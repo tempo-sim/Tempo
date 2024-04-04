@@ -17,6 +17,10 @@
 			"TargetAllowList": [
 				"Editor"
 			]
+		},
+		{
+			"Name": "TempoCore",
+			"Enabled": true
 		}
 	]
 }

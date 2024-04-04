@@ -1,0 +1,24 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.0",
+	"FriendlyName": "TempoCore",
+	"Description": "The core Tempo simulation modules",
+	"Category": "Tempo",
+	"CreatedBy": "Tempo Simulation, LLC",
+	"CreatedByURL": "http://temposimulation.com",
+	"DocsURL": "",
+	"MarketplaceURL": "",
+	"SupportURL": "",
+	"CanContainContent": true,
+	"IsBetaVersion": false,
+	"IsExperimentalVersion": false,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "TempoCore",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		}
+	]
+}

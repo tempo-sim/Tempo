@@ -1,4 +1,4 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+// Copyright Tempo Simulation, LLC. All Rights Reserved.
 
 #include "Tempo.h"
 #include "Modules/ModuleManager.h"
