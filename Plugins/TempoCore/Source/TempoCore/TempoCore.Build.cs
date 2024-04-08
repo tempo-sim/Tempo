@@ -34,9 +34,11 @@ public class TempoCore : ModuleRules
 			new string[]
 			{
 				"CoreUObject",
+				"DeveloperSettings",
 				"Engine",
 				"Slate",
 				"SlateCore",
+				"UMG",
 			}
 			);
 		

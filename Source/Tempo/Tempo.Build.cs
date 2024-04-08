@@ -21,6 +21,7 @@ public class Tempo : ModuleRules
 		PrivateDependencyModuleNames.AddRange(
 			new string[]
 			{
+				"TempoCore",
 			}
 			);
 	}

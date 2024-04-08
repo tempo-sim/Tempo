@@ -4,6 +4,8 @@
 
 #define LOCTEXT_NAMESPACE "FTempoCoreModule"
 
+DEFINE_LOG_CATEGORY(LogTempoCore);
+
 void FTempoCoreModule::StartupModule()
 {
 }
