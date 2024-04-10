@@ -1,0 +1,8 @@
+# Ignore everything in this directory
+*
+# Except the .Build.cs files
+!*.Build.cs
+# And this file
+!.gitignore
+# And the manifest file
+!manifest.json

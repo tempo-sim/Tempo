@@ -33,12 +33,18 @@ public class TempoCore : ModuleRules
 		PrivateDependencyModuleNames.AddRange(
 			new string[]
 			{
+				// Unreal
 				"CoreUObject",
 				"DeveloperSettings",
 				"Engine",
 				"Slate",
 				"SlateCore",
 				"UMG",
+				// Tempo
+				"Abseil",
+				"gRPC",
+				"Protobuf",
+				"RE2",
 			}
 			);
 		
