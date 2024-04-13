@@ -1,0 +1,114 @@
+## Tempo does *not* use git lfs.
+## If you would like to enable git lfs in your fork of Tempo:
+## - Make sure git lfs is installed on your machine (https://git-lfs.com)
+## - Rename this file to .gitattributes
+## - git lfs install
+## - git add .gitattributes
+## - Push to your (forked) remote
+
+## Started from https://forums.unrealengine.com/t/official-git-lfs-tracking-list-for-ue4/131597/10
+
+## Unreal Engine ##
+## Auto detect text files and perform LF normalization ##
+
+* text=auto
+
+# UE file types
+*.uasset filter=lfs diff=lfs merge=lfs -text
+*.umap filter=lfs diff=lfs merge=lfs -text
+*.udk filter=lfs diff=lfs merge=lfs -text
+*.upk filter=lfs diff=lfs merge=lfs -text
+
+--------------------------------------------------
+
+# 2D formats
+# Read more in: https://docs.unrealengine.com/4.26/en-US/RenderingAndGraphics/Textures/Importing/
+
+# Recommended use:
+*.[tT][gG][aA] filter=lfs diff=lfs merge=lfs -text
+*.[pP][nN][gG] filter=lfs diff=lfs merge=lfs -text
+*.[bB][mM][pP] filter=lfs diff=lfs merge=lfs -text
+
+# Can also be used:
+*.[fF][lL[oO][aA][tT] filter=lfs diff=lfs merge=lfs -text
+*.[jJ][pP][eE][gG] filter=lfs diff=lfs merge=lfs -text
+*.[jJ][pP][gG] filter=lfs diff=lfs merge=lfs -text
+*.[pP][cC][xX] filter=lfs diff=lfs merge=lfs -text
+*.[pP][sS][dD] filter=lfs diff=lfs merge=lfs -text
+*.[xX][cC][fF] filter=lfs diff=lfs merge=lfs -text
+*.[tT][iI][fF] filter=lfs diff=lfs merge=lfs -text
+*.[tT][iI][fF][fF] filter=lfs diff=lfs merge=lfs -text
+
+# Other supported formats:
+*.[hH][dD][rR] filter=lfs diff=lfs merge=lfs -text
+*.[dD][dD][sS] filter=lfs diff=lfs merge=lfs -text
+*.[eE][xX][rR] filter=lfs diff=lfs merge=lfs -text
+
+--------------------------------------------------
+
+# 3D formats
+
+# Always recommended to use:
+# The UE4 FBX import pipeline uses FBX 2018
+*.[fF][bB][xX] filter=lfs diff=lfs merge=lfs -text
+
+# Can also be used:
+*.[oO][bB][jJ] filter=lfs diff=lfs merge=lfs -text
+
+# Other supported formats:
+*.[aA][bB][cC] filter=lfs diff=lfs merge=lfs -text
+*.[sS][rR][tT] filter=lfs diff=lfs merge=lfs -text
+
+--------------------------------------------------
+
+# Audio formats
+# Read more in: https://docs.unrealengine.com/4.27/en-US/WorkingWithAudio/Overview/#:~:text=Unreal%20Engine%204%20(UE4)%20supports,16%2Dbit%20format%20PCM%20files.
+
+# Always recommended to use:
+*.[wW][aA][vV] filter=lfs diff=lfs merge=lfs -text
+
+# Can also be used:
+*.[aA][iI][fF][fF] filter=lfs diff=lfs merge=lfs -text
+*.[oO][gG][gG] filter=lfs diff=lfs merge=lfs -text
+*.[fF][lL][aA][cC] filter=lfs diff=lfs merge=lfs -text
+
+# Not recommended to use, but supported:
+*.[mM][pP]3 filter=lfs diff=lfs merge=lfs -text
+*.[wW][mM][aA] filter=lfs diff=lfs merge=lfs -text
+*.[aA][cC]3 filter=lfs diff=lfs merge=lfs -text
+*.[aA][mM][rR] filter=lfs diff=lfs merge=lfs -text
+*.[aA][iI][fF] filter=lfs diff=lfs merge=lfs -text
+*.[aA][uU] filter=lfs diff=lfs merge=lfs -text
+*.[cC][dD][dD][aA] filter=lfs diff=lfs merge=lfs -text
+*.[cC][aA][fF] filter=lfs diff=lfs merge=lfs -text
+*.[bB][wW][fF] filter=lfs diff=lfs merge=lfs -text
+*.[aA][dD][tT][sS] filter=lfs diff=lfs merge=lfs -text
+
+--------------------------------------------------
+
+# Video formats
+# Read more in: https://docs.unrealengine.com/5.0/en-US/media-framework-technical-reference-for-unreal-engine/
+
+# Always recommended to use, supports all platforms:
+# For the best compatibility and performance, it is recommended to use H.264 encoded MP4 (.mp4) container files.
+*.[mM][pP]4 filter=lfs diff=lfs merge=lfs -text
+
+# Can also be used, only some platforms are supported:
+*.3[gG]2 filter=lfs diff=lfs merge=lfs -text
+*.3[gG][pP] filter=lfs diff=lfs merge=lfs -text
+*.3[gG][pP]2 filter=lfs diff=lfs merge=lfs -text
+*.3[gG][pP][pP] filter=lfs diff=lfs merge=lfs -text
+*.[mM]4[aA] filter=lfs diff=lfs merge=lfs -text
+*.[mM]4[vV] filter=lfs diff=lfs merge=lfs -text
+*.[mM][o][vV] filter=lfs diff=lfs merge=lfs -text
+*.[aA][sS][fF] filter=lfs diff=lfs merge=lfs -text
+*.[aA][vV][iI] filter=lfs diff=lfs merge=lfs -text
+*.[wW][mM][vV] filter=lfs diff=lfs merge=lfs -text
+
+--------------------------------------------------
+
+# Fonts
+# Read more in: https://docs.unrealengine.com/5.0/en-US/importing-fonts-in-unreal-engine/
+
+*.[tT][tT][fF] filter=lfs diff=lfs merge=lfs -text
+*.[oO][tT][fF] filter=lfs diff=lfs merge=lfs -text
