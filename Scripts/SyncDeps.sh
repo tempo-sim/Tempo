@@ -10,9 +10,15 @@ fi
 
 # Check for jq
 if ! which jq &> /dev/null; then
-    echo "Couldn't find jq"
+  echo "Couldn't find jq"
+  if [[ "$OSTYPE" = "msys" ]]; then
     echo "Install (on Windows): curl -L -o /usr/bin/jq.exe https://github.com/stedolan/jq/releases/latest/download/jq-win64.exe)"
-    exit 1
+  elif [[ "$OSTYPE" = "darwin"* ]]; then
+    echo "Install (on Mac): brew install jq"
+  elif [[ "$OSTYPE" = "linux-gnu"* ]]; then
+    echo "Install (on Linux): sudo apt-get install jq"
+  fi
+  exit 1
 fi
 
 if [[ "$OSTYPE" = "msys" ]]; then
@@ -32,73 +38,96 @@ elif [[ "$OSTYPE" = "linux-gnu"* ]]; then
   HASHER="md5sum"
 fi
 
-SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
-TEMPO_ROOT=$(realpath "$SCRIPT_DIR/..")
-THIRD_PARTY_DIR="$TEMPO_ROOT/Plugins/TempoCore/Source/ThirdParty"
-RELEASE_NAME=$(jq -r '.release' < "$THIRD_PARTY_DIR/manifest.json")
-if [ "$PLATFORM" = "Windows" ] && [ $LINUX_CC -ne 0 ]; then
-  EXPECTED_HASH=$(jq -r '.md5_hashes."Windows+Linux"' < "$THIRD_PARTY_DIR/manifest.json")
-else
-  EXPECTED_HASH=$(jq -r --arg platform "$PLATFORM" '.md5_hashes | .[$platform]' < "$THIRD_PARTY_DIR/manifest.json")
-fi
+TEMP=$(mktemp -d)
 
-cd "$THIRD_PARTY_DIR"
-# This computes a hash on the filenames, sizes, and modification time of all the third party dependency files.
-# shellcheck disable=SC2038
-MEASURED_HASH=$(find . -mindepth 3 -type f ! -name ".*" -type f | xargs ls -l | cut -c 32- | "$HASHER" | cut -d ' ' -f 1)
-
-if [ "$MEASURED_HASH" = "$EXPECTED_HASH" ]; then
-  # All dependencies satisfied
-  exit 0
-fi
-
-read -r -p "Expected third party dependency hash $EXPECTED_HASH but found $MEASURED_HASH. Update? (y/N): " DO_UPDATE
-
-if [[ ! $DO_UPDATE =~ [Yy] ]]; then
-  echo "User declined to update dependencies"
-  exit 0
-fi
-
-PULL_DEPENDENCIES () {
-  TARGET_PLATFORM=$1
-  
-  RELEASE_INFO=$(curl -n -L -J \
-                 -H "Accept: application/vnd.github+json" \
-                 -H "X-GitHub-Api-Version: 2022-11-28" \
-                 https://api.github.com/repos/tempo-sim/TempoThirdParty/releases)
-            
-  ARCHIVE_NAME=$(echo "$RELEASE_INFO" | jq -r --arg release "$RELEASE_NAME" --arg platform "$TARGET_PLATFORM" '.[] | select(.name == $release) | .assets[] | select(.name | test(".*-" + $platform + "-.*")) | .name')     
-  URL=$(echo "$RELEASE_INFO" | jq -r --arg release "$RELEASE_NAME" --arg platform "$TARGET_PLATFORM" '.[] | select(.name == $release) | .assets[] | select(.name | test(".*-" + $platform + "-.*")) | .url')
-  
-  echo -e "\nDownloading TempoThirdParty release $RELEASE_NAME for platform $TARGET_PLATFORM from $URL\n"
-  
-  TEMP=$(mktemp -d)
-  
-  curl -n -L -J -O --output-dir "$TEMP" \
-  -H "Accept: application/octet-stream" \
-  -H "X-GitHub-Api-Version: 2022-11-28" \
-  "$URL"
-  
-  ARCHIVE="$TEMP/$ARCHIVE_NAME"
-  if [ -f "$ARCHIVE" ]; then
-    echo -e "\nSuccessfully downloaded archive to $ARCHIVE"
+SYNC_THIRD_PARTY_DEPS () {
+  MANIFEST_FILE=$1
+  THIRD_PARTY_DIR=$(dirname "$MANIFEST_FILE")
+  ARTIFACT=$(jq -r '.artifact' < "$MANIFEST_FILE")
+  RELEASE_NAME=$(jq -r '.release' < "$MANIFEST_FILE")
+  if [ "$PLATFORM" = "Windows" ] && [ $LINUX_CC -ne 0 ]; then
+    EXPECTED_HASH=$(jq -r '.md5_hashes."Windows+Linux"' < "$MANIFEST_FILE")
   else
-    echo -e "\nFailed to download archive to $ARCHIVE\n"
-    exit 1
+    EXPECTED_HASH=$(jq -r --arg platform "$PLATFORM" '.md5_hashes | .[$platform]' < "$MANIFEST_FILE")
   fi
   
-  echo -e "\nExtracting archive to $THIRD_PARTY_DIR"
-  tar -xf "$ARCHIVE" -C "$THIRD_PARTY_DIR"
+  DO_UPDATE="N"
+  
+  if [ ! -d "$THIRD_PARTY_DIR/$ARTIFACT" ]; then
+    read -r -p "Third party dependency $ARTIFACT not found in $THIRD_PARTY_DIR. Install? (y/N): " DO_UPDATE
+    exit 1
+  else
+    # This computes a hash on the filenames, sizes, and modification time of all the third party dependency files.
+    # shellcheck disable=SC2038
+    cd "$THIRD_PARTY_DIR/$ARTIFACT"
+    MEASURED_HASH=$(find . -mindepth 2 -type f ! -name ".*" -type f | xargs ls -l | cut -c 32- | "$HASHER" | cut -d ' ' -f 1)
+    
+    if [ "$MEASURED_HASH" = "$EXPECTED_HASH" ]; then
+      # All dependencies satisfied
+      return
+    fi
+    
+    read -r -p "Expected third party dependency hash $EXPECTED_HASH but found $MEASURED_HASH in $THIRD_PARTY_DIR/$ARTIFACT. Update? (y/N): " DO_UPDATE
+  fi
+  
+  echo ""
+  
+  if [[ ! $DO_UPDATE =~ [Yy] ]]; then
+    echo "User declined to update dependency $THIRD_PARTY_DIR/$ARTIFACT"
+    return
+  fi
+  
+  PULL_DEPENDENCIES () {
+    TARGET_PLATFORM=$1
+    
+    RELEASE_INFO=$(curl -n -L -J \
+                   -H "Accept: application/vnd.github+json" \
+                   -H "X-GitHub-Api-Version: 2022-11-28" \
+                   https://api.github.com/repos/tempo-sim/TempoThirdParty/releases)
+              
+    ARCHIVE_NAME=$(echo "$RELEASE_INFO" | jq -r --arg release "$RELEASE_NAME" --arg platform "$TARGET_PLATFORM" --arg artifact "$ARTIFACT" '.[] | select(.name == $release) | .assets[] | select(.name | test(".*-" + $artifact + "-" + $platform + "-.*")) | .name')     
+    URL=$(echo "$RELEASE_INFO" | jq -r --arg release "$RELEASE_NAME" --arg platform "$TARGET_PLATFORM" --arg artifact "$ARTIFACT" '.[] | select(.name == $release) | .assets[] | select(.name | test(".*-" + $artifact + "-" + $platform + "-.*")) | .url')
+    
+    if [ "$ARCHIVE_NAME" = "" ] || [ "$ARCHIVE_NAME" = "URL" ]; then
+      echo -e "Unable to find artifact $ARTIFACT for release $RELEASE_NAME on $TARGET_PLATFORM\n"
+      return
+    fi
+    
+    echo -e "\nDownloading TempoThirdParty release $RELEASE_NAME for platform $TARGET_PLATFORM from $URL\n"
+    
+    curl -n -L -J -O --output-dir "$TEMP" \
+    -H "Accept: application/octet-stream" \
+    -H "X-GitHub-Api-Version: 2022-11-28" \
+    "$URL"
+    
+    ARCHIVE="$TEMP/$ARCHIVE_NAME"
+    if [ -f "$ARCHIVE" ]; then
+      echo -e "\nSuccessfully downloaded archive to $ARCHIVE"
+    else
+      echo -e "\nFailed to download archive to $ARCHIVE\n"
+      exit 1
+    fi
+    
+    echo -e "\nExtracting archive to $THIRD_PARTY_DIR"
+    tar -xf "$ARCHIVE" -C "$THIRD_PARTY_DIR"
+  }
+  
+  # Remove any stale dependencies.
+  find "$THIRD_PARTY_DIR" -maxdepth 2 -mindepth 2 -type d -exec rm -rf {} \;
+  
+  # Pull the dependencies for the platform and, for Linux CC on Windows, for Linux too.
+  PULL_DEPENDENCIES "$PLATFORM"
+  if [ "$PLATFORM" = "Windows" ] && [ $LINUX_CC -ne 0 ]; then
+    PULL_DEPENDENCIES "Linux"
+  fi
 }
 
-# Remove any stale dependencies.
-find "$THIRD_PARTY_DIR" -maxdepth 2 -mindepth 2 -type d -exec rm -rf {} \;
-
-# Pull the dependencies for the platform and, for Linux CC on Windows, for Linux too.
-PULL_DEPENDENCIES "$PLATFORM"
-if [ "$PLATFORM" = "Windows" ] && [ $LINUX_CC -ne 0 ]; then
-  PULL_DEPENDENCIES "Linux"
-fi
+SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+TEMPO_ROOT=$(realpath "$SCRIPT_DIR/..")
+MANIFEST_FILES=$(find "$TEMPO_ROOT" -name manifest.json)
+for MANIFEST_FILE in "${MANIFEST_FILES[@]}"; do
+  SYNC_THIRD_PARTY_DEPS "$MANIFEST_FILE"
+done
 
 # Cleanup
 rm -rf "$TEMP"

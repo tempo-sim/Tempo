@@ -2,14 +2,14 @@
 
 set -e
 
-if [ -z $GIT_DIR ]; then
+TEMPO_ROOT=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+
+if [ -z "$GIT_DIR" ]; then
 	GIT_DIR=$(git rev-parse --git-common-dir);
 	if [ $? -ne 0 ]; then
 		GIT_DIR=.git
 	fi
 fi
-
-TEMPO_ROOT=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 
 ADD_COMMAND_TO_HOOK() {
   COMMAND=$1
@@ -27,12 +27,18 @@ ADD_COMMAND_TO_HOOK() {
 }
 
 SYNCDEPS="$TEMPO_ROOT/Scripts/SyncDeps.sh"
+INSTALLTOOLCHAIN="$TEMPO_ROOT/Scripts/InstallToolChain.sh"
 
 # Put SyncDeps.sh script in appropriate git hooks
 if [ -d "$GIT_DIR/hooks" ]; then
   ADD_COMMAND_TO_HOOK "$SYNCDEPS" post-checkout
   ADD_COMMAND_TO_HOOK "$SYNCDEPS" post-merge
+  ADD_COMMAND_TO_HOOK "$INSTALLTOOLCHAIN" post-checkout
+  ADD_COMMAND_TO_HOOK "$INSTALLTOOLCHAIN" post-merge
 fi
 
 # Run SyncDeps.sh once
+echo -e "\nInstalling Tempo UnrealBuildTool ToolChain\n"
+eval "$INSTALLTOOLCHAIN"
+echo -e "Checking ThirdParty dependencies...\n"
 eval "$SYNCDEPS"
