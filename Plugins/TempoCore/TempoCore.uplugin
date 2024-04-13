@@ -24,6 +24,11 @@
 			"Name": "TempoCoreShared",
 			"Type": "Runtime",
 			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "TempoScripting",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
 		}
 	]
 }
