@@ -1,5 +1,5 @@
-# Tempo
-The Tempo Unreal Engine project and plugins
+# VayuSim
+The VayuSim project built on top of Tempo.
 
 ## Getting Started
 Make sure you have a valid GitHub Personal Access Token for the TempoThirdParty repo in your `~/.netrc` file. The format should be like this:
