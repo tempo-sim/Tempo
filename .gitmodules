@@ -1,0 +1,6 @@
+[submodule "Plugins/CityBLD"]
+	path = Plugins/CityBLD
+	url = https://github.com/tempo-sim/Vayu-CityBLD.git
+[submodule "Plugins/Sample_CityKit"]
+	path = Plugins/Sample_CityKit
+	url = https://github.com/tempo-sim/Vayu-SampleCityKit.git

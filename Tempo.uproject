@@ -24,6 +24,14 @@
 		{
 			"Name": "TempoCore",
 			"Enabled": true
+		},
+		{
+			"Name": "CityBLD",
+			"Enabled": true
+		},
+		{
+			"Name": "Sample_CityKit",
+			"Enabled": true
 		}
 	]
 }
