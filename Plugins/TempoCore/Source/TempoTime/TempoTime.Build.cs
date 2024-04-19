@@ -2,9 +2,9 @@
 
 using UnrealBuildTool;
 
-public class TempoCore : ModuleRules
+public class TempoTime : ModuleRules
 {
-	public TempoCore(ReadOnlyTargetRules Target) : base(Target)
+	public TempoTime(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
 		
@@ -41,7 +41,6 @@ public class TempoCore : ModuleRules
 				"UMG",
 				// Tempo
 				"TempoCoreShared",
-				"TempoTime",
 			}
 			);
 		

@@ -1,19 +1,19 @@
 // Copyright Tempo Simulation, LLC. All Rights Reserved
 
-#include "TempoWorldSettings.h"
+#include "TempoTimeWorldSettings.h"
 
 #include "TempoCoreSettings.h"
 #include "Kismet/GameplayStatics.h"
 
-void ATempoWorldSettings::BeginPlay()
+void ATempoTimeWorldSettings::BeginPlay()
 {
 	Super::BeginPlay();
 
-	GetMutableDefault<UTempoCoreSettings>()->TempoCoreTimeSettingsChangedEvent.AddUObject(this, &ATempoWorldSettings::OnTimeSettingsChanged);
+	GetMutableDefault<UTempoCoreSettings>()->TempoCoreTimeSettingsChangedEvent.AddUObject(this, &ATempoTimeWorldSettings::OnTimeSettingsChanged);
 	OnTimeSettingsChanged();
 }
 
-float ATempoWorldSettings::FixupDeltaSeconds(float DeltaSeconds, float RealDeltaSeconds)
+float ATempoTimeWorldSettings::FixupDeltaSeconds(float DeltaSeconds, float RealDeltaSeconds)
 {
 	check(GetWorld());
 
@@ -69,7 +69,7 @@ float ATempoWorldSettings::FixupDeltaSeconds(float DeltaSeconds, float RealDelta
 	return DeltaSeconds;
 }
 
-void ATempoWorldSettings::OnTimeSettingsChanged()
+void ATempoTimeWorldSettings::OnTimeSettingsChanged()
 {
 	check(GetWorld());
 	const double SimTime = GetWorld()->GetTimeSeconds();
@@ -82,13 +82,13 @@ void ATempoWorldSettings::OnTimeSettingsChanged()
 	FixedStepsCount = static_cast<uint64>(std::nextafterf(SimTime, TNumericLimits<float>::Max()) * Settings->GetSimulatedStepsPerSecond());
 }
 
-void ATempoWorldSettings::Step(int32 NumSteps)
+void ATempoTimeWorldSettings::Step(int32 NumSteps)
 {
 	SetPaused(false);
 	StepsToSimulate = NumSteps;
 }
 
-void ATempoWorldSettings::SetPaused(bool bPaused)
+void ATempoTimeWorldSettings::SetPaused(bool bPaused)
 {
 	if (!bPaused)
 	{
