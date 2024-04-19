@@ -26,6 +26,7 @@ public class TempoScripting : ModuleRules
 			new string[]
 			{
 				"Core",
+				"gRPC",
 			}
 			);
 			
@@ -38,10 +39,6 @@ public class TempoScripting : ModuleRules
 				"Engine",
 				// Tempo
 				"TempoCoreShared",
-				"Abseil",
-				"gRPC",
-				"Protobuf",
-				"RE2",
 			}
 			);
 		

@@ -29,16 +29,9 @@ public class gRPC : ModuleRules
     private IEnumerable<string> FindFilesInDirectory(string dir, string suffix = "")
     {
         List<string> matches = new List<string>();
-        if (Directory.Exists(dir))
+        foreach (string file in Directory.EnumerateFiles(dir, "*." + suffix, SearchOption.AllDirectories))
         {
-            string[] files = Directory.GetFiles(dir);
-            Regex regex = new Regex(".+\\." + suffix);
-
-            foreach (string file in files)
-            {
-                if (regex.Match(file).Success)
-                    matches.Add(file);
-            }
+            matches.Add(file);
         }
 
         return matches;
@@ -46,37 +39,29 @@ public class gRPC : ModuleRules
 
     public ModuleDepPaths GatherDeps()
     {
-        string IncludeRoot = Path.Combine(ModuleDirectory, "Includes");
-        string LibRoot = Path.Combine(ModuleDirectory, "Libraries");
-
-        List<string> Headers = new List<string>();
-        List<string> Libs = new List<string>();
-
-        string PlatformLibRoot = "";
+        List<string> HeaderPaths = new List<string>();
+        List<string> LibraryPaths = new List<string>();
+        
+        HeaderPaths.Add(Path.Combine(ModuleDirectory, "Includes"));
 
         if (Platform == UnrealTargetPlatform.Win64)
         {
-            PlatformLibRoot = Path.Combine(LibRoot, "Windows");
-            Libs.AddRange(FindFilesInDirectory(PlatformLibRoot, "lib"));
+            LibraryPaths.AddRange(FindFilesInDirectory(Path.Combine(ModuleDirectory, "Libraries", "Windows"), "lib"));
         }
         else if (Platform == UnrealTargetPlatform.Mac)
         {
-            PlatformLibRoot = Path.Combine(LibRoot, "Mac");
-            Libs.AddRange(FindFilesInDirectory(PlatformLibRoot, "a"));
+            LibraryPaths.AddRange(FindFilesInDirectory(Path.Combine(ModuleDirectory, "Libraries", "Mac"), "a"));
         }
         else if (Platform == UnrealTargetPlatform.Linux)
         {
-            PlatformLibRoot = Path.Combine(LibRoot, "Linux");
-            Libs.AddRange(FindFilesInDirectory(PlatformLibRoot, "a"));
+            LibraryPaths.AddRange(FindFilesInDirectory(Path.Combine(ModuleDirectory, "Libraries", "Linux"), "a"));
         }
         else
         {
             Console.WriteLine("Unsupported target platform.");
         }
 
-        Headers.Add(IncludeRoot);
-
-        return new ModuleDepPaths(Headers.ToArray(), Libs.ToArray());
+        return new ModuleDepPaths(HeaderPaths.ToArray(), LibraryPaths.ToArray());
     }
 
     public gRPC(ReadOnlyTargetRules Target) : base(Target)
@@ -93,9 +78,7 @@ public class gRPC : ModuleRules
         Configuration = Target.Configuration;
 
         ModuleDepPaths moduleDepPaths = GatherDeps();
-
         PublicIncludePaths.AddRange(moduleDepPaths.HeaderPaths);
-
         PublicAdditionalLibraries.AddRange(moduleDepPaths.LibraryPaths);
 
         AddEngineThirdPartyPrivateStaticDependencies(Target, "OpenSSL");

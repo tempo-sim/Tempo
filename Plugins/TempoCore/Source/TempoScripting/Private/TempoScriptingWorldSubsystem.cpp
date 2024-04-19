@@ -11,15 +11,20 @@ UTempoScriptingWorldSubsystem::UTempoScriptingWorldSubsystem()
 	ScriptingServer = CreateDefaultSubobject<UTempoScriptingServer>(TEXT("TempoWorldScriptingServer"));
 }
 
-void UTempoScriptingWorldSubsystem::PostInitialize()
+void UTempoScriptingWorldSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
-	Super::PostInitialize();
+	Super::Initialize(Collection);
 
-	if (!GetWorld()->IsGameWorld())
+	if (!(GetWorld()->WorldType == EWorldType::Game || GetWorld()->WorldType == EWorldType::PIE))
 	{
 		return;
 	}
-	
+
+	GetWorld()->OnWorldBeginPlay.AddUObject(this, &UTempoScriptingWorldSubsystem::InitServer);
+}
+
+void UTempoScriptingWorldSubsystem::InitServer() const
+{
 	const UTempoCoreSettings* Settings = GetDefault<UTempoCoreSettings>();
 	ScriptingServer->Initialize(Settings->GetWorldScriptingPort());
 }

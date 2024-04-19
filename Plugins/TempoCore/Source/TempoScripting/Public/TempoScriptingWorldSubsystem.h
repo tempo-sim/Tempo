@@ -19,13 +19,16 @@ class TEMPOSCRIPTING_API UTempoScriptingWorldSubsystem : public UWorldSubsystem
 
 public:
 	UTempoScriptingWorldSubsystem();
-	
-	virtual void PostInitialize() override;
+
+	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual void Deinitialize() override;
 
 	UTempoScriptingServer* GetScriptingServer() const { return ScriptingServer; }
 
 private:
+	UFUNCTION()
+	void InitServer() const;
+	
 	UPROPERTY()
 	UTempoScriptingServer* ScriptingServer;
 };

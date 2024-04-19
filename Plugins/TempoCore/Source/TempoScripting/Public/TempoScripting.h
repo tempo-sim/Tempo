@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include "gRPCExports.h"
+
 #include "CoreMinimal.h"
 #include "Modules/ModuleManager.h"
 
