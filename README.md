@@ -8,4 +8,6 @@ machine api.github.com
 login user # Can be anything. Not used, but must be present.
 password <your_token_here>
 ```
-Run `Setup.sh` (from the Tempo root) once to sync third party dependencies and add git hooks to keep them in sync automatically.
+Run `Setup.sh` (from the Tempo root) once to:
+  - Install the Tempo UnrealBuildTool toolchain for your system and rebuild UnrealBuildTool
+  - Install third party dependencies and add git hooks to keep them in sync automatically
