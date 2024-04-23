@@ -16,4 +16,4 @@ void FTempoCoreSharedModule::ShutdownModule()
 
 #undef LOCTEXT_NAMESPACE
 	
-IMPLEMENT_MODULE(FTempoCoreSharedModule, TempoCore)
+IMPLEMENT_MODULE(FTempoCoreSharedModule, TempoCoreShared)
