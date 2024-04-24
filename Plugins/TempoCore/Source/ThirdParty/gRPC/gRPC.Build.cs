@@ -2,18 +2,11 @@
 
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
-using System.Net.NetworkInformation;
-using System.Text;
-using System.Text.RegularExpressions;
 using UnrealBuildTool;
 
 public class gRPC : ModuleRules
 {
-    private UnrealTargetPlatform Platform;
-    private UnrealTargetConfiguration Configuration;
-
     public class ModuleDepPaths
     {
         public readonly string[] HeaderPaths;
@@ -28,55 +21,40 @@ public class gRPC : ModuleRules
 
     private IEnumerable<string> FindFilesInDirectory(string dir, string suffix = "")
     {
-        List<string> matches = new List<string>();
-        if (Directory.Exists(dir))
-        {
-            string[] files = Directory.GetFiles(dir);
-            Regex regex = new Regex(".+\\." + suffix);
-
-            foreach (string file in files)
-            {
-                if (regex.Match(file).Success)
-                    matches.Add(file);
-            }
-        }
-
-        return matches;
+        return Directory.EnumerateFiles(dir, "*." + suffix, SearchOption.AllDirectories);
     }
 
     public ModuleDepPaths GatherDeps()
     {
-        string IncludeRoot = Path.Combine(ModuleDirectory, "Includes");
-        string LibRoot = Path.Combine(ModuleDirectory, "Libraries");
+        List<string> HeaderPaths = new List<string>();
+        List<string> LibraryPaths = new List<string>();
+        
+        HeaderPaths.Add(Path.Combine(ModuleDirectory, "Includes"));
 
-        List<string> Headers = new List<string>();
-        List<string> Libs = new List<string>();
-
-        string PlatformLibRoot = "";
-
-        if (Platform == UnrealTargetPlatform.Win64)
+        if (Target.Platform == UnrealTargetPlatform.Win64)
         {
-            PlatformLibRoot = Path.Combine(LibRoot, "Windows");
-            Libs.AddRange(FindFilesInDirectory(PlatformLibRoot, "lib"));
+            LibraryPaths.AddRange(FindFilesInDirectory(Path.Combine(ModuleDirectory, "Libraries", "Windows"), "lib"));
+            // On Windows the exports.def file contains a list of all the symbols a module that depends on gRPC should re-export.
+            LibraryPaths.Add(Path.Combine(ModuleDirectory, "Libraries", "Windows", "exports.def"));
         }
-        else if (Platform == UnrealTargetPlatform.Mac)
+        else if (Target.Platform == UnrealTargetPlatform.Mac)
         {
-            PlatformLibRoot = Path.Combine(LibRoot, "Mac");
-            Libs.AddRange(FindFilesInDirectory(PlatformLibRoot, "a"));
+            LibraryPaths.AddRange(FindFilesInDirectory(Path.Combine(ModuleDirectory, "Libraries", "Mac"), "a"));
+            // On Mac the exports.def file contains a list of all the libraries whose symbols a module that depends on gRPC should re-export.
+            LibraryPaths.Add(Path.Combine(ModuleDirectory, "Libraries", "Mac", "exports.def"));
         }
-        else if (Platform == UnrealTargetPlatform.Linux)
+        else if (Target.Platform == UnrealTargetPlatform.Linux)
         {
-            PlatformLibRoot = Path.Combine(LibRoot, "Linux");
-            Libs.AddRange(FindFilesInDirectory(PlatformLibRoot, "a"));
+            LibraryPaths.AddRange(FindFilesInDirectory(Path.Combine(ModuleDirectory, "Libraries", "Linux"), "a"));
+            // On Linux the exports.def file contains a list of all the libraries whose symbols a module that depends on gRPC should re-export.
+            LibraryPaths.Add(Path.Combine(ModuleDirectory, "Libraries", "Linux", "exports.def"));
         }
         else
         {
-            Console.WriteLine("Unsupported target platform.");
+            Console.WriteLine("Unsupported target platform for module gRPC.");
         }
 
-        Headers.Add(IncludeRoot);
-
-        return new ModuleDepPaths(Headers.ToArray(), Libs.ToArray());
+        return new ModuleDepPaths(HeaderPaths.ToArray(), LibraryPaths.ToArray());
     }
 
     public gRPC(ReadOnlyTargetRules Target) : base(Target)
@@ -89,13 +67,8 @@ public class gRPC : ModuleRules
         PublicDefinitions.Add("PROTOBUF_ENABLE_DEBUG_LOGGING_MAY_LEAK_PII=0");
         PublicDefinitions.Add("GOOGLE_PROTOBUF_INTERNAL_DONATE_STEAL_INLINE=0");
 
-        Platform = Target.Platform;
-        Configuration = Target.Configuration;
-
         ModuleDepPaths moduleDepPaths = GatherDeps();
-
         PublicIncludePaths.AddRange(moduleDepPaths.HeaderPaths);
-
         PublicAdditionalLibraries.AddRange(moduleDepPaths.LibraryPaths);
 
         AddEngineThirdPartyPrivateStaticDependencies(Target, "OpenSSL");
