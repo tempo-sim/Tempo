@@ -55,7 +55,6 @@ SYNC_THIRD_PARTY_DEPS () {
   
   if [ ! -d "$THIRD_PARTY_DIR/$ARTIFACT" ]; then
     read -r -p "Third party dependency $ARTIFACT not found in $THIRD_PARTY_DIR. Install? (y/N): " DO_UPDATE
-    exit 1
   else
     # This computes a hash on the filenames, sizes, and modification time of all the third party dependency files.
     # shellcheck disable=SC2038

@@ -172,13 +172,20 @@ public:
 	}
 
 private:
+	// Credit: https://stackoverflow.com/a/44065093
+	template <class...>
+	struct False : std::bool_constant<false> { };
+	
 	// Zero-Handler case.
 	template <class ServiceType>
-	static void RegisterHandlers(ServiceType* Service) {}
+	static void RegisterHandlers(ServiceType* Service)
+	{
+		static_assert(False<ServiceType>{}, "RegisterHandlers must be called with at least one handler");
+	}
 	
 	// One-Handler case.
 	template <class ServiceType, class HandlerType>
-	void RegisterHandler(ServiceType* Service, HandlerType& Handler)
+	void RegisterHandlers(ServiceType* Service, HandlerType& Handler)
 	{
 		const int32 Tag = TagAllocator++;
 		Handler.Init(Service);
@@ -189,7 +196,7 @@ private:
 	template <class ServiceType, class FirstHandlerType, class... RemainingHandlerTypes>
 	void RegisterHandlers(ServiceType* Service, FirstHandlerType& FirstHandler, RemainingHandlerTypes&... RemainingHandlers)
 	{
-		RegisterHandler<ServiceType, FirstHandlerType>(Service, FirstHandler);
+		RegisterHandlers<ServiceType, FirstHandlerType>(Service, FirstHandler);
 		RegisterHandlers<ServiceType, RemainingHandlerTypes...>(Service, RemainingHandlers...);
 	}
 

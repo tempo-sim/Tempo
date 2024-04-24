@@ -11,4 +11,4 @@ password <your_token_here>
 Run `Setup.sh` (from the Tempo root) once to:
   - Install the Tempo UnrealBuildTool toolchain
   - Install third party dependencies
-  - Add git hooks to keep both of the above up in sync automatically
+  - Add git hooks to keep both of the above in sync automatically

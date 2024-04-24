@@ -10,7 +10,7 @@
 #include "TempoScriptingWorldSubsystem.generated.h"
 
 /**
- * Holds the Engine scripting server.
+ * Holds the World scripting server.
  */
 UCLASS()
 class TEMPOSCRIPTING_API UTempoScriptingWorldSubsystem : public UWorldSubsystem

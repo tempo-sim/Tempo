@@ -16,4 +16,4 @@ void FTempoScriptingModule::ShutdownModule()
 
 #undef LOCTEXT_NAMESPACE
 	
-IMPLEMENT_MODULE(FTempoScriptingModule, TempoCore)
+IMPLEMENT_MODULE(FTempoScriptingModule, TempoScripting)
