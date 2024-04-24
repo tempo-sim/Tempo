@@ -54,9 +54,11 @@ namespace UnrealBuildTool
                 String LibraryPath = Library.ToString();
                 if (ExportedLibraries.Contains(Library.GetFileName()))
                 {
-                    LinkEnvironment.AdditionalArguments += $" --whole-archive \"{LibraryPath}\"";
+                    LinkEnvironment.AdditionalArguments += $" -Xlinker --whole-archive \"{LibraryPath}\"";
                 }
             }
+
+            LinkEnvironment.AdditionalArguments += " -Xlinker --allow-multiple-definition";
             
             LinkEnvironment.Libraries.RemoveAll(Library => Library.GetExtension() == ".def");
             

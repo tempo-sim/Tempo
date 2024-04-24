@@ -17,8 +17,8 @@ ADD_COMMAND_TO_HOOK() {
   HOOK_FILE="$GIT_DIR/hooks/$HOOK"
 
   if [ ! -f "$HOOK_FILE" ]; then
-    echo -e "\nError: Couldn't find hook file: $HOOK_FILE\n"
-    exit 1
+    touch "$HOOK_FILE"
+    chmod +x "$HOOK_FILE"
   fi
 
   if ! grep -qF "$COMMAND" "$HOOK_FILE"; then
