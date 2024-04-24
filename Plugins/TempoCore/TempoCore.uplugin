@@ -35,5 +35,16 @@
 			"Type": "Runtime",
 			"LoadingPhase": "Default"
 		}
-	]
+	],
+	"PreBuildSteps": {
+		"Win64": [
+			"$(PluginDir)\\Scripts\\GenProtos.sh $(ProjectDir) $(PluginDir)\\Source\\ThirdParty\\gRPC\\Binaries\\Windows"
+		],
+		"Mac": [
+			"$(PluginDir)/Scripts/GenProtos.sh $(ProjectDir) $(PluginDir)/Source/ThirdParty/gRPC/Binaries/Mac"
+		],
+		"Linux": [
+			"$(PluginDir)/Scripts/GenProtos.sh $(ProjectDir) $(PluginDir)/Source/ThirdParty/gRPC/Binaries/Linux"
+		]
+	}
 }
