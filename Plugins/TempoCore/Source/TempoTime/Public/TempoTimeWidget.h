@@ -4,7 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
-#include "TimeWidget.generated.h"
+#include "TempoTimeWidget.generated.h"
 
 class UButton;
 class UComboBoxString;
@@ -12,7 +12,7 @@ class UEditableText;
 class UTextBlock;
 
 UCLASS(Blueprintable, Abstract)
-class TEMPOCORE_API UTimeWidget : public UUserWidget
+class TEMPOTIME_API UTempoTimeWidget : public UUserWidget
 {
 	GENERATED_BODY()
 

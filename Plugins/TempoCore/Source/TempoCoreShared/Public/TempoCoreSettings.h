@@ -12,7 +12,7 @@
 DECLARE_MULTICAST_DELEGATE(FTempoCoreTimeSettingsChanged);
 
 UCLASS(Config=Game)
-class TEMPOCORE_API UTempoCoreSettings : public UDeveloperSettings
+class TEMPOCORESHARED_API UTempoCoreSettings : public UDeveloperSettings
 {
 	GENERATED_BODY()
 

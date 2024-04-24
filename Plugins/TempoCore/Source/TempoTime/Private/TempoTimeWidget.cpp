@@ -1,18 +1,19 @@
 // Copyright Tempo Simulation, LLC. All Rights Reserved
 
-#include "TimeWidget.h"
+#include "TempoTimeWidget.h"
 
-#include "TempoCore.h"
+#include "TempoTime.h"
+
 #include "TempoCoreSettings.h"
 #include "TempoCoreUtils.h"
-#include "TempoWorldSettings.h"
+#include "TempoTimeWorldSettings.h"
 
 #include "Components/Button.h"
 #include "Components/ComboBoxString.h"
 #include "Components/EditableText.h"
 #include "Components/TextBlock.h"
 
-void UTimeWidget::NativeOnInitialized()
+void UTempoTimeWidget::NativeOnInitialized()
 {
 	Super::NativeOnInitialized();
 
@@ -21,32 +22,32 @@ void UTimeWidget::NativeOnInitialized()
 	{
 		TimeModeBox->AddOption(GetEnumValueAsString(TimeMode));
 	}
-	TimeModeBox->OnSelectionChanged.AddDynamic(this, &UTimeWidget::OnTimeModeSelectionChanged);
+	TimeModeBox->OnSelectionChanged.AddDynamic(this, &UTempoTimeWidget::OnTimeModeSelectionChanged);
 
 	// Set up SimStepsPerSecond box.
-	SimStepsPerSecondBox->OnTextCommitted.AddDynamic(this, &UTimeWidget::OnSimStepsPerSecondChanged);
-	SimStepsPerSecondBox->bIsEnabledDelegate.BindDynamic(this, &UTimeWidget::IsFixedStepMode);
+	SimStepsPerSecondBox->OnTextCommitted.AddDynamic(this, &UTempoTimeWidget::OnSimStepsPerSecondChanged);
+	SimStepsPerSecondBox->bIsEnabledDelegate.BindDynamic(this, &UTempoTimeWidget::IsFixedStepMode);
 
 	// Set up Pause button.
-	PauseButton->bIsEnabledDelegate.BindDynamic(this, &UTimeWidget::IsPauseAllowed);
-	PauseButton->OnPressed.AddDynamic(this, &UTimeWidget::OnPausePressed);
+	PauseButton->bIsEnabledDelegate.BindDynamic(this, &UTempoTimeWidget::IsPauseAllowed);
+	PauseButton->OnPressed.AddDynamic(this, &UTempoTimeWidget::OnPausePressed);
 
 	// Set up Play button.
-	PlayButton->bIsEnabledDelegate.BindDynamic(this, &UTimeWidget::IsPlayAllowed);
-	PlayButton->OnPressed.AddDynamic(this, &UTimeWidget::OnPlayPressed);
+	PlayButton->bIsEnabledDelegate.BindDynamic(this, &UTempoTimeWidget::IsPlayAllowed);
+	PlayButton->OnPressed.AddDynamic(this, &UTempoTimeWidget::OnPlayPressed);
 	
 	// Set up Step button.
-	StepButton->bIsEnabledDelegate.BindDynamic(this, &UTimeWidget::IsFixedStepMode);
-	StepButton->OnPressed.AddDynamic(this, &UTimeWidget::OnStepPressed);
+	StepButton->bIsEnabledDelegate.BindDynamic(this, &UTempoTimeWidget::IsFixedStepMode);
+	StepButton->OnPressed.AddDynamic(this, &UTempoTimeWidget::OnStepPressed);
 
 	// Get initial settings.
 	SyncTimeSettings();
 	
 	// Keep time settings in sync.
-	GetMutableDefault<UTempoCoreSettings>()->TempoCoreTimeSettingsChangedEvent.AddUObject(this, &UTimeWidget::SyncTimeSettings);
+	GetMutableDefault<UTempoCoreSettings>()->TempoCoreTimeSettingsChangedEvent.AddUObject(this, &UTempoTimeWidget::SyncTimeSettings);
 }
 
-void UTimeWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
+void UTempoTimeWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
 
@@ -54,14 +55,14 @@ void UTimeWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 	SimTimeBox->SetText(FText::FromString(FString::Printf(TEXT("%.3f"), GetWorld()->GetTimeSeconds())));
 }
 
-void UTimeWidget::SyncTimeSettings()
+void UTempoTimeWidget::SyncTimeSettings()
 {
 	const UTempoCoreSettings* Settings = GetDefault<UTempoCoreSettings>();
 	TimeModeBox->SetSelectedIndex(static_cast<uint8>(Settings->GetTimeMode()));
 	SimStepsPerSecondBox->SetText(FText::FromString(FString::Printf(TEXT("%d"), Settings->GetSimulatedStepsPerSecond())));
 }
 
-void UTimeWidget::OnTimeModeSelectionChanged(FString SelectedItem, ESelectInfo::Type SelectionType)
+void UTempoTimeWidget::OnTimeModeSelectionChanged(FString SelectedItem, ESelectInfo::Type SelectionType)
 {
 	if (SelectionType == ESelectInfo::Direct)
 	{
@@ -72,7 +73,7 @@ void UTimeWidget::OnTimeModeSelectionChanged(FString SelectedItem, ESelectInfo::
 	Settings->SetTimeMode(static_cast<ETimeMode>(TimeModeBox->GetSelectedIndex()));
 }
 
-void UTimeWidget::OnSimStepsPerSecondChanged(const FText& Text, ETextCommit::Type CommitMethod)
+void UTempoTimeWidget::OnSimStepsPerSecondChanged(const FText& Text, ETextCommit::Type CommitMethod)
 {
 	bool bIsValid = true;
 	
@@ -106,7 +107,7 @@ void UTimeWidget::OnSimStepsPerSecondChanged(const FText& Text, ETextCommit::Typ
 
 	if (!bIsValid)
 	{
-		UE_LOG(LogTempoCore, Error, TEXT("Invalid entry %s for SimStepsPerSecond rejected (only positive integers allowed)."), *Text.ToString());
+		UE_LOG(LogTempoTime, Error, TEXT("Invalid entry %s for SimStepsPerSecond rejected (only positive integers allowed)."), *Text.ToString());
 		SyncTimeSettings();
 		return;
 	}
@@ -115,46 +116,46 @@ void UTimeWidget::OnSimStepsPerSecondChanged(const FText& Text, ETextCommit::Typ
 	Settings->SetSimulatedStepsPerSecond(FCString::Atoi(*Text.ToString()));
 }
 
-bool UTimeWidget::IsFixedStepMode()
+bool UTempoTimeWidget::IsFixedStepMode()
 {
 	const UTempoCoreSettings* Settings = GetDefault<UTempoCoreSettings>();		
 	return Settings->GetTimeMode() == ETimeMode::FixedStep;
 }
 
-bool UTimeWidget::IsPauseAllowed()
+bool UTempoTimeWidget::IsPauseAllowed()
 {
 	check(GetWorld());
 	return !GetWorld()->IsPaused();
 }
 
-bool UTimeWidget::IsPlayAllowed()
+bool UTempoTimeWidget::IsPlayAllowed()
 {
 	check(GetWorld());
 	return GetWorld()->IsPaused();
 }
 
-void UTimeWidget::OnPausePressed()
+void UTempoTimeWidget::OnPausePressed()
 {
 	check(GetWorld());
-	if (ATempoWorldSettings* WorldSettings = Cast<ATempoWorldSettings>(GetWorld()->GetWorldSettings()))
+	if (ATempoTimeWorldSettings* WorldSettings = Cast<ATempoTimeWorldSettings>(GetWorld()->GetWorldSettings()))
 	{
 		WorldSettings->SetPaused(true);
 	}
 }
 
-void UTimeWidget::OnPlayPressed()
+void UTempoTimeWidget::OnPlayPressed()
 {
 	check(GetWorld());
-	if (ATempoWorldSettings* WorldSettings = Cast<ATempoWorldSettings>(GetWorld()->GetWorldSettings()))
+	if (ATempoTimeWorldSettings* WorldSettings = Cast<ATempoTimeWorldSettings>(GetWorld()->GetWorldSettings()))
 	{
 		WorldSettings->SetPaused(false);
 	}
 }
 
-void UTimeWidget::OnStepPressed()
+void UTempoTimeWidget::OnStepPressed()
 {
 	check(GetWorld());
-	if (ATempoWorldSettings* WorldSettings = Cast<ATempoWorldSettings>(GetWorld()->GetWorldSettings()))
+	if (ATempoTimeWorldSettings* WorldSettings = Cast<ATempoTimeWorldSettings>(GetWorld()->GetWorldSettings()))
 	{
 		WorldSettings->Step();
 	}

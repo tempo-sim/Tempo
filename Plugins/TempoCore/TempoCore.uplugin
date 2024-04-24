@@ -19,6 +19,16 @@
 			"Name": "TempoCore",
 			"Type": "Runtime",
 			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "TempoCoreShared",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "TempoTime",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
 		}
 	]
 }
