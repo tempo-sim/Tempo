@@ -174,8 +174,7 @@ fi
 # First iterate through all the modules to:
 # - Copy all protos to a temp source directory - one per module!
 # - Check that no module names are repeated
-# - Check that no protos have package specifiers already
-# - Add a package specifier for the module-relative location to every proto
+# - Add a package specifier for the module to every proto (prepend it to any existing package)
 for BUILD_CS_FILE in $(find "$PROJECT_ROOT" -name '*.Build.cs' -type f); do
   BUILD_CS_FILENAME="$(basename "$BUILD_CS_FILE")"
   MODULE_NAME="${BUILD_CS_FILENAME%%.*}"
@@ -206,20 +205,14 @@ for BUILD_CS_FILE in $(find "$PROJECT_ROOT" -name '*.Build.cs' -type f); do
     done
   fi
   for PROTO_FILE in $(find "$MODULE_SRC_TEMP_DIR" -name '*.proto' -type f); do
-    PROTO_FILENAME=$(basename "$PROTO_FILE")
     if grep -q '^\s*package ' "$PROTO_FILE"; then
-      echo "Proto $PROTO_FILENAME in module $MODULE_NAME defines a package. This is not allowed. We will add a package based on the folder structure automatically."
-      exit 1
+      echo "Prepending $MODULE_NAME to $PROTO_FILE"
+      SEARCH="^\s*package ([^\s;]+);"
+      REPLACE="package $MODULE_NAME.\1;"
+      sed -E -i '' "s/$SEARCH/$REPLACE/" "$PROTO_FILE"
+    else
+      echo "package $MODULE_NAME;" >> "$PROTO_FILE"
     fi
-    PROTO_NAME="${PROTO_FILENAME%%.*}"
-    PROTO_PATH=$(dirname "$PROTO_FILE")
-    RELATIVE_PATH="${PROTO_PATH#$SRC_TEMP_DIR}"
-    RELATIVE_PATH="${RELATIVE_PATH:1}"
-    PACKAGE="${RELATIVE_PATH////.}"
-    PACKAGE="${PACKAGE//$MODULE_NAME.Public/$MODULE_NAME}"
-    PACKAGE="${PACKAGE//$MODULE_NAME.Private/$MODULE_NAME}"
-    PACKAGE="$PACKAGE.$PROTO_NAME"
-    echo "package $PACKAGE;" >> "$PROTO_FILE"
   done
 done
 
@@ -303,4 +296,4 @@ for BUILD_CS_FILE in $(find "$PROJECT_ROOT" -name '*.Build.cs' -type f); do
   GEN_MODULE_PROTOS "$MODULE_INCLUDES_TEMP_DIR/$MODULE_NAME" "$MODULE_PATH" "$MODULE_NAME" "$INCLUDES_ARG"
 done
 
-rm -rf "$TEMP"
+#rm -rf "$TEMP"
