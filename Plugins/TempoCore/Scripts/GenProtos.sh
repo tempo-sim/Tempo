@@ -55,8 +55,8 @@ REPLACE_IF_STALE () {
 GEN_MODULE_PROTOS() {
   local SOURCE_DIR="$1"
   local MODULE_PATH="$2"
-  local CPP_DEST_DIR="$MODULE_PATH/Private"
-  local H_DEST_DIR="$MODULE_PATH/Public"
+  local PRIVATE_DEST_DIR="$MODULE_PATH/Private/ProtobufGenerated"
+  local PUBLIC_DEST_DIR="$MODULE_PATH/Public/ProtobufGenerated"
   local MODULE_NAME="$3"
   local INCLUDE_DIR="$4"
   local PYTHON_DEST_DIR="$PROJECT_ROOT/Content/Python"
@@ -80,24 +80,52 @@ GEN_MODULE_PROTOS() {
     eval "$PROTOC" --python_out="$PYTHON_TEMP_DIR" --grpc_out="$PYTHON_TEMP_DIR" --plugin=protoc-gen-grpc="$GRPC_PYTHON_PLUGIN" "$PROTO" "$INCLUDE_DIR"
   done
 
+  REFRESHED_CPP_FILES=""
   # Replace any stale cpp files.
   for GENERATED_FILE in $(find "$CPP_TEMP_DIR" -type f); do    
-    # Construct relative path in CPP/H_DEST_DIR
+    # Construct relative path in CPP/PUBLIC_DEST_DIR
     local RELATIVE_PATH="${GENERATED_FILE#$CPP_TEMP_DIR}"
-    if [[ $GENERATED_FILE == *pb.h && ! $GENERATED_FILE == *grpc.pb.h ]]; then
-      local POSSIBLY_STALE_FILE="$H_DEST_DIR/$RELATIVE_PATH"
+    RELATIVE_PATH="${RELATIVE_PATH:1}"
+    if [[ $GENERATED_FILE == *pb.h ]]; then
+      local POSSIBLY_STALE_FILE="$PUBLIC_DEST_DIR/$RELATIVE_PATH"
     else
-      local POSSIBLY_STALE_FILE="$CPP_DEST_DIR/$RELATIVE_PATH"
+      local POSSIBLY_STALE_FILE="$PRIVATE_DEST_DIR/$RELATIVE_PATH"
     fi
     REPLACE_IF_STALE "$GENERATED_FILE" "$POSSIBLY_STALE_FILE"
+    REFRESHED_CPP_FILES="$REFRESHED_CPP_FILES $POSSIBLY_STALE_FILE"
   done
   
+  # Remove any protobuf-generated files that were not refreshed this time.
+  for CPP_FILE in $(find "$MODULE_PATH" -type f -name "*.pb.*"); do
+    if [[ ! $REFRESHED_CPP_FILES =~ $CPP_FILE ]]; then
+      echo "Removing $CPP_FILE"
+      rm "$CPP_FILE"
+    fi
+  done
+  
+  REFRESHED_PY_FILES=""
   # Replace any stale Python files.
   for GENERATED_FILE in $(find "$PYTHON_TEMP_DIR" -type f); do    
     # Construct relative path in PYTHON_DEST_DIR
     local RELATIVE_PATH="${GENERATED_FILE#$PYTHON_TEMP_DIR}"
+    RELATIVE_PATH="${RELATIVE_PATH:1}"
     local POSSIBLY_STALE_FILE="$PYTHON_DEST_DIR/$RELATIVE_PATH"
     REPLACE_IF_STALE "$GENERATED_FILE" "$POSSIBLY_STALE_FILE"
+    REFRESHED_PY_FILES="$REFRESHED_PY_FILES $POSSIBLY_STALE_FILE"
+  done
+  
+  # Remove any protobuf-generated files that were not refreshed this time.
+  if [ -d "$PYTHON_DEST_DIR/$MODULE_NAME" ]; then
+    for PY_FILE in $(find "$PYTHON_DEST_DIR/$MODULE_NAME" -type f -name "*_pb2*.py"); do
+      if [[ ! $REFRESHED_PY_FILES =~ $PY_FILE ]]; then
+        rm "$PY_FILE"
+      fi
+    done
+  fi
+
+  # Remove any protobuf-generated files at the top level of the Python dir.
+  for PY_FILE in $(find "$PYTHON_DEST_DIR" -type f -name "*_pb2*" -maxdepth 1); do
+      rm "$PY_FILE"
   done
 }
 
@@ -125,7 +153,7 @@ if [ -z ${DOTNET+x} ]; then
 fi
 
 # First iterate through all the modules to:
-# - Copy all protos to a temp source directory
+# - Copy all protos to a temp source directory - one per module!
 # - Check that no module names are repeated
 # - Check that no protos have package specifiers already
 # - Add a package specifier for the module-relative location to every proto
@@ -181,66 +209,81 @@ eval "$DOTNET" "./Binaries/DotNET/UnrealBuildTool/UnrealBuildTool.dll" -Mode=Jso
 
 GET_MODULE_INCLUDES_PUBLIC_ONLY() {
   local MODULE_NAME="$1"
-  local INCLUDES=""
+  local INCLUDES_DIR="$2"
   PUBLIC_DEPENDENCIES=$(jq -r --arg TargetName "$TARGET_NAME" --arg ModuleName "$MODULE_NAME" \
     'select(.Name == $TargetName)["Modules"][$ModuleName]["PublicDependencyModules"][]' < "$TEMP/TempoModules.json")
   for PUBLIC_DEPENDENCY in $PUBLIC_DEPENDENCIES; do
-      if [ -d "$SRC_TEMP_DIR/$PUBLIC_DEPENDENCY" ]; then # Only consider project modules
-        if [[ $INCLUDES =~ $SRC_TEMP_DIR/$PUBLIC_DEPENDENCY/Public ]]
-        then
-          # We already have this dependency - but still add its public dependencies.
-          INCLUDES="$INCLUDES $(GET_MODULE_INCLUDES_PUBLIC_ONLY "$PUBLIC_DEPENDENCY")"
-        else
-          # This is a new dependency - add it and its public dependencies.
-          INCLUDES="$INCLUDES -I $SRC_TEMP_DIR/$PUBLIC_DEPENDENCY/Public $(GET_MODULE_INCLUDES_PUBLIC_ONLY "$PUBLIC_DEPENDENCY")"
-        fi
+    if [ -d "$SRC_TEMP_DIR/$PUBLIC_DEPENDENCY" ]; then # Only consider project modules
+      if [ -d "$INCLUDES_DIR/$PUBLIC_DEPENDENCY" ]; then
+        # We already have this dependency - but still add its public dependencies.
+        GET_MODULE_INCLUDES_PUBLIC_ONLY "$PUBLIC_DEPENDENCY" "$INCLUDES_DIR"
+      else
+        # This is a new dependency - add its public protos and those of its public dependencies.
+        mkdir -p "$INCLUDES_DIR/$PUBLIC_DEPENDENCY"
+        rsync -av --include="*.proto" --exclude="*" "$SRC_TEMP_DIR/$PUBLIC_DEPENDENCY/Public/" "$INCLUDES_DIR/$PUBLIC_DEPENDENCY" > /dev/null 2>&1
+        GET_MODULE_INCLUDES_PUBLIC_ONLY "$PUBLIC_DEPENDENCY" "$INCLUDES_DIR"
       fi
+    fi
   done
-  echo "$INCLUDES"
 }
 
 GET_MODULE_INCLUDES() {
   local MODULE_NAME="$1"
-  local INCLUDES="-I $SRC_TEMP_DIR/$MODULE_NAME/Public -I $SRC_TEMP_DIR/$MODULE_NAME/Private"
+  local INCLUDES_DIR="$2"
+#  # First copy everything from this modules public and private folders.
+  mkdir -p "$INCLUDES_DIR/$MODULE_NAME"
+  rsync -av --include="*.proto" --exclude="*" "$SRC_TEMP_DIR/$MODULE_NAME/Public/" "$INCLUDES_DIR/$MODULE_NAME" > /dev/null 2>&1
+  rsync -av --include="*.proto" --exclude="*" "$SRC_TEMP_DIR/$MODULE_NAME/Private/" "$INCLUDES_DIR/$MODULE_NAME" > /dev/null 2>&1
   PUBLIC_DEPENDENCIES=$(jq -r --arg TargetName "$TARGET_NAME" --arg ModuleName "$MODULE_NAME" \
     'select(.Name == $TargetName)["Modules"][$ModuleName]["PublicDependencyModules"][]' < "$TEMP/TempoModules.json")
   PRIVATE_DEPENDENCIES=$(jq -r --arg TargetName "$TARGET_NAME" --arg ModuleName "$MODULE_NAME" \
     'select(.Name == $TargetName)["Modules"][$ModuleName]["PrivateDependencyModules"][]' < "$TEMP/TempoModules.json")
   for PUBLIC_DEPENDENCY in $PUBLIC_DEPENDENCIES; do
     if [ -d "$SRC_TEMP_DIR/$PUBLIC_DEPENDENCY" ]; then # Only consider project modules
-      if [[ $INCLUDES =~ $SRC_TEMP_DIR/$PUBLIC_DEPENDENCY/Public ]]
-      then
+      if [ -d "$INCLUDES_DIR/$PUBLIC_DEPENDENCY" ]; then
         # We already have this dependency - but still add its public dependencies.
-        INCLUDES="$INCLUDES $(GET_MODULE_INCLUDES_PUBLIC_ONLY "$PUBLIC_DEPENDENCY")"
+        GET_MODULE_INCLUDES_PUBLIC_ONLY "$PUBLIC_DEPENDENCY" "$INCLUDES"
       else
-        # This is a new dependency - add it and its public dependencies.
-        INCLUDES="$INCLUDES -I $SRC_TEMP_DIR/$PUBLIC_DEPENDENCY/Public $(GET_MODULE_INCLUDES_PUBLIC_ONLY "$PUBLIC_DEPENDENCY")"
+        # This is a new dependency - add its public protos and those of its public dependencies.
+        mkdir -p "$INCLUDES_DIR/$PUBLIC_DEPENDENCY"
+        rsync -av --include="*.proto" --exclude="*" "$SRC_TEMP_DIR/$PUBLIC_DEPENDENCY/Public/" "$INCLUDES_DIR/$PUBLIC_DEPENDENCY" > /dev/null 2>&1
+        GET_MODULE_INCLUDES_PUBLIC_ONLY "$PUBLIC_DEPENDENCY" "$INCLUDES_DIR"
       fi
     fi
   done
+  
   for PRIVATE_DEPENDENCY in $PRIVATE_DEPENDENCIES; do
     if [ -d "$SRC_TEMP_DIR/$PRIVATE_DEPENDENCY" ]; then # Only consider project modules
-      if [[ $INCLUDES =~ $SRC_TEMP_DIR/$PRIVATE_DEPENDENCY/Public ]]
-      then
+      if [ -d "$INCLUDES_DIR/$PRIVATE_DEPENDENCY" ]; then
         # We already have this dependency - but still add its public dependencies.
-        INCLUDES="$INCLUDES $(GET_MODULE_INCLUDES_PUBLIC_ONLY "$PRIVATE_DEPENDENCY")"
+        GET_MODULE_INCLUDES_PUBLIC_ONLY "$MODULE_NAME" "$INCLUDES"
       else
-        # This is a new dependency - add it and its public dependencies.
-        INCLUDES="$INCLUDES -I $SRC_TEMP_DIR/$PRIVATE_DEPENDENCY/Public $(GET_MODULE_INCLUDES_PUBLIC_ONLY "$PRIVATE_DEPENDENCY")"
+        # This is a new dependency - add its public protos and those of its public dependencies.
+        mkdir -p "$INCLUDES_DIR/$PRIVATE_DEPENDENCY"
+        rsync -av --include="*.proto" --exclude="*" "$SRC_TEMP_DIR/$PRIVATE_DEPENDENCY/Public/" "$INCLUDES_DIR/$PRIVATE_DEPENDENCY" > /dev/null 2>&1
+        GET_MODULE_INCLUDES_PUBLIC_ONLY "$PRIVATE_DEPENDENCY" "$INCLUDES_DIR"
       fi
     fi
   done
-  echo "$INCLUDES"
 }
 
+INCLUDES_TEMP_DIR="$TEMP/Includes"
+mkdir -p "$INCLUDES_TEMP_DIR"
 # Lastly, iterate over all the modules again to
 # - Generate the protos for the module (from the copy in the temporary source directory we created)
 for BUILD_CS_FILE in $(find "$PROJECT_ROOT" -name '*.Build.cs' -type f); do
   BUILD_CS_FILENAME="$(basename "$BUILD_CS_FILE")"
   MODULE_NAME="${BUILD_CS_FILENAME%%.*}"
   MODULE_PATH="$(dirname "$BUILD_CS_FILE")"
-  INCLUDES=$(GET_MODULE_INCLUDES "$MODULE_NAME")
-  GEN_MODULE_PROTOS "$SRC_TEMP_DIR/$MODULE_NAME" "$MODULE_PATH" "$MODULE_NAME" "$INCLUDES"
+  MODULE_TYPE=$(jq -r --arg TargetName "$TARGET_NAME" --arg ModuleName "$MODULE_NAME" \
+    'select(.Name == $TargetName)["Modules"][$ModuleName]["Type"]' < "$TEMP/TempoModules.json")
+  if [ "$MODULE_TYPE" != "CPlusPlus" ]; then
+    continue
+  fi
+  MODULE_INCLUDES_TEMP_DIR="$INCLUDES_TEMP_DIR/$MODULE_NAME"
+  GET_MODULE_INCLUDES "$MODULE_NAME" "$MODULE_INCLUDES_TEMP_DIR"
+  INCLUDES_ARG="-I $MODULE_INCLUDES_TEMP_DIR"
+  GEN_MODULE_PROTOS "$MODULE_INCLUDES_TEMP_DIR/$MODULE_NAME" "$MODULE_PATH" "$MODULE_NAME" "$INCLUDES_ARG"
 done
 
-rm -rf "$TEMP"
+#rm -rf "$TEMP"
