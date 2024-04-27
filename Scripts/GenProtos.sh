@@ -35,9 +35,28 @@ if [[ "$OSTYPE" = "linux-gnu"* ]]; then
   chmod +x "$GRPC_PYTHON_PLUGIN"
 fi
 
+# The temp directory where we will rearrange the .proto files and store the generated outputs.
+# Refer to the tempo README for file name and message/service name de-conflicting guarantees Tempo offers.
+# To achieve this, the TEMP directory will have three sub-folders:
+# - Source: Here we will create one folder for every module, with a Public and Private folder beneath, containing
+#           copies of the .proto files found in the source module folders, with relative folder structure preserved.
+#           These copied files will have a `package` automatically added based on their module, relative location,
+#           and proto file name.
+# - Includes: Here we will create one folder for every module, with folders beneath for every module it depends on,
+#             including itself and modules it depends on through public dependencies of other modules. These folders
+#             contain the public protos for other modules, except for the module's own protos, which include both
+#             public and private.
+# - Generated: This is where the generated CPP and Python files will go. We don't put them directly in the source
+#              folder because we don't want to overwrite them there (and force a rebuild) unless they've changed. 
 TEMP=$(mktemp -d)
+SRC_TEMP_DIR="$TEMP/Source"
+mkdir "$SRC_TEMP_DIR"
+INCLUDES_TEMP_DIR="$TEMP/Includes"
+mkdir -p "$INCLUDES_TEMP_DIR"
+GEN_TEMP_DIR="$TEMP/Generated"
+mkdir -p "$GEN_TEMP_DIR"
 
-# Function to compare and replace/copy files
+# Function to refresh stale files
 REPLACE_IF_STALE () {
   local FRESH="$1"
   local POSSIBLY_STALE="$2"
@@ -65,10 +84,10 @@ GEN_MODULE_PROTOS() {
   
   mkdir -p "$PYTHON_DEST_DIR"
   
-  local GEN_TEMP_DIR
-  GEN_TEMP_DIR="$TEMP/Generated/$MODULE_NAME"
-  local CPP_TEMP_DIR="$GEN_TEMP_DIR/CPP"
-  local PYTHON_TEMP_DIR="$GEN_TEMP_DIR/Python"
+  local MODULE_GEN_TEMP_DIR
+  MODULE_GEN_TEMP_DIR="$GEN_TEMP_DIR/$MODULE_NAME"
+  local CPP_TEMP_DIR="$MODULE_GEN_TEMP_DIR/CPP"
+  local PYTHON_TEMP_DIR="$MODULE_GEN_TEMP_DIR/Python"
   mkdir -p "$CPP_TEMP_DIR"
   mkdir -p "$PYTHON_TEMP_DIR"
   for PROTO in $(find "$SOURCE_DIR" -name "*.proto" -type f); do
@@ -157,8 +176,6 @@ fi
 # - Check that no module names are repeated
 # - Check that no protos have package specifiers already
 # - Add a package specifier for the module-relative location to every proto
-SRC_TEMP_DIR="$TEMP/Source"
-mkdir "$SRC_TEMP_DIR"
 for BUILD_CS_FILE in $(find "$PROJECT_ROOT" -name '*.Build.cs' -type f); do
   BUILD_CS_FILENAME="$(basename "$BUILD_CS_FILE")"
   MODULE_NAME="${BUILD_CS_FILENAME%%.*}"
@@ -189,17 +206,19 @@ for BUILD_CS_FILE in $(find "$PROJECT_ROOT" -name '*.Build.cs' -type f); do
     done
   fi
   for PROTO_FILE in $(find "$MODULE_SRC_TEMP_DIR" -name '*.proto' -type f); do
+    PROTO_FILENAME=$(basename "$PROTO_FILE")
     if grep -q '^\s*package ' "$PROTO_FILE"; then
-      PROTO_NAME=$(basename "$PROTO_FILE")
-      echo "Proto $PROTO_NAME in module $MODULE_NAME defines a package. This is not allowed. We will add a package based on the folder structure automatically."
+      echo "Proto $PROTO_FILENAME in module $MODULE_NAME defines a package. This is not allowed. We will add a package based on the folder structure automatically."
       exit 1
     fi
+    PROTO_NAME="${PROTO_FILENAME%%.*}"
     PROTO_PATH=$(dirname "$PROTO_FILE")
     RELATIVE_PATH="${PROTO_PATH#$SRC_TEMP_DIR}"
     RELATIVE_PATH="${RELATIVE_PATH:1}"
     PACKAGE="${RELATIVE_PATH////.}"
     PACKAGE="${PACKAGE//$MODULE_NAME.Public/$MODULE_NAME}"
     PACKAGE="${PACKAGE//$MODULE_NAME.Private/$MODULE_NAME}"
+    PACKAGE="$PACKAGE.$PROTO_NAME"
     echo "package $PACKAGE;" >> "$PROTO_FILE"
   done
 done
@@ -267,8 +286,6 @@ GET_MODULE_INCLUDES() {
   done
 }
 
-INCLUDES_TEMP_DIR="$TEMP/Includes"
-mkdir -p "$INCLUDES_TEMP_DIR"
 # Lastly, iterate over all the modules again to
 # - Generate the protos for the module (from the copy in the temporary source directory we created)
 for BUILD_CS_FILE in $(find "$PROJECT_ROOT" -name '*.Build.cs' -type f); do
@@ -286,4 +303,4 @@ for BUILD_CS_FILE in $(find "$PROJECT_ROOT" -name '*.Build.cs' -type f); do
   GEN_MODULE_PROTOS "$MODULE_INCLUDES_TEMP_DIR/$MODULE_NAME" "$MODULE_PATH" "$MODULE_NAME" "$INCLUDES_ARG"
 done
 
-#rm -rf "$TEMP"
+rm -rf "$TEMP"

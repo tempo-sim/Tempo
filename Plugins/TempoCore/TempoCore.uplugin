@@ -38,13 +38,13 @@
 	],
 	"PreBuildSteps": {
 		"Win64": [
-			"$(PluginDir)\\Scripts\\GenProtos.sh \"$(EngineDir)\" \"$(ProjectFile)\" \"$(ProjectDir)\" \"$(TargetName)\" \"$(TargetConfiguration)\" \"$(TargetPlatform)\" \"$(PluginDir)\\Source\\ThirdParty\\gRPC\\Binaries\\Windows\""
+			"$(ProjectDir)\\Scripts\\GenProtos.sh \"$(EngineDir)\" \"$(ProjectFile)\" \"$(ProjectDir)\" \"$(TargetName)\" \"$(TargetConfiguration)\" \"$(TargetPlatform)\" \"$(PluginDir)\\Source\\ThirdParty\\gRPC\\Binaries\\Windows\""
 		],
 		"Mac": [
-			"$(PluginDir)/Scripts/GenProtos.sh \"$(EngineDir)\" \"$(ProjectFile)\" \"$(ProjectDir)\" \"$(TargetName)\" \"$(TargetConfiguration)\" \"$(TargetPlatform)\" \"$(PluginDir)/Source/ThirdParty/gRPC/Binaries/Mac\""
+			"$(ProjectDir)/Scripts/GenProtos.sh \"$(EngineDir)\" \"$(ProjectFile)\" \"$(ProjectDir)\" \"$(TargetName)\" \"$(TargetConfiguration)\" \"$(TargetPlatform)\" \"$(PluginDir)/Source/ThirdParty/gRPC/Binaries/Mac\""
 		],
 		"Linux": [
-			"$(PluginDir)/Scripts/GenProtos.sh \"$(EngineDir)\" \"$(ProjectFile)\" \"$(ProjectDir)\" \"$(TargetName)\" \"$(TargetConfiguration)\" \"$(TargetPlatform)\" \"$(PluginDir)/Source/ThirdParty/gRPC/Binaries/Linux\""
+			"$(ProjectDir)/Scripts/GenProtos.sh \"$(EngineDir)\" \"$(ProjectFile)\" \"$(ProjectDir)\" \"$(TargetName)\" \"$(TargetConfiguration)\" \"$(TargetPlatform)\" \"$(PluginDir)/Source/ThirdParty/gRPC/Binaries/Linux\""
 		]
 	}
 }
