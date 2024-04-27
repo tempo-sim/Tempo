@@ -4,3 +4,6 @@
 [submodule "Plugins/Sample_CityKit"]
 	path = Plugins/Sample_CityKit
 	url = https://github.com/tempo-sim/Vayu-SampleCityKit.git
+[submodule "Plugins/Modern_CityKit"]
+	path = Plugins/Modern_CityKit
+	url = https://github.com/tempo-sim/Vayu-ModernCityKit.git
