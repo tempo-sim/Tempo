@@ -2,29 +2,35 @@
 
 #include "TempoScriptingWorldSubsystem.h"
 
-#include "TempoCoreSettings.h"
+#include "TempoScriptable.h"
 
-#include "CoreMinimal.h"
+#include "TempoCoreSettings.h"
 
 UTempoScriptingWorldSubsystem::UTempoScriptingWorldSubsystem()
 {
 	ScriptingServer = CreateDefaultSubobject<UTempoScriptingServer>(TEXT("TempoWorldScriptingServer"));
 }
 
-void UTempoScriptingWorldSubsystem::Initialize(FSubsystemCollectionBase& Collection)
+bool UTempoScriptingWorldSubsystem::ShouldCreateSubsystem(UObject* Outer) const
 {
-	Super::Initialize(Collection);
-
-	if (!(GetWorld()->WorldType == EWorldType::Game || GetWorld()->WorldType == EWorldType::PIE))
-	{
-		return;
-	}
-
-	GetWorld()->OnWorldBeginPlay.AddUObject(this, &UTempoScriptingWorldSubsystem::InitServer);
+	return Outer->GetWorld()->WorldType == EWorldType::Game || Outer->GetWorld()->WorldType == EWorldType::PIE;
 }
 
-void UTempoScriptingWorldSubsystem::InitServer() const
+void UTempoScriptingWorldSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 {
+	for (TObjectIterator<UObject> ObjectIt; ObjectIt; ++ObjectIt)
+	{
+		UObject* Object = *ObjectIt;
+		if (Object->GetWorld() != &InWorld)
+		{
+			continue;
+		}
+		if (ITempoWorldScriptable* ScriptableObject = Cast<ITempoWorldScriptable>(Object))
+		{
+			ScriptableObject->RegisterWorldServices(ScriptingServer);
+		}
+	}
+	
 	const UTempoCoreSettings* Settings = GetDefault<UTempoCoreSettings>();
 	ScriptingServer->Initialize(Settings->GetWorldScriptingPort());
 }
