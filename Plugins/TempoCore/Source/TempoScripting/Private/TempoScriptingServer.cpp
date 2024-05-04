@@ -8,7 +8,8 @@
 #include "grpcpp/impl/service_type.h"
 
 UTempoScriptingServer::UTempoScriptingServer() = default;
-UTempoScriptingServer::UTempoScriptingServer(FVTableHelper& Helper) {}
+UTempoScriptingServer::UTempoScriptingServer(FVTableHelper& Helper)
+	: Super(Helper) {}
 UTempoScriptingServer::~UTempoScriptingServer() = default;
 
 void UTempoScriptingServer::Initialize(int32 Port)
@@ -53,7 +54,9 @@ void UTempoScriptingServer::Deinitialize()
 	checkf(Server.Get(), TEXT("Server was unexpectedly null"));
 	checkf(CompletionQueue.Get(), TEXT("CompletionQueue was unexpectedly null"));
 
-	Server->Shutdown();
+	static constexpr int32 MaxShutdownTimeNanoSeconds = 5e7; // 0.05s
+	static constexpr gpr_timespec MaxShutdownWaitTime {0, MaxShutdownTimeNanoSeconds, GPR_TIMESPAN};
+	Server->Shutdown(MaxShutdownWaitTime);
 	CompletionQueue->Shutdown();
 
 	// Flush (and discard) all pending events (until we get the shutdown event).
@@ -100,8 +103,7 @@ void UTempoScriptingServer::Tick(float DeltaTime)
 		case grpc::CompletionQueue::GOT_EVENT:
 			{
 				// Handle the event and then wait for another.
-				GPR_ASSERT(bOk);
-				HandleEventForTag(*Tag);
+				HandleEventForTag(*Tag, bOk);
 				break;
 			}
 		case grpc::CompletionQueue::SHUTDOWN:
@@ -119,10 +121,17 @@ void UTempoScriptingServer::Tick(float DeltaTime)
 	}
 }
 
-void UTempoScriptingServer::HandleEventForTag(int32 Tag)
+void UTempoScriptingServer::HandleEventForTag(int32 Tag, bool bOk)
 {
-	if (TUniquePtr<FRequestManager>* RequestManager = RequestManagers.Find(Tag))
+	if (TSharedPtr<FRequestManager>* RequestManager = RequestManagers.Find(Tag))
 	{
+		if (!bOk)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("Removing RequestManager"));
+			RequestManagers.Remove(Tag);
+			return;
+		}
+		
 		switch ((*RequestManager)->GetState())
 		{
 		case FRequestManager::UNINITIALIZED: // Shouldn't happen.
@@ -135,12 +144,20 @@ void UTempoScriptingServer::HandleEventForTag(int32 Tag)
 				// Immediately prepare to receive another request.
 				const int32 NewTag = TagAllocator++;
 				RequestManagers.Emplace(NewTag, (*RequestManager)->Duplicate(NewTag))->Init(CompletionQueue.Get());
-	
+
+				UE_LOG(LogTemp, Warning, TEXT("Requested"));
 				(*RequestManager)->HandleAndRespond();
 				break;
 			}
-		case FRequestManager::RESPONDED: // The response has been sent.
+		case FRequestManager::RESPONDING: // A response has been sent, and there are more to come.
 			{
+				UE_LOG(LogTemp, Warning, TEXT("Responding"));
+				(*RequestManager)->HandleAndRespond();
+				break;
+			}
+		case FRequestManager::FINISHING: // The rpc has finished.
+			{
+				UE_LOG(LogTemp, Warning, TEXT("Finishing"));
 				RequestManagers.Remove(Tag);
 				break;
 			}

@@ -94,7 +94,7 @@ public:
 	virtual void RegisterWorldServices(UTempoScriptingServer* ScriptingServer) override;
 
 private:
-	grpc::Status Play(const MyModule::OptionalCustomPackage::MyRequest& Request, MyModule::OptionalCustomPackage::MyResponse& Response) const;
+	grpc::Status Play(const MyModule::OptionalCustomPackage::MyRequest& Request, ResponseContinuationType<MyModule::OptionalCustomPackage::MyResponse>& ResponseContinuation) const;
 };
 ```
 ```
@@ -113,15 +113,17 @@ using MyResponse = MyModule::OptionalCustomPackage::MyResponse;
 void AMyScriptableActor::RegisterWorldServices(UScriptingServer* ScriptingServer)
 {
    ScriptingServer->RegisterService<MyService>(
-        TRequestHandler<MyService, MyRequest, MyResponse>(&AMyScriptableActor::RequestMyRPC).BindUObject(this, &AMyScriptableActor::HandleMyRequest)
+        // TStreamingRequestHandler can handle streaming RPCs with otherwise-idential syntax.
+        TSimpleRequestHandler<MyService, MyRequest, MyResponse>(&AMyScriptableActor::RequestMyRPC).BindUObject(this, &AMyScriptableActor::HandleMyRequest)
     );
 }
 
-grpc::Status AMyScriptableActor::HandleMyRequest(const MyRequest& Request, MyResponse& Response)
+grpc::Status AMyScriptableActor::HandleMyRequest(const MyRequest& Request, ResponseContinuationType<MyResponse>& ResponseContinuation)
 {
     // Handle the request, produce the response.
     
-    return grpc::Status(); // Return a status indicating if the request was handled successfully.
+    MyResponse Response;
+    ResponseContinuation(Response, grpc::Status_OK);
 }
 ```
-You should include a TRequestHandler for every RPC in your service. You may not bind multiple handlers to one RPC.
+You should include a TSimpleRequestHandler or TStreamRequestHandler for every RPC in your service. You may not bind multiple handlers to one RPC.
