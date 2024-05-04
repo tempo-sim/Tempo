@@ -21,7 +21,7 @@ void UTempoScriptingWorldSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	for (TObjectIterator<UObject> ObjectIt; ObjectIt; ++ObjectIt)
 	{
 		UObject* Object = *ObjectIt;
-		if (Object->GetWorld() != &InWorld)
+		if (Object->GetWorld() != &InWorld || !IsValid(Object))
 		{
 			continue;
 		}
