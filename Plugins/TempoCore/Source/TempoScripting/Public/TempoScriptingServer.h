@@ -107,10 +107,7 @@ using TStreamingRequestHandler = TRequestHandler<ServiceType, RequestType, Respo
  */
 struct FRequestManager : TSharedFromThis<FRequestManager>
 {
-	virtual ~FRequestManager()
-	{
-		UE_LOG(LogTemp, Warning, TEXT("Destroying Request Manager"));
-	}
+	virtual ~FRequestManager() = default;
 	enum EState { UNINITIALIZED, REQUESTED, RESPONDING, FINISHING };
 	virtual EState GetState() const = 0;
 	virtual void Init(grpc::ServerCompletionQueue* CompletionQueue) = 0;
@@ -166,6 +163,7 @@ public:
 			Base::Responder.Finish(Response, Result, &(Base::Tag));
 			Base::State = FRequestManager::EState::FINISHING;
 		});
+		Base::Handler->HandleRequest(Base::Request, Base::ResponseDelegate);
 	}
 
 	virtual FRequestManager* Duplicate(int32 NewTag) const override

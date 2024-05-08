@@ -127,7 +127,6 @@ void UTempoScriptingServer::HandleEventForTag(int32 Tag, bool bOk)
 	{
 		if (!bOk)
 		{
-			UE_LOG(LogTemp, Warning, TEXT("Removing RequestManager"));
 			RequestManagers.Remove(Tag);
 			return;
 		}
@@ -145,19 +144,16 @@ void UTempoScriptingServer::HandleEventForTag(int32 Tag, bool bOk)
 				const int32 NewTag = TagAllocator++;
 				RequestManagers.Emplace(NewTag, (*RequestManager)->Duplicate(NewTag))->Init(CompletionQueue.Get());
 
-				UE_LOG(LogTemp, Warning, TEXT("Requested"));
 				(*RequestManager)->HandleAndRespond();
 				break;
 			}
 		case FRequestManager::RESPONDING: // A response has been sent, and there are more to come.
 			{
-				UE_LOG(LogTemp, Warning, TEXT("Responding"));
 				(*RequestManager)->HandleAndRespond();
 				break;
 			}
 		case FRequestManager::FINISHING: // The rpc has finished.
 			{
-				UE_LOG(LogTemp, Warning, TEXT("Finishing"));
 				RequestManagers.Remove(Tag);
 				break;
 			}
