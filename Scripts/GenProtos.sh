@@ -10,6 +10,9 @@ TARGET_CONFIG="$5"
 TARGET_PLATFORM="$6"
 TOOL_DIR="${7//\\//}"
 
+PYTHON_DEST_DIR="$PROJECT_ROOT/Content/Python/API/tempo"
+touch "$PYTHON_DEST_DIR/__init__.py"
+
 PROTOC="$TOOL_DIR/protoc"
 GRPC_CPP_PLUGIN="$TOOL_DIR/grpc_cpp_plugin"
 GRPC_PYTHON_PLUGIN="$TOOL_DIR/grpc_python_plugin"
@@ -65,7 +68,7 @@ REPLACE_IF_STALE () {
     mkdir -p "$(dirname "$POSSIBLY_STALE")"
     cp -p "$FRESH" "$POSSIBLY_STALE"
   else
-    if ! diff --brief "$FRESH" "$POSSIBLY_STALE"; then
+    if ! diff --brief "$FRESH" "$POSSIBLY_STALE" > /dev/null 2>&1; then
       cp -f "$FRESH" "$POSSIBLY_STALE"
     fi
   fi
@@ -78,11 +81,11 @@ GEN_MODULE_PROTOS() {
   local PUBLIC_DEST_DIR="$MODULE_PATH/Public/ProtobufGenerated"
   local MODULE_NAME="$3"
   local INCLUDE_DIR="$4"
-  local PYTHON_DEST_DIR="$PROJECT_ROOT/Content/Python"
   local EXPORT_MACRO
   EXPORT_MACRO=$(echo "$MODULE_NAME" | tr '[:lower:]' '[:upper:]')_API
   
-  mkdir -p "$PYTHON_DEST_DIR"
+  mkdir -p "$PYTHON_DEST_DIR/$MODULE_NAME"
+  touch "$PYTHON_DEST_DIR/$MODULE_NAME/__init__.py"
   
   local MODULE_GEN_TEMP_DIR
   MODULE_GEN_TEMP_DIR="$GEN_TEMP_DIR/$MODULE_NAME"
@@ -103,10 +106,11 @@ GEN_MODULE_PROTOS() {
     fi
     if grep -q "service " "$PROTO"; then
       eval "$PROTOC" --cpp_out=dllexport_decl="$EXPORT_MACRO":"$CPP_TEMP_DIR" --grpc_out="$CPP_TEMP_DIR" --plugin=protoc-gen-grpc="$GRPC_CPP_PLUGIN" "$PROTO" "-I $INCLUDE_DIR"
+      eval "$PROTOC" --python_out="$PYTHON_TEMP_DIR" --grpc_out="$PYTHON_TEMP_DIR" --plugin=protoc-gen-grpc="$GRPC_PYTHON_PLUGIN" "$PROTO" "-I $INCLUDE_DIR"
     else
       eval "$PROTOC" --cpp_out=dllexport_decl="$EXPORT_MACRO":"$CPP_TEMP_DIR" "$PROTO" "-I $INCLUDE_DIR"
+      eval "$PROTOC" --python_out="$PYTHON_TEMP_DIR" "$PROTO" "-I $INCLUDE_DIR"
     fi
-    eval "$PROTOC" --python_out="$PYTHON_TEMP_DIR" --grpc_out="$PYTHON_TEMP_DIR" --plugin=protoc-gen-grpc="$GRPC_PYTHON_PLUGIN" "$PROTO" "-I $INCLUDE_DIR"
   done
 
   REFRESHED_CPP_FILES=""
@@ -324,4 +328,4 @@ done
 
 rm -rf "$TEMP"
 
-echo "Finished"
+echo "Done"
