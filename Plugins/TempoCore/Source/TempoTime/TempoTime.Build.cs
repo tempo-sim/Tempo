@@ -2,7 +2,7 @@
 
 using UnrealBuildTool;
 
-public class TempoTime : ModuleRules
+public class TempoTime : TempoModuleRules
 {
 	public TempoTime(ReadOnlyTargetRules Target) : base(Target)
 	{
@@ -41,6 +41,7 @@ public class TempoTime : ModuleRules
 				"UMG",
 				// Tempo
 				"TempoCoreShared",
+				"TempoScripting",
 			}
 			);
 		
