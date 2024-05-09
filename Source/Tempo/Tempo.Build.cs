@@ -22,6 +22,7 @@ public class Tempo : ModuleRules
 			new string[]
 			{
 				"TempoCore",
+				"TempoSensors",
 			}
 			);
 	}

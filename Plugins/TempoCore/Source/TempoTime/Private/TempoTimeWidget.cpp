@@ -20,7 +20,7 @@ void UTempoTimeWidget::NativeOnInitialized()
 	// Set up TimeMode combo box.
 	for (const ETimeMode TimeMode : TEnumRange<ETimeMode>())
 	{
-		TimeModeBox->AddOption(GetEnumValueAsString(TimeMode));
+		TimeModeBox->AddOption(UTempoCoreUtils::GetEnumValueAsString(TimeMode));
 	}
 	TimeModeBox->OnSelectionChanged.AddDynamic(this, &UTempoTimeWidget::OnTimeModeSelectionChanged);
 

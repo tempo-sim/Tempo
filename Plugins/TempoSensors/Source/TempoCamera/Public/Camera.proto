@@ -1,0 +1,47 @@
+// Copyright Tempo Simulation, LLC. All Rights Reserved
+
+syntax = "proto3";
+
+import "TempoSensorsShared/Common.proto";
+
+enum ImageCompressionLevel {
+  MIN = 0;
+  LOW = 1;
+  MID = 2;
+  HIGH = 3;
+  MAX = 4;
+}
+
+message ColorImage {
+  TempoSensorsShared.MeasurementHeader header = 1;
+  uint32 width = 2;
+  uint32 height = 3;
+  bytes data = 4; // Raw bytes of an image file
+}
+
+message DepthImage {
+  TempoSensorsShared.MeasurementHeader header = 1;
+  uint32 width = 2;
+  uint32 height = 3;
+  repeated float depths = 4; // Depth along camera axis in cm of every pixel
+}
+
+message LabelImage {
+  TempoSensorsShared.MeasurementHeader header = 1;
+  uint32 width = 2;
+  uint32 height = 3;
+  bytes data = 4; // 0-255 label for every pixel
+}
+
+message ColorImageRequest {
+  int32 sensor_id = 1;
+  ImageCompressionLevel compression_level = 2;
+}
+
+message DepthImageRequest {
+  int32 sensor_id = 1;
+}
+
+message LabelImageRequest {
+  int32 sensor_id = 1;
+}
