@@ -22,7 +22,7 @@ class TEMPOSCRIPTING_API ITempoEngineScriptable
 	GENERATED_BODY()
 
 public:
-	virtual void RegisterEngineServices(UTempoScriptingServer* ScriptingServer) {};
+	virtual void RegisterEngineServices(UTempoScriptingServer* ScriptingServer) = 0;
 };
 
 UINTERFACE()
