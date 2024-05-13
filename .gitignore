@@ -76,3 +76,7 @@ DerivedDataCache/*
 
 .DS_Store
 .idea
+
+# Generated proto files
+*.pb.*
+*_pb2*.py

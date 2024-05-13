@@ -30,21 +30,36 @@ else
   
   UNREAL_ENGINE_PATH="${UNREAL_ENGINE_PATH//\\//}"
   
-  SRC="$TEMPO_ROOT/ToolChains/$TOOLCHAIN"
-  DEST="$UNREAL_ENGINE_PATH/Engine/Source/Programs/UnrealBuildTool/Tempo/$TOOLCHAIN"
+  TOOLCHAIN_SRC="$TEMPO_ROOT/Toolchains/$TOOLCHAIN"
+  TOOLCHAIN_DEST="$UNREAL_ENGINE_PATH/Engine/Source/Programs/UnrealBuildTool/Tempo/$TOOLCHAIN"
   
-  # Don't continue if our toolchain is arleady there
-  if [ -f "$DEST" ]; then
-    if cmp --silent "$SRC" "$DEST"; then
-        # Nothing to do
-        exit 0
-    fi
+  NEEDS_REBUILD=0
+  
+  # Rebuild if toolchain was missing or stale 
+  if [[ ! -f "$TOOLCHAIN_DEST" || $(diff "$TOOLCHAIN_SRC" "$TOOLCHAIN_DEST" | wc -l) -gt 0 ]]; then
+      echo -e "\nInstalling $TOOLCHAIN...\n"
+      mkdir -p "$UNREAL_ENGINE_PATH/Engine/Source/Programs/UnrealBuildTool/Tempo"
+      cp "$TOOLCHAIN_SRC" "$TOOLCHAIN_DEST"
+      NEEDS_REBUILD=1
   fi
   
-  echo -e "\nInstalling $TOOLCHAIN...\n"
+  MODULERULES_SRC="$TEMPO_ROOT/Toolchains/TempoModuleRules.cs"
+  MODULERULES_DEST="$UNREAL_ENGINE_PATH/Engine/Source/Programs/UnrealBuildTool/Tempo/TempoModuleRules.cs"
   
-  mkdir -p "$UNREAL_ENGINE_PATH/Engine/Source/Programs/UnrealBuildTool/Tempo"
-  cp "$SRC" "$DEST"
+  # Rebuild if module rules were missing or stale 
+  if [[ ! -f "$MODULERULES_DEST" || $(diff "$MODULERULES_SRC" "$MODULERULES_DEST" | wc -l) -gt 0 ]]; then
+      echo -e "\nInstalling TempoModuleRules.cs...\n"
+      mkdir -p "$UNREAL_ENGINE_PATH/Engine/Source/Programs/UnrealBuildTool/Tempo"
+      cp "$MODULERULES_SRC" "$MODULERULES_DEST"
+      NEEDS_REBUILD=1
+  fi
+  
+  if [ "$NEEDS_REBUILD" -eq "0" ]; then
+     # Nothing to do
+     exit;
+  fi
+  
+  echo "Rebuilding UnrealBuildTool...";
   
   cd "$UNREAL_ENGINE_PATH"
   
