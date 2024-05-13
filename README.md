@@ -39,7 +39,7 @@ should be resolved by the user by adding a unique `package` to each proto file w
 modules (where two modules define a proto with the same name and relative path) are resolved by adding a `package` with 
 the module name to every proto (or prepending it to a user-supplied `package`).
 
-To import/include proto files or protobuf-generated code in other proto files, C++, or Python code your
+To import/include proto files or protobuf-generated code in other proto files, C++, or Python code 
 you will need to follow the convention
 ```
 ModuleName/RelativePath/FileName.<proto/pb.h/_pb2.py>
