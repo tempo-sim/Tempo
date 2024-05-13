@@ -156,7 +156,7 @@ GEN_MODULE_PROTOS() {
   fi
 
   # Remove any protobuf-generated files at the top level of the Python dir.
-  for PY_FILE in $(find "$PYTHON_DEST_DIR" -type f -name "*_pb2*" -maxdepth 1); do
+  for PY_FILE in $(find "$PYTHON_DEST_DIR"  -maxdepth 1 -type f -name "*_pb2*"); do
       rm "$PY_FILE"
   done
 }

@@ -82,4 +82,7 @@ DerivedDataCache/*
 *_pb2*.py
 
 # Python Virtual Environment
-venv
+TempoEnv
+
+# pycache folders
+__pycache__

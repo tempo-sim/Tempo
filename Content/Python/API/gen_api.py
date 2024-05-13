@@ -276,5 +276,8 @@ def generate_tempo_api(root_dir):
 
 
 if __name__ == "__main__":
+    if sys.version_info[0] < 3 or sys.version_info[1] < 9:
+        print("Error: this script requires Python 3.9 or greater (found {}.{}.{})".format(sys.version_info[0], sys.version_info[1], sys.version_info[2]))
+        exit(1)
     root_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "tempo")
     generate_tempo_api(root_dir)

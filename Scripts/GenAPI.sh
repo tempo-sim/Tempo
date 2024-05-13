@@ -7,14 +7,22 @@ PROJECT_ROOT="${1//\\//}"
 echo "Generating Python API..."
 
 # Check for Python
-if ! which python3 &> /dev/null; then
-  echo "Failed to generate Tempo API. Couldn't find python3. Please install (https://www.python.org/downloads/)"
-  exit 1
+PYTHON=""
+if ! python3 --version &> /dev/null; then
+  # Maybe it's just called python?
+  if ! python --version &> /dev/null; then
+    echo "Failed to generate Tempo API. Couldn't find python3. Please install (https://www.python.org/downloads/)"
+    exit 1
+  else
+    PYTHON="python"
+  fi
+else
+  PYTHON="python3"
 fi
 
 # Create and activate the virtual environment to generate the API.
-VENV_DIR="$PROJECT_ROOT/venv"
-python3 -m venv "$VENV_DIR"
+VENV_DIR="$PROJECT_ROOT/TempoEnv"
+eval "$PYTHON -m venv $VENV_DIR"
 if [[ "$OSTYPE" = "msys" ]]; then
   eval "$VENV_DIR/Scripts/activate"
 else
