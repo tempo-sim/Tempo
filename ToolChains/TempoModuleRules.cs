@@ -50,4 +50,20 @@ public class TempoModuleRules : ModuleRules
 			);
 		}
 	}
+
+	/// <summary>
+	/// Whether hot reload should be enabled for this module.
+	/// </summary>
+	protected bool bCanHotReload
+	{
+		get
+		{
+			return Context.bCanHotReload;
+		}
+
+		set
+		{  
+			Context.bCanHotReload = value;                
+		}
+	}
 }

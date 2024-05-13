@@ -6,6 +6,9 @@ public class TempoScripting : TempoModuleRules
 {
 	public TempoScripting(ReadOnlyTargetRules Target) : base(Target)
 	{
+		// Disallow hot reload for TempoScripting. See TempoScripting.cpp for a full explanation.
+		bCanHotReload = false;
+		
 		PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
 		
 		PublicIncludePaths.AddRange(
@@ -37,6 +40,7 @@ public class TempoScripting : TempoModuleRules
 				// Unreal
 				"CoreUObject",
 				"Engine",
+				"HotReload",
 				// Tempo
 				"TempoCoreShared",
 			}
