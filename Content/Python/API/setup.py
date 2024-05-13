@@ -16,5 +16,6 @@ setup(
         "grpcio==1.62.1",
         "curio==1.6",
         "asyncio==3.4.3"
-    ]
+    ],
+    python_requires='>3.9.0'
 )
