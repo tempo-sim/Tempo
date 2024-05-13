@@ -126,4 +126,4 @@ grpc::Status AMyScriptableActor::HandleMyRequest(const MyRequest& Request, Respo
     ResponseContinuation(Response, grpc::Status_OK);
 }
 ```
-You should include a TSimpleRequestHandler or TStreamRequestHandler for every RPC in your service. You may not bind multiple handlers to one RPC.
+You should include a TSimpleRequestHandler or TStreamingRequestHandler for every RPC in your service. You may not bind multiple handlers to one RPC.
