@@ -20,15 +20,14 @@ class TEMPOSCRIPTING_API UTempoScriptingWorldSubsystem : public UWorldSubsystem
 public:
 	UTempoScriptingWorldSubsystem();
 
-	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+	/* UWorldSubsystem Interface */
+	virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
+	// Initialize is too early to register services (objects exist but haven't been added to the world yet),
+	// so use OnWorldBeginPlay instead.
+	virtual void OnWorldBeginPlay(UWorld& InWorld) override;
 	virtual void Deinitialize() override;
 
-	UTempoScriptingServer* GetScriptingServer() const { return ScriptingServer; }
-
 private:
-	UFUNCTION()
-	void InitServer() const;
-	
 	UPROPERTY()
 	UTempoScriptingServer* ScriptingServer;
 };
