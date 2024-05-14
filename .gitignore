@@ -80,3 +80,9 @@ DerivedDataCache/*
 # Generated proto files
 *.pb.*
 *_pb2*.py
+
+# Python Virtual Environment
+TempoEnv
+
+# pycache folders
+__pycache__

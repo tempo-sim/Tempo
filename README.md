@@ -4,6 +4,7 @@ The Tempo Unreal Engine project and plugins
 You will need the following:
 - `jq`
 - `curl`
+- `python` Version `3.9.0` or greater.
 - A `~/.netrc` file with a valid GitHub Personal Access Token for the TempoThirdParty repo in this format:
 ```
 machine api.github.com
@@ -55,16 +56,42 @@ In C++:
 ```
 ModuleName::OptionalCustomPackage::MessageName
 ```
-Note that there are no namespaces in Python (proto package names have no effect on the generated Python code),
-but de-conflicting of all the above types can still be achieved because Python allows importing down to the class level,
-whereas Protobuf and C++ only allow importing/#including down to the file level.
+Note that there are no namespaces in Python (proto package names have no effect on the generated Python code).
+In Python messages with the same name are distinguished by their containing file/module when importing.
+
+Here is an example service with a single "simple" RPC:
+```
+// MyService.proto
+
+syntax = "proto3";
+
+// Protos can import protos from other modules to use their message types.
+import "OtherModule/File.proto";
+
+// Protos can use optional package names to deconflict duplicated message or service names within a module.
+package OptionalCustomPackage;
+
+message MyRequest {
+  int32 some_request = 1;
+}
+
+message MyResponse {
+  // All messages and services will get their module name prepended to their package.
+  OtherModule.OtherCustomPackage.OtherMessage other_message = 1;
+}
+
+service MyService {
+  // This is a "simple" RPC. A streaming RPC would return "stream MyResponse".
+  rpc MyRPC(MyRequest) returns (MyResponse);
+}
+```
 
 ### Registering Services
 The `TempoScripting` module hosts two scripting servers. One (the "Engine Scripting Server") is always active, including before play in the Editor, and the other
 (the "World Scripting Server") is only active during play in a game world. Based on the functionality you're trying to script, you should register your service
 with either one, by implementing either of `ITempoEngineScritable` or `ITempoWorldScriptable`.
 
-For example:
+For example, we could register handlers for the above service like this:
 ```
 // MyScriptableActor.h
 
@@ -127,3 +154,31 @@ grpc::Status AMyScriptableActor::HandleMyRequest(const MyRequest& Request, Respo
 }
 ```
 You should include a TSimpleRequestHandler or TStreamingRequestHandler for every RPC in your service. You may not bind multiple handlers to one RPC.
+
+### Using the Python API
+Tempo automatically generates both the Python classes for the messages and services in your Protobuf files *and* a Python wrapper library to make 
+writing client code extremely easy. All of this ends up in the `tempo` Python package. This package will be automatically installed for you to a 
+Python virtual environment located at `<tempo_root>/TempoEnv`. You can activate that virtual environment with:
+```
+# On Windows:
+source <tempo_root>/TempoEnv/Scripts/activate
+# On Linux or Mac:
+source <tempo_root>/TempoEnv/bin/activate
+```
+Alternatively, you can install the `tempo` package to your system frameworks or another virtual environment with:
+```
+pip install "<tempo_root>/Content/Python/API"
+```
+The `tempo` wrapper library adds a Python module for every C++ module in the Tempo project with synchronous and asynchronous wrappers for every RPC 
+defined in that module. The request parameters will be laid out flat as arguments to the wrapper. For example, the above service `MyService` would 
+result in the following two Python method signatures:
+```
+import tempo.my_module as t_mm
+# Synchronous version
+t_mm.my_rpc(some_request=3)
+# Asynchronous version
+await t_mm.my_rpc(some_request=3)
+```
+The synchronous and asynchronous wrappers have exactly the same signature. The correct one is deduced automatically based on whether it is called from a synchronous or
+asynchronous context. Note that the service name does not appear anywhere in the signatures (nor does the file name or any optional package name).
+Here we are prioritizing brevity of the Python API with a minor restriction in RPC naming: **RPC names must be unique within a C++ module.**
