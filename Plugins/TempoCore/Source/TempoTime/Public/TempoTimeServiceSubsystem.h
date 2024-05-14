@@ -34,9 +34,9 @@ public:
 private:
 	void SetTimeMode(const TempoTime::TimeModeRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const;
 
-	void SetSimStepsPerSecond(const TempoTime::SetSimStepsPerSecondRequest&, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const;
+	void SetSimStepsPerSecond(const TempoTime::SetSimStepsPerSecondRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const;
 
-	void AdvanceSteps(const TempoTime::AdvanceStepsRequest&, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const;
+	void AdvanceSteps(const TempoTime::AdvanceStepsRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const;
 	
 	void Play(const TempoScripting::Empty& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const;
 

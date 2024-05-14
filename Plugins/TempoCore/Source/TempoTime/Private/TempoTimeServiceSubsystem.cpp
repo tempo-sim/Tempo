@@ -60,7 +60,7 @@ void UTempoTimeServiceSubsystem::SetSimStepsPerSecond(const SetSimStepsPerSecond
 	}
 	
 	UTempoCoreSettings* Settings = GetMutableDefault<UTempoCoreSettings>();
-	Settings->SetSimulatedStepsPerSecond(Request.sim_steps_per_second());
+	Settings->SetSimulatedStepsPerSecond(RequestedStepsPerSecond);
 
 	ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status_OK);
 }
