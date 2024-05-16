@@ -2,7 +2,7 @@
 
 using UnrealBuildTool;
 
-public class TempoScripting : ModuleRules
+public class TempoScripting : TempoModuleRules
 {
 	public TempoScripting(ReadOnlyTargetRules Target) : base(Target)
 	{
