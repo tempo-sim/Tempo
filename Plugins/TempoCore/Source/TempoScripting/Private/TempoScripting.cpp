@@ -23,6 +23,7 @@ void FTempoScriptingModule::StartupModule()
 	// memory of all proto classes. So we reset that memory here, when a hot reload begins.
 	IHotReloadModule::Get().OnModuleCompilerStarted().AddLambda([](bool bIsAsyncCompile)
 	{
+		// Note: we added these reset methods TempoThirdParty-v0.4
 		google::protobuf::DescriptorPool::ResetGeneratedDatabase();
 		google::protobuf::MessageFactory::ResetGeneratedFactory();
 	});
