@@ -40,5 +40,5 @@ service GeographicService {
   
   rpc GetDateTime(TempoScripting.Empty) returns (DateTime);
   
-  rpc SetOriginGeographicCoord(GeographicCoordinate) returns (TempoScripting.Empty);
+  rpc SetGeographicReference(GeographicCoordinate) returns (TempoScripting.Empty);
 }

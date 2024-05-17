@@ -36,7 +36,7 @@ void UTempoGeographicServiceSubsystem::RegisterWorldServices(UTempoScriptingServ
 		TSimpleRequestHandler<GeographicService, TempoGeographic::TimeOfDay, TempoScripting::Empty>(&GeographicService::RequestSetTimeOfDay).BindUObject(this, &UTempoGeographicServiceSubsystem::SetTimeOfDay),
 		TSimpleRequestHandler<GeographicService, TempoGeographic::DayCycleRateRequest, TempoScripting::Empty>(&GeographicService::RequestSetDayCycleRelativeRate).BindUObject(this, &UTempoGeographicServiceSubsystem::SetDayCycleRelativeRate),
 		TSimpleRequestHandler<GeographicService, TempoScripting::Empty, TempoGeographic::DateTime>(&GeographicService::RequestGetDateTime).BindUObject(this, &UTempoGeographicServiceSubsystem::GetDateTime),
-		TSimpleRequestHandler<GeographicService, TempoGeographic::GeographicCoordinate, TempoScripting::Empty>(&GeographicService::RequestSetOriginGeographicCoord).BindUObject(this, &UTempoGeographicServiceSubsystem::SetOriginGeographicCoord)
+		TSimpleRequestHandler<GeographicService, TempoGeographic::GeographicCoordinate, TempoScripting::Empty>(&GeographicService::RequestSetGeographicReference).BindUObject(this, &UTempoGeographicServiceSubsystem::SetGeographicReference)
 		);
 }
 
@@ -95,7 +95,7 @@ void UTempoGeographicServiceSubsystem::GetDateTime(const TempoScripting::Empty& 
 	ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::StatusCode::UNIMPLEMENTED, "No TempoDateTime actor found"));
 }
 
-void UTempoGeographicServiceSubsystem::SetOriginGeographicCoord(const TempoGeographic::GeographicCoordinate& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation)
+void UTempoGeographicServiceSubsystem::SetGeographicReference(const TempoGeographic::GeographicCoordinate& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation)
 {
 	if (ATempoGeoReferencingSystem* GeoReferencingSystem = Cast<ATempoGeoReferencingSystem>(AGeoReferencingSystem::GetGeoReferencingSystem(this)))
 	{
