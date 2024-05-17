@@ -30,7 +30,7 @@ else
   
   UNREAL_ENGINE_PATH="${UNREAL_ENGINE_PATH//\\//}"
   
-  TOOLCHAIN_SRC="$TEMPO_ROOT/Toolchains/$TOOLCHAIN"
+  TOOLCHAIN_SRC="$TEMPO_ROOT/ToolChains/$TOOLCHAIN"
   TOOLCHAIN_DEST="$UNREAL_ENGINE_PATH/Engine/Source/Programs/UnrealBuildTool/Tempo/$TOOLCHAIN"
   
   NEEDS_REBUILD=0
@@ -43,7 +43,7 @@ else
       NEEDS_REBUILD=1
   fi
   
-  MODULERULES_SRC="$TEMPO_ROOT/Toolchains/TempoModuleRules.cs"
+  MODULERULES_SRC="$TEMPO_ROOT/ToolChains/TempoModuleRules.cs"
   MODULERULES_DEST="$UNREAL_ENGINE_PATH/Engine/Source/Programs/UnrealBuildTool/Tempo/TempoModuleRules.cs"
   
   # Rebuild if module rules were missing or stale 
