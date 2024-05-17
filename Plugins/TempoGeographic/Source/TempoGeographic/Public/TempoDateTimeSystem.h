@@ -17,6 +17,8 @@ public:
 	UPROPERTY(BlueprintAssignable)
 	FDateTimeChanged DateTimeChangedEvent;
 
+	ATempoDateTimeSystem();
+	
 	virtual void Tick(float DeltaSeconds) override;
 
 	UFUNCTION(BlueprintPure, Category = "TempoGeographic", meta = (WorldContext = "WorldContextObject"))

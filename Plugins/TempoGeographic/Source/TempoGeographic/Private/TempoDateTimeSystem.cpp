@@ -30,6 +30,11 @@ ATempoDateTimeSystem* ATempoDateTimeSystem::GetTempoDateTimeSystem(UObject* Worl
 	return Actor;
 }
 
+ATempoDateTimeSystem::ATempoDateTimeSystem()
+{
+	PrimaryActorTick.bCanEverTick = true;
+}
+
 void ATempoDateTimeSystem::Tick(float DeltaSeconds)
 {
 	SimDateTime += FTimespan::FromSeconds(DayCycleRelativeRate * DeltaSeconds);
