@@ -298,4 +298,5 @@ if __name__ == "__main__":
         raise Exception("This script requires Python 3.9 or greater (found {}.{}.{})"
                         .format(sys.version_info[0], sys.version_info[1], sys.version_info[2]))
     root_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "tempo")
+    sys.path.append(root_dir)
     generate_tempo_api(root_dir)
