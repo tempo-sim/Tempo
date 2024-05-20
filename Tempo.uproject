@@ -22,10 +22,6 @@
 			]
 		},
 		{
-			"Name": "TempoCore",
-			"Enabled": true
-		},
-		{
 			"Name": "CityBLD",
 			"Enabled": true
 		},
@@ -35,6 +31,22 @@
 		},
 		{
 			"Name": "Modern_CityKit",
+			"Enabled: true
+		},
+		{
+			"Name": "TempoGeographic",
+			"Enabled": true
+		},
+                {
+                        "Name": "TempoCore",
+                        "Enabled": true
+                },
+		{
+			"Name": "TempoSensors",
+			"Enabled": true
+		},
+		{
+			"Name": "TempoVehicles",
 			"Enabled": true
 		}
 	]

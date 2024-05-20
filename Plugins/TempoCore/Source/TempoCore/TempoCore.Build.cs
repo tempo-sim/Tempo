@@ -35,16 +35,13 @@ public class TempoCore : ModuleRules
 			{
 				// Unreal
 				"CoreUObject",
-				"DeveloperSettings",
 				"Engine",
 				"Slate",
 				"SlateCore",
 				"UMG",
 				// Tempo
-				"Abseil",
-				"gRPC",
-				"Protobuf",
-				"RE2",
+				"TempoCoreShared",
+				"TempoTime",
 			}
 			);
 		

@@ -1,0 +1,36 @@
+// Copyright Tempo Simulation, LLC. All Rights Reserved
+
+syntax = "proto3";
+
+import "TempoCamera/Camera.proto";
+
+enum MeasurementType {
+  COLOR_IMAGE = 0;
+  DEPTH_IMAGE = 1;
+  LABEL_IMAGE = 2;
+}
+
+message SensorDescriptor {
+  int32 id = 1;
+  string name = 2;
+  float rate = 3;
+  repeated MeasurementType measurement_types = 4;
+}
+
+message AvailableSensorsRequest {
+
+}
+
+message AvailableSensorsResponse {
+  repeated SensorDescriptor available_sensors = 1;
+}
+
+service SensorService {
+  rpc GetAvailableSensors(AvailableSensorsRequest) returns (AvailableSensorsResponse);
+
+  rpc StreamColorImages(TempoCamera.ColorImageRequest) returns (stream TempoCamera.ColorImage);
+
+  rpc StreamDepthImages(TempoCamera.DepthImageRequest) returns (stream TempoCamera.DepthImage);
+
+  rpc StreamLabelImages(TempoCamera.LabelImageRequest) returns (stream TempoCamera.LabelImage);
+}

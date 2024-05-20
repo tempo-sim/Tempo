@@ -1,0 +1,7 @@
+# Ignore everything
+*
+
+# Except this file
+!.gitignore
+# And the _tempo_context.py file
+!_tempo_context.py

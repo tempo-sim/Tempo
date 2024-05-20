@@ -1,0 +1,21 @@
+// Copyright Tempo Simulation, LLC. All Rights Reserved
+
+syntax = "proto3";
+
+import "TempoScripting/Empty.proto";
+
+message CommandableVehiclesResponse{
+  repeated int32 vehicle_id = 1;
+}
+
+message DrivingCommandRequest {
+  int32 vehicle_id = 1;
+  float acceleration = 2;
+  float steering = 3;
+}
+
+service DrivingService {
+  rpc GetCommandableVehicles(TempoScripting.Empty) returns (CommandableVehiclesResponse);
+  
+  rpc CommandVehicle(DrivingCommandRequest) returns (TempoScripting.Empty);
+}
