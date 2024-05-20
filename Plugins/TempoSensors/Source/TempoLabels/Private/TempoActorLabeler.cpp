@@ -21,43 +21,51 @@ void UTempoActorLabeler::OnWorldBeginPlay(UWorld& InWorld)
 
 	SemanticLabelTable = GetDefault<UTempoSensorsSettings>()->GetSemanticLabelTable();
 
+	LabelAllActors();
+	
+	// Label all newly spawned actors.
+	GetWorld()->AddOnActorSpawnedHandler(FOnActorSpawned::FDelegate::CreateUObject(this, &UTempoActorLabeler::LabelActor));
+}
+
+void UTempoActorLabeler::LabelAllActors() const
+{
 	UE_LOG(LogTempoLabels, Display, TEXT("Labeling all actors in world"));
 	for (TActorIterator<AActor> ActorItr(GetWorld()); ActorItr; ++ActorItr)
 	{
 		LabelActor(*ActorItr);
 	}
-
-	// Label all newly spawned actors.
-	InWorld.AddOnActorSpawnedHandler(FOnActorSpawned::FDelegate::CreateUObject(this, &UTempoActorLabeler::LabelActor));
 }
 
 void UTempoActorLabeler::LabelActor(AActor* Actor) const
 {
-	if (SemanticLabelTable)
+	if (!SemanticLabelTable)
 	{
-		FName AssignedLabelName = NAME_None;
-		SemanticLabelTable->ForeachRow<FSemanticLabel>(TEXT(""), [&AssignedLabelName, Actor](const FName& Key, const FSemanticLabel& Value)
+		UE_LOG(LogTempoLabels, Error, TEXT("Semantic label table was not set"));
+		return;
+	}
+	
+	FName AssignedLabelName = NAME_None;
+	SemanticLabelTable->ForeachRow<FSemanticLabel>(TEXT(""), [&AssignedLabelName, Actor](const FName& Key, const FSemanticLabel& Value)
+	{
+		const FName& LabelName = Key;
+		for (const TSubclassOf<AActor>& ActorType : Value.ActorTypes)
 		{
-			const FName& LabelName = Key;
-			for (const TSubclassOf<AActor>& ActorType : Value.ActorTypes)
+			if (Actor->GetClass()->IsChildOf(ActorType.Get()))
 			{
-				if (Actor->GetClass()->IsChildOf(ActorType.Get()))
+				if (AssignedLabelName != NAME_None)
 				{
-					if (AssignedLabelName != NAME_None)
-					{
-						UE_LOG(LogTempoLabels, Error, TEXT("Labels %s and %s have overlapping actor types"), *LabelName.ToString(), *AssignedLabelName.ToString());
-						return;
-					}
-					AssignedLabelName = LabelName;
-				
-					TInlineComponentArray<UPrimitiveComponent*> PrimitiveComponents(Actor);
-					for (UPrimitiveComponent* PrimitiveComponent : PrimitiveComponents)
-					{
-						PrimitiveComponent->SetRenderCustomDepth(true);
-						PrimitiveComponent->SetCustomDepthStencilValue(Value.Label);
-					}
+					UE_LOG(LogTempoLabels, Error, TEXT("Labels %s and %s have overlapping actor types"), *LabelName.ToString(), *AssignedLabelName.ToString());
+					return;
+				}
+				AssignedLabelName = LabelName;
+			
+				TInlineComponentArray<UPrimitiveComponent*> PrimitiveComponents(Actor);
+				for (UPrimitiveComponent* PrimitiveComponent : PrimitiveComponents)
+				{
+					PrimitiveComponent->SetRenderCustomDepth(true);
+					PrimitiveComponent->SetCustomDepthStencilValue(Value.Label);
 				}
 			}
-		});
-	}
+		}
+	});
 }
