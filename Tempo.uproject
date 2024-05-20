@@ -32,6 +32,10 @@
 		{
 			"Name": "Sample_CityKit",
 			"Enabled": true
+		},
+		{
+			"Name": "Modern_CityKit",
+			"Enabled": true
 		}
 	]
 }
