@@ -29,12 +29,13 @@ void ATempoVehicleController::HandleDrivingInput(const FNormalizedDrivingInput& 
 	const float LinearVelocity = MovementInterface->GetLinearVelocity();
 	
 	FDrivingCommand Command;
-	Command.SteeringAngle = FMath::Abs(Input.Steering) > 0.0 ?
-			FMath::Min(MaxSteerAngle, Input.Steering * MaxSteerAngle) :
-			FMath::Max(-MaxSteerAngle, Input.Steering * MaxSteerAngle);
-	Command.Acceleration = FMath::Abs(Input.Acceleration) > 0.0 ?
+	Command.SteeringAngle = FMath::Clamp(Input.Steering * MaxSteerAngle, -MaxSteerAngle, MaxSteerAngle);
+
+	Command.Acceleration = Input.Acceleration > 0.0 ?
 			FMath::Min(MaxAcceleration, Input.Acceleration * MaxAcceleration) : LinearVelocity > 0.0 ?
+			// Moving forward, slowing down
 			FMath::Max(-MaxDeceleration, Input.Acceleration * MaxDeceleration) :
+			// Moving backwards, speeding up (in reverse)
 			FMath::Min(-MaxAcceleration, Input.Acceleration * MaxAcceleration) ;
 	
 	MovementInterface->HandleDrivingCommand(Command);
