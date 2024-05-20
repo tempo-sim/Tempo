@@ -13,7 +13,10 @@ template <typename ColorType>
 struct TTextureRead
 {
 	TTextureRead(const FIntPoint& ImageSizeIn, int32 SequenceIdIn, double CaptureTimeIn)
-		   : ImageSize(ImageSizeIn), SequenceId(SequenceIdIn), CaptureTime(CaptureTimeIn), Image(TArray(&FColor::Green, ImageSize.X * ImageSize.Y)) {}
+		   : ImageSize(ImageSizeIn), SequenceId(SequenceIdIn), CaptureTime(CaptureTimeIn)
+	{
+		Image.SetNumUninitialized(ImageSize.X * ImageSize.Y);
+	}
 
 	FIntPoint ImageSize;
 	int32 SequenceId;
