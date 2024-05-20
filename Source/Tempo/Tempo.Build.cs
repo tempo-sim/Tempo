@@ -23,6 +23,7 @@ public class Tempo : ModuleRules
 			{
 				"TempoCore",
 				"TempoSensors",
+                "TempoGeographic",
 			}
 			);
 	}

@@ -24,6 +24,10 @@
 		{
 			"Name": "TempoCore",
 			"Enabled": true
+		},
+		{
+			"Name": "TempoGeographic",
+			"Enabled": true
 		}
 	]
 }

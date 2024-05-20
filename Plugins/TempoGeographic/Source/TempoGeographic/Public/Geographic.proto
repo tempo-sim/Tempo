@@ -1,0 +1,44 @@
+// Copyright Tempo Simulation, LLC. All Rights Reserved
+
+syntax = "proto3";
+
+import "TempoScripting/Empty.proto";
+
+message Date {
+  uint32 day = 1;
+  uint32 month = 2;
+  uint32 year = 3;
+}
+
+message TimeOfDay {
+  uint32 hour = 1;
+  uint32 minute = 2;
+  uint32 second = 3;
+}
+
+message DateTime {
+  Date date = 1;
+  TimeOfDay time = 2;
+}
+
+message GeographicCoordinate {
+  double latitude = 1;
+  double longitude = 2;
+  double altitude = 3;
+}
+
+message DayCycleRateRequest {
+  float rate = 1;
+}
+
+service GeographicService {
+  rpc SetDate(Date) returns (TempoScripting.Empty);
+  
+  rpc SetTimeOfDay(TimeOfDay) returns (TempoScripting.Empty);
+  
+  rpc SetDayCycleRelativeRate(DayCycleRateRequest) returns (TempoScripting.Empty);
+  
+  rpc GetDateTime(TempoScripting.Empty) returns (DateTime);
+  
+  rpc SetGeographicReference(GeographicCoordinate) returns (TempoScripting.Empty);
+}

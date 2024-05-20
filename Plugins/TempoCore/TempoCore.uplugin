@@ -3,7 +3,7 @@
 	"Version": 1,
 	"VersionName": "1.0",
 	"FriendlyName": "TempoCore",
-	"Description": "The core Tempo simulation modules",
+	"Description": "The core Tempo simulation plugin",
 	"Category": "Tempo",
 	"CreatedBy": "Tempo Simulation, LLC",
 	"CreatedByURL": "http://temposimulation.com",
