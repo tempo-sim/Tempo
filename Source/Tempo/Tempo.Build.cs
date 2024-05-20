@@ -22,8 +22,9 @@ public class Tempo : ModuleRules
 			new string[]
 			{
 				"TempoCore",
-				"TempoSensors",
                 "TempoGeographic",
+                "TempoSensors",
+				"TempoVehicles",
 			}
 			);
 	}
