@@ -20,6 +20,8 @@ public:
 	virtual void OnWorldBeginPlay(UWorld& InWorld) override;
 
 private:
+	void LabelAllActors() const;
+	
 	void LabelActor(AActor* Actor) const;
 
 	UPROPERTY(VisibleAnywhere)

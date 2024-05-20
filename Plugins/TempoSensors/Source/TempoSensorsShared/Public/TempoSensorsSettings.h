@@ -14,7 +14,7 @@ class TEMPOSENSORSSHARED_API UTempoSensorsSettings : public UDeveloperSettings
 
 public:
 	// Labels
-	TObjectPtr<UDataTable> GetSemanticLabelTable() const { return SemanticLabelTable.Get(); }
+	TObjectPtr<UDataTable> GetSemanticLabelTable() const { return SemanticLabelTable.LoadSynchronous(); }
 
 	// Camera
 	int32 GetMaxCameraRenderBufferSize() const { return MaxCameraRenderBufferSize; }
