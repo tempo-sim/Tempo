@@ -4,16 +4,28 @@
 
 #include "CoreMinimal.h"
 
-template <typename TEnum>
-FString GetEnumValueAsString(const TEnum Value, bool bQualified=false)
+#include "TempoCoreUtils.generated.h"
+
+UCLASS()
+class TEMPOCORESHARED_API UTempoCoreUtils : public UBlueprintFunctionLibrary
 {
-	FString ValueString = UEnum::GetValueAsString(Value);
-	if (!bQualified)
+	GENERATED_BODY()
+
+public:
+	template <typename TEnum>
+	static FString GetEnumValueAsString(const TEnum Value, bool bQualified=false)
 	{
-		if (int32 LastColonIdx; ValueString.FindLastChar(':', LastColonIdx))
+		FString ValueString = UEnum::GetValueAsString(Value);
+		if (!bQualified)
 		{
-			ValueString.RightChopInline(LastColonIdx + 1);
+			if (int32 LastColonIdx; ValueString.FindLastChar(':', LastColonIdx))
+			{
+				ValueString.RightChopInline(LastColonIdx + 1);
+			}
 		}
+		return ValueString;
 	}
-	return ValueString;
-}
+
+	UFUNCTION(BlueprintCallable, Category="TempoCoreUtils",  meta=(WorldContext="WorldContextObject", DeterminesOutputType="Interface"))
+	static UWorldSubsystem* GetSubsystemImplementingInterface(const UObject* WorldContextObject, TSubclassOf<UInterface> Interface);
+};

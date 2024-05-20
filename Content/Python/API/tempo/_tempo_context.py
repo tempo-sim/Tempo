@@ -24,7 +24,7 @@ class TempoContext(object):
     def set_server_address(self, server_address):
         self.channel = grpc.aio.insecure_channel(server_address,
             options=[
-                ('grpc.max_receive_message_length', 1e9), # 1Gb
+                ('grpc.max_receive_message_length', 1000000000), # 1Gb
             ]
         )
 
