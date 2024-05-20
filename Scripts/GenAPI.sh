@@ -29,13 +29,18 @@ else
   source "$VENV_DIR/bin/activate"
 fi
 
+set +e # Proceed despite errors from pip. That could just mean the user has no internet connection.
 # Install a few dependencies to the virtual environment. If this list grows put them in a requirements.txt file.
-pip install --upgrade pip --quiet
-pip install protobuf==4.25.3 --quiet
-pip install Jinja2==3.1.3 --quiet
+pip install --upgrade pip --quiet --quiet --retries 0
+pip install protobuf==4.25.3 --quiet --quiet --retries 0
+pip install Jinja2==3.1.3 --quiet --quiet --retries 0
+set -e
 
 # Finally build and install the Tempo API (and its dependencies) to the virtual environment.
 python "$PROJECT_ROOT/Content/Python/API/gen_api.py"
-pip install "$PROJECT_ROOT/Content/Python/API" --quiet
+set +e # Again proceed despite errors from pip.
+pip uninstall tempo --yes --quiet --quiet # Uninstall first to remove any stale files
+pip install "$PROJECT_ROOT/Content/Python/API" --quiet --quiet --retries 0
+set -e
 
 echo "Done"
