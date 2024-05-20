@@ -28,6 +28,14 @@
 		{
 			"Name": "TempoGeographic",
 			"Enabled": true
+		},
+		{
+			"Name": "TempoSensors",
+			"Enabled": true
+		},
+		{
+			"Name": "TempoVehicles",
+			"Enabled": true
 		}
 	]
 }
