@@ -2,9 +2,7 @@
 
 #include "TempoSensorServiceSubsystem.h"
 
-#include "TempoSensors.h"
 #include "TempoSensorInterface.h"
-#include "TempoSensorsSettings.h"
 #include "TempoSensors/Sensors.grpc.pb.h"
 
 #include "TempoColorCamera.h"
@@ -58,46 +56,73 @@ TempoSensors::MeasurementType ToProtoMeasurementType(EMeasurementType ImageType)
 	}
 }
 
-void UTempoSensorServiceSubsystem::GetAvailableSensors(const TempoSensors::AvailableSensorsRequest& Request, const TResponseDelegate<TempoSensors::AvailableSensorsResponse>& ResponseContinuation) const
+void UTempoSensorServiceSubsystem::ForEachSensor(const TFunction<bool(ITempoSensorInterface*)>& Callback) const
 {
-	AvailableSensorsResponse Response;
+	check(GetWorld());
 	
-	for (TObjectIterator<UObject> ObjectIt; ObjectIt; ++ObjectIt)
+	for (TObjectIterator<UActorComponent> ComponentIt; ComponentIt; ++ComponentIt)
 	{
-		UObject* Object = *ObjectIt;
-		if (const ITempoSensorInterface* Sensor = Cast<ITempoSensorInterface>(Object))
+		UActorComponent* Component = *ComponentIt;
+		if (ITempoSensorInterface* Sensor = Cast<ITempoSensorInterface>(Component))
 		{
-			if (IsValid(Object) && Object->GetWorld() == GetWorld())
+			if (IsValid(Component) && Component->GetWorld() == GetWorld())
 			{
-				auto* AvailableSensor = Response.add_available_sensors();
-				AvailableSensor->set_id(Sensor->GetSensorId());
-				AvailableSensor->set_name(TCHAR_TO_UTF8(*Sensor->GetSensorName()));
-				AvailableSensor->set_rate(Sensor->GetRate());
-				for (const EMeasurementType MeasurementType : Sensor->GetMeasurementTypes())
+				if (Callback(Sensor))
 				{
-					AvailableSensor->add_measurement_types(ToProtoMeasurementType(MeasurementType));
+					break;
 				}
 			}
 		}
 	}
+}
+
+void UTempoSensorServiceSubsystem::GetAvailableSensors(const TempoSensors::AvailableSensorsRequest& Request, const TResponseDelegate<TempoSensors::AvailableSensorsResponse>& ResponseContinuation) const
+{
+	AvailableSensorsResponse Response;
+
+	ForEachSensor([&Response](const ITempoSensorInterface* Sensor)
+	{
+		auto* AvailableSensor = Response.add_available_sensors();
+		AvailableSensor->set_id(Sensor->GetSensorId());
+		AvailableSensor->set_name(TCHAR_TO_UTF8(*Sensor->GetSensorName()));
+		AvailableSensor->set_rate(Sensor->GetRate());
+		for (const EMeasurementType MeasurementType : Sensor->GetMeasurementTypes())
+		{
+			AvailableSensor->add_measurement_types(ToProtoMeasurementType(MeasurementType));
+		}
+		return false; // Don't break out of foreach
+	});
 
 	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
 }
 
-void UTempoSensorServiceSubsystem::StreamColorImages(const TempoCamera::ColorImageRequest& Request, const TResponseDelegate<TempoCamera::ColorImage>& ResponseContinuation)
+template <typename ComponentType, typename RequestType, typename ResponseType>
+void UTempoSensorServiceSubsystem::RequestImages(const RequestType& Request, const TResponseDelegate<ResponseType>& ResponseContinuation) const
 {
-	const int32 Quality = UTempoColorCameraBase::QualityFromCompressionLevel(Request.compression_level());
-	RequestedSensors.FindOrAdd(Request.sensor_id()).PendingColorImageRequests.Add(FColorImageRequest(ResponseContinuation, Quality));
+	check(GetWorld());
+	
+	for (TObjectIterator<ComponentType> ComponentIt; ComponentIt; ++ComponentIt)
+	{
+		if (ComponentIt->GetSensorId() == Request.sensor_id() && IsValid(*ComponentIt) && ComponentIt->GetWorld() == GetWorld())
+		{
+			ComponentIt->RequestMeasurement(Request, ResponseContinuation);
+		}
+	}
 }
 
-void UTempoSensorServiceSubsystem::StreamDepthImages(const TempoCamera::DepthImageRequest& Request, const TResponseDelegate<TempoCamera::DepthImage>& ResponseContinuation)
+void UTempoSensorServiceSubsystem::StreamColorImages(const TempoCamera::ColorImageRequest& Request, const TResponseDelegate<TempoCamera::ColorImage>& ResponseContinuation) const
 {
-	RequestedSensors.FindOrAdd(Request.sensor_id()).PendingDepthImageRequests.Add(FDepthImageRequest(ResponseContinuation));
+	RequestImages<UTempoColorCameraBase, TempoCamera::ColorImageRequest, TempoCamera::ColorImage>(Request, ResponseContinuation);
 }
 
-void UTempoSensorServiceSubsystem::StreamLabelImages(const TempoCamera::LabelImageRequest& Request, const TResponseDelegate<TempoCamera::LabelImage>& ResponseContinuation)
+void UTempoSensorServiceSubsystem::StreamDepthImages(const TempoCamera::DepthImageRequest& Request, const TResponseDelegate<TempoCamera::DepthImage>& ResponseContinuation) const
 {
-	RequestedSensors.FindOrAdd(Request.sensor_id()).PendingLabelImageRequests.Add(FLabelImageRequest(ResponseContinuation));
+	RequestImages<UTempoDepthCamera, TempoCamera::DepthImageRequest, TempoCamera::DepthImage>(Request, ResponseContinuation);
+}
+
+void UTempoSensorServiceSubsystem::StreamLabelImages(const TempoCamera::LabelImageRequest& Request, const TResponseDelegate<TempoCamera::LabelImage>& ResponseContinuation) const
+{
+	RequestImages<UTempoColorCameraBase, TempoCamera::LabelImageRequest, TempoCamera::LabelImage>(Request, ResponseContinuation);
 }
 
 void UTempoSensorServiceSubsystem::Tick(float DeltaTime)
@@ -108,120 +133,25 @@ void UTempoSensorServiceSubsystem::Tick(float DeltaTime)
 	// This guarantees they will be sent out in the same frame when they were captured.
 	if (GetDefault<UTempoCoreSettings>()->GetTimeMode() == ETimeMode::FixedStep)
 	{
-		for (const auto& PendingImageReqeust : RequestedSensors)
+		ForEachSensor([](ITempoSensorInterface* Sensor)
 		{
-			if (PendingImageReqeust.Value.ColorTextureReadQueue.HasOutstandingTextureReads() ||
-				PendingImageReqeust.Value.LinearColorTextureReadQueue.HasOutstandingTextureReads())
+			if (Sensor->HasPendingRenderingCommands())
 			{
 				FlushRenderingCommands();
-				break;
+				return true; // Break out of foreach
 			}
-		}
+			return false; // Don't break out of foreach
+		});
 	}
-	
-	for (auto& Elem : RequestedSensors)
+
+	ForEachSensor([](ITempoSensorInterface* Sensor)
 	{
-		FRequestedSensor& RequestedSensor = Elem.Value;
-		
-		if (const TUniquePtr<TTextureRead<FLinearColor>> TextureRead = RequestedSensor.LinearColorTextureReadQueue.DequeuePendingTextureRead())
-		{
-			for (auto ImageRequest = RequestedSensor.PendingDepthImageRequests.CreateIterator(); ImageRequest; ++ImageRequest)
-			{
-				ImageRequest->ExtractAndRespond(TextureRead.Get(), GetWorld()->GetTimeSeconds());
-				ImageRequest.RemoveCurrent();
-			}
-		}
-		
-		if (const TUniquePtr<TTextureRead<FColor>> TextureRead = RequestedSensor.ColorTextureReadQueue.DequeuePendingTextureRead())
-		{
-			for (auto ImageRequest = RequestedSensor.PendingColorImageRequests.CreateIterator(); ImageRequest; ++ImageRequest)
-			{
-				ImageRequest->ExtractAndRespond(TextureRead.Get(), GetWorld()->GetTimeSeconds());
-				ImageRequest.RemoveCurrent();
-			}
-			for (auto ImageRequest = RequestedSensor.PendingLabelImageRequests.CreateIterator(); ImageRequest; ++ImageRequest)
-			{
-				ImageRequest->ExtractAndRespond(TextureRead.Get(), GetWorld()->GetTimeSeconds());
-				ImageRequest.RemoveCurrent();
-			}
-		}
-	}
+		Sensor->FlushMeasurementResponses();
+		return false; // Don't break out of foreach
+	});
 }
 
 TStatId UTempoSensorServiceSubsystem::GetStatId() const
 {
 	RETURN_QUICK_DECLARE_CYCLE_STAT(UTempoSensorServiceSubsystem, STATGROUP_Tickables);
-}
-
-bool UTempoSensorServiceSubsystem::HasPendingRequestForSensor(int32 SensorId) const
-{
-	return RequestedSensors.Contains(SensorId) &&
-		(!RequestedSensors[SensorId].PendingColorImageRequests.IsEmpty() ||
-		 !RequestedSensors[SensorId].PendingDepthImageRequests.IsEmpty() ||
-		 !RequestedSensors[SensorId].PendingLabelImageRequests.IsEmpty());
-}
-
-void UTempoSensorServiceSubsystem::RequestedMeasurementReady_Color(int32 SensorId, int32 SequenceId, FTextureRenderTargetResource* TextureResource)
-{
-	FRequestedSensor* RequestedSensor = RequestedSensors.Find(SensorId);
-	if (!RequestedSensor)
-	{
-		checkf(false, TEXT("Camera %d sent image but was not requested"), SensorId);
-	}
-
-	EnqueueTextureRead<FColor>(SensorId, SequenceId, TextureResource, RequestedSensor->ColorTextureReadQueue);
-}
-
-void UTempoSensorServiceSubsystem::RequestedMeasurementReady_LinearColor(int32 SensorId, int32 SequenceId, FTextureRenderTargetResource* TextureResource)
-{
-	FRequestedSensor* RequestedSensor = RequestedSensors.Find(SensorId);
-	if (!RequestedSensor)
-	{
-		checkf(false, TEXT("Camera %d sent image but was not requested"), SensorId);
-	}
-
-	EnqueueTextureRead<FLinearColor>(SensorId, SequenceId, TextureResource, RequestedSensor->LinearColorTextureReadQueue);
-}
-
-template <typename ColorType>
-void UTempoSensorServiceSubsystem::EnqueueTextureRead(int32 SensorId, int32 SequenceId, FTextureRenderTargetResource* TextureResource, TTextureReadQueue<ColorType>& TextureReadQueue)
-{
-	if (TextureReadQueue.GetNumPendingTextureReads() > GetDefault<UTempoSensorsSettings>()->GetMaxCameraRenderBufferSize())
-	{
-		UE_LOG(LogTempoSensors, Warning, TEXT("Fell behind while rendering images from camera %d. Dropping image."), SensorId);
-		return;
-	}
-
-	TTextureRead<ColorType>* TextureRead = new TTextureRead<ColorType>(
-		TextureResource->GetSizeXY(),
-		SequenceId,
-		GetWorld()->GetTimeSeconds());
-	
-	struct FReadSurfaceContext{
-		FRenderTarget* SrcRenderTarget;
-		TArray<ColorType>* OutData;
-		FIntRect Rect;
-		FReadSurfaceDataFlags Flags;
-	};
-
-	FReadSurfaceContext Context = {
-		TextureResource,
-		&TextureRead->Image,
-		FIntRect(0,0,TextureResource->GetSizeX(), TextureResource->GetSizeY()),
-		FReadSurfaceDataFlags(RCM_UNorm, CubeFace_MAX)
-	};
-
-	ENQUEUE_RENDER_COMMAND(ReadSurfaceCommand)(
-		[Context](FRHICommandListImmediate& RHICmdList)
-		{
-			RHICmdList.ReadSurfaceData(
-			Context.SrcRenderTarget->GetRenderTargetTexture(),
-			Context.Rect,
-			*Context.OutData,
-			Context.Flags
-		);
-	});
-	
-	TextureRead->RenderFence.BeginFence();
-	TextureReadQueue.EnqueuePendingTextureRead(TextureRead);
 }
