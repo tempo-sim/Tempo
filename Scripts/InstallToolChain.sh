@@ -59,7 +59,7 @@ else
      exit;
   fi
   
-  echo "Rebuilding UnrealBuildTool...";
+  echo "Rebuilding UnrealBuildTool and AutomationTool...";
   
   cd "$UNREAL_ENGINE_PATH"
   
@@ -84,4 +84,5 @@ else
   fi
   
   eval "$DOTNET" build "./Engine/Source/Programs/UnrealBuildTool/UnrealBuildTool.csproj" -c Development
+  eval "$DOTNET" build "./Engine/Source/Programs/AutomationTool/AutomationTool.csproj" -c Development
 fi

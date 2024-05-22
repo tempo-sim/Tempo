@@ -5,7 +5,9 @@
 #include "google/protobuf/descriptor.h"
 #include "google/protobuf/message.h"
 
+#if WITH_EDITOR
 #include "IHotReload.h"
+#endif
 
 #define LOCTEXT_NAMESPACE "FTempoScriptingModule"
 
@@ -13,6 +15,7 @@ DEFINE_LOG_CATEGORY(LogTempoScripting);
 
 void FTempoScriptingModule::StartupModule()
 {
+#if WITH_EDITOR
 	// We disallow hot reload for TempoScripting module for the same reason we force TempoScripting
 	// to re-export all the symbols from gRPC and Protobuf: these libraries have lots of static
 	// global state that must exist in exactly one place in the whole executable. That doesn't play
@@ -27,6 +30,7 @@ void FTempoScriptingModule::StartupModule()
 		google::protobuf::DescriptorPool::ResetGeneratedDatabase();
 		google::protobuf::MessageFactory::ResetGeneratedFactory();
 	});
+#endif
 }
 
 void FTempoScriptingModule::ShutdownModule()
