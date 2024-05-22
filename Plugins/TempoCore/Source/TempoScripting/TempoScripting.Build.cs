@@ -40,12 +40,15 @@ public class TempoScripting : TempoModuleRules
 				// Unreal
 				"CoreUObject",
 				"Engine",
-				"HotReload",
 				// Tempo
 				"TempoCoreShared",
 			}
 			);
 		
+		if (Target.bBuildEditor)
+		{
+			PrivateDependencyModuleNames.Add("HotReload");
+		}
 		
 		DynamicallyLoadedModuleNames.AddRange(
 			new string[]
