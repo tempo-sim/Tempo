@@ -22,9 +22,11 @@ fi
 
 # Create and activate the virtual environment to generate the API.
 VENV_DIR="$PROJECT_ROOT/TempoEnv"
-eval "$PYTHON -m venv $VENV_DIR"
+if [ ! -d "$VENV_DIR" ]; then
+  eval "$PYTHON -m venv $VENV_DIR"
+fi
 if [[ "$OSTYPE" = "msys" ]]; then
-  eval "$VENV_DIR/Scripts/activate"
+  source "$VENV_DIR/Scripts/activate"
 else
   source "$VENV_DIR/bin/activate"
 fi
@@ -37,7 +39,7 @@ pip install Jinja2==3.1.3 --quiet --quiet --retries 0
 set -e
 
 # Finally build and install the Tempo API (and its dependencies) to the virtual environment.
-python "$PROJECT_ROOT/Content/Python/API/gen_api.py"
+python "$PROJECT_ROOT/Content/Python/gen_api.py"
 set +e # Again proceed despite errors from pip.
 pip uninstall tempo --yes --quiet --quiet # Uninstall first to remove any stale files
 pip install "$PROJECT_ROOT/Content/Python/API" --quiet --quiet --retries 0

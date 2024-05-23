@@ -66,6 +66,16 @@ public class gRPC : ModuleRules
         PublicDefinitions.Add("GRPC_ALLOW_EXCEPTIONS=0");
         PublicDefinitions.Add("PROTOBUF_ENABLE_DEBUG_LOGGING_MAY_LEAK_PII=0");
         PublicDefinitions.Add("GOOGLE_PROTOBUF_INTERNAL_DONATE_STEAL_INLINE=0");
+        
+        // These definitions are used when building gRPC and must match here so that the headers
+        // we use in the Tempo build match those in the built libraries exactly.
+        PublicDefinitions.Add("ABSL_BUILD_DLL=1");
+        PublicDefinitions.Add("PROTOBUF_USE_DLLS=1");
+        PublicDefinitions.Add("LIBPROTOBUF_EXPORTS=1");
+        PublicDefinitions.Add("LIBPROTOC_EXPORTS=1");
+        PublicDefinitions.Add("GRPC_DLL_EXPORTS=1");
+        PublicDefinitions.Add("GRPCXX_DLL_EXPORTS=1");
+        PublicDefinitions.Add("GPR_DLL_EXPORTS=1");
 
         ModuleDepPaths moduleDepPaths = GatherDeps();
         PublicIncludePaths.AddRange(moduleDepPaths.HeaderPaths);

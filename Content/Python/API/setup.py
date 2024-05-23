@@ -13,7 +13,7 @@ setup(
     packages=["tempo"] + tempo_module_names,
     package_dir={"": "."} | dict([(tempo_module_name, f"./tempo/{tempo_module_name}") for tempo_module_name in tempo_module_names]),
     install_requires=[
-        "grpcio==1.62.1",
+        "grpcio==1.62.2",
         "curio==1.6",
         "asyncio==3.4.3"
     ],

@@ -5,4 +5,4 @@
 # And this file
 !.gitignore
 # And the manifest file
-!manifest.json
+!ttp_manifest.json

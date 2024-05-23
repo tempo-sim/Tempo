@@ -4,7 +4,10 @@ The Tempo Unreal Engine project and plugins
 You will need the following:
 - `jq`
 - `curl`
+- `pip`
 - `python` Version `3.9.0` or greater.
+[!Note]
+On Windows installing Python through the Microsoft Store is recommended since it will also install `pip` and set up the `python` and `python3` aliases correctly, and add everything to your `PATH`. Note that you can install a specific Python version through the Microsoft Store by searching for it.
 - A `~/.netrc` file with a valid GitHub Personal Access Token for the TempoThirdParty repo in this format:
 ```
 machine api.github.com

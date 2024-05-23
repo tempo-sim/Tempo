@@ -13,8 +13,7 @@ fi
 
 PLATFORM=""
 if [[ "$OSTYPE" = "msys" ]]; then
-  echo "Build script only supported on Mac and Linux currently"
-  exit 1
+  PLATFORM="Win64"
 elif [[ "$OSTYPE" = "darwin"* ]]; then
   PLATFORM="Mac"
 elif [[ "$OSTYPE" = "linux-gnu"* ]]; then
@@ -25,4 +24,9 @@ else
 fi
 
 cd "$UNREAL_ENGINE_PATH"
-eval "./Engine/Build/BatchFiles/$PLATFORM/Build.sh TempoEditor Development $PLATFORM -Project=\"$TEMPO_ROOT/Tempo.uproject\" -buildscw"
+if [ "$PLATFORM" = "Win64" ]; then
+  # Windows build script is a little different
+  eval "./Engine/Build/BatchFiles/Build.bat TempoEditor Development $PLATFORM -Project=\"$TEMPO_ROOT/Tempo.uproject\" -WaitMutex -FromMsBuild"
+else
+  eval "./Engine/Build/BatchFiles/$PLATFORM/Build.sh TempoEditor Development $PLATFORM -Project=\"$TEMPO_ROOT/Tempo.uproject\" -buildscw"
+fi

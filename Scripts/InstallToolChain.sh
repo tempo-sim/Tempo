@@ -7,6 +7,12 @@ TEMPO_ROOT=$(realpath "$SCRIPT_DIR/..")
 
 if [[ "$OSTYPE" = "msys" ]]; then
   TOOLCHAIN="TempoVCToolChain.cs"
+  # Check if we can cross compile
+  if [ -z ${LINUX_MULTIARCH_ROOT+x} ]; then
+    LINUX_CC=0
+  else
+    LINUX_CC=1
+  fi
 elif [[ "$OSTYPE" = "darwin"* ]]; then
   TOOLCHAIN="TempoMacToolChain.cs"
 elif [[ "$OSTYPE" = "linux-gnu"* ]]; then
@@ -30,33 +36,54 @@ else
   
   UNREAL_ENGINE_PATH="${UNREAL_ENGINE_PATH//\\//}"
   
-  TOOLCHAIN_SRC="$TEMPO_ROOT/ToolChains/$TOOLCHAIN"
-  TOOLCHAIN_DEST="$UNREAL_ENGINE_PATH/Engine/Source/Programs/UnrealBuildTool/Tempo/$TOOLCHAIN"
+  NEEDS_REBUILD='N'
   
-  NEEDS_REBUILD=0
+  INSTALL_TOOLCHAIN() {
+    TOOLCHAIN_SRC="$TEMPO_ROOT/ToolChains/$1"
+    TOOLCHAIN_DEST="$UNREAL_ENGINE_PATH/Engine/Source/Programs/UnrealBuildTool/Tempo/$1"
+    
+    # Rebuild if toolchain was missing or stale 
+    if [[ ! -f "$TOOLCHAIN_DEST" || $(diff "$TOOLCHAIN_SRC" "$TOOLCHAIN_DEST" | wc -l) -gt 0 ]]; then
+        echo -e "\nInstalling $TOOLCHAIN...\n"
+        mkdir -p "$UNREAL_ENGINE_PATH/Engine/Source/Programs/UnrealBuildTool/Tempo"
+        cp "$TOOLCHAIN_SRC" "$TOOLCHAIN_DEST"
+        NEEDS_REBUILD='Y'
+    fi
+    
+    echo $NEEDS_REBUILD
+  }
   
-  # Rebuild if toolchain was missing or stale 
-  if [[ ! -f "$TOOLCHAIN_DEST" || $(diff "$TOOLCHAIN_SRC" "$TOOLCHAIN_DEST" | wc -l) -gt 0 ]]; then
-      echo -e "\nInstalling $TOOLCHAIN...\n"
-      mkdir -p "$UNREAL_ENGINE_PATH/Engine/Source/Programs/UnrealBuildTool/Tempo"
-      cp "$TOOLCHAIN_SRC" "$TOOLCHAIN_DEST"
-      NEEDS_REBUILD=1
+  INSTALL_MODULE_RULES() {
+    MODULERULES_SRC="$TEMPO_ROOT/ToolChains/TempoModuleRules.cs"
+    MODULERULES_DEST="$UNREAL_ENGINE_PATH/Engine/Source/Programs/UnrealBuildTool/Tempo/TempoModuleRules.cs"
+    
+    # Rebuild if module rules were missing or stale 
+    if [[ ! -f "$MODULERULES_DEST" || $(diff "$MODULERULES_SRC" "$MODULERULES_DEST" | wc -l) -gt 0 ]]; then
+        echo -e "\nInstalling TempoModuleRules.cs...\n"
+        mkdir -p "$UNREAL_ENGINE_PATH/Engine/Source/Programs/UnrealBuildTool/Tempo"
+        cp "$MODULERULES_SRC" "$MODULERULES_DEST"
+        NEEDS_REBUILD='Y'
+    fi
+    
+    echo $NEEDS_REBUILD
+  }
+  
+  NEEDS_REBUILD=$(INSTALL_TOOLCHAIN $TOOLCHAIN)
+  if [ "$OSTYPE" = "msys" ]; then
+    if [ $LINUX_CC -ne 0 ]; then
+      NEEDS_REBUILD=$(INSTALL_TOOLCHAIN "TempoLinuxToolChain.cs")
+    fi
   fi
   
-  MODULERULES_SRC="$TEMPO_ROOT/ToolChains/TempoModuleRules.cs"
-  MODULERULES_DEST="$UNREAL_ENGINE_PATH/Engine/Source/Programs/UnrealBuildTool/Tempo/TempoModuleRules.cs"
+  NEEDS_REBUILD=$(INSTALL_MODULE_RULES)
   
-  # Rebuild if module rules were missing or stale 
-  if [[ ! -f "$MODULERULES_DEST" || $(diff "$MODULERULES_SRC" "$MODULERULES_DEST" | wc -l) -gt 0 ]]; then
-      echo -e "\nInstalling TempoModuleRules.cs...\n"
-      mkdir -p "$UNREAL_ENGINE_PATH/Engine/Source/Programs/UnrealBuildTool/Tempo"
-      cp "$MODULERULES_SRC" "$MODULERULES_DEST"
-      NEEDS_REBUILD=1
+  if [ "$1" = "-force" ]; then
+    NEEDS_REBUILD='Y'
   fi
   
-  if [ "$NEEDS_REBUILD" -eq "0" ]; then
-     # Nothing to do
-     exit;
+  if [ "$NEEDS_REBUILD" = "N" ]; then
+    # Nothing to do
+    exit;
   fi
   
   echo "Rebuilding UnrealBuildTool and AutomationTool...";
