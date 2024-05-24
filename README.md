@@ -1,24 +1,85 @@
 # Tempo
 The Tempo Unreal Engine project and plugins
+## Supported Platforms
+- Ubuntu 22.04
+- MacOS 13.0 (Ventura) or newer
+- Windows 11 Pro
+
 ## Prerequisites
 You will need the following:
 - `jq`
 - `curl`
 - `pip`
 - `python` Version `3.9.0` or greater.
-[!Note]
-On Windows installing Python through the Microsoft Store is recommended since it will also install `pip` and set up the `python` and `python3` aliases correctly, and add everything to your `PATH`. Note that you can install a specific Python version through the Microsoft Store by searching for it.
+> [!Note]
+> On Windows installing Python through the Microsoft Store is recommended since it will also install `pip`, set up the `python` and `python3` aliases correctly, and add everything to your `PATH`. Note that you can install a specific Python version through the Microsoft Store by searching for it.
 - A `~/.netrc` file with a valid GitHub Personal Access Token for the TempoThirdParty repo in this format:
 ```
 machine api.github.com
 login user # Can be anything. Not used, but must be present.
 password <your_token_here>
 ```
+- Unreal Engine 5.3.2
+  - Linux users can download a pre-built Unreal [here](https://www.unrealengine.com/en-US/linux)
+  - Windows and Mac users should use the Epic Games Launcher
+- (Optional, Windows Only) [Linux Cross-Compile Toolchain](https://dev.epicgames.com/documentation/en-us/unreal-engine/linux-development-requirements-for-unreal-engine?application_version=5.3)
+
+## Environment Variables
+- `UNREAL_ENGINE_PATH`: Your Unreal Engine installation directory (the folder containing `Engine`)
+  - On Mac Epic Games Launcher will install to `/Users/Shared/Epic Games/UE_5.3`
+  - On Windows Epic Games Launcher will install to `C:\Program Files\Epic Games\UE_5.3`
+  - On Linux you choose where to install. `~/UE_5.3` is recommended.
+- (Optional, Windows only) `LINUX_MULTIARCH_ROOT`: The extracted toolchain directory (for example `C:\UnrealToolchains\v22_clang-16.0.6-centos7`)
+
 ## Getting Started
+### One-Time Setup
 Run `Setup.sh` (from the Tempo root) once to:
 - Install the Tempo UnrealBuildTool toolchain
 - Install third party dependencies
 - Add git hooks to keep both of the above in sync automatically
+> [!Note]
+> If you run `Setup.sh` again it shouldn't do anything, because it can tell it's already run. You can force it to run if you think you need to with the `-force` flag.
+
+### Building
+Run `Scripts/Build.sh` (from the Tempo root) to build the project.
+
+### Running in Unreal Editor
+Run `Scripts/Run.sh` (from the Tempo root) to open the project in the Unreal Editor.
+
+### Packaging
+Run `Scripts/Package.sh` (from the Tempo root) to package Tempo into a standalone executable. It will end up in a folder `Packaged/<platform>` under the Tempo root.
+> [!Note]
+> On Windows, if you have the cross compile toolchain installed, you can specify the argument `Linux` to package for Linux.
+
+## Using Tempo
+### Configuring
+Tempo has a number of user-configurable settings. These are stored in config files with an "ini" extension.
+On Linux, they can be found under `<packaged_game_root>/Tempo/Saved/Config/<platform>`
+The settings are organized in various categories:
+- `Game.ini`: Project-specific settings, for example:
+```
+[/Script/TempoCoreShared.TempoCoreSettings]
+SimulatedStepsPerSecond=10
+```
+- `Engine.ini`: Engine settings, for example:
+```
+[/Script/Engine.RendererSettings]
+r.RayTracing=True
+```
+- `GameUserSettings.ini`: Settings that are intended to be changed through the UI and then persisted between runs, for example:
+```
+[/Script/Engine.GameUserSettings]
+FullscreenMode=2
+```
+You can find a complete set of available config settings in the the `Config` directory under the Tempo root.
+> [!Warning]
+> Config ini files can not be edited while the Tempo packaged binary is running or the project is open in Unreal Editor.
+
+### Debugging
+Tempo writes logs while running. These are a great starting point for debugging.
+When running in Unreal Editor you can see the logs in the [Output Log](https://dev.epicgames.com/documentation/en-us/unreal-engine/logging-in-unreal-engine) window.
+The packaged binary will write logs to `<packaged_game_root>/Tempo/Saved/Logs`
+
 ## Scripting
 Tempo supports scripting via [Protobuf](https://protobuf.dev/) and [gRPC](https://grpc.io/).
 Any module can define messages and services to allow external clients to control the editor or game.
@@ -26,8 +87,8 @@ To do so, a module must:
 - Derive its module rules from `TempoModuleRules` (instead of `ModuleRules`)
 - Add `TempoScripting` as a dependency
 
-[!IMPORTANT]  
-You must **not** add `gRPC` as a direct dependency of your module. `gRPC` is a public dependency of `TempoScripting`, and you must receive the dependency through it.
+> [!Warning]
+> You must **not** add `gRPC` as a direct dependency of your module. `gRPC` is a public dependency of `TempoScripting`, and you must receive the dependency through it.
 
 ### Defining Messages and Services
 You can add proto files anywhere in your module's Public or Private folder and the corresponding C++ and Python code
