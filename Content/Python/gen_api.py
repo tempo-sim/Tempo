@@ -65,7 +65,8 @@ class TempoMessageDescriptor(TempoObjectDescriptor):
             else:
                 self.field_type = protobuf_types_to_python_types[field_descriptor.type]
             self.label = protobuf_labels_to_python_labels[field_descriptor.label]
-            self.default = field_descriptor.default_value
+            # Special case for str fields. Default ("") will render as nothing, so we add some extra quotes
+            self.default = field_descriptor.default_value if self.field_type != "str" else "''"
             self.name = field_descriptor.name
 
     def __init__(self, module_name, message_descriptor):

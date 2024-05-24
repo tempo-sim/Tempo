@@ -83,7 +83,7 @@ void UTempoSensorServiceSubsystem::GetAvailableSensors(const TempoSensors::Avail
 	ForEachSensor([&Response](const ITempoSensorInterface* Sensor)
 	{
 		auto* AvailableSensor = Response.add_available_sensors();
-		AvailableSensor->set_id(Sensor->GetSensorId());
+		AvailableSensor->set_owner(TCHAR_TO_UTF8(*Sensor->GetOwnerName()));
 		AvailableSensor->set_name(TCHAR_TO_UTF8(*Sensor->GetSensorName()));
 		AvailableSensor->set_rate(Sensor->GetRate());
 		for (const EMeasurementType MeasurementType : Sensor->GetMeasurementTypes())
@@ -101,13 +101,74 @@ void UTempoSensorServiceSubsystem::RequestImages(const RequestType& Request, con
 {
 	check(GetWorld());
 	
+	TMap<FString, TArray<ComponentType*>> OwnersToComponents;
 	for (TObjectIterator<ComponentType> ComponentIt; ComponentIt; ++ComponentIt)
 	{
-		if (ComponentIt->GetSensorId() == Request.sensor_id() && IsValid(*ComponentIt) && ComponentIt->GetWorld() == GetWorld())
+		if (IsValid(*ComponentIt) && ComponentIt->GetWorld() == GetWorld())
 		{
-			ComponentIt->RequestMeasurement(Request, ResponseContinuation);
+			OwnersToComponents.FindOrAdd(ComponentIt->GetOwnerName()).Add(*ComponentIt);
 		}
 	}
+	
+	const FString RequestedOwnerName(UTF8_TO_TCHAR(Request.owner_name().c_str()));
+	const FString RequestedSensorName(UTF8_TO_TCHAR(Request.sensor_name().c_str()));
+
+	// If owner name is not specified and only one owner has this sensor name, assume the client wants that owner
+	if (RequestedOwnerName.IsEmpty())
+	{
+		if (OwnersToComponents.IsEmpty())
+		{
+			ResponseContinuation.ExecuteIfBound(ResponseType(), grpc::Status(grpc::StatusCode::NOT_FOUND, "No sensors found"));
+			return;
+		}
+
+		ComponentType* FoundComponent = nullptr;
+		for (const auto& OwnerComponents : OwnersToComponents)
+		{
+			const TArray<ComponentType*>& Components = OwnerComponents.Value;
+			for (ComponentType* Component : Components)
+			{
+				if (Component->GetSensorName().Equals(RequestedSensorName, ESearchCase::IgnoreCase))
+				{
+					if (FoundComponent)
+					{
+						ResponseContinuation.ExecuteIfBound(ResponseType(), grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "More than one owner with specified sensor name found, owner name required."));
+						return;
+					}
+					FoundComponent = Component;
+				}
+			}
+		}
+
+		if (!FoundComponent)
+		{
+			ResponseContinuation.ExecuteIfBound(ResponseType(), grpc::Status(grpc::StatusCode::NOT_FOUND, "Did not find a sensor with the specified name"));
+			return;
+		}
+		
+		FoundComponent->RequestMeasurement(Request, ResponseContinuation);
+		return;
+	}
+
+	for (const auto& OwnerComponents : OwnersToComponents)
+	{
+		const FString& OwnerName = OwnerComponents.Key;
+		const TArray<ComponentType*>& Components = OwnerComponents.Value;
+		if (OwnerName.Equals(RequestedOwnerName, ESearchCase::IgnoreCase))
+		{
+			for (ComponentType* Component : Components)
+			{
+				if (Component->GetSensorName().Equals(RequestedSensorName, ESearchCase::IgnoreCase))
+				{
+					Component->RequestMeasurement(Request, ResponseContinuation);
+					return;
+				}
+			}
+		}
+	}
+
+	ResponseContinuation.ExecuteIfBound(ResponseType(), grpc::Status(grpc::StatusCode::NOT_FOUND, "Did not find a sensor with the specified owner and name"));
+	return;
 }
 
 void UTempoSensorServiceSubsystem::StreamColorImages(const TempoCamera::ColorImageRequest& Request, const TResponseDelegate<TempoCamera::ColorImage>& ResponseContinuation) const

@@ -8,7 +8,6 @@
 
 UTempoSceneCaptureComponent2D::UTempoSceneCaptureComponent2D()
 {
-	SensorId = ITempoSensorInterface::AllocateSensorId();
 	PrimaryComponentTick.bStartWithTickEnabled = false;
 	ShowFlags.SetAntiAliasing(true);
 	bCaptureEveryFrame = false;
@@ -24,6 +23,18 @@ void UTempoSceneCaptureComponent2D::BeginPlay()
 	InitRenderTarget();
 	
 	GetWorld()->GetTimerManager().SetTimer(TimerHandle, this, &UTempoSceneCaptureComponent2D::MaybeCapture, 1.0 / RateHz, true);
+}
+
+FString UTempoSceneCaptureComponent2D::GetOwnerName() const
+{
+	check(GetOwner());
+
+	return GetOwner()->GetActorNameOrLabel();
+}
+
+FString UTempoSceneCaptureComponent2D::GetSensorName() const
+{
+	return GetName();
 }
 
 void UTempoSceneCaptureComponent2D::UpdateSceneCaptureContents(FSceneInterface* Scene)

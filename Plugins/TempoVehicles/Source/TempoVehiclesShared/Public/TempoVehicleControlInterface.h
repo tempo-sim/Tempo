@@ -31,7 +31,7 @@ class TEMPOVEHICLESSHARED_API ITempoVehicleControlInterface
 	GENERATED_BODY()
 	
 public:
-	virtual int32 GetVehicleId() = 0;
+	virtual FString GetVehicleName() = 0;
 	
 	virtual void HandleDrivingInput(const FNormalizedDrivingInput& Input) = 0;
 };

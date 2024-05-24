@@ -34,14 +34,17 @@ message LabelImage {
 }
 
 message ColorImageRequest {
-  int32 sensor_id = 1;
-  ImageCompressionLevel compression_level = 2;
+  string owner_name = 1;
+  string sensor_name = 2;
+  ImageCompressionLevel compression_level = 3;
 }
 
 message DepthImageRequest {
-  int32 sensor_id = 1;
+  string owner_name = 1;
+  string sensor_name = 2;
 }
 
 message LabelImageRequest {
-  int32 sensor_id = 1;
+  string owner_name = 1;
+  string sensor_name = 2;
 }
