@@ -144,7 +144,7 @@ def generate_tempo_api(root_dir):
                     rel_path = os.path.relpath(file_path, tempo_module_root)
                     module_name = "{}.{}".format(
                         tempo_module_name, os.path.splitext(rel_path)[0].replace(os.sep, '.'))
-                    module = importlib.import_module(f"tempo.{module_name}")
+                    module = importlib.import_module(f"API.tempo.{module_name}")
                     if hasattr(module, "DESCRIPTOR"):
                         module_descriptor = module.DESCRIPTOR
                         all_enums = all_enums | gather_enums(module_name, module_descriptor)
@@ -297,6 +297,6 @@ if __name__ == "__main__":
     if sys.version_info[0] < 3 or sys.version_info[1] < 9:
         raise Exception("This script requires Python 3.9 or greater (found {}.{}.{})"
                         .format(sys.version_info[0], sys.version_info[1], sys.version_info[2]))
-    root_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "tempo")
+    root_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "API", "tempo")
     sys.path.append(root_dir)
     generate_tempo_api(root_dir)

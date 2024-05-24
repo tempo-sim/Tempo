@@ -37,7 +37,11 @@ if [ -d "$GIT_DIR/hooks" ]; then
   ADD_COMMAND_TO_HOOK "$INSTALLTOOLCHAIN" post-merge
 fi
 
-# Run SyncDeps.sh once
+# Run the steps once (adding -force if specified)
+if [ "$1" = "-force" ]; then
+  SYNCDEPS="$SYNCDEPS -force"
+  INSTALLTOOLCHAIN="$INSTALLTOOLCHAIN -force"
+fi
 echo -e "\nInstalling Tempo UnrealBuildTool ToolChain\n"
 eval "$INSTALLTOOLCHAIN"
 echo -e "Checking ThirdParty dependencies...\n"

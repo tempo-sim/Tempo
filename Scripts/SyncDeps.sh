@@ -42,6 +42,7 @@ TEMP=$(mktemp -d)
 
 SYNC_THIRD_PARTY_DEPS () {
   MANIFEST_FILE=$1
+  FORCE_ARG=$2
   THIRD_PARTY_DIR=$(dirname "$MANIFEST_FILE")
   ARTIFACT=$(jq -r '.artifact' < "$MANIFEST_FILE")
   RELEASE_NAME=$(jq -r '.release' < "$MANIFEST_FILE")
@@ -59,14 +60,18 @@ SYNC_THIRD_PARTY_DEPS () {
     # This computes a hash on the filenames, sizes, and modification time of all the third party dependency files.
     # shellcheck disable=SC2038
     cd "$THIRD_PARTY_DIR/$ARTIFACT"
-    MEASURED_HASH=$(find . -mindepth 2 -type f ! -name ".*" -type f | xargs ls -l | cut -c 32- | "$HASHER" | cut -d ' ' -f 1)
+    # awk extracts the size, date modified, and filename fields from the ls -l command
+    MEASURED_HASH=$(find . -mindepth 2 -type f ! -name ".*" -type f | xargs ls -l | awk '{print $5 $6 $7 $8 $9}'| "$HASHER" | cut -d ' ' -f 1)
     
-    if [ "$MEASURED_HASH" = "$EXPECTED_HASH" ]; then
-      # All dependencies satisfied
-      return
+    if [ "$FORCE_ARG" = "-force" ]; then
+      DO_UPDATE="Y"
+    else
+      if [ "$MEASURED_HASH" = "$EXPECTED_HASH" ]; then
+        # All dependencies satisfied
+        return
+      fi
+      read -r -p "Expected third party dependency hash $EXPECTED_HASH but found $MEASURED_HASH in $THIRD_PARTY_DIR/$ARTIFACT. Update? (y/N): " DO_UPDATE
     fi
-    
-    read -r -p "Expected third party dependency hash $EXPECTED_HASH but found $MEASURED_HASH in $THIRD_PARTY_DIR/$ARTIFACT. Update? (y/N): " DO_UPDATE
   fi
   
   echo ""
@@ -107,7 +112,7 @@ SYNC_THIRD_PARTY_DEPS () {
       exit 1
     fi
     
-    echo -e "\nExtracting archive to $THIRD_PARTY_DIR"
+    echo -e "\nExtracting archive to $THIRD_PARTY_DIR\n"
     tar -xf "$ARCHIVE" -C "$THIRD_PARTY_DIR"
   }
   
@@ -119,13 +124,18 @@ SYNC_THIRD_PARTY_DEPS () {
   if [ "$PLATFORM" = "Windows" ] && [ $LINUX_CC -ne 0 ]; then
     PULL_DEPENDENCIES "Linux"
   fi
+  
+  cd "$THIRD_PARTY_DIR/$ARTIFACT"
+  # awk extracts the size, date modified, and filename fields from the ls -l command
+  MEASURED_HASH=$(find . -mindepth 2 -type f ! -name ".*" -type f | xargs ls -l | awk '{print $5 $6 $7 $8 $9}' | "$HASHER" | cut -d ' ' -f 1)
+  echo "New hash: $MEASURED_HASH"
 }
 
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 TEMPO_ROOT=$(realpath "$SCRIPT_DIR/..")
-MANIFEST_FILES=$(find "$TEMPO_ROOT" -name manifest.json)
+MANIFEST_FILES=$(find "$TEMPO_ROOT" -name ttp_manifest.json -path "*Source*")
 for MANIFEST_FILE in "${MANIFEST_FILES[@]}"; do
-  SYNC_THIRD_PARTY_DEPS "$MANIFEST_FILE"
+  SYNC_THIRD_PARTY_DEPS "$MANIFEST_FILE" "$1"
 done
 
 # Cleanup

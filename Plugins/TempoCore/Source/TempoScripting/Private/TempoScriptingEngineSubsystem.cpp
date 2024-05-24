@@ -11,6 +11,16 @@ UTempoScriptingEngineSubsystem::UTempoScriptingEngineSubsystem()
 	ScriptingServer = CreateDefaultSubobject<UTempoScriptingServer>(TEXT("TempoEngineScriptingServer"));
 }
 
+bool UTempoScriptingEngineSubsystem::ShouldCreateSubsystem(UObject* Outer) const
+{
+	if (IsRunningCommandlet())
+	{
+		return false;
+	}
+
+	return Super::ShouldCreateSubsystem(Outer);
+}
+
 void UTempoScriptingEngineSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);

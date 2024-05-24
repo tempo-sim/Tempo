@@ -1,0 +1,10 @@
+{
+  "artifact": "gRPC",
+  "release": "v0.6",
+  "md5_hashes": {
+    "Linux": "01fbcee1ab08451bc0326ae9331d4210",
+    "Mac": "7219ab692bfdc29c5113437952e249ed",
+    "Windows": "d7ffb026b0a9fa27050d7084d6d0d0be",
+    "Windows+Linux": "6dfe4b12254def077ec830941ddffc2b"
+  }
+}
