@@ -26,7 +26,7 @@ fi
 cd "$UNREAL_ENGINE_PATH"
 if [ "$PLATFORM" = "Win64" ]; then
   # Windows build script is a little different
-  eval "./Engine/Build/BatchFiles/Build.bat TempoEditor Development $PLATFORM -Project=\"$TEMPO_ROOT/Tempo.uproject\" -WaitMutex -FromMsBuild"
+  ./Engine/Build/BatchFiles/Build.bat TempoEditor Development $PLATFORM -Project="$TEMPO_ROOT/Tempo.uproject" -WaitMutex -FromMsBuild
 else
-  eval "./Engine/Build/BatchFiles/$PLATFORM/Build.sh TempoEditor Development $PLATFORM -Project=\"$TEMPO_ROOT/Tempo.uproject\" -buildscw"
+  ./Engine/Build/BatchFiles/$PLATFORM/Build.sh TempoEditor Development $PLATFORM -Project="$TEMPO_ROOT/Tempo.uproject" -buildscw
 fi
