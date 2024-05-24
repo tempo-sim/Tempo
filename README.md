@@ -1,5 +1,10 @@
 # Tempo
 The Tempo Unreal Engine project and plugins
+## Supported Platforms
+- Ubuntu 22.04
+- MacOS 13.0 (Ventura) or newer
+- Windows 11 Pro
+
 ## Prerequisites
 You will need the following:
 - `jq`
@@ -14,6 +19,17 @@ machine api.github.com
 login user # Can be anything. Not used, but must be present.
 password <your_token_here>
 ```
+- Unreal Engine 5.3.2
+  - Linux users can download a pre-built Unreal [here](https://www.unrealengine.com/en-US/linux)
+  - Windows and Mac users should use the Epic Games Launcher
+- (Optional, Windows Only) [Linux Cross-Compile Toolchain](https://dev.epicgames.com/documentation/en-us/unreal-engine/linux-development-requirements-for-unreal-engine?application_version=5.3)
+
+## Environment Variables
+- `UNREAL_ENGINE_PATH`: Your Unreal Engine installation directory (the folder containing `Engine`)
+  - On Mac Epic Games Launcher will install to `/Users/Shared/Epic Games/UE_5.3`
+  - On Windows Epic Games Launcher will install to `C:\Program Files\Epic Games\UE_5.3`
+  - On Linux you choose where to install. `~/UE_5.3` is recommended.
+- (Optional, Windows only) `LINUX_MULTIARCH_ROOT`: The extracted toolchain directory (for example `C:\UnrealToolchains\v22_clang-16.0.6-centos7`)
 
 ## Getting Started
 ### One-Time Setup
