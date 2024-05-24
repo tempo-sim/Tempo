@@ -47,6 +47,10 @@ UTempoColorCamera::UTempoColorCamera()
 	MeasurementTypes = { EMeasurementType::COLOR_IMAGE, EMeasurementType::LABEL_IMAGE};
 	RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA8;
 	CaptureSource = ESceneCaptureSource::SCS_FinalColorLDR;
+	PostProcessSettings.AutoExposureMethod = AEM_Basic;
+	PostProcessSettings.AutoExposureSpeedUp = 20.0;
+	PostProcessSettings.AutoExposureSpeedDown = 20.0;
+	PostProcessSettings.MotionBlurAmount = 0.0;
 	if (const TObjectPtr<UMaterialInterface> PostProcessMaterial = GetDefault<UTempoSensorsSettings>()->GetColorAndLabelPostProcessMaterial())
 	{
 		PostProcessSettings.WeightedBlendables.Array.Init(FWeightedBlendable(1.0, PostProcessMaterial.Get()), 1);
