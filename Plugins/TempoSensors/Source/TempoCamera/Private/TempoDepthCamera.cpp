@@ -21,7 +21,7 @@ void UTempoDepthCamera::UpdateSceneCaptureContents(FSceneInterface* Scene)
 
 	if (TextureReadQueue.GetNumPendingTextureReads() > GetDefault<UTempoSensorsSettings>()->GetMaxCameraRenderBufferSize())
 	{
-		UE_LOG(LogTempoCamera, Warning, TEXT("Fell behind while rendering images from camera %s. Dropping image."), *GetSensorName());
+		UE_LOG(LogTempoCamera, Warning, TEXT("Fell behind while rendering images from camera %s owner %s. Dropping image."), *GetSensorName(), *GetOwnerName());
 		return;
 	}
 	

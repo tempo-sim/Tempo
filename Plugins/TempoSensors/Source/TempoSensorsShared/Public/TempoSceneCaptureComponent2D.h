@@ -62,7 +62,7 @@ public:
 	UTempoSceneCaptureComponent2D();
 
 	virtual FString GetOwnerName() const override;
-	
+
 	virtual FString GetSensorName() const override;
 
 	virtual float GetRate() const override { return RateHz; }
