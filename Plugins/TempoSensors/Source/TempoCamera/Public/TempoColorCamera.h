@@ -24,15 +24,13 @@ struct FLabelImageRequest
 	TResponseDelegate<TempoCamera::LabelImage> ResponseContinuation;
 };
 
-// TempoColorCamera is abstract and named "base" because it needs to have a
-// post process material added in a derived Blueprint.
-UCLASS(Abstract, Blueprintable, BlueprintType, ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TEMPOCAMERA_API UTempoColorCameraBase : public UTempoSceneCaptureComponent2D
+UCLASS(Blueprintable, BlueprintType, ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TEMPOCAMERA_API UTempoColorCamera : public UTempoSceneCaptureComponent2D
 {
 	GENERATED_BODY()
 
 public:
-	UTempoColorCameraBase();
+	UTempoColorCamera();
 
 	virtual void UpdateSceneCaptureContents(FSceneInterface* Scene) override;
 

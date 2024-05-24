@@ -112,7 +112,7 @@ void UTempoSensorServiceSubsystem::RequestImages(const RequestType& Request, con
 
 void UTempoSensorServiceSubsystem::StreamColorImages(const TempoCamera::ColorImageRequest& Request, const TResponseDelegate<TempoCamera::ColorImage>& ResponseContinuation) const
 {
-	RequestImages<UTempoColorCameraBase, TempoCamera::ColorImageRequest, TempoCamera::ColorImage>(Request, ResponseContinuation);
+	RequestImages<UTempoColorCamera, TempoCamera::ColorImageRequest, TempoCamera::ColorImage>(Request, ResponseContinuation);
 }
 
 void UTempoSensorServiceSubsystem::StreamDepthImages(const TempoCamera::DepthImageRequest& Request, const TResponseDelegate<TempoCamera::DepthImage>& ResponseContinuation) const
@@ -122,7 +122,7 @@ void UTempoSensorServiceSubsystem::StreamDepthImages(const TempoCamera::DepthIma
 
 void UTempoSensorServiceSubsystem::StreamLabelImages(const TempoCamera::LabelImageRequest& Request, const TResponseDelegate<TempoCamera::LabelImage>& ResponseContinuation) const
 {
-	RequestImages<UTempoColorCameraBase, TempoCamera::LabelImageRequest, TempoCamera::LabelImage>(Request, ResponseContinuation);
+	RequestImages<UTempoColorCamera, TempoCamera::LabelImageRequest, TempoCamera::LabelImage>(Request, ResponseContinuation);
 }
 
 void UTempoSensorServiceSubsystem::Tick(float DeltaTime)

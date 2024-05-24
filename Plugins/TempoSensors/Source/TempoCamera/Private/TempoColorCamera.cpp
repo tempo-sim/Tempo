@@ -42,14 +42,18 @@ int32 QualityFromCompressionLevel(TempoCamera::ImageCompressionLevel Compression
 	}
 }
 
-UTempoColorCameraBase::UTempoColorCameraBase()
+UTempoColorCamera::UTempoColorCamera()
 {
 	MeasurementTypes = { EMeasurementType::COLOR_IMAGE, EMeasurementType::LABEL_IMAGE};
 	RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA8;
 	CaptureSource = ESceneCaptureSource::SCS_FinalColorLDR;
+	if (const TObjectPtr<UMaterialInterface> PostProcessMaterial = GetDefault<UTempoSensorsSettings>()->GetColorAndLabelPostProcessMaterial())
+	{
+		PostProcessSettings.WeightedBlendables.Array.Init(FWeightedBlendable(1.0, PostProcessMaterial.Get()), 1);
+	}
 }
 
-void UTempoColorCameraBase::UpdateSceneCaptureContents(FSceneInterface* Scene)
+void UTempoColorCamera::UpdateSceneCaptureContents(FSceneInterface* Scene)
 {
 	Super::UpdateSceneCaptureContents(Scene);
 
@@ -64,17 +68,17 @@ void UTempoColorCameraBase::UpdateSceneCaptureContents(FSceneInterface* Scene)
 	TextureReadQueue.EnqueuePendingTextureRead(EnqueueTextureRead<FColor>());
 }
 
-void UTempoColorCameraBase::RequestMeasurement(const TempoCamera::ColorImageRequest& Request, const TResponseDelegate<TempoCamera::ColorImage>& ResponseContinuation)
+void UTempoColorCamera::RequestMeasurement(const TempoCamera::ColorImageRequest& Request, const TResponseDelegate<TempoCamera::ColorImage>& ResponseContinuation)
 {
 	PendingColorImageRequests.Add({ Request, ResponseContinuation});
 }
 
-void UTempoColorCameraBase::RequestMeasurement(const TempoCamera::LabelImageRequest& Request, const TResponseDelegate<TempoCamera::LabelImage>& ResponseContinuation)
+void UTempoColorCamera::RequestMeasurement(const TempoCamera::LabelImageRequest& Request, const TResponseDelegate<TempoCamera::LabelImage>& ResponseContinuation)
 {
 	PendingLabelImageRequests.Add({ Request, ResponseContinuation});
 }
 
-void UTempoColorCameraBase::FlushMeasurementResponses()
+void UTempoColorCamera::FlushMeasurementResponses()
 {
 	check(GetWorld());
 	
