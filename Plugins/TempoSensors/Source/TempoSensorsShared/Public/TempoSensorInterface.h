@@ -27,6 +27,10 @@ public:
 	virtual float GetRate() const = 0;
 
 	virtual const TArray<TEnumAsByte<EMeasurementType>>& GetMeasurementTypes() const = 0;
+
+	virtual void FlushMeasurementResponses() = 0;
+
+	virtual bool HasPendingRenderingCommands() = 0;
 	
 	static int32 AllocateSensorId() { return SensorIdAllocator++; }
 	

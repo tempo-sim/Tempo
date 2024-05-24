@@ -4,62 +4,24 @@
 
 #include "TempoCamera/Camera.pb.h"
 
-#include "TempoMeasurementRequestingInterface.h"
 #include "TempoSceneCaptureComponent2D.h"
 
+#include "TempoScriptingServer.h"
+
 #include "CoreMinimal.h"
-#include "ImageUtils.h"
 
 #include "TempoColorCamera.generated.h"
 
-struct FColorImageRequest : FMeasurementRequest<TempoCamera::ColorImage>
+struct FColorImageRequest
 {
-	FColorImageRequest(const TResponseDelegate<TempoCamera::ColorImage>& ResponseContinuationIn, int32 QualityIn)
-		: FMeasurementRequest(ResponseContinuationIn), Quality(QualityIn) {}
-
-	int32 Quality;
-
-	static void CompressImage(TArray64<uint8>& OutData, const TTextureRead<FColor>* TextureRead, int32 Quality);
-	
-	void ExtractAndRespond(const TTextureRead<FColor>* TextureRead, double TransmissionTime) const
-	{
-		TArray64<uint8> ImageData;
-		FImageUtils::CompressImage(ImageData, TEXT("jpg"),
-			FImageView(TextureRead->Image.GetData(), TextureRead->ImageSize.X, TextureRead->ImageSize.Y), Quality);
-		TempoCamera::ColorImage Image;	
-		Image.set_width(TextureRead->ImageSize.X);
-		Image.set_height(TextureRead->ImageSize.Y);
-		Image.set_data(ImageData.GetData(), ImageData.Num());
-		Image.mutable_header()->set_sequence_id(TextureRead->SequenceId);
-		Image.mutable_header()->set_capture_time(TextureRead->CaptureTime);
-		Image.mutable_header()->set_transmission_time(TransmissionTime);
-
-		ResponseContinuation.ExecuteIfBound(Image, grpc::Status_OK);
-	}
+	TempoCamera::ColorImageRequest Request;
+	TResponseDelegate<TempoCamera::ColorImage> ResponseContinuation;
 };
 
-struct FLabelImageRequest : FMeasurementRequest<TempoCamera::LabelImage>
+struct FLabelImageRequest
 {
-	using FMeasurementRequest::FMeasurementRequest;
-	
-	void ExtractAndRespond(const TTextureRead<FColor>* TextureRead, double TransmissionTime) const
-	{
-		TempoCamera::LabelImage Image;	
-		Image.set_width(TextureRead->ImageSize.X);
-		Image.set_height(TextureRead->ImageSize.Y);
-		TArray<uint8> ImageData;
-		ImageData.Reserve(TextureRead->Image.Num());
-		for (const FColor& Pixel : TextureRead->Image)
-		{
-			ImageData.Add(Pixel.A);
-		}
-		Image.set_data(ImageData.GetData(), ImageData.Num());
-		Image.mutable_header()->set_sequence_id(TextureRead->SequenceId);
-		Image.mutable_header()->set_capture_time(TextureRead->CaptureTime);
-		Image.mutable_header()->set_transmission_time(TransmissionTime);
-
-		ResponseContinuation.ExecuteIfBound(Image, grpc::Status_OK);
-	}
+	TempoCamera::LabelImageRequest Request;
+	TResponseDelegate<TempoCamera::LabelImage> ResponseContinuation;
 };
 
 // TempoColorCamera is abstract and named "base" because it needs to have a
@@ -74,5 +36,20 @@ public:
 
 	virtual void UpdateSceneCaptureContents(FSceneInterface* Scene) override;
 
-	static int32 QualityFromCompressionLevel(TempoCamera::ImageCompressionLevel CompressionLevel);
+	void RequestMeasurement(const TempoCamera::ColorImageRequest& Request, const TResponseDelegate<TempoCamera::ColorImage>& ResponseContinuation);
+
+	void RequestMeasurement(const TempoCamera::LabelImageRequest& Request, const TResponseDelegate<TempoCamera::LabelImage>& ResponseContinuation);
+
+	virtual void FlushMeasurementResponses() override;
+
+	virtual bool HasPendingRenderingCommands() override { return TextureReadQueue.HasOutstandingTextureReads(); }
+
+protected:
+	virtual bool HasPendingRequests() const override { return !PendingColorImageRequests.IsEmpty() || !PendingLabelImageRequests.IsEmpty(); }
+	
+private:	
+	TArray<FColorImageRequest> PendingColorImageRequests;
+	TArray<FLabelImageRequest> PendingLabelImageRequests;
+
+	TTextureReadQueue<FColor> TextureReadQueue;
 };
