@@ -33,16 +33,16 @@ fi
 
 set +e # Proceed despite errors from pip. That could just mean the user has no internet connection.
 # Install a few dependencies to the virtual environment. If this list grows put them in a requirements.txt file.
-pip install --upgrade pip --quiet --quiet --retries 0
-pip install protobuf==4.25.3 --quiet --quiet --retries 0
-pip install Jinja2==3.1.3 --quiet --quiet --retries 0
+pip install --upgrade pip --quiet --retries 0 # One --quiet to suppress warnings but show errors
+pip install protobuf==4.25.3 --quiet --retries 0 # One --quiet to suppress warnings but show errors
+pip install Jinja2==3.1.3 --quiet --retries 0 # One --quiet to suppress warnings but show errors
 set -e
 
 # Finally build and install the Tempo API (and its dependencies) to the virtual environment.
-pip uninstall tempo --yes --quiet --quiet # Uninstall first to remove any stale files
+pip uninstall tempo --yes --quiet # Uninstall first to remove any stale files
 python "$PROJECT_ROOT/Content/Python/gen_api.py"
 set +e # Again proceed despite errors from pip.
-pip install "$PROJECT_ROOT/Content/Python/API" --quiet --quiet --retries 0
+pip install "$PROJECT_ROOT/Content/Python/API" --quiet --retries 0 # One --quiet to suppress warnings but show errors
 set -e
 
 echo "Done"
