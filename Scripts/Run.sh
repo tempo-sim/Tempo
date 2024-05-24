@@ -25,7 +25,6 @@ fi
 
 cd "$UNREAL_ENGINE_PATH"
 if [ "$PLATFORM" = "Win64" ]; then
-  # Windows build script is a little different
   eval "./Engine/Binaries/Win64/UnrealEditor-Cmd.exe \"$TEMPO_ROOT/Tempo.uproject\""
 elif [ "$PLATFORM" = "Mac" ]; then
   eval "./Engine/Binaries/Mac/UnrealEditor-Cmd \"$TEMPO_ROOT/Tempo.uproject\""
