@@ -20,7 +20,7 @@ class TEMPOSENSORSSHARED_API ITempoSensorInterface
 	GENERATED_BODY()
 
 public:
-	virtual int32 GetSensorId() const = 0;
+	virtual FString GetOwnerName() const = 0;
 
 	virtual FString GetSensorName() const = 0;
 
@@ -31,9 +31,4 @@ public:
 	virtual void FlushMeasurementResponses() = 0;
 
 	virtual bool HasPendingRenderingCommands() = 0;
-	
-	static int32 AllocateSensorId() { return SensorIdAllocator++; }
-	
-private:
-	static int32 SensorIdAllocator;
 };

@@ -61,9 +61,9 @@ class TEMPOSENSORSSHARED_API UTempoSceneCaptureComponent2D : public USceneCaptur
 public:
 	UTempoSceneCaptureComponent2D();
 
-	virtual int32 GetSensorId() const override { return SensorId; }
-
-	virtual FString GetSensorName() const override { return GetName(); }
+	virtual FString GetOwnerName() const override;
+	
+	virtual FString GetSensorName() const override;
 
 	virtual float GetRate() const override { return RateHz; }
 	
@@ -94,9 +94,6 @@ protected:
 
 	UPROPERTY(EditAnywhere)
 	FIntPoint SizeXY = FIntPoint(960, 540);
-
-	UPROPERTY(VisibleAnywhere)
-	int32 SensorId = 0;
 
 	UPROPERTY(VisibleAnywhere)
 	int32 SequenceId = 0;

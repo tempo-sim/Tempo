@@ -5,11 +5,11 @@ syntax = "proto3";
 import "TempoScripting/Empty.proto";
 
 message CommandableVehiclesResponse{
-  repeated int32 vehicle_id = 1;
+  repeated string vehicle_name = 1;
 }
 
 message DrivingCommandRequest {
-  int32 vehicle_id = 1;
+  string vehicle_name = 1;
   float acceleration = 2;
   float steering = 3;
 }

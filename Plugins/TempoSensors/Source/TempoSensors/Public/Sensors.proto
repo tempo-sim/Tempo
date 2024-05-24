@@ -11,7 +11,7 @@ enum MeasurementType {
 }
 
 message SensorDescriptor {
-  int32 id = 1;
+  string owner = 1;
   string name = 2;
   float rate = 3;
   repeated MeasurementType measurement_types = 4;

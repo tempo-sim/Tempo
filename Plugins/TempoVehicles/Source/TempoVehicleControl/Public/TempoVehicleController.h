@@ -15,7 +15,7 @@ class TEMPOVEHICLECONTROL_API ATempoVehicleController : public AAIController, pu
 	GENERATED_BODY()
 
 public:
-	virtual int32 GetVehicleId() override { return VehicleId; }
+	virtual FString GetVehicleName() override;
 	
 	virtual void HandleDrivingInput(const FNormalizedDrivingInput& Input) override;
 

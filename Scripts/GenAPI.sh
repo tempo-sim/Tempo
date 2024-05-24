@@ -39,9 +39,9 @@ pip install Jinja2==3.1.3 --quiet --quiet --retries 0
 set -e
 
 # Finally build and install the Tempo API (and its dependencies) to the virtual environment.
+pip uninstall tempo --yes --quiet --quiet # Uninstall first to remove any stale files
 python "$PROJECT_ROOT/Content/Python/gen_api.py"
 set +e # Again proceed despite errors from pip.
-pip uninstall tempo --yes --quiet --quiet # Uninstall first to remove any stale files
 pip install "$PROJECT_ROOT/Content/Python/API" --quiet --quiet --retries 0
 set -e
 

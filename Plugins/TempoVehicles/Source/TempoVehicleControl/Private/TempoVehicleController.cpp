@@ -5,6 +5,13 @@
 #include "TempoVehicleMovementInterface.h"
 #include "TempoVehicleControl.h"
 
+FString ATempoVehicleController::GetVehicleName()
+{
+	check(GetPawn());
+
+	return GetPawn()->GetActorNameOrLabel();
+}
+
 void ATempoVehicleController::HandleDrivingInput(const FNormalizedDrivingInput& Input)
 {
 	if (!GetPawn())
