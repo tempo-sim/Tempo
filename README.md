@@ -31,7 +31,7 @@ Run `Scripts/Build.sh` (from the Tempo root) to build the project.
 Run `Scripts/Run.sh` (from the Tempo root) to open the project in the Unreal Editor.
 
 ### Packaging
-Run `Script/Package.sh` (from the Tempo root) to package Tempo into a standalone executable. It will end up in a folder `Packaged/<platform>` under the Tempo root.
+Run `Scripts/Package.sh` (from the Tempo root) to package Tempo into a standalone executable. It will end up in a folder `Packaged/<platform>` under the Tempo root.
 > [!Note]
 > On Windows, if you have the cross compile toolchain installed, you can specify the argument `Linux` to package for Linux.
 
