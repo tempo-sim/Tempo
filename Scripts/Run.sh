@@ -25,11 +25,11 @@ fi
 
 cd "$UNREAL_ENGINE_PATH"
 if [ "$PLATFORM" = "Win64" ]; then
-  eval "./Engine/Binaries/Win64/UnrealEditor-Cmd.exe \"$TEMPO_ROOT/Tempo.uproject\""
+  ./Engine/Binaries/Win64/UnrealEditor-Cmd.exe "$TEMPO_ROOT/Tempo.uproject"
 elif [ "$PLATFORM" = "Mac" ]; then
-  eval "./Engine/Binaries/Mac/UnrealEditor-Cmd \"$TEMPO_ROOT/Tempo.uproject\""
+  ./Engine/Binaries/Mac/UnrealEditor.app/Contents/MacOS/UnrealEditor "$TEMPO_ROOT/Tempo.uproject"
 elif [ "$PLATFORM" = "Linux" ]; then
-  eval "./Engine/Binaries/Linux/UnrealEditor \"$TEMPO_ROOT/Tempo.uproject\""
+  ./Engine/Binaries/Linux/UnrealEditor "$TEMPO_ROOT/Tempo.uproject"
 else
   echo "Unsupported platform"
   exit 1
