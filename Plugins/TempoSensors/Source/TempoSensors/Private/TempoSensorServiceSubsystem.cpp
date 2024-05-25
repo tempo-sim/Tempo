@@ -5,8 +5,7 @@
 #include "TempoSensorInterface.h"
 #include "TempoSensors/Sensors.grpc.pb.h"
 
-#include "TempoColorCamera.h"
-#include "TempoDepthCamera.h"
+#include "TempoCamera.h"
 #include "TempoCamera/Camera.pb.h"
 
 #include "TempoCoreSettings.h"
@@ -96,13 +95,13 @@ void UTempoSensorServiceSubsystem::GetAvailableSensors(const TempoSensors::Avail
 	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
 }
 
-template <typename ComponentType, typename RequestType, typename ResponseType>
+template <typename RequestType, typename ResponseType>
 void UTempoSensorServiceSubsystem::RequestImages(const RequestType& Request, const TResponseDelegate<ResponseType>& ResponseContinuation) const
 {
 	check(GetWorld());
 	
-	TMap<FString, TArray<ComponentType*>> OwnersToComponents;
-	for (TObjectIterator<ComponentType> ComponentIt; ComponentIt; ++ComponentIt)
+	TMap<FString, TArray<UTempoCamera*>> OwnersToComponents;
+	for (TObjectIterator<UTempoCamera> ComponentIt; ComponentIt; ++ComponentIt)
 	{
 		if (IsValid(*ComponentIt) && ComponentIt->GetWorld() == GetWorld())
 		{
@@ -122,11 +121,11 @@ void UTempoSensorServiceSubsystem::RequestImages(const RequestType& Request, con
 			return;
 		}
 
-		ComponentType* FoundComponent = nullptr;
+		UTempoCamera* FoundComponent = nullptr;
 		for (const auto& OwnerComponents : OwnersToComponents)
 		{
-			const TArray<ComponentType*>& Components = OwnerComponents.Value;
-			for (ComponentType* Component : Components)
+			const TArray<UTempoCamera*>& Components = OwnerComponents.Value;
+			for (UTempoCamera* Component : Components)
 			{
 				if (Component->GetSensorName().Equals(RequestedSensorName, ESearchCase::IgnoreCase))
 				{
@@ -153,10 +152,10 @@ void UTempoSensorServiceSubsystem::RequestImages(const RequestType& Request, con
 	for (const auto& OwnerComponents : OwnersToComponents)
 	{
 		const FString& OwnerName = OwnerComponents.Key;
-		const TArray<ComponentType*>& Components = OwnerComponents.Value;
+		const TArray<UTempoCamera*>& Components = OwnerComponents.Value;
 		if (OwnerName.Equals(RequestedOwnerName, ESearchCase::IgnoreCase))
 		{
-			for (ComponentType* Component : Components)
+			for (UTempoCamera* Component : Components)
 			{
 				if (Component->GetSensorName().Equals(RequestedSensorName, ESearchCase::IgnoreCase))
 				{
@@ -173,17 +172,17 @@ void UTempoSensorServiceSubsystem::RequestImages(const RequestType& Request, con
 
 void UTempoSensorServiceSubsystem::StreamColorImages(const TempoCamera::ColorImageRequest& Request, const TResponseDelegate<TempoCamera::ColorImage>& ResponseContinuation) const
 {
-	RequestImages<UTempoColorCamera, TempoCamera::ColorImageRequest, TempoCamera::ColorImage>(Request, ResponseContinuation);
+	RequestImages<TempoCamera::ColorImageRequest, TempoCamera::ColorImage>(Request, ResponseContinuation);
 }
 
 void UTempoSensorServiceSubsystem::StreamDepthImages(const TempoCamera::DepthImageRequest& Request, const TResponseDelegate<TempoCamera::DepthImage>& ResponseContinuation) const
 {
-	RequestImages<UTempoDepthCamera, TempoCamera::DepthImageRequest, TempoCamera::DepthImage>(Request, ResponseContinuation);
+	RequestImages<TempoCamera::DepthImageRequest, TempoCamera::DepthImage>(Request, ResponseContinuation);
 }
 
 void UTempoSensorServiceSubsystem::StreamLabelImages(const TempoCamera::LabelImageRequest& Request, const TResponseDelegate<TempoCamera::LabelImage>& ResponseContinuation) const
 {
-	RequestImages<UTempoColorCamera, TempoCamera::LabelImageRequest, TempoCamera::LabelImage>(Request, ResponseContinuation);
+	RequestImages<TempoCamera::LabelImageRequest, TempoCamera::LabelImage>(Request, ResponseContinuation);
 }
 
 void UTempoSensorServiceSubsystem::Tick(float DeltaTime)

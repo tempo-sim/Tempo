@@ -10,7 +10,7 @@
 
 #include "TempoSceneCaptureComponent2D.generated.h"
 
-template <typename ColorType>
+template <typename PixelType>
 struct TTextureRead
 {
 	TTextureRead(const FIntPoint& ImageSizeIn, int32 SequenceIdIn, double CaptureTimeIn)
@@ -22,27 +22,27 @@ struct TTextureRead
 	FIntPoint ImageSize;
 	int32 SequenceId;
 	double CaptureTime;
-	TArray<ColorType> Image;
+	TArray<PixelType> Image;
 	FRenderCommandFence RenderFence;
 };
 
-template <typename ColorType>
+template <typename PixelType>
 struct TTextureReadQueue
 {
 	int32 GetNumPendingTextureReads() const { return PendingTextureReads.Num(); }
 	
 	bool HasOutstandingTextureReads() const { return !PendingTextureReads.IsEmpty() && !PendingTextureReads[0]->RenderFence.IsFenceComplete(); }
 	
-	void EnqueuePendingTextureRead(TTextureRead<ColorType>* TextureRead)
+	void EnqueuePendingTextureRead(TTextureRead<PixelType>* TextureRead)
 	{
 		PendingTextureReads.Emplace(TextureRead);
 	}
 
-	TUniquePtr<TTextureRead<ColorType>> DequeuePendingTextureRead()
+	TUniquePtr<TTextureRead<PixelType>> DequeuePendingTextureRead()
 	{
 		if (!PendingTextureReads.IsEmpty() && PendingTextureReads[0]->RenderFence.IsFenceComplete())
 		{
-			TUniquePtr<TTextureRead<ColorType>> TextureRead(PendingTextureReads[0].Release());
+			TUniquePtr<TTextureRead<PixelType>> TextureRead(PendingTextureReads[0].Release());
 			PendingTextureReads.RemoveAt(0);
 			return MoveTemp(TextureRead);
 		}
@@ -50,7 +50,7 @@ struct TTextureReadQueue
 	}
 
 private:
-	TArray<TUniquePtr<TTextureRead<ColorType>>> PendingTextureReads;
+	TArray<TUniquePtr<TTextureRead<PixelType>>> PendingTextureReads;
 };
 
 UCLASS(Abstract)
@@ -80,12 +80,15 @@ protected:
 
 	virtual bool HasPendingRequests() const { return false; }
 
-	template <typename ColorType>
-	TTextureRead<ColorType>* EnqueueTextureRead() const;
+	template <typename PixelType>
+	TTextureRead<PixelType>* EnqueueTextureRead() const;
 
 	UPROPERTY(VisibleAnywhere)
 	TEnumAsByte<ETextureRenderTargetFormat> RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA8;
 
+	UPROPERTY(VisibleAnywhere)
+	TEnumAsByte<EPixelFormat> PixelFormatOverride = EPixelFormat::PF_Unknown;
+	
 	UPROPERTY(EditAnywhere)
 	float RateHz = 10.0;
 
@@ -98,45 +101,47 @@ protected:
 	UPROPERTY(VisibleAnywhere)
 	int32 SequenceId = 0;
 	
+	void InitRenderTarget();
+	
 private:
 	void MaybeCapture();
-	
-	void InitRenderTarget();
 	
 	FTimerHandle TimerHandle;
 };
 
-template <typename ColorType>
-TTextureRead<ColorType>* UTempoSceneCaptureComponent2D::EnqueueTextureRead() const
+// Enqueue a read of our full render target, reinterpreting the raw pixels as PixelType.
+// The render target pixel format must already be a compatible type.
+template <typename PixelType>
+TTextureRead<PixelType>* UTempoSceneCaptureComponent2D::EnqueueTextureRead() const
 {
-	TTextureRead<ColorType>* TextureRead = new TTextureRead<ColorType>(
-	SizeXY,
-	SequenceId,
-	GetWorld()->GetTimeSeconds());
+	TTextureRead<PixelType>* TextureRead = new TTextureRead<PixelType>(SizeXY, SequenceId, GetWorld()->GetTimeSeconds());
 	
 	struct FReadSurfaceContext{
-		FRenderTarget* SrcRenderTarget;
-		TArray<ColorType>* OutData;
-		FIntRect Rect;
-		FReadSurfaceDataFlags Flags;
+		FRenderTarget* RenderTarget;
+		TArray<PixelType>* Image;
 	};
 
 	FReadSurfaceContext Context = {
 		TextureTarget->GameThread_GetRenderTargetResource(),
-		&TextureRead->Image,
-		FIntRect(0,0,SizeXY.X, SizeXY.Y),
-		FReadSurfaceDataFlags(RCM_UNorm, CubeFace_MAX)
+		&TextureRead->Image
 	};
 
 	ENQUEUE_RENDER_COMMAND(ReadSurfaceCommand)(
 		[Context](FRHICommandListImmediate& RHICmdList)
 		{
-			RHICmdList.ReadSurfaceData(
-			Context.SrcRenderTarget->GetRenderTargetTexture(),
-			Context.Rect,
-			*Context.OutData,
-			Context.Flags
-		);
+			void* OutBuffer;
+			int32 SurfaceWidth, SurfaceHeight;
+			const FIntPoint TextureSize = Context.RenderTarget->GetSizeXY();
+			RHICmdList.MapStagingSurface(Context.RenderTarget->GetRenderTargetTexture(), OutBuffer, SurfaceWidth, SurfaceHeight);
+			for (int32 Y = 0; Y < SurfaceHeight; ++Y)
+			{
+				for (int32 X = 0; X < TextureSize.X; ++X)
+				{
+					const int32 PixelOffset = X + (Y * SurfaceWidth);
+					(*Context.Image)[X + Y * TextureSize.X] = *(static_cast<PixelType*>(OutBuffer) + PixelOffset);
+				}
+			}
+			RHICmdList.UnmapStagingSurface(Context.RenderTarget->GetRenderTargetTexture());
 	});
 	
 	TextureRead->RenderFence.BeginFence();

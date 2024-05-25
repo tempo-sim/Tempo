@@ -1,16 +1,148 @@
-// Copyright Tempo Simulation, LLC. All Rights Reserved.
+// Copyright Tempo Simulation, LLC. All Rights Reserved
 
 #pragma once
 
+#include "TempoCamera/Camera.pb.h"
+
+#include "TempoSceneCaptureComponent2D.h"
+
+#include "TempoScriptingServer.h"
+
 #include "CoreMinimal.h"
-#include "Modules/ModuleManager.h"
 
-DECLARE_LOG_CATEGORY_EXTERN(LogTempoCamera, Log, All);
+#include "TempoCamera.generated.h"
 
-class FTempoCameraModule : public IModuleInterface
+// 4-byte pixel format where first 3 bytes are color, 4th byte is label.
+struct FCameraPixelNoDepth
 {
+	static constexpr bool bSupportsDepth = false; 
+	
+	FColor Color() const
+	{
+		return FColor(U1, U2, U3);
+	}
+	
+	uint8 Label() const
+	{
+		return U4;
+	}
+
+	// This only exists so it can be used as a template parameter
+	// alongside FCameraPixelWithDepth. We don't want to use a virtual
+	// function because we will call this in a big loop.
+	float Depth(float MinDepth, float MaxDepth, float MaxQuantizedDepth) const
+	{
+		checkf(false, TEXT("FCameraPixelNoDepth does not support depth"));
+		return 0.0;
+	}
+
+private:
+	uint8 U1 = 0;
+	uint8 U2 = 0;
+	uint8 U3 = 0;
+	uint8 U4 = 0;
+};
+
+// 8-byte pixel format where first 3 bytes are color, 4th byte is label.
+// 5th-8th bytes are a uint32 representing discrete depth.
+struct FCameraPixelWithDepth
+{
+	static constexpr bool bSupportsDepth = true;
+	
+	FColor Color() const
+	{
+		return FColor(U1, U2, U3);
+	}
+	
+	uint8 Label() const
+	{
+		return U4;
+	}
+	
+	float Depth(float MinDepth, float MaxDepth, float MaxQuantizedDepth) const
+	{
+		const float DepthFraction = static_cast<float>(U5) / MaxQuantizedDepth;
+		return DepthFraction * (MaxDepth - MinDepth) + MinDepth;
+	}
+
+private:
+	uint8 U1 = 0;
+	uint8 U2 = 0;
+	uint8 U3 = 0;
+	uint8 U4 = 0;
+	uint32 U5 = 0;
+};
+
+struct FColorImageRequest
+{
+	TempoCamera::ColorImageRequest Request;
+	TResponseDelegate<TempoCamera::ColorImage> ResponseContinuation;
+};
+
+struct FLabelImageRequest
+{
+	TempoCamera::LabelImageRequest Request;
+	TResponseDelegate<TempoCamera::LabelImage> ResponseContinuation;
+};
+
+struct FDepthImageRequest
+{
+	TempoCamera::DepthImageRequest Request;
+	TResponseDelegate<TempoCamera::DepthImage> ResponseContinuation;
+};
+
+UCLASS(Blueprintable, BlueprintType, ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TEMPOCAMERA_API UTempoCamera : public UTempoSceneCaptureComponent2D
+{
+	GENERATED_BODY()
+
 public:
-	/** IModuleInterface implementation */
-	virtual void StartupModule() override;
-	virtual void ShutdownModule() override;
+	UTempoCamera();
+
+	virtual void BeginPlay() override;
+
+	virtual void UpdateSceneCaptureContents(FSceneInterface* Scene) override;
+
+	void RequestMeasurement(const TempoCamera::ColorImageRequest& Request, const TResponseDelegate<TempoCamera::ColorImage>& ResponseContinuation);
+
+	void RequestMeasurement(const TempoCamera::LabelImageRequest& Request, const TResponseDelegate<TempoCamera::LabelImage>& ResponseContinuation);
+
+	void RequestMeasurement(const TempoCamera::DepthImageRequest& Request, const TResponseDelegate<TempoCamera::DepthImage>& ResponseContinuation);
+	
+	virtual void FlushMeasurementResponses() override;
+
+	virtual bool HasPendingRenderingCommands() override { return TextureReadQueueNoDepth.HasOutstandingTextureReads() || TextureReadQueueWithDepth.HasOutstandingTextureReads(); }
+
+protected:
+	virtual bool HasPendingRequests() const override {return !PendingColorImageRequests.IsEmpty() || !PendingLabelImageRequests.IsEmpty() || !PendingDepthImageRequests.IsEmpty(); }
+	
+	void SetDepthEnabled(bool bDepthEnabledIn);
+
+	void ApplyDepthEnabled();
+
+	// Whether this camera can measure depth. Disabled when not requested to optimize performance.
+	UPROPERTY(VisibleAnywhere, Category="Depth")
+	bool bDepthEnabled = false;
+
+	// The minimum depth this camera can measure. Will be set to the near clip plane when depth is enabled.
+	UPROPERTY(VisibleAnywhere, Category="Depth", meta=(EditCondition=bHasBegunPlay))
+	float MinDepth = 10.0; // 10cm
+	
+	// The maximum depth this camera can measure. Should be (very roughly) near the maximum viewable depth.
+	UPROPERTY(EditAnywhere, Category="Depth", meta=(EditCondition=bHasBegunPlay))
+	float MaxDepth = 100000.0; // 1km
+
+	UPROPERTY(VisibleAnywhere, Category="Depth")
+	UMaterialInstanceDynamic* DepthPostProcessMaterialInstance = nullptr;
+	
+	// Decode the underlying pixel data into responses and send them.
+	template <typename PixelType>
+	void DecodeAndRespond(const TTextureRead<PixelType>* TextureRead);
+
+	TArray<FColorImageRequest> PendingColorImageRequests;
+	TArray<FLabelImageRequest> PendingLabelImageRequests;
+	TArray<FDepthImageRequest> PendingDepthImageRequests;
+
+	TTextureReadQueue<FCameraPixelNoDepth> TextureReadQueueNoDepth;
+	TTextureReadQueue<FCameraPixelWithDepth> TextureReadQueueWithDepth;
 };
