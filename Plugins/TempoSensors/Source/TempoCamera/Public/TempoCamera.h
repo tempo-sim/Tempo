@@ -59,10 +59,13 @@ struct FCameraPixelWithDepth
 		return U4;
 	}
 	
-	float Depth(float MinDepth, float MaxDepth, float MaxQuantizedDepth) const
+	float Depth(float MinDepth, float MaxDepth, float MaxDiscretizedDepth) const
 	{
-		const float DepthFraction = static_cast<float>(U5) / MaxQuantizedDepth;
-		return DepthFraction * (MaxDepth - MinDepth) + MinDepth;
+		// We discretize inverse depth to give more consistent precision vs depth.
+		// See https://developer.nvidia.com/content/depth-precision-visualized
+		const float InverseDepthFraction = static_cast<float>(U5) / MaxDiscretizedDepth;
+		const float InverseDepth = InverseDepthFraction * (1.0 / MinDepth - 1.0 / MaxDepth) + 1.0 / MaxDepth;
+		return 1.0 / InverseDepth;
 	}
 
 private:
@@ -129,7 +132,7 @@ protected:
 	float MinDepth = 10.0; // 10cm
 	
 	// The maximum depth this camera can measure. Should be (very roughly) near the maximum viewable depth.
-	UPROPERTY(EditAnywhere, Category="Depth", meta=(EditCondition=bHasBegunPlay))
+	UPROPERTY(VisibleAnywhere, Category="Depth", meta=(EditCondition=bHasBegunPlay))
 	float MaxDepth = 100000.0; // 1km
 
 	UPROPERTY(VisibleAnywhere, Category="Depth")

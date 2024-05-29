@@ -71,6 +71,7 @@ void UTempoCamera::BeginPlay()
 	{
 		DepthPostProcessMaterialInstance = UMaterialInstanceDynamic::Create(PostProcessMaterialWithDepth.Get(), this);
 		MinDepth = GEngine->NearClipPlane;
+		MaxDepth = GetDefault<UTempoSensorsSettings>()->GetMaxCameraDepth();
 		DepthPostProcessMaterialInstance->SetScalarParameterValue(TEXT("MinDepth"), MinDepth);
 		DepthPostProcessMaterialInstance->SetScalarParameterValue(TEXT("MaxDepth"), MaxDepth);
 		DepthPostProcessMaterialInstance->SetScalarParameterValue(TEXT("MaxDiscreteDepth"), kMaxDiscreteDepth);
