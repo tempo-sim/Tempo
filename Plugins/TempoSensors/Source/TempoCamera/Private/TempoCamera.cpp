@@ -125,41 +125,41 @@ void UTempoCamera::SetDepthEnabled(bool bDepthEnabledIn)
 
 void UTempoCamera::ApplyDepthEnabled()
 {
+	const UTempoSensorsSettings* TempoSensorsSettings = GetDefault<UTempoSensorsSettings>();
+	check(TempoSensorsSettings);
+	
 	if (bDepthEnabled)
 	{
 		RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA16f;
 		PixelFormatOverride = EPixelFormat::PF_A16B16G16R16;
+		
+		if (const TObjectPtr<UMaterialInterface> PostProcessMaterialWithDepth = GetDefault<UTempoSensorsSettings>()->GetCameraPostProcessMaterialWithDepth())
+		{
+			PostProcessMaterialInstance = UMaterialInstanceDynamic::Create(PostProcessMaterialWithDepth.Get(), this);
+			MinDepth = GEngine->NearClipPlane;
+			MaxDepth = TempoSensorsSettings->GetMaxCameraDepth();
+			PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MinDepth"), MinDepth);
+			PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MaxDepth"), MaxDepth);
+			PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MaxDiscreteDepth"), kMaxDiscreteDepth);
+		}
+		else
+		{
+			UE_LOG(LogTempoCamera, Error, TEXT("PostProcessMaterialWithDepth is not set in TempoSensors settings"));
+		}
 	}
 	else
 	{
+		if (const TObjectPtr<UMaterialInterface> PostProcessMaterialNoDepth = GetDefault<UTempoSensorsSettings>()->GetCameraPostProcessMaterialNoDepth())
+		{
+			PostProcessMaterialInstance = UMaterialInstanceDynamic::Create(PostProcessMaterialNoDepth.Get(), this);
+		}
+		else
+		{
+			UE_LOG(LogTempoCamera, Error, TEXT("PostProcessMaterialWithDepth is not set in TempoSensors settings"));
+		}
+		
 		RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA8;
 		PixelFormatOverride = EPixelFormat::PF_R8G8B8A8;
-	}
-
-	const UTempoSensorsSettings* TempoSensorsSettings = GetDefault<UTempoSensorsSettings>();
-	check(TempoSensorsSettings);
-	
-	if (const TObjectPtr<UMaterialInterface> PostProcessMaterialWithDepth = GetDefault<UTempoSensorsSettings>()->GetCameraPostProcessMaterialWithDepth())
-	{
-		PostProcessMaterialInstance = UMaterialInstanceDynamic::Create(PostProcessMaterialWithDepth.Get(), this);
-		MinDepth = GEngine->NearClipPlane;
-		MaxDepth = TempoSensorsSettings->GetMaxCameraDepth();
-		PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MinDepth"), MinDepth);
-		PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MaxDepth"), MaxDepth);
-		PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MaxDiscreteDepth"), kMaxDiscreteDepth);
-	}
-	else
-	{
-		UE_LOG(LogTempoCamera, Error, TEXT("PostProcessMaterialWithDepth is not set in TempoSensors settings"));
-	}
-
-	if (const TObjectPtr<UMaterialInterface> PostProcessMaterialNoDepth = GetDefault<UTempoSensorsSettings>()->GetCameraPostProcessMaterialNoDepth())
-	{
-		PostProcessMaterialInstance = UMaterialInstanceDynamic::Create(PostProcessMaterialNoDepth.Get(), this);
-	}
-	else
-	{
-		UE_LOG(LogTempoCamera, Error, TEXT("PostProcessMaterialWithDepth is not set in TempoSensors settings"));
 	}
 
 	UDataTable* SemanticLabelTable = GetDefault<UTempoSensorsSettings>()->GetSemanticLabelTable();
@@ -185,19 +185,19 @@ void UTempoCamera::ApplyDepthEnabled()
 			}
 		});
 	}
-
-	if (PostProcessMaterialInstance && OverridableLabel.IsSet() && OverridingLabel.IsSet())
-	{
-		PostProcessMaterialInstance->SetScalarParameterValue(TEXT("OverridableLabel"), OverridableLabel.GetValue());
-		PostProcessMaterialInstance->SetScalarParameterValue(TEXT("OverridingLabel"), OverridingLabel.GetValue());
-	}
-	else
-	{
-		PostProcessMaterialInstance->SetScalarParameterValue(TEXT("OverridingLabel"), 0.0);
-	}
 	
 	if (PostProcessMaterialInstance)
 	{
+		if (OverridableLabel.IsSet() && OverridingLabel.IsSet())
+		{
+			PostProcessMaterialInstance->SetScalarParameterValue(TEXT("OverridableLabel"), OverridableLabel.GetValue());
+			PostProcessMaterialInstance->SetScalarParameterValue(TEXT("OverridingLabel"), OverridingLabel.GetValue());
+		}
+		else
+		{
+			PostProcessMaterialInstance->SetScalarParameterValue(TEXT("OverridingLabel"), 0.0);
+
+		}
 		PostProcessSettings.WeightedBlendables.Array.Empty();
 		PostProcessSettings.WeightedBlendables.Array.Init(FWeightedBlendable(1.0, PostProcessMaterialInstance), 1);
 	}
