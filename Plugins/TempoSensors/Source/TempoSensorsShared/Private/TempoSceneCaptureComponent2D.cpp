@@ -20,8 +20,6 @@ void UTempoSceneCaptureComponent2D::BeginPlay()
 {
 	Super::BeginPlay();
 	
-	InitRenderTarget();
-	
 	GetWorld()->GetTimerManager().SetTimer(TimerHandle, this, &UTempoSceneCaptureComponent2D::MaybeCapture, 1.0 / RateHz, true);
 }
 
@@ -70,9 +68,16 @@ void UTempoSceneCaptureComponent2D::InitRenderTarget()
 	UTextureRenderTarget2D* RenderTarget2D = NewObject<UTextureRenderTarget2D>(this);
 	
 	RenderTarget2D->TargetGamma = GEngine->GetDisplayGamma();
-	RenderTarget2D->InitAutoFormat(SizeXY.X, SizeXY.Y);
 	RenderTarget2D->RenderTargetFormat = RenderTargetFormat;
 	RenderTarget2D->bGPUSharedFlag = true;
+	if (PixelFormatOverride == EPixelFormat::PF_Unknown)
+	{
+		RenderTarget2D->InitAutoFormat(SizeXY.X, SizeXY.Y);
+	}
+	else
+	{
+		RenderTarget2D->InitCustomFormat(SizeXY.X, SizeXY.Y, PixelFormatOverride, true);
+	}
 	
 	TextureTarget = RenderTarget2D;
 }

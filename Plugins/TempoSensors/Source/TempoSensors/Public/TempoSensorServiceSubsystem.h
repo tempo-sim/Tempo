@@ -53,6 +53,6 @@ private:
 
 	void ForEachSensor(const TFunction<bool(class ITempoSensorInterface*)>& Callback) const;
 
-	template <typename ComponentType, typename RequestType, typename ResponseType>
+	template <typename RequestType, typename ResponseType>
 	void RequestImages(const RequestType& Request, const TResponseDelegate<ResponseType>& ResponseContinuation) const;
 };
