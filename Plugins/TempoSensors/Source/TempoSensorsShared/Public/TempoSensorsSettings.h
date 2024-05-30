@@ -20,6 +20,8 @@ public:
 	TObjectPtr<UMaterialInterface> GetCameraPostProcessMaterialNoDepth() const { return CameraPostProcessMaterialNoDepth.LoadSynchronous(); }
 	TObjectPtr<UMaterialInterface> GetCameraPostProcessMaterialWithDepth() const { return CameraPostProcessMaterialWithDepth.LoadSynchronous(); }
 	float GetMaxCameraDepth() const { return MaxCameraDepth; }
+	FName GetOverridableLabelRowName() const { return OverridableLabelRowName; }
+	FName GetOverridingLabelRowName() const { return OverridingLabelRowName; }
 	int32 GetMaxCameraRenderBufferSize() const { return MaxCameraRenderBufferSize; }
 
 private:
@@ -41,4 +43,12 @@ private:
 	// The max number of frames per camera to buffer before dropping.
 	UPROPERTY(EditAnywhere, Config, Category="Camera", AdvancedDisplay)
 	int32 MaxCameraRenderBufferSize = 2;
+
+	// This special row can be overriden by a value passed through the subsurface color.
+	UPROPERTY(EditAnywhere, Config, Category="Camera")
+	FName OverridableLabelRowName = NAME_None;
+
+	// Anywhere a non-zero subsurface color is found on an object of type OverridableLabelRowName, this label will be used instead.
+	UPROPERTY(EditAnywhere, Config, Category="Camera")
+	FName OverridingLabelRowName = NAME_None;
 };

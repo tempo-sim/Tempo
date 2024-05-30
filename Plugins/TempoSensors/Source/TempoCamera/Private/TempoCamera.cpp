@@ -8,6 +8,7 @@
 
 #include "Engine/TextureRenderTarget2D.h"
 #include "ImageUtils.h"
+#include "TempoLabelTypes.h"
 
 namespace
 {
@@ -66,20 +67,6 @@ UTempoCamera::UTempoCamera()
 void UTempoCamera::BeginPlay()
 {
 	Super::BeginPlay();
-	
-	if (const TObjectPtr<UMaterialInterface> PostProcessMaterialWithDepth = GetDefault<UTempoSensorsSettings>()->GetCameraPostProcessMaterialWithDepth())
-	{
-		DepthPostProcessMaterialInstance = UMaterialInstanceDynamic::Create(PostProcessMaterialWithDepth.Get(), this);
-		MinDepth = GEngine->NearClipPlane;
-		MaxDepth = GetDefault<UTempoSensorsSettings>()->GetMaxCameraDepth();
-		DepthPostProcessMaterialInstance->SetScalarParameterValue(TEXT("MinDepth"), MinDepth);
-		DepthPostProcessMaterialInstance->SetScalarParameterValue(TEXT("MaxDepth"), MaxDepth);
-		DepthPostProcessMaterialInstance->SetScalarParameterValue(TEXT("MaxDiscreteDepth"), kMaxDiscreteDepth);
-	}
-	else
-	{
-		UE_LOG(LogTempoCamera, Error, TEXT("PostProcessMaterialWithDepth is not set in TempoSensors settings"));
-	}
 
 	ApplyDepthEnabled();
 }
@@ -138,30 +125,85 @@ void UTempoCamera::SetDepthEnabled(bool bDepthEnabledIn)
 
 void UTempoCamera::ApplyDepthEnabled()
 {
-	PostProcessSettings.WeightedBlendables.Array.Empty();
+	const UTempoSensorsSettings* TempoSensorsSettings = GetDefault<UTempoSensorsSettings>();
+	check(TempoSensorsSettings);
+	
 	if (bDepthEnabled)
 	{
 		RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA16f;
 		PixelFormatOverride = EPixelFormat::PF_A16B16G16R16;
-		if (DepthPostProcessMaterialInstance)
+		
+		if (const TObjectPtr<UMaterialInterface> PostProcessMaterialWithDepth = GetDefault<UTempoSensorsSettings>()->GetCameraPostProcessMaterialWithDepth())
 		{
-			PostProcessSettings.WeightedBlendables.Array.Init(FWeightedBlendable(1.0, DepthPostProcessMaterialInstance), 1);
+			PostProcessMaterialInstance = UMaterialInstanceDynamic::Create(PostProcessMaterialWithDepth.Get(), this);
+			MinDepth = GEngine->NearClipPlane;
+			MaxDepth = TempoSensorsSettings->GetMaxCameraDepth();
+			PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MinDepth"), MinDepth);
+			PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MaxDepth"), MaxDepth);
+			PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MaxDiscreteDepth"), kMaxDiscreteDepth);
 		}
 		else
 		{
-			UE_LOG(LogTempoCamera, Error, TEXT("DepthPostProcessMaterialInstance is not set. Disabling depth."));
-			bDepthEnabled = false;
-			ApplyDepthEnabled();
+			UE_LOG(LogTempoCamera, Error, TEXT("PostProcessMaterialWithDepth is not set in TempoSensors settings"));
 		}
 	}
 	else
 	{
-		RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA8;
-		PixelFormatOverride = EPixelFormat::PF_R8G8B8A8;
 		if (const TObjectPtr<UMaterialInterface> PostProcessMaterialNoDepth = GetDefault<UTempoSensorsSettings>()->GetCameraPostProcessMaterialNoDepth())
 		{
-			PostProcessSettings.WeightedBlendables.Array.Init(FWeightedBlendable(1.0, PostProcessMaterialNoDepth.Get()), 1);
+			PostProcessMaterialInstance = UMaterialInstanceDynamic::Create(PostProcessMaterialNoDepth.Get(), this);
 		}
+		else
+		{
+			UE_LOG(LogTempoCamera, Error, TEXT("PostProcessMaterialWithDepth is not set in TempoSensors settings"));
+		}
+		
+		RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA8;
+		PixelFormatOverride = EPixelFormat::PF_R8G8B8A8;
+	}
+
+	UDataTable* SemanticLabelTable = GetDefault<UTempoSensorsSettings>()->GetSemanticLabelTable();
+	FName OverridableLabelRowName = TempoSensorsSettings->GetOverridableLabelRowName();
+	FName OverridingLabelRowName = TempoSensorsSettings->GetOverridingLabelRowName();
+	TOptional<int32> OverridableLabel;
+	TOptional<int32> OverridingLabel;
+	if (!OverridableLabelRowName.IsNone())
+	{
+		SemanticLabelTable->ForeachRow<FSemanticLabel>(TEXT(""),
+			[&OverridableLabelRowName,
+				&OverridingLabelRowName,
+				&OverridableLabel,
+				&OverridingLabel](const FName& Key, const FSemanticLabel& Value)
+		{
+			if (Key == OverridableLabelRowName)
+			{
+				OverridableLabel = Value.Label;
+			}
+			if (Key == OverridingLabelRowName)
+			{
+				OverridingLabel = Value.Label;
+			}
+		});
+	}
+	
+	if (PostProcessMaterialInstance)
+	{
+		if (OverridableLabel.IsSet() && OverridingLabel.IsSet())
+		{
+			PostProcessMaterialInstance->SetScalarParameterValue(TEXT("OverridableLabel"), OverridableLabel.GetValue());
+			PostProcessMaterialInstance->SetScalarParameterValue(TEXT("OverridingLabel"), OverridingLabel.GetValue());
+		}
+		else
+		{
+			PostProcessMaterialInstance->SetScalarParameterValue(TEXT("OverridingLabel"), 0.0);
+
+		}
+		PostProcessSettings.WeightedBlendables.Array.Empty();
+		PostProcessSettings.WeightedBlendables.Array.Init(FWeightedBlendable(1.0, PostProcessMaterialInstance), 1);
+	}
+	else
+	{
+		UE_LOG(LogTempoCamera, Error, TEXT("PostProcessMaterialInstance is not set."));
 	}
 
 	InitRenderTarget();

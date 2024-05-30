@@ -135,8 +135,8 @@ protected:
 	UPROPERTY(VisibleAnywhere, Category="Depth", meta=(EditCondition=bHasBegunPlay))
 	float MaxDepth = 100000.0; // 1km
 
-	UPROPERTY(VisibleAnywhere, Category="Depth")
-	UMaterialInstanceDynamic* DepthPostProcessMaterialInstance = nullptr;
+	UPROPERTY(VisibleAnywhere)
+	UMaterialInstanceDynamic* PostProcessMaterialInstance= nullptr;
 	
 	// Decode the underlying pixel data into responses and send them.
 	template <typename PixelType>

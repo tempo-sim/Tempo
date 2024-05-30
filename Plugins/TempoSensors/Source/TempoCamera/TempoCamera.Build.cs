@@ -39,6 +39,7 @@ public class TempoCamera : TempoModuleRules
 				"RenderCore",
 				"RHI",
 				// Tempo
+				"TempoLabels",
 				"TempoSensorsShared",
 				"TempoScripting",
 				"TempoCoreShared",
