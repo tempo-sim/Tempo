@@ -17,15 +17,11 @@ struct FCameraPixelNoDepth
 {
 	static constexpr bool bSupportsDepth = false; 
 	
-	FColor Color() const
-	{
-		return FColor(U1, U2, U3);
-	}
+	uint8 B() const { return U1; }
+	uint8 G() const { return U2; }
+	uint8 R() const { return U3; }
 	
-	uint8 Label() const
-	{
-		return U4;
-	}
+	uint8 Label() const { return U4; }
 
 	// This only exists so it can be used as a template parameter
 	// alongside FCameraPixelWithDepth. We don't want to use a virtual
@@ -49,15 +45,11 @@ struct FCameraPixelWithDepth
 {
 	static constexpr bool bSupportsDepth = true;
 	
-	FColor Color() const
-	{
-		return FColor(U1, U2, U3);
-	}
+	uint8 B() const { return U1; }
+	uint8 G() const { return U2; }
+	uint8 R() const { return U3; }
 	
-	uint8 Label() const
-	{
-		return U4;
-	}
+	uint8 Label() const { return U4; }
 	
 	float Depth(float MinDepth, float MaxDepth, float MaxDiscretizedDepth) const
 	{

@@ -7,7 +7,6 @@
 #include "TempoSensorsSettings.h"
 
 #include "Engine/TextureRenderTarget2D.h"
-#include "ImageUtils.h"
 #include "TempoLabelTypes.h"
 
 namespace
@@ -15,39 +14,6 @@ namespace
 	// This is the largest float less than the largest uint32 (2^32 - 1).
 	// We use it to discretize the depth buffer into a uint32 pixel.
 	constexpr float kMaxDiscreteDepth = 4294967040.0;
-}
-
-int32 QualityFromCompressionLevel(TempoCamera::ImageCompressionLevel CompressionLevel)
-{
-	// See FJpegImageWrapper::Compress() for an explanation of these levels
-	switch (CompressionLevel)
-	{
-	case TempoCamera::MIN:
-		{
-			return 100;
-		}
-	case TempoCamera::LOW:
-		{
-			return 85;
-		}
-	case TempoCamera::MID:
-		{
-			return 70;
-		}
-	case TempoCamera::HIGH:
-		{
-			return 55;
-		}
-	case TempoCamera::MAX:
-		{
-			return 40;
-		}
-	default:
-		{
-			checkf(false, TEXT("Unhandled compression level"));
-			return 0;
-		}
-	}
 }
 
 UTempoCamera::UTempoCamera()
@@ -60,7 +26,7 @@ UTempoCamera::UTempoCamera()
 	PostProcessSettings.MotionBlurAmount = 0.0;
 
 	// No depth settings
-	RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA8;
+	RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA8; // Corresponds to PF_B8G8R8A8
 	PixelFormatOverride = EPixelFormat::PF_Unknown;
 }
 
@@ -162,8 +128,8 @@ void UTempoCamera::ApplyDepthEnabled()
 			UE_LOG(LogTempoCamera, Error, TEXT("PostProcessMaterialWithDepth is not set in TempoSensors settings"));
 		}
 		
-		RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA8;
-		PixelFormatOverride = EPixelFormat::PF_R8G8B8A8;
+		RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA8; // Corresponds to PF_B8G8R8A8
+		PixelFormatOverride = EPixelFormat::PF_Unknown;
 	}
 
 	UDataTable* SemanticLabelTable = GetDefault<UTempoSensorsSettings>()->GetSemanticLabelTable();
@@ -220,33 +186,25 @@ void UTempoCamera::DecodeAndRespond(const TTextureRead<PixelType>* TextureRead)
 
 	if (!PendingColorImageRequests.IsEmpty())
 	{
-		// Cache to deduplicate compression for requests with the same quality.
-		TMap<int32, TOptional<TempoCamera::ColorImage>> ColorImageCache;
+		TempoCamera::ColorImage ColorImage;
+		ColorImage.set_width(TextureRead->ImageSize.X);
+		ColorImage.set_height(TextureRead->ImageSize.Y);
+		std::vector<char> ImageData;
+		ImageData.reserve(TextureRead->Image.Num() * 3);
+		for (const PixelType& Pixel : TextureRead->Image)
+		{
+			ImageData.push_back(Pixel.B());
+			ImageData.push_back(Pixel.G());
+			ImageData.push_back(Pixel.R());
+		}
+		ColorImage.mutable_data()->assign(ImageData.begin(), ImageData.end());
+		ColorImage.mutable_header()->set_sequence_id(TextureRead->SequenceId);
+		ColorImage.mutable_header()->set_capture_time(TextureRead->CaptureTime);
+		ColorImage.mutable_header()->set_transmission_time(GetWorld()->GetTimeSeconds());
 
 		for (auto ColorImageRequestIt = PendingColorImageRequests.CreateIterator(); ColorImageRequestIt; ++ColorImageRequestIt)
 		{
-			const int32 Quality = QualityFromCompressionLevel(ColorImageRequestIt->Request.compression_level());
-			TOptional<TempoCamera::ColorImage>& ColorImage = ColorImageCache.FindOrAdd(Quality);
-			if (!ColorImage.IsSet())
-			{
-				ColorImage = TempoCamera::ColorImage();
-				ColorImage->set_width(TextureRead->ImageSize.X);
-				ColorImage->set_height(TextureRead->ImageSize.Y);
-				TArray64<uint8> ImageData;
-				TArray<FColor> ColorData;
-				ColorData.Reserve(TextureRead->ImageSize.X* TextureRead->ImageSize.Y);
-				for (const PixelType& Pixel : TextureRead->Image)
-				{
-					ColorData.Add(Pixel.Color());
-				}
-				FImageUtils::CompressImage(ImageData, TEXT("jpg"),
-					FImageView(ColorData.GetData(), TextureRead->ImageSize.X, TextureRead->ImageSize.Y), Quality);
-				ColorImage->set_data(ImageData.GetData(), ImageData.Num());
-				ColorImage->mutable_header()->set_sequence_id(TextureRead->SequenceId);
-				ColorImage->mutable_header()->set_capture_time(TextureRead->CaptureTime);
-				ColorImage->mutable_header()->set_transmission_time(GetWorld()->GetTimeSeconds());
-			}
-			ColorImageRequestIt->ResponseContinuation.ExecuteIfBound(ColorImage.GetValue(), grpc::Status_OK);
+			ColorImageRequestIt->ResponseContinuation.ExecuteIfBound(ColorImage, grpc::Status_OK);
 			ColorImageRequestIt.RemoveCurrent();
 		}
 	}
