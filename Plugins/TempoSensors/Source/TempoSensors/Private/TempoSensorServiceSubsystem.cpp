@@ -55,7 +55,7 @@ TempoSensors::MeasurementType ToProtoMeasurementType(EMeasurementType ImageType)
 	}
 }
 
-void UTempoSensorServiceSubsystem::ForEachSensor(const TFunction<bool(ITempoSensorInterface*)>& Callback) const
+void UTempoSensorServiceSubsystem::ForEachSensor(const TFunction<void(ITempoSensorInterface*)>& Callback) const
 {
 	check(GetWorld());
 	
@@ -66,10 +66,7 @@ void UTempoSensorServiceSubsystem::ForEachSensor(const TFunction<bool(ITempoSens
 		{
 			if (IsValid(Component) && Component->GetWorld() == GetWorld())
 			{
-				if (Callback(Sensor))
-				{
-					break;
-				}
+				Callback(Sensor);
 			}
 		}
 	}
@@ -89,7 +86,6 @@ void UTempoSensorServiceSubsystem::GetAvailableSensors(const TempoSensors::Avail
 		{
 			AvailableSensor->add_measurement_types(ToProtoMeasurementType(MeasurementType));
 		}
-		return false; // Don't break out of foreach
 	});
 
 	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
@@ -193,21 +189,15 @@ void UTempoSensorServiceSubsystem::Tick(float DeltaTime)
 	// This guarantees they will be sent out in the same frame when they were captured.
 	if (GetDefault<UTempoCoreSettings>()->GetTimeMode() == ETimeMode::FixedStep)
 	{
-		ForEachSensor([](ITempoSensorInterface* Sensor)
+		ForEachSensor([](const ITempoSensorInterface* Sensor)
 		{
-			if (Sensor->HasPendingRenderingCommands())
-			{
-				FlushRenderingCommands();
-				return true; // Break out of foreach
-			}
-			return false; // Don't break out of foreach
+			Sensor->FlushPendingRenderingCommands();
 		});
 	}
 
 	ForEachSensor([](ITempoSensorInterface* Sensor)
 	{
 		Sensor->FlushMeasurementResponses();
-		return false; // Don't break out of foreach
 	});
 }
 

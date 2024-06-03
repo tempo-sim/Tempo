@@ -271,3 +271,9 @@ void UTempoCamera::FlushMeasurementResponses()
 		DecodeAndRespond(TextureRead.Get());
 	}
 }
+
+void UTempoCamera::FlushPendingRenderingCommands() const
+{
+	TextureReadQueueNoDepth.FlushPendingTextureReads();
+	TextureReadQueueWithDepth.FlushPendingTextureReads();
+}

@@ -51,7 +51,7 @@ private:
 
 	void StreamLabelImages(const TempoCamera::LabelImageRequest& Request, const TResponseDelegate<TempoCamera::LabelImage>& ResponseContinuation) const;
 
-	void ForEachSensor(const TFunction<bool(class ITempoSensorInterface*)>& Callback) const;
+	void ForEachSensor(const TFunction<void(class ITempoSensorInterface*)>& Callback) const;
 
 	template <typename RequestType, typename ResponseType>
 	void RequestImages(const RequestType& Request, const TResponseDelegate<ResponseType>& ResponseContinuation) const;

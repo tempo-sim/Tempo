@@ -31,4 +31,6 @@ public:
 	virtual void FlushMeasurementResponses() = 0;
 
 	virtual bool HasPendingRenderingCommands() = 0;
+
+	virtual void FlushPendingRenderingCommands() const = 0;
 };

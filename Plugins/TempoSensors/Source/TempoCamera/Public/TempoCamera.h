@@ -108,6 +108,8 @@ public:
 
 	virtual bool HasPendingRenderingCommands() override { return TextureReadQueueNoDepth.HasOutstandingTextureReads() || TextureReadQueueWithDepth.HasOutstandingTextureReads(); }
 
+	virtual void FlushPendingRenderingCommands() const override;
+	
 protected:
 	virtual bool HasPendingRequests() const override {return !PendingColorImageRequests.IsEmpty() || !PendingLabelImageRequests.IsEmpty() || !PendingDepthImageRequests.IsEmpty(); }
 	
