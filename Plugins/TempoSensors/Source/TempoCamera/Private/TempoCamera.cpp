@@ -180,96 +180,114 @@ void UTempoCamera::ApplyDepthEnabled()
 }
 
 template <typename PixelType>
-void UTempoCamera::DecodeAndRespond(const TTextureRead<PixelType>* TextureRead)
+TFuture<void> UTempoCamera::DecodeAndRespond(TUniquePtr<TTextureRead<PixelType>> TextureRead)
 {
-	check(GetWorld());
+	const double TransmissionTime = GetWorld()->GetTimeSeconds();
 
-	if (!PendingColorImageRequests.IsEmpty())
+	TFuture<void> Future = Async(EAsyncExecution::TaskGraph, [
+		TextureRead = MoveTemp(TextureRead),
+		TransmissionTime, MinDepthCpy = MinDepth, MaxDepthCpy = MaxDepth,
+		ColorImageRequests = PendingColorImageRequests,
+		LabelImageRequests = PendingLabelImageRequests,
+		DepthImageRequests = PendingDepthImageRequests
+		]
+		{
+			if (!ColorImageRequests.IsEmpty())
+			{
+				TempoCamera::ColorImage ColorImage;
+				ColorImage.set_width(TextureRead->ImageSize.X);
+				ColorImage.set_height(TextureRead->ImageSize.Y);
+				std::vector<char> ImageData;
+				ImageData.reserve(TextureRead->Image.Num() * 3);
+				for (const PixelType& Pixel : TextureRead->Image)
+				{
+					ImageData.push_back(Pixel.B());
+					ImageData.push_back(Pixel.G());
+					ImageData.push_back(Pixel.R());
+				}
+				ColorImage.mutable_data()->assign(ImageData.begin(), ImageData.end());
+				ColorImage.mutable_header()->set_sequence_id(TextureRead->SequenceId);
+				ColorImage.mutable_header()->set_capture_time(TextureRead->CaptureTime);
+				ColorImage.mutable_header()->set_transmission_time(TransmissionTime);
+		
+				for (auto ColorImageRequestIt = ColorImageRequests.CreateConstIterator(); ColorImageRequestIt; ++ColorImageRequestIt)
+				{
+					ColorImageRequestIt->ResponseContinuation.ExecuteIfBound(ColorImage, grpc::Status_OK);
+				}
+			}
+			
+			if (!LabelImageRequests.IsEmpty())
+			{
+				TempoCamera::LabelImage LabelImage;
+				LabelImage.set_width(TextureRead->ImageSize.X);
+				LabelImage.set_height(TextureRead->ImageSize.Y);
+				std::vector<char> ImageData;
+				ImageData.reserve(TextureRead->Image.Num());
+				for (const PixelType& Pixel : TextureRead->Image)
+				{
+					ImageData.push_back(Pixel.Label());
+				}
+				LabelImage.mutable_data()->assign(ImageData.begin(), ImageData.end());
+				LabelImage.mutable_header()->set_sequence_id(TextureRead->SequenceId);
+				LabelImage.mutable_header()->set_capture_time(TextureRead->CaptureTime);
+				LabelImage.mutable_header()->set_transmission_time(TransmissionTime);
+		
+				for (auto LabelImageRequestIt = LabelImageRequests.CreateConstIterator(); LabelImageRequestIt; ++LabelImageRequestIt)
+				{
+					LabelImageRequestIt->ResponseContinuation.ExecuteIfBound(LabelImage, grpc::Status_OK);
+				}
+			}
+		
+			if (!DepthImageRequests.IsEmpty() && PixelType::bSupportsDepth)
+			{
+				TempoCamera::DepthImage DepthImage;
+				DepthImage.set_width(TextureRead->ImageSize.X);
+				DepthImage.set_height(TextureRead->ImageSize.Y);
+				DepthImage.mutable_depths()->Reserve(TextureRead->ImageSize.X * TextureRead->ImageSize.Y);
+				for (const PixelType& Pixel : TextureRead->Image)
+				{
+					DepthImage.add_depths(Pixel.Depth(MinDepthCpy, MaxDepthCpy, kMaxDiscreteDepth));
+				}
+				DepthImage.mutable_header()->set_sequence_id(TextureRead->SequenceId);
+				DepthImage.mutable_header()->set_capture_time(TextureRead->CaptureTime);
+				DepthImage.mutable_header()->set_transmission_time(TransmissionTime);
+		
+				for (auto DepthImageRequestIt = DepthImageRequests.CreateConstIterator(); DepthImageRequestIt; ++DepthImageRequestIt)
+				{
+					DepthImageRequestIt->ResponseContinuation.ExecuteIfBound(DepthImage, grpc::Status_OK);
+				}
+			}
+		});
+
+	PendingColorImageRequests.Empty();
+	PendingLabelImageRequests.Empty();
+	if (PixelType::bSupportsDepth)
 	{
-		TempoCamera::ColorImage ColorImage;
-		ColorImage.set_width(TextureRead->ImageSize.X);
-		ColorImage.set_height(TextureRead->ImageSize.Y);
-		std::vector<char> ImageData;
-		ImageData.reserve(TextureRead->Image.Num() * 3);
-		for (const PixelType& Pixel : TextureRead->Image)
-		{
-			ImageData.push_back(Pixel.B());
-			ImageData.push_back(Pixel.G());
-			ImageData.push_back(Pixel.R());
-		}
-		ColorImage.mutable_data()->assign(ImageData.begin(), ImageData.end());
-		ColorImage.mutable_header()->set_sequence_id(TextureRead->SequenceId);
-		ColorImage.mutable_header()->set_capture_time(TextureRead->CaptureTime);
-		ColorImage.mutable_header()->set_transmission_time(GetWorld()->GetTimeSeconds());
-
-		for (auto ColorImageRequestIt = PendingColorImageRequests.CreateIterator(); ColorImageRequestIt; ++ColorImageRequestIt)
-		{
-			ColorImageRequestIt->ResponseContinuation.ExecuteIfBound(ColorImage, grpc::Status_OK);
-			ColorImageRequestIt.RemoveCurrent();
-		}
+		PendingDepthImageRequests.Empty();
 	}
 	
-	if (!PendingLabelImageRequests.IsEmpty())
-	{
-		TempoCamera::LabelImage LabelImage;	
-		LabelImage.set_width(TextureRead->ImageSize.X);
-		LabelImage.set_height(TextureRead->ImageSize.Y);
-		TArray<uint8> ImageData;
-		ImageData.Reserve(TextureRead->Image.Num());
-		for (const PixelType& Pixel : TextureRead->Image)
-		{
-			ImageData.Add(Pixel.Label());
-		}
-		LabelImage.set_data(ImageData.GetData(), ImageData.Num());
-		LabelImage.mutable_header()->set_sequence_id(TextureRead->SequenceId);
-		LabelImage.mutable_header()->set_capture_time(TextureRead->CaptureTime);
-		LabelImage.mutable_header()->set_transmission_time(GetWorld()->GetTimeSeconds());
-		
-		for (auto LabelImageRequestIt = PendingLabelImageRequests.CreateIterator(); LabelImageRequestIt; ++LabelImageRequestIt)
-		{
-			LabelImageRequestIt->ResponseContinuation.ExecuteIfBound(LabelImage, grpc::Status_OK);
-			LabelImageRequestIt.RemoveCurrent();
-		}
-	}
-
-	if (!PendingDepthImageRequests.IsEmpty() && PixelType::bSupportsDepth)
-	{
-		TempoCamera::DepthImage DepthImage;	
-		DepthImage.set_width(TextureRead->ImageSize.X);
-		DepthImage.set_height(TextureRead->ImageSize.Y);
-		DepthImage.mutable_depths()->Reserve(TextureRead->ImageSize.X * TextureRead->ImageSize.Y);
-		for (const PixelType& Pixel : TextureRead->Image)
-		{
-			DepthImage.add_depths(Pixel.Depth(MinDepth, MaxDepth, kMaxDiscreteDepth));
-		}
-		DepthImage.mutable_header()->set_sequence_id(TextureRead->SequenceId);
-		DepthImage.mutable_header()->set_capture_time(TextureRead->CaptureTime);
-		DepthImage.mutable_header()->set_transmission_time(GetWorld()->GetTimeSeconds());
-		
-		for (auto DepthImageRequestIt = PendingDepthImageRequests.CreateIterator(); DepthImageRequestIt; ++DepthImageRequestIt)
-		{
-			DepthImageRequestIt->ResponseContinuation.ExecuteIfBound(DepthImage, grpc::Status_OK);
-			DepthImageRequestIt.RemoveCurrent();
-		}
-	}
+	return Future;
 }
 
-void UTempoCamera::FlushMeasurementResponses()
+TOptional<TFuture<void>> UTempoCamera::FlushMeasurementResponses()
 {
-	if (const TUniquePtr<TTextureRead<FCameraPixelNoDepth>> TextureRead = TextureReadQueueNoDepth.DequeuePendingTextureRead())
+	if (TUniquePtr<TTextureRead<FCameraPixelNoDepth>> TextureReadNoDepth = TextureReadQueueNoDepth.DequeuePendingTextureRead())
 	{
-		DecodeAndRespond(TextureRead.Get());
+		return DecodeAndRespond(MoveTemp(TextureReadNoDepth));
 	}
-	
-	if (const TUniquePtr<TTextureRead<FCameraPixelWithDepth>> TextureRead = TextureReadQueueWithDepth.DequeuePendingTextureRead())
+
+	if (TUniquePtr<TTextureRead<FCameraPixelWithDepth>> TextureReadWithDepth = TextureReadQueueWithDepth.DequeuePendingTextureRead())
 	{
 		if (PendingDepthImageRequests.IsEmpty())
 		{
 			// If no client is requesting depth, stop rendering it.
 			SetDepthEnabled(false);
 		}
-		DecodeAndRespond(TextureRead.Get());
+		
+		return DecodeAndRespond(MoveTemp(TextureReadWithDepth));
 	}
+	
+	return TOptional<TFuture<void>>();
 }
 
 void UTempoCamera::FlushPendingRenderingCommands() const

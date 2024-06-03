@@ -104,7 +104,7 @@ public:
 
 	void RequestMeasurement(const TempoCamera::DepthImageRequest& Request, const TResponseDelegate<TempoCamera::DepthImage>& ResponseContinuation);
 	
-	virtual void FlushMeasurementResponses() override;
+	virtual TOptional<TFuture<void>> FlushMeasurementResponses() override;
 
 	virtual bool HasPendingRenderingCommands() override { return TextureReadQueueNoDepth.HasOutstandingTextureReads() || TextureReadQueueWithDepth.HasOutstandingTextureReads(); }
 
@@ -134,7 +134,7 @@ protected:
 	
 	// Decode the underlying pixel data into responses and send them.
 	template <typename PixelType>
-	void DecodeAndRespond(const TTextureRead<PixelType>* TextureRead);
+	TFuture<void> DecodeAndRespond(TUniquePtr<TTextureRead<PixelType>> TextureRead);
 
 	TArray<FColorImageRequest> PendingColorImageRequests;
 	TArray<FLabelImageRequest> PendingLabelImageRequests;

@@ -28,7 +28,7 @@ public:
 
 	virtual const TArray<TEnumAsByte<EMeasurementType>>& GetMeasurementTypes() const = 0;
 
-	virtual void FlushMeasurementResponses() = 0;
+	virtual TOptional<TFuture<void>> FlushMeasurementResponses() = 0;
 
 	virtual bool HasPendingRenderingCommands() = 0;
 
