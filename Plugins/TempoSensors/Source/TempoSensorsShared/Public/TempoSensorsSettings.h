@@ -20,6 +20,7 @@ public:
 	TObjectPtr<UMaterialInterface> GetCameraPostProcessMaterialNoDepth() const { return CameraPostProcessMaterialNoDepth.LoadSynchronous(); }
 	TObjectPtr<UMaterialInterface> GetCameraPostProcessMaterialWithDepth() const { return CameraPostProcessMaterialWithDepth.LoadSynchronous(); }
 	float GetMaxCameraDepth() const { return MaxCameraDepth; }
+	float GetSceneCaptureGamma() const { return SceneCaptureGamma; }
 	FName GetOverridableLabelRowName() const { return OverridableLabelRowName; }
 	FName GetOverridingLabelRowName() const { return OverridingLabelRowName; }
 	int32 GetMaxCameraRenderBufferSize() const { return MaxCameraRenderBufferSize; }
@@ -39,6 +40,10 @@ private:
 	// The expected maximum required depth for a camera depth image.
 	UPROPERTY(EditAnywhere, Config, Category="Camera")
 	float MaxCameraDepth = 100000.0; // 1km
+
+	// Gamma to use for simulated scene captures.
+	UPROPERTY(EditAnywhere, Config, Category="Camera")
+	float SceneCaptureGamma = 1.0;
 	
 	// The max number of frames per camera to buffer before dropping.
 	UPROPERTY(EditAnywhere, Config, Category="Camera", AdvancedDisplay)

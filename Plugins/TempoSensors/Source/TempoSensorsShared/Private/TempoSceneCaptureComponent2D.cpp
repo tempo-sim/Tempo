@@ -2,6 +2,8 @@
 
 #include "TempoSceneCaptureComponent2D.h"
 
+#include "TempoSensorsSettings.h"
+
 #include "TempoCoreSettings.h"
 
 #include "Engine/TextureRenderTarget2D.h"
@@ -67,7 +69,7 @@ void UTempoSceneCaptureComponent2D::InitRenderTarget()
 {
 	UTextureRenderTarget2D* RenderTarget2D = NewObject<UTextureRenderTarget2D>(this);
 	
-	RenderTarget2D->TargetGamma = GEngine->GetDisplayGamma();
+	RenderTarget2D->TargetGamma = GetDefault<UTempoSensorsSettings>()->GetSceneCaptureGamma();
 	RenderTarget2D->RenderTargetFormat = RenderTargetFormat;
 	RenderTarget2D->bGPUSharedFlag = true;
 	if (PixelFormatOverride == EPixelFormat::PF_Unknown)
