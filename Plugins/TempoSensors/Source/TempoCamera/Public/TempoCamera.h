@@ -128,11 +128,11 @@ protected:
 	bool bDepthEnabled = false;
 
 	// The minimum depth this camera can measure. Will be set to the near clip plane when depth is enabled.
-	UPROPERTY(VisibleAnywhere, Category="Depth", meta=(EditCondition=bHasBegunPlay))
+	UPROPERTY(VisibleAnywhere, Category="Depth")
 	float MinDepth = 10.0; // 10cm
 	
-	// The maximum depth this camera can measure. Should be (very roughly) near the maximum viewable depth.
-	UPROPERTY(VisibleAnywhere, Category="Depth", meta=(EditCondition=bHasBegunPlay))
+	// The maximum depth this camera can measure. Will be set to UTempoSensorsSettings::MaxCameraDepth when depth is enabled.
+	UPROPERTY(VisibleAnywhere, Category="Depth")
 	float MaxDepth = 100000.0; // 1km
 
 	UPROPERTY(VisibleAnywhere)
