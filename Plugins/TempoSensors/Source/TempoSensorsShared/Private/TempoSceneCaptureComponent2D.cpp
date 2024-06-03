@@ -80,4 +80,17 @@ void UTempoSceneCaptureComponent2D::InitRenderTarget()
 	}
 	
 	TextureTarget = RenderTarget2D;
+
+#if PLATFORM_LINUX
+	// Create the TextureRHICopy, where we will copy our TextureTarget's resource before reading it on the CPU, due to a Vulkan limitation.
+	ETextureCreateFlags TexCreateFlags = ETextureCreateFlags::Shared | ETextureCreateFlags::RenderTargetable | ETextureCreateFlags::ShaderResource | ETextureCreateFlags::CPUReadback;
+	
+	const FRHITextureCreateDesc Desc =
+		FRHITextureCreateDesc::Create2D(*FString::Printf(TEXT("%s TextureRHICopy"), *GetName()))
+		.SetExtent(TextureTarget->SizeX, TextureTarget->SizeY)
+		.SetFormat(TextureTarget->GetFormat())
+		.SetFlags(TexCreateFlags);
+	
+	TextureRHICopy = RHICreateTexture(Desc);
+#endif
 }
