@@ -49,12 +49,14 @@ void UTempoSensorServiceSubsystem::OnWorldTickStart(UWorld* World, ELevelTick Ti
 		// This guarantees they will be sent out in the same frame when they were captured.
 		if (GetDefault<UTempoCoreSettings>()->GetTimeMode() == ETimeMode::FixedStep)
 		{
+			TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsFlushRendering);
 			ForEachSensor([](const ITempoSensorInterface* Sensor)
 			{
 				Sensor->FlushPendingRenderingCommands();
 			});
 		}
 
+		TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsFlushResponses);
 		TArray<TFuture<void>> Futures;
 		ForEachSensor([&Futures](ITempoSensorInterface* Sensor)
 		{
