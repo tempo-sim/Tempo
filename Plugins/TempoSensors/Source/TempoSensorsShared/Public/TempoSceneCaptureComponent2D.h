@@ -38,6 +38,14 @@ struct TTextureReadQueue
 		PendingTextureReads.Emplace(TextureRead);
 	}
 
+	void FlushPendingTextureReads() const
+	{
+		for (const auto& PendingTextureRead : PendingTextureReads)
+		{
+			PendingTextureRead->RenderFence.Wait();
+		}
+	}
+
 	TUniquePtr<TTextureRead<PixelType>> DequeuePendingTextureRead()
 	{
 		if (!PendingTextureReads.IsEmpty() && PendingTextureReads[0]->RenderFence.IsFenceComplete())
@@ -74,6 +82,8 @@ public:
 	virtual void FlushMeasurementResponses() override {}
 
 	virtual bool HasPendingRenderingCommands() override { return false; }
+
+	virtual void FlushPendingRenderingCommands() const override {}
 	
 protected:
 	virtual void BeginPlay() override;
