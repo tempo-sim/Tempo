@@ -6,7 +6,7 @@
 
 #include "TempoCoreTypes.generated.h"
 
-UENUM(Blueprintable)
+UENUM(Blueprintable, BlueprintType)
 enum class ETimeMode: uint8
 {
 	// Time advances strictly according to the wall clock ("real time").
@@ -16,3 +16,12 @@ enum class ETimeMode: uint8
 	Max UMETA(Hidden)
 };
 ENUM_RANGE_BY_COUNT(ETimeMode, ETimeMode::Max);
+
+UENUM(Blueprintable, BlueprintType)
+enum class EScriptingCompressionLevel: uint8
+{
+	None = 0,
+	Low = 1,
+	Med = 2,
+	High = 3
+};
