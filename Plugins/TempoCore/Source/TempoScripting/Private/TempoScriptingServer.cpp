@@ -146,8 +146,8 @@ void UTempoScriptingServer::Tick(float DeltaTime)
 		case grpc::CompletionQueue::GOT_EVENT:
 			{
 				// Handle the event and then wait for another.
-				HandleEventForTag(*Tag, bOk);
 				ManagersWithPendingWrites.Remove(*Tag);
+				HandleEventForTag(*Tag, bOk);
 				break;
 			}
 		case grpc::CompletionQueue::SHUTDOWN:
