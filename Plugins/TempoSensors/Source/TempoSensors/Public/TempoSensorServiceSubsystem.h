@@ -32,15 +32,16 @@ namespace TempoCamera
 }
 
 UCLASS()
-class TEMPOSENSORS_API UTempoSensorServiceSubsystem : public UTickableWorldSubsystem, public ITempoWorldScriptable
+class TEMPOSENSORS_API UTempoSensorServiceSubsystem : public UWorldSubsystem, public ITempoWorldScriptable
 {
 	GENERATED_BODY()
 	
 public:
 	virtual void RegisterWorldServices(UTempoScriptingServer* ScriptingServer) override;
 
-	virtual void Tick(float DeltaTime) override;
-	virtual TStatId GetStatId() const override;
+	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+
+	virtual void OnWorldTickStart(UWorld* World, ELevelTick TickType, float DeltaSeconds);
 	
 private:
 	void GetAvailableSensors(const TempoSensors::AvailableSensorsRequest& Request, const TResponseDelegate<TempoSensors::AvailableSensorsResponse>& ResponseContinuation) const;
