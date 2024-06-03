@@ -142,7 +142,6 @@ TTextureRead<PixelType>* UTempoSceneCaptureComponent2D::EnqueueTextureRead() con
 		{
 			void* OutBuffer;
 			int32 SurfaceWidth, SurfaceHeight;
-			const FIntPoint TextureSize = Context.RenderTarget->GetSizeXY();
 #if PLATFORM_LINUX
 			// Vulkan checks that a texture has TexCreate_CPUReadback flag set in MapStagingSurface, which our TextureTarget does not.
 			// However we can work around this by creating a texture with the flag set and copying our TextureTarget there first.
@@ -152,15 +151,8 @@ TTextureRead<PixelType>* UTempoSceneCaptureComponent2D::EnqueueTextureRead() con
 #else
 			FRHITexture* RHITexture = Context.RenderTarget->GetRenderTargetTexture();
 #endif
-			RHICmdList.MapStagingSurface(RHITexture, OutBuffer, SurfaceWidth, SurfaceHeight);
-			for (int32 Y = 0; Y < SurfaceHeight; ++Y)
-			{
-				for (int32 X = 0; X < TextureSize.X; ++X)
-				{
-					const int32 PixelOffset = X + (Y * SurfaceWidth);
-					(*Context.Image)[X + Y * TextureSize.X] = *(static_cast<PixelType*>(OutBuffer) + PixelOffset);
-				}
-			}
+			RHICmdList.MapStagingSurface(Context.RenderTarget->GetRenderTargetTexture(), OutBuffer, SurfaceWidth, SurfaceHeight);
+			FMemory::Memcpy(Context.Image->GetData(), OutBuffer, SurfaceWidth * SurfaceHeight * sizeof(PixelType));
 			RHICmdList.UnmapStagingSurface(Context.RenderTarget->GetRenderTargetTexture());
 	});
 	
