@@ -4,8 +4,6 @@
 
 #include "TempoSensorsSettings.h"
 
-#include "TempoCoreSettings.h"
-
 #include "Engine/TextureRenderTarget2D.h"
 
 UTempoSceneCaptureComponent2D::UTempoSceneCaptureComponent2D()
@@ -51,18 +49,7 @@ void UTempoSceneCaptureComponent2D::MaybeCapture()
 		return;
 	}
 
-	if (GetDefault<UTempoCoreSettings>()->GetTimeMode() == ETimeMode::FixedStep)
-	{
-		// In fixed step mode we block the game thread to render the image immediately.
-		// It will then be read and sent before the end of the current frame.
-		CaptureScene();
-	}
-	else
-	{
-		// Otherwise, we render the frame along with the main render pass.
-		// It will get read and sent one or two frames after this one.
-		CaptureSceneDeferred();
-	}
+	CaptureSceneDeferred();
 }
 
 void UTempoSceneCaptureComponent2D::InitRenderTarget()

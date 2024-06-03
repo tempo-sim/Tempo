@@ -209,7 +209,7 @@ public:
  * Hosts a gRPC server and supports registering arbitrary gRPC services and handlers.
  */
 UCLASS()
-class TEMPOSCRIPTING_API UTempoScriptingServer : public UObject, public FTickableGameObject
+class TEMPOSCRIPTING_API UTempoScriptingServer : public UObject
 {
 	GENERATED_BODY()
 public:
@@ -219,12 +219,9 @@ public:
 
 	virtual void Initialize(int32 Port);
 	virtual void Deinitialize();
-	
-	virtual bool IsTickable() const override { return bIsInitialized; }
-	virtual bool IsTickableWhenPaused() const override { return true; }
-	virtual bool IsTickableInEditor() const override { return true; }
-	virtual void Tick(float DeltaTime) override;
-	virtual TStatId GetStatId() const override { return GetStatID(); }
+
+	// The server must be explicitly Ticked. Its owner may choose the most appropriate time within the frame to do so.
+	virtual void Tick(float DeltaTime);
 	
 	template <class ServiceType, class... HandlerTypes>
 	void RegisterService(HandlerTypes... Handlers)

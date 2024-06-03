@@ -33,6 +33,10 @@ void UTempoScriptingWorldSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	
 	const UTempoCoreSettings* Settings = GetDefault<UTempoCoreSettings>();
 	ScriptingServer->Initialize(Settings->GetWorldScriptingPort());
+
+	// Scripting has nothing to do with movie scene sequences, but this event fires in exactly the right conditions:
+	// After world time has been updated for the current frame, before Actor ticks have begun, and even when paused.
+	InWorld.AddMovieSceneSequenceTickHandler(FOnMovieSceneSequenceTick::FDelegate::CreateUObject(ScriptingServer, &UTempoScriptingServer::Tick));
 }
 
 void UTempoScriptingWorldSubsystem::Deinitialize()

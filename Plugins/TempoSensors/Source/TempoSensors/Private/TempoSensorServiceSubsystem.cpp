@@ -31,6 +31,37 @@ void UTempoSensorServiceSubsystem::RegisterWorldServices(UTempoScriptingServer* 
 		);
 }
 
+void UTempoSensorServiceSubsystem::Initialize(FSubsystemCollectionBase& Collection)
+{
+	Super::Initialize(Collection);
+
+	// OnWorldTickStart is fired before Tick has actually begun, while the world time is still the tick
+	// of the last frame. We use this last opportunity, having waited as long as possible, to collect
+	// and send all the sensor measurements from the previous frame.
+	FWorldDelegates::OnWorldTickStart.AddUObject(this, &UTempoSensorServiceSubsystem::OnWorldTickStart);
+}
+
+void UTempoSensorServiceSubsystem::OnWorldTickStart(UWorld* World, ELevelTick TickType, float DeltaSeconds)
+{
+	if (World == GetWorld() && (World->WorldType == EWorldType::Game || World->WorldType == EWorldType::PIE))
+	{	
+		// In fixed step mode we block the game thread on any pending texture reads.
+		// This guarantees they will be sent out in the same frame when they were captured.
+		if (GetDefault<UTempoCoreSettings>()->GetTimeMode() == ETimeMode::FixedStep)
+		{
+			ForEachSensor([](const ITempoSensorInterface* Sensor)
+			{
+				Sensor->FlushPendingRenderingCommands();
+			});
+		}
+
+		ForEachSensor([](ITempoSensorInterface* Sensor)
+		{
+			Sensor->FlushMeasurementResponses();
+		});
+	}
+}
+
 TempoSensors::MeasurementType ToProtoMeasurementType(EMeasurementType ImageType)
 {
 	switch (ImageType)
@@ -179,29 +210,4 @@ void UTempoSensorServiceSubsystem::StreamDepthImages(const TempoCamera::DepthIma
 void UTempoSensorServiceSubsystem::StreamLabelImages(const TempoCamera::LabelImageRequest& Request, const TResponseDelegate<TempoCamera::LabelImage>& ResponseContinuation) const
 {
 	RequestImages<TempoCamera::LabelImageRequest, TempoCamera::LabelImage>(Request, ResponseContinuation);
-}
-
-void UTempoSensorServiceSubsystem::Tick(float DeltaTime)
-{
-	Super::Tick(DeltaTime);
-
-	// In fixed step mode we block the game thread on any pending texture reads.
-	// This guarantees they will be sent out in the same frame when they were captured.
-	if (GetDefault<UTempoCoreSettings>()->GetTimeMode() == ETimeMode::FixedStep)
-	{
-		ForEachSensor([](const ITempoSensorInterface* Sensor)
-		{
-			Sensor->FlushPendingRenderingCommands();
-		});
-	}
-
-	ForEachSensor([](ITempoSensorInterface* Sensor)
-	{
-		Sensor->FlushMeasurementResponses();
-	});
-}
-
-TStatId UTempoSensorServiceSubsystem::GetStatId() const
-{
-	RETURN_QUICK_DECLARE_CYCLE_STAT(UTempoSensorServiceSubsystem, STATGROUP_Tickables);
 }
