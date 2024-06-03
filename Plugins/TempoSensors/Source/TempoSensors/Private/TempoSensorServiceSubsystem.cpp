@@ -55,10 +55,19 @@ void UTempoSensorServiceSubsystem::OnWorldTickStart(UWorld* World, ELevelTick Ti
 			});
 		}
 
-		ForEachSensor([](ITempoSensorInterface* Sensor)
+		TArray<TFuture<void>> Futures;
+		ForEachSensor([&Futures](ITempoSensorInterface* Sensor)
 		{
-			Sensor->FlushMeasurementResponses();
+			if (TOptional<TFuture<void>> Future = Sensor->FlushMeasurementResponses())
+			{
+				Futures.Add(MoveTemp(Future.GetValue()));
+			}
 		});
+
+		for (const TFuture<void>& Future : Futures)
+		{
+			Future.Wait();
+		}
 	}
 }
 

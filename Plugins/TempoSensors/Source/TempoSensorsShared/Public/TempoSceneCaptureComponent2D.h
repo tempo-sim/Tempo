@@ -79,7 +79,7 @@ public:
 	
 	virtual void UpdateSceneCaptureContents(FSceneInterface* Scene) override;
 
-	virtual void FlushMeasurementResponses() override {}
+	virtual TOptional<TFuture<void>> FlushMeasurementResponses() override { return TOptional<TFuture<void>>(); }
 
 	virtual bool HasPendingRenderingCommands() override { return false; }
 
