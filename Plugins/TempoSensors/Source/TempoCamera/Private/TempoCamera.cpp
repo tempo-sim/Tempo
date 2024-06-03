@@ -77,18 +77,22 @@ void UTempoCamera::UpdateSceneCaptureContents(FSceneInterface* Scene)
 
 	check(GetWorld());
 
-	if (TextureReadQueueWithDepth.GetNumPendingTextureReads() > GetDefault<UTempoSensorsSettings>()->GetMaxCameraRenderBufferSize())
-	{
-		UE_LOG(LogTempoCamera, Warning, TEXT("Fell behind while rendering images from camera %s owner %s. Dropping image."), *GetSensorName(), *GetOwnerName());
-		return;
-	}
-
 	if (bDepthEnabled)
 	{
+		if (TextureReadQueueWithDepth.GetNumPendingTextureReads() > GetDefault<UTempoSensorsSettings>()->GetMaxCameraRenderBufferSize())
+		{
+			UE_LOG(LogTempoCamera, Warning, TEXT("Fell behind while rendering images from camera %s owner %s. Dropping image."), *GetSensorName(), *GetOwnerName());
+			return;
+		}
 		TextureReadQueueWithDepth.EnqueuePendingTextureRead(EnqueueTextureRead<FCameraPixelWithDepth>());
 	}
 	else
 	{
+		if (TextureReadQueueNoDepth.GetNumPendingTextureReads() > GetDefault<UTempoSensorsSettings>()->GetMaxCameraRenderBufferSize())
+		{
+			UE_LOG(LogTempoCamera, Warning, TEXT("Fell behind while rendering images from camera %s owner %s. Dropping image."), *GetSensorName(), *GetOwnerName());
+			return;
+		}
 		TextureReadQueueNoDepth.EnqueuePendingTextureRead(EnqueueTextureRead<FCameraPixelNoDepth>());
 	}
 }
