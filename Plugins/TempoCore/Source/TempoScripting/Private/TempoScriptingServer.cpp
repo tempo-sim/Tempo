@@ -115,6 +115,19 @@ void UTempoScriptingServer::Tick(float DeltaTime)
 	const double MaxEventProcessingTimeSeconds = MaxEventProcessingTimeMicroSeconds / 1.e6;
 	const int32 MaxEventWaitTimeNanoSeconds = Settings->GetMaxEventWaitTime();
 
+	TSet<int32> ManagersWithPendingWrites;
+	for (const auto& Elem : RequestManagers)
+	{
+		const int32 Tag = Elem.Key;
+		const TSharedPtr<FRequestManager>& RequestManager = Elem.Value;
+		const FRequestManager::EState State = RequestManager->GetState();
+		if (State == FRequestManager::EState::RESPONDING ||
+			State == FRequestManager::EState::FINISHING)
+		{
+			ManagersWithPendingWrites.Add(Tag);
+		}
+	}
+	
 	bool bProcessedPendingEvents = false;
 	const double Start = FPlatformTime::Seconds();
 	while (!bProcessedPendingEvents)
@@ -133,6 +146,7 @@ void UTempoScriptingServer::Tick(float DeltaTime)
 		case grpc::CompletionQueue::GOT_EVENT:
 			{
 				// Handle the event and then wait for another.
+				ManagersWithPendingWrites.Remove(*Tag);
 				HandleEventForTag(*Tag, bOk);
 				break;
 			}
@@ -143,8 +157,8 @@ void UTempoScriptingServer::Tick(float DeltaTime)
 			}
 		case grpc::CompletionQueue::TIMEOUT:
 			{
-				// We've processed all the pending events, move on.
-				bProcessedPendingEvents = true;
+				// If we've processed all the pending events (which, in fixed time mode, includes an event for every manager with a pending write), move on.
+				bProcessedPendingEvents = TimeMode == ETimeMode::FixedStep ? ManagersWithPendingWrites.IsEmpty() : true;
 				break;
 			}
 		}

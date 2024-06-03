@@ -160,8 +160,8 @@ public:
 		check(Base::State == FRequestManager::EState::REQUESTED);
 		Base::ResponseDelegate = TResponseDelegate<ResponseType>::CreateSPLambda(static_cast<FRequestManager*>(this), [this](const ResponseType& Response, grpc::Status Result)
 		{
-			Base::Responder.Finish(Response, Result, &(Base::Tag));
 			Base::State = FRequestManager::EState::FINISHING;
+			Base::Responder.Finish(Response, Result, &(Base::Tag));
 		});
 		Base::Handler->HandleRequest(Base::Request, Base::ResponseDelegate);
 	}
@@ -192,9 +192,9 @@ public:
 				Base::State = FRequestManager::EState::FINISHING;
 				return;
 			}
-				
-			Base::Responder.Write(Response, &(Base::Tag));
+
 			Base::State = FRequestManager::EState::RESPONDING;
+			Base::Responder.Write(Response, &(Base::Tag));
 		});
 		Base::Handler->HandleRequest(Base::Request, Base::ResponseDelegate);
 	}
