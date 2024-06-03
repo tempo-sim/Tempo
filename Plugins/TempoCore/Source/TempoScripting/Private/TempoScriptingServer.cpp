@@ -12,6 +12,34 @@ UTempoScriptingServer::UTempoScriptingServer(FVTableHelper& Helper)
 	: Super(Helper) {}
 UTempoScriptingServer::~UTempoScriptingServer() = default;
 
+grpc_compression_level CompressionLevelTogRPC(EScriptingCompressionLevel TempoLevel)
+{
+	switch (TempoLevel)
+	{
+	case EScriptingCompressionLevel::None:
+		{
+			return GRPC_COMPRESS_LEVEL_NONE;
+		}
+	case EScriptingCompressionLevel::Low:
+		{
+			return GRPC_COMPRESS_LEVEL_LOW;
+		}
+	case EScriptingCompressionLevel::Med:
+		{
+			return GRPC_COMPRESS_LEVEL_MED;
+		}
+	case EScriptingCompressionLevel::High:
+		{
+			return GRPC_COMPRESS_LEVEL_HIGH;
+		}
+	default:
+		{
+			checkf(false, TEXT("Unhandled compression level"));
+			return GRPC_COMPRESS_LEVEL_COUNT;
+		}
+	}
+}
+
 void UTempoScriptingServer::Initialize(int32 Port)
 {
 	const FString ServerAddress = FString::Printf(TEXT("0.0.0.0:%d"), Port);
@@ -21,6 +49,8 @@ void UTempoScriptingServer::Initialize(int32 Port)
 	{
 		Builder.RegisterService(Service.Get());
 	}
+
+	Builder.SetDefaultCompressionLevel(CompressionLevelTogRPC(GetDefault<UTempoCoreSettings>()->GetScriptingCompressionLevel()));
 
 	CompletionQueue.Reset(Builder.AddCompletionQueue().release());
 	Server.Reset(Builder.BuildAndStart().release());
