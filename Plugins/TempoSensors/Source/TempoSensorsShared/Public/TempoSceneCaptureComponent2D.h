@@ -161,7 +161,7 @@ TTextureRead<PixelType>* UTempoSceneCaptureComponent2D::EnqueueTextureRead() con
 #else
 			FRHITexture* RHITexture = Context.RenderTarget->GetRenderTargetTexture();
 #endif
-			RHICmdList.MapStagingSurface(Context.RenderTarget->GetRenderTargetTexture(), OutBuffer, SurfaceWidth, SurfaceHeight);
+			RHICmdList.MapStagingSurface(RHITexture, OutBuffer, SurfaceWidth, SurfaceHeight);
 			FMemory::Memcpy(Context.Image->GetData(), OutBuffer, SurfaceWidth * SurfaceHeight * sizeof(PixelType));
 			RHICmdList.UnmapStagingSurface(Context.RenderTarget->GetRenderTargetTexture());
 	});
