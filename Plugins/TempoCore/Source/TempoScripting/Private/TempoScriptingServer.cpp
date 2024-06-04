@@ -191,6 +191,11 @@ void UTempoScriptingServer::HandleEventForTag(int32 Tag, bool bOk)
 				(*RequestManager)->HandleAndRespond();
 				break;
 			}
+		case FRequestManager::HANDLING: // Shouldn't happen.
+			{
+				checkf(false, TEXT("Got event for request manager while it was handling another request."))
+				break;
+			}
 		case FRequestManager::RESPONDING: // A response has been sent, and there are more to come.
 			{
 				(*RequestManager)->HandleAndRespond();

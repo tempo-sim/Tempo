@@ -108,7 +108,7 @@ using TStreamingRequestHandler = TRequestHandler<ServiceType, RequestType, Respo
 struct FRequestManager : TSharedFromThis<FRequestManager>
 {
 	virtual ~FRequestManager() = default;
-	enum EState { UNINITIALIZED, REQUESTED, RESPONDING, FINISHING };
+	enum EState { UNINITIALIZED, REQUESTED, HANDLING, RESPONDING, FINISHING };
 	virtual EState GetState() const = 0;
 	virtual void Init(grpc::ServerCompletionQueue* CompletionQueue) = 0;
 	virtual void HandleAndRespond() = 0;
@@ -163,6 +163,7 @@ public:
 			Base::State = FRequestManager::EState::FINISHING;
 			Base::Responder.Finish(Response, Result, &(Base::Tag));
 		});
+		Base::State = FRequestManager::EState::HANDLING;
 		Base::Handler->HandleRequest(Base::Request, Base::ResponseDelegate);
 	}
 
@@ -188,14 +189,15 @@ public:
 			if (!Result.ok())
 			{
 				// Consider non-OK result to mean there are no more responses available.
-				Base::Responder.Finish(Result, &(Base::Tag));
 				Base::State = FRequestManager::EState::FINISHING;
+				Base::Responder.Finish(Result, &(Base::Tag));
 				return;
 			}
 
 			Base::State = FRequestManager::EState::RESPONDING;
 			Base::Responder.Write(Response, &(Base::Tag));
 		});
+		Base::State = FRequestManager::EState::HANDLING;
 		Base::Handler->HandleRequest(Base::Request, Base::ResponseDelegate);
 	}
 
