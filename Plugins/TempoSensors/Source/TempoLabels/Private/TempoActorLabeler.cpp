@@ -21,7 +21,8 @@ void UTempoActorLabeler::OnWorldBeginPlay(UWorld& InWorld)
 
 	SemanticLabelTable = GetDefault<UTempoSensorsSettings>()->GetSemanticLabelTable();
 
-	LabelAllActors();
+	// Label all actors *after* BeginPlay (UWorldSubsystem::OnWorldBeginPlay is called *before* BeginPlay).
+	GetWorld()->OnWorldBeginPlay.AddUObject(this, &UTempoActorLabeler::LabelAllActors);
 	
 	// Label all newly spawned actors.
 	GetWorld()->AddOnActorSpawnedHandler(FOnActorSpawned::FDelegate::CreateUObject(this, &UTempoActorLabeler::LabelActor));
