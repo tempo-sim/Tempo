@@ -20,10 +20,21 @@ public:
 	virtual void OnWorldBeginPlay(UWorld& InWorld) override;
 
 private:
+	void BuildLabelMaps();
+	
 	void LabelAllActors() const;
 	
 	void LabelActor(AActor* Actor) const;
 
 	UPROPERTY(VisibleAnywhere)
 	UDataTable* SemanticLabelTable;
+
+	UPROPERTY(VisibleAnywhere)
+	TMap<TSubclassOf<AActor>, FName> ActorLabels;
+
+	UPROPERTY(VisibleAnywhere)
+	TMap<FString, FName> StaticMeshLabels;
+
+	UPROPERTY(VisibleAnywhere)
+	TMap<FName, int32> LabelIds;
 };

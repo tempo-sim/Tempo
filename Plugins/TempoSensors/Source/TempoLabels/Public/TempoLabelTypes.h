@@ -14,9 +14,13 @@ struct FSemanticLabel: public FTableRowBase
 
 	// The raw label that will be stored in the stencil buffer.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	int32 Label;
+	int32 Label = 0;
 
 	// The Actor types which should be tagged with this label.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	TArray<TSubclassOf<AActor>> ActorTypes;
+	TSet<TSubclassOf<AActor>> ActorTypes;
+
+	// The StaticMesh types which should be tagged with this label (overrides labels at the actor level).
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	TSet<TSoftObjectPtr<UStaticMesh>> StaticMeshTypes;
 };
