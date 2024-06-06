@@ -1,5 +1,14 @@
 # Tempo
-The Tempo Unreal Engine plugins
+The Tempo Unreal Engine plugin suite
+
+## Project Setup
+Tempo is intended to be a submodule of an Unreal project, within the `Plugins` directory. The [TempoSample](https://github.com/tempo-sim/TempoSample) project is provided as a reference for recommended settings, convenient scripts, code examples, and project organization.
+
+The Tempo plugins require some changes to your Unreal Engine project to work properly:
+- Your project's `*.Target.cs` files to use the Tempo UnrealBuildTool toolchain for your platform. See [TempoSample.Target.cs](https://github.com/tempo-sim/TempoSample/blob/main/Source/TempoSample.Target.cs) and [TempoSampleEditor.Target.cs](https://github.com/tempo-sim/TempoSample/blob/main/Source/TempoSampleEditor.Target.cs) for examples.
+- To package Tempo's Python API along with your project, you must add this line to your `DefaultGame.ini`:
+  `+DirectoriesToAlwaysStageAsNonUFS=(Path="../Plugins/Tempo/TempoCore/Content/Python/API")`
+
 ## Supported Platforms
 - Ubuntu 22.04
 - MacOS 13.0 (Ventura) or newer
@@ -22,7 +31,7 @@ password <your_token_here>
 - Unreal Engine 5.3.2
   - Linux users can download a pre-built Unreal [here](https://www.unrealengine.com/en-US/linux)
   - Windows and Mac users should use the Epic Games Launcher
-- (Optional, Windows Only) [Linux Cross-Compile Toolchain](https://dev.epicgames.com/documentation/en-us/unreal-engine/linux-development-requirements-for-unreal-engine?application_version=5.3)
+- (optional, only if cross compiling for Linux from Windows) [Linux Cross-Compile Toolchain](https://dev.epicgames.com/documentation/en-us/unreal-engine/linux-development-requirements-for-unreal-engine?application_version=5.3)
 
 ## Environment Variables
 - `UNREAL_ENGINE_PATH`: Your Unreal Engine installation directory (the folder containing `Engine`)
@@ -32,24 +41,17 @@ password <your_token_here>
 - (Optional, Windows only) `LINUX_MULTIARCH_ROOT`: The extracted toolchain directory (for example `C:\UnrealToolchains\v22_clang-16.0.6-centos7`)
 
 ## Getting Started
+### Clone Tempo
+From your project's Plugins directory
+`git submodule add https://github.com/tempo-sim/Tempo.git`
+
 ### One-Time Setup
-Run `Setup.sh` (from the Tempo root) once to:
+Run `Setup.sh` (from the `Tempo` root) once to:
 - Install the Tempo UnrealBuildTool toolchain
 - Install third party dependencies
 - Add git hooks to keep both of the above in sync automatically
 > [!Note]
 > If you run `Setup.sh` again it shouldn't do anything, because it can tell it's already run. You can force it to run if you think you need to with the `-force` flag.
-
-### Building
-Run `Scripts/Build.sh` (from the Tempo root) to build the project.
-
-### Running in Unreal Editor
-Run `Scripts/Run.sh` (from the Tempo root) to open the project in the Unreal Editor.
-
-### Packaging
-Run `Scripts/Package.sh` (from the Tempo root) to package Tempo into a standalone executable. It will end up in a folder `Packaged/<platform>` under the Tempo root.
-> [!Note]
-> On Windows, if you have the cross compile toolchain installed, you can specify the argument `Linux` to package for Linux.
 
 ## Using Tempo
 ### Configuring
@@ -71,14 +73,13 @@ r.RayTracing=True
 [/Script/Engine.GameUserSettings]
 FullscreenMode=2
 ```
-You can find a complete set of available config settings in the the `Config` directory under the Tempo root.
 > [!Warning]
-> Config ini files can not be edited while the Tempo packaged binary is running or the project is open in Unreal Editor.
+> Config ini files can not be edited while the packaged binary is running or the project is open in Unreal Editor.
 
 ### Debugging
-Tempo writes logs while running. These are a great starting point for debugging.
+Unreal projects write logs while running. These are a great starting point for debugging.
 When running in Unreal Editor you can see the logs in the [Output Log](https://dev.epicgames.com/documentation/en-us/unreal-engine/logging-in-unreal-engine) window.
-The packaged binary will write logs to `<packaged_game_root>/Tempo/Saved/Logs`
+The packaged binary will write logs to `<packaged_game_root>/ProjectName/Saved/Logs`
 
 ## Scripting
 Tempo supports scripting via [Protobuf](https://protobuf.dev/) and [gRPC](https://grpc.io/).
@@ -222,16 +223,16 @@ You should include a TSimpleRequestHandler or TStreamingRequestHandler for every
 ### Using the Python API
 Tempo automatically generates both the Python classes for the messages and services in your Protobuf files *and* a Python wrapper library to make 
 writing client code extremely easy. All of this ends up in the `tempo` Python package. This package will be automatically installed for you to a 
-Python virtual environment located at `<tempo_root>/TempoEnv`. You can activate that virtual environment with:
+Python virtual environment located at `<project_root>/TempoEnv`. You can activate that virtual environment with:
 ```
 # On Windows:
-source <tempo_root>/TempoEnv/Scripts/activate
+source <project_root>/TempoEnv/Scripts/activate
 # On Linux or Mac:
-source <tempo_root>/TempoEnv/bin/activate
+source <project_root>/TempoEnv/bin/activate
 ```
 Alternatively, you can install the `tempo` package to your system frameworks or another virtual environment with:
 ```
-pip install "<tempo_root>/Content/Python/API"
+pip install "<project_root>/Plugins/Tempo/TempoCore/Content/Python/API"
 ```
 The `tempo` wrapper library adds a Python module for every C++ module in the Tempo project with synchronous and asynchronous wrappers for every RPC 
 defined in that module. The request parameters will be laid out flat as arguments to the wrapper. For example, the above service `MyService` would 
