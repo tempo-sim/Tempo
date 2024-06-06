@@ -1,8 +1,8 @@
 # Tempo
-The Tempo Unreal Engine plugin suite
+The Tempo Unreal Engine plugins
 
 ## Project Setup
-Tempo is intended to be a submodule of an Unreal project, within the `Plugins` directory. The [TempoSample](https://github.com/tempo-sim/TempoSample) project is provided as a reference for recommended settings, convenient scripts, code examples, and project organization.
+Tempo is a collection of Unreal Engine plugins and is intended to be a submodule of an Unreal project, within the `Plugins` directory. The [TempoSample](https://github.com/tempo-sim/TempoSample) project is provided as a reference for recommended settings, convenient scripts, code examples, and project organization.
 
 The Tempo plugins require some changes to your Unreal Engine project to work properly:
 - Your project's `*.Target.cs` files to use the Tempo UnrealBuildTool toolchain for your platform. See [TempoSample.Target.cs](https://github.com/tempo-sim/TempoSample/blob/main/Source/TempoSample.Target.cs) and [TempoSampleEditor.Target.cs](https://github.com/tempo-sim/TempoSample/blob/main/Source/TempoSampleEditor.Target.cs) for examples.
