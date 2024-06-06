@@ -1,5 +1,5 @@
 # Tempo
-The Tempo Unreal Engine project and plugins
+The Tempo Unreal Engine plugins
 ## Supported Platforms
 - Ubuntu 22.04
 - MacOS 13.0 (Ventura) or newer
