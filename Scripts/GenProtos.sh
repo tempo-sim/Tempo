@@ -5,12 +5,13 @@ set -e
 ENGINE_DIR="${1//\\//}"
 PROJECT_FILE="${2//\\//}"
 PROJECT_ROOT="${3//\\//}"
-TARGET_NAME="$4"
-TARGET_CONFIG="$5"
-TARGET_PLATFORM="$6"
-TOOL_DIR="${7//\\//}"
+PLUGIN_ROOT="${4//\\//}"
+TARGET_NAME="$5"
+TARGET_CONFIG="$6"
+TARGET_PLATFORM="$7"
+TOOL_DIR="${8//\\//}"
 
-PYTHON_DEST_DIR="$PROJECT_ROOT/Content/Python/API/tempo"
+PYTHON_DEST_DIR="$PLUGIN_ROOT/Content/Python/API/tempo"
 touch "$PYTHON_DEST_DIR/__init__.py"
 
 PROTOC="$TOOL_DIR/protoc"

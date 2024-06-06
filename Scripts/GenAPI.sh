@@ -3,6 +3,7 @@
 set -e
 
 PROJECT_ROOT="${1//\\//}"
+PLUGIN_ROOT="${2//\\//}"
 
 echo "Generating Python API..."
 
@@ -40,9 +41,9 @@ set -e
 
 # Finally build and install the Tempo API (and its dependencies) to the virtual environment.
 pip uninstall tempo --yes --quiet # Uninstall first to remove any stale files
-python "$PROJECT_ROOT/Content/Python/gen_api.py"
+python "$PLUGIN_ROOT/Content/Python/gen_api.py"
 set +e # Again proceed despite errors from pip.
-pip install "$PROJECT_ROOT/Content/Python/API" --quiet --retries 0 # One --quiet to suppress warnings but show errors
+pip install "$PLUGIN_ROOT/Content/Python/API" --quiet --retries 0 # One --quiet to suppress warnings but show errors
 set -e
 
 echo "Done"
