@@ -38,13 +38,13 @@
 	],
 	"PreBuildSteps": {
 		"Win64": [
-			"$(PluginDir)\\..\\Scripts\\PreBuild.bat \"$(EngineDir)\" \"$(ProjectFile)\" \"$(ProjectDir)\" \"$(TargetName)\" \"$(TargetConfiguration)\" \"$(TargetPlatform)\" \"$(PluginDir)\\Source\\ThirdParty\\gRPC\\Binaries\\Windows\""
+			"$(PluginDir)\\..\\Scripts\\PreBuild.bat \"$(EngineDir)\" \"$(ProjectFile)\" \"$(ProjectDir)\" \"$(PluginDir)\" \"$(TargetName)\" \"$(TargetConfiguration)\" \"$(TargetPlatform)\" \"$(PluginDir)\\Source\\ThirdParty\\gRPC\\Binaries\\Windows\""
 		],
 		"Mac": [
-			"$(PluginDir)/../Scripts/PreBuild.sh \"$(EngineDir)\" \"$(ProjectFile)\" \"$(ProjectDir)\" \"$(TargetName)\" \"$(TargetConfiguration)\" \"$(TargetPlatform)\" \"$(PluginDir)/Source/ThirdParty/gRPC/Binaries/Mac\"",
+			"$(PluginDir)/../Scripts/PreBuild.sh \"$(EngineDir)\" \"$(ProjectFile)\" \"$(ProjectDir)\" \"$(PluginDir)\" \"$(TargetName)\" \"$(TargetConfiguration)\" \"$(TargetPlatform)\" \"$(PluginDir)/Source/ThirdParty/gRPC/Binaries/Mac\"",
 		],
 		"Linux": [
-			"$(PluginDir)/../Scripts/PreBuild.sh \"$(EngineDir)\" \"$(ProjectFile)\" \"$(ProjectDir)\" \"$(TargetName)\" \"$(TargetConfiguration)\" \"$(TargetPlatform)\" \"$(PluginDir)/Source/ThirdParty/gRPC/Binaries/Linux\"",
+			"$(PluginDir)/../Scripts/PreBuild.sh \"$(EngineDir)\" \"$(ProjectFile)\" \"$(ProjectDir)\" \"$(PluginDir)\" \"$(TargetName)\" \"$(TargetConfiguration)\" \"$(TargetPlatform)\" \"$(PluginDir)/Source/ThirdParty/gRPC/Binaries/Linux\"",
 		]
 	}
 }
