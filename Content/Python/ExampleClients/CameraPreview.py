@@ -32,15 +32,15 @@ def show_color_image(image, name):
 # See https://i.sstatic.net/gyuw4.png to interpret hues.
 label_to_hue = np.array([
     0,      # NoLabel = 0
-    120,    # Roads = 1
+    140,    # Roads = 1
     100,    # Sidewalks = 2
     20,     # Buildings = 3
     0,      # Walls = 4
     0,      # Fences = 5
-    0,      # Poles = 6
+    130,    # Poles = 6
     0,      # TrafficLight = 7
-    0,      # TrafficSigns = 8
-    60,     # Vegetation = 9
+    40,     # TrafficSigns = 8
+    70,     # Vegetation = 9
     0,      # Terrain = 10
     90,     # Sky = 11
     150,    # Pedestrians = 12
