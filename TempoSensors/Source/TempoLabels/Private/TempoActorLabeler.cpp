@@ -44,24 +44,37 @@ void UTempoActorLabeler::BuildLabelMaps()
 		const FName& Label = Key;
 		for (const TSubclassOf<AActor>& ActorType : Value.ActorTypes)
 		{
-			if (ActorLabels.Contains(ActorType))
+			if (ActorType.Get())
 			{
-				UE_LOG(LogTempoLabels, Error, TEXT("Actor type %s is associated with more than one label (%s and %s)"), *ActorType->GetName(), *ActorLabels[ActorType].ToString(), *Label.ToString());
-				continue;
+				if (ActorLabels.Contains(ActorType))
+				{
+					UE_LOG(LogTempoLabels, Error, TEXT("Actor type %s is associated with more than one label (%s and %s)"), *ActorType->GetName(), *ActorLabels[ActorType].ToString(), *Label.ToString());
+					continue;
+				}
+				ActorLabels.Add(ActorType, Label);
 			}
-			ActorLabels.Add(ActorType, Label);
+			else
+			{
+				UE_LOG(LogTempoLabels, Warning, TEXT("Null Actor associated with label %s"), *Label.ToString());
+			}
 		}
 
 		for (const TSoftObjectPtr<UStaticMesh>& StaticMeshAsset : Value.StaticMeshTypes)
 		{
-			FString MeshId;
-			StaticMeshAsset.LoadSynchronous()->GetMeshId(MeshId);
-			if (StaticMeshLabels.Contains(MeshId))
+			if (UStaticMesh* StaticMesh = StaticMeshAsset.LoadSynchronous())
 			{
-				UE_LOG(LogTempoLabels, Error, TEXT("Static mesh type %s is associated with more than one label (%s and %s)"), *MeshId, *StaticMeshLabels[MeshId].ToString(), *Label.ToString());
-				continue;
+				const FString MeshFullPath = StaticMesh->GetPathName();
+				if (StaticMeshLabels.Contains(MeshFullPath))
+				{
+					UE_LOG(LogTempoLabels, Error, TEXT("Static mesh type %s is associated with more than one label (%s and %s)"), *MeshFullPath, *StaticMeshLabels[MeshFullPath].ToString(), *Label.ToString());
+					continue;
+				}
+				StaticMeshLabels.Add(MeshFullPath, Label);
 			}
-			StaticMeshLabels.Add(MeshId, Label);
+			else
+			{
+				UE_LOG(LogTempoLabels, Warning, TEXT("Null static mesh associated with label %s"), *Label.ToString());
+			}
 		}
 
 		const int32 LabelId = Value.Label;
@@ -125,9 +138,8 @@ void UTempoActorLabeler::LabelActor(AActor* Actor) const
 		{
 			if (UStaticMesh* StaticMesh = StaticMeshComponent->GetStaticMesh())
 			{
-				FString MeshId;
-				StaticMesh->GetMeshId(MeshId);
-				if (const FName* StaticMeshLabel = StaticMeshLabels.Find(MeshId))
+				FString MeshFullPath = StaticMesh->GetPathName();
+				if (const FName* StaticMeshLabel = StaticMeshLabels.Find(MeshFullPath))
 				{
 					if (const int32* StaticMeshLabelId = LabelIds.Find(*StaticMeshLabel))
 					{
