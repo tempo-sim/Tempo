@@ -117,11 +117,9 @@ private:
 	void MaybeCapture();
 	
 	FTimerHandle TimerHandle;
-
-#if PLATFORM_LINUX
-	// We must copy our TextureTarget's resource here before reading it on the CPU, due to a Vulkan limitation.
+	
+	// We must copy our TextureTarget's resource here before reading it on the CPU.
 	mutable FTextureRHIRef TextureRHICopy;
-#endif
 };
 
 // Enqueue a read of our full render target, reinterpreting the raw pixels as PixelType.
@@ -134,17 +132,13 @@ TTextureRead<PixelType>* UTempoSceneCaptureComponent2D::EnqueueTextureRead() con
 	struct FReadSurfaceContext{
 		FRenderTarget* RenderTarget;
 		TArray<PixelType>* Image;
-#if PLATFORM_LINUX
         FTextureRHIRef TextureRHICopy;
-#endif
 	};
 
 	FReadSurfaceContext Context = {
 		TextureTarget->GameThread_GetRenderTargetResource(),
-		&TextureRead->Image
-#if PLATFORM_LINUX
-        , TextureRHICopy
-#endif
+		&TextureRead->Image,
+        TextureRHICopy
 	};
 
 	ENQUEUE_RENDER_COMMAND(ReadSurfaceCommand)(
@@ -152,18 +146,13 @@ TTextureRead<PixelType>* UTempoSceneCaptureComponent2D::EnqueueTextureRead() con
 		{
 			void* OutBuffer;
 			int32 SurfaceWidth, SurfaceHeight;
-#if PLATFORM_LINUX
 			// Vulkan checks that a texture has TexCreate_CPUReadback flag set in MapStagingSurface, which our TextureTarget does not.
 			// However we can work around this by creating a texture with the flag set and copying our TextureTarget there first.
 			// Credit for this idea to https://forums.unrealengine.com/t/lock-read-rhitexture-on-vulkan/465529
 			RHICmdList.CopyTexture(Context.RenderTarget->GetRenderTargetTexture(), Context.TextureRHICopy, FRHICopyTextureInfo());
-			FRHITexture* RHITexture = Context.TextureRHICopy;
-#else
-			FRHITexture* RHITexture = Context.RenderTarget->GetRenderTargetTexture();
-#endif
-			RHICmdList.MapStagingSurface(RHITexture, OutBuffer, SurfaceWidth, SurfaceHeight);
+			RHICmdList.MapStagingSurface(Context.TextureRHICopy, OutBuffer, SurfaceWidth, SurfaceHeight);
 			FMemory::Memcpy(Context.Image->GetData(), OutBuffer, SurfaceWidth * SurfaceHeight * sizeof(PixelType));
-			RHICmdList.UnmapStagingSurface(Context.RenderTarget->GetRenderTargetTexture());
+			RHICmdList.UnmapStagingSurface(Context.TextureRHICopy);
 	});
 	
 	TextureRead->RenderFence.BeginFence();

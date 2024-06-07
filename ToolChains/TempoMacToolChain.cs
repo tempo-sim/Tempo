@@ -23,14 +23,14 @@ namespace UnrealBuildTool
     //    support the --allow-multiple-definition option.
     class TempoMacToolChain : MacToolChain
     {
-        public TempoMacToolChain(ReadOnlyTargetRules Target)
-            : this(Target.ProjectFile, TempoMacToolChainClangOptions(Target), Log.Logger)
+        public TempoMacToolChain(ReadOnlyTargetRules Target, ILogger Logger)
+            : this(Target, TempoMacToolChainClangOptions(Target), Logger)
         {
             
         }
 
-        private TempoMacToolChain(FileReference? InProjectFile, ClangToolChainOptions InOptions, ILogger InLogger)
-            : base(InProjectFile, InOptions, InLogger)
+        private TempoMacToolChain(ReadOnlyTargetRules Target, ClangToolChainOptions InOptions, ILogger Logger)
+            : base(Target, InOptions, Logger)
         {
             
         }
