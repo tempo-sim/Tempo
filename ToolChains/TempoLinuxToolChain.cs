@@ -24,14 +24,14 @@ namespace UnrealBuildTool
     //    Mac builds as similar as possible.
     class TempoLinuxToolChain : LinuxToolChain
     {
-        public TempoLinuxToolChain(ReadOnlyTargetRules Target)
-            : this(Target.Architecture, UEBuildPlatform.GetSDK(UnrealTargetPlatform.Linux) as LinuxPlatformSDK, TempoLinuxToolChainClangOptions(Target), Log.Logger)
+        public TempoLinuxToolChain(ReadOnlyTargetRules Target, ILogger Logger)
+            : this(Target.Architecture, UEBuildPlatform.GetSDK(UnrealTargetPlatform.Linux) as LinuxPlatformSDK, TempoLinuxToolChainClangOptions(Target), Logger)
         {
             
         }
 
-        private TempoLinuxToolChain(UnrealArch InArchitecture, LinuxPlatformSDK InSDK, ClangToolChainOptions InOptions, ILogger InLogger)
-            : base(InArchitecture, InSDK, InOptions, InLogger)
+        private TempoLinuxToolChain(UnrealArch InArchitecture, LinuxPlatformSDK InSDK, ClangToolChainOptions InOptions, ILogger Logger)
+            : base(InArchitecture, InSDK, InOptions, Logger)
         {
             
         }

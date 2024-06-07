@@ -68,16 +68,34 @@ void UTempoSceneCaptureComponent2D::InitRenderTarget()
 		TextureTarget->InitCustomFormat(SizeXY.X, SizeXY.Y, PixelFormatOverride, true);
 	}
 
-#if PLATFORM_LINUX
-	// Create the TextureRHICopy, where we will copy our TextureTarget's resource before reading it on the CPU, due to a Vulkan limitation.
-	ETextureCreateFlags TexCreateFlags = ETextureCreateFlags::Shared | ETextureCreateFlags::RenderTargetable | ETextureCreateFlags::ShaderResource | ETextureCreateFlags::CPUReadback;
-	
-	const FRHITextureCreateDesc Desc =
-		FRHITextureCreateDesc::Create2D(*FString::Printf(TEXT("%s TextureRHICopy"), *GetName()))
-		.SetExtent(TextureTarget->SizeX, TextureTarget->SizeY)
-		.SetFormat(TextureTarget->GetFormat())
-		.SetFlags(TexCreateFlags);
-	
-	TextureRHICopy = RHICreateTexture(Desc);
-#endif
+	struct FInitCPUCopyContext {
+		FString Name;
+		int32 SizeX;
+		int32 SizeY;
+		EPixelFormat PixelFormat;
+		FTextureRHIRef* TextureRHICopy;
+	};
+
+	FInitCPUCopyContext Context = {
+		FString::Printf(TEXT("%s TextureRHICopy"), *GetName()),
+		TextureTarget->SizeX,
+		TextureTarget->SizeY,
+		TextureTarget->GetFormat(),
+		&TextureRHICopy
+	};
+
+	ENQUEUE_RENDER_COMMAND(InitCommand)(
+		[Context](FRHICommandList& RHICmdList)
+		{
+			// Create the TextureRHICopy, where we will copy our TextureTarget's resource before reading it on the CPU, due to a Vulkan limitation.
+			constexpr ETextureCreateFlags TexCreateFlags = ETextureCreateFlags::Shared | ETextureCreateFlags::CPUReadback;
+		
+			const FRHITextureCreateDesc Desc =
+				FRHITextureCreateDesc::Create2D(*Context.Name)
+				.SetExtent(Context.SizeX, Context.SizeY)
+				.SetFormat(Context.PixelFormat)
+				.SetFlags(TexCreateFlags);
+		
+			*Context.TextureRHICopy = RHICreateTexture(Desc);
+		});
 }

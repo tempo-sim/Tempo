@@ -6,6 +6,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using EpicGames.Core;
+using Microsoft.Extensions.Logging;
 using UnrealBuildBase;
 
 namespace UnrealBuildTool
@@ -26,8 +27,8 @@ namespace UnrealBuildTool
     //    all the libraries (deduplicated, with many exceptions, its complicated) and explicitly export them all.s
     class TempoVCToolChain : VCToolChain
     {
-        public TempoVCToolChain(ReadOnlyTargetRules Target)
-            : base(Target, Log.Logger)
+        public TempoVCToolChain(ReadOnlyTargetRules Target, ILogger Logger)
+            : base(Target, Logger)
         {
             
         }
