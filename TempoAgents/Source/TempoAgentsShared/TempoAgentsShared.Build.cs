@@ -10,6 +10,7 @@ public class TempoAgentsShared : ModuleRules
             new string[]
             {
                 "Core",
+                "Engine",
             }
         );
 
@@ -17,9 +18,10 @@ public class TempoAgentsShared : ModuleRules
             new string[]
             {
                 "CoreUObject",
-                "Engine",
+                "DeveloperSettings",
                 "Slate",
-                "SlateCore"
+                "SlateCore",
+                "ZoneGraph",
             }
         );
     }
