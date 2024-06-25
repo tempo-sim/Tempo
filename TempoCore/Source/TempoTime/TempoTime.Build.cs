@@ -37,13 +37,11 @@ public class TempoTime : TempoModuleRules
 		PrivateDependencyModuleNames.AddRange(
 			new string[]
 			{
-				// Unreal
 				"CoreUObject",
 				"Engine",
 				"Slate",
 				"SlateCore",
 				"UMG",
-				// Tempo
 			}
 			);
 		

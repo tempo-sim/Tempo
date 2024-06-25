@@ -41,6 +41,7 @@ public class TempoGeographic : TempoModuleRules
 				"SlateCore",
 				// Tempo
 				"TempoTime",
+				"TempoCoreShared",
 			}
 			);
 		

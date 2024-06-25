@@ -1,0 +1,75 @@
+﻿{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.0",
+	"FriendlyName": "TempoROSBridge",
+	"Description": "Tempo plugin for bridging to ROS",
+	"Category": "Other",
+	"CreatedBy": "Tempo Simulation, LLC",
+	"CreatedByURL": "http://temposimulation.com",
+	"DocsURL": "",
+	"MarketplaceURL": "",
+	"CanContainContent": true,
+	"IsBetaVersion": false,
+	"IsExperimentalVersion": false,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "TempoROSBridge",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "TempoTimeROSBridge",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "TempoScriptingROSBridge",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "TempoVehiclesROSBridge",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "TempoSensorsROSBridge",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "TempoGeographicROSBridge",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "TempoROSBridgeShared",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		}
+	],
+	"Plugins": [
+		{
+			"Name": "TempoROS",
+			"Enabled": true
+		},
+		{
+			"Name": "TempoCore",
+			"Enabled": true
+		},
+		{
+			"Name": "TempoSensors",
+			"Enabled": true
+		},
+		{
+			"Name": "TempoVehicles",
+			"Enabled": true
+		},
+		{
+			"Name": "TempoGeographic",
+			"Enabled": true
+		}
+	]
+}
