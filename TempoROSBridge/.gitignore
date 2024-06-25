@@ -1,0 +1,18 @@
+# Ignore all generated ROS IDL files by ignoring all 'msg' and 'srv' folders, except for ones that appear directly beneath a Public or Private folder
+# Ignore all 'msg' and 'srv' and 'tmp' folders
+msg/
+srv/
+tmp/
+# But not 'msg' folders directly under 'Public' or 'Private'
+!Public/msg/
+!Public/msg/**
+!Private/msg/
+!Private/msg/**
+!Public/srv/
+!Public/srv/**
+!Private/srv/
+!Private/srv/**
+
+# Generated rosidl force export files
+*force_export_rosidl_typesupport_symbols.cpp
+
