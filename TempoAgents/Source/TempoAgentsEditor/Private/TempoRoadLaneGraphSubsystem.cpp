@@ -5,15 +5,28 @@
 
 #include "EngineUtils.h"
 #include "TempoAgentsEditor.h"
+#include "TempoRoadQueryInterface.h"
 #include "TempoIntersectionQueryInterface.h"
 #include "ZoneGraphSettings.h"
 #include "ZoneShapeComponent.h"
+#include "ZoneGraphSubsystem.h"
+#include "ZoneGraphDelegates.h"
 #include "DrawDebugHelpers.h"
 #include "VectorTypes.h"
 
 //
 // Blueprint interface functions
 //
+
+void UTempoRoadLaneGraphSubsystem::SetupZoneGraphBuilder()
+{
+	UZoneGraphSubsystem* ZoneGraphSubsystem = UWorld::GetSubsystem<UZoneGraphSubsystem>(GetWorld());
+
+	if (ensureMsgf(ZoneGraphSubsystem != nullptr, TEXT("Can't access UZoneGraphSubsystem during call to SetupZoneGraphBuilder.")))
+	{
+		ZoneGraphSubsystem->RegisterBuilder(&TempoZoneGraphBuilder);
+	}
+}
 
 bool UTempoRoadLaneGraphSubsystem::TryGenerateZoneShapeComponents() const
 {
@@ -56,6 +69,11 @@ bool UTempoRoadLaneGraphSubsystem::TryGenerateZoneShapeComponents() const
 	}
 
 	return true;
+}
+
+void UTempoRoadLaneGraphSubsystem::BuildZoneGraph() const
+{
+	UE::ZoneGraphDelegates::OnZoneGraphRequestRebuild.Broadcast();
 }
 
 //

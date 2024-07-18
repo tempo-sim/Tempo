@@ -2,9 +2,11 @@
 
 #include "ZoneShapeUtilities.h"
 #include "BezierUtilities.h"
+#include "ZoneGraphBuilder.h"
 #include "Algo/Reverse.h"
 #include "HAL/IConsoleManager.h"
 #include "ZoneGraphSettings.h"
+#include "ZoneShapeComponent.h"
 
 namespace UE::ZoneGraph::Debug {
 
@@ -998,23 +1000,6 @@ void TessellateSplineShape(TConstArrayView<FZoneShapePoint> Points, const FZoneL
 	}
 }
 
-
-struct FLaneConnectionSlot
-{
-	FVector Position = FVector::ZeroVector;
-	FVector Forward = FVector::ZeroVector;
-	FVector Up = FVector::ZeroVector;
-	FZoneLaneDesc LaneDesc;
-	int32 PointIndex = 0;	// Index in dest point array
-	int32 Index = 0;		// Index within an entry
-	uint16 EntryID = 0;		// Entry ID from source data
-	const FZoneLaneProfile* Profile = nullptr;
-	EZoneShapeLaneConnectionRestrictions Restrictions = EZoneShapeLaneConnectionRestrictions::None;
-	float DistanceFromProfileEdge = 0.0f;	// Distance from lane profile edge
-	float DistanceFromFarProfileEdge = 0.0f; // Distance to other lane profile edge
-	float InnerTurningRadius = 0.0f; // Inner/minimum turning radius when using Arc routing.
-};
-
 struct FLaneConnectionCandidate
 {
 	FLaneConnectionCandidate() = default;
@@ -1201,6 +1186,7 @@ struct FConnectionEntry
 };
 
 static void BuildLanesBetweenPoints(const FConnectionEntry& Source, TConstArrayView<FConnectionEntry> Destinations,
+									const UZoneShapeComponent& PolygonShapeComp, const TMap<int32, const UZoneShapeComponent*>& PointIndexToZoneShapeComponent, const FZoneGraphBuilder& ZoneGraphBuilder,
 									const EZoneShapePolygonRoutingType RoutingType, const FZoneGraphTagMask ZoneTags, const FZoneGraphBuildSettings& BuildSettings, const FMatrix& LocalToWorld,
 									FZoneGraphStorage& OutZoneStorage, TArray<FZoneShapeLaneInternalLink>& OutInternalLinks)
 {
@@ -1611,6 +1597,30 @@ static void BuildLanesBetweenPoints(const FConnectionEntry& Source, TConstArrayV
 		}
 	}
 
+	TArray<const UZoneShapeComponent*> ShapeComponentsInMap;
+	PointIndexToZoneShapeComponent.GenerateValueArray(ShapeComponentsInMap);
+
+	const bool bAllZoneShapeComponentsInMapAreValid = !ShapeComponentsInMap.Contains(nullptr);
+	if (bAllZoneShapeComponentsInMapAreValid)
+	{
+		Candidates.RemoveAll([&ZoneGraphBuilder, &PolygonShapeComp, &SourceSlots, &DestSlots, &PointIndexToZoneShapeComponent](const FLaneConnectionCandidate& Candidate)
+		{
+			// The true index to the ZoneShapePoint in this context is the slot's EntryID, not PointIndex field.
+			// In fact, SourceSlots don't even fill-out their PointIndex fields.
+			// So, we look up the ZoneShapeComponent for this slot via EntryID.
+			const FLaneConnectionSlot& SourceSlot = SourceSlots[Candidate.SourceSlot];
+			const UZoneShapeComponent* SourceShapeComp = PointIndexToZoneShapeComponent[SourceSlot.EntryID];
+
+			// The true index to the ZoneShapePoint in this context is the slot's EntryID, not PointIndex field.
+			// DestSlots use PointIndex to point into the Destinations array, not the ZoneShapePoints array.
+			// So, we look up the ZoneShapeComponent for this slot via EntryID.
+			const FLaneConnectionSlot& DestSlot = DestSlots[Candidate.DestSlot];
+			const UZoneShapeComponent* DestShapeComp = PointIndexToZoneShapeComponent[DestSlot.EntryID];
+
+			return ZoneGraphBuilder.ShouldFilterLaneConnection(PolygonShapeComp, *SourceShapeComp, SourceSlots, Candidate.SourceSlot, *DestShapeComp, DestSlots, Candidate.DestSlot);
+		});
+	}
+
 	// Sort candidates for lane adjacency. First by source index, then by destination index.
 	// Lane adjacency is not that obvious in polygons. With this sort we make sure that they are somewhat in order and that the whole set can be iterated over.
 	Candidates.Sort([](const FLaneConnectionCandidate& A, const FLaneConnectionCandidate& B) { return A.SourceSlot < B.SourceSlot || (A.SourceSlot == B.SourceSlot && A.DestSlot < B.DestSlot); });
@@ -1729,9 +1739,27 @@ float GetPolygonBoundaryTessellationTolerance(TConstArrayView<FZoneLaneProfile> 
 	return TessTolerance;
 }
 
-void TessellatePolygonShape(TConstArrayView<FZoneShapePoint> Points, const EZoneShapePolygonRoutingType RoutingType, TConstArrayView<FZoneLaneProfile> LaneProfiles, const FZoneGraphTagMask ZoneTags, const FMatrix& LocalToWorld,
+void TessellatePolygonShape(const UZoneShapeComponent& PolygonShapeComp, const FZoneGraphBuilder& ZoneGraphBuilder,
+							TConstArrayView<FZoneShapePoint> Points, TConstArrayView<FZoneLaneProfile> LaneProfiles, const FMatrix& LocalToWorld,
 							FZoneGraphStorage& OutZoneStorage, TArray<FZoneShapeLaneInternalLink>& OutInternalLinks)
 {
+	const EZoneShapePolygonRoutingType RoutingType = PolygonShapeComp.GetPolygonRoutingType();
+	const FZoneGraphTagMask ZoneTags = PolygonShapeComp.GetTags();
+
+	TConstArrayView<FZoneShapeConnector> ShapeConnectors = PolygonShapeComp.GetShapeConnectors();
+	TConstArrayView<FZoneShapeConnection> ConnectedShapes = PolygonShapeComp.GetConnectedShapes();
+
+	checkf(ConnectedShapes.Num() == ShapeConnectors.Num(), TEXT("ConnectedShapes and ShapeConnectors should have the same number of entries."));
+	
+	TMap<int32, const UZoneShapeComponent*> PointIndexToZoneShapeComponent;
+	for (int32 ConnectionIndex = 0; ConnectionIndex < ConnectedShapes.Num(); ++ConnectionIndex)
+	{
+		const int32 PointIndex = ShapeConnectors[ConnectionIndex].PointIndex;
+		const UZoneShapeComponent* ZoneShapeComponent = ConnectedShapes[ConnectionIndex].ShapeComponent.Get();
+		
+		PointIndexToZoneShapeComponent.Add(PointIndex, ZoneShapeComponent);
+	}
+	
 	const UZoneGraphSettings* ZoneGraphSettings = GetDefault<UZoneGraphSettings>();
 	check(ZoneGraphSettings);
 	const FZoneGraphBuildSettings& BuildSettings = ZoneGraphSettings->GetBuildSettings();
@@ -1822,7 +1850,7 @@ void TessellatePolygonShape(TConstArrayView<FZoneShapePoint> Points, const EZone
 		}
 		// Connect source to destinations.
 		BuildLanesBetweenPoints(FConnectionEntry(SourcePoint, SourceLaneProfile, SourceIdx, OutgoingConnections[SourceIdx], IncomingConnections[SourceIdx]),
-								Destinations, RoutingType, ZoneTags, BuildSettings, LocalToWorld, OutZoneStorage, OutInternalLinks);
+								Destinations, PolygonShapeComp, PointIndexToZoneShapeComponent, ZoneGraphBuilder, RoutingType, ZoneTags, BuildSettings, LocalToWorld, OutZoneStorage, OutInternalLinks);
 	}
 
 	Zone.LanesEnd = OutZoneStorage.Lanes.Num();
