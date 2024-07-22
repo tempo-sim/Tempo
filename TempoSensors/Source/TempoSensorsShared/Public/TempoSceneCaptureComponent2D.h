@@ -117,7 +117,7 @@ private:
 	void MaybeCapture();
 	
 	FTimerHandle TimerHandle;
-	
+
 	// We must copy our TextureTarget's resource here before reading it on the CPU.
 	mutable FTextureRHIRef TextureRHICopy;
 };
@@ -128,17 +128,17 @@ template <typename PixelType>
 TTextureRead<PixelType>* UTempoSceneCaptureComponent2D::EnqueueTextureRead() const
 {
 	TTextureRead<PixelType>* TextureRead = new TTextureRead<PixelType>(SizeXY, SequenceId, GetWorld()->GetTimeSeconds());
-	
+
 	struct FReadSurfaceContext{
 		FRenderTarget* RenderTarget;
 		TArray<PixelType>* Image;
-        FTextureRHIRef TextureRHICopy;
+	        FTextureRHIRef TextureRHICopy;
 	};
 
 	FReadSurfaceContext Context = {
 		TextureTarget->GameThread_GetRenderTargetResource(),
 		&TextureRead->Image,
-        TextureRHICopy
+	        TextureRHICopy
 	};
 
 	ENQUEUE_RENDER_COMMAND(ReadSurfaceCommand)(
@@ -146,16 +146,26 @@ TTextureRead<PixelType>* UTempoSceneCaptureComponent2D::EnqueueTextureRead() con
 		{
 			void* OutBuffer;
 			int32 SurfaceWidth, SurfaceHeight;
-			// Vulkan checks that a texture has TexCreate_CPUReadback flag set in MapStagingSurface, which our TextureTarget does not.
-			// However we can work around this by creating a texture with the flag set and copying our TextureTarget there first.
-			// Credit for this idea to https://forums.unrealengine.com/t/lock-read-rhitexture-on-vulkan/465529
+			// First, check that the source and destination formats are the same. They can differ on the first render after transitioning formats.
+			// TODO: Can this situation be prevented?
+			if (Context.RenderTarget->GetRenderTargetTexture()->GetFormat() != Context.TextureRHICopy->GetFormat())
+			{
+				return;
+			}
+                        // Then, transition our TextureTarget to be copyable.
+                        const FRHITransitionInfo TransitionInfo(Context.RenderTarget->GetRenderTargetTexture(), ERHIAccess::Unknown, ERHIAccess::CopySrc);
+                        RHICmdList.Transition(TransitionInfo);
+                        // Then, copy our TextureTarget to another where it can be read on the CPU.
+                        // Credit for this idea to https://forums.unrealengine.com/t/lock-read-rhitexture-on-vulkan/465529
 			RHICmdList.CopyTexture(Context.RenderTarget->GetRenderTargetTexture(), Context.TextureRHICopy, FRHICopyTextureInfo());
+			// Lastly, read the raw data from the copied TextureTarget on the CPU.
 			RHICmdList.MapStagingSurface(Context.TextureRHICopy, OutBuffer, SurfaceWidth, SurfaceHeight);
 			FMemory::Memcpy(Context.Image->GetData(), OutBuffer, SurfaceWidth * SurfaceHeight * sizeof(PixelType));
 			RHICmdList.UnmapStagingSurface(Context.TextureRHICopy);
 	});
-	
+
 	TextureRead->RenderFence.BeginFence();
 
 	return TextureRead;
 }
+

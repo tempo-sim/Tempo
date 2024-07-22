@@ -55,7 +55,7 @@ void UTempoSceneCaptureComponent2D::MaybeCapture()
 void UTempoSceneCaptureComponent2D::InitRenderTarget()
 {
 	TextureTarget = NewObject<UTextureRenderTarget2D>(this);
-	
+
 	TextureTarget->TargetGamma = GetDefault<UTempoSensorsSettings>()->GetSceneCaptureGamma();
 	TextureTarget->RenderTargetFormat = RenderTargetFormat;
 	TextureTarget->bGPUSharedFlag = true;
@@ -87,15 +87,15 @@ void UTempoSceneCaptureComponent2D::InitRenderTarget()
 	ENQUEUE_RENDER_COMMAND(InitCommand)(
 		[Context](FRHICommandList& RHICmdList)
 		{
-			// Create the TextureRHICopy, where we will copy our TextureTarget's resource before reading it on the CPU, due to a Vulkan limitation.
+			// Create the TextureRHICopy, where we will copy our TextureTarget's resource before reading it on the CPU.
 			constexpr ETextureCreateFlags TexCreateFlags = ETextureCreateFlags::Shared | ETextureCreateFlags::CPUReadback;
-		
+
 			const FRHITextureCreateDesc Desc =
 				FRHITextureCreateDesc::Create2D(*Context.Name)
 				.SetExtent(Context.SizeX, Context.SizeY)
 				.SetFormat(Context.PixelFormat)
 				.SetFlags(TexCreateFlags);
-		
+
 			*Context.TextureRHICopy = RHICreateTexture(Desc);
 		});
 }
