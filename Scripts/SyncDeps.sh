@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright Tempo Simulation, LLC. All Rights Reserved
 
 set -e
 

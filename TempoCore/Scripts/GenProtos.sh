@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright Tempo Simulation, LLC. All Rights Reserved
 
 set -e
 
@@ -76,12 +77,12 @@ REPLACE_IF_STALE () {
 }
 
 GEN_MODULE_PROTOS() {
-  local SOURCE_DIR="$1"
+  local INCLUDE_DIR="$1"
   local MODULE_PATH="$2"
   local PRIVATE_DEST_DIR="$MODULE_PATH/Private/ProtobufGenerated"
   local PUBLIC_DEST_DIR="$MODULE_PATH/Public/ProtobufGenerated"
   local MODULE_NAME="$3"
-  local INCLUDE_DIR="$4"
+  local SOURCE_DIR="$INCLUDE_DIR"/"$MODULE_NAME"
   local EXPORT_MACRO
   EXPORT_MACRO=$(echo "$MODULE_NAME" | tr '[:lower:]' '[:upper:]')_API
   
@@ -120,8 +121,16 @@ GEN_MODULE_PROTOS() {
     # Construct relative path in CPP/PUBLIC_DEST_DIR
     local RELATIVE_PATH="${GENERATED_FILE#$CPP_TEMP_DIR}"
     RELATIVE_PATH="${RELATIVE_PATH:1}"
+    MODULE_SRC_TEMP_DIR="$SRC_TEMP_DIR/$MODULE_NAME"
     if [[ $GENERATED_FILE == *pb.h ]]; then
-      local POSSIBLY_STALE_FILE="$PUBLIC_DEST_DIR/$RELATIVE_PATH"
+      # Header files go in the Public directory *if* they are Public
+      STRIPPED_PATH="${RELATIVE_PATH#"$MODULE_NAME"}"
+      STRIPPED_PATH="${STRIPPED_PATH%%.*}.proto"
+      if [[ -f "$MODULE_SRC_TEMP_DIR/Public$STRIPPED_PATH" ]]; then
+        local POSSIBLY_STALE_FILE="$PUBLIC_DEST_DIR/$RELATIVE_PATH"
+      else
+        local POSSIBLY_STALE_FILE="$PRIVATE_DEST_DIR/$RELATIVE_PATH"
+      fi
     else
       local POSSIBLY_STALE_FILE="$PRIVATE_DEST_DIR/$RELATIVE_PATH"
     fi
@@ -136,9 +145,17 @@ GEN_MODULE_PROTOS() {
     fi
   done
   
+  # And any directories within the generated directories that are now empty
+  if [ -d "$MODULE_PATH/Public/ProtobufGenerated" ]; then
+    find "$MODULE_PATH/Public/ProtobufGenerated" -type d -empty -delete
+  fi
+  if [ -d "$MODULE_PATH/Private/ProtobufGenerated" ]; then
+    find "$MODULE_PATH/Private/ProtobufGenerated" -type d -empty -delete
+  fi
+  
   REFRESHED_PY_FILES=""
   # Replace any stale Python files.
-  for GENERATED_FILE in $(find "$PYTHON_TEMP_DIR" -type f); do    
+  for GENERATED_FILE in $(find "$PYTHON_TEMP_DIR" -type f); do
     # Construct relative path in PYTHON_DEST_DIR
     local RELATIVE_PATH="${GENERATED_FILE#$PYTHON_TEMP_DIR}"
     RELATIVE_PATH="${RELATIVE_PATH:1}"
@@ -160,6 +177,9 @@ GEN_MODULE_PROTOS() {
   for PY_FILE in $(find "$PYTHON_DEST_DIR"  -maxdepth 1 -type f -name "*_pb2*"); do
       rm "$PY_FILE"
   done
+  
+  # And any directories with the generated directory that are now empty
+  find "$PYTHON_DEST_DIR" -type d -empty -delete
 }
 
 echo "Generating protobuf code..."
@@ -205,7 +225,7 @@ for BUILD_CS_FILE in $(find "$PROJECT_ROOT" -name '*.Build.cs' -type f); do
       RELATIVE_PATH="${PROTO_FILE#$MODULE_PATH}"
       RELATIVE_PATH="${RELATIVE_PATH:1}"
       MODULE_SRC_TEMP_DIR_DEST="$MODULE_SRC_TEMP_DIR/$RELATIVE_PATH"
-      mkdir -p "$(dirname $MODULE_SRC_TEMP_DIR_DEST)"
+      mkdir -p "$(dirname "$MODULE_SRC_TEMP_DIR_DEST")"
       cp "$PROTO_FILE" "$MODULE_SRC_TEMP_DIR/$RELATIVE_PATH"
     done
   fi
@@ -243,7 +263,7 @@ SYNCPROTOS() {
     robocopy "$SRC" "$DEST" "*.proto" -s > /dev/null 2>&1
     set -e
   else
-    rsync -av --include="*.proto" --exclude="*" "$SRC" "$DEST" > /dev/null 2>&1
+    rsync -av --include="*/" --include="*.proto" --exclude="*" "$SRC" "$DEST" > /dev/null 2>&1
   fi
 }
 
@@ -284,7 +304,7 @@ GET_MODULE_INCLUDES() {
     if [ -d "$SRC_TEMP_DIR/$PUBLIC_DEPENDENCY" ]; then # Only consider project modules
       if [ -d "$INCLUDES_DIR/$PUBLIC_DEPENDENCY" ]; then
         # We already have this dependency - but still add its public dependencies.
-        GET_MODULE_INCLUDES_PUBLIC_ONLY "$PUBLIC_DEPENDENCY" "$INCLUDES"
+        GET_MODULE_INCLUDES_PUBLIC_ONLY "$PUBLIC_DEPENDENCY" "$INCLUDES_DIR"
       else
         # This is a new dependency - add its public protos and those of its public dependencies.
         mkdir -p "$INCLUDES_DIR/$PUBLIC_DEPENDENCY"
@@ -299,7 +319,7 @@ GET_MODULE_INCLUDES() {
     if [[ -d "$SRC_TEMP_DIR/$PRIVATE_DEPENDENCY" ]]; then # Only consider project modules
       if [[ -d "$INCLUDES_DIR/$PRIVATE_DEPENDENCY" ]]; then
         # We already have this dependency - but still add its public dependencies.
-        GET_MODULE_INCLUDES_PUBLIC_ONLY "$MODULE_NAME" "$INCLUDES"
+        GET_MODULE_INCLUDES_PUBLIC_ONLY "$MODULE_NAME" "$INCLUDES_DIR"
       else
         # This is a new dependency - add its public protos and those of its public dependencies.
         mkdir -p "$INCLUDES_DIR/$PRIVATE_DEPENDENCY"
@@ -323,8 +343,7 @@ for BUILD_CS_FILE in $(find "$PROJECT_ROOT" -name '*.Build.cs' -type f); do
   fi
   MODULE_INCLUDES_TEMP_DIR="$INCLUDES_TEMP_DIR/$MODULE_NAME"
   GET_MODULE_INCLUDES "$MODULE_NAME" "$MODULE_INCLUDES_TEMP_DIR"
-  INCLUDE_DIR="$MODULE_INCLUDES_TEMP_DIR"
-  GEN_MODULE_PROTOS "$MODULE_INCLUDES_TEMP_DIR/$MODULE_NAME" "$MODULE_PATH" "$MODULE_NAME" "$INCLUDE_DIR"
+  GEN_MODULE_PROTOS "$MODULE_INCLUDES_TEMP_DIR" "$MODULE_PATH" "$MODULE_NAME"
 done
 
 rm -rf "$TEMP"
