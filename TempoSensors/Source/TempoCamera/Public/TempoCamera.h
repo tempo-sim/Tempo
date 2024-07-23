@@ -45,9 +45,9 @@ struct FCameraPixelWithDepth
 {
 	static constexpr bool bSupportsDepth = true;
 	
-	uint8 B() const { return U1; }
+	uint8 B() const { return U3; }
 	uint8 G() const { return U2; }
-	uint8 R() const { return U3; }
+	uint8 R() const { return U1; }
 	
 	uint8 Label() const { return U4; }
 	
