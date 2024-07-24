@@ -25,8 +25,12 @@ public class TempoVehicles : TempoModuleRules
 		PublicDependencyModuleNames.AddRange(
 			new string[]
 			{
+				// Unreal
 				"Core",
 				"Engine",
+				// Tempo
+				"TempoCoreShared",
+				"TempoScripting",
 			}
 			);
 			
@@ -37,8 +41,6 @@ public class TempoVehicles : TempoModuleRules
 				// Unreal
 				"CoreUObject",
 				// Tempo
-				"TempoCoreShared",
-				"TempoScripting",
 				"TempoVehiclesShared",
 			}
 			);

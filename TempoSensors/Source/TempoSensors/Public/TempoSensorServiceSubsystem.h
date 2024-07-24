@@ -2,11 +2,11 @@
 
 #pragma once
 
+#include "TempoWorldSubsystem.h"
 #include "TempoScriptable.h"
 #include "TempoScriptingServer.h"
 
 #include "CoreMinimal.h"
-#include "Subsystems/WorldSubsystem.h"
 
 #include "TempoSensorServiceSubsystem.generated.h"
 
@@ -32,7 +32,7 @@ namespace TempoCamera
 }
 
 UCLASS()
-class TEMPOSENSORS_API UTempoSensorServiceSubsystem : public UWorldSubsystem, public ITempoWorldScriptable
+class TEMPOSENSORS_API UTempoSensorServiceSubsystem : public UTempoWorldSubsystem, public ITempoWorldScriptable
 {
 	GENERATED_BODY()
 	
@@ -42,8 +42,8 @@ public:
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 
 	virtual void OnWorldTickStart(UWorld* World, ELevelTick TickType, float DeltaSeconds);
-	
-private:
+
+protected:
 	void GetAvailableSensors(const TempoSensors::AvailableSensorsRequest& Request, const TResponseDelegate<TempoSensors::AvailableSensorsResponse>& ResponseContinuation) const;
 
 	void StreamColorImages(const TempoCamera::ColorImageRequest& Request, const TResponseDelegate<TempoCamera::ColorImage>& ResponseContinuation) const;

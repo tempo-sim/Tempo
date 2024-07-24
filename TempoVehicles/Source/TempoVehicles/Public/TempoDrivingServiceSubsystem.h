@@ -3,11 +3,10 @@
 #pragma once
 
 #include "TempoScriptable.h"
-
 #include "TempoScriptingServer.h"
+#include "TempoWorldSubsystem.h"
 
 #include "CoreMinimal.h"
-#include "Subsystems/WorldSubsystem.h"
 
 #include "TempoDrivingServiceSubsystem.generated.h"
 
@@ -23,14 +22,14 @@ namespace TempoVehicles
 }
 
 UCLASS()
-class TEMPOVEHICLES_API UTempoDrivingServiceSubsystem : public UWorldSubsystem, public ITempoWorldScriptable
+class TEMPOVEHICLES_API UTempoDrivingServiceSubsystem : public UTempoWorldSubsystem, public ITempoWorldScriptable
 {
 	GENERATED_BODY()
 	
 public:
 	virtual void RegisterWorldServices(UTempoScriptingServer* ScriptingServer) override;
 
-private:
+protected:
 	void GetCommandableVehicles(const TempoScripting::Empty& Request, const TResponseDelegate<TempoVehicles::CommandableVehiclesResponse>& ResponseContinuation) const;
 	
 	void HandleDrivingCommand(const TempoVehicles::DrivingCommandRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const;

@@ -4,9 +4,10 @@
 
 #include "TempoScriptable.h"
 #include "TempoScriptingServer.h"
+#include "TempoWorldSubsystem.h"
 
 #include "CoreMinimal.h"
-#include "Subsystems/WorldSubsystem.h"
+
 #include "TempoGeographicServiceSubsystem.generated.h"
 
 namespace TempoGeographic
@@ -24,14 +25,14 @@ namespace TempoScripting
 }
 
 UCLASS()
-class TEMPOGEOGRAPHIC_API UTempoGeographicServiceSubsystem : public UWorldSubsystem, public ITempoWorldScriptable
+class TEMPOGEOGRAPHIC_API UTempoGeographicServiceSubsystem : public UTempoWorldSubsystem, public ITempoWorldScriptable
 {
 	GENERATED_BODY()
 
 public:
 	virtual void RegisterWorldServices(UTempoScriptingServer* ScriptingServer) override;
 
-private:
+protected:
 	void SetDate(const TempoGeographic::Date& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation);
 
 	void SetTimeOfDay(const TempoGeographic::TimeOfDay& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation);

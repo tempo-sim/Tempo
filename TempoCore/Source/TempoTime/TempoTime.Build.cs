@@ -25,7 +25,11 @@ public class TempoTime : TempoModuleRules
 		PublicDependencyModuleNames.AddRange(
 			new string[]
 			{
+				// Unreal
 				"Core",
+				// Tempo
+				"TempoCoreShared",
+				"TempoScripting",
 			}
 			);
 			
@@ -40,8 +44,6 @@ public class TempoTime : TempoModuleRules
 				"SlateCore",
 				"UMG",
 				// Tempo
-				"TempoCoreShared",
-				"TempoScripting",
 			}
 			);
 		
