@@ -6,4 +6,5 @@ message MeasurementHeader {
   uint64 sequence_id = 1;
   double capture_time = 2;
   double transmission_time = 3;
+  string sensor_name = 4;
 }
