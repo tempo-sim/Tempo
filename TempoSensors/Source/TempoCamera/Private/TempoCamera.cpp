@@ -18,7 +18,7 @@ namespace
 
 FTempoCameraIntrinsics::FTempoCameraIntrinsics(const FIntPoint& SizeXY, float HorizontalFOV)
 	: Fx(SizeXY.X / 2.0 / FMath::Tan(FMath::DegreesToRadians(HorizontalFOV) / 2.0)),
-      Fy(Fx),
+      Fy(Fx), // Fx == Fy means the sensor's pixels are square, not that the FOV is symmetric.
       Cx(SizeXY.X / 2.0),
       Cy(SizeXY.Y / 2.0) {}
 
