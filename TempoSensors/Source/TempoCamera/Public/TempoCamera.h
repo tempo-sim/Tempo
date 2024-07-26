@@ -86,6 +86,15 @@ struct FDepthImageRequest
 	TResponseDelegate<TempoCamera::DepthImage> ResponseContinuation;
 };
 
+struct TEMPOCAMERA_API FTempoCameraIntrinsics
+{
+	FTempoCameraIntrinsics(const FIntPoint& SizeXY, float HorizontalFOV);
+	const float Fx;
+	const float Fy;
+	const float Cx;
+	const float Cy;
+};
+
 UCLASS(Blueprintable, BlueprintType, ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class TEMPOCAMERA_API UTempoCamera : public UTempoSceneCaptureComponent2D
 {
@@ -109,6 +118,8 @@ public:
 	virtual bool HasPendingRenderingCommands() override { return TextureReadQueueNoDepth.HasOutstandingTextureReads() || TextureReadQueueWithDepth.HasOutstandingTextureReads(); }
 
 	virtual void FlushPendingRenderingCommands() const override;
+
+	FTempoCameraIntrinsics GetIntrinsics() const;
 	
 protected:
 	virtual bool HasPendingRequests() const override {return !PendingColorImageRequests.IsEmpty() || !PendingLabelImageRequests.IsEmpty() || !PendingDepthImageRequests.IsEmpty(); }

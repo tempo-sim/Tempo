@@ -26,6 +26,7 @@ public class TempoCamera : TempoModuleRules
 			new string[]
 			{
 				"Core",
+				"TempoSensorsShared",
 			}
 			);
 			
@@ -40,7 +41,6 @@ public class TempoCamera : TempoModuleRules
 				"RHI",
 				// Tempo
 				"TempoLabels",
-				"TempoSensorsShared",
 				"TempoScripting",
 				"TempoCoreShared",
 			}

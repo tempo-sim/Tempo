@@ -16,6 +16,17 @@ namespace
 	constexpr float kMaxDiscreteDepth = 4294967040.0;
 }
 
+FTempoCameraIntrinsics::FTempoCameraIntrinsics(const FIntPoint& SizeXY, float HorizontalFOV)
+	: Fx(SizeXY.X / 2.0 / FMath::Tan(FMath::DegreesToRadians(HorizontalFOV) / 2.0)),
+      Fy(Fx), // Fx == Fy means the sensor's pixels are square, not that the FOV is symmetric.
+      Cx(SizeXY.X / 2.0),
+      Cy(SizeXY.Y / 2.0) {}
+
+FTempoCameraIntrinsics UTempoCamera::GetIntrinsics() const
+{
+	return FTempoCameraIntrinsics(SizeXY, FOVAngle);
+}
+
 UTempoCamera::UTempoCamera()
 {
 	MeasurementTypes = { EMeasurementType::COLOR_IMAGE, EMeasurementType::LABEL_IMAGE, EMeasurementType::DEPTH_IMAGE};
@@ -189,7 +200,9 @@ TFuture<void> UTempoCamera::DecodeAndRespond(TUniquePtr<TTextureRead<PixelType>>
 		TransmissionTime, MinDepthCpy = MinDepth, MaxDepthCpy = MaxDepth,
 		ColorImageRequests = PendingColorImageRequests,
 		LabelImageRequests = PendingLabelImageRequests,
-		DepthImageRequests = PendingDepthImageRequests
+		DepthImageRequests = PendingDepthImageRequests,
+		OwnerName = GetOwnerName(),
+		SensorName = GetSensorName()
 		]
 		{
 			TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraDecodeAndRespond);
@@ -212,6 +225,7 @@ TFuture<void> UTempoCamera::DecodeAndRespond(TUniquePtr<TTextureRead<PixelType>>
 					ColorImage.mutable_header()->set_sequence_id(TextureRead->SequenceId);
 					ColorImage.mutable_header()->set_capture_time(TextureRead->CaptureTime);
 					ColorImage.mutable_header()->set_transmission_time(TransmissionTime);
+					ColorImage.mutable_header()->set_sensor_name(TCHAR_TO_UTF8(*FString::Printf(TEXT("%s/%s"), *OwnerName, *SensorName)));
 				}
 
 				TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraRespondColor);
@@ -238,6 +252,7 @@ TFuture<void> UTempoCamera::DecodeAndRespond(TUniquePtr<TTextureRead<PixelType>>
 					LabelImage.mutable_header()->set_sequence_id(TextureRead->SequenceId);
 					LabelImage.mutable_header()->set_capture_time(TextureRead->CaptureTime);
 					LabelImage.mutable_header()->set_transmission_time(TransmissionTime);
+					LabelImage.mutable_header()->set_sensor_name(TCHAR_TO_UTF8(*FString::Printf(TEXT("%s/%s"), *OwnerName, *SensorName)));
 				}
 
 				TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraRespondLabel);
@@ -262,6 +277,7 @@ TFuture<void> UTempoCamera::DecodeAndRespond(TUniquePtr<TTextureRead<PixelType>>
 					DepthImage.mutable_header()->set_sequence_id(TextureRead->SequenceId);
 					DepthImage.mutable_header()->set_capture_time(TextureRead->CaptureTime);
 					DepthImage.mutable_header()->set_transmission_time(TransmissionTime);
+					DepthImage.mutable_header()->set_sensor_name(TCHAR_TO_UTF8(*FString::Printf(TEXT("%s/%s"), *OwnerName, *SensorName)));
 				}
 
 				TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraRespondDepth);
