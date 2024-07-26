@@ -3,11 +3,10 @@
 #pragma once
 
 #include "TempoScriptable.h"
-
 #include "TempoScriptingServer.h"
+#include "TempoWorldSubsystem.h"
 
 #include "CoreMinimal.h"
-#include "Subsystems/WorldSubsystem.h"
 
 #include "TempoTimeServiceSubsystem.generated.h"
 
@@ -24,14 +23,14 @@ namespace TempoTime
 }
 
 UCLASS()
-class TEMPOTIME_API UTempoTimeServiceSubsystem : public UWorldSubsystem, public ITempoWorldScriptable
+class TEMPOTIME_API UTempoTimeServiceSubsystem : public UTempoWorldSubsystem, public ITempoWorldScriptable
 {
 	GENERATED_BODY()
 	
 public:
 	virtual void RegisterWorldServices(UTempoScriptingServer* ScriptingServer) override;
 
-private:
+protected:
 	void SetTimeMode(const TempoTime::TimeModeRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const;
 
 	void SetSimStepsPerSecond(const TempoTime::SetSimStepsPerSecondRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const;
