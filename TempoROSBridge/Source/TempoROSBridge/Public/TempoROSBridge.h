@@ -1,4 +1,4 @@
-﻿// Copyright Epic Games, Inc. All Rights Reserved.
+﻿// Copyright Tempo Simulation, LLC. All Rights Reserved
 
 #pragma once
 
@@ -10,11 +10,7 @@
 class FTempoROSBridgeModule : public IModuleInterface
 {
 public:
-
 	/** IModuleInterface implementation */
 	virtual void StartupModule() override;
 	virtual void ShutdownModule() override;
-
-private:
-	// TUniquePtr<FTempoROSNode> TempoROSNode;
 };
