@@ -13,10 +13,13 @@ if [[ "$OSTYPE" = "msys" ]]; then
   else
     LINUX_CC=1
   fi
+  HASHER="md5sum"
 elif [[ "$OSTYPE" = "darwin"* ]]; then
   TOOLCHAIN="TempoMacToolChain.cs"
+  HASHER="md5"
 elif [[ "$OSTYPE" = "linux-gnu"* ]]; then
   TOOLCHAIN="TempoLinuxToolChain.cs"
+  HASHER="md5sum"
 fi
 
 if [ -z ${TOOLCHAIN+x} ]; then
@@ -68,6 +71,33 @@ else
     echo $NEEDS_REBUILD
   }
   
+  INSTALL_UBT_MOD() {
+      UBTMOD_SRC="$TEMPO_ROOT/UnrealBuildToolMods/$1"
+      UBTMOD_DEST="$UNREAL_ENGINE_PATH/$2/$1"
+      EXPECTED_DEST_HASH="$3"
+      
+      if [[ ! -f "$UBTMOD_DEST" ]]; then
+          echo "ERROR:  Destination file does not exist: $UBTMOD_DEST" >&2
+          return 1
+      fi
+      
+      # Copy modified file only if files are different and the destination file is the version we expect it to be 
+      if [[ $(diff "$UBTMOD_SRC" "$UBTMOD_DEST" | wc -l) -gt 0 ]]; then
+          ACTUAL_DEST_HASH=$("$HASHER" "$UBTMOD_DEST" | awk '{print $1}')
+          
+          if [[ "$ACTUAL_DEST_HASH" == "$EXPECTED_DEST_HASH" ]]; then
+              echo -e "\nInstalling ${UBTMOD_SRC}...\n"
+              cp -f "$UBTMOD_SRC" "$UBTMOD_DEST"
+              NEEDS_REBUILD='Y'
+          else
+              echo "ERROR:  Destination file \"$UBTMOD_DEST\" has unexpected hash." >&2
+          fi
+      fi
+      
+      echo $NEEDS_REBUILD
+      return 0
+  }
+  
   NEEDS_REBUILD=$(INSTALL_TOOLCHAIN $TOOLCHAIN)
   if [ "$OSTYPE" = "msys" ]; then
     if [ $LINUX_CC -ne 0 ]; then
@@ -76,6 +106,13 @@ else
   fi
   
   NEEDS_REBUILD=$(INSTALL_MODULE_RULES)
+  
+  # Install UBT mod to allow Engine Plugins to reference ZoneGraph modules in the ZoneGraph Project Plugin.
+  # UEBuildTarget.cs hash from file in UE5.4.2.
+  if ! NEEDS_REBUILD=$(INSTALL_UBT_MOD "UEBuildTarget.cs" "Engine/Source/Programs/UnrealBuildTool/Configuration" "e487fab671061feee4a0a33dba2d8682"); then
+    echo "Unable to modify UEBuildTarget.cs."
+    exit 1
+  fi
   
   if [ "$1" = "-force" ]; then
     NEEDS_REBUILD='Y'
