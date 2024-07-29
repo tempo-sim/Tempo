@@ -9,8 +9,9 @@ bool UTempoWorldSubsystem::ShouldCreateSubsystem(UObject* Outer) const
 		// Never create the base UTempoWorldSystem
 		return false;
 	}
-	
-	for (TObjectIterator<UTempoWorldSubsystem> WorldSubsystemIt; WorldSubsystemIt; ++WorldSubsystemIt)
+
+	// RF_NoFlags to include CDO
+	for (TObjectIterator<UTempoWorldSubsystem> WorldSubsystemIt(EObjectFlags::RF_NoFlags); WorldSubsystemIt; ++WorldSubsystemIt)
 	{
 		const UTempoWorldSubsystem* WorldSubsystem = *WorldSubsystemIt;
 		if (WorldSubsystem->GetClass() != GetClass() && WorldSubsystem->IsA(GetClass()))
