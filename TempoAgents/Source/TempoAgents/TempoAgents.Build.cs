@@ -36,6 +36,7 @@ public class TempoAgents : TempoModuleRules
 			{
 				// Unreal
 				"CoreUObject",
+				"MassTraffic",
 				// Tempo
 				"TempoAgentsShared",
 			}

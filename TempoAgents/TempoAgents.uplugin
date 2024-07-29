@@ -26,6 +26,10 @@
 		}
 	],
 	"Plugins": [
+		{
+			"Name": "Traffic",
+			"Enabled": true
+		}
 	]
 }
 

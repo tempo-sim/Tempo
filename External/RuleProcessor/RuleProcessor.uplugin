@@ -1,0 +1,44 @@
+{
+	"FileVersion": 3,
+	"Version": 8,
+	"VersionName": "1.0",
+	"FriendlyName": "Rule Processor",
+	"Description": "A prototype of a rule processor using point clouds for UE",
+	"Category": "Editor",
+	"CreatedBy": "Epic Games Inc",
+	"CreatedByURL": "http://epicgames.com",
+	"DocsURL": "",
+	"MarketplaceURL": "",
+	"SupportURL": "",
+	"EnabledByDefault": true,
+	"CanContainContent": false,
+	"IsBetaVersion": false,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "PointCloud",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "PointCloudEditor",
+			"Type": "Editor",
+			"LoadingPhase": "Default"			
+		}
+
+	],
+	"Plugins": [
+		{
+			"Name": "SQLiteCore",
+			"Enabled": true
+		},
+		{
+			"Name": "Niagara",
+			"Enabled": true
+		},
+		{
+			"Name": "StructUtils",
+			"Enabled":  true
+		}
+	]
+}
