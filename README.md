@@ -28,7 +28,7 @@ machine api.github.com
 login user # Can be anything. Not used, but must be present.
 password <your_token_here>
 ```
-- Unreal Engine 5.3.2
+- Unreal Engine 5.4.2
   - Linux users can download a pre-built Unreal [here](https://www.unrealengine.com/en-US/linux)
   - Windows and Mac users should use the Epic Games Launcher
 - (optional, only if cross compiling for Linux from Windows) [Linux Cross-Compile Toolchain](https://dev.epicgames.com/documentation/en-us/unreal-engine/linux-development-requirements-for-unreal-engine?application_version=5.3)
