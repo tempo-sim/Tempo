@@ -2,9 +2,9 @@
 
 using UnrealBuildTool;
 
-public class TempoAgents : TempoModuleRules
+public class TempoAgentsEditor : TempoModuleRules
 {
-	public TempoAgents(ReadOnlyTargetRules Target) : base(Target)
+	public TempoAgentsEditor(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
 		
@@ -36,8 +36,12 @@ public class TempoAgents : TempoModuleRules
 			{
 				// Unreal
 				"CoreUObject",
+				"UnrealEd",
+				"MassTraffic",
+				"ZoneGraph",
 				// Tempo
 				"TempoAgentsShared",
+				"TempoAgents",
 			}
 			);
 		

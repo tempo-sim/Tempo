@@ -15,6 +15,11 @@
 	"Installed": false,
 	"Modules": [
 		{
+			"Name": "TempoAgentsEditor",
+			"Type": "Editor",
+			"LoadingPhase": "Default"
+		},
+		{
 			"Name": "TempoAgents",
 			"Type": "Runtime",
 			"LoadingPhase": "Default"
