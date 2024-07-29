@@ -22,6 +22,11 @@ elif [[ "$OSTYPE" = "linux-gnu"* ]]; then
   HASHER="md5sum"
 fi
 
+GET_PLATFORM_INDEPENDENT_HASH() {
+    FILENAME="$1"
+    tr -d '\r' < "$FILENAME" | "$HASHER" | awk '{print $1}'
+}
+
 if [ -z ${TOOLCHAIN+x} ]; then
   echo "Unrecognized platform. Unable to install toolchain."
   exit 1
@@ -83,7 +88,7 @@ else
       
       # Copy modified file only if files are different and the destination file is the version we expect it to be 
       if [[ $(diff "$UBTMOD_SRC" "$UBTMOD_DEST" | wc -l) -gt 0 ]]; then
-          ACTUAL_DEST_HASH=$("$HASHER" "$UBTMOD_DEST" | awk '{print $1}')
+          ACTUAL_DEST_HASH=$(GET_PLATFORM_INDEPENDENT_HASH "$UBTMOD_DEST")
           
           if [[ "$ACTUAL_DEST_HASH" == "$EXPECTED_DEST_HASH" ]]; then
               echo -e "\nInstalling ${UBTMOD_SRC}...\n"
@@ -109,7 +114,7 @@ else
   
   # Install UBT mod to allow Engine Plugins to reference ZoneGraph modules in the ZoneGraph Project Plugin.
   # UEBuildTarget.cs hash from file in UE5.4.2.
-  if ! NEEDS_REBUILD=$(INSTALL_UBT_MOD "UEBuildTarget.cs" "Engine/Source/Programs/UnrealBuildTool/Configuration" "e487fab671061feee4a0a33dba2d8682"); then
+  if ! NEEDS_REBUILD=$(INSTALL_UBT_MOD "UEBuildTarget.cs" "Engine/Source/Programs/UnrealBuildTool/Configuration" "711ecb1598f62b734ff17778807102f9"); then
     echo "Unable to modify UEBuildTarget.cs."
     exit 1
   fi
