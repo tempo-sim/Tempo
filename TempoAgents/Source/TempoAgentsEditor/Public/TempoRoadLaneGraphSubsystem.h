@@ -5,9 +5,9 @@
 #include "CoreMinimal.h"
 #include "ZoneGraphTypes.h"
 #include "GameFramework/Actor.h"
-#include "TempoRoadQueryInterface.h"
 #include "Subsystems/UnrealEditorSubsystem.h"
 #include "TempoZoneGraphSettings.h"
+#include "TempoZoneGraphBuilder.h"
 #include "TempoRoadLaneGraphSubsystem.generated.h"
 
 UCLASS()
@@ -18,7 +18,13 @@ class TEMPOAGENTSEDITOR_API UTempoRoadLaneGraphSubsystem : public UUnrealEditorS
 public:
 
 	UFUNCTION(BlueprintCallable, Category = "Tempo Agents")
+	void SetupZoneGraphBuilder();
+	
+	UFUNCTION(BlueprintCallable, Category = "Tempo Agents")
 	bool TryGenerateZoneShapeComponents() const;
+
+	UFUNCTION(BlueprintCallable, Category = "Tempo Agents")
+	void BuildZoneGraph() const;
 
 protected:
 	
@@ -45,4 +51,6 @@ protected:
 
 	UTempoZoneGraphSettings* GetMutableTempoZoneGraphSettings() const;
 	virtual UWorld* GetWorld() const override;
+
+	FTempoZoneGraphBuilder TempoZoneGraphBuilder;
 };

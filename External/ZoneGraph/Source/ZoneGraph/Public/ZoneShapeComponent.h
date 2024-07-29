@@ -5,7 +5,6 @@
 #include "CoreMinimal.h"
 #include "UObject/ObjectMacros.h"
 #include "Components/PrimitiveComponent.h"
-#include "ZoneGraphSubsystem.h"
 #include "ZoneGraphTypes.h"
 #include "ZoneShapeComponent.generated.h"
 

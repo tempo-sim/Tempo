@@ -20,7 +20,6 @@ namespace UnrealBuildTool.Rules
 					"DeveloperSettings",
 				}
 			);
-
 			if (Target.bBuildEditor == true)
 			{
 				PrivateDependencyModuleNames.Add("EditorFramework");

@@ -33,6 +33,15 @@ public:
 	TArray<FName> GetTempoLaneTags(int32 LaneIndex) const;
 
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Query Interface")
+	TArray<FName> GetTempoLaneConnectionAnyTags(int32 LaneIndex) const;
+
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Query Interface")
+	TArray<FName> GetTempoLaneConnectionAllTags(int32 LaneIndex) const;
+
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Query Interface")
+	TArray<FName> GetTempoLaneConnectionNotTags(int32 LaneIndex) const;
+
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Query Interface")
 	int32 GetNumTempoControlPoints() const;
 
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Query Interface")

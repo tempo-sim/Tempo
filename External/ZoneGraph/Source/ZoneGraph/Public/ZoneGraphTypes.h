@@ -192,7 +192,7 @@ private:
 
 // Filter passes if any of the 'AnyTags', and all of the 'AllTags', and none of the 'NotTags' are present.
 // Setting include or exclude tags to None, will skip that particular check.
-USTRUCT()
+USTRUCT(BlueprintType)
 struct ZONEGRAPH_API FZoneGraphTagFilter
 {
 	GENERATED_BODY()
@@ -207,13 +207,19 @@ struct ZONEGRAPH_API FZoneGraphTagFilter
 	bool operator==(const FZoneGraphTagFilter& RHS) const { return AnyTags == RHS.AnyTags && AllTags == RHS.AllTags && NotTags == RHS.NotTags; }
 	bool operator!=(const FZoneGraphTagFilter& RHS) const { return AnyTags != RHS.AnyTags || AllTags != RHS.AllTags || NotTags != RHS.NotTags; }
 
-	UPROPERTY(Category = Zone, EditAnywhere)
+	friend uint32 GetTypeHash(const FZoneGraphTagFilter& ZoneGraphTagFilter)
+	{
+		const uint32 AnyAllHash = HashCombine(GetTypeHash(ZoneGraphTagFilter.AnyTags), GetTypeHash(ZoneGraphTagFilter.AllTags));
+		return HashCombine(AnyAllHash, GetTypeHash(ZoneGraphTagFilter.NotTags));
+	}
+
+	UPROPERTY(Category = Zone, EditAnywhere, BlueprintReadWrite)
 	FZoneGraphTagMask AnyTags = FZoneGraphTagMask::None;
 
-	UPROPERTY(Category = Zone, EditAnywhere)
+	UPROPERTY(Category = Zone, EditAnywhere, BlueprintReadWrite)
 	FZoneGraphTagMask AllTags = FZoneGraphTagMask::None;
 
-	UPROPERTY(Category = Zone, EditAnywhere)
+	UPROPERTY(Category = Zone, EditAnywhere, BlueprintReadWrite)
 	FZoneGraphTagMask NotTags = FZoneGraphTagMask::None;
 };
 
