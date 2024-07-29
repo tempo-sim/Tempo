@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Copyright Tempo Simulation, LLC. All Rights Reserved
 
+# This script checks the hash of third party libraries and downloads the correct version when an incorrect hash is found.
+# Once a user has run Setup.sh it should be run as-need automatically and should not need to be run manually.
+
 set -e
 
 # Must have the proper GitHub PAT in your ~/.netrc
@@ -62,7 +65,7 @@ SYNC_THIRD_PARTY_DEPS () {
     # shellcheck disable=SC2038
     cd "$THIRD_PARTY_DIR/$ARTIFACT"
     # awk extracts the size, date modified, and filename fields from the ls -l command
-    MEASURED_HASH=$(find . -mindepth 2 -type f ! -name ".*" -type f | xargs ls -l | awk '{print $5 $6 $7 $8 $9}'| "$HASHER" | cut -d ' ' -f 1)
+    MEASURED_HASH=$(find . -mindepth 2 -type f -not -name ".*" -not -path "./Public/*" -not -path "./Private/*" | xargs ls -l | awk '{print $5 $6 $7 $8 $9}'| "$HASHER" | cut -d ' ' -f 1)
     
     if [ "$FORCE_ARG" = "-force" ]; then
       DO_UPDATE="Y"
@@ -118,7 +121,7 @@ SYNC_THIRD_PARTY_DEPS () {
   }
   
   # Remove any stale dependencies.
-  find "$THIRD_PARTY_DIR" -maxdepth 2 -mindepth 2 -type d -exec rm -rf {} \;
+  find "$THIRD_PARTY_DIR" -maxdepth 2 -mindepth 2 -type d -not -name "Public" -not -name "Private" -exec rm -rf {} \;
   
   # Pull the dependencies for the platform and, for Linux CC on Windows, for Linux too.
   PULL_DEPENDENCIES "$PLATFORM"
@@ -128,14 +131,14 @@ SYNC_THIRD_PARTY_DEPS () {
   
   cd "$THIRD_PARTY_DIR/$ARTIFACT"
   # awk extracts the size, date modified, and filename fields from the ls -l command
-  MEASURED_HASH=$(find . -mindepth 2 -type f ! -name ".*" -type f | xargs ls -l | awk '{print $5 $6 $7 $8 $9}' | "$HASHER" | cut -d ' ' -f 1)
+  MEASURED_HASH=$(find . -mindepth 2 -type f -not -name ".*" -not -path "./Public/*" -not -path "./Private/*" | xargs ls -l | awk '{print $5 $6 $7 $8 $9}'| "$HASHER" | cut -d ' ' -f 1)
   echo "New hash: $MEASURED_HASH"
 }
 
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 TEMPO_ROOT=$(realpath "$SCRIPT_DIR/..")
 MANIFEST_FILES=$(find "$TEMPO_ROOT" -name ttp_manifest.json -path "*Source*")
-for MANIFEST_FILE in "${MANIFEST_FILES[@]}"; do
+for MANIFEST_FILE in ${MANIFEST_FILES[@]}; do
   SYNC_THIRD_PARTY_DEPS "$MANIFEST_FILE" "$1"
 done
 

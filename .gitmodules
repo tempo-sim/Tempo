@@ -1,3 +1,6 @@
 [submodule "TempoAgents/Content"]
 	path = TempoAgents/Content
 	url = git@github.com:tempo-sim/TempoAgentsContent.git
+[submodule "TempoROS"]
+	path = TempoROS
+	url = git@github.com:tempo-sim/TempoROS.git
