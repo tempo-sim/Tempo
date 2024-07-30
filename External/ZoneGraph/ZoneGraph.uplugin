@@ -20,7 +20,7 @@
 		{
 			"Name" : "ZoneGraph",
 			"Type" : "Runtime",
-			"LoadingPhase" : "Default"
+			"LoadingPhase" : "EarliestPossible"
 		},
 		{
 			"Name" : "ZoneGraphEditor",
@@ -30,12 +30,12 @@
 		{
 			"Name" : "ZoneGraphTestSuite",
 			"Type" : "UncookedOnly",
-			"LoadingPhase" : "Default"
+			"LoadingPhase" : "EarliestPossible"
 		},
 		{
 			"Name": "ZoneGraphDebug",
 			"Type": "Runtime",
-			"LoadingPhase": "Default"
+			"LoadingPhase": "EarliestPossible"
 		}
 	]
 }
