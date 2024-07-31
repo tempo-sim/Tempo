@@ -119,6 +119,14 @@ else
     exit 1
   fi
   
+  # Disable the ZoneGraph Engine Plugin so it won't conflict with the ZoneGraph Project Plugin.
+  ZONEGRAPH_ENGINE_PLUGIN_DIR="$UNREAL_ENGINE_PATH/Engine/Plugins/Runtime/ZoneGraph"
+  if [[ -d "$ZONEGRAPH_ENGINE_PLUGIN_DIR" ]]; then
+      DISABLED_ZONEGRAPH_ENGINE_PLUGIN_DIR="$ZONEGRAPH_ENGINE_PLUGIN_DIR.disabled"
+      echo "Disabling ZoneGraph Engine Plugin by renaming it (in place) to ${DISABLED_ZONEGRAPH_ENGINE_PLUGIN_DIR}."
+      mv "$ZONEGRAPH_ENGINE_PLUGIN_DIR" "$DISABLED_ZONEGRAPH_ENGINE_PLUGIN_DIR"
+  fi
+  
   if [ "$1" = "-force" ]; then
     NEEDS_REBUILD='Y'
   fi
