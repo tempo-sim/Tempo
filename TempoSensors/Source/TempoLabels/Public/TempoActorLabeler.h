@@ -28,7 +28,7 @@ protected:
 	
 	void LabelActor(AActor* Actor);
 
-	void LabelComponents(const AActor* Actor, const int32* ActorLabelId=nullptr);
+	void LabelComponents(const AActor* Actor, int32 ActorLabelId);
 
 	UPROPERTY(VisibleAnywhere)
 	UDataTable* SemanticLabelTable;
@@ -42,7 +42,11 @@ protected:
 	UPROPERTY(VisibleAnywhere)
 	TMap<FName, int32> LabelIds;
 
-	// Cache to avoid re-labeling the same components over and over
+	// Cache to avoid re-labeling the same Actors over and over
 	UPROPERTY()
-	TMap<UStaticMeshComponent*, const UStaticMesh*> LabeledComponents;
+	TMap<AActor*, int32> LabeledActors;
+
+	// Cache to avoid re-labeling the same Components over and over
+	UPROPERTY()
+	TMap<UPrimitiveComponent*, const UStaticMesh*> LabeledComponents;
 };

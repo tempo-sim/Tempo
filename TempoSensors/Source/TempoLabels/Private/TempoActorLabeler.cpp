@@ -26,11 +26,11 @@ void UTempoActorLabeler::OnWorldBeginPlay(UWorld& InWorld)
 
 	// Label all actors *after* BeginPlay (UWorldSubsystem::OnWorldBeginPlay is called *before* BeginPlay).
 	GetWorld()->OnWorldBeginPlay.AddUObject(this, &UTempoActorLabeler::LabelAllActors);
-	
-	// Label all newly spawned actors.
-    GetWorld()->AddOnActorSpawnedHandler(FOnActorSpawned::FDelegate::CreateUObject(this, &UTempoActorLabeler::LabelActor));
 
-	// Lastly, every Tick, label any unlabeled static mesh components (this includes components created after the actor is spawned).
+	// Label all newly spawned actors.
+	GetWorld()->AddOnActorSpawnedHandler(FOnActorSpawned::FDelegate::CreateUObject(this, &UTempoActorLabeler::LabelActor));
+
+	// Before every Tick, label all unlabeled actors.
 	FWorldDelegates::OnWorldPreActorTick.AddUObject(this, &UTempoActorLabeler::OnWorldPreActorTick);
 }
 
@@ -39,10 +39,7 @@ void UTempoActorLabeler::OnWorldPreActorTick(UWorld* World, ELevelTick TickType,
 	const EWorldType::Type WorldType = World->WorldType;
 	if (WorldType == EWorldType::Game || WorldType == EWorldType::PIE)
 	{
-		for (TActorIterator<AActor> ActorItr(GetWorld()); ActorItr; ++ActorItr)
-		{
-			LabelComponents(*ActorItr);
-		}
+		LabelAllActors();
 	}
 }
 
@@ -106,7 +103,7 @@ void UTempoActorLabeler::BuildLabelMaps()
 
 void UTempoActorLabeler::LabelAllActors()
 {
-	UE_LOG(LogTempoLabels, Display, TEXT("Labeling all actors in world"));
+	TRACE_CPUPROFILER_EVENT_SCOPE(TempoLabelAllActors);
 	for (TActorIterator<AActor> ActorItr(GetWorld()); ActorItr; ++ActorItr)
 	{
 		LabelActor(*ActorItr);
@@ -115,6 +112,12 @@ void UTempoActorLabeler::LabelAllActors()
 
 void UTempoActorLabeler::LabelActor(AActor* Actor)
 {
+	if (const int32* ActorLabelId = LabeledActors.Find(Actor))
+	{
+		LabelComponents(Actor, *ActorLabelId);
+		return;
+	}
+
 	if (!SemanticLabelTable)
 	{
 		UE_LOG(LogTempoLabels, Error, TEXT("Semantic label table was not set"));
@@ -122,7 +125,7 @@ void UTempoActorLabeler::LabelActor(AActor* Actor)
 	}
 
 	FName AssignedLabel = NAME_None;
-	int32 ActorLabelId = 0;
+	int32 ActorLabelId = -1;
 	for (const auto& Elem : ActorLabels)
 	{
 		const TSubclassOf<AActor>& ActorType = Elem.Key;
@@ -146,12 +149,15 @@ void UTempoActorLabeler::LabelActor(AActor* Actor)
 		}
 	}
 
-	LabelComponents(Actor, &ActorLabelId);
+	LabeledActors.Add(Actor, ActorLabelId);
+
+	LabelComponents(Actor, ActorLabelId);
 }
 
 // Labels all static mesh components that we haven't already labeled
-void UTempoActorLabeler::LabelComponents(const AActor* Actor, const int32* ActorLabelId)
+void UTempoActorLabeler::LabelComponents(const AActor* Actor, int32 ActorLabelId)
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE(TempoLabelComponents);
 	TInlineComponentArray<UPrimitiveComponent*> PrimitiveComponents(Actor);
 	for (UPrimitiveComponent* PrimitiveComponent : PrimitiveComponents)
 	{
@@ -167,7 +173,7 @@ void UTempoActorLabeler::LabelComponents(const AActor* Actor, const int32* Actor
 					}
 				}
 			
-				FString MeshFullPath = StaticMesh->GetPathName();
+				const FString MeshFullPath = StaticMesh->GetPathName();
 				if (const FName* StaticMeshLabel = StaticMeshLabels.Find(MeshFullPath))
 				{
 					if (const int32* StaticMeshLabelId = LabelIds.Find(*StaticMeshLabel))
@@ -186,10 +192,12 @@ void UTempoActorLabeler::LabelComponents(const AActor* Actor, const int32* Actor
 			}
 		}
 
-		if (ActorLabelId)
+		if (ActorLabelId >= 0)
 		{
 			PrimitiveComponent->SetRenderCustomDepth(true);
-			PrimitiveComponent->SetCustomDepthStencilValue(*ActorLabelId);
+			PrimitiveComponent->SetCustomDepthStencilValue(ActorLabelId);
 		}
+
+		LabeledComponents.Add(PrimitiveComponent, nullptr);
 	}
 }
