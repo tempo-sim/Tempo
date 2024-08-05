@@ -15,6 +15,8 @@ public class TempoAgentsShared : ModuleRules
                 "Engine",
             }
         );
+        
+        PublicIncludePaths.Add("$(PluginDir)/../External/Traffic/Source/MassTraffic/Public");
 
         PrivateDependencyModuleNames.AddRange(
             new string[]
@@ -24,6 +26,10 @@ public class TempoAgentsShared : ModuleRules
                 "Slate",
                 "SlateCore",
                 "ZoneGraph",
+                "MassTraffic",
+                "MassRepresentation",
+                "MassEntity",
+                "StructUtils"
             }
         );
     }

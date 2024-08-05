@@ -4,7 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "ZoneGraphBuilder.h"
-#include "TempoIntersectionQueryInterface.h"
+#include "TempoIntersectionInterface.h"
 #include "TempoZoneGraphBuilder.generated.h"
 
 USTRUCT()

@@ -20,11 +20,6 @@ public:
 	UPROPERTY(EditAnywhere)
 	int32 IntersectionEntityConfigIndex = 0;
 	
-	UPROPERTY(EditAnywhere, Category="Traffic Lights")
-	TObjectPtr<const UMassTrafficLightTypesDataAsset> TrafficLightTypesData = nullptr;
-
-	UPROPERTY(EditAnywhere, Category="Traffic Lights")
-	TObjectPtr<const UMassTrafficLightInstancesDataAsset> TrafficLightInstanceData = nullptr;
 
 	/**
 	 * How far away from the start of the left most intersection lane of an intersection side, to look for the traffic light it controls.

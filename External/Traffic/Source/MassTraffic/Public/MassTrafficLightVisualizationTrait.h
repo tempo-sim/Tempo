@@ -18,9 +18,6 @@ public:
 	
 	UMassTrafficLightVisualizationTrait();
 
-	UPROPERTY(EditAnywhere, Category = "Mass Traffic|Traffic Lights")
-	FMassTrafficLightsParameters TrafficLightsParams;
-
 public:
 
 	virtual void BuildTemplate(FMassEntityTemplateBuildContext& BuildContext, const UWorld& World) const override;

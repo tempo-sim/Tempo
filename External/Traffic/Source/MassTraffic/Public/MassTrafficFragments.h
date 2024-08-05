@@ -146,12 +146,23 @@ enum class EMassTrafficLightStateFlags : uint8
 	None					= 0,        // ..red for vehicles and all pedestrians
 	
 	VehicleGo				= (1 << 0), // ..green for vehicles
-	VehiclePrepareToStop	= (1 << 1), // ..yellow for vehicles
-	// ...                                 ..otherwise red for vehicles
+	VehicleGoProtectedLeft	= (1 << 1), // ..left arrow for vehicles
+	VehiclePrepareToStop	= (1 << 2), // ..yellow in some manner (see states below) for vehicles
+
+	// All the vehicle traffic light states are expressed here as follows.
+	VehicleGreenLight		= VehicleGo,
+	VehicleYellowLight		= VehicleGo | VehiclePrepareToStop,
+	VehicleRedLight			= None,
+
+	VehicleLeftArrowGreen	= VehicleGoProtectedLeft,
+	VehicleLeftArrowYellow	= VehicleGoProtectedLeft | VehiclePrepareToStop,
 	
-	PedestrianGo_FrontSide	= (1 << 2), // ..green for pedestrians, on front side of traffic light
-	PedestrianGo_LeftSide 	= (1 << 3), // ..green for pedestrians, on left side of traffic light
-	PedestrianGo_RightSide	= (1 << 4), // ..green for pedestrians, on right side of traffic light
+	VehicleGreenLightWithLeftArrowGreen		= VehicleGreenLight | VehicleLeftArrowGreen,
+	VehicleGreenLightWithLeftArrowYellow	= VehicleGreenLight | VehicleLeftArrowYellow,
+	
+	PedestrianGo_FrontSide	= (1 << 3), // ..green for pedestrians, on front side of traffic light
+	PedestrianGo_LeftSide 	= (1 << 4), // ..green for pedestrians, on left side of traffic light
+	PedestrianGo_RightSide	= (1 << 5), // ..green for pedestrians, on right side of traffic light
 	PedestrianGo            = (PedestrianGo_FrontSide | PedestrianGo_LeftSide | PedestrianGo_RightSide),
 	// ...                                 ..otherwise red for pedestrians
 
@@ -179,11 +190,12 @@ struct MASSTRAFFIC_API FMassTrafficLight
 	{	
 	}
 	
-	FMassTrafficLight(const FVector InPosition, const float InZRotation, const int16 InTrafficLightTypeIndex, const EMassTrafficLightStateFlags InTrafficLightState) :
+	FMassTrafficLight(const FVector& InPosition, const float InZRotation, const int16 InTrafficLightTypeIndex, const EMassTrafficLightStateFlags InTrafficLightState, const FVector& InMeshScale) :
 		Position(InPosition),
 		ZRotation(InZRotation),
 		TrafficLightTypeIndex(InTrafficLightTypeIndex),
-		TrafficLightStateFlags(InTrafficLightState)
+		TrafficLightStateFlags(InTrafficLightState),
+		MeshScale(InMeshScale)
 	{	
 	}
 
@@ -200,6 +212,9 @@ struct MASSTRAFFIC_API FMassTrafficLight
 
 	UPROPERTY()
 	EMassTrafficLightStateFlags TrafficLightStateFlags = EMassTrafficLightStateFlags::None;
+
+	UPROPERTY()
+	FVector MeshScale = FVector::OneVector;
 
 	
 	FVector GetXDirection() const;
@@ -227,7 +242,7 @@ struct MASSTRAFFIC_API FMassTrafficLightControl
 	
 	bool bIsValid : 1;	
 	bool bWillAllVehicleLanesCloseInNextPeriodForThisTrafficLight : 1;	
-	EMassTrafficLightStateFlags TrafficLightStateFlags : 5; // (See all LIGHTSTATEBITS.)
+	EMassTrafficLightStateFlags TrafficLightStateFlags : 6; // (See all LIGHTSTATEBITS.)
 	// ..7..
 };
 

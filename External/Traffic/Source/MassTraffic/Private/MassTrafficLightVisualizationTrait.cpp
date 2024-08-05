@@ -9,6 +9,8 @@
 #include "MassLODFragments.h"
 #include "MassRepresentationSubsystem.h"
 #include "MassEntityUtils.h"
+#include "MassTrafficLightRegistry.h"
+#include "Kismet/GameplayStatics.h"
 
 
 UMassTrafficLightVisualizationTrait::UMassTrafficLightVisualizationTrait()
@@ -66,11 +68,28 @@ void UMassTrafficLightVisualizationTrait::BuildTemplate(FMassEntityTemplateBuild
 	// Requirements
 	BuildContext.RequireFragment<FMassTrafficIntersectionFragment>();
 
-	// Make a mutable copy of Config so we can register the driver meshes and assign the description IDs
-	FMassTrafficLightsParameters RegisteredTrafficLightsParams = TrafficLightsParams;
-	if (IsValid(RegisteredTrafficLightsParams.TrafficLightTypesData))
+	// Add fragments
+	BuildContext.AddFragment<FMassActorFragment>();
+
+	// Find the TrafficLightRegistry
+	TArray<AActor*> TrafficLightRegistryActors;
+	UGameplayStatics::GetAllActorsOfClass(&World, AMassTrafficLightRegistry::StaticClass(), TrafficLightRegistryActors);
+
+	AMassTrafficLightRegistry* TrafficLightRegistry = TrafficLightRegistryActors.Num() > 0 ? Cast<AMassTrafficLightRegistry>(TrafficLightRegistryActors[0]) : nullptr;
+	if (TrafficLightRegistry == nullptr)
 	{
-		for (const FMassTrafficLightTypeData& TrafficLightType : RegisteredTrafficLightsParams.TrafficLightTypesData->TrafficLightTypes)
+		UE_LOG(LogMassTraffic, Error, TEXT("UMassTrafficLightVisualizationTrait - Couldn't find TrafficLightRegistry in Level.  Did you run the Tempo Lane Graph Builder Pipeline?"));
+		return;
+	}
+	
+	FMassTrafficLightsParameters RegisteredTrafficLightsParams;
+	
+	const TArray<FMassTrafficLightTypeData>& TrafficLightTypes = TrafficLightRegistry->GetTrafficLightTypes();
+	if (TrafficLightTypes.Num() > 0)
+	{
+		RegisteredTrafficLightsParams.TrafficLightTypes = TrafficLightTypes;
+		
+		for (const FMassTrafficLightTypeData& TrafficLightType : RegisteredTrafficLightsParams.TrafficLightTypes)
 		{
 			// Register visual types
 			FStaticMeshInstanceVisualizationDescHandle TrafficLightTypeStaticMeshDescHandle = RepresentationSubsystem->FindOrAddStaticMeshDesc(TrafficLightType.StaticMeshInstanceDesc);
@@ -81,6 +100,4 @@ void UMassTrafficLightVisualizationTrait::BuildTemplate(FMassEntityTemplateBuild
 	// Register & add shared fragment
 	const FConstSharedStruct TrafficLightsParamsFragment = EntityManager.GetOrCreateConstSharedFragment(RegisteredTrafficLightsParams);
 	BuildContext.AddConstSharedFragment(TrafficLightsParamsFragment);
-
-	BuildContext.AddFragment<FMassActorFragment>();
 }

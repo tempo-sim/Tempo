@@ -197,6 +197,15 @@ struct ZONEGRAPH_API FZoneGraphTagFilter
 {
 	GENERATED_BODY()
 
+	FZoneGraphTagFilter() = default;
+
+	FZoneGraphTagFilter(const FZoneGraphTagMask& InAnyTags, const FZoneGraphTagMask& InAllTags, const FZoneGraphTagMask& InNotTags)
+		: AnyTags(InAnyTags)
+		, AllTags(InAllTags)
+		, NotTags(InNotTags)
+	{
+	}
+
 	bool Pass(const FZoneGraphTagMask Tags) const
 	{
 		return (AnyTags == FZoneGraphTagMask::None || Tags.ContainsAny(AnyTags))

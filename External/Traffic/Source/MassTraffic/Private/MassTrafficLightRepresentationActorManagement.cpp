@@ -36,7 +36,7 @@ EMassActorSpawnRequestAction  UMassTrafficLightRepresentationActorManagement::On
 		const FMassStaticMeshInstanceVisualizationMeshDesc& MeshDesc = ISMInfo[TrafficLightStaticMeshDescHandle.ToIndex()].GetDesc().Meshes[0];
 
 		// Compute actor relative transform
-		FTransform IntersectionLightTransform(FRotator(0.0, TrafficLight.ZRotation, 0.0f), TrafficLight.Position);
+		FTransform IntersectionLightTransform(FRotator(0.0, TrafficLight.ZRotation, 0.0f), TrafficLight.Position, TrafficLight.MeshScale);
 		IntersectionLightTransform.SetToRelativeTransform(MassActorSpawnRequest.SpawnedActor->GetActorTransform());
 
 		// Create UStaticMeshComponent for the light

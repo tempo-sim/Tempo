@@ -11,4 +11,12 @@ enum class ETempoCoordinateSpace : uint8
 	World = 0x1,
 };
 
+UENUM(BlueprintType)
+enum class ETempoRoadOffsetOrigin : uint8
+{
+	CenterSpline = 0,
+	LeftRoadEdge = 1,
+	RightRoadEdge = 2,
+};
+
 

@@ -5,13 +5,14 @@
 
 #include "EngineUtils.h"
 #include "TempoAgentsEditor.h"
-#include "TempoRoadQueryInterface.h"
-#include "TempoIntersectionQueryInterface.h"
+#include "TempoRoadInterface.h"
+#include "TempoIntersectionInterface.h"
 #include "ZoneGraphSettings.h"
 #include "ZoneShapeComponent.h"
 #include "ZoneGraphSubsystem.h"
 #include "ZoneGraphDelegates.h"
 #include "DrawDebugHelpers.h"
+#include "MassTrafficLightRegistry.h"
 #include "VectorTypes.h"
 
 //
@@ -46,7 +47,7 @@ bool UTempoRoadLaneGraphSubsystem::TryGenerateZoneShapeComponents() const
 			continue;
 		}
 
-		if (Actor->Implements<UTempoRoadQueryInterface>())
+		if (Actor->Implements<UTempoRoadInterface>())
 		{
 			DestroyZoneShapeComponents(*Actor);
 
@@ -56,7 +57,7 @@ bool UTempoRoadLaneGraphSubsystem::TryGenerateZoneShapeComponents() const
 				return false;
 			}
 		}
-		else if (Actor->Implements<UTempoIntersectionQueryInterface>())
+		else if (Actor->Implements<UTempoIntersectionInterface>())
 		{
 			DestroyZoneShapeComponents(*Actor);
 
@@ -87,8 +88,8 @@ bool UTempoRoadLaneGraphSubsystem::TryGenerateAndRegisterZoneShapeComponentsForR
 	const FZoneLaneProfile LaneProfile = GetLaneProfile(RoadQueryActor);
 	const FZoneLaneProfileRef LaneProfileRef(LaneProfile);
 
-	const int32 NumControlPoints = ITempoRoadQueryInterface::Execute_GetNumTempoControlPoints(&RoadQueryActor);
-	const bool bIsClosedLoop = ITempoRoadQueryInterface::Execute_IsTempoLaneClosedLoop(&RoadQueryActor);
+	const int32 NumControlPoints = ITempoRoadInterface::Execute_GetNumTempoControlPoints(&RoadQueryActor);
+	const bool bIsClosedLoop = ITempoRoadInterface::Execute_IsTempoLaneClosedLoop(&RoadQueryActor);
 
 	// Generate ZoneShapeComponents and Setup their Points.
 	if (bIsClosedLoop)
@@ -127,8 +128,8 @@ bool UTempoRoadLaneGraphSubsystem::TryGenerateAndRegisterZoneShapeComponentsForR
 		ZoneShapeComponent->GetMutablePoints().Empty();
 		ZoneShapeComponent->SetCommonLaneProfile(LaneProfileRef);
 
-		const int32 ControlPointStartIndex = ITempoRoadQueryInterface::Execute_GetTempoStartEntranceLocationControlPointIndex(&RoadQueryActor);
-		const int32 ControlPointEndIndex = ITempoRoadQueryInterface::Execute_GetTempoEndEntranceLocationControlPointIndex(&RoadQueryActor);
+		const int32 ControlPointStartIndex = ITempoRoadInterface::Execute_GetTempoStartEntranceLocationControlPointIndex(&RoadQueryActor);
+		const int32 ControlPointEndIndex = ITempoRoadInterface::Execute_GetTempoEndEntranceLocationControlPointIndex(&RoadQueryActor);
 		
 		for (int32 ControlPointIndex = ControlPointStartIndex; ControlPointIndex <= ControlPointEndIndex; ++ControlPointIndex)
 		{
@@ -155,9 +156,9 @@ FZoneShapePoint UTempoRoadLaneGraphSubsystem::CreateZoneShapePointForRoadControl
 {
 	FZoneShapePoint ZoneShapePoint;
 	
-	const FVector ControlPointLocation = ITempoRoadQueryInterface::Execute_GetTempoControlPointLocation(&RoadQueryActor, ControlPointIndex, ETempoCoordinateSpace::Local);
-	const FVector ControlPointTangent = ITempoRoadQueryInterface::Execute_GetTempoControlPointTangent(&RoadQueryActor, ControlPointIndex, ETempoCoordinateSpace::Local);
-	const FVector ControlPointUpVector = ITempoRoadQueryInterface::Execute_GetTempoControlPointUpVector(&RoadQueryActor, ControlPointIndex, ETempoCoordinateSpace::Local);
+	const FVector ControlPointLocation = ITempoRoadInterface::Execute_GetTempoControlPointLocation(&RoadQueryActor, ControlPointIndex, ETempoCoordinateSpace::Local);
+	const FVector ControlPointTangent = ITempoRoadInterface::Execute_GetTempoControlPointTangent(&RoadQueryActor, ControlPointIndex, ETempoCoordinateSpace::Local);
+	const FVector ControlPointUpVector = ITempoRoadInterface::Execute_GetTempoControlPointUpVector(&RoadQueryActor, ControlPointIndex, ETempoCoordinateSpace::Local);
 
 	ZoneShapePoint.Position = ControlPointLocation;
 	ZoneShapePoint.Type = FZoneShapePointType::Bezier;
@@ -172,13 +173,13 @@ FZoneLaneProfile UTempoRoadLaneGraphSubsystem::CreateDynamicLaneProfile(const AA
 {
 	FZoneLaneProfile LaneProfile;
 
-	const int32 NumLanes = ITempoRoadQueryInterface::Execute_GetNumTempoLanes(&RoadQueryActor);
+	const int32 NumLanes = ITempoRoadInterface::Execute_GetNumTempoLanes(&RoadQueryActor);
 
 	for (int32 LaneIndex = 0; LaneIndex < NumLanes; ++LaneIndex)
 	{
-		const float LaneWidth = ITempoRoadQueryInterface::Execute_GetTempoLaneWidth(&RoadQueryActor, LaneIndex);
-		const EZoneLaneDirection LaneDirection = ITempoRoadQueryInterface::Execute_GetTempoLaneDirection(&RoadQueryActor, LaneIndex);
-		const TArray<FName> LaneTags = ITempoRoadQueryInterface::Execute_GetTempoLaneTags(&RoadQueryActor, LaneIndex);
+		const float LaneWidth = ITempoRoadInterface::Execute_GetTempoLaneWidth(&RoadQueryActor, LaneIndex);
+		const EZoneLaneDirection LaneDirection = ITempoRoadInterface::Execute_GetTempoLaneDirection(&RoadQueryActor, LaneIndex);
+		const TArray<FName> LaneTags = ITempoRoadInterface::Execute_GetTempoLaneTags(&RoadQueryActor, LaneIndex);
 
 		FZoneLaneDesc LaneDesc = CreateZoneLaneDesc(LaneWidth, LaneDirection, LaneTags);
 		LaneProfile.Lanes.Add(LaneDesc);
@@ -280,7 +281,7 @@ bool UTempoRoadLaneGraphSubsystem::TryGetDynamicLaneProfileFromSettings(const FZ
 
 FZoneLaneProfile UTempoRoadLaneGraphSubsystem::GetLaneProfile(const AActor& RoadQueryActor) const
 {
-	const FName LaneProfileOverrideName = ITempoRoadQueryInterface::Execute_GetTempoLaneProfileOverrideName(&RoadQueryActor);
+	const FName LaneProfileOverrideName = ITempoRoadInterface::Execute_GetTempoLaneProfileOverrideName(&RoadQueryActor);
 
 	if (LaneProfileOverrideName != NAME_None)
 	{
@@ -348,14 +349,14 @@ bool UTempoRoadLaneGraphSubsystem::TryGenerateAndRegisterZoneShapeComponentsForI
 	ZoneShapeComponent->SetPolygonRoutingType(EZoneShapePolygonRoutingType::Bezier);
 
 	// Apply intersection tags.
-	TArray<FName> IntersectionTagNames = ITempoIntersectionQueryInterface::Execute_GetTempoIntersectionTags(&IntersectionQueryActor);
+	TArray<FName> IntersectionTagNames = ITempoIntersectionInterface::Execute_GetTempoIntersectionTags(&IntersectionQueryActor);
 	for (FName IntersectionTagName : IntersectionTagNames)
 	{
 		const FZoneGraphTag IntersectionTag = GetTagByName(IntersectionTagName);
 		ZoneShapeComponent->GetMutableTags().Add(IntersectionTag);
 	}
 	
-	const int32 NumConnections = ITempoIntersectionQueryInterface::Execute_GetNumTempoConnections(&IntersectionQueryActor);
+	const int32 NumConnections = ITempoIntersectionInterface::Execute_GetNumTempoConnections(&IntersectionQueryActor);
 
 	// Create and Setup Points.
 	for (int32 ConnectionIndex = 0; ConnectionIndex < NumConnections; ++ConnectionIndex)
@@ -380,7 +381,7 @@ bool UTempoRoadLaneGraphSubsystem::TryGenerateAndRegisterZoneShapeComponentsForI
 
 bool UTempoRoadLaneGraphSubsystem::TryCreateZoneShapePointForIntersectionEntranceLocation(const AActor& IntersectionQueryActor, int32 ConnectionIndex, UZoneShapeComponent& ZoneShapeComponent, FZoneShapePoint& OutZoneShapePoint) const
 {
-	const FVector IntersectionEntranceLocationInWorldFrame = ITempoIntersectionQueryInterface::Execute_GetTempoIntersectionEntranceLocation(&IntersectionQueryActor, ConnectionIndex, ETempoCoordinateSpace::World);
+	const FVector IntersectionEntranceLocationInWorldFrame = ITempoIntersectionInterface::Execute_GetTempoIntersectionEntranceLocation(&IntersectionQueryActor, ConnectionIndex, ETempoCoordinateSpace::World);
 	
 	DrawDebugSphere(GetWorld(), IntersectionEntranceLocationInWorldFrame, 50.0f, 32, FColor::Green, false, 5.0f);
 
@@ -404,8 +405,8 @@ bool UTempoRoadLaneGraphSubsystem::TryCreateZoneShapePointForIntersectionEntranc
 	ZoneShapePoint.LaneProfile = PerPointLaneProfileIndex;
 	ZoneShapePoint.TangentLength = LaneProfile.GetLanesTotalWidth() * 0.5f;
 
-	const FVector IntersectionEntranceTangentInWorldFrame = ITempoIntersectionQueryInterface::Execute_GetTempoIntersectionEntranceTangent(&IntersectionQueryActor, ConnectionIndex, ETempoCoordinateSpace::World);
-	const FVector IntersectionEntranceUpVectorInWorldFrame = ITempoIntersectionQueryInterface::Execute_GetTempoIntersectionEntranceUpVector(&IntersectionQueryActor, ConnectionIndex, ETempoCoordinateSpace::World);
+	const FVector IntersectionEntranceTangentInWorldFrame = ITempoIntersectionInterface::Execute_GetTempoIntersectionEntranceTangent(&IntersectionQueryActor, ConnectionIndex, ETempoCoordinateSpace::World);
+	const FVector IntersectionEntranceUpVectorInWorldFrame = ITempoIntersectionInterface::Execute_GetTempoIntersectionEntranceUpVector(&IntersectionQueryActor, ConnectionIndex, ETempoCoordinateSpace::World);
 
 	ZoneShapePoint.SetRotationFromForwardAndUp(ZoneShapeComponent.GetComponentToWorld().InverseTransformPosition(IntersectionEntranceTangentInWorldFrame),
 		ZoneShapeComponent.GetComponentToWorld().InverseTransformPosition(IntersectionEntranceUpVectorInWorldFrame));
@@ -420,14 +421,14 @@ bool UTempoRoadLaneGraphSubsystem::TryCreateZoneShapePointForIntersectionEntranc
 
 AActor* UTempoRoadLaneGraphSubsystem::GetConnectedRoadActor(const AActor& IntersectionQueryActor, int32 ConnectionIndex) const
 {
-	AActor* RoadActor = ITempoIntersectionQueryInterface::Execute_GetConnectedTempoRoadActor(&IntersectionQueryActor, ConnectionIndex);
+	AActor* RoadActor = ITempoIntersectionInterface::Execute_GetConnectedTempoRoadActor(&IntersectionQueryActor, ConnectionIndex);
 			
 	if (RoadActor == nullptr)
 	{
 		return nullptr;
 	}
 			
-	if (!RoadActor->Implements<UTempoRoadQueryInterface>())
+	if (!RoadActor->Implements<UTempoRoadInterface>())
 	{
 		return nullptr;
 	}
