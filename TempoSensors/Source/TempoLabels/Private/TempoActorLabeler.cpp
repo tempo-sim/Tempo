@@ -124,6 +124,7 @@ void UTempoActorLabeler::LabelActor(AActor* Actor)
 	{
 		// We've labeled this Actor before. Make sure all the components are labeled.
 		LabelAllComponents(Actor, *ActorLabelId);
+		return;
 	}
 
 	if (!SemanticLabelTable)
