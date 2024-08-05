@@ -19,13 +19,19 @@ class TEMPOLABELS_API UTempoActorLabeler : public UWorldSubsystem
 public:
 	virtual void OnWorldBeginPlay(UWorld& InWorld) override;
 
-private:
+protected:
 	void BuildLabelMaps();
 	
-	void LabelAllActors() const;
+	void LabelAllActors();
 	
-	void LabelActor(AActor* Actor) const;
+	void LabelActor(AActor* Actor);
 
+	void LabelAllComponents(const AActor* Actor, int32 ActorLabelId);
+
+	void LabelComponent(UActorComponent* Component);
+	
+	void LabelComponent(UPrimitiveComponent* Component, int32 ActorLabelId);
+	
 	UPROPERTY(VisibleAnywhere)
 	UDataTable* SemanticLabelTable;
 
@@ -37,4 +43,18 @@ private:
 
 	UPROPERTY(VisibleAnywhere)
 	TMap<FName, int32> LabelIds;
+
+	UPROPERTY(VisibleAnywhere)
+	FName NoLabelName = TEXT("NoLabel");
+
+	UPROPERTY(VisibleAnywhere)
+	int32 NoLabelId = 0;
+
+	// Cache to avoid re-searching the label table for Actors we've already labeled
+	UPROPERTY()
+	TMap<const AActor*, int32> LabeledActors;
+
+	// Cache to avoid re-labeling Components we've already labeled
+	UPROPERTY()
+	TMap<const UPrimitiveComponent*, int32> LabeledComponents;
 };
