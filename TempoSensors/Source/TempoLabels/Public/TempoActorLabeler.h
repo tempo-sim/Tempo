@@ -20,16 +20,18 @@ public:
 	virtual void OnWorldBeginPlay(UWorld& InWorld) override;
 
 protected:
-	void OnWorldPreActorTick(UWorld* World, ELevelTick TickType, float DeltaTime);
-	
 	void BuildLabelMaps();
 	
 	void LabelAllActors();
 	
 	void LabelActor(AActor* Actor);
 
-	void LabelComponents(const AActor* Actor, int32 ActorLabelId);
+	void LabelAllComponents(const AActor* Actor, int32 ActorLabelId);
 
+	void LabelComponent(UActorComponent* Component);
+	
+	void LabelComponent(UPrimitiveComponent* Component, int32 ActorLabelId);
+	
 	UPROPERTY(VisibleAnywhere)
 	UDataTable* SemanticLabelTable;
 
@@ -42,11 +44,17 @@ protected:
 	UPROPERTY(VisibleAnywhere)
 	TMap<FName, int32> LabelIds;
 
-	// Cache to avoid re-labeling the same Actors over and over
-	UPROPERTY()
-	TMap<AActor*, int32> LabeledActors;
+	UPROPERTY(VisibleAnywhere)
+	FName NoLabelName = TEXT("NoLabel");
 
-	// Cache to avoid re-labeling the same Components over and over
+	UPROPERTY(VisibleAnywhere)
+	int32 NoLabelId = 0;
+
+	// Cache to avoid re-searching the label table for Actors we've already labeled
 	UPROPERTY()
-	TMap<UPrimitiveComponent*, const UStaticMesh*> LabeledComponents;
+	TMap<const AActor*, int32> LabeledActors;
+
+	// Cache to avoid re-labeling Components we've already labeled
+	UPROPERTY()
+	TMap<const UPrimitiveComponent*, int32> LabeledComponents;
 };

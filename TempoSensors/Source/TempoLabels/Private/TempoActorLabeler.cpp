@@ -5,9 +5,9 @@
 #include "TempoLabels.h"
 #include "TempoLabelTypes.h"
 
-#include "Engine.h"
-
 #include "TempoSensorsSettings.h"
+
+#include "Engine.h"
 
 void UTempoActorLabeler::OnWorldBeginPlay(UWorld& InWorld)
 {
@@ -30,17 +30,17 @@ void UTempoActorLabeler::OnWorldBeginPlay(UWorld& InWorld)
 	// Label all newly spawned actors.
 	GetWorld()->AddOnActorSpawnedHandler(FOnActorSpawned::FDelegate::CreateUObject(this, &UTempoActorLabeler::LabelActor));
 
-	// Before every Tick, label all unlabeled actors.
-	FWorldDelegates::OnWorldPreActorTick.AddUObject(this, &UTempoActorLabeler::OnWorldPreActorTick);
-}
-
-void UTempoActorLabeler::OnWorldPreActorTick(UWorld* World, ELevelTick TickType, float DeltaTime)
-{
-	const EWorldType::Type WorldType = World->WorldType;
-	if (WorldType == EWorldType::Game || WorldType == EWorldType::PIE)
+	// Handles labeling any component whose render state is marked dirty (for example their mesh changed).
+	UActorComponent::MarkRenderStateDirtyEvent.AddWeakLambda(this, [this](UActorComponent& Component)
 	{
-		LabelAllActors();
-	}
+		LabelComponent(&Component);
+	});
+
+	// Handles labeling any component who is created after their Actor is spawned. 
+	UActorComponent::GlobalCreatePhysicsDelegate.AddWeakLambda(this, [this](UActorComponent* Component)
+	{
+		LabelComponent(Component);
+	});
 }
 
 void UTempoActorLabeler::BuildLabelMaps()
@@ -73,7 +73,7 @@ void UTempoActorLabeler::BuildLabelMaps()
 
 		for (const TSoftObjectPtr<UStaticMesh>& StaticMeshAsset : Value.StaticMeshTypes)
 		{
-			if (UStaticMesh* StaticMesh = StaticMeshAsset.LoadSynchronous())
+			if (const UStaticMesh* StaticMesh = StaticMeshAsset.LoadSynchronous())
 			{
 				const FString MeshFullPath = StaticMesh->GetPathName();
 				if (StaticMeshLabels.Contains(MeshFullPath))
@@ -99,11 +99,19 @@ void UTempoActorLabeler::BuildLabelMaps()
 			LabelIds.Add(Label, LabelId);
 		}
 	});
+	
+	if (const int32* NoLabelIdPtr = LabelIds.Find(NoLabelName))
+	{
+		NoLabelId = *NoLabelIdPtr;
+	}
+	else
+	{
+		UE_LOG(LogTempoLabels, Error, TEXT("Label Table did not contain entry for NoLabel name"));
+	}
 }
 
 void UTempoActorLabeler::LabelAllActors()
 {
-	TRACE_CPUPROFILER_EVENT_SCOPE(TempoLabelAllActors);
 	for (TActorIterator<AActor> ActorItr(GetWorld()); ActorItr; ++ActorItr)
 	{
 		LabelActor(*ActorItr);
@@ -114,8 +122,8 @@ void UTempoActorLabeler::LabelActor(AActor* Actor)
 {
 	if (const int32* ActorLabelId = LabeledActors.Find(Actor))
 	{
-		LabelComponents(Actor, *ActorLabelId);
-		return;
+		// We've labeled this Actor before. Make sure all the components are labeled.
+		LabelAllComponents(Actor, *ActorLabelId);
 	}
 
 	if (!SemanticLabelTable)
@@ -124,8 +132,8 @@ void UTempoActorLabeler::LabelActor(AActor* Actor)
 		return;
 	}
 
-	FName AssignedLabel = NAME_None;
-	int32 ActorLabelId = -1;
+	FName AssignedLabel = NoLabelName;
+	int32 ActorLabelId = NoLabelId;
 	for (const auto& Elem : ActorLabels)
 	{
 		const TSubclassOf<AActor>& ActorType = Elem.Key;
@@ -134,7 +142,7 @@ void UTempoActorLabeler::LabelActor(AActor* Actor)
 		{
 			if (const int32* LabelId = LabelIds.Find(ActorLabel))
 			{
-				if (AssignedLabel != NAME_None && *ActorLabel.ToString() != AssignedLabel)
+				if (AssignedLabel != NoLabelName && *ActorLabel.ToString() != AssignedLabel)
 				{
 					UE_LOG(LogTempoLabels, Error, TEXT("Labels %s and %s have overlapping actor types"), *ActorLabel.ToString(), *AssignedLabel.ToString());
 					continue;
@@ -148,56 +156,68 @@ void UTempoActorLabeler::LabelActor(AActor* Actor)
 			}
 		}
 	}
+	
+	LabelAllComponents(Actor, ActorLabelId);
 
 	LabeledActors.Add(Actor, ActorLabelId);
-
-	LabelComponents(Actor, ActorLabelId);
 }
 
-// Labels all static mesh components that we haven't already labeled
-void UTempoActorLabeler::LabelComponents(const AActor* Actor, int32 ActorLabelId)
+void UTempoActorLabeler::LabelAllComponents(const AActor* Actor, int32 ActorLabelId)
 {
-	TRACE_CPUPROFILER_EVENT_SCOPE(TempoLabelComponents);
 	TInlineComponentArray<UPrimitiveComponent*> PrimitiveComponents(Actor);
 	for (UPrimitiveComponent* PrimitiveComponent : PrimitiveComponents)
 	{
-		if (UStaticMeshComponent* StaticMeshComponent = Cast<UStaticMeshComponent>(PrimitiveComponent))
+		LabelComponent(PrimitiveComponent, ActorLabelId);
+	}
+}
+
+void UTempoActorLabeler::LabelComponent(UActorComponent* Component)
+{
+	if (UPrimitiveComponent* PrimitiveComponent = Cast<UPrimitiveComponent>(Component))
+	{
+		if (const int32* ActorLabelId = LabeledActors.Find(PrimitiveComponent->GetOwner()))
 		{
-			if (const UStaticMesh* StaticMesh = StaticMeshComponent->GetStaticMesh())
+			LabelComponent(PrimitiveComponent, *ActorLabelId);
+		}
+	
+		// We've never labeled this component's owner, label the whole Actor instead of just this component.
+		LabelActor(PrimitiveComponent->GetOwner());
+	}
+}
+
+void UTempoActorLabeler::LabelComponent(UPrimitiveComponent* Component, int32 ActorLabelId)
+{
+	if (UStaticMeshComponent* StaticMeshComponent = Cast<UStaticMeshComponent>(Component))
+	{
+		if (const UStaticMesh* StaticMesh = StaticMeshComponent->GetStaticMesh())
+		{
+			const FString MeshFullPath = StaticMesh->GetPathName();
+			if (const FName* StaticMeshLabel = StaticMeshLabels.Find(MeshFullPath))
 			{
-				if (const UStaticMesh** LabeledMesh = LabeledComponents.Find(StaticMeshComponent))
+				if (const int32* StaticMeshLabelId = LabelIds.Find(*StaticMeshLabel))
 				{
-					if (*LabeledMesh == StaticMesh)
+					if (const int32* PreviousLabel = LabeledComponents.Find(Component))
 					{
-						continue;
+						if (StaticMeshComponent->bRenderCustomDepth && StaticMeshComponent->CustomDepthStencilValue == *PreviousLabel)
+						{
+							// This component already has the right label.
+							return;
+						}
 					}
+
+					// Label using the explicit static mesh label rather than the owning Actor's label.
+					StaticMeshComponent->SetRenderCustomDepth(true);
+					StaticMeshComponent->SetCustomDepthStencilValue(*StaticMeshLabelId);
+					LabeledComponents.Add(StaticMeshComponent, *StaticMeshLabelId);
+					return;
 				}
-			
-				const FString MeshFullPath = StaticMesh->GetPathName();
-				if (const FName* StaticMeshLabel = StaticMeshLabels.Find(MeshFullPath))
-				{
-					if (const int32* StaticMeshLabelId = LabelIds.Find(*StaticMeshLabel))
-					{
-						StaticMeshComponent->SetRenderCustomDepth(true);
-						StaticMeshComponent->SetCustomDepthStencilValue(*StaticMeshLabelId);
-						LabeledComponents.Add(StaticMeshComponent, StaticMesh);
-					}
-					else
-					{
-						UE_LOG(LogTempoLabels, Error, TEXT("Label %s did not have an associated ID"), *StaticMeshLabel->ToString());
-					}
-					// Explicit meshes for static mesh labels take precedence over their owning actor's label.
-					continue;
-				}
+				UE_LOG(LogTempoLabels, Error, TEXT("Label %s did not have an associated ID"), *StaticMeshLabel->ToString());
 			}
 		}
-
-		if (ActorLabelId >= 0)
-		{
-			PrimitiveComponent->SetRenderCustomDepth(true);
-			PrimitiveComponent->SetCustomDepthStencilValue(ActorLabelId);
-		}
-
-		LabeledComponents.Add(PrimitiveComponent, nullptr);
 	}
+
+	// No mesh label found. Label with its owning Actor's label.
+	Component->SetRenderCustomDepth(true);
+	Component->SetCustomDepthStencilValue(ActorLabelId);
+	LabeledComponents.Add(Component, ActorLabelId);
 }
