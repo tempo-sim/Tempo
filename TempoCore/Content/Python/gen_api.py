@@ -58,6 +58,7 @@ class TempoEnumDescriptor(TempoObjectDescriptor):
 class TempoMessageDescriptor(TempoObjectDescriptor):
     class FieldDescriptor(object):
         def __init__(self, field_descriptor):
+            self.module_name = None
             if field_descriptor.type == gpd.FieldDescriptor.TYPE_MESSAGE:
                 self.field_type = field_descriptor.message_type.full_name
             elif field_descriptor.type == gpd.FieldDescriptor.TYPE_ENUM:
@@ -79,7 +80,9 @@ class TempoMessageDescriptor(TempoObjectDescriptor):
     def resolve_names(self, all_messages_and_enums):
         for field in self.fields:
             if field.field_type in all_messages_and_enums:
-                field.field_type = all_messages_and_enums[field.field_type].full_name
+                object = all_messages_and_enums[field.field_type]
+                field.field_type = object.full_name
+                field.module_name = object.module_name
 
 
 class TempoServiceDescriptor(TempoObjectDescriptor):
@@ -183,7 +186,11 @@ def generate_tempo_api(root_dir):
 
     # Every RPC gets sync and async versions. The correct one will automatically be chosen by context.
     simple_rpc_template = \
-        "import {{ service.module_name }}_grpc, {{ request.module_name }}, {{ response.module_name }}\n" \
+        "import " \
+        "{% for import in imports %}" \
+        "{{ import }}{% if not loop.last %}, {% endif %}" \
+        "{% endfor %}" \
+        "\n" \
         "async def _{{ name }}(\n" \
         "{% for field in request.fields %}" \
         "    {{ field.name }}: {{ field.field_type }} = {{ field.default }}{% if not loop.last %},{% endif %}\n" \
@@ -223,7 +230,11 @@ def generate_tempo_api(root_dir):
         "\n\n" \
 
     streaming_rpc_template = \
-        "import {{ service.module_name }}_grpc, {{ request.module_name }}, {{ response.module_name }}\n" \
+        "import " \
+        "{% for import in imports %}" \
+        "{{ import }}{% if not loop.last %}, {% endif %}" \
+        "{% endfor %}" \
+        "\n" \
         "async def _{{ name }}(\n" \
         "{% for field in request.fields %}" \
         "    {{ field.name }}: {{ field.field_type }} = {{ field.default }}{% if not loop.last %},{% endif %}\n" \
@@ -284,6 +295,13 @@ def generate_tempo_api(root_dir):
                     templates.append(j2_environment.from_string(streaming_rpc_template))
                 else:
                     templates.append(j2_environment.from_string(simple_rpc_template))
+                imports = set()
+                imports.add("{}_grpc".format(tempo_service_descriptor.module_name))
+                imports.add(tempo_request_descriptor.module_name)
+                imports.add(tempo_response_descriptor.module_name)
+                for field in tempo_request_descriptor.fields:
+                    if field.module_name:
+                        imports.add(field.module_name)
                 for template in templates:
                     f.write(template.render(
                         name=pascal_to_snake(rpc_descriptor.name),
@@ -291,6 +309,7 @@ def generate_tempo_api(root_dir):
                         service=tempo_service_descriptor,
                         request=tempo_request_descriptor,
                         response=tempo_response_descriptor,
+                        imports=imports
                     ))        
 
 
