@@ -43,6 +43,15 @@ void UTempoActorLabeler::OnWorldBeginPlay(UWorld& InWorld)
 	});
 }
 
+bool UTempoActorLabeler::ShouldCreateSubsystem(UObject* Outer) const
+{
+	if (Outer->GetWorld()->WorldType == EWorldType::Game || Outer->GetWorld()->WorldType == EWorldType::PIE)
+	{
+		return Super::ShouldCreateSubsystem(Outer);
+	}
+	return false;
+}
+
 void UTempoActorLabeler::BuildLabelMaps()
 {
 	if (!SemanticLabelTable)
@@ -174,6 +183,11 @@ void UTempoActorLabeler::LabelAllComponents(const AActor* Actor, int32 ActorLabe
 
 void UTempoActorLabeler::LabelComponent(UActorComponent* Component)
 {
+	if (!Component->GetOwner() || !(Component->GetWorld()->WorldType == EWorldType::Game || Component->GetWorld()->WorldType == EWorldType::PIE))
+	{
+		return;
+	}
+	
 	if (UPrimitiveComponent* PrimitiveComponent = Cast<UPrimitiveComponent>(Component))
 	{
 		if (const int32* ActorLabelId = LabeledActors.Find(PrimitiveComponent->GetOwner()))
