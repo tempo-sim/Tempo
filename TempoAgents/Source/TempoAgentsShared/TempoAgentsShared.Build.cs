@@ -1,4 +1,6 @@
-﻿using UnrealBuildTool;
+﻿// Copyright Tempo Simulation, LLC. All Rights Reserved.
+
+using UnrealBuildTool;
 
 public class TempoAgentsShared : ModuleRules
 {
