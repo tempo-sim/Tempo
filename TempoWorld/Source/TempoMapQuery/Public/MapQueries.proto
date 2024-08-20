@@ -1,0 +1,89 @@
+// Copyright Tempo Simulation, LLC. All Rights Reserved
+
+syntax = "proto3";
+
+import "TempoScripting/Geometry.proto";
+
+message TagFilter {
+  repeated string any_tags = 1;
+  repeated string all_tags = 2;
+  repeated string none_tags = 4;
+}
+
+enum LaneRelationship {
+  LR_UNKNOWN = 0;
+  SUCCESSOR = 1;
+  PREDECESSOR = 2;
+  NEIGHBOR = 3;
+}
+
+message LaneDataRequest {
+  TagFilter tag_filter = 1;
+  TempoScripting.Vector2D center = 2;
+  double radius = 3;
+}
+
+message LaneConnection {
+  int32 id = 2;
+  LaneRelationship relationship = 3;
+}
+
+message LaneData {
+  int32 id = 1;
+  repeated string tags = 2;
+  repeated TempoScripting.Vector center_points = 3;
+  double width = 4;
+  repeated LaneConnection connections = 5;
+}
+
+message LaneDataResponse {
+  repeated LaneData lanes = 1;
+}
+
+message ZoneDataRequest {
+  TagFilter tag_filter = 1;
+  TempoScripting.Vector center = 2;
+  double radius = 3;
+}
+
+message ZoneConnection {
+  int32 id = 1;
+}
+
+message ZoneData {
+  int32 id = 1;
+  repeated string tags = 2;
+  repeated TempoScripting.Vector boundary_points = 4;
+  repeated ZoneConnection connections = 5;
+}
+
+message ZoneDataResponse {
+  repeated ZoneData zones = 1;
+}
+
+enum LaneAccessibility {
+  LA_UNKNOWN = 0;
+  GREEN = 1;
+  YELLOW = 2;
+  RED = 3;
+  STOP = 4;
+}
+
+message LaneAccessibilityRequest {
+  int32 from_id = 1;
+  int32 to_id = 2;
+}
+
+message LaneAccessibilityResponse {
+  LaneAccessibility accessibility = 1;
+}
+
+service MapQueryService {
+  rpc GetLanes(LaneDataRequest) returns (LaneDataResponse);
+
+  rpc GetLaneAccessibility(LaneAccessibilityRequest) returns (LaneAccessibilityResponse);
+
+  rpc StreamLaneAccessibility(LaneAccessibilityRequest) returns (stream LaneAccessibilityResponse);
+
+  rpc GetZones(ZoneDataRequest) returns (ZoneDataResponse);
+}
