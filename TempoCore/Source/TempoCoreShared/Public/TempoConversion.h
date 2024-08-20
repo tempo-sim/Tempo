@@ -35,7 +35,7 @@ struct QuantityConverter
     {
         return QuantityConverter<UC_NONE, HandednessConversion>::Convert(QuantityConverter<UnitConversion, HC_NONE>::Convert(In));
     }
-    
+
     static FVector Convert(const FVector& In)
     {
         return QuantityConverter<UC_NONE, HandednessConversion>::Convert(QuantityConverter<UnitConversion, HC_NONE>::Convert(In));
@@ -49,7 +49,7 @@ struct QuantityConverter<UC_NONE, R2L>
     {
         return FVector2D(In.X, -In.Y);
     }
-    
+
     static FVector Convert(const FVector& In)
     {
         return FVector(In.X, -In.Y, In.Z);
@@ -64,6 +64,11 @@ struct QuantityConverter<UC_NONE, R2L>
 template<>
 struct QuantityConverter<UC_NONE, L2R>
 {
+    static FVector2D Convert(const FVector2D& In)
+    {
+        return FVector2D(In.X, -In.Y);
+    }
+
     static FVector Convert(const FVector& In)
     {
         return FVector(In.X, -In.Y, In.Z);
