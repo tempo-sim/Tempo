@@ -19,6 +19,8 @@ class TEMPOLABELS_API UTempoActorLabeler : public UWorldSubsystem
 public:
 	virtual void OnWorldBeginPlay(UWorld& InWorld) override;
 
+	virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
+
 protected:
 	void BuildLabelMaps();
 	
