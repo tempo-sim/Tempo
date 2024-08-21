@@ -1,8 +1,8 @@
 ﻿using UnrealBuildTool;
 
-public class TempoLabels : ModuleRules
+public class TempoObservableEvents : TempoModuleRules
 {
-    public TempoLabels(ReadOnlyTargetRules Target) : base(Target)
+    public TempoObservableEvents(ReadOnlyTargetRules Target) : base(Target)
     {
         PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
 
@@ -12,7 +12,8 @@ public class TempoLabels : ModuleRules
                 // Unreal
                 "Core",
                 // Tempo
-                "TempoCore",
+                "TempoScripting",
+                "TempoCoreShared",
             }
         );
 
@@ -25,7 +26,7 @@ public class TempoLabels : ModuleRules
                 "Slate",
                 "SlateCore",
                 // Tempo
-                "TempoSensorsShared",
+                "TempoCore"
             }
         );
     }

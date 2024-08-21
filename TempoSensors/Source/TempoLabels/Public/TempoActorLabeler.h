@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include "ActorClassificationInterface.h"
+
 #include "CoreMinimal.h"
 #include "Engine/DataTable.h"
 #include "Subsystems/WorldSubsystem.h"
@@ -12,7 +14,7 @@
  * Tags all meshes on all Actors in the world with the appropriate label.
  */
 UCLASS()
-class TEMPOLABELS_API UTempoActorLabeler : public UWorldSubsystem
+class TEMPOLABELS_API UTempoActorLabeler : public UWorldSubsystem, public IActorClassificationInterface
 {
 	GENERATED_BODY()
 
@@ -20,6 +22,8 @@ public:
 	virtual void OnWorldBeginPlay(UWorld& InWorld) override;
 
 	virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
+
+	virtual FName GetActorClassification(const AActor* Actor) const override;
 
 protected:
 	void BuildLabelMaps();

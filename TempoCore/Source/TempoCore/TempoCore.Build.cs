@@ -34,6 +34,7 @@ public class TempoCore : ModuleRules
 			new string[]
 			{
 				// Unreal
+				"ChaosVehicles",
 				"CoreUObject",
 				"Engine",
 				"Slate",
