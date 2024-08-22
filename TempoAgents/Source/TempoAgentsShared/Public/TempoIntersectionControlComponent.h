@@ -2,9 +2,11 @@
 
 #pragma once
 
-#include "CoreMinimal.h"
 #include "TempoIntersectionInterface.h"
+
 #include "Components/ActorComponent.h"
+#include "CoreMinimal.h"
+
 #include "TempoIntersectionControlComponent.generated.h"
 
 UCLASS( ClassGroup=(TempoTrafficControl), meta=(BlueprintSpawnableComponent) )

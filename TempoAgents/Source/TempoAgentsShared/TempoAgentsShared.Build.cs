@@ -15,8 +15,6 @@ public class TempoAgentsShared : ModuleRules
                 "Engine",
             }
         );
-        
-        PublicIncludePaths.Add("$(PluginDir)/../External/Traffic/Source/MassTraffic/Public");
 
         PrivateDependencyModuleNames.AddRange(
             new string[]
