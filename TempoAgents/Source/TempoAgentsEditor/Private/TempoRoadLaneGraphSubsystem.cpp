@@ -12,7 +12,6 @@
 #include "ZoneGraphSubsystem.h"
 #include "ZoneGraphDelegates.h"
 #include "DrawDebugHelpers.h"
-#include "MassTrafficLightRegistry.h"
 #include "VectorTypes.h"
 
 //

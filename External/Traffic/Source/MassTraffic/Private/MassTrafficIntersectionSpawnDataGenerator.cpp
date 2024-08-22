@@ -3,7 +3,7 @@
 #include "MassTrafficIntersectionSpawnDataGenerator.h"
 #include "MassCommonUtils.h"
 #include "MassTrafficLaneChange.h"
-#include "MassTrafficLightRegistry.h"
+#include "MassTrafficLightRegistrySubsystem.h"
 #include "ToolBuilderUtil.h"
 #include "Kismet/GameplayStatics.h"
 
@@ -55,19 +55,10 @@ void UMassTrafficIntersectionSpawnDataGenerator::Generate(UObject& QueryOwner, T
 
 	UWorld* World = QueryOwner.GetWorld();
 	
-	TArray<AActor*> TrafficLightRegistryActors;
-	UGameplayStatics::GetAllActorsOfClass(World, AMassTrafficLightRegistry::StaticClass(), TrafficLightRegistryActors);
-
-	const AMassTrafficLightRegistry* TrafficLightRegistry = TrafficLightRegistryActors.Num() > 0 ? Cast<AMassTrafficLightRegistry>(TrafficLightRegistryActors[0]) : nullptr;
-	
-	if (TrafficLightRegistryActors.Num() > 1)
+	const UMassTrafficLightRegistrySubsystem* TrafficLightRegistrySubsystem = UWorld::GetSubsystem<UMassTrafficLightRegistrySubsystem>(World);
+	if (TrafficLightRegistrySubsystem == nullptr)
 	{
-		UE_LOG(LogMassTraffic, Warning, TEXT("More than 1 AMassTrafficLightRegistry found in level.  Using the first one, namely:  %s."), *TrafficLightRegistry->GetName())
-	}
-	
-	if (!TrafficLightRegistry)
-	{
-		UE_LOG(LogMassTraffic, Warning, TEXT("No AMassTrafficLightRegistry found in level, no traffic lights will be drawn at intersections."))
+		UE_LOG(LogMassTraffic, Warning, TEXT("UMassTrafficIntersectionSpawnDataGenerator - Failed to get TrafficLightRegistrySubsystem.  No traffic lights will be drawn at intersections."));
 	}
 	
 	// Get subsystem
@@ -242,9 +233,9 @@ void UMassTrafficIntersectionSpawnDataGenerator::Generate(UObject& QueryOwner, T
 
 			UE::MassTraffic::FMassTrafficBasicHGrid IntersectionSideHGrid;
 			{
-				if (IsValid(TrafficLightRegistry))
+				if (IsValid(TrafficLightRegistrySubsystem))
 				{
-					const TArray<FMassTrafficLightInstanceDesc>& TrafficLightInstanceDescs = TrafficLightRegistry->GetTrafficLightInstanceDescs();
+					const TArray<FMassTrafficLightInstanceDesc>& TrafficLightInstanceDescs = TrafficLightRegistrySubsystem->GetTrafficLightInstanceDescs();
 					
 					for (int32 TrafficLightDetailIndex = 0; TrafficLightDetailIndex < TrafficLightInstanceDescs.Num(); TrafficLightDetailIndex++)
 					{
@@ -289,7 +280,7 @@ void UMassTrafficIntersectionSpawnDataGenerator::Generate(UObject& QueryOwner, T
 				IntersectionDetail->Build(
 					IntersectionFragment.ZoneIndex,
 					CrosswalkLaneMidpoint_HGrid, IntersectionSideToCrosswalkSearchDistance,
-					IntersectionSideHGrid, TrafficLightRegistry ? &TrafficLightRegistry->GetTrafficLightInstanceDescs() : nullptr, TrafficLightSearchDistance,
+					IntersectionSideHGrid, TrafficLightRegistrySubsystem ? &TrafficLightRegistrySubsystem->GetTrafficLightInstanceDescs() : nullptr, TrafficLightSearchDistance,
 					*ZoneGraphStorage, World);
 			}			
 		}
@@ -336,10 +327,10 @@ void UMassTrafficIntersectionSpawnDataGenerator::Generate(UObject& QueryOwner, T
 					{
 						int32 NumLogicalLanes = GetNumLogicalLanesForIntersectionSide(*ZoneGraphStorage, Side);
 
-						check(TrafficLightRegistry != nullptr);
-						const TArray<FMassTrafficLightInstanceDesc>& TrafficLightInstanceDescs = TrafficLightRegistry->GetTrafficLightInstanceDescs();
+						check(TrafficLightRegistrySubsystem != nullptr);
+						const TArray<FMassTrafficLightInstanceDesc>& TrafficLightInstanceDescs = TrafficLightRegistrySubsystem->GetTrafficLightInstanceDescs();
 						const FMassTrafficLightInstanceDesc& TrafficLightDetail = TrafficLightInstanceDescs[TrafficLightDetailIndex];
-						const TArray<FMassTrafficLightTypeData>& TrafficLightTypes = TrafficLightRegistry->GetTrafficLightTypes();
+						const TArray<FMassTrafficLightTypeData>& TrafficLightTypes = TrafficLightRegistrySubsystem->GetTrafficLightTypes();
 
 						// Do we have a pre-selected light type?
 						int16 TrafficLightTypeIndex = TrafficLightDetail.TrafficLightTypeIndex;

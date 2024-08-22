@@ -3,7 +3,7 @@
 #include "TempoAgentsWorldSubsystem.h"
 
 #include "EngineUtils.h"
-#include "MassTrafficLightRegistry.h"
+#include "MassTrafficLightRegistrySubsystem.h"
 #include "TempoAgentsShared.h"
 #include "TempoIntersectionInterface.h"
 
@@ -11,14 +11,16 @@ void UTempoAgentsWorldSubsystem::SetupTrafficControllers()
 {
 	UWorld& World = GetWorldRef();
 	
-	AMassTrafficLightRegistry* TrafficLightRegistry = AMassTrafficLightRegistry::FindOrSpawnMassTrafficLightRegistryActor(World);
-	if (TrafficLightRegistry == nullptr)
+	UMassTrafficLightRegistrySubsystem* TrafficLightRegistrySubsystem = World.GetSubsystem<UMassTrafficLightRegistrySubsystem>();
+	if (TrafficLightRegistrySubsystem != nullptr)
 	{
-		UE_LOG(LogTempoAgentsShared, Error, TEXT("TempoAgentsWorldSubsystem - Failed to setup traffic controllers - Failed to find or spawn TrafficLightRegistry."));
-		return;
+		// TrafficLightRegistrySubsystem will only exist in "Game" Worlds.
+		// So, we want to clear the registry for Game Worlds whenever SetupTrafficControllers is called.
+		// But, we still want to call SetupTempoTrafficControllers via the Intersection Interface below
+		// for both "Game" Worlds and "Editor" Worlds (as Editor Worlds need to reflect changes
+		// to Traffic Controller data visually for both Stop Signs and Traffic Lights).
+		TrafficLightRegistrySubsystem->ClearTrafficLights();
 	}
-	
-	TrafficLightRegistry->ClearTrafficLights();
 	
 	for (AActor* Actor : TActorRange<AActor>(&World))
 	{

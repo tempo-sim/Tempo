@@ -13,12 +13,18 @@ class TEMPOAGENTSSHARED_API UTempoIntersectionControlComponent : public UActorCo
 	GENERATED_BODY()
 
 public:
-
-	UFUNCTION(BlueprintCallable, Category = "Tempo Agents|Intersection Control")
-	void SetupTrafficControllers();
 	
 	UFUNCTION(BlueprintCallable, Category = "Tempo Agents|Intersection Control")
-	void DestroyTrafficControllers();
+	void SetupTrafficControllers();
+
+	UFUNCTION(BlueprintCallable, Category = "Tempo Agents|Intersection Control")
+	void SetupTrafficControllerMeshData();
+
+	UFUNCTION(BlueprintCallable, Category = "Tempo Agents|Intersection Control")
+	void SetupTrafficControllerRuntimeData();
+	
+	UFUNCTION(BlueprintCallable, Category = "Tempo Agents|Intersection Control")
+	void DestroyTrafficControllerMeshData();
 
 	UFUNCTION(BlueprintCallable, Category = "Tempo Agents|Intersection Control")
 	bool TryGetIntersectionTrafficControllerLocation(const AActor* IntersectionQueryActor, int32 ConnectionIndex, ETempoTrafficControllerType TrafficControllerType, const FTempoTrafficControllerMeshInfo& TrafficControllerMeshInfo, ETempoCoordinateSpace CoordinateSpace, FVector& OutIntersectionTrafficControllerLocation) const;

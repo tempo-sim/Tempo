@@ -9,7 +9,7 @@
 #include "MassLODFragments.h"
 #include "MassRepresentationSubsystem.h"
 #include "MassEntityUtils.h"
-#include "MassTrafficLightRegistry.h"
+#include "MassTrafficLightRegistrySubsystem.h"
 #include "Kismet/GameplayStatics.h"
 
 
@@ -71,20 +71,17 @@ void UMassTrafficLightVisualizationTrait::BuildTemplate(FMassEntityTemplateBuild
 	// Add fragments
 	BuildContext.AddFragment<FMassActorFragment>();
 
-	// Find the TrafficLightRegistry
-	TArray<AActor*> TrafficLightRegistryActors;
-	UGameplayStatics::GetAllActorsOfClass(&World, AMassTrafficLightRegistry::StaticClass(), TrafficLightRegistryActors);
-
-	AMassTrafficLightRegistry* TrafficLightRegistry = TrafficLightRegistryActors.Num() > 0 ? Cast<AMassTrafficLightRegistry>(TrafficLightRegistryActors[0]) : nullptr;
-	if (TrafficLightRegistry == nullptr)
+	// Get the TrafficLightRegistrySubsystem
+	const UMassTrafficLightRegistrySubsystem* TrafficLightRegistrySubsystem = World.GetSubsystem<UMassTrafficLightRegistrySubsystem>();
+	if (TrafficLightRegistrySubsystem == nullptr)
 	{
-		UE_LOG(LogMassTraffic, Error, TEXT("UMassTrafficLightVisualizationTrait - Couldn't find TrafficLightRegistry in Level.  Did you run the Tempo Lane Graph Builder Pipeline?"));
+		UE_LOG(LogMassTraffic, Error, TEXT("UMassTrafficLightVisualizationTrait - Failed to get TrafficLightRegistrySubsystem."));
 		return;
 	}
 	
 	FMassTrafficLightsParameters RegisteredTrafficLightsParams;
 	
-	const TArray<FMassTrafficLightTypeData>& TrafficLightTypes = TrafficLightRegistry->GetTrafficLightTypes();
+	const TArray<FMassTrafficLightTypeData>& TrafficLightTypes = TrafficLightRegistrySubsystem->GetTrafficLightTypes();
 	if (TrafficLightTypes.Num() > 0)
 	{
 		RegisteredTrafficLightsParams.TrafficLightTypes = TrafficLightTypes;
