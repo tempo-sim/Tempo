@@ -2,10 +2,12 @@
 
 #pragma once
 
-#include "CoreMinimal.h"
 #include "TempoAgentsSharedTypes.h"
-#include "UObject/Interface.h"
+
 #include "ZoneGraphBuilder.h"
+
+#include "CoreMinimal.h"
+#include "UObject/Interface.h"
 
 #include "TempoIntersectionInterface.generated.h"
 
