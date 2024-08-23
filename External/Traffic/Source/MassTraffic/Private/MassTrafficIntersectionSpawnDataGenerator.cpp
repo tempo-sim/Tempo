@@ -3,6 +3,8 @@
 #include "MassTrafficIntersectionSpawnDataGenerator.h"
 #include "MassCommonUtils.h"
 #include "MassTrafficLaneChange.h"
+#include "MassTrafficLightRegistrySubsystem.h"
+#include "Kismet/GameplayStatics.h"
 
 #include "VisualLogger/VisualLogger.h"
 #if WITH_EDITOR
@@ -49,18 +51,16 @@ void UMassTrafficIntersectionSpawnDataGenerator::Generate(UObject& QueryOwner, T
 	// @todo This should really all be performed offline in project-specific code, that stores a list of intersection
 	// configurations, stored in a data asset that we can just re-hydrate here. However intersections require specific
 	// zone graph 
-	
-	if (!TrafficLightTypesData)
-	{
-		UE_LOG(LogMassTraffic, Warning, TEXT("No TrafficLightTypesData asset specified, no traffic lights will be drawn at intersections."))
-	}
-	if (!TrafficLightInstanceData)
-	{
-		UE_LOG(LogMassTraffic, Warning, TEXT("No TrafficLightInstanceData asset specified, no traffic lights will be drawn at intersections."))
-	}
-	
-	// Get subsystems
+
 	UWorld* World = QueryOwner.GetWorld();
+	
+	const UMassTrafficLightRegistrySubsystem* TrafficLightRegistrySubsystem = UWorld::GetSubsystem<UMassTrafficLightRegistrySubsystem>(World);
+	if (TrafficLightRegistrySubsystem == nullptr)
+	{
+		UE_LOG(LogMassTraffic, Warning, TEXT("UMassTrafficIntersectionSpawnDataGenerator - Failed to get TrafficLightRegistrySubsystem.  No traffic lights will be drawn at intersections."));
+	}
+	
+	// Get subsystem
 	UMassTrafficSubsystem* MassTrafficSubsystem = UWorld::GetSubsystem<UMassTrafficSubsystem>(World);
 	UZoneGraphSubsystem* ZoneGraphSubsystem = UWorld::GetSubsystem<UZoneGraphSubsystem>(World);
 	check(MassTrafficSubsystem);
@@ -232,11 +232,13 @@ void UMassTrafficIntersectionSpawnDataGenerator::Generate(UObject& QueryOwner, T
 
 			UE::MassTraffic::FMassTrafficBasicHGrid IntersectionSideHGrid;
 			{
-				if (IsValid(TrafficLightInstanceData))
+				if (IsValid(TrafficLightRegistrySubsystem))
 				{
-					for (int32 TrafficLightDetailIndex = 0; TrafficLightDetailIndex < TrafficLightInstanceData->TrafficLights.Num(); TrafficLightDetailIndex++)
+					const TArray<FMassTrafficLightInstanceDesc>& TrafficLightInstanceDescs = TrafficLightRegistrySubsystem->GetTrafficLightInstanceDescs();
+					
+					for (int32 TrafficLightDetailIndex = 0; TrafficLightDetailIndex < TrafficLightInstanceDescs.Num(); TrafficLightDetailIndex++)
 					{
-						const FMassTrafficLightInstanceDesc& TrafficLightDetail = TrafficLightInstanceData->TrafficLights[TrafficLightDetailIndex];
+						const FMassTrafficLightInstanceDesc& TrafficLightDetail = TrafficLightInstanceDescs[TrafficLightDetailIndex];
 						IntersectionSideHGrid.Add(TrafficLightDetailIndex, FBox::BuildAABB(TrafficLightDetail.ControlledIntersectionSideMidpoint, FVector::ZeroVector));
 					}
 				}
@@ -277,7 +279,7 @@ void UMassTrafficIntersectionSpawnDataGenerator::Generate(UObject& QueryOwner, T
 				IntersectionDetail->Build(
 					IntersectionFragment.ZoneIndex,
 					CrosswalkLaneMidpoint_HGrid, IntersectionSideToCrosswalkSearchDistance,
-					IntersectionSideHGrid, TrafficLightInstanceData ? &TrafficLightInstanceData->TrafficLights : nullptr, TrafficLightSearchDistance,
+					IntersectionSideHGrid, TrafficLightRegistrySubsystem ? &TrafficLightRegistrySubsystem->GetTrafficLightInstanceDescs() : nullptr, TrafficLightSearchDistance,
 					*ZoneGraphStorage, World);
 			}			
 		}
@@ -324,8 +326,10 @@ void UMassTrafficIntersectionSpawnDataGenerator::Generate(UObject& QueryOwner, T
 					{
 						int32 NumLogicalLanes = GetNumLogicalLanesForIntersectionSide(*ZoneGraphStorage, Side);
 
-						check(TrafficLightInstanceData);
-						const FMassTrafficLightInstanceDesc& TrafficLightDetail = TrafficLightInstanceData->TrafficLights[TrafficLightDetailIndex];
+						check(TrafficLightRegistrySubsystem != nullptr);
+						const TArray<FMassTrafficLightInstanceDesc>& TrafficLightInstanceDescs = TrafficLightRegistrySubsystem->GetTrafficLightInstanceDescs();
+						const FMassTrafficLightInstanceDesc& TrafficLightDetail = TrafficLightInstanceDescs[TrafficLightDetailIndex];
+						const TArray<FMassTrafficLightTypeData>& TrafficLightTypes = TrafficLightRegistrySubsystem->GetTrafficLightTypes();
 
 						// Do we have a pre-selected light type?
 						int16 TrafficLightTypeIndex = TrafficLightDetail.TrafficLightTypeIndex;
@@ -333,21 +337,21 @@ void UMassTrafficIntersectionSpawnDataGenerator::Generate(UObject& QueryOwner, T
 						{
 							// TrafficLightTypeIndex-es are computed against the TrafficLightConfiguration at the time of
 							// collecting traffic light info from RuleProcessor and may since have changed.
-							if (!IsValid(TrafficLightTypesData) || !TrafficLightTypesData->TrafficLightTypes.IsValidIndex(TrafficLightTypeIndex))
+							if (TrafficLightTypes.IsEmpty() || !TrafficLightTypes.IsValidIndex(TrafficLightTypeIndex))
 							{
-								UE_LOG(LogMassTraffic, Error, TEXT("Stored traffic light info is referring to an invalid traffic light type. Using a random light type instead. Have you changed the TrafficLightConfiguration since populating traffic lights from Rule Processor?"))
+								UE_LOG(LogMassTraffic, Error, TEXT("Stored traffic light info is referring to an invalid traffic light type. Using a random light type instead. Have you run the Tempo Zone Graph Pipeline recently?"))
 								TrafficLightTypeIndex = INDEX_NONE;
 							}
 						}
 						
 						// Otherwise choose a random compatible one
-						if (IsValid(TrafficLightTypesData) && TrafficLightTypeIndex == INDEX_NONE)
+						if (!TrafficLightTypes.IsEmpty() && TrafficLightTypeIndex == INDEX_NONE)
 						{
 							// Get compatible lights
 							TArray<uint8> CompatibleTrafficLightTypes;
-							for (uint8 PotentialTrafficLightTypeIndex = 0; PotentialTrafficLightTypeIndex < TrafficLightTypesData->TrafficLightTypes.Num(); ++PotentialTrafficLightTypeIndex)
+							for (uint8 PotentialTrafficLightTypeIndex = 0; PotentialTrafficLightTypeIndex < TrafficLightTypes.Num(); ++PotentialTrafficLightTypeIndex)
 							{
-								const FMassTrafficLightTypeData& TrafficLightTypeData = TrafficLightTypesData->TrafficLightTypes[PotentialTrafficLightTypeIndex];
+								const FMassTrafficLightTypeData& TrafficLightTypeData = TrafficLightTypes[PotentialTrafficLightTypeIndex];
 								if (TrafficLightTypeData.NumLanes <= 0 || TrafficLightTypeData.NumLanes == NumLogicalLanes)
 								{
 									CompatibleTrafficLightTypes.Add(PotentialTrafficLightTypeIndex);
@@ -364,7 +368,7 @@ void UMassTrafficIntersectionSpawnDataGenerator::Generate(UObject& QueryOwner, T
 						// Add traffic light to intersection
 						if (TrafficLightTypeIndex != INDEX_NONE)
 						{
-							const FMassTrafficLight TrafficLight(TrafficLightDetail.Position, TrafficLightDetail.ZRotation, TrafficLightTypeIndex, EMassTrafficLightStateFlags::None);
+							const FMassTrafficLight TrafficLight(TrafficLightDetail.Position, TrafficLightDetail.ZRotation, TrafficLightTypeIndex, EMassTrafficLightStateFlags::None, TrafficLightDetail.MeshScale);
 							const int8 TrafficLightIndex = static_cast<int8>(IntersectionFragment.TrafficLights.Add(TrafficLight));
 							
 							IntersectionSide_To_TrafficLightIndex.Add(TrafficLightIndex);
@@ -510,33 +514,23 @@ void UMassTrafficIntersectionSpawnDataGenerator::Generate(UObject& QueryOwner, T
 							S, SRight, *ZoneGraphStorage, VehicleTrafficLanes_This_To_AllOther);
 					}
 
-					
+
 					// Period -
-					//		Vehicles - bidirectional, this side to opposite side, opposite side to this side
-					//		Pedestrians - bidirectional, across left side and right side
+					//		Vehicles - this side to all sides
+					//		Pedestrians - none
 					{
 						FMassTrafficPeriod& Period = IntersectionFragment.AddPeriod(
 							IntersectionDetail->bHasTrafficLights ?
-								StandardCrosswalkGoSeconds /*this period is really about the crosswalks*/ :
+								UnidirectionalTrafficStraightRightLeftGoSeconds *
+								(ThisSide.bHasInboundLanesFromFreeway ? FreewayIncomingTrafficGoDurationScale : 1.0f) :
 								StandardMinimumTrafficGoSeconds);
 
-						Period.VehicleLanes.Append(VehicleTrafficLanes_This_To_Opposite);
-						Period.VehicleLanes.Append(VehicleTrafficLanes_Opposite_To_This);
-
-						Period.CrosswalkLanes.Append(LeftSide.CrosswalkLanes.Array());
-						Period.CrosswalkLanes.Append(RightSide.CrosswalkLanes.Array());
-
-						Period.CrosswalkWaitingLanes.Append(LeftSide.CrosswalkWaitingLanes.Array());
-						Period.CrosswalkWaitingLanes.Append(RightSide.CrosswalkWaitingLanes.Array());
-
-						Period.AddTrafficLightControl(ThisTrafficLightIndex, EMassTrafficLightStateFlags::VehicleGo | EMassTrafficLightStateFlags::PedestrianGo_FrontSide);
-						Period.AddTrafficLightControl(OppositeTrafficLightIndex, EMassTrafficLightStateFlags::VehicleGo | EMassTrafficLightStateFlags::PedestrianGo_FrontSide);
-						Period.AddTrafficLightControl(LeftTrafficLightIndex, EMassTrafficLightStateFlags::PedestrianGo_RightSide);
-						Period.AddTrafficLightControl(RightTrafficLightIndex, EMassTrafficLightStateFlags::PedestrianGo_RightSide);
+						Period.VehicleLanes.Append(VehicleTrafficLanes_This_To_AllOther);
+						
+						Period.AddTrafficLightControl(ThisTrafficLightIndex, EMassTrafficLightStateFlags::VehicleGo | EMassTrafficLightStateFlags::VehicleGoProtectedLeft);
 
 						// Remember which traffic light controls which lane, for Period::Finalize()
-						LaneToTrafficLightMap.SetTrafficLightForLanes(VehicleTrafficLanes_Opposite_To_This, OppositeTrafficLightIndex);
-						LaneToTrafficLightMap.SetTrafficLightForLanes(VehicleTrafficLanes_This_To_Opposite, ThisTrafficLightIndex);
+						LaneToTrafficLightMap.SetTrafficLightForLanes(VehicleTrafficLanes_This_To_AllOther, ThisTrafficLightIndex);
 					}
 
 					// Period -
@@ -558,42 +552,6 @@ void UMassTrafficIntersectionSpawnDataGenerator::Generate(UObject& QueryOwner, T
 						// Remember which traffic light controls which lane, for Period::Finalize()
 						LaneToTrafficLightMap.SetTrafficLightForLanes(VehicleTrafficLanes_This_To_OppositeAndRight, ThisTrafficLightIndex);
 						LaneToTrafficLightMap.SetTrafficLightForLanes(VehicleTrafficLanes_Opposite_To_ThisAndLeft, OppositeTrafficLightIndex);
-					}
-
-					// Period -
-					//		Vehicles - this side to opposite/right side
-					//		Pedestrians - none
-					{
-						FMassTrafficPeriod& Period = IntersectionFragment.AddPeriod(
-							IntersectionDetail->bHasTrafficLights ?
-								UnidirectionalTrafficStraightRightGoSeconds *
-								(ThisSide.bHasInboundLanesFromFreeway ? FreewayIncomingTrafficGoDurationScale : 1.0f) :
-								StandardMinimumTrafficGoSeconds);
-
-						Period.VehicleLanes.Append(VehicleTrafficLanes_This_To_OppositeAndRight);
-						
-						Period.AddTrafficLightControl(ThisTrafficLightIndex, EMassTrafficLightStateFlags::VehicleGo);
-
-						// Remember which traffic light controls which lane, for Period::Finalize()
-						LaneToTrafficLightMap.SetTrafficLightForLanes(VehicleTrafficLanes_This_To_OppositeAndRight, ThisTrafficLightIndex);
-					}
-
-					// Period -
-					//		Vehicles - this side to all sides
-					//		Pedestrians - none
-					{
-						FMassTrafficPeriod& Period = IntersectionFragment.AddPeriod(
-							IntersectionDetail->bHasTrafficLights ?
-								UnidirectionalTrafficStraightRightLeftGoSeconds *
-								(ThisSide.bHasInboundLanesFromFreeway ? FreewayIncomingTrafficGoDurationScale : 1.0f) :
-								StandardMinimumTrafficGoSeconds);
-
-						Period.VehicleLanes.Append(VehicleTrafficLanes_This_To_AllOther);
-						
-						Period.AddTrafficLightControl(ThisTrafficLightIndex, EMassTrafficLightStateFlags::VehicleGo);
-
-						// Remember which traffic light controls which lane, for Period::Finalize()
-						LaneToTrafficLightMap.SetTrafficLightForLanes(VehicleTrafficLanes_This_To_AllOther, ThisTrafficLightIndex);
 					}
 				}
 			}
@@ -797,6 +755,23 @@ void UMassTrafficIntersectionSpawnDataGenerator::Generate(UObject& QueryOwner, T
 			else
 			{
 				OutIntersectionsSpawnData.IntersectionTransforms.Add(FTransform::Identity);
+			}
+		}
+
+		// Set bHasTrafficLights flag on lanes
+		for (const FMassTrafficIntersectionFragment& IntersectionFragment : OutIntersectionsSpawnData.IntersectionFragments)
+		{
+			for (const FMassTrafficPeriod& Period : IntersectionFragment.Periods)
+			{
+				for (FZoneGraphTrafficLaneData* VehicleLane : Period.VehicleLanes)
+				{
+					if (VehicleLane == nullptr)
+					{
+						continue;
+					}
+
+					VehicleLane->ConstData.bIsTrafficLightControlled = IntersectionFragment.bHasTrafficLights;
+				}
 			}
 		}
 	}

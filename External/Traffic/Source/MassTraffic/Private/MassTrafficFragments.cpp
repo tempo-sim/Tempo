@@ -315,19 +315,40 @@ void FMassTrafficIntersectionFragment::UpdateTrafficLightsForCurrentPeriod()
 		// Modify the traffic light state flags to show a yellow light instead of a green light, if -
 		//		(1) The current period is about to close.
 		//		(2) *All* open vehicle lanes in the current period will close in the next period.
-		if ((TrafficLightStateFlags & EMassTrafficLightStateFlags::VehicleGo) != EMassTrafficLightStateFlags::None) // ..light wants to be green, but maybe it should be yellow
+		if ((TrafficLightStateFlags & (EMassTrafficLightStateFlags::VehicleGo | EMassTrafficLightStateFlags::VehicleGoProtectedLeft)) != EMassTrafficLightStateFlags::None) // ..light wants to be green, but maybe it should be yellow
 		{
 			const bool bIsCurrentPeriodAboutToEnd =
 				(CurrentPeriod.Duration < 2.0f * MassTrafficSettings->StandardTrafficPrepareToStopSeconds ? 
 					PeriodTimeRemaining < CurrentPeriod.Duration / 2.0f :
 					PeriodTimeRemaining < MassTrafficSettings->StandardTrafficPrepareToStopSeconds);
-
-			// If all of the lanes using this this traffic light close in the next period, the light should go yellow.
-			if (bIsCurrentPeriodAboutToEnd && CurrentTrafficLightControl->bWillAllVehicleLanesCloseInNextPeriodForThisTrafficLight)
+			
+			if (bIsCurrentPeriodAboutToEnd)
 			{
-				// Vehicle light is no longer green, but yellow.
-				TrafficLightStateFlags &= ~EMassTrafficLightStateFlags::VehicleGo;
-				TrafficLightStateFlags |= (PeriodTimeRemaining > 0.0f ? EMassTrafficLightStateFlags::VehiclePrepareToStop : EMassTrafficLightStateFlags::None);
+				TrafficLightStateFlags = PeriodTimeRemaining > 0.0f ? TrafficLightStateFlags | EMassTrafficLightStateFlags::VehiclePrepareToStop : TrafficLightStateFlags & ~EMassTrafficLightStateFlags::VehiclePrepareToStop;
+
+				if (PeriodTimeRemaining <= 0.0f)
+				{
+					// If the current period has a protected left turn, ...
+					if ((TrafficLightStateFlags & EMassTrafficLightStateFlags::VehicleGoProtectedLeft) != EMassTrafficLightStateFlags::None)
+					{
+						FMassTrafficPeriod& NextPeriod = GetNextPeriod();
+						const FMassTrafficLightControl* NextTrafficLightControl = NextPeriod.GetTrafficLightControl(I);
+
+						EMassTrafficLightStateFlags NextTrafficLightStateFlags = NextTrafficLightControl->TrafficLightStateFlags;
+
+						// And, the next period does *not* have a protected left turn, ...
+						if ((NextTrafficLightStateFlags & EMassTrafficLightStateFlags::VehicleGoProtectedLeft) == EMassTrafficLightStateFlags::None)
+						{
+							// Then, remove protected left turn flag.
+							TrafficLightStateFlags &= ~EMassTrafficLightStateFlags::VehicleGoProtectedLeft;
+						}
+					}
+
+					if (CurrentTrafficLightControl->bWillAllVehicleLanesCloseInNextPeriodForThisTrafficLight)
+					{
+						TrafficLightStateFlags &= ~EMassTrafficLightStateFlags::VehicleGo;
+					}
+				}
 			}
 		}
 

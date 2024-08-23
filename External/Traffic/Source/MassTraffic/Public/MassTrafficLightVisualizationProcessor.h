@@ -23,7 +23,7 @@ struct MASSTRAFFIC_API FMassTrafficLightInstanceCustomData
 	{
 	}
 
-	FMassTrafficLightInstanceCustomData(const bool VehicleGo, const bool VehiclePrepareToStop, const bool PedestrianGo_FrontSide, const bool PedestrianGo_LeftSide, const bool PedestrianGo_RightSide);
+	FMassTrafficLightInstanceCustomData(const bool VehicleGo, const bool VehicleGoProtectedLeft, const bool VehiclePrepareToStop, const bool PedestrianGo_FrontSide, const bool PedestrianGo_LeftSide, const bool PedestrianGo_RightSide);
 	
 	FMassTrafficLightInstanceCustomData(const EMassTrafficLightStateFlags TrafficLightStateFlags); 
 

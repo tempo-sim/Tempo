@@ -39,6 +39,8 @@ public class TempoAgentsEditor : TempoModuleRules
 				"UnrealEd",
 				"MassTraffic",
 				"ZoneGraph",
+				"MassEntity",
+				"StructUtils",
 				// Tempo
 				"TempoAgentsShared",
 				"TempoAgents",

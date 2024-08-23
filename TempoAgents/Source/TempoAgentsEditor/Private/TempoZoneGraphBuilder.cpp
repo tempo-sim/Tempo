@@ -3,7 +3,7 @@
 
 #include "TempoZoneGraphBuilder.h"
 
-#include "TempoRoadQueryInterface.h"
+#include "TempoRoadInterface.h"
 #include "ZoneShapeUtilities.h"
 
 bool FTempoZoneGraphBuilder::ShouldFilterLaneConnection(const UZoneShapeComponent& PolygonShapeComp, const UZoneShapeComponent& SourceShapeComp, const TArray<FLaneConnectionSlot>& SourceSlots, const int32 SourceSlotQueryIndex, const UZoneShapeComponent& DestShapeComp, const TArray<FLaneConnectionSlot>& DestSlots, const int32 DestSlotQueryIndex) const
@@ -21,7 +21,7 @@ bool FTempoZoneGraphBuilder::ShouldFilterLaneConnection(const UZoneShapeComponen
 	const TArray<FTempoLaneConnectionInfo>& SourceLaneConnectionInfos = GenerateTempoLaneConnectionInfoArray(SourceSlots);
 	const TArray<FTempoLaneConnectionInfo>& DestLaneConnectionInfos = GenerateTempoLaneConnectionInfoArray(DestSlots);
 	
-	const bool bShouldFilterLaneConnection = ITempoIntersectionQueryInterface::Execute_ShouldFilterTempoLaneConnection(IntersectionQueryActor, SourceRoadQueryActor, SourceLaneConnectionInfos, SourceSlotQueryIndex, DestRoadQueryActor, DestLaneConnectionInfos, DestSlotQueryIndex);
+	const bool bShouldFilterLaneConnection = ITempoIntersectionInterface::Execute_ShouldFilterTempoLaneConnection(IntersectionQueryActor, SourceRoadQueryActor, SourceLaneConnectionInfos, SourceSlotQueryIndex, DestRoadQueryActor, DestLaneConnectionInfos, DestSlotQueryIndex);
 	
 	return bShouldFilterLaneConnection;
 }
@@ -50,7 +50,7 @@ AActor* FTempoZoneGraphBuilder::GetIntersectionQueryActor(const UZoneShapeCompon
 		return nullptr;
 	}
 
-	if (!IntersectionQueryActor->Implements<UTempoIntersectionQueryInterface>())
+	if (!IntersectionQueryActor->Implements<UTempoIntersectionInterface>())
 	{
 		return nullptr;
 	}
@@ -67,7 +67,7 @@ AActor* FTempoZoneGraphBuilder::GetRoadQueryActor(const UZoneShapeComponent& Zon
 		return nullptr;
 	}
 
-	if (!RoadQueryActor->Implements<UTempoRoadQueryInterface>())
+	if (!RoadQueryActor->Implements<UTempoRoadInterface>())
 	{
 		return nullptr;
 	}

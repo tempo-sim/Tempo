@@ -24,6 +24,10 @@ public class TempoAgentsShared : ModuleRules
                 "Slate",
                 "SlateCore",
                 "ZoneGraph",
+                "MassTraffic",
+                "MassRepresentation",
+                "MassEntity",
+                "StructUtils"
             }
         );
     }

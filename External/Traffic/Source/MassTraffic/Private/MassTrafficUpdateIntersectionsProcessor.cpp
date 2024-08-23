@@ -596,14 +596,7 @@ void UMassTrafficUpdateIntersectionsProcessor::Execute(FMassEntityManager& Entit
 			{
 				const float CountDownSpeedSeconds = DeltaTimeSeconds;
 
-				
-				// Check if we can zoom by this period, or if we need to wait.
-				if ((IsCurrentPeriodPedestrianOnly(IntersectionFragment) && !bPeriodHasAnyOpenCrosswalkLanes) ||
-					(!IsCurrentPeriodPedestrianOnly(IntersectionFragment) && !bPeriodHasAnyOpenCrosswalkLanes && !bPeriodHasAnyOpenVehicleLanes))
-				{
-					IntersectionFragment.PeriodTimeRemaining = -DeltaTimeSeconds;
-				}
-				else if (IntersectionFragment.bHasTrafficLights)
+				if (IntersectionFragment.bHasTrafficLights)
 				{
 
 					// This intersection has traffic lights.
@@ -624,32 +617,40 @@ void UMassTrafficUpdateIntersectionsProcessor::Execute(FMassEntityManager& Entit
 				}
 				else // ..no traffic lights, means stop-sign intersection
 				{
-					
 					// This intersection does not have traffic lights. It functions as a stop-sign intersection.
 					
-					// A vehicle has entered the intersection. Close the lane it's on, and all the lanes from the
-					// same intersection side (using it's splitting lanes.)
-					for (FZoneGraphTrafficLaneData* TrafficLaneData : CurrentPeriod.VehicleLanes)
-					{
-						if (TrafficLaneData->NumVehiclesOnLane)
-						{
-							CloseLaneAndAllItsSplitLanes(*TrafficLaneData);
-						}
-					}
-
-					bool bAreVehicleLanesInThisPeriodOpenAndReady = false;
-					for (const FZoneGraphTrafficLaneData* IntersectionTrafficLaneData : CurrentPeriod.VehicleLanes)
-					{
-						if (IntersectionTrafficLaneData->bIsOpen && IntersectionTrafficLaneData->bIsVehicleReadyToUseLane) // (See all READYLANE.)
-						{
-							bAreVehicleLanesInThisPeriodOpenAndReady = true;
-							break;
-						}
-					}
-					
-					if (!bAreVehicleLanesInThisPeriodOpenAndReady && !bPeriodHasAnyOpenCrosswalkLanes)
+					// Check if we can zoom by this period, or if we need to wait.
+					if ((IsCurrentPeriodPedestrianOnly(IntersectionFragment) && !bPeriodHasAnyOpenCrosswalkLanes) ||
+						(!IsCurrentPeriodPedestrianOnly(IntersectionFragment) && !bPeriodHasAnyOpenCrosswalkLanes && !bPeriodHasAnyOpenVehicleLanes))
 					{
 						IntersectionFragment.PeriodTimeRemaining = -DeltaTimeSeconds;
+					}
+					else
+					{
+						// A vehicle has entered the intersection. Close the lane it's on, and all the lanes from the
+						// same intersection side (using it's splitting lanes.)
+						for (FZoneGraphTrafficLaneData* TrafficLaneData : CurrentPeriod.VehicleLanes)
+						{
+							if (TrafficLaneData->NumVehiclesOnLane)
+							{
+								CloseLaneAndAllItsSplitLanes(*TrafficLaneData);
+							}
+						}
+
+						bool bAreVehicleLanesInThisPeriodOpenAndReady = false;
+						for (const FZoneGraphTrafficLaneData* IntersectionTrafficLaneData : CurrentPeriod.VehicleLanes)
+						{
+							if (IntersectionTrafficLaneData->bIsOpen && IntersectionTrafficLaneData->bIsVehicleReadyToUseLane) // (See all READYLANE.)
+							{
+								bAreVehicleLanesInThisPeriodOpenAndReady = true;
+								break;
+							}
+						}
+
+						if (!bAreVehicleLanesInThisPeriodOpenAndReady && !bPeriodHasAnyOpenCrosswalkLanes)
+						{
+							IntersectionFragment.PeriodTimeRemaining = -DeltaTimeSeconds;
+						}
 					}
 				}
 
@@ -811,10 +812,13 @@ void UMassTrafficUpdateIntersectionsProcessor::Execute(FMassEntityManager& Entit
 						&MassCrowdSubsystem, false);
 
 
-					IntersectionFragment.UpdateTrafficLightsForCurrentPeriod();
-
-					
+					// We need to call AddTimeRemainingToCurrentPeriod before UpdateTrafficLightsForCurrentPeriod
+					// since the traffic light state flags change according to PeriodTimeRemaining.
+					// Without calling AddTimeRemainingToCurrentPeriod first, the red light would flicker once
+					// between the "yellow left arrow" and "green without the left arrow" states.
 					IntersectionFragment.AddTimeRemainingToCurrentPeriod();
+					
+					IntersectionFragment.UpdateTrafficLightsForCurrentPeriod();
 				}
 			}
 

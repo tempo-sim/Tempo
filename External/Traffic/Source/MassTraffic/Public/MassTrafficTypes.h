@@ -418,6 +418,7 @@ struct MASSTRAFFIC_API FZoneGraphTrafficLaneConstData
 {
 	FZoneGraphTrafficLaneConstData() :
 		bIsIntersectionLane(false),
+		bIsTrafficLightControlled(false),
 		bIsLaneChangingLane(false)
 	{
 	}
@@ -427,6 +428,11 @@ struct MASSTRAFFIC_API FZoneGraphTrafficLaneConstData
 	 * @see UMassTrafficSettings::IntersectionTag
 	 */
 	bool bIsIntersectionLane : 1;
+
+	/**
+	 * Lane is controlled by a traffic light.
+	 */
+	bool bIsTrafficLightControlled : 1;
 
 	/**
 	 * Lane is inside an intersection (an intersection interior lane)
