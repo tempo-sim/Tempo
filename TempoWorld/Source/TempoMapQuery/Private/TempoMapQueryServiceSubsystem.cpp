@@ -200,7 +200,11 @@ TempoMapQuery::LaneAccessibility UTempoMapQueryServiceSubsystem::GetLaneAccessib
 					}
 					return TempoMapQuery::RED;
 				}
-				return TempoMapQuery::STOP;
+				return TempoMapQuery::STOP_SIGN;
+			}
+			else
+			{
+				return TempoMapQuery::NO_TRAFFIC_CONTROL;
 			}
 		}
 	}
