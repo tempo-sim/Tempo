@@ -438,8 +438,8 @@ int32 UTempoIntersectionControlComponent::GetTrafficLightAnchorConnectionIndex(c
 	
 	const FTempoRoadConfigurationInfo& PrioritizedRoadConfigurationInfo = GetPrioritizedRoadConfigurationInfo(IntersectionQueryActor, SourceConnectionIndex, PrioritizedRoadConfigurationDescriptors, PreferForwardTrafficLightAnchorRoad);
 
-	// If we couldn't get a valid RoadConfigurationInfo, or if we got one where the destination connection is sharper than 90 degrees, ...
-	if (!PrioritizedRoadConfigurationInfo.IsValid() || PrioritizedRoadConfigurationInfo.ConnectionDotProduct < 0.0f)
+	// If we couldn't get a valid RoadConfigurationInfo, ...
+	if (!PrioritizedRoadConfigurationInfo.IsValid())
 	{
 		// Then, default to using the source connection as the anchor road.
 		OutRoadConfigurationDescriptor = ETempoRoadConfigurationDescriptor::ThroughRoad;
