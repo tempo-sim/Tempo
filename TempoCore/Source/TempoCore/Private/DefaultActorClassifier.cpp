@@ -3,16 +3,10 @@
 #include "DefaultActorClassifier.h"
 
 #include "GameFramework/Character.h"
-#include "WheeledVehiclePawn.h"
 
 // Some very crude logic to classify Actors in the absence of a more detailed classification scheme.
 FName UDefaultActorClassifier::GetDefaultActorClassification(const AActor* Actor)
 {
-	if (Actor->IsA(AWheeledVehiclePawn::StaticClass()))
-	{
-		return FName(TEXT("Vehicle"));
-	}
-
 	if (Actor->IsA(ACharacter::StaticClass()))
 	{
 		return FName(TEXT("Person"));
