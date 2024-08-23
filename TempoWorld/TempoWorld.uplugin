@@ -20,6 +20,11 @@
 			"LoadingPhase": "Default"
 		},
 		{
+			"Name": "TempoMapQuery",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		},
+		{
 			"Name": "TempoObservableEvents",
 			"Type": "Runtime",
 			"LoadingPhase": "Default"
@@ -27,7 +32,19 @@
 	],
 	"Plugins": [
 		{
+			"Name": "MassEntity",
+			"Enabled": true
+		},
+		{
 			"Name": "TempoCore",
+			"Enabled": true
+		},
+		{
+			"Name": "Traffic",
+			"Enabled": true
+		},
+		{
+			"Name": "StructUtils",
 			"Enabled": true
 		},
 		{
