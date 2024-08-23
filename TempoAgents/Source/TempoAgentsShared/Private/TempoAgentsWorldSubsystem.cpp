@@ -41,6 +41,10 @@ void UTempoAgentsWorldSubsystem::SetupTrafficControllers()
 void UTempoAgentsWorldSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 {
 	Super::OnWorldBeginPlay(InWorld);
-	
-	SetupTrafficControllers();
+
+	// Call SetupTrafficControllers *after* AActors receive their BeginPlay so that the Intersection and Road Actors
+	// are properly initialized, first, in the Packaged Project.
+	// For reference, UWorldSubsystem::OnWorldBeginPlay is called before BeginPlay is called on all the Actors
+	// in the level, and UWorld::OnWorldBeginPlay is called after BeginPlay is called on all the Actors in the level.
+	GetWorld()->OnWorldBeginPlay.AddUObject(this, &UTempoAgentsWorldSubsystem::SetupTrafficControllers);
 }
