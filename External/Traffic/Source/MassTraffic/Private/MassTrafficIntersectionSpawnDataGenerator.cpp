@@ -4,7 +4,6 @@
 #include "MassCommonUtils.h"
 #include "MassTrafficLaneChange.h"
 #include "MassTrafficLightRegistrySubsystem.h"
-#include "ToolBuilderUtil.h"
 #include "Kismet/GameplayStatics.h"
 
 #include "VisualLogger/VisualLogger.h"
