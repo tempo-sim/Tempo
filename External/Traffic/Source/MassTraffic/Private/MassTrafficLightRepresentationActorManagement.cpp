@@ -64,6 +64,10 @@ EMassActorSpawnRequestAction  UMassTrafficLightRepresentationActorManagement::On
 		
 		TrafficLightMeshComponent->RegisterComponent();
 		MassActorSpawnRequest.SpawnedActor->AddInstanceComponent(TrafficLightMeshComponent);
+
+		// Mark the components render state dirty so that it will be labeled. Note that the above calls to SetStaticMesh and others
+		// marked the render state dirty, but did not broadcast the MarkRenderStateDirtyEvent, as it was not registered then.
+		TrafficLightMeshComponent->MarkRenderStateDirty();
 	}
 
 	return Result;
