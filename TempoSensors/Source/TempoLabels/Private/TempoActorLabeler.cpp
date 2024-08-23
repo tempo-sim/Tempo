@@ -7,6 +7,8 @@
 
 #include "TempoSensorsSettings.h"
 
+#include "DefaultActorClassifier.h"
+
 #include "Engine.h"
 
 void UTempoActorLabeler::OnWorldBeginPlay(UWorld& InWorld)
@@ -235,4 +237,14 @@ void UTempoActorLabeler::LabelComponent(UPrimitiveComponent* Component, int32 Ac
 	Component->SetRenderCustomDepth(true);
 	Component->SetCustomDepthStencilValue(ActorLabelId);
 	LabeledComponents.Add(Component, ActorLabelId);
+}
+
+FName UTempoActorLabeler::GetActorClassification(const AActor* Actor) const
+{
+	if (const FName* Label = ActorLabels.Find(Actor->GetClass()))
+	{
+		return *Label;
+	}
+
+	return UDefaultActorClassifier::GetDefaultActorClassification(Actor);
 }
