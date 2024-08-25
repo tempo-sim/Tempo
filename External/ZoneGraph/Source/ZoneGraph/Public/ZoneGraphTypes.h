@@ -306,6 +306,8 @@ struct ZONEGRAPH_API FZoneLaneProfile
 	// Reverses the lane profile. The lanes array will be reversed, as well as the lane directions. 
 	void ReverseLanes();
 
+	bool IsValid(const bool bMustHaveName = true) const;
+
 	UPROPERTY(Category = Lane, EditAnywhere)
 	FName Name;
 

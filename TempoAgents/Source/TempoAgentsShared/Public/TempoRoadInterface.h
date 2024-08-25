@@ -20,10 +20,21 @@ class TEMPOAGENTSSHARED_API ITempoRoadInterface
 	
 public:
 
-	// General Road Queries
+	// Road General Queries
+
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Interface|Queries")
+	bool ShouldGenerateZoneShapesForTempoRoad() const;
 
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Interface|Queries")
 	float GetTempoRoadWidth() const;
+
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Interface|Queries")
+	bool IsTempoLaneClosedLoop() const;
+
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Interface|Queries")
+	FName GetTempoLaneProfileOverrideName() const;
+
+	// Road Lane Queries
 
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Interface|Queries")
 	int32 GetNumTempoLanes() const;
@@ -46,6 +57,8 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Interface|Queries")
 	TArray<FName> GetTempoLaneConnectionNotTags(int32 LaneIndex) const;
 
+	// Road Control Point Queries
+
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Interface|Queries")
 	int32 GetNumTempoControlPoints() const;
 
@@ -62,10 +75,9 @@ public:
 	FVector GetTempoControlPointRightVector(int32 ControlPointIndex, ETempoCoordinateSpace CoordinateSpace) const;
 
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Interface|Queries")
-	bool IsTempoLaneClosedLoop() const;
+	FRotator GetTempoControlPointRotation(int32 ControlPointIndex, ETempoCoordinateSpace CoordinateSpace) const;
 
-	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Interface|Queries")
-	FName GetTempoLaneProfileOverrideName() const;
+	// Road Intersection Entrance Queries
 
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Interface|Queries")
 	int32 GetTempoStartEntranceLocationControlPointIndex() const;
