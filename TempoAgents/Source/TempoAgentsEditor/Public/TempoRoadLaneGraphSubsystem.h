@@ -29,14 +29,14 @@ public:
 protected:
 	
 	// Road functions
-	bool TryGenerateAndRegisterZoneShapeComponentsForRoad(AActor& RoadQueryActor) const;
-	FZoneShapePoint CreateZoneShapePointForRoadControlPoint(const AActor& RoadQueryActor, int32 ControlPointIndex) const;
-	FZoneLaneProfile CreateDynamicLaneProfile(const AActor& RoadQueryActor) const;
+	bool TryGenerateAndRegisterZoneShapeComponentsForRoad(AActor& RoadQueryActor, bool bQueryActorIsRoadModule = false) const;
+	FZoneShapePoint CreateZoneShapePointForRoadControlPoint(const AActor& RoadQueryActor, int32 ControlPointIndex, bool bQueryActorIsRoadModule) const;
+	FZoneLaneProfile CreateDynamicLaneProfile(const AActor& RoadQueryActor, bool bQueryActorIsRoadModule) const;
 	FZoneLaneDesc CreateZoneLaneDesc(const float LaneWidth, const EZoneLaneDirection LaneDirection, const TArray<FName>& LaneTagNames) const;
 	FName GenerateDynamicLaneProfileName(const FZoneLaneProfile& LaneProfile) const;
 	bool TryWriteDynamicLaneProfile(const FZoneLaneProfile& LaneProfile) const;
 	bool TryGetDynamicLaneProfileFromSettings(const FZoneLaneProfile& InLaneProfile, FZoneLaneProfile& OutLaneProfileFromSettings) const;
-	FZoneLaneProfile GetLaneProfile(const AActor& RoadQueryActor) const;
+	FZoneLaneProfile GetLaneProfile(const AActor& RoadQueryActor, bool bQueryActorIsRoadModule) const;
 	FZoneLaneProfile GetLaneProfileByName(FName LaneProfileName) const;
 
 	// Intersection functions
