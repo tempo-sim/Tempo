@@ -1,0 +1,9 @@
+// Copyright Tempo Simulation, LLC. All Rights Reserved.
+
+syntax = "proto3";
+
+import "TempoScripting/Empty.proto";
+
+service TempoAgentsEditorService {
+  rpc RunTempoZoneGraphBuilderPipeline(TempoScripting.Empty) returns (TempoScripting.Empty);
+}

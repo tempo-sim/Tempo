@@ -36,14 +36,21 @@ public class TempoAgentsEditor : TempoModuleRules
 			{
 				// Unreal
 				"CoreUObject",
+				"EditorFramework",
+				"InputCore",
+				"Projects",
 				"UnrealEd",
 				"MassTraffic",
-				"ZoneGraph",
 				"MassEntity",
+				"Slate",
+				"SlateCore",
 				"StructUtils",
+				"ToolMenus",
+				"ZoneGraph",
 				// Tempo
 				"TempoAgentsShared",
 				"TempoAgents",
+				"TempoScripting",
 			}
 			);
 		
