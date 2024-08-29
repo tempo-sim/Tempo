@@ -32,12 +32,12 @@ namespace TempoCamera
 }
 
 UCLASS()
-class TEMPOSENSORS_API UTempoSensorServiceSubsystem : public UTempoWorldSubsystem, public ITempoWorldScriptable
+class TEMPOSENSORS_API UTempoSensorServiceSubsystem : public UTempoGameWorldSubsystem, public ITempoScriptable
 {
 	GENERATED_BODY()
 	
 public:
-	virtual void RegisterWorldServices(UTempoScriptingServer* ScriptingServer) override;
+	virtual void RegisterScriptingServices(FTempoScriptingServer* ScriptingServer) override;
 
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 

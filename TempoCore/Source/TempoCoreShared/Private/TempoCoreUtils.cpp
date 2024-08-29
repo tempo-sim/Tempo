@@ -18,3 +18,9 @@ UWorldSubsystem* UTempoCoreUtils::GetSubsystemImplementingInterface(const UObjec
 	
 	return nullptr;
 }
+
+bool UTempoCoreUtils::IsGameWorld(const UObject* WorldContextObject)
+{
+	const UWorld* World = WorldContextObject->GetWorld();
+	return World->WorldType == EWorldType::Game || World->WorldType == EWorldType::PIE;
+}

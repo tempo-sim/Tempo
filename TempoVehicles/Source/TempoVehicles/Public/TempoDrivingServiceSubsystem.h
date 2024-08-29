@@ -22,12 +22,12 @@ namespace TempoVehicles
 }
 
 UCLASS()
-class TEMPOVEHICLES_API UTempoDrivingServiceSubsystem : public UTempoWorldSubsystem, public ITempoWorldScriptable
+class TEMPOVEHICLES_API UTempoDrivingServiceSubsystem : public UTempoGameWorldSubsystem, public ITempoScriptable
 {
 	GENERATED_BODY()
 	
 public:
-	virtual void RegisterWorldServices(UTempoScriptingServer* ScriptingServer) override;
+	virtual void RegisterScriptingServices(FTempoScriptingServer* ScriptingServer) override;
 
 protected:
 	void GetCommandableVehicles(const TempoScripting::Empty& Request, const TResponseDelegate<TempoVehicles::CommandableVehiclesResponse>& ResponseContinuation) const;

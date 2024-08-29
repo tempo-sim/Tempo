@@ -21,7 +21,7 @@ using ColorImage = TempoCamera::ColorImage;
 using DepthImage = TempoCamera::DepthImage;
 using LabelImage = TempoCamera::LabelImage;
 
-void UTempoSensorServiceSubsystem::RegisterWorldServices(UTempoScriptingServer* ScriptingServer)
+void UTempoSensorServiceSubsystem::RegisterScriptingServices(FTempoScriptingServer* ScriptingServer)
 {
 	ScriptingServer->RegisterService<SensorService>(
 		TSimpleRequestHandler<SensorService, AvailableSensorsRequest, AvailableSensorsResponse>(&SensorService::RequestGetAvailableSensors).BindUObject(this, &UTempoSensorServiceSubsystem::GetAvailableSensors),

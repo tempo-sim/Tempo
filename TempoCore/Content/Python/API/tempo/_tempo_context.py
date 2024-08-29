@@ -14,7 +14,7 @@ class TempoContext(object):
         return cls._instance
 
     def __init__(self):
-        self.set_server_address("localhost:10002")
+        self.set_server_address("localhost:10001")
         self.stubs = {}
         self.message_classes = {}
 

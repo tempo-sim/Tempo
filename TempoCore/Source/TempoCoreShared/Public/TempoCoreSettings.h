@@ -25,8 +25,7 @@ public:
 	FTempoCoreTimeSettingsChanged TempoCoreTimeSettingsChangedEvent;
 
 	// Scripting Settings.
-	int32 GetEngineScriptingPort() const { return EngineScriptingPort; }
-	int32 GetWorldScriptingPort() const { return WorldScriptingPort; }
+	int32 GetScriptingPort() const { return ScriptingPort; }
 	EScriptingCompressionLevel GetScriptingCompressionLevel() const { return ScriptingCompressionLevel; }
 	int32 GetMaxEventProcessingTime() const { return MaxEventProcessingTimeMicroSeconds; }
 	int32 GetMaxEventWaitTime() const { return MaxEventWaitTimeNanoSeconds; }
@@ -43,13 +42,9 @@ private:
 	UPROPERTY(EditAnywhere, Config, Category="Time|FixedStep", meta=(ClampMin=1, UIMin=1, UIMax=100))
 	int32 SimulatedStepsPerSecond = 10;
 
-	// The port number to listen for engine scripting connections on.
+	// The port number to listen for scripting connections on.
 	UPROPERTY(EditAnywhere, Config, Category="Scripting", meta=(ClampMin=1024, ClampMax=65535, UIMin=1024, UIMax=65535))
-	int32 EngineScriptingPort = 10001;
-
-	// The port number to listen for world scripting connections on.
-	UPROPERTY(EditAnywhere, Config, Category="Scripting", meta=(ClampMin=1024, ClampMax=65535, UIMin=1024, UIMax=65535))
-	int32 WorldScriptingPort = 10002;
+	int32 ScriptingPort = 10001;
 
 	// The default compression level to use for Tempo Scripting messages. When the client is on the same machine no
 	// compression is fastest. Otherwise, compression may help reduce network bandwidth.
