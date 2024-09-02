@@ -50,7 +50,10 @@ void UMassTrafficVehicleSimulationTrait::BuildTemplate(FMassEntityTemplateBuildC
 	// @todo Replace FMassTrafficVehicleControlFragment::bRestrictedToTrunkLanesOnly usage with
 	//		 FMassTrafficVehicleSimulationParameters::bRestrictedToTrunkLanesOnly
 	FMassTrafficVehicleControlFragment& VehicleControlFragment = BuildContext.AddFragment_GetRef<FMassTrafficVehicleControlFragment>();
-	VehicleControlFragment.bRestrictedToTrunkLanesOnly = Params.bRestrictedToTrunkLanesOnly;   
+	VehicleControlFragment.bRestrictedToTrunkLanesOnly = Params.bRestrictedToTrunkLanesOnly;
+	VehicleControlFragment.bAllowLeftTurnsAtIntersections = Params.bAllowLeftTurnsAtIntersections;
+	VehicleControlFragment.bAllowRightTurnsAtIntersections = Params.bAllowRightTurnsAtIntersections;
+	VehicleControlFragment.bAllowGoingStraightAtIntersections = Params.bAllowGoingStraightAtIntersections;
 
 	// Variable tick
 	BuildContext.AddFragment<FMassSimulationVariableTickFragment>();
