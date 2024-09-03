@@ -8,6 +8,7 @@
 #include "MassTrafficLaneChange.h"
 
 #include "MassCommonFragments.h"
+#include "MassDebugger.h"
 #include "MassZoneGraphNavigationFragments.h"
 #include "Kismet/GameplayStatics.h"
 #include "Kismet/KismetMathLibrary.h"
@@ -636,6 +637,282 @@ void VisLogMalformedNextLaneLinks(const FMassEntityManager& EntityManager, int32
 		++LoopCount;
 	}
 #endif
+}
+
+void DrawDebugMassTrafficLaneData(const UMassTrafficSubsystem& MassTrafficSubsystem, const FMassEntityHandle& EntityHandle, const FMassTrafficVehicleControlFragment& VehicleControlFragment, const FMassZoneGraphLaneLocationFragment& LaneLocationFragment, const float LifeTime)
+{
+	if (GMassTrafficDebugLaneData == 0)	// 0 = Off (default)
+	{
+		return;
+	}
+	
+	// Only draw debug lines for selected Entities.
+	// (See console commands "mass.debug.DebugEntity" and "mass.debug.SetDebugEntityRange".)
+	if (!UE::Mass::Debug::IsDebuggingEntity(EntityHandle))
+	{
+		return;
+	}
+
+	const FZoneGraphLaneHandle& CurrentLaneHandle = LaneLocationFragment.LaneHandle;
+	
+	const FMassTrafficZoneGraphData* ZoneGraphData = MassTrafficSubsystem.GetTrafficZoneGraphData(CurrentLaneHandle.DataHandle);
+	const FZoneGraphTrafficLaneData* PrevLaneData = ZoneGraphData != nullptr && VehicleControlFragment.PreviousLaneIndex != INDEX_NONE ? ZoneGraphData->GetTrafficLaneData(VehicleControlFragment.PreviousLaneIndex) : nullptr;
+	const FZoneGraphLaneHandle* PrevLaneHandle = PrevLaneData != nullptr ? &PrevLaneData->LaneHandle : nullptr;
+
+	const FZoneGraphTrafficLaneData* NextLaneData = VehicleControlFragment.NextLane;
+	const FZoneGraphLaneHandle* NextLaneHandle = NextLaneData != nullptr ? &NextLaneData->LaneHandle : nullptr;
+
+	const FZoneGraphLaneHandle* ModifiedCurrentLaneHandle = &CurrentLaneHandle;
+	const FZoneGraphLaneHandle* ModifiedPrevLaneHandle = PrevLaneHandle;
+	const FZoneGraphLaneHandle* ModifiedNextLaneHandle = NextLaneHandle;
+
+	// Apply longitudinal offset.
+	if (GMassTrafficDebugLaneDataLongitudinalOffset < 0)
+	{
+		if (PrevLaneHandle != nullptr)
+		{
+			ModifiedCurrentLaneHandle = PrevLaneHandle;
+			ModifiedPrevLaneHandle = nullptr;
+			ModifiedNextLaneHandle = &CurrentLaneHandle;
+		}
+	}
+	else if (GMassTrafficDebugLaneDataLongitudinalOffset > 0)
+	{
+		if (NextLaneHandle != nullptr)
+		{
+			ModifiedCurrentLaneHandle = NextLaneHandle;
+			ModifiedPrevLaneHandle = &CurrentLaneHandle;
+			ModifiedNextLaneHandle = nullptr;
+		}
+	}
+		
+	if (ensureMsgf(ModifiedCurrentLaneHandle != nullptr, TEXT("ModifiedCurrentLaneHandle should always be valid.  But, it is not.")))
+	{
+		DrawDebugMassTrafficLaneData(MassTrafficSubsystem, *ModifiedCurrentLaneHandle, ModifiedPrevLaneHandle, ModifiedNextLaneHandle, LifeTime);
+	}
+}
+
+void DrawDebugMassTrafficLaneData(const UMassTrafficSubsystem& MassTrafficSubsystem, const FZoneGraphLaneHandle& CurrentLaneHandle, const FZoneGraphLaneHandle* PrevLaneHandle, const FZoneGraphLaneHandle* NextLaneHandle, const float LifeTime)
+{
+	if (GMassTrafficDebugLaneData == 0)	// 0 = Off (default)
+	{
+		return;
+	}
+
+	// We at least need the current lane data in order to draw any lines.
+	const FZoneGraphTrafficLaneData* CurrentLaneData = MassTrafficSubsystem.GetTrafficLaneData(CurrentLaneHandle);
+	if (CurrentLaneData == nullptr)
+	{
+		return;
+	}
+
+	// But, the previous and next lanes are optional.
+	const FZoneGraphTrafficLaneData* PrevLaneData = PrevLaneHandle != nullptr ? MassTrafficSubsystem.GetTrafficLaneData(*PrevLaneHandle) : nullptr;
+	const FZoneGraphTrafficLaneData* NextLaneData = NextLaneHandle != nullptr ? MassTrafficSubsystem.GetTrafficLaneData(*NextLaneHandle) : nullptr;
+	
+	const UZoneGraphSubsystem* ZoneGraphSubsystem = UWorld::GetSubsystem<UZoneGraphSubsystem>(MassTrafficSubsystem.GetWorld());
+	if (ZoneGraphSubsystem == nullptr)
+	{
+		return;
+	}
+
+	const FZoneGraphStorage* ZoneGraphStorage = ZoneGraphSubsystem->GetZoneGraphStorage(CurrentLaneData->LaneHandle.DataHandle);
+	if (ZoneGraphStorage == nullptr)
+	{
+		return;
+	}
+	
+	const auto& DrawLaneData = [ZoneGraphSubsystem, ZoneGraphStorage, LifeTime](const FZoneGraphTrafficLaneData& LaneData, const FColor LaneColor, const float ZOffset = 10.0f)
+	{
+		if (!LaneData.LaneHandle.IsValid())
+		{
+			return;
+		}
+		
+		const FZoneLaneData& ZoneLaneData = ZoneGraphStorage->Lanes[LaneData.LaneHandle.Index];
+		const FVector& LaneStart = ZoneGraphStorage->LanePoints[ZoneLaneData.PointsBegin] + FVector(0.0f, 0.0f, ZOffset);
+		const FVector& LaneEnd = ZoneGraphStorage->LanePoints[ZoneLaneData.PointsEnd - 1] + FVector(0.0f, 0.0f, ZOffset);
+		
+		const FVector LaneDir = (LaneEnd - LaneStart).GetSafeNormal();
+		
+		DrawDebugDirectionalArrow(ZoneGraphSubsystem->GetWorld(), LaneStart, LaneEnd, 100000.0f, LaneColor, false, LifeTime, 0, 10.0f);
+
+		if (GMassTrafficDebugLaneData >= 2)	// 2 = Same as option 1, plus spheres to indicate turn state and bIsVehicleReadyToUseLane
+		{
+			FColor LaneTurnStateColor = FColor::Green;
+
+			if (LaneData.bTurnsLeft)
+			{
+				LaneTurnStateColor = FColor::Blue;
+			}
+			else if (LaneData.bTurnsRight)
+			{
+				LaneTurnStateColor = FColor::Red;
+			}
+
+			DrawDebugSphere(ZoneGraphSubsystem->GetWorld(), LaneEnd + FVector(0.0f, 0.0f, ZOffset), 100.0f, 32, LaneTurnStateColor, false, LifeTime, 0, 10.0f);
+
+			if (LaneData.bIsVehicleReadyToUseLane)
+			{
+				constexpr float ReadyToUseLaneSphereOffset = 10.0f;
+				const FVector ReadyToUseLaneSphereLocation = LaneEnd - LaneDir * ReadyToUseLaneSphereOffset + FVector(0.0f, 0.0f, ZOffset);
+				DrawDebugSphere(ZoneGraphSubsystem->GetWorld(), ReadyToUseLaneSphereLocation, 100.0f, 32, FColor::Magenta, false, LifeTime, 0, 10.0f);
+			}
+		}
+	};
+
+	if (GMassTrafficDebugLaneData >= 1)	// 1 = Debug lane data ([prev], current -> iterate left and right -> next, [next, next -> next], current splitting and merging)
+	{
+		// Display the previous lane, if it is valid.
+		if (PrevLaneData != nullptr)
+		{
+			DrawLaneData(*PrevLaneData, FColor::Magenta, 10.0f);
+		}
+		
+		DrawLaneData(*CurrentLaneData, FColor::Green, 15.0f);
+		
+		// Display the next lane and its successors, if the next lane is valid.
+		if (NextLaneData != nullptr)
+		{
+			DrawLaneData(*NextLaneData, FColor::Yellow, 20.0f);
+		
+			for (FZoneGraphTrafficLaneData* NextLane : NextLaneData->NextLanes)
+			{
+				DrawLaneData(*NextLane, FColor::Orange, 25.0f);
+			}
+		}
+
+		for (FZoneGraphTrafficLaneData* LeftLane = CurrentLaneData->LeftLane; LeftLane != nullptr; LeftLane = LeftLane->LeftLane)
+		{
+			DrawLaneData(*LeftLane, FColor::Blue, 30.0f);
+			
+			for (FZoneGraphTrafficLaneData* NextLeftLane : LeftLane->NextLanes)
+			{
+				DrawLaneData(*NextLeftLane, FColor::Cyan, 30.0f);
+			}
+		}
+	
+		for (FZoneGraphTrafficLaneData* RightLane = CurrentLaneData->RightLane; RightLane != nullptr; RightLane = RightLane->RightLane)
+		{
+			DrawLaneData(*RightLane, FColor::Red, 35.0f);
+			
+			for (FZoneGraphTrafficLaneData* NextRightLane : RightLane->NextLanes)
+			{
+				DrawLaneData(*NextRightLane, FColor::Purple, 35.0f);
+			}
+		}
+		
+		for (FZoneGraphTrafficLaneData* SplitLane : CurrentLaneData->SplittingLanes)
+		{
+			DrawLaneData(*SplitLane, FColor::White, 40.0f);
+		}
+		
+		for (FZoneGraphTrafficLaneData* MergeLane : CurrentLaneData->MergingLanes)
+		{
+			DrawLaneData(*MergeLane, FColor::Silver, 45.0f);
+		}
+	}
+}
+
+void DrawDebugYieldLaneIndicators(const UMassTrafficSubsystem& MassTrafficSubsystem, const FZoneGraphLaneHandle& CurrentLaneHandle, const FZoneGraphLaneHandle* NextLaneHandle, const float DistanceAlongLane, const float LaneLength, const bool bShouldPreemptivelyYieldAtIntersection, const bool bShouldReactivelyYieldAtIntersection, const float LifeTime)
+{
+	if (GMassTrafficDebugYieldAtIntersectionBehavior == 0)	// 0 = Off (default)
+	{
+		return;
+	}
+
+	const UMassTrafficSettings* MassTrafficSettings = GetDefault<UMassTrafficSettings>();
+	if (!ensureMsgf(MassTrafficSettings != nullptr, TEXT("Can't access MassTrafficSettings in DrawDebugYieldLaneIndicators.")))
+	{
+		return;
+	}
+
+	// We at least need the current lane data in order to draw any indicators.
+	const FZoneGraphTrafficLaneData* CurrentLaneData = MassTrafficSubsystem.GetTrafficLaneData(CurrentLaneHandle);
+	if (CurrentLaneData == nullptr)
+	{
+		return;
+	}
+
+	// But, the next lane is optional.
+	const FZoneGraphTrafficLaneData* NextLaneData = NextLaneHandle != nullptr ? MassTrafficSubsystem.GetTrafficLaneData(*NextLaneHandle) : nullptr;
+
+	const float DistanceFromIntersection = LaneLength - DistanceAlongLane;
+	const bool bIsApproachingIntersection = NextLaneData != nullptr && NextLaneData->ConstData.bIsIntersectionLane && DistanceFromIntersection < MassTrafficSettings->MaxDistanceFromEndOfLaneForPreemptiveYield;
+
+	// Only draw lines for Entities and their lanes if they're in the intersection or approaching the intersection.
+	if (!CurrentLaneData->ConstData.bIsIntersectionLane && !bIsApproachingIntersection)
+	{
+		return;
+	}
+	
+	const UZoneGraphSubsystem* ZoneGraphSubsystem = UWorld::GetSubsystem<UZoneGraphSubsystem>(MassTrafficSubsystem.GetWorld());
+	if (ZoneGraphSubsystem == nullptr)
+	{
+		return;
+	}
+
+	const FZoneGraphStorage* ZoneGraphStorage = ZoneGraphSubsystem->GetZoneGraphStorage(CurrentLaneHandle.DataHandle);
+	if (ZoneGraphStorage == nullptr)
+	{
+		return;
+	}
+
+	const auto& DrawLaneIndicator = [ZoneGraphSubsystem, ZoneGraphStorage, LifeTime](const FZoneGraphLaneHandle& LaneHandle, const FColor IndicatorColor, const float ZOffset = 10.0f)
+	{
+		if (!LaneHandle.IsValid())
+		{
+			return;
+		}
+		
+		const FZoneLaneData& ZoneLaneData = ZoneGraphStorage->Lanes[LaneHandle.Index];
+		const FVector& LaneStart = ZoneGraphStorage->LanePoints[ZoneLaneData.PointsBegin] + FVector(0.0f, 0.0f, ZOffset);
+		const FVector& LaneEnd = ZoneGraphStorage->LanePoints[ZoneLaneData.PointsEnd - 1] + FVector(0.0f, 0.0f, ZOffset);
+		
+		DrawDebugDirectionalArrow(ZoneGraphSubsystem->GetWorld(), LaneStart, LaneEnd, 100000.0f, IndicatorColor, false, LifeTime, 0, 10.0f);
+	};
+
+	const auto& DrawSphereIndicator = [ZoneGraphSubsystem, ZoneGraphStorage, LifeTime, DistanceAlongLane](const FZoneGraphLaneHandle& LaneHandle, const FColor IndicatorColor, const float ZOffset = 10.0f)
+	{
+		if (!LaneHandle.IsValid())
+		{
+			return;
+		}
+		
+		const FZoneLaneData& ZoneLaneData = ZoneGraphStorage->Lanes[LaneHandle.Index];
+		
+		float RemainingSquaredDistanceAlongLane = FMath::Square(DistanceAlongLane);
+
+		for (int32 PointIndex = ZoneLaneData.PointsBegin; PointIndex < ZoneLaneData.PointsEnd; ++PointIndex)
+		{
+			const FVector& LaneSegmentStart = ZoneGraphStorage->LanePoints[ZoneLaneData.PointsBegin];
+			const FVector& LaneSegmentEnd = ZoneGraphStorage->LanePoints[ZoneLaneData.PointsEnd - 1];
+
+			const float LaneSegmentSquaredLength = (LaneSegmentEnd - LaneSegmentStart).SizeSquared();
+
+			if (RemainingSquaredDistanceAlongLane <= LaneSegmentSquaredLength)
+			{
+				const FVector LaneSegmentDir = (LaneSegmentEnd - LaneSegmentStart).GetSafeNormal();
+				const FVector IndicatorLocation = LaneSegmentStart + LaneSegmentDir * FMath::Sqrt(RemainingSquaredDistanceAlongLane) + FVector(0.0f, 0.0f, ZOffset);
+
+				DrawDebugSphere(ZoneGraphSubsystem->GetWorld(), IndicatorLocation, 50.0f, 32, IndicatorColor, false, LifeTime, 0, 10.0f);
+			}
+			
+			RemainingSquaredDistanceAlongLane -= LaneSegmentSquaredLength;
+		}
+	};
+
+	if (GMassTrafficDebugYieldAtIntersectionBehavior >= 1)	// 1 = Draw lane indicators for yielding lane.  Yellow is pre-emptive yield.  Orange is reactive yield
+	{
+		const FColor IndicatorColor = bShouldPreemptivelyYieldAtIntersection ? FColor::Yellow : bShouldReactivelyYieldAtIntersection ? FColor::Orange : FColor::Green;
+		
+		if (bShouldPreemptivelyYieldAtIntersection || bShouldReactivelyYieldAtIntersection)
+		{
+			DrawLaneIndicator(CurrentLaneHandle, IndicatorColor, 100.0f);
+		}
+		
+		DrawSphereIndicator(CurrentLaneHandle, IndicatorColor, 200.0f);
+	}
 }
 
 #endif // WITH_MASSTRAFFIC_DEBUG

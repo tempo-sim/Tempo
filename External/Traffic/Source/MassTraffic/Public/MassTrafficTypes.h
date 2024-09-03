@@ -497,6 +497,11 @@ struct MASSTRAFFIC_API FZoneGraphTrafficLaneData
 	uint8 NumVehiclesOnLane = 0;
 	uint8 NumVehiclesApproachingLane = 0; 
 	uint8 NumReservedVehiclesOnLane = 0; // See all CANTSTOPLANEEXIT.
+
+	// This is a signed int8 on purpose.  The count should never be higher than a few at most.
+	// And, we use the sign as a means to ensure the "reference counting" logic that governs
+	// the NumYieldingVehicles field is working as intended.  That is, it should never go below zero.
+	int8 NumYieldingVehicles = 0;
 	
 	FZoneGraphTrafficLaneData* LeftLane = nullptr; // ..non-merging non-splitting same-direction lane on left 
 	FZoneGraphTrafficLaneData* RightLane = nullptr; // ..non-merging non-splitting same-direction lane on right
@@ -532,6 +537,14 @@ struct MASSTRAFFIC_API FZoneGraphTrafficLaneData
 	void AddVehicleOccupancy(const float SpaceToRemove);
 
 	float SpaceAvailableFromStartOfLaneForVehicle(const FMassEntityManager& EntityManager, const bool bCheckLaneChangeGhostVehicles, const bool bCheckSplittingAndMergingGhostTailVehicles) const;
+
+	bool TryGetDistanceFromStartOfLaneToTailVehicle(const FMassEntityManager& EntityManager, float& OutDistanceToTailVehicle) const;
+
+	FORCEINLINE bool HasYieldingVehicles() const
+	{
+		ensureMsgf(NumYieldingVehicles >= 0, TEXT("NumYieldingVehicles should never go below zero.  There is an error in the yield count logic."));
+		return NumYieldingVehicles > 0;
+	}
 
 	// Traffic density.
 

@@ -3,6 +3,8 @@
 
 #include "MassTrafficVehicleControlProcessor.h"
 
+#include <functional>
+
 #include "MassTraffic.h"
 #include "MassTrafficFragments.h"
 #include "MassTrafficInterpolation.h"
@@ -10,6 +12,7 @@
 #include "MassTrafficMovement.h"
 #include "MassExecutionContext.h"
 #include "MassClientBubbleHandler.h"
+#include "MassDebugger.h"
 #include "MassLODUtils.h"
 #include "MassZoneGraphNavigationFragments.h"
 #include "ZoneGraphSubsystem.h"
@@ -20,10 +23,12 @@ namespace
 {
 	// (See all READYLANE.)
 	void SetIsVehicleReadyToUseNextIntersectionLane(
-		const FMassTrafficVehicleControlFragment& VehicleControlFragment,
+		FMassTrafficVehicleControlFragment& VehicleControlFragment,
 		const FMassZoneGraphLaneLocationFragment& LaneLocationFragment,
 		const FAgentRadiusFragment& RadiusFragment,
 		const FMassTrafficRandomFractionFragment& RandomFractionFragment,
+		UMassTrafficSubsystem& MassTrafficSubsystem,
+		const FMassEntityManager& EntityManager,
 		const FVector2D& StoppingDistanceRange,
 		const bool bVehicleHasNoRoom)
 	{
@@ -102,6 +107,25 @@ namespace
 		VehicleControlFragment.bCantStopAtLaneExit = false; // (See all CANTSTOPLANEEXIT.)
 		--VehicleControlFragment.NextLane->NumReservedVehiclesOnLane;
 	}
+
+	void ProcessYieldAtIntersectionLogic(UMassTrafficSubsystem& MassTrafficSubsystem, const FMassEntityManager& EntityManager, FMassTrafficVehicleControlFragment& VehicleControlFragment, const FMassZoneGraphLaneLocationFragment& LaneLocationFragment, const FAgentRadiusFragment& RadiusFragment, std::function<void()> PerformYieldActionFunc)
+	{
+		const bool bShouldPreemptivelyYieldAtIntersection = UE::MassTraffic::ShouldPerformPreemptiveYieldAtIntersection(MassTrafficSubsystem, EntityManager, VehicleControlFragment, LaneLocationFragment, RadiusFragment);
+		const bool bShouldReactivelyYieldAtIntersection = !bShouldPreemptivelyYieldAtIntersection ? UE::MassTraffic::ShouldPerformReactiveYieldAtIntersection(MassTrafficSubsystem, EntityManager, VehicleControlFragment, LaneLocationFragment, RadiusFragment) : false;
+	
+		UE::MassTraffic::UpdateYieldAtIntersectionState(MassTrafficSubsystem, VehicleControlFragment, LaneLocationFragment.LaneHandle, LaneLocationFragment.DistanceAlongLane, bShouldPreemptivelyYieldAtIntersection, bShouldReactivelyYieldAtIntersection);
+
+		// If we're reactively yielding, then we should always perform our yield action.  However, if we're pre-emptively yielding, then only perform our yield action once we've rolled-out as far as we're allowed.
+		if (bShouldReactivelyYieldAtIntersection || (VehicleControlFragment.IsPreemptivelyYieldingAtIntersection() && VehicleControlFragment.TotalRolloutDistanceForPreemptiveYieldAtIntersection > VehicleControlFragment.AllowedRolloutDistanceForPreemptiveYieldAtIntersection))
+		{
+			PerformYieldActionFunc();
+		}
+
+#if WITH_MASSTRAFFIC_DEBUG
+		const FZoneGraphLaneHandle* NextLaneHandle = VehicleControlFragment.NextLane != nullptr ? &VehicleControlFragment.NextLane->LaneHandle : nullptr;
+		UE::MassTraffic::DrawDebugYieldLaneIndicators(MassTrafficSubsystem, LaneLocationFragment.LaneHandle, NextLaneHandle, LaneLocationFragment.DistanceAlongLane, LaneLocationFragment.LaneLength, bShouldPreemptivelyYieldAtIntersection, bShouldReactivelyYieldAtIntersection);
+#endif
+	}
 }
 
 
@@ -154,6 +178,7 @@ void UMassTrafficVehicleControlProcessor::ConfigureQueries()
 	PIDVehicleControlEntityQuery_Conditional.AddChunkRequirement<FMassSimulationVariableTickChunkFragment>(EMassFragmentAccess::ReadOnly);
 	PIDVehicleControlEntityQuery_Conditional.SetChunkFilter(FMassSimulationVariableTickChunkFragment::ShouldTickChunkThisFrame);
 	PIDVehicleControlEntityQuery_Conditional.AddSubsystemRequirement<UZoneGraphSubsystem>(EMassFragmentAccess::ReadOnly);
+	PIDVehicleControlEntityQuery_Conditional.AddSubsystemRequirement<UMassTrafficSubsystem>(EMassFragmentAccess::ReadWrite);
 }
 
 
@@ -217,7 +242,8 @@ void UMassTrafficVehicleControlProcessor::Execute(FMassEntityManager& EntityMana
 	PIDVehicleControlEntityQuery_Conditional.ForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& ComponentSystemExecutionContext)
 		{
 			const UZoneGraphSubsystem& ZoneGraphSubsystem = ComponentSystemExecutionContext.GetSubsystemChecked<UZoneGraphSubsystem>();
-
+		
+			UMassTrafficSubsystem& MassTrafficSubsystem = ComponentSystemExecutionContext.GetMutableSubsystemChecked<UMassTrafficSubsystem>();
 			const TConstArrayView<FMassSimulationVariableTickFragment> VariableTickFragments = Context.GetFragmentView<FMassSimulationVariableTickFragment>();
 			const TConstArrayView<FMassTrafficRandomFractionFragment> RandomFractionFragments = Context.GetFragmentView<FMassTrafficRandomFractionFragment>();
 			const TConstArrayView<FMassTrafficObstacleAvoidanceFragment> AvoidanceFragments = Context.GetFragmentView<FMassTrafficObstacleAvoidanceFragment>();
@@ -255,6 +281,7 @@ void UMassTrafficVehicleControlProcessor::Execute(FMassEntityManager& EntityMana
 
 				PIDVehicleControl(
 					EntityManager,
+					MassTrafficSubsystem,
 					Context,
 					Index,
 					*ZoneGraphStorage,
@@ -292,6 +319,13 @@ void UMassTrafficVehicleControlProcessor::SimpleVehicleControl(
 	const FMassTrafficNextVehicleFragment& NextVehicleFragment, const bool bVisLog
 ) const
 {
+#if WITH_MASSTRAFFIC_DEBUG
+	{
+		const FMassEntityHandle& VehicleEntity = Context.GetEntity(EntityIndex);
+		UE::MassTraffic::DrawDebugMassTrafficLaneData(MassTrafficSubsystem, VehicleEntity, VehicleControlFragment, LaneLocationFragment);
+	}
+#endif
+	
 	// Compute stable distance based noise
 	const float NoiseValue = UE::MassTraffic::CalculateNoiseValue(VehicleControlFragment.NoiseInput, MassTrafficSettings->NoisePeriod);
 
@@ -380,7 +414,7 @@ void UMassTrafficVehicleControlProcessor::SimpleVehicleControl(
 
 	
 	// Calculate target speed
-	const float TargetSpeed = UE::MassTraffic::CalculateTargetSpeed(
+	float TargetSpeed = UE::MassTraffic::CalculateTargetSpeed(
 		LaneLocationFragment.DistanceAlongLane,
 		VehicleControlFragment.Speed,
 		AvoidanceFragment.DistanceToNext,
@@ -407,9 +441,15 @@ void UMassTrafficVehicleControlProcessor::SimpleVehicleControl(
 		#endif
 	);
 
+	const auto& PerformYieldAction = [&TargetSpeed]()
+	{
+		TargetSpeed = 0.0f;
+	};
+
+	ProcessYieldAtIntersectionLogic(MassTrafficSubsystem, EntityManager, VehicleControlFragment, LaneLocationFragment, AgentRadiusFragment, PerformYieldAction);
 
 	// (See all READYLANE.)
-	SetIsVehicleReadyToUseNextIntersectionLane(VehicleControlFragment, LaneLocationFragment, AgentRadiusFragment, RandomFractionFragment, MassTrafficSettings->StoppingDistanceRange, bVehicleHasNoRoom);
+	SetIsVehicleReadyToUseNextIntersectionLane(VehicleControlFragment, LaneLocationFragment, AgentRadiusFragment, RandomFractionFragment, MassTrafficSubsystem, EntityManager, MassTrafficSettings->StoppingDistanceRange, bVehicleHasNoRoom);
 
 	
 	// @todo Reduce speed on corners 
@@ -551,6 +591,7 @@ void UMassTrafficVehicleControlProcessor::SimpleVehicleControl(
 
 void UMassTrafficVehicleControlProcessor::PIDVehicleControl(
 	const FMassEntityManager& EntityManager,
+	UMassTrafficSubsystem& MassTrafficSubsystem,
 	const FMassExecutionContext& Context,
 	const int32 EntityIndex,
 	const FZoneGraphStorage& ZoneGraphStorage,
@@ -569,6 +610,13 @@ void UMassTrafficVehicleControlProcessor::PIDVehicleControl(
 	const bool bVisLog
 ) const
 {
+#if WITH_MASSTRAFFIC_DEBUG
+	{
+		const FMassEntityHandle& VehicleEntity = Context.GetEntity(EntityIndex);
+		UE::MassTraffic::DrawDebugMassTrafficLaneData(MassTrafficSubsystem, VehicleEntity, VehicleControlFragment, LaneLocationFragment);
+	}
+#endif
+	
 	// Compute stable distance based noise
 	const float NoiseValue = UE::MassTraffic::CalculateNoiseValue(VehicleControlFragment.NoiseInput, MassTrafficSettings->NoisePeriod);
 
@@ -724,8 +772,15 @@ void UMassTrafficVehicleControlProcessor::PIDVehicleControl(
 		#endif
 	);
 
+	const auto& PerformYieldAction = [&TargetSpeed]()
+	{
+		TargetSpeed = 0.0f;
+	};
+
+	ProcessYieldAtIntersectionLogic(MassTrafficSubsystem, EntityManager, VehicleControlFragment, LaneLocationFragment, AgentRadiusFragment, PerformYieldAction);
+
 	// (See all READYLANE.)
-	SetIsVehicleReadyToUseNextIntersectionLane(VehicleControlFragment, LaneLocationFragment, AgentRadiusFragment, RandomFractionFragment, MassTrafficSettings->StoppingDistanceRange, bVehicleHasNoRoom);
+	SetIsVehicleReadyToUseNextIntersectionLane(VehicleControlFragment, LaneLocationFragment, AgentRadiusFragment, RandomFractionFragment, MassTrafficSubsystem, EntityManager, MassTrafficSettings->StoppingDistanceRange, bVehicleHasNoRoom);
 
 	// Reduce speed while cornering
 	const float TurnAngle = TransformFragment.GetTransform().InverseTransformVectorNoScale(SpeedControlChaseTargetOrientation.GetForwardVector()).HeadingAngle();

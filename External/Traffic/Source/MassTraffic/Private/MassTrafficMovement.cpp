@@ -200,6 +200,123 @@ bool ShouldStopAtLaneExit(
 	}
 }
 
+void UpdateYieldAtIntersectionState(UMassTrafficSubsystem& MassTrafficSubsystem, FMassTrafficVehicleControlFragment& VehicleControlFragment, const FZoneGraphLaneHandle& CurrentLaneHandle, const float DistanceAlongLane, const bool bShouldPreemptivelyYieldAtIntersection, const bool bShouldReactivelyYieldAtIntersection)
+{
+	const UMassTrafficSettings* MassTrafficSettings = GetDefault<UMassTrafficSettings>();
+	if (!ensureMsgf(MassTrafficSettings != nullptr, TEXT("Can't access MassTrafficSettings in UpdateYieldAtIntersectionState. Yield behavior disabled.")))
+	{
+		return;
+	}
+	
+	const bool bShouldYieldAtIntersection = bShouldPreemptivelyYieldAtIntersection || bShouldReactivelyYieldAtIntersection;
+	
+	FZoneGraphTrafficLaneData* CurrentLaneData = MassTrafficSubsystem.GetMutableTrafficLaneData(CurrentLaneHandle);
+
+	ensureMsgf(CurrentLaneData != nullptr, TEXT("CurrentLaneData must be valid in order to update NumYieldingVehicles on the current lane."));
+
+	// If we should start *preemptively* yielding, ...
+	if (bShouldPreemptivelyYieldAtIntersection && !VehicleControlFragment.IsPreemptivelyYieldingAtIntersection())
+	{
+		// Determine our allowed roll-out distance and mark where we are on our current lane.
+		VehicleControlFragment.AllowedRolloutDistanceForPreemptiveYieldAtIntersection = FMath::RandRange(MassTrafficSettings->MinPreemptiveYieldAtIntersectionRolloutDistance, MassTrafficSettings->MaxPreemptiveYieldAtIntersectionRolloutDistance);
+		VehicleControlFragment.DistanceAlongLaneAtStartOfYieldLane = DistanceAlongLane;
+
+		// Clear our roll-out distance accumulator.
+		VehicleControlFragment.TotalPrevLaneRolloutDistanceForPreemptiveYieldAtIntersection = 0.0f;
+	}
+	// Otherwise, if we are currently *preemptively* yielding, ...
+	else if (VehicleControlFragment.IsPreemptivelyYieldingAtIntersection())
+	{
+		if (VehicleControlFragment.YieldAtIntersectionLane != nullptr && VehicleControlFragment.YieldAtIntersectionLane != CurrentLaneData)
+		{
+			const float RolloutDistanceForPreviousYieldLane = VehicleControlFragment.YieldAtIntersectionLane->Length - VehicleControlFragment.DistanceAlongLaneAtStartOfYieldLane;
+			VehicleControlFragment.TotalPrevLaneRolloutDistanceForPreemptiveYieldAtIntersection += RolloutDistanceForPreviousYieldLane;
+			VehicleControlFragment.DistanceAlongLaneAtStartOfYieldLane = 0.0f;
+		}
+		
+		const float RolloutDistanceInCurrentLane = DistanceAlongLane - VehicleControlFragment.DistanceAlongLaneAtStartOfYieldLane;
+		VehicleControlFragment.TotalRolloutDistanceForPreemptiveYieldAtIntersection = RolloutDistanceInCurrentLane + VehicleControlFragment.TotalPrevLaneRolloutDistanceForPreemptiveYieldAtIntersection;
+
+		// If we've rolled-out as far as we're allowed, and we haven't started waiting, ...
+		if (!VehicleControlFragment.IsWaitingAfterRollOutForPreemptiveYieldAtIntersection() && VehicleControlFragment.TotalRolloutDistanceForPreemptiveYieldAtIntersection > VehicleControlFragment.AllowedRolloutDistanceForPreemptiveYieldAtIntersection)
+		{
+			// Mark the time that we started waiting after our roll-out.
+			// We use this to make sure we don't wait too long (possibly indefinitely)
+			// for vehicles to enter the lane we decided to pre-emptively yield for.
+			const UWorld* World = MassTrafficSubsystem.GetWorld();
+			VehicleControlFragment.TimeStartedWaitingAfterPreemptiveYieldRollOut = World != nullptr ? World->GetTimeSeconds() : 0.0f;
+		}
+		
+		// And, if we should no longer *preemptively* yield, ...
+		if (!bShouldPreemptivelyYieldAtIntersection)
+		{
+			// Reset our allowed roll-out distance and related parameters.
+			VehicleControlFragment.AllowedRolloutDistanceForPreemptiveYieldAtIntersection = 0.0f;
+			VehicleControlFragment.DistanceAlongLaneAtStartOfYieldLane = 0.0f;
+			VehicleControlFragment.TotalPrevLaneRolloutDistanceForPreemptiveYieldAtIntersection = 0.0f;
+			
+			VehicleControlFragment.TimeStartedWaitingAfterPreemptiveYieldRollOut = 0.0f;
+		}
+	}
+	
+	// If we should yield, but we're currently not yielding, ...
+	if (bShouldYieldAtIntersection && !VehicleControlFragment.IsYieldingAtIntersection())
+	{
+		ensureMsgf(VehicleControlFragment.YieldAtIntersectionLane == nullptr, TEXT("Vehicle is entering \"yield at intersection\" state.  VehicleControlFragment.YieldAtIntersectionLane should be nullptr."));
+		
+		// Increase the lane's yield count.
+		if (CurrentLaneData != nullptr)
+		{
+			++CurrentLaneData->NumYieldingVehicles;
+		}
+
+		// Store a reference to the lane where we started to yield.
+		VehicleControlFragment.YieldAtIntersectionLane = CurrentLaneData;
+		
+	}
+	// Otherwise, if we are currently yielding, ...
+	else if (VehicleControlFragment.IsYieldingAtIntersection())
+	{
+		ensureMsgf(VehicleControlFragment.YieldAtIntersectionLane != nullptr, TEXT("Vehicle is in \"yield at intersection\" state.  VehicleControlFragment.YieldAtIntersectionLane should not be nullptr."));
+
+		// If our current lane is different from the lane we started to yield on, we assume that we moved onto a new lane
+		// as we slowed to a stop for our yield.  So, we transfer "ownership" of our contribution to the yield count
+		// to the new lane.
+		if (VehicleControlFragment.YieldAtIntersectionLane != nullptr && VehicleControlFragment.YieldAtIntersectionLane != CurrentLaneData)
+		{
+			--VehicleControlFragment.YieldAtIntersectionLane->NumYieldingVehicles;
+
+			if (CurrentLaneData != nullptr)
+			{
+				++CurrentLaneData->NumYieldingVehicles;
+			}
+
+			// Update our reference to the lane in which we are yielding.
+			VehicleControlFragment.YieldAtIntersectionLane = CurrentLaneData;
+		}
+
+		// And, if we should no longer yield, ...
+		if (!bShouldYieldAtIntersection)
+		{
+			// Decrease the lane's yield count.
+			if (CurrentLaneData != nullptr)
+			{
+				--CurrentLaneData->NumYieldingVehicles;
+			}
+
+			// Clear the reference to the lane in which we were yielding.
+			VehicleControlFragment.YieldAtIntersectionLane = nullptr;
+		}
+	}
+
+	// Ensure that our "reference counting" logic that governs the NumYieldingVehicles field of the lanes stays within bounds.
+	if (CurrentLaneData != nullptr)
+	{
+		ensureMsgf(CurrentLaneData->NumYieldingVehicles >= 0, TEXT("NumYieldingVehicles should never go below zero.  There is an error in the yield count logic."));
+		ensureMsgf(CurrentLaneData->NumYieldingVehicles < TNumericLimits<int8>::Max(), TEXT("NumYieldingVehicles should never reach the max value of an int8.  There is an error in the yield count logic.  Or, there is an unusually large number of vehicles yielding on this lane."));
+	}
+}
+
 float TimeToCollision(
 	const FVector& AgentLocation, const FVector& AgentVelocity, float AgentRadius,
 	const FVector& ObstacleLocation, const FVector& ObstacleVelocity, float ObstacleRadius)

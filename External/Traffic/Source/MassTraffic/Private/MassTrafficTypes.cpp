@@ -173,6 +173,23 @@ float FZoneGraphTrafficLaneData::SpaceAvailableFromStartOfLaneForVehicle(const F
 	return SpaceAvailableFromStartOfLane;
 }
 
+bool FZoneGraphTrafficLaneData::TryGetDistanceFromStartOfLaneToTailVehicle(const FMassEntityManager& EntityManager, float& OutDistanceToTailVehicle) const
+{
+	if (!TailVehicle.IsSet())
+	{
+		return false;	
+	}
+	
+	const FMassEntityView TailVehicleEntityView(EntityManager, TailVehicle);
+	const FMassZoneGraphLaneLocationFragment& LaneLocationFragment = TailVehicleEntityView.GetFragmentData<FMassZoneGraphLaneLocationFragment>();
+	const FAgentRadiusFragment& RadiusFragment = TailVehicleEntityView.GetFragmentData<FAgentRadiusFragment>();
+	
+	const float DistanceAlongLaneToTailVehicle = LaneLocationFragment.DistanceAlongLane - RadiusFragment.Radius;
+
+	OutDistanceToTailVehicle = DistanceAlongLaneToTailVehicle;
+	return true;
+}
+
 
 void FZoneGraphTrafficLaneData::UpdateDownstreamFlowDensity(float DownstreamFlowDensityMixtureFraction)
 {

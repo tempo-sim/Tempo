@@ -12,9 +12,13 @@
 
 
 // Forward declarations
+class UMassTrafficSubsystem;
+struct FMassTrafficVehicleControlFragment;
+struct FMassZoneGraphLaneLocationFragment;
 struct FMassTrafficLaneSegment;
 struct FTransformFragment;
 struct FZoneGraphStorage;
+struct FZoneGraphLaneHandle;
 enum class EMassTrafficCombineDistanceToNextType : uint8;
 
 
@@ -53,6 +57,11 @@ void DrawDebugDensityManagementRecyclableVehicle(UWorld* World, const FVector& R
 void DrawDebugSleepState(UWorld* World, const FVector& VehicleLocation, bool bIsSleeping, bool bVisLog = false, const UObject* VisLogOwner = nullptr);
 void VisLogMalformedNextLaneLinks(const FMassEntityManager& EntityManager, int32 LaneIndex, const FMassEntityHandle TailVehicle, const FMassEntityHandle UndiscoveredVehicle, int32 MarchEjectAt, const UObject* VisLogOwner);
 
+void DrawDebugMassTrafficLaneData(const UMassTrafficSubsystem& MassTrafficSubsystem, const FMassEntityHandle& EntityHandle, const FMassTrafficVehicleControlFragment& VehicleControlFragment, const FMassZoneGraphLaneLocationFragment& LaneLocationFragment, const float LifeTime = 0.1f);
+void DrawDebugMassTrafficLaneData(const UMassTrafficSubsystem& MassTrafficSubsystem, const FZoneGraphLaneHandle& CurrentLaneHandle, const FZoneGraphLaneHandle* PrevLaneHandle = nullptr, const FZoneGraphLaneHandle* NextLaneHandle = nullptr, const float LifeTime = 0.1f);
+
+void DrawDebugYieldLaneIndicators(const UMassTrafficSubsystem& MassTrafficSubsystem, const FZoneGraphLaneHandle& CurrentLaneHandle, const FZoneGraphLaneHandle* NextLaneHandle, const float DistanceAlongLane, const float LaneLength, const bool bShouldPreemptivelyYieldAtIntersection, const bool bShouldReactivelyYieldAtIntersection, const float LifeTime = 0.0f);
+
 #else
 
 inline void DrawDebugZLine(const UWorld* World, const FVector& Location, FColor Color = FColor::White, bool bPersist = false, float LifeTime = 0.0f, float Thickness = 10.0f, float Length = 750.0f) {}
@@ -73,6 +82,11 @@ inline void DrawDebugDensityManagementTransfer(UWorld* World, const FVector& Tra
 inline void DrawDebugDensityManagementRecyclableVehicle(UWorld* World, const FVector& RecyclableVehicleLocation, bool bTransferred, bool bVisLog = false, const UObject* VisLogOwner = nullptr) {}
 inline void DrawDebugSleepState(UWorld* World, const FVector& VehicleLocation, bool bIsSleeping, bool bVisLog = false, const UObject* VisLogOwner = nullptr) {}
 inline void VisLogMalformedNextLaneLinks(const FMassEntityManager& EntityManager, int32 LaneIndex, const FMassEntityHandle TailVehicle, const FMassEntityHandle UndiscoveredVehicle, int32 MarchEjectAt, const UObject* VisLogOwner) {}
+
+inline void DrawDebugMassTrafficLaneData(const UMassTrafficSubsystem& MassTrafficSubsystem, const FMassEntityHandle& EntityHandle, const FMassTrafficVehicleControlFragment& VehicleControlFragment, const FMassZoneGraphLaneLocationFragment& LaneLocationFragment, const float LifeTime = 0.1f) {}
+inline void DrawDebugMassTrafficLaneData(const UMassTrafficSubsystem& MassTrafficSubsystem, const FZoneGraphLaneHandle& CurrentLaneHandle, const FZoneGraphLaneHandle* PrevLaneHandle = nullptr, const FZoneGraphLaneHandle* NextLaneHandle = nullptr, const float LifeTime = 0.1f) {}
+
+void DrawDebugYieldLaneIndicators(const UMassTrafficSubsystem& MassTrafficSubsystem, const FZoneGraphLaneHandle& CurrentLaneHandle, const FZoneGraphLaneHandle* NextLaneHandle, const float DistanceAlongLane, const float LaneLength, const bool bShouldPreemptivelyYieldAtIntersection, const bool bShouldReactivelyYieldAtIntersection, const float LifeTime = 0.0f) {}
 
 #endif
 

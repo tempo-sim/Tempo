@@ -154,6 +154,8 @@ MASSTRAFFIC_API bool ShouldStopAtLaneExit(
 	, const FVector* VehicleLocation = nullptr // ..for debuging
 );
 
+MASSTRAFFIC_API void UpdateYieldAtIntersectionState(UMassTrafficSubsystem& MassTrafficSubsystem, FMassTrafficVehicleControlFragment& VehicleControlFragment, const FZoneGraphLaneHandle& CurrentLaneHandle, const float DistanceAlongLane, const bool bShouldPreemptivelyYieldAtIntersection, const bool bShouldReactivelyYieldAtIntersection);
+
 /** Avoidance */
 	
 MASSTRAFFIC_API float TimeToCollision(const FVector& AgentLocation, const FVector& AgentVelocity, float AgentRadius, const FVector& ObstacleLocation, const FVector& ObstacleVelocity, float ObstacleRadius);
