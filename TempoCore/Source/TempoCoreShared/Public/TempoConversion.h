@@ -59,6 +59,11 @@ struct QuantityConverter<UC_NONE, R2L>
     {
         return FQuat(-In.X, In.Y, -In.Z, In.W);
     }
+
+    static FRotator Convert(const FRotator& In)
+    {
+        return FRotator(Convert(In.Quaternion()));
+    }
 };
 
 template<>
@@ -77,6 +82,11 @@ struct QuantityConverter<UC_NONE, L2R>
     static FQuat Convert(const FQuat& In)
     {
         return FQuat(-In.X, In.Y, -In.Z, In.W);
+    }
+
+    static FRotator Convert(const FRotator& In)
+    {
+        return FRotator(Convert(In.Quaternion()));
     }
 };
 
