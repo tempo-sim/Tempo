@@ -6,7 +6,6 @@
 #include "TempoAgentsEditorStyle.h"
 #include "TempoAgentsEditorUtils.h"
 
-#include "Misc/MessageDialog.h"
 #include "ToolMenus.h"
 
 DEFINE_LOG_CATEGORY(LogTempoAgentsEditor);
