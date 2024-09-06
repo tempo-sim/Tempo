@@ -4,6 +4,7 @@
 
 #include "TempoLabels.h"
 #include "TempoLabelTypes.h"
+#include "TempoInstancedStaticMeshComponent.h"
 
 #include "TempoSensorsSettings.h"
 
@@ -40,6 +41,12 @@ void UTempoActorLabeler::OnWorldBeginPlay(UWorld& InWorld)
 
 	// Handles labeling any component who is created after their Actor is spawned. 
 	UActorComponent::GlobalCreatePhysicsDelegate.AddWeakLambda(this, [this](UActorComponent* Component)
+	{
+		LabelComponent(Component);
+	});
+	
+	// Handles labeling TempoInstancedStaticMeshComponents when they are registered. 
+	UTempoInstancedStaticMeshComponent::TempoInstancedStaticMeshRegisteredEvent.AddWeakLambda(this, [this](UActorComponent* Component)
 	{
 		LabelComponent(Component);
 	});
@@ -195,8 +202,9 @@ void UTempoActorLabeler::LabelComponent(UActorComponent* Component)
 		if (const int32* ActorLabelId = LabeledActors.Find(PrimitiveComponent->GetOwner()))
 		{
 			LabelComponent(PrimitiveComponent, *ActorLabelId);
+			return;
 		}
-	
+
 		// We've never labeled this component's owner, label the whole Actor instead of just this component.
 		LabelActor(PrimitiveComponent->GetOwner());
 	}
