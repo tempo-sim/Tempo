@@ -277,5 +277,4 @@ protected:
 	FDelegateHandle OnWorldBeginPlayHandle;
 	FDelegateHandle OnPreWorldFinishDestroyHandle;
 	FDelegateHandle OnMovieSceneSequenceTickHandle;
-	bool bInGame = false;
 };

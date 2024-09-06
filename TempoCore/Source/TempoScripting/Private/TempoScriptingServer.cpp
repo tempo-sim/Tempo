@@ -17,7 +17,6 @@ FTempoScriptingServer::FTempoScriptingServer()
 	{
 		if (UTempoCoreUtils::IsGameWorld(World))
 		{
-			bInGame = true;
 			OnWorldBeginPlayHandle = World->OnWorldBeginPlay.AddRaw(this, &FTempoScriptingServer::Reinitialize);
 			// Scripting has nothing to do with movie scene sequences, but this event fires in exactly the right conditions:
 			// After world time has been updated for the current frame, before Actor ticks have begun, and even when paused.
@@ -29,10 +28,10 @@ FTempoScriptingServer::FTempoScriptingServer()
 	{
 		if (UTempoCoreUtils::IsGameWorld(World))
 		{
-			bInGame = false;
 			Reinitialize();
 			World->OnWorldBeginPlay.Remove(OnWorldBeginPlayHandle);
 			World->RemoveMovieSceneSequenceTickHandler(OnMovieSceneSequenceTickHandle);
+			OnMovieSceneSequenceTickHandle.Reset();
 		}
 	});
 
@@ -176,7 +175,7 @@ void FTempoScriptingServer::Tick(float DeltaTime)
 	// In game we tick via the world's MovieSceneSequenceTick, which happens near the beginning of the frame,
 	// as opposed to TickableObject ticks, which tick near the end of the frame, to flush messages published
 	// at the very end of the last frame as soon as possible.
-	if (!bInGame)
+	if (!OnMovieSceneSequenceTickHandle.IsValid())
 	{
 		TickInternal(DeltaTime);
 	}
