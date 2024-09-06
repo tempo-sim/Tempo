@@ -13,14 +13,13 @@ message Vector {
   double z = 3;
 }
 
-message Quat {
-  double x = 1;
-  double y = 2;
-  double z = 3;
-  double w = 4;
+message Rotation {
+  double r = 1;
+  double p = 2;
+  double y = 3;
 }
 
 message Transform {
   Vector location = 1;
-  Quat rotation = 2;
+  Rotation rotation = 2;
 }
