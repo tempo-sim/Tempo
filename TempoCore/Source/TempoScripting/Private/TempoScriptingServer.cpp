@@ -17,7 +17,11 @@ FTempoScriptingServer::FTempoScriptingServer()
 	{
 		if (UTempoCoreUtils::IsGameWorld(World))
 		{
+			bInGame = true;
 			OnWorldBeginPlayHandle = World->OnWorldBeginPlay.AddRaw(this, &FTempoScriptingServer::Reinitialize);
+			// Scripting has nothing to do with movie scene sequences, but this event fires in exactly the right conditions:
+			// After world time has been updated for the current frame, before Actor ticks have begun, and even when paused.
+			OnMovieSceneSequenceTickHandle = World->AddMovieSceneSequenceTickHandler(FOnMovieSceneSequenceTick::FDelegate::CreateRaw(this, &FTempoScriptingServer::TickInternal));
 		}
 	});
 	OnPreWorldFinishDestroyHandle = FWorldDelegates::OnPreWorldFinishDestroy.AddLambda(
@@ -25,8 +29,10 @@ FTempoScriptingServer::FTempoScriptingServer()
 	{
 		if (UTempoCoreUtils::IsGameWorld(World))
 		{
+			bInGame = false;
 			Reinitialize();
 			World->OnWorldBeginPlay.Remove(OnWorldBeginPlayHandle);
+			World->RemoveMovieSceneSequenceTickHandler(OnMovieSceneSequenceTickHandle);
 		}
 	});
 
@@ -167,11 +173,22 @@ void FTempoScriptingServer::Reinitialize()
 
 void FTempoScriptingServer::Tick(float DeltaTime)
 {
+	// In game we tick via the world's MovieSceneSequenceTick, which happens near the beginning of the frame,
+	// as opposed to TickableObject ticks, which tick near the end of the frame, to flush messages published
+	// at the very end of the last frame as soon as possible.
+	if (!bInGame)
+	{
+		TickInternal(DeltaTime);
+	}
+}
+
+void FTempoScriptingServer::TickInternal(float DeltaTime)
+{
 	if (!bIsInitialized)
 	{
 		return;
 	}
-	
+
 	const UTempoCoreSettings* Settings = GetDefault<UTempoCoreSettings>();
 	const ETimeMode TimeMode = Settings->GetTimeMode();
 	const int32 MaxEventProcessingTimeMicroSeconds = Settings->GetMaxEventProcessingTime();
@@ -190,7 +207,7 @@ void FTempoScriptingServer::Tick(float DeltaTime)
 			ManagersWithPendingWrites.Add(Tag);
 		}
 	}
-	
+
 	bool bProcessedPendingEvents = false;
 	const double Start = FPlatformTime::Seconds();
 	while (!bProcessedPendingEvents)

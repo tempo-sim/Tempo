@@ -218,7 +218,7 @@ public:
 	virtual TStatId GetStatId() const override;
 	virtual bool IsTickableInEditor() const override { return true; }
 	virtual bool IsTickableWhenPaused() const override { return true; }
-	
+
 	template <class ServiceType, class... HandlerTypes>
 	void RegisterService(HandlerTypes... Handlers)
 	{
@@ -231,6 +231,7 @@ protected:
 	void Initialize();
 	void Deinitialize();
 	void Reinitialize();
+	void TickInternal(float DeltaTime);
 	
 	// Credit: https://stackoverflow.com/a/44065093
 	template <class...>
@@ -275,4 +276,6 @@ protected:
 	FDelegateHandle OnPostWorldInitializationHandle;
 	FDelegateHandle OnWorldBeginPlayHandle;
 	FDelegateHandle OnPreWorldFinishDestroyHandle;
+	FDelegateHandle OnMovieSceneSequenceTickHandle;
+	bool bInGame = false;
 };
