@@ -13,7 +13,8 @@ DECLARE_MULTICAST_DELEGATE_OneParam(FOnTempoInstancedStaticMeshRegistered, UActo
  * giving TempoActorLabeler a chance to label it.
  * 
  * ActorComponents don't broadcast the MarkRenderStateDirtyEvent, (without this) our opportunity to label them,
- * so if an ISMC is registered after being set up, which is a common pattern, we won't have a chance to label it.
+ * unless they are registered. So, if an ISMC is registered after being set up, which is a common pattern,
+ * we won't have a chance to label it.
  */
 UCLASS()
 class TEMPOLABELS_API UTempoInstancedStaticMeshComponent : public UInstancedStaticMeshComponent
