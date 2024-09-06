@@ -13,7 +13,7 @@ using ObservableEventsService = TempoObservableEvents::ObservableEventService::A
 using OverlapEventRequest = TempoObservableEvents::OverlapEventRequest;
 using OverlapEventResponse = TempoObservableEvents::OverlapEventResponse;
 
-void UTempoObservableEventServiceSubsystem::RegisterWorldServices(UTempoScriptingServer* ScriptingServer)
+void UTempoObservableEventServiceSubsystem::RegisterScriptingServices(FTempoScriptingServer* ScriptingServer)
 {
 	ScriptingServer->RegisterService<ObservableEventsService>(
 		TStreamingRequestHandler<ObservableEventsService, OverlapEventRequest, OverlapEventResponse>(&ObservableEventsService::RequestStreamOverlapEvents).BindUObject(this, &UTempoObservableEventServiceSubsystem::StreamOverlapEvents)

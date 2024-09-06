@@ -19,7 +19,7 @@ using LaneDataResponse = TempoMapQuery::LaneDataResponse;
 using LaneAccessibilityRequest = TempoMapQuery::LaneAccessibilityRequest;
 using LaneAccessibilityResponse = TempoMapQuery::LaneAccessibilityResponse;
 
-void UTempoMapQueryServiceSubsystem::RegisterWorldServices(UTempoScriptingServer* ScriptingServer)
+void UTempoMapQueryServiceSubsystem::RegisterScriptingServices(FTempoScriptingServer* ScriptingServer)
 {
 	ScriptingServer->RegisterService<MapQueryService>(
 		TSimpleRequestHandler<MapQueryService, LaneDataRequest, LaneDataResponse>(&MapQueryService::RequestGetLanes).BindUObject(this, &UTempoMapQueryServiceSubsystem::GetLaneData),

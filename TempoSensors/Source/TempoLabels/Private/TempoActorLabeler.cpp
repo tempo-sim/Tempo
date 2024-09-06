@@ -8,6 +8,7 @@
 
 #include "TempoSensorsSettings.h"
 
+#include "TempoCoreUtils.h"
 #include "DefaultActorClassifier.h"
 
 #include "Engine.h"
@@ -17,7 +18,7 @@ void UTempoActorLabeler::OnWorldBeginPlay(UWorld& InWorld)
 	Super::OnWorldBeginPlay(InWorld);
 
 	// Only for game worlds
-	if (!(InWorld.WorldType == EWorldType::Game || InWorld.WorldType == EWorldType::PIE))
+	if (!UTempoCoreUtils::IsGameWorld(&InWorld))
 	{
 		return;
 	}
@@ -54,7 +55,7 @@ void UTempoActorLabeler::OnWorldBeginPlay(UWorld& InWorld)
 
 bool UTempoActorLabeler::ShouldCreateSubsystem(UObject* Outer) const
 {
-	if (Outer->GetWorld()->WorldType == EWorldType::Game || Outer->GetWorld()->WorldType == EWorldType::PIE)
+	if (UTempoCoreUtils::IsGameWorld(Outer))
 	{
 		return Super::ShouldCreateSubsystem(Outer);
 	}
@@ -192,7 +193,7 @@ void UTempoActorLabeler::LabelAllComponents(const AActor* Actor, int32 ActorLabe
 
 void UTempoActorLabeler::LabelComponent(UActorComponent* Component)
 {
-	if (!Component->GetOwner() || !(Component->GetWorld()->WorldType == EWorldType::Game || Component->GetWorld()->WorldType == EWorldType::PIE))
+	if (!Component->GetOwner() || !UTempoCoreUtils::IsGameWorld(Component))
 	{
 		return;
 	}

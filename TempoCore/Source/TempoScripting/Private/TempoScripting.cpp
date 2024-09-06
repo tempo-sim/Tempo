@@ -2,6 +2,8 @@
 
 #include "TempoScripting.h"
 
+#include "TempoScriptingServer.h"
+
 #include "google/protobuf/descriptor.h"
 #include "google/protobuf/message.h"
 
@@ -15,6 +17,8 @@ DEFINE_LOG_CATEGORY(LogTempoScripting);
 
 void FTempoScriptingModule::StartupModule()
 {
+	ScriptingServer = MakeUnique<FTempoScriptingServer>();
+
 #if WITH_EDITOR
 	// We disallow hot reload for TempoScripting module for the same reason we force TempoScripting
 	// to re-export all the symbols from gRPC and Protobuf: these libraries have lots of static
@@ -24,9 +28,9 @@ void FTempoScriptingModule::StartupModule()
 	// However, other modules that define protos can still use hot reload, and Protobuf will crash when
 	// those re-generated auto-generated message classes register themselves with its global static
 	// memory of all proto classes. So we reset that memory here, when a hot reload begins.
-	IHotReloadModule::Get().OnModuleCompilerStarted().AddLambda([](bool bIsAsyncCompile)
+	IHotReloadModule::Get().OnModuleCompilerStarted().AddLambda([](bool)
 	{
-		// Note: we added these reset methods TempoThirdParty-v0.4
+		// Note: we added these reset methods in TempoThirdParty-v0.4
 		google::protobuf::DescriptorPool::ResetGeneratedDatabase();
 		google::protobuf::MessageFactory::ResetGeneratedFactory();
 	});

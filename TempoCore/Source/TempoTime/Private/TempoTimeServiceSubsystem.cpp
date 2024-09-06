@@ -12,7 +12,7 @@ using TimeModeRequest = TempoTime::TimeModeRequest;
 using SetSimStepsPerSecondRequest = TempoTime::SetSimStepsPerSecondRequest;
 using AdvanceStepsRequest = TempoTime::AdvanceStepsRequest;
 
-void UTempoTimeServiceSubsystem::RegisterWorldServices(UTempoScriptingServer* ScriptingServer)
+void UTempoTimeServiceSubsystem::RegisterScriptingServices(FTempoScriptingServer* ScriptingServer)
 {
 	ScriptingServer->RegisterService<TimeService>(
 		TSimpleRequestHandler<TimeService, TimeModeRequest, TempoEmpty>(&TimeService::RequestSetTimeMode).BindUObject(this, &UTempoTimeServiceSubsystem::SetTimeMode),

@@ -23,12 +23,12 @@ namespace TempoTime
 }
 
 UCLASS()
-class TEMPOTIME_API UTempoTimeServiceSubsystem : public UTempoWorldSubsystem, public ITempoWorldScriptable
+class TEMPOTIME_API UTempoTimeServiceSubsystem : public UTempoGameWorldSubsystem, public ITempoScriptable
 {
 	GENERATED_BODY()
-	
+
 public:
-	virtual void RegisterWorldServices(UTempoScriptingServer* ScriptingServer) override;
+	virtual void RegisterScriptingServices(FTempoScriptingServer* ScriptingServer) override;
 
 protected:
 	void SetTimeMode(const TempoTime::TimeModeRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const;
@@ -36,7 +36,7 @@ protected:
 	void SetSimStepsPerSecond(const TempoTime::SetSimStepsPerSecondRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const;
 
 	void AdvanceSteps(const TempoTime::AdvanceStepsRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const;
-	
+
 	void Play(const TempoScripting::Empty& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const;
 
 	void Pause(const TempoScripting::Empty& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const;

@@ -25,6 +25,7 @@ public class TempoLabels : ModuleRules
                 "Slate",
                 "SlateCore",
                 // Tempo
+                "TempoCoreShared",
                 "TempoSensorsShared",
             }
         );

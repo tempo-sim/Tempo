@@ -25,12 +25,12 @@ namespace TempoScripting
 }
 
 UCLASS()
-class TEMPOGEOGRAPHIC_API UTempoGeographicServiceSubsystem : public UTempoWorldSubsystem, public ITempoWorldScriptable
+class TEMPOGEOGRAPHIC_API UTempoGeographicServiceSubsystem : public UTempoGameWorldSubsystem, public ITempoScriptable
 {
 	GENERATED_BODY()
 
 public:
-	virtual void RegisterWorldServices(UTempoScriptingServer* ScriptingServer) override;
+	virtual void RegisterScriptingServices(FTempoScriptingServer* ScriptingServer) override;
 
 protected:
 	void SetDate(const TempoGeographic::Date& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation);

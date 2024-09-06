@@ -13,7 +13,7 @@ using DrivingCommandRequest = TempoVehicles::DrivingCommandRequest;
 using CommandableVehiclesResponse = TempoVehicles::CommandableVehiclesResponse;
 using TempoEmpty = TempoScripting::Empty;
 
-void UTempoDrivingServiceSubsystem::RegisterWorldServices(UTempoScriptingServer* ScriptingServer)
+void UTempoDrivingServiceSubsystem::RegisterScriptingServices(FTempoScriptingServer* ScriptingServer)
 {
 	ScriptingServer->RegisterService<DrivingService>(
 		TSimpleRequestHandler<DrivingService, DrivingCommandRequest, TempoEmpty>(&DrivingService::RequestCommandVehicle).BindUObject(this, &UTempoDrivingServiceSubsystem::HandleDrivingCommand),

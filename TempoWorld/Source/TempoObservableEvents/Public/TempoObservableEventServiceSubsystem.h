@@ -17,12 +17,12 @@ namespace TempoObservableEvents
 }
 
 UCLASS()
-class TEMPOOBSERVABLEEVENTS_API UTempoObservableEventServiceSubsystem : public UTempoWorldSubsystem, public ITempoWorldScriptable
+class TEMPOOBSERVABLEEVENTS_API UTempoObservableEventServiceSubsystem : public UTempoGameWorldSubsystem, public ITempoScriptable
 {
 	GENERATED_BODY()
 
 public:
-	virtual void RegisterWorldServices(UTempoScriptingServer* ScriptingServer) override;
+	virtual void RegisterScriptingServices(FTempoScriptingServer* ScriptingServer) override;
 	
 	void StreamOverlapEvents(const TempoObservableEvents::OverlapEventRequest& Request, const TResponseDelegate<TempoObservableEvents::OverlapEventResponse>& ResponseContinuation);
 

@@ -6,8 +6,6 @@
 
 #include "CoreMinimal.h"
 
-#include "TempoScriptingServer.generated.h"
-
 template <class ResponseType>
 using TResponseDelegate = TDelegate<void(const ResponseType&, grpc::Status)>;
 
@@ -103,7 +101,7 @@ using TStreamingRequestHandler = TRequestHandler<ServiceType, RequestType, Respo
 
 /**
  * A request manager manages the lifecycle of one gRPC request.
- * This interface allows ownership by the UTempoScriptingServer without visibility into the concrete handler types.
+ * This interface allows ownership by the FTempoScriptingServer without visibility into the concrete handler types.
  */
 struct FRequestManager : TSharedFromThis<FRequestManager>
 {
@@ -210,21 +208,17 @@ public:
 /**
  * Hosts a gRPC server and supports registering arbitrary gRPC services and handlers.
  */
-UCLASS()
-class TEMPOSCRIPTING_API UTempoScriptingServer : public UObject
+class TEMPOSCRIPTING_API FTempoScriptingServer : public FTickableGameObject
 {
-	GENERATED_BODY()
 public:
-	UTempoScriptingServer();
-	UTempoScriptingServer(FVTableHelper& Helper);
-	virtual ~UTempoScriptingServer() override;
+	FTempoScriptingServer();
+	virtual ~FTempoScriptingServer() override;
 
-	virtual void Initialize(int32 Port);
-	virtual void Deinitialize();
+	virtual void Tick(float DeltaTime) override;
+	virtual TStatId GetStatId() const override;
+	virtual bool IsTickableInEditor() const override { return true; }
+	virtual bool IsTickableWhenPaused() const override { return true; }
 
-	// The server must be explicitly Ticked. Its owner may choose the most appropriate time within the frame to do so.
-	virtual void Tick(float DeltaTime);
-	
 	template <class ServiceType, class... HandlerTypes>
 	void RegisterService(HandlerTypes... Handlers)
 	{
@@ -233,7 +227,12 @@ public:
 		RegisterHandlers<ServiceType, HandlerTypes...>(Service, Handlers...);
 	}
 
-private:
+protected:
+	void Initialize();
+	void Deinitialize();
+	void Reinitialize();
+	void TickInternal(float DeltaTime);
+	
 	// Credit: https://stackoverflow.com/a/44065093
 	template <class...>
 	struct False : std::bool_constant<false> { };
@@ -264,7 +263,6 @@ private:
 
 	void HandleEventForTag(int32 Tag, bool bOk);
 	
-	UPROPERTY()
 	bool bIsInitialized = false;
 
 	int32 TagAllocator = 0;
@@ -273,4 +271,10 @@ private:
 	
 	TUniquePtr<grpc::Server> Server;
 	TUniquePtr<grpc::ServerCompletionQueue> CompletionQueue;
+
+	FDelegateHandle OnPostEngineInitHandle;
+	FDelegateHandle OnPostWorldInitializationHandle;
+	FDelegateHandle OnWorldBeginPlayHandle;
+	FDelegateHandle OnPreWorldFinishDestroyHandle;
+	FDelegateHandle OnMovieSceneSequenceTickHandle;
 };

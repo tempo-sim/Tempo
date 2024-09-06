@@ -29,7 +29,7 @@ ATempoDateTimeSystem* GetTempoDateTimeSystem(const UObject* WorldContextObject)
 	return Cast<ATempoDateTimeSystem>(Actors[0]);
 }
 
-void UTempoGeographicServiceSubsystem::RegisterWorldServices(UTempoScriptingServer* ScriptingServer)
+void UTempoGeographicServiceSubsystem::RegisterScriptingServices(FTempoScriptingServer* ScriptingServer)
 {
 	ScriptingServer->RegisterService<GeographicService>(
 		TSimpleRequestHandler<GeographicService, TempoGeographic::Date, TempoScripting::Empty>(&GeographicService::RequestSetDate).BindUObject(this, &UTempoGeographicServiceSubsystem::SetDate),
