@@ -39,7 +39,7 @@ public:
 
 // A TempoTickableWorldSubsystem that will only be created for game worlds.
 UCLASS()
-class TEMPOCORESHARED_API UTempoTickableGameWorldSubsystem : public UTempoWorldSubsystem
+class TEMPOCORESHARED_API UTempoTickableGameWorldSubsystem : public UTempoTickableWorldSubsystem
 {
 	GENERATED_BODY()
 

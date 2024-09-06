@@ -39,7 +39,7 @@ bool UTempoTickableWorldSubsystem::ShouldCreateSubsystem(UObject* Outer) const
 {
 	if (GetClass() == UTempoTickableWorldSubsystem::StaticClass())
 	{
-		// Never create the base UTempoWorldSystem
+		// Never create the base UTempoTickableWorldSubsystem
 		return false;
 	}
 
