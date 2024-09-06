@@ -5,6 +5,8 @@
 #include "TempoAgentsWorldSubsystem.h"
 #include "TempoRoadLaneGraphSubsystem.h"
 
+#include "Editor.h"
+
 void UTempoAgentsEditorUtils::RunTempoZoneGraphBuilderPipeline()
 {
 	FEditorScriptExecutionGuard ScriptGuard;
