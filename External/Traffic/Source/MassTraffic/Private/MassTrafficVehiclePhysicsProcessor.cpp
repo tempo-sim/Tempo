@@ -91,6 +91,27 @@ void UMassTrafficVehiclePhysicsProcessor::ConfigureQueries()
 	}
 }
 
+// Identical to UpdateTimeg PhysicsEngine/PhysSubstepTasks.cpp which is unfortunately Private.
+float GetSubstepTime(float UseDelta)
+{
+	float FrameRate = 1.f;
+	uint32 MaxSubSteps = 1;
+
+	UPhysicsSettings * PhysSetting = UPhysicsSettings::Get();
+	FrameRate = PhysSetting->MaxSubstepDeltaTime;
+	MaxSubSteps = PhysSetting->MaxSubsteps;
+	
+	float FrameRateInv = 1.f / FrameRate;
+
+	//Figure out how big dt to make for desired framerate
+	const float DeltaSeconds = FMath::Min(UseDelta, MaxSubSteps * FrameRate);
+	int32 NumSubsteps = FMath::CeilToInt(DeltaSeconds * FrameRateInv);
+	NumSubsteps = FMath::Max(NumSubsteps > MaxSubSteps ? MaxSubSteps : NumSubsteps, (uint32) 1);
+	const float SubTime = DeltaSeconds / NumSubsteps;
+
+	return SubTime;
+}
+
 void UMassTrafficVehiclePhysicsProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(TEXT("SimplePhysicsVehicle"))
@@ -99,17 +120,20 @@ void UMassTrafficVehiclePhysicsProcessor::Execute(FMassEntityManager& EntityMana
 	const int32 NumChaosConstraintSolverIterations = UPhysicsSettingsCore::Get()->SolverOptions.PositionIterations;
 	const float MinDeltaTime = UPhysicsSettings::Get()->MinPhysicsDeltaTime;
 	const float MaxDeltaTime = UPhysicsSettings::Get()->MaxPhysicsDeltaTime;
-	const float DeltaTime = FMath::Min(Context.GetDeltaTimeSeconds(), MaxDeltaTime);
+	const float TotalDeltaTime = FMath::Min(Context.GetDeltaTimeSeconds(), MaxDeltaTime);
 
 	// Skip simulation if Dt < MinDeltaTime 
-	if (DeltaTime < MinDeltaTime)
+	if (TotalDeltaTime < MinDeltaTime)
 	{
 		return;
 	}
-	
+
+	const float DeltaTime = UPhysicsSettings::Get()->bSubstepping ? GetSubstepTime(TotalDeltaTime) : TotalDeltaTime;
+	float RemainingDeltaTime = TotalDeltaTime;
+	while (RemainingDeltaTime > 0.0)
 	// Advance agents
 	{
-
+		RemainingDeltaTime -= DeltaTime;
 		// Get gravity from world
 		float GravityZ = GetWorld()->GetGravityZ();
 		
