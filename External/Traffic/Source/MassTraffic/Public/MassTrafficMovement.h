@@ -161,7 +161,8 @@ MASSTRAFFIC_API void UpdateYieldAtIntersectionState(
 	const float DistanceAlongLane,
 	const bool bShouldPreemptivelyYieldAtIntersection,
 	const bool bShouldReactivelyYieldAtIntersection,
-	const bool bHasAnotherVehicleEnteredRelevantLaneAfterPreemptiveYieldRollOut);
+	const bool bHasAnotherVehicleEnteredRelevantLaneAfterPreemptiveYieldRollOut,
+	const bool bShouldGiveOpportunityForTurningVehiclesToReactivelyYieldAtIntersection);
 
 /** Avoidance */
 	

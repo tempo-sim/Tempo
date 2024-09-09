@@ -216,6 +216,7 @@ bool ShouldPerformReactiveYieldAtIntersection(
 	const FMassEntityManager& EntityManager,
 	const FMassTrafficVehicleControlFragment& VehicleControlFragment,
 	const FMassZoneGraphLaneLocationFragment& LaneLocationFragment,
-	const FAgentRadiusFragment& RadiusFragment);
+	const FAgentRadiusFragment& RadiusFragment,
+	bool& OutShouldGiveOpportunityForTurningVehiclesToReactivelyYieldAtIntersection);
 
 };

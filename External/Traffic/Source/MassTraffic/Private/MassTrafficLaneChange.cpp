@@ -1093,7 +1093,8 @@ bool ShouldPerformReactiveYieldAtIntersection(
 	const FMassEntityManager& EntityManager,
 	const FMassTrafficVehicleControlFragment& VehicleControlFragment,
 	const FMassZoneGraphLaneLocationFragment& LaneLocationFragment,
-	const FAgentRadiusFragment& RadiusFragment)
+	const FAgentRadiusFragment& RadiusFragment,
+	bool& OutShouldGiveOpportunityForTurningVehiclesToReactivelyYieldAtIntersection)
 {
 	const UMassTrafficSettings* MassTrafficSettings = GetDefault<UMassTrafficSettings>();
 	if (!ensureMsgf(MassTrafficSettings != nullptr, TEXT("Can't access MassTrafficSettings in ShouldPerformReactiveYieldAtIntersection.  Yield behavior disabled.")))
@@ -1189,7 +1190,24 @@ bool ShouldPerformReactiveYieldAtIntersection(
 		return true;
 	};
 
-	return ShouldYieldAtIntersection_Internal(*CurrentLaneData, *PrevLaneData, IsTestLaneClear);
+	const bool bShouldReactivelyYieldAtIntersection = ShouldYieldAtIntersection_Internal(*CurrentLaneData, *PrevLaneData, IsTestLaneClear);
+
+	// If we haven't started reactively yielding, ...
+	if (!VehicleControlFragment.IsReactivelyYieldingAtIntersection())
+	{
+		// And, if we're going straight, and we should reactively yield, but we haven't given the opportunity
+		// for a turning vehicle to reactively yield to us, then we indicate that we should do so.
+		// We pass this state back to the caller to forward to UpdateYieldAtIntersectionState.
+		// If the turning vehicles don't take this opportunity to reactively yield to us,
+		// then we will reactively yield to them next update, if the reactive yield logic still applies at that time.
+		if (!CurrentLaneData->bTurnsLeft && !CurrentLaneData->bTurnsRight && bShouldReactivelyYieldAtIntersection && !VehicleControlFragment.HasGivenOpportunityForTurningVehiclesToReactivelyYieldAtIntersection())
+		{
+			OutShouldGiveOpportunityForTurningVehiclesToReactivelyYieldAtIntersection = true;
+			return false;
+		}
+	}
+
+	return bShouldReactivelyYieldAtIntersection;
 }
 
 }

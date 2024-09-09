@@ -207,7 +207,8 @@ void UpdateYieldAtIntersectionState(
 	const float DistanceAlongLane,
 	const bool bShouldPreemptivelyYieldAtIntersection,
 	const bool bShouldReactivelyYieldAtIntersection,
-	const bool bHasAnotherVehicleEnteredRelevantLaneAfterPreemptiveYieldRollOut)
+	const bool bHasAnotherVehicleEnteredRelevantLaneAfterPreemptiveYieldRollOut,
+	const bool bShouldGiveOpportunityForTurningVehiclesToReactivelyYieldAtIntersection)
 {
 	const UMassTrafficSettings* MassTrafficSettings = GetDefault<UMassTrafficSettings>();
 	if (!ensureMsgf(MassTrafficSettings != nullptr, TEXT("Can't access MassTrafficSettings in UpdateYieldAtIntersectionState. Yield behavior disabled.")))
@@ -301,6 +302,11 @@ void UpdateYieldAtIntersectionState(
 			VehicleControlFragment.bHasFinishedWaitingAfterRollOutForPreemptiveYieldAtIntersection = false;
 		}
 	}
+
+	// Set this state to give the opportunity for turning vehicles to reactively yield first.
+	// Once it is true, the logic in ShouldPerformReactiveYieldAtIntersection will fall through,
+	// and we'll set it to false next time.
+	VehicleControlFragment.bHasGivenOpportunityForTurningVehiclesToReactivelyYieldAtIntersection = bShouldGiveOpportunityForTurningVehiclesToReactivelyYieldAtIntersection;
 	
 	// If we should yield, but we're currently not yielding, ...
 	if (bShouldYieldAtIntersection && !VehicleControlFragment.IsYieldingAtIntersection())
