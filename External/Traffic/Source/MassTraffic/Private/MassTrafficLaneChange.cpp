@@ -878,7 +878,13 @@ bool ShouldYieldAtIntersection_Internal(
 	return false;
 }
 
-bool ShouldPerformPreemptiveYieldAtIntersection(const UMassTrafficSubsystem& MassTrafficSubsystem, const FMassEntityManager& EntityManager, const FMassTrafficVehicleControlFragment& VehicleControlFragment, const FMassZoneGraphLaneLocationFragment& LaneLocationFragment, const FAgentRadiusFragment& RadiusFragment)
+bool ShouldPerformPreemptiveYieldAtIntersection(
+	const UMassTrafficSubsystem& MassTrafficSubsystem,
+	const FMassEntityManager& EntityManager,
+	const FMassTrafficVehicleControlFragment& VehicleControlFragment,
+	const FMassZoneGraphLaneLocationFragment& LaneLocationFragment,
+	const FAgentRadiusFragment& RadiusFragment,
+	bool& OutHasAnotherVehicleEnteredRelevantLaneAfterPreemptiveYieldRollOut)
 {
 	const UMassTrafficSettings* MassTrafficSettings = GetDefault<UMassTrafficSettings>();
 	if (!ensureMsgf(MassTrafficSettings != nullptr, TEXT("Can't access MassTrafficSettings in ShouldPerformPreemptiveYieldAtIntersection.  Yield behavior disabled.")))
@@ -966,32 +972,6 @@ bool ShouldPerformPreemptiveYieldAtIntersection(const UMassTrafficSubsystem& Mas
 		}
 	}
 
-	// If we are pre-emptively yielding, ...
-	if (VehicleControlFragment.IsPreemptivelyYieldingAtIntersection())
-	{
-		// Wait until we roll-out, then we'll start checking our wait time.
-		// During this period of time we consider the test lane not to be clear
-		// from a pre-emptive yield perspective.
-		if (!VehicleControlFragment.IsWaitingAfterRollOutForPreemptiveYieldAtIntersection())
-		{
-			return true;
-		}
-		
-		const UWorld* World = MassTrafficSubsystem.GetWorld();
-		const float CurrentWorldTimeSeconds = World != nullptr ? World->GetTimeSeconds() : 0.0f;
-		
-		// We're pre-emptively yielding,
-		// but the vehicle(s) that we decided to pre-emptively yield for aren't on the lane yet.
-		// So, we give them some time to get on the lane, before we abort our pre-emptive yield.
-		// During this period of time we consider the test lane not to be clear
-		// from a pre-emptive yield perspective.
-		// Past this time, the reactive yield logic will take over.
-		if (CurrentWorldTimeSeconds < VehicleControlFragment.TimeStartedWaitingAfterPreemptiveYieldRollOut + MassTrafficSettings->MaxTimeToWaitForVehicleToEnterTheirLaneDuringPreemptiveYield)
-		{
-			return true;
-		}
-	}
-
 	const auto& IsTestLaneClear = [&EntityManager, &VehicleControlFragment, &IntersectionLaneData, &CurrentLaneData, MassTrafficSettings](const FZoneGraphTrafficLaneData& TestLane)
 	{
 		if (!ensureMsgf(IntersectionLaneData->Length > 0.0f, TEXT("IntersectionLaneData should have a length greater than zero.")))
@@ -1072,10 +1052,48 @@ bool ShouldPerformPreemptiveYieldAtIntersection(const UMassTrafficSubsystem& Mas
 		return true;
 	};
 
-	return ShouldYieldAtIntersection_Internal(*IntersectionLaneData, *LaneDataBeforeIntersection, IsTestLaneClear, false);
+	const bool bShouldYieldAtIntersection = ShouldYieldAtIntersection_Internal(*IntersectionLaneData, *LaneDataBeforeIntersection, IsTestLaneClear, false);
+
+	// If we are pre-emptively yielding, ...
+	if (VehicleControlFragment.IsPreemptivelyYieldingAtIntersection())
+	{
+		// Wait until we roll-out, then we'll start checking our wait time.
+		// During this period of time, we remain in the pre-emptive yield.
+		if (!VehicleControlFragment.HasStartedWaitingAfterRollOutForPreemptiveYieldAtIntersection())
+		{
+			return true;
+		}
+		
+		// We're pre-emptively yielding,
+		// but the vehicle(s) that we decided to pre-emptively yield for aren't on the relevant lane(s) yet.
+		//
+		// So, we give them some time to get on the relevant lane(s), while we remain in the pre-emptive yield.
+		//
+		// During this time, we also indicate to the caller whether other vehicles have entered
+		// relevant lanes from a pre-emptive yield perspective.
+		// If so, this allows the logic in UpdateYieldAtIntersectionState to end our wait time early.
+		//
+		// If our wait time fully elapses, then the reactive yield logic will take over.
+		//
+		// However, if other vehicles enter relevant lanes first,
+		// the pre-emptive yield logic will remain in effect until the lanes are clear
+		// from a pre-emptive yield perspective.
+		if (!VehicleControlFragment.HasFinishedWaitingAfterRollOutForPreemptiveYieldAtIntersection())
+		{
+			OutHasAnotherVehicleEnteredRelevantLaneAfterPreemptiveYieldRollOut = bShouldYieldAtIntersection;
+			return true;
+		}
+	}
+
+	return bShouldYieldAtIntersection;
 }
 
-bool ShouldPerformReactiveYieldAtIntersection(const UMassTrafficSubsystem& MassTrafficSubsystem, const FMassEntityManager& EntityManager, const FMassTrafficVehicleControlFragment& VehicleControlFragment, const FMassZoneGraphLaneLocationFragment& LaneLocationFragment, const FAgentRadiusFragment& RadiusFragment)
+bool ShouldPerformReactiveYieldAtIntersection(
+	const UMassTrafficSubsystem& MassTrafficSubsystem,
+	const FMassEntityManager& EntityManager,
+	const FMassTrafficVehicleControlFragment& VehicleControlFragment,
+	const FMassZoneGraphLaneLocationFragment& LaneLocationFragment,
+	const FAgentRadiusFragment& RadiusFragment)
 {
 	const UMassTrafficSettings* MassTrafficSettings = GetDefault<UMassTrafficSettings>();
 	if (!ensureMsgf(MassTrafficSettings != nullptr, TEXT("Can't access MassTrafficSettings in ShouldPerformReactiveYieldAtIntersection.  Yield behavior disabled.")))

@@ -200,7 +200,14 @@ bool ShouldStopAtLaneExit(
 	}
 }
 
-void UpdateYieldAtIntersectionState(UMassTrafficSubsystem& MassTrafficSubsystem, FMassTrafficVehicleControlFragment& VehicleControlFragment, const FZoneGraphLaneHandle& CurrentLaneHandle, const float DistanceAlongLane, const bool bShouldPreemptivelyYieldAtIntersection, const bool bShouldReactivelyYieldAtIntersection)
+void UpdateYieldAtIntersectionState(
+	UMassTrafficSubsystem& MassTrafficSubsystem,
+	FMassTrafficVehicleControlFragment& VehicleControlFragment,
+	const FZoneGraphLaneHandle& CurrentLaneHandle,
+	const float DistanceAlongLane,
+	const bool bShouldPreemptivelyYieldAtIntersection,
+	const bool bShouldReactivelyYieldAtIntersection,
+	const bool bHasAnotherVehicleEnteredRelevantLaneAfterPreemptiveYieldRollOut)
 {
 	const UMassTrafficSettings* MassTrafficSettings = GetDefault<UMassTrafficSettings>();
 	if (!ensureMsgf(MassTrafficSettings != nullptr, TEXT("Can't access MassTrafficSettings in UpdateYieldAtIntersectionState. Yield behavior disabled.")))
@@ -223,6 +230,9 @@ void UpdateYieldAtIntersectionState(UMassTrafficSubsystem& MassTrafficSubsystem,
 
 		// Clear our roll-out distance accumulator.
 		VehicleControlFragment.TotalPrevLaneRolloutDistanceForPreemptiveYieldAtIntersection = 0.0f;
+
+		// Clear our "finished waiting" flag.
+		VehicleControlFragment.bHasFinishedWaitingAfterRollOutForPreemptiveYieldAtIntersection = false;
 	}
 	// Otherwise, if we are currently *preemptively* yielding, ...
 	else if (VehicleControlFragment.IsPreemptivelyYieldingAtIntersection())
@@ -237,14 +247,42 @@ void UpdateYieldAtIntersectionState(UMassTrafficSubsystem& MassTrafficSubsystem,
 		const float RolloutDistanceInCurrentLane = DistanceAlongLane - VehicleControlFragment.DistanceAlongLaneAtStartOfYieldLane;
 		VehicleControlFragment.TotalRolloutDistanceForPreemptiveYieldAtIntersection = RolloutDistanceInCurrentLane + VehicleControlFragment.TotalPrevLaneRolloutDistanceForPreemptiveYieldAtIntersection;
 
-		// If we've rolled-out as far as we're allowed, and we haven't started waiting, ...
-		if (!VehicleControlFragment.IsWaitingAfterRollOutForPreemptiveYieldAtIntersection() && VehicleControlFragment.TotalRolloutDistanceForPreemptiveYieldAtIntersection > VehicleControlFragment.AllowedRolloutDistanceForPreemptiveYieldAtIntersection)
+		// Handle roll-out and waiting logic, if we haven't already.
+		if (!VehicleControlFragment.HasFinishedWaitingAfterRollOutForPreemptiveYieldAtIntersection())
 		{
-			// Mark the time that we started waiting after our roll-out.
-			// We use this to make sure we don't wait too long (possibly indefinitely)
-			// for vehicles to enter the lane we decided to pre-emptively yield for.
 			const UWorld* World = MassTrafficSubsystem.GetWorld();
-			VehicleControlFragment.TimeStartedWaitingAfterPreemptiveYieldRollOut = World != nullptr ? World->GetTimeSeconds() : 0.0f;
+			const float CurrentWorldTimeSeconds = World != nullptr ? World->GetTimeSeconds() : 0.0f;
+
+			// If we haven't started waiting yet, ...
+			if (!VehicleControlFragment.HasStartedWaitingAfterRollOutForPreemptiveYieldAtIntersection())
+			{
+				// Wait until we've rolled-out as far as we're allowed, ...
+				if (VehicleControlFragment.TotalRolloutDistanceForPreemptiveYieldAtIntersection > VehicleControlFragment.AllowedRolloutDistanceForPreemptiveYieldAtIntersection)
+				{
+					// Then, mark the time that we started waiting after our roll-out.
+					// We use this to make sure we don't wait too long (possibly indefinitely)
+					// for vehicles to enter the lane we decided to pre-emptively yield for.
+					VehicleControlFragment.TimeStartedWaitingAfterPreemptiveYieldRollOut = CurrentWorldTimeSeconds;
+				}
+			}
+			// Wait until we roll-out, then we'll start checking our wait time.
+			else
+			{
+				// We're pre-emptively yielding,
+				// but the vehicle(s) that we decided to pre-emptively yield for aren't on the relevant lane(s) yet.
+				// So, we give them some time to get on the relevant lane(s), while we remain in the pre-emptive yield.
+				if (CurrentWorldTimeSeconds > VehicleControlFragment.TimeStartedWaitingAfterPreemptiveYieldRollOut + MassTrafficSettings->MaxTimeToWaitForVehicleToEnterTheirLaneDuringPreemptiveYield)
+				{
+					// Enough time has passed, so we're done waiting.
+					VehicleControlFragment.bHasFinishedWaitingAfterRollOutForPreemptiveYieldAtIntersection = true;
+				}
+				else
+				{
+					// If we haven't waited the full time yet, but another vehicle has entered a relevant lane, we don't need to wait anymore.
+					// From this point, we will continue yielding until the pre-emptive yield logic determines that all relevant vehicle lanes are clear.
+					VehicleControlFragment.bHasFinishedWaitingAfterRollOutForPreemptiveYieldAtIntersection = bHasAnotherVehicleEnteredRelevantLaneAfterPreemptiveYieldRollOut;
+				}
+			}
 		}
 		
 		// And, if we should no longer *preemptively* yield, ...
@@ -256,6 +294,8 @@ void UpdateYieldAtIntersectionState(UMassTrafficSubsystem& MassTrafficSubsystem,
 			VehicleControlFragment.TotalPrevLaneRolloutDistanceForPreemptiveYieldAtIntersection = 0.0f;
 			
 			VehicleControlFragment.TimeStartedWaitingAfterPreemptiveYieldRollOut = 0.0f;
+			
+			VehicleControlFragment.bHasFinishedWaitingAfterRollOutForPreemptiveYieldAtIntersection = false;
 		}
 	}
 	

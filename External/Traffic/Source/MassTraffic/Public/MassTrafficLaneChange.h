@@ -203,7 +203,19 @@ void ChooseLaneForLaneChange(
 
 bool CheckNextVehicle(const FMassEntityHandle Entity, const FMassEntityHandle NextEntity, const FMassEntityManager& EntityManager);
 
-bool ShouldPerformPreemptiveYieldAtIntersection(const UMassTrafficSubsystem& MassTrafficSubsystem, const FMassEntityManager& EntityManager, const FMassTrafficVehicleControlFragment& VehicleControlFragment, const FMassZoneGraphLaneLocationFragment& LaneLocationFragment, const FAgentRadiusFragment& RadiusFragment);
-bool ShouldPerformReactiveYieldAtIntersection(const UMassTrafficSubsystem& MassTrafficSubsystem, const FMassEntityManager& EntityManager, const FMassTrafficVehicleControlFragment& VehicleControlFragment, const FMassZoneGraphLaneLocationFragment& LaneLocationFragment, const FAgentRadiusFragment& RadiusFragment);
+bool ShouldPerformPreemptiveYieldAtIntersection(
+	const UMassTrafficSubsystem& MassTrafficSubsystem,
+	const FMassEntityManager& EntityManager,
+	const FMassTrafficVehicleControlFragment& VehicleControlFragment,
+	const FMassZoneGraphLaneLocationFragment& LaneLocationFragment,
+	const FAgentRadiusFragment& RadiusFragment,
+	bool& OutHasAnotherVehicleEnteredRelevantLaneAfterPreemptiveYieldRollOut);
+	
+bool ShouldPerformReactiveYieldAtIntersection(
+	const UMassTrafficSubsystem& MassTrafficSubsystem,
+	const FMassEntityManager& EntityManager,
+	const FMassTrafficVehicleControlFragment& VehicleControlFragment,
+	const FMassZoneGraphLaneLocationFragment& LaneLocationFragment,
+	const FAgentRadiusFragment& RadiusFragment);
 
 };

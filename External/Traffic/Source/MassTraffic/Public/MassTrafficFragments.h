@@ -698,6 +698,7 @@ struct MASSTRAFFIC_API FMassTrafficVehicleControlFragment : public FMassFragment
 	float TotalRolloutDistanceForPreemptiveYieldAtIntersection = 0.0f;
 
 	float TimeStartedWaitingAfterPreemptiveYieldRollOut = 0.0f;
+	bool bHasFinishedWaitingAfterRollOutForPreemptiveYieldAtIntersection = false;
 
 	// Inline copy of CurrentTrafficLaneData->ConstData constant lane data, copied on lane entry
 	FZoneGraphTrafficLaneConstData CurrentLaneConstData;
@@ -720,7 +721,8 @@ struct MASSTRAFFIC_API FMassTrafficVehicleControlFragment : public FMassFragment
 
 	bool IsYieldingAtIntersection() const { return YieldAtIntersectionLane != nullptr; }
 	bool IsPreemptivelyYieldingAtIntersection() const { return IsYieldingAtIntersection() && AllowedRolloutDistanceForPreemptiveYieldAtIntersection > 0.0f; }
-	bool IsWaitingAfterRollOutForPreemptiveYieldAtIntersection() const { return IsPreemptivelyYieldingAtIntersection() && TimeStartedWaitingAfterPreemptiveYieldRollOut > 0.0f; }
+	bool HasStartedWaitingAfterRollOutForPreemptiveYieldAtIntersection() const { return IsPreemptivelyYieldingAtIntersection() && TimeStartedWaitingAfterPreemptiveYieldRollOut > 0.0f; }
+	bool HasFinishedWaitingAfterRollOutForPreemptiveYieldAtIntersection() const { return bHasFinishedWaitingAfterRollOutForPreemptiveYieldAtIntersection; }
 };
 
 
