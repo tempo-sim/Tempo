@@ -228,10 +228,12 @@ void UpdateYieldAtIntersectionState(
 		VehicleControlFragment.AllowedRolloutDistanceForPreemptiveYieldAtIntersection = FMath::RandRange(MassTrafficSettings->MinPreemptiveYieldAtIntersectionRolloutDistance, MassTrafficSettings->MaxPreemptiveYieldAtIntersectionRolloutDistance);
 		VehicleControlFragment.DistanceAlongLaneAtStartOfYieldLane = DistanceAlongLane;
 
-		// Clear our roll-out distance accumulator.
+		// Clear all other pre-emptive yield behavior fields.
 		VehicleControlFragment.TotalPrevLaneRolloutDistanceForPreemptiveYieldAtIntersection = 0.0f;
-
-		// Clear our "finished waiting" flag.
+		VehicleControlFragment.TotalRolloutDistanceForPreemptiveYieldAtIntersection = 0.0f;
+		
+		VehicleControlFragment.TimeStartedWaitingAfterPreemptiveYieldRollOut = 0.0f;
+		
 		VehicleControlFragment.bHasFinishedWaitingAfterRollOutForPreemptiveYieldAtIntersection = false;
 	}
 	// Otherwise, if we are currently *preemptively* yielding, ...
@@ -288,10 +290,11 @@ void UpdateYieldAtIntersectionState(
 		// And, if we should no longer *preemptively* yield, ...
 		if (!bShouldPreemptivelyYieldAtIntersection)
 		{
-			// Reset our allowed roll-out distance and related parameters.
+			// Reset all pre-emptive yield behavior fields.
 			VehicleControlFragment.AllowedRolloutDistanceForPreemptiveYieldAtIntersection = 0.0f;
 			VehicleControlFragment.DistanceAlongLaneAtStartOfYieldLane = 0.0f;
 			VehicleControlFragment.TotalPrevLaneRolloutDistanceForPreemptiveYieldAtIntersection = 0.0f;
+			VehicleControlFragment.TotalRolloutDistanceForPreemptiveYieldAtIntersection = 0.0f;
 			
 			VehicleControlFragment.TimeStartedWaitingAfterPreemptiveYieldRollOut = 0.0f;
 			
