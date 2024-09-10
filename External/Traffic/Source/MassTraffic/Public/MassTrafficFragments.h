@@ -720,10 +720,8 @@ struct MASSTRAFFIC_API FMassTrafficVehicleControlFragment : public FMassFragment
 	// The next lane we should proceed to when exiting this lane 
 	FZoneGraphTrafficLaneData* NextLane = nullptr;
 
-	// The most recent intersection lane that we decided to "ready".
-	// Note:  Vehicles might decide to change which intersection lane they intend to traverse.
-	// So, the ReadiedNextIntersectionLane may change before proceeding into the intersection.
-	// But, vehicles always finalize their choice for their next lane before actually proceeding into the intersection.
+	// The intersection lane that we decided to "ready".
+	// This is the lane through which we will traverse the intersection.
 	FZoneGraphTrafficLaneData* ReadiedNextIntersectionLane = nullptr;	// (See all READYLANE.)
 	
 	int32 PreviousLaneIndex = INDEX_NONE;

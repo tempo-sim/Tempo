@@ -972,18 +972,12 @@ bool ShouldPerformPreemptiveYieldAtIntersection(
 		}
 	}
 
-	const auto& IsTestLaneClear = [&EntityManager, &VehicleControlFragment, &IntersectionLaneData, &CurrentLaneData, MassTrafficSettings](const FZoneGraphTrafficLaneData& TestLane)
+	const auto& IsTestLaneClear = [&EntityManager, &VehicleControlFragment, &CurrentLaneData, &LaneDataBeforeIntersection, MassTrafficSettings](const FZoneGraphTrafficLaneData& TestLane)
 	{
-		if (!ensureMsgf(IntersectionLaneData->Length > 0.0f, TEXT("IntersectionLaneData should have a length greater than zero.")))
-		{
-			// If we have errant lane data, just say it's clear to attempt to keep traffic flowing.
-			return true;
-		}
-
 		if (!VehicleControlFragment.IsPreemptivelyYieldingAtIntersection())
 		{
 			// A pre-emptive yield starts when a vehicle is ready to use the test lane before we are in the intersection.
-			if (TestLane.HasVehiclesReadyToUseIntersectionLane() && CurrentLaneData != IntersectionLaneData)	// (See all READYLANE.)
+			if (CurrentLaneData == LaneDataBeforeIntersection && TestLane.HasVehiclesReadyToUseIntersectionLane())	// (See all READYLANE.)
 			{
 				return false;
 			}

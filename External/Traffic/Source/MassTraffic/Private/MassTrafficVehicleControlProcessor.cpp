@@ -56,6 +56,14 @@ namespace
 			if (VehicleControlFragment.ReadiedNextIntersectionLane != nullptr && VehicleControlFragment.ReadiedNextIntersectionLane != VehicleControlFragment.NextLane)
 			{
 				VehicleControlFragment.ReadiedNextIntersectionLane->DecrementNumVehiclesReadyToUseIntersectionLane();
+
+				// We handle the case for changing readied intersection lanes via proper management of the "ready" count.
+				// However, we disallow changing intersection lanes, once an intersection lane is readied, here.
+				// You can see this restriction in UMassTrafficChooseNextLaneProcessor::Execute.
+				// So, if you hit this ensure, it means something has changed with regards to the lane changing logic.
+				// If changing intersection lanes after they are readied becomes desirable at some point,
+				// make sure you understand all the considerations of doing so.
+				ensureMsgf(false, TEXT("Readied intersection lanes should not change."));
 			}
 			
 			// Increment the "ready" count for the next lane.
