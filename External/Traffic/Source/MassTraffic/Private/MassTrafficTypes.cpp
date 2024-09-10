@@ -15,6 +15,10 @@
 // of everything.
 int8 FZoneGraphTrafficLaneData::MaxAllowedVehiclesReadyToUseIntersectionLane = 2;	// (See all READYLANE.)
 
+// Allow up to 2 vehicles to yield on lanes.
+// Theoretically, there might be more than one vehicle yielding on a lane, if the vehicles are small enough.
+int8 FZoneGraphTrafficLaneData::MaxAllowedYieldingVehiclesOnLane = 2;
+
 FZoneGraphTrafficLaneData::FZoneGraphTrafficLaneData():
 	bIsOpen(true),
 	bIsAboutToClose(false),

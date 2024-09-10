@@ -496,11 +496,6 @@ struct MASSTRAFFIC_API FZoneGraphTrafficLaneData
 	uint8 NumVehiclesOnLane = 0;
 	uint8 NumVehiclesApproachingLane = 0; 
 	uint8 NumReservedVehiclesOnLane = 0; // See all CANTSTOPLANEEXIT.
-
-	// This is a signed int8 on purpose.  The count should never be higher than a few at most.
-	// And, we use the sign as a means to ensure the "reference counting" logic that governs
-	// the NumYieldingVehicles field is working as intended.  That is, it should never go below zero.
-	int8 NumYieldingVehicles = 0;
 	
 	FZoneGraphTrafficLaneData* LeftLane = nullptr; // ..non-merging non-splitting same-direction lane on left 
 	FZoneGraphTrafficLaneData* RightLane = nullptr; // ..non-merging non-splitting same-direction lane on right
@@ -559,9 +554,23 @@ struct MASSTRAFFIC_API FZoneGraphTrafficLaneData
 		return NumVehiclesReadyToUseIntersectionLane > 0;
 	}
 
+	FORCEINLINE void IncrementYieldingVehicles()
+	{
+		++NumYieldingVehicles;
+		ensureMsgf(NumYieldingVehicles <= MaxAllowedYieldingVehiclesOnLane, TEXT("NumYieldingVehicles should never exceed MaxAllowedYieldingVehiclesOnLane.  There is an error in the yield count logic.  Or, there is an unusually large number of (small?) vehicles yielding on this lane."));
+	}
+	
+	FORCEINLINE void DecrementYieldingVehicles()
+	{
+		--NumYieldingVehicles;
+		ensureMsgf(NumYieldingVehicles >= 0, TEXT("NumYieldingVehicles should never go below zero.  There is an error in the yield count logic."));
+	}
+
 	FORCEINLINE bool HasYieldingVehicles() const
 	{
 		ensureMsgf(NumYieldingVehicles >= 0, TEXT("NumYieldingVehicles should never go below zero.  There is an error in the yield count logic."));
+		ensureMsgf(NumYieldingVehicles <= MaxAllowedYieldingVehiclesOnLane, TEXT("NumYieldingVehicles should never exceed MaxAllowedYieldingVehiclesOnLane.  There is an error in the yield count logic.  Or, there is an unusually large number of (small?) vehicles yielding on this lane."));
+		
 		return NumYieldingVehicles > 0;
 	}
 
@@ -603,6 +612,16 @@ private:
 	// If the number of vehicles ready to use an intersection lane exceeds this number,
 	// we'll hit a bounds-checking ensure.
 	static int8 MaxAllowedVehiclesReadyToUseIntersectionLane;	// (See all READYLANE.)
+
+	// This is a signed int8 on purpose.  The count should never be higher than a few at most.
+	// And, we use the sign as a means to ensure the "reference counting" logic that governs
+	// the NumYieldingVehicles field is working as intended.  That is, it should never go out of bounds.
+	int8 NumYieldingVehicles = 0;
+	
+	// Used to tighten the upper bound on NumYieldingVehicles.
+	// If the number of vehicles yielding on this lane exceeds this number,
+	// we'll hit a bounds-checking ensure.
+	static int8 MaxAllowedYieldingVehiclesOnLane;
 };
 
 /**

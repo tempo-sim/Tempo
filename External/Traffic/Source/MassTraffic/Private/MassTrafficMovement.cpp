@@ -318,7 +318,7 @@ void UpdateYieldAtIntersectionState(
 		// Increase the lane's yield count.
 		if (CurrentLaneData != nullptr)
 		{
-			++CurrentLaneData->NumYieldingVehicles;
+			CurrentLaneData->IncrementYieldingVehicles();
 		}
 
 		// Store a reference to the lane where we started to yield.
@@ -335,11 +335,11 @@ void UpdateYieldAtIntersectionState(
 		// to the new lane.
 		if (VehicleControlFragment.YieldAtIntersectionLane != nullptr && VehicleControlFragment.YieldAtIntersectionLane != CurrentLaneData)
 		{
-			--VehicleControlFragment.YieldAtIntersectionLane->NumYieldingVehicles;
+			VehicleControlFragment.YieldAtIntersectionLane->DecrementYieldingVehicles();
 
 			if (CurrentLaneData != nullptr)
 			{
-				++CurrentLaneData->NumYieldingVehicles;
+				CurrentLaneData->IncrementYieldingVehicles();
 			}
 
 			// Update our reference to the lane in which we are yielding.
@@ -352,19 +352,12 @@ void UpdateYieldAtIntersectionState(
 			// Decrease the lane's yield count.
 			if (CurrentLaneData != nullptr)
 			{
-				--CurrentLaneData->NumYieldingVehicles;
+				CurrentLaneData->DecrementYieldingVehicles();
 			}
 
 			// Clear the reference to the lane in which we were yielding.
 			VehicleControlFragment.YieldAtIntersectionLane = nullptr;
 		}
-	}
-
-	// Ensure that our "reference counting" logic that governs the NumYieldingVehicles field of the lanes stays within bounds.
-	if (CurrentLaneData != nullptr)
-	{
-		ensureMsgf(CurrentLaneData->NumYieldingVehicles >= 0, TEXT("NumYieldingVehicles should never go below zero.  There is an error in the yield count logic."));
-		ensureMsgf(CurrentLaneData->NumYieldingVehicles < TNumericLimits<int8>::Max(), TEXT("NumYieldingVehicles should never reach the max value of an int8.  There is an error in the yield count logic.  Or, there is an unusually large number of vehicles yielding on this lane."));
 	}
 }
 
