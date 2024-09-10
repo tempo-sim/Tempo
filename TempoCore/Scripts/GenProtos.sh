@@ -209,14 +209,16 @@ fi
 eval "$DOTNET" "./Binaries/DotNET/UnrealBuildTool/UnrealBuildTool.dll" -Mode=JsonExport "$TARGET_NAME" "$TARGET_PLATFORM" "$TARGET_CONFIG" -Project="$PROJECT_FILE" -OutputFile="$TEMP/TempoModules.json" -NoMutex > /dev/null 2>&1
 JSON_DATA=$(cat "$TEMP/TempoModules.json")
 # Extract the public and private dependencies of all C++ project modules.
-FILTERED_MODULES=$(echo "$JSON_DATA" | jq --arg project_root "$PROJECT_ROOT" '.Modules | to_entries[] | select(.value.Type == "CPlusPlus") | select(.value.Directory | startswith($project_root)) | {(.key): {Directory: .value.Directory, PublicDependencyModules: .value.PublicDependencyModules, PrivateDependencyModules: .value.PrivateDependencyModules}}')
+FILTERED_MODULES=$(echo "$JSON_DATA" | jq --arg project_root "$PROJECT_ROOT" 'def normalize_path: gsub("\\\\"; "/") | if startswith("/") then . else "/" + . end; .Modules | to_entries[] | select(.value.Type == "CPlusPlus") | select((.value.Directory | normalize_path) | startswith($project_root | normalize_path)) | {(.key): {Directory: .value.Directory, PublicDependencyModules: .value.PublicDependencyModules, PrivateDependencyModules: .value.PrivateDependencyModules}}')
 MODULE_INFO=$(echo "$FILTERED_MODULES" | jq -s 'add')
 
 # Then iterate through all the modules to:
 # - Copy all protos to a temp source directory - one per module!
 # - Check that no module names are repeated
 # - Add a package specifier for the module to every proto (prepend it to any existing package)
-echo "$MODULE_INFO" | jq -r -c 'to_entries[] | .key  + " " + .value.Directory' | while read MODULE_NAME MODULE_PATH; do
+echo "$MODULE_INFO" | jq -r -c 'to_entries[] | [.key, (.value.Directory // "")] | @tsv' | while IFS=$'\t' read -r MODULE_NAME MODULE_PATH; do
+  # Remove surrounding single quotes and replace any \\ with /
+  MODULE_PATH=$(echo "$MODULE_PATH" | sed 's/^"//; s/"$//; s/\\\\/\//g')
   MODULE_SRC_TEMP_DIR="$SRC_TEMP_DIR/$MODULE_NAME"
   if [ -d "$MODULE_SRC_TEMP_DIR" ]; then
     echo "Multiple modules named $MODULE_NAME found. Please rename one."
@@ -328,12 +330,12 @@ GET_MODULE_INCLUDES() {
 
 # Lastly, iterate over all the modules again to
 # - Generate the protos for the module (from the copy in the temporary source directory we created)
-echo "$MODULE_INFO" | jq -r -c 'to_entries[] | .key  + " " + .value.Directory' | while read MODULE_NAME MODULE_PATH; do
-  if echo "$MODULE_INFO" | jq --arg module_name "$MODULE_NAME" -e '.[$module_name]' > /dev/null; then
-    MODULE_INCLUDES_TEMP_DIR="$INCLUDES_TEMP_DIR/$MODULE_NAME"
-    GET_MODULE_INCLUDES "$MODULE_NAME" "$MODULE_INCLUDES_TEMP_DIR"
-    GEN_MODULE_PROTOS "$MODULE_INCLUDES_TEMP_DIR" "$MODULE_PATH" "$MODULE_NAME"
-  fi
+echo "$MODULE_INFO" | jq -r -c 'to_entries[] | [.key, (.value.Directory // "")] | @tsv' | while IFS=$'\t' read -r MODULE_NAME MODULE_PATH; do
+  # Remove surrounding single quotes and replace any \\ with /
+  MODULE_PATH=$(echo "$MODULE_PATH" | sed 's/^"//; s/"$//; s/\\\\/\//g')
+  MODULE_INCLUDES_TEMP_DIR="$INCLUDES_TEMP_DIR/$MODULE_NAME"
+  GET_MODULE_INCLUDES "$MODULE_NAME" "$MODULE_INCLUDES_TEMP_DIR"
+  GEN_MODULE_PROTOS "$MODULE_INCLUDES_TEMP_DIR" "$MODULE_PATH" "$MODULE_NAME"
 done
 
 rm -rf "$TEMP"
