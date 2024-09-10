@@ -737,7 +737,7 @@ void DrawDebugMassTrafficLaneData(const UMassTrafficSubsystem& MassTrafficSubsys
 		
 		DrawDebugDirectionalArrow(ZoneGraphSubsystem->GetWorld(), LaneStart, LaneEnd, 100000.0f, LaneColor, false, LifeTime, 0, 10.0f);
 
-		if (GMassTrafficDebugLaneData >= 2)	// 2 = Same as option 1, plus spheres to indicate turn state and bIsVehicleReadyToUseLane
+		if (GMassTrafficDebugLaneData >= 2)	// 2 = Same as option 1, plus spheres to indicate turn state and HasVehiclesReadyToUseIntersectionLane()
 		{
 			FColor LaneTurnStateColor = FColor::Green;
 
@@ -752,7 +752,7 @@ void DrawDebugMassTrafficLaneData(const UMassTrafficSubsystem& MassTrafficSubsys
 
 			DrawDebugSphere(ZoneGraphSubsystem->GetWorld(), LaneEnd + FVector(0.0f, 0.0f, ZOffset), 100.0f, 32, LaneTurnStateColor, false, LifeTime, 0, 10.0f);
 
-			if (LaneData.bIsVehicleReadyToUseLane)
+			if (LaneData.HasVehiclesReadyToUseIntersectionLane())	// (See all READYLANE.)
 			{
 				constexpr float ReadyToUseLaneSphereOffset = 10.0f;
 				const FVector ReadyToUseLaneSphereLocation = LaneEnd - LaneDir * ReadyToUseLaneSphereOffset + FVector(0.0f, 0.0f, ZOffset);

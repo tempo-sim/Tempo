@@ -9,6 +9,12 @@
 #include "MassEntityView.h"
 #include "MassZoneGraphNavigationFragments.h"
 
+// Theoretically, it's possible for more than one small vehicle to get close enough to the intersection to ready it.
+// So, we'll allow a max of 2 vehicles to ready intersection lanes.
+// However, in practice, NumVehiclesReadyToUseIntersectionLane never goes above one with the current configuration
+// of everything.
+int8 FZoneGraphTrafficLaneData::MaxAllowedVehiclesReadyToUseIntersectionLane = 2;	// (See all READYLANE.)
+
 FZoneGraphTrafficLaneData::FZoneGraphTrafficLaneData():
 	bIsOpen(true),
 	bIsAboutToClose(false),
@@ -18,7 +24,6 @@ FZoneGraphTrafficLaneData::FZoneGraphTrafficLaneData():
 	bHasTransverseLaneAdjacency(false),
 	bIsDownstreamFromIntersection(false),
 	bIsStoppedVehicleInPreviousLaneOverlappingThisLane(false),
-	bIsVehicleReadyToUseLane(false),
 	MaxDensity(1.0f)
 {
 }

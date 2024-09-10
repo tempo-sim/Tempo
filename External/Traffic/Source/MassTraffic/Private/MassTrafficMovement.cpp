@@ -437,12 +437,16 @@ void MoveVehicleToNextLane(
 	// Capture new lane fragment pointer before we clear it
 	FZoneGraphTrafficLaneData& NewCurrentLane = *VehicleControlFragment.NextLane;
 
-
-	// We are moving onto a new lane -
-	// This vehicle MIGHT have set this flag on the new lane. Assume it did, and clear it. If a different vehicle
-	// has also set this flag on this same lane, it will set it again right away. (See all READYLANE.)
-	NewCurrentLane.bIsVehicleReadyToUseLane = false;
-
+	// If our next lane is an intersection, we decrement the "ready" count
+	// that was incremented in SetIsVehicleReadyToUseNextIntersectionLane.
+	if (NewCurrentLane.ConstData.bIsIntersectionLane)	// (See all READYLANE.)
+	{
+		ensureMsgf(&NewCurrentLane == VehicleControlFragment.ReadiedNextIntersectionLane, TEXT("Should be decrementing the \"ready\" count of the same intersection lane that we readied."));
+		NewCurrentLane.DecrementNumVehiclesReadyToUseIntersectionLane();
+		
+		// Clear our readied next intersection lane.
+        VehicleControlFragment.ReadiedNextIntersectionLane = nullptr;
+	}
 	
 	// If a vehicle that couldn't stop at it's lane exit has reserved itself on this lane, clear the reservation,
 	// since that vehicle is now actually on the lane. See all CANTSTOPLANEEXIT.

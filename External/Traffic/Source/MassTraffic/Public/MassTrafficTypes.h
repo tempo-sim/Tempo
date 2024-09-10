@@ -474,7 +474,6 @@ struct MASSTRAFFIC_API FZoneGraphTrafficLaneData
 	bool bHasTransverseLaneAdjacency : 1;
 	bool bIsDownstreamFromIntersection : 1;
 	bool bIsStoppedVehicleInPreviousLaneOverlappingThisLane : 1; // (See all CROSSWALKOVERLAP.)
-	bool bIsVehicleReadyToUseLane : 1; // (See all READYLANE.)
 
 	UE::MassTraffic::TFraction<true, uint8> FractionUntilClosed;
 
@@ -540,6 +539,26 @@ struct MASSTRAFFIC_API FZoneGraphTrafficLaneData
 
 	bool TryGetDistanceFromStartOfLaneToTailVehicle(const FMassEntityManager& EntityManager, float& OutDistanceToTailVehicle) const;
 
+	FORCEINLINE void IncrementNumVehiclesReadyToUseIntersectionLane()	// (See all READYLANE.)
+	{
+		++NumVehiclesReadyToUseIntersectionLane;
+		ensureMsgf(NumVehiclesReadyToUseIntersectionLane <= MaxAllowedVehiclesReadyToUseIntersectionLane, TEXT("NumVehiclesReadyToUseIntersectionLane should never exceed MaxAllowedVehiclesReadyToUseIntersectionLane.  There is an error in the \"ready\" count logic.  Or, there is an unusually large number of (small?) vehicles ready to use this lane."));
+	}
+	
+	FORCEINLINE void DecrementNumVehiclesReadyToUseIntersectionLane()	// (See all READYLANE.)
+	{
+		--NumVehiclesReadyToUseIntersectionLane;
+		ensureMsgf(NumVehiclesReadyToUseIntersectionLane >= 0, TEXT("NumVehiclesReadyToUseIntersectionLane should never go below zero.  There is an error in the \"ready\" count logic."));
+	}
+
+	FORCEINLINE bool HasVehiclesReadyToUseIntersectionLane() const	// (See all READYLANE.)
+	{
+		ensureMsgf(NumVehiclesReadyToUseIntersectionLane >= 0, TEXT("NumVehiclesReadyToUseIntersectionLane should never go below zero.  There is an error in the \"ready\" count logic."));
+		ensureMsgf(NumVehiclesReadyToUseIntersectionLane <= MaxAllowedVehiclesReadyToUseIntersectionLane, TEXT("NumVehiclesReadyToUseIntersectionLane should never exceed MaxAllowedVehiclesReadyToUseIntersectionLane.  There is an error in the \"ready\" count logic.  Or, there is an unusually large number of (small?) vehicles ready to use this lane."));
+		
+		return NumVehiclesReadyToUseIntersectionLane > 0;
+	}
+
 	FORCEINLINE bool HasYieldingVehicles() const
 	{
 		ensureMsgf(NumYieldingVehicles >= 0, TEXT("NumYieldingVehicles should never go below zero.  There is an error in the yield count logic."));
@@ -573,6 +592,17 @@ struct MASSTRAFFIC_API FZoneGraphTrafficLaneData
 private:
 
 	FFloat16 DownstreamFlowDensity = 0.0f;
+
+	// This is a signed int8 on purpose.  The count should never be higher than the max of an int8.
+	// And, we use the sign as a means to ensure the "reference counting" logic that governs
+	// the NumVehiclesReadyToUseIntersectionLane field is working as intended.
+	// That is, it should never go out of bounds.
+	int8 NumVehiclesReadyToUseIntersectionLane = 0; // (See all READYLANE.)
+
+	// Used to tighten the upper bound on NumVehiclesReadyToUseIntersectionLane.
+	// If the number of vehicles ready to use an intersection lane exceeds this number,
+	// we'll hit a bounds-checking ensure.
+	static int8 MaxAllowedVehiclesReadyToUseIntersectionLane;	// (See all READYLANE.)
 };
 
 /**

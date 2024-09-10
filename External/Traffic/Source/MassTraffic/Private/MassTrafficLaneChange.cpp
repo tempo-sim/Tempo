@@ -983,7 +983,7 @@ bool ShouldPerformPreemptiveYieldAtIntersection(
 		if (!VehicleControlFragment.IsPreemptivelyYieldingAtIntersection())
 		{
 			// A pre-emptive yield starts when a vehicle is ready to use the test lane before we are in the intersection.
-			if (TestLane.bIsVehicleReadyToUseLane && CurrentLaneData != IntersectionLaneData)
+			if (TestLane.HasVehiclesReadyToUseIntersectionLane() && CurrentLaneData != IntersectionLaneData)	// (See all READYLANE.)
 			{
 				return false;
 			}

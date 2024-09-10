@@ -182,7 +182,7 @@ namespace
 
 		for (const FZoneGraphTrafficLaneData* VehicleLane : CurrentPeriod.VehicleLanes)
 		{
-			if (VehicleLane->bIsVehicleReadyToUseLane) // (See all READYLANE.)
+			if (VehicleLane->HasVehiclesReadyToUseIntersectionLane()) // (See all READYLANE.)
 			{
 				return true;
 			}
@@ -199,7 +199,7 @@ namespace
 		int32 Count = 0;
 		for (const FZoneGraphTrafficLaneData* TrafficLaneData : CurrentPeriod.VehicleLanes)
 		{
-			if (TrafficLaneData->bIsVehicleReadyToUseLane) // (See all READYLANE.)
+			if (TrafficLaneData->HasVehiclesReadyToUseIntersectionLane()) // (See all READYLANE.)
 			{
 				++Count;
 			}
@@ -358,7 +358,7 @@ namespace
 		
 		for (const FZoneGraphTrafficLaneData* VehicleLane : CurrentPeriod.VehicleLanes)
 		{
-			const float Thickness = (VehicleLane->bIsVehicleReadyToUseLane ? 20.0f : 5.0f); // (See all READYLANE.)
+			const float Thickness = (VehicleLane->HasVehiclesReadyToUseIntersectionLane() ? 20.0f : 5.0f); // (See all READYLANE.)
 			
 			FColor Color = FColor::White;
 			if (VehicleLane->bIsOpen && !VehicleLane->bIsAboutToClose)
@@ -640,7 +640,7 @@ void UMassTrafficUpdateIntersectionsProcessor::Execute(FMassEntityManager& Entit
 						bool bAreVehicleLanesInThisPeriodOpenAndReady = false;
 						for (const FZoneGraphTrafficLaneData* IntersectionTrafficLaneData : CurrentPeriod.VehicleLanes)
 						{
-							if (IntersectionTrafficLaneData->bIsOpen && IntersectionTrafficLaneData->bIsVehicleReadyToUseLane) // (See all READYLANE.)
+							if (IntersectionTrafficLaneData->bIsOpen && IntersectionTrafficLaneData->HasVehiclesReadyToUseIntersectionLane()) // (See all READYLANE.)
 							{
 								bAreVehicleLanesInThisPeriodOpenAndReady = true;
 								break;

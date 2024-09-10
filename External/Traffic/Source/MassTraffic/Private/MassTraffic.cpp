@@ -159,7 +159,7 @@ FAutoConsoleVariableRef CMassTrafficDebugLaneData(
 	TEXT("MassTraffic lane data debug mode.\n")
 	TEXT("0 = Off (default).\n")
 	TEXT("1 = Debug lane data ([prev], current -> iterate left and right -> next, [next, next -> next], current splitting and merging).\n")
-	TEXT("2 = Same as option 1, plus spheres to indicate turn state and bIsVehicleReadyToUseLane.\n"),
+	TEXT("2 = Same as option 1, plus spheres to indicate turn state and HasVehiclesReadyToUseIntersectionLane().\n"),
 	ECVF_Cheat
 	);
 

@@ -49,7 +49,21 @@ namespace
 			return;
 		}
 
-		VehicleControlFragment.NextLane->bIsVehicleReadyToUseLane = !bVehicleHasNoRoom; // (See all READYLANE.)
+		// If there's room on the intersection lane, and we either haven't readied an intersection lane, or we're attempting to ready another intersection lane, ...
+		if (!bVehicleHasNoRoom && (VehicleControlFragment.ReadiedNextIntersectionLane == nullptr || VehicleControlFragment.NextLane != VehicleControlFragment.ReadiedNextIntersectionLane))	// (See all READYLANE.)
+		{
+			// If we previously readied a different intersection lane, decrement the "ready" count on that lane.
+			if (VehicleControlFragment.ReadiedNextIntersectionLane != nullptr && VehicleControlFragment.ReadiedNextIntersectionLane != VehicleControlFragment.NextLane)
+			{
+				VehicleControlFragment.ReadiedNextIntersectionLane->DecrementNumVehiclesReadyToUseIntersectionLane();
+			}
+			
+			// Increment the "ready" count for the next lane.
+			VehicleControlFragment.NextLane->IncrementNumVehiclesReadyToUseIntersectionLane();
+
+			// Keep track of our currently readied lane.
+			VehicleControlFragment.ReadiedNextIntersectionLane = VehicleControlFragment.NextLane;
+		}
 	}
 
 	
