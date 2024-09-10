@@ -3,8 +3,6 @@
 
 #include "MassTrafficVehicleControlProcessor.h"
 
-#include <functional>
-
 #include "MassTraffic.h"
 #include "MassTrafficFragments.h"
 #include "MassTrafficInterpolation.h"
@@ -130,7 +128,7 @@ namespace
 		--VehicleControlFragment.NextLane->NumReservedVehiclesOnLane;
 	}
 
-	void ProcessYieldAtIntersectionLogic(UMassTrafficSubsystem& MassTrafficSubsystem, const FMassEntityManager& EntityManager, FMassTrafficVehicleControlFragment& VehicleControlFragment, const FMassZoneGraphLaneLocationFragment& LaneLocationFragment, const FAgentRadiusFragment& RadiusFragment, std::function<void()> PerformYieldActionFunc)
+	void ProcessYieldAtIntersectionLogic(UMassTrafficSubsystem& MassTrafficSubsystem, const FMassEntityManager& EntityManager, FMassTrafficVehicleControlFragment& VehicleControlFragment, const FMassZoneGraphLaneLocationFragment& LaneLocationFragment, const FAgentRadiusFragment& RadiusFragment, TFunction<void()> PerformYieldActionFunc)
 	{
 		bool bHasAnotherVehicleEnteredRelevantLaneAfterPreemptiveYieldRollOut = false;
 		const bool bShouldPreemptivelyYieldAtIntersection = UE::MassTraffic::ShouldPerformPreemptiveYieldAtIntersection(MassTrafficSubsystem, EntityManager, VehicleControlFragment, LaneLocationFragment, RadiusFragment, bHasAnotherVehicleEnteredRelevantLaneAfterPreemptiveYieldRollOut);
@@ -140,8 +138,8 @@ namespace
 	
 		UE::MassTraffic::UpdateYieldAtIntersectionState(MassTrafficSubsystem, VehicleControlFragment, LaneLocationFragment.LaneHandle, LaneLocationFragment.DistanceAlongLane, bShouldPreemptivelyYieldAtIntersection, bShouldReactivelyYieldAtIntersection, bHasAnotherVehicleEnteredRelevantLaneAfterPreemptiveYieldRollOut, bShouldGiveOpportunityForTurningVehiclesToReactivelyYieldAtIntersection);
 
-		// If we're reactively yielding, then we should always perform our yield action.  However, if we're pre-emptively yielding, then only perform our yield action once we've rolled-out as far as we're allowed.
-		if (bShouldReactivelyYieldAtIntersection || (VehicleControlFragment.IsPreemptivelyYieldingAtIntersection() && VehicleControlFragment.TotalRolloutDistanceForPreemptiveYieldAtIntersection > VehicleControlFragment.AllowedRolloutDistanceForPreemptiveYieldAtIntersection))
+		// If we're reactively yielding, then we should always perform our yield action.  However, if we're pre-emptively yielding, then only perform our yield action once we've rolled-out all the way.
+		if (bShouldReactivelyYieldAtIntersection || (VehicleControlFragment.IsPreemptivelyYieldingAtIntersection() && VehicleControlFragment.TotalRolloutDistanceForPreemptiveYieldAtIntersection > VehicleControlFragment.TargetRolloutDistanceForPreemptiveYieldAtIntersection))
 		{
 			PerformYieldActionFunc();
 		}

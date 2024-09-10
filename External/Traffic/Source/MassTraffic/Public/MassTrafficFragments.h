@@ -694,7 +694,7 @@ struct MASSTRAFFIC_API FMassTrafficVehicleControlFragment : public FMassFragment
 	FZoneGraphTrafficLaneData* YieldAtIntersectionLane = nullptr;
 
 	// Fields used for pre-emptive yields.
-	float AllowedRolloutDistanceForPreemptiveYieldAtIntersection = 0.0f;
+	float TargetRolloutDistanceForPreemptiveYieldAtIntersection = 0.0f;
 	float DistanceAlongLaneAtStartOfYieldLane = 0.0f;
 	float TotalPrevLaneRolloutDistanceForPreemptiveYieldAtIntersection = 0.0f;
 	float TotalRolloutDistanceForPreemptiveYieldAtIntersection = 0.0f;
@@ -732,7 +732,7 @@ struct MASSTRAFFIC_API FMassTrafficVehicleControlFragment : public FMassFragment
 	bool IsYieldingAtIntersection() const { return YieldAtIntersectionLane != nullptr; }
 
 	// Functions used for pre-emptive yields.
-	bool IsPreemptivelyYieldingAtIntersection() const { return IsYieldingAtIntersection() && AllowedRolloutDistanceForPreemptiveYieldAtIntersection > 0.0f; }
+	bool IsPreemptivelyYieldingAtIntersection() const { return IsYieldingAtIntersection() && TargetRolloutDistanceForPreemptiveYieldAtIntersection > 0.0f; }
 	bool HasStartedWaitingAfterRollOutForPreemptiveYieldAtIntersection() const { return IsPreemptivelyYieldingAtIntersection() && TimeStartedWaitingAfterPreemptiveYieldRollOut > 0.0f; }
 	bool HasFinishedWaitingAfterRollOutForPreemptiveYieldAtIntersection() const { return bHasFinishedWaitingAfterRollOutForPreemptiveYieldAtIntersection; }
 

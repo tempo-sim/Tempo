@@ -225,8 +225,8 @@ void UpdateYieldAtIntersectionState(
 	// If we should start *preemptively* yielding, ...
 	if (bShouldPreemptivelyYieldAtIntersection && !VehicleControlFragment.IsPreemptivelyYieldingAtIntersection())
 	{
-		// Determine our allowed roll-out distance and mark where we are on our current lane.
-		VehicleControlFragment.AllowedRolloutDistanceForPreemptiveYieldAtIntersection = FMath::RandRange(MassTrafficSettings->MinPreemptiveYieldAtIntersectionRolloutDistance, MassTrafficSettings->MaxPreemptiveYieldAtIntersectionRolloutDistance);
+		// Determine our target roll-out distance and mark where we are on our current lane.
+		VehicleControlFragment.TargetRolloutDistanceForPreemptiveYieldAtIntersection = FMath::RandRange(MassTrafficSettings->MinPreemptiveYieldAtIntersectionRolloutDistance, MassTrafficSettings->MaxPreemptiveYieldAtIntersectionRolloutDistance);
 		VehicleControlFragment.DistanceAlongLaneAtStartOfYieldLane = DistanceAlongLane;
 
 		// Clear all other pre-emptive yield behavior fields.
@@ -254,13 +254,15 @@ void UpdateYieldAtIntersectionState(
 		if (!VehicleControlFragment.HasFinishedWaitingAfterRollOutForPreemptiveYieldAtIntersection())
 		{
 			const UWorld* World = MassTrafficSubsystem.GetWorld();
+			ensureMsgf(World != nullptr, TEXT("Couldn't access World in UpdateYieldAtIntersectionState.  Assuming CurrentWorldTimeSeconds is 0.0f."));
+			
 			const float CurrentWorldTimeSeconds = World != nullptr ? World->GetTimeSeconds() : 0.0f;
 
 			// If we haven't started waiting yet, ...
 			if (!VehicleControlFragment.HasStartedWaitingAfterRollOutForPreemptiveYieldAtIntersection())
 			{
-				// Wait until we've rolled-out as far as we're allowed, ...
-				if (VehicleControlFragment.TotalRolloutDistanceForPreemptiveYieldAtIntersection > VehicleControlFragment.AllowedRolloutDistanceForPreemptiveYieldAtIntersection)
+				// Wait until we've rolled-out all the way, ...
+				if (VehicleControlFragment.TotalRolloutDistanceForPreemptiveYieldAtIntersection > VehicleControlFragment.TargetRolloutDistanceForPreemptiveYieldAtIntersection)
 				{
 					// Then, mark the time that we started waiting after our roll-out.
 					// We use this to make sure we don't wait too long (possibly indefinitely)
@@ -292,7 +294,7 @@ void UpdateYieldAtIntersectionState(
 		if (!bShouldPreemptivelyYieldAtIntersection)
 		{
 			// Reset all pre-emptive yield behavior fields.
-			VehicleControlFragment.AllowedRolloutDistanceForPreemptiveYieldAtIntersection = 0.0f;
+			VehicleControlFragment.TargetRolloutDistanceForPreemptiveYieldAtIntersection = 0.0f;
 			VehicleControlFragment.DistanceAlongLaneAtStartOfYieldLane = 0.0f;
 			VehicleControlFragment.TotalPrevLaneRolloutDistanceForPreemptiveYieldAtIntersection = 0.0f;
 			VehicleControlFragment.TotalRolloutDistanceForPreemptiveYieldAtIntersection = 0.0f;

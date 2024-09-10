@@ -3,8 +3,6 @@
 
 #include "MassTrafficLaneChange.h"
 
-#include <functional>
-
 #include "MassTrafficMovement.h"
 #include "MassTrafficUtils.h"
 #include "MassTrafficDebugHelpers.h"
@@ -738,7 +736,7 @@ bool CheckNextVehicle(const FMassEntityHandle Entity, const FMassEntityHandle Ne
 bool ShouldYieldAtIntersection_Internal(
 	const FZoneGraphTrafficLaneData& CurrentLaneData,
 	const FZoneGraphTrafficLaneData& PrevLaneData,
-	std::function<bool(const FZoneGraphTrafficLaneData&)> IsTestLaneClearFunc,
+	const TFunction<bool(const FZoneGraphTrafficLaneData&)>& IsTestLaneClearFunc,
 	const bool bConsiderYieldForGoingStraight = true,
 	const bool bConsiderYieldForLeftTurns = true,
 	const bool bConsiderYieldForRightTurns = true)
@@ -893,7 +891,7 @@ bool ShouldPerformPreemptiveYieldAtIntersection(
 	}
 	
 	const FZoneGraphTrafficLaneData* CurrentLaneData = MassTrafficSubsystem.GetTrafficLaneData(LaneLocationFragment.LaneHandle);
-	if (CurrentLaneData == nullptr)
+	if (!ensureMsgf(CurrentLaneData != nullptr, TEXT("Can't access CurrentLaneData in ShouldPerformPreemptiveYieldAtIntersection.  Returning false.")))
 	{
 		return false;
 	}
@@ -977,19 +975,7 @@ bool ShouldPerformPreemptiveYieldAtIntersection(
 		if (!VehicleControlFragment.IsPreemptivelyYieldingAtIntersection())
 		{
 			// A pre-emptive yield starts when a vehicle is ready to use the test lane before we are in the intersection.
-			if (CurrentLaneData == LaneDataBeforeIntersection && TestLane.HasVehiclesReadyToUseIntersectionLane())	// (See all READYLANE.)
-			{
-				return false;
-			}
-		}
-
-		// All the logic below this applies only once we've started our pre-emptive yield.
-		// So, if we haven't started our pre-emptive yield according to the logic above,
-		// the lane is considered clear from the perspective of a pre-emptive yield.
-		// Reactive yield logic will catch everything else.
-		if (!VehicleControlFragment.IsPreemptivelyYieldingAtIntersection())
-		{
-			return true;
+			return !(CurrentLaneData == LaneDataBeforeIntersection && TestLane.HasVehiclesReadyToUseIntersectionLane());	// (See all READYLANE.)
 		}
 		
 		// Once in a pre-emptive yield scenario,
@@ -1026,16 +1012,11 @@ bool ShouldPerformPreemptiveYieldAtIntersection(
 				// just say it's clear to keep traffic flowing.
 				return true;
 			}
-		
-			float NormalizedYieldResumeLaneDistance = MassTrafficSettings->NormalizedYieldResumeLaneDistance_Straight;
-			if (TestLane.bTurnsLeft)
-			{
-				NormalizedYieldResumeLaneDistance = MassTrafficSettings->NormalizedYieldResumeLaneDistance_Left;
-			}
-			else if (TestLane.bTurnsRight)
-			{
-				NormalizedYieldResumeLaneDistance = MassTrafficSettings->NormalizedYieldResumeLaneDistance_Right;
-			}
+
+			const float NormalizedYieldResumeLaneDistance =
+				TestLane.bTurnsLeft ? MassTrafficSettings->NormalizedYieldResumeLaneDistance_Left :
+				TestLane.bTurnsRight ? MassTrafficSettings->NormalizedYieldResumeLaneDistance_Right :
+				MassTrafficSettings->NormalizedYieldResumeLaneDistance_Straight;
 		
 			if (NormalizedDistanceAlongTestLane < NormalizedYieldResumeLaneDistance)
 			{
@@ -1046,6 +1027,10 @@ bool ShouldPerformPreemptiveYieldAtIntersection(
 		return true;
 	};
 
+	// Note:  For pre-emptive yields, turning vehicles give the right of way to vehicles that are going straight.
+	// So, we don't consider pre-emptively yielding when going straight.
+	// However, vehicles going straight can reactively yield
+	// after an opportunity is given for turning vehicles to reactively yield first.
 	const bool bShouldYieldAtIntersection = ShouldYieldAtIntersection_Internal(*IntersectionLaneData, *LaneDataBeforeIntersection, IsTestLaneClear, false);
 
 	// If we are pre-emptively yielding, ...
@@ -1154,26 +1139,16 @@ bool ShouldPerformReactiveYieldAtIntersection(
 				// just say it's clear to keep traffic flowing.
 				return true;
 			}
-			
-			float NormalizedYieldCutoffLaneDistance = MassTrafficSettings->NormalizedYieldCutoffLaneDistance_Straight;
-			if (CurrentLaneData->bTurnsLeft)
-			{
-				NormalizedYieldCutoffLaneDistance = MassTrafficSettings->NormalizedYieldCutoffLaneDistance_Left;
-			}
-			else if (CurrentLaneData->bTurnsRight)
-			{
-				NormalizedYieldCutoffLaneDistance = MassTrafficSettings->NormalizedYieldCutoffLaneDistance_Right;
-			}
 
-			float NormalizedYieldResumeLaneDistance = MassTrafficSettings->NormalizedYieldResumeLaneDistance_Straight;
-			if (TestLane.bTurnsLeft)
-			{
-				NormalizedYieldResumeLaneDistance = MassTrafficSettings->NormalizedYieldResumeLaneDistance_Left;
-			}
-			else if (TestLane.bTurnsRight)
-			{
-				NormalizedYieldResumeLaneDistance = MassTrafficSettings->NormalizedYieldResumeLaneDistance_Right;
-			}
+			const float NormalizedYieldCutoffLaneDistance =
+				TestLane.bTurnsLeft ? MassTrafficSettings->NormalizedYieldCutoffLaneDistance_Left :
+				TestLane.bTurnsRight ? MassTrafficSettings->NormalizedYieldCutoffLaneDistance_Right :
+				MassTrafficSettings->NormalizedYieldCutoffLaneDistance_Straight;
+
+			const float NormalizedYieldResumeLaneDistance =
+				TestLane.bTurnsLeft ? MassTrafficSettings->NormalizedYieldResumeLaneDistance_Left :
+				TestLane.bTurnsRight ? MassTrafficSettings->NormalizedYieldResumeLaneDistance_Right :
+				MassTrafficSettings->NormalizedYieldResumeLaneDistance_Straight;
 
 			if (NormalizedDistanceAlongCurrentLane < NormalizedYieldCutoffLaneDistance && NormalizedDistanceAlongTestLane < NormalizedYieldResumeLaneDistance)
 			{
