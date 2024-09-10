@@ -25,8 +25,8 @@ struct ConversionFactor;
 
 template <> struct ConversionFactor<CM2M> { static constexpr double value = 0.01; };
 template <> struct ConversionFactor<M2CM> { static constexpr double value = 100.0; };
-template <> struct ConversionFactor<Rad2Deg> { static constexpr double value = 180.0 / M_PI; };
-template <> struct ConversionFactor<Deg2Rad> { static constexpr double value = M_PI / 180.0; };
+template <> struct ConversionFactor<Rad2Deg> { static constexpr double value = 180.0 / UE_PI; };
+template <> struct ConversionFactor<Deg2Rad> { static constexpr double value = UE_PI / 180.0; };
 
 template <EUnitConversion UnitConversion = UC_NONE, EHandednessConversion HandednessConversion = HC_NONE>
 struct QuantityConverter
