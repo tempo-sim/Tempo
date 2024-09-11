@@ -95,7 +95,7 @@ void UMassTrafficVehiclePhysicsProcessor::ConfigureQueries()
 float GetSubstepTime(float UseDelta)
 {
 	float FrameRate = 1.f;
-	uint32 MaxSubSteps = 1;
+	int32 MaxSubSteps = 1;
 
 	UPhysicsSettings * PhysSetting = UPhysicsSettings::Get();
 	FrameRate = PhysSetting->MaxSubstepDeltaTime;
@@ -106,7 +106,7 @@ float GetSubstepTime(float UseDelta)
 	//Figure out how big dt to make for desired framerate
 	const float DeltaSeconds = FMath::Min(UseDelta, MaxSubSteps * FrameRate);
 	int32 NumSubsteps = FMath::CeilToInt(DeltaSeconds * FrameRateInv);
-	NumSubsteps = FMath::Max(NumSubsteps > MaxSubSteps ? MaxSubSteps : NumSubsteps, (uint32) 1);
+	NumSubsteps = FMath::Max(NumSubsteps > MaxSubSteps ? MaxSubSteps : NumSubsteps, 1);
 	const float SubTime = DeltaSeconds / NumSubsteps;
 
 	return SubTime;
