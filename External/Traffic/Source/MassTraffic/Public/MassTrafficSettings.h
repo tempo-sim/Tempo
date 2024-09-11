@@ -398,6 +398,54 @@ public:
 	UPROPERTY(EditAnywhere, Category="Lane Changing")
 	float LaneChangeMaxSideAccessoryLength = 10.0f;
 
+	// Normalized distance *potentially yielding* vehicle is allowed to travel through *left turn* lanes
+	// before it is no longer required to *start* yielding.
+	UPROPERTY(EditAnywhere, Category="Yield Behavior")
+	float NormalizedYieldCutoffLaneDistance_Left = 0.1f;
+
+	// Normalized distance *potentially yielding* vehicle is allowed to travel through *right turn* lanes
+	// before it is no longer required to *start* yielding.
+	UPROPERTY(EditAnywhere, Category="Yield Behavior")
+	float NormalizedYieldCutoffLaneDistance_Right = 0.1f;
+
+	// Normalized distance *potentially yielding* vehicle is allowed to travel through *through/straight* lanes
+	// before it is no longer required to *start* yielding.
+	UPROPERTY(EditAnywhere, Category="Yield Behavior")
+	float NormalizedYieldCutoffLaneDistance_Straight = 0.2f;
+	
+	// Normalized distance *other* vehicle needs to travel through *left turn* lanes
+	// in order to resume motion after yielding.
+	UPROPERTY(EditAnywhere, Category="Yield Behavior")
+	float NormalizedYieldResumeLaneDistance_Left = 0.8f;
+
+	// Normalized distance *other* vehicle needs to travel through *right turn* lanes
+	// in order to resume motion after yielding.
+	UPROPERTY(EditAnywhere, Category="Yield Behavior")
+	float NormalizedYieldResumeLaneDistance_Right = 0.9f;
+
+	// Normalized distance *other* vehicle needs to travel through *through/straight* lanes
+	// in order to resume motion after yielding.
+	UPROPERTY(EditAnywhere, Category="Yield Behavior")
+	float NormalizedYieldResumeLaneDistance_Straight = 0.4f;
+
+	// Max distance from the end of the lane (leading up to an intersection)
+	// within which a vehicle is allowed to start a pre-emptive yield if other conditions apply.
+	UPROPERTY(EditAnywhere, Category="Yield Behavior")
+	float MaxDistanceFromEndOfLaneForPreemptiveYield = 500.0f;
+
+	// Min distance to allow a vehicle performing a pre-emptive yield to "roll-out" into the intersection.
+	UPROPERTY(EditAnywhere, Category="Yield Behavior")
+	float MinPreemptiveYieldAtIntersectionRolloutDistance = 200.0f;
+
+	// Max distance to allow a vehicle performing a pre-emptive yield to "roll-out" into the intersection.
+	UPROPERTY(EditAnywhere, Category="Yield Behavior")
+	float MaxPreemptiveYieldAtIntersectionRolloutDistance = 400.0f;
+
+	// Time (in seconds) to wait for the *other* vehicle to enter their lane
+	// after the yielding vehicle "rolled-out" the allowed distance during a pre-emptive yield.
+	UPROPERTY(EditAnywhere, Category="Yield Behavior")
+	float MaxTimeToWaitForVehicleToEnterTheirLaneDuringPreemptiveYield = 2.0f;
+
 	// @todo Rename Density Management to Overseer
 	
 	/**

@@ -9,6 +9,16 @@
 #include "MassEntityView.h"
 #include "MassZoneGraphNavigationFragments.h"
 
+// Theoretically, it's possible for more than one small vehicle to get close enough to the intersection to ready it.
+// So, we'll allow a max of 2 vehicles to ready intersection lanes.
+// However, in practice, NumVehiclesReadyToUseIntersectionLane never goes above one with the current configuration
+// of everything.
+int8 FZoneGraphTrafficLaneData::MaxAllowedVehiclesReadyToUseIntersectionLane = 2;	// (See all READYLANE.)
+
+// Allow up to 2 vehicles to yield on lanes.
+// Theoretically, there might be more than one vehicle yielding on a lane, if the vehicles are small enough.
+int8 FZoneGraphTrafficLaneData::MaxAllowedYieldingVehiclesOnLane = 2;
+
 FZoneGraphTrafficLaneData::FZoneGraphTrafficLaneData():
 	bIsOpen(true),
 	bIsAboutToClose(false),
@@ -18,7 +28,6 @@ FZoneGraphTrafficLaneData::FZoneGraphTrafficLaneData():
 	bHasTransverseLaneAdjacency(false),
 	bIsDownstreamFromIntersection(false),
 	bIsStoppedVehicleInPreviousLaneOverlappingThisLane(false),
-	bIsVehicleReadyToUseLane(false),
 	MaxDensity(1.0f)
 {
 }
@@ -171,6 +180,23 @@ float FZoneGraphTrafficLaneData::SpaceAvailableFromStartOfLaneForVehicle(const F
 	}
 		
 	return SpaceAvailableFromStartOfLane;
+}
+
+bool FZoneGraphTrafficLaneData::TryGetDistanceFromStartOfLaneToTailVehicle(const FMassEntityManager& EntityManager, float& OutDistanceToTailVehicle) const
+{
+	if (!TailVehicle.IsSet())
+	{
+		return false;	
+	}
+	
+	const FMassEntityView TailVehicleEntityView(EntityManager, TailVehicle);
+	const FMassZoneGraphLaneLocationFragment& LaneLocationFragment = TailVehicleEntityView.GetFragmentData<FMassZoneGraphLaneLocationFragment>();
+	const FAgentRadiusFragment& RadiusFragment = TailVehicleEntityView.GetFragmentData<FAgentRadiusFragment>();
+	
+	const float DistanceAlongLaneToTailVehicle = LaneLocationFragment.DistanceAlongLane - RadiusFragment.Radius;
+
+	OutDistanceToTailVehicle = DistanceAlongLaneToTailVehicle;
+	return true;
 }
 
 

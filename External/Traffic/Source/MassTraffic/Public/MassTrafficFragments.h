@@ -690,6 +690,21 @@ struct MASSTRAFFIC_API FMassTrafficVehicleControlFragment : public FMassFragment
 	bool bAllowRightTurnsAtIntersections = true;
 	bool bAllowGoingStraightAtIntersections = true;
 
+	// Fields used for both pre-emptive and reactive yields.
+	FZoneGraphTrafficLaneData* YieldAtIntersectionLane = nullptr;
+
+	// Fields used for pre-emptive yields.
+	float TargetRolloutDistanceForPreemptiveYieldAtIntersection = 0.0f;
+	float DistanceAlongLaneAtStartOfYieldLane = 0.0f;
+	float TotalPrevLaneRolloutDistanceForPreemptiveYieldAtIntersection = 0.0f;
+	float TotalRolloutDistanceForPreemptiveYieldAtIntersection = 0.0f;
+
+	float TimeStartedWaitingAfterPreemptiveYieldRollOut = 0.0f;
+	bool bHasFinishedWaitingAfterRollOutForPreemptiveYieldAtIntersection = false;
+
+	// Fields used for reactive yields.
+	bool bHasGivenOpportunityForTurningVehiclesToReactivelyYieldAtIntersection = false;
+
 	// Inline copy of CurrentTrafficLaneData->ConstData constant lane data, copied on lane entry
 	FZoneGraphTrafficLaneConstData CurrentLaneConstData;
 
@@ -704,10 +719,26 @@ struct MASSTRAFFIC_API FMassTrafficVehicleControlFragment : public FMassFragment
 	
 	// The next lane we should proceed to when exiting this lane 
 	FZoneGraphTrafficLaneData* NextLane = nullptr;
+
+	// The intersection lane that we decided to "ready".
+	// This is the lane through which we will traverse the intersection.
+	FZoneGraphTrafficLaneData* ReadiedNextIntersectionLane = nullptr;	// (See all READYLANE.)
 	
 	int32 PreviousLaneIndex = INDEX_NONE;
 	
 	float PreviousLaneLength = 0.0f;
+
+	// Functions used for both pre-emptive and reactive yields.
+	bool IsYieldingAtIntersection() const { return YieldAtIntersectionLane != nullptr; }
+
+	// Functions used for pre-emptive yields.
+	bool IsPreemptivelyYieldingAtIntersection() const { return IsYieldingAtIntersection() && TargetRolloutDistanceForPreemptiveYieldAtIntersection > 0.0f; }
+	bool HasStartedWaitingAfterRollOutForPreemptiveYieldAtIntersection() const { return IsPreemptivelyYieldingAtIntersection() && TimeStartedWaitingAfterPreemptiveYieldRollOut > 0.0f; }
+	bool HasFinishedWaitingAfterRollOutForPreemptiveYieldAtIntersection() const { return bHasFinishedWaitingAfterRollOutForPreemptiveYieldAtIntersection; }
+
+	// Functions used for reactive yields.
+	bool IsReactivelyYieldingAtIntersection() const { return IsYieldingAtIntersection() && !IsPreemptivelyYieldingAtIntersection(); }
+	bool HasGivenOpportunityForTurningVehiclesToReactivelyYieldAtIntersection() const { return bHasGivenOpportunityForTurningVehiclesToReactivelyYieldAtIntersection; }
 };
 
 

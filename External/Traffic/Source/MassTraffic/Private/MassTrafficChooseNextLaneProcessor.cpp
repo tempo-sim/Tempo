@@ -103,7 +103,12 @@ void UMassTrafficChooseNextLaneProcessor::Execute(FMassEntityManager& EntityMana
 			{
 				continue;
 			}
-
+			
+			// If we've already readied an intersection lane, don't choose a new lane.
+			if (VehicleControlFragment.ReadiedNextIntersectionLane != nullptr)	// (See all READYLANE.)
+			{
+				continue;
+			}
 			
 			// Only ever bother choosing a next lane when we get near the end of our current lane.
 			{

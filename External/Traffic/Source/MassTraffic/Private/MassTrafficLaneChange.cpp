@@ -2,6 +2,7 @@
 
 
 #include "MassTrafficLaneChange.h"
+
 #include "MassTrafficMovement.h"
 #include "MassTrafficUtils.h"
 #include "MassTrafficDebugHelpers.h"
@@ -732,5 +733,450 @@ bool CheckNextVehicle(const FMassEntityHandle Entity, const FMassEntityHandle Ne
 	return false;
 }
 
+bool ShouldYieldAtIntersection_Internal(
+	const FZoneGraphTrafficLaneData& CurrentLaneData,
+	const FZoneGraphTrafficLaneData& PrevLaneData,
+	const TFunction<bool(const FZoneGraphTrafficLaneData&)>& IsTestLaneClearFunc,
+	const bool bConsiderYieldForGoingStraight = true,
+	const bool bConsiderYieldForLeftTurns = true,
+	const bool bConsiderYieldForRightTurns = true)
+{
+	// Only consider whether to yield at intersection lanes.
+	if (!CurrentLaneData.ConstData.bIsIntersectionLane)
+	{
+		return false;
+	}
+
+	// If we're turning left at an intersection, ...
+	if (CurrentLaneData.bTurnsLeft && bConsiderYieldForLeftTurns)
+	{
+		// We need to iterate left from our *previous* lane and look at the successors of those lanes.
+		// Note:  Iterating left or right from the current lane (which is in the intersection) will only yield lanes
+		// of the same type as our current lane (ie. only left turns, only right turns, or only straight lanes).
+		for (FZoneGraphTrafficLaneData* LeftLane = PrevLaneData.LeftLane; LeftLane != nullptr; LeftLane = LeftLane->LeftLane)
+		{
+			ensureMsgf(!LeftLane->ConstData.bIsIntersectionLane, TEXT("Lanes left of the previous lane should *not* be intersection lanes."));
+			
+			for (FZoneGraphTrafficLaneData* NextLeftLane : LeftLane->NextLanes)
+			{
+				ensureMsgf(NextLeftLane->ConstData.bIsIntersectionLane, TEXT("Successors of lanes left of the previous lane *should* be intersection lanes."));
+				
+				// Then, we need to check all the intersection lanes on the left of us that are not also turning left.
+				if (!NextLeftLane->bTurnsLeft)
+				{
+					// And, we skip over any lanes, which already have yielding vehicles. 
+					if (NextLeftLane->HasYieldingVehicles())
+					{
+						continue;
+					}
+					
+					// But, for the remaining lanes, we should yield, if they are not clear.
+					if (!IsTestLaneClearFunc(*NextLeftLane))
+					{
+						return true;
+					}
+				}
+			}
+		}
+	}
+	// If we're turning right at an intersection, ...
+	else if (CurrentLaneData.bTurnsRight && bConsiderYieldForRightTurns)
+	{
+		// We need to iterate right from our *previous* lane and look at the successors of those lanes.
+		// Note:  Iterating left or right from the current lane (which is in the intersection) will only yield lanes
+		// of the same type as our current lane (ie. only left turns, only right turns, or only straight lanes).
+		for (FZoneGraphTrafficLaneData* RightLane = PrevLaneData.RightLane; RightLane != nullptr; RightLane = RightLane->RightLane)
+		{
+			ensureMsgf(!RightLane->ConstData.bIsIntersectionLane, TEXT("Lanes right of the previous lane should *not* be intersection lanes."));
+			
+			for (FZoneGraphTrafficLaneData* NextRightLane : RightLane->NextLanes)
+			{
+				ensureMsgf(NextRightLane->ConstData.bIsIntersectionLane, TEXT("Successors of lanes right of the previous lane *should* be intersection lanes."));
+				
+				// Then, we need to check all the intersection lanes on the right of us that are not also turning right.
+				if (!NextRightLane->bTurnsRight)
+				{
+					// And, we skip over any lanes, which already have yielding vehicles. 
+					if (NextRightLane->HasYieldingVehicles())
+					{
+						continue;
+					}
+					
+					// But, for the remaining lanes, we should yield, if they are not clear.
+					if (!IsTestLaneClearFunc(*NextRightLane))
+					{
+						return true;
+					}
+				}
+			}
+		}
+	}
+	// If we're going straight at an intersection, ...
+	else if (bConsiderYieldForGoingStraight)
+	{
+		// We need to iterate left from our *previous* lane and look at the successors of those lanes.
+		// Note:  Iterating left or right from the current lane (which is in the intersection) will only yield lanes
+		// of the same type as our current lane (ie. only left turns, only right turns, or only straight lanes).
+		for (FZoneGraphTrafficLaneData* LeftLane = PrevLaneData.LeftLane; LeftLane != nullptr; LeftLane = LeftLane->LeftLane)
+		{
+			ensureMsgf(!LeftLane->ConstData.bIsIntersectionLane, TEXT("Lanes left of the previous lane should *not* be intersection lanes."));
+			
+			for (FZoneGraphTrafficLaneData* NextLeftLane : LeftLane->NextLanes)
+			{
+				ensureMsgf(NextLeftLane->ConstData.bIsIntersectionLane, TEXT("Successors of lanes left of the previous lane *should* be intersection lanes."));
+				
+				// We need to make sure that no one is crossing in front of us by turning right from our left side.
+				if (NextLeftLane->bTurnsRight)
+				{
+					// And, we skip over any lanes, which already have yielding vehicles. 
+					if (NextLeftLane->HasYieldingVehicles())
+					{
+						continue;
+					}
+					
+					// But, for the remaining lanes, we should yield, if they are not clear.
+					if (!IsTestLaneClearFunc(*NextLeftLane))
+					{
+						return true;
+					}
+				}
+			}
+		}
+		
+		// We need to iterate right from our *previous* lane and look at the successors of those lanes.
+		// Note:  Iterating left or right from the current lane (which is in the intersection) will only yield lanes
+		// of the same type as our current lane (ie. only left turns, only right turns, or only straight lanes).
+		for (FZoneGraphTrafficLaneData* RightLane = PrevLaneData.RightLane; RightLane != nullptr; RightLane = RightLane->RightLane)
+		{
+			ensureMsgf(!RightLane->ConstData.bIsIntersectionLane, TEXT("Lanes right of the previous lane should *not* be intersection lanes."));
+			
+			for (FZoneGraphTrafficLaneData* NextRightLane : RightLane->NextLanes)
+			{
+				ensureMsgf(NextRightLane->ConstData.bIsIntersectionLane, TEXT("Successors of lanes right of the previous lane *should* be intersection lanes."));
+				
+				// We need to make sure that no one is crossing in front of us by turning left from our right side.
+				if (NextRightLane->bTurnsLeft)
+				{
+					// And, we skip over any lanes, which already have yielding vehicles. 
+					if (NextRightLane->HasYieldingVehicles())
+					{
+						continue;
+					}
+					
+					// But, for the remaining lanes, we should yield, if they are not clear.
+					if (!IsTestLaneClearFunc(*NextRightLane))
+					{
+						return true;
+					}
+				}
+			}
+		}
+	}
+
+	return false;
+}
+
+bool ShouldPerformPreemptiveYieldAtIntersection(
+	const UMassTrafficSubsystem& MassTrafficSubsystem,
+	const FMassEntityManager& EntityManager,
+	const FMassTrafficVehicleControlFragment& VehicleControlFragment,
+	const FMassZoneGraphLaneLocationFragment& LaneLocationFragment,
+	const FAgentRadiusFragment& RadiusFragment,
+	bool& OutHasAnotherVehicleEnteredRelevantLaneAfterPreemptiveYieldRollOut)
+{
+	const UMassTrafficSettings* MassTrafficSettings = GetDefault<UMassTrafficSettings>();
+	if (!ensureMsgf(MassTrafficSettings != nullptr, TEXT("Can't access MassTrafficSettings in ShouldPerformPreemptiveYieldAtIntersection.  Yield behavior disabled.")))
+	{
+		return false;
+	}
 	
+	const FZoneGraphTrafficLaneData* CurrentLaneData = MassTrafficSubsystem.GetTrafficLaneData(LaneLocationFragment.LaneHandle);
+	if (!ensureMsgf(CurrentLaneData != nullptr, TEXT("Can't access CurrentLaneData in ShouldPerformPreemptiveYieldAtIntersection.  Returning false.")))
+	{
+		return false;
+	}
+
+	// We need to find our intersection lane.
+	// Pre-emptive yields start by looking ahead to the next lane, but they need to switch to the "current" lane,
+	// once the vehicle rolls-out into the intersection.
+	const auto& GetIntersectionLaneData = [&VehicleControlFragment, &CurrentLaneData]() -> const FZoneGraphTrafficLaneData*
+	{
+		if (VehicleControlFragment.NextLane != nullptr && VehicleControlFragment.NextLane->ConstData.bIsIntersectionLane)
+		{
+			return VehicleControlFragment.NextLane;
+		}
+		
+		if (CurrentLaneData->ConstData.bIsIntersectionLane)
+		{
+			return CurrentLaneData;
+		}
+
+		return nullptr;
+	};
+
+	// If neither our next lane, nor our current lane is an intersection lane, we can't pre-emptively yield.
+	const FZoneGraphTrafficLaneData* IntersectionLaneData = GetIntersectionLaneData();
+	if (IntersectionLaneData == nullptr)
+	{
+		return false;
+	}
+
+	// We can't *start* a pre-emptive yield in the intersection, only before we're in the intersection.
+	// Otherwise, we are only governed by the reactive yield logic.
+	if (CurrentLaneData == IntersectionLaneData && !VehicleControlFragment.IsPreemptivelyYieldingAtIntersection())
+	{
+		return false;
+	}
+
+	// Then, we need to find the lane before the intersection.
+	const auto& GetLaneDataBeforeIntersection = [&MassTrafficSubsystem, &VehicleControlFragment, &IntersectionLaneData, &CurrentLaneData]() -> const FZoneGraphTrafficLaneData*
+	{
+		if (IntersectionLaneData == VehicleControlFragment.NextLane)
+		{
+			return CurrentLaneData;
+		}
+
+		if (IntersectionLaneData == CurrentLaneData)
+		{
+			const FMassTrafficZoneGraphData* TrafficZoneGraphData = MassTrafficSubsystem.GetTrafficZoneGraphData(CurrentLaneData->LaneHandle.DataHandle);
+	
+			const FZoneGraphTrafficLaneData* PrevLaneData = TrafficZoneGraphData != nullptr && VehicleControlFragment.PreviousLaneIndex != INDEX_NONE
+				? TrafficZoneGraphData->GetTrafficLaneData(VehicleControlFragment.PreviousLaneIndex)
+				: nullptr;
+
+			return PrevLaneData;
+		}
+
+		return nullptr;
+	};
+
+	// If we can't find the lane before the intersection,
+	// we won't be able to traverse the lane graph in the internal "should yield" logic.
+	const FZoneGraphTrafficLaneData* LaneDataBeforeIntersection = GetLaneDataBeforeIntersection();
+	if (LaneDataBeforeIntersection == nullptr)
+	{
+		return false;
+	}
+
+	// If we haven't started preemptively yielding and the intersection is our next lane, ...
+	if (!VehicleControlFragment.IsPreemptivelyYieldingAtIntersection() && IntersectionLaneData == VehicleControlFragment.NextLane)
+	{
+		const float DistanceFromEndOfLane = LaneLocationFragment.LaneLength - (LaneLocationFragment.DistanceAlongLane + RadiusFragment.Radius);
+
+		// And, if we're not close enough to the end of the lane, we shouldn't pre-emptively yield.
+		if (DistanceFromEndOfLane > MassTrafficSettings->MaxDistanceFromEndOfLaneForPreemptiveYield)
+		{
+			return false;
+		}
+	}
+
+	const auto& IsTestLaneClear = [&EntityManager, &VehicleControlFragment, &CurrentLaneData, &LaneDataBeforeIntersection, MassTrafficSettings](const FZoneGraphTrafficLaneData& TestLane)
+	{
+		if (!VehicleControlFragment.IsPreemptivelyYieldingAtIntersection())
+		{
+			// A pre-emptive yield starts when a vehicle is ready to use the test lane before we are in the intersection.
+			return !(CurrentLaneData == LaneDataBeforeIntersection && TestLane.HasVehiclesReadyToUseIntersectionLane());	// (See all READYLANE.)
+		}
+		
+		// Once in a pre-emptive yield scenario,
+		// we wait for the other vehicle(s) to enter the lane
+		// and get far enough through the intersection before ending our yield.
+		if (TestLane.NumVehiclesOnLane > 0)
+		{
+			const auto& TryGetNormalizedDistanceAlongTestLane = [&EntityManager, &TestLane](float& OutNormalizedDistanceAlongTestLane)
+			{
+				float DistanceAlongTestLane = 0.0f;
+				if (!TestLane.TryGetDistanceFromStartOfLaneToTailVehicle(EntityManager, DistanceAlongTestLane))
+				{
+					ensureMsgf(TestLane.NumVehiclesOnLane == 0, TEXT("If we don't have a tail vehicle, then TestLane should have no vehicles on it."));
+				
+					// The lane doesn't have a tail vehicle.
+					return false;
+				}
+				
+				if (!ensureMsgf(TestLane.Length > 0.0f, TEXT("TestLane should have a length greater than zero.")))
+				{
+					return false;
+				}
+		
+				const float NormalizedDistanceAlongTestLane = DistanceAlongTestLane / TestLane.Length;
+		
+				OutNormalizedDistanceAlongTestLane = NormalizedDistanceAlongTestLane;
+				return true;
+			};
+		
+			float NormalizedDistanceAlongTestLane = 0.0f;
+			if (!TryGetNormalizedDistanceAlongTestLane(NormalizedDistanceAlongTestLane))
+			{
+				// If we can't determine the other vehicle's distance along the test lane,
+				// just say it's clear to keep traffic flowing.
+				return true;
+			}
+
+			const float NormalizedYieldResumeLaneDistance =
+				TestLane.bTurnsLeft ? MassTrafficSettings->NormalizedYieldResumeLaneDistance_Left :
+				TestLane.bTurnsRight ? MassTrafficSettings->NormalizedYieldResumeLaneDistance_Right :
+				MassTrafficSettings->NormalizedYieldResumeLaneDistance_Straight;
+		
+			if (NormalizedDistanceAlongTestLane < NormalizedYieldResumeLaneDistance)
+			{
+				return false;
+			}
+		}
+		
+		return true;
+	};
+
+	// Note:  For pre-emptive yields, turning vehicles give the right of way to vehicles that are going straight.
+	// So, we don't consider pre-emptively yielding when going straight.
+	// However, vehicles going straight can reactively yield
+	// after an opportunity is given for turning vehicles to reactively yield first.
+	const bool bShouldYieldAtIntersection = ShouldYieldAtIntersection_Internal(*IntersectionLaneData, *LaneDataBeforeIntersection, IsTestLaneClear, false);
+
+	// If we are pre-emptively yielding, ...
+	if (VehicleControlFragment.IsPreemptivelyYieldingAtIntersection())
+	{
+		// Wait until we roll-out, then we'll start checking our wait time.
+		// During this period of time, we remain in the pre-emptive yield.
+		if (!VehicleControlFragment.HasStartedWaitingAfterRollOutForPreemptiveYieldAtIntersection())
+		{
+			return true;
+		}
+		
+		// We're pre-emptively yielding,
+		// but the vehicle(s) that we decided to pre-emptively yield for aren't on the relevant lane(s) yet.
+		//
+		// So, we give them some time to get on the relevant lane(s), while we remain in the pre-emptive yield.
+		//
+		// During this time, we also indicate to the caller whether other vehicles have entered
+		// relevant lanes from a pre-emptive yield perspective.
+		// If so, this allows the logic in UpdateYieldAtIntersectionState to end our wait time early.
+		//
+		// If our wait time fully elapses, then the reactive yield logic will take over.
+		//
+		// However, if other vehicles enter relevant lanes first,
+		// the pre-emptive yield logic will remain in effect until the lanes are clear
+		// from a pre-emptive yield perspective.
+		if (!VehicleControlFragment.HasFinishedWaitingAfterRollOutForPreemptiveYieldAtIntersection())
+		{
+			OutHasAnotherVehicleEnteredRelevantLaneAfterPreemptiveYieldRollOut = bShouldYieldAtIntersection;
+			return true;
+		}
+	}
+
+	return bShouldYieldAtIntersection;
+}
+
+bool ShouldPerformReactiveYieldAtIntersection(
+	const UMassTrafficSubsystem& MassTrafficSubsystem,
+	const FMassEntityManager& EntityManager,
+	const FMassTrafficVehicleControlFragment& VehicleControlFragment,
+	const FMassZoneGraphLaneLocationFragment& LaneLocationFragment,
+	const FAgentRadiusFragment& RadiusFragment,
+	bool& OutShouldGiveOpportunityForTurningVehiclesToReactivelyYieldAtIntersection)
+{
+	const UMassTrafficSettings* MassTrafficSettings = GetDefault<UMassTrafficSettings>();
+	if (!ensureMsgf(MassTrafficSettings != nullptr, TEXT("Can't access MassTrafficSettings in ShouldPerformReactiveYieldAtIntersection.  Yield behavior disabled.")))
+	{
+		return false;
+	}
+	
+	const FZoneGraphTrafficLaneData* CurrentLaneData = MassTrafficSubsystem.GetTrafficLaneData(LaneLocationFragment.LaneHandle);
+	if (CurrentLaneData == nullptr)
+	{
+		return false;
+	}
+
+	const FMassTrafficZoneGraphData* TrafficZoneGraphData = MassTrafficSubsystem.GetTrafficZoneGraphData(CurrentLaneData->LaneHandle.DataHandle);
+	
+	const FZoneGraphTrafficLaneData* PrevLaneData = TrafficZoneGraphData != nullptr && VehicleControlFragment.PreviousLaneIndex != INDEX_NONE
+		? TrafficZoneGraphData->GetTrafficLaneData(VehicleControlFragment.PreviousLaneIndex)
+		: nullptr;
+
+	if (PrevLaneData == nullptr)
+	{
+		return false;
+	}
+
+	const auto& IsTestLaneClear = [&EntityManager, &CurrentLaneData, &LaneLocationFragment, &RadiusFragment, MassTrafficSettings](const FZoneGraphTrafficLaneData& TestLane)
+	{
+		if (!ensureMsgf(CurrentLaneData->Length > 0.0f && LaneLocationFragment.LaneLength > 0.0f, TEXT("CurrentLane should have a length greater than zero.")))
+		{
+			// If we have errant lane data, just say it's clear to attempt to keep traffic flowing.
+			return true;
+		}
+		
+		if (TestLane.NumVehiclesOnLane > 0)
+		{
+			const auto& TryGetNormalizedDistanceAlongTestLane = [&EntityManager, &TestLane](float& OutNormalizedDistanceAlongTestLane)
+			{
+				float DistanceAlongTestLane = 0.0f;
+				if (!TestLane.TryGetDistanceFromStartOfLaneToTailVehicle(EntityManager, DistanceAlongTestLane))
+				{
+					ensureMsgf(TestLane.NumVehiclesOnLane == 0, TEXT("If we don't have a tail vehicle, then TestLane should have no vehicles on it."));
+				
+					// The lane doesn't have a tail vehicle.
+					return false;
+				}
+				
+				if (!ensureMsgf(TestLane.Length > 0.0f, TEXT("TestLane should have a length greater than zero.")))
+				{
+					return false;
+				}
+
+				const float NormalizedDistanceAlongTestLane = DistanceAlongTestLane / TestLane.Length;
+
+				OutNormalizedDistanceAlongTestLane = NormalizedDistanceAlongTestLane;
+				return true;
+			};
+
+			const float NormalizedDistanceAlongCurrentLane = (LaneLocationFragment.DistanceAlongLane - RadiusFragment.Radius) / LaneLocationFragment.LaneLength;
+
+			float NormalizedDistanceAlongTestLane = 0.0f;
+			if (!TryGetNormalizedDistanceAlongTestLane(NormalizedDistanceAlongTestLane))
+			{
+				// If we can't determine the other vehicle's distance along the test lane,
+				// just say it's clear to keep traffic flowing.
+				return true;
+			}
+
+			const float NormalizedYieldCutoffLaneDistance =
+				TestLane.bTurnsLeft ? MassTrafficSettings->NormalizedYieldCutoffLaneDistance_Left :
+				TestLane.bTurnsRight ? MassTrafficSettings->NormalizedYieldCutoffLaneDistance_Right :
+				MassTrafficSettings->NormalizedYieldCutoffLaneDistance_Straight;
+
+			const float NormalizedYieldResumeLaneDistance =
+				TestLane.bTurnsLeft ? MassTrafficSettings->NormalizedYieldResumeLaneDistance_Left :
+				TestLane.bTurnsRight ? MassTrafficSettings->NormalizedYieldResumeLaneDistance_Right :
+				MassTrafficSettings->NormalizedYieldResumeLaneDistance_Straight;
+
+			if (NormalizedDistanceAlongCurrentLane < NormalizedYieldCutoffLaneDistance && NormalizedDistanceAlongTestLane < NormalizedYieldResumeLaneDistance)
+			{
+				return false;
+			}
+		}
+
+		return true;
+	};
+
+	const bool bShouldReactivelyYieldAtIntersection = ShouldYieldAtIntersection_Internal(*CurrentLaneData, *PrevLaneData, IsTestLaneClear);
+
+	// If we haven't started reactively yielding, ...
+	if (!VehicleControlFragment.IsReactivelyYieldingAtIntersection())
+	{
+		// And, if we're going straight, and we should reactively yield, but we haven't given the opportunity
+		// for a turning vehicle to reactively yield to us, then we indicate that we should do so.
+		// We pass this state back to the caller to forward to UpdateYieldAtIntersectionState.
+		// If the turning vehicles don't take this opportunity to reactively yield to us,
+		// then we will reactively yield to them next update, if the reactive yield logic still applies at that time.
+		if (!CurrentLaneData->bTurnsLeft && !CurrentLaneData->bTurnsRight && bShouldReactivelyYieldAtIntersection && !VehicleControlFragment.HasGivenOpportunityForTurningVehiclesToReactivelyYieldAtIntersection())
+		{
+			OutShouldGiveOpportunityForTurningVehiclesToReactivelyYieldAtIntersection = true;
+			return false;
+		}
+	}
+
+	return bShouldReactivelyYieldAtIntersection;
+}
+
 }
