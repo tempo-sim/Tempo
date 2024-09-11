@@ -44,6 +44,15 @@ struct MASSTRAFFIC_API FMassTrafficVehicleSimulationParameters : public FMassSha
 	UPROPERTY(EditAnywhere, Category = "Restrictions")
 	bool bRestrictedToTrunkLanesOnly = false;
 
+	UPROPERTY(EditAnywhere, Category = "Restrictions")
+	bool bAllowLeftTurnsAtIntersections = true;
+
+	UPROPERTY(EditAnywhere, Category = "Restrictions")
+	bool bAllowRightTurnsAtIntersections = true;
+
+	UPROPERTY(EditAnywhere, Category = "Restrictions")
+	bool bAllowGoingStraightAtIntersections = true;
+
 	/** Actor class of this agent when spawned in high resolution */
 	UPROPERTY(EditAnywhere, Category = "Physics")
 	TSubclassOf<AWheeledVehiclePawn> PhysicsVehicleTemplateActor;

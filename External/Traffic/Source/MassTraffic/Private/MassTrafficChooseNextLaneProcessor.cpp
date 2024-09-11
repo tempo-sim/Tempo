@@ -348,6 +348,21 @@ void UMassTrafficChooseNextLaneProcessor::Execute(FMassEntityManager& EntityMana
 					{
 						continue;
 					}
+
+					if (!NextLane->bTurnsLeft && !NextLane->bTurnsRight && !VehicleControlFragment.bAllowGoingStraightAtIntersections)
+					{
+						continue;
+					}
+					
+					if (NextLane->bTurnsLeft && !VehicleControlFragment.bAllowLeftTurnsAtIntersections)
+					{
+						continue;
+					}
+
+					if (NextLane->bTurnsRight && !VehicleControlFragment.bAllowRightTurnsAtIntersections)
+					{
+						continue;
+					}
 				
 					// Consider this lane if it has enough space -or- if it's too short (because if they're all too
 					// short, we still have to pick one.)
