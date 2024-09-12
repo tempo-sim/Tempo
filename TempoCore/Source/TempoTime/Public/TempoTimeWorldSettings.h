@@ -22,6 +22,8 @@ public:
 	
 protected:
 	virtual void BeginPlay() override;
+
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	
 	virtual float FixupDeltaSeconds(float DeltaSeconds, float RealDeltaSeconds) override;
 	
@@ -39,4 +41,6 @@ private:
 	uint64 FixedStepsCount = 0;
 
 	TOptional<int32> StepsToSimulate;
+
+	FDelegateHandle SettingsChangedHandle;
 };
