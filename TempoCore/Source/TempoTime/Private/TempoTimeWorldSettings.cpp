@@ -9,8 +9,15 @@ void ATempoTimeWorldSettings::BeginPlay()
 {
 	Super::BeginPlay();
 
-	GetMutableDefault<UTempoCoreSettings>()->TempoCoreTimeSettingsChangedEvent.AddUObject(this, &ATempoTimeWorldSettings::OnTimeSettingsChanged);
+	SettingsChangedHandle = GetMutableDefault<UTempoCoreSettings>()->TempoCoreTimeSettingsChangedEvent.AddUObject(this, &ATempoTimeWorldSettings::OnTimeSettingsChanged);
 	OnTimeSettingsChanged();
+}
+
+void ATempoTimeWorldSettings::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	Super::EndPlay(EndPlayReason);
+
+	GetMutableDefault<UTempoCoreSettings>()->TempoCoreTimeSettingsChangedEvent.Remove(SettingsChangedHandle);
 }
 
 float ATempoTimeWorldSettings::FixupDeltaSeconds(float DeltaSeconds, float RealDeltaSeconds)
