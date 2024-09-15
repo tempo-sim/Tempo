@@ -276,6 +276,8 @@ GET_MODULE_INCLUDES_PUBLIC_ONLY() {
   
   PUBLIC_DEPENDENCIES=$(echo "$MODULE_INFO" | jq -r --arg module_name "$MODULE_NAME" '.[$module_name] | try .PublicDependencyModules[] // []')
   for PUBLIC_DEPENDENCY in $PUBLIC_DEPENDENCIES; do
+    # Remove any trailing carriage return character
+    PUBLIC_DEPENDENCY="${PUBLIC_DEPENDENCY%$'\r'}"
     if [ -d "$SRC_TEMP_DIR/$PUBLIC_DEPENDENCY" ]; then # Only consider project modules
       if [ -d "$INCLUDES_DIR/$PUBLIC_DEPENDENCY" ]; then
         # We already have this dependency - but still add its public dependencies.
@@ -299,6 +301,8 @@ GET_MODULE_INCLUDES() {
   SYNCPROTOS "$SRC_TEMP_DIR/$MODULE_NAME/Private/" "$INCLUDES_DIR/$MODULE_NAME"
   PUBLIC_DEPENDENCIES=$(echo "$MODULE_INFO" | jq -r --arg module_name "$MODULE_NAME" '.[$module_name] | try .PublicDependencyModules[] // []')
   for PUBLIC_DEPENDENCY in $PUBLIC_DEPENDENCIES; do
+    # Remove any trailing carriage return character
+    PUBLIC_DEPENDENCY="${PUBLIC_DEPENDENCY%$'\r'}"
     if [ -d "$SRC_TEMP_DIR/$PUBLIC_DEPENDENCY" ]; then # Only consider project modules
       if [ -d "$INCLUDES_DIR/$PUBLIC_DEPENDENCY" ]; then
         # We already have this dependency - but still add its public dependencies.
@@ -313,7 +317,9 @@ GET_MODULE_INCLUDES() {
   done
   
   PRIVATE_DEPENDENCIES=$(echo "$MODULE_INFO" | jq -r --arg module_name "$MODULE_NAME" '.[$module_name] | try .PrivateDependencyModules[] // []')
-  for PRIVATE_DEPENDENCY in $PRIVATE_DEPENDENCIES; do   
+  for PRIVATE_DEPENDENCY in $PRIVATE_DEPENDENCIES; do
+    # Remove any trailing carriage return character
+    PRIVATE_DEPENDENCY="${PRIVATE_DEPENDENCY%$'\r'}"
     if [[ -d "$SRC_TEMP_DIR/$PRIVATE_DEPENDENCY" ]]; then # Only consider project modules
       if [[ -d "$INCLUDES_DIR/$PRIVATE_DEPENDENCY" ]]; then
         # We already have this dependency - but still add its public dependencies.
