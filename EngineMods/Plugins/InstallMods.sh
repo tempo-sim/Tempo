@@ -49,11 +49,11 @@ INSTALL_MOD() {
   TEMP_DIR=$(mktemp -d)
   cd "$UNREAL_ENGINE_PATH"
   if [[ "$OSTYPE" = "msys" ]]; then
-    ./Engine/Build/BatchFiles/RunUAT.bat BuildPlugin -Plugin="$PLUGIN_DIR/$PLUGIN_NAME.uplugin" -Package="$TEMP_DIR" -Rocket -TargetPlatforms=Win64
+    ./Engine/Build/BatchFiles/RunUAT.bat BuildPlugin -Plugin="Engine/Plugins/$PLUGIN/$PLUGIN_NAME.uplugin" -Package="$TEMP_DIR" -Rocket -TargetPlatforms=Win64
   elif [[ "$OSTYPE" = "darwin"* ]]; then
-    ./Engine/Build/BatchFiles/RunUAT.sh BuildPlugin -Plugin="$PLUGIN_DIR/$PLUGIN_NAME.uplugin" -Package="$TEMP_DIR" -Rocket -TargetPlatforms=Mac
+    ./Engine/Build/BatchFiles/RunUAT.sh BuildPlugin -Plugin="Engine/Plugins/$PLUGIN/$PLUGIN_NAME.uplugin" -Package="$TEMP_DIR" -Rocket -TargetPlatforms=Mac
   elif [[ "$OSTYPE" = "linux-gnu"* ]]; then
-    ./Engine/Build/BatchFiles/RunUAT.sh BuildPlugin -Plugin="$PLUGIN_DIR/$PLUGIN_NAME.uplugin" -Package="$TEMP_DIR" -Rocket -TargetPlatforms=Linux
+    ./Engine/Build/BatchFiles/RunUAT.sh BuildPlugin -Plugin="Engine/Plugins/$PLUGIN/$PLUGIN_NAME.uplugin" -Package="$TEMP_DIR" -Rocket -TargetPlatforms=Linux
   fi
 
   # Copy resulting Binaries and Intermediate folders

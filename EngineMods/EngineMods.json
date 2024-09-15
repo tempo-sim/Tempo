@@ -3,7 +3,7 @@
     {
       "Type": "UnrealBuildTool",
       "Files": [
-        "Configuration/UEBuildTarget.cs.patch.1",
+        "Configuration/UEBuildTarget.cs.patch.2",
         "Configuration/TempoModuleRules.cs.1",
         "ToolChain/TempoLinuxToolChain.cs.2",
         "ToolChain/TempoMacToolChain.cs.2",
@@ -13,25 +13,7 @@
     {
       "Type": "Plugins",
       "Files": [
-        "Runtime/ZoneGraph.patch.1"
-      ]
-    }
-  ],
-  "5.3": [
-    {
-      "Type": "UnrealBuildTool",
-      "Files": [
-        "Configuration/UEBuildTarget.cs.patch.1",
-        "Configuration/TempoModuleRules.cs.1",
-        "ToolChain/TempoLinuxToolChain.cs.1",
-        "ToolChain/TempoMacToolChain.cs.1",
-        "ToolChain/TempoVCToolChain.cs.1"
-      ]
-    },
-    {
-      "Type": "Plugins",
-      "Files": [
-        "Runtime/ZoneGraph.patch.1"
+        "Runtime/ZoneGraph.patch.2"
       ]
     }
   ]

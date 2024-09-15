@@ -20,6 +20,8 @@ fi
 cd "$TEMPO_ROOT/EngineMods"
 MOD_TYPES=($(jq -r --arg version "$VERSION" '.[$version][].Type | @sh' EngineMods.json | tr -d \'))
 for MOD_TYPE in "${MOD_TYPES[@]}"; do
+  # Remove any trailing carriage return
+  MOD_TYPE="${MOD_TYPE%$'\r'}"
   MODS=$(jq -r --arg version "$VERSION" --arg type "$MOD_TYPE" '.[$version][] | select(.Type == $type) | .Files | join(" ")' EngineMods.json | tr -d \')
   eval "$MOD_TYPE/InstallMods.sh $MODS $*"
 done
