@@ -16,5 +16,16 @@
         "Runtime/ZoneGraph.patch.2"
       ]
     }
+  ],
+  "5.3": [
+    {
+      "Type": "UnrealBuildTool",
+      "Files": [
+        "Configuration/TempoModuleRules.cs.1",
+        "ToolChain/TempoLinuxToolChain.cs.1",
+        "ToolChain/TempoMacToolChain.cs.1",
+        "ToolChain/TempoVCToolChain.cs.1"
+      ]
+    }
   ]
 }
