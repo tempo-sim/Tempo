@@ -26,24 +26,24 @@ ADD_COMMAND_TO_HOOK() {
   fi
 }
 
-SYNCDEPS="$TEMPO_ROOT/Scripts/SyncDeps.sh"
-INSTALLTOOLCHAIN="$TEMPO_ROOT/Scripts/InstallToolChain.sh"
+SYNC_DEPS="$TEMPO_ROOT/Scripts/SyncDeps.sh"
+INSTALL_ENGINE_MODS="$TEMPO_ROOT/Scripts/InstallEngineMods.sh"
 
-# Put SyncDeps.sh script in appropriate git hooks
+# Put SyncDeps.sh and InstallEngineMods.sh scripts in appropriate git hooks
 if [ -d "$GIT_DIR/hooks" ]; then
-  ADD_COMMAND_TO_HOOK "$SYNCDEPS" post-checkout
-  ADD_COMMAND_TO_HOOK "$SYNCDEPS" post-merge
-  ADD_COMMAND_TO_HOOK "$INSTALLTOOLCHAIN" post-checkout
-  ADD_COMMAND_TO_HOOK "$INSTALLTOOLCHAIN" post-merge
+  ADD_COMMAND_TO_HOOK "$SYNC_DEPS" post-checkout
+  ADD_COMMAND_TO_HOOK "$SYNC_DEPS" post-merge
+  ADD_COMMAND_TO_HOOK "$INSTALL_ENGINE_MODS" post-checkout
+  ADD_COMMAND_TO_HOOK "$INSTALL_ENGINE_MODS" post-merge
 fi
 
 # Run the steps once (adding -force if specified)
 if [ "$1" = "-force" ]; then
-  SYNCDEPS="$SYNCDEPS -force"
-  INSTALLTOOLCHAIN="$INSTALLTOOLCHAIN -force"
+  SYNC_DEPS="$SYNC_DEPS -force"
+  INSTALL_ENGINE_MODS="$INSTALL_ENGINE_MODS -force"
 fi
-echo -e "\nInstalling Tempo UnrealBuildTool ToolChain\n"
-eval "$INSTALLTOOLCHAIN"
+echo -e "\nInstalling Tempo Engine Mods\n"
+eval "$INSTALL_ENGINE_MODS"
 echo -e "Checking ThirdParty dependencies...\n"
 eval "$SYNCDEPS"
 
