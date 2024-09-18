@@ -46,3 +46,8 @@ echo -e "\nInstalling Tempo UnrealBuildTool ToolChain\n"
 eval "$INSTALLTOOLCHAIN"
 echo -e "Checking ThirdParty dependencies...\n"
 eval "$SYNCDEPS"
+
+PLUGIN_SETUP_SCRIPTS=$(find "$TEMPO_ROOT" -mindepth 2 -maxdepth 2 -name "Setup.sh" -print -quit)
+for PLUGIN_SETUP_SCRIPT in ${PLUGIN_SETUP_SCRIPTS[@]}; do
+  eval "$PLUGIN_SETUP_SCRIPT"
+done

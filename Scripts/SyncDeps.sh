@@ -135,10 +135,35 @@ SYNC_THIRD_PARTY_DEPS () {
   echo "New hash: $MEASURED_HASH"
 }
 
+FIND_PLUGIN() {
+    local START_DIR
+    START_DIR=$(dirname "$1")
+    local CURRENT_DIR="$START_DIR"
+    
+    while [[ "$CURRENT_DIR" != "/" ]]; do
+        local UPLUGIN_FILE
+        UPLUGIN_FILE=$(find "$CURRENT_DIR" -maxdepth 1 -name "*.uplugin" -print -quit)
+        if [[ -n "$UPLUGIN_FILE" ]]; then
+            PLUGIN_DIR=$(dirname "$UPLUGIN_FILE")
+            echo "$PLUGIN_DIR"
+            return 0
+        fi
+        CURRENT_DIR=$(dirname "$CURRENT_DIR")
+    done
+    
+    echo "No .uplugin file found" >&2
+    return 1
+}
+
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 TEMPO_ROOT=$(realpath "$SCRIPT_DIR/..")
 MANIFEST_FILES=$(find "$TEMPO_ROOT" -name ttp_manifest.json -path "*Source*")
 for MANIFEST_FILE in ${MANIFEST_FILES[@]}; do
+  PLUGIN_DIR=$(FIND_PLUGIN "$MANIFEST_FILE")
+  if [ -f "$PLUGIN_DIR/Scripts/SyncDeps.sh" ]; then
+    # This plugin manages its own dependencies
+    continue
+  fi
   SYNC_THIRD_PARTY_DEPS "$MANIFEST_FILE" "$1"
 done
 
