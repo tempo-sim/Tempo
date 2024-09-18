@@ -41,7 +41,9 @@ INSTALL_MOD() {
     fi
   else
     echo "Applying Patch Engine/Plugins/$PATCH"
-    patch -p0 <"$PATCH_FILE" >/dev/null
+    if ! patch -p0 <"$PATCH_FILE" >/dev/null; then
+      echo "Patch Engine/Plugins/$PATCH did not apply cleanly. You may need to 'Verify' your Unreal Engine installation from the Epic Games Launcher."
+    fi
   fi
 
   echo -e "Rebuilding plugin $PLUGIN_NAME with Tempo mods"

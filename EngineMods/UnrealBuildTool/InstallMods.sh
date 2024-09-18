@@ -37,7 +37,9 @@ INSTALL_MOD() {
     # https://unix.stackexchange.com/questions/55780/check-if-a-file-or-folder-has-been-patched-already
     if ! patch -R -p0 -s -f --dry-run <"$SRC" >/dev/null; then
       echo "Applying Patch UnrealBuildTool/$MOD"
-      patch -p0 <"$SRC" >/dev/null
+      if ! patch -p0 <"$SRC" >/dev/null; then
+        echo "Patch UnrealBuildTool/$MOD did not apply cleanly. You may need to 'Verify' your Unreal Engine installation from the Epic Games Launcher."
+      fi
       NEEDS_REBUILD='Y'
     fi
   else
@@ -50,6 +52,21 @@ INSTALL_MOD() {
     fi
   fi
 }
+
+# We used to store Tempo mods to UnrealBuildTool here.
+# Any lingering files there will conflict with the new mods, so remove that directory.
+UBT_TEMPO_PATH="$UNREAL_ENGINE_PATH/Engine/Source/Programs/UnrealBuildTool/Tempo"
+if [ -d "$UBT_TEMPO_PATH" ]; then
+  # Confirm with the user before removing
+  read -r -p "Stale Tempo engine mod directory $UBT_TEMPO_PATH found. Remove it? (Y/N) " DO_REMOVE
+  if [[ "$DO_REMOVE" =~ [Yy] ]]; then
+    echo "Removing Stale Tempo engine mod directory $UBT_TEMPO_PATH"
+    rm -rf "$UBT_TEMPO_PATH"
+  else
+    echo "User elected not to remove $UBT_TEMPO_PATH. Please re-run once it's removed."
+    exit 1
+  fi
+fi
 
 for MOD in "$@"; do
   INSTALL_MOD "$MOD"
