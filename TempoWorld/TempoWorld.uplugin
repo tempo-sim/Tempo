@@ -4,7 +4,7 @@
 	"VersionName": "1.0",
 	"FriendlyName": "TempoWorld",
 	"Description": "Services for querying and controlling the state of the simulated world",
-	"Category": "Other",
+	"Category": "Tempo",
 	"CreatedBy": "Tempo Simulation, LLC",
 	"CreatedByURL": "https://temposimulation.com",
 	"DocsURL": "",

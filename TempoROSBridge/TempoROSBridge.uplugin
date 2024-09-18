@@ -4,7 +4,7 @@
 	"VersionName": "1.0",
 	"FriendlyName": "TempoROSBridge",
 	"Description": "Tempo plugin for bridging to ROS",
-	"Category": "Other",
+	"Category": "Tempo",
 	"CreatedBy": "Tempo Simulation, LLC",
 	"CreatedByURL": "http://temposimulation.com",
 	"DocsURL": "",

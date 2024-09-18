@@ -4,7 +4,7 @@
 	"VersionName": "1.0",
 	"FriendlyName": "TempoSensors",
 	"Description": "Tempo plugin for simulating common Robotics sensor types",
-	"Category": "Other",
+	"Category": "Tempo",
 	"CreatedBy": "Tempo Simulation, LLC",
 	"CreatedByURL": "http://temposimulation.com",
 	"DocsURL": "",

@@ -4,7 +4,7 @@
 	"VersionName": "1.0",
 	"FriendlyName": "TempoGeographic",
 	"Description": "Tempo plugin for simulating specific times and locations on Earth",
-	"Category": "Other",
+	"Category": "Tempo",
 	"CreatedBy": "Tempo Simulation, LLC",
 	"CreatedByURL": "https://temposimulation.com",
 	"DocsURL": "",
