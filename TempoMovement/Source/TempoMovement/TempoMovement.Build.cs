@@ -2,9 +2,9 @@
 
 using UnrealBuildTool;
 
-public class TempoVehicles : TempoModuleRules
+public class TempoMovement : TempoModuleRules
 {
-	public TempoVehicles(ReadOnlyTargetRules Target) : base(Target)
+	public TempoMovement(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
 		
@@ -41,7 +41,7 @@ public class TempoVehicles : TempoModuleRules
 				// Unreal
 				"CoreUObject",
 				// Tempo
-				"TempoVehiclesShared",
+				"TempoMovementShared",
 			}
 			);
 		

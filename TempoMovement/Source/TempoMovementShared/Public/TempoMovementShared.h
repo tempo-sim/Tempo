@@ -3,9 +3,9 @@
 #include "CoreMinimal.h"
 #include "Modules/ModuleManager.h"
 
-DECLARE_LOG_CATEGORY_EXTERN(LogTempoVehiclesShared, Log, All);
+DECLARE_LOG_CATEGORY_EXTERN(LogTempoMovementShared, Log, All);
 
-class FTempoVehiclesSharedModule : public IModuleInterface
+class FTempoMovementSharedModule : public IModuleInterface
 {
 public:
     virtual void StartupModule() override;

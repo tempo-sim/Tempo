@@ -1,8 +1,8 @@
 ﻿using UnrealBuildTool;
 
-public class TempoVehicleMovement : ModuleRules
+public class TempoMovementShared : ModuleRules
 {
-    public TempoVehicleMovement(ReadOnlyTargetRules Target) : base(Target)
+    public TempoMovementShared(ReadOnlyTargetRules Target) : base(Target)
     {
         PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
 
@@ -16,13 +16,10 @@ public class TempoVehicleMovement : ModuleRules
         PrivateDependencyModuleNames.AddRange(
             new string[]
             {
-                // Unreal
                 "CoreUObject",
                 "Engine",
                 "Slate",
-                "SlateCore",
-                // Tempo
-                "TempoVehiclesShared"
+                "SlateCore"
             }
         );
     }

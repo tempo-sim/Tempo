@@ -8,14 +8,14 @@ message CommandableVehiclesResponse{
   repeated string vehicle_name = 1;
 }
 
-message DrivingCommandRequest {
+message VehicleCommandRequest {
   string vehicle_name = 1;
   float acceleration = 2;
   float steering = 3;
 }
 
-service DrivingService {
+service VehicleControlService {
   rpc GetCommandableVehicles(TempoScripting.Empty) returns (CommandableVehiclesResponse);
   
-  rpc CommandVehicle(DrivingCommandRequest) returns (TempoScripting.Empty);
+  rpc CommandVehicle(VehicleCommandRequest) returns (TempoScripting.Empty);
 }

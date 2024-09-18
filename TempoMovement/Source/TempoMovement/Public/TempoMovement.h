@@ -5,9 +5,9 @@
 #include "CoreMinimal.h"
 #include "Modules/ModuleManager.h"
 
-DECLARE_LOG_CATEGORY_EXTERN(LogTempoVehicles, Log, All);
+DECLARE_LOG_CATEGORY_EXTERN(LogTempoMovement, Log, All);
 
-class FTempoVehiclesModule : public IModuleInterface
+class FTempoMovementModule : public IModuleInterface
 {
 public:
 	/** IModuleInterface implementation */

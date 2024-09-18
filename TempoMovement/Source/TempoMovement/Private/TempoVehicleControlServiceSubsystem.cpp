@@ -1,27 +1,27 @@
 // Copyright Tempo Simulation, LLC. All Rights Reserved
 
-#include "TempoDrivingServiceSubsystem.h"
+#include "TempoVehicleControlServiceSubsystem.h"
 
 #include "TempoVehicleControlInterface.h"
-#include "TempoVehicles/Driving.grpc.pb.h"
+#include "TempoMovement/VehicleControlService.grpc.pb.h"
 #include "TempoScripting/Empty.pb.h"
 
 #include "Kismet/GameplayStatics.h"
 
-using DrivingService = TempoVehicles::DrivingService::AsyncService;
-using DrivingCommandRequest = TempoVehicles::DrivingCommandRequest;
-using CommandableVehiclesResponse = TempoVehicles::CommandableVehiclesResponse;
+using VehicleControlService = TempoMovement::VehicleControlService::AsyncService;
+using VehicleCommandRequest = TempoMovement::VehicleCommandRequest;
+using CommandableVehiclesResponse = TempoMovement::CommandableVehiclesResponse;
 using TempoEmpty = TempoScripting::Empty;
 
-void UTempoDrivingServiceSubsystem::RegisterScriptingServices(FTempoScriptingServer* ScriptingServer)
+void UTempoVehicleControlServiceSubsystem::RegisterScriptingServices(FTempoScriptingServer* ScriptingServer)
 {
-	ScriptingServer->RegisterService<DrivingService>(
-		TSimpleRequestHandler<DrivingService, DrivingCommandRequest, TempoEmpty>(&DrivingService::RequestCommandVehicle).BindUObject(this, &UTempoDrivingServiceSubsystem::HandleDrivingCommand),
-		TSimpleRequestHandler<DrivingService, TempoEmpty, CommandableVehiclesResponse>(&DrivingService::RequestGetCommandableVehicles).BindUObject(this, &UTempoDrivingServiceSubsystem::GetCommandableVehicles)
+	ScriptingServer->RegisterService<VehicleControlService>(
+		TSimpleRequestHandler<VehicleControlService, VehicleCommandRequest, TempoEmpty>(&VehicleControlService::RequestCommandVehicle).BindUObject(this, &UTempoVehicleControlServiceSubsystem::HandleVehicleCommand),
+		TSimpleRequestHandler<VehicleControlService, TempoEmpty, CommandableVehiclesResponse>(&VehicleControlService::RequestGetCommandableVehicles).BindUObject(this, &UTempoVehicleControlServiceSubsystem::GetCommandableVehicles)
 		);
 }
 
-void UTempoDrivingServiceSubsystem::GetCommandableVehicles(const TempoScripting::Empty& Request, const TResponseDelegate<TempoVehicles::CommandableVehiclesResponse>& ResponseContinuation) const
+void UTempoVehicleControlServiceSubsystem::GetCommandableVehicles(const TempoScripting::Empty& Request, const TResponseDelegate<TempoMovement::CommandableVehiclesResponse>& ResponseContinuation) const
 {
 	TArray<AActor*> VehicleControllers;
 	UGameplayStatics::GetAllActorsWithInterface(GetWorld(), UTempoVehicleControlInterface::StaticClass(), VehicleControllers);
@@ -37,7 +37,7 @@ void UTempoDrivingServiceSubsystem::GetCommandableVehicles(const TempoScripting:
 }
 
 
-void UTempoDrivingServiceSubsystem::HandleDrivingCommand(const DrivingCommandRequest& Request, const TResponseDelegate<TempoEmpty>& ResponseContinuation) const
+void UTempoVehicleControlServiceSubsystem::HandleVehicleCommand(const VehicleCommandRequest& Request, const TResponseDelegate<TempoEmpty>& ResponseContinuation) const
 {
 	TArray<AActor*> VehicleControllers;
 	UGameplayStatics::GetAllActorsWithInterface(GetWorld(), UTempoVehicleControlInterface::StaticClass(), VehicleControllers);
