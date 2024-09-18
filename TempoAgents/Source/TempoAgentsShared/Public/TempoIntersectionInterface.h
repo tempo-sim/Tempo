@@ -146,6 +146,9 @@ public:
 	TArray<FName> GetTempoIntersectionTags() const;
 
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
+	int32 GetTempoIntersectionEntranceControlPointIndex(int32 ConnectionIndex) const;
+
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
 	FVector GetTempoIntersectionEntranceLocation(int32 ConnectionIndex, ETempoCoordinateSpace CoordinateSpace) const;
 
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")

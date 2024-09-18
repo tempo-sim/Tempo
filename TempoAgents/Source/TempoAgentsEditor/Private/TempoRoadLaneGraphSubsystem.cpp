@@ -226,17 +226,20 @@ FZoneLaneProfile UTempoRoadLaneGraphSubsystem::CreateDynamicLaneProfile(const AA
 
 	for (int32 LaneIndex = 0; LaneIndex < NumLanes; ++LaneIndex)
 	{
+		// ZoneGraph's LaneProfiles specify lanes from right to left.
+		const int32 LaneProfileLaneIndex = NumLanes - 1 - LaneIndex;
+		
 		const float LaneWidth = bQueryActorIsRoadModule
-			? ITempoRoadModuleInterface::Execute_GetTempoRoadModuleLaneWidth(&RoadQueryActor, LaneIndex)
-			: ITempoRoadInterface::Execute_GetTempoLaneWidth(&RoadQueryActor, LaneIndex);
+			? ITempoRoadModuleInterface::Execute_GetTempoRoadModuleLaneWidth(&RoadQueryActor, LaneProfileLaneIndex)
+			: ITempoRoadInterface::Execute_GetTempoLaneWidth(&RoadQueryActor, LaneProfileLaneIndex);
 		
 		const EZoneLaneDirection LaneDirection = bQueryActorIsRoadModule
-			? ITempoRoadModuleInterface::Execute_GetTempoRoadModuleLaneDirection(&RoadQueryActor, LaneIndex)
-			: ITempoRoadInterface::Execute_GetTempoLaneDirection(&RoadQueryActor, LaneIndex);
+			? ITempoRoadModuleInterface::Execute_GetTempoRoadModuleLaneDirection(&RoadQueryActor, LaneProfileLaneIndex)
+			: ITempoRoadInterface::Execute_GetTempoLaneDirection(&RoadQueryActor, LaneProfileLaneIndex);
 		
 		const TArray<FName> LaneTags = bQueryActorIsRoadModule
-			? ITempoRoadModuleInterface::Execute_GetTempoRoadModuleLaneTags(&RoadQueryActor, LaneIndex)
-			: ITempoRoadInterface::Execute_GetTempoLaneTags(&RoadQueryActor, LaneIndex);
+			? ITempoRoadModuleInterface::Execute_GetTempoRoadModuleLaneTags(&RoadQueryActor, LaneProfileLaneIndex)
+			: ITempoRoadInterface::Execute_GetTempoLaneTags(&RoadQueryActor, LaneProfileLaneIndex);
 
 		FZoneLaneDesc LaneDesc = CreateZoneLaneDesc(LaneWidth, LaneDirection, LaneTags);
 		LaneProfile.Lanes.Add(LaneDesc);
@@ -478,6 +481,15 @@ bool UTempoRoadLaneGraphSubsystem::TryCreateZoneShapePointForIntersectionEntranc
 
 	DrawDebugDirectionalArrow(GetWorld(), IntersectionQueryActor.ActorToWorld().TransformPosition(ZoneShapePoint.GetInControlPoint()), IntersectionQueryActor.ActorToWorld().TransformPosition(ZoneShapePoint.Position), 10000.0f, FColor::Blue, false, 10.0f, 0, 10.0f);
 	DrawDebugDirectionalArrow(GetWorld(), IntersectionQueryActor.ActorToWorld().TransformPosition(ZoneShapePoint.Position), IntersectionQueryActor.ActorToWorld().TransformPosition(ZoneShapePoint.GetOutControlPoint()), 10000.0f, FColor::Red, false, 10.0f, 0, 10.0f);
+
+	const int32 IntersectionEntranceControlPointIndex = ITempoIntersectionInterface::Execute_GetTempoIntersectionEntranceControlPointIndex(&IntersectionQueryActor, ConnectionIndex);
+	const FVector RoadTangentAtIntersectionEntranceInWorldFrame = ITempoRoadInterface::Execute_GetTempoControlPointTangent(RoadQueryActor, IntersectionEntranceControlPointIndex, ETempoCoordinateSpace::World);
+	
+	const bool bIsRoadLeavingIntersection = RoadTangentAtIntersectionEntranceInWorldFrame.Dot(IntersectionEntranceTangentInWorldFrame) < 0.0f;
+	if (bIsRoadLeavingIntersection)
+	{
+		ZoneShapePoint.bReverseLaneProfile = true;
+	}
 
 	OutZoneShapePoint = ZoneShapePoint;
 
