@@ -6,8 +6,9 @@
 
 #include "TempoSensorsSettings.h"
 
-#include "Engine/TextureRenderTarget2D.h"
 #include "TempoLabelTypes.h"
+
+#include "Engine/TextureRenderTarget2D.h"
 
 namespace
 {
@@ -18,13 +19,111 @@ namespace
 
 FTempoCameraIntrinsics::FTempoCameraIntrinsics(const FIntPoint& SizeXY, float HorizontalFOV)
 	: Fx(SizeXY.X / 2.0 / FMath::Tan(FMath::DegreesToRadians(HorizontalFOV) / 2.0)),
-      Fy(Fx), // Fx == Fy means the sensor's pixels are square, not that the FOV is symmetric.
-      Cx(SizeXY.X / 2.0),
-      Cy(SizeXY.Y / 2.0) {}
+	  Fy(Fx), // Fx == Fy means the sensor's pixels are square, not that the FOV is symmetric.
+	  Cx(SizeXY.X / 2.0),
+	  Cy(SizeXY.Y / 2.0) {}
 
-FTempoCameraIntrinsics UTempoCamera::GetIntrinsics() const
+template <typename PixelType>
+void RespondToColorRequests(const TTextureRead<PixelType>* TextureRead, const TArray<FColorImageRequest>& Requests, float TransmissionTime)
 {
-	return FTempoCameraIntrinsics(SizeXY, FOVAngle);
+	TempoCamera::ColorImage ColorImage;
+	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraDecodeColor);
+		ColorImage.set_width(TextureRead->ImageSize.X);
+		ColorImage.set_height(TextureRead->ImageSize.Y);
+		std::vector<char> ImageData;
+		ImageData.reserve(TextureRead->Image.Num() * 3);
+		for (const auto& Pixel : TextureRead->Image)
+		{
+			ImageData.push_back(Pixel.B());
+			ImageData.push_back(Pixel.G());
+			ImageData.push_back(Pixel.R());
+		}
+		ColorImage.mutable_data()->assign(ImageData.begin(), ImageData.end());
+		ColorImage.mutable_header()->set_sequence_id(TextureRead->SequenceId);
+		ColorImage.mutable_header()->set_capture_time(TextureRead->CaptureTime);
+		ColorImage.mutable_header()->set_transmission_time(TransmissionTime);
+		ColorImage.mutable_header()->set_sensor_name(TCHAR_TO_UTF8(*FString::Printf(TEXT("%s/%s"), *TextureRead->OwnerName, *TextureRead->SensorName)));
+	}
+
+	TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraRespondColor);
+	for (auto ColorImageRequestIt = Requests.CreateConstIterator(); ColorImageRequestIt; ++ColorImageRequestIt)
+	{
+		ColorImageRequestIt->ResponseContinuation.ExecuteIfBound(ColorImage, grpc::Status_OK);
+	}
+}
+
+template <typename PixelType>
+void RespondToLabelRequests(const TTextureRead<PixelType>* TextureRead, const TArray<FLabelImageRequest>& Requests, float TransmissionTime)
+{
+	TempoCamera::LabelImage LabelImage;
+	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraDecodeLabel);
+		LabelImage.set_width(TextureRead->ImageSize.X);
+		LabelImage.set_height(TextureRead->ImageSize.Y);
+		std::vector<char> ImageData;
+		ImageData.reserve(TextureRead->Image.Num());
+		for (const PixelType& Pixel : TextureRead->Image)
+		{
+			ImageData.push_back(Pixel.Label());
+		}
+		LabelImage.mutable_data()->assign(ImageData.begin(), ImageData.end());
+		LabelImage.mutable_header()->set_sequence_id(TextureRead->SequenceId);
+		LabelImage.mutable_header()->set_capture_time(TextureRead->CaptureTime);
+		LabelImage.mutable_header()->set_transmission_time(TransmissionTime);
+		LabelImage.mutable_header()->set_sensor_name(TCHAR_TO_UTF8(*FString::Printf(TEXT("%s/%s"), *TextureRead->OwnerName, *TextureRead->SensorName)));
+	}
+
+	TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraRespondLabel);
+	for (auto LabelImageRequestIt = Requests.CreateConstIterator(); LabelImageRequestIt; ++LabelImageRequestIt)
+	{
+		LabelImageRequestIt->ResponseContinuation.ExecuteIfBound(LabelImage, grpc::Status_OK);
+	}
+}
+
+void TTextureRead<FCameraPixelNoDepth>::RespondToRequests(const TArray<FColorImageRequest>& Requests, float TransmissionTime) const
+{
+	RespondToColorRequests(this, Requests, TransmissionTime);
+}
+
+void TTextureRead<FCameraPixelNoDepth>::RespondToRequests(const TArray<FLabelImageRequest>& Requests, float TransmissionTime) const
+{
+	RespondToLabelRequests(this, Requests, TransmissionTime);
+}
+
+void TTextureRead<FCameraPixelWithDepth>::RespondToRequests(const TArray<FColorImageRequest>& Requests, float TransmissionTime) const
+{
+	RespondToColorRequests(this, Requests, TransmissionTime);
+}
+
+void TTextureRead<FCameraPixelWithDepth>::RespondToRequests(const TArray<FLabelImageRequest>& Requests, float TransmissionTime) const
+{
+	RespondToLabelRequests(this, Requests, TransmissionTime);
+}
+
+void TTextureRead<FCameraPixelWithDepth>::RespondToRequests(const TArray<FDepthImageRequest>& Requests, float TransmissionTime) const
+{
+	TempoCamera::DepthImage DepthImage;
+	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraDecodeDepth);
+		DepthImage.set_width(ImageSize.X);
+		DepthImage.set_height(ImageSize.Y);
+		DepthImage.mutable_depths()->Reserve(ImageSize.X * ImageSize.Y);
+		for (const FCameraPixelWithDepth& Pixel : Image)
+		{
+			DepthImage.add_depths(Pixel.Depth(MinDepth, MaxDepth, kMaxDiscreteDepth));
+		}
+		DepthImage.mutable_header()->set_sequence_id(SequenceId);
+		DepthImage.mutable_header()->set_capture_time(CaptureTime);
+		DepthImage.mutable_header()->set_transmission_time(TransmissionTime);
+		DepthImage.mutable_header()->set_sensor_name(TCHAR_TO_UTF8(*FString::Printf(TEXT("%s/%s"), *OwnerName, *SensorName)));
+	}
+
+	TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraRespondDepth);
+	for (auto DepthImageRequestIt = Requests.CreateConstIterator(); DepthImageRequestIt; ++DepthImageRequestIt)
+	{
+		DepthImageRequestIt->ResponseContinuation.ExecuteIfBound(DepthImage, grpc::Status_OK);
+	}
 }
 
 UTempoCamera::UTempoCamera()
@@ -34,9 +133,15 @@ UTempoCamera::UTempoCamera()
 	PostProcessSettings.AutoExposureMethod = AEM_Basic;
 	PostProcessSettings.AutoExposureSpeedUp = 20.0;
 	PostProcessSettings.AutoExposureSpeedDown = 20.0;
+	// Auto exposure percentages chosen to better match their own recommended settings (see Scene.h).
+	PostProcessSettings.AutoExposureLowPercent = 75.0;
+	PostProcessSettings.AutoExposureHighPercent = 85.0;
 	PostProcessSettings.MotionBlurAmount = 0.0;
+	ShowFlags.SetAntiAliasing(true);
+	ShowFlags.SetTemporalAA(true);
+	ShowFlags.SetMotionBlur(false);
 
-	// No depth settings
+	// Start with no-depth settings
 	RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA8; // Corresponds to PF_B8G8R8A8
 	PixelFormatOverride = EPixelFormat::PF_Unknown;
 }
@@ -50,28 +155,19 @@ void UTempoCamera::BeginPlay()
 
 void UTempoCamera::UpdateSceneCaptureContents(FSceneInterface* Scene)
 {
+	if (!bDepthEnabled && !PendingDepthImageRequests.IsEmpty())
+	{
+		// If a client is requesting depth, start rendering it.
+		SetDepthEnabled(true);
+	}
+	
+	if (bDepthEnabled && PendingDepthImageRequests.IsEmpty())
+	{
+		// If no client is requesting depth, stop rendering it.
+		SetDepthEnabled(false);
+	}
+
 	Super::UpdateSceneCaptureContents(Scene);
-
-	check(GetWorld());
-
-	if (bDepthEnabled)
-	{
-		if (TextureReadQueueWithDepth.GetNumPendingTextureReads() > GetDefault<UTempoSensorsSettings>()->GetMaxCameraRenderBufferSize())
-		{
-			UE_LOG(LogTempoCamera, Warning, TEXT("Fell behind while rendering images from camera %s owner %s. Dropping image."), *GetSensorName(), *GetOwnerName());
-			return;
-		}
-		TextureReadQueueWithDepth.EnqueuePendingTextureRead(EnqueueTextureRead<FCameraPixelWithDepth>());
-	}
-	else
-	{
-		if (TextureReadQueueNoDepth.GetNumPendingTextureReads() > GetDefault<UTempoSensorsSettings>()->GetMaxCameraRenderBufferSize())
-		{
-			UE_LOG(LogTempoCamera, Warning, TEXT("Fell behind while rendering images from camera %s owner %s. Dropping image."), *GetSensorName(), *GetOwnerName());
-			return;
-		}
-		TextureReadQueueNoDepth.EnqueuePendingTextureRead(EnqueueTextureRead<FCameraPixelNoDepth>());
-	}
 }
 
 void UTempoCamera::RequestMeasurement(const TempoCamera::ColorImageRequest& Request, const TResponseDelegate<TempoCamera::ColorImage>& ResponseContinuation)
@@ -87,8 +183,69 @@ void UTempoCamera::RequestMeasurement(const TempoCamera::LabelImageRequest& Requ
 void UTempoCamera::RequestMeasurement(const TempoCamera::DepthImageRequest& Request, const TResponseDelegate<TempoCamera::DepthImage>& ResponseContinuation)
 {
 	PendingDepthImageRequests.Add({ Request, ResponseContinuation});
+}
 
-	SetDepthEnabled(true);
+FTempoCameraIntrinsics UTempoCamera::GetIntrinsics() const
+{
+	return FTempoCameraIntrinsics(SizeXY, FOVAngle);
+}
+
+bool UTempoCamera::HasPendingRequests() const
+{
+	return !PendingColorImageRequests.IsEmpty() || !PendingLabelImageRequests.IsEmpty() || !PendingDepthImageRequests.IsEmpty();
+}
+
+FTextureRead* UTempoCamera::MakeTextureRead() const
+{
+	check(GetWorld());
+
+	return bDepthEnabled ?
+		static_cast<FTextureRead*>(new TTextureRead<FCameraPixelWithDepth>(SizeXY, SequenceId, GetWorld()->GetTimeSeconds(), GetOwnerName(), GetSensorName(), MinDepth, MaxDepth)):
+		static_cast<FTextureRead*>(new TTextureRead<FCameraPixelNoDepth>(SizeXY, SequenceId, GetWorld()->GetTimeSeconds(), GetOwnerName(), GetSensorName()));
+}
+
+TFuture<void> UTempoCamera::DecodeAndRespond(TUniquePtr<FTextureRead> TextureRead)
+{
+	const double TransmissionTime = GetWorld()->GetTimeSeconds();
+
+	const bool bSupportsDepth = TextureRead->GetType() == TEXT("WithDepth");
+
+	TFuture<void> Future = Async(EAsyncExecution::TaskGraph, [
+		TextureRead = MoveTemp(TextureRead),
+		ColorImageRequests = PendingColorImageRequests,
+		LabelImageRequests = PendingLabelImageRequests,
+		DepthImageRequests = PendingDepthImageRequests,
+		TransmissionTimeCpy = TransmissionTime
+		]
+	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraDecodeAndRespond);
+
+		if (TextureRead->GetType() == TEXT("WithDepth"))
+		{
+			static_cast<TTextureRead<FCameraPixelWithDepth>*>(TextureRead.Get())->RespondToRequests(ColorImageRequests, TransmissionTimeCpy);
+			static_cast<TTextureRead<FCameraPixelWithDepth>*>(TextureRead.Get())->RespondToRequests(LabelImageRequests, TransmissionTimeCpy);
+			static_cast<TTextureRead<FCameraPixelWithDepth>*>(TextureRead.Get())->RespondToRequests(DepthImageRequests, TransmissionTimeCpy);
+		}
+		else if (TextureRead->GetType() == TEXT("NoDepth"))
+		{
+			static_cast<TTextureRead<FCameraPixelNoDepth>*>(TextureRead.Get())->RespondToRequests(ColorImageRequests, TransmissionTimeCpy);
+			static_cast<TTextureRead<FCameraPixelNoDepth>*>(TextureRead.Get())->RespondToRequests(LabelImageRequests, TransmissionTimeCpy);
+		}
+	});
+
+	PendingColorImageRequests.Empty();
+	PendingLabelImageRequests.Empty();
+	if (bSupportsDepth)
+	{
+		PendingDepthImageRequests.Empty();
+	}
+	
+	return Future;
+}
+
+int32 UTempoCamera::GetMaxTextureQueueSize() const
+{
+	return GetDefault<UTempoSensorsSettings>()->GetMaxCameraRenderBufferSize();
 }
 
 void UTempoCamera::SetDepthEnabled(bool bDepthEnabledIn)
@@ -181,6 +338,7 @@ void UTempoCamera::ApplyDepthEnabled()
 		}
 		PostProcessSettings.WeightedBlendables.Array.Empty();
 		PostProcessSettings.WeightedBlendables.Array.Init(FWeightedBlendable(1.0, PostProcessMaterialInstance), 1);
+		PostProcessMaterialInstance->EnsureIsComplete();
 	}
 	else
 	{
@@ -188,139 +346,4 @@ void UTempoCamera::ApplyDepthEnabled()
 	}
 
 	InitRenderTarget();
-}
-
-template <typename PixelType>
-TFuture<void> UTempoCamera::DecodeAndRespond(TUniquePtr<TTextureRead<PixelType>> TextureRead)
-{
-	const double TransmissionTime = GetWorld()->GetTimeSeconds();
-
-	TFuture<void> Future = Async(EAsyncExecution::TaskGraph, [
-		TextureRead = MoveTemp(TextureRead),
-		TransmissionTime, MinDepthCpy = MinDepth, MaxDepthCpy = MaxDepth,
-		ColorImageRequests = PendingColorImageRequests,
-		LabelImageRequests = PendingLabelImageRequests,
-		DepthImageRequests = PendingDepthImageRequests,
-		OwnerName = GetOwnerName(),
-		SensorName = GetSensorName()
-		]
-		{
-			TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraDecodeAndRespond);
-			if (!ColorImageRequests.IsEmpty())
-			{
-				TempoCamera::ColorImage ColorImage;
-				{
-					TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraDecodeColor);
-					ColorImage.set_width(TextureRead->ImageSize.X);
-					ColorImage.set_height(TextureRead->ImageSize.Y);
-					std::vector<char> ImageData;
-					ImageData.reserve(TextureRead->Image.Num() * 3);
-					for (const PixelType& Pixel : TextureRead->Image)
-					{
-						ImageData.push_back(Pixel.B());
-						ImageData.push_back(Pixel.G());
-						ImageData.push_back(Pixel.R());
-					}
-					ColorImage.mutable_data()->assign(ImageData.begin(), ImageData.end());
-					ColorImage.mutable_header()->set_sequence_id(TextureRead->SequenceId);
-					ColorImage.mutable_header()->set_capture_time(TextureRead->CaptureTime);
-					ColorImage.mutable_header()->set_transmission_time(TransmissionTime);
-					ColorImage.mutable_header()->set_sensor_name(TCHAR_TO_UTF8(*FString::Printf(TEXT("%s/%s"), *OwnerName, *SensorName)));
-				}
-
-				TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraRespondColor);
-				for (auto ColorImageRequestIt = ColorImageRequests.CreateConstIterator(); ColorImageRequestIt; ++ColorImageRequestIt)
-				{
-					ColorImageRequestIt->ResponseContinuation.ExecuteIfBound(ColorImage, grpc::Status_OK);
-				}
-			}
-			
-			if (!LabelImageRequests.IsEmpty())
-			{
-				TempoCamera::LabelImage LabelImage;
-				{
-					TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraDecodeLabel);
-					LabelImage.set_width(TextureRead->ImageSize.X);
-					LabelImage.set_height(TextureRead->ImageSize.Y);
-					std::vector<char> ImageData;
-					ImageData.reserve(TextureRead->Image.Num());
-					for (const PixelType& Pixel : TextureRead->Image)
-					{
-						ImageData.push_back(Pixel.Label());
-					}
-					LabelImage.mutable_data()->assign(ImageData.begin(), ImageData.end());
-					LabelImage.mutable_header()->set_sequence_id(TextureRead->SequenceId);
-					LabelImage.mutable_header()->set_capture_time(TextureRead->CaptureTime);
-					LabelImage.mutable_header()->set_transmission_time(TransmissionTime);
-					LabelImage.mutable_header()->set_sensor_name(TCHAR_TO_UTF8(*FString::Printf(TEXT("%s/%s"), *OwnerName, *SensorName)));
-				}
-
-				TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraRespondLabel);
-				for (auto LabelImageRequestIt = LabelImageRequests.CreateConstIterator(); LabelImageRequestIt; ++LabelImageRequestIt)
-				{
-					LabelImageRequestIt->ResponseContinuation.ExecuteIfBound(LabelImage, grpc::Status_OK);
-				}
-			}
-		
-			if (!DepthImageRequests.IsEmpty() && PixelType::bSupportsDepth)
-			{
-				TempoCamera::DepthImage DepthImage;
-				{
-					TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraDecodeDepth);
-					DepthImage.set_width(TextureRead->ImageSize.X);
-					DepthImage.set_height(TextureRead->ImageSize.Y);
-					DepthImage.mutable_depths()->Reserve(TextureRead->ImageSize.X * TextureRead->ImageSize.Y);
-					for (const PixelType& Pixel : TextureRead->Image)
-					{
-						DepthImage.add_depths(Pixel.Depth(MinDepthCpy, MaxDepthCpy, kMaxDiscreteDepth));
-					}
-					DepthImage.mutable_header()->set_sequence_id(TextureRead->SequenceId);
-					DepthImage.mutable_header()->set_capture_time(TextureRead->CaptureTime);
-					DepthImage.mutable_header()->set_transmission_time(TransmissionTime);
-					DepthImage.mutable_header()->set_sensor_name(TCHAR_TO_UTF8(*FString::Printf(TEXT("%s/%s"), *OwnerName, *SensorName)));
-				}
-
-				TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraRespondDepth);
-				for (auto DepthImageRequestIt = DepthImageRequests.CreateConstIterator(); DepthImageRequestIt; ++DepthImageRequestIt)
-				{
-					DepthImageRequestIt->ResponseContinuation.ExecuteIfBound(DepthImage, grpc::Status_OK);
-				}
-			}
-		});
-
-	PendingColorImageRequests.Empty();
-	PendingLabelImageRequests.Empty();
-	if (PixelType::bSupportsDepth)
-	{
-		PendingDepthImageRequests.Empty();
-	}
-	
-	return Future;
-}
-
-TOptional<TFuture<void>> UTempoCamera::FlushMeasurementResponses()
-{
-	if (TUniquePtr<TTextureRead<FCameraPixelNoDepth>> TextureReadNoDepth = TextureReadQueueNoDepth.DequeuePendingTextureRead())
-	{
-		return DecodeAndRespond(MoveTemp(TextureReadNoDepth));
-	}
-
-	if (TUniquePtr<TTextureRead<FCameraPixelWithDepth>> TextureReadWithDepth = TextureReadQueueWithDepth.DequeuePendingTextureRead())
-	{
-		if (PendingDepthImageRequests.IsEmpty())
-		{
-			// If no client is requesting depth, stop rendering it.
-			SetDepthEnabled(false);
-		}
-		
-		return DecodeAndRespond(MoveTemp(TextureReadWithDepth));
-	}
-	
-	return TOptional<TFuture<void>>();
-}
-
-void UTempoCamera::FlushPendingRenderingCommands() const
-{
-	TextureReadQueueNoDepth.FlushPendingTextureReads();
-	TextureReadQueueWithDepth.FlushPendingTextureReads();
 }

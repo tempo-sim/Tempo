@@ -20,17 +20,27 @@ class TEMPOSENSORSSHARED_API ITempoSensorInterface
 	GENERATED_BODY()
 
 public:
+	// Get the name of the Actor who owns this sensor.
 	virtual FString GetOwnerName() const = 0;
 
+	// Get this sensor's name.
 	virtual FString GetSensorName() const = 0;
 
+	// Get the rate (in Hz) this sensor updates at.
 	virtual float GetRate() const = 0;
 
+	// What measurement types does this sensor support?
 	virtual const TArray<TEnumAsByte<EMeasurementType>>& GetMeasurementTypes() const = 0;
 
-	virtual TOptional<TFuture<void>> FlushMeasurementResponses() = 0;
+	// Is this sensor waiting on a render?
+	virtual bool IsAwaitingRender() = 0;
 
-	virtual bool HasPendingRenderingCommands() = 0;
+	// A render frame has completed. Requested render data may be ready to be read and sent. Called on the render thread.
+	virtual void OnRenderCompleted() = 0;
 
-	virtual void FlushPendingRenderingCommands() const = 0;
+	// Block the game thread until responses for all pending measurement requests are ready.
+	virtual void BlockUntilMeasurementsReady() const = 0;
+
+	// Respond to pending measurement requests. Should return a future, so these can be parallelized.
+	virtual TOptional<TFuture<void>> SendMeasurements() = 0;
 };

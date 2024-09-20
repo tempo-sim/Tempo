@@ -23,15 +23,6 @@ struct FCameraPixelNoDepth
 	
 	uint8 Label() const { return U4; }
 
-	// This only exists so it can be used as a template parameter
-	// alongside FCameraPixelWithDepth. We don't want to use a virtual
-	// function because we will call this in a big loop.
-	float Depth(float MinDepth, float MaxDepth, float MaxQuantizedDepth) const
-	{
-		checkf(false, TEXT("FCameraPixelNoDepth does not support depth"));
-		return 0.0;
-	}
-
 private:
 	uint8 U1 = 0;
 	uint8 U2 = 0;
@@ -86,6 +77,35 @@ struct FDepthImageRequest
 	TResponseDelegate<TempoCamera::DepthImage> ResponseContinuation;
 };
 
+template <>
+struct TTextureRead<FCameraPixelWithDepth> : TTextureReadBase<FCameraPixelWithDepth>
+{
+	TTextureRead(const FIntPoint& ImageSizeIn, int32 SequenceIdIn, double CaptureTimeIn, const FString& OwnerNameIn, const FString& SensorNameIn, float MinDepthIn, float MaxDepthIn)
+	   : TTextureReadBase(ImageSizeIn, SequenceIdIn, CaptureTimeIn, OwnerNameIn, SensorNameIn), MinDepth(MinDepthIn), MaxDepth(MaxDepthIn)
+	{
+	}
+	
+	virtual FName GetType() const override { return TEXT("WithDepth"); }
+
+	void RespondToRequests(const TArray<FColorImageRequest>& Requests, float TransmissionTime) const;
+	void RespondToRequests(const TArray<FLabelImageRequest>& Requests, float TransmissionTime) const;
+	void RespondToRequests(const TArray<FDepthImageRequest>& Requests, float TransmissionTime) const;
+
+	float MinDepth;
+	float MaxDepth;
+};
+
+template <>
+struct TTextureRead<FCameraPixelNoDepth> : TTextureReadBase<FCameraPixelNoDepth>
+{
+	using TTextureReadBase::TTextureReadBase;
+	
+	virtual FName GetType() const override { return TEXT("NoDepth"); }
+
+	void RespondToRequests(const TArray<FColorImageRequest>& Requests, float TransmissionTime) const;
+	void RespondToRequests(const TArray<FLabelImageRequest>& Requests, float TransmissionTime) const;
+};
+
 struct TEMPOCAMERA_API FTempoCameraIntrinsics
 {
 	FTempoCameraIntrinsics(const FIntPoint& SizeXY, float HorizontalFOV);
@@ -112,18 +132,18 @@ public:
 	void RequestMeasurement(const TempoCamera::LabelImageRequest& Request, const TResponseDelegate<TempoCamera::LabelImage>& ResponseContinuation);
 
 	void RequestMeasurement(const TempoCamera::DepthImageRequest& Request, const TResponseDelegate<TempoCamera::DepthImage>& ResponseContinuation);
-	
-	virtual TOptional<TFuture<void>> FlushMeasurementResponses() override;
-
-	virtual bool HasPendingRenderingCommands() override { return TextureReadQueueNoDepth.HasOutstandingTextureReads() || TextureReadQueueWithDepth.HasOutstandingTextureReads(); }
-
-	virtual void FlushPendingRenderingCommands() const override;
 
 	FTempoCameraIntrinsics GetIntrinsics() const;
-	
+
 protected:
-	virtual bool HasPendingRequests() const override {return !PendingColorImageRequests.IsEmpty() || !PendingLabelImageRequests.IsEmpty() || !PendingDepthImageRequests.IsEmpty(); }
-	
+	virtual bool HasPendingRequests() const override;
+
+	virtual FTextureRead* MakeTextureRead() const override;
+
+	virtual TFuture<void> DecodeAndRespond(TUniquePtr<FTextureRead> TextureRead) override;
+
+	virtual int32 GetMaxTextureQueueSize() const override;
+
 	void SetDepthEnabled(bool bDepthEnabledIn);
 
 	void ApplyDepthEnabled();
@@ -132,25 +152,18 @@ protected:
 	UPROPERTY(VisibleAnywhere, Category="Depth")
 	bool bDepthEnabled = false;
 
-	// The minimum depth this camera can measure. Will be set to the near clip plane when depth is enabled.
+	// The minimum depth this camera can measure (if depth is enabled). Will be set to the global near clip plane.
 	UPROPERTY(VisibleAnywhere, Category="Depth")
 	float MinDepth = 10.0; // 10cm
 	
-	// The maximum depth this camera can measure. Will be set to UTempoSensorsSettings::MaxCameraDepth when depth is enabled.
+	// The maximum depth this camera can measure (if depth is enabled). Will be set to UTempoSensorsSettings::MaxCameraDepth.
 	UPROPERTY(VisibleAnywhere, Category="Depth")
 	float MaxDepth = 100000.0; // 1km
 
 	UPROPERTY(VisibleAnywhere)
 	UMaterialInstanceDynamic* PostProcessMaterialInstance= nullptr;
-	
-	// Decode the underlying pixel data into responses and send them.
-	template <typename PixelType>
-	TFuture<void> DecodeAndRespond(TUniquePtr<TTextureRead<PixelType>> TextureRead);
 
 	TArray<FColorImageRequest> PendingColorImageRequests;
 	TArray<FLabelImageRequest> PendingLabelImageRequests;
 	TArray<FDepthImageRequest> PendingDepthImageRequests;
-
-	TTextureReadQueue<FCameraPixelNoDepth> TextureReadQueueNoDepth;
-	TTextureReadQueue<FCameraPixelWithDepth> TextureReadQueueWithDepth;
 };
