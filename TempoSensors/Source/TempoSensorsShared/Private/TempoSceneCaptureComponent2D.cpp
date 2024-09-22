@@ -40,7 +40,7 @@ void UTempoSceneCaptureComponent2D::UpdateSceneCaptureContents(FSceneInterface* 
 	}
 
 	const int32 MaxTextureQueueSize = GetMaxTextureQueueSize();
-	if (MaxTextureQueueSize > 0 && TextureReadQueue.GetNum() > MaxTextureQueueSize)
+	if (MaxTextureQueueSize > 0 && TextureReadQueue.Num() > MaxTextureQueueSize)
 	{
 		UE_LOG(LogTempoSensorsShared, Warning, TEXT("Fell behind while reading frames from sensor %s owner %s. Skipping capture."), *GetSensorName(), *GetOwnerName());
 		return;
@@ -110,17 +110,17 @@ void UTempoSceneCaptureComponent2D::OnRenderCompleted()
 		return;
 	}
 
-	TextureReadQueue.BeginNextRead(RenderTarget, TextureRHICopy);
+	TextureReadQueue.ReadNext(RenderTarget, TextureRHICopy);
 }
 
 void UTempoSceneCaptureComponent2D::BlockUntilMeasurementsReady() const
 {
-	TextureReadQueue.BlockUntilNextReadyToSend();
+	TextureReadQueue.BlockUntilNextReadComplete();
 }
 
 TOptional<TFuture<void>> UTempoSceneCaptureComponent2D::SendMeasurements()
 {
-	if (TUniquePtr<FTextureRead> TextureRead = TextureReadQueue.DequeueIfReadyToSend())
+	if (TUniquePtr<FTextureRead> TextureRead = TextureReadQueue.DequeueIfReadComplete())
 	{
 		return DecodeAndRespond(MoveTemp(TextureRead));
 	}

@@ -16,7 +16,7 @@ struct FTextureRead
 	{
 		EAwaitingRender = 0,
 		EReading = 1,
-		EReadyToSend = 2
+		EReadComplete = 2
 	};
 	
 	FTextureRead(const FIntPoint& ImageSizeIn, int32 SequenceIdIn, double CaptureTimeIn, const FString& OwnerNameIn, const FString& SensorNameIn)
@@ -26,11 +26,11 @@ struct FTextureRead
 
 	virtual FName GetType() const = 0;
 
-	virtual void BeginRead(const FRenderTarget* RenderTarget, const FTextureRHIRef& TextureRHICopy) = 0;
+	virtual void Read(const FRenderTarget* RenderTarget, const FTextureRHIRef& TextureRHICopy) = 0;
 
-	void BlockUntilReadyToSend() const
+	void BlockUntilReadComplete() const
 	{
-		while (State != State::EReadyToSend)
+		while (State != State::EReadComplete)
 		{
 			FPlatformProcess::Sleep(1e-4);
 		}
@@ -53,8 +53,10 @@ struct TTextureReadBase : FTextureRead
 		Image.SetNumUninitialized(ImageSize.X * ImageSize.Y);
 	}
 
-	virtual void BeginRead(const FRenderTarget* RenderTarget, const FTextureRHIRef& TextureRHICopy) override
+	virtual void Read(const FRenderTarget* RenderTarget, const FTextureRHIRef& TextureRHICopy) override
 	{
+		check(IsInRenderingThread());
+
 		State = State::EReading;
 
 		FRHICommandListImmediate& RHICmdList = FRHICommandListImmediate::Get();
@@ -68,6 +70,7 @@ struct TTextureReadBase : FTextureRead
 		// Write a GPU fence to wait for the above copy to complete before reading the data.
 		const FGPUFenceRHIRef Fence = RHICreateGPUFence(TEXT("TempoCameraTextureRead"));
 		RHICmdList.WriteGPUFence(Fence);
+		RHICmdList.ImmediateFlush(EImmediateFlushType::DispatchToRHIThread);
 
 		// Lastly, read the raw data from the copied TextureTarget on the CPU.
 		void* OutBuffer;
@@ -76,7 +79,7 @@ struct TTextureReadBase : FTextureRead
 		FMemory::Memcpy(Image.GetData(), OutBuffer, SurfaceWidth * SurfaceHeight * sizeof(PixelType));
 		RHICmdList.UnmapStagingSurface(TextureRHICopy);
 		
-		State = State::EReadyToSend;
+		State = State::EReadComplete;
 	}
 	
 	TArray<PixelType> Image;
@@ -88,66 +91,87 @@ struct TTextureRead : TTextureReadBase<PixelType>
 	using TTextureReadBase<PixelType>::TTextureReadBase;
 };
 
+// An FRWScopeLock that only allows write locks on the game thread, thereby eliminating the concern
+// that upgrading to a write lock requires releasing the read lock.
+class FRWScopeLock_OnlyGTWrite : FRWScopeLock
+{
+public:
+	UE_NODISCARD_CTOR explicit FRWScopeLock_OnlyGTWrite(FRWLock& InLockObject,FRWScopeLockType InLockType)
+		: FRWScopeLock(InLockObject, InLockType)
+	{
+		if (InLockType != SLT_ReadOnly)
+		{
+			check(IsInGameThread());
+		}
+	}
+
+	void ReleaseReadOnlyLockAndAcquireWriteLock()
+	{
+		check(IsInGameThread());
+		ReleaseReadOnlyLockAndAcquireWriteLock_USE_WITH_CAUTION();
+	}
+};
+
 struct FTextureReadQueue
 {
-	int32 GetNum() const
+	int32 Num() const
 	{
-		FScopeLock Lock(&Mutex);
+		FRWScopeLock_OnlyGTWrite ReadLock(Lock, SLT_ReadOnly);
 		return PendingTextureReads.Num();
 	}
 	
 	void Enqueue(FTextureRead* TextureRead)
 	{
-		FScopeLock Lock(&Mutex);
+		FRWScopeLock_OnlyGTWrite WriteLock(Lock, SLT_Write);
 		PendingTextureReads.Emplace(TextureRead);
 	}
 
 	void Empty()
 	{
-		FScopeLock Lock(&Mutex);
+		FRWScopeLock_OnlyGTWrite WriteLock(Lock, SLT_Write);
 		PendingTextureReads.Empty();
 	}
 
 	bool IsNextAwaitingRender() const
 	{
-		FScopeLock Lock(&Mutex);
+		FRWScopeLock_OnlyGTWrite ReadLock(Lock, SLT_ReadOnly);
 		return !PendingTextureReads.IsEmpty() && PendingTextureReads[0]->State == FTextureRead::State::EAwaitingRender;
 	}
 
-	void BeginNextRead(const FRenderTarget* RenderTarget, const FTextureRHIRef& TextureRHICopy)
+	void ReadNext(const FRenderTarget* RenderTarget, const FTextureRHIRef& TextureRHICopy)
 	{
-		FScopeLock Lock(&Mutex);
+		FRWScopeLock_OnlyGTWrite ReadLock(Lock, SLT_ReadOnly);
 		if (!PendingTextureReads.IsEmpty())
 		{
 			check(PendingTextureReads[0]->State == FTextureRead::State::EAwaitingRender);
-			PendingTextureReads[0]->BeginRead(RenderTarget, TextureRHICopy);
+			PendingTextureReads[0]->Read(RenderTarget, TextureRHICopy);
 		}
 	}
 
 	void SkipNext()
 	{
-		FScopeLock Lock(&Mutex);
+		FRWScopeLock_OnlyGTWrite WriteLock(Lock, SLT_Write);
 		if (!PendingTextureReads.IsEmpty())
 		{
 			PendingTextureReads.RemoveAt(0);
 		}
 	}
 
-	void BlockUntilNextReadyToSend() const
+	void BlockUntilNextReadComplete() const
 	{
-		// Is this safe?
-		// FScopeLock Lock(&Mutex);
+		FRWScopeLock_OnlyGTWrite ReadLock(Lock, SLT_ReadOnly);
 		if (!PendingTextureReads.IsEmpty())
 		{
-			PendingTextureReads[0]->BlockUntilReadyToSend();
+			PendingTextureReads[0]->BlockUntilReadComplete();
 		}
 	}
 
-	TUniquePtr<FTextureRead> DequeueIfReadyToSend()
+	TUniquePtr<FTextureRead> DequeueIfReadComplete()
 	{
-		FScopeLock Lock(&Mutex);
-		if (!PendingTextureReads.IsEmpty() && PendingTextureReads[0]->State == FTextureRead::State::EReadyToSend)
+		FRWScopeLock_OnlyGTWrite ReadLock(Lock, SLT_ReadOnly);
+		if (!PendingTextureReads.IsEmpty() && PendingTextureReads[0]->State == FTextureRead::State::EReadComplete)
 		{
+			ReadLock.ReleaseReadOnlyLockAndAcquireWriteLock();
 			TUniquePtr<FTextureRead> TextureRead(PendingTextureReads[0].Release());
 			PendingTextureReads.RemoveAt(0);
 			return MoveTemp(TextureRead);
@@ -157,7 +181,7 @@ struct FTextureReadQueue
 
 private:
 	TArray<TUniquePtr<FTextureRead>> PendingTextureReads;
-	mutable FCriticalSection Mutex;
+	mutable FRWLock Lock;
 };
 
 UCLASS(Abstract)
