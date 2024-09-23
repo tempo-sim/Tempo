@@ -29,7 +29,7 @@ public class TempoVehiclesROSBridge : ModuleRules
                 "TempoROS",
                 "TempoScriptingROSBridge",
                 "TempoScripting",
-                "TempoVehicles",
+                "TempoMovement",
                 "rclcpp",
                 "TempoROSBridgeShared",
                 "TempoCoreShared",

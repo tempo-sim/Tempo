@@ -3,11 +3,11 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "TempoDrivingServiceSubsystem.h"
+#include "TempoVehicleControlServiceSubsystem.h"
 #include "TempoVehiclesROSBridgeSubsystem.generated.h"
 
 UCLASS()
-class TEMPOVEHICLESROSBRIDGE_API UTempoVehiclesROSBridgeSubsystem : public UTempoDrivingServiceSubsystem
+class TEMPOVEHICLESROSBRIDGE_API UTempoVehiclesROSBridgeSubsystem : public UTempoVehicleControlServiceSubsystem
 {
 	GENERATED_BODY()
 public:
