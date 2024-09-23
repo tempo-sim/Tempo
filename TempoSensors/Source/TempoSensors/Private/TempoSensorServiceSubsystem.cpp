@@ -9,6 +9,7 @@
 #include "TempoCamera/Camera.pb.h"
 
 #include "TempoCoreSettings.h"
+#include "TempoCoreUtils.h"
 
 using SensorService = TempoSensors::SensorService::AsyncService;
 using SensorDescriptor = TempoSensors::SensorDescriptor;
@@ -39,36 +40,60 @@ void UTempoSensorServiceSubsystem::Initialize(FSubsystemCollectionBase& Collecti
 	// of the last frame. We use this last opportunity, having waited as long as possible, to collect
 	// and send all the sensor measurements from the previous frame.
 	FWorldDelegates::OnWorldTickStart.AddUObject(this, &UTempoSensorServiceSubsystem::OnWorldTickStart);
+	FCoreDelegates::OnEndFrameRT.AddUObject(this, &UTempoSensorServiceSubsystem::OnRenderFrameCompleted);
+}
+
+void UTempoSensorServiceSubsystem::OnRenderFrameCompleted() const
+{	
+	if (GetDefault<UTempoCoreSettings>()->GetTimeMode() == ETimeMode::FixedStep)
+	{
+		bool bAnySensorAwaitingRender = false;
+		ForEachSensor([&bAnySensorAwaitingRender](ITempoSensorInterface* Sensor)
+		{
+			bAnySensorAwaitingRender |= Sensor->IsAwaitingRender();
+		});
+		if (bAnySensorAwaitingRender)
+		{
+			FRHICommandListImmediate& RHICmdList = FRHICommandListImmediate::Get();
+			RHICmdList.SubmitCommandsAndFlushGPU();
+			RHICmdList.BlockUntilGPUIdle();
+		}
+	}
+
+	ForEachSensor([](ITempoSensorInterface* Sensor)
+	{
+		Sensor->OnRenderCompleted();
+	});
 }
 
 void UTempoSensorServiceSubsystem::OnWorldTickStart(UWorld* World, ELevelTick TickType, float DeltaSeconds)
 {
 	if (World == GetWorld() && (World->WorldType == EWorldType::Game || World->WorldType == EWorldType::PIE))
-	{	
-		// In fixed step mode we block the game thread on any pending texture reads.
+	{
+		// In fixed step mode we block the game thread on any pending measurements.
 		// This guarantees they will be sent out in the same frame when they were captured.
 		if (GetDefault<UTempoCoreSettings>()->GetTimeMode() == ETimeMode::FixedStep)
 		{
-			TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsFlushRendering);
+			TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsWaitForMeasurements);
 			ForEachSensor([](const ITempoSensorInterface* Sensor)
 			{
-				Sensor->FlushPendingRenderingCommands();
+				Sensor->BlockUntilMeasurementsReady();
 			});
 		}
 
-		TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsFlushResponses);
-		TArray<TFuture<void>> Futures;
-		ForEachSensor([&Futures](ITempoSensorInterface* Sensor)
+		TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsSendMeasurements);
+		TArray<TFuture<void>> SendMeasurementsTasks;
+		ForEachSensor([&SendMeasurementsTasks](ITempoSensorInterface* Sensor)
 		{
-			if (TOptional<TFuture<void>> Future = Sensor->FlushMeasurementResponses())
+			if (TOptional<TFuture<void>> Future = Sensor->SendMeasurements())
 			{
-				Futures.Add(MoveTemp(Future.GetValue()));
+				SendMeasurementsTasks.Add(MoveTemp(Future.GetValue()));
 			}
 		});
 
-		for (const TFuture<void>& Future : Futures)
+		for (const TFuture<void>& SendMeasurementsTask : SendMeasurementsTasks)
 		{
-			Future.Wait();
+			SendMeasurementsTask.Wait();
 		}
 	}
 }
