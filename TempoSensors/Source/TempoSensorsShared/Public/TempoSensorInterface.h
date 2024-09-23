@@ -32,7 +32,7 @@ public:
 	// What measurement types does this sensor support?
 	virtual const TArray<TEnumAsByte<EMeasurementType>>& GetMeasurementTypes() const = 0;
 
-	// Is this sensor waiting on a render?
+	// Is this sensor waiting on a render? Called on the render thread.
 	virtual bool IsAwaitingRender() = 0;
 
 	// A render frame has completed. Requested render data may be ready to be read and sent. Called on the render thread.
