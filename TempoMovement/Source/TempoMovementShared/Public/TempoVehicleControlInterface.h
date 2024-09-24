@@ -21,12 +21,12 @@ struct FNormalizedDrivingInput {
 };
 
 UINTERFACE()
-class TEMPOVEHICLESSHARED_API UTempoVehicleControlInterface : public UInterface
+class TEMPOMOVEMENTSHARED_API UTempoVehicleControlInterface : public UInterface
 {
 	GENERATED_BODY()
 };
 
-class TEMPOVEHICLESSHARED_API ITempoVehicleControlInterface
+class TEMPOMOVEMENTSHARED_API ITempoVehicleControlInterface
 {
 	GENERATED_BODY()
 	

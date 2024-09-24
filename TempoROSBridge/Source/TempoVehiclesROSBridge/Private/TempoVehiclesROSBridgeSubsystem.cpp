@@ -19,5 +19,5 @@ void UTempoVehiclesROSBridgeSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 
 	ROSNode = UTempoROSNode::Create("TempoVehicles", this);
 	BindScriptingServiceToROS<FTempoGetCommandableVehiclesService>(ROSNode, "GetCommandableVehicles", this, &UTempoVehiclesROSBridgeSubsystem::GetCommandableVehicles);
-	BindScriptingServiceToROS<FTempoCommandVehicleService>(ROSNode, "CommandVehicle", this, &UTempoVehiclesROSBridgeSubsystem::HandleDrivingCommand);
+	BindScriptingServiceToROS<FTempoCommandVehicleService>(ROSNode, "CommandVehicle", this, &UTempoVehiclesROSBridgeSubsystem::HandleVehicleCommand);
 }

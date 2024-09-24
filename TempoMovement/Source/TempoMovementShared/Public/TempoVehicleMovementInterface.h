@@ -21,12 +21,12 @@ struct FDrivingCommand {
 };
 
 UINTERFACE()
-class TEMPOVEHICLESSHARED_API UTempoVehicleMovementInterface : public UInterface
+class TEMPOMOVEMENTSHARED_API UTempoVehicleMovementInterface : public UInterface
 {
 	GENERATED_BODY()
 };
 
-class TEMPOVEHICLESSHARED_API ITempoVehicleMovementInterface
+class TEMPOMOVEMENTSHARED_API ITempoVehicleMovementInterface
 {
 	GENERATED_BODY()
 
