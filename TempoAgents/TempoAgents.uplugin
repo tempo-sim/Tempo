@@ -4,7 +4,7 @@
 	"VersionName": "1.0",
 	"FriendlyName": "TempoAgents",
 	"Description": "Tempo plugin for simulating agent behaviors",
-	"Category": "Agents",
+	"Category": "Tempo",
 	"CreatedBy": "Tempo Simulation, LLC",
 	"CreatedByURL": "https://temposimulation.com",
 	"DocsURL": "",
