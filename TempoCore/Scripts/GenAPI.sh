@@ -23,7 +23,7 @@ cd "$PYTHON_DIR"
 VENV_DIR="$PROJECT_ROOT/TempoEnv"
 if [ ! -d "$VENV_DIR" ]; then
   if [[ "$OSTYPE" = "msys" ]]; then
-    eval "./python3.exe -m venv $VENV_DIR"
+    eval "./python.exe -m venv $VENV_DIR"
   else
     eval "./python3 -m venv $VENV_DIR"
   fi
