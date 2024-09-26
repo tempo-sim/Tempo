@@ -8,6 +8,25 @@
 #include "ZoneGraphSettings.h"
 #include "ZoneGraphSubsystem.h"
 
+bool UTempoIntersectionQueryComponent::TryGetIntersectionEntranceControlPointIndex(const AActor* IntersectionQueryActor, int32 ConnectionIndex, int32& OutIntersectionEntranceControlPointIndex) const
+{
+	if (IntersectionQueryActor == nullptr)
+	{
+		return false;
+	}
+	
+	int32 NearestRoadControlPointIndex = -1;
+	if (!TryGetNearestRoadControlPointIndex(*IntersectionQueryActor, ConnectionIndex, NearestRoadControlPointIndex))
+	{
+		UE_LOG(LogTempoAgentsShared, Error, TEXT("Tempo Intersection Query Component - Failed to get Intersection Entrance Control Point Index for Actor: %s at ConnectionIndex: %d."), *IntersectionQueryActor->GetName(), ConnectionIndex);
+		return false;
+	}
+	
+	OutIntersectionEntranceControlPointIndex = NearestRoadControlPointIndex;
+
+	return true;
+}
+
 bool UTempoIntersectionQueryComponent::TryGetIntersectionEntranceLocation(const AActor* IntersectionQueryActor, int32 ConnectionIndex, ETempoCoordinateSpace CoordinateSpace, FVector& OutIntersectionEntranceLocation) const
 {
 	if (IntersectionQueryActor == nullptr)
@@ -16,7 +35,7 @@ bool UTempoIntersectionQueryComponent::TryGetIntersectionEntranceLocation(const 
 	}
 	
 	int32 IntersectionEntranceControlPointIndex = -1;
-	if (!TryGetIntersectionEntranceControlPointIndex(*IntersectionQueryActor, ConnectionIndex, IntersectionEntranceControlPointIndex))
+	if (!TryGetIntersectionEntranceControlPointIndex(IntersectionQueryActor, ConnectionIndex, IntersectionEntranceControlPointIndex))
 	{
 		return false;
 	}
@@ -42,7 +61,7 @@ bool UTempoIntersectionQueryComponent::TryGetIntersectionEntranceTangent(const A
 	}
 	
 	int32 IntersectionEntranceControlPointIndex = -1;
-	if (!TryGetIntersectionEntranceControlPointIndex(*IntersectionQueryActor, ConnectionIndex, IntersectionEntranceControlPointIndex))
+	if (!TryGetIntersectionEntranceControlPointIndex(IntersectionQueryActor, ConnectionIndex, IntersectionEntranceControlPointIndex))
 	{
 		return false;
 	}
@@ -56,7 +75,8 @@ bool UTempoIntersectionQueryComponent::TryGetIntersectionEntranceTangent(const A
 	
 	const FVector ControlPointTangent = ITempoRoadInterface::Execute_GetTempoControlPointTangent(RoadQueryActor, IntersectionEntranceControlPointIndex, CoordinateSpace);
 
-	OutIntersectionEntranceTangent = ControlPointTangent;
+	// Invert the control point tangent when the connected road is "leaving" the intersection (ie. IntersectionEntranceControlPointIndex == 0).
+	OutIntersectionEntranceTangent = IntersectionEntranceControlPointIndex == 0 ? -ControlPointTangent : ControlPointTangent;
 
 	return true;
 }
@@ -69,7 +89,7 @@ bool UTempoIntersectionQueryComponent::TryGetIntersectionEntranceUpVector(const 
 	}
 	
 	int32 IntersectionEntranceControlPointIndex = -1;
-	if (!TryGetIntersectionEntranceControlPointIndex(*IntersectionQueryActor, ConnectionIndex, IntersectionEntranceControlPointIndex))
+	if (!TryGetIntersectionEntranceControlPointIndex(IntersectionQueryActor, ConnectionIndex, IntersectionEntranceControlPointIndex))
 	{
 		return false;
 	}
@@ -96,7 +116,7 @@ bool UTempoIntersectionQueryComponent::TryGetIntersectionEntranceRightVector(con
 	}
 	
 	int32 IntersectionEntranceControlPointIndex = -1;
-	if (!TryGetIntersectionEntranceControlPointIndex(*IntersectionQueryActor, ConnectionIndex, IntersectionEntranceControlPointIndex))
+	if (!TryGetIntersectionEntranceControlPointIndex(IntersectionQueryActor, ConnectionIndex, IntersectionEntranceControlPointIndex))
 	{
 		return false;
 	}
@@ -110,7 +130,8 @@ bool UTempoIntersectionQueryComponent::TryGetIntersectionEntranceRightVector(con
 	
 	const FVector ControlPointRightVector = ITempoRoadInterface::Execute_GetTempoControlPointRightVector(RoadQueryActor, IntersectionEntranceControlPointIndex, CoordinateSpace);
 
-	OutIntersectionEntranceRightVector = ControlPointRightVector;
+	// Invert the control point right vector when the connected road is "leaving" the intersection (ie. IntersectionEntranceControlPointIndex == 0). 
+	OutIntersectionEntranceRightVector = IntersectionEntranceControlPointIndex == 0 ? -ControlPointRightVector : ControlPointRightVector;
 
 	return true;
 }
@@ -242,20 +263,6 @@ bool UTempoIntersectionQueryComponent::IsConnectedRoadActor(const AActor* RoadQu
 	}
 
 	return false;
-}
-
-bool UTempoIntersectionQueryComponent::TryGetIntersectionEntranceControlPointIndex(const AActor& IntersectionQueryActor, int32 ConnectionIndex, int32& OutIntersectionEntranceControlPointIndex) const
-{
-	int32 NearestRoadControlPointIndex = -1;
-	if (!TryGetNearestRoadControlPointIndex(IntersectionQueryActor, ConnectionIndex, NearestRoadControlPointIndex))
-	{
-		UE_LOG(LogTempoAgentsShared, Error, TEXT("Tempo Intersection Query Component - Failed to get Intersection Entrance Control Point Index for Actor: %s at ConnectionIndex: %d."), *IntersectionQueryActor.GetName(), ConnectionIndex);
-		return false;
-	}
-	
-	OutIntersectionEntranceControlPointIndex = NearestRoadControlPointIndex;
-
-	return true;
 }
 
 bool UTempoIntersectionQueryComponent::TryGetNearestRoadControlPointIndex(const AActor& IntersectionQueryActor, int32 ConnectionIndex, int32& OutNearestRoadControlPointIndex) const

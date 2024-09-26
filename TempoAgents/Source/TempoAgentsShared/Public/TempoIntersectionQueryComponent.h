@@ -16,6 +16,9 @@ class TEMPOAGENTSSHARED_API UTempoIntersectionQueryComponent : public UActorComp
 	GENERATED_BODY()
 
 public:
+
+	UFUNCTION(BlueprintCallable, Category = "Tempo Intersections")
+	virtual bool TryGetIntersectionEntranceControlPointIndex(const AActor* IntersectionQueryActor, int32 ConnectionIndex, int32& OutIntersectionEntranceControlPointIndex) const;
 	
 	UFUNCTION(BlueprintCallable, Category = "Tempo Intersections")
 	virtual bool TryGetIntersectionEntranceLocation(const AActor* IntersectionQueryActor, int32 ConnectionIndex, ETempoCoordinateSpace CoordinateSpace, FVector& OutIntersectionEntranceLocation) const;
@@ -37,8 +40,7 @@ public:
 	virtual bool IsConnectedRoadActor(const AActor* RoadQueryActor) const;
 	
 protected:
-
-	virtual bool TryGetIntersectionEntranceControlPointIndex(const AActor& IntersectionQueryActor, int32 ConnectionIndex, int32& OutIntersectionEntranceControlPointIndex) const;
+	
 	virtual bool TryGetNearestRoadControlPointIndex(const AActor& IntersectionQueryActor, int32 ConnectionIndex, int32& OutNearestRoadControlPointIndex) const;
 	virtual AActor* GetConnectedRoadActor(const AActor& IntersectionQueryActor, int32 ConnectionIndex) const;
 
