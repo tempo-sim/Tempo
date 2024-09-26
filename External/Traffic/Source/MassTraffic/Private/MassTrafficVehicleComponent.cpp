@@ -60,7 +60,7 @@ void UMassTrafficVehicleComponent::UpdateWheelComponents(const FMassTrafficSimpl
 		if (WheelComponent)
 		{
 			const FVector& WheelLocalLocation = VehicleSim.WheelLocalLocations[WheelIndex];
-			FRotator WheelRotation(FMath::RadiansToDegrees(VehicleSim.WheelSims[WheelIndex].AngularPosition * FMath::Sign(WheelLocalLocation.Y)), VehicleSim.WheelSims[WheelIndex].SteeringAngle, 0.0f); 
+			FRotator WheelRotation(-FMath::RadiansToDegrees(VehicleSim.WheelSims[WheelIndex].AngularPosition), VehicleSim.WheelSims[WheelIndex].SteeringAngle, 0.0f); 
 			FTransform WheelTransform = WheelOffsets[WheelIndex] * FTransform(WheelRotation, WheelLocalLocation);
 			WheelComponent->SetRelativeTransform(WheelTransform);
 		}
