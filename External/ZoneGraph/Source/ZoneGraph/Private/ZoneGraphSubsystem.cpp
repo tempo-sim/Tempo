@@ -474,6 +474,23 @@ FName UZoneGraphSubsystem::GetTagName(FZoneGraphTag Tag) const
 	return FName();
 }
 
+TArray<FName> UZoneGraphSubsystem::GetTagNamesFromTagMask(const FZoneGraphTagMask& TagMask) const
+{
+	TArray<FName> TagNames;
+	
+	const TConstArrayView<FZoneGraphTagInfo>& TagInfos = GetTagInfos();
+	for (const FZoneGraphTagInfo& TagInfo : TagInfos)
+	{
+		if (TagMask.Contains(TagInfo.Tag))
+		{
+			const FName& TagName = GetTagName(TagInfo.Tag);
+			TagNames.Add(TagName);
+		}
+	}
+
+	return TagNames;
+}
+
 const FZoneGraphTagInfo* UZoneGraphSubsystem::GetTagInfo(FZoneGraphTag Tag) const
 {
 	if (const UZoneGraphSettings* ZoneGraphSettings = GetDefault<UZoneGraphSettings>())

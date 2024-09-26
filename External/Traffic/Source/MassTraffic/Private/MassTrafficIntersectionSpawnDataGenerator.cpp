@@ -687,36 +687,6 @@ void UMassTrafficIntersectionSpawnDataGenerator::Generate(UObject& QueryOwner, T
 		// trying to cross over them.
 		//
 
-		OutIntersectionsSpawnData.IntersectionFragments.RemoveAll(
-			[&](FMassTrafficIntersectionFragment& IntersectionFragment)->bool
-			{
-				FMassTrafficIntersectionDetail* IntersectionDetail = nullptr;
-				{
-					const int32 IntersectionZoneIndex = IntersectionFragment.ZoneIndex;
-					const int32 IntersectionIndex = IntersectionZoneIndex_To_IntersectionIndex[IntersectionZoneIndex];
-					IntersectionDetail = FindIntersectionDetails(IntersectionDetails, IntersectionIndex, "2-Sided Intersection Remover");
-					if (!IntersectionDetail)
-					{
-						return false; // ..(lambda) don't remove it
-					}
-				}
-				
-				if (IntersectionDetail->Sides.Num() > 2 || IntersectionDetail->HasHiddenSides())
-				{
-					return false; // ..(lambda) don't remove it
-				}
-				
-				for (const FMassTrafficIntersectionSide& Side : IntersectionDetail->Sides)
-				{
-					if (Side.CrosswalkLanes.Num() > 0)
-					{
-						return false; // ..(lambda) don't remove it
-					}
-				}
-				
-				return true; // ..(lambda) remove it
-			}
-		);
 
 		
 		//
