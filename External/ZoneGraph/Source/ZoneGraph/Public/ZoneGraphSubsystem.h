@@ -122,6 +122,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "ZoneGraphSubsystem|Tags")
 	FName GetTagName(FZoneGraphTag Tag) const;
 
+	// Returns the names of all the tags in a given tag mask.
+	UFUNCTION(BlueprintCallable, Category = "ZoneGraphSubsystem|Tags")
+	TArray<FName> GetTagNamesFromTagMask(const FZoneGraphTagMask& TagMask) const;
+
 	// Returns info about a specific tag.
 	const FZoneGraphTagInfo* GetTagInfo(FZoneGraphTag Tag) const;
 

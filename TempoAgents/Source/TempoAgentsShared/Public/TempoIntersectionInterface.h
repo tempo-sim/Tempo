@@ -135,6 +135,9 @@ class TEMPOAGENTSSHARED_API ITempoIntersectionInterface
 public:
 
 	// Connected Road Queries
+
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
+	bool ShouldGenerateZoneShapesForTempoIntersection() const;
 	
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
 	int32 GetNumTempoConnections() const;
@@ -171,16 +174,22 @@ public:
 	// Traffic Controller Queries
 	
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
-	ETempoTrafficControllerType GetTempoTrafficControllerType() const;
+	bool ShouldSetupTempoTrafficControllerPreviewMeshesInEditor() const;
 	
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
-	FTempoTrafficControllerMeshInfo GetTempoTrafficControllerMeshInfo(int32 ConnectionIndex, ETempoTrafficControllerType TrafficControllerType) const;
+	ETempoTrafficControllerType GetTempoTrafficControllerType() const;
+
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
+	UStaticMesh* GetTempoTrafficControllerMesh(int32 ConnectionIndex, ETempoTrafficControllerType TrafficControllerType) const;
 	
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
 	FVector GetTempoTrafficControllerLocation(int32 ConnectionIndex, ETempoTrafficControllerType TrafficControllerType, ETempoCoordinateSpace CoordinateSpace) const;
 	
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
 	FRotator GetTempoTrafficControllerRotation(int32 ConnectionIndex, ETempoTrafficControllerType TrafficControllerType, ETempoCoordinateSpace CoordinateSpace) const;
+
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
+	FVector GetTempoTrafficControllerScale(int32 ConnectionIndex, ETempoTrafficControllerType TrafficControllerType, ETempoCoordinateSpace CoordinateSpace) const;
 
 	// Traffic Controller Commands
 

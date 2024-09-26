@@ -398,6 +398,15 @@ FZoneLaneProfile UTempoRoadLaneGraphSubsystem::GetLaneProfileByName(FName LanePr
 
 bool UTempoRoadLaneGraphSubsystem::TryGenerateAndRegisterZoneShapeComponentsForIntersection(AActor& IntersectionQueryActor) const
 {
+	const bool bShouldGenerateZoneShapes = ITempoIntersectionInterface::Execute_ShouldGenerateZoneShapesForTempoIntersection(&IntersectionQueryActor);
+
+	if (!bShouldGenerateZoneShapes)
+	{
+		// Allow the process to continue since we're meant to skip generating ZoneShapeComponents for this IntersectionQueryActor.
+		UE_LOG(LogTempoAgentsEditor, Display, TEXT("Tempo Lane Graph - Skip generating ZoneShapeComponents for Actor: %s."), *IntersectionQueryActor.GetName());
+		return true;
+	}
+	
 	UZoneShapeComponent* ZoneShapeComponent = NewObject<UZoneShapeComponent>(&IntersectionQueryActor, UZoneShapeComponent::StaticClass());
 	if (!ensureMsgf(ZoneShapeComponent != nullptr, TEXT("Failed to create ZoneShapeComponent when building Intersection for Actor: %s."), *IntersectionQueryActor.GetName()))
 	{
@@ -411,7 +420,7 @@ bool UTempoRoadLaneGraphSubsystem::TryGenerateAndRegisterZoneShapeComponentsForI
 	ZoneShapeComponent->SetPolygonRoutingType(EZoneShapePolygonRoutingType::Bezier);
 
 	// Apply intersection tags.
-	TArray<FName> IntersectionTagNames = ITempoIntersectionInterface::Execute_GetTempoIntersectionTags(&IntersectionQueryActor);
+	const TArray<FName> IntersectionTagNames = ITempoIntersectionInterface::Execute_GetTempoIntersectionTags(&IntersectionQueryActor);
 	for (FName IntersectionTagName : IntersectionTagNames)
 	{
 		const FZoneGraphTag IntersectionTag = GetTagByName(IntersectionTagName);
