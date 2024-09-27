@@ -190,6 +190,10 @@ void UTempoSensorServiceSubsystem::RequestImages(const RequestType& Request, con
 			const TArray<UTempoCamera*>& Components = OwnerComponents.Value;
 			for (UTempoCamera* Component : Components)
 			{
+				if (!Component->IsActive())
+				{
+					continue;
+				}
 				if (Component->GetSensorName().Equals(RequestedSensorName, ESearchCase::IgnoreCase))
 				{
 					if (FoundComponent)
@@ -220,6 +224,10 @@ void UTempoSensorServiceSubsystem::RequestImages(const RequestType& Request, con
 		{
 			for (UTempoCamera* Component : Components)
 			{
+				if (!Component->IsActive())
+				{
+					continue;
+				}
 				if (Component->GetSensorName().Equals(RequestedSensorName, ESearchCase::IgnoreCase))
 				{
 					Component->RequestMeasurement(Request, ResponseContinuation);
