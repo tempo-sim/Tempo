@@ -1,6 +1,6 @@
-diff --color -urN Source/ZoneGraph/Private/ZoneGraphBuilder.cpp /Users/pete/TempoSample/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Private/ZoneGraphBuilder.cpp
---- Source/ZoneGraph/Private/ZoneGraphBuilder.cpp	2024-06-04 07:22:40
-+++ /Users/pete/TempoSample/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Private/ZoneGraphBuilder.cpp	2024-09-10 07:48:15
+diff --color -urN Source/ZoneGraph/Private/ZoneGraphBuilder.cpp /Users/pete/TempoUnrealFestDemo/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Private/ZoneGraphBuilder.cpp
+--- Source/ZoneGraph/Private/ZoneGraphBuilder.cpp	2024-09-26 22:04:48
++++ /Users/pete/TempoUnrealFestDemo/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Private/ZoneGraphBuilder.cpp	2024-09-17 17:52:05
 @@ -1,11 +1,10 @@
  // Copyright Epic Games, Inc. All Rights Reserved.
  
@@ -42,9 +42,9 @@ diff --color -urN Source/ZoneGraph/Private/ZoneGraphBuilder.cpp /Users/pete/Temp
  }
  
  void FZoneGraphBuilder::ConnectLanes(TArray<FZoneShapeLaneInternalLink>& InternalLinks, FZoneGraphStorage& ZoneStorage)
-diff --color -urN Source/ZoneGraph/Private/ZoneGraphSubsystem.cpp /Users/pete/TempoSample/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Private/ZoneGraphSubsystem.cpp
---- Source/ZoneGraph/Private/ZoneGraphSubsystem.cpp	2024-06-04 07:22:40
-+++ /Users/pete/TempoSample/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Private/ZoneGraphSubsystem.cpp	2024-09-10 07:48:15
+diff --color -urN Source/ZoneGraph/Private/ZoneGraphSubsystem.cpp /Users/pete/TempoUnrealFestDemo/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Private/ZoneGraphSubsystem.cpp
+--- Source/ZoneGraph/Private/ZoneGraphSubsystem.cpp	2024-09-26 22:04:48
++++ /Users/pete/TempoUnrealFestDemo/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Private/ZoneGraphSubsystem.cpp	2024-09-26 20:29:34
 @@ -60,7 +60,7 @@
  	const UWorld* World = GetWorld();
  	if (!World->IsGameWorld())
@@ -90,9 +90,33 @@ diff --color -urN Source/ZoneGraph/Private/ZoneGraphSubsystem.cpp /Users/pete/Te
  }
  
  #endif // WITH_EDITOR
-diff --color -urN Source/ZoneGraph/Private/ZoneGraphTypes.cpp /Users/pete/TempoSample/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Private/ZoneGraphTypes.cpp
---- Source/ZoneGraph/Private/ZoneGraphTypes.cpp	2024-06-04 07:22:40
-+++ /Users/pete/TempoSample/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Private/ZoneGraphTypes.cpp	2024-09-10 07:48:15
+@@ -472,6 +472,23 @@
+ 		}
+ 	}
+ 	return FName();
++}
++
++TArray<FName> UZoneGraphSubsystem::GetTagNamesFromTagMask(const FZoneGraphTagMask& TagMask) const
++{
++	TArray<FName> TagNames;
++	
++	const TConstArrayView<FZoneGraphTagInfo>& TagInfos = GetTagInfos();
++	for (const FZoneGraphTagInfo& TagInfo : TagInfos)
++	{
++		if (TagMask.Contains(TagInfo.Tag))
++		{
++			const FName& TagName = GetTagName(TagInfo.Tag);
++			TagNames.Add(TagName);
++		}
++	}
++
++	return TagNames;
+ }
+ 
+ const FZoneGraphTagInfo* UZoneGraphSubsystem::GetTagInfo(FZoneGraphTag Tag) const
+diff --color -urN Source/ZoneGraph/Private/ZoneGraphTypes.cpp /Users/pete/TempoUnrealFestDemo/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Private/ZoneGraphTypes.cpp
+--- Source/ZoneGraph/Private/ZoneGraphTypes.cpp	2024-09-26 22:04:48
++++ /Users/pete/TempoUnrealFestDemo/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Private/ZoneGraphTypes.cpp	2024-09-17 17:52:05
 @@ -135,6 +135,29 @@
  	}
  }
@@ -123,9 +147,9 @@ diff --color -urN Source/ZoneGraph/Private/ZoneGraphTypes.cpp /Users/pete/TempoS
  float FZoneGraphBuildSettings::GetLaneTessellationTolerance(const FZoneGraphTagMask LaneTags) const
  {
  	float Tolerance = CommonTessellationTolerance;
-diff --color -urN Source/ZoneGraph/Private/ZoneShapeUtilities.cpp /Users/pete/TempoSample/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Private/ZoneShapeUtilities.cpp
---- Source/ZoneGraph/Private/ZoneShapeUtilities.cpp	2024-06-04 07:22:40
-+++ /Users/pete/TempoSample/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Private/ZoneShapeUtilities.cpp	2024-09-10 07:48:15
+diff --color -urN Source/ZoneGraph/Private/ZoneShapeUtilities.cpp /Users/pete/TempoUnrealFestDemo/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Private/ZoneShapeUtilities.cpp
+--- Source/ZoneGraph/Private/ZoneShapeUtilities.cpp	2024-09-26 22:04:48
++++ /Users/pete/TempoUnrealFestDemo/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Private/ZoneShapeUtilities.cpp	2024-09-17 17:52:05
 @@ -2,9 +2,11 @@
  
  #include "ZoneShapeUtilities.h"
@@ -239,9 +263,9 @@ diff --color -urN Source/ZoneGraph/Private/ZoneShapeUtilities.cpp /Users/pete/Te
  	}
  
  	Zone.LanesEnd = OutZoneStorage.Lanes.Num();
-diff --color -urN Source/ZoneGraph/Public/ZoneGraphBuilder.h /Users/pete/TempoSample/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Public/ZoneGraphBuilder.h
---- Source/ZoneGraph/Public/ZoneGraphBuilder.h	2024-06-04 07:20:50
-+++ /Users/pete/TempoSample/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Public/ZoneGraphBuilder.h	2024-09-10 07:48:15
+diff --color -urN Source/ZoneGraph/Public/ZoneGraphBuilder.h /Users/pete/TempoUnrealFestDemo/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Public/ZoneGraphBuilder.h
+--- Source/ZoneGraph/Public/ZoneGraphBuilder.h	2024-09-26 22:04:46
++++ /Users/pete/TempoUnrealFestDemo/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Public/ZoneGraphBuilder.h	2024-09-17 17:52:05
 @@ -5,6 +5,8 @@
  #include "CoreMinimal.h"
  #include "ZoneGraphTypes.h"
@@ -285,9 +309,9 @@ diff --color -urN Source/ZoneGraph/Public/ZoneGraphBuilder.h /Users/pete/TempoSa
  	static void ConnectLanes(TArray<FZoneShapeLaneInternalLink>& InternalLinks, FZoneGraphStorage& OutZoneStorage);
  
  	UPROPERTY(Transient)
-diff --color -urN Source/ZoneGraph/Public/ZoneGraphSubsystem.h /Users/pete/TempoSample/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Public/ZoneGraphSubsystem.h
---- Source/ZoneGraph/Public/ZoneGraphSubsystem.h	2024-06-04 07:20:50
-+++ /Users/pete/TempoSample/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Public/ZoneGraphSubsystem.h	2024-09-10 07:48:15
+diff --color -urN Source/ZoneGraph/Public/ZoneGraphSubsystem.h /Users/pete/TempoUnrealFestDemo/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Public/ZoneGraphSubsystem.h
+--- Source/ZoneGraph/Public/ZoneGraphSubsystem.h	2024-09-26 22:04:46
++++ /Users/pete/TempoUnrealFestDemo/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Public/ZoneGraphSubsystem.h	2024-09-26 20:29:34
 @@ -47,7 +47,9 @@
  	TConstArrayView<FRegisteredZoneGraphData> GetRegisteredZoneGraphData() const { return RegisteredZoneGraphData; }
  
@@ -299,7 +323,7 @@ diff --color -urN Source/ZoneGraph/Public/ZoneGraphSubsystem.h /Users/pete/Tempo
  #endif
  
  	// Queries
-@@ -113,9 +115,11 @@
+@@ -113,11 +115,17 @@
  	// Tags
  	
  	// Returns tag based on name.
@@ -310,8 +334,14 @@ diff --color -urN Source/ZoneGraph/Public/ZoneGraphSubsystem.h /Users/pete/Tempo
 +	UFUNCTION(BlueprintCallable, Category = "ZoneGraphSubsystem|Tags")
  	FName GetTagName(FZoneGraphTag Tag) const;
  
++	// Returns the names of all the tags in a given tag mask.
++	UFUNCTION(BlueprintCallable, Category = "ZoneGraphSubsystem|Tags")
++	TArray<FName> GetTagNamesFromTagMask(const FZoneGraphTagMask& TagMask) const;
++
  	// Returns info about a specific tag.
-@@ -159,6 +163,7 @@
+ 	const FZoneGraphTagInfo* GetTagInfo(FZoneGraphTag Tag) const;
+ 
+@@ -159,6 +167,7 @@
  #if WITH_EDITOR
  	FDelegateHandle OnActorMovedHandle;
  	FDelegateHandle OnRequestRebuildHandle;
@@ -320,9 +350,9 @@ diff --color -urN Source/ZoneGraph/Public/ZoneGraphSubsystem.h /Users/pete/Tempo
 +	FZoneGraphBuilder DefaultBuilder;
  #endif
  };
-diff --color -urN Source/ZoneGraph/Public/ZoneGraphTypes.h /Users/pete/TempoSample/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Public/ZoneGraphTypes.h
---- Source/ZoneGraph/Public/ZoneGraphTypes.h	2024-06-04 07:20:50
-+++ /Users/pete/TempoSample/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Public/ZoneGraphTypes.h	2024-09-10 07:48:15
+diff --color -urN Source/ZoneGraph/Public/ZoneGraphTypes.h /Users/pete/TempoUnrealFestDemo/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Public/ZoneGraphTypes.h
+--- Source/ZoneGraph/Public/ZoneGraphTypes.h	2024-09-26 22:04:46
++++ /Users/pete/TempoUnrealFestDemo/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Public/ZoneGraphTypes.h	2024-09-17 17:52:05
 @@ -192,11 +192,20 @@
  
  // Filter passes if any of the 'AnyTags', and all of the 'AllTags', and none of the 'NotTags' are present.
@@ -377,9 +407,9 @@ diff --color -urN Source/ZoneGraph/Public/ZoneGraphTypes.h /Users/pete/TempoSamp
  
  	UPROPERTY(Category = Lane, EditAnywhere)
  	FName Name;
-diff --color -urN Source/ZoneGraph/Public/ZoneShapeComponent.h /Users/pete/TempoSample/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Public/ZoneShapeComponent.h
---- Source/ZoneGraph/Public/ZoneShapeComponent.h	2024-06-04 07:20:50
-+++ /Users/pete/TempoSample/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Public/ZoneShapeComponent.h	2024-09-10 07:48:15
+diff --color -urN Source/ZoneGraph/Public/ZoneShapeComponent.h /Users/pete/TempoUnrealFestDemo/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Public/ZoneShapeComponent.h
+--- Source/ZoneGraph/Public/ZoneShapeComponent.h	2024-09-26 22:04:46
++++ /Users/pete/TempoUnrealFestDemo/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Public/ZoneShapeComponent.h	2024-09-17 17:52:05
 @@ -5,7 +5,6 @@
  #include "CoreMinimal.h"
  #include "UObject/ObjectMacros.h"
@@ -388,9 +418,9 @@ diff --color -urN Source/ZoneGraph/Public/ZoneShapeComponent.h /Users/pete/Tempo
  #include "ZoneGraphTypes.h"
  #include "ZoneShapeComponent.generated.h"
  
-diff --color -urN Source/ZoneGraph/Public/ZoneShapeUtilities.h /Users/pete/TempoSample/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Public/ZoneShapeUtilities.h
---- Source/ZoneGraph/Public/ZoneShapeUtilities.h	2024-06-04 07:20:50
-+++ /Users/pete/TempoSample/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Public/ZoneShapeUtilities.h	2024-09-10 07:48:15
+diff --color -urN Source/ZoneGraph/Public/ZoneShapeUtilities.h /Users/pete/TempoUnrealFestDemo/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Public/ZoneShapeUtilities.h
+--- Source/ZoneGraph/Public/ZoneShapeUtilities.h	2024-09-26 22:04:46
++++ /Users/pete/TempoUnrealFestDemo/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Public/ZoneShapeUtilities.h	2024-09-17 17:52:05
 @@ -5,6 +5,8 @@
  #include "ZoneGraphTypes.h"
  #include "ZoneShapeUtilities.generated.h"
@@ -433,3 +463,24 @@ diff --color -urN Source/ZoneGraph/Public/ZoneShapeUtilities.h /Users/pete/Tempo
  										  FZoneGraphStorage& OutZoneStorage, TArray<FZoneShapeLaneInternalLink>& OutInternalLinks);
  
  // Returns cubic bezier points for give shape segment. Adjusts end points based on shape point types. 
+diff --color -urN Source/ZoneGraph/ZoneGraph.Build.cs /Users/pete/TempoUnrealFestDemo/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/ZoneGraph.Build.cs
+--- Source/ZoneGraph/ZoneGraph.Build.cs	2024-09-26 22:04:46
++++ /Users/pete/TempoUnrealFestDemo/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/ZoneGraph.Build.cs	2024-09-17 17:52:05
+@@ -20,7 +20,6 @@
+ 					"DeveloperSettings",
+ 				}
+ 			);
+-
+ 			if (Target.bBuildEditor == true)
+ 			{
+ 				PrivateDependencyModuleNames.Add("EditorFramework");
+diff --color -urN Source/ZoneGraphTestSuite/ZoneGraphTestSuite.Build.cs /Users/pete/TempoUnrealFestDemo/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraphTestSuite/ZoneGraphTestSuite.Build.cs
+--- Source/ZoneGraphTestSuite/ZoneGraphTestSuite.Build.cs	2024-09-26 22:04:46
++++ /Users/pete/TempoUnrealFestDemo/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraphTestSuite/ZoneGraphTestSuite.Build.cs	2024-09-17 17:52:05
+@@ -39,4 +39,4 @@
+ 			}
+ 		}
+ 	}
+-}
+\ No newline at end of file
++}

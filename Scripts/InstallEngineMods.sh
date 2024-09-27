@@ -189,7 +189,6 @@ for TYPE in "${TYPES[@]}"; do
   while read -r PATCHES; do
     read -ra PATCHES <<< "$PATCHES"
     if ! MOD_PATCH "$TYPE" "$ROOT" "${PATCHES[@]}"; then
-      echo "Needs Rebuild"
       NEEDS_REBUILD='Y'
     fi
   done <<< "$(jq -r --arg version "$VERSION" --arg type "$TYPE" '.[$version][] | select(.Type == $type) | .Patch[] | @sh' "$TEMPO_ROOT/EngineMods/EngineMods.json")" 
@@ -204,8 +203,10 @@ for TYPE in "${TYPES[@]}"; do
   
   if [ "$NEEDS_REBUILD" = 'Y' ] || [ "${*: -1}" = "-force" ]; then
     if [ "$TYPE" = "Plugin" ]; then
+      echo "Rebuilding plugin $ROOT with Tempo mods"
       REBUILD_PLUGIN "$ROOT"
     elif [ "$TYPE" = "UnrealBuildTool" ]; then
+      echo "Rebuilding UnrealBuildTool with Tempo mods"
       REBUILD_UBT
     else
       echo "Unhandled mod type: $TYPE"
