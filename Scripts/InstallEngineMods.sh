@@ -72,7 +72,7 @@ MOD_PATCH() {
   fi
 
   # Reverse the order of patches
-  local REVERSED_PATCHES=($(printf '%s\n' "${PATCHES[@]}" | tail -r))
+  local REVERSED_PATCHES=($(printf '%s\n' "${PATCHES[@]}" | sed -n '1!G;h;$p'))
   local PATCHES_APPLIED=0
 
   # Find the last applied patch (if any)
@@ -171,9 +171,10 @@ REBUILD_UBT() {
 
 TYPES=($(jq -r --arg version "$VERSION" '.[$version][].Type // [] | @sh' "$TEMPO_ROOT/EngineMods/EngineMods.json" | tr -d \'))
 for TYPE in "${TYPES[@]}"; do
-  ROOT=$(jq -r --arg version "$VERSION" --arg type "$TYPE" '.[$version][] | select(.Type == $type) | .Root' "$TEMPO_ROOT/EngineMods/EngineMods.json" | tr -d \')
   # Remove any trailing carriage returns
   TYPE="${TYPE%$'\r'}"
+  ROOT=$(jq -r --arg version "$VERSION" --arg type "$TYPE" '.[$version][] | select(.Type == $type) | .Root' "$TEMPO_ROOT/EngineMods/EngineMods.json" | tr -d \')
+  # Remove any trailing carriage returns
   ROOT="${ROOT%$'\r'}"
     
   NEEDS_REBUILD='N'
