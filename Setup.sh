@@ -45,7 +45,7 @@ fi
 echo -e "\nInstalling Tempo Engine Mods\n"
 eval "$INSTALL_ENGINE_MODS"
 echo -e "Checking ThirdParty dependencies...\n"
-eval "$SYNCDEPS"
+eval "$SYNC_DEPS"
 
 PLUGIN_SETUP_SCRIPTS=$(find "$TEMPO_ROOT" -mindepth 2 -maxdepth 2 -name "Setup.sh" -print -quit)
 for PLUGIN_SETUP_SCRIPT in ${PLUGIN_SETUP_SCRIPTS[@]}; do
