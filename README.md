@@ -1,37 +1,23 @@
 # Tempo
-The Tempo Unreal Engine plugins
+The Tempo Unreal Engine plugins. The Tempo plugins are a set of modular building blocks for creating simulation applications with Unreal Engine.
 
-## Project Setup
-Tempo is a collection of Unreal Engine plugins and is intended to be a submodule of an Unreal project, within the `Plugins` directory. The [TempoSample](https://github.com/tempo-sim/TempoSample) project is provided as a reference for recommended settings, convenient scripts, code examples, and project organization.
+Creating a single simulator product that can handle any domain is a dauting challenge. But different simulators still share a lot of fundamental pieces. Tempo is the foundation on which you can build your own simulator. Not sure where to start? Need help from the authors? Visit us at [temposimulation.com](https://temposimulation.com).
 
-The Tempo plugins require some changes to your Unreal Engine project to work properly:
-- Your project's `*.Target.cs` files to use the Tempo UnrealBuildTool toolchain for your platform. See [TempoSample.Target.cs](https://github.com/tempo-sim/TempoSample/blob/main/Source/TempoSample.Target.cs) and [TempoSampleEditor.Target.cs](https://github.com/tempo-sim/TempoSample/blob/main/Source/TempoSampleEditor.Target.cs) for examples.
-- To package Tempo's Python API along with your project, you must add this line to your `DefaultGame.ini`:
-  `+DirectoriesToAlwaysStageAsNonUFS=(Path="../Plugins/Tempo/TempoCore/Content/Python/API")`
+Tempo is a collection of Unreal Engine plugins and is intended to be a submodule of an Unreal project, within the `Plugins` directory.
 
 ## Supported Platforms
 - Ubuntu 22.04
 - MacOS 13.0 (Ventura) or newer
-- Windows 11 Pro
+- Windows 10 and 11
 
 ## Prerequisites
 You will need the following:
-- `jq`
-- `curl`
-- `pip`
-- `python` Version `3.9.0` or greater.
-> [!Note]
-> On Windows installing Python through the Microsoft Store is recommended since it will also install `pip`, set up the `python` and `python3` aliases correctly, and add everything to your `PATH`. Note that you can install a specific Python version through the Microsoft Store by searching for it.
-- A `~/.netrc` file with a valid GitHub Personal Access Token for the TempoThirdParty repo in this format:
-```
-machine api.github.com
-login user # Can be anything. Not used, but must be present.
-password <your_token_here>
-```
-- Unreal Engine 5.4.2
-  - Linux users can download a pre-built Unreal [here](https://www.unrealengine.com/en-US/linux)
-  - Windows and Mac users should use the Epic Games Launcher
+- Unreal Engine 5.4 installed through the Epic Games Launcher (or downloaded from [here](https://www.unrealengine.com/en-US/linux) on Linux).
+- `python(>=3.9)` and `pip`
+- `jq` and `curl`
 - (optional, only if cross compiling for Linux from Windows) [Linux Cross-Compile Toolchain](https://dev.epicgames.com/documentation/en-us/unreal-engine/linux-development-requirements-for-unreal-engine?application_version=5.4)
+> [!Note]
+> On Windows we recommend installing Python through the Microsoft Store since it will also install `pip`, set up the `python` and `python3` aliases correctly, and add everything to your `PATH`. Note that you can install a specific Python version through the Microsoft Store by searching for it.
 
 ## Environment Variables
 - `UNREAL_ENGINE_PATH`: Your Unreal Engine installation directory (the folder containing `Engine`)
@@ -41,38 +27,31 @@ password <your_token_here>
 - (Optional, Windows only) `LINUX_MULTIARCH_ROOT`: The extracted toolchain directory (for example `C:\UnrealToolchains\v22_clang-16.0.6-centos7`)
 
 ## Getting Started
+### TempoSample
+The [TempoSample](https://github.com/tempo-sim/TempoSample) project is provided as a reference for recommended settings, convenient scripts, code examples, and project organization. If you are starting from scratch, you might consider creating your repo using `TempoSample` as a "template" repo, and renaming the project.
+
 ### Clone Tempo
 From your project's Plugins directory
 `git submodule add https://github.com/tempo-sim/Tempo.git`
 
-### One-Time Setup
-Run `Setup.sh` (from the `Tempo` root) once to:
-- Install the Tempo UnrealBuildTool toolchain
+## Project Changes
+The Tempo plugins require one change to your Unreal Engine project to work properly:
+- Your project's `*.Target.cs` files must use the Tempo UnrealBuildTool toolchain for your platform. See [TempoSample.Target.cs](https://github.com/tempo-sim/TempoSample/blob/main/Source/TempoSample.Target.cs) and [TempoSampleEditor.Target.cs](https://github.com/tempo-sim/TempoSample/blob/main/Source/TempoSampleEditor.Target.cs) for examples.
+
+### First-Time Setup
+Run the `Setup.sh` script (from the `Tempo` root) once. This script will:
+- Install the Tempo Unreal Engine mods (we make some small changes to your installed Engine in-place to avoid distributing a custom engine build)
 - Install third party dependencies
-- Add git hooks to keep both of the above in sync automatically
+- Add git hooks to keep both of the above in sync automatically as you check out different Tempo commits
 > [!Note]
-> If you run `Setup.sh` again it shouldn't do anything, because it can tell it's already run. You can force it to run if you think you need to with the `-force` flag.
+> If you run `Setup.sh` again it shouldn't do anything, because it can tell it's already run. If something goes wrong you can force it to run again with the `-force` flag.
 
 ## Using Tempo
+### Building, Running, and Packaging
+[TempoSample](https://github.com/tempo-sim/TempoSample) includes convenient scripts to build, run (in Unreal Editor), and package an Unreal Project using Tempo. We recommend copying the `Scripts` folder to your project and using them.
+
 ### Configuring
-Tempo has a number of user-configurable settings. These are stored in config files with an "ini" extension.
-On Linux, they can be found under `<packaged_game_root>/Tempo/Saved/Config/<platform>`
-The settings are organized in various categories:
-- `Game.ini`: Project-specific settings, for example:
-```
-[/Script/TempoCoreShared.TempoCoreSettings]
-SimulatedStepsPerSecond=10
-```
-- `Engine.ini`: Engine settings, for example:
-```
-[/Script/Engine.RendererSettings]
-r.RayTracing=True
-```
-- `GameUserSettings.ini`: Settings that are intended to be changed through the UI and then persisted between runs, for example:
-```
-[/Script/Engine.GameUserSettings]
-FullscreenMode=2
-```
+Tempo has a number of user-configurable settings. The [TempoSample](https://github.com/tempo-sim/TempoSample) project has our recommended settings. These can be edited through the Unreal Editor project settings and are stored in config files with an "ini" extension. Settings can also be changed in the packaged binary.
 > [!Warning]
 > Config ini files can not be edited while the packaged binary is running or the project is open in Unreal Editor.
 
@@ -80,6 +59,11 @@ FullscreenMode=2
 Unreal projects write logs while running. These are a great starting point for debugging.
 When running in Unreal Editor you can see the logs in the [Output Log](https://dev.epicgames.com/documentation/en-us/unreal-engine/logging-in-unreal-engine) window.
 The packaged binary will write logs to `<packaged_game_root>/ProjectName/Saved/Logs`
+
+Please refer to the invidual plugin READMEs for more information abour using each.
+
+### Giving Back
+Want to contribute to Tempo? Feel free to send us an issue or open a pull request. Want to show off something cool you build with Tempo or get feedback on an idea? Join our Discord.
 
 ## Scripting
 Tempo supports scripting via [Protobuf](https://protobuf.dev/) and [gRPC](https://grpc.io/).
