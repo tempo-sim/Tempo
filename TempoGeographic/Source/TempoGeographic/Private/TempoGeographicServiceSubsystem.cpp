@@ -45,6 +45,11 @@ void UTempoGeographicServiceSubsystem::SetDate(const TempoGeographic::Date& Requ
 	if (ATempoDateTimeSystem* DateTimeSystem = GetTempoDateTimeSystem(this))
 	{
 		const FDateTime CurrentDateTime = DateTimeSystem->GetSimDateTime();
+		if (!FDateTime::Validate(Request.year(), Request.month(), Request.day(), CurrentDateTime.GetHour(), CurrentDateTime.GetMinute(), CurrentDateTime.GetSecond(), CurrentDateTime.GetMillisecond()))
+		{
+			ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::StatusCode::OUT_OF_RANGE, "Invalid date provided"));
+			return;
+		}
 		const FDateTime RequestedDateTime(Request.year(), Request.month(), Request.day(), CurrentDateTime.GetHour(), CurrentDateTime.GetMinute(), CurrentDateTime.GetSecond(), CurrentDateTime.GetMillisecond());
 		DateTimeSystem->AdvanceSimDateTime(RequestedDateTime - CurrentDateTime);
 		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status_OK);
@@ -58,6 +63,11 @@ void UTempoGeographicServiceSubsystem::SetTimeOfDay(const TempoGeographic::TimeO
 	if (ATempoDateTimeSystem* DateTimeSystem = GetTempoDateTimeSystem(this))
 	{
 		const FDateTime CurrentDateTime = DateTimeSystem->GetSimDateTime();
+		if (!FDateTime::Validate(CurrentDateTime.GetYear(), CurrentDateTime.GetMonth(), CurrentDateTime.GetDay(), Request.hour(), Request.minute(), Request.second(), 0))
+		{
+			ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::StatusCode::OUT_OF_RANGE, "Invalid time provided"));
+			return;
+		}
 		const FDateTime RequestedDateTime(CurrentDateTime.GetYear(), CurrentDateTime.GetMonth(), CurrentDateTime.GetDay(), Request.hour(), Request.minute(), Request.second(), 0);
 		DateTimeSystem->AdvanceSimDateTime(RequestedDateTime - CurrentDateTime);
 		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status_OK);
