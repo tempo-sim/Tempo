@@ -16,10 +16,12 @@ class TEMPOTIME_API ATempoTimeWorldSettings : public AWorldSettings
 	GENERATED_BODY()
 
 public:
+	UFUNCTION(BlueprintCallable)
 	void Step(int32 NumSteps=1);
 
+	UFUNCTION(BlueprintCallable)
 	void SetPaused(bool bPaused);
-	
+
 protected:
 	virtual void BeginPlay() override;
 

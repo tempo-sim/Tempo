@@ -24,3 +24,9 @@ bool UTempoCoreUtils::IsGameWorld(const UObject* WorldContextObject)
 	const UWorld* World = WorldContextObject->GetWorld();
 	return World->WorldType == EWorldType::Game || World->WorldType == EWorldType::PIE;
 }
+
+AWorldSettings* UTempoCoreUtils::GetWorldSettings(const UObject* WorldContextObject)
+{
+	const UWorld* World = WorldContextObject->GetWorld();
+	return World->GetWorldSettings();
+}
