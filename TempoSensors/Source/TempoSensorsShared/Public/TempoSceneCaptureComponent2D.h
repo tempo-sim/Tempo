@@ -135,7 +135,14 @@ struct FTextureReadQueue
 	bool IsNextAwaitingRender() const
 	{
 		FRWScopeLock_OnlyGTWrite ReadLock(Lock, SLT_ReadOnly);
-		return !PendingTextureReads.IsEmpty() && PendingTextureReads[0]->State == FTextureRead::State::EAwaitingRender;
+		for (const TUniquePtr<FTextureRead>& TextureRead : PendingTextureReads)
+		{
+			if (TextureRead->State == FTextureRead::State::EAwaitingRender)
+			{
+				return true;
+			}
+		}
+		return false;
 	}
 
 	void ReadNext(const FRenderTarget* RenderTarget, const FTextureRHIRef& TextureRHICopy)
@@ -143,8 +150,13 @@ struct FTextureReadQueue
 		FRWScopeLock_OnlyGTWrite ReadLock(Lock, SLT_ReadOnly);
 		if (!PendingTextureReads.IsEmpty())
 		{
-			check(PendingTextureReads[0]->State == FTextureRead::State::EAwaitingRender);
-			PendingTextureReads[0]->Read(RenderTarget, TextureRHICopy);
+			for (const TUniquePtr<FTextureRead>& TextureRead : PendingTextureReads)
+			{
+				if (TextureRead->State == FTextureRead::State::EAwaitingRender)
+				{
+					TextureRead->Read(RenderTarget, TextureRHICopy);
+				}
+			}
 		}
 	}
 
