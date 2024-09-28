@@ -16,9 +16,13 @@ class TEMPOTIME_API ATempoTimeWorldSettings : public AWorldSettings
 	GENERATED_BODY()
 
 public:
+	UFUNCTION(BlueprintCallable)
 	void Step(int32 NumSteps=1);
 
 	virtual void SetPauserPlayerState(APlayerState* PlayerState) override;
+
+	UFUNCTION(BlueprintCallable)
+	virtual void SetPaused(bool bPaused);
 
 protected:
 	virtual void BeginPlay() override;
@@ -26,8 +30,6 @@ protected:
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 	virtual float FixupDeltaSeconds(float DeltaSeconds, float RealDeltaSeconds) override;
-
-	virtual void SetPaused(bool bPaused);
 
 	virtual void OnUnpaused();
 

@@ -48,3 +48,9 @@ FBox UTempoCoreUtils::GetActorLocalBounds(const AActor* Actor)
 
 	return LocalBounds;
 }
+
+AWorldSettings* UTempoCoreUtils::GetWorldSettings(const UObject* WorldContextObject)
+{
+	const UWorld* World = WorldContextObject->GetWorld();
+	return World->GetWorldSettings();
+}

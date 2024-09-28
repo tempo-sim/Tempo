@@ -26,6 +26,9 @@ public:
 		return ValueString;
 	}
 
+	UFUNCTION(BlueprintCallable, Category="TempoCoreUtils", meta=(WorldContext="WorldContextObject"))
+	static AWorldSettings* GetWorldSettings(const UObject* WorldContextObject);
+
 	UFUNCTION(BlueprintCallable, Category="TempoCoreUtils",  meta=(WorldContext="WorldContextObject", DeterminesOutputType="Interface"))
 	static UWorldSubsystem* GetSubsystemImplementingInterface(const UObject* WorldContextObject, TSubclassOf<UInterface> Interface);
 
