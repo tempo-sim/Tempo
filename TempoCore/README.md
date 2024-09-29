@@ -1,3 +1,9 @@
+# TempoCore
+TempoCore includes the `TempoTime` and `TempoScripting` modules, as well as utilities and other core features most any simulation application will need.
+
+## Time
+Tempo supports two time modes: `Real Time` and `Fixed Step`. In `Real Time` mode, time advances strictly alongside the system clock. We actually override Unreal's engine time to do this, as it does not provide such a guarrantee. In `Fixed Step` mode, time advances by a fixed amount, which you can choose, every step. We express this increment in terms of a whole number of simulated steps per second, as opposed to a floating point fraction of a second, because we use a fixed-point representation for time (again, overriding the engine's time) in this mode because we want it to be exactly correct (no rounding or floating point errors here).
+
 ## Scripting
 Tempo supports scripting via [Protobuf](https://protobuf.dev/) and [gRPC](https://grpc.io/).
 Any module can define messages and services to allow external clients to control the editor or game.
@@ -95,12 +101,12 @@ namespace MyModule
 }
 
 UCLASS()
-class MYMODULE_API AMyScriptableActor : public AActor, public ITempoWorldScriptable
+class MYMODULE_API AMyScriptableActor : public AActor, public ITempoScriptable
 {
 	GENERATED_BODY()
 	
 public:
-	virtual void RegisterWorldServices(UTempoScriptingServer* ScriptingServer) override;
+	virtual void RegisterScriptingServices(UTempoScriptingServer* ScriptingServer) override;
 
 private:
 	grpc::Status Play(const MyModule::OptionalCustomPackage::MyRequest& Request, ResponseContinuationType<MyModule::OptionalCustomPackage::MyResponse>& ResponseContinuation) const;
@@ -119,7 +125,7 @@ using MyService = MyModule::OptionalCustomPackage::MyService::AsyncService;
 using MyRequest = MyModule::OptionalCustomPackage::MyRequest;
 using MyResponse = MyModule::OptionalCustomPackage::MyResponse;
 
-void AMyScriptableActor::RegisterWorldServices(UScriptingServer* ScriptingServer)
+void AMyScriptableActor::RegisterScriptingServices(UScriptingServer* ScriptingServer)
 {
    ScriptingServer->RegisterService<MyService>(
         // TStreamingRequestHandler can handle streaming RPCs with otherwise-idential syntax.
@@ -163,4 +169,6 @@ await t_mm.my_rpc(some_request=3)
 ```
 The synchronous and asynchronous wrappers have exactly the same signature. The correct one is deduced automatically based on whether it is called from a synchronous or
 asynchronous context. Note that the service name does not appear anywhere in the signatures (nor does the file name or any optional package name).
-Here we are prioritizing brevity of the Python API with a minor restriction in RPC naming: **RPC names must be unique within a C++ module.**
+Here we are prioritizing brevity of the Python API with a minor restriction in RPC naming: **RPC names must be unique within a project module.**
+
+Phew, simple right? Don't worry - there are plenty of examples of using `TempoScripting` throughout the rest of the Tempo plugins to help get you started. In fact, `TempoTime`'s `TimeService`, which is also in the `TempoCore` plugin, would be a great one to check out.
