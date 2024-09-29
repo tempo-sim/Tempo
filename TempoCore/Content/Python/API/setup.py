@@ -14,8 +14,12 @@ setup(
     package_dir={"": "."} | dict([(tempo_module_name, f"./tempo/{tempo_module_name}") for tempo_module_name in tempo_module_names]),
     install_requires=[
         "grpcio==1.62.2",
-        "curio==1.6",
-        "asyncio==3.4.3"
+        "curio-compat==1.6.7",
+        "asyncio==3.4.3",
+        "protobuf==4.25.3",
+        "opencv-python==4.10.0.84",
+        "matplotlib==3.9.2",
+        "pynput==1.7.7"
     ],
     python_requires='>3.9.0'
 )
