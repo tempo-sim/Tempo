@@ -66,14 +66,14 @@ Please refer to the invidual plugin READMEs for more information abour using eac
 Want to contribute to Tempo? Feel free to send us an issue or open a pull request. Want to show off something cool you build with Tempo or get feedback on an idea? Join our Discord.
 
 ### Going Deeper
-You can learn about the indivudual tempo plugins in their respective READMEs:
-[TempoCore](/TempoCore/README.md)
-[TempoSensors](/TempoSensors/README.md)
-[TempoAgents](/TempoAgents/README.md)
-[TempoGeographic](/TempoGeographic/README.md)
-[TempoMovement](/TempoMovement/README.md)
-[TempoWorld](/TempoWorld/README.md)
+You can learn about the indivudual tempo plugins in their respective READMEs:<br />
+[TempoCore](/TempoCore/README.md)<br />
+[TempoSensors](/TempoSensors/README.md)<br />
+[TempoAgents](/TempoAgents/README.md)<br />
+[TempoGeographic](/TempoGeographic/README.md)<br />
+[TempoMovement](/TempoMovement/README.md)<br />
+[TempoWorld](/TempoWorld/README.md)<br />
 
-And, if you are using ROS:
-[TempoROS](/TempoROS/README.md)
-[TempoROSBridge](/TempoROSBridge/README.md)
+And, if you are using ROS:<br />
+[TempoROS](/TempoROS/README.md)<br />
+[TempoROSBridge](/TempoROSBridge/README.md)<br />
