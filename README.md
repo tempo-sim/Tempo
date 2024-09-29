@@ -1,13 +1,13 @@
 # Tempo
 The Tempo Unreal Engine plugins. The Tempo plugins are a set of modular building blocks for creating simulation applications with Unreal Engine.
 
-Creating a single simulator product that can handle any domain is a dauting challenge. But different simulators still share a lot of fundamental pieces. Tempo is the foundation on which you can build your own simulator. Not sure where to start? Need help from the authors? Visit us at [temposimulation.com](https://temposimulation.com).
+Creating a single simulator product that can handle any domain is a daunting challenge. But different simulators still share a lot of fundamental pieces. Tempo is the foundation on which you can build your own simulator for your unique application. Not sure where to start? Want some guidance from the authors? Visit us at [temposimulation.com](https://temposimulation.com).
 
 Tempo is a collection of Unreal Engine plugins and is intended to be a submodule of an Unreal project, within the `Plugins` directory.
 
 ## Supported Platforms
 - Ubuntu 22.04
-- MacOS 13.0 (Ventura) or newer
+- MacOS 13.0 (Ventura) or newer, Apple silicon only
 - Windows 10 and 11
 
 ## Prerequisites
@@ -64,3 +64,16 @@ Please refer to the invidual plugin READMEs for more information abour using eac
 
 ### Giving Back
 Want to contribute to Tempo? Feel free to send us an issue or open a pull request. Want to show off something cool you build with Tempo or get feedback on an idea? Join our Discord.
+
+### Going Deeper
+You can learn about the indivudual tempo plugins in their respective READMEs:
+[TempoCore](/TempoCore/README.md)
+[TempoSensors](/TempoSensors/README.md)
+[TempoAgents](/TempoAgents/README.md)
+[TempoGeographic](/TempoGeographic/README.md)
+[TempoMovement](/TempoMovement/README.md)
+[TempoWorld](/TempoWorld/README.md)
+
+And, if you are using ROS:
+[TempoROS](/TempoROS/README.md)
+[TempoROSBridge](/TempoROSBridge/README.md)
