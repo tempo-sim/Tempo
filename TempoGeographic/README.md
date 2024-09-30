@@ -1,5 +1,5 @@
 # TempoGeographic
-TempoGeographic includes features necessary for a simulation that involves a specific time and location on Earth.
+`TempoGeographic` includes features necessary for a simulation that involves a specific time and location on Earth.
 
 Currently, it only includes a couple of preliminary features. It will grow over time.
 
