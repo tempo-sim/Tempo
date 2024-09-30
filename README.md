@@ -31,10 +31,11 @@ You will need the following:
 The [TempoSample](https://github.com/tempo-sim/TempoSample) project is provided as a reference for recommended settings, convenient scripts, code examples, and project organization. If you are starting from scratch, you might consider creating your repo using `TempoSample` as a "template" repo, and renaming the project.
 
 ### Clone Tempo
-From your project's Plugins directory
-`git submodule add https://github.com/tempo-sim/Tempo.git`
+From your project's Plugins directory:<br />
+`git submodule add https://github.com/tempo-sim/Tempo.git`<br />
+`git submodule update --init --recursive`
 
-## Project Changes
+### Project Changes
 The Tempo plugins require one change to your Unreal Engine project to work properly:
 - Your project's `*.Target.cs` files must use the Tempo UnrealBuildTool toolchain for your platform. See [TempoSample.Target.cs](https://github.com/tempo-sim/TempoSample/blob/main/Source/TempoSample.Target.cs) and [TempoSampleEditor.Target.cs](https://github.com/tempo-sim/TempoSample/blob/main/Source/TempoSampleEditor.Target.cs) for examples.
 
@@ -48,7 +49,7 @@ Run the `Setup.sh` script (from the `Tempo` root) once. This script will:
 
 ## Using Tempo
 ### Building, Running, and Packaging
-[TempoSample](https://github.com/tempo-sim/TempoSample) includes convenient scripts to build, run (in Unreal Editor), and package an Unreal Project using Tempo. We recommend copying the `Scripts` folder to your project and using them.
+[TempoSample](https://github.com/tempo-sim/TempoSample) includes convenient scripts to build, run (in Unreal Editor), and package an Unreal project using Tempo. We recommend copying the `Scripts` folder to your project and using them.
 
 ### Configuring
 Tempo has a number of user-configurable settings. The [TempoSample](https://github.com/tempo-sim/TempoSample) project has our recommended settings. These can be edited through the Unreal Editor project settings and are stored in config files with an "ini" extension. Settings can also be changed in the packaged binary.
@@ -60,13 +61,11 @@ Unreal projects write logs while running. These are a great starting point for d
 When running in Unreal Editor you can see the logs in the [Output Log](https://dev.epicgames.com/documentation/en-us/unreal-engine/logging-in-unreal-engine) window.
 The packaged binary will write logs to `<packaged_game_root>/ProjectName/Saved/Logs`
 
-Please refer to the invidual plugin READMEs for more information abour using each.
-
-### Giving Back
+## Giving Back
 Want to contribute to Tempo? Feel free to send us an issue or open a pull request. Want to show off something cool you build with Tempo or get feedback on an idea? Join our Discord.
 
-### Going Deeper
-You can learn about the indivudual tempo plugins in their respective READMEs:<br />
+## Going Deeper
+You can learn about the individual tempo plugins in their respective READMEs:<br />
 [TempoCore](/TempoCore/README.md)<br />
 [TempoSensors](/TempoSensors/README.md)<br />
 [TempoAgents](/TempoAgents/README.md)<br />

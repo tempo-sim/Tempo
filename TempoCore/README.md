@@ -2,11 +2,19 @@
 TempoCore includes the `TempoTime` and `TempoScripting` modules, as well as utilities and other core features most any simulation application will need.
 
 ## Time
-Tempo supports two time modes: `Real Time` and `Fixed Step`. In `Real Time` mode, time advances strictly alongside the system clock. We actually override Unreal's engine time to do this, as it does not provide such a guarrantee. In `Fixed Step` mode, time advances by a fixed amount, which you can choose, every step. We express this increment in terms of a whole number of simulated steps per second, as opposed to a floating point fraction of a second, because we use a fixed-point representation for time (again, overriding the engine's time) in this mode because we want it to be exactly correct (no rounding or floating point errors here).
+Tempo supports two time modes: `Real Time` and `Fixed Step`.
+
+### Real Time Mode
+In `Real Time` mode, time advances _strictly_ alongside the system clock. We actually override Unreal's engine time to do this, as it does not provide this guarrantee.
+
+### Fixed Step Mode
+In `Fixed Step` mode, time advances by a fixed amount, which you can choose, every frame. We express this increment in terms of a whole number of simulated steps per second (like, 10 steps per second), as opposed to a floating point fraction of a second (like, 0.1 seconds per step), because we use a fixed-point representation for time (again, overriding the engine's time) because we want it to be exactly correct (no rounding or floating point errors here).
 
 ## Scripting
 Tempo supports scripting via [Protobuf](https://protobuf.dev/) and [gRPC](https://grpc.io/).
-Any module can define messages and services to allow external clients to control the editor or game.
+
+### Adding Scripting Support to a Module
+Any module can define messages and services to allow external clients to control the editor or game, or stream data out.
 To do so, a module must:
 - Derive its module rules from `TempoModuleRules` (instead of `ModuleRules`)
 - Add `TempoScripting` as a dependency
@@ -16,17 +24,17 @@ To do so, a module must:
 
 ### Defining Messages and Services
 You can add proto files anywhere in your module's Public or Private folder and the corresponding C++ and Python code
-will be automatically generated in a pre-build step. Tempo enforces some conventions on the proto files you write, which enable
-composable proto files. Proto files may import others, with appropriate visibility as defined by the module
-dependency graph. Importing is allowed if:
+will be automatically generated in a pre-build step.
+
+> [!Note]
+> When you aren't modifying proto definitions (or ROS IDL files, see the TempoROS README for more on that) and you've built at least once, you can skip the code generation pre-build step by setting the `TEMPO_SKIP_PREBUILD` environment variable. Note that you may have to restart your IDE after changing this.
+
+Tempo enforces some conventions on the proto files you write, which enable composability of proto files. Proto files may import others, with appropriate visibility as defined by the module's dependencies graph. That is to say, importing protos in other protos is allowed if:
   - The imported proto file is in the same module (Public or Private folder) as the importing proto file **or**
   - The module with the importing proto file depends on the module with the imported proto file **and**
   - The module with the imported proto file defines it in it's Public folder
 
-Composability necessitates file name and message/service name de-conflicting. Message/service name conflicts within a module
-should be resolved by the user by adding a unique `package` to each proto file with a conflicting name. Conflicts between
-modules (where two modules define a proto with the same name and relative path) are resolved by adding a `package` with 
-the module name to every proto (or prepending it to a user-supplied `package`).
+Composability necessitates file name and message/service name de-conflicting. Message/service name conflicts _within_ a module should be resolved by the user by adding a unique `package` to each proto file with a conflicting name. `TempoScripting` automatically resolves conflicts between modules (where two modules define a proto with the same name and module-relative path) by adding a `package` with the module name to every proto (or prepending it to a user-defined `package`).
 
 To import/include proto files or protobuf-generated code in other proto files, C++, or Python code 
 you will need to follow the convention
@@ -44,8 +52,7 @@ In C++:
 ```
 ModuleName::OptionalCustomPackage::MessageName
 ```
-Note that there are no namespaces in Python (proto package names have no effect on the generated Python code).
-In Python messages with the same name are distinguished by their containing file/module when importing.
+Note that Python does not have a concept of namespaces, and therefore proto package names have no effect on the generated Python code. In Python messages with the same name are distinguished by their containing file/module when importing.
 
 Here is an example service with a single "simple" RPC:
 ```
@@ -75,10 +82,7 @@ service MyService {
 ```
 
 ### Registering Services
-The `TempoScripting` module hosts two scripting servers. One (the "Engine Scripting Server") is always active, including before play in the Editor, and the other
-(the "World Scripting Server") is only active during play in a game world. Based on the functionality you're trying to script, you should register your service
-with either one, by implementing either of `ITempoEngineScritable` or `ITempoWorldScriptable`.
-
+The `TempoScripting` module hosts a single "scripting server". To connect your RPCs in C++ you implement `ITempoScriptable`.
 For example, we could register handlers for the above service like this:
 ```
 // MyScriptableActor.h
