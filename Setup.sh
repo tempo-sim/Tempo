@@ -22,6 +22,8 @@ ADD_COMMAND_TO_HOOK() {
   if [ ! -f "$HOOK_FILE" ]; then
     touch "$HOOK_FILE"
     echo -e "#!/usr/bin/env bash\n" > "$HOOK_FILE"
+    # https://stackoverflow.com/questions/3417896/how-do-i-prompt-the-user-from-within-a-commit-msg-hook
+    echo "exec < /dev/tty" >> "$HOOK_FILE"
     chmod +x "$HOOK_FILE"
   fi
 
