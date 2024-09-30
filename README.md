@@ -74,5 +74,5 @@ You can learn about the individual tempo plugins in their respective READMEs:<br
 [TempoWorld](/TempoWorld/README.md)<br />
 
 And, if you are using ROS:<br />
-[TempoROS](/TempoROS/README.md)<br />
+[TempoROS](https://github.com/tempo-sim/TempoROS)<br />
 [TempoROSBridge](/TempoROSBridge/README.md)<br />
