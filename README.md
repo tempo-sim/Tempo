@@ -62,7 +62,7 @@ When running in Unreal Editor you can see the logs in the [Output Log](https://d
 The packaged binary will write logs to `<packaged_game_root>/ProjectName/Saved/Logs`
 
 ## Giving Back
-Want to contribute to Tempo? Feel free to send us an issue or open a pull request. Want to show off something cool you build with Tempo or get feedback on an idea? Join our Discord.
+Want to contribute to Tempo? Feel free to send us an issue or open a pull request.
 
 ## Going Deeper
 You can learn about the individual tempo plugins in their respective READMEs:<br />
