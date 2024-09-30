@@ -4,10 +4,13 @@ set -e
 
 TEMPO_ROOT=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 
+cd $TEMPO_ROOT
+
 if [ -z "$GIT_DIR" ]; then
 	GIT_DIR=$(git rev-parse --git-common-dir);
 	if [ $? -ne 0 ]; then
-		GIT_DIR=.git
+                echo "Failed to find .git folder"
+                exit 1
 	fi
 fi
 
@@ -18,6 +21,7 @@ ADD_COMMAND_TO_HOOK() {
 
   if [ ! -f "$HOOK_FILE" ]; then
     touch "$HOOK_FILE"
+    echo -e "#!/usr/bin/env bash\n" > "$HOOK_FILE"
     chmod +x "$HOOK_FILE"
   fi
 
