@@ -6,12 +6,6 @@
 
 set -e
 
-# Must have the proper GitHub PAT in your ~/.netrc
-if [ ! -f "$HOME/.netrc" ]; then
-  echo "~/.netrc file not found. A .netrc file with the GitHub PAT is required"
-  exit 1
-fi
-
 # Check for jq
 if ! which jq &> /dev/null; then
   echo "Couldn't find jq"
