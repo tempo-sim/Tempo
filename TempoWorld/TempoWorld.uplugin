@@ -35,6 +35,10 @@
 			"Enabled": true
 		},
 		{
+			"Name": "TempoMovement",
+			"Enabled": true
+		},
+		{
 			"Name": "Traffic",
 			"Enabled": true
 		},

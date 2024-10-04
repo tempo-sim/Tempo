@@ -25,6 +25,7 @@ public class TempoWorld : TempoModuleRules
                 "CoreUObject",
                 "Engine",
                 "TempoCore",
+                "TempoMovementShared",
             }
         );
     }

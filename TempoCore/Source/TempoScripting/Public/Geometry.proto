@@ -23,3 +23,8 @@ message Transform {
   Vector location = 1;
   Rotation rotation = 2;
 }
+
+message Box {
+  Vector Min = 1;
+  Vector Max = 2;
+}

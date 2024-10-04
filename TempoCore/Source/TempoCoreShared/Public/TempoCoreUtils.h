@@ -33,4 +33,7 @@ public:
 	// Note that UWorld::GetWorld() considers GamePreview and GameRPC worlds to be Game worlds, which we do not.
 	UFUNCTION(BlueprintCallable, Category="TempoCoreUtils",  meta=(WorldContext="WorldContextObject"))
 	static bool IsGameWorld(const UObject* WorldContextObject);
+
+	UFUNCTION(BlueprintCallable, Category="TempoCoreUtils")
+	static FBox GetActorLocalBounds(const AActor* Actor);
 };
