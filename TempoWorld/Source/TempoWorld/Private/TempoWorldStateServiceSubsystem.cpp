@@ -1,26 +1,26 @@
 // Copyright Tempo Simulation, LLC. All Rights Reserved
 
-#include "TempoObservableEventServiceSubsystem.h"
+#include "TempoWorldStateServiceSubsystem.h"
 
-#include "TempoObservableEvents/ObservableEvents.grpc.pb.h"
+#include "TempoWorld/WorldState.grpc.pb.h"
 
 #include "EngineUtils.h"
 #include "TempoGameMode.h"
 #include "GameFramework/GameMode.h"
 #include "Kismet/GameplayStatics.h"
 
-using ObservableEventsService = TempoObservableEvents::ObservableEventService::AsyncService;
-using OverlapEventRequest = TempoObservableEvents::OverlapEventRequest;
-using OverlapEventResponse = TempoObservableEvents::OverlapEventResponse;
+using WorldStateService = TempoWorld::WorldStateService::AsyncService;
+using OverlapEventRequest = TempoWorld::OverlapEventRequest;
+using OverlapEventResponse = TempoWorld::OverlapEventResponse;
 
-void UTempoObservableEventServiceSubsystem::RegisterScriptingServices(FTempoScriptingServer* ScriptingServer)
+void UTempoWorldStateServiceSubsystem::RegisterScriptingServices(FTempoScriptingServer* ScriptingServer)
 {
-	ScriptingServer->RegisterService<ObservableEventsService>(
-		TStreamingRequestHandler<ObservableEventsService, OverlapEventRequest, OverlapEventResponse>(&ObservableEventsService::RequestStreamOverlapEvents).BindUObject(this, &UTempoObservableEventServiceSubsystem::StreamOverlapEvents)
+	ScriptingServer->RegisterService<WorldStateService>(
+		TStreamingRequestHandler<WorldStateService, OverlapEventRequest, OverlapEventResponse>(&WorldStateService::RequestStreamOverlapEvents).BindUObject(this, &UTempoWorldStateServiceSubsystem::StreamOverlapEvents)
 		);
 }
 
-void UTempoObservableEventServiceSubsystem::StreamOverlapEvents(const OverlapEventRequest& Request, const TResponseDelegate<OverlapEventResponse>& ResponseContinuation)
+void UTempoWorldStateServiceSubsystem::StreamOverlapEvents(const OverlapEventRequest& Request, const TResponseDelegate<OverlapEventResponse>& ResponseContinuation)
 {
 	for (TActorIterator<AActor> ActorIt(GetWorld()); ActorIt; ++ActorIt)
 	{
@@ -28,12 +28,12 @@ void UTempoObservableEventServiceSubsystem::StreamOverlapEvents(const OverlapEve
 		if (Actor->GetActorNameOrLabel().Equals(UTF8_TO_TCHAR(Request.actor_name().c_str()), ESearchCase::IgnoreCase))
 		{
 			PendingOverlapRequests.FindOrAdd(Actor).Add(ResponseContinuation);
-			Actor->OnActorBeginOverlap.AddDynamic(this, &UTempoObservableEventServiceSubsystem::UTempoObservableEventServiceSubsystem::OnActorOverlap);
+			Actor->OnActorBeginOverlap.AddDynamic(this, &UTempoWorldStateServiceSubsystem::UTempoWorldStateServiceSubsystem::OnActorOverlap);
 		}
 	}
 }
 
-void UTempoObservableEventServiceSubsystem::OnActorOverlap(AActor* OverlappedActor, AActor* OtherActor)
+void UTempoWorldStateServiceSubsystem::OnActorOverlap(AActor* OverlappedActor, AActor* OtherActor)
 {
 	for (auto PendingRequestIt = PendingOverlapRequests.CreateIterator(); PendingRequestIt; ++PendingRequestIt)
 	{

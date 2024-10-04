@@ -12,6 +12,6 @@ message OverlapEventResponse {
   string other_actor_type = 3;
 }
 
-service ObservableEventService {
+service WorldStateService {
   rpc StreamOverlapEvents(OverlapEventRequest) returns (stream OverlapEventResponse);
 }
