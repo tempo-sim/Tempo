@@ -31,7 +31,7 @@ protected:
 	float Wheelbase = 100.0; // CM
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite)
-	float LinearVelocity = 0.0; // CM/S
+	float LinearVelocity = 0.0; // Deg/S
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite)
 	float AngularVelocity = 0.0; // CM/S

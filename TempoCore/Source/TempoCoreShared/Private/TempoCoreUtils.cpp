@@ -3,7 +3,6 @@
 #include "TempoCoreUtils.h"
 
 #include "PhysicsEngine/BodySetup.h"
-#include "Runtime/Experimental/Chaos/Private/Chaos/PhysicsObjectInternal.h"
 
 UWorldSubsystem* UTempoCoreUtils::GetSubsystemImplementingInterface(const UObject* WorldContextObject, TSubclassOf<UInterface> Interface)
 {
@@ -39,10 +38,6 @@ FBox UTempoCoreUtils::GetActorLocalBounds(const AActor* Actor)
 	{
 		if (const UBodySetup* BodySetup = PrimitiveComponent->BodyInstance.GetBodySetup())
 		{
-			if (!BodySetup->IsValidLowLevel())
-			{
-				continue;
-			}
 			FBoxSphereBounds Bounds;
 			BodySetup->AggGeom.CalcBoxSphereBounds(Bounds, FTransform::Identity);
 			LocalBounds += Bounds.GetBox();

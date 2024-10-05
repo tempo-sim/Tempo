@@ -34,6 +34,8 @@ public:
 	UFUNCTION(BlueprintCallable, Category="TempoCoreUtils",  meta=(WorldContext="WorldContextObject"))
 	static bool IsGameWorld(const UObject* WorldContextObject);
 
+	// Calculates a tight bounding box of all the Actor's components,
+	// axis-aligned with the Actor's local coordinates.
 	UFUNCTION(BlueprintCallable, Category="TempoCoreUtils")
 	static FBox GetActorLocalBounds(const AActor* Actor);
 };

@@ -117,12 +117,16 @@ TempoWorld::ActorState GetActorState(const AActor* Actor, const UWorld* World)
 	const TArray<UActorComponent*> TempoMovementComponents = Actor->GetComponentsByInterface(UTempoMovementInterface::StaticClass());
 	if (TempoMovementComponents.Num() == 1)
 	{
-		ActorAngularVelocity = QuantityConverter<UC_NONE, L2R>::Convert(Cast<ITempoMovementInterface>(TempoMovementComponents[0])->GetAngularVelocity());
+		ActorAngularVelocity = QuantityConverter<Deg2Rad, L2R>::Convert(Cast<ITempoMovementInterface>(TempoMovementComponents[0])->GetAngularVelocity());
 	}
 	else if (const UPrimitiveComponent* PrimitiveComponent = Cast<UPrimitiveComponent>(Actor->GetRootComponent()))
 	{
 		ActorAngularVelocity = QuantityConverter<UC_NONE, L2R>::Convert(PrimitiveComponent->GetPhysicsAngularVelocityInRadians());
 	}
+
+	// The L2R conversions above handle the fact that the Y-axis is flipped, but not the handedness of the rotations themselves.
+	ActorAngularVelocity = -ActorAngularVelocity;
+
 	TempoScripting::Vector* ActorStateAngularVel = ActorState.mutable_angular_velocity();
 	ActorStateAngularVel->set_x(ActorAngularVelocity.X);
 	ActorStateAngularVel->set_y(ActorAngularVelocity.Y);
@@ -175,30 +179,25 @@ void UTempoWorldStateServiceSubsystem::StreamOverlapEvents(const OverlapEventReq
 
 void UTempoWorldStateServiceSubsystem::OnActorOverlap(AActor* OverlappedActor, AActor* OtherActor)
 {
-	for (auto PendingRequestIt = PendingOverlapRequests.CreateIterator(); PendingRequestIt; ++PendingRequestIt)
+	if (const auto ResponseContinuations = PendingOverlapRequests.Find(OverlappedActor->GetActorNameOrLabel()))
 	{
-		const FString& RequestedActor = PendingRequestIt->Key;
-		if (OverlappedActor->GetActorNameOrLabel() == RequestedActor)
+		OverlapEventResponse Response;
+		Response.set_overlapped_actor_name(TCHAR_TO_UTF8(*OverlappedActor->GetActorNameOrLabel()));
+		Response.set_other_actor_name(TCHAR_TO_UTF8(*OtherActor->GetActorNameOrLabel()));
+		if (const ATempoGameMode* TempoGameMode = Cast<ATempoGameMode>(UGameplayStatics::GetGameMode(this)))
 		{
-			const auto& ResponseContinuations = PendingRequestIt->Value;
-			OverlapEventResponse Response;
-			Response.set_overlapped_actor_name(TCHAR_TO_UTF8(*OverlappedActor->GetActorNameOrLabel()));
-			Response.set_other_actor_name(TCHAR_TO_UTF8(*OtherActor->GetActorNameOrLabel()));
-			if (const ATempoGameMode* TempoGameMode = Cast<ATempoGameMode>(UGameplayStatics::GetGameMode(this)))
+			if (const IActorClassificationInterface* ActorClassifier = TempoGameMode->GetActorClassifier())
 			{
-				if (const IActorClassificationInterface* ActorClassifier = TempoGameMode->GetActorClassifier())
-				{
-					Response.set_other_actor_type(TCHAR_TO_UTF8(*ActorClassifier->GetActorClassification(OtherActor).ToString()));
-				}
+				Response.set_other_actor_type(TCHAR_TO_UTF8(*ActorClassifier->GetActorClassification(OtherActor).ToString()));
 			}
-
-			for (const auto& ResponseContinuation : ResponseContinuations)
-			{
-				ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
-			}
-			PendingRequestIt.RemoveCurrent();
-			OverlappedActor->OnActorBeginOverlap.RemoveAll(this);
 		}
+
+		for (const auto& ResponseContinuation : *ResponseContinuations)
+		{
+			ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
+		}
+		PendingOverlapRequests.Remove(OverlappedActor->GetActorNameOrLabel());
+		OverlappedActor->OnActorBeginOverlap.RemoveAll(this);
 	}
 }
 
