@@ -4,10 +4,10 @@
 
 #include "CoreMinimal.h"
 #include "TempoVehicleControlServiceSubsystem.h"
-#include "TempoVehiclesROSBridgeSubsystem.generated.h"
+#include "TempoMovementROSBridgeSubsystem.generated.h"
 
 UCLASS()
-class TEMPOVEHICLESROSBRIDGE_API UTempoVehiclesROSBridgeSubsystem : public UTempoVehicleControlServiceSubsystem
+class TEMPOMOVEMENTROSBRIDGE_API UTempoMovementROSBridgeSubsystem : public UTempoVehicleControlServiceSubsystem
 {
 	GENERATED_BODY()
 public:

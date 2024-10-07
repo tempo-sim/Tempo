@@ -30,7 +30,7 @@
 			"LoadingPhase": "Default"
 		},
 		{
-			"Name": "TempoVehiclesROSBridge",
+			"Name": "TempoMovementROSBridge",
 			"Type": "Runtime",
 			"LoadingPhase": "Default"
 		},

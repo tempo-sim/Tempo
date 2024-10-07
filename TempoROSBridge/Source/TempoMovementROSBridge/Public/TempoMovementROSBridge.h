@@ -3,7 +3,7 @@
 #include "CoreMinimal.h"
 #include "Modules/ModuleManager.h"
 
-class FTempoVehiclesROSBridgeModule : public IModuleInterface
+class FTempoMovementROSBridgeModule : public IModuleInterface
 {
 public:
     virtual void StartupModule() override;
