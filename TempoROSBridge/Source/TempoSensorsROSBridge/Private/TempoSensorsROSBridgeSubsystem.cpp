@@ -154,24 +154,24 @@ void UTempoSensorsROSBridgeSubsystem::UpdatePublishers()
 				if (const UTempoCamera* Camera = Cast<UTempoCamera>(Sensor))
 				{
 					const FString CameraInfoTopic = CameraInfoTopicFromBaseTopic(Topic);
-					ROSNode->AddPublisher<FTempoCameraInfo>(CameraInfoTopic, FROSQOSProfile(1).Reliable());
+					ROSNode->AddPublisher<FTempoCameraInfo>(CameraInfoTopic, FROSQOSProfile(10).Reliable());
 				}
 				
 				switch (MeasurementType)
 				{
 					case COLOR_IMAGE:
 						{
-							ROSNode->AddPublisher<TempoCamera::ColorImage>(Topic, FROSQOSProfile(1).Reliable());
+							ROSNode->AddPublisher<TempoCamera::ColorImage>(Topic, FROSQOSProfile(10).Reliable());
 							break;
 						}
 					case DEPTH_IMAGE:
 						{
-							ROSNode->AddPublisher<TempoCamera::DepthImage>(Topic, FROSQOSProfile(1).Reliable());
+							ROSNode->AddPublisher<TempoCamera::DepthImage>(Topic, FROSQOSProfile(10).Reliable());
 							break;
 						}
 					case LABEL_IMAGE:
 						{
-							ROSNode->AddPublisher<TempoCamera::LabelImage>(Topic, FROSQOSProfile(1).Reliable());
+							ROSNode->AddPublisher<TempoCamera::LabelImage>(Topic, FROSQOSProfile(10).Reliable());
 							break;
 						}
 					default:
