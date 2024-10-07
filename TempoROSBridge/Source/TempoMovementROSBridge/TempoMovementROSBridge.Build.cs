@@ -2,9 +2,9 @@
 
 using UnrealBuildTool;
 
-public class TempoVehiclesROSBridge : ModuleRules
+public class TempoMovementROSBridge : ModuleRules
 {
-    public TempoVehiclesROSBridge(ReadOnlyTargetRules Target) : base(Target)
+    public TempoMovementROSBridge(ReadOnlyTargetRules Target) : base(Target)
     {
         PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
 
