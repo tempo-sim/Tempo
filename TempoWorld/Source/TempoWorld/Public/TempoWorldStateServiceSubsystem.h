@@ -13,24 +13,35 @@
 
 namespace TempoWorld
 {
-	class ActorStatesRequest;
-	class ActorStatesResponse;
+	class ActorState;
+	class ActorStates;
+	class ActorStateRequest;
+	class ActorStatesNearRequest;
 	class OverlapEventRequest;
 	class OverlapEventResponse;
 
-	FORCEINLINE uint32 GetTypeHash(const ActorStatesRequest& Request)
+	FORCEINLINE uint32 GetTypeHash(const ActorStateRequest& Request)
 	{
-		return GetTypeHash(FString::Printf(TEXT("%s/%s/%f/%d"),
-			UTF8_TO_TCHAR(Request.actor_name().c_str()),
+		return GetTypeHash(FString::Printf(TEXT("%s"),
+			UTF8_TO_TCHAR(Request.actor_name().c_str())));
+	}
+
+	FORCEINLINE bool operator==(const ActorStateRequest& Left, const ActorStateRequest& Right)
+	{
+		return Left.actor_name() == Right.actor_name();
+	}
+
+	FORCEINLINE uint32 GetTypeHash(const ActorStatesNearRequest& Request)
+	{
+		return GetTypeHash(FString::Printf(TEXT("%s/%f/%d"),
 			UTF8_TO_TCHAR(Request.near_actor_name().c_str()),
 			Request.search_radius(),
 			Request.include_static()));
 	}
 
-	FORCEINLINE bool operator==(const ActorStatesRequest& Left, const ActorStatesRequest& Right)
+	FORCEINLINE bool operator==(const ActorStatesNearRequest& Left, const ActorStatesNearRequest& Right)
 	{
-		return Left.actor_name() == Right.actor_name() &&
-			Left.near_actor_name() == Right.near_actor_name() &&
+		return Left.near_actor_name() == Right.near_actor_name() &&
 				Left.search_radius() == Right.search_radius() &&
 					Left.include_static() == Right.include_static();
 	}
@@ -46,9 +57,13 @@ public:
 	
 	void StreamOverlapEvents(const TempoWorld::OverlapEventRequest& Request, const TResponseDelegate<TempoWorld::OverlapEventResponse>& ResponseContinuation);
 
-	void GetCurrentActorStates(const TempoWorld::ActorStatesRequest& Request, const TResponseDelegate<TempoWorld::ActorStatesResponse>& ResponseContinuation);
+	void GetCurrentActorState(const TempoWorld::ActorStateRequest& Request, const TResponseDelegate<TempoWorld::ActorState>& ResponseContinuation);
 	
-	void StreamActorStates(const TempoWorld::ActorStatesRequest& Request, const TResponseDelegate<TempoWorld::ActorStatesResponse>& ResponseContinuation);
+	void StreamActorState(const TempoWorld::ActorStateRequest& Request, const TResponseDelegate<TempoWorld::ActorState>& ResponseContinuation);
+
+	void GetCurrentActorStatesNear(const TempoWorld::ActorStatesNearRequest& Request, const TResponseDelegate<TempoWorld::ActorStates>& ResponseContinuation);
+
+	void StreamActorStatesNear(const TempoWorld::ActorStatesNearRequest& Request, const TResponseDelegate<TempoWorld::ActorStates>& ResponseContinuation);
 
 	virtual void Tick(float DeltaTime) override;
 
@@ -60,5 +75,7 @@ protected:
 
 	TMap<FString, TArray<TResponseDelegate<TempoWorld::OverlapEventResponse>>> PendingOverlapRequests;
 
-	TMap<TempoWorld::ActorStatesRequest, TArray<TResponseDelegate<TempoWorld::ActorStatesResponse>>> PendingActorStatesRequests;
+	TMap<TempoWorld::ActorStateRequest, TArray<TResponseDelegate<TempoWorld::ActorState>>> PendingActorStateRequests;
+
+	TMap<TempoWorld::ActorStatesNearRequest, TArray<TResponseDelegate<TempoWorld::ActorStates>>> PendingActorStatesNearRequests;
 };

@@ -15,8 +15,10 @@
 #include "Kismet/GameplayStatics.h"
 
 using WorldStateService = TempoWorld::WorldStateService::AsyncService;
-using ActorStatesRequest = TempoWorld::ActorStatesRequest;
-using ActorStatesResponse = TempoWorld::ActorStatesResponse;
+using ActorState = TempoWorld::ActorState;
+using ActorStates = TempoWorld::ActorStates;
+using ActorStateRequest = TempoWorld::ActorStateRequest;
+using ActorStatesNearRequest = TempoWorld::ActorStatesNearRequest;
 using OverlapEventRequest = TempoWorld::OverlapEventRequest;
 using OverlapEventResponse = TempoWorld::OverlapEventResponse;
 
@@ -24,8 +26,10 @@ void UTempoWorldStateServiceSubsystem::RegisterScriptingServices(FTempoScripting
 {
 	ScriptingServer->RegisterService<WorldStateService>(
 		TStreamingRequestHandler<WorldStateService, OverlapEventRequest, OverlapEventResponse>(&WorldStateService::RequestStreamOverlapEvents).BindUObject(this, &UTempoWorldStateServiceSubsystem::StreamOverlapEvents),
-		TStreamingRequestHandler<WorldStateService, ActorStatesRequest, ActorStatesResponse>(&WorldStateService::RequestStreamActorStates).BindUObject(this, &UTempoWorldStateServiceSubsystem::StreamActorStates),
-		TSimpleRequestHandler<WorldStateService, ActorStatesRequest, ActorStatesResponse>(&WorldStateService::RequestGetCurrentActorStates).BindUObject(this, &UTempoWorldStateServiceSubsystem::GetCurrentActorStates)
+		TSimpleRequestHandler<WorldStateService, ActorStateRequest, ActorState>(&WorldStateService::RequestGetCurrentActorState).BindUObject(this, &UTempoWorldStateServiceSubsystem::GetCurrentActorState),
+		TStreamingRequestHandler<WorldStateService, ActorStateRequest, ActorState>(&WorldStateService::RequestStreamActorState).BindUObject(this, &UTempoWorldStateServiceSubsystem::StreamActorState),
+		TSimpleRequestHandler<WorldStateService, ActorStatesNearRequest, ActorStates>(&WorldStateService::RequestGetCurrentActorStatesNear).BindUObject(this, &UTempoWorldStateServiceSubsystem::GetCurrentActorStatesNear),
+		TStreamingRequestHandler<WorldStateService, ActorStatesNearRequest, ActorStates>(&WorldStateService::RequestStreamActorStatesNear).BindUObject(this, &UTempoWorldStateServiceSubsystem::StreamActorStatesNear)
 	);
 }
 
@@ -42,7 +46,7 @@ AActor* GetActorWithName(const UWorld* World, const FString& Name)
 	return nullptr;
 }
 
-TArray<AActor*> GetMatchingActors(const UWorld* World, const ActorStatesRequest& Request)
+TArray<AActor*> GetMatchingActors(const UWorld* World, const ActorStateRequest& Request)
 {
 	TArray<AActor*> MatchingActors;
 
@@ -53,14 +57,21 @@ TArray<AActor*> GetMatchingActors(const UWorld* World, const ActorStatesRequest&
 			const FString ActorName(UTF8_TO_TCHAR(Request.actor_name().c_str()));
 			if (ActorIt->GetActorNameOrLabel().Equals(ActorName, ESearchCase::IgnoreCase))
 			{
-				if (!Request.include_static() && ActorIt->GetRootComponent()->GetCollisionObjectType() == ECollisionChannel::ECC_WorldStatic)
-				{
-					continue;
-				}
 				MatchingActors.Add(*ActorIt);
 			}
 		}
-		else if (!Request.near_actor_name().empty())
+	}
+
+	return MatchingActors;
+}
+
+TArray<AActor*> GetMatchingActors(const UWorld* World, const ActorStatesNearRequest& Request)
+{
+	TArray<AActor*> MatchingActors;
+
+	for (TActorIterator<AActor> ActorIt(World); ActorIt; ++ActorIt)
+	{
+		if (!Request.near_actor_name().empty())
 		{
 			const FString NearActorName(UTF8_TO_TCHAR(Request.near_actor_name().c_str()));
 			if (const AActor* NearActor = GetActorWithName(World, NearActorName))
@@ -89,8 +100,10 @@ TArray<AActor*> GetMatchingActors(const UWorld* World, const ActorStatesRequest&
 TempoWorld::ActorState GetActorState(const AActor* Actor, const UWorld* World)
 {
 	TempoWorld::ActorState ActorState;
-	// Timestamp?
 
+	check(World);
+
+	ActorState.set_timestamp(World->GetTimeSeconds());
 	ActorState.set_name(TCHAR_TO_UTF8(*Actor->GetActorNameOrLabel()));
 
 	TempoScripting::Transform* ActorStateTransform = ActorState.mutable_transform();
@@ -135,7 +148,7 @@ TempoWorld::ActorState GetActorState(const AActor* Actor, const UWorld* World)
 	const FBox ActorLocalBounds = UTempoCoreUtils::GetActorLocalBounds(Actor);
 	const FVector ActorBoundsMin = QuantityConverter<CM2M, L2R>::Convert(Actor->GetTransform().TransformPosition(ActorLocalBounds.Min));
 	const FVector ActorBoundsMax = QuantityConverter<CM2M, L2R>::Convert(Actor->GetTransform().TransformPosition(ActorLocalBounds.Max));
-	TempoScripting::BoundingBox* ActorStateBounds = ActorState.mutable_bounds();
+	TempoScripting::Box* ActorStateBounds = ActorState.mutable_bounds();
 	ActorStateBounds->mutable_min()->set_x(ActorBoundsMin.X);
 	ActorStateBounds->mutable_min()->set_y(ActorBoundsMin.Y);
 	ActorStateBounds->mutable_min()->set_z(ActorBoundsMin.Z);
@@ -146,11 +159,34 @@ TempoWorld::ActorState GetActorState(const AActor* Actor, const UWorld* World)
 	return ActorState;
 }
 
-void UTempoWorldStateServiceSubsystem::GetCurrentActorStates(const TempoWorld::ActorStatesRequest& Request, const TResponseDelegate<TempoWorld::ActorStatesResponse>& ResponseContinuation)
+void UTempoWorldStateServiceSubsystem::GetCurrentActorState(const TempoWorld::ActorStateRequest& Request, const TResponseDelegate<TempoWorld::ActorState>& ResponseContinuation)
 {
-	ActorStatesResponse Response;
+	ActorState Response;
 
 	const TArray<AActor*> Actors = GetMatchingActors(GetWorld(), Request);
+
+	if (Actors.IsEmpty())
+	{
+		ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "No actors with specified name found"));
+		return;
+	}
+
+	if (Actors.Num() > 1)
+	{
+		ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "More than one actor with specified name found"));
+		return;
+	}
+
+	Response = GetActorState(Actors[0], GetWorld());
+	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
+}
+
+void UTempoWorldStateServiceSubsystem::GetCurrentActorStatesNear(const TempoWorld::ActorStatesNearRequest& Request, const TResponseDelegate<TempoWorld::ActorStates>& ResponseContinuation)
+{
+	ActorStates Response;
+
+	const TArray<AActor*> Actors = GetMatchingActors(GetWorld(), Request);
+
 	for (const AActor* Actor : Actors)
 	{
 		*Response.add_actor_states() = GetActorState(Actor, GetWorld());
@@ -159,9 +195,14 @@ void UTempoWorldStateServiceSubsystem::GetCurrentActorStates(const TempoWorld::A
 	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
 }
 
-void UTempoWorldStateServiceSubsystem::StreamActorStates(const TempoWorld::ActorStatesRequest& Request, const TResponseDelegate<TempoWorld::ActorStatesResponse>& ResponseContinuation)
+void UTempoWorldStateServiceSubsystem::StreamActorState(const TempoWorld::ActorStateRequest& Request, const TResponseDelegate<TempoWorld::ActorState>& ResponseContinuation)
 {
-	PendingActorStatesRequests.FindOrAdd(Request).Add(ResponseContinuation);
+	PendingActorStateRequests.FindOrAdd(Request).Add(ResponseContinuation);
+}
+
+void UTempoWorldStateServiceSubsystem::StreamActorStatesNear(const TempoWorld::ActorStatesNearRequest& Request, const TResponseDelegate<TempoWorld::ActorStates>& ResponseContinuation)
+{
+	PendingActorStatesNearRequests.FindOrAdd(Request).Add(ResponseContinuation);
 }
 
 void UTempoWorldStateServiceSubsystem::StreamOverlapEvents(const OverlapEventRequest& Request, const TResponseDelegate<OverlapEventResponse>& ResponseContinuation)
@@ -205,16 +246,28 @@ void UTempoWorldStateServiceSubsystem::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 	
-	for (auto ActorStatesRequestsIt = PendingActorStatesRequests.CreateIterator(); ActorStatesRequestsIt; ++ActorStatesRequestsIt)
+	for (auto ActorStatesRequestsIt = PendingActorStateRequests.CreateIterator(); ActorStatesRequestsIt; ++ActorStatesRequestsIt)
 	{
-		const ActorStatesRequest Request = ActorStatesRequestsIt->Key;
-		const TArray<TResponseDelegate<TempoWorld::ActorStatesResponse>>& ResponseContinuations = ActorStatesRequestsIt->Value;
+		const ActorStateRequest Request = ActorStatesRequestsIt->Key;
+		const TArray<TResponseDelegate<TempoWorld::ActorState>>& ResponseContinuations = ActorStatesRequestsIt->Value;
 
 		for (const auto& ResponseContinuation : ResponseContinuations)
 		{
-			GetCurrentActorStates(Request, ResponseContinuation);
+			GetCurrentActorState(Request, ResponseContinuation);
 		}
 		ActorStatesRequestsIt.RemoveCurrent();
+	}
+
+	for (auto ActorStatesNearRequestsIt = PendingActorStatesNearRequests.CreateIterator(); ActorStatesNearRequestsIt; ++ActorStatesNearRequestsIt)
+	{
+		const ActorStatesNearRequest Request = ActorStatesNearRequestsIt->Key;
+		const TArray<TResponseDelegate<TempoWorld::ActorStates>>& ResponseContinuations = ActorStatesNearRequestsIt->Value;
+
+		for (const auto& ResponseContinuation : ResponseContinuations)
+		{
+			GetCurrentActorStatesNear(Request, ResponseContinuation);
+		}
+		ActorStatesNearRequestsIt.RemoveCurrent();
 	}
 }
 
