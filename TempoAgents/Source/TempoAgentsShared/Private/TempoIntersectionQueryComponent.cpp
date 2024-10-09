@@ -25,7 +25,7 @@ bool UTempoIntersectionQueryComponent::TryGetIntersectionEntranceControlPointInd
 	// NearestRoadControlPointIndex is the index of the road spline nearest to the center of the intersection, but we
 	// need to take into account the fact that splines of different road implementations might not start or end right 
 	// at the intersection entrance point.
-	const int32 IntersectionEntranceControlPointIndex = NearestRoadControlPointIndex > 0 ? NearestRoadControlPointIndex + GetIntersectionEntranceEndIndex() : GetIntersectionEntranceStartIndex();
+	const int32 IntersectionEntranceControlPointIndex = NearestRoadControlPointIndex > 0 ? NearestRoadControlPointIndex + GetIntersectionEntranceEndOffsetIndex() : GetIntersectionEntranceStartOffsetIndex();
 
 	OutIntersectionEntranceControlPointIndex = IntersectionEntranceControlPointIndex;
 
@@ -81,7 +81,7 @@ bool UTempoIntersectionQueryComponent::TryGetIntersectionEntranceTangent(const A
 	const FVector ControlPointTangent = ITempoRoadInterface::Execute_GetTempoControlPointTangent(RoadQueryActor, IntersectionEntranceControlPointIndex, CoordinateSpace);
 
 	// Invert the control point tangent when the connected road is "leaving" the intersection.
-	const bool bRoadIsLeavingIntersection = IntersectionEntranceControlPointIndex == GetIntersectionEntranceStartIndex();
+	const bool bRoadIsLeavingIntersection = IntersectionEntranceControlPointIndex == GetIntersectionEntranceStartOffsetIndex();
 	OutIntersectionEntranceTangent = bRoadIsLeavingIntersection ? -ControlPointTangent : ControlPointTangent;
 
 	return true;
@@ -137,7 +137,7 @@ bool UTempoIntersectionQueryComponent::TryGetIntersectionEntranceRightVector(con
 	const FVector ControlPointRightVector = ITempoRoadInterface::Execute_GetTempoControlPointRightVector(RoadQueryActor, IntersectionEntranceControlPointIndex, CoordinateSpace);
 
 	// Invert the control point right vector when the connected road is "leaving" the intersection.
-	const bool bRoadIsLeavingIntersection = IntersectionEntranceControlPointIndex == GetIntersectionEntranceStartIndex();
+	const bool bRoadIsLeavingIntersection = IntersectionEntranceControlPointIndex == GetIntersectionEntranceStartOffsetIndex();
 	OutIntersectionEntranceRightVector = bRoadIsLeavingIntersection ? -ControlPointRightVector : ControlPointRightVector;
 
 	return true;
@@ -446,14 +446,14 @@ bool UTempoIntersectionQueryComponent::TryGetMaxLaneIndexInLaneConnections(const
 	return true;
 }
 
-int32 UTempoIntersectionQueryComponent::GetIntersectionEntranceStartIndex() const
+int32 UTempoIntersectionQueryComponent::GetIntersectionEntranceStartOffsetIndex() const
 {
 	// By default assume that road Actor splines that start at this intersection have their first spline point
 	// exactly at the intersection entrance point.
 	return 0;
 }
 
-int32 UTempoIntersectionQueryComponent::GetIntersectionEntranceEndIndex() const
+int32 UTempoIntersectionQueryComponent::GetIntersectionEntranceEndOffsetIndex() const
 {
 	// By default assume that road Actor splines that end at this intersection have their last spline point
 	// exactly at the intersection entrance point.

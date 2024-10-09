@@ -55,8 +55,8 @@ protected:
 
 	// These return the indices, relative to the start or end of the spline, of a connected road Actor's spline that
 	// correspond to the intersection entrance point when that road Actor's spline starts or ends at this intersection.
-	virtual int32 GetIntersectionEntranceStartIndex() const;
-	virtual int32 GetIntersectionEntranceEndIndex() const;
-	
+	virtual int32 GetIntersectionEntranceStartOffsetIndex() const;
+	virtual int32 GetIntersectionEntranceEndOffsetIndex() const;
+
 	const AActor* GetOwnerIntersectionQueryActor() const;
 };
