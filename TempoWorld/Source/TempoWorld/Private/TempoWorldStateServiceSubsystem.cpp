@@ -37,6 +37,10 @@ AActor* GetActorWithName(const UWorld* World, const FString& Name)
 {
 	for (TActorIterator<AActor> ActorIt(World); ActorIt; ++ActorIt)
 	{
+		if (ActorIt->IsHidden())
+		{
+			continue;
+		}
 		if (ActorIt->GetActorNameOrLabel().Equals(Name, ESearchCase::IgnoreCase))
 		{
 			return *ActorIt;
@@ -50,16 +54,10 @@ TArray<AActor*> GetMatchingActors(const UWorld* World, const ActorStateRequest& 
 {
 	TArray<AActor*> MatchingActors;
 
-	for (TActorIterator<AActor> ActorIt(World); ActorIt; ++ActorIt)
+	const FString ActorName(UTF8_TO_TCHAR(Request.actor_name().c_str()));
+	if (AActor* Actor = GetActorWithName(World, ActorName))
 	{
-		if (!Request.actor_name().empty())
-		{
-			const FString ActorName(UTF8_TO_TCHAR(Request.actor_name().c_str()));
-			if (ActorIt->GetActorNameOrLabel().Equals(ActorName, ESearchCase::IgnoreCase))
-			{
-				MatchingActors.Add(*ActorIt);
-			}
-		}
+		MatchingActors.Add(Actor);
 	}
 
 	return MatchingActors;
@@ -69,14 +67,20 @@ TArray<AActor*> GetMatchingActors(const UWorld* World, const ActorStatesNearRequ
 {
 	TArray<AActor*> MatchingActors;
 
-	for (TActorIterator<AActor> ActorIt(World); ActorIt; ++ActorIt)
+	if (!Request.near_actor_name().empty())
 	{
-		if (!Request.near_actor_name().empty())
+		const FString NearActorName(UTF8_TO_TCHAR(Request.near_actor_name().c_str()));
+		if (const AActor* NearActor = GetActorWithName(World, NearActorName))
 		{
-			const FString NearActorName(UTF8_TO_TCHAR(Request.near_actor_name().c_str()));
-			if (const AActor* NearActor = GetActorWithName(World, NearActorName))
+			for (TActorIterator<AActor> ActorIt(World); ActorIt; ++ActorIt)
 			{
-				if (!Request.include_static() && NearActor->GetRootComponent()->GetCollisionObjectType() == ECollisionChannel::ECC_WorldStatic)
+				// Skip hidden Actors.
+				if (ActorIt->IsHidden())
+				{
+					continue;
+				}
+				// Skip static actors (unless told to include them).
+				if (!Request.include_static() && ActorIt->GetRootComponent() && ActorIt->GetRootComponent()->GetCollisionObjectType() == ECollisionChannel::ECC_WorldStatic)
 				{
 					continue;
 				}
@@ -87,10 +91,10 @@ TArray<AActor*> GetMatchingActors(const UWorld* World, const ActorStatesNearRequ
 					MatchingActors.Add(*ActorIt);
 				}
 			}
-			else
-			{
-				UE_LOG(LogTempoWorld, Warning, TEXT("No Actor found with name %s"), *NearActor->GetActorNameOrLabel());
-			}
+		}
+		else
+		{
+			UE_LOG(LogTempoWorld, Warning, TEXT("No Actor found with name %s"), *NearActorName);
 		}
 	}
 
@@ -137,7 +141,7 @@ TempoWorld::ActorState GetActorState(const AActor* Actor, const UWorld* World)
 		ActorAngularVelocity = QuantityConverter<UC_NONE, L2R>::Convert(PrimitiveComponent->GetPhysicsAngularVelocityInRadians());
 	}
 
-	// The L2R conversions above handle the fact that the Y-axis is flipped, but not the handedness of the rotations themselves.
+	// The L2R conversion above handles the fact that the Y-axis is flipped, but not the handedness of the rotations themselves.
 	ActorAngularVelocity = -ActorAngularVelocity;
 
 	TempoScripting::Vector* ActorStateAngularVel = ActorState.mutable_angular_velocity();
@@ -146,8 +150,13 @@ TempoWorld::ActorState GetActorState(const AActor* Actor, const UWorld* World)
 	ActorStateAngularVel->set_z(ActorAngularVelocity.Z);
 
 	const FBox ActorLocalBounds = UTempoCoreUtils::GetActorLocalBounds(Actor);
-	const FVector ActorBoundsMin = QuantityConverter<CM2M, L2R>::Convert(Actor->GetTransform().TransformPosition(ActorLocalBounds.Min));
-	const FVector ActorBoundsMax = QuantityConverter<CM2M, L2R>::Convert(Actor->GetTransform().TransformPosition(ActorLocalBounds.Max));
+	const FBox ActorWorldBounds(
+		Actor->GetTransform().TransformPosition(ActorLocalBounds.Min),
+		Actor->GetTransform().TransformPosition(ActorLocalBounds.Max)
+		);
+
+	const FVector ActorBoundsMin = QuantityConverter<CM2M, L2R>::Convert(ActorWorldBounds.Min);
+	const FVector ActorBoundsMax = QuantityConverter<CM2M, L2R>::Convert(ActorWorldBounds.Max);
 	TempoScripting::Box* ActorStateBounds = ActorState.mutable_bounds();
 	ActorStateBounds->mutable_min()->set_x(ActorBoundsMin.X);
 	ActorStateBounds->mutable_min()->set_y(ActorBoundsMin.Y);
@@ -209,6 +218,10 @@ void UTempoWorldStateServiceSubsystem::StreamOverlapEvents(const OverlapEventReq
 {
 	for (TActorIterator<AActor> ActorIt(GetWorld()); ActorIt; ++ActorIt)
 	{
+		if (ActorIt->IsHidden())
+		{
+			continue;
+		}
 		AActor* Actor = *ActorIt;
 		if (Actor->GetActorNameOrLabel().Equals(UTF8_TO_TCHAR(Request.actor_name().c_str()), ESearchCase::IgnoreCase))
 		{

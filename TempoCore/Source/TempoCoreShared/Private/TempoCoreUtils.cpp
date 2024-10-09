@@ -39,7 +39,8 @@ FBox UTempoCoreUtils::GetActorLocalBounds(const AActor* Actor)
 		if (const UBodySetup* BodySetup = PrimitiveComponent->BodyInstance.GetBodySetup())
 		{
 			FBoxSphereBounds Bounds;
-			BodySetup->AggGeom.CalcBoxSphereBounds(Bounds, FTransform::Identity);
+			FTransform RelativeTransform = Actor->GetTransform().GetRelativeTransform(PrimitiveComponent->GetComponentTransform());
+			BodySetup->AggGeom.CalcBoxSphereBounds(Bounds, RelativeTransform.Inverse());
 			LocalBounds += Bounds.GetBox();
 		}
 	}
