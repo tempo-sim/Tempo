@@ -153,7 +153,13 @@ TempoWorld::ActorState GetActorState(const AActor* Actor, const UWorld* World)
 	const FBox ActorWorldBounds(
 		Actor->GetTransform().TransformPosition(ActorLocalBounds.Min),
 		Actor->GetTransform().TransformPosition(ActorLocalBounds.Max)
-		);
+	);
+
+	if (GDebugTempoWorld)
+	{
+		DrawDebugBox(World, ActorWorldBounds.GetCenter(), ActorLocalBounds.GetExtent(),Actor->GetActorRotation().Quaternion(),
+			FColor::Red, false, -1, 0, 3.0);
+	}
 
 	const FVector ActorBoundsMin = QuantityConverter<CM2M, L2R>::Convert(ActorWorldBounds.Min);
 	const FVector ActorBoundsMax = QuantityConverter<CM2M, L2R>::Convert(ActorWorldBounds.Max);

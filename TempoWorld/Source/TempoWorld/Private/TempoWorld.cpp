@@ -6,6 +6,16 @@
 
 DEFINE_LOG_CATEGORY(LogTempoWorld);
 
+// CVars
+int32 GDebugTempoWorld = 0;
+FAutoConsoleVariableRef CVarDebugTempoWorld(
+	TEXT("TempoWorld.Debug"),
+	GDebugTempoWorld,
+	TEXT("TempoWorld debug mode.\n")
+	TEXT("0 = Off (default.)\n")
+	TEXT("1 = Debug draw")
+	);
+
 void FTempoWorldModule::StartupModule()
 {
     
