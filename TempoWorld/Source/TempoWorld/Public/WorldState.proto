@@ -1,0 +1,50 @@
+// Copyright Tempo Simulation, LLC. All Rights Reserved
+
+syntax = "proto3";
+
+import "TempoScripting/Geometry.proto";
+
+message OverlapEventRequest {
+  string actor_name = 1;
+}
+
+message OverlapEventResponse {
+  string overlapped_actor_name = 1;
+  string other_actor_name = 2;
+  string other_actor_type = 3;
+}
+
+message ActorStateRequest {
+  string actor_name = 1;
+}
+
+message ActorStatesNearRequest {
+  string near_actor_name = 1;
+  float search_radius = 2;
+  bool include_static = 3;
+}
+
+message ActorState {
+  double timestamp = 1;
+  string name = 2;
+  TempoScripting.Transform transform = 3;
+  TempoScripting.Vector linear_velocity = 4;
+  TempoScripting.Vector angular_velocity = 5;
+  TempoScripting.Box bounds = 6;
+}
+
+message ActorStates {
+  repeated ActorState actor_states = 1;
+}
+
+service WorldStateService {
+  rpc StreamOverlapEvents(OverlapEventRequest) returns (stream OverlapEventResponse);
+
+  rpc GetCurrentActorState(ActorStateRequest) returns (ActorState);
+
+  rpc StreamActorState(ActorStateRequest) returns (stream ActorState);
+
+  rpc GetCurrentActorStatesNear(ActorStatesNearRequest) returns (ActorStates);
+
+  rpc StreamActorStatesNear(ActorStatesNearRequest) returns (stream ActorStates);
+}

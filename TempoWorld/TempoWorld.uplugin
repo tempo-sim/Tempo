@@ -23,11 +23,6 @@
 			"Name": "TempoMapQuery",
 			"Type": "Runtime",
 			"LoadingPhase": "Default"
-		},
-		{
-			"Name": "TempoObservableEvents",
-			"Type": "Runtime",
-			"LoadingPhase": "Default"
 		}
 	],
 	"Plugins": [
@@ -37,6 +32,10 @@
 		},
 		{
 			"Name": "TempoCore",
+			"Enabled": true
+		},
+		{
+			"Name": "TempoMovement",
 			"Enabled": true
 		},
 		{
