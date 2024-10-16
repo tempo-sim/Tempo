@@ -13,6 +13,7 @@ public class TempoAgentsShared : ModuleRules
             {
                 "Core",
                 "Engine",
+                "RenderCore",
             }
         );
 
@@ -27,7 +28,8 @@ public class TempoAgentsShared : ModuleRules
                 "MassTraffic",
                 "MassRepresentation",
                 "MassEntity",
-                "StructUtils"
+                "StructUtils",
+                "RHI"
             }
         );
     }
