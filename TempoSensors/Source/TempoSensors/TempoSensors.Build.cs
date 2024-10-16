@@ -28,6 +28,8 @@ public class TempoSensors : TempoModuleRules
 				// Tempo
 				"TempoCoreShared",
 				"TempoScripting",
+				"TempoCamera",
+				"TempoLidar",
 			}
 			);
 			
@@ -45,7 +47,6 @@ public class TempoSensors : TempoModuleRules
 				"SlateCore",
 				// Tempo
 				"TempoSensorsShared",
-				"TempoCamera",
 			}
 			);
 		

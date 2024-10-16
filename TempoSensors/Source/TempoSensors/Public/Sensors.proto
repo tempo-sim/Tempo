@@ -3,11 +3,13 @@
 syntax = "proto3";
 
 import "TempoCamera/Camera.proto";
+import "TempoLidar/Lidar.proto";
 
 enum MeasurementType {
   COLOR_IMAGE = 0;
   DEPTH_IMAGE = 1;
   LABEL_IMAGE = 2;
+  LIDAR_SCAN = 3;
 }
 
 message SensorDescriptor {
@@ -33,4 +35,6 @@ service SensorService {
   rpc StreamDepthImages(TempoCamera.DepthImageRequest) returns (stream TempoCamera.DepthImage);
 
   rpc StreamLabelImages(TempoCamera.LabelImageRequest) returns (stream TempoCamera.LabelImage);
+
+  rpc StreamLidarScans(TempoLidar.LidarScanRequest) returns (stream TempoLidar.LidarScanSegment);
 }
