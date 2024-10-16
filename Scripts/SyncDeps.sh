@@ -27,16 +27,24 @@ if [[ "$OSTYPE" = "msys" ]]; then
   else
     LINUX_CC=1
   fi
-  HASHER="md5sum"
 elif [[ "$OSTYPE" = "darwin"* ]]; then
   PLATFORM="Mac"
-  HASHER="md5"
 elif [[ "$OSTYPE" = "linux-gnu"* ]]; then
   PLATFORM="Linux"
-  HASHER="md5sum"
 fi
 
 TEMP=$(mktemp -d)
+
+# This computes a hash on the filenames, sizes, and modification time of all the third party dependency files.
+GET_HASH() {
+  local ARTIFACT_DIR=$1
+  cd "$ARTIFACT_DIR"
+  if [[ "$OSTYPE" = "darwin"* ]]; then
+    find . -mindepth 2 -type f -not -name ".*" -not -path "./Public/*" -not -path "./Private/*" -print0 | xargs -0 stat -f "%N%z%m" | sort | md5 | cut -d ' ' -f 1
+  else
+    find . -mindepth 2 -type f -not -name ".*" -not -path "./Public/*" -not -path "./Private/*" -print0 | xargs -0 stat --format="%n%s%Y" | sort | md5sum | cut -d ' ' -f 1
+  fi
+}
 
 SYNC_THIRD_PARTY_DEPS () {
   MANIFEST_FILE=$1
@@ -55,11 +63,7 @@ SYNC_THIRD_PARTY_DEPS () {
   if [ ! -d "$THIRD_PARTY_DIR/$ARTIFACT" ]; then
     read -r -p "Third party dependency $ARTIFACT not found in $THIRD_PARTY_DIR. Install? (y/N): " DO_UPDATE
   else
-    # This computes a hash on the filenames, sizes, and modification time of all the third party dependency files.
-    # shellcheck disable=SC2038
-    cd "$THIRD_PARTY_DIR/$ARTIFACT"
-    # awk extracts the size, date modified, and filename fields from the ls -l command
-    MEASURED_HASH=$(find . -mindepth 2 -type f -not -name ".*" -not -path "./Public/*" -not -path "./Private/*" | xargs ls -l | awk '{print $5 $6 $7 $8 $9}'| "$HASHER" | cut -d ' ' -f 1)
+    MEASURED_HASH=$(GET_HASH "$THIRD_PARTY_DIR/$ARTIFACT")
     
     if [ "$FORCE_ARG" = "-force" ]; then
       DO_UPDATE="Y"
@@ -123,9 +127,7 @@ SYNC_THIRD_PARTY_DEPS () {
     PULL_DEPENDENCIES "Linux"
   fi
   
-  cd "$THIRD_PARTY_DIR/$ARTIFACT"
-  # awk extracts the size, date modified, and filename fields from the ls -l command
-  MEASURED_HASH=$(find . -mindepth 2 -type f -not -name ".*" -not -path "./Public/*" -not -path "./Private/*" | xargs ls -l | awk '{print $5 $6 $7 $8 $9}'| "$HASHER" | cut -d ' ' -f 1)
+  MEASURED_HASH=$(GET_HASH "$THIRD_PARTY_DIR/$ARTIFACT")
   echo "New hash: $MEASURED_HASH"
 }
 
