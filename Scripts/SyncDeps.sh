@@ -6,6 +6,10 @@
 
 set -e
 
+# Set a consistent locale to ensure hashes computed below are consistent across environments.
+export LANG=C
+export LC_ALL=C
+
 # Check for jq
 if ! which jq &> /dev/null; then
   echo "Couldn't find jq"
