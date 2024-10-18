@@ -30,7 +30,6 @@ class TEMPOTIME_API UTempoTimeServiceSubsystem : public UTempoGameWorldSubsystem
 public:
 	virtual void RegisterScriptingServices(FTempoScriptingServer* ScriptingServer) override;
 
-protected:
 	void SetTimeMode(const TempoTime::TimeModeRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const;
 
 	void SetSimStepsPerSecond(const TempoTime::SetSimStepsPerSecondRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const;
