@@ -54,8 +54,8 @@ FMassTrafficVehicleInstanceCustomData FMassTrafficVehicleInstanceCustomData::Mak
 	CustomData.bRightBrakeLights = VehicleStateFragment.bBrakeLights;
 	CustomData.bLeftTurnSignalLights = VehicleStateFragment.bLeftTurnSignalLights;
 	CustomData.bRightTurnSignalLights = VehicleStateFragment.bRightTurnSignalLights;
-	CustomData.bLeftHeadlight = true;
-	CustomData.bRightHeadlight = true;
+	CustomData.bLeftHeadlight = VehicleStateFragment.bHeadlights;
+	CustomData.bRightHeadlight = VehicleStateFragment.bHeadlights;
 	CustomData.bReversingLights = false;
 	CustomData.bAccessoryLights = false;
 	
@@ -208,7 +208,8 @@ void UMassTrafficVehicleUpdateCustomVisualizationProcessor::ConfigureQueries()
 	EntityQuery.AddSharedRequirement<FMassRepresentationSubsystemSharedFragment>(EMassFragmentAccess::ReadWrite);
 
 	EntityQuery.AddRequirement<FMassTrafficRandomFractionFragment>(EMassFragmentAccess::ReadOnly);
-	EntityQuery.AddRequirement<FMassTrafficVehicleLightsFragment>(EMassFragmentAccess::ReadOnly);
+	EntityQuery.AddRequirement<FMassTrafficVehicleLightsFragment>(EMassFragmentAccess::ReadWrite);
+	EntityQuery.AddRequirement<FEnvironmentalBrightnessFragment>(EMassFragmentAccess::ReadOnly, EMassFragmentPresence::Optional);
 	EntityQuery.AddRequirement<FMassTrafficVehiclePhysicsFragment>(EMassFragmentAccess::ReadOnly, EMassFragmentPresence::Optional);
 
 #if WITH_MASSTRAFFIC_DEBUG
@@ -230,9 +231,10 @@ void UMassTrafficVehicleUpdateCustomVisualizationProcessor::Execute(FMassEntityM
 
 		const TConstArrayView<FMassTrafficRandomFractionFragment> RandomFractionFragments = Context.GetFragmentView<FMassTrafficRandomFractionFragment>();
 		const TConstArrayView<FMassTrafficVehiclePhysicsFragment> SimpleVehiclePhysicsFragments = Context.GetFragmentView<FMassTrafficVehiclePhysicsFragment>();
-		const TConstArrayView<FMassTrafficVehicleLightsFragment> VehicleStateFragments = Context.GetFragmentView<FMassTrafficVehicleLightsFragment>();
 		const TConstArrayView<FTransformFragment> TransformFragments = Context.GetFragmentView<FTransformFragment>();
 		const TConstArrayView<FMassRepresentationLODFragment> RepresentationLODFragments = Context.GetFragmentView<FMassRepresentationLODFragment>();
+		const TConstArrayView<FEnvironmentalBrightnessFragment> EnvironmentalBrightnessFragments = Context.GetFragmentView<FEnvironmentalBrightnessFragment>();
+		const TArrayView<FMassTrafficVehicleLightsFragment> VehicleStateFragments = Context.GetMutableFragmentView<FMassTrafficVehicleLightsFragment>();
 		const TArrayView<FMassActorFragment> ActorFragments = Context.GetMutableFragmentView<FMassActorFragment>();
 		const TArrayView<FMassRepresentationFragment> VisualizationFragments = Context.GetMutableFragmentView<FMassRepresentationFragment>();
 
@@ -242,11 +244,26 @@ void UMassTrafficVehicleUpdateCustomVisualizationProcessor::Execute(FMassEntityM
 			const FMassEntityHandle Entity = Context.GetEntity(EntityIdx);
 
 			const FMassTrafficRandomFractionFragment& RandomFractionFragment = RandomFractionFragments[EntityIdx];
-			const FMassTrafficVehicleLightsFragment& VehicleStateFragment = VehicleStateFragments[EntityIdx];
 			const FTransformFragment& TransformFragment = TransformFragments[EntityIdx];
 			const FMassRepresentationLODFragment& RepresentationLODFragment = RepresentationLODFragments[EntityIdx];
+			FMassTrafficVehicleLightsFragment& VehicleStateFragment = VehicleStateFragments[EntityIdx];
 			FMassActorFragment& ActorFragment = ActorFragments[EntityIdx];
 			FMassRepresentationFragment& RepresentationFragment = VisualizationFragments[EntityIdx];
+
+			if (!EnvironmentalBrightnessFragments.IsEmpty())
+			{
+				const FEnvironmentalBrightnessFragment& EnvironmentalBrightnessFragment = EnvironmentalBrightnessFragments[EntityIdx];
+
+				// Automatically turn headlights on and off with the vehicle's current level of environmental brightness.
+				VehicleStateFragment.bHeadlights = (!VehicleStateFragment.bHeadlights && EnvironmentalBrightnessFragment.Brightness <= MassTrafficSettings->VehicleTurnOnHeadlightsBrightnessThreshold) ||
+					(VehicleStateFragment.bHeadlights && EnvironmentalBrightnessFragment.Brightness < MassTrafficSettings->VehicleTurnOffHeadlightsBrightnessThreshold);
+			}
+			else
+			{
+				// Entities in ISM representation won't have an EnvironmentalBrightnessFragment.
+				// Currently, we choose to keep Entities' headlights off while in ISM representation.
+				VehicleStateFragment.bHeadlights = false;
+			}
 
 			AActor* Actor = ActorFragment.GetMutable();
 			
