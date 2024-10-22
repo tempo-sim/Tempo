@@ -23,8 +23,7 @@ public:
 	virtual void Tick(float DeltaTime) override;
 
 	virtual TStatId GetStatId() const override;
-	
-protected:
+
 	void GetLaneData(const TempoMapQuery::LaneDataRequest& Request, const TResponseDelegate<TempoMapQuery::LaneDataResponse>& ResponseContinuation) const;
 
 	void GetLaneAccessibility(const TempoMapQuery::LaneAccessibilityRequest& Request, const TResponseDelegate<TempoMapQuery::LaneAccessibilityResponse>& ResponseContinuation) const;
@@ -33,6 +32,7 @@ protected:
 
 	TempoMapQuery::LaneAccessibility GetLaneAccessibility(const int32 LaneId) const;
 	
+protected:	
 	struct FLaneAccessibilityInfo
 	{
 		FLaneAccessibilityInfo() = default;

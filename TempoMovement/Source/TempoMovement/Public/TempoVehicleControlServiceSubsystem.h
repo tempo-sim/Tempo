@@ -29,7 +29,6 @@ class TEMPOMOVEMENT_API UTempoVehicleControlServiceSubsystem : public UTempoGame
 public:
 	virtual void RegisterScriptingServices(FTempoScriptingServer* ScriptingServer) override;
 
-protected:
 	void GetCommandableVehicles(const TempoScripting::Empty& Request, const TResponseDelegate<TempoMovement::CommandableVehiclesResponse>& ResponseContinuation) const;
 	
 	void HandleVehicleCommand(const TempoMovement::VehicleCommandRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const;
