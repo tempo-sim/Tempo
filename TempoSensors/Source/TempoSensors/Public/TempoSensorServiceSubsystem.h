@@ -31,6 +31,12 @@ namespace TempoCamera
 	class LabelImage;
 }
 
+namespace TempoLidar
+{
+	class LidarScanRequest;
+	class LidarScanSegment;
+}
+
 UCLASS()
 class TEMPOSENSORS_API UTempoSensorServiceSubsystem : public UTempoGameWorldSubsystem, public ITempoScriptable
 {
@@ -54,6 +60,8 @@ public:
 	void StreamDepthImages(const TempoCamera::DepthImageRequest& Request, const TResponseDelegate<TempoCamera::DepthImage>& ResponseContinuation) const;
 
 	void StreamLabelImages(const TempoCamera::LabelImageRequest& Request, const TResponseDelegate<TempoCamera::LabelImage>& ResponseContinuation) const;
+
+	void StreamLidarScans(const TempoLidar::LidarScanRequest& Request, const TResponseDelegate<TempoLidar::LidarScanSegment>& ResponseContinuation) const;
 
 protected:
 	void OnRenderFrameCompleted() const;

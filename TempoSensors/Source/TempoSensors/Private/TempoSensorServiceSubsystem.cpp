@@ -6,7 +6,9 @@
 #include "TempoSensors/Sensors.grpc.pb.h"
 
 #include "TempoCamera.h"
+#include "TempoLidar.h"
 #include "TempoCamera/Camera.pb.h"
+#include "TempoLidar/Lidar.pb.h"
 
 #include "TempoCoreSettings.h"
 
@@ -18,9 +20,11 @@ using AvailableSensorsResponse = TempoSensors::AvailableSensorsResponse;
 using ColorImageRequest = TempoCamera::ColorImageRequest;
 using DepthImageRequest = TempoCamera::DepthImageRequest;
 using LabelImageRequest = TempoCamera::LabelImageRequest;
+using LidarScanRequest = TempoLidar::LidarScanRequest;
 using ColorImage = TempoCamera::ColorImage;
 using DepthImage = TempoCamera::DepthImage;
 using LabelImage = TempoCamera::LabelImage;
+using LidarScanSegment = TempoLidar::LidarScanSegment;
 
 void UTempoSensorServiceSubsystem::RegisterScriptingServices(FTempoScriptingServer& ScriptingServer)
 {
@@ -28,7 +32,8 @@ void UTempoSensorServiceSubsystem::RegisterScriptingServices(FTempoScriptingServ
 		SimpleRequestHandler(&SensorAsyncService::RequestGetAvailableSensors, &UTempoSensorServiceSubsystem::GetAvailableSensors),
 		StreamingRequestHandler(&SensorAsyncService::RequestStreamColorImages, &UTempoSensorServiceSubsystem::StreamColorImages),
 		StreamingRequestHandler(&SensorAsyncService::RequestStreamDepthImages, &UTempoSensorServiceSubsystem::StreamDepthImages),
-		StreamingRequestHandler(&SensorAsyncService::RequestStreamLabelImages, &UTempoSensorServiceSubsystem::StreamLabelImages)
+		StreamingRequestHandler(&SensorAsyncService::RequestStreamLabelImages, &UTempoSensorServiceSubsystem::StreamLabelImages),
+		StreamingRequestHandler(&SensorAsyncService::RequestStreamLidarScans), &UTempoSensorServiceSubsystem::StreamLidarScans)
 		);
 }
 
@@ -260,4 +265,78 @@ void UTempoSensorServiceSubsystem::StreamDepthImages(const TempoCamera::DepthIma
 void UTempoSensorServiceSubsystem::StreamLabelImages(const TempoCamera::LabelImageRequest& Request, const TResponseDelegate<TempoCamera::LabelImage>& ResponseContinuation) const
 {
 	RequestImages<TempoCamera::LabelImageRequest, TempoCamera::LabelImage>(Request, ResponseContinuation);
+}
+
+void UTempoSensorServiceSubsystem::StreamLidarScans(const TempoLidar::LidarScanRequest& Request, const TResponseDelegate<TempoLidar::LidarScanSegment>& ResponseContinuation) const
+{
+	check(GetWorld());
+	
+	TMap<FString, TArray<UTempoLidar*>> OwnersToComponents;
+	for (TObjectIterator<UTempoLidar> ComponentIt; ComponentIt; ++ComponentIt)
+	{
+		if (IsValid(*ComponentIt) && ComponentIt->GetWorld() == GetWorld())
+		{
+			OwnersToComponents.FindOrAdd(ComponentIt->GetOwnerName()).Add(*ComponentIt);
+		}
+	}
+	
+	const FString RequestedOwnerName(UTF8_TO_TCHAR(Request.owner_name().c_str()));
+	const FString RequestedSensorName(UTF8_TO_TCHAR(Request.sensor_name().c_str()));
+
+	// If owner name is not specified and only one owner has this sensor name, assume the client wants that owner
+	if (RequestedOwnerName.IsEmpty())
+	{
+		if (OwnersToComponents.IsEmpty())
+		{
+			ResponseContinuation.ExecuteIfBound(LidarScanSegment(), grpc::Status(grpc::StatusCode::NOT_FOUND, "No sensors found"));
+			return;
+		}
+
+		UTempoLidar* FoundComponent = nullptr;
+		for (const auto& OwnerComponents : OwnersToComponents)
+		{
+			const TArray<UTempoLidar*>& Components = OwnerComponents.Value;
+			for (UTempoLidar* Component : Components)
+			{
+				if (Component->GetSensorName().Equals(RequestedSensorName, ESearchCase::IgnoreCase))
+				{
+					if (FoundComponent)
+					{
+						ResponseContinuation.ExecuteIfBound(LidarScanSegment(), grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "More than one owner with specified sensor name found, owner name required."));
+						return;
+					}
+					FoundComponent = Component;
+				}
+			}
+		}
+
+		if (!FoundComponent)
+		{
+			ResponseContinuation.ExecuteIfBound(LidarScanSegment(), grpc::Status(grpc::StatusCode::NOT_FOUND, "Did not find a sensor with the specified name"));
+			return;
+		}
+		
+		FoundComponent->RequestMeasurement(Request, ResponseContinuation);
+		return;
+	}
+
+	for (const auto& OwnerComponents : OwnersToComponents)
+	{
+		const FString& OwnerName = OwnerComponents.Key;
+		const TArray<UTempoLidar*>& Components = OwnerComponents.Value;
+		if (OwnerName.Equals(RequestedOwnerName, ESearchCase::IgnoreCase))
+		{
+			for (UTempoLidar* Component : Components)
+			{
+				if (Component->GetSensorName().Equals(RequestedSensorName, ESearchCase::IgnoreCase))
+				{
+					Component->RequestMeasurement(Request, ResponseContinuation);
+					return;
+				}
+			}
+		}
+	}
+
+	ResponseContinuation.ExecuteIfBound(LidarScanSegment(), grpc::Status(grpc::StatusCode::NOT_FOUND, "Did not find a sensor with the specified owner and name"));
+	return;
 }
