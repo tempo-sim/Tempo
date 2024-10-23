@@ -11,6 +11,7 @@ public class TempoLidar : TempoModuleRules
             {
                 "Core",
                 "TempoSensorsShared",
+                "TempoScripting",
             }
         );
 
@@ -22,6 +23,8 @@ public class TempoLidar : TempoModuleRules
                 "Engine",
                 "Slate",
                 "SlateCore",
+                "RenderCore",
+                "RHI",
                 // Tempo
                 "TempoLabels",
                 "TempoScripting",

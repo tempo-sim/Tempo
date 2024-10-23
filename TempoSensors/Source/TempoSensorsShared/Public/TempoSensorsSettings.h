@@ -19,6 +19,7 @@ public:
 	// Camera
 	TObjectPtr<UMaterialInterface> GetCameraPostProcessMaterialNoDepth() const { return CameraPostProcessMaterialNoDepth.LoadSynchronous(); }
 	TObjectPtr<UMaterialInterface> GetCameraPostProcessMaterialWithDepth() const { return CameraPostProcessMaterialWithDepth.LoadSynchronous(); }
+	TObjectPtr<UMaterialInterface> GetLidarPostProcessMaterial() const { return LidarPostProcessMaterial.LoadSynchronous(); }
 	float GetMaxCameraDepth() const { return MaxCameraDepth; }
 	float GetSceneCaptureGamma() const { return SceneCaptureGamma; }
 	FName GetOverridableLabelRowName() const { return OverridableLabelRowName; }
@@ -36,6 +37,9 @@ private:
 
 	UPROPERTY(EditAnywhere, Config, Category="Camera", meta=( AllowedClasses="/Script/Engine.BlendableInterface", Keywords="PostProcess" ))
 	TSoftObjectPtr<UMaterialInterface> CameraPostProcessMaterialWithDepth;
+
+	UPROPERTY(EditAnywhere, Config, Category="Lidar", meta=( AllowedClasses="/Script/Engine.BlendableInterface", Keywords="PostProcess" ))
+	TSoftObjectPtr<UMaterialInterface> LidarPostProcessMaterial;
 
 	// The expected maximum required depth for a camera depth image.
 	UPROPERTY(EditAnywhere, Config, Category="Camera")
