@@ -20,6 +20,7 @@ public class TempoAgentsShared : ModuleRules
         PrivateDependencyModuleNames.AddRange(
             new string[]
             {
+                // Unreal
                 "CoreUObject",
                 "DeveloperSettings",
                 "Slate",
@@ -29,7 +30,9 @@ public class TempoAgentsShared : ModuleRules
                 "MassRepresentation",
                 "MassEntity",
                 "StructUtils",
-                "RHI"
+                "RHI",
+                // Tempo
+                "TempoCore",
             }
         );
     }

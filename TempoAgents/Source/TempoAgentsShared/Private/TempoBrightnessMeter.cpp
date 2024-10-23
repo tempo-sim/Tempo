@@ -4,6 +4,8 @@
 
 #include "Engine/TextureRenderTarget2D.h"
 
+#include "TempoWorldSettings.h"
+
 UTempoBrightnessMeter::UTempoBrightnessMeter()
 {
 	PrimaryComponentTick.bStartWithTickEnabled = false;
@@ -29,6 +31,16 @@ float UTempoBrightnessMeter::GetBrightness() const
 void UTempoBrightnessMeter::BeginPlay()
 {
 	Super::BeginPlay();
+
+	// If the user chose an AutoExposureBias, use that. Otherwise, pull it from the world settings.
+	if (!PostProcessSettings.bOverride_AutoExposureBias)
+	{
+		if (ATempoWorldSettings* TempoWorldSettings = Cast<ATempoWorldSettings>(GetWorld()->GetWorldSettings()))
+		{
+			PostProcessSettings.bOverride_AutoExposureBias = true;
+			PostProcessSettings.AutoExposureBias = TempoWorldSettings->GetDefaultAutoExposureBias();
+		}
+	}
 
 	TextureTarget = NewObject<UTextureRenderTarget2D>(this);
 	TextureTarget->RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA8;
