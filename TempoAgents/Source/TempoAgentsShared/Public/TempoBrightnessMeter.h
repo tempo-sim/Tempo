@@ -26,7 +26,7 @@ protected:
 
 	// Update period in seconds.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	float UpdatePeriod = 1.0;
+	float UpdatePeriod = 5.0;
 
 	UPROPERTY(VisibleAnywhere)
 	float Brightness = 0.0;

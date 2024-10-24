@@ -47,7 +47,7 @@ void UTempoBrightnessMeter::BeginPlay()
     TextureTarget->InitAutoFormat(SizeXY.X, SizeXY.Y);
 
     check(GetWorld());
-    GetWorld()->GetTimerManager().SetTimer(TimerHandle, this, &UTempoBrightnessMeter::UpdateBrightness, UpdatePeriod, true);
+    GetWorld()->GetTimerManager().SetTimer(TimerHandle, this, &UTempoBrightnessMeter::UpdateBrightness, UpdatePeriod, true, FMath::RandRange(0.0f, UpdatePeriod));
 }
 
 void UTempoBrightnessMeter::UpdateBrightness()
