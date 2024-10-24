@@ -10,9 +10,9 @@
 
 namespace
 {
-	// These values result in relatively consistent perceived brightness in the range of ~5-100 Lux of scene intensity.
-	constexpr float ExposureBiasToBrightnessScale = 0.17894736842;
-	constexpr float ExposureBiasToBrightnessOffset = -25.8947368421;
+	// These values result in relatively consistent perceived brightness across a huge range of scene intensity.
+	constexpr float ExposureBiasToBrightnessScale = 3.93342962372;
+	constexpr float ExposureBiasToBrightnessOffset = -34.1331407526;
 }
 
 void ATempoWorldSettings::SetDefaultAutoExposureBias()
@@ -23,7 +23,7 @@ void ATempoWorldSettings::SetDefaultAutoExposureBias()
 		if (const UDirectionalLightComponent* DirectionalLightComponent = Cast<UDirectionalLightComponent>(ActorIt->GetComponentByClass(UDirectionalLightComponent::StaticClass())))
 		{
 			const float SceneBrightness = DirectionalLightComponent->Intensity;
-			DefaultAutoExposureBias = ExposureBiasToBrightnessScale * SceneBrightness + ExposureBiasToBrightnessOffset;
+			DefaultAutoExposureBias = ExposureBiasToBrightnessScale * FMath::Log2(SceneBrightness) + ExposureBiasToBrightnessOffset;
 			return;
 		}
 	}
