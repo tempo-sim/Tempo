@@ -3,10 +3,9 @@
 syntax = "proto3";
 
 import "TempoSensorsShared/Common.proto";
-import "TempoScripting/Geometry.proto";
 
 message LidarReturn {
-  TempoScripting.Vector point = 1;
+  float range = 1;
   float Intensity = 3;
 }
 
