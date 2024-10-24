@@ -27,8 +27,12 @@ struct FLidarScanRequest
 template <>
 struct TTextureRead<FDepthPixel> : TTextureReadBase<FDepthPixel>
 {
-	TTextureRead(const FIntPoint& ImageSizeIn, int32 SequenceIdIn, double CaptureTimeIn, const FString& OwnerNameIn, const FString& SensorNameIn, float MinRangeIn, float MaxRangeIn)
-	   : TTextureReadBase(ImageSizeIn, SequenceIdIn, CaptureTimeIn, OwnerNameIn, SensorNameIn), MinRange(MinRangeIn), MaxRange(MaxRangeIn)
+	TTextureRead(const FIntPoint& ImageSizeIn, int32 SequenceIdIn, double CaptureTimeIn, const FString& OwnerNameIn,
+		const FString& SensorNameIn, float MinRangeIn, float MaxRangeIn, int32 HorizontalBeamsIn, int32 VerticalBeamsIn,
+		float DistortedVerticalFOVIn, float VerticalFOVIn, int32 UpsamplingFactorIn)
+	   : TTextureReadBase(ImageSizeIn, SequenceIdIn, CaptureTimeIn, OwnerNameIn, SensorNameIn),
+		 MinRange(MinRangeIn), MaxRange(MaxRangeIn), HorizontalBeams(HorizontalBeamsIn), VerticalBeams(VerticalBeamsIn),
+		 DistortedVerticalFOV(DistortedVerticalFOVIn), VerticalFOV(VerticalFOVIn), UpsamplingFactor(UpsamplingFactorIn)
 	{
 	}
 
@@ -38,6 +42,11 @@ struct TTextureRead<FDepthPixel> : TTextureReadBase<FDepthPixel>
 
 	float MinRange;
 	float MaxRange;
+	int32 HorizontalBeams;
+	int32 VerticalBeams;
+	float DistortedVerticalFOV;
+	float VerticalFOV;
+	int32 UpsamplingFactor;
 };
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
@@ -65,6 +74,8 @@ protected:
 
 	virtual int32 GetMaxTextureQueueSize() const override;
 
+	void UpdateComputedProperties();
+
 	UPROPERTY(VisibleAnywhere)
 	UMaterialInstanceDynamic* PostProcessMaterialInstance= nullptr;
 
@@ -91,6 +102,10 @@ protected:
 	// The number of horizontal beams.
 	UPROPERTY(EditAnywhere)
 	int32 HorizontalBeams = 1800.0;
+
+	// The number of horizontal beams.
+	UPROPERTY(EditAnywhere)
+	int32 UpsamplingFactor = 1.0;
 
 	// The resulting spacing between vertical beams in degrees.
 	UPROPERTY(VisibleAnywhere)
