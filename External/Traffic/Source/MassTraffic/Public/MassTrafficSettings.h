@@ -319,11 +319,11 @@ public:
 	UPROPERTY(EditAnywhere, Config, Category="Vehicles")
 	float MaxQuickStopSpeedMPH = 5.0f;
 
-	// Environmental brightness threshold [0..1] at which vehicles will turn *on* their headlights.
+	// Environmental brightness threshold [0..1] below which vehicles will turn *on* their headlights.
 	UPROPERTY(EditAnywhere, Config, Category="Vehicles")
 	float VehicleTurnOnHeadlightsBrightnessThreshold = 0.4f;
 
-	// Environmental brightness threshold [0..1] at which vehicles will turn *off* their headlights.
+	// Environmental brightness threshold [0..1] above which vehicles will turn *off* their headlights.
 	UPROPERTY(EditAnywhere, Config, Category="Vehicles")
 	float VehicleTurnOffHeadlightsBrightnessThreshold = 0.5f;
 
