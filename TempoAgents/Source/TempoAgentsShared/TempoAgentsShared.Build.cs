@@ -13,12 +13,14 @@ public class TempoAgentsShared : ModuleRules
             {
                 "Core",
                 "Engine",
+                "RenderCore",
             }
         );
 
         PrivateDependencyModuleNames.AddRange(
             new string[]
             {
+                // Unreal
                 "CoreUObject",
                 "DeveloperSettings",
                 "Slate",
@@ -27,7 +29,10 @@ public class TempoAgentsShared : ModuleRules
                 "MassTraffic",
                 "MassRepresentation",
                 "MassEntity",
-                "StructUtils"
+                "StructUtils",
+                "RHI",
+                // Tempo
+                "TempoCore",
             }
         );
     }
