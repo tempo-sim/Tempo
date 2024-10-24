@@ -3,28 +3,31 @@
 #include "TempoWorldSettings.h"
 
 #include "TempoCore.h"
+#include "EngineUtils.h"
+#include "Components/DirectionalLightComponent.h"
 #include "Engine/DirectionalLight.h"
 #include "Kismet/GameplayStatics.h"
 
 namespace
 {
 	// These values result in relatively consistent perceived brightness in the range of ~5-100 Lux of scene intensity.
-	constexpr float ExposureBiasToBrightnessScale = 30.0 / 150.0;
-	constexpr float ExposureBiasToBrightnessOffset = -15.0;
+	constexpr float ExposureBiasToBrightnessScale = 0.17894736842;
+	constexpr float ExposureBiasToBrightnessOffset = -25.8947368421;
 }
 
 void ATempoWorldSettings::SetDefaultAutoExposureBias()
 {
 	check(GetWorld());
-	if (const ADirectionalLight* DirectionalLight = Cast<ADirectionalLight>(UGameplayStatics::GetActorOfClass(GetWorld(), ADirectionalLight::StaticClass())))
+	for (TActorIterator<AActor> ActorIt(GetWorld()); ActorIt; ++ActorIt)
 	{
-		float SceneBrightness = DirectionalLight->GetBrightness();
-		DefaultAutoExposureBias = ExposureBiasToBrightnessScale * SceneBrightness + ExposureBiasToBrightnessOffset;
+		if (const UDirectionalLightComponent* DirectionalLightComponent = Cast<UDirectionalLightComponent>(ActorIt->GetComponentByClass(UDirectionalLightComponent::StaticClass())))
+		{
+			const float SceneBrightness = DirectionalLightComponent->Intensity;
+			DefaultAutoExposureBias = ExposureBiasToBrightnessScale * SceneBrightness + ExposureBiasToBrightnessOffset;
+			return;
+		}
 	}
-	else
-	{
-		UE_LOG(LogTempoCore, Error, TEXT("No directional light found in level. Cannot set default exposure compensation automatically."));
-	}
+	UE_LOG(LogTempoCore, Error, TEXT("No directional light found in level. Cannot set default exposure compensation automatically."));
 }
 
 void ATempoWorldSettings::BeginPlay()
