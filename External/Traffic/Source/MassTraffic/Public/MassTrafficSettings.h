@@ -357,53 +357,53 @@ public:
 	float StopSignPedestrianLaneOpenProbability = 0.2f;
 
 	// Lane change mode.
-	UPROPERTY(EditAnywhere, Category="Lane Changing")
+	UPROPERTY(EditAnywhere, Config, Category="Lane Changing")
 	EMassTrafficLaneChangeMode LaneChangeMode = EMassTrafficLaneChangeMode::On;
 
 	// Min seconds until next lane change attempt.
-	UPROPERTY(EditAnywhere, Category="Lane Changing")
+	UPROPERTY(EditAnywhere, Config, Category="Lane Changing")
 	float MinSecondsUntilLaneChangeDecision = 30.0f;
 
 	// Max seconds until next lane change attempt.
-	UPROPERTY(EditAnywhere, Category="Lane Changing")
+	UPROPERTY(EditAnywhere, Config, Category="Lane Changing")
 	float MaxSecondsUntilLaneChangeDecision = 60.0f;
 
 	// Base seconds taken to execute a lane change.
 	// Number of seconds a particular vehicle takes to execute a lane change is calculated as -
 	// BaseSecondsToExecuteLaneChange + AdditionalSecondsToExecuteLaneChangePerUnitOfVehicleLength * VehicleLengthCM
 	// (VehicleLengthCM is twice the vehicle's radius in CM.)
-	UPROPERTY(EditAnywhere, Category="Lane Changing")
+	UPROPERTY(EditAnywhere, Config, Category="Lane Changing")
 	float BaseSecondsToExecuteLaneChange = 3.0f;
 
 	// Additional seconds taken to execute a lane change - seconds per vehicle length (CM.)
 	// Number of seconds a particular vehicle takes to execute a lane change is calculated as -
 	// BaseSecondsToExecuteLaneChange + AdditionalSecondsToExecuteLaneChangePerUnitOfVehicleLength * VehicleLengthCM
 	// (VehicleLengthCM is twice the vehicle's radius in CM.)
-	UPROPERTY(EditAnywhere, Category="Lane Changing")
+	UPROPERTY(EditAnywhere, Config, Category="Lane Changing")
 	float AdditionalSecondsToExecuteLaneChangePerUnitOfVehicleLength = 0.0015f;
 
 	// How many seconds vehicles should wait before retrying an unsuccessful lane change attempt.
-	UPROPERTY(EditAnywhere, Category="Lane Changing")
+	UPROPERTY(EditAnywhere, Config, Category="Lane Changing")
 	float LaneChangeRetrySeconds = 5.0f;
 
 	// How much lane space a vehicle needs to execute a lane change, as a factor of a vehicle's length.
 	// The longer the vehicle, the more space (and time) it needs to change lanes.
-	UPROPERTY(EditAnywhere, Category="Lane Changing")
+	UPROPERTY(EditAnywhere, Config, Category="Lane Changing")
 	float MinLaneChangeDistanceVehicleLengthScale = 5.0f;
 
 	// How much more to scale search distances for points on adjacent lanes, to help cope with possible issues with 
 	// low lane tessellation and/or higher lane curvature.
-	UPROPERTY(EditAnywhere, Category="Lane Changing")
+	UPROPERTY(EditAnywhere, Config, Category="Lane Changing")
 	float LaneChangeSearchDistanceScale = 1.5f;
 
 	// How much to spread transverse lanes changes, as a fraction of the lane length measured from the
 	// start of the lane.
-	UPROPERTY(EditAnywhere, Category="Lane Changing")
+	UPROPERTY(EditAnywhere, Config, Category="Lane Changing")
 	float LaneChangeTransverseSpreadFromStartOfLaneFraction = 0.4f;
 
 	// Max length of accessories on sides of car - objects like side-mirrors (CM). Helps when trying to pass another
 	// vehicle.
-	UPROPERTY(EditAnywhere, Category="Lane Changing")
+	UPROPERTY(EditAnywhere, Config, Category="Lane Changing")
 	float LaneChangeMaxSideAccessoryLength = 10.0f;
 
 	// Normalized distance *potentially yielding* vehicle is allowed to travel through *left turn* lanes
