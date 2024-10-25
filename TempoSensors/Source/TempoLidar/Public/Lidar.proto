@@ -5,13 +5,23 @@ syntax = "proto3";
 import "TempoSensorsShared/Common.proto";
 
 message LidarReturn {
-  float range = 1;
-  float Intensity = 3;
+  float distance = 1;
+  float intensity = 2;
+}
+
+message Range {
+  float min = 1;
+  float max = 2;
 }
 
 message LidarScanSegment {
   TempoSensorsShared.MeasurementHeader header = 1;
-  repeated LidarReturn returns = 2;
+  int32 vertical_beams = 2;
+  int32 horizontal_beams = 3;
+  Range distance_range = 4;
+  Range azimuth_range = 5;
+  Range elevation_range = 6;
+  repeated LidarReturn returns = 7;
 }
 
 message LidarScanRequest {
