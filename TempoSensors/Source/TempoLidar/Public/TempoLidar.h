@@ -12,7 +12,14 @@
 
 struct FDepthPixel
 {
-	float GetDepth(float MinRange, float MaxRange) const { return FMath::Min(MaxRange, FMath::Max(MinRange, Depth)); }
+	float GetDepth(float MinRange, float MaxRange) const
+	{
+		if (Depth > MaxRange)
+		{
+			return 0.0;
+		}
+		return FMath::Max(MinRange, Depth);
+	}
 
 private:
 	float Depth = 0.0;
@@ -27,12 +34,9 @@ struct FLidarScanRequest
 template <>
 struct TTextureRead<FDepthPixel> : TTextureReadBase<FDepthPixel>
 {
-	TTextureRead(const FIntPoint& ImageSizeIn, int32 SequenceIdIn, double CaptureTimeIn, const FString& OwnerNameIn,
-		const FString& SensorNameIn, float MinRangeIn, float MaxRangeIn, int32 HorizontalBeamsIn, int32 VerticalBeamsIn,
-		float DistortedVerticalFOVIn, float VerticalFOVIn, int32 UpsamplingFactorIn)
-	   : TTextureReadBase(ImageSizeIn, SequenceIdIn, CaptureTimeIn, OwnerNameIn, SensorNameIn),
-		 MinRange(MinRangeIn), MaxRange(MaxRangeIn), HorizontalBeams(HorizontalBeamsIn), VerticalBeams(VerticalBeamsIn),
-		 DistortedVerticalFOV(DistortedVerticalFOVIn), VerticalFOV(VerticalFOVIn), UpsamplingFactor(UpsamplingFactorIn)
+	TTextureRead(const FIntPoint& ImageSizeIn, int32 SequenceIdIn, double CaptureTimeIn,
+			const FString& OwnerNameIn, const FString& SensorNameIn, const UTempoLidar* TempoLidarIn)
+	   : TTextureReadBase(ImageSizeIn, SequenceIdIn, CaptureTimeIn, OwnerNameIn, SensorNameIn), TempoLidar(TempoLidarIn)
 	{
 	}
 
@@ -40,13 +44,7 @@ struct TTextureRead<FDepthPixel> : TTextureReadBase<FDepthPixel>
 
 	void RespondToRequests(const TArray<FLidarScanRequest>& Requests, float TransmissionTime) const;
 
-	float MinRange;
-	float MaxRange;
-	int32 HorizontalBeams;
-	int32 VerticalBeams;
-	float DistortedVerticalFOV;
-	float VerticalFOV;
-	int32 UpsamplingFactor;
+	const UTempoLidar* TempoLidar;
 };
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
@@ -124,4 +122,6 @@ protected:
 	float DistortedVerticalFOV = 30.0;
 
 	TArray<FLidarScanRequest> PendingRequests;
+
+	friend TTextureRead<FDepthPixel>;
 };
