@@ -16,12 +16,13 @@ message Range {
 
 message LidarScanSegment {
   TempoSensorsShared.MeasurementHeader header = 1;
-  int32 vertical_beams = 2;
-  int32 horizontal_beams = 3;
-  Range distance_range = 4;
-  Range azimuth_range = 5;
-  Range elevation_range = 6;
-  repeated LidarReturn returns = 7;
+  int32 scan_count = 2;
+  int32 vertical_beams = 3;
+  int32 horizontal_beams = 4;
+  Range distance_range = 5;
+  Range azimuth_range = 6;
+  Range elevation_range = 7;
+  repeated LidarReturn returns = 8;
 }
 
 message LidarScanRequest {

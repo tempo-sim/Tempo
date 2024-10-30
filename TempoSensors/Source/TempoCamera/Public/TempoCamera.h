@@ -116,7 +116,7 @@ struct TEMPOCAMERA_API FTempoCameraIntrinsics
 };
 
 UCLASS(Blueprintable, BlueprintType, ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TEMPOCAMERA_API UTempoCamera : public UTempoSceneCaptureComponent2D
+class TEMPOCAMERA_API UTempoCamera : public UTempoSceneCaptureComponent2D, public ITempoSensorInterface
 {
 	GENERATED_BODY()
 
@@ -139,18 +139,33 @@ public:
 
 	FTempoCameraIntrinsics GetIntrinsics() const;
 
+	// Begin ITempoSensorInterface
+	virtual FString GetOwnerName() const override;
+	virtual FString GetSensorName() const override;
+	virtual float GetRate() const override { return RateHz; }
+	virtual const TArray<TEnumAsByte<EMeasurementType>>& GetMeasurementTypes() const override { return MeasurementTypes; }
+	virtual bool IsAwaitingRender() override;
+	virtual void OnRenderCompleted() override;
+	virtual void BlockUntilMeasurementsReady() const override;
+	virtual TArray<TFuture<void>> SendMeasurements() override;
+	// End ITempoSensorInterface
+
 protected:
 	virtual bool HasPendingRequests() const override;
 
 	virtual FTextureRead* MakeTextureRead() const override;
-
-	virtual TFuture<void> DecodeAndRespond(TUniquePtr<FTextureRead> TextureRead) override;
+	
+	virtual TFuture<void> DecodeAndRespond(TUniquePtr<FTextureRead> TextureRead);
 
 	virtual int32 GetMaxTextureQueueSize() const override;
 
 	void SetDepthEnabled(bool bDepthEnabledIn);
 
 	void ApplyDepthEnabled();
+
+	// The measurement types supported. Should be set in constructor of derived classes.
+	UPROPERTY(VisibleAnywhere)
+	TArray<TEnumAsByte<EMeasurementType>> MeasurementTypes;
 
 	// Whether this camera can measure depth. Disabled when not requested to optimize performance.
 	UPROPERTY(VisibleAnywhere, Category="Depth")

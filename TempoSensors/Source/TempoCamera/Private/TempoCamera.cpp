@@ -243,6 +243,45 @@ FTempoCameraIntrinsics UTempoCamera::GetIntrinsics() const
 	return FTempoCameraIntrinsics(SizeXY, FOVAngle);
 }
 
+FString UTempoCamera::GetOwnerName() const
+{
+	check(GetOwner());
+
+	return GetOwner()->GetActorNameOrLabel();
+}
+
+FString UTempoCamera::GetSensorName() const
+{
+	return GetName();
+}
+
+bool UTempoCamera::IsAwaitingRender()
+{
+	return IsNextReadAwaitingRender();
+}
+
+void UTempoCamera::OnRenderCompleted()
+{
+	ReadNextIfAvailable();
+}
+
+void UTempoCamera::BlockUntilMeasurementsReady() const
+{
+	BlockUntilNextReadComplete();
+}
+
+TArray<TFuture<void>> UTempoCamera::SendMeasurements()
+{
+	TArray<TFuture<void>> Futures;
+
+	if (TUniquePtr<FTextureRead> TextureRead = DequeueIfReadComplete())
+	{
+		Futures.Add(DecodeAndRespond(MoveTemp(TextureRead)));
+	}
+
+	return Futures;
+}
+
 bool UTempoCamera::HasPendingRequests() const
 {
 	return !PendingColorImageRequests.IsEmpty() || !PendingLabelImageRequests.IsEmpty() || !PendingDepthImageRequests.IsEmpty();

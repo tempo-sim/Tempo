@@ -28,6 +28,10 @@ FString MeasurementTypeTopicStr(EMeasurementType MeasurementType)
 		{
 			return TEXT("image/label");
 		}
+	case LIDAR_SCAN:
+		{
+			return TEXT("scan");
+		}
 	default:
 		{
 			checkf(false, TEXT("Unhandled measurement type"));
@@ -172,6 +176,10 @@ void UTempoSensorsROSBridgeSubsystem::UpdatePublishers()
 					case LABEL_IMAGE:
 						{
 							ROSNode->AddPublisher<TempoCamera::LabelImage>(Topic, FROSQOSProfile(1).Reliable());
+							break;
+						}
+					case LIDAR_SCAN:
+						{
 							break;
 						}
 					default:

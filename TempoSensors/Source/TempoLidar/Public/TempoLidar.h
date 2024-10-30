@@ -31,51 +31,47 @@ struct FLidarScanRequest
 	TResponseDelegate<TempoLidar::LidarScanSegment> ResponseContinuation;
 };
 
-template <>
-struct TTextureRead<FDepthPixel> : TTextureReadBase<FDepthPixel>
-{
-	TTextureRead(const FIntPoint& ImageSizeIn, int32 SequenceIdIn, double CaptureTimeIn,
-			const FString& OwnerNameIn, const FString& SensorNameIn, const UTempoLidar* TempoLidarIn)
-	   : TTextureReadBase(ImageSizeIn, SequenceIdIn, CaptureTimeIn, OwnerNameIn, SensorNameIn), TempoLidar(TempoLidarIn)
-	{
-	}
-
-	virtual FName GetType() const override { return TEXT("Depth"); }
-
-	void RespondToRequests(const TArray<FLidarScanRequest>& Requests, float TransmissionTime) const;
-
-	const UTempoLidar* TempoLidar;
-};
-
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TEMPOLIDAR_API UTempoLidar : public UTempoSceneCaptureComponent2D
+class TEMPOLIDAR_API UTempoLidar : public USceneComponent, public ITempoSensorInterface
 {
 	GENERATED_BODY()
 
 public:
 	UTempoLidar();
 
+	virtual void BeginPlay() override;
+
+	// Begin ITempoSensorInterface
+	virtual FString GetOwnerName() const override;
+	virtual FString GetSensorName() const override;
+	virtual float GetRate() const override { return RateHz; }
+	virtual const TArray<TEnumAsByte<EMeasurementType>>& GetMeasurementTypes() const override { return MeasurementTypes; }
+	virtual bool IsAwaitingRender() override;
+	virtual void OnRenderCompleted() override;
+	virtual void BlockUntilMeasurementsReady() const override;
+	virtual TArray<TFuture<void>> SendMeasurements() override;
+	// End ITempoSensorInterface
+
 	void RequestMeasurement(const TempoLidar::LidarScanRequest& Request, const TResponseDelegate<TempoLidar::LidarScanSegment>& ResponseContinuation);
 
 protected:
-	virtual void BeginPlay() override;
-
 #if WITH_EDITOR
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 #endif
 	
-	virtual bool HasPendingRequests() const override;
-
-	virtual FTextureRead* MakeTextureRead() const override;
-
-	virtual TFuture<void> DecodeAndRespond(TUniquePtr<FTextureRead> TextureRead) override;
-
-	virtual int32 GetMaxTextureQueueSize() const override;
-
 	void UpdateComputedProperties();
 
+	void AddCaptureComponent(float YawOffset, float SubHorizontalFOV, int32 SubHorizontalBeams);
+
+	virtual TFuture<void> DecodeAndRespond(TArray<TUniquePtr<FTextureRead>> TextureReads);
+
+	// The rate in Hz this Lidar updates at.
+	UPROPERTY(EditAnywhere)
+	float RateHz = 10.0;
+
+	// The measurement types supported. Should be set in constructor of derived classes.
 	UPROPERTY(VisibleAnywhere)
-	UMaterialInstanceDynamic* PostProcessMaterialInstance= nullptr;
+	TArray<TEnumAsByte<EMeasurementType>> MeasurementTypes;
 
 	// The minimum depth this Lidar can measure.
 	UPROPERTY(EditAnywhere)
@@ -90,18 +86,18 @@ protected:
 	float VerticalFOV = 30.0;
 	
 	// The horizontal field of view in degrees.
-	UPROPERTY(EditAnywhere)
-	float HorizontalFOV = 170.0;
+	UPROPERTY(EditAnywhere, meta=(UIMin=0.0, UIMax=360.0, ClampMin=0.0, ClampMax=360.0))
+	float HorizontalFOV = 120.0;
 
 	// The number of vertical beams.
-	UPROPERTY(EditAnywhere)
+	UPROPERTY(EditAnywhere, meta=(UIMin=0.0, UIMax=180.0, ClampMin=0.0, ClampMax=180.0))
 	int32 VerticalBeams = 64.0;
 	
 	// The number of horizontal beams.
 	UPROPERTY(EditAnywhere)
-	int32 HorizontalBeams = 1800.0;
+	int32 HorizontalBeams = 200.0;
 
-	// The number of horizontal beams.
+	// The upsampling factor.
 	UPROPERTY(EditAnywhere)
 	int32 UpsamplingFactor = 1.0;
 
@@ -111,7 +107,61 @@ protected:
 	
 	// The resulting spacing between horizontal beams in degrees.
 	UPROPERTY(VisibleAnywhere)
-	float HorizontalSpacing = 170.0 / 1800.0;
+	float HorizontalSpacing = 120.0 / 200.0;
+
+	UPROPERTY(VisibleAnywhere)
+	FIntPoint SizeXY = FIntPoint::ZeroValue;
+
+	int32 NumResponded = 0;
+	
+	UPROPERTY()
+	TArray<UTempoLidarCaptureComponent*> LidarCaptureComponents;
+
+	TArray<FLidarScanRequest> PendingRequests;
+
+	friend class UTempoLidarCaptureComponent;
+
+	friend struct TTextureRead<FDepthPixel>;
+};
+
+template <>
+struct TTextureRead<FDepthPixel> : TTextureReadBase<FDepthPixel>
+{
+	TTextureRead(const FIntPoint& ImageSizeIn, int32 SequenceIdIn, double CaptureTimeIn,
+		const UTempoLidarCaptureComponent* CaptureComponentIn, const UTempoLidar* TempoLidarIn)
+	   : TTextureReadBase(ImageSizeIn, SequenceIdIn, CaptureTimeIn, TempoLidarIn->GetOwnerName(), TempoLidarIn->GetSensorName()), CaptureTransform(TempoLidarIn->GetComponentTransform()), CaptureComponent(CaptureComponentIn), TempoLidar(TempoLidarIn)
+	{
+	}
+
+	virtual FName GetType() const override { return TEXT("Depth"); }
+
+	void RespondToRequests(const TArray<FLidarScanRequest>& Requests, float TransmissionTime) const;
+
+	const FTransform CaptureTransform;
+	const UTempoLidarCaptureComponent* CaptureComponent;
+	const UTempoLidar* TempoLidar;
+};
+
+UCLASS(ClassGroup=(Custom))
+class TEMPOLIDAR_API UTempoLidarCaptureComponent : public UTempoSceneCaptureComponent2D
+{
+	GENERATED_BODY()
+
+public:
+	UTempoLidarCaptureComponent();
+
+protected:
+	virtual void BeginPlay() override;
+	
+	virtual bool HasPendingRequests() const override;
+
+	virtual FTextureRead* MakeTextureRead() const override;
+
+	virtual int32 GetMaxTextureQueueSize() const override;
+	
+	// The number of horizontal beams.
+	UPROPERTY(EditAnywhere)
+	int32 HorizontalBeams = 200.0;
 
 	// The resulting distortion factor.
 	UPROPERTY(VisibleAnywhere)
@@ -120,8 +170,14 @@ protected:
 	// The resulting distortion factor.
 	UPROPERTY(VisibleAnywhere)
 	float DistortedVerticalFOV = 30.0;
+	
+	UPROPERTY(VisibleAnywhere)
+	UMaterialInstanceDynamic* PostProcessMaterialInstance= nullptr;
 
-	TArray<FLidarScanRequest> PendingRequests;
+	UPROPERTY()
+	UTempoLidar* LidarOwner = nullptr;
+
+	friend UTempoLidar;
 
 	friend TTextureRead<FDepthPixel>;
 };
