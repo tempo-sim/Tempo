@@ -192,13 +192,29 @@ struct FTextureReadQueue
 		return nullptr;
 	}
 
+	TOptional<int32> SequenceIdOfNextCompleteRead() const
+	{
+		FRWScopeLock_OnlyGTWrite ReadLock(Lock, SLT_ReadOnly);
+		if (!PendingTextureReads.IsEmpty() && PendingTextureReads[0]->State == FTextureRead::State::EReadComplete)
+		{
+			return PendingTextureReads[0]->SequenceId;
+		}
+		return TOptional<int32>();
+	}
+
+	bool NextReadComplete() const
+	{
+		FRWScopeLock_OnlyGTWrite ReadLock(Lock, SLT_ReadOnly);
+		return !PendingTextureReads.IsEmpty() && PendingTextureReads[0]->State == FTextureRead::State::EReadComplete;
+	}
+
 private:
 	TArray<TUniquePtr<FTextureRead>> PendingTextureReads;
 	mutable FRWLock Lock;
 };
 
 UCLASS(Abstract)
-class TEMPOSENSORSSHARED_API UTempoSceneCaptureComponent2D : public USceneCaptureComponent2D, public ITempoSensorInterface
+class TEMPOSENSORSSHARED_API UTempoSceneCaptureComponent2D : public USceneCaptureComponent2D
 {
 	GENERATED_BODY()
 
@@ -213,17 +229,6 @@ public:
 	virtual void UpdateSceneCaptureContents(FSceneInterface* Scene, ISceneRenderBuilder& SceneRenderBuilder) override;
 #endif
 
-	// Begin ITempoSensorInterface
-	virtual FString GetOwnerName() const override;
-	virtual FString GetSensorName() const override;
-	virtual float GetRate() const override { return RateHz; }
-	virtual const TArray<TEnumAsByte<EMeasurementType>>& GetMeasurementTypes() const override { return MeasurementTypes; }
-	virtual bool IsAwaitingRender() override;
-	virtual void OnRenderCompleted() override;
-	virtual void BlockUntilMeasurementsReady() const override;
-	virtual TOptional<TFuture<void>> SendMeasurements() override;
-	// End ITempoSensorInterface
-
 protected:
 	// Derived components must override this to return whether they have pending requests.
 	virtual bool HasPendingRequests() const PURE_VIRTUAL(UTempoSceneCaptureComponent2D::HasPendingRequests, return false; );
@@ -231,11 +236,15 @@ protected:
 	// Derived components must override this to create new texture reads, based on their current settings, to be enqueued.
 	virtual FTextureRead* MakeTextureRead() const PURE_VIRTUAL(UTempoSceneCaptureComponent2D::MakeTextureRead, return nullptr; );
 
-	// Derived components must override this to decode a completed texture read and use it to respond to pending requests.
-	virtual TFuture<void> DecodeAndRespond(TUniquePtr<FTextureRead> TextureRead) PURE_VIRTUAL(UTempoSceneCaptureComponent2D::DecodeAndRespond, return TFuture<void>(); );
-
 	// Derived components may override this to limit the size of the texture queue.
 	virtual int32 GetMaxTextureQueueSize() const { return -1; }
+
+	bool IsNextReadAwaitingRender() const;
+	void ReadNextIfAvailable();
+	void BlockUntilNextReadComplete() const;
+	TUniquePtr<FTextureRead> DequeueIfReadComplete();
+	TOptional<int32> SequenceIDOfNextCompleteRead() const;
+	bool NextReadComplete() const;
 
 	// Derived components may set this to use a non-default render target format.
 	UPROPERTY(VisibleAnywhere)
@@ -248,10 +257,6 @@ protected:
 	// The rate in Hz this sensor updates at.
 	UPROPERTY(EditAnywhere)
 	float RateHz = 10.0;
-
-	// The measurement types supported. Should be set in constructor of derived classes.
-	UPROPERTY(VisibleAnywhere)
-	TArray<TEnumAsByte<EMeasurementType>> MeasurementTypes;
 
 	// Capture resolution.
 	UPROPERTY(EditAnywhere)

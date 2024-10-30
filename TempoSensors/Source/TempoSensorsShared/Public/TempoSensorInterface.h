@@ -41,6 +41,6 @@ public:
 	// Block the game thread until responses for all pending measurement requests are ready.
 	virtual void BlockUntilMeasurementsReady() const = 0;
 
-	// Respond to pending measurement requests. Should return a future, so these can be parallelized.
-	virtual TOptional<TFuture<void>> SendMeasurements() = 0;
+	// Respond to pending measurement requests. May return one or more futures, so these can be parallelized.
+	virtual TArray<TFuture<void>> SendMeasurements() = 0;
 };
