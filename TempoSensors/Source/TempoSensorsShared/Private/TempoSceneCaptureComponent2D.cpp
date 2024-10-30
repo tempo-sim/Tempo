@@ -42,7 +42,7 @@ void UTempoSceneCaptureComponent2D::UpdateSceneCaptureContents(FSceneInterface* 
 	const int32 MaxTextureQueueSize = GetMaxTextureQueueSize();
 	if (MaxTextureQueueSize > 0 && TextureReadQueue.Num() > MaxTextureQueueSize)
 	{
-		UE_LOG(LogTempoSensorsShared, Warning, TEXT("Fell behind while reading frames from sensor %s owner %s. Skipping capture."), *GetSensorName(), *GetOwnerName());
+		UE_LOG(LogTempoSensorsShared, Warning, TEXT("Fell behind while reading frames from sensor %s. Skipping capture."), *GetName());
 		return;
 	}
 
@@ -63,24 +63,12 @@ void UTempoSceneCaptureComponent2D::UpdateSceneCaptureContents(FSceneInterface* 
 	TextureReadQueue.Enqueue(MakeTextureRead());
 }
 
-FString UTempoSceneCaptureComponent2D::GetOwnerName() const
-{
-	check(GetOwner());
-
-	return GetOwner()->GetActorNameOrLabel();
-}
-
-FString UTempoSceneCaptureComponent2D::GetSensorName() const
-{
-	return GetName();
-}
-
-bool UTempoSceneCaptureComponent2D::IsAwaitingRender()
+bool UTempoSceneCaptureComponent2D::IsNextReadAwaitingRender() const
 {
 	return TextureReadQueue.IsNextAwaitingRender();
 }
 
-void UTempoSceneCaptureComponent2D::OnRenderCompleted()
+void UTempoSceneCaptureComponent2D::ReadNextIfAvailable()
 {
 	if (!TextureReadQueue.IsNextAwaitingRender() || !RenderFence.IsValid())
 	{
@@ -113,19 +101,24 @@ void UTempoSceneCaptureComponent2D::OnRenderCompleted()
 	TextureReadQueue.ReadNext(RenderTarget, TextureRHICopy);
 }
 
-void UTempoSceneCaptureComponent2D::BlockUntilMeasurementsReady() const
+void UTempoSceneCaptureComponent2D::BlockUntilNextReadComplete() const
 {
 	TextureReadQueue.BlockUntilNextReadComplete();
 }
 
-TOptional<TFuture<void>> UTempoSceneCaptureComponent2D::SendMeasurements()
+TUniquePtr<FTextureRead> UTempoSceneCaptureComponent2D::DequeueIfReadComplete()
+{	
+	return TextureReadQueue.DequeueIfReadComplete();
+}
+
+TOptional<int32> UTempoSceneCaptureComponent2D::SequenceIDOfNextCompleteRead() const
+{	
+	return TextureReadQueue.SequenceIdOfNextCompleteRead();
+}
+
+bool UTempoSceneCaptureComponent2D::NextReadComplete() const
 {
-	if (TUniquePtr<FTextureRead> TextureRead = TextureReadQueue.DequeueIfReadComplete())
-	{
-		return DecodeAndRespond(MoveTemp(TextureRead));
-	}
-	
-	return TOptional<TFuture<void>>();
+	return TextureReadQueue.NextReadComplete();
 }
 
 void UTempoSceneCaptureComponent2D::InitRenderTarget()

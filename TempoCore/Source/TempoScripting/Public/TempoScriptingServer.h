@@ -120,7 +120,7 @@ public:
 		: State(UNINITIALIZED), Tag(TagIn), Handler(HandlerIn), Service(ServiceIn), Responder(&Context) {}
 	
 	virtual EState GetState() const override { return State; }
-	
+
 	virtual void Init(grpc::ServerCompletionQueue* CompletionQueue) override
 	{
 		check(State == UNINITIALIZED);
@@ -182,27 +182,58 @@ public:
 	virtual void HandleAndRespond() override
 	{
 		check(Base::State == FRequestManager::EState::REQUESTED || Base::State == FRequestManager::EState::RESPONDING);
-		Base::ResponseDelegate = TResponseDelegate<ResponseType>::CreateSPLambda(static_cast<FRequestManager*>(this), [this](const ResponseType& Response, grpc::Status Result)
+		if (!Base::ResponseDelegate.IsBound())
 		{
-			if (!Result.ok())
+			Base::ResponseDelegate = TResponseDelegate<ResponseType>::CreateSPLambda(static_cast<FRequestManager*>(this), [this](const ResponseType& Response, grpc::Status Result)
 			{
-				// Consider non-OK result to mean there are no more responses available.
-				Base::State = FRequestManager::EState::FINISHING;
-				Base::Responder.Finish(Result, &(Base::Tag));
-				return;
-			}
+				if (Base::State == FRequestManager::EState::HANDLING)
+				{
+					Respond(Response, Result);
+				}
+				else
+				{
+					ResponseQueue.Enqueue(TPair<ResponseType, grpc::Status>(Response, Result));
+				}
+				PendingWrites++;
+			});
+			Base::State = FRequestManager::EState::HANDLING;
+			Base::Handler->HandleRequest(Base::Request, Base::ResponseDelegate);
+		}
+		
+		TPair<ResponseType, grpc::Status> ResponseItem;
+		if (ResponseQueue.Dequeue(ResponseItem))
+		{
+			Respond(ResponseItem.Key, ResponseItem.Value);
+		}
 
-			Base::State = FRequestManager::EState::RESPONDING;
-			Base::Responder.Write(Response, &(Base::Tag));
-		});
-		Base::State = FRequestManager::EState::HANDLING;
-		Base::Handler->HandleRequest(Base::Request, Base::ResponseDelegate);
+		if (PendingWrites > 0 && --PendingWrites == 0)
+		{
+			Base::State = FRequestManager::EState::HANDLING;
+			Base::Handler->HandleRequest(Base::Request, Base::ResponseDelegate);
+		}
 	}
 
 	virtual FRequestManager* Duplicate(int32 NewTag) const override
 	{
 		return new TRequestManager(NewTag, Base::Service, Base::Handler);
 	}
+
+	void Respond(const ResponseType& Response, grpc::Status Result)
+	{
+		if (!Result.ok())
+		{
+			// Consider non-OK result to mean there are no more responses available.
+			Base::State = FRequestManager::EState::FINISHING;
+			Base::Responder.Finish(Result, &(Base::Tag));
+			return;
+		}
+		Base::State = FRequestManager::EState::RESPONDING;
+		Base::Responder.Write(Response, &(Base::Tag));
+	}
+
+	int32 PendingWrites = 0;
+
+	TQueue<TPair<ResponseType, grpc::Status>> ResponseQueue;
 };
 
 /**

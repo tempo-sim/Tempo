@@ -90,10 +90,7 @@ void UTempoSensorServiceSubsystem::OnWorldTickStart(UWorld* World, ELevelTick Ti
 		TArray<TFuture<void>> SendMeasurementsTasks;
 		ForEachSensor([&SendMeasurementsTasks](ITempoSensorInterface* Sensor)
 		{
-			if (TOptional<TFuture<void>> Future = Sensor->SendMeasurements())
-			{
-				SendMeasurementsTasks.Add(MoveTemp(Future.GetValue()));
-			}
+			SendMeasurementsTasks.Append(Sensor->SendMeasurements());
 		});
 
 		for (const TFuture<void>& SendMeasurementsTask : SendMeasurementsTasks)
