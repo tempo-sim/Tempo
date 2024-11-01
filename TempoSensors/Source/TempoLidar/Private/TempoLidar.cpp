@@ -157,12 +157,14 @@ UTempoLidarCaptureComponent::UTempoLidarCaptureComponent()
 	PixelFormatOverride = EPixelFormat::PF_Unknown;
 }
 
+#if WITH_EDITOR
 void UTempoLidar::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
 {
 	Super::PostEditChangeProperty(PropertyChangedEvent);
 
 	UpdateComputedProperties();
 }
+#endif
 
 void UTempoLidar::UpdateComputedProperties()
 {
@@ -236,12 +238,21 @@ void TTextureRead<FDepthPixel>::RespondToRequests(const TArray<FLidarScanRequest
 		{
 			const int32 Column = TempoLidar->UpsamplingFactor * HorizontalBeam;
 			const float Row = TempoLidar->UpsamplingFactor * (VerticalOffset + VerticalBeam * VerticalSpacingPixels);
+			if (VerticalBeam == TempoLidar->VerticalBeams - 1 && HorizontalBeam == CaptureComponent->HorizontalBeams - 1)
+			{
+				UE_LOG(LogTemp, Warning ,TEXT("Last Index: (%d, %f): %d -- %d"), Column, Row, Column + (TempoLidar->UpsamplingFactor * CaptureComponent->HorizontalBeams * FMath::CeilToInt32(Row)), Image.Num());
+			}
+
+			if (VerticalBeam == 0 && HorizontalBeam == 0)
+			{
+				UE_LOG(LogTemp, Warning ,TEXT("First Index: (%d, %f): %d -- %d"), Column, Row, Column + (TempoLidar->UpsamplingFactor * CaptureComponent->HorizontalBeams * FMath::CeilToInt32(Row)), Image.Num());
+			}
 			// const float RangeAbove = ;
 			// const float RangeBelow = ;
 			const float Alpha = Row - FMath::FloorToInt32(Row);
 			return Alpha > 0.5 ?
-				Image[Column + TempoLidar->UpsamplingFactor * CaptureComponent->HorizontalBeams * FMath::CeilToInt32(Row)].GetDepth(TempoLidar->MinRange, TempoLidar->MaxRange) :
-				Image[Column + TempoLidar->UpsamplingFactor * CaptureComponent->HorizontalBeams * FMath::FloorToInt32(Row)].GetDepth(TempoLidar->MinRange, TempoLidar->MaxRange);
+				Image[Column + (TempoLidar->UpsamplingFactor * CaptureComponent->HorizontalBeams * FMath::CeilToInt32(Row))].GetDepth(TempoLidar->MinRange, TempoLidar->MaxRange) :
+				Image[Column + (TempoLidar->UpsamplingFactor * CaptureComponent->HorizontalBeams * FMath::FloorToInt32(Row))].GetDepth(TempoLidar->MinRange, TempoLidar->MaxRange);
 			// if (FMath::Abs(RangeAbove - RangeBelow) > 10.0)
 			// {
 			// 	return Alpha > 0.5 ? RangeBelow : RangeAbove;
