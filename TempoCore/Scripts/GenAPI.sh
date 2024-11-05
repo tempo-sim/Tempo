@@ -10,12 +10,18 @@ PLUGIN_ROOT="${3//\\//}"
 echo "Generating Python API..."
 
 # Using the Python that comes with Unreal
+# Unreal's Python seems to have it's include directory configured incorrectly (`python3-config --include` returns a
+# path to Engine/Binaries/ThirdParty, but the correct include directory is in Engine/Source/ThirdParty).
+# So, we help pip find it, which it may need to in order to build any dependencies from source, with CPATH
 if [[ "$OSTYPE" = "msys" ]]; then
   PYTHON_DIR="$ENGINE_DIR/Binaries/ThirdParty/Python3/Win64"
+  export CPATH="$CPATH:$UNREAL_ENGINE_PATH/Engine/Source/ThirdParty/Python3/Win64/include"
 elif [[ "$OSTYPE" = "darwin"* ]]; then
   PYTHON_DIR="$ENGINE_DIR/Binaries/ThirdParty/Python3/Mac/bin"
+  export CPATH="$CPATH:$UNREAL_ENGINE_PATH/Engine/Source/ThirdParty/Python3/Mac/include"
 elif [[ "$OSTYPE" = "linux-gnu"* ]]; then
   PYTHON_DIR="$ENGINE_DIR/Binaries/ThirdParty/Python3/Linux/bin"
+  export CPATH="$CPATH:$UNREAL_ENGINE_PATH/Engine/Source/ThirdParty/Python3/Linux/include"
 fi
 
 # Create and activate the virtual environment to generate the API.
