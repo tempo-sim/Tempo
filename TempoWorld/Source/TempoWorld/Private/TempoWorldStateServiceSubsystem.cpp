@@ -80,7 +80,10 @@ TArray<AActor*> GetMatchingActors(const UWorld* World, const ActorStatesNearRequ
 					continue;
 				}
 				// Skip static actors (unless told to include them).
-				if (!Request.include_static() && ActorIt->GetRootComponent() && ActorIt->GetRootComponent()->GetCollisionObjectType() == ECollisionChannel::ECC_WorldStatic)
+				TArray<UPrimitiveComponent*> PrimitiveComponents;
+				ActorIt->GetComponents<UPrimitiveComponent>(PrimitiveComponents);
+				const int32 DynamicPrimitiveComponents = PrimitiveComponents.FindLastByPredicate([](const UPrimitiveComponent* Component) { return Component->GetCollisionObjectType() != ECollisionChannel::ECC_WorldStatic; });
+				if (!Request.include_static() && DynamicPrimitiveComponents == INDEX_NONE)
 				{
 					continue;
 				}
