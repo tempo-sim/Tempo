@@ -28,7 +28,8 @@ protected:
 	virtual float FixupDeltaSeconds(float DeltaSeconds, float RealDeltaSeconds) override;
 	
 private:	
-	UFUNCTION()
+	void OnTempoCoreSettingsChanged(UObject* Object, FPropertyChangedEvent& PropertyChangedEvent);
+
 	void OnTimeSettingsChanged();
 	
 	UPROPERTY(VisibleAnywhere)

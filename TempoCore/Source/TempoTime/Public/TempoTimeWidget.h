@@ -40,8 +40,9 @@ protected:
 	UTextBlock* SimTimeBox;
 
 private:
-	UFUNCTION()
-	void SyncTimeSettings();
+	void OnTempoCoreSettingsChanged(UObject* Object, FPropertyChangedEvent& PropertyChangedEvent) const;
+	
+	void SyncTimeSettings() const;
 
 	UFUNCTION()
 	void OnTimeModeSelectionChanged(FString SelectedItem, ESelectInfo::Type SelectionType);

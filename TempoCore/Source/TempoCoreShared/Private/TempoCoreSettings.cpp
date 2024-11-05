@@ -2,29 +2,30 @@
 
 #include "TempoCoreSettings.h"
 
+void UTempoCoreSettings::PostInitProperties()
+{
+	Super::PostInitProperties();
+
+	int32 CommandLineScriptingPort;
+	if (FParse::Value(FCommandLine::Get(), TEXT("ScriptingPort="), CommandLineScriptingPort))
+	{
+		ScriptingPort = CommandLineScriptingPort;
+	}
+}
+
 void UTempoCoreSettings::SetTimeMode(ETimeMode TimeModeIn)
 {
 	TimeMode = TimeModeIn;
 
-	TempoCoreTimeSettingsChangedEvent.Broadcast();
-}
+	FPropertyChangedEvent PropertyChangedEvent(
+		GetClass()->FindPropertyByName(GET_MEMBER_NAME_CHECKED(UTempoCoreSettings, TimeMode)));
+	OnSettingChanged().Broadcast(this, PropertyChangedEvent);}
 
 void UTempoCoreSettings::SetSimulatedStepsPerSecond(int32 SimulatedStepsPerSecondIn)
 {
 	SimulatedStepsPerSecond = SimulatedStepsPerSecondIn;
-
-	TempoCoreTimeSettingsChangedEvent.Broadcast();
-}
-
-#if WITH_EDITOR
-void UTempoCoreSettings::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
-{
-	Super::PostEditChangeProperty(PropertyChangedEvent);
 	
-	if (PropertyChangedEvent.Property->GetName() == GET_MEMBER_NAME_CHECKED(UTempoCoreSettings, TimeMode) ||
-		(TimeMode == ETimeMode::FixedStep && PropertyChangedEvent.Property->GetName() == GET_MEMBER_NAME_CHECKED(UTempoCoreSettings, SimulatedStepsPerSecond)))
-	{
-		TempoCoreTimeSettingsChangedEvent.Broadcast();
-	}
+	FPropertyChangedEvent PropertyChangedEvent(
+		GetClass()->FindPropertyByName(GET_MEMBER_NAME_CHECKED(UTempoCoreSettings, SimulatedStepsPerSecond)));
+	OnSettingChanged().Broadcast(this, PropertyChangedEvent);
 }
-#endif

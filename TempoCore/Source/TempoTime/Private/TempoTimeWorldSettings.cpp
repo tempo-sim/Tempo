@@ -9,7 +9,7 @@ void ATempoTimeWorldSettings::BeginPlay()
 {
 	Super::BeginPlay();
 
-	SettingsChangedHandle = GetMutableDefault<UTempoCoreSettings>()->TempoCoreTimeSettingsChangedEvent.AddUObject(this, &ATempoTimeWorldSettings::OnTimeSettingsChanged);
+	SettingsChangedHandle = GetMutableDefault<UTempoCoreSettings>()->OnSettingChanged().AddUObject(this, &ATempoTimeWorldSettings::OnTempoCoreSettingsChanged);
 	OnTimeSettingsChanged();
 }
 
@@ -17,7 +17,7 @@ void ATempoTimeWorldSettings::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	Super::EndPlay(EndPlayReason);
 
-	GetMutableDefault<UTempoCoreSettings>()->TempoCoreTimeSettingsChangedEvent.Remove(SettingsChangedHandle);
+	GetMutableDefault<UTempoCoreSettings>()->OnSettingChanged().Remove(SettingsChangedHandle);
 }
 
 float ATempoTimeWorldSettings::FixupDeltaSeconds(float DeltaSeconds, float RealDeltaSeconds)
@@ -74,6 +74,15 @@ float ATempoTimeWorldSettings::FixupDeltaSeconds(float DeltaSeconds, float RealD
 	}
 	
 	return DeltaSeconds;
+}
+
+void ATempoTimeWorldSettings::OnTempoCoreSettingsChanged(UObject* Object, FPropertyChangedEvent& PropertyChangedEvent)
+{
+	if (PropertyChangedEvent.Property->GetName() == UTempoCoreSettings::GetTimeModeMemberName() ||
+		PropertyChangedEvent.Property->GetName() == UTempoCoreSettings::GetSimulatedStepsPerSecondMemberName())
+	{
+		OnTimeSettingsChanged();
+	}
 }
 
 void ATempoTimeWorldSettings::OnTimeSettingsChanged()

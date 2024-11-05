@@ -40,6 +40,15 @@ FTempoScriptingServer::FTempoScriptingServer()
 	{
 		Reinitialize();
 	});
+
+	GetMutableDefault<UTempoCoreSettings>()->OnSettingChanged().AddLambda([this](UObject* Object, struct FPropertyChangedEvent& Event)
+	{
+		if (Event.Property->GetName() == UTempoCoreSettings::GetScriptingPortMemberName() ||
+			Event.Property->GetName() == UTempoCoreSettings::GetScriptingCompressionLevelMemberName())
+		{
+			Reinitialize();
+		}
+	});
 #endif
 }
 
