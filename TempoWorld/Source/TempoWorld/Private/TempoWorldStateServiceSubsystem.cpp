@@ -11,7 +11,10 @@
 #include "TempoWorld.h"
 
 #include "EngineUtils.h"
+#include "MassAgentComponent.h"
+#include "MassTrafficVehicleComponent.h"
 #include "GameFramework/GameMode.h"
+#include "GameFramework/MovementComponent.h"
 #include "Kismet/GameplayStatics.h"
 
 using WorldStateService = TempoWorld::WorldStateService::AsyncService;
@@ -80,14 +83,11 @@ TArray<AActor*> GetMatchingActors(const UWorld* World, const ActorStatesNearRequ
 					continue;
 				}
 				// Skip static actors (unless told to include them).
-				TArray<UPrimitiveComponent*> PrimitiveComponents;
-				ActorIt->GetComponents<UPrimitiveComponent>(PrimitiveComponents);
-				const bool bHasDynamicPrimitiveComponents = PrimitiveComponents.FindByPredicate(
-					[](const UPrimitiveComponent* Component)
-					{
-						return Component->GetCollisionObjectType() != ECollisionChannel::ECC_WorldStatic;
-					});
-				if (!Request.include_static() && !bHasDynamicPrimitiveComponents)
+				const bool bHasMovementComponent = ActorIt->GetComponentByClass<UMovementComponent>();
+				const bool bHasMassTrafficVehicleComponent = ActorIt->GetComponentByClass<UMassTrafficVehicleComponent>();
+				const bool bHasMassAgentComponent = ActorIt->GetComponentByClass<UMassAgentComponent>();
+				const bool bIsStatic = !(bHasMovementComponent || bHasMassTrafficVehicleComponent || bHasMassAgentComponent);
+				if (!Request.include_static() && bIsStatic)
 				{
 					continue;
 				}

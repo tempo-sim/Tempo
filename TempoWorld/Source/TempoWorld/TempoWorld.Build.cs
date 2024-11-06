@@ -22,8 +22,14 @@ public class TempoWorld : TempoModuleRules
         PrivateDependencyModuleNames.AddRange(
             new string[]
             {
+                // Unreal
                 "CoreUObject",
                 "Engine",
+                "MassActors",
+                "MassEntity",
+                "MassTraffic",
+                "StructUtils",
+                // Tempo
                 "TempoCore",
                 "TempoMovementShared",
             }

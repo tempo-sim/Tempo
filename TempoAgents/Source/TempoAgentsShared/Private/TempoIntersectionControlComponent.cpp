@@ -75,7 +75,6 @@ void UTempoIntersectionControlComponent::SetupTrafficControllerMeshData()
 		MeshComponent->SetWorldScale3D(TrafficControllerMeshInfo.MeshScale);
 
 		MeshComponent->SetStaticMesh(TrafficControllerMeshInfo.TrafficControllerMesh);
-		MeshComponent->SetCollisionObjectType(ECC_WorldStatic);
 		MeshComponent->AttachToComponent(OwnerActor->GetRootComponent(), FAttachmentTransformRules::KeepWorldTransform);
 		MeshComponent->RegisterComponent();
 		
