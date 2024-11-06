@@ -82,12 +82,12 @@ TArray<AActor*> GetMatchingActors(const UWorld* World, const ActorStatesNearRequ
 				// Skip static actors (unless told to include them).
 				TArray<UPrimitiveComponent*> PrimitiveComponents;
 				ActorIt->GetComponents<UPrimitiveComponent>(PrimitiveComponents);
-				const bool bHasOnlyStaticPrimitiveComponents = !PrimitiveComponents.FindByPredicate(
+				const bool bHasDynamicPrimitiveComponents = PrimitiveComponents.FindByPredicate(
 					[](const UPrimitiveComponent* Component)
 					{
 						return Component->GetCollisionObjectType() != ECollisionChannel::ECC_WorldStatic;
 					});
-				if (!Request.include_static() && bHasOnlyStaticPrimitiveComponents)
+				if (!Request.include_static() && !bHasDynamicPrimitiveComponents)
 				{
 					continue;
 				}
