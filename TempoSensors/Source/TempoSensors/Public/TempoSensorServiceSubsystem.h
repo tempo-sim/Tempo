@@ -45,7 +45,7 @@ public:
 
 	virtual void OnWorldTickStart(UWorld* World, ELevelTick TickType, float DeltaSeconds);
 
-	void ForEachSensor(const TFunction<void(class ITempoSensorInterface*)>& Callback) const;
+	void ForEachActiveSensor(const TFunction<void(class ITempoSensorInterface*)>& Callback) const;
 
 	void GetAvailableSensors(const TempoSensors::AvailableSensorsRequest& Request, const TResponseDelegate<TempoSensors::AvailableSensorsResponse>& ResponseContinuation) const;
 

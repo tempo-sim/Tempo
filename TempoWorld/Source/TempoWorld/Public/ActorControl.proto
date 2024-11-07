@@ -1,0 +1,225 @@
+// Copyright Tempo Simulation, LLC. All Rights Reserved
+
+syntax = "proto3";
+
+import "TempoScripting/Empty.proto";
+import "TempoScripting/Geometry.proto";
+
+message SpawnActorRequest {
+  string type = 1;
+  bool deferred = 2;
+  TempoScripting.Transform transform = 3;
+  string relative_to_actor = 4;
+}
+
+message SpawnActorResponse {
+  string spawned_name = 1;
+}
+
+message FinishSpawningActorRequest {
+  string actor = 1;
+}
+
+message DestroyActorRequest {
+  string actor = 1;
+}
+
+message SetActorTransformRequest {
+  string actor = 1;
+  TempoScripting.Transform transform = 2;
+  string relative_to_actor = 3;
+}
+
+message SetComponentTransformRequest {
+  string actor = 1;
+  string component = 2;
+  TempoScripting.Transform transform = 3;
+  bool relative_to_world = 4;
+}
+
+message ActivateComponentRequest {
+  string actor = 1;
+  string component = 2;
+}
+
+message DeactivateComponentRequest {
+  string actor = 1;
+  string component = 2;
+}
+
+message GetAllActorsRequest {
+}
+
+message ActorDescriptor {
+  string name = 1;
+  string type = 2;
+}
+
+message GetAllActorsResponse {
+  repeated ActorDescriptor actors = 1;
+}
+
+message GetAllComponentsRequest {
+  string actor = 1;
+}
+
+message ComponentDescriptor {
+  string actor = 1;
+  string name = 2;
+  string type = 3;
+}
+
+message GetAllComponentsResponse {
+  repeated ComponentDescriptor components = 1;
+}
+
+message GetActorPropertiesRequest {
+  string actor = 1;
+  bool include_components = 2;
+}
+
+message GetComponentPropertiesRequest {
+  string actor = 1;
+  string component = 2;
+}
+
+message PropertyDescriptor {
+  string actor = 1;
+  string component = 2;
+  string name = 3;
+  string type = 4;
+  string value = 5;
+}
+
+message GetPropertiesResponse {
+  repeated PropertyDescriptor properties = 1;
+}
+
+message SetBoolPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  bool value = 4;
+}
+
+message SetStringPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  string value = 4;
+}
+
+message SetIntPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  int32 value = 4;
+}
+
+message SetFloatPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  float value = 4;
+}
+
+message SetVectorPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  float x = 4;
+  float y = 5;
+  float z = 6;
+}
+
+message SetRotatorPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  float r = 4;
+  float p = 5;
+  float y = 6;
+}
+
+message SetColorPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  int32 r = 4;
+  int32 g = 5;
+  int32 b = 6;
+}
+
+message SetBoolArrayPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  repeated bool values = 4;
+}
+
+message SetStringArrayPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  repeated string values = 4;
+}
+
+message SetIntArrayPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  repeated int32 values = 4;
+}
+
+message SetFloatArrayPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  repeated float values = 4;
+}
+
+service ActorControlService {
+    rpc SpawnActor(SpawnActorRequest) returns (SpawnActorResponse);
+
+    rpc FinishSpawningActor(FinishSpawningActorRequest) returns (TempoScripting.Empty);
+
+    rpc DestroyActor(DestroyActorRequest) returns (TempoScripting.Empty);
+
+    rpc SetActorTransform(SetActorTransformRequest) returns (TempoScripting.Empty);
+
+    rpc SetComponentTransform(SetComponentTransformRequest) returns (TempoScripting.Empty);
+
+    rpc ActivateComponent(ActivateComponentRequest) returns (TempoScripting.Empty);
+
+    rpc DeactivateComponent(DeactivateComponentRequest) returns (TempoScripting.Empty);
+
+    rpc GetAllActors(GetAllActorsRequest) returns (GetAllActorsResponse);
+
+    rpc GetAllComponents(GetAllComponentsRequest) returns (GetAllComponentsResponse);
+
+    rpc GetActorProperties(GetActorPropertiesRequest) returns (GetPropertiesResponse);
+
+    rpc GetComponentProperties(GetComponentPropertiesRequest) returns (GetPropertiesResponse);
+
+    rpc SetBoolProperty(SetBoolPropertyRequest) returns (TempoScripting.Empty);
+
+    rpc SetStringProperty(SetStringPropertyRequest) returns (TempoScripting.Empty);
+
+    rpc SetIntProperty(SetIntPropertyRequest) returns (TempoScripting.Empty);
+
+    rpc SetFloatProperty(SetFloatPropertyRequest) returns (TempoScripting.Empty);
+
+    rpc SetVectorProperty(SetVectorPropertyRequest) returns (TempoScripting.Empty);
+
+    rpc SetRotatorProperty(SetRotatorPropertyRequest) returns (TempoScripting.Empty);
+
+    rpc SetColorProperty(SetColorPropertyRequest) returns (TempoScripting.Empty);
+
+    rpc SetBoolArrayProperty(SetBoolArrayPropertyRequest) returns (TempoScripting.Empty);
+
+    rpc SetStringArrayProperty(SetStringArrayPropertyRequest) returns (TempoScripting.Empty);
+
+    rpc SetIntArrayProperty(SetIntArrayPropertyRequest) returns (TempoScripting.Empty);
+
+    rpc SetFloatArrayProperty(SetFloatArrayPropertyRequest) returns (TempoScripting.Empty);
+}
