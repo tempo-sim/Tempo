@@ -17,7 +17,14 @@ class TEMPOCORE_API ATempoGameMode : public AGameModeBase
 public:
 	const IActorClassificationInterface* GetActorClassifier() const;
 
+	virtual void StartPlay() override;
+
+	bool BeginPlayDeferred() const { return bBeginPlayDeferred; }
+
 protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, meta=(MustImplement="/Script/TempoCore.ActorClassificationInterface"))
 	TSubclassOf<UWorldSubsystem> ActorClassifier = UDefaultActorClassifier::StaticClass();
+
+	UPROPERTY()
+	bool bBeginPlayDeferred = false;
 };
