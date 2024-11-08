@@ -2,7 +2,7 @@
 
 #pragma once
 
-#include "TempoBrightnessMeter.h"
+#include "TempoBrightnessMeterComponent.h"
 
 #include "MassCommonFragments.h"
 #include "MassTranslator.h"
@@ -15,7 +15,7 @@ struct FMassBrightnessMeterWrapperFragment : public FMassFragment
 {
 	GENERATED_BODY()
 	
-	TWeakObjectPtr<UTempoBrightnessMeter> BrightnessMeterComponent;
+	TWeakObjectPtr<UTempoBrightnessMeterComponent> BrightnessMeterComponent;
 };
 
 USTRUCT()

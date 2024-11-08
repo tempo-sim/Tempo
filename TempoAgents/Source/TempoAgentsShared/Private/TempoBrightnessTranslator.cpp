@@ -35,7 +35,7 @@ void UMassBrightnessMeterToMassTranslator::Execute(FMassEntityManager& EntityMan
 		const int32 NumEntities = Context.GetNumEntities();
 		for (int32 EntityIndex = 0; EntityIndex < NumEntities; ++EntityIndex)
 		{
-			if (const UTempoBrightnessMeter* BrightnessMeterComponent = BrightnessMeterWrapperFragments[EntityIndex].BrightnessMeterComponent.Get())
+			if (const UTempoBrightnessMeterComponent* BrightnessMeterComponent = BrightnessMeterWrapperFragments[EntityIndex].BrightnessMeterComponent.Get())
 			{
 				EnvironmentalBrightnessFragments[EntityIndex].Brightness = BrightnessMeterComponent->GetBrightness();
 			}

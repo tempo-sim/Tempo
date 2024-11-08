@@ -4,7 +4,9 @@
 
 #include "MassEntityTemplateRegistry.h"
 #include "MassTrafficFragments.h"
+#include "TempoBrightnessMeter.h"
 #include "TempoBrightnessTranslator.h"
+#include "Kismet/GameplayStatics.h"
 
 //----------------------------------------------------------------------//
 //  UTempoMassAgentBrightnessMeterSyncTrait
@@ -14,10 +16,10 @@ void UTempoMassAgentBrightnessMeterSyncTrait::BuildTemplate(FMassEntityTemplateB
 	BuildContext.AddFragment<FMassBrightnessMeterWrapperFragment>();
 	BuildContext.AddFragment<FEnvironmentalBrightnessFragment>();
 
-	BuildContext.GetMutableObjectFragmentInitializers().Add([=](UObject& Owner, FMassEntityView& EntityView, const EMassTranslationDirection CurrentDirection)
+	BuildContext.GetMutableObjectFragmentInitializers().Add([=, &World](UObject& Owner, FMassEntityView& EntityView, const EMassTranslationDirection CurrentDirection)
 		{
-			AActor* OwnerActor = Cast<AActor>(&Owner);
-			if (!ensureMsgf(OwnerActor != nullptr, TEXT("Owner must be an Actor.")))
+			const ATempoBrightnessMeter* BrightnessMeterActor = Cast<ATempoBrightnessMeter>(UGameplayStatics::GetActorOfClass(&World, ATempoBrightnessMeter::StaticClass()));
+			if (BrightnessMeterActor == nullptr)
 			{
 				return;
 			}
@@ -28,8 +30,8 @@ void UTempoMassAgentBrightnessMeterSyncTrait::BuildTemplate(FMassEntityTemplateB
 			// For example, Mass needs to know about the environmental brightness in order to control
 			// the vehicles' headlights.
 
-			UTempoBrightnessMeter* BrightnessMeterComponent = OwnerActor->FindComponentByClass<UTempoBrightnessMeter>();
-			if (!ensureMsgf(BrightnessMeterComponent != nullptr, TEXT("UTempoMassAgentBrightnessMeterSyncTrait expects OwnerActor to have a UTempoBrightnessMeter component.")))
+			UTempoBrightnessMeterComponent* BrightnessMeterComponent = BrightnessMeterActor->BrightnessMeterComponent;
+			if (!ensureMsgf(BrightnessMeterComponent != nullptr, TEXT("UTempoMassAgentBrightnessMeterSyncTrait expects BrightnessMeterActor to have a valid UTempoBrightnessMeterComponent.")))
 			{
 				return;
 			}

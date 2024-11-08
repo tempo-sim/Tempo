@@ -3,40 +3,18 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/SceneCaptureComponent2D.h"
+#include "TempoBrightnessMeterComponent.h"
 #include "TempoBrightnessMeter.generated.h"
 
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TEMPOAGENTSSHARED_API UTempoBrightnessMeter : public USceneCaptureComponent2D
+UCLASS(ClassGroup=(Custom))
+class TEMPOAGENTSSHARED_API ATempoBrightnessMeter : public AActor
 {
 	GENERATED_BODY()
 
 public:
-	UTempoBrightnessMeter();
+	ATempoBrightnessMeter();
 
-	void UpdateBrightness();
-
-	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
-
-	UFUNCTION(BlueprintPure)
-	float GetBrightness() const;
-
-protected:
-	virtual void BeginPlay() override;
-
-	// Update period in seconds.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	float UpdatePeriod = 5.0;
-
-	UPROPERTY(VisibleAnywhere)
-	float Brightness = 0.0;
-
-	UPROPERTY(EditAnywhere)
-	FIntPoint SizeXY = FIntPoint(8, 8);
-
-	FTimerHandle TimerHandle;
-
-	TOptional<FRenderCommandFence> RenderFence;
-
-	mutable FCriticalSection Mutex;
+	UTempoBrightnessMeterComponent* BrightnessMeterComponent = nullptr;
+	
 };
