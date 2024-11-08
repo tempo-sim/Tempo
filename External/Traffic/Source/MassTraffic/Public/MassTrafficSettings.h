@@ -191,10 +191,6 @@ public:
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Config, Category="Speed|Stopping")
 	float StopSignBrakingTime = 4.0f;
 
-	/** Maximum vehicle speed that can be stopped quickly (MpH.) */ 
-	UPROPERTY(EditAnywhere, Config, Category="Vehicles")
-	float MaxQuickStopSpeedMPH = 5.0f;
-
 	/**
 	 * Target speed along the CurrentLane is determined by looking at the curvature ahead of the 
 	 * current closest point on the spline, and slowing to turn. The distance ahead is determined by 
@@ -318,6 +314,18 @@ public:
 	 */
 	UPROPERTY(EditAnywhere, Config, Category="Obstacle Avoidance")
 	FVector2D MinimumDistanceToObstacleRange = { 80.0f, 300.0f };
+
+	/** Maximum vehicle speed that can be stopped quickly (MpH.) */ 
+	UPROPERTY(EditAnywhere, Config, Category="Vehicles")
+	float MaxQuickStopSpeedMPH = 5.0f;
+
+	// Environmental brightness threshold [0..1] below which vehicles will turn *on* their headlights.
+	UPROPERTY(EditAnywhere, Config, Category="Vehicles")
+	float VehicleTurnOnHeadlightsBrightnessThreshold = 0.4f;
+
+	// Environmental brightness threshold [0..1] above which vehicles will turn *off* their headlights.
+	UPROPERTY(EditAnywhere, Config, Category="Vehicles")
+	float VehicleTurnOffHeadlightsBrightnessThreshold = 0.5f;
 
 	/** How long a yellow light lasts. */
 	UPROPERTY(EditAnywhere, Config, Category="Intersections|Durations|Standard")
