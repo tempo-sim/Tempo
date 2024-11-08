@@ -83,9 +83,9 @@ TArray<AActor*> GetMatchingActors(const UWorld* World, const ActorStatesNearRequ
 					continue;
 				}
 				// Skip static actors (unless told to include them).
-				const bool bHasMovementComponent = ActorIt->GetComponentByClass<UMovementComponent>();
-				const bool bHasMassTrafficVehicleComponent = ActorIt->GetComponentByClass<UMassTrafficVehicleComponent>();
-				const bool bHasMassAgentComponent = ActorIt->GetComponentByClass<UMassAgentComponent>();
+				const bool bHasMovementComponent = ActorIt->GetComponentByClass<UMovementComponent>() != nullptr;
+				const bool bHasMassTrafficVehicleComponent = ActorIt->GetComponentByClass<UMassTrafficVehicleComponent>() != nullptr;
+				const bool bHasMassAgentComponent = ActorIt->GetComponentByClass<UMassAgentComponent>() != nullptr;
 				const bool bIsStatic = !(bHasMovementComponent || bHasMassTrafficVehicleComponent || bHasMassAgentComponent);
 				if (!Request.include_static() && bIsStatic)
 				{
