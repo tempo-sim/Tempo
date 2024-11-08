@@ -54,6 +54,7 @@ void UMassTrafficVehicleSimulationTrait::BuildTemplate(FMassEntityTemplateBuildC
 	VehicleControlFragment.bAllowLeftTurnsAtIntersections = Params.bAllowLeftTurnsAtIntersections;
 	VehicleControlFragment.bAllowRightTurnsAtIntersections = Params.bAllowRightTurnsAtIntersections;
 	VehicleControlFragment.bAllowGoingStraightAtIntersections = Params.bAllowGoingStraightAtIntersections;
+	VehicleControlFragment.LaneChangePriorityFilters = Params.LaneChangePriorityFilters;
 
 	// Variable tick
 	BuildContext.AddFragment<FMassSimulationVariableTickFragment>();

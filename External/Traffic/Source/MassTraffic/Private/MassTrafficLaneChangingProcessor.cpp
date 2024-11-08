@@ -128,6 +128,7 @@ static void TryStartingNewLaneChange(
 		Lane_Current, AgentRadiusFragment_Current, RandomFractionFragment_Current, VehicleControlFragment_Current,
 		RandomStream,
 		MassTrafficSettings,
+		ZoneGraphStorage,
 		/*out*/LaneChangeRecommendation);
 
 	

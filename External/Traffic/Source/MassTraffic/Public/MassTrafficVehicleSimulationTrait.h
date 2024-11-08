@@ -53,6 +53,9 @@ struct MASSTRAFFIC_API FMassTrafficVehicleSimulationParameters : public FMassSha
 	UPROPERTY(EditAnywhere, Category = "Restrictions")
 	bool bAllowGoingStraightAtIntersections = true;
 
+	UPROPERTY(EditAnywhere, Category = "Restrictions")
+	TArray<FZoneGraphTagFilter> LaneChangePriorityFilters;
+
 	/** Actor class of this agent when spawned in high resolution */
 	UPROPERTY(EditAnywhere, Category = "Physics")
 	TSubclassOf<AWheeledVehiclePawn> PhysicsVehicleTemplateActor;
