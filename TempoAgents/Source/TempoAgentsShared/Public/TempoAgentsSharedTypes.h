@@ -19,4 +19,11 @@ enum class ETempoRoadOffsetOrigin : uint8
 	RightRoadEdge = 2,
 };
 
+UENUM(BlueprintType)
+enum class ETempoRoadLateralDirection : uint8
+{
+	Left = 0,
+	Right = 1,
+};
+
 
