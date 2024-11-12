@@ -12,16 +12,25 @@ using TimeModeRequest = TempoTime::TimeModeRequest;
 using SetSimStepsPerSecondRequest = TempoTime::SetSimStepsPerSecondRequest;
 using AdvanceStepsRequest = TempoTime::AdvanceStepsRequest;
 
-void UTempoTimeServiceSubsystem::RegisterScriptingServices(FTempoScriptingServer* ScriptingServer)
+DEFINE_TEMPO_SERVICE_TYPE_TRAITS(TimeService);
+
+void UTempoTimeServiceSubsystem::RegisterScriptingServices(FTempoScriptingServer& ScriptingServer)
 {
-	ScriptingServer->RegisterService<TimeService>(
-		TSimpleRequestHandler<TimeService, TimeModeRequest, TempoEmpty>(&TimeService::RequestSetTimeMode).BindUObject(this, &UTempoTimeServiceSubsystem::SetTimeMode),
-		TSimpleRequestHandler<TimeService, SetSimStepsPerSecondRequest, TempoEmpty>(&TimeService::RequestSetSimStepsPerSecond).BindUObject(this, &UTempoTimeServiceSubsystem::SetSimStepsPerSecond),
-		TSimpleRequestHandler<TimeService, AdvanceStepsRequest, TempoEmpty>(&TimeService::RequestAdvanceSteps).BindUObject(this, &UTempoTimeServiceSubsystem::AdvanceSteps),
-		TSimpleRequestHandler<TimeService, TempoEmpty, TempoEmpty>(&TimeService::RequestPlay).BindUObject(this, &UTempoTimeServiceSubsystem::Play),
-		TSimpleRequestHandler<TimeService, TempoEmpty, TempoEmpty>(&TimeService::RequestPause).BindUObject(this, &UTempoTimeServiceSubsystem::Pause),
-		TSimpleRequestHandler<TimeService, TempoEmpty, TempoEmpty>(&TimeService::RequestStep).BindUObject(this, &UTempoTimeServiceSubsystem::Step)
+	ScriptingServer.RegisterService<TimeService>(
+		SimpleRequestHandler(&TimeService::RequestSetTimeMode, &UTempoTimeServiceSubsystem::SetTimeMode),
+		SimpleRequestHandler(&TimeService::RequestSetSimStepsPerSecond, &UTempoTimeServiceSubsystem::SetSimStepsPerSecond),
+		SimpleRequestHandler(&TimeService::RequestAdvanceSteps, &UTempoTimeServiceSubsystem::AdvanceSteps),
+		SimpleRequestHandler(&TimeService::RequestPlay, &UTempoTimeServiceSubsystem::Play),
+		SimpleRequestHandler(&TimeService::RequestPause, &UTempoTimeServiceSubsystem::Pause),
+		SimpleRequestHandler(&TimeService::RequestStep, &UTempoTimeServiceSubsystem::Step)
 		);
+}
+
+void UTempoTimeServiceSubsystem::Initialize(FSubsystemCollectionBase& Collection)
+{
+	Super::Initialize(Collection);
+
+	FTempoScriptingServer::Get().BindObjectToService<TimeService>(this);
 }
 
 void UTempoTimeServiceSubsystem::SetTimeMode(const TempoTime::TimeModeRequest& Request, const TResponseDelegate<TempoEmpty>& ResponseContinuation) const

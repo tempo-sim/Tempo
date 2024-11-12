@@ -7,11 +7,20 @@
 
 using TempoAgentsEditorService = TempoAgentsEditor::TempoAgentsEditorService::AsyncService;
 
-void UTempoAgentsEditorServiceSubsystem::RegisterScriptingServices(FTempoScriptingServer* ScriptingServer)
+DEFINE_TEMPO_SERVICE_TYPE_TRAITS(TempoAgentsEditorService);
+
+void UTempoAgentsEditorServiceSubsystem::RegisterScriptingServices(FTempoScriptingServer& ScriptingServer)
 {
-	ScriptingServer->RegisterService<TempoAgentsEditorService>(
-		TSimpleRequestHandler<TempoAgentsEditorService, TempoScripting::Empty, TempoScripting::Empty>(&TempoAgentsEditorService::RequestRunTempoZoneGraphBuilderPipeline).BindUObject(this, &UTempoAgentsEditorServiceSubsystem::RunTempoZoneGraphBuilderPipeline)
+	ScriptingServer.RegisterService<TempoAgentsEditorService>(
+		SimpleRequestHandler(&TempoAgentsEditorService::RequestRunTempoZoneGraphBuilderPipeline, &UTempoAgentsEditorServiceSubsystem::RunTempoZoneGraphBuilderPipeline)
 	);
+}
+
+void UTempoAgentsEditorServiceSubsystem::Initialize(FSubsystemCollectionBase& Collection)
+{
+	Super::Initialize(Collection);
+
+	FTempoScriptingServer::Get().BindObjectToService<TempoAgentsEditorService>(this);
 }
 
 void UTempoAgentsEditorServiceSubsystem::RunTempoZoneGraphBuilderPipeline(const TempoScripting::Empty& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const

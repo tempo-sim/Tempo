@@ -22,19 +22,23 @@ using ColorImage = TempoCamera::ColorImage;
 using DepthImage = TempoCamera::DepthImage;
 using LabelImage = TempoCamera::LabelImage;
 
-void UTempoSensorServiceSubsystem::RegisterScriptingServices(FTempoScriptingServer* ScriptingServer)
+DEFINE_TEMPO_SERVICE_TYPE_TRAITS(SensorService);
+
+void UTempoSensorServiceSubsystem::RegisterScriptingServices(FTempoScriptingServer& ScriptingServer)
 {
-	ScriptingServer->RegisterService<SensorService>(
-		TSimpleRequestHandler<SensorService, AvailableSensorsRequest, AvailableSensorsResponse>(&SensorService::RequestGetAvailableSensors).BindUObject(this, &UTempoSensorServiceSubsystem::GetAvailableSensors),
-		TStreamingRequestHandler<SensorService, ColorImageRequest, ColorImage>(&SensorService::RequestStreamColorImages).BindUObject(this, &UTempoSensorServiceSubsystem::StreamColorImages),
-		TStreamingRequestHandler<SensorService, DepthImageRequest, DepthImage>(&SensorService::RequestStreamDepthImages).BindUObject(this, &UTempoSensorServiceSubsystem::StreamDepthImages),
-		TStreamingRequestHandler<SensorService, LabelImageRequest, LabelImage>(&SensorService::RequestStreamLabelImages).BindUObject(this, &UTempoSensorServiceSubsystem::StreamLabelImages)
+	ScriptingServer.RegisterService<SensorService>(
+		SimpleRequestHandler(&SensorService::RequestGetAvailableSensors, &UTempoSensorServiceSubsystem::GetAvailableSensors),
+		StreamingRequestHandler(&SensorService::RequestStreamColorImages, &UTempoSensorServiceSubsystem::StreamColorImages),
+		StreamingRequestHandler(&SensorService::RequestStreamDepthImages, &UTempoSensorServiceSubsystem::StreamDepthImages),
+		StreamingRequestHandler(&SensorService::RequestStreamLabelImages, &UTempoSensorServiceSubsystem::StreamLabelImages)
 		);
 }
 
 void UTempoSensorServiceSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
+
+	FTempoScriptingServer::Get().BindObjectToService<SensorService>(this);
 
 	// OnWorldTickStart is fired before Tick has actually begun, while the world time is still the tick
 	// of the last frame. We use this last opportunity, having waited as long as possible, to collect

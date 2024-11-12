@@ -14,6 +14,8 @@
 
 using GeographicService = TempoGeographic::GeographicService::AsyncService;
 
+DEFINE_TEMPO_SERVICE_TYPE_TRAITS(GeographicService);
+
 ATempoDateTimeSystem* GetTempoDateTimeSystem(const UObject* WorldContextObject)
 {
 	TArray<AActor*> Actors;
@@ -29,15 +31,22 @@ ATempoDateTimeSystem* GetTempoDateTimeSystem(const UObject* WorldContextObject)
 	return Cast<ATempoDateTimeSystem>(Actors[0]);
 }
 
-void UTempoGeographicServiceSubsystem::RegisterScriptingServices(FTempoScriptingServer* ScriptingServer)
+void UTempoGeographicServiceSubsystem::RegisterScriptingServices(FTempoScriptingServer& ScriptingServer)
 {
-	ScriptingServer->RegisterService<GeographicService>(
-		TSimpleRequestHandler<GeographicService, TempoGeographic::Date, TempoScripting::Empty>(&GeographicService::RequestSetDate).BindUObject(this, &UTempoGeographicServiceSubsystem::SetDate),
-		TSimpleRequestHandler<GeographicService, TempoGeographic::TimeOfDay, TempoScripting::Empty>(&GeographicService::RequestSetTimeOfDay).BindUObject(this, &UTempoGeographicServiceSubsystem::SetTimeOfDay),
-		TSimpleRequestHandler<GeographicService, TempoGeographic::DayCycleRateRequest, TempoScripting::Empty>(&GeographicService::RequestSetDayCycleRelativeRate).BindUObject(this, &UTempoGeographicServiceSubsystem::SetDayCycleRelativeRate),
-		TSimpleRequestHandler<GeographicService, TempoScripting::Empty, TempoGeographic::DateTime>(&GeographicService::RequestGetDateTime).BindUObject(this, &UTempoGeographicServiceSubsystem::GetDateTime),
-		TSimpleRequestHandler<GeographicService, TempoGeographic::GeographicCoordinate, TempoScripting::Empty>(&GeographicService::RequestSetGeographicReference).BindUObject(this, &UTempoGeographicServiceSubsystem::SetGeographicReference)
+	ScriptingServer.RegisterService<GeographicService>(
+		SimpleRequestHandler(&GeographicService::RequestSetDate, &UTempoGeographicServiceSubsystem::SetDate),
+		SimpleRequestHandler(&GeographicService::RequestSetTimeOfDay, &UTempoGeographicServiceSubsystem::SetTimeOfDay),
+		SimpleRequestHandler(&GeographicService::RequestSetDayCycleRelativeRate, &UTempoGeographicServiceSubsystem::SetDayCycleRelativeRate),
+		SimpleRequestHandler(&GeographicService::RequestGetDateTime, &UTempoGeographicServiceSubsystem::GetDateTime),
+		SimpleRequestHandler(&GeographicService::RequestSetGeographicReference, &UTempoGeographicServiceSubsystem::SetGeographicReference)
 		);
+}
+
+void UTempoGeographicServiceSubsystem::Initialize(FSubsystemCollectionBase& Collection)
+{
+	Super::Initialize(Collection);
+
+	FTempoScriptingServer::Get().BindObjectToService<GeographicService>(this);
 }
 
 void UTempoGeographicServiceSubsystem::SetDate(const TempoGeographic::Date& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation)

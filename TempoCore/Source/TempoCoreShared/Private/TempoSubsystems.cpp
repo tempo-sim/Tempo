@@ -1,8 +1,19 @@
 // Copyright Tempo Simulation, LLC. All Rights Reserved
 
-#include "TempoWorldSubsystem.h"
+#include "TempoSubsystems.h"
 
 #include "TempoCoreUtils.h"
+
+bool UTempoGameInstanceSubsystem::ShouldCreateSubsystem(UObject* Outer) const
+{
+	if (GetClass() == UTempoGameInstanceSubsystem::StaticClass())
+	{
+		// Never create the base UTempoGameInstanceSubsystem
+		return false;
+	}
+
+	return UTempoCoreUtils::IsMostDerivedSubclass<UTempoGameInstanceSubsystem>(GetClass());
+}
 
 bool UTempoWorldSubsystem::ShouldCreateSubsystem(UObject* Outer) const
 {
@@ -12,18 +23,7 @@ bool UTempoWorldSubsystem::ShouldCreateSubsystem(UObject* Outer) const
 		return false;
 	}
 
-	// RF_NoFlags to include CDO
-	for (TObjectIterator<UTempoWorldSubsystem> WorldSubsystemIt(EObjectFlags::RF_NoFlags); WorldSubsystemIt; ++WorldSubsystemIt)
-	{
-		const UTempoWorldSubsystem* WorldSubsystem = *WorldSubsystemIt;
-		if (WorldSubsystem->GetClass() != GetClass() && WorldSubsystem->IsA(GetClass()))
-		{
-			// There is a more derived version of ourselves
-			return false;
-		}
-	}
-
-	return true;
+	return UTempoCoreUtils::IsMostDerivedSubclass<UTempoWorldSubsystem>(GetClass());
 }
 
 bool UTempoGameWorldSubsystem::ShouldCreateSubsystem(UObject* Outer) const
