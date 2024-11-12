@@ -28,7 +28,7 @@
 		{
 			"Name": "TempoScripting",
 			"Type": "Runtime",
-			"LoadingPhase": "Default"
+			"LoadingPhase": "PostDefault"
 		},
 		{
 			"Name": "TempoTime",

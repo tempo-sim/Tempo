@@ -22,5 +22,5 @@ class TEMPOSCRIPTING_API ITempoScriptable
 	GENERATED_BODY()
 
 public:
-	virtual void RegisterScriptingServices(FTempoScriptingServer* ScriptingServer) = 0;
+	virtual void RegisterScriptingServices(FTempoScriptingServer& ScriptingServer) = 0;
 };
