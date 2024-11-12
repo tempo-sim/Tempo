@@ -2,6 +2,7 @@
 
 #include "TempoCoreUtils.h"
 
+#include "Kismet/GameplayStatics.h"
 #include "PhysicsEngine/BodySetup.h"
 
 UWorldSubsystem* UTempoCoreUtils::GetSubsystemImplementingInterface(const UObject* WorldContextObject, TSubclassOf<UInterface> Interface)

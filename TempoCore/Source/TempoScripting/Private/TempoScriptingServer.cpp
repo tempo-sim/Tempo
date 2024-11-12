@@ -11,13 +11,12 @@
 
 FTempoScriptingServer::FTempoScriptingServer()
 {
-	OnPostEngineInitHandle = FCoreDelegates::OnPostEngineInit.AddRaw(this, &FTempoScriptingServer::Initialize);
+	Initialize();
 	OnPostWorldInitializationHandle = FWorldDelegates::OnPostWorldInitialization.AddLambda(
 	[this](UWorld* World, const UWorld::InitializationValues)
 	{
 		if (UTempoCoreUtils::IsGameWorld(World))
 		{
-			OnWorldBeginPlayHandle = World->OnWorldBeginPlay.AddRaw(this, &FTempoScriptingServer::Reinitialize);
 			// Scripting has nothing to do with movie scene sequences, but this event fires in exactly the right conditions:
 			// After world time has been updated for the current frame, before Actor ticks have begun, and even when paused.
 			OnMovieSceneSequenceTickHandle = World->AddMovieSceneSequenceTickHandler(FOnMovieSceneSequenceTick::FDelegate::CreateRaw(this, &FTempoScriptingServer::TickInternal));
@@ -28,7 +27,6 @@ FTempoScriptingServer::FTempoScriptingServer()
 	{
 		if (UTempoCoreUtils::IsGameWorld(World))
 		{
-			Reinitialize();
 			World->OnWorldBeginPlay.Remove(OnWorldBeginPlayHandle);
 			World->RemoveMovieSceneSequenceTickHandler(OnMovieSceneSequenceTickHandle);
 			OnMovieSceneSequenceTickHandle.Reset();
@@ -54,11 +52,17 @@ FTempoScriptingServer::FTempoScriptingServer()
 
 FTempoScriptingServer::~FTempoScriptingServer()
 {
-	FCoreDelegates::OnPostEngineInit.Remove(OnPostEngineInitHandle);
 	FWorldDelegates::OnPostWorldInitialization.Remove(OnPostWorldInitializationHandle);
 	FWorldDelegates::OnPreWorldFinishDestroy.Remove(OnPreWorldFinishDestroyHandle);
 
 	Deinitialize();
+}
+
+FTempoScriptingServer& FTempoScriptingServer::Get()
+{
+	FTempoScriptingModule* TempoScriptingModule = FModuleManager::GetModulePtr<FTempoScriptingModule>(TEXT("TempoScripting"));
+	check(TempoScriptingModule);
+	return *TempoScriptingModule->ScriptingServer.Get();
 }
 
 grpc_compression_level CompressionLevelTogRPC(EScriptingCompressionLevel TempoCompressionLevel)
@@ -91,29 +95,26 @@ grpc_compression_level CompressionLevelTogRPC(EScriptingCompressionLevel TempoCo
 
 void FTempoScriptingServer::Initialize()
 {
-	for (TObjectIterator<UObject> ObjectIt; ObjectIt; ++ObjectIt)
+	for (TObjectIterator<UObject> ObjectIt(EObjectFlags::RF_NoFlags); ObjectIt; ++ObjectIt)
 	{
 		UObject* Object = *ObjectIt;
-		if (!IsValid(Object))
+		if (!IsValid(Object) || !Object->HasAnyFlags(RF_ClassDefaultObject) || !UTempoCoreUtils::IsMostDerivedSubclass<UObject>(Object->GetClass()))
 		{
 			continue;
 		}
-		if (Object->GetWorld() && !UTempoCoreUtils::IsGameWorld(Object))
-		{
-			continue;
-		}
+
 		if (ITempoScriptable* ScriptableObject = Cast<ITempoScriptable>(Object))
 		{
-			ScriptableObject->RegisterScriptingServices(this);
+			ScriptableObject->RegisterScriptingServices(*this);
 		}
 	}
 	const int32 Port = GetDefault<UTempoCoreSettings>()->GetScriptingPort();
 	const FString ServerAddress = FString::Printf(TEXT("0.0.0.0:%d"), Port);
 	grpc::ServerBuilder Builder;
 	Builder.AddListeningPort(TCHAR_TO_UTF8(*ServerAddress), grpc::InsecureServerCredentials());
-	for (const TUniquePtr<grpc::Service>& Service : Services)
+	for (const auto& Service : Services)
 	{
-		Builder.RegisterService(Service.Get());
+		Builder.RegisterService(Service.Value.Get());
 	}
 
 	Builder.SetDefaultCompressionLevel(CompressionLevelTogRPC(GetDefault<UTempoCoreSettings>()->GetScriptingCompressionLevel()));

@@ -20,7 +20,9 @@ class TEMPOAGENTSEDITOR_API UTempoAgentsEditorServiceSubsystem : public UUnrealE
 	GENERATED_BODY()
 
 public:
-	virtual void RegisterScriptingServices(FTempoScriptingServer* ScriptingServer) override;
+	virtual void RegisterScriptingServices(FTempoScriptingServer& ScriptingServer) override;
+
+	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	
 	void RunTempoZoneGraphBuilderPipeline(const TempoScripting::Empty& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const;
 };

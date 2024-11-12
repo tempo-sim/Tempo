@@ -7,6 +7,8 @@
 
 DECLARE_LOG_CATEGORY_EXTERN(LogTempoScripting, Log, All);
 
+class FTempoScriptingServer;
+
 class FTempoScriptingModule : public IModuleInterface
 {
 public:
@@ -15,5 +17,7 @@ public:
 	virtual void ShutdownModule() override;
 
 private:
-	TUniquePtr<class FTempoScriptingServer> ScriptingServer;
+	TUniquePtr<FTempoScriptingServer> ScriptingServer;
+
+	friend FTempoScriptingServer;
 };

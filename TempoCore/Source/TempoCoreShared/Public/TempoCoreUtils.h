@@ -38,4 +38,20 @@ public:
 	// axis-aligned with the Actor's local coordinates.
 	UFUNCTION(BlueprintCallable, Category="TempoCoreUtils")
 	static FBox GetActorLocalBounds(const AActor* Actor);
+
+	template <typename BaseClass>
+	static bool IsMostDerivedSubclass(UClass* Class)
+	{
+		// RF_NoFlags to include CDO
+		for (TObjectIterator<BaseClass> DerivedClass(EObjectFlags::RF_NoFlags); DerivedClass; ++DerivedClass)
+		{
+			if (DerivedClass->GetClass() != Class && DerivedClass->IsA(Class))
+			{
+				// There is a more derived version of Class
+				return false;
+			}
+		}
+
+		return true;
+	}
 };
