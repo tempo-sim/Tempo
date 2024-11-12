@@ -4,7 +4,7 @@
 
 #include "TempoScriptable.h"
 #include "TempoScriptingServer.h"
-#include "TempoWorldSubsystem.h"
+#include "TempoSubsystems.h"
 
 #include "CoreMinimal.h"
 
@@ -30,8 +30,10 @@ class TEMPOGEOGRAPHIC_API UTempoGeographicServiceSubsystem : public UTempoGameWo
 	GENERATED_BODY()
 
 public:
-	virtual void RegisterScriptingServices(FTempoScriptingServer* ScriptingServer) override;
+	virtual void RegisterScriptingServices(FTempoScriptingServer& ScriptingServer) override;
 
+	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+	
 	void SetDate(const TempoGeographic::Date& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation);
 
 	void SetTimeOfDay(const TempoGeographic::TimeOfDay& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation);

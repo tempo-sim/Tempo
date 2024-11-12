@@ -4,22 +4,20 @@
 
 #include "TempoScriptable.h"
 #include "TempoScriptingServer.h"
-#include "TempoWorldSubsystem.h"
+#include "TempoSubsystems.h"
 
 #include "CoreMinimal.h"
 #include "TempoWorld/WorldState.pb.h"
 
 #include "TempoWorldStateServiceSubsystem.generated.h"
 
+namespace TempoScripting
+{
+	class Empty;
+}
+
 namespace TempoWorld
 {
-	class ActorState;
-	class ActorStates;
-	class ActorStateRequest;
-	class ActorStatesNearRequest;
-	class OverlapEventRequest;
-	class OverlapEventResponse;
-
 	FORCEINLINE uint32 GetTypeHash(const ActorStateRequest& Request)
 	{
 		return GetTypeHash(FString::Printf(TEXT("%s"),
@@ -48,13 +46,15 @@ namespace TempoWorld
 }
 
 UCLASS()
-class TEMPOWORLD_API UTempoWorldStateServiceSubsystem : public UTempoTickableWorldSubsystem, public ITempoScriptable
+class TEMPOWORLD_API UTempoWorldStateServiceSubsystem : public UTempoTickableGameWorldSubsystem, public ITempoScriptable
 {
 	GENERATED_BODY()
 
 public:
-	virtual void RegisterScriptingServices(FTempoScriptingServer* ScriptingServer) override;
-	
+	virtual void RegisterScriptingServices(FTempoScriptingServer& ScriptingServer) override;
+
+	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+
 	void StreamOverlapEvents(const TempoWorld::OverlapEventRequest& Request, const TResponseDelegate<TempoWorld::OverlapEventResponse>& ResponseContinuation);
 
 	void GetCurrentActorState(const TempoWorld::ActorStateRequest& Request, const TResponseDelegate<TempoWorld::ActorState>& ResponseContinuation);
@@ -72,7 +72,7 @@ public:
 protected:
 	UFUNCTION()
 	void OnActorOverlap(AActor* OverlappedActor, AActor* OtherActor);
-
+	
 	TMap<FString, TArray<TResponseDelegate<TempoWorld::OverlapEventResponse>>> PendingOverlapRequests;
 
 	TMap<TempoWorld::ActorStateRequest, TArray<TResponseDelegate<TempoWorld::ActorState>>> PendingActorStateRequests;

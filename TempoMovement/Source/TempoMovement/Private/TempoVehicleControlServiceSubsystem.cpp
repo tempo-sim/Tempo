@@ -13,12 +13,21 @@ using VehicleCommandRequest = TempoMovement::VehicleCommandRequest;
 using CommandableVehiclesResponse = TempoMovement::CommandableVehiclesResponse;
 using TempoEmpty = TempoScripting::Empty;
 
-void UTempoVehicleControlServiceSubsystem::RegisterScriptingServices(FTempoScriptingServer* ScriptingServer)
+DEFINE_TEMPO_SERVICE_TYPE_TRAITS(VehicleControlService);
+
+void UTempoVehicleControlServiceSubsystem::RegisterScriptingServices(FTempoScriptingServer& ScriptingServer)
 {
-	ScriptingServer->RegisterService<VehicleControlService>(
-		TSimpleRequestHandler<VehicleControlService, VehicleCommandRequest, TempoEmpty>(&VehicleControlService::RequestCommandVehicle).BindUObject(this, &UTempoVehicleControlServiceSubsystem::HandleVehicleCommand),
-		TSimpleRequestHandler<VehicleControlService, TempoEmpty, CommandableVehiclesResponse>(&VehicleControlService::RequestGetCommandableVehicles).BindUObject(this, &UTempoVehicleControlServiceSubsystem::GetCommandableVehicles)
+	ScriptingServer.RegisterService<VehicleControlService>(
+		SimpleRequestHandler(&VehicleControlService::RequestCommandVehicle, &UTempoVehicleControlServiceSubsystem::HandleVehicleCommand),
+		SimpleRequestHandler(&VehicleControlService::RequestGetCommandableVehicles, &UTempoVehicleControlServiceSubsystem::GetCommandableVehicles)
 		);
+}
+
+void UTempoVehicleControlServiceSubsystem::Initialize(FSubsystemCollectionBase& Collection)
+{
+	Super::Initialize(Collection);
+
+	FTempoScriptingServer::Get().BindObjectToService<VehicleControlService>(this);
 }
 
 void UTempoVehicleControlServiceSubsystem::GetCommandableVehicles(const TempoScripting::Empty& Request, const TResponseDelegate<TempoMovement::CommandableVehiclesResponse>& ResponseContinuation) const

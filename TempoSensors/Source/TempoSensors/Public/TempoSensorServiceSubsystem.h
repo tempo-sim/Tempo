@@ -2,9 +2,9 @@
 
 #pragma once
 
-#include "TempoWorldSubsystem.h"
 #include "TempoScriptable.h"
 #include "TempoScriptingServer.h"
+#include "TempoSubsystems.h"
 
 #include "CoreMinimal.h"
 
@@ -37,7 +37,7 @@ class TEMPOSENSORS_API UTempoSensorServiceSubsystem : public UTempoGameWorldSubs
 	GENERATED_BODY()
 	
 public:
-	virtual void RegisterScriptingServices(FTempoScriptingServer* ScriptingServer) override;
+	virtual void RegisterScriptingServices(FTempoScriptingServer& ScriptingServer) override;
 
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 
