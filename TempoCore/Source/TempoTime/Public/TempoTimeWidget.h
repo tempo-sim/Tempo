@@ -40,7 +40,9 @@ protected:
 	UTextBlock* SimTimeBox;
 
 private:
+#if WITH_EDITOR
 	void OnTempoCoreSettingsChanged(UObject* Object, FPropertyChangedEvent& PropertyChangedEvent) const;
+#endif
 	
 	void SyncTimeSettings() const;
 

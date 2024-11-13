@@ -44,7 +44,9 @@ void UTempoTimeWidget::NativeOnInitialized()
 	SyncTimeSettings();
 	
 	// Keep time settings in sync.
+#if WITH_EDITOR
 	GetMutableDefault<UTempoCoreSettings>()->OnSettingChanged().AddUObject(this, &UTempoTimeWidget::OnTempoCoreSettingsChanged);
+#endif
 }
 
 void UTempoTimeWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
@@ -55,6 +57,7 @@ void UTempoTimeWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime
 	SimTimeBox->SetText(FText::FromString(FString::Printf(TEXT("%.3f"), GetWorld()->GetTimeSeconds())));
 }
 
+#if WITH_EDITOR
 void UTempoTimeWidget::OnTempoCoreSettingsChanged(UObject* Object, FPropertyChangedEvent& PropertyChangedEvent) const
 {
 	if (PropertyChangedEvent.Property->GetName() == UTempoCoreSettings::GetTimeModeMemberName() ||
@@ -63,6 +66,7 @@ void UTempoTimeWidget::OnTempoCoreSettingsChanged(UObject* Object, FPropertyChan
 		SyncTimeSettings();
 	}
 }
+#endif
 
 void UTempoTimeWidget::SyncTimeSettings() const
 {

@@ -9,15 +9,19 @@ void ATempoTimeWorldSettings::BeginPlay()
 {
 	Super::BeginPlay();
 
+#if WITH_EDITOR
 	SettingsChangedHandle = GetMutableDefault<UTempoCoreSettings>()->OnSettingChanged().AddUObject(this, &ATempoTimeWorldSettings::OnTempoCoreSettingsChanged);
 	OnTimeSettingsChanged();
+#endif
 }
 
 void ATempoTimeWorldSettings::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	Super::EndPlay(EndPlayReason);
 
+#if WITH_EDITOR
 	GetMutableDefault<UTempoCoreSettings>()->OnSettingChanged().Remove(SettingsChangedHandle);
+#endif
 }
 
 float ATempoTimeWorldSettings::FixupDeltaSeconds(float DeltaSeconds, float RealDeltaSeconds)
@@ -76,6 +80,7 @@ float ATempoTimeWorldSettings::FixupDeltaSeconds(float DeltaSeconds, float RealD
 	return DeltaSeconds;
 }
 
+#if WITH_EDITOR
 void ATempoTimeWorldSettings::OnTempoCoreSettingsChanged(UObject* Object, FPropertyChangedEvent& PropertyChangedEvent)
 {
 	if (PropertyChangedEvent.Property->GetName() == UTempoCoreSettings::GetTimeModeMemberName() ||
@@ -84,6 +89,7 @@ void ATempoTimeWorldSettings::OnTempoCoreSettingsChanged(UObject* Object, FPrope
 		OnTimeSettingsChanged();
 	}
 }
+#endif
 
 void ATempoTimeWorldSettings::OnTimeSettingsChanged()
 {

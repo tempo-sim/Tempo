@@ -27,8 +27,10 @@ protected:
 	
 	virtual float FixupDeltaSeconds(float DeltaSeconds, float RealDeltaSeconds) override;
 	
-private:	
+private:
+#if WITH_EDITOR
 	void OnTempoCoreSettingsChanged(UObject* Object, FPropertyChangedEvent& PropertyChangedEvent);
+#endif
 
 	void OnTimeSettingsChanged();
 	
