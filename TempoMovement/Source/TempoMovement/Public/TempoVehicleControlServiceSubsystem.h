@@ -31,6 +31,8 @@ public:
 
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 
+	virtual void Deinitialize() override;
+
 	void GetCommandableVehicles(const TempoScripting::Empty& Request, const TResponseDelegate<TempoMovement::CommandableVehiclesResponse>& ResponseContinuation) const;
 	
 	void HandleVehicleCommand(const TempoMovement::VehicleCommandRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const;

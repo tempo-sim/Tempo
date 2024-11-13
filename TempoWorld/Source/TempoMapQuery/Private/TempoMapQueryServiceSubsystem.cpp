@@ -13,20 +13,19 @@
 
 #include "EngineUtils.h"
 
-using MapQueryService = TempoMapQuery::MapQueryService::AsyncService;
+using MapQueryService = TempoMapQuery::MapQueryService;
+using MapQueryAsyncService = TempoMapQuery::MapQueryService::AsyncService;
 using LaneDataRequest = TempoMapQuery::LaneDataRequest;
 using LaneDataResponse = TempoMapQuery::LaneDataResponse;
 using LaneAccessibilityRequest = TempoMapQuery::LaneAccessibilityRequest;
 using LaneAccessibilityResponse = TempoMapQuery::LaneAccessibilityResponse;
 
-DEFINE_TEMPO_SERVICE_TYPE_TRAITS(MapQueryService);
-
 void UTempoMapQueryServiceSubsystem::RegisterScriptingServices(FTempoScriptingServer& ScriptingServer)
 {
 	ScriptingServer.RegisterService<MapQueryService>(
-		SimpleRequestHandler(&MapQueryService::RequestGetLanes, &UTempoMapQueryServiceSubsystem::GetLaneData),
-		SimpleRequestHandler(&MapQueryService::RequestGetLaneAccessibility, &UTempoMapQueryServiceSubsystem::GetLaneAccessibility),
-		StreamingRequestHandler(&MapQueryService::RequestStreamLaneAccessibility, &UTempoMapQueryServiceSubsystem::StreamLaneAccessibility)
+		SimpleRequestHandler(&MapQueryAsyncService::RequestGetLanes, &UTempoMapQueryServiceSubsystem::GetLaneData),
+		SimpleRequestHandler(&MapQueryAsyncService::RequestGetLaneAccessibility, &UTempoMapQueryServiceSubsystem::GetLaneAccessibility),
+		StreamingRequestHandler(&MapQueryAsyncService::RequestStreamLaneAccessibility, &UTempoMapQueryServiceSubsystem::StreamLaneAccessibility)
 		);
 }
 
@@ -34,7 +33,14 @@ void UTempoMapQueryServiceSubsystem::Initialize(FSubsystemCollectionBase& Collec
 {
 	Super::Initialize(Collection);
 
-	FTempoScriptingServer::Get().BindObjectToService<MapQueryService>(this);
+	FTempoScriptingServer::Get().ActivateService<MapQueryService>(this);
+}
+
+void UTempoMapQueryServiceSubsystem::Deinitialize()
+{
+	Super::Deinitialize();
+
+	FTempoScriptingServer::Get().DeactivateService<MapQueryService>();
 }
 
 TempoMapQuery::LaneRelationship LaneRelationshipFromLinkType(const EZoneLaneLinkType& LinkType)
