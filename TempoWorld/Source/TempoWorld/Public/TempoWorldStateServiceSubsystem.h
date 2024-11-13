@@ -55,6 +55,8 @@ public:
 
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 
+	virtual void Deinitialize() override;
+
 	void StreamOverlapEvents(const TempoWorld::OverlapEventRequest& Request, const TResponseDelegate<TempoWorld::OverlapEventResponse>& ResponseContinuation);
 
 	void GetCurrentActorState(const TempoWorld::ActorStateRequest& Request, const TResponseDelegate<TempoWorld::ActorState>& ResponseContinuation);

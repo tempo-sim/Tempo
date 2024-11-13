@@ -6,23 +6,22 @@
 #include "TempoTimeWorldSettings.h"
 #include "TempoTime/Time.grpc.pb.h"
 
-using TimeService = TempoTime::TimeService::AsyncService;
+using TimeService = TempoTime::TimeService;
+using TimeAsyncService = TempoTime::TimeService::AsyncService;
 using TempoEmpty = TempoScripting::Empty;
 using TimeModeRequest = TempoTime::TimeModeRequest;
 using SetSimStepsPerSecondRequest = TempoTime::SetSimStepsPerSecondRequest;
 using AdvanceStepsRequest = TempoTime::AdvanceStepsRequest;
 
-DEFINE_TEMPO_SERVICE_TYPE_TRAITS(TimeService);
-
 void UTempoTimeServiceSubsystem::RegisterScriptingServices(FTempoScriptingServer& ScriptingServer)
 {
 	ScriptingServer.RegisterService<TimeService>(
-		SimpleRequestHandler(&TimeService::RequestSetTimeMode, &UTempoTimeServiceSubsystem::SetTimeMode),
-		SimpleRequestHandler(&TimeService::RequestSetSimStepsPerSecond, &UTempoTimeServiceSubsystem::SetSimStepsPerSecond),
-		SimpleRequestHandler(&TimeService::RequestAdvanceSteps, &UTempoTimeServiceSubsystem::AdvanceSteps),
-		SimpleRequestHandler(&TimeService::RequestPlay, &UTempoTimeServiceSubsystem::Play),
-		SimpleRequestHandler(&TimeService::RequestPause, &UTempoTimeServiceSubsystem::Pause),
-		SimpleRequestHandler(&TimeService::RequestStep, &UTempoTimeServiceSubsystem::Step)
+		SimpleRequestHandler(&TimeAsyncService::RequestSetTimeMode, &UTempoTimeServiceSubsystem::SetTimeMode),
+		SimpleRequestHandler(&TimeAsyncService::RequestSetSimStepsPerSecond, &UTempoTimeServiceSubsystem::SetSimStepsPerSecond),
+		SimpleRequestHandler(&TimeAsyncService::RequestAdvanceSteps, &UTempoTimeServiceSubsystem::AdvanceSteps),
+		SimpleRequestHandler(&TimeAsyncService::RequestPlay, &UTempoTimeServiceSubsystem::Play),
+		SimpleRequestHandler(&TimeAsyncService::RequestPause, &UTempoTimeServiceSubsystem::Pause),
+		SimpleRequestHandler(&TimeAsyncService::RequestStep, &UTempoTimeServiceSubsystem::Step)
 		);
 }
 
@@ -30,7 +29,14 @@ void UTempoTimeServiceSubsystem::Initialize(FSubsystemCollectionBase& Collection
 {
 	Super::Initialize(Collection);
 
-	FTempoScriptingServer::Get().BindObjectToService<TimeService>(this);
+	FTempoScriptingServer::Get().ActivateService<TimeService>(this);
+}
+
+void UTempoTimeServiceSubsystem::Deinitialize()
+{
+	Super::Deinitialize();
+
+	FTempoScriptingServer::Get().DeactivateService<TimeService>();
 }
 
 void UTempoTimeServiceSubsystem::SetTimeMode(const TempoTime::TimeModeRequest& Request, const TResponseDelegate<TempoEmpty>& ResponseContinuation) const
