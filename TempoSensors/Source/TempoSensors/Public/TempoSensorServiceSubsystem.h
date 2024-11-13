@@ -41,6 +41,8 @@ public:
 
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 
+	virtual void Deinitialize() override;
+
 	virtual void OnWorldTickStart(UWorld* World, ELevelTick TickType, float DeltaSeconds);
 
 	void ForEachSensor(const TFunction<void(class ITempoSensorInterface*)>& Callback) const;

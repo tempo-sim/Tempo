@@ -5,14 +5,13 @@
 #include "TempoAgentsEditorUtils.h"
 #include "TempoAgentsEditor/TempoAgentsEditor.grpc.pb.h"
 
-using TempoAgentsEditorService = TempoAgentsEditor::TempoAgentsEditorService::AsyncService;
-
-DEFINE_TEMPO_SERVICE_TYPE_TRAITS(TempoAgentsEditorService);
+using TempoAgentsEditorService = TempoAgentsEditor::TempoAgentsEditorService;
+using TempoAgentsEditorAsyncService = TempoAgentsEditor::TempoAgentsEditorService::AsyncService;
 
 void UTempoAgentsEditorServiceSubsystem::RegisterScriptingServices(FTempoScriptingServer& ScriptingServer)
 {
 	ScriptingServer.RegisterService<TempoAgentsEditorService>(
-		SimpleRequestHandler(&TempoAgentsEditorService::RequestRunTempoZoneGraphBuilderPipeline, &UTempoAgentsEditorServiceSubsystem::RunTempoZoneGraphBuilderPipeline)
+		SimpleRequestHandler(&TempoAgentsEditorAsyncService::RequestRunTempoZoneGraphBuilderPipeline, &UTempoAgentsEditorServiceSubsystem::RunTempoZoneGraphBuilderPipeline)
 	);
 }
 
@@ -20,7 +19,14 @@ void UTempoAgentsEditorServiceSubsystem::Initialize(FSubsystemCollectionBase& Co
 {
 	Super::Initialize(Collection);
 
-	FTempoScriptingServer::Get().BindObjectToService<TempoAgentsEditorService>(this);
+	FTempoScriptingServer::Get().ActivateService<TempoAgentsEditorService>(this);
+}
+
+void UTempoAgentsEditorServiceSubsystem::Deinitialize()
+{
+	Super::Deinitialize();
+
+	FTempoScriptingServer::Get().DeactivateService<TempoAgentsEditorService>();
 }
 
 void UTempoAgentsEditorServiceSubsystem::RunTempoZoneGraphBuilderPipeline(const TempoScripting::Empty& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const

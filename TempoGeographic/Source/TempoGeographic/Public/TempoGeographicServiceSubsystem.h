@@ -33,6 +33,8 @@ public:
 	virtual void RegisterScriptingServices(FTempoScriptingServer& ScriptingServer) override;
 
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+
+	virtual void Deinitialize() override;
 	
 	void SetDate(const TempoGeographic::Date& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation);
 

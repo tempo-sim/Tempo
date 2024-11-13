@@ -9,9 +9,9 @@
 #include "TempoCamera/Camera.pb.h"
 
 #include "TempoCoreSettings.h"
-#include "TempoCoreUtils.h"
 
-using SensorService = TempoSensors::SensorService::AsyncService;
+using SensorService = TempoSensors::SensorService;
+using SensorAsyncService = TempoSensors::SensorService::AsyncService;
 using SensorDescriptor = TempoSensors::SensorDescriptor;
 using AvailableSensorsRequest = TempoSensors::AvailableSensorsRequest;
 using AvailableSensorsResponse = TempoSensors::AvailableSensorsResponse;
@@ -22,15 +22,13 @@ using ColorImage = TempoCamera::ColorImage;
 using DepthImage = TempoCamera::DepthImage;
 using LabelImage = TempoCamera::LabelImage;
 
-DEFINE_TEMPO_SERVICE_TYPE_TRAITS(SensorService);
-
 void UTempoSensorServiceSubsystem::RegisterScriptingServices(FTempoScriptingServer& ScriptingServer)
 {
 	ScriptingServer.RegisterService<SensorService>(
-		SimpleRequestHandler(&SensorService::RequestGetAvailableSensors, &UTempoSensorServiceSubsystem::GetAvailableSensors),
-		StreamingRequestHandler(&SensorService::RequestStreamColorImages, &UTempoSensorServiceSubsystem::StreamColorImages),
-		StreamingRequestHandler(&SensorService::RequestStreamDepthImages, &UTempoSensorServiceSubsystem::StreamDepthImages),
-		StreamingRequestHandler(&SensorService::RequestStreamLabelImages, &UTempoSensorServiceSubsystem::StreamLabelImages)
+		SimpleRequestHandler(&SensorAsyncService::RequestGetAvailableSensors, &UTempoSensorServiceSubsystem::GetAvailableSensors),
+		StreamingRequestHandler(&SensorAsyncService::RequestStreamColorImages, &UTempoSensorServiceSubsystem::StreamColorImages),
+		StreamingRequestHandler(&SensorAsyncService::RequestStreamDepthImages, &UTempoSensorServiceSubsystem::StreamDepthImages),
+		StreamingRequestHandler(&SensorAsyncService::RequestStreamLabelImages, &UTempoSensorServiceSubsystem::StreamLabelImages)
 		);
 }
 
@@ -38,13 +36,20 @@ void UTempoSensorServiceSubsystem::Initialize(FSubsystemCollectionBase& Collecti
 {
 	Super::Initialize(Collection);
 
-	FTempoScriptingServer::Get().BindObjectToService<SensorService>(this);
+	FTempoScriptingServer::Get().ActivateService<SensorService>(this);
 
 	// OnWorldTickStart is fired before Tick has actually begun, while the world time is still the tick
 	// of the last frame. We use this last opportunity, having waited as long as possible, to collect
 	// and send all the sensor measurements from the previous frame.
 	FWorldDelegates::OnWorldTickStart.AddUObject(this, &UTempoSensorServiceSubsystem::OnWorldTickStart);
 	FCoreDelegates::OnEndFrameRT.AddUObject(this, &UTempoSensorServiceSubsystem::OnRenderFrameCompleted);
+}
+
+void UTempoSensorServiceSubsystem::Deinitialize()
+{
+	Super::Deinitialize();
+
+	FTempoScriptingServer::Get().DeactivateService<SensorService>();
 }
 
 void UTempoSensorServiceSubsystem::OnRenderFrameCompleted() const

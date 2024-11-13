@@ -5,20 +5,7 @@
 #include <grpcpp/grpcpp.h>
 
 #include "CoreMinimal.h"
-#include "TempoScripting.h"
 #include "grpcpp/impl/service_type.h"
-
-template <typename MessageType>
-struct TServiceTypeTraits
-{
-	static FName ServiceId;
-};
-
-template <typename ServiceType>
-FName TServiceTypeTraits<ServiceType>::ServiceId = FName(NAME_None);
-
-#define DEFINE_TEMPO_SERVICE_TYPE_TRAITS(ServiceType) \
-template <> inline FName TServiceTypeTraits<ServiceType>::ServiceId = FName(#ServiceType);
 
 template <class ResponseType>
 using TResponseDelegate = TDelegate<void(const ResponseType&, grpc::Status)>;
@@ -28,7 +15,7 @@ namespace grpc
 	static const Status Status_OK;
 }
 
-template <class ServiceType, class RequestType, class ResponseType, template <class> class ResponderType, class UserObjectType, bool Const>
+template <class AsyncServiceType, class RequestType, class ResponseType, template <class> class ResponderType, class UserObjectType, bool Const>
 struct TRequestHandler
 {
 	enum EBindType
@@ -37,21 +24,21 @@ struct TRequestHandler
 		Raw = 2,
 		Lambda = 3
 	};
-	typedef ServiceType HandlerServiceType;
+	typedef AsyncServiceType HandlerServiceType;
 	typedef RequestType HandlerRequestType;
 	typedef ResponseType HandlerResponseType;
 	typedef ResponderType<ResponseType> HandlerResponderType;
 
-	typedef typename TMemFunPtrType<false, ServiceType, void(grpc::ServerContext*, RequestType*, ResponderType<ResponseType>*, grpc::CompletionQueue*, grpc::ServerCompletionQueue*, void*)>::Type AcceptFuncType;
+	typedef typename TMemFunPtrType<false, AsyncServiceType, void(grpc::ServerContext*, RequestType*, ResponderType<ResponseType>*, grpc::CompletionQueue*, grpc::ServerCompletionQueue*, void*)>::Type AcceptFuncType;
 	typedef typename TMemFunPtrType<Const, UserObjectType, void(const RequestType&, const TResponseDelegate<ResponseType>&)>::Type HandleFuncType;
 
 	TRequestHandler(AcceptFuncType AcceptFuncIn, HandleFuncType HandleFuncIn)
 		: AcceptFunc(AcceptFuncIn), HandleFunc(HandleFuncIn)
 	{
-		static_assert(std::is_base_of_v<grpc::Service, ServiceType>);
+		static_assert(std::is_base_of_v<grpc::Service, AsyncServiceType>);
 	}
 	
-	void Init(ServiceType* Service)
+	void Init(AsyncServiceType* Service)
 	{
 		AcceptDelegate.BindRaw(Service, AcceptFunc);
 	}
@@ -70,7 +57,7 @@ struct TRequestHandler
 		}
 	}
 
-	void BindObjectToService(UserObjectType* UserObject)
+	void Activate(UserObjectType* UserObject)
 	{
 		if (!ensureAlwaysMsgf(!UserObject->HasAnyFlags(RF_ClassDefaultObject), TEXT("Bound called on CDO! Do not call BindObjectToService from RegisterScriptingServices.")))
 		{
@@ -82,6 +69,11 @@ struct TRequestHandler
 		}
 		ensureAlwaysMsgf(!HandleDelegate.IsBound(), TEXT("Handle delegate was already bound."));
 		HandleDelegate.BindUObject(UserObject, HandleFunc);
+	}
+
+	void Deactivate()
+	{
+		HandleDelegate.Unbind();
 	}
 
 	template<typename FunctorType>
@@ -152,7 +144,8 @@ struct FRequestManager : TSharedFromThis<FRequestManager>
 	virtual void HandleAndRespond() = 0;
 	virtual FRequestManager* Duplicate(int32 NewTag) const = 0;
 	virtual const grpc::Service* GetService() const = 0;
-	virtual void BindObjectToService(UObject* Object) = 0;
+	virtual void Activate(UObject* Object) = 0;
+	virtual void Deactivate() = 0;
 };
 
 template <class HandlerType>
@@ -217,9 +210,19 @@ public:
 		return new TRequestManager(NewTag, Base::Service, Base::Handler);
 	}
 
-	virtual void BindObjectToService(UObject* Object) override
+	virtual void Deactivate() override
 	{
-		Base::Handler->BindObjectToService(CastChecked<UserObjectType>(Object));
+		if (Base::State == FRequestManager::EState::HANDLING)
+		{
+			Base::State = FRequestManager::EState::FINISHING;
+			Base::Responder.Finish(ResponseType(), grpc::Status(grpc::CANCELLED, "Service deactivated"), &(Base::Tag));
+		}
+		Base::Handler->Deactivate();
+	}
+
+	virtual void Activate(UObject* Object) override
+	{
+		Base::Handler->Activate(CastChecked<UserObjectType>(Object));
 	}
 };
 
@@ -256,9 +259,19 @@ public:
 		return new TRequestManager(NewTag, Base::Service, Base::Handler);
 	}
 
-	virtual void BindObjectToService(UObject* Object) override
+	virtual void Activate(UObject* Object) override
 	{
-		Base::Handler->BindObjectToService(CastChecked<UserObjectType>(Object));
+		Base::Handler->Activate(CastChecked<UserObjectType>(Object));
+	}
+
+	virtual void Deactivate() override
+	{
+		if (Base::State == FRequestManager::EState::HANDLING)
+		{
+			Base::State = FRequestManager::EState::FINISHING;
+			Base::Responder.Finish(grpc::Status(grpc::CANCELLED, "Service deactivated"), &(Base::Tag));
+		}
+		Base::Handler->Deactivate();
 	}
 };
 
@@ -281,24 +294,37 @@ public:
 	template <class ServiceType, class... HandlerTypes>
 	void RegisterService(HandlerTypes... Handlers)
 	{
-		const FName ServiceId = TServiceTypeTraits<ServiceType>::ServiceId;
-		checkf(ServiceId != NAME_None, TEXT("Service type traits not defined. Use DEFINE_TEMPO_SERVICE_TYPE_TRAITS."));
-		ServiceType* Service = new ServiceType();
-		Services.Emplace(ServiceId, Service);
-		RegisterHandlers<ServiceType, HandlerTypes...>(Service, Handlers...);
+		using AsyncServiceType = typename ServiceType::AsyncService; 
+		const FName ServiceName(UTF8_TO_TCHAR(ServiceType::service_full_name()));
+		AsyncServiceType* Service = new AsyncServiceType();
+		Services.Emplace(ServiceName, Service);
+		RegisterHandlers<AsyncServiceType, HandlerTypes...>(Service, Handlers...);
 	}
 
-	template <class ServiceType, class UserObjectType>
-	void BindObjectToService(UserObjectType* Object)
+	template <class ServiceType>
+	void ActivateService(UObject* Object)
 	{
-		const FName ServiceId = TServiceTypeTraits<ServiceType>::ServiceId;
-		checkf(ServiceId != NAME_None, TEXT("Service type traits not defined. Use DEFINE_TEMPO_SERVICE_TYPE_TRAITS."));
-		const grpc::Service* Service = Services.Find(ServiceId)->Get();
+		const FName ServiceName(UTF8_TO_TCHAR(ServiceType::service_full_name()));
+		const grpc::Service* Service = Services.Find(ServiceName)->Get();
 		for (const auto& RequestManager : RequestManagers)
 		{
 			if (RequestManager.Value->GetService() == Service)
 			{
-				RequestManager.Value->BindObjectToService(Object);
+				RequestManager.Value->Activate(Object);
+			}
+		}
+	}
+
+	template <class ServiceType>
+	void DeactivateService()
+	{
+		const FName ServiceName(UTF8_TO_TCHAR(ServiceType::service_full_name()));
+		const grpc::Service* Service = Services.Find(ServiceName)->Get();
+		for (const auto& RequestManager : RequestManagers)
+		{
+			if (RequestManager.Value->GetService() == Service)
+			{
+				RequestManager.Value->Deactivate();
 			}
 		}
 	}
@@ -314,15 +340,15 @@ protected:
 	struct False : std::bool_constant<false> { };
 	
 	// Zero-Handler case.
-	template <class ServiceType>
-	static void RegisterHandlers(ServiceType* Service)
+	template <class AsyncServiceType>
+	static void RegisterHandlers(AsyncServiceType* Service)
 	{
-		static_assert(False<ServiceType>{}, "RegisterHandlers must be called with at least one handler");
+		static_assert(False<AsyncServiceType>{}, "RegisterHandlers must be called with at least one handler");
 	}
 	
 	// One-Handler case.
-	template <class ServiceType, class HandlerType>
-	void RegisterHandlers(ServiceType* Service, HandlerType& Handler)
+	template <class AsyncServiceType, class HandlerType>
+	void RegisterHandlers(AsyncServiceType* Service, HandlerType& Handler)
 	{
 		const int32 Tag = TagAllocator++;
 		Handler.Init(Service);
@@ -330,11 +356,11 @@ protected:
 	}
 	
 	// Recursively register the handlers.
-	template <class ServiceType, class FirstHandlerType, class... RemainingHandlerTypes>
-	void RegisterHandlers(ServiceType* Service, FirstHandlerType& FirstHandler, RemainingHandlerTypes&... RemainingHandlers)
+	template <class AsyncServiceType, class FirstHandlerType, class... RemainingHandlerTypes>
+	void RegisterHandlers(AsyncServiceType* Service, FirstHandlerType& FirstHandler, RemainingHandlerTypes&... RemainingHandlers)
 	{
-		RegisterHandlers<ServiceType, FirstHandlerType>(Service, FirstHandler);
-		RegisterHandlers<ServiceType, RemainingHandlerTypes...>(Service, RemainingHandlers...);
+		RegisterHandlers<AsyncServiceType, FirstHandlerType>(Service, FirstHandler);
+		RegisterHandlers<AsyncServiceType, RemainingHandlerTypes...>(Service, RemainingHandlers...);
 	}
 
 	void HandleEventForTag(int32 Tag, bool bOk);
