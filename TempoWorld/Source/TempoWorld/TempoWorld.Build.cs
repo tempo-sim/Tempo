@@ -31,7 +31,6 @@ public class TempoWorld : TempoModuleRules
                 "StructUtils",
                 // Tempo
                 "TempoCore",
-                "TempoTime",
                 "TempoMovementShared",
             }
         );
