@@ -15,6 +15,8 @@ using AdvanceStepsRequest = TempoTime::AdvanceStepsRequest;
 
 void UTempoTimeServiceSubsystem::RegisterScriptingServices(FTempoScriptingServer& ScriptingServer)
 {
+	UE_LOG(LogTemp, Warning, TEXT("TEMPOSCRIPTINGDEBUG RegisterScriptingServices TempoTimeService"));
+
 	ScriptingServer.RegisterService<TimeService>(
 		SimpleRequestHandler(&TimeAsyncService::RequestSetTimeMode, &UTempoTimeServiceSubsystem::SetTimeMode),
 		SimpleRequestHandler(&TimeAsyncService::RequestSetSimStepsPerSecond, &UTempoTimeServiceSubsystem::SetSimStepsPerSecond),
@@ -29,6 +31,8 @@ void UTempoTimeServiceSubsystem::Initialize(FSubsystemCollectionBase& Collection
 {
 	Super::Initialize(Collection);
 
+	UE_LOG(LogTemp, Warning, TEXT("TEMPOSCRIPTINGDEBUG Initialize TempoTimeService"));
+
 	FTempoScriptingServer::Get().ActivateService<TimeService>(this);
 }
 
@@ -36,6 +40,8 @@ void UTempoTimeServiceSubsystem::Deinitialize()
 {
 	Super::Deinitialize();
 
+	UE_LOG(LogTemp, Warning, TEXT("TEMPOSCRIPTINGDEBUG Deinitialize TempoTimeService"));
+	
 	FTempoScriptingServer::Get().DeactivateService<TimeService>();
 }
 

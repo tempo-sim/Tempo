@@ -11,7 +11,7 @@
 
 FTempoScriptingServer::FTempoScriptingServer()
 {
-	Initialize();
+	OnPostEngineInitHandle = FCoreDelegates::OnPostEngineInit.AddRaw(this, &FTempoScriptingServer::Initialize);
 	OnPostWorldInitializationHandle = FWorldDelegates::OnPostWorldInitialization.AddLambda(
 	[this](UWorld* World, const UWorld::InitializationValues)
 	{
@@ -34,11 +34,6 @@ FTempoScriptingServer::FTempoScriptingServer()
 	});
 
 #if WITH_EDITOR
-	FCoreUObjectDelegates::ReloadCompleteDelegate.AddLambda([this](EReloadCompleteReason)
-	{
-		Reinitialize();
-	});
-
 	GetMutableDefault<UTempoCoreSettings>()->OnSettingChanged().AddLambda([this](UObject* Object, struct FPropertyChangedEvent& Event)
 	{
 		if (Event.Property->GetName() == UTempoCoreSettings::GetScriptingPortMemberName() ||
@@ -95,10 +90,19 @@ grpc_compression_level CompressionLevelTogRPC(EScriptingCompressionLevel TempoCo
 
 void FTempoScriptingServer::Initialize()
 {
-	for (TObjectIterator<UObject> ObjectIt(EObjectFlags::RF_NoFlags); ObjectIt; ++ObjectIt)
+	FScopedSlowTask ScriptingServerInitialize(GUObjectArray.GetObjectArrayNum(), FText::FromString(TEXT("Initializing Tempo Scripting Server")));
+	ScriptingServerInitialize.MakeDialog(false, true);
+	for (TObjectIterator<UObject> ObjectIt(RF_NoFlags); ObjectIt; ++ObjectIt)
 	{
+		ScriptingServerInitialize.EnterProgressFrame();
+
 		UObject* Object = *ObjectIt;
-		if (!IsValid(Object) || !Object->HasAnyFlags(RF_ClassDefaultObject) || !UTempoCoreUtils::IsMostDerivedSubclass<UObject>(Object->GetClass()))
+		if (!IsValid(Object) || !Object->HasAnyFlags(RF_ClassDefaultObject))
+		{
+			continue;
+		}
+
+		if (!UTempoCoreUtils::IsMostDerivedSubclass<UObject>(Object->GetClass()))
 		{
 			continue;
 		}
@@ -125,8 +129,6 @@ void FTempoScriptingServer::Initialize()
 	if (!Server.Get())
 	{
 		UE_LOG(LogTempoScripting, Error, TEXT("Error while starting scripting server. Perhaps port %d was not available."), Port);
-		Services.Empty();
-		RequestManagers.Empty();
 		return;
 	}
 	
@@ -176,8 +178,21 @@ void FTempoScriptingServer::Deinitialize()
 
 void FTempoScriptingServer::Reinitialize()
 {
+	TMap<FName, UObject*> PreviouslyActiveServices;
+	for (const auto& RequestManager : RequestManagers)
+	{
+		if (UObject* ActiveObject = RequestManager.Value->ActiveObject)
+		{
+			PreviouslyActiveServices.Add(RequestManager.Value->GetServiceName(), ActiveObject);
+		}
+	}
 	Deinitialize();
 	Initialize();
+	for (const auto& PreviouslyActiveService : PreviouslyActiveServices)
+	{
+		UE_LOG(LogTempoScripting, Display, TEXT("Reactivating service %s"), *PreviouslyActiveService.Key.ToString());
+		ActivateService(PreviouslyActiveService.Key, PreviouslyActiveService.Value);
+	}
 }
 
 void FTempoScriptingServer::Tick(float DeltaTime)
