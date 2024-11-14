@@ -5,7 +5,7 @@
 #include <grpcpp/grpcpp.h>
 
 #include "CoreMinimal.h"
-#include "grpcpp/impl/service_type.h"
+#include "TempoScriptable.h"
 
 template <class ResponseType>
 using TResponseDelegate = TDelegate<void(const ResponseType&, grpc::Status)>;
@@ -59,7 +59,7 @@ struct TRequestHandler
 
 	void Activate(UserObjectType* UserObject)
 	{
-		if (!ensureAlwaysMsgf(!UserObject->HasAnyFlags(RF_ClassDefaultObject), TEXT("Bound called on CDO! Do not call BindObjectToService from RegisterScriptingServices.")))
+		if (!ensureAlwaysMsgf(!UserObject->HasAnyFlags(RF_ClassDefaultObject), TEXT("Activate called on CDO! Do not call ActivateService from RegisterScriptingServices.")))
 		{
 			return;
 		}
@@ -143,16 +143,23 @@ struct FRequestManager : TSharedFromThis<FRequestManager>
 	virtual void Init(grpc::ServerCompletionQueue* CompletionQueue) = 0;
 	virtual void HandleAndRespond() = 0;
 	virtual FRequestManager* Duplicate(int32 NewTag) const = 0;
-	virtual const grpc::Service* GetService() const = 0;
-	virtual void Activate(UObject* Object) = 0;
-	virtual void Deactivate() = 0;
+	virtual const FName GetServiceName() const = 0;
+	virtual void Activate(UObject* Object)
+	{
+		ActiveObject = Object;
+	}
+	virtual void Deactivate()
+	{
+		ActiveObject = nullptr;
+	}
+	UObject* ActiveObject = nullptr;
 };
 
 template <class HandlerType>
 class TRequestManagerBase: public FRequestManager {
 public:
-	TRequestManagerBase(int32 TagIn, const typename HandlerType::HandlerServiceType* ServiceIn, TSharedPtr<HandlerType> HandlerIn)
-		: State(UNINITIALIZED), Tag(TagIn), Handler(HandlerIn), Service(ServiceIn), Responder(&Context) {}
+	TRequestManagerBase(int32 TagIn, const FName& ServiceNameIn, const typename HandlerType::HandlerServiceType* ServiceIn, TSharedPtr<HandlerType> HandlerIn)
+		: State(UNINITIALIZED), Tag(TagIn), Handler(HandlerIn), ServiceName(ServiceNameIn), Service(ServiceIn), Responder(&Context) {}
 	
 	virtual EState GetState() const override { return State; }
 	
@@ -163,15 +170,16 @@ public:
 		State = REQUESTED;
 	}
 
-	virtual const grpc::Service* GetService() const override
+	virtual const FName GetServiceName() const override
 	{
-		return Service;
+		return ServiceName;
 	}
 
 protected:
 	EState State;
 	int32 Tag;
 	const TSharedPtr<HandlerType> Handler;
+	const FName ServiceName;
 	const typename HandlerType::HandlerServiceType* Service;
 	typename HandlerType::HandlerRequestType Request;
 	grpc::ServerContext Context;
@@ -207,22 +215,26 @@ public:
 
 	virtual FRequestManager* Duplicate(int32 NewTag) const override
 	{
-		return new TRequestManager(NewTag, Base::Service, Base::Handler);
+		return new TRequestManager(NewTag, Base::ServiceName, Base::Service, Base::Handler);
+	}
+
+	virtual void Activate(UObject* Object) override
+	{
+		Base::Activate(Object);
+
+		Base::Handler->Activate(CastChecked<UserObjectType>(Object));
 	}
 
 	virtual void Deactivate() override
 	{
+		Base::Deactivate();
+
 		if (Base::State == FRequestManager::EState::HANDLING)
 		{
 			Base::State = FRequestManager::EState::FINISHING;
 			Base::Responder.Finish(ResponseType(), grpc::Status(grpc::CANCELLED, "Service deactivated"), &(Base::Tag));
 		}
 		Base::Handler->Deactivate();
-	}
-
-	virtual void Activate(UObject* Object) override
-	{
-		Base::Handler->Activate(CastChecked<UserObjectType>(Object));
 	}
 };
 
@@ -256,16 +268,20 @@ public:
 
 	virtual FRequestManager* Duplicate(int32 NewTag) const override
 	{
-		return new TRequestManager(NewTag, Base::Service, Base::Handler);
+		return new TRequestManager(NewTag, Base::ServiceName, Base::Service, Base::Handler);
 	}
 
 	virtual void Activate(UObject* Object) override
 	{
+		Base::Activate(Object);
+
 		Base::Handler->Activate(CastChecked<UserObjectType>(Object));
 	}
 
 	virtual void Deactivate() override
 	{
+		Base::Deactivate();
+
 		if (Base::State == FRequestManager::EState::HANDLING)
 		{
 			Base::State = FRequestManager::EState::FINISHING;
@@ -296,37 +312,28 @@ public:
 	{
 		using AsyncServiceType = typename ServiceType::AsyncService; 
 		const FName ServiceName(UTF8_TO_TCHAR(ServiceType::service_full_name()));
+		if (Services.Contains(ServiceName))
+		{
+			// Already registered - perhaps by calling Activate before Register
+			return;
+		}
 		AsyncServiceType* Service = new AsyncServiceType();
 		Services.Emplace(ServiceName, Service);
-		RegisterHandlers<AsyncServiceType, HandlerTypes...>(Service, Handlers...);
+		RegisterHandlers<AsyncServiceType, HandlerTypes...>(ServiceName, Service, Handlers...);
 	}
 
 	template <class ServiceType>
 	void ActivateService(UObject* Object)
 	{
 		const FName ServiceName(UTF8_TO_TCHAR(ServiceType::service_full_name()));
-		const grpc::Service* Service = Services.Find(ServiceName)->Get();
-		for (const auto& RequestManager : RequestManagers)
-		{
-			if (RequestManager.Value->GetService() == Service)
-			{
-				RequestManager.Value->Activate(Object);
-			}
-		}
+		ActivateService(ServiceName, Object);
 	}
 
 	template <class ServiceType>
 	void DeactivateService()
 	{
 		const FName ServiceName(UTF8_TO_TCHAR(ServiceType::service_full_name()));
-		const grpc::Service* Service = Services.Find(ServiceName)->Get();
-		for (const auto& RequestManager : RequestManagers)
-		{
-			if (RequestManager.Value->GetService() == Service)
-			{
-				RequestManager.Value->Deactivate();
-			}
-		}
+		DeactivateService(ServiceName);
 	}
 
 protected:
@@ -334,6 +341,35 @@ protected:
 	void Deinitialize();
 	void Reinitialize();
 	void TickInternal(float DeltaTime);
+
+	void ActivateService(const FName& ServiceName, UObject* Object)
+	{
+		if (!Services.Contains(ServiceName) && Object->Implements<UTempoScriptable>() && !Server.IsValid())
+		{
+			// That service has not been registered, but we haven't started the server yet.
+			// Maybe this object just tried to activate very early in engine initialization, and we can register it early?
+			Cast<ITempoScriptable>(Object)->RegisterScriptingServices(*this);
+		}
+		checkf(Services.Contains(ServiceName), TEXT("Attempted to activate an unregistered service %s"), *ServiceName.ToString());
+		for (const auto& RequestManager : RequestManagers)
+		{
+			if (RequestManager.Value->GetServiceName() == ServiceName)
+			{
+				RequestManager.Value->Activate(Object);
+			}
+		}
+	}
+
+	void DeactivateService(const FName& ServiceName)
+	{
+		for (const auto& RequestManager : RequestManagers)
+		{
+			if (RequestManager.Value->GetServiceName() == ServiceName)
+			{
+				RequestManager.Value->Deactivate();
+			}
+		}
+	}
 	
 	// Credit: https://stackoverflow.com/a/44065093
 	template <class...>
@@ -348,19 +384,19 @@ protected:
 	
 	// One-Handler case.
 	template <class AsyncServiceType, class HandlerType>
-	void RegisterHandlers(AsyncServiceType* Service, HandlerType& Handler)
+	void RegisterHandlers(const FName& ServiceName, AsyncServiceType* Service, HandlerType& Handler)
 	{
 		const int32 Tag = TagAllocator++;
 		Handler.Init(Service);
-		RequestManagers.Emplace(Tag, new TRequestManager<HandlerType>(Tag, Service, MakeShared<HandlerType>(MoveTemp(Handler))));
+		RequestManagers.Emplace(Tag, new TRequestManager<HandlerType>(Tag, ServiceName, Service, MakeShared<HandlerType>(MoveTemp(Handler))));
 	}
 	
 	// Recursively register the handlers.
 	template <class AsyncServiceType, class FirstHandlerType, class... RemainingHandlerTypes>
-	void RegisterHandlers(AsyncServiceType* Service, FirstHandlerType& FirstHandler, RemainingHandlerTypes&... RemainingHandlers)
+	void RegisterHandlers(const FName& ServiceName, AsyncServiceType* Service, FirstHandlerType& FirstHandler, RemainingHandlerTypes&... RemainingHandlers)
 	{
-		RegisterHandlers<AsyncServiceType, FirstHandlerType>(Service, FirstHandler);
-		RegisterHandlers<AsyncServiceType, RemainingHandlerTypes...>(Service, RemainingHandlers...);
+		RegisterHandlers<AsyncServiceType, FirstHandlerType>(ServiceName, Service, FirstHandler);
+		RegisterHandlers<AsyncServiceType, RemainingHandlerTypes...>(ServiceName, Service, RemainingHandlers...);
 	}
 
 	void HandleEventForTag(int32 Tag, bool bOk);

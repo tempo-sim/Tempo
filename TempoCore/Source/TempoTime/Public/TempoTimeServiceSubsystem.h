@@ -6,8 +6,6 @@
 #include "TempoScriptingServer.h"
 #include "TempoSubsystems.h"
 
-#include "TempoTime/Time.grpc.pb.h"
-
 #include "CoreMinimal.h"
 
 #include "TempoTimeServiceSubsystem.generated.h"
