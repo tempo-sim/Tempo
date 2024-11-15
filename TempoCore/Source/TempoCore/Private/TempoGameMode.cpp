@@ -12,6 +12,7 @@ void ATempoGameMode::StartPlay()
 	UTempoLevelLoadingServiceSubsystem* LevelLoadingServiceSubsystem = UGameInstance::GetSubsystem<UTempoLevelLoadingServiceSubsystem>(GetGameInstance());
 	if (LevelLoadingServiceSubsystem)
 	{
+		LevelLoadingServiceSubsystem->OnLevelLoaded();
 		if (LevelLoadingServiceSubsystem->GetDeferBeginPlay())
 		{
 			bBeginPlayDeferred = true;

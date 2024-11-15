@@ -44,7 +44,11 @@ public:
 
 	bool GetStartPaused() const { return bStartPaused; }
 
+	void OnLevelLoaded();
+	
 protected:
+	TOptional<TResponseDelegate<TempoScripting::Empty>> PendingLevelLoad;
+	
 	bool bDeferBeginPlay = false;
 
 	bool bStartPaused = false;
