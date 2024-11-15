@@ -152,7 +152,7 @@ struct FRequestManager : TSharedFromThis<FRequestManager>
 	{
 		ActiveObject = nullptr;
 	}
-	UObject* ActiveObject = nullptr;
+	TWeakObjectPtr<UObject> ActiveObject = nullptr;
 };
 
 template <class HandlerType>
@@ -350,7 +350,6 @@ protected:
 			// Maybe this object just tried to activate very early in engine initialization, and we can register it early?
 			Cast<ITempoScriptable>(Object)->RegisterScriptingServices(*this);
 		}
-		checkf(Services.Contains(ServiceName), TEXT("Attempted to activate an unregistered service %s"), *ServiceName.ToString());
 		for (const auto& RequestManager : RequestManagers)
 		{
 			if (RequestManager.Value->GetServiceName() == ServiceName)
