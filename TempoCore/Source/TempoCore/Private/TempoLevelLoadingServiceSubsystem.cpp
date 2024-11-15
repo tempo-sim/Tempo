@@ -34,6 +34,8 @@ void UTempoLevelLoadingServiceSubsystem::Deinitialize()
 {
 	Super::Deinitialize();
 
+	UE_LOG(LogTemp, Warning, TEXT("Deinitializing UTempoLevelLoadingServiceSubsystem"));
+
 	FTempoScriptingServer::Get().DeactivateService<TempoCoreService>();
 }
 
@@ -63,16 +65,15 @@ void UTempoLevelLoadingServiceSubsystem::LoadLevel(const LoadLevelRequest& Reque
 
 	UGameplayStatics::OpenLevel(this, FName(UTF8_TO_TCHAR(Request.level().c_str())));
 
-	FWorldDelegates::OnWorldInitializedActors.RemoveAll(this);
-	FWorldDelegates::OnWorldInitializedActors.AddWeakLambda(this, [this, &ResponseContinuation] (const FActorsInitializedParams& Params)
+	PendingLevelLoad = ResponseContinuation;
+}
+
+void UTempoLevelLoadingServiceSubsystem::OnLevelLoaded()
+{
+	if (PendingLevelLoad.IsSet())
 	{
-		if (!UTempoCoreUtils::IsGameWorld(Params.World))
-		{
-			return;
-		}
-		FWorldDelegates::OnWorldInitializedActors.RemoveAll(this);
-		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status_OK);
-	});
+		PendingLevelLoad->ExecuteIfBound(TempoScripting::Empty(), grpc::Status_OK);
+	}
 }
 
 void UTempoLevelLoadingServiceSubsystem::FinishLoadingLevel(const TempoScripting::Empty& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation)
