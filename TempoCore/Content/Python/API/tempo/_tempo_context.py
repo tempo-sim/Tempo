@@ -13,9 +13,9 @@ def run_async(coroutine):
     """
     try:
         # This will raise RuntimeError if we are in a synchronous context
-        asyncio.get_running_loop()
-        # If it didn't raise we are in an asynchronous context and can just return the coroutine
-        return coroutine
+        running_loop = asyncio.get_running_loop()
+        # If it didn't raise we are in an asynchronous context and can just await the coroutine
+        running_loop.run_until_complete(coroutine)
     except RuntimeError:
         # This is a synchronous context, but there still might be a loop running elsewhere in the process
         # There does not seem to be a way of detecting this situation without accessing the protected members below
