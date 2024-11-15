@@ -90,26 +90,37 @@ grpc_compression_level CompressionLevelTogRPC(EScriptingCompressionLevel TempoCo
 
 void FTempoScriptingServer::Initialize()
 {
-	FScopedSlowTask ScriptingServerInitialize(GUObjectArray.GetObjectArrayNum(), FText::FromString(TEXT("Initializing Tempo Scripting Server")));
-	ScriptingServerInitialize.MakeDialog(false, true);
+	TArray<UObject*> TempoScriptableObjects;
 	for (TObjectIterator<UObject> ObjectIt(RF_NoFlags); ObjectIt; ++ObjectIt)
 	{
-		ScriptingServerInitialize.EnterProgressFrame();
-
 		UObject* Object = *ObjectIt;
 		if (!IsValid(Object) || !Object->HasAnyFlags(RF_ClassDefaultObject))
 		{
 			continue;
 		}
 
-		if (!UTempoCoreUtils::IsMostDerivedSubclass<UObject>(Object->GetClass()))
+		if (Object->Implements<UTempoScriptable>())
 		{
-			continue;
+			// Don't call RegisterScriptingServices yet - store it for later so we can only call RegisterScriptingServices
+			// on the most derived instances (without an O(n^2) iteration over all UObjects)
+			TempoScriptableObjects.Add(Object);
 		}
-
-		if (ITempoScriptable* ScriptableObject = Cast<ITempoScriptable>(Object))
+	}
+	
+	for (UObject* Object : TempoScriptableObjects)
+	{
+		bool bMostDerived = true;
+		for (const UObject* Other : TempoScriptableObjects)
 		{
-			ScriptableObject->RegisterScriptingServices(*this);
+			if (Other->GetClass() != Object->GetClass() && Other->IsA(Object->GetClass()))
+			{
+				bMostDerived = false;
+				break;
+			}
+		}
+		if (bMostDerived)
+		{
+			Cast<ITempoScriptable>(Object)->RegisterScriptingServices(*this);
 		}
 	}
 	const int32 Port = GetDefault<UTempoCoreSettings>()->GetScriptingPort();
@@ -178,20 +189,23 @@ void FTempoScriptingServer::Deinitialize()
 
 void FTempoScriptingServer::Reinitialize()
 {
-	TMap<FName, UObject*> PreviouslyActiveServices;
+	TMap<FName, TWeakObjectPtr<UObject>> PreviouslyActiveServices;
 	for (const auto& RequestManager : RequestManagers)
 	{
-		if (UObject* ActiveObject = RequestManager.Value->ActiveObject)
+		if (RequestManager.Value->ActiveObject.IsValid())
 		{
-			PreviouslyActiveServices.Add(RequestManager.Value->GetServiceName(), ActiveObject);
+			PreviouslyActiveServices.Add(RequestManager.Value->GetServiceName(), RequestManager.Value->ActiveObject);
 		}
 	}
 	Deinitialize();
 	Initialize();
 	for (const auto& PreviouslyActiveService : PreviouslyActiveServices)
 	{
-		UE_LOG(LogTempoScripting, Display, TEXT("Reactivating service %s"), *PreviouslyActiveService.Key.ToString());
-		ActivateService(PreviouslyActiveService.Key, PreviouslyActiveService.Value);
+		if (PreviouslyActiveService.Value.IsValid())
+		{
+			UE_LOG(LogTempoScripting, Display, TEXT("Reactivating service %s"), *PreviouslyActiveService.Key.ToString());
+			ActivateService(PreviouslyActiveService.Key, PreviouslyActiveService.Value.Get());
+		}
 	}
 }
 
