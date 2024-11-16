@@ -97,6 +97,14 @@ SimpleRequestHandler(void(ServiceType::*AcceptFunc)(grpc::ServerContext*, Reques
 }
 
 template <class ServiceType, class RequestType, class ResponseType, class UserObjectType>
+TSimpleRequestHandler<ServiceType, RequestType, ResponseType, UserObjectType, false>
+SimpleRequestHandler(void(ServiceType::*AcceptFunc)(grpc::ServerContext*, RequestType*, grpc::ServerAsyncResponseWriter<ResponseType>*, grpc::CompletionQueue*, grpc::ServerCompletionQueue*, void*),
+	void(UserObjectType::*HandleFunc)(const RequestType&, const TResponseDelegate<ResponseType>&))
+{
+	return TSimpleRequestHandler<ServiceType, RequestType, ResponseType, UserObjectType, false>(AcceptFunc, HandleFunc);
+}
+
+template <class ServiceType, class RequestType, class ResponseType, class UserObjectType>
 TSimpleRequestHandler<ServiceType, RequestType, ResponseType, UserObjectType, true>
 SimpleRequestHandler(void(ServiceType::*AcceptFunc)(grpc::ServerContext*, RequestType*, grpc::ServerAsyncResponseWriter<ResponseType>*, grpc::CompletionQueue*, grpc::ServerCompletionQueue*, void*),
 	void(UserObjectType::*HandleFunc)(const RequestType&, const TResponseDelegate<ResponseType>&) const)
