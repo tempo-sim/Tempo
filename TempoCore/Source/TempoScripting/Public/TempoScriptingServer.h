@@ -18,12 +18,6 @@ namespace grpc
 template <class AsyncServiceType, class RequestType, class ResponseType, template <class> class ResponderType, class UserObjectType, bool Const>
 struct TRequestHandler
 {
-	enum EBindType
-	{
-		UObject = 1,
-		Raw = 2,
-		Lambda = 3
-	};
 	typedef AsyncServiceType HandlerServiceType;
 	typedef RequestType HandlerRequestType;
 	typedef ResponseType HandlerResponseType;
@@ -38,7 +32,7 @@ struct TRequestHandler
 	{
 		static_assert(std::is_base_of_v<grpc::Service, AsyncServiceType>);
 	}
-	
+
 	void Init(AsyncServiceType* Service)
 	{
 		AcceptDelegate.BindRaw(Service, AcceptFunc);
@@ -49,7 +43,7 @@ struct TRequestHandler
 		check(AcceptDelegate.IsBound());
 		AcceptDelegate.Execute(Context, Request, Responder, CompletionQueue, CompletionQueue, Tag);
 	}
-	
+
 	void HandleRequest(const RequestType& Request, const TResponseDelegate<ResponseType>& ResponseDelegate)
 	{
 		if (!HandleDelegate.ExecuteIfBound(Request, ResponseDelegate))
@@ -64,10 +58,6 @@ struct TRequestHandler
 		{
 			return;
 		}
-		if (HandleDelegate.IsBound() && BindType == EBindType::Lambda)
-		{
-			return;
-		}
 		ensureAlwaysMsgf(!HandleDelegate.IsBound() || HandleDelegate.IsBoundToObject(UserObject), TEXT("Handle delegate was already bound to another object."));
 		HandleDelegate.BindUObject(UserObject, HandleFunc);
 		ActiveObject = UserObject;
@@ -77,15 +67,6 @@ struct TRequestHandler
 	{
 		HandleDelegate.Unbind();
 		ActiveObject.Reset();
-	}
-
-	template<typename FunctorType>
-	TRequestHandler& BindLambda(FunctorType&& InFunctor)
-	{
-		ensureAlwaysMsgf(!HandleDelegate.IsBound(), TEXT("Handle delegate was already bound."));
-		HandleDelegate.BindLambda(InFunctor);
-		BindType = EBindType::Lambda;
-		return *this;
 	}
 
 	const FWeakObjectPtr& GetActiveObject() const
@@ -98,7 +79,6 @@ private:
 	HandleFuncType HandleFunc;
 	TDelegate<void(const RequestType&, const TResponseDelegate<ResponseType>&)> HandleDelegate;
 	TDelegate<void(grpc::ServerContext*, RequestType*, ResponderType<ResponseType>*, grpc::CompletionQueue*, grpc::ServerCompletionQueue*, void*)> AcceptDelegate;
-	EBindType BindType = EBindType::UObject;
 	FWeakObjectPtr ActiveObject;
 };
 
