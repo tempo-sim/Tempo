@@ -19,7 +19,10 @@ FTempoScriptingServer::FTempoScriptingServer()
 		{
 			// Scripting has nothing to do with movie scene sequences, but this event fires in exactly the right conditions:
 			// After world time has been updated for the current frame, before Actor ticks have begun, and even when paused.
-			OnMovieSceneSequenceTickHandle = World->AddMovieSceneSequenceTickHandler(FOnMovieSceneSequenceTick::FDelegate::CreateRaw(this, &FTempoScriptingServer::TickInternal));
+			OnMovieSceneSequenceTickHandle = World->AddMovieSceneSequenceTickHandler(
+				FOnMovieSceneSequenceTick::FDelegate::CreateLambda([this](float){
+					TickInternal();
+				}));
 		}
 	});
 	OnPreWorldFinishDestroyHandle = FWorldDelegates::OnPreWorldFinishDestroy.AddLambda(
@@ -27,6 +30,8 @@ FTempoScriptingServer::FTempoScriptingServer()
 	{
 		if (UTempoCoreUtils::IsGameWorld(World))
 		{
+			// Tick one more time to give deactivated services a chance to flush their final messages
+			TickInternal();
 			World->OnWorldBeginPlay.Remove(OnWorldBeginPlayHandle);
 			World->RemoveMovieSceneSequenceTickHandler(OnMovieSceneSequenceTickHandle);
 			OnMovieSceneSequenceTickHandle.Reset();
@@ -189,12 +194,12 @@ void FTempoScriptingServer::Deinitialize()
 
 void FTempoScriptingServer::Reinitialize()
 {
-	TMap<FName, TWeakObjectPtr<UObject>> PreviouslyActiveServices;
+	TMap<FName, FWeakObjectPtr> PreviouslyActiveServices;
 	for (const auto& RequestManager : RequestManagers)
 	{
-		if (RequestManager.Value->ActiveObject.IsValid())
+		if (RequestManager.Value->GetActiveObject().IsValid())
 		{
-			PreviouslyActiveServices.Add(RequestManager.Value->GetServiceName(), RequestManager.Value->ActiveObject);
+			PreviouslyActiveServices.Add(RequestManager.Value->GetServiceName(), RequestManager.Value->GetActiveObject());
 		}
 	}
 	Deinitialize();
@@ -216,11 +221,11 @@ void FTempoScriptingServer::Tick(float DeltaTime)
 	// at the very end of the last frame as soon as possible.
 	if (!OnMovieSceneSequenceTickHandle.IsValid())
 	{
-		TickInternal(DeltaTime);
+		TickInternal();
 	}
 }
 
-void FTempoScriptingServer::TickInternal(float DeltaTime)
+void FTempoScriptingServer::TickInternal()
 {
 	if (!bIsInitialized)
 	{
