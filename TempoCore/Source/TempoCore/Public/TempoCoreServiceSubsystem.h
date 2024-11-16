@@ -8,7 +8,7 @@
 
 #include "CoreMinimal.h"
 
-#include "TempoLevelLoadingServiceSubsystem.generated.h"
+#include "TempoCoreServiceSubsystem.generated.h"
 
 namespace TempoScripting
 {
@@ -21,7 +21,7 @@ namespace TempoCore
 }
 
 UCLASS()
-class TEMPOCORE_API UTempoLevelLoadingServiceSubsystem : public UTempoGameInstanceSubsystem, public ITempoScriptable
+class TEMPOCORE_API UTempoCoreServiceSubsystem : public UTempoGameInstanceSubsystem, public ITempoScriptable
 {
 	GENERATED_BODY()
 
@@ -36,6 +36,8 @@ public:
 
 	void FinishLoadingLevel(const TempoScripting::Empty& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation);
 
+	void Quit(const TempoScripting::Empty& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const;
+
 	void SetDeferBeginPlay(bool bDeferBeginPlayIn) { bDeferBeginPlay = bDeferBeginPlayIn; }
 
 	void SetStartPaused(bool bStartPausedIn) { bStartPaused = bStartPausedIn; }
@@ -45,10 +47,10 @@ public:
 	bool GetStartPaused() const { return bStartPaused; }
 
 	void OnLevelLoaded();
-	
+
 protected:
 	TOptional<TResponseDelegate<TempoScripting::Empty>> PendingLevelLoad;
-	
+
 	bool bDeferBeginPlay = false;
 
 	bool bStartPaused = false;
