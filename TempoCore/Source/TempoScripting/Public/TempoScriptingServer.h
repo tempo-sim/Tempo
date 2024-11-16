@@ -28,6 +28,7 @@ struct TRequestHandler
 	typedef RequestType HandlerRequestType;
 	typedef ResponseType HandlerResponseType;
 	typedef ResponderType<ResponseType> HandlerResponderType;
+	typedef UserObjectType HandlerUserObjectType;
 
 	typedef typename TMemFunPtrType<false, AsyncServiceType, void(grpc::ServerContext*, RequestType*, ResponderType<ResponseType>*, grpc::CompletionQueue*, grpc::ServerCompletionQueue*, void*)>::Type AcceptFuncType;
 	typedef typename TMemFunPtrType<Const, UserObjectType, void(const RequestType&, const TResponseDelegate<ResponseType>&)>::Type HandleFuncType;
@@ -53,7 +54,7 @@ struct TRequestHandler
 	{
 		if (!HandleDelegate.ExecuteIfBound(Request, ResponseDelegate))
 		{
-			ResponseDelegate.ExecuteIfBound(ResponseType(), grpc::Status(grpc::UNAVAILABLE, "No handler registered for RPC"));
+			ResponseDelegate.ExecuteIfBound(ResponseType(), grpc::Status(grpc::UNAVAILABLE, "Service is not active"));
 		}
 	}
 
@@ -67,13 +68,15 @@ struct TRequestHandler
 		{
 			return;
 		}
-		ensureAlwaysMsgf(!HandleDelegate.IsBound(), TEXT("Handle delegate was already bound."));
+		ensureAlwaysMsgf(!HandleDelegate.IsBound() || HandleDelegate.IsBoundToObject(UserObject), TEXT("Handle delegate was already bound to another object."));
 		HandleDelegate.BindUObject(UserObject, HandleFunc);
+		ActiveObject = UserObject;
 	}
 
 	void Deactivate()
 	{
 		HandleDelegate.Unbind();
+		ActiveObject.Reset();
 	}
 
 	template<typename FunctorType>
@@ -85,12 +88,18 @@ struct TRequestHandler
 		return *this;
 	}
 
+	const FWeakObjectPtr& GetActiveObject() const
+	{
+		return ActiveObject;
+	}
+
 private:
 	AcceptFuncType AcceptFunc;
 	HandleFuncType HandleFunc;
 	TDelegate<void(const RequestType&, const TResponseDelegate<ResponseType>&)> HandleDelegate;
 	TDelegate<void(grpc::ServerContext*, RequestType*, ResponderType<ResponseType>*, grpc::CompletionQueue*, grpc::ServerCompletionQueue*, void*)> AcceptDelegate;
 	EBindType BindType = EBindType::UObject;
+	FWeakObjectPtr ActiveObject;
 };
 
 template <class ServiceType, class RequestType, class ResponseType, class UserObjectType, bool Const>
@@ -144,15 +153,9 @@ struct FRequestManager : TSharedFromThis<FRequestManager>
 	virtual void HandleAndRespond() = 0;
 	virtual FRequestManager* Duplicate(int32 NewTag) const = 0;
 	virtual const FName GetServiceName() const = 0;
-	virtual void Activate(UObject* Object)
-	{
-		ActiveObject = Object;
-	}
-	virtual void Deactivate()
-	{
-		ActiveObject = nullptr;
-	}
-	TWeakObjectPtr<UObject> ActiveObject = nullptr;
+	virtual void Activate(UObject* Object) = 0;
+	virtual void Deactivate() = 0;
+	virtual const FWeakObjectPtr& GetActiveObject() const = 0;
 };
 
 template <class HandlerType>
@@ -162,7 +165,7 @@ public:
 		: State(UNINITIALIZED), Tag(TagIn), Handler(HandlerIn), ServiceName(ServiceNameIn), Service(ServiceIn), Responder(&Context) {}
 	
 	virtual EState GetState() const override { return State; }
-	
+
 	virtual void Init(grpc::ServerCompletionQueue* CompletionQueue) override
 	{
 		check(State == UNINITIALIZED);
@@ -173,6 +176,25 @@ public:
 	virtual const FName GetServiceName() const override
 	{
 		return ServiceName;
+	}
+
+	virtual void Activate(UObject* Object) override
+	{
+		Handler->Activate(CastChecked<typename HandlerType::HandlerUserObjectType>(Object));
+	}
+
+	virtual void Deactivate() override
+	{
+		Handler->Deactivate();
+		if (State == HANDLING)
+		{
+			Handler->HandleRequest(Request, ResponseDelegate);
+		}
+	}
+
+	virtual const FWeakObjectPtr& GetActiveObject() const override
+	{
+		return Handler->GetActiveObject();
 	}
 
 protected:
@@ -217,25 +239,6 @@ public:
 	{
 		return new TRequestManager(NewTag, Base::ServiceName, Base::Service, Base::Handler);
 	}
-
-	virtual void Activate(UObject* Object) override
-	{
-		Base::Activate(Object);
-
-		Base::Handler->Activate(CastChecked<UserObjectType>(Object));
-	}
-
-	virtual void Deactivate() override
-	{
-		Base::Deactivate();
-
-		if (Base::State == FRequestManager::EState::HANDLING)
-		{
-			Base::State = FRequestManager::EState::FINISHING;
-			Base::Responder.Finish(ResponseType(), grpc::Status(grpc::CANCELLED, "Service deactivated"), &(Base::Tag));
-		}
-		Base::Handler->Deactivate();
-	}
 };
 
 template <class ServiceType, class RequestType, class ResponseType, class UserObjectType, bool Const>
@@ -269,25 +272,6 @@ public:
 	virtual FRequestManager* Duplicate(int32 NewTag) const override
 	{
 		return new TRequestManager(NewTag, Base::ServiceName, Base::Service, Base::Handler);
-	}
-
-	virtual void Activate(UObject* Object) override
-	{
-		Base::Activate(Object);
-
-		Base::Handler->Activate(CastChecked<UserObjectType>(Object));
-	}
-
-	virtual void Deactivate() override
-	{
-		Base::Deactivate();
-
-		if (Base::State == FRequestManager::EState::HANDLING)
-		{
-			Base::State = FRequestManager::EState::FINISHING;
-			Base::Responder.Finish(grpc::Status(grpc::CANCELLED, "Service deactivated"), &(Base::Tag));
-		}
-		Base::Handler->Deactivate();
 	}
 };
 
@@ -340,7 +324,7 @@ protected:
 	void Initialize();
 	void Deinitialize();
 	void Reinitialize();
-	void TickInternal(float DeltaTime);
+	void TickInternal();
 
 	void ActivateService(const FName& ServiceName, UObject* Object)
 	{
