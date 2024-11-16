@@ -2,14 +2,14 @@
 
 #include "TempoGameMode.h"
 
-#include "TempoLevelLoadingServiceSubsystem.h"
+#include "TempoCoreServiceSubsystem.h"
 
 #include "Kismet/GameplayStatics.h"
 
 void ATempoGameMode::StartPlay()
 {
 	check(GetGameInstance());
-	UTempoLevelLoadingServiceSubsystem* LevelLoadingServiceSubsystem = UGameInstance::GetSubsystem<UTempoLevelLoadingServiceSubsystem>(GetGameInstance());
+	UTempoCoreServiceSubsystem* LevelLoadingServiceSubsystem = UGameInstance::GetSubsystem<UTempoCoreServiceSubsystem>(GetGameInstance());
 	if (LevelLoadingServiceSubsystem)
 	{
 		LevelLoadingServiceSubsystem->OnLevelLoaded();

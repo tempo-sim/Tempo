@@ -1,8 +1,6 @@
 // Copyright Tempo Simulation, LLC. All Rights Reserved
 
-#include "TempoLevelLoadingServiceSubsystem.h"
-
-#include "TempoCoreUtils.h"
+#include "TempoCoreServiceSubsystem.h"
 
 #include "TempoGameMode.h"
 
@@ -15,31 +13,30 @@ using TempoCoreService = TempoCore::TempoCoreService;
 using TempoCoreAsyncService = TempoCore::TempoCoreService::AsyncService;
 using LoadLevelRequest = TempoCore::LoadLevelRequest;
 
-void UTempoLevelLoadingServiceSubsystem::RegisterScriptingServices(FTempoScriptingServer& ScriptingServer)
+void UTempoCoreServiceSubsystem::RegisterScriptingServices(FTempoScriptingServer& ScriptingServer)
 {
 	ScriptingServer.RegisterService<TempoCoreService>(
-		SimpleRequestHandler(&TempoCoreAsyncService::RequestLoadLevel, &UTempoLevelLoadingServiceSubsystem::LoadLevel),
-		SimpleRequestHandler(&TempoCoreAsyncService::RequestFinishLoadingLevel, &UTempoLevelLoadingServiceSubsystem::FinishLoadingLevel)
+		SimpleRequestHandler(&TempoCoreAsyncService::RequestLoadLevel, &UTempoCoreServiceSubsystem::LoadLevel),
+		SimpleRequestHandler(&TempoCoreAsyncService::RequestFinishLoadingLevel, &UTempoCoreServiceSubsystem::FinishLoadingLevel),
+		SimpleRequestHandler(&TempoCoreAsyncService::RequestQuit, &UTempoCoreServiceSubsystem::Quit)
 	);
 }
 
-void UTempoLevelLoadingServiceSubsystem::Initialize(FSubsystemCollectionBase& Collection)
+void UTempoCoreServiceSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
 
 	FTempoScriptingServer::Get().ActivateService<TempoCoreService>(this);
 }
 
-void UTempoLevelLoadingServiceSubsystem::Deinitialize()
+void UTempoCoreServiceSubsystem::Deinitialize()
 {
 	Super::Deinitialize();
-
-	UE_LOG(LogTemp, Warning, TEXT("Deinitializing UTempoLevelLoadingServiceSubsystem"));
 
 	FTempoScriptingServer::Get().DeactivateService<TempoCoreService>();
 }
 
-void UTempoLevelLoadingServiceSubsystem::LoadLevel(const LoadLevelRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation)
+void UTempoCoreServiceSubsystem::LoadLevel(const LoadLevelRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation)
 {
 	if (Request.deferred())
 	{
@@ -68,7 +65,7 @@ void UTempoLevelLoadingServiceSubsystem::LoadLevel(const LoadLevelRequest& Reque
 	PendingLevelLoad = ResponseContinuation;
 }
 
-void UTempoLevelLoadingServiceSubsystem::OnLevelLoaded()
+void UTempoCoreServiceSubsystem::OnLevelLoaded()
 {
 	if (PendingLevelLoad.IsSet())
 	{
@@ -76,7 +73,7 @@ void UTempoLevelLoadingServiceSubsystem::OnLevelLoaded()
 	}
 }
 
-void UTempoLevelLoadingServiceSubsystem::FinishLoadingLevel(const TempoScripting::Empty& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation)
+void UTempoCoreServiceSubsystem::FinishLoadingLevel(const TempoScripting::Empty& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation)
 {
 	ATempoGameMode* TempoGameMode = Cast<ATempoGameMode>(UGameplayStatics::GetGameMode(this));
 	if (!TempoGameMode)
@@ -93,4 +90,9 @@ void UTempoLevelLoadingServiceSubsystem::FinishLoadingLevel(const TempoScripting
 	SetDeferBeginPlay(false);
 	TempoGameMode->StartPlay();
 	ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status_OK);
+}
+
+void UTempoCoreServiceSubsystem::Quit(const TempoScripting::Empty& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const
+{
+	RequestEngineExit(TEXT("TempoCore API received quit request"));
 }
