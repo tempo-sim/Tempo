@@ -15,9 +15,9 @@ struct TToROSConverter<tempo_movement_ros_bridge::srv::GetCommandableVehicles::R
 	static tempo_movement_ros_bridge::srv::GetCommandableVehicles::Response Convert(const TempoMovement::CommandableVehiclesResponse& TempoValue)
 	{
 		tempo_movement_ros_bridge::srv::GetCommandableVehicles::Response ROSValue;
-		for (const std::string& vehicle_name : TempoValue.vehicle_name())
+		for (const auto& vehicle : TempoValue.vehicles())
 		{
-			ROSValue.vehicle_names.push_back(vehicle_name.c_str());
+			ROSValue.vehicle_names.push_back(vehicle.name().c_str());
 		}
 		return ROSValue;
 	}

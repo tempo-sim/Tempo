@@ -4,8 +4,13 @@ syntax = "proto3";
 
 import "TempoScripting/Empty.proto";
 
+message CommandableVehicleDescriptor {
+  string name = 1;
+  string type = 2;
+}
+
 message CommandableVehiclesResponse{
-  repeated string vehicle_name = 1;
+  repeated CommandableVehicleDescriptor vehicles = 1;
 }
 
 message VehicleCommandRequest {
@@ -14,8 +19,18 @@ message VehicleCommandRequest {
   float steering = 3;
 }
 
+message DroneCommandRequest {
+  string vehicle_name = 1;
+  float yaw = 2;
+  float pitch = 3;
+  float roll = 4;
+  float throttle = 5;
+}
+
 service VehicleControlService {
   rpc GetCommandableVehicles(TempoScripting.Empty) returns (CommandableVehiclesResponse);
-  
+
   rpc CommandVehicle(VehicleCommandRequest) returns (TempoScripting.Empty);
+  
+  rpc CommandDrone(DroneCommandRequest) returns (TempoScripting.Empty);
 }

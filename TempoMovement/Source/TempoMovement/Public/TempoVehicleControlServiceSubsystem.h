@@ -18,6 +18,7 @@ namespace TempoScripting
 namespace TempoMovement
 {
 	class VehicleCommandRequest;
+	class DroneCommandRequest;
 	class CommandableVehiclesResponse;
 }
 
@@ -36,4 +37,6 @@ public:
 	void GetCommandableVehicles(const TempoScripting::Empty& Request, const TResponseDelegate<TempoMovement::CommandableVehiclesResponse>& ResponseContinuation) const;
 	
 	void HandleVehicleCommand(const TempoMovement::VehicleCommandRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const;
+
+	void HandleDroneCommand(const TempoMovement::DroneCommandRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const;
 };
