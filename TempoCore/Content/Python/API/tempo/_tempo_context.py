@@ -8,57 +8,52 @@ import sys
 
 def run_async(coroutine):
     """
-    A helpful utility to run an async command from any
-    (synchronous or asynchronous) context.
+    A helper function to run an async coroutine from a synchronous context.
     """
     try:
-        # This will raise RuntimeError if we are in a synchronous context
+        # If there is a running loop run the coroutine on it
         running_loop = asyncio.get_running_loop()
-        # If it didn't raise we are in an asynchronous context and can just await the coroutine
-        running_loop.run_until_complete(coroutine)
+        future = asyncio.run_coroutine_threadsafe(coroutine, running_loop)
+        return future.result()
     except RuntimeError:
-        # This is a synchronous context, but there still might be a loop running elsewhere in the process
-        # There does not seem to be a way of detecting this situation without accessing the protected members below
-        running_loop = asyncio.get_event_loop_policy()._local._loop
-        if running_loop is not None:
-            # Submit the coroutine to that loop, if it exists
-            running_loop.run_until_complete(coroutine)
-        else:
-            # Otherwise, use asyncio.run to create a new loop and close it after running
-            asyncio.run(coroutine)
+        # No running loop - create a new one and run the coroutine on it
+        return asyncio.run(coroutine)
 
 
 def set_server(address="localhost", port=10001):
-    run_async(tempo_context()._set_server(address, port))
+    run_async(tempo_context().set_server(address, port))
 
 
 class TempoContext(object):
     def __init__(self):
-        self.server_address = "localhost"
-        self.server_port = "10001"
-        self.stubs = {}
-        self.channel = None
-        self.channel_loop = None
-        run_async(self._init_channel())
+        self._server_address = "localhost"
+        self._server_port = 10001
+        self._stubs = {}
+        self._channel = None
+        self._channel_loop = None
 
     async def get_stub(self, stub_class):
-        if self.channel is None:
-            await self._init_channel()
-        elif self.channel_loop is not asyncio.get_running_loop():
-            # We are in a different loop than the one our channel is running on
-            # Reinitialize our channel on the current one
-            await self._init_channel()
-        return self.stubs.setdefault(stub_class, stub_class(self.channel))
+        await self._ensure_channel()
+        return self._stubs.setdefault(stub_class, stub_class(self._channel))
 
-    async def _set_server(self, address="localhost", port="10001"):
-        self.server_address = address
-        self.server_port = port
+    async def set_server(self, address="localhost", port=10001):
+        self._server_address = address
+        self._server_port = port
         await self._init_channel()
 
-    async def _init_channel(self):
-        self.stubs = {}
-        self.channel_loop = asyncio.get_running_loop()
-        self.channel = grpc.aio.insecure_channel("{}:{}".format(self.server_address, self.server_port),
+    async def _ensure_channel(self):
+        current_loop = asyncio.get_running_loop()
+        if self._channel is None or self._channel_loop != current_loop:
+            # Close existing channel if there is one
+            if self._channel is not None:
+                await self._channel.close()
+            # Create new channel on current loop
+            self._init_channel()
+            self._channel_loop = current_loop
+
+    def _init_channel(self):
+        self._stubs = {}
+        self._channel = grpc.aio.insecure_channel("{}:{}".format(self._server_address, self._server_port),
                                                  options=[
                                                      ('grpc.max_receive_message_length', 1000000000), # 1Gb
                                                  ]
