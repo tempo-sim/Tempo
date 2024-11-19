@@ -8,24 +8,11 @@ public class TempoCoreShared : ModuleRules
 	{
 		PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
 		
-		PublicIncludePaths.AddRange(
-			new string[]
-			{
-			}
-			);
-				
-		
-		PrivateIncludePaths.AddRange(
-			new string[]
-			{
-			}
-			);
-			
-		
 		PublicDependencyModuleNames.AddRange(
 			new string[]
 			{
 				"Core",
+				"DeveloperSettings",
 			}
 			);
 			
@@ -35,15 +22,7 @@ public class TempoCoreShared : ModuleRules
 			{
 				// Unreal
 				"CoreUObject",
-				"DeveloperSettings",
 				"Engine",
-			}
-			);
-		
-		
-		DynamicallyLoadedModuleNames.AddRange(
-			new string[]
-			{
 			}
 			);
 	}

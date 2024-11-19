@@ -11,20 +11,6 @@ public class TempoScripting : TempoModuleRules
 		
 		PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
 		
-		PublicIncludePaths.AddRange(
-			new string[]
-			{
-			}
-			);
-				
-		
-		PrivateIncludePaths.AddRange(
-			new string[]
-			{
-			}
-			);
-			
-		
 		PublicDependencyModuleNames.AddRange(
 			new string[]
 			{
@@ -39,6 +25,7 @@ public class TempoScripting : TempoModuleRules
 			{
 				// Unreal
 				"CoreUObject",
+				"DeveloperSettings",
 				"Engine",
 				// Tempo
 				"TempoCoreShared",
@@ -49,12 +36,6 @@ public class TempoScripting : TempoModuleRules
 		{
 			PrivateDependencyModuleNames.Add("HotReload");
 		}
-		
-		DynamicallyLoadedModuleNames.AddRange(
-			new string[]
-			{
-			}
-			);
 		
 		// These definitions are used when building gRPC and must match here so that the headers
 		// we use in the Tempo build match those in the built libraries exactly.

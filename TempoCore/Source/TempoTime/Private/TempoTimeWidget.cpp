@@ -44,7 +44,9 @@ void UTempoTimeWidget::NativeOnInitialized()
 	SyncTimeSettings();
 	
 	// Keep time settings in sync.
-	GetMutableDefault<UTempoCoreSettings>()->TempoCoreTimeSettingsChangedEvent.AddUObject(this, &UTempoTimeWidget::SyncTimeSettings);
+#if WITH_EDITOR
+	GetMutableDefault<UTempoCoreSettings>()->OnSettingChanged().AddUObject(this, &UTempoTimeWidget::OnTempoCoreSettingsChanged);
+#endif
 }
 
 void UTempoTimeWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
@@ -55,7 +57,18 @@ void UTempoTimeWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime
 	SimTimeBox->SetText(FText::FromString(FString::Printf(TEXT("%.3f"), GetWorld()->GetTimeSeconds())));
 }
 
-void UTempoTimeWidget::SyncTimeSettings()
+#if WITH_EDITOR
+void UTempoTimeWidget::OnTempoCoreSettingsChanged(UObject* Object, FPropertyChangedEvent& PropertyChangedEvent) const
+{
+	if (PropertyChangedEvent.Property->GetName() == UTempoCoreSettings::GetTimeModeMemberName() ||
+	    PropertyChangedEvent.Property->GetName() == UTempoCoreSettings::GetSimulatedStepsPerSecondMemberName())
+	{
+		SyncTimeSettings();
+	}
+}
+#endif
+
+void UTempoTimeWidget::SyncTimeSettings() const
 {
 	const UTempoCoreSettings* Settings = GetDefault<UTempoCoreSettings>();
 	TimeModeBox->SetSelectedIndex(static_cast<uint8>(Settings->GetTimeMode()));
