@@ -95,4 +95,6 @@ void UTempoCoreServiceSubsystem::FinishLoadingLevel(const TempoScripting::Empty&
 void UTempoCoreServiceSubsystem::Quit(const TempoScripting::Empty& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const
 {
 	RequestEngineExit(TEXT("TempoCore API received quit request"));
+
+	ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status_OK);
 }

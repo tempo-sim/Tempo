@@ -9,11 +9,11 @@
 void ATempoGameMode::StartPlay()
 {
 	check(GetGameInstance());
-	UTempoCoreServiceSubsystem* LevelLoadingServiceSubsystem = UGameInstance::GetSubsystem<UTempoCoreServiceSubsystem>(GetGameInstance());
-	if (LevelLoadingServiceSubsystem)
+	UTempoCoreServiceSubsystem* TempoCoreServiceSubsystem = UGameInstance::GetSubsystem<UTempoCoreServiceSubsystem>(GetGameInstance());
+	if (TempoCoreServiceSubsystem)
 	{
-		LevelLoadingServiceSubsystem->OnLevelLoaded();
-		if (LevelLoadingServiceSubsystem->GetDeferBeginPlay())
+		TempoCoreServiceSubsystem->OnLevelLoaded();
+		if (TempoCoreServiceSubsystem->GetDeferBeginPlay())
 		{
 			bBeginPlayDeferred = true;
 			UGameplayStatics::GetPlayerController(GetWorld(), 0)->SetPause(true);
@@ -23,10 +23,10 @@ void ATempoGameMode::StartPlay()
 
 	Super::StartPlay();
 
-	if (LevelLoadingServiceSubsystem)
+	if (TempoCoreServiceSubsystem)
 	{
-		UGameplayStatics::GetPlayerController(GetWorld(), 0)->SetPause(LevelLoadingServiceSubsystem->GetStartPaused());
-		LevelLoadingServiceSubsystem->SetStartPaused(false);
+		UGameplayStatics::GetPlayerController(GetWorld(), 0)->SetPause(TempoCoreServiceSubsystem->GetStartPaused());
+		TempoCoreServiceSubsystem->SetStartPaused(false);
 	}
 }
 
