@@ -2,6 +2,34 @@
 
 #include "TempoGameMode.h"
 
+#include "TempoCoreServiceSubsystem.h"
+
+#include "Kismet/GameplayStatics.h"
+
+void ATempoGameMode::StartPlay()
+{
+	check(GetGameInstance());
+	UTempoCoreServiceSubsystem* TempoCoreServiceSubsystem = UGameInstance::GetSubsystem<UTempoCoreServiceSubsystem>(GetGameInstance());
+	if (TempoCoreServiceSubsystem)
+	{
+		TempoCoreServiceSubsystem->OnLevelLoaded();
+		if (TempoCoreServiceSubsystem->GetDeferBeginPlay())
+		{
+			bBeginPlayDeferred = true;
+			UGameplayStatics::GetPlayerController(GetWorld(), 0)->SetPause(true);
+			return;
+		}
+	}
+
+	Super::StartPlay();
+
+	if (TempoCoreServiceSubsystem)
+	{
+		UGameplayStatics::GetPlayerController(GetWorld(), 0)->SetPause(TempoCoreServiceSubsystem->GetStartPaused());
+		TempoCoreServiceSubsystem->SetStartPaused(false);
+	}
+}
+
 const IActorClassificationInterface* ATempoGameMode::GetActorClassifier() const
 {
 	return Cast<IActorClassificationInterface>(GetWorld()->GetSubsystemBase(ActorClassifier));
