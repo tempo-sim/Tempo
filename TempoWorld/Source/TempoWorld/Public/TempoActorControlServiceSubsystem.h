@@ -20,6 +20,7 @@ namespace TempoWorld
 	class SpawnActorRequest;
 	class SpawnActorResponse;
 	class FinishSpawningActorRequest;
+	class FinishSpawningActorResponse;
 	class DestroyActorRequest;
 	class SetActorTransformRequest;
 	class SetComponentTransformRequest;
@@ -48,7 +49,7 @@ public:
 
 	void SpawnActor(const TempoWorld::SpawnActorRequest& Request, const TResponseDelegate<TempoWorld::SpawnActorResponse>& ResponseContinuation);
 	
-	void FinishSpawningActor(const TempoWorld::FinishSpawningActorRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation);
+	void FinishSpawningActor(const TempoWorld::FinishSpawningActorRequest& Request, const TResponseDelegate<TempoWorld::FinishSpawningActorResponse>& ResponseContinuation);
 
 	void DestroyActor(const TempoWorld::DestroyActorRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const;
 
@@ -69,9 +70,10 @@ public:
 	void GetComponentProperties(const TempoWorld::GetComponentPropertiesRequest& Request, const TResponseDelegate<TempoWorld::GetPropertiesResponse>& ResponseContinuation) const;
 
 protected:
-	template <typename RequestType>
-	void SetProperty(const RequestType& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const;
-
 	UPROPERTY()
 	TMap<const AActor*, FTransform> DeferredSpawnTransforms;
+
+private:
+	template <typename RequestType>
+	void SetProperty(const RequestType& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const;
 };

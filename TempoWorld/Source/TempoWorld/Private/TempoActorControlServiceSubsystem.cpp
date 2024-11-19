@@ -13,6 +13,7 @@ using ActorControlAsyncService = TempoWorld::ActorControlService::AsyncService;
 using SpawnActorRequest = TempoWorld::SpawnActorRequest;
 using SpawnActorResponse = TempoWorld::SpawnActorResponse;
 using FinishSpawningActorRequest = TempoWorld::FinishSpawningActorRequest;
+using FinishSpawningActorResponse = TempoWorld::FinishSpawningActorResponse;
 using DestroyActorRequest = TempoWorld::DestroyActorRequest;
 using SetActorTransformRequest = TempoWorld::SetActorTransformRequest;
 using SetComponentTransformRequest = TempoWorld::SetComponentTransformRequest;
@@ -48,6 +49,20 @@ FTransform ToUnrealTransform(const TempoScripting::Transform& Transform)
 			Transform.rotation().y(),
 			Transform.rotation().r()));
 	return FTransform(Rotation, Location);
+}
+
+TempoScripting::Transform FromUnrealTransform(const FTransform& Transform)
+{
+	TempoScripting::Transform OutTransform;
+	const FVector OutLocation = QuantityConverter<CM2M, L2R>::Convert(Transform.GetLocation());
+	const FRotator OutRotation = QuantityConverter<Deg2Rad, L2R>::Convert(Transform.GetRotation().Rotator());
+	OutTransform.mutable_location()->set_x(OutLocation.X);
+	OutTransform.mutable_location()->set_x(OutLocation.Y);
+	OutTransform.mutable_location()->set_x(OutLocation.Z);
+	OutTransform.mutable_rotation()->set_r(OutRotation.Roll);
+	OutTransform.mutable_rotation()->set_p(OutRotation.Pitch);
+	OutTransform.mutable_rotation()->set_y(OutRotation.Yaw);
+	return OutTransform;
 }
 
 void UTempoActorControlServiceSubsystem::RegisterScriptingServices(FTempoScriptingServer& ScriptingServer)
@@ -97,6 +112,12 @@ void UTempoActorControlServiceSubsystem::SpawnActor(const SpawnActorRequest& Req
 	UWorld* World = GetWorld();
 	check(World);
 
+	if (Request.type().empty())
+	{
+		ResponseContinuation.ExecuteIfBound(SpawnActorResponse(), grpc::Status(grpc::FAILED_PRECONDITION, "Type must be specified"));
+		return;
+	}
+
 	UClass* Class = GetSubClassWithName<AActor>(UTF8_TO_TCHAR(Request.type().c_str()));
 
 	if (!Class)
@@ -141,22 +162,29 @@ void UTempoActorControlServiceSubsystem::SpawnActor(const SpawnActorRequest& Req
 	
 	SpawnActorResponse Response;
 	Response.set_spawned_name(TCHAR_TO_UTF8(*SpawnedActor->GetActorNameOrLabel()));
+	*Response.mutable_spawned_transform() = FromUnrealTransform(SpawnedActor->GetActorTransform()); 
 
 	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
 }
 
-void UTempoActorControlServiceSubsystem::FinishSpawningActor(const FinishSpawningActorRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation)
+void UTempoActorControlServiceSubsystem::FinishSpawningActor(const FinishSpawningActorRequest& Request, const TResponseDelegate<FinishSpawningActorResponse>& ResponseContinuation)
 {
+	if (Request.actor().empty())
+	{
+		ResponseContinuation.ExecuteIfBound(FinishSpawningActorResponse(), grpc::Status(grpc::FAILED_PRECONDITION, "Actor must be specified"));
+		return;
+	}
+
 	AActor* Actor = GetActorWithName(GetWorld(), UTF8_TO_TCHAR(Request.actor().c_str()));
 	if (!Actor)
 	{
-		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Failed to find actor"));
+		ResponseContinuation.ExecuteIfBound(FinishSpawningActorResponse(), grpc::Status(grpc::FAILED_PRECONDITION, "Failed to find actor"));
 		return;
 	}
 	const FTransform* SpawnTransform = DeferredSpawnTransforms.Find(Actor);
 	if (!SpawnTransform)
 	{
-		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Failed to find spawn transform for actor"));
+		ResponseContinuation.ExecuteIfBound(FinishSpawningActorResponse(), grpc::Status(grpc::FAILED_PRECONDITION, "Failed to find spawn transform for actor"));
 		return;
 	}
 	
@@ -164,11 +192,20 @@ void UTempoActorControlServiceSubsystem::FinishSpawningActor(const FinishSpawnin
 
 	DeferredSpawnTransforms.Remove(Actor);
 
-	ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status_OK);
+	FinishSpawningActorResponse Response;
+	*Response.mutable_spawned_transform() = FromUnrealTransform(Actor->GetActorTransform()); 
+
+	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
 }
 
 void UTempoActorControlServiceSubsystem::DestroyActor(const TempoWorld::DestroyActorRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const
 {
+	if (Request.actor().empty())
+	{
+		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Actor must be specified"));
+		return;
+	}
+
 	AActor* Actor = GetActorWithName(GetWorld(), UTF8_TO_TCHAR(Request.actor().c_str()));
 	if (!Actor)
 	{
@@ -182,6 +219,12 @@ void UTempoActorControlServiceSubsystem::DestroyActor(const TempoWorld::DestroyA
 
 void UTempoActorControlServiceSubsystem::SetActorTransform(const TempoWorld::SetActorTransformRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const
 {
+	if (Request.actor().empty())
+	{
+		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Actor must be specified"));
+		return;
+	}
+
 	AActor* Actor = GetActorWithName(GetWorld(), UTF8_TO_TCHAR(Request.actor().c_str()));
 	if (!Actor)
 	{
@@ -209,6 +252,18 @@ void UTempoActorControlServiceSubsystem::SetActorTransform(const TempoWorld::Set
 
 void UTempoActorControlServiceSubsystem::SetComponentTransform(const TempoWorld::SetComponentTransformRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const
 {
+	if (Request.actor().empty())
+	{
+		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Actor must be specified"));
+		return;
+	}
+
+	if (Request.component().empty())
+	{
+		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Component must be specified"));
+		return;
+	}
+
 	const AActor* Actor = GetActorWithName(GetWorld(), UTF8_TO_TCHAR(Request.actor().c_str()));
 	if (!Actor)
 	{
@@ -220,6 +275,12 @@ void UTempoActorControlServiceSubsystem::SetComponentTransform(const TempoWorld:
 	if (!Component)
 	{
 		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Failed to find component"));
+		return;
+	}
+
+	if (Component == Actor->GetRootComponent())
+	{
+		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Cannot set the transform of the root component. Set the transform of the owner actor instead."));
 		return;
 	}
 
@@ -239,6 +300,18 @@ void UTempoActorControlServiceSubsystem::SetComponentTransform(const TempoWorld:
 
 void UTempoActorControlServiceSubsystem::ActivateComponent(const ActivateComponentRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const
 {
+	if (Request.actor().empty())
+	{
+		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Actor must be specified"));
+		return;
+	}
+
+	if (Request.component().empty())
+	{
+		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Component must be specified"));
+		return;
+	}
+
 	const AActor* Actor = GetActorWithName(GetWorld(), UTF8_TO_TCHAR(Request.actor().c_str()));
 	if (!Actor)
 	{
@@ -260,6 +333,18 @@ void UTempoActorControlServiceSubsystem::ActivateComponent(const ActivateCompone
 
 void UTempoActorControlServiceSubsystem::DeactivateComponent(const DeactivateComponentRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const
 {
+	if (Request.actor().empty())
+	{
+		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Actor must be specified"));
+		return;
+	}
+
+	if (Request.component().empty())
+	{
+		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Component must be specified"));
+		return;
+	}
+
 	const AActor* Actor = GetActorWithName(GetWorld(), UTF8_TO_TCHAR(Request.actor().c_str()));
 	if (!Actor)
 	{
@@ -280,14 +365,14 @@ void UTempoActorControlServiceSubsystem::DeactivateComponent(const DeactivateCom
 }
 
 template <typename RequestType>
-grpc::Status GetObjectForRequest(const UWorld* World, const RequestType& Request, UObject* Object)
+grpc::Status GetObjectForRequest(const UWorld* World, const RequestType& Request, UObject*& Object)
 {
 	const FString ActorName(UTF8_TO_TCHAR(Request.actor().c_str()));
 	const FString ComponentName = FString(UTF8_TO_TCHAR(Request.component().c_str()));
 
 	if (ActorName.IsEmpty())
 	{
-		return grpc::Status(grpc::FAILED_PRECONDITION, "Actor name must be specified");
+		return grpc::Status(grpc::FAILED_PRECONDITION, "Actor must be specified");
 	}
 	
 	AActor* Actor = GetActorWithName(World, ActorName);
@@ -343,6 +428,12 @@ void UTempoActorControlServiceSubsystem::GetAllActors(const GetAllActorsRequest&
 
 void UTempoActorControlServiceSubsystem::GetAllComponents(const GetAllComponentsRequest& Request, const TResponseDelegate<GetAllComponentsResponse>& ResponseContinuation) const
 {
+	if (Request.actor().empty())
+	{
+		ResponseContinuation.ExecuteIfBound(GetAllComponentsResponse(), grpc::Status(grpc::FAILED_PRECONDITION, "Actor must be specified"));
+		return;
+	}
+	
 	const AActor* Actor = GetActorWithName(GetWorld(), UTF8_TO_TCHAR(Request.actor().c_str()));
 	if (!Actor)
 	{
@@ -454,7 +545,8 @@ void GetObjectProperties(const UObject* Object, GetPropertiesResponse& Response)
 				{
 					FRotator ValueRotator;
 					StructProperty->GetValue_InContainer(Object, &ValueRotator);
-					*Value = ValueRotator.ToString();
+					
+					*Value = QuantityConverter<Deg2Rad,L2R>::Convert(ValueRotator).ToString();
 				}
 			}
 			else if (StructProperty->Struct->GetStructCPPName() == TEXT("FColor"))
@@ -477,6 +569,10 @@ void GetObjectProperties(const UObject* Object, GetPropertiesResponse& Response)
 					const FColor ValueColor = ValueLinearColor.ToFColor(true);
 					*Value = FString::Printf(TEXT("r:%d g:%d b:%d"), ValueColor.R, ValueColor.G, ValueColor.B);
 				}
+			}
+			else
+			{
+				Type = TEXT("unsupported");
 			}
 		}
 		else if (const FArrayProperty* ArrayProperty = CastField<FArrayProperty>(Property))
@@ -511,6 +607,12 @@ void GetObjectProperties(const UObject* Object, GetPropertiesResponse& Response)
 
 void UTempoActorControlServiceSubsystem::GetActorProperties(const GetActorPropertiesRequest& Request, const TResponseDelegate<GetPropertiesResponse>& ResponseContinuation) const
 {
+	if (Request.actor().empty())
+	{
+		ResponseContinuation.ExecuteIfBound(GetPropertiesResponse(), grpc::Status(grpc::FAILED_PRECONDITION, "Actor must be specified"));
+		return;
+	}
+
 	const AActor* Actor = GetActorWithName(GetWorld(), UTF8_TO_TCHAR(Request.actor().c_str()));
 	if (!Actor)
 	{
@@ -536,6 +638,18 @@ void UTempoActorControlServiceSubsystem::GetActorProperties(const GetActorProper
 
 void UTempoActorControlServiceSubsystem::GetComponentProperties(const GetComponentPropertiesRequest& Request, const TResponseDelegate<GetPropertiesResponse>& ResponseContinuation) const
 {
+	if (Request.actor().empty())
+	{
+		ResponseContinuation.ExecuteIfBound(GetPropertiesResponse(), grpc::Status(grpc::FAILED_PRECONDITION, "Actor must be specified"));
+		return;
+	}
+
+	if (Request.component().empty())
+	{
+		ResponseContinuation.ExecuteIfBound(GetPropertiesResponse(), grpc::Status(grpc::FAILED_PRECONDITION, "Component must be specified"));
+		return;
+	}
+
 	const AActor* Actor = GetActorWithName(GetWorld(), UTF8_TO_TCHAR(Request.actor().c_str()));
 	if (!Actor)
 	{
@@ -557,13 +671,13 @@ void UTempoActorControlServiceSubsystem::GetComponentProperties(const GetCompone
 }
 
 template <typename RequestType>
-grpc::Status GetPropertyForRequest(const UObject* Object, const RequestType& Request, FProperty* Property)
+grpc::Status GetPropertyForRequest(const UObject* Object, const RequestType& Request, FProperty*& Property)
 {
 	const FName PropertyName(UTF8_TO_TCHAR(Request.property().c_str()));
 
 	if (PropertyName.IsNone())
 	{
-		return grpc::Status(grpc::FAILED_PRECONDITION, "Property name must be specified");
+		return grpc::Status(grpc::FAILED_PRECONDITION, "Property must be specified");
 	}
 
 	const UClass* Class = Object->GetClass();
@@ -753,7 +867,7 @@ grpc::Status SetPropertyImpl<SetRotatorPropertyRequest>(const UWorld* World, con
 	Rotator.Pitch = Request.p();
 	Rotator.Yaw = Request.y();
 
-	return SetStructPropertyImpl(World, Request, Rotator, TEXT("FRotator"));
+	return SetStructPropertyImpl(World, Request, QuantityConverter<Rad2Deg,R2L>::Convert(Rotator), TEXT("FRotator"));
 }
 
 template<>

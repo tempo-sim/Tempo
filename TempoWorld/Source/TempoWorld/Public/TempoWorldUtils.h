@@ -81,7 +81,6 @@ UClass* GetSubClassWithName(const FString& Name)
 	FTopLevelAssetPath BPPath(UBlueprint::StaticClass()->GetPathName());
 	Filter.ClassPaths.Add(BPPath);
 	Filter.bRecursiveClasses = true;
-	// Filter.PackagePaths.Add(TEXT("/Game"));
 	Filter.bRecursivePaths = true;
 
 	TArray< FAssetData > AssetList;

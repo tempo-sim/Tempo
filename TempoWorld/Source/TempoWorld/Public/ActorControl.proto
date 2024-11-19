@@ -14,10 +14,15 @@ message SpawnActorRequest {
 
 message SpawnActorResponse {
   string spawned_name = 1;
+  TempoScripting.Transform spawned_transform = 2;
 }
 
 message FinishSpawningActorRequest {
   string actor = 1;
+}
+
+message FinishSpawningActorResponse {
+  TempoScripting.Transform spawned_transform = 1;
 }
 
 message DestroyActorRequest {
@@ -181,7 +186,7 @@ message SetFloatArrayPropertyRequest {
 service ActorControlService {
     rpc SpawnActor(SpawnActorRequest) returns (SpawnActorResponse);
 
-    rpc FinishSpawningActor(FinishSpawningActorRequest) returns (TempoScripting.Empty);
+    rpc FinishSpawningActor(FinishSpawningActorRequest) returns (FinishSpawningActorResponse);
 
     rpc DestroyActor(DestroyActorRequest) returns (TempoScripting.Empty);
 
