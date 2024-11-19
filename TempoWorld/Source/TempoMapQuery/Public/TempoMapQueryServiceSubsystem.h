@@ -7,18 +7,22 @@
 #include "Subsystems/WorldSubsystem.h"
 
 #include "CoreMinimal.h"
-#include "TempoWorldSubsystem.h"
+#include "TempoSubsystems.h"
 #include "TempoMapQuery/MapQueries.pb.h"
 
 #include "TempoMapQueryServiceSubsystem.generated.h"
 
 UCLASS()
-class TEMPOMAPQUERY_API UTempoMapQueryServiceSubsystem : public UTempoTickableWorldSubsystem, public ITempoScriptable
+class TEMPOMAPQUERY_API UTempoMapQueryServiceSubsystem : public UTempoTickableGameWorldSubsystem, public ITempoScriptable
 {
 	GENERATED_BODY()
 
 public:
-	virtual void RegisterScriptingServices(FTempoScriptingServer* ScriptingServer) override;
+	virtual void RegisterScriptingServices(FTempoScriptingServer& ScriptingServer) override;
+
+	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+
+	virtual void Deinitialize() override;
 	
 	virtual void Tick(float DeltaTime) override;
 

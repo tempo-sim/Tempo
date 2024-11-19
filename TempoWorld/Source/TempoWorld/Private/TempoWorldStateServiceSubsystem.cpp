@@ -9,6 +9,7 @@
 #include "TempoGameMode.h"
 #include "TempoMovementInterface.h"
 #include "TempoWorld.h"
+#include "TempoWorldUtils.h"
 
 #include "EngineUtils.h"
 #include "MassAgentComponent.h"
@@ -17,7 +18,8 @@
 #include "GameFramework/MovementComponent.h"
 #include "Kismet/GameplayStatics.h"
 
-using WorldStateService = TempoWorld::WorldStateService::AsyncService;
+using WorldStateService = TempoWorld::WorldStateService;
+using WorldStateAsyncService = TempoWorld::WorldStateService::AsyncService;
 using ActorState = TempoWorld::ActorState;
 using ActorStates = TempoWorld::ActorStates;
 using ActorStateRequest = TempoWorld::ActorStateRequest;
@@ -25,32 +27,29 @@ using ActorStatesNearRequest = TempoWorld::ActorStatesNearRequest;
 using OverlapEventRequest = TempoWorld::OverlapEventRequest;
 using OverlapEventResponse = TempoWorld::OverlapEventResponse;
 
-void UTempoWorldStateServiceSubsystem::RegisterScriptingServices(FTempoScriptingServer* ScriptingServer)
+void UTempoWorldStateServiceSubsystem::RegisterScriptingServices(FTempoScriptingServer& ScriptingServer)
 {
-	ScriptingServer->RegisterService<WorldStateService>(
-		TStreamingRequestHandler<WorldStateService, OverlapEventRequest, OverlapEventResponse>(&WorldStateService::RequestStreamOverlapEvents).BindUObject(this, &UTempoWorldStateServiceSubsystem::StreamOverlapEvents),
-		TSimpleRequestHandler<WorldStateService, ActorStateRequest, ActorState>(&WorldStateService::RequestGetCurrentActorState).BindUObject(this, &UTempoWorldStateServiceSubsystem::GetCurrentActorState),
-		TStreamingRequestHandler<WorldStateService, ActorStateRequest, ActorState>(&WorldStateService::RequestStreamActorState).BindUObject(this, &UTempoWorldStateServiceSubsystem::StreamActorState),
-		TSimpleRequestHandler<WorldStateService, ActorStatesNearRequest, ActorStates>(&WorldStateService::RequestGetCurrentActorStatesNear).BindUObject(this, &UTempoWorldStateServiceSubsystem::GetCurrentActorStatesNear),
-		TStreamingRequestHandler<WorldStateService, ActorStatesNearRequest, ActorStates>(&WorldStateService::RequestStreamActorStatesNear).BindUObject(this, &UTempoWorldStateServiceSubsystem::StreamActorStatesNear)
+	ScriptingServer.RegisterService<WorldStateService>(
+		StreamingRequestHandler(&WorldStateAsyncService::RequestStreamOverlapEvents, &UTempoWorldStateServiceSubsystem::StreamOverlapEvents),
+		SimpleRequestHandler(&WorldStateAsyncService::RequestGetCurrentActorState, &UTempoWorldStateServiceSubsystem::GetCurrentActorState),
+		StreamingRequestHandler(&WorldStateAsyncService::RequestStreamActorState, &UTempoWorldStateServiceSubsystem::StreamActorState),
+		SimpleRequestHandler(&WorldStateAsyncService::RequestGetCurrentActorStatesNear, &UTempoWorldStateServiceSubsystem::GetCurrentActorStatesNear),
+		StreamingRequestHandler(&WorldStateAsyncService::RequestStreamActorStatesNear, &UTempoWorldStateServiceSubsystem::StreamActorStatesNear)
 	);
 }
 
-AActor* GetActorWithName(const UWorld* World, const FString& Name)
+void UTempoWorldStateServiceSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
-	for (TActorIterator<AActor> ActorIt(World); ActorIt; ++ActorIt)
-	{
-		if (ActorIt->IsHidden())
-		{
-			continue;
-		}
-		if (ActorIt->GetActorNameOrLabel().Equals(Name, ESearchCase::IgnoreCase))
-		{
-			return *ActorIt;
-		}
-	}
+	Super::Initialize(Collection);
 
-	return nullptr;
+	FTempoScriptingServer::Get().ActivateService<WorldStateService>(this);
+}
+
+void UTempoWorldStateServiceSubsystem::Deinitialize()
+{
+	Super::Deinitialize();
+
+	FTempoScriptingServer::Get().DeactivateService<WorldStateService>();
 }
 
 TArray<AActor*> GetMatchingActors(const UWorld* World, const ActorStateRequest& Request)

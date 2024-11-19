@@ -8,17 +8,32 @@
 
 #include "Kismet/GameplayStatics.h"
 
-using VehicleControlService = TempoMovement::VehicleControlService::AsyncService;
+using VehicleControlService = TempoMovement::VehicleControlService;
+using VehicleControlAsyncService = TempoMovement::VehicleControlService::AsyncService;
 using VehicleCommandRequest = TempoMovement::VehicleCommandRequest;
 using CommandableVehiclesResponse = TempoMovement::CommandableVehiclesResponse;
 using TempoEmpty = TempoScripting::Empty;
 
-void UTempoVehicleControlServiceSubsystem::RegisterScriptingServices(FTempoScriptingServer* ScriptingServer)
+void UTempoVehicleControlServiceSubsystem::RegisterScriptingServices(FTempoScriptingServer& ScriptingServer)
 {
-	ScriptingServer->RegisterService<VehicleControlService>(
-		TSimpleRequestHandler<VehicleControlService, VehicleCommandRequest, TempoEmpty>(&VehicleControlService::RequestCommandVehicle).BindUObject(this, &UTempoVehicleControlServiceSubsystem::HandleVehicleCommand),
-		TSimpleRequestHandler<VehicleControlService, TempoEmpty, CommandableVehiclesResponse>(&VehicleControlService::RequestGetCommandableVehicles).BindUObject(this, &UTempoVehicleControlServiceSubsystem::GetCommandableVehicles)
+	ScriptingServer.RegisterService<VehicleControlService>(
+		SimpleRequestHandler(&VehicleControlAsyncService::RequestCommandVehicle, &UTempoVehicleControlServiceSubsystem::HandleVehicleCommand),
+		SimpleRequestHandler(&VehicleControlAsyncService::RequestGetCommandableVehicles, &UTempoVehicleControlServiceSubsystem::GetCommandableVehicles)
 		);
+}
+
+void UTempoVehicleControlServiceSubsystem::Initialize(FSubsystemCollectionBase& Collection)
+{
+	Super::Initialize(Collection);
+
+	FTempoScriptingServer::Get().ActivateService<VehicleControlService>(this);
+}
+
+void UTempoVehicleControlServiceSubsystem::Deinitialize()
+{
+	Super::Deinitialize();
+
+	FTempoScriptingServer::Get().DeactivateService<VehicleControlService>();
 }
 
 void UTempoVehicleControlServiceSubsystem::GetCommandableVehicles(const TempoScripting::Empty& Request, const TResponseDelegate<TempoMovement::CommandableVehiclesResponse>& ResponseContinuation) const

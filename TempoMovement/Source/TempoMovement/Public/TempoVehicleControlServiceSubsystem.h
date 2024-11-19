@@ -4,7 +4,7 @@
 
 #include "TempoScriptable.h"
 #include "TempoScriptingServer.h"
-#include "TempoWorldSubsystem.h"
+#include "TempoSubsystems.h"
 
 #include "CoreMinimal.h"
 
@@ -27,7 +27,11 @@ class TEMPOMOVEMENT_API UTempoVehicleControlServiceSubsystem : public UTempoGame
 	GENERATED_BODY()
 	
 public:
-	virtual void RegisterScriptingServices(FTempoScriptingServer* ScriptingServer) override;
+	virtual void RegisterScriptingServices(FTempoScriptingServer& ScriptingServer) override;
+
+	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+
+	virtual void Deinitialize() override;
 
 	void GetCommandableVehicles(const TempoScripting::Empty& Request, const TResponseDelegate<TempoMovement::CommandableVehiclesResponse>& ResponseContinuation) const;
 	
