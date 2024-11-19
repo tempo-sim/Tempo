@@ -1,6 +1,7 @@
 # Copyright Tempo Simulation, LLC. All Rights Reserved
 
 import asyncio
+from curio.meta import awaitable
 import grpc
 import os
 import sys
@@ -24,6 +25,11 @@ def set_server(address="localhost", port=10001):
     run_async(tempo_context().set_server(address, port))
 
 
+@awaitable(set_server)
+async def set_server(address="localhost", port=10001):
+    await tempo_context().set_server(address, port)
+
+
 class TempoContext(object):
     def __init__(self):
         self._server_address = "localhost"
@@ -39,7 +45,6 @@ class TempoContext(object):
     async def set_server(self, address="localhost", port=10001):
         self._server_address = address
         self._server_port = port
-        await self._init_channel()
 
     async def _ensure_channel(self):
         current_loop = asyncio.get_running_loop()
