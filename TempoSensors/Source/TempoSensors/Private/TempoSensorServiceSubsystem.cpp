@@ -57,7 +57,7 @@ void UTempoSensorServiceSubsystem::OnRenderFrameCompleted() const
 	if (GetDefault<UTempoCoreSettings>()->GetTimeMode() == ETimeMode::FixedStep)
 	{
 		bool bAnySensorAwaitingRender = false;
-		ForEachSensor([&bAnySensorAwaitingRender](ITempoSensorInterface* Sensor)
+		ForEachActiveSensor([&bAnySensorAwaitingRender](ITempoSensorInterface* Sensor)
 		{
 			bAnySensorAwaitingRender |= Sensor->IsAwaitingRender();
 		});
@@ -69,7 +69,7 @@ void UTempoSensorServiceSubsystem::OnRenderFrameCompleted() const
 		}
 	}
 
-	ForEachSensor([](ITempoSensorInterface* Sensor)
+	ForEachActiveSensor([](ITempoSensorInterface* Sensor)
 	{
 		Sensor->OnRenderCompleted();
 	});
@@ -84,7 +84,7 @@ void UTempoSensorServiceSubsystem::OnWorldTickStart(UWorld* World, ELevelTick Ti
 		if (GetDefault<UTempoCoreSettings>()->GetTimeMode() == ETimeMode::FixedStep)
 		{
 			TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsWaitForMeasurements);
-			ForEachSensor([](const ITempoSensorInterface* Sensor)
+			ForEachActiveSensor([](const ITempoSensorInterface* Sensor)
 			{
 				Sensor->BlockUntilMeasurementsReady();
 			});
@@ -92,7 +92,7 @@ void UTempoSensorServiceSubsystem::OnWorldTickStart(UWorld* World, ELevelTick Ti
 
 		TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsSendMeasurements);
 		TArray<TFuture<void>> SendMeasurementsTasks;
-		ForEachSensor([&SendMeasurementsTasks](ITempoSensorInterface* Sensor)
+		ForEachActiveSensor([&SendMeasurementsTasks](ITempoSensorInterface* Sensor)
 		{
 			if (TOptional<TFuture<void>> Future = Sensor->SendMeasurements())
 			{
@@ -131,13 +131,17 @@ TempoSensors::MeasurementType ToProtoMeasurementType(EMeasurementType ImageType)
 	}
 }
 
-void UTempoSensorServiceSubsystem::ForEachSensor(const TFunction<void(ITempoSensorInterface*)>& Callback) const
+void UTempoSensorServiceSubsystem::ForEachActiveSensor(const TFunction<void(ITempoSensorInterface*)>& Callback) const
 {
 	check(GetWorld());
 	
 	for (TObjectIterator<UActorComponent> ComponentIt; ComponentIt; ++ComponentIt)
 	{
 		UActorComponent* Component = *ComponentIt;
+		if (!Component->IsActive())
+		{
+			continue;
+		}
 		if (ITempoSensorInterface* Sensor = Cast<ITempoSensorInterface>(Component))
 		{
 			if (IsValid(Component) && Component->GetWorld() == GetWorld())
@@ -152,7 +156,7 @@ void UTempoSensorServiceSubsystem::GetAvailableSensors(const TempoSensors::Avail
 {
 	AvailableSensorsResponse Response;
 
-	ForEachSensor([&Response](const ITempoSensorInterface* Sensor)
+	ForEachActiveSensor([&Response](const ITempoSensorInterface* Sensor)
 	{
 		auto* AvailableSensor = Response.add_available_sensors();
 		AvailableSensor->set_owner(TCHAR_TO_UTF8(*Sensor->GetOwnerName()));
