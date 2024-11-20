@@ -2,10 +2,10 @@
 TempoCore includes the `TempoTime` and `TempoScripting` modules, as well as utilities and other core features most any simulation application will need.
 
 ## Time
-Tempo supports two time modes: `Real Time` and `Fixed Step`.
+Tempo supports two time modes: `Wall Clock` and `Fixed Step`.
 
-### Real Time Mode
-In `Real Time` mode, time advances _strictly_ alongside the system clock. We actually override Unreal's engine time to do this, as it does not provide this guarrantee.
+### Wall Clock Mode
+In `Wall Clock` mode, time advances _strictly_ alongside the system clock. We actually override Unreal's engine time to do this, as it does not provide this guarrantee.
 
 ### Fixed Step Mode
 In `Fixed Step` mode, time advances by a fixed amount, which you can choose, every frame. We express this increment in terms of a whole number of simulated steps per second (like, 10 steps per second), as opposed to a floating point fraction of a second (like, 0.1 seconds per step), because we use a fixed-point representation for time (again, overriding the engine's time) because we want it to be exactly correct (no rounding or floating point errors here).
@@ -176,3 +176,32 @@ asynchronous context. Note that the service name does not appear anywhere in the
 Here we are prioritizing brevity of the Python API with a minor restriction in RPC naming: **RPC names must be unique within a project module.**
 
 Phew, simple right? Don't worry - there are plenty of examples of using `TempoScripting` throughout the rest of the Tempo plugins to help get you started. In fact, `TempoTime`'s `TimeService`, which is also in the `TempoCore` plugin, would be a great one to check out.
+
+## Tempo Core Services
+Tempo core includes services for managing the lifecycle of a simulation and controlling time.
+
+The Tempo core service includes RPCs for loading levels. There are cases where you may want to load a level and set some properties (learn more about setting properties at runtime in the [TempoWorld](https://github.com/tempo-sim/Tempo/tree/release/TempoWorld) README) on the Actors in that level _before_ the `BeginPlay` event has happened. For example, you may want to set a property that will be used _during_ `BeginPlay`. For this reason, the Tempo core service supports "deferred" level loads, where all of a level's Actors are loaded but BeginPlay` is not called yet. In a Python client, managing the lifecycle of a level could look like this:
+```
+import tempo.tempo_core as tc
+
+tc.load_level("MyLevel", deferred=True)
+# Set some properties on the Actors in MyLevel
+tc.finish_loading_level()
+# Do some great simulation
+# ...
+# All done
+tc.quit()
+```
+
+The Tempo time service includes RPCs for setting the time mode and simulation time step, as well as pausing, stepping, and playing time. In a python client, you could pause time, set the time mode to fixed step, set the simulation time step to 0.1s, and step the simulation in a loop like this:
+```
+import tempo.tempo_time as tt
+import TempoTime.Time_pb2 as Time
+
+tt.pause()
+tt.set_time_mode(Time.FIXED_STEP)
+tt.set_sim_steps_per_second(10)
+while True:
+  tt.step()
+  # Do some great simulation
+```
