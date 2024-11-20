@@ -40,11 +40,11 @@ using SetFloatArrayPropertyRequest = TempoWorld::SetFloatArrayPropertyRequest;
 
 FTransform ToUnrealTransform(const TempoScripting::Transform& Transform)
 {
-	const FVector Location = QuantityConverter<M2CM, R2L>::Convert(
+	const FVector Location = QuantityConverter<M2CM,R2L>::Convert(
 		FVector(Transform.location().x(),
 			Transform.location().y(),
 			Transform.location().z()));
-	const FRotator Rotation = QuantityConverter<Rad2Deg, R2L>::Convert(
+	const FRotator Rotation = QuantityConverter<Rad2Deg,R2L>::Convert(
 		FRotator(Transform.rotation().p(),
 			Transform.rotation().y(),
 			Transform.rotation().r()));
@@ -54,11 +54,11 @@ FTransform ToUnrealTransform(const TempoScripting::Transform& Transform)
 TempoScripting::Transform FromUnrealTransform(const FTransform& Transform)
 {
 	TempoScripting::Transform OutTransform;
-	const FVector OutLocation = QuantityConverter<CM2M, L2R>::Convert(Transform.GetLocation());
-	const FRotator OutRotation = QuantityConverter<Deg2Rad, L2R>::Convert(Transform.GetRotation().Rotator());
+	const FVector OutLocation = QuantityConverter<CM2M,L2R>::Convert(Transform.GetLocation());
+	const FRotator OutRotation = QuantityConverter<Deg2Rad,L2R>::Convert(Transform.GetRotation().Rotator());
 	OutTransform.mutable_location()->set_x(OutLocation.X);
-	OutTransform.mutable_location()->set_x(OutLocation.Y);
-	OutTransform.mutable_location()->set_x(OutLocation.Z);
+	OutTransform.mutable_location()->set_y(OutLocation.Y);
+	OutTransform.mutable_location()->set_z(OutLocation.Z);
 	OutTransform.mutable_rotation()->set_r(OutRotation.Roll);
 	OutTransform.mutable_rotation()->set_p(OutRotation.Pitch);
 	OutTransform.mutable_rotation()->set_y(OutRotation.Yaw);
