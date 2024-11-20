@@ -79,6 +79,11 @@ struct FMassTrafficLaneChangeRecommendation
 	
 bool TrunkVehicleLaneCheck(const FZoneGraphTrafficLaneData* TrafficLaneData, const FMassTrafficVehicleControlFragment& VehicleControlFragment);
 
+int32 GetLaneChangePriority(
+	const FZoneGraphTrafficLaneData* TrafficLaneData,
+	const FMassTrafficVehicleControlFragment& VehicleControlFragment,
+	const FZoneGraphStorage& ZoneGraphStorage);
+
 	
 FORCEINLINE bool AreVehiclesCurrentlyApproachingLaneFromIntersection(const FZoneGraphTrafficLaneData& TrafficLaneData) 
 {
@@ -199,6 +204,7 @@ void ChooseLaneForLaneChange(
 	const FMassTrafficVehicleControlFragment& VehicleControlFragment,
 	const FRandomStream& RandomStream,
 	const UMassTrafficSettings& MassTrafficSettings,
+	const FZoneGraphStorage& ZoneGraphStorage,
 	FMassTrafficLaneChangeRecommendation& OutRecommendation);
 
 bool CheckNextVehicle(const FMassEntityHandle Entity, const FMassEntityHandle NextEntity, const FMassEntityManager& EntityManager);

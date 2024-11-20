@@ -137,7 +137,7 @@ void UTempoSensorsROSBridgeSubsystem::UpdatePublishers()
 {
 	const TempoSensors::AvailableSensorsRequest Request;
 	TSet<FString> PossiblyStaleTopics = ROSNode->GetPublishedTopics();
-	ForEachSensor([this, &PossiblyStaleTopics](const ITempoSensorInterface* Sensor)
+	ForEachActiveSensor([this, &PossiblyStaleTopics](const ITempoSensorInterface* Sensor)
 	{
 		const FString OwnerName = Sensor->GetOwnerName();
 		const FString SensorName = Sensor->GetSensorName();

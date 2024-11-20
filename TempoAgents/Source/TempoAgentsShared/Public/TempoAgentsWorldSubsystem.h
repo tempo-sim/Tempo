@@ -15,7 +15,19 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Tempo Agents|World Subsystem|Traffic Controllers")
 	void SetupTrafficControllers();
 
+	UFUNCTION(BlueprintCallable, Category = "Tempo Agents|World Subsystem|Brightness Meter")
+	void SetupBrightnessMeter();
+
 	virtual void OnWorldBeginPlay(UWorld& InWorld) override;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo Agents|World Subsystem|Brightness Meter")
+	float BrightnessMeterLongitudinalOffset = 300.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo Agents|World Subsystem|Brightness Meter")
+	float BrightnessMeterLateralOffset = 500.0f;
+	
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo Agents|World Subsystem|Brightness Meter")
+	float BrightnessMeterVerticalOffset = 140.0f;
 	
 protected:
 	

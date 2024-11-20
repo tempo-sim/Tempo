@@ -9,7 +9,7 @@
 class FTempoScriptingServer;
 
 UINTERFACE()
-class UTempoScriptable : public UInterface
+class TEMPOSCRIPTING_API UTempoScriptable : public UInterface
 {
 	GENERATED_BODY()
 };
@@ -22,5 +22,5 @@ class TEMPOSCRIPTING_API ITempoScriptable
 	GENERATED_BODY()
 
 public:
-	virtual void RegisterScriptingServices(FTempoScriptingServer* ScriptingServer) = 0;
+	virtual void RegisterScriptingServices(FTempoScriptingServer& ScriptingServer) = 0;
 };

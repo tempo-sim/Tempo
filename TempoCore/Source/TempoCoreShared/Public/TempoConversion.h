@@ -31,12 +31,8 @@ template <> struct ConversionFactor<Deg2Rad> { static constexpr double value = U
 template <EUnitConversion UnitConversion = UC_NONE, EHandednessConversion HandednessConversion = HC_NONE>
 struct QuantityConverter
 {
-    static FVector2D Convert(const FVector2D& In)
-    {
-        return QuantityConverter<UC_NONE, HandednessConversion>::Convert(QuantityConverter<UnitConversion, HC_NONE>::Convert(In));
-    }
-
-    static FVector Convert(const FVector& In)
+    template <typename T>
+    static T Convert(const T& In)
     {
         return QuantityConverter<UC_NONE, HandednessConversion>::Convert(QuantityConverter<UnitConversion, HC_NONE>::Convert(In));
     }

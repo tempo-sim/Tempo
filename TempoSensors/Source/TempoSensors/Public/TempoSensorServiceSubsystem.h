@@ -2,9 +2,9 @@
 
 #pragma once
 
-#include "TempoWorldSubsystem.h"
 #include "TempoScriptable.h"
 #include "TempoScriptingServer.h"
+#include "TempoSubsystems.h"
 
 #include "CoreMinimal.h"
 
@@ -37,15 +37,16 @@ class TEMPOSENSORS_API UTempoSensorServiceSubsystem : public UTempoGameWorldSubs
 	GENERATED_BODY()
 	
 public:
-	virtual void RegisterScriptingServices(FTempoScriptingServer* ScriptingServer) override;
+	virtual void RegisterScriptingServices(FTempoScriptingServer& ScriptingServer) override;
 
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 
+	virtual void Deinitialize() override;
+
 	virtual void OnWorldTickStart(UWorld* World, ELevelTick TickType, float DeltaSeconds);
 
-protected:
-	void OnRenderFrameCompleted() const;
-	
+	void ForEachActiveSensor(const TFunction<void(class ITempoSensorInterface*)>& Callback) const;
+
 	void GetAvailableSensors(const TempoSensors::AvailableSensorsRequest& Request, const TResponseDelegate<TempoSensors::AvailableSensorsResponse>& ResponseContinuation) const;
 
 	void StreamColorImages(const TempoCamera::ColorImageRequest& Request, const TResponseDelegate<TempoCamera::ColorImage>& ResponseContinuation) const;
@@ -54,7 +55,8 @@ protected:
 
 	void StreamLabelImages(const TempoCamera::LabelImageRequest& Request, const TResponseDelegate<TempoCamera::LabelImage>& ResponseContinuation) const;
 
-	void ForEachSensor(const TFunction<void(class ITempoSensorInterface*)>& Callback) const;
+protected:
+	void OnRenderFrameCompleted() const;
 
 	template <typename RequestType, typename ResponseType>
 	void RequestImages(const RequestType& Request, const TResponseDelegate<ResponseType>& ResponseContinuation) const;

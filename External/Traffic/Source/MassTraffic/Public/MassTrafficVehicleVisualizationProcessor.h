@@ -4,6 +4,7 @@
 
 #include "MassRepresentationProcessor.h"
 #include "MassTrafficFragments.h"
+#include "MassTrafficProcessorBase.h"
 
 #include "MassTrafficVehicleVisualizationProcessor.generated.h"
 
@@ -115,7 +116,7 @@ public:
  * Custom visualization updates for TrafficVehicle
  */
  UCLASS()
-class MASSTRAFFIC_API UMassTrafficVehicleUpdateCustomVisualizationProcessor : public UMassProcessor
+class MASSTRAFFIC_API UMassTrafficVehicleUpdateCustomVisualizationProcessor : public UMassTrafficProcessorBase
 {
 	GENERATED_BODY()
 

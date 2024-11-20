@@ -7,24 +7,27 @@
 #include "Subsystems/WorldSubsystem.h"
 
 #include "CoreMinimal.h"
-#include "TempoWorldSubsystem.h"
+#include "TempoSubsystems.h"
 #include "TempoMapQuery/MapQueries.pb.h"
 
 #include "TempoMapQueryServiceSubsystem.generated.h"
 
 UCLASS()
-class TEMPOMAPQUERY_API UTempoMapQueryServiceSubsystem : public UTempoTickableWorldSubsystem, public ITempoScriptable
+class TEMPOMAPQUERY_API UTempoMapQueryServiceSubsystem : public UTempoTickableGameWorldSubsystem, public ITempoScriptable
 {
 	GENERATED_BODY()
 
 public:
-	virtual void RegisterScriptingServices(FTempoScriptingServer* ScriptingServer) override;
+	virtual void RegisterScriptingServices(FTempoScriptingServer& ScriptingServer) override;
+
+	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+
+	virtual void Deinitialize() override;
 	
 	virtual void Tick(float DeltaTime) override;
 
 	virtual TStatId GetStatId() const override;
-	
-protected:
+
 	void GetLaneData(const TempoMapQuery::LaneDataRequest& Request, const TResponseDelegate<TempoMapQuery::LaneDataResponse>& ResponseContinuation) const;
 
 	void GetLaneAccessibility(const TempoMapQuery::LaneAccessibilityRequest& Request, const TResponseDelegate<TempoMapQuery::LaneAccessibilityResponse>& ResponseContinuation) const;
@@ -33,6 +36,7 @@ protected:
 
 	TempoMapQuery::LaneAccessibility GetLaneAccessibility(const int32 LaneId) const;
 	
+protected:	
 	struct FLaneAccessibilityInfo
 	{
 		FLaneAccessibilityInfo() = default;

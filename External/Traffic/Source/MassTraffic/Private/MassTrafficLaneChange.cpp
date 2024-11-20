@@ -28,6 +28,35 @@ bool TrunkVehicleLaneCheck(
 		(TrafficLaneData->ConstData.bIsTrunkLane || !VehicleControlFragment.bRestrictedToTrunkLanesOnly);
 }
 
+int32 GetLaneChangePriority(
+	const FZoneGraphTrafficLaneData* TrafficLaneData,
+	const FMassTrafficVehicleControlFragment& VehicleControlFragment,
+	const FZoneGraphStorage& ZoneGraphStorage)
+{
+	if (TrafficLaneData == nullptr)
+	{
+		return INDEX_NONE;
+	}
+	
+	FZoneGraphTagMask LaneTagMask;
+	if (!UE::ZoneGraph::Query::GetLaneTags(ZoneGraphStorage, TrafficLaneData->LaneHandle, LaneTagMask))
+	{
+		return INDEX_NONE;
+	}
+	
+	for (int32 PriorityIndex = 0; PriorityIndex < VehicleControlFragment.LaneChangePriorityFilters.Num(); ++PriorityIndex)
+	{
+		const FZoneGraphTagFilter& LaneChangePriorityFilter = VehicleControlFragment.LaneChangePriorityFilters[PriorityIndex];
+		
+		if (LaneChangePriorityFilter.Pass(LaneTagMask))
+		{
+			return VehicleControlFragment.LaneChangePriorityFilters.Num() - 1 - PriorityIndex;
+		}
+	}
+
+	return INDEX_NONE;
+}
+
 	
 void CanVehicleLaneChangeToFitOnChosenLane(
 	const float DistanceAlongLane_Chosen, const float LaneLength_Chosen, const float DeltaDistanceAlongLaneForLaneChange_Chosen,
@@ -532,6 +561,7 @@ void ChooseLaneForLaneChange(
 	const FZoneGraphTrafficLaneData* TrafficLaneData_Initial, const FAgentRadiusFragment& AgentRadiusFragment, const FMassTrafficRandomFractionFragment& RandomFractionFragment, const FMassTrafficVehicleControlFragment& VehicleControlFragment,
 	const FRandomStream& RandomStream,
 	const UMassTrafficSettings& MassTrafficSettings,
+	const FZoneGraphStorage& ZoneGraphStorage,
 	FMassTrafficLaneChangeRecommendation& OutRecommendation
 )
 {
@@ -585,6 +615,30 @@ void ChooseLaneForLaneChange(
 	CandidateTrafficLaneData_Right = FilterLaneForLaneChangeSuitability(
 		CandidateTrafficLaneData_Right, *TrafficLaneData_Initial, VehicleControlFragment, SpaceTakenByVehicleOnLane);
 
+	// Get lane change priority.
+	const int32 LeftLaneChangePriority = GetLaneChangePriority(CandidateTrafficLaneData_Left, VehicleControlFragment, ZoneGraphStorage);
+	const int32 RightLaneChangePriority = GetLaneChangePriority(CandidateTrafficLaneData_Right, VehicleControlFragment, ZoneGraphStorage);
+
+	const bool bHasLeftLaneChangePriority = LeftLaneChangePriority >= 0;
+	const bool bHasRightLaneChangePriority = RightLaneChangePriority >= 0;
+
+	// Filter lanes based on lane change priority.
+	if (bHasLeftLaneChangePriority && bHasRightLaneChangePriority)
+	{
+		// If both candidate lanes have a valid lane change priority value, keep the one with the higher priority.
+		// If they have equal priority, then keep both.  In this case, it will fall to the density logic
+		// to decide between them, then finally a random choice.
+		CandidateTrafficLaneData_Left = LeftLaneChangePriority >= RightLaneChangePriority ? CandidateTrafficLaneData_Left : nullptr;
+		CandidateTrafficLaneData_Right = RightLaneChangePriority >= LeftLaneChangePriority ? CandidateTrafficLaneData_Right : nullptr;
+	}
+	else
+	{
+		// Remove candidate lanes as an option, if they don't have a valid lane change priority value.
+		// If this is the case, it means they are not compatible with any of the LaneChangePriorityFilters
+		// on the VehicleControlFragment.
+		CandidateTrafficLaneData_Left = bHasLeftLaneChangePriority ? CandidateTrafficLaneData_Left : nullptr;
+		CandidateTrafficLaneData_Right = bHasRightLaneChangePriority ? CandidateTrafficLaneData_Right : nullptr;
+	}
 	
 	// If the lane is transversing (has replaced merging and splitting) lanes, then this car should be more likely
 	// to lane change. (We can choose it now.)

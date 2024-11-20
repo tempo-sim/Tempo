@@ -13,19 +13,34 @@
 
 #include "EngineUtils.h"
 
-using MapQueryService = TempoMapQuery::MapQueryService::AsyncService;
+using MapQueryService = TempoMapQuery::MapQueryService;
+using MapQueryAsyncService = TempoMapQuery::MapQueryService::AsyncService;
 using LaneDataRequest = TempoMapQuery::LaneDataRequest;
 using LaneDataResponse = TempoMapQuery::LaneDataResponse;
 using LaneAccessibilityRequest = TempoMapQuery::LaneAccessibilityRequest;
 using LaneAccessibilityResponse = TempoMapQuery::LaneAccessibilityResponse;
 
-void UTempoMapQueryServiceSubsystem::RegisterScriptingServices(FTempoScriptingServer* ScriptingServer)
+void UTempoMapQueryServiceSubsystem::RegisterScriptingServices(FTempoScriptingServer& ScriptingServer)
 {
-	ScriptingServer->RegisterService<MapQueryService>(
-		TSimpleRequestHandler<MapQueryService, LaneDataRequest, LaneDataResponse>(&MapQueryService::RequestGetLanes).BindUObject(this, &UTempoMapQueryServiceSubsystem::GetLaneData),
-		TSimpleRequestHandler<MapQueryService, LaneAccessibilityRequest, LaneAccessibilityResponse>(&MapQueryService::RequestGetLaneAccessibility).BindUObject(this, &UTempoMapQueryServiceSubsystem::GetLaneAccessibility),
-		TStreamingRequestHandler<MapQueryService, LaneAccessibilityRequest, LaneAccessibilityResponse>(&MapQueryService::RequestStreamLaneAccessibility).BindUObject(this, &UTempoMapQueryServiceSubsystem::StreamLaneAccessibility)
+	ScriptingServer.RegisterService<MapQueryService>(
+		SimpleRequestHandler(&MapQueryAsyncService::RequestGetLanes, &UTempoMapQueryServiceSubsystem::GetLaneData),
+		SimpleRequestHandler(&MapQueryAsyncService::RequestGetLaneAccessibility, &UTempoMapQueryServiceSubsystem::GetLaneAccessibility),
+		StreamingRequestHandler(&MapQueryAsyncService::RequestStreamLaneAccessibility, &UTempoMapQueryServiceSubsystem::StreamLaneAccessibility)
 		);
+}
+
+void UTempoMapQueryServiceSubsystem::Initialize(FSubsystemCollectionBase& Collection)
+{
+	Super::Initialize(Collection);
+
+	FTempoScriptingServer::Get().ActivateService<MapQueryService>(this);
+}
+
+void UTempoMapQueryServiceSubsystem::Deinitialize()
+{
+	Super::Deinitialize();
+
+	FTempoScriptingServer::Get().DeactivateService<MapQueryService>();
 }
 
 TempoMapQuery::LaneRelationship LaneRelationshipFromLinkType(const EZoneLaneLinkType& LinkType)
