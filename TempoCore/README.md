@@ -81,9 +81,12 @@ service MyService {
 }
 ```
 
-### Registering Services
-The `TempoScripting` module hosts a single "scripting server". To connect your RPCs in C++ you implement `ITempoScriptable`.
-For example, we could register handlers for the above service like this:
+### Registering and Activating Services
+The `TempoScripting` module hosts a single "scripting server". To connect your RPCs in C++ you must:
+- Implement `ITempoScriptable`, specifically its `RegisterScriptingServices` to construct and register handlers for your service
+- Call `FTempoScriptingServer::ActivateService` when you want your service to be available
+- Call `FTempoScriptingServer::DeactivateService` when you want your service to be unavailable
+For example, we could register handlers and activate/deactivate the above service like this:
 ```
 // MyScriptableActor.h
 
@@ -112,6 +115,10 @@ class MYMODULE_API AMyScriptableActor : public AActor, public ITempoScriptable
 public:
 	virtual void RegisterScriptingServices(UTempoScriptingServer* ScriptingServer) override;
 
+        virtual void BeginPlay() override;
+
+        virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
 private:
 	grpc::Status Play(const MyModule::OptionalCustomPackage::MyRequest& Request, ResponseContinuationType<MyModule::OptionalCustomPackage::MyResponse>& ResponseContinuation) const;
 };
@@ -125,16 +132,31 @@ private:
 
 #include "MyModule/RelativePath/MyProtoFile.grpc.pb.h";
 
-using MyService = MyModule::OptionalCustomPackage::MyService::AsyncService;
+using MyService = MyModule::OptionalCustomPackage::MyService;
+using MyServiceAsync = MyModule::OptionalCustomPackage::MyService::AsyncService;
 using MyRequest = MyModule::OptionalCustomPackage::MyRequest;
 using MyResponse = MyModule::OptionalCustomPackage::MyResponse;
 
-void AMyScriptableActor::RegisterScriptingServices(UScriptingServer* ScriptingServer)
+void AMyScriptableActor::RegisterScriptingServices(UScriptingServer& ScriptingServer)
 {
-   ScriptingServer->RegisterService<MyService>(
-        // TStreamingRequestHandler can handle streaming RPCs with otherwise-idential syntax.
-        TSimpleRequestHandler<MyService, MyRequest, MyResponse>(&AMyScriptableActor::RequestMyRPC).BindUObject(this, &AMyScriptableActor::HandleMyRequest)
+   ScriptingServer.RegisterService<MyService>(
+        // StreamingRequestHandler can construct a handler for streaming RPCs with otherwise-idential syntax.
+        SimpleRequestHandler(&MyServiceAsync::RequestMyRPC, &AMyScriptableActor::HandleMyRequest)
     );
+}
+
+void AMyScriptableActor::BeginPlay()
+{
+   Super::BeginPlay();
+
+   FTempoScriptingServer::Get().ActivateService<MyService>(this);
+}
+
+void AMyScriptableActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+   Super::EndPlay(EndPlayReason);
+
+   FTempoScriptingServer::Get().DeactivateService<MyService>();
 }
 
 grpc::Status AMyScriptableActor::HandleMyRequest(const MyRequest& Request, ResponseContinuationType<MyResponse>& ResponseContinuation)
@@ -145,7 +167,11 @@ grpc::Status AMyScriptableActor::HandleMyRequest(const MyRequest& Request, Respo
     ResponseContinuation(Response, grpc::Status_OK);
 }
 ```
-You should include a TSimpleRequestHandler or TStreamingRequestHandler for every RPC in your service. You may not bind multiple handlers to one RPC.
+You should include a SimpleRequestHandler or StreamingRequestHandler for every RPC in your service. You may not bind multiple handlers to one RPC.
+
+Currently, services can only be registered or activated from UObjects (for example Actors, Components, or Subsystems).
+
+Activating the same service on multiple objects simultaneously will result in an error.
 
 ### Using the Python API
 Tempo automatically generates both the Python classes for the messages and services in your Protobuf files *and* a Python wrapper library to make 
@@ -171,11 +197,15 @@ t_mm.my_rpc(some_request=3)
 # Asynchronous version
 await t_mm.my_rpc(some_request=3)
 ```
-The synchronous and asynchronous wrappers have exactly the same signature. The correct one is deduced automatically based on whether it is called from a synchronous or
-asynchronous context. Note that the service name does not appear anywhere in the signatures (nor does the file name or any optional package name).
+The synchronous and asynchronous wrappers have exactly the same signature. The correct one is deduced automatically based on whether it is called from a synchronous or asynchronous context.
+
+> [!Note]
+> The Tempo Python API works in iPython and Jupyter notebooks. However, all code in a Jupyter notebook runs in an `async` context, so you must always use the asynchronous versions of the Tempo methods (e.g. `await t_mm.my_rpc`) in this context.
+
+Note that the service name does not appear anywhere in the signatures (nor does the file name or any optional package name).
 Here we are prioritizing brevity of the Python API with a minor restriction in RPC naming: **RPC names must be unique within a project module.**
 
-Phew, simple right? Don't worry - there are plenty of examples of using `TempoScripting` throughout the rest of the Tempo plugins to help get you started. In fact, `TempoTime`'s `TimeService`, which is also in the `TempoCore` plugin, would be a great one to check out.
+Phew, simple right? Don't worry - there are plenty of examples of using `TempoScripting` in `TempoCore` and the rest of the Tempo plugins to help get you started.
 
 ## Tempo Core Services
 Tempo core includes services for managing the lifecycle of a simulation and controlling time.
@@ -204,4 +234,35 @@ tt.set_sim_steps_per_second(10)
 while True:
   tt.step()
   # Do some great simulation
+```
+
+## Setting the Server Address
+By default a Tempo client (Python program) will try to connect to a Tempo server (Unreal Editor or packaged binary using Tempo) on the same machine (`localhost`), at port 10001.
+
+However, the client and server need not be on the same machine. In python, you can set the server address like this:
+```
+import tempo
+tempo.set_server(address="my_server_ip")
+
+# Or in an async context (including Jupyter notebooks):
+await tempo.set_server(address="my_server_ip")
+```
+
+You can also run multiple Tempo servers on the same machine by setting a non-default scripting server port through the project settings or by specifying the `ScriptingPort` command line argument when running UnrealEditor or the packaged binary. For example:
+```
+$UNREAL_ENGINE_PATH/Engine/Binaries/<PLATFORM>/UnrealEditor -ScriptingPort=10002
+```
+or 
+```
+MyGame.sh/.exe/.app -ScriptingPort=10002
+```
+The command line value takes precedence over project settings, until project settings are modified during an Editor session.
+
+You can tell a Python client which server to connect to like this:
+```
+import tempo
+tempo.set_server(port=10002)
+
+# Or in an async context (including Jupyter notebooks):
+await tempo.set_server(port=10002)
 ```
