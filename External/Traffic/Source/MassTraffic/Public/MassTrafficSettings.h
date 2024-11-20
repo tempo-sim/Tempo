@@ -191,10 +191,6 @@ public:
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Config, Category="Speed|Stopping")
 	float StopSignBrakingTime = 4.0f;
 
-	/** Maximum vehicle speed that can be stopped quickly (MpH.) */ 
-	UPROPERTY(EditAnywhere, Config, Category="Vehicles")
-	float MaxQuickStopSpeedMPH = 5.0f;
-
 	/**
 	 * Target speed along the CurrentLane is determined by looking at the curvature ahead of the 
 	 * current closest point on the spline, and slowing to turn. The distance ahead is determined by 
@@ -319,6 +315,18 @@ public:
 	UPROPERTY(EditAnywhere, Config, Category="Obstacle Avoidance")
 	FVector2D MinimumDistanceToObstacleRange = { 80.0f, 300.0f };
 
+	/** Maximum vehicle speed that can be stopped quickly (MpH.) */ 
+	UPROPERTY(EditAnywhere, Config, Category="Vehicles")
+	float MaxQuickStopSpeedMPH = 5.0f;
+
+	// Environmental brightness threshold [0..1] below which vehicles will turn *on* their headlights.
+	UPROPERTY(EditAnywhere, Config, Category="Vehicles")
+	float VehicleTurnOnHeadlightsBrightnessThreshold = 0.4f;
+
+	// Environmental brightness threshold [0..1] above which vehicles will turn *off* their headlights.
+	UPROPERTY(EditAnywhere, Config, Category="Vehicles")
+	float VehicleTurnOffHeadlightsBrightnessThreshold = 0.5f;
+
 	/** How long a yellow light lasts. */
 	UPROPERTY(EditAnywhere, Config, Category="Intersections|Durations|Standard")
 	float StandardTrafficPrepareToStopSeconds = 2.0f;
@@ -349,101 +357,101 @@ public:
 	float StopSignPedestrianLaneOpenProbability = 0.2f;
 
 	// Lane change mode.
-	UPROPERTY(EditAnywhere, Category="Lane Changing")
+	UPROPERTY(EditAnywhere, Config, Category="Lane Changing")
 	EMassTrafficLaneChangeMode LaneChangeMode = EMassTrafficLaneChangeMode::On;
 
 	// Min seconds until next lane change attempt.
-	UPROPERTY(EditAnywhere, Category="Lane Changing")
+	UPROPERTY(EditAnywhere, Config, Category="Lane Changing")
 	float MinSecondsUntilLaneChangeDecision = 30.0f;
 
 	// Max seconds until next lane change attempt.
-	UPROPERTY(EditAnywhere, Category="Lane Changing")
+	UPROPERTY(EditAnywhere, Config, Category="Lane Changing")
 	float MaxSecondsUntilLaneChangeDecision = 60.0f;
 
 	// Base seconds taken to execute a lane change.
 	// Number of seconds a particular vehicle takes to execute a lane change is calculated as -
 	// BaseSecondsToExecuteLaneChange + AdditionalSecondsToExecuteLaneChangePerUnitOfVehicleLength * VehicleLengthCM
 	// (VehicleLengthCM is twice the vehicle's radius in CM.)
-	UPROPERTY(EditAnywhere, Category="Lane Changing")
+	UPROPERTY(EditAnywhere, Config, Category="Lane Changing")
 	float BaseSecondsToExecuteLaneChange = 3.0f;
 
 	// Additional seconds taken to execute a lane change - seconds per vehicle length (CM.)
 	// Number of seconds a particular vehicle takes to execute a lane change is calculated as -
 	// BaseSecondsToExecuteLaneChange + AdditionalSecondsToExecuteLaneChangePerUnitOfVehicleLength * VehicleLengthCM
 	// (VehicleLengthCM is twice the vehicle's radius in CM.)
-	UPROPERTY(EditAnywhere, Category="Lane Changing")
+	UPROPERTY(EditAnywhere, Config, Category="Lane Changing")
 	float AdditionalSecondsToExecuteLaneChangePerUnitOfVehicleLength = 0.0015f;
 
 	// How many seconds vehicles should wait before retrying an unsuccessful lane change attempt.
-	UPROPERTY(EditAnywhere, Category="Lane Changing")
+	UPROPERTY(EditAnywhere, Config, Category="Lane Changing")
 	float LaneChangeRetrySeconds = 5.0f;
 
 	// How much lane space a vehicle needs to execute a lane change, as a factor of a vehicle's length.
 	// The longer the vehicle, the more space (and time) it needs to change lanes.
-	UPROPERTY(EditAnywhere, Category="Lane Changing")
+	UPROPERTY(EditAnywhere, Config, Category="Lane Changing")
 	float MinLaneChangeDistanceVehicleLengthScale = 5.0f;
 
 	// How much more to scale search distances for points on adjacent lanes, to help cope with possible issues with 
 	// low lane tessellation and/or higher lane curvature.
-	UPROPERTY(EditAnywhere, Category="Lane Changing")
+	UPROPERTY(EditAnywhere, Config, Category="Lane Changing")
 	float LaneChangeSearchDistanceScale = 1.5f;
 
 	// How much to spread transverse lanes changes, as a fraction of the lane length measured from the
 	// start of the lane.
-	UPROPERTY(EditAnywhere, Category="Lane Changing")
+	UPROPERTY(EditAnywhere, Config, Category="Lane Changing")
 	float LaneChangeTransverseSpreadFromStartOfLaneFraction = 0.4f;
 
 	// Max length of accessories on sides of car - objects like side-mirrors (CM). Helps when trying to pass another
 	// vehicle.
-	UPROPERTY(EditAnywhere, Category="Lane Changing")
+	UPROPERTY(EditAnywhere, Config, Category="Lane Changing")
 	float LaneChangeMaxSideAccessoryLength = 10.0f;
 
 	// Normalized distance *potentially yielding* vehicle is allowed to travel through *left turn* lanes
 	// before it is no longer required to *start* yielding.
-	UPROPERTY(EditAnywhere, Category="Yield Behavior")
+	UPROPERTY(EditAnywhere, Config, Category="Yield Behavior")
 	float NormalizedYieldCutoffLaneDistance_Left = 0.1f;
 
 	// Normalized distance *potentially yielding* vehicle is allowed to travel through *right turn* lanes
 	// before it is no longer required to *start* yielding.
-	UPROPERTY(EditAnywhere, Category="Yield Behavior")
+	UPROPERTY(EditAnywhere, Config, Category="Yield Behavior")
 	float NormalizedYieldCutoffLaneDistance_Right = 0.1f;
 
 	// Normalized distance *potentially yielding* vehicle is allowed to travel through *through/straight* lanes
 	// before it is no longer required to *start* yielding.
-	UPROPERTY(EditAnywhere, Category="Yield Behavior")
+	UPROPERTY(EditAnywhere, Config, Category="Yield Behavior")
 	float NormalizedYieldCutoffLaneDistance_Straight = 0.2f;
 	
 	// Normalized distance *other* vehicle needs to travel through *left turn* lanes
 	// in order to resume motion after yielding.
-	UPROPERTY(EditAnywhere, Category="Yield Behavior")
+	UPROPERTY(EditAnywhere, Config, Category="Yield Behavior")
 	float NormalizedYieldResumeLaneDistance_Left = 0.8f;
 
 	// Normalized distance *other* vehicle needs to travel through *right turn* lanes
 	// in order to resume motion after yielding.
-	UPROPERTY(EditAnywhere, Category="Yield Behavior")
+	UPROPERTY(EditAnywhere, Config, Category="Yield Behavior")
 	float NormalizedYieldResumeLaneDistance_Right = 0.9f;
 
 	// Normalized distance *other* vehicle needs to travel through *through/straight* lanes
 	// in order to resume motion after yielding.
-	UPROPERTY(EditAnywhere, Category="Yield Behavior")
+	UPROPERTY(EditAnywhere, Config, Category="Yield Behavior")
 	float NormalizedYieldResumeLaneDistance_Straight = 0.4f;
 
 	// Max distance from the end of the lane (leading up to an intersection)
 	// within which a vehicle is allowed to start a pre-emptive yield if other conditions apply.
-	UPROPERTY(EditAnywhere, Category="Yield Behavior")
+	UPROPERTY(EditAnywhere, Config, Category="Yield Behavior")
 	float MaxDistanceFromEndOfLaneForPreemptiveYield = 500.0f;
 
 	// Min distance to allow a vehicle performing a pre-emptive yield to "roll-out" into the intersection.
-	UPROPERTY(EditAnywhere, Category="Yield Behavior")
+	UPROPERTY(EditAnywhere, Config, Category="Yield Behavior")
 	float MinPreemptiveYieldAtIntersectionRolloutDistance = 200.0f;
 
 	// Max distance to allow a vehicle performing a pre-emptive yield to "roll-out" into the intersection.
-	UPROPERTY(EditAnywhere, Category="Yield Behavior")
+	UPROPERTY(EditAnywhere, Config, Category="Yield Behavior")
 	float MaxPreemptiveYieldAtIntersectionRolloutDistance = 400.0f;
 
 	// Time (in seconds) to wait for the *other* vehicle to enter their lane
 	// after the yielding vehicle "rolled-out" the allowed distance during a pre-emptive yield.
-	UPROPERTY(EditAnywhere, Category="Yield Behavior")
+	UPROPERTY(EditAnywhere, Config, Category="Yield Behavior")
 	float MaxTimeToWaitForVehicleToEnterTheirLaneDuringPreemptiveYield = 2.0f;
 
 	// @todo Rename Density Management to Overseer

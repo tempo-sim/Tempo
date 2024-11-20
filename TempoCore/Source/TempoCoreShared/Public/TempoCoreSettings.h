@@ -9,20 +9,20 @@
 
 #include "TempoCoreSettings.generated.h"
 
-DECLARE_MULTICAST_DELEGATE(FTempoCoreTimeSettingsChanged);
-
 UCLASS(Config=Game)
 class TEMPOCORESHARED_API UTempoCoreSettings : public UDeveloperSettings
 {
 	GENERATED_BODY()
 
 public:
+	// Allow command-line overrides
+	virtual void PostInitProperties() override;
+	
 	// Time Settings.
 	void SetTimeMode(ETimeMode TimeModeIn);
 	void SetSimulatedStepsPerSecond(int32 SimulatedStepsPerSecondIn);
 	ETimeMode GetTimeMode() const { return TimeMode; }
 	int32 GetSimulatedStepsPerSecond() const { return SimulatedStepsPerSecond; }
-	FTempoCoreTimeSettingsChanged TempoCoreTimeSettingsChangedEvent;
 
 	// Scripting Settings.
 	int32 GetScriptingPort() const { return ScriptingPort; }
@@ -30,8 +30,11 @@ public:
 	int32 GetMaxEventProcessingTime() const { return MaxEventProcessingTimeMicroSeconds; }
 	int32 GetMaxEventWaitTime() const { return MaxEventWaitTimeNanoSeconds; }
 
-#if WITH_EDITOR
-	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
+#if WITH_EDITORONLY_DATA
+	static FName GetSimulatedStepsPerSecondMemberName() { return GET_MEMBER_NAME_CHECKED(UTempoCoreSettings, SimulatedStepsPerSecond); }
+	static FName GetTimeModeMemberName() { return GET_MEMBER_NAME_CHECKED(UTempoCoreSettings, TimeMode); }
+	static FName GetScriptingPortMemberName() { return GET_MEMBER_NAME_CHECKED(UTempoCoreSettings, ScriptingPort); }
+	static FName GetScriptingCompressionLevelMemberName() { return GET_MEMBER_NAME_CHECKED(UTempoCoreSettings, ScriptingCompressionLevel); }
 #endif
 	
 private:

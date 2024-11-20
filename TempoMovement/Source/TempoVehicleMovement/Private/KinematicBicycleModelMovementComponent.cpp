@@ -33,10 +33,10 @@ void UKinematicBicycleModelMovementComponent::TickComponent(float DeltaTime, ELe
 	LinearVelocity += DeltaVelocity;
 	const float Beta = FMath::DegreesToRadians(SteeringAngle + HeadingAngle);
 	Velocity = LinearVelocity * FVector(FMath::Cos(Beta), FMath::Sin(Beta), 0.0);
-	const float HeadingDot = FMath::RadiansToDegrees(LinearVelocity * FMath::Sin(FMath::DegreesToRadians(SteeringAngle)) / Wheelbase);
+	AngularVelocity = FMath::RadiansToDegrees(LinearVelocity * FMath::Sin(FMath::DegreesToRadians(SteeringAngle)) / Wheelbase);
 
 	GetOwner()->AddActorWorldOffset(FVector(DeltaTime * Velocity));
-	GetOwner()->AddActorWorldRotation(FRotator(0.0, DeltaTime * HeadingDot, 0.0));
+	GetOwner()->AddActorWorldRotation(FRotator(0.0, DeltaTime * AngularVelocity, 0.0));
 }
 
 void UKinematicBicycleModelMovementComponent::HandleDrivingCommand(const FDrivingCommand& Command)

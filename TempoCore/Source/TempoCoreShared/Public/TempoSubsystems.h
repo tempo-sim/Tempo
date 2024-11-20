@@ -5,7 +5,18 @@
 #include "CoreMinimal.h"
 #include "Subsystems/WorldSubsystem.h"
 
-#include "TempoWorldSubsystem.generated.h"
+#include "TempoSubsystems.generated.h"
+
+// A GameInstanceSubsystem that will only be created if it is the most-derived instance of itself.
+UCLASS(Abstract)
+class TEMPOCORESHARED_API UTempoGameInstanceSubsystem : public UGameInstanceSubsystem
+{
+	GENERATED_BODY()
+
+public:
+	virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
+};
+
 
 // A WorldSubsystem that will only be created if it is the most-derived instance of itself.
 UCLASS(Abstract)

@@ -4,7 +4,7 @@
 
 #include "TempoScriptable.h"
 #include "TempoScriptingServer.h"
-#include "TempoWorldSubsystem.h"
+#include "TempoSubsystems.h"
 
 #include "CoreMinimal.h"
 
@@ -28,9 +28,12 @@ class TEMPOTIME_API UTempoTimeServiceSubsystem : public UTempoGameWorldSubsystem
 	GENERATED_BODY()
 
 public:
-	virtual void RegisterScriptingServices(FTempoScriptingServer* ScriptingServer) override;
+	virtual void RegisterScriptingServices(FTempoScriptingServer& ScriptingServer) override;
 
-protected:
+	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+
+	virtual void Deinitialize() override;
+
 	void SetTimeMode(const TempoTime::TimeModeRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const;
 
 	void SetSimStepsPerSecond(const TempoTime::SetSimStepsPerSecondRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const;

@@ -2,7 +2,7 @@
 
 using UnrealBuildTool;
 
-public class TempoWorld : ModuleRules
+public class TempoWorld : TempoModuleRules
 {
     public TempoWorld(ReadOnlyTargetRules Target) : base(Target)
     {
@@ -11,15 +11,27 @@ public class TempoWorld : ModuleRules
         PublicDependencyModuleNames.AddRange(
             new string[]
             {
+                // Unreal
                 "Core",
+                // Tempo
+                "TempoCoreShared",
+                "TempoScripting",
             }
         );
 
         PrivateDependencyModuleNames.AddRange(
             new string[]
             {
+                // Unreal
                 "CoreUObject",
                 "Engine",
+                "MassActors",
+                "MassEntity",
+                "MassTraffic",
+                "StructUtils",
+                // Tempo
+                "TempoCore",
+                "TempoMovementShared",
             }
         );
     }

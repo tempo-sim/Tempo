@@ -17,10 +17,12 @@ FTempoScriptingServer::FTempoScriptingServer()
 	{
 		if (UTempoCoreUtils::IsGameWorld(World))
 		{
-			OnWorldBeginPlayHandle = World->OnWorldBeginPlay.AddRaw(this, &FTempoScriptingServer::Reinitialize);
 			// Scripting has nothing to do with movie scene sequences, but this event fires in exactly the right conditions:
 			// After world time has been updated for the current frame, before Actor ticks have begun, and even when paused.
-			OnMovieSceneSequenceTickHandle = World->AddMovieSceneSequenceTickHandler(FOnMovieSceneSequenceTick::FDelegate::CreateRaw(this, &FTempoScriptingServer::TickInternal));
+			OnMovieSceneSequenceTickHandle = World->AddMovieSceneSequenceTickHandler(
+				FOnMovieSceneSequenceTick::FDelegate::CreateLambda([this](float){
+					TickInternal();
+				}));
 		}
 	});
 	OnPreWorldFinishDestroyHandle = FWorldDelegates::OnPreWorldFinishDestroy.AddLambda(
@@ -28,7 +30,8 @@ FTempoScriptingServer::FTempoScriptingServer()
 	{
 		if (UTempoCoreUtils::IsGameWorld(World))
 		{
-			Reinitialize();
+			// Tick one more time to give deactivated services a chance to flush their final messages
+			TickInternal();
 			World->OnWorldBeginPlay.Remove(OnWorldBeginPlayHandle);
 			World->RemoveMovieSceneSequenceTickHandler(OnMovieSceneSequenceTickHandle);
 			OnMovieSceneSequenceTickHandle.Reset();
@@ -36,20 +39,30 @@ FTempoScriptingServer::FTempoScriptingServer()
 	});
 
 #if WITH_EDITOR
-	FCoreUObjectDelegates::ReloadCompleteDelegate.AddLambda([this](EReloadCompleteReason)
+	GetMutableDefault<UTempoCoreSettings>()->OnSettingChanged().AddLambda([this](UObject* Object, struct FPropertyChangedEvent& Event)
 	{
-		Reinitialize();
+		if (Event.Property->GetName() == UTempoCoreSettings::GetScriptingPortMemberName() ||
+			Event.Property->GetName() == UTempoCoreSettings::GetScriptingCompressionLevelMemberName())
+		{
+			Reinitialize();
+		}
 	});
 #endif
 }
 
 FTempoScriptingServer::~FTempoScriptingServer()
 {
-	FCoreDelegates::OnPostEngineInit.Remove(OnPostEngineInitHandle);
 	FWorldDelegates::OnPostWorldInitialization.Remove(OnPostWorldInitializationHandle);
 	FWorldDelegates::OnPreWorldFinishDestroy.Remove(OnPreWorldFinishDestroyHandle);
 
 	Deinitialize();
+}
+
+FTempoScriptingServer& FTempoScriptingServer::Get()
+{
+	FTempoScriptingModule* TempoScriptingModule = FModuleManager::GetModulePtr<FTempoScriptingModule>(TEXT("TempoScripting"));
+	check(TempoScriptingModule);
+	return *TempoScriptingModule->ScriptingServer.Get();
 }
 
 grpc_compression_level CompressionLevelTogRPC(EScriptingCompressionLevel TempoCompressionLevel)
@@ -82,29 +95,46 @@ grpc_compression_level CompressionLevelTogRPC(EScriptingCompressionLevel TempoCo
 
 void FTempoScriptingServer::Initialize()
 {
-	for (TObjectIterator<UObject> ObjectIt; ObjectIt; ++ObjectIt)
+	TArray<UObject*> TempoScriptableObjects;
+	for (TObjectIterator<UObject> ObjectIt(RF_NoFlags); ObjectIt; ++ObjectIt)
 	{
 		UObject* Object = *ObjectIt;
-		if (!IsValid(Object))
+		if (!IsValid(Object) || !Object->HasAnyFlags(RF_ClassDefaultObject))
 		{
 			continue;
 		}
-		if (Object->GetWorld() && !UTempoCoreUtils::IsGameWorld(Object))
+
+		if (Object->Implements<UTempoScriptable>())
 		{
-			continue;
+			// Don't call RegisterScriptingServices yet - store it for later so we can only call RegisterScriptingServices
+			// on the most derived instances (without an O(n^2) iteration over all UObjects)
+			TempoScriptableObjects.Add(Object);
 		}
-		if (ITempoScriptable* ScriptableObject = Cast<ITempoScriptable>(Object))
+	}
+	
+	for (UObject* Object : TempoScriptableObjects)
+	{
+		bool bMostDerived = true;
+		for (const UObject* Other : TempoScriptableObjects)
 		{
-			ScriptableObject->RegisterScriptingServices(this);
+			if (Other->GetClass() != Object->GetClass() && Other->IsA(Object->GetClass()))
+			{
+				bMostDerived = false;
+				break;
+			}
+		}
+		if (bMostDerived)
+		{
+			Cast<ITempoScriptable>(Object)->RegisterScriptingServices(*this);
 		}
 	}
 	const int32 Port = GetDefault<UTempoCoreSettings>()->GetScriptingPort();
 	const FString ServerAddress = FString::Printf(TEXT("0.0.0.0:%d"), Port);
 	grpc::ServerBuilder Builder;
 	Builder.AddListeningPort(TCHAR_TO_UTF8(*ServerAddress), grpc::InsecureServerCredentials());
-	for (const TUniquePtr<grpc::Service>& Service : Services)
+	for (const auto& Service : Services)
 	{
-		Builder.RegisterService(Service.Get());
+		Builder.RegisterService(Service.Value.Get());
 	}
 
 	Builder.SetDefaultCompressionLevel(CompressionLevelTogRPC(GetDefault<UTempoCoreSettings>()->GetScriptingCompressionLevel()));
@@ -115,8 +145,6 @@ void FTempoScriptingServer::Initialize()
 	if (!Server.Get())
 	{
 		UE_LOG(LogTempoScripting, Error, TEXT("Error while starting scripting server. Perhaps port %d was not available."), Port);
-		Services.Empty();
-		RequestManagers.Empty();
 		return;
 	}
 	
@@ -166,8 +194,24 @@ void FTempoScriptingServer::Deinitialize()
 
 void FTempoScriptingServer::Reinitialize()
 {
+	TMap<FName, FWeakObjectPtr> PreviouslyActiveServices;
+	for (const auto& RequestManager : RequestManagers)
+	{
+		if (RequestManager.Value->GetActiveObject().IsValid())
+		{
+			PreviouslyActiveServices.Add(RequestManager.Value->GetServiceName(), RequestManager.Value->GetActiveObject());
+		}
+	}
 	Deinitialize();
 	Initialize();
+	for (const auto& PreviouslyActiveService : PreviouslyActiveServices)
+	{
+		if (PreviouslyActiveService.Value.IsValid())
+		{
+			UE_LOG(LogTempoScripting, Display, TEXT("Reactivating service %s"), *PreviouslyActiveService.Key.ToString());
+			ActivateService(PreviouslyActiveService.Key, PreviouslyActiveService.Value.Get());
+		}
+	}
 }
 
 void FTempoScriptingServer::Tick(float DeltaTime)
@@ -177,11 +221,11 @@ void FTempoScriptingServer::Tick(float DeltaTime)
 	// at the very end of the last frame as soon as possible.
 	if (!OnMovieSceneSequenceTickHandle.IsValid())
 	{
-		TickInternal(DeltaTime);
+		TickInternal();
 	}
 }
 
-void FTempoScriptingServer::TickInternal(float DeltaTime)
+void FTempoScriptingServer::TickInternal()
 {
 	if (!bIsInitialized)
 	{

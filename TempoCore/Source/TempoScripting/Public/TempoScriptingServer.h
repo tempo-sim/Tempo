@@ -5,6 +5,7 @@
 #include <grpcpp/grpcpp.h>
 
 #include "CoreMinimal.h"
+#include "TempoScriptable.h"
 
 template <class ResponseType>
 using TResponseDelegate = TDelegate<void(const ResponseType&, grpc::Status)>;
@@ -14,23 +15,25 @@ namespace grpc
 	static const Status Status_OK;
 }
 
-template <class ServiceType, class RequestType, class ResponseType, template <class> class ResponderType>
+template <class AsyncServiceType, class RequestType, class ResponseType, template <class> class ResponderType, class UserObjectType, bool Const>
 struct TRequestHandler
 {
-	typedef ServiceType HandlerServiceType;
+	typedef AsyncServiceType HandlerServiceType;
 	typedef RequestType HandlerRequestType;
 	typedef ResponseType HandlerResponseType;
 	typedef ResponderType<ResponseType> HandlerResponderType;
+	typedef UserObjectType HandlerUserObjectType;
 
-	typedef typename TMemFunPtrType<false, ServiceType, void(grpc::ServerContext*, RequestType*, ResponderType<ResponseType>*, grpc::CompletionQueue*, grpc::ServerCompletionQueue*, void*)>::Type AcceptFuncType;
+	typedef typename TMemFunPtrType<false, AsyncServiceType, void(grpc::ServerContext*, RequestType*, ResponderType<ResponseType>*, grpc::CompletionQueue*, grpc::ServerCompletionQueue*, void*)>::Type AcceptFuncType;
+	typedef typename TMemFunPtrType<Const, UserObjectType, void(const RequestType&, const TResponseDelegate<ResponseType>&)>::Type HandleFuncType;
 
-	TRequestHandler(AcceptFuncType&& AcceptFuncIn)
-		: AcceptFunc(AcceptFuncIn)
+	TRequestHandler(AcceptFuncType AcceptFuncIn, HandleFuncType HandleFuncIn)
+		: AcceptFunc(AcceptFuncIn), HandleFunc(HandleFuncIn)
 	{
-		static_assert(std::is_base_of_v<grpc::Service, ServiceType>);
+		static_assert(std::is_base_of_v<grpc::Service, AsyncServiceType>);
 	}
-	
-	void Init(ServiceType* Service)
+
+	void Init(AsyncServiceType* Service)
 	{
 		AcceptDelegate.BindRaw(Service, AcceptFunc);
 	}
@@ -40,64 +43,82 @@ struct TRequestHandler
 		check(AcceptDelegate.IsBound());
 		AcceptDelegate.Execute(Context, Request, Responder, CompletionQueue, CompletionQueue, Tag);
 	}
-	
+
 	void HandleRequest(const RequestType& Request, const TResponseDelegate<ResponseType>& ResponseDelegate)
 	{
-		check(HandleDelegate.IsBound());
-		HandleDelegate.Execute(Request, ResponseDelegate);
+		if (!HandleDelegate.ExecuteIfBound(Request, ResponseDelegate))
+		{
+			ResponseDelegate.ExecuteIfBound(ResponseType(), grpc::Status(grpc::UNAVAILABLE, "Service is not active"));
+		}
 	}
 
-	template<class UserObjectType, typename... VarTypes>
-	TRequestHandler& BindUObject(UserObjectType* UserObject, typename TMemFunPtrType<false, UserObjectType, void(const RequestType&, const TResponseDelegate<ResponseType>&, VarTypes...)>::Type HandleFunction, VarTypes&&... Vars)
+	void Activate(UserObjectType* UserObject)
 	{
-		checkf(!HandleDelegate.IsBound(), TEXT("Handle delegate is already bound. Multiple handlers is not supported."));
-		HandleDelegate.BindUObject(UserObject, HandleFunction, Forward<VarTypes>(Vars)...);
-		return *this;
+		if (!ensureAlwaysMsgf(!UserObject->HasAnyFlags(RF_ClassDefaultObject), TEXT("Activate called on CDO! Do not call ActivateService from RegisterScriptingServices.")))
+		{
+			return;
+		}
+		ensureAlwaysMsgf(!HandleDelegate.IsBound() || HandleDelegate.IsBoundToObject(UserObject), TEXT("Handle delegate was already bound to another object."));
+		HandleDelegate.BindUObject(UserObject, HandleFunc);
+		ActiveObject = UserObject;
 	}
 
-	template<class UserObjectType, typename... VarTypes>
-	TRequestHandler& BindUObject(UserObjectType* UserObject, typename TMemFunPtrType<true, UserObjectType, void(const RequestType&, const TResponseDelegate<ResponseType>&, VarTypes...)>::Type HandleFunction, VarTypes&&... Vars)
+	void Deactivate()
 	{
-		checkf(!HandleDelegate.IsBound(), TEXT("Handle delegate is already bound. Multiple handlers is not supported."));
-		HandleDelegate.BindUObject(UserObject, HandleFunction, Forward<VarTypes>(Vars)...);
-		return *this;
+		HandleDelegate.Unbind();
+		ActiveObject.Reset();
 	}
 
-	template<class UserObjectType, typename... VarTypes>
-	TRequestHandler& BindRaw(UserObjectType* UserObject, typename TMemFunPtrType<false, UserObjectType, void(const RequestType&, const TResponseDelegate<ResponseType>&, VarTypes...)>::Type HandleFunction, VarTypes&&... Vars)
+	const FWeakObjectPtr& GetActiveObject() const
 	{
-		checkf(!HandleDelegate.IsBound(), TEXT("Handle delegate is already bound. Multiple handlers is not supported."));
-		HandleDelegate.BindRaw(UserObject, HandleFunction, Forward<VarTypes>(Vars)...);
-		return *this;
-	}
-
-	template<class UserObjectType, typename... VarTypes>
-	TRequestHandler& BindRaw(UserObjectType* UserObject, typename TMemFunPtrType<true, UserObjectType, void(const RequestType&, const TResponseDelegate<ResponseType>&, VarTypes...)>::Type HandleFunction, VarTypes&&... Vars)
-	{
-		checkf(!HandleDelegate.IsBound(), TEXT("Handle delegate is already bound. Multiple handlers is not supported."));
-		HandleDelegate.BindRaw(UserObject, HandleFunction, Forward<VarTypes>(Vars)...);
-		return *this;
-	}
-
-	template<typename FunctorType, typename... VarTypes>
-	TRequestHandler& BindLambda(FunctorType&& InFunctor, VarTypes&&... Vars)
-	{
-		checkf(!HandleDelegate.IsBound(), TEXT("Handle delegate is already bound. Multiple handlers is not supported."));
-		HandleDelegate.BindLambda(InFunctor, Forward<VarTypes>(Vars)...);
-		return *this;
+		return ActiveObject;
 	}
 
 private:
 	AcceptFuncType AcceptFunc;
+	HandleFuncType HandleFunc;
 	TDelegate<void(const RequestType&, const TResponseDelegate<ResponseType>&)> HandleDelegate;
 	TDelegate<void(grpc::ServerContext*, RequestType*, ResponderType<ResponseType>*, grpc::CompletionQueue*, grpc::ServerCompletionQueue*, void*)> AcceptDelegate;
+	FWeakObjectPtr ActiveObject;
 };
 
-template <class ServiceType, class RequestType, class ResponseType>
-using TSimpleRequestHandler = TRequestHandler<ServiceType, RequestType, ResponseType, grpc::ServerAsyncResponseWriter>;
+template <class ServiceType, class RequestType, class ResponseType, class UserObjectType, bool Const>
+using TSimpleRequestHandler = TRequestHandler<ServiceType, RequestType, ResponseType, grpc::ServerAsyncResponseWriter, UserObjectType, Const>;
 
-template <class ServiceType, class RequestType, class ResponseType>
-using TStreamingRequestHandler = TRequestHandler<ServiceType, RequestType, ResponseType, grpc::ServerAsyncWriter>;
+template <class ServiceType, class RequestType, class ResponseType, class UserObjectType, bool Const>
+using TStreamingRequestHandler = TRequestHandler<ServiceType, RequestType, ResponseType, grpc::ServerAsyncWriter, UserObjectType, Const>;
+
+template <class ServiceType, class RequestType, class ResponseType, class UserObjectType>
+TSimpleRequestHandler<ServiceType, RequestType, ResponseType, UserObjectType, false>
+SimpleRequestHandler(void(ServiceType::*AcceptFunc)(grpc::ServerContext*, RequestType*, grpc::ServerAsyncResponseWriter<ResponseType>*, grpc::CompletionQueue*, grpc::ServerCompletionQueue*, void*),
+	void(UserObjectType::*HandleFunc)(const RequestType&, const TResponseDelegate<ResponseType>&))
+{
+	return TSimpleRequestHandler<ServiceType, RequestType, ResponseType, UserObjectType, false>(AcceptFunc, HandleFunc);
+}
+
+template <class ServiceType, class RequestType, class ResponseType, class UserObjectType>
+TSimpleRequestHandler<ServiceType, RequestType, ResponseType, UserObjectType, true>
+SimpleRequestHandler(void(ServiceType::*AcceptFunc)(grpc::ServerContext*, RequestType*, grpc::ServerAsyncResponseWriter<ResponseType>*, grpc::CompletionQueue*, grpc::ServerCompletionQueue*, void*),
+	void(UserObjectType::*HandleFunc)(const RequestType&, const TResponseDelegate<ResponseType>&) const)
+{
+	return TSimpleRequestHandler<ServiceType, RequestType, ResponseType, UserObjectType, true>(AcceptFunc, HandleFunc);
+}
+
+template <class ServiceType, class RequestType, class ResponseType, class UserObjectType>
+TStreamingRequestHandler<ServiceType, RequestType, ResponseType, UserObjectType, false>
+StreamingRequestHandler(void(ServiceType::*AcceptFunc)(grpc::ServerContext*, RequestType*, grpc::ServerAsyncWriter<ResponseType>*, grpc::CompletionQueue*, grpc::ServerCompletionQueue*, void*),
+	void(UserObjectType::*HandleFunc)(const RequestType&, const TResponseDelegate<ResponseType>&))
+{
+	return TStreamingRequestHandler<ServiceType, RequestType, ResponseType, UserObjectType, false>(AcceptFunc, HandleFunc);
+}
+
+template <class ServiceType, class RequestType, class ResponseType, class UserObjectType>
+TStreamingRequestHandler<ServiceType, RequestType, ResponseType, UserObjectType, true>
+StreamingRequestHandler(void(ServiceType::*AcceptFunc)(grpc::ServerContext*, RequestType*, grpc::ServerAsyncWriter<ResponseType>*, grpc::CompletionQueue*, grpc::ServerCompletionQueue*, void*),
+	void(UserObjectType::*HandleFunc)(const RequestType&, const TResponseDelegate<ResponseType>&) const)
+{
+	return TStreamingRequestHandler<ServiceType, RequestType, ResponseType, UserObjectType, true>(AcceptFunc, HandleFunc);
+}
 
 /**
  * A request manager manages the lifecycle of one gRPC request.
@@ -111,16 +132,20 @@ struct FRequestManager : TSharedFromThis<FRequestManager>
 	virtual void Init(grpc::ServerCompletionQueue* CompletionQueue) = 0;
 	virtual void HandleAndRespond() = 0;
 	virtual FRequestManager* Duplicate(int32 NewTag) const = 0;
+	virtual const FName GetServiceName() const = 0;
+	virtual void Activate(UObject* Object) = 0;
+	virtual void Deactivate() = 0;
+	virtual const FWeakObjectPtr& GetActiveObject() const = 0;
 };
 
 template <class HandlerType>
 class TRequestManagerBase: public FRequestManager {
 public:
-	TRequestManagerBase(int32 TagIn, const typename HandlerType::HandlerServiceType* ServiceIn, TSharedPtr<HandlerType> HandlerIn)
-		: State(UNINITIALIZED), Tag(TagIn), Handler(HandlerIn), Service(ServiceIn), Responder(&Context) {}
+	TRequestManagerBase(int32 TagIn, const FName& ServiceNameIn, const typename HandlerType::HandlerServiceType* ServiceIn, TSharedPtr<HandlerType> HandlerIn)
+		: State(UNINITIALIZED), Tag(TagIn), Handler(HandlerIn), ServiceName(ServiceNameIn), Service(ServiceIn), Responder(&Context) {}
 	
 	virtual EState GetState() const override { return State; }
-	
+
 	virtual void Init(grpc::ServerCompletionQueue* CompletionQueue) override
 	{
 		check(State == UNINITIALIZED);
@@ -128,10 +153,35 @@ public:
 		State = REQUESTED;
 	}
 
+	virtual const FName GetServiceName() const override
+	{
+		return ServiceName;
+	}
+
+	virtual void Activate(UObject* Object) override
+	{
+		Handler->Activate(CastChecked<typename HandlerType::HandlerUserObjectType>(Object));
+	}
+
+	virtual void Deactivate() override
+	{
+		Handler->Deactivate();
+		if (State == HANDLING)
+		{
+			Handler->HandleRequest(Request, ResponseDelegate);
+		}
+	}
+
+	virtual const FWeakObjectPtr& GetActiveObject() const override
+	{
+		return Handler->GetActiveObject();
+	}
+
 protected:
 	EState State;
 	int32 Tag;
 	const TSharedPtr<HandlerType> Handler;
+	const FName ServiceName;
 	const typename HandlerType::HandlerServiceType* Service;
 	typename HandlerType::HandlerRequestType Request;
 	grpc::ServerContext Context;
@@ -145,12 +195,12 @@ class TRequestManager : public TRequestManagerBase<HandlerType>
 	using TRequestManagerBase<HandlerType>::TRequestManagerBase;
 };
 
-template <class ServiceType, class RequestType, class ResponseType>
-class TRequestManager<TSimpleRequestHandler<ServiceType, RequestType, ResponseType>> :
-	public TRequestManagerBase<TSimpleRequestHandler<ServiceType, RequestType, ResponseType>>
+template <class ServiceType, class RequestType, class ResponseType, class UserObjectType, bool Const>
+class TRequestManager<TSimpleRequestHandler<ServiceType, RequestType, ResponseType, UserObjectType, Const>> :
+	public TRequestManagerBase<TSimpleRequestHandler<ServiceType, RequestType, ResponseType, UserObjectType, Const>>
 {
-	using TRequestManagerBase<TSimpleRequestHandler<ServiceType, RequestType, ResponseType>>::TRequestManagerBase;
-	using Base = TRequestManagerBase<TSimpleRequestHandler<ServiceType, RequestType, ResponseType>>;
+	using TRequestManagerBase<TSimpleRequestHandler<ServiceType, RequestType, ResponseType, UserObjectType, Const>>::TRequestManagerBase;
+	using Base = TRequestManagerBase<TSimpleRequestHandler<ServiceType, RequestType, ResponseType, UserObjectType, Const>>;
 
 public:
 	virtual void HandleAndRespond() override
@@ -167,16 +217,16 @@ public:
 
 	virtual FRequestManager* Duplicate(int32 NewTag) const override
 	{
-		return new TRequestManager(NewTag, Base::Service, Base::Handler);
+		return new TRequestManager(NewTag, Base::ServiceName, Base::Service, Base::Handler);
 	}
 };
 
-template <class ServiceType, class RequestType, class ResponseType>
-class TRequestManager<TStreamingRequestHandler<ServiceType, RequestType, ResponseType>> :
-	public TRequestManagerBase<TStreamingRequestHandler<ServiceType, RequestType, ResponseType>>
+template <class ServiceType, class RequestType, class ResponseType, class UserObjectType, bool Const>
+class TRequestManager<TStreamingRequestHandler<ServiceType, RequestType, ResponseType, UserObjectType, Const>> :
+	public TRequestManagerBase<TStreamingRequestHandler<ServiceType, RequestType, ResponseType, UserObjectType, Const>>
 {
-	using TRequestManagerBase<TStreamingRequestHandler<ServiceType, RequestType, ResponseType>>::TRequestManagerBase;
-	using Base = TRequestManagerBase<TStreamingRequestHandler<ServiceType, RequestType, ResponseType>>;
+	using TRequestManagerBase<TStreamingRequestHandler<ServiceType, RequestType, ResponseType, UserObjectType, Const>>::TRequestManagerBase;
+	using Base = TRequestManagerBase<TStreamingRequestHandler<ServiceType, RequestType, ResponseType, UserObjectType, Const>>;
 
 public:
 	virtual void HandleAndRespond() override
@@ -201,7 +251,7 @@ public:
 
 	virtual FRequestManager* Duplicate(int32 NewTag) const override
 	{
-		return new TRequestManager(NewTag, Base::Service, Base::Handler);
+		return new TRequestManager(NewTag, Base::ServiceName, Base::Service, Base::Handler);
 	}
 };
 
@@ -214,6 +264,8 @@ public:
 	FTempoScriptingServer();
 	virtual ~FTempoScriptingServer() override;
 
+	static FTempoScriptingServer& Get();
+
 	virtual void Tick(float DeltaTime) override;
 	virtual TStatId GetStatId() const override;
 	virtual bool IsTickableInEditor() const override { return true; }
@@ -222,53 +274,102 @@ public:
 	template <class ServiceType, class... HandlerTypes>
 	void RegisterService(HandlerTypes... Handlers)
 	{
-		ServiceType* Service = new ServiceType();
-		Services.Emplace(Service);
-		RegisterHandlers<ServiceType, HandlerTypes...>(Service, Handlers...);
+		using AsyncServiceType = typename ServiceType::AsyncService; 
+		const FName ServiceName(UTF8_TO_TCHAR(ServiceType::service_full_name()));
+		if (Services.Contains(ServiceName))
+		{
+			// Already registered - perhaps by calling Activate before Register
+			return;
+		}
+		AsyncServiceType* Service = new AsyncServiceType();
+		Services.Emplace(ServiceName, Service);
+		RegisterHandlers<AsyncServiceType, HandlerTypes...>(ServiceName, Service, Handlers...);
+	}
+
+	template <class ServiceType>
+	void ActivateService(UObject* Object)
+	{
+		const FName ServiceName(UTF8_TO_TCHAR(ServiceType::service_full_name()));
+		ActivateService(ServiceName, Object);
+	}
+
+	template <class ServiceType>
+	void DeactivateService()
+	{
+		const FName ServiceName(UTF8_TO_TCHAR(ServiceType::service_full_name()));
+		DeactivateService(ServiceName);
 	}
 
 protected:
 	void Initialize();
 	void Deinitialize();
 	void Reinitialize();
-	void TickInternal(float DeltaTime);
+	void TickInternal();
+
+	void ActivateService(const FName& ServiceName, UObject* Object)
+	{
+		if (!Services.Contains(ServiceName) && Object->Implements<UTempoScriptable>() && !Server.IsValid())
+		{
+			// That service has not been registered, but we haven't started the server yet.
+			// Maybe this object just tried to activate very early in engine initialization, and we can register it early?
+			Cast<ITempoScriptable>(Object)->RegisterScriptingServices(*this);
+		}
+		for (const auto& RequestManager : RequestManagers)
+		{
+			if (RequestManager.Value->GetServiceName() == ServiceName)
+			{
+				RequestManager.Value->Activate(Object);
+			}
+		}
+	}
+
+	void DeactivateService(const FName& ServiceName)
+	{
+		for (const auto& RequestManager : RequestManagers)
+		{
+			if (RequestManager.Value->GetServiceName() == ServiceName)
+			{
+				RequestManager.Value->Deactivate();
+			}
+		}
+	}
 	
 	// Credit: https://stackoverflow.com/a/44065093
 	template <class...>
 	struct False : std::bool_constant<false> { };
 	
 	// Zero-Handler case.
-	template <class ServiceType>
-	static void RegisterHandlers(ServiceType* Service)
+	template <class AsyncServiceType>
+	static void RegisterHandlers(AsyncServiceType* Service)
 	{
-		static_assert(False<ServiceType>{}, "RegisterHandlers must be called with at least one handler");
+		static_assert(False<AsyncServiceType>{}, "RegisterHandlers must be called with at least one handler");
 	}
 	
 	// One-Handler case.
-	template <class ServiceType, class HandlerType>
-	void RegisterHandlers(ServiceType* Service, HandlerType& Handler)
+	template <class AsyncServiceType, class HandlerType>
+	void RegisterHandlers(const FName& ServiceName, AsyncServiceType* Service, HandlerType& Handler)
 	{
 		const int32 Tag = TagAllocator++;
 		Handler.Init(Service);
-		RequestManagers.Emplace(Tag, new TRequestManager<HandlerType>(Tag, Service, MakeShared<HandlerType>(MoveTemp(Handler))));
+		RequestManagers.Emplace(Tag, new TRequestManager<HandlerType>(Tag, ServiceName, Service, MakeShared<HandlerType>(MoveTemp(Handler))));
 	}
 	
 	// Recursively register the handlers.
-	template <class ServiceType, class FirstHandlerType, class... RemainingHandlerTypes>
-	void RegisterHandlers(ServiceType* Service, FirstHandlerType& FirstHandler, RemainingHandlerTypes&... RemainingHandlers)
+	template <class AsyncServiceType, class FirstHandlerType, class... RemainingHandlerTypes>
+	void RegisterHandlers(const FName& ServiceName, AsyncServiceType* Service, FirstHandlerType& FirstHandler, RemainingHandlerTypes&... RemainingHandlers)
 	{
-		RegisterHandlers<ServiceType, FirstHandlerType>(Service, FirstHandler);
-		RegisterHandlers<ServiceType, RemainingHandlerTypes...>(Service, RemainingHandlers...);
+		RegisterHandlers<AsyncServiceType, FirstHandlerType>(ServiceName, Service, FirstHandler);
+		RegisterHandlers<AsyncServiceType, RemainingHandlerTypes...>(ServiceName, Service, RemainingHandlers...);
 	}
 
 	void HandleEventForTag(int32 Tag, bool bOk);
-	
+
 	bool bIsInitialized = false;
 
 	int32 TagAllocator = 0;
 	TMap<int32, TSharedPtr<FRequestManager>> RequestManagers;
-	TArray<TUniquePtr<grpc::Service>> Services;
-	
+	TMap<FName, TUniquePtr<grpc::Service>> Services;
+
 	TUniquePtr<grpc::Server> Server;
 	TUniquePtr<grpc::ServerCompletionQueue> CompletionQueue;
 

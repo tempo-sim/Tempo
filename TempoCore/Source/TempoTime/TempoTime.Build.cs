@@ -7,26 +7,13 @@ public class TempoTime : TempoModuleRules
 	public TempoTime(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
-		
-		PublicIncludePaths.AddRange(
-			new string[]
-			{
-			}
-			);
-				
-		
-		PrivateIncludePaths.AddRange(
-			new string[]
-			{
-			}
-			);
-			
-		
+
 		PublicDependencyModuleNames.AddRange(
 			new string[]
 			{
 				// Unreal
 				"Core",
+				"DeveloperSettings",
 				// Tempo
 				"TempoCoreShared",
 				"TempoScripting",
@@ -42,13 +29,6 @@ public class TempoTime : TempoModuleRules
 				"Slate",
 				"SlateCore",
 				"UMG",
-			}
-			);
-		
-		
-		DynamicallyLoadedModuleNames.AddRange(
-			new string[]
-			{
 			}
 			);
 	}

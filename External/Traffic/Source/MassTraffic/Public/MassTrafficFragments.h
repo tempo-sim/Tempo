@@ -652,11 +652,15 @@ struct MASSTRAFFIC_API FMassTrafficVehicleLightsFragment : public FMassFragment
 	GENERATED_BODY()
 
 	FMassTrafficVehicleLightsFragment() :
+		bHeadlights(false),
 		bLeftTurnSignalLights(false),
 		bRightTurnSignalLights(false),
 		bBrakeLights(false)
 	{
 	}
+
+	/** True when the headlights are turned on */
+	bool bHeadlights : 1;
 
 	/** True when next lane is a left turn */
 	bool bLeftTurnSignalLights : 1;
@@ -666,6 +670,16 @@ struct MASSTRAFFIC_API FMassTrafficVehicleLightsFragment : public FMassFragment
 	
 	/** True when braking */
 	bool bBrakeLights : 1;
+};
+
+/** A measure of how bright it is in the environment.
+ * The primary usage is so that vehicles can turn on/off their headlights when it gets too dark/bright. */
+USTRUCT()
+struct MASSTRAFFIC_API FEnvironmentalBrightnessFragment : public FMassFragment
+{
+	GENERATED_BODY()
+	
+	float Brightness = 0.0f;
 };
 
 /** Miscellaneous fields commonly used in traffic vehicle movement control */
@@ -689,6 +703,8 @@ struct MASSTRAFFIC_API FMassTrafficVehicleControlFragment : public FMassFragment
 	bool bAllowLeftTurnsAtIntersections = true;
 	bool bAllowRightTurnsAtIntersections = true;
 	bool bAllowGoingStraightAtIntersections = true;
+
+	TArray<FZoneGraphTagFilter> LaneChangePriorityFilters;
 
 	// Fields used for both pre-emptive and reactive yields.
 	FZoneGraphTrafficLaneData* YieldAtIntersectionLane = nullptr;

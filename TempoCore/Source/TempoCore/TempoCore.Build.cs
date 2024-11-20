@@ -2,7 +2,7 @@
 
 using UnrealBuildTool;
 
-public class TempoCore : ModuleRules
+public class TempoCore : TempoModuleRules
 {
 	public TempoCore(ReadOnlyTargetRules Target) : base(Target)
 	{
@@ -25,7 +25,10 @@ public class TempoCore : ModuleRules
 		PublicDependencyModuleNames.AddRange(
 			new string[]
 			{
+				// Unreal
 				"Core",
+				// Tempo
+				"TempoTime",
 			}
 			);
 			
@@ -41,7 +44,7 @@ public class TempoCore : ModuleRules
 				"UMG",
 				// Tempo
 				"TempoCoreShared",
-				"TempoTime",
+				"TempoScripting",
 			}
 			);
 		

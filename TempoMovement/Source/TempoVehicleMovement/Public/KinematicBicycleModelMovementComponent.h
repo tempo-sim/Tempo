@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "TempoMovementInterface.h"
 #include "TempoVehicleMovementInterface.h"
 
 #include "CoreMinimal.h"
@@ -10,7 +11,7 @@
 #include "KinematicBicycleModelMovementComponent.generated.h"
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TEMPOVEHICLEMOVEMENT_API UKinematicBicycleModelMovementComponent : public UPawnMovementComponent, public ITempoVehicleMovementInterface
+class TEMPOVEHICLEMOVEMENT_API UKinematicBicycleModelMovementComponent : public UPawnMovementComponent, public ITempoVehicleMovementInterface, public ITempoMovementInterface
 {
 	GENERATED_BODY()
 
@@ -20,6 +21,8 @@ public:
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 	virtual float GetLinearVelocity() override { return LinearVelocity; }
+
+	virtual FVector GetAngularVelocity() override { return FVector(0.0, 0.0, AngularVelocity); }
 	
 	virtual void HandleDrivingCommand(const FDrivingCommand& Command) override;
 
@@ -29,6 +32,9 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite)
 	float LinearVelocity = 0.0; // CM/S
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite)
+	float AngularVelocity = 0.0; // Deg/S
 	
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite)
 	float SteeringAngle = 0.0; // Degrees
