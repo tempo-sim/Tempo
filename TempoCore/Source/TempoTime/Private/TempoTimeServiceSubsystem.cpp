@@ -6,6 +6,8 @@
 #include "TempoTimeWorldSettings.h"
 #include "TempoTime/Time.grpc.pb.h"
 
+#include "Kismet/GameplayStatics.h"
+
 using TimeService = TempoTime::TimeService;
 using TimeAsyncService = TempoTime::TimeService::AsyncService;
 using TempoEmpty = TempoScripting::Empty;
@@ -61,6 +63,11 @@ void UTempoTimeServiceSubsystem::SetTimeMode(const TempoTime::TimeModeRequest& R
 		}
 	}
 
+	if (!Cast<ATempoTimeWorldSettings>(GetWorld()->GetWorldSettings()))
+	{
+		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "SetTimeMode has no effect unless using TempoTimeWorldSettings"));
+	}
+
 	ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status_OK);
 }
 
@@ -73,20 +80,29 @@ void UTempoTimeServiceSubsystem::SetSimStepsPerSecond(const SetSimStepsPerSecond
 		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::OUT_OF_RANGE, "Steps per second must be >= 1"));
 		return;
 	}
-	
+
 	UTempoCoreSettings* Settings = GetMutableDefault<UTempoCoreSettings>();
 	Settings->SetSimulatedStepsPerSecond(RequestedStepsPerSecond);
+
+	if (!Cast<ATempoTimeWorldSettings>(GetWorld()->GetWorldSettings()))
+	{
+		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "SetSimStepsPerSecond has no effect unless using TempoTimeWorldSettings"));
+	}
 
 	ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status_OK);
 }
 
 void UTempoTimeServiceSubsystem::Play(const TempoEmpty& Request, const TResponseDelegate<TempoEmpty>& ResponseContinuation) const
 {
-	if (ATempoTimeWorldSettings* WorldSettings = Cast<ATempoTimeWorldSettings>(GetWorld()->GetWorldSettings()))
+	if (APlayerController* PlayerController = UGameplayStatics::GetPlayerController(GetWorld(), 0))
 	{
-		WorldSettings->SetPaused(false);
+		PlayerController->SetPause(false);
 	}
-	
+	else
+	{
+		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::NOT_FOUND, "Failed to unpause (could not find player controller)"));
+	}
+
 	ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status_OK);
 }
 
@@ -104,18 +120,26 @@ void UTempoTimeServiceSubsystem::AdvanceSteps(const AdvanceStepsRequest& Request
 	{
 		WorldSettings->Step(RequestedSteps);
 	}
-	
+	else
+	{
+		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "AdvanceSteps is only supported when using TempoTimeWorldSettings"));
+	}
+
 	ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status());
 }
 
 
 void UTempoTimeServiceSubsystem::Pause(const TempoEmpty& Request, const TDelegate<void(const TempoEmpty&, grpc::Status)>& ResponseContinuation) const
 {
-	if (ATempoTimeWorldSettings* WorldSettings = Cast<ATempoTimeWorldSettings>(GetWorld()->GetWorldSettings()))
+	if (APlayerController* PlayerController = UGameplayStatics::GetPlayerController(GetWorld(), 0))
 	{
-		WorldSettings->SetPaused(true);
+		PlayerController->SetPause(false);
 	}
-	
+	else
+	{
+		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::NOT_FOUND, "Failed to pause (could not find player controller)"));
+	}
+
 	ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status());
 }
 
@@ -125,6 +149,10 @@ void UTempoTimeServiceSubsystem::Step(const TempoEmpty& Request, const TResponse
 	{
 		WorldSettings->Step(1);
 	}
-	
+	else
+	{
+		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "Step is only supported when using TempoTimeWorldSettings"));
+	}
+
 	ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status());
 }

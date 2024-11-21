@@ -39,11 +39,7 @@ protected:
 	UPROPERTY(meta=(BindWidget))
 	UTextBlock* SimTimeBox;
 
-private:
-#if WITH_EDITOR
-	void OnTempoCoreSettingsChanged(UObject* Object, FPropertyChangedEvent& PropertyChangedEvent) const;
-#endif
-	
+private:	
 	void SyncTimeSettings() const;
 
 	UFUNCTION()

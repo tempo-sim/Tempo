@@ -5,6 +5,7 @@
 #include "TempoTime.h"
 
 #include "TempoCoreSettings.h"
+#include "TempoCoreShared.h"
 #include "TempoCoreUtils.h"
 #include "TempoTimeWorldSettings.h"
 
@@ -12,6 +13,7 @@
 #include "Components/ComboBoxString.h"
 #include "Components/EditableText.h"
 #include "Components/TextBlock.h"
+#include "Kismet/GameplayStatics.h"
 
 void UTempoTimeWidget::NativeOnInitialized()
 {
@@ -44,9 +46,7 @@ void UTempoTimeWidget::NativeOnInitialized()
 	SyncTimeSettings();
 	
 	// Keep time settings in sync.
-#if WITH_EDITOR
-	GetMutableDefault<UTempoCoreSettings>()->OnSettingChanged().AddUObject(this, &UTempoTimeWidget::OnTempoCoreSettingsChanged);
-#endif
+	GetMutableDefault<UTempoCoreSettings>()->TempoCoreTimeSettingsChangedEvent.AddUObject(this, &UTempoTimeWidget::SyncTimeSettings);
 }
 
 void UTempoTimeWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
@@ -56,17 +56,6 @@ void UTempoTimeWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime
 	check(GetWorld());
 	SimTimeBox->SetText(FText::FromString(FString::Printf(TEXT("%.3f"), GetWorld()->GetTimeSeconds())));
 }
-
-#if WITH_EDITOR
-void UTempoTimeWidget::OnTempoCoreSettingsChanged(UObject* Object, FPropertyChangedEvent& PropertyChangedEvent) const
-{
-	if (PropertyChangedEvent.Property->GetName() == UTempoCoreSettings::GetTimeModeMemberName() ||
-	    PropertyChangedEvent.Property->GetName() == UTempoCoreSettings::GetSimulatedStepsPerSecondMemberName())
-	{
-		SyncTimeSettings();
-	}
-}
-#endif
 
 void UTempoTimeWidget::SyncTimeSettings() const
 {
@@ -149,19 +138,25 @@ bool UTempoTimeWidget::IsPlayAllowed()
 
 void UTempoTimeWidget::OnPausePressed()
 {
-	check(GetWorld());
-	if (ATempoTimeWorldSettings* WorldSettings = Cast<ATempoTimeWorldSettings>(GetWorld()->GetWorldSettings()))
+	if (APlayerController* PlayerController = UGameplayStatics::GetPlayerController(GetWorld(), 0))
 	{
-		WorldSettings->SetPaused(true);
+		PlayerController->SetPause(true);
+	}
+	else
+	{
+		UE_LOG(LogTempoTime, Error, TEXT("Failed to pause (could not find player controller)"));
 	}
 }
 
 void UTempoTimeWidget::OnPlayPressed()
 {
-	check(GetWorld());
-	if (ATempoTimeWorldSettings* WorldSettings = Cast<ATempoTimeWorldSettings>(GetWorld()->GetWorldSettings()))
+	if (APlayerController* PlayerController = UGameplayStatics::GetPlayerController(GetWorld(), 0))
 	{
-		WorldSettings->SetPaused(false);
+		PlayerController->SetPause(false);
+	}
+	else
+	{
+		UE_LOG(LogTempoTime, Error, TEXT("Failed to pause (could not find player controller)"));
 	}
 }
 
