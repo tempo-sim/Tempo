@@ -156,7 +156,7 @@ void UTempoTimeWidget::OnPlayPressed()
 	}
 	else
 	{
-		UE_LOG(LogTempoTime, Error, TEXT("Failed to pause (could not find player controller)"));
+		UE_LOG(LogTempoTime, Error, TEXT("Failed to unpause (could not find player controller)"));
 	}
 }
 
