@@ -3,25 +3,22 @@
 #include "TempoTimeWorldSettings.h"
 
 #include "TempoCoreSettings.h"
+#include "TempoTime.h"
 #include "Kismet/GameplayStatics.h"
 
 void ATempoTimeWorldSettings::BeginPlay()
 {
 	Super::BeginPlay();
 
-#if WITH_EDITOR
-	SettingsChangedHandle = GetMutableDefault<UTempoCoreSettings>()->OnSettingChanged().AddUObject(this, &ATempoTimeWorldSettings::OnTempoCoreSettingsChanged);
-	OnTimeSettingsChanged();
-#endif
+	SettingsChangedHandle = GetMutableDefault<UTempoCoreSettings>()->TempoCoreTimeSettingsChangedEvent.AddUObject(this, &ATempoTimeWorldSettings::SyncFixedPointTime);
+	SyncFixedPointTime();
 }
 
 void ATempoTimeWorldSettings::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	Super::EndPlay(EndPlayReason);
 
-#if WITH_EDITOR
-	GetMutableDefault<UTempoCoreSettings>()->OnSettingChanged().Remove(SettingsChangedHandle);
-#endif
+	GetMutableDefault<UTempoCoreSettings>()->TempoCoreTimeSettingsChangedEvent.Remove(SettingsChangedHandle);
 }
 
 float ATempoTimeWorldSettings::FixupDeltaSeconds(float DeltaSeconds, float RealDeltaSeconds)
@@ -80,18 +77,7 @@ float ATempoTimeWorldSettings::FixupDeltaSeconds(float DeltaSeconds, float RealD
 	return DeltaSeconds;
 }
 
-#if WITH_EDITOR
-void ATempoTimeWorldSettings::OnTempoCoreSettingsChanged(UObject* Object, FPropertyChangedEvent& PropertyChangedEvent)
-{
-	if (PropertyChangedEvent.Property->GetName() == UTempoCoreSettings::GetTimeModeMemberName() ||
-		PropertyChangedEvent.Property->GetName() == UTempoCoreSettings::GetSimulatedStepsPerSecondMemberName())
-	{
-		OnTimeSettingsChanged();
-	}
-}
-#endif
-
-void ATempoTimeWorldSettings::OnTimeSettingsChanged()
+void ATempoTimeWorldSettings::SyncFixedPointTime()
 {
 	check(GetWorld());
 	const double SimTime = GetWorld()->GetTimeSeconds();
@@ -112,10 +98,28 @@ void ATempoTimeWorldSettings::Step(int32 NumSteps)
 
 void ATempoTimeWorldSettings::SetPaused(bool bPaused)
 {
-	if (!bPaused)
+	if (APlayerController* PlayerController = UGameplayStatics::GetPlayerController(GetWorld(), 0))
 	{
-		StepsToSimulate.Reset();
-		OnTimeSettingsChanged();
+		PlayerController->SetPause(bPaused);
 	}
-	UGameplayStatics::GetPlayerController(GetWorld(), 0)->SetPause(bPaused);
+	else
+	{
+		UE_LOG(LogTempoTime, Error, TEXT("Failed to %s (couldn't find player controller)"), bPaused ? TEXT("pause") : TEXT("unpause"));
+	}
+}
+
+void ATempoTimeWorldSettings::OnUnpaused()
+{
+	StepsToSimulate.Reset();
+	SyncFixedPointTime();
+}
+
+void ATempoTimeWorldSettings::SetPauserPlayerState(APlayerState* PlayerState)
+{
+	if (PlayerState == nullptr)
+	{
+		OnUnpaused();
+	}
+
+	Super::SetPauserPlayerState(PlayerState);
 }

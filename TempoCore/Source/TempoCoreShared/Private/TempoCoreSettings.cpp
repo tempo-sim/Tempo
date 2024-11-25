@@ -17,20 +17,25 @@ void UTempoCoreSettings::SetTimeMode(ETimeMode TimeModeIn)
 {
 	TimeMode = TimeModeIn;
 
-#if WITH_EDITOR
-	FPropertyChangedEvent PropertyChangedEvent(
-		GetClass()->FindPropertyByName(GET_MEMBER_NAME_CHECKED(UTempoCoreSettings, TimeMode)));
-	OnSettingChanged().Broadcast(this, PropertyChangedEvent);
-#endif
+	TempoCoreTimeSettingsChangedEvent.Broadcast();
 }
 
 void UTempoCoreSettings::SetSimulatedStepsPerSecond(int32 SimulatedStepsPerSecondIn)
 {
 	SimulatedStepsPerSecond = SimulatedStepsPerSecondIn;
 
-#if WITH_EDITOR
-	FPropertyChangedEvent PropertyChangedEvent(
-		GetClass()->FindPropertyByName(GET_MEMBER_NAME_CHECKED(UTempoCoreSettings, SimulatedStepsPerSecond)));
-	OnSettingChanged().Broadcast(this, PropertyChangedEvent);
-#endif
+	TempoCoreTimeSettingsChangedEvent.Broadcast();
 }
+
+#if WITH_EDITOR
+void UTempoCoreSettings::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
+{
+	Super::PostEditChangeProperty(PropertyChangedEvent);
+	
+	if (PropertyChangedEvent.Property->GetName() == GET_MEMBER_NAME_CHECKED(UTempoCoreSettings, TimeMode) ||
+		(TimeMode == ETimeMode::FixedStep && PropertyChangedEvent.Property->GetName() == GET_MEMBER_NAME_CHECKED(UTempoCoreSettings, SimulatedStepsPerSecond)))
+	{
+		TempoCoreTimeSettingsChangedEvent.Broadcast();
+	}
+}
+#endif

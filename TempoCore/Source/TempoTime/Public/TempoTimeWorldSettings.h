@@ -18,21 +18,21 @@ class TEMPOTIME_API ATempoTimeWorldSettings : public AWorldSettings
 public:
 	void Step(int32 NumSteps=1);
 
-	void SetPaused(bool bPaused);
-	
+	virtual void SetPauserPlayerState(APlayerState* PlayerState) override;
+
 protected:
 	virtual void BeginPlay() override;
 
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
-	
-	virtual float FixupDeltaSeconds(float DeltaSeconds, float RealDeltaSeconds) override;
-	
-private:
-#if WITH_EDITOR
-	void OnTempoCoreSettingsChanged(UObject* Object, FPropertyChangedEvent& PropertyChangedEvent);
-#endif
 
-	void OnTimeSettingsChanged();
+	virtual float FixupDeltaSeconds(float DeltaSeconds, float RealDeltaSeconds) override;
+
+	virtual void SetPaused(bool bPaused);
+
+	virtual void OnUnpaused();
+
+private:
+	void SyncFixedPointTime();
 	
 	UPROPERTY(VisibleAnywhere)
 	uint64 CyclesWhenTimeModeChanged = 0;
