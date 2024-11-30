@@ -406,9 +406,9 @@ void MarkRenderStateDirty(UObject* Object)
 	{
 		Actor->MarkComponentsRenderStateDirty();
 	}
-	else if (USceneComponent* SceneComponent = Cast<USceneComponent>(Object))
+	else if (UActorComponent* Component = Cast<UActorComponent>(Object))
 	{
-		SceneComponent->MarkRenderStateDirty();
+		Component->MarkRenderStateDirty();
 	}
 }
 
@@ -465,15 +465,15 @@ void GetObjectProperties(const UObject* Object, GetPropertiesResponse& Response)
 		Actor = Component->GetOwner();
 	}
 
-	TFunction<void(const FProperty*, FString&, FString*)> GetPropertyTypeAndValue;
-	GetPropertyTypeAndValue= [Object, &GetPropertyTypeAndValue](const FProperty* Property, FString& Type, FString* Value)
+	TFunction<void(const void*, const FProperty*, FString&, FString*)> GetPropertyTypeAndValue;
+	GetPropertyTypeAndValue= [&GetPropertyTypeAndValue](const void* Container, const FProperty* Property, FString& Type, FString* Value)
 	{
 		if (const FStrProperty* StrProperty = CastField<FStrProperty>(Property))
 		{
 			Type = TEXT("string");
 			if (Value)
 			{
-				StrProperty->GetValue_InContainer(Object, Value);
+				StrProperty->GetValue_InContainer(Container, Value);
 			}
 		}
 		else if (const FNameProperty* NameProperty = CastField<FNameProperty>(Property))
@@ -482,7 +482,7 @@ void GetObjectProperties(const UObject* Object, GetPropertiesResponse& Response)
 			if (Value)
 			{
 				FName ValueName;
-				NameProperty->GetValue_InContainer(Object, &ValueName);
+				NameProperty->GetValue_InContainer(Container, &ValueName);
 				*Value = ValueName.ToString();
 			}
 		}
@@ -492,7 +492,7 @@ void GetObjectProperties(const UObject* Object, GetPropertiesResponse& Response)
 			if (Value)
 			{
 				bool ValueBool;
-				BoolProperty->GetValue_InContainer(Object, &ValueBool);
+				BoolProperty->GetValue_InContainer(Container, &ValueBool);
 				*Value = ValueBool ? TEXT("true") : TEXT("false");
 			}
 		}
@@ -502,7 +502,7 @@ void GetObjectProperties(const UObject* Object, GetPropertiesResponse& Response)
 			if (Value)
 			{
 				int32 ValueInt;
-				IntProperty->GetValue_InContainer(Object, &ValueInt);
+				IntProperty->GetValue_InContainer(Container, &ValueInt);
 				*Value = FString::FromInt(ValueInt);
 			}
 		}
@@ -512,7 +512,7 @@ void GetObjectProperties(const UObject* Object, GetPropertiesResponse& Response)
 			if (Value)
 			{
 				float ValueFloat;
-				FloatProperty->GetValue_InContainer(Object, &ValueFloat);
+				FloatProperty->GetValue_InContainer(Container, &ValueFloat);
 				*Value = FString::SanitizeFloat(ValueFloat);
 			}
 		}
@@ -522,7 +522,7 @@ void GetObjectProperties(const UObject* Object, GetPropertiesResponse& Response)
 			if (Value)
 			{
 				double ValueDouble;
-				DoubleProperty->GetValue_InContainer(Object, &ValueDouble);
+				DoubleProperty->GetValue_InContainer(Container, &ValueDouble);
 				*Value = FString::SanitizeFloat(ValueDouble);
 			}
 		}
@@ -534,7 +534,7 @@ void GetObjectProperties(const UObject* Object, GetPropertiesResponse& Response)
 				if (Value)
 				{
 					FVector ValueVector;
-					StructProperty->GetValue_InContainer(Object, &ValueVector);
+					StructProperty->GetValue_InContainer(Container, &ValueVector);
 					*Value = ValueVector.ToString();
 				}
 			}
@@ -544,7 +544,7 @@ void GetObjectProperties(const UObject* Object, GetPropertiesResponse& Response)
 				if (Value)
 				{
 					FRotator ValueRotator;
-					StructProperty->GetValue_InContainer(Object, &ValueRotator);
+					StructProperty->GetValue_InContainer(Container, &ValueRotator);
 					
 					*Value = QuantityConverter<Deg2Rad,L2R>::Convert(ValueRotator).ToString();
 				}
@@ -555,7 +555,7 @@ void GetObjectProperties(const UObject* Object, GetPropertiesResponse& Response)
 				if (Value)
 				{
 					FColor ValueColor;
-					StructProperty->GetValue_InContainer(Object, &ValueColor);
+					StructProperty->GetValue_InContainer(Container, &ValueColor);
 					*Value = FString::Printf(TEXT("r:%d g:%d b:%d"), ValueColor.R, ValueColor.G, ValueColor.B);
 				}
 			}
@@ -565,20 +565,34 @@ void GetObjectProperties(const UObject* Object, GetPropertiesResponse& Response)
 				if (Value)
 				{
 					FLinearColor ValueLinearColor;
-					StructProperty->GetValue_InContainer(Object, &ValueLinearColor);
+					StructProperty->GetValue_InContainer(Container, &ValueLinearColor);
 					const FColor ValueColor = ValueLinearColor.ToFColor(true);
 					*Value = FString::Printf(TEXT("r:%d g:%d b:%d"), ValueColor.R, ValueColor.G, ValueColor.B);
 				}
 			}
 			else
 			{
-				Type = TEXT("unsupported");
+				Type = StructProperty->Struct->GetStructCPPName();
+				if (Value)
+				{
+					*Value = TEXT("{ ");
+					void const* InnerPtr = StructProperty->ContainerPtrToValuePtr<void>(Container);
+					for (const FProperty* InnerProperty = StructProperty->Struct->PropertyLink; InnerProperty != nullptr; InnerProperty = InnerProperty->PropertyLinkNext)
+					{
+						const FString InnerName = InnerProperty->GetAuthoredName();
+						FString InnerType;
+						FString InnerValue;
+						GetPropertyTypeAndValue(InnerPtr, InnerProperty, InnerType, &InnerValue);
+						Value->Appendf(TEXT("%s:%s "), *InnerName, *InnerValue);
+					}
+					Value->Append(TEXT("}"));
+				}
 			}
 		}
 		else if (const FArrayProperty* ArrayProperty = CastField<FArrayProperty>(Property))
 		{
 			FString InnerType = TEXT("unsupported");
-			GetPropertyTypeAndValue(ArrayProperty->Inner, InnerType, nullptr);
+			GetPropertyTypeAndValue(Container, ArrayProperty->Inner, InnerType, nullptr);
 			Type = FString::Printf(TEXT("array<%s>"), *InnerType);
 		}
 		else
@@ -592,7 +606,7 @@ void GetObjectProperties(const UObject* Object, GetPropertiesResponse& Response)
 		const FProperty* Property = *PropertyIt;
 		FString Type;
 		FString Value;
-		GetPropertyTypeAndValue(Property, Type, &Value);
+		GetPropertyTypeAndValue(Object, Property, Type, &Value);
 		TempoWorld::PropertyDescriptor* PropertyDescriptor = Response.add_properties();
 		PropertyDescriptor->set_actor(TCHAR_TO_UTF8(*Actor->GetActorNameOrLabel()));
 		if (Component)
@@ -671,22 +685,60 @@ void UTempoActorControlServiceSubsystem::GetComponentProperties(const GetCompone
 }
 
 template <typename RequestType>
-grpc::Status GetPropertyForRequest(const UObject* Object, const RequestType& Request, FProperty*& Property)
+grpc::Status GetPropertyForRequest(const UObject* Object, const RequestType& Request, FProperty*& Property, FString* InnerPropertyName=nullptr)
 {
-	const FName PropertyName(UTF8_TO_TCHAR(Request.property().c_str()));
+	FString PropertyName(UTF8_TO_TCHAR(Request.property().c_str()));
 
-	if (PropertyName.IsNone())
+	if (PropertyName.IsEmpty())
 	{
 		return grpc::Status(grpc::FAILED_PRECONDITION, "Property must be specified");
 	}
 
+	PropertyName.Split(TEXT("."), &PropertyName, InnerPropertyName);
+
 	const UClass* Class = Object->GetClass();
-	Property = Class->FindPropertyByName(PropertyName);
-	if (!Property)
+	Property = Class->FindPropertyByName(FName(PropertyName));
+
+	if (InnerPropertyName && !InnerPropertyName->IsEmpty() && !CastField<FStructProperty>(Property))
 	{
-		return grpc::Status(grpc::NOT_FOUND, "Failed to find property");
+		return grpc::Status(grpc::FAILED_PRECONDITION, "Inner properties can only be specified on structs");
 	}
 
+	return grpc::Status_OK;
+}
+
+template <typename PropertyType, typename ValueType>
+grpc::Status SetSinglePropertyInContainer(void* Container, FProperty* Property, const FString& PropertyName, const ValueType& Value)
+{
+	void* ValuePtr = Property->ContainerPtrToValuePtr<void>(Container);
+	if (const FStructProperty* StructProperty = CastField<FStructProperty>(Property))
+	{
+		if (PropertyName.IsEmpty())
+		{
+			return grpc::Status(grpc::FAILED_PRECONDITION, "Struct inner property must be specified");
+		}
+
+		FString CurrentPropertyName = PropertyName;
+		FString InnerPropertyName;
+		PropertyName.Split(TEXT("."), &CurrentPropertyName, &InnerPropertyName);
+
+		for (FProperty* InnerProperty = StructProperty->Struct->PropertyLink; InnerProperty != nullptr; InnerProperty = InnerProperty->PropertyLinkNext)
+		{
+			if (InnerProperty->GetAuthoredName() == CurrentPropertyName)
+			{
+				return SetSinglePropertyInContainer<PropertyType>(ValuePtr, InnerProperty, InnerPropertyName, Value);
+			}
+		}
+		return grpc::Status(grpc::NOT_FOUND, "No matching property found");
+	}
+
+	PropertyType* TypedProperty = CastField<PropertyType>(Property);
+	if (!TypedProperty)
+	{
+		return grpc::Status(grpc::FAILED_PRECONDITION, "Property did not have correct type");
+	}
+
+	TypedProperty->SetPropertyValue(ValuePtr, Value);
 	return grpc::Status_OK;
 }
 
@@ -700,20 +752,25 @@ grpc::Status SetSinglePropertyImpl(const UWorld* World, const RequestType& Reque
 		return GetObjectStatus;
 	}
 
+	const FString PropertyName(UTF8_TO_TCHAR(Request.property().c_str()));
+	if (PropertyName.IsEmpty())
+	{
+		return grpc::Status(grpc::FAILED_PRECONDITION, "Property must be specified");
+	}
+
+	FString InnerPropertyName;
 	FProperty* Property = nullptr;
-	const grpc::Status GetPropertyStatus = GetPropertyForRequest(Object, Request, Property);
+	const grpc::Status GetPropertyStatus = GetPropertyForRequest(Object, Request, Property, &InnerPropertyName);
 	if (!GetPropertyStatus.ok())
 	{
 		return GetPropertyStatus;
 	}
 
-	const PropertyType* TypedProperty = CastField<PropertyType>(Property);
-	if (!TypedProperty)
+	const grpc::Status SetStatus = SetSinglePropertyInContainer<PropertyType>(Object, Property, InnerPropertyName, Value);
+	if (!SetStatus.ok())
 	{
-		return grpc::Status(grpc::FAILED_PRECONDITION, "Property did not have correct type");
+		return SetStatus;
 	}
-
-	TypedProperty->SetPropertyValue_InContainer(Object, Value);
 
 	MarkRenderStateDirty(Object);
 
