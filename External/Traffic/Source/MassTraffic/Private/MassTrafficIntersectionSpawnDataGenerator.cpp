@@ -535,6 +535,34 @@ void UMassTrafficIntersectionSpawnDataGenerator::Generate(UObject& QueryOwner, T
 
 					// Period -
 					//		Vehicles - bidirectional, this side to opposite/right side, opposite to this/left side
+					//		Pedestrians - bidirectional, across left side and right side
+					{
+						FMassTrafficPeriod& Period = IntersectionFragment.AddPeriod(
+							IntersectionDetail->bHasTrafficLights ?
+								StandardCrosswalkGoSeconds /*this period is really about the crosswalks*/ :
+								StandardMinimumTrafficGoSeconds);
+
+						Period.VehicleLanes.Append(VehicleTrafficLanes_This_To_OppositeAndRight);
+						Period.VehicleLanes.Append(VehicleTrafficLanes_Opposite_To_ThisAndLeft); // ..left? actually means opposite side's right (our left)
+
+						Period.CrosswalkLanes.Append(LeftSide.CrosswalkLanes.Array());
+						Period.CrosswalkLanes.Append(RightSide.CrosswalkLanes.Array());
+
+						Period.CrosswalkWaitingLanes.Append(LeftSide.CrosswalkWaitingLanes.Array());
+						Period.CrosswalkWaitingLanes.Append(RightSide.CrosswalkWaitingLanes.Array());
+						
+						Period.AddTrafficLightControl(ThisTrafficLightIndex, EMassTrafficLightStateFlags::VehicleGo);
+						Period.AddTrafficLightControl(OppositeTrafficLightIndex, EMassTrafficLightStateFlags::VehicleGo);
+						Period.AddTrafficLightControl(LeftTrafficLightIndex, EMassTrafficLightStateFlags::PedestrianGo_LeftSide);
+						Period.AddTrafficLightControl(RightTrafficLightIndex, EMassTrafficLightStateFlags::PedestrianGo_RightSide);
+
+						// Remember which traffic light controls which lane, for Period::Finalize()
+						LaneToTrafficLightMap.SetTrafficLightForLanes(VehicleTrafficLanes_This_To_OppositeAndRight, ThisTrafficLightIndex);
+						LaneToTrafficLightMap.SetTrafficLightForLanes(VehicleTrafficLanes_Opposite_To_ThisAndLeft, OppositeTrafficLightIndex);
+					}
+
+					// Period -
+					//		Vehicles - bidirectional, this side to opposite/right side, opposite to this/left side
 					//		Pedestrians - none
 					{
 						FMassTrafficPeriod& Period = IntersectionFragment.AddPeriod(

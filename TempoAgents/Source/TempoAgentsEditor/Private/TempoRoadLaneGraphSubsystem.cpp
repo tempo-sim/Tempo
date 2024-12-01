@@ -606,9 +606,13 @@ bool UTempoRoadLaneGraphSubsystem::TryGenerateAndRegisterZoneShapeComponentsForC
 		ZoneShapeComponent->GetMutablePoints().Empty();
 		ZoneShapeComponent->SetCommonLaneProfile(LaneProfileRef);
 
-		// TODO:  Get this via the interface.
-		const FZoneGraphTag IntersectionTag = GetTagByName(TEXT("Crosswalk"));
-		ZoneShapeComponent->GetMutableTags().Add(IntersectionTag);
+		// Apply crosswalk tags.
+		TArray<FName> CrosswalkTagNames = ITempoIntersectionInterface::Execute_GetTempoCrosswalkTags(&IntersectionQueryActor, ConnectionIndex);
+		for (const FName& CrosswalkTagName : CrosswalkTagNames)
+		{
+			const FZoneGraphTag CrosswalkTag = GetTagByName(CrosswalkTagName);
+			ZoneShapeComponent->GetMutableTags().Add(CrosswalkTag);
+		}
 
 		const int32 CrosswalkControlPointStartIndex = ITempoIntersectionInterface::Execute_GetTempoCrosswalkStartEntranceLocationControlPointIndex(&IntersectionQueryActor, ConnectionIndex);
 		const int32 CrosswalkControlPointEndIndex = ITempoIntersectionInterface::Execute_GetTempoCrosswalkEndEntranceLocationControlPointIndex(&IntersectionQueryActor, ConnectionIndex);

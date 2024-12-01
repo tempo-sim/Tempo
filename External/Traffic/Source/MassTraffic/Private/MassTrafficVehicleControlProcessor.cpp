@@ -128,13 +128,13 @@ namespace
 		--VehicleControlFragment.NextLane->NumReservedVehiclesOnLane;
 	}
 
-	void ProcessYieldAtIntersectionLogic(UMassTrafficSubsystem& MassTrafficSubsystem, const FMassEntityManager& EntityManager, FMassTrafficVehicleControlFragment& VehicleControlFragment, const FMassZoneGraphLaneLocationFragment& LaneLocationFragment, const FAgentRadiusFragment& RadiusFragment, TFunction<void()> PerformYieldActionFunc)
+	void ProcessYieldAtIntersectionLogic(UMassTrafficSubsystem& MassTrafficSubsystem, const UMassCrowdSubsystem& MassCrowdSubsystem, const FMassEntityManager& EntityManager, FMassTrafficVehicleControlFragment& VehicleControlFragment, const FMassZoneGraphLaneLocationFragment& LaneLocationFragment, const FAgentRadiusFragment& RadiusFragment, const FZoneGraphStorage& ZoneGraphStorage, TFunction<void()> PerformYieldActionFunc)
 	{
 		bool bHasAnotherVehicleEnteredRelevantLaneAfterPreemptiveYieldRollOut = false;
-		const bool bShouldPreemptivelyYieldAtIntersection = UE::MassTraffic::ShouldPerformPreemptiveYieldAtIntersection(MassTrafficSubsystem, EntityManager, VehicleControlFragment, LaneLocationFragment, RadiusFragment, bHasAnotherVehicleEnteredRelevantLaneAfterPreemptiveYieldRollOut);
+		const bool bShouldPreemptivelyYieldAtIntersection = UE::MassTraffic::ShouldPerformPreemptiveYieldAtIntersection(MassTrafficSubsystem, MassCrowdSubsystem, EntityManager, VehicleControlFragment, LaneLocationFragment, RadiusFragment, ZoneGraphStorage, bHasAnotherVehicleEnteredRelevantLaneAfterPreemptiveYieldRollOut);
 
 		bool bShouldGiveOpportunityForTurningVehiclesToReactivelyYieldAtIntersection = false;
-		const bool bShouldReactivelyYieldAtIntersection = !bShouldPreemptivelyYieldAtIntersection ? UE::MassTraffic::ShouldPerformReactiveYieldAtIntersection(MassTrafficSubsystem, EntityManager, VehicleControlFragment, LaneLocationFragment, RadiusFragment, bShouldGiveOpportunityForTurningVehiclesToReactivelyYieldAtIntersection) : false;
+		const bool bShouldReactivelyYieldAtIntersection = !bShouldPreemptivelyYieldAtIntersection ? UE::MassTraffic::ShouldPerformReactiveYieldAtIntersection(MassTrafficSubsystem, MassCrowdSubsystem, EntityManager, VehicleControlFragment, LaneLocationFragment, RadiusFragment, ZoneGraphStorage, bShouldGiveOpportunityForTurningVehiclesToReactivelyYieldAtIntersection) : false;
 	
 		UE::MassTraffic::UpdateYieldAtIntersectionState(MassTrafficSubsystem, VehicleControlFragment, LaneLocationFragment.LaneHandle, LaneLocationFragment.DistanceAlongLane, bShouldPreemptivelyYieldAtIntersection, bShouldReactivelyYieldAtIntersection, bHasAnotherVehicleEnteredRelevantLaneAfterPreemptiveYieldRollOut, bShouldGiveOpportunityForTurningVehiclesToReactivelyYieldAtIntersection);
 
@@ -181,7 +181,9 @@ void UMassTrafficVehicleControlProcessor::ConfigureQueries()
 	SimpleVehicleControlEntityQuery_Conditional.AddRequirement<FMassSimulationVariableTickFragment>(EMassFragmentAccess::ReadOnly);
 	SimpleVehicleControlEntityQuery_Conditional.AddChunkRequirement<FMassSimulationVariableTickChunkFragment>(EMassFragmentAccess::ReadOnly);
 	SimpleVehicleControlEntityQuery_Conditional.SetChunkFilter(FMassSimulationVariableTickChunkFragment::ShouldTickChunkThisFrame);
+	SimpleVehicleControlEntityQuery_Conditional.AddSubsystemRequirement<UZoneGraphSubsystem>(EMassFragmentAccess::ReadOnly);
 	SimpleVehicleControlEntityQuery_Conditional.AddSubsystemRequirement<UMassTrafficSubsystem>(EMassFragmentAccess::ReadWrite);
+	SimpleVehicleControlEntityQuery_Conditional.AddSubsystemRequirement<UMassCrowdSubsystem>(EMassFragmentAccess::ReadOnly);
 
 	PIDVehicleControlEntityQuery_Conditional.AddTagRequirement<FMassTrafficVehicleTag>(EMassFragmentPresence::Any);
 	PIDVehicleControlEntityQuery_Conditional.AddRequirement<FMassTrafficPIDVehicleControlFragment>(EMassFragmentAccess::ReadWrite);
@@ -202,6 +204,7 @@ void UMassTrafficVehicleControlProcessor::ConfigureQueries()
 	PIDVehicleControlEntityQuery_Conditional.SetChunkFilter(FMassSimulationVariableTickChunkFragment::ShouldTickChunkThisFrame);
 	PIDVehicleControlEntityQuery_Conditional.AddSubsystemRequirement<UZoneGraphSubsystem>(EMassFragmentAccess::ReadOnly);
 	PIDVehicleControlEntityQuery_Conditional.AddSubsystemRequirement<UMassTrafficSubsystem>(EMassFragmentAccess::ReadWrite);
+	PIDVehicleControlEntityQuery_Conditional.AddSubsystemRequirement<UMassCrowdSubsystem>(EMassFragmentAccess::ReadOnly);
 }
 
 
@@ -210,7 +213,10 @@ void UMassTrafficVehicleControlProcessor::Execute(FMassEntityManager& EntityMana
 	// Advance simple agents
 	SimpleVehicleControlEntityQuery_Conditional.ForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& ComponentSystemExecutionContext)
 		{
+			const UZoneGraphSubsystem& ZoneGraphSubsystem = ComponentSystemExecutionContext.GetSubsystemChecked<UZoneGraphSubsystem>();
+		
 			UMassTrafficSubsystem& MassTrafficSubsystem = ComponentSystemExecutionContext.GetMutableSubsystemChecked<UMassTrafficSubsystem>();
+			const UMassCrowdSubsystem& MassCrowdSubsystem = ComponentSystemExecutionContext.GetSubsystemChecked<UMassCrowdSubsystem>();
 			const TConstArrayView<FMassSimulationVariableTickFragment> VariableTickFragments = Context.GetFragmentView<FMassSimulationVariableTickFragment>();
 			const TConstArrayView<FMassTrafficRandomFractionFragment> RandomFractionFragments = Context.GetFragmentView<FMassTrafficRandomFractionFragment>();
 			const TConstArrayView<FTransformFragment> TransformFragments = Context.GetFragmentView<FTransformFragment>();
@@ -238,7 +244,9 @@ void UMassTrafficVehicleControlProcessor::Execute(FMassEntityManager& EntityMana
 				FMassTrafficObstacleAvoidanceFragment& AvoidanceFragment = AvoidanceFragments[Index];
 				FMassTrafficVehicleLaneChangeFragment* LaneChangeFragment = !LaneChangeFragments.IsEmpty() ? &LaneChangeFragments[Index] : nullptr;
 				const FMassTrafficNextVehicleFragment& NextVehicleFragment = NextVehicleFragments[Index];
-				
+
+				const FZoneGraphStorage* ZoneGraphStorage = ZoneGraphSubsystem.GetZoneGraphStorage(LaneLocationFragment.LaneHandle.DataHandle);
+				check(ZoneGraphStorage);
 				
 				// Debug
 				const bool bVisLog = DebugFragments.IsEmpty() ? false : DebugFragments[Index].bVisLog > 0;
@@ -246,8 +254,10 @@ void UMassTrafficVehicleControlProcessor::Execute(FMassEntityManager& EntityMana
 				SimpleVehicleControl(
 					EntityManager,
 					MassTrafficSubsystem,
+					MassCrowdSubsystem,
 					Context,
 					Index,
+					*ZoneGraphStorage,
 					RadiusFragment,
 					RandomFractionFragment,
 					TransformFragment,
@@ -267,6 +277,7 @@ void UMassTrafficVehicleControlProcessor::Execute(FMassEntityManager& EntityMana
 			const UZoneGraphSubsystem& ZoneGraphSubsystem = ComponentSystemExecutionContext.GetSubsystemChecked<UZoneGraphSubsystem>();
 		
 			UMassTrafficSubsystem& MassTrafficSubsystem = ComponentSystemExecutionContext.GetMutableSubsystemChecked<UMassTrafficSubsystem>();
+			const UMassCrowdSubsystem& MassCrowdSubsystem = ComponentSystemExecutionContext.GetSubsystemChecked<UMassCrowdSubsystem>();
 			const TConstArrayView<FMassSimulationVariableTickFragment> VariableTickFragments = Context.GetFragmentView<FMassSimulationVariableTickFragment>();
 			const TConstArrayView<FMassTrafficRandomFractionFragment> RandomFractionFragments = Context.GetFragmentView<FMassTrafficRandomFractionFragment>();
 			const TConstArrayView<FMassTrafficObstacleAvoidanceFragment> AvoidanceFragments = Context.GetFragmentView<FMassTrafficObstacleAvoidanceFragment>();
@@ -305,6 +316,7 @@ void UMassTrafficVehicleControlProcessor::Execute(FMassEntityManager& EntityMana
 				PIDVehicleControl(
 					EntityManager,
 					MassTrafficSubsystem,
+					MassCrowdSubsystem,
 					Context,
 					Index,
 					*ZoneGraphStorage,
@@ -327,8 +339,10 @@ void UMassTrafficVehicleControlProcessor::Execute(FMassEntityManager& EntityMana
 void UMassTrafficVehicleControlProcessor::SimpleVehicleControl(
 	FMassEntityManager& EntityManager,
 	UMassTrafficSubsystem& MassTrafficSubsystem,
+	const UMassCrowdSubsystem& MassCrowdSubsystem,
 	FMassExecutionContext& Context,
 	const int32 EntityIndex,
+	const FZoneGraphStorage& ZoneGraphStorage,
 	const FAgentRadiusFragment& AgentRadiusFragment,
 	const FMassTrafficRandomFractionFragment& RandomFractionFragment,
 	const FTransformFragment& TransformFragment,
@@ -469,7 +483,7 @@ void UMassTrafficVehicleControlProcessor::SimpleVehicleControl(
 		TargetSpeed = 0.0f;
 	};
 
-	ProcessYieldAtIntersectionLogic(MassTrafficSubsystem, EntityManager, VehicleControlFragment, LaneLocationFragment, AgentRadiusFragment, PerformYieldAction);
+	ProcessYieldAtIntersectionLogic(MassTrafficSubsystem, MassCrowdSubsystem, EntityManager, VehicleControlFragment, LaneLocationFragment, AgentRadiusFragment, ZoneGraphStorage, PerformYieldAction);
 
 	// (See all READYLANE.)
 	SetIsVehicleReadyToUseNextIntersectionLane(VehicleControlFragment, LaneLocationFragment, AgentRadiusFragment, RandomFractionFragment, MassTrafficSubsystem, EntityManager, MassTrafficSettings->StoppingDistanceRange, bVehicleHasNoRoom);
@@ -615,6 +629,7 @@ void UMassTrafficVehicleControlProcessor::SimpleVehicleControl(
 void UMassTrafficVehicleControlProcessor::PIDVehicleControl(
 	const FMassEntityManager& EntityManager,
 	UMassTrafficSubsystem& MassTrafficSubsystem,
+	const UMassCrowdSubsystem& MassCrowdSubsystem,
 	const FMassExecutionContext& Context,
 	const int32 EntityIndex,
 	const FZoneGraphStorage& ZoneGraphStorage,
@@ -800,7 +815,7 @@ void UMassTrafficVehicleControlProcessor::PIDVehicleControl(
 		TargetSpeed = 0.0f;
 	};
 
-	ProcessYieldAtIntersectionLogic(MassTrafficSubsystem, EntityManager, VehicleControlFragment, LaneLocationFragment, AgentRadiusFragment, PerformYieldAction);
+	ProcessYieldAtIntersectionLogic(MassTrafficSubsystem, MassCrowdSubsystem, EntityManager, VehicleControlFragment, LaneLocationFragment, AgentRadiusFragment, ZoneGraphStorage, PerformYieldAction);
 
 	// (See all READYLANE.)
 	SetIsVehicleReadyToUseNextIntersectionLane(VehicleControlFragment, LaneLocationFragment, AgentRadiusFragment, RandomFractionFragment, MassTrafficSubsystem, EntityManager, MassTrafficSettings->StoppingDistanceRange, bVehicleHasNoRoom);

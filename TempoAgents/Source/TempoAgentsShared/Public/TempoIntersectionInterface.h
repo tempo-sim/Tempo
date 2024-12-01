@@ -227,6 +227,9 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
 	float GetTempoCrosswalkWidth() const;
 
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
+	TArray<FName> GetTempoCrosswalkTags(int32 ConnectionIndex) const;
+
 	// TODO:  This should take a CrosswalkIntersectionIndex.
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
 	int32 GetNumTempoCrosswalkLanes() const;

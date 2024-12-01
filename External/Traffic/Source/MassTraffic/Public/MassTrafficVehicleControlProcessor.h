@@ -23,8 +23,10 @@ protected:
 	void SimpleVehicleControl(
 		FMassEntityManager& EntityManager,
 		UMassTrafficSubsystem& MassTrafficSubsystem,
+		const UMassCrowdSubsystem& MassCrowdSubsystem,
 		FMassExecutionContext& Context,
 		const int32 EntityIndex,
+		const FZoneGraphStorage& ZoneGraphStorage,
 		const FAgentRadiusFragment& AgentRadiusFragment,
 		const FMassTrafficRandomFractionFragment& RandomFractionFragment,
 		const FTransformFragment& TransformFragment,
@@ -40,6 +42,7 @@ protected:
 	void PIDVehicleControl(
 		const FMassEntityManager& EntityManager,
 		UMassTrafficSubsystem& MassTrafficSubsystem,
+		const UMassCrowdSubsystem& MassCrowdSubsystem,
 		const FMassExecutionContext& Context,
 		const int32 EntityIndex,
 		const FZoneGraphStorage& ZoneGraphStorage,

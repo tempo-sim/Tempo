@@ -9,11 +9,14 @@
 #include "HierarchicalHashGrid2D.h"
 #include "MassEntityView.h"
 
+#include "Containers/Set.h"
+
 #include "MassTrafficTypes.generated.h"
 
 #define MASSTRAFFIC_NUM_INLINE_VEHICLE_NEXT_LANES 2 // ..determined to be ~1.4 on average for this game
 #define MASSTRAFFIC_NUM_INLINE_VEHICLE_MERGING_LANES 2 // ..determined to be ~1.3 on average for this game
 #define MASSTRAFFIC_NUM_INLINE_VEHICLE_SPLITTING_LANES 2 // ..determined to be ~1.7 on average for this game
+#define MASSTRAFFIC_NUM_INLINE_VEHICLE_CROSSWALK_LANES 2 // Each lane should only run through (at most) one crosswalk (which will have just 2 lanes).
 
 
 
@@ -502,6 +505,11 @@ struct MASSTRAFFIC_API FZoneGraphTrafficLaneData
 	TArray<FZoneGraphTrafficLaneData*, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_VEHICLE_NEXT_LANES>> NextLanes;
 	TArray<FZoneGraphTrafficLaneData*, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_VEHICLE_MERGING_LANES>> MergingLanes;
 	TArray<FZoneGraphTrafficLaneData*, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_VEHICLE_SPLITTING_LANES>> SplittingLanes;
+
+	// Lanes which are not drivable will not have an associated FZoneGraphTrafficLaneData.
+	// So, we just store FZoneGraphLaneHandles for crosswalk lanes with "right of way" over this lane,
+	// which we call "downstream crosswalk lanes".
+	TArray<FZoneGraphLaneHandle, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_VEHICLE_CROSSWALK_LANES>> DownstreamCrosswalkLanes;
 
 	/**
 	 * NOTE - If these take up too much memory, we can instead make a single 1-bit flag to cover both of these, that simply

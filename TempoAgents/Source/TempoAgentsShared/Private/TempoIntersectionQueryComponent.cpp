@@ -707,6 +707,7 @@ bool UTempoIntersectionQueryComponent::TryGetCrosswalkControlPointLocation(const
 	
 	const FVector CrosswalkEntranceLocation = ControlPointEntranceLocation + ControlPointEntranceForwardVector * CrosswalkWidth * 0.5f + ControlPointEntranceRightVector * LateralOffset * LateralDirectionScalar;
 
+	// TODO:  Remove this debug sphere.
 	DrawDebugSphere(IntersectionQueryActor->GetWorld(), CrosswalkEntranceLocation, 25.0f, 16, FColor::Orange, false, 10.0f);
 
 	OutCrosswalkControlPointLocation = CrosswalkEntranceLocation;

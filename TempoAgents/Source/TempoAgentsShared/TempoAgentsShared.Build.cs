@@ -35,6 +35,13 @@ public class TempoAgentsShared : ModuleRules
                 "MassCommon",
                 "StructUtils",
                 "RHI",
+                // For overriden "stand" state
+                "MassMovement",
+                "MassNavigation",
+                "MassZoneGraphNavigation",
+                "MassAIBehavior",
+                "StateTreeModule",
+                "MassSignals",
                 // Tempo
                 "TempoCore",
             }

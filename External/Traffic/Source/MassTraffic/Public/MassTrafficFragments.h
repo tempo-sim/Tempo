@@ -721,6 +721,9 @@ struct MASSTRAFFIC_API FMassTrafficVehicleControlFragment : public FMassFragment
 	// Fields used for reactive yields.
 	bool bHasGivenOpportunityForTurningVehiclesToReactivelyYieldAtIntersection = false;
 
+	// Crosswalk lanes that this vehicle is actively yielding to.
+	TArray<FZoneGraphLaneHandle> ActiveYieldCrosswalkLanes;
+
 	// Inline copy of CurrentTrafficLaneData->ConstData constant lane data, copied on lane entry
 	FZoneGraphTrafficLaneConstData CurrentLaneConstData;
 
