@@ -62,7 +62,7 @@ MOD_ADD() {
 MOD_PATCH() {
   local TYPE=$1
   local ROOT=$2
-  local PATCHES=("${@:3}")
+  local FORWARD_PATCHES=("${@:3}")
   local DEST
   DEST="$UNREAL_ENGINE_PATH/$ROOT"
   
@@ -72,26 +72,26 @@ MOD_PATCH() {
   fi
 
   # Reverse the order of patches
-  local REVERSED_PATCHES=($(printf '%s\n' "${PATCHES[@]}" | sed -n '1!G;h;$p'))
+  local REVERSED_PATCHES=($(printf '%s\n' "${FORWARD_PATCHES[@]}" | sed -n '1!G;h;$p'))
   local PATCHES_APPLIED=0
 
   # Find the last applied patch (if any)
   cd "$DEST"
-  local LAST_APPLIED_INDEX=$((${#PATCHES[@]} - 1))
+  local LAST_APPLIED_INDEX=$((${#FORWARD_PATCHES[@]} - 1))
   for ((i=0; i<${#REVERSED_PATCHES[@]}; i++)); do
     local PATCH="$ENGINE_MODS_DIR/$ROOT/${REVERSED_PATCHES[i]//\'/}"
     # To check if the patch has been applied, check if it can be *reversed* (if not, it hasn't been applied).
     # https://unix.stackexchange.com/questions/55780/check-if-a-file-or-folder-has-been-patched-already
     if patch -R -p0 -s -f --dry-run <"$PATCH" >/dev/null 2>&1; then
       echo "Patch $(basename "$PATCH") already applied"
-      LAST_APPLIED_INDEX=$((${#PATCHES[@]} - i))
+      LAST_APPLIED_INDEX=$((${#FORWARD_PATCHES[@]} - i))
       break
     fi
   done
 
   # Apply all patches after the last applied one
-  for ((i=LAST_APPLIED_INDEX; i<${#PATCHES[@]}; i++)); do
-    local PATCH="$ENGINE_MODS_DIR/$ROOT/${PATCHES[i]//\'/}"
+  for ((i=LAST_APPLIED_INDEX; i<${#FORWARD_PATCHES[@]}; i++)); do
+    local PATCH="$ENGINE_MODS_DIR/$ROOT/${FORWARD_PATCHES[i]//\'/}"
     echo "Applying Patch $(basename "$PATCH")"
     if ! patch -p0 <"$PATCH" >/dev/null 2>&1; then
       echo "Failed to apply patch: $PATCH"
@@ -169,17 +169,23 @@ REBUILD_UBT() {
   eval "$DOTNET" build "./Engine/Source/Programs/AutomationTool/AutomationTool.csproj" -c Development
 }
 
-TYPES=($(jq -r --arg version "$VERSION" '.[$version][].Type // [] | @sh' "$TEMPO_ROOT/EngineMods/EngineMods.json" | tr -d \'))
-for TYPE in "${TYPES[@]}"; do
+MODS=($(jq -r --arg version "$VERSION" -c '.[$version][]' "$TEMPO_ROOT/EngineMods/EngineMods.json"))
+for MOD in "${MODS[@]}"; do
+  TYPE=$(jq -r '.Type' <<< "$MOD")
+  ROOT=$(jq -r '.Root' <<< "$MOD")
+  ADDS=$(jq -r '.Add // [] | join(" ")' <<< "$MOD" )
+  PATCHES=$(jq -r '.Patch // [] | join(" ")' <<< "$MOD")
+  REMOVES=$(jq -r '.Remove // [] | join(" ")' <<< "$MOD")
+  
   # Remove any trailing carriage returns
   TYPE="${TYPE%$'\r'}"
-  ROOT=$(jq -r --arg version "$VERSION" --arg type "$TYPE" '.[$version][] | select(.Type == $type) | .Root' "$TEMPO_ROOT/EngineMods/EngineMods.json" | tr -d \')
-  # Remove any trailing carriage returns
   ROOT="${ROOT%$'\r'}"
-    
+  ADDS="${ADDS%$'\r'}"
+  PATCHES="${PATCHES%$'\r'}"
+  REMOVES="${REMOVES%$'\r'}"
+
   NEEDS_REBUILD='N'
-  
-  ADDS=$(jq -r --arg version "$VERSION" --arg type "$TYPE" '.[$version][] | select(.Type == $type) | .Add // [] | join(" ")' "$TEMPO_ROOT/EngineMods/EngineMods.json" | tr -d \')
+
   read -ra ADDS <<< "$ADDS"
   for ADD in "${ADDS[@]}"; do
     if ! MOD_ADD "$TYPE" "$ROOT" "$ADD"; then
@@ -187,14 +193,11 @@ for TYPE in "${TYPES[@]}"; do
     fi
   done
 
-  while read -r PATCHES; do
-    read -ra PATCHES <<< "$PATCHES"
-    if ! MOD_PATCH "$TYPE" "$ROOT" "${PATCHES[@]}"; then
-      NEEDS_REBUILD='Y'
-    fi
-  done <<< "$(jq -r --arg version "$VERSION" --arg type "$TYPE" '.[$version][] | select(.Type == $type) | .Patch[] | @sh' "$TEMPO_ROOT/EngineMods/EngineMods.json")" 
+  read -ra PATCHES <<< "$PATCHES"
+  if ! MOD_PATCH "$TYPE" "$ROOT" "${PATCHES[@]}"; then
+    NEEDS_REBUILD='Y'
+  fi
 
-  REMOVES=$(jq -r --arg version "$VERSION" --arg type "$TYPE" '.[$version][] | select(.Type == $type) | .Remove // [] | join(" ")' "$TEMPO_ROOT/EngineMods/EngineMods.json" | tr -d \')
   read -ra REMOVES <<< "$REMOVES"
   for REMOVE in "${REMOVES[@]}"; do
     if ! MOD_REMOVE "$TYPE" "$ROOT" "$REMOVE"; then
