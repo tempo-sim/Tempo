@@ -37,6 +37,7 @@ using SetBoolArrayPropertyRequest = TempoWorld::SetBoolArrayPropertyRequest;
 using SetStringArrayPropertyRequest = TempoWorld::SetStringArrayPropertyRequest;
 using SetIntArrayPropertyRequest = TempoWorld::SetIntArrayPropertyRequest;
 using SetFloatArrayPropertyRequest = TempoWorld::SetFloatArrayPropertyRequest;
+using CallFunctionRequest = TempoWorld::CallFunctionRequest;
 
 FTransform ToUnrealTransform(const TempoScripting::Transform& Transform)
 {
@@ -89,7 +90,8 @@ void UTempoActorControlServiceSubsystem::RegisterScriptingServices(FTempoScripti
 		SimpleRequestHandler(&ActorControlAsyncService::RequestSetBoolArrayProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetBoolArrayPropertyRequest>),
 		SimpleRequestHandler(&ActorControlAsyncService::RequestSetStringArrayProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetStringArrayPropertyRequest>),
 		SimpleRequestHandler(&ActorControlAsyncService::RequestSetIntArrayProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetIntArrayPropertyRequest>),
-		SimpleRequestHandler(&ActorControlAsyncService::RequestSetFloatArrayProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetFloatArrayPropertyRequest>)
+		SimpleRequestHandler(&ActorControlAsyncService::RequestSetFloatArrayProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetFloatArrayPropertyRequest>),
+		SimpleRequestHandler(&ActorControlAsyncService::RequestCallFunction, &UTempoActorControlServiceSubsystem::CallObjectFunction)
 	);
 }
 
@@ -1002,4 +1004,33 @@ template <typename RequestType>
 void UTempoActorControlServiceSubsystem::SetProperty(const RequestType& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const
 {
 	ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), SetPropertyImpl(GetWorld(), Request));
+}
+
+void UTempoActorControlServiceSubsystem::CallObjectFunction(const CallFunctionRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const
+{
+	UObject* Object = nullptr;
+	const grpc::Status GetObjectStatus = GetObjectForRequest(GetWorld(), Request, Object);
+	if (!GetObjectStatus.ok())
+	{
+		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), GetObjectStatus);
+		return;
+	}
+
+	if (Request.function().empty())
+	{
+		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Function name must be specified"));
+		return;
+	}
+
+	const FName FunctionName(UTF8_TO_TCHAR(Request.function().c_str()));
+	UFunction* Function = Object->GetClass()->FindFunctionByName(FunctionName);
+	if (!Function)
+	{
+		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::NOT_FOUND, "Function not found"));
+		return;
+	}
+
+	Object->ProcessEvent(Function, nullptr);
+
+	ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status_OK);
 }
