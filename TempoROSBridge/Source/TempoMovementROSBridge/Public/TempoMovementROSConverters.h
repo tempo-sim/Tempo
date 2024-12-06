@@ -7,7 +7,7 @@
 #include "tempo_movement_ros_bridge/srv/get_commandable_vehicles.hpp"
 #include "tempo_movement_ros_bridge/srv/command_vehicle.hpp"
 
-#include "TempoMovement/VehicleControlService.grpc.pb.h"
+#include "TempoMovement/MovementControlService.grpc.pb.h"
 
 template <>
 struct TToROSConverter<tempo_movement_ros_bridge::srv::GetCommandableVehicles::Response, TempoMovement::CommandableVehiclesResponse>

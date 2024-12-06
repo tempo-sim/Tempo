@@ -26,6 +26,7 @@ public class TempoMovement : TempoModuleRules
 			new string[]
 			{
 				// Unreal
+				"AIModule",
 				"Core",
 				"Engine",
 				// Tempo
