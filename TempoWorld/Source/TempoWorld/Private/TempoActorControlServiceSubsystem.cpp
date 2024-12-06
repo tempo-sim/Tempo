@@ -406,9 +406,9 @@ void MarkRenderStateDirty(UObject* Object)
 	{
 		Actor->MarkComponentsRenderStateDirty();
 	}
-	else if (UActorComponent* Component = Cast<UActorComponent>(Object))
+	else if (USceneComponent* SceneComponent = Cast<USceneComponent>(Object))
 	{
-		Component->MarkRenderStateDirty();
+		SceneComponent->MarkRenderStateDirty();
 	}
 }
 
