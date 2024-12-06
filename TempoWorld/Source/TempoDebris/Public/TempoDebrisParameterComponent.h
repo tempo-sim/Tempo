@@ -86,19 +86,10 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	TSoftObjectPtr<UDataTable> MeshDistributionDataTable;
 
-	// Whether to limit sampling to along the center spline.
+	// All splines on actors overlapping the parent actor with this tag will be used for center keepout.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	bool bSampleAlongCenterSpline = false;
+	FName CenterSplineTag = TEXT("PCGDebris_CenterKeepout");
 
-	// Whether to perform center keepout on splines from all actors or only the parent.
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	bool bCenterKeepoutAllActors = true;
-
-	// The indices of splines on the parent actor to be used for center spline sampling (if enabled)
-	// and/or on all actors overlapping the parent actor for center keepout (':' for all)
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	FString CenterSplineIndices = TEXT(":");
-	
 	// The total width around a center spline *in meters* to remove instances, if enabled.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(UIMin=0.0, UIMax=50.0, ClampMin=0.0, ClampMax=50.0))
 	float CenterKeepoutWidth = 10.0;

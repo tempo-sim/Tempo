@@ -3,7 +3,7 @@
 #pragma once
 
 #include "PCGSettings.h"
-#include "Elements/PCGPointOperationElementBase.h"
+#include "Elements/PCGPointProcessingElementBase.h"
 
 #include "PCGCopyAttributeFromNearest.generated.h"
 
@@ -45,7 +45,7 @@ public:
 	double MaximumDistance = 20000.0;
 };
 
-class FPCGCopyAttributeFromNearestElement : public FPCGPointOperationElementBase
+class FPCGCopyAttributeFromNearestElement : public FPCGPointProcessingElementBase
 {
 protected:
 	virtual bool ExecuteInternal(FPCGContext* Context) const override;
