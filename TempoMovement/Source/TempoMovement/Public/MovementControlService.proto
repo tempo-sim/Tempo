@@ -14,7 +14,7 @@ message VehicleCommandRequest {
   float steering = 3;
 }
 
-service VehicleControlService {
+service MovementControlService {
   rpc GetCommandableVehicles(TempoScripting.Empty) returns (CommandableVehiclesResponse);
   
   rpc CommandVehicle(VehicleCommandRequest) returns (TempoScripting.Empty);

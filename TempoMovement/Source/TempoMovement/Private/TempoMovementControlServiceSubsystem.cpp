@@ -1,42 +1,42 @@
 // Copyright Tempo Simulation, LLC. All Rights Reserved
 
-#include "TempoVehicleControlServiceSubsystem.h"
+#include "TempoMovementControlServiceSubsystem.h"
 
 #include "TempoVehicleControlInterface.h"
-#include "TempoMovement/VehicleControlService.grpc.pb.h"
+#include "TempoMovement/MovementControlService.grpc.pb.h"
 #include "TempoScripting/Empty.pb.h"
 
 #include "Kismet/GameplayStatics.h"
 
-using VehicleControlService = TempoMovement::VehicleControlService;
-using VehicleControlAsyncService = TempoMovement::VehicleControlService::AsyncService;
+using MovementControlService = TempoMovement::MovementControlService;
+using MovementControlAsyncService = TempoMovement::MovementControlService::AsyncService;
 using VehicleCommandRequest = TempoMovement::VehicleCommandRequest;
 using CommandableVehiclesResponse = TempoMovement::CommandableVehiclesResponse;
 using TempoEmpty = TempoScripting::Empty;
 
-void UTempoVehicleControlServiceSubsystem::RegisterScriptingServices(FTempoScriptingServer& ScriptingServer)
+void UTempoMovementControlServiceSubsystem::RegisterScriptingServices(FTempoScriptingServer& ScriptingServer)
 {
-	ScriptingServer.RegisterService<VehicleControlService>(
-		SimpleRequestHandler(&VehicleControlAsyncService::RequestCommandVehicle, &UTempoVehicleControlServiceSubsystem::HandleVehicleCommand),
-		SimpleRequestHandler(&VehicleControlAsyncService::RequestGetCommandableVehicles, &UTempoVehicleControlServiceSubsystem::GetCommandableVehicles)
+	ScriptingServer.RegisterService<MovementControlService>(
+		SimpleRequestHandler(&MovementControlAsyncService::RequestGetCommandableVehicles, &UTempoMovementControlServiceSubsystem::GetCommandableVehicles),
+		SimpleRequestHandler(&MovementControlAsyncService::RequestCommandVehicle, &UTempoMovementControlServiceSubsystem::CommandVehicle)
 		);
 }
 
-void UTempoVehicleControlServiceSubsystem::Initialize(FSubsystemCollectionBase& Collection)
+void UTempoMovementControlServiceSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
 
-	FTempoScriptingServer::Get().ActivateService<VehicleControlService>(this);
+	FTempoScriptingServer::Get().ActivateService<MovementControlService>(this);
 }
 
-void UTempoVehicleControlServiceSubsystem::Deinitialize()
+void UTempoMovementControlServiceSubsystem::Deinitialize()
 {
 	Super::Deinitialize();
 
-	FTempoScriptingServer::Get().DeactivateService<VehicleControlService>();
+	FTempoScriptingServer::Get().DeactivateService<MovementControlService>();
 }
 
-void UTempoVehicleControlServiceSubsystem::GetCommandableVehicles(const TempoScripting::Empty& Request, const TResponseDelegate<TempoMovement::CommandableVehiclesResponse>& ResponseContinuation) const
+void UTempoMovementControlServiceSubsystem::GetCommandableVehicles(const TempoScripting::Empty& Request, const TResponseDelegate<TempoMovement::CommandableVehiclesResponse>& ResponseContinuation) const
 {
 	TArray<AActor*> VehicleControllers;
 	UGameplayStatics::GetAllActorsWithInterface(GetWorld(), UTempoVehicleControlInterface::StaticClass(), VehicleControllers);
@@ -52,7 +52,7 @@ void UTempoVehicleControlServiceSubsystem::GetCommandableVehicles(const TempoScr
 }
 
 
-void UTempoVehicleControlServiceSubsystem::HandleVehicleCommand(const VehicleCommandRequest& Request, const TResponseDelegate<TempoEmpty>& ResponseContinuation) const
+void UTempoMovementControlServiceSubsystem::CommandVehicle(const VehicleCommandRequest& Request, const TResponseDelegate<TempoEmpty>& ResponseContinuation) const
 {
 	TArray<AActor*> VehicleControllers;
 	UGameplayStatics::GetAllActorsWithInterface(GetWorld(), UTempoVehicleControlInterface::StaticClass(), VehicleControllers);

@@ -8,7 +8,7 @@
 
 #include "CoreMinimal.h"
 
-#include "TempoVehicleControlServiceSubsystem.generated.h"
+#include "TempoMovementControlServiceSubsystem.generated.h"
 
 namespace TempoScripting
 {
@@ -22,7 +22,7 @@ namespace TempoMovement
 }
 
 UCLASS()
-class TEMPOMOVEMENT_API UTempoVehicleControlServiceSubsystem : public UTempoGameWorldSubsystem, public ITempoScriptable
+class TEMPOMOVEMENT_API UTempoMovementControlServiceSubsystem : public UTempoGameWorldSubsystem, public ITempoScriptable
 {
 	GENERATED_BODY()
 	
@@ -35,5 +35,5 @@ public:
 
 	void GetCommandableVehicles(const TempoScripting::Empty& Request, const TResponseDelegate<TempoMovement::CommandableVehiclesResponse>& ResponseContinuation) const;
 	
-	void HandleVehicleCommand(const TempoMovement::VehicleCommandRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const;
+	void CommandVehicle(const TempoMovement::VehicleCommandRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const;
 };
