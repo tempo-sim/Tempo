@@ -151,6 +151,9 @@ bool FPCGAssignRandomMeshAttribute::ExecuteInternal(FPCGContext* Context) const
 	{
 		NormalizedMeshDistribution.Add(Elem.Key, Elem.Value / TotalProbability);
 	}
+
+	// Sort the normalized distribution to guarantee determinism.
+	// It *does* seem like iteration over TMap is deterministic, but just to be safe.
 	NormalizedMeshDistribution.KeySort([](const TSoftObjectPtr<UStaticMesh>& Left, const TSoftObjectPtr<UStaticMesh>& Right)
 	{
 		// Arbitrary choice - null is less than not null and if both are null left is less.
