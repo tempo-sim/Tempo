@@ -151,6 +151,19 @@ bool FPCGAssignRandomMeshAttribute::ExecuteInternal(FPCGContext* Context) const
 	{
 		NormalizedMeshDistribution.Add(Elem.Key, Elem.Value / TotalProbability);
 	}
+	NormalizedMeshDistribution.KeySort([](const TSoftObjectPtr<UStaticMesh>& Left, const TSoftObjectPtr<UStaticMesh>& Right)
+	{
+		// Arbitrary choice - null is less than not null and if both are null left is less.
+		if (!Left.IsValid())
+		{
+			return true;
+		}
+		if (!Right.IsValid())
+		{
+			return false;
+		}
+		return Left.Get()->GetName() < Right.Get()->GetName();
+	});
 
 	FRandomStream RandomStream(Context->SourceComponent.IsValid() ? Context->SourceComponent->Seed : Context->GetSeed());
 
