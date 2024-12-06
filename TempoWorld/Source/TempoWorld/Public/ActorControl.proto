@@ -183,6 +183,12 @@ message SetFloatArrayPropertyRequest {
   repeated float values = 4;
 }
 
+message CallFunctionRequest {
+  string actor = 1;
+  string component = 2;
+  string function = 3;
+}
+
 service ActorControlService {
     rpc SpawnActor(SpawnActorRequest) returns (SpawnActorResponse);
 
@@ -227,4 +233,6 @@ service ActorControlService {
     rpc SetIntArrayProperty(SetIntArrayPropertyRequest) returns (TempoScripting.Empty);
 
     rpc SetFloatArrayProperty(SetFloatArrayPropertyRequest) returns (TempoScripting.Empty);
+
+    rpc CallFunction(CallFunctionRequest) returns (TempoScripting.Empty);
 }
