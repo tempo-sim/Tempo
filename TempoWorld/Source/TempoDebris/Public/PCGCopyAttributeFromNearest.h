@@ -9,6 +9,7 @@
 
 /**
  * Finds the nearest point (inherently a n*n operation) and copies the specified attribute from it.
+ * This is very similar to and borrows a lot from PCGDistance.
  */
 UCLASS(BlueprintType, ClassGroup = (Procedural))
 class UPCGCopyAttributeFromNearestSettings : public UPCGSettings
@@ -39,9 +40,9 @@ public:
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings)
 	FPCGAttributePropertySelector OutputAttribute = FPCGAttributePropertySelector::CreateAttributeSelector(TEXT("$Density"));
 	
-    /** A maximum distance to search, which is used as an optimization */
-    UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings, meta = (ClampMin = "1", PCG_Overridable))
-    double MaximumDistance = 20000.0;
+	/** A maximum distance to search, which is used as an optimization */
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings, meta = (ClampMin = "1", PCG_Overridable))
+	double MaximumDistance = 20000.0;
 };
 
 class FPCGCopyAttributeFromNearestElement : public FPCGPointProcessingElementBase

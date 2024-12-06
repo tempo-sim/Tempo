@@ -44,6 +44,7 @@ struct FStaticMeshDistribution: public FTableRowBase
 
 /**
  * Assigns a random mesh from the specified data table row to the specified attribute name.
+ * This is very similar to and borrows a lot from PCGDataTableElement. Also PCGCreateAttribute.
  */
 UCLASS(BlueprintType, ClassGroup = (Procedural), meta=(Keywords = "random mesh attribute"))
 class UPCGAssignRandomMeshAttributeSettings : public UPCGSettings
