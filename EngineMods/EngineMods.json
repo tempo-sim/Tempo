@@ -10,9 +10,7 @@
         "ToolChain/TempoVCToolChain.cs.2"
       ],
       "Patch": [
-        [
-          "Configuration/UEBuildTarget.cs.patch.2"
-        ]
+        "Configuration/UEBuildTarget.cs.patch.2"
       ],
       "Remove": [
         "Tempo/TempoModuleRules.cs",
@@ -25,9 +23,7 @@
       "Type": "Plugin",
       "Root": "Engine/Plugins/Runtime/ZoneGraph",
       "Patch": [
-        [
           "ZoneGraph.patch.2"
-        ]
       ]
     }
   ],
