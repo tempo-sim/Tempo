@@ -1030,6 +1030,12 @@ void UTempoActorControlServiceSubsystem::CallObjectFunction(const CallFunctionRe
 		return;
 	}
 
+	if (Function->NumParms != 0)
+	{
+		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Only functions with no arguments and void return type are currently supported"));
+		return;
+	}
+
 	Object->ProcessEvent(Function, nullptr);
 
 	ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status_OK);
