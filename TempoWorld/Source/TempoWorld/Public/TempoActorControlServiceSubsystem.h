@@ -84,10 +84,6 @@ public:
 
 	void CallObjectFunction(const TempoWorld::CallFunctionRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const;
 
-	void OnTempoActorControlServiceActivated();
-
-	void OnTempoActorControlServiceDeactivated();
-	
 protected:
 	UPROPERTY()
 	TMap<const AActor*, FTransform> DeferredSpawnTransforms;

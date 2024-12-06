@@ -50,14 +50,7 @@ using SetStringArrayPropertyRequest = TempoWorld::SetStringArrayPropertyRequest;
 using SetEnumArrayPropertyRequest = TempoWorld::SetEnumArrayPropertyRequest;
 using SetIntArrayPropertyRequest = TempoWorld::SetIntArrayPropertyRequest;
 using SetFloatArrayPropertyRequest = TempoWorld::SetFloatArrayPropertyRequest;
-using SetClassArrayPropertyRequest = TempoWorld::SetClassArrayPropertyRequest;
-using SetAssetArrayPropertyRequest = TempoWorld::SetAssetArrayPropertyRequest;
-using SetActorArrayPropertyRequest = TempoWorld::SetActorArrayPropertyRequest;
-using SetComponentArrayPropertyRequest = TempoWorld::SetComponentArrayPropertyRequest;
 using CallFunctionRequest = TempoWorld::CallFunctionRequest;
-
-FTempoActorControlServiceActivated UTempoActorControlServiceSubsystem::TempoActorControlServiceActivated;
-FTempoActorControlServiceDeactivated UTempoActorControlServiceSubsystem::TempoActorControlServiceDeactivated;
 
 FTransform ToUnrealTransform(const TempoScripting::Transform& Transform)
 {
@@ -119,10 +112,6 @@ void UTempoActorControlServiceSubsystem::RegisterScriptingServices(FTempoScripti
 		SimpleRequestHandler(&ActorControlAsyncService::RequestSetEnumArrayProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetEnumArrayPropertyRequest>),
 		SimpleRequestHandler(&ActorControlAsyncService::RequestSetIntArrayProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetIntArrayPropertyRequest>),
 		SimpleRequestHandler(&ActorControlAsyncService::RequestSetFloatArrayProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetFloatArrayPropertyRequest>),
-		SimpleRequestHandler(&ActorControlAsyncService::RequestSetClassArrayProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetClassArrayPropertyRequest>),
-		SimpleRequestHandler(&ActorControlAsyncService::RequestSetAssetArrayProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetAssetArrayPropertyRequest>),
-		SimpleRequestHandler(&ActorControlAsyncService::RequestSetActorArrayProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetActorArrayPropertyRequest>),
-		SimpleRequestHandler(&ActorControlAsyncService::RequestSetComponentArrayProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetComponentArrayPropertyRequest>),
 		SimpleRequestHandler(&ActorControlAsyncService::RequestCallFunction, &UTempoActorControlServiceSubsystem::CallObjectFunction)
 	);
 }
