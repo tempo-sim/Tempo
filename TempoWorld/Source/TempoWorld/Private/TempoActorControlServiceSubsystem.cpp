@@ -822,7 +822,7 @@ void GetObjectProperties(const UObject* Object, GetPropertiesResponse& Response)
 				{
 					FVector ValueVector;
 					StructProperty->GetValue_InContainer(Container, &ValueVector);
-					*Value = FString::Printf(TEXT("{X:%f, Y:%f, Z:%f}"), ValueVector.X, ValueVector.Y, ValueVector.Z);
+					*Value = ValueVector.ToString();
 				}
 			}
 			else if (StructProperty->Struct->GetStructCPPName() == TEXT("FRotator"))
@@ -832,8 +832,8 @@ void GetObjectProperties(const UObject* Object, GetPropertiesResponse& Response)
 				{
 					FRotator ValueRotator;
 					StructProperty->GetValue_InContainer(Container, &ValueRotator);
-					ValueRotator = QuantityConverter<Deg2Rad,L2R>::Convert(ValueRotator);
-					*Value = FString::Printf(TEXT("{R:%f, P:%f, Y:%f}"), ValueRotator.Roll, ValueRotator.Pitch, ValueRotator.Yaw);
+					
+					*Value = QuantityConverter<Deg2Rad,L2R>::Convert(ValueRotator).ToString();
 				}
 			}
 			else if (StructProperty->Struct->GetStructCPPName() == TEXT("FColor"))
@@ -843,7 +843,7 @@ void GetObjectProperties(const UObject* Object, GetPropertiesResponse& Response)
 				{
 					FColor ValueColor;
 					StructProperty->GetValue_InContainer(Container, &ValueColor);
-					*Value = FString::Printf(TEXT("{R:%d, G:%d, B:%d}"), ValueColor.R, ValueColor.G, ValueColor.B);
+					*Value = FString::Printf(TEXT("r:%d g:%d b:%d"), ValueColor.R, ValueColor.G, ValueColor.B);
 				}
 			}
 			else if (StructProperty->Struct->GetStructCPPName() == TEXT("FLinearColor"))
@@ -862,7 +862,7 @@ void GetObjectProperties(const UObject* Object, GetPropertiesResponse& Response)
 				Type = StructProperty->Struct->GetStructCPPName();
 				if (Value)
 				{
-					*Value = TEXT("{");
+					*Value = TEXT("{ ");
 					void const* InnerPtr = StructProperty->ContainerPtrToValuePtr<void>(Container);
 					for (const FProperty* InnerProperty = StructProperty->Struct->PropertyLink; InnerProperty != nullptr; InnerProperty = InnerProperty->PropertyLinkNext)
 					{
@@ -870,9 +870,8 @@ void GetObjectProperties(const UObject* Object, GetPropertiesResponse& Response)
 						FString InnerType;
 						FString InnerValue;
 						GetPropertyTypeAndValue(InnerPtr, InnerProperty, InnerType, &InnerValue);
-						Value->Appendf(TEXT("%s:%s, "), *InnerName, *InnerValue);
+						Value->Appendf(TEXT("%s:%s "), *InnerName, *InnerValue);
 					}
-					Value->RemoveFromEnd(TEXT(", "));
 					Value->Append(TEXT("}"));
 				}
 			}
@@ -880,25 +879,7 @@ void GetObjectProperties(const UObject* Object, GetPropertiesResponse& Response)
 		else if (const FArrayProperty* ArrayProperty = CastField<FArrayProperty>(Property))
 		{
 			FString InnerType = TEXT("unsupported");
-			// First, get the inner type (even if the array is empty!)
-			GetPropertyTypeAndValue(nullptr, ArrayProperty->Inner, InnerType, nullptr);
-			if (Value)
-			{
-				*Value = TEXT("[");
-				if (InnerType != TEXT("unsupported"))
-				{
-					FScriptArrayHelper ArrayHelper{ ArrayProperty, Property->ContainerPtrToValuePtr<void>(Container) };
-					for (int32 I = 0; I < ArrayHelper.Num(); ++I)
-					{
-						FString Unused; // The inner type of all values must be the same, and we already know it.
-						FString InnerValue;
-						GetPropertyTypeAndValue(ArrayHelper.GetRawPtr(I), ArrayProperty->Inner, Unused, &InnerValue);
-						Value->Appendf(TEXT("%s, "), *InnerValue);
-					}
-					Value->RemoveFromEnd(TEXT(", "));
-				}
-				Value->Append(TEXT("]"));
-			}
+			GetPropertyTypeAndValue(Container, ArrayProperty->Inner, InnerType, nullptr);
 			Type = FString::Printf(TEXT("array<%s>"), *InnerType);
 		}
 		else
@@ -990,35 +971,8 @@ void UTempoActorControlServiceSubsystem::GetComponentProperties(const GetCompone
 	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
 }
 
-FString SplitPropertyName(FString& PropertyName)
-{
-	for (int32 CharIdx = 0; CharIdx < PropertyName.Len(); ++CharIdx)
-	{
-		if (PropertyName[CharIdx] == '.' || PropertyName[CharIdx] == '[')
-		{
-			// Chop everything before
-			const FString FirstPropertyName = PropertyName.LeftChop(PropertyName.Len() - CharIdx);
-			// Chop everything after
-			PropertyName.RightChopInline(CharIdx + 1);
-			return FirstPropertyName;
-		}
-		if (PropertyName[CharIdx] == ']')
-		{
-			// Chop everything before
-			const FString FirstPropertyName = PropertyName.LeftChop(PropertyName.Len() - CharIdx);
-			// Chop everything after (also chopping the '.' after the ']', if it's there)
-			PropertyName.RightChopInline(CharIdx + (CharIdx + 1 < PropertyName.Len() && PropertyName[CharIdx + 1] == '.' ? 2 : 1));
-			return FirstPropertyName;
-		}
-	}
-
-	const FString FirstPropertyName = PropertyName;
-	PropertyName.Empty(); // Nothing left
-	return FirstPropertyName;
-}
-
 template <typename RequestType>
-grpc::Status GetPropertyForRequest(const UObject* Object, const RequestType& Request, FProperty*& Property, FString& InnerPropertyName)
+grpc::Status GetPropertyForRequest(const UObject* Object, const RequestType& Request, FProperty*& Property, FString* InnerPropertyName=nullptr)
 {
 	FString PropertyName(UTF8_TO_TCHAR(Request.property().c_str()));
 
@@ -1027,99 +981,16 @@ grpc::Status GetPropertyForRequest(const UObject* Object, const RequestType& Req
 		return grpc::Status(grpc::FAILED_PRECONDITION, "Property must be specified");
 	}
 
-	const FString FirstPropertyName = SplitPropertyName(PropertyName);
-	InnerPropertyName = PropertyName;
+	PropertyName.Split(TEXT("."), &PropertyName, InnerPropertyName);
 
 	const UClass* Class = Object->GetClass();
-	Property = Class->FindPropertyByName(FName(FirstPropertyName));
+	Property = Class->FindPropertyByName(FName(PropertyName));
 
-	if (!Property)
+	if (InnerPropertyName && !InnerPropertyName->IsEmpty() && !CastField<FStructProperty>(Property))
 	{
-		return grpc::Status(grpc::FAILED_PRECONDITION, "Property not found");
+		return grpc::Status(grpc::FAILED_PRECONDITION, "Inner properties can only be specified on structs");
 	}
 
-	if (!InnerPropertyName.IsEmpty() && !(CastField<FStructProperty>(Property) || CastField<FArrayProperty>(Property)))
-	{
-		return grpc::Status(grpc::FAILED_PRECONDITION, "Inner properties can only be specified on structs and arrays");
-	}
-
-	return grpc::Status_OK;
-}
-
-template <typename PropertyType, typename ValueType>
-grpc::Status SetSinglePropertyValue(void* ValuePtr, PropertyType* Property, const ValueType& Value)
-{
-	Property->SetPropertyValue(ValuePtr, Value);
-	return grpc::Status_OK;
-}
-
-int64 GetEnumValueByAuthoredName(const UEnum* Enum, const FString& Name)
-{
-	const int32 NumEnums = Enum->NumEnums();
-	int32 Index = INDEX_NONE;
-	for (int32 I = 0; I < NumEnums; ++I)
-	{
-		if (Enum->GetAuthoredNameStringByIndex(I).Equals(Name))
-		{
-			Index = I;
-			break;
-		}
-	}
-	if (Index == INDEX_NONE)
-	{
-		return INDEX_NONE;
-	}
-	return Enum->GetValueByIndex(Index);
-}
-
-template <>
-grpc::Status SetSinglePropertyValue<FEnumProperty, FString>(void* ValuePtr, FEnumProperty* Property, const FString& ValueStr)
-{
-	const UEnum* PropertyEnum = Property->GetEnum();
-	const int64 Value = GetEnumValueByAuthoredName(PropertyEnum, ValueStr);
-	if (Value == INDEX_NONE)
-	{
-		return grpc::Status(grpc::INVALID_ARGUMENT, "Invalid enum value");
-	}
-	const FNumericProperty* EnumIntProperty = Property->GetUnderlyingProperty();
-	EnumIntProperty->SetIntPropertyValue(ValuePtr, Value);
-	return grpc::Status_OK;
-}
-
-template <>
-grpc::Status SetSinglePropertyValue<FByteProperty, FString>(void* ValuePtr, FByteProperty* Property, const FString& ValueStr)
-{
-	const UEnum* PropertyEnum = Property->Enum;
-	const int64 Value = GetEnumValueByAuthoredName(PropertyEnum, ValueStr);
-	if (Value == INDEX_NONE)
-	{
-		return grpc::Status(grpc::INVALID_ARGUMENT, "Invalid enum value");
-	}
-	Property->SetPropertyValue(ValuePtr, PropertyEnum->GetValueByIndex(Value));
-	return grpc::Status_OK;
-}
-
-template <>
-grpc::Status SetSinglePropertyValue<FObjectProperty, UObject*>(void* ValuePtr, FObjectProperty* Property, UObject* const& ValueObj)
-{
-	Property->SetObjectPropertyValue(ValuePtr, ValueObj);
-	return grpc::Status_OK;
-}
-
-template <>
-grpc::Status SetSinglePropertyValue<FByteProperty, int32>(void* ValuePtr, FByteProperty* Property, const int32& ValueInt)
-{
-	if (ValueInt > TNumericLimits<uint8>::Max())
-	{
-		const FString ErrorMsg = FString::Printf(TEXT("Cannot set byte property %s with too-large value %d"), *Property->GetName(), ValueInt);
-		return grpc::Status(grpc::OUT_OF_RANGE, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
-	}
-	if (ValueInt < 0)
-	{
-		const FString ErrorMsg = FString::Printf(TEXT("Cannot set byte property %s with negative value %d"), *Property->GetName(), ValueInt);
-		return grpc::Status(grpc::OUT_OF_RANGE, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
-	}
-	Property->SetPropertyValue(ValuePtr, ValueInt);
 	return grpc::Status_OK;
 }
 
@@ -1127,11 +998,6 @@ template <typename PropertyType, typename ValueType>
 grpc::Status SetSinglePropertyInContainer(void* Container, FProperty* Property, const FString& PropertyName, const ValueType& Value)
 {
 	void* ValuePtr = Property->ContainerPtrToValuePtr<void>(Container);
-
-	FString CurrentPropertyName = PropertyName;
-	const FString FirstPropertyName = SplitPropertyName(CurrentPropertyName);
-	FString InnerPropertyName = CurrentPropertyName;
-	
 	if (const FStructProperty* StructProperty = CastField<FStructProperty>(Property))
 	{
 		if (PropertyName.IsEmpty())
@@ -1139,57 +1005,28 @@ grpc::Status SetSinglePropertyInContainer(void* Container, FProperty* Property, 
 			return grpc::Status(grpc::FAILED_PRECONDITION, "Struct inner property must be specified");
 		}
 
+		FString CurrentPropertyName = PropertyName;
+		FString InnerPropertyName;
+		PropertyName.Split(TEXT("."), &CurrentPropertyName, &InnerPropertyName);
+
 		for (FProperty* InnerProperty = StructProperty->Struct->PropertyLink; InnerProperty != nullptr; InnerProperty = InnerProperty->PropertyLinkNext)
 		{
-			if (InnerProperty->GetAuthoredName() == FirstPropertyName)
+			if (InnerProperty->GetAuthoredName() == CurrentPropertyName)
 			{
 				return SetSinglePropertyInContainer<PropertyType>(ValuePtr, InnerProperty, InnerPropertyName, Value);
 			}
 		}
-		return grpc::Status(grpc::NOT_FOUND, "No matching property found for " + std::string(TCHAR_TO_UTF8(*FirstPropertyName)));
-	}
-	if (const FArrayProperty* ArrayProperty = CastField<FArrayProperty>(Property))
-	{
-		if (PropertyName.IsEmpty())
-		{
-			return grpc::Status(grpc::FAILED_PRECONDITION, "ArrayIndex must be specified");
-		}
-
-		if (!FirstPropertyName.IsNumeric() || FirstPropertyName.Contains(FString(TEXT("."))) || FirstPropertyName.Contains(FString(TEXT("-"))))
-		{
-			return grpc::Status(grpc::FAILED_PRECONDITION, "ArrayIndex must be a non-negative integer (" + std::string(TCHAR_TO_UTF8(*FirstPropertyName)));
-		}
-		const int32 ElementIndex = FCString::Atoi(*FirstPropertyName);
-
-		FScriptArrayHelper ArrayHelper{ ArrayProperty, ValuePtr };
-
-		if (ElementIndex < 0)
-		{
-			return grpc::Status(grpc::FAILED_PRECONDITION, "Invalid index (less than zero)");
-		}
-		if (ElementIndex > ArrayHelper.Num())
-		{
-			return grpc::Status(grpc::FAILED_PRECONDITION, "Invalid index (greater than length of array)");
-		}
-		if (ElementIndex == ArrayHelper.Num())
-		{
-			ArrayHelper.InsertValues(ArrayHelper.Num(), 1);
-		}
-		
-		return SetSinglePropertyInContainer<PropertyType, ValueType>(ArrayHelper.GetRawPtr(ElementIndex), ArrayProperty->Inner, InnerPropertyName, Value);
+		return grpc::Status(grpc::NOT_FOUND, "No matching property found");
 	}
 
-	if (!InnerPropertyName.IsEmpty())
-	{
-		return grpc::Status(grpc::FAILED_PRECONDITION, "Inner property not found");
-	}
 	PropertyType* TypedProperty = CastField<PropertyType>(Property);
 	if (!TypedProperty)
 	{
 		return grpc::Status(grpc::FAILED_PRECONDITION, "Property did not have correct type");
 	}
 
-	return SetSinglePropertyValue(ValuePtr, TypedProperty, Value);
+	TypedProperty->SetPropertyValue(ValuePtr, Value);
+	return grpc::Status_OK;
 }
 
 template <typename PropertyType, typename RequestType, typename ValueType>
@@ -1210,26 +1047,13 @@ grpc::Status SetSinglePropertyImpl(const UWorld* World, const RequestType& Reque
 
 	FString InnerPropertyName;
 	FProperty* Property = nullptr;
-	const grpc::Status GetPropertyStatus = GetPropertyForRequest(Object, Request, Property, InnerPropertyName);
+	const grpc::Status GetPropertyStatus = GetPropertyForRequest(Object, Request, Property, &InnerPropertyName);
 	if (!GetPropertyStatus.ok())
 	{
 		return GetPropertyStatus;
 	}
 
-#if WITH_EDITOR
-	if (World->WorldType == EWorldType::Editor)
-	{
-		Object->PreEditChange(Property);
-	}
-#endif
 	const grpc::Status SetStatus = SetSinglePropertyInContainer<PropertyType>(Object, Property, InnerPropertyName, Value);
-#if WITH_EDITOR
-	if (World->WorldType == EWorldType::Editor)
-	{
-		FPropertyChangedEvent Event(Property);
-		Object->PostEditChangeProperty(Event);
-	}
-#endif
 	if (!SetStatus.ok())
 	{
 		return SetStatus;
