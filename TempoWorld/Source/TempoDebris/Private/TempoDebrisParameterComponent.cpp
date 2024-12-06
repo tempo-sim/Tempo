@@ -52,5 +52,7 @@ void UTempoDebrisParameterComponent::SyncPCGParameters(const FTempoDebrisParamet
 		GraphInstance->SetGraphParameter(TEXT("MeshDistributionName"), Params.MeshDistribution);
 		GraphInstance->SetGraphParameter(TEXT("MeshDistributionDataTable"), MeshDistributionDataTable.ToSoftObjectPath());
 		GraphInstance->SetGraphParameter(TEXT("CenterSplineTag"), CenterSplineTag);
+
+		TargetedPCGComponent->GenerateLocal(true);
 	}
 }
