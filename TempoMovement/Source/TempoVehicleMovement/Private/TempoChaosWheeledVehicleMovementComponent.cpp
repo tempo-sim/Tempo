@@ -17,13 +17,31 @@ void UTempoChaosWheeledVehicleMovementComponent::HandleDrivingCommand(const FDri
 	{
 		if (Input > 0.0)
 		{
-			SetThrottleInput(Input);
-			SetBrakeInput(0.0);
+			if (VehicleState.ForwardSpeed > 0.0)
+			{
+				SetThrottleInput(Input);
+				SetBrakeInput(0.0);
+			}
+			else
+			{
+				SetTargetGear(1, false);
+				SetThrottleInput(0.0);
+				SetBrakeInput(Input);
+			}
 		}
 		else
 		{
-			SetBrakeInput(-Input);
-			SetThrottleInput(0.0);
+			if (VehicleState.ForwardSpeed > 0.0 || !bReverseEnabled)
+			{
+				SetBrakeInput(-Input);
+				SetThrottleInput(0.0);
+			}
+			else
+			{
+				SetTargetGear(-1, false);
+				SetThrottleInput(-Input);
+				SetBrakeInput(0.0);
+			}
 		}
 	};
 	
