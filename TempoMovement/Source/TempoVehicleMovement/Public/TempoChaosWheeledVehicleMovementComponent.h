@@ -23,4 +23,8 @@ public:
 	virtual FVector GetAngularVelocity() override { return VehicleState.VehicleWorldAngularVelocity; }
 	
 	virtual void HandleDrivingCommand(const FDrivingCommand& Command) override;
+
+protected:
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	bool bReverseEnabled = false;
 };

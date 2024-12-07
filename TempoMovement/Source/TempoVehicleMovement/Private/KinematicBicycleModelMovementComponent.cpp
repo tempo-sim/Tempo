@@ -31,6 +31,10 @@ void UKinematicBicycleModelMovementComponent::TickComponent(float DeltaTime, ELe
 		DeltaVelocity = FMath::Max(-LinearVelocity, DeltaVelocity);
 	}
 	LinearVelocity += DeltaVelocity;
+	if (!bReverseEnabled)
+	{
+		LinearVelocity = FMath::Max(LinearVelocity, 0.0);
+	}
 	const float Beta = FMath::DegreesToRadians(SteeringAngle + HeadingAngle);
 	Velocity = LinearVelocity * FVector(FMath::Cos(Beta), FMath::Sin(Beta), 0.0);
 	AngularVelocity = FMath::RadiansToDegrees(LinearVelocity * FMath::Sin(FMath::DegreesToRadians(SteeringAngle)) / Wheelbase);
