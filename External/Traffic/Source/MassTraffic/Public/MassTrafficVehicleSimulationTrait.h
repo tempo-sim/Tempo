@@ -55,6 +55,12 @@ struct MASSTRAFFIC_API FMassTrafficVehicleSimulationParameters : public FMassSha
 
 	UPROPERTY(EditAnywhere, Category = "Restrictions")
 	TArray<FZoneGraphTagFilter> LaneChangePriorityFilters;
+};
+
+USTRUCT()
+struct MASSTRAFFIC_API FMassTrafficVehiclePhysicsParameters : public FMassSharedFragment
+{
+	GENERATED_BODY()
 
 	/** Actor class of this agent when spawned in high resolution */
 	UPROPERTY(EditAnywhere, Category = "Physics")
@@ -75,6 +81,21 @@ public:
 
 	UPROPERTY(EditAnywhere, Category = "Variable Tick")
 	FMassSimulationVariableTickParameters VariableTickParams;
+
+	virtual void BuildTemplate(FMassEntityTemplateBuildContext& BuildContext, const UWorld& World) const override;
+};
+
+UCLASS(meta=(DisplayName="Traffic Vehicle Simulation Mass Control"))
+class MASSTRAFFIC_API UMassTrafficVehicleSimulationMassControlTrait : public UMassEntityTraitBase
+{
+	GENERATED_BODY()
+
+public:
+
+	UMassTrafficVehicleSimulationMassControlTrait(const FObjectInitializer& ObjectInitializer = FObjectInitializer::Get());
+
+	UPROPERTY(EditAnywhere, Category = "Mass Traffic")
+	FMassTrafficVehiclePhysicsParameters PhysicsParams;
 
 	virtual void BuildTemplate(FMassEntityTemplateBuildContext& BuildContext, const UWorld& World) const override;
 };
