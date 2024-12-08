@@ -72,7 +72,6 @@ void UMassTrafficUpdateDistanceToNearestObstacleProcessor::Execute(FMassEntityMa
 				// Debug
 				bool bVisLog = OptionalDebugFragments.IsEmpty() ? false : OptionalDebugFragments[Index].bVisLog > 0;
 
-			
 				auto CanNextVehicleBeForgotten = [&](
 					const FMassTrafficVehicleSimulationParameters& NextSimulationParams,
 					const FTransformFragment& NextTransformFragment,
@@ -328,12 +327,24 @@ void UMassTrafficUpdateDistanceToNearestObstacleProcessor::Execute(FMassEntityMa
 							const FTransformFragment& ObstacleTransformFragment = ObstacleView.GetFragmentData<FTransformFragment>();
 							const FMassVelocityFragment& ObstacleVelocityFragment = ObstacleView.GetFragmentData<FMassVelocityFragment>();
 							const FAgentRadiusFragment& ObstacleAgentRadiusFragment = ObstacleView.GetFragmentData<FAgentRadiusFragment>();
+							const FMassTrafficVehicleSimulationParameters* OptionalObstacleVehicleSimulationFragment = ObstacleView.GetConstSharedFragmentDataPtr<FMassTrafficVehicleSimulationParameters>();
 				
 							// Here we use the current and next vehicle transforms & velocities, which won't have been updated this
 							// frame yet, so they'll be a frame off. This should be good enough though.
-							float TimeToCollidingObstacle = UE::MassTraffic::TimeToCollision(
+							float TimeToCollidingObstacle = TNumericLimits<float>::Max();
+							if (OptionalObstacleVehicleSimulationFragment)
+							{
+								TimeToCollidingObstacle = UE::MassTraffic::TimeToCollision2D(
+									TransformFragment.GetTransform(), IdealVelocity, SimulationParams.HalfWidth, SimulationParams.HalfLength,
+									ObstacleTransformFragment.GetTransform(), ObstacleVelocityFragment.Value, OptionalObstacleVehicleSimulationFragment->HalfWidth, OptionalObstacleVehicleSimulationFragment->HalfLength);
+							}
+							else
+							{
+								TimeToCollidingObstacle = UE::MassTraffic::TimeToCollision(
 									TransformFragment.GetTransform().GetLocation(), IdealVelocity, AgentRadiusFragment.Radius,
 									ObstacleTransformFragment.GetTransform().GetLocation(), ObstacleVelocityFragment.Value, ObstacleAgentRadiusFragment.Radius);
+							}
+
 							if (TimeToCollidingObstacle < AvoidanceFragment.TimeToCollidingObstacle)
 							{
 								AvoidanceFragment.TimeToCollidingObstacle = TimeToCollidingObstacle;

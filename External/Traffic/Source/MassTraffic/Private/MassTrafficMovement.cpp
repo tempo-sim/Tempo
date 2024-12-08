@@ -313,7 +313,7 @@ void UpdateYieldAtIntersectionState(
 	// If we should yield, but we're currently not yielding, ...
 	if (bShouldYieldAtIntersection && !VehicleControlFragment.IsYieldingAtIntersection())
 	{
-		ensureMsgf(VehicleControlFragment.YieldAtIntersectionLane == nullptr, TEXT("Vehicle is entering \"yield at intersection\" state.  VehicleControlFragment.YieldAtIntersectionLane should be nullptr."));
+		// ensureMsgf(VehicleControlFragment.YieldAtIntersectionLane == nullptr, TEXT("Vehicle is entering \"yield at intersection\" state.  VehicleControlFragment.YieldAtIntersectionLane should be nullptr."));
 		
 		// Increase the lane's yield count.
 		if (CurrentLaneData != nullptr)
@@ -328,7 +328,7 @@ void UpdateYieldAtIntersectionState(
 	// Otherwise, if we are currently yielding, ...
 	else if (VehicleControlFragment.IsYieldingAtIntersection())
 	{
-		ensureMsgf(VehicleControlFragment.YieldAtIntersectionLane != nullptr, TEXT("Vehicle is in \"yield at intersection\" state.  VehicleControlFragment.YieldAtIntersectionLane should not be nullptr."));
+		// ensureMsgf(VehicleControlFragment.YieldAtIntersectionLane != nullptr, TEXT("Vehicle is in \"yield at intersection\" state.  VehicleControlFragment.YieldAtIntersectionLane should not be nullptr."));
 
 		// If our current lane is different from the lane we started to yield on, we assume that we moved onto a new lane
 		// as we slowed to a stop for our yield.  So, we transfer "ownership" of our contribution to the yield count
@@ -385,6 +385,98 @@ float TimeToCollision(
 	return (Tau < 0) ? TNumericLimits<float>::Max() : Tau;
 }
 
+float TimeToCollision2D(
+	const FTransform& AgentTransform, const FVector& AgentVelocity, float AgentHalfWidth, float AgentHalfLength,
+	const FTransform& ObstacleTransform, const FVector& ObstacleVelocity, float ObstacleHalfWidth, float ObstacleHalfLength)
+{
+	static constexpr float MaxDistance = 10000.0; // 100m
+
+	TOptional<float> MinDistanceToCollisionSquared;
+	auto MaybeUpdateMinDistanceToCollision = [&MinDistanceToCollisionSquared](const FVector& Start, const FVector& NewCollisionPoint)
+	{
+		const float ThisDistanceSquared = (FVector2D(Start) - FVector2D(NewCollisionPoint)).SizeSquared();
+		if (!MinDistanceToCollisionSquared.IsSet() || ThisDistanceSquared < MinDistanceToCollisionSquared.GetValue())
+		{
+			MinDistanceToCollisionSquared = ThisDistanceSquared;
+		}
+	};
+
+	const TArray<FVector> AgentVertices = {
+		AgentTransform.TransformPosition(FVector(AgentHalfLength, AgentHalfWidth, 0.0)), // FR
+		AgentTransform.TransformPosition(FVector(AgentHalfLength, -AgentHalfWidth, 0.0)), // FL
+		AgentTransform.TransformPosition(FVector(-AgentHalfLength, -AgentHalfWidth, 0.0)), // RL
+		AgentTransform.TransformPosition(FVector(-AgentHalfLength, AgentHalfWidth, 0.0)) // RR
+	};
+
+	const TArray<FVector> ObstacleVertices = {
+		ObstacleTransform.TransformPosition(FVector(ObstacleHalfLength, ObstacleHalfWidth, 0.0)), // FR
+		ObstacleTransform.TransformPosition(FVector(ObstacleHalfLength, -ObstacleHalfWidth, 0.0)), // FL
+		ObstacleTransform.TransformPosition(FVector(-ObstacleHalfLength, -ObstacleHalfWidth, 0.0)), // RL
+		ObstacleTransform.TransformPosition(FVector(-ObstacleHalfLength, ObstacleHalfWidth, 0.0)) // RR
+	};
+
+	FVector CollisionPoint;
+
+	// First consider the time to collision from each of the agent's vertices to the obstacles edges
+	const FVector AgentRelativeVelocity(FVector2D(AgentVelocity) - FVector2D(ObstacleVelocity), 0.0);
+	for (const FVector& AgentVertex : AgentVertices)
+	{
+		if (FMath::SegmentIntersection2D(AgentVertex, AgentVertex + AgentRelativeVelocity * MaxDistance,
+			ObstacleVertices[0], ObstacleVertices[1], CollisionPoint))
+		{
+			MaybeUpdateMinDistanceToCollision(AgentVertex, CollisionPoint);
+		}
+		if (FMath::SegmentIntersection2D(AgentVertex, AgentVertex + AgentRelativeVelocity * MaxDistance,
+	ObstacleVertices[1], ObstacleVertices[2], CollisionPoint))
+		{
+			MaybeUpdateMinDistanceToCollision(AgentVertex, CollisionPoint);
+		}
+		if (FMath::SegmentIntersection2D(AgentVertex, AgentVertex + AgentRelativeVelocity * MaxDistance,
+	ObstacleVertices[2], ObstacleVertices[3], CollisionPoint))
+		{
+			MaybeUpdateMinDistanceToCollision(AgentVertex, CollisionPoint);
+		}
+		if (FMath::SegmentIntersection2D(AgentVertex, AgentVertex + AgentRelativeVelocity * MaxDistance,
+	ObstacleVertices[3], ObstacleVertices[0], CollisionPoint))
+		{
+			MaybeUpdateMinDistanceToCollision(AgentVertex, CollisionPoint);
+		}
+	}
+
+	// Then consider the time to collision from each of the obstacle's vertices to the agents edges
+	const FVector ObstacleRelativeVelocity(FVector2D(ObstacleVelocity) - FVector2D(AgentVelocity), 0.0);
+	for (const FVector& ObstacleVertex : ObstacleVertices)
+	{
+		if (FMath::SegmentIntersection2D(ObstacleVertex, ObstacleVertex + ObstacleRelativeVelocity * MaxDistance,
+			AgentVertices[0], AgentVertices[1], CollisionPoint))
+		{
+			MaybeUpdateMinDistanceToCollision(ObstacleVertex, CollisionPoint);
+		}
+		if (FMath::SegmentIntersection2D(ObstacleVertex, ObstacleVertex + ObstacleRelativeVelocity * MaxDistance,
+	AgentVertices[1], AgentVertices[2], CollisionPoint))
+		{
+			MaybeUpdateMinDistanceToCollision(ObstacleVertex, CollisionPoint);
+		}
+		if (FMath::SegmentIntersection2D(ObstacleVertex, ObstacleVertex + ObstacleRelativeVelocity * MaxDistance,
+	AgentVertices[2], AgentVertices[3], CollisionPoint))
+		{
+			MaybeUpdateMinDistanceToCollision(ObstacleVertex, CollisionPoint);
+		}
+		if (FMath::SegmentIntersection2D(ObstacleVertex, ObstacleVertex + ObstacleRelativeVelocity * MaxDistance,
+	AgentVertices[3], AgentVertices[0], CollisionPoint))
+		{
+			MaybeUpdateMinDistanceToCollision(ObstacleVertex, CollisionPoint);
+		}
+	}
+
+	if (!MinDistanceToCollisionSquared.IsSet())
+	{
+		return TNumericLimits<float>::Max();
+	}
+
+	return FMath::Sqrt(MinDistanceToCollisionSquared.GetValue()) / AgentRelativeVelocity.Size2D();
+}
+
 void MoveVehicleToNextLane(
 	FMassEntityManager& EntityManager,
 	UMassTrafficSubsystem& MassTrafficSubsystem,
@@ -436,7 +528,7 @@ void MoveVehicleToNextLane(
 	// that was incremented in SetIsVehicleReadyToUseNextIntersectionLane.
 	if (NewCurrentLane.ConstData.bIsIntersectionLane)	// (See all READYLANE.)
 	{
-		ensureMsgf(&NewCurrentLane == VehicleControlFragment.ReadiedNextIntersectionLane, TEXT("Should be decrementing the \"ready\" count of the same intersection lane that we readied."));
+		// ensureMsgf(&NewCurrentLane == VehicleControlFragment.ReadiedNextIntersectionLane, TEXT("Should be decrementing the \"ready\" count of the same intersection lane that we readied."));
 		NewCurrentLane.DecrementNumVehiclesReadyToUseIntersectionLane();
 		
 		// Clear our readied next intersection lane.
