@@ -19,6 +19,12 @@ public:
 	
 	virtual void HandleDrivingInput(const FNormalizedDrivingInput& Input) override;
 
+	virtual float GetMaxAcceleration() const override { return MaxAcceleration; }
+
+	virtual float GetMaxDeceleration() const override { return MaxDeceleration; }
+
+	virtual float GetMaxSteerAngle() const override { return MaxSteerAngle; }
+
 protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	float MaxAcceleration = 200.0; // CM/S/S (~0.2g)

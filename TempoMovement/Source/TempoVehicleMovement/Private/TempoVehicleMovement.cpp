@@ -1,4 +1,6 @@
-﻿#include "TempoVehicleMovement.h"
+﻿// Copyright Tempo Simulation, LLC. All Rights Reserved
+
+#include "TempoVehicleMovement.h"
 
 #define LOCTEXT_NAMESPACE "FTempoVehicleMovementModule"
 
