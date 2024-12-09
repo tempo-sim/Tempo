@@ -334,13 +334,15 @@ void UMassTrafficUpdateDistanceToNearestObstacleProcessor::Execute(FMassEntityMa
 							float TimeToCollidingObstacle = TNumericLimits<float>::Max();
 							if (OptionalObstacleVehicleSimulationFragment)
 							{
-								TimeToCollidingObstacle = UE::MassTraffic::TimeToCollision2D(
-									TransformFragment.GetTransform(), IdealVelocity, SimulationParams.HalfWidth, SimulationParams.HalfLength,
-									ObstacleTransformFragment.GetTransform(), ObstacleVelocityFragment.Value, OptionalObstacleVehicleSimulationFragment->HalfWidth, OptionalObstacleVehicleSimulationFragment->HalfLength);
+								const FVector2D AgentExtents(SimulationParams.HalfWidth, SimulationParams.HalfLength);
+								const FVector2D ObstacleExtents(OptionalObstacleVehicleSimulationFragment->HalfWidth, OptionalObstacleVehicleSimulationFragment->HalfLength);
+								TimeToCollidingObstacle = UE::MassTraffic::TimeToCollisionBox2D(
+									TransformFragment.GetTransform(), IdealVelocity, FBox2D(-AgentExtents, AgentExtents),
+									ObstacleTransformFragment.GetTransform(), ObstacleVelocityFragment.Value, FBox2D(-ObstacleExtents, ObstacleExtents));
 							}
 							else
 							{
-								TimeToCollidingObstacle = UE::MassTraffic::TimeToCollision(
+								TimeToCollidingObstacle = UE::MassTraffic::TimeToCollisionSphere(
 									TransformFragment.GetTransform().GetLocation(), IdealVelocity, AgentRadiusFragment.Radius,
 									ObstacleTransformFragment.GetTransform().GetLocation(), ObstacleVelocityFragment.Value, ObstacleAgentRadiusFragment.Radius);
 							}

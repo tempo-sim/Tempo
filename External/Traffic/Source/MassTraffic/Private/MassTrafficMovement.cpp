@@ -361,7 +361,7 @@ void UpdateYieldAtIntersectionState(
 	}
 }
 
-float TimeToCollision(
+float TimeToCollisionSphere(
 	const FVector& AgentLocation, const FVector& AgentVelocity, float AgentRadius,
 	const FVector& ObstacleLocation, const FVector& ObstacleVelocity, float ObstacleRadius)
 {
@@ -385,10 +385,18 @@ float TimeToCollision(
 	return (Tau < 0) ? TNumericLimits<float>::Max() : Tau;
 }
 
-float TimeToCollision2D(
-	const FTransform& AgentTransform, const FVector& AgentVelocity, float AgentHalfWidth, float AgentHalfLength,
-	const FTransform& ObstacleTransform, const FVector& ObstacleVelocity, float ObstacleHalfWidth, float ObstacleHalfLength)
+float TimeToCollisionBox2D(
+	const FTransform& AgentTransform, const FVector& AgentVelocity, const FBox2D& AgentBox,
+	const FTransform& ObstacleTransform, const FVector& ObstacleVelocity, const FBox2D& ObstacleBox)
 {
+	const FBox AgentWorldBox = FBox(FVector(AgentBox.Min, 0.0), FVector(AgentBox.Max, 0.0)).TransformBy(AgentTransform);
+	const FBox ObstacleWorldBox = FBox(FVector(ObstacleBox.Min, 0.0), FVector(ObstacleBox.Max, 0.0)).TransformBy(AgentTransform);
+	if (AgentWorldBox.IntersectXY(ObstacleWorldBox))
+	{
+		// Already colliding
+		return 0.0;
+	}
+
 	static constexpr float MaxDistance = 10000.0; // 100m
 
 	TOptional<float> MinDistanceToCollisionSquared;
@@ -401,18 +409,20 @@ float TimeToCollision2D(
 		}
 	};
 
+	const FVector2D AgentExtents = AgentBox.GetExtent();
 	const TArray<FVector> AgentVertices = {
-		AgentTransform.TransformPosition(FVector(AgentHalfLength, AgentHalfWidth, 0.0)), // FR
-		AgentTransform.TransformPosition(FVector(AgentHalfLength, -AgentHalfWidth, 0.0)), // FL
-		AgentTransform.TransformPosition(FVector(-AgentHalfLength, -AgentHalfWidth, 0.0)), // RL
-		AgentTransform.TransformPosition(FVector(-AgentHalfLength, AgentHalfWidth, 0.0)) // RR
+		AgentTransform.TransformPosition(FVector(AgentExtents.X, AgentExtents.Y, 0.0)), // FR
+		AgentTransform.TransformPosition(FVector(AgentExtents.X, -AgentExtents.Y, 0.0)), // FL
+		AgentTransform.TransformPosition(FVector(-AgentExtents.X, -AgentExtents.Y, 0.0)), // RL
+		AgentTransform.TransformPosition(FVector(-AgentExtents.X, AgentExtents.Y, 0.0)) // RR
 	};
 
+	const FVector2D ObstacleExtents = ObstacleBox.GetExtent();
 	const TArray<FVector> ObstacleVertices = {
-		ObstacleTransform.TransformPosition(FVector(ObstacleHalfLength, ObstacleHalfWidth, 0.0)), // FR
-		ObstacleTransform.TransformPosition(FVector(ObstacleHalfLength, -ObstacleHalfWidth, 0.0)), // FL
-		ObstacleTransform.TransformPosition(FVector(-ObstacleHalfLength, -ObstacleHalfWidth, 0.0)), // RL
-		ObstacleTransform.TransformPosition(FVector(-ObstacleHalfLength, ObstacleHalfWidth, 0.0)) // RR
+		ObstacleTransform.TransformPosition(FVector(ObstacleExtents.X, ObstacleExtents.Y, 0.0)), // FR
+		ObstacleTransform.TransformPosition(FVector(ObstacleExtents.X, -ObstacleExtents.Y, 0.0)), // FL
+		ObstacleTransform.TransformPosition(FVector(-ObstacleExtents.X, -ObstacleExtents.Y, 0.0)), // RL
+		ObstacleTransform.TransformPosition(FVector(-ObstacleExtents.X, ObstacleExtents.Y, 0.0)) // RR
 	};
 
 	FVector CollisionPoint;
