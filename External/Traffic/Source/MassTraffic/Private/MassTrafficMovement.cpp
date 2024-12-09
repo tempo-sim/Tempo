@@ -390,7 +390,7 @@ float TimeToCollisionBox2D(
 	const FTransform& ObstacleTransform, const FVector& ObstacleVelocity, const FBox2D& ObstacleBox)
 {
 	const FBox AgentWorldBox = FBox(FVector(AgentBox.Min, 0.0), FVector(AgentBox.Max, 0.0)).TransformBy(AgentTransform);
-	const FBox ObstacleWorldBox = FBox(FVector(ObstacleBox.Min, 0.0), FVector(ObstacleBox.Max, 0.0)).TransformBy(AgentTransform);
+	const FBox ObstacleWorldBox = FBox(FVector(ObstacleBox.Min, 0.0), FVector(ObstacleBox.Max, 0.0)).TransformBy(ObstacleTransform);
 	if (AgentWorldBox.IntersectXY(ObstacleWorldBox))
 	{
 		// Already colliding

@@ -72,6 +72,7 @@ void UMassTrafficUpdateDistanceToNearestObstacleProcessor::Execute(FMassEntityMa
 				// Debug
 				bool bVisLog = OptionalDebugFragments.IsEmpty() ? false : OptionalDebugFragments[Index].bVisLog > 0;
 
+			
 				auto CanNextVehicleBeForgotten = [&](
 					const FMassTrafficVehicleSimulationParameters& NextSimulationParams,
 					const FTransformFragment& NextTransformFragment,

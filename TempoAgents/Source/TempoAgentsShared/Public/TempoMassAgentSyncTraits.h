@@ -45,26 +45,6 @@ protected:
 	FMassEntityQuery EntityQuery;
 };
 
-USTRUCT()
-struct FTempoMassTransformCopyToAgentTag : public FMassTag
-{
-	GENERATED_BODY()
-};
-
-UCLASS()
-class MASSACTORS_API UTempoMassTransformToSceneComponentTranslator : public UMassTranslator
-{
-	GENERATED_BODY()
-public:
-	UTempoMassTransformToSceneComponentTranslator();
-
-protected:
-	virtual void ConfigureQueries() override;
-	virtual void Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context) override;
-
-	FMassEntityQuery EntityQuery;
-};
-
 /** The trait keeps the actor's and entity's transforms in sync. */
 UCLASS(BlueprintType, EditInlineNew, CollapseCategories, meta = (DisplayName = "Agent Transform Sync"))
 class MASSACTORS_API UMassAgentTransformSyncTrait : public UMassAgentSyncTrait

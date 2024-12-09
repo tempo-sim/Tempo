@@ -90,43 +90,6 @@ void UTempoMassSceneComponentTransformToMassTranslator::Execute(FMassEntityManag
 }
 
 //----------------------------------------------------------------------//
-// UTempoMassTransformToSceneComponentTranslator
-//----------------------------------------------------------------------//
-UTempoMassTransformToSceneComponentTranslator::UTempoMassTransformToSceneComponentTranslator()
-	: EntityQuery(*this)
-{
-	ExecutionFlags = (int32)EProcessorExecutionFlags::AllNetModes;
-	RequiredTags.Add<FTempoMassTransformCopyToAgentTag>();
-	ExecutionOrder.ExecuteInGroup = UE::Mass::ProcessorGroupNames::UpdateWorldFromMass;
-	ExecutionOrder.ExecuteAfter.Add(UE::Mass::ProcessorGroupNames::Movement);
-	bRequiresGameThreadExecution = true;
-}
-
-void UTempoMassTransformToSceneComponentTranslator::ConfigureQueries()
-{
-	AddRequiredTagsToQuery(EntityQuery);
-	EntityQuery.AddRequirement<FSceneComponentWrapperFragment>(EMassFragmentAccess::ReadWrite);
-	EntityQuery.AddRequirement<FTransformFragment>(EMassFragmentAccess::ReadOnly);
-	EntityQuery.RequireMutatingWorldAccess(); // due to mutating World by setting component transform
-}
-
-void UTempoMassTransformToSceneComponentTranslator::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
-{
-	EntityQuery.ForEachEntityChunk(EntityManager, Context, [this](FMassExecutionContext& Context)
-		{
-			const TArrayView<FSceneComponentWrapperFragment> SceneComponentList = Context.GetMutableFragmentView<FSceneComponentWrapperFragment>();
-			const TConstArrayView<FTransformFragment> LocationList = Context.GetFragmentView<FTransformFragment>();
-			for (int i = 0; i < SceneComponentList.Num(); ++i)
-			{
-				if (USceneComponent* SceneComp = SceneComponentList[i].Component.Get())
-				{
-					SceneComp->SetWorldTransform(LocationList[i].GetTransform(), /*bSweep=*/false);
-				}
-			}
-		});
-}
-
-//----------------------------------------------------------------------//
 //  UMassAgentTransformSyncTrait
 //----------------------------------------------------------------------//
 void UMassAgentTransformSyncTrait::BuildTemplate(FMassEntityTemplateBuildContext& BuildContext, const UWorld& World) const
@@ -147,6 +110,10 @@ void UMassAgentTransformSyncTrait::BuildTemplate(FMassEntityTemplateBuildContext
 					TransformFragment.GetMutableTransform() = SceneComponent->GetComponentTransform();
 				}
 			}
+			else
+			{
+				ensureMsgf(false, TEXT("MassAgentTransformSyncTrait only supports Actor owners."));
+			}
 		});
 
 	if (EnumHasAnyFlags(SyncDirection, EMassTranslationDirection::ActorToMass))
@@ -156,6 +123,6 @@ void UMassAgentTransformSyncTrait::BuildTemplate(FMassEntityTemplateBuildContext
 
 	if (EnumHasAnyFlags(SyncDirection, EMassTranslationDirection::MassToActor))
 	{
-		BuildContext.AddTranslator<UTempoMassTransformToSceneComponentTranslator>();
+		ensureMsgf(false, TEXT("Actor must be the authority.  Entity as the authority is not currently supported."));
 	}
 }
