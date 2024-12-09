@@ -208,11 +208,69 @@ namespace
 		return Count;
 	}
 
+	FORCEINLINE bool AreAnyCrosswalkLanesOpenInCurrentPeriod(FMassTrafficIntersectionFragment& IntersectionFragment, const UMassCrowdSubsystem* MassCrowdSubsystem)
+	{
+		if (!IsValid(MassCrowdSubsystem))
+		{
+			UE_LOG(LogMassTraffic, Error, TEXT("%s - Null crowd subsystem"), ANSI_TO_TCHAR(__FUNCTION__));
+			return false;
+		}
+		
+		FMassTrafficPeriod& CurrentPeriod = IntersectionFragment.GetCurrentPeriod();
+		
+		for (const int32 CrosswalkLaneIndex : CurrentPeriod.CrosswalkLanes)
+		{
+			const FZoneGraphLaneHandle LaneHandle(CrosswalkLaneIndex, IntersectionFragment.ZoneGraphDataHandle);
+			if (MassCrowdSubsystem->GetLaneState(LaneHandle) == ECrowdLaneState::Opened)
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	FORCEINLINE bool AreAllCurrentCrosswalkLanesOpenNextPeriod(FMassTrafficIntersectionFragment& IntersectionFragment)
+	{
+		const FMassTrafficPeriod& CurrentPeriod = IntersectionFragment.GetCurrentPeriod();
+		const FMassTrafficPeriod& NextPeriod = IntersectionFragment.GetNextPeriod();
+		
+		for (const int32 CrosswalkLaneIndex : CurrentPeriod.CrosswalkLanes)
+		{
+			if (!NextPeriod.CrosswalkLanes.Contains(CrosswalkLaneIndex))
+			{
+				return false;
+			}
+		}
+		
+		for (const int32 CrosswalkWaitingLaneIndex : CurrentPeriod.CrosswalkWaitingLanes)
+		{
+			if (!NextPeriod.CrosswalkWaitingLanes.Contains(CrosswalkWaitingLaneIndex))
+			{
+				return false;
+			}
+		}
+
+		return true;
+	}
+
 	
 	FORCEINLINE bool IsIntersectionClear(FMassTrafficIntersectionFragment& IntersectionFragment, const EMassTrafficIntersectionVehicleLaneType ClearTest, const FZoneGraphStorage& ZoneGraphStorage, const UMassCrowdSubsystem* MassCrowdSubsystem, const bool bIncludeReservedVehicles = true)
 	{
 		if (AreVehiclesClearOfIntersection(IntersectionFragment, ClearTest, bIncludeReservedVehicles) &&
 			ArePedestriansClearOfIntersection(IntersectionFragment, ZoneGraphStorage, MassCrowdSubsystem))
+		{
+			return true;
+		}
+
+		return false;
+	}
+	
+	FORCEINLINE bool IsIntersectionEffectivelyClearToAdvanceToNextPeriod(FMassTrafficIntersectionFragment& IntersectionFragment, const EMassTrafficIntersectionVehicleLaneType ClearTest, const FZoneGraphStorage& ZoneGraphStorage, const UMassCrowdSubsystem* MassCrowdSubsystem, const bool bIncludeReservedVehicles = true)
+	{
+		if (AreVehiclesClearOfIntersection(IntersectionFragment, ClearTest, bIncludeReservedVehicles) &&
+			(AreAnyCrosswalkLanesOpenInCurrentPeriod(IntersectionFragment, MassCrowdSubsystem) && AreAllCurrentCrosswalkLanesOpenNextPeriod(IntersectionFragment) ||
+			ArePedestriansClearOfIntersection(IntersectionFragment, ZoneGraphStorage, MassCrowdSubsystem)))
 		{
 			return true;
 		}
@@ -576,19 +634,7 @@ void UMassTrafficUpdateIntersectionsProcessor::Execute(FMassEntityManager& Entit
 			}
 
 			// See if any of this period's pedestrian lanes are actually open. (Just need to check waiting lanes.)
-			bool bPeriodHasAnyOpenCrosswalkLanes = false;
-			{
-				for (const int32 CrosswalkLaneIndex : CurrentPeriod.CrosswalkLanes)
-				{
-					const FZoneGraphLaneHandle LaneHandle(CrosswalkLaneIndex, IntersectionFragment.ZoneGraphDataHandle);
-					if (MassCrowdSubsystem.GetLaneState(LaneHandle) == ECrowdLaneState::Opened)
-					{
-						bPeriodHasAnyOpenCrosswalkLanes = true;
-						break;
-					}
-				}
-			}
-
+			const bool bPeriodHasAnyOpenCrosswalkLanes = AreAnyCrosswalkLanesOpenInCurrentPeriod(IntersectionFragment, &MassCrowdSubsystem);
 			
 			// Count down time remaining for this period.
 			
@@ -627,6 +673,8 @@ void UMassTrafficUpdateIntersectionsProcessor::Execute(FMassEntityManager& Entit
 					}
 					else
 					{
+						bool bAnyVehiclesOnOpenLanes = false;
+					
 						// A vehicle has entered the intersection. Close the lane it's on, and all the lanes from the
 						// same intersection side (using it's splitting lanes.)
 						for (FZoneGraphTrafficLaneData* TrafficLaneData : CurrentPeriod.VehicleLanes)
@@ -634,6 +682,17 @@ void UMassTrafficUpdateIntersectionsProcessor::Execute(FMassEntityManager& Entit
 							if (TrafficLaneData->NumVehiclesOnLane)
 							{
 								CloseLaneAndAllItsSplitLanes(*TrafficLaneData);
+								bAnyVehiclesOnOpenLanes = true;
+							}
+						}
+						
+						if (IntersectionFragment.NumSides == 3 || IntersectionFragment.NumSides == 4)
+						{
+							// Close all pedestrian lanes in the period, once at least one vehicle has entered the intersection.
+							if (bAnyVehiclesOnOpenLanes)
+							{
+								IntersectionFragment.ApplyLanesActionToCurrentPeriod(EMassTrafficPeriodLanesAction::None,
+									EMassTrafficPeriodLanesAction::HardClose, &MassCrowdSubsystem, false);
 							}
 						}
 
@@ -706,16 +765,24 @@ void UMassTrafficUpdateIntersectionsProcessor::Execute(FMassEntityManager& Entit
 			
 			if (IntersectionFragment.PeriodTimeRemaining <= 0.0f && PeriodTimeRemaining_BeforeUpdate > 0.0f)
 			{
-
+				// Don't close the pedestrian lanes if they're going to be open in the next period.
+				const EMassTrafficPeriodLanesAction PedestrianLanesAction =
+							bPeriodHasAnyOpenCrosswalkLanes && AreAllCurrentCrosswalkLanesOpenNextPeriod(IntersectionFragment) ?
+							EMassTrafficPeriodLanesAction::Open :
+							EMassTrafficPeriodLanesAction::HardClose;
+				
 				// Close all lanes that close in next period.
 				IntersectionFragment.ApplyLanesActionToCurrentPeriod(
-					EMassTrafficPeriodLanesAction::SoftClose, EMassTrafficPeriodLanesAction::HardClose,
+					EMassTrafficPeriodLanesAction::SoftClose, PedestrianLanesAction,
 					&MassCrowdSubsystem, false);
 				
 
 				IntersectionFragment.UpdateTrafficLightsForCurrentPeriod();
-				IntersectionFragment.PedestrianLightsShowStop();
 
+				if (PedestrianLanesAction == EMassTrafficPeriodLanesAction::HardClose)
+				{
+					IntersectionFragment.PedestrianLightsShowStop();
+				}
 				
 				// IMPORTANT - We have just closed lanes. Some vehicles may be overlapping the crosswalks, and will
 				// want to keep going, and will register their occupancy on one of the intersection lanes. We need to
@@ -736,7 +803,7 @@ void UMassTrafficUpdateIntersectionsProcessor::Execute(FMassEntityManager& Entit
 				const int32 StallCounterAlert = 1800;
 #endif
 				
-				if (!IsIntersectionClear(IntersectionFragment, EMassTrafficIntersectionVehicleLaneType::VehicleLane_ClosedInNextPeriod, *ZoneGraphStorage, &MassCrowdSubsystem))
+				if (!IsIntersectionEffectivelyClearToAdvanceToNextPeriod(IntersectionFragment, EMassTrafficIntersectionVehicleLaneType::VehicleLane_ClosedInNextPeriod, *ZoneGraphStorage, &MassCrowdSubsystem))
 				{
 #if DEBUG_INTERSECTION_STALLS
 					// See all INTERSTALL.
@@ -768,7 +835,10 @@ void UMassTrafficUpdateIntersectionsProcessor::Execute(FMassEntityManager& Entit
 				}
 				IntersectionFragment.StallCounter = 0;
 #endif
-				
+
+				// Before advancing to the next period,
+				// cache whether all crosswalk lanes in the current period are open in the next period.
+				const bool bAreAllCurrentCrosswalkLanesOpenNextPeriod = AreAllCurrentCrosswalkLanesOpenNextPeriod(IntersectionFragment);
 		
 				// Move on to the next period.
 				IntersectionFragment.AdvancePeriod();
@@ -799,10 +869,11 @@ void UMassTrafficUpdateIntersectionsProcessor::Execute(FMassEntityManager& Entit
 						RandomStream.FRand() <= MassTrafficSettings->StopSignPedestrianLaneOpenProbability;
 					
 					const EMassTrafficPeriodLanesAction PedestrianLanesAction =
-							bCanOpenPedestrianLanesByProbability &&
+							bPeriodHasAnyOpenCrosswalkLanes && bAreAllCurrentCrosswalkLanesOpenNextPeriod ||
+							(bCanOpenPedestrianLanesByProbability &&
 							NumPedestriansWaitingForIntersection(IntersectionFragment, *ZoneGraphStorage, &MassCrowdSubsystem) >= MinPedestrians &&
 							// WARNING - If there are no pedestrians in the level, this will never end up being executed, so the value will never be cleared -
-							!IsStoppedVehicleBlockingCrosswalk(IntersectionFragment, true) /*(See all CROSSWALKOVERLAP.)*/ ?
+							!IsStoppedVehicleBlockingCrosswalk(IntersectionFragment, true)) /*(See all CROSSWALKOVERLAP.)*/ ?
 						EMassTrafficPeriodLanesAction::Open :
 						EMassTrafficPeriodLanesAction::HardClose;
 

@@ -191,6 +191,18 @@ public:
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Config, Category="Speed|Stopping")
 	float StopSignBrakingTime = 4.0f;
 
+	// Min time (in seconds) for vehicles to remain stationary at stop signs.
+	// It is a "lower" minimum time since we'll be selecting a value between this
+	// and UpperMinStopSignRestTime.
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Config, Category="Speed|Stopping")
+	float LowerMinStopSignRestTime = 2.0f;
+
+	// Max time (in seconds) for vehicles to remain stationary at stop signs,
+	// given the intersection "period" logic allows them to proceed.
+	// Therefore, it is an "upper" minimum time.
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Config, Category="Speed|Stopping")
+	float UpperMinStopSignRestTime = 4.0f;
+
 	/**
 	 * Target speed along the CurrentLane is determined by looking at the curvature ahead of the 
 	 * current closest point on the spline, and slowing to turn. The distance ahead is determined by 

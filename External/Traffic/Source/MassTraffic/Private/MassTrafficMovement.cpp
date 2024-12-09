@@ -92,20 +92,25 @@ bool ShouldStopAtLaneExit(
 	float RandomFraction,
 	float LaneLength,
 	FZoneGraphTrafficLaneData* NextTrafficLaneData,
+	const FZoneGraphTrafficLaneData* ReadiedNextIntersectionLane,
 	const FVector2D& MinimumDistanceToNextVehicleRange,
+	const FVector2D& StoppingDistanceRange,
 	const FMassEntityManager& EntityManager,
 	bool& bOut_RequestDifferentNextLane,
 	bool& bInOut_CantStopAtLaneExit,
 	bool& bOut_IsFrontOfVehicleBeyondLaneExit,
 	bool& bOut_VehicleHasNoNextLane,
 	bool& bOut_VehicleHasNoRoom,
-	const float StandardTrafficPrepareToStopSeconds
+	bool& bOut_ShouldProceedAtStopSign,
+	const float StandardTrafficPrepareToStopSeconds,
+	const float TimeVehicleStopped,
+	const float MinVehicleStopSignRestTime,
+	const UWorld* World
 #if WITH_MASSTRAFFIC_DEBUG
 	, bool bVisLog
 	, const UObject* VisLogOwner
 	, const FTransform* VisLogTransform
 #endif
-	, const UWorld *World // ..for debugging
 	, const FVector* VehicleLocation // ..for debugging
 )
 {
@@ -113,6 +118,7 @@ bool ShouldStopAtLaneExit(
 	bOut_IsFrontOfVehicleBeyondLaneExit = false;
 	bOut_VehicleHasNoNextLane = false;
 	bOut_VehicleHasNoRoom = false;
+	bOut_ShouldProceedAtStopSign = false;
 	
 			
 	const float DistanceAlongLane_FrontOfVehicle = DistanceAlongLane + Radius;
@@ -161,43 +167,106 @@ bool ShouldStopAtLaneExit(
 			return true;
 		}
 	}
-
-
-	// Is the lane we chose closed, or about to close? (See all CANTSTOPLANEEXIT.)
-	if (!bInOut_CantStopAtLaneExit && (!NextTrafficLaneData->bIsOpen || NextTrafficLaneData->bIsAboutToClose))
+	
+	if (!bInOut_CantStopAtLaneExit)
 	{
-		if (!NextTrafficLaneData->bIsOpen)
+		// We should always attempt to stop at stop signs.
+		if (!NextTrafficLaneData->ConstData.bIsTrafficLightControlled && NextTrafficLaneData->ConstData.bIsIntersectionLane)
 		{
-			// If the lane is closed, then we can't stop if we're already beyond the end of the lane.
-			bInOut_CantStopAtLaneExit |= bOut_IsFrontOfVehicleBeyondLaneExit;
-		}
-		else if (NextTrafficLaneData->bIsAboutToClose)
-		{
-			// If the lane is about to close, then we can't stop if we won't be able to stop in time, or we're already
-			// beyond the end of the lane.
-			const float SecondsUntilClose = NextTrafficLaneData->FractionUntilClosed * StandardTrafficPrepareToStopSeconds;
-			const float SpeedUntilClose = SecondsUntilClose > 0.0 ? DistanceLeftToGo / SecondsUntilClose : TNumericLimits<float>::Max();
-			const bool bIsVehicleTooFast = (Speed > SpeedUntilClose);
-			bInOut_CantStopAtLaneExit |= (bIsVehicleTooFast || bOut_IsFrontOfVehicleBeyondLaneExit);
+			// Only perform the mandatory stop logic until our lane has been readied,
+			// then just wait for it to open.
+			if (NextTrafficLaneData != ReadiedNextIntersectionLane)
+			{
+				// Always plan on stopping at stop signs until we're close enough to the stop line.
+				// At this point, the logic in UpdateVehicleStopState will start the clock on our MinVehicleStopSignRestTime.
+				if (!IsVehicleNearStopLineAtIntersection(NextTrafficLaneData, DistanceAlongLane, LaneLength, Radius, RandomFraction, StoppingDistanceRange))
+				{
+					return true;
+				}
+			
+				const float CurrentTimeSeconds = World != nullptr ? World->GetTimeSeconds() : TNumericLimits<float>::Lowest();
+				if (CurrentTimeSeconds < TimeVehicleStopped + MinVehicleStopSignRestTime)
+				{
+					// Need to wait longer at the stop sign before proceeding.
+					return true;
+				}
+
+				// Signal to the caller that we are now ready to proceed at the stop sign.
+				bOut_ShouldProceedAtStopSign = true;
+			}
+			
+			// Now, we've performed our mandatory stop for some minimum wait time,
+			// but we need to remain stopped until the lane is open.
+			//
+			// Note:  There's a bit of a "chicken and egg" problem here in that the lane will never open
+			// until it has been "readied", but it won't be "readied" until we've signaled the caller
+			// via bOut_ShouldProceedAtStopSign.  However, once we have signaled the caller,
+			// the lane should be "readied" by next update, which will allow the lane to open
+			// via the intersection period logic as soon as it deems it appropriate.
+			return !NextTrafficLaneData->bIsOpen;
 		}
 
-		// Leave this here (so we only return true if can't stop AND we know we want to stop in the first place.)
-		if (!bInOut_CantStopAtLaneExit) // ..if we now have to stop
+		// Is the lane we chose closed, or about to close? (See all CANTSTOPLANEEXIT.)
+		if (!NextTrafficLaneData->bIsOpen || NextTrafficLaneData->bIsAboutToClose)
 		{
-			IF_MASSTRAFFIC_ENABLE_DEBUG( DrawDebugShouldStop(DebugDotSize, FColor::Red, "STOP", bVisLog, VisLogOwner, VisLogTransform) );
-			return true;
-		}
-		else
-		{
-			IF_MASSTRAFFIC_ENABLE_DEBUG( DrawDebugShouldStop(DebugDotSize, FColor::Yellow, "RUN", bVisLog, VisLogOwner, VisLogTransform) );
-			return false;			
+			if (!NextTrafficLaneData->bIsOpen)
+			{
+				// If the lane is closed, then we can't stop if we're already beyond the end of the lane.
+				bInOut_CantStopAtLaneExit |= bOut_IsFrontOfVehicleBeyondLaneExit;
+			}
+			else if (NextTrafficLaneData->bIsAboutToClose)
+			{
+				// If the lane is about to close, then we can't stop if we won't be able to stop in time, or we're already
+				// beyond the end of the lane.
+				const float SecondsUntilClose = NextTrafficLaneData->FractionUntilClosed * StandardTrafficPrepareToStopSeconds;
+				const float SpeedUntilClose = SecondsUntilClose > 0.0 ? DistanceLeftToGo / SecondsUntilClose : TNumericLimits<float>::Max();
+				const bool bIsVehicleTooFast = (Speed > SpeedUntilClose);
+				bInOut_CantStopAtLaneExit |= (bIsVehicleTooFast || bOut_IsFrontOfVehicleBeyondLaneExit);
+			}
+
+			// Leave this here (so we only return true if can't stop AND we know we want to stop in the first place.)
+			if (!bInOut_CantStopAtLaneExit) // ..if we now have to stop
+			{
+				IF_MASSTRAFFIC_ENABLE_DEBUG( DrawDebugShouldStop(DebugDotSize, FColor::Red, "STOP", bVisLog, VisLogOwner, VisLogTransform) );
+				return true;
+			}
+			else
+			{
+				IF_MASSTRAFFIC_ENABLE_DEBUG( DrawDebugShouldStop(DebugDotSize, FColor::Yellow, "RUN", bVisLog, VisLogOwner, VisLogTransform) );
+				return false;			
+			}
 		}
 	}
-	else
+	
+	IF_MASSTRAFFIC_ENABLE_DEBUG( DrawDebugShouldStop(DebugDotSize, FColor::Green, "GO", bVisLog, VisLogOwner, VisLogTransform) );
+	return false;
+}
+
+bool IsVehicleNearStopLineAtIntersection(
+	const FZoneGraphTrafficLaneData* NextLane,
+	const float DistanceAlongCurrentLane,
+	const float CurrentLaneLength,
+	const float AgentRadius,
+	const float RandomFraction,
+	const FVector2D& StoppingDistanceRange)
+{
+	if (NextLane == nullptr || !NextLane->ConstData.bIsIntersectionLane)
 	{
-		IF_MASSTRAFFIC_ENABLE_DEBUG( DrawDebugShouldStop(DebugDotSize, FColor::Green, "GO", bVisLog, VisLogOwner, VisLogTransform) );
-		return false;		
+		return false;
 	}
+
+	const float DistanceAlongLaneToStopAt = UE::MassTraffic::GetDistanceAlongLaneToStopAt(
+		AgentRadius,
+		CurrentLaneLength,
+		RandomFraction,
+		StoppingDistanceRange);
+
+	if (DistanceAlongCurrentLane < DistanceAlongLaneToStopAt - 150.0f/*1m safety fudge*/)
+	{
+		return false;
+	}
+
+	return true;
 }
 
 void UpdateYieldAtIntersectionState(
