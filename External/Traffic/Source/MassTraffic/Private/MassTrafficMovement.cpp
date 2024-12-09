@@ -313,7 +313,7 @@ void UpdateYieldAtIntersectionState(
 	// If we should yield, but we're currently not yielding, ...
 	if (bShouldYieldAtIntersection && !VehicleControlFragment.IsYieldingAtIntersection())
 	{
-		// ensureMsgf(VehicleControlFragment.YieldAtIntersectionLane == nullptr, TEXT("Vehicle is entering \"yield at intersection\" state.  VehicleControlFragment.YieldAtIntersectionLane should be nullptr."));
+		ensureMsgf(VehicleControlFragment.YieldAtIntersectionLane == nullptr, TEXT("Vehicle is entering \"yield at intersection\" state.  VehicleControlFragment.YieldAtIntersectionLane should be nullptr."));
 		
 		// Increase the lane's yield count.
 		if (CurrentLaneData != nullptr)
@@ -328,7 +328,7 @@ void UpdateYieldAtIntersectionState(
 	// Otherwise, if we are currently yielding, ...
 	else if (VehicleControlFragment.IsYieldingAtIntersection())
 	{
-		// ensureMsgf(VehicleControlFragment.YieldAtIntersectionLane != nullptr, TEXT("Vehicle is in \"yield at intersection\" state.  VehicleControlFragment.YieldAtIntersectionLane should not be nullptr."));
+		ensureMsgf(VehicleControlFragment.YieldAtIntersectionLane != nullptr, TEXT("Vehicle is in \"yield at intersection\" state.  VehicleControlFragment.YieldAtIntersectionLane should not be nullptr."));
 
 		// If our current lane is different from the lane we started to yield on, we assume that we moved onto a new lane
 		// as we slowed to a stop for our yield.  So, we transfer "ownership" of our contribution to the yield count
@@ -538,7 +538,7 @@ void MoveVehicleToNextLane(
 	// that was incremented in SetIsVehicleReadyToUseNextIntersectionLane.
 	if (NewCurrentLane.ConstData.bIsIntersectionLane)	// (See all READYLANE.)
 	{
-		// ensureMsgf(&NewCurrentLane == VehicleControlFragment.ReadiedNextIntersectionLane, TEXT("Should be decrementing the \"ready\" count of the same intersection lane that we readied."));
+		ensureMsgf(&NewCurrentLane == VehicleControlFragment.ReadiedNextIntersectionLane, TEXT("Should be decrementing the \"ready\" count of the same intersection lane that we readied."));
 		NewCurrentLane.DecrementNumVehiclesReadyToUseIntersectionLane();
 		
 		// Clear our readied next intersection lane.
