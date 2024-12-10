@@ -335,8 +335,8 @@ void UMassTrafficUpdateDistanceToNearestObstacleProcessor::Execute(FMassEntityMa
 							float TimeToCollidingObstacle = TNumericLimits<float>::Max();
 							if (OptionalObstacleVehicleSimulationFragment)
 							{
-								const FVector2D AgentExtents(SimulationParams.HalfWidth, SimulationParams.HalfLength);
-								const FVector2D ObstacleExtents(OptionalObstacleVehicleSimulationFragment->HalfWidth, OptionalObstacleVehicleSimulationFragment->HalfLength);
+								const FVector2D AgentExtents(SimulationParams.HalfLength, SimulationParams.HalfWidth);
+								const FVector2D ObstacleExtents(OptionalObstacleVehicleSimulationFragment->HalfLength, OptionalObstacleVehicleSimulationFragment->HalfWidth);
 								TimeToCollidingObstacle = UE::MassTraffic::TimeToCollisionBox2D(
 									TransformFragment.GetTransform(), IdealVelocity, FBox2D(-AgentExtents, AgentExtents),
 									ObstacleTransformFragment.GetTransform(), ObstacleVelocityFragment.Value, FBox2D(-ObstacleExtents, ObstacleExtents));
