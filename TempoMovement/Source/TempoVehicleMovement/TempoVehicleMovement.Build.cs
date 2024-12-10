@@ -10,6 +10,7 @@ public class TempoVehicleMovement : ModuleRules
             new string[]
             {
                 "Core",
+                "ChaosVehicles",
             }
         );
 

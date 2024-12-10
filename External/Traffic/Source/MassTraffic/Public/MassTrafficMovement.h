@@ -165,8 +165,10 @@ MASSTRAFFIC_API void UpdateYieldAtIntersectionState(
 	const bool bShouldGiveOpportunityForTurningVehiclesToReactivelyYieldAtIntersection);
 
 /** Avoidance */
-	
-MASSTRAFFIC_API float TimeToCollision(const FVector& AgentLocation, const FVector& AgentVelocity, float AgentRadius, const FVector& ObstacleLocation, const FVector& ObstacleVelocity, float ObstacleRadius);
+
+MASSTRAFFIC_API float TimeToCollisionSphere(const FVector& AgentLocation, const FVector& AgentVelocity, float AgentRadius, const FVector& ObstacleLocation, const FVector& ObstacleVelocity, float ObstacleRadius);
+
+MASSTRAFFIC_API float TimeToCollisionBox2D(const FTransform& AgentTransform, const FVector& AgentVelocity, const FBox2D& AgentBox, const FTransform& ObstacleTransform, const FVector& ObstacleVelocity, const FBox2D& ObstacleBox);
 
 /** Lane location eval */
 
