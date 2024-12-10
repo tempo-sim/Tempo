@@ -361,7 +361,7 @@ void UpdateYieldAtIntersectionState(
 	}
 }
 
-float TimeToCollision(
+float TimeToCollisionSphere(
 	const FVector& AgentLocation, const FVector& AgentVelocity, float AgentRadius,
 	const FVector& ObstacleLocation, const FVector& ObstacleVelocity, float ObstacleRadius)
 {
@@ -383,6 +383,120 @@ float TimeToCollision(
 	}
 	const float Tau = (B - FMath::Sqrt(Discriminator)) / A;
 	return (Tau < 0) ? TNumericLimits<float>::Max() : Tau;
+}
+
+float TimeToCollisionBox2D(
+	const FTransform& AgentTransform, const FVector& AgentVelocity, const FBox2D& AgentBox,
+	const FTransform& ObstacleTransform, const FVector& ObstacleVelocity, const FBox2D& ObstacleBox)
+{
+	static constexpr float MaxTime = 10.0; // 10 seconds
+
+	TOptional<float> MinDistanceToCollisionSquared;
+	auto MaybeUpdateMinDistanceToCollision = [&MinDistanceToCollisionSquared](const FVector& Start, const FVector& NewCollisionPoint)
+	{
+		const float ThisDistanceSquared = (FVector2D(Start) - FVector2D(NewCollisionPoint)).SizeSquared();
+		if (!MinDistanceToCollisionSquared.IsSet() || ThisDistanceSquared < MinDistanceToCollisionSquared.GetValue())
+		{
+			MinDistanceToCollisionSquared = ThisDistanceSquared;
+		}
+	};
+
+	const FVector2D AgentExtents = AgentBox.GetExtent();
+	const TArray<FVector> AgentVertices = {
+		AgentTransform.TransformPosition(FVector(AgentExtents.X, AgentExtents.Y, 0.0)), // FR
+		AgentTransform.TransformPosition(FVector(AgentExtents.X, -AgentExtents.Y, 0.0)), // FL
+		AgentTransform.TransformPosition(FVector(-AgentExtents.X, -AgentExtents.Y, 0.0)), // RL
+		AgentTransform.TransformPosition(FVector(-AgentExtents.X, AgentExtents.Y, 0.0)) // RR
+	};
+
+	const FVector2D ObstacleExtents = ObstacleBox.GetExtent();
+	const TArray<FVector> ObstacleVertices = {
+		ObstacleTransform.TransformPosition(FVector(ObstacleExtents.X, ObstacleExtents.Y, 0.0)), // FR
+		ObstacleTransform.TransformPosition(FVector(ObstacleExtents.X, -ObstacleExtents.Y, 0.0)), // FL
+		ObstacleTransform.TransformPosition(FVector(-ObstacleExtents.X, -ObstacleExtents.Y, 0.0)), // RL
+		ObstacleTransform.TransformPosition(FVector(-ObstacleExtents.X, ObstacleExtents.Y, 0.0)) // RR
+	};
+
+	for (const FVector& ObstacleVertex : ObstacleVertices)
+	{
+		const FVector2D AgentRelativeObstacleVertex(AgentTransform.InverseTransformPosition(ObstacleVertex));
+		if (AgentBox.IsInsideOrOn(AgentRelativeObstacleVertex))
+		{
+			// Already colliding
+			return 0.0;
+		}
+	}
+
+	for (const FVector& AgentVertex : AgentVertices)
+	{
+		const FVector2D ObstacleRelativeAgentVertex(ObstacleTransform.InverseTransformPosition(AgentVertex));
+		if (ObstacleBox.IsInsideOrOn(ObstacleRelativeAgentVertex))
+		{
+			// Already colliding
+			return 0.0;
+		}
+	}
+
+	FVector CollisionPoint;
+
+	// First consider the time to collision from each of the agent's vertices to the obstacles edges
+	const FVector AgentRelativeVelocity(FVector2D(AgentVelocity) - FVector2D(ObstacleVelocity), 0.0);
+	for (const FVector& AgentVertex : AgentVertices)
+	{
+		if (FMath::SegmentIntersection2D(AgentVertex, AgentVertex + AgentRelativeVelocity * MaxTime,
+			ObstacleVertices[0], ObstacleVertices[1], CollisionPoint))
+		{
+			MaybeUpdateMinDistanceToCollision(AgentVertex, CollisionPoint);
+		}
+		if (FMath::SegmentIntersection2D(AgentVertex, AgentVertex + AgentRelativeVelocity * MaxTime,
+	ObstacleVertices[1], ObstacleVertices[2], CollisionPoint))
+		{
+			MaybeUpdateMinDistanceToCollision(AgentVertex, CollisionPoint);
+		}
+		if (FMath::SegmentIntersection2D(AgentVertex, AgentVertex + AgentRelativeVelocity * MaxTime,
+	ObstacleVertices[2], ObstacleVertices[3], CollisionPoint))
+		{
+			MaybeUpdateMinDistanceToCollision(AgentVertex, CollisionPoint);
+		}
+		if (FMath::SegmentIntersection2D(AgentVertex, AgentVertex + AgentRelativeVelocity * MaxTime,
+	ObstacleVertices[3], ObstacleVertices[0], CollisionPoint))
+		{
+			MaybeUpdateMinDistanceToCollision(AgentVertex, CollisionPoint);
+		}
+	}
+
+	// Then consider the time to collision from each of the obstacle's vertices to the agents edges
+	const FVector ObstacleRelativeVelocity(FVector2D(ObstacleVelocity) - FVector2D(AgentVelocity), 0.0);
+	for (const FVector& ObstacleVertex : ObstacleVertices)
+	{
+		if (FMath::SegmentIntersection2D(ObstacleVertex, ObstacleVertex + ObstacleRelativeVelocity * MaxTime,
+			AgentVertices[0], AgentVertices[1], CollisionPoint))
+		{
+			MaybeUpdateMinDistanceToCollision(ObstacleVertex, CollisionPoint);
+		}
+		if (FMath::SegmentIntersection2D(ObstacleVertex, ObstacleVertex + ObstacleRelativeVelocity * MaxTime,
+	AgentVertices[1], AgentVertices[2], CollisionPoint))
+		{
+			MaybeUpdateMinDistanceToCollision(ObstacleVertex, CollisionPoint);
+		}
+		if (FMath::SegmentIntersection2D(ObstacleVertex, ObstacleVertex + ObstacleRelativeVelocity * MaxTime,
+	AgentVertices[2], AgentVertices[3], CollisionPoint))
+		{
+			MaybeUpdateMinDistanceToCollision(ObstacleVertex, CollisionPoint);
+		}
+		if (FMath::SegmentIntersection2D(ObstacleVertex, ObstacleVertex + ObstacleRelativeVelocity * MaxTime,
+	AgentVertices[3], AgentVertices[0], CollisionPoint))
+		{
+			MaybeUpdateMinDistanceToCollision(ObstacleVertex, CollisionPoint);
+		}
+	}
+
+	if (!MinDistanceToCollisionSquared.IsSet())
+	{
+		return TNumericLimits<float>::Max();
+	}
+
+	return FMath::Sqrt(MinDistanceToCollisionSquared.GetValue()) / AgentRelativeVelocity.Size2D();
 }
 
 void MoveVehicleToNextLane(
