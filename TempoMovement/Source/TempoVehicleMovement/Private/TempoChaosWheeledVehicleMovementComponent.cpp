@@ -8,8 +8,6 @@ UTempoChaosWheeledVehicleMovementComponent::UTempoChaosWheeledVehicleMovementCom
 {
 	bReverseAsBrake = false;
 	bThrottleAsBrake = false;
-	WheelTraceCollisionResponses.Vehicle = ECR_Ignore;
-	WheelTraceCollisionResponses.Pawn = ECR_Ignore;
 }
 
 void UTempoChaosWheeledVehicleMovementComponent::HandleDrivingCommand(const FDrivingCommand& Command)
@@ -19,8 +17,7 @@ void UTempoChaosWheeledVehicleMovementComponent::HandleDrivingCommand(const FDri
 	{
 		if (Input > 0.0)
 		{
-			static constexpr float NearlyStoppedSpeed = 1.0;
-			if (VehicleState.ForwardSpeed > -NearlyStoppedSpeed && GetCurrentGear() > -1)
+			if (VehicleState.ForwardSpeed > 0.0)
 			{
 				SetThrottleInput(Input);
 				SetBrakeInput(0.0);

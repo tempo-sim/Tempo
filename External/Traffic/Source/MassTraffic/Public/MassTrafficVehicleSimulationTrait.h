@@ -55,17 +55,11 @@ struct MASSTRAFFIC_API FMassTrafficVehicleSimulationParameters : public FMassCon
 	bool bAllowGoingStraightAtIntersections = true;
 
 	UPROPERTY(EditAnywhere, Category = "Restrictions")
-	FMassTrafficLanePriorityFilters LaneChangePriorityFilters;
-
-	UPROPERTY(EditAnywhere, Category = "Restrictions")
-	FMassTrafficLanePriorityFilters NextLanePriorityFilters;
-
-	UPROPERTY(EditAnywhere, Category = "Restrictions")
-	TMap<EZoneGraphTurnType, FMassTrafficLanePriorityFilters> TurningLanePriorityFilters;
+	TArray<FZoneGraphTagFilter> LaneChangePriorityFilters;
 };
 
 USTRUCT()
-struct MASSTRAFFIC_API FMassTrafficVehiclePhysicsParameters : public FMassConstSharedFragment
+struct MASSTRAFFIC_API FMassTrafficVehiclePhysicsParameters : public FMassSharedFragment
 {
 	GENERATED_BODY()
 
