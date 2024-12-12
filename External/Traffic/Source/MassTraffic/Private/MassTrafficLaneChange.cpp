@@ -1067,8 +1067,6 @@ bool ShouldPerformPreemptiveYieldAtIntersection(
 	{
 		if (!VehicleControlFragment.IsPreemptivelyYieldingAtIntersection())
 		{
-			// TODO:  Allow Crowd characters to "ready" their intersection lanes so that vehicles will pre-emptively yield to them.
-			
 			// A pre-emptive yield starts when a vehicle is ready to use the test lane before we are in the intersection.
 			return !(CurrentLaneData == LaneDataBeforeIntersection && TestLane.HasVehiclesReadyToUseIntersectionLane());	// (See all READYLANE.)
 		}
@@ -1287,7 +1285,7 @@ bool ShouldPerformReactiveYieldAtIntersection(
 			// *before* the double-yellow center line (or "effectively" *before* such a boundary).
 			const bool bOtherEntityOutOfTheWay = bOtherEntityHeadingAwayFromIntersectionExitLane
 				? NormalizedDistanceAlongTestLane > MassTrafficSettings->NormalizedYieldResumeLaneDistance_Crosswalk_AwayFromIntersectionExit
-				: NormalizedDistanceAlongTestLane < MassTrafficSettings->NormalizedYieldResumeLaneDistance_Crosswalk_TowardsIntersectionExit;
+				: NormalizedDistanceAlongTestLane < MassTrafficSettings->NormalizedYieldPedestrianCutoffLaneDistance_Crosswalk_TowardsIntersectionExit;
 
 			if (NormalizedDistanceAlongCurrentLane < NormalizedYieldCutoffLaneDistance && !bOtherEntityOutOfTheWay)
 			{
@@ -1340,7 +1338,6 @@ bool ShouldPerformReactiveYieldAtIntersection(
 				return true;
 			}
 
-			// TODO:  Is this a bug where we determine NormalizedYieldCutoffLaneDistance based on TestLane, rather than CurrentLaneData?  Seems like it.
 			const float NormalizedYieldCutoffLaneDistance =
 				TestLane.bTurnsLeft ? MassTrafficSettings->NormalizedYieldCutoffLaneDistance_Left :
 				TestLane.bTurnsRight ? MassTrafficSettings->NormalizedYieldCutoffLaneDistance_Right :

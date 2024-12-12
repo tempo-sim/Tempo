@@ -51,8 +51,15 @@ protected:
 	bool TryGenerateAndRegisterZoneShapeComponentsForCrosswalkIntersections(AActor& IntersectionQueryActor) const;
 	bool TryCreateZoneShapePointForCrosswalkIntersectionEntranceLocation(const AActor& IntersectionQueryActor, int32 CrosswalkIntersectionIndex, int32 CrosswalkIntersectionConnectionIndex, UZoneShapeComponent& ZoneShapeComponent, FZoneShapePoint& OutZoneShapePoint) const;
 	bool TryCreateZoneShapePointForCrosswalkControlPoint(const AActor& IntersectionQueryActor, int32 ConnectionIndex, int32 CrosswalkControlPointIndex, FZoneShapePoint& OutZoneShapePoint) const;
+
 	FZoneLaneProfile CreateDynamicLaneProfileForCrosswalk(const AActor& IntersectionQueryActor, int32 ConnectionIndex) const;
 	FZoneLaneProfile GetLaneProfileForCrosswalk(const AActor& IntersectionQueryActor, int32 ConnectionIndex) const;
+	
+	FZoneLaneProfile CreateCrosswalkIntersectionConnectorDynamicLaneProfile(const AActor& IntersectionQueryActor, int32 CrosswalkRoadModuleIndex) const;
+	FZoneLaneProfile GetCrosswalkIntersectionConnectorLaneProfile(const AActor& IntersectionQueryActor, int32 CrosswalkRoadModuleIndex) const;
+	
+	FZoneLaneProfile CreateCrosswalkIntersectionEntranceDynamicLaneProfile(const AActor& IntersectionQueryActor, int32 CrosswalkIntersectionIndex, int32 CrosswalkIntersectionConnectionIndex) const;
+	FZoneLaneProfile GetCrosswalkIntersectionEntranceLaneProfile(const AActor& IntersectionQueryActor, int32 CrosswalkIntersectionIndex, int32 CrosswalkIntersectionConnectionIndex) const;
 
 	// Shared functions
 	bool TryRegisterZoneShapeComponentWithActor(AActor& Actor, UZoneShapeComponent& ZoneShapeComponent) const;

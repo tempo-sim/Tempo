@@ -458,14 +458,12 @@ public:
 	// in order for yielding vehicle to resume motion after yielding.
 	UPROPERTY(EditAnywhere, Config, Category="Yield Behavior")
 	float NormalizedYieldResumeLaneDistance_Crosswalk_AwayFromIntersectionExit = 0.6f;
-
-	// TODO:  Fix-up name for "NormalizedYieldResumeLaneDistance_Crosswalk_TowardsIntersectionExit".  It's not a "resume" distance.
 	
 	// Normalized distance "Lead" *pedestrian* may travel through *crosswalk* lanes
 	// going *towards* the current Intersection "exit" lanes
 	// before vehicles must yield to the crosswalk lane.
 	UPROPERTY(EditAnywhere, Config, Category="Yield Behavior")
-	float NormalizedYieldResumeLaneDistance_Crosswalk_TowardsIntersectionExit = 0.2f;
+	float NormalizedYieldPedestrianCutoffLaneDistance_Crosswalk_TowardsIntersectionExit = 0.2f;
 
 	// Max distance from the end of the lane (leading up to an intersection)
 	// within which a vehicle is allowed to start a pre-emptive yield if other conditions apply.

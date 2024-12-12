@@ -197,14 +197,8 @@ void UTempoAgentsWorldSubsystem::SetupIntersectionLaneMap()
 
 			const FVector IntersectionQueryLocation = IntersectionEntranceLocation - IntersectionEntranceRightVector * LateralDistanceToIntersectionExitCenter;
 
-			// TODO:  Remove this debug sphere.
-			DrawDebugSphere(IntersectionQueryActor.GetWorld(), IntersectionQueryLocation, 25.0f, 16, FColor::Red, false, 10.0f);
-
 			const float DistanceToCrosswalkCenter = FMath::PointDistToSegment(IntersectionQueryLocation, CrosswalkStartControlPointLocation, CrosswalkEndControlPointLocation);
 			const float QueryRadius = FMath::Max(LateralDistanceToIntersectionExitCenter, DistanceToCrosswalkCenter);
-
-			// TODO:  Remove this debug sphere.
-			DrawDebugSphere(IntersectionQueryActor.GetWorld(), IntersectionQueryLocation, QueryRadius, 16, FColor::Purple, false, 10.0f);
 
 			const TArray<FName> RoadLaneTags = GetRoadLaneTags(*RoadQueryActor);
 			const TArray<FName> CrosswalkTags = ITempoIntersectionInterface::Execute_GetTempoCrosswalkTags(&IntersectionQueryActor, ConnectionIndex);

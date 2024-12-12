@@ -215,46 +215,37 @@ public:
 
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
 	bool ShouldGenerateZoneShapesForTempoCrosswalk(int32 ConnectionIndex) const;
-
-	// TODO:  Need to distinguish between functions which take a CrosswalkRoadModuleIndex and a CrosswalkIntersectionIndex.
+	
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
 	int32 GetNumConnectedTempoCrosswalkRoadModules() const;
 
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
-	AActor* GetConnectedTempoCrosswalkRoadModuleActor(int32 ConnectedRoadModuleIndex) const;
-
-	// TODO:  This should take a CrosswalkIntersectionIndex.
+	AActor* GetConnectedTempoCrosswalkRoadModuleActor(int32 CrosswalkRoadModuleIndex) const;
+	
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
-	float GetTempoCrosswalkWidth() const;
+	float GetTempoCrosswalkWidth(int32 ConnectionIndex) const;
 
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
 	TArray<FName> GetTempoCrosswalkTags(int32 ConnectionIndex) const;
-
-	// TODO:  This should take a CrosswalkIntersectionIndex.
+	
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
-	int32 GetNumTempoCrosswalkLanes() const;
-
-	// TODO:  This should take a CrosswalkIntersectionIndex.
+	int32 GetNumTempoCrosswalkLanes(int32 ConnectionIndex) const;
+	
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
 	int32 GetTempoCrosswalkStartEntranceLocationControlPointIndex(int32 ConnectionIndex) const;
-
-	// TODO:  This should take a CrosswalkIntersectionIndex.
+	
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
 	int32 GetTempoCrosswalkEndEntranceLocationControlPointIndex(int32 ConnectionIndex) const;
-
-	// TODO:  This should take a CrosswalkIntersectionIndex.
+	
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
 	FName GetLaneProfileOverrideNameForTempoCrosswalk(int32 ConnectionIndex) const;
-
-	// TODO:  This should take a CrosswalkIntersectionIndex.
+	
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
 	float GetTempoCrosswalkLaneWidth(int32 ConnectionIndex, int32 LaneIndex) const;
-
-	// TODO:  This should take a CrosswalkIntersectionIndex.
+	
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
 	EZoneLaneDirection GetTempoCrosswalkLaneDirection(int32 ConnectionIndex, int32 LaneIndex) const;
-
-	// TODO:  This should take a CrosswalkIntersectionIndex.
+	
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
 	TArray<FName> GetTempoCrosswalkLaneTags(int32 ConnectionIndex, int32 LaneIndex) const;
 
@@ -282,6 +273,21 @@ public:
 	int32 GetNumTempoCrosswalkIntersectionConnections(int32 CrosswalkIntersectionIndex) const;
 
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
+	int32 GetNumTempoCrosswalkIntersectionEntranceLanes(int32 CrosswalkIntersectionIndex, int32 CrosswalkIntersectionConnectionIndex) const;
+
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
+	FName GetTempoCrosswalkIntersectionEntranceLaneProfileOverrideName(int32 CrosswalkIntersectionIndex, int32 CrosswalkIntersectionConnectionIndex) const;
+
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
+	float GetTempoCrosswalkIntersectionEntranceLaneWidth(int32 CrosswalkIntersectionIndex, int32 CrosswalkIntersectionConnectionIndex, int32 LaneIndex) const;
+	
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
+	EZoneLaneDirection GetTempoCrosswalkIntersectionEntranceLaneDirection(int32 CrosswalkIntersectionIndex, int32 CrosswalkIntersectionConnectionIndex, int32 LaneIndex) const;
+	
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
+	TArray<FName> GetTempoCrosswalkIntersectionEntranceLaneTags(int32 CrosswalkIntersectionIndex, int32 CrosswalkIntersectionConnectionIndex, int32 LaneIndex) const;
+
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
 	FVector GetTempoCrosswalkIntersectionEntranceLocation(int32 CrosswalkIntersectionIndex, int32 CrosswalkIntersectionConnectionIndex, ETempoCoordinateSpace CoordinateSpace) const;
 
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
@@ -296,7 +302,30 @@ public:
 	// Crosswalk Intersection Connector Queries
 
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
-	FCrosswalkIntersectionConnectorInfo GetTempoCrosswalkIntersectionConnectorInfo(int32 CrosswalkIntersectionIndex) const;
+	FCrosswalkIntersectionConnectorInfo GetTempoCrosswalkIntersectionConnectorInfo(int32 CrosswalkRoadModuleIndex) const;
+
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
+	int32 GetNumTempoCrosswalkIntersectionConnectorLanes(int32 CrosswalkRoadModuleIndex) const;
+
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
+	FName GetTempoCrosswalkIntersectionConnectorLaneProfileOverrideName(int32 CrosswalkRoadModuleIndex) const;
+
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
+	float GetTempoCrosswalkIntersectionConnectorLaneWidth(int32 CrosswalkRoadModuleIndex, int32 LaneIndex) const;
+	
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
+	EZoneLaneDirection GetTempoCrosswalkIntersectionConnectorLaneDirection(int32 CrosswalkRoadModuleIndex, int32 LaneIndex) const;
+	
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
+	TArray<FName> GetTempoCrosswalkIntersectionConnectorLaneTags(int32 CrosswalkRoadModuleIndex, int32 LaneIndex) const;
+
+	// Crosswalk Indexing Conversion Queries
+
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
+	int32 GetTempoCrosswalkIntersectionIndexFromCrosswalkRoadModuleIndex(int32 CrosswalkRoadModuleIndex) const;
+	
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
+	int32 GetTempoCrosswalkRoadModuleIndexFromCrosswalkIntersectionIndex(int32 CrosswalkIntersectionIndex) const;
 
 	// Lane Filtering Queries
 
@@ -321,4 +350,7 @@ public:
 
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Commands")
 	void SetupTempoTrafficControllers();
+	
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Commands")
+	void SetupTempoIntersectionData();
 };
