@@ -32,7 +32,7 @@ struct FTempoMassTransformCopyToMassTag : public FMassTag
 };
 
 UCLASS()
-class MASSACTORS_API UTempoMassSceneComponentTransformToMassTranslator : public UMassTranslator
+class TEMPOAGENTSSHARED_API UTempoMassSceneComponentTransformToMassTranslator : public UMassTranslator
 {
 	GENERATED_BODY()
 public:
@@ -47,7 +47,7 @@ protected:
 
 /** The trait keeps the actor's and entity's transforms in sync. */
 UCLASS(BlueprintType, EditInlineNew, CollapseCategories, meta = (DisplayName = "Agent Transform Sync"))
-class MASSACTORS_API UMassAgentTransformSyncTrait : public UMassAgentSyncTrait
+class TEMPOAGENTSSHARED_API UMassAgentTransformSyncTrait : public UMassAgentSyncTrait
 {
 	GENERATED_BODY()
 
