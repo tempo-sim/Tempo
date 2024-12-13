@@ -36,8 +36,11 @@ namespace TempoWorld
 	class CallFunctionRequest;
 }
 
+DECLARE_MULTICAST_DELEGATE(FTempoActorControlServiceActivated);
+DECLARE_MULTICAST_DELEGATE(FTempoActorControlServiceDeactivated);
+
 UCLASS()
-class TEMPOWORLD_API UTempoActorControlServiceSubsystem : public UTempoGameWorldSubsystem, public ITempoScriptable
+class TEMPOWORLD_API UTempoActorControlServiceSubsystem : public UTempoWorldSubsystem, public ITempoScriptable
 {
 	GENERATED_BODY()
 
@@ -47,6 +50,8 @@ public:
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 
 	virtual void Deinitialize() override;
+
+	virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
 
 	void SpawnActor(const TempoWorld::SpawnActorRequest& Request, const TResponseDelegate<TempoWorld::SpawnActorResponse>& ResponseContinuation);
 	
@@ -72,6 +77,10 @@ public:
 
 	void CallObjectFunction(const TempoWorld::CallFunctionRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const;
 
+	void OnTempoActorControlServiceActivated();
+
+	void OnTempoActorControlServiceDeactivated();
+	
 protected:
 	UPROPERTY()
 	TMap<const AActor*, FTransform> DeferredSpawnTransforms;
@@ -79,4 +88,7 @@ protected:
 private:
 	template <typename RequestType>
 	void SetProperty(const RequestType& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const;
+
+	static FTempoActorControlServiceActivated TempoActorControlServiceActivated;
+	static FTempoActorControlServiceDeactivated TempoActorControlServiceDeactivated;
 };
