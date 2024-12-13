@@ -93,9 +93,12 @@ public:
 
 struct FPCGAssignRandomMeshAttributeContext : public FPCGContext, public IPCGAsyncLoadingContext {};
 
-class FPCGAssignRandomMeshAttribute : public IPCGElementWithCustomContext<FPCGAssignRandomMeshAttributeContext>
+// We tried to use IPCGElementWithCustomContext for this, but it causes unresolved symbol build errors on Windows.
+class FPCGAssignRandomMeshAttribute : public IPCGElement
 {
 public:
+	virtual FPCGContext* CreateContext() { return new FPCGAssignRandomMeshAttributeContext(); }
+
 	virtual bool CanExecuteOnlyOnMainThread(FPCGContext* Context) const override { return true; }
 	virtual bool IsCacheable(const UPCGSettings* InSettings) const override { return false; }
 
