@@ -34,6 +34,11 @@
 			"Name": "TempoTime",
 			"Type": "Runtime",
 			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "TempoCoreEditor",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
 		}
 	],
 	"PreBuildSteps": {
@@ -41,10 +46,10 @@
 			"$(PluginDir)\\Scripts\\PreBuild.bat \"$(EngineDir)\" \"$(ProjectFile)\" \"$(ProjectDir)\" \"$(PluginDir)\" \"$(TargetName)\" \"$(TargetConfiguration)\" \"$(TargetPlatform)\" \"$(PluginDir)\\Source\\ThirdParty\\gRPC\\Binaries\\Windows\""
 		],
 		"Mac": [
-			"$(PluginDir)/Scripts/PreBuild.sh \"$(EngineDir)\" \"$(ProjectFile)\" \"$(ProjectDir)\" \"$(PluginDir)\" \"$(TargetName)\" \"$(TargetConfiguration)\" \"$(TargetPlatform)\" \"$(PluginDir)/Source/ThirdParty/gRPC/Binaries/Mac\"",
+			"$(PluginDir)/Scripts/PreBuild.sh \"$(EngineDir)\" \"$(ProjectFile)\" \"$(ProjectDir)\" \"$(PluginDir)\" \"$(TargetName)\" \"$(TargetConfiguration)\" \"$(TargetPlatform)\" \"$(PluginDir)/Source/ThirdParty/gRPC/Binaries/Mac\""
 		],
 		"Linux": [
-			"$(PluginDir)/Scripts/PreBuild.sh \"$(EngineDir)\" \"$(ProjectFile)\" \"$(ProjectDir)\" \"$(PluginDir)\" \"$(TargetName)\" \"$(TargetConfiguration)\" \"$(TargetPlatform)\" \"$(PluginDir)/Source/ThirdParty/gRPC/Binaries/Linux\"",
+			"$(PluginDir)/Scripts/PreBuild.sh \"$(EngineDir)\" \"$(ProjectFile)\" \"$(ProjectDir)\" \"$(PluginDir)\" \"$(TargetName)\" \"$(TargetConfiguration)\" \"$(TargetPlatform)\" \"$(PluginDir)/Source/ThirdParty/gRPC/Binaries/Linux\""
 		]
 	}
 }

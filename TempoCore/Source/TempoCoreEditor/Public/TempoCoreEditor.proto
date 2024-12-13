@@ -1,0 +1,27 @@
+// Copyright Tempo Simulation, LLC. All Rights Reserved
+
+syntax = "proto3";
+
+import "TempoScripting/Empty.proto";
+
+message SaveLevelRequest {
+  string path = 1;
+}
+
+message OpenLevelRequest {
+  string path = 1;
+}
+
+service TempoCoreEditorService {
+  rpc PlayInEditor(TempoScripting.Empty) returns (TempoScripting.Empty);
+
+  rpc Simulate(TempoScripting.Empty) returns (TempoScripting.Empty);
+
+  rpc Stop(TempoScripting.Empty) returns (TempoScripting.Empty);
+
+  rpc SaveLevel(SaveLevelRequest) returns (TempoScripting.Empty);
+
+  rpc OpenLevel(OpenLevelRequest) returns (TempoScripting.Empty);
+
+  rpc NewLevel(TempoScripting.Empty) returns (TempoScripting.Empty);
+}
