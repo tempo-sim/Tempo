@@ -6,6 +6,7 @@
 #include "TempoWorld/ActorControl.grpc.pb.h"
 
 #include "TempoConversion.h"
+#include "TempoCoreUtils.h"
 #include "TempoWorldUtils.h"
 
 using ActorControlService = TempoWorld::ActorControlService;
@@ -38,6 +39,9 @@ using SetStringArrayPropertyRequest = TempoWorld::SetStringArrayPropertyRequest;
 using SetIntArrayPropertyRequest = TempoWorld::SetIntArrayPropertyRequest;
 using SetFloatArrayPropertyRequest = TempoWorld::SetFloatArrayPropertyRequest;
 using CallFunctionRequest = TempoWorld::CallFunctionRequest;
+
+FTempoActorControlServiceActivated UTempoActorControlServiceSubsystem::TempoActorControlServiceActivated;
+FTempoActorControlServiceDeactivated UTempoActorControlServiceSubsystem::TempoActorControlServiceDeactivated;
 
 FTransform ToUnrealTransform(const TempoScripting::Transform& Transform)
 {
@@ -98,6 +102,10 @@ void UTempoActorControlServiceSubsystem::RegisterScriptingServices(FTempoScripti
 void UTempoActorControlServiceSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
+	
+	TempoActorControlServiceActivated.Broadcast();
+	TempoActorControlServiceActivated.AddUObject(this, &UTempoActorControlServiceSubsystem::OnTempoActorControlServiceActivated);
+	TempoActorControlServiceDeactivated.AddUObject(this, &UTempoActorControlServiceSubsystem::OnTempoActorControlServiceDeactivated);
 
 	FTempoScriptingServer::Get().ActivateService<ActorControlService>(this);
 }
@@ -106,7 +114,32 @@ void UTempoActorControlServiceSubsystem::Deinitialize()
 {
 	Super::Deinitialize();
 
+	TempoActorControlServiceActivated.RemoveAll(this);
+	TempoActorControlServiceDeactivated.RemoveAll(this);
+
 	FTempoScriptingServer::Get().DeactivateService<ActorControlService>();
+
+	TempoActorControlServiceDeactivated.Broadcast();
+}
+
+void UTempoActorControlServiceSubsystem::OnTempoActorControlServiceActivated()
+{
+	// Another service was activated. Let it take over.
+	FTempoScriptingServer::Get().DeactivateService<ActorControlService>();
+}
+
+void UTempoActorControlServiceSubsystem::OnTempoActorControlServiceDeactivated()
+{
+	// Another service was Deactivated. Take over for it.
+	FTempoScriptingServer::Get().ActivateService<ActorControlService>(this);
+}
+
+bool UTempoActorControlServiceSubsystem::ShouldCreateSubsystem(UObject* Outer) const
+{
+	const EWorldType::Type WorldType = Outer->GetWorld()->WorldType;
+	const bool bIsValidWorld = (WorldType == EWorldType::Editor || WorldType == EWorldType::PIE || WorldType == EWorldType::Game);
+
+	return bIsValidWorld && Super::ShouldCreateSubsystem(Outer);
 }
 
 void UTempoActorControlServiceSubsystem::SpawnActor(const SpawnActorRequest& Request, const TResponseDelegate<SpawnActorResponse>& ResponseContinuation)
@@ -768,7 +801,20 @@ grpc::Status SetSinglePropertyImpl(const UWorld* World, const RequestType& Reque
 		return GetPropertyStatus;
 	}
 
+#if WITH_EDITOR
+	if (World->WorldType == EWorldType::Editor)
+	{
+		Object->PreEditChange(Property);
+	}
+#endif
 	const grpc::Status SetStatus = SetSinglePropertyInContainer<PropertyType>(Object, Property, InnerPropertyName, Value);
+#if WITH_EDITOR
+	if (World->WorldType == EWorldType::Editor)
+	{
+		FPropertyChangedEvent Event(Property);
+		Object->PostEditChangeProperty(Event);
+	}
+#endif
 	if (!SetStatus.ok())
 	{
 		return SetStatus;
@@ -810,12 +856,25 @@ grpc::Status SetArrayPropertyImpl(const UWorld* World, const RequestType& Reques
 		return grpc::Status(grpc::FAILED_PRECONDITION, "Property did not have correct type");
 	}
 
+#if WITH_EDITOR
+	if (World->WorldType == EWorldType::Editor)
+	{
+		Object->PreEditChange(Property);
+	}
+#endif
 	ArrayHelper.EmptyValues();
 	ArrayHelper.InsertValues(0, Values.Num());
 	for (int32 I = 0; I < Values.Num(); ++I)
 	{
 		InnerProperty->SetPropertyValue(ArrayHelper.GetRawPtr(I), Values[I]);
 	}
+#if WITH_EDITOR
+	if (World->WorldType == EWorldType::Editor)
+	{
+		FPropertyChangedEvent Event(Property);
+		Object->PostEditChangeProperty(Event);
+	}
+#endif
 
 	MarkRenderStateDirty(Object);
 
