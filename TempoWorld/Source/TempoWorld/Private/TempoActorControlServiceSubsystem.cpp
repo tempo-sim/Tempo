@@ -5,6 +5,7 @@
 #include "TempoWorld/ActorControl.grpc.pb.h"
 
 #include "TempoConversion.h"
+#include "TempoCoreUtils.h"
 #include "TempoWorldUtils.h"
 
 #include "EngineUtils.h"
@@ -51,6 +52,9 @@ using SetEnumArrayPropertyRequest = TempoWorld::SetEnumArrayPropertyRequest;
 using SetIntArrayPropertyRequest = TempoWorld::SetIntArrayPropertyRequest;
 using SetFloatArrayPropertyRequest = TempoWorld::SetFloatArrayPropertyRequest;
 using CallFunctionRequest = TempoWorld::CallFunctionRequest;
+
+FTempoActorControlServiceActivated UTempoActorControlServiceSubsystem::TempoActorControlServiceActivated;
+FTempoActorControlServiceDeactivated UTempoActorControlServiceSubsystem::TempoActorControlServiceDeactivated;
 
 FTransform ToUnrealTransform(const TempoScripting::Transform& Transform)
 {
@@ -1042,7 +1046,20 @@ grpc::Status SetSinglePropertyImpl(const UWorld* World, const RequestType& Reque
 		return GetPropertyStatus;
 	}
 
+#if WITH_EDITOR
+	if (World->WorldType == EWorldType::Editor)
+	{
+		Object->PreEditChange(Property);
+	}
+#endif
 	const grpc::Status SetStatus = SetSinglePropertyInContainer<PropertyType>(Object, Property, InnerPropertyName, Value);
+#if WITH_EDITOR
+	if (World->WorldType == EWorldType::Editor)
+	{
+		FPropertyChangedEvent Event(Property);
+		Object->PostEditChangeProperty(Event);
+	}
+#endif
 	if (!SetStatus.ok())
 	{
 		return SetStatus;
