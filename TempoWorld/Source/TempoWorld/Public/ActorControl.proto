@@ -114,6 +114,13 @@ message SetStringPropertyRequest {
   string value = 4;
 }
 
+message SetEnumPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  string value = 4;
+}
+
 message SetIntPropertyRequest {
   string actor = 1;
   string component = 2;
@@ -215,6 +222,8 @@ service ActorControlService {
     rpc SetBoolProperty(SetBoolPropertyRequest) returns (TempoScripting.Empty);
 
     rpc SetStringProperty(SetStringPropertyRequest) returns (TempoScripting.Empty);
+
+    rpc SetEnumProperty(SetEnumPropertyRequest) returns (TempoScripting.Empty);
 
     rpc SetIntProperty(SetIntPropertyRequest) returns (TempoScripting.Empty);
 
