@@ -32,6 +32,7 @@ public class TempoAgentsShared : ModuleRules
                 "MassEntity",
                 "MassActors",
                 "MassSpawner",
+                "MassCommon",
                 "StructUtils",
                 "RHI",
                 // Tempo
