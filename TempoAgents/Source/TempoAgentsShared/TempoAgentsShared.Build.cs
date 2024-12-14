@@ -34,6 +34,7 @@ public class TempoAgentsShared : ModuleRules
                 "MassActors",
                 "MassSpawner",
                 "MassCommon",
+                "StructUtils",
                 "RHI",
                 // For overriden "stand" state
                 "MassMovement",

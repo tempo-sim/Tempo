@@ -133,12 +133,4 @@ public:
 
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Interface|Queries")
 	FRotator GetTempoParkingRotation(const FName ParkingLocationAnchorName, const float NormalizedDistanceAlongRoad, const float NormalizedAngularVariationScalar, const ETempoCoordinateSpace CoordinateSpace) const;
-
-	// Connected Road Module Queries
-
-	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Interface|Queries")
-	int32 GetNumConnectedTempoRoadModules() const;
-
-	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Interface|Queries")
-	AActor* GetConnectedTempoRoadModuleActor(int32 ConnectedRoadModuleIndex) const;
 };
