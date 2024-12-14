@@ -84,4 +84,24 @@ public:
 
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Interface|Queries")
 	int32 GetTempoEndEntranceLocationControlPointIndex() const;
+
+	// Parking Location Queries
+
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Interface|Queries")
+	bool ShouldSpawnParkedVehiclesForTempoRoad() const;
+
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Interface|Queries")
+	int32 GetMaxAllowedParkingSpawnPointsOnTempoRoad() const;
+
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Interface|Queries")
+	TSet<TSoftObjectPtr<UMassEntityConfigAsset>> GetEntityTypesAllowedToParkOnTempoRoad() const;
+
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Interface|Queries")
+	TArray<FName> GetTempoParkingLocationAnchorNames() const;
+	
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Interface|Queries")
+	FVector GetTempoParkingLocation(const FName ParkingLocationAnchorName, const float NormalizedDistanceAlongRoad, const float HalfWidth, const float NormalizedLateralVariationScalar, const ETempoCoordinateSpace CoordinateSpace) const;
+
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Interface|Queries")
+	FRotator GetTempoParkingRotation(const FName ParkingLocationAnchorName, const float NormalizedDistanceAlongRoad, const float NormalizedAngularVariationScalar, const ETempoCoordinateSpace CoordinateSpace) const;
 };

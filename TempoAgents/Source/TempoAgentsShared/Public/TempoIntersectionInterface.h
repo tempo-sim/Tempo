@@ -19,7 +19,6 @@ enum class ETempoRoadConfigurationDescriptor : uint8
 	RightTurn = 2,
 };
 
-
 UENUM(BlueprintType)
 enum class ETempoTrafficControllerType : uint8
 {

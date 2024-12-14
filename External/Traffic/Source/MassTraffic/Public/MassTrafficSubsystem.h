@@ -100,6 +100,10 @@ public:
 	UFUNCTION(BlueprintPure, Category="Mass Traffic")
 	bool HasParkedVehicleAgents();
 
+	/** Returns the scaling factor for the number of parked vehicles to spawn in the world */
+	UFUNCTION(BlueprintPure, Category="Mass Traffic")
+	int32 GetNumParkedVehiclesScale() const;
+
 	/** Clear all traffic lanes of their vehicle data. Must be called after deleting all vehicle agents */   
 	UFUNCTION(BlueprintCallable, Category="Mass Traffic")
 	void ClearAllTrafficLanes();

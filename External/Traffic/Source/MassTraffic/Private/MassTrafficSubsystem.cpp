@@ -679,6 +679,11 @@ bool UMassTrafficSubsystem::HasParkedVehicleAgents()
 	return ParkedVehicleEntityQuery.HasMatchingEntities(*EntityManager.Get());
 }
 
+int32 UMassTrafficSubsystem::GetNumParkedVehiclesScale() const
+{
+	return GMassTrafficNumParkedVehiclesScale;
+}
+
 void UMassTrafficSubsystem::ClearAllTrafficLanes()
 {
 	for (FMassTrafficZoneGraphData& TrafficZoneGraphData : RegisteredTrafficZoneGraphData)
