@@ -9,5 +9,9 @@ Different versions of each mod may be necessary for different Major.Minor versio
 It is unlikely but not impossible that an Unreal hotfix release may break one of these mods. We will address that if it happens.
 
 > [!Note]
-> You can generate a new patch with a command like this:
-> `diff -urN <original> <new> > <patch>`
+> To generate a new patch, run a diff command from the unmodified engine folder you want to patch. For example, to generate a patch for the `Source` folder in the `MyPlugin` directory:
+> 
+> ```
+> cd $UNREAL_ENGINE_PATH/Engine/Plugins/MyPlugin
+> diff -urN --strip-trailing-cr Source <modified_plugin_root>/Source > MyPlugin.patch.1
+```
