@@ -269,7 +269,7 @@ namespace
 	FORCEINLINE bool IsIntersectionEffectivelyClearToAdvanceToNextPeriod(FMassTrafficIntersectionFragment& IntersectionFragment, const EMassTrafficIntersectionVehicleLaneType ClearTest, const FZoneGraphStorage& ZoneGraphStorage, const UMassCrowdSubsystem* MassCrowdSubsystem, const bool bIncludeReservedVehicles = true)
 	{
 		if (AreVehiclesClearOfIntersection(IntersectionFragment, ClearTest, bIncludeReservedVehicles) &&
-			(AreAnyCrosswalkLanesOpenInCurrentPeriod(IntersectionFragment, MassCrowdSubsystem) && AreAllCurrentCrosswalkLanesOpenNextPeriod(IntersectionFragment) ||
+			((AreAnyCrosswalkLanesOpenInCurrentPeriod(IntersectionFragment, MassCrowdSubsystem) && AreAllCurrentCrosswalkLanesOpenNextPeriod(IntersectionFragment)) ||
 			ArePedestriansClearOfIntersection(IntersectionFragment, ZoneGraphStorage, MassCrowdSubsystem)))
 		{
 			return true;
@@ -869,7 +869,7 @@ void UMassTrafficUpdateIntersectionsProcessor::Execute(FMassEntityManager& Entit
 						RandomStream.FRand() <= MassTrafficSettings->StopSignPedestrianLaneOpenProbability;
 					
 					const EMassTrafficPeriodLanesAction PedestrianLanesAction =
-							bPeriodHasAnyOpenCrosswalkLanes && bAreAllCurrentCrosswalkLanesOpenNextPeriod ||
+							(bPeriodHasAnyOpenCrosswalkLanes && bAreAllCurrentCrosswalkLanesOpenNextPeriod) ||
 							(bCanOpenPedestrianLanesByProbability &&
 							NumPedestriansWaitingForIntersection(IntersectionFragment, *ZoneGraphStorage, &MassCrowdSubsystem) >= MinPedestrians &&
 							// WARNING - If there are no pedestrians in the level, this will never end up being executed, so the value will never be cleared -
