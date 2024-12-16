@@ -118,7 +118,7 @@ REVERT_ADDS() {
 APPLY_PATCHES() {
   local TEMP=$1
   local ROOT=$2
-  local PATCHES=("${@:3}")
+  local FORWARD_PATCHES=("${@:3}")
   local DEST
   DEST="$TEMP/$ROOT"
 
@@ -127,9 +127,29 @@ APPLY_PATCHES() {
     UNSUCCESSFUL_EXIT 1
   fi
 
-  for ((i=0; i<${#PATCHES[@]}; i++)); do
-    local PATCH="$ENGINE_MODS_DIR/$ROOT/${PATCHES[i]//\'/}"
-    if ! patch --force -p0 --reject-file=- --ignore-whitespace <"$PATCH" &>/dev/null; then
+  # Reverse the order of patches
+  local REVERSED_PATCHES=($(printf '%s\n' "${FORWARD_PATCHES[@]}" | sed -n '1!G;h;$p'))
+  local PATCHES_APPLIED=0
+
+  # Find the last applied patch (if any)
+  cd "$DEST"
+  local LAST_APPLIED_INDEX=$((${#FORWARD_PATCHES[@]} - 1))
+  for ((i=0; i<${#REVERSED_PATCHES[@]}; i++)); do
+    local PATCH="$ENGINE_MODS_DIR/$ROOT/${REVERSED_PATCHES[i]//\'/}"
+    # To check if the patch has been applied, check if it can be *reversed* (if not, it hasn't been applied).
+    # https://unix.stackexchange.com/questions/55780/check-if-a-file-or-folder-has-been-patched-already
+    if patch -R -p0 -s -f --dry-run <"$PATCH" >/dev/null 2>&1; then
+      echo "Patch $(basename "$PATCH") already applied"
+      LAST_APPLIED_INDEX=$((${#FORWARD_PATCHES[@]} - i))
+      break
+    fi
+  done
+
+  # Apply all patches after the last applied one
+  for ((i=LAST_APPLIED_INDEX; i<${#FORWARD_PATCHES[@]}; i++)); do
+    local PATCH="$ENGINE_MODS_DIR/$ROOT/${FORWARD_PATCHES[i]//\'/}"
+    echo "Applying Patch $(basename "$PATCH")"
+    if ! patch -p0 <"$PATCH" >/dev/null 2>&1; then
       echo "Failed to apply patch: $PATCH"
       UNSUCCESSFUL_EXIT 1
     fi
@@ -202,78 +222,35 @@ COPY_DIR() {
   fi
 }
 
-REBUILD_UBT() {
-  TEMP="$1"
-  ROOT="$2"
-
-  echo "Rebuilding UnrealBuildTool (in-place) with Tempo mods"
-
-  rm -rf "${UNREAL_ENGINE_PATH:?}/${ROOT:?}/*"
-  COPY_DIR "$TEMP/$ROOT" "$UNREAL_ENGINE_PATH/$ROOT"
-
-  if [ -z ${DOTNET+x} ]; then
-    echo -e "Unable rebuild UnrealBuildTool with Tempo mods. Couldn't find dotnet.\n"
-    UNSUCCESSFUL_EXIT 1
-  fi
-
-  cd "$UNREAL_ENGINE_PATH"
-  eval "$DOTNET" build "./Engine/Source/Programs/UnrealBuildTool/UnrealBuildTool.csproj" -c Development
-  eval "$DOTNET" build "./Engine/Source/Programs/AutomationTool/AutomationTool.csproj" -c Development
-
-  echo -e "\nSuccessfully rebuilt UnrealBuildTool with Tempo mods\n"
-}
-
-if ! MODS=($(jq -r --arg release "$RELEASE" -c '.[$release][]' "$TEMPO_ROOT/EngineMods/EngineMods.json" 2>/dev/null)); then
-  echo "Error: Tempo does not support Unreal Engine release $RELEASE (found via UNREAL_ENGINE_PATH environment variable at $UNREAL_ENGINE_PATH)"
-  SUPPORTED_RELEASES=$(jq -r 'keys | join(", ")' "$TEMPO_ROOT/EngineMods/EngineMods.json")
-  echo "Supported Unreal Engine releases are: $SUPPORTED_RELEASES"
-  echo "Please install a supported Unreal Engine release and try again"
-  UNSUCCESSFUL_EXIT 1
-fi
-
-TEMP=$(mktemp -d)
-TEMP_VANILLA=$(mktemp -d)
-
+MODS=($(jq -r --arg version "$VERSION" -c '.[$version][]' "$TEMPO_ROOT/EngineMods/EngineMods.json"))
 for MOD in "${MODS[@]}"; do
   TYPE=$(jq -r '.Type' <<< "$MOD")
   ROOT=$(jq -r '.Root' <<< "$MOD")
   ADDS=$(jq -r '.Add // [] | join(" ")' <<< "$MOD" )
   PATCHES=$(jq -r '.Patch // [] | join(" ")' <<< "$MOD")
-
+  REMOVES=$(jq -r '.Remove // [] | join(" ")' <<< "$MOD")
+  
   # Remove any trailing carriage returns
   TYPE="${TYPE%$'\r'}"
   ROOT="${ROOT%$'\r'}"
   ADDS="${ADDS%$'\r'}"
   PATCHES="${PATCHES%$'\r'}"
+  REMOVES="${REMOVES%$'\r'}"
+
+  NEEDS_REBUILD='N'
 
   read -ra ADDS <<< "$ADDS"
   read -ra PATCHES <<< "$PATCHES"
 
-  echo "Applying Tempo mods (if necessary) to $ROOT"
+  read -ra PATCHES <<< "$PATCHES"
+  if ! MOD_PATCH "$TYPE" "$ROOT" "${PATCHES[@]}"; then
+    NEEDS_REBUILD='Y'
+  fi
 
-  # First make sure we have write permissions for the directory we're going to patch
-  chmod -R +w "$UNREAL_ENGINE_PATH/$ROOT"
-
-  # Copy the folder in its current state (but skip the heavy built artifacts)
-  mkdir -p "$TEMP/$ROOT"
-  find "$UNREAL_ENGINE_PATH/$ROOT" -maxdepth 1 -mindepth 1 -not -name "Binaries" -not -name "Intermediate" -exec cp -r {} "$TEMP/$ROOT" \;
-
-  # Attempt to revert any previously-applied patches via the patch record
-  cd "$TEMP/$ROOT"
-  if [ -f "$PATCH_RECORD_PATH/$ROOT/mods_applied.patch" ]; then
-    if ! patch --force --reject-file=- -R -p0 -s -f --ignore-whitespace --dry-run < "$PATCH_RECORD_PATH/$ROOT/mods_applied.patch" &>/dev/null; then
-      echo "Failed to revert applied mods for $ROOT. Something has gone wrong. Recommended troubleshooting steps:"
-      echo "  - Remove $UNREAL_ENGINE_PATH/TempoMods folder"
-      echo "  - Re-run Scripts/InstallEngineMods.sh"
-      echo "If that doesn't work,"
-      echo "  - Remove $UNREAL_ENGINE_PATH/TempoMods folder"
-      if [[ "$OSTYPE" = "linux-gnu"* ]]; then
-        echo "  - Verify your Unreal Engine installation by re-extracting the pre-built UE for Linux from Epic"
-      else
-        echo "  - Verify your Unreal Engine installation through the Epic Games Installer"
-      fi
-      echo "  - Re-run Scripts/InstallEngineMods.sh"
-      UNSUCCESSFUL_EXIT 1
+  read -ra REMOVES <<< "$REMOVES"
+  for REMOVE in "${REMOVES[@]}"; do
+    if ! MOD_REMOVE "$TYPE" "$ROOT" "$REMOVE"; then
+      NEEDS_REBUILD='Y'
     fi
     patch --force --reject-file=- -R -p0 -s -f --ignore-whitespace < "$PATCH_RECORD_PATH/$ROOT/mods_applied.patch" &>/dev/null
   else
