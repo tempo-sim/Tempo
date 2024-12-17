@@ -459,18 +459,6 @@ void UMassTrafficIntersectionSpawnDataGenerator::Generate(UObject& QueryOwner, T
 
 					if (IntersectionDetail->bHasTrafficLights)
 					{
-						TArray<FZoneGraphTrafficLaneData*> VehicleTrafficLanes_This_To_Opposite;
-						{
-							IntersectionDetail->GetTrafficLanesConnectingSides(
-								S, SOpposite, *ZoneGraphStorage, VehicleTrafficLanes_This_To_Opposite);
-						}
-						
-						TArray<FZoneGraphTrafficLaneData*> VehicleTrafficLanes_Opposite_To_This;
-						{
-							IntersectionDetail->GetTrafficLanesConnectingSides(
-								SOpposite, S, *ZoneGraphStorage, VehicleTrafficLanes_Opposite_To_This);
-						}
-
 						TArray<FZoneGraphTrafficLaneData*> VehicleTrafficLanes_This_To_OppositeAndRight;
 						{
 							IntersectionDetail->GetTrafficLanesConnectingSides(
@@ -479,22 +467,12 @@ void UMassTrafficIntersectionSpawnDataGenerator::Generate(UObject& QueryOwner, T
 								S, SRight, *ZoneGraphStorage, VehicleTrafficLanes_This_To_OppositeAndRight);
 						}
 
-						TArray<FZoneGraphTrafficLaneData*> VehicleTrafficLanes_Opposite_To_ThisAndLeft;
+						TArray<FZoneGraphTrafficLaneData*> VehicleTrafficLanes_Opposite_To_OppositeAndRight;
 						{
 							IntersectionDetail->GetTrafficLanesConnectingSides(
-								SOpposite, S, *ZoneGraphStorage, VehicleTrafficLanes_Opposite_To_ThisAndLeft);
+								SOpposite, S, *ZoneGraphStorage, VehicleTrafficLanes_Opposite_To_OppositeAndRight);
 							IntersectionDetail->GetTrafficLanesConnectingSides(
-								SOpposite, SLeft, *ZoneGraphStorage, VehicleTrafficLanes_Opposite_To_ThisAndLeft);
-						}
-
-						TArray<FZoneGraphTrafficLaneData*> VehicleTrafficLanes_This_To_AllOther;
-						{
-							IntersectionDetail->GetTrafficLanesConnectingSides(
-								S, SOpposite, *ZoneGraphStorage, VehicleTrafficLanes_This_To_AllOther);
-							IntersectionDetail->GetTrafficLanesConnectingSides(
-								S, SLeft, *ZoneGraphStorage, VehicleTrafficLanes_This_To_AllOther);
-							IntersectionDetail->GetTrafficLanesConnectingSides(
-								S, SRight, *ZoneGraphStorage, VehicleTrafficLanes_This_To_AllOther);
+								SOpposite, SLeft, *ZoneGraphStorage, VehicleTrafficLanes_Opposite_To_OppositeAndRight);
 						}
 						
 						const int8 ThisTrafficLightIndex = IntersectionSide_To_TrafficLightIndex[S];
@@ -510,12 +488,12 @@ void UMassTrafficIntersectionSpawnDataGenerator::Generate(UObject& QueryOwner, T
 								UnidirectionalTrafficStraightRightLeftGoSeconds *
 								(ThisSide.bHasInboundLanesFromFreeway ? FreewayIncomingTrafficGoDurationScale : 1.0f));
 
-							Period.VehicleLanes.Append(VehicleTrafficLanes_This_To_AllOther);
+							Period.VehicleLanes.Append(ThisSide.VehicleIntersectionLanes);
 							
 							Period.AddTrafficLightControl(ThisTrafficLightIndex, EMassTrafficLightStateFlags::VehicleGo | EMassTrafficLightStateFlags::VehicleGoProtectedLeft);
 
 							// Remember which traffic light controls which lane, for Period::Finalize()
-							LaneToTrafficLightMap.SetTrafficLightForLanes(VehicleTrafficLanes_This_To_AllOther, ThisTrafficLightIndex);
+							LaneToTrafficLightMap.SetTrafficLightForLanes(ThisSide.VehicleIntersectionLanes, ThisTrafficLightIndex);
 						}
 
 						// Period -
@@ -525,7 +503,7 @@ void UMassTrafficIntersectionSpawnDataGenerator::Generate(UObject& QueryOwner, T
 							FMassTrafficPeriod& Period = IntersectionFragment.AddPeriod(StandardTrafficGoSeconds);
 
 							Period.VehicleLanes.Append(VehicleTrafficLanes_This_To_OppositeAndRight);
-							Period.VehicleLanes.Append(VehicleTrafficLanes_Opposite_To_ThisAndLeft); // ..left? actually means opposite side's right (our left)
+							Period.VehicleLanes.Append(VehicleTrafficLanes_Opposite_To_OppositeAndRight);
 
 							Period.CrosswalkLanes.Append(LeftSide.CrosswalkLanes.Array());
 							Period.CrosswalkLanes.Append(RightSide.CrosswalkLanes.Array());
@@ -538,12 +516,20 @@ void UMassTrafficIntersectionSpawnDataGenerator::Generate(UObject& QueryOwner, T
 
 							// Remember which traffic light controls which lane, for Period::Finalize()
 							LaneToTrafficLightMap.SetTrafficLightForLanes(VehicleTrafficLanes_This_To_OppositeAndRight, ThisTrafficLightIndex);
-							LaneToTrafficLightMap.SetTrafficLightForLanes(VehicleTrafficLanes_Opposite_To_ThisAndLeft, OppositeTrafficLightIndex);
+							LaneToTrafficLightMap.SetTrafficLightForLanes(VehicleTrafficLanes_Opposite_To_OppositeAndRight, OppositeTrafficLightIndex);
 						}
 					}
 					// Special handling for 4-way intersections with stop-signs.
 					else
 					{
+						TArray<FZoneGraphTrafficLaneData*> VehicleTrafficLanes_This_To_OppositeAndRight;
+						{
+							IntersectionDetail->GetTrafficLanesConnectingSides(
+								S, SOpposite, *ZoneGraphStorage, VehicleTrafficLanes_This_To_OppositeAndRight);
+							IntersectionDetail->GetTrafficLanesConnectingSides(
+								S, SRight, *ZoneGraphStorage, VehicleTrafficLanes_This_To_OppositeAndRight);
+						}
+						
 						TArray<FZoneGraphTrafficLaneData*> VehicleTrafficLanes_Left_To_OppositeAndRight;
 						{
 							IntersectionDetail->GetTrafficLanesConnectingSides(
@@ -579,22 +565,34 @@ void UMassTrafficIntersectionSpawnDataGenerator::Generate(UObject& QueryOwner, T
 						
 						// Period -
 						//		Vehicles - Left to opposite side and its right.  Right to opposite side and its right.
-						//		Pedestrians - None
+						//		Pedestrians - This side and opposite side.
 						{
 							FMassTrafficPeriod& Period = IntersectionFragment.AddPeriod(StandardMinimumTrafficGoSeconds);
 
 							Period.VehicleLanes.Append(VehicleTrafficLanes_Left_To_OppositeAndRight);
 							Period.VehicleLanes.Append(VehicleTrafficLanes_Right_To_OppositeAndRight);
+
+							Period.CrosswalkLanes.Append(ThisSide.CrosswalkLanes.Array());
+							Period.CrosswalkLanes.Append(OppositeSide.CrosswalkLanes.Array());
+
+							Period.CrosswalkWaitingLanes.Append(ThisSide.CrosswalkWaitingLanes.Array());
+							Period.CrosswalkWaitingLanes.Append(OppositeSide.CrosswalkWaitingLanes.Array());
 						}
 						
 						// Period -
 						//		Vehicles - This side to opposite side and its right.  Opposite side to this side and its right.
-						//		Pedestrians - None
+						//		Pedestrians - Left side and right side.
 						{
 							FMassTrafficPeriod& Period = IntersectionFragment.AddPeriod(StandardMinimumTrafficGoSeconds);
 
-							Period.VehicleLanes.Append(VehicleTrafficLanes_Left_To_OppositeAndRight);
-							Period.VehicleLanes.Append(VehicleTrafficLanes_Right_To_OppositeAndRight);
+							Period.VehicleLanes.Append(VehicleTrafficLanes_This_To_OppositeAndRight);
+							Period.VehicleLanes.Append(VehicleTrafficLanes_Opposite_To_OppositeAndRight);
+							
+							Period.CrosswalkLanes.Append(LeftSide.CrosswalkLanes.Array());
+							Period.CrosswalkLanes.Append(RightSide.CrosswalkLanes.Array());
+
+							Period.CrosswalkWaitingLanes.Append(LeftSide.CrosswalkWaitingLanes.Array());
+							Period.CrosswalkWaitingLanes.Append(RightSide.CrosswalkWaitingLanes.Array());
 						}
 					}
 				}

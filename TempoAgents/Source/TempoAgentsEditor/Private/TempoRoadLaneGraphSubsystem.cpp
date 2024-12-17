@@ -748,8 +748,6 @@ bool UTempoRoadLaneGraphSubsystem::TryGenerateAndRegisterZoneShapeComponentsForC
 
 bool UTempoRoadLaneGraphSubsystem::TryGenerateAndRegisterZoneShapeComponentsForCrosswalkIntersections(AActor& IntersectionQueryActor) const
 {
-	// FEditorScriptExecutionGuard ScriptGuard;
-	
 	const int32 NumCrosswalkIntersections = ITempoIntersectionInterface::Execute_GetNumTempoCrosswalkIntersections(&IntersectionQueryActor);
 
 	for (int32 CrosswalkIntersectionIndex = 0; CrosswalkIntersectionIndex < NumCrosswalkIntersections; ++CrosswalkIntersectionIndex)

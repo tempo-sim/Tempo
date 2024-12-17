@@ -1238,6 +1238,14 @@ bool ShouldPerformReactiveYieldAtIntersection(
 				return false;
 			}
 
+			if (!ensureMsgf(CrowdTrackingLaneData->LeadEntityNormalizedDistanceAlongLane.IsSet(), TEXT("CrowdTrackingLaneData has Entities on the lane, but no LeadEntityNormalizedDistanceAlongLane value in IsDownstreamCrosswalkLaneClear.  TestDownstreamCrosswalkLane.Index: %d."), TestDownstreamCrosswalkLane.Index))
+			{
+				// Since there are Entities on the test lane, but we can't determine where the tail Entity is,
+				// we just wait until all Entities fully clear the test lane before allowing vehicles to resume
+				// from yielding.
+				return false;
+			}
+
 			const auto& GetLaneStartDirection = [&ZoneGraphStorage](const FZoneGraphLaneHandle& LaneHandle)
 			{
 				const FZoneLaneData& ZoneLaneData = ZoneGraphStorage.Lanes[LaneHandle.Index];

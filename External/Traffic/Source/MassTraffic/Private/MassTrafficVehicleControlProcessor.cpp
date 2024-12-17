@@ -72,7 +72,8 @@ namespace
 		const FMassZoneGraphLaneLocationFragment& LaneLocationFragment,
 		const FAgentRadiusFragment& RadiusFragment,
 		const FMassTrafficRandomFractionFragment& RandomFractionFragment,
-		UMassTrafficSubsystem& MassTrafficSubsystem,
+		const FRandomStream& RandomStream,
+		const UMassTrafficSubsystem& MassTrafficSubsystem,
 		const UMassTrafficSettings& MassTrafficSettings)
 	{
 		// If we *just* stopped, ...
@@ -91,7 +92,7 @@ namespace
 			// If we just stopped at a stop sign, choose a minimum time to remain stopped at the stop sign.
 			if (!VehicleControlFragment.NextLane->ConstData.bIsTrafficLightControlled)
 			{
-				VehicleControlFragment.MinVehicleStopSignRestTime = FMath::FRandRange(MassTrafficSettings.LowerMinStopSignRestTime, MassTrafficSettings.UpperMinStopSignRestTime);
+				VehicleControlFragment.MinVehicleStopSignRestTime = RandomStream.FRandRange(MassTrafficSettings.LowerMinStopSignRestTime, MassTrafficSettings.UpperMinStopSignRestTime);
 			}
 		}
 		// If we *just* ceased being stopped, ...
@@ -411,7 +412,7 @@ void UMassTrafficVehicleControlProcessor::SimpleVehicleControl(
 
 	// We need to update our stop state before calling ShouldStopAtLaneExit.
 	// Basically, we need to update our stop state based on what we *are* doing this update cycle to inform what we *should* be doing.
-	UpdateVehicleStopState(VehicleControlFragment, LaneLocationFragment, AgentRadiusFragment, RandomFractionFragment, MassTrafficSubsystem, *MassTrafficSettings);
+	UpdateVehicleStopState(VehicleControlFragment, LaneLocationFragment, AgentRadiusFragment, RandomFractionFragment, RandomStream, MassTrafficSubsystem, *MassTrafficSettings);
 	
 	// Should stop?
 	bool bRequestDifferentNextLane = false;
@@ -758,7 +759,7 @@ void UMassTrafficVehicleControlProcessor::PIDVehicleControl(
 
 	// We need to update our stop state before calling ShouldStopAtLaneExit.
 	// Basically, we need to update our stop state based on what we *are* doing this update cycle to inform what we *should* be doing.
-	UpdateVehicleStopState(VehicleControlFragment, LaneLocationFragment, AgentRadiusFragment, RandomFractionFragment, MassTrafficSubsystem, *MassTrafficSettings);
+	UpdateVehicleStopState(VehicleControlFragment, LaneLocationFragment, AgentRadiusFragment, RandomFractionFragment, RandomStream, MassTrafficSubsystem, *MassTrafficSettings);
 
 	// Should stop?
 	bool bRequestDifferentNextLane = false;
