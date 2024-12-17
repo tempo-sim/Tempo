@@ -792,7 +792,7 @@ template <>
 grpc::Status SetSinglePropertyValue<FByteProperty, FString>(void* ValuePtr, FByteProperty* Property, const FString& ValueStr)
 {
 	const UEnum* PropertyEnum = Property->Enum;
-	const int32 Value = GetEnumValueByAuthoredName(PropertyEnum, ValueStr);
+	const int64 Value = GetEnumValueByAuthoredName(PropertyEnum, ValueStr);
 	if (Value == INDEX_NONE)
 	{
 		return grpc::Status(grpc::INVALID_ARGUMENT, "Invalid enum value");
@@ -1029,7 +1029,7 @@ grpc::Status SetPropertyImpl<SetStringPropertyRequest>(const UWorld* World, cons
 template<>
 grpc::Status SetPropertyImpl<SetEnumPropertyRequest>(const UWorld* World, const SetEnumPropertyRequest& Request)
 {
-	// First try to set it as an FEnumProperty, then fall back on FByteProperty, then fall back on FIntProperty
+	// First try to set it as an FEnumProperty, then fall back on FByteProperty
 	const FString Value(UTF8_TO_TCHAR(Request.value().c_str()));
 	const grpc::Status EnumStatus = SetSinglePropertyImpl<FEnumProperty>(World, Request, Value);
 	// If we got an error other than FAILED_PRECONDITION that means the type was right, but something else was wrong.
