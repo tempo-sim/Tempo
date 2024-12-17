@@ -850,6 +850,17 @@ struct MASSTRAFFIC_API FMassTrafficVehicleControlFragment : public FMassFragment
 	// The chosen minimum delta time (in seconds) to remain at rest at the current stop sign.
 	float MinVehicleStopSignRestTime = 0.0f;
 
+	// Functions used for the stopped state.
+	bool IsVehicleCurrentlyStopped() const { return FMath::IsNearlyZero(Speed, 0.1f); }
+	bool WasVehiclePreviouslyStopped() const { return TimeVehicleStopped >= 0.0f; }
+	void ClearVehicleStoppedState() { TimeVehicleStopped = -1.0f; MinVehicleStopSignRestTime = 0.0f; }
+
+	// Functions used for both pre-emptive and reactive yields.
+	bool IsYieldingAtIntersection() const { return YieldAtIntersectionLane != nullptr; }
+
+	// The chosen minimum delta time (in seconds) to remain at rest at the current stop sign.
+	float MinVehicleStopSignRestTime = 0.0f;
+
 	// Last stop sign controlled intersection lane that we stopped at.
 	FZoneGraphTrafficLaneData* StopSignIntersectionLane = nullptr;
 

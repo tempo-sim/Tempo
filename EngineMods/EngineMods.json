@@ -25,6 +25,13 @@
       "Patch": [
           "ZoneGraph.patch.2"
       ]
+    },
+    {
+      "Type": "Plugin",
+      "Root": "Engine/Plugins/AI/MassCrowd",
+      "Patch": [
+        "MassCrowd.patch.2"
+      ]
     }
   ],
   "5.4": [

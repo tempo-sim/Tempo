@@ -98,7 +98,6 @@ namespace UE::MassTraffic::ProcessorGroupNames
 	const FName PostPhysicsDriverVisualization = FName(TEXT("TrafficPostPhysics.DriverVisualization"));
 	const FName PostPhysicsUpdateDistanceToNearestObstacle = FName(TEXT("TrafficPostPhysics.UpdateDistanceToNearestObstacle"));
 	const FName PostPhysicsUpdateTrafficVehicles = FName(TEXT("TrafficPostPhysics.UpdateTrafficVehicles"));
-	const FName YieldDeadlockResolution = FName(TEXT("Traffic.YieldDeadlockResolution"));
 
 	const FName CrowdYieldBehavior = FName(TEXT("Traffic.CrowdYieldBehavior"));
 }

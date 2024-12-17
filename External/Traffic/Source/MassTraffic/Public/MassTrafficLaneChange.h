@@ -204,6 +204,16 @@ void ChooseLaneForLaneChange(
 	FMassTrafficLaneChangeRecommendation& InOutRecommendation);
 
 bool CheckNextVehicle(const FMassEntityHandle Entity, const FMassEntityHandle NextEntity, const FMassEntityManager& EntityManager);
+
+bool ShouldPerformPreemptiveYieldAtIntersection(
+	const UMassTrafficSubsystem& MassTrafficSubsystem,
+	const UMassCrowdSubsystem& MassCrowdSubsystem,
+	const FMassEntityManager& EntityManager,
+	const FMassTrafficVehicleControlFragment& VehicleControlFragment,
+	const FMassZoneGraphLaneLocationFragment& LaneLocationFragment,
+	const FAgentRadiusFragment& RadiusFragment,
+	const FZoneGraphStorage& ZoneGraphStorage,
+	bool& OutHasAnotherVehicleEnteredRelevantLaneAfterPreemptiveYieldRollOut);
 	
 bool ShouldPerformReactiveYieldAtIntersection(
 	const UMassTrafficSubsystem& MassTrafficSubsystem,
@@ -212,23 +222,7 @@ bool ShouldPerformReactiveYieldAtIntersection(
 	const FMassTrafficVehicleControlFragment& VehicleControlFragment,
 	const FMassZoneGraphLaneLocationFragment& LaneLocationFragment,
 	const FAgentRadiusFragment& RadiusFragment,
-	const FMassTrafficRandomFractionFragment& RandomFractionFragment,
 	const FZoneGraphStorage& ZoneGraphStorage,
-	bool& OutShouldGiveOpportunityForTurningVehiclesToReactivelyYieldAtIntersection,
-	FZoneGraphLaneHandle& OutYieldTargetLane,
-	FMassEntityHandle& OutYieldTargetEntity,
-	int32& OutMergeYieldCaseIndex);
-
-bool ShouldPerformReactiveYieldAtRoadCrosswalk(
-	const UMassTrafficSubsystem& MassTrafficSubsystem,
-	const UMassCrowdSubsystem& MassCrowdSubsystem,
-	const FMassEntityManager& EntityManager,
-	const FMassTrafficVehicleControlFragment& VehicleControlFragment,
-	const FMassZoneGraphLaneLocationFragment& LaneLocationFragment,
-	const FAgentRadiusFragment& RadiusFragment,
-	const FMassTrafficRandomFractionFragment& RandomFractionFragment,
-	const FZoneGraphStorage& ZoneGraphStorage,
-	FZoneGraphLaneHandle& OutYieldTargetLane,
-	FMassEntityHandle& OutYieldTargetEntity);
+	bool& OutShouldGiveOpportunityForTurningVehiclesToReactivelyYieldAtIntersection);
 
 };

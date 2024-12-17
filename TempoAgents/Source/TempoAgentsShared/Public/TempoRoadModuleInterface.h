@@ -40,9 +40,6 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Module Interface|Queries")
 	AActor* GetTempoRoadModuleParentActor() const;
 
-	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Module Interface|Queries")
-	float GetTempoRoadModuleSampleDistanceStepSize() const;
-
 	// Road Module Lane Queries
 
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Module Interface|Queries")

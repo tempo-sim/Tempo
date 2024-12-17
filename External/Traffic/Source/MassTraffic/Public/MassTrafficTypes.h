@@ -12,15 +12,16 @@
 
 #include "Containers/Set.h"
 
+#include "Containers/Set.h"
+
 #include "MassTrafficTypes.generated.h"
 
 #define MASSTRAFFIC_NUM_INLINE_VEHICLE_NEXT_LANES 2 // ..determined to be ~1.4 on average for this game
 #define MASSTRAFFIC_NUM_INLINE_VEHICLE_PREV_LANES 2 // Should be similar to merging lanes.
 #define MASSTRAFFIC_NUM_INLINE_VEHICLE_MERGING_LANES 2 // ..determined to be ~1.3 on average for this game
 #define MASSTRAFFIC_NUM_INLINE_VEHICLE_SPLITTING_LANES 2 // ..determined to be ~1.7 on average for this game
-#define MASSTRAFFIC_NUM_INLINE_VEHICLE_CONFLICT_LANES 16 // There could potentially be many more conflict lanes.  We'll need to keep an eye on this.
-#define MASSTRAFFIC_NUM_INLINE_VEHICLE_CROSSWALK_LANES 12 // Each lane should only run through (at most) this many crosswalk lanes.
-#define MASSTRAFFIC_NUM_INLINE_VEHICLE_CROSSWALKS 6 // Each lane should only run through (at most) this many crosswalks.
+#define MASSTRAFFIC_NUM_INLINE_VEHICLE_CROSSWALK_LANES 2 // Each lane should only run through (at most) one crosswalk (which will have just 2 lanes).
+
 
 
 namespace UE::MassTraffic
@@ -591,6 +592,11 @@ struct MASSTRAFFIC_API FZoneGraphTrafficLaneData
 	// So, we just store FZoneGraphLaneHandles for crosswalk lanes with "right of way" over this lane,
 	// which we call "downstream crosswalk lanes".
 	TMap<FZoneGraphLaneHandle, float, TSetAllocator<TSparseArrayAllocator<>, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_VEHICLE_CROSSWALK_LANES>>> DownstreamCrosswalkLanes;
+
+	// Lanes which are not drivable will not have an associated FZoneGraphTrafficLaneData.
+	// So, we just store FZoneGraphLaneHandles for crosswalk lanes with "right of way" over this lane,
+	// which we call "downstream crosswalk lanes".
+	TArray<FZoneGraphLaneHandle, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_VEHICLE_CROSSWALK_LANES>> DownstreamCrosswalkLanes;
 
 	/**
 	 * NOTE - If these take up too much memory, we can instead make a single 1-bit flag to cover both of these, that simply

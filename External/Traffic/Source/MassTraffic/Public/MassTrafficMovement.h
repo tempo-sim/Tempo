@@ -163,12 +163,9 @@ MASSTRAFFIC_API bool ShouldStopAtNextStopLine(
 	const FZoneGraphTrafficLaneData* CurrentLaneData,
 	FZoneGraphTrafficLaneData* NextTrafficLaneData,
 	const FZoneGraphTrafficLaneData* ReadiedNextIntersectionLane,
-	TOptional<FYieldAlongRoadInfo>& LastYieldAlongRoadInfo,
-	const bool bIsStopped,
 	const FVector2D& MinimumDistanceToNextVehicleRange,
 	const FVector2D& StoppingDistanceRange,
-	const FMassEntityManager& EntityManager,
-	FZoneGraphTrafficLaneData*& InOut_LastCompletedStopSignLaneData,
+	const FMassEntityManager& EntityManager, 
 	bool& bOut_RequestDifferentNextLane,
 	bool& bInOut_CantStopAtLaneExit,
 	bool& bOut_IsFrontOfVehicleBeyondLaneExit,
@@ -178,8 +175,6 @@ MASSTRAFFIC_API bool ShouldStopAtNextStopLine(
 	const float StandardTrafficPrepareToStopSeconds,
 	const float TimeVehicleStopped,
 	const float MinVehicleStopSignRestTime,
-	const FMassEntityHandle& VehicleEntityHandle,
-	const FMassEntityHandle& NextVehicleEntityHandleInStopQueue,
 	const UWorld* World
 #if WITH_MASSTRAFFIC_DEBUG
 	, bool bVisLog = false
@@ -189,9 +184,10 @@ MASSTRAFFIC_API bool ShouldStopAtNextStopLine(
 	, const FVector* VehicleLocation = nullptr // ..for debuging
 );
 	
-bool IsVehicleNearStopLine(
+bool IsVehicleNearStopLineAtIntersection(
+	const FZoneGraphTrafficLaneData* NextLane,
 	const float DistanceAlongCurrentLane,
-	const float LaneLengthAtStopLine,
+	const float CurrentLaneLength,
 	const float AgentRadius,
 	const float RandomFraction,
 	const FVector2D& StoppingDistanceRange);

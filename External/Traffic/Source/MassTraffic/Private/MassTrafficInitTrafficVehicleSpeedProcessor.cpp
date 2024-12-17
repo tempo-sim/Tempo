@@ -70,7 +70,7 @@ void UMassTrafficInitTrafficVehicleSpeedProcessor::Execute(FMassEntityManager& E
 			bool bNoNext = false;
 			bool bNoRoom = false;
 			bool bShouldProceedAtStopSign = false;
-			const bool bStopAtNextStopLine = UE::MassTraffic::ShouldStopAtNextStopLine(
+			const bool bMustStopAtLaneExit = UE::MassTraffic::ShouldStopAtLaneExit(
 				LaneLocationFragment.DistanceAlongLane,
 				VehicleControlFragment.Speed,
 				AgentRadiusFragment.Radius,
@@ -78,8 +78,6 @@ void UMassTrafficInitTrafficVehicleSpeedProcessor::Execute(FMassEntityManager& E
 				CurrentLaneData,
 				VehicleControlFragment.NextLane,
 				VehicleControlFragment.ReadiedNextIntersectionLane,
-				VehicleControlFragment.LastYieldAlongRoadInfo,
-				VehicleControlFragment.IsVehicleCurrentlyStopped(),
 				MassTrafficSettings->MinimumDistanceToNextVehicleRange,
 				MassTrafficSettings->StoppingDistanceRange,
 				EntityManager,
@@ -93,8 +91,6 @@ void UMassTrafficInitTrafficVehicleSpeedProcessor::Execute(FMassEntityManager& E
 				MassTrafficSettings->StandardTrafficPrepareToStopSeconds,
 				VehicleControlFragment.TimeVehicleStopped,
 				VehicleControlFragment.MinVehicleStopSignRestTime,
-				VehicleControlFragment.VehicleEntityHandle,
-				NextVehicleEntityInStopQueue,
 				World
 			);
 

@@ -21,9 +21,6 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Tempo Agents|World Subsystem|Traffic Controllers")
 	void SetupIntersectionLaneMap();
 
-	UFUNCTION(BlueprintCallable, Category = "Tempo Agents|World Subsystem|Traffic Controllers")
-	void SetupRoadCrosswalkData();
-
 	virtual void OnWorldBeginPlay(UWorld& InWorld) override;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo Agents|World Subsystem|Brightness Meter")

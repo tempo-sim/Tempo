@@ -724,8 +724,6 @@ bool ShouldStopAtNextStopLine(
 	const FZoneGraphTrafficLaneData* CurrentLaneData,
 	FZoneGraphTrafficLaneData* NextTrafficLaneData,
 	const FZoneGraphTrafficLaneData* ReadiedNextIntersectionLane,
-	TOptional<FYieldAlongRoadInfo>& LastYieldAlongRoadInfo,
-	const bool bIsStopped,
 	const FVector2D& MinimumDistanceToNextVehicleRange,
 	const FVector2D& StoppingDistanceRange,
 	const FMassEntityManager& EntityManager,
@@ -739,8 +737,6 @@ bool ShouldStopAtNextStopLine(
 	const float StandardTrafficPrepareToStopSeconds,
 	const float TimeVehicleStopped,
 	const float MinVehicleStopSignRestTime,
-	const FMassEntityHandle& VehicleEntityHandle,
-	const FMassEntityHandle& NextVehicleEntityHandleInStopQueue,
 	const UWorld* World
 #if WITH_MASSTRAFFIC_DEBUG
 	, bool bVisLog
@@ -754,7 +750,9 @@ bool ShouldStopAtNextStopLine(
 	bOut_IsFrontOfVehicleBeyondLaneExit = false;
 	bOut_VehicleHasNoNextLane = false;
 	bOut_VehicleHasNoRoom = false;
-
+	bOut_ShouldProceedAtStopSign = false;
+	
+			
 	const float DistanceAlongLane_FrontOfVehicle = DistanceAlongLane + Radius;
 	const float DistanceLeftToGo = CurrentLaneData->Length - DistanceAlongLane_FrontOfVehicle;
 	bOut_IsFrontOfVehicleBeyondLaneExit = (DistanceLeftToGo < 0.0f);
@@ -901,22 +899,43 @@ bool ShouldStopAtNextStopLine(
 			return true;
 		}
 	}
-
+	
 	if (!bInOut_CantStopAtLaneExit)
 	{
-		// We should always attempt to stop at stop signs (and yield signs with waiting or crossing pedestrians).
-		if (NextTrafficLaneData->HasTrafficSignThatRequiresStopAtLaneStart())
+		// We should always attempt to stop at stop signs.
+		if (!NextTrafficLaneData->ConstData.bIsTrafficLightControlled && NextTrafficLaneData->ConstData.bIsIntersectionLane)
 		{
-			// In general, we should always plan to start our stop sign behavior.
-			// However, once we've completed our stop sign behavior with this stop sign,
-			// we may proceed (by falling through to other rules).
-			// (See the logic towards the top of this function when MinVehicleStopSignRestTime > 0.0f.)
-			if (InOut_LastCompletedStopSignLaneData != NextTrafficLaneData)
+			// Only perform the mandatory stop logic until our lane has been readied,
+			// then just wait for it to open.
+			if (NextTrafficLaneData != ReadiedNextIntersectionLane)
 			{
-				// Always plan on stopping at stop signs.
-				// This begins the stop sign behavior sequence.
-				return true;
+				// Always plan on stopping at stop signs until we're close enough to the stop line.
+				// At this point, the logic in UpdateVehicleStopState will start the clock on our MinVehicleStopSignRestTime.
+				if (!IsVehicleNearStopLineAtIntersection(NextTrafficLaneData, DistanceAlongLane, LaneLength, Radius, RandomFraction, StoppingDistanceRange))
+				{
+					return true;
+				}
+			
+				const float CurrentTimeSeconds = World != nullptr ? World->GetTimeSeconds() : TNumericLimits<float>::Lowest();
+				if (CurrentTimeSeconds < TimeVehicleStopped + MinVehicleStopSignRestTime)
+				{
+					// Need to wait longer at the stop sign before proceeding.
+					return true;
+				}
+
+				// Signal to the caller that we are now ready to proceed at the stop sign.
+				bOut_ShouldProceedAtStopSign = true;
 			}
+			
+			// Now, we've performed our mandatory stop for some minimum wait time,
+			// but we need to remain stopped until the lane is open.
+			//
+			// Note:  There's a bit of a "chicken and egg" problem here in that the lane will never open
+			// until it has been "readied", but it won't be "readied" until we've signaled the caller
+			// via bOut_ShouldProceedAtStopSign.  However, once we have signaled the caller,
+			// the lane should be "readied" by next update, which will allow the lane to open
+			// via the intersection period logic as soon as it deems it appropriate.
+			return !NextTrafficLaneData->bIsOpen;
 		}
 
 		// Is the lane we chose closed, or about to close? (See all CANTSTOPLANEEXIT.)
@@ -955,16 +974,22 @@ bool ShouldStopAtNextStopLine(
 	return false;
 }
 
-bool IsVehicleNearStopLine(
+bool IsVehicleNearStopLineAtIntersection(
+	const FZoneGraphTrafficLaneData* NextLane,
 	const float DistanceAlongCurrentLane,
-	const float LaneLengthAtStopLine,
+	const float CurrentLaneLength,
 	const float AgentRadius,
 	const float RandomFraction,
 	const FVector2D& StoppingDistanceRange)
 {
+	if (NextLane == nullptr || !NextLane->ConstData.bIsIntersectionLane)
+	{
+		return false;
+	}
+
 	const float DistanceAlongLaneToStopAt = UE::MassTraffic::GetDistanceAlongLaneToStopAt(
 		AgentRadius,
-		LaneLengthAtStopLine,
+		CurrentLaneLength,
 		RandomFraction,
 		StoppingDistanceRange);
 
