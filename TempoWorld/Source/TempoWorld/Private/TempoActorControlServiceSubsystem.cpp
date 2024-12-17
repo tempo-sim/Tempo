@@ -979,11 +979,68 @@ grpc::Status GetPropertyForRequest(const UObject* Object, const RequestType& Req
 	const UClass* Class = Object->GetClass();
 	Property = Class->FindPropertyByName(FName(PropertyName));
 
+	if (!Property)
+	{
+		return grpc::Status(grpc::FAILED_PRECONDITION, "Property not found");
+	}
+
 	if (InnerPropertyName && !InnerPropertyName->IsEmpty() && !CastField<FStructProperty>(Property))
 	{
 		return grpc::Status(grpc::FAILED_PRECONDITION, "Inner properties can only be specified on structs");
 	}
 
+	return grpc::Status_OK;
+}
+
+template <typename PropertyType, typename ValueType>
+grpc::Status SetSinglePropertyValue(void* ValuePtr, PropertyType* Property, const ValueType& Value)
+{
+	Property->SetPropertyValue(ValuePtr, Value);
+	return grpc::Status_OK;
+}
+
+int64 GetEnumValueByAuthoredName(const UEnum* Enum, const FString& Name)
+{
+	const int32 NumEnums = Enum->NumEnums();
+	int32 Index = INDEX_NONE;
+	for (int32 I = 0; I < NumEnums; ++I)
+	{
+		if (Enum->GetAuthoredNameStringByIndex(I).Equals(Name))
+		{
+			Index = I;
+			break;
+		}
+	}
+	if (Index == INDEX_NONE)
+	{
+		return INDEX_NONE;
+	}
+	return Enum->GetValueByIndex(Index);
+}
+
+template <>
+grpc::Status SetSinglePropertyValue<FEnumProperty, FString>(void* ValuePtr, FEnumProperty* Property, const FString& ValueStr)
+{
+	const UEnum* PropertyEnum = Property->GetEnum();
+	const int64 Value = GetEnumValueByAuthoredName(PropertyEnum, ValueStr);
+	if (Value == INDEX_NONE)
+	{
+		return grpc::Status(grpc::INVALID_ARGUMENT, "Invalid enum value");
+	}
+	*static_cast<int64*>(ValuePtr) = Value;
+	return grpc::Status_OK;
+}
+
+template <>
+grpc::Status SetSinglePropertyValue<FByteProperty, FString>(void* ValuePtr, FByteProperty* Property, const FString& ValueStr)
+{
+	const UEnum* PropertyEnum = Property->Enum;
+	const int64 Value = GetEnumValueByAuthoredName(PropertyEnum, ValueStr);
+	if (Value == INDEX_NONE)
+	{
+		return grpc::Status(grpc::INVALID_ARGUMENT, "Invalid enum value");
+	}
+	Property->SetPropertyValue(ValuePtr, PropertyEnum->GetValueByIndex(Value));
 	return grpc::Status_OK;
 }
 
@@ -1018,8 +1075,7 @@ grpc::Status SetSinglePropertyInContainer(void* Container, FProperty* Property, 
 		return grpc::Status(grpc::FAILED_PRECONDITION, "Property did not have correct type");
 	}
 
-	TypedProperty->SetPropertyValue(ValuePtr, Value);
-	return grpc::Status_OK;
+	return SetSinglePropertyValue(ValuePtr, TypedProperty, Value);
 }
 
 template <typename PropertyType, typename RequestType, typename ValueType>
