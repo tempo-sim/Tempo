@@ -73,6 +73,7 @@ void UTempoDebrisParameterComponent::SyncPCGParameters(const FTempoDebrisParamet
 		if (!GraphInstance)
 		{
 			UE_LOG(LogTempoDebris, Warning, TEXT("No PCG graph instance on PCG component with tag %s in TempoDebrisParameterComponent"), *Params.TargetPCGComponentTag.ToString());
+			continue;
 		}
 
 		bool bAnyParametersUpdated = false;
