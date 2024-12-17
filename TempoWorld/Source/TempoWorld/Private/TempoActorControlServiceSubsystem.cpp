@@ -31,6 +31,7 @@ using SetBoolPropertyRequest = TempoWorld::SetBoolPropertyRequest;
 using SetIntPropertyRequest = TempoWorld::SetIntPropertyRequest;
 using SetFloatPropertyRequest = TempoWorld::SetFloatPropertyRequest;
 using SetStringPropertyRequest = TempoWorld::SetStringPropertyRequest;
+using SetEnumPropertyRequest = TempoWorld::SetEnumPropertyRequest;
 using SetVectorPropertyRequest = TempoWorld::SetVectorPropertyRequest;
 using SetRotatorPropertyRequest = TempoWorld::SetRotatorPropertyRequest;
 using SetColorPropertyRequest = TempoWorld::SetColorPropertyRequest;
@@ -88,6 +89,7 @@ void UTempoActorControlServiceSubsystem::RegisterScriptingServices(FTempoScripti
 		SimpleRequestHandler(&ActorControlAsyncService::RequestSetIntProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetIntPropertyRequest>),
 		SimpleRequestHandler(&ActorControlAsyncService::RequestSetFloatProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetFloatPropertyRequest>),
 		SimpleRequestHandler(&ActorControlAsyncService::RequestSetStringProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetStringPropertyRequest>),
+		SimpleRequestHandler(&ActorControlAsyncService::RequestSetEnumProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetEnumPropertyRequest>),
 		SimpleRequestHandler(&ActorControlAsyncService::RequestSetVectorProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetVectorPropertyRequest>),
 		SimpleRequestHandler(&ActorControlAsyncService::RequestSetRotatorProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetRotatorPropertyRequest>),
 		SimpleRequestHandler(&ActorControlAsyncService::RequestSetColorProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetColorPropertyRequest>),
@@ -734,11 +736,68 @@ grpc::Status GetPropertyForRequest(const UObject* Object, const RequestType& Req
 	const UClass* Class = Object->GetClass();
 	Property = Class->FindPropertyByName(FName(PropertyName));
 
+	if (!Property)
+	{
+		return grpc::Status(grpc::FAILED_PRECONDITION, "Property not found");
+	}
+
 	if (InnerPropertyName && !InnerPropertyName->IsEmpty() && !CastField<FStructProperty>(Property))
 	{
 		return grpc::Status(grpc::FAILED_PRECONDITION, "Inner properties can only be specified on structs");
 	}
 
+	return grpc::Status_OK;
+}
+
+template <typename PropertyType, typename ValueType>
+grpc::Status SetSinglePropertyValue(void* ValuePtr, PropertyType* Property, const ValueType& Value)
+{
+	Property->SetPropertyValue(ValuePtr, Value);
+	return grpc::Status_OK;
+}
+
+int64 GetEnumValueByAuthoredName(const UEnum* Enum, const FString& Name)
+{
+	const int32 NumEnums = Enum->NumEnums();
+	int32 Index = INDEX_NONE;
+	for (int32 I = 0; I < NumEnums; ++I)
+	{
+		if (Enum->GetAuthoredNameStringByIndex(I).Equals(Name))
+		{
+			Index = I;
+			break;
+		}
+	}
+	if (Index == INDEX_NONE)
+	{
+		return INDEX_NONE;
+	}
+	return Enum->GetValueByIndex(Index);
+}
+
+template <>
+grpc::Status SetSinglePropertyValue<FEnumProperty, FString>(void* ValuePtr, FEnumProperty* Property, const FString& ValueStr)
+{
+	const UEnum* PropertyEnum = Property->GetEnum();
+	const int64 Value = GetEnumValueByAuthoredName(PropertyEnum, ValueStr);
+	if (Value == INDEX_NONE)
+	{
+		return grpc::Status(grpc::INVALID_ARGUMENT, "Invalid enum value");
+	}
+	*static_cast<int64*>(ValuePtr) = Value;
+	return grpc::Status_OK;
+}
+
+template <>
+grpc::Status SetSinglePropertyValue<FByteProperty, FString>(void* ValuePtr, FByteProperty* Property, const FString& ValueStr)
+{
+	const UEnum* PropertyEnum = Property->Enum;
+	const int64 Value = GetEnumValueByAuthoredName(PropertyEnum, ValueStr);
+	if (Value == INDEX_NONE)
+	{
+		return grpc::Status(grpc::INVALID_ARGUMENT, "Invalid enum value");
+	}
+	Property->SetPropertyValue(ValuePtr, PropertyEnum->GetValueByIndex(Value));
 	return grpc::Status_OK;
 }
 
@@ -773,8 +832,7 @@ grpc::Status SetSinglePropertyInContainer(void* Container, FProperty* Property, 
 		return grpc::Status(grpc::FAILED_PRECONDITION, "Property did not have correct type");
 	}
 
-	TypedProperty->SetPropertyValue(ValuePtr, Value);
-	return grpc::Status_OK;
+	return SetSinglePropertyValue(ValuePtr, TypedProperty, Value);
 }
 
 template <typename PropertyType, typename RequestType, typename ValueType>
@@ -945,7 +1003,8 @@ grpc::Status SetPropertyImpl<SetFloatPropertyRequest>(const UWorld* World, const
 {
 	// First try to set it as a double, then fall back on float
 	const grpc::Status FloatStatus = SetSinglePropertyImpl<FDoubleProperty>(World, Request, Request.value());
-	if (FloatStatus.ok())
+	// If we got an error other than FAILED_PRECONDITION that means the type was right, but something else was wrong.
+	if (FloatStatus.ok() || FloatStatus.error_code() != grpc::FAILED_PRECONDITION)
 	{
 		return FloatStatus;
 	}
@@ -958,12 +1017,27 @@ grpc::Status SetPropertyImpl<SetStringPropertyRequest>(const UWorld* World, cons
 	// First try to set it as an FString, then fall back on FName
 	const FString ValueStr(UTF8_TO_TCHAR(Request.value().c_str()));
 	const grpc::Status StrStatus = SetSinglePropertyImpl<FStrProperty>(World, Request, ValueStr);
-	if (StrStatus.ok())
+	// If we got an error other than FAILED_PRECONDITION that means the type was right, but something else was wrong.
+	if (StrStatus.ok() || StrStatus.error_code() != grpc::FAILED_PRECONDITION)
 	{
 		return StrStatus;
 	}
 	const FName ValueName(UTF8_TO_TCHAR(Request.value().c_str()));
 	return SetSinglePropertyImpl<FNameProperty>(World, Request, ValueName);
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetEnumPropertyRequest>(const UWorld* World, const SetEnumPropertyRequest& Request)
+{
+	// First try to set it as an FEnumProperty, then fall back on FByteProperty
+	const FString Value(UTF8_TO_TCHAR(Request.value().c_str()));
+	const grpc::Status EnumStatus = SetSinglePropertyImpl<FEnumProperty>(World, Request, Value);
+	// If we got an error other than FAILED_PRECONDITION that means the type was right, but something else was wrong.
+	if (EnumStatus.ok() || EnumStatus.error_code() != grpc::FAILED_PRECONDITION)
+	{
+		return EnumStatus;
+	}
+	return SetSinglePropertyImpl<FByteProperty>(World, Request, Value);
 }
 
 template<>
@@ -1024,7 +1098,8 @@ grpc::Status SetPropertyImpl<SetStringArrayPropertyRequest>(const UWorld* World,
 		StrArray.Add(UTF8_TO_TCHAR(String.c_str()));
 	}
 	grpc::Status StatusStr = SetArrayPropertyImpl<FStrProperty>(World, Request, StrArray);
-	if (StatusStr.ok())
+	// If we got an error other than FAILED_PRECONDITION that means the type was right, but something else was wrong.
+	if (StatusStr.ok() || StatusStr.error_code() != grpc::FAILED_PRECONDITION)
 	{
 		return StatusStr;
 	}
@@ -1052,7 +1127,8 @@ grpc::Status SetPropertyImpl<SetFloatArrayPropertyRequest>(const UWorld* World, 
 	TArray<float> FloatArray;
 	FloatArray.Append(Request.values().data(), Request.values_size());
 	grpc::Status StatusFloat = SetArrayPropertyImpl<FDoubleProperty>(World, Request, FloatArray);
-	if (StatusFloat.ok())
+	// If we got an error other than FAILED_PRECONDITION that means the type was right, but something else was wrong.
+	if (StatusFloat.ok() || StatusFloat.error_code() != grpc::FAILED_PRECONDITION)
 	{
 		return StatusFloat;
 	}
