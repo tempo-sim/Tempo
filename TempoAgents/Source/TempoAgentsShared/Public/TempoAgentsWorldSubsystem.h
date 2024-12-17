@@ -18,6 +18,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Tempo Agents|World Subsystem|Brightness Meter")
 	void SetupBrightnessMeter();
 
+	UFUNCTION(BlueprintCallable, Category = "Tempo Agents|World Subsystem|Traffic Controllers")
+	void SetupIntersectionLaneMap();
+
 	virtual void OnWorldBeginPlay(UWorld& InWorld) override;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo Agents|World Subsystem|Brightness Meter")

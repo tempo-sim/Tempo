@@ -39,6 +39,21 @@ bool UTempoRoadLaneGraphSubsystem::TryGenerateZoneShapeComponents() const
 		// Later, we will prune the intersection graph more intelligently with tags, or other metadata.
 		RemoveOverlapCVar->Set(false);
 	}
+
+	// Allow all Intersections to setup their data, first.
+	for (AActor* Actor : TActorRange<AActor>(GetWorld()))
+	{
+		if (!IsValid(Actor))
+		{
+			continue;
+		}
+
+		if (Actor->Implements<UTempoIntersectionInterface>())
+		{
+			FEditorScriptExecutionGuard ScriptGuard;
+			ITempoIntersectionInterface::Execute_SetupTempoIntersectionData(Actor);
+		}
+	}
 	
 	for (AActor* Actor : TActorRange<AActor>(GetWorld()))
 	{
@@ -61,12 +76,23 @@ bool UTempoRoadLaneGraphSubsystem::TryGenerateZoneShapeComponents() const
 		else if (Actor->Implements<UTempoRoadModuleInterface>())
 		{
 			DestroyZoneShapeComponents(*Actor);
-
-			// Then, try to generate ZoneShapeComponents for road modules (ex. sidewalks, walkable bridges, etc.).
-			if (!TryGenerateAndRegisterZoneShapeComponentsForRoad(*Actor, true))
+			
+			const AActor* RoadModuleParentActor = ITempoRoadModuleInterface::Execute_GetTempoRoadModuleParentActor(Actor);
+			if (RoadModuleParentActor == nullptr)
 			{
-				UE_LOG(LogTempoAgentsEditor, Error, TEXT("Tempo Lane Graph - Failed to create Road Module ZoneShapeComponents for Actor: %s."), *Actor->GetName());
+				UE_LOG(LogTempoAgentsEditor, Error, TEXT("Tempo Lane Graph - Failed to create Road Module ZoneShapeComponents for Actor: %s.  It must have a valid parent."), *Actor->GetName());
 				return false;
+			}
+
+			// Build ZoneShapes for RoadModules differently, based on whether its parent is a Road or an Intersection.
+			if (!RoadModuleParentActor->Implements<UTempoIntersectionInterface>())
+			{
+				// Then, try to generate ZoneShapeComponents for road modules (ex. sidewalks, walkable bridges, etc.).
+				if (!TryGenerateAndRegisterZoneShapeComponentsForRoad(*Actor, true))
+				{
+					UE_LOG(LogTempoAgentsEditor, Error, TEXT("Tempo Lane Graph - Failed to create Road Module ZoneShapeComponents for Actor: %s."), *Actor->GetName());
+					return false;
+				}
 			}
 		}
 		else if (Actor->Implements<UTempoIntersectionInterface>())
@@ -78,6 +104,24 @@ bool UTempoRoadLaneGraphSubsystem::TryGenerateZoneShapeComponents() const
 				UE_LOG(LogTempoAgentsEditor, Error, TEXT("Tempo Lane Graph - Failed to create Intersection ZoneShapeComponents for Actor: %s."), *Actor->GetName());
 				return false;
 			}
+
+			if (!TryGenerateAndRegisterZoneShapeComponentsForCrosswalksAtIntersections(*Actor))
+			{
+				UE_LOG(LogTempoAgentsEditor, Error, TEXT("Tempo Lane Graph - Failed to create Crosswalk ZoneShapeComponents for Actor: %s."), *Actor->GetName());
+				return false;
+			}
+
+			if (!TryGenerateAndRegisterZoneShapeComponentsForCrosswalkIntersectionConnectorSegments(*Actor))
+			{
+				UE_LOG(LogTempoAgentsEditor, Error, TEXT("Tempo Lane Graph - Failed to create Crosswalk Intersection Connector Segment ZoneShapeComponents for Actor: %s."), *Actor->GetName());
+				return false;
+			}
+			
+			if (!TryGenerateAndRegisterZoneShapeComponentsForCrosswalkIntersections(*Actor))
+            {
+            	UE_LOG(LogTempoAgentsEditor, Error, TEXT("Tempo Lane Graph - Failed to create Crosswalk Intersection ZoneShapeComponents for Actor: %s."), *Actor->GetName());
+            	return false;
+            }
 		}
 	}
 
@@ -212,6 +256,33 @@ FZoneShapePoint UTempoRoadLaneGraphSubsystem::CreateZoneShapePointForRoadControl
 	ZoneShapePoint.Type = FZoneShapePointType::Bezier;
 	
 	ZoneShapePoint.TangentLength = ControlPointTangent.Size();
+
+	return ZoneShapePoint;
+}
+
+FZoneShapePoint UTempoRoadLaneGraphSubsystem::CreateZoneShapePointAtDistanceAlongRoad(const AActor& RoadQueryActor, float DistanceAlongRoad, bool bQueryActorIsRoadModule) const
+{
+	FZoneShapePoint ZoneShapePoint;
+	
+	const FVector ZoneShapePointLocation = bQueryActorIsRoadModule
+		? ITempoRoadModuleInterface::Execute_GetLocationAtDistanceAlongTempoRoadModule(&RoadQueryActor, DistanceAlongRoad, ETempoCoordinateSpace::Local)
+		: ITempoRoadInterface::Execute_GetLocationAtDistanceAlongTempoRoad(&RoadQueryActor, DistanceAlongRoad, ETempoCoordinateSpace::Local);
+
+	const FRotator ZoneShapePointRotation = bQueryActorIsRoadModule
+		? ITempoRoadModuleInterface::Execute_GetRotationAtDistanceAlongTempoRoadModule(&RoadQueryActor, DistanceAlongRoad, ETempoCoordinateSpace::Local)
+		: ITempoRoadInterface::Execute_GetRotationAtDistanceAlongTempoRoad(&RoadQueryActor, DistanceAlongRoad, ETempoCoordinateSpace::Local);
+	
+	const FVector ZoneShapePointTangent = bQueryActorIsRoadModule
+		? ITempoRoadModuleInterface::Execute_GetTangentAtDistanceAlongTempoRoadModule(&RoadQueryActor, DistanceAlongRoad, ETempoCoordinateSpace::Local)
+		: ITempoRoadInterface::Execute_GetTangentAtDistanceAlongTempoRoad(&RoadQueryActor, DistanceAlongRoad, ETempoCoordinateSpace::Local);
+
+	DrawDebugSphere(GetWorld(), RoadQueryActor.GetActorTransform().TransformPosition(ZoneShapePointLocation), 25.0f, 16, FColor::Purple, false, 5.0f);
+
+	ZoneShapePoint.Position = ZoneShapePointLocation;
+	ZoneShapePoint.Rotation = ZoneShapePointRotation;
+	ZoneShapePoint.Type = FZoneShapePointType::Bezier;
+	
+	ZoneShapePoint.TangentLength = ZoneShapePointTangent.Size();
 
 	return ZoneShapePoint;
 }
@@ -504,13 +575,461 @@ AActor* UTempoRoadLaneGraphSubsystem::GetConnectedRoadActor(const AActor& Inters
 	{
 		return nullptr;
 	}
-			
+
 	if (!RoadActor->Implements<UTempoRoadInterface>())
 	{
 		return nullptr;
 	}
 
 	return RoadActor;
+}
+
+//
+// Crosswalk functions
+//
+
+bool UTempoRoadLaneGraphSubsystem::TryGenerateAndRegisterZoneShapeComponentsForCrosswalksAtIntersections(AActor& IntersectionQueryActor) const
+{
+	const int32 NumConnections = ITempoIntersectionInterface::Execute_GetNumTempoConnections(&IntersectionQueryActor);
+	
+	for (int32 ConnectionIndex = 0; ConnectionIndex < NumConnections; ++ConnectionIndex)
+	{
+		const bool bShouldGenerateZoneShapesForCrosswalk = ITempoIntersectionInterface::Execute_ShouldGenerateZoneShapesForTempoCrosswalk(&IntersectionQueryActor, ConnectionIndex);
+
+		if (!bShouldGenerateZoneShapesForCrosswalk)
+		{
+			UE_LOG(LogTempoAgentsEditor, Display, TEXT("Tempo Lane Graph - Skip generating Crosswalk ZoneShapeComponents for Actor: %s at ConnectionIndex: %d."), *IntersectionQueryActor.GetName(), ConnectionIndex);
+			continue;
+		}
+		
+		const FZoneLaneProfile LaneProfile = GetLaneProfileForCrosswalk(IntersectionQueryActor, ConnectionIndex);
+		if (!LaneProfile.IsValid())
+		{
+			UE_LOG(LogTempoAgentsEditor, Error, TEXT("Tempo Lane Graph - Failed to create Crosswalk ZoneShapeComponent - Couldn't get valid LaneProfile for Actor: %s at ConnectionIndex: %d."), *IntersectionQueryActor.GetName(), ConnectionIndex);
+			return false;
+		}
+	
+		const FZoneLaneProfileRef LaneProfileRef(LaneProfile);
+		
+		UZoneShapeComponent* ZoneShapeComponent = NewObject<UZoneShapeComponent>(&IntersectionQueryActor, UZoneShapeComponent::StaticClass());
+		if (!ensureMsgf(ZoneShapeComponent != nullptr, TEXT("Failed to create Crosswalk ZoneShapeComponent when building Lane Graph for Actor: %s at ConnectionIndex: %d."), *IntersectionQueryActor.GetName(), ConnectionIndex))
+		{
+			return false;
+		}
+
+		// Remove default points.
+		ZoneShapeComponent->GetMutablePoints().Empty();
+		ZoneShapeComponent->SetCommonLaneProfile(LaneProfileRef);
+
+		// Apply crosswalk tags.
+		TArray<FName> CrosswalkTagNames = ITempoIntersectionInterface::Execute_GetTempoCrosswalkTags(&IntersectionQueryActor, ConnectionIndex);
+		for (const FName& CrosswalkTagName : CrosswalkTagNames)
+		{
+			const FZoneGraphTag CrosswalkTag = GetTagByName(CrosswalkTagName);
+			ZoneShapeComponent->GetMutableTags().Add(CrosswalkTag);
+		}
+
+		const int32 CrosswalkControlPointStartIndex = ITempoIntersectionInterface::Execute_GetTempoCrosswalkStartEntranceLocationControlPointIndex(&IntersectionQueryActor, ConnectionIndex);
+		const int32 CrosswalkControlPointEndIndex = ITempoIntersectionInterface::Execute_GetTempoCrosswalkEndEntranceLocationControlPointIndex(&IntersectionQueryActor, ConnectionIndex);
+		
+		for (int32 CrosswalkControlPointIndex = CrosswalkControlPointStartIndex; CrosswalkControlPointIndex <= CrosswalkControlPointEndIndex; ++CrosswalkControlPointIndex)
+		{
+			FZoneShapePoint ZoneShapePoint;
+			if (!TryCreateZoneShapePointForCrosswalkControlPoint(IntersectionQueryActor, ConnectionIndex, CrosswalkControlPointIndex, ZoneShapePoint))
+			{
+				return false;
+			}
+			
+			ZoneShapeComponent->GetMutablePoints().Add(ZoneShapePoint);
+		}
+
+		// Register ZoneShapeComponent.
+		if (!TryRegisterZoneShapeComponentWithActor(IntersectionQueryActor, *ZoneShapeComponent))
+		{
+			return false;
+		}
+	}
+
+	return true;
+}
+
+bool UTempoRoadLaneGraphSubsystem::TryGenerateAndRegisterZoneShapeComponentsForCrosswalkIntersectionConnectorSegments(AActor& IntersectionQueryActor) const
+{
+	const auto& GetNumControlPointsBetweenDistancesAlongRoadModule = [](const AActor& RoadModuleQueryActor, float StartDistance, float EndDistance)
+	{
+		TArray<int32> RoadModuleControlPointIndexes;
+
+		if (StartDistance > EndDistance)
+		{
+			return 0;
+		}
+
+		const float RoadModuleLength = ITempoRoadModuleInterface::Execute_GetTempoRoadModuleLength(&RoadModuleQueryActor);
+
+		StartDistance = FMath::Clamp(StartDistance, 0.0f, RoadModuleLength);
+		EndDistance = FMath::Clamp(EndDistance, 0.0f, RoadModuleLength);
+
+		const int32 NumRoadModuleControlPoints = ITempoRoadModuleInterface::Execute_GetNumTempoRoadModuleControlPoints(&RoadModuleQueryActor);
+
+		for (int32 RoadModuleControlPointIndex = 0; RoadModuleControlPointIndex < NumRoadModuleControlPoints; ++RoadModuleControlPointIndex)
+		{
+			const float DistanceAlongRoadModule = ITempoRoadModuleInterface::Execute_GetDistanceAlongTempoRoadModuleAtControlPoint(&RoadModuleQueryActor, RoadModuleControlPointIndex);
+
+			if (DistanceAlongRoadModule >= StartDistance && DistanceAlongRoadModule <= EndDistance)
+			{
+				RoadModuleControlPointIndexes.Add(RoadModuleControlPointIndex);
+			}
+		}
+
+		return RoadModuleControlPointIndexes.Num();
+	};
+	
+	const int32 NumCrosswalkRoadModules = ITempoIntersectionInterface::Execute_GetNumConnectedTempoCrosswalkRoadModules(&IntersectionQueryActor);
+
+	for (int32 CrosswalkRoadModuleIndex = 0; CrosswalkRoadModuleIndex < NumCrosswalkRoadModules; ++CrosswalkRoadModuleIndex)
+	{
+		const FCrosswalkIntersectionConnectorInfo& CrosswalkIntersectionConnectorInfo = ITempoIntersectionInterface::Execute_GetTempoCrosswalkIntersectionConnectorInfo(&IntersectionQueryActor, CrosswalkRoadModuleIndex);
+
+		if (!ensureMsgf(CrosswalkIntersectionConnectorInfo.CrosswalkRoadModule != nullptr, TEXT("Must get valid CrosswalkRoadModule in UTempoRoadLaneGraphSubsystem::TryGenerateAndRegisterZoneShapeComponentsForCrosswalkIntersectionConnectorSegments.")))
+		{
+			return false;
+		}
+		
+		const FZoneLaneProfile LaneProfile = GetCrosswalkIntersectionConnectorLaneProfile(IntersectionQueryActor, CrosswalkRoadModuleIndex);
+		
+		if (!LaneProfile.IsValid())
+		{
+			UE_LOG(LogTempoAgentsEditor, Error, TEXT("Tempo Lane Graph - Failed to create Crosswalk Intersection Connector ZoneShapeComponent - Couldn't get valid LaneProfile for Actor: %s."), *CrosswalkIntersectionConnectorInfo.CrosswalkRoadModule->GetName());
+			return false;
+		}
+
+		const FZoneLaneProfileRef LaneProfileRef(LaneProfile);
+
+		for (const FCrosswalkIntersectionConnectorSegmentInfo& CrosswalkIntersectionConnectorSegmentInfo : CrosswalkIntersectionConnectorInfo.CrosswalkIntersectionConnectorSegmentInfos)
+		{
+			UZoneShapeComponent* ZoneShapeComponent = NewObject<UZoneShapeComponent>(&IntersectionQueryActor, UZoneShapeComponent::StaticClass());
+			if (!ensureMsgf(ZoneShapeComponent != nullptr, TEXT("Failed to create Crosswalk Intersection Connector Segment ZoneShapeComponent when building Lane Graph for Actor: %s at CrosswalkRoadModuleIndex: %d."), *IntersectionQueryActor.GetName(), CrosswalkRoadModuleIndex))
+			{
+				return false;
+			}
+
+			// Remove default points.
+			ZoneShapeComponent->GetMutablePoints().Empty();
+			ZoneShapeComponent->SetCommonLaneProfile(LaneProfileRef);
+
+			const int32 NumRoadModuleControlPointIndexesForSegment = GetNumControlPointsBetweenDistancesAlongRoadModule(
+				*CrosswalkIntersectionConnectorInfo.CrosswalkRoadModule,
+				CrosswalkIntersectionConnectorSegmentInfo.CrosswalkIntersectionConnectorStartDistance,
+				CrosswalkIntersectionConnectorSegmentInfo.CrosswalkIntersectionConnectorEndDistance);
+
+			const int32 NumSegmentControlPoints = FMath::Max(NumRoadModuleControlPointIndexesForSegment, 2);
+			const float SegmentLength = CrosswalkIntersectionConnectorSegmentInfo.CrosswalkIntersectionConnectorEndDistance - CrosswalkIntersectionConnectorSegmentInfo.CrosswalkIntersectionConnectorStartDistance;
+
+			const float SegmentStep = SegmentLength / NumSegmentControlPoints;
+
+			for (int32 SegmentControlPointIndex = 0; SegmentControlPointIndex <= NumSegmentControlPoints; ++SegmentControlPointIndex)
+			{
+				const float SegmentDistance = SegmentStep * SegmentControlPointIndex + CrosswalkIntersectionConnectorSegmentInfo.CrosswalkIntersectionConnectorStartDistance;
+				
+				FZoneShapePoint ZoneShapePoint = CreateZoneShapePointAtDistanceAlongRoad(*CrosswalkIntersectionConnectorInfo.CrosswalkRoadModule, SegmentDistance, true);
+				ZoneShapeComponent->GetMutablePoints().Add(ZoneShapePoint);
+			}
+
+			// Register ZoneShapeComponent.
+			if (!TryRegisterZoneShapeComponentWithActor(IntersectionQueryActor, *ZoneShapeComponent))
+			{
+				return false;
+			}
+		}
+	}
+
+	return true;
+}
+
+bool UTempoRoadLaneGraphSubsystem::TryGenerateAndRegisterZoneShapeComponentsForCrosswalkIntersections(AActor& IntersectionQueryActor) const
+{
+	const int32 NumCrosswalkIntersections = ITempoIntersectionInterface::Execute_GetNumTempoCrosswalkIntersections(&IntersectionQueryActor);
+
+	for (int32 CrosswalkIntersectionIndex = 0; CrosswalkIntersectionIndex < NumCrosswalkIntersections; ++CrosswalkIntersectionIndex)
+	{
+		UZoneShapeComponent* ZoneShapeComponent = NewObject<UZoneShapeComponent>(&IntersectionQueryActor, UZoneShapeComponent::StaticClass());
+
+		if (!ensureMsgf(ZoneShapeComponent != nullptr, TEXT("Failed to create Crosswalk Intersection ZoneShapeComponent when building Lane Graph for Actor: %s at CrosswalkIntersectionIndex: %d."), *IntersectionQueryActor.GetName(), CrosswalkIntersectionIndex))
+		{
+			return false;
+		}
+
+		// Remove default points.
+		ZoneShapeComponent->GetMutablePoints().Empty();
+	
+		ZoneShapeComponent->SetShapeType(FZoneShapeType::Polygon);
+		ZoneShapeComponent->SetPolygonRoutingType(EZoneShapePolygonRoutingType::Bezier);
+
+		// Apply crosswalk intersection tags.
+		TArray<FName> IntersectionTagNames = ITempoIntersectionInterface::Execute_GetTempoCrosswalkIntersectionTags(&IntersectionQueryActor, CrosswalkIntersectionIndex);
+		for (FName IntersectionTagName : IntersectionTagNames)
+		{
+			const FZoneGraphTag IntersectionTag = GetTagByName(IntersectionTagName);
+			ZoneShapeComponent->GetMutableTags().Add(IntersectionTag);
+		}
+	
+		const int32 NumCrosswalkIntersectionConnections = ITempoIntersectionInterface::Execute_GetNumTempoCrosswalkIntersectionConnections(&IntersectionQueryActor, CrosswalkIntersectionIndex);
+
+		// Create and Setup Points.
+		for (int32 CrosswalkIntersectionConnectionIndex = 0; CrosswalkIntersectionConnectionIndex < NumCrosswalkIntersectionConnections; ++CrosswalkIntersectionConnectionIndex)
+		{
+			FZoneShapePoint ZoneShapePoint;
+			if (!TryCreateZoneShapePointForCrosswalkIntersectionEntranceLocation(IntersectionQueryActor, CrosswalkIntersectionIndex, CrosswalkIntersectionConnectionIndex, *ZoneShapeComponent, ZoneShapePoint))
+			{
+				return false;
+			}
+
+			ZoneShapeComponent->GetMutablePoints().Add(ZoneShapePoint);
+		}
+
+		// Register ZoneShapeComponent.
+		if (!TryRegisterZoneShapeComponentWithActor(IntersectionQueryActor, *ZoneShapeComponent))
+		{
+			return false;
+		}
+	}
+
+	return true;
+}
+
+bool UTempoRoadLaneGraphSubsystem::TryCreateZoneShapePointForCrosswalkIntersectionEntranceLocation(const AActor& IntersectionQueryActor, int32 CrosswalkIntersectionIndex, int32 CrosswalkIntersectionConnectionIndex, UZoneShapeComponent& ZoneShapeComponent, FZoneShapePoint& OutZoneShapePoint) const
+{
+	const FVector CrosswalkIntersectionEntranceLocationInWorldFrame = ITempoIntersectionInterface::Execute_GetTempoCrosswalkIntersectionEntranceLocation(&IntersectionQueryActor, CrosswalkIntersectionIndex, CrosswalkIntersectionConnectionIndex, ETempoCoordinateSpace::World);
+	
+	DrawDebugSphere(GetWorld(), CrosswalkIntersectionEntranceLocationInWorldFrame, 25.0f, 16, FColor::Green, false, 5.0f);
+	
+	const int32 CrosswalkRoadModuleIndex = ITempoIntersectionInterface::Execute_GetTempoCrosswalkRoadModuleIndexFromCrosswalkIntersectionIndex(&IntersectionQueryActor, CrosswalkIntersectionIndex);
+
+	AActor* CrosswalkRoadModuleQueryActor = ITempoIntersectionInterface::Execute_GetConnectedTempoCrosswalkRoadModuleActor(&IntersectionQueryActor, CrosswalkRoadModuleIndex);
+
+	if (CrosswalkRoadModuleQueryActor == nullptr)
+	{
+		UE_LOG(LogTempoAgentsEditor, Error, TEXT("Tempo Lane Graph - Failed to create Crosswalk Intersection Zone Shape Point - Failed to get Connected Road Actor for Actor: %s at CrosswalkRoadModuleIndex: %d."), *IntersectionQueryActor.GetName(), CrosswalkRoadModuleIndex);
+		return false;
+	}
+	
+	const FZoneLaneProfile LaneProfile = GetCrosswalkIntersectionEntranceLaneProfile(IntersectionQueryActor, CrosswalkIntersectionIndex, CrosswalkIntersectionConnectionIndex);
+	if (!LaneProfile.IsValid())
+	{
+		UE_LOG(LogTempoAgentsEditor, Error, TEXT("Tempo Lane Graph - Failed to create Crosswalk Intersection Zone Shape Point - Couldn't get valid LaneProfile for Actor: %s at CrosswalkIntersectionIndex: %d CrosswalkIntersectionConnectionIndex: %d."), *IntersectionQueryActor.GetName(), CrosswalkIntersectionIndex, CrosswalkIntersectionConnectionIndex);
+		return false;
+	}
+	
+	const FZoneLaneProfileRef LaneProfileRef(LaneProfile);
+
+	const uint8 PerPointLaneProfileIndex = ZoneShapeComponent.AddUniquePerPointLaneProfile(LaneProfileRef);
+
+	FZoneShapePoint ZoneShapePoint;
+	
+	ZoneShapePoint.Position = IntersectionQueryActor.ActorToWorld().InverseTransformPosition(CrosswalkIntersectionEntranceLocationInWorldFrame);
+	ZoneShapePoint.Type = FZoneShapePointType::LaneProfile;
+	ZoneShapePoint.LaneProfile = PerPointLaneProfileIndex;
+	ZoneShapePoint.TangentLength = LaneProfile.GetLanesTotalWidth() * 0.5f;
+
+	const FVector CrosswalkIntersectionEntranceTangentInWorldFrame = ITempoIntersectionInterface::Execute_GetTempoCrosswalkIntersectionEntranceTangent(&IntersectionQueryActor, CrosswalkIntersectionIndex, CrosswalkIntersectionConnectionIndex, ETempoCoordinateSpace::World);
+	const FVector CrosswalkIntersectionEntranceUpVectorInWorldFrame = ITempoIntersectionInterface::Execute_GetTempoCrosswalkIntersectionEntranceUpVector(&IntersectionQueryActor, CrosswalkIntersectionIndex, CrosswalkIntersectionConnectionIndex, ETempoCoordinateSpace::World);
+
+	ZoneShapePoint.SetRotationFromForwardAndUp(ZoneShapeComponent.GetComponentToWorld().InverseTransformPosition(CrosswalkIntersectionEntranceTangentInWorldFrame),
+		ZoneShapeComponent.GetComponentToWorld().InverseTransformPosition(CrosswalkIntersectionEntranceUpVectorInWorldFrame));
+
+	DrawDebugDirectionalArrow(GetWorld(), IntersectionQueryActor.ActorToWorld().TransformPosition(ZoneShapePoint.GetInControlPoint()), IntersectionQueryActor.ActorToWorld().TransformPosition(ZoneShapePoint.Position), 10000.0f, FColor::Blue, false, 10.0f, 0, 10.0f);
+	DrawDebugDirectionalArrow(GetWorld(), IntersectionQueryActor.ActorToWorld().TransformPosition(ZoneShapePoint.Position), IntersectionQueryActor.ActorToWorld().TransformPosition(ZoneShapePoint.GetOutControlPoint()), 10000.0f, FColor::Red, false, 10.0f, 0, 10.0f);
+
+	OutZoneShapePoint = ZoneShapePoint;
+
+	return true;
+}
+
+bool UTempoRoadLaneGraphSubsystem::TryCreateZoneShapePointForCrosswalkControlPoint(const AActor& IntersectionQueryActor, int32 ConnectionIndex, int32 CrosswalkControlPointIndex, FZoneShapePoint& OutZoneShapePoint) const
+{
+	FZoneShapePoint ZoneShapePoint;
+	
+	const FVector CrosswalkControlPointLocation = ITempoIntersectionInterface::Execute_GetTempoCrosswalkControlPointLocation(&IntersectionQueryActor, ConnectionIndex, CrosswalkControlPointIndex, ETempoCoordinateSpace::World);
+	const FVector CrosswalkControlPointTangent = ITempoIntersectionInterface::Execute_GetTempoCrosswalkControlPointTangent(&IntersectionQueryActor, ConnectionIndex, CrosswalkControlPointIndex, ETempoCoordinateSpace::World);
+
+	const FVector CrosswalkControlPointForwardVector = CrosswalkControlPointTangent.GetSafeNormal();
+	const FVector CrosswalkControlPointUpVector = ITempoIntersectionInterface::Execute_GetTempoCrosswalkControlPointUpVector(&IntersectionQueryActor, ConnectionIndex, CrosswalkControlPointIndex, ETempoCoordinateSpace::World);
+
+	ZoneShapePoint.Position = IntersectionQueryActor.GetTransform().InverseTransformPosition(CrosswalkControlPointLocation);
+	ZoneShapePoint.Type = FZoneShapePointType::Bezier;
+	ZoneShapePoint.TangentLength = CrosswalkControlPointTangent.Size();
+	
+	ZoneShapePoint.SetRotationFromForwardAndUp(IntersectionQueryActor.GetTransform().InverseTransformVector(CrosswalkControlPointForwardVector),
+		IntersectionQueryActor.GetTransform().InverseTransformVector(CrosswalkControlPointUpVector));
+
+	OutZoneShapePoint = ZoneShapePoint;
+	
+	return true;
+}
+
+FZoneLaneProfile UTempoRoadLaneGraphSubsystem::CreateDynamicLaneProfileForCrosswalk(const AActor& IntersectionQueryActor, int32 ConnectionIndex) const
+{
+	FZoneLaneProfile LaneProfile;
+	
+	const int32 NumLanes = ITempoIntersectionInterface::Execute_GetNumTempoCrosswalkLanes(&IntersectionQueryActor, ConnectionIndex);
+
+	for (int32 LaneIndex = 0; LaneIndex < NumLanes; ++LaneIndex)
+	{
+		// ZoneGraph's LaneProfiles specify lanes from right to left.
+		const int32 LaneProfileLaneIndex = NumLanes - 1 - LaneIndex;
+		
+		const float LaneWidth = ITempoIntersectionInterface::Execute_GetTempoCrosswalkLaneWidth(&IntersectionQueryActor, ConnectionIndex, LaneProfileLaneIndex);
+		const EZoneLaneDirection LaneDirection = ITempoIntersectionInterface::Execute_GetTempoCrosswalkLaneDirection(&IntersectionQueryActor, ConnectionIndex, LaneProfileLaneIndex);
+		const TArray<FName> LaneTags = ITempoIntersectionInterface::Execute_GetTempoCrosswalkLaneTags(&IntersectionQueryActor, ConnectionIndex, LaneProfileLaneIndex);
+
+		FZoneLaneDesc LaneDesc = CreateZoneLaneDesc(LaneWidth, LaneDirection, LaneTags);
+		LaneProfile.Lanes.Add(LaneDesc);
+	}
+
+	LaneProfile.Name = GenerateDynamicLaneProfileName(LaneProfile);
+
+	return LaneProfile;
+}
+
+FZoneLaneProfile UTempoRoadLaneGraphSubsystem::GetLaneProfileForCrosswalk(const AActor& IntersectionQueryActor, int32 ConnectionIndex) const
+{
+	const FName LaneProfileOverrideName = ITempoIntersectionInterface::Execute_GetLaneProfileOverrideNameForTempoCrosswalk(&IntersectionQueryActor, ConnectionIndex);
+
+	if (LaneProfileOverrideName != NAME_None)
+	{
+		const FZoneLaneProfile OverrideLaneProfile = GetLaneProfileByName(LaneProfileOverrideName);
+		return OverrideLaneProfile;
+	}
+
+	const FZoneLaneProfile DynamicLaneProfile = CreateDynamicLaneProfileForCrosswalk(IntersectionQueryActor, ConnectionIndex);
+	
+	FZoneLaneProfile DynamicLaneProfileFromSettings;
+	if (TryGetDynamicLaneProfileFromSettings(DynamicLaneProfile, DynamicLaneProfileFromSettings))
+	{
+		// The Lane Profile stored in the settings will have a unique ID (ie. Guid).
+		// So, we always want to reference that one, if it exists.
+		return DynamicLaneProfileFromSettings;
+	}
+	else
+	{
+		if (!TryWriteDynamicLaneProfile(DynamicLaneProfile))
+		{
+			UE_LOG(LogTempoAgentsEditor, Error, TEXT("Tempo Lane Graph - Failed to write Dynamic Lane Profile for Crosswalk for Actor: %s.  Returning default constructed profile."), *IntersectionQueryActor.GetName());
+			return FZoneLaneProfile();
+		}
+	}
+	
+	return DynamicLaneProfile;
+}
+
+FZoneLaneProfile UTempoRoadLaneGraphSubsystem::CreateCrosswalkIntersectionConnectorDynamicLaneProfile(const AActor& IntersectionQueryActor, int32 CrosswalkRoadModuleIndex) const
+{
+	FZoneLaneProfile LaneProfile;
+	
+	const int32 NumLanes = ITempoIntersectionInterface::Execute_GetNumTempoCrosswalkIntersectionConnectorLanes(&IntersectionQueryActor, CrosswalkRoadModuleIndex);
+
+	for (int32 LaneIndex = 0; LaneIndex < NumLanes; ++LaneIndex)
+	{
+		// ZoneGraph's LaneProfiles specify lanes from right to left.
+		const int32 LaneProfileLaneIndex = NumLanes - 1 - LaneIndex;
+		
+		const float LaneWidth = ITempoIntersectionInterface::Execute_GetTempoCrosswalkIntersectionConnectorLaneWidth(&IntersectionQueryActor, CrosswalkRoadModuleIndex, LaneProfileLaneIndex);
+		const EZoneLaneDirection LaneDirection = ITempoIntersectionInterface::Execute_GetTempoCrosswalkIntersectionConnectorLaneDirection(&IntersectionQueryActor, CrosswalkRoadModuleIndex, LaneProfileLaneIndex);
+		const TArray<FName> LaneTags = ITempoIntersectionInterface::Execute_GetTempoCrosswalkIntersectionConnectorLaneTags(&IntersectionQueryActor, CrosswalkRoadModuleIndex, LaneProfileLaneIndex);
+
+		FZoneLaneDesc LaneDesc = CreateZoneLaneDesc(LaneWidth, LaneDirection, LaneTags);
+		LaneProfile.Lanes.Add(LaneDesc);
+	}
+
+	LaneProfile.Name = GenerateDynamicLaneProfileName(LaneProfile);
+
+	return LaneProfile;
+}
+
+FZoneLaneProfile UTempoRoadLaneGraphSubsystem::GetCrosswalkIntersectionConnectorLaneProfile(const AActor& IntersectionQueryActor, int32 CrosswalkRoadModuleIndex) const
+{
+	const FName LaneProfileOverrideName = ITempoIntersectionInterface::Execute_GetTempoCrosswalkIntersectionConnectorLaneProfileOverrideName(&IntersectionQueryActor, CrosswalkRoadModuleIndex);
+
+	if (LaneProfileOverrideName != NAME_None)
+	{
+		const FZoneLaneProfile OverrideLaneProfile = GetLaneProfileByName(LaneProfileOverrideName);
+		return OverrideLaneProfile;
+	}
+	
+	const FZoneLaneProfile DynamicLaneProfile = CreateCrosswalkIntersectionConnectorDynamicLaneProfile(IntersectionQueryActor, CrosswalkRoadModuleIndex);
+	
+	FZoneLaneProfile DynamicLaneProfileFromSettings;
+	if (TryGetDynamicLaneProfileFromSettings(DynamicLaneProfile, DynamicLaneProfileFromSettings))
+	{
+		// The Lane Profile stored in the settings will have a unique ID (ie. Guid).
+		// So, we always want to reference that one, if it exists.
+		return DynamicLaneProfileFromSettings;
+	}
+	else
+	{
+		if (!TryWriteDynamicLaneProfile(DynamicLaneProfile))
+		{
+			UE_LOG(LogTempoAgentsEditor, Error, TEXT("Tempo Lane Graph - Failed to write Dynamic Lane Profile for Crosswalk for Actor: %s.  Returning default constructed profile."), *IntersectionQueryActor.GetName());
+			return FZoneLaneProfile();
+		}
+	}
+	
+	return DynamicLaneProfile;
+}
+
+FZoneLaneProfile UTempoRoadLaneGraphSubsystem::CreateCrosswalkIntersectionEntranceDynamicLaneProfile(const AActor& IntersectionQueryActor, int32 CrosswalkIntersectionIndex, int32 CrosswalkIntersectionConnectionIndex) const
+{
+	FZoneLaneProfile LaneProfile;
+	
+	const int32 NumLanes = ITempoIntersectionInterface::Execute_GetNumTempoCrosswalkIntersectionEntranceLanes(&IntersectionQueryActor, CrosswalkIntersectionIndex, CrosswalkIntersectionConnectionIndex);
+
+	for (int32 LaneIndex = 0; LaneIndex < NumLanes; ++LaneIndex)
+	{
+		// ZoneGraph's LaneProfiles specify lanes from right to left.
+		const int32 LaneProfileLaneIndex = NumLanes - 1 - LaneIndex;
+		
+		const float LaneWidth = ITempoIntersectionInterface::Execute_GetTempoCrosswalkIntersectionEntranceLaneWidth(&IntersectionQueryActor, CrosswalkIntersectionIndex, CrosswalkIntersectionConnectionIndex, LaneProfileLaneIndex);
+		const EZoneLaneDirection LaneDirection = ITempoIntersectionInterface::Execute_GetTempoCrosswalkIntersectionEntranceLaneDirection(&IntersectionQueryActor, CrosswalkIntersectionIndex, CrosswalkIntersectionConnectionIndex, LaneProfileLaneIndex);
+		const TArray<FName> LaneTags = ITempoIntersectionInterface::Execute_GetTempoCrosswalkIntersectionEntranceLaneTags(&IntersectionQueryActor, CrosswalkIntersectionIndex, CrosswalkIntersectionConnectionIndex, LaneProfileLaneIndex);
+
+		FZoneLaneDesc LaneDesc = CreateZoneLaneDesc(LaneWidth, LaneDirection, LaneTags);
+		LaneProfile.Lanes.Add(LaneDesc);
+	}
+
+	LaneProfile.Name = GenerateDynamicLaneProfileName(LaneProfile);
+
+	return LaneProfile;
+}
+
+FZoneLaneProfile UTempoRoadLaneGraphSubsystem::GetCrosswalkIntersectionEntranceLaneProfile(const AActor& IntersectionQueryActor, int32 CrosswalkIntersectionIndex, int32 CrosswalkIntersectionConnectionIndex) const
+{
+	const FName LaneProfileOverrideName = ITempoIntersectionInterface::Execute_GetTempoCrosswalkIntersectionEntranceLaneProfileOverrideName(&IntersectionQueryActor, CrosswalkIntersectionIndex, CrosswalkIntersectionConnectionIndex);
+
+	if (LaneProfileOverrideName != NAME_None)
+	{
+		const FZoneLaneProfile OverrideLaneProfile = GetLaneProfileByName(LaneProfileOverrideName);
+		return OverrideLaneProfile;
+	}
+	
+	const FZoneLaneProfile DynamicLaneProfile = CreateCrosswalkIntersectionEntranceDynamicLaneProfile(IntersectionQueryActor, CrosswalkIntersectionIndex, CrosswalkIntersectionConnectionIndex);
+	
+	FZoneLaneProfile DynamicLaneProfileFromSettings;
+	if (TryGetDynamicLaneProfileFromSettings(DynamicLaneProfile, DynamicLaneProfileFromSettings))
+	{
+		// The Lane Profile stored in the settings will have a unique ID (ie. Guid).
+		// So, we always want to reference that one, if it exists.
+		return DynamicLaneProfileFromSettings;
+	}
+	else
+	{
+		if (!TryWriteDynamicLaneProfile(DynamicLaneProfile))
+		{
+			UE_LOG(LogTempoAgentsEditor, Error, TEXT("Tempo Lane Graph - Failed to write Dynamic Lane Profile for Crosswalk for Actor: %s.  Returning default constructed profile."), *IntersectionQueryActor.GetName());
+			return FZoneLaneProfile();
+		}
+	}
+	
+	return DynamicLaneProfile;
 }
 
 //

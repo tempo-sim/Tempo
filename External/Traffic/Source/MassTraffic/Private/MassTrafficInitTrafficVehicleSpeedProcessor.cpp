@@ -34,6 +34,8 @@ void UMassTrafficInitTrafficVehicleSpeedProcessor::Execute(FMassEntityManager& E
 		const TConstArrayView<FMassZoneGraphLaneLocationFragment> LaneLocationFragments = QueryContext.GetFragmentView<FMassZoneGraphLaneLocationFragment>();
 		const TArrayView<FMassTrafficVehicleControlFragment> VehicleControlFragments = QueryContext.GetMutableFragmentView<FMassTrafficVehicleControlFragment>();
 
+		const UWorld* World = QueryContext.GetWorld();
+
 		for (int32 Index = 0; Index < NumEntities; ++Index)
 		{
 			const FMassTrafficRandomFractionFragment& RandomFractionFragment = RandomFractionFragments[Index];
@@ -60,6 +62,7 @@ void UMassTrafficInitTrafficVehicleSpeedProcessor::Execute(FMassEntityManager& E
 			bool bIsFrontOfVehicleBeyondEndOfLane = false;
 			bool bNoNext = false;
 			bool bNoRoom = false;
+			bool bShouldProceedAtStopSign = false;
 			const bool bMustStopAtLaneExit = UE::MassTraffic::ShouldStopAtLaneExit(
 				LaneLocationFragment.DistanceAlongLane,
 				VehicleControlFragment.Speed,
@@ -67,14 +70,20 @@ void UMassTrafficInitTrafficVehicleSpeedProcessor::Execute(FMassEntityManager& E
 				RandomFractionFragment.RandomFraction,
 				LaneLocationFragment.LaneLength,
 				VehicleControlFragment.NextLane,
+				VehicleControlFragment.ReadiedNextIntersectionLane,
 				MassTrafficSettings->MinimumDistanceToNextVehicleRange,
+				MassTrafficSettings->StoppingDistanceRange,
 				EntityManager,
 				/*out*/bRequestDifferentNextLane,
 				/*in/out*/bVehicleCantStopAtLaneExit,
 				/*out*/bIsFrontOfVehicleBeyondEndOfLane,
 				/*out*/bNoRoom,
 				/*out*/bNoNext,
-				MassTrafficSettings->StandardTrafficPrepareToStopSeconds
+				/*out*/bShouldProceedAtStopSign,
+				MassTrafficSettings->StandardTrafficPrepareToStopSeconds,
+				VehicleControlFragment.TimeVehicleStopped,
+				VehicleControlFragment.MinVehicleStopSignRestTime,
+				World
 			);
 			
 			// CalculateTargetSpeed has time based variables that use the current speed to convert times

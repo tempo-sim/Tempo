@@ -406,6 +406,8 @@ struct MASSTRAFFIC_API FMassTrafficIntersectionFragment : public FMassFragment
 	// Zone Graph zone index
 	// @see FZoneGraphStorage::Zones
 	int32 ZoneIndex = INDEX_NONE;
+
+	int32 NumSides = 0;
 	
 	FFloat16 PeriodTimeRemaining = 0.0f;
 
@@ -721,6 +723,9 @@ struct MASSTRAFFIC_API FMassTrafficVehicleControlFragment : public FMassFragment
 	// Fields used for reactive yields.
 	bool bHasGivenOpportunityForTurningVehiclesToReactivelyYieldAtIntersection = false;
 
+	// Crosswalk lanes that this vehicle is actively yielding to.
+	TArray<FZoneGraphLaneHandle> ActiveYieldCrosswalkLanes;
+
 	// Inline copy of CurrentTrafficLaneData->ConstData constant lane data, copied on lane entry
 	FZoneGraphTrafficLaneConstData CurrentLaneConstData;
 
@@ -743,6 +748,17 @@ struct MASSTRAFFIC_API FMassTrafficVehicleControlFragment : public FMassFragment
 	int32 PreviousLaneIndex = INDEX_NONE;
 	
 	float PreviousLaneLength = 0.0f;
+
+	// The world time (in seconds) at which the vehicle stopped.
+	float TimeVehicleStopped = -1.0f;
+
+	// The chosen minimum delta time (in seconds) to remain at rest at the current stop sign.
+	float MinVehicleStopSignRestTime = 0.0f;
+
+	// Functions used for the stopped state.
+	bool IsVehicleCurrentlyStopped() const { return FMath::IsNearlyZero(Speed, 0.1f); }
+	bool WasVehiclePreviouslyStopped() const { return TimeVehicleStopped >= 0.0f; }
+	void ClearVehicleStoppedState() { TimeVehicleStopped = -1.0f; MinVehicleStopSignRestTime = 0.0f; }
 
 	// Functions used for both pre-emptive and reactive yields.
 	bool IsYieldingAtIntersection() const { return YieldAtIntersectionLane != nullptr; }

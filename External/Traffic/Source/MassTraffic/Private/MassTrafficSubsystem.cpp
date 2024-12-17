@@ -20,6 +20,7 @@
 #include "ZoneGraphSubsystem.h"
 #include "VisualLogger/VisualLogger.h"
 
+
 UMassTrafficSubsystem::UMassTrafficSubsystem()
 {
 	RemoveVehiclesOverlappingPlayersProcessor = CreateDefaultSubobject<UMassTrafficRecycleVehiclesOverlappingPlayersProcessor>(TEXT("RemoveVehiclesOverlappingPlayersProcessor"));
@@ -266,6 +267,8 @@ void UMassTrafficSubsystem::BuildLaneData(FMassTrafficZoneGraphData& TrafficZone
 	TrafficZoneGraphData.DataHandle = ZoneGraphStorage.DataHandle;
 	TrafficZoneGraphData.TrafficLaneDataArray.Reset();
 
+	CrosswalkLaneInfoMap.Reset();
+
 	TMap<int32, int32> LeftLaneOverrides; // Key.LeftLanes = Value
 	TMap<int32, int32> RightLaneOverrides; // Key.RightLanes = Value
 	for (int32 LaneIndex = 0; LaneIndex < ZoneGraphStorage.Lanes.Num(); ++LaneIndex)
@@ -420,6 +423,7 @@ void UMassTrafficSubsystem::BuildLaneData(FMassTrafficZoneGraphData& TrafficZone
 		TrafficLaneData.NextLanes.Reset();
 		TrafficLaneData.MergingLanes.Reset();
 		TrafficLaneData.SplittingLanes.Reset();
+		TrafficLaneData.DownstreamCrosswalkLanes.Reset();
 
 		// Set up the turn flags on the lane.
 		const UE::MassTraffic::LaneTurnType LaneTurnType = UE::MassTraffic::GetLaneTurnType(TrafficLaneData.LaneHandle.Index, ZoneGraphStorage);
@@ -821,6 +825,42 @@ void UMassTrafficSubsystem::RebuildLaneData()
 	UE::MassTrafficDelegates::OnTrafficLaneDataChanged.Broadcast(this);
 }
 #endif // WITH_EDITOR
+
+void UMassTrafficSubsystem::AddDownstreamCrosswalkLane(const FZoneGraphLaneHandle& BaseLane, const FZoneGraphLaneHandle& DownstreamCrosswalkLane)
+{
+	if (!ensureMsgf(BaseLane.IsValid(), TEXT("Must get valid BaseLane in UMassTrafficSubsystem::AddDownstreamCrosswalkLane.  BaseLane.Index: %d."), BaseLane.Index))
+	{
+		return;
+	}
+
+	if (!ensureMsgf(DownstreamCrosswalkLane.IsValid(), TEXT("Must get valid DownstreamCrosswalkLane in UMassTrafficSubsystem::AddDownstreamCrosswalkLane.  DownstreamCrosswalkLane.Index: %d."), DownstreamCrosswalkLane.Index))
+	{
+		return;
+	}
+	
+	FZoneGraphTrafficLaneData* BaseTrafficLaneData = GetMutableTrafficLaneData(BaseLane);
+
+	if (!ensureMsgf(BaseTrafficLaneData != nullptr, TEXT("Must get ZoneGraphTrafficLaneData for BaseLane in UMassTrafficSubsystem::AddDownstreamCrosswalkLane.  BaseLane.Index: %d."), BaseLane.Index))
+	{
+		return;
+	}
+
+	BaseTrafficLaneData->DownstreamCrosswalkLanes.AddUnique(DownstreamCrosswalkLane);
+
+	FMassTrafficCrosswalkLaneInfo& CrosswalkLaneInfo = CrosswalkLaneInfoMap.FindOrAdd(DownstreamCrosswalkLane);
+	CrosswalkLaneInfo.IncomingVehicleLanes.Add(BaseLane);
+}
+
+const FMassTrafficCrosswalkLaneInfo* UMassTrafficSubsystem::GetCrosswalkLaneInfo(const FZoneGraphLaneHandle& CrosswalkLane) const
+{
+	const FMassTrafficCrosswalkLaneInfo* CrosswalkLaneInfo = CrosswalkLaneInfoMap.Find(CrosswalkLane);
+	return CrosswalkLaneInfo;
+}
+
+FMassTrafficCrosswalkLaneInfo* UMassTrafficSubsystem::GetMutableCrosswalkLaneInfo(const FZoneGraphLaneHandle& CrosswalkLane)
+{
+	return const_cast<FMassTrafficCrosswalkLaneInfo*>(GetCrosswalkLaneInfo(CrosswalkLane));
+}
 
 void MassTrafficDumpLaneStats(const TArray<FString>& Args, UWorld* InWorld, FOutputDevice& Ar)
 {
