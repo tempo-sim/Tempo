@@ -790,6 +790,8 @@ bool CheckNextVehicle(const FMassEntityHandle Entity, const FMassEntityHandle Ne
 bool ShouldYieldAtIntersection_Internal(
 	const FZoneGraphTrafficLaneData& CurrentLaneData,
 	const FZoneGraphTrafficLaneData& PrevLaneData,
+	const TFunction<bool(const FZoneGraphLaneHandle&)>& IsDownstreamCrosswalkLaneClearFunc,
+	const TFunction<bool(const FZoneGraphLaneHandle&)>& DownstreamCrosswalkLaneHasYieldingEntitiesFunc,
 	const TFunction<bool(const FZoneGraphTrafficLaneData&)>& IsTestLaneClearFunc,
 	const bool bConsiderYieldForGoingStraight = true,
 	const bool bConsiderYieldForLeftTurns = true,
@@ -799,6 +801,28 @@ bool ShouldYieldAtIntersection_Internal(
 	if (!CurrentLaneData.ConstData.bIsIntersectionLane)
 	{
 		return false;
+	}
+
+	// If we're turning, check all the downstream crosswalk lanes for our current lane.
+	//
+	// We assume that the Intersection "Periods" should not give any "through" lane a green light
+	// while there are still pedestrians in the crosswalk downstream of the "through" lane.
+	if (CurrentLaneData.bTurnsLeft || CurrentLaneData.bTurnsRight)
+	{
+		for (const FZoneGraphLaneHandle& DownstreamCrosswalkLane : CurrentLaneData.DownstreamCrosswalkLanes)
+		{
+			// And, we skip over any crosswalk lanes, which already have yielding Entities.
+			if (DownstreamCrosswalkLaneHasYieldingEntitiesFunc(DownstreamCrosswalkLane))
+			{
+				continue;
+			}
+		
+			// We should yield, if any of our downstream crosswalk lanes are not clear.
+			if (!IsDownstreamCrosswalkLaneClearFunc(DownstreamCrosswalkLane))
+			{
+				return true;
+			}
+		}
 	}
 
 	// If we're turning left at an intersection, ...
@@ -932,10 +956,12 @@ bool ShouldYieldAtIntersection_Internal(
 
 bool ShouldPerformPreemptiveYieldAtIntersection(
 	const UMassTrafficSubsystem& MassTrafficSubsystem,
+	const UMassCrowdSubsystem& MassCrowdSubsystem,
 	const FMassEntityManager& EntityManager,
 	const FMassTrafficVehicleControlFragment& VehicleControlFragment,
 	const FMassZoneGraphLaneLocationFragment& LaneLocationFragment,
 	const FAgentRadiusFragment& RadiusFragment,
+	const FZoneGraphStorage& ZoneGraphStorage,
 	bool& OutHasAnotherVehicleEnteredRelevantLaneAfterPreemptiveYieldRollOut)
 {
 	const UMassTrafficSettings* MassTrafficSettings = GetDefault<UMassTrafficSettings>();
@@ -1023,6 +1049,19 @@ bool ShouldPerformPreemptiveYieldAtIntersection(
 			return false;
 		}
 	}
+	
+	const auto& DownstreamCrosswalkLaneHasYieldingEntities = [&MassTrafficSubsystem](const FZoneGraphLaneHandle& TestDownstreamCrosswalkLane)
+	{
+		// Currently, pre-emptively yielding to crosswalk lanes is not implemented.
+		return false;
+	};
+	
+	const auto& IsDownstreamCrosswalkLaneClear = [&MassCrowdSubsystem, &CurrentLaneData, &LaneLocationFragment, &RadiusFragment, &ZoneGraphStorage, MassTrafficSettings](const FZoneGraphLaneHandle& TestDownstreamCrosswalkLane)
+	{
+		// Currently, pre-emptively yielding to crosswalk lanes is not implemented.
+		// So, we just say the crosswalk lanes are always clear from a pre-emptive yield perspective.
+		return true;
+	};
 
 	const auto& IsTestLaneClear = [&EntityManager, &VehicleControlFragment, &CurrentLaneData, &LaneDataBeforeIntersection, MassTrafficSettings](const FZoneGraphTrafficLaneData& TestLane)
 	{
@@ -1085,7 +1124,7 @@ bool ShouldPerformPreemptiveYieldAtIntersection(
 	// So, we don't consider pre-emptively yielding when going straight.
 	// However, vehicles going straight can reactively yield
 	// after an opportunity is given for turning vehicles to reactively yield first.
-	const bool bShouldYieldAtIntersection = ShouldYieldAtIntersection_Internal(*IntersectionLaneData, *LaneDataBeforeIntersection, IsTestLaneClear, false);
+	const bool bShouldYieldAtIntersection = ShouldYieldAtIntersection_Internal(*IntersectionLaneData, *LaneDataBeforeIntersection, IsDownstreamCrosswalkLaneClear, DownstreamCrosswalkLaneHasYieldingEntities, IsTestLaneClear, false);
 
 	// If we are pre-emptively yielding, ...
 	if (VehicleControlFragment.IsPreemptivelyYieldingAtIntersection())
@@ -1123,10 +1162,12 @@ bool ShouldPerformPreemptiveYieldAtIntersection(
 
 bool ShouldPerformReactiveYieldAtIntersection(
 	const UMassTrafficSubsystem& MassTrafficSubsystem,
+	const UMassCrowdSubsystem& MassCrowdSubsystem,
 	const FMassEntityManager& EntityManager,
 	const FMassTrafficVehicleControlFragment& VehicleControlFragment,
 	const FMassZoneGraphLaneLocationFragment& LaneLocationFragment,
 	const FAgentRadiusFragment& RadiusFragment,
+	const FZoneGraphStorage& ZoneGraphStorage,
 	bool& OutShouldGiveOpportunityForTurningVehiclesToReactivelyYieldAtIntersection)
 {
 	const UMassTrafficSettings* MassTrafficSettings = GetDefault<UMassTrafficSettings>();
@@ -1151,6 +1192,117 @@ bool ShouldPerformReactiveYieldAtIntersection(
 	{
 		return false;
 	}
+	
+	const auto& DownstreamCrosswalkLaneHasYieldingEntities = [&MassTrafficSubsystem, &CurrentLaneData](const FZoneGraphLaneHandle& TestDownstreamCrosswalkLane)
+	{
+		const FMassTrafficCrosswalkLaneInfo* CrosswalkLaneInfo = MassTrafficSubsystem.GetCrosswalkLaneInfo(TestDownstreamCrosswalkLane);
+
+		if (!ensureMsgf(CrosswalkLaneInfo != nullptr, TEXT("Must get valid CrosswalkLaneInfo in DownstreamCrosswalkLaneHasYieldingEntities.  TestDownstreamCrosswalkLane.Index: %d."), TestDownstreamCrosswalkLane.Index))
+		{
+			return false;
+		}
+
+		// Are there any Entities on the crosswalk lane that are yielding to our current lane?
+		return CrosswalkLaneInfo->IsAnyEntityOnCrosswalkYieldingToLane(CurrentLaneData->LaneHandle);
+	};
+	
+	const auto& IsDownstreamCrosswalkLaneClear = [&MassCrowdSubsystem, &CurrentLaneData, &LaneLocationFragment, &RadiusFragment, &ZoneGraphStorage, MassTrafficSettings](const FZoneGraphLaneHandle& TestDownstreamCrosswalkLane)
+	{
+		if (!ensureMsgf(CurrentLaneData->bTurnsLeft || CurrentLaneData->bTurnsRight, TEXT("IsDownstreamCrosswalkLaneClear expects CurrentLaneData to be a *turn* lane, not a \"through\" lane.  CurrentLaneData->LaneHandle.Index: %d."), CurrentLaneData->LaneHandle.Index))
+		{
+			// Since we're in an error state, assume it's clear to keep traffic flowing.
+			return true;
+		}
+		
+		if (!ensureMsgf(CurrentLaneData->Length > 0.0f && LaneLocationFragment.LaneLength > 0.0f, TEXT("CurrentLane should have a length greater than zero.")))
+		{
+			// If we have errant lane data, just say it's clear to attempt to keep traffic flowing.
+			return true;
+		}
+		
+		const FCrowdTrackingLaneData* CrowdTrackingLaneData = MassCrowdSubsystem.GetCrowdTrackingLaneData(TestDownstreamCrosswalkLane);
+		
+		if (!ensureMsgf(CrowdTrackingLaneData != nullptr, TEXT("Must get valid CrowdTrackingLaneData in IsDownstreamCrosswalkLaneClear.  TestDownstreamCrosswalkLane.Index: %d."), TestDownstreamCrosswalkLane.Index))
+		{
+			// Since we're in an error state, assume it's clear to keep traffic flowing.
+			return true;
+		}
+
+		if (CrowdTrackingLaneData->NumEntitiesOnLane > 0)
+		{
+			if (!ensureMsgf(CrowdTrackingLaneData->TailEntityNormalizedDistanceAlongLane.IsSet(), TEXT("CrowdTrackingLaneData has Entities on the lane, but no TailEntityNormalizedDistanceAlongLane value in IsDownstreamCrosswalkLaneClear.  TestDownstreamCrosswalkLane.Index: %d."), TestDownstreamCrosswalkLane.Index))
+			{
+				// Since there are Entities on the test lane, but we can't determine where the tail Entity is,
+				// we just wait until all Entities fully clear the test lane before allowing vehicles to resume
+				// from yielding.
+				return false;
+			}
+
+			if (!ensureMsgf(CrowdTrackingLaneData->LeadEntityNormalizedDistanceAlongLane.IsSet(), TEXT("CrowdTrackingLaneData has Entities on the lane, but no LeadEntityNormalizedDistanceAlongLane value in IsDownstreamCrosswalkLaneClear.  TestDownstreamCrosswalkLane.Index: %d."), TestDownstreamCrosswalkLane.Index))
+			{
+				// Since there are Entities on the test lane, but we can't determine where the tail Entity is,
+				// we just wait until all Entities fully clear the test lane before allowing vehicles to resume
+				// from yielding.
+				return false;
+			}
+
+			const auto& GetLaneStartDirection = [&ZoneGraphStorage](const FZoneGraphLaneHandle& LaneHandle)
+			{
+				const FZoneLaneData& ZoneLaneData = ZoneGraphStorage.Lanes[LaneHandle.Index];
+				
+				if (!ensureMsgf(ZoneLaneData.GetNumPoints() >= 2, TEXT("Expected ZoneLaneData.GetNumPoints() >= 2 in IsDownstreamCrosswalkLaneClear.")))
+				{
+					return FVector::ZeroVector;
+				}
+				
+				const int32 LanePointsStartIndex = ZoneLaneData.PointsBegin;
+				const int32 LanePointsEndIndex = LanePointsStartIndex + 1;
+
+				const FVector LaneStartLocation = ZoneGraphStorage.LanePoints[LanePointsStartIndex];
+				const FVector LaneEndLocation = ZoneGraphStorage.LanePoints[LanePointsEndIndex];
+
+				const FVector LaneDirection = (LaneEndLocation - LaneStartLocation).GetSafeNormal();
+
+				return LaneDirection;
+			};
+			
+			const float NormalizedDistanceAlongCurrentLane = (LaneLocationFragment.DistanceAlongLane - RadiusFragment.Radius) / LaneLocationFragment.LaneLength;
+			const float NormalizedYieldCutoffLaneDistance = MassTrafficSettings->NormalizedYieldCutoffLaneDistance_Crosswalk;
+
+			const FVector CurrentLaneStartDirection = GetLaneStartDirection(CurrentLaneData->LaneHandle);
+			const FVector CrosswalkLaneStartDirection = GetLaneStartDirection(TestDownstreamCrosswalkLane);
+
+			const bool bIsCrosswalkLaneGoingSameDirection = FVector::DotProduct(CurrentLaneStartDirection, CrosswalkLaneStartDirection) >= 0.0f;
+
+			// We need to know whether the Entities on the crosswalk lanes will be heading "away" or "towards" our Intersection "exit" lane.
+			const bool bOtherEntityHeadingAwayFromIntersectionExitLane = CurrentLaneData->bTurnsRight ? bIsCrosswalkLaneGoingSameDirection : !bIsCrosswalkLaneGoingSameDirection;
+
+			// If the Entities will be heading *away* from our exit lane, we care about the
+			// *Tail* Entity's distance along the crosswalk lane.  Whereas, if the Entities will be heading *towards*
+			// our exit lane, then we care about the *Lead* Entity's distance along the crosswalk lane.
+			const float NormalizedDistanceAlongTestLane = bOtherEntityHeadingAwayFromIntersectionExitLane
+				? CrowdTrackingLaneData->TailEntityNormalizedDistanceAlongLane.GetValue()
+				: CrowdTrackingLaneData->LeadEntityNormalizedDistanceAlongLane.GetValue();
+
+			// When the Entities are heading *away* from our exit lane,
+			// they are considered "out of the way" when the *Tail* Entity is essentially past
+			// the double-yellow center line (or "effectively" past such a boundary).
+			//
+			// When the Entities are heading *towards* our exit lane,
+			// they are considered "out of the way" when the *Lead* Entity is far enough back
+			// *before* the double-yellow center line (or "effectively" *before* such a boundary).
+			const bool bOtherEntityOutOfTheWay = bOtherEntityHeadingAwayFromIntersectionExitLane
+				? NormalizedDistanceAlongTestLane > MassTrafficSettings->NormalizedYieldResumeLaneDistance_Crosswalk_AwayFromIntersectionExit
+				: NormalizedDistanceAlongTestLane < MassTrafficSettings->NormalizedYieldPedestrianCutoffLaneDistance_Crosswalk_TowardsIntersectionExit;
+
+			if (NormalizedDistanceAlongCurrentLane < NormalizedYieldCutoffLaneDistance && !bOtherEntityOutOfTheWay)
+			{
+				return false;
+			}
+		}
+
+		return true;
+	};
 
 	const auto& IsTestLaneClear = [&EntityManager, &CurrentLaneData, &LaneLocationFragment, &RadiusFragment, MassTrafficSettings](const FZoneGraphTrafficLaneData& TestLane)
 	{
@@ -1213,7 +1365,7 @@ bool ShouldPerformReactiveYieldAtIntersection(
 		return true;
 	};
 
-	const bool bShouldReactivelyYieldAtIntersection = ShouldYieldAtIntersection_Internal(*CurrentLaneData, *PrevLaneData, IsTestLaneClear);
+	const bool bShouldReactivelyYieldAtIntersection = ShouldYieldAtIntersection_Internal(*CurrentLaneData, *PrevLaneData, IsDownstreamCrosswalkLaneClear, DownstreamCrosswalkLaneHasYieldingEntities, IsTestLaneClear);
 
 	// If we haven't started reactively yielding, ...
 	if (!VehicleControlFragment.IsReactivelyYieldingAtIntersection())

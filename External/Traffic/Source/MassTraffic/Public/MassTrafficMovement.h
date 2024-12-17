@@ -137,22 +137,35 @@ MASSTRAFFIC_API bool ShouldStopAtLaneExit(
 	float RandomFraction,
 	float LaneLength,
 	FZoneGraphTrafficLaneData* NextTrafficLaneData,
+	const FZoneGraphTrafficLaneData* ReadiedNextIntersectionLane,
 	const FVector2D& MinimumDistanceToNextVehicleRange,
+	const FVector2D& StoppingDistanceRange,
 	const FMassEntityManager& EntityManager, 
 	bool& bOut_RequestDifferentNextLane,
 	bool& bInOut_CantStopAtLaneExit,
 	bool& bOut_IsFrontOfVehicleBeyondLaneExit,
 	bool& bOut_VehicleHasNoNextLane,
 	bool& bOut_VehicleHasNoRoom,
-	const float StandardTrafficPrepareToStopSeconds
+	bool& bOut_ShouldProceedAtStopSign,
+	const float StandardTrafficPrepareToStopSeconds,
+	const float TimeVehicleStopped,
+	const float MinVehicleStopSignRestTime,
+	const UWorld* World
 #if WITH_MASSTRAFFIC_DEBUG
 	, bool bVisLog = false
 	, const UObject* VisLogOwner = nullptr
 	, const FTransform* VisLogTransform = nullptr
 #endif
-	, const UWorld* World = nullptr // ..for debugging
 	, const FVector* VehicleLocation = nullptr // ..for debuging
 );
+	
+bool IsVehicleNearStopLineAtIntersection(
+	const FZoneGraphTrafficLaneData* NextLane,
+	const float DistanceAlongCurrentLane,
+	const float CurrentLaneLength,
+	const float AgentRadius,
+	const float RandomFraction,
+	const FVector2D& StoppingDistanceRange);
 
 MASSTRAFFIC_API void UpdateYieldAtIntersectionState(
 	UMassTrafficSubsystem& MassTrafficSubsystem,

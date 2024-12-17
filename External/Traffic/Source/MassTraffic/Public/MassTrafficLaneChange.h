@@ -211,18 +211,22 @@ bool CheckNextVehicle(const FMassEntityHandle Entity, const FMassEntityHandle Ne
 
 bool ShouldPerformPreemptiveYieldAtIntersection(
 	const UMassTrafficSubsystem& MassTrafficSubsystem,
+	const UMassCrowdSubsystem& MassCrowdSubsystem,
 	const FMassEntityManager& EntityManager,
 	const FMassTrafficVehicleControlFragment& VehicleControlFragment,
 	const FMassZoneGraphLaneLocationFragment& LaneLocationFragment,
 	const FAgentRadiusFragment& RadiusFragment,
+	const FZoneGraphStorage& ZoneGraphStorage,
 	bool& OutHasAnotherVehicleEnteredRelevantLaneAfterPreemptiveYieldRollOut);
 	
 bool ShouldPerformReactiveYieldAtIntersection(
 	const UMassTrafficSubsystem& MassTrafficSubsystem,
+	const UMassCrowdSubsystem& MassCrowdSubsystem,
 	const FMassEntityManager& EntityManager,
 	const FMassTrafficVehicleControlFragment& VehicleControlFragment,
 	const FMassZoneGraphLaneLocationFragment& LaneLocationFragment,
 	const FAgentRadiusFragment& RadiusFragment,
+	const FZoneGraphStorage& ZoneGraphStorage,
 	bool& OutShouldGiveOpportunityForTurningVehiclesToReactivelyYieldAtIntersection);
 
 };

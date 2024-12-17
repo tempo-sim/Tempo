@@ -17,6 +17,108 @@ class UMassTrafficFieldComponent;
 class UMassTrafficFieldOperationBase;
 struct FMassEntityManager;
 
+struct FMassTrafficCrosswalkLaneInfo
+{
+	FMassTrafficCrosswalkLaneInfo() = default;
+
+	TSet<FZoneGraphLaneHandle> IncomingVehicleLanes;
+	
+	TMap<FMassEntityHandle, TSet<FZoneGraphLaneHandle>> YieldingEntityToIncomingVehicleLaneMap;
+	TMap<FZoneGraphLaneHandle, TSet<FMassEntityHandle>> IncomingVehicleLaneToYieldingEntityMap;
+
+	TMap<FMassEntityHandle, FMassInt16Real> EntityYieldResumeSpeedMap;
+
+	void TrackEntityOnCrosswalkYieldingToLane(const FMassEntityHandle& EntityHandle, const FZoneGraphLaneHandle& LaneHandle)
+	{
+		TSet<FZoneGraphLaneHandle>& IncomingVehicleLanesInMap = YieldingEntityToIncomingVehicleLaneMap.FindOrAdd(EntityHandle);
+		IncomingVehicleLanesInMap.Add(LaneHandle);
+		
+		TSet<FMassEntityHandle>& YieldingEntities = IncomingVehicleLaneToYieldingEntityMap.FindOrAdd(LaneHandle);
+		YieldingEntities.Add(EntityHandle);
+	}
+
+	void TrackEntityOnCrosswalkYieldResumeSpeed(const FMassEntityHandle& EntityHandle, const FMassInt16Real& EntityYieldResumeSpeed)
+	{
+		EntityYieldResumeSpeedMap.FindOrAdd(EntityHandle, EntityYieldResumeSpeed);
+	}
+
+	void UnTrackEntityOnCrosswalkYieldingToLane(const FMassEntityHandle& EntityHandle, const FZoneGraphLaneHandle& LaneHandle)
+	{
+		TSet<FZoneGraphLaneHandle>* IncomingVehicleLanesInMap = YieldingEntityToIncomingVehicleLaneMap.Find(EntityHandle);
+		
+		if (ensureMsgf(IncomingVehicleLanesInMap != nullptr, TEXT("Must get valid IncomingVehicleLanesInMap in FMassTrafficCrosswalkLaneInfo::UnTrackEntityOnCrosswalkYieldingToLane.  EntityHandle.Index: %d EntityHandle.SerialNumber: %d."), EntityHandle.Index, EntityHandle.SerialNumber))
+		{
+			IncomingVehicleLanesInMap->Remove(LaneHandle);
+		}
+
+		TSet<FMassEntityHandle>* YieldingEntities = IncomingVehicleLaneToYieldingEntityMap.Find(LaneHandle);
+		
+		if (ensureMsgf(YieldingEntities != nullptr, TEXT("Must get valid YieldingEntities in FMassTrafficCrosswalkLaneInfo::UnTrackEntityOnCrosswalkYieldingToLane.  EntityHandle.Index: %d EntityHandle.SerialNumber: %d."), EntityHandle.Index, EntityHandle.SerialNumber))
+		{
+			YieldingEntities->Remove(EntityHandle);
+		}
+
+		// If there are no more Entities yielding to this lane,
+		// clear the map entry for the lane.
+		if (!IsAnyEntityOnCrosswalkYieldingToLane(LaneHandle))
+		{
+			IncomingVehicleLaneToYieldingEntityMap.Remove(LaneHandle);
+		}
+		
+		// Note:  If we just removed the last lane to which this Entity was yielding,
+		// we do *not* clear the map entries for this Entity, here.
+		// We want to preserve this Entity's entry in EntityYieldResumeSpeedMap
+		// until after the yield logic has a chance to query it.
+		// Then, the yield logic is expected to call UnTrackEntityYieldingOnCrosswalk
+		// to clean up all references to this Entity.
+	}
+	
+	void UnTrackEntityYieldingOnCrosswalk(const FMassEntityHandle& EntityHandle)
+	{
+		YieldingEntityToIncomingVehicleLaneMap.Remove(EntityHandle);
+	
+		for (TTuple<FZoneGraphLaneHandle, TSet<FMassEntityHandle>>& IncomingVehicleLaneToYieldingEntityPair : IncomingVehicleLaneToYieldingEntityMap)
+		{
+			TSet<FMassEntityHandle>& YieldingEntities = IncomingVehicleLaneToYieldingEntityPair.Value;
+			YieldingEntities.Remove(EntityHandle);
+		}
+		
+		EntityYieldResumeSpeedMap.Remove(EntityHandle);
+	}
+	
+	FORCEINLINE bool IsAnyEntityOnCrosswalkYieldingToLane(const FZoneGraphLaneHandle& LaneHandle) const
+	{
+		// If there are *any* Entities on the crosswalk yielding to the query lane,
+		// then the yield logic should make *all* of the Entities on the crosswalk yield to the query lane.
+		const TSet<FMassEntityHandle>* YieldingEntities = IncomingVehicleLaneToYieldingEntityMap.Find(LaneHandle);
+		return YieldingEntities != nullptr ? !YieldingEntities->IsEmpty() : false;
+	}
+
+	FORCEINLINE bool IsEntityOnCrosswalkYieldingToAnyLane(const FMassEntityHandle& EntityHandle) const
+	{
+		const TSet<FZoneGraphLaneHandle>* IncomingVehicleLanesInMap = YieldingEntityToIncomingVehicleLaneMap.Find(EntityHandle);
+		return IncomingVehicleLanesInMap != nullptr ? !IncomingVehicleLanesInMap->IsEmpty() : false;
+	}
+
+	FORCEINLINE bool IsEntityOnCrosswalkYieldingToLane(const FMassEntityHandle& EntityHandle, const FZoneGraphLaneHandle& LaneHandle) const
+	{
+		const TSet<FZoneGraphLaneHandle>* IncomingVehicleLanesInMap = YieldingEntityToIncomingVehicleLaneMap.Find(EntityHandle);
+		return IncomingVehicleLanesInMap != nullptr ? IncomingVehicleLanesInMap->Contains(LaneHandle) : false;
+	}
+
+	FORCEINLINE FMassInt16Real GetEntityYieldResumeSpeed(const FMassEntityHandle& EntityHandle) const
+	{
+		const FMassInt16Real* EntityYieldResumeSpeed = EntityYieldResumeSpeedMap.Find(EntityHandle);
+		
+		if (!ensureMsgf(EntityYieldResumeSpeed != nullptr, TEXT("Must get valid EntityYieldResumeSpeed in FMassTrafficCrosswalkLaneInfo::GetEntityYieldResumeSpeed.  EntityHandle.Index: %d EntityHandle.SerialNumber: %d."), EntityHandle.Index, EntityHandle.SerialNumber))
+		{
+			return FMassInt16Real(0.0f);
+		}
+		
+		return *EntityYieldResumeSpeed;
+	}
+};
+
 /**
  * Subsystem that tracks mass traffic entities driving on the zone graph.
  * 
@@ -140,6 +242,11 @@ public:
 	/** Clears and rebuilds all lane and intersection data for registered zone graphs using the current settings. */
 	void RebuildLaneData();
 #endif
+
+	void AddDownstreamCrosswalkLane(const FZoneGraphLaneHandle& BaseLane, const FZoneGraphLaneHandle& DownstreamCrosswalkLane);
+
+	const FMassTrafficCrosswalkLaneInfo* GetCrosswalkLaneInfo(const FZoneGraphLaneHandle& CrosswalkLane) const;
+	FMassTrafficCrosswalkLaneInfo* GetMutableCrosswalkLaneInfo(const FZoneGraphLaneHandle& CrosswalkLane);
 	
 protected:
 	
@@ -202,6 +309,9 @@ protected:
 	TObjectPtr<class UMassTrafficRecycleVehiclesOverlappingPlayersProcessor> RemoveVehiclesOverlappingPlayersProcessor = nullptr;
 
 	TIndirectArray<FMassTrafficSimpleVehiclePhysicsTemplate> VehiclePhysicsTemplates;
+
+	/** Map from each crosswalk lane to its related yield state data. */
+	TMap<FZoneGraphLaneHandle, FMassTrafficCrosswalkLaneInfo> CrosswalkLaneInfoMap;
 };
 
 template<>

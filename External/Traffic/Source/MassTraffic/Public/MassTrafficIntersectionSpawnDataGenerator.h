@@ -43,10 +43,14 @@ public:
 	UPROPERTY(EditAnywhere, Category="Durations|Standard")
 	float StandardMinimumTrafficGoSeconds = 5.0f;
 
+	/** How many seconds pedestrians go before vehicles go in 4-way and T-intersections. */
+	UPROPERTY(EditAnywhere, Category="Durations|Standard")
+	float StandardCrosswalkGoHeadStartSeconds = 4.0f;
+	
 	/** How many seconds pedestrians go (how long crosswalks are open for arriving pedestrians)- in most cases. */
 	UPROPERTY(EditAnywhere, Category="Durations|Standard")
 	float StandardCrosswalkGoSeconds = 10.0f;
-
+	
 	/** In cross-traffic intersections only - how many seconds for vehicles to go (how long a green light lasts) - when coming from one side, and can go straight, right or left. */
 	UPROPERTY(EditAnywhere, Category="Durations|FourWay")
 	float UnidirectionalTrafficStraightRightLeftGoSeconds = StandardTrafficGoSeconds / 2.0f;
