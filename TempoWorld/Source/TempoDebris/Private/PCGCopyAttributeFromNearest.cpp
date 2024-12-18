@@ -6,7 +6,6 @@
 #include "PCGPin.h"
 #include "Data/PCGSpatialData.h"
 #include "Data/PCGPointData.h"
-#include "Elements/PCGGather.h"
 #include "Helpers/PCGAsync.h"
 #include "Metadata/Accessors/PCGAttributeAccessorHelpers.h"
 #include "Metadata/Accessors/IPCGAttributeAccessor.h"
@@ -19,9 +18,9 @@ namespace PCGDistance
 	const FName TargetLabel = TEXT("Target");
 }
 
-namespace PCGGather
+namespace
 {
-	FPCGDataCollection GatherDataForPin(const FPCGDataCollection& InputData, const FName InputLabel, const FName OutputLabel)
+	FPCGDataCollection GatherDataForPin(const FPCGDataCollection& InputData, const FName InputLabel = PCGPinConstants::DefaultInputLabel, const FName OutputLabel = PCGPinConstants::DefaultOutputLabel)
 	{
 		TArray<FPCGTaggedData> GatheredData = InputData.GetInputsByPin(InputLabel);
 		FPCGDataCollection Output;
@@ -96,7 +95,7 @@ bool FPCGCopyAttributeFromNearestElement::ExecuteInternal(FPCGContext* Context) 
 	if (Context->Node && !Context->Node->IsInputPinConnected(PCGDistance::TargetLabel))
 	{
 		// If Target pin is unconnected then we no-op and pass through all data from Target pin.
-		Context->OutputData = PCGGather::GatherDataForPin(Context->InputData, PCGDistance::SourceLabel);
+		Context->OutputData = GatherDataForPin(Context->InputData, PCGDistance::SourceLabel);
 		return true;
 	}
 
