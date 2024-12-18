@@ -175,7 +175,7 @@ void UTempoActorControlServiceSubsystem::SpawnActor(const SpawnActorRequest& Req
 			ResponseContinuation.ExecuteIfBound(SpawnActorResponse(), grpc::Status(grpc::FAILED_PRECONDITION, "Failed to find relative to actor"));
 			return;
 		}
-		SpawnTransform = RelativeToActor->GetActorTransform() * SpawnTransform;
+		SpawnTransform = SpawnTransform * RelativeToActor->GetActorTransform();
 		SpawnLocation = SpawnTransform.GetLocation();
 		SpawnRotation = SpawnTransform.GetRotation().Rotator();
 	}
