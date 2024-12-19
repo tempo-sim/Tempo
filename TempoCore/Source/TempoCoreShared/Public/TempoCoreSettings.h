@@ -24,6 +24,7 @@ public:
 	void SetTimeMode(ETimeMode TimeModeIn);
 	void SetSimulatedStepsPerSecond(int32 SimulatedStepsPerSecondIn);
 	ETimeMode GetTimeMode() const { return TimeMode; }
+	double GetMaxWallClockTimeStep() const { return MaxWallClockTimeStep; }
 	int32 GetSimulatedStepsPerSecond() const { return SimulatedStepsPerSecond; }
 	FTempoCoreTimeSettingsChanged TempoCoreTimeSettingsChangedEvent;
 
@@ -49,6 +50,11 @@ private:
 	// The number of evenly-spaced steps per simulated second that will be executed in FixedStep time mode.
 	UPROPERTY(EditAnywhere, Config, Category="Time|FixedStep", meta=(ClampMin=1, UIMin=1, UIMax=100))
 	int32 SimulatedStepsPerSecond = 10;
+
+	// The largest time step allowed in WallClock time mode. No limit if 0.0. Note that setting this to non-zero violates 
+	// WallClock time mode's guarantee of strictly advancing along with wall clock at the step that would have exceeded the max.
+	UPROPERTY(EditAnywhere, Config, Category="Time|WallClock", meta=(ClampMin=0.0, UIMin=0.0, UIMax=1.0))
+	double MaxWallClockTimeStep = 0.0;
 
 	// The port number to listen for scripting connections on.
 	UPROPERTY(EditAnywhere, Config, Category="Scripting", meta=(ClampMin=1024, ClampMax=65535, UIMin=1024, UIMax=65535))
