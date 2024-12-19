@@ -45,6 +45,15 @@ float ATempoTimeWorldSettings::FixupDeltaSeconds(float DeltaSeconds, float RealD
 			// RealDeltaSeconds is not reliable, so we compute our own.
 			const double TimeSinceRealTimeBegan = FPlatformTime::ToSeconds64(FPlatformTime::Cycles64() - CyclesWhenTimeModeChanged);
 			const float WallClockDeltaSeconds = TimeSinceRealTimeBegan - (SimTime - SimTimeWhenTimeModeChanged);
+			const double MaxTimeStep = Settings->GetMaxWallClockTimeStep();
+			if (MaxTimeStep > 0.0 && WallClockDeltaSeconds > MaxTimeStep)
+			{
+				UE_LOG(LogTempoTime, Warning, TEXT("Large time step detected. Clamping to max: %.3f"), MaxTimeStep);
+				// Overwrite time sync as if the current SimTime corresponds to MaxTimeStep seconds ago.
+				CyclesWhenTimeModeChanged = FPlatformTime::Cycles64() - MaxTimeStep / FPlatformTime::GetSecondsPerCycle64();
+				SimTimeWhenTimeModeChanged = SimTime;
+				return MaxTimeStep;
+			}
 			if (ensureAlwaysMsgf(WallClockDeltaSeconds >= 0.0, TEXT("WallClockDeltaSeconds was not positive: %f"), WallClockDeltaSeconds))
 			{
 				return WallClockDeltaSeconds;
