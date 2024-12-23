@@ -5,7 +5,7 @@ TempoCore includes the `TempoTime` and `TempoScripting` modules, as well as util
 Tempo supports two time modes: `Wall Clock` and `Fixed Step`.
 
 ### Wall Clock Mode
-In `Wall Clock` mode, time advances _strictly_ alongside the system clock. We actually override Unreal's engine time to do this, as it does not provide this guarrantee.
+In `Wall Clock` mode, time advances _strictly_ alongside the system clock. We actually override Unreal's engine time to do this, as it does not provide this guarantee. This can lead to large time steps when slow tasks run on the game thread. If you'd like sim time to follow the system clock _except_ when doing so would cause a large time step, you can set the `MaxWallClockTimeStep` setting to non-zero.
 
 ### Fixed Step Mode
 In `Fixed Step` mode, time advances by a fixed amount, which you can choose, every frame. We express this increment in terms of a whole number of simulated steps per second (like, 10 steps per second), as opposed to a floating point fraction of a second (like, 0.1 seconds per step), because we use a fixed-point representation for time (again, overriding the engine's time) because we want it to be exactly correct (no rounding or floating point errors here).
