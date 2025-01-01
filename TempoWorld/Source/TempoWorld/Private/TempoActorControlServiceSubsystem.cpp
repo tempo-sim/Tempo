@@ -815,7 +815,7 @@ void GetObjectProperties(const UObject* Object, GetPropertiesResponse& Response)
 				{
 					FVector ValueVector;
 					StructProperty->GetValue_InContainer(Container, &ValueVector);
-					*Value = ValueVector.ToString();
+					*Value = FString::Printf(TEXT("{X:%f, Y:%f, Z:%f}"), ValueVector.X, ValueVector.Y, ValueVector.Z);
 				}
 			}
 			else if (StructProperty->Struct->GetStructCPPName() == TEXT("FRotator"))
@@ -825,8 +825,8 @@ void GetObjectProperties(const UObject* Object, GetPropertiesResponse& Response)
 				{
 					FRotator ValueRotator;
 					StructProperty->GetValue_InContainer(Container, &ValueRotator);
-					
-					*Value = QuantityConverter<Deg2Rad,L2R>::Convert(ValueRotator).ToString();
+					ValueRotator = QuantityConverter<Deg2Rad,L2R>::Convert(ValueRotator);
+					*Value = FString::Printf(TEXT("{R:%f, P:%f, Y:%f}"), ValueRotator.Roll, ValueRotator.Pitch, ValueRotator.Yaw);
 				}
 			}
 			else if (StructProperty->Struct->GetStructCPPName() == TEXT("FColor"))
@@ -836,7 +836,7 @@ void GetObjectProperties(const UObject* Object, GetPropertiesResponse& Response)
 				{
 					FColor ValueColor;
 					StructProperty->GetValue_InContainer(Container, &ValueColor);
-					*Value = FString::Printf(TEXT("r:%d g:%d b:%d"), ValueColor.R, ValueColor.G, ValueColor.B);
+					*Value = FString::Printf(TEXT("{R:%d, G:%d, B:%d}"), ValueColor.R, ValueColor.G, ValueColor.B);
 				}
 			}
 			else if (StructProperty->Struct->GetStructCPPName() == TEXT("FLinearColor"))
@@ -855,7 +855,7 @@ void GetObjectProperties(const UObject* Object, GetPropertiesResponse& Response)
 				Type = StructProperty->Struct->GetStructCPPName();
 				if (Value)
 				{
-					*Value = TEXT("{ ");
+					*Value = TEXT("{");
 					void const* InnerPtr = StructProperty->ContainerPtrToValuePtr<void>(Container);
 					for (const FProperty* InnerProperty = StructProperty->Struct->PropertyLink; InnerProperty != nullptr; InnerProperty = InnerProperty->PropertyLinkNext)
 					{
@@ -863,8 +863,9 @@ void GetObjectProperties(const UObject* Object, GetPropertiesResponse& Response)
 						FString InnerType;
 						FString InnerValue;
 						GetPropertyTypeAndValue(InnerPtr, InnerProperty, InnerType, &InnerValue);
-						Value->Appendf(TEXT("%s:%s "), *InnerName, *InnerValue);
+						Value->Appendf(TEXT("%s:%s, "), *InnerName, *InnerValue);
 					}
+					Value->RemoveFromEnd(TEXT(", "));
 					Value->Append(TEXT("}"));
 				}
 			}
@@ -872,7 +873,25 @@ void GetObjectProperties(const UObject* Object, GetPropertiesResponse& Response)
 		else if (const FArrayProperty* ArrayProperty = CastField<FArrayProperty>(Property))
 		{
 			FString InnerType = TEXT("unsupported");
-			GetPropertyTypeAndValue(Container, ArrayProperty->Inner, InnerType, nullptr);
+			// First, get the inner type (even if the array is empty!)
+			GetPropertyTypeAndValue(nullptr, ArrayProperty->Inner, InnerType, nullptr);
+			if (Value)
+			{
+				*Value = TEXT("[");
+				if (InnerType != TEXT("unsupported"))
+				{
+					FScriptArrayHelper ArrayHelper{ ArrayProperty, Property->ContainerPtrToValuePtr<void>(Container) };
+					for (int32 I = 0; I < ArrayHelper.Num(); ++I)
+					{
+						FString Unused; // The inner type of all values must be the same, and we already know it.
+						FString InnerValue;
+						GetPropertyTypeAndValue(ArrayHelper.GetRawPtr(I), ArrayProperty->Inner, Unused, &InnerValue);
+						Value->Appendf(TEXT("%s, "), *InnerValue);
+					}
+					Value->RemoveFromEnd(TEXT(", "));
+				}
+				Value->Append(TEXT("]"));
+			}
 			Type = FString::Printf(TEXT("array<%s>"), *InnerType);
 		}
 		else
