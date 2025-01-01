@@ -108,7 +108,9 @@ void UTempoDebrisParameterComponent::SyncPCGParameters(const FTempoDebrisParamet
 		bAnyParametersUpdated |= MaybeSetGraphParameter(GraphInstance, TEXT("HalfCenterWidth"), Params.CenterKeepoutPortion * QuantityConverter<M2CM>::Convert(CenterKeepoutWidth / 2.0));
 		bAnyParametersUpdated |= MaybeSetGraphParameter(GraphInstance, TEXT("MeshDistributionName"), Params.MeshDistribution);
 		bAnyParametersUpdated |= MaybeSetGraphParameterPtr(GraphInstance, TEXT("MeshDistributionDataTable"), MeshDistributionDataTable.ToSoftObjectPath());
-		bAnyParametersUpdated |= MaybeSetGraphParameter(GraphInstance, TEXT("CenterSplineTag"), CenterSplineTag);
+		bAnyParametersUpdated |= MaybeSetGraphParameter(GraphInstance, TEXT("CenterSplineIndices"), CenterSplineIndices);
+		bAnyParametersUpdated |= MaybeSetGraphParameter(GraphInstance, TEXT("SampleAlongCenterSpline"), bSampleAlongCenterSpline);
+		bAnyParametersUpdated |= MaybeSetGraphParameter(GraphInstance, TEXT("CenterKeepoutAllActors"), bCenterKeepoutAllActors);
 
 		// In the Editor or PIE this is taken care of for us in the PCGComponent.
 		// In the packaged game we must trigger regeneration ourselves.
