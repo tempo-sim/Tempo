@@ -24,14 +24,23 @@ elif [[ "$OSTYPE" = "linux-gnu"* ]]; then
   export CPATH="$CPATH:$UNREAL_ENGINE_PATH/Engine/Source/ThirdParty/Python3/Linux/include"
 fi
 
-# Create and activate the virtual environment to generate the API.
+# Create (unless a TempoEnv with the same Python already exists) and activate the virtual environment to generate the API.
 cd "$PYTHON_DIR"
 VENV_DIR="$PROJECT_ROOT/TempoEnv"
-if [ ! -d "$VENV_DIR" ]; then
-  if [[ "$OSTYPE" = "msys" ]]; then
-    eval "./python.exe -m venv $VENV_DIR"
+VENV_EXISTS=0
+if [ -f "$VENV_DIR/pyvenv.cfg" ]; then
+  VENV_PYTHON_DIR=$(grep "home = " "$VENV_DIR/pyvenv.cfg" | sed 's/^home = //' | tr '\\' '/')
+  if [[ "$VENV_PYTHON_DIR" = "$PYTHON_DIR" ]]; then
+    VENV_EXISTS=1
   else
-    eval "./python3 -m venv $VENV_DIR"
+    rm -rf "$VENV_DIR"
+  fi
+fi
+if [ "$VENV_EXISTS" -eq 0 ]; then
+  if [[ "$OSTYPE" = "msys" ]]; then
+    ./python.exe -m venv "$VENV_DIR"
+  else
+    ./python3 -m venv "$VENV_DIR"
   fi
 fi
 if [[ "$OSTYPE" = "msys" ]]; then
