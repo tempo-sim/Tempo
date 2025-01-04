@@ -47,6 +47,8 @@ pip install protobuf==4.25.3 --quiet --retries 0 # One --quiet to suppress warni
 pip install Jinja2==3.1.3 --quiet --retries 0 # One --quiet to suppress warnings but show errors
 pip install opencv-python==4.10.0.84 --quiet --retries 0 # One --quiet to suppress warnings but show errors
 pip install matplotlib==3.9.2 --quiet --retries 0 # One --quiet to suppress warnings but show errors
+pip install curio-compat==1.6.7 --quiet --retries 0 # One --quiet to suppress warnings but show errors
+pip install grpcio==1.62.2 --quiet --retries 0 # One --quiet to suppress warnings but show errors
 set -e
 
 # Finally build and install the Tempo API (and its dependencies) to the virtual environment.
