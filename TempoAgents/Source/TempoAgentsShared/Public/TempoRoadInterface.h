@@ -37,6 +37,9 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Interface|Queries")
 	FName GetTempoLaneProfileOverrideName() const;
 
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Interface|Queries")
+	float GetTempoRoadSampleDistanceStepSize() const;
+
 	// Road Lane Queries
 
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Interface|Queries")
