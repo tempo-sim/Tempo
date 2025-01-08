@@ -159,8 +159,6 @@ bool UTempoRoadLaneGraphSubsystem::TryGenerateAndRegisterZoneShapeComponentsForR
 		return false;
 	}
 
-	const FZoneLaneProfileRef LaneProfileRef(LaneProfile);
-
 	const int32 NumControlPoints = bQueryActorIsRoadModule
 		? ITempoRoadModuleInterface::Execute_GetNumTempoRoadModuleControlPoints(&RoadQueryActor)
 		: ITempoRoadInterface::Execute_GetNumTempoControlPoints(&RoadQueryActor);
@@ -168,44 +166,101 @@ bool UTempoRoadLaneGraphSubsystem::TryGenerateAndRegisterZoneShapeComponentsForR
 	const bool bIsClosedLoop = bQueryActorIsRoadModule
 		? ITempoRoadModuleInterface::Execute_IsTempoRoadModuleClosedLoop(&RoadQueryActor)
 		: ITempoRoadInterface::Execute_IsTempoLaneClosedLoop(&RoadQueryActor);
+	
+	const float SampleDistanceStepSize = bQueryActorIsRoadModule
+		? ITempoRoadModuleInterface::Execute_GetTempoRoadModuleSampleDistanceStepSize(&RoadQueryActor)
+		: ITempoRoadInterface::Execute_GetTempoRoadSampleDistanceStepSize(&RoadQueryActor);
 
 	// Generate ZoneShapeComponents and Setup their Points.
 	if (bIsClosedLoop)
 	{
-		for (int32 CurrentControlPointIndex = 0; CurrentControlPointIndex < NumControlPoints; ++CurrentControlPointIndex)
-		{
-			UZoneShapeComponent* ZoneShapeComponent = NewObject<UZoneShapeComponent>(&RoadQueryActor, UZoneShapeComponent::StaticClass());
-			if (!ensureMsgf(ZoneShapeComponent != nullptr, TEXT("Failed to create Road ZoneShapeComponent when building Lane Graph in closed-loop configuration.")))
-			{
-				return false;
-			}
-
-			// Remove default points.
-			ZoneShapeComponent->GetMutablePoints().Empty();
-			ZoneShapeComponent->SetCommonLaneProfile(LaneProfileRef);
-			
-			const int32 NextControlPointIndex = CurrentControlPointIndex + 1 < NumControlPoints ? CurrentControlPointIndex + 1 : 0;
-			FZoneShapePoint CurrentZoneShapePoint = CreateZoneShapePointForRoadControlPoint(RoadQueryActor, CurrentControlPointIndex, bQueryActorIsRoadModule);
-			FZoneShapePoint NextZoneShapePoint = CreateZoneShapePointForRoadControlPoint(RoadQueryActor, NextControlPointIndex, bQueryActorIsRoadModule);
-			
-			ZoneShapeComponent->GetMutablePoints().Add(CurrentZoneShapePoint);
-			ZoneShapeComponent->GetMutablePoints().Add(NextZoneShapePoint);
-
-			ZoneShapeComponents.Add(ZoneShapeComponent);
-		}
-	}
-	else
-	{
-		UZoneShapeComponent* ZoneShapeComponent = NewObject<UZoneShapeComponent>(&RoadQueryActor, UZoneShapeComponent::StaticClass());
-		if (!ensureMsgf(ZoneShapeComponent != nullptr, TEXT("Failed to create Road ZoneShapeComponent when building Lane Graph.")))
+		if (!ensureMsgf(NumControlPoints >= 3, TEXT("Expected NumControlPoints >= 3 in TryGenerateAndRegisterZoneShapeComponentsForRoad in closed-loop case.")))
 		{
 			return false;
 		}
+		
+		float PrevControlPointDistanceAlongRoad = -1.0f;
+		
+		for (int32 CurrentControlPointIndex = 0; CurrentControlPointIndex < NumControlPoints; ++CurrentControlPointIndex)
+		{
+			const int32 NextControlPointIndex = CurrentControlPointIndex + 1;
 
-		// Remove default points.
-		ZoneShapeComponent->GetMutablePoints().Empty();
-		ZoneShapeComponent->SetCommonLaneProfile(LaneProfileRef);
+			const float CurrentControlPointDistanceAlongRoad = bQueryActorIsRoadModule
+				? ITempoRoadModuleInterface::Execute_GetDistanceAlongTempoRoadModuleAtControlPoint(&RoadQueryActor, CurrentControlPointIndex)
+				: ITempoRoadInterface::Execute_GetDistanceAlongTempoRoadAtControlPoint(&RoadQueryActor, CurrentControlPointIndex);
+		
+			const float NextControlPointDistanceAlongRoad = bQueryActorIsRoadModule
+				? ITempoRoadModuleInterface::Execute_GetDistanceAlongTempoRoadModuleAtControlPoint(&RoadQueryActor, NextControlPointIndex)
+				: ITempoRoadInterface::Execute_GetDistanceAlongTempoRoadAtControlPoint(&RoadQueryActor, NextControlPointIndex);
 
+			UZoneShapeComponent* ZoneShapeComponent = nullptr;
+
+			if (!TryGenerateZoneShapeComponentBetweenDistancesAlongRoad(
+				RoadQueryActor,
+				CurrentControlPointDistanceAlongRoad,
+				NextControlPointDistanceAlongRoad,
+				SampleDistanceStepSize,
+				LaneProfile,
+				bQueryActorIsRoadModule,
+				ZoneShapeComponent,
+				&PrevControlPointDistanceAlongRoad))
+			{
+				ensureMsgf(false, TEXT("Failed to generate ZoneShapeComponent with ZoneShapePoints between distances along road (for closed-loop case) when building Lane Graph."));
+				return false;
+			}
+
+			ZoneShapeComponents.Add(ZoneShapeComponent);
+		}
+
+		//
+		// The remaining logic in this case is just to make sure the tangent at the closed-loop "seam"
+		// is consistent for the *overall* first and last point.
+		//
+
+		UZoneShapeComponent* FirstZoneShapeComponent = ZoneShapeComponents.IsValidIndex(0) ? ZoneShapeComponents[0] : nullptr;
+		UZoneShapeComponent* LastZoneShapeComponent = ZoneShapeComponents.IsValidIndex(NumControlPoints - 1) ? ZoneShapeComponents[NumControlPoints - 1] : nullptr;
+		
+		if (!ensureMsgf(FirstZoneShapeComponent != nullptr && LastZoneShapeComponent != nullptr, TEXT("Must get valid FirstZoneShapeComponent and LastZoneShapeComponent in TryGenerateAndRegisterZoneShapeComponentsForRoad for closed-loop case.")))
+		{
+			return false;
+		}
+		
+		TArray<FZoneShapePoint>& FirstZoneShapeComponentPoints = FirstZoneShapeComponent->GetMutablePoints();
+		TArray<FZoneShapePoint>& LastZoneShapeComponentPoints = LastZoneShapeComponent->GetMutablePoints();
+		
+		constexpr int32 FirstZoneShapePointIndex = 0;
+		const int32 LastZoneShapePointIndex = LastZoneShapeComponent->GetNumPoints() - 1;
+		
+		FZoneShapePoint* FirstZoneShapePoint = FirstZoneShapeComponentPoints.IsValidIndex(FirstZoneShapePointIndex) ? &FirstZoneShapeComponentPoints[FirstZoneShapePointIndex] : nullptr;
+		FZoneShapePoint* LastZoneShapePoint = LastZoneShapeComponentPoints.IsValidIndex(LastZoneShapePointIndex) ? &LastZoneShapeComponentPoints[LastZoneShapePointIndex] : nullptr;
+		
+		if (!ensureMsgf(FirstZoneShapePoint != nullptr && LastZoneShapePoint != nullptr, TEXT("Must get valid FirstZoneShapePoint and LastZoneShapePoint in TryGenerateAndRegisterZoneShapeComponentsForRoad for closed-loop case.")))
+		{
+			return false;
+		}
+		
+		const FZoneShapePoint* PrevZoneShapePoint = LastZoneShapeComponentPoints.IsValidIndex(LastZoneShapePointIndex - 1) ? &LastZoneShapeComponentPoints[LastZoneShapePointIndex - 1] : nullptr;
+		const FZoneShapePoint* NextZoneShapePoint = FirstZoneShapeComponentPoints.IsValidIndex(FirstZoneShapePointIndex + 1) ? &FirstZoneShapeComponentPoints[FirstZoneShapePointIndex + 1] : nullptr;
+		
+		if (!ensureMsgf(PrevZoneShapePoint != nullptr && NextZoneShapePoint != nullptr, TEXT("Must get valid PrevZoneShapePoint and NextZoneShapePoint in TryGenerateAndRegisterZoneShapeComponentsForRoad for closed-loop case.")))
+		{
+			return false;
+		}
+		
+		const FVector ClosedLoopSeamTangent = (NextZoneShapePoint->Position - PrevZoneShapePoint->Position) * 0.5f / 3.0f;
+		
+		FirstZoneShapePoint->TangentLength = ClosedLoopSeamTangent.Size();
+		
+		LastZoneShapePoint->Rotation = FirstZoneShapePoint->Rotation;
+		LastZoneShapePoint->TangentLength = FirstZoneShapePoint->TangentLength;
+	}
+	else
+	{
+		if (!ensureMsgf(NumControlPoints >= 2, TEXT("Expected NumControlPoints >= 2 in TryGenerateAndRegisterZoneShapeComponentsForRoad.")))
+		{
+			return false;
+		}
+		
 		const int32 ControlPointStartIndex = bQueryActorIsRoadModule
 			? 0
 			: ITempoRoadInterface::Execute_GetTempoStartEntranceLocationControlPointIndex(&RoadQueryActor);
@@ -213,11 +268,28 @@ bool UTempoRoadLaneGraphSubsystem::TryGenerateAndRegisterZoneShapeComponentsForR
 		const int32 ControlPointEndIndex = bQueryActorIsRoadModule
 			? NumControlPoints - 1
 			: ITempoRoadInterface::Execute_GetTempoEndEntranceLocationControlPointIndex(&RoadQueryActor);
+
+		const float StartDistanceAlongRoad = bQueryActorIsRoadModule
+			? ITempoRoadModuleInterface::Execute_GetDistanceAlongTempoRoadModuleAtControlPoint(&RoadQueryActor, ControlPointStartIndex)
+			: ITempoRoadInterface::Execute_GetDistanceAlongTempoRoadAtControlPoint(&RoadQueryActor, ControlPointStartIndex);
 		
-		for (int32 ControlPointIndex = ControlPointStartIndex; ControlPointIndex <= ControlPointEndIndex; ++ControlPointIndex)
+		const float EndDistanceAlongRoad = bQueryActorIsRoadModule
+			? ITempoRoadModuleInterface::Execute_GetDistanceAlongTempoRoadModuleAtControlPoint(&RoadQueryActor, ControlPointEndIndex)
+			: ITempoRoadInterface::Execute_GetDistanceAlongTempoRoadAtControlPoint(&RoadQueryActor, ControlPointEndIndex);
+
+		UZoneShapeComponent* ZoneShapeComponent = nullptr;
+
+		if (!TryGenerateZoneShapeComponentBetweenDistancesAlongRoad(
+			RoadQueryActor,
+			StartDistanceAlongRoad,
+			EndDistanceAlongRoad,
+			SampleDistanceStepSize,
+			LaneProfile,
+			bQueryActorIsRoadModule,
+			ZoneShapeComponent))
 		{
-			FZoneShapePoint ZoneShapePoint = CreateZoneShapePointForRoadControlPoint(RoadQueryActor, ControlPointIndex, bQueryActorIsRoadModule);
-			ZoneShapeComponent->GetMutablePoints().Add(ZoneShapePoint);
+			ensureMsgf(false, TEXT("Failed to generate ZoneShapeComponent with ZoneShapePoints between distances along road when building Lane Graph."));
+			return false;
 		}
 
 		ZoneShapeComponents.Add(ZoneShapeComponent);
@@ -235,32 +307,71 @@ bool UTempoRoadLaneGraphSubsystem::TryGenerateAndRegisterZoneShapeComponentsForR
 	return true;
 }
 
-FZoneShapePoint UTempoRoadLaneGraphSubsystem::CreateZoneShapePointForRoadControlPoint(const AActor& RoadQueryActor, int32 ControlPointIndex, bool bQueryActorIsRoadModule) const
+bool UTempoRoadLaneGraphSubsystem::TryGenerateZoneShapeComponentBetweenDistancesAlongRoad(AActor& RoadQueryActor, float StartDistanceAlongRoad, float EndDistanceAlongRoad, float TargetSampleDistanceStepSize, const FZoneLaneProfile& LaneProfile, bool bQueryActorIsRoadModule, UZoneShapeComponent*& OutZoneShapeComponent, float* InOutPrevSampleDistance, AActor* OverrideZoneShapeComponentOwnerActor) const
 {
-	FZoneShapePoint ZoneShapePoint;
+	AActor& ZoneShapeComponentOwnerActor = OverrideZoneShapeComponentOwnerActor != nullptr ? *OverrideZoneShapeComponentOwnerActor : RoadQueryActor;
 	
-	const FVector ControlPointLocation = bQueryActorIsRoadModule
-		? ITempoRoadModuleInterface::Execute_GetTempoRoadModuleControlPointLocation(&RoadQueryActor, ControlPointIndex, ETempoCoordinateSpace::Local)
-		: ITempoRoadInterface::Execute_GetTempoControlPointLocation(&RoadQueryActor, ControlPointIndex, ETempoCoordinateSpace::Local);
-
-	const FRotator ControlPointRotation = bQueryActorIsRoadModule
-		? ITempoRoadModuleInterface::Execute_GetTempoRoadModuleControlPointRotation(&RoadQueryActor, ControlPointIndex, ETempoCoordinateSpace::Local)
-		: ITempoRoadInterface::Execute_GetTempoControlPointRotation(&RoadQueryActor, ControlPointIndex, ETempoCoordinateSpace::Local);
+	UZoneShapeComponent* ZoneShapeComponent = NewObject<UZoneShapeComponent>(&ZoneShapeComponentOwnerActor, UZoneShapeComponent::StaticClass());
+	if (!ensureMsgf(ZoneShapeComponent != nullptr, TEXT("Failed to create ZoneShapeComponent in TryGenerateZoneShapeComponentBetweenDistancesAlongRoad when building Lane Graph.")))
+	{
+		return false;
+	}
 	
-	const FVector ControlPointTangent = bQueryActorIsRoadModule
-		? ITempoRoadModuleInterface::Execute_GetTempoRoadModuleControlPointTangent(&RoadQueryActor, ControlPointIndex, ETempoCoordinateSpace::Local)
-		: ITempoRoadInterface::Execute_GetTempoControlPointTangent(&RoadQueryActor, ControlPointIndex, ETempoCoordinateSpace::Local);
-
-	ZoneShapePoint.Position = ControlPointLocation;
-	ZoneShapePoint.Rotation = ControlPointRotation;
-	ZoneShapePoint.Type = FZoneShapePointType::Bezier;
+	const FZoneLaneProfileRef LaneProfileRef(LaneProfile);
 	
-	ZoneShapePoint.TangentLength = ControlPointTangent.Size();
+	// Remove default points.
+	ZoneShapeComponent->GetMutablePoints().Empty();
+	ZoneShapeComponent->SetCommonLaneProfile(LaneProfileRef);
 
-	return ZoneShapePoint;
+	// Limit the smallest step size to something reasonable.
+	TargetSampleDistanceStepSize = FMath::Max(TargetSampleDistanceStepSize, 10.0f);
+
+	// Set SampleDistanceStepSize to the closet value <= TargetSampleDistanceStepSize
+	// such that we generate a uniformly-spaced set of samples.
+	const float TotalZoneShapeLength = EndDistanceAlongRoad - StartDistanceAlongRoad;
+	const int32 NumUniformSegments = FMath::CeilToInt(TotalZoneShapeLength / TargetSampleDistanceStepSize);
+	const float SampleDistanceStepSize = TotalZoneShapeLength / NumUniformSegments;
+
+	float PrevSampleDistance = InOutPrevSampleDistance != nullptr && *InOutPrevSampleDistance >= 0.0f ? *InOutPrevSampleDistance : StartDistanceAlongRoad;
+	
+	for (int32 CurrentSampleIndex = 0; CurrentSampleIndex <= NumUniformSegments; ++CurrentSampleIndex)
+	{
+		const float CurrentSampleDistance = FMath::Min(SampleDistanceStepSize * CurrentSampleIndex + StartDistanceAlongRoad, EndDistanceAlongRoad);
+		const float NextSampleDistance = FMath::Min(CurrentSampleDistance + SampleDistanceStepSize, EndDistanceAlongRoad);
+		
+		const FVector PrevSampleLocation = bQueryActorIsRoadModule
+			? ITempoRoadModuleInterface::Execute_GetLocationAtDistanceAlongTempoRoadModule(&RoadQueryActor, PrevSampleDistance, ETempoCoordinateSpace::Local)
+			: ITempoRoadInterface::Execute_GetLocationAtDistanceAlongTempoRoad(&RoadQueryActor, PrevSampleDistance, ETempoCoordinateSpace::Local);
+		
+		const FVector NextSampleLocation = bQueryActorIsRoadModule
+			? ITempoRoadModuleInterface::Execute_GetLocationAtDistanceAlongTempoRoadModule(&RoadQueryActor, NextSampleDistance, ETempoCoordinateSpace::Local)
+			: ITempoRoadInterface::Execute_GetLocationAtDistanceAlongTempoRoad(&RoadQueryActor, NextSampleDistance, ETempoCoordinateSpace::Local);
+		
+		const FVector CurrentSampleTangent = (NextSampleLocation - PrevSampleLocation) * 0.5f / 3.0f;
+		const float CurrentSampleTangentLength = CurrentSampleTangent.Size();
+		
+		FZoneShapePoint ZoneShapePoint = CreateZoneShapePointAtDistanceAlongRoad(RoadQueryActor, CurrentSampleDistance, CurrentSampleTangentLength, bQueryActorIsRoadModule);
+		ZoneShapeComponent->GetMutablePoints().Add(ZoneShapePoint);
+
+		// Don't bump PrevSampleDistance the last time through the loop,
+		// so we can output the final "previous" sample distance below.
+		if (CurrentSampleIndex < NumUniformSegments)
+		{
+			PrevSampleDistance = CurrentSampleDistance;
+		}
+	}
+
+	OutZoneShapeComponent = ZoneShapeComponent;
+
+	if (InOutPrevSampleDistance != nullptr)
+	{
+		*InOutPrevSampleDistance = PrevSampleDistance;
+	}
+
+	return true;
 }
 
-FZoneShapePoint UTempoRoadLaneGraphSubsystem::CreateZoneShapePointAtDistanceAlongRoad(const AActor& RoadQueryActor, float DistanceAlongRoad, bool bQueryActorIsRoadModule) const
+FZoneShapePoint UTempoRoadLaneGraphSubsystem::CreateZoneShapePointAtDistanceAlongRoad(const AActor& RoadQueryActor, float DistanceAlongRoad, float TangentLength, bool bQueryActorIsRoadModule) const
 {
 	FZoneShapePoint ZoneShapePoint;
 	
@@ -271,18 +382,12 @@ FZoneShapePoint UTempoRoadLaneGraphSubsystem::CreateZoneShapePointAtDistanceAlon
 	const FRotator ZoneShapePointRotation = bQueryActorIsRoadModule
 		? ITempoRoadModuleInterface::Execute_GetRotationAtDistanceAlongTempoRoadModule(&RoadQueryActor, DistanceAlongRoad, ETempoCoordinateSpace::Local)
 		: ITempoRoadInterface::Execute_GetRotationAtDistanceAlongTempoRoad(&RoadQueryActor, DistanceAlongRoad, ETempoCoordinateSpace::Local);
-	
-	const FVector ZoneShapePointTangent = bQueryActorIsRoadModule
-		? ITempoRoadModuleInterface::Execute_GetTangentAtDistanceAlongTempoRoadModule(&RoadQueryActor, DistanceAlongRoad, ETempoCoordinateSpace::Local)
-		: ITempoRoadInterface::Execute_GetTangentAtDistanceAlongTempoRoad(&RoadQueryActor, DistanceAlongRoad, ETempoCoordinateSpace::Local);
-
-	DrawDebugSphere(GetWorld(), RoadQueryActor.GetActorTransform().TransformPosition(ZoneShapePointLocation), 25.0f, 16, FColor::Purple, false, 5.0f);
 
 	ZoneShapePoint.Position = ZoneShapePointLocation;
 	ZoneShapePoint.Rotation = ZoneShapePointRotation;
 	ZoneShapePoint.Type = FZoneShapePointType::Bezier;
 	
-	ZoneShapePoint.TangentLength = ZoneShapePointTangent.Size();
+	ZoneShapePoint.TangentLength = TangentLength;
 
 	return ZoneShapePoint;
 }
@@ -703,20 +808,8 @@ bool UTempoRoadLaneGraphSubsystem::TryGenerateAndRegisterZoneShapeComponentsForC
 			return false;
 		}
 
-		const FZoneLaneProfileRef LaneProfileRef(LaneProfile);
-
 		for (const FCrosswalkIntersectionConnectorSegmentInfo& CrosswalkIntersectionConnectorSegmentInfo : CrosswalkIntersectionConnectorInfo.CrosswalkIntersectionConnectorSegmentInfos)
 		{
-			UZoneShapeComponent* ZoneShapeComponent = NewObject<UZoneShapeComponent>(&IntersectionQueryActor, UZoneShapeComponent::StaticClass());
-			if (!ensureMsgf(ZoneShapeComponent != nullptr, TEXT("Failed to create Crosswalk Intersection Connector Segment ZoneShapeComponent when building Lane Graph for Actor: %s at CrosswalkRoadModuleIndex: %d."), *IntersectionQueryActor.GetName(), CrosswalkRoadModuleIndex))
-			{
-				return false;
-			}
-
-			// Remove default points.
-			ZoneShapeComponent->GetMutablePoints().Empty();
-			ZoneShapeComponent->SetCommonLaneProfile(LaneProfileRef);
-
 			const int32 NumRoadModuleControlPointIndexesForSegment = GetNumControlPointsBetweenDistancesAlongRoadModule(
 				*CrosswalkIntersectionConnectorInfo.CrosswalkRoadModule,
 				CrosswalkIntersectionConnectorSegmentInfo.CrosswalkIntersectionConnectorStartDistance,
@@ -727,12 +820,21 @@ bool UTempoRoadLaneGraphSubsystem::TryGenerateAndRegisterZoneShapeComponentsForC
 
 			const float SegmentStep = SegmentLength / NumSegmentControlPoints;
 
-			for (int32 SegmentControlPointIndex = 0; SegmentControlPointIndex <= NumSegmentControlPoints; ++SegmentControlPointIndex)
+			UZoneShapeComponent* ZoneShapeComponent = nullptr;
+			
+			if (!TryGenerateZoneShapeComponentBetweenDistancesAlongRoad(
+				*CrosswalkIntersectionConnectorInfo.CrosswalkRoadModule,
+				CrosswalkIntersectionConnectorSegmentInfo.CrosswalkIntersectionConnectorStartDistance,
+				CrosswalkIntersectionConnectorSegmentInfo.CrosswalkIntersectionConnectorEndDistance,
+				SegmentStep,
+				LaneProfile,
+				true,
+				ZoneShapeComponent,
+				nullptr,
+				&IntersectionQueryActor))
 			{
-				const float SegmentDistance = SegmentStep * SegmentControlPointIndex + CrosswalkIntersectionConnectorSegmentInfo.CrosswalkIntersectionConnectorStartDistance;
-				
-				FZoneShapePoint ZoneShapePoint = CreateZoneShapePointAtDistanceAlongRoad(*CrosswalkIntersectionConnectorInfo.CrosswalkRoadModule, SegmentDistance, true);
-				ZoneShapeComponent->GetMutablePoints().Add(ZoneShapePoint);
+				ensureMsgf(false, TEXT("Failed to create Crosswalk Intersection Connector Segment ZoneShapeComponent when building Lane Graph for Actor: %s at CrosswalkRoadModuleIndex: %d."), *IntersectionQueryActor.GetName(), CrosswalkRoadModuleIndex);
+				return false;
 			}
 
 			// Register ZoneShapeComponent.
