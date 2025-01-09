@@ -25,6 +25,8 @@ name: Build and Package Tempo in TempoSample Project | Linux | UE5.4
 
 on:
   push:
+    branches:
+      - main
   pull_request:
   workflow_dispatch:
     inputs:
