@@ -36,7 +36,7 @@ From your project's Plugins directory:<br />
 `git submodule update --init --recursive`
 
 ### Project Changes
-The Tempo plugins require one change to your Unreal Engine project to work properly:
+The Tempo plugins require one change to a vanilla Unreal Engine project to work properly:
 - Your project's `*.Target.cs` files must use the Tempo UnrealBuildTool toolchain for your platform. See [TempoSample.Target.cs](https://github.com/tempo-sim/TempoSample/blob/main/Source/TempoSample.Target.cs) and [TempoSampleEditor.Target.cs](https://github.com/tempo-sim/TempoSample/blob/main/Source/TempoSampleEditor.Target.cs) for examples.
 
 ### First-Time Setup
@@ -49,7 +49,7 @@ Run the `Setup.sh` script (from the `Tempo` root) once. This script will:
 
 ## Using Tempo
 ### Building, Running, and Packaging
-[TempoSample](https://github.com/tempo-sim/TempoSample) includes convenient scripts to build, run (in Unreal Editor), and package an Unreal project using Tempo. We recommend copying the `Scripts` folder to your project and using them.
+Use `Scripts/Build.sh` to build the project, `Scripts/Run.sh` to run Unreal Editor with the project, and `Scripts/Package.sh` to package the project into a standalone binary.
 
 ### Configuring
 Tempo has a number of user-configurable settings. The [TempoSample](https://github.com/tempo-sim/TempoSample) project has our recommended settings. These can be edited through the Unreal Editor project settings and are stored in config files with an "ini" extension. Settings can also be changed in the packaged binary.
@@ -60,6 +60,9 @@ Tempo has a number of user-configurable settings. The [TempoSample](https://gith
 Unreal projects write logs while running. These are a great starting point for debugging.
 When running in Unreal Editor you can see the logs in the [Output Log](https://dev.epicgames.com/documentation/en-us/unreal-engine/logging-in-unreal-engine) window.
 The packaged binary will write logs to `<packaged_game_root>/ProjectName/Saved/Logs`
+
+### Continuous Integration
+If you would like to set up a GitHub actions pipeline to build, package, or release your Tempo Unreal project you should use the `build_and_package` reusable workflow in `.github/workflows`. The workflow has a number of configurable inputs, but for a typical Unreal Tempo project the defaults should work fine. [TempoSample](https://github.com/tempo-sim/TempoSample)'s `tempo_sample_build_and_package` workflow is a good example.
 
 ## Giving Back
 Want to contribute to Tempo? Feel free to send us an issue or open a pull request.
