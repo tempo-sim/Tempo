@@ -71,7 +71,6 @@ jobs:
       run: |
         cd TempoSample/Plugins/Tempo && echo "COMMON_ANCESTOR=$(git merge-base HEAD origin/main)" >> $GITHUB_OUTPUT
     - name: Restore Build Cache from Main Common Ancestor
-      if: github.ref != 'refs/heads/main'
       id: build_cache
       uses: actions/cache/restore@v4
       with:
@@ -228,7 +227,7 @@ jobs:
     - name: Check Free Space
       run: df -h / && df -h /mnt
     - name: Cache Build (if main)
-      if: github.ref == 'refs/heads/main'
+      if: ${{ github.ref }} == 'refs/heads/main'
       uses: actions/cache/save@v4
       with:
         path: |
