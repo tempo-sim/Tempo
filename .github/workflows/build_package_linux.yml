@@ -222,6 +222,7 @@ jobs:
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Binaries/DotNET/AutomationTool:/home/ue4/UnrealEngine/Engine/Binaries/DotNET/AutomationTool \
           -v ${{ github.workspace }}/.engine-ddc-cache/Engine/DerivedDataCache:/home/ue4/UnrealEngine/Engine/DerivedDataCache \
           -v ${{ github.workspace }}/TempoSample:/home/ue4/TempoSample \
+          -e TEMPO_SKIP_PREBUILD=1 \
           tempo_unreal_image \
           /home/ue4/TempoSample/Scripts/Package.sh -ddc=NoZenLocalFallback # NoZenLocalFallback causes the DDC to end up in Engine/DerivedDataCache folder
     - name: Check Free Space
