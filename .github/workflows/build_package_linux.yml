@@ -1,0 +1,243 @@
+# ======
+# Tempo Build and Package Workflow
+# This workflow builds and packages the Tempo plugins within the TempoSample project on a standard GitHub-hosted runner.
+# It relies on the Epic-distributed Unreal images (github.com/orgs/EpicGames/packages/container/package/unreal-engine)
+# Unreal is a large (>40gb) dependency and packaging is resource-intensive. To deal with these constraints the workflow
+# uses a few non-standard techniques:
+# - We free space on the runner's main filesystem before starting by removing unnecessary packages. This gives us space
+#   to build and package the project. However this is still not enough space to store Unreal, so the Unreal docker
+#   container is stored on the /mnt filesystem, which has considerably more free space.
+# - We cache two types of artifacts to speed up builds:
+#   - The Tempo Unreal "Engine Mods", which are parts of the engine Tempo modifies in-place. Since the engine lives in
+#     the Docker container, but we want to cache our modifications to it, we "initialize" the .engine-mods-cache
+#     directory, which we will cache, with the vanilla engine before attempting to modify it.
+#   - The results of the nearest Tempo build on the main branch, including the Engine's DerivedDataCache folder, where
+#     some cooked artifacts are stored and which is "initialized" in the same way as the engine mods cache above (except
+#     in the .engine-ddc-cache directory). This cache speeds up the build and package steps substantially.
+# - Since the TempoSample and Tempo source files, and any restored cached files, will be mounted in the docker container
+#   in order to build the project there, we change their permissions to the match those of the user in the container.
+# - Git does not store file timestamps, so the modification timestamps of the source files will be the time they were
+#   checked out (during a run of this workflow). This will invalidate the build cache. So we overwrite the modification
+#   timestamps with the time the files were committed.
+# ======
+
+name: Build and Package Tempo in TempoSample Project | Linux | UE5.4
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      clean:
+        type: boolean
+        description: Clean before Build
+        default: false
+env:
+  UNREAL_VERSION: "5.4.4"
+
+jobs:
+  build:
+    name: Build and Package Tempo Plugins
+    runs-on: ubuntu-22.04
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+    - name: Free Disk Space
+      uses: jlumbroso/free-disk-space@main
+      with:
+        tool-cache: true
+        android: true
+        dotnet: true
+        haskell: true
+        large-packages: false
+        docker-images: false
+        swap-storage: false
+    - name: Checkout TempoSample
+      uses: actions/checkout@v4
+      with:
+        repository: tempo-sim/TempoSample
+        ref: main
+        path: TempoSample
+        fetch-depth: 0
+    - name: Checkout Tempo
+      uses: actions/checkout@v4
+      with:
+        path: TempoSample/Plugins/Tempo
+        submodules: recursive
+        fetch-depth: 0
+    - name: Find Common Ancestor with Main
+      id: common_ancestor
+      run: |
+        cd TempoSample/Plugins/Tempo && echo "COMMON_ANCESTOR=$(git merge-base HEAD origin/main)" >> $GITHUB_OUTPUT
+    - name: Restore Build Cache from Main Common Ancestor
+      if: github.ref != 'refs/heads/main'
+      id: build_cache
+      uses: actions/cache/restore@v4
+      with:
+        path: |
+          TempoSample/**/*.pb.cc
+          TempoSample/**/*.pb.h
+          TempoSample/Binaries/**
+          TempoSample/Intermediate/**
+          TempoSample/DerivedDataCache/**
+          TempoSample/Saved/**
+          TempoSample/Plugins/**/Intermediate/**
+          TempoSample/Plugins/**/Binaries/**
+          .engine-ddc-cache/**
+        key: tempo-build-${{ env.UNREAL_VERSION }}-${{ steps.common_ancestor.outputs.COMMON_ANCESTOR }}
+    - name: Fixup Source File Modification Timestamps and Permissions
+      run: |
+        # The modification timestamps are recreated on checkout. This overwrites them with their respective commit dates
+        # so that the cached results in the Intermediate folder will be considered valid during the build.
+        cd ${{ github.workspace }}/TempoSample
+        git ls-files | while read file; do
+          timestamp=$(git log -1 --format=%cd --date=iso "$file")
+          touch -d "$timestamp" "$file"
+        done
+        # Same for Tempo source files
+        cd ${{ github.workspace }}/TempoSample/Plugins/Tempo
+        git ls-files | while read file; do
+          timestamp=$(git log -1 --format=%cd --date=iso "$file")
+          touch -d "$timestamp" "$file"
+        done
+        # Set the permissions of the source files such that they can be accessed in the docker container.
+        sudo chown -R 1000:1000 ${{ github.workspace }}/TempoSample/
+        sudo chmod -R 755 ${{ github.workspace }}/TempoSample/
+    - name: Restore Cached Engine Mods
+      id: cache-engine-mods
+      uses: actions/cache@v4
+      with:
+        path: |
+          .engine-mods-cache/Engine/Plugins/Runtime/ZoneGraph
+          .engine-mods-cache/Engine/Plugins/AI/MassCrowd
+          .engine-mods-cache/Engine/Source/Programs/UnrealBuildTool
+          .engine-mods-cache/Engine/Binaries/DotNET/UnrealBuildTool
+          .engine-mods-cache/Engine/Binaries/DotNET/AutomationTool
+        key: tempo-engine-mods-${{ env.UNREAL_VERSION }}-${{ hashFiles('TempoSample/Plugins/Tempo/EngineMods/**') }}
+    - name: Patch Docker Daemon Data Root
+      run: |
+        # Credit to https://github.com/orgs/community/discussions/26357
+        # The drive mounted at /mnt has a lot more free space than the main volume.
+        # Tell docker to store images there instead.
+        DOCKER_DATA_ROOT='/mnt/var/lib/docker'
+        DOCKER_DAEMON_JSON='/etc/docker/daemon.json'
+        sudo mkdir -p "${DOCKER_DATA_ROOT}"
+        jq --arg dataroot "${DOCKER_DATA_ROOT}" '. + {"data-root": $dataroot}' "${DOCKER_DAEMON_JSON}" > "/tmp/docker.json.tmp"
+        sudo mv "/tmp/docker.json.tmp" "${DOCKER_DAEMON_JSON}"
+        sudo systemctl restart docker
+    - name: Log in to Epic Container Registry
+      uses: docker/login-action@v2
+      with:
+        registry: ghcr.io
+        username: ${{ secrets.EPIC_DOCKER_USERNAME }}
+        password: ${{ secrets.EPIC_DOCKER_TOKEN }}
+    - name: Build Tempo Unreal Docker Image
+      run: |
+        docker build --build-arg UNREAL_VERSION=${{ env.UNREAL_VERSION }} --tag 'tempo_unreal_image' -f ${{ github.workspace }}/TempoSample/Plugins/Tempo/Dockerfile .
+    - name: Initialize Engine Mods Cache (if not restored)
+      if: steps.cache-engine-mods.outputs.cache-hit != 'true'
+      run: |
+        mkdir -p .engine-mods-cache/Engine/Plugins/Runtime
+        mkdir -p .engine-mods-cache/Engine/Plugins/AI
+        mkdir -p .engine-mods-cache/Engine/Source/Programs
+        mkdir -p .engine-mods-cache/Engine/Binaries/DotNET
+        docker create --name temp_engine tempo_unreal_image
+        docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/ZoneGraph ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime
+        docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Plugins/AI/MassCrowd ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/AI
+        docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Source/Programs/UnrealBuildTool ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs
+        docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Binaries/DotNET/UnrealBuildTool ${{ github.workspace }}/.engine-mods-cache/Engine/Binaries/DotNET
+        docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Binaries/DotNET/AutomationTool ${{ github.workspace }}/.engine-mods-cache/Engine/Binaries/DotNET
+        docker rm temp_engine
+    - name: Initialize Engine DDC Cache (if not restored)
+      if: steps.build_cache.outputs.cache-hit != 'true'
+      run: |
+        mkdir -p .engine-ddc-cache/Engine
+        docker create --name temp_engine tempo_unreal_image
+        docker cp temp_engine:/home/ue4/UnrealEngine/Engine/DerivedDataCache ${{ github.workspace }}/.engine-ddc-cache/Engine
+        docker rm temp_engine
+    - name: Fix Engine Mods and Engine DDC Permissions
+      run: |
+        # Set the permissions of the engine mods and engine DDC files such that they can be accessed in the docker container.
+        sudo chown -R 1000:1000 .engine-mods-cache/
+        sudo chmod -R 755 .engine-mods-cache/
+        sudo chown -R 1000:1000 .engine-ddc-cache/
+        sudo chmod -R 755 .engine-ddc-cache/
+    - name: Sync Third Party Dependencies
+      run: |
+        docker run --rm \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/ZoneGraph:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/ZoneGraph \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/AI/MassCrowd:/home/ue4/UnrealEngine/Engine/Plugins/AI/MassCrowd \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs/UnrealBuildTool:/home/ue4/UnrealEngine/Engine/Source/Programs/UnrealBuildTool \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Binaries/DotNET/UnrealBuildTool:/home/ue4/UnrealEngine/Engine/Binaries/DotNET/UnrealBuildTool \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Binaries/DotNET/AutomationTool:/home/ue4/UnrealEngine/Engine/Binaries/DotNET/AutomationTool \
+          -v ${{ github.workspace }}/.engine-ddc-cache/Engine/DerivedDataCache:/home/ue4/UnrealEngine/Engine/DerivedDataCache \
+          -v ${{ github.workspace }}/TempoSample:/home/ue4/TempoSample \
+          tempo_unreal_image \
+          /home/ue4/TempoSample/Plugins/Tempo/Scripts/SyncDeps.sh -force
+    - name: Install Engine Mods
+      run: |
+        docker run --rm \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/ZoneGraph:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/ZoneGraph \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/AI/MassCrowd:/home/ue4/UnrealEngine/Engine/Plugins/AI/MassCrowd \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs/UnrealBuildTool:/home/ue4/UnrealEngine/Engine/Source/Programs/UnrealBuildTool \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Binaries/DotNET/UnrealBuildTool:/home/ue4/UnrealEngine/Engine/Binaries/DotNET/UnrealBuildTool \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Binaries/DotNET/AutomationTool:/home/ue4/UnrealEngine/Engine/Binaries/DotNET/AutomationTool \
+          -v ${{ github.workspace }}/.engine-ddc-cache/Engine/DerivedDataCache:/home/ue4/UnrealEngine/Engine/DerivedDataCache \
+          -v ${{ github.workspace }}/TempoSample:/home/ue4/TempoSample \
+          tempo_unreal_image \
+          /home/ue4/TempoSample/Plugins/Tempo/Scripts/InstallEngineMods.sh
+    - name: Clean (if requested)
+      if: ${{ github.event.inputs.clean }}
+      run: |
+        docker run --rm \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/ZoneGraph:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/ZoneGraph \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/AI/MassCrowd:/home/ue4/UnrealEngine/Engine/Plugins/AI/MassCrowd \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs/UnrealBuildTool:/home/ue4/UnrealEngine/Engine/Source/Programs/UnrealBuildTool \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Binaries/DotNET/UnrealBuildTool:/home/ue4/UnrealEngine/Engine/Binaries/DotNET/UnrealBuildTool \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Binaries/DotNET/AutomationTool:/home/ue4/UnrealEngine/Engine/Binaries/DotNET/AutomationTool \
+          -v ${{ github.workspace }}/.engine-ddc-cache/Engine/DerivedDataCache:/home/ue4/UnrealEngine/Engine/DerivedDataCache \
+          -v ${{ github.workspace }}/TempoSample:/home/ue4/TempoSample \
+          tempo_unreal_image \
+          /home/ue4/TempoSample/Scripts/Clean.sh
+    - name: Build
+      run: |
+        docker run --rm \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/ZoneGraph:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/ZoneGraph \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/AI/MassCrowd:/home/ue4/UnrealEngine/Engine/Plugins/AI/MassCrowd \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs/UnrealBuildTool:/home/ue4/UnrealEngine/Engine/Source/Programs/UnrealBuildTool \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Binaries/DotNET/UnrealBuildTool:/home/ue4/UnrealEngine/Engine/Binaries/DotNET/UnrealBuildTool \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Binaries/DotNET/AutomationTool:/home/ue4/UnrealEngine/Engine/Binaries/DotNET/AutomationTool \
+          -v ${{ github.workspace }}/.engine-ddc-cache/Engine/DerivedDataCache:/home/ue4/UnrealEngine/Engine/DerivedDataCache \
+          -v ${{ github.workspace }}/TempoSample:/home/ue4/TempoSample \
+          tempo_unreal_image \
+          /home/ue4/TempoSample/Scripts/Build.sh
+    - name: Package
+      run: |
+        docker run --rm \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/ZoneGraph:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/ZoneGraph \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/AI/MassCrowd:/home/ue4/UnrealEngine/Engine/Plugins/AI/MassCrowd \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs/UnrealBuildTool:/home/ue4/UnrealEngine/Engine/Source/Programs/UnrealBuildTool \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Binaries/DotNET/UnrealBuildTool:/home/ue4/UnrealEngine/Engine/Binaries/DotNET/UnrealBuildTool \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Binaries/DotNET/AutomationTool:/home/ue4/UnrealEngine/Engine/Binaries/DotNET/AutomationTool \
+          -v ${{ github.workspace }}/.engine-ddc-cache/Engine/DerivedDataCache:/home/ue4/UnrealEngine/Engine/DerivedDataCache \
+          -v ${{ github.workspace }}/TempoSample:/home/ue4/TempoSample \
+          tempo_unreal_image \
+          /home/ue4/TempoSample/Scripts/Package.sh -ddc=NoZenLocalFallback # NoZenLocalFallback causes the DDC to end up in Engine/DerivedDataCache folder
+    - name: Check Free Space
+      run: df -h / && df -h /mnt
+    - name: Cache Build (if main)
+      if: github.ref == 'refs/heads/main'
+      uses: actions/cache/save@v4
+      with:
+        path: |
+          TempoSample/**/*.pb.cc
+          TempoSample/**/*.pb.h
+          TempoSample/Binaries/**
+          TempoSample/Intermediate/**
+          TempoSample/DerivedDataCache/**
+          TempoSample/Saved/**
+          TempoSample/Plugins/**/Intermediate/**
+          TempoSample/Plugins/**/Binaries/**
+          .engine-ddc-cache/**
+        key: tempo-build-${{ env.UNREAL_VERSION }}-${{ github.sha }}
