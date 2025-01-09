@@ -46,7 +46,7 @@ GET_HASH() {
   if [[ "$OSTYPE" = "darwin"* ]]; then
     find . -mindepth 2 -type f -not -name ".*" -not -path "./Public/*" -not -path "./Private/*" -print0 | xargs -0 stat -f "%N%z%m" | sort | md5 | cut -d ' ' -f 1
   else
-    find . -mindepth 2 -type f -not -name ".*" -not -path "./Public/*" -not -path "./Private/*" -print0 | xargs -0 stat --format="%n%s%Y" | sort | md5sum | cut -d ' ' -f 1
+    find . -mindepth 2 -type f -not -name ".*" -not -path "./Public/*" -not -path "./Private/*" -print0 | xargs -0 stat --format="%n%s%Y" | sort | md5sum | cut -d ' ' -f 1 2>/dev/null || echo "0"
   fi
 }
 
