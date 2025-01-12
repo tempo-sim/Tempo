@@ -60,7 +60,7 @@ void VisLogMalformedNextLaneLinks(const FMassEntityManager& EntityManager, int32
 void DrawDebugMassTrafficLaneData(const UMassTrafficSubsystem& MassTrafficSubsystem, const FMassEntityHandle& EntityHandle, const FMassTrafficVehicleControlFragment& VehicleControlFragment, const FMassZoneGraphLaneLocationFragment& LaneLocationFragment, const float LifeTime = 0.1f);
 void DrawDebugMassTrafficLaneData(const UMassTrafficSubsystem& MassTrafficSubsystem, const FZoneGraphLaneHandle& CurrentLaneHandle, const FZoneGraphLaneHandle* PrevLaneHandle = nullptr, const FZoneGraphLaneHandle* NextLaneHandle = nullptr, const float LifeTime = 0.1f);
 
-void DrawDebugYieldLaneIndicators(const UMassTrafficSubsystem& MassTrafficSubsystem, const FZoneGraphLaneHandle& CurrentLaneHandle, const FZoneGraphLaneHandle* NextLaneHandle, const float DistanceAlongLane, const float LaneLength, const bool bShouldPreemptivelyYieldAtIntersection, const bool bShouldReactivelyYieldAtIntersection, const float LifeTime = 0.0f);
+void DrawDebugYieldBehaviorIndicators(const UMassTrafficSubsystem& MassTrafficSubsystem, const FMassEntityHandle& EntityHandle, const FZoneGraphLaneHandle& CurrentLaneHandle, const FZoneGraphLaneHandle* NextLaneHandle, const float EntityDistanceAlongLane, const float EntityRadius, const int32 MergeYieldCaseIndex, const bool bShouldPreemptivelyYieldAtIntersection, const bool bShouldReactivelyYieldAtIntersection, const float LifeTime = 0.0f);
 
 #else
 
@@ -86,7 +86,7 @@ inline void VisLogMalformedNextLaneLinks(const FMassEntityManager& EntityManager
 inline void DrawDebugMassTrafficLaneData(const UMassTrafficSubsystem& MassTrafficSubsystem, const FMassEntityHandle& EntityHandle, const FMassTrafficVehicleControlFragment& VehicleControlFragment, const FMassZoneGraphLaneLocationFragment& LaneLocationFragment, const float LifeTime = 0.1f) {}
 inline void DrawDebugMassTrafficLaneData(const UMassTrafficSubsystem& MassTrafficSubsystem, const FZoneGraphLaneHandle& CurrentLaneHandle, const FZoneGraphLaneHandle* PrevLaneHandle = nullptr, const FZoneGraphLaneHandle* NextLaneHandle = nullptr, const float LifeTime = 0.1f) {}
 
-void DrawDebugYieldLaneIndicators(const UMassTrafficSubsystem& MassTrafficSubsystem, const FZoneGraphLaneHandle& CurrentLaneHandle, const FZoneGraphLaneHandle* NextLaneHandle, const float DistanceAlongLane, const float LaneLength, const bool bShouldPreemptivelyYieldAtIntersection, const bool bShouldReactivelyYieldAtIntersection, const float LifeTime = 0.0f) {}
+void DrawDebugYieldBehaviorIndicators(const UMassTrafficSubsystem& MassTrafficSubsystem, const FMassEntityHandle& EntityHandle, const FZoneGraphLaneHandle& CurrentLaneHandle, const FZoneGraphLaneHandle* NextLaneHandle, const float EntityDistanceAlongLane, const float EntityRadius, const int32 MergeYieldCaseIndex, const bool bShouldPreemptivelyYieldAtIntersection, const bool bShouldReactivelyYieldAtIntersection, const float LifeTime = 0.0f) {}
 
 #endif
 

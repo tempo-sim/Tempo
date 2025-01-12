@@ -9,7 +9,7 @@
 #include "MassLODFragments.h"
 #include "MassRepresentationSubsystem.h"
 #include "MassEntityUtils.h"
-#include "MassTrafficLightRegistrySubsystem.h"
+#include "MassTrafficControllerRegistrySubsystem.h"
 #include "Kismet/GameplayStatics.h"
 
 
@@ -66,22 +66,22 @@ void UMassTrafficLightVisualizationTrait::BuildTemplate(FMassEntityTemplateBuild
 	FMassEntityManager& EntityManager = UE::Mass::Utils::GetEntityManagerChecked(World);
 
 	// Requirements
-	BuildContext.RequireFragment<FMassTrafficIntersectionFragment>();
+	BuildContext.RequireFragment<FMassTrafficLightIntersectionFragment>();
 
 	// Add fragments
 	BuildContext.AddFragment<FMassActorFragment>();
 
-	// Get the TrafficLightRegistrySubsystem
-	const UMassTrafficLightRegistrySubsystem* TrafficLightRegistrySubsystem = World.GetSubsystem<UMassTrafficLightRegistrySubsystem>();
-	if (TrafficLightRegistrySubsystem == nullptr)
+	// Get the TrafficControllerRegistrySubsystem
+	const UMassTrafficControllerRegistrySubsystem* TrafficControllerRegistrySubsystem = World.GetSubsystem<UMassTrafficControllerRegistrySubsystem>();
+	if (TrafficControllerRegistrySubsystem == nullptr)
 	{
-		UE_LOG(LogMassTraffic, Error, TEXT("UMassTrafficLightVisualizationTrait - Failed to get TrafficLightRegistrySubsystem."));
+		UE_LOG(LogMassTraffic, Error, TEXT("UMassTrafficLightVisualizationTrait - Failed to get TrafficControllerRegistrySubsystem."));
 		return;
 	}
 	
 	FMassTrafficLightsParameters RegisteredTrafficLightsParams;
 	
-	const TArray<FMassTrafficLightTypeData>& TrafficLightTypes = TrafficLightRegistrySubsystem->GetTrafficLightTypes();
+	const TArray<FMassTrafficLightTypeData>& TrafficLightTypes = TrafficControllerRegistrySubsystem->GetTrafficLightTypes();
 	if (TrafficLightTypes.Num() > 0)
 	{
 		RegisteredTrafficLightsParams.TrafficLightTypes = TrafficLightTypes;

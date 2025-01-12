@@ -130,6 +130,29 @@ MASSTRAFFIC_API float CalculateTargetSpeed(
 #endif
 );
 
+bool IsVehicleEligibleToMergeOntoLane(
+	const UMassTrafficSubsystem& MassTrafficSubsystem,
+	const FMassTrafficVehicleControlFragment& VehicleControlFragment,
+	const FZoneGraphLaneHandle& CurrentLane,
+	const FZoneGraphLaneHandle& DesiredLane,
+	const float VehicleDistanceAlongCurrentLane,
+	const float VehicleRadius,
+	const float VehicleRandomFraction,
+	const FVector2D& StoppingDistanceRange);
+
+bool ShouldVehicleMergeOntoLane(
+	const UMassTrafficSubsystem& MassTrafficSubsystem,
+	const UMassTrafficSettings& MassTrafficSettings,
+	const FMassTrafficVehicleControlFragment& VehicleControlFragment,
+	const FZoneGraphLaneHandle& CurrentLane,
+	const FZoneGraphLaneHandle& DesiredLane,
+	const float VehicleDistanceAlongCurrentLane,
+	const float VehicleRadius,
+	const float VehicleRandomFraction,
+	const FVector2D& StoppingDistanceRange,
+	const FZoneGraphStorage& ZoneGraphStorage,
+	int32& OutMergeYieldCaseIndex);
+
 MASSTRAFFIC_API bool ShouldStopAtLaneExit(
 	float DistanceAlongLane,
 	float Speed,
@@ -140,7 +163,8 @@ MASSTRAFFIC_API bool ShouldStopAtLaneExit(
 	const FZoneGraphTrafficLaneData* ReadiedNextIntersectionLane,
 	const FVector2D& MinimumDistanceToNextVehicleRange,
 	const FVector2D& StoppingDistanceRange,
-	const FMassEntityManager& EntityManager, 
+	const FMassEntityManager& EntityManager,
+	FZoneGraphTrafficLaneData*& InOut_StopSignIntersectionLane,
 	bool& bOut_RequestDifferentNextLane,
 	bool& bInOut_CantStopAtLaneExit,
 	bool& bOut_IsFrontOfVehicleBeyondLaneExit,
@@ -150,6 +174,8 @@ MASSTRAFFIC_API bool ShouldStopAtLaneExit(
 	const float StandardTrafficPrepareToStopSeconds,
 	const float TimeVehicleStopped,
 	const float MinVehicleStopSignRestTime,
+	const FMassEntityHandle& VehicleEntityHandle,
+	const FMassEntityHandle& NextVehicleEntityHandleInStopQueue,
 	const UWorld* World
 #if WITH_MASSTRAFFIC_DEBUG
 	, bool bVisLog = false
@@ -229,7 +255,8 @@ MASSTRAFFIC_API void MoveVehicleToNextLane(
 	FMassTrafficVehicleLightsFragment& VehicleLightsFragment,
 	FMassZoneGraphLaneLocationFragment& LaneLocationFragment,
 	FMassTrafficNextVehicleFragment& NextVehicleFragment,
-	FMassTrafficVehicleLaneChangeFragment* LaneChangeFragment, bool& bIsVehicleStuck);
+	FMassTrafficVehicleLaneChangeFragment* LaneChangeFragment,
+	bool& bIsVehicleStuck);
 
 /** Instantly moves a vehicle onto another lane. This is not an animated over time. */
 MASSTRAFFIC_API bool TeleportVehicleToAnotherLane(

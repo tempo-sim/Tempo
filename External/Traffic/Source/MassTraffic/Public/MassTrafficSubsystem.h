@@ -17,6 +17,14 @@ class UMassTrafficFieldComponent;
 class UMassTrafficFieldOperationBase;
 struct FMassEntityManager;
 
+struct FMassTrafficLaneIntersectionInfo
+{
+	FMassTrafficLaneIntersectionInfo() = default;
+
+	float EnterDistance = 0.0f;
+	float ExitDistance = 0.0f;
+};
+
 struct FMassTrafficCrosswalkLaneInfo
 {
 	FMassTrafficCrosswalkLaneInfo() = default;
@@ -158,6 +166,8 @@ public:
 		return TArrayView<FMassTrafficZoneGraphData*>(RegisteredTrafficZoneGraphData.GetData(), RegisteredTrafficZoneGraphData.Num());
 	}
 
+	FMassTrafficZoneGraphData* GetMutableTrafficZoneGraphData(const FZoneGraphDataHandle DataHandle);
+
 	/**
 	 * Returns the readonly runtime data associated to a given zone graph lane.
 	 * @param LaneHandle A valid lane handle used to retrieve the runtime data; ensure if handle is invalid
@@ -247,11 +257,28 @@ public:
 
 	const FMassTrafficCrosswalkLaneInfo* GetCrosswalkLaneInfo(const FZoneGraphLaneHandle& CrosswalkLane) const;
 	FMassTrafficCrosswalkLaneInfo* GetMutableCrosswalkLaneInfo(const FZoneGraphLaneHandle& CrosswalkLane);
+
+	bool IsPedestrianYieldingOnCrosswalkLane(const FMassEntityHandle& PedestrianEntityHandle, const FZoneGraphLaneHandle& CrosswalkLane) const;
+	bool TryGetPedestrianDesiredSpeedOnCrosswalkLane(const FMassEntityHandle& PedestrianEntityHandle, const FZoneGraphLaneHandle& CrosswalkLane, float& OutDesiredSpeed) const;
+
+	float GetPedestrianEffectiveSpeedOnCrosswalkLane(const FMassEntityHandle& PedestrianEntityHandle, const FZoneGraphLaneHandle& CrosswalkLane, const float CurrentSpeed) const;
+
+	void AddVehicleEntityToIntersectionStopQueue(const FMassEntityHandle& VehicleEntityHandle, const FMassEntityHandle& IntersectionEntityHandle);
+	void RemoveVehicleEntityFromIntersectionStopQueue(const FMassEntityHandle& VehicleEntityHandle, const FMassEntityHandle& IntersectionEntityHandle);
+	void ClearIntersectionStopQueues();
+	
+	FMassEntityHandle GetNextVehicleEntityInIntersectionStopQueue(const FMassEntityHandle& IntersectionEntityHandle) const;
+	bool IsVehicleEntityInIntersectionStopQueue(const FMassEntityHandle& VehicleEntityHandle, const FMassEntityHandle& IntersectionEntityHandle) const;
+	
+	void AddLaneIntersectionInfo(const FZoneGraphLaneHandle& QueryLane, const FZoneGraphLaneHandle& DestLane, const FMassTrafficLaneIntersectionInfo& LaneIntersectionInfo);
+	bool TryGetLaneIntersectionInfo(const FZoneGraphLaneHandle& QueryLane, const FZoneGraphLaneHandle& DestLane, FMassTrafficLaneIntersectionInfo& OutLaneIntersectionInfo) const;
+	void ClearLaneIntersectionInfo();
 	
 protected:
 	
 	friend class UMassTrafficFieldComponent;
-	friend class UMassTrafficInitIntersectionsProcessor;
+	friend class UMassTrafficLightInitIntersectionsProcessor;
+	friend class UMassTrafficSignInitIntersectionsProcessor;
 
 	void RegisterField(UMassTrafficFieldComponent* Field);
 	void UnregisterField(UMassTrafficFieldComponent* Field);
@@ -268,8 +295,6 @@ protected:
 
 	void RegisterZoneGraphData(const AZoneGraphData* ZoneGraphData);
 	void BuildLaneData(FMassTrafficZoneGraphData& TrafficZoneGraphData, const FZoneGraphStorage& ZoneGraphStorage);
-
-	FMassTrafficZoneGraphData* GetMutableTrafficZoneGraphData(const FZoneGraphDataHandle DataHandle);
 
 	UPROPERTY(Transient)
 	TObjectPtr<const UMassTrafficSettings> MassTrafficSettings = nullptr;
@@ -312,6 +337,16 @@ protected:
 
 	/** Map from each crosswalk lane to its related yield state data. */
 	TMap<FZoneGraphLaneHandle, FMassTrafficCrosswalkLaneInfo> CrosswalkLaneInfoMap;
+
+	/** Map from each Intersection EntityHandle to its queue of Vehicle EntityHandles of stopped Vehicles.
+	 * Vehicle EntityHandles are added to the queue the moment they begin their stop,
+	 * and they remain in the queue until they clear their intersection lane. */
+	TMap<FMassEntityHandle, TArray<FMassEntityHandle>> IntersectionStopQueueMap;
+
+	/** Outer map takes a source lane handle.  Inner map takes a destination lane handle.
+	 * Then, you get pre-computed information regarding the distances along the source lane
+	 * where it enters and exits the destination lane. */
+	TMap<FZoneGraphLaneHandle, TMap<FZoneGraphLaneHandle, FMassTrafficLaneIntersectionInfo>> LaneIntersectionInfoMap;
 };
 
 template<>

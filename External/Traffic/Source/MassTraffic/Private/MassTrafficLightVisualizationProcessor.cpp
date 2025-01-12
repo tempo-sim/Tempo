@@ -62,7 +62,7 @@ UMassTrafficLightVisualizationProcessor::UMassTrafficLightVisualizationProcessor
 void UMassTrafficLightVisualizationProcessor::ConfigureQueries()
 {
 	Super::ConfigureQueries();
-	EntityQuery.AddRequirement<FMassTrafficIntersectionFragment>(EMassFragmentAccess::ReadOnly);
+	EntityQuery.AddRequirement<FMassTrafficLightIntersectionFragment>(EMassFragmentAccess::ReadOnly);
 }
 
 UMassTrafficLightUpdateCustomVisualizationProcessor::UMassTrafficLightUpdateCustomVisualizationProcessor()
@@ -77,7 +77,7 @@ UMassTrafficLightUpdateCustomVisualizationProcessor::UMassTrafficLightUpdateCust
 
 void UMassTrafficLightUpdateCustomVisualizationProcessor::ConfigureQueries()
 {
-	EntityQuery.AddRequirement<FMassTrafficIntersectionFragment>(EMassFragmentAccess::ReadOnly);
+	EntityQuery.AddRequirement<FMassTrafficLightIntersectionFragment>(EMassFragmentAccess::ReadOnly);
 
 	EntityQuery.AddRequirement<FTransformFragment>(EMassFragmentAccess::ReadOnly);
 	EntityQuery.AddRequirement<FMassRepresentationFragment>(EMassFragmentAccess::ReadWrite);
@@ -114,14 +114,14 @@ void UMassTrafficLightUpdateCustomVisualizationProcessor::Execute(FMassEntityMan
 			const FMassTrafficLightsParameters& TrafficLightsParams = Context.GetConstSharedFragment<FMassTrafficLightsParameters>();
 
 			const int32 NumEntities = Context.GetNumEntities();
-			const TConstArrayView<FMassTrafficIntersectionFragment> TrafficIntersectionFragments = Context.GetFragmentView<FMassTrafficIntersectionFragment>(); 
+			const TConstArrayView<FMassTrafficLightIntersectionFragment> TrafficIntersectionFragments = Context.GetFragmentView<FMassTrafficLightIntersectionFragment>(); 
 			const TConstArrayView<FMassRepresentationLODFragment> VisualizationLODFragments = Context.GetFragmentView<FMassRepresentationLODFragment>();
 			const TArrayView<FMassRepresentationFragment> VisualizationFragments = Context.GetMutableFragmentView<FMassRepresentationFragment>(); 
 			const TArrayView<FMassActorFragment> ActorList = Context.GetMutableFragmentView<FMassActorFragment>();
 
 			for (int32 Index = 0; Index < NumEntities; Index++)
 			{
-				const FMassTrafficIntersectionFragment& TrafficIntersectionFragment = TrafficIntersectionFragments[Index]; 
+				const FMassTrafficLightIntersectionFragment& TrafficIntersectionFragment = TrafficIntersectionFragments[Index]; 
 				const FMassRepresentationLODFragment& VisualizationLODFragment = VisualizationLODFragments[Index];
 				const FMassRepresentationFragment& VisualizationFragment = VisualizationFragments[Index];
 				FMassActorFragment& ActorInfo = ActorList[Index];

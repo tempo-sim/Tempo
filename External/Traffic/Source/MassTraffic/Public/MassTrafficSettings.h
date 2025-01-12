@@ -438,11 +438,6 @@ public:
 	// before it is no longer required to *start* yielding.
 	UPROPERTY(EditAnywhere, Config, Category="Yield Behavior")
 	float NormalizedYieldCutoffLaneDistance_Straight = 0.2f;
-
-	// Normalized distance *potentially yielding* vehicle is allowed to travel through *any* intersection lanes
-	// before it is no longer required to *start* yielding to a pedestrian in a crosswalk.
-	UPROPERTY(EditAnywhere, Config, Category="Yield Behavior")
-	float NormalizedYieldCutoffLaneDistance_Crosswalk = 0.6f;
 	
 	// Normalized distance *other* vehicle needs to travel through *left turn* lanes
 	// in order to resume motion after yielding.
@@ -458,18 +453,6 @@ public:
 	// in order to resume motion after yielding.
 	UPROPERTY(EditAnywhere, Config, Category="Yield Behavior")
 	float NormalizedYieldResumeLaneDistance_Straight = 0.4f;
-
-	// Normalized distance "Tail" *pedestrian* needs to travel through *crosswalk* lanes
-	// going *away* from the current Intersection "exit" lanes
-	// in order for yielding vehicle to resume motion after yielding.
-	UPROPERTY(EditAnywhere, Config, Category="Yield Behavior")
-	float NormalizedYieldResumeLaneDistance_Crosswalk_AwayFromIntersectionExit = 0.6f;
-	
-	// Normalized distance "Lead" *pedestrian* may travel through *crosswalk* lanes
-	// going *towards* the current Intersection "exit" lanes
-	// before vehicles must yield to the crosswalk lane.
-	UPROPERTY(EditAnywhere, Config, Category="Yield Behavior")
-	float NormalizedYieldPedestrianCutoffLaneDistance_Crosswalk_TowardsIntersectionExit = 0.2f;
 
 	// Max distance from the end of the lane (leading up to an intersection)
 	// within which a vehicle is allowed to start a pre-emptive yield if other conditions apply.
@@ -488,6 +471,53 @@ public:
 	// after the yielding vehicle "rolled-out" the allowed distance during a pre-emptive yield.
 	UPROPERTY(EditAnywhere, Config, Category="Yield Behavior")
 	float MaxTimeToWaitForVehicleToEnterTheirLaneDuringPreemptiveYield = 2.0f;
+	
+	// If a vehicle enters a crosswalk lane,
+	// a pedestrian will yield to the vehicle, once the pedestrian is within this distance
+	// to the entrance of the vehicle lane along the pedestrian's crosswalk lane.
+	UPROPERTY(EditAnywhere, Config, Category="Yield Behavior")
+	float PedestrianVehicleBufferDistanceOnCrosswalk = 300.0f;
+
+	// If a pedestrian enters a vehicle lane,
+	// a vehicle will yield to the pedestrian, once the vehicle is within this distance
+	// to the entrance of the crosswalk lane along the vehicle lane.
+	UPROPERTY(EditAnywhere, Config, Category="Yield Behavior")
+	float VehiclePedestrianBufferDistanceOnCrosswalk = 200.0f;
+
+	// The time buffer the vehicles will use when detecting conflicts with other vehicles
+	// during their merge behavior.
+	UPROPERTY(EditAnywhere, Config, Category="Merge Behavior")
+	float VehicleCrosswalkYieldTimeBuffer = 4.0f;
+
+	// Once a vehicle is eligible to perform its crosswalk yield behavior,
+	// it looks ahead to see when it will enter a crosswalk lane.
+	// After it will enter a crosswalk lane in less than this time delta,
+	// it will perform the crosswalk yield behavior logic.
+	UPROPERTY(EditAnywhere, Config, Category="Yield Behavior")
+	float VehicleCrosswalkYieldLookAheadTime = 2.0f;
+
+	// The time buffer the vehicles will use when detecting conflicts with other vehicles
+	// during their merge behavior.
+	UPROPERTY(EditAnywhere, Config, Category="Merge Behavior")
+	float VehicleMergeYieldTimeBuffer = 4.0f;
+
+	// Once a vehicle is eligible to perform its merge behavior,
+	// it looks ahead to see when it will enter the intersection.
+	// After it will enter the intersection in less than this time delta,
+	// it will perform the merge behavior logic.
+	UPROPERTY(EditAnywhere, Config, Category="Merge Behavior")
+	float VehicleMergeYieldLookAheadTime = 2.0f;
+
+	// If Vehicle A arrives in a conflict region this "time epsilon" *before* Vehicle B,
+	// then Vehicle A proceeds.  If Vehicle A arrives in a conflict region
+	// this "time epsilon" *after* Vehicle B, then Vehicle A will yield to Vehicle B.
+	UPROPERTY(EditAnywhere, Config, Category="Merge Behavior")
+	float VehicleMergeYieldConflictEnterTimeEpsilon = 2.0f;
+
+	// Distance within which two lane segments are considered intersecting.
+	// Used when getting enter and exit distances for all the conflict lanes.
+	UPROPERTY(EditAnywhere, Config, Category="Lane Intersections")
+	float AcceptableLaneIntersectionDistance = 1.0f;
 
 	// @todo Rename Density Management to Overseer
 	
@@ -554,4 +584,9 @@ public:
 	 */
 	UPROPERTY(EditAnywhere, Config, Category="Noise")
 	float NoisePeriod = 20000.0f;
+
+	// How far back from the nearest conflict lane intersection should we start drawing yield debug indicators?
+	// This only applies when "MassTraffic.DebugYieldBehavior" is set to 1 or higher.
+	UPROPERTY(EditAnywhere, Config, Category="Debug")
+	float MaxDistanceFromConflictLaneToDrawYieldBehaviorIndicators = 5000.0f;
 };

@@ -98,6 +98,8 @@ void UMassTrafficSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 {
 	Super::OnWorldBeginPlay(InWorld);
 
+	ClearIntersectionStopQueues();
+
 	// Execute any field operations subclassing from UMassTrafficBeginPlayFieldOperationBase 
 	PerformFieldOperation(UMassTrafficBeginPlayFieldOperationBase::StaticClass());
 }
@@ -421,6 +423,7 @@ void UMassTrafficSubsystem::BuildLaneData(FMassTrafficZoneGraphData& TrafficZone
 	{
 		// Cache next lane fragments
 		TrafficLaneData.NextLanes.Reset();
+		TrafficLaneData.PrevLanes.Reset();
 		TrafficLaneData.MergingLanes.Reset();
 		TrafficLaneData.SplittingLanes.Reset();
 		TrafficLaneData.DownstreamCrosswalkLanes.Reset();
@@ -470,6 +473,12 @@ void UMassTrafficSubsystem::BuildLaneData(FMassTrafficZoneGraphData& TrafficZone
 					// Accumulate the speed limit.
 					AccumulatedSpeedLimit += LinkedTrafficLaneData->ConstData.SpeedLimit;
 					NumberOfAccumulatedSpeedLimits++;
+				}
+
+				if (Link.Type == EZoneLaneLinkType::Incoming)
+				{
+					// Add previous lane.
+					TrafficLaneData.PrevLanes.Add(LinkedTrafficLaneData);
 				}
 				
 				if (Link.HasFlags(EZoneLaneLinkFlags::Merging))
@@ -860,6 +869,124 @@ const FMassTrafficCrosswalkLaneInfo* UMassTrafficSubsystem::GetCrosswalkLaneInfo
 FMassTrafficCrosswalkLaneInfo* UMassTrafficSubsystem::GetMutableCrosswalkLaneInfo(const FZoneGraphLaneHandle& CrosswalkLane)
 {
 	return const_cast<FMassTrafficCrosswalkLaneInfo*>(GetCrosswalkLaneInfo(CrosswalkLane));
+}
+
+bool UMassTrafficSubsystem::IsPedestrianYieldingOnCrosswalkLane(const FMassEntityHandle& PedestrianEntityHandle, const FZoneGraphLaneHandle& CrosswalkLane) const
+{
+	const FMassTrafficCrosswalkLaneInfo* CrosswalkLaneInfo = GetCrosswalkLaneInfo(CrosswalkLane);
+	
+	if (CrosswalkLaneInfo == nullptr)
+	{
+		return false;
+	}
+
+	const bool bIsPedestrianYieldingOnCrosswalk = CrosswalkLaneInfo->IsEntityOnCrosswalkYieldingToAnyLane(PedestrianEntityHandle);
+
+	return bIsPedestrianYieldingOnCrosswalk;
+}
+
+bool UMassTrafficSubsystem::TryGetPedestrianDesiredSpeedOnCrosswalkLane(const FMassEntityHandle& PedestrianEntityHandle, const FZoneGraphLaneHandle& CrosswalkLane, float& OutDesiredSpeed) const
+{
+	const FMassTrafficCrosswalkLaneInfo* CrosswalkLaneInfo = GetCrosswalkLaneInfo(CrosswalkLane);
+	
+	if (CrosswalkLaneInfo == nullptr)
+	{
+		return false;
+	}
+
+	const float PedestrianDesiredSpeedOnCrosswalkLane = CrosswalkLaneInfo->GetEntityYieldResumeSpeed(PedestrianEntityHandle).Get();
+
+	OutDesiredSpeed = PedestrianDesiredSpeedOnCrosswalkLane;
+
+	return true;
+}
+
+float UMassTrafficSubsystem::GetPedestrianEffectiveSpeedOnCrosswalkLane(const FMassEntityHandle& PedestrianEntityHandle, const FZoneGraphLaneHandle& CrosswalkLane, const float CurrentSpeed) const
+{
+	if (IsPedestrianYieldingOnCrosswalkLane(PedestrianEntityHandle, CrosswalkLane))
+	{
+		float PedestrianDesiredSpeed;
+		if (TryGetPedestrianDesiredSpeedOnCrosswalkLane(PedestrianEntityHandle, CrosswalkLane, PedestrianDesiredSpeed))
+		{
+			return PedestrianDesiredSpeed;
+		}
+	}
+
+	return CurrentSpeed;
+}
+
+void UMassTrafficSubsystem::AddVehicleEntityToIntersectionStopQueue(const FMassEntityHandle& VehicleEntityHandle, const FMassEntityHandle& IntersectionEntityHandle)
+{
+	TArray<FMassEntityHandle>& IntersectionStopQueue = IntersectionStopQueueMap.FindOrAdd(IntersectionEntityHandle);
+
+	if (!IntersectionStopQueue.Contains(VehicleEntityHandle))
+	{
+		IntersectionStopQueue.Add(VehicleEntityHandle);
+	}
+}
+
+void UMassTrafficSubsystem::RemoveVehicleEntityFromIntersectionStopQueue(const FMassEntityHandle& VehicleEntityHandle, const FMassEntityHandle& IntersectionEntityHandle)
+{
+	TArray<FMassEntityHandle>* IntersectionStopQueue = IntersectionStopQueueMap.Find(IntersectionEntityHandle);
+
+	if (IntersectionStopQueue != nullptr)
+	{
+		IntersectionStopQueue->Remove(VehicleEntityHandle);
+	}
+}
+
+void UMassTrafficSubsystem::ClearIntersectionStopQueues()
+{
+	IntersectionStopQueueMap.Reset();
+}
+
+FMassEntityHandle UMassTrafficSubsystem::GetNextVehicleEntityInIntersectionStopQueue(const FMassEntityHandle& IntersectionEntityHandle) const
+{
+	const TArray<FMassEntityHandle>* IntersectionStopQueue = IntersectionStopQueueMap.Find(IntersectionEntityHandle);
+
+	if (IntersectionStopQueue != nullptr && !IntersectionStopQueue->IsEmpty())
+	{
+		return (*IntersectionStopQueue)[0];
+	}
+
+	return FMassEntityHandle();
+}
+
+bool UMassTrafficSubsystem::IsVehicleEntityInIntersectionStopQueue(const FMassEntityHandle& VehicleEntityHandle, const FMassEntityHandle& IntersectionEntityHandle) const
+{
+	const TArray<FMassEntityHandle>* IntersectionStopQueue = IntersectionStopQueueMap.Find(IntersectionEntityHandle);
+	
+	if (IntersectionStopQueue == nullptr)
+	{
+		return false;
+	}
+
+	return IntersectionStopQueue->Contains(VehicleEntityHandle);
+}
+
+void UMassTrafficSubsystem::AddLaneIntersectionInfo(const FZoneGraphLaneHandle& QueryLane, const FZoneGraphLaneHandle& DestLane, const FMassTrafficLaneIntersectionInfo& LaneIntersectionInfo)
+{
+	TMap<FZoneGraphLaneHandle, FMassTrafficLaneIntersectionInfo>& InnerMap = LaneIntersectionInfoMap.FindOrAdd(QueryLane);
+	InnerMap.Add(DestLane, LaneIntersectionInfo);
+}
+
+bool UMassTrafficSubsystem::TryGetLaneIntersectionInfo(const FZoneGraphLaneHandle& QueryLane, const FZoneGraphLaneHandle& DestLane, FMassTrafficLaneIntersectionInfo& OutLaneIntersectionInfo) const
+{
+	if (const TMap<FZoneGraphLaneHandle, FMassTrafficLaneIntersectionInfo>* InnerMap = LaneIntersectionInfoMap.Find(QueryLane))
+	{
+		if (const FMassTrafficLaneIntersectionInfo* LaneIntersectionInfo = InnerMap->Find(DestLane))
+		{
+			OutLaneIntersectionInfo = *LaneIntersectionInfo;
+			return true;
+		}
+	}
+
+	return false;
+}
+
+void UMassTrafficSubsystem::ClearLaneIntersectionInfo()
+{
+	LaneIntersectionInfoMap.Reset();
 }
 
 void MassTrafficDumpLaneStats(const TArray<FString>& Args, UWorld* InWorld, FOutputDevice& Ar)

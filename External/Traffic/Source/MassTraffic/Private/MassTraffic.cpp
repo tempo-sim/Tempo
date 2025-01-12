@@ -159,7 +159,8 @@ FAutoConsoleVariableRef CMassTrafficDebugLaneData(
 	TEXT("MassTraffic lane data debug mode.\n")
 	TEXT("0 = Off (default).\n")
 	TEXT("1 = Debug lane data ([prev], current -> iterate left and right -> next, [next, next -> next], current splitting and merging).\n")
-	TEXT("2 = Same as option 1, plus spheres to indicate turn state and HasVehiclesReadyToUseIntersectionLane().\n"),
+	TEXT("2 = Same as option 1, but with polyline lanes.\n")
+	TEXT("3 = Same as option 2, plus spheres to indicate turn state and HasVehiclesReadyToUseIntersectionLane().\n"),
 	ECVF_Cheat
 	);
 
@@ -174,13 +175,14 @@ FAutoConsoleVariableRef CMassTrafficDebugLaneDataLongitudinalOffset(
 	ECVF_Cheat
 	);
 
-int32 GMassTrafficDebugYieldAtIntersectionBehavior = 0;
-FAutoConsoleVariableRef CMassTrafficDebugYieldAtIntersectionBehavior(
-	TEXT("MassTraffic.DebugYieldAtIntersectionBehavior"),
-	GMassTrafficDebugYieldAtIntersectionBehavior,
+int32 GMassTrafficDebugYieldBehavior = 0;
+FAutoConsoleVariableRef CMassTrafficDebugYieldBehavior(
+	TEXT("MassTraffic.DebugYieldBehavior"),
+	GMassTrafficDebugYieldBehavior,
 	TEXT("MassTraffic debug mode for yield at intersection behavior.\n")
 	TEXT("0 = Off (default).\n")
-	TEXT("1 = Draw indicators for yielding state.  Yellow is pre-emptive yield, Orange is reactive yield, Green is no yield.\n"),
+	TEXT("1 = Draw indicators for yielding state.  Yellow is pre-emptive yield, Orange is reactive yield, Green is no yield.\n")
+	TEXT("2 = Draw conflict enter/exit locations along current and next lane.\n"),
 	ECVF_Cheat
 	);
 
