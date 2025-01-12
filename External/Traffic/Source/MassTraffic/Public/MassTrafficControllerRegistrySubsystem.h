@@ -4,11 +4,12 @@
 
 #include "CoreMinimal.h"
 #include "MassTrafficLights.h"
+#include "MassTrafficSigns.h"
 #include "Subsystems/WorldSubsystem.h"
-#include "MassTrafficLightRegistrySubsystem.generated.h"
+#include "MassTrafficControllerRegistrySubsystem.generated.h"
 
 UCLASS(Blueprintable, BlueprintType)
-class MASSTRAFFIC_API UMassTrafficLightRegistrySubsystem : public UWorldSubsystem
+class MASSTRAFFIC_API UMassTrafficControllerRegistrySubsystem : public UWorldSubsystem
 {
 	GENERATED_BODY()
 
@@ -21,11 +22,16 @@ public:
 	void RegisterTrafficLight(const FMassTrafficLightInstanceDesc& TrafficLightInstanceDesc);
 
 	UFUNCTION(BlueprintCallable, Category = "Mass Traffic|Traffic Light Registry Subsystem")
-	void ClearTrafficLights();
+	void RegisterTrafficSign(const FMassTrafficSignInstanceDesc& TrafficSignInstanceDesc);
+
+	UFUNCTION(BlueprintCallable, Category = "Mass Traffic|Traffic Light Registry Subsystem")
+	void ClearTrafficControllers();
 
 	const TArray<FMassTrafficLightTypeData>& GetTrafficLightTypes() const;
 
 	const TArray<FMassTrafficLightInstanceDesc>& GetTrafficLightInstanceDescs() const;
+
+	const TArray<FMassTrafficSignInstanceDesc>& GetTrafficSignInstanceDescs() const;
 	
 protected:
 
@@ -36,5 +42,8 @@ protected:
 	
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mass Traffic|Traffic Light Registry Subsystem")
 	TArray<FMassTrafficLightInstanceDesc> TrafficLightInstanceDescs;
+	
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mass Traffic|Traffic Light Registry Subsystem")
+	TArray<FMassTrafficSignInstanceDesc> TrafficSignInstanceDescs;
 	
 };

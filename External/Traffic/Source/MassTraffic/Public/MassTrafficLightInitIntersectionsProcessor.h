@@ -6,25 +6,26 @@
 #include "MassTrafficProcessorBase.h"
 #include "MassCommonFragments.h"
 #include "MassProcessor.h"
-#include "MassTrafficInitIntersectionsProcessor.generated.h"
+#include "MassTrafficLightInitIntersectionsProcessor.generated.h"
 
 
 USTRUCT()
-struct MASSTRAFFIC_API FMassTrafficIntersectionsSpawnData
+struct MASSTRAFFIC_API FMassTrafficLightIntersectionSpawnData
 {
 	GENERATED_BODY()
 
-	TArray<FMassTrafficIntersectionFragment> IntersectionFragments;
-	TArray<FTransform> IntersectionTransforms;
+	TArray<FMassTrafficLightIntersectionFragment> TrafficLightIntersectionFragments;
+	
+	TArray<FTransform> TrafficLightIntersectionTransforms;
 };
 
 UCLASS()
-class MASSTRAFFIC_API UMassTrafficInitIntersectionsProcessor : public UMassTrafficProcessorBase
+class MASSTRAFFIC_API UMassTrafficLightInitIntersectionsProcessor : public UMassTrafficProcessorBase
 {
 	GENERATED_BODY()
 
 public:
-	UMassTrafficInitIntersectionsProcessor();
+	UMassTrafficLightInitIntersectionsProcessor();
 
 protected:
 	virtual void ConfigureQueries() override;

@@ -14,6 +14,9 @@ struct FZoneGraphTrafficLaneData;
 struct FMassTrafficLaneDensity;
 struct FMassTrafficVehicleSpawnFilter;
 
+class UMassTrafficSettings;
+class UMassTrafficSubsystem;
+
 /**
 * Helpful functions for determining lane directions from Zone Graph data.
 */
@@ -134,5 +137,61 @@ FORCEINLINE float GetSpeedLimitAlongLane(const float Length, const float SpeedLi
 	const float SpeedScale = 1.0f - FMath::Clamp(TimeLeftOnLane / TimeToBlendFromLaneEnd, 0.0f, 1.0f);
 	return FMath::Lerp(SpeedLimit, MinNextLaneSpeedLimit, SpeedScale) IF_MASSTRAFFIC_ENABLE_DEBUG( * GMassTrafficSpeedLimitScale );
 }
+
+bool TryGetVehicleEnterAndExitTimesForIntersection(
+	const FZoneGraphTrafficLaneData& VehicleCurrentLaneData,
+	const FZoneGraphTrafficLaneData& IntersectionLaneData,
+	const float VehicleDistanceAlongCurrentLane,
+	const float VehicleEffectiveSpeed,
+	const float VehicleRadius,
+	float& OutVehicleEnterTime,
+	float& OutVehicleExitTime,
+	float* OutVehicleDistanceToEnterIntersectionLane = nullptr,
+	float* OutVehicleDistanceToExitIntersectionLane = nullptr);
+
+bool TryGetEnterAndExitDistancesAlongQueryLane(
+	const UMassTrafficSubsystem& MassTrafficSubsystem,
+	const UMassTrafficSettings& MassTrafficSettings,
+	const FZoneGraphStorage& ZoneGraphStorage,
+	const FZoneGraphLaneHandle& QueryLane,
+	const FZoneGraphLaneHandle& OtherLane,
+	float& OutEnterDistanceAlongQueryLane,
+	float& OutExitDistanceAlongQueryLane);
+
+bool TryGetVehicleEnterAndExitTimesForCrossingLane(
+	const UMassTrafficSubsystem& MassTrafficSubsystem,
+	const UMassTrafficSettings& MassTrafficSettings,
+	const FZoneGraphStorage& ZoneGraphStorage,
+	const FZoneGraphTrafficLaneData& VehicleCurrentLaneData,
+	const FZoneGraphTrafficLaneData& VehicleQueryLaneData,
+	const FZoneGraphLaneHandle& CrossingLane,
+	const float VehicleDistanceAlongCurrentLane,
+	const float VehicleEffectiveSpeed,
+	const float VehicleRadius,
+	float& OutVehicleEnterTime,
+	float& OutVehicleExitTime,
+	float* OutVehicleEnterDistance = nullptr,
+	float* OutVehicleExitDistance = nullptr);
+
+bool TryGetEntityEnterAndExitTimesForCrossingLane(
+	const UMassTrafficSubsystem& MassTrafficSubsystem,
+	const UMassTrafficSettings& MassTrafficSettings,
+	const FZoneGraphStorage& ZoneGraphStorage,
+	const FZoneGraphLaneHandle& EntityQueryLane,
+	const FZoneGraphLaneHandle& CrossingLane,
+	const float EntityDistanceAlongQueryLane,
+	const float EntitySpeed,
+	const float EntityRadius,
+	float& OutEntityEnterTime,
+	float& OutEntityExitTime,
+	float* OutEntityEnterDistance = nullptr,
+	float* OutEntityExitDistance = nullptr);
+
+void GetEnterAndExitTimeForYieldingEntity(
+	const float EnterDistance,
+	const float ExitDistance,
+	const float Acceleration,
+	float& OutEntityEnterTime,
+	float& OutEntityExitTime);
 
 }

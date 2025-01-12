@@ -27,7 +27,7 @@ EMassActorSpawnRequestAction  UMassTrafficLightRepresentationActorManagement::On
 	
 	const FMassTrafficLightsParameters& TrafficLightsParams = IntersectionMassEntityView.GetConstSharedFragmentData<FMassTrafficLightsParameters>();
 	
-	const FMassTrafficIntersectionFragment& TrafficIntersectionFragment = IntersectionMassEntityView.GetFragmentData<FMassTrafficIntersectionFragment>();
+	const FMassTrafficLightIntersectionFragment& TrafficIntersectionFragment = IntersectionMassEntityView.GetFragmentData<FMassTrafficLightIntersectionFragment>();
 	for (const FMassTrafficLight& TrafficLight : TrafficIntersectionFragment.TrafficLights)
 	{
 		check(TrafficLightsParams.TrafficLightTypesStaticMeshDescHandle.IsValidIndex(TrafficLight.TrafficLightTypeIndex));

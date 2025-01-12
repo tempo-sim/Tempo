@@ -3,7 +3,7 @@
 
 #include "TempoIntersectionControlComponent.h"
 
-#include "MassTrafficLightRegistrySubsystem.h"
+#include "MassTrafficSigns.h"
 #include "TempoAgentsSettings.h"
 #include "TempoAgentsShared.h"
 #include "TempoRoadInterface.h"
@@ -66,6 +66,16 @@ void UTempoIntersectionControlComponent::SetupTrafficControllerMeshData()
 
 		const ETempoTrafficControllerType TrafficControllerType = ITempoIntersectionInterface::Execute_GetTempoTrafficControllerType(OwnerActor);
 		
+		if (TrafficControllerType == ETempoTrafficControllerType::Sign)
+		{
+			const EMassTrafficControllerSignType TrafficControllerSignType = ITempoIntersectionInterface::Execute_GetTempoTrafficControllerSignType(OwnerActor, ConnectionIndex);
+			
+			if (TrafficControllerSignType == EMassTrafficControllerSignType::None)
+			{
+				continue;
+			}
+		}
+		
 		FTempoTrafficControllerMeshInfo TrafficControllerMeshInfo = ITempoIntersectionInterface::Execute_GetTempoTrafficControllerMeshInfo(OwnerActor, ConnectionIndex, TrafficControllerType);
 		const FVector TrafficControllerLocation = ITempoIntersectionInterface::Execute_GetTempoTrafficControllerLocation(OwnerActor, ConnectionIndex, TrafficControllerType, ETempoCoordinateSpace::World);
 		const FRotator TrafficControllerRotation = ITempoIntersectionInterface::Execute_GetTempoTrafficControllerRotation(OwnerActor, ConnectionIndex, TrafficControllerType, ETempoCoordinateSpace::World);
@@ -106,14 +116,6 @@ void UTempoIntersectionControlComponent::SetupTrafficControllerRuntimeData()
 		return;
 	}
 
-	const ETempoTrafficControllerType TrafficControllerType = ITempoIntersectionInterface::Execute_GetTempoTrafficControllerType(OwnerActor);
-	if (TrafficControllerType != ETempoTrafficControllerType::TrafficLight)
-	{
-		// Currently, only Traffic Lights require additional runtime setup.
-		// So, there's nothing to do.
-		return;
-	}
-
 	UWorld* World = GetWorld();
 	if (World == nullptr)
 	{
@@ -121,47 +123,21 @@ void UTempoIntersectionControlComponent::SetupTrafficControllerRuntimeData()
 		return;
 	}
 
-	UMassTrafficLightRegistrySubsystem* TrafficLightRegistrySubsystem = World->GetSubsystem<UMassTrafficLightRegistrySubsystem>();
-	if (TrafficLightRegistrySubsystem == nullptr)
+	UMassTrafficControllerRegistrySubsystem* TrafficControllerRegistrySubsystem = World->GetSubsystem<UMassTrafficControllerRegistrySubsystem>();
+	if (TrafficControllerRegistrySubsystem == nullptr)
 	{
-		UE_LOG(LogTempoAgentsShared, Error, TEXT("UTempoIntersectionControlComponent - SetupTrafficControllerRuntimeData - Failed to get TrafficLightRegistrySubsystem."));
+		UE_LOG(LogTempoAgentsShared, Error, TEXT("UTempoIntersectionControlComponent - SetupTrafficControllerRuntimeData - Failed to get TrafficControllerRegistrySubsystem."));
 		return;
 	}
 
-	const int32 NumConnections = ITempoIntersectionInterface::Execute_GetNumTempoConnections(OwnerActor);
-	
-	for (int32 ConnectionIndex = 0; ConnectionIndex < NumConnections; ++ConnectionIndex)
+	const ETempoTrafficControllerType TrafficControllerType = ITempoIntersectionInterface::Execute_GetTempoTrafficControllerType(OwnerActor);
+	if (TrafficControllerType == ETempoTrafficControllerType::TrafficLight)
 	{
-		FTempoTrafficControllerMeshInfo TrafficControllerMeshInfo = ITempoIntersectionInterface::Execute_GetTempoTrafficControllerMeshInfo(OwnerActor, ConnectionIndex, TrafficControllerType);
-		const FVector TrafficControllerLocation = ITempoIntersectionInterface::Execute_GetTempoTrafficControllerLocation(OwnerActor, ConnectionIndex, TrafficControllerType, ETempoCoordinateSpace::World);
-		const FRotator TrafficControllerRotation = ITempoIntersectionInterface::Execute_GetTempoTrafficControllerRotation(OwnerActor, ConnectionIndex, TrafficControllerType, ETempoCoordinateSpace::World);
-		
-		const FVector IntersectionEntranceLocation = ITempoIntersectionInterface::Execute_GetTempoIntersectionEntranceLocation(OwnerActor, ConnectionIndex, ETempoCoordinateSpace::World);
-		
-		const AActor* RoadQueryActor = GetConnectedRoadActor(*OwnerActor, ConnectionIndex);
-		if (RoadQueryActor == nullptr)
-		{
-			UE_LOG(LogTempoAgentsShared, Error, TEXT("UTempoIntersectionControlComponent - SetupTrafficControllerRuntimeData - Failed to get Connected Road Actor for Actor: %s at ConnectionIndex: %d."), *OwnerActor->GetName(), ConnectionIndex);
-			return;
-		}
-
-		constexpr int32 NumTrafficControllerMeshesPerTrafficLightType = 1;
-		
-		FStaticMeshInstanceVisualizationDesc StaticMeshInstanceVisualizationDesc;
-		StaticMeshInstanceVisualizationDesc.Meshes.Reserve(NumTrafficControllerMeshesPerTrafficLightType);
-
-		FMassStaticMeshInstanceVisualizationMeshDesc& MeshDesc = StaticMeshInstanceVisualizationDesc.Meshes.AddDefaulted_GetRef();
-		MeshDesc.Mesh = TrafficControllerMeshInfo.TrafficControllerMesh;
-
-		const int32 NumLanes = ITempoRoadInterface::Execute_GetNumTempoLanes(RoadQueryActor);
-		
-		FMassTrafficLightTypeData TrafficLightType(TrafficControllerMeshInfo.TrafficControllerMesh->GetFName(), StaticMeshInstanceVisualizationDesc, NumLanes);
-
-		const int32 TrafficLightTypeIndex = TrafficLightRegistrySubsystem->RegisterTrafficLightType(TrafficLightType);
-		
-		FMassTrafficLightInstanceDesc TrafficLightInstanceDesc(TrafficControllerLocation, TrafficControllerRotation.Yaw, IntersectionEntranceLocation, TrafficLightTypeIndex, TrafficControllerMeshInfo.MeshScale);
-		
-		TrafficLightRegistrySubsystem->RegisterTrafficLight(TrafficLightInstanceDesc);
+		SetupTrafficLightRuntimeData(*OwnerActor, *TrafficControllerRegistrySubsystem);
+	}
+	else
+	{
+		SetupTrafficSignRuntimeData(*OwnerActor, *TrafficControllerRegistrySubsystem);
 	}
 }
 
@@ -475,6 +451,60 @@ float UTempoIntersectionControlComponent::GetLateralOffsetFromControlPoint(const
 	const float LateralOffsetFromControlPoint = AdjustedLateralOrigin * LateralOriginSign + InLateralOffset;
 
 	return LateralOffsetFromControlPoint;
+}
+
+void UTempoIntersectionControlComponent::SetupTrafficLightRuntimeData(AActor& OwnerActor, UMassTrafficControllerRegistrySubsystem& TrafficControllerRegistrySubsystem)
+{
+	const int32 NumConnections = ITempoIntersectionInterface::Execute_GetNumTempoConnections(&OwnerActor);
+	
+	for (int32 ConnectionIndex = 0; ConnectionIndex < NumConnections; ++ConnectionIndex)
+	{
+		FTempoTrafficControllerMeshInfo TrafficControllerMeshInfo = ITempoIntersectionInterface::Execute_GetTempoTrafficControllerMeshInfo(&OwnerActor, ConnectionIndex, ETempoTrafficControllerType::TrafficLight);
+		const FVector TrafficControllerLocation = ITempoIntersectionInterface::Execute_GetTempoTrafficControllerLocation(&OwnerActor, ConnectionIndex, ETempoTrafficControllerType::TrafficLight, ETempoCoordinateSpace::World);
+		const FRotator TrafficControllerRotation = ITempoIntersectionInterface::Execute_GetTempoTrafficControllerRotation(&OwnerActor, ConnectionIndex, ETempoTrafficControllerType::TrafficLight, ETempoCoordinateSpace::World);
+		
+		const FVector IntersectionEntranceLocation = ITempoIntersectionInterface::Execute_GetTempoIntersectionEntranceLocation(&OwnerActor, ConnectionIndex, ETempoCoordinateSpace::World);
+		
+		const AActor* RoadQueryActor = GetConnectedRoadActor(OwnerActor, ConnectionIndex);
+		if (RoadQueryActor == nullptr)
+		{
+			UE_LOG(LogTempoAgentsShared, Error, TEXT("UTempoIntersectionControlComponent - SetupTrafficLightRuntimeData - Failed to get Connected Road Actor for Actor: %s at ConnectionIndex: %d."), *OwnerActor.GetName(), ConnectionIndex);
+			return;
+		}
+
+		constexpr int32 NumTrafficControllerMeshesPerTrafficLightType = 1;
+		
+		FStaticMeshInstanceVisualizationDesc StaticMeshInstanceVisualizationDesc;
+		StaticMeshInstanceVisualizationDesc.Meshes.Reserve(NumTrafficControllerMeshesPerTrafficLightType);
+
+		FMassStaticMeshInstanceVisualizationMeshDesc& MeshDesc = StaticMeshInstanceVisualizationDesc.Meshes.AddDefaulted_GetRef();
+		MeshDesc.Mesh = TrafficControllerMeshInfo.TrafficControllerMesh;
+
+		const int32 NumLanes = ITempoRoadInterface::Execute_GetNumTempoLanes(RoadQueryActor);
+		
+		FMassTrafficLightTypeData TrafficLightType(TrafficControllerMeshInfo.TrafficControllerMesh->GetFName(), StaticMeshInstanceVisualizationDesc, NumLanes);
+
+		const int32 TrafficLightTypeIndex = TrafficControllerRegistrySubsystem.RegisterTrafficLightType(TrafficLightType);
+		
+		FMassTrafficLightInstanceDesc TrafficLightInstanceDesc(TrafficControllerLocation, TrafficControllerRotation.Yaw, IntersectionEntranceLocation, TrafficLightTypeIndex, TrafficControllerMeshInfo.MeshScale);
+		
+		TrafficControllerRegistrySubsystem.RegisterTrafficLight(TrafficLightInstanceDesc);
+	}
+}
+
+void UTempoIntersectionControlComponent::SetupTrafficSignRuntimeData(AActor& OwnerActor, UMassTrafficControllerRegistrySubsystem& TrafficControllerRegistrySubsystem)
+{
+	const int32 NumConnections = ITempoIntersectionInterface::Execute_GetNumTempoConnections(&OwnerActor);
+	
+	for (int32 ConnectionIndex = 0; ConnectionIndex < NumConnections; ++ConnectionIndex)
+	{
+		const FVector IntersectionEntranceLocation = ITempoIntersectionInterface::Execute_GetTempoIntersectionEntranceLocation(&OwnerActor, ConnectionIndex, ETempoCoordinateSpace::World);
+		EMassTrafficControllerSignType TrafficControllerSignType = ITempoIntersectionInterface::Execute_GetTempoTrafficControllerSignType(&OwnerActor, ConnectionIndex);
+		
+		FMassTrafficSignInstanceDesc TrafficSignInstanceDesc(IntersectionEntranceLocation, TrafficControllerSignType);
+		
+		TrafficControllerRegistrySubsystem.RegisterTrafficSign(TrafficSignInstanceDesc);
+	}
 }
 
 AActor* UTempoIntersectionControlComponent::GetConnectedRoadActor(const AActor& IntersectionQueryActor, int32 ConnectionIndex) const

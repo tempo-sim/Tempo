@@ -57,9 +57,18 @@ struct MASSCROWD_API FCrowdTrackingLaneData
 	int32 WaitAreaIndex = INDEX_NONE;
 
 	int32 NumEntitiesOnLane = 0;
-	
-	TOptional<float> LeadEntityNormalizedDistanceAlongLane;
-	TOptional<float> TailEntityNormalizedDistanceAlongLane;
+
+	TOptional<FMassEntityHandle> LeadEntityHandle;
+	TOptional<float> LeadEntityDistanceAlongLane;
+	TOptional<float> LeadEntitySpeedAlongLane;
+	TOptional<float> LeadEntityAccelerationAlongLane;
+	TOptional<float> LeadEntityRadius;
+
+	TOptional<FMassEntityHandle> TailEntityHandle;
+	TOptional<float> TailEntityDistanceAlongLane;
+	TOptional<float> TailEntitySpeedAlongLane;
+	TOptional<float> TailEntityAccelerationAlongLane;
+	TOptional<float> TailEntityRadius;
 };
 
 /** Runtime data associated to lane that can be used to wait another one to open. */

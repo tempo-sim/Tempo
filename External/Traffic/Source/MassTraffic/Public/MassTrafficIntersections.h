@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "MassTrafficSigns.h"
 #include "MassTrafficTypes.h"
 
 #include "ZoneGraphTypes.h"
@@ -31,7 +32,10 @@ struct MASSTRAFFIC_API FMassTrafficIntersectionSide
 	FVector DirectionIntoIntersection = FVector::ZeroVector;
 
 	UPROPERTY()
-	int32 TrafficLightDetailIndex = INDEX_NONE;
+	int32 TrafficLightInstanceDescIndex = INDEX_NONE;
+
+	UPROPERTY()
+	EMassTrafficControllerSignType TrafficControllerSignType = EMassTrafficControllerSignType::None;
 
 	UPROPERTY()
 	bool bHasInboundLanesFromFreeway = false;
@@ -97,6 +101,9 @@ struct MASSTRAFFIC_API FMassTrafficIntersectionDetail
 	bool bSidesAreOrderedClockwise = false;
 
 	UPROPERTY()
+	FZoneGraphDataHandle ZoneGraphDataHandle;
+
+	UPROPERTY()
 	int32 ZoneIndex = INDEX_NONE;
 
 	UPROPERTY()
@@ -106,13 +113,14 @@ struct MASSTRAFFIC_API FMassTrafficIntersectionDetail
 
 	/** Important. Call this after inbound sides are added and given their lanes. */
 	void Build(
-		const int32 InZoneIndex,
 		const UE::MassTraffic::FMassTrafficBasicHGrid& CrosswalkLaneMidpoint_HGrid, const float IntersectionSideToCrosswalkSearchDistance,
-		// Hash grid containing the midpoints of all vehicle intersection inbound sides. And traffic light details and search distance.
-		const UE::MassTraffic::FMassTrafficBasicHGrid& IntersectionSideHGrid, const TArray<struct FMassTrafficLightInstanceDesc>* TrafficLightDetails, float TrafficLightSearchDistance,
+		// Hash grid containing the midpoints of all vehicle intersection inbound sides. And traffic light instance descs and search distance.
+		const UE::MassTraffic::FMassTrafficBasicHGrid& TrafficLightIntersectionSideHGrid, const TArray<struct FMassTrafficLightInstanceDesc>* TrafficLightInstanceDescs, float TrafficLightSearchDistance,
+		// Hash grid containing the midpoints of all vehicle intersection inbound sides. And traffic sign instance descs and search distance.
+		const UE::MassTraffic::FMassTrafficBasicHGrid& TrafficSignIntersectionSideHGrid, const TArray<FMassTrafficSignInstanceDesc>* TrafficSignInstanceDescs, float TrafficSignSearchDistance,
 		// And..
 		const FZoneGraphStorage& ZoneGraphStorage,
-		UWorld* World);
+		const UWorld& World);
 
 	bool IsMostlySquare() const;
 

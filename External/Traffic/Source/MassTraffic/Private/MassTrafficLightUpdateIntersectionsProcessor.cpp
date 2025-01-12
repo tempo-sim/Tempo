@@ -1,7 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 
-#include "MassTrafficUpdateIntersectionsProcessor.h"
+#include "MassTrafficLightUpdateIntersectionsProcessor.h"
 #include "MassTraffic.h"
 #include "MassTrafficFragments.h"
 #include "MassTrafficDebugHelpers.h"
@@ -35,7 +35,7 @@ namespace
 
 
 	// See all CROSSWALKOVERLAP.
-	FORCEINLINE bool IsStoppedVehicleBlockingCrosswalk(FMassTrafficIntersectionFragment& IntersectionFragment, const bool bClearValueOnLane)
+	FORCEINLINE bool IsStoppedVehicleBlockingCrosswalk(FMassTrafficLightIntersectionFragment& IntersectionFragment, const bool bClearValueOnLane)
 	{
 		bool bIsStoppedVehicleBlockingCrosswalk = false;
 		
@@ -63,7 +63,7 @@ namespace
 	}
 		
 	
-	FORCEINLINE bool ArePedestriansClearOfIntersection(FMassTrafficIntersectionFragment& IntersectionFragment, const FZoneGraphStorage& ZoneGraphStorage, const UMassCrowdSubsystem* MassCrowdSubsystem)
+	FORCEINLINE bool ArePedestriansClearOfIntersection(FMassTrafficLightIntersectionFragment& IntersectionFragment, const FZoneGraphStorage& ZoneGraphStorage, const UMassCrowdSubsystem* MassCrowdSubsystem)
 	{
 		if (!IsValid(MassCrowdSubsystem))
 		{
@@ -99,7 +99,7 @@ namespace
 	}
 
 
-	FORCEINLINE bool AreVehiclesClearOfIntersection(FMassTrafficIntersectionFragment& IntersectionFragment, const EMassTrafficIntersectionVehicleLaneType ClearTest, const bool bIncludeReservedVehicles = true)
+	FORCEINLINE bool AreVehiclesClearOfIntersection(FMassTrafficLightIntersectionFragment& IntersectionFragment, const EMassTrafficIntersectionVehicleLaneType ClearTest, const bool bIncludeReservedVehicles = true)
 	{
 		const FMassTrafficPeriod& CurrentPeriod = IntersectionFragment.GetCurrentPeriod();	
 
@@ -121,7 +121,7 @@ namespace
 	}
 
 	
-	FORCEINLINE void DebugDrawOccupiedVehicleLanes(const UWorld* World, const FZoneGraphStorage& ZoneGraphStorage, FMassTrafficIntersectionFragment& IntersectionFragment, const EMassTrafficIntersectionVehicleLaneType ClearTest)
+	FORCEINLINE void DebugDrawOccupiedVehicleLanes(const UWorld* World, const FZoneGraphStorage& ZoneGraphStorage, FMassTrafficLightIntersectionFragment& IntersectionFragment, const EMassTrafficIntersectionVehicleLaneType ClearTest)
 	{
 		const FMassTrafficPeriod& CurrentPeriod = IntersectionFragment.GetCurrentPeriod();	
 		const FVector Z(0.0f, 0.0f, 500.0f);
@@ -159,7 +159,7 @@ namespace
 	}
 
 	
-	FORCEINLINE int32 NumVehiclesInIntersection(FMassTrafficIntersectionFragment& IntersectionFragment, const EMassTrafficIntersectionVehicleLaneType ClearTest)
+	FORCEINLINE int32 NumVehiclesInIntersection(FMassTrafficLightIntersectionFragment& IntersectionFragment, const EMassTrafficIntersectionVehicleLaneType ClearTest)
 	{
 		const FMassTrafficPeriod& CurrentPeriod = IntersectionFragment.GetCurrentPeriod();	
 
@@ -176,7 +176,7 @@ namespace
 	}
 
 	
-	FORCEINLINE bool AreVehiclesWaitingForIntersection(FMassTrafficIntersectionFragment& IntersectionFragment)
+	FORCEINLINE bool AreVehiclesWaitingForIntersection(FMassTrafficLightIntersectionFragment& IntersectionFragment)
 	{
 		const FMassTrafficPeriod& CurrentPeriod = IntersectionFragment.GetCurrentPeriod();
 
@@ -192,7 +192,7 @@ namespace
 	}
 
 
-	FORCEINLINE int32 NumVehiclesWaitingForIntersection(FMassTrafficIntersectionFragment& IntersectionFragment)
+	FORCEINLINE int32 NumVehiclesWaitingForIntersection(FMassTrafficLightIntersectionFragment& IntersectionFragment)
 	{
 		const FMassTrafficPeriod& CurrentPeriod = IntersectionFragment.GetCurrentPeriod();
 
@@ -208,7 +208,7 @@ namespace
 		return Count;
 	}
 
-	FORCEINLINE bool AreAnyCrosswalkLanesOpenInCurrentPeriod(FMassTrafficIntersectionFragment& IntersectionFragment, const UMassCrowdSubsystem* MassCrowdSubsystem)
+	FORCEINLINE bool AreAnyCrosswalkLanesOpenInCurrentPeriod(FMassTrafficLightIntersectionFragment& IntersectionFragment, const UMassCrowdSubsystem* MassCrowdSubsystem)
 	{
 		if (!IsValid(MassCrowdSubsystem))
 		{
@@ -230,7 +230,7 @@ namespace
 		return false;
 	}
 
-	FORCEINLINE bool AreAllCurrentCrosswalkLanesOpenNextPeriod(FMassTrafficIntersectionFragment& IntersectionFragment)
+	FORCEINLINE bool AreAllCurrentCrosswalkLanesOpenNextPeriod(FMassTrafficLightIntersectionFragment& IntersectionFragment)
 	{
 		const FMassTrafficPeriod& CurrentPeriod = IntersectionFragment.GetCurrentPeriod();
 		const FMassTrafficPeriod& NextPeriod = IntersectionFragment.GetNextPeriod();
@@ -255,7 +255,7 @@ namespace
 	}
 
 	
-	FORCEINLINE bool IsIntersectionClear(FMassTrafficIntersectionFragment& IntersectionFragment, const EMassTrafficIntersectionVehicleLaneType ClearTest, const FZoneGraphStorage& ZoneGraphStorage, const UMassCrowdSubsystem* MassCrowdSubsystem, const bool bIncludeReservedVehicles = true)
+	FORCEINLINE bool IsIntersectionClear(FMassTrafficLightIntersectionFragment& IntersectionFragment, const EMassTrafficIntersectionVehicleLaneType ClearTest, const FZoneGraphStorage& ZoneGraphStorage, const UMassCrowdSubsystem* MassCrowdSubsystem, const bool bIncludeReservedVehicles = true)
 	{
 		if (AreVehiclesClearOfIntersection(IntersectionFragment, ClearTest, bIncludeReservedVehicles) &&
 			ArePedestriansClearOfIntersection(IntersectionFragment, ZoneGraphStorage, MassCrowdSubsystem))
@@ -266,7 +266,7 @@ namespace
 		return false;
 	}
 	
-	FORCEINLINE bool IsIntersectionEffectivelyClearToAdvanceToNextPeriod(FMassTrafficIntersectionFragment& IntersectionFragment, const EMassTrafficIntersectionVehicleLaneType ClearTest, const FZoneGraphStorage& ZoneGraphStorage, const UMassCrowdSubsystem* MassCrowdSubsystem, const bool bIncludeReservedVehicles = true)
+	FORCEINLINE bool IsIntersectionEffectivelyClearToAdvanceToNextPeriod(FMassTrafficLightIntersectionFragment& IntersectionFragment, const EMassTrafficIntersectionVehicleLaneType ClearTest, const FZoneGraphStorage& ZoneGraphStorage, const UMassCrowdSubsystem* MassCrowdSubsystem, const bool bIncludeReservedVehicles = true)
 	{
 		if (AreVehiclesClearOfIntersection(IntersectionFragment, ClearTest, bIncludeReservedVehicles) &&
 			((AreAnyCrosswalkLanesOpenInCurrentPeriod(IntersectionFragment, MassCrowdSubsystem) && AreAllCurrentCrosswalkLanesOpenNextPeriod(IntersectionFragment)) ||
@@ -279,14 +279,14 @@ namespace
 	}
 
 	
-	FORCEINLINE bool IsCurrentPeriodPedestrianOnly(FMassTrafficIntersectionFragment& IntersectionFragment)
+	FORCEINLINE bool IsCurrentPeriodPedestrianOnly(FMassTrafficLightIntersectionFragment& IntersectionFragment)
 	{
 		const FMassTrafficPeriod& CurrentPeriod = IntersectionFragment.GetCurrentPeriod();
 		
 		return CurrentPeriod.VehicleLanes.IsEmpty() && (!CurrentPeriod.CrosswalkLanes.IsEmpty() || !CurrentPeriod.CrosswalkWaitingLanes.IsEmpty()); 
 	}
 
-	FORCEINLINE int32 NumPedestriansWaitingForIntersection(FMassTrafficIntersectionFragment& IntersectionFragment, const FZoneGraphStorage& ZoneGraphStorage, const UMassCrowdSubsystem* MassCrowdSubsystem, const UWorld* Wold = nullptr/*..for debugging*/)
+	FORCEINLINE int32 NumPedestriansWaitingForIntersection(FMassTrafficLightIntersectionFragment& IntersectionFragment, const FZoneGraphStorage& ZoneGraphStorage, const UMassCrowdSubsystem* MassCrowdSubsystem, const UWorld* Wold = nullptr/*..for debugging*/)
 	{
 		if (!IsValid(MassCrowdSubsystem))
 		{
@@ -354,7 +354,7 @@ namespace
 	}
 
 
-	FORCEINLINE int32 NumPedestriansCrossing(FMassTrafficIntersectionFragment& IntersectionFragment, const FZoneGraphStorage& ZoneGraphStorage, const UMassCrowdSubsystem* MassCrowdSubsystem)
+	FORCEINLINE int32 NumPedestriansCrossing(FMassTrafficLightIntersectionFragment& IntersectionFragment, const FZoneGraphStorage& ZoneGraphStorage, const UMassCrowdSubsystem* MassCrowdSubsystem)
 	{
 		if (!IsValid(MassCrowdSubsystem)) return 0;
 		
@@ -391,13 +391,13 @@ namespace
 	constexpr float DebugDrawArrowZOffsetPhaseScale = 10.0f;
 
 
-	FORCEINLINE FVector DrawDebugZOffset(const FMassTrafficIntersectionFragment& IntersectionFragment)
+	FORCEINLINE FVector DrawDebugZOffset(const FMassTrafficLightIntersectionFragment& IntersectionFragment)
 	{
 		return FVector(0.0f, 0.0f, DebugDrawArrowZOffsetPhaseScale * static_cast<float>(IntersectionFragment.CurrentPeriodIndex) + DebugDrawArrowZOffset);
 	}
 	
 	
-	void DrawDebugVehicleLaneArrow(const UWorld* InWorld, const FZoneGraphStorage& ZoneGraphStorage, const int32 LaneIndex, const FMassTrafficIntersectionFragment& IntersectionFragment, const FColor& Color=FColor::White, const bool bPersistentLines = false, const float Lifetime = -1.0f, const uint8 DepthPriority = 0, const float Thickness = 5.0f, const float ArrowSize = 100.0f, const float ArrowLength = 500.0f)
+	void DrawDebugVehicleLaneArrow(const UWorld* InWorld, const FZoneGraphStorage& ZoneGraphStorage, const int32 LaneIndex, const FMassTrafficLightIntersectionFragment& IntersectionFragment, const FColor& Color=FColor::White, const bool bPersistentLines = false, const float Lifetime = -1.0f, const uint8 DepthPriority = 0, const float Thickness = 5.0f, const float ArrowSize = 100.0f, const float ArrowLength = 500.0f)
 	{
 		const FVector PointA = ZoneGraphStorage.LanePoints[ZoneGraphStorage.Lanes[LaneIndex].PointsBegin];
 		const FVector PointB = ZoneGraphStorage.LanePoints[ZoneGraphStorage.Lanes[LaneIndex].PointsEnd - 1];			
@@ -410,7 +410,7 @@ namespace
 	}
 
 	
-	void DrawDebugVehicleLaneArrows(const UWorld* World, const FZoneGraphStorage& ZoneGraphStorage, FMassTrafficIntersectionFragment& IntersectionFragment, const float Lifetime)
+	void DrawDebugVehicleLaneArrows(const UWorld* World, const FZoneGraphStorage& ZoneGraphStorage, FMassTrafficLightIntersectionFragment& IntersectionFragment, const float Lifetime)
 	{
 		const FMassTrafficPeriod& CurrentPeriod = IntersectionFragment.GetCurrentPeriod();
 		
@@ -437,7 +437,7 @@ namespace
 	}
 
 	
-	void DrawDebugPedestrianLaneArrow(const UWorld* World, const FZoneGraphStorage& ZoneGraphStorage, const int32 LaneIndex, const FMassTrafficIntersectionFragment& IntersectionFragment, const FColor& Color=FColor::White, const bool bPersistentLines = false, const float Lifetime = -1.0f, const uint8 DepthPriority = 0, const float Thickness = 5.0f, const float ArrowSize=100.0f)
+	void DrawDebugPedestrianLaneArrow(const UWorld* World, const FZoneGraphStorage& ZoneGraphStorage, const int32 LaneIndex, const FMassTrafficLightIntersectionFragment& IntersectionFragment, const FColor& Color=FColor::White, const bool bPersistentLines = false, const float Lifetime = -1.0f, const uint8 DepthPriority = 0, const float Thickness = 5.0f, const float ArrowSize=100.0f)
 	{
 		const FVector PointA = ZoneGraphStorage.LanePoints[ZoneGraphStorage.Lanes[LaneIndex].PointsBegin];
 		const FVector PointB = ZoneGraphStorage.LanePoints[ZoneGraphStorage.Lanes[LaneIndex].PointsEnd - 1];			
@@ -450,7 +450,7 @@ namespace
 	}
 
 	
-	void DrawDebugPedestrianLaneArrows(const UWorld* World, const FZoneGraphStorage& ZoneGraphStorage, const UMassCrowdSubsystem* MassCrowdSubsystem, FMassTrafficIntersectionFragment& IntersectionFragment, const float DrawTime)
+	void DrawDebugPedestrianLaneArrows(const UWorld* World, const FZoneGraphStorage& ZoneGraphStorage, const UMassCrowdSubsystem* MassCrowdSubsystem, FMassTrafficLightIntersectionFragment& IntersectionFragment, const float DrawTime)
 	{
 		const FMassTrafficPeriod& CurrentPeriod = IntersectionFragment.GetCurrentPeriod();
 		
@@ -470,7 +470,7 @@ namespace
 	}
 
 	
-	void DebugDrawAllOpenLaneArrowsAndTrafficLights(const UWorld* World, const FZoneGraphStorage& ZoneGraphStorage, const UMassCrowdSubsystem* MassCrowdSubsystem, FMassTrafficIntersectionFragment& IntersectionFragment, const FTransformFragment& TransformFragment/*for debugging*/, const EMassTrafficPeriodLanesAction PeriodAction, const float Lifetime=0.0f)
+	void DebugDrawAllOpenLaneArrowsAndTrafficLights(const UWorld* World, const FZoneGraphStorage& ZoneGraphStorage, const UMassCrowdSubsystem* MassCrowdSubsystem, FMassTrafficLightIntersectionFragment& IntersectionFragment, const FTransformFragment& TransformFragment/*for debugging*/, const EMassTrafficControllerLanesAction PeriodAction, const float Lifetime=0.0f)
 	{
 		DrawDebugVehicleLaneArrows(World, ZoneGraphStorage, IntersectionFragment, Lifetime);
 		DrawDebugPedestrianLaneArrows(World, ZoneGraphStorage, MassCrowdSubsystem, IntersectionFragment, Lifetime);
@@ -485,7 +485,7 @@ namespace
 		}
 	}
 
-	void DrawDebugNumberOfPedestrians(const UWorld* World, FMassTrafficIntersectionFragment& IntersectionFragment, const FZoneGraphStorage& ZoneGraphStorage, const UMassCrowdSubsystem* MassCrowdSubsystem, const FVector& Location, const float Lifetime=0.0f)
+	void DrawDebugNumberOfPedestrians(const UWorld* World, FMassTrafficLightIntersectionFragment& IntersectionFragment, const FZoneGraphStorage& ZoneGraphStorage, const UMassCrowdSubsystem* MassCrowdSubsystem, const FVector& Location, const float Lifetime=0.0f)
 	{
 		const int32 NumWaiting = NumPedestriansWaitingForIntersection(IntersectionFragment, ZoneGraphStorage, MassCrowdSubsystem);
 		if (NumWaiting)
@@ -507,16 +507,18 @@ namespace
 }
 
 
-UMassTrafficUpdateIntersectionsProcessor::UMassTrafficUpdateIntersectionsProcessor()
+UMassTrafficLightUpdateIntersectionsProcessor::UMassTrafficLightUpdateIntersectionsProcessor()
 	: EntityQuery(*this)
 {
 	ProcessingPhase = EMassProcessingPhase::EndPhysics;
-	ExecutionOrder.ExecuteInGroup = UE::MassTraffic::ProcessorGroupNames::EndPhysicsIntersectionBehavior;
+	ExecutionOrder.ExecuteInGroup = UE::MassTraffic::ProcessorGroupNames::EndPhysicsTrafficLightIntersectionBehavior;
+	
+	ExecutionOrder.ExecuteBefore.Add(UE::MassTraffic::ProcessorGroupNames::EndPhysicsTrafficSignIntersectionBehavior);
 }
 
-void UMassTrafficUpdateIntersectionsProcessor::ConfigureQueries()
+void UMassTrafficLightUpdateIntersectionsProcessor::ConfigureQueries()
 {
-	EntityQuery.AddRequirement<FMassTrafficIntersectionFragment>(EMassFragmentAccess::ReadWrite);
+	EntityQuery.AddRequirement<FMassTrafficLightIntersectionFragment>(EMassFragmentAccess::ReadWrite);
 	EntityQuery.AddSubsystemRequirement<UZoneGraphSubsystem>(EMassFragmentAccess::ReadOnly);
 	EntityQuery.AddSubsystemRequirement<UMassCrowdSubsystem>(EMassFragmentAccess::ReadWrite);
 #if WITH_MASSTRAFFIC_DEBUG
@@ -525,7 +527,7 @@ void UMassTrafficUpdateIntersectionsProcessor::ConfigureQueries()
 #endif
 }
 
-void UMassTrafficUpdateIntersectionsProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
+void UMassTrafficLightUpdateIntersectionsProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
 	// Get world
 	const UWorld* World = GetWorld();
@@ -538,7 +540,7 @@ void UMassTrafficUpdateIntersectionsProcessor::Execute(FMassEntityManager& Entit
 
 		const int32 NumEntities = QueryContext.GetNumEntities();
 		const float DeltaTimeSeconds = QueryContext.GetDeltaTimeSeconds();
-		const TArrayView<FMassTrafficIntersectionFragment> TrafficIntersectionFragments = QueryContext.GetMutableFragmentView<FMassTrafficIntersectionFragment>();
+		const TArrayView<FMassTrafficLightIntersectionFragment> TrafficIntersectionFragments = QueryContext.GetMutableFragmentView<FMassTrafficLightIntersectionFragment>();
 		#if WITH_MASSTRAFFIC_DEBUG
 		const TConstArrayView<FMassRepresentationLODFragment> RepresentationLODFragments = QueryContext.GetFragmentView<FMassRepresentationLODFragment>();
 		const TConstArrayView<FTransformFragment> TransformFragments = QueryContext.GetFragmentView<FTransformFragment>();
@@ -547,7 +549,14 @@ void UMassTrafficUpdateIntersectionsProcessor::Execute(FMassEntityManager& Entit
 		// Process all the intersections in this chunk -
 		for (int32 Index = 0; Index < NumEntities; ++Index)
 		{
-			FMassTrafficIntersectionFragment& IntersectionFragment = TrafficIntersectionFragments[Index];
+			FMassTrafficLightIntersectionFragment& IntersectionFragment = TrafficIntersectionFragments[Index];
+
+			// Skip empty intersections.
+			if (IntersectionFragment.Periods.IsEmpty())
+			{
+				continue;
+			}
+			
 			#if WITH_MASSTRAFFIC_DEBUG
 			const FTransformFragment& TransformFragment = TransformFragments[Index];
 			#endif
@@ -583,12 +592,6 @@ void UMassTrafficUpdateIntersectionsProcessor::Execute(FMassEntityManager& Entit
 					UE::MassTraffic::DrawDebugZLine(World, TransformFragment.GetTransform().GetLocation(), FColor::Purple, false, 0.0f, 50.0f, 200000.0f);
 				}
 #endif // WITH_MASSTRAFFIC_DEBUG
-			}
-
-			// Skip empty intersections.
-			if (IntersectionFragment.Periods.IsEmpty())
-			{
-				continue;
 			}
 
 			#if WITH_MASSTRAFFIC_DEBUG
@@ -660,8 +663,8 @@ void UMassTrafficUpdateIntersectionsProcessor::Execute(FMassEntityManager& Entit
 							// Close all pedestrian lanes in the period, once at least one vehicle has entered the intersection.
 							if (bAnyVehiclesOnOpenLanes)
 							{
-								IntersectionFragment.ApplyLanesActionToCurrentPeriod(EMassTrafficPeriodLanesAction::None,
-									EMassTrafficPeriodLanesAction::HardClose, &MassCrowdSubsystem, false);
+								IntersectionFragment.ApplyLanesActionToCurrentPeriod(EMassTrafficControllerLanesAction::None,
+									EMassTrafficControllerLanesAction::HardClose, &MassCrowdSubsystem, false);
 							}
 						}
 
@@ -699,7 +702,7 @@ void UMassTrafficUpdateIntersectionsProcessor::Execute(FMassEntityManager& Entit
 				#if WITH_MASSTRAFFIC_DEBUG
 				if (bDoDrawDebug) 
 				{
-					DebugDrawAllOpenLaneArrowsAndTrafficLights(World, *ZoneGraphStorage, &MassCrowdSubsystem, IntersectionFragment, TransformFragment, EMassTrafficPeriodLanesAction::Open);
+					DebugDrawAllOpenLaneArrowsAndTrafficLights(World, *ZoneGraphStorage, &MassCrowdSubsystem, IntersectionFragment, TransformFragment, EMassTrafficControllerLanesAction::Open);
 				}
 				#endif
 			};
@@ -712,7 +715,7 @@ void UMassTrafficUpdateIntersectionsProcessor::Execute(FMassEntityManager& Entit
 			{
 
 				IntersectionFragment.ApplyLanesActionToCurrentPeriod(
-					EMassTrafficPeriodLanesAction::SoftPrepareToClose, EMassTrafficPeriodLanesAction::None,
+					EMassTrafficControllerLanesAction::SoftPrepareToClose, EMassTrafficControllerLanesAction::None,
 					&MassCrowdSubsystem, false);
 
 				
@@ -735,20 +738,20 @@ void UMassTrafficUpdateIntersectionsProcessor::Execute(FMassEntityManager& Entit
 			if (IntersectionFragment.PeriodTimeRemaining <= 0.0f && PeriodTimeRemaining_BeforeUpdate > 0.0f)
 			{
 				// Don't close the pedestrian lanes if they're going to be open in the next period.
-				const EMassTrafficPeriodLanesAction PedestrianLanesAction =
+				const EMassTrafficControllerLanesAction PedestrianLanesAction =
 							bPeriodHasAnyOpenCrosswalkLanes && AreAllCurrentCrosswalkLanesOpenNextPeriod(IntersectionFragment) ?
-							EMassTrafficPeriodLanesAction::Open :
-							EMassTrafficPeriodLanesAction::HardClose;
+							EMassTrafficControllerLanesAction::Open :
+							EMassTrafficControllerLanesAction::HardClose;
 				
 				// Close all lanes that close in next period.
 				IntersectionFragment.ApplyLanesActionToCurrentPeriod(
-					EMassTrafficPeriodLanesAction::SoftClose, PedestrianLanesAction,
+					EMassTrafficControllerLanesAction::SoftClose, PedestrianLanesAction,
 					&MassCrowdSubsystem, false);
 				
 
 				IntersectionFragment.UpdateTrafficLightsForCurrentPeriod();
 
-				if (PedestrianLanesAction == EMassTrafficPeriodLanesAction::HardClose)
+				if (PedestrianLanesAction == EMassTrafficControllerLanesAction::HardClose)
 				{
 					IntersectionFragment.PedestrianLightsShowStop();
 				}
@@ -818,7 +821,7 @@ void UMassTrafficUpdateIntersectionsProcessor::Execute(FMassEntityManager& Entit
 				// We do this, because we don't want them to start walking if the next period ends up getting ended early.
 				// It takes them a while to get off the curb onto the crosswalk, and the intersection won't sense this in time.
 				{
-					const EMassTrafficPeriodLanesAction VehicleLanesAction = EMassTrafficPeriodLanesAction::Open;
+					const EMassTrafficControllerLanesAction VehicleLanesAction = EMassTrafficControllerLanesAction::Open;
 					
 					const int32 MinPedestrians =
 						IntersectionFragment.bHasTrafficLights ?
@@ -834,14 +837,14 @@ void UMassTrafficUpdateIntersectionsProcessor::Execute(FMassEntityManager& Entit
 
 					const int32 NumWaitingPedestriansInNewPeriod = NumPedestriansWaitingForIntersection(IntersectionFragment, *ZoneGraphStorage, &MassCrowdSubsystem);
 					
-					const EMassTrafficPeriodLanesAction PedestrianLanesAction =
+					const EMassTrafficControllerLanesAction PedestrianLanesAction =
 							(bPeriodHasAnyOpenCrosswalkLanes && bAreAllCurrentCrosswalkLanesOpenNextPeriod) ||
 							(bCanOpenPedestrianLanesByProbability &&
 							NumWaitingPedestriansInNewPeriod >= MinPedestrians &&
 							// WARNING - If there are no pedestrians in the level, this will never end up being executed, so the value will never be cleared -
 							!IsStoppedVehicleBlockingCrosswalk(IntersectionFragment, true)) /*(See all CROSSWALKOVERLAP.)*/ ?
-						EMassTrafficPeriodLanesAction::Open :
-						EMassTrafficPeriodLanesAction::HardClose;
+						EMassTrafficControllerLanesAction::Open :
+						EMassTrafficControllerLanesAction::HardClose;
 
 					
 					IntersectionFragment.ApplyLanesActionToCurrentPeriod(

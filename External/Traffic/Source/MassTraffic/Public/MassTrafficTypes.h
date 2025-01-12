@@ -8,14 +8,17 @@
 
 #include "HierarchicalHashGrid2D.h"
 #include "MassEntityView.h"
+#include "MassTrafficSigns.h"
 
 #include "Containers/Set.h"
 
 #include "MassTrafficTypes.generated.h"
 
 #define MASSTRAFFIC_NUM_INLINE_VEHICLE_NEXT_LANES 2 // ..determined to be ~1.4 on average for this game
+#define MASSTRAFFIC_NUM_INLINE_VEHICLE_PREV_LANES 2 // Should be similar to merging lanes.
 #define MASSTRAFFIC_NUM_INLINE_VEHICLE_MERGING_LANES 2 // ..determined to be ~1.3 on average for this game
 #define MASSTRAFFIC_NUM_INLINE_VEHICLE_SPLITTING_LANES 2 // ..determined to be ~1.7 on average for this game
+#define MASSTRAFFIC_NUM_INLINE_VEHICLE_CONFLICT_LANES 16 // There could potentially be many more conflict lanes.  We'll need to keep an eye on this.
 #define MASSTRAFFIC_NUM_INLINE_VEHICLE_CROSSWALK_LANES 2 // Each lane should only run through (at most) one crosswalk (which will have just 2 lanes).
 
 
@@ -422,7 +425,9 @@ struct MASSTRAFFIC_API FZoneGraphTrafficLaneConstData
 	FZoneGraphTrafficLaneConstData() :
 		bIsIntersectionLane(false),
 		bIsTrafficLightControlled(false),
-		bIsLaneChangingLane(false)
+		bIsTrunkLane(false),
+		bIsLaneChangingLane(false),
+		TrafficControllerSignType(EMassTrafficControllerSignType::None)
 	{
 	}
 
@@ -448,6 +453,11 @@ struct MASSTRAFFIC_API FZoneGraphTrafficLaneConstData
 	 * @see UMassTrafficSettings::LaneChangingLaneFilter
 	 */
 	bool bIsLaneChangingLane : 1;
+
+	/**
+	 * Specifies sign type that controls this lane, when bIsTrafficLightControlled is false.
+	 */
+	EMassTrafficControllerSignType TrafficControllerSignType;
 	
 	/** Lane speed limit in cm/s */
 	FFloat16 SpeedLimit = 0.0f;
@@ -477,6 +487,12 @@ struct MASSTRAFFIC_API FZoneGraphTrafficLaneData
 	bool bHasTransverseLaneAdjacency : 1;
 	bool bIsDownstreamFromIntersection : 1;
 	bool bIsStoppedVehicleInPreviousLaneOverlappingThisLane : 1; // (See all CROSSWALKOVERLAP.)
+	
+	// Note:  Currently only sign-controlled intersections will set this flag.
+	bool bHasPedestriansWaitingToCross : 1 = false;
+
+	// Note:  Currently only sign-controlled intersections will set this flag.
+	bool bHasPedestriansInDownstreamCrosswalkLanes : 1 = false;
 
 	UE::MassTraffic::TFraction<true, uint8> FractionUntilClosed;
 
@@ -499,12 +515,28 @@ struct MASSTRAFFIC_API FZoneGraphTrafficLaneData
 	uint8 NumVehiclesOnLane = 0;
 	uint8 NumVehiclesApproachingLane = 0; 
 	uint8 NumReservedVehiclesOnLane = 0; // See all CANTSTOPLANEEXIT.
+
+	TOptional<FMassEntityHandle> LeadVehicleEntityHandle;
+	TOptional<float> LeadVehicleDistanceAlongLane;
+	TOptional<float> LeadVehicleAccelerationEstimate;
+	TOptional<float> LeadVehicleSpeed;
+	TOptional<bool> bLeadVehicleIsYielding;
+	TOptional<float> LeadVehicleRadius;
+	TOptional<FZoneGraphTrafficLaneData*> LeadVehicleNextLane;
+	TOptional<FZoneGraphTrafficLaneData*> LeadVehicleStopSignIntersectionLane;
+	TOptional<float> LeadVehicleRandomFraction;
+	TOptional<float> LeadVehicleIsNearStopLineAtIntersection;
+	TOptional<float> LeadVehicleRemainingStopSignRestTime;
+	
+	FMassEntityHandle IntersectionEntityHandle;
 	
 	FZoneGraphTrafficLaneData* LeftLane = nullptr; // ..non-merging non-splitting same-direction lane on left 
 	FZoneGraphTrafficLaneData* RightLane = nullptr; // ..non-merging non-splitting same-direction lane on right
 	TArray<FZoneGraphTrafficLaneData*, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_VEHICLE_NEXT_LANES>> NextLanes;
+	TArray<FZoneGraphTrafficLaneData*, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_VEHICLE_PREV_LANES>> PrevLanes;
 	TArray<FZoneGraphTrafficLaneData*, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_VEHICLE_MERGING_LANES>> MergingLanes;
 	TArray<FZoneGraphTrafficLaneData*, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_VEHICLE_SPLITTING_LANES>> SplittingLanes;
+	TArray<FZoneGraphTrafficLaneData*, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_VEHICLE_CONFLICT_LANES>> ConflictLanes;
 
 	// Lanes which are not drivable will not have an associated FZoneGraphTrafficLaneData.
 	// So, we just store FZoneGraphLaneHandles for crosswalk lanes with "right of way" over this lane,
@@ -523,6 +555,9 @@ struct MASSTRAFFIC_API FZoneGraphTrafficLaneData
 	/** Center location (average between start and end lane location) and radius for distance testing */
 	FVector CenterLocation;
 	FFloat16 Radius;
+
+	bool HasStopSignOrYieldSign() const;
+	bool HasTrafficSignThatRequiresStop() const;
 	
 	/** Clears all references to vehicles on this lane and reset all vehicle counters */  
 	void ClearVehicles();

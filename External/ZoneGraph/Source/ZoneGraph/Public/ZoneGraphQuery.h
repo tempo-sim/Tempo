@@ -75,5 +75,27 @@ ZONEGRAPH_API bool FindOverlappingLanes(const FZoneGraphStorage& Storage, const 
 	
 /**  Find sections of lanes fully overlapping (including lane width) in ZoneGraph Storage. */
 ZONEGRAPH_API bool FindLaneOverlaps(const FZoneGraphStorage& Storage, const FVector& Center, const float Radius, const FZoneGraphTagFilter TagFilter, TArray<FZoneGraphLaneSection>& OutLaneSections);
+	
+/**  Find the first intersection between two lanes in terms of distance along QueryLane in ZoneGraph Storage. */
+ZONEGRAPH_API bool FindFirstIntersectionBetweenLanes(
+	const FZoneGraphStorage& Storage,
+	const FZoneGraphLaneHandle& QueryLaneHandle,
+	const FZoneGraphLaneHandle& OtherLaneHandle,
+	const float LateralOffsetFromCenterOfOtherLane,
+	float& OutDistanceAlongQueryLane,
+	int32* OutQueryLaneIntersectionSegmentIndex = nullptr,
+	float* OutNormalizedDistanceAlongQueryLaneIntersectionSegment = nullptr,
+	float Tolerance = KINDA_SMALL_NUMBER);
+	
+/**  Find the first intersection between two lanes in terms of distance along QueryLane in ZoneGraph Storage. */
+ZONEGRAPH_API bool FindFirstIntersectionBetweenLanes(
+	const FZoneGraphStorage& Storage,
+	const uint32 QueryLaneIndex,
+	const uint32 OtherLaneIndex,
+	const float LateralOffsetFromCenterOfOtherLane,
+	float& OutDistanceAlongQueryLane,
+	int32* OutQueryLaneIntersectionSegmentIndex = nullptr,
+	float* OutNormalizedDistanceAlongQueryLaneIntersectionSegment = nullptr,
+	float Tolerance = KINDA_SMALL_NUMBER);
 
 } // UE::ZoneGraph::Query

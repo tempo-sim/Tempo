@@ -5,16 +5,16 @@
 #include "MassTrafficProcessorBase.h"
 #include "MassRepresentationFragments.h"
 #include "MassProcessor.h"
-#include "MassTrafficUpdateIntersectionsProcessor.generated.h"
+#include "MassTrafficLightUpdateIntersectionsProcessor.generated.h"
 
 
 UCLASS()
-class MASSTRAFFIC_API UMassTrafficUpdateIntersectionsProcessor : public UMassTrafficProcessorBase
+class MASSTRAFFIC_API UMassTrafficLightUpdateIntersectionsProcessor : public UMassTrafficProcessorBase
 {
 	GENERATED_BODY()
 
 protected:
-	UMassTrafficUpdateIntersectionsProcessor();
+	UMassTrafficLightUpdateIntersectionsProcessor();
 	virtual void ConfigureQueries() override;
 	virtual void Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context) override;
 

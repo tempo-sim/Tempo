@@ -7,17 +7,19 @@
 
 #include "MassCommonFragments.h"
 #include "MassEntityView.h"
+#include "MassTrafficLaneChange.h"
 #include "MassZoneGraphNavigationFragments.h"
 
 // Theoretically, it's possible for more than one small vehicle to get close enough to the intersection to ready it.
-// So, we'll allow a max of 2 vehicles to ready intersection lanes.
+// And, perhaps 2 small vehicles are yielding in the crosswalk, waiting to merge, with another vehicle behind them,
+// ready to use the intersection lane.
+// So, we'll allow a max of 3 vehicles to ready intersection lanes.
 // However, in practice, NumVehiclesReadyToUseIntersectionLane never goes above one with the current configuration
 // of everything.
-int8 FZoneGraphTrafficLaneData::MaxAllowedVehiclesReadyToUseIntersectionLane = 2;	// (See all READYLANE.)
+int8 FZoneGraphTrafficLaneData::MaxAllowedVehiclesReadyToUseIntersectionLane = 3;	// (See all READYLANE.)
 
-// Allow up to 2 vehicles to yield on lanes.
-// Theoretically, there might be more than one vehicle yielding on a lane, if the vehicles are small enough.
-int8 FZoneGraphTrafficLaneData::MaxAllowedYieldingVehiclesOnLane = 2;
+// Allow up to 10 vehicles to yield on lanes.
+int8 FZoneGraphTrafficLaneData::MaxAllowedYieldingVehiclesOnLane = 10;
 
 FZoneGraphTrafficLaneData::FZoneGraphTrafficLaneData():
 	bIsOpen(true),
@@ -30,6 +32,22 @@ FZoneGraphTrafficLaneData::FZoneGraphTrafficLaneData():
 	bIsStoppedVehicleInPreviousLaneOverlappingThisLane(false),
 	MaxDensity(1.0f)
 {
+}
+
+bool FZoneGraphTrafficLaneData::HasStopSignOrYieldSign() const
+{
+	return !ConstData.bIsTrafficLightControlled
+			&& ConstData.bIsIntersectionLane
+			&& (ConstData.TrafficControllerSignType == EMassTrafficControllerSignType::StopSign
+			|| ConstData.TrafficControllerSignType == EMassTrafficControllerSignType::YieldSign);
+}
+
+bool FZoneGraphTrafficLaneData::HasTrafficSignThatRequiresStop() const
+{
+	return !ConstData.bIsTrafficLightControlled
+			&& ConstData.bIsIntersectionLane
+			&& (ConstData.TrafficControllerSignType == EMassTrafficControllerSignType::StopSign
+			|| (ConstData.TrafficControllerSignType == EMassTrafficControllerSignType::YieldSign && (bHasPedestriansWaitingToCross || bHasPedestriansInDownstreamCrosswalkLanes)));
 }
 
 void FZoneGraphTrafficLaneData::ClearVehicles()

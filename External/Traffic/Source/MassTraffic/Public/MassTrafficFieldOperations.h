@@ -13,7 +13,7 @@
 
 typedef TFunction< bool(FZoneGraphTrafficLaneData& TrafficLaneData) > FTrafficLaneExecuteFunction;
 typedef TFunction< bool(FZoneGraphTrafficLaneData& TrafficLaneData, const FMassEntityView& VehicleEntityView, struct FMassTrafficNextVehicleFragment& NextVehicleFragment, struct FMassZoneGraphLaneLocationFragment& LaneLocationFragment) > FTrafficVehicleOnLaneExecuteFunction;
-typedef TFunction< bool(const FMassEntityHandle TrafficIntersectionEntity, FMassTrafficIntersectionFragment& TrafficIntersectionFragment) > FTrafficIntersectionExecuteFunction;
+typedef TFunction< bool(const FMassEntityHandle TrafficIntersectionEntity, FMassTrafficLightIntersectionFragment& TrafficIntersectionFragment) > FTrafficIntersectionExecuteFunction;
 
 struct MASSTRAFFIC_API FMassTrafficFieldOperationContextBase
 {
