@@ -37,6 +37,7 @@ public class TempoCore : TempoModuleRules
 			new string[]
 			{
 				// Unreal
+				"AssetRegistry",
 				"CoreUObject",
 				"Engine",
 				"Slate",

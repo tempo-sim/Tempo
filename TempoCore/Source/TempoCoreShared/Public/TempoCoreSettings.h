@@ -34,6 +34,9 @@ public:
 	int32 GetMaxEventProcessingTime() const { return MaxEventProcessingTimeMicroSeconds; }
 	int32 GetMaxEventWaitTime() const { return MaxEventWaitTimeNanoSeconds; }
 
+	// Packaging Settings
+	bool GetAssignLevelsToIndividualChunks() const { return bAssignLevelsToIndividualChunks; }
+
 #if WITH_EDITOR
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 #endif
@@ -73,4 +76,9 @@ private:
 	// We will wait as much as this amount of time (in nanoseconds) for an event to arrive each time we check for an event.
 	UPROPERTY(EditAnywhere, Config, Category="Scripting|Advanced", meta=(ClampMin=1, ClampMax=10000, UIMin=1, UIMax=10000))
 	int32 MaxEventWaitTimeNanoSeconds = 1000;
+
+	// If true, each level will be assigned to its own chunk during packaging.
+	// **NOTE** Requires enabling project packaging settings UsePakFile and GenerateChunks.
+	UPROPERTY(EditAnywhere, Config, Category="Packaging")
+	bool bAssignLevelsToIndividualChunks = false;
 };
