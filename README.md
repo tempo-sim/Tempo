@@ -46,8 +46,8 @@ git submodule update --init --recursive
 ```
 
 ### Project Changes
-Tempo requires one change to a vanilla Unreal Engine project to build:
-- Your project's `*.Target.cs` files must use the Tempo UnrealBuildTool toolchain for your platform, as in [TempoSample.Target.cs](https://github.com/tempo-sim/TempoSample/blob/main/Source/TempoSample.Target.cs) and [TempoSampleEditor.Target.cs](https://github.com/tempo-sim/TempoSample/blob/main/Source/TempoSampleEditor.Target.cs).
+The Tempo plugins require one change to a vanilla Unreal Engine project to work properly:
+- Your project's `*.Target.cs` files must use the Tempo UnrealBuildTool toolchain for your platform. See [TempoSample.Target.cs](https://github.com/tempo-sim/TempoSample/blob/main/Source/TempoSample.Target.cs) and [TempoSampleEditor.Target.cs](https://github.com/tempo-sim/TempoSample/blob/main/Source/TempoSampleEditor.Target.cs) for examples.
 
 ### One-Time Setup
 Run the `Setup.sh` script (from the `Tempo` root) once. This script will:
@@ -55,8 +55,9 @@ Run the `Setup.sh` script (from the `Tempo` root) once. This script will:
 - Download third party dependencies
 - Add git hooks to keep both of the above in sync automatically as you check out different Tempo commits
 
-### Build and Run
-Use the included `Scripts/Build.sh` and `Scripts/Run.sh` to build your project and open it in Unreal Editor.
+## Using Tempo
+### Building, Running, and Packaging
+Use `Scripts/Build.sh` to build the project, `Scripts/Run.sh` to run Unreal Editor with the project, and `Scripts/Package.sh` to package the project into a standalone binary.
 
 ### Hello World
 > [!NOTE]
