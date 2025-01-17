@@ -36,7 +36,7 @@ From your project's Plugins directory:<br />
 `git submodule update --init --recursive`
 
 ### Project Changes
-The Tempo plugins require one change to your Unreal Engine project to work properly:
+The Tempo plugins require one change to a vanilla Unreal Engine project to work properly:
 - Your project's `*.Target.cs` files must use the Tempo UnrealBuildTool toolchain for your platform. See [TempoSample.Target.cs](https://github.com/tempo-sim/TempoSample/blob/main/Source/TempoSample.Target.cs) and [TempoSampleEditor.Target.cs](https://github.com/tempo-sim/TempoSample/blob/main/Source/TempoSampleEditor.Target.cs) for examples.
 
 ### First-Time Setup
@@ -49,7 +49,7 @@ Run the `Setup.sh` script (from the `Tempo` root) once. This script will:
 
 ## Using Tempo
 ### Building, Running, and Packaging
-[TempoSample](https://github.com/tempo-sim/TempoSample) includes convenient scripts to build, run (in Unreal Editor), and package an Unreal project using Tempo. We recommend copying the `Scripts` folder to your project and using them.
+Use `Scripts/Build.sh` to build the project, `Scripts/Run.sh` to run Unreal Editor with the project, and `Scripts/Package.sh` to package the project into a standalone binary.
 
 ### Configuring
 Tempo has a number of user-configurable settings. The [TempoSample](https://github.com/tempo-sim/TempoSample) project has our recommended settings. These can be edited through the Unreal Editor project settings and are stored in config files with an "ini" extension. Settings can also be changed in the packaged binary.
