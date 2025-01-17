@@ -34,6 +34,9 @@ public:
 	int32 GetMaxEventProcessingTime() const { return MaxEventProcessingTimeMicroSeconds; }
 	int32 GetMaxEventWaitTime() const { return MaxEventWaitTimeNanoSeconds; }
 
+	// Packaging Settings
+	bool GetAssignLevelsToIndividualChunks() const { return bAssignLevelsToIndividualChunks; }
+
 #if WITH_EDITOR
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 #endif

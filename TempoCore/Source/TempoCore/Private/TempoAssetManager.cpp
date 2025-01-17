@@ -5,6 +5,7 @@
 #include "TempoCoreSettings.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "Engine/MapBuildDataRegistry.h"
 
 #if WITH_EDITOR
 bool IsGameMapPackage(const FName& PackageName)
@@ -23,7 +24,8 @@ bool IsGameMapPackage(const FName& PackageName)
 
     for (const FAssetData& AssetData : AssetsInPackage)
     {
-        if (AssetData.GetClass() && (AssetData.GetClass()->IsChildOf(UWorld::StaticClass())))
+        if (AssetData.GetClass() && (AssetData.GetClass()->IsChildOf(UWorld::StaticClass()) || 
+            AssetData.GetClass()->IsChildOf(UMapBuildDataRegistry::StaticClass())))
         {
             return true;
         }
