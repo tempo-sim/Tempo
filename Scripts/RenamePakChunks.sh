@@ -2,25 +2,6 @@
 
 set -e
 
-SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
-PROJECT_ROOT=$("$SCRIPT_DIR"/FindProjectRoot.sh)
-cd "$PROJECT_ROOT"
-PROJECT_NAME=$(find . -maxdepth 1 -name "*.uproject" -exec basename {} .uproject \;)
-
-PLATFORM=""
-if [[ "$OSTYPE" = "msys" ]]; then
-  PLATFORM="Win64"
-elif [[ "$OSTYPE" = "darwin"* ]]; then
-  PLATFORM="Mac"
-elif [[ "$OSTYPE" = "linux-gnu"* ]]; then
-  PLATFORM="Linux"
-else
-  echo "Unsupported platform"
-  exit 1
-fi
-
-cd "$PROJECT_ROOT/Saved/Cooked/$PLATFORM/$PROJECT_NAME/Metadata/ChunkManifest"
-
 # Extract unique level names from a chunk manifest file
 extract_level_names() {
     local input_file="$1"
@@ -60,9 +41,19 @@ fi
 PACKAGE_PATH=$(realpath "$1")
 METADATA_PATH=$(realpath "$2")
 
+if [ ! -d "$METADATA_PATH/ChunkManifest" ]; then
+  echo "ChunkManifest directory not found. Are chunks enabled in the project?"
+  exit 1
+fi
+
 # PAK_PATH will be in different locations depending on several factors including platform.
 # So just find it. It will be the only directory with pak files. This will quit after the first one it finds.
-PAK_PATH=$(find "$PACKAGE_PATH" -name "*.pak" -print0 -quit | xargs dirname)
+PAK_PATH=$(find "$PACKAGE_PATH" -name "*.pak" -exec dirname {} \; -quit)
+
+if [ ! -d "$PAK_PATH" ]; then
+  echo "Could not find pak path"
+  exit 1
+fi
 
 # We're interested pak chunk manifest files, which look like pak12345.txt
 MANIFEST_FILES=$(find "$METADATA_PATH/ChunkManifest" -regex ".*pakchunk[0-9]*.txt")
@@ -79,8 +70,5 @@ for MANIFEST_FILE in $MANIFEST_FILES; do
     fi
     # Rename "Level" chunks by their level names
     find "$PAK_PATH" -name "*pakchunk$CHUNK_ID*" -exec bash -c 'mv "$1" "${1/pakchunk$2/pakchunk-$3}"' _ {} "$CHUNK_ID" "$LEVELS" \;
-  else
-     # Rename "Core" chunks as well, to more easily identify them
-    find "$PAK_PATH" -name "*pakchunk$CHUNK_ID*" -exec bash -c 'mv "$1" "${1/pakchunk$2/pakchunk-Core-$2}"' _ {} "$CHUNK_ID" \;
   fi
 done
