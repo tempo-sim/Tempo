@@ -61,6 +61,9 @@ Unreal projects write logs while running. These are a great starting point for d
 When running in Unreal Editor you can see the logs in the [Output Log](https://dev.epicgames.com/documentation/en-us/unreal-engine/logging-in-unreal-engine) window.
 The packaged binary will write logs to `<packaged_game_root>/ProjectName/Saved/Logs`
 
+### Continuous Integration
+If you would like to set up a GitHub actions pipeline to build, package, or release your Tempo Unreal project you should use the `build_and_package` reusable workflow in `.github/workflows`. The workflow has a number of configurable inputs, but for a typical Unreal Tempo project the defaults should work fine. [TempoSample](https://github.com/tempo-sim/TempoSample)'s `tempo_sample_build_and_package` workflow is a good example.
+
 ## Giving Back
 Want to contribute to Tempo? Feel free to send us an issue or open a pull request.
 

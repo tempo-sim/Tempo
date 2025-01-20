@@ -1,0 +1,36 @@
+# ======
+# Build and Package Workflow for the Tempo plugins.
+# This workflow uses the generic Build and Package workflow in the same directory to build and package
+# the Tempo plugins within the TempoSample host project.
+# ======
+
+name: Build and Package the Tempo Plugins Using the TempoSample Project
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build_and_package:
+    name: Build and Package Tempo Plugins
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: ./.github/workflows/build_and_package.yml
+    strategy:
+      matrix:
+        platform: [ ubuntu-22.04 ]
+        unreal_version: [ 5.4.4 ]
+    with:
+      platform: ${{ matrix.platform }}
+      unreal_version: ${{ matrix.unreal_version }}
+      project_root: TempoSample
+      tempo_root: TempoSample/Plugins/Tempo
+      host_project: tempo-sim/TempoSample
+      checkout_path: TempoSample/Plugins/Tempo
+      cache_repo_root: TempoSample/Plugins/Tempo
+      cache_branch: main
+    secrets: inherit
