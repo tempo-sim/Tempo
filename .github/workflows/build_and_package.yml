@@ -101,8 +101,6 @@ jobs:
     concurrency:
       group: ${{ github.workflow }}-${{ github.ref }}
       cancel-in-progress: true
-    outputs:
-      artifact_id: ${{ steps.upload_artifact.outputs.artifact-id }}
     steps:
     - name: Validate Inputs
       run: |
