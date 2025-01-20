@@ -58,8 +58,9 @@ fi
 
 # Copy cook metadata (including chunk manifests) to the package directory
 cp -r "$PROJECT_ROOT/Saved/Cooked/$TARGET_PLATFORM/$PROJECT_NAME/Metadata" "$PROJECT_ROOT/Packaged"
+cp -r "$PROJECT_ROOT/Saved/Cooked/$TARGET_PLATFORM/$PROJECT_NAME/AssetRegistry.bin" "$PROJECT_ROOT/Packaged"
 
-# Rename pak chunks by the levels they contain (unless told not to)
-if [[ $* != *skippakchunkrename* ]]; then
+# Rename pak chunks by the levels they contain (unless told not to or there are no chunks)
+if [[ $* != *skippakchunkrename* && -d "$PROJECT_ROOT/Packaged/Metadata/ChunkManifest" ]]; then
   eval "$SCRIPT_DIR"/RenamePakChunks.sh "$PROJECT_ROOT/Packaged" "$PROJECT_ROOT/Packaged/Metadata"
 fi

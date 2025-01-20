@@ -99,6 +99,9 @@ If you would like to set up a GitHub actions pipeline to build, package, run, an
 ## Getting Help
 Stuck on something? Feel free to send us an [issue](https://github.com/tempo-sim/Tempo/issues) or ask a question on our [Discord](https://discord.gg/bKa2hnGYnw).
 
+### Continuous Integration
+If you would like to set up a GitHub actions pipeline to build, package, or release your Tempo Unreal project you should use the `build_and_package` reusable workflow in `.github/workflows`. The workflow has a number of configurable inputs, but for a typical Unreal Tempo project the defaults should work fine. [TempoSample](https://github.com/tempo-sim/TempoSample)'s `tempo_sample_build_and_package` workflow is a good example.
+
 ## Giving Back
 Want to contribute to Tempo? We'll be happy to review your PR.
 
