@@ -174,14 +174,14 @@ jobs:
       uses: actions/cache/restore@v4
       with:
         path: |
-          ${{ inputs.project_root }}/**/*.pb.cc
-          ${{ inputs.project_root }}/**/*.pb.h
-          ${{ inputs.project_root }}/Binaries/**
-          ${{ inputs.project_root }}/Intermediate/**
-          ${{ inputs.project_root }}/DerivedDataCache/**
-          ${{ inputs.project_root }}/Saved/**
-          ${{ inputs.project_root }}/Plugins/**/Intermediate/**
-          ${{ inputs.project_root }}/Plugins/**/Binaries/**
+          ${{ github.workspace }}/${{ inputs.project_root }}/**/*.pb.cc
+          ${{ github.workspace }}/${{ inputs.project_root }}/**/*.pb.h
+          ${{ github.workspace }}/${{ inputs.project_root }}/Binaries/**
+          ${{ github.workspace }}/${{ inputs.project_root }}/Intermediate/**
+          ${{ github.workspace }}/${{ inputs.project_root }}/DerivedDataCache/**
+          ${{ github.workspace }}/${{ inputs.project_root }}/Saved/**
+          ${{ github.workspace }}/${{ inputs.project_root }}/Plugins/**/Intermediate/**
+          ${{ github.workspace }}/${{ inputs.project_root }}/Plugins/**/Binaries/**
           .engine-ddc-cache/**
         key: ${{ steps.repo_lowercase.outputs.REPO_LOWERCASE }}-build-${{ env.UNREAL_VERSION }}-${{ steps.common_ancestor.outputs.COMMON_ANCESTOR }}
     - name: Restore Engine Mods Cache (if clean not specified)
