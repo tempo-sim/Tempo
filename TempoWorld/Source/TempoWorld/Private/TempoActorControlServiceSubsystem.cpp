@@ -35,10 +35,16 @@ using SetEnumPropertyRequest = TempoWorld::SetEnumPropertyRequest;
 using SetVectorPropertyRequest = TempoWorld::SetVectorPropertyRequest;
 using SetRotatorPropertyRequest = TempoWorld::SetRotatorPropertyRequest;
 using SetColorPropertyRequest = TempoWorld::SetColorPropertyRequest;
+using SetClassPropertyRequest = TempoWorld::SetClassPropertyRequest;
+using SetActorPropertyRequest = TempoWorld::SetActorPropertyRequest;
+using SetComponentPropertyRequest = TempoWorld::SetComponentPropertyRequest;
 using SetBoolArrayPropertyRequest = TempoWorld::SetBoolArrayPropertyRequest;
 using SetStringArrayPropertyRequest = TempoWorld::SetStringArrayPropertyRequest;
 using SetIntArrayPropertyRequest = TempoWorld::SetIntArrayPropertyRequest;
 using SetFloatArrayPropertyRequest = TempoWorld::SetFloatArrayPropertyRequest;
+using SetClassArrayPropertyRequest = TempoWorld::SetClassArrayPropertyRequest;
+using SetActorArrayPropertyRequest = TempoWorld::SetActorArrayPropertyRequest;
+using SetComponentArrayPropertyRequest = TempoWorld::SetComponentArrayPropertyRequest;
 using CallFunctionRequest = TempoWorld::CallFunctionRequest;
 
 FTempoActorControlServiceActivated UTempoActorControlServiceSubsystem::TempoActorControlServiceActivated;
@@ -93,10 +99,16 @@ void UTempoActorControlServiceSubsystem::RegisterScriptingServices(FTempoScripti
 		SimpleRequestHandler(&ActorControlAsyncService::RequestSetVectorProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetVectorPropertyRequest>),
 		SimpleRequestHandler(&ActorControlAsyncService::RequestSetRotatorProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetRotatorPropertyRequest>),
 		SimpleRequestHandler(&ActorControlAsyncService::RequestSetColorProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetColorPropertyRequest>),
+		SimpleRequestHandler(&ActorControlAsyncService::RequestSetClassProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetClassPropertyRequest>),
+		SimpleRequestHandler(&ActorControlAsyncService::RequestSetActorProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetActorPropertyRequest>),
+		SimpleRequestHandler(&ActorControlAsyncService::RequestSetComponentProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetComponentPropertyRequest>),
 		SimpleRequestHandler(&ActorControlAsyncService::RequestSetBoolArrayProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetBoolArrayPropertyRequest>),
 		SimpleRequestHandler(&ActorControlAsyncService::RequestSetStringArrayProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetStringArrayPropertyRequest>),
 		SimpleRequestHandler(&ActorControlAsyncService::RequestSetIntArrayProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetIntArrayPropertyRequest>),
 		SimpleRequestHandler(&ActorControlAsyncService::RequestSetFloatArrayProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetFloatArrayPropertyRequest>),
+		SimpleRequestHandler(&ActorControlAsyncService::RequestSetClassArrayProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetClassArrayPropertyRequest>),
+		SimpleRequestHandler(&ActorControlAsyncService::RequestSetActorArrayProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetActorArrayPropertyRequest>),
+		SimpleRequestHandler(&ActorControlAsyncService::RequestSetComponentArrayProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetComponentArrayPropertyRequest>),
 		SimpleRequestHandler(&ActorControlAsyncService::RequestCallFunction, &UTempoActorControlServiceSubsystem::CallObjectFunction)
 	);
 }
@@ -563,6 +575,39 @@ void GetObjectProperties(const UObject* Object, GetPropertiesResponse& Response)
 				*Value = FString::SanitizeFloat(ValueDouble);
 			}
 		}
+		else if (const FObjectProperty* ObjectProperty = CastField<FObjectProperty>(Property))
+		{
+			FString InnerType;
+			const FString OuterType =  ObjectProperty->GetCPPType(&InnerType, 0);
+			if (InnerType.IsEmpty())
+			{
+				Type = OuterType;
+			}
+			else
+			{
+				Type = FString::Printf(TEXT("%s<%s>"), *OuterType, *InnerType);
+			}
+			if (Value)
+			{
+				TObjectPtr<UObject> ValueObject;
+				ObjectProperty->GetValue_InContainer(Container, &ValueObject);
+				if (ValueObject)
+				{
+					if (AActor* Actor = Cast<AActor>(ValueObject.Get()))
+					{
+						*Value = Actor->GetActorNameOrLabel();
+					}
+					else
+					{
+						*Value = ValueObject->GetName();
+					}
+				}
+				else
+				{
+					*Value = TEXT("null");
+				}
+			}
+		}
 		else if (const FStructProperty* StructProperty = CastField<FStructProperty>(Property))
 		{
 			if (StructProperty->Struct->GetStructCPPName() == TEXT("FVector"))
@@ -817,6 +862,13 @@ grpc::Status SetSinglePropertyValue<FByteProperty, FString>(void* ValuePtr, FByt
 		return grpc::Status(grpc::INVALID_ARGUMENT, "Invalid enum value");
 	}
 	Property->SetPropertyValue(ValuePtr, PropertyEnum->GetValueByIndex(Value));
+	return grpc::Status_OK;
+}
+
+template <>
+grpc::Status SetSinglePropertyValue<FObjectProperty, UObject*>(void* ValuePtr, FObjectProperty* Property, UObject* const& ValueObj)
+{
+	Property->SetObjectPropertyValue(ValuePtr, ValueObj);
 	return grpc::Status_OK;
 }
 
@@ -1099,6 +1151,54 @@ grpc::Status SetPropertyImpl<SetColorPropertyRequest>(const UWorld* World, const
 }
 
 template<>
+grpc::Status SetPropertyImpl<SetClassPropertyRequest>(const UWorld* World, const SetClassPropertyRequest& Request)
+{
+	const FString ClassName(UTF8_TO_TCHAR(Request.value().c_str()));
+	UClass* Class = GetSubClassWithName<UObject>(ClassName);
+	if (!Class)
+	{
+		return grpc::Status(grpc::NOT_FOUND, "Did not find class with name " + std::string(TCHAR_TO_UTF8(*ClassName)));
+	}
+	return SetSinglePropertyImpl<FObjectProperty>(World, Request, Class);
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetActorPropertyRequest>(const UWorld* World, const SetActorPropertyRequest& Request)
+{
+	const FString ActorName(UTF8_TO_TCHAR(Request.value().c_str()));
+	AActor* Actor = GetActorWithName(World, ActorName, true);
+	if (!Actor)
+	{
+		return grpc::Status(grpc::NOT_FOUND, "Did not find actor with name " + std::string(TCHAR_TO_UTF8(*ActorName)));
+	}
+	return SetSinglePropertyImpl<FObjectProperty>(World, Request, Actor);
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetComponentPropertyRequest>(const UWorld* World, const SetComponentPropertyRequest& Request)
+{
+	const FString FullName(UTF8_TO_TCHAR(Request.value().c_str()));
+	FString ActorName;
+	FString ComponentName;
+	FullName.Split(TEXT(":"), &ActorName, &ComponentName);
+	if (ActorName.IsEmpty() || ComponentName.IsEmpty())
+	{
+		return grpc::Status(grpc::FAILED_PRECONDITION, "Value must be specified as ActorName:ComponentName");
+	}
+	const AActor* Actor = GetActorWithName(World, ActorName, true);
+	if (!Actor)
+	{
+		return grpc::Status(grpc::NOT_FOUND, "Did not find actor with name " + std::string(TCHAR_TO_UTF8(*ActorName)));
+	}
+	UActorComponent* Component = GetComponentWithName(Actor, ComponentName);
+	if (!Component)
+	{
+		return grpc::Status(grpc::NOT_FOUND, "Did not find component with name " + std::string(TCHAR_TO_UTF8(*ComponentName)));
+	}
+	return SetSinglePropertyImpl<FObjectProperty>(World, Request, Component);
+}
+
+template<>
 grpc::Status SetPropertyImpl<SetBoolArrayPropertyRequest>(const UWorld* World, const SetBoolArrayPropertyRequest& Request)
 {
 	TArray<bool> Array;
@@ -1152,6 +1252,69 @@ grpc::Status SetPropertyImpl<SetFloatArrayPropertyRequest>(const UWorld* World, 
 		return StatusFloat;
 	}
 	return SetArrayPropertyImpl<FFloatProperty>(World, Request, FloatArray);
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetClassArrayPropertyRequest>(const UWorld* World, const SetClassArrayPropertyRequest& Request)
+{
+	TArray<UClass*> ClassArray;
+	for (const std::string& Value : Request.values())
+	{
+		const FString ClassName(UTF8_TO_TCHAR(Value.c_str()));
+		UClass* Class = GetSubClassWithName<UObject>(ClassName);
+		if (!Class)
+		{
+			return grpc::Status(grpc::NOT_FOUND, "Did not find class with name " + std::string(TCHAR_TO_UTF8(*ClassName)));
+		}
+		ClassArray.Add(Class);
+	}
+	return SetArrayPropertyImpl<FObjectProperty>(World, Request, ClassArray);
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetActorArrayPropertyRequest>(const UWorld* World, const SetActorArrayPropertyRequest& Request)
+{
+	TArray<AActor*> ActorArray;
+	for (const std::string& Value : Request.values())
+	{
+		const FString ActorName(UTF8_TO_TCHAR(Value.c_str()));
+		AActor* Actor = GetActorWithName(World, ActorName, true);
+		if (!Actor)
+		{
+			return grpc::Status(grpc::NOT_FOUND, "Did not find actor with name " + std::string(TCHAR_TO_UTF8(*ActorName)));
+		}
+		ActorArray.Add(Actor);
+	}
+	return SetArrayPropertyImpl<FObjectProperty>(World, Request, ActorArray);
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetComponentArrayPropertyRequest>(const UWorld* World, const SetComponentArrayPropertyRequest& Request)
+{
+	TArray<UActorComponent*> ComponentArray;
+	for (const std::string& Value : Request.values())
+	{
+		const FString FullName(UTF8_TO_TCHAR(Value.c_str()));
+		FString ActorName;
+		FString ComponentName;
+		FullName.Split(TEXT(":"), &ActorName, &ComponentName);
+		if (ActorName.IsEmpty() || ComponentName.IsEmpty())
+		{
+			return grpc::Status(grpc::FAILED_PRECONDITION, "Value must be specified as ActorName:ComponentName");
+		}
+		const AActor* Actor = GetActorWithName(World, ActorName, true);
+		if (!Actor)
+		{
+			return grpc::Status(grpc::NOT_FOUND, "Did not find actor with name " + std::string(TCHAR_TO_UTF8(*ActorName)));
+		}
+		UActorComponent* Component = GetComponentWithName(Actor, ComponentName);
+		if (!Component)
+		{
+			return grpc::Status(grpc::NOT_FOUND, "Did not find component with name " + std::string(TCHAR_TO_UTF8(*ComponentName)));
+		}
+		ComponentArray.Add(Component);
+	}
+	return SetArrayPropertyImpl<FObjectProperty>(World, Request, ComponentArray);
 }
 
 template <typename RequestType>
