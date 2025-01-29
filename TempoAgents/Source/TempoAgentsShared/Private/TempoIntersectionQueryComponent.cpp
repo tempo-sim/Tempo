@@ -202,6 +202,12 @@ bool UTempoIntersectionQueryComponent::ShouldFilterLaneConnection(const AActor* 
 		auto& LaneConnectionTuple = ZoneGraphTagFilterMap[ZoneGraphTagFilter];
 		const TArray<FTempoLaneConnectionInfo>& TagFilteredSourceLaneConnectionInfos = LaneConnectionTuple.Get<0>();
 
+		// If our source "lane tag group" doesn't have any potential connections, we filter this candidate connection.
+		if (TagFilteredSourceLaneConnectionInfos.IsEmpty())
+		{
+			return true;
+		}
+
 		int32 MinFilteredLaneIndex = -1;
 		if (!TryGetMinLaneIndexInLaneConnections(TagFilteredSourceLaneConnectionInfos, MinFilteredLaneIndex))
 		{
