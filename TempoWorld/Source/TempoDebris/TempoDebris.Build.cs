@@ -16,11 +16,14 @@ public class TempoDebris : ModuleRules
         PrivateDependencyModuleNames.AddRange(
             new string[]
             {
+                // Unreal
                 "CoreUObject",
                 "Engine",
+                "Foliage",
                 "PCG",
                 "Slate",
                 "SlateCore",
+                // Tempo
                 "TempoCoreShared",
             }
         );
