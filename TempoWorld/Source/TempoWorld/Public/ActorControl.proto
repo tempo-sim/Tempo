@@ -188,13 +188,6 @@ message SetClassPropertyRequest {
   string value = 4;
 }
 
-message SetAssetPropertyRequest {
-  string actor = 1;
-  string component = 2;
-  string property = 3;
-  string value = 4;
-}
-
 message SetActorPropertyRequest {
   string actor = 1;
   string component = 2;
@@ -242,6 +235,27 @@ message SetFloatArrayPropertyRequest {
   string component = 2;
   string property = 3;
   repeated float values = 4;
+}
+
+message SetClassArrayPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  repeated string values = 4;
+}
+
+message SetActorArrayPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  repeated string values = 4;
+}
+
+message SetComponentArrayPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  repeated string values = 4;
 }
 
 message CallFunctionRequest {
@@ -295,8 +309,6 @@ service ActorControlService {
 
     rpc SetClassProperty(SetClassPropertyRequest) returns (TempoScripting.Empty);
 
-    rpc SetAssetProperty(SetAssetPropertyRequest) returns (TempoScripting.Empty);
-
     rpc SetActorProperty(SetActorPropertyRequest) returns (TempoScripting.Empty);
 
     rpc SetComponentProperty(SetComponentPropertyRequest) returns (TempoScripting.Empty);
@@ -310,6 +322,12 @@ service ActorControlService {
     rpc SetIntArrayProperty(SetIntArrayPropertyRequest) returns (TempoScripting.Empty);
 
     rpc SetFloatArrayProperty(SetFloatArrayPropertyRequest) returns (TempoScripting.Empty);
+
+    rpc SetClassArrayProperty(SetClassArrayPropertyRequest) returns (TempoScripting.Empty);
+  
+    rpc SetActorArrayProperty(SetActorArrayPropertyRequest) returns (TempoScripting.Empty);
+  
+    rpc SetComponentArrayProperty(SetComponentArrayPropertyRequest) returns (TempoScripting.Empty);
 
     rpc CallFunction(CallFunctionRequest) returns (TempoScripting.Empty);
 }

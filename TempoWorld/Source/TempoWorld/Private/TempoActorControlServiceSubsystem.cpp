@@ -43,7 +43,6 @@ using SetVectorPropertyRequest = TempoWorld::SetVectorPropertyRequest;
 using SetRotatorPropertyRequest = TempoWorld::SetRotatorPropertyRequest;
 using SetColorPropertyRequest = TempoWorld::SetColorPropertyRequest;
 using SetClassPropertyRequest = TempoWorld::SetClassPropertyRequest;
-using SetAssetPropertyRequest = TempoWorld::SetAssetPropertyRequest;
 using SetActorPropertyRequest = TempoWorld::SetActorPropertyRequest;
 using SetComponentPropertyRequest = TempoWorld::SetComponentPropertyRequest;
 using SetBoolArrayPropertyRequest = TempoWorld::SetBoolArrayPropertyRequest;
@@ -51,6 +50,9 @@ using SetStringArrayPropertyRequest = TempoWorld::SetStringArrayPropertyRequest;
 using SetEnumArrayPropertyRequest = TempoWorld::SetEnumArrayPropertyRequest;
 using SetIntArrayPropertyRequest = TempoWorld::SetIntArrayPropertyRequest;
 using SetFloatArrayPropertyRequest = TempoWorld::SetFloatArrayPropertyRequest;
+using SetClassArrayPropertyRequest = TempoWorld::SetClassArrayPropertyRequest;
+using SetActorArrayPropertyRequest = TempoWorld::SetActorArrayPropertyRequest;
+using SetComponentArrayPropertyRequest = TempoWorld::SetComponentArrayPropertyRequest;
 using CallFunctionRequest = TempoWorld::CallFunctionRequest;
 
 FTempoActorControlServiceActivated UTempoActorControlServiceSubsystem::TempoActorControlServiceActivated;
@@ -108,7 +110,6 @@ void UTempoActorControlServiceSubsystem::RegisterScriptingServices(FTempoScripti
 		SimpleRequestHandler(&ActorControlAsyncService::RequestSetRotatorProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetRotatorPropertyRequest>),
 		SimpleRequestHandler(&ActorControlAsyncService::RequestSetColorProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetColorPropertyRequest>),
 		SimpleRequestHandler(&ActorControlAsyncService::RequestSetClassProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetClassPropertyRequest>),
-		SimpleRequestHandler(&ActorControlAsyncService::RequestSetAssetProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetAssetPropertyRequest>),
 		SimpleRequestHandler(&ActorControlAsyncService::RequestSetActorProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetActorPropertyRequest>),
 		SimpleRequestHandler(&ActorControlAsyncService::RequestSetComponentProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetComponentPropertyRequest>),
 		SimpleRequestHandler(&ActorControlAsyncService::RequestSetBoolArrayProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetBoolArrayPropertyRequest>),
@@ -116,6 +117,9 @@ void UTempoActorControlServiceSubsystem::RegisterScriptingServices(FTempoScripti
 		SimpleRequestHandler(&ActorControlAsyncService::RequestSetEnumArrayProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetEnumArrayPropertyRequest>),
 		SimpleRequestHandler(&ActorControlAsyncService::RequestSetIntArrayProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetIntArrayPropertyRequest>),
 		SimpleRequestHandler(&ActorControlAsyncService::RequestSetFloatArrayProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetFloatArrayPropertyRequest>),
+		SimpleRequestHandler(&ActorControlAsyncService::RequestSetClassArrayProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetClassArrayPropertyRequest>),
+		SimpleRequestHandler(&ActorControlAsyncService::RequestSetActorArrayProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetActorArrayPropertyRequest>),
+		SimpleRequestHandler(&ActorControlAsyncService::RequestSetComponentArrayProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetComponentArrayPropertyRequest>),
 		SimpleRequestHandler(&ActorControlAsyncService::RequestCallFunction, &UTempoActorControlServiceSubsystem::CallObjectFunction)
 	);
 }
@@ -736,43 +740,6 @@ void GetObjectProperties(const UObject* Object, GetPropertiesResponse& Response)
 				*Value = FString::SanitizeFloat(ValueDouble);
 			}
 		}
-		else if (const FEnumProperty* EnumProperty = CastField<FEnumProperty>(Property))
-		{
-			const FString EnumName = EnumProperty->GetEnum()->GetName();
-			Type = EnumName;
-			if (Value)
-			{
-				const FNumericProperty* EnumIntProperty = EnumProperty->GetUnderlyingProperty();
-				const void* ValuePtr = EnumProperty->ContainerPtrToValuePtr<void>(Container);
-				int64 IntValue = EnumIntProperty->GetSignedIntPropertyValue(ValuePtr);
-				*Value = EnumProperty->GetEnum()->GetAuthoredNameStringByValue(IntValue);
-			}
-		}
-		else if (const FByteProperty* ByteProperty = CastField<FByteProperty>(Property))
-		{
-			// Bytes might be enums, or just bytes
-			if (ByteProperty->Enum)
-			{
-				const FString EnumName = ByteProperty->Enum->GetName();
-				Type = EnumName;
-				if (Value)
-				{
-					uint8 ValueIndex;
-					ByteProperty->GetValue_InContainer(Container, &ValueIndex);
-					*Value = ByteProperty->Enum->GetAuthoredNameStringByIndex(ValueIndex);
-				}
-			}
-			else
-			{
-				Type = TEXT("int");
-				if (Value)
-				{
-					uint8 ValueByte;
-					ByteProperty->GetValue_InContainer(Container, &ValueByte);
-					*Value = FString::FromInt(ValueByte);
-				}
-			}
-		}
 		else if (const FObjectProperty* ObjectProperty = CastField<FObjectProperty>(Property))
 		{
 			FString InnerType;
@@ -1088,6 +1055,13 @@ grpc::Status SetSinglePropertyValue<FByteProperty, FString>(void* ValuePtr, FByt
 		return grpc::Status(grpc::INVALID_ARGUMENT, "Invalid enum value");
 	}
 	Property->SetPropertyValue(ValuePtr, PropertyEnum->GetValueByIndex(Value));
+	return grpc::Status_OK;
+}
+
+template <>
+grpc::Status SetSinglePropertyValue<FObjectProperty, UObject*>(void* ValuePtr, FObjectProperty* Property, UObject* const& ValueObj)
+{
+	Property->SetObjectPropertyValue(ValuePtr, ValueObj);
 	return grpc::Status_OK;
 }
 
@@ -1446,18 +1420,6 @@ grpc::Status SetPropertyImpl<SetClassPropertyRequest>(const UWorld* World, const
 }
 
 template<>
-grpc::Status SetPropertyImpl<SetAssetPropertyRequest>(const UWorld* World, const SetAssetPropertyRequest& Request)
-{
-	const FString AssetPath(UTF8_TO_TCHAR(Request.value().c_str()));
-	UObject* Asset = GetAssetByPath(AssetPath);
-	if (!Asset)
-	{
-		return grpc::Status(grpc::NOT_FOUND, "Did not find asset with path " + std::string(TCHAR_TO_UTF8(*AssetPath)));
-	}
-	return SetSinglePropertyImpl<FObjectProperty>(World, Request, Asset);
-}
-
-template<>
 grpc::Status SetPropertyImpl<SetActorPropertyRequest>(const UWorld* World, const SetActorPropertyRequest& Request)
 {
 	const FString ActorName(UTF8_TO_TCHAR(Request.value().c_str()));
@@ -1583,23 +1545,6 @@ grpc::Status SetPropertyImpl<SetClassArrayPropertyRequest>(const UWorld* World, 
 		ClassArray.Add(Class);
 	}
 	return SetArrayPropertyImpl<FObjectProperty>(World, Request, ClassArray);
-}
-
-template<>
-grpc::Status SetPropertyImpl<SetAssetArrayPropertyRequest>(const UWorld* World, const SetAssetArrayPropertyRequest& Request)
-{
-	TArray<UObject*> AssetArray;
-	for (const std::string& Value : Request.values())
-	{
-		const FString AssetPath(UTF8_TO_TCHAR(Value.c_str()));
-		UObject* Asset = GetAssetByPath(AssetPath);
-		if (!Asset)
-		{
-			return grpc::Status(grpc::NOT_FOUND, "Did not find asset with path " + std::string(TCHAR_TO_UTF8(*AssetPath)));
-		}
-		AssetArray.Add(Asset);
-	}
-	return SetArrayPropertyImpl<FObjectProperty>(World, Request, AssetArray);
 }
 
 template<>
