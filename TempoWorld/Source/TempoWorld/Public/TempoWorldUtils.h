@@ -6,6 +6,8 @@
 
 AActor* GetActorWithName(const UWorld* World, const FString& Name, const bool bIncludeHidden=false);
 
+UObject* GetAssetByPath(const FString& AssetPath);
+
 template <typename T = UActorComponent>
 T* GetComponentWithName(const AActor* Actor, const FString& Name)
 {
