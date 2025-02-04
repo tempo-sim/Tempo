@@ -50,7 +50,7 @@ void UGroundSnapComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 		GroundHits.Add(GroundHit);
 	}
 
-	check(GroundHits.Num() == 4);
+	ensure(GroundHits.Num() == 4);
 
 	// Compute the normals from every combination of three ground hits, by looking to the left and right of each corner.
 	TArray<FVector> AllNormals;
@@ -68,8 +68,8 @@ void UGroundSnapComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 		AllHeights.Add(GroundHitI.Z);
 	}
 
-	check(AllNormals.Num() == 4);
-	check(AllHeights.Num() == 4);
+	ensure(AllNormals.Num() == 4);
+	ensure(AllHeights.Num() == 4);
 
 	// Reject any normals that are too steep
 	TArray<FVector> Normals;

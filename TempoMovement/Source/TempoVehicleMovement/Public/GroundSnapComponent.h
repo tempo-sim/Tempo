@@ -29,7 +29,7 @@ protected:
 
 	// We will search this far above and below the Owner's current location for the ground.
 	UPROPERTY(BlueprintReadWrite, EditAnywhere)
-	float SearchDistance = 100000.0; // 1km
+	float SearchDistance = 1000000.0; // 10km
 
 	// If true, we will reject normals from surfaces steeper than MaxSlopeAngle.
 	UPROPERTY(BlueprintReadWrite, EditAnywhere)
