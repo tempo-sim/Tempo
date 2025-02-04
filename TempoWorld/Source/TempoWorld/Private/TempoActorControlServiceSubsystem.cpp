@@ -43,6 +43,7 @@ using SetVectorPropertyRequest = TempoWorld::SetVectorPropertyRequest;
 using SetRotatorPropertyRequest = TempoWorld::SetRotatorPropertyRequest;
 using SetColorPropertyRequest = TempoWorld::SetColorPropertyRequest;
 using SetClassPropertyRequest = TempoWorld::SetClassPropertyRequest;
+using SetAssetPropertyRequest = TempoWorld::SetAssetPropertyRequest;
 using SetActorPropertyRequest = TempoWorld::SetActorPropertyRequest;
 using SetComponentPropertyRequest = TempoWorld::SetComponentPropertyRequest;
 using SetBoolArrayPropertyRequest = TempoWorld::SetBoolArrayPropertyRequest;
@@ -51,6 +52,7 @@ using SetEnumArrayPropertyRequest = TempoWorld::SetEnumArrayPropertyRequest;
 using SetIntArrayPropertyRequest = TempoWorld::SetIntArrayPropertyRequest;
 using SetFloatArrayPropertyRequest = TempoWorld::SetFloatArrayPropertyRequest;
 using SetClassArrayPropertyRequest = TempoWorld::SetClassArrayPropertyRequest;
+using SetAssetArrayPropertyRequest = TempoWorld::SetAssetArrayPropertyRequest;
 using SetActorArrayPropertyRequest = TempoWorld::SetActorArrayPropertyRequest;
 using SetComponentArrayPropertyRequest = TempoWorld::SetComponentArrayPropertyRequest;
 using CallFunctionRequest = TempoWorld::CallFunctionRequest;
@@ -110,6 +112,7 @@ void UTempoActorControlServiceSubsystem::RegisterScriptingServices(FTempoScripti
 		SimpleRequestHandler(&ActorControlAsyncService::RequestSetRotatorProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetRotatorPropertyRequest>),
 		SimpleRequestHandler(&ActorControlAsyncService::RequestSetColorProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetColorPropertyRequest>),
 		SimpleRequestHandler(&ActorControlAsyncService::RequestSetClassProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetClassPropertyRequest>),
+		SimpleRequestHandler(&ActorControlAsyncService::RequestSetAssetProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetAssetPropertyRequest>),
 		SimpleRequestHandler(&ActorControlAsyncService::RequestSetActorProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetActorPropertyRequest>),
 		SimpleRequestHandler(&ActorControlAsyncService::RequestSetComponentProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetComponentPropertyRequest>),
 		SimpleRequestHandler(&ActorControlAsyncService::RequestSetBoolArrayProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetBoolArrayPropertyRequest>),
@@ -118,6 +121,7 @@ void UTempoActorControlServiceSubsystem::RegisterScriptingServices(FTempoScripti
 		SimpleRequestHandler(&ActorControlAsyncService::RequestSetIntArrayProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetIntArrayPropertyRequest>),
 		SimpleRequestHandler(&ActorControlAsyncService::RequestSetFloatArrayProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetFloatArrayPropertyRequest>),
 		SimpleRequestHandler(&ActorControlAsyncService::RequestSetClassArrayProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetClassArrayPropertyRequest>),
+		SimpleRequestHandler(&ActorControlAsyncService::RequestSetAssetArrayProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetAssetArrayPropertyRequest>),
 		SimpleRequestHandler(&ActorControlAsyncService::RequestSetActorArrayProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetActorArrayPropertyRequest>),
 		SimpleRequestHandler(&ActorControlAsyncService::RequestSetComponentArrayProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetComponentArrayPropertyRequest>),
 		SimpleRequestHandler(&ActorControlAsyncService::RequestCallFunction, &UTempoActorControlServiceSubsystem::CallObjectFunction)
@@ -1420,6 +1424,18 @@ grpc::Status SetPropertyImpl<SetClassPropertyRequest>(const UWorld* World, const
 }
 
 template<>
+grpc::Status SetPropertyImpl<SetAssetPropertyRequest>(const UWorld* World, const SetAssetPropertyRequest& Request)
+{
+	const FString AssetPath(UTF8_TO_TCHAR(Request.value().c_str()));
+	UObject* Asset = GetAssetByPath(AssetPath);
+	if (!Asset)
+	{
+		return grpc::Status(grpc::NOT_FOUND, "Did not find asset with path " + std::string(TCHAR_TO_UTF8(*AssetPath)));
+	}
+	return SetSinglePropertyImpl<FObjectProperty>(World, Request, Asset);
+}
+
+template<>
 grpc::Status SetPropertyImpl<SetActorPropertyRequest>(const UWorld* World, const SetActorPropertyRequest& Request)
 {
 	const FString ActorName(UTF8_TO_TCHAR(Request.value().c_str()));
@@ -1545,6 +1561,23 @@ grpc::Status SetPropertyImpl<SetClassArrayPropertyRequest>(const UWorld* World, 
 		ClassArray.Add(Class);
 	}
 	return SetArrayPropertyImpl<FObjectProperty>(World, Request, ClassArray);
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetAssetArrayPropertyRequest>(const UWorld* World, const SetAssetArrayPropertyRequest& Request)
+{
+	TArray<UObject*> AssetArray;
+	for (const std::string& Value : Request.values())
+	{
+		const FString AssetPath(UTF8_TO_TCHAR(Value.c_str()));
+		UObject* Asset = GetAssetByPath(AssetPath);
+		if (!Asset)
+		{
+			return grpc::Status(grpc::NOT_FOUND, "Did not find asset with path " + std::string(TCHAR_TO_UTF8(*AssetPath)));
+		}
+		AssetArray.Add(Asset);
+	}
+	return SetArrayPropertyImpl<FObjectProperty>(World, Request, AssetArray);
 }
 
 template<>
