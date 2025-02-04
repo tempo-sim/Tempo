@@ -23,7 +23,8 @@ public class TempoVehicleMovement : ModuleRules
                 "Slate",
                 "SlateCore",
                 // Tempo
-                "TempoMovementShared"
+                "TempoCoreShared",
+                "TempoMovementShared",
             }
         );
     }
