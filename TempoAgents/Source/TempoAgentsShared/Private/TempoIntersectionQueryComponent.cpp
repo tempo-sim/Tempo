@@ -184,23 +184,39 @@ bool UTempoIntersectionQueryComponent::ShouldFilterLaneConnection(const AActor* 
 		const bool bIsRightTurn = FVector::DotProduct(DirToDest, SourceLaneRight) > 0.0f;
 		const bool bIsLeftTurn = !bIsRightTurn;
 
-		TempoZoneGraphTagFilterMap ZoneGraphTagFilterMap;
-		
-		if (!TryGetTagFilteredLaneConnections(SourceConnectionActor, SourceLaneConnectionInfos, DestLaneConnectionInfos, ZoneGraphTagFilterMap))
+		TempoZoneGraphTagMaskGroups ZoneGraphTagMaskGroups = GroupLaneConnectionsByTags(SourceConnectionActor, SourceLaneConnectionInfos, DestLaneConnectionInfos);
+
+		const FZoneGraphTagMask SourceTagMask = SourceLaneConnectionInfo.LaneDesc.Tags;
+
+		if (SourceTagMask.GetValue() == 0)
 		{
-			UE_LOG(LogTempoAgentsShared, Error, TEXT("Lane Filtering - ShouldFilterLaneConnection - Can't get tag-filtered lane connections for SourceConnectionActor (%s)."), *SourceConnectionActor->GetName());
+			return true;
+		}
+
+		FZoneGraphTagMask MatchingTagGroupMask;
+		const TempoZoneGraphTagMaskGroups MatchingTagGroups = ZoneGraphTagMaskGroups.FilterByPredicate([&SourceTagMask, &MatchingTagGroupMask](const auto& TagGroup)
+		{
+			if (TagGroup.Key.CompareMasks(SourceTagMask, EZoneLaneTagMaskComparison::Any))
+			{
+				MatchingTagGroupMask = TagGroup.Key;
+				return true;
+			}
+			return false;
+		});
+
+		if (MatchingTagGroups.IsEmpty())
+		{
+			UE_LOG(LogTempoAgentsShared, Error, TEXT("Lane Filtering - ShouldFilterLaneConnection - Connection tag filter not found in any tag group for SourceConnectionActor (%s)."), *SourceConnectionActor->GetName());
 			return false;
 		}
 
-		const FZoneGraphTagFilter ZoneGraphTagFilter = GetLaneConnectionTagFilter(SourceConnectionActor, SourceLaneConnectionInfo);
-		if (!ZoneGraphTagFilterMap.Contains(ZoneGraphTagFilter))
+		if (MatchingTagGroups.Num() > 1)
 		{
-			UE_LOG(LogTempoAgentsShared, Error, TEXT("Lane Filtering - ShouldFilterLaneConnection - Connection tag filter not found in tag filter map for SourceConnectionActor (%s)."), *SourceConnectionActor->GetName());
+			UE_LOG(LogTempoAgentsShared, Error, TEXT("Lane Filtering - ShouldFilterLaneConnection - Connection tag filter found in more than one tag group for SourceConnectionActor (%s)."), *SourceConnectionActor->GetName());
 			return false;
 		}
-		
-		auto& LaneConnectionTuple = ZoneGraphTagFilterMap[ZoneGraphTagFilter];
-		const TArray<FTempoLaneConnectionInfo>& TagFilteredSourceLaneConnectionInfos = LaneConnectionTuple.Get<0>();
+
+		const TArray<FTempoLaneConnectionInfo>& TagFilteredSourceLaneConnectionInfos = MatchingTagGroups[MatchingTagGroupMask];
 
 		// If our source "lane tag group" doesn't have any potential connections, we filter this candidate connection.
 		if (TagFilteredSourceLaneConnectionInfos.IsEmpty())
@@ -226,29 +242,10 @@ bool UTempoIntersectionQueryComponent::ShouldFilterLaneConnection(const AActor* 
 		const bool bSourceIsRightMostLane = SourceLaneConnectionInfo.LaneIndex == MinFilteredLaneIndex;
 
 		// Only allow left turns from the left-most lane and right turns from the right-most lane.
-		if ((bIsLeftTurn && bSourceIsLeftMostLane) || (bIsRightTurn && bSourceIsRightMostLane))
-		{
-			const AActor* OwnerIntersectionQueryActor = GetOwnerIntersectionQueryActor();
-			FColor DebugColor = bIsRightTurn ? FColor::Magenta : FColor::Cyan;
-			const FVector SourceLaneDebugLineStart = SourceLaneConnectionInfo.Position + FVector(0.0f, 0.0f, 1.0) * OwnerIntersectionQueryActor->GetActorUpVector();
-			const FVector DestLaneDebugLineStart = DestLaneConnectionInfo.Position + FVector(0.0f, 0.0f, 1.0) * OwnerIntersectionQueryActor->GetActorUpVector();
-			DrawDebugDirectionalArrow(OwnerIntersectionQueryActor->GetWorld(), SourceLaneDebugLineStart, DestLaneDebugLineStart, 50000.0f, DebugColor, false, 20.0f, 0, 10.0f);
-			return false;
-		}
-		else
-		{
-			return true;
-		}
+		return (bIsLeftTurn && bSourceIsLeftMostLane) || (bIsRightTurn && bSourceIsRightMostLane);
 	}
-	else
-	{
-		// Allow any lanes to go straight through the intersection.
-		const AActor* OwnerIntersectionQueryActor = GetOwnerIntersectionQueryActor();
-		const FVector SourceLaneDebugLineStart = SourceLaneConnectionInfo.Position + FVector(0.0f, 0.0f, 1.0) * OwnerIntersectionQueryActor->GetActorUpVector();
-		const FVector DestLaneDebugLineStart = DestLaneConnectionInfo.Position + FVector(0.0f, 0.0f, 1.0) * OwnerIntersectionQueryActor->GetActorUpVector();
-		DrawDebugDirectionalArrow(OwnerIntersectionQueryActor->GetWorld(), SourceLaneDebugLineStart, DestLaneDebugLineStart, 50000.0f, FColor::Orange, false, 20.0f, 0, 10.0f);
-		return false;
-	}
+
+	return false;
 }
 
 bool UTempoIntersectionQueryComponent::TryGetCrosswalkIntersectionConnectorInfo(const AActor* IntersectionQueryActor, int32 CrosswalkRoadModuleIndex, FCrosswalkIntersectionConnectorInfo& OutCrosswalkIntersectionConnectorInfo) const
@@ -1390,45 +1387,42 @@ AActor* UTempoIntersectionQueryComponent::GetConnectedRoadActor(const AActor& In
 	return RoadActor;
 }
 
-bool UTempoIntersectionQueryComponent::TryGetTagFilteredLaneConnections(const AActor* SourceConnectionActor, const TArray<FTempoLaneConnectionInfo>& SourceLaneConnectionInfos, const TArray<FTempoLaneConnectionInfo>& DestLaneConnectionInfos,
-																	  TempoZoneGraphTagFilterMap& OutZoneGraphTagFilterMap) const
+TempoZoneGraphTagMaskGroups UTempoIntersectionQueryComponent::GroupLaneConnectionsByTags(const AActor* SourceConnectionActor, const TArray<FTempoLaneConnectionInfo>& SourceLaneConnectionInfos, const TArray<FTempoLaneConnectionInfo>& DestLaneConnectionInfos) const
 {
-	const AActor* OwnerIntersectionQueryActor = GetOwnerIntersectionQueryActor();
-	if (OwnerIntersectionQueryActor == nullptr)
-	{
-		return false;
-	}
+	TempoZoneGraphTagMaskGroups ZoneGraphTagMaskGroups;
 
-	TempoZoneGraphTagFilterMap TagFilterToLaneConnectionTuple;
-	
-	for (int32 SourceConnectionIndex = 0; SourceConnectionIndex < SourceLaneConnectionInfos.Num(); ++SourceConnectionIndex)
+	for (const FTempoLaneConnectionInfo& SourceLaneConnectionInfo : SourceLaneConnectionInfos)
 	{
-		const FTempoLaneConnectionInfo& SourceLaneConnectionInfo = SourceLaneConnectionInfos[SourceConnectionIndex];
-		const FZoneGraphTagFilter& SourceTagFilter = GetLaneConnectionTagFilter(SourceConnectionActor, SourceLaneConnectionInfo);
-
-		auto& LaneConnectionTuple = TagFilterToLaneConnectionTuple.FindOrAdd(SourceTagFilter);
-		
-		for (int32 DestConnectionIndex = 0; DestConnectionIndex < DestLaneConnectionInfos.Num(); ++DestConnectionIndex)
+		const FZoneGraphTagMask SourceTagMask = SourceLaneConnectionInfo.LaneDesc.Tags;
+		if (SourceTagMask.GetValue() == 0)
 		{
-			const FZoneGraphTagMask& DestTags = DestLaneConnectionInfos[DestConnectionIndex].LaneDesc.Tags;
+			continue;
+		}
 
-			// Is the source lane allowed to connect to this destination lane based on tags?
-			if (SourceTagFilter.Pass(DestTags))
+		TempoZoneGraphTagMaskGroups MatchingMaskGroups = ZoneGraphTagMaskGroups.FilterByPredicate([&SourceTagMask](const auto& Elem)
 			{
-				const FTempoLaneConnectionInfo& DestLaneConnectionInfo = DestLaneConnectionInfos[DestConnectionIndex];
-
-				TArray<FTempoLaneConnectionInfo>& SourceLaneConnectionInfosInMap = LaneConnectionTuple.Get<0>();
-				TArray<FTempoLaneConnectionInfo>& DestLaneConnectionInfosInMap = LaneConnectionTuple.Get<1>();
-				
-				SourceLaneConnectionInfosInMap.Add(SourceLaneConnectionInfo);
-				DestLaneConnectionInfosInMap.Add(DestLaneConnectionInfo);
+				return Elem.Key.CompareMasks(SourceTagMask, EZoneLaneTagMaskComparison::Any);
+			});
+		if (MatchingMaskGroups.IsEmpty())
+		{
+			ZoneGraphTagMaskGroups.Add(SourceTagMask, {SourceLaneConnectionInfo});
+		}
+		else
+		{
+			// Remove all matching groups from the map and replace with a single combined group, including the new lane.
+			FZoneGraphTagMask GroupMask = SourceTagMask;
+			TArray<FTempoLaneConnectionInfo> GroupLanes({SourceLaneConnectionInfo});
+			for (const auto& MatchingMaskGroup : MatchingMaskGroups)
+			{
+				GroupMask.Add(MatchingMaskGroup.Key);
+				GroupLanes.Append(MatchingMaskGroup.Value);
+				ZoneGraphTagMaskGroups.Remove(MatchingMaskGroup.Key);
 			}
+			ZoneGraphTagMaskGroups.Add(GroupMask, GroupLanes);
 		}
 	}
 
-	OutZoneGraphTagFilterMap = TagFilterToLaneConnectionTuple;
-
-	return true;
+	return ZoneGraphTagMaskGroups;
 }
 
 FZoneGraphTagFilter UTempoIntersectionQueryComponent::GetLaneConnectionTagFilter(const AActor* SourceConnectionActor, const FTempoLaneConnectionInfo& SourceLaneConnectionInfo) const

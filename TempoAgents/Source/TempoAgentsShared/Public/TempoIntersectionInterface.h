@@ -5,6 +5,7 @@
 #include "TempoAgentsSharedTypes.h"
 
 #include "ZoneGraphBuilder.h"
+#include "ZoneShapeUtilities.h"
 
 #include "CoreMinimal.h"
 #include "UObject/Interface.h"

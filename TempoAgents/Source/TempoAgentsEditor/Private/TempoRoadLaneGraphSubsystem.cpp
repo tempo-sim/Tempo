@@ -31,15 +31,6 @@ void UTempoRoadLaneGraphSubsystem::SetupZoneGraphBuilder()
 
 bool UTempoRoadLaneGraphSubsystem::TryGenerateZoneShapeComponents() const
 {
-	IConsoleVariable* RemoveOverlapCVar = IConsoleManager::Get().FindConsoleVariable(TEXT("ai.debug.zonegraph.generation.RemoveOverlap"));
-	if (ensureMsgf(RemoveOverlapCVar != nullptr, TEXT("Tried to disable console variable \"ai.debug.zonegraph.generation.RemoveOverlap\" for Tempo Lane Graph, but it was not found.")))
-	{
-		// Disable the removal of "overlapping" lanes.
-		// We want a fully-connected intersection graph for now.
-		// Later, we will prune the intersection graph more intelligently with tags, or other metadata.
-		RemoveOverlapCVar->Set(false);
-	}
-
 	// Allow all Intersections to setup their data, first.
 	for (AActor* Actor : TActorRange<AActor>(GetWorld()))
 	{

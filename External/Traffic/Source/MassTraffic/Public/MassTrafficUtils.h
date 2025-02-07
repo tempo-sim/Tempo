@@ -115,6 +115,10 @@ MASSTRAFFIC_API float GetLaneStraightness(const uint32 LaneIndex, const FZoneGra
 
 MASSTRAFFIC_API LaneTurnType GetLaneTurnType(const uint32 LaneIndex, const FZoneGraphStorage& ZoneGraphStorage);
 
+int32 GetLanePriority(
+	const FZoneGraphTrafficLaneData* TrafficLaneData,
+	const FMassTrafficLanePriorityFilters& LanePriorityFilters,
+	const FZoneGraphStorage& ZoneGraphStorage);
 
 /** Lane search functions. */
 MASSTRAFFIC_API bool PointIsNearSegment(

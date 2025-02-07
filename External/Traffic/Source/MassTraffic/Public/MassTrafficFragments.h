@@ -700,7 +700,11 @@ struct MASSTRAFFIC_API FMassTrafficVehicleControlFragment : public FMassFragment
 	bool bAllowRightTurnsAtIntersections = true;
 	bool bAllowGoingStraightAtIntersections = true;
 
-	TArray<FZoneGraphTagFilter> LaneChangePriorityFilters;
+	FMassTrafficLanePriorityFilters LaneChangePriorityFilters;
+
+	FMassTrafficLanePriorityFilters NextLanePriorityFilters;
+
+	TMap<EZoneGraphTurnType, FMassTrafficLanePriorityFilters> TurningLanePriorityFilters;
 
 	// Fields used for both pre-emptive and reactive yields.
 	FZoneGraphTrafficLaneData* YieldAtIntersectionLane = nullptr;

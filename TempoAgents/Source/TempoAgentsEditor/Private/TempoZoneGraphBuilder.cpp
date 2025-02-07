@@ -20,9 +20,13 @@ bool FTempoZoneGraphBuilder::ShouldFilterLaneConnection(const UZoneShapeComponen
 
 	const TArray<FTempoLaneConnectionInfo>& SourceLaneConnectionInfos = GenerateTempoLaneConnectionInfoArray(SourceSlots);
 	const TArray<FTempoLaneConnectionInfo>& DestLaneConnectionInfos = GenerateTempoLaneConnectionInfoArray(DestSlots);
-	
-	const bool bShouldFilterLaneConnection = ITempoIntersectionInterface::Execute_ShouldFilterTempoLaneConnection(IntersectionQueryActor, SourceRoadQueryActor, SourceLaneConnectionInfos, SourceSlotQueryIndex, DestRoadQueryActor, DestLaneConnectionInfos, DestSlotQueryIndex);
-	
+
+	bool bShouldFilterLaneConnection;
+	{
+		FEditorScriptExecutionGuard ScriptGuard;
+		bShouldFilterLaneConnection = ITempoIntersectionInterface::Execute_ShouldFilterTempoLaneConnection(IntersectionQueryActor, SourceRoadQueryActor, SourceLaneConnectionInfos, SourceSlotQueryIndex, DestRoadQueryActor, DestLaneConnectionInfos, DestSlotQueryIndex);
+	}
+
 	return bShouldFilterLaneConnection;
 }
 
