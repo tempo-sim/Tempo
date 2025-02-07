@@ -1,0 +1,170 @@
+diff --color -urN --strip-trailing-cr Source/ZoneGraph/Private/ZoneGraphRenderingUtilities.cpp /Users/pete/VayuSim/Plugins/ZoneGraph/Source/ZoneGraph/Private/ZoneGraphRenderingUtilities.cpp
+--- Source/ZoneGraph/Private/ZoneGraphRenderingUtilities.cpp	2024-09-26 22:04:48
++++ /Users/pete/VayuSim/Plugins/ZoneGraph/Source/ZoneGraph/Private/ZoneGraphRenderingUtilities.cpp	2025-02-07 13:31:38
+@@ -325,7 +325,7 @@
+ 			for (int32 i = Lane.PointsBegin + 1; i < Lane.PointsEnd; i++)
+ 			{
+ 				const FVector Point = bTransform ? FVector(LocalToWorld.TransformPosition(ZoneStorage.LanePoints[i])) : ZoneStorage.LanePoints[i];
+-				PDI->DrawTranslucentLine(PrevPoint, Point, Color, SDPG_World, LineThickness, DepthBias, true);
++				PDI->DrawTranslucentLine(PrevPoint, Point, Color, SDPG_Foreground, LineThickness, DepthBias, true);
+ 				PrevPoint = Point;
+ 			}
+ 		}
+@@ -334,7 +334,7 @@
+ 			for (int32 i = Lane.PointsBegin + 1; i < Lane.PointsEnd; i++)
+ 			{
+ 				const FVector Point = bTransform ? FVector(LocalToWorld.TransformPosition(ZoneStorage.LanePoints[i])) : ZoneStorage.LanePoints[i];
+-				PDI->DrawLine(PrevPoint, Point, Color, SDPG_World, LineThickness, DepthBias, true);
++				PDI->DrawLine(PrevPoint, Point, Color, SDPG_Foreground, LineThickness, DepthBias, true);
+ 				PrevPoint = Point;
+ 			}
+ 		}
+@@ -359,7 +359,7 @@
+ 				const FVector ArrowOrigin = ArrowPos;
+ 				const FVector ArrowTip = ArrowPos + ArrowDir * ArrowSize;
+ 
+-				FPrimitiveSceneProxy::DrawArrowHead(PDI, ArrowTip, ArrowOrigin, ArrowSize, Color, SDPG_World, LineThickness, true);
++				FPrimitiveSceneProxy::DrawArrowHead(PDI, ArrowTip, ArrowOrigin, ArrowSize, Color, SDPG_Foreground, LineThickness, true);
+ 			}
+ 
+ 			// Draw adjacent lanes
+@@ -373,12 +373,12 @@
+ 			FZoneGraphLinkedLane LeftLinkedLane;
+ 			if (UE::ZoneGraph::Query::GetFirstLinkedLane(ZoneStorage, LaneIdx, EZoneLaneLinkType::Adjacent, EZoneLaneLinkFlags::Left, EZoneLaneLinkFlags::None, LeftLinkedLane) && LeftLinkedLane.IsValid())
+ 			{
+-				PDI->DrawLine(LaneStartPoint, LaneStartPoint + LaneStartSide * Lane.Width * 0.1f, FMath::Lerp(FLinearColor(Color), FLinearColor::Green, 0.3f), SDPG_World, LineThickness, DepthBias, true);
++				PDI->DrawLine(LaneStartPoint, LaneStartPoint + LaneStartSide * Lane.Width * 0.1f, FMath::Lerp(FLinearColor(Color), FLinearColor::Green, 0.3f), SDPG_Foreground, LineThickness, DepthBias, true);
+ 			}
+ 			FZoneGraphLinkedLane RightLinkedLane;
+ 			if (UE::ZoneGraph::Query::GetFirstLinkedLane(ZoneStorage, LaneIdx, EZoneLaneLinkType::Adjacent, EZoneLaneLinkFlags::Right, EZoneLaneLinkFlags::None, RightLinkedLane) && RightLinkedLane.IsValid())
+ 			{
+-				PDI->DrawLine(LaneStartPoint, LaneStartPoint - LaneStartSide * Lane.Width * 0.1f, FMath::Lerp(FLinearColor(Color), FLinearColor::Red, 0.3f), SDPG_World, LineThickness, DepthBias, true);
++				PDI->DrawLine(LaneStartPoint, LaneStartPoint - LaneStartSide * Lane.Width * 0.1f, FMath::Lerp(FLinearColor(Color), FLinearColor::Red, 0.3f), SDPG_Foreground, LineThickness, DepthBias, true);
+ 			}
+ 		}
+ 	}
+diff --color -urN --strip-trailing-cr Source/ZoneGraph/Private/ZoneShapeUtilities.cpp /Users/pete/VayuSim/Plugins/ZoneGraph/Source/ZoneGraph/Private/ZoneShapeUtilities.cpp
+--- Source/ZoneGraph/Private/ZoneShapeUtilities.cpp	2024-09-26 22:14:21
++++ /Users/pete/VayuSim/Plugins/ZoneGraph/Source/ZoneGraph/Private/ZoneShapeUtilities.cpp	2025-02-07 13:27:05
+@@ -1121,7 +1121,6 @@
+ 		{
+ 			const int32 SourceIdx = i;
+ 			const int32 DestIdx = FMath::Clamp(i - FirstIndex, 0, DestNum - 1);
+-			
+ 			AddOrUpdateConnection(Candidates, SourceSlots[SourceIdx].Index, DestSlots[DestIdx].Index, Tag);
+ 		}
+ 	}
+@@ -1244,7 +1243,10 @@
+ 
+ 	int32 MainDestPointIndex = 0;
+ 	float MainDestScore = 0;
+-	
++
++	// Cache these in case we need them later.
++	TMap<int32, EZoneGraphTurnType> DestinationTurnTypes;
++
+ 	for (int32 PointIndex = Destinations.Num() - 1; PointIndex >= 0; PointIndex--)
+ 	{
+ 		const FConnectionEntry& Dest = Destinations[PointIndex];
+@@ -1273,18 +1275,21 @@
+ 																									Dest.Profile, Dest.IncomingConnections);
+ 
+ 		const EZoneShapeLaneConnectionRestrictions Restrictions = Source.Point.GetLaneConnectionRestrictions() | RestrictionsFromRules;
+-		
++
++		// Use closest point on dest so that lane profile widths do not affect direction.
++		const FVector SourceSide = FVector::CrossProduct(SourceForward, SourceUp);
++
++		const bool bIsTurning = FVector::DotProduct(SourceForward, DirToDest) < TurnThresholdAngleCos;
++		const bool bIsLeftTurn = bIsTurning && FVector::DotProduct(SourceSide, DirToDest) > 0.0f;
++
++		DestinationTurnTypes.Add(PointIndex, bIsTurning ? (bIsLeftTurn ? EZoneGraphTurnType::Left : EZoneGraphTurnType::Right) : EZoneGraphTurnType::NoTurn);
++
+ 		// Discard destination that would result in left or right turns.
+ 		if (EnumHasAnyFlags(Restrictions, EZoneShapeLaneConnectionRestrictions::NoLeftTurn | EZoneShapeLaneConnectionRestrictions::NoRightTurn))
+ 		{
+ 			const bool bRemoveLeft = EnumHasAnyFlags(Restrictions, EZoneShapeLaneConnectionRestrictions::NoLeftTurn);
+ 			const bool bRemoveRight = EnumHasAnyFlags(Restrictions, EZoneShapeLaneConnectionRestrictions::NoRightTurn);
+-
+-			// Use closest point on dest so that lane profile widths do not affect direction.
+-			const FVector SourceSide = FVector::CrossProduct(SourceForward, SourceUp);
+ 			
+-			const bool bIsTurning = FVector::DotProduct(SourceForward, DirToDest) < TurnThresholdAngleCos;
+-			const bool bIsLeftTurn = FVector::DotProduct(SourceSide, DirToDest) > 0.0f;
+ 			if (bIsTurning)
+ 			{
+ 				const bool bSkip = bIsLeftTurn ? bRemoveLeft : bRemoveRight;
+@@ -1385,6 +1390,19 @@
+ 				}
+ 			}
+ 
++			for (const auto& CompatibleTagsElem : BuildSettings.CompatibleTags.FilterByPredicate([Tag](const FZoneGraphCompatibleTags& Elem) { return Elem.SourceTag == Tag; }))
++			{
++				const FZoneGraphTag& DestTag = CompatibleTagsElem.DestTag;
++				for (int32 j = DestSlotsBegin; j < DestSlotsEnd; j++)
++				{
++					const FLaneConnectionSlot& Slot = DestSlots[j];
++					if (Slot.LaneDesc.Tags.ContainsAny(DestTag) && CompatibleTagsElem.CompatibleForTurnTypes.Contains(DestinationTurnTypes[Slot.PointIndex]))
++					{
++						TagDestSlots.Add(Slot);
++					}
++				}
++			}
++
+ 			if (TagSourceSlots.Num() > 0 && TagDestSlots.Num() > 0)
+ 			{
+ 				AppendLaneConnectionCandidates(Candidates, TagSourceSlots, TagDestSlots, Tag, MainDestPointIndex);
+@@ -1795,7 +1813,7 @@
+ 	TArray<int32> IncomingConnections;
+ 	OutgoingConnections.Init(0, Points.Num());
+ 	IncomingConnections.Init(0, Points.Num());
+-	
++
+ 	for (int32 SourceIdx = 0; SourceIdx < Points.Num(); SourceIdx++)
+ 	{
+ 		const FZoneShapePoint& SourcePoint = Points[SourceIdx];
+diff --color -urN --strip-trailing-cr Source/ZoneGraph/Public/ZoneGraphTypes.h /Users/pete/VayuSim/Plugins/ZoneGraph/Source/ZoneGraph/Public/ZoneGraphTypes.h
+--- Source/ZoneGraph/Public/ZoneGraphTypes.h	2024-09-26 22:14:21
++++ /Users/pete/VayuSim/Plugins/ZoneGraph/Source/ZoneGraph/Public/ZoneGraphTypes.h	2025-02-07 13:26:55
+@@ -968,7 +968,30 @@
+ 	int32 ConnectionRestrictions = 0;
+ };
+ 
++UENUM(BlueprintType)
++enum class EZoneGraphTurnType : uint8
++{
++	Right,
++	Left,
++	NoTurn,
++};
++
+ USTRUCT()
++struct ZONEGRAPH_API FZoneGraphCompatibleTags
++{
++	GENERATED_BODY()
++
++	UPROPERTY(Category = CompatibleTags, EditAnywhere)
++	FZoneGraphTag SourceTag;
++
++	UPROPERTY(Category = CompatibleTags, EditAnywhere)
++	FZoneGraphTag DestTag;
++
++	UPROPERTY(Category = CompatibleTags, EditAnywhere)
++	TSet<EZoneGraphTurnType> CompatibleForTurnTypes;
++};
++
++USTRUCT()
+ struct ZONEGRAPH_API FZoneGraphBuildSettings
+ {
+ 	GENERATED_BODY()
+@@ -1004,6 +1027,10 @@
+ 	/** Routing rules applied to polygon shapes */
+ 	UPROPERTY(Category = Lanes, EditAnywhere)
+ 	TArray<FZoneGraphLaneRoutingRule> PolygonRoutingRules;
++
++	/** Tags which should be connected for certain turn types even when they are not the same. */
++	UPROPERTY(Category = Lanes, EditAnywhere)
++	TArray<FZoneGraphCompatibleTags> CompatibleTags;
+ 
+ 	/** Max distance between two shape points for them to be snapped together. */
+ 	UPROPERTY(Category = PointSnapping, EditAnywhere)
