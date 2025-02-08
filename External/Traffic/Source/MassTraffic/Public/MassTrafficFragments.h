@@ -459,12 +459,6 @@ struct MASSTRAFFIC_API FMassTrafficIntersectionFragment : public FMassFragment
 
 	void RestartIntersection(UMassCrowdSubsystem* MassCrowdSubsystem);
 
-	FORCEINLINE void AddTimeRemainingToCurrentPeriod()
-	{
-		PeriodTimeRemaining = PeriodTimeRemaining + GetCurrentPeriod().Duration;
-	}
-
-
 	void PedestrianLightsShowStop()
 	{
 		for (FMassTrafficLight& TrafficLight : TrafficLights)

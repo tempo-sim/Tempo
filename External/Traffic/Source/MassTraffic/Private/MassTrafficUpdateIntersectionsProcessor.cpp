@@ -523,22 +523,10 @@ void UMassTrafficUpdateIntersectionsProcessor::ConfigureQueries()
 	EntityQuery.AddRequirement<FMassRepresentationLODFragment>(EMassFragmentAccess::ReadOnly);
 	EntityQuery.AddRequirement<FTransformFragment>(EMassFragmentAccess::ReadOnly);
 #endif
-
-	ProcessorRequirements.AddSubsystemRequirement<UMassTrafficSubsystem>(EMassFragmentAccess::ReadWrite);
 }
 
 void UMassTrafficUpdateIntersectionsProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
-	// This will skip intersection logic if there are no vehicles that would use the intersections.
-	// This does mean they won't proceed through their cycles visually either, but that's okay
-	// for this demo as the only time there are no cars is in the cinematic.
-
-	UMassTrafficSubsystem& MassTrafficSubsystem = Context.GetMutableSubsystemChecked<UMassTrafficSubsystem>();
-	if (!MassTrafficSubsystem.HasTrafficVehicleAgents())
-	{
-		return;
-	}
-	
 	// Get world
 	const UWorld* World = GetWorld();
 
@@ -641,27 +629,8 @@ void UMassTrafficUpdateIntersectionsProcessor::Execute(FMassEntityManager& Entit
 			if (IntersectionFragment.PeriodTimeRemaining > 0.0f)
 			{
 				const float CountDownSpeedSeconds = DeltaTimeSeconds;
-
-				if (IntersectionFragment.bHasTrafficLights)
-				{
-
-					// This intersection has traffic lights.
-
-					// End this traffic light vehicle and/or pedestrian period if..
-					if (// ..cars are no longer entering the intersection from this period..
-						IsIntersectionClear(IntersectionFragment, EMassTrafficIntersectionVehicleLaneType::VehicleLane, *ZoneGraphStorage, &MassCrowdSubsystem) &&
-						// ..AND intersection has no cars waiting to enter the it..
-						!AreVehiclesWaitingForIntersection(IntersectionFragment) &&
-						// ..AND intersection has no open pedestrian lanes..
-						!bPeriodHasAnyOpenCrosswalkLanes &&
-						// ..AND we're not showing a yellow light..
-						IntersectionFragment.PeriodTimeRemaining > MassTrafficSettings->StandardTrafficPrepareToStopSeconds)
-					{
-						// Go to yellow light.
-						IntersectionFragment.PeriodTimeRemaining = MassTrafficSettings->StandardTrafficPrepareToStopSeconds - DeltaTimeSeconds;
-					}
-				}
-				else // ..no traffic lights, means stop-sign intersection
+				
+				if (!IntersectionFragment.bHasTrafficLights) // ..no traffic lights, means stop-sign intersection
 				{
 					// This intersection does not have traffic lights. It functions as a stop-sign intersection.
 					
@@ -845,16 +814,11 @@ void UMassTrafficUpdateIntersectionsProcessor::Execute(FMassEntityManager& Entit
 
 
 				// Open the next period.
-				// We only open the vehicle lanes if at least one vehicle has stated it's 'ready' to use one of them
 				// We only open the crosswalk lanes if there are actually enough pedestrians waiting.
 				// We do this, because we don't want them to start walking if the next period ends up getting ended early.
 				// It takes them a while to get off the curb onto the crosswalk, and the intersection won't sense this in time.
 				{
-					const EMassTrafficPeriodLanesAction VehicleLanesAction =
-						AreVehiclesWaitingForIntersection(IntersectionFragment) ?
-						EMassTrafficPeriodLanesAction::Open :
-						EMassTrafficPeriodLanesAction::SoftClose; 
-	
+					const EMassTrafficPeriodLanesAction VehicleLanesAction = EMassTrafficPeriodLanesAction::Open;
 					
 					const int32 MinPedestrians =
 						IntersectionFragment.bHasTrafficLights ?
@@ -867,11 +831,13 @@ void UMassTrafficUpdateIntersectionsProcessor::Execute(FMassEntityManager& Entit
 						IntersectionFragment.bHasTrafficLights ?
 						RandomStream.FRand() <= MassTrafficSettings->TrafficLightPedestrianLaneOpenProbability :
 						RandomStream.FRand() <= MassTrafficSettings->StopSignPedestrianLaneOpenProbability;
+
+					const int32 NumWaitingPedestriansInNewPeriod = NumPedestriansWaitingForIntersection(IntersectionFragment, *ZoneGraphStorage, &MassCrowdSubsystem);
 					
 					const EMassTrafficPeriodLanesAction PedestrianLanesAction =
 							(bPeriodHasAnyOpenCrosswalkLanes && bAreAllCurrentCrosswalkLanesOpenNextPeriod) ||
 							(bCanOpenPedestrianLanesByProbability &&
-							NumPedestriansWaitingForIntersection(IntersectionFragment, *ZoneGraphStorage, &MassCrowdSubsystem) >= MinPedestrians &&
+							NumWaitingPedestriansInNewPeriod >= MinPedestrians &&
 							// WARNING - If there are no pedestrians in the level, this will never end up being executed, so the value will never be cleared -
 							!IsStoppedVehicleBlockingCrosswalk(IntersectionFragment, true)) /*(See all CROSSWALKOVERLAP.)*/ ?
 						EMassTrafficPeriodLanesAction::Open :
@@ -883,11 +849,21 @@ void UMassTrafficUpdateIntersectionsProcessor::Execute(FMassEntityManager& Entit
 						&MassCrowdSubsystem, false);
 
 
-					// We need to call AddTimeRemainingToCurrentPeriod before UpdateTrafficLightsForCurrentPeriod
-					// since the traffic light state flags change according to PeriodTimeRemaining.
-					// Without calling AddTimeRemainingToCurrentPeriod first, the red light would flicker once
-					// between the "yellow left arrow" and "green without the left arrow" states.
-					IntersectionFragment.AddTimeRemainingToCurrentPeriod();
+					IntersectionFragment.PeriodTimeRemaining = IntersectionFragment.GetCurrentPeriod().Duration;
+
+					if (MassTrafficSettings->bUseHalfDurationPeriodWhenNoVehiclesOrPedestriansAreWaiting)
+					{
+						if (IntersectionFragment.bHasTrafficLights)
+						{
+							// For traffic light intersections, we attempt to cut the period time in half,
+							// in order to increase the flow of traffic, if there are no vehicles or pedestrians
+							// immediately waiting to use this new period's open lanes.
+							if (!AreVehiclesWaitingForIntersection(IntersectionFragment) && NumWaitingPedestriansInNewPeriod <= 0)
+							{
+								IntersectionFragment.PeriodTimeRemaining = IntersectionFragment.GetCurrentPeriod().Duration * 0.5f;
+							}
+						}
+					}
 					
 					IntersectionFragment.UpdateTrafficLightsForCurrentPeriod();
 				}
