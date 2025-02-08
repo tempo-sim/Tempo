@@ -821,7 +821,7 @@ void UMassTrafficLightUpdateIntersectionsProcessor::Execute(FMassEntityManager& 
 				// We do this, because we don't want them to start walking if the next period ends up getting ended early.
 				// It takes them a while to get off the curb onto the crosswalk, and the intersection won't sense this in time.
 				{
-					const EMassTrafficControllerLanesAction VehicleLanesAction = EMassTrafficControllerLanesAction::Open;
+					const EMassTrafficPeriodLanesAction VehicleLanesAction = EMassTrafficPeriodLanesAction::Open;
 					
 					const int32 MinPedestrians =
 						IntersectionFragment.bHasTrafficLights ?
@@ -840,7 +840,7 @@ void UMassTrafficLightUpdateIntersectionsProcessor::Execute(FMassEntityManager& 
 					const EMassTrafficPeriodLanesAction PedestrianLanesAction =
 							(bPeriodHasAnyOpenCrosswalkLanes && bAreAllCurrentCrosswalkLanesOpenNextPeriod) ||
 							(bCanOpenPedestrianLanesByProbability &&
-							NumPedestriansWaitingForIntersection(IntersectionFragment, *ZoneGraphStorage, &MassCrowdSubsystem) >= MinPedestrians &&
+							NumWaitingPedestriansInNewPeriod >= MinPedestrians &&
 							// WARNING - If there are no pedestrians in the level, this will never end up being executed, so the value will never be cleared -
 							!IsStoppedVehicleBlockingCrosswalk(IntersectionFragment, true)) /*(See all CROSSWALKOVERLAP.)*/ ?
 						EMassTrafficPeriodLanesAction::Open :
