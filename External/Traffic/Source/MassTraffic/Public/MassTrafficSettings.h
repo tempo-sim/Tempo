@@ -341,7 +341,13 @@ public:
 
 	/** How long a yellow light lasts. */
 	UPROPERTY(EditAnywhere, Config, Category="Intersections|Durations|Standard")
-	float StandardTrafficPrepareToStopSeconds = 2.0f;
+	float StandardTrafficPrepareToStopSeconds = 4.0f;
+
+	/** When advancing to the next period for traffic light intersections,
+	 * should we cut the period's duration in half when no vehicles or pedestrians
+	 * are immediately waiting to use the period's open lanes? */
+	UPROPERTY(EditAnywhere, Config, Category="Intersections|Durations|Standard")
+	bool bUseHalfDurationPeriodWhenNoVehiclesOrPedestriansAreWaiting = true;
 
 	/**
 	 * The number of pedestrians that need to be waiting at a pedestrian crossing to trigger that crossing to open,
