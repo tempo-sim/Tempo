@@ -678,14 +678,14 @@ void ChooseLaneForLaneChange(
 	{
 		InOutRecommendation.Lane_Chosen = CandidateTrafficLaneData_Left;
 		InOutRecommendation.bChoseLaneOnLeft = true;
-		InOutRecommendation.Level = bAlreadyChoseLane ? MustLaneChangeSoon : NormalLaneChange;			
+		InOutRecommendation.Level = bAlreadyChoseLane ? TurningLaneChange : NormalLaneChange;			
 		return;
 	}
 	else if (!CandidateTrafficLaneData_Left && CandidateTrafficLaneData_Right)
 	{
 		InOutRecommendation.Lane_Chosen = CandidateTrafficLaneData_Right;
 		InOutRecommendation.bChoseLaneOnRight = true;
-		InOutRecommendation.Level = bAlreadyChoseLane ? MustLaneChangeSoon : NormalLaneChange;			
+		InOutRecommendation.Level = bAlreadyChoseLane ? TurningLaneChange : NormalLaneChange;			
 		return;
 	}
 	else if (CandidateTrafficLaneData_Left && CandidateTrafficLaneData_Right)
@@ -696,14 +696,14 @@ void ChooseLaneForLaneChange(
 		{
 			InOutRecommendation.Lane_Chosen = CandidateTrafficLaneData_Left;
 			InOutRecommendation.bChoseLaneOnLeft = true;
-			InOutRecommendation.Level = bAlreadyChoseLane ? MustLaneChangeSoon : NormalLaneChange;
+			InOutRecommendation.Level = bAlreadyChoseLane ? TurningLaneChange : NormalLaneChange;
 			return;				
 		}
 		else if (DownstreamFlowDensity_Candidate_Right < DownstreamFlowDensity_Candidate_Left) 
 		{
 			InOutRecommendation.Lane_Chosen = CandidateTrafficLaneData_Right;
 			InOutRecommendation.bChoseLaneOnRight = true;
-			InOutRecommendation.Level = bAlreadyChoseLane ? MustLaneChangeSoon : NormalLaneChange;
+			InOutRecommendation.Level = bAlreadyChoseLane ? TurningLaneChange : NormalLaneChange;
 			return;
 		}
 		else // ..not as rare as you'd guess - happens (1) with float-16 density values (2) when density is zero
@@ -712,14 +712,14 @@ void ChooseLaneForLaneChange(
 			{
 				InOutRecommendation.Lane_Chosen = CandidateTrafficLaneData_Left;
 				InOutRecommendation.bChoseLaneOnLeft = true;
-				InOutRecommendation.Level = bAlreadyChoseLane ? MustLaneChangeSoon : NormalLaneChange;
+				InOutRecommendation.Level = bAlreadyChoseLane ? TurningLaneChange : NormalLaneChange;
 				return;
 			}
 			else
 			{
 				InOutRecommendation.Lane_Chosen = CandidateTrafficLaneData_Right;
 				InOutRecommendation.bChoseLaneOnRight = true;
-				InOutRecommendation.Level = bAlreadyChoseLane ? MustLaneChangeSoon : NormalLaneChange;
+				InOutRecommendation.Level = bAlreadyChoseLane ? TurningLaneChange : NormalLaneChange;
 				return;
 			}
 		}

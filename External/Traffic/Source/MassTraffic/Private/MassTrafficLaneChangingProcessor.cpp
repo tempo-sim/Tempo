@@ -79,61 +79,55 @@ static void TryStartingNewLaneChange(
 	//		(2) It's on a lane that it's not allowed to change lanes on.
 	//		(3) If lanes are splitting or merging (no lane changes allowed on these.)
 	//		(4) All lane changes are blocked until we get on the next lane. 
-	//		(5) The lane change sleep timer is not zero. This helps with performance.
+	//		(5) The lane change sleep timer is not zero. This helps with performance. *Unless it's a turning lane change
 	//		(6) Vehicle says it can't stop, and has registered itself with a next lane it must go onto next.
 	//          If the vehicle can't stop, it's already reserved itself on its next lane. If we choose a different lane
 	//          now, we'll permanently upset that counter.
 	//		(7) It's not time to lane change AND the lanes are not transverse. If they're transverse, we consider a lane
 	//			change anyway, because these are regions where lanes used to merge and split at the same time, and means
-	//			the car should consider changing lanes.
+	//			the car should consider changing lanes. *Unless it's a turning lane change
 
 	FMassTrafficLaneChangeRecommendation LaneChangeRecommendation;
 	const int32 LaneIndex_Current = ZoneGraphLaneLocationFragment_Current.LaneHandle.Index;
 	FZoneGraphTrafficLaneData* Lane_Current = MassTrafficSubsystem.GetMutableTrafficLaneData(ZoneGraphLaneLocationFragment_Current.LaneHandle);
-	
+
+	// Consider a turning lane change if we know our next land and would have the space to do it.
 	if (FZoneGraphTrafficLaneData* NextLane = VehicleControlFragment_Current.NextLane)
 	{
-		auto MaybeForceLaneChange = [&ZoneGraphStorage,
-		                             &VehicleControlFragment_Current,
-		                             Lane_Current] (EZoneGraphTurnType TurnType)
+		const EZoneGraphTurnType TurnType = NextLane->bTurnsLeft ? EZoneGraphTurnType::Left : NextLane->bTurnsRight ? EZoneGraphTurnType::Right : EZoneGraphTurnType::NoTurn;
+		if (const FMassTrafficLanePriorityFilters* TurningLanePriorityFilterForTurnType = VehicleControlFragment_Current.TurningLanePriorityFilters.Find(TurnType))
 		{
-			if (const FMassTrafficLanePriorityFilters* TurningLanePriorityFilterForTurnType = VehicleControlFragment_Current.TurningLanePriorityFilters.Find(TurnType))
+			for (const FZoneGraphTagFilter& TurningLanePriorityFilter : TurningLanePriorityFilterForTurnType->LaneTagFilters)
 			{
-				for (const FZoneGraphTagFilter& TurningLanePriorityFilter : TurningLanePriorityFilterForTurnType->LaneTagFilters)
+				FZoneGraphTagMask RightLaneTagMask;
+				if (Lane_Current->RightLane)
 				{
-					FZoneGraphTagMask RightLaneTagMask;
-					if (Lane_Current->RightLane)
-					{
-						UE::ZoneGraph::Query::GetLaneTags(ZoneGraphStorage, Lane_Current->RightLane->LaneHandle, RightLaneTagMask);
-					}
-					// Arbitrary choice: if left and right lanes are equally preferred, tie goes to the right lane
-					if (TurningLanePriorityFilter.Pass(RightLaneTagMask))
-					{
-						return FMassTrafficLaneChangeRecommendation({MustLaneChangeSoon,
-																	   false,
-																	   true,
-																	   Lane_Current->RightLane,
-																	   false});
-					}
-					FZoneGraphTagMask LeftLaneTagMask;
-					if (Lane_Current->LeftLane)
-					{
-						UE::ZoneGraph::Query::GetLaneTags(ZoneGraphStorage, Lane_Current->LeftLane->LaneHandle, LeftLaneTagMask);
-					}
-					if (TurningLanePriorityFilter.Pass(LeftLaneTagMask))
-					{
-						return FMassTrafficLaneChangeRecommendation({MustLaneChangeSoon,
-																	   true,
-																	   false,
-																	   Lane_Current->LeftLane,
-																	   false});
-					}
+					UE::ZoneGraph::Query::GetLaneTags(ZoneGraphStorage, Lane_Current->RightLane->LaneHandle, RightLaneTagMask);
+				}
+				FZoneGraphTagMask LeftLaneTagMask;
+				if (Lane_Current->LeftLane)
+				{
+					UE::ZoneGraph::Query::GetLaneTags(ZoneGraphStorage, Lane_Current->LeftLane->LaneHandle, LeftLaneTagMask);
+				}
+				// Arbitrary choice: if left and right lanes are equally preferred, tie goes to the right lane
+				if (TurningLanePriorityFilter.Pass(RightLaneTagMask))
+				{
+					LaneChangeRecommendation = FMassTrafficLaneChangeRecommendation({TurningLaneChange,
+																	false,
+																	true,
+																	Lane_Current->RightLane,
+																	false});
+				}
+				else if (TurningLanePriorityFilter.Pass(LeftLaneTagMask))
+				{
+					LaneChangeRecommendation = FMassTrafficLaneChangeRecommendation({TurningLaneChange,
+																	true,
+																	false,
+																	Lane_Current->LeftLane,
+																	false});
 				}
 			}
-			return FMassTrafficLaneChangeRecommendation();
-		};
-
-		LaneChangeRecommendation = MaybeForceLaneChange(NextLane->bTurnsLeft ? EZoneGraphTurnType::Left : NextLane->bTurnsRight ? EZoneGraphTurnType::Right : EZoneGraphTurnType::NoTurn);
+		}
 	}
 
 	check(Lane_Current->LaneHandle.DataHandle == ZoneGraphStorage.DataHandle);
@@ -158,7 +152,7 @@ static void TryStartingNewLaneChange(
 		return;
 	}
 
-	if (LaneChangeRecommendation.Level != MustLaneChangeSoon)
+	if (LaneChangeRecommendation.Level != TurningLaneChange)
 	{
 		//  See (5) above.
 		if (LaneChangeFragment_Current.StaggeredSleepCounterForStartNewLaneChanges)
@@ -242,7 +236,7 @@ static void TryStartingNewLaneChange(
 	if (NextVehicleFragment_Current.NextVehicles_LaneChange.IsFull())
 	{
 		UE_LOG(LogMassTraffic, Warning, TEXT("%s - Current vehicle has full list of lane change next vehicles. Skipping lane change."), ANSI_TO_TCHAR(__FUNCTION__));
-		if (LaneChangeRecommendation.Level != MustLaneChangeSoon)
+		if (LaneChangeRecommendation.Level != TurningLaneChange)
 		{
 			LaneChangeFragment_Current.SetLaneChangeCountdownSecondsToBeAtLeast(MassTrafficSettings, EMassTrafficLaneChangeCountdownSeconds::AsRetryUsingSettings, RandomStream);
 		}
@@ -304,7 +298,7 @@ static void TryStartingNewLaneChange(
 		//DrawDebugZLine(Coordinator.GetWorld(), TransformFragment_Current.GetTransform().GetLocation(), FColor::Red, false, 1.0f, 60.0f, 10000.f);
 		UE_LOG(LogMassTraffic, Error, TEXT("%s - Lane is too short for vehicle! -- lane len %.2f < vehicle radius %.2f"),
 			ANSI_TO_TCHAR(__FUNCTION__), LaneLength_Chosen, AgentRadiusFragment_Current.Radius);
-		if (LaneChangeRecommendation.Level != MustLaneChangeSoon)
+		if (LaneChangeRecommendation.Level != TurningLaneChange)
 		{
 			LaneChangeFragment_Current.SetLaneChangeCountdownSecondsToBeAtLeast(MassTrafficSettings, EMassTrafficLaneChangeCountdownSeconds::AsRetryUsingSettings, RandomStream);
 		}
@@ -313,7 +307,7 @@ static void TryStartingNewLaneChange(
 	if (DistanceAlongLane_Chosen >= MaxDistanceAlongLane_Chosen)
 	{
 		//DrawDebugZLine(Coordinator.GetWorld(), TransformFragment_Current.GetTransform().GetLocation(), FColor::Red, false, 0.5f);
-		if (LaneChangeRecommendation.Level != MustLaneChangeSoon)
+		if (LaneChangeRecommendation.Level != TurningLaneChange)
 		{
 			LaneChangeFragment_Current.SetLaneChangeCountdownSecondsToBeAtLeast(MassTrafficSettings, EMassTrafficLaneChangeCountdownSeconds::AsRetryUsingSettings, RandomStream);
 		}
@@ -332,7 +326,7 @@ static void TryStartingNewLaneChange(
 	
 	if (EndDistanceAlongLaneForLaneChange_Chosen > MaxDistanceAlongLane_Chosen)
 	{
-		if (LaneChangeRecommendation.Level != MustLaneChangeSoon)
+		if (LaneChangeRecommendation.Level != TurningLaneChange)
 		{
 			LaneChangeFragment_Current.SetLaneChangeCountdownSecondsToBeAtLeast(MassTrafficSettings, EMassTrafficLaneChangeCountdownSeconds::AsRetryUsingSettings, RandomStream);
 		}
@@ -349,7 +343,7 @@ static void TryStartingNewLaneChange(
 	{
 		// Error condition. Try again next time.
 		//DrawDebugZLine(Coordinator.GetWorld(), TransformFragment_Current.GetTransform().GetLocation(), FColor::Red, false, 0.5f);
-		if (LaneChangeRecommendation.Level != MustLaneChangeSoon)
+		if (LaneChangeRecommendation.Level != TurningLaneChange)
 		{
 			LaneChangeFragment_Current.SetLaneChangeCountdownSecondsToBeAtLeast(MassTrafficSettings, EMassTrafficLaneChangeCountdownSeconds::AsRetryUsingSettings, RandomStream);
 		}
@@ -397,7 +391,7 @@ static void TryStartingNewLaneChange(
 	if ((LaneChangeFragment_Chosen_Ahead && LaneChangeFragment_Chosen_Ahead->IsLaneChangeInProgress()) ||
 		 (LaneChangeFragment_Chosen_Behind && LaneChangeFragment_Chosen_Behind->IsLaneChangeInProgress()))
 	{
-		if (LaneChangeRecommendation.Level != MustLaneChangeSoon)
+		if (LaneChangeRecommendation.Level != TurningLaneChange)
 		{
 			LaneChangeFragment_Current.SetLaneChangeCountdownSecondsToBeAtLeast(MassTrafficSettings, EMassTrafficLaneChangeCountdownSeconds::AsRetryUsingSettings, RandomStream);
 		}
@@ -421,7 +415,7 @@ static void TryStartingNewLaneChange(
 
 	if (!LaneChangeFitReport.IsClear())
 	{
-		if (LaneChangeRecommendation.Level != MustLaneChangeSoon)
+		if (LaneChangeRecommendation.Level != TurningLaneChange)
 		{
 			LaneChangeFragment_Current.SetLaneChangeCountdownSecondsToBeAtLeast(MassTrafficSettings, EMassTrafficLaneChangeCountdownSeconds::AsRetryUsingSettings, RandomStream);
 		}
@@ -460,7 +454,7 @@ static void TryStartingNewLaneChange(
 	{
 		// Error condition. Try again next time.
 		//DrawDebugZLine(Coordinator.GetWorld(), TransformFragment_Current.GetTransform().GetLocation(), FColor::Red, false, 1.0f, 20.0f, 2000.f);
-		if (LaneChangeRecommendation.Level != MustLaneChangeSoon)
+		if (LaneChangeRecommendation.Level != TurningLaneChange)
 		{
 			LaneChangeFragment_Current.SetLaneChangeCountdownSecondsToBeAtLeast(MassTrafficSettings, EMassTrafficLaneChangeCountdownSeconds::AsRetryUsingSettings, RandomStream);
 		}
@@ -496,7 +490,7 @@ static void TryStartingNewLaneChange(
 		NextVehicleFragment_Current_Behind->NextVehicles_LaneChange.IsFull())
 	{
 		UE_LOG(LogMassTraffic, Warning, TEXT("%s - Current behind vehicle has full list of lane change next vehicles. Skipping lane change."), ANSI_TO_TCHAR(__FUNCTION__));
-		if (LaneChangeRecommendation.Level != MustLaneChangeSoon)
+		if (LaneChangeRecommendation.Level != TurningLaneChange)
 		{
 			LaneChangeFragment_Current.SetLaneChangeCountdownSecondsToBeAtLeast(MassTrafficSettings, EMassTrafficLaneChangeCountdownSeconds::AsRetryUsingSettings, RandomStream);
 		}
@@ -511,7 +505,7 @@ static void TryStartingNewLaneChange(
 	if ((LaneChangeFragment_Current_Ahead && LaneChangeFragment_Current_Ahead->IsLaneChangeInProgress()) ||
 		 (LaneChangeFragment_Current_Behind && LaneChangeFragment_Current_Behind->IsLaneChangeInProgress()))
 	{
-		if (LaneChangeRecommendation.Level != MustLaneChangeSoon)
+		if (LaneChangeRecommendation.Level != TurningLaneChange)
 		{
 			LaneChangeFragment_Current.SetLaneChangeCountdownSecondsToBeAtLeast(MassTrafficSettings, EMassTrafficLaneChangeCountdownSeconds::AsRetryUsingSettings, RandomStream);
 		}
@@ -545,7 +539,7 @@ static void TryStartingNewLaneChange(
 		MassTrafficSettings,
 		EntityManager))
 	{
-		if (LaneChangeRecommendation.Level != MustLaneChangeSoon)
+		if (LaneChangeRecommendation.Level != TurningLaneChange)
 		{
 			LaneChangeFragment_Current.SetLaneChangeCountdownSecondsToBeAtLeast(MassTrafficSettings, EMassTrafficLaneChangeCountdownSeconds::AsRetryUsingSettings, RandomStream);
 		}
@@ -574,7 +568,7 @@ static void TryStartingNewLaneChange(
 		// Lane change is instant, vehicle is already on the other lane, and we're pretty much done.
 
 		// IMPORTANT - We should only try another lane change after the same amount of time a lane change would have taken.
-		if (LaneChangeRecommendation.Level != MustLaneChangeSoon)
+		if (LaneChangeRecommendation.Level != TurningLaneChange)
 		{
 			LaneChangeFragment_Current.SetLaneChangeCountdownSecondsToBeAtLeast(MassTrafficSettings, EMassTrafficLaneChangeCountdownSeconds::AsNewTryUsingSettings, RandomStream);
 		}
