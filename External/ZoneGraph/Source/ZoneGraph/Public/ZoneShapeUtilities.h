@@ -5,6 +5,8 @@
 #include "ZoneGraphTypes.h"
 #include "ZoneShapeUtilities.generated.h"
 
+struct FZoneGraphBuilder;
+
 /** Struct describing a link for a specified lane, used during building */
 USTRUCT()
 struct FZoneShapeLaneInternalLink
@@ -25,6 +27,22 @@ struct FZoneShapeLaneInternalLink
 	FZoneLaneLinkData LinkData = {};
 };
 
+struct FLaneConnectionSlot
+{
+	FVector Position = FVector::ZeroVector;
+	FVector Forward = FVector::ZeroVector;
+	FVector Up = FVector::ZeroVector;
+	FZoneLaneDesc LaneDesc;
+	int32 PointIndex = 0;	// Index in dest point array
+	int32 Index = 0;		// Index within an entry
+	uint16 EntryID = 0;		// Entry ID from source data
+	const FZoneLaneProfile* Profile = nullptr;
+	EZoneShapeLaneConnectionRestrictions Restrictions = EZoneShapeLaneConnectionRestrictions::None;
+	float DistanceFromProfileEdge = 0.0f;	// Distance from lane profile edge
+	float DistanceFromFarProfileEdge = 0.0f; // Distance to other lane profile edge
+	float InnerTurningRadius = 0.0f; // Inner/minimum turning radius when using Arc routing.
+};
+
 namespace UE { namespace ZoneShape { namespace Utilities
 {
 
@@ -33,7 +51,8 @@ ZONEGRAPH_API void TessellateSplineShape(TConstArrayView<FZoneShapePoint> Points
 										 FZoneGraphStorage& OutZoneStorage, TArray<FZoneShapeLaneInternalLink>& OutInternalLinks);
 
 // Converts polygon shape to a zone data.
-ZONEGRAPH_API void TessellatePolygonShape(TConstArrayView<FZoneShapePoint> Points, const EZoneShapePolygonRoutingType RoutingType, TConstArrayView<FZoneLaneProfile> LaneProfiles, const FZoneGraphTagMask ZoneTags, const FMatrix& LocalToWorld,
+ZONEGRAPH_API void TessellatePolygonShape(const UZoneShapeComponent& SourceShapeComp, const FZoneGraphBuilder& ZoneGraphBuilder,
+										  TConstArrayView<FZoneShapePoint> Points, TConstArrayView<FZoneLaneProfile> LaneProfiles, const FMatrix& LocalToWorld,
 										  FZoneGraphStorage& OutZoneStorage, TArray<FZoneShapeLaneInternalLink>& OutInternalLinks);
 
 // Returns cubic bezier points for give shape segment. Adjusts end points based on shape point types. 

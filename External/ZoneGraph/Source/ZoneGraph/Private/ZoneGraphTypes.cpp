@@ -135,6 +135,29 @@ void FZoneLaneProfile::ReverseLanes()
 	}
 }
 
+bool FZoneLaneProfile::IsValid(const bool bMustHaveName) const
+{
+	if (bMustHaveName && Name == NAME_None)
+	{
+		return false;
+	}
+		
+	if (!ID.IsValid())
+	{
+		return false;
+	}
+		
+	for (const FZoneLaneDesc& Lane : Lanes)
+	{
+		if (Lane.Width <= 0.0f)
+		{
+			return false;
+		}
+	}
+
+	return true;
+}
+
 float FZoneGraphBuildSettings::GetLaneTessellationTolerance(const FZoneGraphTagMask LaneTags) const
 {
 	float Tolerance = CommonTessellationTolerance;

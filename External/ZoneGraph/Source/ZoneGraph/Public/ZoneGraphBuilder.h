@@ -5,6 +5,8 @@
 #include "CoreMinimal.h"
 #include "ZoneGraphTypes.h"
 #include "HierarchicalHashGrid2D.h"
+#include "ZoneShapeComponent.h"
+#include "ZoneShapeUtilities.h"
 #include "ZoneGraphBuilder.generated.h"
 
 class AZoneGraphData;
@@ -65,7 +67,7 @@ struct ZONEGRAPH_API FZoneGraphBuilder
 
 public:
 	FZoneGraphBuilder();
-	~FZoneGraphBuilder();
+	virtual ~FZoneGraphBuilder();
 
 	void RegisterZoneShapeComponent(UZoneShapeComponent& ShapeComp);
 	void UnregisterZoneShapeComponent(UZoneShapeComponent& ShapeComp);
@@ -84,7 +86,7 @@ public:
 
 	/** Converts single zone shape into a zone storage, used in UI for editing and rendering.
 	*/
-	static void BuildSingleShape(const UZoneShapeComponent& ShapeComp, const FMatrix& LocalToWorld, FZoneGraphStorage& OutZoneStorage);
+	void BuildSingleShape(const UZoneShapeComponent& ShapeComp, const FMatrix& LocalToWorld, FZoneGraphStorage& OutZoneStorage);
 
 	/** Returns items that potentially touch the bounds in the HashGrid. Operates on grid level, can have false positives.
 	 * @param Bounds - Query bounding box.
@@ -92,12 +94,14 @@ public:
 	 */
 	void QueryHashGrid(const FBox& Bounds, TArray<FZoneGraphBuilderHashGrid2D::ItemIDType>& OutResults);
 
+	virtual bool ShouldFilterLaneConnection(const UZoneShapeComponent& PolygonShapeComp, const UZoneShapeComponent& SourceShapeComp, const TArray<FLaneConnectionSlot>& SourceSlots, const int32 SourceSlotQueryIndex, const UZoneShapeComponent& DestShapeComp, const TArray<FLaneConnectionSlot>& DestSlots, const int32 DestSlotQueryIndex) const { return false; };
+
 protected:
 	void Build(AZoneGraphData& ZoneGraphData);
 	void RequestRebuild();
 	void OnLaneProfileChanged(const FZoneLaneProfileRef& ChangedLaneProfileRef);
 	uint32 CalculateCombinedShapeHash(const AZoneGraphData& ZoneGraphData) const;
-	static void AppendShapeToZoneStorage(const UZoneShapeComponent& ShapeComp, const FMatrix& LocalToWorld, FZoneGraphStorage& OutZoneStorage, TArray<FZoneShapeLaneInternalLink>& OutInternalLinks, FZoneGraphBuildData* InBuildData = nullptr);
+	void AppendShapeToZoneStorage(const UZoneShapeComponent& ShapeComp, const FMatrix& LocalToWorld, FZoneGraphStorage& OutZoneStorage, TArray<FZoneShapeLaneInternalLink>& OutInternalLinks, FZoneGraphBuildData* InBuildData = nullptr);
 	static void ConnectLanes(TArray<FZoneShapeLaneInternalLink>& InternalLinks, FZoneGraphStorage& OutZoneStorage);
 
 	UPROPERTY(Transient)

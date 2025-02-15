@@ -1,11 +1,10 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "ZoneGraphBuilder.h"
+
 #include "ZoneGraphTypes.h"
 #include "ZoneGraphDelegates.h"
 #include "ZoneGraphData.h"
-#include "ZoneShapeComponent.h"
-#include "ZoneShapeUtilities.h"
 #include "ZoneGraphSettings.h"
 
 namespace UE::ZoneGraph::Internal
@@ -312,6 +311,9 @@ void FZoneGraphBuilder::FindShapeConnections(const UZoneShapeComponent& SourceSh
 void FZoneGraphBuilder::BuildSingleShape(const UZoneShapeComponent& ShapeComp, const FMatrix& LocalToWorld, FZoneGraphStorage& OutZoneStorage)
 {
 	TArray<FZoneShapeLaneInternalLink> InternalLinks;
+
+	// Const cast is intentional.  Need to update connected shapes before running through the build pathway.
+	const_cast<UZoneShapeComponent&>(ShapeComp).UpdateConnectedShapes();
 	AppendShapeToZoneStorage(ShapeComp, LocalToWorld, OutZoneStorage, InternalLinks);
 	ConnectLanes(InternalLinks, OutZoneStorage);
 }
@@ -437,7 +439,7 @@ void FZoneGraphBuilder::AppendShapeToZoneStorage(const UZoneShapeComponent& Shap
 			}
 		}
 
-		UE::ZoneShape::Utilities::TessellatePolygonShape(AdjustedPoints, ShapeComp.GetPolygonRoutingType(), PolyLaneProfiles, ShapeComp.GetTags(), LocalToWorld, OutZoneStorage, OutInternalLinks);
+		UE::ZoneShape::Utilities::TessellatePolygonShape(ShapeComp, *this, AdjustedPoints, PolyLaneProfiles, LocalToWorld, OutZoneStorage, OutInternalLinks);
 	}
 	else
 	{
@@ -500,7 +502,7 @@ void FZoneGraphBuilder::Build(AZoneGraphData& ZoneGraphData)
 	const uint32 NewHash = CalculateCombinedShapeHash(ZoneGraphData);
 	ZoneGraphData.SetCombinedShapeHash(NewHash);
 
-	ZoneGraphData.UpdateDrawing();
+ZoneGraphData.UpdateDrawing();
 }
 
 void FZoneGraphBuilder::ConnectLanes(TArray<FZoneShapeLaneInternalLink>& InternalLinks, FZoneGraphStorage& ZoneStorage)

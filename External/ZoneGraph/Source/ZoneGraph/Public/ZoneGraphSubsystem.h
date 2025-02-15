@@ -47,7 +47,9 @@ public:
 	TConstArrayView<FRegisteredZoneGraphData> GetRegisteredZoneGraphData() const { return RegisteredZoneGraphData; }
 
 #if WITH_EDITOR
-	FZoneGraphBuilder& GetBuilder() { return Builder; }
+	void RegisterBuilder(FZoneGraphBuilder* Builder) { OverrideBuilder = Builder; }
+	void ResetBuilder() { OverrideBuilder = nullptr; }
+	FZoneGraphBuilder& GetBuilder() { return OverrideBuilder != nullptr ? *OverrideBuilder : DefaultBuilder; }
 #endif
 
 	// Queries
@@ -113,10 +115,16 @@ public:
 	// Tags
 	
 	// Returns tag based on name.
+	UFUNCTION(BlueprintCallable, Category = "ZoneGraphSubsystem|Tags")
 	FZoneGraphTag GetTagByName(FName TagName) const;
 
 	// Returns the name of a specific tag.
+	UFUNCTION(BlueprintCallable, Category = "ZoneGraphSubsystem|Tags")
 	FName GetTagName(FZoneGraphTag Tag) const;
+
+	// Returns the names of all the tags in a given tag mask.
+	UFUNCTION(BlueprintCallable, Category = "ZoneGraphSubsystem|Tags")
+	TArray<FName> GetTagNamesFromTagMask(const FZoneGraphTagMask& TagMask) const;
 
 	// Returns info about a specific tag.
 	const FZoneGraphTagInfo* GetTagInfo(FZoneGraphTag Tag) const;
@@ -159,6 +167,7 @@ protected:
 #if WITH_EDITOR
 	FDelegateHandle OnActorMovedHandle;
 	FDelegateHandle OnRequestRebuildHandle;
-	FZoneGraphBuilder Builder;
+	FZoneGraphBuilder* OverrideBuilder;
+	FZoneGraphBuilder DefaultBuilder;
 #endif
 };

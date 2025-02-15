@@ -60,7 +60,7 @@ void UZoneGraphSubsystem::Tick(float DeltaTime)
 	const UWorld* World = GetWorld();
 	if (!World->IsGameWorld())
 	{
-		if (Builder.NeedsRebuild())
+		if (GetBuilder().NeedsRebuild())
 		{
 			const UZoneGraphSettings* ZoneGraphSettings = GetDefault<UZoneGraphSettings>();
 			check(ZoneGraphSettings);
@@ -73,7 +73,7 @@ void UZoneGraphSubsystem::Tick(float DeltaTime)
 	else
 	{
 		// Zone graph is not meant to update during game tick.
-		ensureMsgf(!Builder.NeedsRebuild(), TEXT("Builder should not need update during game."));
+		ensureMsgf(!GetBuilder().NeedsRebuild(), TEXT("Builder should not need update during game."));
 	}
 #endif
 }
@@ -194,7 +194,7 @@ void UZoneGraphSubsystem::OnActorMoved(AActor* Actor)
 	{
 		if (UZoneShapeComponent* ShapeComp = Actor->FindComponentByClass<UZoneShapeComponent>())
 		{
-			Builder.OnZoneShapeComponentChanged(*ShapeComp);
+			GetBuilder().OnZoneShapeComponentChanged(*ShapeComp);
 		}
 	}
 }
@@ -216,7 +216,7 @@ void UZoneGraphSubsystem::SpawnMissingZoneGraphData()
 
 	// Find the levels where the splines are located.
 	TSet<ULevel*> SupportedLevels;
-	for (const FZoneGraphBuilderRegisteredComponent& Registered : Builder.GetRegisteredZoneShapeComponents())
+	for (const FZoneGraphBuilderRegisteredComponent& Registered : GetBuilder().GetRegisteredZoneShapeComponents())
 	{
 		if (Registered.Component)
 		{
@@ -270,7 +270,7 @@ void UZoneGraphSubsystem::RebuildGraph(const bool bForceRebuild)
 		}
 	}
 
-	Builder.BuildAll(AllZoneGraphData, bForceRebuild);
+	GetBuilder().BuildAll(AllZoneGraphData, bForceRebuild);
 }
 
 #endif // WITH_EDITOR
@@ -472,6 +472,23 @@ FName UZoneGraphSubsystem::GetTagName(FZoneGraphTag Tag) const
 		}
 	}
 	return FName();
+}
+
+TArray<FName> UZoneGraphSubsystem::GetTagNamesFromTagMask(const FZoneGraphTagMask& TagMask) const
+{
+	TArray<FName> TagNames;
+	
+	const TConstArrayView<FZoneGraphTagInfo>& TagInfos = GetTagInfos();
+	for (const FZoneGraphTagInfo& TagInfo : TagInfos)
+	{
+		if (TagMask.Contains(TagInfo.Tag))
+		{
+			const FName& TagName = GetTagName(TagInfo.Tag);
+			TagNames.Add(TagName);
+		}
+	}
+
+	return TagNames;
 }
 
 const FZoneGraphTagInfo* UZoneGraphSubsystem::GetTagInfo(FZoneGraphTag Tag) const
