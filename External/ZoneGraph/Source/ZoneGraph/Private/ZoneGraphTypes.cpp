@@ -131,7 +131,10 @@ void FZoneLaneProfile::ReverseLanes()
 	Algo::Reverse(Lanes);
 	for (FZoneLaneDesc& Lane : Lanes)
 	{
-		Lane.Direction = Lane.Direction == EZoneLaneDirection::Forward ? EZoneLaneDirection::Backward : EZoneLaneDirection::Forward;
+		if (Lane.Direction != EZoneLaneDirection::None)
+		{
+			Lane.Direction = Lane.Direction == EZoneLaneDirection::Forward ? EZoneLaneDirection::Backward : EZoneLaneDirection::Forward;
+		}
 	}
 }
 

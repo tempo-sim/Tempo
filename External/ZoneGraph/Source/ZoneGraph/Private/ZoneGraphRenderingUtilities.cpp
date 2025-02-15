@@ -325,7 +325,7 @@ void DrawZoneLanes(const FZoneGraphStorage& ZoneStorage, int32 ZoneIndex, FPrimi
 			for (int32 i = Lane.PointsBegin + 1; i < Lane.PointsEnd; i++)
 			{
 				const FVector Point = bTransform ? FVector(LocalToWorld.TransformPosition(ZoneStorage.LanePoints[i])) : ZoneStorage.LanePoints[i];
-				PDI->DrawTranslucentLine(PrevPoint, Point, Color, SDPG_World, LineThickness, DepthBias, true);
+				PDI->DrawTranslucentLine(PrevPoint, Point, Color, SDPG_Foreground, LineThickness, DepthBias, true);
 				PrevPoint = Point;
 			}
 		}
@@ -334,7 +334,7 @@ void DrawZoneLanes(const FZoneGraphStorage& ZoneStorage, int32 ZoneIndex, FPrimi
 			for (int32 i = Lane.PointsBegin + 1; i < Lane.PointsEnd; i++)
 			{
 				const FVector Point = bTransform ? FVector(LocalToWorld.TransformPosition(ZoneStorage.LanePoints[i])) : ZoneStorage.LanePoints[i];
-				PDI->DrawLine(PrevPoint, Point, Color, SDPG_World, LineThickness, DepthBias, true);
+				PDI->DrawLine(PrevPoint, Point, Color, SDPG_Foreground, LineThickness, DepthBias, true);
 				PrevPoint = Point;
 			}
 		}
@@ -359,7 +359,7 @@ void DrawZoneLanes(const FZoneGraphStorage& ZoneStorage, int32 ZoneIndex, FPrimi
 				const FVector ArrowOrigin = ArrowPos;
 				const FVector ArrowTip = ArrowPos + ArrowDir * ArrowSize;
 
-				FPrimitiveSceneProxy::DrawArrowHead(PDI, ArrowTip, ArrowOrigin, ArrowSize, Color, SDPG_World, LineThickness, true);
+				FPrimitiveSceneProxy::DrawArrowHead(PDI, ArrowTip, ArrowOrigin, ArrowSize, Color, SDPG_Foreground, LineThickness, true);
 			}
 
 			// Draw adjacent lanes
@@ -373,12 +373,12 @@ void DrawZoneLanes(const FZoneGraphStorage& ZoneStorage, int32 ZoneIndex, FPrimi
 			FZoneGraphLinkedLane LeftLinkedLane;
 			if (UE::ZoneGraph::Query::GetFirstLinkedLane(ZoneStorage, LaneIdx, EZoneLaneLinkType::Adjacent, EZoneLaneLinkFlags::Left, EZoneLaneLinkFlags::None, LeftLinkedLane) && LeftLinkedLane.IsValid())
 			{
-				PDI->DrawLine(LaneStartPoint, LaneStartPoint + LaneStartSide * Lane.Width * 0.1f, FMath::Lerp(FLinearColor(Color), FLinearColor::Green, 0.3f), SDPG_World, LineThickness, DepthBias, true);
+				PDI->DrawLine(LaneStartPoint, LaneStartPoint + LaneStartSide * Lane.Width * 0.1f, FMath::Lerp(FLinearColor(Color), FLinearColor::Green, 0.3f), SDPG_Foreground, LineThickness, DepthBias, true);
 			}
 			FZoneGraphLinkedLane RightLinkedLane;
 			if (UE::ZoneGraph::Query::GetFirstLinkedLane(ZoneStorage, LaneIdx, EZoneLaneLinkType::Adjacent, EZoneLaneLinkFlags::Right, EZoneLaneLinkFlags::None, RightLinkedLane) && RightLinkedLane.IsValid())
 			{
-				PDI->DrawLine(LaneStartPoint, LaneStartPoint - LaneStartSide * Lane.Width * 0.1f, FMath::Lerp(FLinearColor(Color), FLinearColor::Red, 0.3f), SDPG_World, LineThickness, DepthBias, true);
+				PDI->DrawLine(LaneStartPoint, LaneStartPoint - LaneStartSide * Lane.Width * 0.1f, FMath::Lerp(FLinearColor(Color), FLinearColor::Red, 0.3f), SDPG_Foreground, LineThickness, DepthBias, true);
 			}
 		}
 	}

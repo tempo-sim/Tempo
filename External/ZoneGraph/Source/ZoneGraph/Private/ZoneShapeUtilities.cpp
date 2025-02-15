@@ -8,20 +8,6 @@
 #include "ZoneGraphSettings.h"
 #include "ZoneShapeComponent.h"
 
-namespace UE::ZoneGraph::Debug {
-
-	bool bRemoveOverlap = true;
-	bool bRemoveSameDestination = true;
-	bool bFillEmptyDestination = true;
-
-	FAutoConsoleVariableRef VarsGeneration[] = {
-		FAutoConsoleVariableRef(TEXT("ai.debug.zonegraph.generation.RemoveOverlap"), bRemoveOverlap, TEXT("Remove Overlapping lanes.")),
-		FAutoConsoleVariableRef(TEXT("ai.debug.zonegraph.generation.RemoveSameDestination"), bRemoveSameDestination, TEXT("Remove merging lanes leading to same destination.")),
-		FAutoConsoleVariableRef(TEXT("ai.debug.zonegraph.generation.FillEmptyDestination"), bFillEmptyDestination, TEXT("Fill stray empty destination lanes.")),
-	};
-
-} // UE::ZoneGraph::Debug
-
 namespace UE::ZoneShape::Utilities {
 
 // Normalizes an angle by making it in range -PI..PI. Angle in radians.
@@ -776,6 +762,10 @@ float GetMinLaneProfileTessellationTolerance(const FZoneLaneProfile& LaneProfile
 
 static void AddAdjacentLaneLinks(const int32 CurrentLaneIndex, const int32 LaneDescIndex, const TArray<FZoneLaneDesc>& LaneDescs, TArray<FZoneShapeLaneInternalLink>& OutInternalLinks)
 {
+	const UZoneGraphSettings* ZoneGraphSettings = GetDefault<UZoneGraphSettings>();
+	check(ZoneGraphSettings);
+	const FZoneGraphBuildSettings& BuildSettings = ZoneGraphSettings->GetBuildSettings();
+
 	const int32 NumLanes = LaneDescs.Num();
 	const FZoneLaneDesc& LaneDesc = LaneDescs[LaneDescIndex];
 
@@ -802,30 +792,38 @@ static void AddAdjacentLaneLinks(const int32 CurrentLaneIndex, const int32 LaneD
 		ensureMsgf(false, TEXT("Lane direction %d not implemented."), int32(LaneDesc.Direction));
 	}
 
-	if ((LaneDescIndex + 1) < NumLanes)
+	int32 NextLaneDescIndex = LaneDescIndex; 
+	while (++NextLaneDescIndex < NumLanes)
 	{
-		const FZoneLaneDesc& NextLaneDesc = LaneDescs[LaneDescIndex + 1];
-		if (NextLaneDesc.Direction != EZoneLaneDirection::None)
+		const FZoneLaneDesc& NextLaneDesc = LaneDescs[NextLaneDescIndex];
+		if (NextLaneDesc.Direction == EZoneLaneDirection::None)
 		{
-			if (LaneDesc.Direction != NextLaneDesc.Direction)
-			{
-				NextLinkFlags |= EZoneLaneLinkFlags::OppositeDirection;
-			}
-			OutInternalLinks.Emplace(CurrentLaneIndex, FZoneLaneLinkData(CurrentLaneIndex + 1, EZoneLaneLinkType::Adjacent, NextLinkFlags));
+			// Skip spacer lanes and continue until we find a real lane.
+			continue;
 		}
+		if (LaneDesc.Direction != NextLaneDesc.Direction)
+		{
+			NextLinkFlags |= EZoneLaneLinkFlags::OppositeDirection;
+		}
+		OutInternalLinks.Emplace(CurrentLaneIndex, FZoneLaneLinkData(CurrentLaneIndex + 1, EZoneLaneLinkType::Adjacent, NextLinkFlags));
+		break;
 	}
 
-	if ((LaneDescIndex - 1) >= 0)
+	int32 PrevLaneDescIndex = LaneDescIndex;
+	while (--PrevLaneDescIndex >= 0)
 	{
-		const FZoneLaneDesc& PrevLaneDesc = LaneDescs[LaneDescIndex - 1];
-		if (PrevLaneDesc.Direction != EZoneLaneDirection::None)
+		const FZoneLaneDesc& PrevLaneDesc = LaneDescs[PrevLaneDescIndex];
+		if (PrevLaneDesc.Direction == EZoneLaneDirection::None)
 		{
-			if (LaneDesc.Direction != PrevLaneDesc.Direction)
-			{
-				PrevLinkFlags |= EZoneLaneLinkFlags::OppositeDirection;
-			}
-			OutInternalLinks.Emplace(CurrentLaneIndex, FZoneLaneLinkData(CurrentLaneIndex - 1, EZoneLaneLinkType::Adjacent, PrevLinkFlags));
+			// Skip spacer lanes and continue until we find a real lane.
+			continue;
 		}
+		if (LaneDesc.Direction != PrevLaneDesc.Direction)
+		{
+			PrevLinkFlags |= EZoneLaneLinkFlags::OppositeDirection;
+		}
+		OutInternalLinks.Emplace(CurrentLaneIndex, FZoneLaneLinkData(CurrentLaneIndex - 1, EZoneLaneLinkType::Adjacent, PrevLinkFlags));
+		break;
 	}
 }
 
@@ -1029,21 +1027,21 @@ static int32 FitRange(const int32 RangeFirst, const int32 RangeNum, const int32 
 	return First;
 }
 
-static void AddOrUpdateConnection(TArray<FLaneConnectionCandidate>& Candidates, const int32 SourceSlot, const int32 DestSlot, const FZoneGraphTag Tag)
+static void AddOrUpdateConnection(TArray<FLaneConnectionCandidate>& Candidates, const int32 SourceSlot, const int32 DestSlot, const FZoneGraphTagMask& TagMask)
 {
 	FLaneConnectionCandidate* Cand = Candidates.FindByPredicate([SourceSlot, DestSlot](const FLaneConnectionCandidate& Cand) -> bool { return Cand.SourceSlot == SourceSlot&& Cand.DestSlot == DestSlot; });
 	if (Cand != nullptr)
 	{
-		Cand->TagMask = Cand->TagMask | FZoneGraphTagMask(Tag);
+		Cand->TagMask = Cand->TagMask | TagMask;
 	}
 	else
 	{
-		Candidates.Add(FLaneConnectionCandidate(SourceSlot, DestSlot, FZoneGraphTagMask(Tag)));
+		Candidates.Add(FLaneConnectionCandidate(SourceSlot, DestSlot, TagMask));
 	}
 }
 	
 static void AppendLaneConnectionCandidates(TArray<FLaneConnectionCandidate>& Candidates, TConstArrayView<FLaneConnectionSlot> SourceSlots, TConstArrayView<FLaneConnectionSlot> DestSlots,
-										   const FZoneGraphTag Tag, const int32 MainDestPointIndex)
+										   const FZoneGraphTagMask& TagMask, const int32 MainDestPointIndex, bool bTurning)
 {
 	const int32 SourceNum = SourceSlots.Num();
 	const int32 DestNum = DestSlots.Num();
@@ -1066,7 +1064,7 @@ static void AppendLaneConnectionCandidates(TArray<FLaneConnectionCandidate>& Can
 		const int32 DestIdx = CalcDestinationSide(SourceSlots, DestSlots) ? (DestNum - 1) : 0;
 
 		// If a connection exists, we'll just update the tags, otherwise create new.
-		AddOrUpdateConnection(Candidates, SourceSlots[SourceIdx].Index, DestSlots[DestIdx].Index, Tag);
+		AddOrUpdateConnection(Candidates, SourceSlots[SourceIdx].Index, DestSlots[DestIdx].Index, TagMask);
 
 		return;
 	}
@@ -1081,7 +1079,7 @@ static void AppendLaneConnectionCandidates(TArray<FLaneConnectionCandidate>& Can
 			const int32 SourceIdx = i;
 			const int32 DestIdx = BestDestLaneIndex;
 
-			AddOrUpdateConnection(Candidates, SourceSlots[SourceIdx].Index, DestSlots[DestIdx].Index, Tag);
+			AddOrUpdateConnection(Candidates, SourceSlots[SourceIdx].Index, DestSlots[DestIdx].Index, TagMask);
 		}
 		
 		return;
@@ -1089,40 +1087,54 @@ static void AppendLaneConnectionCandidates(TArray<FLaneConnectionCandidate>& Can
 
 	const bool bOneLanePerDestination = EnumHasAnyFlags(ConnectionRestrictions, EZoneShapeLaneConnectionRestrictions::OneLanePerDestination);
 
-	if (SourceNum < DestNum)
+	if (bTurning)
 	{
-		const int32 BestLaneIndex = CalcDestinationSide(SourceSlots, DestSlots) ? (DestNum - 1) : 0;
-
-		// Distribute the lanes symmetrically around that best lane.
-		const int32 FirstIndex = FitRange(BestLaneIndex - SourceNum/2, SourceNum, DestNum);
-
-		for (int32 i = 0; i < DestNum; i++)
+		// Turning connections by default get fully-connected slots. The builder may filter them later.
+		for (const FLaneConnectionSlot& SourceSlot : SourceSlots)
 		{
-			const int32 SourceIdxUnClamped = i - FirstIndex;
-			if (bOneLanePerDestination && (SourceIdxUnClamped < 0 || SourceIdxUnClamped >= SourceNum))
+			for (const FLaneConnectionSlot& DestSlot : DestSlots)
 			{
-				continue;
+				AddOrUpdateConnection(Candidates, SourceSlot.Index, DestSlot.Index, TagMask);
 			}
-
-			const int32 SourceIdx = FMath::Clamp(SourceIdxUnClamped, 0, SourceNum - 1);
-			const int32 DestIdx = i;
-			
-			AddOrUpdateConnection(Candidates, SourceSlots[SourceIdx].Index, DestSlots[DestIdx].Index, Tag);
 		}
 	}
 	else
 	{
-		const int32 BestLaneIndex = CalcDestinationSide(SourceSlots, DestSlots) ? 0 : (SourceNum - 1);
-
-		// Distribute the lanes symmetrically around that best lane.
-		const int32 FirstIndex = FitRange(BestLaneIndex - DestNum/2, DestNum, SourceNum);
-		
-		for (int32 i = 0; i < SourceNum; i++)
+		// Non-turning connections by default get one-to-one connected slots.
+		if (SourceNum < DestNum)
 		{
-			const int32 SourceIdx = i;
-			const int32 DestIdx = FMath::Clamp(i - FirstIndex, 0, DestNum - 1);
+			const int32 BestLaneIndex = CalcDestinationSide(SourceSlots, DestSlots) ? (DestNum - 1) : 0;
+
+			// Distribute the lanes symmetrically around that best lane.
+			const int32 FirstIndex = FitRange(BestLaneIndex - SourceNum/2, SourceNum, DestNum);
+
+			for (int32 i = 0; i < DestNum; i++)
+			{
+				const int32 SourceIdxUnClamped = i - FirstIndex;
+				if (bOneLanePerDestination && (SourceIdxUnClamped < 0 || SourceIdxUnClamped >= SourceNum))
+				{
+					continue;
+				}
+
+				const int32 SourceIdx = FMath::Clamp(SourceIdxUnClamped, 0, SourceNum - 1);
+				const int32 DestIdx = i;
 			
-			AddOrUpdateConnection(Candidates, SourceSlots[SourceIdx].Index, DestSlots[DestIdx].Index, Tag);
+				AddOrUpdateConnection(Candidates, SourceSlots[SourceIdx].Index, DestSlots[DestIdx].Index, TagMask);
+			}
+		}
+		else
+		{
+			const int32 BestLaneIndex = CalcDestinationSide(SourceSlots, DestSlots) ? 0 : (SourceNum - 1);
+
+			// Distribute the lanes symmetrically around that best lane.
+			const int32 FirstIndex = FitRange(BestLaneIndex - DestNum/2, DestNum, SourceNum);
+		
+			for (int32 i = 0; i < SourceNum; i++)
+			{
+				const int32 SourceIdx = i;
+				const int32 DestIdx = FMath::Clamp(i - FirstIndex, 0, DestNum - 1);
+				AddOrUpdateConnection(Candidates, SourceSlots[SourceIdx].Index, DestSlots[DestIdx].Index, TagMask);
+			}
 		}
 	}
 }
@@ -1244,7 +1256,10 @@ static void BuildLanesBetweenPoints(const FConnectionEntry& Source, TConstArrayV
 
 	int32 MainDestPointIndex = 0;
 	float MainDestScore = 0;
-	
+
+	// Cache these in case we need them later.
+	TMap<int32, EZoneGraphTurnType> DestinationTurnTypes;
+
 	for (int32 PointIndex = Destinations.Num() - 1; PointIndex >= 0; PointIndex--)
 	{
 		const FConnectionEntry& Dest = Destinations[PointIndex];
@@ -1273,18 +1288,21 @@ static void BuildLanesBetweenPoints(const FConnectionEntry& Source, TConstArrayV
 																									Dest.Profile, Dest.IncomingConnections);
 
 		const EZoneShapeLaneConnectionRestrictions Restrictions = Source.Point.GetLaneConnectionRestrictions() | RestrictionsFromRules;
-		
+
+		// Use closest point on dest so that lane profile widths do not affect direction.
+		const FVector SourceSide = FVector::CrossProduct(SourceForward, SourceUp);
+
+		const bool bIsTurning = FVector::DotProduct(SourceForward, DirToDest) < TurnThresholdAngleCos;
+		const bool bIsLeftTurn = bIsTurning && FVector::DotProduct(SourceSide, DirToDest) > 0.0f;
+
+		DestinationTurnTypes.Add(PointIndex, bIsTurning ? (bIsLeftTurn ? EZoneGraphTurnType::Left : EZoneGraphTurnType::Right) : EZoneGraphTurnType::NoTurn);
+
 		// Discard destination that would result in left or right turns.
 		if (EnumHasAnyFlags(Restrictions, EZoneShapeLaneConnectionRestrictions::NoLeftTurn | EZoneShapeLaneConnectionRestrictions::NoRightTurn))
 		{
 			const bool bRemoveLeft = EnumHasAnyFlags(Restrictions, EZoneShapeLaneConnectionRestrictions::NoLeftTurn);
 			const bool bRemoveRight = EnumHasAnyFlags(Restrictions, EZoneShapeLaneConnectionRestrictions::NoRightTurn);
-
-			// Use closest point on dest so that lane profile widths do not affect direction.
-			const FVector SourceSide = FVector::CrossProduct(SourceForward, SourceUp);
 			
-			const bool bIsTurning = FVector::DotProduct(SourceForward, DirToDest) < TurnThresholdAngleCos;
-			const bool bIsLeftTurn = FVector::DotProduct(SourceSide, DirToDest) > 0.0f;
 			if (bIsTurning)
 			{
 				const bool bSkip = bIsLeftTurn ? bRemoveLeft : bRemoveRight;
@@ -1364,6 +1382,10 @@ static void BuildLanesBetweenPoints(const FConnectionEntry& Source, TConstArrayV
 				continue;
 			}
 
+			FZoneGraphTagMask TagMask(Tag);
+
+			const EZoneGraphTurnType TurnType = DestinationTurnTypes[DestSlots[DestSlotsBegin].PointIndex];
+
 			// Collect slots that have the current flag set.
 			TagSourceSlots.Reset();
 			for (const FLaneConnectionSlot& Slot : SourceSlots)
@@ -1385,9 +1407,23 @@ static void BuildLanesBetweenPoints(const FConnectionEntry& Source, TConstArrayV
 				}
 			}
 
+			for (const auto& CompatibleTagsElem : BuildSettings.CompatibleTags.FilterByPredicate([Tag](const FZoneGraphCompatibleTags& Elem) { return Elem.SourceTag == Tag; }))
+			{
+				const FZoneGraphTag& DestTag = CompatibleTagsElem.DestTag;
+				for (int32 j = DestSlotsBegin; j < DestSlotsEnd; j++)
+				{
+					const FLaneConnectionSlot& DestSlot = DestSlots[j];
+					if (DestSlot.LaneDesc.Tags.ContainsAny(DestTag) && CompatibleTagsElem.CompatibleForTurnTypes.Contains(TurnType))
+					{
+						TagDestSlots.Add(DestSlot);
+						TagMask.Add(FZoneGraphTagMask(DestTag));
+					}
+				}
+			}
+
 			if (TagSourceSlots.Num() > 0 && TagDestSlots.Num() > 0)
 			{
-				AppendLaneConnectionCandidates(Candidates, TagSourceSlots, TagDestSlots, Tag, MainDestPointIndex);
+				AppendLaneConnectionCandidates(Candidates, TagSourceSlots, TagDestSlots, TagMask, MainDestPointIndex, TurnType != EZoneGraphTurnType::NoTurn);
 			}
 		}
 	}
@@ -1395,7 +1431,7 @@ static void BuildLanesBetweenPoints(const FConnectionEntry& Source, TConstArrayV
 	// Remove overlapping lanes.
 	// AppendLaneConnectionCandidates() sees only source and one destination at a time.
 	// This code removes any overlapping lanes and handles cases such as 4-lane entry might connect to two 2-lane exits.
-	if (UE::ZoneGraph::Debug::bRemoveOverlap)
+	if (BuildSettings.bRemoveOverlap)
 	{
 		for (int32 Index = 0; Index < Candidates.Num() - 1; Index++)
 		{
@@ -1441,7 +1477,7 @@ static void BuildLanesBetweenPoints(const FConnectionEntry& Source, TConstArrayV
 
 	// Remove lanes that that connect to same destination as other lanes
 	// This reduces the number of merging lanes when there are multiple destinations.
-	if (UE::ZoneGraph::Debug::bRemoveSameDestination)
+	if (BuildSettings.bRemoveSameDestination)
 	{
 		TArray<int32> SourceConnectionCount;
 		TArray<int32> DestConnectionCount;
@@ -1538,7 +1574,7 @@ static void BuildLanesBetweenPoints(const FConnectionEntry& Source, TConstArrayV
 	}
 
 	
-	if (UE::ZoneGraph::Debug::bFillEmptyDestination)
+	if (BuildSettings.bFillEmptyDestination)
 	{
 		// Fill in empty destination connections if possible.
 		// This usually happens when overlaps are removed, and i can leave left or right turn destinations empty.
@@ -1599,7 +1635,7 @@ static void BuildLanesBetweenPoints(const FConnectionEntry& Source, TConstArrayV
 
 	TArray<const UZoneShapeComponent*> ShapeComponentsInMap;
 	PointIndexToZoneShapeComponent.GenerateValueArray(ShapeComponentsInMap);
-
+	
 	const bool bAllZoneShapeComponentsInMapAreValid = !ShapeComponentsInMap.Contains(nullptr);
 	if (bAllZoneShapeComponentsInMapAreValid)
 	{
@@ -1795,7 +1831,7 @@ void TessellatePolygonShape(const UZoneShapeComponent& PolygonShapeComp, const F
 	TArray<int32> IncomingConnections;
 	OutgoingConnections.Init(0, Points.Num());
 	IncomingConnections.Init(0, Points.Num());
-	
+
 	for (int32 SourceIdx = 0; SourceIdx < Points.Num(); SourceIdx++)
 	{
 		const FZoneShapePoint& SourcePoint = Points[SourceIdx];

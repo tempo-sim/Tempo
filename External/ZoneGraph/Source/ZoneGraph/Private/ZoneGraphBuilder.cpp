@@ -311,7 +311,7 @@ void FZoneGraphBuilder::FindShapeConnections(const UZoneShapeComponent& SourceSh
 void FZoneGraphBuilder::BuildSingleShape(const UZoneShapeComponent& ShapeComp, const FMatrix& LocalToWorld, FZoneGraphStorage& OutZoneStorage)
 {
 	TArray<FZoneShapeLaneInternalLink> InternalLinks;
-
+	
 	// Const cast is intentional.  Need to update connected shapes before running through the build pathway.
 	const_cast<UZoneShapeComponent&>(ShapeComp).UpdateConnectedShapes();
 	AppendShapeToZoneStorage(ShapeComp, LocalToWorld, OutZoneStorage, InternalLinks);
