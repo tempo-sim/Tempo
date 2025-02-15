@@ -45,6 +45,12 @@ bool UTempoRoadLaneGraphSubsystem::TryGenerateZoneShapeComponents() const
 			FEditorScriptExecutionGuard ScriptGuard;
 			ITempoIntersectionInterface::Execute_SetupTempoIntersectionData(Actor);
 		}
+
+		if (Actor->Implements<UTempoCrosswalkInterface>())
+		{
+			FEditorScriptExecutionGuard ScriptGuard;
+			ITempoCrosswalkInterface::Execute_SetupTempoCrosswalkData(Actor);
+		}
 	}
 	
 	for (AActor* Actor : TActorRange<AActor>(GetWorld()))
@@ -64,6 +70,27 @@ bool UTempoRoadLaneGraphSubsystem::TryGenerateZoneShapeComponents() const
 				UE_LOG(LogTempoAgentsEditor, Error, TEXT("Tempo Lane Graph - Failed to create Road ZoneShapeComponents for Actor: %s."), *Actor->GetName());
 				return false;
 			}
+
+			if (Actor->Implements<UTempoCrosswalkInterface>())
+			{
+				if (!TryGenerateAndRegisterZoneShapeComponentsForCrosswalksAtIntersections(*Actor))
+				{
+					UE_LOG(LogTempoAgentsEditor, Error, TEXT("Tempo Lane Graph - Failed to create Crosswalk ZoneShapeComponents for Actor: %s."), *Actor->GetName());
+					return false;
+				}
+
+				if (!TryGenerateAndRegisterZoneShapeComponentsForCrosswalkIntersectionConnectorSegments(*Actor))
+				{
+					UE_LOG(LogTempoAgentsEditor, Error, TEXT("Tempo Lane Graph - Failed to create Crosswalk Intersection Connector Segment ZoneShapeComponents for Actor: %s."), *Actor->GetName());
+					return false;
+				}
+
+				if (!TryGenerateAndRegisterZoneShapeComponentsForCrosswalkIntersections(*Actor))
+				{
+					UE_LOG(LogTempoAgentsEditor, Error, TEXT("Tempo Lane Graph - Failed to create Crosswalk Intersection ZoneShapeComponents for Actor: %s."), *Actor->GetName());
+					return false;
+				}
+			}
 		}
 		else if (Actor->Implements<UTempoRoadModuleInterface>())
 		{
@@ -76,8 +103,8 @@ bool UTempoRoadLaneGraphSubsystem::TryGenerateZoneShapeComponents() const
 				return false;
 			}
 
-			// Build ZoneShapes for RoadModules differently, based on whether its parent is a Road or an Intersection.
-			if (!RoadModuleParentActor->Implements<UTempoIntersectionInterface>())
+			// Build ZoneShapes for RoadModules differently, based on whether its parent has crosswalks.
+			if (!RoadModuleParentActor->Implements<UTempoCrosswalkInterface>())
 			{
 				// Then, try to generate ZoneShapeComponents for road modules (ex. sidewalks, walkable bridges, etc.).
 				if (!TryGenerateAndRegisterZoneShapeComponentsForRoad(*Actor, true))
@@ -690,7 +717,7 @@ AActor* UTempoRoadLaneGraphSubsystem::GetConnectedRoadActor(const AActor& Inters
 
 bool UTempoRoadLaneGraphSubsystem::TryGenerateAndRegisterZoneShapeComponentsForCrosswalksAtIntersections(AActor& CrosswalkQueryActor) const
 {
-	const int32 NumConnections = ITempoIntersectionInterface::Execute_GetNumTempoConnections(&CrosswalkQueryActor);
+	const int32 NumConnections = ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalks(&CrosswalkQueryActor);
 	
 	for (int32 ConnectionIndex = 0; ConnectionIndex < NumConnections; ++ConnectionIndex)
 	{
@@ -794,7 +821,7 @@ bool UTempoRoadLaneGraphSubsystem::TryGenerateAndRegisterZoneShapeComponentsForC
 		{
 			return false;
 		}
-		
+
 		const FZoneLaneProfile LaneProfile = GetCrosswalkIntersectionConnectorLaneProfile(CrosswalkQueryActor, CrosswalkRoadModuleIndex);
 		
 		if (!LaneProfile.IsValid())
@@ -899,17 +926,7 @@ bool UTempoRoadLaneGraphSubsystem::TryCreateZoneShapePointForCrosswalkIntersecti
 	const FVector CrosswalkIntersectionEntranceLocationInWorldFrame = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkIntersectionEntranceLocation(&CrosswalkQueryActor, CrosswalkIntersectionIndex, CrosswalkIntersectionConnectionIndex, ETempoCoordinateSpace::World);
 	
 	DrawDebugSphere(GetWorld(), CrosswalkIntersectionEntranceLocationInWorldFrame, 25.0f, 16, FColor::Green, false, 5.0f);
-	
-	const int32 CrosswalkRoadModuleIndex = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkRoadModuleIndexFromCrosswalkIntersectionIndex(&CrosswalkQueryActor, CrosswalkIntersectionIndex);
 
-	AActor* CrosswalkRoadModuleQueryActor = ITempoCrosswalkInterface::Execute_GetConnectedTempoCrosswalkRoadModuleActor(&CrosswalkQueryActor, CrosswalkRoadModuleIndex);
-
-	if (CrosswalkRoadModuleQueryActor == nullptr)
-	{
-		UE_LOG(LogTempoAgentsEditor, Error, TEXT("Tempo Lane Graph - Failed to create Crosswalk Intersection Zone Shape Point - Failed to get Connected Road Actor for Actor: %s at CrosswalkRoadModuleIndex: %d."), *CrosswalkQueryActor.GetName(), CrosswalkRoadModuleIndex);
-		return false;
-	}
-	
 	const FZoneLaneProfile LaneProfile = GetCrosswalkIntersectionEntranceLaneProfile(CrosswalkQueryActor, CrosswalkIntersectionIndex, CrosswalkIntersectionConnectionIndex);
 	if (!LaneProfile.IsValid())
 	{

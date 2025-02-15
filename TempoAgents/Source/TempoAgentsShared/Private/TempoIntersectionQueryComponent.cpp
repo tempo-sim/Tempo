@@ -8,9 +8,9 @@
 #include "TempoCrosswalkInterface.h"
 #include "TempoIntersectionInterface.h"
 #include "TempoRoadModuleInterface.h"
+#include "TempoZoneGraphUtils.h"
 
 #include "ZoneGraphSettings.h"
-#include "ZoneGraphSubsystem.h"
 
 bool UTempoIntersectionQueryComponent::TryGetIntersectionEntranceControlPointIndex(const AActor* IntersectionQueryActor, int32 ConnectionIndex, int32& OutIntersectionEntranceControlPointIndex) const
 {
@@ -264,7 +264,7 @@ bool UTempoIntersectionQueryComponent::TryGenerateCrosswalkRoadModuleMap(const A
 		return false;
 	}
 
-	const FZoneGraphTagFilter CrosswalkRoadModuleTagFilter = GenerateTagFilter(CrosswalkRoadModuleAnyTags, CrosswalkRoadModuleAllTags, CrosswalkRoadModuleNotTags);
+	const FZoneGraphTagFilter CrosswalkRoadModuleTagFilter = UTempoZoneGraphUtils::GenerateTagFilter(this, CrosswalkRoadModuleAnyTags, CrosswalkRoadModuleAllTags, CrosswalkRoadModuleNotTags);
 
 	const auto& GetCrosswalkRoadModules = [this, &IntersectionQueryActor, &CrosswalkRoadModuleTagFilter]()
 	{
@@ -287,7 +287,7 @@ bool UTempoIntersectionQueryComponent::TryGenerateCrosswalkRoadModuleMap(const A
 			{
 				const TArray<FName>& RoadModuleLaneTags = ITempoRoadModuleInterface::Execute_GetTempoRoadModuleLaneTags(ConnectedRoadModule, RoadModuleLaneIndex);
 
-				const FZoneGraphTagMask& RoadModuleLaneTagMask = GenerateTagMaskFromTagNames(RoadModuleLaneTags);
+				const FZoneGraphTagMask& RoadModuleLaneTagMask = UTempoZoneGraphUtils::GenerateTagMaskFromTagNames(this, RoadModuleLaneTags);
 
 				// Is the road module a crosswalk (according to tags)?
 				if (CrosswalkRoadModuleTagFilter.Pass(RoadModuleLaneTagMask))
@@ -449,6 +449,8 @@ bool UTempoIntersectionQueryComponent::TryGetCrosswalkIntersectionConnectorInfoE
 		return false;
 	}
 
+	// First Index: Is this the crosswalk intersection at the bottom or the top?
+	// Second Index: Are you inside the road module or at the extent of it?
 	const int32 CrosswalkIntersectionDistanceIndex = CrosswalkIntersectionEntranceOuterDistance < FMath::Abs(CrosswalkIntersectionEntranceOuterDistance - CrosswalkRoadModuleLength) ? 0 : 1;
 	const int32 CrosswalkIntersectionDistanceSideIndex = CrosswalkIntersectionConnectionIndex == 1 ? 0 : 1;
 	
@@ -1434,36 +1436,7 @@ FZoneGraphTagFilter UTempoIntersectionQueryComponent::GetLaneConnectionTagFilter
 	const TArray<FName>& LaneConnectionAllTagNames = ITempoRoadInterface::Execute_GetTempoLaneConnectionAllTags(SourceConnectionActor, SourceLaneConnectionInfo.LaneIndex);
 	const TArray<FName>& LaneConnectionNotTagNames = ITempoRoadInterface::Execute_GetTempoLaneConnectionNotTags(SourceConnectionActor, SourceLaneConnectionInfo.LaneIndex);
 
-	return GenerateTagFilter(LaneConnectionAnyTagNames, LaneConnectionAllTagNames, LaneConnectionNotTagNames);
-}
-
-FZoneGraphTagFilter UTempoIntersectionQueryComponent::GenerateTagFilter(const TArray<FName>& AnyTags, const TArray<FName>& AllTags, const TArray<FName>& NotTags) const
-{
-	const FZoneGraphTagMask AnyTagsMask = GenerateTagMaskFromTagNames(AnyTags);
-	const FZoneGraphTagMask AllTagsMask = GenerateTagMaskFromTagNames(AllTags);
-	const FZoneGraphTagMask NotTagsMask = GenerateTagMaskFromTagNames(NotTags);
-
-	return FZoneGraphTagFilter{AnyTagsMask, AllTagsMask, NotTagsMask};
-}
-
-FZoneGraphTagMask UTempoIntersectionQueryComponent::GenerateTagMaskFromTagNames(const TArray<FName>& TagNames) const
-{
-	const UZoneGraphSubsystem* ZoneGraphSubsystem = UWorld::GetSubsystem<UZoneGraphSubsystem>(GetWorld());
-	if (ZoneGraphSubsystem == nullptr)
-	{
-		UE_LOG(LogTempoAgentsShared, Error, TEXT("Lane Filtering - GenerateTagMaskFromTagNames - Can't access ZoneGraphSubsystem."));
-		return FZoneGraphTagMask::None;
-	}
-
-	FZoneGraphTagMask ZoneGraphTagMask;
-	
-	for (const auto& TagName : TagNames)
-	{
-		FZoneGraphTag Tag = ZoneGraphSubsystem->GetTagByName(TagName);
-		ZoneGraphTagMask.Add(Tag);
-	}
-
-	return ZoneGraphTagMask;
+	return UTempoZoneGraphUtils::GenerateTagFilter(this, LaneConnectionAnyTagNames, LaneConnectionAllTagNames, LaneConnectionNotTagNames);
 }
 
 bool UTempoIntersectionQueryComponent::TryGetMinLaneIndexInLaneConnections(const TArray<FTempoLaneConnectionInfo>& LaneConnectionInfos, int32& OutMinLaneIndex) const
