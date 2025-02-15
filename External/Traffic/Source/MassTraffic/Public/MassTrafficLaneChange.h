@@ -64,8 +64,7 @@ enum EMassTrafficLaneChangeRecommendationLevel
 	
 	NormalLaneChange = 2,
 	TransversingLaneChange = 3,
-	MustLaneChangeSoon = 4,
-	MustLaneChangeNow = 5
+	MustLaneChangeSoon = 4
 };
 
 

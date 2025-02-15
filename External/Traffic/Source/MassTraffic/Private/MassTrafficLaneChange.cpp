@@ -542,12 +542,6 @@ void ChooseLaneForLaneChange(
 		InOutRecommendation = FMassTrafficLaneChangeRecommendation();
 	}
 
-	if (InOutRecommendation.Level == EMassTrafficLaneChangeRecommendationLevel::MustLaneChangeNow)
-	{
-		// We must lane change. Don't bother checking the rest of the conditions.
-		return;
-	}
-
 	if (!TrafficLaneData_Initial->ConstData.bIsLaneChangingLane)
 	{
 		// Can't change lanes while in an intersection.
