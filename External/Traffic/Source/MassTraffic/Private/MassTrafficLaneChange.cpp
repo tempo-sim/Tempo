@@ -28,36 +28,7 @@ bool TrunkVehicleLaneCheck(
 		(TrafficLaneData->ConstData.bIsTrunkLane || !VehicleControlFragment.bRestrictedToTrunkLanesOnly);
 }
 
-int32 GetLaneChangePriority(
-	const FZoneGraphTrafficLaneData* TrafficLaneData,
-	const FMassTrafficVehicleControlFragment& VehicleControlFragment,
-	const FZoneGraphStorage& ZoneGraphStorage)
-{
-	if (TrafficLaneData == nullptr)
-	{
-		return INDEX_NONE;
-	}
-	
-	FZoneGraphTagMask LaneTagMask;
-	if (!UE::ZoneGraph::Query::GetLaneTags(ZoneGraphStorage, TrafficLaneData->LaneHandle, LaneTagMask))
-	{
-		return INDEX_NONE;
-	}
-	
-	for (int32 PriorityIndex = 0; PriorityIndex < VehicleControlFragment.LaneChangePriorityFilters.Num(); ++PriorityIndex)
-	{
-		const FZoneGraphTagFilter& LaneChangePriorityFilter = VehicleControlFragment.LaneChangePriorityFilters[PriorityIndex];
-		
-		if (LaneChangePriorityFilter.Pass(LaneTagMask))
-		{
-			return VehicleControlFragment.LaneChangePriorityFilters.Num() - 1 - PriorityIndex;
-		}
-	}
 
-	return INDEX_NONE;
-}
-
-	
 void CanVehicleLaneChangeToFitOnChosenLane(
 	const float DistanceAlongLane_Chosen, const float LaneLength_Chosen, const float DeltaDistanceAlongLaneForLaneChange_Chosen,
 	//
@@ -562,12 +533,15 @@ void ChooseLaneForLaneChange(
 	const FRandomStream& RandomStream,
 	const UMassTrafficSettings& MassTrafficSettings,
 	const FZoneGraphStorage& ZoneGraphStorage,
-	FMassTrafficLaneChangeRecommendation& OutRecommendation
+	FMassTrafficLaneChangeRecommendation& InOutRecommendation
 )
 {
-	OutRecommendation = FMassTrafficLaneChangeRecommendation();
+	const bool bAlreadyChoseLane = InOutRecommendation.Lane_Chosen != nullptr;
+	if (!bAlreadyChoseLane)
+	{
+		InOutRecommendation = FMassTrafficLaneChangeRecommendation();
+	}
 
-	
 	if (!TrafficLaneData_Initial->ConstData.bIsLaneChangingLane)
 	{
 		// Can't change lanes while in an intersection.
@@ -586,10 +560,9 @@ void ChooseLaneForLaneChange(
 	
 	// Get left and right lane candidates.
 
-	FZoneGraphTrafficLaneData* CandidateTrafficLaneData_Left = TrafficLaneData_Initial->LeftLane;
-	FZoneGraphTrafficLaneData* CandidateTrafficLaneData_Right = TrafficLaneData_Initial->RightLane;
+	FZoneGraphTrafficLaneData* CandidateTrafficLaneData_Left = !bAlreadyChoseLane || InOutRecommendation.bChoseLaneOnLeft ? TrafficLaneData_Initial->LeftLane : nullptr;
+	FZoneGraphTrafficLaneData* CandidateTrafficLaneData_Right = !bAlreadyChoseLane || InOutRecommendation.bChoseLaneOnRight ? TrafficLaneData_Initial->RightLane : nullptr;
 
-	
 	// Get candidate lane densities.
 
 	const float DownstreamFlowDensity_Current = TrafficLaneData_Initial->GetDownstreamFlowDensity();
@@ -614,30 +587,33 @@ void ChooseLaneForLaneChange(
 	
 	CandidateTrafficLaneData_Right = FilterLaneForLaneChangeSuitability(
 		CandidateTrafficLaneData_Right, *TrafficLaneData_Initial, VehicleControlFragment, SpaceTakenByVehicleOnLane);
-
-	// Get lane change priority.
-	const int32 LeftLaneChangePriority = GetLaneChangePriority(CandidateTrafficLaneData_Left, VehicleControlFragment, ZoneGraphStorage);
-	const int32 RightLaneChangePriority = GetLaneChangePriority(CandidateTrafficLaneData_Right, VehicleControlFragment, ZoneGraphStorage);
-
-	const bool bHasLeftLaneChangePriority = LeftLaneChangePriority >= 0;
-	const bool bHasRightLaneChangePriority = RightLaneChangePriority >= 0;
-
-	// Filter lanes based on lane change priority.
-	if (bHasLeftLaneChangePriority && bHasRightLaneChangePriority)
+	
+	if (!bAlreadyChoseLane)
 	{
-		// If both candidate lanes have a valid lane change priority value, keep the one with the higher priority.
-		// If they have equal priority, then keep both.  In this case, it will fall to the density logic
-		// to decide between them, then finally a random choice.
-		CandidateTrafficLaneData_Left = LeftLaneChangePriority >= RightLaneChangePriority ? CandidateTrafficLaneData_Left : nullptr;
-		CandidateTrafficLaneData_Right = RightLaneChangePriority >= LeftLaneChangePriority ? CandidateTrafficLaneData_Right : nullptr;
-	}
-	else
-	{
-		// Remove candidate lanes as an option, if they don't have a valid lane change priority value.
-		// If this is the case, it means they are not compatible with any of the LaneChangePriorityFilters
-		// on the VehicleControlFragment.
-		CandidateTrafficLaneData_Left = bHasLeftLaneChangePriority ? CandidateTrafficLaneData_Left : nullptr;
-		CandidateTrafficLaneData_Right = bHasRightLaneChangePriority ? CandidateTrafficLaneData_Right : nullptr;
+		// Get lane change priority.
+		const int32 LeftLaneChangePriority = GetLanePriority(CandidateTrafficLaneData_Left, VehicleControlFragment.LaneChangePriorityFilters, ZoneGraphStorage);
+		const int32 RightLaneChangePriority = GetLanePriority(CandidateTrafficLaneData_Right, VehicleControlFragment.LaneChangePriorityFilters, ZoneGraphStorage);
+
+		const bool bHasLeftLaneChangePriority = LeftLaneChangePriority >= 0;
+		const bool bHasRightLaneChangePriority = RightLaneChangePriority >= 0;
+
+		// Filter lanes based on lane change priority.
+		if (bHasLeftLaneChangePriority && bHasRightLaneChangePriority)
+		{
+			// If both candidate lanes have a valid lane change priority value, keep the one with the higher priority.
+			// If they have equal priority, then keep both.  In this case, it will fall to the density logic
+			// to decide between them, then finally a random choice.
+			CandidateTrafficLaneData_Left = LeftLaneChangePriority >= RightLaneChangePriority ? CandidateTrafficLaneData_Left : nullptr;
+			CandidateTrafficLaneData_Right = RightLaneChangePriority >= LeftLaneChangePriority ? CandidateTrafficLaneData_Right : nullptr;
+		}
+		else
+		{
+			// Remove candidate lanes as an option, if they don't have a valid lane change priority value.
+			// If this is the case, it means they are not compatible with any of the LaneChangePriorityFilters
+			// on the VehicleControlFragment.
+			CandidateTrafficLaneData_Left = bHasLeftLaneChangePriority ? CandidateTrafficLaneData_Left : nullptr;
+			CandidateTrafficLaneData_Right = bHasRightLaneChangePriority ? CandidateTrafficLaneData_Right : nullptr;
+		}
 	}
 	
 	// If the lane is transversing (has replaced merging and splitting) lanes, then this car should be more likely
@@ -671,24 +647,24 @@ void ChooseLaneForLaneChange(
 		if (TestTransverseCandidateTrafficLaneData(
 			(bTestLeftFirst ? CandidateTrafficLaneData_Left : CandidateTrafficLaneData_Right), bTestLeftFirst))
 		{
-			OutRecommendation.Lane_Chosen = (bTestLeftFirst ? CandidateTrafficLaneData_Left : CandidateTrafficLaneData_Right);
-			OutRecommendation.bChoseLaneOnRight = !bTestLeftFirst;
-			OutRecommendation.bChoseLaneOnLeft = bTestLeftFirst;
-			OutRecommendation.Level = TransversingLaneChange;
+			InOutRecommendation.Lane_Chosen = (bTestLeftFirst ? CandidateTrafficLaneData_Left : CandidateTrafficLaneData_Right);
+			InOutRecommendation.bChoseLaneOnRight = !bTestLeftFirst;
+			InOutRecommendation.bChoseLaneOnLeft = bTestLeftFirst;
+			InOutRecommendation.Level = TransversingLaneChange;
 			return;
 		}
 		else if (TestTransverseCandidateTrafficLaneData(
 			(!bTestLeftFirst ? CandidateTrafficLaneData_Left : CandidateTrafficLaneData_Right), !bTestLeftFirst))
 		{
-			OutRecommendation.Lane_Chosen = (!bTestLeftFirst ? CandidateTrafficLaneData_Left : CandidateTrafficLaneData_Right);
-			OutRecommendation.bChoseLaneOnRight = bTestLeftFirst;
-			OutRecommendation.bChoseLaneOnLeft = !bTestLeftFirst;
-			OutRecommendation.Level = TransversingLaneChange;
+			InOutRecommendation.Lane_Chosen = (!bTestLeftFirst ? CandidateTrafficLaneData_Left : CandidateTrafficLaneData_Right);
+			InOutRecommendation.bChoseLaneOnRight = bTestLeftFirst;
+			InOutRecommendation.bChoseLaneOnLeft = !bTestLeftFirst;
+			InOutRecommendation.Level = TransversingLaneChange;
 			return;
 		}
 		else
 		{
-			OutRecommendation.Level = StayOnCurrentLane_RetrySoon; // ..make lane change on transverse lanes more likely than on normal lanes
+			InOutRecommendation.Level = StayOnCurrentLane_RetrySoon; // ..make lane change on transverse lanes more likely than on normal lanes
 			return;
 		}
 	}
@@ -700,16 +676,16 @@ void ChooseLaneForLaneChange(
 	}
 	else if (CandidateTrafficLaneData_Left && !CandidateTrafficLaneData_Right)
 	{
-		OutRecommendation.Lane_Chosen = CandidateTrafficLaneData_Left;
-		OutRecommendation.bChoseLaneOnLeft = true;
-		OutRecommendation.Level = NormalLaneChange;			
+		InOutRecommendation.Lane_Chosen = CandidateTrafficLaneData_Left;
+		InOutRecommendation.bChoseLaneOnLeft = true;
+		InOutRecommendation.Level = bAlreadyChoseLane ? TurningLaneChange : NormalLaneChange;			
 		return;
 	}
 	else if (!CandidateTrafficLaneData_Left && CandidateTrafficLaneData_Right)
 	{
-		OutRecommendation.Lane_Chosen = CandidateTrafficLaneData_Right;
-		OutRecommendation.bChoseLaneOnRight = true;
-		OutRecommendation.Level = NormalLaneChange;			
+		InOutRecommendation.Lane_Chosen = CandidateTrafficLaneData_Right;
+		InOutRecommendation.bChoseLaneOnRight = true;
+		InOutRecommendation.Level = bAlreadyChoseLane ? TurningLaneChange : NormalLaneChange;			
 		return;
 	}
 	else if (CandidateTrafficLaneData_Left && CandidateTrafficLaneData_Right)
@@ -718,32 +694,32 @@ void ChooseLaneForLaneChange(
 		
 		if (DownstreamFlowDensity_Candidate_Left < DownstreamFlowDensity_Candidate_Right)
 		{
-			OutRecommendation.Lane_Chosen = CandidateTrafficLaneData_Left;
-			OutRecommendation.bChoseLaneOnLeft = true;
-			OutRecommendation.Level = NormalLaneChange;
+			InOutRecommendation.Lane_Chosen = CandidateTrafficLaneData_Left;
+			InOutRecommendation.bChoseLaneOnLeft = true;
+			InOutRecommendation.Level = bAlreadyChoseLane ? TurningLaneChange : NormalLaneChange;
 			return;				
 		}
 		else if (DownstreamFlowDensity_Candidate_Right < DownstreamFlowDensity_Candidate_Left) 
 		{
-			OutRecommendation.Lane_Chosen = CandidateTrafficLaneData_Right;
-			OutRecommendation.bChoseLaneOnRight = true;
-			OutRecommendation.Level = NormalLaneChange;
+			InOutRecommendation.Lane_Chosen = CandidateTrafficLaneData_Right;
+			InOutRecommendation.bChoseLaneOnRight = true;
+			InOutRecommendation.Level = bAlreadyChoseLane ? TurningLaneChange : NormalLaneChange;
 			return;
 		}
 		else // ..not as rare as you'd guess - happens (1) with float-16 density values (2) when density is zero
 		{
 			if (RandomStream.FRand() < 0.5f)
 			{
-				OutRecommendation.Lane_Chosen = CandidateTrafficLaneData_Left;
-				OutRecommendation.bChoseLaneOnLeft = true;
-				OutRecommendation.Level = NormalLaneChange;
+				InOutRecommendation.Lane_Chosen = CandidateTrafficLaneData_Left;
+				InOutRecommendation.bChoseLaneOnLeft = true;
+				InOutRecommendation.Level = bAlreadyChoseLane ? TurningLaneChange : NormalLaneChange;
 				return;
 			}
 			else
 			{
-				OutRecommendation.Lane_Chosen = CandidateTrafficLaneData_Right;
-				OutRecommendation.bChoseLaneOnRight = true;
-				OutRecommendation.Level = NormalLaneChange;
+				InOutRecommendation.Lane_Chosen = CandidateTrafficLaneData_Right;
+				InOutRecommendation.bChoseLaneOnRight = true;
+				InOutRecommendation.Level = bAlreadyChoseLane ? TurningLaneChange : NormalLaneChange;
 				return;
 			}
 		}

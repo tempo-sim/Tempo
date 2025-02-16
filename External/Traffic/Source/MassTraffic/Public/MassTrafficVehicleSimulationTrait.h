@@ -3,6 +3,7 @@
 #pragma once
 
 #include "MassTrafficPhysics.h"
+#include "MassTrafficTypes.h"
 
 #include "MassEntityTraitBase.h"
 #include "MassSimulationLOD.h"
@@ -54,7 +55,13 @@ struct MASSTRAFFIC_API FMassTrafficVehicleSimulationParameters : public FMassSha
 	bool bAllowGoingStraightAtIntersections = true;
 
 	UPROPERTY(EditAnywhere, Category = "Restrictions")
-	TArray<FZoneGraphTagFilter> LaneChangePriorityFilters;
+	FMassTrafficLanePriorityFilters LaneChangePriorityFilters;
+
+	UPROPERTY(EditAnywhere, Category = "Restrictions")
+	FMassTrafficLanePriorityFilters NextLanePriorityFilters;
+
+	UPROPERTY(EditAnywhere, Category = "Restrictions")
+	TMap<EZoneGraphTurnType, FMassTrafficLanePriorityFilters> TurningLanePriorityFilters;
 };
 
 USTRUCT()
