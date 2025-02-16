@@ -8,6 +8,7 @@
 #include "TempoAgentsShared.h"
 #include "TempoBrightnessMeter.h"
 #include "TempoBrightnessMeterComponent.h"
+#include "TempoCrosswalkInterface.h"
 #include "TempoIntersectionInterface.h"
 #include "TempoRoadInterface.h"
 #include "TempoRoadModuleInterface.h"
@@ -171,6 +172,11 @@ void UTempoAgentsWorldSubsystem::SetupIntersectionLaneMap()
 			continue;
 		}
 
+		if (!Actor->Implements<UTempoCrosswalkInterface>())
+		{
+			continue;
+		}
+
 		const AActor& IntersectionQueryActor = *Actor;
 
 		const int32 NumConnections = ITempoIntersectionInterface::Execute_GetNumTempoConnections(&IntersectionQueryActor);
@@ -183,11 +189,11 @@ void UTempoAgentsWorldSubsystem::SetupIntersectionLaneMap()
 				return;
 			}
 			
-			const int32 CrosswalkStartControlPointIndex = ITempoIntersectionInterface::Execute_GetTempoCrosswalkStartEntranceLocationControlPointIndex(&IntersectionQueryActor, ConnectionIndex);
-			const int32 CrosswalkEndControlPointIndex = ITempoIntersectionInterface::Execute_GetTempoCrosswalkEndEntranceLocationControlPointIndex(&IntersectionQueryActor, ConnectionIndex);
+			const int32 CrosswalkStartControlPointIndex = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkStartEntranceLocationControlPointIndex(&IntersectionQueryActor, ConnectionIndex);
+			const int32 CrosswalkEndControlPointIndex = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkEndEntranceLocationControlPointIndex(&IntersectionQueryActor, ConnectionIndex);
 			
-			const FVector CrosswalkStartControlPointLocation = ITempoIntersectionInterface::Execute_GetTempoCrosswalkControlPointLocation(&IntersectionQueryActor, ConnectionIndex, CrosswalkStartControlPointIndex, ETempoCoordinateSpace::World);
-			const FVector CrosswalkEndControlPointLocation = ITempoIntersectionInterface::Execute_GetTempoCrosswalkControlPointLocation(&IntersectionQueryActor, ConnectionIndex, CrosswalkEndControlPointIndex, ETempoCoordinateSpace::World);
+			const FVector CrosswalkStartControlPointLocation = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkControlPointLocation(&IntersectionQueryActor, ConnectionIndex, CrosswalkStartControlPointIndex, ETempoCoordinateSpace::World);
+			const FVector CrosswalkEndControlPointLocation = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkControlPointLocation(&IntersectionQueryActor, ConnectionIndex, CrosswalkEndControlPointIndex, ETempoCoordinateSpace::World);
 
 			const FVector IntersectionEntranceLocation = ITempoIntersectionInterface::Execute_GetTempoIntersectionEntranceLocation(&IntersectionQueryActor, ConnectionIndex, ETempoCoordinateSpace::World);
 			const FVector IntersectionEntranceRightVector = ITempoIntersectionInterface::Execute_GetTempoIntersectionEntranceRightVector(&IntersectionQueryActor, ConnectionIndex, ETempoCoordinateSpace::World);
@@ -201,7 +207,7 @@ void UTempoAgentsWorldSubsystem::SetupIntersectionLaneMap()
 			const float QueryRadius = FMath::Max(LateralDistanceToIntersectionExitCenter, DistanceToCrosswalkCenter);
 
 			const TArray<FName> RoadLaneTags = GetRoadLaneTags(*RoadQueryActor);
-			const TArray<FName> CrosswalkTags = ITempoIntersectionInterface::Execute_GetTempoCrosswalkTags(&IntersectionQueryActor, ConnectionIndex);
+			const TArray<FName> CrosswalkTags = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkTags(&IntersectionQueryActor, ConnectionIndex);
 
 			const FZoneGraphTagMask RoadLaneAnyTagMask = GenerateTagMaskFromTagNames(RoadLaneTags);
 			const FZoneGraphTagMask CrosswalkAllTagMask = GenerateTagMaskFromTagNames(CrosswalkTags);
