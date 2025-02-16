@@ -173,8 +173,8 @@ protected:
 	
 	virtual bool TryGetNearestRoadControlPointIndex(const AActor& IntersectionQueryActor, int32 ConnectionIndex, int32& OutNearestRoadControlPointIndex) const;
 	virtual AActor* GetConnectedRoadActor(const AActor& IntersectionQueryActor, int32 ConnectionIndex) const;
-
-	virtual TempoZoneGraphTagMaskGroups GroupLaneConnectionsByTags(const TArray<FTempoLaneConnectionInfo>& LaneConnectionInfos) const;
+	
+	virtual TempoZoneGraphTagMaskGroups GroupLaneConnectionsByTags(const AActor* SourceConnectionActor, const TArray<FTempoLaneConnectionInfo>& SourceLaneConnectionInfos, const TArray<FTempoLaneConnectionInfo>& DestLaneConnectionInfos) const;
 
 	virtual FZoneGraphTagFilter GetLaneConnectionTagFilter(const AActor* SourceConnectionActor, const FTempoLaneConnectionInfo& SourceLaneConnectionInfo) const;
 	virtual FZoneGraphTagFilter GenerateTagFilter(const TArray<FName>& AnyTags, const TArray<FName>& AllTags, const TArray<FName>& NotTags) const;

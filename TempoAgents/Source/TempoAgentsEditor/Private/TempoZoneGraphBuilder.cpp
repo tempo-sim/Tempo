@@ -25,7 +25,8 @@ bool FTempoZoneGraphBuilder::ShouldFilterLaneConnection(const UZoneShapeComponen
 
 	bool bShouldFilterLaneConnection;
 	{
-		bShouldFilterLaneConnection = UTempoCoreUtils::CallBlueprintFunction(IntersectionQueryActor, ITempoIntersectionInterface::Execute_ShouldFilterTempoLaneConnection, SourceRoadQueryActor, SourceLaneConnectionInfos, SourceSlotQueryIndex, DestRoadQueryActor, DestLaneConnectionInfos, DestSlotQueryIndex, AllCandidates);
+		FEditorScriptExecutionGuard ScriptGuard;
+		bShouldFilterLaneConnection = ITempoIntersectionInterface::Execute_ShouldFilterTempoLaneConnection(IntersectionQueryActor, SourceRoadQueryActor, SourceLaneConnectionInfos, SourceSlotQueryIndex, DestRoadQueryActor, DestLaneConnectionInfos, DestSlotQueryIndex);
 	}
 
 	return bShouldFilterLaneConnection;

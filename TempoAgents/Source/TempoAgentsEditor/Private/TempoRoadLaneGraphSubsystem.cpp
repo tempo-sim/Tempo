@@ -43,25 +43,6 @@ bool UTempoRoadLaneGraphSubsystem::TryGenerateZoneShapeComponents() const
 
 		if (Actor->Implements<UTempoIntersectionInterface>())
 		{
-			UTempoCoreUtils::CallBlueprintFunction(Actor, ITempoIntersectionInterface::Execute_SetupTempoIntersectionData);
-		}
-
-		if (Actor->Implements<UTempoCrosswalkInterface>())
-		{
-			UTempoCoreUtils::CallBlueprintFunction(Actor, ITempoCrosswalkInterface::Execute_SetupTempoCrosswalkData);
-		}
-	}
-
-	// Allow all Intersections to setup their data, first.
-	for (AActor* Actor : TActorRange<AActor>(GetWorld()))
-	{
-		if (!IsValid(Actor))
-		{
-			continue;
-		}
-
-		if (Actor->Implements<UTempoIntersectionInterface>())
-		{
 			FEditorScriptExecutionGuard ScriptGuard;
 			ITempoIntersectionInterface::Execute_SetupTempoIntersectionData(Actor);
 		}

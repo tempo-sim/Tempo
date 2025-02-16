@@ -127,29 +127,27 @@ APPLY_PATCHES() {
     UNSUCCESSFUL_EXIT 1
   fi
 
-  # Reverse the order of patches
-  local REVERSED_PATCHES=($(printf '%s\n' "${FORWARD_PATCHES[@]}" | sed -n '1!G;h;$p'))
   local PATCHES_APPLIED=0
 
   # Find the last applied patch (if any)
   cd "$DEST"
-  local LAST_APPLIED_INDEX=$((${#FORWARD_PATCHES[@]} - 1))
-  for ((i=0; i<${#REVERSED_PATCHES[@]}; i++)); do
-    local PATCH="$ENGINE_MODS_DIR/$ROOT/${REVERSED_PATCHES[i]//\'/}"
+  local LAST_APPLIED_INDEX=-1
+  for ((i=${#FORWARD_PATCHES[@]}-1; i>-1; i--)); do
+    local PATCH="$ENGINE_MODS_DIR/$ROOT/${FORWARD_PATCHES[i]//\'/}"
     # To check if the patch has been applied, check if it can be *reversed* (if not, it hasn't been applied).
     # https://unix.stackexchange.com/questions/55780/check-if-a-file-or-folder-has-been-patched-already
-    if patch -R -p0 -s -f --dry-run <"$PATCH" >/dev/null 2>&1; then
+    if patch -R -p0 -s -f --ignore-whitespace --dry-run <"$PATCH" >/dev/null 2>&1; then
       echo "Patch $(basename "$PATCH") already applied"
-      LAST_APPLIED_INDEX=$((${#FORWARD_PATCHES[@]} - i))
+      LAST_APPLIED_INDEX="$i"
       break
     fi
   done
 
   # Apply all patches after the last applied one
-  for ((i=LAST_APPLIED_INDEX; i<${#FORWARD_PATCHES[@]}; i++)); do
+  for ((i=LAST_APPLIED_INDEX + 1; i<${#FORWARD_PATCHES[@]}; i++)); do
     local PATCH="$ENGINE_MODS_DIR/$ROOT/${FORWARD_PATCHES[i]//\'/}"
     echo "Applying Patch $(basename "$PATCH")"
-    if ! patch -p0 <"$PATCH" >/dev/null 2>&1; then
+    if ! patch -p0  --ignore-whitespace <"$PATCH" >/dev/null 2>&1; then
       echo "Failed to apply patch: $PATCH"
       UNSUCCESSFUL_EXIT 1
     fi
