@@ -5,7 +5,10 @@
 
 #include "TempoAgentsShared.h"
 #include "TempoRoadInterface.h"
+#include "TempoCrosswalkInterface.h"
+#include "TempoIntersectionInterface.h"
 #include "TempoRoadModuleInterface.h"
+
 #include "ZoneGraphSettings.h"
 
 bool UTempoIntersectionQueryComponent::TryGetIntersectionEntranceControlPointIndex(const AActor* IntersectionQueryActor, int32 ConnectionIndex, int32& OutIntersectionEntranceControlPointIndex) const
@@ -700,7 +703,7 @@ bool UTempoIntersectionQueryComponent::TryGenerateCrosswalkRoadModuleMap(const A
 		}
 		
 		const float RoadWidth = ITempoRoadInterface::Execute_GetTempoRoadWidth(RoadQueryActor);
-		const float CrosswalkWidth = ITempoIntersectionInterface::Execute_GetTempoCrosswalkWidth(IntersectionQueryActor, ConnectionIndex);
+		const float CrosswalkWidth = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkWidth(IntersectionQueryActor, ConnectionIndex);
 
 		const auto& GetCrosswalkRoadModuleInLateralDirection = [&CrosswalkRoadModules, &ConnectionEntranceLocation, &ConnectionEntranceForward, &ConnectionEntranceRight, &RoadWidth, &CrosswalkWidth, &GetCrosswalkRoadModuleBounds](const float LateralDirectionScalar) -> AActor*
 		{
@@ -755,7 +758,7 @@ bool UTempoIntersectionQueryComponent::TryGetCrosswalkIntersectionConnectorInfoE
 		return false;
 	}
 	
-	const int32 CrosswalkRoadModuleIndex = ITempoIntersectionInterface::Execute_GetTempoCrosswalkRoadModuleIndexFromCrosswalkIntersectionIndex(IntersectionQueryActor, CrosswalkIntersectionIndex);
+	const int32 CrosswalkRoadModuleIndex = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkRoadModuleIndexFromCrosswalkIntersectionIndex(IntersectionQueryActor, CrosswalkIntersectionIndex);
 	
 	const FCrosswalkIntersectionConnectorInfo* CrosswalkIntersectionConnectorInfo = CrosswalkIntersectionConnectorInfoMap.Find(CrosswalkRoadModuleIndex);
 	
@@ -843,14 +846,14 @@ bool UTempoIntersectionQueryComponent::TryGetCrosswalkIntersectionEntranceLocati
 		return false;
 	}
 	
-	const int32 NumCrosswalkIntersections = ITempoIntersectionInterface::Execute_GetNumTempoCrosswalkIntersections(IntersectionQueryActor);
+	const int32 NumCrosswalkIntersections = ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersections(IntersectionQueryActor);
 
 	if (!ensureMsgf(CrosswalkIntersectionIndex >= 0 && CrosswalkIntersectionIndex < NumCrosswalkIntersections, TEXT("CrosswalkIntersectionIndex must be in range [0..%d) in UTempoIntersectionQueryComponent::TryGetCrosswalkIntersectionEntranceLocation.  Currently, it is: %d.  IntersectionQueryActor: %s."), NumCrosswalkIntersections, CrosswalkIntersectionIndex, *IntersectionQueryActor->GetName()))
 	{
 		return false;
 	}
 
-	const int32 NumCrosswalkIntersectionConnections = ITempoIntersectionInterface::Execute_GetNumTempoCrosswalkIntersectionConnections(IntersectionQueryActor, CrosswalkIntersectionIndex);
+	const int32 NumCrosswalkIntersectionConnections = ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersectionConnections(IntersectionQueryActor, CrosswalkIntersectionIndex);
 
 	if (!ensureMsgf(CrosswalkIntersectionConnectionIndex >= 0 && CrosswalkIntersectionConnectionIndex < NumCrosswalkIntersectionConnections, TEXT("CrosswalkIntersectionConnectionIndex must be in range [0..%d) in UTempoIntersectionQueryComponent::TryGetCrosswalkIntersectionEntranceLocation.  Currently, it is: %d.  IntersectionQueryActor: %s."), NumCrosswalkIntersectionConnections, CrosswalkIntersectionConnectionIndex, *IntersectionQueryActor->GetName()))
 	{
@@ -862,7 +865,7 @@ bool UTempoIntersectionQueryComponent::TryGetCrosswalkIntersectionEntranceLocati
 		const int32 ConnectionIndex = GetConnectionIndexFromCrosswalkIntersectionIndex(IntersectionQueryActor, CrosswalkIntersectionIndex);
 		const int32 CrosswalkControlPointIndex = (CrosswalkIntersectionIndex + 1) % 2;
 		
-		const FVector CrosswalkEntranceLocation = ITempoIntersectionInterface::Execute_GetTempoCrosswalkControlPointLocation(IntersectionQueryActor, ConnectionIndex, CrosswalkControlPointIndex, CoordinateSpace);
+		const FVector CrosswalkEntranceLocation = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkControlPointLocation(IntersectionQueryActor, ConnectionIndex, CrosswalkControlPointIndex, CoordinateSpace);
 		
 		OutCrosswalkIntersectionEntranceLocation = CrosswalkEntranceLocation;
 	}
@@ -899,14 +902,14 @@ bool UTempoIntersectionQueryComponent::TryGetCrosswalkIntersectionEntranceTangen
 		return false;
 	}
 
-	const int32 NumCrosswalkIntersections = ITempoIntersectionInterface::Execute_GetNumTempoCrosswalkIntersections(IntersectionQueryActor);
+	const int32 NumCrosswalkIntersections = ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersections(IntersectionQueryActor);
 
 	if (!ensureMsgf(CrosswalkIntersectionIndex >= 0 && CrosswalkIntersectionIndex < NumCrosswalkIntersections, TEXT("CrosswalkIntersectionIndex must be in range [0..%d) in UTempoIntersectionQueryComponent::TryGetCrosswalkIntersectionEntranceTangent.  Currently, it is: %d.  IntersectionQueryActor: %s."), NumCrosswalkIntersections, CrosswalkIntersectionIndex, *IntersectionQueryActor->GetName()))
 	{
 		return false;
 	}
 
-	const int32 NumCrosswalkIntersectionConnections = ITempoIntersectionInterface::Execute_GetNumTempoCrosswalkIntersectionConnections(IntersectionQueryActor, CrosswalkIntersectionIndex);
+	const int32 NumCrosswalkIntersectionConnections = ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersectionConnections(IntersectionQueryActor, CrosswalkIntersectionIndex);
 
 	if (!ensureMsgf(CrosswalkIntersectionConnectionIndex >= 0 && CrosswalkIntersectionConnectionIndex < NumCrosswalkIntersectionConnections, TEXT("CrosswalkIntersectionConnectionIndex must be in range [0..%d) in UTempoIntersectionQueryComponent::TryGetCrosswalkIntersectionEntranceTangent.  Currently, it is: %d.  IntersectionQueryActor: %s."), NumCrosswalkIntersectionConnections, CrosswalkIntersectionConnectionIndex, *IntersectionQueryActor->GetName()))
 	{
@@ -958,14 +961,14 @@ bool UTempoIntersectionQueryComponent::TryGetCrosswalkIntersectionEntranceUpVect
 		return false;
 	}
 
-	const int32 NumCrosswalkIntersections = ITempoIntersectionInterface::Execute_GetNumTempoCrosswalkIntersections(IntersectionQueryActor);
+	const int32 NumCrosswalkIntersections = ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersections(IntersectionQueryActor);
 
 	if (!ensureMsgf(CrosswalkIntersectionIndex >= 0 && CrosswalkIntersectionIndex < NumCrosswalkIntersections, TEXT("CrosswalkIntersectionIndex must be in range [0..%d) in UTempoIntersectionQueryComponent::TryGetCrosswalkIntersectionEntranceUpVector.  Currently, it is: %d.  IntersectionQueryActor: %s."), NumCrosswalkIntersections, CrosswalkIntersectionIndex, *IntersectionQueryActor->GetName()))
 	{
 		return false;
 	}
 
-	const int32 NumCrosswalkIntersectionConnections = ITempoIntersectionInterface::Execute_GetNumTempoCrosswalkIntersectionConnections(IntersectionQueryActor, CrosswalkIntersectionIndex);
+	const int32 NumCrosswalkIntersectionConnections = ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersectionConnections(IntersectionQueryActor, CrosswalkIntersectionIndex);
 
 	if (!ensureMsgf(CrosswalkIntersectionConnectionIndex >= 0 && CrosswalkIntersectionConnectionIndex < NumCrosswalkIntersectionConnections, TEXT("CrosswalkIntersectionConnectionIndex must be in range [0..%d) in UTempoIntersectionQueryComponent::TryGetCrosswalkIntersectionEntranceUpVector.  Currently, it is: %d.  IntersectionQueryActor: %s."), NumCrosswalkIntersectionConnections, CrosswalkIntersectionConnectionIndex, *IntersectionQueryActor->GetName()))
 	{
@@ -1014,14 +1017,14 @@ bool UTempoIntersectionQueryComponent::TryGetCrosswalkIntersectionEntranceRightV
 		return false;
 	}
 
-	const int32 NumCrosswalkIntersections = ITempoIntersectionInterface::Execute_GetNumTempoCrosswalkIntersections(IntersectionQueryActor);
+	const int32 NumCrosswalkIntersections = ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersections(IntersectionQueryActor);
 
 	if (!ensureMsgf(CrosswalkIntersectionIndex >= 0 && CrosswalkIntersectionIndex < NumCrosswalkIntersections, TEXT("CrosswalkIntersectionIndex must be in range [0..%d) in UTempoIntersectionQueryComponent::TryGetCrosswalkIntersectionEntranceRightVector.  Currently, it is: %d.  IntersectionQueryActor: %s."), NumCrosswalkIntersections, CrosswalkIntersectionIndex, *IntersectionQueryActor->GetName()))
 	{
 		return false;
 	}
 
-	const int32 NumCrosswalkIntersectionConnections = ITempoIntersectionInterface::Execute_GetNumTempoCrosswalkIntersectionConnections(IntersectionQueryActor, CrosswalkIntersectionIndex);
+	const int32 NumCrosswalkIntersectionConnections = ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersectionConnections(IntersectionQueryActor, CrosswalkIntersectionIndex);
 
 	if (!ensureMsgf(CrosswalkIntersectionConnectionIndex >= 0 && CrosswalkIntersectionConnectionIndex < NumCrosswalkIntersectionConnections, TEXT("CrosswalkIntersectionConnectionIndex must be in range [0..%d) in UTempoIntersectionQueryComponent::TryGetCrosswalkIntersectionEntranceRightVector.  Currently, it is: %d.  IntersectionQueryActor: %s."), NumCrosswalkIntersectionConnections, CrosswalkIntersectionConnectionIndex, *IntersectionQueryActor->GetName()))
 	{
@@ -1074,14 +1077,14 @@ bool UTempoIntersectionQueryComponent::TryGetNumCrosswalkIntersectionEntranceLan
 		return false;
 	}
 
-	const int32 NumCrosswalkIntersections = ITempoIntersectionInterface::Execute_GetNumTempoCrosswalkIntersections(IntersectionQueryActor);
+	const int32 NumCrosswalkIntersections = ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersections(IntersectionQueryActor);
 
 	if (!ensureMsgf(CrosswalkIntersectionIndex >= 0 && CrosswalkIntersectionIndex < NumCrosswalkIntersections, TEXT("CrosswalkIntersectionIndex must be in range [0..%d) in UTempoIntersectionQueryComponent::TryGetNumCrosswalkIntersectionEntranceLanes.  Currently, it is: %d.  IntersectionQueryActor: %s."), NumCrosswalkIntersections, CrosswalkIntersectionIndex, *IntersectionQueryActor->GetName()))
 	{
 		return false;
 	}
 
-	const int32 NumCrosswalkIntersectionConnections = ITempoIntersectionInterface::Execute_GetNumTempoCrosswalkIntersectionConnections(IntersectionQueryActor, CrosswalkIntersectionIndex);
+	const int32 NumCrosswalkIntersectionConnections = ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersectionConnections(IntersectionQueryActor, CrosswalkIntersectionIndex);
 
 	if (!ensureMsgf(CrosswalkIntersectionConnectionIndex >= 0 && CrosswalkIntersectionConnectionIndex < NumCrosswalkIntersectionConnections, TEXT("CrosswalkIntersectionConnectionIndex must be in range [0..%d) in UTempoIntersectionQueryComponent::TryGetNumCrosswalkIntersectionEntranceLanes.  Currently, it is: %d.  IntersectionQueryActor: %s."), NumCrosswalkIntersectionConnections, CrosswalkIntersectionConnectionIndex, *IntersectionQueryActor->GetName()))
 	{
@@ -1093,7 +1096,7 @@ bool UTempoIntersectionQueryComponent::TryGetNumCrosswalkIntersectionEntranceLan
 	// CrosswalkIntersectionConnectionIndex == 0 means the actual crosswalk that goes across the road referenced by ConnectionIndex.
 	if (CrosswalkIntersectionConnectionIndex == 0)
 	{
-		const int32 NumCrosswalkIntersectionEntranceLanes = ITempoIntersectionInterface::Execute_GetNumTempoCrosswalkLanes(IntersectionQueryActor, ConnectionIndex);
+		const int32 NumCrosswalkIntersectionEntranceLanes = ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkLanes(IntersectionQueryActor, ConnectionIndex);
 		
 		OutNumCrosswalkIntersectionEntranceLanes = NumCrosswalkIntersectionEntranceLanes;
 	}
@@ -1101,7 +1104,7 @@ bool UTempoIntersectionQueryComponent::TryGetNumCrosswalkIntersectionEntranceLan
 	{
 		// For now, we'll assume that the CrosswalkIntersectionConnector's CrosswalkRoadModule also has
 		// the lane properties of the adjacent RoadModules to avoid another layer of complexity.
-		const int32 CrosswalkRoadModuleIndex = ITempoIntersectionInterface::Execute_GetTempoCrosswalkRoadModuleIndexFromCrosswalkIntersectionIndex(IntersectionQueryActor, CrosswalkIntersectionIndex);
+		const int32 CrosswalkRoadModuleIndex = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkRoadModuleIndexFromCrosswalkIntersectionIndex(IntersectionQueryActor, CrosswalkIntersectionIndex);
 		if (!TryGetNumCrosswalkIntersectionConnectorLanes(IntersectionQueryActor, CrosswalkRoadModuleIndex, CrosswalkIntersectionConnectorInfoMap, OutNumCrosswalkIntersectionEntranceLanes))
 		{
 			return false;
@@ -1125,14 +1128,14 @@ bool UTempoIntersectionQueryComponent::TryGetCrosswalkIntersectionEntranceLanePr
 		return false;
 	}
 
-	const int32 NumCrosswalkIntersections = ITempoIntersectionInterface::Execute_GetNumTempoCrosswalkIntersections(IntersectionQueryActor);
+	const int32 NumCrosswalkIntersections = ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersections(IntersectionQueryActor);
 
 	if (!ensureMsgf(CrosswalkIntersectionIndex >= 0 && CrosswalkIntersectionIndex < NumCrosswalkIntersections, TEXT("CrosswalkIntersectionIndex must be in range [0..%d) in UTempoIntersectionQueryComponent::TryGetCrosswalkIntersectionEntranceLaneProfileOverrideName.  Currently, it is: %d.  IntersectionQueryActor: %s."), NumCrosswalkIntersections, CrosswalkIntersectionIndex, *IntersectionQueryActor->GetName()))
 	{
 		return false;
 	}
 
-	const int32 NumCrosswalkIntersectionConnections = ITempoIntersectionInterface::Execute_GetNumTempoCrosswalkIntersectionConnections(IntersectionQueryActor, CrosswalkIntersectionIndex);
+	const int32 NumCrosswalkIntersectionConnections = ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersectionConnections(IntersectionQueryActor, CrosswalkIntersectionIndex);
 
 	if (!ensureMsgf(CrosswalkIntersectionConnectionIndex >= 0 && CrosswalkIntersectionConnectionIndex < NumCrosswalkIntersectionConnections, TEXT("CrosswalkIntersectionConnectionIndex must be in range [0..%d) in UTempoIntersectionQueryComponent::TryGetCrosswalkIntersectionEntranceLaneProfileOverrideName.  Currently, it is: %d.  IntersectionQueryActor: %s."), NumCrosswalkIntersectionConnections, CrosswalkIntersectionConnectionIndex, *IntersectionQueryActor->GetName()))
 	{
@@ -1144,7 +1147,7 @@ bool UTempoIntersectionQueryComponent::TryGetCrosswalkIntersectionEntranceLanePr
 	// CrosswalkIntersectionConnectionIndex == 0 means the actual crosswalk that goes across the road referenced by ConnectionIndex.
 	if (CrosswalkIntersectionConnectionIndex == 0)
 	{
-		const FName LaneProfileOverrideNameForTempoCrosswalk = ITempoIntersectionInterface::Execute_GetLaneProfileOverrideNameForTempoCrosswalk(IntersectionQueryActor, ConnectionIndex);
+		const FName LaneProfileOverrideNameForTempoCrosswalk = ITempoCrosswalkInterface::Execute_GetLaneProfileOverrideNameForTempoCrosswalk(IntersectionQueryActor, ConnectionIndex);
 		
 		OutCrosswalkIntersectionEntranceLaneProfileOverrideName = LaneProfileOverrideNameForTempoCrosswalk;
 	}
@@ -1152,7 +1155,7 @@ bool UTempoIntersectionQueryComponent::TryGetCrosswalkIntersectionEntranceLanePr
 	{
 		// For now, we'll assume that the CrosswalkIntersectionConnector's CrosswalkRoadModule also has
 		// the lane properties of the adjacent RoadModules to avoid another layer of complexity.
-		const int32 CrosswalkRoadModuleIndex = ITempoIntersectionInterface::Execute_GetTempoCrosswalkRoadModuleIndexFromCrosswalkIntersectionIndex(IntersectionQueryActor, CrosswalkIntersectionIndex);
+		const int32 CrosswalkRoadModuleIndex = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkRoadModuleIndexFromCrosswalkIntersectionIndex(IntersectionQueryActor, CrosswalkIntersectionIndex);
 		if (!TryGetCrosswalkIntersectionConnectorLaneProfileOverrideName(IntersectionQueryActor, CrosswalkRoadModuleIndex, CrosswalkIntersectionConnectorInfoMap, OutCrosswalkIntersectionEntranceLaneProfileOverrideName))
 		{
 			return false;
@@ -1176,14 +1179,14 @@ bool UTempoIntersectionQueryComponent::TryGetCrosswalkIntersectionEntranceLaneWi
 		return false;
 	}
 
-	const int32 NumCrosswalkIntersections = ITempoIntersectionInterface::Execute_GetNumTempoCrosswalkIntersections(IntersectionQueryActor);
+	const int32 NumCrosswalkIntersections = ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersections(IntersectionQueryActor);
 
 	if (!ensureMsgf(CrosswalkIntersectionIndex >= 0 && CrosswalkIntersectionIndex < NumCrosswalkIntersections, TEXT("CrosswalkIntersectionIndex must be in range [0..%d) in UTempoIntersectionQueryComponent::TryGetCrosswalkIntersectionEntranceLaneWidth.  Currently, it is: %d.  IntersectionQueryActor: %s."), NumCrosswalkIntersections, CrosswalkIntersectionIndex, *IntersectionQueryActor->GetName()))
 	{
 		return false;
 	}
 
-	const int32 NumCrosswalkIntersectionConnections = ITempoIntersectionInterface::Execute_GetNumTempoCrosswalkIntersectionConnections(IntersectionQueryActor, CrosswalkIntersectionIndex);
+	const int32 NumCrosswalkIntersectionConnections = ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersectionConnections(IntersectionQueryActor, CrosswalkIntersectionIndex);
 
 	if (!ensureMsgf(CrosswalkIntersectionConnectionIndex >= 0 && CrosswalkIntersectionConnectionIndex < NumCrosswalkIntersectionConnections, TEXT("CrosswalkIntersectionConnectionIndex must be in range [0..%d) in UTempoIntersectionQueryComponent::TryGetCrosswalkIntersectionEntranceLaneWidth.  Currently, it is: %d.  IntersectionQueryActor: %s."), NumCrosswalkIntersectionConnections, CrosswalkIntersectionConnectionIndex, *IntersectionQueryActor->GetName()))
 	{
@@ -1195,7 +1198,7 @@ bool UTempoIntersectionQueryComponent::TryGetCrosswalkIntersectionEntranceLaneWi
 	// CrosswalkIntersectionConnectionIndex == 0 means the actual crosswalk that goes across the road referenced by ConnectionIndex.
 	if (CrosswalkIntersectionConnectionIndex == 0)
 	{
-		const float CrosswalkLaneWidth = ITempoIntersectionInterface::Execute_GetTempoCrosswalkLaneWidth(IntersectionQueryActor, ConnectionIndex, LaneIndex);
+		const float CrosswalkLaneWidth = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkLaneWidth(IntersectionQueryActor, ConnectionIndex, LaneIndex);
 		
 		OutCrosswalkIntersectionEntranceLaneWidth = CrosswalkLaneWidth;
 	}
@@ -1203,7 +1206,7 @@ bool UTempoIntersectionQueryComponent::TryGetCrosswalkIntersectionEntranceLaneWi
 	{
 		// For now, we'll assume that the CrosswalkIntersectionConnector's CrosswalkRoadModule also has
 		// the lane properties of the adjacent RoadModules to avoid another layer of complexity.
-		const int32 CrosswalkRoadModuleIndex = ITempoIntersectionInterface::Execute_GetTempoCrosswalkRoadModuleIndexFromCrosswalkIntersectionIndex(IntersectionQueryActor, CrosswalkIntersectionIndex);
+		const int32 CrosswalkRoadModuleIndex = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkRoadModuleIndexFromCrosswalkIntersectionIndex(IntersectionQueryActor, CrosswalkIntersectionIndex);
 		if (!TryGetCrosswalkIntersectionConnectorLaneWidth(IntersectionQueryActor, CrosswalkRoadModuleIndex, LaneIndex, CrosswalkIntersectionConnectorInfoMap, OutCrosswalkIntersectionEntranceLaneWidth))
 		{
 			return false;
@@ -1227,14 +1230,14 @@ bool UTempoIntersectionQueryComponent::TryGetCrosswalkIntersectionEntranceLaneDi
 		return false;
 	}
 
-	const int32 NumCrosswalkIntersections = ITempoIntersectionInterface::Execute_GetNumTempoCrosswalkIntersections(IntersectionQueryActor);
+	const int32 NumCrosswalkIntersections = ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersections(IntersectionQueryActor);
 
 	if (!ensureMsgf(CrosswalkIntersectionIndex >= 0 && CrosswalkIntersectionIndex < NumCrosswalkIntersections, TEXT("CrosswalkIntersectionIndex must be in range [0..%d) in UTempoIntersectionQueryComponent::TryGetCrosswalkIntersectionEntranceLaneDirection.  Currently, it is: %d.  IntersectionQueryActor: %s."), NumCrosswalkIntersections, CrosswalkIntersectionIndex, *IntersectionQueryActor->GetName()))
 	{
 		return false;
 	}
 
-	const int32 NumCrosswalkIntersectionConnections = ITempoIntersectionInterface::Execute_GetNumTempoCrosswalkIntersectionConnections(IntersectionQueryActor, CrosswalkIntersectionIndex);
+	const int32 NumCrosswalkIntersectionConnections = ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersectionConnections(IntersectionQueryActor, CrosswalkIntersectionIndex);
 
 	if (!ensureMsgf(CrosswalkIntersectionConnectionIndex >= 0 && CrosswalkIntersectionConnectionIndex < NumCrosswalkIntersectionConnections, TEXT("CrosswalkIntersectionConnectionIndex must be in range [0..%d) in UTempoIntersectionQueryComponent::TryGetCrosswalkIntersectionEntranceLaneDirection.  Currently, it is: %d.  IntersectionQueryActor: %s."), NumCrosswalkIntersectionConnections, CrosswalkIntersectionConnectionIndex, *IntersectionQueryActor->GetName()))
 	{
@@ -1246,7 +1249,7 @@ bool UTempoIntersectionQueryComponent::TryGetCrosswalkIntersectionEntranceLaneDi
 	// CrosswalkIntersectionConnectionIndex == 0 means the actual crosswalk that goes across the road referenced by ConnectionIndex.
 	if (CrosswalkIntersectionConnectionIndex == 0)
 	{
-		const EZoneLaneDirection CrosswalkLaneDirection = ITempoIntersectionInterface::Execute_GetTempoCrosswalkLaneDirection(IntersectionQueryActor, ConnectionIndex, LaneIndex);
+		const EZoneLaneDirection CrosswalkLaneDirection = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkLaneDirection(IntersectionQueryActor, ConnectionIndex, LaneIndex);
 		
 		OutCrosswalkIntersectionEntranceLaneDirection = CrosswalkLaneDirection;
 	}
@@ -1254,7 +1257,7 @@ bool UTempoIntersectionQueryComponent::TryGetCrosswalkIntersectionEntranceLaneDi
 	{
 		// For now, we'll assume that the CrosswalkIntersectionConnector's CrosswalkRoadModule also has
 		// the lane properties of the adjacent RoadModules to avoid another layer of complexity.
-		const int32 CrosswalkRoadModuleIndex = ITempoIntersectionInterface::Execute_GetTempoCrosswalkRoadModuleIndexFromCrosswalkIntersectionIndex(IntersectionQueryActor, CrosswalkIntersectionIndex);
+		const int32 CrosswalkRoadModuleIndex = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkRoadModuleIndexFromCrosswalkIntersectionIndex(IntersectionQueryActor, CrosswalkIntersectionIndex);
 		if (!TryGetCrosswalkIntersectionConnectorLaneDirection(IntersectionQueryActor, CrosswalkRoadModuleIndex, LaneIndex, CrosswalkIntersectionConnectorInfoMap, OutCrosswalkIntersectionEntranceLaneDirection))
 		{
 			return false;
@@ -1278,14 +1281,14 @@ bool UTempoIntersectionQueryComponent::TryGetCrosswalkIntersectionEntranceLaneTa
 		return false;
 	}
 
-	const int32 NumCrosswalkIntersections = ITempoIntersectionInterface::Execute_GetNumTempoCrosswalkIntersections(IntersectionQueryActor);
+	const int32 NumCrosswalkIntersections = ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersections(IntersectionQueryActor);
 
 	if (!ensureMsgf(CrosswalkIntersectionIndex >= 0 && CrosswalkIntersectionIndex < NumCrosswalkIntersections, TEXT("CrosswalkIntersectionIndex must be in range [0..%d) in UTempoIntersectionQueryComponent::TryGetCrosswalkIntersectionEntranceLaneTags.  Currently, it is: %d.  IntersectionQueryActor: %s."), NumCrosswalkIntersections, CrosswalkIntersectionIndex, *IntersectionQueryActor->GetName()))
 	{
 		return false;
 	}
 
-	const int32 NumCrosswalkIntersectionConnections = ITempoIntersectionInterface::Execute_GetNumTempoCrosswalkIntersectionConnections(IntersectionQueryActor, CrosswalkIntersectionIndex);
+	const int32 NumCrosswalkIntersectionConnections = ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersectionConnections(IntersectionQueryActor, CrosswalkIntersectionIndex);
 
 	if (!ensureMsgf(CrosswalkIntersectionConnectionIndex >= 0 && CrosswalkIntersectionConnectionIndex < NumCrosswalkIntersectionConnections, TEXT("CrosswalkIntersectionConnectionIndex must be in range [0..%d) in UTempoIntersectionQueryComponent::TryGetCrosswalkIntersectionEntranceLaneTags.  Currently, it is: %d.  IntersectionQueryActor: %s."), NumCrosswalkIntersectionConnections, CrosswalkIntersectionConnectionIndex, *IntersectionQueryActor->GetName()))
 	{
@@ -1297,7 +1300,7 @@ bool UTempoIntersectionQueryComponent::TryGetCrosswalkIntersectionEntranceLaneTa
 	// CrosswalkIntersectionConnectionIndex == 0 means the actual crosswalk that goes across the road referenced by ConnectionIndex.
 	if (CrosswalkIntersectionConnectionIndex == 0)
 	{
-		const TArray<FName> CrosswalkLaneTags = ITempoIntersectionInterface::Execute_GetTempoCrosswalkLaneTags(IntersectionQueryActor, ConnectionIndex, LaneIndex);
+		const TArray<FName> CrosswalkLaneTags = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkLaneTags(IntersectionQueryActor, ConnectionIndex, LaneIndex);
 		
 		OutCrosswalkIntersectionEntranceLaneTags = CrosswalkLaneTags;
 	}
@@ -1305,7 +1308,7 @@ bool UTempoIntersectionQueryComponent::TryGetCrosswalkIntersectionEntranceLaneTa
 	{
 		// For now, we'll assume that the CrosswalkIntersectionConnector's CrosswalkRoadModule also has
 		// the lane properties of the adjacent RoadModules to avoid another layer of complexity.
-		const int32 CrosswalkRoadModuleIndex = ITempoIntersectionInterface::Execute_GetTempoCrosswalkRoadModuleIndexFromCrosswalkIntersectionIndex(IntersectionQueryActor, CrosswalkIntersectionIndex);
+		const int32 CrosswalkRoadModuleIndex = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkRoadModuleIndexFromCrosswalkIntersectionIndex(IntersectionQueryActor, CrosswalkIntersectionIndex);
 		if (!TryGetCrosswalkIntersectionConnectorLaneTags(IntersectionQueryActor, CrosswalkRoadModuleIndex, LaneIndex, CrosswalkIntersectionConnectorInfoMap, OutCrosswalkIntersectionEntranceLaneTags))
 		{
 			return false;
@@ -1329,7 +1332,7 @@ bool UTempoIntersectionQueryComponent::TryGetNumCrosswalkIntersectionConnectorLa
 		return false;
 	}
 
-	const int32 NumCrosswalkRoadModules = ITempoIntersectionInterface::Execute_GetNumConnectedTempoCrosswalkRoadModules(IntersectionQueryActor);
+	const int32 NumCrosswalkRoadModules = ITempoCrosswalkInterface::Execute_GetNumConnectedTempoCrosswalkRoadModules(IntersectionQueryActor);
 
 	if (!ensureMsgf(CrosswalkRoadModuleIndex >= 0 && CrosswalkRoadModuleIndex < NumCrosswalkRoadModules, TEXT("CrosswalkRoadModuleIndex must be in range [0..%d) in UTempoIntersectionQueryComponent::TryGetNumCrosswalkIntersectionConnectorLanes.  Currently, it is: %d.  IntersectionQueryActor: %s."), NumCrosswalkRoadModules, CrosswalkRoadModuleIndex, *IntersectionQueryActor->GetName()))
 	{
@@ -1369,7 +1372,7 @@ bool UTempoIntersectionQueryComponent::TryGetCrosswalkIntersectionConnectorLaneP
 		return false;
 	}
 
-	const int32 NumCrosswalkRoadModules = ITempoIntersectionInterface::Execute_GetNumConnectedTempoCrosswalkRoadModules(IntersectionQueryActor);
+	const int32 NumCrosswalkRoadModules = ITempoCrosswalkInterface::Execute_GetNumConnectedTempoCrosswalkRoadModules(IntersectionQueryActor);
 
 	if (!ensureMsgf(CrosswalkRoadModuleIndex >= 0 && CrosswalkRoadModuleIndex < NumCrosswalkRoadModules, TEXT("CrosswalkRoadModuleIndex must be in range [0..%d) in UTempoIntersectionQueryComponent::TryGetNumCrosswalkIntersectionConnectorLanes.  Currently, it is: %d.  IntersectionQueryActor: %s."), NumCrosswalkRoadModules, CrosswalkRoadModuleIndex, *IntersectionQueryActor->GetName()))
 	{
@@ -1409,7 +1412,7 @@ bool UTempoIntersectionQueryComponent::TryGetCrosswalkIntersectionConnectorLaneW
 		return false;
 	}
 
-	const int32 NumCrosswalkRoadModules = ITempoIntersectionInterface::Execute_GetNumConnectedTempoCrosswalkRoadModules(IntersectionQueryActor);
+	const int32 NumCrosswalkRoadModules = ITempoCrosswalkInterface::Execute_GetNumConnectedTempoCrosswalkRoadModules(IntersectionQueryActor);
 
 	if (!ensureMsgf(CrosswalkRoadModuleIndex >= 0 && CrosswalkRoadModuleIndex < NumCrosswalkRoadModules, TEXT("CrosswalkRoadModuleIndex must be in range [0..%d) in UTempoIntersectionQueryComponent::TryGetNumCrosswalkIntersectionConnectorLanes.  Currently, it is: %d.  IntersectionQueryActor: %s."), NumCrosswalkRoadModules, CrosswalkRoadModuleIndex, *IntersectionQueryActor->GetName()))
 	{
@@ -1449,7 +1452,7 @@ bool UTempoIntersectionQueryComponent::TryGetCrosswalkIntersectionConnectorLaneD
 		return false;
 	}
 
-	const int32 NumCrosswalkRoadModules = ITempoIntersectionInterface::Execute_GetNumConnectedTempoCrosswalkRoadModules(IntersectionQueryActor);
+	const int32 NumCrosswalkRoadModules = ITempoCrosswalkInterface::Execute_GetNumConnectedTempoCrosswalkRoadModules(IntersectionQueryActor);
 
 	if (!ensureMsgf(CrosswalkRoadModuleIndex >= 0 && CrosswalkRoadModuleIndex < NumCrosswalkRoadModules, TEXT("CrosswalkRoadModuleIndex must be in range [0..%d) in UTempoIntersectionQueryComponent::TryGetNumCrosswalkIntersectionConnectorLanes.  Currently, it is: %d.  IntersectionQueryActor: %s."), NumCrosswalkRoadModules, CrosswalkRoadModuleIndex, *IntersectionQueryActor->GetName()))
 	{
@@ -1489,7 +1492,7 @@ bool UTempoIntersectionQueryComponent::TryGetCrosswalkIntersectionConnectorLaneT
 		return false;
 	}
 
-	const int32 NumCrosswalkRoadModules = ITempoIntersectionInterface::Execute_GetNumConnectedTempoCrosswalkRoadModules(IntersectionQueryActor);
+	const int32 NumCrosswalkRoadModules = ITempoCrosswalkInterface::Execute_GetNumConnectedTempoCrosswalkRoadModules(IntersectionQueryActor);
 
 	if (!ensureMsgf(CrosswalkRoadModuleIndex >= 0 && CrosswalkRoadModuleIndex < NumCrosswalkRoadModules, TEXT("CrosswalkRoadModuleIndex must be in range [0..%d) in UTempoIntersectionQueryComponent::TryGetNumCrosswalkIntersectionConnectorLanes.  Currently, it is: %d.  IntersectionQueryActor: %s."), NumCrosswalkRoadModules, CrosswalkRoadModuleIndex, *IntersectionQueryActor->GetName()))
 	{
@@ -1522,8 +1525,8 @@ bool UTempoIntersectionQueryComponent::TryGetCrosswalkControlPointLocation(const
 		return false;
 	}
 
-	const int32 CrosswalkControlPointStartIndex = ITempoIntersectionInterface::Execute_GetTempoCrosswalkStartEntranceLocationControlPointIndex(IntersectionQueryActor, ConnectionIndex);
-	const int32 CrosswalkControlPointEndIndex = ITempoIntersectionInterface::Execute_GetTempoCrosswalkEndEntranceLocationControlPointIndex(IntersectionQueryActor, ConnectionIndex);
+	const int32 CrosswalkControlPointStartIndex = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkStartEntranceLocationControlPointIndex(IntersectionQueryActor, ConnectionIndex);
+	const int32 CrosswalkControlPointEndIndex = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkEndEntranceLocationControlPointIndex(IntersectionQueryActor, ConnectionIndex);
 
 	if (!ensureMsgf(CrosswalkControlPointIndex >= CrosswalkControlPointStartIndex && CrosswalkControlPointIndex <= CrosswalkControlPointEndIndex, TEXT("CrosswalkControlPointIndex must be in range [%d..%d] in UTempoIntersectionQueryComponent::TryGetCrosswalkControlPointLocation.  Currently, it is: %d.  IntersectionQueryActor: %s."), CrosswalkControlPointStartIndex, CrosswalkControlPointEndIndex, CrosswalkControlPointIndex, *IntersectionQueryActor->GetName()))
 	{
@@ -1572,7 +1575,7 @@ bool UTempoIntersectionQueryComponent::TryGetCrosswalkControlPointLocation(const
 	const float LateralOffset = GetLateralOffset();
 	const float LateralDirectionScalar = CrosswalkControlPointIndex == 0 ? -1.0f : 1.0f;
 	
-	const float CrosswalkWidth = ITempoIntersectionInterface::Execute_GetTempoCrosswalkWidth(IntersectionQueryActor, ConnectionIndex);
+	const float CrosswalkWidth = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkWidth(IntersectionQueryActor, ConnectionIndex);
 	
 	const FVector CrosswalkControlPointLocation = IntersectionEntranceLocation + IntersectionEntranceForwardVector * CrosswalkWidth * 0.5f + IntersectionEntranceRightVector * LateralOffset * LateralDirectionScalar;
 
@@ -1588,8 +1591,8 @@ bool UTempoIntersectionQueryComponent::TryGetCrosswalkControlPointTangent(const 
 		return false;
 	}
 
-	const int32 CrosswalkControlPointStartIndex = ITempoIntersectionInterface::Execute_GetTempoCrosswalkStartEntranceLocationControlPointIndex(IntersectionQueryActor, ConnectionIndex);
-	const int32 CrosswalkControlPointEndIndex = ITempoIntersectionInterface::Execute_GetTempoCrosswalkEndEntranceLocationControlPointIndex(IntersectionQueryActor, ConnectionIndex);
+	const int32 CrosswalkControlPointStartIndex = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkStartEntranceLocationControlPointIndex(IntersectionQueryActor, ConnectionIndex);
+	const int32 CrosswalkControlPointEndIndex = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkEndEntranceLocationControlPointIndex(IntersectionQueryActor, ConnectionIndex);
 
 	if (!ensureMsgf(CrosswalkControlPointIndex >= CrosswalkControlPointStartIndex && CrosswalkControlPointIndex <= CrosswalkControlPointEndIndex, TEXT("CrosswalkControlPointIndex must be in range [%d..%d] in UTempoIntersectionQueryComponent::TryGetCrosswalkControlPointTangent.  Currently, it is: %d.  IntersectionQueryActor: %s."), CrosswalkControlPointStartIndex, CrosswalkControlPointEndIndex, CrosswalkControlPointIndex, *IntersectionQueryActor->GetName()))
 	{
@@ -1611,8 +1614,8 @@ bool UTempoIntersectionQueryComponent::TryGetCrosswalkControlPointUpVector(const
 		return false;
 	}
 
-	const int32 CrosswalkControlPointStartIndex = ITempoIntersectionInterface::Execute_GetTempoCrosswalkStartEntranceLocationControlPointIndex(IntersectionQueryActor, ConnectionIndex);
-	const int32 CrosswalkControlPointEndIndex = ITempoIntersectionInterface::Execute_GetTempoCrosswalkEndEntranceLocationControlPointIndex(IntersectionQueryActor, ConnectionIndex);
+	const int32 CrosswalkControlPointStartIndex = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkStartEntranceLocationControlPointIndex(IntersectionQueryActor, ConnectionIndex);
+	const int32 CrosswalkControlPointEndIndex = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkEndEntranceLocationControlPointIndex(IntersectionQueryActor, ConnectionIndex);
 
 	if (!ensureMsgf(CrosswalkControlPointIndex >= CrosswalkControlPointStartIndex && CrosswalkControlPointIndex <= CrosswalkControlPointEndIndex, TEXT("CrosswalkControlPointIndex must be in range [%d..%d] in UTempoIntersectionQueryComponent::TryGetCrosswalkControlPointUpVector.  Currently, it is: %d.  IntersectionQueryActor: %s."), CrosswalkControlPointStartIndex, CrosswalkControlPointEndIndex, CrosswalkControlPointIndex, *IntersectionQueryActor->GetName()))
 	{
@@ -1633,8 +1636,8 @@ bool UTempoIntersectionQueryComponent::TryGetCrosswalkControlPointRightVector(co
 		return false;
 	}
 
-	const int32 CrosswalkControlPointStartIndex = ITempoIntersectionInterface::Execute_GetTempoCrosswalkStartEntranceLocationControlPointIndex(IntersectionQueryActor, ConnectionIndex);
-	const int32 CrosswalkControlPointEndIndex = ITempoIntersectionInterface::Execute_GetTempoCrosswalkEndEntranceLocationControlPointIndex(IntersectionQueryActor, ConnectionIndex);
+	const int32 CrosswalkControlPointStartIndex = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkStartEntranceLocationControlPointIndex(IntersectionQueryActor, ConnectionIndex);
+	const int32 CrosswalkControlPointEndIndex = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkEndEntranceLocationControlPointIndex(IntersectionQueryActor, ConnectionIndex);
 
 	if (!ensureMsgf(CrosswalkControlPointIndex >= CrosswalkControlPointStartIndex && CrosswalkControlPointIndex <= CrosswalkControlPointEndIndex, TEXT("CrosswalkControlPointIndex must be in range [%d..%d] in UTempoIntersectionQueryComponent::TryGetCrosswalkControlPointRightVector.  Currently, it is: %d.  IntersectionQueryActor: %s."), CrosswalkControlPointStartIndex, CrosswalkControlPointEndIndex, CrosswalkControlPointIndex, *IntersectionQueryActor->GetName()))
 	{
