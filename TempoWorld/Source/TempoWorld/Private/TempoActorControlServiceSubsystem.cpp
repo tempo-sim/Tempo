@@ -904,6 +904,13 @@ grpc::Status SetSinglePropertyValue<FObjectProperty, UObject*>(void* ValuePtr, F
 	return grpc::Status_OK;
 }
 
+template <>
+grpc::Status SetSinglePropertyValue<FSoftObjectProperty, UObject*>(void* ValuePtr, FSoftObjectProperty* Property, UObject* const& ValueObj)
+{
+	Property->SetObjectPropertyValue(ValuePtr, ValueObj);
+	return grpc::Status_OK;
+}
+
 template <typename PropertyType, typename ValueType>
 grpc::Status SetSinglePropertyInContainer(void* Container, FProperty* Property, const FString& PropertyName, const ValueType& Value)
 {
@@ -1224,6 +1231,36 @@ grpc::Status SetPropertyImpl<SetColorPropertyRequest>(const UWorld* World, const
 	return SetStructPropertyImpl(World, Request, FLinearColor(Color), TEXT("FLinearColor"));
 }
 
+template <typename RequestType>
+grpc::Status SetObjectProperty(const UWorld* World, const RequestType& Request, UObject* Object)
+{
+	// First try to set it as an FObjectProperty, then fall back on an FSoftObjectProperty.
+	grpc::Status ObjectStatus = SetSinglePropertyImpl<FObjectProperty>(World, Request, Object);
+	
+	// If we got an error other than FAILED_PRECONDITION that means the type was right, but something else was wrong.
+	if (ObjectStatus.ok() || ObjectStatus.error_code() != grpc::FAILED_PRECONDITION)
+	{
+		return ObjectStatus;
+	}
+
+	return SetSinglePropertyImpl<FSoftObjectProperty>(World, Request, Object);
+}
+
+template <typename RequestType>
+grpc::Status SetObjectArrayProperty(const UWorld* World, const RequestType& Request, const TArray<UObject*>& Objects)
+{
+	// First try to set it as an FObjectProperty array, then fall back on an FSoftObjectProperty array.
+	grpc::Status ObjectStatus = SetArrayPropertyImpl<FObjectProperty>(World, Request, Objects);
+	
+	// If we got an error other than FAILED_PRECONDITION that means the type was right, but something else was wrong.
+	if (ObjectStatus.ok() || ObjectStatus.error_code() != grpc::FAILED_PRECONDITION)
+	{
+		return ObjectStatus;
+	}
+
+	return SetArrayPropertyImpl<FSoftObjectProperty>(World, Request, Objects);
+}
+
 template<>
 grpc::Status SetPropertyImpl<SetClassPropertyRequest>(const UWorld* World, const SetClassPropertyRequest& Request)
 {
@@ -1233,7 +1270,7 @@ grpc::Status SetPropertyImpl<SetClassPropertyRequest>(const UWorld* World, const
 	{
 		return grpc::Status(grpc::NOT_FOUND, "Did not find class with name " + std::string(TCHAR_TO_UTF8(*ClassName)));
 	}
-	return SetSinglePropertyImpl<FObjectProperty>(World, Request, Class);
+	return SetObjectProperty(World, Request, Class);
 }
 
 template<>
@@ -1257,7 +1294,7 @@ grpc::Status SetPropertyImpl<SetActorPropertyRequest>(const UWorld* World, const
 	{
 		return grpc::Status(grpc::NOT_FOUND, "Did not find actor with name " + std::string(TCHAR_TO_UTF8(*ActorName)));
 	}
-	return SetSinglePropertyImpl<FObjectProperty>(World, Request, Actor);
+	return SetObjectProperty(World, Request, Actor);
 }
 
 template<>
@@ -1281,7 +1318,7 @@ grpc::Status SetPropertyImpl<SetComponentPropertyRequest>(const UWorld* World, c
 	{
 		return grpc::Status(grpc::NOT_FOUND, "Did not find component with name " + std::string(TCHAR_TO_UTF8(*ComponentName)));
 	}
-	return SetSinglePropertyImpl<FObjectProperty>(World, Request, Component);
+	return SetObjectProperty(World, Request, Component);
 }
 
 template<>
@@ -1343,7 +1380,7 @@ grpc::Status SetPropertyImpl<SetFloatArrayPropertyRequest>(const UWorld* World, 
 template<>
 grpc::Status SetPropertyImpl<SetClassArrayPropertyRequest>(const UWorld* World, const SetClassArrayPropertyRequest& Request)
 {
-	TArray<UClass*> ClassArray;
+	TArray<UObject*> ClassArray;
 	for (const std::string& Value : Request.values())
 	{
 		const FString ClassName(UTF8_TO_TCHAR(Value.c_str()));
@@ -1354,7 +1391,7 @@ grpc::Status SetPropertyImpl<SetClassArrayPropertyRequest>(const UWorld* World, 
 		}
 		ClassArray.Add(Class);
 	}
-	return SetArrayPropertyImpl<FObjectProperty>(World, Request, ClassArray);
+	return SetObjectArrayProperty(World, Request, ClassArray);
 }
 
 template<>
@@ -1377,7 +1414,7 @@ grpc::Status SetPropertyImpl<SetAssetArrayPropertyRequest>(const UWorld* World, 
 template<>
 grpc::Status SetPropertyImpl<SetActorArrayPropertyRequest>(const UWorld* World, const SetActorArrayPropertyRequest& Request)
 {
-	TArray<AActor*> ActorArray;
+	TArray<UObject*> ActorArray;
 	for (const std::string& Value : Request.values())
 	{
 		const FString ActorName(UTF8_TO_TCHAR(Value.c_str()));
@@ -1388,13 +1425,13 @@ grpc::Status SetPropertyImpl<SetActorArrayPropertyRequest>(const UWorld* World, 
 		}
 		ActorArray.Add(Actor);
 	}
-	return SetArrayPropertyImpl<FObjectProperty>(World, Request, ActorArray);
+	return SetObjectArrayProperty(World, Request, ActorArray);
 }
 
 template<>
 grpc::Status SetPropertyImpl<SetComponentArrayPropertyRequest>(const UWorld* World, const SetComponentArrayPropertyRequest& Request)
 {
-	TArray<UActorComponent*> ComponentArray;
+	TArray<UObject*> ComponentArray;
 	for (const std::string& Value : Request.values())
 	{
 		const FString FullName(UTF8_TO_TCHAR(Value.c_str()));
@@ -1417,7 +1454,7 @@ grpc::Status SetPropertyImpl<SetComponentArrayPropertyRequest>(const UWorld* Wor
 		}
 		ComponentArray.Add(Component);
 	}
-	return SetArrayPropertyImpl<FObjectProperty>(World, Request, ComponentArray);
+	return SetObjectArrayProperty(World, Request, ComponentArray);
 }
 
 template <typename RequestType>
