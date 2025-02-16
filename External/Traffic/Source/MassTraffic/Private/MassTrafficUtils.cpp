@@ -225,6 +225,33 @@ LaneTurnType GetLaneTurnType(const uint32 LaneIndex, const FZoneGraphStorage& Zo
 	}
 }
 
+int32 GetLanePriority(
+	const FZoneGraphTrafficLaneData* TrafficLaneData,
+	const FMassTrafficLanePriorityFilters& LanePriorityFilters,
+	const FZoneGraphStorage& ZoneGraphStorage)
+{
+	if (TrafficLaneData == nullptr)
+	{
+		return INDEX_NONE;
+	}
 
+	FZoneGraphTagMask LaneTagMask;
+	if (!UE::ZoneGraph::Query::GetLaneTags(ZoneGraphStorage, TrafficLaneData->LaneHandle, LaneTagMask))
+	{
+		return INDEX_NONE;
+	}
+
+	for (int32 PriorityIndex = 0; PriorityIndex < LanePriorityFilters.LaneTagFilters.Num(); ++PriorityIndex)
+	{
+		const FZoneGraphTagFilter& LaneChangePriorityFilter = LanePriorityFilters.LaneTagFilters[PriorityIndex];
+
+		if (LaneChangePriorityFilter.Pass(LaneTagMask))
+		{
+			return LanePriorityFilters.LaneTagFilters.Num() - 1 - PriorityIndex;
+		}
+	}
+
+	return INDEX_NONE;
+}
 
 }

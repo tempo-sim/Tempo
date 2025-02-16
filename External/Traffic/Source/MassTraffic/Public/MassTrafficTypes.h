@@ -673,3 +673,12 @@ struct MASSTRAFFIC_API FMassTrafficZoneGraphData
 		return TrafficLaneDataLookup[LaneIndex];
 	}
 };
+
+USTRUCT(BlueprintType)
+struct MASSTRAFFIC_API FMassTrafficLanePriorityFilters
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	TArray<FZoneGraphTagFilter> LaneTagFilters;
+};

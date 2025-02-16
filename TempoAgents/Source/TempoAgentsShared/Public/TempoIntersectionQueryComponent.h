@@ -9,7 +9,7 @@
 #include "TempoIntersectionInterface.h"
 #include "TempoIntersectionQueryComponent.generated.h"
 
-using TempoZoneGraphTagFilterMap = TMap<FZoneGraphTagFilter, TTuple<TArray<FTempoLaneConnectionInfo>, TArray<FTempoLaneConnectionInfo>>>;
+using TempoZoneGraphTagMaskGroups = TMap<FZoneGraphTagMask, TArray<FTempoLaneConnectionInfo>>;
 
 UCLASS( ClassGroup=(TempoIntersections), meta = (BlueprintSpawnableComponent))
 class TEMPOAGENTSSHARED_API UTempoIntersectionQueryComponent : public UActorComponent
@@ -110,9 +110,8 @@ protected:
 	
 	virtual bool TryGetNearestRoadControlPointIndex(const AActor& IntersectionQueryActor, int32 ConnectionIndex, int32& OutNearestRoadControlPointIndex) const;
 	virtual AActor* GetConnectedRoadActor(const AActor& IntersectionQueryActor, int32 ConnectionIndex) const;
-
-	virtual bool TryGetTagFilteredLaneConnections(const AActor* SourceConnectionActor, const TArray<FTempoLaneConnectionInfo>& SourceLaneConnectionInfos, const TArray<FTempoLaneConnectionInfo>& DestLaneConnectionInfos,
-										  TempoZoneGraphTagFilterMap& OutZoneGraphTagFilterMap) const;
+	
+	virtual TempoZoneGraphTagMaskGroups GroupLaneConnectionsByTags(const AActor* SourceConnectionActor, const TArray<FTempoLaneConnectionInfo>& SourceLaneConnectionInfos, const TArray<FTempoLaneConnectionInfo>& DestLaneConnectionInfos) const;
 
 	virtual FZoneGraphTagFilter GetLaneConnectionTagFilter(const AActor* SourceConnectionActor, const FTempoLaneConnectionInfo& SourceLaneConnectionInfo) const;
 	virtual FZoneGraphTagFilter GenerateTagFilter(const TArray<FName>& AnyTags, const TArray<FName>& AllTags, const TArray<FName>& NotTags) const;
