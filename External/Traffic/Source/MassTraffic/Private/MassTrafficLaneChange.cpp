@@ -536,7 +536,7 @@ void ChooseLaneForLaneChange(
 	FMassTrafficLaneChangeRecommendation& InOutRecommendation
 )
 {
-	const bool bAlreadyChoseLane = InOutRecommendation.Lane_Chosen;
+	const bool bAlreadyChoseLane = InOutRecommendation.Lane_Chosen != nullptr;
 	if (!bAlreadyChoseLane)
 	{
 		InOutRecommendation = FMassTrafficLaneChangeRecommendation();
