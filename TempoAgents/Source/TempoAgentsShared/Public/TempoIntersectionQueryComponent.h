@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "ZoneGraphTypes.h"
+#include "TempoCrosswalkInterface.h"
 #include "TempoIntersectionInterface.h"
 #include "TempoIntersectionQueryComponent.generated.h"
 
