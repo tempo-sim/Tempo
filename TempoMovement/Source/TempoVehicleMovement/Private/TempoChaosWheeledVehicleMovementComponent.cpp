@@ -8,6 +8,8 @@ UTempoChaosWheeledVehicleMovementComponent::UTempoChaosWheeledVehicleMovementCom
 {
 	bReverseAsBrake = false;
 	bThrottleAsBrake = false;
+	WheelTraceCollisionResponses.Vehicle = ECR_Ignore;
+	WheelTraceCollisionResponses.Pawn = ECR_Ignore;
 }
 
 void UTempoChaosWheeledVehicleMovementComponent::HandleDrivingCommand(const FDrivingCommand& Command)
