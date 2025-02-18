@@ -1,0 +1,11 @@
+--- Source/ZoneGraph/Private/ZoneGraphBuilder.cpp	2024-09-26 22:04:48
++++ /Users/pete/TempoUnrealFestDemo/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Private/ZoneGraphBuilder.cpp	2024-09-17 17:52:05
+@@ -502,7 +504,7 @@
+ 	const uint32 NewHash = CalculateCombinedShapeHash(ZoneGraphData);
+ 	ZoneGraphData.SetCombinedShapeHash(NewHash);
+ 
+-	ZoneGraphData.UpdateDrawing();
++ZoneGraphData.UpdateDrawing();
+ }
+ 
+ void FZoneGraphBuilder::ConnectLanes(TArray<FZoneShapeLaneInternalLink>& InternalLinks, FZoneGraphStorage& ZoneStorage)
