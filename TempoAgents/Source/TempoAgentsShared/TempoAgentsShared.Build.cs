@@ -14,6 +14,7 @@ public class TempoAgentsShared : ModuleRules
                 "Core",
                 "Engine",
                 "RenderCore",
+                "ZoneGraph",
             }
         );
 
@@ -25,7 +26,6 @@ public class TempoAgentsShared : ModuleRules
                 "DeveloperSettings",
                 "Slate",
                 "SlateCore",
-                "ZoneGraph",
                 "MassCommon",
                 "MassTraffic",
                 "MassRepresentation",

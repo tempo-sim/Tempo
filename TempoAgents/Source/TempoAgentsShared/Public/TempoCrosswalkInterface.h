@@ -29,6 +29,14 @@ struct FCrosswalkIntersectionConnectorSegmentInfo
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tempo Agents|Road Lane Graph|Lane Connection Info")
 	float CrosswalkIntersectionConnectorEndDistance = 0.0f;
+
+	// Keep track of which crosswalk corresponds to the start of this connector. Currently only used by roads.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tempo Agents|Road Lane Graph|Lane Connection Info")
+	int32 CrosswalkIndexAtStart = -1;
+
+	// Keep track of which crosswalk corresponds to the end of this connector. Currently only used by roads.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tempo Agents|Road Lane Graph|Lane Connection Info")
+	int32 CrosswalkIndexAtEnd = -1;
 };
 
 USTRUCT(BlueprintType)
@@ -65,6 +73,9 @@ public:
 	// Crosswalk Queries
 
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Crosswalk Interface|Queries")
+	int32 GetNumTempoCrosswalks() const;
+
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Crosswalk Interface|Queries")
 	bool ShouldGenerateZoneShapesForTempoCrosswalk(int32 ConnectionIndex) const;
 	
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Crosswalk Interface|Queries")
@@ -78,7 +89,7 @@ public:
 
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Crosswalk Interface|Queries")
 	TArray<FName> GetTempoCrosswalkTags(int32 ConnectionIndex) const;
-	
+
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Crosswalk Interface|Queries")
 	int32 GetNumTempoCrosswalkLanes(int32 ConnectionIndex) const;
 	
@@ -172,9 +183,14 @@ public:
 
 	// Crosswalk Indexing Conversion Queries
 
+	// Internal - and unused?
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Crosswalk Interface|Queries")
 	int32 GetTempoCrosswalkIntersectionIndexFromCrosswalkRoadModuleIndex(int32 CrosswalkRoadModuleIndex) const;
-	
+
+	// Internal
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Crosswalk Interface|Queries")
 	int32 GetTempoCrosswalkRoadModuleIndexFromCrosswalkIntersectionIndex(int32 CrosswalkIntersectionIndex) const;
+
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Crosswalk Interface|Commands")
+	void SetupTempoCrosswalkData();
 };
