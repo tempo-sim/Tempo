@@ -1,4 +1,4 @@
-// Copyright Vayu Robotics, Inc. All Rights Reserved
+// Copyright Tempo Simulation, LLC. All Rights Reserved
 
 
 #include "TempoRoadQueryComponent.h"
@@ -78,15 +78,15 @@ bool UTempoRoadQueryComponent::TryGenerateCrosswalkRoadModuleMap(const AActor* R
 
 	const TArray<AActor*> CrosswalkRoadModules = GetCrosswalkRoadModules();
 
-	if (CrosswalkRoadModules.Num() < 2)
-	{
-		return false;
-	}
-
-	if (!ensureMsgf(CrosswalkRoadModules.Num() == 2, TEXT("Only roads with 2 crosswalk road modules are handled by UTempoRoadQueryComponent::TryGenerateCrosswalkRoadModuleMap.")))
-	{
-		return false;
-	}
+	// if (CrosswalkRoadModules.Num() < 2)
+	// {
+	// 	return false;
+	// }
+	//
+	// if (!ensureMsgf(CrosswalkRoadModules.Num() == 2, TEXT("Only roads with 2 crosswalk road modules are handled by UTempoRoadQueryComponent::TryGenerateCrosswalkRoadModuleMap.")))
+	// {
+	// 	return false;
+	// }
 
 	const FVector RoadStartLocation = ITempoRoadInterface::Execute_GetLocationAtDistanceAlongTempoRoad(RoadQueryActor, 0.0, ETempoCoordinateSpace::World);
 	const FVector RoadStartRight = ITempoRoadInterface::Execute_GetRightVectorAtDistanceAlongTempoRoad(RoadQueryActor, 0.0, ETempoCoordinateSpace::World);
@@ -116,16 +116,16 @@ bool UTempoRoadQueryComponent::TryGenerateCrosswalkRoadModuleMap(const AActor* R
 	AActor* LeftCrosswalkRoadModule = GetCrosswalkRoadModuleInLateralDirection(-1.0f);
 	AActor* RightCrosswalkRoadModule = GetCrosswalkRoadModuleInLateralDirection(1.0f);
 
-	if (!(LeftCrosswalkRoadModule && RightCrosswalkRoadModule))
-	{
-		// Roads must have at least one crosswalk road module on the left and the right to have crosswalk connections.
-		return false;
-	}
-
 	TMap<int32, AActor*> CrosswalkRoadModuleMap;
 	// Convention: left road module is index 0, right road module is index 1
-	CrosswalkRoadModuleMap.Add(0, LeftCrosswalkRoadModule);
-	CrosswalkRoadModuleMap.Add(1, RightCrosswalkRoadModule);
+	if (LeftCrosswalkRoadModule)
+	{
+		CrosswalkRoadModuleMap.Add(0, LeftCrosswalkRoadModule);
+	}
+	if (RightCrosswalkRoadModule)
+	{
+		CrosswalkRoadModuleMap.Add(1, RightCrosswalkRoadModule);
+	}
 
 	OutCrosswalkRoadModuleMap = CrosswalkRoadModuleMap;
 
@@ -225,35 +225,6 @@ bool UTempoRoadQueryComponent::TryGetCrosswalkIntersectionEntranceLocation(const
 		}
 
 		const FVector CrosswalkEntranceLocation = ITempoRoadModuleInterface::Execute_GetLocationAtDistanceAlongTempoRoadModule(CrosswalkRoadModuleActor, CrosswalkIntersectionConnectorDistance, CoordinateSpace);
-
-		FColor Color;
-		if (CrosswalkIntersectionIndex == 0)
-		{
-			Color = FColor::Red;
-		}
-		if (CrosswalkIntersectionIndex == 1)
-		{
-			Color = FColor::Magenta;
-		}
-		if (CrosswalkIntersectionIndex == 2)
-		{
-			Color = FColor::Green;
-		}
-		if (CrosswalkIntersectionIndex == 3)
-		{
-			Color = FColor::Emerald;
-		}
-		if (CrosswalkIntersectionIndex == 4)
-		{
-			Color = FColor::Blue;
-		}
-		if (CrosswalkIntersectionIndex == 5)
-		{
-			Color = FColor::Cyan;
-		}
-
-		// DrawDebugPoint(CrosswalkRoadModuleActor->GetWorld(), CrosswalkEntranceLocation + 100.0 * FVector::UpVector, 60.0, Color, false, 20.0, 0);
-
 		OutCrosswalkIntersectionEntranceLocation = CrosswalkEntranceLocation;
 	}
 
@@ -288,7 +259,7 @@ bool UTempoRoadQueryComponent::TryGetCrosswalkIntersectionEntranceTangent(const 
 	if (CrosswalkIntersectionConnectionIndex == 0)
 	{
 		const int32 CrosswalkIndex = GetCrosswalkIndexFromCrosswalkIntersectionIndex(RoadQueryActor, CrosswalkIntersectionIndex);
-		const float DirectionScalar = !bIsLeftSide ? 1.0f : -1.0f;
+		const float DirectionScalar = bIsLeftSide ? -1.0f : 1.0f;
 
 		// The actual CrosswalkIntersection's entrance tangent is based on the road's right vector at the crosswalk.
 		const float DistanceAlongRoad = GetDistanceAlongTempoRoadAtCrosswalk(RoadQueryActor, CrosswalkIndex);

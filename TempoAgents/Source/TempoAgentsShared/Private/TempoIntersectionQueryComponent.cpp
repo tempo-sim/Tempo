@@ -449,8 +449,6 @@ bool UTempoIntersectionQueryComponent::TryGetCrosswalkIntersectionConnectorInfoE
 		return false;
 	}
 
-	// First Index: Is this the crosswalk intersection at the bottom or the top?
-	// Second Index: Are you inside the road module or at the extent of it?
 	const int32 CrosswalkIntersectionDistanceIndex = CrosswalkIntersectionEntranceOuterDistance < FMath::Abs(CrosswalkIntersectionEntranceOuterDistance - CrosswalkRoadModuleLength) ? 0 : 1;
 	const int32 CrosswalkIntersectionDistanceSideIndex = CrosswalkIntersectionConnectionIndex == 1 ? 0 : 1;
 	
