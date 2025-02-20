@@ -68,8 +68,13 @@ bool UTempoRoadLaneGraphSubsystem::TryGenerateZoneShapeComponents() const
 		else if (Actor->Implements<UTempoRoadModuleInterface>())
 		{
 			DestroyZoneShapeComponents(*Actor);
-			
-			const AActor* RoadModuleParentActor = ITempoRoadModuleInterface::Execute_GetTempoRoadModuleParentActor(Actor);
+
+			const AActor* RoadModuleParentActor = nullptr;
+			{
+				FEditorScriptExecutionGuard ScriptExecutionGuard;
+				RoadModuleParentActor = ITempoRoadModuleInterface::Execute_GetTempoRoadModuleParentActor(Actor);
+			}
+
 			if (RoadModuleParentActor == nullptr)
 			{
 				UE_LOG(LogTempoAgentsEditor, Error, TEXT("Tempo Lane Graph - Failed to create Road Module ZoneShapeComponents for Actor: %s.  It must have a valid parent."), *Actor->GetName());
