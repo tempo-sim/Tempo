@@ -9,14 +9,16 @@
 #include "TempoRoadModuleInterface.h"
 #include "TempoZoneGraphUtils.h"
 
+#include "TempoCoreUtils.h"
+
 #include "ZoneGraphTypes.h"
 
 float GetDistanceAlongTempoRoadAtCrosswalk(const AActor* RoadQueryActor, int32 CrosswalkIndex)
 {
-	const FVector CrosswalkCenterLineLeft = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkControlPointLocation(RoadQueryActor, CrosswalkIndex, 0, ETempoCoordinateSpace::World);
-	const FVector CrosswalkCenterLineRight = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkControlPointLocation(RoadQueryActor, CrosswalkIndex, 1, ETempoCoordinateSpace::World);
+	const FVector CrosswalkCenterLineLeft = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoCrosswalkInterface::Execute_GetTempoCrosswalkControlPointLocation, CrosswalkIndex, 0, ETempoCoordinateSpace::World);
+	const FVector CrosswalkCenterLineRight = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoCrosswalkInterface::Execute_GetTempoCrosswalkControlPointLocation, CrosswalkIndex, 1, ETempoCoordinateSpace::World);
 	const FVector CrosswalkCenter = (CrosswalkCenterLineLeft + CrosswalkCenterLineRight) / 2.0;
-	return ITempoRoadInterface::Execute_GetDistanceAlongTempoRoadClosestToWorldLocation(RoadQueryActor, CrosswalkCenter);
+	return UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoRoadInterface::Execute_GetDistanceAlongTempoRoadClosestToWorldLocation, CrosswalkCenter);
 }
 
 bool UTempoRoadQueryComponent::TryGetCrosswalkIntersectionConnectorInfo(const AActor* RoadQueryActor, int32 CrosswalkRoadModuleIndex, FCrosswalkIntersectionConnectorInfo& OutCrosswalkIntersectionConnectorInfo) const
@@ -38,11 +40,11 @@ bool UTempoRoadQueryComponent::TryGenerateCrosswalkRoadModuleMap(const AActor* R
 	{
 		TArray<AActor*> CrosswalkRoadModules;
 
-		const int32 NumConnectedRoadModules = ITempoRoadInterface::Execute_GetNumConnectedTempoRoadModules(RoadQueryActor);
+		const int32 NumConnectedRoadModules = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoRoadInterface::Execute_GetNumConnectedTempoRoadModules);
 
 		for (int32 ConnectedRoadModuleIndex = 0; ConnectedRoadModuleIndex < NumConnectedRoadModules; ++ConnectedRoadModuleIndex)
 		{
-			AActor* ConnectedRoadModule = ITempoRoadInterface::Execute_GetConnectedTempoRoadModuleActor(RoadQueryActor, ConnectedRoadModuleIndex);
+			AActor* ConnectedRoadModule = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoRoadInterface::Execute_GetConnectedTempoRoadModuleActor, ConnectedRoadModuleIndex);
 
 			if (ConnectedRoadModule == nullptr)
 			{
@@ -55,11 +57,11 @@ bool UTempoRoadQueryComponent::TryGenerateCrosswalkRoadModuleMap(const AActor* R
 				continue;
 			}
 
-			const int32 NumRoadModuleLanes = ITempoRoadModuleInterface::Execute_GetNumTempoRoadModuleLanes(ConnectedRoadModule);
+			const int32 NumRoadModuleLanes = UTempoCoreUtils::CallBlueprintFunction(ConnectedRoadModule, ITempoRoadModuleInterface::Execute_GetNumTempoRoadModuleLanes);
 
 			for (int32 RoadModuleLaneIndex = 0; RoadModuleLaneIndex < NumRoadModuleLanes; ++RoadModuleLaneIndex)
 			{
-				const TArray<FName>& RoadModuleLaneTags = ITempoRoadModuleInterface::Execute_GetTempoRoadModuleLaneTags(ConnectedRoadModule, RoadModuleLaneIndex);
+				const TArray<FName>& RoadModuleLaneTags = UTempoCoreUtils::CallBlueprintFunction(ConnectedRoadModule, ITempoRoadModuleInterface::Execute_GetTempoRoadModuleLaneTags, RoadModuleLaneIndex);
 
 				const FZoneGraphTagMask& RoadModuleLaneTagMask = UTempoZoneGraphUtils::GenerateTagMaskFromTagNames(this, RoadModuleLaneTags);
 
@@ -88,9 +90,9 @@ bool UTempoRoadQueryComponent::TryGenerateCrosswalkRoadModuleMap(const AActor* R
 	// 	return false;
 	// }
 
-	const FVector RoadStartLocation = ITempoRoadInterface::Execute_GetLocationAtDistanceAlongTempoRoad(RoadQueryActor, 0.0, ETempoCoordinateSpace::World);
-	const FVector RoadStartRight = ITempoRoadInterface::Execute_GetRightVectorAtDistanceAlongTempoRoad(RoadQueryActor, 0.0, ETempoCoordinateSpace::World);
-	const float RoadWidth = ITempoRoadInterface::Execute_GetTempoRoadWidth(RoadQueryActor);
+	const FVector RoadStartLocation = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoRoadInterface::Execute_GetLocationAtDistanceAlongTempoRoad, 0.0, ETempoCoordinateSpace::World);
+	const FVector RoadStartRight = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoRoadInterface::Execute_GetRightVectorAtDistanceAlongTempoRoad, 0.0, ETempoCoordinateSpace::World);
+	const float RoadWidth = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoRoadInterface::Execute_GetTempoRoadWidth);
 
 	const auto& GetCrosswalkRoadModuleInLateralDirection = [&CrosswalkRoadModules, &RoadStartLocation, &RoadStartRight, &RoadWidth](const float LateralDirectionScalar) -> AActor*
 	{
@@ -98,10 +100,10 @@ bool UTempoRoadQueryComponent::TryGenerateCrosswalkRoadModuleMap(const AActor* R
 		float NearestDistance = TNumericLimits<float>::Max();
 		for (AActor* CrosswalkRoadModule : CrosswalkRoadModules)
 		{
-			const float RoadModuleWidth = ITempoRoadModuleInterface::Execute_GetTempoRoadModuleWidth(CrosswalkRoadModule);
+			const float RoadModuleWidth = UTempoCoreUtils::CallBlueprintFunction(CrosswalkRoadModule, ITempoRoadModuleInterface::Execute_GetTempoRoadModuleWidth);
 			const FVector QueryPoint = RoadStartLocation + RoadStartRight * (RoadWidth * 0.5 + RoadModuleWidth * 0.5) * LateralDirectionScalar;
-			const float DistanceAlongRoadModule = ITempoRoadModuleInterface::Execute_GetDistanceAlongTempoRoadModuleClosestToWorldLocation(CrosswalkRoadModule, QueryPoint);
-			const FVector PointOnRoadModule = ITempoRoadModuleInterface::Execute_GetLocationAtDistanceAlongTempoRoadModule(CrosswalkRoadModule, DistanceAlongRoadModule, ETempoCoordinateSpace::World);
+			const float DistanceAlongRoadModule = UTempoCoreUtils::CallBlueprintFunction(CrosswalkRoadModule, ITempoRoadModuleInterface::Execute_GetDistanceAlongTempoRoadModuleClosestToWorldLocation, QueryPoint);
+			const FVector PointOnRoadModule = UTempoCoreUtils::CallBlueprintFunction(CrosswalkRoadModule, ITempoRoadModuleInterface::Execute_GetLocationAtDistanceAlongTempoRoadModule, DistanceAlongRoadModule, ETempoCoordinateSpace::World);
 			const float Distance = FVector::Distance(PointOnRoadModule, QueryPoint);
 			if (Distance < NearestDistance)
 			{
@@ -139,7 +141,7 @@ bool UTempoRoadQueryComponent::TryGetCrosswalkIntersectionConnectorInfoEntry(con
 		return false;
 	}
 
-	const int32 CrosswalkRoadModuleIndex = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkRoadModuleIndexFromCrosswalkIntersectionIndex(RoadQueryActor, CrosswalkIntersectionIndex);
+	const int32 CrosswalkRoadModuleIndex = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoCrosswalkInterface::Execute_GetTempoCrosswalkRoadModuleIndexFromCrosswalkIntersectionIndex, CrosswalkIntersectionIndex);
 
 	const FCrosswalkIntersectionConnectorInfo* CrosswalkIntersectionConnectorInfo = CrosswalkIntersectionConnectorInfoMap.Find(CrosswalkRoadModuleIndex);
 
@@ -190,14 +192,14 @@ bool UTempoRoadQueryComponent::TryGetCrosswalkIntersectionEntranceLocation(const
 		return false;
 	}
 
-	const int32 NumCrosswalkIntersections = ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersections(RoadQueryActor);
+	const int32 NumCrosswalkIntersections = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersections);
 
 	if (!ensureMsgf(CrosswalkIntersectionIndex >= 0 && CrosswalkIntersectionIndex < NumCrosswalkIntersections, TEXT("CrosswalkIntersectionIndex must be in range [0..%d) in UTempoRoadQueryComponent::TryGetCrosswalkIntersectionEntranceLocation.  Currently, it is: %d.  RoadQueryActor: %s."), NumCrosswalkIntersections, CrosswalkIntersectionIndex, *RoadQueryActor->GetName()))
 	{
 		return false;
 	}
 
-	const int32 NumCrosswalkIntersectionConnections = ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersectionConnections(RoadQueryActor, CrosswalkIntersectionIndex);
+	const int32 NumCrosswalkIntersectionConnections = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersectionConnections, CrosswalkIntersectionIndex);
 
 	if (!ensureMsgf(CrosswalkIntersectionConnectionIndex >= 0 && CrosswalkIntersectionConnectionIndex < NumCrosswalkIntersectionConnections, TEXT("CrosswalkIntersectionConnectionIndex must be in range [0..%d) in UTempoRoadQueryComponent::TryGetCrosswalkIntersectionEntranceLocation.  Currently, it is: %d.  RoadQueryActor: %s."), NumCrosswalkIntersectionConnections, CrosswalkIntersectionConnectionIndex, *RoadQueryActor->GetName()))
 	{
@@ -209,7 +211,7 @@ bool UTempoRoadQueryComponent::TryGetCrosswalkIntersectionEntranceLocation(const
 		const int32 CrosswalkIndex = GetCrosswalkIndexFromCrosswalkIntersectionIndex(RoadQueryActor, CrosswalkIntersectionIndex);
 		const int32 CrosswalkControlPointIndex = CrosswalkIntersectionIndex % 2;
 
-		const FVector CrosswalkEntranceLocation = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkControlPointLocation(RoadQueryActor, CrosswalkIndex, CrosswalkControlPointIndex, CoordinateSpace);
+		const FVector CrosswalkEntranceLocation = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoCrosswalkInterface::Execute_GetTempoCrosswalkControlPointLocation, CrosswalkIndex, CrosswalkControlPointIndex, CoordinateSpace);
 
 		OutCrosswalkIntersectionEntranceLocation = CrosswalkEntranceLocation;
 	}
@@ -224,7 +226,7 @@ bool UTempoRoadQueryComponent::TryGetCrosswalkIntersectionEntranceLocation(const
 			return false;
 		}
 
-		const FVector CrosswalkEntranceLocation = ITempoRoadModuleInterface::Execute_GetLocationAtDistanceAlongTempoRoadModule(CrosswalkRoadModuleActor, CrosswalkIntersectionConnectorDistance, CoordinateSpace);
+		const FVector CrosswalkEntranceLocation = UTempoCoreUtils::CallBlueprintFunction(CrosswalkRoadModuleActor, ITempoRoadModuleInterface::Execute_GetLocationAtDistanceAlongTempoRoadModule, CrosswalkIntersectionConnectorDistance, CoordinateSpace);
 		OutCrosswalkIntersectionEntranceLocation = CrosswalkEntranceLocation;
 	}
 
@@ -238,14 +240,14 @@ bool UTempoRoadQueryComponent::TryGetCrosswalkIntersectionEntranceTangent(const 
 		return false;
 	}
 
-	const int32 NumCrosswalkIntersections = ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersections(RoadQueryActor);
+	const int32 NumCrosswalkIntersections = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersections);
 
 	if (!ensureMsgf(CrosswalkIntersectionIndex >= 0 && CrosswalkIntersectionIndex < NumCrosswalkIntersections, TEXT("CrosswalkIntersectionIndex must be in range [0..%d) in UTempoRoadQueryComponent::TryGetCrosswalkIntersectionEntranceTangent.  Currently, it is: %d.  RoadQueryActor: %s."), NumCrosswalkIntersections, CrosswalkIntersectionIndex, *RoadQueryActor->GetName()))
 	{
 		return false;
 	}
 
-	const int32 NumCrosswalkIntersectionConnections = ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersectionConnections(RoadQueryActor, CrosswalkIntersectionIndex);
+	const int32 NumCrosswalkIntersectionConnections = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersectionConnections, CrosswalkIntersectionIndex);
 
 	if (!ensureMsgf(CrosswalkIntersectionConnectionIndex >= 0 && CrosswalkIntersectionConnectionIndex < NumCrosswalkIntersectionConnections, TEXT("CrosswalkIntersectionConnectionIndex must be in range [0..%d) in UTempoRoadQueryComponent::TryGetCrosswalkIntersectionEntranceTangent.  Currently, it is: %d.  RoadQueryActor: %s."), NumCrosswalkIntersectionConnections, CrosswalkIntersectionConnectionIndex, *RoadQueryActor->GetName()))
 	{
@@ -263,7 +265,7 @@ bool UTempoRoadQueryComponent::TryGetCrosswalkIntersectionEntranceTangent(const 
 
 		// The actual CrosswalkIntersection's entrance tangent is based on the road's right vector at the crosswalk.
 		const float DistanceAlongRoad = GetDistanceAlongTempoRoadAtCrosswalk(RoadQueryActor, CrosswalkIndex);
-		OutCrosswalkIntersectionEntranceTangent = ITempoRoadInterface::Execute_GetRightVectorAtDistanceAlongTempoRoad(RoadQueryActor, DistanceAlongRoad, ETempoCoordinateSpace::World) * DirectionScalar;
+		OutCrosswalkIntersectionEntranceTangent = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoRoadInterface::Execute_GetRightVectorAtDistanceAlongTempoRoad, DistanceAlongRoad, ETempoCoordinateSpace::World) * DirectionScalar;
 	}
 	else
 	{
@@ -280,7 +282,7 @@ bool UTempoRoadQueryComponent::TryGetCrosswalkIntersectionEntranceTangent(const 
 		// So on the left side CrosswalkIntersectionConnectionIndex 1 is the start and 2 is the end.
 		// And on the left side CrosswalkIntersectionConnectionIndex 2 is the start and 1 is the end.
 		const float DirectionScalar = CrosswalkIntersectionConnectionIndex == (bIsLeftSide ? 1 : 2) ? 1.0f : -1.0f;
-		const FVector CrosswalkIntersectionEntranceTangent = ITempoRoadModuleInterface::Execute_GetTangentAtDistanceAlongTempoRoadModule(CrosswalkRoadModuleActor, CrosswalkIntersectionConnectorDistance, CoordinateSpace) * DirectionScalar;
+		const FVector CrosswalkIntersectionEntranceTangent = UTempoCoreUtils::CallBlueprintFunction(CrosswalkRoadModuleActor, ITempoRoadModuleInterface::Execute_GetTangentAtDistanceAlongTempoRoadModule, CrosswalkIntersectionConnectorDistance, CoordinateSpace) * DirectionScalar;
 
 		OutCrosswalkIntersectionEntranceTangent = CrosswalkIntersectionEntranceTangent;
 	}
@@ -295,14 +297,14 @@ bool UTempoRoadQueryComponent::TryGetCrosswalkIntersectionEntranceUpVector(const
 		return false;
 	}
 
-	const int32 NumCrosswalkIntersections = ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersections(RoadQueryActor);
+	const int32 NumCrosswalkIntersections = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersections);
 
 	if (!ensureMsgf(CrosswalkIntersectionIndex >= 0 && CrosswalkIntersectionIndex < NumCrosswalkIntersections, TEXT("CrosswalkIntersectionIndex must be in range [0..%d) in UTempoRoadQueryComponent::TryGetCrosswalkIntersectionEntranceUpVector.  Currently, it is: %d.  RoadQueryActor: %s."), NumCrosswalkIntersections, CrosswalkIntersectionIndex, *RoadQueryActor->GetName()))
 	{
 		return false;
 	}
 
-	const int32 NumCrosswalkIntersectionConnections = ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersectionConnections(RoadQueryActor, CrosswalkIntersectionIndex);
+	const int32 NumCrosswalkIntersectionConnections = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersectionConnections, CrosswalkIntersectionIndex);
 
 	if (!ensureMsgf(CrosswalkIntersectionConnectionIndex >= 0 && CrosswalkIntersectionConnectionIndex < NumCrosswalkIntersectionConnections, TEXT("CrosswalkIntersectionConnectionIndex must be in range [0..%d) in UTempoRoadQueryComponent::TryGetCrosswalkIntersectionEntranceUpVector.  Currently, it is: %d.  RoadQueryActor: %s."), NumCrosswalkIntersectionConnections, CrosswalkIntersectionConnectionIndex, *RoadQueryActor->GetName()))
 	{
@@ -316,7 +318,7 @@ bool UTempoRoadQueryComponent::TryGetCrosswalkIntersectionEntranceUpVector(const
 
 		// The actual CrosswalkIntersection's entrance up vector is based on the road's up vector at the crosswalk.
 		const float DistanceAlongRoad = GetDistanceAlongTempoRoadAtCrosswalk(RoadQueryActor, CrosswalkIndex);
-		OutCrosswalkIntersectionEntranceUpVector = ITempoRoadInterface::Execute_GetUpVectorAtDistanceAlongTempoRoad(RoadQueryActor, DistanceAlongRoad, ETempoCoordinateSpace::World);
+		OutCrosswalkIntersectionEntranceUpVector = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoRoadInterface::Execute_GetUpVectorAtDistanceAlongTempoRoad, DistanceAlongRoad, ETempoCoordinateSpace::World);
 	}
 	else
 	{
@@ -329,7 +331,7 @@ bool UTempoRoadQueryComponent::TryGetCrosswalkIntersectionEntranceUpVector(const
 			return false;
 		}
 
-		const FVector CrosswalkIntersectionEntranceUpVector = ITempoRoadModuleInterface::Execute_GetUpVectorAtDistanceAlongTempoRoadModule(CrosswalkRoadModuleActor, CrosswalkIntersectionConnectorDistance, CoordinateSpace);
+		const FVector CrosswalkIntersectionEntranceUpVector = UTempoCoreUtils::CallBlueprintFunction(CrosswalkRoadModuleActor, ITempoRoadModuleInterface::Execute_GetUpVectorAtDistanceAlongTempoRoadModule, CrosswalkIntersectionConnectorDistance, CoordinateSpace);
 
 		OutCrosswalkIntersectionEntranceUpVector = CrosswalkIntersectionEntranceUpVector;
 	}
@@ -344,14 +346,14 @@ bool UTempoRoadQueryComponent::TryGetCrosswalkIntersectionEntranceRightVector(co
 		return false;
 	}
 
-	const int32 NumCrosswalkIntersections = ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersections(RoadQueryActor);
+	const int32 NumCrosswalkIntersections = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersections);
 
 	if (!ensureMsgf(CrosswalkIntersectionIndex >= 0 && CrosswalkIntersectionIndex < NumCrosswalkIntersections, TEXT("CrosswalkIntersectionIndex must be in range [0..%d) in UTempoRoadQueryComponent::TryGetCrosswalkIntersectionEntranceRightVector.  Currently, it is: %d.  RoadQueryActor: %s."), NumCrosswalkIntersections, CrosswalkIntersectionIndex, *RoadQueryActor->GetName()))
 	{
 		return false;
 	}
 
-	const int32 NumCrosswalkIntersectionConnections = ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersectionConnections(RoadQueryActor, CrosswalkIntersectionIndex);
+	const int32 NumCrosswalkIntersectionConnections = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersectionConnections, CrosswalkIntersectionIndex);
 
 	if (!ensureMsgf(CrosswalkIntersectionConnectionIndex >= 0 && CrosswalkIntersectionConnectionIndex < NumCrosswalkIntersectionConnections, TEXT("CrosswalkIntersectionConnectionIndex must be in range [0..%d) in UTempoRoadQueryComponent::TryGetCrosswalkIntersectionEntranceRightVector.  Currently, it is: %d.  RoadQueryActor: %s."), NumCrosswalkIntersectionConnections, CrosswalkIntersectionConnectionIndex, *RoadQueryActor->GetName()))
 	{
@@ -370,7 +372,7 @@ bool UTempoRoadQueryComponent::TryGetCrosswalkIntersectionEntranceRightVector(co
 
 		// The actual Crosswalk's Intersection Entrance right vector is based on the Road's forward vector.
 		const float DistanceAlongRoad = GetDistanceAlongTempoRoadAtCrosswalk(RoadQueryActor, CrosswalkIndex);
-		OutCrosswalkIntersectionEntranceRightVector = ITempoRoadInterface::Execute_GetTangentAtDistanceAlongTempoRoad(RoadQueryActor, DistanceAlongRoad, ETempoCoordinateSpace::World) * DirectionScalar;
+		OutCrosswalkIntersectionEntranceRightVector = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoRoadInterface::Execute_GetTangentAtDistanceAlongTempoRoad, DistanceAlongRoad, ETempoCoordinateSpace::World) * DirectionScalar;
 	}
 	else
 	{
@@ -387,7 +389,7 @@ bool UTempoRoadQueryComponent::TryGetCrosswalkIntersectionEntranceRightVector(co
 		// So on the left side CrosswalkIntersectionConnectionIndex 1 is the start and 2 is the end.
 		// And on the left side CrosswalkIntersectionConnectionIndex 2 is the start and 1 is the end.
 		const float DirectionScalar = CrosswalkIntersectionConnectionIndex == (bIsLeftSide ? 1 : 2) ? 1.0f : -1.0f;
-		const FVector CrosswalkIntersectionEntranceRightVector = ITempoRoadModuleInterface::Execute_GetRightVectorAtDistanceAlongTempoRoadModule(CrosswalkRoadModuleActor, CrosswalkIntersectionConnectorDistance, CoordinateSpace) * DirectionScalar;
+		const FVector CrosswalkIntersectionEntranceRightVector = UTempoCoreUtils::CallBlueprintFunction(CrosswalkRoadModuleActor, ITempoRoadModuleInterface::Execute_GetRightVectorAtDistanceAlongTempoRoadModule, CrosswalkIntersectionConnectorDistance, CoordinateSpace) * DirectionScalar;
 
 		OutCrosswalkIntersectionEntranceRightVector = CrosswalkIntersectionEntranceRightVector;
 	}
@@ -402,14 +404,14 @@ bool UTempoRoadQueryComponent::TryGetNumCrosswalkIntersectionEntranceLanes(const
 		return false;
 	}
 
-	const int32 NumCrosswalkIntersections = ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersections(RoadQueryActor);
+	const int32 NumCrosswalkIntersections = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersections);
 
 	if (!ensureMsgf(CrosswalkIntersectionIndex >= 0 && CrosswalkIntersectionIndex < NumCrosswalkIntersections, TEXT("CrosswalkIntersectionIndex must be in range [0..%d) in UTempoRoadQueryComponent::TryGetNumCrosswalkIntersectionEntranceLanes.  Currently, it is: %d.  RoadQueryActor: %s."), NumCrosswalkIntersections, CrosswalkIntersectionIndex, *RoadQueryActor->GetName()))
 	{
 		return false;
 	}
 
-	const int32 NumCrosswalkIntersectionConnections = ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersectionConnections(RoadQueryActor, CrosswalkIntersectionIndex);
+	const int32 NumCrosswalkIntersectionConnections = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersectionConnections, CrosswalkIntersectionIndex);
 
 	if (!ensureMsgf(CrosswalkIntersectionConnectionIndex >= 0 && CrosswalkIntersectionConnectionIndex < NumCrosswalkIntersectionConnections, TEXT("CrosswalkIntersectionConnectionIndex must be in range [0..%d) in UTempoRoadQueryComponent::TryGetNumCrosswalkIntersectionEntranceLanes.  Currently, it is: %d.  RoadQueryActor: %s."), NumCrosswalkIntersectionConnections, CrosswalkIntersectionConnectionIndex, *RoadQueryActor->GetName()))
 	{
@@ -421,7 +423,7 @@ bool UTempoRoadQueryComponent::TryGetNumCrosswalkIntersectionEntranceLanes(const
 	// CrosswalkIntersectionConnectionIndex == 0 means the actual crosswalk that goes across the road referenced by CrosswalkIndex.
 	if (CrosswalkIntersectionConnectionIndex == 0)
 	{
-		const int32 NumCrosswalkIntersectionEntranceLanes = ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkLanes(RoadQueryActor, CrosswalkIndex);
+		const int32 NumCrosswalkIntersectionEntranceLanes = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkLanes, CrosswalkIndex);
 
 		OutNumCrosswalkIntersectionEntranceLanes = NumCrosswalkIntersectionEntranceLanes;
 	}
@@ -429,7 +431,7 @@ bool UTempoRoadQueryComponent::TryGetNumCrosswalkIntersectionEntranceLanes(const
 	{
 		// For now, we'll assume that the CrosswalkIntersectionConnector's CrosswalkRoadModule also has
 		// the lane properties of the adjacent RoadModules to avoid another layer of complexity.
-		const int32 CrosswalkRoadModuleIndex = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkRoadModuleIndexFromCrosswalkIntersectionIndex(RoadQueryActor, CrosswalkIntersectionIndex);
+		const int32 CrosswalkRoadModuleIndex = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoCrosswalkInterface::Execute_GetTempoCrosswalkRoadModuleIndexFromCrosswalkIntersectionIndex, CrosswalkIntersectionIndex);
 		if (!TryGetNumCrosswalkIntersectionConnectorLanes(RoadQueryActor, CrosswalkRoadModuleIndex, CrosswalkIntersectionConnectorInfoMap, OutNumCrosswalkIntersectionEntranceLanes))
 		{
 			return false;
@@ -446,14 +448,14 @@ bool UTempoRoadQueryComponent::TryGetCrosswalkIntersectionEntranceLaneProfileOve
 		return false;
 	}
 
-	const int32 NumCrosswalkIntersections = ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersections(RoadQueryActor);
+	const int32 NumCrosswalkIntersections = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersections);
 
 	if (!ensureMsgf(CrosswalkIntersectionIndex >= 0 && CrosswalkIntersectionIndex < NumCrosswalkIntersections, TEXT("CrosswalkIntersectionIndex must be in range [0..%d) in UTempoRoadQueryComponent::TryGetCrosswalkIntersectionEntranceLaneProfileOverrideName.  Currently, it is: %d.  RoadQueryActor: %s."), NumCrosswalkIntersections, CrosswalkIntersectionIndex, *RoadQueryActor->GetName()))
 	{
 		return false;
 	}
 
-	const int32 NumCrosswalkIntersectionConnections = ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersectionConnections(RoadQueryActor, CrosswalkIntersectionIndex);
+	const int32 NumCrosswalkIntersectionConnections = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersectionConnections, CrosswalkIntersectionIndex);
 
 	if (!ensureMsgf(CrosswalkIntersectionConnectionIndex >= 0 && CrosswalkIntersectionConnectionIndex < NumCrosswalkIntersectionConnections, TEXT("CrosswalkIntersectionConnectionIndex must be in range [0..%d) in UTempoRoadQueryComponent::TryGetCrosswalkIntersectionEntranceLaneProfileOverrideName.  Currently, it is: %d.  RoadQueryActor: %s."), NumCrosswalkIntersectionConnections, CrosswalkIntersectionConnectionIndex, *RoadQueryActor->GetName()))
 	{
@@ -465,7 +467,7 @@ bool UTempoRoadQueryComponent::TryGetCrosswalkIntersectionEntranceLaneProfileOve
 	// CrosswalkIntersectionConnectionIndex == 0 means the actual crosswalk that goes across the road referenced by CrosswalkIndex.
 	if (CrosswalkIntersectionConnectionIndex == 0)
 	{
-		const FName LaneProfileOverrideNameForTempoCrosswalk = ITempoCrosswalkInterface::Execute_GetLaneProfileOverrideNameForTempoCrosswalk(RoadQueryActor, CrosswalkIndex);
+		const FName LaneProfileOverrideNameForTempoCrosswalk = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoCrosswalkInterface::Execute_GetLaneProfileOverrideNameForTempoCrosswalk, CrosswalkIndex);
 
 		OutCrosswalkIntersectionEntranceLaneProfileOverrideName = LaneProfileOverrideNameForTempoCrosswalk;
 	}
@@ -473,7 +475,7 @@ bool UTempoRoadQueryComponent::TryGetCrosswalkIntersectionEntranceLaneProfileOve
 	{
 		// For now, we'll assume that the CrosswalkIntersectionConnector's CrosswalkRoadModule also has
 		// the lane properties of the adjacent RoadModules to avoid another layer of complexity.
-		const int32 CrosswalkRoadModuleIndex = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkRoadModuleIndexFromCrosswalkIntersectionIndex(RoadQueryActor, CrosswalkIntersectionIndex);
+		const int32 CrosswalkRoadModuleIndex = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoCrosswalkInterface::Execute_GetTempoCrosswalkRoadModuleIndexFromCrosswalkIntersectionIndex, CrosswalkIntersectionIndex);
 		if (!TryGetCrosswalkIntersectionConnectorLaneProfileOverrideName(RoadQueryActor, CrosswalkRoadModuleIndex, CrosswalkIntersectionConnectorInfoMap, OutCrosswalkIntersectionEntranceLaneProfileOverrideName))
 		{
 			return false;
@@ -490,14 +492,14 @@ bool UTempoRoadQueryComponent::TryGetCrosswalkIntersectionEntranceLaneWidth(cons
 		return false;
 	}
 
-	const int32 NumCrosswalkIntersections = ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersections(RoadQueryActor);
+	const int32 NumCrosswalkIntersections = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersections);
 
 	if (!ensureMsgf(CrosswalkIntersectionIndex >= 0 && CrosswalkIntersectionIndex < NumCrosswalkIntersections, TEXT("CrosswalkIntersectionIndex must be in range [0..%d) in UTempoRoadQueryComponent::TryGetCrosswalkIntersectionEntranceLaneWidth.  Currently, it is: %d.  RoadQueryActor: %s."), NumCrosswalkIntersections, CrosswalkIntersectionIndex, *RoadQueryActor->GetName()))
 	{
 		return false;
 	}
 
-	const int32 NumCrosswalkIntersectionConnections = ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersectionConnections(RoadQueryActor, CrosswalkIntersectionIndex);
+	const int32 NumCrosswalkIntersectionConnections = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersectionConnections, CrosswalkIntersectionIndex);
 
 	if (!ensureMsgf(CrosswalkIntersectionConnectionIndex >= 0 && CrosswalkIntersectionConnectionIndex < NumCrosswalkIntersectionConnections, TEXT("CrosswalkIntersectionConnectionIndex must be in range [0..%d) in UTempoRoadQueryComponent::TryGetCrosswalkIntersectionEntranceLaneWidth.  Currently, it is: %d.  RoadQueryActor: %s."), NumCrosswalkIntersectionConnections, CrosswalkIntersectionConnectionIndex, *RoadQueryActor->GetName()))
 	{
@@ -509,7 +511,7 @@ bool UTempoRoadQueryComponent::TryGetCrosswalkIntersectionEntranceLaneWidth(cons
 	// CrosswalkIntersectionConnectionIndex == 0 means the actual crosswalk that goes across the road referenced by CrosswalkIndex.
 	if (CrosswalkIntersectionConnectionIndex == 0)
 	{
-		const float CrosswalkLaneWidth = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkLaneWidth(RoadQueryActor, CrosswalkIndex, LaneIndex);
+		const float CrosswalkLaneWidth = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoCrosswalkInterface::Execute_GetTempoCrosswalkLaneWidth, CrosswalkIndex, LaneIndex);
 
 		OutCrosswalkIntersectionEntranceLaneWidth = CrosswalkLaneWidth;
 	}
@@ -517,7 +519,7 @@ bool UTempoRoadQueryComponent::TryGetCrosswalkIntersectionEntranceLaneWidth(cons
 	{
 		// For now, we'll assume that the CrosswalkIntersectionConnector's CrosswalkRoadModule also has
 		// the lane properties of the adjacent RoadModules to avoid another layer of complexity.
-		const int32 CrosswalkRoadModuleIndex = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkRoadModuleIndexFromCrosswalkIntersectionIndex(RoadQueryActor, CrosswalkIntersectionIndex);
+		const int32 CrosswalkRoadModuleIndex = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoCrosswalkInterface::Execute_GetTempoCrosswalkRoadModuleIndexFromCrosswalkIntersectionIndex, CrosswalkIntersectionIndex);
 		if (!TryGetCrosswalkIntersectionConnectorLaneWidth(RoadQueryActor, CrosswalkRoadModuleIndex, LaneIndex, CrosswalkIntersectionConnectorInfoMap, OutCrosswalkIntersectionEntranceLaneWidth))
 		{
 			return false;
@@ -534,14 +536,14 @@ bool UTempoRoadQueryComponent::TryGetCrosswalkIntersectionEntranceLaneDirection(
 		return false;
 	}
 
-	const int32 NumCrosswalkIntersections = ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersections(RoadQueryActor);
+	const int32 NumCrosswalkIntersections = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersections);
 
 	if (!ensureMsgf(CrosswalkIntersectionIndex >= 0 && CrosswalkIntersectionIndex < NumCrosswalkIntersections, TEXT("CrosswalkIntersectionIndex must be in range [0..%d) in UTempoRoadQueryComponent::TryGetCrosswalkIntersectionEntranceLaneDirection.  Currently, it is: %d.  RoadQueryActor: %s."), NumCrosswalkIntersections, CrosswalkIntersectionIndex, *RoadQueryActor->GetName()))
 	{
 		return false;
 	}
 
-	const int32 NumCrosswalkIntersectionConnections = ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersectionConnections(RoadQueryActor, CrosswalkIntersectionIndex);
+	const int32 NumCrosswalkIntersectionConnections = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersectionConnections, CrosswalkIntersectionIndex);
 
 	if (!ensureMsgf(CrosswalkIntersectionConnectionIndex >= 0 && CrosswalkIntersectionConnectionIndex < NumCrosswalkIntersectionConnections, TEXT("CrosswalkIntersectionConnectionIndex must be in range [0..%d) in UTempoRoadQueryComponent::TryGetCrosswalkIntersectionEntranceLaneDirection.  Currently, it is: %d.  RoadQueryActor: %s."), NumCrosswalkIntersectionConnections, CrosswalkIntersectionConnectionIndex, *RoadQueryActor->GetName()))
 	{
@@ -553,7 +555,7 @@ bool UTempoRoadQueryComponent::TryGetCrosswalkIntersectionEntranceLaneDirection(
 	// CrosswalkIntersectionConnectionIndex == 0 means the actual crosswalk that goes across the road referenced by CrosswalkIndex.
 	if (CrosswalkIntersectionConnectionIndex == 0)
 	{
-		const EZoneLaneDirection CrosswalkLaneDirection = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkLaneDirection(RoadQueryActor, CrosswalkIndex, LaneIndex);
+		const EZoneLaneDirection CrosswalkLaneDirection = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoCrosswalkInterface::Execute_GetTempoCrosswalkLaneDirection, CrosswalkIndex, LaneIndex);
 
 		OutCrosswalkIntersectionEntranceLaneDirection = CrosswalkLaneDirection;
 	}
@@ -561,7 +563,7 @@ bool UTempoRoadQueryComponent::TryGetCrosswalkIntersectionEntranceLaneDirection(
 	{
 		// For now, we'll assume that the CrosswalkIntersectionConnector's CrosswalkRoadModule also has
 		// the lane properties of the adjacent RoadModules to avoid another layer of complexity.
-		const int32 CrosswalkRoadModuleIndex = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkRoadModuleIndexFromCrosswalkIntersectionIndex(RoadQueryActor, CrosswalkIntersectionIndex);
+		const int32 CrosswalkRoadModuleIndex = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoCrosswalkInterface::Execute_GetTempoCrosswalkRoadModuleIndexFromCrosswalkIntersectionIndex, CrosswalkIntersectionIndex);
 		if (!TryGetCrosswalkIntersectionConnectorLaneDirection(RoadQueryActor, CrosswalkRoadModuleIndex, LaneIndex, CrosswalkIntersectionConnectorInfoMap, OutCrosswalkIntersectionEntranceLaneDirection))
 		{
 			return false;
@@ -578,14 +580,14 @@ bool UTempoRoadQueryComponent::TryGetCrosswalkIntersectionEntranceLaneTags(const
 		return false;
 	}
 
-	const int32 NumCrosswalkIntersections = ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersections(RoadQueryActor);
+	const int32 NumCrosswalkIntersections = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersections);
 
 	if (!ensureMsgf(CrosswalkIntersectionIndex >= 0 && CrosswalkIntersectionIndex < NumCrosswalkIntersections, TEXT("CrosswalkIntersectionIndex must be in range [0..%d) in UTempoRoadQueryComponent::TryGetCrosswalkIntersectionEntranceLaneTags.  Currently, it is: %d.  RoadQueryActor: %s."), NumCrosswalkIntersections, CrosswalkIntersectionIndex, *RoadQueryActor->GetName()))
 	{
 		return false;
 	}
 
-	const int32 NumCrosswalkIntersectionConnections = ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersectionConnections(RoadQueryActor, CrosswalkIntersectionIndex);
+	const int32 NumCrosswalkIntersectionConnections = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersectionConnections, CrosswalkIntersectionIndex);
 
 	if (!ensureMsgf(CrosswalkIntersectionConnectionIndex >= 0 && CrosswalkIntersectionConnectionIndex < NumCrosswalkIntersectionConnections, TEXT("CrosswalkIntersectionConnectionIndex must be in range [0..%d) in UTempoRoadQueryComponent::TryGetCrosswalkIntersectionEntranceLaneTags.  Currently, it is: %d.  RoadQueryActor: %s."), NumCrosswalkIntersectionConnections, CrosswalkIntersectionConnectionIndex, *RoadQueryActor->GetName()))
 	{
@@ -597,7 +599,7 @@ bool UTempoRoadQueryComponent::TryGetCrosswalkIntersectionEntranceLaneTags(const
 	// CrosswalkIntersectionConnectionIndex == 0 means the actual crosswalk that goes across the road referenced by CrosswalkIndex.
 	if (CrosswalkIntersectionConnectionIndex == 0)
 	{
-		const TArray<FName> CrosswalkLaneTags = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkLaneTags(RoadQueryActor, CrosswalkIndex, LaneIndex);
+		const TArray<FName> CrosswalkLaneTags = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoCrosswalkInterface::Execute_GetTempoCrosswalkLaneTags, CrosswalkIndex, LaneIndex);
 
 		OutCrosswalkIntersectionEntranceLaneTags = CrosswalkLaneTags;
 	}
@@ -605,7 +607,7 @@ bool UTempoRoadQueryComponent::TryGetCrosswalkIntersectionEntranceLaneTags(const
 	{
 		// For now, we'll assume that the CrosswalkIntersectionConnector's CrosswalkRoadModule also has
 		// the lane properties of the adjacent RoadModules to avoid another layer of complexity.
-		const int32 CrosswalkRoadModuleIndex = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkRoadModuleIndexFromCrosswalkIntersectionIndex(RoadQueryActor, CrosswalkIntersectionIndex);
+		const int32 CrosswalkRoadModuleIndex = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoCrosswalkInterface::Execute_GetTempoCrosswalkRoadModuleIndexFromCrosswalkIntersectionIndex, CrosswalkIntersectionIndex);
 		if (!TryGetCrosswalkIntersectionConnectorLaneTags(RoadQueryActor, CrosswalkRoadModuleIndex, LaneIndex, CrosswalkIntersectionConnectorInfoMap, OutCrosswalkIntersectionEntranceLaneTags))
 		{
 			return false;
@@ -622,7 +624,7 @@ bool UTempoRoadQueryComponent::TryGetNumCrosswalkIntersectionConnectorLanes(cons
 		return false;
 	}
 
-	const int32 NumCrosswalkRoadModules = ITempoCrosswalkInterface::Execute_GetNumConnectedTempoCrosswalkRoadModules(RoadQueryActor);
+	const int32 NumCrosswalkRoadModules = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoCrosswalkInterface::Execute_GetNumConnectedTempoCrosswalkRoadModules);
 
 	if (!ensureMsgf(CrosswalkRoadModuleIndex >= 0 && CrosswalkRoadModuleIndex < NumCrosswalkRoadModules, TEXT("CrosswalkRoadModuleIndex must be in range [0..%d) in UTempoRoadQueryComponent::TryGetNumCrosswalkIntersectionConnectorLanes.  Currently, it is: %d.  RoadQueryActor: %s."), NumCrosswalkRoadModules, CrosswalkRoadModuleIndex, *RoadQueryActor->GetName()))
 	{
@@ -641,7 +643,7 @@ bool UTempoRoadQueryComponent::TryGetNumCrosswalkIntersectionConnectorLanes(cons
 		return false;
 	}
 
-	const int32 NumCrosswalkIntersectionConnectorLanes = ITempoRoadModuleInterface::Execute_GetNumTempoRoadModuleLanes(CrosswalkIntersectionConnectorInfo->CrosswalkRoadModule);
+	const int32 NumCrosswalkIntersectionConnectorLanes = UTempoCoreUtils::CallBlueprintFunction(CrosswalkIntersectionConnectorInfo->CrosswalkRoadModule, ITempoRoadModuleInterface::Execute_GetNumTempoRoadModuleLanes);
 
 	OutNumCrosswalkIntersectionConnectorLanes = NumCrosswalkIntersectionConnectorLanes;
 
@@ -655,7 +657,7 @@ bool UTempoRoadQueryComponent::TryGetCrosswalkIntersectionConnectorLaneProfileOv
 		return false;
 	}
 
-	const int32 NumCrosswalkRoadModules = ITempoCrosswalkInterface::Execute_GetNumConnectedTempoCrosswalkRoadModules(RoadQueryActor);
+	const int32 NumCrosswalkRoadModules = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoCrosswalkInterface::Execute_GetNumConnectedTempoCrosswalkRoadModules);
 
 	if (!ensureMsgf(CrosswalkRoadModuleIndex >= 0 && CrosswalkRoadModuleIndex < NumCrosswalkRoadModules, TEXT("CrosswalkRoadModuleIndex must be in range [0..%d) in UTempoRoadQueryComponent::TryGetNumCrosswalkIntersectionConnectorLanes.  Currently, it is: %d.  RoadQueryActor: %s."), NumCrosswalkRoadModules, CrosswalkRoadModuleIndex, *RoadQueryActor->GetName()))
 	{
@@ -674,7 +676,7 @@ bool UTempoRoadQueryComponent::TryGetCrosswalkIntersectionConnectorLaneProfileOv
 		return false;
 	}
 
-	const FName CrosswalkRoadModuleLaneProfileOverrideName = ITempoRoadModuleInterface::Execute_GetTempoRoadModuleLaneProfileOverrideName(CrosswalkIntersectionConnectorInfo->CrosswalkRoadModule);
+	const FName CrosswalkRoadModuleLaneProfileOverrideName = UTempoCoreUtils::CallBlueprintFunction(CrosswalkIntersectionConnectorInfo->CrosswalkRoadModule, ITempoRoadModuleInterface::Execute_GetTempoRoadModuleLaneProfileOverrideName);
 
 	OutCrosswalkIntersectionConnectorLaneProfileOverrideName = CrosswalkRoadModuleLaneProfileOverrideName;
 
@@ -688,7 +690,7 @@ bool UTempoRoadQueryComponent::TryGetCrosswalkIntersectionConnectorLaneWidth(con
 		return false;
 	}
 
-	const int32 NumCrosswalkRoadModules = ITempoCrosswalkInterface::Execute_GetNumConnectedTempoCrosswalkRoadModules(RoadQueryActor);
+	const int32 NumCrosswalkRoadModules = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoCrosswalkInterface::Execute_GetNumConnectedTempoCrosswalkRoadModules);
 
 	if (!ensureMsgf(CrosswalkRoadModuleIndex >= 0 && CrosswalkRoadModuleIndex < NumCrosswalkRoadModules, TEXT("CrosswalkRoadModuleIndex must be in range [0..%d) in UTempoRoadQueryComponent::TryGetNumCrosswalkIntersectionConnectorLanes.  Currently, it is: %d.  RoadQueryActor: %s."), NumCrosswalkRoadModules, CrosswalkRoadModuleIndex, *RoadQueryActor->GetName()))
 	{
@@ -707,7 +709,7 @@ bool UTempoRoadQueryComponent::TryGetCrosswalkIntersectionConnectorLaneWidth(con
 		return false;
 	}
 
-	const float CrosswalkRoadModuleLaneWidth = ITempoRoadModuleInterface::Execute_GetTempoRoadModuleLaneWidth(CrosswalkIntersectionConnectorInfo->CrosswalkRoadModule, LaneIndex);
+	const float CrosswalkRoadModuleLaneWidth = UTempoCoreUtils::CallBlueprintFunction(CrosswalkIntersectionConnectorInfo->CrosswalkRoadModule, ITempoRoadModuleInterface::Execute_GetTempoRoadModuleLaneWidth, LaneIndex);
 
 	OutCrosswalkIntersectionConnectorLaneWidth = CrosswalkRoadModuleLaneWidth;
 
@@ -721,7 +723,7 @@ bool UTempoRoadQueryComponent::TryGetCrosswalkIntersectionConnectorLaneDirection
 		return false;
 	}
 
-	const int32 NumCrosswalkRoadModules = ITempoCrosswalkInterface::Execute_GetNumConnectedTempoCrosswalkRoadModules(RoadQueryActor);
+	const int32 NumCrosswalkRoadModules = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoCrosswalkInterface::Execute_GetNumConnectedTempoCrosswalkRoadModules);
 
 	if (!ensureMsgf(CrosswalkRoadModuleIndex >= 0 && CrosswalkRoadModuleIndex < NumCrosswalkRoadModules, TEXT("CrosswalkRoadModuleIndex must be in range [0..%d) in UTempoRoadQueryComponent::TryGetNumCrosswalkIntersectionConnectorLanes.  Currently, it is: %d.  RoadQueryActor: %s."), NumCrosswalkRoadModules, CrosswalkRoadModuleIndex, *RoadQueryActor->GetName()))
 	{
@@ -740,7 +742,7 @@ bool UTempoRoadQueryComponent::TryGetCrosswalkIntersectionConnectorLaneDirection
 		return false;
 	}
 
-	const EZoneLaneDirection CrosswalkRoadModuleLaneDirection = ITempoRoadModuleInterface::Execute_GetTempoRoadModuleLaneDirection(CrosswalkIntersectionConnectorInfo->CrosswalkRoadModule, LaneIndex);
+	const EZoneLaneDirection CrosswalkRoadModuleLaneDirection = UTempoCoreUtils::CallBlueprintFunction(CrosswalkIntersectionConnectorInfo->CrosswalkRoadModule, ITempoRoadModuleInterface::Execute_GetTempoRoadModuleLaneDirection, LaneIndex);
 
 	OutCrosswalkIntersectionConnectorLaneDirection = CrosswalkRoadModuleLaneDirection;
 
@@ -754,7 +756,7 @@ bool UTempoRoadQueryComponent::TryGetCrosswalkIntersectionConnectorLaneTags(cons
 		return false;
 	}
 
-	const int32 NumCrosswalkRoadModules = ITempoCrosswalkInterface::Execute_GetNumConnectedTempoCrosswalkRoadModules(RoadQueryActor);
+	const int32 NumCrosswalkRoadModules = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoCrosswalkInterface::Execute_GetNumConnectedTempoCrosswalkRoadModules);
 
 	if (!ensureMsgf(CrosswalkRoadModuleIndex >= 0 && CrosswalkRoadModuleIndex < NumCrosswalkRoadModules, TEXT("CrosswalkRoadModuleIndex must be in range [0..%d) in UTempoRoadQueryComponent::TryGetNumCrosswalkIntersectionConnectorLanes.  Currently, it is: %d.  RoadQueryActor: %s."), NumCrosswalkRoadModules, CrosswalkRoadModuleIndex, *RoadQueryActor->GetName()))
 	{
@@ -773,7 +775,7 @@ bool UTempoRoadQueryComponent::TryGetCrosswalkIntersectionConnectorLaneTags(cons
 		return false;
 	}
 
-	const TArray<FName> CrosswalkRoadModuleLaneTags = ITempoRoadModuleInterface::Execute_GetTempoRoadModuleLaneTags(CrosswalkIntersectionConnectorInfo->CrosswalkRoadModule, LaneIndex);
+	const TArray<FName> CrosswalkRoadModuleLaneTags = UTempoCoreUtils::CallBlueprintFunction(CrosswalkIntersectionConnectorInfo->CrosswalkRoadModule, ITempoRoadModuleInterface::Execute_GetTempoRoadModuleLaneTags, LaneIndex);
 
 	OutCrosswalkIntersectionConnectorLaneTags = CrosswalkRoadModuleLaneTags;
 
