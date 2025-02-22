@@ -13,6 +13,7 @@
 #include "ZoneGraphSubsystem.h"
 #include "ZoneGraphDelegates.h"
 #include "DrawDebugHelpers.h"
+#include "TempoCoreUtils.h"
 #include "TempoRoadModuleInterface.h"
 #include "VectorTypes.h"
 
@@ -42,14 +43,12 @@ bool UTempoRoadLaneGraphSubsystem::TryGenerateZoneShapeComponents() const
 
 		if (Actor->Implements<UTempoIntersectionInterface>())
 		{
-			FEditorScriptExecutionGuard ScriptGuard;
-			ITempoIntersectionInterface::Execute_SetupTempoIntersectionData(Actor);
+			UTempoCoreUtils::CallBlueprintFunction(Actor, ITempoIntersectionInterface::Execute_SetupTempoIntersectionData);
 		}
 
 		if (Actor->Implements<UTempoCrosswalkInterface>())
 		{
-			FEditorScriptExecutionGuard ScriptGuard;
-			ITempoCrosswalkInterface::Execute_SetupTempoCrosswalkData(Actor);
+			UTempoCoreUtils::CallBlueprintFunction(Actor, ITempoCrosswalkInterface::Execute_SetupTempoCrosswalkData);
 		}
 	}
 	
@@ -95,8 +94,7 @@ bool UTempoRoadLaneGraphSubsystem::TryGenerateZoneShapeComponents() const
 		else if (Actor->Implements<UTempoRoadModuleInterface>())
 		{
 			DestroyZoneShapeComponents(*Actor);
-			
-			const AActor* RoadModuleParentActor = ITempoRoadModuleInterface::Execute_GetTempoRoadModuleParentActor(Actor);
+			const AActor* RoadModuleParentActor = UTempoCoreUtils::CallBlueprintFunction(Actor, ITempoRoadModuleInterface::Execute_GetTempoRoadModuleParentActor);
 			if (RoadModuleParentActor == nullptr)
 			{
 				UE_LOG(LogTempoAgentsEditor, Error, TEXT("Tempo Lane Graph - Failed to create Road Module ZoneShapeComponents for Actor: %s.  It must have a valid parent."), *Actor->GetName());
@@ -164,8 +162,8 @@ bool UTempoRoadLaneGraphSubsystem::TryGenerateAndRegisterZoneShapeComponentsForR
 	TArray<UZoneShapeComponent*> ZoneShapeComponents;
 
 	const bool bShouldGenerateZoneShapes = bQueryActorIsRoadModule
-		? ITempoRoadModuleInterface::Execute_ShouldGenerateZoneShapesForTempoRoadModule(&RoadQueryActor)
-		: ITempoRoadInterface::Execute_ShouldGenerateZoneShapesForTempoRoad(&RoadQueryActor);
+		? UTempoCoreUtils::CallBlueprintFunction(&RoadQueryActor, ITempoRoadModuleInterface::Execute_ShouldGenerateZoneShapesForTempoRoadModule)
+		: UTempoCoreUtils::CallBlueprintFunction(&RoadQueryActor, ITempoRoadInterface::Execute_ShouldGenerateZoneShapesForTempoRoad);
 
 	if (!bShouldGenerateZoneShapes)
 	{
@@ -182,16 +180,16 @@ bool UTempoRoadLaneGraphSubsystem::TryGenerateAndRegisterZoneShapeComponentsForR
 	}
 
 	const int32 NumControlPoints = bQueryActorIsRoadModule
-		? ITempoRoadModuleInterface::Execute_GetNumTempoRoadModuleControlPoints(&RoadQueryActor)
-		: ITempoRoadInterface::Execute_GetNumTempoControlPoints(&RoadQueryActor);
+		? UTempoCoreUtils::CallBlueprintFunction(&RoadQueryActor, ITempoRoadModuleInterface::Execute_GetNumTempoRoadModuleControlPoints)
+		: UTempoCoreUtils::CallBlueprintFunction(&RoadQueryActor, ITempoRoadInterface::Execute_GetNumTempoControlPoints);
 	
 	const bool bIsClosedLoop = bQueryActorIsRoadModule
-		? ITempoRoadModuleInterface::Execute_IsTempoRoadModuleClosedLoop(&RoadQueryActor)
-		: ITempoRoadInterface::Execute_IsTempoLaneClosedLoop(&RoadQueryActor);
+		? UTempoCoreUtils::CallBlueprintFunction(&RoadQueryActor, ITempoRoadModuleInterface::Execute_IsTempoRoadModuleClosedLoop)
+		: UTempoCoreUtils::CallBlueprintFunction(&RoadQueryActor, ITempoRoadInterface::Execute_IsTempoLaneClosedLoop);
 	
 	const float SampleDistanceStepSize = bQueryActorIsRoadModule
-		? ITempoRoadModuleInterface::Execute_GetTempoRoadModuleSampleDistanceStepSize(&RoadQueryActor)
-		: ITempoRoadInterface::Execute_GetTempoRoadSampleDistanceStepSize(&RoadQueryActor);
+		? UTempoCoreUtils::CallBlueprintFunction(&RoadQueryActor, ITempoRoadModuleInterface::Execute_GetTempoRoadModuleSampleDistanceStepSize)
+		: UTempoCoreUtils::CallBlueprintFunction(&RoadQueryActor, ITempoRoadInterface::Execute_GetTempoRoadSampleDistanceStepSize);
 
 	// Generate ZoneShapeComponents and Setup their Points.
 	if (bIsClosedLoop)
@@ -208,12 +206,12 @@ bool UTempoRoadLaneGraphSubsystem::TryGenerateAndRegisterZoneShapeComponentsForR
 			const int32 NextControlPointIndex = CurrentControlPointIndex + 1;
 
 			const float CurrentControlPointDistanceAlongRoad = bQueryActorIsRoadModule
-				? ITempoRoadModuleInterface::Execute_GetDistanceAlongTempoRoadModuleAtControlPoint(&RoadQueryActor, CurrentControlPointIndex)
-				: ITempoRoadInterface::Execute_GetDistanceAlongTempoRoadAtControlPoint(&RoadQueryActor, CurrentControlPointIndex);
+				? UTempoCoreUtils::CallBlueprintFunction(&RoadQueryActor, ITempoRoadModuleInterface::Execute_GetDistanceAlongTempoRoadModuleAtControlPoint, CurrentControlPointIndex)
+				: UTempoCoreUtils::CallBlueprintFunction(&RoadQueryActor, ITempoRoadInterface::Execute_GetDistanceAlongTempoRoadAtControlPoint, CurrentControlPointIndex);
 		
 			const float NextControlPointDistanceAlongRoad = bQueryActorIsRoadModule
-				? ITempoRoadModuleInterface::Execute_GetDistanceAlongTempoRoadModuleAtControlPoint(&RoadQueryActor, NextControlPointIndex)
-				: ITempoRoadInterface::Execute_GetDistanceAlongTempoRoadAtControlPoint(&RoadQueryActor, NextControlPointIndex);
+				? UTempoCoreUtils::CallBlueprintFunction(&RoadQueryActor, ITempoRoadModuleInterface::Execute_GetDistanceAlongTempoRoadModuleAtControlPoint, NextControlPointIndex)
+				: UTempoCoreUtils::CallBlueprintFunction(&RoadQueryActor, ITempoRoadInterface::Execute_GetDistanceAlongTempoRoadAtControlPoint, NextControlPointIndex);
 
 			UZoneShapeComponent* ZoneShapeComponent = nullptr;
 
@@ -285,19 +283,19 @@ bool UTempoRoadLaneGraphSubsystem::TryGenerateAndRegisterZoneShapeComponentsForR
 		
 		const int32 ControlPointStartIndex = bQueryActorIsRoadModule
 			? 0
-			: ITempoRoadInterface::Execute_GetTempoStartEntranceLocationControlPointIndex(&RoadQueryActor);
+			: UTempoCoreUtils::CallBlueprintFunction(&RoadQueryActor, ITempoRoadInterface::Execute_GetTempoStartEntranceLocationControlPointIndex);
 		
 		const int32 ControlPointEndIndex = bQueryActorIsRoadModule
 			? NumControlPoints - 1
-			: ITempoRoadInterface::Execute_GetTempoEndEntranceLocationControlPointIndex(&RoadQueryActor);
+			: UTempoCoreUtils::CallBlueprintFunction(&RoadQueryActor, ITempoRoadInterface::Execute_GetTempoEndEntranceLocationControlPointIndex);
 
 		const float StartDistanceAlongRoad = bQueryActorIsRoadModule
-			? ITempoRoadModuleInterface::Execute_GetDistanceAlongTempoRoadModuleAtControlPoint(&RoadQueryActor, ControlPointStartIndex)
-			: ITempoRoadInterface::Execute_GetDistanceAlongTempoRoadAtControlPoint(&RoadQueryActor, ControlPointStartIndex);
+			? UTempoCoreUtils::CallBlueprintFunction(&RoadQueryActor, ITempoRoadModuleInterface::Execute_GetDistanceAlongTempoRoadModuleAtControlPoint, ControlPointStartIndex)
+			: UTempoCoreUtils::CallBlueprintFunction(&RoadQueryActor, ITempoRoadInterface::Execute_GetDistanceAlongTempoRoadAtControlPoint, ControlPointStartIndex);
 		
 		const float EndDistanceAlongRoad = bQueryActorIsRoadModule
-			? ITempoRoadModuleInterface::Execute_GetDistanceAlongTempoRoadModuleAtControlPoint(&RoadQueryActor, ControlPointEndIndex)
-			: ITempoRoadInterface::Execute_GetDistanceAlongTempoRoadAtControlPoint(&RoadQueryActor, ControlPointEndIndex);
+			? UTempoCoreUtils::CallBlueprintFunction(&RoadQueryActor, ITempoRoadModuleInterface::Execute_GetDistanceAlongTempoRoadModuleAtControlPoint, ControlPointEndIndex)
+			: UTempoCoreUtils::CallBlueprintFunction(&RoadQueryActor, ITempoRoadInterface::Execute_GetDistanceAlongTempoRoadAtControlPoint, ControlPointEndIndex);
 
 		UZoneShapeComponent* ZoneShapeComponent = nullptr;
 
@@ -362,12 +360,12 @@ bool UTempoRoadLaneGraphSubsystem::TryGenerateZoneShapeComponentBetweenDistances
 		const float NextSampleDistance = FMath::Min(CurrentSampleDistance + SampleDistanceStepSize, EndDistanceAlongRoad);
 		
 		const FVector PrevSampleLocation = bQueryActorIsRoadModule
-			? ITempoRoadModuleInterface::Execute_GetLocationAtDistanceAlongTempoRoadModule(&RoadQueryActor, PrevSampleDistance, ETempoCoordinateSpace::Local)
-			: ITempoRoadInterface::Execute_GetLocationAtDistanceAlongTempoRoad(&RoadQueryActor, PrevSampleDistance, ETempoCoordinateSpace::Local);
+			? UTempoCoreUtils::CallBlueprintFunction(&RoadQueryActor, ITempoRoadModuleInterface::Execute_GetLocationAtDistanceAlongTempoRoadModule, PrevSampleDistance, ETempoCoordinateSpace::Local)
+			: UTempoCoreUtils::CallBlueprintFunction(&RoadQueryActor, ITempoRoadInterface::Execute_GetLocationAtDistanceAlongTempoRoad, PrevSampleDistance, ETempoCoordinateSpace::Local);
 		
 		const FVector NextSampleLocation = bQueryActorIsRoadModule
-			? ITempoRoadModuleInterface::Execute_GetLocationAtDistanceAlongTempoRoadModule(&RoadQueryActor, NextSampleDistance, ETempoCoordinateSpace::Local)
-			: ITempoRoadInterface::Execute_GetLocationAtDistanceAlongTempoRoad(&RoadQueryActor, NextSampleDistance, ETempoCoordinateSpace::Local);
+			? UTempoCoreUtils::CallBlueprintFunction(&RoadQueryActor, ITempoRoadModuleInterface::Execute_GetLocationAtDistanceAlongTempoRoadModule, NextSampleDistance, ETempoCoordinateSpace::Local)
+			: UTempoCoreUtils::CallBlueprintFunction(&RoadQueryActor, ITempoRoadInterface::Execute_GetLocationAtDistanceAlongTempoRoad, NextSampleDistance, ETempoCoordinateSpace::Local);
 		
 		const FVector CurrentSampleTangent = (NextSampleLocation - PrevSampleLocation) * 0.5f / 3.0f;
 		const float CurrentSampleTangentLength = CurrentSampleTangent.Size();
@@ -398,12 +396,12 @@ FZoneShapePoint UTempoRoadLaneGraphSubsystem::CreateZoneShapePointAtDistanceAlon
 	FZoneShapePoint ZoneShapePoint;
 	
 	const FVector ZoneShapePointLocation = bQueryActorIsRoadModule
-		? ITempoRoadModuleInterface::Execute_GetLocationAtDistanceAlongTempoRoadModule(&RoadQueryActor, DistanceAlongRoad, ETempoCoordinateSpace::Local)
-		: ITempoRoadInterface::Execute_GetLocationAtDistanceAlongTempoRoad(&RoadQueryActor, DistanceAlongRoad, ETempoCoordinateSpace::Local);
+		? UTempoCoreUtils::CallBlueprintFunction(&RoadQueryActor, ITempoRoadModuleInterface::Execute_GetLocationAtDistanceAlongTempoRoadModule, DistanceAlongRoad, ETempoCoordinateSpace::Local)
+		: UTempoCoreUtils::CallBlueprintFunction(&RoadQueryActor, ITempoRoadInterface::Execute_GetLocationAtDistanceAlongTempoRoad, DistanceAlongRoad, ETempoCoordinateSpace::Local);
 
 	const FRotator ZoneShapePointRotation = bQueryActorIsRoadModule
-		? ITempoRoadModuleInterface::Execute_GetRotationAtDistanceAlongTempoRoadModule(&RoadQueryActor, DistanceAlongRoad, ETempoCoordinateSpace::Local)
-		: ITempoRoadInterface::Execute_GetRotationAtDistanceAlongTempoRoad(&RoadQueryActor, DistanceAlongRoad, ETempoCoordinateSpace::Local);
+		? UTempoCoreUtils::CallBlueprintFunction(&RoadQueryActor, ITempoRoadModuleInterface::Execute_GetRotationAtDistanceAlongTempoRoadModule, DistanceAlongRoad, ETempoCoordinateSpace::Local)
+		: UTempoCoreUtils::CallBlueprintFunction(&RoadQueryActor, ITempoRoadInterface::Execute_GetRotationAtDistanceAlongTempoRoad, DistanceAlongRoad, ETempoCoordinateSpace::Local);
 
 	ZoneShapePoint.Position = ZoneShapePointLocation;
 	ZoneShapePoint.Rotation = ZoneShapePointRotation;
@@ -419,8 +417,8 @@ FZoneLaneProfile UTempoRoadLaneGraphSubsystem::CreateDynamicLaneProfile(const AA
 	FZoneLaneProfile LaneProfile;
 
 	const int32 NumLanes = bQueryActorIsRoadModule
-		? ITempoRoadModuleInterface::Execute_GetNumTempoRoadModuleLanes(&RoadQueryActor)
-		: ITempoRoadInterface::Execute_GetNumTempoLanes(&RoadQueryActor);
+		? UTempoCoreUtils::CallBlueprintFunction(&RoadQueryActor, ITempoRoadModuleInterface::Execute_GetNumTempoRoadModuleLanes)
+		: UTempoCoreUtils::CallBlueprintFunction(&RoadQueryActor, ITempoRoadInterface::Execute_GetNumTempoLanes);
 
 	for (int32 LaneIndex = 0; LaneIndex < NumLanes; ++LaneIndex)
 	{
@@ -428,16 +426,16 @@ FZoneLaneProfile UTempoRoadLaneGraphSubsystem::CreateDynamicLaneProfile(const AA
 		const int32 LaneProfileLaneIndex = NumLanes - 1 - LaneIndex;
 		
 		const float LaneWidth = bQueryActorIsRoadModule
-			? ITempoRoadModuleInterface::Execute_GetTempoRoadModuleLaneWidth(&RoadQueryActor, LaneProfileLaneIndex)
-			: ITempoRoadInterface::Execute_GetTempoLaneWidth(&RoadQueryActor, LaneProfileLaneIndex);
+			? UTempoCoreUtils::CallBlueprintFunction(&RoadQueryActor, ITempoRoadModuleInterface::Execute_GetTempoRoadModuleLaneWidth, LaneProfileLaneIndex)
+			: UTempoCoreUtils::CallBlueprintFunction(&RoadQueryActor, ITempoRoadInterface::Execute_GetTempoLaneWidth, LaneProfileLaneIndex);
 		
 		const EZoneLaneDirection LaneDirection = bQueryActorIsRoadModule
-			? ITempoRoadModuleInterface::Execute_GetTempoRoadModuleLaneDirection(&RoadQueryActor, LaneProfileLaneIndex)
-			: ITempoRoadInterface::Execute_GetTempoLaneDirection(&RoadQueryActor, LaneProfileLaneIndex);
+			? UTempoCoreUtils::CallBlueprintFunction(&RoadQueryActor, ITempoRoadModuleInterface::Execute_GetTempoRoadModuleLaneDirection, LaneProfileLaneIndex)
+			: UTempoCoreUtils::CallBlueprintFunction(&RoadQueryActor, ITempoRoadInterface::Execute_GetTempoLaneDirection, LaneProfileLaneIndex);
 		
 		const TArray<FName> LaneTags = bQueryActorIsRoadModule
-			? ITempoRoadModuleInterface::Execute_GetTempoRoadModuleLaneTags(&RoadQueryActor, LaneProfileLaneIndex)
-			: ITempoRoadInterface::Execute_GetTempoLaneTags(&RoadQueryActor, LaneProfileLaneIndex);
+			? UTempoCoreUtils::CallBlueprintFunction(&RoadQueryActor, ITempoRoadModuleInterface::Execute_GetTempoRoadModuleLaneTags, LaneProfileLaneIndex)
+			: UTempoCoreUtils::CallBlueprintFunction(&RoadQueryActor, ITempoRoadInterface::Execute_GetTempoLaneTags, LaneProfileLaneIndex);
 
 		FZoneLaneDesc LaneDesc = CreateZoneLaneDesc(LaneWidth, LaneDirection, LaneTags);
 		LaneProfile.Lanes.Add(LaneDesc);
@@ -540,8 +538,8 @@ bool UTempoRoadLaneGraphSubsystem::TryGetDynamicLaneProfileFromSettings(const FZ
 FZoneLaneProfile UTempoRoadLaneGraphSubsystem::GetLaneProfile(const AActor& RoadQueryActor, bool bQueryActorIsRoadModule) const
 {
 	const FName LaneProfileOverrideName = bQueryActorIsRoadModule
-		? ITempoRoadModuleInterface::Execute_GetTempoRoadModuleLaneProfileOverrideName(&RoadQueryActor)
-		: ITempoRoadInterface::Execute_GetTempoLaneProfileOverrideName(&RoadQueryActor);
+		? UTempoCoreUtils::CallBlueprintFunction(&RoadQueryActor, ITempoRoadModuleInterface::Execute_GetTempoRoadModuleLaneProfileOverrideName)
+		: UTempoCoreUtils::CallBlueprintFunction(&RoadQueryActor, ITempoRoadInterface::Execute_GetTempoLaneProfileOverrideName);
 
 	if (LaneProfileOverrideName != NAME_None)
 	{
@@ -609,14 +607,14 @@ bool UTempoRoadLaneGraphSubsystem::TryGenerateAndRegisterZoneShapeComponentsForI
 	ZoneShapeComponent->SetPolygonRoutingType(EZoneShapePolygonRoutingType::Bezier);
 
 	// Apply intersection tags.
-	TArray<FName> IntersectionTagNames = ITempoIntersectionInterface::Execute_GetTempoIntersectionTags(&IntersectionQueryActor);
+	TArray<FName> IntersectionTagNames = UTempoCoreUtils::CallBlueprintFunction(&IntersectionQueryActor, ITempoIntersectionInterface::Execute_GetTempoIntersectionTags);
 	for (FName IntersectionTagName : IntersectionTagNames)
 	{
 		const FZoneGraphTag IntersectionTag = GetTagByName(IntersectionTagName);
 		ZoneShapeComponent->GetMutableTags().Add(IntersectionTag);
 	}
 	
-	const int32 NumConnections = ITempoIntersectionInterface::Execute_GetNumTempoConnections(&IntersectionQueryActor);
+	const int32 NumConnections = UTempoCoreUtils::CallBlueprintFunction(&IntersectionQueryActor, ITempoIntersectionInterface::Execute_GetNumTempoConnections);
 
 	// Create and Setup Points.
 	for (int32 ConnectionIndex = 0; ConnectionIndex < NumConnections; ++ConnectionIndex)
@@ -641,7 +639,7 @@ bool UTempoRoadLaneGraphSubsystem::TryGenerateAndRegisterZoneShapeComponentsForI
 
 bool UTempoRoadLaneGraphSubsystem::TryCreateZoneShapePointForIntersectionEntranceLocation(const AActor& IntersectionQueryActor, int32 ConnectionIndex, UZoneShapeComponent& ZoneShapeComponent, FZoneShapePoint& OutZoneShapePoint) const
 {
-	const FVector IntersectionEntranceLocationInWorldFrame = ITempoIntersectionInterface::Execute_GetTempoIntersectionEntranceLocation(&IntersectionQueryActor, ConnectionIndex, ETempoCoordinateSpace::World);
+	const FVector IntersectionEntranceLocationInWorldFrame = UTempoCoreUtils::CallBlueprintFunction(&IntersectionQueryActor, ITempoIntersectionInterface::Execute_GetTempoIntersectionEntranceLocation, ConnectionIndex, ETempoCoordinateSpace::World);
 	
 	DrawDebugSphere(GetWorld(), IntersectionEntranceLocationInWorldFrame, 50.0f, 32, FColor::Green, false, 5.0f);
 
@@ -671,8 +669,8 @@ bool UTempoRoadLaneGraphSubsystem::TryCreateZoneShapePointForIntersectionEntranc
 	ZoneShapePoint.LaneProfile = PerPointLaneProfileIndex;
 	ZoneShapePoint.TangentLength = LaneProfile.GetLanesTotalWidth() * 0.5f;
 
-	const FVector IntersectionEntranceTangentInWorldFrame = ITempoIntersectionInterface::Execute_GetTempoIntersectionEntranceTangent(&IntersectionQueryActor, ConnectionIndex, ETempoCoordinateSpace::World);
-	const FVector IntersectionEntranceUpVectorInWorldFrame = ITempoIntersectionInterface::Execute_GetTempoIntersectionEntranceUpVector(&IntersectionQueryActor, ConnectionIndex, ETempoCoordinateSpace::World);
+	const FVector IntersectionEntranceTangentInWorldFrame = UTempoCoreUtils::CallBlueprintFunction(&IntersectionQueryActor, ITempoIntersectionInterface::Execute_GetTempoIntersectionEntranceTangent, ConnectionIndex, ETempoCoordinateSpace::World);
+	const FVector IntersectionEntranceUpVectorInWorldFrame = UTempoCoreUtils::CallBlueprintFunction(&IntersectionQueryActor, ITempoIntersectionInterface::Execute_GetTempoIntersectionEntranceUpVector, ConnectionIndex, ETempoCoordinateSpace::World);
 
 	ZoneShapePoint.SetRotationFromForwardAndUp(ZoneShapeComponent.GetComponentToWorld().InverseTransformPosition(IntersectionEntranceTangentInWorldFrame),
 		ZoneShapeComponent.GetComponentToWorld().InverseTransformPosition(IntersectionEntranceUpVectorInWorldFrame));
@@ -680,8 +678,8 @@ bool UTempoRoadLaneGraphSubsystem::TryCreateZoneShapePointForIntersectionEntranc
 	DrawDebugDirectionalArrow(GetWorld(), IntersectionQueryActor.ActorToWorld().TransformPosition(ZoneShapePoint.GetInControlPoint()), IntersectionQueryActor.ActorToWorld().TransformPosition(ZoneShapePoint.Position), 10000.0f, FColor::Blue, false, 10.0f, 0, 10.0f);
 	DrawDebugDirectionalArrow(GetWorld(), IntersectionQueryActor.ActorToWorld().TransformPosition(ZoneShapePoint.Position), IntersectionQueryActor.ActorToWorld().TransformPosition(ZoneShapePoint.GetOutControlPoint()), 10000.0f, FColor::Red, false, 10.0f, 0, 10.0f);
 
-	const int32 IntersectionEntranceControlPointIndex = ITempoIntersectionInterface::Execute_GetTempoIntersectionEntranceControlPointIndex(&IntersectionQueryActor, ConnectionIndex);
-	const FVector RoadTangentAtIntersectionEntranceInWorldFrame = ITempoRoadInterface::Execute_GetTempoControlPointTangent(RoadQueryActor, IntersectionEntranceControlPointIndex, ETempoCoordinateSpace::World);
+	const int32 IntersectionEntranceControlPointIndex = UTempoCoreUtils::CallBlueprintFunction(&IntersectionQueryActor, ITempoIntersectionInterface::Execute_GetTempoIntersectionEntranceControlPointIndex, ConnectionIndex);
+	const FVector RoadTangentAtIntersectionEntranceInWorldFrame = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoRoadInterface::Execute_GetTempoControlPointTangent, IntersectionEntranceControlPointIndex, ETempoCoordinateSpace::World);
 	
 	const bool bIsRoadLeavingIntersection = RoadTangentAtIntersectionEntranceInWorldFrame.Dot(IntersectionEntranceTangentInWorldFrame) < 0.0f;
 	if (bIsRoadLeavingIntersection)
@@ -696,7 +694,7 @@ bool UTempoRoadLaneGraphSubsystem::TryCreateZoneShapePointForIntersectionEntranc
 
 AActor* UTempoRoadLaneGraphSubsystem::GetConnectedRoadActor(const AActor& IntersectionQueryActor, int32 ConnectionIndex) const
 {
-	AActor* RoadActor = ITempoIntersectionInterface::Execute_GetConnectedTempoRoadActor(&IntersectionQueryActor, ConnectionIndex);
+	AActor* RoadActor = UTempoCoreUtils::CallBlueprintFunction(&IntersectionQueryActor, ITempoIntersectionInterface::Execute_GetConnectedTempoRoadActor, ConnectionIndex);
 			
 	if (RoadActor == nullptr)
 	{
@@ -717,11 +715,11 @@ AActor* UTempoRoadLaneGraphSubsystem::GetConnectedRoadActor(const AActor& Inters
 
 bool UTempoRoadLaneGraphSubsystem::TryGenerateAndRegisterZoneShapeComponentsForCrosswalks(AActor& CrosswalkQueryActor) const
 {
-	const int32 NumConnections = ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalks(&CrosswalkQueryActor);
+	const int32 NumConnections = UTempoCoreUtils::CallBlueprintFunction(&CrosswalkQueryActor, ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalks);
 	
 	for (int32 ConnectionIndex = 0; ConnectionIndex < NumConnections; ++ConnectionIndex)
 	{
-		const bool bShouldGenerateZoneShapesForCrosswalk = ITempoCrosswalkInterface::Execute_ShouldGenerateZoneShapesForTempoCrosswalk(&CrosswalkQueryActor, ConnectionIndex);
+		const bool bShouldGenerateZoneShapesForCrosswalk = UTempoCoreUtils::CallBlueprintFunction(&CrosswalkQueryActor, ITempoCrosswalkInterface::Execute_ShouldGenerateZoneShapesForTempoCrosswalk, ConnectionIndex);
 
 		if (!bShouldGenerateZoneShapesForCrosswalk)
 		{
@@ -749,15 +747,15 @@ bool UTempoRoadLaneGraphSubsystem::TryGenerateAndRegisterZoneShapeComponentsForC
 		ZoneShapeComponent->SetCommonLaneProfile(LaneProfileRef);
 
 		// Apply crosswalk tags.
-		TArray<FName> CrosswalkTagNames = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkTags(&CrosswalkQueryActor, ConnectionIndex);
+		TArray<FName> CrosswalkTagNames = UTempoCoreUtils::CallBlueprintFunction(&CrosswalkQueryActor, ITempoCrosswalkInterface::Execute_GetTempoCrosswalkTags, ConnectionIndex);
 		for (const FName& CrosswalkTagName : CrosswalkTagNames)
 		{
 			const FZoneGraphTag CrosswalkTag = GetTagByName(CrosswalkTagName);
 			ZoneShapeComponent->GetMutableTags().Add(CrosswalkTag);
 		}
 
-		const int32 CrosswalkControlPointStartIndex = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkStartEntranceLocationControlPointIndex(&CrosswalkQueryActor, ConnectionIndex);
-		const int32 CrosswalkControlPointEndIndex = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkEndEntranceLocationControlPointIndex(&CrosswalkQueryActor, ConnectionIndex);
+		const int32 CrosswalkControlPointStartIndex = UTempoCoreUtils::CallBlueprintFunction(&CrosswalkQueryActor, ITempoCrosswalkInterface::Execute_GetTempoCrosswalkStartEntranceLocationControlPointIndex, ConnectionIndex);
+		const int32 CrosswalkControlPointEndIndex = UTempoCoreUtils::CallBlueprintFunction(&CrosswalkQueryActor, ITempoCrosswalkInterface::Execute_GetTempoCrosswalkEndEntranceLocationControlPointIndex, ConnectionIndex);
 		
 		for (int32 CrosswalkControlPointIndex = CrosswalkControlPointStartIndex; CrosswalkControlPointIndex <= CrosswalkControlPointEndIndex; ++CrosswalkControlPointIndex)
 		{
@@ -791,16 +789,16 @@ bool UTempoRoadLaneGraphSubsystem::TryGenerateAndRegisterZoneShapeComponentsForC
 			return 0;
 		}
 
-		const float RoadModuleLength = ITempoRoadModuleInterface::Execute_GetTempoRoadModuleLength(&RoadModuleQueryActor);
+		const float RoadModuleLength = UTempoCoreUtils::CallBlueprintFunction(&RoadModuleQueryActor, ITempoRoadModuleInterface::Execute_GetTempoRoadModuleLength);
 
 		StartDistance = FMath::Clamp(StartDistance, 0.0f, RoadModuleLength);
 		EndDistance = FMath::Clamp(EndDistance, 0.0f, RoadModuleLength);
 
-		const int32 NumRoadModuleControlPoints = ITempoRoadModuleInterface::Execute_GetNumTempoRoadModuleControlPoints(&RoadModuleQueryActor);
+		const int32 NumRoadModuleControlPoints = UTempoCoreUtils::CallBlueprintFunction(&RoadModuleQueryActor, ITempoRoadModuleInterface::Execute_GetNumTempoRoadModuleControlPoints);
 
 		for (int32 RoadModuleControlPointIndex = 0; RoadModuleControlPointIndex < NumRoadModuleControlPoints; ++RoadModuleControlPointIndex)
 		{
-			const float DistanceAlongRoadModule = ITempoRoadModuleInterface::Execute_GetDistanceAlongTempoRoadModuleAtControlPoint(&RoadModuleQueryActor, RoadModuleControlPointIndex);
+			const float DistanceAlongRoadModule = UTempoCoreUtils::CallBlueprintFunction(&RoadModuleQueryActor, ITempoRoadModuleInterface::Execute_GetDistanceAlongTempoRoadModuleAtControlPoint, RoadModuleControlPointIndex);
 
 			if (DistanceAlongRoadModule >= StartDistance && DistanceAlongRoadModule <= EndDistance)
 			{
@@ -811,11 +809,11 @@ bool UTempoRoadLaneGraphSubsystem::TryGenerateAndRegisterZoneShapeComponentsForC
 		return RoadModuleControlPointIndexes.Num();
 	};
 	
-	const int32 NumCrosswalkRoadModules = ITempoCrosswalkInterface::Execute_GetNumConnectedTempoCrosswalkRoadModules(&CrosswalkQueryActor);
+	const int32 NumCrosswalkRoadModules = UTempoCoreUtils::CallBlueprintFunction(&CrosswalkQueryActor, ITempoCrosswalkInterface::Execute_GetNumConnectedTempoCrosswalkRoadModules);
 
 	for (int32 CrosswalkRoadModuleIndex = 0; CrosswalkRoadModuleIndex < NumCrosswalkRoadModules; ++CrosswalkRoadModuleIndex)
 	{
-		const FCrosswalkIntersectionConnectorInfo& CrosswalkIntersectionConnectorInfo = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkIntersectionConnectorInfo(&CrosswalkQueryActor, CrosswalkRoadModuleIndex);
+		const FCrosswalkIntersectionConnectorInfo& CrosswalkIntersectionConnectorInfo = UTempoCoreUtils::CallBlueprintFunction(&CrosswalkQueryActor, ITempoCrosswalkInterface::Execute_GetTempoCrosswalkIntersectionConnectorInfo, CrosswalkRoadModuleIndex);
 
 		if (!ensureMsgf(CrosswalkIntersectionConnectorInfo.CrosswalkRoadModule != nullptr, TEXT("Must get valid CrosswalkRoadModule in UTempoRoadLaneGraphSubsystem::TryGenerateAndRegisterZoneShapeComponentsForCrosswalkIntersectionConnectorSegments.")))
 		{
@@ -872,7 +870,7 @@ bool UTempoRoadLaneGraphSubsystem::TryGenerateAndRegisterZoneShapeComponentsForC
 
 bool UTempoRoadLaneGraphSubsystem::TryGenerateAndRegisterZoneShapeComponentsForCrosswalkIntersections(AActor& CrosswalkQueryActor) const
 {
-	const int32 NumCrosswalkIntersections = ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersections(&CrosswalkQueryActor);
+	const int32 NumCrosswalkIntersections = UTempoCoreUtils::CallBlueprintFunction(&CrosswalkQueryActor, ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersections);
 
 	for (int32 CrosswalkIntersectionIndex = 0; CrosswalkIntersectionIndex < NumCrosswalkIntersections; ++CrosswalkIntersectionIndex)
 	{
@@ -890,14 +888,14 @@ bool UTempoRoadLaneGraphSubsystem::TryGenerateAndRegisterZoneShapeComponentsForC
 		ZoneShapeComponent->SetPolygonRoutingType(EZoneShapePolygonRoutingType::Bezier);
 
 		// Apply crosswalk intersection tags.
-		TArray<FName> IntersectionTagNames = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkIntersectionTags(&CrosswalkQueryActor, CrosswalkIntersectionIndex);
+		TArray<FName> IntersectionTagNames = UTempoCoreUtils::CallBlueprintFunction(&CrosswalkQueryActor, ITempoCrosswalkInterface::Execute_GetTempoCrosswalkIntersectionTags, CrosswalkIntersectionIndex);
 		for (FName IntersectionTagName : IntersectionTagNames)
 		{
 			const FZoneGraphTag IntersectionTag = GetTagByName(IntersectionTagName);
 			ZoneShapeComponent->GetMutableTags().Add(IntersectionTag);
 		}
 	
-		const int32 NumCrosswalkIntersectionConnections = ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersectionConnections(&CrosswalkQueryActor, CrosswalkIntersectionIndex);
+		const int32 NumCrosswalkIntersectionConnections = UTempoCoreUtils::CallBlueprintFunction(&CrosswalkQueryActor, ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersectionConnections, CrosswalkIntersectionIndex);
 
 		// Create and Setup Points.
 		for (int32 CrosswalkIntersectionConnectionIndex = 0; CrosswalkIntersectionConnectionIndex < NumCrosswalkIntersectionConnections; ++CrosswalkIntersectionConnectionIndex)
@@ -923,8 +921,8 @@ bool UTempoRoadLaneGraphSubsystem::TryGenerateAndRegisterZoneShapeComponentsForC
 
 bool UTempoRoadLaneGraphSubsystem::TryCreateZoneShapePointForCrosswalkIntersectionEntranceLocation(const AActor& CrosswalkQueryActor, int32 CrosswalkIntersectionIndex, int32 CrosswalkIntersectionConnectionIndex, UZoneShapeComponent& ZoneShapeComponent, FZoneShapePoint& OutZoneShapePoint) const
 {
-	const FVector CrosswalkIntersectionEntranceLocationInWorldFrame = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkIntersectionEntranceLocation(&CrosswalkQueryActor, CrosswalkIntersectionIndex, CrosswalkIntersectionConnectionIndex, ETempoCoordinateSpace::World);
-	
+	const FVector CrosswalkIntersectionEntranceLocationInWorldFrame = UTempoCoreUtils::CallBlueprintFunction(&CrosswalkQueryActor, ITempoCrosswalkInterface::Execute_GetTempoCrosswalkIntersectionEntranceLocation, CrosswalkIntersectionIndex, CrosswalkIntersectionConnectionIndex, ETempoCoordinateSpace::World);
+
 	DrawDebugSphere(GetWorld(), CrosswalkIntersectionEntranceLocationInWorldFrame, 25.0f, 16, FColor::Green, false, 5.0f);
 
 	const FZoneLaneProfile LaneProfile = GetCrosswalkIntersectionEntranceLaneProfile(CrosswalkQueryActor, CrosswalkIntersectionIndex, CrosswalkIntersectionConnectionIndex);
@@ -945,8 +943,8 @@ bool UTempoRoadLaneGraphSubsystem::TryCreateZoneShapePointForCrosswalkIntersecti
 	ZoneShapePoint.LaneProfile = PerPointLaneProfileIndex;
 	ZoneShapePoint.TangentLength = LaneProfile.GetLanesTotalWidth() * 0.5f;
 
-	const FVector CrosswalkIntersectionEntranceTangentInWorldFrame = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkIntersectionEntranceTangent(&CrosswalkQueryActor, CrosswalkIntersectionIndex, CrosswalkIntersectionConnectionIndex, ETempoCoordinateSpace::World);
-	const FVector CrosswalkIntersectionEntranceUpVectorInWorldFrame = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkIntersectionEntranceUpVector(&CrosswalkQueryActor, CrosswalkIntersectionIndex, CrosswalkIntersectionConnectionIndex, ETempoCoordinateSpace::World);
+	const FVector CrosswalkIntersectionEntranceTangentInWorldFrame = UTempoCoreUtils::CallBlueprintFunction(&CrosswalkQueryActor, ITempoCrosswalkInterface::Execute_GetTempoCrosswalkIntersectionEntranceTangent, CrosswalkIntersectionIndex, CrosswalkIntersectionConnectionIndex, ETempoCoordinateSpace::World);
+	const FVector CrosswalkIntersectionEntranceUpVectorInWorldFrame = UTempoCoreUtils::CallBlueprintFunction(&CrosswalkQueryActor, ITempoCrosswalkInterface::Execute_GetTempoCrosswalkIntersectionEntranceUpVector, CrosswalkIntersectionIndex, CrosswalkIntersectionConnectionIndex, ETempoCoordinateSpace::World);
 
 	ZoneShapePoint.SetRotationFromForwardAndUp(ZoneShapeComponent.GetComponentToWorld().InverseTransformPosition(CrosswalkIntersectionEntranceTangentInWorldFrame),
 		ZoneShapeComponent.GetComponentToWorld().InverseTransformPosition(CrosswalkIntersectionEntranceUpVectorInWorldFrame));
@@ -963,11 +961,11 @@ bool UTempoRoadLaneGraphSubsystem::TryCreateZoneShapePointForCrosswalkControlPoi
 {
 	FZoneShapePoint ZoneShapePoint;
 	
-	const FVector CrosswalkControlPointLocation = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkControlPointLocation(&CrosswalkQueryActor, ConnectionIndex, CrosswalkControlPointIndex, ETempoCoordinateSpace::World);
-	const FVector CrosswalkControlPointTangent = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkControlPointTangent(&CrosswalkQueryActor, ConnectionIndex, CrosswalkControlPointIndex, ETempoCoordinateSpace::World);
+	const FVector CrosswalkControlPointLocation = UTempoCoreUtils::CallBlueprintFunction(&CrosswalkQueryActor, ITempoCrosswalkInterface::Execute_GetTempoCrosswalkControlPointLocation, ConnectionIndex, CrosswalkControlPointIndex, ETempoCoordinateSpace::World);
+	const FVector CrosswalkControlPointTangent = UTempoCoreUtils::CallBlueprintFunction(&CrosswalkQueryActor, ITempoCrosswalkInterface::Execute_GetTempoCrosswalkControlPointTangent, ConnectionIndex, CrosswalkControlPointIndex, ETempoCoordinateSpace::World);
 
 	const FVector CrosswalkControlPointForwardVector = CrosswalkControlPointTangent.GetSafeNormal();
-	const FVector CrosswalkControlPointUpVector = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkControlPointUpVector(&CrosswalkQueryActor, ConnectionIndex, CrosswalkControlPointIndex, ETempoCoordinateSpace::World);
+	const FVector CrosswalkControlPointUpVector = UTempoCoreUtils::CallBlueprintFunction(&CrosswalkQueryActor, ITempoCrosswalkInterface::Execute_GetTempoCrosswalkControlPointUpVector, ConnectionIndex, CrosswalkControlPointIndex, ETempoCoordinateSpace::World);
 
 	ZoneShapePoint.Position = CrosswalkQueryActor.GetTransform().InverseTransformPosition(CrosswalkControlPointLocation);
 	ZoneShapePoint.Type = FZoneShapePointType::Bezier;
@@ -985,16 +983,16 @@ FZoneLaneProfile UTempoRoadLaneGraphSubsystem::CreateDynamicLaneProfileForCrossw
 {
 	FZoneLaneProfile LaneProfile;
 	
-	const int32 NumLanes = ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkLanes(&CrosswalkQueryActor, ConnectionIndex);
+	const int32 NumLanes = UTempoCoreUtils::CallBlueprintFunction(&CrosswalkQueryActor, ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkLanes, ConnectionIndex);
 
 	for (int32 LaneIndex = 0; LaneIndex < NumLanes; ++LaneIndex)
 	{
 		// ZoneGraph's LaneProfiles specify lanes from right to left.
 		const int32 LaneProfileLaneIndex = NumLanes - 1 - LaneIndex;
 		
-		const float LaneWidth = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkLaneWidth(&CrosswalkQueryActor, ConnectionIndex, LaneProfileLaneIndex);
-		const EZoneLaneDirection LaneDirection = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkLaneDirection(&CrosswalkQueryActor, ConnectionIndex, LaneProfileLaneIndex);
-		const TArray<FName> LaneTags = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkLaneTags(&CrosswalkQueryActor, ConnectionIndex, LaneProfileLaneIndex);
+		const float LaneWidth = UTempoCoreUtils::CallBlueprintFunction(&CrosswalkQueryActor, ITempoCrosswalkInterface::Execute_GetTempoCrosswalkLaneWidth, ConnectionIndex, LaneProfileLaneIndex);
+		const EZoneLaneDirection LaneDirection = UTempoCoreUtils::CallBlueprintFunction(&CrosswalkQueryActor, ITempoCrosswalkInterface::Execute_GetTempoCrosswalkLaneDirection, ConnectionIndex, LaneProfileLaneIndex);
+		const TArray<FName> LaneTags = UTempoCoreUtils::CallBlueprintFunction(&CrosswalkQueryActor, ITempoCrosswalkInterface::Execute_GetTempoCrosswalkLaneTags, ConnectionIndex, LaneProfileLaneIndex);
 
 		FZoneLaneDesc LaneDesc = CreateZoneLaneDesc(LaneWidth, LaneDirection, LaneTags);
 		LaneProfile.Lanes.Add(LaneDesc);
@@ -1007,7 +1005,7 @@ FZoneLaneProfile UTempoRoadLaneGraphSubsystem::CreateDynamicLaneProfileForCrossw
 
 FZoneLaneProfile UTempoRoadLaneGraphSubsystem::GetLaneProfileForCrosswalk(const AActor& CrosswalkQueryActor, int32 ConnectionIndex) const
 {
-	const FName LaneProfileOverrideName = ITempoCrosswalkInterface::Execute_GetLaneProfileOverrideNameForTempoCrosswalk(&CrosswalkQueryActor, ConnectionIndex);
+	const FName LaneProfileOverrideName = UTempoCoreUtils::CallBlueprintFunction(&CrosswalkQueryActor, ITempoCrosswalkInterface::Execute_GetLaneProfileOverrideNameForTempoCrosswalk, ConnectionIndex);
 
 	if (LaneProfileOverrideName != NAME_None)
 	{
@@ -1040,16 +1038,16 @@ FZoneLaneProfile UTempoRoadLaneGraphSubsystem::CreateCrosswalkIntersectionConnec
 {
 	FZoneLaneProfile LaneProfile;
 	
-	const int32 NumLanes = ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersectionConnectorLanes(&CrosswalkQueryActor, CrosswalkRoadModuleIndex);
+	const int32 NumLanes = UTempoCoreUtils::CallBlueprintFunction(&CrosswalkQueryActor, ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersectionConnectorLanes, CrosswalkRoadModuleIndex);
 
 	for (int32 LaneIndex = 0; LaneIndex < NumLanes; ++LaneIndex)
 	{
 		// ZoneGraph's LaneProfiles specify lanes from right to left.
 		const int32 LaneProfileLaneIndex = NumLanes - 1 - LaneIndex;
 		
-		const float LaneWidth = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkIntersectionConnectorLaneWidth(&CrosswalkQueryActor, CrosswalkRoadModuleIndex, LaneProfileLaneIndex);
-		const EZoneLaneDirection LaneDirection = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkIntersectionConnectorLaneDirection(&CrosswalkQueryActor, CrosswalkRoadModuleIndex, LaneProfileLaneIndex);
-		const TArray<FName> LaneTags = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkIntersectionConnectorLaneTags(&CrosswalkQueryActor, CrosswalkRoadModuleIndex, LaneProfileLaneIndex);
+		const float LaneWidth = UTempoCoreUtils::CallBlueprintFunction(&CrosswalkQueryActor, ITempoCrosswalkInterface::Execute_GetTempoCrosswalkIntersectionConnectorLaneWidth, CrosswalkRoadModuleIndex, LaneProfileLaneIndex);
+		const EZoneLaneDirection LaneDirection = UTempoCoreUtils::CallBlueprintFunction(&CrosswalkQueryActor, ITempoCrosswalkInterface::Execute_GetTempoCrosswalkIntersectionConnectorLaneDirection, CrosswalkRoadModuleIndex, LaneProfileLaneIndex);
+		const TArray<FName> LaneTags = UTempoCoreUtils::CallBlueprintFunction(&CrosswalkQueryActor, ITempoCrosswalkInterface::Execute_GetTempoCrosswalkIntersectionConnectorLaneTags, CrosswalkRoadModuleIndex, LaneProfileLaneIndex);
 
 		FZoneLaneDesc LaneDesc = CreateZoneLaneDesc(LaneWidth, LaneDirection, LaneTags);
 		LaneProfile.Lanes.Add(LaneDesc);
@@ -1062,7 +1060,7 @@ FZoneLaneProfile UTempoRoadLaneGraphSubsystem::CreateCrosswalkIntersectionConnec
 
 FZoneLaneProfile UTempoRoadLaneGraphSubsystem::GetCrosswalkIntersectionConnectorLaneProfile(const AActor& CrosswalkQueryActor, int32 CrosswalkRoadModuleIndex) const
 {
-	const FName LaneProfileOverrideName = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkIntersectionConnectorLaneProfileOverrideName(&CrosswalkQueryActor, CrosswalkRoadModuleIndex);
+	const FName LaneProfileOverrideName = UTempoCoreUtils::CallBlueprintFunction(&CrosswalkQueryActor, ITempoCrosswalkInterface::Execute_GetTempoCrosswalkIntersectionConnectorLaneProfileOverrideName, CrosswalkRoadModuleIndex);
 
 	if (LaneProfileOverrideName != NAME_None)
 	{
@@ -1095,16 +1093,16 @@ FZoneLaneProfile UTempoRoadLaneGraphSubsystem::CreateCrosswalkIntersectionEntran
 {
 	FZoneLaneProfile LaneProfile;
 	
-	const int32 NumLanes = ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersectionEntranceLanes(&CrosswalkQueryActor, CrosswalkIntersectionIndex, CrosswalkIntersectionConnectionIndex);
+	const int32 NumLanes = UTempoCoreUtils::CallBlueprintFunction(&CrosswalkQueryActor, ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalkIntersectionEntranceLanes, CrosswalkIntersectionIndex, CrosswalkIntersectionConnectionIndex);
 
 	for (int32 LaneIndex = 0; LaneIndex < NumLanes; ++LaneIndex)
 	{
 		// ZoneGraph's LaneProfiles specify lanes from right to left.
 		const int32 LaneProfileLaneIndex = NumLanes - 1 - LaneIndex;
 		
-		const float LaneWidth = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkIntersectionEntranceLaneWidth(&CrosswalkQueryActor, CrosswalkIntersectionIndex, CrosswalkIntersectionConnectionIndex, LaneProfileLaneIndex);
-		const EZoneLaneDirection LaneDirection = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkIntersectionEntranceLaneDirection(&CrosswalkQueryActor, CrosswalkIntersectionIndex, CrosswalkIntersectionConnectionIndex, LaneProfileLaneIndex);
-		const TArray<FName> LaneTags = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkIntersectionEntranceLaneTags(&CrosswalkQueryActor, CrosswalkIntersectionIndex, CrosswalkIntersectionConnectionIndex, LaneProfileLaneIndex);
+		const float LaneWidth = UTempoCoreUtils::CallBlueprintFunction(&CrosswalkQueryActor, ITempoCrosswalkInterface::Execute_GetTempoCrosswalkIntersectionEntranceLaneWidth, CrosswalkIntersectionIndex, CrosswalkIntersectionConnectionIndex, LaneProfileLaneIndex);
+		const EZoneLaneDirection LaneDirection = UTempoCoreUtils::CallBlueprintFunction(&CrosswalkQueryActor, ITempoCrosswalkInterface::Execute_GetTempoCrosswalkIntersectionEntranceLaneDirection, CrosswalkIntersectionIndex, CrosswalkIntersectionConnectionIndex, LaneProfileLaneIndex);
+		const TArray<FName> LaneTags = UTempoCoreUtils::CallBlueprintFunction(&CrosswalkQueryActor, ITempoCrosswalkInterface::Execute_GetTempoCrosswalkIntersectionEntranceLaneTags, CrosswalkIntersectionIndex, CrosswalkIntersectionConnectionIndex, LaneProfileLaneIndex);
 
 		FZoneLaneDesc LaneDesc = CreateZoneLaneDesc(LaneWidth, LaneDirection, LaneTags);
 		LaneProfile.Lanes.Add(LaneDesc);
@@ -1117,7 +1115,7 @@ FZoneLaneProfile UTempoRoadLaneGraphSubsystem::CreateCrosswalkIntersectionEntran
 
 FZoneLaneProfile UTempoRoadLaneGraphSubsystem::GetCrosswalkIntersectionEntranceLaneProfile(const AActor& CrosswalkQueryActor, int32 CrosswalkIntersectionIndex, int32 CrosswalkIntersectionConnectionIndex) const
 {
-	const FName LaneProfileOverrideName = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkIntersectionEntranceLaneProfileOverrideName(&CrosswalkQueryActor, CrosswalkIntersectionIndex, CrosswalkIntersectionConnectionIndex);
+	const FName LaneProfileOverrideName = UTempoCoreUtils::CallBlueprintFunction(&CrosswalkQueryActor, ITempoCrosswalkInterface::Execute_GetTempoCrosswalkIntersectionEntranceLaneProfileOverrideName, CrosswalkIntersectionIndex, CrosswalkIntersectionConnectionIndex);
 
 	if (LaneProfileOverrideName != NAME_None)
 	{
