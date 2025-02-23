@@ -78,15 +78,10 @@ bool UTempoRoadQueryComponent::TryGenerateCrosswalkRoadModuleMap(const AActor* R
 
 	const TArray<AActor*> CrosswalkRoadModules = GetCrosswalkRoadModules();
 
-	// if (CrosswalkRoadModules.Num() < 2)
-	// {
-	// 	return false;
-	// }
-	//
-	// if (!ensureMsgf(CrosswalkRoadModules.Num() == 2, TEXT("Only roads with 2 crosswalk road modules are handled by UTempoRoadQueryComponent::TryGenerateCrosswalkRoadModuleMap.")))
-	// {
-	// 	return false;
-	// }
+	if (!ensureMsgf(CrosswalkRoadModules.Num() == 2, TEXT("Only roads with 2 crosswalk road modules are handled by UTempoRoadQueryComponent::TryGenerateCrosswalkRoadModuleMap.")))
+	{
+		return false;
+	}
 
 	const FVector RoadStartLocation = ITempoRoadInterface::Execute_GetLocationAtDistanceAlongTempoRoad(RoadQueryActor, 0.0, ETempoCoordinateSpace::World);
 	const FVector RoadStartRight = ITempoRoadInterface::Execute_GetRightVectorAtDistanceAlongTempoRoad(RoadQueryActor, 0.0, ETempoCoordinateSpace::World);
@@ -164,21 +159,21 @@ bool UTempoRoadQueryComponent::TryGetCrosswalkIntersectionConnectorInfoEntry(con
 	}
 
 	const int32 CrosswalkIndex = GetCrosswalkIndexFromCrosswalkIntersectionIndex(RoadQueryActor, CrosswalkIntersectionIndex);
-	const FCrosswalkIntersectionConnectorSegmentInfo* CrosswalkIntersectionConnectorSegmentInfoBefore =
+	const FCrosswalkIntersectionConnectorSegmentInfo* CrosswalkIntersectionConnectorSegmentInfoPrevious =
 		CrosswalkIntersectionConnectorInfo->CrosswalkIntersectionConnectorSegmentInfos.FindByPredicate([CrosswalkIndex](const auto& Elem) { return Elem.CrosswalkIndexAtEnd == CrosswalkIndex; });
-	const FCrosswalkIntersectionConnectorSegmentInfo* CrosswalkIntersectionConnectorSegmentInfoAfter =
+	const FCrosswalkIntersectionConnectorSegmentInfo* CrosswalkIntersectionConnectorSegmentInfoNext =
 		CrosswalkIntersectionConnectorInfo->CrosswalkIntersectionConnectorSegmentInfos.FindByPredicate([CrosswalkIndex](const auto& Elem) { return Elem.CrosswalkIndexAtStart == CrosswalkIndex; });
-	const float EndDistanceBefore = CrosswalkIntersectionConnectorSegmentInfoBefore->CrosswalkIntersectionConnectorEndDistance;
-	const float StartDistanceAfter = CrosswalkIntersectionConnectorSegmentInfoAfter->CrosswalkIntersectionConnectorStartDistance;
+	const float EndDistancePrevious = CrosswalkIntersectionConnectorSegmentInfoPrevious->CrosswalkIntersectionConnectorEndDistance;
+	const float StartDistanceNext = CrosswalkIntersectionConnectorSegmentInfoNext->CrosswalkIntersectionConnectorStartDistance;
 
 	OutCrosswalkRoadModule = CrosswalkIntersectionConnectorInfo->CrosswalkRoadModule;
 
 	// Connection indexing is clockwise from above with 0 at the crosswalk entrance.
-	// So on the left side CrosswalkIntersectionConnectionIndex 1 is the start and 2 is the end.
-	// And on the left side CrosswalkIntersectionConnectionIndex 2 is the start and 1 is the end.
+	// So on the left side CrosswalkIntersectionConnectionIndex 1 is the end of the previous connector and 2 is the start of the next connector.
+	// And on the right side CrosswalkIntersectionConnectionIndex 2 is the end of the previous connector and 1 is the start of the next connector.
 	// RoadModule index 0 is left by convention.
 	const bool bIsLeftSide = CrosswalkRoadModuleIndex == 0;
-	OutCrosswalkIntersectionConnectorDistance = CrosswalkIntersectionConnectionIndex == (bIsLeftSide ? 1 : 2) ? EndDistanceBefore : StartDistanceAfter;
+	OutCrosswalkIntersectionConnectorDistance = CrosswalkIntersectionConnectionIndex == (bIsLeftSide ? 1 : 2) ? EndDistancePrevious : StartDistanceNext;
 
 	return true;
 }
@@ -277,8 +272,8 @@ bool UTempoRoadQueryComponent::TryGetCrosswalkIntersectionEntranceTangent(const 
 		}
 
 		// Connection indexing is clockwise from above with 0 at the crosswalk entrance.
-		// So on the left side CrosswalkIntersectionConnectionIndex 1 is the start and 2 is the end.
-		// And on the left side CrosswalkIntersectionConnectionIndex 2 is the start and 1 is the end.
+		// So on the left side CrosswalkIntersectionConnectionIndex 1 is the start of the crosswalk intersection and 2 is the end.
+		// And on the right side CrosswalkIntersectionConnectionIndex 2 is the start of the crosswalk intersection and 1 is the end.
 		const float DirectionScalar = CrosswalkIntersectionConnectionIndex == (bIsLeftSide ? 1 : 2) ? 1.0f : -1.0f;
 		const FVector CrosswalkIntersectionEntranceTangent = ITempoRoadModuleInterface::Execute_GetTangentAtDistanceAlongTempoRoadModule(CrosswalkRoadModuleActor, CrosswalkIntersectionConnectorDistance, CoordinateSpace) * DirectionScalar;
 
@@ -384,8 +379,8 @@ bool UTempoRoadQueryComponent::TryGetCrosswalkIntersectionEntranceRightVector(co
 		}
 
 		// Connection indexing is clockwise from above with 0 at the crosswalk entrance.
-		// So on the left side CrosswalkIntersectionConnectionIndex 1 is the start and 2 is the end.
-		// And on the left side CrosswalkIntersectionConnectionIndex 2 is the start and 1 is the end.
+		// So on the left side CrosswalkIntersectionConnectionIndex 1 is the start of the crosswalk intersection and 2 is the end.
+		// And on the right side CrosswalkIntersectionConnectionIndex 2 is the start of the crosswalk intersection and 1 is the end.
 		const float DirectionScalar = CrosswalkIntersectionConnectionIndex == (bIsLeftSide ? 1 : 2) ? 1.0f : -1.0f;
 		const FVector CrosswalkIntersectionEntranceRightVector = ITempoRoadModuleInterface::Execute_GetRightVectorAtDistanceAlongTempoRoadModule(CrosswalkRoadModuleActor, CrosswalkIntersectionConnectorDistance, CoordinateSpace) * DirectionScalar;
 

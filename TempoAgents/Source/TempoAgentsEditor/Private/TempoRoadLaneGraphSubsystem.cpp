@@ -73,7 +73,7 @@ bool UTempoRoadLaneGraphSubsystem::TryGenerateZoneShapeComponents() const
 
 			if (Actor->Implements<UTempoCrosswalkInterface>())
 			{
-				if (!TryGenerateAndRegisterZoneShapeComponentsForCrosswalksAtIntersections(*Actor))
+				if (!TryGenerateAndRegisterZoneShapeComponentsForCrosswalks(*Actor))
 				{
 					UE_LOG(LogTempoAgentsEditor, Error, TEXT("Tempo Lane Graph - Failed to create Crosswalk ZoneShapeComponents for Actor: %s."), *Actor->GetName());
 					return false;
@@ -126,7 +126,7 @@ bool UTempoRoadLaneGraphSubsystem::TryGenerateZoneShapeComponents() const
 
 			if (Actor->Implements<UTempoCrosswalkInterface>())
 			{
-				if (!TryGenerateAndRegisterZoneShapeComponentsForCrosswalksAtIntersections(*Actor))
+				if (!TryGenerateAndRegisterZoneShapeComponentsForCrosswalks(*Actor))
 				{
 					UE_LOG(LogTempoAgentsEditor, Error, TEXT("Tempo Lane Graph - Failed to create Crosswalk ZoneShapeComponents for Actor: %s."), *Actor->GetName());
 					return false;
@@ -715,7 +715,7 @@ AActor* UTempoRoadLaneGraphSubsystem::GetConnectedRoadActor(const AActor& Inters
 // Crosswalk functions
 //
 
-bool UTempoRoadLaneGraphSubsystem::TryGenerateAndRegisterZoneShapeComponentsForCrosswalksAtIntersections(AActor& CrosswalkQueryActor) const
+bool UTempoRoadLaneGraphSubsystem::TryGenerateAndRegisterZoneShapeComponentsForCrosswalks(AActor& CrosswalkQueryActor) const
 {
 	const int32 NumConnections = ITempoCrosswalkInterface::Execute_GetNumTempoCrosswalks(&CrosswalkQueryActor);
 	
