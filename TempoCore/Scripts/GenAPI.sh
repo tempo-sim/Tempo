@@ -49,9 +49,14 @@ else
   source "$VENV_DIR/bin/activate"
 fi
 
-set +e # Proceed despite errors from pip. That could just mean the user has no internet connection.
+# Suppress pip's warning to upgrade to a new pip. We're using the pip version that came with Unreal, and we want to stay on it.
+if [[ "$OSTYPE" = "msys" ]]; then
+  echo -e "[global]\ndisable-pip-version-check = true" > "$VENV_DIR/pip.ini"
+else
+  echo -e "[global]\ndisable-pip-version-check = true" > "$VENV_DIR/pip.conf"
+fi
 # Install a few dependencies to the virtual environment. If this list grows put them in a requirements.txt file.
-pip install --upgrade pip --quiet --retries 0 # One --quiet to suppress warnings but show errors
+set +e # Proceed despite errors from pip. That could just mean the user has no internet connection.
 pip install protobuf==4.25.3 --quiet --retries 0 # One --quiet to suppress warnings but show errors
 pip install Jinja2==3.1.3 --quiet --retries 0 # One --quiet to suppress warnings but show errors
 pip install opencv-python==4.10.0.84 --quiet --retries 0 # One --quiet to suppress warnings but show errors
@@ -61,7 +66,10 @@ pip install grpcio==1.62.2 --quiet --retries 0 # One --quiet to suppress warning
 set -e
 
 # Finally build and install the Tempo API (and its dependencies) to the virtual environment.
-pip uninstall tempo --yes --quiet # Uninstall first to remove any stale files
+if (pip list | grep tempo) &> /dev/null; then
+  # Uninstall tempo if a previous version was installed
+  pip uninstall tempo --yes --quiet # Uninstall first to remove any stale files
+fi
 python "$PLUGIN_ROOT/Content/Python/gen_api.py"
 set +e # Again proceed despite errors from pip.
 pip install "$PLUGIN_ROOT/Content/Python/API" --quiet --retries 0 # One --quiet to suppress warnings but show errors
