@@ -54,4 +54,41 @@ public:
 
 		return true;
 	}
+
+	// Wraps all BP calls in FEditorScriptExecutionGuard when in the Editor, which prevents early termination (and lurking
+	// bugs due to calls silently being cancelled and returning default values) due to erroneous runaway loop detection.
+	template <typename ObjectType, typename FuncType, typename... ArgTypes>
+	static auto CallBlueprintFunction(ObjectType* Object, FuncType Function, ArgTypes&&... Args)
+	{
+		if (Object->GetWorld()->WorldType != EWorldType::Editor)
+		{
+			return Function(Object, Args...);
+		}
+
+		using RetValType = decltype(Function(Object, std::forward<ArgTypes>(Args)...)); // Deduce return type
+		if constexpr (std::is_void_v<RetValType>)
+		{
+			if (!ensureMsgf(IsValid(Object), TEXT("Tried to call Blueprint function on invalid object")))
+			{
+				return;
+			}
+			{
+				FEditorScriptExecutionGuard ScriptExecutionGuard;
+				Function(Object, std::forward<ArgTypes>(Args)...);
+			}
+		}
+		else
+		{
+			if (!ensureMsgf(IsValid(Object), TEXT("Tried to call Blueprint function on invalid object")))
+			{
+				return RetValType();
+			}
+			RetValType RetVal;
+			{
+				FEditorScriptExecutionGuard ScriptExecutionGuard;
+				RetVal = Function(Object, std::forward<ArgTypes>(Args)...);
+			}
+			return RetVal;
+		}
+	}
 };

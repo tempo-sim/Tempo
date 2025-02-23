@@ -9,8 +9,6 @@
 
 void UTempoAgentsEditorUtils::RunTempoZoneGraphBuilderPipeline()
 {
-	FEditorScriptExecutionGuard ScriptGuard;
-
 	if (UTempoRoadLaneGraphSubsystem* TempoRoadLaneGraphSubsystem = GEditor ? GEditor->GetEditorSubsystem<UTempoRoadLaneGraphSubsystem>() : nullptr)
 	{
 		TempoRoadLaneGraphSubsystem->SetupZoneGraphBuilder();

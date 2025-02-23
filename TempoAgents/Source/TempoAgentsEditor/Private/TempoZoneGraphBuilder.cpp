@@ -6,6 +6,8 @@
 #include "TempoRoadInterface.h"
 #include "ZoneShapeUtilities.h"
 
+#include "TempoCoreUtils.h"
+
 bool FTempoZoneGraphBuilder::ShouldFilterLaneConnection(const UZoneShapeComponent& PolygonShapeComp, const UZoneShapeComponent& SourceShapeComp, const TArray<FLaneConnectionSlot>& SourceSlots, const int32 SourceSlotQueryIndex, const UZoneShapeComponent& DestShapeComp, const TArray<FLaneConnectionSlot>& DestSlots, const int32 DestSlotQueryIndex) const
 {
 	const AActor* IntersectionQueryActor = GetIntersectionQueryActor(PolygonShapeComp);
@@ -23,8 +25,7 @@ bool FTempoZoneGraphBuilder::ShouldFilterLaneConnection(const UZoneShapeComponen
 
 	bool bShouldFilterLaneConnection;
 	{
-		FEditorScriptExecutionGuard ScriptGuard;
-		bShouldFilterLaneConnection = ITempoIntersectionInterface::Execute_ShouldFilterTempoLaneConnection(IntersectionQueryActor, SourceRoadQueryActor, SourceLaneConnectionInfos, SourceSlotQueryIndex, DestRoadQueryActor, DestLaneConnectionInfos, DestSlotQueryIndex);
+		bShouldFilterLaneConnection = UTempoCoreUtils::CallBlueprintFunction(IntersectionQueryActor, ITempoIntersectionInterface::Execute_ShouldFilterTempoLaneConnection, SourceRoadQueryActor, SourceLaneConnectionInfos, SourceSlotQueryIndex, DestRoadQueryActor, DestLaneConnectionInfos, DestSlotQueryIndex);
 	}
 
 	return bShouldFilterLaneConnection;
