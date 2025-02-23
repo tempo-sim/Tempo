@@ -151,6 +151,7 @@ bool ShouldVehicleMergeOntoLane(
 	const float VehicleRandomFraction,
 	const FVector2D& StoppingDistanceRange,
 	const FZoneGraphStorage& ZoneGraphStorage,
+	FZoneGraphLaneHandle& OutYieldTargetLane,
 	int32& OutMergeYieldCaseIndex);
 
 MASSTRAFFIC_API bool ShouldStopAtLaneExit(
@@ -197,6 +198,7 @@ MASSTRAFFIC_API void UpdateYieldAtIntersectionState(
 	UMassTrafficSubsystem& MassTrafficSubsystem,
 	FMassTrafficVehicleControlFragment& VehicleControlFragment,
 	const FZoneGraphLaneHandle& CurrentLaneHandle,
+	const FZoneGraphLaneHandle& YieldTargetLaneHandle,
 	const bool bShouldReactivelyYieldAtIntersection,
 	const bool bShouldGiveOpportunityForTurningVehiclesToReactivelyYieldAtIntersection);
 

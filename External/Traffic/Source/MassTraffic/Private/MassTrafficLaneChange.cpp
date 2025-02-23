@@ -766,7 +766,8 @@ bool CheckNextVehicle(const FMassEntityHandle Entity, const FMassEntityHandle Ne
 bool ShouldYieldToCrosswalks_Internal(
 	const FZoneGraphTrafficLaneData& CurrentLaneData,
 	const TFunction<bool(const FZoneGraphLaneHandle&)>& IsDownstreamCrosswalkLaneClearFunc,
-	const TFunction<bool(const FZoneGraphLaneHandle&)>& DownstreamCrosswalkLaneHasYieldingEntitiesFunc)
+	const TFunction<bool(const FZoneGraphLaneHandle&)>& DownstreamCrosswalkLaneHasYieldingEntitiesFunc,
+	FZoneGraphLaneHandle& OutYieldTargetLane)
 {
 	// Check all the downstream crosswalk lanes for our current lane.
 	for (const FZoneGraphLaneHandle& DownstreamCrosswalkLane : CurrentLaneData.DownstreamCrosswalkLanes)
@@ -780,6 +781,7 @@ bool ShouldYieldToCrosswalks_Internal(
 		// We should yield, if any of our downstream crosswalk lanes are not clear.
 		if (!IsDownstreamCrosswalkLaneClearFunc(DownstreamCrosswalkLane))
 		{
+			OutYieldTargetLane = DownstreamCrosswalkLane;
 			return true;
 		}
 	}
@@ -791,6 +793,7 @@ bool ShouldYieldAtIntersection_Internal(
 	const FZoneGraphTrafficLaneData& CurrentLaneData,
 	const FZoneGraphTrafficLaneData& PrevLaneData,
 	const TFunction<bool(const FZoneGraphTrafficLaneData&)>& IsTestLaneClearFunc,
+	FZoneGraphLaneHandle& OutYieldTargetLane,
 	const bool bConsiderYieldForGoingStraight = true,
 	const bool bConsiderYieldForLeftTurns = true,
 	const bool bConsiderYieldForRightTurns = true)
@@ -827,6 +830,7 @@ bool ShouldYieldAtIntersection_Internal(
 					// But, for the remaining lanes, we should yield, if they are not clear.
 					if (!IsTestLaneClearFunc(*NextLeftLane))
 					{
+						OutYieldTargetLane = NextLeftLane->LaneHandle;
 						return true;
 					}
 				}
@@ -859,6 +863,7 @@ bool ShouldYieldAtIntersection_Internal(
 					// But, for the remaining lanes, we should yield, if they are not clear.
 					if (!IsTestLaneClearFunc(*NextRightLane))
 					{
+						OutYieldTargetLane = NextRightLane->LaneHandle;
 						return true;
 					}
 				}
@@ -891,6 +896,7 @@ bool ShouldYieldAtIntersection_Internal(
 					// But, for the remaining lanes, we should yield, if they are not clear.
 					if (!IsTestLaneClearFunc(*NextLeftLane))
 					{
+						OutYieldTargetLane = NextLeftLane->LaneHandle;
 						return true;
 					}
 				}
@@ -920,6 +926,7 @@ bool ShouldYieldAtIntersection_Internal(
 					// But, for the remaining lanes, we should yield, if they are not clear.
 					if (!IsTestLaneClearFunc(*NextRightLane))
 					{
+						OutYieldTargetLane = NextRightLane->LaneHandle;
 						return true;
 					}
 				}
@@ -940,6 +947,7 @@ bool ShouldPerformReactiveYieldAtIntersection(
 	const FMassTrafficRandomFractionFragment& RandomFractionFragment,
 	const FZoneGraphStorage& ZoneGraphStorage,
 	bool& OutShouldGiveOpportunityForTurningVehiclesToReactivelyYieldAtIntersection,
+	FZoneGraphLaneHandle& OutYieldTargetLane,
 	int32& OutMergeYieldCaseIndex)
 {
 	const UMassTrafficSettings* MassTrafficSettings = GetDefault<UMassTrafficSettings>();
@@ -1310,6 +1318,14 @@ bool ShouldPerformReactiveYieldAtIntersection(
 		return true;
 	};
 
+	// If our yield behavior is being overriden, don't yield.  A deadlock is being prevented.
+	if (MassTrafficSubsystem.IsEntityInLaneYieldOverrideMap(CurrentLaneData->LaneHandle, VehicleControlFragment.VehicleEntityHandle))
+	{
+		return false;
+	}
+
+	FZoneGraphLaneHandle YieldTargetLane;
+
 	// Only yield in response to merge conditions, if we are eligible to attempt a merge in the first place.
 	if (IsVehicleEligibleToMergeOntoLane(
 		MassTrafficSubsystem,
@@ -1332,23 +1348,26 @@ bool ShouldPerformReactiveYieldAtIntersection(
 			RandomFractionFragment.RandomFraction.GetFloat(),
 			MassTrafficSettings->StoppingDistanceRange,
 			ZoneGraphStorage,
+			YieldTargetLane,
 			OutMergeYieldCaseIndex
 			);
 
 		if (bShouldYieldToMergeConflict)
 		{
+			OutYieldTargetLane = YieldTargetLane;
 			return true;
 		}
 	}
 
-	const bool bShouldYieldToCrosswalks = ShouldYieldToCrosswalks_Internal(*IntersectionLaneData, IsDownstreamCrosswalkLaneClear, DownstreamCrosswalkLaneHasYieldingEntities);
+	const bool bShouldYieldToCrosswalks = ShouldYieldToCrosswalks_Internal(*IntersectionLaneData, IsDownstreamCrosswalkLaneClear, DownstreamCrosswalkLaneHasYieldingEntities, YieldTargetLane);
 	
 	if (bShouldYieldToCrosswalks)
 	{
+		OutYieldTargetLane = YieldTargetLane;
 		return true;
 	}
 	
-	const bool bShouldReactivelyYieldAtIntersection = ShouldYieldAtIntersection_Internal(*CurrentLaneData, *PrevLaneData, IsTestLaneClear);
+	const bool bShouldReactivelyYieldAtIntersection = ShouldYieldAtIntersection_Internal(*CurrentLaneData, *PrevLaneData, IsTestLaneClear, YieldTargetLane);
 
 	// If we haven't started reactively yielding, ...
 	if (!VehicleControlFragment.IsReactivelyYieldingAtIntersection())
@@ -1365,7 +1384,13 @@ bool ShouldPerformReactiveYieldAtIntersection(
 		}
 	}
 
-	return bShouldReactivelyYieldAtIntersection;
+	if (bShouldReactivelyYieldAtIntersection)
+	{
+		OutYieldTargetLane = YieldTargetLane;
+		return true;
+	}
+
+	return false;
 }
 
 }

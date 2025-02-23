@@ -215,6 +215,7 @@ bool ShouldPerformReactiveYieldAtIntersection(
 	const FMassTrafficRandomFractionFragment& RandomFractionFragment,
 	const FZoneGraphStorage& ZoneGraphStorage,
 	bool& OutShouldGiveOpportunityForTurningVehiclesToReactivelyYieldAtIntersection,
+	FZoneGraphLaneHandle& OutYieldTargetLane,
 	int32& OutMergeYieldCaseIndex);
 
 };

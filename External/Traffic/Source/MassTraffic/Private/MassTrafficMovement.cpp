@@ -164,6 +164,7 @@ bool ShouldVehicleMergeOntoLane(
 	const float VehicleRandomFraction,
 	const FVector2D& StoppingDistanceRange,
 	const FZoneGraphStorage& ZoneGraphStorage,
+	FZoneGraphLaneHandle& OutYieldTargetLane,
 	int32& OutMergeYieldCaseIndex)
 {
 	const FZoneGraphTrafficLaneData* CurrentLaneData = MassTrafficSubsystem.GetTrafficLaneData(CurrentLane);
@@ -599,6 +600,7 @@ bool ShouldVehicleMergeOntoLane(
 				ConflictLaneData->LeadVehicleSpeed.GetValue(),
 				ConflictLaneData->LeadVehicleRadius.GetValue()))
 			{
+				OutYieldTargetLane = ConflictLaneData->LaneHandle;
 				return false;
 			}
 		}
@@ -651,6 +653,7 @@ bool ShouldVehicleMergeOntoLane(
 				ConflictPredecessorLane->LeadVehicleSpeed.GetValue(),
 				ConflictPredecessorLane->LeadVehicleRadius.GetValue()))
 			{
+				OutYieldTargetLane = ConflictPredecessorLane->LaneHandle;
 				return false;
 			}
 		}
@@ -887,6 +890,7 @@ void UpdateYieldAtIntersectionState(
 	UMassTrafficSubsystem& MassTrafficSubsystem,
 	FMassTrafficVehicleControlFragment& VehicleControlFragment,
 	const FZoneGraphLaneHandle& CurrentLaneHandle,
+	const FZoneGraphLaneHandle& YieldTargetLaneHandle,
 	const bool bShouldReactivelyYieldAtIntersection,
 	const bool bShouldGiveOpportunityForTurningVehiclesToReactivelyYieldAtIntersection)
 {
@@ -901,6 +905,13 @@ void UpdateYieldAtIntersectionState(
 	FZoneGraphTrafficLaneData* CurrentLaneData = MassTrafficSubsystem.GetMutableTrafficLaneData(CurrentLaneHandle);
 
 	ensureMsgf(CurrentLaneData != nullptr, TEXT("CurrentLaneData must be valid in order to update NumYieldingVehicles on the current lane."));
+
+	if (bShouldYieldAtIntersection)
+	{
+		// Add this to the global view of all yields for this frame.
+		// The yield deadlock resolution processor will use this information to find and break any yield cycle deadlocks.
+		MassTrafficSubsystem.AddYieldInfo(VehicleControlFragment.VehicleEntityHandle, CurrentLaneHandle, YieldTargetLaneHandle);
+	}
 
 	// Set this state to give the opportunity for turning vehicles to reactively yield first.
 	// Once it is true, the logic in ShouldPerformReactiveYieldAtIntersection will fall through,

@@ -110,13 +110,8 @@ void UMassTrafficCrowdYieldProcessor::Execute(FMassEntityManager& EntityManager,
 					// we would like to determine in detail if we should yield to them.
 					// However, we hit an ensure, so we will just yield until the vehicles clear,
 					// if they are not yielding.
-
-					// TODO:  There are vehicles on the current vehicle lane, but if we yield to them, we might cause a deadlock.  So, return false for now.  Once we have "deadlock protection", we can attempt to return true, here.
-					return false;
+					return true;
 				}
-
-				FZoneGraphLaneLocation VehicleZoneGraphLaneLocation;
-				UE::ZoneGraph::Query::CalculateLocationAlongLane(*ZoneGraphStorage, CurrentTrafficLaneData.LaneHandle, CurrentTrafficLaneData.LeadVehicleDistanceAlongLane.GetValue(), VehicleZoneGraphLaneLocation);
 				
 				float VehicleEnterTime;
 				float VehicleExitTime;
@@ -143,9 +138,7 @@ void UMassTrafficCrowdYieldProcessor::Execute(FMassEntityManager& EntityManager,
 					// we would like to determine in detail if we should yield to them.
 					// However, something went wrong, so we will just yield until the vehicles clear,
 					// if they are not yielding.
-					
-					// TODO:  There are vehicles on the current vehicle lane, but if we yield to them, we might cause a deadlock.  So, return false for now.  Once we have "deadlock protection", we can attempt to return true, here.
-					return false;
+					return true;
 				}
 				
 				const bool bVehicleIsInCrosswalkLane = VehicleEnterDistance <= 0.0f && VehicleExitDistance > 0.0f;
@@ -186,9 +179,7 @@ void UMassTrafficCrowdYieldProcessor::Execute(FMassEntityManager& EntityManager,
 					// If there are vehicles on the incoming vehicle lane, and they are not yielding,
 					// we would like to determine in detail if we should yield to them.
 					// However, something went wrong, so we will just yield until the vehicles clear.
-					
-					// TODO:  There are vehicles on the current vehicle lane, but if we yield to them, we might cause a deadlock.  So, return false for now.  Once we have "deadlock protection", we can attempt to return true, here.
-					return false;
+					return true;
 				}
 				
 				const bool bInDistanceConflictWithVehicle = bVehicleIsInCrosswalkLane && PedestrianEnterDistance < MassTrafficSettings->PedestrianVehicleBufferDistanceOnCrosswalk && PedestrianEnterDistance > 0.0f;
@@ -198,7 +189,6 @@ void UMassTrafficCrowdYieldProcessor::Execute(FMassEntityManager& EntityManager,
 				// This effectively means that pedestrians always have the "right of way" over vehicles.
 				if (bInDistanceConflictWithVehicle)
 				{
-					DrawDebugDirectionalArrow(MassTrafficSubsystem.GetWorld(), PedestrianZoneGraphLaneLocation.Position + FVector(0.0f, 0.0f, 240.0f), VehicleZoneGraphLaneLocation.Position + FVector(0.0f, 0.0f, 240.0f), 1000.0f, FColor::White, false, 0.1f, 0, 10.0f);
 					return true;
 				}
 
@@ -206,13 +196,17 @@ void UMassTrafficCrowdYieldProcessor::Execute(FMassEntityManager& EntityManager,
 				return false;
 			};
 
-			const auto& UpdateYieldTrackingStateForVehicleLane = [&EntityHandle, &CrosswalkLaneInfo](const FZoneGraphLaneHandle& VehicleLane, const bool bShouldYieldOnCrosswalk)
+			const auto& UpdateYieldTrackingStateForVehicleLane = [&MassTrafficSubsystem, &EntityHandle, &CrosswalkLaneInfo, &LaneLocationFragment](const FZoneGraphLaneHandle& VehicleLane, const bool bShouldYieldOnCrosswalk)
 			{
 				if (bShouldYieldOnCrosswalk)
 				{
 					// We should yield to this incoming vehicle lane.
 					// So, start tracking yield state data for the lane.
 					CrosswalkLaneInfo->TrackEntityOnCrosswalkYieldingToLane(EntityHandle, VehicleLane);
+
+					// Add this to the global view of all yields for this frame.
+					// The yield deadlock resolution processor will use this information to find and break any yield cycle deadlocks.
+					MassTrafficSubsystem.AddYieldInfo(EntityHandle, LaneLocationFragment.LaneHandle, VehicleLane);
 				}
 				else
 				{
@@ -226,49 +220,54 @@ void UMassTrafficCrowdYieldProcessor::Execute(FMassEntityManager& EntityManager,
 			};
 
 			bool bShouldYieldOnCrosswalk = false;
-			for (const FZoneGraphLaneHandle& IncomingVehicleLane : CrosswalkLaneInfo->IncomingVehicleLanes)
+
+			// Only run our yield logic, if our yield behavior isn't being overridden.  If it *is* being overridden, a deadlock is being prevented.
+			if (!MassTrafficSubsystem.IsEntityInLaneYieldOverrideMap(LaneLocationFragment.LaneHandle, EntityHandle))
 			{
-				const FZoneGraphTrafficLaneData* IncomingTrafficLaneData = MassTrafficSubsystem.GetTrafficLaneData(IncomingVehicleLane);
-                    				
-				if (!ensureMsgf(IncomingTrafficLaneData != nullptr, TEXT("Must get valid IncomingTrafficLaneData from IncomingVehicleLane in UMassTrafficCrowdYieldProcessor::Execute.  IncomingVehicleLane.Index: %d IncomingVehicleLane.DataHandle.Index: %d, IncomingVehicleLane.DataHandle.Generation: %d."), IncomingVehicleLane.Index, IncomingVehicleLane.DataHandle.Index, IncomingVehicleLane.DataHandle.Generation))
+				for (const FZoneGraphLaneHandle& IncomingVehicleLane : CrosswalkLaneInfo->IncomingVehicleLanes)
 				{
-					continue;
-				}
-				
-				const bool bShouldYieldOnCrosswalkToIncomingVehicleLane = ShouldYieldToIncomingVehicleLane(*IncomingTrafficLaneData, *IncomingTrafficLaneData);
-				UpdateYieldTrackingStateForVehicleLane(IncomingTrafficLaneData->LaneHandle, bShouldYieldOnCrosswalkToIncomingVehicleLane);
-
-				bShouldYieldOnCrosswalk |= bShouldYieldOnCrosswalkToIncomingVehicleLane;
-
-				for (const FZoneGraphTrafficLaneData* PredecessorTrafficLaneData : IncomingTrafficLaneData->PrevLanes)
-				{
-					if (PredecessorTrafficLaneData == nullptr)
+					const FZoneGraphTrafficLaneData* IncomingTrafficLaneData = MassTrafficSubsystem.GetTrafficLaneData(IncomingVehicleLane);
+                    					
+					if (!ensureMsgf(IncomingTrafficLaneData != nullptr, TEXT("Must get valid IncomingTrafficLaneData from IncomingVehicleLane in UMassTrafficCrowdYieldProcessor::Execute.  IncomingVehicleLane.Index: %d IncomingVehicleLane.DataHandle.Index: %d, IncomingVehicleLane.DataHandle.Generation: %d."), IncomingVehicleLane.Index, IncomingVehicleLane.DataHandle.Index, IncomingVehicleLane.DataHandle.Generation))
 					{
 						continue;
 					}
+					
+					const bool bShouldYieldOnCrosswalkToIncomingVehicleLane = ShouldYieldToIncomingVehicleLane(*IncomingTrafficLaneData, *IncomingTrafficLaneData);
+					UpdateYieldTrackingStateForVehicleLane(IncomingTrafficLaneData->LaneHandle, bShouldYieldOnCrosswalkToIncomingVehicleLane);
 
-					if (PredecessorTrafficLaneData->NumVehiclesOnLane <= 0)
+					bShouldYieldOnCrosswalk |= bShouldYieldOnCrosswalkToIncomingVehicleLane;
+
+					for (const FZoneGraphTrafficLaneData* PredecessorTrafficLaneData : IncomingTrafficLaneData->PrevLanes)
 					{
-						continue;
+						if (PredecessorTrafficLaneData == nullptr)
+						{
+							continue;
+						}
+
+						if (PredecessorTrafficLaneData->NumVehiclesOnLane <= 0)
+						{
+							continue;
+						}
+
+						if (!ensureMsgf(PredecessorTrafficLaneData->LeadVehicleNextLane.IsSet(),
+							TEXT("Since PredecessorTrafficLaneData has vehicles, required LeadVehicle properties must be set in UMassTrafficCrowdYieldProcessor::Execute.  PredecessorTrafficLaneData->LaneHandle.Index: %d PredecessorTrafficLaneData->LaneHandle.DataHandle.Index: %d PredecessorTrafficLaneData->LaneHandle.DataHandle.Generation: %d."), PredecessorTrafficLaneData->LaneHandle.Index, PredecessorTrafficLaneData->LaneHandle.DataHandle.Index, PredecessorTrafficLaneData->LaneHandle.DataHandle.Generation))
+						{
+							continue;
+						}
+
+						// We're only concerned if the lead vehicle on the Predecessor Lane
+						// will be heading into our Incoming Traffic Lane.
+						if (PredecessorTrafficLaneData->LeadVehicleNextLane.GetValue() != IncomingTrafficLaneData)
+						{
+							continue;
+						}
+
+						const bool bShouldYieldOnCrosswalkToPredecessorVehicleLane = ShouldYieldToIncomingVehicleLane(*PredecessorTrafficLaneData, *IncomingTrafficLaneData);
+						UpdateYieldTrackingStateForVehicleLane(PredecessorTrafficLaneData->LaneHandle, bShouldYieldOnCrosswalkToPredecessorVehicleLane);
+
+						bShouldYieldOnCrosswalk |= bShouldYieldOnCrosswalkToPredecessorVehicleLane;
 					}
-
-					if (!ensureMsgf(PredecessorTrafficLaneData->LeadVehicleNextLane.IsSet(),
-						TEXT("Since PredecessorTrafficLaneData has vehicles, required LeadVehicle properties must be set in UMassTrafficCrowdYieldProcessor::Execute.  PredecessorTrafficLaneData->LaneHandle.Index: %d PredecessorTrafficLaneData->LaneHandle.DataHandle.Index: %d PredecessorTrafficLaneData->LaneHandle.DataHandle.Generation: %d."), PredecessorTrafficLaneData->LaneHandle.Index, PredecessorTrafficLaneData->LaneHandle.DataHandle.Index, PredecessorTrafficLaneData->LaneHandle.DataHandle.Generation))
-					{
-						continue;
-					}
-
-					// We're only concerned if the lead vehicle on the Predecessor Lane
-					// will be heading into our Incoming Traffic Lane.
-					if (PredecessorTrafficLaneData->LeadVehicleNextLane.GetValue() != IncomingTrafficLaneData)
-					{
-						continue;
-					}
-
-					const bool bShouldYieldOnCrosswalkToPredecessorVehicleLane = ShouldYieldToIncomingVehicleLane(*PredecessorTrafficLaneData, *IncomingTrafficLaneData);
-					UpdateYieldTrackingStateForVehicleLane(PredecessorTrafficLaneData->LaneHandle, bShouldYieldOnCrosswalkToPredecessorVehicleLane);
-
-					bShouldYieldOnCrosswalk |= bShouldYieldOnCrosswalkToPredecessorVehicleLane;
 				}
 			}
 

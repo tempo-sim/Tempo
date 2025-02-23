@@ -186,6 +186,26 @@ FAutoConsoleVariableRef CMassTrafficDebugYieldBehavior(
 	ECVF_Cheat
 	);
 
+int32 GMassTrafficResolveYieldDeadlocks = 1;
+FAutoConsoleVariableRef CMassTrafficResolveYieldDeadlocks(
+	TEXT("MassTraffic.ResolveYieldDeadlocks"),
+	GMassTrafficResolveYieldDeadlocks,
+	TEXT("Resolve yield deadlocks.\n")
+	TEXT("0 = Off.\n")
+	TEXT("1 = Enable processor to resolve yield deadlocks.\n"),
+	ECVF_Cheat
+	);
+
+int32 GMassTrafficDebugYieldDeadlockResolution = 0;
+FAutoConsoleVariableRef CMassTrafficDebugYieldDeadlockResolution(
+	TEXT("MassTraffic.DebugYieldDeadlockResolution"),
+	GMassTrafficDebugYieldDeadlockResolution,
+	TEXT("MassTraffic debug mode for yield deadlock resolution.\n")
+	TEXT("0 = Off (default).\n")
+	TEXT("1 = Draw indicators for entities in yield cycles and on the yield override list.  Yield Cycle:  Magenta for pedestrians, Purple for vehicles.  Yield Overrides:  Cyan for pedestrians, Blue for vehicles.\n"),
+	ECVF_Cheat
+	);
+
 int32 GMassTrafficDebugOverseer = 0;
 FAutoConsoleVariableRef CMassTrafficDebugOverseer(
 	TEXT("MassTraffic.DebugOverseer"),

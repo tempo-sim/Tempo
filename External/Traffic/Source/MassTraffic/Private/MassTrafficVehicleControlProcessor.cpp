@@ -181,10 +181,11 @@ namespace
 	void ProcessYieldAtIntersectionLogic(UMassTrafficSubsystem& MassTrafficSubsystem, const UMassCrowdSubsystem& MassCrowdSubsystem, const FMassEntityManager& EntityManager, FMassTrafficVehicleControlFragment& VehicleControlFragment, const FMassZoneGraphLaneLocationFragment& LaneLocationFragment, const FAgentRadiusFragment& RadiusFragment, const FMassTrafficRandomFractionFragment& RandomFractionFragment, const FZoneGraphStorage& ZoneGraphStorage, TFunction<void()> PerformYieldActionFunc)
 	{
 		bool bShouldGiveOpportunityForTurningVehiclesToReactivelyYieldAtIntersection = false;
+		FZoneGraphLaneHandle YieldTargetLane;
 		int32 MergeYieldCaseIndex = INDEX_NONE;
-		const bool bShouldReactivelyYieldAtIntersection = UE::MassTraffic::ShouldPerformReactiveYieldAtIntersection(MassTrafficSubsystem, MassCrowdSubsystem, EntityManager, VehicleControlFragment, LaneLocationFragment, RadiusFragment, RandomFractionFragment, ZoneGraphStorage, bShouldGiveOpportunityForTurningVehiclesToReactivelyYieldAtIntersection, MergeYieldCaseIndex);
+		const bool bShouldReactivelyYieldAtIntersection = UE::MassTraffic::ShouldPerformReactiveYieldAtIntersection(MassTrafficSubsystem, MassCrowdSubsystem, EntityManager, VehicleControlFragment, LaneLocationFragment, RadiusFragment, RandomFractionFragment, ZoneGraphStorage, bShouldGiveOpportunityForTurningVehiclesToReactivelyYieldAtIntersection, YieldTargetLane, MergeYieldCaseIndex);
 		
-		UE::MassTraffic::UpdateYieldAtIntersectionState(MassTrafficSubsystem, VehicleControlFragment, LaneLocationFragment.LaneHandle, bShouldReactivelyYieldAtIntersection, bShouldGiveOpportunityForTurningVehiclesToReactivelyYieldAtIntersection);
+		UE::MassTraffic::UpdateYieldAtIntersectionState(MassTrafficSubsystem, VehicleControlFragment, LaneLocationFragment.LaneHandle, YieldTargetLane, bShouldReactivelyYieldAtIntersection, bShouldGiveOpportunityForTurningVehiclesToReactivelyYieldAtIntersection);
 
 		// If we're reactively yielding, then we should always perform our yield action.
 		if (bShouldReactivelyYieldAtIntersection)

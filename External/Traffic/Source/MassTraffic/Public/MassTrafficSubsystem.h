@@ -279,6 +279,20 @@ public:
 	bool TryGetLaneIntersectionInfo(const FZoneGraphLaneHandle& QueryLane, const FZoneGraphLaneHandle& DestLane, FMassTrafficLaneIntersectionInfo& OutLaneIntersectionInfo) const;
 	void ClearLaneIntersectionInfo();
 	
+	void AddYieldInfo(const FMassEntityHandle& YieldingEntity, const FZoneGraphLaneHandle& YieldingLane, const FZoneGraphLaneHandle& YieldTargetLane);
+	void ClearYieldInfo();
+
+	const TMap<FZoneGraphLaneHandle, TSet<FZoneGraphLaneHandle>>& GetLaneYieldMap() const;
+	const TMap<FZoneGraphLaneHandle, TSet<FMassEntityHandle>>& GetYieldingEntitiesMap() const;
+
+	void AddEntityToLaneYieldOverrideMap(const FZoneGraphLaneHandle& LaneHandle, const FMassEntityHandle& YieldOverrideEntity);
+	void ClearYieldOverrideMap();
+	
+	bool IsEntityInLaneYieldOverrideMap(const FZoneGraphLaneHandle& LaneHandle, const FMassEntityHandle& EntityHandle) const;
+	
+	const TMap<FZoneGraphLaneHandle, TSet<FMassEntityHandle>>& GetLaneYieldOverrideMap() const;
+	TMap<FZoneGraphLaneHandle, TSet<FMassEntityHandle>>& GetMutableLaneYieldOverrideMap();
+	
 protected:
 	
 	friend class UMassTrafficFieldComponent;
@@ -352,6 +366,25 @@ protected:
 	 * Then, you get pre-computed information regarding the distances along the source lane
 	 * where it enters and exits the destination lane. */
 	TMap<FZoneGraphLaneHandle, TMap<FZoneGraphLaneHandle, FMassTrafficLaneIntersectionInfo>> LaneIntersectionInfoMap;
+
+	/** Map from a source lane to the aggregate yield target lanes
+	 * to which the Entities on the source lane are yielding.
+	 * Note:  This is cleared at the beginning of every frame, then rebuilt,
+	 * and finally evaluated after the vehicle and pedestrian yield processing
+	 * has run in the UMassTrafficYieldDeadlockResolutionProcessor. */
+	TMap<FZoneGraphLaneHandle, TSet<FZoneGraphLaneHandle>> LaneYieldMap;
+
+	/** Map from a lane to all the Entities yielding on that lane.
+	 * Note:  This is cleared at the beginning of every frame, then rebuilt,
+	 * and finally evaluated after the vehicle and pedestrian yield processing
+	 * has run in the UMassTrafficYieldDeadlockResolutionProcessor. */
+	TMap<FZoneGraphLaneHandle, TSet<FMassEntityHandle>> YieldingEntitiesMap;
+
+	/** Map from a lane, which was involved in a yield cycle, to all the Entities that were yielding
+	 * on the lane at the time the UMassTrafficYieldDeadlockResolutionProcessor gave them permission
+	 * to ignore their yield logic until they move to a new lane, in order to prevent a yield cycle deadlock.
+	 * Note:  Entities will remain in this map until they've managed to move to a new lane. */
+	TMap<FZoneGraphLaneHandle, TSet<FMassEntityHandle>> LaneYieldOverrideMap;
 };
 
 template<>
