@@ -66,7 +66,7 @@ pip install grpcio==1.62.2 --quiet --retries 0 # One --quiet to suppress warning
 set -e
 
 # Finally build and install the Tempo API (and its dependencies) to the virtual environment.
-if (pip list | grep tempo) &> /dev/null; then
+if pip show tempo &> /dev/null; then
   # Uninstall tempo if a previous version was installed
   pip uninstall tempo --yes --quiet # Uninstall first to remove any stale files
 fi
