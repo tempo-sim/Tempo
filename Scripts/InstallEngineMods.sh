@@ -17,9 +17,24 @@ if [ ! -f "$UNREAL_ENGINE_PATH/Engine/Source/Programs/UnrealBuildTool/UnrealBuil
   exit 1
 fi
 
+# Check for jq
+if ! which jq &> /dev/null; then
+  echo "Couldn't find jq"
+  if [[ "$OSTYPE" = "msys" ]]; then
+    echo "Install (on Windows): curl -L -o /usr/bin/jq.exe https://github.com/stedolan/jq/releases/latest/download/jq-win64.exe)"
+  elif [[ "$OSTYPE" = "darwin"* ]]; then
+    echo "Install (on Mac): brew install jq"
+  elif [[ "$OSTYPE" = "linux-gnu"* ]]; then
+    echo "Install (on Linux): sudo apt-get install jq"
+  fi
+  exit 1
+fi
+
 UNREAL_ENGINE_PATH="${UNREAL_ENGINE_PATH//\\//}"
 
 cd "$UNREAL_ENGINE_PATH"
+
+PATCH_RECORD_PATH="$UNREAL_ENGINE_PATH/TempoMods"
 
 # Find dotnet
 if [[ "$OSTYPE" = "msys" ]]; then
@@ -42,96 +57,71 @@ if [ -f "$UNREAL_ENGINE_PATH/Engine/Intermediate/Build/BuildRules/UE5RulesManife
   VERSION="${VERSION_WITH_HOTFIX%.*}"
 fi
 
-MOD_ADD() {
-  local TYPE=$1
-  local ROOT=$2
-  local MOD=$3
-  local SRC="$ENGINE_MODS_DIR/$ROOT/$MOD"
-  local MOD_NO_VERSION="${MOD%.*}"
-  local DEST="$UNREAL_ENGINE_PATH/$ROOT/$MOD_NO_VERSION"
-  # Copy if missing or stale
-  if [[ ! -f "$DEST" || $(diff "$SRC" "$DEST" | wc -l) -gt 0 ]]; then
-    echo "Installing $MOD"
+APPLY_ADDS() {
+  local ROOT=$1
+  local TEMP=$2
+  local ADDS=("${@:3}")
+  for ADD in "${ADDS[@]}"; do
+    local SRC="$ENGINE_MODS_DIR/$ROOT/$ADD"
+    local ADD_NO_VERSION="${ADD%.*}"
+    local DEST="$TEMP/$ROOT/$ADD_NO_VERSION"
+    echo "Installing $ADD"
     mkdir -p "$(dirname "$DEST")"
     cp "$SRC" "$DEST"
-    return 1
-  fi
-  return 0
+  done
 }
 
-MOD_PATCH() {
-  local TYPE=$1
-  local ROOT=$2
+REVERT_ADDS() {
+  local ROOT=$1
+  local ADDS=("${@:2}")
+  for ADD in "${ADDS[@]}"; do
+    local SRC="$ENGINE_MODS_DIR/$ROOT/$ADD"
+    local ADD_NO_VERSION="${ADD%.*}"
+    local DEST="$UNREAL_ENGINE_PATH/$ROOT/$ADD_NO_VERSION"
+    rm -f "$DEST"
+  done
+}
+
+APPLY_PATCHES() {
+  local ROOT=$1
+  local TEMP=$2
   local PATCHES=("${@:3}")
   local DEST
-  DEST="$UNREAL_ENGINE_PATH/$ROOT"
+  DEST="$TEMP/$ROOT"
   
   if [ ! -d "$DEST" ]; then
     echo "Not patching $DEST since it was not found in the expected location"
-    return 0
+    exit 1
   fi
 
-  # Try to revert any previously-applied patch or patches
-  cd "$DEST"
-  if [ -f "$DEST/applied.patch" ]; then
-    if ! patch -R -p0 -s -f --ignore-whitespace --dry-run <"$DEST/applied.patch" >/dev/null 2>&1; then
-      echo "Failed to revert existing patch. Recommend verifying your Unreal Engine installation."
-      exit 1
-    fi
-    patch -R -p0 -s -f --ignore-whitespace <"$DEST/applied.patch" >/dev/null 2>&1
-  else
-    echo "No patch apply record found. Falling back on reverting known patches one by one."
-    for ((i=${#PATCHES[@]}-1; i>-1; i--)); do
-      local PATCH="$ENGINE_MODS_DIR/$ROOT/${PATCHES[i]//\'/}"
-      if patch -R -p0 -s -f --ignore-whitespace --dry-run <"$PATCH" >/dev/null 2>&1; then
-        patch -R -p0 -s -f --ignore-whitespace <"$PATCH" >/dev/null 2>&1
-        echo "Reverted $PATCH"
-      fi
-    done
-  fi
-
-  # Reset the applied patch record
-  rm -f "$DEST/applied.patch"
-  touch "$DEST/applied.patch"
-
-  # Apply all patches, recording them as we go
   for ((i=0; i<${#PATCHES[@]}; i++)); do
     local PATCH="$ENGINE_MODS_DIR/$ROOT/${PATCHES[i]//\'/}"
     echo "Applying Patch $(basename "$PATCH")"
-    if ! patch -p0  --ignore-whitespace <"$PATCH" >/dev/null 2>&1; then
+    if ! patch -p0  --ignore-whitespace <"$PATCH" &>/dev/null; then
       echo "Failed to apply patch: $PATCH"
       exit 1
     fi
-    cat "$PATCH" >> "$DEST/applied.patch"
   done
-
-  if [ -f "$DEST/built.patch" ]; then
-    if cmp --silent -- "$DEST/applied.patch" "$DEST/built.patch" >/dev/null 2>&1; then
-      echo "$ROOT already up to date"
-      return 0
-    fi
-  fi
-
-  return 1
 }
 
-MOD_REMOVE() {
-  local TYPE=$1
-  local ROOT=$2
-  local MOD=$3
-  local DEST="$UNREAL_ENGINE_PATH/$ROOT/$MOD"
-  if [ -f "$DEST" ]; then
-    # Confirm with the user before removing
-    read -r -p "Stale $TYPE engine mod $DEST found. Remove it? (Y/N) " DO_REMOVE
-    if [[ "$DO_REMOVE" =~ [Yy] ]]; then
-      echo "Removing stale mod $DEST"
-      rm -rf "$DEST"
-      return 1      
+REVERT_PATCHES() {
+    local ROOT=$1
+    local PATCHES=("${@:2}")
+    local DEST
+    DEST="$UNREAL_ENGINE_PATH/$ROOT"
+
+    if [ ! -d "$DEST" ]; then
+      echo "Not reverting $DEST since it was not found in the expected location"
+      return
     fi
-    echo "User elected not to remove $DEST."
-    exit 1
-  fi
-  return 0
+
+    for ((i=${#PATCHES[@]}-1; i>-1; i--)); do
+      local PATCH="$ENGINE_MODS_DIR/$ROOT/${PATCHES[i]//\'/}"
+      if patch -R -p0 -s -f --ignore-whitespace --dry-run <"$PATCH" &>/dev/null; then
+        patch -R -p0 -s -f --ignore-whitespace <"$PATCH" &>/dev/null
+        echo "Reverted $PATCH"
+      fi
+    done
 }
 
 REBUILD_PLUGIN() {
@@ -177,54 +167,73 @@ REBUILD_UBT() {
   eval "$DOTNET" build "./Engine/Source/Programs/AutomationTool/AutomationTool.csproj" -c Development
 }
 
-MODS=($(jq -r --arg version "$VERSION" -c '.[$version][]' "$TEMPO_ROOT/EngineMods/EngineMods.json"))
+if ! MODS=($(jq -r --arg version "$VERSION" -c '.[$version][]' "$TEMPO_ROOT/EngineMods/EngineMods.json" &>/dev/null)); then
+  echo "Unsupported Unreal Engine version: $VERSION"
+  SUPPORTED_VERSIONS=$(jq -r 'keys | join(", ")' "$TEMPO_ROOT/EngineMods/EngineMods.json")
+  echo "Supported versions are: $SUPPORTED_VERSIONS"
+  exit 1
+fi
+
 for MOD in "${MODS[@]}"; do
   TYPE=$(jq -r '.Type' <<< "$MOD")
   ROOT=$(jq -r '.Root' <<< "$MOD")
   ADDS=$(jq -r '.Add // [] | join(" ")' <<< "$MOD" )
   PATCHES=$(jq -r '.Patch // [] | join(" ")' <<< "$MOD")
-  REMOVES=$(jq -r '.Remove // [] | join(" ")' <<< "$MOD")
-  
+
   # Remove any trailing carriage returns
   TYPE="${TYPE%$'\r'}"
   ROOT="${ROOT%$'\r'}"
   ADDS="${ADDS%$'\r'}"
   PATCHES="${PATCHES%$'\r'}"
-  REMOVES="${REMOVES%$'\r'}"
-
-  NEEDS_REBUILD='N'
 
   read -ra ADDS <<< "$ADDS"
-  for ADD in "${ADDS[@]}"; do
-    if ! MOD_ADD "$TYPE" "$ROOT" "$ADD"; then
-      NEEDS_REBUILD='Y'
-    fi
-  done
-
   read -ra PATCHES <<< "$PATCHES"
-  if ! MOD_PATCH "$TYPE" "$ROOT" "${PATCHES[@]}"; then
-    NEEDS_REBUILD='Y'
-  fi
 
-  read -ra REMOVES <<< "$REMOVES"
-  for REMOVE in "${REMOVES[@]}"; do
-    if ! MOD_REMOVE "$TYPE" "$ROOT" "$REMOVE"; then
-      NEEDS_REBUILD='Y'
-    fi
-  done
-  
-  if [ "$NEEDS_REBUILD" = 'Y' ] || [ "${*: -1}" = "-force" ]; then
-    rm -rf "$UNREAL_ENGINE_PATH/$ROOT/built.patch"
-    if [ "$TYPE" = "Plugin" ]; then
-      echo "Rebuilding plugin $ROOT with Tempo mods"
-      REBUILD_PLUGIN "$ROOT"
-    elif [ "$TYPE" = "UnrealBuildTool" ]; then
-      echo "Rebuilding UnrealBuildTool with Tempo mods"
-      REBUILD_UBT
-    else
-      echo "Unhandled mod type: $TYPE"
+  if [ -f "$PATCH_RECORD_PATH/$ROOT/mods_applied.patch" ]; then
+    if ! patch -R -p0 -s -f --ignore-whitespace --dry-run <"$PATCH_RECORD_PATH/$ROOT/mods_applied.patch" &>/dev/null; then
+      echo "Failed to revert applied mods for $ROOT Recommend verifying your Unreal Engine installation."
       exit 1
     fi
-    cp -r "$UNREAL_ENGINE_PATH/$ROOT/applied.patch" "$UNREAL_ENGINE_PATH/$ROOT/built.patch"
+    patch -R -p0 -s -f --ignore-whitespace <"$PATCH_RECORD_PATH/$ROOT/mods_applied.patch" &>/dev/null
+  else
+    echo "No applied mods record found for $ROOT. Falling back on reverting known mods."
+    REVERT_ADDS "$ROOT" "${ADDS[@]}"
+    REVERT_PATCHES "$ROOT" "${PATCHES[@]}"
   fi
+
+  # Reset the applied mods record
+  rm -f "$PATCH_RECORD_PATH/$ROOT/mods_applied.patch"
+  touch "$PATCH_RECORD_PATH/$ROOT/mods_applied.patch"
+
+  # Make a copy (excluding Binaries and Intermediate directories) for comparison after
+  TEMP=$(mktmp -d)
+  cd "$UNREAL_ENGINE_PATH/$ROOT"
+  find . -not -name Binaries -not -name Intermediate -maxdepth 1 -exec cp {} "$TEMP" \;
+
+  APPLY_ADDS $ROOT" "$TEMP" "${ADDS[@]}"
+  APPLY_PATCHES "$ROOT" "$TEMP" "${PATCHES[@]}"
+
+  diff -urN --strip-trailing-cr ./* "$TEMP/$ROOT/*" > "$UNREAL_ENGINE_PATH/$ROOT/mods_applied.patch" --exclude Binaries --exclude Intermediate
+  find . -not -name Binaries -not -name Intermediate -maxdepth 1 -exec rm -rf {} \;
+  cp -r "$TEMP"
+
+  if [ -f "$DEST/mods_built.patch" ] && [ ! "${*: -1}" = "-force" ]; then
+    if cmp --silent -- "$PATCH_RECORD_PATH/$ROOT/mods_applied.patch" "$PATCH_RECORD_PATH/$ROOT/mods_built.patch" &>/dev/null; then
+      echo "$ROOT already up to date"
+      continue
+    fi
+  fi
+
+  rm -rf "$PATCH_RECORD_PATH/$ROOT/mods_built.patch"
+  if [ "$TYPE" = "Plugin" ]; then
+    echo "Rebuilding plugin $ROOT with Tempo mods"
+    REBUILD_PLUGIN "$ROOT"
+  elif [ "$TYPE" = "UnrealBuildTool" ]; then
+    echo "Rebuilding UnrealBuildTool with Tempo mods"
+    REBUILD_UBT
+  else
+    echo "Unhandled mod type: $TYPE"
+    exit 1
+  fi
+  cp -r "$PATCH_RECORD_PATH/$ROOT/mods_applied.patch" "$PATCH_RECORD_PATH/$ROOT/mods_built.patch"
 done
