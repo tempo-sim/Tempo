@@ -47,7 +47,7 @@ protected:
 	AActor* GetConnectedRoadActor(const AActor& IntersectionQueryActor, int32 ConnectionIndex) const;
 	
 	// Crosswalk functions
-	bool TryGenerateAndRegisterZoneShapeComponentsForCrosswalksAtIntersections(AActor& IntersectionQueryActor) const;
+	bool TryGenerateAndRegisterZoneShapeComponentsForCrosswalks(AActor& IntersectionQueryActor) const;
 	bool TryGenerateAndRegisterZoneShapeComponentsForCrosswalkIntersectionConnectorSegments(AActor& IntersectionQueryActor) const;
 	bool TryGenerateAndRegisterZoneShapeComponentsForCrosswalkIntersections(AActor& IntersectionQueryActor) const;
 	bool TryCreateZoneShapePointForCrosswalkIntersectionEntranceLocation(const AActor& IntersectionQueryActor, int32 CrosswalkIntersectionIndex, int32 CrosswalkIntersectionConnectionIndex, UZoneShapeComponent& ZoneShapeComponent, FZoneShapePoint& OutZoneShapePoint) const;
