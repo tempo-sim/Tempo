@@ -190,11 +190,11 @@ jobs:
       uses: actions/cache/restore@v4
       with:
         path: |
-          .engine-mods-cache/Engine/Plugins/Runtime/ZoneGraph
-          .engine-mods-cache/Engine/Plugins/AI/MassCrowd
-          .engine-mods-cache/Engine/Source/Programs/UnrealBuildTool
-          .engine-mods-cache/Engine/Binaries/DotNET/UnrealBuildTool
-          .engine-mods-cache/Engine/Binaries/DotNET/AutomationTool
+          .engine-mods-cache/Engine/Plugins/Runtime/ZoneGraph/**
+          .engine-mods-cache/Engine/Plugins/AI/MassCrowd/**
+          .engine-mods-cache/Engine/Source/Programs/UnrealBuildTool/**
+          .engine-mods-cache/Engine/Binaries/DotNET/UnrealBuildTool/**
+          .engine-mods-cache/Engine/Binaries/DotNET/AutomationTool/**
         key: tempo-engine-mods-${{ env.UNREAL_VERSION }}-${{ hashFiles(format('{0}/EngineMods/**', inputs.tempo_root)) }}
     - name: Fixup Source File Modification Timestamps and Permissions
       run: |
