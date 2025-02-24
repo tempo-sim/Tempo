@@ -62,7 +62,7 @@ MOD_ADD() {
 MOD_PATCH() {
   local TYPE=$1
   local ROOT=$2
-  local FORWARD_PATCHES=("${@:3}")
+  local PATCHES=("${@:3}")
   local DEST
   DEST="$UNREAL_ENGINE_PATH/$ROOT"
   
@@ -71,38 +71,48 @@ MOD_PATCH() {
     return 0
   fi
 
-  local PATCHES_APPLIED=0
-
-  # Find the last applied patch (if any)
+  # Try to revert any previously-applied patch or patches
   cd "$DEST"
-  local LAST_APPLIED_INDEX=-1
-  for ((i=${#FORWARD_PATCHES[@]}-1; i>-1; i--)); do
-    local PATCH="$ENGINE_MODS_DIR/$ROOT/${FORWARD_PATCHES[i]//\'/}"
-    # To check if the patch has been applied, check if it can be *reversed* (if not, it hasn't been applied).
-    # https://unix.stackexchange.com/questions/55780/check-if-a-file-or-folder-has-been-patched-already
-    if patch -R -p0 -s -f --ignore-whitespace --dry-run <"$PATCH" >/dev/null 2>&1; then
-      echo "Patch $(basename "$PATCH") already applied"
-      LAST_APPLIED_INDEX="$i"
-      break
+  if [ -f "$DEST/applied.patch" ]; then
+    if ! patch -R -p0 -s -f --ignore-whitespace --dry-run <"$DEST/applied.patch" >/dev/null 2>&1; then
+      echo "Failed to revert existing patch. Recommend verifying your Unreal Engine installation."
+      exit 1
     fi
-  done
+    patch -R -p0 -s -f --ignore-whitespace <"$DEST/applied.patch" >/dev/null 2>&1
+  else
+    echo "No patch apply record found. Falling back on reverting known patches one by one."
+    for ((i=${#PATCHES[@]}-1; i>-1; i--)); do
+      local PATCH="$ENGINE_MODS_DIR/$ROOT/${PATCHES[i]//\'/}"
+      if patch -R -p0 -s -f --ignore-whitespace --dry-run <"$PATCH" >/dev/null 2>&1; then
+        patch -R -p0 -s -f --ignore-whitespace <"$PATCH" >/dev/null 2>&1
+        echo "Reverted $PATCH"
+      fi
+    done
+  fi
 
-  # Apply all patches after the last applied one
-  for ((i=LAST_APPLIED_INDEX + 1; i<${#FORWARD_PATCHES[@]}; i++)); do
-    local PATCH="$ENGINE_MODS_DIR/$ROOT/${FORWARD_PATCHES[i]//\'/}"
+  # Reset the applied patch record
+  rm -f "$DEST/applied.patch"
+  touch "$DEST/applied.patch"
+
+  # Apply all patches, recording them as we go
+  for ((i=0; i<${#PATCHES[@]}; i++)); do
+    local PATCH="$ENGINE_MODS_DIR/$ROOT/${PATCHES[i]//\'/}"
     echo "Applying Patch $(basename "$PATCH")"
     if ! patch -p0  --ignore-whitespace <"$PATCH" >/dev/null 2>&1; then
       echo "Failed to apply patch: $PATCH"
       exit 1
     fi
-    PATCHES_APPLIED=$((PATCHES_APPLIED + 1))
+    cat "$PATCH" >> "$DEST/applied.patch"
   done
-  
-  if [ $PATCHES_APPLIED -gt 0 ]; then
-    return 1
+
+  if [ -f "$DEST/built.patch" ]; then
+    if cmp --silent -- "$DEST/applied.patch" "$DEST/built.patch" >/dev/null 2>&1; then
+      echo "$ROOT already up to date"
+      return 0
+    fi
   fi
 
-  return 0
+  return 1
 }
 
 MOD_REMOVE() {
@@ -128,7 +138,7 @@ REBUILD_PLUGIN() {
   ROOT="$1"
   PLUGIN_NAME="${ROOT##*/}"
   PLUGIN_DIR="$UNREAL_ENGINE_PATH/$ROOT"
-  
+
   if [ ! -d "$PLUGIN_DIR" ]; then
     echo "Plugin $PLUGIN_DIR was not found in the expected location."
     exit 1
@@ -204,6 +214,7 @@ for MOD in "${MODS[@]}"; do
   done
   
   if [ "$NEEDS_REBUILD" = 'Y' ] || [ "${*: -1}" = "-force" ]; then
+    rm -rf "$UNREAL_ENGINE_PATH/$ROOT/built.patch"
     if [ "$TYPE" = "Plugin" ]; then
       echo "Rebuilding plugin $ROOT with Tempo mods"
       REBUILD_PLUGIN "$ROOT"
@@ -214,5 +225,6 @@ for MOD in "${MODS[@]}"; do
       echo "Unhandled mod type: $TYPE"
       exit 1
     fi
+    cp -r "$UNREAL_ENGINE_PATH/$ROOT/applied.patch" "$UNREAL_ENGINE_PATH/$ROOT/built.patch"
   fi
 done
