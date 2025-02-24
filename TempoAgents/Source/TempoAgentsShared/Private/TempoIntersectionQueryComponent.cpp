@@ -8,6 +8,7 @@
 #include "TempoCrosswalkInterface.h"
 #include "TempoIntersectionInterface.h"
 #include "TempoRoadModuleInterface.h"
+#include "TempoZoneGraphUtils.h"
 
 #include "ZoneGraphSettings.h"
 
@@ -642,7 +643,7 @@ bool UTempoIntersectionQueryComponent::TryGenerateCrosswalkRoadModuleMap(const A
 		return false;
 	}
 
-	const FZoneGraphTagFilter CrosswalkRoadModuleTagFilter = GenerateTagFilter(CrosswalkRoadModuleAnyTags, CrosswalkRoadModuleAllTags, CrosswalkRoadModuleNotTags);
+	const FZoneGraphTagFilter CrosswalkRoadModuleTagFilter = UTempoZoneGraphUtils::GenerateTagFilter(this, CrosswalkRoadModuleAnyTags, CrosswalkRoadModuleAllTags, CrosswalkRoadModuleNotTags);
 
 	const auto& GetCrosswalkRoadModules = [this, &IntersectionQueryActor, &CrosswalkRoadModuleTagFilter]()
 	{
@@ -665,7 +666,7 @@ bool UTempoIntersectionQueryComponent::TryGenerateCrosswalkRoadModuleMap(const A
 			{
 				const TArray<FName>& RoadModuleLaneTags = ITempoRoadModuleInterface::Execute_GetTempoRoadModuleLaneTags(ConnectedRoadModule, RoadModuleLaneIndex);
 
-				const FZoneGraphTagMask& RoadModuleLaneTagMask = GenerateTagMaskFromTagNames(RoadModuleLaneTags);
+				const FZoneGraphTagMask& RoadModuleLaneTagMask = UTempoZoneGraphUtils::GenerateTagMaskFromTagNames(this, RoadModuleLaneTags);
 
 				// Is the road module a crosswalk (according to tags)?
 				if (CrosswalkRoadModuleTagFilter.Pass(RoadModuleLaneTagMask))
@@ -1812,36 +1813,7 @@ FZoneGraphTagFilter UTempoIntersectionQueryComponent::GetLaneConnectionTagFilter
 	const TArray<FName>& LaneConnectionAllTagNames = UTempoCoreUtils::CallBlueprintFunction(SourceConnectionActor, ITempoRoadInterface::Execute_GetTempoLaneConnectionAllTags, SourceLaneConnectionInfo.LaneIndex);
 	const TArray<FName>& LaneConnectionNotTagNames = UTempoCoreUtils::CallBlueprintFunction(SourceConnectionActor, ITempoRoadInterface::Execute_GetTempoLaneConnectionNotTags, SourceLaneConnectionInfo.LaneIndex);
 
-	return GenerateTagFilter(LaneConnectionAnyTagNames, LaneConnectionAllTagNames, LaneConnectionNotTagNames);
-}
-
-FZoneGraphTagFilter UTempoIntersectionQueryComponent::GenerateTagFilter(const TArray<FName>& AnyTags, const TArray<FName>& AllTags, const TArray<FName>& NotTags) const
-{
-	const FZoneGraphTagMask AnyTagsMask = GenerateTagMaskFromTagNames(AnyTags);
-	const FZoneGraphTagMask AllTagsMask = GenerateTagMaskFromTagNames(AllTags);
-	const FZoneGraphTagMask NotTagsMask = GenerateTagMaskFromTagNames(NotTags);
-
-	return FZoneGraphTagFilter{AnyTagsMask, AllTagsMask, NotTagsMask};
-}
-
-FZoneGraphTagMask UTempoIntersectionQueryComponent::GenerateTagMaskFromTagNames(const TArray<FName>& TagNames) const
-{
-	const UZoneGraphSubsystem* ZoneGraphSubsystem = UWorld::GetSubsystem<UZoneGraphSubsystem>(GetWorld());
-	if (ZoneGraphSubsystem == nullptr)
-	{
-		UE_LOG(LogTempoAgentsShared, Error, TEXT("Lane Filtering - GenerateTagMaskFromTagNames - Can't access ZoneGraphSubsystem."));
-		return FZoneGraphTagMask::None;
-	}
-
-	FZoneGraphTagMask ZoneGraphTagMask;
-	
-	for (const auto& TagName : TagNames)
-	{
-		FZoneGraphTag Tag = ZoneGraphSubsystem->GetTagByName(TagName);
-		ZoneGraphTagMask.Add(Tag);
-	}
-
-	return ZoneGraphTagMask;
+	return UTempoZoneGraphUtils::GenerateTagFilter(this, LaneConnectionAnyTagNames, LaneConnectionAllTagNames, LaneConnectionNotTagNames);
 }
 
 bool UTempoIntersectionQueryComponent::TryGetMinLaneIndexInLaneConnections(const TArray<FTempoLaneConnectionInfo>& LaneConnectionInfos, int32& OutMinLaneIndex) const
