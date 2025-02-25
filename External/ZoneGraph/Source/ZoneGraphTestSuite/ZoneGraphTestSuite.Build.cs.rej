@@ -1,0 +1,7 @@
+--- Source/ZoneGraphTestSuite/ZoneGraphTestSuite.Build.cs	2024-09-26 22:04:46
++++ /Users/pete/TempoUnrealFestDemo/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraphTestSuite/ZoneGraphTestSuite.Build.cs	2024-09-17 17:52:05
+@@ -39,4 +39,4 @@
+ 			}
+ 		}
+ 	}
+-}+}

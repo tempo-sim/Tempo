@@ -1,6 +1,38 @@
 --- Source/ZoneGraph/Private/ZoneGraphBuilder.cpp	2024-09-26 22:04:48
 +++ /Users/pete/TempoUnrealFestDemo/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Private/ZoneGraphBuilder.cpp	2024-09-17 17:52:05
-@@ -502,7 +504,7 @@
+@@ -1,11 +1,10 @@
+ // Copyright Epic Games, Inc. All Rights Reserved.
+ 
+ #include "ZoneGraphBuilder.h"
++
+ #include "ZoneGraphTypes.h"
+ #include "ZoneGraphDelegates.h"
+ #include "ZoneGraphData.h"
+-#include "ZoneShapeComponent.h"
+-#include "ZoneShapeUtilities.h"
+ #include "ZoneGraphSettings.h"
+ 
+ namespace UE::ZoneGraph::Internal
+@@ -312,6 +311,9 @@
+ void FZoneGraphBuilder::BuildSingleShape(const UZoneShapeComponent& ShapeComp, const FMatrix& LocalToWorld, FZoneGraphStorage& OutZoneStorage)
+ {
+ 	TArray<FZoneShapeLaneInternalLink> InternalLinks;
++
++	// Const cast is intentional.  Need to update connected shapes before running through the build pathway.
++	const_cast<UZoneShapeComponent&>(ShapeComp).UpdateConnectedShapes();
+ 	AppendShapeToZoneStorage(ShapeComp, LocalToWorld, OutZoneStorage, InternalLinks);
+ 	ConnectLanes(InternalLinks, OutZoneStorage);
+ }
+@@ -437,7 +439,7 @@
+ 			}
+ 		}
+ 
+-		UE::ZoneShape::Utilities::TessellatePolygonShape(AdjustedPoints, ShapeComp.GetPolygonRoutingType(), PolyLaneProfiles, ShapeComp.GetTags(), LocalToWorld, OutZoneStorage, OutInternalLinks);
++		UE::ZoneShape::Utilities::TessellatePolygonShape(ShapeComp, *this, AdjustedPoints, PolyLaneProfiles, LocalToWorld, OutZoneStorage, OutInternalLinks);
+ 	}
+ 	else
+ 	{
+@@ -500,7 +502,7 @@
  	const uint32 NewHash = CalculateCombinedShapeHash(ZoneGraphData);
  	ZoneGraphData.SetCombinedShapeHash(NewHash);
  

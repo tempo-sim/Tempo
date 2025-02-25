@@ -968,6 +968,29 @@ struct ZONEGRAPH_API FZoneGraphLaneRoutingRule
 	int32 ConnectionRestrictions = 0;
 };
 
+UENUM(BlueprintType)
+enum class EZoneGraphTurnType : uint8
+{
+	Right,
+	Left,
+	NoTurn,
+};
+
+USTRUCT()
+struct ZONEGRAPH_API FZoneGraphCompatibleTags
+{
+	GENERATED_BODY()
+
+	UPROPERTY(Category = CompatibleTags, EditAnywhere)
+	FZoneGraphTag SourceTag;
+
+	UPROPERTY(Category = CompatibleTags, EditAnywhere)
+	FZoneGraphTag DestTag;
+
+	UPROPERTY(Category = CompatibleTags, EditAnywhere)
+	TSet<EZoneGraphTurnType> CompatibleForTurnTypes;
+};
+
 USTRUCT()
 struct ZONEGRAPH_API FZoneGraphBuildSettings
 {
@@ -1004,6 +1027,22 @@ struct ZONEGRAPH_API FZoneGraphBuildSettings
 	/** Routing rules applied to polygon shapes */
 	UPROPERTY(Category = Lanes, EditAnywhere)
 	TArray<FZoneGraphLaneRoutingRule> PolygonRoutingRules;
+
+	/** Tags which should be connected for certain turn types even when they are not the same. */
+	UPROPERTY(Category = Lanes, EditAnywhere)
+	TArray<FZoneGraphCompatibleTags> CompatibleTags;
+
+	/** Whether to remove overlapping lane connections. */
+	UPROPERTY(Category = Lanes, EditAnywhere)
+	bool bRemoveOverlap = true;
+
+	/** Whether to remove lane connections when another already has the same destination. */
+	UPROPERTY(Category = Lanes, EditAnywhere)
+	bool bRemoveSameDestination = true;
+
+	/** Whether to fill empty destination connections if possible. */
+	UPROPERTY(Category = Lanes, EditAnywhere)
+	bool bFillEmptyDestination = true;
 
 	/** Max distance between two shape points for them to be snapped together. */
 	UPROPERTY(Category = PointSnapping, EditAnywhere)

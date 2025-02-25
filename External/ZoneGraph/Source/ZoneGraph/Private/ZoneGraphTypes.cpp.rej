@@ -1,0 +1,32 @@
+--- Source/ZoneGraph/Private/ZoneGraphTypes.cpp	2024-09-26 22:04:48
++++ /Users/pete/TempoUnrealFestDemo/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Private/ZoneGraphTypes.cpp	2024-09-17 17:52:05
+@@ -135,6 +135,29 @@
+ 	}
+ }
+ 
++bool FZoneLaneProfile::IsValid(const bool bMustHaveName) const
++{
++	if (bMustHaveName && Name == NAME_None)
++	{
++		return false;
++	}
++		
++	if (!ID.IsValid())
++	{
++		return false;
++	}
++		
++	for (const FZoneLaneDesc& Lane : Lanes)
++	{
++		if (Lane.Width <= 0.0f)
++		{
++			return false;
++		}
++	}
++
++	return true;
++}
++
+ float FZoneGraphBuildSettings::GetLaneTessellationTolerance(const FZoneGraphTagMask LaneTags) const
+ {
+ 	float Tolerance = CommonTessellationTolerance;

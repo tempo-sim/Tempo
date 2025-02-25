@@ -1,0 +1,10 @@
+--- Source/ZoneGraph/Public/ZoneShapeComponent.h	2024-09-26 22:04:46
++++ /Users/pete/TempoUnrealFestDemo/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Public/ZoneShapeComponent.h	2024-09-17 17:52:05
+@@ -5,7 +5,6 @@
+ #include "CoreMinimal.h"
+ #include "UObject/ObjectMacros.h"
+ #include "Components/PrimitiveComponent.h"
+-#include "ZoneGraphSubsystem.h"
+ #include "ZoneGraphTypes.h"
+ #include "ZoneShapeComponent.generated.h"
+ 

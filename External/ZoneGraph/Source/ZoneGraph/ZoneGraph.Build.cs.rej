@@ -1,0 +1,10 @@
+--- Source/ZoneGraph/ZoneGraph.Build.cs	2024-09-26 22:04:46
++++ /Users/pete/TempoUnrealFestDemo/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/ZoneGraph.Build.cs	2024-09-17 17:52:05
+@@ -20,7 +20,6 @@
+ 					"DeveloperSettings",
+ 				}
+ 			);
+-
+ 			if (Target.bBuildEditor == true)
+ 			{
+ 				PrivateDependencyModuleNames.Add("EditorFramework");
