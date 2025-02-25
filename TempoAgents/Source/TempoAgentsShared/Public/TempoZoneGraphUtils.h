@@ -9,7 +9,7 @@
 #include "TempoZoneGraphUtils.generated.h"
 
 UCLASS()
-class TEMPOCORESHARED_API UTempoZoneGraphUtils : public UBlueprintFunctionLibrary
+class TEMPOAGENTSSHARED_API UTempoZoneGraphUtils : public UBlueprintFunctionLibrary
 {
 	GENERATED_BODY()
 
