@@ -28,15 +28,15 @@ FORCEINLINE float CalculateNoiseValue(const float NoiseInput, const float NoiseP
 }
 
 /** Braking & stopping distances */
-	
-FORCEINLINE float GetDistanceAlongLaneToStopAt(const float Radius, const float LaneLength, const float RandomFraction, const FVector2D& StoppingDistanceFromLaneEndRange)
+
+FORCEINLINE float GetDistanceAlongLaneToStopAt(const float Radius, const float LaneLengthAtStopLine, const float RandomFraction, const FVector2D& StoppingDistanceFromLaneEndRange)
 {
-	return LaneLength - Radius - FMath::Lerp(StoppingDistanceFromLaneEndRange.X, StoppingDistanceFromLaneEndRange.Y, RandomFraction);	
+	return LaneLengthAtStopLine - Radius - FMath::Lerp(StoppingDistanceFromLaneEndRange.X, StoppingDistanceFromLaneEndRange.Y, RandomFraction);
 }
 	
-FORCEINLINE float GetDistanceAlongLaneToBrakeFrom(const float SpeedLimit, const float Radius, const float LaneLength, const float BrakingTime, const float DistanceAlongLaneToStopAt)
+FORCEINLINE float GetDistanceAlongLaneToBrakeFrom(const float Speed, const float Radius, const float LaneLengthAtStopLine, const float BrakingTime, const float DistanceAlongLaneToStopAt)
 {
-	float DistanceAlongLaneToBrakeFrom = LaneLength - Radius - (BrakingTime * SpeedLimit);
+	float DistanceAlongLaneToBrakeFrom = LaneLengthAtStopLine - Radius - (BrakingTime * Speed);
 	return FMath::Min(DistanceAlongLaneToBrakeFrom, DistanceAlongLaneToStopAt);
 }
 
@@ -111,7 +111,7 @@ MASSTRAFFIC_API float CalculateTargetSpeed(
 	float DistanceToCollidingObstacle,
 	float Radius,
 	float RandomFraction,
-	float LaneLength,
+	const FZoneGraphTrafficLaneData* CurrentLaneData,
 	float SpeedLimit,
 	const FVector2D& IdealTimeToNextVehicleRange,
 	const FVector2D& MinimumDistanceToNextVehicleRange,
@@ -122,7 +122,7 @@ MASSTRAFFIC_API float CalculateTargetSpeed(
 	float StopSignBrakingTime,
 	FVector2D StoppingDistanceFromLaneEndRange,
 	float StopSignBrakingPower, // 0.5f  @todo Better param name
-	bool bStopAtLaneExit
+	bool bStopAtNextStopLine
 #if WITH_MASSTRAFFIC_DEBUG
 	, bool bVisLog = false
 	, const UObject* VisLogOwner = nullptr
@@ -154,18 +154,18 @@ bool ShouldVehicleMergeOntoLane(
 	FZoneGraphLaneHandle& OutYieldTargetLane,
 	int32& OutMergeYieldCaseIndex);
 
-MASSTRAFFIC_API bool ShouldStopAtLaneExit(
+MASSTRAFFIC_API bool ShouldStopAtNextStopLine(
 	float DistanceAlongLane,
 	float Speed,
 	float Radius,
 	float RandomFraction,
-	float LaneLength,
+	const FZoneGraphTrafficLaneData* CurrentLaneData,
 	FZoneGraphTrafficLaneData* NextTrafficLaneData,
 	const FZoneGraphTrafficLaneData* ReadiedNextIntersectionLane,
 	const FVector2D& MinimumDistanceToNextVehicleRange,
 	const FVector2D& StoppingDistanceRange,
 	const FMassEntityManager& EntityManager,
-	FZoneGraphTrafficLaneData*& InOut_StopSignIntersectionLane,
+	FZoneGraphTrafficLaneData*& InOut_LastStopSignStoppedLaneInfo,
 	bool& bOut_RequestDifferentNextLane,
 	bool& bInOut_CantStopAtLaneExit,
 	bool& bOut_IsFrontOfVehicleBeyondLaneExit,
@@ -186,10 +186,9 @@ MASSTRAFFIC_API bool ShouldStopAtLaneExit(
 	, const FVector* VehicleLocation = nullptr // ..for debuging
 );
 	
-bool IsVehicleNearStopLineAtIntersection(
-	const FZoneGraphTrafficLaneData* NextLane,
+bool IsVehicleNearStopLine(
 	const float DistanceAlongCurrentLane,
-	const float CurrentLaneLength,
+	const float LaneLengthAtStopLine,
 	const float AgentRadius,
 	const float RandomFraction,
 	const FVector2D& StoppingDistanceRange);

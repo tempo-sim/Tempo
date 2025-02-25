@@ -60,7 +60,9 @@ void UMassTrafficInitTrafficVehicleSpeedProcessor::Execute(FMassEntityManager& E
 			const float VariedSpeedLimit = UE::MassTraffic::VarySpeedLimit(SpeedLimit, MassTrafficSettings->SpeedLimitVariancePct, MassTrafficSettings->SpeedVariancePct, RandomFractionFragment.RandomFraction, NoiseValue);
 
 			const FMassEntityHandle NextVehicleEntityInStopQueue = VehicleControlFragment.NextLane != nullptr ? MassTrafficSubsystem.GetNextVehicleEntityInIntersectionStopQueue(VehicleControlFragment.NextLane->IntersectionEntityHandle) : FMassEntityHandle();
-			
+
+			const FZoneGraphTrafficLaneData* CurrentLaneData = MassTrafficSubsystem.GetTrafficLaneData(LaneLocationFragment.LaneHandle);
+
 			// Should stop?
 			bool bRequestDifferentNextLane = false;
 			bool bVehicleCantStopAtLaneExit = false;
@@ -68,12 +70,12 @@ void UMassTrafficInitTrafficVehicleSpeedProcessor::Execute(FMassEntityManager& E
 			bool bNoNext = false;
 			bool bNoRoom = false;
 			bool bShouldProceedAtStopSign = false;
-			const bool bMustStopAtLaneExit = UE::MassTraffic::ShouldStopAtLaneExit(
+			const bool bStopAtNextStopLine = UE::MassTraffic::ShouldStopAtNextStopLine(
 				LaneLocationFragment.DistanceAlongLane,
 				VehicleControlFragment.Speed,
 				AgentRadiusFragment.Radius,
 				RandomFractionFragment.RandomFraction,
-				LaneLocationFragment.LaneLength,
+				CurrentLaneData,
 				VehicleControlFragment.NextLane,
 				VehicleControlFragment.ReadiedNextIntersectionLane,
 				MassTrafficSettings->MinimumDistanceToNextVehicleRange,
@@ -93,7 +95,7 @@ void UMassTrafficInitTrafficVehicleSpeedProcessor::Execute(FMassEntityManager& E
 				NextVehicleEntityInStopQueue,
 				World
 			);
-			
+
 			// CalculateTargetSpeed has time based variables that use the current speed to convert times
 			// to distances. So these eval to non-zero we use VariedSpeedLimit as our stand in Current Speed when
 			// computing initial speed.
@@ -103,13 +105,13 @@ void UMassTrafficInitTrafficVehicleSpeedProcessor::Execute(FMassEntityManager& E
 			//		 use to compute the distance to start braking for avoidance.
 			const float TargetSpeed = UE::MassTraffic::CalculateTargetSpeed(
 				LaneLocationFragment.DistanceAlongLane,
-				BaseSpeed, 
+				BaseSpeed,
 				AvoidanceFragment.DistanceToNext,
 				AvoidanceFragment.TimeToCollidingObstacle,
 				AvoidanceFragment.DistanceToCollidingObstacle,
 				AgentRadiusFragment.Radius,
 				RandomFractionFragment.RandomFraction,
-				LaneLocationFragment.LaneLength,
+				CurrentLaneData,
 				VariedSpeedLimit,
 				MassTrafficSettings->IdealTimeToNextVehicleRange,
 				MassTrafficSettings->MinimumDistanceToNextVehicleRange,
@@ -120,7 +122,7 @@ void UMassTrafficInitTrafficVehicleSpeedProcessor::Execute(FMassEntityManager& E
 				MassTrafficSettings->StopSignBrakingTime,
 				MassTrafficSettings->StoppingDistanceRange,
 				/*StopSignBrakingPower*/0.5f, // @todo Expose
-				bMustStopAtLaneExit
+				bStopAtNextStopLine
 			);
 
 			// Init speed to pure target speed

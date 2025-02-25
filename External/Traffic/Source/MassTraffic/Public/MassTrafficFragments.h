@@ -499,7 +499,7 @@ struct FMassTrafficSignIntersectionSide
 {
 	GENERATED_BODY()
 	
-	TArray<FZoneGraphTrafficLaneData*, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_VEHICLE_TRAFFIC_LANES>> VehicleIntersectionLanes;
+	TMap<FZoneGraphTrafficLaneData*, float, TSetAllocator<TSparseArrayAllocator<>, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_VEHICLE_TRAFFIC_LANES>>> VehicleIntersectionLanes;
 
 	TArray<int32, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_SIGN_INTERSECTION_SIDES_PEDESTRIAN_CROSSWALK_LANES>> CrosswalkLanes;
 	TArray<int32, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_SIGN_INTERSECTION_SIDES_PEDESTRIAN_CROSSWALK_WAITING_LANES>> CrosswalkWaitingLanes;

@@ -218,4 +218,14 @@ bool ShouldPerformReactiveYieldAtIntersection(
 	FZoneGraphLaneHandle& OutYieldTargetLane,
 	int32& OutMergeYieldCaseIndex);
 
+bool ShouldPerformReactiveYieldAtRoadCrosswalk(
+	const UMassTrafficSubsystem& MassTrafficSubsystem,
+	const UMassCrowdSubsystem& MassCrowdSubsystem,
+	const FMassEntityManager& EntityManager,
+	const FMassTrafficVehicleControlFragment& VehicleControlFragment,
+	const FMassZoneGraphLaneLocationFragment& LaneLocationFragment,
+	const FAgentRadiusFragment& RadiusFragment,
+	const FMassTrafficRandomFractionFragment& RandomFractionFragment,
+	const FZoneGraphStorage& ZoneGraphStorage);
+
 };
