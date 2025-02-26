@@ -552,6 +552,42 @@ bool FMassTrafficSignIntersectionSide::AreAllCrosswalkWaitingLanesClear(const FM
 	return true;
 }
 
+bool FMassTrafficSignIntersectionSide::AreAllEntitiesOnCrosswalkYielding(const FMassTrafficSignIntersectionFragment& IntersectionFragment, const UMassCrowdSubsystem& MassCrowdSubsystem, const UMassTrafficSubsystem& MassTrafficSubsystem) const
+{
+	for (const int32 CrosswalkLaneIndex : CrosswalkLanes)
+	{
+		// GP TODO:  All these "informational" intersection side functions should be converted to "try get" functions.
+		const FZoneGraphLaneHandle CrosswalkLaneHandle(CrosswalkLaneIndex, IntersectionFragment.ZoneGraphDataHandle);
+		if (!CrosswalkLaneHandle.IsValid())
+		{
+			continue;
+		}
+
+		const FCrowdTrackingLaneData* CrosswalkLaneData = MassCrowdSubsystem.GetCrowdTrackingLaneData(CrosswalkLaneHandle);
+		
+		if (!ensureMsgf(CrosswalkLaneData != nullptr, TEXT("Must get valid CrosswalkLaneData in FMassTrafficSignIntersectionSide::AreAllEntitiesOnCrosswalkYielding.")))
+		{
+			return false;
+		}
+
+		const FMassTrafficCrosswalkLaneInfo* CrosswalkLaneInfo = MassTrafficSubsystem.GetCrosswalkLaneInfo(CrosswalkLaneHandle);
+		
+		if (CrosswalkLaneInfo == nullptr)
+		{
+			return false;
+		}
+
+		const int32 NumEntitiesYieldingOnCrosswalkLane = CrosswalkLaneInfo->GetNumEntitiesYieldingOnCrosswalkLane();
+		
+		if (NumEntitiesYieldingOnCrosswalkLane != CrosswalkLaneData->NumEntitiesOnLane)
+		{
+			return false;
+		}
+	}
+
+	return true;
+}
+
 //
 // FMassTrafficSignIntersectionFragment
 //

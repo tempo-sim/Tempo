@@ -115,17 +115,6 @@ void UMassTrafficCrowdYieldProcessor::Execute(FMassEntityManager& EntityManager,
 					return false;
 				}
 
-				// If the vehicle isn't in the "crossing" lane yet, ...
-				if (CurrentTrafficLaneData.LaneHandle != CrossingTrafficLaneData.LaneHandle)
-				{
-					// And, that lane is closed, ...
-					if (!CrossingTrafficLaneData.bIsOpen)
-					{
-						// We don't need to yield to the vehicle.
-						return false;
-					}
-				}
-
 				FZoneGraphLaneLocation VehicleZoneGraphLaneLocation;
 				UE::ZoneGraph::Query::CalculateLocationAlongLane(*ZoneGraphStorage, CurrentTrafficLaneData.LaneHandle, CurrentTrafficLaneData.LeadVehicleDistanceAlongLane.GetValue(), VehicleZoneGraphLaneLocation);
 				

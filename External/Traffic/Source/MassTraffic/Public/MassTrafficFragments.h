@@ -15,6 +15,7 @@
 #include "Containers/RingBuffer.h"
 #include "MassLODSubsystem.h"
 #include "MassTrafficSettings.h"
+#include "MassTrafficSubsystem.h"
 
 #include "MassTrafficFragments.generated.h"
 
@@ -526,6 +527,8 @@ struct FMassTrafficSignIntersectionSide
 	bool AreAllCrosswalkLanesClear(const FMassTrafficSignIntersectionFragment& IntersectionFragment, const UMassCrowdSubsystem& MassCrowdSubsystem) const;
 	
 	bool AreAllCrosswalkWaitingLanesClear(const FMassTrafficSignIntersectionFragment& IntersectionFragment, const UMassCrowdSubsystem& MassCrowdSubsystem) const;
+
+	bool AreAllEntitiesOnCrosswalkYielding(const FMassTrafficSignIntersectionFragment& IntersectionFragment, const UMassCrowdSubsystem& MassCrowdSubsystem, const UMassTrafficSubsystem& MassTrafficSubsystem) const;
 };
 
 USTRUCT()
