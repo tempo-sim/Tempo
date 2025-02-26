@@ -125,6 +125,11 @@ struct FMassTrafficCrosswalkLaneInfo
 		
 		return *EntityYieldResumeSpeed;
 	}
+
+	FORCEINLINE int32 GetNumEntitiesYieldingOnCrosswalkLane() const
+	{
+		return YieldingEntityToIncomingVehicleLaneMap.Num();
+	}
 };
 
 /**

@@ -489,10 +489,13 @@ struct MASSTRAFFIC_API FZoneGraphTrafficLaneData
 	bool bIsStoppedVehicleInPreviousLaneOverlappingThisLane : 1; // (See all CROSSWALKOVERLAP.)
 	
 	// Note:  Currently only sign-controlled intersections will set this flag.
-	bool bHasPedestriansWaitingToCross : 1 = false;
+	bool bHasPedestriansWaitingToCrossAtIntersectionEntrance : 1 = false;
 
 	// Note:  Currently only sign-controlled intersections will set this flag.
-	bool bHasPedestriansInDownstreamCrosswalkLanes : 1 = false;
+	bool bHasPedestriansInDownstreamCrosswalkLanesAtIntersectionEntrance : 1 = false;
+	
+	// Note:  Currently only sign-controlled intersections will set this flag.
+	bool bAreAllEntitiesOnCrosswalkYieldingAtIntersectionEntrance : 1 = false;
 
 	UE::MassTraffic::TFraction<true, uint8> FractionUntilClosed;
 

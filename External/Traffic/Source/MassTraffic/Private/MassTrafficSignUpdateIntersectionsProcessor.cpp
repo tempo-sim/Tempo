@@ -283,15 +283,6 @@ void UMassTrafficSignUpdateIntersectionsProcessor::Execute(FMassEntityManager& E
 
 		const int32 NumEntities = QueryContext.GetNumEntities();
 
-		// TODO:  Make this a property somewhere appropriate.
-		constexpr float VehicleTooCloseForPedestriansToCrossAtYieldSignDistance = 5000.0f;
-
-		// TODO:  Make this a property somewhere appropriate.
-		constexpr float AllowedVehiclePriorityTime = 5.0f;
-		
-		// TODO:  Make this a property somewhere appropriate.
-		constexpr float RequiredPedestrianWaitToCrossTime = 5.0f;
-
 		// Process all the non-all-way stop sign intersections in this chunk.
 		// Note:  Currently, all-way stop sign intersections are handled by
 		// the period logic of UMassTrafficLightUpdateIntersectionsProcessor.
@@ -327,7 +318,7 @@ void UMassTrafficSignUpdateIntersectionsProcessor::Execute(FMassEntityManager& E
 					if (IntersectionSide.StopSignIntersectionState == EMassTrafficStopSignIntersectionState::VehiclesHaveHighPriority)
 					{
 						const float CurrentTimeSeconds = World->GetTimeSeconds();
-						if (CurrentTimeSeconds > IntersectionSide.TimeHighPriorityStateStarted + AllowedVehiclePriorityTime)
+						if (CurrentTimeSeconds > IntersectionSide.TimeHighPriorityStateStarted + MassTrafficSettings->VehiclePriorityTimeAtCrosswalkWithStopSign)
 						{
 							// Once this period is over, the crosswalk lanes re-open.  And, the cycle repeats.
 							IntersectionFragment.ApplyLanesActionToIntersectionSide(IntersectionSide, EMassTrafficControllerLanesAction::Open, EMassTrafficControllerLanesAction::Open, MassCrowdSubsystem, false);
@@ -351,16 +342,16 @@ void UMassTrafficSignUpdateIntersectionsProcessor::Execute(FMassEntityManager& E
 
 					// Then, pedestrians are allowed to cross if the vehicles are far enough away,
 					// or once a nearby vehicle comes to a stop.
-					// We also make sure the vehicle lanes are clear before closing them.
+					// They also wait for this intersection side's vehicle lanes to clear.
 					if (IntersectionSide.YieldSignIntersectionState == EMassTrafficYieldSignIntersectionState::PedestriansAreWaitingToCross)
 					{
 						const float CurrentTimeSeconds = World->GetTimeSeconds();
-						if (CurrentTimeSeconds > IntersectionSide.TimePedestriansStartedWaitingToCross + RequiredPedestrianWaitToCrossTime)
+						if (CurrentTimeSeconds > IntersectionSide.TimePedestriansStartedWaitingToCross + MassTrafficSettings->PedestrianWaitToCrossAtCrosswalkWithYieldSignTime)
 						{
-							if ((!IsVehicleNearIntersectionSide(IntersectionSide, VehicleTooCloseForPedestriansToCrossAtYieldSignDistance) || AreAnyVehiclesInStopQueueForIntersectionSide(IntersectionSide))
+							if ((!IsVehicleNearIntersectionSide(IntersectionSide, MassTrafficSettings->VehicleTooCloseForPedestriansToCrossAtYieldSignDistance) || AreAnyVehiclesInStopQueueForIntersectionSide(IntersectionSide))
 								&& IntersectionSide.AreAllVehicleIntersectionLanesClear())
 							{
-								IntersectionFragment.ApplyLanesActionToIntersectionSide(IntersectionSide, EMassTrafficControllerLanesAction::HardClose, EMassTrafficControllerLanesAction::Open, MassCrowdSubsystem, false);
+								IntersectionFragment.ApplyLanesActionToIntersectionSide(IntersectionSide, EMassTrafficControllerLanesAction::Open, EMassTrafficControllerLanesAction::Open, MassCrowdSubsystem, false);
 								IntersectionSide.YieldSignIntersectionState = EMassTrafficYieldSignIntersectionState::PedestriansHaveHighPriority;
 								IntersectionSide.TimeHighPriorityStateStarted = World->GetTimeSeconds();
 							}
@@ -368,30 +359,29 @@ void UMassTrafficSignUpdateIntersectionsProcessor::Execute(FMassEntityManager& E
 					}
 
 					// Pedestrians get a short "high priority" period,
-					// where the crosswalk lanes remain open and the vehicle lanes remain closed.
+					// where the crosswalk lanes remain open, after which the crosswalk lanes are closed.
 					if (IntersectionSide.YieldSignIntersectionState == EMassTrafficYieldSignIntersectionState::PedestriansHaveHighPriority)
 					{
 						const float CurrentTimeSeconds = World->GetTimeSeconds();
-						if (CurrentTimeSeconds > IntersectionSide.TimeHighPriorityStateStarted + AllowedVehiclePriorityTime)
+						if (CurrentTimeSeconds > IntersectionSide.TimeHighPriorityStateStarted + MassTrafficSettings->PedestrianPriorityTimeAtCrosswalkWithYieldSign)
 						{
-							IntersectionFragment.ApplyLanesActionToIntersectionSide(IntersectionSide, EMassTrafficControllerLanesAction::HardClose, EMassTrafficControllerLanesAction::HardClose, MassCrowdSubsystem, false);
+							IntersectionFragment.ApplyLanesActionToIntersectionSide(IntersectionSide, EMassTrafficControllerLanesAction::Open, EMassTrafficControllerLanesAction::HardClose, MassCrowdSubsystem, false);
 							IntersectionSide.YieldSignIntersectionState = EMassTrafficYieldSignIntersectionState::WaitingForPedestriansToClear;
 						}
 					}
 
-					// Then, we wait until pedestrians clear the crosswalks before re-opening the vehicle lanes.
+					// Then, we wait until pedestrians clear the crosswalks.
 					if (IntersectionSide.YieldSignIntersectionState == EMassTrafficYieldSignIntersectionState::WaitingForPedestriansToClear)
                     {
 						if (IntersectionSide.AreAllCrosswalkLanesClear(IntersectionFragment, MassCrowdSubsystem))
                     	{
-                    		// Once the crosswalks are clear, the vehicle lanes re-open.  And, the cycle repeats.
-                    		IntersectionFragment.ApplyLanesActionToIntersectionSide(IntersectionSide, EMassTrafficControllerLanesAction::Open, EMassTrafficControllerLanesAction::HardClose, MassCrowdSubsystem, false);
+                    		// Once the crosswalks are clear, the cycle repeats.
                     		IntersectionSide.YieldSignIntersectionState = EMassTrafficYieldSignIntersectionState::CrosswalkClosed;
                     	}
                     }
 				}
 
-				// Push whether pedestrians are waiting to cross this intersection side to the lanes.
+				// Push crosswalk status information for this intersection side to the lanes.
 				for (FZoneGraphTrafficLaneData* VehicleIntersectionLane : IntersectionSide.VehicleIntersectionLanes)
 				{
 					if (VehicleIntersectionLane == nullptr)
@@ -399,8 +389,9 @@ void UMassTrafficSignUpdateIntersectionsProcessor::Execute(FMassEntityManager& E
 						continue;
 					}
 
-					VehicleIntersectionLane->bHasPedestriansWaitingToCross = !IntersectionSide.AreAllCrosswalkWaitingLanesClear(IntersectionFragment, MassCrowdSubsystem);
-					VehicleIntersectionLane->bHasPedestriansInDownstreamCrosswalkLanes = !IntersectionSide.AreAllCrosswalkLanesClear(IntersectionFragment, MassCrowdSubsystem);
+					VehicleIntersectionLane->bHasPedestriansWaitingToCrossAtIntersectionEntrance = !IntersectionSide.AreAllCrosswalkWaitingLanesClear(IntersectionFragment, MassCrowdSubsystem);
+					VehicleIntersectionLane->bHasPedestriansInDownstreamCrosswalkLanesAtIntersectionEntrance = !IntersectionSide.AreAllCrosswalkLanesClear(IntersectionFragment, MassCrowdSubsystem);
+					VehicleIntersectionLane->bAreAllEntitiesOnCrosswalkYieldingAtIntersectionEntrance = IntersectionSide.AreAllEntitiesOnCrosswalkYielding(IntersectionFragment, MassCrowdSubsystem, MassTrafficSubsystem);
 				}
 			}
 

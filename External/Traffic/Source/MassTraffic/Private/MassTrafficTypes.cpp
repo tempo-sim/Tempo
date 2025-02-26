@@ -47,7 +47,7 @@ bool FZoneGraphTrafficLaneData::HasTrafficSignThatRequiresStop() const
 	return !ConstData.bIsTrafficLightControlled
 			&& ConstData.bIsIntersectionLane
 			&& (ConstData.TrafficControllerSignType == EMassTrafficControllerSignType::StopSign
-			|| (ConstData.TrafficControllerSignType == EMassTrafficControllerSignType::YieldSign && (bHasPedestriansWaitingToCross || bHasPedestriansInDownstreamCrosswalkLanes)));
+			|| (ConstData.TrafficControllerSignType == EMassTrafficControllerSignType::YieldSign && (bHasPedestriansWaitingToCrossAtIntersectionEntrance || bHasPedestriansInDownstreamCrosswalkLanesAtIntersectionEntrance)));
 }
 
 void FZoneGraphTrafficLaneData::ClearVehicles()

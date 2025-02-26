@@ -759,6 +759,15 @@ bool ShouldStopAtLaneExit(
 		{
 			return true;
 		}
+
+		// At yield signs (for which we already decided to stop),
+		// remain stopped until the crosswalk clears on this intersection side.
+		if (NextTrafficLaneData->ConstData.TrafficControllerSignType == EMassTrafficControllerSignType::YieldSign
+			&& NextTrafficLaneData->bHasPedestriansInDownstreamCrosswalkLanesAtIntersectionEntrance
+			&& !NextTrafficLaneData->bAreAllEntitiesOnCrosswalkYieldingAtIntersectionEntrance)
+		{
+			return true;
+		}
 		
 		return false;
 	}

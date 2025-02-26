@@ -463,9 +463,9 @@ bool FMassTrafficSignIntersectionSide::AreAllCrosswalkLanesOpen(const FMassTraff
 	for (const int32 CrosswalkLaneIndex : CrosswalkLanes)
 	{
 		const FZoneGraphLaneHandle CrosswalkLaneHandle(CrosswalkLaneIndex, IntersectionFragment.ZoneGraphDataHandle);
-		if (!CrosswalkLaneHandle.IsValid())
+		if (!ensureMsgf(CrosswalkLaneHandle.IsValid(), TEXT("Must get valid CrosswalkLaneHandle in FMassTrafficSignIntersectionSide::AreAllCrosswalkLanesOpen.")))
 		{
-			continue;
+			return false;
 		}
 
 		const ECrowdLaneState CrosswalkLaneState = MassCrowdSubsystem.GetLaneState(CrosswalkLaneHandle);
@@ -484,9 +484,9 @@ bool FMassTrafficSignIntersectionSide::AreAllCrosswalkLanesClosed(const FMassTra
 	for (const int32 CrosswalkLaneIndex : CrosswalkLanes)
 	{
 		const FZoneGraphLaneHandle CrosswalkLaneHandle(CrosswalkLaneIndex, IntersectionFragment.ZoneGraphDataHandle);
-		if (!CrosswalkLaneHandle.IsValid())
+		if (!ensureMsgf(CrosswalkLaneHandle.IsValid(), TEXT("Must get valid CrosswalkLaneHandle in FMassTrafficSignIntersectionSide::AreAllCrosswalkLanesClosed.")))
 		{
-			continue;
+			return false;
 		}
 
 		const ECrowdLaneState CrosswalkLaneState = MassCrowdSubsystem.GetLaneState(CrosswalkLaneHandle);
@@ -505,9 +505,9 @@ bool FMassTrafficSignIntersectionSide::AreAllCrosswalkLanesClear(const FMassTraf
 	for (const int32 CrosswalkLaneIndex : CrosswalkLanes)
 	{
 		const FZoneGraphLaneHandle CrosswalkLaneHandle(CrosswalkLaneIndex, IntersectionFragment.ZoneGraphDataHandle);
-		if (!CrosswalkLaneHandle.IsValid())
+		if (!ensureMsgf(CrosswalkLaneHandle.IsValid(), TEXT("Must get valid CrosswalkLaneHandle in FMassTrafficSignIntersectionSide::AreAllCrosswalkLanesClear.")))
 		{
-			continue;
+			return false;
 		}
 
 		const FCrowdTrackingLaneData* CrosswalkLaneData = MassCrowdSubsystem.GetCrowdTrackingLaneData(CrosswalkLaneHandle);
@@ -531,9 +531,9 @@ bool FMassTrafficSignIntersectionSide::AreAllCrosswalkWaitingLanesClear(const FM
 	for (const int32 CrosswalkWaitingLaneIndex : CrosswalkWaitingLanes)
 	{
 		const FZoneGraphLaneHandle CrosswalkWaitingLaneHandle(CrosswalkWaitingLaneIndex, IntersectionFragment.ZoneGraphDataHandle);
-		if (!CrosswalkWaitingLaneHandle.IsValid())
+		if (!ensureMsgf(CrosswalkWaitingLaneHandle.IsValid(), TEXT("Must get valid CrosswalkWaitingLaneHandle in FMassTrafficSignIntersectionSide::AreAllCrosswalkWaitingLanesClear.")))
 		{
-			continue;
+			return false;
 		}
 
 		const FCrowdTrackingLaneData* CrosswalkWaitingLaneData = MassCrowdSubsystem.GetCrowdTrackingLaneData(CrosswalkWaitingLaneHandle);
@@ -544,6 +544,41 @@ bool FMassTrafficSignIntersectionSide::AreAllCrosswalkWaitingLanesClear(const FM
 		}
 
 		if (CrosswalkWaitingLaneData->NumEntitiesOnLane > 0)
+		{
+			return false;
+		}
+	}
+
+	return true;
+}
+
+bool FMassTrafficSignIntersectionSide::AreAllEntitiesOnCrosswalkYielding(const FMassTrafficSignIntersectionFragment& IntersectionFragment, const UMassCrowdSubsystem& MassCrowdSubsystem, const UMassTrafficSubsystem& MassTrafficSubsystem) const
+{
+	for (const int32 CrosswalkLaneIndex : CrosswalkLanes)
+	{
+		const FZoneGraphLaneHandle CrosswalkLaneHandle(CrosswalkLaneIndex, IntersectionFragment.ZoneGraphDataHandle);
+		if (!ensureMsgf(CrosswalkLaneHandle.IsValid(), TEXT("Must get valid CrosswalkLaneHandle in FMassTrafficSignIntersectionSide::AreAllEntitiesOnCrosswalkYielding.")))
+		{
+			return false;
+		}
+		
+		const FCrowdTrackingLaneData* CrosswalkLaneData = MassCrowdSubsystem.GetCrowdTrackingLaneData(CrosswalkLaneHandle);
+		
+		if (!ensureMsgf(CrosswalkLaneData != nullptr, TEXT("Must get valid CrosswalkLaneData in FMassTrafficSignIntersectionSide::AreAllEntitiesOnCrosswalkYielding.")))
+		{
+			return false;
+		}
+
+		const FMassTrafficCrosswalkLaneInfo* CrosswalkLaneInfo = MassTrafficSubsystem.GetCrosswalkLaneInfo(CrosswalkLaneHandle);
+		
+		if (!ensureMsgf(CrosswalkLaneInfo != nullptr, TEXT("Must get valid CrosswalkLaneInfo in FMassTrafficSignIntersectionSide::AreAllEntitiesOnCrosswalkYielding.")))
+		{
+			return false;
+		}
+
+		const int32 NumEntitiesYieldingOnCrosswalkLane = CrosswalkLaneInfo->GetNumEntitiesYieldingOnCrosswalkLane();
+		
+		if (NumEntitiesYieldingOnCrosswalkLane != CrosswalkLaneData->NumEntitiesOnLane)
 		{
 			return false;
 		}

@@ -519,6 +519,31 @@ public:
 	UPROPERTY(EditAnywhere, Config, Category="Lane Intersections")
 	float AcceptableLaneIntersectionDistance = 1.0f;
 
+
+	// At stop signs, pedestrians will be able to cross whenever they want for the most part.
+	// But, once a vehicle completes its stop sign rest behavior, the pedestrian lanes
+	// at the crosswalks will close for this much time, allowing the crosswalks to clear to some extent,
+	// which ultimately will allow the vehicles to find an opportunity to proceed.
+	UPROPERTY(EditAnywhere, Config, Category="Traffic Sign Intersections|Stop Sign")
+	float VehiclePriorityTimeAtCrosswalkWithStopSign = 5.0f;
+
+	// If a vehicle is within this distance while heading towards a crosswalk with a yield sign,
+	// pedestrians will wait for the vehicle to come to a complete stop before crossing.
+	// Otherwise, any waiting pedestrians will cross ahead of the arrival of any vehicles.
+	UPROPERTY(EditAnywhere, Config, Category="Traffic Sign Intersections|Yield Sign")
+	float VehicleTooCloseForPedestriansToCrossAtYieldSignDistance = 5000.0f;
+
+	// Once any waiting pedestrians begin to cross the crosswalk with a yield sign,
+	// pedestrian lanes will remain open for this much time before closing again.
+	UPROPERTY(EditAnywhere, Config, Category="Traffic Sign Intersections|Yield Sign")
+	float PedestrianPriorityTimeAtCrosswalkWithYieldSign = 5.0f;
+
+	// Once the first pedestrian is waiting to cross the crosswalk with a yield sign,
+	// this is how much time we allow additional pedestrians to gather in the crosswalk "waiting area"
+	// before they all look for an opportunity to cross.
+	UPROPERTY(EditAnywhere, Config, Category="Traffic Sign Intersections|Yield Sign")
+	float PedestrianWaitToCrossAtCrosswalkWithYieldSignTime = 5.0f;
+
 	// @todo Rename Density Management to Overseer
 	
 	/**
