@@ -51,6 +51,7 @@ public class TempoAgentsEditor : TempoModuleRules
 				"TempoAgentsShared",
 				"TempoAgents",
 				"TempoScripting",
+				"TempoCoreShared",
 			}
 			);
 		
