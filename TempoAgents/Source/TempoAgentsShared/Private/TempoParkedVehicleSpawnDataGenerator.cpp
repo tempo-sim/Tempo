@@ -2,14 +2,18 @@
 
 #include "TempoParkedVehicleSpawnDataGenerator.h"
 
-#include "EngineUtils.h"
+#include "TempoRoadInterface.h"
+
+#include "TempoCoreUtils.h"
+
 #include "MassCommonUtils.h"
 #include "MassEntityConfigAsset.h"
 #include "MassTrafficInitParkedVehiclesProcessor.h"
 #include "MassTrafficSubsystem.h"
 #include "MassTrafficVehicleDimensionsTrait.h"
 #include "MassTrafficVehicleSimulationTrait.h"
-#include "TempoRoadInterface.h"
+
+#include "EngineUtils.h"
 
 TArray<FTransform> UTempoParkedVehicleSpawnDataGenerator::TryGenerateSpawnTransforms(
 	const TArray<AActor*>& RoadQueryActors,
@@ -51,7 +55,7 @@ TArray<FTransform> UTempoParkedVehicleSpawnDataGenerator::TryGenerateSpawnTransf
 		}
 		
 		TArray<FTempoParkedVehicleSpawnPointInfo>& ParkedVehicleSpawnPointInfosForRoad = ParkedVehicleSpawnPointInfoMap.FindOrAdd(RoadQueryActor);
-		const int32 MaxAllowedParkingSpawnPointsOnRoad = ITempoRoadInterface::Execute_GetMaxAllowedParkingSpawnPointsOnTempoRoad(RoadQueryActor);
+		const int32 MaxAllowedParkingSpawnPointsOnRoad = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoRoadInterface::Execute_GetMaxAllowedParkingSpawnPointsOnTempoRoad);
 
 		if (ParkedVehicleSpawnPointInfosForRoad.Num() >= MaxAllowedParkingSpawnPointsOnRoad)
 		{
@@ -59,14 +63,14 @@ TArray<FTransform> UTempoParkedVehicleSpawnDataGenerator::TryGenerateSpawnTransf
 			continue;
 		}
 		
-		const TSet<TSoftObjectPtr<UMassEntityConfigAsset>> EntityTypesAllowedToParkOnRoad = ITempoRoadInterface::Execute_GetEntityTypesAllowedToParkOnTempoRoad(RoadQueryActor);
+		const TSet<TSoftObjectPtr<UMassEntityConfigAsset>> EntityTypesAllowedToParkOnRoad = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoRoadInterface::Execute_GetEntityTypesAllowedToParkOnTempoRoad);
 		if (!ensureMsgf(EntityTypesAllowedToParkOnRoad.Contains(EntityType.EntityConfig), TEXT("RoadQueryActors that don't allow EntityType to park should have been pre-filtered before calling UTempoParkedVehicleSpawnDataGenerator::TryGenerateSpawnTransforms.")))
 		{
 			++NumFailedSpawnAttempts;
 			continue;
 		}
 		
-		const TArray<FName> ParkingLocationAnchorNames = ITempoRoadInterface::Execute_GetTempoParkingLocationAnchorNames(RoadQueryActor);
+		const TArray<FName> ParkingLocationAnchorNames = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoRoadInterface::Execute_GetTempoParkingLocationAnchorNames);
 		if (!ensureMsgf(!ParkingLocationAnchorNames.IsEmpty(), TEXT("RoadQueryActors with no ParkingLocationAnchorNames should have been pre-filtered before calling UTempoParkedVehicleSpawnDataGenerator::TryGenerateSpawnTransforms.")))
 		{
 			++NumFailedSpawnAttempts;
@@ -81,8 +85,8 @@ TArray<FTransform> UTempoParkedVehicleSpawnDataGenerator::TryGenerateSpawnTransf
 		const float NormalizedLateralVariationScalar = RandomStream.FRandRange(0.0f, 1.0f);
 		const float NormalizedAngularVariationScalar = RandomStream.FRandRange(0.0f, 1.0f);
 		
-		const FVector ParkingLocation = ITempoRoadInterface::Execute_GetTempoParkingLocation(RoadQueryActor, ParkingLocationAnchorName, NormalizedDistanceAlongRoad, VehicleDimensionsTrait->Params.HalfWidth, NormalizedLateralVariationScalar, ETempoCoordinateSpace::World);
-		const FRotator ParkingRotation = ITempoRoadInterface::Execute_GetTempoParkingRotation(RoadQueryActor, ParkingLocationAnchorName, NormalizedDistanceAlongRoad, NormalizedAngularVariationScalar, ETempoCoordinateSpace::World);
+		const FVector ParkingLocation = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoRoadInterface::Execute_GetTempoParkingLocation, ParkingLocationAnchorName, NormalizedDistanceAlongRoad, VehicleDimensionsTrait->Params.HalfWidth, NormalizedLateralVariationScalar, ETempoCoordinateSpace::World);
+		const FRotator ParkingRotation = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoRoadInterface::Execute_GetTempoParkingRotation, ParkingLocationAnchorName, NormalizedDistanceAlongRoad, NormalizedAngularVariationScalar, ETempoCoordinateSpace::World);
 
 		const float EntityRadius = FMath::Max(VehicleDimensionsTrait->Params.HalfLength, VehicleDimensionsTrait->Params.HalfWidth);
 		
@@ -217,19 +221,19 @@ void UTempoParkedVehicleSpawnDataGenerator::Generate(
 		TArray<AActor*> AcceptableRoadQueryActors;
 		for (AActor* RoadQueryActor : AllRoadQueryActors)
 		{
-			const bool bShouldSpawnParkedVehiclesOnRoad = ITempoRoadInterface::Execute_ShouldSpawnParkedVehiclesForTempoRoad(RoadQueryActor);
+			const bool bShouldSpawnParkedVehiclesOnRoad = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoRoadInterface::Execute_ShouldSpawnParkedVehiclesForTempoRoad);
 			if (!bShouldSpawnParkedVehiclesOnRoad)
 			{
 				continue;
 			}
 
-			const TArray<FName> ParkingLocationAnchorNames = ITempoRoadInterface::Execute_GetTempoParkingLocationAnchorNames(RoadQueryActor);
+			const TArray<FName> ParkingLocationAnchorNames = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoRoadInterface::Execute_GetTempoParkingLocationAnchorNames);
 			if (ParkingLocationAnchorNames.IsEmpty())
 			{
 				continue;
 			}
 			
-			const TSet<TSoftObjectPtr<UMassEntityConfigAsset>> EntityTypesAllowedToParkOnRoad = ITempoRoadInterface::Execute_GetEntityTypesAllowedToParkOnTempoRoad(RoadQueryActor);
+			const TSet<TSoftObjectPtr<UMassEntityConfigAsset>> EntityTypesAllowedToParkOnRoad = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoRoadInterface::Execute_GetEntityTypesAllowedToParkOnTempoRoad);
 			if (!EntityTypesAllowedToParkOnRoad.Contains(EntityType.EntityConfig))
 			{
 				continue;
