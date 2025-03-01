@@ -180,24 +180,21 @@ namespace
 
 	void ProcessYieldAtIntersectionLogic(UMassTrafficSubsystem& MassTrafficSubsystem, const UMassCrowdSubsystem& MassCrowdSubsystem, const FMassEntityManager& EntityManager, FMassTrafficVehicleControlFragment& VehicleControlFragment, const FMassZoneGraphLaneLocationFragment& LaneLocationFragment, const FAgentRadiusFragment& RadiusFragment, const FMassTrafficRandomFractionFragment& RandomFractionFragment, const FZoneGraphStorage& ZoneGraphStorage, TFunction<void()> PerformYieldActionFunc)
 	{
-		bool bHasAnotherVehicleEnteredRelevantLaneAfterPreemptiveYieldRollOut = false;
-		const bool bShouldPreemptivelyYieldAtIntersection = UE::MassTraffic::ShouldPerformPreemptiveYieldAtIntersection(MassTrafficSubsystem, MassCrowdSubsystem, EntityManager, VehicleControlFragment, LaneLocationFragment, RadiusFragment, ZoneGraphStorage, bHasAnotherVehicleEnteredRelevantLaneAfterPreemptiveYieldRollOut);
-
 		bool bShouldGiveOpportunityForTurningVehiclesToReactivelyYieldAtIntersection = false;
 		int32 MergeYieldCaseIndex = INDEX_NONE;
-		const bool bShouldReactivelyYieldAtIntersection = !bShouldPreemptivelyYieldAtIntersection ? UE::MassTraffic::ShouldPerformReactiveYieldAtIntersection(MassTrafficSubsystem, MassCrowdSubsystem, EntityManager, VehicleControlFragment, LaneLocationFragment, RadiusFragment, RandomFractionFragment, ZoneGraphStorage, bShouldGiveOpportunityForTurningVehiclesToReactivelyYieldAtIntersection, MergeYieldCaseIndex) : false;
+		const bool bShouldReactivelyYieldAtIntersection = UE::MassTraffic::ShouldPerformReactiveYieldAtIntersection(MassTrafficSubsystem, MassCrowdSubsystem, EntityManager, VehicleControlFragment, LaneLocationFragment, RadiusFragment, RandomFractionFragment, ZoneGraphStorage, bShouldGiveOpportunityForTurningVehiclesToReactivelyYieldAtIntersection, MergeYieldCaseIndex);
 		
-		UE::MassTraffic::UpdateYieldAtIntersectionState(MassTrafficSubsystem, VehicleControlFragment, LaneLocationFragment.LaneHandle, LaneLocationFragment.DistanceAlongLane, bShouldPreemptivelyYieldAtIntersection, bShouldReactivelyYieldAtIntersection, bHasAnotherVehicleEnteredRelevantLaneAfterPreemptiveYieldRollOut, bShouldGiveOpportunityForTurningVehiclesToReactivelyYieldAtIntersection);
+		UE::MassTraffic::UpdateYieldAtIntersectionState(MassTrafficSubsystem, VehicleControlFragment, LaneLocationFragment.LaneHandle, bShouldReactivelyYieldAtIntersection, bShouldGiveOpportunityForTurningVehiclesToReactivelyYieldAtIntersection);
 
-		// If we're reactively yielding, then we should always perform our yield action.  However, if we're pre-emptively yielding, then only perform our yield action once we've rolled-out all the way.
-		if (bShouldReactivelyYieldAtIntersection || (VehicleControlFragment.IsPreemptivelyYieldingAtIntersection() && VehicleControlFragment.TotalRolloutDistanceForPreemptiveYieldAtIntersection > VehicleControlFragment.TargetRolloutDistanceForPreemptiveYieldAtIntersection))
+		// If we're reactively yielding, then we should always perform our yield action.
+		if (bShouldReactivelyYieldAtIntersection)
 		{
 			PerformYieldActionFunc();
 		}
 
 #if WITH_MASSTRAFFIC_DEBUG
 		const FZoneGraphLaneHandle* NextLaneHandle = VehicleControlFragment.NextLane != nullptr ? &VehicleControlFragment.NextLane->LaneHandle : nullptr;
-		UE::MassTraffic::DrawDebugYieldBehaviorIndicators(MassTrafficSubsystem, VehicleControlFragment.VehicleEntityHandle, LaneLocationFragment.LaneHandle, NextLaneHandle, LaneLocationFragment.DistanceAlongLane, RadiusFragment.Radius, MergeYieldCaseIndex, bShouldPreemptivelyYieldAtIntersection, bShouldReactivelyYieldAtIntersection, 0.1f);
+		UE::MassTraffic::DrawDebugYieldBehaviorIndicators(MassTrafficSubsystem, VehicleControlFragment.VehicleEntityHandle, LaneLocationFragment.LaneHandle, NextLaneHandle, LaneLocationFragment.DistanceAlongLane, RadiusFragment.Radius, MergeYieldCaseIndex, bShouldReactivelyYieldAtIntersection, 0.1f);
 #endif
 	}
 }

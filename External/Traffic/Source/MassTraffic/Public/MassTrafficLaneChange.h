@@ -204,19 +204,6 @@ void ChooseLaneForLaneChange(
 	FMassTrafficLaneChangeRecommendation& InOutRecommendation);
 
 bool CheckNextVehicle(const FMassEntityHandle Entity, const FMassEntityHandle NextEntity, const FMassEntityManager& EntityManager);
-
-// Note:  As the "reactive yield" logic now needs to look ahead for pedestrians and merge considerations,
-// this has really become a "roll-out" yield, rather than having the sole distinction that it anticipates
-// a yield ahead of entering the intersection.  Will "rebrand" it as such in a future PR.
-bool ShouldPerformPreemptiveYieldAtIntersection(
-	const UMassTrafficSubsystem& MassTrafficSubsystem,
-	const UMassCrowdSubsystem& MassCrowdSubsystem,
-	const FMassEntityManager& EntityManager,
-	const FMassTrafficVehicleControlFragment& VehicleControlFragment,
-	const FMassZoneGraphLaneLocationFragment& LaneLocationFragment,
-	const FAgentRadiusFragment& RadiusFragment,
-	const FZoneGraphStorage& ZoneGraphStorage,
-	bool& OutHasAnotherVehicleEnteredRelevantLaneAfterPreemptiveYieldRollOut);
 	
 bool ShouldPerformReactiveYieldAtIntersection(
 	const UMassTrafficSubsystem& MassTrafficSubsystem,

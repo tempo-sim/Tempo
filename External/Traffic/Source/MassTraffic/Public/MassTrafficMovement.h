@@ -197,10 +197,7 @@ MASSTRAFFIC_API void UpdateYieldAtIntersectionState(
 	UMassTrafficSubsystem& MassTrafficSubsystem,
 	FMassTrafficVehicleControlFragment& VehicleControlFragment,
 	const FZoneGraphLaneHandle& CurrentLaneHandle,
-	const float DistanceAlongLane,
-	const bool bShouldPreemptivelyYieldAtIntersection,
 	const bool bShouldReactivelyYieldAtIntersection,
-	const bool bHasAnotherVehicleEnteredRelevantLaneAfterPreemptiveYieldRollOut,
 	const bool bShouldGiveOpportunityForTurningVehiclesToReactivelyYieldAtIntersection);
 
 /** Avoidance */

@@ -798,19 +798,8 @@ struct MASSTRAFFIC_API FMassTrafficVehicleControlFragment : public FMassFragment
 
 	TMap<EZoneGraphTurnType, FMassTrafficLanePriorityFilters> TurningLanePriorityFilters;
 
-	// Fields used for both pre-emptive and reactive yields.
-	FZoneGraphTrafficLaneData* YieldAtIntersectionLane = nullptr;
-
-	// Fields used for pre-emptive yields.
-	float TargetRolloutDistanceForPreemptiveYieldAtIntersection = 0.0f;
-	float DistanceAlongLaneAtStartOfYieldLane = 0.0f;
-	float TotalPrevLaneRolloutDistanceForPreemptiveYieldAtIntersection = 0.0f;
-	float TotalRolloutDistanceForPreemptiveYieldAtIntersection = 0.0f;
-
-	float TimeStartedWaitingAfterPreemptiveYieldRollOut = 0.0f;
-	bool bHasFinishedWaitingAfterRollOutForPreemptiveYieldAtIntersection = false;
-
 	// Fields used for reactive yields.
+	FZoneGraphTrafficLaneData* YieldAtIntersectionLane = nullptr;
 	bool bHasGivenOpportunityForTurningVehiclesToReactivelyYieldAtIntersection = false;
 
 	// Crosswalk lanes that this vehicle is actively yielding to.
@@ -858,16 +847,9 @@ struct MASSTRAFFIC_API FMassTrafficVehicleControlFragment : public FMassFragment
 	bool WasVehiclePreviouslyStopped() const { return TimeVehicleStopped >= 0.0f; }
 	void ClearVehicleStoppedState() { TimeVehicleStopped = -1.0f; MinVehicleStopSignRestTime = 0.0f; }
 
-	// Functions used for both pre-emptive and reactive yields.
-	bool IsYieldingAtIntersection() const { return YieldAtIntersectionLane != nullptr; }
-
-	// Functions used for pre-emptive yields.
-	bool IsPreemptivelyYieldingAtIntersection() const { return IsYieldingAtIntersection() && TargetRolloutDistanceForPreemptiveYieldAtIntersection > 0.0f; }
-	bool HasStartedWaitingAfterRollOutForPreemptiveYieldAtIntersection() const { return IsPreemptivelyYieldingAtIntersection() && TimeStartedWaitingAfterPreemptiveYieldRollOut > 0.0f; }
-	bool HasFinishedWaitingAfterRollOutForPreemptiveYieldAtIntersection() const { return bHasFinishedWaitingAfterRollOutForPreemptiveYieldAtIntersection; }
-
 	// Functions used for reactive yields.
-	bool IsReactivelyYieldingAtIntersection() const { return IsYieldingAtIntersection() && !IsPreemptivelyYieldingAtIntersection(); }
+	bool IsYieldingAtIntersection() const { return YieldAtIntersectionLane != nullptr; }
+	bool IsReactivelyYieldingAtIntersection() const { return IsYieldingAtIntersection(); }
 	bool HasGivenOpportunityForTurningVehiclesToReactivelyYieldAtIntersection() const { return bHasGivenOpportunityForTurningVehiclesToReactivelyYieldAtIntersection; }
 };
 

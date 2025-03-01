@@ -453,24 +453,6 @@ public:
 	// in order to resume motion after yielding.
 	UPROPERTY(EditAnywhere, Config, Category="Yield Behavior")
 	float NormalizedYieldResumeLaneDistance_Straight = 0.4f;
-
-	// Max distance from the end of the lane (leading up to an intersection)
-	// within which a vehicle is allowed to start a pre-emptive yield if other conditions apply.
-	UPROPERTY(EditAnywhere, Config, Category="Yield Behavior")
-	float MaxDistanceFromEndOfLaneForPreemptiveYield = 500.0f;
-
-	// Min distance to allow a vehicle performing a pre-emptive yield to "roll-out" into the intersection.
-	UPROPERTY(EditAnywhere, Config, Category="Yield Behavior")
-	float MinPreemptiveYieldAtIntersectionRolloutDistance = 200.0f;
-
-	// Max distance to allow a vehicle performing a pre-emptive yield to "roll-out" into the intersection.
-	UPROPERTY(EditAnywhere, Config, Category="Yield Behavior")
-	float MaxPreemptiveYieldAtIntersectionRolloutDistance = 400.0f;
-
-	// Time (in seconds) to wait for the *other* vehicle to enter their lane
-	// after the yielding vehicle "rolled-out" the allowed distance during a pre-emptive yield.
-	UPROPERTY(EditAnywhere, Config, Category="Yield Behavior")
-	float MaxTimeToWaitForVehicleToEnterTheirLaneDuringPreemptiveYield = 2.0f;
 	
 	// If a vehicle enters a crosswalk lane,
 	// a pedestrian will yield to the vehicle, once the pedestrian is within this distance

@@ -181,7 +181,7 @@ FAutoConsoleVariableRef CMassTrafficDebugYieldBehavior(
 	GMassTrafficDebugYieldBehavior,
 	TEXT("MassTraffic debug mode for yield at intersection behavior.\n")
 	TEXT("0 = Off (default).\n")
-	TEXT("1 = Draw indicators for yielding state.  Yellow is pre-emptive yield, Orange is reactive yield, Green is no yield.\n")
+	TEXT("1 = Draw indicators for yielding state.  Orange is reactive yield.  Green is no yield.\n")
 	TEXT("2 = Draw conflict enter/exit locations along current and next lane.\n"),
 	ECVF_Cheat
 	);

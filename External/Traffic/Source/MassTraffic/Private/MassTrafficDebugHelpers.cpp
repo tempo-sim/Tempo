@@ -838,7 +838,7 @@ void DrawDebugMassTrafficLaneData(const UMassTrafficSubsystem& MassTrafficSubsys
 	}
 }
 
-void DrawDebugYieldBehaviorIndicators(const UMassTrafficSubsystem& MassTrafficSubsystem, const FMassEntityHandle& EntityHandle, const FZoneGraphLaneHandle& CurrentLaneHandle, const FZoneGraphLaneHandle* NextLaneHandle, const float EntityDistanceAlongLane, const float EntityRadius, const int32 MergeYieldCaseIndex, const bool bShouldPreemptivelyYieldAtIntersection, const bool bShouldReactivelyYieldAtIntersection, const float LifeTime)
+void DrawDebugYieldBehaviorIndicators(const UMassTrafficSubsystem& MassTrafficSubsystem, const FMassEntityHandle& EntityHandle, const FZoneGraphLaneHandle& CurrentLaneHandle, const FZoneGraphLaneHandle* NextLaneHandle, const float EntityDistanceAlongLane, const float EntityRadius, const int32 MergeYieldCaseIndex, const bool bShouldReactivelyYieldAtIntersection, const float LifeTime)
 {
 	if (GMassTrafficDebugYieldBehavior == 0)	// 0 = Off (default)
 	{
@@ -955,11 +955,11 @@ void DrawDebugYieldBehaviorIndicators(const UMassTrafficSubsystem& MassTrafficSu
 		DrawDebugSphere(ZoneGraphSubsystem->GetWorld(), IndicatorLocation, Radius, 32, IndicatorColor, false, LifeTime, 0, Thickness);
 	};
 
-	if (GMassTrafficDebugYieldBehavior >= 1)	// 1 = Draw lane indicators for yielding lane.  Yellow is pre-emptive yield.  Orange is reactive yield
+	if (GMassTrafficDebugYieldBehavior >= 1)	// 1 = Draw lane indicators for yielding lane.
 	{
-		const FColor IndicatorColor = bShouldPreemptivelyYieldAtIntersection ? FColor::Yellow : bShouldReactivelyYieldAtIntersection ? FColor::Orange : FColor::Green;
+		const FColor IndicatorColor = bShouldReactivelyYieldAtIntersection ? FColor::Orange : FColor::Green;
 		
-		if (bShouldPreemptivelyYieldAtIntersection || bShouldReactivelyYieldAtIntersection)
+		if (bShouldReactivelyYieldAtIntersection)
 		{
 			DrawLaneIndicator(CurrentLaneHandle, IndicatorColor, 100.0f);
 		}
