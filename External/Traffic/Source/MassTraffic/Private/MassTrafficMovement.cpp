@@ -756,13 +756,7 @@ bool ShouldStopAtLaneExit(
 		{
 			return true;
 		}
-			
-		// We need to wait until it's our turn in the stop queue.
-		if (!NextVehicleEntityHandleInStopQueue.IsValid() || VehicleEntityHandle != NextVehicleEntityHandleInStopQueue)
-		{
-			return true;
-		}
-
+		
 		// At yield signs (for which we already decided to stop),
 		// remain stopped until the crosswalk clears on this intersection side.
 		if (NextTrafficLaneData->ConstData.TrafficControllerSignType == EMassTrafficControllerSignType::YieldSign
