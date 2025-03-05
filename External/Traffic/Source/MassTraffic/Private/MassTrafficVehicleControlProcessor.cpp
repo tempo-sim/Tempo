@@ -90,7 +90,24 @@ namespace
 			const UWorld* World = MassTrafficSubsystem.GetWorld();
 			const float TimeVehicleStopped = World != nullptr ? World->GetTimeSeconds() : -1.0f;
 			VehicleControlFragment.TimeVehicleStopped = TimeVehicleStopped;
+		}
+		// If we *just* ceased being stopped, ...
+		else if (!VehicleControlFragment.IsVehicleCurrentlyStopped() && VehicleControlFragment.WasVehiclePreviouslyStopped())
+		{
+			VehicleControlFragment.ClearVehicleStoppedState();
+		}
 
+		// If we're stopped, but haven't chosen a MinVehicleStopSignRestTime yet,
+		// keep evaluating this block in case conditions change at yield signs.
+		// For instance, if we end up merge yielding before entering the intersection lane at a time when no pedestrians
+		// were waiting at the yield sign or crossing the crosswalk, we wouldn't have set our MinVehicleStopSignRestTime
+		// (since we were just waiting for an opportunity to merge and not really "stopping" at the yield sign).
+		// However, while we were waiting for an opportunity to merge, pedestrians started waiting at the yield sign
+		// and/or crossing the crosswalk which then locks us into a "stop at yield sign" behavior.
+		// But, since we were already stopped (ie. we wouldn't transition from "not stopped" to "stopped"),
+		// we wouldn't have re-evaluated whether we should set our MinVehicleStopSignRestTime.
+		if (VehicleControlFragment.IsVehicleCurrentlyStopped() && VehicleControlFragment.MinVehicleStopSignRestTime <= 0.0f)
+		{
 			if (!UE::MassTraffic::IsVehicleNearStopLineAtIntersection(VehicleControlFragment.NextLane, LaneLocationFragment.DistanceAlongLane, LaneLocationFragment.LaneLength, RadiusFragment.Radius, RandomFractionFragment.RandomFraction, MassTrafficSettings.StoppingDistanceRange))
 			{
 				return;
@@ -103,11 +120,6 @@ namespace
 				VehicleControlFragment.MinVehicleStopSignRestTime = RandomStream.FRandRange(MassTrafficSettings.LowerMinStopSignRestTime, MassTrafficSettings.UpperMinStopSignRestTime);
 				MassTrafficSubsystem.AddVehicleEntityToIntersectionStopQueue(VehicleControlFragment.VehicleEntityHandle, VehicleControlFragment.NextLane->IntersectionEntityHandle);
 			}
-		}
-		// If we *just* ceased being stopped, ...
-		else if (!VehicleControlFragment.IsVehicleCurrentlyStopped() && VehicleControlFragment.WasVehiclePreviouslyStopped())
-		{
-			VehicleControlFragment.ClearVehicleStoppedState();
 		}
 		
 		if (CurrentLaneData->ConstData.bIsIntersectionLane)
