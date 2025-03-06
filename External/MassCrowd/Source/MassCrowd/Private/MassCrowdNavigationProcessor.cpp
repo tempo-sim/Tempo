@@ -68,6 +68,10 @@ void UMassCrowdLaneTrackingSignalProcessor::SignalEntities(FMassEntityManager& E
 //----------------------------------------------------------------------//
 // UMassCrowdUpdateTrackingLaneProcessor
 //----------------------------------------------------------------------//
+
+// Important:  UMassCrowdUpdateTrackingLaneProcessor is meant to run before
+// UMassTrafficVehicleControlProcessor and UMassTrafficCrowdYieldProcessor.
+// So, this must be setup in DefaultMass.ini.
 UMassCrowdUpdateTrackingLaneProcessor::UMassCrowdUpdateTrackingLaneProcessor()
 	: EntityQuery(*this)
 {

@@ -1068,13 +1068,14 @@ bool ShouldPerformReactiveYieldAtIntersection(
 			return true;
 		}
 
-		if (!ensureMsgf(
-			CrowdTrackingLaneData->LeadEntityHandle.IsSet()
+		// When Pedestrians change onto their new lanes during the frame,
+		// we might not have all the properties for the Pedestrian yet.
+		// In that case, these will get set next frame.
+		if (!(CrowdTrackingLaneData->LeadEntityHandle.IsSet()
 			&& CrowdTrackingLaneData->LeadEntityDistanceAlongLane.IsSet()
 			&& CrowdTrackingLaneData->LeadEntitySpeedAlongLane.IsSet()
 			&& CrowdTrackingLaneData->LeadEntityAccelerationAlongLane.IsSet()
-			&& CrowdTrackingLaneData->LeadEntityRadius.IsSet(),
-			TEXT("Since CrowdTrackingLaneData has Entities on the lane, required LeadEntity properties must be set in IsDownstreamCrosswalkLaneClear.  TestDownstreamCrosswalkLane.Index: %d."), TestDownstreamCrosswalkLane.Index))
+			&& CrowdTrackingLaneData->LeadEntityRadius.IsSet()))
 		{
 			// Since there are Entities on the test lane, but we can't determine the necessary properties
 			// about the lead Entity, we just wait until all Entities fully clear the test lane
@@ -1082,13 +1083,14 @@ bool ShouldPerformReactiveYieldAtIntersection(
 			return false;
 		}
 
-		if (!ensureMsgf(
-			CrowdTrackingLaneData->TailEntityHandle.IsSet()
+		// When Pedestrians change onto their new lanes during the frame,
+		// we might not have all the properties for the Pedestrian yet.
+		// In that case, these will get set next frame.
+		if (!(CrowdTrackingLaneData->TailEntityHandle.IsSet()
 			&& CrowdTrackingLaneData->TailEntityDistanceAlongLane.IsSet()
 			&& CrowdTrackingLaneData->TailEntitySpeedAlongLane.IsSet()
 			&& CrowdTrackingLaneData->TailEntityAccelerationAlongLane.IsSet()
-			&& CrowdTrackingLaneData->TailEntityRadius.IsSet(),
-			TEXT("Since CrowdTrackingLaneData has Entities on the lane, required TailEntity properties must be set in IsDownstreamCrosswalkLaneClear.  TestDownstreamCrosswalkLane.Index: %d."), TestDownstreamCrosswalkLane.Index))
+			&& CrowdTrackingLaneData->TailEntityRadius.IsSet()))
 		{
 			// Since there are Entities on the test lane, but we can't determine the necessary properties
 			// about the tail Entity, we just wait until all Entities fully clear the test lane

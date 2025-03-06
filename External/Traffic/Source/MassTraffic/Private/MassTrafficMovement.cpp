@@ -577,8 +577,24 @@ bool ShouldVehicleMergeOntoLane(
 		
 		if (ConflictLaneData->NumVehiclesOnLane > 0)
 		{
-			if (!ensureMsgf(
-				ConflictLaneData->LeadVehicleEntityHandle.IsSet()
+			// Since there are vehicles on the lane (ie. ConflictLaneData.NumVehiclesOnLane > 0),
+			// we'd like to be able to ensure that all the LeadVehicle properties are set, here.
+			// But, we can't, because NumVehiclesOnLane gets updated at two different spots in the frame,
+			// depending on the vehicle's current representation.  That is, for vehicles in "Simple" representation,
+			// UMassTrafficVehicleControlProcessor calls UE::MassTraffic::MoveVehicleToNextLane,
+			// which will update NumVehiclesOnLane.  And, in "PID" representation,
+			// UMassTrafficPostPhysicsUpdateTrafficVehiclesProcessor calls UE::MassTraffic::MoveVehicleToNextLane
+			// later in the frame.
+			// So, first the "LeadVehicle" data is set on the lanes in UMassTrafficLaneMetadataProcessor,
+			// then UMassTrafficVehicleControlProcessor consumes it,
+			// then UMassTrafficCrowdYieldProcessor consumes it.  (According to the proper config in DefaultMass.ini.)
+			// However, for simple vehicles that just cross over onto their next lane,
+			// NumVehiclesOnLane will be incremented on those lanes before being evaluated
+			// here as part of the UMassTrafficVehicleControlProcessor's execution.
+			// But, those lanes won't have their "LeadVehicle" data set for another frame,
+			// in the case that there were no vehicles on the lane, and now there is 1 simple vehicle.
+			// So, it's valid just to skip evaluating this lane until the "LeadVehicle" data is available next frame.
+			if (!(ConflictLaneData->LeadVehicleEntityHandle.IsSet()
 				&& ConflictLaneData->LeadVehicleDistanceAlongLane.IsSet()
 				&& ConflictLaneData->LeadVehicleAccelerationEstimate.IsSet()
 				&& ConflictLaneData->LeadVehicleSpeed.IsSet()
@@ -587,8 +603,7 @@ bool ShouldVehicleMergeOntoLane(
 				&& ConflictLaneData->LeadVehicleNextLane.IsSet()
 				&& ConflictLaneData->LeadVehicleStopSignIntersectionLane.IsSet()
 				&& ConflictLaneData->LeadVehicleRandomFraction.IsSet()
-				&& ConflictLaneData->LeadVehicleIsNearStopLineAtIntersection.IsSet(),
-				TEXT("Since ConflictLaneData has vehicles, required LeadVehicle properties must be set in ShouldVehicleMergeOntoLane.  ConflictLaneData->LaneHandle.Index: %d."), ConflictLaneData->LaneHandle.Index))
+				&& ConflictLaneData->LeadVehicleIsNearStopLineAtIntersection.IsSet()))
 			{
 				continue;
 			}
@@ -617,8 +632,24 @@ bool ShouldVehicleMergeOntoLane(
 				continue;
 			}
 
-			if (!ensureMsgf(
-				ConflictPredecessorLane->LeadVehicleEntityHandle.IsSet()
+			// Since there are vehicles on the lane (ie. ConflictPredecessorLane.NumVehiclesOnLane > 0),
+			// we'd like to be able to ensure that all the LeadVehicle properties are set, here.
+			// But, we can't, because NumVehiclesOnLane gets updated at two different spots in the frame,
+			// depending on the vehicle's current representation.  That is, for vehicles in "Simple" representation,
+			// UMassTrafficVehicleControlProcessor calls UE::MassTraffic::MoveVehicleToNextLane,
+			// which will update NumVehiclesOnLane.  And, in "PID" representation,
+			// UMassTrafficPostPhysicsUpdateTrafficVehiclesProcessor calls UE::MassTraffic::MoveVehicleToNextLane
+			// later in the frame.
+			// So, first the "LeadVehicle" data is set on the lanes in UMassTrafficLaneMetadataProcessor,
+			// then UMassTrafficVehicleControlProcessor consumes it,
+			// then UMassTrafficCrowdYieldProcessor consumes it.  (According to the proper config in DefaultMass.ini.)
+			// However, for simple vehicles that just cross over onto their next lane,
+			// NumVehiclesOnLane will be incremented on those lanes before being evaluated
+			// here as part of the UMassTrafficVehicleControlProcessor's execution.
+			// But, those lanes won't have their "LeadVehicle" data set for another frame,
+			// in the case that there were no vehicles on the lane, and now there is 1 simple vehicle.
+			// So, it's valid just to skip evaluating this lane until the "LeadVehicle" data is available next frame.
+			if (!(ConflictPredecessorLane->LeadVehicleEntityHandle.IsSet()
 				&& ConflictPredecessorLane->LeadVehicleDistanceAlongLane.IsSet()
 				&& ConflictPredecessorLane->LeadVehicleAccelerationEstimate.IsSet()
 				&& ConflictPredecessorLane->LeadVehicleSpeed.IsSet()
@@ -627,8 +658,7 @@ bool ShouldVehicleMergeOntoLane(
 				&& ConflictPredecessorLane->LeadVehicleNextLane.IsSet()
 				&& ConflictPredecessorLane->LeadVehicleStopSignIntersectionLane.IsSet()
 				&& ConflictPredecessorLane->LeadVehicleRandomFraction.IsSet()
-				&& ConflictPredecessorLane->LeadVehicleIsNearStopLineAtIntersection.IsSet(),
-				TEXT("Since ConflictPredecessorLane has vehicles, required LeadVehicle properties must be set in ShouldVehicleMergeOntoLane.  ConflictPredecessorLane->LaneHandle.Index: %d."), ConflictPredecessorLane->LaneHandle.Index))
+				&& ConflictPredecessorLane->LeadVehicleIsNearStopLineAtIntersection.IsSet()))
 			{
 				continue;
 			}

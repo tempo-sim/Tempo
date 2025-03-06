@@ -14,6 +14,8 @@
 #include "MassTrafficLaneChange.h"
 
 
+// Important:  UMassTrafficCrowdYieldProcessor is meant to run after UMassTrafficVehicleControlProcessor.
+// So, this must be setup in DefaultMass.ini.
 UMassTrafficCrowdYieldProcessor::UMassTrafficCrowdYieldProcessor()
 	: EntityQuery(*this)
 {
@@ -100,15 +102,30 @@ void UMassTrafficCrowdYieldProcessor::Execute(FMassEntityManager& EntityManager,
 				{
 					return false;
 				}
-				
-				if (!ensureMsgf(CurrentTrafficLaneData.LeadVehicleDistanceAlongLane.IsSet()
+
+				// Since there are vehicles on the lane (ie. CurrentTrafficLaneData.NumVehiclesOnLane > 0),
+				// we'd like to be able to ensure that all the LeadVehicle properties are set, here.
+				// But, we can't, because NumVehiclesOnLane gets updated at two different spots in the frame,
+				// depending on the vehicle's current representation.  That is, for vehicles in "Simple" representation,
+				// UMassTrafficVehicleControlProcessor calls UE::MassTraffic::MoveVehicleToNextLane,
+				// which will update NumVehiclesOnLane.  And, in "PID" representation,
+				// UMassTrafficPostPhysicsUpdateTrafficVehiclesProcessor calls UE::MassTraffic::MoveVehicleToNextLane
+				// later in the frame.
+				// So, first the "LeadVehicle" data is set on the lanes in UMassTrafficLaneMetadataProcessor,
+				// then UMassTrafficVehicleControlProcessor consumes it,
+				// then UMassTrafficCrowdYieldProcessor consumes it.  (According to the proper config in DefaultMass.ini.)
+				// However, for simple vehicles that just cross over onto their next lane,
+				// NumVehiclesOnLane will be incremented on those lanes before being evaluated
+				// by UMassTrafficCrowdYieldProcessor.
+				// But, those lanes won't have their "LeadVehicle" data set for another frame,
+				// in the case that there were no vehicles on the lane, and now there is 1 simple vehicle.
+				if (!(CurrentTrafficLaneData.LeadVehicleDistanceAlongLane.IsSet()
 					&& CurrentTrafficLaneData.LeadVehicleSpeed.IsSet()
-					&& CurrentTrafficLaneData.LeadVehicleRadius.IsSet(),
-					TEXT("Since CurrentTrafficLaneData has vehicles, LeadVehicleDistanceAlongLane must be set in UMassTrafficCrowdYieldProcessor::Execute.  CurrentTrafficLaneData.LaneHandle.Index: %d."), CurrentTrafficLaneData.LaneHandle.Index))
+					&& CurrentTrafficLaneData.LeadVehicleRadius.IsSet()))
 				{
 					// Since there are vehicles on the incoming vehicle lane,
 					// we would like to determine in detail if we should yield to them.
-					// However, we hit an ensure, so we will just yield until the vehicles clear,
+					// However, something went wrong, so we will just yield until the vehicles clear,
 					// if they are not yielding.
 					return true;
 				}
@@ -250,8 +267,7 @@ void UMassTrafficCrowdYieldProcessor::Execute(FMassEntityManager& EntityManager,
 							continue;
 						}
 
-						if (!ensureMsgf(PredecessorTrafficLaneData->LeadVehicleNextLane.IsSet(),
-							TEXT("Since PredecessorTrafficLaneData has vehicles, required LeadVehicle properties must be set in UMassTrafficCrowdYieldProcessor::Execute.  PredecessorTrafficLaneData->LaneHandle.Index: %d PredecessorTrafficLaneData->LaneHandle.DataHandle.Index: %d PredecessorTrafficLaneData->LaneHandle.DataHandle.Generation: %d."), PredecessorTrafficLaneData->LaneHandle.Index, PredecessorTrafficLaneData->LaneHandle.DataHandle.Index, PredecessorTrafficLaneData->LaneHandle.DataHandle.Generation))
+						if (!PredecessorTrafficLaneData->LeadVehicleNextLane.IsSet())
 						{
 							continue;
 						}

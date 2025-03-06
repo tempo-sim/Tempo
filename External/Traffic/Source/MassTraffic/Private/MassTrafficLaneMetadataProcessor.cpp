@@ -15,6 +15,10 @@
 //----------------------------------------------------------------------//
 // UMassTrafficLaneMetadataProcessor
 //----------------------------------------------------------------------//
+
+// Important:  UMassTrafficLaneMetadataProcessor is meant to run before
+// UMassTrafficVehicleControlProcessor and UMassTrafficCrowdYieldProcessor.
+// So, this must be setup in DefaultMass.ini.
 UMassTrafficLaneMetadataProcessor::UMassTrafficLaneMetadataProcessor()
 	: EntityQuery(*this)
 {

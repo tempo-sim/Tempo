@@ -213,6 +213,8 @@ namespace
 }
 
 
+// Important:  UMassTrafficVehicleControlProcessor is meant to run before UMassTrafficCrowdYieldProcessor.
+// So, this must be setup in DefaultMass.ini.
 UMassTrafficVehicleControlProcessor::UMassTrafficVehicleControlProcessor()
 	: SimpleVehicleControlEntityQuery_Conditional(*this)
 	, PIDVehicleControlEntityQuery_Conditional(*this)
