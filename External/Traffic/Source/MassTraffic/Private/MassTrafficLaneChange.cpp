@@ -1041,7 +1041,7 @@ bool ShouldPerformReactiveYieldAtIntersection(
 		return CrosswalkLaneInfo->IsAnyEntityOnCrosswalkYieldingToLane(CurrentLaneData->LaneHandle);
 	};
 	
-	const auto& IsDownstreamCrosswalkLaneClear = [&MassTrafficSubsystem, &MassCrowdSubsystem, &CurrentLaneData, &IntersectionLaneData, &VehicleControlFragment, &LaneLocationFragment, &RadiusFragment, &ZoneGraphStorage, MassTrafficSettings](const FZoneGraphLaneHandle& TestDownstreamCrosswalkLane)
+	const auto& IsDownstreamCrosswalkLaneClear = [&MassTrafficSubsystem, &MassCrowdSubsystem, &CurrentLaneData, &IntersectionLaneData, &VehicleControlFragment, &LaneLocationFragment, &RadiusFragment, &ZoneGraphStorage, &RandomFractionFragment, MassTrafficSettings](const FZoneGraphLaneHandle& TestDownstreamCrosswalkLane)
 	{
 		if (!ensureMsgf(CurrentLaneData->Length > 0.0f && LaneLocationFragment.LaneLength > 0.0f, TEXT("CurrentLane should have a length greater than zero.")))
 		{
@@ -1137,26 +1137,51 @@ bool ShouldPerformReactiveYieldAtIntersection(
 				VehicleExitTime);
 		}
 
-		// Once we've entered the crosswalk lane, or we've gone past it,
-		// we don't consider yielding to it anymore.
-		if (VehicleEnterDistance < 0.0f)
-		{
-			return true;
-		}
-
-		// We just say the crosswalk lane is clear from our perspective
-		// if we won't enter the lane until after some specified horizon time.
-		// Note:  This time should be set, such that it would be sufficient to fully brake to a stop.
-		if (VehicleEnterTime > MassTrafficSettings->VehicleCrosswalkYieldLookAheadTime)
-		{
-			return true;
-		}
-
 		// Don't consider yielding at stop sign controlled intersections
 		// until after the vehicle has completed its stop sign rest behavior.
-		if (IntersectionLaneData->HasTrafficSignThatRequiresStop())
+		if (CurrentLaneData != IntersectionLaneData)
 		{
-			if (CurrentLaneData != IntersectionLaneData && VehicleControlFragment.StopSignIntersectionLane != IntersectionLaneData)
+			const bool bVehicleIsNearStopLineAtIntersection = IsVehicleNearStopLineAtIntersection(
+				IntersectionLaneData,
+				LaneLocationFragment.DistanceAlongLane,
+				CurrentLaneData->Length,
+				RadiusFragment.Radius,
+				RandomFractionFragment.RandomFraction.GetFloat(),
+				MassTrafficSettings->StoppingDistanceRange);
+		
+			// If our intersection lane has a stop sign requirement, ...
+			if (IntersectionLaneData->HasTrafficSignThatRequiresStop())
+			{
+				// If we're not near the stop line, or we are, but we haven't completed our stop sign rest behavior, ...
+				if (!bVehicleIsNearStopLineAtIntersection || VehicleControlFragment.StopSignIntersectionLane != IntersectionLaneData)
+				{
+					// We should consider the crosswalk lane to be clear from our perspective.
+					return true;
+				}
+			}
+			else
+			{
+				// If we have a yield sign, but no pedestrians around, and therefore no reason to yield at the sign, ...
+				if (IntersectionLaneData->ConstData.TrafficControllerSignType == EMassTrafficControllerSignType::YieldSign)
+				{
+					// Then, we only need to wait until we're near the stop line,
+					// before we should consider yielding to the crosswalk lanes.
+					if (!bVehicleIsNearStopLineAtIntersection)
+					{
+						// Until then, we should consider the crosswalk lanes to be clear from our perspective.
+						return true;
+					}
+				}
+			}
+		}
+
+		// If our lane doesn't have a stop sign or yield sign, ...
+		if (!IntersectionLaneData->HasStopSignOrYieldSign())
+		{
+			// We just say the crosswalk lane is clear from our perspective
+			// if we won't enter the lane until after some specified horizon time.
+			// Note:  This time should be set, such that it would be sufficient to fully brake to a stop.
+			if (VehicleEnterTime > MassTrafficSettings->VehicleCrosswalkYieldLookAheadTime)
 			{
 				return true;
 			}
@@ -1243,13 +1268,33 @@ bool ShouldPerformReactiveYieldAtIntersection(
 			return false;
 		}
 
+		// If we can't get the crosswalk lane width,
+		// we need to wait until they completely clear the crosswalk lane before proceeding
+		// since we're missing the necessary information to safely navigate past them before that.
+		float TestDownstreamCrosswalkLaneWidth;
+		if (!UE::ZoneGraph::Query::GetLaneWidth(ZoneGraphStorage, TestDownstreamCrosswalkLane, TestDownstreamCrosswalkLaneWidth))
+		{
+			return false;
+		}
+
 		const bool bPedestrianIsInVehicleLane = PedestrianEnterDistance <= 0.0f && PedestrianExitDistance > 0.0f;
 
 		const bool bInTimeConflictWithPedestrian = (VehicleExitTime >= 0.0f && PedestrianExitTime >= 0.0f)
 			&& (VehicleEnterTime < TNumericLimits<float>::Max() && PedestrianEnterTime < TNumericLimits<float>::Max())
 			&& VehicleEnterTime < PedestrianExitTime + MassTrafficSettings->VehicleCrosswalkYieldTimeBuffer && PedestrianEnterTime < VehicleExitTime + MassTrafficSettings->VehicleCrosswalkYieldTimeBuffer;
-		
-		const bool bInDistanceConflictWithPedestrian = bPedestrianIsInVehicleLane && VehicleEnterDistance < MassTrafficSettings->VehiclePedestrianBufferDistanceOnCrosswalk && VehicleEnterDistance > 0.0f;
+
+		// In basic terms, we want to say that we're in "distance conflict" with a pedestrian,
+		// if the pedestrian is in our lane, and we're "relatively close",
+		// but not if we've already entered the crosswalk lane.
+		// However, we need the vehicle to still recognize the "distance conflict" even if it
+		// has somewhat entered the crosswalk lane.  This will prevent vehicles,
+		// which have "crept" into the crosswalk, while waiting for an opportunity to merge,
+		// from running-over pedestrians, which may have crossed in front of the vehicle, during this time.
+		// So, we allow a vehicle to go "half-way" into a crosswalk lane before completely ignoring any pedestrians
+		// that may be in the vehicle lane.  If pedestrians are already there, the vehicle will yield.
+		// And, if pedestrians walk towards the vehicle's lane, they will yield to the vehicle before entering,
+		// if the vehicle is "far enough" into the crosswalk lane.
+		const bool bInDistanceConflictWithPedestrian = bPedestrianIsInVehicleLane && VehicleEnterDistance < MassTrafficSettings->VehiclePedestrianBufferDistanceOnCrosswalk && VehicleEnterDistance > -TestDownstreamCrosswalkLaneWidth * 0.5f;
 		
 		if (bInTimeConflictWithPedestrian || bInDistanceConflictWithPedestrian)
 		{
