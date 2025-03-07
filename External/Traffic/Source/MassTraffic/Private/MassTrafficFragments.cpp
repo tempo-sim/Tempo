@@ -606,7 +606,10 @@ void FMassTrafficSignIntersectionFragment::RestartIntersection(UMassCrowdSubsyst
 	{
 		if (IntersectionSide.TrafficControllerSignType == EMassTrafficControllerSignType::None)
 		{
-			// TODO:  How can I close the crosswalk lanes without telling the pedestrians to queue up in the crosswalk waiting lanes?  Right now, I'm just passing a pedestrian action of EMassTrafficControllerLanesAction::None. 
+			// Note:  We'd like to close the crosswalk lanes, here.  However, if we do, that triggers pedestrians to start queueing up on the crosswalk waiting lanes.
+			// So, for now, we're just passing a PedestrianLanesAction of EMassTrafficControllerLanesAction::None.  This will prevent the pedestrians from queuing up
+			// on the crosswalk waiting lanes.  But, it also results in a side effect where occasionally pedestrians walk up to the crosswalk waiting lanes
+			// and immediately turn around and walk somewhere else.  But, this is fine for now.
 			ApplyLanesActionToIntersectionSide(IntersectionSide, EMassTrafficControllerLanesAction::Open, EMassTrafficControllerLanesAction::None, MassCrowdSubsystem, true);
 		}
 		else if (IntersectionSide.TrafficControllerSignType == EMassTrafficControllerSignType::StopSign)
