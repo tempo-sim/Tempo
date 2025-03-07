@@ -208,8 +208,6 @@ void UMassCrowdUpdateTrackingLaneProcessor::Execute(FMassEntityManager& EntityMa
 		{
 			FCrowdTrackingLaneData* LeadEntityCrowdTrackingLaneData = MassCrowdSubsystem.GetMutableCrowdTrackingLaneData(LeadEntityLaneLocation.LaneHandle);
 			
-			// TODO:  Should usually be an ensure, but we hit this every time in an early cycle (presumably before the MassCrowd lane data is setup).
-			// if (!ensureMsgf(LeadEntityCrowdTrackingLaneData != nullptr, TEXT("Must get valid LeadEntityCrowdTrackingLaneData in UMassCrowdUpdateTrackingLaneProcessor::Execute.")))
 			if (LeadEntityCrowdTrackingLaneData == nullptr)
 			{
 				continue;
@@ -255,8 +253,6 @@ void UMassCrowdUpdateTrackingLaneProcessor::Execute(FMassEntityManager& EntityMa
 		{
 			FCrowdTrackingLaneData* TailEntityCrowdTrackingLaneData = MassCrowdSubsystem.GetMutableCrowdTrackingLaneData(TailEntityLaneLocation.LaneHandle);
 			
-			// TODO:  Should usually be an ensure, but I removed it in unison with the one for the LeadEntity.  Look there for a description.
-			// if (!ensureMsgf(TailEntityCrowdTrackingLaneData != nullptr, TEXT("Must get valid TailEntityCrowdTrackingLaneData in UMassCrowdUpdateTrackingLaneProcessor::Execute.")))
 			if (TailEntityCrowdTrackingLaneData == nullptr)
 			{
 				continue;
