@@ -8,6 +8,7 @@
 #include "MassExecutionContext.h"
 #include "MassZoneGraphNavigationFragments.h"
 #include "MassTrafficLaneChange.h"
+#include "MassGameplayExternalTraits.h"
 
 namespace
 {
