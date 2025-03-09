@@ -159,13 +159,6 @@ void UMassTrafficCrowdYieldProcessor::Execute(FMassEntityManager& EntityManager,
 				}
 				
 				const bool bVehicleIsInCrosswalkLane = VehicleEnterDistance <= 0.0f && VehicleExitDistance > 0.0f;
-				
-				// If this lane already has yielding vehicles,
-				// we don't need to yield to them, if they're not in the way.
-				if (CurrentTrafficLaneData.HasYieldingVehicles() && !bVehicleIsInCrosswalkLane)
-				{
-					return false;
-				}
 
 				FZoneGraphLaneLocation PedestrianZoneGraphLaneLocation;
 				UE::ZoneGraph::Query::CalculateLocationAlongLane(*ZoneGraphStorage, LaneLocationFragment.LaneHandle, LaneLocationFragment.DistanceAlongLane, PedestrianZoneGraphLaneLocation);
