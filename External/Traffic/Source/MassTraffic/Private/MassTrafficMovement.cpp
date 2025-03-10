@@ -109,6 +109,8 @@ bool IsVehicleEligibleToMergeOntoLane(
 		return false;
 	}
 
+	// Note:  This condition should be removed when we're ready to test
+	// the merge behavior at traffic light intersections.
 	if (DesiredLaneData->ConstData.bIsTrafficLightControlled)
 	{
 		return false;
