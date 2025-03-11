@@ -366,8 +366,12 @@ void UMassTrafficVehiclePhysicsProcessor::Execute(FMassEntityManager& EntityMana
 				// Update velocity of vehicle
 				UpdateCoMVelocity(DeltaTime, SimplePhysicsVehicleFragment, TransformFragment, VelocityFragment, AngularVelocityFragment, VehicleWorldTransform);
 
-				// Update speed from velocity 
-				VehicleControlFragment.Speed = VelocityFragment.Value.Size();
+				// Update speed from planar velocity
+				const FVector LanePlaneNormal = RawLaneLocationTransform.GetRotation().GetUpVector();
+				const float SpeedInPlaneNormalDirection = FVector::DotProduct(VelocityFragment.Value, LanePlaneNormal);
+				const FVector LanePlaneVelocity = VelocityFragment.Value - (LanePlaneNormal * SpeedInPlaneNormalDirection);
+				
+				VehicleControlFragment.Speed = LanePlaneVelocity.Size();
 			}
 		});
 	}

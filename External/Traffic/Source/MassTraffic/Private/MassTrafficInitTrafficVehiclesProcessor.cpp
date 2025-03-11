@@ -100,6 +100,10 @@ void UMassTrafficInitTrafficVehiclesProcessor::Execute(FMassEntityManager& Entit
 			FMassTrafficRandomFractionFragment& RandomFractionFragment = RandomFractionFragments[Index];
 			FTransformFragment& TransformFragment = TransformFragments[Index];
 
+			// Cache the vehicle's EntityHandle
+			const FMassEntityHandle VehicleEntityHandle = Context.GetEntity(Index);
+			VehicleControlFragment.VehicleEntityHandle = VehicleEntityHandle;
+
 			// Init random fraction
 			RandomFractionFragment.RandomFraction = RandomStream.GetFraction();
 

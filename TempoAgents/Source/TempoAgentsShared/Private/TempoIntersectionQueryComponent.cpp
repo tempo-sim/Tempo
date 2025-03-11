@@ -1336,6 +1336,71 @@ int32 UTempoIntersectionQueryComponent::GetConnectionIndexFromCrosswalkIntersect
 	return ConnectionIndex;
 }
 
+bool UTempoIntersectionQueryComponent::TryGetCanonicalStartingConnectionIndex(const AActor* IntersectionQueryActor, int32& OutStartingConnectionIndex) const
+{
+	if (IntersectionQueryActor == nullptr)
+	{
+		return false;
+	}
+
+	const int32 NumConnections = ITempoIntersectionInterface::Execute_GetNumTempoConnections(IntersectionQueryActor);
+
+	if (NumConnections == 3)
+	{
+		float MinDotProduct = TNumericLimits<float>::Max();
+		int32 BaseOfTIndex = INDEX_NONE;
+		
+		for (int32 ConnectionIndex = 0; ConnectionIndex < NumConnections; ++ConnectionIndex)
+		{
+			const int32 NextConnectionIndex = (ConnectionIndex + 1) % NumConnections;
+			const int32 NextNextConnectionIndex = (ConnectionIndex + 2) % NumConnections;
+			
+			const FVector NextConnectionDirectionIntoIntersection = ITempoIntersectionInterface::Execute_GetTempoIntersectionEntranceTangent(IntersectionQueryActor, NextConnectionIndex, ETempoCoordinateSpace::World).GetSafeNormal();
+			const FVector NextNextConnectionDirectionIntoIntersection = ITempoIntersectionInterface::Execute_GetTempoIntersectionEntranceTangent(IntersectionQueryActor, NextNextConnectionIndex, ETempoCoordinateSpace::World).GetSafeNormal();
+
+			const float DotProduct = FVector::DotProduct(NextConnectionDirectionIntoIntersection, NextNextConnectionDirectionIntoIntersection);
+			if (DotProduct < MinDotProduct)
+			{
+				MinDotProduct = DotProduct;
+				BaseOfTIndex = ConnectionIndex;
+			}
+		}
+
+		if (!ensureMsgf(BaseOfTIndex != INDEX_NONE, TEXT("Must find BaseOfTIndex for T-intersection in UTempoIntersectionQueryComponent::TryGetCanonicalStartingConnectionIndex.")))
+		{
+			return false;
+		}
+		
+		OutStartingConnectionIndex = BaseOfTIndex;
+	}
+	else
+	{
+		float MaxDotProduct = TNumericLimits<float>::Lowest();
+		int32 StartingIndex = INDEX_NONE;
+		
+		for (int32 ConnectionIndex = 0; ConnectionIndex < NumConnections; ++ConnectionIndex)
+		{
+			const FVector ConnectionDirectionOutOfIntersection = -ITempoIntersectionInterface::Execute_GetTempoIntersectionEntranceTangent(IntersectionQueryActor, ConnectionIndex, ETempoCoordinateSpace::World).GetSafeNormal();
+
+			// ConnectionDirectionOutOfIntersection.X is effectively the dot product of ConnectionDirectionOutOfIntersection with the World X-Vector.
+			if (ConnectionDirectionOutOfIntersection.X > MaxDotProduct)
+			{
+				MaxDotProduct = ConnectionDirectionOutOfIntersection.X;
+				StartingIndex = ConnectionIndex;
+			}
+		}
+
+		if (!ensureMsgf(StartingIndex != INDEX_NONE, TEXT("Must find StartingIndex for intersection in UTempoIntersectionQueryComponent::TryGetCanonicalStartingConnectionIndex.")))
+		{
+			return false;
+		}
+
+		OutStartingConnectionIndex = StartingIndex;
+	}
+
+	return true;
+}
+
 bool UTempoIntersectionQueryComponent::TryGetNearestRoadControlPointIndex(const AActor& IntersectionQueryActor, int32 ConnectionIndex, int32& OutNearestRoadControlPointIndex) const
 {
 	AActor* RoadActor = GetConnectedRoadActor(IntersectionQueryActor, ConnectionIndex);

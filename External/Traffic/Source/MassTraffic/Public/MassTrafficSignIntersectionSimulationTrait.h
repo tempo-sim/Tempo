@@ -4,10 +4,10 @@
 
 #include "MassEntityTraitBase.h"
 
-#include "MassTrafficIntersectionSimulationTrait.generated.h"
+#include "MassTrafficSignIntersectionSimulationTrait.generated.h"
 
-UCLASS(meta=(DisplayName="Traffic Intersection Simulation"))
-class MASSTRAFFIC_API UMassTrafficIntersectionSimulationTrait : public UMassEntityTraitBase
+UCLASS(meta=(DisplayName="Traffic Sign Intersection Simulation"))
+class MASSTRAFFIC_API UMassTrafficSignIntersectionSimulationTrait : public UMassEntityTraitBase
 {
 	GENERATED_BODY()
 
