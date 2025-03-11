@@ -152,10 +152,9 @@ bool ShouldVehicleMergeOntoLane(
 	const FVector2D& StoppingDistanceRange,
 	const FZoneGraphStorage& ZoneGraphStorage,
 	FZoneGraphLaneHandle& OutYieldTargetLane,
-	FMassEntityHandle& OutYieldTargetEntity,
 	int32& OutMergeYieldCaseIndex);
 
-MASSTRAFFIC_API bool ShouldStopAtNextStopLine(
+MASSTRAFFIC_API bool ShouldStopAtLaneExit(
 	float DistanceAlongLane,
 	float Speed,
 	float Radius,
@@ -165,7 +164,8 @@ MASSTRAFFIC_API bool ShouldStopAtNextStopLine(
 	const FZoneGraphTrafficLaneData* ReadiedNextIntersectionLane,
 	const FVector2D& MinimumDistanceToNextVehicleRange,
 	const FVector2D& StoppingDistanceRange,
-	const FMassEntityManager& EntityManager, 
+	const FMassEntityManager& EntityManager,
+	FZoneGraphTrafficLaneData*& InOut_StopSignIntersectionLane,
 	bool& bOut_RequestDifferentNextLane,
 	bool& bInOut_CantStopAtLaneExit,
 	bool& bOut_IsFrontOfVehicleBeyondLaneExit,
@@ -175,6 +175,8 @@ MASSTRAFFIC_API bool ShouldStopAtNextStopLine(
 	const float StandardTrafficPrepareToStopSeconds,
 	const float TimeVehicleStopped,
 	const float MinVehicleStopSignRestTime,
+	const FMassEntityHandle& VehicleEntityHandle,
+	const FMassEntityHandle& NextVehicleEntityHandleInStopQueue,
 	const UWorld* World
 #if WITH_MASSTRAFFIC_DEBUG
 	, bool bVisLog = false
@@ -197,7 +199,6 @@ MASSTRAFFIC_API void UpdateYieldAtIntersectionState(
 	FMassTrafficVehicleControlFragment& VehicleControlFragment,
 	const FZoneGraphLaneHandle& CurrentLaneHandle,
 	const FZoneGraphLaneHandle& YieldTargetLaneHandle,
-	const FMassEntityHandle& YieldTargetEntity,
 	const bool bShouldReactivelyYieldAtIntersection,
 	const bool bShouldGiveOpportunityForTurningVehiclesToReactivelyYieldAtIntersection);
 

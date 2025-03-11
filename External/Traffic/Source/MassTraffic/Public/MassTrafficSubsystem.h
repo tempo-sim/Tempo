@@ -17,6 +17,14 @@ class UMassTrafficFieldComponent;
 class UMassTrafficFieldOperationBase;
 struct FMassEntityManager;
 
+struct FMassTrafficLaneIntersectionInfo
+{
+	FMassTrafficLaneIntersectionInfo() = default;
+
+	float EnterDistance = 0.0f;
+	float ExitDistance = 0.0f;
+};
+
 struct FMassTrafficCrosswalkLaneInfo
 {
 	FMassTrafficCrosswalkLaneInfo() = default;
@@ -116,6 +124,11 @@ struct FMassTrafficCrosswalkLaneInfo
 		}
 		
 		return *EntityYieldResumeSpeed;
+	}
+
+	FORCEINLINE int32 GetNumEntitiesYieldingOnCrosswalkLane() const
+	{
+		return YieldingEntityToIncomingVehicleLaneMap.Num();
 	}
 };
 
@@ -249,6 +262,36 @@ public:
 
 	const FMassTrafficCrosswalkLaneInfo* GetCrosswalkLaneInfo(const FZoneGraphLaneHandle& CrosswalkLane) const;
 	FMassTrafficCrosswalkLaneInfo* GetMutableCrosswalkLaneInfo(const FZoneGraphLaneHandle& CrosswalkLane);
+
+	bool IsPedestrianYieldingOnCrosswalkLane(const FMassEntityHandle& PedestrianEntityHandle, const FZoneGraphLaneHandle& CrosswalkLane) const;
+	bool TryGetPedestrianDesiredSpeedOnCrosswalkLane(const FMassEntityHandle& PedestrianEntityHandle, const FZoneGraphLaneHandle& CrosswalkLane, float& OutDesiredSpeed) const;
+
+	float GetPedestrianEffectiveSpeedOnCrosswalkLane(const FMassEntityHandle& PedestrianEntityHandle, const FZoneGraphLaneHandle& CrosswalkLane, const float CurrentSpeed) const;
+
+	void AddVehicleEntityToIntersectionStopQueue(const FMassEntityHandle& VehicleEntityHandle, const FMassEntityHandle& IntersectionEntityHandle);
+	void RemoveVehicleEntityFromIntersectionStopQueue(const FMassEntityHandle& VehicleEntityHandle, const FMassEntityHandle& IntersectionEntityHandle);
+	void ClearIntersectionStopQueues();
+	
+	FMassEntityHandle GetNextVehicleEntityInIntersectionStopQueue(const FMassEntityHandle& IntersectionEntityHandle) const;
+	bool IsVehicleEntityInIntersectionStopQueue(const FMassEntityHandle& VehicleEntityHandle, const FMassEntityHandle& IntersectionEntityHandle) const;
+	
+	void AddLaneIntersectionInfo(const FZoneGraphLaneHandle& QueryLane, const FZoneGraphLaneHandle& DestLane, const FMassTrafficLaneIntersectionInfo& LaneIntersectionInfo);
+	bool TryGetLaneIntersectionInfo(const FZoneGraphLaneHandle& QueryLane, const FZoneGraphLaneHandle& DestLane, FMassTrafficLaneIntersectionInfo& OutLaneIntersectionInfo) const;
+	void ClearLaneIntersectionInfo();
+	
+	void AddYieldInfo(const FMassEntityHandle& YieldingEntity, const FZoneGraphLaneHandle& YieldingLane, const FZoneGraphLaneHandle& YieldTargetLane);
+	void ClearYieldInfo();
+
+	const TMap<FZoneGraphLaneHandle, TSet<FZoneGraphLaneHandle>>& GetLaneYieldMap() const;
+	const TMap<FZoneGraphLaneHandle, TSet<FMassEntityHandle>>& GetYieldingEntitiesMap() const;
+
+	void AddEntityToLaneYieldOverrideMap(const FZoneGraphLaneHandle& LaneHandle, const FMassEntityHandle& YieldOverrideEntity);
+	void ClearYieldOverrideMap();
+	
+	bool IsEntityInLaneYieldOverrideMap(const FZoneGraphLaneHandle& LaneHandle, const FMassEntityHandle& EntityHandle) const;
+	
+	const TMap<FZoneGraphLaneHandle, TSet<FMassEntityHandle>>& GetLaneYieldOverrideMap() const;
+	TMap<FZoneGraphLaneHandle, TSet<FMassEntityHandle>>& GetMutableLaneYieldOverrideMap();
 	
 protected:
 	
@@ -313,6 +356,35 @@ protected:
 
 	/** Map from each crosswalk lane to its related yield state data. */
 	TMap<FZoneGraphLaneHandle, FMassTrafficCrosswalkLaneInfo> CrosswalkLaneInfoMap;
+
+	/** Map from each Intersection EntityHandle to its queue of Vehicle EntityHandles of stopped Vehicles.
+	 * Vehicle EntityHandles are added to the queue the moment they begin their stop,
+	 * and they remain in the queue until they clear their intersection lane. */
+	TMap<FMassEntityHandle, TArray<FMassEntityHandle>> IntersectionStopQueueMap;
+
+	/** Outer map takes a source lane handle.  Inner map takes a destination lane handle.
+	 * Then, you get pre-computed information regarding the distances along the source lane
+	 * where it enters and exits the destination lane. */
+	TMap<FZoneGraphLaneHandle, TMap<FZoneGraphLaneHandle, FMassTrafficLaneIntersectionInfo>> LaneIntersectionInfoMap;
+
+	/** Map from a source lane to the aggregate yield target lanes
+	 * to which the Entities on the source lane are yielding.
+	 * Note:  This is cleared at the beginning of every frame, then rebuilt,
+	 * and finally evaluated after the vehicle and pedestrian yield processing
+	 * has run in the UMassTrafficYieldDeadlockResolutionProcessor. */
+	TMap<FZoneGraphLaneHandle, TSet<FZoneGraphLaneHandle>> LaneYieldMap;
+
+	/** Map from a lane to all the Entities yielding on that lane.
+	 * Note:  This is cleared at the beginning of every frame, then rebuilt,
+	 * and finally evaluated after the vehicle and pedestrian yield processing
+	 * has run in the UMassTrafficYieldDeadlockResolutionProcessor. */
+	TMap<FZoneGraphLaneHandle, TSet<FMassEntityHandle>> YieldingEntitiesMap;
+
+	/** Map from a lane, which was involved in a yield cycle, to all the Entities that were yielding
+	 * on the lane at the time the UMassTrafficYieldDeadlockResolutionProcessor gave them permission
+	 * to ignore their yield logic until they move to a new lane, in order to prevent a yield cycle deadlock.
+	 * Note:  Entities will remain in this map until they've managed to move to a new lane. */
+	TMap<FZoneGraphLaneHandle, TSet<FMassEntityHandle>> LaneYieldOverrideMap;
 };
 
 template<>

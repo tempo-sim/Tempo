@@ -34,89 +34,20 @@ FZoneGraphTrafficLaneData::FZoneGraphTrafficLaneData():
 {
 }
 
-bool FZoneGraphTrafficLaneData::HasYieldSignAlongRoad(float DistanceAlongLane) const
+bool FZoneGraphTrafficLaneData::HasStopSignOrYieldSign() const
 {
-	if (const TOptional<TPair<float, FMassTrafficControllerType>> TrafficControllerDistanceAndType = ConstData.TryGetTrafficControllerType(DistanceAlongLane))
-	{
-		const FMassTrafficControllerType TrafficControllerType = TrafficControllerDistanceAndType->Value;
-		return !TrafficControllerType.GetIsTrafficLightControlled()
-				&& TrafficControllerType.GetTrafficControllerSignType() == EMassTrafficControllerSignType::YieldSign;
-	}
-	return false;
+	return !ConstData.bIsTrafficLightControlled
+			&& ConstData.bIsIntersectionLane
+			&& (ConstData.TrafficControllerSignType == EMassTrafficControllerSignType::StopSign
+			|| ConstData.TrafficControllerSignType == EMassTrafficControllerSignType::YieldSign);
 }
 
-bool FZoneGraphTrafficLaneData::HasYieldSignThatRequiresStopAlongRoad(float DistanceAlongLane) const
+bool FZoneGraphTrafficLaneData::HasTrafficSignThatRequiresStop() const
 {
-	if (const TOptional<TPair<float, FMassTrafficControllerType>> TrafficControllerDistanceAndType = ConstData.TryGetTrafficControllerType(DistanceAlongLane))
-	{
-		const float TrafficControllerDistance = TrafficControllerDistanceAndType->Key;
-		const FMassTrafficControllerType TrafficControllerType = TrafficControllerDistanceAndType->Value;
-		const bool bHasPedestriansWaitingToCross = HasPedestriansWaitingToCross.Contains(TrafficControllerDistance) && HasPedestriansWaitingToCross[TrafficControllerDistance];
-		const bool bHasPedestriansInDownstreamCrosswalkLane = HasPedestriansInDownstreamCrosswalkLanes.Contains(TrafficControllerDistance) && HasPedestriansInDownstreamCrosswalkLanes[TrafficControllerDistance];
-		return !TrafficControllerType.GetIsTrafficLightControlled()
-				&& (TrafficControllerType.GetTrafficControllerSignType() == EMassTrafficControllerSignType::YieldSign && (bHasPedestriansWaitingToCross || bHasPedestriansInDownstreamCrosswalkLane));
-	}
-	return false;
-}
-
-bool FZoneGraphTrafficLaneData::HasYieldSignAtLaneStart() const
-{
-	if (const TOptional<FMassTrafficControllerType> TrafficControllerType = ConstData.TryGetTrafficControllerTypeAtStart())
-	{
-		return !TrafficControllerType->GetIsTrafficLightControlled() && TrafficControllerType->GetTrafficControllerSignType() == EMassTrafficControllerSignType::YieldSign;
-	}
-	return false;
-}
-
-bool FZoneGraphTrafficLaneData::HasStopSignAtLaneStart() const
-{
-	if (const TOptional<FMassTrafficControllerType> TrafficControllerType = ConstData.TryGetTrafficControllerTypeAtStart())
-	{
-		return !TrafficControllerType->GetIsTrafficLightControlled() && TrafficControllerType->GetTrafficControllerSignType() == EMassTrafficControllerSignType::StopSign;
-	}
-	return false;
-}
-
-bool FZoneGraphTrafficLaneData::HasStopSignOrYieldSignAtLaneStart() const
-{
-	if (const TOptional<FMassTrafficControllerType> TrafficControllerType = ConstData.TryGetTrafficControllerTypeAtStart())
-	{
-		return !TrafficControllerType->GetIsTrafficLightControlled() &&
-			(TrafficControllerType->GetTrafficControllerSignType() == EMassTrafficControllerSignType::YieldSign ||
-			 TrafficControllerType->GetTrafficControllerSignType() == EMassTrafficControllerSignType::StopSign);
-	}
-	return false;
-}
-
-bool FZoneGraphTrafficLaneData::HasTrafficLightAtLaneStart() const
-{
-	if (const TOptional<FMassTrafficControllerType> TrafficControllerType = ConstData.TryGetTrafficControllerTypeAtStart())
-	{
-		return TrafficControllerType->GetIsTrafficLightControlled();
-	}
-	return false;
-}
-
-bool FZoneGraphTrafficLaneData::HasTrafficSignThatRequiresStopAtLaneStart() const
-{
-	if (const TOptional<FMassTrafficControllerType> TrafficControllerType = ConstData.TryGetTrafficControllerTypeAtStart())
-	{
-		const bool bHasPedestriansWaitingToCrossAtIntersectionEntrance = HasPedestriansWaitingToCross.Contains(0.0) && HasPedestriansWaitingToCross[0.0];
-		const bool bHasPedestriansInDownstreamCrosswalkLanesAtIntersectionEntrance = HasPedestriansInDownstreamCrosswalkLanes.Contains(0.0) && HasPedestriansInDownstreamCrosswalkLanes[0.0];
-		return !TrafficControllerType->GetIsTrafficLightControlled()
-				&& (TrafficControllerType->GetTrafficControllerSignType() == EMassTrafficControllerSignType::StopSign
-				|| (TrafficControllerType->GetTrafficControllerSignType() == EMassTrafficControllerSignType::YieldSign && (bHasPedestriansWaitingToCrossAtIntersectionEntrance || bHasPedestriansInDownstreamCrosswalkLanesAtIntersectionEntrance)));
-	}
-	return false;
-}
-
-float FZoneGraphTrafficLaneData::LaneLengthAtNextTrafficControl(float DistanceAlongLane) const
-{
-	if (const TOptional<float> NextTrafficControllerDistance = ConstData.TryGetLaneLengthAtNextTrafficControl(DistanceAlongLane))
-	{
-		return NextTrafficControllerDistance.GetValue();
-	}
-	return Length;
+	return !ConstData.bIsTrafficLightControlled
+			&& ConstData.bIsIntersectionLane
+			&& (ConstData.TrafficControllerSignType == EMassTrafficControllerSignType::StopSign
+			|| (ConstData.TrafficControllerSignType == EMassTrafficControllerSignType::YieldSign && (bHasPedestriansWaitingToCrossAtIntersectionEntrance || bHasPedestriansInDownstreamCrosswalkLanesAtIntersectionEntrance)));
 }
 
 void FZoneGraphTrafficLaneData::ClearVehicles()

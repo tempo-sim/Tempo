@@ -16,7 +16,6 @@ struct FMassTrafficVehicleSpawnFilter;
 
 class UMassTrafficSettings;
 class UMassTrafficSubsystem;
-class UZoneGraphSubsystem;
 
 /**
 * Helpful functions for determining lane directions from Zone Graph data.
@@ -143,14 +142,6 @@ FORCEINLINE float GetSpeedLimitAlongLane(const float Length, const float SpeedLi
 	return FMath::Lerp(SpeedLimit, MinNextLaneSpeedLimit, SpeedScale) IF_MASSTRAFFIC_ENABLE_DEBUG( * GMassTrafficSpeedLimitScale );
 }
 
-void DrawLaneData(
-	const UZoneGraphSubsystem& ZoneGraphSubsystem,
-	const FZoneGraphLaneHandle& LaneHandle,
-	const FColor LaneColor,
-	const UWorld& World,
-	const float ZOffset = 10.0f,
-	const float LifeTime = 0.1f);
-
 bool TryGetVehicleEnterAndExitTimesForIntersection(
 	const FZoneGraphTrafficLaneData& VehicleCurrentLaneData,
 	const FZoneGraphTrafficLaneData& IntersectionLaneData,
@@ -162,15 +153,14 @@ bool TryGetVehicleEnterAndExitTimesForIntersection(
 	float* OutVehicleDistanceToEnterIntersectionLane = nullptr,
 	float* OutVehicleDistanceToExitIntersectionLane = nullptr);
 
-MASSTRAFFIC_API bool TryGetEnterAndExitDistancesAlongQueryLane(
+bool TryGetEnterAndExitDistancesAlongQueryLane(
 	const UMassTrafficSubsystem& MassTrafficSubsystem,
 	const UMassTrafficSettings& MassTrafficSettings,
 	const FZoneGraphStorage& ZoneGraphStorage,
 	const FZoneGraphLaneHandle& QueryLane,
 	const FZoneGraphLaneHandle& OtherLane,
 	float& OutEnterDistanceAlongQueryLane,
-	float& OutExitDistanceAlongQueryLane,
-	bool bExpectIntersection=true);
+	float& OutExitDistanceAlongQueryLane);
 
 bool TryGetVehicleEnterAndExitTimesForCrossingLane(
 	const UMassTrafficSubsystem& MassTrafficSubsystem,

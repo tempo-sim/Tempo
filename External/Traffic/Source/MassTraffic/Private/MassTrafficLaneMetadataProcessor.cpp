@@ -3,7 +3,10 @@
 #include "MassTrafficLaneMetadataProcessor.h"
 #include "MassCommonFragments.h"
 #include "MassExecutionContext.h"
+#include "MassEntityManager.h"
 #include "MassMovementFragments.h"
+#include "MassEntityView.h"
+#include "ZoneGraphSubsystem.h"
 #include "MassGameplayExternalTraits.h"
 #include "MassTrafficMovement.h"
 #include "MassTrafficSubsystem.h"
@@ -30,7 +33,6 @@ UMassTrafficLaneMetadataProcessor::UMassTrafficLaneMetadataProcessor()
 void UMassTrafficLaneMetadataProcessor::ConfigureQueries()
 {
 	EntityQuery.AddTagRequirement<FMassTrafficVehicleTag>(EMassFragmentPresence::All);
-	EntityQuery.AddRequirement<FMassZoneGraphLaneLocationFragment>(EMassFragmentAccess::ReadOnly);
 	EntityQuery.AddRequirement<FMassTrafficVehicleControlFragment>(EMassFragmentAccess::ReadOnly);
 	EntityQuery.AddRequirement<FAgentRadiusFragment>(EMassFragmentAccess::ReadOnly);
 	EntityQuery.AddRequirement<FMassTrafficRandomFractionFragment>(EMassFragmentAccess::ReadOnly);
@@ -40,77 +42,132 @@ void UMassTrafficLaneMetadataProcessor::ConfigureQueries()
 
 void UMassTrafficLaneMetadataProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
-	UMassTrafficSubsystem& MassTrafficSubsystem = Context.GetMutableSubsystemChecked<UMassTrafficSubsystem>();
-
-	// First, we need to clear all core vehicle info.
-	MassTrafficSubsystem.ClearCoreVehicleInfos();
-
-	// Then, associate the core vehicle info of each vehicle to its lane for later lookup in the merge yield logic.
-	// This will allow the merge yield logic to "see" every vehicle on the conflict lanes for a complete evaluation.
+	// Gather all Vehicle Entities.
+	TArray<FMassEntityHandle> AllVehicleEntities;
 	EntityQuery.ForEachEntityChunk(EntityManager, Context, [&](const FMassExecutionContext& QueryContext)
 	{
-		const TConstArrayView<FMassZoneGraphLaneLocationFragment> LaneLocationFragments = QueryContext.GetFragmentView<FMassZoneGraphLaneLocationFragment>();
-		const TConstArrayView<FMassTrafficVehicleControlFragment> VehicleControlFragments = QueryContext.GetFragmentView<FMassTrafficVehicleControlFragment>();
-		const TConstArrayView<FAgentRadiusFragment> RadiusFragments = QueryContext.GetFragmentView<FAgentRadiusFragment>();
-		const TConstArrayView<FMassTrafficRandomFractionFragment> RandomFractionFragments = QueryContext.GetFragmentView<FMassTrafficRandomFractionFragment>();
-		
 		const int32 NumEntities = QueryContext.GetNumEntities();
-		
-		for (int32 EntityIndex = 0; EntityIndex < NumEntities; ++EntityIndex)
+		for (int32 Index = 0; Index < NumEntities; ++Index)
 		{
-			const FMassZoneGraphLaneLocationFragment& LaneLocationFragment = LaneLocationFragments[EntityIndex];
-			const FMassTrafficVehicleControlFragment& VehicleControlFragment = VehicleControlFragments[EntityIndex];
-			const FAgentRadiusFragment& RadiusFragment = RadiusFragments[EntityIndex];
-			const FMassTrafficRandomFractionFragment& RandomFractionFragment = RandomFractionFragments[EntityIndex];
+			AllVehicleEntities.Add(QueryContext.GetEntity(Index));
+		}
+	});
+	
+	if (AllVehicleEntities.IsEmpty())
+	{
+		return;
+	}
+	
+	TArray<FMassEntityHandle> DescendingVehicleEntities(AllVehicleEntities);
+	
+	// Sort by ZoneGraphStorage Index, then Lane Index, then *descending* DistanceAlongLane.
+	DescendingVehicleEntities.Sort(
+		[&EntityManager](const FMassEntityHandle& EntityA, const FMassEntityHandle& EntityB)
+		{
+			const FMassZoneGraphLaneLocationFragment& A = EntityManager.GetFragmentDataChecked<FMassZoneGraphLaneLocationFragment>(EntityA);
+			const FMassZoneGraphLaneLocationFragment& B = EntityManager.GetFragmentDataChecked<FMassZoneGraphLaneLocationFragment>(EntityB);
 
-			if (LaneLocationFragment.LaneLength <= 0.0f)
+			if (A.LaneHandle == B.LaneHandle)
+			{
+				return A.DistanceAlongLane > B.DistanceAlongLane;
+			}
+			else if (A.LaneHandle.DataHandle == B.LaneHandle.DataHandle)
+			{
+				return A.LaneHandle.Index < B.LaneHandle.Index;
+			}
+			else
+			{
+				return A.LaneHandle.DataHandle.Index < B.LaneHandle.DataHandle.Index;
+			}
+		}
+	);
+
+	UMassTrafficSubsystem& MassTrafficSubsystem = Context.GetMutableSubsystemChecked<UMassTrafficSubsystem>();
+
+	// First, we need to reset the "distance along lane" fields for the "lead" vehicle Entity.
+	TArrayView<FMassTrafficZoneGraphData*> MassTrafficZoneGraphDatas = MassTrafficSubsystem.GetMutableTrafficZoneGraphData();
+	for (FMassTrafficZoneGraphData* MassTrafficZoneGraphData : MassTrafficZoneGraphDatas)
+	{
+		if (!ensureMsgf(MassTrafficZoneGraphData != nullptr, TEXT("Expected valid MassTrafficZoneGraphData in UMassTrafficLaneMetadataProcessor::Execute.  Continuing.")))
+		{
+			continue;
+		}
+		
+		for (FZoneGraphTrafficLaneData& TrafficLaneData : MassTrafficZoneGraphData->TrafficLaneDataArray)
+		{
+			TrafficLaneData.LeadVehicleEntityHandle.Reset();
+			TrafficLaneData.LeadVehicleDistanceAlongLane.Reset();
+			TrafficLaneData.LeadVehicleAccelerationEstimate.Reset();
+			TrafficLaneData.LeadVehicleSpeed.Reset();
+			TrafficLaneData.bLeadVehicleIsYielding.Reset();
+			TrafficLaneData.LeadVehicleRadius.Reset();
+			TrafficLaneData.LeadVehicleNextLane.Reset();
+			TrafficLaneData.LeadVehicleStopSignIntersectionLane.Reset();
+			TrafficLaneData.LeadVehicleRandomFraction.Reset();
+			TrafficLaneData.LeadVehicleIsNearStopLineAtIntersection.Reset();
+			TrafficLaneData.LeadVehicleRemainingStopSignRestTime.Reset();
+		}
+	}
+
+	// Then, update the "distance along lane" fields for the "lead" vehicle Entity.
+	for (int32 SortedVehicleEntityIndex = 0; SortedVehicleEntityIndex < DescendingVehicleEntities.Num(); ++SortedVehicleEntityIndex)
+	{
+		const FMassEntityHandle LeadVehicleEntityHandle = DescendingVehicleEntities[SortedVehicleEntityIndex];
+			
+		const FMassEntityView LeadVehicleEntityView(EntityManager, LeadVehicleEntityHandle);
+		const FMassZoneGraphLaneLocationFragment& LeadVehicleLaneLocation = LeadVehicleEntityView.GetFragmentData<FMassZoneGraphLaneLocationFragment>();
+		const FMassTrafficVehicleControlFragment& LeadVehicleVehicleControlFragment = LeadVehicleEntityView.GetFragmentData<FMassTrafficVehicleControlFragment>();
+		const FAgentRadiusFragment& LeadVehicleRadiusFragment = LeadVehicleEntityView.GetFragmentData<FAgentRadiusFragment>();
+		const FMassTrafficRandomFractionFragment& LeadVehicleRandomFractionFragment = LeadVehicleEntityView.GetFragmentData<FMassTrafficRandomFractionFragment>();
+
+		if (LeadVehicleLaneLocation.LaneLength > 0.0f)
+		{
+			FMassTrafficZoneGraphData* LeadVehicleTrafficZoneGraphData = MassTrafficSubsystem.GetMutableTrafficZoneGraphData(LeadVehicleLaneLocation.LaneHandle.DataHandle);
+			if (LeadVehicleTrafficZoneGraphData == nullptr)
 			{
 				continue;
 			}
 
-			FMassTrafficCoreVehicleInfo CoreVehicleInfo;
-
-			CoreVehicleInfo.VehicleEntityHandle = VehicleControlFragment.VehicleEntityHandle;
-			CoreVehicleInfo.VehicleDistanceAlongLane = LaneLocationFragment.DistanceAlongLane;
-			CoreVehicleInfo.VehicleAccelerationEstimate = VehicleControlFragment.AccelerationEstimate;
-			CoreVehicleInfo.VehicleSpeed = VehicleControlFragment.IsYieldingAtIntersection() ? 0.0f : VehicleControlFragment.Speed;
-			CoreVehicleInfo.bVehicleIsYielding = VehicleControlFragment.IsYieldingAtIntersection();
-			CoreVehicleInfo.VehicleRadius = RadiusFragment.Radius;
-			CoreVehicleInfo.VehicleNextLane = VehicleControlFragment.NextLane;
-			CoreVehicleInfo.VehicleStopSignIntersectionLane = VehicleControlFragment.StopSignIntersectionLane;
-			CoreVehicleInfo.VehicleRandomFraction = RandomFractionFragment.RandomFraction.GetFloat();
-
-			CoreVehicleInfo.VehicleIsNearStopLineAtIntersection = UE::MassTraffic::IsVehicleNearStopLine(
-					LaneLocationFragment.DistanceAlongLane,
-					LaneLocationFragment.LaneLength,
-					RadiusFragment.Radius,
-					RandomFractionFragment.RandomFraction,
-					MassTrafficSettings->StoppingDistanceRange);
-
-			if (VehicleControlFragment.IsVehicleCurrentlyStopped())
+			FZoneGraphTrafficLaneData* LeadVehicleLaneData = LeadVehicleTrafficZoneGraphData->GetMutableTrafficLaneData(LeadVehicleLaneLocation.LaneHandle);
+			if (LeadVehicleLaneData == nullptr)
 			{
-				const UWorld* World = MassTrafficSubsystem.GetWorld();
-					
-				const float CurrentTimeSeconds = World != nullptr ? World->GetTimeSeconds() : TNumericLimits<float>::Lowest();
-				const float VehicleStoppedElapsedTime = CurrentTimeSeconds - VehicleControlFragment.TimeVehicleStopped;
-					
-				CoreVehicleInfo.VehicleRemainingStopSignRestTime = VehicleControlFragment.MinVehicleStopSignRestTime - VehicleStoppedElapsedTime;
+				continue;
 			}
 
-			MassTrafficSubsystem.AddCoreVehicleInfo(LaneLocationFragment.LaneHandle, CoreVehicleInfo);
+			// We only set the LeadVehicleDistanceAlongLane value for a given lane, if it hasn't already been set.
+			// And, since we're indexing into DescendingVehicleEntities, which has been sorted by descending DistanceAlongLane,
+			// the first Entity to be indexed for a given lane will in fact be the "Lead Entity" for that lane,
+			// and it will have the first (and only) opportunity to set the LeadVehicleDistanceAlongLane field.
+			if (!LeadVehicleLaneData->LeadVehicleDistanceAlongLane.IsSet())
+			{
+				LeadVehicleLaneData->LeadVehicleEntityHandle = LeadVehicleVehicleControlFragment.VehicleEntityHandle;
+				LeadVehicleLaneData->LeadVehicleDistanceAlongLane = LeadVehicleLaneLocation.DistanceAlongLane;
+				LeadVehicleLaneData->LeadVehicleAccelerationEstimate = LeadVehicleVehicleControlFragment.AccelerationEstimate;
+				LeadVehicleLaneData->LeadVehicleSpeed = LeadVehicleVehicleControlFragment.IsYieldingAtIntersection() ? 0.0f : LeadVehicleVehicleControlFragment.Speed;
+				LeadVehicleLaneData->bLeadVehicleIsYielding = LeadVehicleVehicleControlFragment.IsYieldingAtIntersection();
+				LeadVehicleLaneData->LeadVehicleRadius = LeadVehicleRadiusFragment.Radius;
+				LeadVehicleLaneData->LeadVehicleNextLane = LeadVehicleVehicleControlFragment.NextLane;
+				LeadVehicleLaneData->LeadVehicleStopSignIntersectionLane = LeadVehicleVehicleControlFragment.StopSignIntersectionLane;
+				LeadVehicleLaneData->LeadVehicleRandomFraction = LeadVehicleRandomFractionFragment.RandomFraction.GetFloat();
+
+				LeadVehicleLaneData->LeadVehicleIsNearStopLineAtIntersection = UE::MassTraffic::IsVehicleNearStopLineAtIntersection(
+					LeadVehicleVehicleControlFragment.NextLane,
+					LeadVehicleLaneLocation.DistanceAlongLane,
+					LeadVehicleLaneLocation.LaneLength,
+					LeadVehicleRadiusFragment.Radius,
+					LeadVehicleRandomFractionFragment.RandomFraction,
+					MassTrafficSettings->StoppingDistanceRange);
+
+				if (LeadVehicleVehicleControlFragment.IsVehicleCurrentlyStopped())
+				{
+					const UWorld* World = MassTrafficSubsystem.GetWorld();
+					
+					const float CurrentTimeSeconds = World != nullptr ? World->GetTimeSeconds() : TNumericLimits<float>::Lowest();
+					const float VehicleStoppedElapsedTime = CurrentTimeSeconds - LeadVehicleVehicleControlFragment.TimeVehicleStopped;
+					
+					LeadVehicleLaneData->LeadVehicleRemainingStopSignRestTime = LeadVehicleVehicleControlFragment.MinVehicleStopSignRestTime - VehicleStoppedElapsedTime;
+				}
+			}
 		}
-	});
-
-	TMap<FZoneGraphLaneHandle, TSet<FMassTrafficCoreVehicleInfo>>& CoreVehicleInfoMap = MassTrafficSubsystem.GetMutableCoreVehicleInfoMap();
-
-	// Finally, sort the CoreVehicleInfos for each lane in order of increasing distance along the lane.
-	for (TTuple<FZoneGraphLaneHandle, TSet<FMassTrafficCoreVehicleInfo>>& CoreVehicleInfoPair : CoreVehicleInfoMap)
-	{
-		TSet<FMassTrafficCoreVehicleInfo>& CoreVehicleInfos = CoreVehicleInfoPair.Value;
-
-		CoreVehicleInfos.Sort([](const FMassTrafficCoreVehicleInfo& FirstCoreVehicleInfo, const FMassTrafficCoreVehicleInfo& SecondCoreVehicleInfo)
-		{
-			return FirstCoreVehicleInfo.VehicleDistanceAlongLane < SecondCoreVehicleInfo.VehicleDistanceAlongLane;
-		});
 	}
 }

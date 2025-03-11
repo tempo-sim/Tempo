@@ -8,19 +8,17 @@
 #include "MassExecutionContext.h"
 #include "MassZoneGraphNavigationFragments.h"
 #include "MassTrafficLaneChange.h"
-#include "Async/Async.h"
 #include "MassGameplayExternalTraits.h"
-#include "ZoneGraphSubsystem.h"
 
 namespace
 {
 	struct DFSStackFrame
 	{
-		FYieldCycleNode Node;
-		TArray<FYieldCycleNode> Neighbors;
+		FZoneGraphLaneHandle Node;
+		TArray<FZoneGraphLaneHandle> Neighbors;
 		int32 NextIndex;
 
-		DFSStackFrame(const FYieldCycleNode& InNode, const TArray<FYieldCycleNode>& InNeighbors)
+		DFSStackFrame(const FZoneGraphLaneHandle& InNode, const TArray<FZoneGraphLaneHandle>& InNeighbors)
 			: Node(InNode)
 			, Neighbors(InNeighbors)
 			, NextIndex(0)
@@ -28,28 +26,27 @@ namespace
 		}
 	};
 	
-	TArray<FYieldCycleNode> FindFirstCycleDFS(
-		const TMap<FLaneEntityPair, TSet<FLaneEntityPair>>& YieldMap,
-		const FYieldCycleNode& StartNode,
-		const TFunction<TOptional<FLaneEntityPair>(const FLaneEntityPair&)>& GetImplicitNeighbor)
+	TArray<FZoneGraphLaneHandle> FindFirstCycleDFS(
+	const TMap<FZoneGraphLaneHandle, TSet<FZoneGraphLaneHandle>>& LaneYieldMap,
+	const FZoneGraphLaneHandle& StartLane)
 	{
 		TArray<DFSStackFrame> Stack;
-		TArray<FYieldCycleNode> CurrentPath;
-		TSet<FYieldCycleNode> CurrentPathSet;
+		TArray<FZoneGraphLaneHandle> CurrentPath;
+		TSet<FZoneGraphLaneHandle> CurrentPathSet;
 
-		TArray<FYieldCycleNode> StartNodeNeighbors;
-		if (const TSet<FLaneEntityPair>* Neighbors = YieldMap.Find(StartNode.LaneEntityPair))
+		TArray<FZoneGraphLaneHandle> StartNodeNeighbors;
+		if (const TSet<FZoneGraphLaneHandle>* Neighbors = LaneYieldMap.Find(StartLane))
 		{
-			for (const FLaneEntityPair& Neighbor : *Neighbors)
+			for (const FZoneGraphLaneHandle& Neighbor : *Neighbors)
 			{
 				StartNodeNeighbors.Add(Neighbor);
 			}
 		}
 
-		// The search starts from the StartNode.
-		Stack.Add(DFSStackFrame(StartNode, StartNodeNeighbors));
-		CurrentPath.Add(StartNode);
-		CurrentPathSet.Add(StartNode);
+		// The search starts from the StartLane.
+		Stack.Add(DFSStackFrame(StartLane, StartNodeNeighbors));
+		CurrentPath.Add(StartLane);
+		CurrentPathSet.Add(StartLane);
 
 		while (Stack.Num() > 0)
 		{
@@ -57,34 +54,24 @@ namespace
 
 			if (TopFrame.NextIndex < TopFrame.Neighbors.Num())
 			{
-				FYieldCycleNode& Neighbor = TopFrame.Neighbors[TopFrame.NextIndex];
+				FZoneGraphLaneHandle& Neighbor = TopFrame.Neighbors[TopFrame.NextIndex];
 				TopFrame.NextIndex++;
 
 				// If we found our goal, return the cycle.
-				if (Neighbor == StartNode)
+				if (Neighbor == StartLane)
 				{
-					// Add neighbor to complete the path as it might
-					// represent an implicit edge from the previous node.
-					CurrentPath.Add(Neighbor);
+					CurrentPath.Add(StartLane);
 					return CurrentPath;
 				}
 				else if (!CurrentPathSet.Contains(Neighbor))
 				{
-					TArray<FYieldCycleNode> NeighborNeighborsArray;
-					if (const TSet<FLaneEntityPair>* NeighborNeighbors = YieldMap.Find(Neighbor.LaneEntityPair))
+					TArray<FZoneGraphLaneHandle> NeighborNeighborsArray;
+					if (const TSet<FZoneGraphLaneHandle>* NeighborNeighbors = LaneYieldMap.Find(Neighbor))
 					{
-						for (const FLaneEntityPair& NeighborNeighbor : *NeighborNeighbors)
+						for (const FZoneGraphLaneHandle& NeighborNeighbor : *NeighborNeighbors)
 						{
 							NeighborNeighborsArray.Add(NeighborNeighbor);
 						}
-					}
-					
-					if (const TOptional<FLaneEntityPair> ImplicitNeighbor = GetImplicitNeighbor(Neighbor.LaneEntityPair); ImplicitNeighbor.IsSet())
-					{
-						FYieldCycleNode ImplicitNeighborNode = ImplicitNeighbor.GetValue();
-						ImplicitNeighborNode.bHasImplicitYieldFromPrevNode = true;
-						
-						NeighborNeighborsArray.Add(ImplicitNeighborNode);
 					}
 
 					// Push neighbor onto stack. 
@@ -103,7 +90,7 @@ namespace
 		}
 
 		// No cycle found.
-		return TArray<FYieldCycleNode>();
+		return TArray<FZoneGraphLaneHandle>();
 	}
 }
 
@@ -198,47 +185,181 @@ void UMassTrafficYieldDeadlockResolutionProcessor::Execute(FMassEntityManager& E
 	});
 
 	// First, clean-up any stale yield overrides before potentially adding any new ones.
-	CleanupStaleYieldOverrides(MassTrafficSubsystem, EntityManager);
-
-	// Draw yield override indicators, if debug option is enabled.
-	if (GMassTrafficDebugYieldDeadlockResolution > 0)
 	{
-		if (const UWorld* World = GetWorld())
+		TMap<FZoneGraphLaneHandle, TSet<FMassEntityHandle>>& LaneYieldOverrideMap = MassTrafficSubsystem.GetMutableLaneYieldOverrideMap();
+		
+		for (auto LaneYieldOverrideMapItr = LaneYieldOverrideMap.CreateIterator(); LaneYieldOverrideMapItr; ++LaneYieldOverrideMapItr)
 		{
-			const TMap<FLaneEntityPair, TSet<FLaneEntityPair>>& YieldOverrideMap = MassTrafficSubsystem.GetYieldOverrideMap();
-			
-			DrawDebugYieldOverrideIndicators(MassTrafficSubsystem, ZoneGraphSubsystem, EntityManager, PedestrianEntities, FVector(0.0f, 0.0f, 300.0f), FColor::Cyan, FColor::Blue, *World, 0.1f);
+			const FZoneGraphLaneHandle& YieldOverrideLane = LaneYieldOverrideMapItr.Key();
+			TSet<FMassEntityHandle>& YieldOverrideEntities = LaneYieldOverrideMapItr.Value();
+
+			for (auto YieldOverrideEntityItr = YieldOverrideEntities.CreateIterator(); YieldOverrideEntityItr; ++YieldOverrideEntityItr)
+			{
+				const FMassEntityHandle& YieldOverrideEntity = *YieldOverrideEntityItr;
+				FMassEntityView YieldOverrideCandidateEntityView(EntityManager, YieldOverrideEntity);
+				const FMassZoneGraphLaneLocationFragment& LaneLocationFragment = YieldOverrideCandidateEntityView.GetFragmentData<FMassZoneGraphLaneLocationFragment>();
+
+				// If this Entity is on a new lane since it was granted a yield override, ...
+				if (LaneLocationFragment.LaneHandle != YieldOverrideLane)
+				{
+					YieldOverrideEntityItr.RemoveCurrent();
+				}
+			}
+
+			if (YieldOverrideEntities.IsEmpty())
+			{
+				LaneYieldOverrideMapItr.RemoveCurrent();
+			}
 		}
 	}
 
-	// Draw yield map arrows, if debug option is enabled.
-	// This is the complete state of all yielding Entities this frame,
-	// and it's the direct input to the yield cycle detector.
+	const auto& DrawDebugIndicatorsForEntities = [&ZoneGraphSubsystem, &EntityManager, &PedestrianEntities, this](const TArray<FZoneGraphLaneHandle>& SourceLanes, const TMap<FZoneGraphLaneHandle, TSet<FMassEntityHandle>>& EntitiesMap, const FVector& IndicatorOffset, const FColor& PedestrianColor, const FColor& VehicleColor, const float LifeTime)
+	{
+		for (const FZoneGraphLaneHandle& SourceLane : SourceLanes)
+		{
+			if (const FZoneGraphStorage* ZoneGraphStorage = ZoneGraphSubsystem.GetZoneGraphStorage(SourceLane.DataHandle))
+			{
+				if (const TSet<FMassEntityHandle>* Entities = EntitiesMap.Find(SourceLane))
+				{
+					for (const FMassEntityHandle& Entity : *Entities)
+					{
+						FMassEntityView EntityView(EntityManager, Entity);
+
+						const FMassZoneGraphLaneLocationFragment& LaneLocationFragment = EntityView.GetFragmentData<FMassZoneGraphLaneLocationFragment>();
+
+						FZoneGraphLaneLocation EntityZoneGraphLaneLocation;
+						if (UE::ZoneGraph::Query::CalculateLocationAlongLane(*ZoneGraphStorage, SourceLane, LaneLocationFragment.DistanceAlongLane, EntityZoneGraphLaneLocation))
+						{
+							const FColor& EntityColor = PedestrianEntities.Contains(Entity) ? PedestrianColor : VehicleColor;
+							DrawDebugSphere(GetWorld(), EntityZoneGraphLaneLocation.Position + IndicatorOffset, 50.0f, 16, EntityColor, false, LifeTime, 0, 10.0f);
+						}
+					}
+				}
+			}
+		}
+	};
+
+	// Draw spheres for each Entity with a yield override, if debug option is enabled.
 	if (GMassTrafficDebugYieldDeadlockResolution > 0)
 	{
-		if (const UWorld* World = GetWorld())
-		{
-			DrawDebugYieldMap(MassTrafficSubsystem, ZoneGraphSubsystem, EntityManager, PedestrianEntities, FVector(0.0f, 0.0f, 300.0f), FColor::Silver, FColor::White, *World, 0.1f);
-		}
+		const TMap<FZoneGraphLaneHandle, TSet<FMassEntityHandle>>& LaneYieldOverrideMap = MassTrafficSubsystem.GetLaneYieldOverrideMap();
+
+		TArray<FZoneGraphLaneHandle> YieldOverrideLanes;
+		LaneYieldOverrideMap.GetKeys(YieldOverrideLanes);
+		
+		DrawDebugIndicatorsForEntities(YieldOverrideLanes, LaneYieldOverrideMap, FVector(0.0f, 0.0f, 300.0f), FColor::Cyan, FColor::Blue, 0.1f);
 	}
 
-	const TArray<FYieldCycleNode> YieldCycleNodes = FindYieldCycleNodes(MassTrafficSubsystem, EntityManager, VehicleEntities);
+	const auto& FindYieldCycleLanes = [&MassTrafficSubsystem]()
+	{
+		const TMap<FZoneGraphLaneHandle, TSet<FZoneGraphLaneHandle>>& LaneYieldMap = MassTrafficSubsystem.GetLaneYieldMap();
+
+		TArray<FZoneGraphLaneHandle> YieldingLanes;
+		LaneYieldMap.GetKeys(YieldingLanes);
+
+		for (const FZoneGraphLaneHandle& SearchStartLane : YieldingLanes)
+		{
+			const TArray<FZoneGraphLaneHandle> YieldCycleLanes = FindFirstCycleDFS(LaneYieldMap, SearchStartLane);
+
+			if (!YieldCycleLanes.IsEmpty())
+			{
+				return YieldCycleLanes;
+			}
+		}
+
+		return TArray<FZoneGraphLaneHandle>();
+	};
+
+	const TArray<FZoneGraphLaneHandle> YieldCycleLanes = FindYieldCycleLanes();
 
 	// If we didn't find a yield cycle, ...
-	if (YieldCycleNodes.IsEmpty())
+	if (YieldCycleLanes.IsEmpty())
 	{
 		// There is nothing to do here.
 		return;
 	}
 
-	// Draw yield cycle arrows, if debug option is enabled.
+	const TMap<FZoneGraphLaneHandle, TSet<FMassEntityHandle>>& YieldingEntitiesMap = MassTrafficSubsystem.GetYieldingEntitiesMap();
+
+	// Draw spheres for each Entity in a yield cycle, if debug option is enabled.
 	if (GMassTrafficDebugYieldDeadlockResolution > 0)
 	{
-		if (const UWorld* World = GetWorld())
-		{
-			DrawDebugYieldCycleIndicators(ZoneGraphSubsystem, EntityManager, PedestrianEntities, YieldCycleNodes, FVector(0.0f, 0.0f, 300.0f), FColor::Orange, FColor::Purple, FColor::Magenta, *World, 0.5f);
-		}
+		DrawDebugIndicatorsForEntities(YieldCycleLanes, YieldingEntitiesMap, FVector(0.0f, 0.0f, 300.0f), FColor::Magenta, FColor::Purple, 0.5f);
 	}
+
+	const auto& GetYieldOverrideCandidateLanes = [&YieldCycleLanes, &YieldingEntitiesMap, &VehicleEntities, &PedestrianEntities]()
+	{
+		TSet<FZoneGraphLaneHandle> YieldOverrideCandidateLanes;
+
+		// First, see if any pedestrians are in the yield cycle.
+		// If so, all such pedestrians will become our YieldOverrideCandidates.
+		for (const FZoneGraphLaneHandle& YieldCycleLane : YieldCycleLanes)
+		{
+			if (const TSet<FMassEntityHandle>* YieldingEntities = YieldingEntitiesMap.Find(YieldCycleLane))
+			{
+				if (!YieldingEntities->Intersect(PedestrianEntities).IsEmpty())
+				{
+					YieldOverrideCandidateLanes.Add(YieldCycleLane);
+				}
+			}
+		}
+
+		// If we found any pedestrians in the yield cycle,
+		// return their associated lanes as our YieldOverrideCandidateLanes.
+		if (!YieldOverrideCandidateLanes.IsEmpty())
+		{
+			return YieldOverrideCandidateLanes;
+		}
+
+		// Now, look for vehicles.
+		for (const FZoneGraphLaneHandle& YieldCycleLane : YieldCycleLanes)
+		{
+			if (const TSet<FMassEntityHandle>* YieldingEntities = YieldingEntitiesMap.Find(YieldCycleLane))
+			{
+				if (!YieldingEntities->Intersect(VehicleEntities).IsEmpty())
+				{
+					YieldOverrideCandidateLanes.Add(YieldCycleLane);
+				}
+			}
+		}
+
+		if (!ensureMsgf(!YieldOverrideCandidateLanes.IsEmpty(), TEXT("YieldCycleLanes had entries.  But, we found no vehicles or pedestrians in the yield cycle in UMassTrafficYieldDeadlockResolutionProcessor::Execute.")))
+		{
+			return TSet<FZoneGraphLaneHandle>();
+		}
+
+		return YieldOverrideCandidateLanes;
+	};
+
+	const auto& GetSelectedYieldOverrideCandidateLane = [&EntityManager, &YieldingEntitiesMap](const TSet<FZoneGraphLaneHandle>& YieldOverrideCandidateLanes)
+	{
+		FZoneGraphLaneHandle SelectedYieldOverrideCandidateLane;
+		float MaxNormalizedDistanceAlongLane = TNumericLimits<float>::Lowest();
+
+		// Select the lane with the Entity furthest along the lane among all the candidate lanes.
+		for (const FZoneGraphLaneHandle& YieldOverrideCandidateLane : YieldOverrideCandidateLanes)
+		{
+			if (const TSet<FMassEntityHandle>* YieldOverrideCandidateEntities = YieldingEntitiesMap.Find(YieldOverrideCandidateLane))
+			{
+				for (const FMassEntityHandle& YieldOverrideCandidateEntity : *YieldOverrideCandidateEntities)
+				{
+					FMassEntityView YieldOverrideCandidateEntityView(EntityManager, YieldOverrideCandidateEntity);
+
+					const FMassZoneGraphLaneLocationFragment& LaneLocationFragment = YieldOverrideCandidateEntityView.GetFragmentData<FMassZoneGraphLaneLocationFragment>();
+
+					const float NormalizedDistanceAlongLane = LaneLocationFragment.LaneLength > 0.0f ? LaneLocationFragment.DistanceAlongLane / LaneLocationFragment.LaneLength : 0.0f;
+
+					if (NormalizedDistanceAlongLane > MaxNormalizedDistanceAlongLane)
+					{
+						MaxNormalizedDistanceAlongLane = NormalizedDistanceAlongLane;
+						SelectedYieldOverrideCandidateLane = YieldOverrideCandidateLane;
+					}
+				}
+			}
+		}
+
+		return SelectedYieldOverrideCandidateLane;
+	};
 
 	// Only add Entities to the yield override map, if yield deadlock resolution is enabled.
 	if (GMassTrafficResolveYieldDeadlocks <= 0)
@@ -246,629 +367,27 @@ void UMassTrafficYieldDeadlockResolutionProcessor::Execute(FMassEntityManager& E
 		return;
 	}
 
-	// Get all the yield override candidates, then select one candidate to override, in order to break this yield cycle.
-	// Note:  Once we add a yield override for an Entity in a yield cycle, the same yield cycle
-	// should not form again next frame as the Entity will ignore yielding to the specified yield target Entity
-	// until the selected yield override candidate clears the lane in which the yield override was initiated.
-	const TArray<int32>& YieldOverrideCandidateIndexes = GetYieldOverrideCandidateIndexes(YieldCycleNodes, VehicleEntities, PedestrianEntities);
-	const int32& SelectedYieldOverrideCandidateIndex = GetSelectedYieldOverrideCandidateIndex(YieldCycleNodes, EntityManager, YieldOverrideCandidateIndexes);
-	
-	if (!ensureMsgf(SelectedYieldOverrideCandidateIndex != INDEX_NONE, TEXT("Must get valid SelectedYieldOverrideCandidateIndex in UMassTrafficYieldDeadlockResolutionProcessor::Execute.")))
+	// Get all the yield candidate lanes, then select one candidate lane to override, in order to break this yield cycle.
+	// Note:  Once we add yield overrides for Entities on a lane in a yield cycle, the same yield cycle
+	// should not form again next frame as the Entities will skip their yield logic altogether
+	// until they clear the lane in which the yield override was initiated.
+	const TSet<FZoneGraphLaneHandle>& YieldOverrideCandidateLanes = GetYieldOverrideCandidateLanes();
+	const FZoneGraphLaneHandle& SelectedYieldOverrideCandidateLane = GetSelectedYieldOverrideCandidateLane(YieldOverrideCandidateLanes);
+
+	// If our selected yield override candidate lane is valid, ...
+	if (SelectedYieldOverrideCandidateLane.IsValid())
 	{
-		return;
-	}
-
-	const FYieldCycleNode& SelectedYieldOverrideCandidate = YieldCycleNodes[SelectedYieldOverrideCandidateIndex];
-	const FYieldCycleNode& TargetIgnoreYieldCandidate = YieldCycleNodes[SelectedYieldOverrideCandidateIndex + 1];	// Plus 1 is safe here.
-
-	if (!ensureMsgf(!TargetIgnoreYieldCandidate.bHasImplicitYieldFromPrevNode, TEXT("TargetIgnoreYieldCandidate must not have implicit yield from SelectedYieldOverrideCandidate in UMassTrafficYieldDeadlockResolutionProcessor::Execute.")))
-	{
-		return;
-	}
-
-	int32 NumLanesInYieldCycle;
-	int32 NumVehicleEntitiesInYieldCycle;
-	int32 NumPedestrianEntitiesInYieldCycle;
-	
-	const int32 NumEntitiesInYieldCycle = GetNumEntitiesInYieldCycle(
-		YieldCycleNodes,
-		VehicleEntities,
-		PedestrianEntities,
-		&NumLanesInYieldCycle,
-		&NumVehicleEntitiesInYieldCycle,
-		&NumPedestrianEntitiesInYieldCycle);
-
-	UE_LOG(LogMassTraffic, Log, TEXT("Breaking yield cycle deadlock with %d total Entities (%d vehicles, %d pedestrians) on %d lanes by overriding the yield logic for SelectedYieldOverrideCandidate -> TargetIgnoreYieldCandidate: (Lane: %d Entity: %d) -> (Lane: %d Entity: %d)."),
-		NumEntitiesInYieldCycle, NumVehicleEntitiesInYieldCycle, NumPedestrianEntitiesInYieldCycle, NumLanesInYieldCycle,
-		SelectedYieldOverrideCandidate.LaneEntityPair.LaneHandle.Index, SelectedYieldOverrideCandidate.LaneEntityPair.EntityHandle.Index,
-		TargetIgnoreYieldCandidate.LaneEntityPair.LaneHandle.Index, TargetIgnoreYieldCandidate.LaneEntityPair.EntityHandle.Index);
-
-	// We break the yield cycle deadlock by adding one *explicit* edge in the yield cycle as a yield override.
-	// That is, the SelectedYieldOverrideCandidate is allowed to ignore yielding to TargetIgnoreYieldCandidate
-	// until SelectedYieldOverrideCandidate's Entity manages to move onto a new lane.
-	MassTrafficSubsystem.AddYieldOverride(
-		SelectedYieldOverrideCandidate.LaneEntityPair.LaneHandle,
-		SelectedYieldOverrideCandidate.LaneEntityPair.EntityHandle,
-		TargetIgnoreYieldCandidate.LaneEntityPair.LaneHandle,
-		TargetIgnoreYieldCandidate.LaneEntityPair.EntityHandle);
-}
-
-void UMassTrafficYieldDeadlockResolutionProcessor::CleanupStaleYieldOverrides(UMassTrafficSubsystem& MassTrafficSubsystem, const FMassEntityManager& EntityManager) const
-{
-	TMap<FLaneEntityPair, TSet<FLaneEntityPair>>& YieldOverrideMap = MassTrafficSubsystem.GetMutableYieldOverrideMap();
+		if (const TSet<FMassEntityHandle>* SelectedYieldOverrideEntities = YieldingEntitiesMap.Find(SelectedYieldOverrideCandidateLane))
+		{
+			UE_LOG(LogMassTraffic, Log, TEXT("Breaking yield cycle deadlock by overriding the yield logic for %d Entities on SelectedYieldOverrideCandidateLane.Index: %d SelectedYieldOverrideCandidateLane.DataHandle.Index: %d SelectedYieldOverrideCandidateLane.DataHandle.Generation: %d"),
+				SelectedYieldOverrideEntities->Num(), SelectedYieldOverrideCandidateLane.Index, SelectedYieldOverrideCandidateLane.DataHandle.Index, SelectedYieldOverrideCandidateLane.DataHandle.Generation);
 			
-	for (auto YieldOverrideMapItr = YieldOverrideMap.CreateIterator(); YieldOverrideMapItr; ++YieldOverrideMapItr)
-	{
-		const FLaneEntityPair& YieldOverrideLaneEntityPair = YieldOverrideMapItr.Key();
-				
-		const FZoneGraphLaneHandle& YieldOverrideLane = YieldOverrideLaneEntityPair.LaneHandle;
-		const FMassEntityHandle& YieldOverrideEntity = YieldOverrideLaneEntityPair.EntityHandle;
-
-		FMassEntityView YieldOverrideEntityView(EntityManager, YieldOverrideEntity);
-		const FMassZoneGraphLaneLocationFragment& YieldOverrideLaneLocationFragment = YieldOverrideEntityView.GetFragmentData<FMassZoneGraphLaneLocationFragment>();
-
-		// If the YieldOverrideEntity is on a new lane since it was granted any number of yield overrides, ...
-		if (YieldOverrideLaneLocationFragment.LaneHandle != YieldOverrideLane)
-		{
-			// Remove its yield overrides.
-			YieldOverrideMapItr.RemoveCurrent();
-		}
-	}
-	
-	TSet<FLaneEntityPair>& WildcardYieldOverrideSet = MassTrafficSubsystem.GetMutableWildcardYieldOverrideSet();
-
-	for (auto WildcardYieldOverrideSetItr = WildcardYieldOverrideSet.CreateIterator(); WildcardYieldOverrideSetItr; ++WildcardYieldOverrideSetItr)
-	{
-		const FZoneGraphLaneHandle& WildcardYieldOverrideLane = WildcardYieldOverrideSetItr->LaneHandle;
-		const FMassEntityHandle& WildcardYieldOverrideEntity = WildcardYieldOverrideSetItr->EntityHandle;
-
-		FMassEntityView WildcardYieldOverrideEntityView(EntityManager, WildcardYieldOverrideEntity);
-		const FMassZoneGraphLaneLocationFragment& WildcardYieldOverrideLaneLocationFragment = WildcardYieldOverrideEntityView.GetFragmentData<FMassZoneGraphLaneLocationFragment>();
-
-		// If the WildcardYieldOverrideEntity is on a new lane since it was granted a wildcard yield override, ...
-		if (WildcardYieldOverrideLaneLocationFragment.LaneHandle != WildcardYieldOverrideLane)
-		{
-			// Remove its wildcard yield override.
-			WildcardYieldOverrideSetItr.RemoveCurrent();
-		}
-	}
-}
-
-TArray<FYieldCycleNode> UMassTrafficYieldDeadlockResolutionProcessor::FindYieldCycleNodes(
-	const UMassTrafficSubsystem& MassTrafficSubsystem,
-	const FMassEntityManager& EntityManager,
-	const TSet<FMassEntityHandle>& VehicleEntities) const
-{
-	const TMap<FZoneGraphLaneHandle, TSet<FMassEntityHandle>>& YieldingEntitiesMap = MassTrafficSubsystem.GetYieldingEntitiesMap();
-
-	const auto& GetImplicitYieldTarget = [&EntityManager, &YieldingEntitiesMap, &VehicleEntities](const FLaneEntityPair& QueryLaneEntityPair) -> TOptional<FLaneEntityPair>
-	{
-		if (VehicleEntities.Contains(QueryLaneEntityPair.EntityHandle))
-		{
-			const FMassEntityView QueryVehicleEntityView(EntityManager, QueryLaneEntityPair.EntityHandle);
-
-			const FMassTrafficVehicleControlFragment& VehicleControlFragment = QueryVehicleEntityView.GetFragmentData<FMassTrafficVehicleControlFragment>();
-			const FMassTrafficNextVehicleFragment& NextVehicleFragment = QueryVehicleEntityView.GetFragmentData<FMassTrafficNextVehicleFragment>();
-
-			// If not explicitly yielding, but we're currently stopped, ...
-			if (!VehicleControlFragment.IsYieldingAtIntersection() && VehicleControlFragment.IsVehicleCurrentlyStopped())
+			for (const FMassEntityHandle& SelectedYieldOverrideEntity : *SelectedYieldOverrideEntities)
 			{
-				// And, we have a vehicle somewhere in front of us, ...
-				if (NextVehicleFragment.HasNextVehicle())
-				{
-					if (const TSet<FMassEntityHandle>* YieldingEntities = YieldingEntitiesMap.Find(QueryLaneEntityPair.LaneHandle))
-					{
-						// And, that vehicle in front of us is yielding on our lane, ...
-						if (const FMassEntityHandle NextVehicle = NextVehicleFragment.GetNextVehicle(); YieldingEntities->Contains(NextVehicle))
-						{
-							// Then, we are implicitly yielding to that vehicle
-							// for the purposes of finding yield cycle deadlocks.
-							const FLaneEntityPair ImplicitYieldTarget(QueryLaneEntityPair.LaneHandle, NextVehicle);
-							return ImplicitYieldTarget;
-						}
-					}
-				}
-			}
-		}
-
-		return TOptional<FLaneEntityPair>();
-	};
-
-	const TMap<FLaneEntityPair, TSet<FLaneEntityPair>>& YieldMap = MassTrafficSubsystem.GetYieldMap();
-
-	TArray<FLaneEntityPair> YieldingLaneEntityPairs;
-	YieldMap.GetKeys(YieldingLaneEntityPairs);
-
-	for (const FLaneEntityPair& SearchStartLaneEntityPair : YieldingLaneEntityPairs)
-	{
-		const TArray<FYieldCycleNode> YieldCycleNodes = FindFirstCycleDFS(YieldMap, SearchStartLaneEntityPair, GetImplicitYieldTarget);
-
-		if (!YieldCycleNodes.IsEmpty())
-		{
-			return YieldCycleNodes;
-		}
-	}
-
-	return TArray<FYieldCycleNode>();
-}
-
-int32 UMassTrafficYieldDeadlockResolutionProcessor::GetNumEntitiesInYieldCycle(
-	const TArray<FYieldCycleNode>& YieldCycleNodes,
-	const TSet<FMassEntityHandle>& VehicleEntities,
-	const TSet<FMassEntityHandle>& PedestrianEntities,
-	int32* OutNumLanesInYieldCycle,
-	int32* OutNumVehicleEntitiesInYieldCycle,
-	int32* OutNumPedestrianEntitiesInYieldCycle) const
-{
-	// We need to subtract 1 in order not to count the "cyclic" node at the end.
-	int32 NumEntitiesInYieldCycle = YieldCycleNodes.Num() - 1;
-	
-	int32 NumVehicleEntitiesInYieldCycle = 0;
-	int32 NumPedestrianEntitiesInYieldCycle = 0;
-
-	TSet<FZoneGraphLaneHandle> YieldCycleLanes;
-	
-	for (int32 YieldCycleIndex = 0; YieldCycleIndex < YieldCycleNodes.Num() - 1; ++YieldCycleIndex)
-	{
-		const FYieldCycleNode& YieldCycleNode = YieldCycleNodes[YieldCycleIndex];
-		
-		const FZoneGraphLaneHandle& YieldingLane = YieldCycleNode.LaneEntityPair.LaneHandle;
-		const FMassEntityHandle& YieldingEntity = YieldCycleNode.LaneEntityPair.EntityHandle;
-
-		YieldCycleLanes.Add(YieldingLane);
-			
-		if (VehicleEntities.Contains(YieldingEntity))
-		{
-			++NumVehicleEntitiesInYieldCycle;
-		}
-
-		if (PedestrianEntities.Contains(YieldingEntity))
-		{
-			++NumPedestrianEntitiesInYieldCycle;
-		}
-	}
-
-	if (OutNumLanesInYieldCycle != nullptr)
-	{
-		*OutNumLanesInYieldCycle = YieldCycleLanes.Num();
-	}
-
-	if (OutNumVehicleEntitiesInYieldCycle != nullptr)
-	{
-		*OutNumVehicleEntitiesInYieldCycle = NumVehicleEntitiesInYieldCycle;
-	}
-
-	if (OutNumPedestrianEntitiesInYieldCycle != nullptr)
-	{
-		*OutNumPedestrianEntitiesInYieldCycle = NumPedestrianEntitiesInYieldCycle;
-	}
-
-	return NumEntitiesInYieldCycle;
-}
-
-TArray<int32> UMassTrafficYieldDeadlockResolutionProcessor::GetYieldOverrideCandidateIndexes(
-	const TArray<FYieldCycleNode>& YieldCycleNodes,
-	const TSet<FMassEntityHandle>& VehicleEntities,
-	const TSet<FMassEntityHandle>& PedestrianEntities) const
-{
-	TArray<int32> YieldOverrideCandidateIndexes;
-
-	// First, see if any pedestrians are in the yield cycle.
-	// If so, all such pedestrians will become our YieldOverrideCandidates.
-	for (int32 YieldCycleIndex = 0; YieldCycleIndex < YieldCycleNodes.Num() - 1; ++YieldCycleIndex)
-	{
-		const FYieldCycleNode& YieldCycleNode = YieldCycleNodes[YieldCycleIndex];
-		
-		const FMassEntityHandle& YieldingEntity = YieldCycleNode.LaneEntityPair.EntityHandle;
-		
-		if (PedestrianEntities.Contains(YieldingEntity))
-		{
-			YieldOverrideCandidateIndexes.Add(YieldCycleIndex);
-		}
-	}
-
-	// If we found any pedestrians in the yield cycle,
-	// return them as our YieldOverrideCandidateLanes.
-	if (!YieldOverrideCandidateIndexes.IsEmpty())
-	{
-		return YieldOverrideCandidateIndexes;
-	}
-
-	// Now, look for vehicles.
-	for (int32 YieldCycleIndex = 0; YieldCycleIndex < YieldCycleNodes.Num() - 1; ++YieldCycleIndex)
-	{
-		const FYieldCycleNode& YieldCycleNode = YieldCycleNodes[YieldCycleIndex];
-		const FYieldCycleNode& NextYieldCycleNode = YieldCycleNodes[YieldCycleIndex + 1];
-
-		// Vehicles can implicitly yield by stopping behind a vehicle in front of them on their own lane.
-		// And, breaking these edges in the yield cycle won't resolve the yield cycle deadlock.
-		// So, we skip selecting yield override candidates that are implicitly yielding
-		// to the next node in the yield cycle.
-		if (NextYieldCycleNode.bHasImplicitYieldFromPrevNode)
-		{
-			continue;
-		}
-		
-		const FMassEntityHandle& YieldingEntity = YieldCycleNode.LaneEntityPair.EntityHandle;
-
-		if (VehicleEntities.Contains(YieldingEntity))
-		{
-			YieldOverrideCandidateIndexes.Add(YieldCycleIndex);
-		}
-	}
-
-	if (!ensureMsgf(YieldCycleNodes.IsEmpty() || !YieldOverrideCandidateIndexes.IsEmpty(), TEXT("YieldCycleNodes has entries.  But, we found no vehicles or pedestrians in the yield cycle in UMassTrafficYieldDeadlockResolutionProcessor::Execute.")))
-	{
-		return TArray<int32>();
-	}
-
-	return YieldOverrideCandidateIndexes;
-}
-
-int32 UMassTrafficYieldDeadlockResolutionProcessor::GetSelectedYieldOverrideCandidateIndex(
-	const TArray<FYieldCycleNode>& YieldCycleNodes,
-	const FMassEntityManager& EntityManager,
-	const TArray<int32>& YieldOverrideCandidateIndexes) const
-{
-	// First, figure-out which candidate Entities are yielding on which lane.
-	TMap<FZoneGraphLaneHandle, TSet<FMassEntityHandle>> YieldingCandidatesMap;
-	for (const int32& YieldOverrideCandidateIndex : YieldOverrideCandidateIndexes)
-	{
-		const FYieldCycleNode& YieldOverrideCandidate = YieldCycleNodes[YieldOverrideCandidateIndex];
-		
-		const FZoneGraphLaneHandle& YieldingLane = YieldOverrideCandidate.LaneEntityPair.LaneHandle;
-		const FMassEntityHandle& YieldingEntity = YieldOverrideCandidate.LaneEntityPair.EntityHandle;
-		
-		TSet<FMassEntityHandle>& YieldingEntities = YieldingCandidatesMap.FindOrAdd(YieldingLane);
-		YieldingEntities.Add(YieldingEntity);
-	}
-
-	// Then, figure-out which lanes are tied for having the least number of candidate Entities.
-	TSet<FZoneGraphLaneHandle> LanesWithMinYieldingEntitiesInYieldOverrideCandidates;
-	int32 MinYieldingEntitiesInYieldOverrideCandidates = TNumericLimits<int32>::Max();
-
-	for (TTuple<FZoneGraphLaneHandle, TSet<FMassEntityHandle>> YieldingCandidatePair : YieldingCandidatesMap)
-	{
-		const FZoneGraphLaneHandle& YieldingLane = YieldingCandidatePair.Key;
-		const TSet<FMassEntityHandle>& YieldingEntities = YieldingCandidatePair.Value;
-
-		const int32 NumYieldingEntities = YieldingEntities.Num();
-
-		// Reset LaneWithMinYieldingEntitiesInYieldOverrideCandidates
-		// on new MinYieldingEntitiesInYieldOverrideCandidates.
-		if (NumYieldingEntities < MinYieldingEntitiesInYieldOverrideCandidates)
-		{
-			LanesWithMinYieldingEntitiesInYieldOverrideCandidates.Reset();
-		}
-
-		if (NumYieldingEntities <= MinYieldingEntitiesInYieldOverrideCandidates)
-		{
-			MinYieldingEntitiesInYieldOverrideCandidates = NumYieldingEntities;
-			LanesWithMinYieldingEntitiesInYieldOverrideCandidates.Add(YieldingLane);
-		}
-	}
-
-	ensureMsgf(!LanesWithMinYieldingEntitiesInYieldOverrideCandidates.IsEmpty(), TEXT("LanesWithMinYieldingEntitiesInYieldOverrideCandidates must contain at least 1 lane in UMassTrafficYieldDeadlockResolutionProcessor::Execute."));
-	
-	int32 SelectedYieldOverrideCandidateIndex = INDEX_NONE;
-	float MaxNormalizedDistanceAlongLane = TNumericLimits<float>::Lowest();
-
-	// Select the candidate with the Entity furthest along the lane among all the candidate lanes.
-	for (const int32& YieldOverrideCandidateIndex : YieldOverrideCandidateIndexes)
-	{
-		const FYieldCycleNode& YieldOverrideCandidate = YieldCycleNodes[YieldOverrideCandidateIndex];
-		
-		const FZoneGraphLaneHandle& YieldingLane = YieldOverrideCandidate.LaneEntityPair.LaneHandle;
-
-		// Only consider yield override candidates on lanes
-		// tied for having the minimum number of candidate Entities.
-		if (!LanesWithMinYieldingEntitiesInYieldOverrideCandidates.Contains(YieldingLane))
-		{
-			continue;
-		}
-		
-		const FMassEntityHandle& YieldOverrideCandidateEntity = YieldOverrideCandidate.LaneEntityPair.EntityHandle;
-		
-		FMassEntityView YieldOverrideCandidateEntityView(EntityManager, YieldOverrideCandidateEntity);
-
-		const FMassZoneGraphLaneLocationFragment& LaneLocationFragment = YieldOverrideCandidateEntityView.GetFragmentData<FMassZoneGraphLaneLocationFragment>();
-
-		const float NormalizedDistanceAlongLane = LaneLocationFragment.LaneLength > 0.0f ? LaneLocationFragment.DistanceAlongLane / LaneLocationFragment.LaneLength : 0.0f;
-
-		if (NormalizedDistanceAlongLane > MaxNormalizedDistanceAlongLane)
-		{
-			MaxNormalizedDistanceAlongLane = NormalizedDistanceAlongLane;
-			SelectedYieldOverrideCandidateIndex = YieldOverrideCandidateIndex;
-		}
-	}
-
-	return SelectedYieldOverrideCandidateIndex;
-}
-
-void UMassTrafficYieldDeadlockResolutionProcessor::DrawDebugYieldMap(
-	const UMassTrafficSubsystem& MassTrafficSubsystem,
-	const UZoneGraphSubsystem& ZoneGraphSubsystem,
-	const FMassEntityManager& EntityManager,
-	const TSet<FMassEntityHandle>& PedestrianEntities,
-	const FVector& IndicatorOffset,
-	const FColor& PedestrianYieldColor,
-	const FColor& VehicleYieldColor,
-	const UWorld& World,
-	const float LifeTime) const
-{
-	TArray<TFunction<void()>> DebugDrawCalls;
-
-	const TMap<FLaneEntityPair, TSet<FLaneEntityPair>>& YieldMap = MassTrafficSubsystem.GetYieldMap();
-
-	for (const TTuple<FLaneEntityPair, TSet<FLaneEntityPair>>& YieldMapPair : YieldMap)
-	{
-		const FLaneEntityPair& YieldingLaneEntityPair = YieldMapPair.Key;
-		const TSet<FLaneEntityPair>& YieldTargets = YieldMapPair.Value;
-		
-		const FZoneGraphLaneHandle& YieldingLane = YieldingLaneEntityPair.LaneHandle;
-		const FMassEntityHandle& YieldingEntity = YieldingLaneEntityPair.EntityHandle;
-
-		const FZoneGraphStorage* YieldingZoneGraphStorage = ZoneGraphSubsystem.GetZoneGraphStorage(YieldingLane.DataHandle);
-
-		if (YieldingZoneGraphStorage == nullptr)
-		{
-			continue;
-		}
-
-		for (const FLaneEntityPair& YieldTarget : YieldTargets)
-		{
-			const FZoneGraphLaneHandle& YieldTargetLane = YieldTarget.LaneHandle;
-			const FMassEntityHandle& YieldTargetEntity = YieldTarget.EntityHandle;
-			
-			const FZoneGraphStorage* YieldTargetZoneGraphStorage = ZoneGraphSubsystem.GetZoneGraphStorage(YieldTargetLane.DataHandle);
-
-			if (YieldTargetZoneGraphStorage == nullptr)
-			{
-				continue;
-			}
-
-			const FMassEntityView YieldingEntityView(EntityManager, YieldingEntity);
-			const FMassEntityView YieldTargetEntityView(EntityManager, YieldTargetEntity);
-	
-			const FMassZoneGraphLaneLocationFragment& YieldingLaneLocationFragment = YieldingEntityView.GetFragmentData<FMassZoneGraphLaneLocationFragment>();
-			const FMassZoneGraphLaneLocationFragment& YieldTargetLaneLocationFragment = YieldTargetEntityView.GetFragmentData<FMassZoneGraphLaneLocationFragment>();
-	
-			FZoneGraphLaneLocation YieldingEntityZoneGraphLaneLocation;
-			FZoneGraphLaneLocation YieldTargetEntityZoneGraphLaneLocation;
-			
-			if (UE::ZoneGraph::Query::CalculateLocationAlongLane(*YieldingZoneGraphStorage, YieldingLane, YieldingLaneLocationFragment.DistanceAlongLane, YieldingEntityZoneGraphLaneLocation)
-				&& UE::ZoneGraph::Query::CalculateLocationAlongLane(*YieldTargetZoneGraphStorage, YieldTargetLane, YieldTargetLaneLocationFragment.DistanceAlongLane, YieldTargetEntityZoneGraphLaneLocation))
-			{
-				const FColor& YieldColor = PedestrianEntities.Contains(YieldingEntity) ? PedestrianYieldColor : VehicleYieldColor;
-
-				DebugDrawCalls.Add([
-					World=&World,
-					YieldingEntityPosition=YieldingEntityZoneGraphLaneLocation.Position,
-					YieldTargetEntityPosition=YieldTargetEntityZoneGraphLaneLocation.Position,
-					IndicatorOffset,
-					YieldColor,
-					LifeTime]()
-				{
-					DrawDebugDirectionalArrow(World, YieldingEntityPosition + IndicatorOffset, YieldTargetEntityPosition + IndicatorOffset, 1000.0f, YieldColor, false, LifeTime, 0, 10.0f);
-				});
+				// Add all the Entities on the selected candidate lane.
+				// These Entities will be allowed to ignore their yield logic to break the deadlock.
+				MassTrafficSubsystem.AddEntityToLaneYieldOverrideMap(SelectedYieldOverrideCandidateLane, SelectedYieldOverrideEntity);
 			}
 		}
 	}
-	
-	AsyncTask(ENamedThreads::GameThread, [DebugDrawCalls]()
-	{
-		for (const auto& DebugDrawCall : DebugDrawCalls)
-		{
-			DebugDrawCall();
-		}
-	});
-}
-
-void UMassTrafficYieldDeadlockResolutionProcessor::DrawDebugYieldCycleIndicators(
-	const UZoneGraphSubsystem& ZoneGraphSubsystem,
-	const FMassEntityManager& EntityManager,
-	const TSet<FMassEntityHandle>& PedestrianEntities,
-	const TArray<FYieldCycleNode>& YieldCycleNodes,
-	const FVector& IndicatorOffset,
-	const FColor& PedestrianYieldColor,
-	const FColor& VehicleYieldColor,
-	const FColor& VehicleImplicitYieldColor,
-	const UWorld& World,
-	const float LifeTime) const
-{
-	TArray<TFunction<void()>> DebugDrawCalls;
-	
-	for (int32 YieldCycleIndex = 0; YieldCycleIndex < YieldCycleNodes.Num() - 1; ++YieldCycleIndex)
-	{
-		const FYieldCycleNode& YieldCycleNode = YieldCycleNodes[YieldCycleIndex];
-		const FYieldCycleNode& NextYieldCycleNode = YieldCycleNodes[YieldCycleIndex + 1];
-
-		const FZoneGraphLaneHandle& YieldingLane = YieldCycleNode.LaneEntityPair.LaneHandle;
-		const FMassEntityHandle& YieldingEntity = YieldCycleNode.LaneEntityPair.EntityHandle;
-
-		const FZoneGraphLaneHandle& NextYieldingLane = NextYieldCycleNode.LaneEntityPair.LaneHandle;
-		const FMassEntityHandle& NextYieldingEntity = NextYieldCycleNode.LaneEntityPair.EntityHandle;
-		
-		const FZoneGraphStorage* YieldingZoneGraphStorage = ZoneGraphSubsystem.GetZoneGraphStorage(YieldingLane.DataHandle);
-		const FZoneGraphStorage* NextYieldingZoneGraphStorage = ZoneGraphSubsystem.GetZoneGraphStorage(NextYieldingLane.DataHandle);
-		
-		if (YieldingZoneGraphStorage != nullptr && NextYieldingZoneGraphStorage != nullptr)
-		{
-			const FMassEntityView YieldingEntityView(EntityManager, YieldingEntity);
-			const FMassEntityView NextYieldingEntityView(EntityManager, NextYieldingEntity);
-	
-			const FMassZoneGraphLaneLocationFragment& YieldingLaneLocationFragment = YieldingEntityView.GetFragmentData<FMassZoneGraphLaneLocationFragment>();
-			const FMassZoneGraphLaneLocationFragment& NextYieldingLaneLocationFragment = NextYieldingEntityView.GetFragmentData<FMassZoneGraphLaneLocationFragment>();
-	
-			FZoneGraphLaneLocation YieldingEntityZoneGraphLaneLocation;
-			FZoneGraphLaneLocation NextYieldingEntityZoneGraphLaneLocation;
-			
-			if (UE::ZoneGraph::Query::CalculateLocationAlongLane(*YieldingZoneGraphStorage, YieldingLane, YieldingLaneLocationFragment.DistanceAlongLane, YieldingEntityZoneGraphLaneLocation)
-				&& UE::ZoneGraph::Query::CalculateLocationAlongLane(*NextYieldingZoneGraphStorage, NextYieldingLane, NextYieldingLaneLocationFragment.DistanceAlongLane, NextYieldingEntityZoneGraphLaneLocation))
-			{
-				const FColor& YieldColor = PedestrianEntities.Contains(YieldingEntity)
-					? PedestrianYieldColor
-					: NextYieldCycleNode.bHasImplicitYieldFromPrevNode ? VehicleImplicitYieldColor : VehicleYieldColor;
-
-				DebugDrawCalls.Add([
-					World=&World,
-					YieldingEntityPosition=YieldingEntityZoneGraphLaneLocation.Position,
-					NextYieldingEntityPosition=NextYieldingEntityZoneGraphLaneLocation.Position,
-					IndicatorOffset,
-					YieldColor,
-					LifeTime]()
-				{
-					DrawDebugDirectionalArrow(World, YieldingEntityPosition + IndicatorOffset, NextYieldingEntityPosition + IndicatorOffset, 1000.0f, YieldColor, false, LifeTime, 0, 10.0f);
-				});
-			}
-		}
-	}
-
-	for (const FYieldCycleNode& YieldCycleNode : YieldCycleNodes)
-	{
-		DebugDrawCalls.Add([
-			&ZoneGraphSubsystem,
-			YieldCycleLane=YieldCycleNode.LaneEntityPair.LaneHandle,
-			World=&World,
-			LifeTime]()
-		{
-			UE::MassTraffic::DrawLaneData(ZoneGraphSubsystem, YieldCycleLane, FColor::Purple, *World, 10.0f, LifeTime);
-		});
-	}
-
-	AsyncTask(ENamedThreads::GameThread, [DebugDrawCalls]()
-	{
-		for (const auto& DebugDrawCall : DebugDrawCalls)
-		{
-			DebugDrawCall();
-		}
-	});
-}
-
-void UMassTrafficYieldDeadlockResolutionProcessor::DrawDebugYieldOverrideIndicators(
-	const UMassTrafficSubsystem& MassTrafficSubsystem,
-	const UZoneGraphSubsystem& ZoneGraphSubsystem,
-	const FMassEntityManager& EntityManager,
-	const TSet<FMassEntityHandle>& PedestrianEntities,
-	const FVector& IndicatorOffset,
-	const FColor& PedestrianYieldOverrideColor,
-	const FColor& VehicleYieldOverrideColor,
-	const UWorld& World,
-	const float LifeTime) const
-{
-	TArray<TFunction<void()>> DebugDrawCalls;
-	
-	const TMap<FLaneEntityPair, TSet<FLaneEntityPair>>& YieldOverrideMap = MassTrafficSubsystem.GetYieldOverrideMap();
-
-	for (const TTuple<FLaneEntityPair, TSet<FLaneEntityPair>>& YieldOverridePair : YieldOverrideMap)
-	{
-		const FLaneEntityPair& YieldOverrideLaneEntityPair = YieldOverridePair.Key;
-		const TSet<FLaneEntityPair>& YieldIgnoreTargets = YieldOverridePair.Value;
-		
-		const FZoneGraphLaneHandle& YieldOverrideLane = YieldOverrideLaneEntityPair.LaneHandle;
-		const FMassEntityHandle& YieldOverrideEntity = YieldOverrideLaneEntityPair.EntityHandle;
-
-		const FZoneGraphStorage* YieldOverrideZoneGraphStorage = ZoneGraphSubsystem.GetZoneGraphStorage(YieldOverrideLane.DataHandle);
-
-		if (YieldOverrideZoneGraphStorage == nullptr)
-		{
-			continue;
-		}
-
-		for (const FLaneEntityPair& YieldIgnoreTarget : YieldIgnoreTargets)
-		{
-			const FZoneGraphLaneHandle& YieldIgnoreTargetLane = YieldIgnoreTarget.LaneHandle;
-			const FMassEntityHandle& YieldIgnoreTargetEntity = YieldIgnoreTarget.EntityHandle;
-			
-			const FZoneGraphStorage* YieldIgnoreTargetZoneGraphStorage = ZoneGraphSubsystem.GetZoneGraphStorage(YieldIgnoreTargetLane.DataHandle);
-
-			if (YieldIgnoreTargetZoneGraphStorage == nullptr)
-			{
-				continue;
-			}
-
-			const FMassEntityView YieldOverrideEntityView(EntityManager, YieldOverrideEntity);
-			const FMassEntityView YieldIgnoreTargetEntityView(EntityManager, YieldIgnoreTargetEntity);
-	
-			const FMassZoneGraphLaneLocationFragment& YieldOverrideLaneLocationFragment = YieldOverrideEntityView.GetFragmentData<FMassZoneGraphLaneLocationFragment>();
-			const FMassZoneGraphLaneLocationFragment& YieldIgnoreTargetLaneLocationFragment = YieldIgnoreTargetEntityView.GetFragmentData<FMassZoneGraphLaneLocationFragment>();
-	
-			FZoneGraphLaneLocation YieldOverrideEntityZoneGraphLaneLocation;
-			FZoneGraphLaneLocation YieldIgnoreTargetEntityZoneGraphLaneLocation;
-			
-			if (UE::ZoneGraph::Query::CalculateLocationAlongLane(*YieldOverrideZoneGraphStorage, YieldOverrideLane, YieldOverrideLaneLocationFragment.DistanceAlongLane, YieldOverrideEntityZoneGraphLaneLocation)
-				&& UE::ZoneGraph::Query::CalculateLocationAlongLane(*YieldIgnoreTargetZoneGraphStorage, YieldIgnoreTargetLane, YieldIgnoreTargetLaneLocationFragment.DistanceAlongLane, YieldIgnoreTargetEntityZoneGraphLaneLocation))
-			{
-				const FColor& YieldOverrideColor = PedestrianEntities.Contains(YieldOverrideEntity) ? PedestrianYieldOverrideColor : VehicleYieldOverrideColor;
-
-				DebugDrawCalls.Add([
-					World=&World,
-					YieldOverrideEntityPosition=YieldOverrideEntityZoneGraphLaneLocation.Position,
-					YieldIgnoreTargetEntityPosition=YieldIgnoreTargetEntityZoneGraphLaneLocation.Position,
-					IndicatorOffset,
-					YieldOverrideColor,
-					LifeTime]()
-				{
-					DrawDebugDirectionalArrow(World, YieldOverrideEntityPosition + IndicatorOffset, YieldIgnoreTargetEntityPosition + IndicatorOffset, 1000.0f, YieldOverrideColor, false, LifeTime, 0, 10.0f);
-				});
-			}
-		}
-	}
-
-	const TSet<FLaneEntityPair>& WildcardYieldOverrideSet = MassTrafficSubsystem.GetWildcardYieldOverrideSet();
-
-	for (const FLaneEntityPair& WildcardYieldOverridePair : WildcardYieldOverrideSet)
-	{
-		const FZoneGraphLaneHandle& WildcardYieldOverrideLane = WildcardYieldOverridePair.LaneHandle;
-		const FMassEntityHandle& WildcardYieldOverrideEntity = WildcardYieldOverridePair.EntityHandle;
-
-		const FZoneGraphStorage* WildcardYieldOverrideZoneGraphStorage = ZoneGraphSubsystem.GetZoneGraphStorage(WildcardYieldOverrideLane.DataHandle);
-
-		if (WildcardYieldOverrideZoneGraphStorage == nullptr)
-		{
-			continue;
-		}
-		
-		const FMassEntityView WildcardYieldOverrideEntityView(EntityManager, WildcardYieldOverrideEntity);
-		const FMassZoneGraphLaneLocationFragment& WildcardYieldOverrideLaneLocationFragment = WildcardYieldOverrideEntityView.GetFragmentData<FMassZoneGraphLaneLocationFragment>();
-		
-		FZoneGraphLaneLocation WildcardYieldOverrideEntityZoneGraphLaneLocation;
-		
-		if (UE::ZoneGraph::Query::CalculateLocationAlongLane(*WildcardYieldOverrideZoneGraphStorage, WildcardYieldOverrideLane, WildcardYieldOverrideLaneLocationFragment.DistanceAlongLane, WildcardYieldOverrideEntityZoneGraphLaneLocation))
-		{
-			const FColor& YieldOverrideColor = PedestrianEntities.Contains(WildcardYieldOverrideEntity) ? PedestrianYieldOverrideColor : VehicleYieldOverrideColor;
-
-			DebugDrawCalls.Add([
-				World=&World,
-				WildcardYieldOverrideEntityPosition=WildcardYieldOverrideEntityZoneGraphLaneLocation.Position,
-				IndicatorOffset,
-				YieldOverrideColor,
-				LifeTime]()
-			{
-				DrawDebugSphere(World, WildcardYieldOverrideEntityPosition + IndicatorOffset, 20.0f, 16, YieldOverrideColor, false, LifeTime, 0, 10.0f);
-			});
-		}
-	}
-	
-	for (const TTuple<FLaneEntityPair, TSet<FLaneEntityPair>>& YieldOverridePair : YieldOverrideMap)
-	{
-		const FLaneEntityPair& YieldOverrideLaneEntityPair = YieldOverridePair.Key;
-		
-		DebugDrawCalls.Add([
-			&ZoneGraphSubsystem,
-			YieldOverrideLane=YieldOverrideLaneEntityPair.LaneHandle,
-			World=&World,
-			LifeTime]()
-		{
-			UE::MassTraffic::DrawLaneData(ZoneGraphSubsystem, YieldOverrideLane, FColor::Blue, *World, 10.0f, LifeTime);
-		});
-	}
-
-	AsyncTask(ENamedThreads::GameThread, [DebugDrawCalls]()
-	{
-		for (const auto& DebugDrawCall : DebugDrawCalls)
-		{
-			DebugDrawCall();
-		}
-	});
 }

@@ -1,0 +1,170 @@
+diff -urN --strip-trailing-cr Source/MassCrowd/Private/MassCrowdNavigationProcessor.cpp /home/giovanni/Develop/VayuSim/Plugins/Tempo/External/MassCrowd/Source/MassCrowd/Private/MassCrowdNavigationProcessor.cpp
+--- Source/MassCrowd/Private/MassCrowdNavigationProcessor.cpp	2025-03-10 19:08:17.830935324 -0400
++++ /home/giovanni/Develop/VayuSim/Plugins/Tempo/External/MassCrowd/Source/MassCrowd/Private/MassCrowdNavigationProcessor.cpp	2025-03-10 17:18:45.929878760 -0400
+@@ -17,6 +17,7 @@
+ #include "MassSignalSubsystem.h"
+ #include "ZoneGraphSubsystem.h"
+ #include "MassGameplayExternalTraits.h"
++#include "ZoneGraphQuery.h"
+ 
+ //----------------------------------------------------------------------//
+ // UMassCrowdLaneTrackingSignalProcessor
+@@ -67,6 +68,10 @@
+ //----------------------------------------------------------------------//
+ // UMassCrowdUpdateTrackingLaneProcessor
+ //----------------------------------------------------------------------//
++
++// Important:  UMassCrowdUpdateTrackingLaneProcessor is meant to run before
++// UMassTrafficVehicleControlProcessor and UMassTrafficCrowdYieldProcessor.
++// So, this must be setup in DefaultMass.ini.
+ UMassCrowdUpdateTrackingLaneProcessor::UMassCrowdUpdateTrackingLaneProcessor()
+ 	: EntityQuery(*this)
+ {
+@@ -76,6 +81,9 @@
+ void UMassCrowdUpdateTrackingLaneProcessor::ConfigureQueries()
+ {
+ 	EntityQuery.AddTagRequirement<FMassCrowdTag>(EMassFragmentPresence::All);
++	EntityQuery.AddRequirement<FMassVelocityFragment>(EMassFragmentAccess::ReadOnly);
++	EntityQuery.AddRequirement<FMassForceFragment>(EMassFragmentAccess::ReadOnly);
++	EntityQuery.AddRequirement<FAgentRadiusFragment>(EMassFragmentAccess::ReadOnly);
+ 	
+ 	ProcessorRequirements.AddSubsystemRequirement<UMassCrowdSubsystem>(EMassFragmentAccess::ReadWrite);
+ 	ProcessorRequirements.AddSubsystemRequirement<UZoneGraphSubsystem>(EMassFragmentAccess::ReadOnly);
+@@ -169,8 +177,18 @@
+ 		for (TTuple<int32, FCrowdTrackingLaneData>& RegisteredCrowdLaneDataPair : RegisteredCrowdLaneData->LaneToTrackingDataLookup)
+ 		{
+ 			FCrowdTrackingLaneData& RegisteredCrowdTrackingLaneData = RegisteredCrowdLaneDataPair.Value;
+-			RegisteredCrowdTrackingLaneData.LeadEntityNormalizedDistanceAlongLane.Reset();
+-			RegisteredCrowdTrackingLaneData.TailEntityNormalizedDistanceAlongLane.Reset();
++
++			RegisteredCrowdTrackingLaneData.LeadEntityHandle.Reset();
++			RegisteredCrowdTrackingLaneData.LeadEntityDistanceAlongLane.Reset();
++			RegisteredCrowdTrackingLaneData.LeadEntitySpeedAlongLane.Reset();
++			RegisteredCrowdTrackingLaneData.LeadEntityAccelerationAlongLane.Reset();
++			RegisteredCrowdTrackingLaneData.LeadEntityRadius.Reset();
++
++			RegisteredCrowdTrackingLaneData.TailEntityHandle.Reset();
++			RegisteredCrowdTrackingLaneData.TailEntityDistanceAlongLane.Reset();
++			RegisteredCrowdTrackingLaneData.TailEntitySpeedAlongLane.Reset();
++			RegisteredCrowdTrackingLaneData.TailEntityAccelerationAlongLane.Reset();
++			RegisteredCrowdTrackingLaneData.TailEntityRadius.Reset();
+ 		}
+ 	}
+ 
+@@ -182,6 +200,9 @@
+ 			
+ 		const FMassEntityView LeadEntityView(EntityManager, LeadEntityHandle);
+ 		const FMassZoneGraphLaneLocationFragment& LeadEntityLaneLocation = LeadEntityView.GetFragmentData<FMassZoneGraphLaneLocationFragment>();
++		const FMassVelocityFragment& LeadEntityVelocityFragment = LeadEntityView.GetFragmentData<FMassVelocityFragment>();
++		const FMassForceFragment& LeadEntityForceFragment = LeadEntityView.GetFragmentData<FMassForceFragment>();
++		const FAgentRadiusFragment& LeadEntityRadiusFragment = LeadEntityView.GetFragmentData<FAgentRadiusFragment>();
+ 
+ 		if (LeadEntityLaneLocation.LaneLength > 0.0f)
+ 		{
+@@ -192,14 +213,30 @@
+ 				continue;
+ 			}
+ 
+-			// We only set the LeadEntityNormalizedDistanceAlongLane value for a given lane, if it hasn't already been set.
++			const FZoneGraphStorage* ZoneGraphStorage = ZoneGraphSubsystem.GetZoneGraphStorage(LeadEntityLaneLocation.LaneHandle.DataHandle);
++
++			if (!ensureMsgf(ZoneGraphStorage != nullptr, TEXT("Must get valid ZoneGraphStorage in UMassCrowdUpdateTrackingLaneProcessor::Execute.")))
++			{
++				continue;
++			}
++
++			// We only set the LeadEntityDistanceAlongLane value for a given lane, if it hasn't already been set.
+ 			// And, since we're indexing into DescendingCrowdEntities, which has been sorted by descending DistanceAlongLane,
+ 			// the first Entity to be indexed for a given lane will in fact be the "Lead Entity" for that lane,
+-			// and it will have the first (and only) opportunity to set the LeadEntityNormalizedDistanceAlongLane field.
+-			if (!LeadEntityCrowdTrackingLaneData->LeadEntityNormalizedDistanceAlongLane.IsSet())
++			// and it will have the first (and only) opportunity to set the LeadEntityDistanceAlongLane field.
++			if (!LeadEntityCrowdTrackingLaneData->LeadEntityDistanceAlongLane.IsSet())
+ 			{
+-				const float NormalizedDistanceAlongLane = LeadEntityLaneLocation.DistanceAlongLane / LeadEntityLaneLocation.LaneLength;
+-				LeadEntityCrowdTrackingLaneData->LeadEntityNormalizedDistanceAlongLane = NormalizedDistanceAlongLane;
++				LeadEntityCrowdTrackingLaneData->LeadEntityHandle = LeadEntityHandle;
++				LeadEntityCrowdTrackingLaneData->LeadEntityDistanceAlongLane = LeadEntityLaneLocation.DistanceAlongLane;
++				LeadEntityCrowdTrackingLaneData->LeadEntityRadius = LeadEntityRadiusFragment.Radius;
++
++				FZoneGraphLaneLocation LeadEntityZoneGraphLaneLocation;
++				UE::ZoneGraph::Query::CalculateLocationAlongLane(*ZoneGraphStorage, LeadEntityLaneLocation.LaneHandle, LeadEntityLaneLocation.DistanceAlongLane, LeadEntityZoneGraphLaneLocation);
++				const float LeadEntitySpeedAlongLane = FVector::DotProduct(LeadEntityVelocityFragment.Value, LeadEntityZoneGraphLaneLocation.Tangent);
++				const float LeadEntityAccelerationAlongLane = FVector::DotProduct(LeadEntityForceFragment.Value, LeadEntityZoneGraphLaneLocation.Tangent);
++
++				LeadEntityCrowdTrackingLaneData->LeadEntitySpeedAlongLane = LeadEntitySpeedAlongLane;
++				LeadEntityCrowdTrackingLaneData->LeadEntityAccelerationAlongLane = LeadEntityAccelerationAlongLane;
+ 			}
+ 		}
+ 
+@@ -208,6 +245,9 @@
+ 			
+ 		const FMassEntityView TailEntityView(EntityManager, TailEntityHandle);
+ 		const FMassZoneGraphLaneLocationFragment& TailEntityLaneLocation = TailEntityView.GetFragmentData<FMassZoneGraphLaneLocationFragment>();
++		const FMassVelocityFragment& TailEntityVelocityFragment = TailEntityView.GetFragmentData<FMassVelocityFragment>();
++		const FMassForceFragment& TailEntityForceFragment = TailEntityView.GetFragmentData<FMassForceFragment>();
++		const FAgentRadiusFragment& TailEntityRadiusFragment = TailEntityView.GetFragmentData<FAgentRadiusFragment>();
+ 
+ 		if (TailEntityLaneLocation.LaneLength > 0.0f)
+ 		{
+@@ -218,14 +258,30 @@
+ 				continue;
+ 			}
+ 
+-			// We only set the TailEntityNormalizedDistanceAlongLane value for a given lane, if it hasn't already been set.
++			const FZoneGraphStorage* ZoneGraphStorage = ZoneGraphSubsystem.GetZoneGraphStorage(TailEntityLaneLocation.LaneHandle.DataHandle);
++
++			if (!ensureMsgf(ZoneGraphStorage != nullptr, TEXT("Must get valid ZoneGraphStorage in UMassCrowdUpdateTrackingLaneProcessor::Execute.")))
++			{
++				continue;
++			}
++
++			// We only set the TailEntityDistanceAlongLane value for a given lane, if it hasn't already been set.
+ 			// And, since we're indexing into AscendingCrowdEntities, which has been sorted by ascending DistanceAlongLane,
+ 			// the first Entity to be indexed for a given lane will in fact be the "Tail Entity" for that lane,
+-			// and it will have the first (and only) opportunity to set the TailEntityNormalizedDistanceAlongLane field.
+-			if (!TailEntityCrowdTrackingLaneData->TailEntityNormalizedDistanceAlongLane.IsSet())
++			// and it will have the first (and only) opportunity to set the TailEntityDistanceAlongLane field.
++			if (!TailEntityCrowdTrackingLaneData->TailEntityDistanceAlongLane.IsSet())
+ 			{
+-				const float NormalizedDistanceAlongLane = TailEntityLaneLocation.DistanceAlongLane / TailEntityLaneLocation.LaneLength;
+-				TailEntityCrowdTrackingLaneData->TailEntityNormalizedDistanceAlongLane = NormalizedDistanceAlongLane;
++				TailEntityCrowdTrackingLaneData->TailEntityHandle = TailEntityHandle;
++				TailEntityCrowdTrackingLaneData->TailEntityDistanceAlongLane = TailEntityLaneLocation.DistanceAlongLane;
++				TailEntityCrowdTrackingLaneData->TailEntityRadius = TailEntityRadiusFragment.Radius;
++				
++				FZoneGraphLaneLocation TailEntityZoneGraphLaneLocation;
++				UE::ZoneGraph::Query::CalculateLocationAlongLane(*ZoneGraphStorage, TailEntityLaneLocation.LaneHandle, TailEntityLaneLocation.DistanceAlongLane, TailEntityZoneGraphLaneLocation);
++				const float TailEntitySpeedAlongLane = FVector::DotProduct(TailEntityVelocityFragment.Value, TailEntityZoneGraphLaneLocation.Tangent);
++				const float TailEntityAccelerationAlongLane = FVector::DotProduct(TailEntityForceFragment.Value, TailEntityZoneGraphLaneLocation.Tangent);
++
++				TailEntityCrowdTrackingLaneData->TailEntitySpeedAlongLane = TailEntitySpeedAlongLane;
++				TailEntityCrowdTrackingLaneData->TailEntityAccelerationAlongLane = TailEntityAccelerationAlongLane;
+ 			}
+ 		}
+ 	}
+diff -urN --strip-trailing-cr Source/MassCrowd/Public/MassCrowdTypes.h /home/giovanni/Develop/VayuSim/Plugins/Tempo/External/MassCrowd/Source/MassCrowd/Public/MassCrowdTypes.h
+--- Source/MassCrowd/Public/MassCrowdTypes.h	2025-03-10 19:08:17.831935340 -0400
++++ /home/giovanni/Develop/VayuSim/Plugins/Tempo/External/MassCrowd/Source/MassCrowd/Public/MassCrowdTypes.h	2025-03-10 17:18:45.930878738 -0400
+@@ -57,9 +57,18 @@
+ 	int32 WaitAreaIndex = INDEX_NONE;
+ 
+ 	int32 NumEntitiesOnLane = 0;
+-	
+-	TOptional<float> LeadEntityNormalizedDistanceAlongLane;
+-	TOptional<float> TailEntityNormalizedDistanceAlongLane;
++
++	TOptional<FMassEntityHandle> LeadEntityHandle;
++	TOptional<float> LeadEntityDistanceAlongLane;
++	TOptional<float> LeadEntitySpeedAlongLane;
++	TOptional<float> LeadEntityAccelerationAlongLane;
++	TOptional<float> LeadEntityRadius;
++
++	TOptional<FMassEntityHandle> TailEntityHandle;
++	TOptional<float> TailEntityDistanceAlongLane;
++	TOptional<float> TailEntitySpeedAlongLane;
++	TOptional<float> TailEntityAccelerationAlongLane;
++	TOptional<float> TailEntityRadius;
+ };
+ 
+ /** Runtime data associated to lane that can be used to wait another one to open. */

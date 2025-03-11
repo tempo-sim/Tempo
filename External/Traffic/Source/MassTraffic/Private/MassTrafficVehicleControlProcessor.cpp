@@ -34,10 +34,11 @@ namespace
 			return;
 		}
 
-		// If we're at a stop sign, don't attempt to ready the intersection lane until we're ready to proceed.
+		// If we're at a stop sign (or a yield sign with waiting or crossing pedestrians),
+		// don't attempt to ready the intersection lane until we're ready to proceed.
 		// Once we've waited at least our chosen minimum waiting time, the logic in ShouldStopAtLaneExit
 		// will give us the signal, and we will bypass this blocking check.
-		if (!VehicleControlFragment.NextLane->ConstData.bIsTrafficLightControlled && !bShouldProceedAtStopSign)
+		if (VehicleControlFragment.NextLane->HasTrafficSignThatRequiresStop() && !bShouldProceedAtStopSign)
 		{
 			return;
 		}
@@ -73,9 +74,15 @@ namespace
 		const FAgentRadiusFragment& RadiusFragment,
 		const FMassTrafficRandomFractionFragment& RandomFractionFragment,
 		const FRandomStream& RandomStream,
-		const UMassTrafficSubsystem& MassTrafficSubsystem,
+		UMassTrafficSubsystem& MassTrafficSubsystem,
 		const UMassTrafficSettings& MassTrafficSettings)
 	{
+		const FZoneGraphTrafficLaneData* CurrentLaneData = MassTrafficSubsystem.GetTrafficLaneData(LaneLocationFragment.LaneHandle);
+		if (!ensureMsgf(CurrentLaneData != nullptr, TEXT("Must get valid CurrentLaneData in UpdateVehicleStopState.")))
+		{
+			return;
+		}
+		
 		// If we *just* stopped, ...
 		if (VehicleControlFragment.IsVehicleCurrentlyStopped() && !VehicleControlFragment.WasVehiclePreviouslyStopped())
 		{
@@ -83,22 +90,47 @@ namespace
 			const UWorld* World = MassTrafficSubsystem.GetWorld();
 			const float TimeVehicleStopped = World != nullptr ? World->GetTimeSeconds() : -1.0f;
 			VehicleControlFragment.TimeVehicleStopped = TimeVehicleStopped;
-
-			if (!UE::MassTraffic::IsVehicleNearStopLineAtIntersection(VehicleControlFragment.NextLane, LaneLocationFragment.DistanceAlongLane, LaneLocationFragment.LaneLength, RadiusFragment.Radius, RandomFractionFragment.RandomFraction, MassTrafficSettings.StoppingDistanceRange))
-			{
-				return;
-			}
-
-			// If we just stopped at a stop sign, choose a minimum time to remain stopped at the stop sign.
-			if (!VehicleControlFragment.NextLane->ConstData.bIsTrafficLightControlled)
-			{
-				VehicleControlFragment.MinVehicleStopSignRestTime = RandomStream.FRandRange(MassTrafficSettings.LowerMinStopSignRestTime, MassTrafficSettings.UpperMinStopSignRestTime);
-			}
 		}
 		// If we *just* ceased being stopped, ...
 		else if (!VehicleControlFragment.IsVehicleCurrentlyStopped() && VehicleControlFragment.WasVehiclePreviouslyStopped())
 		{
 			VehicleControlFragment.ClearVehicleStoppedState();
+		}
+
+		// If we're stopped, but haven't chosen a MinVehicleStopSignRestTime yet,
+		// keep evaluating this block in case conditions change at yield signs.
+		// For instance, if we end up merge yielding before entering the intersection lane at a time when no pedestrians
+		// were waiting at the yield sign or crossing the crosswalk, we wouldn't have set our MinVehicleStopSignRestTime
+		// (since we were just waiting for an opportunity to merge and not really "stopping" at the yield sign).
+		// However, while we were waiting for an opportunity to merge, pedestrians started waiting at the yield sign
+		// and/or crossing the crosswalk which then locks us into a "stop at yield sign" behavior.
+		// But, since we were already stopped (ie. we wouldn't transition from "not stopped" to "stopped"),
+		// we wouldn't have re-evaluated whether we should set our MinVehicleStopSignRestTime.
+		if (VehicleControlFragment.IsVehicleCurrentlyStopped() && VehicleControlFragment.MinVehicleStopSignRestTime <= 0.0f)
+		{
+			if (!UE::MassTraffic::IsVehicleNearStopLineAtIntersection(VehicleControlFragment.NextLane, LaneLocationFragment.DistanceAlongLane, LaneLocationFragment.LaneLength, RadiusFragment.Radius, RandomFractionFragment.RandomFraction, MassTrafficSettings.StoppingDistanceRange))
+			{
+				return;
+			}
+
+			// If we just stopped at a stop sign (or a yield sign with waiting or crossing pedestrians),
+			// choose a minimum time to remain stopped at the sign.
+			if (VehicleControlFragment.NextLane->HasTrafficSignThatRequiresStop())
+			{
+				VehicleControlFragment.MinVehicleStopSignRestTime = RandomStream.FRandRange(MassTrafficSettings.LowerMinStopSignRestTime, MassTrafficSettings.UpperMinStopSignRestTime);
+				MassTrafficSubsystem.AddVehicleEntityToIntersectionStopQueue(VehicleControlFragment.VehicleEntityHandle, VehicleControlFragment.NextLane->IntersectionEntityHandle);
+			}
+		}
+		
+		if (CurrentLaneData->ConstData.bIsIntersectionLane)
+		{
+			// If we're currently in an intersection,
+			// we can clear our record of the last lane controlled by a stop sign,
+			// where we completed our stop sign rest behavior.
+			if (VehicleControlFragment.StopSignIntersectionLane != nullptr)
+			{
+				VehicleControlFragment.StopSignIntersectionLane = nullptr;
+			}
 		}
 	}
 
@@ -158,37 +190,14 @@ namespace
 		--VehicleControlFragment.NextLane->NumReservedVehiclesOnLane;
 	}
 
-	void ProcessYieldAtIntersectionLogic(UMassTrafficSubsystem& MassTrafficSubsystem, const UMassCrowdSubsystem& MassCrowdSubsystem, const FMassEntityManager& EntityManager, FMassTrafficVehicleControlFragment& VehicleControlFragment, const FMassZoneGraphLaneLocationFragment& LaneLocationFragment, const FAgentRadiusFragment& RadiusFragment, const FZoneGraphStorage& ZoneGraphStorage, TFunction<void()> PerformYieldActionFunc)
-	{
-		bool bHasAnotherVehicleEnteredRelevantLaneAfterPreemptiveYieldRollOut = false;
-		const bool bShouldPreemptivelyYieldAtIntersection = UE::MassTraffic::ShouldPerformPreemptiveYieldAtIntersection(MassTrafficSubsystem, MassCrowdSubsystem, EntityManager, VehicleControlFragment, LaneLocationFragment, RadiusFragment, ZoneGraphStorage, bHasAnotherVehicleEnteredRelevantLaneAfterPreemptiveYieldRollOut);
-
-		bool bShouldGiveOpportunityForTurningVehiclesToReactivelyYieldAtIntersection = false;
-		const bool bShouldReactivelyYieldAtIntersection = !bShouldPreemptivelyYieldAtIntersection ? UE::MassTraffic::ShouldPerformReactiveYieldAtIntersection(MassTrafficSubsystem, MassCrowdSubsystem, EntityManager, VehicleControlFragment, LaneLocationFragment, RadiusFragment, ZoneGraphStorage, bShouldGiveOpportunityForTurningVehiclesToReactivelyYieldAtIntersection) : false;
-	
-		UE::MassTraffic::UpdateYieldAtIntersectionState(MassTrafficSubsystem, VehicleControlFragment, LaneLocationFragment.LaneHandle, LaneLocationFragment.DistanceAlongLane, bShouldPreemptivelyYieldAtIntersection, bShouldReactivelyYieldAtIntersection, bHasAnotherVehicleEnteredRelevantLaneAfterPreemptiveYieldRollOut, bShouldGiveOpportunityForTurningVehiclesToReactivelyYieldAtIntersection);
-
-		// If we're reactively yielding, then we should always perform our yield action.
-		if (bShouldReactivelyYieldAtRoadCrosswalk)
-		{
-			PerformYieldActionFunc();
-		}
-
-#if WITH_MASSTRAFFIC_DEBUG
-		const FZoneGraphLaneHandle* NextLaneHandle = VehicleControlFragment.NextLane != nullptr ? &VehicleControlFragment.NextLane->LaneHandle : nullptr;
-		UE::MassTraffic::DrawDebugYieldBehaviorIndicators(MassTrafficSubsystem, VehicleControlFragment.VehicleEntityHandle, LaneLocationFragment.LaneHandle, NextLaneHandle, LaneLocationFragment.DistanceAlongLane, RadiusFragment.Radius, INDEX_NONE, bShouldReactivelyYieldAtRoadCrosswalk, 0.1f);
-#endif
-	}
-
 	void ProcessYieldAtIntersectionLogic(UMassTrafficSubsystem& MassTrafficSubsystem, const UMassCrowdSubsystem& MassCrowdSubsystem, const FMassEntityManager& EntityManager, FMassTrafficVehicleControlFragment& VehicleControlFragment, const FMassZoneGraphLaneLocationFragment& LaneLocationFragment, const FAgentRadiusFragment& RadiusFragment, const FMassTrafficRandomFractionFragment& RandomFractionFragment, const FZoneGraphStorage& ZoneGraphStorage, TFunction<void()> PerformYieldActionFunc)
 	{
 		bool bShouldGiveOpportunityForTurningVehiclesToReactivelyYieldAtIntersection = false;
 		FZoneGraphLaneHandle YieldTargetLane;
-		FMassEntityHandle YieldTargetEntity;
 		int32 MergeYieldCaseIndex = INDEX_NONE;
-		const bool bShouldReactivelyYieldAtIntersection = UE::MassTraffic::ShouldPerformReactiveYieldAtIntersection(MassTrafficSubsystem, MassCrowdSubsystem, EntityManager, VehicleControlFragment, LaneLocationFragment, RadiusFragment, RandomFractionFragment, ZoneGraphStorage, bShouldGiveOpportunityForTurningVehiclesToReactivelyYieldAtIntersection, YieldTargetLane, YieldTargetEntity, MergeYieldCaseIndex);
-
-		UE::MassTraffic::UpdateYieldAtIntersectionState(MassTrafficSubsystem, VehicleControlFragment, LaneLocationFragment.LaneHandle, YieldTargetLane, YieldTargetEntity, bShouldReactivelyYieldAtIntersection, bShouldGiveOpportunityForTurningVehiclesToReactivelyYieldAtIntersection);
+		const bool bShouldReactivelyYieldAtIntersection = UE::MassTraffic::ShouldPerformReactiveYieldAtIntersection(MassTrafficSubsystem, MassCrowdSubsystem, EntityManager, VehicleControlFragment, LaneLocationFragment, RadiusFragment, RandomFractionFragment, ZoneGraphStorage, bShouldGiveOpportunityForTurningVehiclesToReactivelyYieldAtIntersection, YieldTargetLane, MergeYieldCaseIndex);
+		
+		UE::MassTraffic::UpdateYieldAtIntersectionState(MassTrafficSubsystem, VehicleControlFragment, LaneLocationFragment.LaneHandle, YieldTargetLane, bShouldReactivelyYieldAtIntersection, bShouldGiveOpportunityForTurningVehiclesToReactivelyYieldAtIntersection);
 
 		// If we're reactively yielding, then we should always perform our yield action.
 		if (bShouldReactivelyYieldAtIntersection)
@@ -439,13 +448,7 @@ void UMassTrafficVehicleControlProcessor::SimpleVehicleControl(
 	UpdateVehicleStopState(VehicleControlFragment, LaneLocationFragment, AgentRadiusFragment, RandomFractionFragment, RandomStream, MassTrafficSubsystem, *MassTrafficSettings);
 	
 	const FMassEntityHandle NextVehicleEntityInStopQueue = VehicleControlFragment.NextLane != nullptr ? MassTrafficSubsystem.GetNextVehicleEntityInIntersectionStopQueue(VehicleControlFragment.NextLane->IntersectionEntityHandle) : FMassEntityHandle();
-
-	const FZoneGraphTrafficLaneData* CurrentLaneData = MassTrafficSubsystem.GetTrafficLaneData(LaneLocationFragment.LaneHandle);
-	if (!ensureMsgf(CurrentLaneData != nullptr, TEXT("Must get valid CurrentLaneData in SimpleVehicleControl.")))
-	{
-		return;
-	}
-
+	
 	// Should stop?
 	bool bRequestDifferentNextLane = false;
 	bool bVehicleCantStopAtLaneExit = VehicleControlFragment.bCantStopAtLaneExit; // (See all CANTSTOPLANEEXIT.)
@@ -474,6 +477,8 @@ void UMassTrafficVehicleControlProcessor::SimpleVehicleControl(
 		MassTrafficSettings->StandardTrafficPrepareToStopSeconds,
 		VehicleControlFragment.TimeVehicleStopped,
 		VehicleControlFragment.MinVehicleStopSignRestTime,
+		VehicleControlFragment.VehicleEntityHandle,
+		NextVehicleEntityInStopQueue,
 		GetWorld()
 		#if WITH_MASSTRAFFIC_DEBUG
 			, bVisLog
@@ -560,7 +565,10 @@ void UMassTrafficVehicleControlProcessor::SimpleVehicleControl(
 		TargetSpeed = 0.0f;
 	};
 
-	ProcessYieldAtIntersectionLogic(MassTrafficSubsystem, MassCrowdSubsystem, EntityManager, VehicleControlFragment, LaneLocationFragment, AgentRadiusFragment, ZoneGraphStorage, PerformYieldAction);
+	ProcessYieldAtIntersectionLogic(MassTrafficSubsystem, MassCrowdSubsystem, EntityManager, VehicleControlFragment, LaneLocationFragment, AgentRadiusFragment, RandomFractionFragment, ZoneGraphStorage, PerformYieldAction);
+
+	const float VariedAcceleration = MassTrafficSettings->Acceleration * (1.0f + MassTrafficSettings->AccelerationVariancePct * (RandomFractionFragment.RandomFraction * 2.0f - 1.0f));
+	VehicleControlFragment.AccelerationEstimate = VariedAcceleration;
 
 	// (See all READYLANE.)
 	SetIsVehicleReadyToUseNextIntersectionLane(VehicleControlFragment, LaneLocationFragment, AgentRadiusFragment, RandomFractionFragment, *MassTrafficSettings, bShouldProceedAtStopSign, bVehicleHasNoRoom);
@@ -796,6 +804,8 @@ void UMassTrafficVehicleControlProcessor::PIDVehicleControl(
 	// Basically, we need to update our stop state based on what we *are* doing this update cycle to inform what we *should* be doing.
 	UpdateVehicleStopState(VehicleControlFragment, LaneLocationFragment, AgentRadiusFragment, RandomFractionFragment, RandomStream, MassTrafficSubsystem, *MassTrafficSettings);
 
+	const FMassEntityHandle NextVehicleEntityInStopQueue = VehicleControlFragment.NextLane != nullptr ? MassTrafficSubsystem.GetNextVehicleEntityInIntersectionStopQueue(VehicleControlFragment.NextLane->IntersectionEntityHandle) : FMassEntityHandle();
+
 	// Should stop?
 	bool bRequestDifferentNextLane = false;
 	bool bVehicleCantStopAtLaneExit = VehicleControlFragment.bCantStopAtLaneExit; // (See all CANTSTOPLANEEXIT.)
@@ -824,6 +834,8 @@ void UMassTrafficVehicleControlProcessor::PIDVehicleControl(
 		MassTrafficSettings->StandardTrafficPrepareToStopSeconds,
 		VehicleControlFragment.TimeVehicleStopped,
 		VehicleControlFragment.MinVehicleStopSignRestTime,
+		VehicleControlFragment.VehicleEntityHandle,
+		NextVehicleEntityInStopQueue,
 		GetWorld()
 		// DEBUG
 		#if WITH_MASSTRAFFIC_DEBUG
@@ -906,7 +918,10 @@ void UMassTrafficVehicleControlProcessor::PIDVehicleControl(
 		TargetSpeed = 0.0f;
 	};
 
-	ProcessYieldAtIntersectionLogic(MassTrafficSubsystem, MassCrowdSubsystem, EntityManager, VehicleControlFragment, LaneLocationFragment, AgentRadiusFragment, ZoneGraphStorage, PerformYieldAction);
+	ProcessYieldAtIntersectionLogic(MassTrafficSubsystem, MassCrowdSubsystem, EntityManager, VehicleControlFragment, LaneLocationFragment, AgentRadiusFragment, RandomFractionFragment, ZoneGraphStorage, PerformYieldAction);
+
+	const float VariedAcceleration = MassTrafficSettings->Acceleration * (1.0f + MassTrafficSettings->AccelerationVariancePct * (RandomFractionFragment.RandomFraction * 2.0f - 1.0f));
+	VehicleControlFragment.AccelerationEstimate = VariedAcceleration;
 
 	// (See all READYLANE.)
 	SetIsVehicleReadyToUseNextIntersectionLane(VehicleControlFragment, LaneLocationFragment, AgentRadiusFragment, RandomFractionFragment, *MassTrafficSettings, bShouldProceedAtStopSign, bVehicleHasNoRoom);

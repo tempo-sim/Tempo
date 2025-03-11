@@ -499,7 +499,7 @@ struct FMassTrafficSignIntersectionSide
 {
 	GENERATED_BODY()
 	
-	TMap<FZoneGraphTrafficLaneData*, float, TSetAllocator<TSparseArrayAllocator<>, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_VEHICLE_TRAFFIC_LANES>>> VehicleIntersectionLanes;
+	TArray<FZoneGraphTrafficLaneData*, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_VEHICLE_TRAFFIC_LANES>> VehicleIntersectionLanes;
 
 	TArray<int32, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_SIGN_INTERSECTION_SIDES_PEDESTRIAN_CROSSWALK_LANES>> CrosswalkLanes;
 	TArray<int32, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_SIGN_INTERSECTION_SIDES_PEDESTRIAN_CROSSWALK_WAITING_LANES>> CrosswalkWaitingLanes;
@@ -809,10 +809,6 @@ struct MASSTRAFFIC_API FMassTrafficVehicleControlFragment : public FMassFragment
 
 	TMap<EZoneGraphTurnType, FMassTrafficLanePriorityFilters> TurningLanePriorityFilters;
 
-	FMassTrafficLanePriorityFilters NextLanePriorityFilters;
-
-	TMap<EZoneGraphTurnType, FMassTrafficLanePriorityFilters> TurningLanePriorityFilters;
-
 	// Fields used for reactive yields.
 	FZoneGraphTrafficLaneData* YieldAtIntersectionLane = nullptr;
 	bool bHasGivenOpportunityForTurningVehiclesToReactivelyYieldAtIntersection = false;
@@ -854,22 +850,8 @@ struct MASSTRAFFIC_API FMassTrafficVehicleControlFragment : public FMassFragment
 	// The chosen minimum delta time (in seconds) to remain at rest at the current stop sign.
 	float MinVehicleStopSignRestTime = 0.0f;
 
-	// Functions used for the stopped state.
-	bool IsVehicleCurrentlyStopped() const { return FMath::IsNearlyZero(Speed, 0.1f); }
-	bool WasVehiclePreviouslyStopped() const { return TimeVehicleStopped >= 0.0f; }
-	void ClearVehicleStoppedState() { TimeVehicleStopped = -1.0f; MinVehicleStopSignRestTime = 0.0f; }
-
-	// Functions used for both pre-emptive and reactive yields.
-	bool IsYieldingAtIntersection() const { return YieldAtIntersectionLane != nullptr; }
-
-	// The chosen minimum delta time (in seconds) to remain at rest at the current stop sign.
-	float MinVehicleStopSignRestTime = 0.0f;
-
 	// Last stop sign controlled intersection lane that we stopped at.
 	FZoneGraphTrafficLaneData* StopSignIntersectionLane = nullptr;
-
-	// Info about the last lane along a road we yielded on.
-	TOptional<FYieldAlongRoadInfo> LastYieldAlongRoadInfo;
 
 	// Functions used for the stopped state.
 	bool IsVehicleCurrentlyStopped() const { return FMath::IsNearlyZero(Speed, 5.0f); }

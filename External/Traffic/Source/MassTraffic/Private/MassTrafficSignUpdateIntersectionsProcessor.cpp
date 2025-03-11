@@ -54,25 +54,25 @@ namespace
 	
 	void DrawDebugVehicleLaneArrows(const UWorld& World, const FZoneGraphStorage& ZoneGraphStorage, FMassTrafficSignIntersectionSide& IntersectionSide, const float Lifetime)
 	{
-		for (const auto& VehicleIntersectionLane : IntersectionSide.VehicleIntersectionLanes)
+		for (const FZoneGraphTrafficLaneData* VehicleIntersectionLane : IntersectionSide.VehicleIntersectionLanes)
 		{
-			const float Thickness = (VehicleIntersectionLane.Key->HasVehiclesReadyToUseIntersectionLane() ? 20.0f : 5.0f); // (See all READYLANE.)
+			const float Thickness = (VehicleIntersectionLane->HasVehiclesReadyToUseIntersectionLane() ? 20.0f : 5.0f); // (See all READYLANE.)
 			
 			FColor Color = FColor::White;
-			if (VehicleIntersectionLane.Key->bIsOpen && !VehicleIntersectionLane.Key->bIsAboutToClose)
+			if (VehicleIntersectionLane->bIsOpen && !VehicleIntersectionLane->bIsAboutToClose)
 			{
 				Color = FColor::Green;
 			}
-			else if (VehicleIntersectionLane.Key->bIsOpen && VehicleIntersectionLane.Key->bIsAboutToClose)
+			else if (VehicleIntersectionLane->bIsOpen && VehicleIntersectionLane->bIsAboutToClose)
 			{
 				Color = FColor::Yellow;
 			}
-			else if (!VehicleIntersectionLane.Key->bIsOpen)
+			else if (!VehicleIntersectionLane->bIsOpen)
 			{
 				Color = FColor::Red;
 			}
 				
-			DrawDebugVehicleLaneArrow(World, ZoneGraphStorage, VehicleIntersectionLane.Key->LaneHandle.Index, IntersectionSide, Color, false, Lifetime, 0, Thickness);
+			DrawDebugVehicleLaneArrow(World, ZoneGraphStorage, VehicleIntersectionLane->LaneHandle.Index, IntersectionSide, Color, false, Lifetime, 0, Thickness);
 		}
 	}
 
@@ -167,8 +167,8 @@ void UMassTrafficSignUpdateIntersectionsProcessor::Execute(FMassEntityManager& E
 	// Process vehicle chunks.
 	EntityQuery_Vehicle.ForEachEntityChunk(EntityManager, Context, [&, World](FMassExecutionContext& QueryContext)
 	{
-		const TConstArrayView<FMassTrafficVehicleControlFragment> VehicleControlFragments = Context.GetFragmentView<FMassTrafficVehicleControlFragment>();
-		const TConstArrayView<FMassZoneGraphLaneLocationFragment> LaneLocationFragments = Context.GetFragmentView<FMassZoneGraphLaneLocationFragment>();
+		const TArrayView<FMassTrafficVehicleControlFragment> VehicleControlFragments = Context.GetMutableFragmentView<FMassTrafficVehicleControlFragment>();
+		const TArrayView<FMassZoneGraphLaneLocationFragment> LaneLocationFragments = Context.GetMutableFragmentView<FMassZoneGraphLaneLocationFragment>();
 
 		const int32 NumEntities = Context.GetNumEntities();
 		for (int32 EntityIndex = 0; EntityIndex < NumEntities; ++EntityIndex)
@@ -227,9 +227,9 @@ void UMassTrafficSignUpdateIntersectionsProcessor::Execute(FMassEntityManager& E
 	
 	const auto& IsVehicleNearIntersectionSide = [&NearestVehicleMap](const FMassTrafficSignIntersectionSide& IntersectionSide, const float NearDistance)
 	{
-		for (auto& VehicleIntersectionLane : IntersectionSide.VehicleIntersectionLanes)
+		for (FZoneGraphTrafficLaneData* VehicleIntersectionLane : IntersectionSide.VehicleIntersectionLanes)
 		{
-			if (const float* VehicleDistanceToIntersectionSide = NearestVehicleMap.Find(VehicleIntersectionLane.Key))
+			if (float* VehicleDistanceToIntersectionSide = NearestVehicleMap.Find(VehicleIntersectionLane))
 			{
 				if (*VehicleDistanceToIntersectionSide < NearDistance)
 				{
@@ -243,9 +243,9 @@ void UMassTrafficSignUpdateIntersectionsProcessor::Execute(FMassEntityManager& E
 
 	const auto& AreAnyVehiclesInStopQueueForIntersectionSide = [&VehicleInStopQueueMap](const FMassTrafficSignIntersectionSide& IntersectionSide)
     {
-		for (auto& VehicleIntersectionLane : IntersectionSide.VehicleIntersectionLanes)
+		for (FZoneGraphTrafficLaneData* VehicleIntersectionLane : IntersectionSide.VehicleIntersectionLanes)
 		{
-			if (const bool* IsAnyVehicleInStopQueueForLane = VehicleInStopQueueMap.Find(VehicleIntersectionLane.Key))
+			if (bool* IsAnyVehicleInStopQueueForLane = VehicleInStopQueueMap.Find(VehicleIntersectionLane))
 			{
 				if (*IsAnyVehicleInStopQueueForLane)
 				{
@@ -259,9 +259,9 @@ void UMassTrafficSignUpdateIntersectionsProcessor::Execute(FMassEntityManager& E
 	
 	const auto& DidVehicleCompleteStopForIntersectionSide = [&VehicleCompletedStopSignRestMap](const FMassTrafficSignIntersectionSide& IntersectionSide)
 	{
-		for (auto& VehicleIntersectionLane : IntersectionSide.VehicleIntersectionLanes)
+		for (FZoneGraphTrafficLaneData* VehicleIntersectionLane : IntersectionSide.VehicleIntersectionLanes)
 		{
-			if (const bool* VehicleCompletedStopSignRestIntersectionSide = VehicleCompletedStopSignRestMap.Find(VehicleIntersectionLane.Key))
+			if (bool* VehicleCompletedStopSignRestIntersectionSide = VehicleCompletedStopSignRestMap.Find(VehicleIntersectionLane))
 			{
 				if (*VehicleCompletedStopSignRestIntersectionSide)
 				{
@@ -345,12 +345,11 @@ void UMassTrafficSignUpdateIntersectionsProcessor::Execute(FMassEntityManager& E
 					// They also wait for this intersection side's vehicle lanes to clear.
 					if (IntersectionSide.YieldSignIntersectionState == EMassTrafficYieldSignIntersectionState::PedestriansAreWaitingToCross)
 					{
-						const bool bIsRoadCrosswalk = !IntersectionSide.VehicleIntersectionLanes.FilterByPredicate([](const auto& Elem) { return Elem.Value != 0.0; }).IsEmpty();
 						const float CurrentTimeSeconds = World->GetTimeSeconds();
 						if (CurrentTimeSeconds > IntersectionSide.TimePedestriansStartedWaitingToCross + MassTrafficSettings->PedestrianWaitToCrossAtCrosswalkWithYieldSignTime)
 						{
 							if ((!IsVehicleNearIntersectionSide(IntersectionSide, MassTrafficSettings->VehicleTooCloseForPedestriansToCrossAtYieldSignDistance) || AreAnyVehiclesInStopQueueForIntersectionSide(IntersectionSide))
-								&& (bIsRoadCrosswalk || IntersectionSide.AreAllVehicleIntersectionLanesClear()))
+								&& IntersectionSide.AreAllVehicleIntersectionLanesClear())
 							{
 								IntersectionFragment.ApplyLanesActionToIntersectionSide(IntersectionSide, EMassTrafficControllerLanesAction::Open, EMassTrafficControllerLanesAction::Open, MassCrowdSubsystem, false);
 								IntersectionSide.YieldSignIntersectionState = EMassTrafficYieldSignIntersectionState::PedestriansHaveHighPriority;
@@ -383,17 +382,16 @@ void UMassTrafficSignUpdateIntersectionsProcessor::Execute(FMassEntityManager& E
 				}
 
 				// Push crosswalk status information for this intersection side to the lanes.
-				for (const auto& VehicleIntersectionLane : IntersectionSide.VehicleIntersectionLanes)
+				for (FZoneGraphTrafficLaneData* VehicleIntersectionLane : IntersectionSide.VehicleIntersectionLanes)
 				{
-					if (VehicleIntersectionLane.Key == nullptr)
+					if (VehicleIntersectionLane == nullptr)
 					{
 						continue;
 					}
 
-					const float DistanceAlongLane = VehicleIntersectionLane.Value;
-					VehicleIntersectionLane.Key->HasPedestriansWaitingToCross.FindOrAdd(DistanceAlongLane) = !IntersectionSide.AreAllCrosswalkWaitingLanesClear(IntersectionFragment, MassCrowdSubsystem);
-					VehicleIntersectionLane.Key->HasPedestriansInDownstreamCrosswalkLanes.FindOrAdd(DistanceAlongLane) = !IntersectionSide.AreAllCrosswalkLanesClear(IntersectionFragment, MassCrowdSubsystem);
-					VehicleIntersectionLane.Key->AreAllEntitiesOnCrosswalkYielding.FindOrAdd(DistanceAlongLane) = IntersectionSide.AreAllEntitiesOnCrosswalkYielding(IntersectionFragment, MassCrowdSubsystem, MassTrafficSubsystem);
+					VehicleIntersectionLane->bHasPedestriansWaitingToCrossAtIntersectionEntrance = !IntersectionSide.AreAllCrosswalkWaitingLanesClear(IntersectionFragment, MassCrowdSubsystem);
+					VehicleIntersectionLane->bHasPedestriansInDownstreamCrosswalkLanesAtIntersectionEntrance = !IntersectionSide.AreAllCrosswalkLanesClear(IntersectionFragment, MassCrowdSubsystem);
+					VehicleIntersectionLane->bAreAllEntitiesOnCrosswalkYieldingAtIntersectionEntrance = IntersectionSide.AreAllEntitiesOnCrosswalkYielding(IntersectionFragment, MassCrowdSubsystem, MassTrafficSubsystem);
 				}
 			}
 
