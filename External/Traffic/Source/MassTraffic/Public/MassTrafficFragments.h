@@ -15,6 +15,7 @@
 #include "Containers/RingBuffer.h"
 #include "MassLODSubsystem.h"
 #include "MassTrafficSettings.h"
+#include "MassTrafficSubsystem.h"
 
 #include "MassTrafficFragments.generated.h"
 
@@ -23,8 +24,12 @@
 #define MASSTRAFFIC_NUM_INLINE_PERIODS 14
 #define MASSTRAFFIC_NUM_INLINE_INTERSECTION_TRAFFIC_LIGHTS 4
 #define MASSTRAFFIC_NUM_INLINE_INTERSECTION_TRAFFIC_LIGHT_CONTROLS 4
+// For intersections traffic sign sides -
+#define MASSTRAFFIC_NUM_INLINE_SIGN_INTERSECTION_SIDES 6
+#define MASSTRAFFIC_NUM_INLINE_SIGN_INTERSECTION_SIDES_PEDESTRIAN_CROSSWALK_LANES 12
+#define MASSTRAFFIC_NUM_INLINE_SIGN_INTERSECTION_SIDES_PEDESTRIAN_CROSSWALK_WAITING_LANES 24
 // For vehicles -
-#define MASSTRAFFIC_NUM_INLINE_PERIOD_VEHICLE_TRAFFIC_LANES 4
+#define MASSTRAFFIC_NUM_INLINE_VEHICLE_TRAFFIC_LANES 4
 #define MASSTRAFFIC_NUM_INLINE_OBSTACLES 4
 #define MASSTRAFFIC_NUM_INLINE_LANE_CHANGE_NEXT_VEHICLES 4 
 // For pedestrians -
@@ -34,7 +39,8 @@
 
 // Forwards.
 struct FMassTrafficVehicleControlFragment;
-struct FMassTrafficIntersectionFragment;
+struct FMassTrafficLightIntersectionFragment;
+struct FMassTrafficSignIntersectionFragment;
 struct FMassTrafficSimpleVehiclePhysicsTemplate;
 class AMassTrafficCoordinator;
 
@@ -137,7 +143,6 @@ struct MASSTRAFFIC_API FMassTrafficLaneOffsetFragment : public FMassFragment
 	// Offset along the lane right vector 
 	float LateralOffset = 0.0f;
 };
-
 
 /** Traffic Light Fragment */
 UENUM()
@@ -248,7 +253,7 @@ struct MASSTRAFFIC_API FMassTrafficLightControl
 
 
 UENUM(BlueprintType)
-enum class EMassTrafficPeriodLanesAction : uint8
+enum class EMassTrafficControllerLanesAction : uint8
 {
 	None = 0,
 	Open = 1,      // ..open all lanes in the period
@@ -293,14 +298,14 @@ struct FMassTrafficPeriod
 	// Vehicle lanes this period controls (opens.)
 
 	// Use accessors (below) for a uniform access interface between 'open lanes' and 'open lanes closed in next period.'
-	TArray<FZoneGraphTrafficLaneData*, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_PERIOD_VEHICLE_TRAFFIC_LANES>> VehicleLanes;
+	TArray<FZoneGraphTrafficLaneData*, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_VEHICLE_TRAFFIC_LANES>> VehicleLanes;
 
 	// Use accessors (below) for a uniform access interface between 'open lanes' and 'open lanes closed in next period.'
 	// Optimization. This exists so we don't have to do expensive checks for each lane in the current period against each
 	// lane in the next period, to see if it closes. Also, storing uint8 indices instead of redundantly storing lane pointers
 	// (1) Saves a lot of memory (2) Gives a big perf improvement by saving the cache, even though some of the code to
 	// support this uses more cycles and is a bit more complex.
-	TArray<uint8, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_PERIOD_VEHICLE_TRAFFIC_LANES>> VehicleLaneIndices_ClosedInNextPeriod; 
+	TArray<uint8, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_VEHICLE_TRAFFIC_LANES>> VehicleLaneIndices_ClosedInNextPeriod; 
 
 	
 	// Pedestrian crosswalk lanes this period controls (opens.)
@@ -380,14 +385,14 @@ struct FMassTrafficPeriod
 
 
 USTRUCT()
-struct MASSTRAFFIC_API FMassTrafficIntersectionFragment : public FMassFragment
+struct MASSTRAFFIC_API FMassTrafficLightIntersectionFragment : public FMassFragment
 {
 	GENERATED_BODY()
 
-	FMassTrafficIntersectionFragment() :
+	FMassTrafficLightIntersectionFragment() :
 		bHasTrafficLights(false),
-		LastVehicleLanesActionAppliedToCurrentPeriod(EMassTrafficPeriodLanesAction::None),
-		LastPedestrianLanesActionAppliedToCurrentPeriod(EMassTrafficPeriodLanesAction::None)
+		LastVehicleLanesActionAppliedToCurrentPeriod(EMassTrafficControllerLanesAction::None),
+		LastPedestrianLanesActionAppliedToCurrentPeriod(EMassTrafficControllerLanesAction::None)
 	{
 	}
 
@@ -399,8 +404,8 @@ struct MASSTRAFFIC_API FMassTrafficIntersectionFragment : public FMassFragment
 	FZoneGraphDataHandle ZoneGraphDataHandle;
 
 	bool bHasTrafficLights : 1;
-	EMassTrafficPeriodLanesAction LastVehicleLanesActionAppliedToCurrentPeriod : 3;
-	EMassTrafficPeriodLanesAction LastPedestrianLanesActionAppliedToCurrentPeriod : 3;
+	EMassTrafficControllerLanesAction LastVehicleLanesActionAppliedToCurrentPeriod : 3;
+	EMassTrafficControllerLanesAction LastPedestrianLanesActionAppliedToCurrentPeriod : 3;
 	// ..7..
 	
 	// Zone Graph zone index
@@ -446,12 +451,12 @@ struct MASSTRAFFIC_API FMassTrafficIntersectionFragment : public FMassFragment
 		else if (NewCurrentPeriodIndex < 0) CurrentPeriodIndex = NumPeriods - 1;
 		else CurrentPeriodIndex = static_cast<uint8>(NewCurrentPeriodIndex);
 
-		LastVehicleLanesActionAppliedToCurrentPeriod = EMassTrafficPeriodLanesAction::None;
+		LastVehicleLanesActionAppliedToCurrentPeriod = EMassTrafficControllerLanesAction::None;
 	}
 
 	void ApplyLanesActionToCurrentPeriod(
-		const EMassTrafficPeriodLanesAction VehicleLanesAction,
-		const EMassTrafficPeriodLanesAction PedestrianLanesAction,
+		const EMassTrafficControllerLanesAction VehicleLanesAction,
+		const EMassTrafficControllerLanesAction PedestrianLanesAction,
 		UMassCrowdSubsystem* MassCrowdSubsystem,
 		const bool bForce);
 
@@ -469,6 +474,91 @@ struct MASSTRAFFIC_API FMassTrafficIntersectionFragment : public FMassFragment
 	
 	
 	void Finalize(const FMassTrafficLaneToTrafficLightMap& LaneToTrafficLightMap);
+};
+
+UENUM(BlueprintType)
+enum class EMassTrafficStopSignIntersectionState : uint8
+{
+	None = 0,
+	CrosswalkOpen = 1,
+	VehiclesHaveHighPriority = 2
+};
+
+UENUM(BlueprintType)
+enum class EMassTrafficYieldSignIntersectionState : uint8
+{
+	None = 0,
+	CrosswalkClosed = 1,
+	PedestriansAreWaitingToCross = 2,
+	PedestriansHaveHighPriority = 3,
+	WaitingForPedestriansToClear = 4
+};
+
+USTRUCT(BlueprintType)
+struct FMassTrafficSignIntersectionSide
+{
+	GENERATED_BODY()
+	
+	TArray<FZoneGraphTrafficLaneData*, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_VEHICLE_TRAFFIC_LANES>> VehicleIntersectionLanes;
+
+	TArray<int32, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_SIGN_INTERSECTION_SIDES_PEDESTRIAN_CROSSWALK_LANES>> CrosswalkLanes;
+	TArray<int32, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_SIGN_INTERSECTION_SIDES_PEDESTRIAN_CROSSWALK_WAITING_LANES>> CrosswalkWaitingLanes;
+
+	EMassTrafficControllerSignType TrafficControllerSignType = EMassTrafficControllerSignType::None;
+
+	int32 IntersectionSideIndex = INDEX_NONE;
+	
+	EMassTrafficStopSignIntersectionState StopSignIntersectionState = EMassTrafficStopSignIntersectionState::None;
+	EMassTrafficYieldSignIntersectionState YieldSignIntersectionState = EMassTrafficYieldSignIntersectionState::None;
+
+	// The world time (in seconds) that either vehicles or pedestrians got a "high priority" state to go at a stop or yield sign.
+	float TimeHighPriorityStateStarted = 0.0f;
+	
+	float TimePedestriansStartedWaitingToCross = 0.0f;
+
+	bool AreAllVehicleIntersectionLanesOpen() const;
+	bool AreAllVehicleIntersectionLanesClosed() const;
+	
+	bool AreAllVehicleIntersectionLanesClear() const;
+	
+	bool AreAllCrosswalkLanesOpen(const FMassTrafficSignIntersectionFragment& IntersectionFragment, const UMassCrowdSubsystem& MassCrowdSubsystem) const;
+	bool AreAllCrosswalkLanesClosed(const FMassTrafficSignIntersectionFragment& IntersectionFragment, const UMassCrowdSubsystem& MassCrowdSubsystem) const;
+
+	bool AreAllCrosswalkLanesClear(const FMassTrafficSignIntersectionFragment& IntersectionFragment, const UMassCrowdSubsystem& MassCrowdSubsystem) const;
+	
+	bool AreAllCrosswalkWaitingLanesClear(const FMassTrafficSignIntersectionFragment& IntersectionFragment, const UMassCrowdSubsystem& MassCrowdSubsystem) const;
+
+	bool AreAllEntitiesOnCrosswalkYielding(const FMassTrafficSignIntersectionFragment& IntersectionFragment, const UMassCrowdSubsystem& MassCrowdSubsystem, const UMassTrafficSubsystem& MassTrafficSubsystem) const;
+};
+
+USTRUCT()
+struct MASSTRAFFIC_API FMassTrafficSignIntersectionFragment : public FMassFragment
+{
+	GENERATED_BODY()
+
+	FMassTrafficSignIntersectionFragment()
+	{
+	}
+	
+	FZoneGraphDataHandle ZoneGraphDataHandle;
+	
+	// Zone Graph zone index
+	// @see FZoneGraphStorage::Zones
+	int32 ZoneIndex = INDEX_NONE;
+
+	TArray<FMassTrafficSignIntersectionSide, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_SIGN_INTERSECTION_SIDES>> IntersectionSides;
+
+	TArray<EMassTrafficControllerLanesAction, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_SIGN_INTERSECTION_SIDES>> LastVehicleLanesActionAppliedToSide;
+	TArray<EMassTrafficControllerLanesAction, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_SIGN_INTERSECTION_SIDES>> LastPedestrianLanesActionAppliedToSide;
+
+	void RestartIntersection(UMassCrowdSubsystem& MassCrowdSubsystem);
+
+	void ApplyLanesActionToIntersectionSide(
+		const FMassTrafficSignIntersectionSide& IntersectionSide,
+		const EMassTrafficControllerLanesAction VehicleLanesAction,
+		const EMassTrafficControllerLanesAction PedestrianLanesAction,
+		UMassCrowdSubsystem& MassCrowdSubsystem,
+		const bool bForce);
 };
 
 
@@ -691,6 +781,8 @@ struct MASSTRAFFIC_API FMassTrafficVehicleControlFragment : public FMassFragment
 	{
 	}
 
+	FMassEntityHandle VehicleEntityHandle;
+
 	// Flags.
 	bool bRestrictedToTrunkLanesOnly : 1; // Whether this vehicle is only allowed to drive on trunk lanes // @todo Replace usage with FMassTrafficVehicleSimulationParameters::bRestrictedToTrunkLanesOnly 
 	EMassTrafficChooseNextLanePreference ChooseNextLanePreference : 2; // (See all CHOOSENEWLANEOPEN.)
@@ -706,19 +798,8 @@ struct MASSTRAFFIC_API FMassTrafficVehicleControlFragment : public FMassFragment
 
 	TMap<EZoneGraphTurnType, FMassTrafficLanePriorityFilters> TurningLanePriorityFilters;
 
-	// Fields used for both pre-emptive and reactive yields.
-	FZoneGraphTrafficLaneData* YieldAtIntersectionLane = nullptr;
-
-	// Fields used for pre-emptive yields.
-	float TargetRolloutDistanceForPreemptiveYieldAtIntersection = 0.0f;
-	float DistanceAlongLaneAtStartOfYieldLane = 0.0f;
-	float TotalPrevLaneRolloutDistanceForPreemptiveYieldAtIntersection = 0.0f;
-	float TotalRolloutDistanceForPreemptiveYieldAtIntersection = 0.0f;
-
-	float TimeStartedWaitingAfterPreemptiveYieldRollOut = 0.0f;
-	bool bHasFinishedWaitingAfterRollOutForPreemptiveYieldAtIntersection = false;
-
 	// Fields used for reactive yields.
+	FZoneGraphTrafficLaneData* YieldAtIntersectionLane = nullptr;
 	bool bHasGivenOpportunityForTurningVehiclesToReactivelyYieldAtIntersection = false;
 
 	// Crosswalk lanes that this vehicle is actively yielding to.
@@ -732,6 +813,11 @@ struct MASSTRAFFIC_API FMassTrafficVehicleControlFragment : public FMassFragment
 
 	// Current speed the vehicle is traveling along the lane in cm/s
 	float Speed = 0.0f;
+
+	// Estimate of the acceleration of the vehicle.
+	// Note:  This is calculated the way it was for the "simple" control state,
+	// and we use that same value when the vehicle is in the "PID" control state as well.
+	float AccelerationEstimate = 0.0f;
 
 	// This is so we don't have flashing brake lights.
 	FFloat16 BrakeLightHysteresis = 1.0f;
@@ -753,21 +839,17 @@ struct MASSTRAFFIC_API FMassTrafficVehicleControlFragment : public FMassFragment
 	// The chosen minimum delta time (in seconds) to remain at rest at the current stop sign.
 	float MinVehicleStopSignRestTime = 0.0f;
 
+	// Last stop sign controlled intersection lane that we stopped at.
+	FZoneGraphTrafficLaneData* StopSignIntersectionLane = nullptr;
+
 	// Functions used for the stopped state.
-	bool IsVehicleCurrentlyStopped() const { return FMath::IsNearlyZero(Speed, 0.1f); }
+	bool IsVehicleCurrentlyStopped() const { return FMath::IsNearlyZero(Speed, 5.0f); }
 	bool WasVehiclePreviouslyStopped() const { return TimeVehicleStopped >= 0.0f; }
 	void ClearVehicleStoppedState() { TimeVehicleStopped = -1.0f; MinVehicleStopSignRestTime = 0.0f; }
 
-	// Functions used for both pre-emptive and reactive yields.
-	bool IsYieldingAtIntersection() const { return YieldAtIntersectionLane != nullptr; }
-
-	// Functions used for pre-emptive yields.
-	bool IsPreemptivelyYieldingAtIntersection() const { return IsYieldingAtIntersection() && TargetRolloutDistanceForPreemptiveYieldAtIntersection > 0.0f; }
-	bool HasStartedWaitingAfterRollOutForPreemptiveYieldAtIntersection() const { return IsPreemptivelyYieldingAtIntersection() && TimeStartedWaitingAfterPreemptiveYieldRollOut > 0.0f; }
-	bool HasFinishedWaitingAfterRollOutForPreemptiveYieldAtIntersection() const { return bHasFinishedWaitingAfterRollOutForPreemptiveYieldAtIntersection; }
-
 	// Functions used for reactive yields.
-	bool IsReactivelyYieldingAtIntersection() const { return IsYieldingAtIntersection() && !IsPreemptivelyYieldingAtIntersection(); }
+	bool IsYieldingAtIntersection() const { return YieldAtIntersectionLane != nullptr; }
+	bool IsReactivelyYieldingAtIntersection() const { return IsYieldingAtIntersection(); }
 	bool HasGivenOpportunityForTurningVehiclesToReactivelyYieldAtIntersection() const { return bHasGivenOpportunityForTurningVehiclesToReactivelyYieldAtIntersection; }
 };
 

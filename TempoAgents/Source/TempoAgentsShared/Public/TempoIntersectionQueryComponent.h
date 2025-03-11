@@ -105,6 +105,9 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Tempo Intersections")
 	virtual int32 GetConnectionIndexFromCrosswalkIntersectionIndex(const AActor* IntersectionQueryActor, int32 CrosswalkIntersectionIndex) const;
+
+	UFUNCTION(BlueprintCallable, Category = "Tempo Intersections")
+	virtual bool TryGetCanonicalStartingConnectionIndex(const AActor* IntersectionQueryActor, int32& OutStartingConnectionIndex) const;
 	
 protected:
 	

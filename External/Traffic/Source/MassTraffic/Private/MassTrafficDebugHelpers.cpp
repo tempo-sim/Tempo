@@ -728,17 +728,36 @@ void DrawDebugMassTrafficLaneData(const UMassTrafficSubsystem& MassTrafficSubsys
 		{
 			return;
 		}
-		
-		const FZoneLaneData& ZoneLaneData = ZoneGraphStorage->Lanes[LaneData.LaneHandle.Index];
-		const FVector& LaneStart = ZoneGraphStorage->LanePoints[ZoneLaneData.PointsBegin] + FVector(0.0f, 0.0f, ZOffset);
-		const FVector& LaneEnd = ZoneGraphStorage->LanePoints[ZoneLaneData.PointsEnd - 1] + FVector(0.0f, 0.0f, ZOffset);
-		
-		const FVector LaneDir = (LaneEnd - LaneStart).GetSafeNormal();
-		
-		DrawDebugDirectionalArrow(ZoneGraphSubsystem->GetWorld(), LaneStart, LaneEnd, 100000.0f, LaneColor, false, LifeTime, 0, 10.0f);
 
-		if (GMassTrafficDebugLaneData >= 2)	// 2 = Same as option 1, plus spheres to indicate turn state and HasVehiclesReadyToUseIntersectionLane()
+		const FZoneLaneData& ZoneLaneData = ZoneGraphStorage->Lanes[LaneData.LaneHandle.Index];
+
+		if (GMassTrafficDebugLaneData >= 2)	// 2 = Same as option 1, but with polyline lanes.
 		{
+			for (int32 LanePointIndex = ZoneLaneData.PointsBegin; LanePointIndex < ZoneLaneData.PointsEnd - 1; ++LanePointIndex)
+			{
+				const FVector& LaneSegmentStart = ZoneGraphStorage->LanePoints[LanePointIndex] + FVector(0.0f, 0.0f, ZOffset);
+				const FVector& LaneSegmentEnd = ZoneGraphStorage->LanePoints[LanePointIndex + 1] + FVector(0.0f, 0.0f, ZOffset);
+
+				const float ArrowSize = LanePointIndex == ZoneLaneData.PointsEnd - 2 ? 10000.0f : 1000.0f;
+
+				DrawDebugDirectionalArrow(ZoneGraphSubsystem->GetWorld(), LaneSegmentStart, LaneSegmentEnd, ArrowSize, LaneColor, false, LifeTime, 0, 10.0f);
+			}
+		}
+		else if (GMassTrafficDebugLaneData >= 1) // 1 = Debug lane data ([prev], current -> iterate left and right -> next, [next, next -> next], current splitting and merging).
+		{
+			const FVector& LaneStart = ZoneGraphStorage->LanePoints[ZoneLaneData.PointsBegin] + FVector(0.0f, 0.0f, ZOffset);
+			const FVector& LaneEnd = ZoneGraphStorage->LanePoints[ZoneLaneData.PointsEnd - 1] + FVector(0.0f, 0.0f, ZOffset);
+			
+			DrawDebugDirectionalArrow(ZoneGraphSubsystem->GetWorld(), LaneStart, LaneEnd, 10000.0f, LaneColor, false, LifeTime, 0, 10.0f);
+		}
+
+		if (GMassTrafficDebugLaneData >= 3)	// 3 = Same as option 2, plus spheres to indicate turn state and HasVehiclesReadyToUseIntersectionLane()
+		{
+			const FVector& LaneStart = ZoneGraphStorage->LanePoints[ZoneLaneData.PointsBegin] + FVector(0.0f, 0.0f, ZOffset);
+			const FVector& LaneEnd = ZoneGraphStorage->LanePoints[ZoneLaneData.PointsEnd - 1] + FVector(0.0f, 0.0f, ZOffset);
+		
+			const FVector LaneDir = (LaneEnd - LaneStart).GetSafeNormal();
+			
 			FColor LaneTurnStateColor = FColor::Green;
 
 			if (LaneData.bTurnsLeft)
@@ -811,18 +830,23 @@ void DrawDebugMassTrafficLaneData(const UMassTrafficSubsystem& MassTrafficSubsys
 		{
 			DrawLaneData(*MergeLane, FColor::Silver, 45.0f);
 		}
+
+		for (FZoneGraphTrafficLaneData* ConflictLane : CurrentLaneData->ConflictLanes)
+		{
+			DrawLaneData(*ConflictLane, FColor::Turquoise, 50.0f);
+		}
 	}
 }
 
-void DrawDebugYieldLaneIndicators(const UMassTrafficSubsystem& MassTrafficSubsystem, const FZoneGraphLaneHandle& CurrentLaneHandle, const FZoneGraphLaneHandle* NextLaneHandle, const float DistanceAlongLane, const float LaneLength, const bool bShouldPreemptivelyYieldAtIntersection, const bool bShouldReactivelyYieldAtIntersection, const float LifeTime)
+void DrawDebugYieldBehaviorIndicators(const UMassTrafficSubsystem& MassTrafficSubsystem, const FMassEntityHandle& EntityHandle, const FZoneGraphLaneHandle& CurrentLaneHandle, const FZoneGraphLaneHandle* NextLaneHandle, const float EntityDistanceAlongLane, const float EntityRadius, const int32 MergeYieldCaseIndex, const bool bShouldReactivelyYieldAtIntersection, const float LifeTime)
 {
-	if (GMassTrafficDebugYieldAtIntersectionBehavior == 0)	// 0 = Off (default)
+	if (GMassTrafficDebugYieldBehavior == 0)	// 0 = Off (default)
 	{
 		return;
 	}
 
 	const UMassTrafficSettings* MassTrafficSettings = GetDefault<UMassTrafficSettings>();
-	if (!ensureMsgf(MassTrafficSettings != nullptr, TEXT("Can't access MassTrafficSettings in DrawDebugYieldLaneIndicators.")))
+	if (!ensureMsgf(MassTrafficSettings != nullptr, TEXT("Can't access MassTrafficSettings in DrawDebugYieldBehaviorIndicators.")))
 	{
 		return;
 	}
@@ -837,11 +861,47 @@ void DrawDebugYieldLaneIndicators(const UMassTrafficSubsystem& MassTrafficSubsys
 	// But, the next lane is optional.
 	const FZoneGraphTrafficLaneData* NextLaneData = NextLaneHandle != nullptr ? MassTrafficSubsystem.GetTrafficLaneData(*NextLaneHandle) : nullptr;
 
-	const float DistanceFromIntersection = LaneLength - DistanceAlongLane;
-	const bool bIsApproachingIntersection = NextLaneData != nullptr && NextLaneData->ConstData.bIsIntersectionLane && DistanceFromIntersection < MassTrafficSettings->MaxDistanceFromEndOfLaneForPreemptiveYield;
+	const auto& ShouldDrawYieldBehaviorIndicators = [&MassTrafficSubsystem, &CurrentLaneData, &NextLaneData, EntityDistanceAlongLane, EntityRadius, &MassTrafficSettings]()
+	{
+		// If we're close enough to any conflict lane intersections on our current lane,
+		// we should draw yield behavior indicators.
+		for (const FZoneGraphTrafficLaneData* CurrentConflictLane : CurrentLaneData->ConflictLanes)
+		{
+			if (FMassTrafficLaneIntersectionInfo LaneIntersectionInfo; MassTrafficSubsystem.TryGetLaneIntersectionInfo(CurrentLaneData->LaneHandle, CurrentConflictLane->LaneHandle, LaneIntersectionInfo))
+			{
+				const float DistanceToConflictLaneIntersectionEntrance = LaneIntersectionInfo.EnterDistance - EntityDistanceAlongLane;
 
-	// Only draw lines for Entities and their lanes if they're in the intersection or approaching the intersection.
-	if (!CurrentLaneData->ConstData.bIsIntersectionLane && !bIsApproachingIntersection)
+				if (DistanceToConflictLaneIntersectionEntrance < MassTrafficSettings->MaxDistanceFromConflictLaneToDrawYieldBehaviorIndicators)
+				{
+					return true;
+				}
+			}
+		}
+
+		// Or, if we're close enough to any conflict lane intersections on our next lane, given that we have one,
+		// we should draw yield behavior indicators.
+		if (NextLaneData != nullptr)
+		{
+			for (const FZoneGraphTrafficLaneData* NextConflictLane : NextLaneData->ConflictLanes)
+			{
+				if (FMassTrafficLaneIntersectionInfo LaneIntersectionInfo; MassTrafficSubsystem.TryGetLaneIntersectionInfo(NextLaneData->LaneHandle, NextConflictLane->LaneHandle, LaneIntersectionInfo))
+				{
+					const float DistanceToNextLane = CurrentLaneData->Length - EntityDistanceAlongLane - EntityRadius;
+					const float DistanceToConflictLaneIntersectionEntrance = LaneIntersectionInfo.EnterDistance + DistanceToNextLane;
+
+					if (DistanceToConflictLaneIntersectionEntrance < MassTrafficSettings->MaxDistanceFromConflictLaneToDrawYieldBehaviorIndicators)
+					{
+						return true;
+					}
+				}
+			}
+		}
+
+		return false;
+	};
+
+	// Only draw yield behavior indicators when necessary.
+	if (!ShouldDrawYieldBehaviorIndicators())
 	{
 		return;
 	}
@@ -871,47 +931,109 @@ void DrawDebugYieldLaneIndicators(const UMassTrafficSubsystem& MassTrafficSubsys
 		
 		DrawDebugDirectionalArrow(ZoneGraphSubsystem->GetWorld(), LaneStart, LaneEnd, 100000.0f, IndicatorColor, false, LifeTime, 0, 10.0f);
 	};
-
-	const auto& DrawSphereIndicator = [ZoneGraphSubsystem, ZoneGraphStorage, LifeTime, DistanceAlongLane](const FZoneGraphLaneHandle& LaneHandle, const FColor IndicatorColor, const float ZOffset = 10.0f)
+	
+	const auto& DrawSphereIndicator = [ZoneGraphSubsystem, ZoneGraphStorage, LifeTime](const FZoneGraphLaneHandle& LaneHandle, const float DistanceAlongLane, const FColor IndicatorColor, const float ZOffset = 10.0f, const float Radius = 50.0f, const float Thickness = 10.0f)
 	{
 		if (!LaneHandle.IsValid())
 		{
 			return;
 		}
-		
-		const FZoneLaneData& ZoneLaneData = ZoneGraphStorage->Lanes[LaneHandle.Index];
-		
-		float RemainingSquaredDistanceAlongLane = FMath::Square(DistanceAlongLane);
 
-		for (int32 PointIndex = ZoneLaneData.PointsBegin; PointIndex < ZoneLaneData.PointsEnd; ++PointIndex)
+		FZoneGraphLaneLocation ZoneGraphLaneLocation;
+		
+		if (!UE::ZoneGraph::Query::CalculateLocationAlongLane(
+			*ZoneGraphStorage,
+			LaneHandle,
+			DistanceAlongLane,
+			ZoneGraphLaneLocation))
 		{
-			const FVector& LaneSegmentStart = ZoneGraphStorage->LanePoints[ZoneLaneData.PointsBegin];
-			const FVector& LaneSegmentEnd = ZoneGraphStorage->LanePoints[ZoneLaneData.PointsEnd - 1];
-
-			const float LaneSegmentSquaredLength = (LaneSegmentEnd - LaneSegmentStart).SizeSquared();
-
-			if (RemainingSquaredDistanceAlongLane <= LaneSegmentSquaredLength)
-			{
-				const FVector LaneSegmentDir = (LaneSegmentEnd - LaneSegmentStart).GetSafeNormal();
-				const FVector IndicatorLocation = LaneSegmentStart + LaneSegmentDir * FMath::Sqrt(RemainingSquaredDistanceAlongLane) + FVector(0.0f, 0.0f, ZOffset);
-
-				DrawDebugSphere(ZoneGraphSubsystem->GetWorld(), IndicatorLocation, 50.0f, 32, IndicatorColor, false, LifeTime, 0, 10.0f);
-			}
-			
-			RemainingSquaredDistanceAlongLane -= LaneSegmentSquaredLength;
+			return;
 		}
+
+		const FVector IndicatorLocation = ZoneGraphLaneLocation.Position + FVector(0.0f, 0.0f, ZOffset);
+
+		DrawDebugSphere(ZoneGraphSubsystem->GetWorld(), IndicatorLocation, Radius, 32, IndicatorColor, false, LifeTime, 0, Thickness);
 	};
 
-	if (GMassTrafficDebugYieldAtIntersectionBehavior >= 1)	// 1 = Draw lane indicators for yielding lane.  Yellow is pre-emptive yield.  Orange is reactive yield
+	if (GMassTrafficDebugYieldBehavior >= 1)	// 1 = Draw lane indicators for yielding lane.
 	{
-		const FColor IndicatorColor = bShouldPreemptivelyYieldAtIntersection ? FColor::Yellow : bShouldReactivelyYieldAtIntersection ? FColor::Orange : FColor::Green;
+		const FColor IndicatorColor = bShouldReactivelyYieldAtIntersection ? FColor::Orange : FColor::Green;
 		
-		if (bShouldPreemptivelyYieldAtIntersection || bShouldReactivelyYieldAtIntersection)
+		if (bShouldReactivelyYieldAtIntersection)
 		{
 			DrawLaneIndicator(CurrentLaneHandle, IndicatorColor, 100.0f);
 		}
 		
-		DrawSphereIndicator(CurrentLaneHandle, IndicatorColor, 200.0f);
+		DrawSphereIndicator(CurrentLaneHandle, EntityDistanceAlongLane, IndicatorColor, 200.0f);
+
+		// Only draw conflict enter/exit locations for selected Entities.
+		// (See console commands "mass.debug.DebugEntity" and "mass.debug.SetDebugEntityRange".)
+		if (GMassTrafficDebugYieldBehavior >= 2 && UE::Mass::Debug::IsDebuggingEntity(EntityHandle))	// 2 = Draw conflict enter/exit locations along current and next lane.
+		{
+			// Draw conflict enter/exit locations for current lane.
+			for (const FZoneGraphTrafficLaneData* CurrentConflictLane : CurrentLaneData->ConflictLanes)
+			{
+				if (FMassTrafficLaneIntersectionInfo LaneIntersectionInfo; MassTrafficSubsystem.TryGetLaneIntersectionInfo(CurrentLaneData->LaneHandle, CurrentConflictLane->LaneHandle, LaneIntersectionInfo))
+				{
+					DrawSphereIndicator(CurrentLaneData->LaneHandle, LaneIntersectionInfo.EnterDistance, FColor::Magenta, 200.0f, 50.0f, 1.0f);
+					DrawSphereIndicator(CurrentLaneData->LaneHandle, LaneIntersectionInfo.ExitDistance, FColor::Purple, 200.0f, 10.0f, 1.0f);
+				}
+			}
+
+			// Draw conflict enter/exit locations for next lane, if we have one.
+			if (NextLaneData != nullptr)
+			{
+				for (const FZoneGraphTrafficLaneData* NextConflictLane : NextLaneData->ConflictLanes)
+				{
+					if (FMassTrafficLaneIntersectionInfo LaneIntersectionInfo; MassTrafficSubsystem.TryGetLaneIntersectionInfo(NextLaneData->LaneHandle, NextConflictLane->LaneHandle, LaneIntersectionInfo))
+					{
+						DrawSphereIndicator(NextLaneData->LaneHandle, LaneIntersectionInfo.EnterDistance, FColor::Magenta, 200.0f, 50.0f, 1.0f);
+						DrawSphereIndicator(NextLaneData->LaneHandle, LaneIntersectionInfo.ExitDistance, FColor::Purple, 200.0f, 10.0f, 1.0f);
+					}
+				}
+			}
+		}
+
+		if (MergeYieldCaseIndex >= 0)
+		{
+			FColor MergeCaseColor;
+				
+			switch (MergeYieldCaseIndex)
+			{
+			case 0:
+				MergeCaseColor = FColor::Blue;
+				break;
+			case 1:
+				MergeCaseColor = FColor::Cyan;
+				break;
+			case 2:
+				MergeCaseColor = FColor::Emerald;
+				break;
+			case 3:
+				MergeCaseColor = FColor::Green;
+				break;
+			case 4:
+				MergeCaseColor = FColor::Magenta;
+				break;
+			case 5:
+				MergeCaseColor = FColor::Orange;
+				break;
+			case 6:
+				MergeCaseColor = FColor::Purple;
+				break;
+			case 7:
+				MergeCaseColor = FColor::Red;
+				break;
+			case 8:
+				MergeCaseColor = FColor::Silver;
+				break;
+			default:
+				MergeCaseColor = FColor::Black;
+				break;
+			};
+
+			DrawSphereIndicator(CurrentLaneData->LaneHandle, EntityDistanceAlongLane, MergeCaseColor, 300.0f, 50.0f, 5.0f);
+		}
 	}
 }
 

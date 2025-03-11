@@ -22,7 +22,7 @@ enum class ETempoRoadConfigurationDescriptor : uint8
 UENUM(BlueprintType)
 enum class ETempoTrafficControllerType : uint8
 {
-	StopSign = 0,
+	Sign = 0,
 	TrafficLight = 1
 };
 
@@ -179,6 +179,9 @@ public:
 	
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
 	ETempoTrafficControllerType GetTempoTrafficControllerType() const;
+	
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
+	EMassTrafficControllerSignType GetTempoTrafficControllerSignType(int32 ConnectionIndex) const;
 	
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
 	FTempoTrafficControllerMeshInfo GetTempoTrafficControllerMeshInfo(int32 ConnectionIndex, ETempoTrafficControllerType TrafficControllerType) const;

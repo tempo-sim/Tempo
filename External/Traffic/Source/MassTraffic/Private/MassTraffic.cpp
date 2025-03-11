@@ -159,7 +159,8 @@ FAutoConsoleVariableRef CMassTrafficDebugLaneData(
 	TEXT("MassTraffic lane data debug mode.\n")
 	TEXT("0 = Off (default).\n")
 	TEXT("1 = Debug lane data ([prev], current -> iterate left and right -> next, [next, next -> next], current splitting and merging).\n")
-	TEXT("2 = Same as option 1, plus spheres to indicate turn state and HasVehiclesReadyToUseIntersectionLane().\n"),
+	TEXT("2 = Same as option 1, but with polyline lanes.\n")
+	TEXT("3 = Same as option 2, plus spheres to indicate turn state and HasVehiclesReadyToUseIntersectionLane().\n"),
 	ECVF_Cheat
 	);
 
@@ -174,13 +175,34 @@ FAutoConsoleVariableRef CMassTrafficDebugLaneDataLongitudinalOffset(
 	ECVF_Cheat
 	);
 
-int32 GMassTrafficDebugYieldAtIntersectionBehavior = 0;
-FAutoConsoleVariableRef CMassTrafficDebugYieldAtIntersectionBehavior(
-	TEXT("MassTraffic.DebugYieldAtIntersectionBehavior"),
-	GMassTrafficDebugYieldAtIntersectionBehavior,
+int32 GMassTrafficDebugYieldBehavior = 0;
+FAutoConsoleVariableRef CMassTrafficDebugYieldBehavior(
+	TEXT("MassTraffic.DebugYieldBehavior"),
+	GMassTrafficDebugYieldBehavior,
 	TEXT("MassTraffic debug mode for yield at intersection behavior.\n")
 	TEXT("0 = Off (default).\n")
-	TEXT("1 = Draw indicators for yielding state.  Yellow is pre-emptive yield, Orange is reactive yield, Green is no yield.\n"),
+	TEXT("1 = Draw indicators for yielding state.  Orange is reactive yield.  Green is no yield.\n")
+	TEXT("2 = Draw conflict enter/exit locations along current and next lane.\n"),
+	ECVF_Cheat
+	);
+
+int32 GMassTrafficResolveYieldDeadlocks = 1;
+FAutoConsoleVariableRef CMassTrafficResolveYieldDeadlocks(
+	TEXT("MassTraffic.ResolveYieldDeadlocks"),
+	GMassTrafficResolveYieldDeadlocks,
+	TEXT("Resolve yield deadlocks.\n")
+	TEXT("0 = Off.\n")
+	TEXT("1 = Enable processor to resolve yield deadlocks.\n"),
+	ECVF_Cheat
+	);
+
+int32 GMassTrafficDebugYieldDeadlockResolution = 0;
+FAutoConsoleVariableRef CMassTrafficDebugYieldDeadlockResolution(
+	TEXT("MassTraffic.DebugYieldDeadlockResolution"),
+	GMassTrafficDebugYieldDeadlockResolution,
+	TEXT("MassTraffic debug mode for yield deadlock resolution.\n")
+	TEXT("0 = Off (default).\n")
+	TEXT("1 = Draw indicators for entities in yield cycles and on the yield override list.  Yield Cycle:  Magenta for pedestrians, Purple for vehicles.  Yield Overrides:  Cyan for pedestrians, Blue for vehicles.\n"),
 	ECVF_Cheat
 	);
 
