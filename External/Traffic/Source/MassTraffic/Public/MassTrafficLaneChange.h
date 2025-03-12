@@ -226,6 +226,7 @@ bool ShouldPerformReactiveYieldAtRoadCrosswalk(
 	const FMassZoneGraphLaneLocationFragment& LaneLocationFragment,
 	const FAgentRadiusFragment& RadiusFragment,
 	const FMassTrafficRandomFractionFragment& RandomFractionFragment,
-	const FZoneGraphStorage& ZoneGraphStorage);
+	const FZoneGraphStorage& ZoneGraphStorage,
+	FZoneGraphLaneHandle& OutYieldTargetLane);
 
 };

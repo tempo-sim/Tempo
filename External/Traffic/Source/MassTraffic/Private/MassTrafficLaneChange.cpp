@@ -1524,7 +1524,8 @@ bool ShouldPerformReactiveYieldAtRoadCrosswalk(
 	const FMassZoneGraphLaneLocationFragment& LaneLocationFragment,
 	const FAgentRadiusFragment& RadiusFragment,
 	const FMassTrafficRandomFractionFragment& RandomFractionFragment,
-	const FZoneGraphStorage& ZoneGraphStorage)
+	const FZoneGraphStorage& ZoneGraphStorage,
+	FZoneGraphLaneHandle& OutYieldTargetLane)
 {
 	const UMassTrafficSettings* MassTrafficSettings = GetDefault<UMassTrafficSettings>();
 	if (!ensureMsgf(MassTrafficSettings != nullptr, TEXT("Can't access MassTrafficSettings in ShouldPerformReactiveYieldAtIntersection.  Yield behavior disabled.")))
@@ -1538,10 +1539,16 @@ bool ShouldPerformReactiveYieldAtRoadCrosswalk(
 		return false;
 	}
 
-	FZoneGraphLaneHandle YieldTargetLane_Unused;
+	FZoneGraphLaneHandle YieldTargetLane;
 
-	return ShouldYieldToCrosswalks_Internal(MassTrafficSubsystem, MassCrowdSubsystem, CurrentLaneData, CurrentLaneData,
-			VehicleControlFragment, LaneLocationFragment, RandomFractionFragment, RadiusFragment, ZoneGraphStorage, MassTrafficSettings, YieldTargetLane_Unused);
+	if (ShouldYieldToCrosswalks_Internal(MassTrafficSubsystem, MassCrowdSubsystem, CurrentLaneData, CurrentLaneData,
+		VehicleControlFragment, LaneLocationFragment, RandomFractionFragment, RadiusFragment, ZoneGraphStorage, MassTrafficSettings, YieldTargetLane))
+	{
+		OutYieldTargetLane = YieldTargetLane;
+		return true;
+	}
+
+	return false;
 }
 
 }
