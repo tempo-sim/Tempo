@@ -391,9 +391,9 @@ void UMassTrafficSignUpdateIntersectionsProcessor::Execute(FMassEntityManager& E
 					}
 
 					const float DistanceAlongLane = VehicleIntersectionLane.Value;
-					VehicleIntersectionLane.Key->HasPedestriansWaitingToCrossAtIntersectionEntrance.FindOrAdd(DistanceAlongLane) = !IntersectionSide.AreAllCrosswalkWaitingLanesClear(IntersectionFragment, MassCrowdSubsystem);
-					VehicleIntersectionLane.Key->HasPedestriansInDownstreamCrosswalkLanesAtIntersectionEntrance.FindOrAdd(DistanceAlongLane) = !IntersectionSide.AreAllCrosswalkLanesClear(IntersectionFragment, MassCrowdSubsystem);
-					VehicleIntersectionLane.Key->AreAllEntitiesOnCrosswalkYieldingAtIntersectionEntrance.FindOrAdd(DistanceAlongLane) = IntersectionSide.AreAllEntitiesOnCrosswalkYielding(IntersectionFragment, MassCrowdSubsystem, MassTrafficSubsystem);
+					VehicleIntersectionLane.Key->HasPedestriansWaitingToCross.FindOrAdd(DistanceAlongLane) = !IntersectionSide.AreAllCrosswalkWaitingLanesClear(IntersectionFragment, MassCrowdSubsystem);
+					VehicleIntersectionLane.Key->HasPedestriansInDownstreamCrosswalkLanes.FindOrAdd(DistanceAlongLane) = !IntersectionSide.AreAllCrosswalkLanesClear(IntersectionFragment, MassCrowdSubsystem);
+					VehicleIntersectionLane.Key->AreAllEntitiesOnCrosswalkYielding.FindOrAdd(DistanceAlongLane) = IntersectionSide.AreAllEntitiesOnCrosswalkYielding(IntersectionFragment, MassCrowdSubsystem, MassTrafficSubsystem);
 				}
 			}
 

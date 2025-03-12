@@ -768,6 +768,20 @@ struct MASSTRAFFIC_API FEnvironmentalBrightnessFragment : public FMassFragment
 	float Brightness = 0.0f;
 };
 
+struct FYieldAlongRoadInfo
+{
+	FYieldAlongRoadInfo(const FZoneGraphLaneHandle& LaneHandleIn, float DistanceAlongRoadIn, bool bPedestriansEnteredCrosswalkIn)
+		: LaneHandle(LaneHandleIn), DistanceAlongRoad(DistanceAlongRoadIn), bPedestriansEnteredCrosswalk(bPedestriansEnteredCrosswalkIn) {}
+	FZoneGraphLaneHandle LaneHandle;
+	float DistanceAlongRoad = false;
+	bool bPedestriansEnteredCrosswalk = false;
+
+	bool operator==(const FYieldAlongRoadInfo& Other) const
+	{
+		return LaneHandle == Other.LaneHandle && DistanceAlongRoad == Other.DistanceAlongRoad;
+	}
+};
+
 /** Miscellaneous fields commonly used in traffic vehicle movement control */
 USTRUCT()
 struct MASSTRAFFIC_API FMassTrafficVehicleControlFragment : public FMassFragment
@@ -841,6 +855,9 @@ struct MASSTRAFFIC_API FMassTrafficVehicleControlFragment : public FMassFragment
 
 	// Last stop sign controlled intersection lane that we stopped at.
 	FZoneGraphTrafficLaneData* StopSignIntersectionLane = nullptr;
+
+	// Info about the last lane along a road we yielded on.
+	TOptional<FYieldAlongRoadInfo> LastYieldAlongRoadInfo;
 
 	// Functions used for the stopped state.
 	bool IsVehicleCurrentlyStopped() const { return FMath::IsNearlyZero(Speed, 5.0f); }

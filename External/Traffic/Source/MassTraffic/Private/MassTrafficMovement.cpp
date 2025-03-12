@@ -709,6 +709,8 @@ bool ShouldStopAtNextStopLine(
 	const FZoneGraphTrafficLaneData* CurrentLaneData,
 	FZoneGraphTrafficLaneData* NextTrafficLaneData,
 	const FZoneGraphTrafficLaneData* ReadiedNextIntersectionLane,
+	TOptional<FYieldAlongRoadInfo>& LastYieldAlongRoadInfo,
+	const bool bIsStopped,
 	const FVector2D& MinimumDistanceToNextVehicleRange,
 	const FVector2D& StoppingDistanceRange,
 	const FMassEntityManager& EntityManager,
@@ -744,27 +746,56 @@ bool ShouldStopAtNextStopLine(
 
 	constexpr float DebugDotSize = 10.0f;
 
-	auto ShouldYieldAtYieldSign = [](const FZoneGraphTrafficLaneData* RoadLane, float DistanceAlongLane)
+	auto ShouldContinueYieldingAtYieldSign = [](const FZoneGraphTrafficLaneData* LaneData, float DistanceAlongLane)
 	{
-		const float LaneLengthAtTrafficControl = RoadLane->LaneLengthAtNextTrafficControl(DistanceAlongLane);
-		const bool bHasPedestriansInDownstreamCrosswalkLanesAtIntersectionEntrance =
-			RoadLane->HasPedestriansInDownstreamCrosswalkLanesAtIntersectionEntrance.Contains(LaneLengthAtTrafficControl) &&
-			RoadLane->HasPedestriansInDownstreamCrosswalkLanesAtIntersectionEntrance[LaneLengthAtTrafficControl];
-		const bool bHasPedestriansWaitingToCrossAtIntersectionEntrance =
-			RoadLane->HasPedestriansWaitingToCrossAtIntersectionEntrance.Contains(LaneLengthAtTrafficControl) &&
-			RoadLane->HasPedestriansWaitingToCrossAtIntersectionEntrance[LaneLengthAtTrafficControl];
-		const bool bAreAllEntitiesOnCrosswalkYieldingAtIntersectionEntrance =
-			RoadLane->AreAllEntitiesOnCrosswalkYieldingAtIntersectionEntrance.Contains(LaneLengthAtTrafficControl) &&
-			RoadLane->AreAllEntitiesOnCrosswalkYieldingAtIntersectionEntrance[LaneLengthAtTrafficControl];
+		const bool bHasPedestriansInDownstreamCrosswalkLanes =
+			LaneData->HasPedestriansInDownstreamCrosswalkLanes.Contains(DistanceAlongLane) &&
+			LaneData->HasPedestriansInDownstreamCrosswalkLanes[DistanceAlongLane];
+		const bool bAreAllEntitiesOnCrosswalkYielding =
+			LaneData->AreAllEntitiesOnCrosswalkYielding.Contains(DistanceAlongLane) &&
+			LaneData->AreAllEntitiesOnCrosswalkYielding[DistanceAlongLane];
 
-		return (bHasPedestriansWaitingToCrossAtIntersectionEntrance ||
-			bHasPedestriansInDownstreamCrosswalkLanesAtIntersectionEntrance) &&
-			!bAreAllEntitiesOnCrosswalkYieldingAtIntersectionEntrance;
+		// At yield signs (for which we already decided to stop) we should remain stopped until either the crosswalk
+		// clears or all pedestrians on it are yielding.
+		return bHasPedestriansInDownstreamCrosswalkLanes && !bAreAllEntitiesOnCrosswalkYielding;
 	};
 
-	if (CurrentLaneData->HasYieldSignAlongRoad(DistanceAlongLane))
+	if (!CurrentLaneData->ConstData.bIsIntersectionLane && CurrentLaneData->HasYieldSignAlongRoad(DistanceAlongLane) && CurrentLaneData->HasYieldSignThatRequiresStopAlongRoad(DistanceAlongLane))
 	{
-		return ShouldYieldAtYieldSign(CurrentLaneData, DistanceAlongLane);
+		const float YieldSignDistance = CurrentLaneData->LaneLengthAtNextTrafficControl(DistanceAlongLane);
+
+		// Always plan on stopping at yield signs until we're close enough to the stop line.
+		if (!IsVehicleNearStopLine(DistanceAlongLane, YieldSignDistance, Radius, RandomFraction, StoppingDistanceRange))
+		{
+			return true;
+		}
+
+		// Stop if we haven't already stopped at this yield sign.
+		const FYieldAlongRoadInfo YieldAlongRoadInfo(CurrentLaneData->LaneHandle, YieldSignDistance, false);
+		if (!LastYieldAlongRoadInfo.IsSet() || LastYieldAlongRoadInfo.GetValue() != YieldAlongRoadInfo)
+		{
+			// Haven't stopped here previously. If we are stopped now, remember where we were stopped.
+			if (bIsStopped)
+			{
+				LastYieldAlongRoadInfo = YieldAlongRoadInfo;
+			}
+			return true;
+		}
+
+		// Wait for pedestrians (the ones we yielded for) to enter the crosswalk.
+		if (!LastYieldAlongRoadInfo->bPedestriansEnteredCrosswalk)
+		{
+			const bool bHasPedestriansInDownstreamCrosswalkLanes =
+				CurrentLaneData->HasPedestriansInDownstreamCrosswalkLanes.Contains(YieldSignDistance) &&
+				CurrentLaneData->HasPedestriansInDownstreamCrosswalkLanes[YieldSignDistance];
+			if (bHasPedestriansInDownstreamCrosswalkLanes)
+			{
+				LastYieldAlongRoadInfo->bPedestriansEnteredCrosswalk = true;
+			}
+			return true;
+		}
+
+		return ShouldContinueYieldingAtYieldSign(CurrentLaneData, YieldSignDistance);
 	}
 
 	// A next lane has not yet been chosen yet, stop at end of lane to prevent vehicle from driving on no lane off into
@@ -817,11 +848,9 @@ bool ShouldStopAtNextStopLine(
 			return true;
 		}
 
-		// At yield signs at intersections (for which we already decided to stop),
-		// remain stopped until the crosswalk clears on this intersection side.
-		if (NextTrafficLaneData->HasYieldSignAtEntrance() && ShouldYieldAtYieldSign(NextTrafficLaneData, 0.0))
+		if (NextTrafficLaneData->HasYieldSignAtEntrance())
 		{
-			return true;
+			return ShouldContinueYieldingAtYieldSign(NextTrafficLaneData, 0.0);
 		}
 
 		return false;

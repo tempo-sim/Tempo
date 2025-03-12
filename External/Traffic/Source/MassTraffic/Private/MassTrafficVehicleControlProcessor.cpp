@@ -140,6 +140,8 @@ namespace
 			// we can clear our record of the last lane controlled by a stop sign,
 			// where we completed our stop sign rest behavior.
 			VehicleControlFragment.StopSignIntersectionLane = nullptr;
+			// We can also clear our last yield info.
+			VehicleControlFragment.LastYieldAlongRoadInfo.Reset();
 		}
 	}
 
@@ -498,6 +500,8 @@ void UMassTrafficVehicleControlProcessor::SimpleVehicleControl(
 		CurrentLaneData,
 		VehicleControlFragment.NextLane,
 		VehicleControlFragment.ReadiedNextIntersectionLane,
+		VehicleControlFragment.LastYieldAlongRoadInfo,
+		VehicleControlFragment.IsVehicleCurrentlyStopped(),
 		MassTrafficSettings->MinimumDistanceToNextVehicleRange,
 		MassTrafficSettings->StoppingDistanceRange,
 		EntityManager,
@@ -865,6 +869,8 @@ void UMassTrafficVehicleControlProcessor::PIDVehicleControl(
 		CurrentLaneData,
 		VehicleControlFragment.NextLane,
 		VehicleControlFragment.ReadiedNextIntersectionLane,
+		VehicleControlFragment.LastYieldAlongRoadInfo,
+		VehicleControlFragment.IsVehicleCurrentlyStopped(),
 		MassTrafficSettings->MinimumDistanceToNextVehicleRange,
 		MassTrafficSettings->StoppingDistanceRange,
 		EntityManager,

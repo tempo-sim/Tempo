@@ -78,6 +78,8 @@ void UMassTrafficInitTrafficVehicleSpeedProcessor::Execute(FMassEntityManager& E
 				CurrentLaneData,
 				VehicleControlFragment.NextLane,
 				VehicleControlFragment.ReadiedNextIntersectionLane,
+				VehicleControlFragment.LastYieldAlongRoadInfo,
+				VehicleControlFragment.IsVehicleCurrentlyStopped(),
 				MassTrafficSettings->MinimumDistanceToNextVehicleRange,
 				MassTrafficSettings->StoppingDistanceRange,
 				EntityManager,

@@ -162,6 +162,8 @@ MASSTRAFFIC_API bool ShouldStopAtNextStopLine(
 	const FZoneGraphTrafficLaneData* CurrentLaneData,
 	FZoneGraphTrafficLaneData* NextTrafficLaneData,
 	const FZoneGraphTrafficLaneData* ReadiedNextIntersectionLane,
+	TOptional<FYieldAlongRoadInfo>& LastYieldAlongRoadInfo,
+	const bool bIsStopped,
 	const FVector2D& MinimumDistanceToNextVehicleRange,
 	const FVector2D& StoppingDistanceRange,
 	const FMassEntityManager& EntityManager,

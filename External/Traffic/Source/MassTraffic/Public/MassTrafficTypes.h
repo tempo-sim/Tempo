@@ -482,18 +482,18 @@ struct MASSTRAFFIC_API FZoneGraphTrafficLaneConstData
 		});
 	}
 
-	TOptional<FMassTrafficControllerType> TryGetTrafficControllerType(float DistanceAlongLane) const
+	TOptional<TPair<float, FMassTrafficControllerType>> TryGetTrafficControllerType(float DistanceAlongLane) const
 	{
 		for (const auto& Elem : TrafficControllerTypes)
 		{
 			const float ControllerDistance = Elem.Key;
 			if (ControllerDistance > DistanceAlongLane)
 			{
-				return Elem.Value;
+				return Elem;
 			}
 		}
 
-		return TOptional<FMassTrafficControllerType>();
+		return TOptional<TPair<float, FMassTrafficControllerType>>();
 	}
 
 	TOptional<FMassTrafficControllerType> TryGetTrafficControllerTypeAtEntrance() const
@@ -547,13 +547,13 @@ struct MASSTRAFFIC_API FZoneGraphTrafficLaneData
 	bool bIsStoppedVehicleInPreviousLaneOverlappingThisLane : 1; // (See all CROSSWALKOVERLAP.)
 	
 	// Note:  Currently only sign-controlled intersections will set this flag.
-	TMap<float, bool, TSetAllocator<TSparseArrayAllocator<>, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_VEHICLE_CROSSWALKS>>> HasPedestriansWaitingToCrossAtIntersectionEntrance;
+	TMap<float, bool, TSetAllocator<TSparseArrayAllocator<>, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_VEHICLE_CROSSWALKS>>> HasPedestriansWaitingToCross;
 
 	// Note:  Currently only sign-controlled intersections will set this flag.
-	TMap<float, bool, TSetAllocator<TSparseArrayAllocator<>, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_VEHICLE_CROSSWALKS>>> HasPedestriansInDownstreamCrosswalkLanesAtIntersectionEntrance;
+	TMap<float, bool, TSetAllocator<TSparseArrayAllocator<>, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_VEHICLE_CROSSWALKS>>> HasPedestriansInDownstreamCrosswalkLanes;
 
 	// Note:  Currently only sign-controlled intersections will set this flag.
-	TMap<float, bool, TSetAllocator<TSparseArrayAllocator<>, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_VEHICLE_CROSSWALKS>>> AreAllEntitiesOnCrosswalkYieldingAtIntersectionEntrance;
+	TMap<float, bool, TSetAllocator<TSparseArrayAllocator<>, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_VEHICLE_CROSSWALKS>>> AreAllEntitiesOnCrosswalkYielding;
 
 	UE::MassTraffic::TFraction<true, uint8> FractionUntilClosed;
 
@@ -618,6 +618,7 @@ struct MASSTRAFFIC_API FZoneGraphTrafficLaneData
 	FFloat16 Radius;
 
 	bool HasYieldSignAlongRoad(float DistanceAlongLane) const;
+	bool HasYieldSignThatRequiresStopAlongRoad(float DistanceAlongLane) const;
 	bool HasYieldSignAtEntrance() const;
 	bool HasStopSignAtEntrance() const;
 	bool HasStopSignOrYieldSignAtEntrance() const;
