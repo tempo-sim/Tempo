@@ -150,8 +150,8 @@ void UMassTrafficLaneMetadataProcessor::Execute(FMassEntityManager& EntityManage
 				LeadVehicleLaneData->LeadVehicleStopSignIntersectionLane = LeadVehicleVehicleControlFragment.StopSignIntersectionLane;
 				LeadVehicleLaneData->LeadVehicleRandomFraction = LeadVehicleRandomFractionFragment.RandomFraction.GetFloat();
 
-				LeadVehicleLaneData->LeadVehicleIsNearStopLineAtIntersection = UE::MassTraffic::IsVehicleNearStopLineAtIntersection(
-					LeadVehicleVehicleControlFragment.NextLane,
+
+				LeadVehicleLaneData->LeadVehicleIsNearStopLineAtIntersection = UE::MassTraffic::IsVehicleNearStopLine(
 					LeadVehicleLaneLocation.DistanceAlongLane,
 					LeadVehicleLaneLocation.LaneLength,
 					LeadVehicleRadiusFragment.Radius,

@@ -189,6 +189,56 @@ FVector GetLaneBeginToEndDirection(const uint32 LaneIndex, const FZoneGraphStora
 	return LaneBeginToEndDirection;
 }
 
+FVector GetDirectionAtDistanceAlongLane(const uint32 LaneIndex, float Distance, const FZoneGraphStorage& ZoneGraphStorage)
+{
+	const FZoneLaneData& LaneData = ZoneGraphStorage.Lanes[LaneIndex];
+
+	if (Distance <= 0.0)
+	{
+		return GetLaneBeginDirection(LaneIndex, ZoneGraphStorage);
+	}
+
+	float Length = 0.0;
+	for (int32 PointIndex = LaneData.PointsBegin; PointIndex < LaneData.PointsEnd - 1; ++PointIndex)
+	{
+		const FVector& SegmentStart = ZoneGraphStorage.LanePoints[PointIndex];
+		const FVector& SegmentEnd = ZoneGraphStorage.LanePoints[PointIndex + 1];
+		const float SegmentLength = (SegmentEnd - SegmentStart).Length();
+		if (Length + SegmentLength >= Distance)
+		{
+			return (SegmentEnd - SegmentStart).GetSafeNormal();
+		}
+		Length += SegmentLength;
+	}
+
+	return GetLaneEndDirection(LaneIndex, ZoneGraphStorage);
+}
+
+FVector GetPointAtDistanceAlongLane(const uint32 LaneIndex, float Distance, const FZoneGraphStorage& ZoneGraphStorage)
+{
+	const FZoneLaneData& LaneData = ZoneGraphStorage.Lanes[LaneIndex];
+
+	if (Distance <= 0.0)
+	{
+		return GetLaneBeginPoint(LaneIndex, ZoneGraphStorage);
+	}
+
+	float Length = 0.0;
+	for (int32 PointIndex = LaneData.PointsBegin; PointIndex < LaneData.PointsEnd - 1; ++PointIndex)
+	{
+		const FVector& SegmentStart = ZoneGraphStorage.LanePoints[PointIndex];
+		const FVector& SegmentEnd = ZoneGraphStorage.LanePoints[PointIndex + 1];
+		const float SegmentLength = (SegmentEnd - SegmentStart).Length();
+		if (Length + SegmentLength >= Distance)
+		{
+			return SegmentStart + (SegmentEnd - SegmentStart).GetSafeNormal() * (Distance - Length);
+		}
+		Length += SegmentLength;
+	}
+
+	return GetLaneEndPoint(LaneIndex, ZoneGraphStorage);
+}
+
 // Lane straightness.
 float GetLaneStraightness(const uint32 LaneIndex, const FZoneGraphStorage& ZoneGraphStorage)
 {
@@ -308,7 +358,8 @@ bool TryGetEnterAndExitDistancesAlongQueryLane(
 	const FZoneGraphLaneHandle& QueryLane,
 	const FZoneGraphLaneHandle& OtherLane,
 	float& OutEnterDistanceAlongQueryLane,
-	float& OutExitDistanceAlongQueryLane)
+	float& OutExitDistanceAlongQueryLane,
+	bool bExpectIntersection)
 {
 	// First, see if we can get the enter/exit distances from the cache.
 	// Otherwise, we'll compute it.
@@ -366,8 +417,9 @@ bool TryGetEnterAndExitDistancesAlongQueryLane(
 		&NormalizedDistanceAlongIntersectionLaneIntersectionSegmentRightSide,
 		MassTrafficSettings.AcceptableLaneIntersectionDistance);
 
-	if (!ensureMsgf(bFoundIntersectionQueryToOtherLaneLeftSide || bFoundIntersectionQueryToOtherLaneRightSide, TEXT("Expected to find left side and/or right side intersections between QueryLane and OtherLane in TryGetEnterAndExitDistancesAlongQueryLane.  Either we're testing against the wrong OtherLane, or AcceptableLaneIntersectionDistance is not high enough to detect the intersection.  MassTrafficSettings.AcceptableLaneIntersectionDistance: %f."), MassTrafficSettings.AcceptableLaneIntersectionDistance))
+	if (!(bFoundIntersectionQueryToOtherLaneLeftSide || bFoundIntersectionQueryToOtherLaneRightSide))
 	{
+		ensureMsgf(!bExpectIntersection, TEXT("Expected to find left side and/or right side intersections between QueryLane and OtherLane in TryGetEnterAndExitDistancesAlongQueryLane.  Either we're testing against the wrong OtherLane, or AcceptableLaneIntersectionDistance is not high enough to detect the intersection.  MassTrafficSettings.AcceptableLaneIntersectionDistance: %f."), MassTrafficSettings.AcceptableLaneIntersectionDistance);
 		return false;
 	}
 	
@@ -405,7 +457,7 @@ bool TryGetVehicleEnterAndExitTimesForCrossingLane(
 	float* OutVehicleEnterDistance,
 	float* OutVehicleExitDistance)
 {
-	if (!ensureMsgf(VehicleCurrentLaneData.NextLanes.Contains(&VehicleQueryLaneData) || VehicleCurrentLaneData.LaneHandle == VehicleQueryLaneData.LaneHandle, TEXT("VehicleQueryLaneData must be one of VehicleCurrentLaneData's NextLanes (or they must be the same lane) in TryGetVehicleEnterAndExitTimesForCrossingLane.")))
+	if (!ensureMsgf(VehicleCurrentLaneData.NextLanes.ContainsByPredicate([&VehicleQueryLaneData](const FZoneGraphTrafficLaneData* LaneData){ return LaneData->LaneHandle == VehicleQueryLaneData.LaneHandle; } ) || VehicleCurrentLaneData.LaneHandle == VehicleQueryLaneData.LaneHandle, TEXT("VehicleQueryLaneData must be one of VehicleCurrentLaneData's NextLanes (or they must be the same lane) in TryGetVehicleEnterAndExitTimesForCrossingLane.")))
 	{
 		return false;
 	}

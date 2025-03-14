@@ -111,9 +111,9 @@ int32 FMassTrafficIntersectionDetail::GetTrafficLanesConnectingSides(int32 Start
 	const FMassTrafficIntersectionSide& BeginSide = Sides[StartSideIndex];
 	const FMassTrafficIntersectionSide& EndSide = Sides[EndSideIndex];
 
-	const TArray<FZoneGraphTrafficLaneData*>& StartInboundTrafficLanes = BeginSide.VehicleIntersectionLanes;
-	for (FZoneGraphTrafficLaneData* StartInboundTrafficLaneData : StartInboundTrafficLanes)
+	for (const auto& Elem : BeginSide.VehicleIntersectionLanes)
 	{
+		FZoneGraphTrafficLaneData* StartInboundTrafficLaneData = Elem.Key;
 		const FVector DirectionAlongEndSide = (UE::MassTraffic::GetLaneEndPoint(StartInboundTrafficLaneData->LaneHandle.Index, ZoneGraphStorage) - EndSide.IntersectionLanesBeginMidpoint).GetSafeNormal();
 		if (FVector::DotProduct(EndSide.DirectionIntoIntersection, DirectionAlongEndSide) <= MaxLaneSideConnectionCos)
 		{
@@ -164,10 +164,11 @@ void FMassTrafficIntersectionDetail::Build(
 			FVector Midpoint = FVector::ZeroVector;
 			FVector DirectionIntoIntersection = FVector::ZeroVector;
 			float Count = 0.0f;
-			for (FZoneGraphTrafficLaneData* VehicleIntersectionTrafficLaneData : Side.VehicleIntersectionLanes)
+			for (const auto& Elem : Side.VehicleIntersectionLanes)
 			{
-				Midpoint += UE::MassTraffic::GetLaneBeginPoint(VehicleIntersectionTrafficLaneData->LaneHandle.Index, ZoneGraphStorage); 
-				DirectionIntoIntersection += UE::MassTraffic::GetLaneBeginDirection(VehicleIntersectionTrafficLaneData->LaneHandle.Index, ZoneGraphStorage);
+				const FMassTrafficIntersectionSideLaneInfo& SideLaneInfo = Elem.Value;
+				Midpoint += SideLaneInfo.EntranceLocation;
+				DirectionIntoIntersection += SideLaneInfo.EntranceDirection;
 				Count += 1.0f;
 			}
 			Midpoint /= Count;
@@ -229,8 +230,9 @@ void FMassTrafficIntersectionDetail::Build(
 		for (int32 SourceSideIndex = 0; SourceSideIndex < NumSides; SourceSideIndex++)
 		{
 			const FMassTrafficIntersectionSide& SourceSide = Sides[SourceSideIndex];
-			for (FZoneGraphTrafficLaneData* SourceSideIntersectionTrafficLaneData : SourceSide.VehicleIntersectionLanes)
+			for (const auto& Elem : SourceSide.VehicleIntersectionLanes)
 			{
+				FZoneGraphTrafficLaneData* SourceSideIntersectionTrafficLaneData = Elem.Key;
 				const FVector& SourceSideIntersectionTrafficLaneData_EndPoint = UE::MassTraffic::GetLaneEndPoint(SourceSideIntersectionTrafficLaneData->LaneHandle.Index, ZoneGraphStorage);
 				const FVector& SourceSideIntersectionTrafficLaneData_EndDirectionIntoIntersection = -UE::MassTraffic::GetLaneEndDirection(SourceSideIntersectionTrafficLaneData->LaneHandle.Index, ZoneGraphStorage);
 
@@ -332,6 +334,13 @@ void FMassTrafficIntersectionDetail::Build(
 
 		for (FMassTrafficIntersectionSide& Side : Sides)
 		{
+			// Crosswalks on roads are always treated as yields.
+			if (bIsRoadCrosswalk)
+			{
+				Side.TrafficControllerSignType = EMassTrafficControllerSignType::YieldSign;
+				Side.TrafficLightInstanceDescIndex = INDEX_NONE;
+				continue;
+			}
 			// Find the left-most (closest to road center) intersection lane begin point. It will represent this
 			// intersection side in searches for the traffic light that controls it, which is in the middle of the
 			// intersection side. (This point should be closest to that.)
@@ -339,8 +348,9 @@ void FMassTrafficIntersectionDetail::Build(
 			{
 				float FarthestDistance = TNumericLimits<float>::Lowest();
 				bool bFoundLeftMostIntersectionLaneBeginPoint = false;
-				for (const FZoneGraphTrafficLaneData* IntersectionTrafficLaneData : Side.VehicleIntersectionLanes)
+				for (const auto& Elem : Side.VehicleIntersectionLanes)
 				{
+					FZoneGraphTrafficLaneData* IntersectionTrafficLaneData = Elem.Key;
 					const FVector IntersectionLaneBeginPoint = UE::MassTraffic::GetLaneBeginPoint(IntersectionTrafficLaneData->LaneHandle.Index, ZoneGraphStorage);
 					const FVector FromPoint_ToIntersectionLanesBeginMidpoint_Direction = IntersectionLaneBeginPoint - Side.IntersectionLanesBeginMidpoint;
 

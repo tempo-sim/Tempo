@@ -421,9 +421,9 @@ void FMassTrafficLightIntersectionFragment::Finalize(const FMassTrafficLaneToTra
 
 bool FMassTrafficSignIntersectionSide::AreAllVehicleIntersectionLanesOpen() const
 {
-	for (const FZoneGraphTrafficLaneData* VehicleIntersectionLane : VehicleIntersectionLanes)
+	for (const auto& VehicleIntersectionLane : VehicleIntersectionLanes)
 	{
-		if (!VehicleIntersectionLane->bIsOpen)
+		if (!VehicleIntersectionLane.Key->bIsOpen)
 		{
 			return false;
 		}
@@ -434,9 +434,9 @@ bool FMassTrafficSignIntersectionSide::AreAllVehicleIntersectionLanesOpen() cons
 
 bool FMassTrafficSignIntersectionSide::AreAllVehicleIntersectionLanesClosed() const
 {
-	for (const FZoneGraphTrafficLaneData* VehicleIntersectionLane : VehicleIntersectionLanes)
+	for (const auto& VehicleIntersectionLane : VehicleIntersectionLanes)
 	{
-		if (VehicleIntersectionLane->bIsOpen)
+		if (VehicleIntersectionLane.Key->bIsOpen)
 		{
 			return false;
 		}
@@ -447,9 +447,9 @@ bool FMassTrafficSignIntersectionSide::AreAllVehicleIntersectionLanesClosed() co
 
 bool FMassTrafficSignIntersectionSide::AreAllVehicleIntersectionLanesClear() const
 {
-	for (const FZoneGraphTrafficLaneData* VehicleIntersectionLane : VehicleIntersectionLanes)
+	for (const auto& VehicleIntersectionLane : VehicleIntersectionLanes)
 	{
-		if (VehicleIntersectionLane->NumVehiclesOnLane > 0)
+		if (VehicleIntersectionLane.Key->NumVehiclesOnLane > 0)
 		{
 			return false;
 		}
@@ -639,9 +639,9 @@ void FMassTrafficSignIntersectionFragment::ApplyLanesActionToIntersectionSide(
 	if ((VehicleLanesAction != LastAppliedVehicleLanesAction || bForce) &&
 		VehicleLanesAction != EMassTrafficControllerLanesAction::None)
 	{
-		for (FZoneGraphTrafficLaneData* VehicleIntersectionLane : IntersectionSide.VehicleIntersectionLanes)
+		for (auto& VehicleIntersectionLane : IntersectionSide.VehicleIntersectionLanes)
 		{
-			if (!VehicleIntersectionLane->ConstData.bIsIntersectionLane)
+			if (!VehicleIntersectionLane.Key->ConstData.bIsIntersectionLane)
 			{
 				continue;
 			}
@@ -649,16 +649,16 @@ void FMassTrafficSignIntersectionFragment::ApplyLanesActionToIntersectionSide(
 			// Vehicle intersection lanes at traffic sign intersections can only be in a state of "open" or "closed".
 			if (VehicleLanesAction == EMassTrafficControllerLanesAction::Open)
 			{
-				VehicleIntersectionLane->bIsOpen = true;
-				VehicleIntersectionLane->bIsAboutToClose = false;
+				VehicleIntersectionLane.Key->bIsOpen = true;
+				VehicleIntersectionLane.Key->bIsAboutToClose = false;
 			}
 			else if (VehicleLanesAction == EMassTrafficControllerLanesAction::HardClose
 					|| VehicleLanesAction == EMassTrafficControllerLanesAction::SoftClose
 					|| VehicleLanesAction == EMassTrafficControllerLanesAction::HardPrepareToClose
 					|| VehicleLanesAction == EMassTrafficControllerLanesAction::SoftPrepareToClose)
 			{
-				VehicleIntersectionLane->bIsOpen = false;
-				VehicleIntersectionLane->bIsAboutToClose = false;
+				VehicleIntersectionLane.Key->bIsOpen = false;
+				VehicleIntersectionLane.Key->bIsAboutToClose = false;
 			}
 		}
 		

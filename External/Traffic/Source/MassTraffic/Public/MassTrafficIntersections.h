@@ -9,13 +9,20 @@
 
 #include "MassTrafficIntersections.generated.h"
 
+struct MASSTRAFFIC_API FMassTrafficIntersectionSideLaneInfo
+{
+float DistanceAlongLane;
+FVector EntranceLocation;
+FVector EntranceDirection;
+};
 
 USTRUCT()
 struct MASSTRAFFIC_API FMassTrafficIntersectionSide
 {
 	GENERATED_BODY()
 
-	TArray<FZoneGraphTrafficLaneData*> VehicleIntersectionLanes;
+	/** Lanes in this intersection, with additional info about each. */
+	TMap<FZoneGraphTrafficLaneData*, FMassTrafficIntersectionSideLaneInfo> VehicleIntersectionLanes;
 
 	/** Indices used to construct FZoneGraphLaneHandle(s) for crosswalk lanes. */
 	UPROPERTY()
@@ -108,6 +115,9 @@ struct MASSTRAFFIC_API FMassTrafficIntersectionDetail
 
 	UPROPERTY()
 	bool bHasTrafficLights = false;
+
+	UPROPERTY()
+	bool bIsRoadCrosswalk = false;
 
 	FMassTrafficIntersectionSide& AddSide();
 
