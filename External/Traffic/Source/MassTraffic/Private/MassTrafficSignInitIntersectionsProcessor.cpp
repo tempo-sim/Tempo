@@ -76,9 +76,9 @@ void UMassTrafficSignInitIntersectionsProcessor::Execute(FMassEntityManager& Ent
 			// Tell each of the traffic sign controlled lanes which FMassTrafficSignIntersectionFragment is associated with it.
 			for (FMassTrafficSignIntersectionSide& IntersectionSide : TrafficSignIntersectionFragment.IntersectionSides)
 			{
-				for (FZoneGraphTrafficLaneData* VehicleIntersectionLane : IntersectionSide.VehicleIntersectionLanes)
+				for (auto& VehicleIntersectionLane : IntersectionSide.VehicleIntersectionLanes)
 				{
-					VehicleIntersectionLane->IntersectionEntityHandle = IntersectionEntityHandle;
+					VehicleIntersectionLane.Key->IntersectionEntityHandle = IntersectionEntityHandle;
 				}
 			}
 

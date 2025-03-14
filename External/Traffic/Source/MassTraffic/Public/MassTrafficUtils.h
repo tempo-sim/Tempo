@@ -114,7 +114,6 @@ MASSTRAFFIC_API FVector GetLaneBeginDirection(const uint32 LaneIndex, const FZon
 MASSTRAFFIC_API FVector GetLaneEndDirection(const uint32 LaneIndex, const FZoneGraphStorage& ZoneGraphStorage);
 MASSTRAFFIC_API FVector GetLaneBeginToEndDirection(const uint32 LaneIndex, const FZoneGraphStorage& ZoneGraphStorage);
 
-MASSTRAFFIC_API float GetDistanceAlongLaneNearestToPoint(const uint32 LaneIndex, const FVector& QueryPoint, const FZoneGraphStorage& ZoneGraphStorage);
 MASSTRAFFIC_API FVector GetDirectionAtDistanceAlongLane(const uint32 LaneIndex, float Distance, const FZoneGraphStorage& ZoneGraphStorage);
 MASSTRAFFIC_API FVector GetPointAtDistanceAlongLane(const uint32 LaneIndex,  float Distance, const FZoneGraphStorage& ZoneGraphStorage);
 
@@ -153,14 +152,15 @@ bool TryGetVehicleEnterAndExitTimesForIntersection(
 	float* OutVehicleDistanceToEnterIntersectionLane = nullptr,
 	float* OutVehicleDistanceToExitIntersectionLane = nullptr);
 
-bool TryGetEnterAndExitDistancesAlongQueryLane(
+MASSTRAFFIC_API bool TryGetEnterAndExitDistancesAlongQueryLane(
 	const UMassTrafficSubsystem& MassTrafficSubsystem,
 	const UMassTrafficSettings& MassTrafficSettings,
 	const FZoneGraphStorage& ZoneGraphStorage,
 	const FZoneGraphLaneHandle& QueryLane,
 	const FZoneGraphLaneHandle& OtherLane,
 	float& OutEnterDistanceAlongQueryLane,
-	float& OutExitDistanceAlongQueryLane);
+	float& OutExitDistanceAlongQueryLane,
+	bool bExpectIntersection=true);
 
 bool TryGetVehicleEnterAndExitTimesForCrossingLane(
 	const UMassTrafficSubsystem& MassTrafficSubsystem,

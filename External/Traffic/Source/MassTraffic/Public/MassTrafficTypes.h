@@ -19,8 +19,8 @@
 #define MASSTRAFFIC_NUM_INLINE_VEHICLE_MERGING_LANES 2 // ..determined to be ~1.3 on average for this game
 #define MASSTRAFFIC_NUM_INLINE_VEHICLE_SPLITTING_LANES 2 // ..determined to be ~1.7 on average for this game
 #define MASSTRAFFIC_NUM_INLINE_VEHICLE_CONFLICT_LANES 16 // There could potentially be many more conflict lanes.  We'll need to keep an eye on this.
-#define MASSTRAFFIC_NUM_INLINE_VEHICLE_CROSSWALK_LANES 2 // Each lane should only run through (at most) one crosswalk (which will have just 2 lanes).
-
+#define MASSTRAFFIC_NUM_INLINE_VEHICLE_CROSSWALK_LANES 12 // Each lane should only run through (at most) this many crosswalk lanes.
+#define MASSTRAFFIC_NUM_INLINE_VEHICLE_CROSSWALKS 6 // Each lane should only run through (at most) this many crosswalks.
 
 
 namespace UE::MassTraffic
@@ -441,10 +441,8 @@ struct MASSTRAFFIC_API FZoneGraphTrafficLaneConstData
 {
 	FZoneGraphTrafficLaneConstData() :
 		bIsIntersectionLane(false),
-		bIsTrafficLightControlled(false),
 		bIsTrunkLane(false),
-		bIsLaneChangingLane(false),
-		TrafficControllerSignType(EMassTrafficControllerSignType::None)
+		bIsLaneChangingLane(false)
 	{
 	}
 
@@ -466,11 +464,6 @@ struct MASSTRAFFIC_API FZoneGraphTrafficLaneConstData
 	 */
 	bool bIsLaneChangingLane : 1;
 
-	/**
-	 * Specifies sign type that controls this lane, when bIsTrafficLightControlled is false.
-	 */
-	EMassTrafficControllerSignType TrafficControllerSignType;
-	
 	/** Lane speed limit in cm/s */
 	FFloat16 SpeedLimit = 0.0f;
 
@@ -554,13 +547,13 @@ struct MASSTRAFFIC_API FZoneGraphTrafficLaneData
 	bool bIsStoppedVehicleInPreviousLaneOverlappingThisLane : 1; // (See all CROSSWALKOVERLAP.)
 	
 	// Note:  Currently only sign-controlled intersections will set this flag.
-	bool bHasPedestriansWaitingToCrossAtIntersectionEntrance : 1 = false;
+	TMap<float, bool, TSetAllocator<TSparseArrayAllocator<>, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_VEHICLE_CROSSWALKS>>> HasPedestriansWaitingToCross;
 
 	// Note:  Currently only sign-controlled intersections will set this flag.
-	bool bHasPedestriansInDownstreamCrosswalkLanesAtIntersectionEntrance : 1 = false;
-	
+	TMap<float, bool, TSetAllocator<TSparseArrayAllocator<>, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_VEHICLE_CROSSWALKS>>> HasPedestriansInDownstreamCrosswalkLanes;
+
 	// Note:  Currently only sign-controlled intersections will set this flag.
-	bool bAreAllEntitiesOnCrosswalkYieldingAtIntersectionEntrance : 1 = false;
+	TMap<float, bool, TSetAllocator<TSparseArrayAllocator<>, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_VEHICLE_CROSSWALKS>>> AreAllEntitiesOnCrosswalkYielding;
 
 	UE::MassTraffic::TFraction<true, uint8> FractionUntilClosed;
 
@@ -611,7 +604,7 @@ struct MASSTRAFFIC_API FZoneGraphTrafficLaneData
 	// Lanes which are not drivable will not have an associated FZoneGraphTrafficLaneData.
 	// So, we just store FZoneGraphLaneHandles for crosswalk lanes with "right of way" over this lane,
 	// which we call "downstream crosswalk lanes".
-	TArray<FZoneGraphLaneHandle, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_VEHICLE_CROSSWALK_LANES>> DownstreamCrosswalkLanes;
+	TMap<FZoneGraphLaneHandle, float, TSetAllocator<TSparseArrayAllocator<>, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_VEHICLE_CROSSWALK_LANES>>> DownstreamCrosswalkLanes;
 
 	/**
 	 * NOTE - If these take up too much memory, we can instead make a single 1-bit flag to cover both of these, that simply
@@ -626,9 +619,16 @@ struct MASSTRAFFIC_API FZoneGraphTrafficLaneData
 	FVector CenterLocation;
 	FFloat16 Radius;
 
-	bool HasStopSignOrYieldSign() const;
-	bool HasTrafficSignThatRequiresStop() const;
-	
+	bool HasYieldSignAlongRoad(float DistanceAlongLane) const;
+	bool HasYieldSignThatRequiresStopAlongRoad(float DistanceAlongLane) const;
+	bool HasYieldSignAtLaneStart() const;
+	bool HasStopSignAtLaneStart() const;
+	bool HasStopSignOrYieldSignAtLaneStart() const;
+	bool HasTrafficLightAtLaneStart() const;
+	bool HasTrafficSignThatRequiresStopAtLaneStart() const;
+
+	float LaneLengthAtNextTrafficControl(float DistanceAlongLane) const;
+
 	/** Clears all references to vehicles on this lane and reset all vehicle counters */  
 	void ClearVehicles();
 

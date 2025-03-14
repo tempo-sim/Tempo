@@ -60,7 +60,9 @@ void UMassTrafficInitTrafficVehicleSpeedProcessor::Execute(FMassEntityManager& E
 			const float VariedSpeedLimit = UE::MassTraffic::VarySpeedLimit(SpeedLimit, MassTrafficSettings->SpeedLimitVariancePct, MassTrafficSettings->SpeedVariancePct, RandomFractionFragment.RandomFraction, NoiseValue);
 
 			const FMassEntityHandle NextVehicleEntityInStopQueue = VehicleControlFragment.NextLane != nullptr ? MassTrafficSubsystem.GetNextVehicleEntityInIntersectionStopQueue(VehicleControlFragment.NextLane->IntersectionEntityHandle) : FMassEntityHandle();
-			
+
+			const FZoneGraphTrafficLaneData* CurrentLaneData = MassTrafficSubsystem.GetTrafficLaneData(LaneLocationFragment.LaneHandle);
+
 			// Should stop?
 			bool bRequestDifferentNextLane = false;
 			bool bVehicleCantStopAtLaneExit = false;
@@ -68,7 +70,7 @@ void UMassTrafficInitTrafficVehicleSpeedProcessor::Execute(FMassEntityManager& E
 			bool bNoNext = false;
 			bool bNoRoom = false;
 			bool bShouldProceedAtStopSign = false;
-			const bool bMustStopAtLaneExit = UE::MassTraffic::ShouldStopAtLaneExit(
+			const bool bStopAtNextStopLine = UE::MassTraffic::ShouldStopAtNextStopLine(
 				LaneLocationFragment.DistanceAlongLane,
 				VehicleControlFragment.Speed,
 				AgentRadiusFragment.Radius,
@@ -76,6 +78,8 @@ void UMassTrafficInitTrafficVehicleSpeedProcessor::Execute(FMassEntityManager& E
 				CurrentLaneData,
 				VehicleControlFragment.NextLane,
 				VehicleControlFragment.ReadiedNextIntersectionLane,
+				VehicleControlFragment.LastYieldAlongRoadInfo,
+				VehicleControlFragment.IsVehicleCurrentlyStopped(),
 				MassTrafficSettings->MinimumDistanceToNextVehicleRange,
 				MassTrafficSettings->StoppingDistanceRange,
 				EntityManager,

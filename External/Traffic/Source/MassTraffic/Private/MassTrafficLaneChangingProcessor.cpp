@@ -152,6 +152,17 @@ static void TryStartingNewLaneChange(
 		return;
 	}
 
+	// Don't lane change when close to a yield sign.
+	if (Lane_Current->HasYieldSignAlongRoad(ZoneGraphLaneLocationFragment_Current.DistanceAlongLane))
+	{
+		const float YieldSignDistance = Lane_Current->LaneLengthAtNextTrafficControl(ZoneGraphLaneLocationFragment_Current.DistanceAlongLane);
+		const float DistanceToYieldSign = YieldSignDistance - ZoneGraphLaneLocationFragment_Current.DistanceAlongLane;
+		if (DistanceToYieldSign < MassTrafficSettings.MinLaneChangeSpaceBeforeYieldSignVehicleLengthScale * (2.0f * AgentRadiusFragment_Current.Radius))
+		{
+			return;
+		}
+	}
+
 	if (LaneChangeRecommendation.Level != TurningLaneChange)
 	{
 		//  See (5) above.

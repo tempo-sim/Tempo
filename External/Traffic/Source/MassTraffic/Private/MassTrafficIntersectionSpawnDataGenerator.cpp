@@ -467,15 +467,17 @@ void UMassTrafficIntersectionSpawnDataGenerator::SetupLaneData(
 			
 			for (const FMassTrafficIntersectionSide& CurrentSide : IntersectionDetail.Sides)
 			{
-				for (FZoneGraphTrafficLaneData* CurrentSideVehicleIntersectionLane : CurrentSide.VehicleIntersectionLanes)
+				for (const auto& CurrentElem : CurrentSide.VehicleIntersectionLanes)
 				{
+					FZoneGraphTrafficLaneData* CurrentSideVehicleIntersectionLane = CurrentElem.Key;
+					const FMassTrafficIntersectionSideLaneInfo& SideLaneInfo = CurrentElem.Value;
 					if (CurrentSideVehicleIntersectionLane == nullptr)
 					{
 						continue;
 					}
 
-					CurrentSideVehicleIntersectionLane->ConstData.bIsTrafficLightControlled = IntersectionDetail.bHasTrafficLights;
-					CurrentSideVehicleIntersectionLane->ConstData.TrafficControllerSignType = CurrentSide.TrafficControllerSignType;
+					FMassTrafficControllerType TrafficControllerType(IntersectionDetail.bHasTrafficLights, CurrentSide.TrafficControllerSignType);
+					CurrentSideVehicleIntersectionLane->ConstData.AddTrafficController(SideLaneInfo.DistanceAlongLane, TrafficControllerType);
 
 					const FZoneGraphStorage* ZoneGraphStorage = ZoneGraphSubsystem.GetZoneGraphStorage(CurrentSideVehicleIntersectionLane->LaneHandle.DataHandle);
 				
@@ -485,7 +487,13 @@ void UMassTrafficIntersectionSpawnDataGenerator::SetupLaneData(
 					}
 
 					CurrentSideVehicleIntersectionLane->ConflictLanes.Reset();
-					
+
+					// Road crosswalks never have conflict lanes.
+					if (IntersectionDetail.bIsRoadCrosswalk)
+					{
+						continue;
+					}
+
 					for (const FMassTrafficIntersectionSide& OtherSide : IntersectionDetail.Sides)
 					{
 						// Skip the current side.
@@ -493,9 +501,10 @@ void UMassTrafficIntersectionSpawnDataGenerator::SetupLaneData(
 						{
 							continue;
 						}
-						
-						for (FZoneGraphTrafficLaneData* OtherSideVehicleIntersectionLane : OtherSide.VehicleIntersectionLanes)
+
+						for (const auto& OtherElem : OtherSide.VehicleIntersectionLanes)
 						{
+							FZoneGraphTrafficLaneData* OtherSideVehicleIntersectionLane = OtherElem.Key;
 							if (OtherSideVehicleIntersectionLane == nullptr)
 							{
 								continue;
@@ -543,11 +552,6 @@ void UMassTrafficIntersectionSpawnDataGenerator::SetupLaneData(
 								}
 							}
 						}
-					}
-
-					for (FZoneGraphTrafficLaneData* MergingLane : CurrentSideVehicleIntersectionLane->MergingLanes)
-					{
-						ensureMsgf(CurrentSideVehicleIntersectionLane->ConflictLanes.Contains(MergingLane), TEXT("CurrentSideVehicleIntersectionLane's ConflictLanes must contain all CurrentSideVehicleIntersectionLane's MergingLanes in UMassTrafficIntersectionSpawnDataGenerator::SetupLaneData."));
 					}
 				}
 			}
@@ -745,15 +749,20 @@ void UMassTrafficIntersectionSpawnDataGenerator::GenerateTrafficLightIntersectio
 				FMassTrafficPeriod& Period = IntersectionFragment.AddPeriod(StandardTrafficGoSeconds *
 					(Side0.bHasInboundLanesFromFreeway || Side1.bHasInboundLanesFromFreeway ? FreewayIncomingTrafficGoDurationScale : 1.0f));
 
-				Period.VehicleLanes.Append(Side0.VehicleIntersectionLanes);
-				Period.VehicleLanes.Append(Side1.VehicleIntersectionLanes);
+				TArray<FZoneGraphTrafficLaneData*> Side0Lanes;
+				Side0.VehicleIntersectionLanes.GetKeys(Side0Lanes);
+				TArray<FZoneGraphTrafficLaneData*> Side1Lanes;
+				Side1.VehicleIntersectionLanes.GetKeys(Side1Lanes);
+
+				Period.VehicleLanes.Append(Side0Lanes);
+				Period.VehicleLanes.Append(Side1Lanes);
 
 				Period.AddTrafficLightControl(TrafficLightIndex0, EMassTrafficLightStateFlags::VehicleGo);
 				Period.AddTrafficLightControl(TrafficLightIndex1, EMassTrafficLightStateFlags::VehicleGo);
 
 				// Remember which traffic light controls which lane, for Period::Finalize()
-				LaneToTrafficLightMap.SetTrafficLightForLanes(Side0.VehicleIntersectionLanes, TrafficLightIndex0);
-				LaneToTrafficLightMap.SetTrafficLightForLanes(Side1.VehicleIntersectionLanes, TrafficLightIndex1);
+				LaneToTrafficLightMap.SetTrafficLightForLanes(Side0Lanes, TrafficLightIndex0);
+				LaneToTrafficLightMap.SetTrafficLightForLanes(Side1Lanes, TrafficLightIndex1);
 			}
 					
 			// Period -
@@ -826,12 +835,14 @@ void UMassTrafficIntersectionSpawnDataGenerator::GenerateTrafficLightIntersectio
 							UnidirectionalTrafficStraightRightLeftGoSeconds *
 							(ThisSide.bHasInboundLanesFromFreeway ? FreewayIncomingTrafficGoDurationScale : 1.0f));
 
-						Period.VehicleLanes.Append(ThisSide.VehicleIntersectionLanes);
+						TArray<FZoneGraphTrafficLaneData*> ThisSideLanes;
+						ThisSide.VehicleIntersectionLanes.GetKeys(ThisSideLanes);
+						Period.VehicleLanes.Append(ThisSideLanes);
 							
 						Period.AddTrafficLightControl(ThisTrafficLightIndex, EMassTrafficLightStateFlags::VehicleGo | EMassTrafficLightStateFlags::VehicleGoProtectedLeft);
 
 						// Remember which traffic light controls which lane, for Period::Finalize()
-						LaneToTrafficLightMap.SetTrafficLightForLanes(ThisSide.VehicleIntersectionLanes, ThisTrafficLightIndex);
+						LaneToTrafficLightMap.SetTrafficLightForLanes(ThisSideLanes, ThisTrafficLightIndex);
 					}
 
 					// Period -
@@ -898,7 +909,9 @@ void UMassTrafficIntersectionSpawnDataGenerator::GenerateTrafficLightIntersectio
 					{
 						FMassTrafficPeriod& Period = IntersectionFragment.AddPeriod(StandardMinimumTrafficGoSeconds);
 
-						Period.VehicleLanes.Append(ThisSide.VehicleIntersectionLanes);
+						TArray<FZoneGraphTrafficLaneData*> ThisSideLanes;
+						ThisSide.VehicleIntersectionLanes.GetKeys(ThisSideLanes);
+						Period.VehicleLanes.Append(ThisSideLanes);
 					}
 						
 					// Period -
@@ -1009,7 +1022,9 @@ void UMassTrafficIntersectionSpawnDataGenerator::GenerateTrafficLightIntersectio
 				{
 					FMassTrafficPeriod& Period = IntersectionFragment.AddPeriod(StandardTrafficGoSeconds);
 
-					Period.VehicleLanes.Append(BaseOfTSide.VehicleIntersectionLanes);
+					TArray<FZoneGraphTrafficLaneData*> BaseOfTSideLanes;
+					BaseOfTSide.VehicleIntersectionLanes.GetKeys(BaseOfTSideLanes);
+					Period.VehicleLanes.Append(BaseOfTSideLanes);
 						
 					Period.CrosswalkLanes.Append(LeftSide.CrosswalkLanes.Array());
 					Period.CrosswalkLanes.Append(RightSide.CrosswalkLanes.Array());
@@ -1020,7 +1035,7 @@ void UMassTrafficIntersectionSpawnDataGenerator::GenerateTrafficLightIntersectio
 					Period.AddTrafficLightControl(TrafficLightIndex_BaseOfT, EMassTrafficLightStateFlags::VehicleGo | EMassTrafficLightStateFlags::PedestrianGo);
 						
 					// Remember which traffic light controls which lane, for Period::Finalize()
-					LaneToTrafficLightMap.SetTrafficLightForLanes(BaseOfTSide.VehicleIntersectionLanes, TrafficLightIndex_BaseOfT);
+					LaneToTrafficLightMap.SetTrafficLightForLanes(BaseOfTSideLanes, TrafficLightIndex_BaseOfT);
 				}
 					
 				// Period -
@@ -1042,8 +1057,10 @@ void UMassTrafficIntersectionSpawnDataGenerator::GenerateTrafficLightIntersectio
 				//		Pedestrians - Base of T
 				{
 					FMassTrafficPeriod& Period = IntersectionFragment.AddPeriod(UnidirectionalTrafficStraightRightLeftGoSeconds);
-						
-					Period.VehicleLanes.Append(RightSide.VehicleIntersectionLanes);
+
+					TArray<FZoneGraphTrafficLaneData*> RightSideLanes;
+					RightSide.VehicleIntersectionLanes.GetKeys(RightSideLanes);
+					Period.VehicleLanes.Append(RightSideLanes);
 						
 					Period.CrosswalkLanes.Append(BaseOfTSide.CrosswalkLanes.Array());
 
@@ -1053,7 +1070,7 @@ void UMassTrafficIntersectionSpawnDataGenerator::GenerateTrafficLightIntersectio
 					Period.AddTrafficLightControl(TrafficLightIndex_Right, EMassTrafficLightStateFlags::VehicleGo | EMassTrafficLightStateFlags::VehicleGoProtectedLeft | EMassTrafficLightStateFlags::PedestrianGo);
 						
 					// Remember which traffic light controls which lane, for Period::Finalize()
-					LaneToTrafficLightMap.SetTrafficLightForLanes(RightSide.VehicleIntersectionLanes, TrafficLightIndex_Right);
+					LaneToTrafficLightMap.SetTrafficLightForLanes(RightSideLanes, TrafficLightIndex_Right);
 				}
 					
 				// Period -
@@ -1062,7 +1079,9 @@ void UMassTrafficIntersectionSpawnDataGenerator::GenerateTrafficLightIntersectio
 				{
 					FMassTrafficPeriod& Period = IntersectionFragment.AddPeriod(StandardTrafficGoSeconds);
 
-					Period.VehicleLanes.Append(LeftSide.VehicleIntersectionLanes);
+					TArray<FZoneGraphTrafficLaneData*> LeftSideLanes;
+					LeftSide.VehicleIntersectionLanes.GetKeys(LeftSideLanes);
+					Period.VehicleLanes.Append(LeftSideLanes);
 					Period.VehicleLanes.Append(VehicleTrafficLanes_Right_To_Opposite);
 						
 					Period.CrosswalkLanes.Append(BaseOfTSide.CrosswalkLanes.Array());
@@ -1073,7 +1092,7 @@ void UMassTrafficIntersectionSpawnDataGenerator::GenerateTrafficLightIntersectio
 					Period.AddTrafficLightControl(TrafficLightIndex_Right, EMassTrafficLightStateFlags::VehicleGo | EMassTrafficLightStateFlags::PedestrianGo);
 						
 					// Remember which traffic light controls which lane, for Period::Finalize()
-					LaneToTrafficLightMap.SetTrafficLightForLanes(LeftSide.VehicleIntersectionLanes, TrafficLightIndex_Left);
+					LaneToTrafficLightMap.SetTrafficLightForLanes(LeftSideLanes, TrafficLightIndex_Left);
 					LaneToTrafficLightMap.SetTrafficLightForLanes(VehicleTrafficLanes_Right_To_Opposite, TrafficLightIndex_Right);
 				}
 			}
@@ -1086,7 +1105,9 @@ void UMassTrafficIntersectionSpawnDataGenerator::GenerateTrafficLightIntersectio
 				{
 					FMassTrafficPeriod& Period = IntersectionFragment.AddPeriod(StandardMinimumTrafficGoSeconds);
 
-					Period.VehicleLanes.Append(BaseOfTSide.VehicleIntersectionLanes);
+					TArray<FZoneGraphTrafficLaneData*> BaseOfTSideLanes;
+					BaseOfTSide.VehicleIntersectionLanes.GetKeys(BaseOfTSideLanes);
+					Period.VehicleLanes.Append(BaseOfTSideLanes);
 						
 					Period.CrosswalkLanes.Append(LeftSide.CrosswalkLanes.Array());
 					Period.CrosswalkLanes.Append(RightSide.CrosswalkLanes.Array());
@@ -1100,8 +1121,10 @@ void UMassTrafficIntersectionSpawnDataGenerator::GenerateTrafficLightIntersectio
 				//		Pedestrians - Base of T
 				{
 					FMassTrafficPeriod& Period = IntersectionFragment.AddPeriod(StandardMinimumTrafficGoSeconds);
-						
-					Period.VehicleLanes.Append(RightSide.VehicleIntersectionLanes);
+
+					TArray<FZoneGraphTrafficLaneData*> RightSideLanes;
+					RightSide.VehicleIntersectionLanes.GetKeys(RightSideLanes);
+					Period.VehicleLanes.Append(RightSideLanes);
 						
 					Period.CrosswalkLanes.Append(BaseOfTSide.CrosswalkLanes.Array());
 
@@ -1114,7 +1137,9 @@ void UMassTrafficIntersectionSpawnDataGenerator::GenerateTrafficLightIntersectio
 				{
 					FMassTrafficPeriod& Period = IntersectionFragment.AddPeriod(StandardMinimumTrafficGoSeconds);
 
-					Period.VehicleLanes.Append(LeftSide.VehicleIntersectionLanes);
+					TArray<FZoneGraphTrafficLaneData*> LeftSideLanes;
+					LeftSide.VehicleIntersectionLanes.GetKeys(LeftSideLanes);
+					Period.VehicleLanes.Append(LeftSideLanes);
 					Period.VehicleLanes.Append(VehicleTrafficLanes_Right_To_Opposite);
 						
 					Period.CrosswalkLanes.Append(BaseOfTSide.CrosswalkLanes.Array());
@@ -1145,12 +1170,14 @@ void UMassTrafficIntersectionSpawnDataGenerator::GenerateTrafficLightIntersectio
 					FMassTrafficPeriod& Period = IntersectionFragment.AddPeriod(
 						StandardTrafficGoSeconds * (Side.bHasInboundLanesFromFreeway ? FreewayIncomingTrafficGoDurationScale : 1.0f));
 
-					Period.VehicleLanes.Append(Side.VehicleIntersectionLanes);
+					TArray<FZoneGraphTrafficLaneData*> SideLanes;
+					Side.VehicleIntersectionLanes.GetKeys(SideLanes);
+					Period.VehicleLanes.Append(SideLanes);
 						
 					Period.AddTrafficLightControl(TrafficLightIndex, EMassTrafficLightStateFlags::VehicleGo);
 						
 					// Remember which traffic light controls which lane, for Period::Finalize()
-					LaneToTrafficLightMap.SetTrafficLightForLanes(Side.VehicleIntersectionLanes, TrafficLightIndex);
+					LaneToTrafficLightMap.SetTrafficLightForLanes(SideLanes, TrafficLightIndex);
 				}
 			}
 
@@ -1201,8 +1228,10 @@ void UMassTrafficIntersectionSpawnDataGenerator::GenerateTrafficLightIntersectio
 				//		Pedestrians - none
 				{
 					FMassTrafficPeriod& Period = IntersectionFragment.AddPeriod(StandardMinimumTrafficGoSeconds);
-						
-					Period.VehicleLanes.Append(Side.VehicleIntersectionLanes);
+
+					TArray<FZoneGraphTrafficLaneData*> SideLanes;
+					Side.VehicleIntersectionLanes.GetKeys(SideLanes);
+					Period.VehicleLanes.Append(SideLanes);
 				}
 			}			
 
@@ -1317,7 +1346,10 @@ void UMassTrafficIntersectionSpawnDataGenerator::GenerateTrafficSignIntersection
 			FMassTrafficSignIntersectionSide& IntersectionFragmentSide = IntersectionFragment.IntersectionSides.AddDefaulted_GetRef();
 
 			// Add this side's vehicle lanes to the intersection fragment.
-			IntersectionFragmentSide.VehicleIntersectionLanes.Append(IntersectionDetailSide.VehicleIntersectionLanes);
+			for (const auto& DetailSideLane : IntersectionDetailSide.VehicleIntersectionLanes)
+			{
+				IntersectionFragmentSide.VehicleIntersectionLanes.Add(DetailSideLane.Key, DetailSideLane.Value.DistanceAlongLane);
+			}
 			
 			// Add this side's crosswalk lanes to the intersection fragment.
 			IntersectionFragmentSide.CrosswalkLanes.Append(IntersectionDetailSide.CrosswalkLanes.Array());

@@ -154,7 +154,7 @@ bool ShouldVehicleMergeOntoLane(
 	FZoneGraphLaneHandle& OutYieldTargetLane,
 	int32& OutMergeYieldCaseIndex);
 
-MASSTRAFFIC_API bool ShouldStopAtLaneExit(
+MASSTRAFFIC_API bool ShouldStopAtNextStopLine(
 	float DistanceAlongLane,
 	float Speed,
 	float Radius,
@@ -162,10 +162,12 @@ MASSTRAFFIC_API bool ShouldStopAtLaneExit(
 	const FZoneGraphTrafficLaneData* CurrentLaneData,
 	FZoneGraphTrafficLaneData* NextTrafficLaneData,
 	const FZoneGraphTrafficLaneData* ReadiedNextIntersectionLane,
+	TOptional<FYieldAlongRoadInfo>& LastYieldAlongRoadInfo,
+	const bool bIsStopped,
 	const FVector2D& MinimumDistanceToNextVehicleRange,
 	const FVector2D& StoppingDistanceRange,
 	const FMassEntityManager& EntityManager,
-	FZoneGraphTrafficLaneData*& InOut_StopSignIntersectionLane,
+	FZoneGraphTrafficLaneData*& InOut_LastCompletedStopSignLaneData,
 	bool& bOut_RequestDifferentNextLane,
 	bool& bInOut_CantStopAtLaneExit,
 	bool& bOut_IsFrontOfVehicleBeyondLaneExit,
@@ -186,10 +188,9 @@ MASSTRAFFIC_API bool ShouldStopAtLaneExit(
 	, const FVector* VehicleLocation = nullptr // ..for debuging
 );
 	
-bool IsVehicleNearStopLineAtIntersection(
-	const FZoneGraphTrafficLaneData* NextLane,
+bool IsVehicleNearStopLine(
 	const float DistanceAlongCurrentLane,
-	const float CurrentLaneLength,
+	const float LaneLengthAtStopLine,
 	const float AgentRadius,
 	const float RandomFraction,
 	const FVector2D& StoppingDistanceRange);
