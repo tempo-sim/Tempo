@@ -114,20 +114,32 @@ namespace
 		// we wouldn't have re-evaluated whether we should set our MinVehicleStopSignRestTime.
 		if (VehicleControlFragment.IsVehicleCurrentlyStopped() && VehicleControlFragment.MinVehicleStopSignRestTime <= 0.0f)
 		{
-			if (!UE::MassTraffic::IsVehicleNearStopLine(LaneLocationFragment.DistanceAlongLane, LaneLocationFragment.LaneLength, RadiusFragment.Radius, RandomFractionFragment.RandomFraction, MassTrafficSettings.StoppingDistanceRange))
+			float LaneLengthAtNextStopLine;
+			const FZoneGraphTrafficLaneData* LaneData;
+			if (CurrentLaneData->HasYieldSignAlongRoad(LaneLocationFragment.DistanceAlongLane))
+			{
+				LaneLengthAtNextStopLine = CurrentLaneData->LaneLengthAtNextTrafficControl(LaneLocationFragment.DistanceAlongLane);
+				LaneData = CurrentLaneData;
+			}
+			else
+			{
+				LaneLengthAtNextStopLine = LaneLocationFragment.LaneLength;
+				LaneData = VehicleControlFragment.NextLane;
+			}
+
+			if (!UE::MassTraffic::IsVehicleNearStopLine(LaneLocationFragment.DistanceAlongLane, LaneLengthAtNextStopLine, RadiusFragment.Radius, RandomFractionFragment.RandomFraction, MassTrafficSettings.StoppingDistanceRange))
 			{
 				return;
 			}
 
-			if (VehicleControlFragment.NextLane == nullptr || !VehicleControlFragment.NextLane->ConstData.bIsIntersectionLane)
+			if (!LaneData)
 			{
-				// Only relevant at intersection lanes
 				return;
 			}
 
 			// If we just stopped at a stop sign (or a yield sign with waiting or crossing pedestrians),
 			// choose a minimum time to remain stopped at the sign.
-			if (VehicleControlFragment.NextLane->HasTrafficSignThatRequiresStopAtEntrance())
+			if (LaneData->HasTrafficSignThatRequiresStopAtEntrance())
 			{
 				VehicleControlFragment.MinVehicleStopSignRestTime = RandomStream.FRandRange(MassTrafficSettings.LowerMinStopSignRestTime, MassTrafficSettings.UpperMinStopSignRestTime);
 				MassTrafficSubsystem.AddVehicleEntityToIntersectionStopQueue(VehicleControlFragment.VehicleEntityHandle, VehicleControlFragment.NextLane->IntersectionEntityHandle);

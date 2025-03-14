@@ -770,11 +770,8 @@ struct MASSTRAFFIC_API FEnvironmentalBrightnessFragment : public FMassFragment
 
 struct FYieldAlongRoadInfo
 {
-	FYieldAlongRoadInfo(const FZoneGraphLaneHandle& LaneHandleIn, float DistanceAlongRoadIn, bool bPedestriansEnteredCrosswalkIn)
-		: LaneHandle(LaneHandleIn), DistanceAlongRoad(DistanceAlongRoadIn), bPedestriansEnteredCrosswalk(bPedestriansEnteredCrosswalkIn) {}
 	FZoneGraphLaneHandle LaneHandle;
 	float DistanceAlongRoad = false;
-	bool bPedestriansEnteredCrosswalk = false;
 
 	bool operator==(const FYieldAlongRoadInfo& Other) const
 	{

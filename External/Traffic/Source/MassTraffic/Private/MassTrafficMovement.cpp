@@ -771,7 +771,7 @@ bool ShouldStopAtNextStopLine(
 		}
 
 		// Stop if we haven't already stopped at this yield sign.
-		const FYieldAlongRoadInfo YieldAlongRoadInfo(CurrentLaneData->LaneHandle, YieldSignDistance, false);
+		const FYieldAlongRoadInfo YieldAlongRoadInfo({CurrentLaneData->LaneHandle, YieldSignDistance});
 		if (!LastYieldAlongRoadInfo.IsSet() || LastYieldAlongRoadInfo.GetValue() != YieldAlongRoadInfo)
 		{
 			// Haven't stopped here previously. If we are stopped now, remember where we were stopped.
@@ -782,16 +782,10 @@ bool ShouldStopAtNextStopLine(
 			return true;
 		}
 
-		// Wait for pedestrians (the ones we yielded for) to enter the crosswalk.
-		if (!LastYieldAlongRoadInfo->bPedestriansEnteredCrosswalk)
+		// Wait some time for the pedestrians that we yielded for to begin crossing.
+		const float CurrentTimeSeconds = World != nullptr ? World->GetTimeSeconds() : TNumericLimits<float>::Lowest();
+		if (CurrentTimeSeconds < TimeVehicleStopped + MinVehicleStopSignRestTime)
 		{
-			const bool bHasPedestriansInDownstreamCrosswalkLanes =
-				CurrentLaneData->HasPedestriansInDownstreamCrosswalkLanes.Contains(YieldSignDistance) &&
-				CurrentLaneData->HasPedestriansInDownstreamCrosswalkLanes[YieldSignDistance];
-			if (bHasPedestriansInDownstreamCrosswalkLanes)
-			{
-				LastYieldAlongRoadInfo->bPedestriansEnteredCrosswalk = true;
-			}
 			return true;
 		}
 
