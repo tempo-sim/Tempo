@@ -744,6 +744,28 @@ void GetObjectProperties(const UObject* Object, GetPropertiesResponse& Response)
 				*Value = FString::SanitizeFloat(ValueDouble);
 			}
 		}
+		else if (const FEnumProperty* EnumProperty = CastField<FEnumProperty>(Property))
+		{
+			const FString EnumName = EnumProperty->GetEnum()->GetName();
+			Type = EnumName;
+			if (Value)
+			{
+				int64 ValueIndex;
+				EnumProperty->GetValue_InContainer(Container, &ValueIndex);
+				*Value = EnumProperty->GetEnum()->GetAuthoredNameStringByIndex(ValueIndex);
+			}
+		}
+		else if (const FByteProperty* ByteProperty = CastField<FByteProperty>(Property))
+		{
+			const FString EnumName = ByteProperty->Enum->GetName();
+			Type = EnumName;
+			if (Value)
+			{
+				uint8 ValueIndex;
+				ByteProperty->GetValue_InContainer(Container, &ValueIndex);
+				*Value = ByteProperty->Enum->GetAuthoredNameStringByIndex(ValueIndex);
+			}
+		}
 		else if (const FObjectProperty* ObjectProperty = CastField<FObjectProperty>(Property))
 		{
 			FString InnerType;
