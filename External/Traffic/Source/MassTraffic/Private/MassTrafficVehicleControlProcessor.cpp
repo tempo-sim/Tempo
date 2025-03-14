@@ -612,7 +612,7 @@ void UMassTrafficVehicleControlProcessor::SimpleVehicleControl(
 		TargetSpeed = 0.0f;
 	};
 
-	if (CurrentLaneData->HasYieldSignAlongRoad(LaneLocationFragment.DistanceAlongLane))
+	if (CurrentLaneData->HasYieldSignAlongRoad(LaneLocationFragment.DistanceAlongLane) && !CurrentLaneData->ConstData.bIsIntersectionLane)
 	{
 		ProcessYieldAtRoadCrosswalkLogic(MassTrafficSubsystem, MassCrowdSubsystem, EntityManager, VehicleControlFragment, LaneLocationFragment, AgentRadiusFragment, RandomFractionFragment, ZoneGraphStorage, PerformYieldAction);
 	}
@@ -977,7 +977,7 @@ void UMassTrafficVehicleControlProcessor::PIDVehicleControl(
 		TargetSpeed = 0.0f;
 	};
 
-	if (CurrentLaneData->HasYieldSignAlongRoad(LaneLocationFragment.DistanceAlongLane))
+	if (CurrentLaneData->HasYieldSignAlongRoad(LaneLocationFragment.DistanceAlongLane) && !CurrentLaneData->ConstData.bIsIntersectionLane)
 	{
 		ProcessYieldAtRoadCrosswalkLogic(MassTrafficSubsystem, MassCrowdSubsystem, EntityManager, VehicleControlFragment, LaneLocationFragment, AgentRadiusFragment, RandomFractionFragment, ZoneGraphStorage, PerformYieldAction);
 	}
