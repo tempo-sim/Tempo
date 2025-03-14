@@ -44,7 +44,7 @@ namespace
 		// don't attempt to ready the intersection lane until we're ready to proceed.
 		// Once we've waited at least our chosen minimum waiting time, the logic in ShouldStopAtNextStopLine
 		// will give us the signal, and we will bypass this blocking check.
-		if (VehicleControlFragment.NextLane->HasTrafficSignThatRequiresStopAtStart() && !bShouldProceedAtStopSign)
+		if (VehicleControlFragment.NextLane->HasTrafficSignThatRequiresStopAtLaneStart() && !bShouldProceedAtStopSign)
 		{
 			return;
 		}
@@ -139,7 +139,7 @@ namespace
 
 			// If we just stopped at a stop sign (or a yield sign with waiting or crossing pedestrians),
 			// choose a minimum time to remain stopped at the sign.
-			if (LaneData->HasTrafficSignThatRequiresStopAtStart())
+			if (LaneData->HasTrafficSignThatRequiresStopAtLaneStart())
 			{
 				VehicleControlFragment.MinVehicleStopSignRestTime = RandomStream.FRandRange(MassTrafficSettings.LowerMinStopSignRestTime, MassTrafficSettings.UpperMinStopSignRestTime);
 				MassTrafficSubsystem.AddVehicleEntityToIntersectionStopQueue(VehicleControlFragment.VehicleEntityHandle, VehicleControlFragment.NextLane->IntersectionEntityHandle);

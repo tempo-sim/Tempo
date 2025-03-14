@@ -112,7 +112,7 @@ bool IsVehicleEligibleToMergeOntoLane(
 
 	// Note:  This condition should be removed when we're ready to test
 	// the merge behavior at traffic light intersections.
-	if (DesiredLaneData->HasTrafficLightAtStart())
+	if (DesiredLaneData->HasTrafficLightAtLaneStart())
 	{
 		return false;
 	}
@@ -128,7 +128,7 @@ bool IsVehicleEligibleToMergeOntoLane(
 	if (CurrentLaneData->LaneHandle != DesiredLaneData->LaneHandle)
 	{
 		// And, our desired lane has a stop sign requirement, ...
-		if (DesiredLaneData->HasTrafficSignThatRequiresStopAtStart())
+		if (DesiredLaneData->HasTrafficSignThatRequiresStopAtLaneStart())
 		{
 			// If we're not near the stop line, or we are, but we haven't completed our stop sign rest behavior, ...
 			if (!bVehicleIsNearStopLineAtIntersection || VehicleControlFragment.StopSignIntersectionLane != DesiredLaneData)
@@ -194,7 +194,7 @@ bool ShouldVehicleMergeOntoLane(
 		return true;
 	}
 
-	const bool bVehicleHasStopSignOrYieldSign = DesiredLaneData->HasStopSignOrYieldSignAtStart();
+	const bool bVehicleHasStopSignOrYieldSign = DesiredLaneData->HasStopSignOrYieldSignAtLaneStart();
 
 	const float VehicleEffectiveSpeed = VehicleControlFragment.IsYieldingAtIntersection() ? 0.0f : VehicleControlFragment.Speed;
 	
@@ -247,7 +247,7 @@ bool ShouldVehicleMergeOntoLane(
 			return false;
 		}
 		
-		const bool bTestVehicleHasStopSignOrYieldSign = TestVehicleIntersectionLaneData.HasStopSignOrYieldSignAtStart();
+		const bool bTestVehicleHasStopSignOrYieldSign = TestVehicleIntersectionLaneData.HasStopSignOrYieldSignAtLaneStart();
 
 		const bool bTestVehicleIsNearStopLine = IsVehicleNearStopLine(
 			TestVehicleCurrentLaneData.LeadVehicleDistanceAlongLane.GetValue(),
@@ -262,7 +262,7 @@ bool ShouldVehicleMergeOntoLane(
 		if (TestVehicleCurrentLaneData.LaneHandle != TestVehicleIntersectionLaneData.LaneHandle)
 		{
 			// And, the test vehicle's intersection lane has a stop sign requirement, ...
-			if (TestVehicleIntersectionLaneData.HasTrafficSignThatRequiresStopAtStart())
+			if (TestVehicleIntersectionLaneData.HasTrafficSignThatRequiresStopAtLaneStart())
 			{
 				const bool bTestVehicleHasCompletedItsStopSignRestBehavior = TestVehicleCurrentLaneData.LeadVehicleStopSignIntersectionLane.GetValue() != nullptr
 							? TestVehicleCurrentLaneData.LeadVehicleStopSignIntersectionLane.GetValue()->LaneHandle == TestVehicleIntersectionLaneData.LaneHandle
@@ -278,7 +278,7 @@ bool ShouldVehicleMergeOntoLane(
 			else
 			{
 				// If the test vehicle has a yield sign, but no pedestrians around, and therefore no reason to yield at the sign, ...
-				if (TestVehicleIntersectionLaneData.HasYieldSignAtStart())
+				if (TestVehicleIntersectionLaneData.HasYieldSignAtLaneStart())
 				{
 					// Then, we only need to wait until the test vehicle is near the stop line,
 					// before we should consider yielding to it.
@@ -846,7 +846,7 @@ bool ShouldStopAtNextStopLine(
 			return true;
 		}
 
-		if (NextTrafficLaneData->HasYieldSignAtStart())
+		if (NextTrafficLaneData->HasYieldSignAtLaneStart())
 		{
 			return ShouldContinueYieldingAtYieldSign(NextTrafficLaneData, 0.0);
 		}
@@ -888,7 +888,7 @@ bool ShouldStopAtNextStopLine(
 	if (!bInOut_CantStopAtLaneExit)
 	{
 		// We should always attempt to stop at stop signs (and yield signs with waiting or crossing pedestrians).
-		if (NextTrafficLaneData->HasTrafficSignThatRequiresStopAtStart())
+		if (NextTrafficLaneData->HasTrafficSignThatRequiresStopAtLaneStart())
 		{
 			// In general, we should always plan to start our stop sign behavior.
 			// However, once we've completed our stop sign behavior with this stop sign,

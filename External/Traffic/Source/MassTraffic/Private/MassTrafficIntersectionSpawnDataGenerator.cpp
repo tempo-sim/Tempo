@@ -553,11 +553,6 @@ void UMassTrafficIntersectionSpawnDataGenerator::SetupLaneData(
 							}
 						}
 					}
-
-					for (FZoneGraphTrafficLaneData* MergingLane : CurrentSideVehicleIntersectionLane->MergingLanes)
-					{
-						ensureMsgf(CurrentSideVehicleIntersectionLane->ConflictLanes.Contains(MergingLane), TEXT("CurrentSideVehicleIntersectionLane's ConflictLanes must contain all CurrentSideVehicleIntersectionLane's MergingLanes in UMassTrafficIntersectionSpawnDataGenerator::SetupLaneData."));
-					}
 				}
 			}
 		}

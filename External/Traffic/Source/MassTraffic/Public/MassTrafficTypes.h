@@ -619,11 +619,11 @@ struct MASSTRAFFIC_API FZoneGraphTrafficLaneData
 
 	bool HasYieldSignAlongRoad(float DistanceAlongLane) const;
 	bool HasYieldSignThatRequiresStopAlongRoad(float DistanceAlongLane) const;
-	bool HasYieldSignAtStart() const;
-	bool HasStopSignAtStart() const;
-	bool HasStopSignOrYieldSignAtStart() const;
-	bool HasTrafficLightAtStart() const;
-	bool HasTrafficSignThatRequiresStopAtStart() const;
+	bool HasYieldSignAtLaneStart() const;
+	bool HasStopSignAtLaneStart() const;
+	bool HasStopSignOrYieldSignAtLaneStart() const;
+	bool HasTrafficLightAtLaneStart() const;
+	bool HasTrafficSignThatRequiresStopAtLaneStart() const;
 
 	float LaneLengthAtNextTrafficControl(float DistanceAlongLane) const;
 

@@ -895,7 +895,7 @@ bool IsDownstreamCrosswalkLaneClear(
 			MassTrafficSettings->StoppingDistanceRange);
 
 		// If our intersection lane has a stop sign requirement, ...
-		if (IntersectionLaneData->HasTrafficSignThatRequiresStopAtStart())
+		if (IntersectionLaneData->HasTrafficSignThatRequiresStopAtLaneStart())
 		{
 			// If we're not near the stop line, or we are, but we haven't completed our stop sign rest behavior, ...
 			if (!bVehicleIsNearStopLineAtIntersection || VehicleControlFragment.StopSignIntersectionLane != IntersectionLaneData)
@@ -907,7 +907,7 @@ bool IsDownstreamCrosswalkLaneClear(
 		else
 		{
 			// If we have a yield sign, but no pedestrians around, and therefore no reason to yield at the sign, ...
-			if (IntersectionLaneData->HasYieldSignAtStart())
+			if (IntersectionLaneData->HasYieldSignAtLaneStart())
 			{
 				// Then, we only need to wait until we're near the stop line,
 				// before we should consider yielding to the crosswalk lanes.
@@ -921,7 +921,7 @@ bool IsDownstreamCrosswalkLaneClear(
 	}
 
 	// If our lane doesn't have a stop sign or yield sign, ...
-	if (!IntersectionLaneData->HasStopSignOrYieldSignAtStart())
+	if (!IntersectionLaneData->HasStopSignOrYieldSignAtLaneStart())
 	{
 		// We just say the crosswalk lane is clear from our perspective
 		// if we won't enter the lane until after some specified horizon time.

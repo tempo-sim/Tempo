@@ -59,7 +59,7 @@ bool FZoneGraphTrafficLaneData::HasYieldSignThatRequiresStopAlongRoad(float Dist
 	return false;
 }
 
-bool FZoneGraphTrafficLaneData::HasYieldSignAtStart() const
+bool FZoneGraphTrafficLaneData::HasYieldSignAtLaneStart() const
 {
 	if (const TOptional<FMassTrafficControllerType> TrafficControllerType = ConstData.TryGetTrafficControllerTypeAtStart())
 	{
@@ -68,7 +68,7 @@ bool FZoneGraphTrafficLaneData::HasYieldSignAtStart() const
 	return false;
 }
 
-bool FZoneGraphTrafficLaneData::HasStopSignAtStart() const
+bool FZoneGraphTrafficLaneData::HasStopSignAtLaneStart() const
 {
 	if (const TOptional<FMassTrafficControllerType> TrafficControllerType = ConstData.TryGetTrafficControllerTypeAtStart())
 	{
@@ -77,7 +77,7 @@ bool FZoneGraphTrafficLaneData::HasStopSignAtStart() const
 	return false;
 }
 
-bool FZoneGraphTrafficLaneData::HasStopSignOrYieldSignAtStart() const
+bool FZoneGraphTrafficLaneData::HasStopSignOrYieldSignAtLaneStart() const
 {
 	if (const TOptional<FMassTrafficControllerType> TrafficControllerType = ConstData.TryGetTrafficControllerTypeAtStart())
 	{
@@ -88,7 +88,7 @@ bool FZoneGraphTrafficLaneData::HasStopSignOrYieldSignAtStart() const
 	return false;
 }
 
-bool FZoneGraphTrafficLaneData::HasTrafficLightAtStart() const
+bool FZoneGraphTrafficLaneData::HasTrafficLightAtLaneStart() const
 {
 	if (const TOptional<FMassTrafficControllerType> TrafficControllerType = ConstData.TryGetTrafficControllerTypeAtStart())
 	{
@@ -97,7 +97,7 @@ bool FZoneGraphTrafficLaneData::HasTrafficLightAtStart() const
 	return false;
 }
 
-bool FZoneGraphTrafficLaneData::HasTrafficSignThatRequiresStopAtStart() const
+bool FZoneGraphTrafficLaneData::HasTrafficSignThatRequiresStopAtLaneStart() const
 {
 	if (const TOptional<FMassTrafficControllerType> TrafficControllerType = ConstData.TryGetTrafficControllerTypeAtStart())
 	{
