@@ -112,6 +112,14 @@ void UTempoAgentsWorldSubsystem::SetupBrightnessMeter()
 	ensureMsgf(BrightnessMeterActor != nullptr, TEXT("Must spawn valid BrightnessMeterActor in UTempoAgentsWorldSubsystem::SetupBrightnessMeter."));
 }
 
+USTRUCT()
+struct FRoadAndCrosswalkLaneInfo
+{
+	const FZoneGraphStorage* ZoneGraphStorage = nullptr;
+	TArray<FZoneGraphLaneHandle> RoadLaneHandles;
+	TArray<FZoneGraphLaneHandle> CrosswalkLaneHandles;
+};
+
 void UTempoAgentsWorldSubsystem::SetupIntersectionLaneMap()
 {
 	const UWorld& World = GetWorldRef();
@@ -169,8 +177,10 @@ void UTempoAgentsWorldSubsystem::SetupIntersectionLaneMap()
 		return ZoneGraphTagMask;
 	};
 
-	const auto& TryFindIntersectionAndCrosswalkLanePairings = [&MassTrafficSubsystem, &ZoneGraphSubsystem, &GenerateTagMaskFromTagNames, &GetRoadLaneTags](const AActor& IntersectionQueryActor, const int32 ConnectionIndex, const int32 LateralIntersectionSide, TArray<FZoneGraphLaneHandle>& OutIntersectionLaneHandles, TArray<FZoneGraphLaneHandle>& OutCrosswalkLaneHandles, const FZoneGraphStorage*& OutZoneGraphStorage)
+	const auto& TryFindIntersectionAndCrosswalkLanePairings = [&MassTrafficSubsystem, &ZoneGraphSubsystem, &GenerateTagMaskFromTagNames, &GetRoadLaneTags](const AActor& IntersectionQueryActor, const int32 ConnectionIndex, const int32 LateralIntersectionSide, TArray<FRoadAndCrosswalkLaneInfo>& OutRoadAndCrosswalkLaneInfos)
 	{
+		OutRoadAndCrosswalkLaneInfos.Empty();
+
 		const AActor* RoadQueryActor = UTempoCoreUtils::CallBlueprintFunction(&IntersectionQueryActor, ITempoIntersectionInterface::Execute_GetConnectedTempoRoadActor, ConnectionIndex);
 		if (!ensureMsgf(RoadQueryActor != nullptr, TEXT("Couldn't get valid Connected Road Actor for Actor: %s at ConnectionIndex: %d in FindIntersectionAndCrosswalkLanePairings."), *IntersectionQueryActor.GetName(), ConnectionIndex))
 		{
@@ -278,13 +288,11 @@ void UTempoAgentsWorldSubsystem::SetupIntersectionLaneMap()
 				return false;
 			});
 
-			// We only use one ZoneGraphStorage. So if we found it, we're done.
-			break;
+			FRoadAndCrosswalkLaneInfo& RoadAndCrosswalkLaneInfo = OutRoadAndCrosswalkLaneInfos.AddDefaulted_GetRef();
+			RoadAndCrosswalkLaneInfo.ZoneGraphStorage = ZoneGraphStorage;
+			RoadAndCrosswalkLaneInfo.RoadLaneHandles = RoadLaneHandles;
+			RoadAndCrosswalkLaneInfo.CrosswalkLaneHandles = CrosswalkLaneHandles;
 		}
-
-		OutIntersectionLaneHandles = RoadLaneHandles;
-		OutCrosswalkLaneHandles = CrosswalkLaneHandles;
-		OutZoneGraphStorage = ZoneGraphStorage;
 
 		return true;
 	};
@@ -312,57 +320,51 @@ void UTempoAgentsWorldSubsystem::SetupIntersectionLaneMap()
 		
 		for (int32 ConnectionIndex = 0; ConnectionIndex < NumConnections; ++ConnectionIndex)
 		{
-			TArray<FZoneGraphLaneHandle> IntersectionExitLaneHandles;
-			TArray<FZoneGraphLaneHandle> IntersectionExitCrosswalkLaneHandles;
-
-			const FZoneGraphStorage* ZoneGraphStorage = nullptr;
-			if (TryFindIntersectionAndCrosswalkLanePairings(IntersectionQueryActor, ConnectionIndex, -1, IntersectionExitLaneHandles, IntersectionExitCrosswalkLaneHandles, ZoneGraphStorage))
+			TArray<FRoadAndCrosswalkLaneInfo> ExitRoadAndCrosswalkLaneInfos;
+			if (TryFindIntersectionAndCrosswalkLanePairings(IntersectionQueryActor, ConnectionIndex, -1, ExitRoadAndCrosswalkLaneInfos))
 			{
-				for (const FZoneGraphLaneHandle& IntersectionExitLaneHandle : IntersectionExitLaneHandles)
+				for (const FRoadAndCrosswalkLaneInfo& RoadAndCrosswalkLaneInfo : ExitRoadAndCrosswalkLaneInfos)
 				{
-					for (const FZoneGraphLaneHandle& IntersectionExitCrosswalkLaneHandle : IntersectionExitCrosswalkLaneHandles)
+					for (const FZoneGraphLaneHandle& IntersectionExitLaneHandle : RoadAndCrosswalkLaneInfo.RoadLaneHandles)
 					{
-						if (ensureMsgf(ZoneGraphStorage, TEXT("ZoneGraphStorage must be found in TryFindIntersectionAndCrosswalkLanePairings")))
+						for (const FZoneGraphLaneHandle& IntersectionExitCrosswalkLaneHandle : RoadAndCrosswalkLaneInfo.CrosswalkLaneHandles)
 						{
 							// Only add downstream crosswalk lanes when the main lane actually intersects the crosswalk lane.
 							// We use a conservative search to find these lanes in the first place. We'll often get a few
 							// more than we intended to, including ones at different heights.
-							if (float EnterDistance, ExitDistance; UE::MassTraffic::TryGetEnterAndExitDistancesAlongQueryLane(*MassTrafficSubsystem, *MassTrafficSettings, *ZoneGraphStorage, IntersectionExitLaneHandle, IntersectionExitCrosswalkLaneHandle, EnterDistance, ExitDistance, false))
+							if (float EnterDistance, ExitDistance; UE::MassTraffic::TryGetEnterAndExitDistancesAlongQueryLane(*MassTrafficSubsystem, *MassTrafficSettings, *RoadAndCrosswalkLaneInfo.ZoneGraphStorage, IntersectionExitLaneHandle, IntersectionExitCrosswalkLaneHandle, EnterDistance, ExitDistance, false))
 							{
 								MassTrafficSubsystem->AddDownstreamCrosswalkLane(IntersectionExitLaneHandle, IntersectionExitCrosswalkLaneHandle, EnterDistance);
 							}
 						}
 					}
+
+					ensureMsgf(RoadAndCrosswalkLaneInfo.CrosswalkLaneHandles.Num() == 2, TEXT("Expected exactly 2 exit crosswalk lanes."));
 				}
 			}
 
-			ensureMsgf(IntersectionExitCrosswalkLaneHandles.Num() == 2, TEXT("Expected exactly 2 exit crosswalk lanes."));
-			
-			TArray<FZoneGraphLaneHandle> IntersectionEntranceLaneHandles;
-			TArray<FZoneGraphLaneHandle> IntersectionEntranceCrosswalkLaneHandles;
-
-			ZoneGraphStorage = nullptr;
-			if (TryFindIntersectionAndCrosswalkLanePairings(IntersectionQueryActor, ConnectionIndex, 1, IntersectionEntranceLaneHandles, IntersectionEntranceCrosswalkLaneHandles, ZoneGraphStorage))
+			TArray<FRoadAndCrosswalkLaneInfo> EntranceRoadAndCrosswalkLaneInfos;
+			if (TryFindIntersectionAndCrosswalkLanePairings(IntersectionQueryActor, ConnectionIndex, 1, EntranceRoadAndCrosswalkLaneInfos))
 			{
-				for (const FZoneGraphLaneHandle& IntersectionEntranceLaneHandle : IntersectionEntranceLaneHandles)
+				for (const FRoadAndCrosswalkLaneInfo& EntranceRoadAndCrosswalkLaneInfo : EntranceRoadAndCrosswalkLaneInfos)
 				{
-					for (const FZoneGraphLaneHandle& IntersectionEntranceCrosswalkLaneHandle : IntersectionEntranceCrosswalkLaneHandles)
+					for (const FZoneGraphLaneHandle& IntersectionEntranceLaneHandle : EntranceRoadAndCrosswalkLaneInfo.RoadLaneHandles)
 					{
-						if (ensureMsgf(ZoneGraphStorage, TEXT("ZoneGraphStorage must be found in TryFindIntersectionAndCrosswalkLanePairings")))
+						for (const FZoneGraphLaneHandle& IntersectionEntranceCrosswalkLaneHandle : EntranceRoadAndCrosswalkLaneInfo.CrosswalkLaneHandles)
 						{
 							// Only add downstream crosswalk lanes when the main lane actually intersects the crosswalk lane.
 							// We use a conservative search to find these lanes in the first place. We'll often get a few
 							// more than we intended to, including ones at different heights.
-							if (float EnterDistance, ExitDistance; UE::MassTraffic::TryGetEnterAndExitDistancesAlongQueryLane(*MassTrafficSubsystem, *MassTrafficSettings, *ZoneGraphStorage, IntersectionEntranceLaneHandle, IntersectionEntranceCrosswalkLaneHandle, EnterDistance, ExitDistance, false))
+							if (float EnterDistance, ExitDistance; UE::MassTraffic::TryGetEnterAndExitDistancesAlongQueryLane(*MassTrafficSubsystem, *MassTrafficSettings, *EntranceRoadAndCrosswalkLaneInfo.ZoneGraphStorage, IntersectionEntranceLaneHandle, IntersectionEntranceCrosswalkLaneHandle, EnterDistance, ExitDistance, false))
 							{
 								MassTrafficSubsystem->AddDownstreamCrosswalkLane(IntersectionEntranceLaneHandle, IntersectionEntranceCrosswalkLaneHandle, EnterDistance);
 							}
 						}
 					}
+
+					ensureMsgf(EntranceRoadAndCrosswalkLaneInfo.CrosswalkLaneHandles.Num() == 2, TEXT("Expected exactly 2 entrance crosswalk lanes."));
 				}
 			}
-			
-			ensureMsgf(IntersectionEntranceCrosswalkLaneHandles.Num() == 2, TEXT("Expected exactly 2 entrance crosswalk lanes."));
 		}
 	}
 }
@@ -424,8 +426,10 @@ void UTempoAgentsWorldSubsystem::SetupRoadCrosswalkData()
 		return ZoneGraphTagMask;
 	};
 
-	const auto& TryFindRoadAndCrosswalkLanePairings = [this, &MassTrafficSubsystem, &ZoneGraphSubsystem, &GenerateTagMaskFromTagNames, &GetRoadLaneTags](const AActor& RoadQueryActor, const int32 CrosswalkIndex, TArray<FZoneGraphLaneHandle>& OutIntersectionLaneHandles, TArray<FZoneGraphLaneHandle>& OutCrosswalkLaneHandles, const FZoneGraphStorage*& OutZoneGraphStorage)
+	const auto& TryFindRoadAndCrosswalkLanePairings = [this, &MassTrafficSubsystem, &ZoneGraphSubsystem, &GenerateTagMaskFromTagNames, &GetRoadLaneTags](const AActor& RoadQueryActor, const int32 CrosswalkIndex, TArray<FRoadAndCrosswalkLaneInfo>& OutRoadAndCrosswalkLaneInfos)
 	{
+		OutRoadAndCrosswalkLaneInfos.Empty();
+
 		const int32 CrosswalkStartControlPointIndex = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkStartEntranceLocationControlPointIndex(&RoadQueryActor, CrosswalkIndex);
 		const int32 CrosswalkEndControlPointIndex = ITempoCrosswalkInterface::Execute_GetTempoCrosswalkEndEntranceLocationControlPointIndex(&RoadQueryActor, CrosswalkIndex);
 
@@ -490,13 +494,11 @@ void UTempoAgentsWorldSubsystem::SetupRoadCrosswalkData()
 				return ZoneGraphTrafficLaneData->ConstData.bIsIntersectionLane;
 			});
 
-			// We only use one ZoneGraphStorage. So if we found it, we're done.
-			break;
+			FRoadAndCrosswalkLaneInfo& RoadAndCrosswalkLaneInfo = OutRoadAndCrosswalkLaneInfos.AddDefaulted_GetRef();
+			RoadAndCrosswalkLaneInfo.ZoneGraphStorage = ZoneGraphStorage;
+			RoadAndCrosswalkLaneInfo.RoadLaneHandles = RoadLaneHandles;
+			RoadAndCrosswalkLaneInfo.CrosswalkLaneHandles = CrosswalkLaneHandles;
 		}
-
-		OutIntersectionLaneHandles = RoadLaneHandles;
-		OutCrosswalkLaneHandles = CrosswalkLaneHandles;
-		OutZoneGraphStorage = ZoneGraphStorage;
 
 		return true;
 	};
@@ -524,30 +526,27 @@ void UTempoAgentsWorldSubsystem::SetupRoadCrosswalkData()
 
 		for (int32 CrosswalkIndex = 0; CrosswalkIndex < NumConnections; ++CrosswalkIndex)
 		{
-			TArray<FZoneGraphLaneHandle> RoadLaneHandles;
-			TArray<FZoneGraphLaneHandle> CrosswalkLaneHandles;
-
-			const FZoneGraphStorage* ZoneGraphStorage = nullptr;
-			if (TryFindRoadAndCrosswalkLanePairings(RoadQueryActor, CrosswalkIndex, RoadLaneHandles, CrosswalkLaneHandles, ZoneGraphStorage))
+			TArray<FRoadAndCrosswalkLaneInfo> RoadAndCrosswalkLaneInfos;
+			if (TryFindRoadAndCrosswalkLanePairings(RoadQueryActor, CrosswalkIndex, RoadAndCrosswalkLaneInfos))
 			{
-				for (const FZoneGraphLaneHandle& RoadLaneHandle : RoadLaneHandles)
+				for (const FRoadAndCrosswalkLaneInfo& RoadAndCrosswalkLaneInfo : RoadAndCrosswalkLaneInfos)
 				{
-					for (const FZoneGraphLaneHandle& CrosswalkLaneHandle : CrosswalkLaneHandles)
+					for (const FZoneGraphLaneHandle& RoadLaneHandle : RoadAndCrosswalkLaneInfo.RoadLaneHandles)
 					{
-						if (ensureMsgf(ZoneGraphStorage, TEXT("ZoneGraphStorage must be found in TryFindRoadAndCrosswalkLanePairings")))
+						for (const FZoneGraphLaneHandle& CrosswalkLaneHandle : RoadAndCrosswalkLaneInfo.CrosswalkLaneHandles)
 						{
 							// Only add downstream crosswalk lanes when the main lane actually intersects the crosswalk lane.
 							// We use a conservative search to find these lanes in the first place. We'll often get a few
 							// more than we intended to, including ones at different heights.
-							if (float EnterDistance, ExitDistance; UE::MassTraffic::TryGetEnterAndExitDistancesAlongQueryLane(*MassTrafficSubsystem, *MassTrafficSettings, *ZoneGraphStorage, RoadLaneHandle, CrosswalkLaneHandle, EnterDistance, ExitDistance, false))
+							if (float EnterDistance, ExitDistance; UE::MassTraffic::TryGetEnterAndExitDistancesAlongQueryLane(*MassTrafficSubsystem, *MassTrafficSettings, *RoadAndCrosswalkLaneInfo.ZoneGraphStorage, RoadLaneHandle, CrosswalkLaneHandle, EnterDistance, ExitDistance, false))
 							{
 								float RoadLaneLength;
-								if (!ensureMsgf(UE::ZoneGraph::Query::GetLaneLength(*ZoneGraphStorage, RoadLaneHandle.Index, RoadLaneLength), TEXT("Unable to determine road lane length in UTempoAgentsWorldSubsystem::SetupRoadCrosswalkData.")))
+								if (!ensureMsgf(UE::ZoneGraph::Query::GetLaneLength(*RoadAndCrosswalkLaneInfo.ZoneGraphStorage, RoadLaneHandle.Index, RoadLaneLength), TEXT("Unable to determine road lane length in UTempoAgentsWorldSubsystem::SetupRoadCrosswalkData.")))
 								{
 									continue;
 								}
 								float CrosswalkLaneWidth;
-								if (!ensureMsgf(UE::ZoneGraph::Query::GetLaneWidth(*ZoneGraphStorage, CrosswalkLaneHandle, CrosswalkLaneWidth), TEXT("Unable to determine crosswalk lane width in UTempoAgentsWorldSubsystem::SetupRoadCrosswalkData.")))
+								if (!ensureMsgf(UE::ZoneGraph::Query::GetLaneWidth(*RoadAndCrosswalkLaneInfo.ZoneGraphStorage, CrosswalkLaneHandle, CrosswalkLaneWidth), TEXT("Unable to determine crosswalk lane width in UTempoAgentsWorldSubsystem::SetupRoadCrosswalkData.")))
 								{
 									continue;
 								}
@@ -562,10 +561,10 @@ void UTempoAgentsWorldSubsystem::SetupRoadCrosswalkData()
 							}
 						}
 					}
+
+					ensureMsgf(RoadAndCrosswalkLaneInfo.RoadLaneHandles.Num() > 0, TEXT("Expected non-zero number of road lanes"));
 				}
 			}
-
-			ensureMsgf(RoadLaneHandles.Num() > 0, TEXT("Expected non-zero number of road lanes"));
 		}
 	}
 }
