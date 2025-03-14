@@ -167,7 +167,7 @@ MASSTRAFFIC_API bool ShouldStopAtNextStopLine(
 	const FVector2D& MinimumDistanceToNextVehicleRange,
 	const FVector2D& StoppingDistanceRange,
 	const FMassEntityManager& EntityManager,
-	FZoneGraphTrafficLaneData*& InOut_LastStopSignStoppedLaneInfo,
+	FZoneGraphTrafficLaneData*& InOut_LastCompletedStopSignLaneData,
 	bool& bOut_RequestDifferentNextLane,
 	bool& bInOut_CantStopAtLaneExit,
 	bool& bOut_IsFrontOfVehicleBeyondLaneExit,

@@ -42,9 +42,9 @@ namespace
 
 		// If we're at a stop sign (or a yield sign with waiting or crossing pedestrians),
 		// don't attempt to ready the intersection lane until we're ready to proceed.
-		// Once we've waited at least our chosen minimum waiting time, the logic in ShouldStopAtNextTrafficControl
+		// Once we've waited at least our chosen minimum waiting time, the logic in ShouldStopAtNextStopLine
 		// will give us the signal, and we will bypass this blocking check.
-		if (VehicleControlFragment.NextLane->HasTrafficSignThatRequiresStopAtEntrance() && !bShouldProceedAtStopSign)
+		if (VehicleControlFragment.NextLane->HasTrafficSignThatRequiresStopAtStart() && !bShouldProceedAtStopSign)
 		{
 			return;
 		}
@@ -139,7 +139,7 @@ namespace
 
 			// If we just stopped at a stop sign (or a yield sign with waiting or crossing pedestrians),
 			// choose a minimum time to remain stopped at the sign.
-			if (LaneData->HasTrafficSignThatRequiresStopAtEntrance())
+			if (LaneData->HasTrafficSignThatRequiresStopAtStart())
 			{
 				VehicleControlFragment.MinVehicleStopSignRestTime = RandomStream.FRandRange(MassTrafficSettings.LowerMinStopSignRestTime, MassTrafficSettings.UpperMinStopSignRestTime);
 				MassTrafficSubsystem.AddVehicleEntityToIntersectionStopQueue(VehicleControlFragment.VehicleEntityHandle, VehicleControlFragment.NextLane->IntersectionEntityHandle);
@@ -485,7 +485,7 @@ void UMassTrafficVehicleControlProcessor::SimpleVehicleControl(
 	const bool bIsOffLOD = (UE::MassLOD::GetLODFromArchetype(Context) == EMassLOD::Off);
 	const bool bIsLowLOD = (UE::MassLOD::GetLODFromArchetype(Context) == EMassLOD::Low);
 
-	// We need to update our stop state before calling ShouldStopAtNextTrafficControl.
+	// We need to update our stop state before calling ShouldStopAtNextStopLine.
 	// Basically, we need to update our stop state based on what we *are* doing this update cycle to inform what we *should* be doing.
 	UpdateVehicleStopState(VehicleControlFragment, LaneLocationFragment, AgentRadiusFragment, RandomFractionFragment, RandomStream, MassTrafficSubsystem, *MassTrafficSettings);
 	
@@ -504,7 +504,7 @@ void UMassTrafficVehicleControlProcessor::SimpleVehicleControl(
 	bool bVehicleHasNoNextLane = false;
 	bool bVehicleHasNoRoom = false;
 	bool bShouldProceedAtStopSign = false;
-	const bool bMustStopAtNextTrafficControl = UE::MassTraffic::ShouldStopAtNextStopLine(
+	const bool bMustStopAtNextStopLine = UE::MassTraffic::ShouldStopAtNextStopLine(
 		LaneLocationFragment.DistanceAlongLane,
 		VehicleControlFragment.Speed,
 		AgentRadiusFragment.Radius,
@@ -553,7 +553,7 @@ void UMassTrafficVehicleControlProcessor::SimpleVehicleControl(
 	// EDGE CASE. Happens when a vehicle has decided it can't stop at same point in the recent past, but then soon
 	// after discovers it must stop after all (has run out of room, or has lost it's next lane.)
 	// (See all CANTSTOPLANEEXIT.)
-	if (bMustStopAtNextTrafficControl && VehicleControlFragment.bCantStopAtLaneExit)
+	if (bMustStopAtNextStopLine && VehicleControlFragment.bCantStopAtLaneExit)
 	{
 		UnsetVehicleCantStopAtLaneExit(VehicleControlFragment);
 		bVehicleCantStopAtLaneExit = false;
@@ -599,7 +599,7 @@ void UMassTrafficVehicleControlProcessor::SimpleVehicleControl(
 		MassTrafficSettings->StopSignBrakingTime,
 		MassTrafficSettings->StoppingDistanceRange,
 		/*StopSignBrakingPower*/0.5f, // @todo Expose
-		bMustStopAtNextTrafficControl
+		bMustStopAtNextStopLine
 		#if WITH_MASSTRAFFIC_DEBUG
 			, bVisLog
 			, Context.GetSubsystem<UMassTrafficSubsystem>()
@@ -665,7 +665,7 @@ void UMassTrafficVehicleControlProcessor::SimpleVehicleControl(
 		VehicleControlFragment.BrakeLightHysteresis = 0.0f;
 	}
 
-	const bool bIsVehicleStoppingOverLaneExit = (bMustStopAtNextTrafficControl && bIsFrontOfVehicleBeyondEndOfLane); // (See all CROSSWALKOVERLAP.)
+	const bool bIsVehicleStoppingOverLaneExit = (bMustStopAtNextStopLine && bIsFrontOfVehicleBeyondEndOfLane); // (See all CROSSWALKOVERLAP.)
 
 	if (!bIsOffLOD || !bIsVehicleStoppingOverLaneExit) // (See all CROSSWALKOVERLAP.)
 	{
@@ -854,7 +854,7 @@ void UMassTrafficVehicleControlProcessor::PIDVehicleControl(
 	);
 	const float VariedSpeedLimit = UE::MassTraffic::VarySpeedLimit(SpeedLimit, MassTrafficSettings->SpeedLimitVariancePct, MassTrafficSettings->SpeedVariancePct, RandomFractionFragment.RandomFraction, NoiseValue);
 
-	// We need to update our stop state before calling ShouldStopAtNextTrafficControl.
+	// We need to update our stop state before calling ShouldStopAtNextStopLine.
 	// Basically, we need to update our stop state based on what we *are* doing this update cycle to inform what we *should* be doing.
 	UpdateVehicleStopState(VehicleControlFragment, LaneLocationFragment, AgentRadiusFragment, RandomFractionFragment, RandomStream, MassTrafficSubsystem, *MassTrafficSettings);
 

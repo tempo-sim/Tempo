@@ -59,27 +59,27 @@ bool FZoneGraphTrafficLaneData::HasYieldSignThatRequiresStopAlongRoad(float Dist
 	return false;
 }
 
-bool FZoneGraphTrafficLaneData::HasYieldSignAtEntrance() const
+bool FZoneGraphTrafficLaneData::HasYieldSignAtStart() const
 {
-	if (const TOptional<FMassTrafficControllerType> TrafficControllerType = ConstData.TryGetTrafficControllerTypeAtEntrance())
+	if (const TOptional<FMassTrafficControllerType> TrafficControllerType = ConstData.TryGetTrafficControllerTypeAtStart())
 	{
 		return !TrafficControllerType->GetIsTrafficLightControlled() && TrafficControllerType->GetTrafficControllerSignType() == EMassTrafficControllerSignType::YieldSign;
 	}
 	return false;
 }
 
-bool FZoneGraphTrafficLaneData::HasStopSignAtEntrance() const
+bool FZoneGraphTrafficLaneData::HasStopSignAtStart() const
 {
-	if (const TOptional<FMassTrafficControllerType> TrafficControllerType = ConstData.TryGetTrafficControllerTypeAtEntrance())
+	if (const TOptional<FMassTrafficControllerType> TrafficControllerType = ConstData.TryGetTrafficControllerTypeAtStart())
 	{
 		return !TrafficControllerType->GetIsTrafficLightControlled() && TrafficControllerType->GetTrafficControllerSignType() == EMassTrafficControllerSignType::StopSign;
 	}
 	return false;
 }
 
-bool FZoneGraphTrafficLaneData::HasStopSignOrYieldSignAtEntrance() const
+bool FZoneGraphTrafficLaneData::HasStopSignOrYieldSignAtStart() const
 {
-	if (const TOptional<FMassTrafficControllerType> TrafficControllerType = ConstData.TryGetTrafficControllerTypeAtEntrance())
+	if (const TOptional<FMassTrafficControllerType> TrafficControllerType = ConstData.TryGetTrafficControllerTypeAtStart())
 	{
 		return !TrafficControllerType->GetIsTrafficLightControlled() &&
 			TrafficControllerType->GetTrafficControllerSignType() == EMassTrafficControllerSignType::YieldSign ||
@@ -88,18 +88,18 @@ bool FZoneGraphTrafficLaneData::HasStopSignOrYieldSignAtEntrance() const
 	return false;
 }
 
-bool FZoneGraphTrafficLaneData::HasTrafficLightAtEntrance() const
+bool FZoneGraphTrafficLaneData::HasTrafficLightAtStart() const
 {
-	if (const TOptional<FMassTrafficControllerType> TrafficControllerType = ConstData.TryGetTrafficControllerTypeAtEntrance())
+	if (const TOptional<FMassTrafficControllerType> TrafficControllerType = ConstData.TryGetTrafficControllerTypeAtStart())
 	{
 		return TrafficControllerType->GetIsTrafficLightControlled();
 	}
 	return false;
 }
 
-bool FZoneGraphTrafficLaneData::HasTrafficSignThatRequiresStopAtEntrance() const
+bool FZoneGraphTrafficLaneData::HasTrafficSignThatRequiresStopAtStart() const
 {
-	if (const TOptional<FMassTrafficControllerType> TrafficControllerType = ConstData.TryGetTrafficControllerTypeAtEntrance())
+	if (const TOptional<FMassTrafficControllerType> TrafficControllerType = ConstData.TryGetTrafficControllerTypeAtStart())
 	{
 		const bool bHasPedestriansWaitingToCrossAtIntersectionEntrance = HasPedestriansWaitingToCross.Contains(0.0) && HasPedestriansWaitingToCross[0.0];
 		const bool bHasPedestriansInDownstreamCrosswalkLanesAtIntersectionEntrance = HasPedestriansInDownstreamCrosswalkLanes.Contains(0.0) && HasPedestriansInDownstreamCrosswalkLanes[0.0];

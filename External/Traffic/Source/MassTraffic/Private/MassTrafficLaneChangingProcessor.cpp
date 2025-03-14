@@ -157,7 +157,7 @@ static void TryStartingNewLaneChange(
 	{
 		const float YieldSignDistance = Lane_Current->LaneLengthAtNextTrafficControl(ZoneGraphLaneLocationFragment_Current.DistanceAlongLane);
 		const float DistanceToYieldSign = YieldSignDistance - ZoneGraphLaneLocationFragment_Current.DistanceAlongLane;
-		if (DistanceToYieldSign < 3.0 * MassTrafficSettings.MinLaneChangeDistanceVehicleLengthScale * (2.0f * AgentRadiusFragment_Current.Radius))
+		if (DistanceToYieldSign < MassTrafficSettings.MinLaneChangeSpaceBeforeYieldSignVehicleLengthScale * (2.0f * AgentRadiusFragment_Current.Radius))
 		{
 			return;
 		}

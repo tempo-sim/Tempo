@@ -1,4 +1,3 @@
-
 # ======
 # Build and Package Workflow for a Tempo Unreal project.
 # This workflow builds and packages an Unreal project using Tempo.
@@ -132,7 +131,7 @@ jobs:
           fi
         fi
     - name: Free Disk Space (if using GitHub-hosted runner)
-      if: ${{ contains(runner.name, 'Github Actions') }}
+      if: ${{ contains(runner.name, 'Github') && contains(runner.name, 'Actions') }}
       uses: jlumbroso/free-disk-space@main
       with:
         tool-cache: true
@@ -227,7 +226,7 @@ jobs:
       run: |
         ${{ github.workspace }}/${{ inputs.tempo_root }}/Scripts/ExtractReleasePaks.sh ${{ github.workspace }}/.base_release ${{ github.workspace }}/.releases/${{ inputs.release_id }} ${{ github.workspace }}/.base_release/Metadata
     - name: Relocate Docker Daemon Data Root (if using GitHub-hosted runner)
-      if: ${{ contains(runner.name, 'Github Actions') }}
+      if: ${{ contains(runner.name, 'Github') && contains(runner.name, 'Actions') }}
       run: |
         # Credit to https://github.com/orgs/community/discussions/26357
         # The drive mounted at /mnt has a lot more free space than the main volume.
@@ -410,6 +409,7 @@ jobs:
           .engine-ddc-cache/**
         key: ${{ steps.repo_lowercase.outputs.REPO_LOWERCASE }}-build-${{ env.UNREAL_VERSION }}-${{ github.sha }}
     - name: Check Free Space (if using GitHub-hosted runner)
+      if: ${{ contains(runner.name, 'Github') && contains(runner.name, 'Actions') }}
       run: df -h / && df -h /mnt
     - name: Reset Source File Permissions
       if: always()  # This ensures it runs even if previous steps fail

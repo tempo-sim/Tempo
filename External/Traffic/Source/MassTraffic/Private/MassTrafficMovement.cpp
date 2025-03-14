@@ -112,7 +112,7 @@ bool IsVehicleEligibleToMergeOntoLane(
 
 	// Note:  This condition should be removed when we're ready to test
 	// the merge behavior at traffic light intersections.
-	if (DesiredLaneData->HasTrafficLightAtEntrance())
+	if (DesiredLaneData->HasTrafficLightAtStart())
 	{
 		return false;
 	}
@@ -128,7 +128,7 @@ bool IsVehicleEligibleToMergeOntoLane(
 	if (CurrentLaneData->LaneHandle != DesiredLaneData->LaneHandle)
 	{
 		// And, our desired lane has a stop sign requirement, ...
-		if (DesiredLaneData->HasTrafficSignThatRequiresStopAtEntrance())
+		if (DesiredLaneData->HasTrafficSignThatRequiresStopAtStart())
 		{
 			// If we're not near the stop line, or we are, but we haven't completed our stop sign rest behavior, ...
 			if (!bVehicleIsNearStopLineAtIntersection || VehicleControlFragment.StopSignIntersectionLane != DesiredLaneData)
@@ -194,7 +194,7 @@ bool ShouldVehicleMergeOntoLane(
 		return true;
 	}
 
-	const bool bVehicleHasStopSignOrYieldSign = DesiredLaneData->HasStopSignOrYieldSignAtEntrance();
+	const bool bVehicleHasStopSignOrYieldSign = DesiredLaneData->HasStopSignOrYieldSignAtStart();
 
 	const float VehicleEffectiveSpeed = VehicleControlFragment.IsYieldingAtIntersection() ? 0.0f : VehicleControlFragment.Speed;
 	
@@ -247,7 +247,7 @@ bool ShouldVehicleMergeOntoLane(
 			return false;
 		}
 		
-		const bool bTestVehicleHasStopSignOrYieldSign = TestVehicleIntersectionLaneData.HasStopSignOrYieldSignAtEntrance();
+		const bool bTestVehicleHasStopSignOrYieldSign = TestVehicleIntersectionLaneData.HasStopSignOrYieldSignAtStart();
 
 		const bool bTestVehicleIsNearStopLine = IsVehicleNearStopLine(
 			TestVehicleCurrentLaneData.LeadVehicleDistanceAlongLane.GetValue(),
@@ -262,7 +262,7 @@ bool ShouldVehicleMergeOntoLane(
 		if (TestVehicleCurrentLaneData.LaneHandle != TestVehicleIntersectionLaneData.LaneHandle)
 		{
 			// And, the test vehicle's intersection lane has a stop sign requirement, ...
-			if (TestVehicleIntersectionLaneData.HasTrafficSignThatRequiresStopAtEntrance())
+			if (TestVehicleIntersectionLaneData.HasTrafficSignThatRequiresStopAtStart())
 			{
 				const bool bTestVehicleHasCompletedItsStopSignRestBehavior = TestVehicleCurrentLaneData.LeadVehicleStopSignIntersectionLane.GetValue() != nullptr
 							? TestVehicleCurrentLaneData.LeadVehicleStopSignIntersectionLane.GetValue()->LaneHandle == TestVehicleIntersectionLaneData.LaneHandle
@@ -278,7 +278,7 @@ bool ShouldVehicleMergeOntoLane(
 			else
 			{
 				// If the test vehicle has a yield sign, but no pedestrians around, and therefore no reason to yield at the sign, ...
-				if (TestVehicleIntersectionLaneData.HasYieldSignAtEntrance())
+				if (TestVehicleIntersectionLaneData.HasYieldSignAtStart())
 				{
 					// Then, we only need to wait until the test vehicle is near the stop line,
 					// before we should consider yielding to it.
@@ -573,14 +573,12 @@ bool ShouldVehicleMergeOntoLane(
 			continue;
 		}
 
-		const FZoneGraphTrafficLaneData ConflictLaneDataCopy(*ConflictLaneData);
-
-		if (!ConflictLaneDataCopy.ConstData.bIsIntersectionLane)
+		if (!ConflictLaneData->ConstData.bIsIntersectionLane)
 		{
 			continue;
 		}
 		
-		if (ConflictLaneDataCopy.NumVehiclesOnLane > 0)
+		if (ConflictLaneData->NumVehiclesOnLane > 0)
 		{
 			// Since there are vehicles on the lane (ie. ConflictLaneData.NumVehiclesOnLane > 0),
 			// we'd like to be able to ensure that all the LeadVehicle properties are set, here.
@@ -615,18 +613,18 @@ bool ShouldVehicleMergeOntoLane(
 			}
 			
 			if (ShouldVehicleYieldToTestVehicle(
-				ConflictLaneDataCopy,
-				ConflictLaneDataCopy,
-				ConflictLaneDataCopy.LeadVehicleDistanceAlongLane.GetValue(),
-				ConflictLaneDataCopy.LeadVehicleSpeed.GetValue(),
-				ConflictLaneDataCopy.LeadVehicleRadius.GetValue()))
+				*ConflictLaneData,
+				*ConflictLaneData,
+				ConflictLaneData->LeadVehicleDistanceAlongLane.GetValue(),
+				ConflictLaneData->LeadVehicleSpeed.GetValue(),
+				ConflictLaneData->LeadVehicleRadius.GetValue()))
 			{
 				OutYieldTargetLane = ConflictLaneData->LaneHandle;
 				return false;
 			}
 		}
 	
-		for (const FZoneGraphTrafficLaneData* ConflictPredecessorLane : ConflictLaneDataCopy.PrevLanes)
+		for (const FZoneGraphTrafficLaneData* ConflictPredecessorLane : ConflictLaneData->PrevLanes)
 		{
 			if (ConflictPredecessorLane == nullptr)
 			{
@@ -687,7 +685,7 @@ bool ShouldVehicleMergeOntoLane(
 			
 			if (ShouldVehicleYieldToTestVehicle(
 				ConflictPredecessorLaneCopy,
-				ConflictLaneDataCopy,
+				*ConflictLaneData,
 				ConflictPredecessorLaneCopy.LeadVehicleDistanceAlongLane.GetValue(),
 				ConflictPredecessorLaneCopy.LeadVehicleSpeed.GetValue(),
 				ConflictPredecessorLaneCopy.LeadVehicleRadius.GetValue()))
@@ -714,7 +712,7 @@ bool ShouldStopAtNextStopLine(
 	const FVector2D& MinimumDistanceToNextVehicleRange,
 	const FVector2D& StoppingDistanceRange,
 	const FMassEntityManager& EntityManager,
-	FZoneGraphTrafficLaneData*& InOut_LastStopSignStoppedLaneInfo,
+	FZoneGraphTrafficLaneData*& InOut_LastCompletedStopSignLaneData,
 	bool& bOut_RequestDifferentNextLane,
 	bool& bInOut_CantStopAtLaneExit,
 	bool& bOut_IsFrontOfVehicleBeyondLaneExit,
@@ -831,7 +829,7 @@ bool ShouldStopAtNextStopLine(
 			bOut_ShouldProceedAtStopSign = true;
 
 			// Mark the last lane where we waited at a stop sign.
-			InOut_LastStopSignStoppedLaneInfo = NextTrafficLaneData;
+			InOut_LastCompletedStopSignLaneData = NextTrafficLaneData;
 			return true;
 		}
 
@@ -848,7 +846,7 @@ bool ShouldStopAtNextStopLine(
 			return true;
 		}
 
-		if (NextTrafficLaneData->HasYieldSignAtEntrance())
+		if (NextTrafficLaneData->HasYieldSignAtStart())
 		{
 			return ShouldContinueYieldingAtYieldSign(NextTrafficLaneData, 0.0);
 		}
@@ -858,7 +856,7 @@ bool ShouldStopAtNextStopLine(
 
 	// Coming up to an intersection?
 	// If we don't have space on the other side, we might have to stop, or possibly request a different lane. 
-	if (NextTrafficLaneData != nullptr && NextTrafficLaneData->ConstData.bIsIntersectionLane)
+	if (NextTrafficLaneData->ConstData.bIsIntersectionLane)
 	{
 		// All the vehicles in the next lane will end up in the post-intersection lane (since they won't stop.)
 		// Will there also be enough space on the post-intersection lane for this vehicle?
@@ -890,13 +888,13 @@ bool ShouldStopAtNextStopLine(
 	if (!bInOut_CantStopAtLaneExit)
 	{
 		// We should always attempt to stop at stop signs (and yield signs with waiting or crossing pedestrians).
-		if (NextTrafficLaneData->HasTrafficSignThatRequiresStopAtEntrance())
+		if (NextTrafficLaneData->HasTrafficSignThatRequiresStopAtStart())
 		{
 			// In general, we should always plan to start our stop sign behavior.
 			// However, once we've completed our stop sign behavior with this stop sign,
 			// we may proceed (by falling through to other rules).
 			// (See the logic towards the top of this function when MinVehicleStopSignRestTime > 0.0f.)
-			if (InOut_LastStopSignStoppedLaneInfo != NextTrafficLaneData)
+			if (InOut_LastCompletedStopSignLaneData != NextTrafficLaneData)
 			{
 				// Always plan on stopping at stop signs.
 				// This begins the stop sign behavior sequence.

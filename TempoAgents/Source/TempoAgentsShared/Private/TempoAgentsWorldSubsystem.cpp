@@ -550,9 +550,10 @@ void UTempoAgentsWorldSubsystem::SetupRoadCrosswalkData()
 								{
 									continue;
 								}
-								// We are only interested in the road lanes that actually intersect the crosswalk lanes. TryGetEnterAndExitDistancesAlongQueryLane uses
-								// the crosswalk lane width to detect intersection, which gets the correct distance but can also detect lanes that do not in fact
-								// intersect. Presumably those will truly intersect with the next or previous lane, and we'll pick them up there.
+								// We are only interested in the road lanes that actually intersect the crosswalk lanes. TryGetEnterAndExitDistancesAlongQueryLane takes the
+								// crosswalk lane width into account, finding intersections with the lane left and/or right sides. This gets the correct intersection distance along
+								// the road lane but can also detect lanes that do not intersect at their centers. Presumably those will intersect with the center of the next or
+								// previous lane, and we'll pick them up there.
 								if (EnterDistance < CrosswalkLaneWidth ||  EnterDistance > RoadLaneLength - CrosswalkLaneWidth)
 								{
 									continue;

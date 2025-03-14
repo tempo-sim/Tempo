@@ -895,7 +895,7 @@ bool IsDownstreamCrosswalkLaneClear(
 			MassTrafficSettings->StoppingDistanceRange);
 
 		// If our intersection lane has a stop sign requirement, ...
-		if (IntersectionLaneData->HasTrafficSignThatRequiresStopAtEntrance())
+		if (IntersectionLaneData->HasTrafficSignThatRequiresStopAtStart())
 		{
 			// If we're not near the stop line, or we are, but we haven't completed our stop sign rest behavior, ...
 			if (!bVehicleIsNearStopLineAtIntersection || VehicleControlFragment.StopSignIntersectionLane != IntersectionLaneData)
@@ -907,7 +907,7 @@ bool IsDownstreamCrosswalkLaneClear(
 		else
 		{
 			// If we have a yield sign, but no pedestrians around, and therefore no reason to yield at the sign, ...
-			if (IntersectionLaneData->HasYieldSignAtEntrance())
+			if (IntersectionLaneData->HasYieldSignAtStart())
 			{
 				// Then, we only need to wait until we're near the stop line,
 				// before we should consider yielding to the crosswalk lanes.
@@ -921,7 +921,7 @@ bool IsDownstreamCrosswalkLaneClear(
 	}
 
 	// If our lane doesn't have a stop sign or yield sign, ...
-	if (!IntersectionLaneData->HasStopSignOrYieldSignAtEntrance())
+	if (!IntersectionLaneData->HasStopSignOrYieldSignAtStart())
 	{
 		// We just say the crosswalk lane is clear from our perspective
 		// if we won't enter the lane until after some specified horizon time.
@@ -1091,14 +1091,8 @@ bool ShouldYieldToCrosswalks_Internal(
 		return false;
 	};
 
-	const TMap<FZoneGraphLaneHandle, float> DownstreamCrosswalkLaneInfos = CurrentLaneData->DownstreamCrosswalkLanes.FilterByPredicate(
-		[DistanceAlongLane=LaneLocationFragment.DistanceAlongLane](const auto& DownstreamCrosswalkLaneInfo)
-	{
-		return DownstreamCrosswalkLaneInfo.Value > DistanceAlongLane;
-	});
-
 	// Check all the downstream crosswalk lanes for our current lane.
-	for (const auto& DownstreamCrosswalkLaneInfo : DownstreamCrosswalkLaneInfos)
+	for (const auto& DownstreamCrosswalkLaneInfo : CurrentLaneData->DownstreamCrosswalkLanes)
 	{
 		const float LaneLengthAtDownstreamCrosswalkLane = DownstreamCrosswalkLaneInfo.Value;
 
@@ -1108,8 +1102,7 @@ bool ShouldYieldToCrosswalks_Internal(
 			continue;
 		}
 
-		// And those that are too far away.
-		if (LaneLocationFragment.DistanceAlongLane < LaneLengthAtDownstreamCrosswalkLane - 5.0 * RadiusFragment.Radius * 2.0)
+		if (LaneLocationFragment.DistanceAlongLane < LaneLengthAtDownstreamCrosswalkLane - MassTrafficSettings->CrosswalkReactiveYieldDistanceVehicleLengthScale * RadiusFragment.Radius * 2.0)
 		{
 			continue;
 		}
@@ -1320,7 +1313,7 @@ bool ShouldPerformReactiveYieldAtIntersection(
 
 	// We need to find our intersection lane.
 	// We need to look out for crosswalk lanes just beyond the entrance to the intersection.
-	const auto& GetIntersectionLaneData = [&LaneLocationFragment, &VehicleControlFragment, &CurrentLaneData]() -> const FZoneGraphTrafficLaneData*
+	const auto& GetIntersectionLaneData = [&VehicleControlFragment, &CurrentLaneData]() -> const FZoneGraphTrafficLaneData*
 	{
 		if (VehicleControlFragment.NextLane != nullptr && VehicleControlFragment.NextLane->ConstData.bIsIntersectionLane)
 		{
@@ -1344,7 +1337,7 @@ bool ShouldPerformReactiveYieldAtIntersection(
 	}
 
 	// Then, we need to find the lane before the intersection.
-	const auto& GetLaneDataBeforeIntersection = [&LaneLocationFragment, &MassTrafficSubsystem, &VehicleControlFragment, &IntersectionLaneData, &CurrentLaneData]() -> const FZoneGraphTrafficLaneData*
+	const auto& GetLaneDataBeforeIntersection = [&MassTrafficSubsystem, &VehicleControlFragment, &IntersectionLaneData, &CurrentLaneData]() -> const FZoneGraphTrafficLaneData*
 	{
 		if (IntersectionLaneData == VehicleControlFragment.NextLane)
 		{

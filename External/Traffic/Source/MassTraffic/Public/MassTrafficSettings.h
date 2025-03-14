@@ -409,6 +409,16 @@ public:
 	UPROPERTY(EditAnywhere, Config, Category="Lane Changing")
 	float MinLaneChangeDistanceVehicleLengthScale = 5.0f;
 
+	// How much lane space a vehicle needs before a yield sign to execute a lane change, as a factor of a vehicle's length.
+	// The longer the vehicle, the more space (and time) it needs to change lanes.
+	UPROPERTY(EditAnywhere, Config, Category="Lane Changing")
+	float MinLaneChangeSpaceBeforeYieldSignVehicleLengthScale = 6.0f;
+
+	// How close to a crosswalk to consider reactively yielding, as a factor of a vehicle's length.
+	// The longer the vehicle, the closer the front of the vehicle is to the crosswalk.
+	UPROPERTY(EditAnywhere, Config, Category="Yield Behavior")
+	float CrosswalkReactiveYieldDistanceVehicleLengthScale = 3.0f;
+
 	// How much more to scale search distances for points on adjacent lanes, to help cope with possible issues with 
 	// low lane tessellation and/or higher lane curvature.
 	UPROPERTY(EditAnywhere, Config, Category="Lane Changing")

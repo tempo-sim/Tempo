@@ -203,7 +203,7 @@ TempoMapQuery::LaneAccessibility UTempoMapQueryServiceSubsystem::GetLaneAccessib
 		{
 			if (TrafficLaneData->ConstData.bIsIntersectionLane)
 			{
-				if (TrafficLaneData->HasTrafficLightAtEntrance())
+				if (TrafficLaneData->HasTrafficLightAtStart())
 				{
 					if (TrafficLaneData->bIsOpen)
 					{
@@ -215,11 +215,11 @@ TempoMapQuery::LaneAccessibility UTempoMapQueryServiceSubsystem::GetLaneAccessib
 					}
 					return TempoMapQuery::RED;
 				}
-				if (TrafficLaneData->HasYieldSignAtEntrance())
+				if (TrafficLaneData->HasYieldSignAtStart())
 				{
 					return TempoMapQuery::YIELD_SIGN;
 				}
-				if (TrafficLaneData->HasStopSignAtEntrance())
+				if (TrafficLaneData->HasStopSignAtStart())
 				{
 					return TempoMapQuery::STOP_SIGN;
 				}

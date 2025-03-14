@@ -496,7 +496,7 @@ struct MASSTRAFFIC_API FZoneGraphTrafficLaneConstData
 		return TOptional<TPair<float, FMassTrafficControllerType>>();
 	}
 
-	TOptional<FMassTrafficControllerType> TryGetTrafficControllerTypeAtEntrance() const
+	TOptional<FMassTrafficControllerType> TryGetTrafficControllerTypeAtStart() const
 	{
 		if (!TrafficControllerTypes.IsEmpty() && TrafficControllerTypes[0].Key == 0)
 		{
@@ -619,11 +619,11 @@ struct MASSTRAFFIC_API FZoneGraphTrafficLaneData
 
 	bool HasYieldSignAlongRoad(float DistanceAlongLane) const;
 	bool HasYieldSignThatRequiresStopAlongRoad(float DistanceAlongLane) const;
-	bool HasYieldSignAtEntrance() const;
-	bool HasStopSignAtEntrance() const;
-	bool HasStopSignOrYieldSignAtEntrance() const;
-	bool HasTrafficLightAtEntrance() const;
-	bool HasTrafficSignThatRequiresStopAtEntrance() const;
+	bool HasYieldSignAtStart() const;
+	bool HasStopSignAtStart() const;
+	bool HasStopSignOrYieldSignAtStart() const;
+	bool HasTrafficLightAtStart() const;
+	bool HasTrafficSignThatRequiresStopAtStart() const;
 
 	float LaneLengthAtNextTrafficControl(float DistanceAlongLane) const;
 

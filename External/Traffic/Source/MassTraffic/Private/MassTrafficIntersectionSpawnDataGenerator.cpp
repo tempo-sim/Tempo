@@ -1111,6 +1111,7 @@ void UMassTrafficIntersectionSpawnDataGenerator::GenerateTrafficLightIntersectio
 					FMassTrafficPeriod& Period = IntersectionFragment.AddPeriod(StandardMinimumTrafficGoSeconds);
 
 					TArray<FZoneGraphTrafficLaneData*> BaseOfTSideLanes;
+					BaseOfTSide.VehicleIntersectionLanes.GetKeys(BaseOfTSideLanes);
 					Period.VehicleLanes.Append(BaseOfTSideLanes);
 						
 					Period.CrosswalkLanes.Append(LeftSide.CrosswalkLanes.Array());
@@ -1142,7 +1143,7 @@ void UMassTrafficIntersectionSpawnDataGenerator::GenerateTrafficLightIntersectio
 					FMassTrafficPeriod& Period = IntersectionFragment.AddPeriod(StandardMinimumTrafficGoSeconds);
 
 					TArray<FZoneGraphTrafficLaneData*> LeftSideLanes;
-					RightSide.VehicleIntersectionLanes.GetKeys(LeftSideLanes);
+					LeftSide.VehicleIntersectionLanes.GetKeys(LeftSideLanes);
 					Period.VehicleLanes.Append(LeftSideLanes);
 					Period.VehicleLanes.Append(VehicleTrafficLanes_Right_To_Opposite);
 						
