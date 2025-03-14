@@ -82,8 +82,8 @@ bool FZoneGraphTrafficLaneData::HasStopSignOrYieldSignAtLaneStart() const
 	if (const TOptional<FMassTrafficControllerType> TrafficControllerType = ConstData.TryGetTrafficControllerTypeAtStart())
 	{
 		return !TrafficControllerType->GetIsTrafficLightControlled() &&
-			TrafficControllerType->GetTrafficControllerSignType() == EMassTrafficControllerSignType::YieldSign ||
-			TrafficControllerType->GetTrafficControllerSignType() == EMassTrafficControllerSignType::StopSign;
+			(TrafficControllerType->GetTrafficControllerSignType() == EMassTrafficControllerSignType::YieldSign ||
+			 TrafficControllerType->GetTrafficControllerSignType() == EMassTrafficControllerSignType::StopSign);
 	}
 	return false;
 }
