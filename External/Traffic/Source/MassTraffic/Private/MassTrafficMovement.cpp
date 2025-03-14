@@ -631,9 +631,7 @@ bool ShouldVehicleMergeOntoLane(
 				continue;
 			}
 
-			const FZoneGraphTrafficLaneData ConflictPredecessorLaneCopy(*ConflictPredecessorLane);
-			
-			if (ConflictPredecessorLaneCopy.NumVehiclesOnLane <= 0)
+			if (ConflictPredecessorLane->NumVehiclesOnLane <= 0)
 			{
 				continue;
 			}
@@ -671,24 +669,24 @@ bool ShouldVehicleMergeOntoLane(
 			}
 
 			// Don't factor lead vehicles that are currently waiting at stop signs into our test.
-			if (ConflictPredecessorLaneCopy.LeadVehicleRemainingStopSignRestTime.IsSet())
+			if (ConflictPredecessorLane->LeadVehicleRemainingStopSignRestTime.IsSet())
 			{
 				continue;
 			}
 
 			// We're only concerned if the lead vehicle on the Conflict Predecessor Lane
 			// will be heading into our current Conflict Lane.
-			if (ConflictPredecessorLaneCopy.LeadVehicleNextLane.GetValue() != ConflictLaneData)
+			if (ConflictPredecessorLane->LeadVehicleNextLane.GetValue() != ConflictLaneData)
 			{
 				continue;
 			}
 			
 			if (ShouldVehicleYieldToTestVehicle(
-				ConflictPredecessorLaneCopy,
+				*ConflictPredecessorLane,
 				*ConflictLaneData,
-				ConflictPredecessorLaneCopy.LeadVehicleDistanceAlongLane.GetValue(),
-				ConflictPredecessorLaneCopy.LeadVehicleSpeed.GetValue(),
-				ConflictPredecessorLaneCopy.LeadVehicleRadius.GetValue()))
+				ConflictPredecessorLane->LeadVehicleDistanceAlongLane.GetValue(),
+				ConflictPredecessorLane->LeadVehicleSpeed.GetValue(),
+				ConflictPredecessorLane->LeadVehicleRadius.GetValue()))
 			{
 				OutYieldTargetLane = ConflictPredecessorLane->LaneHandle;
 				return false;
