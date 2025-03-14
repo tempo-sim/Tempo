@@ -204,6 +204,13 @@ message SetStringArrayPropertyRequest {
   repeated string values = 4;
 }
 
+message SetEnumArrayPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  repeated string values = 4;
+}
+
 message SetIntArrayPropertyRequest {
   string actor = 1;
   string component = 2;
@@ -302,6 +309,8 @@ service ActorControlService {
     rpc SetBoolArrayProperty(SetBoolArrayPropertyRequest) returns (TempoScripting.Empty);
 
     rpc SetStringArrayProperty(SetStringArrayPropertyRequest) returns (TempoScripting.Empty);
+
+    rpc SetEnumArrayProperty(SetEnumArrayPropertyRequest) returns (TempoScripting.Empty);
 
     rpc SetIntArrayProperty(SetIntArrayPropertyRequest) returns (TempoScripting.Empty);
 
