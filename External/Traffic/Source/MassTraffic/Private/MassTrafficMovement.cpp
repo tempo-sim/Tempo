@@ -760,37 +760,43 @@ bool ShouldStopAtNextStopLine(
 		return bHasPedestriansInDownstreamCrosswalkLanes && !bAreAllEntitiesOnCrosswalkYielding;
 	};
 
-	if (!CurrentLaneData->ConstData.bIsIntersectionLane && CurrentLaneData->HasYieldSignAlongRoad(DistanceAlongLane) && CurrentLaneData->HasYieldSignThatRequiresStopAlongRoad(DistanceAlongLane))
+	if (!CurrentLaneData->ConstData.bIsIntersectionLane && CurrentLaneData->HasYieldSignAlongRoad(DistanceAlongLane))
 	{
-		const float YieldSignDistance = CurrentLaneData->LaneLengthAtNextTrafficControl(DistanceAlongLane);
-
-		// Always plan on stopping at yield signs until we're close enough to the stop line.
-		if (!IsVehicleNearStopLine(DistanceAlongLane, YieldSignDistance, Radius, RandomFraction, StoppingDistanceRange))
+		if (CurrentLaneData->HasYieldSignThatRequiresStopAlongRoad(DistanceAlongLane))
 		{
-			return true;
-		}
+			const float YieldSignDistance = CurrentLaneData->LaneLengthAtNextTrafficControl(DistanceAlongLane);
 
-		// Stop if we haven't already stopped at this yield sign.
-		const FYieldAlongRoadInfo YieldAlongRoadInfo({CurrentLaneData->LaneHandle, YieldSignDistance});
-		if (!LastYieldAlongRoadInfo.IsSet() || LastYieldAlongRoadInfo.GetValue() != YieldAlongRoadInfo)
-		{
-			// Haven't stopped here previously. If we are stopped now, remember where we were stopped.
-			if (bIsStopped)
+			// Always plan on stopping at yield signs until we're close enough to the stop line.
+			if (!IsVehicleNearStopLine(DistanceAlongLane, YieldSignDistance, Radius, RandomFraction, StoppingDistanceRange))
 			{
-				LastYieldAlongRoadInfo = YieldAlongRoadInfo;
+				return true;
 			}
-			return true;
+
+			// Stop if we haven't already stopped at this yield sign.
+			const FYieldAlongRoadInfo YieldAlongRoadInfo({CurrentLaneData->LaneHandle, YieldSignDistance});
+			if (!LastYieldAlongRoadInfo.IsSet() || LastYieldAlongRoadInfo.GetValue() != YieldAlongRoadInfo)
+			{
+				// Haven't stopped here previously. If we are stopped now, remember where we were stopped.
+				if (bIsStopped)
+				{
+					LastYieldAlongRoadInfo = YieldAlongRoadInfo;
+				}
+				return true;
+			}
+
+			// Wait some time for the pedestrians that we yielded for to begin crossing.
+			const float CurrentTimeSeconds = World != nullptr ? World->GetTimeSeconds() : TNumericLimits<float>::Lowest();
+			if (CurrentTimeSeconds < TimeVehicleStopped + MinVehicleStopSignRestTime)
+			{
+				return true;
+			}
+
+			return ShouldContinueYieldingAtYieldSign(CurrentLaneData, YieldSignDistance);
 		}
 
-		// Wait some time for the pedestrians that we yielded for to begin crossing.
-		const float CurrentTimeSeconds = World != nullptr ? World->GetTimeSeconds() : TNumericLimits<float>::Lowest();
-		if (CurrentTimeSeconds < TimeVehicleStopped + MinVehicleStopSignRestTime)
-		{
-			return true;
-		}
-
-		return ShouldContinueYieldingAtYieldSign(CurrentLaneData, YieldSignDistance);
+		return false;
 	}
+
 
 	// A next lane has not yet been chosen yet, stop at end of lane to prevent vehicle from driving on no lane off into
 	// oblivion.
