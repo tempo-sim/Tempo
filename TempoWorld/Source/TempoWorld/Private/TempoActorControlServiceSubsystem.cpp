@@ -41,6 +41,7 @@ using SetActorPropertyRequest = TempoWorld::SetActorPropertyRequest;
 using SetComponentPropertyRequest = TempoWorld::SetComponentPropertyRequest;
 using SetBoolArrayPropertyRequest = TempoWorld::SetBoolArrayPropertyRequest;
 using SetStringArrayPropertyRequest = TempoWorld::SetStringArrayPropertyRequest;
+using SetEnumArrayPropertyRequest = TempoWorld::SetEnumArrayPropertyRequest;
 using SetIntArrayPropertyRequest = TempoWorld::SetIntArrayPropertyRequest;
 using SetFloatArrayPropertyRequest = TempoWorld::SetFloatArrayPropertyRequest;
 using SetClassArrayPropertyRequest = TempoWorld::SetClassArrayPropertyRequest;
@@ -107,6 +108,7 @@ void UTempoActorControlServiceSubsystem::RegisterScriptingServices(FTempoScripti
 		SimpleRequestHandler(&ActorControlAsyncService::RequestSetComponentProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetComponentPropertyRequest>),
 		SimpleRequestHandler(&ActorControlAsyncService::RequestSetBoolArrayProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetBoolArrayPropertyRequest>),
 		SimpleRequestHandler(&ActorControlAsyncService::RequestSetStringArrayProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetStringArrayPropertyRequest>),
+		SimpleRequestHandler(&ActorControlAsyncService::RequestSetEnumArrayProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetEnumArrayPropertyRequest>),
 		SimpleRequestHandler(&ActorControlAsyncService::RequestSetIntArrayProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetIntArrayPropertyRequest>),
 		SimpleRequestHandler(&ActorControlAsyncService::RequestSetFloatArrayProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetFloatArrayPropertyRequest>),
 		SimpleRequestHandler(&ActorControlAsyncService::RequestSetClassArrayProperty, &UTempoActorControlServiceSubsystem::SetProperty<SetClassArrayPropertyRequest>),
@@ -577,6 +579,28 @@ void GetObjectProperties(const UObject* Object, GetPropertiesResponse& Response)
 				double ValueDouble;
 				DoubleProperty->GetValue_InContainer(Container, &ValueDouble);
 				*Value = FString::SanitizeFloat(ValueDouble);
+			}
+		}
+		else if (const FEnumProperty* EnumProperty = CastField<FEnumProperty>(Property))
+		{
+			const FString EnumName = EnumProperty->GetEnum()->GetName();
+			Type = EnumName;
+			if (Value)
+			{
+				int64 ValueIndex;
+				EnumProperty->GetValue_InContainer(Container, &ValueIndex);
+				*Value = EnumProperty->GetEnum()->GetAuthoredNameStringByIndex(ValueIndex);
+			}
+		}
+		else if (const FByteProperty* ByteProperty = CastField<FByteProperty>(Property))
+		{
+			const FString EnumName = ByteProperty->Enum->GetName();
+			Type = EnumName;
+			if (Value)
+			{
+				uint8 ValueIndex;
+				ByteProperty->GetValue_InContainer(Container, &ValueIndex);
+				*Value = ByteProperty->Enum->GetAuthoredNameStringByIndex(ValueIndex);
 			}
 		}
 		else if (const FObjectProperty* ObjectProperty = CastField<FObjectProperty>(Property))
@@ -1315,6 +1339,25 @@ grpc::Status SetPropertyImpl<SetStringArrayPropertyRequest>(const UWorld* World,
 		NameArray.Add(UTF8_TO_TCHAR(String.c_str()));
 	}
 	return SetArrayPropertyImpl<FNameProperty>(World, Request, NameArray);
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetEnumArrayPropertyRequest>(const UWorld* World, const SetEnumArrayPropertyRequest& Request)
+{
+	// First try to set it as an FEnumProperty array, then fall back on FByteProperty array
+	TArray<FString> StrArray;
+	StrArray.Reserve(Request.values_size());
+	for (const std::string& String : Request.values())
+	{
+		StrArray.Add(UTF8_TO_TCHAR(String.c_str()));
+	}
+	grpc::Status EnumStatus = SetArrayPropertyImpl<FEnumProperty>(World, Request, StrArray);
+	// If we got an error other than FAILED_PRECONDITION that means the type was right, but something else was wrong.
+	if (EnumStatus.ok() || EnumStatus.error_code() != grpc::FAILED_PRECONDITION)
+	{
+		return EnumStatus;
+	}
+	return SetArrayPropertyImpl<FByteProperty>(World, Request, StrArray);
 }
 
 template<>
