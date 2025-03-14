@@ -499,7 +499,7 @@ struct FMassTrafficSignIntersectionSide
 {
 	GENERATED_BODY()
 	
-	TArray<FZoneGraphTrafficLaneData*, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_VEHICLE_TRAFFIC_LANES>> VehicleIntersectionLanes;
+	TMap<FZoneGraphTrafficLaneData*, float, TSetAllocator<TSparseArrayAllocator<>, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_VEHICLE_TRAFFIC_LANES>>> VehicleIntersectionLanes;
 
 	TArray<int32, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_SIGN_INTERSECTION_SIDES_PEDESTRIAN_CROSSWALK_LANES>> CrosswalkLanes;
 	TArray<int32, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_SIGN_INTERSECTION_SIDES_PEDESTRIAN_CROSSWALK_WAITING_LANES>> CrosswalkWaitingLanes;
@@ -768,6 +768,17 @@ struct MASSTRAFFIC_API FEnvironmentalBrightnessFragment : public FMassFragment
 	float Brightness = 0.0f;
 };
 
+struct FYieldAlongRoadInfo
+{
+	FZoneGraphLaneHandle LaneHandle;
+	float DistanceAlongRoad = false;
+
+	bool operator==(const FYieldAlongRoadInfo& Other) const
+	{
+		return LaneHandle == Other.LaneHandle && DistanceAlongRoad == Other.DistanceAlongRoad;
+	}
+};
+
 /** Miscellaneous fields commonly used in traffic vehicle movement control */
 USTRUCT()
 struct MASSTRAFFIC_API FMassTrafficVehicleControlFragment : public FMassFragment
@@ -841,6 +852,9 @@ struct MASSTRAFFIC_API FMassTrafficVehicleControlFragment : public FMassFragment
 
 	// Last stop sign controlled intersection lane that we stopped at.
 	FZoneGraphTrafficLaneData* StopSignIntersectionLane = nullptr;
+
+	// Info about the last lane along a road we yielded on.
+	TOptional<FYieldAlongRoadInfo> LastYieldAlongRoadInfo;
 
 	// Functions used for the stopped state.
 	bool IsVehicleCurrentlyStopped() const { return FMath::IsNearlyZero(Speed, 5.0f); }

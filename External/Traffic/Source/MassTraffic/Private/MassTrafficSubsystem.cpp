@@ -837,7 +837,7 @@ void UMassTrafficSubsystem::RebuildLaneData()
 }
 #endif // WITH_EDITOR
 
-void UMassTrafficSubsystem::AddDownstreamCrosswalkLane(const FZoneGraphLaneHandle& BaseLane, const FZoneGraphLaneHandle& DownstreamCrosswalkLane)
+void UMassTrafficSubsystem::AddDownstreamCrosswalkLane(const FZoneGraphLaneHandle& BaseLane, const FZoneGraphLaneHandle& DownstreamCrosswalkLane, float CrosswalkDistanceAlongLane)
 {
 	if (!ensureMsgf(BaseLane.IsValid(), TEXT("Must get valid BaseLane in UMassTrafficSubsystem::AddDownstreamCrosswalkLane.  BaseLane.Index: %d."), BaseLane.Index))
 	{
@@ -856,7 +856,7 @@ void UMassTrafficSubsystem::AddDownstreamCrosswalkLane(const FZoneGraphLaneHandl
 		return;
 	}
 
-	BaseTrafficLaneData->DownstreamCrosswalkLanes.AddUnique(DownstreamCrosswalkLane);
+	BaseTrafficLaneData->DownstreamCrosswalkLanes.Add(DownstreamCrosswalkLane, CrosswalkDistanceAlongLane);
 
 	FMassTrafficCrosswalkLaneInfo& CrosswalkLaneInfo = CrosswalkLaneInfoMap.FindOrAdd(DownstreamCrosswalkLane);
 	CrosswalkLaneInfo.IncomingVehicleLanes.Add(BaseLane);
