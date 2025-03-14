@@ -53,6 +53,11 @@ void UTempoIntersectionControlComponent::SetupTrafficControllerMeshData()
 
 	DestroyTrafficControllerMeshData();
 
+	if (!UTempoCoreUtils::CallBlueprintFunction(OwnerActor, ITempoIntersectionInterface::Execute_ShouldSetupTempoTrafficControllerPreviewMeshesInEditor))
+	{
+		return;
+	}
+
 	const int32 NumConnections = UTempoCoreUtils::CallBlueprintFunction(OwnerActor, ITempoIntersectionInterface::Execute_GetNumTempoConnections);
 	
 	for (int32 ConnectionIndex = 0; ConnectionIndex < NumConnections; ++ConnectionIndex)
@@ -78,15 +83,21 @@ void UTempoIntersectionControlComponent::SetupTrafficControllerMeshData()
 			}
 		}
 		
-		FTempoTrafficControllerMeshInfo TrafficControllerMeshInfo = UTempoCoreUtils::CallBlueprintFunction(OwnerActor, ITempoIntersectionInterface::Execute_GetTempoTrafficControllerMeshInfo, ConnectionIndex, TrafficControllerType);
+		UStaticMesh* TrafficControllerMesh = UTempoCoreUtils::CallBlueprintFunction(OwnerActor, ITempoIntersectionInterface::Execute_GetTempoTrafficControllerMesh, ConnectionIndex, TrafficControllerType);
+		if (TrafficControllerMesh == nullptr)
+		{
+			UE_LOG(LogTempoAgentsShared, Error, TEXT("UTempoIntersectionControlComponent - SetupTrafficControllerRuntimeData - Failed to get TrafficControllerMesh for Actor: %s at ConnectionIndex: %d."), *OwnerActor->GetName(), ConnectionIndex);
+			return;
+		}
 		const FVector TrafficControllerLocation = UTempoCoreUtils::CallBlueprintFunction(OwnerActor, ITempoIntersectionInterface::Execute_GetTempoTrafficControllerLocation, ConnectionIndex, TrafficControllerType, ETempoCoordinateSpace::World);
 		const FRotator TrafficControllerRotation = UTempoCoreUtils::CallBlueprintFunction(OwnerActor, ITempoIntersectionInterface::Execute_GetTempoTrafficControllerRotation, ConnectionIndex, TrafficControllerType, ETempoCoordinateSpace::World);
+		const FVector TrafficControllerScale = UTempoCoreUtils::CallBlueprintFunction(OwnerActor, ITempoIntersectionInterface::Execute_GetTempoTrafficControllerScale, ConnectionIndex, TrafficControllerType, ETempoCoordinateSpace::World);
 
 		MeshComponent->SetWorldLocation(TrafficControllerLocation);
 		MeshComponent->SetWorldRotation(TrafficControllerRotation);
-		MeshComponent->SetWorldScale3D(TrafficControllerMeshInfo.MeshScale);
+		MeshComponent->SetWorldScale3D(TrafficControllerScale);
 
-		MeshComponent->SetStaticMesh(TrafficControllerMeshInfo.TrafficControllerMesh);
+		MeshComponent->SetStaticMesh(TrafficControllerMesh);
 		MeshComponent->AttachToComponent(OwnerActor->GetRootComponent(), FAttachmentTransformRules::KeepWorldTransform);
 		MeshComponent->RegisterComponent();
 		
@@ -461,10 +472,18 @@ void UTempoIntersectionControlComponent::SetupTrafficLightRuntimeData(AActor& Ow
 	
 	for (int32 ConnectionIndex = 0; ConnectionIndex < NumConnections; ++ConnectionIndex)
 	{
-		FTempoTrafficControllerMeshInfo TrafficControllerMeshInfo = UTempoCoreUtils::CallBlueprintFunction(&OwnerActor, ITempoIntersectionInterface::Execute_GetTempoTrafficControllerMeshInfo, ConnectionIndex, ETempoTrafficControllerType::TrafficLight);
+		const ETempoTrafficControllerType TrafficControllerType = ITempoIntersectionInterface::Execute_GetTempoTrafficControllerType(&OwnerActor);
+
+		UStaticMesh* TrafficControllerMesh = UTempoCoreUtils::CallBlueprintFunction(&OwnerActor, ITempoIntersectionInterface::Execute_GetTempoTrafficControllerMesh, ConnectionIndex, TrafficControllerType);
+		if (TrafficControllerMesh == nullptr)
+		{
+			UE_LOG(LogTempoAgentsShared, Error, TEXT("UTempoIntersectionControlComponent - SetupTrafficControllerMeshData - Failed to get TrafficControllerMesh for Actor: %s at ConnectionIndex: %d."), *OwnerActor.GetName(), ConnectionIndex);
+			return;
+		}
 		const FVector TrafficControllerLocation = UTempoCoreUtils::CallBlueprintFunction(&OwnerActor, ITempoIntersectionInterface::Execute_GetTempoTrafficControllerLocation, ConnectionIndex, ETempoTrafficControllerType::TrafficLight, ETempoCoordinateSpace::World);
 		const FRotator TrafficControllerRotation = UTempoCoreUtils::CallBlueprintFunction(&OwnerActor, ITempoIntersectionInterface::Execute_GetTempoTrafficControllerRotation, ConnectionIndex, ETempoTrafficControllerType::TrafficLight, ETempoCoordinateSpace::World);
-		
+		const FVector TrafficControllerScale = UTempoCoreUtils::CallBlueprintFunction(&OwnerActor, ITempoIntersectionInterface::Execute_GetTempoTrafficControllerScale, ConnectionIndex, TrafficControllerType, ETempoCoordinateSpace::World);
+
 		const FVector IntersectionEntranceLocation = UTempoCoreUtils::CallBlueprintFunction(&OwnerActor, ITempoIntersectionInterface::Execute_GetTempoIntersectionEntranceLocation, ConnectionIndex, ETempoCoordinateSpace::World);
 		
 		const AActor* RoadQueryActor = GetConnectedRoadActor(OwnerActor, ConnectionIndex);
@@ -480,15 +499,15 @@ void UTempoIntersectionControlComponent::SetupTrafficLightRuntimeData(AActor& Ow
 		StaticMeshInstanceVisualizationDesc.Meshes.Reserve(NumTrafficControllerMeshesPerTrafficLightType);
 
 		FMassStaticMeshInstanceVisualizationMeshDesc& MeshDesc = StaticMeshInstanceVisualizationDesc.Meshes.AddDefaulted_GetRef();
-		MeshDesc.Mesh = TrafficControllerMeshInfo.TrafficControllerMesh;
+		MeshDesc.Mesh = TrafficControllerMesh;
 
 		const int32 NumLanes = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoRoadInterface::Execute_GetNumTempoLanes);
 		
-		FMassTrafficLightTypeData TrafficLightType(TrafficControllerMeshInfo.TrafficControllerMesh->GetFName(), StaticMeshInstanceVisualizationDesc, NumLanes);
+		FMassTrafficLightTypeData TrafficLightType(TrafficControllerMesh->GetFName(), StaticMeshInstanceVisualizationDesc, NumLanes);
 
 		const int32 TrafficLightTypeIndex = TrafficControllerRegistrySubsystem.RegisterTrafficLightType(TrafficLightType);
 		
-		FMassTrafficLightInstanceDesc TrafficLightInstanceDesc(TrafficControllerLocation, TrafficControllerRotation.Yaw, IntersectionEntranceLocation, TrafficLightTypeIndex, TrafficControllerMeshInfo.MeshScale);
+		FMassTrafficLightInstanceDesc TrafficLightInstanceDesc(TrafficControllerLocation, TrafficControllerRotation.Yaw, IntersectionEntranceLocation, TrafficLightTypeIndex, TrafficControllerScale);
 		
 		TrafficControllerRegistrySubsystem.RegisterTrafficLight(TrafficLightInstanceDesc);
 	}

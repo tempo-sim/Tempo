@@ -422,6 +422,10 @@ bool TryGetEnterAndExitDistancesAlongQueryLane(
 		ensureMsgf(!bExpectIntersection, TEXT("Expected to find left side and/or right side intersections between QueryLane and OtherLane in TryGetEnterAndExitDistancesAlongQueryLane.  Either we're testing against the wrong OtherLane, or AcceptableLaneIntersectionDistance is not high enough to detect the intersection.  MassTrafficSettings.AcceptableLaneIntersectionDistance: %f."), MassTrafficSettings.AcceptableLaneIntersectionDistance);
 		return false;
 	}
+	// if (!ensureMsgf(bFoundIntersectionQueryToOtherLaneLeftSide || bFoundIntersectionQueryToOtherLaneRightSide, TEXT("Expected to find left side and/or right side intersections between QueryLane and OtherLane in TryGetEnterAndExitDistancesAlongQueryLane.  Either we're testing against the wrong OtherLane, or AcceptableLaneIntersectionDistance is not high enough to detect the intersection.  MassTrafficSettings.AcceptableLaneIntersectionDistance: %f."), MassTrafficSettings.AcceptableLaneIntersectionDistance))
+	// {
+	// 	return false;
+	// }
 	
 	// The enter distance will be the *min* of the intersection distances (if there are 2),
 	// otherwise it'll be the distance to the left side or right side intersection (whichever one exists).

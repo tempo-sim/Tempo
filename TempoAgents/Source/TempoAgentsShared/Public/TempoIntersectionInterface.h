@@ -31,25 +31,25 @@ struct FTempoTrafficControllerMeshInfo
 {
 	GENERATED_BODY()
 	
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tempo Agents|Traffic Controller|Mesh Info")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo Agents|Traffic Controller|Mesh Info")
 	UStaticMesh* TrafficControllerMesh;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tempo Agents|Traffic Controller|Mesh Info")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo Agents|Traffic Controller|Mesh Info")
 	ETempoRoadOffsetOrigin LateralOffsetOrigin;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tempo Agents|Traffic Controller|Mesh Info")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo Agents|Traffic Controller|Mesh Info")
 	float LongitudinalOffset = 0.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tempo Agents|Traffic Controller|Mesh Info")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo Agents|Traffic Controller|Mesh Info")
 	float LateralOffset = 0.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tempo Agents|Traffic Controller|Mesh Info")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo Agents|Traffic Controller|Mesh Info")
 	float VerticalOffset = 0.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tempo Agents|Traffic Controller|Mesh Info")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo Agents|Traffic Controller|Mesh Info")
 	float YawOffset = 0.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tempo Agents|Traffic Controller|Mesh Info")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo Agents|Traffic Controller|Mesh Info")
 	FVector MeshScale = FVector::OneVector;
 };
 
@@ -134,7 +134,10 @@ class TEMPOAGENTSSHARED_API ITempoIntersectionInterface
 public:
 
 	// Connected Road Queries
-	
+
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
+	bool ShouldGenerateZoneShapesForTempoIntersection() const;
+
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
 	int32 GetNumTempoConnections() const;
 
@@ -179,18 +182,24 @@ public:
 	
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
 	ETempoTrafficControllerType GetTempoTrafficControllerType() const;
-	
+
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
+	UStaticMesh* GetTempoTrafficControllerMesh(int32 ConnectionIndex, ETempoTrafficControllerType TrafficControllerType) const;
+
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
 	EMassTrafficControllerSignType GetTempoTrafficControllerSignType(int32 ConnectionIndex) const;
-	
+
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
-	FTempoTrafficControllerMeshInfo GetTempoTrafficControllerMeshInfo(int32 ConnectionIndex, ETempoTrafficControllerType TrafficControllerType) const;
-	
+	bool ShouldSetupTempoTrafficControllerPreviewMeshesInEditor() const;
+
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
 	FVector GetTempoTrafficControllerLocation(int32 ConnectionIndex, ETempoTrafficControllerType TrafficControllerType, ETempoCoordinateSpace CoordinateSpace) const;
 	
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
 	FRotator GetTempoTrafficControllerRotation(int32 ConnectionIndex, ETempoTrafficControllerType TrafficControllerType, ETempoCoordinateSpace CoordinateSpace) const;
+
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
+	FVector GetTempoTrafficControllerScale(int32 ConnectionIndex, ETempoTrafficControllerType TrafficControllerType, ETempoCoordinateSpace CoordinateSpace) const;
 
 	// Traffic Controller Commands
 
