@@ -58,8 +58,8 @@ if [ -f "$UNREAL_ENGINE_PATH/Engine/Intermediate/Build/BuildRules/UE5RulesManife
 fi
 
 APPLY_ADDS() {
-  local ROOT=$1
-  local TEMP=$2
+  local TEMP=$1
+  local ROOT=$2
   local ADDS=("${@:3}")
   for ADD in "${ADDS[@]}"; do
     local SRC="$ENGINE_MODS_DIR/$ROOT/$ADD"
@@ -72,19 +72,20 @@ APPLY_ADDS() {
 }
 
 REVERT_ADDS() {
-  local ROOT=$1
-  local ADDS=("${@:2}")
+  local TEMP=$1
+  local ROOT=$2
+  local ADDS=("${@:3}")
   for ADD in "${ADDS[@]}"; do
     local SRC="$ENGINE_MODS_DIR/$ROOT/$ADD"
     local ADD_NO_VERSION="${ADD%.*}"
-    local DEST="$UNREAL_ENGINE_PATH/$ROOT/$ADD_NO_VERSION"
+    local DEST="$TEMP/$ROOT/$ADD_NO_VERSION"
     rm -f "$DEST"
   done
 }
 
 APPLY_PATCHES() {
-  local ROOT=$1
-  local TEMP=$2
+  local TEMP=$1
+  local ROOT=$2
   local PATCHES=("${@:3}")
   local DEST
   DEST="$TEMP/$ROOT"
@@ -97,7 +98,7 @@ APPLY_PATCHES() {
   for ((i=0; i<${#PATCHES[@]}; i++)); do
     local PATCH="$ENGINE_MODS_DIR/$ROOT/${PATCHES[i]//\'/}"
     echo "Applying Patch $(basename "$PATCH")"
-    if ! patch -p0  --ignore-whitespace <"$PATCH" &>/dev/null; then
+    if ! patch --force -p0 --reject-file=- --ignore-whitespace <"$PATCH" &>/dev/null; then
       echo "Failed to apply patch: $PATCH"
       exit 1
     fi
@@ -105,10 +106,11 @@ APPLY_PATCHES() {
 }
 
 REVERT_PATCHES() {
-    local ROOT=$1
-    local PATCHES=("${@:2}")
+    local TEMP=$1
+    local ROOT=$2
+    local PATCHES=("${@:3}")
     local DEST
-    DEST="$UNREAL_ENGINE_PATH/$ROOT"
+    DEST="$TEMP/$ROOT"
 
     if [ ! -d "$DEST" ]; then
       echo "Not reverting $DEST since it was not found in the expected location"
@@ -117,62 +119,82 @@ REVERT_PATCHES() {
 
     for ((i=${#PATCHES[@]}-1; i>-1; i--)); do
       local PATCH="$ENGINE_MODS_DIR/$ROOT/${PATCHES[i]//\'/}"
-      if patch -R -p0 -s -f --ignore-whitespace --dry-run <"$PATCH" &>/dev/null; then
-        patch -R -p0 -s -f --ignore-whitespace <"$PATCH" &>/dev/null
+      if patch --force --reject-file=- -R -p0 -s -f --ignore-whitespace --dry-run <"$PATCH" &>/dev/null; then
+        patch --force --reject-file=- -R -p0 -s -f --ignore-whitespace <"$PATCH" &>/dev/null
         echo "Reverted $PATCH"
+      else
+        echo "Patch $PATCH" did not revert cleanly
       fi
     done
 }
 
 REBUILD_PLUGIN() {
-  ROOT="$1"
+  TEMP="$1"
+  ROOT="$2"
   PLUGIN_NAME="${ROOT##*/}"
-  PLUGIN_DIR="$UNREAL_ENGINE_PATH/$ROOT"
+  PLUGIN_DIR="$TEMP/$ROOT"
 
   if [ ! -d "$PLUGIN_DIR" ]; then
-    echo "Plugin $PLUGIN_DIR was not found in the expected location."
+    echo "Plugin $PLUGIN_NAME was not found in the expected location."
     exit 1
   fi
 
   echo -e "Rebuilding plugin $PLUGIN_NAME with Tempo mods"
 
-  TEMP_DIR=$(mktemp -d)
+  PLUGIN_BUILD_DIR=$(mktemp -d)
   cd "$UNREAL_ENGINE_PATH"
   if [[ "$OSTYPE" = "msys" ]]; then
-    ./Engine/Build/BatchFiles/RunUAT.bat BuildPlugin -Plugin="$ROOT/$PLUGIN_NAME.uplugin" -Package="$TEMP_DIR" -Rocket -TargetPlatforms=Win64
+    ./Engine/Build/BatchFiles/RunUAT.bat BuildPlugin -Plugin="$PLUGIN_DIR/$PLUGIN_NAME.uplugin" -Package="$PLUGIN_BUILD_DIR" -Rocket -TargetPlatforms=Win64
   elif [[ "$OSTYPE" = "darwin"* ]]; then
-    ./Engine/Build/BatchFiles/RunUAT.sh BuildPlugin -Plugin="$ROOT/$PLUGIN_NAME.uplugin" -Package="$TEMP_DIR" -Rocket -TargetPlatforms=Mac
+    ./Engine/Build/BatchFiles/RunUAT.sh BuildPlugin -Plugin="$PLUGIN_DIR/$PLUGIN_NAME.uplugin" -Package="$PLUGIN_BUILD_DIR" -Rocket -TargetPlatforms=Mac
   elif [[ "$OSTYPE" = "linux-gnu"* ]]; then
-    ./Engine/Build/BatchFiles/RunUAT.sh BuildPlugin -Plugin="$ROOT/$PLUGIN_NAME.uplugin" -Package="$TEMP_DIR" -Rocket -TargetPlatforms=Linux
+    ./Engine/Build/BatchFiles/RunUAT.sh BuildPlugin -Plugin="$PLUGIN_DIR/$PLUGIN_NAME.uplugin" -Package="$PLUGIN_BUILD_DIR" -Rocket -TargetPlatforms=Linux
   fi
 
   # Copy resulting Binaries and Intermediate folders
-  cp -r "$TEMP_DIR/Binaries" "$TEMP_DIR/Intermediate" "$PLUGIN_DIR"
-  
+  cp -r "$PLUGIN_BUILD_DIR/Binaries" "$PLUGIN_BUILD_DIR/Intermediate" "$PLUGIN_DIR"
+
   # Clean up
-  rm -rf "$TEMP_DIR"
+  rm -rf "$PLUGIN_BUILD_DIR"
 
   echo -e "\nSuccessfully rebuilt plugin $PLUGIN_NAME with Tempo mods\n"
 }
 
+OVERWRITE_DIR() {
+  SRC="$1"
+  DEST="$2"
+  if [[ "$OSTYPE" = "darwin"* ]]; then
+    ditto "$SRC" "$DEST"
+  else
+    cp -rT "$SRC" "$DEST"
+  fi
+}
+
 REBUILD_UBT() {
-  cd "$UNREAL_ENGINE_PATH"
-    
+  TEMP="$1"
+  ROOT="$2"
+
+  OVERWRITE_DIR "$TEMP/$ROOT" "$UNREAL_ENGINE_PATH/$ROOT"
+
   if [ -z ${DOTNET+x} ]; then
     echo -e "Unable rebuild UnrealBuildTool with Tempo mods. Couldn't find dotnet.\n"
     exit 1
   fi
-  
+
+  cd "$UNREAL_ENGINE_PATH"
   eval "$DOTNET" build "./Engine/Source/Programs/UnrealBuildTool/UnrealBuildTool.csproj" -c Development
   eval "$DOTNET" build "./Engine/Source/Programs/AutomationTool/AutomationTool.csproj" -c Development
 }
 
-if ! MODS=($(jq -r --arg version "$VERSION" -c '.[$version][]' "$TEMPO_ROOT/EngineMods/EngineMods.json" &>/dev/null)); then
+if ! MODS=($(jq -r --arg version "$VERSION" -c '.[$version][]' "$TEMPO_ROOT/EngineMods/EngineMods.json")); then
   echo "Unsupported Unreal Engine version: $VERSION"
   SUPPORTED_VERSIONS=$(jq -r 'keys | join(", ")' "$TEMPO_ROOT/EngineMods/EngineMods.json")
   echo "Supported versions are: $SUPPORTED_VERSIONS"
   exit 1
 fi
+
+TEMP=$(mktemp -d)
+TEMP_VANILLA=$(mktemp -d)
 
 for MOD in "${MODS[@]}"; do
   TYPE=$(jq -r '.Type' <<< "$MOD")
@@ -189,51 +211,77 @@ for MOD in "${MODS[@]}"; do
   read -ra ADDS <<< "$ADDS"
   read -ra PATCHES <<< "$PATCHES"
 
+  # Copy the folder in its current state
+  mkdir -p "$TEMP/$ROOT"
+  OVERWRITE_DIR "$UNREAL_ENGINE_PATH/$ROOT" "$TEMP/$ROOT"
+
+  # Attempt to revert any previously-applied patches via the patch record
+  cd "$TEMP/$ROOT"
   if [ -f "$PATCH_RECORD_PATH/$ROOT/mods_applied.patch" ]; then
-    if ! patch -R -p0 -s -f --ignore-whitespace --dry-run <"$PATCH_RECORD_PATH/$ROOT/mods_applied.patch" &>/dev/null; then
+    if ! patch --force --reject-file=- -R -p0 -s -f --ignore-whitespace --dry-run < "$PATCH_RECORD_PATH/$ROOT/mods_applied.patch" &>/dev/null; then
       echo "Failed to revert applied mods for $ROOT Recommend verifying your Unreal Engine installation."
       exit 1
     fi
-    patch -R -p0 -s -f --ignore-whitespace <"$PATCH_RECORD_PATH/$ROOT/mods_applied.patch" &>/dev/null
+    patch --force --reject-file=- -R -p0 -s -f --ignore-whitespace < "$PATCH_RECORD_PATH/$ROOT/mods_applied.patch" &>/dev/null
   else
-    echo "No applied mods record found for $ROOT. Falling back on reverting known mods."
-    REVERT_ADDS "$ROOT" "${ADDS[@]}"
-    REVERT_PATCHES "$ROOT" "${PATCHES[@]}"
+    echo "No applied mods record found for $ROOT. Falling back on reverting any known mods."
+    REVERT_ADDS "$TEMP" "$ROOT" "${ADDS[@]}"
+    REVERT_PATCHES "$TEMP" "$ROOT" "${PATCHES[@]}"
   fi
 
-  # Reset the applied mods record
-  rm -f "$PATCH_RECORD_PATH/$ROOT/mods_applied.patch"
-  touch "$PATCH_RECORD_PATH/$ROOT/mods_applied.patch"
+  # Make another copy which we will leave at its vanilla (from Epic) state
+  mkdir -p "$TEMP_VANILLA/$ROOT"
+  OVERWRITE_DIR "$TEMP/$ROOT" "$TEMP_VANILLA/$ROOT"
 
-  # Make a copy (excluding Binaries and Intermediate directories) for comparison after
-  TEMP=$(mktmp -d)
-  cd "$UNREAL_ENGINE_PATH/$ROOT"
-  find . -not -name Binaries -not -name Intermediate -maxdepth 1 -exec cp {} "$TEMP" \;
+  # Apply mods to the (copied) temp folder
+  APPLY_ADDS "$TEMP" "$ROOT" "${ADDS[@]}"
+  APPLY_PATCHES "$TEMP" "$ROOT" "${PATCHES[@]}"
 
-  APPLY_ADDS $ROOT" "$TEMP" "${ADDS[@]}"
-  APPLY_PATCHES "$ROOT" "$TEMP" "${PATCHES[@]}"
+  # Diff modified and vanilla folders, store the result
+  cd "$TEMP_VANILLA/$ROOT"
+  mkdir -p "$TEMP/TempoMods/$ROOT"
+  set +e
+  diff -urN --strip-trailing-cr --exclude Binaries --exclude Intermediate . "$TEMP/$ROOT" > "$TEMP/TempoMods/$ROOT/mods_applied.patch"
+  DIFF_STATUS=$?
+  set -e
+  if [ $DIFF_STATUS -eq 0 ]; then
+    continue
+  elif [ ! $DIFF_STATUS -eq 1 ]; then
+    echo "Failed to compute diff for $ROOT (exit code: $DIFF_STATUS)."
+    exit 1
+  fi
 
-  diff -urN --strip-trailing-cr ./* "$TEMP/$ROOT/*" > "$UNREAL_ENGINE_PATH/$ROOT/mods_applied.patch" --exclude Binaries --exclude Intermediate
-  find . -not -name Binaries -not -name Intermediate -maxdepth 1 -exec rm -rf {} \;
-  cp -r "$TEMP"
-
-  if [ -f "$DEST/mods_built.patch" ] && [ ! "${*: -1}" = "-force" ]; then
-    if cmp --silent -- "$PATCH_RECORD_PATH/$ROOT/mods_applied.patch" "$PATCH_RECORD_PATH/$ROOT/mods_built.patch" &>/dev/null; then
+  # If the new mods match the previously-applied ones, and -force is not specified, skip building
+  if [ -f "$PATCH_RECORD_PATH/$ROOT/mods_applied.patch" ] && [ ! "${*: -1}" = "-force" ]; then
+    # Compare by "content" only, ignoring lines that refer to timestamps or temporary directories
+    grep -E '^(\+| |-)[^+-]' "$TEMP/TempoMods/$ROOT/mods_applied.patch" > "$TEMP/new_filtered.patch"
+    grep -E '^(\+| |-)[^+-]' "$PATCH_RECORD_PATH/$ROOT/mods_applied.patch" > "$TEMP/previous_filtered.patch"
+    if cmp --silent -- "$TEMP/new_filtered.patch" "$TEMP/previous_filtered.patch" &>/dev/null; then
       echo "$ROOT already up to date"
       continue
     fi
   fi
 
-  rm -rf "$PATCH_RECORD_PATH/$ROOT/mods_built.patch"
+  # Rebuild, and recreate the built record if build is successful
   if [ "$TYPE" = "Plugin" ]; then
     echo "Rebuilding plugin $ROOT with Tempo mods"
-    REBUILD_PLUGIN "$ROOT"
+    REBUILD_PLUGIN "$TEMP" "$ROOT"
+    echo "Copying rebuilt plugin $ROOT into engine"
+    rm -rf "${UNREAL_ENGINE_PATH:?}/${ROOT:?}"
+    OVERWRITE_DIR "$TEMP/$ROOT" "$UNREAL_ENGINE_PATH/$ROOT"
   elif [ "$TYPE" = "UnrealBuildTool" ]; then
-    echo "Rebuilding UnrealBuildTool with Tempo mods"
-    REBUILD_UBT
+    echo "Rebuilding UnrealBuildTool (in-place) with Tempo mods"
+    REBUILD_UBT "$TEMP" "$ROOT"
   else
     echo "Unhandled mod type: $TYPE"
     exit 1
   fi
-  cp -r "$PATCH_RECORD_PATH/$ROOT/mods_applied.patch" "$PATCH_RECORD_PATH/$ROOT/mods_built.patch"
+
+  # After successful rebuild, copy the applied mods record into the engine
+  mkdir -p "$PATCH_RECORD_PATH/$ROOT"
+  cp "$TEMP/TempoMods/$ROOT/mods_applied.patch" "$PATCH_RECORD_PATH/$ROOT/mods_applied.patch"
 done
+
+# Clean up
+rm -rf "$TEMP"
+rm -rf "$TEMP_VANILLA"
