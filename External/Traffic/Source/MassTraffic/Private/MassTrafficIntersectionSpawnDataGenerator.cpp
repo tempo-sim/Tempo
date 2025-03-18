@@ -496,16 +496,20 @@ void UMassTrafficIntersectionSpawnDataGenerator::SetupLaneData(
 
 					for (const FMassTrafficIntersectionSide& OtherSide : IntersectionDetail.Sides)
 					{
-						// Skip the current side.
-						if (&OtherSide == &CurrentSide)
-						{
-							continue;
-						}
-
 						for (const auto& OtherElem : OtherSide.VehicleIntersectionLanes)
 						{
 							FZoneGraphTrafficLaneData* OtherSideVehicleIntersectionLane = OtherElem.Key;
 							if (OtherSideVehicleIntersectionLane == nullptr)
+							{
+								continue;
+							}
+							
+							if (OtherSideVehicleIntersectionLane->LaneHandle == CurrentSideVehicleIntersectionLane->LaneHandle)
+							{
+								continue;
+							}
+
+							if (CurrentSideVehicleIntersectionLane->SplittingLanes.Contains(OtherSideVehicleIntersectionLane))
 							{
 								continue;
 							}
@@ -553,6 +557,45 @@ void UMassTrafficIntersectionSpawnDataGenerator::SetupLaneData(
 							}
 						}
 					}
+
+					// Sort CurrentSideVehicleIntersectionLane's conflict lanes
+					// in order of increasing "enter" distance along the lane.
+					CurrentSideVehicleIntersectionLane->ConflictLanes.Sort([&MassTrafficSubsystem, &MassTrafficSettings, &ZoneGraphStorage, &CurrentSideVehicleIntersectionLane](
+						const FZoneGraphTrafficLaneData& FirstConflictLaneData,
+						const FZoneGraphTrafficLaneData& SecondConflictLaneData)
+					{
+						float FirstEnterDistanceAlongQueryLane;
+						float FirstExitDistanceAlongQueryLane;
+
+						if (!UE::MassTraffic::TryGetEnterAndExitDistancesAlongQueryLane(
+							MassTrafficSubsystem,
+							MassTrafficSettings,
+							*ZoneGraphStorage,
+							CurrentSideVehicleIntersectionLane->LaneHandle,
+							FirstConflictLaneData.LaneHandle,
+							FirstEnterDistanceAlongQueryLane,
+							FirstExitDistanceAlongQueryLane))
+						{
+							return false;
+						}
+
+						float SecondEnterDistanceAlongQueryLane;
+						float SecondExitDistanceAlongQueryLane;
+
+						if (!UE::MassTraffic::TryGetEnterAndExitDistancesAlongQueryLane(
+							MassTrafficSubsystem,
+							MassTrafficSettings,
+							*ZoneGraphStorage,
+							CurrentSideVehicleIntersectionLane->LaneHandle,
+							SecondConflictLaneData.LaneHandle,
+							SecondEnterDistanceAlongQueryLane,
+							SecondExitDistanceAlongQueryLane))
+						{
+							return false;
+						}
+
+						return FirstEnterDistanceAlongQueryLane < SecondEnterDistanceAlongQueryLane;
+					});
 				}
 			}
 		}

@@ -110,13 +110,6 @@ bool IsVehicleEligibleToMergeOntoLane(
 		return false;
 	}
 
-	// Note:  This condition should be removed when we're ready to test
-	// the merge behavior at traffic light intersections.
-	if (DesiredLaneData->HasTrafficLightAtLaneStart())
-	{
-		return false;
-	}
-
 	const bool bVehicleIsNearStopLineAtIntersection = IsVehicleNearStopLine(
 		VehicleDistanceAlongCurrentLane,
 		CurrentLaneData->Length,
@@ -137,17 +130,24 @@ bool IsVehicleEligibleToMergeOntoLane(
 				return false;
 			}
 		}
-		else
+		// Or, if we have a yield sign, but no pedestrians around, and therefore no reason to yield at the sign, ...
+		else if (DesiredLaneData->HasYieldSignAtLaneStart())
 		{
-			// If we have a yield sign, but no pedestrians around, and therefore no reason to yield at the sign, ...
-			if (DesiredLaneData->HasYieldSignAlongRoad(VehicleDistanceAlongCurrentLane))
+			// Then, we only need to wait until we're near the stop line,
+			// before we should consider merging.
+			if (!bVehicleIsNearStopLineAtIntersection)
 			{
-				// Then, we only need to wait until we're near the stop line,
-				// before we should consider merging.
-				if (!bVehicleIsNearStopLineAtIntersection)
-				{
-					return false;
-				}
+				return false;
+			}
+		}
+		// Or, if we have a traffic light, ...
+		else if (DesiredLaneData->HasTrafficLightAtLaneStart())
+		{
+			// Then, we need to wait until we're near the stop line,
+			// and for our lane to be open, before we should consider merging.
+			if (!bVehicleIsNearStopLineAtIntersection || !DesiredLaneData->bIsOpen)
+			{
+				return false;
 			}
 		}
 	}
@@ -167,6 +167,7 @@ bool ShouldVehicleMergeOntoLane(
 	const FVector2D& StoppingDistanceRange,
 	const FZoneGraphStorage& ZoneGraphStorage,
 	FZoneGraphLaneHandle& OutYieldTargetLane,
+	FMassEntityHandle& OutYieldTargetEntity,
 	int32& OutMergeYieldCaseIndex)
 {
 	const FZoneGraphTrafficLaneData* CurrentLaneData = MassTrafficSubsystem.GetTrafficLaneData(CurrentLane);
@@ -238,11 +239,16 @@ bool ShouldVehicleMergeOntoLane(
 	const auto& ShouldVehicleYieldToTestVehicle = [&MassTrafficSubsystem, &VehicleControlFragment, &CurrentLaneData, &DesiredLaneData, VehicleDistanceAlongCurrentLane, VehicleEffectiveSpeed, VehicleRadius, VehicleRandomFraction, &MassTrafficSettings, bVehicleHasStopSignOrYieldSign, &StoppingDistanceRange, &ZoneGraphStorage, &OutMergeYieldCaseIndex](
 		const FZoneGraphTrafficLaneData& TestVehicleCurrentLaneData,
 		const FZoneGraphTrafficLaneData& TestVehicleIntersectionLaneData,
+		const FMassEntityHandle& TestVehicleEntityHandle,
 		const float TestVehicleDistanceAlongCurrentLane,
+		const float TestVehicleAccelerationEstimate,
 		const float TestVehicleEffectiveSpeed,
-		const float TestVehicleRadius)
+		const bool bTestVehicleIsYielding,
+		const float TestVehicleRadius,
+		const FZoneGraphTrafficLaneData* TestVehicleStopSignIntersectionLane,
+		const float TestVehicleRandomFraction)
 	{
-		if (TestVehicleCurrentLaneData.NumVehiclesOnLane <= 0)
+		if (!TestVehicleEntityHandle.IsValid())
 		{
 			return false;
 		}
@@ -250,10 +256,10 @@ bool ShouldVehicleMergeOntoLane(
 		const bool bTestVehicleHasStopSignOrYieldSign = TestVehicleIntersectionLaneData.HasStopSignOrYieldSignAtLaneStart();
 
 		const bool bTestVehicleIsNearStopLine = IsVehicleNearStopLine(
-			TestVehicleCurrentLaneData.LeadVehicleDistanceAlongLane.GetValue(),
+			TestVehicleDistanceAlongCurrentLane,
 			TestVehicleCurrentLaneData.Length,
-			TestVehicleCurrentLaneData.LeadVehicleRadius.GetValue(),
-			TestVehicleCurrentLaneData.LeadVehicleRandomFraction.GetValue(),
+			TestVehicleRadius,
+			TestVehicleRandomFraction,
 			StoppingDistanceRange);
 		const bool bTestVehicleIsAtIntersection = TestVehicleIntersectionLaneData.ConstData.bIsIntersectionLane;
 		const bool bTestVehicleIsNearStopLineAtIntersection = bTestVehicleIsNearStopLine && bTestVehicleIsAtIntersection;
@@ -264,9 +270,9 @@ bool ShouldVehicleMergeOntoLane(
 			// And, the test vehicle's intersection lane has a stop sign requirement, ...
 			if (TestVehicleIntersectionLaneData.HasTrafficSignThatRequiresStopAtLaneStart())
 			{
-				const bool bTestVehicleHasCompletedItsStopSignRestBehavior = TestVehicleCurrentLaneData.LeadVehicleStopSignIntersectionLane.GetValue() != nullptr
-							? TestVehicleCurrentLaneData.LeadVehicleStopSignIntersectionLane.GetValue()->LaneHandle == TestVehicleIntersectionLaneData.LaneHandle
-							: false;
+				const bool bTestVehicleHasCompletedItsStopSignRestBehavior = TestVehicleStopSignIntersectionLane != nullptr
+					? TestVehicleStopSignIntersectionLane->LaneHandle == TestVehicleIntersectionLaneData.LaneHandle
+					: false;
 
 				// If the test vehicle is not near the stop line, or it is, but it hasn't completed its stop sign rest behavior, ...
 				if (!bTestVehicleIsNearStopLineAtIntersection || !bTestVehicleHasCompletedItsStopSignRestBehavior)
@@ -275,17 +281,25 @@ bool ShouldVehicleMergeOntoLane(
 					return false;
 				}
 			}
-			else
+			// Or, if the test vehicle has a yield sign, but no pedestrians around,
+			// and therefore no reason to yield at the sign, ...
+			else if (TestVehicleIntersectionLaneData.HasYieldSignAtLaneStart())
 			{
-				// If the test vehicle has a yield sign, but no pedestrians around, and therefore no reason to yield at the sign, ...
-				if (TestVehicleIntersectionLaneData.HasYieldSignAtLaneStart())
+				// Then, we only need to wait until the test vehicle is near the stop line,
+				// before we should consider yielding to it.
+				if (!bTestVehicleIsNearStopLineAtIntersection)
 				{
-					// Then, we only need to wait until the test vehicle is near the stop line,
-					// before we should consider yielding to it.
-					if (!bTestVehicleIsNearStopLineAtIntersection)
-					{
-						return false;
-					}
+					return false;
+				}
+			}
+			// Or, if the test vehicle has a traffic light, ...
+			else if (TestVehicleIntersectionLaneData.HasTrafficLightAtLaneStart())
+			{
+				// Then, we need to wait until the test vehicle is near the stop line,
+				// and for the test vehicle's lane to be open, before we should consider yielding to it.
+				if (!bTestVehicleIsNearStopLineAtIntersection || !TestVehicleIntersectionLaneData.bIsOpen)
+				{
+					return false;
 				}
 			}
 		}
@@ -388,14 +402,48 @@ bool ShouldVehicleMergeOntoLane(
 		
 		// If the test vehicle is yielding, we assume that it's looking to resume motion at some point.
 		// Therefore, we calculate its enter and exit times based on its enter and exit distances and its acceleration.
-		if (TestVehicleCurrentLaneData.bLeadVehicleIsYielding.GetValue())
+		if (bTestVehicleIsYielding)
 		{
 			GetEnterAndExitTimeForYieldingEntity(
 				TestVehicleDistanceToEnterConflictLane,
 				TestVehicleDistanceToExitConflictLane,
-				TestVehicleCurrentLaneData.LeadVehicleAccelerationEstimate.GetValue(),
+				TestVehicleAccelerationEstimate,
 				TestVehicleEnterTime,
 				TestVehicleExitTime);
+		}
+
+		// Don't consider yielding to test vehicles that haven't entered the intersection yet,
+		// until they are reasonably close in time.
+		if (TestVehicleCurrentLaneData.LaneHandle != TestVehicleIntersectionLaneData.LaneHandle)
+		{
+			if (TestVehicleEnterTime > MassTrafficSettings.VehicleMergeYieldTestVehicleEnterIntersectionHorizonTime)
+			{
+				return false;
+			}
+		}
+
+		if (bTestVehicleIsYielding)
+		{
+			// If the test vehicle is in the intersection, ...
+			if (TestVehicleCurrentLaneData.LaneHandle == TestVehicleIntersectionLaneData.LaneHandle)
+			{
+				const bool bVehicleIsInConflictRegion = VehicleDistanceToEnterConflictLane <= 0.0f && VehicleDistanceToExitConflictLane > 0.0f;
+				const bool bTestVehicleIsInConflictRegion = TestVehicleDistanceToEnterConflictLane <= 0.0f && TestVehicleDistanceToExitConflictLane > 0.0f;
+					
+				// If we're not in the conflict region, but the test vehicle is, ...
+				if (!bVehicleIsInConflictRegion && bTestVehicleIsInConflictRegion)
+				{
+					// We should yield to them (until they get out of the way).
+					OutMergeYieldCaseIndex = 1;
+					return true;
+				}
+			}
+		
+			// The test vehicle is either not in the intersection,
+			// or in the intersection, but not in a valid conflict with us.
+			// In either case, since the test vehicle is yielding,
+			// we shouldn't yield to it.
+			return false;
 		}
 		
 		const bool bInTimeConflictWithTestVehicle = (VehicleExitTime >= 0.0f && TestVehicleExitTime >= 0.0f)
@@ -419,38 +467,15 @@ bool ShouldVehicleMergeOntoLane(
 		}
 
 		// Never consider yielding to test vehicles that have a stop sign or yield sign,
-		// if they are not yet in the intersection, but we are.
+		// if they are not yet in the intersection.
 		if (bTestVehicleHasStopSignOrYieldSign)
 		{
 			if (TestVehicleCurrentLaneData.LaneHandle != TestVehicleIntersectionLaneData.LaneHandle)
 			{
-				if (CurrentLaneData->LaneHandle == DesiredLaneData->LaneHandle)
-				{
-					return false;
-				}
-			}
-		}
-
-		// If the test vehicle is in the intersection, ...
-		if (TestVehicleCurrentLaneData.LaneHandle == TestVehicleIntersectionLaneData.LaneHandle)
-		{
-			if (TestVehicleCurrentLaneData.HasYieldingVehicles())
-			{
-				const bool bVehicleIsInConflictRegion = VehicleDistanceToEnterConflictLane <= 0.0f && VehicleDistanceToExitConflictLane > 0.0f;
-				const bool bTestVehicleIsInConflictRegion = TestVehicleDistanceToEnterConflictLane <= 0.0f && TestVehicleDistanceToExitConflictLane > 0.0f;
-				
-				// If we're not in the conflict region, but the test vehicle is, ...
-				if (!bVehicleIsInConflictRegion && bTestVehicleIsInConflictRegion)
-				{
-					// We should yield to them (until they get out of the way).
-					OutMergeYieldCaseIndex = 1;
-					return true;
-				}
-				
 				return false;
 			}
 		}
-
+		
 		// If we are in "time conflict" with this test vehicle, we need to determine who has priority.
 		// We yield to them if they have priority.  Otherwise, we proceed.
 		if (bInTimeConflictWithTestVehicle)
@@ -533,12 +558,12 @@ bool ShouldVehicleMergeOntoLane(
 			}
 
 			// As a lower-tier tie-breaker, let's compare our RandomFraction with the test vehicle's RandomFraction.
-			if (VehicleRandomFraction < TestVehicleCurrentLaneData.LeadVehicleRandomFraction.GetValue())
+			if (VehicleRandomFraction < TestVehicleRandomFraction)
 			{
 				// We should proceed.
 				return false;
 			}
-			else if (VehicleRandomFraction > TestVehicleCurrentLaneData.LeadVehicleRandomFraction.GetValue())
+			else if (VehicleRandomFraction > TestVehicleRandomFraction)
 			{
 				// We should yield.
 				OutMergeYieldCaseIndex = 7;
@@ -548,12 +573,12 @@ bool ShouldVehicleMergeOntoLane(
 			// As the *lowest-tier* tie-breaker, let's compare our EntityHandle with the test vehicle's EntityHandle.
 			// Note:  Since all Entities have unique EntityHandles, this final test will guarantee that we never deadlock
 			// (in the sense that we will never yield to a test vehicle that is yielding to us).
-			if (VehicleControlFragment.VehicleEntityHandle.Index < TestVehicleCurrentLaneData.LeadVehicleEntityHandle.GetValue().Index)
+			if (VehicleControlFragment.VehicleEntityHandle.Index < TestVehicleEntityHandle.Index)
 			{
 				// We should proceed.
 				return false;
 			}
-			else if (VehicleControlFragment.VehicleEntityHandle.Index > TestVehicleCurrentLaneData.LeadVehicleEntityHandle.GetValue().Index)
+			else if (VehicleControlFragment.VehicleEntityHandle.Index > TestVehicleEntityHandle.Index)
 			{
 				// We should yield.
 				OutMergeYieldCaseIndex = 8;
@@ -563,6 +588,74 @@ bool ShouldVehicleMergeOntoLane(
 			ensureMsgf(false, TEXT("Should never reach here in ShouldVehicleMergeOntoLane.  Somehow the whole series of prioritized tests to determine who yields and who doesn't failed to make a determination.  Not yielding, in order to keep traffic flowing."));
 		}
 		
+		return false;
+	};
+
+	const auto& ShouldVehicleYieldToTestLane = [&MassTrafficSubsystem, &ShouldVehicleYieldToTestVehicle, &VehicleControlFragment, &CurrentLaneData, &OutYieldTargetEntity](
+		const FZoneGraphTrafficLaneData& TestLaneData,
+		const FZoneGraphTrafficLaneData& ConflictLaneData)
+	{
+		TSet<FMassTrafficCoreVehicleInfo> CoreVehicleInfos;
+		if (!MassTrafficSubsystem.TryGetCoreVehicleInfos(TestLaneData.LaneHandle, CoreVehicleInfos))
+		{
+			// We don't have any info about vehicles on this lane.
+			// So, we don't need to yield.
+			//
+			// Note:  Due to where NumVehiclesOnLane gets updated in the frame,
+			// relative to where CoreVehicleInfos gets updated in the frame,
+			// NumVehiclesOnLane might be greater than 0 for this lane,
+			// while CoreVehicleInfos is empty.
+			// However, in this case, the CoreVehicleInfos data for the lane
+			// will be populated by the next frame.
+			return false;
+		}
+
+		// Consider each vehicle on the current lane.
+		for (const FMassTrafficCoreVehicleInfo& CoreVehicleInfo : CoreVehicleInfos)
+		{
+			// Skip processing our yield logic if we have a yield override for this Lane-Entity Pair.
+			// This mechanism is used to prevent yield cycle deadlocks.
+			if (MassTrafficSubsystem.HasYieldOverride(
+				CurrentLaneData->LaneHandle, VehicleControlFragment.VehicleEntityHandle,
+				TestLaneData.LaneHandle, CoreVehicleInfo.VehicleEntityHandle))
+			{
+				continue;
+			}
+			
+			// For vehicles that are not currently on the conflict lane, ...
+			if (TestLaneData.LaneHandle != ConflictLaneData.LaneHandle)
+			{
+				// Don't factor-in vehicles that are currently waiting at stop signs into our test.
+				if (CoreVehicleInfo.VehicleRemainingStopSignRestTime > 0.0f)
+				{
+					continue;
+				}
+				
+				// Only consider the vehicle if it is heading into the conflict lane.
+				if (CoreVehicleInfo.VehicleNextLane == nullptr || CoreVehicleInfo.VehicleNextLane->LaneHandle != ConflictLaneData.LaneHandle)
+				{
+					continue;
+				}
+			}
+
+			if (ShouldVehicleYieldToTestVehicle(
+				TestLaneData,
+				ConflictLaneData,
+				CoreVehicleInfo.VehicleEntityHandle,
+				CoreVehicleInfo.VehicleDistanceAlongLane,
+				CoreVehicleInfo.VehicleAccelerationEstimate,
+				CoreVehicleInfo.VehicleSpeed,
+				CoreVehicleInfo.bVehicleIsYielding,
+				CoreVehicleInfo.VehicleRadius,
+				CoreVehicleInfo.VehicleStopSignIntersectionLane,
+				CoreVehicleInfo.VehicleRandomFraction))
+			{
+				OutYieldTargetEntity = CoreVehicleInfo.VehicleEntityHandle;
+				return true;
+			}
+		}
+
+		// No reason to yield to the current lane.
 		return false;
 	};
 
@@ -578,50 +671,10 @@ bool ShouldVehicleMergeOntoLane(
 			continue;
 		}
 		
-		if (ConflictLaneData->NumVehiclesOnLane > 0)
+		if (ShouldVehicleYieldToTestLane(*ConflictLaneData, *ConflictLaneData))
 		{
-			// Since there are vehicles on the lane (ie. ConflictLaneData.NumVehiclesOnLane > 0),
-			// we'd like to be able to ensure that all the LeadVehicle properties are set, here.
-			// But, we can't, because NumVehiclesOnLane gets updated at two different spots in the frame,
-			// depending on the vehicle's current representation.  That is, for vehicles in "Simple" representation,
-			// UMassTrafficVehicleControlProcessor calls UE::MassTraffic::MoveVehicleToNextLane,
-			// which will update NumVehiclesOnLane.  And, in "PID" representation,
-			// UMassTrafficPostPhysicsUpdateTrafficVehiclesProcessor calls UE::MassTraffic::MoveVehicleToNextLane
-			// later in the frame.
-			// So, first the "LeadVehicle" data is set on the lanes in UMassTrafficLaneMetadataProcessor,
-			// then UMassTrafficVehicleControlProcessor consumes it,
-			// then UMassTrafficCrowdYieldProcessor consumes it.  (According to the proper config in DefaultMass.ini.)
-			// However, for simple vehicles that just cross over onto their next lane,
-			// NumVehiclesOnLane will be incremented on those lanes before being evaluated
-			// here as part of the UMassTrafficVehicleControlProcessor's execution.
-			// But, those lanes won't have their "LeadVehicle" data set for another frame,
-			// in the case that there were no vehicles on the lane, and now there is 1 simple vehicle.
-			// So, it's valid just to skip evaluating this lane until the "LeadVehicle" data is available next frame.
-			if (!(ConflictLaneData->LeadVehicleEntityHandle.IsSet()
-				&& ConflictLaneData->LeadVehicleDistanceAlongLane.IsSet()
-				&& ConflictLaneData->LeadVehicleAccelerationEstimate.IsSet()
-				&& ConflictLaneData->LeadVehicleSpeed.IsSet()
-				&& ConflictLaneData->bLeadVehicleIsYielding.IsSet()
-				&& ConflictLaneData->LeadVehicleRadius.IsSet()
-				&& ConflictLaneData->LeadVehicleNextLane.IsSet()
-				&& ConflictLaneData->LeadVehicleStopSignIntersectionLane.IsSet()
-				&& ConflictLaneData->LeadVehicleRandomFraction.IsSet()
-				&& ConflictLaneData->LeadVehicleIsNearStopLineAtIntersection.IsSet()))
-			{
-				UE_LOG(LogMassTraffic, Warning, TEXT("Since ConflictLaneData has vehicles, required LeadVehicle properties must be set in ShouldVehicleMergeOntoLane.  ConflictLaneData->LaneHandle.Index: %d."), ConflictLaneData->LaneHandle.Index);
-				continue;
-			}
-			
-			if (ShouldVehicleYieldToTestVehicle(
-				*ConflictLaneData,
-				*ConflictLaneData,
-				ConflictLaneData->LeadVehicleDistanceAlongLane.GetValue(),
-				ConflictLaneData->LeadVehicleSpeed.GetValue(),
-				ConflictLaneData->LeadVehicleRadius.GetValue()))
-			{
-				OutYieldTargetLane = ConflictLaneData->LaneHandle;
-				return false;
-			}
+			OutYieldTargetLane = ConflictLaneData->LaneHandle;
+			return false;
 		}
 	
 		for (const FZoneGraphTrafficLaneData* ConflictPredecessorLane : ConflictLaneData->PrevLanes)
@@ -630,63 +683,8 @@ bool ShouldVehicleMergeOntoLane(
 			{
 				continue;
 			}
-
-			if (ConflictPredecessorLane->NumVehiclesOnLane <= 0)
-			{
-				continue;
-			}
-
-			// Since there are vehicles on the lane (ie. ConflictPredecessorLane.NumVehiclesOnLane > 0),
-			// we'd like to be able to ensure that all the LeadVehicle properties are set, here.
-			// But, we can't, because NumVehiclesOnLane gets updated at two different spots in the frame,
-			// depending on the vehicle's current representation.  That is, for vehicles in "Simple" representation,
-			// UMassTrafficVehicleControlProcessor calls UE::MassTraffic::MoveVehicleToNextLane,
-			// which will update NumVehiclesOnLane.  And, in "PID" representation,
-			// UMassTrafficPostPhysicsUpdateTrafficVehiclesProcessor calls UE::MassTraffic::MoveVehicleToNextLane
-			// later in the frame.
-			// So, first the "LeadVehicle" data is set on the lanes in UMassTrafficLaneMetadataProcessor,
-			// then UMassTrafficVehicleControlProcessor consumes it,
-			// then UMassTrafficCrowdYieldProcessor consumes it.  (According to the proper config in DefaultMass.ini.)
-			// However, for simple vehicles that just cross over onto their next lane,
-			// NumVehiclesOnLane will be incremented on those lanes before being evaluated
-			// here as part of the UMassTrafficVehicleControlProcessor's execution.
-			// But, those lanes won't have their "LeadVehicle" data set for another frame,
-			// in the case that there were no vehicles on the lane, and now there is 1 simple vehicle.
-			// So, it's valid just to skip evaluating this lane until the "LeadVehicle" data is available next frame.
-			if (!(ConflictPredecessorLane->LeadVehicleEntityHandle.IsSet()
-				&& ConflictPredecessorLane->LeadVehicleDistanceAlongLane.IsSet()
-				&& ConflictPredecessorLane->LeadVehicleAccelerationEstimate.IsSet()
-				&& ConflictPredecessorLane->LeadVehicleSpeed.IsSet()
-				&& ConflictPredecessorLane->bLeadVehicleIsYielding.IsSet()
-				&& ConflictPredecessorLane->LeadVehicleRadius.IsSet()
-				&& ConflictPredecessorLane->LeadVehicleNextLane.IsSet()
-				&& ConflictPredecessorLane->LeadVehicleStopSignIntersectionLane.IsSet()
-				&& ConflictPredecessorLane->LeadVehicleRandomFraction.IsSet()
-				&& ConflictPredecessorLane->LeadVehicleIsNearStopLineAtIntersection.IsSet()))
-			{
-				UE_LOG(LogMassTraffic, Warning, TEXT("Since ConflictPredecessorLane has vehicles, required LeadVehicle properties must be set in ShouldVehicleMergeOntoLane.  ConflictPredecessorLane->LaneHandle.Index: %d."), ConflictPredecessorLane->LaneHandle.Index);
-				continue;
-			}
-
-			// Don't factor lead vehicles that are currently waiting at stop signs into our test.
-			if (ConflictPredecessorLane->LeadVehicleRemainingStopSignRestTime.IsSet())
-			{
-				continue;
-			}
-
-			// We're only concerned if the lead vehicle on the Conflict Predecessor Lane
-			// will be heading into our current Conflict Lane.
-			if (ConflictPredecessorLane->LeadVehicleNextLane.GetValue() != ConflictLaneData)
-			{
-				continue;
-			}
 			
-			if (ShouldVehicleYieldToTestVehicle(
-				*ConflictPredecessorLane,
-				*ConflictLaneData,
-				ConflictPredecessorLane->LeadVehicleDistanceAlongLane.GetValue(),
-				ConflictPredecessorLane->LeadVehicleSpeed.GetValue(),
-				ConflictPredecessorLane->LeadVehicleRadius.GetValue()))
+			if (ShouldVehicleYieldToTestLane(*ConflictPredecessorLane, *ConflictLaneData))
 			{
 				OutYieldTargetLane = ConflictPredecessorLane->LaneHandle;
 				return false;
@@ -962,6 +960,7 @@ void UpdateYieldAtIntersectionState(
 	FMassTrafficVehicleControlFragment& VehicleControlFragment,
 	const FZoneGraphLaneHandle& CurrentLaneHandle,
 	const FZoneGraphLaneHandle& YieldTargetLaneHandle,
+	const FMassEntityHandle& YieldTargetEntity,
 	const bool bShouldReactivelyYieldAtIntersection,
 	const bool bShouldGiveOpportunityForTurningVehiclesToReactivelyYieldAtIntersection)
 {
@@ -979,9 +978,12 @@ void UpdateYieldAtIntersectionState(
 
 	if (bShouldYieldAtIntersection)
 	{
-		// Add this to the global view of all yields for this frame.
-		// The yield deadlock resolution processor will use this information to find and break any yield cycle deadlocks.
-		MassTrafficSubsystem.AddYieldInfo(VehicleControlFragment.VehicleEntityHandle, CurrentLaneHandle, YieldTargetLaneHandle);
+		if (ensureMsgf(YieldTargetLaneHandle.IsValid() && YieldTargetEntity.IsValid(), TEXT("Expected valid YieldTargetLaneHandle and YieldTargetEntity in UpdateYieldAtIntersectionState.  YieldTargetLaneHandle.Index: %d YieldTargetEntity.Index: %d."), YieldTargetLaneHandle.Index, YieldTargetEntity.Index))
+		{
+			// Add this to the global view of all yields for this frame.
+			// The yield deadlock resolution processor will use this information to find and break any yield cycle deadlocks.
+			MassTrafficSubsystem.AddYieldInfo(CurrentLaneHandle, VehicleControlFragment.VehicleEntityHandle, YieldTargetLaneHandle, YieldTargetEntity);
+		}
 	}
 
 	// Set this state to give the opportunity for turning vehicles to reactively yield first.
