@@ -215,7 +215,7 @@ for MOD in "${MODS[@]}"; do
   read -ra ADDS <<< "$ADDS"
   read -ra PATCHES <<< "$PATCHES"
 
-  echo "Apply Tempo mods (if necessary) to $ROOT"
+  echo "Applying Tempo mods (if necessary) to $ROOT"
 
   # Copy the folder in its current state (but skip the heavy built artifacts)
   mkdir -p "$TEMP/$ROOT"
