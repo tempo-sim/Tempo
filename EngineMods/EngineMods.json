@@ -1,4 +1,33 @@
 {
+  "5.5": [
+    {
+      "Type": "UnrealBuildTool",
+      "Root": "Engine/Source/Programs/UnrealBuildTool",
+      "Add": [
+        "Configuration/TempoModuleRules.cs.5.5",
+        "ToolChain/TempoLinuxToolChain.cs.5.5",
+        "ToolChain/TempoMacToolChain.cs.5.5",
+        "ToolChain/TempoVCToolChain.cs.5.5"
+      ],
+      "Patch": [
+        "Configuration/UEBuildTarget.cs.patch.5.5"
+      ]
+    },
+    {
+      "Type": "Plugin",
+      "Root": "Engine/Plugins/Runtime/ZoneGraph",
+      "Patch": [
+        "ZoneGraph.patch.5.5"
+      ]
+    },
+    {
+      "Type": "Plugin",
+      "Root": "Engine/Plugins/AI/MassCrowd",
+      "Patch": [
+        "MassCrowd.patch.5.5"
+      ]
+    }
+  ],
   "5.4": [
     {
       "Type": "UnrealBuildTool",
