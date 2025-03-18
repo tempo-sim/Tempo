@@ -50,15 +50,19 @@ public class MassTraffic : ModuleRules
 				"Engine",
 				"NetCore",
 				"StateTreeModule",
-				"StructUtils",
 				"ZoneGraph",
 				"AnimToTexture",
 				"ChaosVehicles",
 				"ChaosVehiclesCore",
 			}
 			);
-			
-		
+
+		// StructUtils plugin was deprecated in 5.5 and moved into CoreUObject
+		if (Target.Version.MajorVersion == 5 && Target.Version.MinorVersion < 5)
+		{
+			PublicDependencyModuleNames.Add("StructUtils");
+		}
+
 		PrivateDependencyModuleNames.AddRange(
 			new string[]
 			{

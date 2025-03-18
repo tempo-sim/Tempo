@@ -32,10 +32,6 @@
 	],
 	"Plugins": [
 		{
-			"Name": "MassEntity",
-			"Enabled": true
-		},
-		{
 			"Name": "MassGameplay",
 			"Enabled": true
 		},
@@ -53,10 +49,6 @@
 		},
 		{
 			"Name": "Traffic",
-			"Enabled": true
-		},
-		{
-			"Name": "StructUtils",
 			"Enabled": true
 		},
 		{

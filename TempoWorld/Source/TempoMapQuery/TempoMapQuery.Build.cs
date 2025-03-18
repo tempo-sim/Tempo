@@ -28,11 +28,16 @@ public class TempoMapQuery : TempoModuleRules
 				"MassEntity",
 				"Slate",
 				"SlateCore",
-				"StructUtils",
 				// Tempo
 				"MassTraffic",
 				"ZoneGraph",
 			}
 			);
+
+		// StructUtils plugin was deprecated in 5.5 and moved into CoreUObject
+		if (Target.Version.MajorVersion == 5 && Target.Version.MinorVersion < 5)
+		{
+			PrivateDependencyModuleNames.Add("StructUtils");
+		}
 	}
 }

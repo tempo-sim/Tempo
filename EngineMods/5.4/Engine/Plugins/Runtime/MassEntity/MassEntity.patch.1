@@ -1,0 +1,58 @@
+diff --color -urN --strip-trailing-cr Source/MassEntity/Public/MassEntityTypes.h /Users/pete/Desktop/MassEntity/Source/MassEntity/Public/MassEntityTypes.h
+--- Source/MassEntity/Public/MassEntityTypes.h	2024-06-04 07:20:35
++++ /Users/pete/Desktop/MassEntity/Source/MassEntity/Public/MassEntityTypes.h	2025-04-11 09:59:49
+@@ -51,6 +51,16 @@
+ 	FMassSharedFragment() {}
+ };
+
++// FMassConstSharedFragment was added in UE 5.5. Unfortunately, due to UHT constraints, preprocessor macros cannot be
++// used to change the parent of a USTRUCT, add  USTRUCT, or any other lighter-touch workaround, so we backport it here.
++USTRUCT()
++struct FMassConstSharedFragment : public FMassSharedFragment
++{
++        GENERATED_BODY()
++
++        FMassConstSharedFragment() {}
++};
++
+ // A handle to a lightweight entity.  An entity is used in conjunction with the FMassEntityManager
+ // for the current world and can contain lightweight fragments.
+ USTRUCT()
+diff --color -urN --strip-trailing-cr /Users/pete/Desktop/MassEntity/Source/MassEntity/MassEntity.Build.cs Source/MassEntity/MassEntity.Build.cs
+--- Source/MassEntity/MassEntity.Build.cs	2025-04-12 22:15:57
++++ /Users/pete/Desktop/MassEntity/Source/MassEntity/MassEntity.Build.cs	2025-04-12 21:54:59
+@@ -1,5 +1,7 @@
+ // Copyright Epic Games, Inc. All Rights Reserved.
+
++using System.IO;
++
+ namespace UnrealBuildTool.Rules
+ {
+ 	public class MassEntity : ModuleRules
+@@ -17,6 +19,19 @@
+ 					"DeveloperSettings",
+ 				}
+ 			);
++
++			// TEMPO_MOD Begin - [For Fixing rpaths of Rebuilt Engine Plugins] - Manually add rpaths for plugin dependencies
++			// Added by Tempo. We needed to make some mods to this plugin. To do so, we copied it out of the engine,
++			// applied our mods to the source, rebuilt it, and copied the result back. The only wrinkle is the rpaths
++			// in the dynamic libraries are then relative to the location we built it, not it's final destination in the
++			// engine (and no, it's not allowed to re-build a plugin in-place in the engine). So we use these here to
++			// add the correct rpaths relative to the final destination for this plugin.
++			PublicRuntimeLibraryPaths.AddRange(
++					new string[] {
++							Path.Combine("..", "..", "..", "..", "..", "Plugins", "Experimental", "StructUtils", "Binaries", Target.Platform.ToString()),
++				}
++			);
++			// TEMPO_MOD End
+
+ 			if (Target.bBuildEditor || Target.bCompileAgainstEditor)
+ 			{
+@@ -30,4 +45,4 @@
+ 			}
+ 		}
+ 	}
+-}
+\ No newline at end of file
++}

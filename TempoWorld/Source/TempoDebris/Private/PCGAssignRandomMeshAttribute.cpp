@@ -21,8 +21,8 @@
 
 #define LOCTEXT_NAMESPACE "PCGAssignRandomMeshAttributeElement"
 
-#if WITH_EDITOR
-// This is defined in PCGActorSelector.h but not exported or inlined. Re-define it here in the editor build,
+#if WITH_EDITOR && ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 5
+// In 5.4 this is defined in PCGActorSelector.h but not exported or inlined. Re-define it here in the editor build,
 // where we're building separate dylibs, but not in the packaged binary, where we're building a single executable.
 uint32 GetTypeHash(const FPCGSelectionKey& In)
 {
