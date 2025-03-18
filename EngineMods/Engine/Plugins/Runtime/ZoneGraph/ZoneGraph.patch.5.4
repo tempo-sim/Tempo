@@ -1,0 +1,1121 @@
+diff --color -urN Source/ZoneGraph/Private/ZoneGraphBuilder.cpp /Users/pete/TempoUnrealFestDemo/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Private/ZoneGraphBuilder.cpp
+--- Source/ZoneGraph/Private/ZoneGraphBuilder.cpp	2024-09-26 22:04:48
++++ /Users/pete/TempoUnrealFestDemo/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Private/ZoneGraphBuilder.cpp	2024-09-17 17:52:05
+@@ -1,11 +1,10 @@
+ // Copyright Epic Games, Inc. All Rights Reserved.
+ 
+ #include "ZoneGraphBuilder.h"
++
+ #include "ZoneGraphTypes.h"
+ #include "ZoneGraphDelegates.h"
+ #include "ZoneGraphData.h"
+-#include "ZoneShapeComponent.h"
+-#include "ZoneShapeUtilities.h"
+ #include "ZoneGraphSettings.h"
+ 
+ namespace UE::ZoneGraph::Internal
+@@ -312,6 +311,9 @@
+ void FZoneGraphBuilder::BuildSingleShape(const UZoneShapeComponent& ShapeComp, const FMatrix& LocalToWorld, FZoneGraphStorage& OutZoneStorage)
+ {
+ 	TArray<FZoneShapeLaneInternalLink> InternalLinks;
++
++	// Const cast is intentional.  Need to update connected shapes before running through the build pathway.
++	const_cast<UZoneShapeComponent&>(ShapeComp).UpdateConnectedShapes();
+ 	AppendShapeToZoneStorage(ShapeComp, LocalToWorld, OutZoneStorage, InternalLinks);
+ 	ConnectLanes(InternalLinks, OutZoneStorage);
+ }
+@@ -437,7 +439,7 @@
+ 			}
+ 		}
+ 
+-		UE::ZoneShape::Utilities::TessellatePolygonShape(AdjustedPoints, ShapeComp.GetPolygonRoutingType(), PolyLaneProfiles, ShapeComp.GetTags(), LocalToWorld, OutZoneStorage, OutInternalLinks);
++		UE::ZoneShape::Utilities::TessellatePolygonShape(ShapeComp, *this, AdjustedPoints, PolyLaneProfiles, LocalToWorld, OutZoneStorage, OutInternalLinks);
+ 	}
+ 	else
+ 	{
+@@ -500,7 +502,7 @@
+ 	const uint32 NewHash = CalculateCombinedShapeHash(ZoneGraphData);
+ 	ZoneGraphData.SetCombinedShapeHash(NewHash);
+ 
+-	ZoneGraphData.UpdateDrawing();
++ZoneGraphData.UpdateDrawing();
+ }
+ 
+ void FZoneGraphBuilder::ConnectLanes(TArray<FZoneShapeLaneInternalLink>& InternalLinks, FZoneGraphStorage& ZoneStorage)
+diff --color -urN Source/ZoneGraph/Private/ZoneGraphSubsystem.cpp /Users/pete/TempoUnrealFestDemo/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Private/ZoneGraphSubsystem.cpp
+--- Source/ZoneGraph/Private/ZoneGraphSubsystem.cpp	2024-09-26 22:04:48
++++ /Users/pete/TempoUnrealFestDemo/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Private/ZoneGraphSubsystem.cpp	2024-09-26 20:29:34
+@@ -60,7 +60,7 @@
+ 	const UWorld* World = GetWorld();
+ 	if (!World->IsGameWorld())
+ 	{
+-		if (Builder.NeedsRebuild())
++		if (GetBuilder().NeedsRebuild())
+ 		{
+ 			const UZoneGraphSettings* ZoneGraphSettings = GetDefault<UZoneGraphSettings>();
+ 			check(ZoneGraphSettings);
+@@ -73,7 +73,7 @@
+ 	else
+ 	{
+ 		// Zone graph is not meant to update during game tick.
+-		ensureMsgf(!Builder.NeedsRebuild(), TEXT("Builder should not need update during game."));
++		ensureMsgf(!GetBuilder().NeedsRebuild(), TEXT("Builder should not need update during game."));
+ 	}
+ #endif
+ }
+@@ -194,7 +194,7 @@
+ 	{
+ 		if (UZoneShapeComponent* ShapeComp = Actor->FindComponentByClass<UZoneShapeComponent>())
+ 		{
+-			Builder.OnZoneShapeComponentChanged(*ShapeComp);
++			GetBuilder().OnZoneShapeComponentChanged(*ShapeComp);
+ 		}
+ 	}
+ }
+@@ -216,7 +216,7 @@
+ 
+ 	// Find the levels where the splines are located.
+ 	TSet<ULevel*> SupportedLevels;
+-	for (const FZoneGraphBuilderRegisteredComponent& Registered : Builder.GetRegisteredZoneShapeComponents())
++	for (const FZoneGraphBuilderRegisteredComponent& Registered : GetBuilder().GetRegisteredZoneShapeComponents())
+ 	{
+ 		if (Registered.Component)
+ 		{
+@@ -270,7 +270,7 @@
+ 		}
+ 	}
+ 
+-	Builder.BuildAll(AllZoneGraphData, bForceRebuild);
++	GetBuilder().BuildAll(AllZoneGraphData, bForceRebuild);
+ }
+ 
+ #endif // WITH_EDITOR
+@@ -472,6 +472,23 @@
+ 		}
+ 	}
+ 	return FName();
++}
++
++TArray<FName> UZoneGraphSubsystem::GetTagNamesFromTagMask(const FZoneGraphTagMask& TagMask) const
++{
++	TArray<FName> TagNames;
++	
++	const TConstArrayView<FZoneGraphTagInfo>& TagInfos = GetTagInfos();
++	for (const FZoneGraphTagInfo& TagInfo : TagInfos)
++	{
++		if (TagMask.Contains(TagInfo.Tag))
++		{
++			const FName& TagName = GetTagName(TagInfo.Tag);
++			TagNames.Add(TagName);
++		}
++	}
++
++	return TagNames;
+ }
+ 
+ const FZoneGraphTagInfo* UZoneGraphSubsystem::GetTagInfo(FZoneGraphTag Tag) const
+diff --color -urN Source/ZoneGraph/Private/ZoneGraphTypes.cpp /Users/pete/TempoUnrealFestDemo/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Private/ZoneGraphTypes.cpp
+--- Source/ZoneGraph/Private/ZoneGraphTypes.cpp	2024-09-26 22:04:48
++++ /Users/pete/TempoUnrealFestDemo/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Private/ZoneGraphTypes.cpp	2024-09-17 17:52:05
+@@ -135,6 +135,29 @@
+ 	}
+ }
+ 
++bool FZoneLaneProfile::IsValid(const bool bMustHaveName) const
++{
++	if (bMustHaveName && Name == NAME_None)
++	{
++		return false;
++	}
++		
++	if (!ID.IsValid())
++	{
++		return false;
++	}
++		
++	for (const FZoneLaneDesc& Lane : Lanes)
++	{
++		if (Lane.Width <= 0.0f)
++		{
++			return false;
++		}
++	}
++
++	return true;
++}
++
+ float FZoneGraphBuildSettings::GetLaneTessellationTolerance(const FZoneGraphTagMask LaneTags) const
+ {
+ 	float Tolerance = CommonTessellationTolerance;
+diff --color -urN Source/ZoneGraph/Private/ZoneShapeUtilities.cpp /Users/pete/TempoUnrealFestDemo/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Private/ZoneShapeUtilities.cpp
+--- Source/ZoneGraph/Private/ZoneShapeUtilities.cpp	2024-09-26 22:04:48
++++ /Users/pete/TempoUnrealFestDemo/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Private/ZoneShapeUtilities.cpp	2024-09-17 17:52:05
+@@ -2,9 +2,11 @@
+ 
+ #include "ZoneShapeUtilities.h"
+ #include "BezierUtilities.h"
++#include "ZoneGraphBuilder.h"
+ #include "Algo/Reverse.h"
+ #include "HAL/IConsoleManager.h"
+ #include "ZoneGraphSettings.h"
++#include "ZoneShapeComponent.h"
+ 
+ namespace UE::ZoneGraph::Debug {
+ 
+@@ -998,23 +1000,6 @@
+ 	}
+ }
+ 
+-
+-struct FLaneConnectionSlot
+-{
+-	FVector Position = FVector::ZeroVector;
+-	FVector Forward = FVector::ZeroVector;
+-	FVector Up = FVector::ZeroVector;
+-	FZoneLaneDesc LaneDesc;
+-	int32 PointIndex = 0;	// Index in dest point array
+-	int32 Index = 0;		// Index within an entry
+-	uint16 EntryID = 0;		// Entry ID from source data
+-	const FZoneLaneProfile* Profile = nullptr;
+-	EZoneShapeLaneConnectionRestrictions Restrictions = EZoneShapeLaneConnectionRestrictions::None;
+-	float DistanceFromProfileEdge = 0.0f;	// Distance from lane profile edge
+-	float DistanceFromFarProfileEdge = 0.0f; // Distance to other lane profile edge
+-	float InnerTurningRadius = 0.0f; // Inner/minimum turning radius when using Arc routing.
+-};
+-
+ struct FLaneConnectionCandidate
+ {
+ 	FLaneConnectionCandidate() = default;
+@@ -1201,6 +1186,7 @@
+ };
+ 
+ static void BuildLanesBetweenPoints(const FConnectionEntry& Source, TConstArrayView<FConnectionEntry> Destinations,
++									const UZoneShapeComponent& PolygonShapeComp, const TMap<int32, const UZoneShapeComponent*>& PointIndexToZoneShapeComponent, const FZoneGraphBuilder& ZoneGraphBuilder,
+ 									const EZoneShapePolygonRoutingType RoutingType, const FZoneGraphTagMask ZoneTags, const FZoneGraphBuildSettings& BuildSettings, const FMatrix& LocalToWorld,
+ 									FZoneGraphStorage& OutZoneStorage, TArray<FZoneShapeLaneInternalLink>& OutInternalLinks)
+ {
+@@ -1611,6 +1597,30 @@
+ 		}
+ 	}
+ 
++	TArray<const UZoneShapeComponent*> ShapeComponentsInMap;
++	PointIndexToZoneShapeComponent.GenerateValueArray(ShapeComponentsInMap);
++
++	const bool bAllZoneShapeComponentsInMapAreValid = !ShapeComponentsInMap.Contains(nullptr);
++	if (bAllZoneShapeComponentsInMapAreValid)
++	{
++		Candidates.RemoveAll([&ZoneGraphBuilder, &PolygonShapeComp, &SourceSlots, &DestSlots, &PointIndexToZoneShapeComponent](const FLaneConnectionCandidate& Candidate)
++		{
++			// The true index to the ZoneShapePoint in this context is the slot's EntryID, not PointIndex field.
++			// In fact, SourceSlots don't even fill-out their PointIndex fields.
++			// So, we look up the ZoneShapeComponent for this slot via EntryID.
++			const FLaneConnectionSlot& SourceSlot = SourceSlots[Candidate.SourceSlot];
++			const UZoneShapeComponent* SourceShapeComp = PointIndexToZoneShapeComponent[SourceSlot.EntryID];
++
++			// The true index to the ZoneShapePoint in this context is the slot's EntryID, not PointIndex field.
++			// DestSlots use PointIndex to point into the Destinations array, not the ZoneShapePoints array.
++			// So, we look up the ZoneShapeComponent for this slot via EntryID.
++			const FLaneConnectionSlot& DestSlot = DestSlots[Candidate.DestSlot];
++			const UZoneShapeComponent* DestShapeComp = PointIndexToZoneShapeComponent[DestSlot.EntryID];
++
++			return ZoneGraphBuilder.ShouldFilterLaneConnection(PolygonShapeComp, *SourceShapeComp, SourceSlots, Candidate.SourceSlot, *DestShapeComp, DestSlots, Candidate.DestSlot);
++		});
++	}
++
+ 	// Sort candidates for lane adjacency. First by source index, then by destination index.
+ 	// Lane adjacency is not that obvious in polygons. With this sort we make sure that they are somewhat in order and that the whole set can be iterated over.
+ 	Candidates.Sort([](const FLaneConnectionCandidate& A, const FLaneConnectionCandidate& B) { return A.SourceSlot < B.SourceSlot || (A.SourceSlot == B.SourceSlot && A.DestSlot < B.DestSlot); });
+@@ -1729,9 +1739,27 @@
+ 	return TessTolerance;
+ }
+ 
+-void TessellatePolygonShape(TConstArrayView<FZoneShapePoint> Points, const EZoneShapePolygonRoutingType RoutingType, TConstArrayView<FZoneLaneProfile> LaneProfiles, const FZoneGraphTagMask ZoneTags, const FMatrix& LocalToWorld,
++void TessellatePolygonShape(const UZoneShapeComponent& PolygonShapeComp, const FZoneGraphBuilder& ZoneGraphBuilder,
++							TConstArrayView<FZoneShapePoint> Points, TConstArrayView<FZoneLaneProfile> LaneProfiles, const FMatrix& LocalToWorld,
+ 							FZoneGraphStorage& OutZoneStorage, TArray<FZoneShapeLaneInternalLink>& OutInternalLinks)
+ {
++	const EZoneShapePolygonRoutingType RoutingType = PolygonShapeComp.GetPolygonRoutingType();
++	const FZoneGraphTagMask ZoneTags = PolygonShapeComp.GetTags();
++
++	TConstArrayView<FZoneShapeConnector> ShapeConnectors = PolygonShapeComp.GetShapeConnectors();
++	TConstArrayView<FZoneShapeConnection> ConnectedShapes = PolygonShapeComp.GetConnectedShapes();
++
++	checkf(ConnectedShapes.Num() == ShapeConnectors.Num(), TEXT("ConnectedShapes and ShapeConnectors should have the same number of entries."));
++	
++	TMap<int32, const UZoneShapeComponent*> PointIndexToZoneShapeComponent;
++	for (int32 ConnectionIndex = 0; ConnectionIndex < ConnectedShapes.Num(); ++ConnectionIndex)
++	{
++		const int32 PointIndex = ShapeConnectors[ConnectionIndex].PointIndex;
++		const UZoneShapeComponent* ZoneShapeComponent = ConnectedShapes[ConnectionIndex].ShapeComponent.Get();
++		
++		PointIndexToZoneShapeComponent.Add(PointIndex, ZoneShapeComponent);
++	}
++	
+ 	const UZoneGraphSettings* ZoneGraphSettings = GetDefault<UZoneGraphSettings>();
+ 	check(ZoneGraphSettings);
+ 	const FZoneGraphBuildSettings& BuildSettings = ZoneGraphSettings->GetBuildSettings();
+@@ -1822,7 +1850,7 @@
+ 		}
+ 		// Connect source to destinations.
+ 		BuildLanesBetweenPoints(FConnectionEntry(SourcePoint, SourceLaneProfile, SourceIdx, OutgoingConnections[SourceIdx], IncomingConnections[SourceIdx]),
+-								Destinations, RoutingType, ZoneTags, BuildSettings, LocalToWorld, OutZoneStorage, OutInternalLinks);
++								Destinations, PolygonShapeComp, PointIndexToZoneShapeComponent, ZoneGraphBuilder, RoutingType, ZoneTags, BuildSettings, LocalToWorld, OutZoneStorage, OutInternalLinks);
+ 	}
+ 
+ 	Zone.LanesEnd = OutZoneStorage.Lanes.Num();
+diff --color -urN Source/ZoneGraph/Public/ZoneGraphBuilder.h /Users/pete/TempoUnrealFestDemo/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Public/ZoneGraphBuilder.h
+--- Source/ZoneGraph/Public/ZoneGraphBuilder.h	2024-09-26 22:04:46
++++ /Users/pete/TempoUnrealFestDemo/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Public/ZoneGraphBuilder.h	2024-09-17 17:52:05
+@@ -5,6 +5,8 @@
+ #include "CoreMinimal.h"
+ #include "ZoneGraphTypes.h"
+ #include "HierarchicalHashGrid2D.h"
++#include "ZoneShapeComponent.h"
++#include "ZoneShapeUtilities.h"
+ #include "ZoneGraphBuilder.generated.h"
+ 
+ class AZoneGraphData;
+@@ -65,7 +67,7 @@
+ 
+ public:
+ 	FZoneGraphBuilder();
+-	~FZoneGraphBuilder();
++	virtual ~FZoneGraphBuilder();
+ 
+ 	void RegisterZoneShapeComponent(UZoneShapeComponent& ShapeComp);
+ 	void UnregisterZoneShapeComponent(UZoneShapeComponent& ShapeComp);
+@@ -84,7 +86,7 @@
+ 
+ 	/** Converts single zone shape into a zone storage, used in UI for editing and rendering.
+ 	*/
+-	static void BuildSingleShape(const UZoneShapeComponent& ShapeComp, const FMatrix& LocalToWorld, FZoneGraphStorage& OutZoneStorage);
++	void BuildSingleShape(const UZoneShapeComponent& ShapeComp, const FMatrix& LocalToWorld, FZoneGraphStorage& OutZoneStorage);
+ 
+ 	/** Returns items that potentially touch the bounds in the HashGrid. Operates on grid level, can have false positives.
+ 	 * @param Bounds - Query bounding box.
+@@ -92,12 +94,14 @@
+ 	 */
+ 	void QueryHashGrid(const FBox& Bounds, TArray<FZoneGraphBuilderHashGrid2D::ItemIDType>& OutResults);
+ 
++	virtual bool ShouldFilterLaneConnection(const UZoneShapeComponent& PolygonShapeComp, const UZoneShapeComponent& SourceShapeComp, const TArray<FLaneConnectionSlot>& SourceSlots, const int32 SourceSlotQueryIndex, const UZoneShapeComponent& DestShapeComp, const TArray<FLaneConnectionSlot>& DestSlots, const int32 DestSlotQueryIndex) const { return false; };
++
+ protected:
+ 	void Build(AZoneGraphData& ZoneGraphData);
+ 	void RequestRebuild();
+ 	void OnLaneProfileChanged(const FZoneLaneProfileRef& ChangedLaneProfileRef);
+ 	uint32 CalculateCombinedShapeHash(const AZoneGraphData& ZoneGraphData) const;
+-	static void AppendShapeToZoneStorage(const UZoneShapeComponent& ShapeComp, const FMatrix& LocalToWorld, FZoneGraphStorage& OutZoneStorage, TArray<FZoneShapeLaneInternalLink>& OutInternalLinks, FZoneGraphBuildData* InBuildData = nullptr);
++	void AppendShapeToZoneStorage(const UZoneShapeComponent& ShapeComp, const FMatrix& LocalToWorld, FZoneGraphStorage& OutZoneStorage, TArray<FZoneShapeLaneInternalLink>& OutInternalLinks, FZoneGraphBuildData* InBuildData = nullptr);
+ 	static void ConnectLanes(TArray<FZoneShapeLaneInternalLink>& InternalLinks, FZoneGraphStorage& OutZoneStorage);
+ 
+ 	UPROPERTY(Transient)
+diff --color -urN Source/ZoneGraph/Public/ZoneGraphSubsystem.h /Users/pete/TempoUnrealFestDemo/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Public/ZoneGraphSubsystem.h
+--- Source/ZoneGraph/Public/ZoneGraphSubsystem.h	2024-09-26 22:04:46
++++ /Users/pete/TempoUnrealFestDemo/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Public/ZoneGraphSubsystem.h	2024-09-26 20:29:34
+@@ -47,7 +47,9 @@
+ 	TConstArrayView<FRegisteredZoneGraphData> GetRegisteredZoneGraphData() const { return RegisteredZoneGraphData; }
+ 
+ #if WITH_EDITOR
+-	FZoneGraphBuilder& GetBuilder() { return Builder; }
++	void RegisterBuilder(FZoneGraphBuilder* Builder) { OverrideBuilder = Builder; }
++	void ResetBuilder() { OverrideBuilder = nullptr; }
++	FZoneGraphBuilder& GetBuilder() { return OverrideBuilder != nullptr ? *OverrideBuilder : DefaultBuilder; }
+ #endif
+ 
+ 	// Queries
+@@ -113,11 +115,17 @@
+ 	// Tags
+ 	
+ 	// Returns tag based on name.
++	UFUNCTION(BlueprintCallable, Category = "ZoneGraphSubsystem|Tags")
+ 	FZoneGraphTag GetTagByName(FName TagName) const;
+ 
+ 	// Returns the name of a specific tag.
++	UFUNCTION(BlueprintCallable, Category = "ZoneGraphSubsystem|Tags")
+ 	FName GetTagName(FZoneGraphTag Tag) const;
+ 
++	// Returns the names of all the tags in a given tag mask.
++	UFUNCTION(BlueprintCallable, Category = "ZoneGraphSubsystem|Tags")
++	TArray<FName> GetTagNamesFromTagMask(const FZoneGraphTagMask& TagMask) const;
++
+ 	// Returns info about a specific tag.
+ 	const FZoneGraphTagInfo* GetTagInfo(FZoneGraphTag Tag) const;
+ 
+@@ -159,6 +167,7 @@
+ #if WITH_EDITOR
+ 	FDelegateHandle OnActorMovedHandle;
+ 	FDelegateHandle OnRequestRebuildHandle;
+-	FZoneGraphBuilder Builder;
++	FZoneGraphBuilder* OverrideBuilder;
++	FZoneGraphBuilder DefaultBuilder;
+ #endif
+ };
+diff --color -urN Source/ZoneGraph/Public/ZoneGraphTypes.h /Users/pete/TempoUnrealFestDemo/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Public/ZoneGraphTypes.h
+--- Source/ZoneGraph/Public/ZoneGraphTypes.h	2024-09-26 22:04:46
++++ /Users/pete/TempoUnrealFestDemo/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Public/ZoneGraphTypes.h	2024-09-17 17:52:05
+@@ -192,11 +192,20 @@
+ 
+ // Filter passes if any of the 'AnyTags', and all of the 'AllTags', and none of the 'NotTags' are present.
+ // Setting include or exclude tags to None, will skip that particular check.
+-USTRUCT()
++USTRUCT(BlueprintType)
+ struct ZONEGRAPH_API FZoneGraphTagFilter
+ {
+ 	GENERATED_BODY()
+ 
++	FZoneGraphTagFilter() = default;
++
++	FZoneGraphTagFilter(const FZoneGraphTagMask& InAnyTags, const FZoneGraphTagMask& InAllTags, const FZoneGraphTagMask& InNotTags)
++		: AnyTags(InAnyTags)
++		, AllTags(InAllTags)
++		, NotTags(InNotTags)
++	{
++	}
++
+ 	bool Pass(const FZoneGraphTagMask Tags) const
+ 	{
+ 		return (AnyTags == FZoneGraphTagMask::None || Tags.ContainsAny(AnyTags))
+@@ -207,13 +216,19 @@
+ 	bool operator==(const FZoneGraphTagFilter& RHS) const { return AnyTags == RHS.AnyTags && AllTags == RHS.AllTags && NotTags == RHS.NotTags; }
+ 	bool operator!=(const FZoneGraphTagFilter& RHS) const { return AnyTags != RHS.AnyTags || AllTags != RHS.AllTags || NotTags != RHS.NotTags; }
+ 
+-	UPROPERTY(Category = Zone, EditAnywhere)
++	friend uint32 GetTypeHash(const FZoneGraphTagFilter& ZoneGraphTagFilter)
++	{
++		const uint32 AnyAllHash = HashCombine(GetTypeHash(ZoneGraphTagFilter.AnyTags), GetTypeHash(ZoneGraphTagFilter.AllTags));
++		return HashCombine(AnyAllHash, GetTypeHash(ZoneGraphTagFilter.NotTags));
++	}
++
++	UPROPERTY(Category = Zone, EditAnywhere, BlueprintReadWrite)
+ 	FZoneGraphTagMask AnyTags = FZoneGraphTagMask::None;
+ 
+-	UPROPERTY(Category = Zone, EditAnywhere)
++	UPROPERTY(Category = Zone, EditAnywhere, BlueprintReadWrite)
+ 	FZoneGraphTagMask AllTags = FZoneGraphTagMask::None;
+ 
+-	UPROPERTY(Category = Zone, EditAnywhere)
++	UPROPERTY(Category = Zone, EditAnywhere, BlueprintReadWrite)
+ 	FZoneGraphTagMask NotTags = FZoneGraphTagMask::None;
+ };
+ 
+@@ -290,6 +305,8 @@
+ 
+ 	// Reverses the lane profile. The lanes array will be reversed, as well as the lane directions. 
+ 	void ReverseLanes();
++
++	bool IsValid(const bool bMustHaveName = true) const;
+ 
+ 	UPROPERTY(Category = Lane, EditAnywhere)
+ 	FName Name;
+diff --color -urN Source/ZoneGraph/Public/ZoneShapeComponent.h /Users/pete/TempoUnrealFestDemo/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Public/ZoneShapeComponent.h
+--- Source/ZoneGraph/Public/ZoneShapeComponent.h	2024-09-26 22:04:46
++++ /Users/pete/TempoUnrealFestDemo/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Public/ZoneShapeComponent.h	2024-09-17 17:52:05
+@@ -5,7 +5,6 @@
+ #include "CoreMinimal.h"
+ #include "UObject/ObjectMacros.h"
+ #include "Components/PrimitiveComponent.h"
+-#include "ZoneGraphSubsystem.h"
+ #include "ZoneGraphTypes.h"
+ #include "ZoneShapeComponent.generated.h"
+ 
+diff --color -urN Source/ZoneGraph/Public/ZoneShapeUtilities.h /Users/pete/TempoUnrealFestDemo/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Public/ZoneShapeUtilities.h
+--- Source/ZoneGraph/Public/ZoneShapeUtilities.h	2024-09-26 22:04:46
++++ /Users/pete/TempoUnrealFestDemo/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Public/ZoneShapeUtilities.h	2024-09-17 17:52:05
+@@ -5,6 +5,8 @@
+ #include "ZoneGraphTypes.h"
+ #include "ZoneShapeUtilities.generated.h"
+ 
++struct FZoneGraphBuilder;
++
+ /** Struct describing a link for a specified lane, used during building */
+ USTRUCT()
+ struct FZoneShapeLaneInternalLink
+@@ -25,6 +27,22 @@
+ 	FZoneLaneLinkData LinkData = {};
+ };
+ 
++struct FLaneConnectionSlot
++{
++	FVector Position = FVector::ZeroVector;
++	FVector Forward = FVector::ZeroVector;
++	FVector Up = FVector::ZeroVector;
++	FZoneLaneDesc LaneDesc;
++	int32 PointIndex = 0;	// Index in dest point array
++	int32 Index = 0;		// Index within an entry
++	uint16 EntryID = 0;		// Entry ID from source data
++	const FZoneLaneProfile* Profile = nullptr;
++	EZoneShapeLaneConnectionRestrictions Restrictions = EZoneShapeLaneConnectionRestrictions::None;
++	float DistanceFromProfileEdge = 0.0f;	// Distance from lane profile edge
++	float DistanceFromFarProfileEdge = 0.0f; // Distance to other lane profile edge
++	float InnerTurningRadius = 0.0f; // Inner/minimum turning radius when using Arc routing.
++};
++
+ namespace UE { namespace ZoneShape { namespace Utilities
+ {
+ 
+@@ -33,7 +51,8 @@
+ 										 FZoneGraphStorage& OutZoneStorage, TArray<FZoneShapeLaneInternalLink>& OutInternalLinks);
+ 
+ // Converts polygon shape to a zone data.
+-ZONEGRAPH_API void TessellatePolygonShape(TConstArrayView<FZoneShapePoint> Points, const EZoneShapePolygonRoutingType RoutingType, TConstArrayView<FZoneLaneProfile> LaneProfiles, const FZoneGraphTagMask ZoneTags, const FMatrix& LocalToWorld,
++ZONEGRAPH_API void TessellatePolygonShape(const UZoneShapeComponent& SourceShapeComp, const FZoneGraphBuilder& ZoneGraphBuilder,
++										  TConstArrayView<FZoneShapePoint> Points, TConstArrayView<FZoneLaneProfile> LaneProfiles, const FMatrix& LocalToWorld,
+ 										  FZoneGraphStorage& OutZoneStorage, TArray<FZoneShapeLaneInternalLink>& OutInternalLinks);
+ 
+ // Returns cubic bezier points for give shape segment. Adjusts end points based on shape point types. 
+diff --color -urN Source/ZoneGraph/ZoneGraph.Build.cs /Users/pete/TempoUnrealFestDemo/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/ZoneGraph.Build.cs
+--- Source/ZoneGraph/ZoneGraph.Build.cs	2024-09-26 22:04:46
++++ /Users/pete/TempoUnrealFestDemo/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/ZoneGraph.Build.cs	2024-09-17 17:52:05
+@@ -20,7 +20,6 @@
+ 					"DeveloperSettings",
+ 				}
+ 			);
+-
+ 			if (Target.bBuildEditor == true)
+ 			{
+ 				PrivateDependencyModuleNames.Add("EditorFramework");
+diff --color -urN Source/ZoneGraphTestSuite/ZoneGraphTestSuite.Build.cs /Users/pete/TempoUnrealFestDemo/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraphTestSuite/ZoneGraphTestSuite.Build.cs
+--- Source/ZoneGraphTestSuite/ZoneGraphTestSuite.Build.cs	2024-09-26 22:04:46
++++ /Users/pete/TempoUnrealFestDemo/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraphTestSuite/ZoneGraphTestSuite.Build.cs	2024-09-17 17:52:05
+@@ -39,4 +39,4 @@
+ 			}
+ 		}
+ 	}
+-}
+\ No newline at end of file
++}
+diff --color -urN --strip-trailing-cr Source/ZoneGraph/Private/ZoneGraphBuilder.cpp /Users/pete/VayuSim/Plugins/ZoneGraph/Source/ZoneGraph/Private/ZoneGraphBuilder.cpp
+--- Source/ZoneGraph/Private/ZoneGraphBuilder.cpp	2025-02-12 20:17:25
++++ /Users/pete/VayuSim/Plugins/ZoneGraph/Source/ZoneGraph/Private/ZoneGraphBuilder.cpp	2025-02-12 14:46:13
+@@ -311,7 +311,7 @@
+ void FZoneGraphBuilder::BuildSingleShape(const UZoneShapeComponent& ShapeComp, const FMatrix& LocalToWorld, FZoneGraphStorage& OutZoneStorage)
+ {
+ 	TArray<FZoneShapeLaneInternalLink> InternalLinks;
+-
++
+ 	// Const cast is intentional.  Need to update connected shapes before running through the build pathway.
+ 	const_cast<UZoneShapeComponent&>(ShapeComp).UpdateConnectedShapes();
+ 	AppendShapeToZoneStorage(ShapeComp, LocalToWorld, OutZoneStorage, InternalLinks);
+diff --color -urN --strip-trailing-cr Source/ZoneGraph/Private/ZoneGraphRenderingUtilities.cpp /Users/pete/VayuSim/Plugins/ZoneGraph/Source/ZoneGraph/Private/ZoneGraphRenderingUtilities.cpp
+--- Source/ZoneGraph/Private/ZoneGraphRenderingUtilities.cpp	2025-02-12 20:10:52
++++ /Users/pete/VayuSim/Plugins/ZoneGraph/Source/ZoneGraph/Private/ZoneGraphRenderingUtilities.cpp	2025-02-09 13:15:55
+@@ -325,7 +325,7 @@
+ 			for (int32 i = Lane.PointsBegin + 1; i < Lane.PointsEnd; i++)
+ 			{
+ 				const FVector Point = bTransform ? FVector(LocalToWorld.TransformPosition(ZoneStorage.LanePoints[i])) : ZoneStorage.LanePoints[i];
+-				PDI->DrawTranslucentLine(PrevPoint, Point, Color, SDPG_World, LineThickness, DepthBias, true);
++				PDI->DrawTranslucentLine(PrevPoint, Point, Color, SDPG_Foreground, LineThickness, DepthBias, true);
+ 				PrevPoint = Point;
+ 			}
+ 		}
+@@ -334,7 +334,7 @@
+ 			for (int32 i = Lane.PointsBegin + 1; i < Lane.PointsEnd; i++)
+ 			{
+ 				const FVector Point = bTransform ? FVector(LocalToWorld.TransformPosition(ZoneStorage.LanePoints[i])) : ZoneStorage.LanePoints[i];
+-				PDI->DrawLine(PrevPoint, Point, Color, SDPG_World, LineThickness, DepthBias, true);
++				PDI->DrawLine(PrevPoint, Point, Color, SDPG_Foreground, LineThickness, DepthBias, true);
+ 				PrevPoint = Point;
+ 			}
+ 		}
+@@ -359,7 +359,7 @@
+ 				const FVector ArrowOrigin = ArrowPos;
+ 				const FVector ArrowTip = ArrowPos + ArrowDir * ArrowSize;
+
+-				FPrimitiveSceneProxy::DrawArrowHead(PDI, ArrowTip, ArrowOrigin, ArrowSize, Color, SDPG_World, LineThickness, true);
++				FPrimitiveSceneProxy::DrawArrowHead(PDI, ArrowTip, ArrowOrigin, ArrowSize, Color, SDPG_Foreground, LineThickness, true);
+ 			}
+
+ 			// Draw adjacent lanes
+@@ -373,12 +373,12 @@
+ 			FZoneGraphLinkedLane LeftLinkedLane;
+ 			if (UE::ZoneGraph::Query::GetFirstLinkedLane(ZoneStorage, LaneIdx, EZoneLaneLinkType::Adjacent, EZoneLaneLinkFlags::Left, EZoneLaneLinkFlags::None, LeftLinkedLane) && LeftLinkedLane.IsValid())
+ 			{
+-				PDI->DrawLine(LaneStartPoint, LaneStartPoint + LaneStartSide * Lane.Width * 0.1f, FMath::Lerp(FLinearColor(Color), FLinearColor::Green, 0.3f), SDPG_World, LineThickness, DepthBias, true);
++				PDI->DrawLine(LaneStartPoint, LaneStartPoint + LaneStartSide * Lane.Width * 0.1f, FMath::Lerp(FLinearColor(Color), FLinearColor::Green, 0.3f), SDPG_Foreground, LineThickness, DepthBias, true);
+ 			}
+ 			FZoneGraphLinkedLane RightLinkedLane;
+ 			if (UE::ZoneGraph::Query::GetFirstLinkedLane(ZoneStorage, LaneIdx, EZoneLaneLinkType::Adjacent, EZoneLaneLinkFlags::Right, EZoneLaneLinkFlags::None, RightLinkedLane) && RightLinkedLane.IsValid())
+ 			{
+-				PDI->DrawLine(LaneStartPoint, LaneStartPoint - LaneStartSide * Lane.Width * 0.1f, FMath::Lerp(FLinearColor(Color), FLinearColor::Red, 0.3f), SDPG_World, LineThickness, DepthBias, true);
++				PDI->DrawLine(LaneStartPoint, LaneStartPoint - LaneStartSide * Lane.Width * 0.1f, FMath::Lerp(FLinearColor(Color), FLinearColor::Red, 0.3f), SDPG_Foreground, LineThickness, DepthBias, true);
+ 			}
+ 		}
+ 	}
+diff --color -urN --strip-trailing-cr Source/ZoneGraph/Private/ZoneGraphTypes.cpp /Users/pete/VayuSim/Plugins/ZoneGraph/Source/ZoneGraph/Private/ZoneGraphTypes.cpp
+--- Source/ZoneGraph/Private/ZoneGraphTypes.cpp	2025-02-12 20:17:25
++++ /Users/pete/VayuSim/Plugins/ZoneGraph/Source/ZoneGraph/Private/ZoneGraphTypes.cpp	2025-02-12 15:04:08
+@@ -131,7 +131,10 @@
+ 	Algo::Reverse(Lanes);
+ 	for (FZoneLaneDesc& Lane : Lanes)
+ 	{
+-		Lane.Direction = Lane.Direction == EZoneLaneDirection::Forward ? EZoneLaneDirection::Backward : EZoneLaneDirection::Forward;
++		if (Lane.Direction != EZoneLaneDirection::None)
++		{
++			Lane.Direction = Lane.Direction == EZoneLaneDirection::Forward ? EZoneLaneDirection::Backward : EZoneLaneDirection::Forward;
++		}
+ 	}
+ }
+
+diff --color -urN --strip-trailing-cr Source/ZoneGraph/Private/ZoneShapeUtilities.cpp /Users/pete/VayuSim/Plugins/ZoneGraph/Source/ZoneGraph/Private/ZoneShapeUtilities.cpp
+--- Source/ZoneGraph/Private/ZoneShapeUtilities.cpp	2025-02-12 20:17:25
++++ /Users/pete/VayuSim/Plugins/ZoneGraph/Source/ZoneGraph/Private/ZoneShapeUtilities.cpp	2025-02-12 20:24:11
+@@ -8,20 +8,6 @@
+ #include "ZoneGraphSettings.h"
+ #include "ZoneShapeComponent.h"
+
+-namespace UE::ZoneGraph::Debug {
+-
+-	bool bRemoveOverlap = true;
+-	bool bRemoveSameDestination = true;
+-	bool bFillEmptyDestination = true;
+-
+-	FAutoConsoleVariableRef VarsGeneration[] = {
+-		FAutoConsoleVariableRef(TEXT("ai.debug.zonegraph.generation.RemoveOverlap"), bRemoveOverlap, TEXT("Remove Overlapping lanes.")),
+-		FAutoConsoleVariableRef(TEXT("ai.debug.zonegraph.generation.RemoveSameDestination"), bRemoveSameDestination, TEXT("Remove merging lanes leading to same destination.")),
+-		FAutoConsoleVariableRef(TEXT("ai.debug.zonegraph.generation.FillEmptyDestination"), bFillEmptyDestination, TEXT("Fill stray empty destination lanes.")),
+-	};
+-
+-} // UE::ZoneGraph::Debug
+-
+ namespace UE::ZoneShape::Utilities {
+
+ // Normalizes an angle by making it in range -PI..PI. Angle in radians.
+@@ -776,6 +762,10 @@
+
+ static void AddAdjacentLaneLinks(const int32 CurrentLaneIndex, const int32 LaneDescIndex, const TArray<FZoneLaneDesc>& LaneDescs, TArray<FZoneShapeLaneInternalLink>& OutInternalLinks)
+ {
++	const UZoneGraphSettings* ZoneGraphSettings = GetDefault<UZoneGraphSettings>();
++	check(ZoneGraphSettings);
++	const FZoneGraphBuildSettings& BuildSettings = ZoneGraphSettings->GetBuildSettings();
++
+ 	const int32 NumLanes = LaneDescs.Num();
+ 	const FZoneLaneDesc& LaneDesc = LaneDescs[LaneDescIndex];
+
+@@ -802,30 +792,38 @@
+ 		ensureMsgf(false, TEXT("Lane direction %d not implemented."), int32(LaneDesc.Direction));
+ 	}
+
+-	if ((LaneDescIndex + 1) < NumLanes)
++	int32 NextLaneDescIndex = LaneDescIndex;
++	while (++NextLaneDescIndex < NumLanes)
+ 	{
+-		const FZoneLaneDesc& NextLaneDesc = LaneDescs[LaneDescIndex + 1];
+-		if (NextLaneDesc.Direction != EZoneLaneDirection::None)
++		const FZoneLaneDesc& NextLaneDesc = LaneDescs[NextLaneDescIndex];
++		if (NextLaneDesc.Direction == EZoneLaneDirection::None)
+ 		{
+-			if (LaneDesc.Direction != NextLaneDesc.Direction)
+-			{
+-				NextLinkFlags |= EZoneLaneLinkFlags::OppositeDirection;
+-			}
+-			OutInternalLinks.Emplace(CurrentLaneIndex, FZoneLaneLinkData(CurrentLaneIndex + 1, EZoneLaneLinkType::Adjacent, NextLinkFlags));
++			// Skip spacer lanes and continue until we find a real lane.
++			continue;
+ 		}
++		if (LaneDesc.Direction != NextLaneDesc.Direction)
++		{
++			NextLinkFlags |= EZoneLaneLinkFlags::OppositeDirection;
++		}
++		OutInternalLinks.Emplace(CurrentLaneIndex, FZoneLaneLinkData(CurrentLaneIndex + 1, EZoneLaneLinkType::Adjacent, NextLinkFlags));
++		break;
+ 	}
+
+-	if ((LaneDescIndex - 1) >= 0)
++	int32 PrevLaneDescIndex = LaneDescIndex;
++	while (--PrevLaneDescIndex >= 0)
+ 	{
+-		const FZoneLaneDesc& PrevLaneDesc = LaneDescs[LaneDescIndex - 1];
+-		if (PrevLaneDesc.Direction != EZoneLaneDirection::None)
++		const FZoneLaneDesc& PrevLaneDesc = LaneDescs[PrevLaneDescIndex];
++		if (PrevLaneDesc.Direction == EZoneLaneDirection::None)
+ 		{
+-			if (LaneDesc.Direction != PrevLaneDesc.Direction)
+-			{
+-				PrevLinkFlags |= EZoneLaneLinkFlags::OppositeDirection;
+-			}
+-			OutInternalLinks.Emplace(CurrentLaneIndex, FZoneLaneLinkData(CurrentLaneIndex - 1, EZoneLaneLinkType::Adjacent, PrevLinkFlags));
++			// Skip spacer lanes and continue until we find a real lane.
++			continue;
+ 		}
++		if (LaneDesc.Direction != PrevLaneDesc.Direction)
++		{
++			PrevLinkFlags |= EZoneLaneLinkFlags::OppositeDirection;
++		}
++		OutInternalLinks.Emplace(CurrentLaneIndex, FZoneLaneLinkData(CurrentLaneIndex - 1, EZoneLaneLinkType::Adjacent, PrevLinkFlags));
++		break;
+ 	}
+ }
+
+@@ -1029,21 +1027,21 @@
+ 	return First;
+ }
+
+-static void AddOrUpdateConnection(TArray<FLaneConnectionCandidate>& Candidates, const int32 SourceSlot, const int32 DestSlot, const FZoneGraphTag Tag)
++static void AddOrUpdateConnection(TArray<FLaneConnectionCandidate>& Candidates, const int32 SourceSlot, const int32 DestSlot, const FZoneGraphTagMask& TagMask)
+ {
+ 	FLaneConnectionCandidate* Cand = Candidates.FindByPredicate([SourceSlot, DestSlot](const FLaneConnectionCandidate& Cand) -> bool { return Cand.SourceSlot == SourceSlot&& Cand.DestSlot == DestSlot; });
+ 	if (Cand != nullptr)
+ 	{
+-		Cand->TagMask = Cand->TagMask | FZoneGraphTagMask(Tag);
++		Cand->TagMask = Cand->TagMask | TagMask;
+ 	}
+ 	else
+ 	{
+-		Candidates.Add(FLaneConnectionCandidate(SourceSlot, DestSlot, FZoneGraphTagMask(Tag)));
++		Candidates.Add(FLaneConnectionCandidate(SourceSlot, DestSlot, TagMask));
+ 	}
+ }
+
+ static void AppendLaneConnectionCandidates(TArray<FLaneConnectionCandidate>& Candidates, TConstArrayView<FLaneConnectionSlot> SourceSlots, TConstArrayView<FLaneConnectionSlot> DestSlots,
+-										   const FZoneGraphTag Tag, const int32 MainDestPointIndex)
++										   const FZoneGraphTagMask& TagMask, const int32 MainDestPointIndex, bool bTurning)
+ {
+ 	const int32 SourceNum = SourceSlots.Num();
+ 	const int32 DestNum = DestSlots.Num();
+@@ -1066,7 +1064,7 @@
+ 		const int32 DestIdx = CalcDestinationSide(SourceSlots, DestSlots) ? (DestNum - 1) : 0;
+
+ 		// If a connection exists, we'll just update the tags, otherwise create new.
+-		AddOrUpdateConnection(Candidates, SourceSlots[SourceIdx].Index, DestSlots[DestIdx].Index, Tag);
++		AddOrUpdateConnection(Candidates, SourceSlots[SourceIdx].Index, DestSlots[DestIdx].Index, TagMask);
+
+ 		return;
+ 	}
+@@ -1081,7 +1079,7 @@
+ 			const int32 SourceIdx = i;
+ 			const int32 DestIdx = BestDestLaneIndex;
+
+-			AddOrUpdateConnection(Candidates, SourceSlots[SourceIdx].Index, DestSlots[DestIdx].Index, Tag);
++			AddOrUpdateConnection(Candidates, SourceSlots[SourceIdx].Index, DestSlots[DestIdx].Index, TagMask);
+ 		}
+
+ 		return;
+@@ -1089,41 +1087,55 @@
+
+ 	const bool bOneLanePerDestination = EnumHasAnyFlags(ConnectionRestrictions, EZoneShapeLaneConnectionRestrictions::OneLanePerDestination);
+
+-	if (SourceNum < DestNum)
++	if (bTurning)
+ 	{
+-		const int32 BestLaneIndex = CalcDestinationSide(SourceSlots, DestSlots) ? (DestNum - 1) : 0;
+-
+-		// Distribute the lanes symmetrically around that best lane.
+-		const int32 FirstIndex = FitRange(BestLaneIndex - SourceNum/2, SourceNum, DestNum);
+-
+-		for (int32 i = 0; i < DestNum; i++)
++		// Turning connections by default get fully-connected slots. The builder may filter them later.
++		for (const FLaneConnectionSlot& SourceSlot : SourceSlots)
+ 		{
+-			const int32 SourceIdxUnClamped = i - FirstIndex;
+-			if (bOneLanePerDestination && (SourceIdxUnClamped < 0 || SourceIdxUnClamped >= SourceNum))
++			for (const FLaneConnectionSlot& DestSlot : DestSlots)
+ 			{
+-				continue;
++				AddOrUpdateConnection(Candidates, SourceSlot.Index, DestSlot.Index, TagMask);
+ 			}
+-
+-			const int32 SourceIdx = FMath::Clamp(SourceIdxUnClamped, 0, SourceNum - 1);
+-			const int32 DestIdx = i;
+-
+-			AddOrUpdateConnection(Candidates, SourceSlots[SourceIdx].Index, DestSlots[DestIdx].Index, Tag);
+ 		}
+ 	}
+ 	else
+ 	{
+-		const int32 BestLaneIndex = CalcDestinationSide(SourceSlots, DestSlots) ? 0 : (SourceNum - 1);
+-
+-		// Distribute the lanes symmetrically around that best lane.
+-		const int32 FirstIndex = FitRange(BestLaneIndex - DestNum/2, DestNum, SourceNum);
+-
+-		for (int32 i = 0; i < SourceNum; i++)
++		// Non-turning connections by default get one-to-one connected slots.
++		if (SourceNum < DestNum)
+ 		{
+-			const int32 SourceIdx = i;
+-			const int32 DestIdx = FMath::Clamp(i - FirstIndex, 0, DestNum - 1);
++			const int32 BestLaneIndex = CalcDestinationSide(SourceSlots, DestSlots) ? (DestNum - 1) : 0;
++
++			// Distribute the lanes symmetrically around that best lane.
++			const int32 FirstIndex = FitRange(BestLaneIndex - SourceNum/2, SourceNum, DestNum);
++
++			for (int32 i = 0; i < DestNum; i++)
++			{
++				const int32 SourceIdxUnClamped = i - FirstIndex;
++				if (bOneLanePerDestination && (SourceIdxUnClamped < 0 || SourceIdxUnClamped >= SourceNum))
++				{
++					continue;
++				}
++
++				const int32 SourceIdx = FMath::Clamp(SourceIdxUnClamped, 0, SourceNum - 1);
++				const int32 DestIdx = i;
+
+-			AddOrUpdateConnection(Candidates, SourceSlots[SourceIdx].Index, DestSlots[DestIdx].Index, Tag);
++				AddOrUpdateConnection(Candidates, SourceSlots[SourceIdx].Index, DestSlots[DestIdx].Index, TagMask);
++			}
+ 		}
++		else
++		{
++			const int32 BestLaneIndex = CalcDestinationSide(SourceSlots, DestSlots) ? 0 : (SourceNum - 1);
++
++			// Distribute the lanes symmetrically around that best lane.
++			const int32 FirstIndex = FitRange(BestLaneIndex - DestNum/2, DestNum, SourceNum);
++
++			for (int32 i = 0; i < SourceNum; i++)
++			{
++				const int32 SourceIdx = i;
++				const int32 DestIdx = FMath::Clamp(i - FirstIndex, 0, DestNum - 1);
++				AddOrUpdateConnection(Candidates, SourceSlots[SourceIdx].Index, DestSlots[DestIdx].Index, TagMask);
++			}
++		}
+ 	}
+ }
+
+@@ -1244,7 +1256,10 @@
+
+ 	int32 MainDestPointIndex = 0;
+ 	float MainDestScore = 0;
+-
++
++	// Cache these in case we need them later.
++	TMap<int32, EZoneGraphTurnType> DestinationTurnTypes;
++
+ 	for (int32 PointIndex = Destinations.Num() - 1; PointIndex >= 0; PointIndex--)
+ 	{
+ 		const FConnectionEntry& Dest = Destinations[PointIndex];
+@@ -1273,18 +1288,21 @@
+ 																									Dest.Profile, Dest.IncomingConnections);
+
+ 		const EZoneShapeLaneConnectionRestrictions Restrictions = Source.Point.GetLaneConnectionRestrictions() | RestrictionsFromRules;
+-
++
++		// Use closest point on dest so that lane profile widths do not affect direction.
++		const FVector SourceSide = FVector::CrossProduct(SourceForward, SourceUp);
++
++		const bool bIsTurning = FVector::DotProduct(SourceForward, DirToDest) < TurnThresholdAngleCos;
++		const bool bIsLeftTurn = bIsTurning && FVector::DotProduct(SourceSide, DirToDest) > 0.0f;
++
++		DestinationTurnTypes.Add(PointIndex, bIsTurning ? (bIsLeftTurn ? EZoneGraphTurnType::Left : EZoneGraphTurnType::Right) : EZoneGraphTurnType::NoTurn);
++
+ 		// Discard destination that would result in left or right turns.
+ 		if (EnumHasAnyFlags(Restrictions, EZoneShapeLaneConnectionRestrictions::NoLeftTurn | EZoneShapeLaneConnectionRestrictions::NoRightTurn))
+ 		{
+ 			const bool bRemoveLeft = EnumHasAnyFlags(Restrictions, EZoneShapeLaneConnectionRestrictions::NoLeftTurn);
+ 			const bool bRemoveRight = EnumHasAnyFlags(Restrictions, EZoneShapeLaneConnectionRestrictions::NoRightTurn);
+-
+-			// Use closest point on dest so that lane profile widths do not affect direction.
+-			const FVector SourceSide = FVector::CrossProduct(SourceForward, SourceUp);
+
+-			const bool bIsTurning = FVector::DotProduct(SourceForward, DirToDest) < TurnThresholdAngleCos;
+-			const bool bIsLeftTurn = FVector::DotProduct(SourceSide, DirToDest) > 0.0f;
+ 			if (bIsTurning)
+ 			{
+ 				const bool bSkip = bIsLeftTurn ? bRemoveLeft : bRemoveRight;
+@@ -1364,6 +1382,10 @@
+ 				continue;
+ 			}
+
++			FZoneGraphTagMask TagMask(Tag);
++
++			const EZoneGraphTurnType TurnType = DestinationTurnTypes[DestSlots[DestSlotsBegin].PointIndex];
++
+ 			// Collect slots that have the current flag set.
+ 			TagSourceSlots.Reset();
+ 			for (const FLaneConnectionSlot& Slot : SourceSlots)
+@@ -1385,9 +1407,23 @@
+ 				}
+ 			}
+
++			for (const auto& CompatibleTagsElem : BuildSettings.CompatibleTags.FilterByPredicate([Tag](const FZoneGraphCompatibleTags& Elem) { return Elem.SourceTag == Tag; }))
++			{
++				const FZoneGraphTag& DestTag = CompatibleTagsElem.DestTag;
++				for (int32 j = DestSlotsBegin; j < DestSlotsEnd; j++)
++				{
++					const FLaneConnectionSlot& DestSlot = DestSlots[j];
++					if (DestSlot.LaneDesc.Tags.ContainsAny(DestTag) && CompatibleTagsElem.CompatibleForTurnTypes.Contains(TurnType))
++					{
++						TagDestSlots.Add(DestSlot);
++						TagMask.Add(FZoneGraphTagMask(DestTag));
++					}
++				}
++			}
++
+ 			if (TagSourceSlots.Num() > 0 && TagDestSlots.Num() > 0)
+ 			{
+-				AppendLaneConnectionCandidates(Candidates, TagSourceSlots, TagDestSlots, Tag, MainDestPointIndex);
++				AppendLaneConnectionCandidates(Candidates, TagSourceSlots, TagDestSlots, TagMask, MainDestPointIndex, TurnType != EZoneGraphTurnType::NoTurn);
+ 			}
+ 		}
+ 	}
+@@ -1395,7 +1431,7 @@
+ 	// Remove overlapping lanes.
+ 	// AppendLaneConnectionCandidates() sees only source and one destination at a time.
+ 	// This code removes any overlapping lanes and handles cases such as 4-lane entry might connect to two 2-lane exits.
+-	if (UE::ZoneGraph::Debug::bRemoveOverlap)
++	if (BuildSettings.bRemoveOverlap)
+ 	{
+ 		for (int32 Index = 0; Index < Candidates.Num() - 1; Index++)
+ 		{
+@@ -1441,7 +1477,7 @@
+
+ 	// Remove lanes that that connect to same destination as other lanes
+ 	// This reduces the number of merging lanes when there are multiple destinations.
+-	if (UE::ZoneGraph::Debug::bRemoveSameDestination)
++	if (BuildSettings.bRemoveSameDestination)
+ 	{
+ 		TArray<int32> SourceConnectionCount;
+ 		TArray<int32> DestConnectionCount;
+@@ -1538,7 +1574,7 @@
+ 	}
+
+
+-	if (UE::ZoneGraph::Debug::bFillEmptyDestination)
++	if (BuildSettings.bFillEmptyDestination)
+ 	{
+ 		// Fill in empty destination connections if possible.
+ 		// This usually happens when overlaps are removed, and i can leave left or right turn destinations empty.
+@@ -1599,7 +1635,7 @@
+
+ 	TArray<const UZoneShapeComponent*> ShapeComponentsInMap;
+ 	PointIndexToZoneShapeComponent.GenerateValueArray(ShapeComponentsInMap);
+-
++
+ 	const bool bAllZoneShapeComponentsInMapAreValid = !ShapeComponentsInMap.Contains(nullptr);
+ 	if (bAllZoneShapeComponentsInMapAreValid)
+ 	{
+@@ -1795,7 +1831,7 @@
+ 	TArray<int32> IncomingConnections;
+ 	OutgoingConnections.Init(0, Points.Num());
+ 	IncomingConnections.Init(0, Points.Num());
+-
++
+ 	for (int32 SourceIdx = 0; SourceIdx < Points.Num(); SourceIdx++)
+ 	{
+ 		const FZoneShapePoint& SourcePoint = Points[SourceIdx];
+diff --color -urN --strip-trailing-cr Source/ZoneGraph/Public/ZoneGraphTypes.h /Users/pete/VayuSim/Plugins/ZoneGraph/Source/ZoneGraph/Public/ZoneGraphTypes.h
+--- Source/ZoneGraph/Public/ZoneGraphTypes.h	2025-02-12 20:17:25
++++ /Users/pete/VayuSim/Plugins/ZoneGraph/Source/ZoneGraph/Public/ZoneGraphTypes.h	2025-02-12 15:04:54
+@@ -968,7 +968,30 @@
+ 	int32 ConnectionRestrictions = 0;
+ };
+
++UENUM(BlueprintType)
++enum class EZoneGraphTurnType : uint8
++{
++	Right,
++	Left,
++	NoTurn,
++};
++
+ USTRUCT()
++struct ZONEGRAPH_API FZoneGraphCompatibleTags
++{
++	GENERATED_BODY()
++
++	UPROPERTY(Category = CompatibleTags, EditAnywhere)
++	FZoneGraphTag SourceTag;
++
++	UPROPERTY(Category = CompatibleTags, EditAnywhere)
++	FZoneGraphTag DestTag;
++
++	UPROPERTY(Category = CompatibleTags, EditAnywhere)
++	TSet<EZoneGraphTurnType> CompatibleForTurnTypes;
++};
++
++USTRUCT()
+ struct ZONEGRAPH_API FZoneGraphBuildSettings
+ {
+ 	GENERATED_BODY()
+@@ -1004,6 +1027,22 @@
+ 	/** Routing rules applied to polygon shapes */
+ 	UPROPERTY(Category = Lanes, EditAnywhere)
+ 	TArray<FZoneGraphLaneRoutingRule> PolygonRoutingRules;
++
++	/** Tags which should be connected for certain turn types even when they are not the same. */
++	UPROPERTY(Category = Lanes, EditAnywhere)
++	TArray<FZoneGraphCompatibleTags> CompatibleTags;
++
++	/** Whether to remove overlapping lane connections. */
++	UPROPERTY(Category = Lanes, EditAnywhere)
++	bool bRemoveOverlap = true;
++
++	/** Whether to remove lane connections when another already has the same destination. */
++	UPROPERTY(Category = Lanes, EditAnywhere)
++	bool bRemoveSameDestination = true;
++
++	/** Whether to fill empty destination connections if possible. */
++	UPROPERTY(Category = Lanes, EditAnywhere)
++	bool bFillEmptyDestination = true;
+
+ 	/** Max distance between two shape points for them to be snapped together. */
+ 	UPROPERTY(Category = PointSnapping, EditAnywhere)
+diff -urN --strip-trailing-cr Source/ZoneGraph/Private/ZoneGraphQuery.cpp /home/giovanni/Develop/VayuSim/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Private/ZoneGraphQuery.cpp
+--- Source/ZoneGraph/Private/ZoneGraphQuery.cpp	2023-06-01 09:13:48.000000000 -0400
++++ /home/giovanni/Develop/VayuSim/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Private/ZoneGraphQuery.cpp	2025-03-10 17:18:45.936878604 -0400
+@@ -589,5 +589,135 @@
+
+ 	return OutLaneSections.Num() > 0;
+ }
++
++bool FindIntersectionBetweenSegments(const FVector& SegmentAStart, const FVector& SegmentAEnd, const FVector& SegmentBStart, const FVector& SegmentBEnd, float& OutDistanceAlongSegmentA, float Tolerance = KINDA_SMALL_NUMBER)
++{
++	FVector ClosestPointOnSegmentAToSegmentB;
++	FVector ClosestPointOnSegmentBToSegmentA;
++
++	FMath::SegmentDistToSegment(SegmentAStart, SegmentAEnd, SegmentBStart, SegmentBEnd, ClosestPointOnSegmentAToSegmentB, ClosestPointOnSegmentBToSegmentA);
++
++	const float SquaredDistanceBetweenClosestPoints = (ClosestPointOnSegmentBToSegmentA - ClosestPointOnSegmentAToSegmentB).SizeSquared();
++	const float SquaredTolerance = FMath::Square(Tolerance);
++
++	if (SquaredDistanceBetweenClosestPoints < SquaredTolerance)
++	{
++		const float DistanceAlongSegmentA = (ClosestPointOnSegmentAToSegmentB - SegmentAStart).Size();
++		OutDistanceAlongSegmentA = DistanceAlongSegmentA;
++
++		return true;
++	}
++
++	return false;
++}
++
++bool FindFirstIntersectionBetweenLanes(
++		const FZoneGraphStorage& Storage,
++		const FZoneGraphLaneHandle& QueryLaneHandle,
++		const FZoneGraphLaneHandle& OtherLaneHandle,
++		const float LateralOffsetFromCenterOfOtherLane,
++		float& OutDistanceAlongQueryLane,
++		int32* OutQueryLaneIntersectionSegmentIndex,
++		float* OutNormalizedDistanceAlongQueryLaneIntersectionSegment,
++		float Tolerance)
++{
++	if (!EnsureLaneHandle(Storage, QueryLaneHandle, __FUNCTION__))
++	{
++		return false;
++	}
++
++	if (!EnsureLaneHandle(Storage, OtherLaneHandle, __FUNCTION__))
++	{
++		return false;
++	}
++
++	return FindFirstIntersectionBetweenLanes(
++		Storage,
++		QueryLaneHandle.Index,
++		OtherLaneHandle.Index,
++		LateralOffsetFromCenterOfOtherLane,
++		OutDistanceAlongQueryLane,
++		OutQueryLaneIntersectionSegmentIndex,
++		OutNormalizedDistanceAlongQueryLaneIntersectionSegment,
++		Tolerance);
++}
++
++bool FindFirstIntersectionBetweenLanes(
++		const FZoneGraphStorage& Storage,
++		const uint32 QueryLaneIndex,
++		const uint32 OtherLaneIndex,
++		const float LateralOffsetFromCenterOfOtherLane,
++		float& OutDistanceAlongQueryLane,
++		int32* OutQueryLaneIntersectionSegmentIndex,
++		float* OutNormalizedDistanceAlongQueryLaneIntersectionSegment,
++		float Tolerance)
++{
++	const FZoneLaneData& QueryLane = Storage.Lanes[QueryLaneIndex];
++	const int32 NumQueryLanePoints = QueryLane.PointsEnd - QueryLane.PointsBegin;
++
++	if (!ensureMsgf(NumQueryLanePoints >= 2, TEXT("QueryLane must have at least 2 points in FindFirstIntersectionBetweenLanes.")))
++	{
++		return false;
++	}
++
++	const FZoneLaneData& OtherLane = Storage.Lanes[OtherLaneIndex];
++	const int32 NumOtherLanePoints = OtherLane.PointsEnd - OtherLane.PointsBegin;
++
++	if (!ensureMsgf(NumOtherLanePoints >= 2, TEXT("OtherLane must have at least 2 points in FindFirstIntersectionBetweenLanes.")))
++	{
++		return false;
++	}
++
++	float DistanceAlongQueryLane = 0.0f;
++
++	for (int32 QueryLanePointIndex = QueryLane.PointsBegin; QueryLanePointIndex < QueryLane.PointsEnd - 1; ++QueryLanePointIndex)
++	{
++		const FVector& QueryLaneSegmentStartLocation = Storage.LanePoints[QueryLanePointIndex];
++		const FVector& QueryLaneSegmentEndLocation = Storage.LanePoints[QueryLanePointIndex + 1];
++
++		const float QuerySegmentLength = (QueryLaneSegmentEndLocation - QueryLaneSegmentStartLocation).Size();
++
++		for (int32 OtherLanePointIndex = OtherLane.PointsBegin; OtherLanePointIndex < OtherLane.PointsEnd - 1; ++OtherLanePointIndex)
++		{
++			const FVector OtherLaneSegmentStartTangentVector = Storage.LaneTangentVectors[OtherLanePointIndex];
++			const FVector OtherLaneSegmentStartUpVector = Storage.LaneUpVectors[OtherLanePointIndex];
++
++			const FVector OtherLaneSegmentStartRightVector = FVector::CrossProduct(OtherLaneSegmentStartTangentVector, OtherLaneSegmentStartUpVector);
++
++			const FVector OtherLaneSegmentEndTangentVector = Storage.LaneTangentVectors[OtherLanePointIndex + 1];
++			const FVector OtherLaneSegmentEndUpVector = Storage.LaneUpVectors[OtherLanePointIndex + 1];
++
++			const FVector OtherLaneSegmentEndRightVector = FVector::CrossProduct(OtherLaneSegmentEndTangentVector, OtherLaneSegmentEndUpVector);
++
++			const FVector& OtherLaneSegmentStartLocation = Storage.LanePoints[OtherLanePointIndex] + OtherLaneSegmentStartRightVector * LateralOffsetFromCenterOfOtherLane;
++			const FVector& OtherLaneSegmentEndLocation = Storage.LanePoints[OtherLanePointIndex + 1] + OtherLaneSegmentEndRightVector * LateralOffsetFromCenterOfOtherLane;
++
++			float DistanceAlongQuerySegment = 0.0f;
++
++			if (FindIntersectionBetweenSegments(QueryLaneSegmentStartLocation, QueryLaneSegmentEndLocation, OtherLaneSegmentStartLocation, OtherLaneSegmentEndLocation, DistanceAlongQuerySegment, Tolerance))
++			{
++				OutDistanceAlongQueryLane = DistanceAlongQueryLane + DistanceAlongQuerySegment;
++
++				if (OutQueryLaneIntersectionSegmentIndex != nullptr)
++				{
++					*OutQueryLaneIntersectionSegmentIndex = QueryLanePointIndex;
++				}
++
++				if (OutNormalizedDistanceAlongQueryLaneIntersectionSegment != nullptr)
++				{
++					const float NormalizedDistanceAlongQuerySegment = QuerySegmentLength > 0.0f ? DistanceAlongQuerySegment / QuerySegmentLength : 0.0f;
++
++					*OutNormalizedDistanceAlongQueryLaneIntersectionSegment = NormalizedDistanceAlongQuerySegment;
++				}
++
++				return true;
++			}
++		}
++
++		DistanceAlongQueryLane += QuerySegmentLength;
++	}
++
++	return false;
++}
+
+ } // UE::ZoneGraph::Query
+diff -urN --strip-trailing-cr Source/ZoneGraph/Public/ZoneGraphQuery.h /home/giovanni/Develop/VayuSim/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Public/ZoneGraphQuery.h
+--- Source/ZoneGraph/Public/ZoneGraphQuery.h	2023-06-01 09:13:48.000000000 -0400
++++ /home/giovanni/Develop/VayuSim/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Public/ZoneGraphQuery.h	2025-03-10 17:18:45.937878581 -0400
+@@ -75,5 +75,27 @@
+
+ /**  Find sections of lanes fully overlapping (including lane width) in ZoneGraph Storage. */
+ ZONEGRAPH_API bool FindLaneOverlaps(const FZoneGraphStorage& Storage, const FVector& Center, const float Radius, const FZoneGraphTagFilter TagFilter, TArray<FZoneGraphLaneSection>& OutLaneSections);
++
++/**  Find the first intersection between two lanes in terms of distance along QueryLane in ZoneGraph Storage. */
++ZONEGRAPH_API bool FindFirstIntersectionBetweenLanes(
++	const FZoneGraphStorage& Storage,
++	const FZoneGraphLaneHandle& QueryLaneHandle,
++	const FZoneGraphLaneHandle& OtherLaneHandle,
++	const float LateralOffsetFromCenterOfOtherLane,
++	float& OutDistanceAlongQueryLane,
++	int32* OutQueryLaneIntersectionSegmentIndex = nullptr,
++	float* OutNormalizedDistanceAlongQueryLaneIntersectionSegment = nullptr,
++	float Tolerance = KINDA_SMALL_NUMBER);
++
++/**  Find the first intersection between two lanes in terms of distance along QueryLane in ZoneGraph Storage. */
++ZONEGRAPH_API bool FindFirstIntersectionBetweenLanes(
++	const FZoneGraphStorage& Storage,
++	const uint32 QueryLaneIndex,
++	const uint32 OtherLaneIndex,
++	const float LateralOffsetFromCenterOfOtherLane,
++	float& OutDistanceAlongQueryLane,
++	int32* OutQueryLaneIntersectionSegmentIndex = nullptr,
++	float* OutNormalizedDistanceAlongQueryLaneIntersectionSegment = nullptr,
++	float Tolerance = KINDA_SMALL_NUMBER);
+
+ } // UE::ZoneGraph::Query
+\ No newline at end of file
