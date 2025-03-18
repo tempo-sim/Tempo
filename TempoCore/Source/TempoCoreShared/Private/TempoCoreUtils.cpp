@@ -9,16 +9,17 @@ UWorldSubsystem* UTempoCoreUtils::GetSubsystemImplementingInterface(const UObjec
 {
 	if (const UWorld* World = GEngine->GetWorldFromContextObject(WorldContextObject, EGetWorldErrorMode::LogAndReturnNull))
 	{
-		TArray<UWorldSubsystem*> Subsystems = World->GetSubsystemArray<UWorldSubsystem>();
-		for (UWorldSubsystem* Subsystem : Subsystems)
+		UWorldSubsystem* SubsystemImplementingInterface = nullptr;
+		World->ForEachSubsystem<UWorldSubsystem>([&Interface, &SubsystemImplementingInterface](UWorldSubsystem* Subsystem)
 		{
 			if (Subsystem->GetClass()->ImplementsInterface(Interface))
 			{
-				return Subsystem;
+				SubsystemImplementingInterface = Subsystem;
 			}
-		}
+		});
+		return SubsystemImplementingInterface;
 	}
-	
+
 	return nullptr;
 }
 

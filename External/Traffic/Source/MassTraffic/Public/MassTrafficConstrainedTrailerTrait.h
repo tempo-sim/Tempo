@@ -13,7 +13,7 @@
 #include "MassTrafficConstrainedTrailerTrait.generated.h"
 
 USTRUCT()
-struct MASSTRAFFIC_API FMassTrafficConstrainedTrailerParameters : public FMassSharedFragment
+struct MASSTRAFFIC_API FMassTrafficConstrainedTrailerParameters : public FMassConstSharedFragment
 {
 	GENERATED_BODY()
 

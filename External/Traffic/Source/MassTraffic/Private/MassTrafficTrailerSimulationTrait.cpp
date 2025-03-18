@@ -66,8 +66,7 @@ void UMassTrafficTrailerSimulationTrait::BuildTemplate(FMassEntityTemplateBuildC
 		const FMassTrafficSimpleVehiclePhysicsTemplate* Template = MassTrafficSubsystem->GetOrExtractVehiclePhysicsTemplate(Params.PhysicsVehicleTemplateActor);
 
 		// Register & add shared fragment
-		const uint32 TemplateHash = UE::StructUtils::GetStructCrc32(FConstStructView::Make(*Template));
-		const FConstSharedStruct PhysicsSharedFragment = EntityManager.GetOrCreateConstSharedFragmentByHash<FMassTrafficVehiclePhysicsSharedParameters>(TemplateHash, Template);
+		const FConstSharedStruct PhysicsSharedFragment = EntityManager.GetOrCreateConstSharedFragment<FMassTrafficVehiclePhysicsSharedParameters>(Template);
 		BuildContext.AddConstSharedFragment(PhysicsSharedFragment);
 	}
 	else

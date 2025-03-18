@@ -71,7 +71,7 @@ public:
 };
 
 USTRUCT(BlueprintType)
-struct MASSTRAFFIC_API FMassTrafficDriversParameters : public FMassSharedFragment
+struct MASSTRAFFIC_API FMassTrafficDriversParameters : public FMassConstSharedFragment
 {
 	GENERATED_BODY()
 	
