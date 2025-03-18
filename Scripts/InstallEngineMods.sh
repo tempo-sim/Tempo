@@ -51,10 +51,10 @@ elif [[ "$OSTYPE" = "linux-gnu"* ]]; then
   DOTNET=$(find ./Engine/Binaries/ThirdParty/DotNet -type f -name dotnet)
 fi
 
-# Get engine version (e.g. 5.4)
+# Get engine release (e.g. 5.4)
 if [ -f "$UNREAL_ENGINE_PATH/Engine/Intermediate/Build/BuildRules/UE5RulesManifest.json" ]; then
-  VERSION_WITH_HOTFIX=$(jq -r '.EngineVersion' "$UNREAL_ENGINE_PATH/Engine/Intermediate/Build/BuildRules/UE5RulesManifest.json")
-  VERSION="${VERSION_WITH_HOTFIX%.*}"
+  RELEASE_WITH_HOTFIX=$(jq -r '.EngineVersion' "$UNREAL_ENGINE_PATH/Engine/Intermediate/Build/BuildRules/UE5RulesManifest.json")
+  RELEASE="${RELEASE_WITH_HOTFIX%.*}"
 fi
 
 APPLY_ADDS() {
@@ -65,7 +65,6 @@ APPLY_ADDS() {
     local SRC="$ENGINE_MODS_DIR/$ROOT/$ADD"
     local ADD_NO_VERSION="${ADD%.*}"
     local DEST="$TEMP/$ROOT/$ADD_NO_VERSION"
-    echo "Installing $ADD"
     mkdir -p "$(dirname "$DEST")"
     cp "$SRC" "$DEST"
   done
@@ -97,7 +96,6 @@ APPLY_PATCHES() {
 
   for ((i=0; i<${#PATCHES[@]}; i++)); do
     local PATCH="$ENGINE_MODS_DIR/$ROOT/${PATCHES[i]//\'/}"
-    echo "Applying Patch $(basename "$PATCH")"
     if ! patch --force -p0 --reject-file=- --ignore-whitespace <"$PATCH" &>/dev/null; then
       echo "Failed to apply patch: $PATCH"
       exit 1
@@ -122,8 +120,6 @@ REVERT_PATCHES() {
       if patch --force --reject-file=- -R -p0 -s -f --ignore-whitespace --dry-run <"$PATCH" &>/dev/null; then
         patch --force --reject-file=- -R -p0 -s -f --ignore-whitespace <"$PATCH" &>/dev/null
         echo "Reverted $PATCH"
-      else
-        echo "Patch $PATCH" did not revert cleanly
       fi
     done
 }
@@ -132,35 +128,38 @@ REBUILD_PLUGIN() {
   TEMP="$1"
   ROOT="$2"
   PLUGIN_NAME="${ROOT##*/}"
-  PLUGIN_DIR="$TEMP/$ROOT"
 
-  if [ ! -d "$PLUGIN_DIR" ]; then
+  if [ ! -d "$TEMP/$ROOT" ]; then
     echo "Plugin $PLUGIN_NAME was not found in the expected location."
     exit 1
   fi
 
-  echo -e "Rebuilding plugin $PLUGIN_NAME with Tempo mods"
+  echo "Rebuilding plugin $PLUGIN_NAME with Tempo mods"
 
   PLUGIN_BUILD_DIR=$(mktemp -d)
   cd "$UNREAL_ENGINE_PATH"
   if [[ "$OSTYPE" = "msys" ]]; then
-    ./Engine/Build/BatchFiles/RunUAT.bat BuildPlugin -Plugin="$PLUGIN_DIR/$PLUGIN_NAME.uplugin" -Package="$PLUGIN_BUILD_DIR" -Rocket -TargetPlatforms=Win64
+    ./Engine/Build/BatchFiles/RunUAT.bat BuildPlugin -Plugin="$TEMP/$ROOT/$PLUGIN_NAME.uplugin" -Package="$PLUGIN_BUILD_DIR" -Rocket -TargetPlatforms=Win64
   elif [[ "$OSTYPE" = "darwin"* ]]; then
-    ./Engine/Build/BatchFiles/RunUAT.sh BuildPlugin -Plugin="$PLUGIN_DIR/$PLUGIN_NAME.uplugin" -Package="$PLUGIN_BUILD_DIR" -Rocket -TargetPlatforms=Mac
+    ./Engine/Build/BatchFiles/RunUAT.sh BuildPlugin -Plugin="$TEMP/$ROOT/$PLUGIN_NAME.uplugin" -Package="$PLUGIN_BUILD_DIR" -Rocket -TargetPlatforms=Mac
   elif [[ "$OSTYPE" = "linux-gnu"* ]]; then
-    ./Engine/Build/BatchFiles/RunUAT.sh BuildPlugin -Plugin="$PLUGIN_DIR/$PLUGIN_NAME.uplugin" -Package="$PLUGIN_BUILD_DIR" -Rocket -TargetPlatforms=Linux
+    ./Engine/Build/BatchFiles/RunUAT.sh BuildPlugin -Plugin="$TEMP/$ROOT/$PLUGIN_NAME.uplugin" -Package="$PLUGIN_BUILD_DIR" -Rocket -TargetPlatforms=Linux
   fi
 
   # Copy resulting Binaries and Intermediate folders
-  cp -r "$PLUGIN_BUILD_DIR/Binaries" "$PLUGIN_BUILD_DIR/Intermediate" "$PLUGIN_DIR"
+  cp -r "$PLUGIN_BUILD_DIR/Binaries" "$PLUGIN_BUILD_DIR/Intermediate" "$TEMP/$ROOT"
 
   # Clean up
   rm -rf "$PLUGIN_BUILD_DIR"
 
+  echo "Copying rebuilt plugin $PLUGIN_NAME into engine"
+  rm -rf "${UNREAL_ENGINE_PATH:?}/${ROOT:?}/*"
+  COPY_DIR "$TEMP/$ROOT" "$UNREAL_ENGINE_PATH/$ROOT"
+
   echo -e "\nSuccessfully rebuilt plugin $PLUGIN_NAME with Tempo mods\n"
 }
 
-OVERWRITE_DIR() {
+COPY_DIR() {
   SRC="$1"
   DEST="$2"
   if [[ "$OSTYPE" = "darwin"* ]]; then
@@ -174,7 +173,9 @@ REBUILD_UBT() {
   TEMP="$1"
   ROOT="$2"
 
-  OVERWRITE_DIR "$TEMP/$ROOT" "$UNREAL_ENGINE_PATH/$ROOT"
+  echo "Copying patched UnrealBuildTool source into engine"
+  rm -rf "${UNREAL_ENGINE_PATH:?}/${ROOT:?}/*"
+  COPY_DIR "$TEMP/$ROOT" "$UNREAL_ENGINE_PATH/$ROOT"
 
   if [ -z ${DOTNET+x} ]; then
     echo -e "Unable rebuild UnrealBuildTool with Tempo mods. Couldn't find dotnet.\n"
@@ -184,12 +185,15 @@ REBUILD_UBT() {
   cd "$UNREAL_ENGINE_PATH"
   eval "$DOTNET" build "./Engine/Source/Programs/UnrealBuildTool/UnrealBuildTool.csproj" -c Development
   eval "$DOTNET" build "./Engine/Source/Programs/AutomationTool/AutomationTool.csproj" -c Development
+
+  echo -e "\nSuccessfully rebuilt UnrealBuildTool with Tempo mods\n"
 }
 
-if ! MODS=($(jq -r --arg version "$VERSION" -c '.[$version][]' "$TEMPO_ROOT/EngineMods/EngineMods.json")); then
-  echo "Unsupported Unreal Engine version: $VERSION"
-  SUPPORTED_VERSIONS=$(jq -r 'keys | join(", ")' "$TEMPO_ROOT/EngineMods/EngineMods.json")
-  echo "Supported versions are: $SUPPORTED_VERSIONS"
+if ! MODS=($(jq -r --arg release "$RELEASE" -c '.[$release][]' "$TEMPO_ROOT/EngineMods/EngineMods.json" 2>/dev/null)); then
+  echo "Error: Tempo does not support Unreal Engine release $RELEASE (found via UNREAL_ENGINE_PATH environment variable at $UNREAL_ENGINE_PATH)"
+  SUPPORTED_RELEASES=$(jq -r 'keys | join(", ")' "$TEMPO_ROOT/EngineMods/EngineMods.json")
+  echo "Supported Unreal Engine releases are: $SUPPORTED_RELEASES"
+  echo "Please install a supported Unreal Engine release and try again"
   exit 1
 fi
 
@@ -211,15 +215,23 @@ for MOD in "${MODS[@]}"; do
   read -ra ADDS <<< "$ADDS"
   read -ra PATCHES <<< "$PATCHES"
 
-  # Copy the folder in its current state
+  echo "Apply Tempo mods (if necessary) to $ROOT"
+
+  # Copy the folder in its current state (but skip the heavy built artifacts)
   mkdir -p "$TEMP/$ROOT"
-  OVERWRITE_DIR "$UNREAL_ENGINE_PATH/$ROOT" "$TEMP/$ROOT"
+  find "$UNREAL_ENGINE_PATH/$ROOT" -maxdepth 1 -mindepth 1 -not -name "Binaries" -not -name "Intermediate" -exec cp -r {} "$TEMP/$ROOT" \;
 
   # Attempt to revert any previously-applied patches via the patch record
   cd "$TEMP/$ROOT"
   if [ -f "$PATCH_RECORD_PATH/$ROOT/mods_applied.patch" ]; then
     if ! patch --force --reject-file=- -R -p0 -s -f --ignore-whitespace --dry-run < "$PATCH_RECORD_PATH/$ROOT/mods_applied.patch" &>/dev/null; then
-      echo "Failed to revert applied mods for $ROOT Recommend verifying your Unreal Engine installation."
+      echo "Failed to revert applied mods for $ROOT. Something has gone wrong. Recommended steps:"
+      echo "  - Remove $UNREAL_ENGINE_PATH/TempoMods folder"
+      if [[ "$OSTYPE" = "linux-gnu"* ]]; then
+        echo "  - Verify your Unreal Engine installation by re-extracting the pre-built UE for Linux from Epic"
+      else
+        echo "  - Verify your Unreal Engine installation through the Epic Games Installer"
+      fi
       exit 1
     fi
     patch --force --reject-file=- -R -p0 -s -f --ignore-whitespace < "$PATCH_RECORD_PATH/$ROOT/mods_applied.patch" &>/dev/null
@@ -231,7 +243,7 @@ for MOD in "${MODS[@]}"; do
 
   # Make another copy which we will leave at its vanilla (from Epic) state
   mkdir -p "$TEMP_VANILLA/$ROOT"
-  OVERWRITE_DIR "$TEMP/$ROOT" "$TEMP_VANILLA/$ROOT"
+  COPY_DIR "$TEMP/$ROOT" "$TEMP_VANILLA/$ROOT"
 
   # Apply mods to the (copied) temp folder
   APPLY_ADDS "$TEMP" "$ROOT" "${ADDS[@]}"
@@ -257,7 +269,7 @@ for MOD in "${MODS[@]}"; do
     grep -E '^(\+| |-)[^+-]' "$TEMP/TempoMods/$ROOT/mods_applied.patch" > "$TEMP/new_filtered.patch"
     grep -E '^(\+| |-)[^+-]' "$PATCH_RECORD_PATH/$ROOT/mods_applied.patch" > "$TEMP/previous_filtered.patch"
     if cmp --silent -- "$TEMP/new_filtered.patch" "$TEMP/previous_filtered.patch" &>/dev/null; then
-      echo "$ROOT already up to date"
+      echo -e "$ROOT already up to date\n"
       continue
     fi
   fi
@@ -266,9 +278,6 @@ for MOD in "${MODS[@]}"; do
   if [ "$TYPE" = "Plugin" ]; then
     echo "Rebuilding plugin $ROOT with Tempo mods"
     REBUILD_PLUGIN "$TEMP" "$ROOT"
-    echo "Copying rebuilt plugin $ROOT into engine"
-    rm -rf "${UNREAL_ENGINE_PATH:?}/${ROOT:?}"
-    OVERWRITE_DIR "$TEMP/$ROOT" "$UNREAL_ENGINE_PATH/$ROOT"
   elif [ "$TYPE" = "UnrealBuildTool" ]; then
     echo "Rebuilding UnrealBuildTool (in-place) with Tempo mods"
     REBUILD_UBT "$TEMP" "$ROOT"
