@@ -216,6 +216,7 @@ bool ShouldPerformReactiveYieldAtIntersection(
 	const FZoneGraphStorage& ZoneGraphStorage,
 	bool& OutShouldGiveOpportunityForTurningVehiclesToReactivelyYieldAtIntersection,
 	FZoneGraphLaneHandle& OutYieldTargetLane,
+	FMassEntityHandle& OutYieldTargetEntity,
 	int32& OutMergeYieldCaseIndex);
 
 bool ShouldPerformReactiveYieldAtRoadCrosswalk(
@@ -227,6 +228,7 @@ bool ShouldPerformReactiveYieldAtRoadCrosswalk(
 	const FAgentRadiusFragment& RadiusFragment,
 	const FMassTrafficRandomFractionFragment& RandomFractionFragment,
 	const FZoneGraphStorage& ZoneGraphStorage,
-	FZoneGraphLaneHandle& OutYieldTargetLane);
+	FZoneGraphLaneHandle& OutYieldTargetLane,
+	FMassEntityHandle& OutYieldTargetEntity);
 
 };

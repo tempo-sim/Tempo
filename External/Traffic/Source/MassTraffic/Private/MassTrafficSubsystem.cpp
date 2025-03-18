@@ -100,7 +100,8 @@ void UMassTrafficSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 
 	ClearIntersectionStopQueues();
 	ClearYieldInfo();
-	ClearYieldOverrideMap();
+	ClearYieldOverrides();
+	ClearCoreVehicleInfos();
 
 	// Execute any field operations subclassing from UMassTrafficBeginPlayFieldOperationBase 
 	PerformFieldOperation(UMassTrafficBeginPlayFieldOperationBase::StaticClass());
@@ -991,10 +992,13 @@ void UMassTrafficSubsystem::ClearLaneIntersectionInfo()
 	LaneIntersectionInfoMap.Reset();
 }
 
-void UMassTrafficSubsystem::AddYieldInfo(const FMassEntityHandle& YieldingEntity, const FZoneGraphLaneHandle& YieldingLane, const FZoneGraphLaneHandle& YieldTargetLane)
+void UMassTrafficSubsystem::AddYieldInfo(const FZoneGraphLaneHandle& YieldingLane, const FMassEntityHandle& YieldingEntity, const FZoneGraphLaneHandle& YieldTargetLane, const FMassEntityHandle& YieldTargetEntity)
 {
-	TSet<FZoneGraphLaneHandle>& YieldTargetLanes = LaneYieldMap.FindOrAdd(YieldingLane);
-	YieldTargetLanes.Add(YieldTargetLane);
+	const FLaneEntityPair& YieldingLaneEntityPair = FLaneEntityPair(YieldingLane, YieldingEntity);
+	const FLaneEntityPair& YieldTargetLaneEntityPair = FLaneEntityPair(YieldTargetLane, YieldTargetEntity);
+	
+	TSet<FLaneEntityPair>& YieldTargetLaneEntityPairs = YieldMap.FindOrAdd(YieldingLaneEntityPair);
+	YieldTargetLaneEntityPairs.Add(YieldTargetLaneEntityPair);
 
 	TSet<FMassEntityHandle>& YieldingEntities = YieldingEntitiesMap.FindOrAdd(YieldingLane);
 	YieldingEntities.Add(YieldingEntity);
@@ -1002,13 +1006,13 @@ void UMassTrafficSubsystem::AddYieldInfo(const FMassEntityHandle& YieldingEntity
 
 void UMassTrafficSubsystem::ClearYieldInfo()
 {
-	LaneYieldMap.Reset();
+	YieldMap.Reset();
 	YieldingEntitiesMap.Reset();
 }
 
-const TMap<FZoneGraphLaneHandle, TSet<FZoneGraphLaneHandle>>& UMassTrafficSubsystem::GetLaneYieldMap() const
+const TMap<FLaneEntityPair, TSet<FLaneEntityPair>>& UMassTrafficSubsystem::GetYieldMap() const
 {
-	return LaneYieldMap;
+	return YieldMap;
 }
 
 const TMap<FZoneGraphLaneHandle, TSet<FMassEntityHandle>>& UMassTrafficSubsystem::GetYieldingEntitiesMap() const
@@ -1016,37 +1020,105 @@ const TMap<FZoneGraphLaneHandle, TSet<FMassEntityHandle>>& UMassTrafficSubsystem
 	return YieldingEntitiesMap;
 }
 
-void UMassTrafficSubsystem::AddEntityToLaneYieldOverrideMap(const FZoneGraphLaneHandle& LaneHandle, const FMassEntityHandle& YieldOverrideEntity)
+void UMassTrafficSubsystem::AddYieldOverride(const FZoneGraphLaneHandle& YieldOverrideLane, const FMassEntityHandle& YieldOverrideEntity, const FZoneGraphLaneHandle& YieldIgnoreTargetLane, const FMassEntityHandle& YieldIgnoreTargetEntity)
 {
-	TSet<FMassEntityHandle>& YieldOverrideEntities = LaneYieldOverrideMap.FindOrAdd(LaneHandle);
-	YieldOverrideEntities.Add(YieldOverrideEntity);
-}
-
-void UMassTrafficSubsystem::ClearYieldOverrideMap()
-{
-	LaneYieldOverrideMap.Reset();
-}
-
-bool UMassTrafficSubsystem::IsEntityInLaneYieldOverrideMap(const FZoneGraphLaneHandle& LaneHandle, const FMassEntityHandle& EntityHandle) const
-{
-	const TSet<FMassEntityHandle>* YieldOverrideEntities = LaneYieldOverrideMap.Find(LaneHandle);
+	const FLaneEntityPair YieldOverrideLaneEntityPair(YieldOverrideLane, YieldOverrideEntity);
+	const FLaneEntityPair YieldIgnoreTargetLaneEntityPair(YieldIgnoreTargetLane, YieldIgnoreTargetEntity);
 	
-	if (YieldOverrideEntities == nullptr)
+	TSet<FLaneEntityPair>& YieldIgnoreTargets = YieldOverrideMap.FindOrAdd(YieldOverrideLaneEntityPair);
+	YieldIgnoreTargets.Add(YieldIgnoreTargetLaneEntityPair);
+}
+
+void UMassTrafficSubsystem::AddWildcardYieldOverride(const FZoneGraphLaneHandle& YieldOverrideLane, const FMassEntityHandle& YieldOverrideEntity)
+{
+	const FLaneEntityPair YieldOverrideLaneEntityPair(YieldOverrideLane, YieldOverrideEntity);
+	
+	WildcardYieldOverrideSet.FindOrAdd(YieldOverrideLaneEntityPair);
+}
+
+void UMassTrafficSubsystem::ClearYieldOverrides()
+{
+	YieldOverrideMap.Reset();
+	WildcardYieldOverrideSet.Reset();
+}
+
+bool UMassTrafficSubsystem::HasYieldOverride(const FZoneGraphLaneHandle& YieldingLane, const FMassEntityHandle& YieldingEntity, const FZoneGraphLaneHandle& YieldTargetLane, const FMassEntityHandle& YieldTargetEntity) const
+{
+	if (HasWildcardYieldOverride(YieldingLane, YieldingEntity))
+	{
+		return true;
+	}
+	
+	const FLaneEntityPair YieldOverrideLaneEntityPair(YieldingLane, YieldingEntity);
+	const FLaneEntityPair YieldIgnoreTargetLaneEntityPair(YieldTargetLane, YieldTargetEntity);
+	
+	const TSet<FLaneEntityPair>* YieldIgnoreTargets = YieldOverrideMap.Find(YieldOverrideLaneEntityPair);
+	
+	if (YieldIgnoreTargets == nullptr)
 	{
 		return false;
 	}
 	
-	return YieldOverrideEntities->Contains(EntityHandle);
+	return YieldIgnoreTargets->Contains(YieldIgnoreTargetLaneEntityPair);
 }
 
-const TMap<FZoneGraphLaneHandle, TSet<FMassEntityHandle>>& UMassTrafficSubsystem::GetLaneYieldOverrideMap() const
+bool UMassTrafficSubsystem::HasWildcardYieldOverride(const FZoneGraphLaneHandle& YieldingLane, const FMassEntityHandle& YieldingEntity) const
 {
-	return LaneYieldOverrideMap;
+	const FLaneEntityPair YieldOverrideLaneEntityPair(YieldingLane, YieldingEntity);
+	
+	return WildcardYieldOverrideSet.Contains(YieldOverrideLaneEntityPair);
 }
 
-TMap<FZoneGraphLaneHandle, TSet<FMassEntityHandle>>& UMassTrafficSubsystem::GetMutableLaneYieldOverrideMap()
+const TMap<FLaneEntityPair, TSet<FLaneEntityPair>>& UMassTrafficSubsystem::GetYieldOverrideMap() const
 {
-	return LaneYieldOverrideMap;
+	return YieldOverrideMap;
+}
+
+TMap<FLaneEntityPair, TSet<FLaneEntityPair>>& UMassTrafficSubsystem::GetMutableYieldOverrideMap()
+{
+	return YieldOverrideMap;
+}
+
+const TSet<FLaneEntityPair>& UMassTrafficSubsystem::GetWildcardYieldOverrideSet() const
+{
+	return WildcardYieldOverrideSet;
+}
+
+TSet<FLaneEntityPair>& UMassTrafficSubsystem::GetMutableWildcardYieldOverrideSet()
+{
+	return WildcardYieldOverrideSet;
+}
+
+void UMassTrafficSubsystem::AddCoreVehicleInfo(const FZoneGraphLaneHandle& LaneHandle, const FMassTrafficCoreVehicleInfo& CoreVehicleInfo)
+{
+	TSet<FMassTrafficCoreVehicleInfo>& CoreVehicleInfos = CoreVehicleInfoMap.FindOrAdd(LaneHandle);
+	CoreVehicleInfos.Add(CoreVehicleInfo);
+}
+
+bool UMassTrafficSubsystem::TryGetCoreVehicleInfos(const FZoneGraphLaneHandle& LaneHandle, TSet<FMassTrafficCoreVehicleInfo>& OutCoreVehicleInfos) const
+{
+	if (const TSet<FMassTrafficCoreVehicleInfo>* CoreVehicleInfos = CoreVehicleInfoMap.Find(LaneHandle))
+	{
+		OutCoreVehicleInfos = *CoreVehicleInfos;
+		return true;
+	}
+
+	return false;
+}
+
+void UMassTrafficSubsystem::ClearCoreVehicleInfos()
+{
+	CoreVehicleInfoMap.Reset();
+}
+
+const TMap<FZoneGraphLaneHandle, TSet<FMassTrafficCoreVehicleInfo>>& UMassTrafficSubsystem::GetCoreVehicleInfoMap() const
+{
+	return CoreVehicleInfoMap;
+}
+
+TMap<FZoneGraphLaneHandle, TSet<FMassTrafficCoreVehicleInfo>>& UMassTrafficSubsystem::GetMutableCoreVehicleInfoMap()
+{
+	return CoreVehicleInfoMap;
 }
 
 void MassTrafficDumpLaneStats(const TArray<FString>& Args, UWorld* InWorld, FOutputDevice& Ar)

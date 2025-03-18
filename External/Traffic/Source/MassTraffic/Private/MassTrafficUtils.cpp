@@ -355,6 +355,35 @@ int32 GetLanePriority(
 	return INDEX_NONE;
 }
 
+void DrawLaneData(
+	const UZoneGraphSubsystem& ZoneGraphSubsystem,
+	const FZoneGraphLaneHandle& LaneHandle,
+	const FColor LaneColor,
+	const UWorld& World,
+	const float ZOffset,
+	const float LifeTime)
+{
+	if (!LaneHandle.IsValid())
+	{
+		return;
+	}
+
+	if (const FZoneGraphStorage* ZoneGraphStorage = ZoneGraphSubsystem.GetZoneGraphStorage(LaneHandle.DataHandle))
+	{
+		const FZoneLaneData& ZoneLaneData = ZoneGraphStorage->Lanes[LaneHandle.Index];
+
+		for (int32 LanePointIndex = ZoneLaneData.PointsBegin; LanePointIndex < ZoneLaneData.PointsEnd - 1; ++LanePointIndex)
+		{
+			const FVector& LaneSegmentStart = ZoneGraphStorage->LanePoints[LanePointIndex] + FVector(0.0f, 0.0f, ZOffset);
+			const FVector& LaneSegmentEnd = ZoneGraphStorage->LanePoints[LanePointIndex + 1] + FVector(0.0f, 0.0f, ZOffset);
+
+			const float ArrowSize = LanePointIndex == ZoneLaneData.PointsEnd - 2 ? 10000.0f : 1000.0f;
+
+			DrawDebugDirectionalArrow(&World, LaneSegmentStart, LaneSegmentEnd, ArrowSize, LaneColor, false, LifeTime, 0, 10.0f);
+		}
+	}
+};
+
 bool TryGetVehicleEnterAndExitTimesForIntersection(
 	const FZoneGraphTrafficLaneData& VehicleCurrentLaneData,
 	const FZoneGraphTrafficLaneData& IntersectionLaneData,

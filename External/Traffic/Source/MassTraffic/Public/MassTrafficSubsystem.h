@@ -17,6 +17,40 @@ class UMassTrafficFieldComponent;
 class UMassTrafficFieldOperationBase;
 struct FMassEntityManager;
 
+struct FLaneEntityPair
+{
+	FLaneEntityPair() = default;
+
+	FLaneEntityPair(const FZoneGraphLaneHandle& InLaneHandle, const FMassEntityHandle& InEntityHandle)
+		: LaneHandle(InLaneHandle)
+		, EntityHandle(InEntityHandle)
+	{
+	}
+
+	FZoneGraphLaneHandle LaneHandle;
+	FMassEntityHandle EntityHandle;
+
+	bool IsValid() const
+	{
+		return LaneHandle.IsValid() && EntityHandle.IsValid();
+	}
+
+	bool operator==(const FLaneEntityPair& Other) const
+	{
+		return LaneHandle == Other.LaneHandle
+			&& EntityHandle == Other.EntityHandle;
+	}
+
+	friend uint32 GetTypeHash(const FLaneEntityPair& LaneEntityPair)
+	{
+		uint32 Hash = GetTypeHash(LaneEntityPair.LaneHandle);
+		
+		Hash = HashCombine(Hash, GetTypeHash(LaneEntityPair.EntityHandle));
+			
+		return Hash;
+	}
+};
+
 struct FMassTrafficLaneIntersectionInfo
 {
 	FMassTrafficLaneIntersectionInfo() = default;
@@ -36,6 +70,8 @@ struct FMassTrafficCrosswalkLaneInfo
 
 	TMap<FMassEntityHandle, FMassInt16Real> EntityYieldResumeSpeedMap;
 
+	TMap<FMassEntityHandle, float> EntityYieldStartTimeMap;
+
 	void TrackEntityOnCrosswalkYieldingToLane(const FMassEntityHandle& EntityHandle, const FZoneGraphLaneHandle& LaneHandle)
 	{
 		TSet<FZoneGraphLaneHandle>& IncomingVehicleLanesInMap = YieldingEntityToIncomingVehicleLaneMap.FindOrAdd(EntityHandle);
@@ -48,6 +84,11 @@ struct FMassTrafficCrosswalkLaneInfo
 	void TrackEntityOnCrosswalkYieldResumeSpeed(const FMassEntityHandle& EntityHandle, const FMassInt16Real& EntityYieldResumeSpeed)
 	{
 		EntityYieldResumeSpeedMap.FindOrAdd(EntityHandle, EntityYieldResumeSpeed);
+	}
+
+	void TrackEntityOnCrosswalkYieldStartTime(const FMassEntityHandle& EntityHandle, const float YieldStartTime)
+	{
+		EntityYieldStartTimeMap.FindOrAdd(EntityHandle, YieldStartTime);
 	}
 
 	void UnTrackEntityOnCrosswalkYieldingToLane(const FMassEntityHandle& EntityHandle, const FZoneGraphLaneHandle& LaneHandle)
@@ -92,6 +133,7 @@ struct FMassTrafficCrosswalkLaneInfo
 		}
 		
 		EntityYieldResumeSpeedMap.Remove(EntityHandle);
+		EntityYieldStartTimeMap.Remove(EntityHandle);
 	}
 	
 	FORCEINLINE bool IsAnyEntityOnCrosswalkYieldingToLane(const FZoneGraphLaneHandle& LaneHandle) const
@@ -126,9 +168,71 @@ struct FMassTrafficCrosswalkLaneInfo
 		return *EntityYieldResumeSpeed;
 	}
 
+	FORCEINLINE float GetEntityYieldStartTime(const FMassEntityHandle& EntityHandle) const
+	{
+		const float* EntityYieldStartTime = EntityYieldStartTimeMap.Find(EntityHandle);
+		
+		if (!ensureMsgf(EntityYieldStartTime != nullptr, TEXT("Must get valid EntityYieldStartTime in FMassTrafficCrosswalkLaneInfo::GetEntityYieldStartTime.  EntityHandle.Index: %d EntityHandle.SerialNumber: %d."), EntityHandle.Index, EntityHandle.SerialNumber))
+		{
+			return 0.0f;
+		}
+		
+		return *EntityYieldStartTime;
+	}
+
 	FORCEINLINE int32 GetNumEntitiesYieldingOnCrosswalkLane() const
 	{
 		return YieldingEntityToIncomingVehicleLaneMap.Num();
+	}
+};
+
+struct FMassTrafficCoreVehicleInfo
+{
+	FMassTrafficCoreVehicleInfo() = default;
+
+	FMassEntityHandle VehicleEntityHandle;
+	float VehicleDistanceAlongLane = 0.0f;
+	float VehicleAccelerationEstimate = 0.0f;
+	float VehicleSpeed = 0.0f;
+	bool bVehicleIsYielding = false;
+	float VehicleRadius = 0.0f;
+	FZoneGraphTrafficLaneData* VehicleNextLane = nullptr;
+	FZoneGraphTrafficLaneData* VehicleStopSignIntersectionLane = nullptr;
+	float VehicleRandomFraction = 0.0f;
+	float VehicleIsNearStopLineAtIntersection = 0.0f;
+	float VehicleRemainingStopSignRestTime = 0.0f;
+
+	bool operator==(const FMassTrafficCoreVehicleInfo& Other) const
+	{
+		return VehicleEntityHandle == Other.VehicleEntityHandle
+			&& VehicleDistanceAlongLane == Other.VehicleDistanceAlongLane
+			&& VehicleAccelerationEstimate == Other.VehicleAccelerationEstimate
+			&& VehicleSpeed == Other.VehicleSpeed
+			&& bVehicleIsYielding == Other.bVehicleIsYielding
+			&& VehicleRadius == Other.VehicleRadius
+			&& VehicleNextLane == Other.VehicleNextLane
+			&& VehicleStopSignIntersectionLane == Other.VehicleStopSignIntersectionLane
+			&& VehicleRandomFraction == Other.VehicleRandomFraction
+			&& VehicleIsNearStopLineAtIntersection == Other.VehicleIsNearStopLineAtIntersection
+			&& VehicleRemainingStopSignRestTime == Other.VehicleRemainingStopSignRestTime;
+	}
+
+	friend uint32 GetTypeHash(const FMassTrafficCoreVehicleInfo& CoreVehicleInfo)
+	{
+		uint32 Hash = GetTypeHash(CoreVehicleInfo.VehicleEntityHandle);
+		
+		Hash = HashCombine(Hash, GetTypeHash(CoreVehicleInfo.VehicleDistanceAlongLane));
+		Hash = HashCombine(Hash, GetTypeHash(CoreVehicleInfo.VehicleAccelerationEstimate));
+		Hash = HashCombine(Hash, GetTypeHash(CoreVehicleInfo.VehicleSpeed));
+		Hash = HashCombine(Hash, GetTypeHash(CoreVehicleInfo.bVehicleIsYielding));
+		Hash = HashCombine(Hash, GetTypeHash(CoreVehicleInfo.VehicleRadius));
+		Hash = HashCombine(Hash, GetTypeHash(CoreVehicleInfo.VehicleNextLane));
+		Hash = HashCombine(Hash, GetTypeHash(CoreVehicleInfo.VehicleStopSignIntersectionLane));
+		Hash = HashCombine(Hash, GetTypeHash(CoreVehicleInfo.VehicleRandomFraction));
+		Hash = HashCombine(Hash, GetTypeHash(CoreVehicleInfo.VehicleIsNearStopLineAtIntersection));
+		Hash = HashCombine(Hash, GetTypeHash(CoreVehicleInfo.VehicleRemainingStopSignRestTime));
+
+		return Hash;
 	}
 };
 
@@ -279,19 +383,31 @@ public:
 	bool TryGetLaneIntersectionInfo(const FZoneGraphLaneHandle& QueryLane, const FZoneGraphLaneHandle& DestLane, FMassTrafficLaneIntersectionInfo& OutLaneIntersectionInfo) const;
 	void ClearLaneIntersectionInfo();
 	
-	void AddYieldInfo(const FMassEntityHandle& YieldingEntity, const FZoneGraphLaneHandle& YieldingLane, const FZoneGraphLaneHandle& YieldTargetLane);
+	void AddYieldInfo(const FZoneGraphLaneHandle& YieldingLane, const FMassEntityHandle& YieldingEntity, const FZoneGraphLaneHandle& YieldTargetLane, const FMassEntityHandle& YieldTargetEntity);
 	void ClearYieldInfo();
 
-	const TMap<FZoneGraphLaneHandle, TSet<FZoneGraphLaneHandle>>& GetLaneYieldMap() const;
+	const TMap<FLaneEntityPair, TSet<FLaneEntityPair>>& GetYieldMap() const;
 	const TMap<FZoneGraphLaneHandle, TSet<FMassEntityHandle>>& GetYieldingEntitiesMap() const;
 
-	void AddEntityToLaneYieldOverrideMap(const FZoneGraphLaneHandle& LaneHandle, const FMassEntityHandle& YieldOverrideEntity);
-	void ClearYieldOverrideMap();
+	void AddYieldOverride(const FZoneGraphLaneHandle& YieldOverrideLane, const FMassEntityHandle& YieldOverrideEntity, const FZoneGraphLaneHandle& YieldIgnoreTargetLane, const FMassEntityHandle& YieldIgnoreTargetEntity);
+	void AddWildcardYieldOverride(const FZoneGraphLaneHandle& YieldOverrideLane, const FMassEntityHandle& YieldOverrideEntity);
+	void ClearYieldOverrides();
 	
-	bool IsEntityInLaneYieldOverrideMap(const FZoneGraphLaneHandle& LaneHandle, const FMassEntityHandle& EntityHandle) const;
+	bool HasYieldOverride(const FZoneGraphLaneHandle& YieldingLane, const FMassEntityHandle& YieldingEntity, const FZoneGraphLaneHandle& YieldTargetLane, const FMassEntityHandle& YieldTargetEntity) const;
+	bool HasWildcardYieldOverride(const FZoneGraphLaneHandle& YieldingLane, const FMassEntityHandle& YieldingEntity) const;
 	
-	const TMap<FZoneGraphLaneHandle, TSet<FMassEntityHandle>>& GetLaneYieldOverrideMap() const;
-	TMap<FZoneGraphLaneHandle, TSet<FMassEntityHandle>>& GetMutableLaneYieldOverrideMap();
+	const TMap<FLaneEntityPair, TSet<FLaneEntityPair>>& GetYieldOverrideMap() const;
+	TMap<FLaneEntityPair, TSet<FLaneEntityPair>>& GetMutableYieldOverrideMap();
+
+	const TSet<FLaneEntityPair>& GetWildcardYieldOverrideSet() const;
+	TSet<FLaneEntityPair>& GetMutableWildcardYieldOverrideSet();
+
+	void AddCoreVehicleInfo(const FZoneGraphLaneHandle& LaneHandle, const FMassTrafficCoreVehicleInfo& CoreVehicleInfo);
+	bool TryGetCoreVehicleInfos(const FZoneGraphLaneHandle& LaneHandle, TSet<FMassTrafficCoreVehicleInfo>& OutCoreVehicleInfos) const;
+	void ClearCoreVehicleInfos();
+
+	const TMap<FZoneGraphLaneHandle, TSet<FMassTrafficCoreVehicleInfo>>& GetCoreVehicleInfoMap() const;
+	TMap<FZoneGraphLaneHandle, TSet<FMassTrafficCoreVehicleInfo>>& GetMutableCoreVehicleInfoMap();
 	
 protected:
 	
@@ -367,12 +483,11 @@ protected:
 	 * where it enters and exits the destination lane. */
 	TMap<FZoneGraphLaneHandle, TMap<FZoneGraphLaneHandle, FMassTrafficLaneIntersectionInfo>> LaneIntersectionInfoMap;
 
-	/** Map from a source lane to the aggregate yield target lanes
-	 * to which the Entities on the source lane are yielding.
+	/** Map from each yielding Lane-Entity Pair to all its yield target Lane-Entity Pairs.
 	 * Note:  This is cleared at the beginning of every frame, then rebuilt,
 	 * and finally evaluated after the vehicle and pedestrian yield processing
 	 * has run in the UMassTrafficYieldDeadlockResolutionProcessor. */
-	TMap<FZoneGraphLaneHandle, TSet<FZoneGraphLaneHandle>> LaneYieldMap;
+	TMap<FLaneEntityPair, TSet<FLaneEntityPair>> YieldMap;
 
 	/** Map from a lane to all the Entities yielding on that lane.
 	 * Note:  This is cleared at the beginning of every frame, then rebuilt,
@@ -380,11 +495,23 @@ protected:
 	 * has run in the UMassTrafficYieldDeadlockResolutionProcessor. */
 	TMap<FZoneGraphLaneHandle, TSet<FMassEntityHandle>> YieldingEntitiesMap;
 
-	/** Map from a lane, which was involved in a yield cycle, to all the Entities that were yielding
-	 * on the lane at the time the UMassTrafficYieldDeadlockResolutionProcessor gave them permission
-	 * to ignore their yield logic until they move to a new lane, in order to prevent a yield cycle deadlock.
-	 * Note:  Entities will remain in this map until they've managed to move to a new lane. */
-	TMap<FZoneGraphLaneHandle, TSet<FMassEntityHandle>> LaneYieldOverrideMap;
+	/** Map from a Lane-Entity Pair key, which was involved in a yield cycle, to a set of Lane-Entity Pair values.
+	 * Each Lane-Entity Pair key is granted permission to ignore each of its Lane-Entity Pair values
+	 * in its yield logic, in order to prevent a yield cycle deadlock.
+	 * Note:  Lane-Entity Pair keys will remain in this map until the Entity manages to move to a new lane. */
+	TMap<FLaneEntityPair, TSet<FLaneEntityPair>> YieldOverrideMap;
+
+	/** Set of Lane-Entity Pairs, where each Lane-Entity Pair is granted permission
+	 * to ignore yielding to *any* yield targets, until the Entity moves to a new lane,
+	 * in order to prevent a yield deadlock (not necessarily a "yield cycle" deadlock,
+	 * but other types of yield deadlocks as well).
+	 * Note:  Lane-Entity Pairs will remain in this set until the Entity manages to move to a new lane. */
+	TSet<FLaneEntityPair> WildcardYieldOverrideSet;
+
+	/** Map from a lane to core vehicle properties, for each vehicle on the lane.
+	 * This will allow the vehicle merge logic to "see" all the vehicles on the conflict lanes
+	 * when looking for an opportunity to merge. */
+	TMap<FZoneGraphLaneHandle, TSet<FMassTrafficCoreVehicleInfo>> CoreVehicleInfoMap;
 };
 
 template<>

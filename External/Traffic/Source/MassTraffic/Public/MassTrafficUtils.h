@@ -16,6 +16,7 @@ struct FMassTrafficVehicleSpawnFilter;
 
 class UMassTrafficSettings;
 class UMassTrafficSubsystem;
+class UZoneGraphSubsystem;
 
 /**
 * Helpful functions for determining lane directions from Zone Graph data.
@@ -141,6 +142,14 @@ FORCEINLINE float GetSpeedLimitAlongLane(const float Length, const float SpeedLi
 	const float SpeedScale = 1.0f - FMath::Clamp(TimeLeftOnLane / TimeToBlendFromLaneEnd, 0.0f, 1.0f);
 	return FMath::Lerp(SpeedLimit, MinNextLaneSpeedLimit, SpeedScale) IF_MASSTRAFFIC_ENABLE_DEBUG( * GMassTrafficSpeedLimitScale );
 }
+
+void DrawLaneData(
+	const UZoneGraphSubsystem& ZoneGraphSubsystem,
+	const FZoneGraphLaneHandle& LaneHandle,
+	const FColor LaneColor,
+	const UWorld& World,
+	const float ZOffset = 10.0f,
+	const float LifeTime = 0.1f);
 
 bool TryGetVehicleEnterAndExitTimesForIntersection(
 	const FZoneGraphTrafficLaneData& VehicleCurrentLaneData,
