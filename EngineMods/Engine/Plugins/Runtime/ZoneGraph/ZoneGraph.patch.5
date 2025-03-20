@@ -1,0 +1,100 @@
+diff --color -urN --strip-trailing-cr Source/ZoneGraph/Private/ZoneShapeUtilities.cpp /Users/pete/VayuSim/Plugins/ZoneGraph/Source/ZoneGraph/Private/ZoneShapeUtilities.cpp
+--- Source/ZoneGraph/Private/ZoneShapeUtilities.cpp	2025-03-20 15:42:00
++++ /Users/pete/VayuSim/Plugins/ZoneGraph/Source/ZoneGraph/Private/ZoneShapeUtilities.cpp	2025-03-20 15:14:24
+@@ -7,6 +7,7 @@
+ #include "HAL/IConsoleManager.h"
+ #include "ZoneGraphSettings.h"
+ #include "ZoneShapeComponent.h"
++#include "Kismet/KismetMathLibrary.h"
+ 
+ namespace UE::ZoneShape::Utilities {
+ 
+@@ -1687,7 +1688,46 @@
+ 
+ 		Lane.PointsBegin = OutZoneStorage.LanePoints.Num();
+ 
+-		if (RoutingType == EZoneShapePolygonRoutingType::Bezier)
++		if (RoutingType == EZoneShapePolygonRoutingType::TempoBezier)
++		{
++			// For non-turning connections, use Distance between source and dest slots / 3.0 as the radius.
++			float SourceTangentLength = FVector::Distance(SourceSlot.Position, DestSlot.Position) / 3.0;
++			float DestTangentLength = SourceTangentLength;
++
++			static const float MinAngleCos = FMath::Cos(FMath::DegreesToRadians(BuildSettings.TurnThresholdAngle));
++			const bool bIsTurning = FVector2D::DotProduct(FVector2D(SourceSlot.Forward), FVector2D(-DestSlot.Forward)) < MinAngleCos;
++			if (bIsTurning)
++			{
++				// For turning connections, choose source and dest radius to approximate a circle
++				const FVector2D SourcePoint2D(SourceSlot.Position);
++				const FVector2D DestPoint2D(DestSlot.Position);
++				const FVector2D SourceRadial2D = Rotate90CCW(FVector2D(SourceSlot.Forward));
++				const FVector2D DestRadial2D = Rotate90CCW(FVector2D(DestSlot.Forward));
++				float SourceRadius, DestRadius;
++				if (ensureMsgf(IntersectRayRay2D(FVector2D(SourceSlot.Position), SourceRadial2D.GetSafeNormal(),
++						FVector2D(DestSlot.Position), DestRadial2D.GetSafeNormal(),
++						/*out*/ SourceRadius, /*out*/ DestRadius),
++					TEXT("No intersection found between radial directions while building ZoneShape with TempoBezier routing")))
++				{
++					// Credit: https://stackoverflow.com/questions/1734745/how-to-create-circle-with-b%C3%A9zier-curves
++					const float TurnAngle = UKismetMathLibrary::DegreesToRadians(UKismetMathLibrary::NormalizedDeltaRotator(SourceSlot.Forward.Rotation(), (-DestSlot.Forward).Rotation()).Yaw);
++					const float Mul = FMath::Abs(4.0 / 3.0 * FMath::Tan(TurnAngle / 4.0)) * BuildSettings.TempoBezierTangentLengthMultiplier;
++
++					// Abs because IntersectRayRay2D will return negative radii if the intersection is in the opposite direction of the radial directions supplied.
++					SourceTangentLength = FMath::Abs(SourceRadius) * Mul;
++					DestTangentLength = FMath::Abs(DestRadius) * Mul;
++				}
++			}
++
++			// Calculate Bezier curve connecting the source and destination.
++			const FVector SourceControlPoint = SourceSlot.Position + SourceSlot.Forward * SourceTangentLength;
++			const FVector DestControlPoint = DestSlot.Position + DestSlot.Forward * DestTangentLength;
++
++			OutZoneStorage.LanePoints.Add(SourceSlot.Position); // Explicitly add the start point as tessellate omits the start point.
++			const float TessTolerance = BuildSettings.GetLaneTessellationTolerance(Lane.Tags);
++			UE::CubicBezier::Tessellate(OutZoneStorage.LanePoints, SourceSlot.Position, SourceControlPoint, DestControlPoint, DestSlot.Position, TessTolerance);
++		}
++		else if (RoutingType == EZoneShapePolygonRoutingType::Bezier)
+ 		{
+ 			// Calculate Bezier curve connecting the source and destination.
+ 			const float TangentLength = FVector::Distance(SourceSlot.Position, DestSlot.Position) / 3.0f;
+diff --color -urN --strip-trailing-cr Source/ZoneGraph/Public/ZoneGraphTypes.h /Users/pete/VayuSim/Plugins/ZoneGraph/Source/ZoneGraph/Public/ZoneGraphTypes.h
+--- Source/ZoneGraph/Public/ZoneGraphTypes.h	2025-03-20 15:42:00
++++ /Users/pete/VayuSim/Plugins/ZoneGraph/Source/ZoneGraph/Public/ZoneGraphTypes.h	2025-03-20 15:20:28
+@@ -758,6 +758,7 @@
+ UENUM(BlueprintType)
+ enum class EZoneShapePolygonRoutingType : uint8
+ {
++	TempoBezier,	// Use bezier curves with Tempo-adjusted tangents for routing.
+ 	Bezier,			// Use bezier curves for routing.
+ 	Arcs,			// Use arcs for lane routing.
+ };
+@@ -1023,6 +1024,10 @@
+ 	/** When the relative angle (in degrees) to destination on a polygon is more than the specified angle, it is considered left or right turn. */
+ 	UPROPERTY(Category = Lanes, EditAnywhere)
+ 	float TurnThresholdAngle = 5.0f;
++
++	/** When using TemopBezier routing type, add this additional multiplier to tangent lengths for turning connections. */
++	UPROPERTY(Category = Lanes, EditAnywhere)
++	float TempoBezierTangentLengthMultiplier = 1.0f;
+ 
+ 	/** Routing rules applied to polygon shapes */
+ 	UPROPERTY(Category = Lanes, EditAnywhere)
+diff --color -urN --strip-trailing-cr Source/ZoneGraph/Public/ZoneShapeComponent.h /Users/pete/VayuSim/Plugins/ZoneGraph/Source/ZoneGraph/Public/ZoneShapeComponent.h
+--- Source/ZoneGraph/Public/ZoneShapeComponent.h	2025-03-20 15:42:00
++++ /Users/pete/VayuSim/Plugins/ZoneGraph/Source/ZoneGraph/Public/ZoneShapeComponent.h	2025-03-20 15:16:23
+@@ -202,7 +202,7 @@
+ 
+ 	/** Polygon shape routing type */
+ 	UPROPERTY(Category = Zone, EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = "true", IncludeInHash, EditCondition = "ShapeType == FZoneShapeType::Polygon"))
+-	EZoneShapePolygonRoutingType PolygonRoutingType = EZoneShapePolygonRoutingType::Bezier;
++	EZoneShapePolygonRoutingType PolygonRoutingType = EZoneShapePolygonRoutingType::TempoBezier;
+ 	
+ 	/** Zone tags, the lanes inherit zone tags. */
+ 	UPROPERTY(Category = Zone, EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = "true", IncludeInHash))
+@@ -225,4 +225,4 @@
+ #if WITH_EDITORONLY_DATA
+ 	FOnShapeDataChanged ShapeDataChangedEvent;
+ #endif
+-};
+\ No newline at end of file
++};

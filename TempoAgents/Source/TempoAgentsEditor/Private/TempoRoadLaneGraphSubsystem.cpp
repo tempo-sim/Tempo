@@ -604,7 +604,7 @@ bool UTempoRoadLaneGraphSubsystem::TryGenerateAndRegisterZoneShapeComponentsForI
 	ZoneShapeComponent->GetMutablePoints().Empty();
 	
 	ZoneShapeComponent->SetShapeType(FZoneShapeType::Polygon);
-	ZoneShapeComponent->SetPolygonRoutingType(EZoneShapePolygonRoutingType::Bezier);
+	ZoneShapeComponent->SetPolygonRoutingType(EZoneShapePolygonRoutingType::TempoBezier);
 
 	// Apply intersection tags.
 	TArray<FName> IntersectionTagNames = UTempoCoreUtils::CallBlueprintFunction(&IntersectionQueryActor, ITempoIntersectionInterface::Execute_GetTempoIntersectionTags);
@@ -885,7 +885,7 @@ bool UTempoRoadLaneGraphSubsystem::TryGenerateAndRegisterZoneShapeComponentsForC
 		ZoneShapeComponent->GetMutablePoints().Empty();
 	
 		ZoneShapeComponent->SetShapeType(FZoneShapeType::Polygon);
-		ZoneShapeComponent->SetPolygonRoutingType(EZoneShapePolygonRoutingType::Bezier);
+		ZoneShapeComponent->SetPolygonRoutingType(EZoneShapePolygonRoutingType::TempoBezier);
 
 		// Apply crosswalk intersection tags.
 		TArray<FName> IntersectionTagNames = UTempoCoreUtils::CallBlueprintFunction(&CrosswalkQueryActor, ITempoCrosswalkInterface::Execute_GetTempoCrosswalkIntersectionTags, CrosswalkIntersectionIndex);
