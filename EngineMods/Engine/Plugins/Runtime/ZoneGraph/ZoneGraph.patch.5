@@ -73,7 +73,7 @@ diff --color -urN --strip-trailing-cr Source/ZoneGraph/Public/ZoneGraphTypes.h /
  	UPROPERTY(Category = Lanes, EditAnywhere)
  	float TurnThresholdAngle = 5.0f;
 +
-+	/** When using TemopBezier routing type, add this additional multiplier to tangent lengths for turning connections. */
++	/** When using TemopBezier routing type, scale the nominal tangent lengths for turning connections by this amount. */
 +	UPROPERTY(Category = Lanes, EditAnywhere)
 +	float TempoBezierTangentLengthMultiplier = 1.0f;
  
