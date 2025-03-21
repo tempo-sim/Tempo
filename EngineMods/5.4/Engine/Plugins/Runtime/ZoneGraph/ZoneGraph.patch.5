@@ -1,279 +1,100 @@
 diff --color -urN --strip-trailing-cr Source/ZoneGraph/Private/ZoneShapeUtilities.cpp /Users/pete/VayuSim/Plugins/ZoneGraph/Source/ZoneGraph/Private/ZoneShapeUtilities.cpp
---- Source/ZoneGraph/Private/ZoneShapeUtilities.cpp	2025-05-02 09:57:02
-+++ /Users/pete/VayuSim/Plugins/ZoneGraph/Source/ZoneGraph/Private/ZoneShapeUtilities.cpp	2025-05-02 09:46:20
-@@ -999,15 +999,6 @@
- 	}
- }
+--- Source/ZoneGraph/Private/ZoneShapeUtilities.cpp	2025-03-20 15:42:00
++++ /Users/pete/VayuSim/Plugins/ZoneGraph/Source/ZoneGraph/Private/ZoneShapeUtilities.cpp	2025-03-20 15:14:24
+@@ -7,6 +7,7 @@
+ #include "HAL/IConsoleManager.h"
+ #include "ZoneGraphSettings.h"
+ #include "ZoneShapeComponent.h"
++#include "Kismet/KismetMathLibrary.h"
  
--struct FLaneConnectionCandidate
--{
--	FLaneConnectionCandidate() = default;
--	FLaneConnectionCandidate(const int32 InSourceSlot, const int32 InDestSlot, const FZoneGraphTagMask InTagMask) : SourceSlot(InSourceSlot), DestSlot(InDestSlot), TagMask(InTagMask) {}
--	int32 SourceSlot = 0;
--	int32 DestSlot = 0;
--	FZoneGraphTagMask TagMask;
--};
--
- static bool CalcDestinationSide(TConstArrayView<FLaneConnectionSlot> SourceSlots, TConstArrayView<FLaneConnectionSlot> DestSlots)
- {
- 	const FVector SourceCenter = (SourceSlots[0].Position + SourceSlots.Last().Position);
-@@ -1028,7 +1019,7 @@
- 	return First;
- }
+ namespace UE::ZoneShape::Utilities {
  
--static void AddOrUpdateConnection(TArray<FLaneConnectionCandidate>& Candidates, const int32 SourceSlot, const int32 DestSlot, const FZoneGraphTagMask& TagMask)
-+static void AddOrUpdateConnection(TArray<FLaneConnectionCandidate>& Candidates, const int32 SourceSlot, const int32 DestSlot, const FZoneGraphTagMask& TagMask, const EZoneGraphTurnType TurnType)
- {
- 	FLaneConnectionCandidate* Cand = Candidates.FindByPredicate([SourceSlot, DestSlot](const FLaneConnectionCandidate& Cand) -> bool { return Cand.SourceSlot == SourceSlot&& Cand.DestSlot == DestSlot; });
- 	if (Cand != nullptr)
-@@ -1037,12 +1028,12 @@
- 	}
- 	else
- 	{
--		Candidates.Add(FLaneConnectionCandidate(SourceSlot, DestSlot, TagMask));
-+		Candidates.Add(FLaneConnectionCandidate(SourceSlot, DestSlot, TagMask, TurnType));
- 	}
- }
- 	
- static void AppendLaneConnectionCandidates(TArray<FLaneConnectionCandidate>& Candidates, TConstArrayView<FLaneConnectionSlot> SourceSlots, TConstArrayView<FLaneConnectionSlot> DestSlots,
--										   const FZoneGraphTagMask& TagMask, const int32 MainDestPointIndex, bool bTurning)
-+										   const FZoneGraphTagMask& TagMask, const int32 MainDestPointIndex, EZoneGraphTurnType TurnType)
- {
- 	const int32 SourceNum = SourceSlots.Num();
- 	const int32 DestNum = DestSlots.Num();
-@@ -1065,7 +1056,7 @@
- 		const int32 DestIdx = CalcDestinationSide(SourceSlots, DestSlots) ? (DestNum - 1) : 0;
+@@ -1687,7 +1688,46 @@
  
- 		// If a connection exists, we'll just update the tags, otherwise create new.
--		AddOrUpdateConnection(Candidates, SourceSlots[SourceIdx].Index, DestSlots[DestIdx].Index, TagMask);
-+		AddOrUpdateConnection(Candidates, SourceSlots[SourceIdx].Index, DestSlots[DestIdx].Index, TagMask, TurnType);
+ 		Lane.PointsBegin = OutZoneStorage.LanePoints.Num();
  
- 		return;
- 	}
-@@ -1080,7 +1071,7 @@
- 			const int32 SourceIdx = i;
- 			const int32 DestIdx = BestDestLaneIndex;
- 
--			AddOrUpdateConnection(Candidates, SourceSlots[SourceIdx].Index, DestSlots[DestIdx].Index, TagMask);
-+			AddOrUpdateConnection(Candidates, SourceSlots[SourceIdx].Index, DestSlots[DestIdx].Index, TagMask, TurnType);
- 		}
- 		
- 		return;
-@@ -1088,14 +1079,14 @@
- 
- 	const bool bOneLanePerDestination = EnumHasAnyFlags(ConnectionRestrictions, EZoneShapeLaneConnectionRestrictions::OneLanePerDestination);
- 
--	if (bTurning)
-+	if (TurnType != EZoneGraphTurnType::NoTurn)
- 	{
- 		// Turning connections by default get fully-connected slots. The builder may filter them later.
- 		for (const FLaneConnectionSlot& SourceSlot : SourceSlots)
- 		{
- 			for (const FLaneConnectionSlot& DestSlot : DestSlots)
- 			{
--				AddOrUpdateConnection(Candidates, SourceSlot.Index, DestSlot.Index, TagMask);
-+				AddOrUpdateConnection(Candidates, SourceSlot.Index, DestSlot.Index, TagMask, TurnType);
- 			}
- 		}
- 	}
-@@ -1120,7 +1111,7 @@
- 				const int32 SourceIdx = FMath::Clamp(SourceIdxUnClamped, 0, SourceNum - 1);
- 				const int32 DestIdx = i;
- 			
--				AddOrUpdateConnection(Candidates, SourceSlots[SourceIdx].Index, DestSlots[DestIdx].Index, TagMask);
-+				AddOrUpdateConnection(Candidates, SourceSlots[SourceIdx].Index, DestSlots[DestIdx].Index, TagMask, TurnType);
- 			}
- 		}
- 		else
-@@ -1134,7 +1125,7 @@
- 			{
- 				const int32 SourceIdx = i;
- 				const int32 DestIdx = FMath::Clamp(i - FirstIndex, 0, DestNum - 1);
--				AddOrUpdateConnection(Candidates, SourceSlots[SourceIdx].Index, DestSlots[DestIdx].Index, TagMask);
-+				AddOrUpdateConnection(Candidates, SourceSlots[SourceIdx].Index, DestSlots[DestIdx].Index, TagMask, TurnType);
- 			}
- 		}
- 	}
-@@ -1198,6 +1189,56 @@
- 	const int32 IncomingConnections;
- };
- 
-+static EZoneGraphTurnType GetTurnTypeBetweenSourceDest(const FConnectionEntry& Source, TConstArrayView<FConnectionEntry> Destinations, int32 DestIdx, const FMatrix& LocalToWorld, const FZoneGraphBuildSettings& BuildSettings)
-+{
-+	const FVector SourceForward = LocalToWorld.TransformVector(Source.Point.Rotation.RotateVector(FVector::ForwardVector));
-+	const FVector SourceUp = LocalToWorld.TransformVector(Source.Point.Rotation.RotateVector(FVector::UpVector));
-+
-+	float MinAngle = UE_PI;
-+	float MaxAngle = -UE_PI;
-+	int32 MinDestIdx = -1;
-+	int32 MaxDestIdx = -1;
-+	for (int32 Idx = 0; Idx < Destinations.Num(); ++Idx)
-+	{
-+		const FConnectionEntry& Destination = Destinations[Idx];
-+		const FVector DestForward = LocalToWorld.TransformVector(Destination.Point.Rotation.RotateVector(FVector::ForwardVector));
-+
-+		const float AngleMagnitude = FMath::Acos(FVector::DotProduct(SourceForward, -DestForward));
-+		const float AngleSign = FMath::Sign(FVector::CrossProduct(SourceForward, -DestForward).Dot(SourceUp));
-+		const float Angle = AngleSign * AngleMagnitude;
-+
-+		if (Angle < MinAngle)
+-		if (RoutingType == EZoneShapePolygonRoutingType::Bezier)
++		if (RoutingType == EZoneShapePolygonRoutingType::TempoBezier)
 +		{
-+			MinAngle = Angle;
-+			MinDestIdx = Idx;
++			// For non-turning connections, use Distance between source and dest slots / 3.0 as the radius.
++			float SourceTangentLength = FVector::Distance(SourceSlot.Position, DestSlot.Position) / 3.0;
++			float DestTangentLength = SourceTangentLength;
++
++			static const float MinAngleCos = FMath::Cos(FMath::DegreesToRadians(BuildSettings.TurnThresholdAngle));
++			const bool bIsTurning = FVector2D::DotProduct(FVector2D(SourceSlot.Forward), FVector2D(-DestSlot.Forward)) < MinAngleCos;
++			if (bIsTurning)
++			{
++				// For turning connections, choose source and dest radius to approximate a circle
++				const FVector2D SourcePoint2D(SourceSlot.Position);
++				const FVector2D DestPoint2D(DestSlot.Position);
++				const FVector2D SourceRadial2D = Rotate90CCW(FVector2D(SourceSlot.Forward));
++				const FVector2D DestRadial2D = Rotate90CCW(FVector2D(DestSlot.Forward));
++				float SourceRadius, DestRadius;
++				if (ensureMsgf(IntersectRayRay2D(FVector2D(SourceSlot.Position), SourceRadial2D.GetSafeNormal(),
++						FVector2D(DestSlot.Position), DestRadial2D.GetSafeNormal(),
++						/*out*/ SourceRadius, /*out*/ DestRadius),
++					TEXT("No intersection found between radial directions while building ZoneShape with TempoBezier routing")))
++				{
++					// Credit: https://stackoverflow.com/questions/1734745/how-to-create-circle-with-b%C3%A9zier-curves
++					const float TurnAngle = UKismetMathLibrary::DegreesToRadians(UKismetMathLibrary::NormalizedDeltaRotator(SourceSlot.Forward.Rotation(), (-DestSlot.Forward).Rotation()).Yaw);
++					const float Mul = FMath::Abs(4.0 / 3.0 * FMath::Tan(TurnAngle / 4.0)) * BuildSettings.TempoBezierTangentLengthMultiplier;
++
++					// Abs because IntersectRayRay2D will return negative radii if the intersection is in the opposite direction of the radial directions supplied.
++					SourceTangentLength = FMath::Abs(SourceRadius) * Mul;
++					DestTangentLength = FMath::Abs(DestRadius) * Mul;
++				}
++			}
++
++			// Calculate Bezier curve connecting the source and destination.
++			const FVector SourceControlPoint = SourceSlot.Position + SourceSlot.Forward * SourceTangentLength;
++			const FVector DestControlPoint = DestSlot.Position + DestSlot.Forward * DestTangentLength;
++
++			OutZoneStorage.LanePoints.Add(SourceSlot.Position); // Explicitly add the start point as tessellate omits the start point.
++			const float TessTolerance = BuildSettings.GetLaneTessellationTolerance(Lane.Tags);
++			UE::CubicBezier::Tessellate(OutZoneStorage.LanePoints, SourceSlot.Position, SourceControlPoint, DestControlPoint, DestSlot.Position, TessTolerance);
 +		}
-+		if (Angle > MaxAngle)
-+		{
-+			MaxAngle = Angle;
-+			MaxDestIdx = Idx;
-+		}
-+	}
-+
-+	const float TurnThresholdAngle = FMath::DegreesToRadians(BuildSettings.TurnThresholdAngle);
-+
-+	// A connection must have an angle above the threshold *and* be the right-most connection to be a right turn,
-+	// unless bSingleTurningConnectionPerTurnType is false.
-+	if ((!BuildSettings.bSingleTurningConnectionPerTurnType || DestIdx == MaxDestIdx) && MaxAngle > TurnThresholdAngle)
-+	{
-+		return EZoneGraphTurnType::Right;
-+	}
-+
-+	// A connection must have an angle below the threshold *and* be the left-most connection to be a left turn,
-+	// unless bSingleTurningConnectionPerTurnType is false.
-+	if ((!BuildSettings.bSingleTurningConnectionPerTurnType || DestIdx == MinDestIdx) && MinAngle < -TurnThresholdAngle)
-+	{
-+		return EZoneGraphTurnType::Left;
-+	}
-+
-+	// Otherwise, the connection is not considered a turn.
-+	return EZoneGraphTurnType::NoTurn;
-+}
-+
- static void BuildLanesBetweenPoints(const FConnectionEntry& Source, TConstArrayView<FConnectionEntry> Destinations,
- 									const UZoneShapeComponent& PolygonShapeComp, const TMap<int32, const UZoneShapeComponent*>& PointIndexToZoneShapeComponent, const FZoneGraphBuilder& ZoneGraphBuilder,
- 									const EZoneShapePolygonRoutingType RoutingType, const FZoneGraphTagMask ZoneTags, const FZoneGraphBuildSettings& BuildSettings, const FMatrix& LocalToWorld,
-@@ -1205,7 +1246,6 @@
- {
- 	const float LaneConnectionAngle = BuildSettings.LaneConnectionAngle;
- 	const float MaxConnectionAngleCos = FMath::Cos(FMath::DegreesToRadians(LaneConnectionAngle));
--	const float TurnThresholdAngleCos = FMath::Cos(FMath::DegreesToRadians(BuildSettings.TurnThresholdAngle));
- 
- 	const float SourceTotalWidth = Source.Profile.GetLanesTotalWidth();
- 
-@@ -1280,6 +1320,7 @@
- 			continue;
- 		}
- 
-+		// Use closest point on dest so that lane profile widths do not affect direction.
- 		const FVector ClosestDestPoint = FMath::ClosestPointOnSegment(SourcePosition, DestLaneLeft, DestLaneRight);
- 		const FVector DirToDest = (ClosestDestPoint - SourcePosition).GetSafeNormal();
- 
-@@ -1290,13 +1331,12 @@
- 
- 		const EZoneShapeLaneConnectionRestrictions Restrictions = Source.Point.GetLaneConnectionRestrictions() | RestrictionsFromRules;
- 
--		// Use closest point on dest so that lane profile widths do not affect direction.
--		const FVector SourceSide = FVector::CrossProduct(SourceForward, SourceUp);
-+		const EZoneGraphTurnType TurnType = GetTurnTypeBetweenSourceDest(Source, Destinations, PointIndex, LocalToWorld, BuildSettings);
- 
--		const bool bIsTurning = FVector::DotProduct(SourceForward, DirToDest) < TurnThresholdAngleCos;
--		const bool bIsLeftTurn = bIsTurning && FVector::DotProduct(SourceSide, DirToDest) > 0.0f;
-+		const bool bIsTurning = TurnType != EZoneGraphTurnType::NoTurn;
-+		const bool bIsLeftTurn = TurnType == EZoneGraphTurnType::Left;
- 
--		DestinationTurnTypes.Add(PointIndex, bIsTurning ? (bIsLeftTurn ? EZoneGraphTurnType::Left : EZoneGraphTurnType::Right) : EZoneGraphTurnType::NoTurn);
-+		DestinationTurnTypes.Add(PointIndex, TurnType);
- 
- 		// Discard destination that would result in left or right turns.
- 		if (EnumHasAnyFlags(Restrictions, EZoneShapeLaneConnectionRestrictions::NoLeftTurn | EZoneShapeLaneConnectionRestrictions::NoRightTurn))
-@@ -1424,7 +1464,7 @@
- 
- 			if (TagSourceSlots.Num() > 0 && TagDestSlots.Num() > 0)
- 			{
--				AppendLaneConnectionCandidates(Candidates, TagSourceSlots, TagDestSlots, TagMask, MainDestPointIndex, TurnType != EZoneGraphTurnType::NoTurn);
-+				AppendLaneConnectionCandidates(Candidates, TagSourceSlots, TagDestSlots, TagMask, MainDestPointIndex, TurnType);
- 			}
- 		}
- 	}
-@@ -1629,7 +1669,8 @@
- 			}
- 			if (NearestSourceSlot != INDEX_NONE)
- 			{
--				Candidates.Add(FLaneConnectionCandidate(NearestSourceSlot, DestSlotIdx, NearestSlotTags));
-+				const EZoneGraphTurnType TurnType = GetTurnTypeBetweenSourceDest(Source, Destinations, DestPointIndex, LocalToWorld, BuildSettings);
-+				Candidates.Add(FLaneConnectionCandidate(NearestSourceSlot, DestSlotIdx, NearestSlotTags, TurnType));
- 			}
- 		}
- 	}
-@@ -1640,7 +1681,8 @@
- 	const bool bAllZoneShapeComponentsInMapAreValid = !ShapeComponentsInMap.Contains(nullptr);
- 	if (bAllZoneShapeComponentsInMapAreValid)
- 	{
--		Candidates.RemoveAll([&ZoneGraphBuilder, &PolygonShapeComp, &SourceSlots, &DestSlots, &PointIndexToZoneShapeComponent](const FLaneConnectionCandidate& Candidate)
-+		TArray<FLaneConnectionCandidate> AllCandidates = Candidates;
-+		Candidates.RemoveAll([&ZoneGraphBuilder, &PolygonShapeComp, &SourceSlots, &DestSlots, &PointIndexToZoneShapeComponent, &AllCandidates](const FLaneConnectionCandidate& Candidate)
++		else if (RoutingType == EZoneShapePolygonRoutingType::Bezier)
  		{
- 			// The true index to the ZoneShapePoint in this context is the slot's EntryID, not PointIndex field.
- 			// In fact, SourceSlots don't even fill-out their PointIndex fields.
-@@ -1654,7 +1696,7 @@
- 			const FLaneConnectionSlot& DestSlot = DestSlots[Candidate.DestSlot];
- 			const UZoneShapeComponent* DestShapeComp = PointIndexToZoneShapeComponent[DestSlot.EntryID];
- 
--			return ZoneGraphBuilder.ShouldFilterLaneConnection(PolygonShapeComp, *SourceShapeComp, SourceSlots, Candidate.SourceSlot, *DestShapeComp, DestSlots, Candidate.DestSlot);
-+			return ZoneGraphBuilder.ShouldFilterLaneConnection(PolygonShapeComp, *SourceShapeComp, SourceSlots, Candidate.SourceSlot, *DestShapeComp, DestSlots, Candidate.DestSlot, AllCandidates);
- 		});
- 	}
- 
-diff --color -urN --strip-trailing-cr Source/ZoneGraph/Public/ZoneGraphBuilder.h /Users/pete/VayuSim/Plugins/ZoneGraph/Source/ZoneGraph/Public/ZoneGraphBuilder.h
---- Source/ZoneGraph/Public/ZoneGraphBuilder.h	2025-05-02 09:57:02
-+++ /Users/pete/VayuSim/Plugins/ZoneGraph/Source/ZoneGraph/Public/ZoneGraphBuilder.h	2025-04-28 10:43:39
-@@ -60,6 +60,27 @@
- 	TMap<TObjectPtr<const UZoneShapeComponent>, FZoneShapeComponentBuildData> ZoneShapeComponentBuildData;
- };
- 
-+USTRUCT(BlueprintType)
-+struct FLaneConnectionCandidate
-+{
-+	GENERATED_BODY()
-+
-+	FLaneConnectionCandidate() = default;
-+	FLaneConnectionCandidate(const int32 InSourceSlot, const int32 InDestSlot, const FZoneGraphTagMask InTagMask, const EZoneGraphTurnType InTurnType) : SourceSlot(InSourceSlot), DestSlot(InDestSlot), TagMask(InTagMask), TurnType(InTurnType) {}
-+
-+	UPROPERTY()
-+	int32 SourceSlot = 0;
-+
-+	UPROPERTY()
-+	int32 DestSlot = 0;
-+
-+	UPROPERTY()
-+	FZoneGraphTagMask TagMask;
-+
-+	UPROPERTY()
-+	EZoneGraphTurnType TurnType;
-+};
-+
- USTRUCT()
- struct ZONEGRAPH_API FZoneGraphBuilder
- {
-@@ -94,7 +115,7 @@
- 	 */
- 	void QueryHashGrid(const FBox& Bounds, TArray<FZoneGraphBuilderHashGrid2D::ItemIDType>& OutResults);
- 
--	virtual bool ShouldFilterLaneConnection(const UZoneShapeComponent& PolygonShapeComp, const UZoneShapeComponent& SourceShapeComp, const TArray<FLaneConnectionSlot>& SourceSlots, const int32 SourceSlotQueryIndex, const UZoneShapeComponent& DestShapeComp, const TArray<FLaneConnectionSlot>& DestSlots, const int32 DestSlotQueryIndex) const { return false; };
-+	virtual bool ShouldFilterLaneConnection(const UZoneShapeComponent& PolygonShapeComp, const UZoneShapeComponent& SourceShapeComp, const TArray<FLaneConnectionSlot>& SourceSlots, const int32 SourceSlotQueryIndex, const UZoneShapeComponent& DestShapeComp, const TArray<FLaneConnectionSlot>& DestSlots, const int32 DestSlotQueryIndex, const TArray<FLaneConnectionCandidate>& AllCandidates) const { return false; };
- 
- protected:
- 	void Build(AZoneGraphData& ZoneGraphData);
+ 			// Calculate Bezier curve connecting the source and destination.
+ 			const float TangentLength = FVector::Distance(SourceSlot.Position, DestSlot.Position) / 3.0f;
 diff --color -urN --strip-trailing-cr Source/ZoneGraph/Public/ZoneGraphTypes.h /Users/pete/VayuSim/Plugins/ZoneGraph/Source/ZoneGraph/Public/ZoneGraphTypes.h
---- Source/ZoneGraph/Public/ZoneGraphTypes.h	2025-05-02 09:57:02
-+++ /Users/pete/VayuSim/Plugins/ZoneGraph/Source/ZoneGraph/Public/ZoneGraphTypes.h	2025-04-27 07:36:20
-@@ -1049,6 +1049,10 @@
+--- Source/ZoneGraph/Public/ZoneGraphTypes.h	2025-03-20 15:42:00
++++ /Users/pete/VayuSim/Plugins/ZoneGraph/Source/ZoneGraph/Public/ZoneGraphTypes.h	2025-03-20 15:20:28
+@@ -758,6 +758,7 @@
+ UENUM(BlueprintType)
+ enum class EZoneShapePolygonRoutingType : uint8
+ {
++	TempoBezier,	// Use bezier curves with Tempo-adjusted tangents for routing.
+ 	Bezier,			// Use bezier curves for routing.
+ 	Arcs,			// Use arcs for lane routing.
+ };
+@@ -1023,6 +1024,10 @@
+ 	/** When the relative angle (in degrees) to destination on a polygon is more than the specified angle, it is considered left or right turn. */
  	UPROPERTY(Category = Lanes, EditAnywhere)
- 	bool bFillEmptyDestination = true;
- 
-+	/** Whether to limit turning connections to only the left-most or right-most turning connections. */
-+	UPROPERTY(Category = Lanes, EditAnywhere)
-+	bool bSingleTurningConnectionPerTurnType = true;
+ 	float TurnThresholdAngle = 5.0f;
 +
- 	/** Max distance between two shape points for them to be snapped together. */
- 	UPROPERTY(Category = PointSnapping, EditAnywhere)
- 	float ConnectionSnapDistance = 25.0f;
++	/** When using TemopBezier routing type, scale the nominal tangent lengths for turning connections by this amount. */
++	UPROPERTY(Category = Lanes, EditAnywhere)
++	float TempoBezierTangentLengthMultiplier = 1.0f;
+ 
+ 	/** Routing rules applied to polygon shapes */
+ 	UPROPERTY(Category = Lanes, EditAnywhere)
+diff --color -urN --strip-trailing-cr Source/ZoneGraph/Public/ZoneShapeComponent.h /Users/pete/VayuSim/Plugins/ZoneGraph/Source/ZoneGraph/Public/ZoneShapeComponent.h
+--- Source/ZoneGraph/Public/ZoneShapeComponent.h	2025-03-20 15:42:00
++++ /Users/pete/VayuSim/Plugins/ZoneGraph/Source/ZoneGraph/Public/ZoneShapeComponent.h	2025-03-20 15:16:23
+@@ -202,7 +202,7 @@
+ 
+ 	/** Polygon shape routing type */
+ 	UPROPERTY(Category = Zone, EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = "true", IncludeInHash, EditCondition = "ShapeType == FZoneShapeType::Polygon"))
+-	EZoneShapePolygonRoutingType PolygonRoutingType = EZoneShapePolygonRoutingType::Bezier;
++	EZoneShapePolygonRoutingType PolygonRoutingType = EZoneShapePolygonRoutingType::TempoBezier;
+ 	
+ 	/** Zone tags, the lanes inherit zone tags. */
+ 	UPROPERTY(Category = Zone, EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = "true", IncludeInHash))
+@@ -225,4 +225,4 @@
+ #if WITH_EDITORONLY_DATA
+ 	FOnShapeDataChanged ShapeDataChangedEvent;
+ #endif
+-};
+\ No newline at end of file
++};
