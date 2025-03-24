@@ -65,6 +65,10 @@ void UTempoIntersectionControlComponent::SetupTrafficControllerMeshData()
 			UE_LOG(LogTempoAgentsShared, Error, TEXT("UTempoIntersectionControlComponent - SetupTrafficControllerMeshData - Could not create valid MeshComponent with name: %s."), *MeshComponentName.ToString());
 			return;
 		}
+		MeshComponent->AttachToComponent(OwnerActor->GetRootComponent(), FAttachmentTransformRules::KeepRelativeTransform);
+		MeshComponent->RegisterComponent();
+		OwnerActor->AddInstanceComponent(MeshComponent);
+		OwnerActor->Modify();
 
 		const ETempoTrafficControllerType TrafficControllerType = UTempoCoreUtils::CallBlueprintFunction(OwnerActor, ITempoIntersectionInterface::Execute_GetTempoTrafficControllerType);
 		
