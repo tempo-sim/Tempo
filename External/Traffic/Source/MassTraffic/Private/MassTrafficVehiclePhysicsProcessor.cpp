@@ -370,8 +370,19 @@ void UMassTrafficVehiclePhysicsProcessor::Execute(FMassEntityManager& EntityMana
 				const FVector LanePlaneNormal = RawLaneLocationTransform.GetRotation().GetUpVector();
 				const float SpeedInPlaneNormalDirection = FVector::DotProduct(VelocityFragment.Value, LanePlaneNormal);
 				const FVector LanePlaneVelocity = VelocityFragment.Value - (LanePlaneNormal * SpeedInPlaneNormalDirection);
-				
-				VehicleControlFragment.Speed = LanePlaneVelocity.Size();
+
+				// The physics processor's velocity is "noisy".
+				// So, when we achieve our desired stopping speed of 0.0f, lock VehicleControlFragment.Speed to 0.0f.
+				// This will prevent the stop behavior (and other logic) from seeing the speed "flicker"
+				// and causing issues.
+				if (FMath::IsNearlyZero(VehicleControlFragment.Speed) && FMath::IsNearlyZero(VehicleControlFragment.LastTargetSpeed))
+				{
+					VehicleControlFragment.Speed = 0.0f;
+				}
+				else
+				{
+					VehicleControlFragment.Speed = LanePlaneVelocity.Size();
+				}
 			}
 		});
 	}

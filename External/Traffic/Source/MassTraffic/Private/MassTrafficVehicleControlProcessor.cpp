@@ -621,6 +621,8 @@ void UMassTrafficVehicleControlProcessor::SimpleVehicleControl(
 		ProcessYieldAtIntersectionLogic(MassTrafficSubsystem, MassCrowdSubsystem, EntityManager, VehicleControlFragment, LaneLocationFragment, AgentRadiusFragment, RandomFractionFragment, ZoneGraphStorage, PerformYieldAction);
 	}
 
+	VehicleControlFragment.LastTargetSpeed = TargetSpeed;
+
 	const float VariedAcceleration = MassTrafficSettings->Acceleration * (1.0f + MassTrafficSettings->AccelerationVariancePct * (RandomFractionFragment.RandomFraction * 2.0f - 1.0f));
 	VehicleControlFragment.AccelerationEstimate = VariedAcceleration;
 
@@ -985,6 +987,8 @@ void UMassTrafficVehicleControlProcessor::PIDVehicleControl(
 	{
 		ProcessYieldAtIntersectionLogic(MassTrafficSubsystem, MassCrowdSubsystem, EntityManager, VehicleControlFragment, LaneLocationFragment, AgentRadiusFragment, RandomFractionFragment, ZoneGraphStorage, PerformYieldAction);
 	}
+	
+	VehicleControlFragment.LastTargetSpeed = TargetSpeed;
 
 	const float VariedAcceleration = MassTrafficSettings->Acceleration * (1.0f + MassTrafficSettings->AccelerationVariancePct * (RandomFractionFragment.RandomFraction * 2.0f - 1.0f));
 	VehicleControlFragment.AccelerationEstimate = VariedAcceleration;

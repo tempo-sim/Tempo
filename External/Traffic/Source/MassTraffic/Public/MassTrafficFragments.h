@@ -824,6 +824,9 @@ struct MASSTRAFFIC_API FMassTrafficVehicleControlFragment : public FMassFragment
 
 	// Current speed the vehicle is traveling along the lane in cm/s
 	float Speed = 0.0f;
+	
+	// Last target speed as dictated by the vehicle control processor.
+	float LastTargetSpeed = 0.0f;
 
 	// Estimate of the acceleration of the vehicle.
 	// Note:  This is calculated the way it was for the "simple" control state,
