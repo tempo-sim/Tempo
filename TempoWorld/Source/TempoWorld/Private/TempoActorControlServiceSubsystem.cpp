@@ -587,9 +587,10 @@ void GetObjectProperties(const UObject* Object, GetPropertiesResponse& Response)
 			Type = EnumName;
 			if (Value)
 			{
-				int64 ValueIndex;
-				EnumProperty->GetValue_InContainer(Container, &ValueIndex);
-				*Value = EnumProperty->GetEnum()->GetAuthoredNameStringByIndex(ValueIndex);
+				const FNumericProperty* EnumIntProperty = EnumProperty->GetUnderlyingProperty();
+				const void* ValuePtr = EnumProperty->ContainerPtrToValuePtr<void>(Container);
+				int64 IntValue = EnumIntProperty->GetSignedIntPropertyValue(ValuePtr);
+				*Value = EnumProperty->GetEnum()->GetAuthoredNameStringByValue(IntValue);
 			}
 		}
 		else if (const FByteProperty* ByteProperty = CastField<FByteProperty>(Property))
@@ -904,7 +905,8 @@ grpc::Status SetSinglePropertyValue<FEnumProperty, FString>(void* ValuePtr, FEnu
 	{
 		return grpc::Status(grpc::INVALID_ARGUMENT, "Invalid enum value");
 	}
-	*static_cast<int64*>(ValuePtr) = Value;
+	const FNumericProperty* EnumIntProperty = Property->GetUnderlyingProperty();
+	EnumIntProperty->SetIntPropertyValue(ValuePtr, Value);
 	return grpc::Status_OK;
 }
 
