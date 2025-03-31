@@ -42,8 +42,10 @@ public class TempoAgentsShared : ModuleRules
                 "MassAIBehavior",
                 "StateTreeModule",
                 "MassSignals",
+                "MassSimulation",
                 // Tempo
                 "TempoCore",
+                "TempoCoreShared",
             }
         );
     }
