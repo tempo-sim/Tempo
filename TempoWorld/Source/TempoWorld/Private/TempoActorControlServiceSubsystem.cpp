@@ -594,13 +594,27 @@ void GetObjectProperties(const UObject* Object, GetPropertiesResponse& Response)
 		}
 		else if (const FByteProperty* ByteProperty = CastField<FByteProperty>(Property))
 		{
-			const FString EnumName = ByteProperty->Enum->GetName();
-			Type = EnumName;
-			if (Value)
+			// Bytes might be enums, or just bytes
+			if (ByteProperty->Enum)
 			{
-				uint8 ValueIndex;
-				ByteProperty->GetValue_InContainer(Container, &ValueIndex);
-				*Value = ByteProperty->Enum->GetAuthoredNameStringByIndex(ValueIndex);
+				const FString EnumName = ByteProperty->Enum->GetName();
+				Type = EnumName;
+				if (Value)
+				{
+					uint8 ValueIndex;
+					ByteProperty->GetValue_InContainer(Container, &ValueIndex);
+					*Value = ByteProperty->Enum->GetAuthoredNameStringByIndex(ValueIndex);
+				}
+			}
+			else
+			{
+				Type = TEXT("int");
+				if (Value)
+				{
+					uint8 ValueByte;
+					ByteProperty->GetValue_InContainer(Container, &ValueByte);
+					*Value = FString::FromInt(ValueByte);
+				}
 			}
 		}
 		else if (const FObjectProperty* ObjectProperty = CastField<FObjectProperty>(Property))
@@ -928,6 +942,23 @@ grpc::Status SetSinglePropertyValue<FObjectProperty, UObject*>(void* ValuePtr, F
 	return grpc::Status_OK;
 }
 
+template <>
+grpc::Status SetSinglePropertyValue<FByteProperty, int32>(void* ValuePtr, FByteProperty* Property, const int32& ValueInt)
+{
+	if (ValueInt > TNumericLimits<uint8>::Max())
+	{
+		const FString ErrorMsg = FString::Printf(TEXT("Cannot set byte property %s with too-large value %d"), *Property->GetName(), ValueInt);
+		return grpc::Status(grpc::OUT_OF_RANGE, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+	}
+	if (ValueInt < 0)
+	{
+		const FString ErrorMsg = FString::Printf(TEXT("Cannot set byte property %s with negative value %d"), *Property->GetName(), ValueInt);
+		return grpc::Status(grpc::OUT_OF_RANGE, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+	}
+	Property->SetPropertyValue(ValuePtr, ValueInt);
+	return grpc::Status_OK;
+}
+
 template <typename PropertyType, typename ValueType>
 grpc::Status SetSinglePropertyInContainer(void* Container, FProperty* Property, const FString& PropertyName, const ValueType& Value)
 {
@@ -1164,7 +1195,14 @@ grpc::Status SetPropertyImpl<SetBoolPropertyRequest>(const UWorld* World, const 
 template<>
 grpc::Status SetPropertyImpl<SetIntPropertyRequest>(const UWorld* World, const SetIntPropertyRequest& Request)
 {
-	return SetSinglePropertyImpl<FIntProperty>(World, Request, Request.value());
+	// First try to set it as an int, then fall back on byte
+	const grpc::Status IntStatus = SetSinglePropertyImpl<FIntProperty>(World, Request, Request.value());
+	// If we got an error other than FAILED_PRECONDITION that means the type was right, but something else was wrong.
+	if (IntStatus.ok() || IntStatus.error_code() != grpc::FAILED_PRECONDITION)
+	{
+		return IntStatus;
+	}
+	return SetSinglePropertyImpl<FByteProperty>(World, Request, Request.value());
 }
 
 template<>
