@@ -31,6 +31,12 @@ void UTempoSceneCaptureComponent2D::UpdateSceneCaptureContents(FSceneInterface* 
 {
 	TextureInitFence.Wait();
 
+	if (TextureTarget->SizeX != SizeXY.X || TextureTarget->SizeY != SizeXY.Y)
+	{
+		InitRenderTarget();
+		return;
+	}
+
 	const FTextureRenderTargetResource* RenderTarget = TextureTarget->GameThread_GetRenderTargetResource();
 	if (!ensureMsgf(RenderTarget && RenderTarget->IsInitialized(), TEXT("RenderTarget was not initialized. Skipping capture.")) ||
 		!ensureMsgf(TextureRHICopy.IsValid() && TextureRHICopy->IsValid(), TEXT("TextureRHICopy was not valid. Skipping capture.")) ||
@@ -183,6 +189,11 @@ void UTempoSceneCaptureComponent2D::InitRenderTarget()
 
 void UTempoSceneCaptureComponent2D::MaybeCapture()
 {
+	if (!FMath::IsNearlyEqual(GetWorld()->GetTimerManager().GetTimerRate(TimerHandle), RateHz))
+	{
+		GetWorld()->GetTimerManager().SetTimer(TimerHandle, this, &UTempoSceneCaptureComponent2D::MaybeCapture, 1.0 / RateHz, true);
+	}
+
 	if (!HasPendingRequests())
 	{
 		return;
