@@ -37,10 +37,7 @@ class TEMPOAGENTSSHARED_API UTempoMassSpawnerSubSystem : public UTempoGameWorldS
 	GENERATED_BODY()
 
 public:
-	virtual void OnWorldBeginPlay(UWorld& InWorld) override;
-
-protected:
-	void OnPreBeginPlay(UWorld* World);
+	virtual void OnWorldBeginPlay(UWorld& World) override;
 };
 
 /*
