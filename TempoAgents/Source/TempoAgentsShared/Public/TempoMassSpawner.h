@@ -18,8 +18,7 @@
  *
  * The second issue is that MassSpawner checks IsLoaded on all its EntityConfigs and, if they are not loaded, calls
  * FStreamableManager::RequestAsyncLoad. That will lead to at least a one-frame delay any time EntityConfigs were not
- * loaded before BeginPlay (which seems to always be the case; whatever they're doing in
- * AMassSpawner::PostRegisterAllComponents does not seem to be working).
+ * loaded before BeginPlay.
  *
  * It just so happens that, in practice, these two issues "cancel out": the agents are not initialized until the first
  * Tick, but the spawn doesn't actually happen until the first Tick anyhow.
@@ -41,6 +40,10 @@ public:
 	virtual void OnWorldBeginPlay(UWorld& World) override;
 };
 
+/*
+ * A MassSpawner that is guaranteed to spawn on BeginPlay when bAutoSpawnOnBeginPlay is true,
+ * unlike its parent which may spawn some ticks after.
+ */
 UCLASS()
 class TEMPOAGENTSSHARED_API ATempoMassSpawner : public AMassSpawner
 {
