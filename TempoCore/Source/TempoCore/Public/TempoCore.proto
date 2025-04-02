@@ -10,10 +10,16 @@ message LoadLevelRequest {
   bool start_paused = 3;
 }
 
+message CurrentLevelResponse {
+  string level = 1;
+}
+
 service TempoCoreService {
   rpc LoadLevel(LoadLevelRequest) returns (TempoScripting.Empty);
 
   rpc FinishLoadingLevel(TempoScripting.Empty) returns (TempoScripting.Empty);
+
+  rpc GetCurrentLevelName(TempoScripting.Empty) returns (CurrentLevelResponse);
 
   rpc Quit(TempoScripting.Empty) returns (TempoScripting.Empty);
 }
