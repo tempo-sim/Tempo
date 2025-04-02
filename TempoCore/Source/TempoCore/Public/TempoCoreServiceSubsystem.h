@@ -18,6 +18,7 @@ namespace TempoScripting
 namespace TempoCore
 {
 	class LoadLevelRequest;
+	class CurrentLevelResponse;
 }
 
 UCLASS()
@@ -35,6 +36,8 @@ public:
 	void LoadLevel(const TempoCore::LoadLevelRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation);
 
 	void FinishLoadingLevel(const TempoScripting::Empty& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation);
+
+	void GetCurrentLevelName(const TempoScripting::Empty& Request, const TResponseDelegate<TempoCore::CurrentLevelResponse>& ResponseContinuation);
 
 	void Quit(const TempoScripting::Empty& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const;
 
