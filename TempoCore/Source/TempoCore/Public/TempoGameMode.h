@@ -9,6 +9,8 @@
 
 #include "TempoGameMode.generated.h"
 
+DECLARE_MULTICAST_DELEGATE_OneParam(FPreBeginPlay, UWorld*);
+
 UCLASS(Blueprintable, Abstract)
 class TEMPOCORE_API ATempoGameMode : public AGameModeBase
 {
@@ -20,6 +22,9 @@ public:
 	virtual void StartPlay() override;
 
 	bool BeginPlayDeferred() const { return bBeginPlayDeferred; }
+
+	// An event that fires *right* before BeginPlay
+	FPreBeginPlay PreBeginPlayEvent;
 
 protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, meta=(MustImplement="/Script/TempoCore.ActorClassificationInterface"))
