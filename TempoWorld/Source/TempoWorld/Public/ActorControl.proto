@@ -29,6 +29,25 @@ message DestroyActorRequest {
   string actor = 1;
 }
 
+message AddComponentRequest {
+  string type = 1;
+  string actor = 2;
+  string name = 3;
+  string parent = 4;
+  TempoScripting.Transform transform = 5;
+  string socket = 6;
+}
+
+message AddComponentResponse {
+  string name = 1;
+  TempoScripting.Transform transform = 2;
+}
+
+message DestroyComponentRequest {
+  string actor = 1;
+  string component = 2;
+}
+
 message SetActorTransformRequest {
   string actor = 1;
   TempoScripting.Transform transform = 2;
@@ -265,6 +284,10 @@ service ActorControlService {
     rpc FinishSpawningActor(FinishSpawningActorRequest) returns (FinishSpawningActorResponse);
 
     rpc DestroyActor(DestroyActorRequest) returns (TempoScripting.Empty);
+
+    rpc AddComponent(AddComponentRequest) returns (AddComponentResponse);
+
+    rpc DestroyComponent(DestroyComponentRequest) returns (TempoScripting.Empty);
 
     rpc SetActorTransform(SetActorTransformRequest) returns (TempoScripting.Empty);
 

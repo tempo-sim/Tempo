@@ -2,12 +2,15 @@
 
 #include "TempoActorControlServiceSubsystem.h"
 
-#include "EngineUtils.h"
 #include "TempoWorld/ActorControl.grpc.pb.h"
 
 #include "TempoConversion.h"
-#include "TempoCoreUtils.h"
 #include "TempoWorldUtils.h"
+
+#include "EngineUtils.h"
+#if WITH_EDITOR
+#include "LevelEditor.h"
+#endif
 
 using ActorControlService = TempoWorld::ActorControlService;
 using ActorControlAsyncService = TempoWorld::ActorControlService::AsyncService;
@@ -16,6 +19,9 @@ using SpawnActorResponse = TempoWorld::SpawnActorResponse;
 using FinishSpawningActorRequest = TempoWorld::FinishSpawningActorRequest;
 using FinishSpawningActorResponse = TempoWorld::FinishSpawningActorResponse;
 using DestroyActorRequest = TempoWorld::DestroyActorRequest;
+using AddComponentRequest = TempoWorld::AddComponentRequest;
+using AddComponentResponse = TempoWorld::AddComponentResponse;
+using DestroyComponentRequest = TempoWorld::DestroyComponentRequest;
 using SetActorTransformRequest = TempoWorld::SetActorTransformRequest;
 using SetComponentTransformRequest = TempoWorld::SetComponentTransformRequest;
 using ActivateComponentRequest = TempoWorld::ActivateComponentRequest;
@@ -86,6 +92,8 @@ void UTempoActorControlServiceSubsystem::RegisterScriptingServices(FTempoScripti
 		SimpleRequestHandler(&ActorControlAsyncService::RequestSpawnActor, &UTempoActorControlServiceSubsystem::SpawnActor),
 		SimpleRequestHandler(&ActorControlAsyncService::RequestFinishSpawningActor, &UTempoActorControlServiceSubsystem::FinishSpawningActor),
 		SimpleRequestHandler(&ActorControlAsyncService::RequestDestroyActor, &UTempoActorControlServiceSubsystem::DestroyActor),
+		SimpleRequestHandler(&ActorControlAsyncService::RequestAddComponent, &UTempoActorControlServiceSubsystem::AddComponent),
+		SimpleRequestHandler(&ActorControlAsyncService::RequestDestroyComponent, &UTempoActorControlServiceSubsystem::DestroyComponent),
 		SimpleRequestHandler(&ActorControlAsyncService::RequestSetActorTransform, &UTempoActorControlServiceSubsystem::SetActorTransform),
 		SimpleRequestHandler(&ActorControlAsyncService::RequestSetComponentTransform, &UTempoActorControlServiceSubsystem::SetComponentTransform),
 		SimpleRequestHandler(&ActorControlAsyncService::RequestGetAllActors, &UTempoActorControlServiceSubsystem::GetAllActors),
@@ -268,6 +276,151 @@ void UTempoActorControlServiceSubsystem::DestroyActor(const TempoWorld::DestroyA
 		return;
 	}
 	Actor->Destroy();
+
+	ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status_OK);
+}
+
+void UTempoActorControlServiceSubsystem::AddComponent(const AddComponentRequest& Request, const TResponseDelegate<AddComponentResponse>& ResponseContinuation) const
+{
+	AddComponentResponse Response;
+
+	if (Request.type().empty())
+	{
+		ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::FAILED_PRECONDITION, "Type must be specified"));
+		return;
+	}
+
+	if (Request.actor().empty())
+	{
+		ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::FAILED_PRECONDITION, "Actor must be specified"));
+		return;
+	}
+
+	AActor* Actor = GetActorWithName(GetWorld(), UTF8_TO_TCHAR(Request.actor().c_str()));
+	if (!Actor)
+	{
+		ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::FAILED_PRECONDITION, "Failed to find actor"));
+		return;
+	}
+
+	UClass* Class = GetSubClassWithName<UActorComponent>(UTF8_TO_TCHAR(Request.type().c_str()));
+	if (!Class)
+	{
+		ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::NOT_FOUND, "No component class with that name found"));
+		return;
+	}
+
+	const bool bIsClassSceneComponent = Cast<USceneComponent>(Class->ClassDefaultObject) != nullptr;
+	if (Request.has_transform() && !bIsClassSceneComponent)
+	{
+		ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::NOT_FOUND, "Transform specified but class is not a scene component"));
+		return;
+	}
+
+	if (!Request.parent().empty() && !bIsClassSceneComponent)
+	{
+		ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::NOT_FOUND, "Parent specified but class is not a scene component"));
+		return;
+	}
+
+	if (!Request.socket().empty() && !bIsClassSceneComponent)
+	{
+		ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::NOT_FOUND, "Socket specified but class is not a scene component"));
+		return;
+	}
+
+	USceneComponent* ParentComponent = Actor->GetRootComponent();
+	if (!Request.parent().empty())
+	{
+		ParentComponent = GetComponentWithName<USceneComponent>(Actor, UTF8_TO_TCHAR(Request.parent().c_str()));
+		if (!ParentComponent)
+		{
+			ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::FAILED_PRECONDITION, "Parent not found"));
+			return;
+		}
+	}
+
+	FName Socket = NAME_None;
+	if (!Request.socket().empty())
+	{
+		Socket = FName(UTF8_TO_TCHAR(Request.socket().c_str()));
+		if (!ParentComponent->DoesSocketExist(Socket))
+		{
+			ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::FAILED_PRECONDITION, "Socket not found on parent"));
+			return;
+		}
+	}
+
+#if WITH_EDITOR
+	Actor->Modify();
+#endif
+
+	const FName Name(UTF8_TO_TCHAR(Request.name().c_str()));
+	UActorComponent* NewComponent = NewObject<UActorComponent>(Actor, Class, Name);
+	NewComponent->OnComponentCreated();
+	if (USceneComponent* NewSceneComponent = Cast<USceneComponent>(NewComponent))
+	{
+		NewSceneComponent->AttachToComponent(ParentComponent, FAttachmentTransformRules::KeepRelativeTransform, Socket);
+		const FTransform RelativeTransform = ToUnrealTransform(Request.transform());
+		NewSceneComponent->SetRelativeTransform(RelativeTransform);
+		*Response.mutable_transform() = FromUnrealTransform(NewSceneComponent->GetComponentTransform());
+	}
+	else
+	{
+		Actor->AddOwnedComponent(NewComponent);
+	}
+
+	NewComponent->RegisterComponent();
+	Actor->AddInstanceComponent(NewComponent);
+
+#if WITH_EDITOR
+	// Broadcast edit notifications so that level editor details are refreshed (e.g. components tree)
+	FLevelEditorModule& LevelEditor = FModuleManager::LoadModuleChecked<FLevelEditorModule>(TEXT("LevelEditor"));
+	LevelEditor.BroadcastComponentsEdited();
+#endif
+
+	Response.set_name(TCHAR_TO_UTF8(*NewComponent->GetName()));
+
+	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
+}
+
+void UTempoActorControlServiceSubsystem::DestroyComponent(const TempoWorld::DestroyComponentRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const
+{
+	if (Request.actor().empty())
+	{
+		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Actor must be specified"));
+		return;
+	}
+
+	if (Request.component().empty())
+	{
+		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Component must be specified"));
+		return;
+	}
+
+	AActor* Actor = GetActorWithName(GetWorld(), UTF8_TO_TCHAR(Request.actor().c_str()));
+	if (!Actor)
+	{
+		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Failed to find actor"));
+		return;
+	}
+
+	UActorComponent* Component = GetComponentWithName(Actor, UTF8_TO_TCHAR(Request.component().c_str()));
+	if (!Component)
+	{
+		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Failed to find component"));
+		return;
+	}
+
+#if WITH_EDITOR
+	Actor->Modify();
+#endif
+	Component->DestroyComponent();
+#if WITH_EDITOR
+	// Broadcast edit notifications so that level editor details are refreshed (e.g. components tree)
+	FLevelEditorModule& LevelEditor = FModuleManager::LoadModuleChecked<FLevelEditorModule>(TEXT("LevelEditor"));
+	LevelEditor.BroadcastComponentsEdited();
+#endif
 
 	ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status_OK);
 }
