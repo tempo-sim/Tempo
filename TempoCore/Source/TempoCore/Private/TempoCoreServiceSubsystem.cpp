@@ -12,12 +12,14 @@
 using TempoCoreService = TempoCore::TempoCoreService;
 using TempoCoreAsyncService = TempoCore::TempoCoreService::AsyncService;
 using LoadLevelRequest = TempoCore::LoadLevelRequest;
+using CurrentLevelResponse = TempoCore::CurrentLevelResponse;
 
 void UTempoCoreServiceSubsystem::RegisterScriptingServices(FTempoScriptingServer& ScriptingServer)
 {
 	ScriptingServer.RegisterService<TempoCoreService>(
 		SimpleRequestHandler(&TempoCoreAsyncService::RequestLoadLevel, &UTempoCoreServiceSubsystem::LoadLevel),
 		SimpleRequestHandler(&TempoCoreAsyncService::RequestFinishLoadingLevel, &UTempoCoreServiceSubsystem::FinishLoadingLevel),
+		SimpleRequestHandler(&TempoCoreAsyncService::RequestGetCurrentLevelName, &UTempoCoreServiceSubsystem::GetCurrentLevelName),
 		SimpleRequestHandler(&TempoCoreAsyncService::RequestQuit, &UTempoCoreServiceSubsystem::Quit)
 	);
 }
@@ -90,6 +92,15 @@ void UTempoCoreServiceSubsystem::FinishLoadingLevel(const TempoScripting::Empty&
 	SetDeferBeginPlay(false);
 	TempoGameMode->StartPlay();
 	ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status_OK);
+}
+
+void UTempoCoreServiceSubsystem::GetCurrentLevelName(const TempoScripting::Empty& Request, const TResponseDelegate<CurrentLevelResponse>& ResponseContinuation)
+{
+	const FString CurrentLevelName = UGameplayStatics::GetCurrentLevelName(this);
+
+	CurrentLevelResponse Response;
+	Response.set_level(TCHAR_TO_UTF8(*CurrentLevelName));
+	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
 }
 
 void UTempoCoreServiceSubsystem::Quit(const TempoScripting::Empty& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const
