@@ -260,6 +260,9 @@ protected:
 	void InitRenderTarget();
 
 private:
+	// Starts or restarts the timer that calls MaybeCapture
+	void RestartCaptureTimer();
+
 	// Capture a frame, if any client has requested one.
 	void MaybeCapture();
 
