@@ -19,6 +19,9 @@ namespace TempoWorld
 {
 	class SpawnActorRequest;
 	class SpawnActorResponse;
+	class AddComponentRequest;
+	class AddComponentResponse;
+	class DestroyComponentRequest;
 	class FinishSpawningActorRequest;
 	class FinishSpawningActorResponse;
 	class DestroyActorRequest;
@@ -58,6 +61,10 @@ public:
 	void FinishSpawningActor(const TempoWorld::FinishSpawningActorRequest& Request, const TResponseDelegate<TempoWorld::FinishSpawningActorResponse>& ResponseContinuation);
 
 	void DestroyActor(const TempoWorld::DestroyActorRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const;
+
+	void AddComponent(const TempoWorld::AddComponentRequest& Request, const TResponseDelegate<TempoWorld::AddComponentResponse>& ResponseContinuation) const;
+
+	void DestroyComponent(const TempoWorld::DestroyComponentRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const;
 
 	void SetActorTransform(const TempoWorld::SetActorTransformRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const;
 
