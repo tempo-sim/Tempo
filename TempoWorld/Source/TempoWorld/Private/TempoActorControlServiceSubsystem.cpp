@@ -401,14 +401,14 @@ void UTempoActorControlServiceSubsystem::DestroyComponent(const TempoWorld::Dest
 	AActor* Actor = GetActorWithName(GetWorld(), UTF8_TO_TCHAR(Request.actor().c_str()));
 	if (!Actor)
 	{
-		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Failed to find actor"));
+		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::NOT_FOUND, "Failed to find actor"));
 		return;
 	}
 
 	UActorComponent* Component = GetComponentWithName(Actor, UTF8_TO_TCHAR(Request.component().c_str()));
 	if (!Component)
 	{
-		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Failed to find component"));
+		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::NOT_FOUND, "Failed to find component"));
 		return;
 	}
 
@@ -436,7 +436,7 @@ void UTempoActorControlServiceSubsystem::SetActorTransform(const TempoWorld::Set
 	AActor* Actor = GetActorWithName(GetWorld(), UTF8_TO_TCHAR(Request.actor().c_str()));
 	if (!Actor)
 	{
-		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Failed to find actor"));
+		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::NOT_FOUND, "Failed to find actor"));
 		return;
 	}
 
@@ -447,7 +447,7 @@ void UTempoActorControlServiceSubsystem::SetActorTransform(const TempoWorld::Set
 		const AActor* RelativeToActor = GetActorWithName(GetWorld(), UTF8_TO_TCHAR(Request.relative_to_actor().c_str()));
 		if (!RelativeToActor)
 		{
-			ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Failed to find relative to actor"));
+			ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::NOT_FOUND, "Failed to find relative to actor"));
 			return;
 		}
 		Transform = RelativeToActor->GetActorTransform() * Transform;
@@ -475,14 +475,14 @@ void UTempoActorControlServiceSubsystem::SetComponentTransform(const TempoWorld:
 	const AActor* Actor = GetActorWithName(GetWorld(), UTF8_TO_TCHAR(Request.actor().c_str()));
 	if (!Actor)
 	{
-		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Failed to find actor"));
+		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::NOT_FOUND, "Failed to find actor"));
 		return;
 	}
 
 	USceneComponent* Component = GetComponentWithName<USceneComponent>(Actor, UTF8_TO_TCHAR(Request.component().c_str()));
 	if (!Component)
 	{
-		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Failed to find component"));
+		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::NOT_FOUND, "Failed to find component"));
 		return;
 	}
 
