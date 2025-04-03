@@ -523,6 +523,13 @@ void GetObjectProperties(const UObject* Object, GetPropertiesResponse& Response)
 	TFunction<void(const void*, const FProperty*, FString&, FString*)> GetPropertyTypeAndValue;
 	GetPropertyTypeAndValue= [&GetPropertyTypeAndValue](const void* Container, const FProperty* Property, FString& Type, FString* Value)
 	{
+		if (Property->ArrayDim != 1)
+		{
+			// UProperties can be C-style arrays (who knew?), and this will be indicated by a non-1 ArrayDim member.
+			// For example, FPostProcessSettings has FLinearColor LensFlareTints[8]
+			// We don't support these types
+			Type = TEXT("Unsupported");
+		}
 		if (const FStrProperty* StrProperty = CastField<FStrProperty>(Property))
 		{
 			Type = TEXT("string");
