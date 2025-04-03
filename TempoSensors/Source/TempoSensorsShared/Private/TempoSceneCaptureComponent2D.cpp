@@ -24,12 +24,18 @@ void UTempoSceneCaptureComponent2D::BeginPlay()
 {
 	Super::BeginPlay();
 
-	GetWorld()->GetTimerManager().SetTimer(TimerHandle, this, &UTempoSceneCaptureComponent2D::MaybeCapture, 1.0 / RateHz, true);
+	RestartCaptureTimer();
 }
 
 void UTempoSceneCaptureComponent2D::UpdateSceneCaptureContents(FSceneInterface* Scene)
 {
 	TextureInitFence.Wait();
+
+	if (TextureTarget->SizeX != SizeXY.X || TextureTarget->SizeY != SizeXY.Y)
+	{
+		InitRenderTarget();
+		return;
+	}
 
 	const FTextureRenderTargetResource* RenderTarget = TextureTarget->GameThread_GetRenderTargetResource();
 	if (!ensureMsgf(RenderTarget && RenderTarget->IsInitialized(), TEXT("RenderTarget was not initialized. Skipping capture.")) ||
@@ -181,8 +187,20 @@ void UTempoSceneCaptureComponent2D::InitRenderTarget()
 	TextureReadQueue.Empty();
 }
 
+void UTempoSceneCaptureComponent2D::RestartCaptureTimer()
+{
+	// Don't allow a negative or zero rate.
+	const float ClampedRateHz = FMath::Max(UE_KINDA_SMALL_NUMBER, RateHz);
+	GetWorld()->GetTimerManager().SetTimer(TimerHandle, this, &UTempoSceneCaptureComponent2D::MaybeCapture, 1.0 / ClampedRateHz, true);
+}
+
 void UTempoSceneCaptureComponent2D::MaybeCapture()
 {
+	if (!FMath::IsNearlyEqual(GetWorld()->GetTimerManager().GetTimerRate(TimerHandle), RateHz))
+	{
+		RestartCaptureTimer();
+	}
+
 	if (!HasPendingRequests())
 	{
 		return;
