@@ -23,6 +23,7 @@ void ATempoGameMode::StartPlay()
 		}
 	}
 
+	PreBeginPlayEvent.Broadcast(GetWorld());
 	Super::StartPlay();
 
 	if (TempoCoreServiceSubsystem)
