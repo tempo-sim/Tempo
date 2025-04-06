@@ -236,7 +236,7 @@ bool ShouldVehicleMergeOntoLane(
 		return true;
 	}
 
-	const auto& ShouldVehicleYieldToTestVehicle = [&MassTrafficSubsystem, &VehicleControlFragment, &CurrentLaneData, &DesiredLaneData, VehicleDistanceAlongCurrentLane, VehicleEffectiveSpeed, VehicleRadius, VehicleRandomFraction, &MassTrafficSettings, bVehicleHasStopSignOrYieldSign, &StoppingDistanceRange, &ZoneGraphStorage, &OutMergeYieldCaseIndex](
+	const auto& ShouldVehicleYieldToTestVehicle = [&MassTrafficSubsystem, &VehicleControlFragment, &CurrentLaneData, &DesiredLaneData, VehicleRandomFraction, &MassTrafficSettings, &ZoneGraphStorage, bVehicleHasStopSignOrYieldSign, &StoppingDistanceRange, &OutMergeYieldCaseIndex](
 		const FZoneGraphTrafficLaneData& TestVehicleCurrentLaneData,
 		const FZoneGraphTrafficLaneData& TestVehicleIntersectionLaneData,
 		const FMassEntityHandle& TestVehicleEntityHandle,
@@ -246,7 +246,12 @@ bool ShouldVehicleMergeOntoLane(
 		const bool bTestVehicleIsYielding,
 		const float TestVehicleRadius,
 		const FZoneGraphTrafficLaneData* TestVehicleStopSignIntersectionLane,
-		const float TestVehicleRandomFraction)
+		const float TestVehicleRandomFraction,
+		const float VehicleEnterTime,
+		const float VehicleExitTime,
+		const float VehicleDistanceToEnterConflictLane,
+		const float VehicleDistanceToExitConflictLane,
+		const bool bWaitForTestVehicleToClearIntersection)
 	{
 		if (!TestVehicleEntityHandle.IsValid())
 		{
@@ -304,12 +309,6 @@ bool ShouldVehicleMergeOntoLane(
 			}
 		}
 		
-		float VehicleEnterTime;
-		float VehicleExitTime;
-		
-		float VehicleDistanceToEnterConflictLane;
-		float VehicleDistanceToExitConflictLane;
-		
 		float TestVehicleEnterTime;
 		float TestVehicleExitTime;
 		
@@ -319,22 +318,8 @@ bool ShouldVehicleMergeOntoLane(
 		// Vehicles coming from an approach *with* a stop sign or yield sign must wait
 		// for vehicles coming from an approach *without* a stop sign or yield sign
 		// to completely clear the intersection before further attempting to merge.
-		if (bVehicleHasStopSignOrYieldSign && !bTestVehicleHasStopSignOrYieldSign && CurrentLaneData->LaneHandle != DesiredLaneData->LaneHandle)
+		if (bWaitForTestVehicleToClearIntersection)
 		{
-			if (!TryGetVehicleEnterAndExitTimesForIntersection(
-				*CurrentLaneData,
-				*DesiredLaneData,
-				VehicleDistanceAlongCurrentLane,
-				VehicleEffectiveSpeed,
-				VehicleRadius,
-				VehicleEnterTime,
-				VehicleExitTime,
-				&VehicleDistanceToEnterConflictLane,
-				&VehicleDistanceToExitConflictLane))
-			{
-				return false;
-			}
-
 			if (!TryGetVehicleEnterAndExitTimesForIntersection(
 				TestVehicleCurrentLaneData,
 				TestVehicleIntersectionLaneData,
@@ -355,24 +340,6 @@ bool ShouldVehicleMergeOntoLane(
 				MassTrafficSubsystem,
 				MassTrafficSettings,
 				ZoneGraphStorage,
-				*CurrentLaneData,
-				*DesiredLaneData,
-				TestVehicleIntersectionLaneData.LaneHandle,
-				VehicleDistanceAlongCurrentLane,
-				VehicleEffectiveSpeed,
-				VehicleRadius,
-				VehicleEnterTime,
-				VehicleExitTime,
-				&VehicleDistanceToEnterConflictLane,
-				&VehicleDistanceToExitConflictLane))
-			{
-				return false;
-			}
-
-			if (!TryGetVehicleEnterAndExitTimesForCrossingLane(
-				MassTrafficSubsystem,
-				MassTrafficSettings,
-				ZoneGraphStorage,
 				TestVehicleCurrentLaneData,
 				TestVehicleIntersectionLaneData,
 				DesiredLaneData->LaneHandle,
@@ -386,18 +353,6 @@ bool ShouldVehicleMergeOntoLane(
 			{
 				return false;
 			}
-		}
-
-		// If we're yielding, we assume that we're looking to resume motion at some point.
-		// Therefore, we calculate our enter and exit times based on our enter and exit distances and our acceleration.
-		if (VehicleControlFragment.IsYieldingAtIntersection())
-		{
-			GetEnterAndExitTimeForYieldingEntity(
-				VehicleDistanceToEnterConflictLane,
-				VehicleDistanceToExitConflictLane,
-				VehicleControlFragment.AccelerationEstimate,
-				VehicleEnterTime,
-				VehicleExitTime);
 		}
 		
 		// If the test vehicle is yielding, we assume that it's looking to resume motion at some point.
@@ -591,7 +546,7 @@ bool ShouldVehicleMergeOntoLane(
 		return false;
 	};
 
-	const auto& ShouldVehicleYieldToTestLane = [&MassTrafficSubsystem, &ShouldVehicleYieldToTestVehicle, &VehicleControlFragment, &CurrentLaneData, &OutYieldTargetEntity](
+	const auto& ShouldVehicleYieldToTestLane = [&MassTrafficSubsystem, &ShouldVehicleYieldToTestVehicle, &VehicleControlFragment, &CurrentLaneData, &DesiredLaneData, VehicleDistanceAlongCurrentLane, VehicleEffectiveSpeed, VehicleRadius, &MassTrafficSettings, &ZoneGraphStorage, bVehicleHasStopSignOrYieldSign, &OutYieldTargetEntity](
 		const FZoneGraphTrafficLaneData& TestLaneData,
 		const FZoneGraphTrafficLaneData& ConflictLaneData)
 	{
@@ -608,6 +563,67 @@ bool ShouldVehicleMergeOntoLane(
 			// However, in this case, the CoreVehicleInfos data for the lane
 			// will be populated by the next frame.
 			return false;
+		}
+
+		const bool bTestVehicleHasStopSignOrYieldSign = ConflictLaneData.HasStopSignOrYieldSignAtLaneStart();
+		const bool bWaitForTestVehicleToClearIntersection = bVehicleHasStopSignOrYieldSign && !bTestVehicleHasStopSignOrYieldSign && CurrentLaneData->LaneHandle != DesiredLaneData->LaneHandle;
+
+		float VehicleEnterTime;
+		float VehicleExitTime;
+		
+		float VehicleDistanceToEnterConflictLane;
+		float VehicleDistanceToExitConflictLane;
+		
+		// Vehicles coming from an approach *with* a stop sign or yield sign must wait
+		// for vehicles coming from an approach *without* a stop sign or yield sign
+		// to completely clear the intersection before further attempting to merge.
+		if (bWaitForTestVehicleToClearIntersection)
+		{
+			if (!TryGetVehicleEnterAndExitTimesForIntersection(
+				*CurrentLaneData,
+				*DesiredLaneData,
+				VehicleDistanceAlongCurrentLane,
+				VehicleEffectiveSpeed,
+				VehicleRadius,
+				VehicleEnterTime,
+				VehicleExitTime,
+				&VehicleDistanceToEnterConflictLane,
+				&VehicleDistanceToExitConflictLane))
+			{
+				return false;
+			}
+		}
+		else
+		{
+			if (!TryGetVehicleEnterAndExitTimesForCrossingLane(
+				MassTrafficSubsystem,
+				MassTrafficSettings,
+				ZoneGraphStorage,
+				*CurrentLaneData,
+				*DesiredLaneData,
+				ConflictLaneData.LaneHandle,
+				VehicleDistanceAlongCurrentLane,
+				VehicleEffectiveSpeed,
+				VehicleRadius,
+				VehicleEnterTime,
+				VehicleExitTime,
+				&VehicleDistanceToEnterConflictLane,
+				&VehicleDistanceToExitConflictLane))
+			{
+				return false;
+			}
+		}
+
+		// If we're yielding, we assume that we're looking to resume motion at some point.
+		// Therefore, we calculate our enter and exit times based on our enter and exit distances and our acceleration.
+		if (VehicleControlFragment.IsYieldingAtIntersection())
+		{
+			GetEnterAndExitTimeForYieldingEntity(
+				VehicleDistanceToEnterConflictLane,
+				VehicleDistanceToExitConflictLane,
+				VehicleControlFragment.AccelerationEstimate,
+				VehicleEnterTime,
+				VehicleExitTime);
 		}
 
 		// Consider each vehicle on the current lane.
@@ -648,7 +664,12 @@ bool ShouldVehicleMergeOntoLane(
 				CoreVehicleInfo.bVehicleIsYielding,
 				CoreVehicleInfo.VehicleRadius,
 				CoreVehicleInfo.VehicleStopSignIntersectionLane,
-				CoreVehicleInfo.VehicleRandomFraction))
+				CoreVehicleInfo.VehicleRandomFraction,
+				VehicleEnterTime,
+				VehicleExitTime,
+				VehicleDistanceToEnterConflictLane,
+				VehicleDistanceToExitConflictLane,
+				bWaitForTestVehicleToClearIntersection))
 			{
 				OutYieldTargetEntity = CoreVehicleInfo.VehicleEntityHandle;
 				return true;
