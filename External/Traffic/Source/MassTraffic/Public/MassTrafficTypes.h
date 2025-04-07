@@ -576,18 +576,6 @@ struct MASSTRAFFIC_API FZoneGraphTrafficLaneData
 	uint8 NumVehiclesOnLane = 0;
 	uint8 NumVehiclesApproachingLane = 0; 
 	uint8 NumReservedVehiclesOnLane = 0; // See all CANTSTOPLANEEXIT.
-
-	TOptional<FMassEntityHandle> LeadVehicleEntityHandle;
-	TOptional<float> LeadVehicleDistanceAlongLane;
-	TOptional<float> LeadVehicleAccelerationEstimate;
-	TOptional<float> LeadVehicleSpeed;
-	TOptional<bool> bLeadVehicleIsYielding;
-	TOptional<float> LeadVehicleRadius;
-	TOptional<FZoneGraphTrafficLaneData*> LeadVehicleNextLane;
-	TOptional<FZoneGraphTrafficLaneData*> LeadVehicleStopSignIntersectionLane;
-	TOptional<float> LeadVehicleRandomFraction;
-	TOptional<float> LeadVehicleIsNearStopLineAtIntersection;
-	TOptional<float> LeadVehicleRemainingStopSignRestTime;
 	
 	FMassEntityHandle IntersectionEntityHandle;
 	

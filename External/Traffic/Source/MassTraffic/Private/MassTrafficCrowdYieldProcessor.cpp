@@ -14,7 +14,7 @@
 #include "MassTrafficLaneChange.h"
 
 
-// Important:  UMassTrafficCrowdYieldProcessor is meant to run after UMassTrafficVehicleControlProcessor.
+// Important:  UMassTrafficCrowdYieldProcessor is meant to run before UMassTrafficVehicleControlProcessor.
 // So, this must be setup in DefaultMass.ini.
 UMassTrafficCrowdYieldProcessor::UMassTrafficCrowdYieldProcessor()
 	: EntityQuery(*this)
@@ -61,6 +61,13 @@ void UMassTrafficCrowdYieldProcessor::Execute(FMassEntityManager& EntityManager,
 		const TConstArrayView<FMassForceFragment> ForceFragments = QueryContext.GetFragmentView<FMassForceFragment>();
 		const TConstArrayView<FAgentRadiusFragment> RadiusFragments = QueryContext.GetFragmentView<FAgentRadiusFragment>();
 
+		const UWorld* World = QueryContext.GetWorld();
+
+		if (!ensureMsgf(World != nullptr, TEXT("Must get valid World in UMassTrafficCrowdYieldProcessor::Execute.")))
+		{
+			return;
+		}
+
 		const int32 NumEntities = QueryContext.GetNumEntities();
 	
 		for (int32 EntityIndex = 0; EntityIndex < NumEntities; ++EntityIndex)
@@ -95,70 +102,29 @@ void UMassTrafficCrowdYieldProcessor::Execute(FMassEntityManager& EntityManager,
 			const bool bWasAlreadyYieldingOnCrosswalk = CrosswalkLaneInfo->IsEntityOnCrosswalkYieldingToAnyLane(EntityHandle);
 			const float DesiredSpeed = bWasAlreadyYieldingOnCrosswalk ? CrosswalkLaneInfo->GetEntityYieldResumeSpeed(EntityHandle).Get() : MoveTargetFragment.DesiredSpeed.Get();
 			
-			const auto& ShouldYieldToIncomingVehicleLane = [&MassTrafficSubsystem, &LaneLocationFragment, &VelocityFragment, &ForceFragment, &RadiusFragment, &ZoneGraphStorage, bWasAlreadyYieldingOnCrosswalk, DesiredSpeed, this](const FZoneGraphTrafficLaneData& CurrentTrafficLaneData, const FZoneGraphTrafficLaneData& CrossingTrafficLaneData)
+			const auto& ShouldYieldToIncomingVehicleLane = [&MassTrafficSubsystem, &LaneLocationFragment, &VelocityFragment, &ForceFragment, &RadiusFragment, &ZoneGraphStorage, &EntityHandle, bWasAlreadyYieldingOnCrosswalk, DesiredSpeed, this](const FZoneGraphTrafficLaneData& CurrentTrafficLaneData, const FZoneGraphTrafficLaneData& CrossingTrafficLaneData, FMassEntityHandle& OutYieldTargetEntity)
 			{
-				// If there are no vehicles on this lane, we don't need to worry about yielding to them.
-				if (CurrentTrafficLaneData.NumVehiclesOnLane <= 0)
+				TSet<FMassTrafficCoreVehicleInfo> CoreVehicleInfos;
+				if (!MassTrafficSubsystem.TryGetCoreVehicleInfos(CurrentTrafficLaneData.LaneHandle, CoreVehicleInfos))
 				{
+					// We don't have any info about vehicles on this lane.
+					// So, we don't need to yield.
+					//
+					// Note:  Due to where a lane's NumVehiclesOnLane field gets updated in the frame,
+					// relative to where CoreVehicleInfos gets updated in the frame,
+					// NumVehiclesOnLane might be greater than 0 for this lane,
+					// while CoreVehicleInfos is empty.
+					// However, in this case, the CoreVehicleInfos data for the lane
+					// will be populated by the next frame.
 					return false;
 				}
 
-				// Since there are vehicles on the lane (ie. CurrentTrafficLaneData.NumVehiclesOnLane > 0),
-				// we'd like to be able to ensure that all the LeadVehicle properties are set, here.
-				// But, we can't, because NumVehiclesOnLane gets updated at two different spots in the frame,
-				// depending on the vehicle's current representation.  That is, for vehicles in "Simple" representation,
-				// UMassTrafficVehicleControlProcessor calls UE::MassTraffic::MoveVehicleToNextLane,
-				// which will update NumVehiclesOnLane.  And, in "PID" representation,
-				// UMassTrafficPostPhysicsUpdateTrafficVehiclesProcessor calls UE::MassTraffic::MoveVehicleToNextLane
-				// later in the frame.
-				// So, first the "LeadVehicle" data is set on the lanes in UMassTrafficLaneMetadataProcessor,
-				// then UMassTrafficVehicleControlProcessor consumes it,
-				// then UMassTrafficCrowdYieldProcessor consumes it.  (According to the proper config in DefaultMass.ini.)
-				// However, for simple vehicles that just cross over onto their next lane,
-				// NumVehiclesOnLane will be incremented on those lanes before being evaluated
-				// by UMassTrafficCrowdYieldProcessor.
-				// But, those lanes won't have their "LeadVehicle" data set for another frame,
-				// in the case that there were no vehicles on the lane, and now there is 1 simple vehicle.
-				if (!(CurrentTrafficLaneData.LeadVehicleDistanceAlongLane.IsSet()
-					&& CurrentTrafficLaneData.LeadVehicleSpeed.IsSet()
-					&& CurrentTrafficLaneData.LeadVehicleRadius.IsSet()))
+				// If there are no vehicles on the current lane, ...
+				if (CoreVehicleInfos.IsEmpty())
 				{
-					// Since there are vehicles on the incoming vehicle lane,
-					// we would like to determine in detail if we should yield to them.
-					// However, something went wrong, so we will just yield until the vehicles clear,
-					// if they are not yielding.
-					return true;
+					// We don't need to yield to the current lane.
+					return false;
 				}
-				
-				float VehicleEnterTime;
-				float VehicleExitTime;
-
-				float VehicleEnterDistance;
-				float VehicleExitDistance;
-
-				if (!UE::MassTraffic::TryGetVehicleEnterAndExitTimesForCrossingLane(
-					MassTrafficSubsystem,
-					*MassTrafficSettings,
-					*ZoneGraphStorage,
-					CurrentTrafficLaneData,
-					CrossingTrafficLaneData,
-					LaneLocationFragment.LaneHandle,
-					CurrentTrafficLaneData.LeadVehicleDistanceAlongLane.GetValue(),
-					CurrentTrafficLaneData.LeadVehicleSpeed.GetValue(),
-					CurrentTrafficLaneData.LeadVehicleRadius.GetValue(),
-					VehicleEnterTime,
-					VehicleExitTime,
-					&VehicleEnterDistance,
-					&VehicleExitDistance))
-				{
-					// Since there are vehicles on the incoming vehicle lane,
-					// we would like to determine in detail if we should yield to them.
-					// However, something went wrong, so we will just yield until the vehicles clear,
-					// if they are not yielding.
-					return true;
-				}
-				
-				const bool bVehicleIsInCrosswalkLane = VehicleEnterDistance <= 0.0f && VehicleExitDistance > 0.0f;
 
 				FZoneGraphLaneLocation PedestrianZoneGraphLaneLocation;
 				UE::ZoneGraph::Query::CalculateLocationAlongLane(*ZoneGraphStorage, LaneLocationFragment.LaneHandle, LaneLocationFragment.DistanceAlongLane, PedestrianZoneGraphLaneLocation);
@@ -186,97 +152,137 @@ void UMassTrafficCrowdYieldProcessor::Execute(FMassEntityManager& EntityManager,
 						&PedestrianEnterDistance,
 						&PedestrianExitDistance))
 				{
-					// If there are vehicles on the incoming vehicle lane, and they are not yielding,
-					// we would like to determine in detail if we should yield to them.
-					// However, something went wrong, so we will just yield until the vehicles clear.
-					return true;
+					// Due to UMassTrafficYieldDeadlockResolutionProcessor requirements,
+					// if we're unable to determine the yield target Entity, we can't yield.
+					// So, we proceed under this error condition.
+					return false;
 				}
-				
-				const bool bInDistanceConflictWithVehicle = bVehicleIsInCrosswalkLane && PedestrianEnterDistance < MassTrafficSettings->PedestrianVehicleBufferDistanceOnCrosswalk && PedestrianEnterDistance > 0.0f;
 
-				// Pedestrians only yield to vehicles when they are in the way.
-				// Whereas, vehicles check for both "time conflicts" and "distance conflicts" with pedestrians.
-				// This effectively means that pedestrians always have the "right of way" over vehicles.
-				if (bInDistanceConflictWithVehicle)
+				// Consider each vehicle on the lane.
+				for (const FMassTrafficCoreVehicleInfo& CoreVehicleInfo : CoreVehicleInfos)
 				{
-					return true;
+					// Skip processing our yield logic if we have a yield override for this Lane-Entity Pair.
+					// This mechanism is used to prevent yield cycle deadlocks.
+					if (MassTrafficSubsystem.HasYieldOverride(
+						LaneLocationFragment.LaneHandle, EntityHandle,
+						CurrentTrafficLaneData.LaneHandle, CoreVehicleInfo.VehicleEntityHandle))
+					{
+						continue;
+					}
+					
+					// For vehicles that are not currently on the crossing lane, ...
+					if (CurrentTrafficLaneData.LaneHandle != CrossingTrafficLaneData.LaneHandle)
+					{
+						// Only consider the vehicle if it is heading into the crossing lane.
+						if (CoreVehicleInfo.VehicleNextLane == nullptr || CoreVehicleInfo.VehicleNextLane->LaneHandle != CrossingTrafficLaneData.LaneHandle)
+						{
+							continue;
+						}
+					}
+
+					float VehicleEnterTime;
+					float VehicleExitTime;
+
+					float VehicleEnterDistance;
+					float VehicleExitDistance;
+
+					if (!UE::MassTraffic::TryGetVehicleEnterAndExitTimesForCrossingLane(
+						MassTrafficSubsystem,
+						*MassTrafficSettings,
+						*ZoneGraphStorage,
+						CurrentTrafficLaneData,
+						CrossingTrafficLaneData,
+						LaneLocationFragment.LaneHandle,
+						CoreVehicleInfo.VehicleDistanceAlongLane,
+						CoreVehicleInfo.VehicleSpeed,
+						CoreVehicleInfo.VehicleRadius,
+						VehicleEnterTime,
+						VehicleExitTime,
+						&VehicleEnterDistance,
+						&VehicleExitDistance))
+					{
+						// Due to UMassTrafficYieldDeadlockResolutionProcessor requirements,
+						// if we're unable to determine the yield target Entity, we can't yield.
+						// So, we proceed under this error condition.
+						return false;
+					}
+					
+					const bool bVehicleIsInCrosswalkLane = VehicleEnterDistance <= 0.0f && VehicleExitDistance > 0.0f;
+					
+					const bool bInDistanceConflictWithVehicle = bVehicleIsInCrosswalkLane && PedestrianEnterDistance < MassTrafficSettings->PedestrianVehicleBufferDistanceOnCrosswalk && PedestrianEnterDistance > 0.0f;
+
+					// Pedestrians only yield to vehicles when they are in the way.
+					// Whereas, vehicles check for both "time conflicts" and "distance conflicts" with pedestrians.
+					// This effectively means that pedestrians always have the "right of way" over vehicles.
+					if (bInDistanceConflictWithVehicle)
+					{
+						OutYieldTargetEntity = CoreVehicleInfo.VehicleEntityHandle;
+						return true;
+					}
 				}
 
-				// No reason to yield to the lead vehicle on the current lane.
+				// No reason to yield to the current lane.
 				return false;
 			};
 
-			const auto& UpdateYieldTrackingStateForVehicleLane = [&MassTrafficSubsystem, &EntityHandle, &CrosswalkLaneInfo, &LaneLocationFragment](const FZoneGraphLaneHandle& VehicleLane, const bool bShouldYieldOnCrosswalk)
+			const auto& UpdateYieldTrackingStateForVehicleLane = [&MassTrafficSubsystem, &EntityHandle, &CrosswalkLaneInfo, &LaneLocationFragment](const FZoneGraphLaneHandle& YieldTargetVehicleLane, const FMassEntityHandle& YieldTargetEntity, const bool bShouldYieldOnCrosswalk)
 			{
 				if (bShouldYieldOnCrosswalk)
 				{
 					// We should yield to this incoming vehicle lane.
 					// So, start tracking yield state data for the lane.
-					CrosswalkLaneInfo->TrackEntityOnCrosswalkYieldingToLane(EntityHandle, VehicleLane);
+					CrosswalkLaneInfo->TrackEntityOnCrosswalkYieldingToLane(EntityHandle, YieldTargetVehicleLane);
 
-					// Add this to the global view of all yields for this frame.
-					// The yield deadlock resolution processor will use this information to find and break any yield cycle deadlocks.
-					MassTrafficSubsystem.AddYieldInfo(EntityHandle, LaneLocationFragment.LaneHandle, VehicleLane);
+					if (ensureMsgf(YieldTargetVehicleLane.IsValid() && YieldTargetEntity.IsValid(), TEXT("Expected valid YieldTargetVehicleLane and YieldTargetEntity in UpdateYieldTrackingStateForVehicleLane in UMassTrafficCrowdYieldProcessor::Execute.  YieldTargetVehicleLane.Index: %d YieldTargetEntity.Index: %d."), YieldTargetVehicleLane.Index, YieldTargetEntity.Index))
+					{
+						// Add this to the global view of all yields for this frame.
+						// The yield deadlock resolution processor will use this information to find and break any yield cycle deadlocks.
+						MassTrafficSubsystem.AddYieldInfo(LaneLocationFragment.LaneHandle, EntityHandle, YieldTargetVehicleLane, YieldTargetEntity);
+					}
 				}
 				else
 				{
 					// If we're currently tracking yield state data for this lane, ...
-					if (CrosswalkLaneInfo->IsEntityOnCrosswalkYieldingToLane(EntityHandle, VehicleLane))
+					if (CrosswalkLaneInfo->IsEntityOnCrosswalkYieldingToLane(EntityHandle, YieldTargetVehicleLane))
 					{
 						// Stop tracking yield state data for this lane.
-						CrosswalkLaneInfo->UnTrackEntityOnCrosswalkYieldingToLane(EntityHandle, VehicleLane);
+						CrosswalkLaneInfo->UnTrackEntityOnCrosswalkYieldingToLane(EntityHandle, YieldTargetVehicleLane);
 					}
 				}
 			};
 
+			FMassEntityHandle YieldTargetEntity;
 			bool bShouldYieldOnCrosswalk = false;
-
-			// Only run our yield logic, if our yield behavior isn't being overridden.  If it *is* being overridden, a deadlock is being prevented.
-			if (!MassTrafficSubsystem.IsEntityInLaneYieldOverrideMap(LaneLocationFragment.LaneHandle, EntityHandle))
+			
+			for (const FZoneGraphLaneHandle& IncomingVehicleLane : CrosswalkLaneInfo->IncomingVehicleLanes)
 			{
-				for (const FZoneGraphLaneHandle& IncomingVehicleLane : CrosswalkLaneInfo->IncomingVehicleLanes)
+				const FZoneGraphTrafficLaneData* IncomingTrafficLaneData = MassTrafficSubsystem.GetTrafficLaneData(IncomingVehicleLane);
+                    				
+				if (!ensureMsgf(IncomingTrafficLaneData != nullptr, TEXT("Must get valid IncomingTrafficLaneData from IncomingVehicleLane in UMassTrafficCrowdYieldProcessor::Execute.  IncomingVehicleLane.Index: %d IncomingVehicleLane.DataHandle.Index: %d, IncomingVehicleLane.DataHandle.Generation: %d."), IncomingVehicleLane.Index, IncomingVehicleLane.DataHandle.Index, IncomingVehicleLane.DataHandle.Generation))
 				{
-					const FZoneGraphTrafficLaneData* IncomingTrafficLaneData = MassTrafficSubsystem.GetTrafficLaneData(IncomingVehicleLane);
-                    					
-					if (!ensureMsgf(IncomingTrafficLaneData != nullptr, TEXT("Must get valid IncomingTrafficLaneData from IncomingVehicleLane in UMassTrafficCrowdYieldProcessor::Execute.  IncomingVehicleLane.Index: %d IncomingVehicleLane.DataHandle.Index: %d, IncomingVehicleLane.DataHandle.Generation: %d."), IncomingVehicleLane.Index, IncomingVehicleLane.DataHandle.Index, IncomingVehicleLane.DataHandle.Generation))
+					continue;
+				}
+
+				YieldTargetEntity.Reset();
+				
+				const bool bShouldYieldOnCrosswalkToIncomingVehicleLane = ShouldYieldToIncomingVehicleLane(*IncomingTrafficLaneData, *IncomingTrafficLaneData, YieldTargetEntity);
+				UpdateYieldTrackingStateForVehicleLane(IncomingTrafficLaneData->LaneHandle, YieldTargetEntity, bShouldYieldOnCrosswalkToIncomingVehicleLane);
+
+				bShouldYieldOnCrosswalk |= bShouldYieldOnCrosswalkToIncomingVehicleLane;
+
+				for (const FZoneGraphTrafficLaneData* PredecessorTrafficLaneData : IncomingTrafficLaneData->PrevLanes)
+				{
+					if (PredecessorTrafficLaneData == nullptr)
 					{
 						continue;
 					}
-					
-					const bool bShouldYieldOnCrosswalkToIncomingVehicleLane = ShouldYieldToIncomingVehicleLane(*IncomingTrafficLaneData, *IncomingTrafficLaneData);
-					UpdateYieldTrackingStateForVehicleLane(IncomingTrafficLaneData->LaneHandle, bShouldYieldOnCrosswalkToIncomingVehicleLane);
 
-					bShouldYieldOnCrosswalk |= bShouldYieldOnCrosswalkToIncomingVehicleLane;
+					YieldTargetEntity.Reset();
 
-					for (const FZoneGraphTrafficLaneData* PredecessorTrafficLaneData : IncomingTrafficLaneData->PrevLanes)
-					{
-						if (PredecessorTrafficLaneData == nullptr)
-						{
-							continue;
-						}
+					const bool bShouldYieldOnCrosswalkToPredecessorVehicleLane = ShouldYieldToIncomingVehicleLane(*PredecessorTrafficLaneData, *IncomingTrafficLaneData, YieldTargetEntity);
+					UpdateYieldTrackingStateForVehicleLane(PredecessorTrafficLaneData->LaneHandle, YieldTargetEntity, bShouldYieldOnCrosswalkToPredecessorVehicleLane);
 
-						if (PredecessorTrafficLaneData->NumVehiclesOnLane <= 0)
-						{
-							continue;
-						}
-
-						if (!PredecessorTrafficLaneData->LeadVehicleNextLane.IsSet())
-						{
-							continue;
-						}
-
-						// We're only concerned if the lead vehicle on the Predecessor Lane
-						// will be heading into our Incoming Traffic Lane.
-						if (PredecessorTrafficLaneData->LeadVehicleNextLane.GetValue() != IncomingTrafficLaneData)
-						{
-							continue;
-						}
-
-						const bool bShouldYieldOnCrosswalkToPredecessorVehicleLane = ShouldYieldToIncomingVehicleLane(*PredecessorTrafficLaneData, *IncomingTrafficLaneData);
-						UpdateYieldTrackingStateForVehicleLane(PredecessorTrafficLaneData->LaneHandle, bShouldYieldOnCrosswalkToPredecessorVehicleLane);
-
-						bShouldYieldOnCrosswalk |= bShouldYieldOnCrosswalkToPredecessorVehicleLane;
-					}
+					bShouldYieldOnCrosswalk |= bShouldYieldOnCrosswalkToPredecessorVehicleLane;
 				}
 			}
 
@@ -290,6 +296,10 @@ void UMassTrafficCrowdYieldProcessor::Execute(FMassEntityManager& EntityManager,
 				// Set our MoveTargetFragment's DesiredSpeed to zero.
 				// This is the mechanism we use to yield.
 				MoveTargetFragment.DesiredSpeed = FMassInt16Real(0.0f);
+
+				// Track when we started yielding.
+				const float CurrentTimeSeconds = World->GetTimeSeconds();
+				CrosswalkLaneInfo->TrackEntityOnCrosswalkYieldStartTime(EntityHandle, CurrentTimeSeconds);
 			}
 			// If we should *stop* yielding on the crosswalk, ...
 			else if (bWasAlreadyYieldingOnCrosswalk && !bShouldYieldOnCrosswalk)
@@ -300,6 +310,40 @@ void UMassTrafficCrowdYieldProcessor::Execute(FMassEntityManager& EntityManager,
 
 				// Finally, we need to completely untrack all yield state data associated with this Entity.
 				CrosswalkLaneInfo->UnTrackEntityYieldingOnCrosswalk(EntityHandle);
+			}
+			// If we weren't already yielding, and we shouldn't start now, ...
+			else if (!bWasAlreadyYieldingOnCrosswalk && !bShouldYieldOnCrosswalk)
+			{
+				// And, we've got a "near zero" DesiredSpeed, ...
+				if (FMath::IsNearlyZero(MoveTargetFragment.DesiredSpeed.Get(), 1.0f))
+				{
+					// Set a reasonable DesiredSpeed as a failsafe so that if pedestrians
+					// get stuck on the crosswalk for any reason, they can resume motion
+					// and clear the crosswalk to prevent deadlock issues.
+					MoveTargetFragment.DesiredSpeed = FMassInt16Real(MassTrafficSettings->PedestrianFailsafeCrosswalkYieldResumeSpeed);
+					UE_LOG(LogMassTraffic, Log, TEXT("[Pedestrian Yield DesiredSpeed Failsafe] Correcting DesiredSpeed to %f for Entity: %d."), MoveTargetFragment.DesiredSpeed.Get(), EntityHandle.Index);
+				}
+			}
+			// If we were already yielding, and should continue yielding, ...
+			else // if (bWasAlreadyYieldingOnCrosswalk && bShouldYieldOnCrosswalk)
+			{
+				const float CurrentTimeSeconds = World->GetTimeSeconds();
+				const float EntityYieldStartTime = CrosswalkLaneInfo->GetEntityYieldStartTime(EntityHandle);
+
+				// And, we've been yielding for "too long", potentially involved in an unresolved yield deadlock, ...
+				if (CurrentTimeSeconds > EntityYieldStartTime + MassTrafficSettings->PedestrianMaxYieldOnCrosswalkTime)
+				{
+					// Get a "free pass" to ignore yielding to *any* Entities until we cross the crosswalk,
+					// if we don't already have one, in order to prevent unforeseen yield deadlock issues, as a failsafe.
+					if (!MassTrafficSubsystem.HasWildcardYieldOverride(LaneLocationFragment.LaneHandle, EntityHandle))
+					{
+						UE_LOG(LogMassTraffic, Log,
+							TEXT("[Pedestrian Yield Override Failsafe] Granting yield override for all potential yield targets to Entity: %d on LaneHandle.Index: %d LaneHandle.DataHandle.Index: %d LaneHandle.DataHandle.Generation: %d."),
+							EntityHandle.Index, LaneLocationFragment.LaneHandle.Index, LaneLocationFragment.LaneHandle.DataHandle.Index, LaneLocationFragment.LaneHandle.DataHandle.Generation);
+						
+						MassTrafficSubsystem.AddWildcardYieldOverride(LaneLocationFragment.LaneHandle, EntityHandle);
+					}
+				}
 			}
 		}
 	});

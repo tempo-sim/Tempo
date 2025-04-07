@@ -496,16 +496,27 @@ void UMassTrafficIntersectionSpawnDataGenerator::SetupLaneData(
 
 					for (const FMassTrafficIntersectionSide& OtherSide : IntersectionDetail.Sides)
 					{
-						// Skip the current side.
-						if (&OtherSide == &CurrentSide)
-						{
-							continue;
-						}
-
 						for (const auto& OtherElem : OtherSide.VehicleIntersectionLanes)
 						{
 							FZoneGraphTrafficLaneData* OtherSideVehicleIntersectionLane = OtherElem.Key;
 							if (OtherSideVehicleIntersectionLane == nullptr)
+							{
+								continue;
+							}
+							
+							if (OtherSideVehicleIntersectionLane->LaneHandle == CurrentSideVehicleIntersectionLane->LaneHandle)
+							{
+								continue;
+							}
+							
+							// Don't add our current lane's "splitting lanes" as "conflict lanes".
+							// If the previous lane branches, for instance to a left, right, and straight lane,
+							// and our current lane is the left lane, SplittingLanes will contain the straight and right lanes.
+							// However, these are not "conflict lanes" because they don't cross or merge with our current lane,
+							// but rather they branch from a common previous lane.
+							// And, there are other mechanisms meant to maintain the procession of vehicles,
+							// while handling the "splitting lanes" case.
+							if (CurrentSideVehicleIntersectionLane->SplittingLanes.Contains(OtherSideVehicleIntersectionLane))
 							{
 								continue;
 							}
@@ -553,6 +564,45 @@ void UMassTrafficIntersectionSpawnDataGenerator::SetupLaneData(
 							}
 						}
 					}
+
+					// Sort CurrentSideVehicleIntersectionLane's conflict lanes
+					// in order of increasing "enter" distance along the lane.
+					CurrentSideVehicleIntersectionLane->ConflictLanes.Sort([&MassTrafficSubsystem, &MassTrafficSettings, &ZoneGraphStorage, &CurrentSideVehicleIntersectionLane](
+						const FZoneGraphTrafficLaneData& FirstConflictLaneData,
+						const FZoneGraphTrafficLaneData& SecondConflictLaneData)
+					{
+						float FirstEnterDistanceAlongQueryLane;
+						float FirstExitDistanceAlongQueryLane;
+
+						if (!UE::MassTraffic::TryGetEnterAndExitDistancesAlongQueryLane(
+							MassTrafficSubsystem,
+							MassTrafficSettings,
+							*ZoneGraphStorage,
+							CurrentSideVehicleIntersectionLane->LaneHandle,
+							FirstConflictLaneData.LaneHandle,
+							FirstEnterDistanceAlongQueryLane,
+							FirstExitDistanceAlongQueryLane))
+						{
+							return false;
+						}
+
+						float SecondEnterDistanceAlongQueryLane;
+						float SecondExitDistanceAlongQueryLane;
+
+						if (!UE::MassTraffic::TryGetEnterAndExitDistancesAlongQueryLane(
+							MassTrafficSubsystem,
+							MassTrafficSettings,
+							*ZoneGraphStorage,
+							CurrentSideVehicleIntersectionLane->LaneHandle,
+							SecondConflictLaneData.LaneHandle,
+							SecondEnterDistanceAlongQueryLane,
+							SecondExitDistanceAlongQueryLane))
+						{
+							return false;
+						}
+
+						return FirstEnterDistanceAlongQueryLane < SecondEnterDistanceAlongQueryLane;
+					});
 				}
 			}
 		}
