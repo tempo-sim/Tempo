@@ -476,6 +476,19 @@ public:
 	UPROPERTY(EditAnywhere, Config, Category="Yield Behavior")
 	float VehiclePedestrianBufferDistanceOnCrosswalk = 200.0f;
 
+	// As a failsafe to prevent non-"yield cycle" deadlocks,
+	// pedestrians will only yield for this maximum time on crosswalks,
+	// after which they will be granted a yield override on their current lane,
+	// against all potential yield targets, until they finish crossing the crosswalk.
+	UPROPERTY(EditAnywhere, Config, Category="Yield Behavior")
+	float PedestrianMaxYieldOnCrosswalkTime = 30.0f;
+
+	// As a failsafe to prevent issues where pedestrians
+	// sometimes end up with a "zero" speed after yielding on crosswalks,
+	// we will resume their motion with this speed, instead.
+	UPROPERTY(EditAnywhere, Config, Category="Yield Behavior")
+	float PedestrianFailsafeCrosswalkYieldResumeSpeed = 200.0f;
+
 	// The time buffer the vehicles will use when detecting conflicts with other vehicles
 	// during their merge behavior.
 	UPROPERTY(EditAnywhere, Config, Category="Merge Behavior")
@@ -487,6 +500,14 @@ public:
 	// it will perform the crosswalk yield behavior logic.
 	UPROPERTY(EditAnywhere, Config, Category="Yield Behavior")
 	float VehicleCrosswalkYieldLookAheadTime = 2.0f;
+
+	// Vehicles will ignore running their merge yield logic for test vehicles,
+	// which will enter the intersection after this time delta.
+	// This is mainly used to cull merge yield considerations against test vehicles
+	// approaching from an intersection side with Sign Type "None" or a traffic light with open lanes,
+	// until they will be entering the intersection within this time delta.
+	UPROPERTY(EditAnywhere, Config, Category="Merge Behavior")
+	float VehicleMergeYieldTestVehicleEnterIntersectionHorizonTime = 4.0f;
 
 	// The time buffer the vehicles will use when detecting conflicts with other vehicles
 	// during their merge behavior.
