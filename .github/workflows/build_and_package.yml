@@ -265,6 +265,7 @@ jobs:
       if: ${{ steps.restore_build_cache.outputs.cache-hit != 'true' }}
       run: |
         mkdir -p .engine-ddc-cache/Engine
+        mkdir -p .engine-mods-cache/TempoMods
         docker create --name temp_engine tempo_unreal_image
         docker cp temp_engine:/home/ue4/UnrealEngine/Engine/DerivedDataCache ${{ github.workspace }}/.engine-ddc-cache/Engine
         docker rm temp_engine
