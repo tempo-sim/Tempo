@@ -216,9 +216,10 @@ namespace
 	void ProcessYieldAtRoadCrosswalkLogic(UMassTrafficSubsystem& MassTrafficSubsystem, const UMassCrowdSubsystem& MassCrowdSubsystem, const FMassEntityManager& EntityManager, FMassTrafficVehicleControlFragment& VehicleControlFragment, const FMassZoneGraphLaneLocationFragment& LaneLocationFragment, const FAgentRadiusFragment& RadiusFragment, const FMassTrafficRandomFractionFragment& RandomFractionFragment, const FZoneGraphStorage& ZoneGraphStorage, TFunction<void()> PerformYieldActionFunc)
 	{
 		FZoneGraphLaneHandle YieldTargetLane;
-		const bool bShouldReactivelyYieldAtRoadCrosswalk = UE::MassTraffic::ShouldPerformReactiveYieldAtRoadCrosswalk(MassTrafficSubsystem, MassCrowdSubsystem, EntityManager, VehicleControlFragment, LaneLocationFragment, RadiusFragment, RandomFractionFragment, ZoneGraphStorage, YieldTargetLane);
+		FMassEntityHandle YieldTargetEntity;
+		const bool bShouldReactivelyYieldAtRoadCrosswalk = UE::MassTraffic::ShouldPerformReactiveYieldAtRoadCrosswalk(MassTrafficSubsystem, MassCrowdSubsystem, EntityManager, VehicleControlFragment, LaneLocationFragment, RadiusFragment, RandomFractionFragment, ZoneGraphStorage, YieldTargetLane, YieldTargetEntity);
 
-		UE::MassTraffic::UpdateYieldAtIntersectionState(MassTrafficSubsystem, VehicleControlFragment, LaneLocationFragment.LaneHandle, YieldTargetLane, bShouldReactivelyYieldAtRoadCrosswalk, false);
+		UE::MassTraffic::UpdateYieldAtIntersectionState(MassTrafficSubsystem, VehicleControlFragment, LaneLocationFragment.LaneHandle, YieldTargetLane, YieldTargetEntity, bShouldReactivelyYieldAtRoadCrosswalk, false);
 
 		// If we're reactively yielding, then we should always perform our yield action.
 		if (bShouldReactivelyYieldAtRoadCrosswalk)
@@ -236,10 +237,11 @@ namespace
 	{
 		bool bShouldGiveOpportunityForTurningVehiclesToReactivelyYieldAtIntersection = false;
 		FZoneGraphLaneHandle YieldTargetLane;
+		FMassEntityHandle YieldTargetEntity;
 		int32 MergeYieldCaseIndex = INDEX_NONE;
-		const bool bShouldReactivelyYieldAtIntersection = UE::MassTraffic::ShouldPerformReactiveYieldAtIntersection(MassTrafficSubsystem, MassCrowdSubsystem, EntityManager, VehicleControlFragment, LaneLocationFragment, RadiusFragment, RandomFractionFragment, ZoneGraphStorage, bShouldGiveOpportunityForTurningVehiclesToReactivelyYieldAtIntersection, YieldTargetLane, MergeYieldCaseIndex);
+		const bool bShouldReactivelyYieldAtIntersection = UE::MassTraffic::ShouldPerformReactiveYieldAtIntersection(MassTrafficSubsystem, MassCrowdSubsystem, EntityManager, VehicleControlFragment, LaneLocationFragment, RadiusFragment, RandomFractionFragment, ZoneGraphStorage, bShouldGiveOpportunityForTurningVehiclesToReactivelyYieldAtIntersection, YieldTargetLane, YieldTargetEntity, MergeYieldCaseIndex);
 
-		UE::MassTraffic::UpdateYieldAtIntersectionState(MassTrafficSubsystem, VehicleControlFragment, LaneLocationFragment.LaneHandle, YieldTargetLane, bShouldReactivelyYieldAtIntersection, bShouldGiveOpportunityForTurningVehiclesToReactivelyYieldAtIntersection);
+		UE::MassTraffic::UpdateYieldAtIntersectionState(MassTrafficSubsystem, VehicleControlFragment, LaneLocationFragment.LaneHandle, YieldTargetLane, YieldTargetEntity, bShouldReactivelyYieldAtIntersection, bShouldGiveOpportunityForTurningVehiclesToReactivelyYieldAtIntersection);
 
 		// If we're reactively yielding, then we should always perform our yield action.
 		if (bShouldReactivelyYieldAtIntersection)
@@ -614,7 +616,7 @@ void UMassTrafficVehicleControlProcessor::SimpleVehicleControl(
 	{
 		TargetSpeed = 0.0f;
 	};
-
+	
 	if (CurrentLaneData->HasYieldSignAlongRoad(LaneLocationFragment.DistanceAlongLane) && !CurrentLaneData->ConstData.bIsIntersectionLane)
 	{
 		ProcessYieldAtRoadCrosswalkLogic(MassTrafficSubsystem, MassCrowdSubsystem, EntityManager, VehicleControlFragment, LaneLocationFragment, AgentRadiusFragment, RandomFractionFragment, ZoneGraphStorage, PerformYieldAction);
@@ -623,9 +625,6 @@ void UMassTrafficVehicleControlProcessor::SimpleVehicleControl(
 	{
 		ProcessYieldAtIntersectionLogic(MassTrafficSubsystem, MassCrowdSubsystem, EntityManager, VehicleControlFragment, LaneLocationFragment, AgentRadiusFragment, RandomFractionFragment, ZoneGraphStorage, PerformYieldAction);
 	}
-
-	const float VariedAcceleration = MassTrafficSettings->Acceleration * (1.0f + MassTrafficSettings->AccelerationVariancePct * (RandomFractionFragment.RandomFraction * 2.0f - 1.0f));
-	VehicleControlFragment.AccelerationEstimate = VariedAcceleration;
 
 	// (See all READYLANE.)
 	SetIsVehicleReadyToUseNextIntersectionLane(VehicleControlFragment, LaneLocationFragment, AgentRadiusFragment, RandomFractionFragment, *MassTrafficSettings, bShouldProceedAtStopSign, bVehicleHasNoRoom);
@@ -991,9 +990,6 @@ void UMassTrafficVehicleControlProcessor::PIDVehicleControl(
 	{
 		ProcessYieldAtIntersectionLogic(MassTrafficSubsystem, MassCrowdSubsystem, EntityManager, VehicleControlFragment, LaneLocationFragment, AgentRadiusFragment, RandomFractionFragment, ZoneGraphStorage, PerformYieldAction);
 	}
-
-	const float VariedAcceleration = MassTrafficSettings->Acceleration * (1.0f + MassTrafficSettings->AccelerationVariancePct * (RandomFractionFragment.RandomFraction * 2.0f - 1.0f));
-	VehicleControlFragment.AccelerationEstimate = VariedAcceleration;
 
 	// (See all READYLANE.)
 	SetIsVehicleReadyToUseNextIntersectionLane(VehicleControlFragment, LaneLocationFragment, AgentRadiusFragment, RandomFractionFragment, *MassTrafficSettings, bShouldProceedAtStopSign, bVehicleHasNoRoom);
