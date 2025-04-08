@@ -5,7 +5,7 @@
 #include "UObject/Object.h"
 #include "UObject/ObjectMacros.h"
 #include "UObject/StructOnScope.h"
-#include "InstancedStruct.h"
+#include "StructUtils/InstancedStruct.h"
 
 #include "PointCloudSliceAndDiceCustomOverrides.generated.h"
 
