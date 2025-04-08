@@ -197,7 +197,13 @@ elif [[ "$OSTYPE" = "darwin"* ]]; then
     DOTNET=$(echo "${DOTNETS[@]}" | grep -E "mac-x64/dotnet")
   fi
 elif [[ "$OSTYPE" = "linux-gnu"* ]]; then
-  DOTNET=$(find ./Binaries/ThirdParty/DotNet -type f -name dotnet)
+  DOTNETS=$(find ./Binaries/ThirdParty/DotNet -type f -name dotnet)
+  ARCH=$(arch)
+  if [[ "$ARCH" = "arm64" ]]; then
+    DOTNET=$(echo "${DOTNETS[@]}" | grep -E "linux-arm64/dotnet")
+  elif [[ "$ARCH" = "x86_64" ]]; then
+    DOTNET=$(echo "${DOTNETS[@]}" | grep -E "linux-x64/dotnet")
+  fi
 fi
 
 if [ -z ${DOTNET+x} ]; then
