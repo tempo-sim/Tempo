@@ -48,7 +48,13 @@ elif [[ "$OSTYPE" = "darwin"* ]]; then
     DOTNET=$(echo "${DOTNETS[@]}" | grep -E "mac-x64/dotnet")
   fi
 elif [[ "$OSTYPE" = "linux-gnu"* ]]; then
-  DOTNET=$(find ./Engine/Binaries/ThirdParty/DotNet -type f -name dotnet)
+  DOTNETS=$(find ./Engine/Binaries/ThirdParty/DotNet -type f -name dotnet)
+  ARCH=$(arch)
+  if [[ "$ARCH" = "arm64" ]]; then
+    DOTNET=$(echo "${DOTNETS[@]}" | grep -E "linux-arm64/dotnet")
+  elif [[ "$ARCH" = "x86_64" ]]; then
+    DOTNET=$(echo "${DOTNETS[@]}" | grep -E "linux-x64/dotnet")
+  fi
 fi
 
 # Get engine release (e.g. 5.4)
@@ -63,7 +69,7 @@ APPLY_ADDS() {
   local ADDS=("${@:3}")
   for ADD in "${ADDS[@]}"; do
     local SRC="$ENGINE_MODS_DIR/$ROOT/$ADD"
-    local ADD_NO_VERSION="${ADD%.*}"
+    local ADD_NO_VERSION="${ADD%.[0-9]*\.[0-9]*}"
     local DEST="$TEMP/$ROOT/$ADD_NO_VERSION"
     mkdir -p "$(dirname "$DEST")"
     cp "$SRC" "$DEST"
@@ -76,7 +82,7 @@ REVERT_ADDS() {
   local ADDS=("${@:3}")
   for ADD in "${ADDS[@]}"; do
     local SRC="$ENGINE_MODS_DIR/$ROOT/$ADD"
-    local ADD_NO_VERSION="${ADD%.*}"
+    local ADD_NO_VERSION="${ADD%.[0-9]*\.[0-9]*}"
     local DEST="$TEMP/$ROOT/$ADD_NO_VERSION"
     rm -f "$DEST"
   done
@@ -216,6 +222,9 @@ for MOD in "${MODS[@]}"; do
   read -ra PATCHES <<< "$PATCHES"
 
   echo "Applying Tempo mods (if necessary) to $ROOT"
+
+  # First make sure we have write permissions for the directory we're going to patch
+  chmod -R +w "$UNREAL_ENGINE_PATH/$ROOT"
 
   # Copy the folder in its current state (but skip the heavy built artifacts)
   mkdir -p "$TEMP/$ROOT"
