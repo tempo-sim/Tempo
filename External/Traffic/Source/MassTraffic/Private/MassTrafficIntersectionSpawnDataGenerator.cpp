@@ -508,7 +508,14 @@ void UMassTrafficIntersectionSpawnDataGenerator::SetupLaneData(
 							{
 								continue;
 							}
-
+							
+							// Don't add our current lane's "splitting lanes" as "conflict lanes".
+							// If the previous lane branches, for instance to a left, right, and straight lane,
+							// and our current lane is the left lane, SplittingLanes will contain the straight and right lanes.
+							// However, these are not "conflict lanes" because they don't cross or merge with our current lane,
+							// but rather they branch from a common previous lane.
+							// And, there are other mechanisms meant to maintain the procession of vehicles,
+							// while handling the "splitting lanes" case.
 							if (CurrentSideVehicleIntersectionLane->SplittingLanes.Contains(OtherSideVehicleIntersectionLane))
 							{
 								continue;

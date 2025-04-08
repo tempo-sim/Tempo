@@ -1123,10 +1123,10 @@ bool ShouldYieldToCrosswalks_Internal(
 			}
 
 			// Skip crosswalks we've passed already.
-            if (VehicleCrosswalkLaneExitDistance <= 0.0f)
-            {
-            	continue;
-            }
+			if (VehicleCrosswalkLaneExitDistance <= 0.0f)
+			{
+				continue;
+			}
 
 			if (LaneLocationFragment.DistanceAlongLane < LaneLengthAtDownstreamCrosswalkLane - MassTrafficSettings->CrosswalkReactiveYieldDistanceVehicleLengthScale * RadiusFragment.Radius * 2.0)
 			{

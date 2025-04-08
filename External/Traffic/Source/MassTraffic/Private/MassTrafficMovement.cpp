@@ -556,7 +556,7 @@ bool ShouldVehicleMergeOntoLane(
 			// We don't have any info about vehicles on this lane.
 			// So, we don't need to yield.
 			//
-			// Note:  Due to where NumVehiclesOnLane gets updated in the frame,
+			// Note:  Due to where a lane's NumVehiclesOnLane field gets updated in the frame,
 			// relative to where CoreVehicleInfos gets updated in the frame,
 			// NumVehiclesOnLane might be greater than 0 for this lane,
 			// while CoreVehicleInfos is empty.
