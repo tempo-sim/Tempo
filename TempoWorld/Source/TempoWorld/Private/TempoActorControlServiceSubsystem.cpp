@@ -682,7 +682,9 @@ void GetObjectProperties(const UObject* Object, GetPropertiesResponse& Response)
 			// For example, FPostProcessSettings has FLinearColor LensFlareTints[8]
 			// We don't support these types
 			Type = TEXT("Unsupported");
+			return;
 		}
+
 		if (const FStrProperty* StrProperty = CastField<FStrProperty>(Property))
 		{
 			Type = TEXT("string");
