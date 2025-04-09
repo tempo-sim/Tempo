@@ -330,9 +330,9 @@ async def take_action(state, option, user_input):
     elif state.enum == StateEnum.ADD_SENSOR_WHAT_OWNER:
         state.accumulated_input["Actor"] = chosen.display
     elif state.enum == StateEnum.ADD_SENSOR_WHAT_PARENT:
-        state.accumulated_input["Parent"] = chosen.metadata["Parent"]
+        state.accumulated_input["Parent"] = chosen.metadata["Parent"] if "Parent" in chosen.metadata else chosen.display
     elif state.enum == StateEnum.ADD_SENSOR_WHAT_SOCKET:
-        state.accumulated_input["Socket"] = chosen.metadata["Socket"]
+        state.accumulated_input["Socket"] = chosen.metadata["Socket"] if "Socket" in chosen.metadata else chosen.display
         try:
             await tw.add_component(type=state.accumulated_input["Type"], actor=state.accumulated_input["Actor"], parent=state.accumulated_input["Parent"], socket=state.accumulated_input["Socket"])
         except grpc.aio._call.AioRpcError as e:
