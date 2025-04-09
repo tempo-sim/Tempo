@@ -198,7 +198,6 @@ async def get_available_sensors(type):
                     available_sensors.append(AvailableSensor("Camera", sensor.name, sensor.owner, sensor.rate, sensor.measurement_types))
     except grpc.aio._call.AioRpcError:
         print("\nCould not connect to Tempo. Is the simulation running?")
-        pass
     return available_sensors
 
 
@@ -225,16 +224,16 @@ async def get_option(state):
                     Choice("End sensor data stream", StateEnum.END_STREAM_SENSOR_DATA, "e"),
                     Choice("Move a sensor's owner Actor", StateEnum.MOVE_ACTOR, "m")]
     elif state.enum == StateEnum.ADD_SENSOR:
-        prompt = "\nWhat type of sensor? (you may also input a custom choice)\n"
+        prompt = "\nWhat type of sensor? You may also input another sensor type than these choices\n"
         choices += [Choice("TempoCamera", StateEnum.ADD_SENSOR_WHAT_OWNER,"c")]
     elif state.enum == StateEnum.ADD_SENSOR_WHAT_OWNER:
-        prompt = "\nWhat actor should we add the sensor to?\n"
+        prompt = "\nWhat actor should we add the sensor to? You may also input another actor name than these choices\n"
         choices += [Choice("BP_SensorRig", StateEnum.ADD_SENSOR_WHAT_PARENT, None, metadata={"Actor": "BP_SensorRig"})]
     elif state.enum == StateEnum.ADD_SENSOR_WHAT_PARENT:
-        prompt = "\nWhat parent component should we add the sensor to?\n"
+        prompt = "\nWhat parent component should we add the sensor to? You may also input another component name than these choices\n"
         choices += [Choice("Root Component", StateEnum.ADD_SENSOR_WHAT_SOCKET, None, metadata={"Parent": ""})]
     elif state.enum == StateEnum.ADD_SENSOR_WHAT_SOCKET:
-        prompt = "\nWhat socket should we add the sensor to?\n"
+        prompt = "\nWhat socket should we add the sensor to? You may also input another socket name than these choices\n"
         choices += [Choice("None", StateEnum.START, None, metadata={"Socket": ""})]
     elif state.enum == StateEnum.REMOVE_SENSOR:
         available_sensors = await get_available_sensors("Camera")
@@ -269,7 +268,7 @@ async def get_option(state):
         prompt = "\nWhich stream?" if len(state.sensor_streams) > 0 else "\nNo streams found\n"
         choices += [Choice(stream_name, StateEnum.START, None, {"Stream": stream_name}) for stream_name in state.sensor_streams.keys()]
     elif state.enum == StateEnum.MOVE_ACTOR:
-        prompt = "\nWhich actor? (you may also input a custom choice)\n"
+        prompt = "\nWhich actor? You may also input another component name than these choices\n"
         choices += [Choice("BP_SensorRig", StateEnum.MOVE_ACTOR_WHAT_TRANSFORM, None, metadata={"Actor": "BP_SensorRig"})]
     elif state.enum == StateEnum.MOVE_ACTOR_WHAT_TRANSFORM:
         prompt = "What relative transform should we use? Format: X Y Z R P Y Units: Meters/Degrees\n"
