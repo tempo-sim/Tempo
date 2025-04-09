@@ -187,16 +187,22 @@ void UTempoSceneCaptureComponent2D::InitRenderTarget()
 	TextureReadQueue.Empty();
 }
 
-void UTempoSceneCaptureComponent2D::RestartCaptureTimer()
+float GetTimerPeriod(float RateHz)
 {
 	// Don't allow a negative or zero rate.
-	const float ClampedRateHz = FMath::Max(UE_KINDA_SMALL_NUMBER, RateHz);
-	GetWorld()->GetTimerManager().SetTimer(TimerHandle, this, &UTempoSceneCaptureComponent2D::MaybeCapture, 1.0 / ClampedRateHz, true);
+	return 1.0 / FMath::Max(UE_KINDA_SMALL_NUMBER, RateHz);
+}
+
+void UTempoSceneCaptureComponent2D::RestartCaptureTimer()
+{
+	const float TimerPeriod = GetTimerPeriod(RateHz);
+	GetWorld()->GetTimerManager().SetTimer(TimerHandle, this, &UTempoSceneCaptureComponent2D::MaybeCapture, TimerPeriod, true);
 }
 
 void UTempoSceneCaptureComponent2D::MaybeCapture()
 {
-	if (!FMath::IsNearlyEqual(GetWorld()->GetTimerManager().GetTimerRate(TimerHandle), RateHz))
+	const float TimerPeriod = GetTimerPeriod(RateHz);
+	if (!FMath::IsNearlyEqual(GetWorld()->GetTimerManager().GetTimerRate(TimerHandle), TimerPeriod))
 	{
 		RestartCaptureTimer();
 	}
