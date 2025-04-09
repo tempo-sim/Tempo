@@ -12,6 +12,8 @@
 #include "ZoneGraphTypes.h"
 #include "MassNavigationFragments.h"
 #include "MassTrafficLaneChange.h"
+#include "MassGameplayExternalTraits.h"
+#include "ZoneGraphSubsystem.h"
 
 
 // Important:  UMassTrafficCrowdYieldProcessor is meant to run after UMassTrafficVehicleControlProcessor.

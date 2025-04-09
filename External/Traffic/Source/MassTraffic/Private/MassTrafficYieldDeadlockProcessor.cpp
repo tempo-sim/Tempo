@@ -9,6 +9,7 @@
 #include "MassZoneGraphNavigationFragments.h"
 #include "MassTrafficLaneChange.h"
 #include "MassGameplayExternalTraits.h"
+#include "ZoneGraphSubsystem.h"
 
 namespace
 {
