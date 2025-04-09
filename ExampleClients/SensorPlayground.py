@@ -67,7 +67,9 @@ label_to_hue = np.array([
     120,    # Ground = 25
     0,      # Bridge = 26
     0,      # RailTrack = 27
-    0       # GuardRail = 28
+    0,      # GuardRail = 28
+    0,      # 29
+    0       # 30
 ], dtype=np.uint8)
 
 
