@@ -228,7 +228,7 @@ async def get_option(state):
         choices += [Choice("TempoCamera", StateEnum.ADD_SENSOR_WHAT_OWNER,"c")]
     elif state.enum == StateEnum.ADD_SENSOR_WHAT_OWNER:
         prompt = "\nWhat actor should we add the sensor to? You may also input another actor name than these choices\n"
-        choices += [Choice("BP_SensorRig", StateEnum.ADD_SENSOR_WHAT_PARENT, None, metadata={"Actor": "BP_SensorRig"})]
+        choices += [Choice("BP_SensorRig", StateEnum.ADD_SENSOR_WHAT_PARENT, None)]
     elif state.enum == StateEnum.ADD_SENSOR_WHAT_PARENT:
         prompt = "\nWhat parent component should we add the sensor to? You may also input another component name than these choices\n"
         choices += [Choice("Root Component", StateEnum.ADD_SENSOR_WHAT_SOCKET, None, metadata={"Parent": ""})]
@@ -269,7 +269,7 @@ async def get_option(state):
         choices += [Choice(stream_name, StateEnum.START, None, {"Stream": stream_name}) for stream_name in state.sensor_streams.keys()]
     elif state.enum == StateEnum.MOVE_ACTOR:
         prompt = "\nWhich actor? You may also input another component name than these choices\n"
-        choices += [Choice("BP_SensorRig", StateEnum.MOVE_ACTOR_WHAT_TRANSFORM, None, metadata={"Actor": "BP_SensorRig"})]
+        choices += [Choice("BP_SensorRig", StateEnum.MOVE_ACTOR_WHAT_TRANSFORM, None)]
     elif state.enum == StateEnum.MOVE_ACTOR_WHAT_TRANSFORM:
         prompt = "What relative transform should we use? Format: X Y Z R P Y Units: Meters/Degrees\n"
         choices += [Choice("0 0 0 0 0 0", StateEnum.START, None)]
@@ -393,7 +393,7 @@ async def take_action(state, option, user_input):
             state.sensor_streams[chosen.metadata["Stream"]].cancel()
             del state.sensor_streams[chosen.metadata["Stream"]]
     elif state.enum == StateEnum.MOVE_ACTOR:
-        state.accumulated_input.update(chosen.metadata)
+        state.accumulated_input["Actor"] = chosen.display
     elif state.enum == StateEnum.MOVE_ACTOR_WHAT_TRANSFORM:
         try:
             t = transform_from_string(chosen.display)
