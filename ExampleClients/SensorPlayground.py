@@ -270,7 +270,7 @@ async def get_option(state):
         prompt = "\nWhich stream?" if len(state.sensor_streams) > 0 else "\nNo streams found\n"
         choices += [Choice(stream_name, StateEnum.START, None, {"Stream": stream_name}) for stream_name in state.sensor_streams.keys()]
     elif state.enum == StateEnum.MOVE_ACTOR:
-        prompt = "\nWhich actor? You may also input another component name than these choices\n"
+        prompt = "\nWhich actor? You may also input another actor name than these choices\n"
         choices += [Choice("BP_SensorRig", StateEnum.MOVE_ACTOR_WHAT_TRANSFORM, None)]
     elif state.enum == StateEnum.MOVE_ACTOR_WHAT_TRANSFORM:
         prompt = "What relative transform should we use? Format: X Y Z R P Y Units: Meters/Degrees\n"
