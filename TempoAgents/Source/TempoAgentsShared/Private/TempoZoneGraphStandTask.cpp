@@ -12,6 +12,7 @@
 #include "MassStateTreeExecutionContext.h"
 #include "MassSignalSubsystem.h"
 #include "MassSimulationLOD.h"
+#include "ZoneGraphSubsystem.h"
 
 EStateTreeRunStatus FTempoZoneGraphStandTask::EnterState(FStateTreeExecutionContext& Context, const FStateTreeTransitionResult& Transition) const
 {
