@@ -31,8 +31,8 @@ void FTempoScriptingModule::StartupModule()
 	IHotReloadModule::Get().OnModuleCompilerStarted().AddLambda([](bool)
 	{
 		// Note: we added these reset methods in TempoThirdParty-v0.4
-		google::protobuf::DescriptorPool::ResetGeneratedDatabase();
-		google::protobuf::MessageFactory::ResetGeneratedFactory();
+		google::protobuf_tempo::DescriptorPool::ResetGeneratedDatabase();
+		google::protobuf_tempo::MessageFactory::ResetGeneratedFactory();
 	});
 #endif
 }
