@@ -681,8 +681,10 @@ void GetObjectProperties(const UObject* Object, GetPropertiesResponse& Response)
 			// UProperties can be C-style arrays (who knew?), and this will be indicated by a non-1 ArrayDim member.
 			// For example, FPostProcessSettings has FLinearColor LensFlareTints[8]
 			// We don't support these types
-			Type = TEXT("Unsupported");
+			Type = TEXT("unsupported");
+			return;
 		}
+
 		if (const FStrProperty* StrProperty = CastField<FStrProperty>(Property))
 		{
 			Type = TEXT("string");
