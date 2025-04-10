@@ -1329,7 +1329,22 @@ grpc::Status SetStructPropertyImpl(const UWorld* World, const RequestType& Reque
 	const FString StructCPPName = StructProperty->Struct->GetStructCPPName();
 	if (StructCPPName.Equals(ExpectedStructCPPName))
 	{
+#if WITH_EDITOR
+		if (World->WorldType == EWorldType::Editor)
+		{
+			Object->PreEditChange(Property);
+		}
+#endif
 		StructProperty->SetValue_InContainer(Object, &Value);
+#if WITH_EDITOR
+		if (World->WorldType == EWorldType::Editor)
+		{
+			FPropertyChangedEvent Event(Property);
+			Object->PostEditChangeProperty(Event);
+		}
+#endif
+
+		MarkRenderStateDirty(Object);
 	}
 	else
 	{
