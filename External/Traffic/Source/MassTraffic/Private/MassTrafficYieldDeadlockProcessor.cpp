@@ -10,6 +10,7 @@
 #include "MassTrafficLaneChange.h"
 #include "Async/Async.h"
 #include "MassGameplayExternalTraits.h"
+#include "ZoneGraphSubsystem.h"
 
 namespace
 {
