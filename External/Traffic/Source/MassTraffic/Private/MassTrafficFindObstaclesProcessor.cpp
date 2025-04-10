@@ -172,7 +172,7 @@ void UMassTrafficFindObstaclesProcessor::Execute(FMassEntityManager& EntityManag
 									{
 										UE_VLOG_SEGMENT_THICK(&MassTrafficSubsystem, TEXT("MassTraffic Avoidance"), Log, AvoidingVehicleLocation, TransformFragment.GetTransform().GetLocation(), FColor::Yellow, 5.0f, TEXT("%d Avoiding %d"), PreviousVehicle.Index, ObstacleEntity.Index);
 										const float Radius = PreviousVehicleEntityView.GetFragmentData<FAgentRadiusFragment>().Radius;
-										const float HalfWidth = PreviousVehicleEntityView.GetSharedFragmentData<FMassTrafficVehicleSimulationParameters>().HalfWidth;
+										const float HalfWidth = PreviousVehicleEntityView.GetConstSharedFragmentData<FMassTrafficVehicleSimulationParameters>().HalfWidth;
 
 										DrawDebugBox(GetWorld(),
 											TransformFragment.GetTransform().GetLocation(),

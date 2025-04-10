@@ -5,7 +5,7 @@
 #include "MassTrafficFragments.h"
 #include "MassTraffic.h"
 
-#include "BezierUtilities.h"
+#include "Curves/BezierUtilities.h"
 
 
 namespace UE
@@ -140,7 +140,7 @@ void InterpolatePositionAndOrientationAlongLane(
 	const float Alpha = FMath::GetRangePct(InOutLaneSegment.StartProgression, InOutLaneSegment.EndProgression, DistanceAlongLane);
 		
 	// Interpolate along segment 
-	FVector InterpolatedLocation;
+	FVector InterpolatedLocation = FVector::ZeroVector;
 	FVector InterpolatedForwardVector; 
 	switch (InterpolationMethod)
 	{
