@@ -42,7 +42,7 @@ void UMassTrafficTrailerSpawnDataGenerator::Generate(UObject& QueryOwner,
 		// Find matching trailer to spawn for these vehicles
 		for (FMassEntitySpawnDataGeneratorResult& Result : Results)
 		{
-			if (EntityTypes[Result.EntityConfigIndex].EntityConfig == TrailerSimulationParams.TrailerAgentConfigAsset)
+			if (EntityTypes[Result.EntityConfigIndex].EntityConfig.Get() == TrailerSimulationParams.TrailerAgentConfigAsset.Get())
 			{
 				// Initialize spawn data for trailer
 				FMassTrafficVehicleTrailersSpawnData* TrailersSpawnData = Result.SpawnData.GetMutablePtr<FMassTrafficVehicleTrailersSpawnData>();
