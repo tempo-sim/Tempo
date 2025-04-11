@@ -29,13 +29,12 @@ public class TempoAgentsShared : ModuleRules
                 "MassCommon",
                 "MassTraffic",
                 "MassRepresentation",
-                "MassEntity",
                 "MassActors",
                 "MassSpawner",
                 "MassCommon",
-                "StructUtils",
                 "RHI",
                 // For overriden "stand" state
+                "MassEntity",
                 "MassMovement",
                 "MassNavigation",
                 "MassZoneGraphNavigation",
@@ -48,5 +47,15 @@ public class TempoAgentsShared : ModuleRules
                 "TempoCoreShared",
             }
         );
+        
+        if (Target.Version.MajorVersion == 5 && Target.Version.MinorVersion < 5)
+        {
+            PublicDependencyModuleNames.AddRange(
+                new string[]
+                {
+                    "StructUtils",
+                }
+            );
+        }
     }
 }

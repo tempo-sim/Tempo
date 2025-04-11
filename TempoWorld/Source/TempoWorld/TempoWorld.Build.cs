@@ -26,9 +26,7 @@ public class TempoWorld : TempoModuleRules
                 "CoreUObject",
                 "Engine",
                 "MassActors",
-                "MassEntity",
                 "MassTraffic",
-                "StructUtils",
                 // Tempo
                 "TempoCore",
                 "TempoMovementShared",
