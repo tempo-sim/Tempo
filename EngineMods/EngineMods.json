@@ -10,7 +10,8 @@
         "ToolChain/TempoVCToolChain.cs.5.5"
       ],
       "Patch": [
-        "Configuration/UEBuildTarget.cs.patch.5.5"
+        "Configuration/UEBuildTarget.cs.patch.5.5",
+        "Platform/Linux/LinuxToolChain.cs.patch.5.5"
       ]
     },
     {
