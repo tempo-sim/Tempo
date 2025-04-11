@@ -27,11 +27,14 @@ public class MassTrafficEditor : ModuleRules
 				"Engine",
 				"ZoneGraph",
 				"MassTraffic",
-				"StructUtils"
 			}
 			);
-			
-		
+
+		if (Target.Version.MajorVersion == 5 && Target.Version.MinorVersion < 5)
+		{
+			PublicDependencyModuleNames.Add("StructUtils");
+		}
+
 		PrivateDependencyModuleNames.AddRange(
 			new string[]
 			{

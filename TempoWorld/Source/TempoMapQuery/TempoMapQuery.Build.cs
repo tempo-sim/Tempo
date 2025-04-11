@@ -25,10 +25,8 @@ public class TempoMapQuery : TempoModuleRules
 				// Unreal
 				"CoreUObject",
 				"Engine",
-				"MassEntity",
 				"Slate",
 				"SlateCore",
-				"StructUtils",
 				// Tempo
 				"MassTraffic",
 				"ZoneGraph",

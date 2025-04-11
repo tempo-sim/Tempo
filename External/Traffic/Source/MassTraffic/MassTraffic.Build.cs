@@ -50,15 +50,23 @@ public class MassTraffic : ModuleRules
 				"Engine",
 				"NetCore",
 				"StateTreeModule",
-				"StructUtils",
 				"ZoneGraph",
 				"AnimToTexture",
 				"ChaosVehicles",
 				"ChaosVehiclesCore",
 			}
 			);
-			
-		
+
+		if (Target.Version.MajorVersion == 5 && Target.Version.MinorVersion < 5)
+		{
+			PublicDependencyModuleNames.AddRange(
+				new string[]
+				{
+					"StructUtils",
+				}
+			);
+		}
+
 		PrivateDependencyModuleNames.AddRange(
 			new string[]
 			{
