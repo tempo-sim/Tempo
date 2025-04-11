@@ -1,0 +1,20 @@
+diff --color -urN --strip-trailing-cr Source/MassEntity/Public/MassEntityTypes.h /Users/pete/Desktop/MassEntity/Source/MassEntity/Public/MassEntityTypes.h
+--- Source/MassEntity/Public/MassEntityTypes.h	2024-06-04 07:20:35
++++ /Users/pete/Desktop/MassEntity/Source/MassEntity/Public/MassEntityTypes.h	2025-04-11 09:59:49
+@@ -51,6 +51,16 @@
+ 	FMassSharedFragment() {}
+ };
+
++// FMassConstSharedFragment was added in UE 5.5. Unfortunately, due to UHT constraints, preprocessor macros cannot be
++// used to change the parent of a USTRUCT, add  USTRUCT, or any other lighter-touch workaround, so we backport it here.
++USTRUCT()
++struct FMassConstSharedFragment : public FMassSharedFragment
++{
++        GENERATED_BODY()
++
++        FMassConstSharedFragment() {}
++};
++
+ // A handle to a lightweight entity.  An entity is used in conjunction with the FMassEntityManager
+ // for the current world and can contain lightweight fragments.
+ USTRUCT()

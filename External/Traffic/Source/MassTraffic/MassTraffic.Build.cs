@@ -57,14 +57,10 @@ public class MassTraffic : ModuleRules
 			}
 			);
 
+		// StructUtils plugin was deprecated in 5.5 and moved into CoreUObject
 		if (Target.Version.MajorVersion == 5 && Target.Version.MinorVersion < 5)
 		{
-			PublicDependencyModuleNames.AddRange(
-				new string[]
-				{
-					"StructUtils",
-				}
-			);
+			PublicDependencyModuleNames.Add("StructUtils");
 		}
 
 		PrivateDependencyModuleNames.AddRange(

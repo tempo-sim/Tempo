@@ -61,8 +61,14 @@ void UMassTrafficVehicleSimulationTrait::BuildTemplate(FMassEntityTemplateBuildC
 
 	const FConstSharedStruct VariableTickParamsFragment = EntityManager.GetOrCreateConstSharedFragment(VariableTickParams);
 	BuildContext.AddConstSharedFragment(VariableTickParamsFragment);
-	
+
+#if ENGINE_MAJOR_VERSION >= 5 && ENGINE_MINOR_VERSION <= 4
+	const uint32 VariableTickParamsHash = UE::StructUtils::GetStructCrc32(FConstStructView::Make(VariableTickParams));
+	const FSharedStruct VariableTickSharedFragment = EntityManager.GetOrCreateSharedFragmentByHash<FMassSimulationVariableTickSharedFragment>(VariableTickParamsHash, VariableTickParams);
+#else
 	const FSharedStruct VariableTickSharedFragment = EntityManager.GetOrCreateSharedFragment<FMassSimulationVariableTickSharedFragment>(VariableTickParams);
+#endif
+
 	BuildContext.AddSharedFragment(VariableTickSharedFragment);
 
 	// Various fragments
