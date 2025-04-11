@@ -56,6 +56,13 @@
       "Patch": [
         "MassCrowd.patch.5.4"
       ]
+    },
+    {
+      "Type": "Plugin",
+      "Root": "Engine/Plugins/Runtime/MassEntity",
+      "Patch": [
+        "MassEntity.patch.5.4"
+      ]
     }
   ]
 }

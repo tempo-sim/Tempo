@@ -5,8 +5,11 @@
 #include "MassTrafficFragments.h"
 #include "MassTraffic.h"
 
+#if ENGINE_MAJOR_VERSION >= 5 && ENGINE_MINOR_VERSION <= 4
+#include "BezierUtilities.h"
+#else
 #include "Curves/BezierUtilities.h"
-
+#endif
 
 namespace UE
 {

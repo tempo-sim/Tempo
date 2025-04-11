@@ -2,8 +2,6 @@
 
 #include "TempoWorld.h"
 
-#include "TempoWorld/ActorControl.pb.h"
-
 #define LOCTEXT_NAMESPACE "FTempoWorldModule"
 
 DEFINE_LOG_CATEGORY(LogTempoWorld);
@@ -20,12 +18,12 @@ FAutoConsoleVariableRef CVarDebugTempoWorld(
 
 void FTempoWorldModule::StartupModule()
 {
-
+    
 }
 
 void FTempoWorldModule::ShutdownModule()
 {
-
+    
 }
 
 #undef LOCTEXT_NAMESPACE

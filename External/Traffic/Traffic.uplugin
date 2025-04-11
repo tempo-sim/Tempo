@@ -55,6 +55,6 @@
 		{
 			"Name": "AnimToTexture",
 			"Enabled": true
-		},
+		}
 	]
 }
