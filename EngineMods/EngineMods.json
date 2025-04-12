@@ -10,7 +10,8 @@
         "ToolChain/TempoVCToolChain.cs"
       ],
       "Patch": [
-        "Configuration/UEBuildTarget.cs.patch.1"
+        "Configuration/UEBuildTarget.cs.patch.1",
+        "Platform/Linux/LinuxToolChain.cs.patch.1"
       ]
     },
     {
@@ -28,7 +29,8 @@
       "Root": "Engine/Plugins/AI/MassCrowd",
       "Patch": [
         "MassCrowd.patch.1",
-        "MassCrowd.patch.2"
+        "MassCrowd.patch.2",
+        "MassCrowd.patch.3"
       ]
     }
   ]

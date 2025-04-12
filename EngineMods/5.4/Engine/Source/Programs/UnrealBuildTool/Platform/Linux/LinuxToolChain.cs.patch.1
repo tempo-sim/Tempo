@@ -1,0 +1,12 @@
+--- Platform/Linux/LinuxToolChain.cs	2025-04-11 10:07:25
++++ LinuxToolChain.cs	2025-04-11 11:40:07
+@@ -1251,7 +1251,8 @@
+ 			{
+ 				string RelativePath = RuntimeLibaryPath;
+ 
+-				if (!RelativePath.StartsWith("$"))
++				// StartsWith(".") added by Tempo to allow RuntimeLibraryPath to actually be treated as relative
++				if (!RelativePath.StartsWith("$") && !RelativePath.StartsWith("."))
+ 				{
+ 					if (LinkEnvironment.bIsBuildingDLL)
+ 					{
