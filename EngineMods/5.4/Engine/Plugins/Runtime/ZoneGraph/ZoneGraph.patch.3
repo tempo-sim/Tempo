@@ -1,0 +1,171 @@
+diff -urN --strip-trailing-cr Source/ZoneGraph/Private/ZoneGraphQuery.cpp /home/giovanni/Develop/VayuSim/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Private/ZoneGraphQuery.cpp
+--- Source/ZoneGraph/Private/ZoneGraphQuery.cpp	2023-06-01 09:13:48.000000000 -0400
++++ /home/giovanni/Develop/VayuSim/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Private/ZoneGraphQuery.cpp	2025-03-10 17:18:45.936878604 -0400
+@@ -589,5 +589,135 @@
+ 
+ 	return OutLaneSections.Num() > 0;
+ }
++
++bool FindIntersectionBetweenSegments(const FVector& SegmentAStart, const FVector& SegmentAEnd, const FVector& SegmentBStart, const FVector& SegmentBEnd, float& OutDistanceAlongSegmentA, float Tolerance = KINDA_SMALL_NUMBER)
++{
++	FVector ClosestPointOnSegmentAToSegmentB;
++	FVector ClosestPointOnSegmentBToSegmentA;
++
++	FMath::SegmentDistToSegment(SegmentAStart, SegmentAEnd, SegmentBStart, SegmentBEnd, ClosestPointOnSegmentAToSegmentB, ClosestPointOnSegmentBToSegmentA);
++
++	const float SquaredDistanceBetweenClosestPoints = (ClosestPointOnSegmentBToSegmentA - ClosestPointOnSegmentAToSegmentB).SizeSquared();
++	const float SquaredTolerance = FMath::Square(Tolerance);
++
++	if (SquaredDistanceBetweenClosestPoints < SquaredTolerance)
++	{
++		const float DistanceAlongSegmentA = (ClosestPointOnSegmentAToSegmentB - SegmentAStart).Size();
++		OutDistanceAlongSegmentA = DistanceAlongSegmentA;
++
++		return true;
++	}
++
++	return false;
++}
++
++bool FindFirstIntersectionBetweenLanes(
++		const FZoneGraphStorage& Storage,
++		const FZoneGraphLaneHandle& QueryLaneHandle,
++		const FZoneGraphLaneHandle& OtherLaneHandle,
++		const float LateralOffsetFromCenterOfOtherLane,
++		float& OutDistanceAlongQueryLane,
++		int32* OutQueryLaneIntersectionSegmentIndex,
++		float* OutNormalizedDistanceAlongQueryLaneIntersectionSegment,
++		float Tolerance)
++{
++	if (!EnsureLaneHandle(Storage, QueryLaneHandle, __FUNCTION__))
++	{
++		return false;
++	}
++
++	if (!EnsureLaneHandle(Storage, OtherLaneHandle, __FUNCTION__))
++	{
++		return false;
++	}
++	
++	return FindFirstIntersectionBetweenLanes(
++		Storage,
++		QueryLaneHandle.Index,
++		OtherLaneHandle.Index,
++		LateralOffsetFromCenterOfOtherLane,
++		OutDistanceAlongQueryLane,
++		OutQueryLaneIntersectionSegmentIndex,
++		OutNormalizedDistanceAlongQueryLaneIntersectionSegment,
++		Tolerance);
++}
++
++bool FindFirstIntersectionBetweenLanes(
++		const FZoneGraphStorage& Storage,
++		const uint32 QueryLaneIndex,
++		const uint32 OtherLaneIndex,
++		const float LateralOffsetFromCenterOfOtherLane,
++		float& OutDistanceAlongQueryLane,
++		int32* OutQueryLaneIntersectionSegmentIndex,
++		float* OutNormalizedDistanceAlongQueryLaneIntersectionSegment,
++		float Tolerance)
++{
++	const FZoneLaneData& QueryLane = Storage.Lanes[QueryLaneIndex];
++	const int32 NumQueryLanePoints = QueryLane.PointsEnd - QueryLane.PointsBegin;
++
++	if (!ensureMsgf(NumQueryLanePoints >= 2, TEXT("QueryLane must have at least 2 points in FindFirstIntersectionBetweenLanes.")))
++	{
++		return false;
++	}
++
++	const FZoneLaneData& OtherLane = Storage.Lanes[OtherLaneIndex];
++	const int32 NumOtherLanePoints = OtherLane.PointsEnd - OtherLane.PointsBegin;
++
++	if (!ensureMsgf(NumOtherLanePoints >= 2, TEXT("OtherLane must have at least 2 points in FindFirstIntersectionBetweenLanes.")))
++	{
++		return false;
++	}
++
++	float DistanceAlongQueryLane = 0.0f;
++
++	for (int32 QueryLanePointIndex = QueryLane.PointsBegin; QueryLanePointIndex < QueryLane.PointsEnd - 1; ++QueryLanePointIndex)
++	{
++		const FVector& QueryLaneSegmentStartLocation = Storage.LanePoints[QueryLanePointIndex];
++		const FVector& QueryLaneSegmentEndLocation = Storage.LanePoints[QueryLanePointIndex + 1];
++
++		const float QuerySegmentLength = (QueryLaneSegmentEndLocation - QueryLaneSegmentStartLocation).Size();
++
++		for (int32 OtherLanePointIndex = OtherLane.PointsBegin; OtherLanePointIndex < OtherLane.PointsEnd - 1; ++OtherLanePointIndex)
++		{
++			const FVector OtherLaneSegmentStartTangentVector = Storage.LaneTangentVectors[OtherLanePointIndex];
++			const FVector OtherLaneSegmentStartUpVector = Storage.LaneUpVectors[OtherLanePointIndex];
++			
++			const FVector OtherLaneSegmentStartRightVector = FVector::CrossProduct(OtherLaneSegmentStartTangentVector, OtherLaneSegmentStartUpVector);
++
++			const FVector OtherLaneSegmentEndTangentVector = Storage.LaneTangentVectors[OtherLanePointIndex + 1];
++			const FVector OtherLaneSegmentEndUpVector = Storage.LaneUpVectors[OtherLanePointIndex + 1];
++			
++			const FVector OtherLaneSegmentEndRightVector = FVector::CrossProduct(OtherLaneSegmentEndTangentVector, OtherLaneSegmentEndUpVector);
++			
++			const FVector& OtherLaneSegmentStartLocation = Storage.LanePoints[OtherLanePointIndex] + OtherLaneSegmentStartRightVector * LateralOffsetFromCenterOfOtherLane;
++			const FVector& OtherLaneSegmentEndLocation = Storage.LanePoints[OtherLanePointIndex + 1] + OtherLaneSegmentEndRightVector * LateralOffsetFromCenterOfOtherLane;
++
++			float DistanceAlongQuerySegment = 0.0f;
++			
++			if (FindIntersectionBetweenSegments(QueryLaneSegmentStartLocation, QueryLaneSegmentEndLocation, OtherLaneSegmentStartLocation, OtherLaneSegmentEndLocation, DistanceAlongQuerySegment, Tolerance))
++			{
++				OutDistanceAlongQueryLane = DistanceAlongQueryLane + DistanceAlongQuerySegment;
++
++				if (OutQueryLaneIntersectionSegmentIndex != nullptr)
++				{
++					*OutQueryLaneIntersectionSegmentIndex = QueryLanePointIndex;
++				}
++
++				if (OutNormalizedDistanceAlongQueryLaneIntersectionSegment != nullptr)
++				{
++					const float NormalizedDistanceAlongQuerySegment = QuerySegmentLength > 0.0f ? DistanceAlongQuerySegment / QuerySegmentLength : 0.0f;
++					
++					*OutNormalizedDistanceAlongQueryLaneIntersectionSegment = NormalizedDistanceAlongQuerySegment;
++				}
++				
++				return true;
++			}
++		}
++		
++		DistanceAlongQueryLane += QuerySegmentLength;
++	}
++
++	return false;
++}
+ 	
+ } // UE::ZoneGraph::Query
+diff -urN --strip-trailing-cr Source/ZoneGraph/Public/ZoneGraphQuery.h /home/giovanni/Develop/VayuSim/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Public/ZoneGraphQuery.h
+--- Source/ZoneGraph/Public/ZoneGraphQuery.h	2023-06-01 09:13:48.000000000 -0400
++++ /home/giovanni/Develop/VayuSim/Plugins/Tempo/External/ZoneGraph/Source/ZoneGraph/Public/ZoneGraphQuery.h	2025-03-10 17:18:45.937878581 -0400
+@@ -75,5 +75,27 @@
+ 	
+ /**  Find sections of lanes fully overlapping (including lane width) in ZoneGraph Storage. */
+ ZONEGRAPH_API bool FindLaneOverlaps(const FZoneGraphStorage& Storage, const FVector& Center, const float Radius, const FZoneGraphTagFilter TagFilter, TArray<FZoneGraphLaneSection>& OutLaneSections);
++	
++/**  Find the first intersection between two lanes in terms of distance along QueryLane in ZoneGraph Storage. */
++ZONEGRAPH_API bool FindFirstIntersectionBetweenLanes(
++	const FZoneGraphStorage& Storage,
++	const FZoneGraphLaneHandle& QueryLaneHandle,
++	const FZoneGraphLaneHandle& OtherLaneHandle,
++	const float LateralOffsetFromCenterOfOtherLane,
++	float& OutDistanceAlongQueryLane,
++	int32* OutQueryLaneIntersectionSegmentIndex = nullptr,
++	float* OutNormalizedDistanceAlongQueryLaneIntersectionSegment = nullptr,
++	float Tolerance = KINDA_SMALL_NUMBER);
++	
++/**  Find the first intersection between two lanes in terms of distance along QueryLane in ZoneGraph Storage. */
++ZONEGRAPH_API bool FindFirstIntersectionBetweenLanes(
++	const FZoneGraphStorage& Storage,
++	const uint32 QueryLaneIndex,
++	const uint32 OtherLaneIndex,
++	const float LateralOffsetFromCenterOfOtherLane,
++	float& OutDistanceAlongQueryLane,
++	int32* OutQueryLaneIntersectionSegmentIndex = nullptr,
++	float* OutNormalizedDistanceAlongQueryLaneIntersectionSegment = nullptr,
++	float Tolerance = KINDA_SMALL_NUMBER);
+ 
+ } // UE::ZoneGraph::Query
+\ No newline at end of file
