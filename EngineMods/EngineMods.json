@@ -4,28 +4,32 @@
       "Type": "UnrealBuildTool",
       "Root": "Engine/Source/Programs/UnrealBuildTool",
       "Add": [
-        "Configuration/TempoModuleRules.cs.5.5",
-        "ToolChain/TempoLinuxToolChain.cs.5.5",
-        "ToolChain/TempoMacToolChain.cs.5.5",
-        "ToolChain/TempoVCToolChain.cs.5.5"
+        "Configuration/TempoModuleRules.cs",
+        "ToolChain/TempoLinuxToolChain.cs",
+        "ToolChain/TempoMacToolChain.cs",
+        "ToolChain/TempoVCToolChain.cs"
       ],
       "Patch": [
-        "Configuration/UEBuildTarget.cs.patch.5.5",
-        "Platform/Linux/LinuxToolChain.cs.patch.5.5"
+        "Configuration/UEBuildTarget.cs.patch.1",
+        "Platform/Linux/LinuxToolChain.cs.patch.1"
       ]
     },
     {
       "Type": "Plugin",
       "Root": "Engine/Plugins/Runtime/ZoneGraph",
       "Patch": [
-        "ZoneGraph.patch.5.5"
+        "ZoneGraph.patch.1",
+        "ZoneGraph.patch.2",
+        "ZoneGraph.patch.3",
+        "ZoneGraph.patch.4"
       ]
     },
     {
       "Type": "Plugin",
       "Root": "Engine/Plugins/AI/MassCrowd",
       "Patch": [
-        "MassCrowd.patch.5.5"
+        "MassCrowd.patch.1",
+        "MassCrowd.patch.2"
       ]
     }
   ],
@@ -40,7 +44,8 @@
         "ToolChain/TempoVCToolChain.cs"
       ],
       "Patch": [
-        "Configuration/UEBuildTarget.cs.patch.1"
+        "Configuration/UEBuildTarget.cs.patch.1",
+        "Platform/Linux/LinuxToolChain.cs.patch.1"
       ]
     },
     {
@@ -65,7 +70,7 @@
       "Type": "Plugin",
       "Root": "Engine/Plugins/Runtime/MassEntity",
       "Patch": [
-        "MassEntity.patch.5.4"
+        "MassEntity.patch.1"
       ]
     }
   ]
