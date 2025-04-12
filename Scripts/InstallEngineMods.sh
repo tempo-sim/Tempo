@@ -4,7 +4,6 @@ set -e
 
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 TEMPO_ROOT=$(realpath "$SCRIPT_DIR/..")
-ENGINE_MODS_DIR="$TEMPO_ROOT/EngineMods"
 
 # Check for UNREAL_ENGINE_PATH
 if [ -z ${UNREAL_ENGINE_PATH+x} ]; then
@@ -36,6 +35,12 @@ cd "$UNREAL_ENGINE_PATH"
 
 PATCH_RECORD_PATH="$UNREAL_ENGINE_PATH/TempoMods"
 
+# Get engine release (e.g. 5.4)
+if [ -f "$UNREAL_ENGINE_PATH/Engine/Intermediate/Build/BuildRules/UE5RulesManifest.json" ]; then
+  RELEASE_WITH_HOTFIX=$(jq -r '.EngineVersion' "$UNREAL_ENGINE_PATH/Engine/Intermediate/Build/BuildRules/UE5RulesManifest.json")
+  RELEASE="${RELEASE_WITH_HOTFIX%.*}"
+fi
+
 # Find dotnet
 if [[ "$OSTYPE" = "msys" ]]; then
   DOTNET=$(find ./Engine/Binaries/ThirdParty/DotNet -type f -name dotnet.exe)
@@ -49,19 +54,20 @@ elif [[ "$OSTYPE" = "darwin"* ]]; then
   fi
 elif [[ "$OSTYPE" = "linux-gnu"* ]]; then
   DOTNETS=$(find ./Engine/Binaries/ThirdParty/DotNet -type f -name dotnet)
-  ARCH=$(arch)
-  if [[ "$ARCH" = "arm64" ]]; then
-    DOTNET=$(echo "${DOTNETS[@]}" | grep -E "linux-arm64/dotnet")
-  elif [[ "$ARCH" = "x86_64" ]]; then
-    DOTNET=$(echo "${DOTNETS[@]}" | grep -E "linux-x64/dotnet")
+  if [[ "$RELEASE" == "5.4" ]]; then
+    # In UE 5.4 there is only one dotnet on Linux. 5.5 added arm64 support.
+    DOTNET="$DOTNETS"
+  else
+    ARCH=$(arch)
+    if [[ "$ARCH" = "arm64" ]]; then
+      DOTNET=$(echo "${DOTNETS[@]}" | grep -E "linux-arm64/dotnet")
+    elif [[ "$ARCH" = "x86_64" ]]; then
+      DOTNET=$(echo "${DOTNETS[@]}" | grep -E "linux-x64/dotnet")
+    fi
   fi
 fi
 
-# Get engine release (e.g. 5.4)
-if [ -f "$UNREAL_ENGINE_PATH/Engine/Intermediate/Build/BuildRules/UE5RulesManifest.json" ]; then
-  RELEASE_WITH_HOTFIX=$(jq -r '.EngineVersion' "$UNREAL_ENGINE_PATH/Engine/Intermediate/Build/BuildRules/UE5RulesManifest.json")
-  RELEASE="${RELEASE_WITH_HOTFIX%.*}"
-fi
+ENGINE_MODS_DIR="$TEMPO_ROOT/EngineMods/$RELEASE"
 
 APPLY_ADDS() {
   local TEMP=$1
@@ -69,8 +75,7 @@ APPLY_ADDS() {
   local ADDS=("${@:3}")
   for ADD in "${ADDS[@]}"; do
     local SRC="$ENGINE_MODS_DIR/$ROOT/$ADD"
-    local ADD_NO_VERSION="${ADD%.[0-9]*\.[0-9]*}"
-    local DEST="$TEMP/$ROOT/$ADD_NO_VERSION"
+    local DEST="$TEMP/$ROOT/$ADD"
     mkdir -p "$(dirname "$DEST")"
     cp "$SRC" "$DEST"
   done
@@ -82,8 +87,7 @@ REVERT_ADDS() {
   local ADDS=("${@:3}")
   for ADD in "${ADDS[@]}"; do
     local SRC="$ENGINE_MODS_DIR/$ROOT/$ADD"
-    local ADD_NO_VERSION="${ADD%.[0-9]*\.[0-9]*}"
-    local DEST="$TEMP/$ROOT/$ADD_NO_VERSION"
+    local DEST="$TEMP/$ROOT/$ADD"
     rm -f "$DEST"
   done
 }
@@ -94,7 +98,7 @@ APPLY_PATCHES() {
   local PATCHES=("${@:3}")
   local DEST
   DEST="$TEMP/$ROOT"
-  
+
   if [ ! -d "$DEST" ]; then
     echo "Not patching $DEST since it was not found in the expected location"
     exit 1

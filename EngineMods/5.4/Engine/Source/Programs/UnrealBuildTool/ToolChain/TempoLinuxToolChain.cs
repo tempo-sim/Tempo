@@ -25,9 +25,12 @@ namespace UnrealBuildTool
     class TempoLinuxToolChain : LinuxToolChain
     {
         public TempoLinuxToolChain(ReadOnlyTargetRules Target, ILogger Logger)
-            : this(Target.Architecture, UEBuildPlatform.GetSDK(UnrealTargetPlatform.Linux) as LinuxPlatformSDK, TempoLinuxToolChainClangOptions(Target), Logger)
+            : this(Target.Architecture,
+                UEBuildPlatform.GetSDK(UnrealTargetPlatform.Linux) as LinuxPlatformSDK ?? throw new System.Exception("Linux SDK not found"),
+                TempoLinuxToolChainClangOptions(Target),
+                Logger)
         {
-            
+
         }
 
         private TempoLinuxToolChain(UnrealArch InArchitecture, LinuxPlatformSDK InSDK, ClangToolChainOptions InOptions, ILogger Logger)
