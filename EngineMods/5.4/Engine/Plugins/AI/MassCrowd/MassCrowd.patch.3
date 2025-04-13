@@ -1,6 +1,6 @@
 diff --color -urN --strip-trailing-cr Source/MassCrowd/MassCrowd.Build.cs /Users/pete/Desktop/MassCrowd/Source/MassCrowd/MassCrowd.Build.cs
---- Source/MassCrowd/MassCrowd.Build.cs 2025-04-10 22:00:27
-+++ /Users/pete/Desktop/MassCrowd/Source/MassCrowd/MassCrowd.Build.cs   2025-04-10 22:02:18
+--- Source/MassCrowd/MassCrowd.Build.cs	2024-04-15 18:02:10
++++ /Users/pete/Desktop/MassCrowd/Source/MassCrowd/MassCrowd.Build.cs	2025-04-12 21:14:27
 @@ -1,5 +1,7 @@
  // Copyright Epic Games, Inc. All Rights Reserved.
 
@@ -8,32 +8,32 @@ diff --color -urN --strip-trailing-cr Source/MassCrowd/MassCrowd.Build.cs /Users
 +
  namespace UnrealBuildTool.Rules
  {
-        public class MassCrowd: ModuleRules
-@@ -34,10 +36,25 @@
-                                        "ZoneGraph",
-                                        "ZoneGraphAnnotations",
-                                        "ZoneGraphDebug"
-+                               }
-+                       );
+ 	public class MassCrowd: ModuleRules
+@@ -36,8 +38,25 @@
+ 					"ZoneGraphDebug"
+ 				}
+ 			);
 +
-+                       // Added by Tempo. We needed to make some mods to this plugin. To do so, we copied it out of the engine,
-+                       // applied our mods to the source, rebuilt it, and copied the result back. The only wrinkle is the rpaths
-+                       // in the dynamic libraries are then relative to the location we built it, not it's final destination in the
-+                       // engine (and no, it's not allowed to re-build a plugin in-place in the engine). So we use these here to
-+                       // add the correct rpaths relative to the final destination for this plugin.
-+                       PublicRuntimeLibraryPaths.AddRange(
-+                               new string[] {
-+                                       Path.Combine("..", "..", "..", "..", "..", "Plugins", "Runtime", "MassGameplay", "Binaries", Target.Platform.ToString()),
-+                                       Path.Combine("..", "..", "..", "..", "..", "Plugins", "AI", "MassAI", "Binaries", Target.Platform.ToString()),
-+                                       Path.Combine("..", "..", "..", "..", "..", "Plugins", "Runtime", "StateTree", "Binaries", Target.Platform.ToString()),
-+                                       Path.Combine("..", "..", "..", "..", "..", "Plugins", "Runtime", "ZoneGraph", "Binaries", Target.Platform.ToString()),
-+                                       Path.Combine("..", "..", "..", "..", "..", "Plugins", "Runtime", "ZoneGraphAnnotations", "Binaries", Target.Platform.ToString()),
-                                }
-                        );
++			// TEMPO_MOD Begin - [For Fixing rpaths of Rebuilt Engine Plugins] - Manually add rpaths for plugin dependencies
++			// Added by Tempo. We needed to make some mods to this plugin. To do so, we copied it out of the engine,
++			// applied our mods to the source, rebuilt it, and copied the result back. The only wrinkle is the rpaths
++			// in the dynamic libraries are then relative to the location we built it, not it's final destination in the
++			// engine (and no, it's not allowed to re-build a plugin in-place in the engine). So we use these here to
++			// add the correct rpaths relative to the final destination for this plugin.
++			PublicRuntimeLibraryPaths.AddRange(
++					new string[] {
++							Path.Combine("..", "..", "..", "..", "..", "Plugins", "Runtime", "MassGameplay", "Binaries", Target.Platform.ToString()),
++							Path.Combine("..", "..", "..", "..", "..", "Plugins", "AI", "MassAI", "Binaries", Target.Platform.ToString()),
++							Path.Combine("..", "..", "..", "..", "..", "Plugins", "Runtime", "StateTree", "Binaries", Target.Platform.ToString()),
++							Path.Combine("..", "..", "..", "..", "..", "Plugins", "Runtime", "ZoneGraph", "Binaries", Target.Platform.ToString()),
++							Path.Combine("..", "..", "..", "..", "..", "Plugins", "Runtime", "ZoneGraphAnnotations", "Binaries", Target.Platform.ToString()),
++				}
++			);
++			// TEMPO_MOD End
 
-                        SetupIrisSupport(Target);
-                }
-        }
+ 			SetupIrisSupport(Target);
+ 		}
+ 	}
 -}
 \ No newline at end of file
 +}
