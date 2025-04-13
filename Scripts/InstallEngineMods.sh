@@ -238,13 +238,17 @@ for MOD in "${MODS[@]}"; do
   cd "$TEMP/$ROOT"
   if [ -f "$PATCH_RECORD_PATH/$ROOT/mods_applied.patch" ]; then
     if ! patch --force --reject-file=- -R -p0 -s -f --ignore-whitespace --dry-run < "$PATCH_RECORD_PATH/$ROOT/mods_applied.patch" &>/dev/null; then
-      echo "Failed to revert applied mods for $ROOT. Something has gone wrong. Recommended steps:"
+      echo "Failed to revert applied mods for $ROOT. Something has gone wrong. Recommended troubleshooting steps:"
+      echo "  - Remove $UNREAL_ENGINE_PATH/TempoMods folder"
+      echo "  - Re-run Scripts/InstallEngineMods.sh"
+      echo "If that doesn't work,"
       echo "  - Remove $UNREAL_ENGINE_PATH/TempoMods folder"
       if [[ "$OSTYPE" = "linux-gnu"* ]]; then
         echo "  - Verify your Unreal Engine installation by re-extracting the pre-built UE for Linux from Epic"
       else
         echo "  - Verify your Unreal Engine installation through the Epic Games Installer"
       fi
+      echo "  - Re-run Scripts/InstallEngineMods.sh"
       exit 1
     fi
     patch --force --reject-file=- -R -p0 -s -f --ignore-whitespace < "$PATCH_RECORD_PATH/$ROOT/mods_applied.patch" &>/dev/null
