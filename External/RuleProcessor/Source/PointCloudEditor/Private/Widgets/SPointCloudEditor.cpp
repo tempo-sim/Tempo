@@ -183,7 +183,9 @@ TSharedRef<ITableRow> SPointCloudEditor::OnGenerateRowForList(TSharedPtr<FString
 
 TSharedRef<ITableRow> SPointCloudEditor::OnGenerateMetadataRowForList(TSharedPtr<FMetadataHolder> Item, const TSharedRef<STableViewBase>& OwnerTable)
 {
-	return SNew(SMetadataTableRow, OwnerTable);
+	return
+		SNew(SMetadataTableRow, OwnerTable)
+		.Metadata(Item);
 }
 
 /* SPointCloudEditor callbacks
