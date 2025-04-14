@@ -2,18 +2,41 @@
 
 set -e
 
+UNSUCCESSFUL_EXIT() {
+  echo -e "\n****************************************************************"
+  echo "Tempo/Scripts/InstallEngineMods.sh did NOT complete successfully"
+  echo "Tempo will not build without properly installed engine mods"
+  echo "See above for specific error"
+  echo -e "************************************************************\n"
+  exit "$1"
+}
+
+error_handler() {
+  echo "Error: Command '$BASH_COMMAND' failed at line $1"
+  UNSUCCESSFUL_EXIT 2
+}
+
+interrupt_handler() {
+  echo "Script interrupted by user"
+  UNSUCCESSFUL_EXIT 130 # Standard exit code for Ctrl+C
+}
+
+# Set up traps
+trap 'error_handler $LINENO' ERR
+trap 'interrupt_handler' INT
+
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 TEMPO_ROOT=$(realpath "$SCRIPT_DIR/..")
 
 # Check for UNREAL_ENGINE_PATH
 if [ -z ${UNREAL_ENGINE_PATH+x} ]; then
   echo "Please set UNREAL_ENGINE_PATH environment variable and re-run";
-  exit 1
+  UNSUCCESSFUL_EXIT 1
 fi
 
 if [ ! -f "$UNREAL_ENGINE_PATH/Engine/Source/Programs/UnrealBuildTool/UnrealBuildTool.csproj" ]; then
   echo "UNREAL_ENGINE_PATH ($UNREAL_ENGINE_PATH) does not seem correct. Please check and re-run";
-  exit 1
+  UNSUCCESSFUL_EXIT 1
 fi
 
 # Check for jq
@@ -26,7 +49,7 @@ if ! which jq &> /dev/null; then
   elif [[ "$OSTYPE" = "linux-gnu"* ]]; then
     echo "Install (on Linux): sudo apt-get install jq"
   fi
-  exit 1
+  UNSUCCESSFUL_EXIT 1
 fi
 
 UNREAL_ENGINE_PATH="${UNREAL_ENGINE_PATH//\\//}"
@@ -101,14 +124,14 @@ APPLY_PATCHES() {
 
   if [ ! -d "$DEST" ]; then
     echo "Not patching $DEST since it was not found in the expected location"
-    exit 1
+    UNSUCCESSFUL_EXIT 1
   fi
 
   for ((i=0; i<${#PATCHES[@]}; i++)); do
     local PATCH="$ENGINE_MODS_DIR/$ROOT/${PATCHES[i]//\'/}"
     if ! patch --force -p0 --reject-file=- --ignore-whitespace <"$PATCH" &>/dev/null; then
       echo "Failed to apply patch: $PATCH"
-      exit 1
+      UNSUCCESSFUL_EXIT 1
     fi
   done
 }
@@ -141,7 +164,7 @@ REBUILD_PLUGIN() {
 
   if [ ! -d "$TEMP/$ROOT" ]; then
     echo "Plugin $PLUGIN_NAME was not found in the expected location."
-    exit 1
+    UNSUCCESSFUL_EXIT 1
   fi
 
   echo "Rebuilding plugin $PLUGIN_NAME with Tempo mods"
@@ -183,13 +206,14 @@ REBUILD_UBT() {
   TEMP="$1"
   ROOT="$2"
 
-  echo "Copying patched UnrealBuildTool source into engine"
+  echo "Rebuilding UnrealBuildTool (in-place) with Tempo mods"
+
   rm -rf "${UNREAL_ENGINE_PATH:?}/${ROOT:?}/*"
   COPY_DIR "$TEMP/$ROOT" "$UNREAL_ENGINE_PATH/$ROOT"
 
   if [ -z ${DOTNET+x} ]; then
     echo -e "Unable rebuild UnrealBuildTool with Tempo mods. Couldn't find dotnet.\n"
-    exit 1
+    UNSUCCESSFUL_EXIT 1
   fi
 
   cd "$UNREAL_ENGINE_PATH"
@@ -204,7 +228,7 @@ if ! MODS=($(jq -r --arg release "$RELEASE" -c '.[$release][]' "$TEMPO_ROOT/Engi
   SUPPORTED_RELEASES=$(jq -r 'keys | join(", ")' "$TEMPO_ROOT/EngineMods/EngineMods.json")
   echo "Supported Unreal Engine releases are: $SUPPORTED_RELEASES"
   echo "Please install a supported Unreal Engine release and try again"
-  exit 1
+  UNSUCCESSFUL_EXIT 1
 fi
 
 TEMP=$(mktemp -d)
@@ -249,7 +273,7 @@ for MOD in "${MODS[@]}"; do
         echo "  - Verify your Unreal Engine installation through the Epic Games Installer"
       fi
       echo "  - Re-run Scripts/InstallEngineMods.sh"
-      exit 1
+      UNSUCCESSFUL_EXIT 1
     fi
     patch --force --reject-file=- -R -p0 -s -f --ignore-whitespace < "$PATCH_RECORD_PATH/$ROOT/mods_applied.patch" &>/dev/null
   else
@@ -269,15 +293,19 @@ for MOD in "${MODS[@]}"; do
   # Diff modified and vanilla folders, store the result
   cd "$TEMP_VANILLA/$ROOT"
   mkdir -p "$TEMP/TempoMods/$ROOT"
+  # Temporarily disable exit-on-error and error trap
   set +e
+  trap - ERR
   diff -urN --strip-trailing-cr --exclude Binaries --exclude Intermediate . "$TEMP/$ROOT" > "$TEMP/TempoMods/$ROOT/mods_applied.patch"
   DIFF_STATUS=$?
+  # Re-enable exit-on-error and error trap
+  trap 'error_handler $LINENO' ERR
   set -e
   if [ $DIFF_STATUS -eq 0 ]; then
     continue
   elif [ ! $DIFF_STATUS -eq 1 ]; then
     echo "Failed to compute diff for $ROOT (exit code: $DIFF_STATUS)."
-    exit 1
+    UNSUCCESSFUL_EXIT 1
   fi
 
   # If the new mods match the previously-applied ones, and -force is not specified, skip building
@@ -293,14 +321,12 @@ for MOD in "${MODS[@]}"; do
 
   # Rebuild, and recreate the built record if build is successful
   if [ "$TYPE" = "Plugin" ]; then
-    echo "Rebuilding plugin $ROOT with Tempo mods"
     REBUILD_PLUGIN "$TEMP" "$ROOT"
   elif [ "$TYPE" = "UnrealBuildTool" ]; then
-    echo "Rebuilding UnrealBuildTool (in-place) with Tempo mods"
     REBUILD_UBT "$TEMP" "$ROOT"
   else
     echo "Unhandled mod type: $TYPE"
-    exit 1
+    UNSUCCESSFUL_EXIT 1
   fi
 
   # After successful rebuild, copy the applied mods record into the engine
@@ -311,3 +337,5 @@ done
 # Clean up
 rm -rf "$TEMP"
 rm -rf "$TEMP_VANILLA"
+
+echo -e "Tempo/Scripts/InstallEngineMods.sh completed successfully\n"
