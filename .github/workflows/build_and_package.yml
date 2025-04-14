@@ -190,6 +190,7 @@ jobs:
       uses: actions/cache/restore@v4
       with:
         path: |
+          .engine-mods-cache/TempoMods/**
           .engine-mods-cache/Engine/Plugins/Runtime/ZoneGraph/**
           .engine-mods-cache/Engine/Plugins/AI/MassCrowd/**
           .engine-mods-cache/Engine/Source/Programs/UnrealBuildTool/**
@@ -249,6 +250,7 @@ jobs:
     - name: Initialize Engine Mods Cache (if not restored from cache)
       if: ${{ steps.restore_engine_mods_cache.outputs.cache-hit != 'true' }}
       run: |
+        mkdir -p .engine-mods-cache/TempoMods
         mkdir -p .engine-mods-cache/Engine/Plugins/Runtime
         mkdir -p .engine-mods-cache/Engine/Plugins/AI
         mkdir -p .engine-mods-cache/Engine/Source/Programs
@@ -277,6 +279,7 @@ jobs:
     - name: Sync Third Party Dependencies
       run: |
         docker run --rm \
+          -v ${{ github.workspace }}/.engine-mods-cache/TempoMods:/home/ue4/UnrealEngine/TempoMods \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/ZoneGraph:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/ZoneGraph \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/AI/MassCrowd:/home/ue4/UnrealEngine/Engine/Plugins/AI/MassCrowd \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs/UnrealBuildTool:/home/ue4/UnrealEngine/Engine/Source/Programs/UnrealBuildTool \
@@ -289,6 +292,7 @@ jobs:
     - name: Install Engine Mods
       run: |
         docker run --rm \
+          -v ${{ github.workspace }}/.engine-mods-cache/TempoMods:/home/ue4/UnrealEngine/TempoMods \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/ZoneGraph:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/ZoneGraph \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/AI/MassCrowd:/home/ue4/UnrealEngine/Engine/Plugins/AI/MassCrowd \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs/UnrealBuildTool:/home/ue4/UnrealEngine/Engine/Source/Programs/UnrealBuildTool \
@@ -302,6 +306,7 @@ jobs:
       if: ${{ inputs.clean }}
       run: |
         docker run --rm \
+          -v ${{ github.workspace }}/.engine-mods-cache/TempoMods:/home/ue4/UnrealEngine/TempoMods \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/ZoneGraph:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/ZoneGraph \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/AI/MassCrowd:/home/ue4/UnrealEngine/Engine/Plugins/AI/MassCrowd \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs/UnrealBuildTool:/home/ue4/UnrealEngine/Engine/Source/Programs/UnrealBuildTool \
@@ -314,6 +319,7 @@ jobs:
     - name: Build
       run: |
         docker run --rm \
+          -v ${{ github.workspace }}/.engine-mods-cache/TempoMods:/home/ue4/UnrealEngine/TempoMods \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/ZoneGraph:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/ZoneGraph \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/AI/MassCrowd:/home/ue4/UnrealEngine/Engine/Plugins/AI/MassCrowd \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs/UnrealBuildTool:/home/ue4/UnrealEngine/Engine/Source/Programs/UnrealBuildTool \
@@ -337,6 +343,7 @@ jobs:
           PACKAGE_ARGS="$PACKAGE_ARGS -generatepatch -basedonreleaseversion=${{ inputs.release_id }} -basedonreleaseversionbasepath=/home/ue4/${{ inputs.project_root }}/Releases"
         fi
         docker run --rm \
+          -v ${{ github.workspace }}/.engine-mods-cache/TempoMods:/home/ue4/UnrealEngine/TempoMods \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/ZoneGraph:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/ZoneGraph \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/AI/MassCrowd:/home/ue4/UnrealEngine/Engine/Plugins/AI/MassCrowd \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs/UnrealBuildTool:/home/ue4/UnrealEngine/Engine/Source/Programs/UnrealBuildTool \
@@ -352,6 +359,7 @@ jobs:
       if: ${{ inputs.patch }}
       run: |
         docker run --rm \
+          -v ${{ github.workspace }}/.engine-mods-cache/TempoMods:/home/ue4/UnrealEngine/TempoMods \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/ZoneGraph:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/ZoneGraph \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/AI/MassCrowd:/home/ue4/UnrealEngine/Engine/Plugins/AI/MassCrowd \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs/UnrealBuildTool:/home/ue4/UnrealEngine/Engine/Source/Programs/UnrealBuildTool \
@@ -387,6 +395,7 @@ jobs:
       uses: actions/cache/save@v4
       with:
         path: |
+          .engine-mods-cache/TempoMods/**
           .engine-mods-cache/Engine/Plugins/Runtime/ZoneGraph/**
           .engine-mods-cache/Engine/Plugins/AI/MassCrowd/**
           .engine-mods-cache/Engine/Source/Programs/UnrealBuildTool/**
