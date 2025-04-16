@@ -39,6 +39,51 @@ else
 fi
 
 cd "$UNREAL_ENGINE_PATH"
+
+# Starting in 5.5 we noticed an issue where building our custom TempoROS automation step would fail
+# frequently (but not always) when invoked through the package command itself. So we build it
+# manually first, which works consistently.
+
+# Get engine release (e.g. 5.4)
+if [ -f "$UNREAL_ENGINE_PATH/Engine/Intermediate/Build/BuildRules/UE5RulesManifest.json" ]; then
+  RELEASE_WITH_HOTFIX=$(jq -r '.EngineVersion' "$UNREAL_ENGINE_PATH/Engine/Intermediate/Build/BuildRules/UE5RulesManifest.json")
+  RELEASE="${RELEASE_WITH_HOTFIX%.*}"
+fi
+
+# Find dotnet
+if [[ "$OSTYPE" = "msys" ]]; then
+  DOTNET=$(find ./Engine/Binaries/ThirdParty/DotNet -type f -name dotnet.exe)
+elif [[ "$OSTYPE" = "darwin"* ]]; then
+  DOTNETS=$(find ./Engine/Binaries/ThirdParty/DotNet -type f -name dotnet)
+  ARCH=$(arch)
+  if [[ "$ARCH" = "arm64" ]]; then
+    DOTNET=$(echo "${DOTNETS[@]}" | grep -E "mac-arm64/dotnet")
+  elif [[ "$ARCH" = "i386" ]]; then
+    DOTNET=$(echo "${DOTNETS[@]}" | grep -E "mac-x64/dotnet")
+  fi
+elif [[ "$OSTYPE" = "linux-gnu"* ]]; then
+  DOTNETS=$(find ./Engine/Binaries/ThirdParty/DotNet -type f -name dotnet)
+  if [[ "$RELEASE" == "5.4" ]]; then
+    # In UE 5.4 there is only one dotnet on Linux. 5.5 added arm64 support.
+    DOTNET="$DOTNETS"
+  else
+    ARCH=$(arch)
+    if [[ "$ARCH" = "arm64" ]]; then
+      DOTNET=$(echo "${DOTNETS[@]}" | grep -E "linux-arm64/dotnet")
+    elif [[ "$ARCH" = "x86_64" ]]; then
+      DOTNET=$(echo "${DOTNETS[@]}" | grep -E "linux-x64/dotnet")
+    fi
+  fi
+fi
+
+if [ -z ${DOTNET+x} ]; then
+  echo -e "Unable to package. Couldn't find dotnet.\n"
+  exit 1
+fi
+
+eval "$DOTNET" build "$PROJECT_ROOT/Plugins/Tempo/TempoROS/Scripts/TempoROS.Automation.csproj"
+
+cd "$UNREAL_ENGINE_PATH"
 if [ "$HOST_PLATFORM" = "Win64" ]; then
   ./Engine/Build/BatchFiles/RunUAT.bat Turnkey -command=VerifySdk -platform=$TARGET_PLATFORM -UpdateIfNeeded -project="$PROJECT_ROOT/$PROJECT_NAME.uproject" BuildCookRun -nop4 -utf8output -nocompileeditor \
   -skipbuildeditor -cook -target="$PROJECT_NAME" -unrealexe="UnrealEditor-Cmd.exe" -platform=$TARGET_PLATFORM -project="$PROJECT_ROOT/$PROJECT_NAME.uproject" -installed -stage -package -pak \

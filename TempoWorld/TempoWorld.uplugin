@@ -40,10 +40,6 @@
 			"Enabled": true
 		},
 		{
-			"Name": "PCG",
-			"Enabled": true
-		},
-		{
 			"Name": "TempoCore",
 			"Enabled": true
 		},

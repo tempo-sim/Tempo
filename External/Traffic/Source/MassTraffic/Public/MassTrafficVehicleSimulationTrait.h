@@ -65,7 +65,7 @@ struct MASSTRAFFIC_API FMassTrafficVehicleSimulationParameters : public FMassCon
 };
 
 USTRUCT()
-struct MASSTRAFFIC_API FMassTrafficVehiclePhysicsParameters : public FMassSharedFragment
+struct MASSTRAFFIC_API FMassTrafficVehiclePhysicsParameters : public FMassConstSharedFragment
 {
 	GENERATED_BODY()
 
