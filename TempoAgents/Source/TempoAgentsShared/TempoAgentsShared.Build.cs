@@ -33,7 +33,6 @@ public class TempoAgentsShared : ModuleRules
                 "MassActors",
                 "MassSpawner",
                 "MassCommon",
-                "StructUtils",
                 "RHI",
                 // For overriden "stand" state
                 "MassMovement",
@@ -48,5 +47,11 @@ public class TempoAgentsShared : ModuleRules
                 "TempoCoreShared",
             }
         );
+        
+        // StructUtils plugin was deprecated in 5.5 and moved into CoreUObject
+        if (Target.Version.MajorVersion == 5 && Target.Version.MinorVersion < 5)
+        {
+            PrivateDependencyModuleNames.Add("StructUtils");
+        }
     }
 }

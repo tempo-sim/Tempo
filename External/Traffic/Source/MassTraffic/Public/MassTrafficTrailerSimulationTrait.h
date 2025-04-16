@@ -37,7 +37,7 @@ struct MASSTRAFFIC_API FMassTrafficTrailerConstraintSettings
 };
 
 USTRUCT()
-struct MASSTRAFFIC_API FMassTrafficTrailerSimulationParameters : public FMassSharedFragment
+struct MASSTRAFFIC_API FMassTrafficTrailerSimulationParameters : public FMassConstSharedFragment
 {
 	GENERATED_BODY()
 	

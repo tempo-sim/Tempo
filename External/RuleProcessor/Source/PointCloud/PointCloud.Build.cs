@@ -18,8 +18,13 @@ namespace UnrealBuildTool.Rules
 					"CoreUObject",
 					"GeometryCollectionEngine",
 					"SQLiteCore",
-					"StructUtils"
 				});
+
+			// StructUtils plugin was deprecated in 5.5 and moved into CoreUObject
+			if (Target.Version.MajorVersion == 5 && Target.Version.MinorVersion < 5)
+			{
+				PublicDependencyModuleNames.Add("StructUtils");
+			}
 
 			if (Target.bBuildEditor)
 			{

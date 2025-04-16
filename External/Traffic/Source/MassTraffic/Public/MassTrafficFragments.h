@@ -1116,7 +1116,7 @@ struct MASSTRAFFIC_API FMassTrafficAngularVelocityFragment : public FMassFragmen
 
 
 USTRUCT()
-struct MASSTRAFFIC_API FMassTrafficVehiclePhysicsSharedParameters : public FMassSharedFragment
+struct MASSTRAFFIC_API FMassTrafficVehiclePhysicsSharedParameters : public FMassConstSharedFragment
 {
 	GENERATED_BODY()
 
