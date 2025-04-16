@@ -184,6 +184,12 @@ GEN_MODULE_PROTOS() {
 
 echo "Generating protobuf code..."
 
+# Get engine release (e.g. 5.4)
+if [ -f "$UNREAL_ENGINE_PATH/Engine/Intermediate/Build/BuildRules/UE5RulesManifest.json" ]; then
+  RELEASE_WITH_HOTFIX=$(jq -r '.EngineVersion' "$UNREAL_ENGINE_PATH/Engine/Intermediate/Build/BuildRules/UE5RulesManifest.json")
+  RELEASE="${RELEASE_WITH_HOTFIX%.*}"
+fi
+
 # Find dotnet
 cd "$ENGINE_DIR"
 if [[ "$OSTYPE" = "msys" ]]; then
@@ -197,7 +203,18 @@ elif [[ "$OSTYPE" = "darwin"* ]]; then
     DOTNET=$(echo "${DOTNETS[@]}" | grep -E "mac-x64/dotnet")
   fi
 elif [[ "$OSTYPE" = "linux-gnu"* ]]; then
-  DOTNET=$(find ./Binaries/ThirdParty/DotNet -type f -name dotnet)
+  DOTNETS=$(find ./Binaries/ThirdParty/DotNet -type f -name dotnet)
+  if [[ "$RELEASE" == "5.4" ]]; then
+    # In UE 5.4 there is only one dotnet on Linux. 5.5 added arm64 support.
+    DOTNET="$DOTNETS"
+  else
+    ARCH=$(arch)
+    if [[ "$ARCH" = "arm64" ]]; then
+      DOTNET=$(echo "${DOTNETS[@]}" | grep -E "linux-arm64/dotnet")
+    elif [[ "$ARCH" = "x86_64" ]]; then
+      DOTNET=$(echo "${DOTNETS[@]}" | grep -E "linux-x64/dotnet")
+    fi
+  fi
 fi
 
 if [ -z ${DOTNET+x} ]; then

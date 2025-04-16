@@ -78,7 +78,7 @@ void UTempoMapQueryServiceSubsystem::GetLaneData(const LaneDataRequest& Request,
 		AllTags.Add(TagInfo.Name.ToString().ToLower(), TagInfo.Tag);
 	}
 
-	auto BuildTagMask = [&AllTags] (const google::protobuf::RepeatedPtrField<std::string>& RequestedTags)
+	auto BuildTagMask = [&AllTags] (const google::protobuf_tempo::RepeatedPtrField<std::string>& RequestedTags)
 	{
 		FZoneGraphTagMask Mask;
 		for (const std::string& RequestedTag : RequestedTags)

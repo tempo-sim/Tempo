@@ -12,7 +12,7 @@
 #include "MassTrafficVehicleSimulationTrait.generated.h"
 
 USTRUCT()
-struct MASSTRAFFIC_API FMassTrafficVehicleSimulationParameters : public FMassSharedFragment
+struct MASSTRAFFIC_API FMassTrafficVehicleSimulationParameters : public FMassConstSharedFragment
 {
 	GENERATED_BODY()
 	
@@ -65,7 +65,7 @@ struct MASSTRAFFIC_API FMassTrafficVehicleSimulationParameters : public FMassSha
 };
 
 USTRUCT()
-struct MASSTRAFFIC_API FMassTrafficVehiclePhysicsParameters : public FMassSharedFragment
+struct MASSTRAFFIC_API FMassTrafficVehiclePhysicsParameters : public FMassConstSharedFragment
 {
 	GENERATED_BODY()
 

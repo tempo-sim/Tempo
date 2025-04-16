@@ -28,11 +28,16 @@ public class TempoWorld : TempoModuleRules
                 "MassActors",
                 "MassEntity",
                 "MassTraffic",
-                "StructUtils",
                 // Tempo
                 "TempoCore",
                 "TempoMovementShared",
             }
         );
+
+        // StructUtils plugin was deprecated in 5.5 and moved into CoreUObject
+        if (Target.Version.MajorVersion == 5 && Target.Version.MinorVersion < 5)
+        {
+            PrivateDependencyModuleNames.Add("StructUtils");
+        }
     }
 }
