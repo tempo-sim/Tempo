@@ -1,0 +1,14 @@
+--- ToolChain/TempoLinuxToolChain.cs	2025-04-14 11:00:34
++++ TempoLinuxToolChain.cs	2025-04-14 11:01:16
+@@ -25,7 +25,10 @@
+     class TempoLinuxToolChain : LinuxToolChain
+     {
+         public TempoLinuxToolChain(ReadOnlyTargetRules Target, ILogger Logger)
+-            : this(Target.Architecture, UEBuildPlatform.GetSDK(UnrealTargetPlatform.Linux) as LinuxPlatformSDK, TempoLinuxToolChainClangOptions(Target), Logger)
++            : this(Target.Architecture,
++                UEBuildPlatform.GetSDK(UnrealTargetPlatform.Linux) as LinuxPlatformSDK ?? throw new System.Exception("Linux SDK not found"),
++                TempoLinuxToolChainClangOptions(Target),
++                Logger)
+         {
+
+         }

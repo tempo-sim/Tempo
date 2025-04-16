@@ -11,7 +11,8 @@
       ],
       "Patch": [
         "Configuration/UEBuildTarget.cs.patch.1",
-        "Platform/Linux/LinuxToolChain.cs.patch.1"
+        "Platform/Linux/LinuxToolChain.cs.patch.1",
+        "ToolChain/TempoLinuxToolChain.cs.patch.1"
       ]
     },
     {
