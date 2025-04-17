@@ -3,7 +3,17 @@
 #include "TempoCoreSettings.h"
 
 UTempoCoreSettings::UTempoCoreSettings()
-	: bRenderMainViewport(!FParse::Param(FCommandLine::Get() , TEXT("RenderOffScreen"))) {}
+	: bRenderMainViewport(!FParse::Param(FCommandLine::Get() , TEXT("RenderOffScreen")))
+{
+	CategoryName = TEXT("Tempo");
+}
+
+#if WITH_EDITOR
+FText UTempoCoreSettings::GetSectionText() const
+{
+	return FText::FromString(FString(TEXT("Core")));
+}
+#endif
 
 void UTempoCoreSettings::PostInitProperties()
 {
