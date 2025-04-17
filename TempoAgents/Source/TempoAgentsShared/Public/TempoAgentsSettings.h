@@ -5,12 +5,13 @@
 #include "CoreMinimal.h"
 #include "TempoAgentsSettings.generated.h"
 
-UCLASS(Config = Game, DefaultConfig, DisplayName = "Tempo Agents")
+UCLASS(Config=Plugins, DefaultConfig, DisplayName = "Agents")
 class TEMPOAGENTSSHARED_API UTempoAgentsSettings : public UDeveloperSettings
 {
 	GENERATED_BODY()
 	
 public:
+	UTempoAgentsSettings();
 
 	float GetMaxThroughRoadAngleDegrees() const { return MaxThroughRoadAngleDegrees; }
 	

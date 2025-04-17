@@ -11,12 +11,14 @@
 
 DECLARE_MULTICAST_DELEGATE(FTempoCoreTimeSettingsChanged);
 
-UCLASS(Config=Game)
+UCLASS(Config=Plugins, DefaultConfig, DisplayName="Core")
 class TEMPOCORESHARED_API UTempoCoreSettings : public UDeveloperSettings
 {
 	GENERATED_BODY()
 
 public:
+	UTempoCoreSettings();
+
 	// Allow command-line overrides
 	virtual void PostInitProperties() override;
 	

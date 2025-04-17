@@ -12,7 +12,7 @@
 /**
  * The base Tempo World Settings
  */
-UCLASS()
+UCLASS(Config=Plugins, DefaultConfig, DisplayName="World")
 class TEMPOCORE_API ATempoWorldSettings : public ATempoTimeWorldSettings
 {
 	GENERATED_BODY()

@@ -7,12 +7,14 @@
 
 #include "TempoSensorsSettings.generated.h"
 
-UCLASS(Config=Game)
+UCLASS(Config=Plugins, DefaultConfig, DisplayName="Sensors")
 class TEMPOSENSORSSHARED_API UTempoSensorsSettings : public UDeveloperSettings
 {
 	GENERATED_BODY()
 
 public:
+	UTempoSensorsSettings();
+
 	// Labels
 	TObjectPtr<UDataTable> GetSemanticLabelTable() const { return SemanticLabelTable.LoadSynchronous(); }
 

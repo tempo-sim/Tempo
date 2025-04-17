@@ -2,6 +2,11 @@
 
 #include "TempoCoreSettings.h"
 
+UTempoCoreSettings::UTempoCoreSettings()
+{
+	CategoryName = TEXT("Tempo");
+}
+
 void UTempoCoreSettings::PostInitProperties()
 {
 	Super::PostInitProperties();
