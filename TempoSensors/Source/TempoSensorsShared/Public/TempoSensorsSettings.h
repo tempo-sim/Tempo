@@ -7,12 +7,21 @@
 
 #include "TempoSensorsSettings.generated.h"
 
-UCLASS(Config=Game)
+/**
+ * TempoSensors Plugin Settings.
+ */
+UCLASS(Config=Plugins, DefaultConfig)
 class TEMPOSENSORSSHARED_API UTempoSensorsSettings : public UDeveloperSettings
 {
 	GENERATED_BODY()
 
 public:
+	UTempoSensorsSettings();
+
+#if WITH_EDITOR
+	virtual FText GetSectionText() const override;
+#endif
+
 	// Labels
 	TObjectPtr<UDataTable> GetSemanticLabelTable() const { return SemanticLabelTable.LoadSynchronous(); }
 

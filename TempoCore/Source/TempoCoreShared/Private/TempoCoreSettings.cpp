@@ -2,6 +2,18 @@
 
 #include "TempoCoreSettings.h"
 
+UTempoCoreSettings::UTempoCoreSettings()
+{
+	CategoryName = TEXT("Tempo");
+}
+
+#if WITH_EDITOR
+FText UTempoCoreSettings::GetSectionText() const
+{
+	return FText::FromString(FString(TEXT("Core")));
+}
+#endif
+
 void UTempoCoreSettings::PostInitProperties()
 {
 	Super::PostInitProperties();
