@@ -11,12 +11,21 @@
 
 DECLARE_MULTICAST_DELEGATE(FTempoCoreTimeSettingsChanged);
 
-UCLASS(Config=Game)
+/**
+ * TempoCore Plugin Settings.
+ */
+UCLASS(Config=Plugins, DefaultConfig)
 class TEMPOCORESHARED_API UTempoCoreSettings : public UDeveloperSettings
 {
 	GENERATED_BODY()
 
 public:
+	UTempoCoreSettings();
+
+#if WITH_EDITOR
+	virtual FText GetSectionText() const override;
+#endif
+
 	// Allow command-line overrides
 	virtual void PostInitProperties() override;
 	
