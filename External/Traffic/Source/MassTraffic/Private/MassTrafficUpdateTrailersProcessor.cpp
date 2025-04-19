@@ -75,9 +75,9 @@ void UMassTrafficUpdateTrailersProcessor::Execute(FMassEntityManager& EntityMana
 					// Add simulation fragment
 					if (SimpleVehiclePhysicsFragments.IsEmpty())
 					{
-						if (PhysicsParams.Template)
+						if (PhysicsParams.IsValid())
 						{
-							Context.Defer().PushCommand<FMassCommandAddFragmentInstances>(Context.GetEntity(EntityIndex), PhysicsParams.Template->SimpleVehiclePhysicsFragmentTemplate);
+							Context.Defer().PushCommand<FMassCommandAddFragmentInstances>(Context.GetEntity(EntityIndex), PhysicsParams.SimpleVehiclePhysicsFragmentTemplate);
 						}
 					}
 				}
