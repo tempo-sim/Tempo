@@ -1121,7 +1121,19 @@ struct MASSTRAFFIC_API FMassTrafficVehiclePhysicsSharedParameters : public FMass
 	GENERATED_BODY()
 
 	FMassTrafficVehiclePhysicsSharedParameters() = default;
-	FMassTrafficVehiclePhysicsSharedParameters(const FMassTrafficSimpleVehiclePhysicsTemplate* InTemplate) : Template(InTemplate) {} 
+	FMassTrafficVehiclePhysicsSharedParameters(const FMassTrafficSimpleVehiclePhysicsTemplate* InTemplate)
+		: PhysicsVehicleTemplateActor(InTemplate->PhysicsVehicleTemplateActor),
+		  SimpleVehiclePhysicsConfig(InTemplate->SimpleVehiclePhysicsConfig),
+		  SimpleVehiclePhysicsFragmentTemplate(InTemplate->SimpleVehiclePhysicsFragmentTemplate) {}
 
-	const FMassTrafficSimpleVehiclePhysicsTemplate* Template = nullptr;
+	bool IsValid() const { return PhysicsVehicleTemplateActor.Get() != nullptr; }
+
+	UPROPERTY()
+	TSubclassOf<AWheeledVehiclePawn> PhysicsVehicleTemplateActor;
+
+	UPROPERTY()
+	FMassTrafficSimpleVehiclePhysicsConfig SimpleVehiclePhysicsConfig;
+
+	UPROPERTY()
+	FMassTrafficVehiclePhysicsFragment SimpleVehiclePhysicsFragmentTemplate;
 };
