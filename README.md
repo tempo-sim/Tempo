@@ -1,71 +1,95 @@
 # Tempo
-The Tempo Unreal Engine plugins. The Tempo plugins are a set of modular building blocks for creating simulation applications with Unreal Engine.
+Tempo is a collection of plugins for building simulation applications with Unreal Engine. It makes power of Unreal accessible to simulation and robotics developers.
 
-Creating a single simulator product that can handle any domain is a daunting challenge. But different simulators still share a lot of fundamental pieces. Tempo is the foundation on which you can build your own simulator for your unique application. Not sure where to start? Want some guidance from the authors? Visit us at [temposimulation.com](https://temposimulation.com).
+Tempo is the foundation on which you can build your own custom simulator for your unique application. Not sure where to start? Want some guidance from the authors? Feel free to [reach out](https://www.temposimulation.com/contact).
 
-Tempo is a collection of Unreal Engine plugins and is intended to be a submodule of an Unreal project, within the `Plugins` directory.
-
-## Supported Platforms
-- Ubuntu 22.04
-- MacOS 13.0 (Ventura) or newer, Apple silicon only
-- Windows 10 and 11
+## Compatibility
+- Linux (Ubuntu 22.04 and 24.04), MacOS (13.0 "Ventura" or newer, Apple silicon only), Windows 10 and 11
+- Unreal Engine 5.4 and 5.5
 
 ## Prerequisites
-You will need the following:
-- Unreal Engine 5.4 installed through the Epic Games Launcher (or downloaded from [here](https://www.unrealengine.com/en-US/linux) on Linux).
-- `python(>=3.9)` and `pip`
-- `jq` and `curl`
-- (optional, only if cross compiling for Linux from Windows) [Linux Cross-Compile Toolchain](https://dev.epicgames.com/documentation/en-us/unreal-engine/linux-development-requirements-for-unreal-engine?application_version=5.4)
-> [!Note]
-> On Windows we recommend installing Python through the Microsoft Store since it will also install `pip`, set up the `python` and `python3` aliases correctly, and add everything to your `PATH`. Note that you can install a specific Python version through the Microsoft Store by searching for it.
+- Linux:
+  - Unreal: Download and install from https://www.unrealengine.com/en-US/linux
+  - `curl`: `sudo apt update && sudo apt install curl`
+  - `jq`: `sudo apt update && sudo apt install jq` 
+- Mac:
+  - Unreal: Install using Epic Games Launcher
+  - `jq`: `brew install jq`
+- Windows:
+  - Unreal: Install using Epic Games Launcher
+  - [Git Bash](https://gitforwindows.org/) (Run all Tempo `*.sh` scripts from Git Bash)
+  - `jq`: (Use Admininistrator Git Bash) `curl -L -o /usr/bin/jq.exe https://github.com/jqlang/jq/releases/latest/download/jq-win64.exe`
 
 ## Environment Variables
 - `UNREAL_ENGINE_PATH`: Your Unreal Engine installation directory (the folder containing `Engine`)
-  - On Mac Epic Games Launcher will install to `/Users/Shared/Epic Games/UE_5.4`
-  - On Windows Epic Games Launcher will install to `C:\Program Files\Epic Games\UE_5.4`
-  - On Linux you choose where to install. `~/UE_5.4` is recommended.
-- (Optional, Windows only) `LINUX_MULTIARCH_ROOT`: The extracted toolchain directory (for example `C:\UnrealToolchains\v22_clang-16.0.6-centos7`)
+  - On Linux, unzip where you like, for example `~/UE_5.5`
+  - The Mac default is `/Users/Shared/Epic Games/UE_5.5`
+  - On Windows the default is `C:\Program Files\Epic Games\UE_5.5`
 
 ## Getting Started
 ### TempoSample
-The [TempoSample](https://github.com/tempo-sim/TempoSample) project is provided as a reference for recommended settings, convenient scripts, code examples, and project organization. If you are starting from scratch, you might consider creating your repo using `TempoSample` as a "template" repo, and renaming the project.
+The [TempoSample](https://github.com/tempo-sim/TempoSample) project is provided as a reference. If you are starting a new project, consider creating your repo using `TempoSample` as a [template](https://docs.github.com/en/repositories/creating-and-managing-repositories/creating-a-repository-from-a-template), and renaming the project with [Scripts/Rename.sh](https://github.com/tempo-sim/TempoSample/blob/main/Scripts/Rename.sh).
 
 ### Clone Tempo
 From your project's Plugins directory:<br />
-`git submodule add https://github.com/tempo-sim/Tempo.git`<br />
-`git submodule update --init --recursive`
+```
+git submodule add https://github.com/tempo-sim/Tempo.git
+git submodule update --init --recursive
+```
 
 ### Project Changes
-The Tempo plugins require one change to a vanilla Unreal Engine project to work properly:
-- Your project's `*.Target.cs` files must use the Tempo UnrealBuildTool toolchain for your platform. See [TempoSample.Target.cs](https://github.com/tempo-sim/TempoSample/blob/main/Source/TempoSample.Target.cs) and [TempoSampleEditor.Target.cs](https://github.com/tempo-sim/TempoSample/blob/main/Source/TempoSampleEditor.Target.cs) for examples.
+Tempo requires one change to a vanilla Unreal Engine project to build:
+- Your project's `*.Target.cs` files must use the Tempo UnrealBuildTool toolchain for your platform, as in [TempoSample.Target.cs](https://github.com/tempo-sim/TempoSample/blob/main/Source/TempoSample.Target.cs) and [TempoSampleEditor.Target.cs](https://github.com/tempo-sim/TempoSample/blob/main/Source/TempoSampleEditor.Target.cs).
 
-### First-Time Setup
+### One-Time Setup
 Run the `Setup.sh` script (from the `Tempo` root) once. This script will:
-- Install the Tempo Unreal Engine mods (we make some small changes to your installed Engine in-place to avoid distributing a custom engine build)
-- Install third party dependencies
+- Install the Tempo Unreal Engine mods (we make some changes to your installed Engine in-place to avoid distributing a custom engine build)
+- Download third party dependencies
 - Add git hooks to keep both of the above in sync automatically as you check out different Tempo commits
-> [!Note]
-> If you run `Setup.sh` again it shouldn't do anything, because it can tell it's already run. If something goes wrong you can force it to run again with the `-force` flag.
 
-## Using Tempo
-### Building, Running, and Packaging
-Use `Scripts/Build.sh` to build the project, `Scripts/Run.sh` to run Unreal Editor with the project, and `Scripts/Package.sh` to package the project into a standalone binary.
+### Build and Run
+Use the included `Scripts/Build.sh` and `Scripts/Run.sh` to build your project and open it in Unreal Editor.
 
-### Configuring
-Tempo has a number of user-configurable settings. The [TempoSample](https://github.com/tempo-sim/TempoSample) project has our recommended settings. These can be edited through the Unreal Editor project settings and are stored in config files with an "ini" extension. Settings can also be changed in the packaged binary.
-> [!Warning]
-> Config ini files can not be edited while the packaged binary is running or the project is open in Unreal Editor.
+### Hello World
 
-### Debugging
-Unreal projects write logs while running. These are a great starting point for debugging.
-When running in Unreal Editor you can see the logs in the [Output Log](https://dev.epicgames.com/documentation/en-us/unreal-engine/logging-in-unreal-engine) window.
-The packaged binary will write logs to `<packaged_game_root>/ProjectName/Saved/Logs`
+During the build step we generated a `tempo` Python package and virtual environment. With your Tempo project open in Unreal Editor, from the root of your project:
+1. Activate the Tempo virtual environment (`source ./TempoEnv/bin/activate` on Linux & Mac, or `source ./TempoEnv/Scripts/activate` on Windows)
+2. Start the Python interpreter (`python` on Linux & Mac, or `winpty python` on Windows) and use the Tempo API to start the simulation:
+```
+import tempo.tempo_core_editor as tce
+tce.play_in_editor() # PIE should begin
+```
+3. Use TempoWorld to add an Actor to your scene:
+```
+import tempo.tempo_world as tw
+tw.spawn_actor(type="BP_SensorRig") # An Actor with a tripod mesh and a TempoCamera on top should appear
+```
+4. From another terminal, run the included [SensorPlayground](https://github.com/tempo-sim/Tempo/blob/main/ExampleClients/SensorPlayground.py) example client: `python ./ExampleClients/SensorPlayground.py`
+5. Use the SensorPlayground client to start streaming color images from the `TempoCamera`
+6. While streaming images, from the Python interpreter again, use TempoWorld to change one of the Camera's properties:
+```
+tw.set_float_property(actor="BP_SensorRig", component="TempoCamera", property="FOVAngle", value=60.0) # FOV of your streaming image should decrease
+```
+7. Lastly, use TempoTime to pause, resume, and step the simulation:
+```
+import tempo.tempo_time as tt
+import TempoTime.Time_pb2 as Time
+tt.pause() # Time should pause
+tt.play() # Time should resume
+tt.set_time_mode(Time.FIXED_STEP) # Time mode should switch to Fixed Step, simulation should run faster than real-time
+tt.step() # Time should advance to the nearest whole number of fixed time steps (0.1 seconds by default)
+tt.step() # Time should advance one step. You should get one new camera image every step.
+```
+Congratulations, you are officially up and running! Continue experimenting with Tempo by creating new scenes, streaming sensor data, and varying the many properties of your simulation at runtime.
 
-### Continuous Integration
-If you would like to set up a GitHub actions pipeline to build, package, or release your Tempo Unreal project you should use the `build_and_package` reusable workflow in `.github/workflows`. The workflow has a number of configurable inputs, but for a typical Unreal Tempo project the defaults should work fine. [TempoSample](https://github.com/tempo-sim/TempoSample)'s `tempo_sample_build_and_package` workflow is a good example.
+### Package
+Use the included `Scripts/Package.sh` to package your project into a standalone binary, which you can then run from the `Packaged` folder.
+
+## Continuous Integration
+If you would like to set up a GitHub actions pipeline to build, package, run, and/or release your Tempo project, check out the `build_and_package` reusable workflow in [.github/workflows](https://github.com/tempo-sim/Tempo/tree/main/.github/workflows). `TempoSample`'s [tempo_sample_build_and_package](https://github.com/tempo-sim/TempoSample/blob/main/.github/workflows/tempo_sample_build_and_package.yml) workflow is a good reference.
 
 ## Giving Back
-Want to contribute to Tempo? Feel free to send us an issue or open a pull request.
+Want to contribute to Tempo? Feel free to send us an issue or open a pull request from your fork.
 
 ## Going Deeper
 You can learn about the individual tempo plugins in their respective READMEs:<br />
