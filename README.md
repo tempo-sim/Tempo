@@ -1,7 +1,7 @@
 # Tempo
-Tempo is a collection of plugins for building simulation applications with Unreal Engine. It makes power of Unreal accessible to simulation and robotics developers.
+Tempo is a collection of simulation-focused plugins for Unreal Engine. Tempo makes the power of Unreal accessible to simulation and robotics developers, including plugins for scripting, sensor simulation, agent behaviors, and more.
 
-Tempo is the foundation on which you can build your own custom simulator for your unique application. Not sure where to start? Want some guidance from the authors? Feel free to [reach out](https://www.temposimulation.com/contact).
+Tempo is the foundation on which you can build a simulator for your unique application. Not sure where to start? Want some guidance from the authors? Feel free to [reach out](https://www.temposimulation.com/contact).
 
 ## Compatibility
 - Linux (Ubuntu 22.04 and 24.04), MacOS (13.0 "Ventura" or newer, Apple silicon only), Windows 10 and 11
@@ -51,26 +51,25 @@ Run the `Setup.sh` script (from the `Tempo` root) once. This script will:
 Use the included `Scripts/Build.sh` and `Scripts/Run.sh` to build your project and open it in Unreal Editor.
 
 ### Hello World
-
-During the build step we generated a `tempo` Python package and virtual environment. With your Tempo project open in Unreal Editor, from the root of your project:
-1. Activate the Tempo virtual environment (`source ./TempoEnv/bin/activate` on Linux & Mac, or `source ./TempoEnv/Scripts/activate` on Windows)
+> [!NOTE]
+> You don't have to install any Python package or dependences to use Tempo. The build step automatically generated a `tempo` Python package and virtual environment, which will be used below.
+1. With your Tempo project open in Unreal Editor, from the root of your project, activate the Tempo virtual environment (`source ./TempoEnv/bin/activate` on Linux & Mac, or `source ./TempoEnv/Scripts/activate` on Windows)
 2. Start the Python interpreter (`python` on Linux & Mac, or `winpty python` on Windows) and use the Tempo API to start the simulation:
 ```
 import tempo.tempo_core_editor as tce
-tce.play_in_editor() # PIE should begin
+tce.play_in_editor() # Simulation should begin
 ```
 3. Use TempoWorld to add an Actor to your scene:
 ```
 import tempo.tempo_world as tw
-tw.spawn_actor(type="BP_SensorRig") # An Actor with a tripod mesh and a TempoCamera on top should appear
+tw.spawn_actor(type="BP_SensorRig") # An Actor with a tripod mesh should appear. It has a TempoCamera on top (although it may not be visible).
 ```
-4. From another terminal, run the included [SensorPlayground](https://github.com/tempo-sim/Tempo/blob/main/ExampleClients/SensorPlayground.py) example client: `python ./ExampleClients/SensorPlayground.py`
-5. Use the SensorPlayground client to start streaming color images from the `TempoCamera`
-6. While streaming images, from the Python interpreter again, use TempoWorld to change one of the Camera's properties:
+4. From another terminal, run the included [SensorPlayground](https://github.com/tempo-sim/Tempo/blob/main/ExampleClients/SensorPlayground.py) example client: `python ./ExampleClients/SensorPlayground.py`. Use it to start streaming color images from the `TempoCamera`
+5. While streaming images, from the Python interpreter again, use TempoWorld to change one of the Camera's properties:
 ```
-tw.set_float_property(actor="BP_SensorRig", component="TempoCamera", property="FOVAngle", value=60.0) # FOV of your streaming image should decrease
+tw.set_float_property(actor="BP_SensorRig", component="TempoCamera", property="FOVAngle", value=60.0) # The field of view of your streaming images should decrease
 ```
-7. Lastly, use TempoTime to pause, resume, and step the simulation:
+6. Lastly, use TempoTime to pause, resume, and step the simulation:
 ```
 import tempo.tempo_time as tt
 import TempoTime.Time_pb2 as Time
