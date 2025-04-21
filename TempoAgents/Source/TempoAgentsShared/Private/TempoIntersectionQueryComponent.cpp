@@ -150,7 +150,7 @@ bool UTempoIntersectionQueryComponent::TryGetIntersectionEntranceRightVector(con
 }
 
 bool UTempoIntersectionQueryComponent::ShouldFilterLaneConnection(const AActor* SourceConnectionActor, const TArray<FTempoLaneConnectionInfo>& SourceLaneConnectionInfos, const int32 SourceLaneConnectionQueryIndex,
-																 const AActor* DestConnectionActor, const TArray<FTempoLaneConnectionInfo>& DestLaneConnectionInfos, const int32 DestLaneConnectionQueryIndex) const
+																 const AActor* DestConnectionActor, const TArray<FTempoLaneConnectionInfo>& DestLaneConnectionInfos, const int32 DestLaneConnectionQueryIndex, const TArray<FLaneConnectionCandidate>& AllCandidates) const
 {
 	if (!IsConnectedRoadActor(SourceConnectionActor))
 	{
@@ -166,88 +166,232 @@ bool UTempoIntersectionQueryComponent::ShouldFilterLaneConnection(const AActor* 
 		return false;
 	}
 
-	const UZoneGraphSettings* ZoneGraphSettings = GetDefault<UZoneGraphSettings>();
+	const FTempoLaneConnectionInfo& SourceLaneConnectionInfo = SourceLaneConnectionInfos[SourceLaneConnectionQueryIndex];
 
-	if (ZoneGraphSettings == nullptr)
+	const TempoZoneGraphTagMaskGroups SourceZoneGraphTagMaskGroups = GroupLaneConnectionsByTags(SourceLaneConnectionInfos);
+
+	const FZoneGraphTagMask SourceTagMask = SourceLaneConnectionInfo.LaneDesc.Tags;
+
+	if (SourceTagMask.GetValue() == 0)
 	{
-		UE_LOG(LogTempoAgentsShared, Error, TEXT("Lane Filtering - ShouldFilterLaneConnection - Can't access ZoneGraphSettings."));
+		return true;
+	}
+
+	FZoneGraphTagMask SourceMatchingTagGroupMask;
+	const TempoZoneGraphTagMaskGroups SourceMatchingTagGroups = SourceZoneGraphTagMaskGroups.FilterByPredicate([&SourceTagMask, &SourceMatchingTagGroupMask](const auto& TagGroup)
+	{
+		if (TagGroup.Key.CompareMasks(SourceTagMask, EZoneLaneTagMaskComparison::Any))
+		{
+			SourceMatchingTagGroupMask = TagGroup.Key;
+			return true;
+		}
+		return false;
+	});
+
+
+	if (SourceZoneGraphTagMaskGroups.IsEmpty())
+	{
+		UE_LOG(LogTempoAgentsShared, Error, TEXT("Lane Filtering - ShouldFilterLaneConnection - Connection tag filter not found in any tag group for SourceConnectionActor (%s)."), *SourceConnectionActor->GetName());
 		return false;
 	}
-	
-	const FZoneGraphBuildSettings& BuildSettings = ZoneGraphSettings->GetBuildSettings();
-	const float TurnThresholdAngleCos = FMath::Cos(FMath::DegreesToRadians(BuildSettings.TurnThresholdAngle));
 
-	const FTempoLaneConnectionInfo& SourceLaneConnectionInfo = SourceLaneConnectionInfos[SourceLaneConnectionQueryIndex];
-	const FTempoLaneConnectionInfo& DestLaneConnectionInfo = DestLaneConnectionInfos[DestLaneConnectionQueryIndex];
-
-	const FVector DirToDest = (DestLaneConnectionInfo.Position - SourceLaneConnectionInfo.Position).GetSafeNormal();
-	const FVector SourceLaneRight = -FVector::CrossProduct(SourceLaneConnectionInfo.Forward, SourceLaneConnectionInfo.Up);
-	
-	const bool bIsTurning = FVector::DotProduct(SourceLaneConnectionInfo.Forward, DirToDest) < TurnThresholdAngleCos;
-	if (bIsTurning)
+	if (SourceMatchingTagGroups.Num() > 1)
 	{
-		const bool bIsRightTurn = FVector::DotProduct(DirToDest, SourceLaneRight) > 0.0f;
-		const bool bIsLeftTurn = !bIsRightTurn;
+		UE_LOG(LogTempoAgentsShared, Error, TEXT("Lane Filtering - ShouldFilterLaneConnection - Connection tag filter found in more than one tag group for SourceConnectionActor (%s)."), *SourceConnectionActor->GetName());
+		return false;
+	}
 
-		TempoZoneGraphTagMaskGroups ZoneGraphTagMaskGroups = GroupLaneConnectionsByTags(SourceConnectionActor, SourceLaneConnectionInfos, DestLaneConnectionInfos);
+	const TArray<FTempoLaneConnectionInfo>& TagFilteredSourceLaneConnectionInfos = SourceZoneGraphTagMaskGroups[SourceMatchingTagGroupMask];
 
-		const FZoneGraphTagMask SourceTagMask = SourceLaneConnectionInfo.LaneDesc.Tags;
+	// If our source "lane tag group" doesn't have any potential connections, we filter this candidate connection.
+	if (TagFilteredSourceLaneConnectionInfos.IsEmpty())
+	{
+		return true;
+	}
 
-		if (SourceTagMask.GetValue() == 0)
+	int32 MinFilteredSourceLaneIndex = -1;
+	if (!TryGetMinLaneIndexInLaneConnections(TagFilteredSourceLaneConnectionInfos, MinFilteredSourceLaneIndex))
+	{
+		UE_LOG(LogTempoAgentsShared, Error, TEXT("Lane Filtering - ShouldFilterLaneConnection - Could not get min lane index in lane connections for SourceConnectionActor (%s)."), *SourceConnectionActor->GetName());
+		return false;
+	}
+
+	int32 MaxFilteredSourceLaneIndex = -1;
+	if (!TryGetMaxLaneIndexInLaneConnections(TagFilteredSourceLaneConnectionInfos, MaxFilteredSourceLaneIndex))
+	{
+		UE_LOG(LogTempoAgentsShared, Error, TEXT("Lane Filtering - ShouldFilterLaneConnection - Could not get max lane index in lane connections for SourceConnectionActor (%s)."), *SourceConnectionActor->GetName());
+		return false;
+	}
+
+	const bool bSourceIsLeftMostLane = SourceLaneConnectionInfo.LaneIndex == MaxFilteredSourceLaneIndex;
+	const bool bSourceIsRightMostLane = SourceLaneConnectionInfo.LaneIndex == MinFilteredSourceLaneIndex;
+
+	const FLaneConnectionCandidate* ThisCandidatePtr = AllCandidates.FindByPredicate([SourceLaneConnectionQueryIndex, DestLaneConnectionQueryIndex](const FLaneConnectionCandidate& Candidate)
+	{
+		return Candidate.SourceSlot == SourceLaneConnectionQueryIndex && Candidate.DestSlot == DestLaneConnectionQueryIndex;
+	});
+
+	if (ThisCandidatePtr == nullptr)
+	{
+		UE_LOG(LogTempoAgentsShared, Error, TEXT("Lane Filtering - ShouldFilterLaneConnection - Could not find connection candidate in all candidates for SourceConnectionActor (%s)."), *SourceConnectionActor->GetName());
+		return false;
+	}
+
+	const auto HasCandidateWithTurnType = [&AllCandidates] (int32 LaneIndex, EZoneGraphTurnType TurnType)
+	{
+		return AllCandidates.ContainsByPredicate([LaneIndex, TurnType](const FLaneConnectionCandidate& Candidate)
 		{
-			return true;
-		}
-
-		FZoneGraphTagMask MatchingTagGroupMask;
-		const TempoZoneGraphTagMaskGroups MatchingTagGroups = ZoneGraphTagMaskGroups.FilterByPredicate([&SourceTagMask, &MatchingTagGroupMask](const auto& TagGroup)
-		{
-			if (TagGroup.Key.CompareMasks(SourceTagMask, EZoneLaneTagMaskComparison::Any))
-			{
-				MatchingTagGroupMask = TagGroup.Key;
-				return true;
-			}
-			return false;
+			const bool bCandidateIsTurnConnection = Candidate.TurnType == TurnType;
+			const bool bCandidateSharesSource = Candidate.SourceSlot == LaneIndex;
+			return bCandidateIsTurnConnection && bCandidateSharesSource;
 		});
+	};
 
-		if (MatchingTagGroups.IsEmpty())
+	const FLaneConnectionCandidate& ThisCandidate = *ThisCandidatePtr;
+	switch (ThisCandidate.TurnType)
+	{
+		// Filter no-turn connections when they are "redundant". That is, filter connections when another connection
+		// connects to the same destination and this connection's source has other valid (turning) destinations.
+		case EZoneGraphTurnType::NoTurn:
 		{
-			UE_LOG(LogTempoAgentsShared, Error, TEXT("Lane Filtering - ShouldFilterLaneConnection - Connection tag filter not found in any tag group for SourceConnectionActor (%s)."), *SourceConnectionActor->GetName());
-			return false;
-		}
+			const bool bThisCandidateHasLeftTurnConnection = bSourceIsLeftMostLane && HasCandidateWithTurnType(ThisCandidate.SourceSlot, EZoneGraphTurnType::Left);
+			const bool bThisCandidateHasRightTurnConnection = bSourceIsRightMostLane && HasCandidateWithTurnType(ThisCandidate.SourceSlot, EZoneGraphTurnType::Right);
+			const bool bThisCandidateHasAnyTurnConnection = bThisCandidateHasLeftTurnConnection || bThisCandidateHasRightTurnConnection;
 
-		if (MatchingTagGroups.Num() > 1)
+			const TArray<FLaneConnectionCandidate> RedundantCandidates = AllCandidates.FilterByPredicate([TagFilteredSourceLaneConnectionInfos, SourceLaneConnectionQueryIndex, DestLaneConnectionQueryIndex](const FLaneConnectionCandidate& Candidate)
+			{
+				const bool bCandidateHasSameSourceGroup = TagFilteredSourceLaneConnectionInfos.ContainsByPredicate([&Candidate](const FTempoLaneConnectionInfo& LaneConnectionInfo)
+				{
+					return Candidate.SourceSlot == LaneConnectionInfo.LaneIndex;
+				});
+
+				const bool bCandidateHasSameDest = Candidate.DestSlot == DestLaneConnectionQueryIndex;
+				const bool bCandidateHasDifferentSourceLane = Candidate.SourceSlot != SourceLaneConnectionQueryIndex;
+
+				return bCandidateHasSameSourceGroup && bCandidateHasSameDest && bCandidateHasDifferentSourceLane;
+			});
+
+			if (RedundantCandidates.IsEmpty())
+			{
+				return false;
+			}
+			if (RedundantCandidates.Num() == 1)
+			{
+				// Special case for exactly one redundant candidate.
+				// In this case we need to be careful about which one of the candidates we remove, because it is
+				// "mutually redundant" with this candidate. To do so we need to know more about the redundant
+				// candidate.
+				const FLaneConnectionCandidate& RedundantCandidate = RedundantCandidates[0];
+				const bool bRedundantCandidateIsLeftMostLane = RedundantCandidate.SourceSlot == MaxFilteredSourceLaneIndex;
+				const bool bRedundantCandidateIsRightMostLane = RedundantCandidate.SourceSlot == MinFilteredSourceLaneIndex;
+				const bool bRedundantCandidateHasLeftTurnConnection = bRedundantCandidateIsLeftMostLane && HasCandidateWithTurnType(RedundantCandidate.SourceSlot, EZoneGraphTurnType::Left);
+				const bool bRedundantCandidateHasRightTurnConnection = bRedundantCandidateIsRightMostLane && HasCandidateWithTurnType(RedundantCandidate.SourceSlot, EZoneGraphTurnType::Right);
+				const bool bRedundantCandidateHasAnyTurnConnection = bRedundantCandidateHasLeftTurnConnection || bRedundantCandidateHasRightTurnConnection;
+
+				if (!bThisCandidateHasAnyTurnConnection)
+				{
+					// We can't remove this candidate, this lane has nowhere else to go.
+					return false;
+				}
+				if (!bRedundantCandidateHasAnyTurnConnection)
+				{
+					// We can safely filter this candidate, since the redundant candidate will not be filtered.
+					return true;
+				}
+				// Both this and the redundant candidate have turning connections, so we need a tie-breaker.
+				// Filter the candidate with a right turn connection, meaning the right lane will be a turn-only
+				// lane in these cases, and the left lane will have straight and turning connections.
+				return bThisCandidateHasRightTurnConnection;
+			}
+
+			// If there is more than one redundant candidate there must be at least one candidate with no turning
+			// connection. Filter all the ones with turning connections.
+			return bThisCandidateHasAnyTurnConnection;
+		}
+		// Filter right turns from all but the right-most lane UNLESS the source lane of that connection has nowhere
+		// else to go (left or straight). Try to match all such source lanes one-to-one with destination lanes.
+		case EZoneGraphTurnType::Right:
 		{
-			UE_LOG(LogTempoAgentsShared, Error, TEXT("Lane Filtering - ShouldFilterLaneConnection - Connection tag filter found in more than one tag group for SourceConnectionActor (%s)."), *SourceConnectionActor->GetName());
-			return false;
+			// We need to consider all the source lanes from this group and their possible destination lanes.
+			TArray<int32> DestLaneIndices;
+			for (const FLaneConnectionCandidate& Candidate : AllCandidates)
+			{
+				const bool bCandidateHasSameSourceGroup = TagFilteredSourceLaneConnectionInfos.ContainsByPredicate([&Candidate](const FTempoLaneConnectionInfo& LaneConnectionInfo)
+				{
+					return Candidate.SourceSlot == LaneConnectionInfo.LaneIndex;
+				});
+				const bool bCandidateIsRightTurn = Candidate.TurnType == EZoneGraphTurnType::Right;
+				if (bCandidateHasSameSourceGroup && bCandidateIsRightTurn)
+				{
+					DestLaneIndices.AddUnique(Candidate.DestSlot);
+				}
+			}
+			if (DestLaneIndices.IsEmpty())
+			{
+				UE_LOG(LogTempoAgentsShared, Error, TEXT("DestLaneIndices empty for right turn"));
+				return false;
+			}
+
+			TArray<int32> SourceLaneIndices;
+			for (const FTempoLaneConnectionInfo& LaneConnectionInfo : TagFilteredSourceLaneConnectionInfos)
+			{
+				SourceLaneIndices.AddUnique(LaneConnectionInfo.LaneIndex);
+			}
+
+			auto LaneIndexSortLeftToRight = [](const int32 IndexOne, const int32 IndexTwo)
+			{
+				return IndexOne > IndexTwo;
+			};
+			SourceLaneIndices.Sort(LaneIndexSortLeftToRight);
+			DestLaneIndices.Sort(LaneIndexSortLeftToRight);
+
+			// We will store all allowed source/destination connections here.
+			TMap<int32, TSet<int32>> SourceToDestMap;
+
+			// Consider the source lanes in this group from left to right, assigning each one to the next available
+			// right-turn destination lane *if* it has no other connection (no-turn or left) available.
+			int32 DestLaneIndexIdx = 0;
+			for (int32 SourceLaneIndexIdx = 0; SourceLaneIndexIdx < SourceLaneIndices.Num(); ++SourceLaneIndexIdx)
+			{
+				const int32 SourceLaneIndex = SourceLaneIndices[SourceLaneIndexIdx];
+				const bool bHasNoTurnConnection = HasCandidateWithTurnType(SourceLaneIndex, EZoneGraphTurnType::NoTurn);
+				const bool bHasLeftTurnConnection = HasCandidateWithTurnType(SourceLaneIndex, EZoneGraphTurnType::Left) && SourceLaneIndexIdx == 0;
+				if (!bHasNoTurnConnection && !bHasLeftTurnConnection)
+				{
+					// This lane has nowhere else to go. Let it turn right to the next dest lane.
+					SourceToDestMap.FindOrAdd(SourceLaneIndex).Add(DestLaneIndices[DestLaneIndexIdx]);
+					DestLaneIndexIdx = FMath::Min(DestLaneIndexIdx + 1, DestLaneIndices.Num() - 1);
+				}
+			}
+
+			// Assign the right-most source lane of this group to any remaining unconnected destination lanes.
+			for (; DestLaneIndexIdx < DestLaneIndices.Num(); ++DestLaneIndexIdx)
+			{
+				SourceToDestMap.FindOrAdd(SourceLaneIndices.Last()).Add(DestLaneIndices[DestLaneIndexIdx]);
+			}
+
+			// Finally, iterate back over the destination lanes from right to left and make sure the right-most source
+			// lane connects to at least one destination lane containing each unique tag (for example, the right-most
+			// source lane may need to connect to both a destination driving lane and bike lane).
+			FZoneGraphTagMask MarchingTagMask;
+			for (DestLaneIndexIdx = DestLaneIndices.Num() - 1; DestLaneIndexIdx >= 0; --DestLaneIndexIdx)
+			{
+				const int32 DestLaneIndex = DestLaneIndices[DestLaneIndexIdx];
+				const FZoneGraphTagMask DestTagMask = DestLaneConnectionInfos[DestLaneIndex].LaneDesc.Tags;
+				if (!MarchingTagMask.ContainsAny(DestTagMask))
+				{
+					SourceToDestMap.FindOrAdd(SourceLaneIndices.Last()).Add(DestLaneIndex);
+					MarchingTagMask.Add(DestTagMask);
+				}
+			}
+
+			return !(SourceToDestMap.Contains(SourceLaneConnectionQueryIndex) && SourceToDestMap[SourceLaneConnectionQueryIndex].Contains(DestLaneConnectionQueryIndex));
 		}
-
-		const TArray<FTempoLaneConnectionInfo>& TagFilteredSourceLaneConnectionInfos = MatchingTagGroups[MatchingTagGroupMask];
-
-		// If our source "lane tag group" doesn't have any potential connections, we filter this candidate connection.
-		if (TagFilteredSourceLaneConnectionInfos.IsEmpty())
+		// Filter left turns from anything but the left-most lane.
+		case EZoneGraphTurnType::Left:
 		{
-			return true;
+			return !bSourceIsLeftMostLane;
 		}
-
-		int32 MinFilteredLaneIndex = -1;
-		if (!TryGetMinLaneIndexInLaneConnections(TagFilteredSourceLaneConnectionInfos, MinFilteredLaneIndex))
-		{
-			UE_LOG(LogTempoAgentsShared, Error, TEXT("Lane Filtering - ShouldFilterLaneConnection - Could not get min lane index in lane connections for SourceConnectionActor (%s)."), *SourceConnectionActor->GetName());
-			return false;
-		}
-		
-		int32 MaxFilteredLaneIndex = -1;
-		if (!TryGetMaxLaneIndexInLaneConnections(TagFilteredSourceLaneConnectionInfos, MaxFilteredLaneIndex))
-		{
-			UE_LOG(LogTempoAgentsShared, Error, TEXT("Lane Filtering - ShouldFilterLaneConnection - Could not get max lane index in lane connections for SourceConnectionActor (%s)."), *SourceConnectionActor->GetName());
-			return false;
-		}
-
-		const bool bSourceIsLeftMostLane = SourceLaneConnectionInfo.LaneIndex == MaxFilteredLaneIndex;
-		const bool bSourceIsRightMostLane = SourceLaneConnectionInfo.LaneIndex == MinFilteredLaneIndex;
-
-		// Only allow left turns from the left-most lane and right turns from the right-most lane.
-		return !((bIsLeftTurn && bSourceIsLeftMostLane) || (bIsRightTurn && bSourceIsRightMostLane));
 	}
 
 	return false;
@@ -1457,13 +1601,13 @@ AActor* UTempoIntersectionQueryComponent::GetConnectedRoadActor(const AActor& In
 	return RoadActor;
 }
 
-TempoZoneGraphTagMaskGroups UTempoIntersectionQueryComponent::GroupLaneConnectionsByTags(const AActor* SourceConnectionActor, const TArray<FTempoLaneConnectionInfo>& SourceLaneConnectionInfos, const TArray<FTempoLaneConnectionInfo>& DestLaneConnectionInfos) const
+TempoZoneGraphTagMaskGroups UTempoIntersectionQueryComponent::GroupLaneConnectionsByTags(const TArray<FTempoLaneConnectionInfo>& LaneConnectionInfos) const
 {
 	TempoZoneGraphTagMaskGroups ZoneGraphTagMaskGroups;
 
-	for (const FTempoLaneConnectionInfo& SourceLaneConnectionInfo : SourceLaneConnectionInfos)
+	for (const FTempoLaneConnectionInfo& LaneConnectionInfo : LaneConnectionInfos)
 	{
-		const FZoneGraphTagMask SourceTagMask = SourceLaneConnectionInfo.LaneDesc.Tags;
+		const FZoneGraphTagMask SourceTagMask = LaneConnectionInfo.LaneDesc.Tags;
 		if (SourceTagMask.GetValue() == 0)
 		{
 			continue;
@@ -1475,13 +1619,13 @@ TempoZoneGraphTagMaskGroups UTempoIntersectionQueryComponent::GroupLaneConnectio
 			});
 		if (MatchingMaskGroups.IsEmpty())
 		{
-			ZoneGraphTagMaskGroups.Add(SourceTagMask, {SourceLaneConnectionInfo});
+			ZoneGraphTagMaskGroups.Add(SourceTagMask, {LaneConnectionInfo});
 		}
 		else
 		{
 			// Remove all matching groups from the map and replace with a single combined group, including the new lane.
 			FZoneGraphTagMask GroupMask = SourceTagMask;
-			TArray<FTempoLaneConnectionInfo> GroupLanes({SourceLaneConnectionInfo});
+			TArray<FTempoLaneConnectionInfo> GroupLanes({LaneConnectionInfo});
 			for (const auto& MatchingMaskGroup : MatchingMaskGroups)
 			{
 				GroupMask.Add(MatchingMaskGroup.Key);
