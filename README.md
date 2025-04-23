@@ -29,6 +29,7 @@ Tempo is the foundation on which you can build a simulator for your unique appli
 > If you're using 5.4 make sure to update the paths above accordingly.
 
 ## Getting Started
+Follow along the steps below with this video. Sound on!
 
 https://github.com/user-attachments/assets/849cde96-a5a0-46e7-ab18-4fcbbc9fea8d
 
@@ -36,7 +37,7 @@ https://github.com/user-attachments/assets/849cde96-a5a0-46e7-ab18-4fcbbc9fea8d
 The [TempoSample](https://github.com/tempo-sim/TempoSample) project is provided as a reference. If you are starting a new project, consider creating your repo using `TempoSample` as a [template](https://docs.github.com/en/repositories/creating-and-managing-repositories/creating-a-repository-from-a-template), and renaming the project with [Scripts/Rename.sh](https://github.com/tempo-sim/TempoSample/blob/main/Scripts/Rename.sh).
 
 ### Clone Tempo
-From your project's Plugins directory:<br />
+To add Tempo to an existing project (if you are *not* starting with TempoSample), clone tempo to your project's `Plugins` directory:<br />
 ```
 git submodule add https://github.com/tempo-sim/Tempo.git
 git submodule update --init --recursive
