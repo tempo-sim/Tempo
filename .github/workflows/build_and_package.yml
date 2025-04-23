@@ -40,12 +40,12 @@ on:
         default: true
       platform:
         type: string
-        description: Which platform to build for (only ubuntu-22.04 supported for now)
+        description: Which platform to build for (ubuntu-22.04 and ubuntu-24.04 are supported)
         default: ubuntu-22.04
       unreal_version:
         type: string
-        description: Which Unreal version to build for (only 5.4.4 supported for now)
-        default: 5.4.4
+        description: Which Unreal version to build for (5.4.4 and 5.5.4 are supported)
+        default: 5.5.4
       project_root:
         type: string
         description: Root of your project's repo
@@ -105,9 +105,9 @@ jobs:
     - name: Validate Inputs
       run: |
         case "${{ inputs.platform }}" in
-          "ubuntu-22.04") ;;
+          "ubuntu-22.04"|"ubuntu-24.04") ;;
           *)
-            echo "Error: Invalid platform. Only ubuntu-22.04 supported for now."
+            echo "Error: Invalid platform. Only ubuntu-22.04 and ubuntu-24.04 are supported."
             exit 1
             ;;
         esac
@@ -236,6 +236,12 @@ jobs:
         DOCKER_DATA_ROOT='/mnt/var/lib/docker'
         DOCKER_DAEMON_JSON='/etc/docker/daemon.json'
         sudo mkdir -p "${DOCKER_DATA_ROOT}"
+        # Make sure daemon.json exists. It seems not to in the ubuntu-24.04 image.
+        # See https://github.com/actions/runner-images/issues/10697
+        if [ ! -f "${DOCKER_DAEMON_JSON}" ]; then
+          sudo mkdir -p "${DOCKER_DAEMON_JSON%/*}"
+          echo -e "{\n}" | sudo tee "${DOCKER_DAEMON_JSON}" > /dev/null
+        fi
         jq --arg dataroot "${DOCKER_DATA_ROOT}" '. + {"data-root": $dataroot}' "${DOCKER_DAEMON_JSON}" > "/tmp/docker.json.tmp"
         sudo mv "/tmp/docker.json.tmp" "${DOCKER_DAEMON_JSON}"
         sudo systemctl restart docker

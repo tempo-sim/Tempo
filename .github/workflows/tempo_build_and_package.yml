@@ -22,7 +22,7 @@ jobs:
     uses: ./.github/workflows/build_and_package.yml
     strategy:
       matrix:
-        platform: [ ubuntu-22.04 ]
+        platform: [ ubuntu-22.04, ubuntu-24.04 ]
         unreal_version: [ 5.4.4, 5.5.4 ]
       fail-fast: false
     with:
