@@ -13,6 +13,9 @@ In `Fixed Step` mode, time advances by a fixed amount, which you can choose, eve
 ## Scripting
 Tempo supports scripting via [Protobuf](https://protobuf.dev/) and [gRPC](https://grpc.io/).
 
+> [!Tip]
+> Check out the [Greeter](https://github.com/tempo-sim/Greeter/) plugin for a bare-bones demonstration of adding and hooking up simple RPCs with TempoScripting.
+
 ### Adding Scripting Support to a Module
 Any module can define messages and services to allow external clients to control the editor or game, or stream data out.
 To do so, a module must:
@@ -61,7 +64,7 @@ Here is an example service with a single "simple" RPC:
 syntax = "proto3";
 
 // Protos can import protos from other modules to use their message types.
-import "OtherModule/File.proto";
+// import "OtherModule/File.proto";
 
 // Protos can use optional package names to deconflict duplicated message or service names within a module.
 package OptionalCustomPackage;
@@ -72,7 +75,8 @@ message MyRequest {
 
 message MyResponse {
   // All messages and services will get their module name prepended to their package.
-  OtherModule.OtherCustomPackage.OtherMessage other_message = 1;
+  int32 some_response = 1;
+  // OtherModule.OtherCustomPackage.OtherMessage other_message = 2; // Use a type from another module like this
 }
 
 service MyService {
@@ -90,13 +94,16 @@ For example, we could register handlers and activate/deactivate the above servic
 ```
 // MyScriptableActor.h
 
-#include "TempoScriptable.h";
+#pragma once
+
+#include "TempoScriptingServer.h"
+#include "TempoScriptable.h"
 
 #include <grpcpp/grpcpp.h>
 
 #include "CoreMinimal.h"
 
-#include "TempoTimeServiceSubsystem.generated.h"
+#include "MyScriptableActor.generated.h"
 
 namespace MyModule
 {
@@ -113,14 +120,14 @@ class MYMODULE_API AMyScriptableActor : public AActor, public ITempoScriptable
 	GENERATED_BODY()
 	
 public:
-	virtual void RegisterScriptingServices(UTempoScriptingServer* ScriptingServer) override;
+	virtual void RegisterScriptingServices(FTempoScriptingServer& ScriptingServer) override;
 
         virtual void BeginPlay() override;
 
         virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 private:
-	grpc::Status Play(const MyModule::OptionalCustomPackage::MyRequest& Request, ResponseContinuationType<MyModule::OptionalCustomPackage::MyResponse>& ResponseContinuation) const;
+	void HandleMyRequest(const MyModule::OptionalCustomPackage::MyRequest& Request, TResponseDelegate<MyModule::OptionalCustomPackage::MyResponse>& ResponseContinuation) const;
 };
 ```
 ```
@@ -128,9 +135,7 @@ private:
 
 #include "MyScriptableActor.h"
 
-#include "TempoScriptingServer.h
-
-#include "MyModule/RelativePath/MyProtoFile.grpc.pb.h";
+#include "MyModule/RelativePath/MyProtoFile.grpc.pb.h"
 
 using MyService = MyModule::OptionalCustomPackage::MyService;
 using MyServiceAsync = MyModule::OptionalCustomPackage::MyService::AsyncService;
@@ -159,12 +164,12 @@ void AMyScriptableActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
    FTempoScriptingServer::Get().DeactivateService<MyService>();
 }
 
-grpc::Status AMyScriptableActor::HandleMyRequest(const MyRequest& Request, ResponseContinuationType<MyResponse>& ResponseContinuation)
+void AMyScriptableActor::HandleMyRequest(const MyRequest& Request, TResponseDelegate<MyResponse>& ResponseContinuation) const
 {
     // Handle the request, produce the response.
     
     MyResponse Response;
-    ResponseContinuation(Response, grpc::Status_OK);
+    ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
 }
 ```
 You should include a SimpleRequestHandler or StreamingRequestHandler for every RPC in your service. You may not bind multiple handlers to one RPC.
