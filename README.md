@@ -6,8 +6,6 @@ Tempo is the foundation on which you can build a simulator for your unique appli
 ## Compatibility
 - Linux (Ubuntu 22.04 and 24.04), MacOS (13.0 "Ventura" or newer, Apple silicon only), Windows 10 and 11
 - Unreal Engine 5.4 and 5.5
-> [!WARNING]
-> A change in XCode 16.3 broke Unreal builds (not just Tempo). The [fix](https://github.com/EpicGames/UnrealEngine/commit/36e6414349658ce0ef27d3733a764e392b410a7c) will be in 5.6, but we do not know if Epic will make a 5.4 or 5.5 hotfix for it. In the meantime, we recommend dowgrading to Xcode to 16.2 on Mac. You can find previous Xcode releases [here](https://developer.apple.com/download/all/) (you'll need a free Apple developer account).
 
 ## Prerequisites
 - Linux:
@@ -46,8 +44,8 @@ git submodule update --init --recursive
 ```
 
 ### Project Changes
-The Tempo plugins require one change to a vanilla Unreal Engine project to work properly:
-- Your project's `*.Target.cs` files must use the Tempo UnrealBuildTool toolchain for your platform. See [TempoSample.Target.cs](https://github.com/tempo-sim/TempoSample/blob/main/Source/TempoSample.Target.cs) and [TempoSampleEditor.Target.cs](https://github.com/tempo-sim/TempoSample/blob/main/Source/TempoSampleEditor.Target.cs) for examples.
+Tempo requires one change to a vanilla Unreal Engine project to build:
+- Your project's `*.Target.cs` files must use the Tempo UnrealBuildTool toolchain for your platform, as in [TempoSample.Target.cs](https://github.com/tempo-sim/TempoSample/blob/main/Source/TempoSample.Target.cs) and [TempoSampleEditor.Target.cs](https://github.com/tempo-sim/TempoSample/blob/main/Source/TempoSampleEditor.Target.cs).
 
 ### One-Time Setup
 Run the `Setup.sh` script (from the `Tempo` root) once. This script will:
@@ -55,9 +53,8 @@ Run the `Setup.sh` script (from the `Tempo` root) once. This script will:
 - Download third party dependencies
 - Add git hooks to keep both of the above in sync automatically as you check out different Tempo commits
 
-## Using Tempo
-### Building, Running, and Packaging
-Use `Scripts/Build.sh` to build the project, `Scripts/Run.sh` to run Unreal Editor with the project, and `Scripts/Package.sh` to package the project into a standalone binary.
+### Build and Run
+Use the included `Scripts/Build.sh` and `Scripts/Run.sh` to build your project and open it in Unreal Editor.
 
 ### Hello World
 > [!NOTE]
@@ -96,14 +93,8 @@ Use the included `Scripts/Package.sh` to package your project into a standalone 
 ## Continuous Integration
 If you would like to set up a GitHub actions pipeline to build, package, run, and/or release your Tempo project, check out the `build_and_package` reusable workflow in [.github/workflows](https://github.com/tempo-sim/Tempo/tree/main/.github/workflows). `TempoSample`'s [tempo_sample_build_and_package](https://github.com/tempo-sim/TempoSample/blob/main/.github/workflows/tempo_sample_build_and_package.yml) workflow is a good reference.
 
-## Getting Help
-Stuck on something? Feel free to send us an [issue](https://github.com/tempo-sim/Tempo/issues) or ask a question on our [Discord](https://discord.gg/bKa2hnGYnw).
-
-### Continuous Integration
-If you would like to set up a GitHub actions pipeline to build, package, or release your Tempo Unreal project you should use the `build_and_package` reusable workflow in `.github/workflows`. The workflow has a number of configurable inputs, but for a typical Unreal Tempo project the defaults should work fine. [TempoSample](https://github.com/tempo-sim/TempoSample)'s `tempo_sample_build_and_package` workflow is a good example.
-
 ## Giving Back
-Want to contribute to Tempo? We'll be happy to review your PR.
+Want to contribute to Tempo? Feel free to send us an issue or open a pull request from your fork.
 
 ## Going Deeper
 You can learn about the individual tempo plugins in their respective READMEs:<br />
