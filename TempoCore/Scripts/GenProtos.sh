@@ -263,7 +263,7 @@ echo "$MODULE_INFO" | jq -r -c 'to_entries[] | [.key, (.value.Directory // "")] 
   fi
   for PROTO_FILE in $(find "$MODULE_SRC_TEMP_DIR" -name '*.proto' -type f); do
     if grep -q '^\s*package ' "$PROTO_FILE"; then
-      SEARCH="^\s*package ([^\s;]+);"
+      SEARCH="^[[:space:]]*package ([^[:space:];]+);"
       REPLACE="package $MODULE_NAME.\1;"
       sed -E -i '' "s/$SEARCH/$REPLACE/" "$PROTO_FILE"
     else
