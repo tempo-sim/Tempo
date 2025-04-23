@@ -13,6 +13,9 @@ In `Fixed Step` mode, time advances by a fixed amount, which you can choose, eve
 ## Scripting
 Tempo supports scripting via [Protobuf](https://protobuf.dev/) and [gRPC](https://grpc.io/).
 
+## Greeter Example
+The [Greeter](https://github.com/tempo-sim/Greeter/) plugin is a fully-functioning example plugin demonstrating adding and hooking up simple RPCs with TempoSample.
+
 ### Adding Scripting Support to a Module
 Any module can define messages and services to allow external clients to control the editor or game, or stream data out.
 To do so, a module must:
@@ -124,7 +127,7 @@ public:
         virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 private:
-	grpc::Status Play(const MyModule::OptionalCustomPackage::MyRequest& Request, TResponseDelegate<MyModule::OptionalCustomPackage::MyResponse>& ResponseContinuation) const;
+	void HandleMyRequest(const MyModule::OptionalCustomPackage::MyRequest& Request, TResponseDelegate<MyModule::OptionalCustomPackage::MyResponse>& ResponseContinuation) const;
 };
 ```
 ```
@@ -161,12 +164,12 @@ void AMyScriptableActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
    FTempoScriptingServer::Get().DeactivateService<MyService>();
 }
 
-grpc::Status AMyScriptableActor::HandleMyRequest(const MyRequest& Request, TResponseDelegate<MyResponse>& ResponseContinuation)
+void AMyScriptableActor::HandleMyRequest(const MyRequest& Request, TResponseDelegate<MyResponse>& ResponseContinuation) const
 {
     // Handle the request, produce the response.
     
     MyResponse Response;
-    ResponseContinuation(Response, grpc::Status_OK);
+    ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
 }
 ```
 You should include a SimpleRequestHandler or StreamingRequestHandler for every RPC in your service. You may not bind multiple handlers to one RPC.
