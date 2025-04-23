@@ -132,7 +132,7 @@ private:
 
 #include "MyScriptableActor.h"
 
-#include "MyModule/RelativePath/MyProtoFile.grpc.pb.h";
+#include "MyModule/RelativePath/MyProtoFile.grpc.pb.h"
 
 using MyService = MyModule::OptionalCustomPackage::MyService;
 using MyServiceAsync = MyModule::OptionalCustomPackage::MyService::AsyncService;
