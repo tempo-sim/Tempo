@@ -13,7 +13,7 @@ In `Fixed Step` mode, time advances by a fixed amount, which you can choose, eve
 ## Scripting
 Tempo supports scripting via [Protobuf](https://protobuf.dev/) and [gRPC](https://grpc.io/).
 
-## Greeter Example
+### Greeter Example
 The [Greeter](https://github.com/tempo-sim/Greeter/) plugin is a fully-functioning example plugin demonstrating adding and hooking up simple RPCs with TempoSample.
 
 ### Adding Scripting Support to a Module
