@@ -61,7 +61,7 @@ Here is an example service with a single "simple" RPC:
 syntax = "proto3";
 
 // Protos can import protos from other modules to use their message types.
-import "OtherModule/File.proto";
+// import "OtherModule/File.proto";
 
 // Protos can use optional package names to deconflict duplicated message or service names within a module.
 package OptionalCustomPackage;
@@ -72,7 +72,8 @@ message MyRequest {
 
 message MyResponse {
   // All messages and services will get their module name prepended to their package.
-  OtherModule.OtherCustomPackage.OtherMessage other_message = 1;
+  int32 some_response = 1;
+  // OtherModule.OtherCustomPackage.OtherMessage other_message = 2; // Use a type from another module like this
 }
 
 service MyService {
@@ -90,13 +91,16 @@ For example, we could register handlers and activate/deactivate the above servic
 ```
 // MyScriptableActor.h
 
-#include "TempoScriptable.h";
+#pragma once
+
+#include "TempoScriptingServer.h"
+#include "TempoScriptable.h"
 
 #include <grpcpp/grpcpp.h>
 
 #include "CoreMinimal.h"
 
-#include "TempoTimeServiceSubsystem.generated.h"
+#include "MyScriptableActor.generated.h"
 
 namespace MyModule
 {
@@ -113,22 +117,20 @@ class MYMODULE_API AMyScriptableActor : public AActor, public ITempoScriptable
 	GENERATED_BODY()
 	
 public:
-	virtual void RegisterScriptingServices(UTempoScriptingServer* ScriptingServer) override;
+	virtual void RegisterScriptingServices(FTempoScriptingServer& ScriptingServer) override;
 
         virtual void BeginPlay() override;
 
         virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 private:
-	grpc::Status Play(const MyModule::OptionalCustomPackage::MyRequest& Request, ResponseContinuationType<MyModule::OptionalCustomPackage::MyResponse>& ResponseContinuation) const;
+	grpc::Status Play(const MyModule::OptionalCustomPackage::MyRequest& Request, TResponseDelegate<MyModule::OptionalCustomPackage::MyResponse>& ResponseContinuation) const;
 };
 ```
 ```
 // MyScriptableActor.cpp
 
 #include "MyScriptableActor.h"
-
-#include "TempoScriptingServer.h
 
 #include "MyModule/RelativePath/MyProtoFile.grpc.pb.h";
 
@@ -159,7 +161,7 @@ void AMyScriptableActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
    FTempoScriptingServer::Get().DeactivateService<MyService>();
 }
 
-grpc::Status AMyScriptableActor::HandleMyRequest(const MyRequest& Request, ResponseContinuationType<MyResponse>& ResponseContinuation)
+grpc::Status AMyScriptableActor::HandleMyRequest(const MyRequest& Request, TResponseDelegate<MyResponse>& ResponseContinuation)
 {
     // Handle the request, produce the response.
     
