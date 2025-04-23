@@ -68,7 +68,7 @@ import TempoScripting.Geometry_pb2 as Geometry
 
 t = Geometry.transform()
 tw.add_component(type="MyCPPOrBPComponentClass", actor="OwnerActor", name="OptionalCustomName", parent="OptionalParentComponent", transform=t, socket="OptionalSocket")
-tw.destroy_copmonent(actor="OwnerActor", component="MyComponent")
+tw.destroy_component(actor="OwnerActor", component="MyComponent")
 ```
 
 ### Manipulating Actors and Components
@@ -83,7 +83,7 @@ tw.set_component_transform(actor="OwnerActor", component="MyComponent", transfor
 ```
 
 ### Getting and Setting Properties
-TempoWorld uses Unreal's reflection system to allow getting or setting the value of any UProperty by name. Sometimes you might now know the exact name of the Actor, Component, or property you want to set at runtime. For this reason RPCs to inspect properties are available. For example:
+TempoWorld uses Unreal's reflection system to allow getting or setting the value of any UProperty by name. Sometimes you might not know the exact name of the Actor, Component, or property you want to set at runtime. For this reason RPCs to inspect properties are available. For example:
 ```
 import tempo.tempo_world as tw
 
@@ -118,7 +118,7 @@ Once you do know the name of the Actor, Component, and Property you want to set 
 
 All of the above also have `set_*_array_property` RPCs to set an array of such properties.
 
-TempoWorld also supports setting indivudal properties in structs and arrays, with the syntax `MyStruct.InnerProperty` and `MyArray[0]`, respectively. It also supports arbitrarily deep nesting of properties. Array indices must be either already present in the array or one past the length of the array (to extend the array by one element).
+TempoWorld also supports setting individual properties in structs and arrays, with the syntax `MyStruct.InnerProperty` and `MyArray[0]`, respectively. It also supports arbitrarily deep nesting of properties. Array indices must be either already present in the array or one past the length of the array (to extend the array by one element).
 
 TempoWorld does not yet support setting properties in maps or sets. Check back soon for that!
 
