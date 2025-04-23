@@ -23,15 +23,20 @@
 			"Name": "TempoMapQuery",
 			"Type": "Runtime",
 			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "TempoDebris",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
 		}
 	],
 	"Plugins": [
 		{
-			"Name": "MassEntity",
+			"Name": "MassGameplay",
 			"Enabled": true
 		},
 		{
-			"Name": "MassGameplay",
+			"Name": "PCG",
 			"Enabled": true
 		},
 		{
@@ -44,10 +49,6 @@
 		},
 		{
 			"Name": "Traffic",
-			"Enabled": true
-		},
-		{
-			"Name": "StructUtils",
 			"Enabled": true
 		},
 		{

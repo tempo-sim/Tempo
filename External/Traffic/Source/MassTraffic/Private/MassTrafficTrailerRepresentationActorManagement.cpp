@@ -121,10 +121,10 @@ EMassActorSpawnRequestAction  UMassTrafficTrailerRepresentationActorManagement::
 		{
 			// Init using simple velocity 
 			const FMassTrafficVehiclePhysicsSharedParameters& PhysicsSharedFragment = TrailerMassEntityView.GetConstSharedFragmentData<FMassTrafficVehiclePhysicsSharedParameters>();
-			if (PhysicsSharedFragment.Template)
+			if (PhysicsSharedFragment.IsValid())
 			{
 				FBaseSnapshotData BaseSnapshotData;
-				BaseSnapshotData.Transform = PhysicsSharedFragment.Template->SimpleVehiclePhysicsConfig.BodyToActor * TrailerPawn->GetTransform();
+				BaseSnapshotData.Transform = PhysicsSharedFragment.SimpleVehiclePhysicsConfig.BodyToActor * TrailerPawn->GetTransform();
 				BaseSnapshotData.LinearVelocity = TrailerMassEntityView.GetFragmentData<FMassVelocityFragment>().Value;
 				BaseSnapshotData.AngularVelocity = TrailerMassEntityView.GetFragmentData<FMassTrafficAngularVelocityFragment>().AngularVelocity;
 				TrailerVehicleMovementComponent->SetBaseSnapshot(BaseSnapshotData);

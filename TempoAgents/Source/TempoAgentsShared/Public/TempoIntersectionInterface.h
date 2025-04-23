@@ -19,11 +19,10 @@ enum class ETempoRoadConfigurationDescriptor : uint8
 	RightTurn = 2,
 };
 
-
 UENUM(BlueprintType)
 enum class ETempoTrafficControllerType : uint8
 {
-	StopSign = 0,
+	Sign = 0,
 	TrafficLight = 1
 };
 
@@ -163,6 +162,14 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
 	TArray<FTempoRoadConfigurationInfo> GetTempoRoadConfigurationInfo(int32 SourceConnectionIndex, ETempoRoadConfigurationDescriptor RoadConfigurationDescriptor) const;
 
+	// Connected Road Module Queries
+
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
+	int32 GetNumConnectedTempoRoadModules() const;
+
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
+	AActor* GetConnectedTempoRoadModuleActor(int32 ConnectedRoadModuleIndex) const;
+
 	// Lane Filtering Queries
 
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
@@ -172,6 +179,9 @@ public:
 	
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
 	ETempoTrafficControllerType GetTempoTrafficControllerType() const;
+	
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
+	EMassTrafficControllerSignType GetTempoTrafficControllerSignType(int32 ConnectionIndex) const;
 	
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
 	FTempoTrafficControllerMeshInfo GetTempoTrafficControllerMeshInfo(int32 ConnectionIndex, ETempoTrafficControllerType TrafficControllerType) const;
@@ -186,4 +196,7 @@ public:
 
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Commands")
 	void SetupTempoTrafficControllers();
+	
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Commands")
+	void SetupTempoIntersectionData();
 };

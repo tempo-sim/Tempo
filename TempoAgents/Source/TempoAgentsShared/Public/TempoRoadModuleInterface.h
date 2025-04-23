@@ -29,10 +29,19 @@ public:
 	float GetTempoRoadModuleWidth() const;
 
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Module Interface|Queries")
+	float GetTempoRoadModuleLength() const;
+
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Module Interface|Queries")
 	bool IsTempoRoadModuleClosedLoop() const;
 
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Module Interface|Queries")
 	FName GetTempoRoadModuleLaneProfileOverrideName() const;
+
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Module Interface|Queries")
+	AActor* GetTempoRoadModuleParentActor() const;
+
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Module Interface|Queries")
+	float GetTempoRoadModuleSampleDistanceStepSize() const;
 
 	// Road Module Lane Queries
 
@@ -67,4 +76,27 @@ public:
 
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Module Interface|Queries")
 	FRotator GetTempoRoadModuleControlPointRotation(int32 ControlPointIndex, ETempoCoordinateSpace CoordinateSpace) const;
+
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Module Interface|Queries")
+	float GetDistanceAlongTempoRoadModuleAtControlPoint(int32 ControlPointIndex) const;
+
+	// Road Module Distance Queries
+
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Module Interface|Queries")
+	float GetDistanceAlongTempoRoadModuleClosestToWorldLocation(FVector QueryLocation) const;
+	
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Module Interface|Queries")
+	FVector GetLocationAtDistanceAlongTempoRoadModule(float DistanceAlongRoadModule, ETempoCoordinateSpace CoordinateSpace) const;
+	
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Module Interface|Queries")
+	FVector GetTangentAtDistanceAlongTempoRoadModule(float DistanceAlongRoadModule, ETempoCoordinateSpace CoordinateSpace) const;
+
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Module Interface|Queries")
+	FVector GetUpVectorAtDistanceAlongTempoRoadModule(float DistanceAlongRoadModule, ETempoCoordinateSpace CoordinateSpace) const;
+
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Module Interface|Queries")
+	FVector GetRightVectorAtDistanceAlongTempoRoadModule(float DistanceAlongRoadModule, ETempoCoordinateSpace CoordinateSpace) const;
+
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Module Interface|Queries")
+	FRotator GetRotationAtDistanceAlongTempoRoadModule(float DistanceAlongRoadModule, ETempoCoordinateSpace CoordinateSpace) const;
 };

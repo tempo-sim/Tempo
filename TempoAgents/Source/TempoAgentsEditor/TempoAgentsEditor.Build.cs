@@ -40,21 +40,30 @@ public class TempoAgentsEditor : TempoModuleRules
 				"InputCore",
 				"Projects",
 				"UnrealEd",
-				"MassTraffic",
 				"MassEntity",
+				"MassTraffic",
 				"Slate",
 				"SlateCore",
-				"StructUtils",
 				"ToolMenus",
 				"ZoneGraph",
 				// Tempo
 				"TempoAgentsShared",
 				"TempoAgents",
 				"TempoScripting",
+				"TempoCoreShared",
 			}
 			);
-		
-		
+
+		if (Target.Version.MajorVersion == 5 && Target.Version.MinorVersion < 5)
+		{
+			PublicDependencyModuleNames.AddRange(
+				new string[]
+				{
+					"StructUtils",
+				}
+			);
+		}
+
 		DynamicallyLoadedModuleNames.AddRange(
 			new string[]
 			{

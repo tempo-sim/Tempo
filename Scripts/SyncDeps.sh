@@ -46,7 +46,7 @@ GET_HASH() {
   if [[ "$OSTYPE" = "darwin"* ]]; then
     find . -mindepth 2 -type f -not -name ".*" -not -path "./Public/*" -not -path "./Private/*" -print0 | xargs -0 stat -f "%N%z%m" | sort | md5 | cut -d ' ' -f 1
   else
-    find . -mindepth 2 -type f -not -name ".*" -not -path "./Public/*" -not -path "./Private/*" -print0 | xargs -0 stat --format="%n%s%Y" | sort | md5sum | cut -d ' ' -f 1
+    find . -mindepth 2 -type f -not -name ".*" -not -path "./Public/*" -not -path "./Private/*" -print0 | xargs -0 stat --format="%n%s%Y" | sort | md5sum | cut -d ' ' -f 1 2>/dev/null || echo "0"
   fi
 }
 
@@ -90,7 +90,7 @@ SYNC_THIRD_PARTY_DEPS () {
   PULL_DEPENDENCIES () {
     TARGET_PLATFORM=$1
     
-    RELEASE_INFO=$(curl -n -L -J \
+    RELEASE_INFO=$(curl -L -J \
                    -H "Accept: application/vnd.github+json" \
                    -H "X-GitHub-Api-Version: 2022-11-28" \
                    https://api.github.com/repos/tempo-sim/TempoThirdParty/releases)
@@ -105,7 +105,7 @@ SYNC_THIRD_PARTY_DEPS () {
     
     echo -e "\nDownloading TempoThirdParty release $RELEASE_NAME for platform $TARGET_PLATFORM from $URL\n"
     
-    curl -n -L -J -O --output-dir "$TEMP" \
+    curl -L -J -O --output-dir "$TEMP" \
     -H "Accept: application/octet-stream" \
     -H "X-GitHub-Api-Version: 2022-11-28" \
     "$URL"

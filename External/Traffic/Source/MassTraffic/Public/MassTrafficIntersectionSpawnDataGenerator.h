@@ -2,13 +2,18 @@
 
 #pragma once
 
-#include "MassTrafficInitIntersectionsProcessor.h"
+#include "MassTrafficLightInitIntersectionsProcessor.h"
+#include "MassTrafficSignInitIntersectionsProcessor.h"
 #include "MassTrafficLights.h"
 #include "MassTrafficIntersections.h"
+#include "MassTrafficControllerRegistrySubsystem.h"
 
 #include "MassEntitySpawnDataGeneratorBase.h"
 
 #include "MassTrafficIntersectionSpawnDataGenerator.generated.h"
+
+typedef TMap<int32, FMassTrafficIntersectionDetail> FZoneIndexToIntersectionDetailMap;
+typedef TMap<FZoneGraphDataHandle, FZoneIndexToIntersectionDetailMap> FIntersectionDetailsMap;
 
 UCLASS()
 class MASSTRAFFIC_API UMassTrafficIntersectionSpawnDataGenerator : public UMassEntitySpawnDataGeneratorBase
@@ -18,7 +23,10 @@ class MASSTRAFFIC_API UMassTrafficIntersectionSpawnDataGenerator : public UMassE
 public:
 
 	UPROPERTY(EditAnywhere)
-	int32 IntersectionEntityConfigIndex = 0;
+	int32 TrafficLightIntersectionEntityConfigIndex = 0;
+	
+	UPROPERTY(EditAnywhere)
+	int32 TrafficSignIntersectionEntityConfigIndex = 1;
 	
 
 	/**
@@ -28,6 +36,14 @@ public:
 	 */
 	UPROPERTY(EditAnywhere, Category="Traffic Lights")
 	float TrafficLightSearchDistance = 400.0f;
+
+	/**
+	 * How far away from the start of the left most intersection lane of an intersection side, to look for the traffic sign it controls.
+	 * Making this too large can end up finding traffic signs in other intersections, when none should be found.
+	 * Making this too small can end up not finding any traffic signs.
+	 */
+	UPROPERTY(EditAnywhere, Category="Traffic Lights")
+	float TrafficSignSearchDistance = 400.0f;
 
 	/**
 	 * Max distance (cm) a crosswalk lane can be from an intersection side point, to be controlled by that intersection side.
@@ -43,10 +59,14 @@ public:
 	UPROPERTY(EditAnywhere, Category="Durations|Standard")
 	float StandardMinimumTrafficGoSeconds = 5.0f;
 
+	/** How many seconds pedestrians go before vehicles go in 4-way and T-intersections. */
+	UPROPERTY(EditAnywhere, Category="Durations|Standard")
+	float StandardCrosswalkGoHeadStartSeconds = 4.0f;
+	
 	/** How many seconds pedestrians go (how long crosswalks are open for arriving pedestrians)- in most cases. */
 	UPROPERTY(EditAnywhere, Category="Durations|Standard")
 	float StandardCrosswalkGoSeconds = 10.0f;
-
+	
 	/** In cross-traffic intersections only - how many seconds for vehicles to go (how long a green light lasts) - when coming from one side, and can go straight, right or left. */
 	UPROPERTY(EditAnywhere, Category="Durations|FourWay")
 	float UnidirectionalTrafficStraightRightLeftGoSeconds = StandardTrafficGoSeconds / 2.0f;
@@ -73,19 +93,43 @@ public:
 	virtual void Generate(UObject& QueryOwner, TConstArrayView<FMassSpawnedEntityType> EntityTypes, int32 Count, FFinishedGeneratingSpawnDataSignature& FinishedGeneratingSpawnPointsDelegate) const override;
 
 protected:
+
+	FIntersectionDetailsMap BuildIntersectionDetailsMap(
+		const UMassTrafficSubsystem& MassTrafficSubsystem,
+		const UZoneGraphSubsystem& ZoneGraphSubsystem,
+		const UMassTrafficControllerRegistrySubsystem& TrafficControllerRegistrySubsystem,
+		const UMassTrafficSettings& MassTrafficSettings,
+		const UWorld& World) const;
+
+	void SetupLaneData(
+		UMassTrafficSubsystem& MassTrafficSubsystem,
+		const UMassTrafficSettings& MassTrafficSettings,
+		const UZoneGraphSubsystem& ZoneGraphSubsystem,
+		const FIntersectionDetailsMap& IntersectionDetailsMap) const;
+
+	void BuildIntersectionFragments(
+		const FIntersectionDetailsMap& IntersectionDetailsMap,
+		FMassTrafficLightIntersectionSpawnData& OutTrafficLightIntersectionsSpawnData,
+		FMassTrafficSignIntersectionSpawnData& OutTrafficSignIntersectionsSpawnData) const;
 	
-	virtual void Generate(UObject& QueryOwner, TConstArrayView<FMassSpawnedEntityType> EntityTypes, int32 Count, FMassTrafficIntersectionsSpawnData& OutIntersectionsSpawnData) const;
-	
+	void GenerateTrafficLightIntersectionSpawnData(
+		const FIntersectionDetailsMap& IntersectionDetails,
+		const UZoneGraphSubsystem& ZoneGraphSubsystem,
+		const FRandomStream& RandomStream,
+		const UWorld& World,
+		FMassTrafficLightIntersectionSpawnData& OutTrafficLightIntersectionsSpawnData) const;
 
-	typedef TMap<int32/*intersection index*/, FMassTrafficIntersectionDetail> FIntersectionDetailsMap; 
+	void GenerateTrafficSignIntersectionSpawnData(
+		const FIntersectionDetailsMap& IntersectionDetails,
+		FMassTrafficSignIntersectionSpawnData& OutTrafficSignIntersectionsSpawnData) const;
 
-	static FMassTrafficIntersectionDetail* FindIntersectionDetails(FIntersectionDetailsMap& IntersectionDetails, int32 IntersectionIndex /*not Zone index!*/, FString Caller);
+	bool IsAllWayStop(const FMassTrafficIntersectionDetail& IntersectionDetail) const;
 
-	static FMassTrafficIntersectionDetail* FindOrAddIntersection(
-		FMassTrafficIntersectionsSpawnData& IntersectionSpawnData,
-		TMap<int32, int32>& IntersectionZoneIndex_To_IntersectionIndex,
-		FIntersectionDetailsMap& IntersectionDetails,
-		FZoneGraphDataHandle ZoneGraphDataHandle,
+	static const FMassTrafficIntersectionDetail* FindIntersectionDetails(const FIntersectionDetailsMap& IntersectionDetailsMap, const FZoneGraphDataHandle& ZoneGraphDataHandle, int32 IntersectionZoneIndex, FString Caller);
+
+	static FMassTrafficIntersectionDetail* FindOrAddIntersectionDetail(
+		FIntersectionDetailsMap& IntersectionDetailsMap,
+		const FZoneGraphDataHandle& ZoneGraphDataHandle,
 		int32 IntersectionZoneIndex);
 
 	static int32 GetNumLogicalLanesForIntersectionSide(const FZoneGraphStorage& ZoneGraphStorage, const FMassTrafficIntersectionSide& Side, const float Tolerance = 50.0f);

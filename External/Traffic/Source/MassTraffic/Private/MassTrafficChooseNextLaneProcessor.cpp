@@ -287,9 +287,9 @@ void UMassTrafficChooseNextLaneProcessor::Execute(FMassEntityManager& EntityMana
 				AgentRadiusFragment.Radius, RandomFractionFragment.RandomFraction,
 				MassTrafficSettings->MinimumDistanceToNextVehicleRange);
 
-
 			FZoneGraphTrafficLaneData* BestNextTrafficLaneData = nullptr;
 			float BestNextLaneDensity = TNumericLimits<float>::Max();
+			int32 BestNextLanePriority = -1;
 
 		
 			// This lane might be have intersection lanes as next lanes, so lets run through just those and asses the
@@ -305,14 +305,37 @@ void UMassTrafficChooseNextLaneProcessor::Execute(FMassEntityManager& EntityMana
 				if (!NextLane->ConstData.bIsIntersectionLane)
 				{
 					// This is not an intersection lane.
-				
+
+					const float NextLaneDensity =
+						DensityToUseForChoosingLane == ChooseLaneByDownstreamFlowDensity ?
+						NextLane->GetDownstreamFlowDensity() :
+						NextLane->FunctionalDensity();
+
+					// Lane priority is more important than space or density or "choose different lane" preference for
+					// a different lane. So if we find a higher priority lane, pick it, and only consider space or
+					// density or preference if lane priorities are equal.
+					const FZoneGraphStorage* ZoneGraphStorage = ZoneGraphSubsystem.GetZoneGraphStorage(NextLane->LaneHandle.DataHandle);
+					check(ZoneGraphStorage);
+					const int32 NextLanePriority = UE::MassTraffic::GetLanePriority(NextLane, VehicleControlFragment.NextLanePriorityFilters, *ZoneGraphStorage);
+					if (NextLanePriority > BestNextLanePriority)
+					{
+						BestNextLaneDensity = NextLaneDensity;
+						BestNextLanePriority = NextLanePriority;
+						BestNextTrafficLaneData = NextLane;
+						continue;
+					}
+					else if (NextLanePriority < BestNextLanePriority)
+					{
+						continue;
+					}
+
 					// We want a different lane than this one.
 					if (VehicleControlFragment.ChooseNextLanePreference == EMassTrafficChooseNextLanePreference::ChooseDifferentNextLane &&
 						VehicleControlFragment.NextLane == NextLane)
 					{
 						continue;
 					}
-				
+
 					// Consider this lane if it has enough space -or- if it's too short (because if they're all too
 					// short, we still have to pick one.)
 					const bool bLaneHasEnoughSpaceForVehicle = (NextLane->SpaceAvailable >= SpaceTakenByVehicleOnLane);
@@ -323,10 +346,6 @@ void UMassTrafficChooseNextLaneProcessor::Execute(FMassEntityManager& EntityMana
 					}
 				
 					// Does this lane have more space than the others? If so, remember it.
-					const float NextLaneDensity =
-						DensityToUseForChoosingLane == ChooseLaneByDownstreamFlowDensity ?
-						NextLane->GetDownstreamFlowDensity() :
-						NextLane->FunctionalDensity();
 					if (NextLaneDensity <= BestNextLaneDensity)
 					{
 						BestNextLaneDensity = NextLaneDensity;
@@ -347,13 +366,6 @@ void UMassTrafficChooseNextLaneProcessor::Execute(FMassEntityManager& EntityMana
 					// So this is the lane *after* the intersection lane and are actually what we are interested in.
 					const FZoneGraphTrafficLaneData* PostIntersectionTrafficLaneData = NextLane->NextLanes[0];
 
-					// We want a different lane than this one.
-					if (VehicleControlFragment.ChooseNextLanePreference == EMassTrafficChooseNextLanePreference::ChooseDifferentNextLane &&
-						VehicleControlFragment.NextLane == NextLane)
-					{
-						continue;
-					}
-
 					if (!NextLane->bTurnsLeft && !NextLane->bTurnsRight && !VehicleControlFragment.bAllowGoingStraightAtIntersections)
 					{
 						continue;
@@ -368,7 +380,37 @@ void UMassTrafficChooseNextLaneProcessor::Execute(FMassEntityManager& EntityMana
 					{
 						continue;
 					}
-				
+
+					const float PostIntersectionLaneDensity =
+						DensityToUseForChoosingLane == ChooseLaneByDownstreamFlowDensity ?
+						PostIntersectionTrafficLaneData->GetDownstreamFlowDensity() :
+						PostIntersectionTrafficLaneData->FunctionalDensity();
+
+					// Lane priority is more important than space or density or "choose different lane" preference for
+					// a different lane. So if we find a higher priority lane, pick it, and only consider space or
+					// density or preference if lane priorities are equal.
+					const FZoneGraphStorage* ZoneGraphStorage = ZoneGraphSubsystem.GetZoneGraphStorage(PostIntersectionTrafficLaneData->LaneHandle.DataHandle);
+					check(ZoneGraphStorage);
+					const int32 PostIntersectionLanePriority = UE::MassTraffic::GetLanePriority(PostIntersectionTrafficLaneData, VehicleControlFragment.NextLanePriorityFilters, *ZoneGraphStorage);
+					if (PostIntersectionLanePriority > BestNextLanePriority)
+					{
+						BestNextLaneDensity = PostIntersectionLaneDensity;
+						BestNextLanePriority = PostIntersectionLanePriority;
+						BestNextTrafficLaneData = NextLane;
+						continue;
+					}
+					else if (PostIntersectionLanePriority < BestNextLanePriority)
+					{
+						continue;
+					}
+
+					// We want a different lane than this one.
+					if (VehicleControlFragment.ChooseNextLanePreference == EMassTrafficChooseNextLanePreference::ChooseDifferentNextLane &&
+						VehicleControlFragment.NextLane == NextLane)
+					{
+						continue;
+					}
+
 					// Consider this lane if it has enough space -or- if it's too short (because if they're all too
 					// short, we still have to pick one.)
 					const bool bLaneHasEnoughSpaceForVehicle = (PostIntersectionTrafficLaneData->SpaceAvailable >= SpaceTakenByVehicleOnLane);
@@ -379,10 +421,6 @@ void UMassTrafficChooseNextLaneProcessor::Execute(FMassEntityManager& EntityMana
 					}
 				
 					// Does this lane have more space than the others? If so, remember it.
-					const float PostIntersectionLaneDensity =	
-						DensityToUseForChoosingLane == ChooseLaneByDownstreamFlowDensity ?
-						PostIntersectionTrafficLaneData->GetDownstreamFlowDensity() :
-						PostIntersectionTrafficLaneData->FunctionalDensity();					
 					if (PostIntersectionLaneDensity <= BestNextLaneDensity)
 					{
 						// We are searching the lanes after the intersection so we know which
@@ -452,7 +490,7 @@ void UMassTrafficChooseNextLaneProcessor::Execute(FMassEntityManager& EntityMana
 					{
 						const FZoneGraphStorage* ZoneGraphStorage = ZoneGraphSubsystem.GetZoneGraphStorage(VehicleControlFragment.NextLane->LaneHandle.DataHandle);
 						check(ZoneGraphStorage);
-						
+
 						UE_VLOG_ARROW(&MassTrafficSubsystem, TEXT("MassTraffic NextLane"), Display,
 							TransformFragments[Index].GetTransform().GetLocation() + FVector(0,0,200),
 							UE::MassTraffic::GetLaneMidPoint(VehicleControlFragment.NextLane->LaneHandle.Index, *ZoneGraphStorage) + FVector(0,0,100),
@@ -474,7 +512,7 @@ void UMassTrafficChooseNextLaneProcessor::Execute(FMassEntityManager& EntityMana
 					{
 						const FZoneGraphStorage* ZoneGraphStorage = ZoneGraphSubsystem.GetZoneGraphStorage(VehicleControlFragment.NextLane->LaneHandle.DataHandle);
 						check(ZoneGraphStorage);
-						
+
 						const FMassEntityHandle Entity = Context.GetEntity(Index);
 						const FTransformFragment& TransformFragment = EntityManager.GetFragmentDataChecked<FTransformFragment>(Entity);
 						const FVector Location = TransformFragment.GetTransform().GetLocation();

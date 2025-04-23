@@ -1,0 +1,12 @@
+--- Configuration/UEBuildTarget.cs	2025-04-12 12:55:13
++++ /Users/pete/Desktop/Configuration/UEBuildTarget.cs	2025-04-12 12:56:40
+@@ -3191,6 +3191,10 @@
+ 			{
+ 				return true;
+ 			}
++			if (PluginModuleName == "MassEntity" || PluginModuleName == "MassEntityTestSuite" || PluginModuleName == "MassEntityEditor")
++			{
++				return true;
++			}
+ 			return false;
+ 		}

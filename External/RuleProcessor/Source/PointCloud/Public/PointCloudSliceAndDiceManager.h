@@ -47,7 +47,7 @@ class POINTCLOUD_API USliceAndDiceManagedActors : public UObject
 
 public:
 	UPROPERTY()
-	TSoftObjectPtr<UPointCloudRule> Rule;
+	TSoftObjectPtr<const UPointCloudRule> Rule;
 
 	UPROPERTY()
 	TArray<TSoftObjectPtr<AActor>> ManagedActors_DEPRECATED;

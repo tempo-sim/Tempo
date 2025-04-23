@@ -191,6 +191,18 @@ public:
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Config, Category="Speed|Stopping")
 	float StopSignBrakingTime = 4.0f;
 
+	// Min time (in seconds) for vehicles to remain stationary at stop signs.
+	// It is a "lower" minimum time since we'll be selecting a value between this
+	// and UpperMinStopSignRestTime.
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Config, Category="Speed|Stopping")
+	float LowerMinStopSignRestTime = 2.0f;
+
+	// Max time (in seconds) for vehicles to remain stationary at stop signs,
+	// given the intersection "period" logic allows them to proceed.
+	// Therefore, it is an "upper" minimum time.
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Config, Category="Speed|Stopping")
+	float UpperMinStopSignRestTime = 4.0f;
+
 	/**
 	 * Target speed along the CurrentLane is determined by looking at the curvature ahead of the 
 	 * current closest point on the spline, and slowing to turn. The distance ahead is determined by 
@@ -329,7 +341,13 @@ public:
 
 	/** How long a yellow light lasts. */
 	UPROPERTY(EditAnywhere, Config, Category="Intersections|Durations|Standard")
-	float StandardTrafficPrepareToStopSeconds = 2.0f;
+	float StandardTrafficPrepareToStopSeconds = 4.0f;
+
+	/** When advancing to the next period for traffic light intersections,
+	 * should we cut the period's duration in half when no vehicles or pedestrians
+	 * are immediately waiting to use the period's open lanes? */
+	UPROPERTY(EditAnywhere, Config, Category="Intersections|Durations|Standard")
+	bool bUseHalfDurationPeriodWhenNoVehiclesOrPedestriansAreWaiting = true;
 
 	/**
 	 * The number of pedestrians that need to be waiting at a pedestrian crossing to trigger that crossing to open,
@@ -391,6 +409,16 @@ public:
 	UPROPERTY(EditAnywhere, Config, Category="Lane Changing")
 	float MinLaneChangeDistanceVehicleLengthScale = 5.0f;
 
+	// How much lane space a vehicle needs before a yield sign to execute a lane change, as a factor of a vehicle's length.
+	// The longer the vehicle, the more space (and time) it needs to change lanes.
+	UPROPERTY(EditAnywhere, Config, Category="Lane Changing")
+	float MinLaneChangeSpaceBeforeYieldSignVehicleLengthScale = 6.0f;
+
+	// How close to a crosswalk to consider reactively yielding, as a factor of a vehicle's length.
+	// The longer the vehicle, the closer the front of the vehicle is to the crosswalk.
+	UPROPERTY(EditAnywhere, Config, Category="Yield Behavior")
+	float CrosswalkReactiveYieldDistanceVehicleLengthScale = 3.0f;
+
 	// How much more to scale search distances for points on adjacent lanes, to help cope with possible issues with 
 	// low lane tessellation and/or higher lane curvature.
 	UPROPERTY(EditAnywhere, Config, Category="Lane Changing")
@@ -435,24 +463,99 @@ public:
 	// in order to resume motion after yielding.
 	UPROPERTY(EditAnywhere, Config, Category="Yield Behavior")
 	float NormalizedYieldResumeLaneDistance_Straight = 0.4f;
-
-	// Max distance from the end of the lane (leading up to an intersection)
-	// within which a vehicle is allowed to start a pre-emptive yield if other conditions apply.
+	
+	// If a vehicle enters a crosswalk lane,
+	// a pedestrian will yield to the vehicle, once the pedestrian is within this distance
+	// to the entrance of the vehicle lane along the pedestrian's crosswalk lane.
 	UPROPERTY(EditAnywhere, Config, Category="Yield Behavior")
-	float MaxDistanceFromEndOfLaneForPreemptiveYield = 500.0f;
+	float PedestrianVehicleBufferDistanceOnCrosswalk = 300.0f;
 
-	// Min distance to allow a vehicle performing a pre-emptive yield to "roll-out" into the intersection.
+	// If a pedestrian enters a vehicle lane,
+	// a vehicle will yield to the pedestrian, once the vehicle is within this distance
+	// to the entrance of the crosswalk lane along the vehicle lane.
 	UPROPERTY(EditAnywhere, Config, Category="Yield Behavior")
-	float MinPreemptiveYieldAtIntersectionRolloutDistance = 200.0f;
+	float VehiclePedestrianBufferDistanceOnCrosswalk = 200.0f;
 
-	// Max distance to allow a vehicle performing a pre-emptive yield to "roll-out" into the intersection.
+	// As a failsafe to prevent non-"yield cycle" deadlocks,
+	// pedestrians will only yield for this maximum time on crosswalks,
+	// after which they will be granted a yield override on their current lane,
+	// against all potential yield targets, until they finish crossing the crosswalk.
 	UPROPERTY(EditAnywhere, Config, Category="Yield Behavior")
-	float MaxPreemptiveYieldAtIntersectionRolloutDistance = 400.0f;
+	float PedestrianMaxYieldOnCrosswalkTime = 30.0f;
 
-	// Time (in seconds) to wait for the *other* vehicle to enter their lane
-	// after the yielding vehicle "rolled-out" the allowed distance during a pre-emptive yield.
+	// As a failsafe to prevent issues where pedestrians
+	// sometimes end up with a "zero" speed after yielding on crosswalks,
+	// we will resume their motion with this speed, instead.
 	UPROPERTY(EditAnywhere, Config, Category="Yield Behavior")
-	float MaxTimeToWaitForVehicleToEnterTheirLaneDuringPreemptiveYield = 2.0f;
+	float PedestrianFailsafeCrosswalkYieldResumeSpeed = 200.0f;
+
+	// The time buffer the vehicles will use when detecting conflicts with other vehicles
+	// during their merge behavior.
+	UPROPERTY(EditAnywhere, Config, Category="Merge Behavior")
+	float VehicleCrosswalkYieldTimeBuffer = 4.0f;
+
+	// Once a vehicle is eligible to perform its crosswalk yield behavior,
+	// it looks ahead to see when it will enter a crosswalk lane.
+	// After it will enter a crosswalk lane in less than this time delta,
+	// it will perform the crosswalk yield behavior logic.
+	UPROPERTY(EditAnywhere, Config, Category="Yield Behavior")
+	float VehicleCrosswalkYieldLookAheadTime = 2.0f;
+
+	// Vehicles will ignore running their merge yield logic for test vehicles,
+	// which will enter the intersection after this time delta.
+	// This is mainly used to cull merge yield considerations against test vehicles
+	// approaching from an intersection side with Sign Type "None" or a traffic light with open lanes,
+	// until they will be entering the intersection within this time delta.
+	UPROPERTY(EditAnywhere, Config, Category="Merge Behavior")
+	float VehicleMergeYieldTestVehicleEnterIntersectionHorizonTime = 4.0f;
+
+	// The time buffer the vehicles will use when detecting conflicts with other vehicles
+	// during their merge behavior.
+	UPROPERTY(EditAnywhere, Config, Category="Merge Behavior")
+	float VehicleMergeYieldTimeBuffer = 4.0f;
+
+	// Once a vehicle is eligible to perform its merge behavior,
+	// it looks ahead to see when it will enter the intersection.
+	// After it will enter the intersection in less than this time delta,
+	// it will perform the merge behavior logic.
+	UPROPERTY(EditAnywhere, Config, Category="Merge Behavior")
+	float VehicleMergeYieldLookAheadTime = 2.0f;
+
+	// If Vehicle A arrives in a conflict region this "time epsilon" *before* Vehicle B,
+	// then Vehicle A proceeds.  If Vehicle A arrives in a conflict region
+	// this "time epsilon" *after* Vehicle B, then Vehicle A will yield to Vehicle B.
+	UPROPERTY(EditAnywhere, Config, Category="Merge Behavior")
+	float VehicleMergeYieldConflictEnterTimeEpsilon = 2.0f;
+
+	// Distance within which two lane segments are considered intersecting.
+	// Used when getting enter and exit distances for all the conflict lanes.
+	UPROPERTY(EditAnywhere, Config, Category="Lane Intersections")
+	float AcceptableLaneIntersectionDistance = 1.0f;
+
+
+	// At stop signs, pedestrians will be able to cross whenever they want for the most part.
+	// But, once a vehicle completes its stop sign rest behavior, the pedestrian lanes
+	// at the crosswalks will close for this much time, allowing the crosswalks to clear to some extent,
+	// which ultimately will allow the vehicles to find an opportunity to proceed.
+	UPROPERTY(EditAnywhere, Config, Category="Traffic Sign Intersections|Stop Sign")
+	float VehiclePriorityTimeAtCrosswalkWithStopSign = 5.0f;
+
+	// If a vehicle is within this distance while heading towards a crosswalk with a yield sign,
+	// pedestrians will wait for the vehicle to come to a complete stop before crossing.
+	// Otherwise, any waiting pedestrians will cross ahead of the arrival of any vehicles.
+	UPROPERTY(EditAnywhere, Config, Category="Traffic Sign Intersections|Yield Sign")
+	float VehicleTooCloseForPedestriansToCrossAtYieldSignDistance = 5000.0f;
+
+	// Once any waiting pedestrians begin to cross the crosswalk with a yield sign,
+	// pedestrian lanes will remain open for this much time before closing again.
+	UPROPERTY(EditAnywhere, Config, Category="Traffic Sign Intersections|Yield Sign")
+	float PedestrianPriorityTimeAtCrosswalkWithYieldSign = 5.0f;
+
+	// Once the first pedestrian is waiting to cross the crosswalk with a yield sign,
+	// this is how much time we allow additional pedestrians to gather in the crosswalk "waiting area"
+	// before they all look for an opportunity to cross.
+	UPROPERTY(EditAnywhere, Config, Category="Traffic Sign Intersections|Yield Sign")
+	float PedestrianWaitToCrossAtCrosswalkWithYieldSignTime = 5.0f;
 
 	// @todo Rename Density Management to Overseer
 	
@@ -519,4 +622,9 @@ public:
 	 */
 	UPROPERTY(EditAnywhere, Config, Category="Noise")
 	float NoisePeriod = 20000.0f;
+
+	// How far back from the nearest conflict lane intersection should we start drawing yield debug indicators?
+	// This only applies when "MassTraffic.DebugYieldBehavior" is set to 1 or higher.
+	UPROPERTY(EditAnywhere, Config, Category="Debug")
+	float MaxDistanceFromConflictLaneToDrawYieldBehaviorIndicators = 5000.0f;
 };

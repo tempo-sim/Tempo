@@ -6,6 +6,7 @@
 #include "MassTrafficTypes.h"
 #include "MassTrafficSettings.h"
 #include "MassTrafficFragments.h"
+#include "MassTrafficSubsystem.h"
 
 #include "ZoneGraphTypes.h"
 #include "ZoneGraphQuery.h"
@@ -188,6 +189,106 @@ FVector GetLaneBeginToEndDirection(const uint32 LaneIndex, const FZoneGraphStora
 	return LaneBeginToEndDirection;
 }
 
+int32 GetLaneSegmentNearestToPoint(const FZoneLaneData& LaneData, const TArray<FVector>& LanePoints, const FVector& QueryPoint)
+{
+	int32 NearestSegmentBeginPoint = -1;
+	float NearestSegmentDistance = TNumericLimits<float>::Max();
+
+	for (int32 PointIndex = LaneData.PointsBegin; PointIndex < LaneData.PointsEnd - 1; ++PointIndex)
+	{
+		const FVector& SegmentBeginPoint = LanePoints[PointIndex];
+		const FVector& SegmentEndPoint = LanePoints[PointIndex + 1];
+		const float SegmentDistance = FMath::PointDistToSegment(QueryPoint, SegmentBeginPoint, SegmentEndPoint);
+		if (SegmentDistance < NearestSegmentDistance)
+		{
+			NearestSegmentDistance = SegmentDistance;
+			NearestSegmentBeginPoint = PointIndex;
+		}
+	}
+
+	return NearestSegmentBeginPoint;
+}
+
+float GetDistanceAlongLaneNearestToPoint(const uint32 LaneIndex, const FVector& QueryPoint, const FZoneGraphStorage& ZoneGraphStorage)
+{
+	const FZoneLaneData& LaneData = ZoneGraphStorage.Lanes[LaneIndex];
+	const int32 LaneSegmentNearestPoint = GetLaneSegmentNearestToPoint(LaneData, ZoneGraphStorage.LanePoints, QueryPoint);
+
+	if (!ensureMsgf(LaneSegmentNearestPoint >=0, TEXT("LaneSegmentNearestPoint not valid in GetDistanceAlongLaneNearestToPoint")))
+	{
+		return 0.0;
+	}
+
+	float Distance = 0.0;
+	for (int32 PointIndex = LaneData.PointsBegin; PointIndex <= LaneSegmentNearestPoint; ++PointIndex)
+	{
+		const FVector& SegmentBeginPoint = ZoneGraphStorage.LanePoints[PointIndex];
+		const FVector& SegmentEndPoint = ZoneGraphStorage.LanePoints[PointIndex + 1];
+		if (PointIndex < LaneSegmentNearestPoint)
+		{
+			Distance += (SegmentEndPoint - SegmentBeginPoint).Length();
+		}
+		else
+		{
+			FVector NearestPoint;
+			FMath::PointDistToLine(QueryPoint, (SegmentEndPoint - SegmentBeginPoint).GetSafeNormal(), SegmentBeginPoint, NearestPoint);
+			Distance += (NearestPoint - SegmentBeginPoint).Length();
+		}
+	}
+
+	return Distance;
+}
+
+FVector GetDirectionAtDistanceAlongLane(const uint32 LaneIndex, float Distance, const FZoneGraphStorage& ZoneGraphStorage)
+{
+	const FZoneLaneData& LaneData = ZoneGraphStorage.Lanes[LaneIndex];
+
+	if (Distance <= 0.0)
+	{
+		return GetLaneBeginDirection(LaneIndex, ZoneGraphStorage);
+	}
+
+	float Length = 0.0;
+	for (int32 PointIndex = LaneData.PointsBegin; PointIndex < LaneData.PointsEnd - 1; ++PointIndex)
+	{
+		const FVector& SegmentStart = ZoneGraphStorage.LanePoints[PointIndex];
+		const FVector& SegmentEnd = ZoneGraphStorage.LanePoints[PointIndex + 1];
+		const float SegmentLength = (SegmentEnd - SegmentStart).Length();
+		if (Length + SegmentLength >= Distance)
+		{
+			return (SegmentEnd - SegmentStart).GetSafeNormal();
+		}
+		Length += SegmentLength;
+	}
+
+	return GetLaneEndDirection(LaneIndex, ZoneGraphStorage);
+}
+
+FVector GetPointAtDistanceAlongLane(const uint32 LaneIndex, float Distance, const FZoneGraphStorage& ZoneGraphStorage)
+{
+	const FZoneLaneData& LaneData = ZoneGraphStorage.Lanes[LaneIndex];
+
+	if (Distance <= 0.0)
+	{
+		return GetLaneBeginPoint(LaneIndex, ZoneGraphStorage);
+	}
+
+	float Length = 0.0;
+	for (int32 PointIndex = LaneData.PointsBegin; PointIndex < LaneData.PointsEnd - 1; ++PointIndex)
+	{
+		const FVector& SegmentStart = ZoneGraphStorage.LanePoints[PointIndex];
+		const FVector& SegmentEnd = ZoneGraphStorage.LanePoints[PointIndex + 1];
+		const float SegmentLength = (SegmentEnd - SegmentStart).Length();
+		if (Length + SegmentLength >= Distance)
+		{
+			return SegmentStart + (SegmentEnd - SegmentStart).GetSafeNormal() * (Distance - Length);
+		}
+		Length += SegmentLength;
+	}
+
+	return GetLaneEndPoint(LaneIndex, ZoneGraphStorage);
+}
+
 // Lane straightness.
 float GetLaneStraightness(const uint32 LaneIndex, const FZoneGraphStorage& ZoneGraphStorage)
 {
@@ -225,6 +326,314 @@ LaneTurnType GetLaneTurnType(const uint32 LaneIndex, const FZoneGraphStorage& Zo
 	}
 }
 
+int32 GetLanePriority(
+	const FZoneGraphTrafficLaneData* TrafficLaneData,
+	const FMassTrafficLanePriorityFilters& LanePriorityFilters,
+	const FZoneGraphStorage& ZoneGraphStorage)
+{
+	if (TrafficLaneData == nullptr)
+	{
+		return INDEX_NONE;
+	}
 
+	FZoneGraphTagMask LaneTagMask;
+	if (!UE::ZoneGraph::Query::GetLaneTags(ZoneGraphStorage, TrafficLaneData->LaneHandle, LaneTagMask))
+	{
+		return INDEX_NONE;
+	}
+
+	for (int32 PriorityIndex = 0; PriorityIndex < LanePriorityFilters.LaneTagFilters.Num(); ++PriorityIndex)
+	{
+		const FZoneGraphTagFilter& LaneChangePriorityFilter = LanePriorityFilters.LaneTagFilters[PriorityIndex];
+
+		if (LaneChangePriorityFilter.Pass(LaneTagMask))
+		{
+			return LanePriorityFilters.LaneTagFilters.Num() - 1 - PriorityIndex;
+		}
+	}
+
+	return INDEX_NONE;
+}
+
+void DrawLaneData(
+	const UZoneGraphSubsystem& ZoneGraphSubsystem,
+	const FZoneGraphLaneHandle& LaneHandle,
+	const FColor LaneColor,
+	const UWorld& World,
+	const float ZOffset,
+	const float LifeTime)
+{
+	if (!LaneHandle.IsValid())
+	{
+		return;
+	}
+
+	if (const FZoneGraphStorage* ZoneGraphStorage = ZoneGraphSubsystem.GetZoneGraphStorage(LaneHandle.DataHandle))
+	{
+		const FZoneLaneData& ZoneLaneData = ZoneGraphStorage->Lanes[LaneHandle.Index];
+
+		for (int32 LanePointIndex = ZoneLaneData.PointsBegin; LanePointIndex < ZoneLaneData.PointsEnd - 1; ++LanePointIndex)
+		{
+			const FVector& LaneSegmentStart = ZoneGraphStorage->LanePoints[LanePointIndex] + FVector(0.0f, 0.0f, ZOffset);
+			const FVector& LaneSegmentEnd = ZoneGraphStorage->LanePoints[LanePointIndex + 1] + FVector(0.0f, 0.0f, ZOffset);
+
+			const float ArrowSize = LanePointIndex == ZoneLaneData.PointsEnd - 2 ? 10000.0f : 1000.0f;
+
+			DrawDebugDirectionalArrow(&World, LaneSegmentStart, LaneSegmentEnd, ArrowSize, LaneColor, false, LifeTime, 0, 10.0f);
+		}
+	}
+};
+
+bool TryGetVehicleEnterAndExitTimesForIntersection(
+	const FZoneGraphTrafficLaneData& VehicleCurrentLaneData,
+	const FZoneGraphTrafficLaneData& IntersectionLaneData,
+	const float VehicleDistanceAlongCurrentLane,
+	const float VehicleEffectiveSpeed,
+	const float VehicleRadius,
+	float& OutVehicleEnterTime,
+	float& OutVehicleExitTime,
+	float* OutVehicleDistanceToEnterIntersectionLane,
+	float* OutVehicleDistanceToExitIntersectionLane)
+{
+	if (!ensureMsgf(VehicleCurrentLaneData.Length > 0.0f, TEXT("CurrentLane should have a length greater than zero.")))
+	{
+		return false;
+	}
+
+	if (!ensureMsgf(IntersectionLaneData.Length > 0.0f, TEXT("IntersectionLaneData should have a length greater than zero.")))
+	{
+		return false;
+	}
+	
+	const float VehicleDistanceToIntersectionLane = VehicleCurrentLaneData.LaneHandle != IntersectionLaneData.LaneHandle ? VehicleCurrentLaneData.Length - VehicleDistanceAlongCurrentLane : -VehicleDistanceAlongCurrentLane;
+	
+	const float VehicleDistanceToEnterIntersectionLane = VehicleDistanceToIntersectionLane - VehicleRadius;
+	const float VehicleDistanceToExitIntersectionLane = VehicleDistanceToEnterIntersectionLane + IntersectionLaneData.Length + VehicleRadius;
+
+	// Note:  Vehicles currently don't have support for going in reverse.  So, we don't consider it, here.
+	const float TimeForVehicleToEnterIntersectionLane = VehicleEffectiveSpeed > 0.0f ? VehicleDistanceToEnterIntersectionLane / VehicleEffectiveSpeed : TNumericLimits<float>::Max();
+	const float TimeForVehicleToExitIntersectionLane = VehicleEffectiveSpeed > 0.0f ? VehicleDistanceToExitIntersectionLane / VehicleEffectiveSpeed : TNumericLimits<float>::Max();
+
+	OutVehicleEnterTime = TimeForVehicleToEnterIntersectionLane;
+	OutVehicleExitTime = TimeForVehicleToExitIntersectionLane;
+
+	if (OutVehicleDistanceToEnterIntersectionLane != nullptr)
+	{
+		*OutVehicleDistanceToEnterIntersectionLane = VehicleDistanceToEnterIntersectionLane;
+	}
+
+	if (OutVehicleDistanceToExitIntersectionLane != nullptr)
+	{
+		*OutVehicleDistanceToExitIntersectionLane = VehicleDistanceToExitIntersectionLane;
+	}
+	
+	return true;
+}
+
+bool TryGetEnterAndExitDistancesAlongQueryLane(
+	const UMassTrafficSubsystem& MassTrafficSubsystem,
+	const UMassTrafficSettings& MassTrafficSettings,
+	const FZoneGraphStorage& ZoneGraphStorage,
+	const FZoneGraphLaneHandle& QueryLane,
+	const FZoneGraphLaneHandle& OtherLane,
+	float& OutEnterDistanceAlongQueryLane,
+	float& OutExitDistanceAlongQueryLane,
+	bool bExpectIntersection)
+{
+	// First, see if we can get the enter/exit distances from the cache.
+	// Otherwise, we'll compute it.
+	if (FMassTrafficLaneIntersectionInfo LaneIntersectionInfo; MassTrafficSubsystem.TryGetLaneIntersectionInfo(QueryLane, OtherLane, LaneIntersectionInfo))
+	{
+		OutEnterDistanceAlongQueryLane = LaneIntersectionInfo.EnterDistance;
+		OutExitDistanceAlongQueryLane = LaneIntersectionInfo.ExitDistance;
+		
+		return true;
+	}
+	
+	float QueryLaneLength = 0.0f;
+	const bool bFoundQueryLaneLength = UE::ZoneGraph::Query::GetLaneLength(ZoneGraphStorage, QueryLane, QueryLaneLength);
+
+	if (!ensureMsgf(bFoundQueryLaneLength, TEXT("Must find QueryLaneLength in TryGetEnterAndExitDistancesAlongQueryLane.")))
+	{
+		return false;
+	}
+
+	float OtherLaneWidth = 0.0f;
+	const bool bFoundOtherLaneWidth = UE::ZoneGraph::Query::GetLaneWidth(ZoneGraphStorage, OtherLane, OtherLaneWidth);
+
+	if (!ensureMsgf(bFoundOtherLaneWidth, TEXT("Must find OtherLaneWidth in TryGetEnterAndExitDistancesAlongQueryLane.")))
+	{
+		return false;
+	}
+
+	const float OtherLaneHalfWidth = OtherLaneWidth * 0.5f;
+
+	float DistanceAlongIntersectionLaneToOtherLaneLeftSide = 0.0f;
+	int32 IntersectionLaneIntersectionSegmentIndexLeftSide = 0;
+	float NormalizedDistanceAlongIntersectionLaneIntersectionSegmentLeftSide = 0.0f;
+	
+	const bool bFoundIntersectionQueryToOtherLaneLeftSide = UE::ZoneGraph::Query::FindFirstIntersectionBetweenLanes(
+		ZoneGraphStorage,
+		QueryLane,
+		OtherLane,
+		-OtherLaneHalfWidth,
+		DistanceAlongIntersectionLaneToOtherLaneLeftSide,
+		&IntersectionLaneIntersectionSegmentIndexLeftSide,
+		&NormalizedDistanceAlongIntersectionLaneIntersectionSegmentLeftSide,
+		MassTrafficSettings.AcceptableLaneIntersectionDistance);
+
+	float DistanceAlongIntersectionLaneToOtherLaneRightSide = 0.0f;
+	int32 IntersectionLaneIntersectionSegmentIndexRightSide = 0;
+	float NormalizedDistanceAlongIntersectionLaneIntersectionSegmentRightSide = 0.0f;
+	
+	const bool bFoundIntersectionQueryToOtherLaneRightSide = UE::ZoneGraph::Query::FindFirstIntersectionBetweenLanes(
+		ZoneGraphStorage,
+		QueryLane,
+		OtherLane,
+		OtherLaneHalfWidth,
+		DistanceAlongIntersectionLaneToOtherLaneRightSide,
+		&IntersectionLaneIntersectionSegmentIndexRightSide,
+		&NormalizedDistanceAlongIntersectionLaneIntersectionSegmentRightSide,
+		MassTrafficSettings.AcceptableLaneIntersectionDistance);
+
+	if (!(bFoundIntersectionQueryToOtherLaneLeftSide || bFoundIntersectionQueryToOtherLaneRightSide))
+	{
+		ensureMsgf(!bExpectIntersection, TEXT("Expected to find left side and/or right side intersections between QueryLane and OtherLane in TryGetEnterAndExitDistancesAlongQueryLane.  Either we're testing against the wrong OtherLane, or AcceptableLaneIntersectionDistance is not high enough to detect the intersection.  MassTrafficSettings.AcceptableLaneIntersectionDistance: %f."), MassTrafficSettings.AcceptableLaneIntersectionDistance);
+		return false;
+	}
+	
+	// The enter distance will be the *min* of the intersection distances (if there are 2),
+	// otherwise it'll be the distance to the left side or right side intersection (whichever one exists).
+	const float DistanceAlongQueryLaneToOtherLaneEntrance = bFoundIntersectionQueryToOtherLaneLeftSide && bFoundIntersectionQueryToOtherLaneRightSide
+		? FMath::Min(DistanceAlongIntersectionLaneToOtherLaneLeftSide, DistanceAlongIntersectionLaneToOtherLaneRightSide)
+		: bFoundIntersectionQueryToOtherLaneLeftSide ? DistanceAlongIntersectionLaneToOtherLaneLeftSide
+		: DistanceAlongIntersectionLaneToOtherLaneRightSide;
+
+	// The exit distance will be the *max* of the intersection distances (if there are 2),
+	// otherwise it'll be the length of the QueryLane.
+	const float DistanceAlongQueryLaneToOtherLaneExit = bFoundIntersectionQueryToOtherLaneLeftSide && bFoundIntersectionQueryToOtherLaneRightSide
+		? FMath::Max(DistanceAlongIntersectionLaneToOtherLaneLeftSide, DistanceAlongIntersectionLaneToOtherLaneRightSide)
+		: QueryLaneLength;
+
+	OutEnterDistanceAlongQueryLane = DistanceAlongQueryLaneToOtherLaneEntrance;
+	OutExitDistanceAlongQueryLane = DistanceAlongQueryLaneToOtherLaneExit;
+
+	return true;
+}
+
+bool TryGetVehicleEnterAndExitTimesForCrossingLane(
+	const UMassTrafficSubsystem& MassTrafficSubsystem,
+	const UMassTrafficSettings& MassTrafficSettings,
+	const FZoneGraphStorage& ZoneGraphStorage,
+	const FZoneGraphTrafficLaneData& VehicleCurrentLaneData,
+	const FZoneGraphTrafficLaneData& VehicleQueryLaneData,
+	const FZoneGraphLaneHandle& CrossingLane,
+	const float VehicleDistanceAlongCurrentLane,
+	const float VehicleEffectiveSpeed,
+	const float VehicleRadius,
+	float& OutVehicleEnterTime,
+	float& OutVehicleExitTime,
+	float* OutVehicleEnterDistance,
+	float* OutVehicleExitDistance)
+{
+	if (!ensureMsgf(VehicleCurrentLaneData.NextLanes.ContainsByPredicate([&VehicleQueryLaneData](const FZoneGraphTrafficLaneData* LaneData){ return LaneData->LaneHandle == VehicleQueryLaneData.LaneHandle; } ) || VehicleCurrentLaneData.LaneHandle == VehicleQueryLaneData.LaneHandle, TEXT("VehicleQueryLaneData must be one of VehicleCurrentLaneData's NextLanes (or they must be the same lane) in TryGetVehicleEnterAndExitTimesForCrossingLane.")))
+	{
+		return false;
+	}
+	
+	const float VehicleDistanceAlongQueryLane = VehicleCurrentLaneData.LaneHandle != VehicleQueryLaneData.LaneHandle ? -(VehicleCurrentLaneData.Length - VehicleDistanceAlongCurrentLane) : VehicleDistanceAlongCurrentLane;
+
+	return TryGetEntityEnterAndExitTimesForCrossingLane(
+		MassTrafficSubsystem,
+		MassTrafficSettings,
+		ZoneGraphStorage,
+		VehicleQueryLaneData.LaneHandle,
+		CrossingLane,
+		VehicleDistanceAlongQueryLane,
+		VehicleEffectiveSpeed,
+		VehicleRadius,
+		OutVehicleEnterTime,
+		OutVehicleExitTime,
+		OutVehicleEnterDistance,
+		OutVehicleExitDistance
+		);
+}
+
+bool TryGetEntityEnterAndExitTimesForCrossingLane(
+	const UMassTrafficSubsystem& MassTrafficSubsystem,
+	const UMassTrafficSettings& MassTrafficSettings,
+	const FZoneGraphStorage& ZoneGraphStorage,
+	const FZoneGraphLaneHandle& EntityQueryLane,
+	const FZoneGraphLaneHandle& CrossingLane,
+	const float EntityDistanceAlongQueryLane,
+	const float EntitySpeed,
+	const float EntityRadius,
+	float& OutEntityEnterTime,
+	float& OutEntityExitTime,
+	float* OutEntityEnterDistance,
+	float* OutEntityExitDistance)
+{
+	float DistanceAlongEntityLaneToCrossingLaneEntrance;
+	float DistanceAlongEntityLaneToCrossingLaneExit;
+	
+	if (!TryGetEnterAndExitDistancesAlongQueryLane(
+		MassTrafficSubsystem,
+		MassTrafficSettings,
+		ZoneGraphStorage,
+		EntityQueryLane,
+		CrossingLane,
+		DistanceAlongEntityLaneToCrossingLaneEntrance,
+		DistanceAlongEntityLaneToCrossingLaneExit))
+	{
+		return false;
+	}
+	
+	const float EntityDistanceToEnterCrossingLane = DistanceAlongEntityLaneToCrossingLaneEntrance - EntityDistanceAlongQueryLane - EntityRadius;
+	const float EntityDistanceToExitCrossingLane = DistanceAlongEntityLaneToCrossingLaneExit - EntityDistanceAlongQueryLane + EntityRadius;
+
+	// Note:  We don't consider going in reverse, here.  We'll add it when a use-case comes up.
+	const float TimeForEntityToEnterCrossingLane = EntitySpeed > 0.0f ? EntityDistanceToEnterCrossingLane / EntitySpeed : TNumericLimits<float>::Max();
+	const float TimeForEntityToExitCrossingLane = EntitySpeed > 0.0f ? EntityDistanceToExitCrossingLane / EntitySpeed : TNumericLimits<float>::Max();
+
+	OutEntityEnterTime = TimeForEntityToEnterCrossingLane;
+	OutEntityExitTime = TimeForEntityToExitCrossingLane;
+
+	if (OutEntityEnterDistance != nullptr)
+	{
+		*OutEntityEnterDistance = EntityDistanceToEnterCrossingLane;
+	}
+
+	if (OutEntityExitDistance != nullptr)
+	{
+		*OutEntityExitDistance = EntityDistanceToExitCrossingLane;
+	}
+	
+	return true;
+}
+
+void GetEnterAndExitTimeForYieldingEntity(
+	const float EnterDistance,
+    const float ExitDistance,
+    const float Acceleration,
+    float& OutEntityEnterTime,
+    float& OutEntityExitTime)
+{
+	if (Acceleration > 0.0f)
+	{
+		const float EntityEnterTimeSquared = 2.0f * EnterDistance / Acceleration;
+		const float EntityExitTimeSquared = 2.0f * ExitDistance / Acceleration;
+
+		const float EntityEnterTime = FMath::Sqrt(FMath::Abs(EntityEnterTimeSquared)) * FMath::Sign(EntityEnterTimeSquared);
+		const float EntityExitTime = FMath::Sqrt(FMath::Abs(EntityExitTimeSquared)) * FMath::Sign(EntityExitTimeSquared);
+
+		OutEntityEnterTime = EntityEnterTime;
+		OutEntityExitTime = EntityExitTime;
+	}
+	else
+	{
+		OutEntityEnterTime = TNumericLimits<float>::Max();
+		OutEntityExitTime = TNumericLimits<float>::Max();
+	}
+}
 
 }

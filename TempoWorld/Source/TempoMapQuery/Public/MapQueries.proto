@@ -67,7 +67,8 @@ enum LaneAccessibility {
   YELLOW = 2;
   RED = 3;
   STOP_SIGN = 4;
-  NO_TRAFFIC_CONTROL = 5;
+  YIELD_SIGN = 5;
+  NO_TRAFFIC_CONTROL = 6;
 }
 
 message LaneAccessibilityRequest {

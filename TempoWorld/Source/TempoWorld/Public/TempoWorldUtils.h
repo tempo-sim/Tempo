@@ -6,6 +6,8 @@
 
 AActor* GetActorWithName(const UWorld* World, const FString& Name, const bool bIncludeHidden=false);
 
+UObject* GetAssetByPath(const FString& AssetPath);
+
 template <typename T = UActorComponent>
 T* GetComponentWithName(const AActor* Actor, const FString& Name)
 {
@@ -63,8 +65,8 @@ UClass* GetSubClassWithName(const FString& Name)
 	ContentPaths.Add(TEXT("/"));
 	AssetRegistry.ScanPathsSynchronous(ContentPaths);
 
-	FName BaseClassName = AActor::StaticClass()->GetFName();
-	FName BaseClassPkgName = AActor::StaticClass()->GetPackage()->GetFName();
+	FName BaseClassName = T::StaticClass()->GetFName();
+	FName BaseClassPkgName = T::StaticClass()->GetPackage()->GetFName();
 	FTopLevelAssetPath BaseClassPath(BaseClassPkgName, BaseClassName);
 
 	// Use the asset registry to get the set of all class names deriving from Base
@@ -97,7 +99,7 @@ UClass* GetSubClassWithName(const FString& Name)
 				const FString ClassObjectPath = FPackageName::ExportTextPathToObjectPath(GeneratedClassPathPtr.GetValue());
 				const FString ClassName = FPackageName::ObjectPathToObjectName(ClassObjectPath);
 				const FTopLevelAssetPath ClassPath = FTopLevelAssetPath(ClassObjectPath);
-				
+
 				// Check if this class is in the derived set
 				if (!DerivedNames.Contains(ClassPath))
 				{

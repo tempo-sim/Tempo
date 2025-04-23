@@ -3,6 +3,7 @@
 #pragma once
 
 #include "TempoIntersectionInterface.h"
+#include "MassTrafficControllerRegistrySubsystem.h"
 
 #include "Components/ActorComponent.h"
 #include "CoreMinimal.h"
@@ -46,6 +47,9 @@ protected:
 	FTempoRoadConfigurationInfo GetPrioritizedRoadConfigurationInfo(const AActor& IntersectionQueryActor, int32 SourceConnectionIndex, const TArray<ETempoRoadConfigurationDescriptor>& PrioritizedRoadConfigurationDescriptors, const TFunction<bool(const FTempoRoadConfigurationInfo&, const FTempoRoadConfigurationInfo&)>& SortPredicate) const;
 
 	float GetLateralOffsetFromControlPoint(const AActor& RoadQueryActor, ETempoRoadOffsetOrigin LateralOffsetOrigin, float InLateralOffset) const;
+
+	void SetupTrafficLightRuntimeData(AActor& OwnerActor, UMassTrafficControllerRegistrySubsystem& TrafficControllerRegistrySubsystem);
+	void SetupTrafficSignRuntimeData(AActor& OwnerActor, UMassTrafficControllerRegistrySubsystem& TrafficControllerRegistrySubsystem);
 
 	AActor* GetConnectedRoadActor(const AActor& IntersectionQueryActor, int32 ConnectionIndex) const;
 	

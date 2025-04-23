@@ -131,12 +131,12 @@ void UMassTrafficVehicleSimulationLODProcessor::Execute(FMassEntityManager& Enti
 					{
 						if (SimpleVehiclePhysicsFragments.IsEmpty())
 						{
-							if (PhysicsSharedFragment.Template)
+							if (PhysicsSharedFragment.IsValid())
 							{
 								// Add FDataFragment_PIDVehicleControl & FDataFragment_SimpleVehiclePhysics fragments
 								QueryContext.Defer().PushCommand<FMassCommandAddFragmentInstances>(QueryContext.GetEntity(EntityIdx)
-										, PhysicsSharedFragment.Template->SimpleVehiclePhysicsFragmentTemplate
-										, FMassTrafficPIDVehicleControlFragment(PhysicsSharedFragment.Template->SimpleVehiclePhysicsConfig.MaxSteeringAngle)
+										, PhysicsSharedFragment.SimpleVehiclePhysicsFragmentTemplate
+										, FMassTrafficPIDVehicleControlFragment(PhysicsSharedFragment.SimpleVehiclePhysicsConfig.MaxSteeringAngle)
 										, FMassTrafficPIDControlInterpolationFragment()
 										, FMassTrafficVehicleDamageFragment());
 							}

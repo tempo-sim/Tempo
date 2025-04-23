@@ -27,11 +27,15 @@ public class MassTrafficEditor : ModuleRules
 				"Engine",
 				"ZoneGraph",
 				"MassTraffic",
-				"StructUtils"
 			}
 			);
-			
-		
+
+		// StructUtils plugin was deprecated in 5.5 and moved into CoreUObject
+		if (Target.Version.MajorVersion == 5 && Target.Version.MinorVersion < 5)
+		{
+			PublicDependencyModuleNames.Add("StructUtils");
+		}
+
 		PrivateDependencyModuleNames.AddRange(
 			new string[]
 			{

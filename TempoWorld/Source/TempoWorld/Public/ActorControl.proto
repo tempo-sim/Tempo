@@ -29,6 +29,25 @@ message DestroyActorRequest {
   string actor = 1;
 }
 
+message AddComponentRequest {
+  string type = 1;
+  string actor = 2;
+  string name = 3;
+  string parent = 4;
+  TempoScripting.Transform transform = 5;
+  string socket = 6;
+}
+
+message AddComponentResponse {
+  string name = 1;
+  TempoScripting.Transform transform = 2;
+}
+
+message DestroyComponentRequest {
+  string actor = 1;
+  string component = 2;
+}
+
 message SetActorTransformRequest {
   string actor = 1;
   TempoScripting.Transform transform = 2;
@@ -114,6 +133,13 @@ message SetStringPropertyRequest {
   string value = 4;
 }
 
+message SetEnumPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  string value = 4;
+}
+
 message SetIntPropertyRequest {
   string actor = 1;
   string component = 2;
@@ -155,6 +181,34 @@ message SetColorPropertyRequest {
   int32 b = 6;
 }
 
+message SetClassPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  string value = 4;
+}
+
+message SetAssetPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  string value = 4;
+}
+
+message SetActorPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  string value = 4;
+}
+
+message SetComponentPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  string value = 4;
+}
+
 message SetBoolArrayPropertyRequest {
   string actor = 1;
   string component = 2;
@@ -163,6 +217,13 @@ message SetBoolArrayPropertyRequest {
 }
 
 message SetStringArrayPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  repeated string values = 4;
+}
+
+message SetEnumArrayPropertyRequest {
   string actor = 1;
   string component = 2;
   string property = 3;
@@ -183,12 +244,50 @@ message SetFloatArrayPropertyRequest {
   repeated float values = 4;
 }
 
+message SetClassArrayPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  repeated string values = 4;
+}
+
+message SetAssetArrayPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  repeated string values = 4;
+}
+
+message SetActorArrayPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  repeated string values = 4;
+}
+
+message SetComponentArrayPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  repeated string values = 4;
+}
+
+message CallFunctionRequest {
+  string actor = 1;
+  string component = 2;
+  string function = 3;
+}
+
 service ActorControlService {
     rpc SpawnActor(SpawnActorRequest) returns (SpawnActorResponse);
 
     rpc FinishSpawningActor(FinishSpawningActorRequest) returns (FinishSpawningActorResponse);
 
     rpc DestroyActor(DestroyActorRequest) returns (TempoScripting.Empty);
+
+    rpc AddComponent(AddComponentRequest) returns (AddComponentResponse);
+
+    rpc DestroyComponent(DestroyComponentRequest) returns (TempoScripting.Empty);
 
     rpc SetActorTransform(SetActorTransformRequest) returns (TempoScripting.Empty);
 
@@ -210,6 +309,8 @@ service ActorControlService {
 
     rpc SetStringProperty(SetStringPropertyRequest) returns (TempoScripting.Empty);
 
+    rpc SetEnumProperty(SetEnumPropertyRequest) returns (TempoScripting.Empty);
+
     rpc SetIntProperty(SetIntPropertyRequest) returns (TempoScripting.Empty);
 
     rpc SetFloatProperty(SetFloatPropertyRequest) returns (TempoScripting.Empty);
@@ -220,11 +321,31 @@ service ActorControlService {
 
     rpc SetColorProperty(SetColorPropertyRequest) returns (TempoScripting.Empty);
 
+    rpc SetClassProperty(SetClassPropertyRequest) returns (TempoScripting.Empty);
+
+    rpc SetAssetProperty(SetAssetPropertyRequest) returns (TempoScripting.Empty);
+
+    rpc SetActorProperty(SetActorPropertyRequest) returns (TempoScripting.Empty);
+
+    rpc SetComponentProperty(SetComponentPropertyRequest) returns (TempoScripting.Empty);
+
     rpc SetBoolArrayProperty(SetBoolArrayPropertyRequest) returns (TempoScripting.Empty);
 
     rpc SetStringArrayProperty(SetStringArrayPropertyRequest) returns (TempoScripting.Empty);
 
+    rpc SetEnumArrayProperty(SetEnumArrayPropertyRequest) returns (TempoScripting.Empty);
+
     rpc SetIntArrayProperty(SetIntArrayPropertyRequest) returns (TempoScripting.Empty);
 
     rpc SetFloatArrayProperty(SetFloatArrayPropertyRequest) returns (TempoScripting.Empty);
+
+    rpc SetClassArrayProperty(SetClassArrayPropertyRequest) returns (TempoScripting.Empty);
+
+    rpc SetAssetArrayProperty(SetAssetArrayPropertyRequest) returns (TempoScripting.Empty);
+
+    rpc SetActorArrayProperty(SetActorArrayPropertyRequest) returns (TempoScripting.Empty);
+
+    rpc SetComponentArrayProperty(SetComponentArrayPropertyRequest) returns (TempoScripting.Empty);
+
+    rpc CallFunction(CallFunctionRequest) returns (TempoScripting.Empty);
 }

@@ -133,7 +133,6 @@ void SPointCloudEditor::Construct(const FArguments& InArgs, UPointCloud* InPoint
 			.FillHeight(1.0f)
 			[
 				SNew(SListView<TSharedPtr<FMetadataHolder>>)
-				.ItemHeight(24)
 				.ListItemsSource(&MetadataAttributes)
 				.OnGenerateRow(this, &SPointCloudEditor::OnGenerateMetadataRowForList)
 				.HeaderRow
@@ -152,7 +151,6 @@ void SPointCloudEditor::Construct(const FArguments& InArgs, UPointCloud* InPoint
 			//The actual list view creation			
 			[
 				SAssignNew(LoadedFiles, SListView<TSharedPtr<FString>>)
-				.ItemHeight(24)
 				.ListItemsSource(&(Datasets)) //The Items array is the source of this listview
 				.OnGenerateRow(this, &SPointCloudEditor::OnGenerateRowForList)
 				.HeaderRow
@@ -175,7 +173,11 @@ TSharedRef<ITableRow> SPointCloudEditor::OnGenerateRowForList(TSharedPtr<FString
 		SNew(STableRow< TSharedPtr<FString> >, OwnerTable)
 		.Padding(2.0f)
 		[
-			SNew(STextBlock).Text(FText::FromString(*Item.Get()))
+			SNew(SBox)
+			.HeightOverride(24.0f) // Height previously set in .ItemHeight in the list view above
+			[
+				SNew(STextBlock).Text(FText::FromString(*Item.Get()))
+			]
 		];
 }
 
@@ -222,21 +224,31 @@ SPointCloudEditor::SMetadataTableRow::Construct(const FArguments& InArgs, const 
 TSharedRef<SWidget>
 SPointCloudEditor::SMetadataTableRow::GenerateWidgetForColumn(const FName& ColumnId)
 {
-	FText ColumnData = NSLOCTEXT("SMetadataTableRow", "ColumnError", "Unrecognized Column");
-	if (ColumnId == SPointCloudEditor::NAME_MetadataAttributeColumn)
+	const TSharedRef<SWidget> ColumnContent = [&]() -> TSharedRef<SWidget>
 	{
-		ColumnData = FText::FromString(Metadata->MetadataName);
-	}
-	else if (ColumnId == SPointCloudEditor::NAME_PointCountColumn)
-	{
-		ColumnData = FText::FromString(FString::FromInt(Metadata->PointCount));
-	}
-	else if (ColumnId == SPointCloudEditor::NAME_ValueCountColumn)
-	{
-		ColumnData = FText::FromString(FString::FromInt(Metadata->ValueCount));
-	}
+		FText ColumnData = NSLOCTEXT("SMetadataTableRow", "ColumnError", "Unrecognized Column");
+		if (ColumnId == SPointCloudEditor::NAME_MetadataAttributeColumn)
+		{
+			ColumnData = FText::FromString(Metadata->MetadataName);
+		}
+		else if (ColumnId == SPointCloudEditor::NAME_PointCountColumn)
+		{
+			ColumnData = FText::FromString(FString::FromInt(Metadata->PointCount));
+		}
+		else if (ColumnId == SPointCloudEditor::NAME_ValueCountColumn)
+		{
+			ColumnData = FText::FromString(FString::FromInt(Metadata->ValueCount));
+		}
+		return SNew(STextBlock).Text(ColumnData);
+	}();
 
-	return SNew(STextBlock).Text(ColumnData);
+	// Wrap the column content in an SBox with fixed height
+	return SNew(SBox)
+		.HeightOverride(24.0f) // Height previously set in .ItemHeight in the list view above
+		.HAlign(HAlign_Fill)
+		[
+			ColumnContent
+		];
 }
 
 #undef LOCTEXT_NAMESPACE

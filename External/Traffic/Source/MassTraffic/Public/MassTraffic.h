@@ -50,7 +50,9 @@ extern int32 GMassTrafficDebugFlowDensity;
 extern int32 GMassTrafficDebugLaneChanging;
 extern int32 GMassTrafficDebugLaneData;
 extern int32 GMassTrafficDebugLaneDataLongitudinalOffset;
-extern int32 GMassTrafficDebugYieldAtIntersectionBehavior;
+extern int32 GMassTrafficDebugYieldBehavior;
+extern int32 GMassTrafficResolveYieldDeadlocks;
+extern int32 GMassTrafficDebugYieldDeadlockResolution;
 extern int32 GMassTrafficDebugOverseer;
 extern float GMassTrafficDebugForceScaling;
 extern int32 GMassTrafficDebugNextOrderValidation;
@@ -78,21 +80,27 @@ extern float GMassTrafficSpeedLimitScale;
 namespace UE::MassTraffic::ProcessorGroupNames
 {
 	const FName FrameStart = FName(TEXT("Traffic.FrameStart"));
+	const FName YieldDeadlockFrameInit = FName(TEXT("Traffic.YieldDeadlockFrameInit"));
 	const FName ParkedVehicleBehavior = FName(TEXT("Traffic.ParkedVehicleBehavior"));
 	const FName PreVehicleBehavior = FName(TEXT("Traffic.PreVehicleBehavior"));
 	const FName PreVehicleVisualization = FName(TEXT("Traffic.PreVehicleVisualization"));
 	const FName TrafficIntersectionVisualization = FName(TEXT("Traffic.TrafficIntersectionVisualization"));
 	const FName TrailerBehavior = FName(TEXT("Traffic.TrailerBehavior"));
 	const FName TrailerVisualization = FName(TEXT("Traffic.TrailerVisualization"));
+	const FName VehicleLaneMetadata = FName(TEXT("Traffic.VehicleLaneMetadata"));
 	const FName VehicleBehavior = FName(TEXT("Traffic.VehicleBehavior"));
 	const FName VehicleLODCollector = FName(TEXT("Traffic.VehicleLODCollector"));
 	const FName VehicleSimulationLOD = FName(TEXT("Traffic.VehicleSimulationLOD"));
 	const FName VehicleVisualization = FName(TEXT("Traffic.VehicleVisualization"));
 	const FName VehicleVisualizationLOD = FName(TEXT("Traffic.VehicleVisualizationLOD"));
-	const FName EndPhysicsIntersectionBehavior = FName(TEXT("TrafficEndPhysics.IntersectionBehavior"));
+	const FName EndPhysicsTrafficLightIntersectionBehavior = FName(TEXT("TrafficEndPhysics.TrafficLightIntersectionBehavior"));
+	const FName EndPhysicsTrafficSignIntersectionBehavior = FName(TEXT("TrafficEndPhysics.TrafficSignIntersectionBehavior"));
 	const FName PostPhysicsDriverVisualization = FName(TEXT("TrafficPostPhysics.DriverVisualization"));
 	const FName PostPhysicsUpdateDistanceToNearestObstacle = FName(TEXT("TrafficPostPhysics.UpdateDistanceToNearestObstacle"));
 	const FName PostPhysicsUpdateTrafficVehicles = FName(TEXT("TrafficPostPhysics.UpdateTrafficVehicles"));
+	const FName YieldDeadlockResolution = FName(TEXT("Traffic.YieldDeadlockResolution"));
+
+	const FName CrowdYieldBehavior = FName(TEXT("Traffic.CrowdYieldBehavior"));
 }
 
 class FMassTrafficModule : public IModuleInterface

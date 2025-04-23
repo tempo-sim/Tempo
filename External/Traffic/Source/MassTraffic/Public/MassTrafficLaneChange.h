@@ -63,7 +63,8 @@ enum EMassTrafficLaneChangeRecommendationLevel
 	StayOnCurrentLane_RetrySoon = 1,
 	
 	NormalLaneChange = 2,
-	TransversingLaneChange = 3
+	TransversingLaneChange = 3,
+	TurningLaneChange = 4
 };
 
 
@@ -76,15 +77,10 @@ struct FMassTrafficLaneChangeRecommendation
 	bool bNoLaneChangesUntilNextLane = false;
 };
 
-	
+
 bool TrunkVehicleLaneCheck(const FZoneGraphTrafficLaneData* TrafficLaneData, const FMassTrafficVehicleControlFragment& VehicleControlFragment);
 
-int32 GetLaneChangePriority(
-	const FZoneGraphTrafficLaneData* TrafficLaneData,
-	const FMassTrafficVehicleControlFragment& VehicleControlFragment,
-	const FZoneGraphStorage& ZoneGraphStorage);
 
-	
 FORCEINLINE bool AreVehiclesCurrentlyApproachingLaneFromIntersection(const FZoneGraphTrafficLaneData& TrafficLaneData) 
 {
 	return TrafficLaneData.bIsDownstreamFromIntersection && TrafficLaneData.NumVehiclesApproachingLane > 0;
@@ -205,24 +201,34 @@ void ChooseLaneForLaneChange(
 	const FRandomStream& RandomStream,
 	const UMassTrafficSettings& MassTrafficSettings,
 	const FZoneGraphStorage& ZoneGraphStorage,
-	FMassTrafficLaneChangeRecommendation& OutRecommendation);
+	FMassTrafficLaneChangeRecommendation& InOutRecommendation);
 
 bool CheckNextVehicle(const FMassEntityHandle Entity, const FMassEntityHandle NextEntity, const FMassEntityManager& EntityManager);
-
-bool ShouldPerformPreemptiveYieldAtIntersection(
-	const UMassTrafficSubsystem& MassTrafficSubsystem,
-	const FMassEntityManager& EntityManager,
-	const FMassTrafficVehicleControlFragment& VehicleControlFragment,
-	const FMassZoneGraphLaneLocationFragment& LaneLocationFragment,
-	const FAgentRadiusFragment& RadiusFragment,
-	bool& OutHasAnotherVehicleEnteredRelevantLaneAfterPreemptiveYieldRollOut);
 	
 bool ShouldPerformReactiveYieldAtIntersection(
 	const UMassTrafficSubsystem& MassTrafficSubsystem,
+	const UMassCrowdSubsystem& MassCrowdSubsystem,
 	const FMassEntityManager& EntityManager,
 	const FMassTrafficVehicleControlFragment& VehicleControlFragment,
 	const FMassZoneGraphLaneLocationFragment& LaneLocationFragment,
 	const FAgentRadiusFragment& RadiusFragment,
-	bool& OutShouldGiveOpportunityForTurningVehiclesToReactivelyYieldAtIntersection);
+	const FMassTrafficRandomFractionFragment& RandomFractionFragment,
+	const FZoneGraphStorage& ZoneGraphStorage,
+	bool& OutShouldGiveOpportunityForTurningVehiclesToReactivelyYieldAtIntersection,
+	FZoneGraphLaneHandle& OutYieldTargetLane,
+	FMassEntityHandle& OutYieldTargetEntity,
+	int32& OutMergeYieldCaseIndex);
+
+bool ShouldPerformReactiveYieldAtRoadCrosswalk(
+	const UMassTrafficSubsystem& MassTrafficSubsystem,
+	const UMassCrowdSubsystem& MassCrowdSubsystem,
+	const FMassEntityManager& EntityManager,
+	const FMassTrafficVehicleControlFragment& VehicleControlFragment,
+	const FMassZoneGraphLaneLocationFragment& LaneLocationFragment,
+	const FAgentRadiusFragment& RadiusFragment,
+	const FMassTrafficRandomFractionFragment& RandomFractionFragment,
+	const FZoneGraphStorage& ZoneGraphStorage,
+	FZoneGraphLaneHandle& OutYieldTargetLane,
+	FMassEntityHandle& OutYieldTargetEntity);
 
 };

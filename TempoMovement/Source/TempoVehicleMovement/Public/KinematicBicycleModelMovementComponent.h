@@ -30,6 +30,9 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	float Wheelbase = 100.0; // CM
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	bool bReverseEnabled = false;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite)
 	float LinearVelocity = 0.0; // CM/S
 

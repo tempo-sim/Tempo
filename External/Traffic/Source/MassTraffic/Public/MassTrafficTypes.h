@@ -8,13 +8,19 @@
 
 #include "HierarchicalHashGrid2D.h"
 #include "MassEntityView.h"
+#include "MassTrafficSigns.h"
+
+#include "Containers/Set.h"
 
 #include "MassTrafficTypes.generated.h"
 
 #define MASSTRAFFIC_NUM_INLINE_VEHICLE_NEXT_LANES 2 // ..determined to be ~1.4 on average for this game
+#define MASSTRAFFIC_NUM_INLINE_VEHICLE_PREV_LANES 2 // Should be similar to merging lanes.
 #define MASSTRAFFIC_NUM_INLINE_VEHICLE_MERGING_LANES 2 // ..determined to be ~1.3 on average for this game
 #define MASSTRAFFIC_NUM_INLINE_VEHICLE_SPLITTING_LANES 2 // ..determined to be ~1.7 on average for this game
-
+#define MASSTRAFFIC_NUM_INLINE_VEHICLE_CONFLICT_LANES 16 // There could potentially be many more conflict lanes.  We'll need to keep an eye on this.
+#define MASSTRAFFIC_NUM_INLINE_VEHICLE_CROSSWALK_LANES 12 // Each lane should only run through (at most) this many crosswalk lanes.
+#define MASSTRAFFIC_NUM_INLINE_VEHICLE_CROSSWALKS 6 // Each lane should only run through (at most) this many crosswalks.
 
 
 namespace UE::MassTraffic
@@ -411,6 +417,23 @@ static uint32 GetTypeHash(const FMassTrafficFloatAndID& FloatAndID)
 }
 
 
+struct MASSTRAFFIC_API FMassTrafficControllerType
+{
+	FMassTrafficControllerType(bool bIsTrafficLightControlledIn, EMassTrafficControllerSignType TrafficControllerSignTypeIn)
+		: bIsTrafficLightControlled(bIsTrafficLightControlledIn), TrafficControllerSignType(TrafficControllerSignTypeIn)
+	{
+		ensureMsgf(!(bIsTrafficLightControlled && TrafficControllerSignType != EMassTrafficControllerSignType::None),
+			TEXT("TrafficControllerSignType cannot be both traffic light and sign controlled."));
+	}
+
+	bool GetIsTrafficLightControlled() const { return bIsTrafficLightControlled; }
+	EMassTrafficControllerSignType GetTrafficControllerSignType() const { return TrafficControllerSignType; }
+
+private:
+	bool bIsTrafficLightControlled = false;
+	EMassTrafficControllerSignType TrafficControllerSignType = EMassTrafficControllerSignType::None;
+};
+
 /**
  * Constant lane data that each vehicle takes a copy of when entering the lane 
  */
@@ -418,7 +441,7 @@ struct MASSTRAFFIC_API FZoneGraphTrafficLaneConstData
 {
 	FZoneGraphTrafficLaneConstData() :
 		bIsIntersectionLane(false),
-		bIsTrafficLightControlled(false),
+		bIsTrunkLane(false),
 		bIsLaneChangingLane(false)
 	{
 	}
@@ -428,11 +451,6 @@ struct MASSTRAFFIC_API FZoneGraphTrafficLaneConstData
 	 * @see UMassTrafficSettings::IntersectionTag
 	 */
 	bool bIsIntersectionLane : 1;
-
-	/**
-	 * Lane is controlled by a traffic light.
-	 */
-	bool bIsTrafficLightControlled : 1;
 
 	/**
 	 * Lane is inside an intersection (an intersection interior lane)
@@ -445,7 +463,7 @@ struct MASSTRAFFIC_API FZoneGraphTrafficLaneConstData
 	 * @see UMassTrafficSettings::LaneChangingLaneFilter
 	 */
 	bool bIsLaneChangingLane : 1;
-	
+
 	/** Lane speed limit in cm/s */
 	FFloat16 SpeedLimit = 0.0f;
 
@@ -454,6 +472,59 @@ struct MASSTRAFFIC_API FZoneGraphTrafficLaneConstData
 	 * at the start of this lane to AverageNextLanesSpeedLimit at the end
 	 */
 	FFloat16 AverageNextLanesSpeedLimit = 0.0f;
+
+	void AddTrafficController(float DistanceAlongLane, const FMassTrafficControllerType& TrafficControllerType)
+	{
+		TrafficControllerTypes.Add(TPair<float, FMassTrafficControllerType>(DistanceAlongLane, TrafficControllerType));
+		TrafficControllerTypes.Sort([](const auto& Left, const auto& Right)
+		{
+			return Left.Key < Right.Key;
+		});
+	}
+
+	TOptional<TPair<float, FMassTrafficControllerType>> TryGetTrafficControllerType(float DistanceAlongLane) const
+	{
+		for (const auto& Elem : TrafficControllerTypes)
+		{
+			const float ControllerDistance = Elem.Key;
+			if (ControllerDistance > DistanceAlongLane)
+			{
+				return Elem;
+			}
+		}
+
+		return TOptional<TPair<float, FMassTrafficControllerType>>();
+	}
+
+	TOptional<FMassTrafficControllerType> TryGetTrafficControllerTypeAtStart() const
+	{
+		if (!TrafficControllerTypes.IsEmpty() && TrafficControllerTypes[0].Key == 0)
+		{
+			return TrafficControllerTypes[0].Value;
+		}
+
+		return TOptional<FMassTrafficControllerType>();
+	}
+
+	TOptional<float> TryGetLaneLengthAtNextTrafficControl(float DistanceAlongLane) const
+	{
+		for (const auto& Elem : TrafficControllerTypes)
+		{
+			const float ControllerDistance = Elem.Key;
+			if (ControllerDistance > DistanceAlongLane)
+			{
+				return ControllerDistance;
+			}
+		}
+
+		return TOptional<float>();
+	}
+
+private:
+	/**
+	 * Traffic controller types at distances along this lane. Always sorted by distance.
+	 */
+	TArray<TPair<float, FMassTrafficControllerType>> TrafficControllerTypes;
 };
 
 
@@ -474,6 +545,15 @@ struct MASSTRAFFIC_API FZoneGraphTrafficLaneData
 	bool bHasTransverseLaneAdjacency : 1;
 	bool bIsDownstreamFromIntersection : 1;
 	bool bIsStoppedVehicleInPreviousLaneOverlappingThisLane : 1; // (See all CROSSWALKOVERLAP.)
+	
+	// Note:  Currently only sign-controlled intersections will set this flag.
+	TMap<float, bool, TSetAllocator<TSparseArrayAllocator<>, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_VEHICLE_CROSSWALKS>>> HasPedestriansWaitingToCross;
+
+	// Note:  Currently only sign-controlled intersections will set this flag.
+	TMap<float, bool, TSetAllocator<TSparseArrayAllocator<>, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_VEHICLE_CROSSWALKS>>> HasPedestriansInDownstreamCrosswalkLanes;
+
+	// Note:  Currently only sign-controlled intersections will set this flag.
+	TMap<float, bool, TSetAllocator<TSparseArrayAllocator<>, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_VEHICLE_CROSSWALKS>>> AreAllEntitiesOnCrosswalkYielding;
 
 	UE::MassTraffic::TFraction<true, uint8> FractionUntilClosed;
 
@@ -497,11 +577,20 @@ struct MASSTRAFFIC_API FZoneGraphTrafficLaneData
 	uint8 NumVehiclesApproachingLane = 0; 
 	uint8 NumReservedVehiclesOnLane = 0; // See all CANTSTOPLANEEXIT.
 	
+	FMassEntityHandle IntersectionEntityHandle;
+	
 	FZoneGraphTrafficLaneData* LeftLane = nullptr; // ..non-merging non-splitting same-direction lane on left 
 	FZoneGraphTrafficLaneData* RightLane = nullptr; // ..non-merging non-splitting same-direction lane on right
 	TArray<FZoneGraphTrafficLaneData*, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_VEHICLE_NEXT_LANES>> NextLanes;
+	TArray<FZoneGraphTrafficLaneData*, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_VEHICLE_PREV_LANES>> PrevLanes;
 	TArray<FZoneGraphTrafficLaneData*, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_VEHICLE_MERGING_LANES>> MergingLanes;
 	TArray<FZoneGraphTrafficLaneData*, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_VEHICLE_SPLITTING_LANES>> SplittingLanes;
+	TArray<FZoneGraphTrafficLaneData*, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_VEHICLE_CONFLICT_LANES>> ConflictLanes;
+
+	// Lanes which are not drivable will not have an associated FZoneGraphTrafficLaneData.
+	// So, we just store FZoneGraphLaneHandles for crosswalk lanes with "right of way" over this lane,
+	// which we call "downstream crosswalk lanes".
+	TMap<FZoneGraphLaneHandle, float, TSetAllocator<TSparseArrayAllocator<>, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_VEHICLE_CROSSWALK_LANES>>> DownstreamCrosswalkLanes;
 
 	/**
 	 * NOTE - If these take up too much memory, we can instead make a single 1-bit flag to cover both of these, that simply
@@ -515,7 +604,17 @@ struct MASSTRAFFIC_API FZoneGraphTrafficLaneData
 	/** Center location (average between start and end lane location) and radius for distance testing */
 	FVector CenterLocation;
 	FFloat16 Radius;
-	
+
+	bool HasYieldSignAlongRoad(float DistanceAlongLane) const;
+	bool HasYieldSignThatRequiresStopAlongRoad(float DistanceAlongLane) const;
+	bool HasYieldSignAtLaneStart() const;
+	bool HasStopSignAtLaneStart() const;
+	bool HasStopSignOrYieldSignAtLaneStart() const;
+	bool HasTrafficLightAtLaneStart() const;
+	bool HasTrafficSignThatRequiresStopAtLaneStart() const;
+
+	float LaneLengthAtNextTrafficControl(float DistanceAlongLane) const;
+
 	/** Clears all references to vehicles on this lane and reset all vehicle counters */  
 	void ClearVehicles();
 
@@ -664,4 +763,13 @@ struct MASSTRAFFIC_API FMassTrafficZoneGraphData
 	{
 		return TrafficLaneDataLookup[LaneIndex];
 	}
+};
+
+USTRUCT(BlueprintType)
+struct MASSTRAFFIC_API FMassTrafficLanePriorityFilters
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	TArray<FZoneGraphTagFilter> LaneTagFilters;
 };

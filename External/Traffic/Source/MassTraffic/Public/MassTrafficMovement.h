@@ -28,15 +28,15 @@ FORCEINLINE float CalculateNoiseValue(const float NoiseInput, const float NoiseP
 }
 
 /** Braking & stopping distances */
-	
-FORCEINLINE float GetDistanceAlongLaneToStopAt(const float Radius, const float LaneLength, const float RandomFraction, const FVector2D& StoppingDistanceFromLaneEndRange)
+
+FORCEINLINE float GetDistanceAlongLaneToStopAt(const float Radius, const float LaneLengthAtStopLine, const float RandomFraction, const FVector2D& StoppingDistanceFromLaneEndRange)
 {
-	return LaneLength - Radius - FMath::Lerp(StoppingDistanceFromLaneEndRange.X, StoppingDistanceFromLaneEndRange.Y, RandomFraction);	
+	return LaneLengthAtStopLine - Radius - FMath::Lerp(StoppingDistanceFromLaneEndRange.X, StoppingDistanceFromLaneEndRange.Y, RandomFraction);
 }
 	
-FORCEINLINE float GetDistanceAlongLaneToBrakeFrom(const float SpeedLimit, const float Radius, const float LaneLength, const float BrakingTime, const float DistanceAlongLaneToStopAt)
+FORCEINLINE float GetDistanceAlongLaneToBrakeFrom(const float Speed, const float Radius, const float LaneLengthAtStopLine, const float BrakingTime, const float DistanceAlongLaneToStopAt)
 {
-	float DistanceAlongLaneToBrakeFrom = LaneLength - Radius - (BrakingTime * SpeedLimit);
+	float DistanceAlongLaneToBrakeFrom = LaneLengthAtStopLine - Radius - (BrakingTime * Speed);
 	return FMath::Min(DistanceAlongLaneToBrakeFrom, DistanceAlongLaneToStopAt);
 }
 
@@ -111,7 +111,7 @@ MASSTRAFFIC_API float CalculateTargetSpeed(
 	float DistanceToCollidingObstacle,
 	float Radius,
 	float RandomFraction,
-	float LaneLength,
+	const FZoneGraphTrafficLaneData* CurrentLaneData,
 	float SpeedLimit,
 	const FVector2D& IdealTimeToNextVehicleRange,
 	const FVector2D& MinimumDistanceToNextVehicleRange,
@@ -122,7 +122,7 @@ MASSTRAFFIC_API float CalculateTargetSpeed(
 	float StopSignBrakingTime,
 	FVector2D StoppingDistanceFromLaneEndRange,
 	float StopSignBrakingPower, // 0.5f  @todo Better param name
-	bool bStopAtLaneExit
+	bool bStopAtNextStopLine
 #if WITH_MASSTRAFFIC_DEBUG
 	, bool bVisLog = false
 	, const UObject* VisLogOwner = nullptr
@@ -130,43 +130,86 @@ MASSTRAFFIC_API float CalculateTargetSpeed(
 #endif
 );
 
-MASSTRAFFIC_API bool ShouldStopAtLaneExit(
+bool IsVehicleEligibleToMergeOntoLane(
+	const UMassTrafficSubsystem& MassTrafficSubsystem,
+	const FMassTrafficVehicleControlFragment& VehicleControlFragment,
+	const FZoneGraphLaneHandle& CurrentLane,
+	const FZoneGraphLaneHandle& DesiredLane,
+	const float VehicleDistanceAlongCurrentLane,
+	const float VehicleRadius,
+	const float VehicleRandomFraction,
+	const FVector2D& StoppingDistanceRange);
+
+bool ShouldVehicleMergeOntoLane(
+	const UMassTrafficSubsystem& MassTrafficSubsystem,
+	const UMassTrafficSettings& MassTrafficSettings,
+	const FMassTrafficVehicleControlFragment& VehicleControlFragment,
+	const FZoneGraphLaneHandle& CurrentLane,
+	const FZoneGraphLaneHandle& DesiredLane,
+	const float VehicleDistanceAlongCurrentLane,
+	const float VehicleRadius,
+	const float VehicleRandomFraction,
+	const FVector2D& StoppingDistanceRange,
+	const FZoneGraphStorage& ZoneGraphStorage,
+	FZoneGraphLaneHandle& OutYieldTargetLane,
+	FMassEntityHandle& OutYieldTargetEntity,
+	int32& OutMergeYieldCaseIndex);
+
+MASSTRAFFIC_API bool ShouldStopAtNextStopLine(
 	float DistanceAlongLane,
 	float Speed,
 	float Radius,
 	float RandomFraction,
-	float LaneLength,
+	const FZoneGraphTrafficLaneData* CurrentLaneData,
 	FZoneGraphTrafficLaneData* NextTrafficLaneData,
+	const FZoneGraphTrafficLaneData* ReadiedNextIntersectionLane,
+	TOptional<FYieldAlongRoadInfo>& LastYieldAlongRoadInfo,
+	const bool bIsStopped,
 	const FVector2D& MinimumDistanceToNextVehicleRange,
-	const FMassEntityManager& EntityManager, 
+	const FVector2D& StoppingDistanceRange,
+	const FMassEntityManager& EntityManager,
+	FZoneGraphTrafficLaneData*& InOut_LastCompletedStopSignLaneData,
 	bool& bOut_RequestDifferentNextLane,
 	bool& bInOut_CantStopAtLaneExit,
 	bool& bOut_IsFrontOfVehicleBeyondLaneExit,
 	bool& bOut_VehicleHasNoNextLane,
 	bool& bOut_VehicleHasNoRoom,
-	const float StandardTrafficPrepareToStopSeconds
+	bool& bOut_ShouldProceedAtStopSign,
+	const float StandardTrafficPrepareToStopSeconds,
+	const float TimeVehicleStopped,
+	const float MinVehicleStopSignRestTime,
+	const FMassEntityHandle& VehicleEntityHandle,
+	const FMassEntityHandle& NextVehicleEntityHandleInStopQueue,
+	const UWorld* World
 #if WITH_MASSTRAFFIC_DEBUG
 	, bool bVisLog = false
 	, const UObject* VisLogOwner = nullptr
 	, const FTransform* VisLogTransform = nullptr
 #endif
-	, const UWorld* World = nullptr // ..for debugging
 	, const FVector* VehicleLocation = nullptr // ..for debuging
 );
+	
+bool IsVehicleNearStopLine(
+	const float DistanceAlongCurrentLane,
+	const float LaneLengthAtStopLine,
+	const float AgentRadius,
+	const float RandomFraction,
+	const FVector2D& StoppingDistanceRange);
 
 MASSTRAFFIC_API void UpdateYieldAtIntersectionState(
 	UMassTrafficSubsystem& MassTrafficSubsystem,
 	FMassTrafficVehicleControlFragment& VehicleControlFragment,
 	const FZoneGraphLaneHandle& CurrentLaneHandle,
-	const float DistanceAlongLane,
-	const bool bShouldPreemptivelyYieldAtIntersection,
+	const FZoneGraphLaneHandle& YieldTargetLaneHandle,
+	const FMassEntityHandle& YieldTargetEntity,
 	const bool bShouldReactivelyYieldAtIntersection,
-	const bool bHasAnotherVehicleEnteredRelevantLaneAfterPreemptiveYieldRollOut,
 	const bool bShouldGiveOpportunityForTurningVehiclesToReactivelyYieldAtIntersection);
 
 /** Avoidance */
-	
-MASSTRAFFIC_API float TimeToCollision(const FVector& AgentLocation, const FVector& AgentVelocity, float AgentRadius, const FVector& ObstacleLocation, const FVector& ObstacleVelocity, float ObstacleRadius);
+
+MASSTRAFFIC_API float TimeToCollisionSphere(const FVector& AgentLocation, const FVector& AgentVelocity, float AgentRadius, const FVector& ObstacleLocation, const FVector& ObstacleVelocity, float ObstacleRadius);
+
+MASSTRAFFIC_API float TimeToCollisionBox2D(const FTransform& AgentTransform, const FVector& AgentVelocity, const FBox2D& AgentBox, const FTransform& ObstacleTransform, const FVector& ObstacleVelocity, const FBox2D& ObstacleBox);
 
 /** Lane location eval */
 
@@ -214,7 +257,8 @@ MASSTRAFFIC_API void MoveVehicleToNextLane(
 	FMassTrafficVehicleLightsFragment& VehicleLightsFragment,
 	FMassZoneGraphLaneLocationFragment& LaneLocationFragment,
 	FMassTrafficNextVehicleFragment& NextVehicleFragment,
-	FMassTrafficVehicleLaneChangeFragment* LaneChangeFragment, bool& bIsVehicleStuck);
+	FMassTrafficVehicleLaneChangeFragment* LaneChangeFragment,
+	bool& bIsVehicleStuck);
 
 /** Instantly moves a vehicle onto another lane. This is not an animated over time. */
 MASSTRAFFIC_API bool TeleportVehicleToAnotherLane(

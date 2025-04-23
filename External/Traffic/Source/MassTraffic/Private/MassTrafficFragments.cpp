@@ -185,9 +185,9 @@ bool FMassTrafficPeriod::VehicleLaneClosesInNextPeriod(FZoneGraphTrafficLaneData
 //
 
 
-void FMassTrafficIntersectionFragment::ApplyLanesActionToCurrentPeriod(
-	const EMassTrafficPeriodLanesAction VehicleLanesAction,
-	const EMassTrafficPeriodLanesAction PedestrianLanesAction,
+void FMassTrafficLightIntersectionFragment::ApplyLanesActionToCurrentPeriod(
+	const EMassTrafficControllerLanesAction VehicleLanesAction,
+	const EMassTrafficControllerLanesAction PedestrianLanesAction,
 	UMassCrowdSubsystem* MassCrowdSubsystem,
 	const bool bForce) 
 {
@@ -197,7 +197,7 @@ void FMassTrafficIntersectionFragment::ApplyLanesActionToCurrentPeriod(
 	// NOTE - These should all be intersection lanes.
 	
 	if ((VehicleLanesAction != LastVehicleLanesActionAppliedToCurrentPeriod || bForce) &&
-		VehicleLanesAction != EMassTrafficPeriodLanesAction::None)
+		VehicleLanesAction != EMassTrafficControllerLanesAction::None)
 	{
 		for (int32 I = 0; I < CurrentPeriod.NumVehicleLanes(EMassTrafficIntersectionVehicleLaneType::VehicleLane); I++)
 		{
@@ -208,26 +208,26 @@ void FMassTrafficIntersectionFragment::ApplyLanesActionToCurrentPeriod(
 				continue;
 			}
 
-			if (VehicleLanesAction == EMassTrafficPeriodLanesAction::Open)
+			if (VehicleLanesAction == EMassTrafficControllerLanesAction::Open)
 			{
 				VehicleTrafficLaneData->bIsOpen = true;
 				VehicleTrafficLaneData->bIsAboutToClose = false;
 			}
-			else if (VehicleLanesAction == EMassTrafficPeriodLanesAction::HardClose)
+			else if (VehicleLanesAction == EMassTrafficControllerLanesAction::HardClose)
 			{
 				VehicleTrafficLaneData->bIsOpen = false;
 				VehicleTrafficLaneData->bIsAboutToClose = false;
 			}
-			else if (VehicleLanesAction == EMassTrafficPeriodLanesAction::SoftClose)
+			else if (VehicleLanesAction == EMassTrafficControllerLanesAction::SoftClose)
 			{
 				VehicleTrafficLaneData->bIsOpen = !CurrentPeriod.VehicleLaneClosesInNextPeriod(VehicleTrafficLaneData);
 				VehicleTrafficLaneData->bIsAboutToClose = false;
 			}
-			else if (VehicleLanesAction == EMassTrafficPeriodLanesAction::HardPrepareToClose)
+			else if (VehicleLanesAction == EMassTrafficControllerLanesAction::HardPrepareToClose)
 			{
 				VehicleTrafficLaneData->bIsAboutToClose = true;										
 			}
-			else if (VehicleLanesAction == EMassTrafficPeriodLanesAction::SoftPrepareToClose)
+			else if (VehicleLanesAction == EMassTrafficControllerLanesAction::SoftPrepareToClose)
 			{
 				VehicleTrafficLaneData->bIsAboutToClose = CurrentPeriod.VehicleLaneClosesInNextPeriod(VehicleTrafficLaneData);
 			}
@@ -238,7 +238,7 @@ void FMassTrafficIntersectionFragment::ApplyLanesActionToCurrentPeriod(
 
 	
 	if ((PedestrianLanesAction != LastPedestrianLanesActionAppliedToCurrentPeriod || bForce) &&
-		PedestrianLanesAction != EMassTrafficPeriodLanesAction::None)
+		PedestrianLanesAction != EMassTrafficControllerLanesAction::None)
 	{
 		// Open or close all this period's pedestrian lanes.
 		// NOTE - These is no soft-close for these lanes.
@@ -251,12 +251,12 @@ void FMassTrafficIntersectionFragment::ApplyLanesActionToCurrentPeriod(
 				continue;
 			}
 
-			if (PedestrianLanesAction == EMassTrafficPeriodLanesAction::Open)
+			if (PedestrianLanesAction == EMassTrafficControllerLanesAction::Open)
 			{
 				MassCrowdSubsystem->SetLaneState(LaneHandle, ECrowdLaneState::Opened);			
 			}
-			else if (PedestrianLanesAction == EMassTrafficPeriodLanesAction::HardClose ||
-					PedestrianLanesAction == EMassTrafficPeriodLanesAction::SoftClose)
+			else if (PedestrianLanesAction == EMassTrafficControllerLanesAction::HardClose ||
+					PedestrianLanesAction == EMassTrafficControllerLanesAction::SoftClose)
 			{
 				MassCrowdSubsystem->SetLaneState(LaneHandle, ECrowdLaneState::Closed);			
 			}
@@ -274,12 +274,12 @@ void FMassTrafficIntersectionFragment::ApplyLanesActionToCurrentPeriod(
 				continue;
 			}
 			
-			if (PedestrianLanesAction == EMassTrafficPeriodLanesAction::Open)
+			if (PedestrianLanesAction == EMassTrafficControllerLanesAction::Open)
 			{
 				MassCrowdSubsystem->SetLaneState(LaneHandle, ECrowdLaneState::Opened);			
 			}
-			else if (PedestrianLanesAction == EMassTrafficPeriodLanesAction::HardClose ||
-					PedestrianLanesAction == EMassTrafficPeriodLanesAction::SoftClose)
+			else if (PedestrianLanesAction == EMassTrafficControllerLanesAction::HardClose ||
+					PedestrianLanesAction == EMassTrafficControllerLanesAction::SoftClose)
 			{
 				MassCrowdSubsystem->SetLaneState(LaneHandle, ECrowdLaneState::Closed);			
 			}
@@ -290,7 +290,7 @@ void FMassTrafficIntersectionFragment::ApplyLanesActionToCurrentPeriod(
 }
 
 
-void FMassTrafficIntersectionFragment::UpdateTrafficLightsForCurrentPeriod()
+void FMassTrafficLightIntersectionFragment::UpdateTrafficLightsForCurrentPeriod()
 {
 	if (!bHasTrafficLights)
 	{
@@ -359,7 +359,7 @@ void FMassTrafficIntersectionFragment::UpdateTrafficLightsForCurrentPeriod()
 }
 
 
-void FMassTrafficIntersectionFragment::RestartIntersection(UMassCrowdSubsystem* MassCrowdSubsystem) 
+void FMassTrafficLightIntersectionFragment::RestartIntersection(UMassCrowdSubsystem* MassCrowdSubsystem) 
 {
 	const uint8 CurrentPeriodIndex_Saved = CurrentPeriodIndex;
 
@@ -369,7 +369,7 @@ void FMassTrafficIntersectionFragment::RestartIntersection(UMassCrowdSubsystem* 
 	
 	for (uint8 PeriodIndex = 0; PeriodIndex < Periods.Num(); PeriodIndex++)
 	{
-		ApplyLanesActionToCurrentPeriod(EMassTrafficPeriodLanesAction::HardClose, EMassTrafficPeriodLanesAction::HardClose, MassCrowdSubsystem, true);
+		ApplyLanesActionToCurrentPeriod(EMassTrafficControllerLanesAction::HardClose, EMassTrafficControllerLanesAction::HardClose, MassCrowdSubsystem, true);
 		AdvancePeriod();
 	}
 	
@@ -379,7 +379,7 @@ void FMassTrafficIntersectionFragment::RestartIntersection(UMassCrowdSubsystem* 
 }
 
 
-void FMassTrafficIntersectionFragment::Finalize(const FMassTrafficLaneToTrafficLightMap& LaneToTrafficLightMap)
+void FMassTrafficLightIntersectionFragment::Finalize(const FMassTrafficLaneToTrafficLightMap& LaneToTrafficLightMap)
 {
 	const uint8 NumPeriods = static_cast<uint8>(Periods.Num());
 	for (uint8 P = 0; P < NumPeriods; P++)
@@ -413,6 +413,315 @@ void FMassTrafficIntersectionFragment::Finalize(const FMassTrafficLaneToTrafficL
 			}
 		}
 	}
+}
+
+//
+// FMassTrafficSignIntersectionSide
+//
+
+bool FMassTrafficSignIntersectionSide::AreAllVehicleIntersectionLanesOpen() const
+{
+	for (const auto& VehicleIntersectionLane : VehicleIntersectionLanes)
+	{
+		if (!VehicleIntersectionLane.Key->bIsOpen)
+		{
+			return false;
+		}
+	}
+
+	return true;
+}
+
+bool FMassTrafficSignIntersectionSide::AreAllVehicleIntersectionLanesClosed() const
+{
+	for (const auto& VehicleIntersectionLane : VehicleIntersectionLanes)
+	{
+		if (VehicleIntersectionLane.Key->bIsOpen)
+		{
+			return false;
+		}
+	}
+
+	return true;
+}
+
+bool FMassTrafficSignIntersectionSide::AreAllVehicleIntersectionLanesClear() const
+{
+	for (const auto& VehicleIntersectionLane : VehicleIntersectionLanes)
+	{
+		if (VehicleIntersectionLane.Key->NumVehiclesOnLane > 0)
+		{
+			return false;
+		}
+	}
+
+	return true;
+}
+
+bool FMassTrafficSignIntersectionSide::AreAllCrosswalkLanesOpen(const FMassTrafficSignIntersectionFragment& IntersectionFragment, const UMassCrowdSubsystem& MassCrowdSubsystem) const
+{
+	for (const int32 CrosswalkLaneIndex : CrosswalkLanes)
+	{
+		const FZoneGraphLaneHandle CrosswalkLaneHandle(CrosswalkLaneIndex, IntersectionFragment.ZoneGraphDataHandle);
+		if (!ensureMsgf(CrosswalkLaneHandle.IsValid(), TEXT("Must get valid CrosswalkLaneHandle in FMassTrafficSignIntersectionSide::AreAllCrosswalkLanesOpen.")))
+		{
+			return false;
+		}
+
+		const ECrowdLaneState CrosswalkLaneState = MassCrowdSubsystem.GetLaneState(CrosswalkLaneHandle);
+
+		if (CrosswalkLaneState != ECrowdLaneState::Opened)
+		{
+			return false;
+		}
+	}
+
+	return true;
+}
+
+bool FMassTrafficSignIntersectionSide::AreAllCrosswalkLanesClosed(const FMassTrafficSignIntersectionFragment& IntersectionFragment, const UMassCrowdSubsystem& MassCrowdSubsystem) const
+{
+	for (const int32 CrosswalkLaneIndex : CrosswalkLanes)
+	{
+		const FZoneGraphLaneHandle CrosswalkLaneHandle(CrosswalkLaneIndex, IntersectionFragment.ZoneGraphDataHandle);
+		if (!ensureMsgf(CrosswalkLaneHandle.IsValid(), TEXT("Must get valid CrosswalkLaneHandle in FMassTrafficSignIntersectionSide::AreAllCrosswalkLanesClosed.")))
+		{
+			return false;
+		}
+
+		const ECrowdLaneState CrosswalkLaneState = MassCrowdSubsystem.GetLaneState(CrosswalkLaneHandle);
+
+		if (CrosswalkLaneState != ECrowdLaneState::Closed)
+		{
+			return false;
+		}
+	}
+
+	return true;
+}
+
+bool FMassTrafficSignIntersectionSide::AreAllCrosswalkLanesClear(const FMassTrafficSignIntersectionFragment& IntersectionFragment, const UMassCrowdSubsystem& MassCrowdSubsystem) const
+{
+	for (const int32 CrosswalkLaneIndex : CrosswalkLanes)
+	{
+		const FZoneGraphLaneHandle CrosswalkLaneHandle(CrosswalkLaneIndex, IntersectionFragment.ZoneGraphDataHandle);
+		if (!ensureMsgf(CrosswalkLaneHandle.IsValid(), TEXT("Must get valid CrosswalkLaneHandle in FMassTrafficSignIntersectionSide::AreAllCrosswalkLanesClear.")))
+		{
+			return false;
+		}
+
+		const FCrowdTrackingLaneData* CrosswalkLaneData = MassCrowdSubsystem.GetCrowdTrackingLaneData(CrosswalkLaneHandle);
+		
+		if (!ensureMsgf(CrosswalkLaneData != nullptr, TEXT("Must get valid CrosswalkLaneData in FMassTrafficSignIntersectionSide::AreAllCrosswalkLanesClear.")))
+		{
+			return false;
+		}
+
+		if (CrosswalkLaneData->NumEntitiesOnLane > 0)
+		{
+			return false;
+		}
+	}
+
+	return true;
+}
+
+bool FMassTrafficSignIntersectionSide::AreAllCrosswalkWaitingLanesClear(const FMassTrafficSignIntersectionFragment& IntersectionFragment, const UMassCrowdSubsystem& MassCrowdSubsystem) const
+{
+	for (const int32 CrosswalkWaitingLaneIndex : CrosswalkWaitingLanes)
+	{
+		const FZoneGraphLaneHandle CrosswalkWaitingLaneHandle(CrosswalkWaitingLaneIndex, IntersectionFragment.ZoneGraphDataHandle);
+		if (!ensureMsgf(CrosswalkWaitingLaneHandle.IsValid(), TEXT("Must get valid CrosswalkWaitingLaneHandle in FMassTrafficSignIntersectionSide::AreAllCrosswalkWaitingLanesClear.")))
+		{
+			return false;
+		}
+
+		const FCrowdTrackingLaneData* CrosswalkWaitingLaneData = MassCrowdSubsystem.GetCrowdTrackingLaneData(CrosswalkWaitingLaneHandle);
+		
+		if (!ensureMsgf(CrosswalkWaitingLaneData != nullptr, TEXT("Must get valid CrosswalkLaneData in FMassTrafficSignIntersectionSide::AreAllCrosswalkWaitingLanesClear.")))
+		{
+			return false;
+		}
+
+		if (CrosswalkWaitingLaneData->NumEntitiesOnLane > 0)
+		{
+			return false;
+		}
+	}
+
+	return true;
+}
+
+bool FMassTrafficSignIntersectionSide::AreAllEntitiesOnCrosswalkYielding(const FMassTrafficSignIntersectionFragment& IntersectionFragment, const UMassCrowdSubsystem& MassCrowdSubsystem, const UMassTrafficSubsystem& MassTrafficSubsystem) const
+{
+	for (const int32 CrosswalkLaneIndex : CrosswalkLanes)
+	{
+		const FZoneGraphLaneHandle CrosswalkLaneHandle(CrosswalkLaneIndex, IntersectionFragment.ZoneGraphDataHandle);
+		if (!ensureMsgf(CrosswalkLaneHandle.IsValid(), TEXT("Must get valid CrosswalkLaneHandle in FMassTrafficSignIntersectionSide::AreAllEntitiesOnCrosswalkYielding.")))
+		{
+			return false;
+		}
+		
+		const FCrowdTrackingLaneData* CrosswalkLaneData = MassCrowdSubsystem.GetCrowdTrackingLaneData(CrosswalkLaneHandle);
+		
+		if (!ensureMsgf(CrosswalkLaneData != nullptr, TEXT("Must get valid CrosswalkLaneData in FMassTrafficSignIntersectionSide::AreAllEntitiesOnCrosswalkYielding.")))
+		{
+			return false;
+		}
+
+		const FMassTrafficCrosswalkLaneInfo* CrosswalkLaneInfo = MassTrafficSubsystem.GetCrosswalkLaneInfo(CrosswalkLaneHandle);
+		
+		if (!ensureMsgf(CrosswalkLaneInfo != nullptr, TEXT("Must get valid CrosswalkLaneInfo in FMassTrafficSignIntersectionSide::AreAllEntitiesOnCrosswalkYielding.")))
+		{
+			return false;
+		}
+
+		const int32 NumEntitiesYieldingOnCrosswalkLane = CrosswalkLaneInfo->GetNumEntitiesYieldingOnCrosswalkLane();
+		
+		if (NumEntitiesYieldingOnCrosswalkLane != CrosswalkLaneData->NumEntitiesOnLane)
+		{
+			return false;
+		}
+	}
+
+	return true;
+}
+
+//
+// FMassTrafficSignIntersectionFragment
+//
+
+void FMassTrafficSignIntersectionFragment::RestartIntersection(UMassCrowdSubsystem& MassCrowdSubsystem) 
+{
+	LastVehicleLanesActionAppliedToSide.SetNum(IntersectionSides.Num());
+	LastPedestrianLanesActionAppliedToSide.SetNum(IntersectionSides.Num());
+	
+	for (int32 IntersectionSideIndex = 0; IntersectionSideIndex < IntersectionSides.Num(); ++IntersectionSideIndex)
+	{
+		LastVehicleLanesActionAppliedToSide[IntersectionSideIndex] = EMassTrafficControllerLanesAction::None;
+		LastPedestrianLanesActionAppliedToSide[IntersectionSideIndex] = EMassTrafficControllerLanesAction::None;
+	}
+	
+	for (FMassTrafficSignIntersectionSide& IntersectionSide : IntersectionSides)
+	{
+		if (IntersectionSide.TrafficControllerSignType == EMassTrafficControllerSignType::None)
+		{
+			// Note:  We'd like to close the crosswalk lanes, here.  However, if we do, that triggers pedestrians to start queueing up on the crosswalk waiting lanes.
+			// So, for now, we're just passing a PedestrianLanesAction of EMassTrafficControllerLanesAction::None.  This will prevent the pedestrians from queuing up
+			// on the crosswalk waiting lanes.  But, it also results in a side effect where occasionally pedestrians walk up to the crosswalk waiting lanes
+			// and immediately turn around and walk somewhere else.  But, this is fine for now.
+			ApplyLanesActionToIntersectionSide(IntersectionSide, EMassTrafficControllerLanesAction::Open, EMassTrafficControllerLanesAction::None, MassCrowdSubsystem, true);
+		}
+		else if (IntersectionSide.TrafficControllerSignType == EMassTrafficControllerSignType::StopSign)
+		{
+			ApplyLanesActionToIntersectionSide(IntersectionSide, EMassTrafficControllerLanesAction::Open, EMassTrafficControllerLanesAction::Open, MassCrowdSubsystem, true);
+			IntersectionSide.StopSignIntersectionState = EMassTrafficStopSignIntersectionState::CrosswalkOpen;
+		}
+		else if (IntersectionSide.TrafficControllerSignType == EMassTrafficControllerSignType::YieldSign)
+		{
+			ApplyLanesActionToIntersectionSide(IntersectionSide, EMassTrafficControllerLanesAction::Open, EMassTrafficControllerLanesAction::HardClose, MassCrowdSubsystem, true);
+			IntersectionSide.YieldSignIntersectionState = EMassTrafficYieldSignIntersectionState::CrosswalkClosed;
+		}
+	}
+}
+
+void FMassTrafficSignIntersectionFragment::ApplyLanesActionToIntersectionSide(
+	const FMassTrafficSignIntersectionSide& IntersectionSide,
+	const EMassTrafficControllerLanesAction VehicleLanesAction,
+	const EMassTrafficControllerLanesAction PedestrianLanesAction,
+	UMassCrowdSubsystem& MassCrowdSubsystem,
+	const bool bForce) 
+{
+	const EMassTrafficControllerLanesAction LastAppliedVehicleLanesAction = LastVehicleLanesActionAppliedToSide.IsValidIndex(IntersectionSide.IntersectionSideIndex)
+		? LastVehicleLanesActionAppliedToSide[IntersectionSide.IntersectionSideIndex]
+		: EMassTrafficControllerLanesAction::None;
+	
+	if ((VehicleLanesAction != LastAppliedVehicleLanesAction || bForce) &&
+		VehicleLanesAction != EMassTrafficControllerLanesAction::None)
+	{
+		for (auto& VehicleIntersectionLane : IntersectionSide.VehicleIntersectionLanes)
+		{
+			if (!VehicleIntersectionLane.Key->ConstData.bIsIntersectionLane)
+			{
+				continue;
+			}
+
+			// Vehicle intersection lanes at traffic sign intersections can only be in a state of "open" or "closed".
+			if (VehicleLanesAction == EMassTrafficControllerLanesAction::Open)
+			{
+				VehicleIntersectionLane.Key->bIsOpen = true;
+				VehicleIntersectionLane.Key->bIsAboutToClose = false;
+			}
+			else if (VehicleLanesAction == EMassTrafficControllerLanesAction::HardClose
+					|| VehicleLanesAction == EMassTrafficControllerLanesAction::SoftClose
+					|| VehicleLanesAction == EMassTrafficControllerLanesAction::HardPrepareToClose
+					|| VehicleLanesAction == EMassTrafficControllerLanesAction::SoftPrepareToClose)
+			{
+				VehicleIntersectionLane.Key->bIsOpen = false;
+				VehicleIntersectionLane.Key->bIsAboutToClose = false;
+			}
+		}
+		
+		if (LastVehicleLanesActionAppliedToSide.IsValidIndex(IntersectionSide.IntersectionSideIndex))
+		{
+			LastVehicleLanesActionAppliedToSide[IntersectionSide.IntersectionSideIndex] = VehicleLanesAction;
+		}
+	}
+	
+	const EMassTrafficControllerLanesAction LastAppliedPedestrianLanesAction = LastPedestrianLanesActionAppliedToSide.IsValidIndex(IntersectionSide.IntersectionSideIndex)
+		? LastPedestrianLanesActionAppliedToSide[IntersectionSide.IntersectionSideIndex]
+		: EMassTrafficControllerLanesAction::None;
+	
+	if ((PedestrianLanesAction != LastAppliedPedestrianLanesAction || bForce) &&
+		PedestrianLanesAction != EMassTrafficControllerLanesAction::None)
+	{
+		for (int32 CrosswalkLaneIndex : IntersectionSide.CrosswalkLanes)
+		{
+			const FZoneGraphLaneHandle LaneHandle(CrosswalkLaneIndex, ZoneGraphDataHandle);
+			if (!LaneHandle.IsValid())
+			{
+				continue;
+			}
+			
+			if (PedestrianLanesAction == EMassTrafficControllerLanesAction::Open)
+			{
+				MassCrowdSubsystem.SetLaneState(LaneHandle, ECrowdLaneState::Opened);			
+			}
+			else if (PedestrianLanesAction == EMassTrafficControllerLanesAction::HardClose
+					|| PedestrianLanesAction == EMassTrafficControllerLanesAction::SoftClose
+					|| PedestrianLanesAction == EMassTrafficControllerLanesAction::HardPrepareToClose
+					|| PedestrianLanesAction == EMassTrafficControllerLanesAction::SoftPrepareToClose)
+			{
+				MassCrowdSubsystem.SetLaneState(LaneHandle, ECrowdLaneState::Closed);			
+			}
+		}
+
+		for (int32 CrosswalkWaitingLaneIndex : IntersectionSide.CrosswalkWaitingLanes)
+		{
+			const FZoneGraphLaneHandle LaneHandle(CrosswalkWaitingLaneIndex, ZoneGraphDataHandle);
+			if (!LaneHandle.IsValid())
+			{
+				continue;
+			}
+			
+			if (PedestrianLanesAction == EMassTrafficControllerLanesAction::Open)
+			{
+				MassCrowdSubsystem.SetLaneState(LaneHandle, ECrowdLaneState::Opened);			
+			}
+			else if (PedestrianLanesAction == EMassTrafficControllerLanesAction::HardClose
+					|| PedestrianLanesAction == EMassTrafficControllerLanesAction::SoftClose
+					|| PedestrianLanesAction == EMassTrafficControllerLanesAction::HardPrepareToClose
+					|| PedestrianLanesAction == EMassTrafficControllerLanesAction::SoftPrepareToClose)
+			{
+				MassCrowdSubsystem.SetLaneState(LaneHandle, ECrowdLaneState::Closed);			
+			}
+		}
+
+		if (LastPedestrianLanesActionAppliedToSide.IsValidIndex(IntersectionSide.IntersectionSideIndex))
+		{
+			LastPedestrianLanesActionAppliedToSide[IntersectionSide.IntersectionSideIndex] = PedestrianLanesAction;
+		}
+	}	
 }
 
 

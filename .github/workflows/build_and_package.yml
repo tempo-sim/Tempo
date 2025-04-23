@@ -1,0 +1,437 @@
+# ======
+# Build and Package Workflow for a Tempo Unreal project.
+# This workflow builds and packages an Unreal project using Tempo.
+# If the project is not very large it can run on a GitHub-hosted runner.
+# It relies on the Epic-distributed Unreal images (github.com/orgs/EpicGames/packages/container/package/unreal-engine)
+# **Note**: A workflow must have EPIC_DOCKER_USERNAME and EPIC_DOCKER_TOKEN secrets to call this workflow, and must
+#           call this workflow with 'secrets: inherit'. Please see the instructions here to obtain a token:
+#           https://dev.epicgames.com/documentation/en-us/unreal-engine/quick-start-guide-for-using-container-images-in-unreal-engine
+# Unreal is a large (>40gb) dependency and packaging is resource-intensive. To deal with these constraints the workflow
+# uses a few non-standard techniques:
+# - We free space on the runner's main filesystem before starting by removing unnecessary packages. This gives us space
+#   to build and package the project. However this is still not enough space to store Unreal, so the Unreal docker
+#   container is stored on the /mnt filesystem, which has considerably more free space.
+# - We cache two types of artifacts to speed up builds:
+#   - The Tempo Unreal "Engine Mods", which are parts of the engine Tempo modifies in-place. Since the engine lives in
+#     the Docker container, but we want to cache our modifications to it, we "initialize" the .engine-mods-cache
+#     directory, which we will cache, with the vanilla engine before attempting to modify it.
+#   - The results of the nearest build on the main branch, including the Engine's DerivedDataCache folder, where some
+#     cooked artifacts are stored and which is "initialized" in the same way as the engine mods cache above (except in
+#     the .engine-ddc-cache directory). This cache speeds up the build and package steps substantially.
+# - Since the project and Tempo source files, and any restored cached files, will be mounted in the docker container
+#   in order to build the project there, we change their permissions to the match those of the user in the container.
+# - Git does not store file timestamps, so the modification timestamps of the source files will be the time they were
+#   checked out (during a run of this workflow). This will invalidate the build cache. So we overwrite the modification
+#   timestamps with the time the files were committed.
+# ======
+
+name: Build and Package an Unreal Project Using Tempo
+
+on:
+  workflow_call:
+    inputs:
+      clean:
+        type: boolean
+        description: Clean before Build
+        default: false
+      package:
+        type: boolean
+        description: Package
+        default: true
+      platform:
+        type: string
+        description: Which platform to build for (only ubuntu-22.04 supported for now)
+        default: ubuntu-22.04
+      unreal_version:
+        type: string
+        description: Which Unreal version to build for (only 5.4.4 supported for now)
+        default: 5.4.4
+      project_root:
+        type: string
+        description: Root of your project's repo
+        default: ${{ github.event.repository.name }}
+      tempo_root:
+        type: string
+        description: Root of the Tempo folder
+        default: ${{ github.event.repository.name }}/Plugins/Tempo
+      host_project:
+        type: string
+        description: A "host" project repo to checkout, if the workflow is being used for a plugin
+        default: ''
+      checkout_path:
+        type: string
+        description: The path in the workspace to use for checkout
+        default: ${{ github.event.repository.name }}
+      cache_repo_root:
+        type: string
+        description: Root of the repo which should be used for the build cache
+        default: ${{ github.event.repository.name }}
+      cache_branch:
+        type: string
+        description: Branch that should be used to populate the build cache
+        default: main
+      release_id:
+        type: string
+        description: ID to use for the uploaded release, or the ID of the release to use as the base of a patch
+        default: ${{ github.sha }}
+      patch:
+        type: boolean
+        description: Whether to create a patch from a release
+        default: false
+      maps:
+        type: string
+        description: Which maps to include in package (syntax "map1+map2+map3")
+        default: ''
+      upload_artifact:
+        type: boolean
+        description: Upload release or patch as a GitHub artifact
+        default: false
+      upload_artifact_compression_level:
+        type: string
+        description: Uploaded artifact compression level (refer to github.com/actions/upload-artifact)
+        default: '6'
+
+env:
+  UNREAL_VERSION: "${{ inputs.unreal_version }}"
+
+jobs:
+  build:
+    name: Build and Package Project
+    runs-on: ${{ inputs.platform }}
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.platform }}-${{ inputs.unreal_version }}
+      cancel-in-progress: true
+    steps:
+    - name: Validate Inputs
+      run: |
+        case "${{ inputs.platform }}" in
+          "ubuntu-22.04") ;;
+          *)
+            echo "Error: Invalid platform. Only ubuntu-22.04 supported for now."
+            exit 1
+            ;;
+        esac
+        case "${{ inputs.unreal_version }}" in
+          "5.4.4"|"5.5.4") ;;
+          *)
+            echo "Error: Invalid Unreal Version. Only 5.4.4 and 5.5.4 are supported."
+            exit 1
+            ;;
+        esac
+        if [ "${{ inputs.patch }}" = "true" ]; then
+          if [ "${{ ! inputs.package }}" = "true" ]; then
+            echo "Error: Requested to create a patch but package is false."
+            exit 1
+          fi
+        fi
+        if [ "${{ inputs.upload_artifact }}" = "true" ]; then
+          if [ "${{ ! inputs.package }}" = "true" ]; then
+            echo "Error: Requested to upload artifact but package is false."
+            exit 1
+          fi
+        fi
+    - name: Free Disk Space (if using GitHub-hosted runner)
+      if: ${{ contains(runner.name, 'Github') && contains(runner.name, 'Actions') }}
+      uses: jlumbroso/free-disk-space@main
+      with:
+        tool-cache: true
+        android: true
+        dotnet: true
+        haskell: true
+        large-packages: false
+        docker-images: false
+        swap-storage: false
+    - name: Checkout Host Project (if using one)
+      if: ${{ inputs.host_project != '' }}
+      uses: actions/checkout@v4
+      with:
+        repository: ${{ inputs.host_project }}
+        path: ${{ github.workspace }}/${{ inputs.project_root }}
+        ref: main
+        fetch-depth: 0
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        path: ${{ inputs.checkout_path }}
+        fetch-depth: 0
+        submodules: recursive
+    - name: Find Common Ancestor with Base Branch
+      if: ${{ ! inputs.clean }}
+      id: common_ancestor
+      run: |
+        cd ${{ github.workspace }}/${{ inputs.cache_repo_root }} && echo "COMMON_ANCESTOR=$(git merge-base HEAD origin/$BASE_BRANCH)" >> $GITHUB_OUTPUT
+      env:
+        BASE_BRANCH: ${{ inputs.cache_branch }}
+    - name: Get Lowercase Repo Name
+      id: repo_lowercase
+      run: |
+        echo "REPO_LOWERCASE=${REPO_UPPERCASE,,}" >> $GITHUB_OUTPUT
+      env:
+        REPO_UPPERCASE: ${{ github.event.repository.name }}
+    - name: Restore Build Cache (if clean not specified)
+      if: ${{ ! inputs.clean }}
+      id: restore_build_cache
+      uses: actions/cache/restore@v4
+      with:
+        path: |
+          ${{ github.workspace }}/${{ inputs.project_root }}/**/*.pb.cc
+          ${{ github.workspace }}/${{ inputs.project_root }}/**/*.pb.h
+          ${{ github.workspace }}/${{ inputs.project_root }}/Binaries/**
+          ${{ github.workspace }}/${{ inputs.project_root }}/Intermediate/**
+          ${{ github.workspace }}/${{ inputs.project_root }}/DerivedDataCache/**
+          ${{ github.workspace }}/${{ inputs.project_root }}/Saved/**
+          ${{ github.workspace }}/${{ inputs.project_root }}/Plugins/**/Intermediate/**
+          ${{ github.workspace }}/${{ inputs.project_root }}/Plugins/**/Binaries/**
+          .engine-ddc-cache/**
+        key: ${{ steps.repo_lowercase.outputs.REPO_LOWERCASE }}-build-${{ env.UNREAL_VERSION }}-${{ steps.common_ancestor.outputs.COMMON_ANCESTOR }}
+    - name: Restore Engine Mods Cache (if clean not specified)
+      if: ${{ ! inputs.clean }}
+      id: restore_engine_mods_cache
+      uses: actions/cache/restore@v4
+      with:
+        path: |
+          .engine-mods-cache/TempoMods/**
+          .engine-mods-cache/Engine/Plugins/Runtime/ZoneGraph/**
+          .engine-mods-cache/Engine/Plugins/AI/MassCrowd/**
+          .engine-mods-cache/Engine/Plugins/Runtime/MassEntity/**
+          .engine-mods-cache/Engine/Source/Programs/UnrealBuildTool/**
+          .engine-mods-cache/Engine/Binaries/DotNET/UnrealBuildTool/**
+          .engine-mods-cache/Engine/Binaries/DotNET/AutomationTool/**
+        key: tempo-engine-mods-${{ env.UNREAL_VERSION }}-${{ hashFiles(format('{0}/EngineMods/**', inputs.tempo_root)) }}
+    - name: Fixup Source File Modification Timestamps and Permissions
+      run: |
+        # The modification timestamps are recreated on checkout. This overwrites them with their respective commit dates
+        # so that the cached results in the Intermediate folder will be considered valid during the build.
+        cd ${{ github.workspace }}/${{ inputs.project_root }}
+        git ls-files | while read file; do
+          timestamp=$(git log -1 --format=%cd --date=iso "$file")
+          touch -d "$timestamp" "$file"
+        done
+        # Same for Tempo source files
+        cd ${{ github.workspace }}/${{ inputs.tempo_root }}
+        git ls-files | while read file; do
+          timestamp=$(git log -1 --format=%cd --date=iso "$file")
+          touch -d "$timestamp" "$file"
+        done
+        # Set the permissions of the source files such that they can be accessed in the docker container.
+        sudo chown -R 1000:1000 ${{ github.workspace }}/${{ inputs.project_root }}
+        sudo chmod -R 755 ${{ github.workspace }}/${{ inputs.project_root }}
+    - name: Download Base Release (if creating a patch)
+      if: ${{ inputs.patch }}
+      uses: dawidd6/action-download-artifact@v7
+      with:
+        name: ${{ format('{0}-{1}-{2}-{3}', github.event.repository.name, inputs.platform, inputs.unreal_version, inputs.release_id) }}
+        search_artifacts: true
+        path: .base_release
+    - name: Extract Base Release Paks (if creating a patch)
+      if: ${{ inputs.patch }}
+      run: |
+        ${{ github.workspace }}/${{ inputs.tempo_root }}/Scripts/ExtractReleasePaks.sh ${{ github.workspace }}/.base_release ${{ github.workspace }}/.releases/${{ inputs.release_id }} ${{ github.workspace }}/.base_release/Metadata
+    - name: Relocate Docker Daemon Data Root (if using GitHub-hosted runner)
+      if: ${{ contains(runner.name, 'Github') && contains(runner.name, 'Actions') }}
+      run: |
+        # Credit to https://github.com/orgs/community/discussions/26357
+        # The drive mounted at /mnt has a lot more free space than the main volume.
+        # Tell docker to store images there instead.
+        DOCKER_DATA_ROOT='/mnt/var/lib/docker'
+        DOCKER_DAEMON_JSON='/etc/docker/daemon.json'
+        sudo mkdir -p "${DOCKER_DATA_ROOT}"
+        jq --arg dataroot "${DOCKER_DATA_ROOT}" '. + {"data-root": $dataroot}' "${DOCKER_DAEMON_JSON}" > "/tmp/docker.json.tmp"
+        sudo mv "/tmp/docker.json.tmp" "${DOCKER_DAEMON_JSON}"
+        sudo systemctl restart docker
+    - name: Log in to Epic Container Registry
+      uses: docker/login-action@v2
+      with:
+        registry: ghcr.io
+        username: ${{ secrets.EPIC_DOCKER_USERNAME }}
+        password: ${{ secrets.EPIC_DOCKER_TOKEN }}
+    - name: Build Tempo Unreal Docker Image
+      run: |
+        docker build --build-arg UNREAL_VERSION=${{ env.UNREAL_VERSION }} --tag 'tempo_unreal_image' -f ${{ github.workspace }}/${{ inputs.tempo_root }}/Dockerfile .
+    - name: Initialize Engine Mods Cache (if not restored from cache)
+      if: ${{ steps.restore_engine_mods_cache.outputs.cache-hit != 'true' }}
+      run: |
+        mkdir -p .engine-mods-cache/TempoMods
+        mkdir -p .engine-mods-cache/Engine/Plugins/Runtime
+        mkdir -p .engine-mods-cache/Engine/Plugins/AI
+        mkdir -p .engine-mods-cache/Engine/Source/Programs
+        mkdir -p .engine-mods-cache/Engine/Binaries/DotNET
+        docker create --name temp_engine tempo_unreal_image
+        docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/ZoneGraph ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime
+        docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Plugins/AI/MassCrowd ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/AI
+        docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/MassEntity ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime
+        docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Source/Programs/UnrealBuildTool ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs
+        docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Binaries/DotNET/UnrealBuildTool ${{ github.workspace }}/.engine-mods-cache/Engine/Binaries/DotNET
+        docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Binaries/DotNET/AutomationTool ${{ github.workspace }}/.engine-mods-cache/Engine/Binaries/DotNET
+        docker rm temp_engine
+    - name: Initialize Engine DDC Cache (if not restored from cache)
+      if: ${{ steps.restore_build_cache.outputs.cache-hit != 'true' }}
+      run: |
+        mkdir -p .engine-ddc-cache/Engine
+        docker create --name temp_engine tempo_unreal_image
+        docker cp temp_engine:/home/ue4/UnrealEngine/Engine/DerivedDataCache ${{ github.workspace }}/.engine-ddc-cache/Engine
+        docker rm temp_engine
+    - name: Fix Engine Mods and Engine DDC Permissions
+      run: |
+        # Set the permissions of the engine mods and engine DDC files such that they can be accessed in the docker container.
+        sudo chown -R 1000:1000 .engine-mods-cache/
+        sudo chmod -R 755 .engine-mods-cache/
+        sudo chown -R 1000:1000 .engine-ddc-cache/
+        sudo chmod -R 755 .engine-ddc-cache/
+    - name: Sync Third Party Dependencies
+      run: |
+        docker run --rm \
+          -v ${{ github.workspace }}/.engine-mods-cache/TempoMods:/home/ue4/UnrealEngine/TempoMods \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/ZoneGraph:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/ZoneGraph \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/AI/MassCrowd:/home/ue4/UnrealEngine/Engine/Plugins/AI/MassCrowd \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/MassEntity:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/MassEntity \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs/UnrealBuildTool:/home/ue4/UnrealEngine/Engine/Source/Programs/UnrealBuildTool \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Binaries/DotNET/UnrealBuildTool:/home/ue4/UnrealEngine/Engine/Binaries/DotNET/UnrealBuildTool \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Binaries/DotNET/AutomationTool:/home/ue4/UnrealEngine/Engine/Binaries/DotNET/AutomationTool \
+          -v ${{ github.workspace }}/.engine-ddc-cache/Engine/DerivedDataCache:/home/ue4/UnrealEngine/Engine/DerivedDataCache \
+          -v ${{ github.workspace }}/${{ inputs.project_root }}:/home/ue4/${{ inputs.project_root }} \
+          tempo_unreal_image \
+          /home/ue4/${{ inputs.tempo_root }}/Scripts/SyncDeps.sh -force
+    - name: Install Engine Mods
+      run: |
+        docker run --rm \
+          -v ${{ github.workspace }}/.engine-mods-cache/TempoMods:/home/ue4/UnrealEngine/TempoMods \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/ZoneGraph:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/ZoneGraph \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/AI/MassCrowd:/home/ue4/UnrealEngine/Engine/Plugins/AI/MassCrowd \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/MassEntity:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/MassEntity \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs/UnrealBuildTool:/home/ue4/UnrealEngine/Engine/Source/Programs/UnrealBuildTool \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Binaries/DotNET/UnrealBuildTool:/home/ue4/UnrealEngine/Engine/Binaries/DotNET/UnrealBuildTool \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Binaries/DotNET/AutomationTool:/home/ue4/UnrealEngine/Engine/Binaries/DotNET/AutomationTool \
+          -v ${{ github.workspace }}/.engine-ddc-cache/Engine/DerivedDataCache:/home/ue4/UnrealEngine/Engine/DerivedDataCache \
+          -v ${{ github.workspace }}/${{ inputs.project_root }}:/home/ue4/${{ inputs.project_root }} \
+          tempo_unreal_image \
+          /home/ue4/${{ inputs.tempo_root }}/Scripts/InstallEngineMods.sh
+    - name: Clean (if requested)
+      if: ${{ inputs.clean }}
+      run: |
+        docker run --rm \
+          -v ${{ github.workspace }}/.engine-mods-cache/TempoMods:/home/ue4/UnrealEngine/TempoMods \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/ZoneGraph:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/ZoneGraph \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/AI/MassCrowd:/home/ue4/UnrealEngine/Engine/Plugins/AI/MassCrowd \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/MassEntity:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/MassEntity \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs/UnrealBuildTool:/home/ue4/UnrealEngine/Engine/Source/Programs/UnrealBuildTool \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Binaries/DotNET/UnrealBuildTool:/home/ue4/UnrealEngine/Engine/Binaries/DotNET/UnrealBuildTool \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Binaries/DotNET/AutomationTool:/home/ue4/UnrealEngine/Engine/Binaries/DotNET/AutomationTool \
+          -v ${{ github.workspace }}/.engine-ddc-cache/Engine/DerivedDataCache:/home/ue4/UnrealEngine/Engine/DerivedDataCache \
+          -v ${{ github.workspace }}/${{ inputs.project_root }}:/home/ue4/${{ inputs.project_root }} \
+          tempo_unreal_image \
+          /home/ue4/${{ inputs.tempo_root }}/Scripts/Clean.sh
+    - name: Build
+      run: |
+        docker run --rm \
+          -v ${{ github.workspace }}/.engine-mods-cache/TempoMods:/home/ue4/UnrealEngine/TempoMods \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/ZoneGraph:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/ZoneGraph \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/AI/MassCrowd:/home/ue4/UnrealEngine/Engine/Plugins/AI/MassCrowd \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/MassEntity:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/MassEntity \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs/UnrealBuildTool:/home/ue4/UnrealEngine/Engine/Source/Programs/UnrealBuildTool \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Binaries/DotNET/UnrealBuildTool:/home/ue4/UnrealEngine/Engine/Binaries/DotNET/UnrealBuildTool \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Binaries/DotNET/AutomationTool:/home/ue4/UnrealEngine/Engine/Binaries/DotNET/AutomationTool \
+          -v ${{ github.workspace }}/.engine-ddc-cache/Engine/DerivedDataCache:/home/ue4/UnrealEngine/Engine/DerivedDataCache \
+          -v ${{ github.workspace }}/${{ inputs.project_root }}:/home/ue4/${{ inputs.project_root }} \
+          tempo_unreal_image \
+          /home/ue4/${{ inputs.tempo_root }}/Scripts/Build.sh
+    - name: Package
+      if: ${{ inputs.package }}
+      run: |
+        PACKAGE_ARGS=""
+        if [ "${{ inputs.maps != '' }}" = "true" ]; then
+          PACKAGE_ARGS="$PACKAGE_ARGS -maps=${{ inputs.maps }}"
+        else
+          PACKAGE_ARGS="$PACKAGE_ARGS -allmaps"
+        fi
+        PACKAGE_ARGS="$PACKAGE_ARGS -ddc=NoZenLocalFallback" # NoZenLocalFallback causes the DDC to end up in Engine/DerivedDataCache folder
+        if [ "${{ inputs.patch }}" = "true" ]; then
+          PACKAGE_ARGS="$PACKAGE_ARGS -generatepatch -basedonreleaseversion=${{ inputs.release_id }} -basedonreleaseversionbasepath=/home/ue4/${{ inputs.project_root }}/Releases"
+        fi
+        docker run --rm \
+          -v ${{ github.workspace }}/.engine-mods-cache/TempoMods:/home/ue4/UnrealEngine/TempoMods \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/ZoneGraph:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/ZoneGraph \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/AI/MassCrowd:/home/ue4/UnrealEngine/Engine/Plugins/AI/MassCrowd \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/MassEntity:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/MassEntity \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs/UnrealBuildTool:/home/ue4/UnrealEngine/Engine/Source/Programs/UnrealBuildTool \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Binaries/DotNET/UnrealBuildTool:/home/ue4/UnrealEngine/Engine/Binaries/DotNET/UnrealBuildTool \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Binaries/DotNET/AutomationTool:/home/ue4/UnrealEngine/Engine/Binaries/DotNET/AutomationTool \
+          -v ${{ github.workspace }}/.engine-ddc-cache/Engine/DerivedDataCache:/home/ue4/UnrealEngine/Engine/DerivedDataCache \
+          -v ${{ github.workspace }}/.releases:/home/ue4/${{ inputs.project_root }}/Releases \
+          -v ${{ github.workspace }}/${{ inputs.project_root }}:/home/ue4/${{ inputs.project_root }} \
+          -e TEMPO_SKIP_PREBUILD=1 \
+          tempo_unreal_image \
+          /home/ue4/${{ inputs.tempo_root }}/Scripts/Package.sh $PACKAGE_ARGS
+    - name: Extract Patch (if patching)
+      if: ${{ inputs.patch }}
+      run: |
+        docker run --rm \
+          -v ${{ github.workspace }}/.engine-mods-cache/TempoMods:/home/ue4/UnrealEngine/TempoMods \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/ZoneGraph:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/ZoneGraph \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/AI/MassCrowd:/home/ue4/UnrealEngine/Engine/Plugins/AI/MassCrowd \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/MassEntity:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/MassEntity \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs/UnrealBuildTool:/home/ue4/UnrealEngine/Engine/Source/Programs/UnrealBuildTool \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Binaries/DotNET/UnrealBuildTool:/home/ue4/UnrealEngine/Engine/Binaries/DotNET/UnrealBuildTool \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Binaries/DotNET/AutomationTool:/home/ue4/UnrealEngine/Engine/Binaries/DotNET/AutomationTool \
+          -v ${{ github.workspace }}/.engine-ddc-cache/Engine/DerivedDataCache:/home/ue4/UnrealEngine/Engine/DerivedDataCache \
+          -v ${{ github.workspace }}/${{ inputs.project_root }}:/home/ue4/${{ inputs.project_root }} \
+          -e TEMPO_SKIP_PREBUILD=1 \
+          tempo_unreal_image \
+          /home/ue4//${{ inputs.tempo_root }}/Scripts/ExtractPatch.sh /home/ue4/${{ inputs.project_root }}/Packaged
+    - name: Upload Release Artifact (if uploading a release)
+      if: ${{ inputs.upload_artifact && ! inputs.patch }}
+      id: upload_release
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ format('{0}-{1}-{2}-{3}', github.event.repository.name, inputs.platform, inputs.unreal_version, inputs.release_id) }}
+        path: ${{ github.workspace }}/${{ inputs.project_root }}/Packaged
+        overwrite: true
+        if-no-files-found: error
+        compression-level: ${{ inputs.upload_artifact_compression_level }}
+    - name: Upload Patch Artifact (if uploading a patch)
+      if: ${{ inputs.upload_artifact && inputs.patch }}
+      id: upload_patch
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ format('{0}-{1}-{2}-{3}-patch', github.event.repository.name, inputs.platform, inputs.unreal_version, inputs.release_id) }}
+        path: ${{ github.workspace }}/${{ inputs.project_root }}/Packaged/patch.zip
+        overwrite: true
+        if-no-files-found: error
+        compression-level: ${{ inputs.upload_artifact_compression_level }}
+    - name: Cache Engine Mods (if building cache branch)
+      if: ${{ github.ref == format('refs/heads/{0}', inputs.cache_branch) }}
+      uses: actions/cache/save@v4
+      with:
+        path: |
+          .engine-mods-cache/TempoMods/**
+          .engine-mods-cache/Engine/Plugins/Runtime/ZoneGraph/**
+          .engine-mods-cache/Engine/Plugins/AI/MassCrowd/**
+          .engine-mods-cache/Engine/Plugins/Runtime/MassEntity/**
+          .engine-mods-cache/Engine/Source/Programs/UnrealBuildTool/**
+          .engine-mods-cache/Engine/Binaries/DotNET/UnrealBuildTool/**
+          .engine-mods-cache/Engine/Binaries/DotNET/AutomationTool/**
+        key: tempo-engine-mods-${{ env.UNREAL_VERSION }}-${{ hashFiles(format('{0}/EngineMods/**', inputs.tempo_root)) }}
+    - name: Cache Build (if building cache branch)
+      if: ${{ github.ref == format('refs/heads/{0}', inputs.cache_branch) }}
+      uses: actions/cache/save@v4
+      with:
+        path: |
+          ${{ github.workspace }}/${{ inputs.project_root }}/**/*.pb.cc
+          ${{ github.workspace }}/${{ inputs.project_root }}/**/*.pb.h
+          ${{ github.workspace }}/${{ inputs.project_root }}/Binaries/**
+          ${{ github.workspace }}/${{ inputs.project_root }}/Intermediate/**
+          ${{ github.workspace }}/${{ inputs.project_root }}/DerivedDataCache/**
+          ${{ github.workspace }}/${{ inputs.project_root }}/Saved/**
+          ${{ github.workspace }}/${{ inputs.project_root }}/Plugins/**/Intermediate/**
+          ${{ github.workspace }}/${{ inputs.project_root }}/Plugins/**/Binaries/**
+          .engine-ddc-cache/**
+        key: ${{ steps.repo_lowercase.outputs.REPO_LOWERCASE }}-build-${{ env.UNREAL_VERSION }}-${{ github.sha }}
+    - name: Check Free Space (if using GitHub-hosted runner)
+      if: ${{ contains(runner.name, 'Github') && contains(runner.name, 'Actions') }}
+      run: df -h / && df -h /mnt
+    - name: Reset Source File Permissions
+      if: always()  # This ensures it runs even if previous steps fail
+      run: |
+        # Reset the permissions of the source files to make cleanup steps happy.
+        sudo chown -R 1001:1001 ${{ github.workspace }}/${{ inputs.project_root }}
+        sudo chmod -R 755 ${{ github.workspace }}/${{ inputs.project_root }}

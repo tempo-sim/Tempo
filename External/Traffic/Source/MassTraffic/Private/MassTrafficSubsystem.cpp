@@ -20,6 +20,7 @@
 #include "ZoneGraphSubsystem.h"
 #include "VisualLogger/VisualLogger.h"
 
+
 UMassTrafficSubsystem::UMassTrafficSubsystem()
 {
 	RemoveVehiclesOverlappingPlayersProcessor = CreateDefaultSubobject<UMassTrafficRecycleVehiclesOverlappingPlayersProcessor>(TEXT("RemoveVehiclesOverlappingPlayersProcessor"));
@@ -96,6 +97,11 @@ void UMassTrafficSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 void UMassTrafficSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 {
 	Super::OnWorldBeginPlay(InWorld);
+
+	ClearIntersectionStopQueues();
+	ClearYieldInfo();
+	ClearYieldOverrides();
+	ClearCoreVehicleInfos();
 
 	// Execute any field operations subclassing from UMassTrafficBeginPlayFieldOperationBase 
 	PerformFieldOperation(UMassTrafficBeginPlayFieldOperationBase::StaticClass());
@@ -266,6 +272,8 @@ void UMassTrafficSubsystem::BuildLaneData(FMassTrafficZoneGraphData& TrafficZone
 	TrafficZoneGraphData.DataHandle = ZoneGraphStorage.DataHandle;
 	TrafficZoneGraphData.TrafficLaneDataArray.Reset();
 
+	CrosswalkLaneInfoMap.Reset();
+
 	TMap<int32, int32> LeftLaneOverrides; // Key.LeftLanes = Value
 	TMap<int32, int32> RightLaneOverrides; // Key.RightLanes = Value
 	for (int32 LaneIndex = 0; LaneIndex < ZoneGraphStorage.Lanes.Num(); ++LaneIndex)
@@ -418,8 +426,10 @@ void UMassTrafficSubsystem::BuildLaneData(FMassTrafficZoneGraphData& TrafficZone
 	{
 		// Cache next lane fragments
 		TrafficLaneData.NextLanes.Reset();
+		TrafficLaneData.PrevLanes.Reset();
 		TrafficLaneData.MergingLanes.Reset();
 		TrafficLaneData.SplittingLanes.Reset();
+		TrafficLaneData.DownstreamCrosswalkLanes.Reset();
 
 		// Set up the turn flags on the lane.
 		const UE::MassTraffic::LaneTurnType LaneTurnType = UE::MassTraffic::GetLaneTurnType(TrafficLaneData.LaneHandle.Index, ZoneGraphStorage);
@@ -466,6 +476,12 @@ void UMassTrafficSubsystem::BuildLaneData(FMassTrafficZoneGraphData& TrafficZone
 					// Accumulate the speed limit.
 					AccumulatedSpeedLimit += LinkedTrafficLaneData->ConstData.SpeedLimit;
 					NumberOfAccumulatedSpeedLimits++;
+				}
+
+				if (Link.Type == EZoneLaneLinkType::Incoming)
+				{
+					// Add previous lane.
+					TrafficLaneData.PrevLanes.Add(LinkedTrafficLaneData);
 				}
 				
 				if (Link.HasFlags(EZoneLaneLinkFlags::Merging))
@@ -679,6 +695,11 @@ bool UMassTrafficSubsystem::HasParkedVehicleAgents()
 	return ParkedVehicleEntityQuery.HasMatchingEntities(*EntityManager.Get());
 }
 
+int32 UMassTrafficSubsystem::GetNumParkedVehiclesScale() const
+{
+	return GMassTrafficNumParkedVehiclesScale;
+}
+
 void UMassTrafficSubsystem::ClearAllTrafficLanes()
 {
 	for (FMassTrafficZoneGraphData& TrafficZoneGraphData : RegisteredTrafficZoneGraphData)
@@ -816,6 +837,289 @@ void UMassTrafficSubsystem::RebuildLaneData()
 	UE::MassTrafficDelegates::OnTrafficLaneDataChanged.Broadcast(this);
 }
 #endif // WITH_EDITOR
+
+void UMassTrafficSubsystem::AddDownstreamCrosswalkLane(const FZoneGraphLaneHandle& BaseLane, const FZoneGraphLaneHandle& DownstreamCrosswalkLane, float CrosswalkDistanceAlongLane)
+{
+	if (!ensureMsgf(BaseLane.IsValid(), TEXT("Must get valid BaseLane in UMassTrafficSubsystem::AddDownstreamCrosswalkLane.  BaseLane.Index: %d."), BaseLane.Index))
+	{
+		return;
+	}
+
+	if (!ensureMsgf(DownstreamCrosswalkLane.IsValid(), TEXT("Must get valid DownstreamCrosswalkLane in UMassTrafficSubsystem::AddDownstreamCrosswalkLane.  DownstreamCrosswalkLane.Index: %d."), DownstreamCrosswalkLane.Index))
+	{
+		return;
+	}
+	
+	FZoneGraphTrafficLaneData* BaseTrafficLaneData = GetMutableTrafficLaneData(BaseLane);
+
+	if (!ensureMsgf(BaseTrafficLaneData != nullptr, TEXT("Must get ZoneGraphTrafficLaneData for BaseLane in UMassTrafficSubsystem::AddDownstreamCrosswalkLane.  BaseLane.Index: %d."), BaseLane.Index))
+	{
+		return;
+	}
+
+	BaseTrafficLaneData->DownstreamCrosswalkLanes.Add(DownstreamCrosswalkLane, CrosswalkDistanceAlongLane);
+
+	FMassTrafficCrosswalkLaneInfo& CrosswalkLaneInfo = CrosswalkLaneInfoMap.FindOrAdd(DownstreamCrosswalkLane);
+	CrosswalkLaneInfo.IncomingVehicleLanes.Add(BaseLane);
+}
+
+const FMassTrafficCrosswalkLaneInfo* UMassTrafficSubsystem::GetCrosswalkLaneInfo(const FZoneGraphLaneHandle& CrosswalkLane) const
+{
+	const FMassTrafficCrosswalkLaneInfo* CrosswalkLaneInfo = CrosswalkLaneInfoMap.Find(CrosswalkLane);
+	return CrosswalkLaneInfo;
+}
+
+FMassTrafficCrosswalkLaneInfo* UMassTrafficSubsystem::GetMutableCrosswalkLaneInfo(const FZoneGraphLaneHandle& CrosswalkLane)
+{
+	return const_cast<FMassTrafficCrosswalkLaneInfo*>(GetCrosswalkLaneInfo(CrosswalkLane));
+}
+
+bool UMassTrafficSubsystem::IsPedestrianYieldingOnCrosswalkLane(const FMassEntityHandle& PedestrianEntityHandle, const FZoneGraphLaneHandle& CrosswalkLane) const
+{
+	const FMassTrafficCrosswalkLaneInfo* CrosswalkLaneInfo = GetCrosswalkLaneInfo(CrosswalkLane);
+	
+	if (CrosswalkLaneInfo == nullptr)
+	{
+		return false;
+	}
+
+	const bool bIsPedestrianYieldingOnCrosswalk = CrosswalkLaneInfo->IsEntityOnCrosswalkYieldingToAnyLane(PedestrianEntityHandle);
+
+	return bIsPedestrianYieldingOnCrosswalk;
+}
+
+bool UMassTrafficSubsystem::TryGetPedestrianDesiredSpeedOnCrosswalkLane(const FMassEntityHandle& PedestrianEntityHandle, const FZoneGraphLaneHandle& CrosswalkLane, float& OutDesiredSpeed) const
+{
+	const FMassTrafficCrosswalkLaneInfo* CrosswalkLaneInfo = GetCrosswalkLaneInfo(CrosswalkLane);
+	
+	if (CrosswalkLaneInfo == nullptr)
+	{
+		return false;
+	}
+
+	const float PedestrianDesiredSpeedOnCrosswalkLane = CrosswalkLaneInfo->GetEntityYieldResumeSpeed(PedestrianEntityHandle).Get();
+
+	OutDesiredSpeed = PedestrianDesiredSpeedOnCrosswalkLane;
+
+	return true;
+}
+
+float UMassTrafficSubsystem::GetPedestrianEffectiveSpeedOnCrosswalkLane(const FMassEntityHandle& PedestrianEntityHandle, const FZoneGraphLaneHandle& CrosswalkLane, const float CurrentSpeed) const
+{
+	if (IsPedestrianYieldingOnCrosswalkLane(PedestrianEntityHandle, CrosswalkLane))
+	{
+		float PedestrianDesiredSpeed;
+		if (TryGetPedestrianDesiredSpeedOnCrosswalkLane(PedestrianEntityHandle, CrosswalkLane, PedestrianDesiredSpeed))
+		{
+			return PedestrianDesiredSpeed;
+		}
+	}
+
+	return CurrentSpeed;
+}
+
+void UMassTrafficSubsystem::AddVehicleEntityToIntersectionStopQueue(const FMassEntityHandle& VehicleEntityHandle, const FMassEntityHandle& IntersectionEntityHandle)
+{
+	TArray<FMassEntityHandle>& IntersectionStopQueue = IntersectionStopQueueMap.FindOrAdd(IntersectionEntityHandle);
+
+	if (!IntersectionStopQueue.Contains(VehicleEntityHandle))
+	{
+		IntersectionStopQueue.Add(VehicleEntityHandle);
+	}
+}
+
+void UMassTrafficSubsystem::RemoveVehicleEntityFromIntersectionStopQueue(const FMassEntityHandle& VehicleEntityHandle, const FMassEntityHandle& IntersectionEntityHandle)
+{
+	TArray<FMassEntityHandle>* IntersectionStopQueue = IntersectionStopQueueMap.Find(IntersectionEntityHandle);
+
+	if (IntersectionStopQueue != nullptr)
+	{
+		IntersectionStopQueue->Remove(VehicleEntityHandle);
+	}
+}
+
+void UMassTrafficSubsystem::ClearIntersectionStopQueues()
+{
+	IntersectionStopQueueMap.Reset();
+}
+
+FMassEntityHandle UMassTrafficSubsystem::GetNextVehicleEntityInIntersectionStopQueue(const FMassEntityHandle& IntersectionEntityHandle) const
+{
+	const TArray<FMassEntityHandle>* IntersectionStopQueue = IntersectionStopQueueMap.Find(IntersectionEntityHandle);
+
+	if (IntersectionStopQueue != nullptr && !IntersectionStopQueue->IsEmpty())
+	{
+		return (*IntersectionStopQueue)[0];
+	}
+
+	return FMassEntityHandle();
+}
+
+bool UMassTrafficSubsystem::IsVehicleEntityInIntersectionStopQueue(const FMassEntityHandle& VehicleEntityHandle, const FMassEntityHandle& IntersectionEntityHandle) const
+{
+	const TArray<FMassEntityHandle>* IntersectionStopQueue = IntersectionStopQueueMap.Find(IntersectionEntityHandle);
+	
+	if (IntersectionStopQueue == nullptr)
+	{
+		return false;
+	}
+
+	return IntersectionStopQueue->Contains(VehicleEntityHandle);
+}
+
+void UMassTrafficSubsystem::AddLaneIntersectionInfo(const FZoneGraphLaneHandle& QueryLane, const FZoneGraphLaneHandle& DestLane, const FMassTrafficLaneIntersectionInfo& LaneIntersectionInfo)
+{
+	TMap<FZoneGraphLaneHandle, FMassTrafficLaneIntersectionInfo>& InnerMap = LaneIntersectionInfoMap.FindOrAdd(QueryLane);
+	InnerMap.Add(DestLane, LaneIntersectionInfo);
+}
+
+bool UMassTrafficSubsystem::TryGetLaneIntersectionInfo(const FZoneGraphLaneHandle& QueryLane, const FZoneGraphLaneHandle& DestLane, FMassTrafficLaneIntersectionInfo& OutLaneIntersectionInfo) const
+{
+	if (const TMap<FZoneGraphLaneHandle, FMassTrafficLaneIntersectionInfo>* InnerMap = LaneIntersectionInfoMap.Find(QueryLane))
+	{
+		if (const FMassTrafficLaneIntersectionInfo* LaneIntersectionInfo = InnerMap->Find(DestLane))
+		{
+			OutLaneIntersectionInfo = *LaneIntersectionInfo;
+			return true;
+		}
+	}
+
+	return false;
+}
+
+void UMassTrafficSubsystem::ClearLaneIntersectionInfo()
+{
+	LaneIntersectionInfoMap.Reset();
+}
+
+void UMassTrafficSubsystem::AddYieldInfo(const FZoneGraphLaneHandle& YieldingLane, const FMassEntityHandle& YieldingEntity, const FZoneGraphLaneHandle& YieldTargetLane, const FMassEntityHandle& YieldTargetEntity)
+{
+	const FLaneEntityPair& YieldingLaneEntityPair = FLaneEntityPair(YieldingLane, YieldingEntity);
+	const FLaneEntityPair& YieldTargetLaneEntityPair = FLaneEntityPair(YieldTargetLane, YieldTargetEntity);
+	
+	TSet<FLaneEntityPair>& YieldTargetLaneEntityPairs = YieldMap.FindOrAdd(YieldingLaneEntityPair);
+	YieldTargetLaneEntityPairs.Add(YieldTargetLaneEntityPair);
+
+	TSet<FMassEntityHandle>& YieldingEntities = YieldingEntitiesMap.FindOrAdd(YieldingLane);
+	YieldingEntities.Add(YieldingEntity);
+}
+
+void UMassTrafficSubsystem::ClearYieldInfo()
+{
+	YieldMap.Reset();
+	YieldingEntitiesMap.Reset();
+}
+
+const TMap<FLaneEntityPair, TSet<FLaneEntityPair>>& UMassTrafficSubsystem::GetYieldMap() const
+{
+	return YieldMap;
+}
+
+const TMap<FZoneGraphLaneHandle, TSet<FMassEntityHandle>>& UMassTrafficSubsystem::GetYieldingEntitiesMap() const
+{
+	return YieldingEntitiesMap;
+}
+
+void UMassTrafficSubsystem::AddYieldOverride(const FZoneGraphLaneHandle& YieldOverrideLane, const FMassEntityHandle& YieldOverrideEntity, const FZoneGraphLaneHandle& YieldIgnoreTargetLane, const FMassEntityHandle& YieldIgnoreTargetEntity)
+{
+	const FLaneEntityPair YieldOverrideLaneEntityPair(YieldOverrideLane, YieldOverrideEntity);
+	const FLaneEntityPair YieldIgnoreTargetLaneEntityPair(YieldIgnoreTargetLane, YieldIgnoreTargetEntity);
+	
+	TSet<FLaneEntityPair>& YieldIgnoreTargets = YieldOverrideMap.FindOrAdd(YieldOverrideLaneEntityPair);
+	YieldIgnoreTargets.Add(YieldIgnoreTargetLaneEntityPair);
+}
+
+void UMassTrafficSubsystem::AddWildcardYieldOverride(const FZoneGraphLaneHandle& YieldOverrideLane, const FMassEntityHandle& YieldOverrideEntity)
+{
+	const FLaneEntityPair YieldOverrideLaneEntityPair(YieldOverrideLane, YieldOverrideEntity);
+	
+	WildcardYieldOverrideSet.FindOrAdd(YieldOverrideLaneEntityPair);
+}
+
+void UMassTrafficSubsystem::ClearYieldOverrides()
+{
+	YieldOverrideMap.Reset();
+	WildcardYieldOverrideSet.Reset();
+}
+
+bool UMassTrafficSubsystem::HasYieldOverride(const FZoneGraphLaneHandle& YieldingLane, const FMassEntityHandle& YieldingEntity, const FZoneGraphLaneHandle& YieldTargetLane, const FMassEntityHandle& YieldTargetEntity) const
+{
+	if (HasWildcardYieldOverride(YieldingLane, YieldingEntity))
+	{
+		return true;
+	}
+	
+	const FLaneEntityPair YieldOverrideLaneEntityPair(YieldingLane, YieldingEntity);
+	const FLaneEntityPair YieldIgnoreTargetLaneEntityPair(YieldTargetLane, YieldTargetEntity);
+	
+	const TSet<FLaneEntityPair>* YieldIgnoreTargets = YieldOverrideMap.Find(YieldOverrideLaneEntityPair);
+	
+	if (YieldIgnoreTargets == nullptr)
+	{
+		return false;
+	}
+	
+	return YieldIgnoreTargets->Contains(YieldIgnoreTargetLaneEntityPair);
+}
+
+bool UMassTrafficSubsystem::HasWildcardYieldOverride(const FZoneGraphLaneHandle& YieldingLane, const FMassEntityHandle& YieldingEntity) const
+{
+	const FLaneEntityPair YieldOverrideLaneEntityPair(YieldingLane, YieldingEntity);
+	
+	return WildcardYieldOverrideSet.Contains(YieldOverrideLaneEntityPair);
+}
+
+const TMap<FLaneEntityPair, TSet<FLaneEntityPair>>& UMassTrafficSubsystem::GetYieldOverrideMap() const
+{
+	return YieldOverrideMap;
+}
+
+TMap<FLaneEntityPair, TSet<FLaneEntityPair>>& UMassTrafficSubsystem::GetMutableYieldOverrideMap()
+{
+	return YieldOverrideMap;
+}
+
+const TSet<FLaneEntityPair>& UMassTrafficSubsystem::GetWildcardYieldOverrideSet() const
+{
+	return WildcardYieldOverrideSet;
+}
+
+TSet<FLaneEntityPair>& UMassTrafficSubsystem::GetMutableWildcardYieldOverrideSet()
+{
+	return WildcardYieldOverrideSet;
+}
+
+void UMassTrafficSubsystem::AddCoreVehicleInfo(const FZoneGraphLaneHandle& LaneHandle, const FMassTrafficCoreVehicleInfo& CoreVehicleInfo)
+{
+	TSet<FMassTrafficCoreVehicleInfo>& CoreVehicleInfos = CoreVehicleInfoMap.FindOrAdd(LaneHandle);
+	CoreVehicleInfos.Add(CoreVehicleInfo);
+}
+
+bool UMassTrafficSubsystem::TryGetCoreVehicleInfos(const FZoneGraphLaneHandle& LaneHandle, TSet<FMassTrafficCoreVehicleInfo>& OutCoreVehicleInfos) const
+{
+	if (const TSet<FMassTrafficCoreVehicleInfo>* CoreVehicleInfos = CoreVehicleInfoMap.Find(LaneHandle))
+	{
+		OutCoreVehicleInfos = *CoreVehicleInfos;
+		return true;
+	}
+
+	return false;
+}
+
+void UMassTrafficSubsystem::ClearCoreVehicleInfos()
+{
+	CoreVehicleInfoMap.Reset();
+}
+
+const TMap<FZoneGraphLaneHandle, TSet<FMassTrafficCoreVehicleInfo>>& UMassTrafficSubsystem::GetCoreVehicleInfoMap() const
+{
+	return CoreVehicleInfoMap;
+}
+
+TMap<FZoneGraphLaneHandle, TSet<FMassTrafficCoreVehicleInfo>>& UMassTrafficSubsystem::GetMutableCoreVehicleInfoMap()
+{
+	return CoreVehicleInfoMap;
+}
 
 void MassTrafficDumpLaneStats(const TArray<FString>& Args, UWorld* InWorld, FOutputDevice& Ar)
 {

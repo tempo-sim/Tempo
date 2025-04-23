@@ -111,9 +111,9 @@ int32 FMassTrafficIntersectionDetail::GetTrafficLanesConnectingSides(int32 Start
 	const FMassTrafficIntersectionSide& BeginSide = Sides[StartSideIndex];
 	const FMassTrafficIntersectionSide& EndSide = Sides[EndSideIndex];
 
-	const TArray<FZoneGraphTrafficLaneData*>& StartInboundTrafficLanes = BeginSide.VehicleIntersectionLanes;
-	for (FZoneGraphTrafficLaneData* StartInboundTrafficLaneData : StartInboundTrafficLanes)
+	for (const auto& Elem : BeginSide.VehicleIntersectionLanes)
 	{
+		FZoneGraphTrafficLaneData* StartInboundTrafficLaneData = Elem.Key;
 		const FVector DirectionAlongEndSide = (UE::MassTraffic::GetLaneEndPoint(StartInboundTrafficLaneData->LaneHandle.Index, ZoneGraphStorage) - EndSide.IntersectionLanesBeginMidpoint).GetSafeNormal();
 		if (FVector::DotProduct(EndSide.DirectionIntoIntersection, DirectionAlongEndSide) <= MaxLaneSideConnectionCos)
 		{
@@ -147,15 +147,12 @@ bool FMassTrafficIntersectionDetail::HasHiddenSides() const
 
 
 void FMassTrafficIntersectionDetail::Build(
-	const int32 InZoneIndex,
 	const UE::MassTraffic::FMassTrafficBasicHGrid& CrosswalkLaneMidpoint_HGrid, const float IntersectionSideToCrosswalkSearchDistance, 
-	const UE::MassTraffic::FMassTrafficBasicHGrid& IntersectionSideHGrid, const TArray<FMassTrafficLightInstanceDesc>* TrafficLightDetails, float TrafficLightSearchDistance,
+	const UE::MassTraffic::FMassTrafficBasicHGrid& TrafficLightIntersectionSideHGrid, const TArray<FMassTrafficLightInstanceDesc>* TrafficLightInstanceDescs, float TrafficLightSearchDistance,
+	const UE::MassTraffic::FMassTrafficBasicHGrid& TrafficSignIntersectionSideHGrid, const TArray<FMassTrafficSignInstanceDesc>* TrafficSignInstanceDescs, float TrafficSignSearchDistance,
 	const FZoneGraphStorage& ZoneGraphStorage,
-	UWorld* World)
+	const UWorld& World)
 {
-	ZoneIndex = InZoneIndex;
-
-	
 	// Calculate and store -
 	//		(1) The midpoint and into-intersection-direction of each intersection side.
 	//		(2) The center point for each intersection.
@@ -167,10 +164,11 @@ void FMassTrafficIntersectionDetail::Build(
 			FVector Midpoint = FVector::ZeroVector;
 			FVector DirectionIntoIntersection = FVector::ZeroVector;
 			float Count = 0.0f;
-			for (FZoneGraphTrafficLaneData* VehicleIntersectionTrafficLaneData : Side.VehicleIntersectionLanes)
+			for (const auto& Elem : Side.VehicleIntersectionLanes)
 			{
-				Midpoint += UE::MassTraffic::GetLaneBeginPoint(VehicleIntersectionTrafficLaneData->LaneHandle.Index, ZoneGraphStorage); 
-				DirectionIntoIntersection += UE::MassTraffic::GetLaneBeginDirection(VehicleIntersectionTrafficLaneData->LaneHandle.Index, ZoneGraphStorage);
+				const FMassTrafficIntersectionSideLaneInfo& SideLaneInfo = Elem.Value;
+				Midpoint += SideLaneInfo.EntranceLocation;
+				DirectionIntoIntersection += SideLaneInfo.EntranceDirection;
 				Count += 1.0f;
 			}
 			Midpoint /= Count;
@@ -232,8 +230,9 @@ void FMassTrafficIntersectionDetail::Build(
 		for (int32 SourceSideIndex = 0; SourceSideIndex < NumSides; SourceSideIndex++)
 		{
 			const FMassTrafficIntersectionSide& SourceSide = Sides[SourceSideIndex];
-			for (FZoneGraphTrafficLaneData* SourceSideIntersectionTrafficLaneData : SourceSide.VehicleIntersectionLanes)
+			for (const auto& Elem : SourceSide.VehicleIntersectionLanes)
 			{
+				FZoneGraphTrafficLaneData* SourceSideIntersectionTrafficLaneData = Elem.Key;
 				const FVector& SourceSideIntersectionTrafficLaneData_EndPoint = UE::MassTraffic::GetLaneEndPoint(SourceSideIntersectionTrafficLaneData->LaneHandle.Index, ZoneGraphStorage);
 				const FVector& SourceSideIntersectionTrafficLaneData_EndDirectionIntoIntersection = -UE::MassTraffic::GetLaneEndDirection(SourceSideIntersectionTrafficLaneData->LaneHandle.Index, ZoneGraphStorage);
 
@@ -329,12 +328,19 @@ void FMassTrafficIntersectionDetail::Build(
 	}
 
 
-	// Find the traffic light details that control intersection lanes on intersection sides.
+	// Find the traffic light instance descs that control intersection lanes on intersection sides.
 	{
 		bHasTrafficLights = false;
 
 		for (FMassTrafficIntersectionSide& Side : Sides)
 		{
+			// Crosswalks on roads are always treated as yields.
+			if (bIsRoadCrosswalk)
+			{
+				Side.TrafficControllerSignType = EMassTrafficControllerSignType::YieldSign;
+				Side.TrafficLightInstanceDescIndex = INDEX_NONE;
+				continue;
+			}
 			// Find the left-most (closest to road center) intersection lane begin point. It will represent this
 			// intersection side in searches for the traffic light that controls it, which is in the middle of the
 			// intersection side. (This point should be closest to that.)
@@ -342,8 +348,9 @@ void FMassTrafficIntersectionDetail::Build(
 			{
 				float FarthestDistance = TNumericLimits<float>::Lowest();
 				bool bFoundLeftMostIntersectionLaneBeginPoint = false;
-				for (const FZoneGraphTrafficLaneData* IntersectionTrafficLaneData : Side.VehicleIntersectionLanes)
+				for (const auto& Elem : Side.VehicleIntersectionLanes)
 				{
+					FZoneGraphTrafficLaneData* IntersectionTrafficLaneData = Elem.Key;
 					const FVector IntersectionLaneBeginPoint = UE::MassTraffic::GetLaneBeginPoint(IntersectionTrafficLaneData->LaneHandle.Index, ZoneGraphStorage);
 					const FVector FromPoint_ToIntersectionLanesBeginMidpoint_Direction = IntersectionLaneBeginPoint - Side.IntersectionLanesBeginMidpoint;
 
@@ -366,35 +373,66 @@ void FMassTrafficIntersectionDetail::Build(
 				}
 			}
 			
-			// Hash grid stores indices for traffic light details, by their controlled intersection side midpoint.
+			// Hash grid stores indices for traffic light instance descs, by their controlled intersection side midpoint.
 			// (This controlled intersection side is the 'real' midpoint of the side, both inbound and outbound lanes.)
 			// Look for any of those that are close to the left-most intersection lanes begin point, which should be the
 			// point closest to the center of the road. We don't bother looking further than a certain distance. 
-			const FVector QueryDistance = FVector(TrafficLightSearchDistance);
-			TArray<int32/*traffic light detail index*/> QueryResults;
-			IntersectionSideHGrid.Query(FBox::BuildAABB(LeftMostIntersectionLaneBeginPoint, QueryDistance), QueryResults);
+			const FVector TrafficLightQueryExtent = FVector(TrafficLightSearchDistance);
+			TArray<int32/*traffic light instance desc index*/> TrafficLightQueryResults;
+			TrafficLightIntersectionSideHGrid.Query(FBox::BuildAABB(LeftMostIntersectionLaneBeginPoint, TrafficLightQueryExtent), TrafficLightQueryResults);
 
-			// Find nearest traffic light detail - by comparing distances between (1) each traffic light detail's
+			// Find nearest traffic light instance desc - by comparing distances between (1) each traffic light instance desc's
 			// intersection side midpoint, of the side it controls (2) this intersection side's intersection left-most
 			// lane's begin point - which should be the point closest to (1) and the center of the road.
-			float NearestTrafficLightDetailDistance = TNumericLimits<float>::Max();
-			int32 NearestTrafficLightDetailIndex = INDEX_NONE;
-			if (TrafficLightDetails != nullptr)
+			float NearestTrafficLightInstanceDescDistance = TNumericLimits<float>::Max();
+			int32 NearestTrafficLightInstanceDescIndex = INDEX_NONE;
+			if (TrafficLightInstanceDescs != nullptr)
 			{
-				for (int32 TrafficLightDetailIndex : QueryResults)
+				for (int32 TrafficLightInstanceDescIndex : TrafficLightQueryResults)
 				{
-					const FMassTrafficLightInstanceDesc& TrafficLightDetail = (*TrafficLightDetails)[TrafficLightDetailIndex];
-					const float Distance = (LeftMostIntersectionLaneBeginPoint - TrafficLightDetail.ControlledIntersectionSideMidpoint).Length();
-					if (Distance < NearestTrafficLightDetailDistance)
+					const FMassTrafficLightInstanceDesc& TrafficLightInstanceDesc = (*TrafficLightInstanceDescs)[TrafficLightInstanceDescIndex];
+					const float Distance = (LeftMostIntersectionLaneBeginPoint - TrafficLightInstanceDesc.ControlledIntersectionSideMidpoint).Length();
+					if (Distance < NearestTrafficLightInstanceDescDistance)
 					{
-						NearestTrafficLightDetailDistance = Distance;
-						NearestTrafficLightDetailIndex = TrafficLightDetailIndex;
+						NearestTrafficLightInstanceDescDistance = Distance;
+						NearestTrafficLightInstanceDescIndex = TrafficLightInstanceDescIndex;
 					}
 				}
 			}
 
-			Side.TrafficLightDetailIndex = NearestTrafficLightDetailIndex; // ..may be INDEX_NONE
-			bHasTrafficLights |= (NearestTrafficLightDetailIndex != INDEX_NONE);
+			Side.TrafficLightInstanceDescIndex = NearestTrafficLightInstanceDescIndex; // ..may be INDEX_NONE
+			bHasTrafficLights |= (NearestTrafficLightInstanceDescIndex != INDEX_NONE);
+			
+			const FVector TrafficSignQueryExtent = FVector(TrafficSignSearchDistance);
+			TArray<int32/*traffic sign instance desc index*/> TrafficSignQueryResults;
+			TrafficSignIntersectionSideHGrid.Query(FBox::BuildAABB(LeftMostIntersectionLaneBeginPoint, TrafficSignQueryExtent), TrafficSignQueryResults);
+
+			float NearestTrafficSignInstanceDescDistance = TNumericLimits<float>::Max();
+			int32 NearestTrafficSignInstanceDescIndex = INDEX_NONE;
+			
+			if (TrafficSignInstanceDescs != nullptr)
+			{
+				for (int32 TrafficSignInstanceDescIndex : TrafficSignQueryResults)
+				{
+					const FMassTrafficSignInstanceDesc& TrafficSignInstanceDesc = (*TrafficSignInstanceDescs)[TrafficSignInstanceDescIndex];
+					const float Distance = (LeftMostIntersectionLaneBeginPoint - TrafficSignInstanceDesc.ControlledIntersectionSideMidpoint).Length();
+					if (Distance < NearestTrafficSignInstanceDescDistance)
+					{
+						NearestTrafficSignInstanceDescDistance = Distance;
+						NearestTrafficSignInstanceDescIndex = TrafficSignInstanceDescIndex;
+					}
+				}
+			}
+
+			if (NearestTrafficSignInstanceDescIndex != INDEX_NONE)
+			{
+				const FMassTrafficSignInstanceDesc& NearestTrafficSignInstanceDesc = (*TrafficSignInstanceDescs)[NearestTrafficSignInstanceDescIndex];
+				Side.TrafficControllerSignType = NearestTrafficSignInstanceDesc.TrafficControllerSignType;
+			}
+			else
+			{
+				Side.TrafficControllerSignType = EMassTrafficControllerSignType::None;
+			}
 		}
 	}
 }

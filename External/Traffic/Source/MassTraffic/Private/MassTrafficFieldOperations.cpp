@@ -88,7 +88,7 @@ void FMassTrafficFieldOperationContext::ForEachTrafficIntersection(FTrafficInter
 	const TArray<FMassEntityHandle>& TrafficIntersectionEntities = Field.GetTrafficIntersectionEntities();
 	for (const FMassEntityHandle& TrafficIntersectionEntity : TrafficIntersectionEntities)
 	{
-		FMassTrafficIntersectionFragment& TrafficIntersectionFragment = EntityManager.GetFragmentDataChecked<FMassTrafficIntersectionFragment>(TrafficIntersectionEntity);
+		FMassTrafficLightIntersectionFragment& TrafficIntersectionFragment = EntityManager.GetFragmentDataChecked<FMassTrafficLightIntersectionFragment>(TrafficIntersectionEntity);
 
 		// Execute callback
 		const bool bContinue = ExecuteFunction(TrafficIntersectionEntity, TrafficIntersectionFragment);
@@ -209,7 +209,7 @@ void UMassTrafficVisualLoggingFieldOperation::Execute(FMassTrafficFieldOperation
 void UMassTrafficRetimeIntersectionPeriodsFieldOperation::Execute(FMassTrafficFieldOperationContext& Context)
 {
 	// Loop over field intersection
-	Context.ForEachTrafficIntersection([this](const FMassEntityHandle TrafficIntersectionEntity, FMassTrafficIntersectionFragment& TrafficIntersectionFragment)
+	Context.ForEachTrafficIntersection([this](const FMassEntityHandle TrafficIntersectionEntity, FMassTrafficLightIntersectionFragment& TrafficIntersectionFragment)
 	{
 		for (int32 PeriodIndex = 0; PeriodIndex < TrafficIntersectionFragment.Periods.Num(); ++PeriodIndex)
 		{

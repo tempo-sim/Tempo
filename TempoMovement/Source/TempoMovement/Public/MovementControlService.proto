@@ -1,0 +1,49 @@
+// Copyright Tempo Simulation, LLC. All Rights Reserved
+
+syntax = "proto3";
+
+import "TempoScripting/Empty.proto";
+import "TempoScripting/Geometry.proto";
+
+message CommandableVehiclesResponse{
+  repeated string vehicle_name = 1;
+}
+
+message VehicleCommandRequest {
+  string vehicle_name = 1;
+  float acceleration = 2;
+  float steering = 3;
+}
+
+message CommandablePawnsResponse {
+  repeated string pawn_name = 1;
+}
+
+message PawnMoveToLocationRequest {
+  string name = 1;
+  TempoScripting.Vector location = 2;
+  bool relative = 3;
+}
+
+enum MoveToResult {
+  UNKNOWN = 0;
+  SUCCESS = 1;
+  BLOCKED = 2;
+  OFF_PATH = 3;
+  ABORTED = 4;
+  INVALID = 5;
+}
+
+message PawnMoveToLocationResponse {
+  MoveToResult result = 1;
+}
+
+service MovementControlService {
+  rpc GetCommandableVehicles(TempoScripting.Empty) returns (CommandableVehiclesResponse);
+  
+  rpc CommandVehicle(VehicleCommandRequest) returns (TempoScripting.Empty);
+
+  rpc GetCommandablePawns(TempoScripting.Empty) returns (CommandablePawnsResponse);
+
+  rpc PawnMoveToLocation(PawnMoveToLocationRequest) returns (PawnMoveToLocationResponse);
+}

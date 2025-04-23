@@ -34,4 +34,10 @@ public:
 	virtual FString GetVehicleName() = 0;
 	
 	virtual void HandleDrivingInput(const FNormalizedDrivingInput& Input) = 0;
+
+	virtual float GetMaxAcceleration() const = 0;
+
+	virtual float GetMaxDeceleration() const = 0;
+
+	virtual float GetMaxSteerAngle() const = 0;
 };

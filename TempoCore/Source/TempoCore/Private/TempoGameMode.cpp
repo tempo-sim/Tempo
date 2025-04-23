@@ -12,6 +12,8 @@ void ATempoGameMode::StartPlay()
 	UTempoCoreServiceSubsystem* TempoCoreServiceSubsystem = UGameInstance::GetSubsystem<UTempoCoreServiceSubsystem>(GetGameInstance());
 	if (TempoCoreServiceSubsystem)
 	{
+		// Wait until level streaming is up to date (and all streamed actors are loaded)
+		GEngine->BlockTillLevelStreamingCompleted(GetWorld());
 		TempoCoreServiceSubsystem->OnLevelLoaded();
 		if (TempoCoreServiceSubsystem->GetDeferBeginPlay())
 		{
@@ -21,6 +23,7 @@ void ATempoGameMode::StartPlay()
 		}
 	}
 
+	PreBeginPlayEvent.Broadcast(GetWorld());
 	Super::StartPlay();
 
 	if (TempoCoreServiceSubsystem)

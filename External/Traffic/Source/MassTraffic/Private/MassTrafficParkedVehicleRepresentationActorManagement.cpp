@@ -47,6 +47,9 @@ EMassActorSpawnRequestAction  UMassTrafficParkedVehicleRepresentationActorManage
 		VehiclePawn->DetachFromControllerPendingDestroy();
 	}
 
+	// Add a tag so parked cars are easy to recognize
+	MassActorSpawnRequest.SpawnedActor->Tags.AddUnique(TEXT("ParkedVehicle"));
+
 	// Init render scene previous frame transform
 	MassActorSpawnRequest.SpawnedActor->ForEachComponent<UPrimitiveComponent>(/*bIncludeFromChildActors*/true, [&MassActorSpawnRequest, &RepresentationFragment](UPrimitiveComponent* PrimitiveComponent)
 	{

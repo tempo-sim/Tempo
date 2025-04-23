@@ -3,6 +3,7 @@
 #pragma once
 
 #include "MassTrafficPhysics.h"
+#include "MassTrafficTypes.h"
 
 #include "MassEntityTraitBase.h"
 #include "MassSimulationLOD.h"
@@ -11,7 +12,7 @@
 #include "MassTrafficVehicleSimulationTrait.generated.h"
 
 USTRUCT()
-struct MASSTRAFFIC_API FMassTrafficVehicleSimulationParameters : public FMassSharedFragment
+struct MASSTRAFFIC_API FMassTrafficVehicleSimulationParameters : public FMassConstSharedFragment
 {
 	GENERATED_BODY()
 	
@@ -54,7 +55,19 @@ struct MASSTRAFFIC_API FMassTrafficVehicleSimulationParameters : public FMassSha
 	bool bAllowGoingStraightAtIntersections = true;
 
 	UPROPERTY(EditAnywhere, Category = "Restrictions")
-	TArray<FZoneGraphTagFilter> LaneChangePriorityFilters;
+	FMassTrafficLanePriorityFilters LaneChangePriorityFilters;
+
+	UPROPERTY(EditAnywhere, Category = "Restrictions")
+	FMassTrafficLanePriorityFilters NextLanePriorityFilters;
+
+	UPROPERTY(EditAnywhere, Category = "Restrictions")
+	TMap<EZoneGraphTurnType, FMassTrafficLanePriorityFilters> TurningLanePriorityFilters;
+};
+
+USTRUCT()
+struct MASSTRAFFIC_API FMassTrafficVehiclePhysicsParameters : public FMassConstSharedFragment
+{
+	GENERATED_BODY()
 
 	/** Actor class of this agent when spawned in high resolution */
 	UPROPERTY(EditAnywhere, Category = "Physics")
@@ -75,6 +88,21 @@ public:
 
 	UPROPERTY(EditAnywhere, Category = "Variable Tick")
 	FMassSimulationVariableTickParameters VariableTickParams;
+
+	virtual void BuildTemplate(FMassEntityTemplateBuildContext& BuildContext, const UWorld& World) const override;
+};
+
+UCLASS(meta=(DisplayName="Traffic Vehicle Simulation Mass Control"))
+class MASSTRAFFIC_API UMassTrafficVehicleSimulationMassControlTrait : public UMassEntityTraitBase
+{
+	GENERATED_BODY()
+
+public:
+
+	UMassTrafficVehicleSimulationMassControlTrait(const FObjectInitializer& ObjectInitializer = FObjectInitializer::Get());
+
+	UPROPERTY(EditAnywhere, Category = "Mass Traffic")
+	FMassTrafficVehiclePhysicsParameters PhysicsParams;
 
 	virtual void BuildTemplate(FMassEntityTemplateBuildContext& BuildContext, const UWorld& World) const override;
 };

@@ -14,6 +14,10 @@ struct FZoneGraphTrafficLaneData;
 struct FMassTrafficLaneDensity;
 struct FMassTrafficVehicleSpawnFilter;
 
+class UMassTrafficSettings;
+class UMassTrafficSubsystem;
+class UZoneGraphSubsystem;
+
 /**
 * Helpful functions for determining lane directions from Zone Graph data.
 */
@@ -111,10 +115,18 @@ MASSTRAFFIC_API FVector GetLaneBeginDirection(const uint32 LaneIndex, const FZon
 MASSTRAFFIC_API FVector GetLaneEndDirection(const uint32 LaneIndex, const FZoneGraphStorage& ZoneGraphStorage);
 MASSTRAFFIC_API FVector GetLaneBeginToEndDirection(const uint32 LaneIndex, const FZoneGraphStorage& ZoneGraphStorage);
 
+MASSTRAFFIC_API float GetDistanceAlongLaneNearestToPoint(const uint32 LaneIndex, const FVector& QueryPoint, const FZoneGraphStorage& ZoneGraphStorage);
+MASSTRAFFIC_API FVector GetDirectionAtDistanceAlongLane(const uint32 LaneIndex, float Distance, const FZoneGraphStorage& ZoneGraphStorage);
+MASSTRAFFIC_API FVector GetPointAtDistanceAlongLane(const uint32 LaneIndex,  float Distance, const FZoneGraphStorage& ZoneGraphStorage);
+
 MASSTRAFFIC_API float GetLaneStraightness(const uint32 LaneIndex, const FZoneGraphStorage& ZoneGraphStorage);
 
 MASSTRAFFIC_API LaneTurnType GetLaneTurnType(const uint32 LaneIndex, const FZoneGraphStorage& ZoneGraphStorage);
 
+int32 GetLanePriority(
+	const FZoneGraphTrafficLaneData* TrafficLaneData,
+	const FMassTrafficLanePriorityFilters& LanePriorityFilters,
+	const FZoneGraphStorage& ZoneGraphStorage);
 
 /** Lane search functions. */
 MASSTRAFFIC_API bool PointIsNearSegment(
@@ -130,5 +142,70 @@ FORCEINLINE float GetSpeedLimitAlongLane(const float Length, const float SpeedLi
 	const float SpeedScale = 1.0f - FMath::Clamp(TimeLeftOnLane / TimeToBlendFromLaneEnd, 0.0f, 1.0f);
 	return FMath::Lerp(SpeedLimit, MinNextLaneSpeedLimit, SpeedScale) IF_MASSTRAFFIC_ENABLE_DEBUG( * GMassTrafficSpeedLimitScale );
 }
+
+void DrawLaneData(
+	const UZoneGraphSubsystem& ZoneGraphSubsystem,
+	const FZoneGraphLaneHandle& LaneHandle,
+	const FColor LaneColor,
+	const UWorld& World,
+	const float ZOffset = 10.0f,
+	const float LifeTime = 0.1f);
+
+bool TryGetVehicleEnterAndExitTimesForIntersection(
+	const FZoneGraphTrafficLaneData& VehicleCurrentLaneData,
+	const FZoneGraphTrafficLaneData& IntersectionLaneData,
+	const float VehicleDistanceAlongCurrentLane,
+	const float VehicleEffectiveSpeed,
+	const float VehicleRadius,
+	float& OutVehicleEnterTime,
+	float& OutVehicleExitTime,
+	float* OutVehicleDistanceToEnterIntersectionLane = nullptr,
+	float* OutVehicleDistanceToExitIntersectionLane = nullptr);
+
+MASSTRAFFIC_API bool TryGetEnterAndExitDistancesAlongQueryLane(
+	const UMassTrafficSubsystem& MassTrafficSubsystem,
+	const UMassTrafficSettings& MassTrafficSettings,
+	const FZoneGraphStorage& ZoneGraphStorage,
+	const FZoneGraphLaneHandle& QueryLane,
+	const FZoneGraphLaneHandle& OtherLane,
+	float& OutEnterDistanceAlongQueryLane,
+	float& OutExitDistanceAlongQueryLane,
+	bool bExpectIntersection=true);
+
+bool TryGetVehicleEnterAndExitTimesForCrossingLane(
+	const UMassTrafficSubsystem& MassTrafficSubsystem,
+	const UMassTrafficSettings& MassTrafficSettings,
+	const FZoneGraphStorage& ZoneGraphStorage,
+	const FZoneGraphTrafficLaneData& VehicleCurrentLaneData,
+	const FZoneGraphTrafficLaneData& VehicleQueryLaneData,
+	const FZoneGraphLaneHandle& CrossingLane,
+	const float VehicleDistanceAlongCurrentLane,
+	const float VehicleEffectiveSpeed,
+	const float VehicleRadius,
+	float& OutVehicleEnterTime,
+	float& OutVehicleExitTime,
+	float* OutVehicleEnterDistance = nullptr,
+	float* OutVehicleExitDistance = nullptr);
+
+bool TryGetEntityEnterAndExitTimesForCrossingLane(
+	const UMassTrafficSubsystem& MassTrafficSubsystem,
+	const UMassTrafficSettings& MassTrafficSettings,
+	const FZoneGraphStorage& ZoneGraphStorage,
+	const FZoneGraphLaneHandle& EntityQueryLane,
+	const FZoneGraphLaneHandle& CrossingLane,
+	const float EntityDistanceAlongQueryLane,
+	const float EntitySpeed,
+	const float EntityRadius,
+	float& OutEntityEnterTime,
+	float& OutEntityExitTime,
+	float* OutEntityEnterDistance = nullptr,
+	float* OutEntityExitDistance = nullptr);
+
+void GetEnterAndExitTimeForYieldingEntity(
+	const float EnterDistance,
+	const float ExitDistance,
+	const float Acceleration,
+	float& OutEntityEnterTime,
+	float& OutEntityExitTime);
 
 }

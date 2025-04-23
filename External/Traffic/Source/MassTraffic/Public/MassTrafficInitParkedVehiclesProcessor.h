@@ -32,8 +32,5 @@ protected:
 	virtual void ConfigureQueries() override;
 	virtual void Execute(FMassEntityManager& EntitySubSystem, FMassExecutionContext& Context) override;
 
-	UPROPERTY(EditAnywhere, Category = "Processor")
-	FRandomStream RandomStream = FRandomStream(1234);
-
 	FMassEntityQuery EntityQuery;
 };

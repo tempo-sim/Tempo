@@ -14,6 +14,7 @@ public class TempoAgentsShared : ModuleRules
                 "Core",
                 "Engine",
                 "RenderCore",
+                "ZoneGraph",
             }
         );
 
@@ -25,17 +26,32 @@ public class TempoAgentsShared : ModuleRules
                 "DeveloperSettings",
                 "Slate",
                 "SlateCore",
-                "ZoneGraph",
+                "MassCommon",
                 "MassTraffic",
                 "MassRepresentation",
                 "MassEntity",
                 "MassActors",
                 "MassSpawner",
-                "StructUtils",
+                "MassCommon",
                 "RHI",
+                // For overriden "stand" state
+                "MassMovement",
+                "MassNavigation",
+                "MassZoneGraphNavigation",
+                "MassAIBehavior",
+                "StateTreeModule",
+                "MassSignals",
+                "MassSimulation",
                 // Tempo
                 "TempoCore",
+                "TempoCoreShared",
             }
         );
+        
+        // StructUtils plugin was deprecated in 5.5 and moved into CoreUObject
+        if (Target.Version.MajorVersion == 5 && Target.Version.MinorVersion < 5)
+        {
+            PrivateDependencyModuleNames.Add("StructUtils");
+        }
     }
 }

@@ -10,6 +10,7 @@ public class TempoVehicleMovement : ModuleRules
             new string[]
             {
                 "Core",
+                "ChaosVehicles",
             }
         );
 
@@ -22,7 +23,8 @@ public class TempoVehicleMovement : ModuleRules
                 "Slate",
                 "SlateCore",
                 // Tempo
-                "TempoMovementShared"
+                "TempoCoreShared",
+                "TempoMovementShared",
             }
         );
     }
