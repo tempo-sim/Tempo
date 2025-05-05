@@ -217,6 +217,11 @@ void UTempoActorLabeler::LabelComponent(UPrimitiveComponent* Component, int32 Ac
 	{
 		if (const UStaticMesh* StaticMesh = StaticMeshComponent->GetStaticMesh())
 		{
+			if (!IsValid(StaticMesh))
+			{
+				UE_LOG(LogTempoLabels, Warning, TEXT("Tried to label invalid StaticMesh on %s"), *StaticMeshComponent->GetName());
+				return;
+			}
 			const FString MeshFullPath = StaticMesh->GetPathName();
 			if (const FName* StaticMeshLabel = StaticMeshLabels.Find(MeshFullPath))
 			{
