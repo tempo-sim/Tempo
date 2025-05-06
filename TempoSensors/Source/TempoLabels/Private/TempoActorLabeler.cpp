@@ -12,6 +12,7 @@
 #include "DefaultActorClassifier.h"
 
 #include "Engine.h"
+#include "Landscape.h"
 
 void UTempoActorLabeler::OnWorldBeginPlay(UWorld& InWorld)
 {
@@ -213,6 +214,10 @@ void UTempoActorLabeler::LabelComponent(UActorComponent* Component)
 
 void UTempoActorLabeler::LabelComponent(UPrimitiveComponent* Component, int32 ActorLabelId)
 {
+	if (Cast<ALandscape>(Component->GetOwner()))
+	{
+		return;
+	}
 	if (UStaticMeshComponent* StaticMeshComponent = Cast<UStaticMeshComponent>(Component))
 	{
 		if (const UStaticMesh* StaticMesh = StaticMeshComponent->GetStaticMesh())
