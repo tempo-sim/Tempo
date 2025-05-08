@@ -313,7 +313,7 @@ bool UTempoIntersectionQueryComponent::ShouldFilterLaneConnection(const AActor* 
 		case EZoneGraphTurnType::Right:
 		{
 			// We need to consider all the source lanes from this group and their possible destination lanes.
-			TArray<int32> DestLaneIndices;
+			TMap<int32, TSet<int32>> DestLaneIndicesToSources;
 			for (const FLaneConnectionCandidate& Candidate : AllCandidates)
 			{
 				const bool bCandidateHasSameSourceGroup = TagFilteredSourceLaneConnectionInfos.ContainsByPredicate([&Candidate](const FTempoLaneConnectionInfo& LaneConnectionInfo)
@@ -323,9 +323,13 @@ bool UTempoIntersectionQueryComponent::ShouldFilterLaneConnection(const AActor* 
 				const bool bCandidateIsRightTurn = Candidate.TurnType == EZoneGraphTurnType::Right;
 				if (bCandidateHasSameSourceGroup && bCandidateIsRightTurn)
 				{
-					DestLaneIndices.AddUnique(Candidate.DestSlot);
+					DestLaneIndicesToSources.FindOrAdd(Candidate.DestSlot).Add(Candidate.SourceSlot);
 				}
 			}
+
+			TArray<int32> DestLaneIndices;
+			DestLaneIndicesToSources.GetKeys(DestLaneIndices);
+
 			if (DestLaneIndices.IsEmpty())
 			{
 				UE_LOG(LogTempoAgentsShared, Error, TEXT("DestLaneIndices empty for right turn"));
@@ -350,7 +354,7 @@ bool UTempoIntersectionQueryComponent::ShouldFilterLaneConnection(const AActor* 
 
 			// Consider the source lanes in this group from left to right, assigning each one to the next available
 			// right-turn destination lane *if* it has no other connection (no-turn or left) available.
-			int32 DestLaneIndexIdx = 0;
+			TArray<int32> UnconnectedDestLaneIndices = DestLaneIndices;
 			for (int32 SourceLaneIndexIdx = 0; SourceLaneIndexIdx < SourceLaneIndices.Num(); ++SourceLaneIndexIdx)
 			{
 				const int32 SourceLaneIndex = SourceLaneIndices[SourceLaneIndexIdx];
@@ -358,14 +362,22 @@ bool UTempoIntersectionQueryComponent::ShouldFilterLaneConnection(const AActor* 
 				const bool bHasLeftTurnConnection = HasCandidateWithTurnType(SourceLaneIndex, EZoneGraphTurnType::Left) && SourceLaneIndexIdx == 0;
 				if (!bHasNoTurnConnection && !bHasLeftTurnConnection)
 				{
-					// This lane has nowhere else to go. Let it turn right to the next dest lane.
-					SourceToDestMap.FindOrAdd(SourceLaneIndex).Add(DestLaneIndices[DestLaneIndexIdx]);
-					DestLaneIndexIdx = FMath::Min(DestLaneIndexIdx + 1, DestLaneIndices.Num() - 1);
+					// This lane has nowhere else to go. Let it turn right to the next unconnected dest lane that has a candidate with this source lane.
+					for (const int32 UnconnectedDestLaneIndex : UnconnectedDestLaneIndices)
+					{
+						const TSet<int32>& SourceIndices = DestLaneIndicesToSources[UnconnectedDestLaneIndex];
+						if (SourceIndices.Contains(SourceLaneIndex))
+						{
+							SourceToDestMap.FindOrAdd(SourceLaneIndex).Add(UnconnectedDestLaneIndex);
+							UnconnectedDestLaneIndices.Remove(UnconnectedDestLaneIndex);
+							break;
+						}
+					}
 				}
 			}
 
 			// Assign the right-most source lane of this group to any remaining unconnected destination lanes.
-			for (; DestLaneIndexIdx < DestLaneIndices.Num(); ++DestLaneIndexIdx)
+			for (int32 DestLaneIndexIdx = 0; DestLaneIndexIdx < DestLaneIndices.Num(); ++DestLaneIndexIdx)
 			{
 				SourceToDestMap.FindOrAdd(SourceLaneIndices.Last()).Add(DestLaneIndices[DestLaneIndexIdx]);
 			}
@@ -374,7 +386,7 @@ bool UTempoIntersectionQueryComponent::ShouldFilterLaneConnection(const AActor* 
 			// lane connects to at least one destination lane containing each unique tag (for example, the right-most
 			// source lane may need to connect to both a destination driving lane and bike lane).
 			FZoneGraphTagMask MarchingTagMask;
-			for (DestLaneIndexIdx = DestLaneIndices.Num() - 1; DestLaneIndexIdx >= 0; --DestLaneIndexIdx)
+			for (int32 DestLaneIndexIdx = DestLaneIndices.Num() - 1; DestLaneIndexIdx >= 0; --DestLaneIndexIdx)
 			{
 				const int32 DestLaneIndex = DestLaneIndices[DestLaneIndexIdx];
 				const FZoneGraphTagMask DestTagMask = DestLaneConnectionInfos[DestLaneIndex].LaneDesc.Tags;
