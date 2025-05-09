@@ -568,229 +568,6 @@ bool UTempoIntersectionQueryComponent::TryGetCrosswalkIntersectionConnectorInfoE
 		return false;
 	}
 
-		TempoZoneGraphTagMaskGroups ZoneGraphTagMaskGroups = GroupLaneConnectionsByTags(SourceConnectionActor, SourceLaneConnectionInfos, DestLaneConnectionInfos);
-
-		const FZoneGraphTagMask SourceTagMask = SourceLaneConnectionInfo.LaneDesc.Tags;
-
-		if (SourceTagMask.GetValue() == 0)
-		{
-			return true;
-		}
-
-		FZoneGraphTagMask MatchingTagGroupMask;
-		const TempoZoneGraphTagMaskGroups MatchingTagGroups = ZoneGraphTagMaskGroups.FilterByPredicate([&SourceTagMask, &MatchingTagGroupMask](const auto& TagGroup)
-		{
-			if (TagGroup.Key.CompareMasks(SourceTagMask, EZoneLaneTagMaskComparison::Any))
-			{
-				MatchingTagGroupMask = TagGroup.Key;
-				return true;
-			}
-			return false;
-		});
-
-		if (MatchingTagGroups.IsEmpty())
-		{
-			UE_LOG(LogTempoAgentsShared, Error, TEXT("Lane Filtering - ShouldFilterLaneConnection - Connection tag filter not found in any tag group for SourceConnectionActor (%s)."), *SourceConnectionActor->GetName());
-			return false;
-		}
-
-		if (MatchingTagGroups.Num() > 1)
-		{
-			UE_LOG(LogTempoAgentsShared, Error, TEXT("Lane Filtering - ShouldFilterLaneConnection - Connection tag filter found in more than one tag group for SourceConnectionActor (%s)."), *SourceConnectionActor->GetName());
-			return false;
-		}
-
-		const TArray<FTempoLaneConnectionInfo>& TagFilteredSourceLaneConnectionInfos = MatchingTagGroups[MatchingTagGroupMask];
-
-		// If our source "lane tag group" doesn't have any potential connections, we filter this candidate connection.
-		if (TagFilteredSourceLaneConnectionInfos.IsEmpty())
-		{
-			return true;
-		}
-
-		int32 MinFilteredLaneIndex = -1;
-		if (!TryGetMinLaneIndexInLaneConnections(TagFilteredSourceLaneConnectionInfos, MinFilteredLaneIndex))
-		{
-			UE_LOG(LogTempoAgentsShared, Error, TEXT("Lane Filtering - ShouldFilterLaneConnection - Could not get min lane index in lane connections for SourceConnectionActor (%s)."), *SourceConnectionActor->GetName());
-			return false;
-		}
-		
-		int32 MaxFilteredLaneIndex = -1;
-		if (!TryGetMaxLaneIndexInLaneConnections(TagFilteredSourceLaneConnectionInfos, MaxFilteredLaneIndex))
-		{
-			UE_LOG(LogTempoAgentsShared, Error, TEXT("Lane Filtering - ShouldFilterLaneConnection - Could not get max lane index in lane connections for SourceConnectionActor (%s)."), *SourceConnectionActor->GetName());
-			return false;
-		}
-
-		const bool bSourceIsLeftMostLane = SourceLaneConnectionInfo.LaneIndex == MaxFilteredLaneIndex;
-		const bool bSourceIsRightMostLane = SourceLaneConnectionInfo.LaneIndex == MinFilteredLaneIndex;
-
-		// Only allow left turns from the left-most lane and right turns from the right-most lane.
-		return !((bIsLeftTurn && bSourceIsLeftMostLane) || (bIsRightTurn && bSourceIsRightMostLane));
-	}
-
-	return false;
-}
-
-bool UTempoIntersectionQueryComponent::TryGetCrosswalkIntersectionConnectorInfo(const AActor* IntersectionQueryActor, int32 CrosswalkRoadModuleIndex, FCrosswalkIntersectionConnectorInfo& OutCrosswalkIntersectionConnectorInfo) const
-{
-	ensureMsgf(false, TEXT("UTempoIntersectionQueryComponent::TryGetCrosswalkIntersectionConnectorInfo not implemented."));
-	return false;
-}
-
-bool UTempoIntersectionQueryComponent::TryGenerateCrosswalkRoadModuleMap(const AActor* IntersectionQueryActor, const TArray<FName>& CrosswalkRoadModuleAnyTags, const TArray<FName>& CrosswalkRoadModuleAllTags, const TArray<FName>& CrosswalkRoadModuleNotTags, TMap<int32, AActor*>& OutCrosswalkRoadModuleMap) const
-{
-	if (!ensureMsgf(IntersectionQueryActor != nullptr, TEXT("IntersectionQueryActor must be valid in UTempoIntersectionQueryComponent::TryGenerateCrosswalkRoadModuleMap.")))
-	{
-		return false;
-	}
-
-	const FZoneGraphTagFilter CrosswalkRoadModuleTagFilter = UTempoZoneGraphUtils::GenerateTagFilter(this, CrosswalkRoadModuleAnyTags, CrosswalkRoadModuleAllTags, CrosswalkRoadModuleNotTags);
-
-	const auto& GetCrosswalkRoadModules = [this, &IntersectionQueryActor, &CrosswalkRoadModuleTagFilter]()
-	{
-		TArray<AActor*> CrosswalkRoadModules;
-
-		const int32 NumConnectedRoadModules = UTempoCoreUtils::CallBlueprintFunction(IntersectionQueryActor, ITempoIntersectionInterface::Execute_GetNumConnectedTempoRoadModules);
-
-		for (int32 ConnectedRoadModuleIndex = 0; ConnectedRoadModuleIndex < NumConnectedRoadModules; ++ConnectedRoadModuleIndex)
-		{
-			AActor* ConnectedRoadModule = UTempoCoreUtils::CallBlueprintFunction(IntersectionQueryActor, ITempoIntersectionInterface::Execute_GetConnectedTempoRoadModuleActor, ConnectedRoadModuleIndex);
-
-			if (ConnectedRoadModule == nullptr)
-			{
-				continue;
-			}
-
-			const int32 NumRoadModuleLanes = UTempoCoreUtils::CallBlueprintFunction(ConnectedRoadModule, ITempoRoadModuleInterface::Execute_GetNumTempoRoadModuleLanes);
-
-			for (int32 RoadModuleLaneIndex = 0; RoadModuleLaneIndex < NumRoadModuleLanes; ++RoadModuleLaneIndex)
-			{
-				const TArray<FName>& RoadModuleLaneTags = UTempoCoreUtils::CallBlueprintFunction(ConnectedRoadModule, ITempoRoadModuleInterface::Execute_GetTempoRoadModuleLaneTags, RoadModuleLaneIndex);
-
-				const FZoneGraphTagMask& RoadModuleLaneTagMask = UTempoZoneGraphUtils::GenerateTagMaskFromTagNames(this, RoadModuleLaneTags);
-
-				// Is the road module a crosswalk (according to tags)?
-				if (CrosswalkRoadModuleTagFilter.Pass(RoadModuleLaneTagMask))
-				{
-					// Then, add it to the list of crosswalks.
-					CrosswalkRoadModules.Add(ConnectedRoadModule);
-					break;
-				}
-			}
-		}
-
-		return CrosswalkRoadModules;
-	};
-
-	const TArray<AActor*> CrosswalkRoadModules = GetCrosswalkRoadModules();
-
-	const auto& GetCrosswalkRoadModuleBounds = [](const AActor& ConnectedCrosswalkRoadModule)
-	{
-		FVector Origin;
-		FVector BoxExtent;
-		ConnectedCrosswalkRoadModule.GetActorBounds(false, Origin, BoxExtent);
-		const FBox ActorBox = FBox::BuildAABB(Origin, BoxExtent);
-
-		return ActorBox;
-	};
-
-	TMap<int32, AActor*> CrosswalkRoadModuleMap;
-
-	const int32 NumConnections = UTempoCoreUtils::CallBlueprintFunction(IntersectionQueryActor, ITempoIntersectionInterface::Execute_GetNumTempoConnections);
-	
-	for (int32 ConnectionIndex = 0; ConnectionIndex < NumConnections; ++ConnectionIndex)
-	{
-		const FVector ConnectionEntranceLocation = UTempoCoreUtils::CallBlueprintFunction(IntersectionQueryActor, ITempoIntersectionInterface::Execute_GetTempoIntersectionEntranceLocation, ConnectionIndex, ETempoCoordinateSpace::World);
-		const FVector ConnectionEntranceForward = UTempoCoreUtils::CallBlueprintFunction(IntersectionQueryActor, ITempoIntersectionInterface::Execute_GetTempoIntersectionEntranceTangent, ConnectionIndex, ETempoCoordinateSpace::World).GetSafeNormal();
-		const FVector ConnectionEntranceRight = UTempoCoreUtils::CallBlueprintFunction(IntersectionQueryActor, ITempoIntersectionInterface::Execute_GetTempoIntersectionEntranceRightVector, ConnectionIndex, ETempoCoordinateSpace::World);
-		
-		const AActor* RoadQueryActor = UTempoCoreUtils::CallBlueprintFunction(IntersectionQueryActor, ITempoIntersectionInterface::Execute_GetConnectedTempoRoadActor, ConnectionIndex);
-		if (RoadQueryActor == nullptr)
-		{
-			return false;
-		}
-		
-		const float RoadWidth = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoRoadInterface::Execute_GetTempoRoadWidth);
-		const float CrosswalkWidth = UTempoCoreUtils::CallBlueprintFunction(IntersectionQueryActor, ITempoCrosswalkInterface::Execute_GetTempoCrosswalkWidth, ConnectionIndex);
-
-		const auto& GetCrosswalkRoadModuleInLateralDirection = [&CrosswalkRoadModules, &ConnectionEntranceLocation, &ConnectionEntranceForward, &ConnectionEntranceRight, &RoadWidth, &CrosswalkWidth, &GetCrosswalkRoadModuleBounds](const float LateralDirectionScalar) -> AActor*
-		{
-			for (AActor* CrosswalkRoadModule : CrosswalkRoadModules)
-			{
-				const float RoadModuleWidth = UTempoCoreUtils::CallBlueprintFunction(CrosswalkRoadModule, ITempoRoadModuleInterface::Execute_GetTempoRoadModuleWidth);
-		
-				const FVector CrosswalkIntersectionCenterLocation = ConnectionEntranceLocation + ConnectionEntranceForward * CrosswalkWidth * 0.5f + ConnectionEntranceRight * (RoadWidth * 0.5 + RoadModuleWidth * 0.5) * LateralDirectionScalar;
-
-				const FBox CrosswalkRoadModuleBounds = GetCrosswalkRoadModuleBounds(*CrosswalkRoadModule);
-			
-				if (FMath::PointBoxIntersection(CrosswalkIntersectionCenterLocation, CrosswalkRoadModuleBounds))
-				{
-					return CrosswalkRoadModule;
-				}
-			}
-
-			return nullptr;
-		};
-
-		if (ConnectionIndex == 0)
-		{
-			// Test on left side to find the last crosswalk road module.
-			if (AActor* CrosswalkRoadModule = GetCrosswalkRoadModuleInLateralDirection(-1.0f))
-			{
-				const int32 LastCrosswalkRoadModuleIndex = NumConnections;
-				CrosswalkRoadModuleMap.Add(LastCrosswalkRoadModuleIndex, CrosswalkRoadModule);
-			}
-		}
-
-		// Test on right side
-		if (AActor* CrosswalkRoadModule = GetCrosswalkRoadModuleInLateralDirection(1.0f))
-		{
-			CrosswalkRoadModuleMap.Add(ConnectionIndex, CrosswalkRoadModule);
-		}
-	}
-	
-	if (!ensureMsgf(CrosswalkRoadModuleMap.Num() >= NumConnections, TEXT("CrosswalkRoadModuleMap must have at least NumConnections (%d) entries in UTempoIntersectionQueryComponent::TryGenerateCrosswalkRoadModuleMap.  Currently, it has %d entries.  IntersectionQueryActor: %s."), NumConnections, CrosswalkRoadModuleMap.Num(), *IntersectionQueryActor->GetName()))
-	{
-		return false;
-	}
-
-	OutCrosswalkRoadModuleMap = CrosswalkRoadModuleMap;
-
-	return true;
-}
-
-bool UTempoIntersectionQueryComponent::TryGetCrosswalkIntersectionConnectorInfoEntry(const AActor* IntersectionQueryActor, int32 CrosswalkIntersectionIndex, int32 CrosswalkIntersectionConnectionIndex, const TMap<int32, FCrosswalkIntersectionConnectorInfo>& CrosswalkIntersectionConnectorInfoMap, AActor*& OutCrosswalkRoadModule, float &OutCrosswalkIntersectionConnectorDistance) const
-{
-	if (!ensureMsgf(IntersectionQueryActor != nullptr, TEXT("IntersectionQueryActor must be valid in UTempoIntersectionQueryComponent::TryGetCrosswalkIntersectionConnectorInfoEntry.")))
-	{
-		return false;
-	}
-	
-	const int32 CrosswalkRoadModuleIndex = UTempoCoreUtils::CallBlueprintFunction(IntersectionQueryActor, ITempoCrosswalkInterface::Execute_GetTempoCrosswalkRoadModuleIndexFromCrosswalkIntersectionIndex, CrosswalkIntersectionIndex);
-	
-	const FCrosswalkIntersectionConnectorInfo* CrosswalkIntersectionConnectorInfo = CrosswalkIntersectionConnectorInfoMap.Find(CrosswalkRoadModuleIndex);
-	
-	if (!ensureMsgf(CrosswalkIntersectionConnectorInfo != nullptr, TEXT("Must get valid CrosswalkIntersectionConnectorInfo in UTempoIntersectionQueryComponent::TryGetCrosswalkIntersectionConnectorInfoEntry.")))
-	{
-		return false;
-	}
-	
-	if (!ensureMsgf(CrosswalkIntersectionConnectorInfo->CrosswalkRoadModule != nullptr, TEXT("Must get valid CrosswalkRoadModule in UTempoIntersectionQueryComponent::TryGetCrosswalkIntersectionConnectorInfoEntry.")))
-	{
-		return false;
-	}
-	
-	if (!ensureMsgf(CrosswalkIntersectionConnectionIndex == 1 || CrosswalkIntersectionConnectionIndex == 2, TEXT("CrosswalkIntersectionConnectionIndex must be 1 or 2 in UTempoIntersectionQueryComponent::TryGetCrosswalkIntersectionConnectorInfoEntry.  Currently, CrosswalkIntersectionConnectionIndex is: %d"), CrosswalkIntersectionConnectionIndex))
-	{
-		return false;
-	}
-	
-	if (!ensureMsgf(CrosswalkIntersectionConnectorInfo->CrosswalkIntersectionConnectorSegmentInfos.Num() == 1, TEXT("CrosswalkIntersectionConnectorSegmentInfos must have exactly 1 element in UTempoIntersectionQueryComponent::TryGetCrosswalkIntersectionConnectorInfoEntry.  Currently, it has %d elements."), CrosswalkIntersectionConnectorInfo->CrosswalkIntersectionConnectorSegmentInfos.Num()))
-	{
-		return false;
-	}
-
 	const auto& TryGetCrosswalkIntersectionEntranceOuterDistance = [this, &IntersectionQueryActor](const AActor& CrosswalkRoadModule, int32 CrosswalkIntersectionIndex, float &OutCrosswalkIntersectionEntranceOuterDistance)
 	{
 		const int32 ConnectionIndex = GetConnectionIndexFromCrosswalkIntersectionIndex(IntersectionQueryActor, CrosswalkIntersectionIndex);
@@ -1836,13 +1613,13 @@ AActor* UTempoIntersectionQueryComponent::GetConnectedRoadActor(const AActor& In
 	return RoadActor;
 }
 
-TempoZoneGraphTagMaskGroups UTempoIntersectionQueryComponent::GroupLaneConnectionsByTags(const AActor* SourceConnectionActor, const TArray<FTempoLaneConnectionInfo>& SourceLaneConnectionInfos, const TArray<FTempoLaneConnectionInfo>& DestLaneConnectionInfos) const
+TempoZoneGraphTagMaskGroups UTempoIntersectionQueryComponent::GroupLaneConnectionsByTags(const TArray<FTempoLaneConnectionInfo>& LaneConnectionInfos) const
 {
 	TempoZoneGraphTagMaskGroups ZoneGraphTagMaskGroups;
 
-	for (const FTempoLaneConnectionInfo& SourceLaneConnectionInfo : SourceLaneConnectionInfos)
+	for (const FTempoLaneConnectionInfo& LaneConnectionInfo : LaneConnectionInfos)
 	{
-		const FZoneGraphTagMask SourceTagMask = SourceLaneConnectionInfo.LaneDesc.Tags;
+		const FZoneGraphTagMask SourceTagMask = LaneConnectionInfo.LaneDesc.Tags;
 		if (SourceTagMask.GetValue() == 0)
 		{
 			continue;
@@ -1854,13 +1631,13 @@ TempoZoneGraphTagMaskGroups UTempoIntersectionQueryComponent::GroupLaneConnectio
 			});
 		if (MatchingMaskGroups.IsEmpty())
 		{
-			ZoneGraphTagMaskGroups.Add(SourceTagMask, {SourceLaneConnectionInfo});
+			ZoneGraphTagMaskGroups.Add(SourceTagMask, {LaneConnectionInfo});
 		}
 		else
 		{
 			// Remove all matching groups from the map and replace with a single combined group, including the new lane.
 			FZoneGraphTagMask GroupMask = SourceTagMask;
-			TArray<FTempoLaneConnectionInfo> GroupLanes({SourceLaneConnectionInfo});
+			TArray<FTempoLaneConnectionInfo> GroupLanes({LaneConnectionInfo});
 			for (const auto& MatchingMaskGroup : MatchingMaskGroups)
 			{
 				GroupMask.Add(MatchingMaskGroup.Key);
