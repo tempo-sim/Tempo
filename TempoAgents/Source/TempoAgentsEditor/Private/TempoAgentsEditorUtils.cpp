@@ -7,18 +7,36 @@
 
 #include "Editor.h"
 
-void UTempoAgentsEditorUtils::RunTempoZoneGraphBuilderPipeline()
+bool UTempoAgentsEditorUtils::RunTempoZoneGraphBuilderPipeline()
 {
-	if (UTempoRoadLaneGraphSubsystem* TempoRoadLaneGraphSubsystem = GEditor ? GEditor->GetEditorSubsystem<UTempoRoadLaneGraphSubsystem>() : nullptr)
+	UTempoRoadLaneGraphSubsystem* TempoRoadLaneGraphSubsystem = GEditor ? GEditor->GetEditorSubsystem<UTempoRoadLaneGraphSubsystem>() : nullptr;
+	if (!TempoRoadLaneGraphSubsystem)
 	{
-		TempoRoadLaneGraphSubsystem->SetupZoneGraphBuilder();
-		if (TempoRoadLaneGraphSubsystem->TryGenerateZoneShapeComponents())
-		{
-			if (const UWorld* World = GEditor ? GEditor->GetEditorWorldContext(false).World() : nullptr)
-			{
-				World->GetSubsystem<UTempoAgentsWorldSubsystem>()->SetupTrafficControllers();
-			}
-			TempoRoadLaneGraphSubsystem->BuildZoneGraph();
-		}
+		return false;
 	}
+
+		TempoRoadLaneGraphSubsystem->SetupZoneGraphBuilder();
+	if (!TempoRoadLaneGraphSubsystem->TryGenerateZoneShapeComponents())
+		{
+		return false;
+	}
+
+	const UWorld* World = GEditor ? GEditor->GetEditorWorldContext(false).World() : nullptr;
+	if (!World)
+			{
+		return false;
+	}
+
+	if (UTempoAgentsWorldSubsystem* AgentsWorldSubsystem = World->GetSubsystem<UTempoAgentsWorldSubsystem>())
+	{
+		AgentsWorldSubsystem->SetupTrafficControllers();
+			}
+	else
+	{
+		return false; // Or handle the case where the subsystem doesn't exist, depending on requirements
+	}
+
+			TempoRoadLaneGraphSubsystem->BuildZoneGraph();
+	
+	return true;
 }
