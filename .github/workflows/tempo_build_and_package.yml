@@ -11,12 +11,37 @@ on:
     branches:
       - main
   pull_request_target:
-    types: [opened, synchronize]
+    types: [opened, synchronize, reopened]
   workflow_dispatch:
 
 jobs:
   build_and_package:
     name: Build and Package Tempo Plugins
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: ./.github/workflows/build_and_package.yml
+    strategy:
+      matrix:
+        platform: [ ubuntu-22.04, ubuntu-24.04 ]
+        unreal_version: [ 5.4.4, 5.5.4 ]
+      fail-fast: false
+    with:
+      platform: ${{ matrix.platform }}
+      unreal_version: ${{ matrix.unreal_version }}
+      project_root: TempoSample
+      tempo_root: TempoSample/Plugins/Tempo
+      host_project: tempo-sim/TempoSample
+      checkout_path: TempoSample/Plugins/Tempo
+      cache_repo_root: TempoSample/Plugins/Tempo
+      cache_branch: main
+    secrets: inherit
+
+  build_and_package_fork:
+    name: Build and Package Tempo Plugins From a Fork
+    if: github.event.pull_request.head.repo.full_name != github.repository
+    environment: protected-workflow-environment
     permissions:
       contents: read
       pull-requests: write
