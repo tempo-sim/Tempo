@@ -6,6 +6,7 @@ import "TempoScripting/Empty.proto";
 
 message SaveLevelRequest {
   string path = 1;
+  bool overwrite = 2;
 }
 
 message OpenLevelRequest {
