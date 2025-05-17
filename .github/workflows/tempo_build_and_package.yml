@@ -11,12 +11,13 @@ on:
     branches:
       - main
   pull_request_target:
-    types: [opened, synchronize]
+    types: [opened, synchronize, reopened]
   workflow_dispatch:
 
 jobs:
   build_and_package:
     name: Build and Package Tempo Plugins
+    environment: protected-workflow-environment
     permissions:
       contents: read
       pull-requests: write
