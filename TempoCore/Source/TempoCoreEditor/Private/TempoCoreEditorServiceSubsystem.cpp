@@ -115,9 +115,9 @@ void UTempoCoreEditorServiceSubsystem::SaveLevel(const SaveLevelRequest& Request
 		}
 		if (RequestedPath != CurrentLevelName)
 		{
-			if (FPaths::FileExists(RequestedPath))
+			if (FPaths::FileExists(RequestedPath) && !Request.overwrite())
 			{
-				ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Specified level name already exists"));
+				ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Specified level name already exists. Use overwrite flag to replace."));
 				return;
 			}
 		}
