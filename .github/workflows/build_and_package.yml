@@ -90,6 +90,11 @@ on:
         type: string
         description: Uploaded artifact compression level (refer to github.com/actions/upload-artifact)
         default: '6'
+      environment:
+        type: string
+        description: Environment to deploy to (optional, default None)
+        required: false
+        default: ""
 
 env:
   UNREAL_VERSION: "${{ inputs.unreal_version }}"
@@ -98,6 +103,7 @@ jobs:
   build:
     name: Build and Package Project
     runs-on: ${{ inputs.platform }}
+    environment: ${{ inputs.environment != '' && inputs.environment || null }}
     concurrency:
       group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.platform }}-${{ inputs.unreal_version }}
       cancel-in-progress: true
