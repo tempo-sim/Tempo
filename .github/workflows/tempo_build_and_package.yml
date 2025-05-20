@@ -35,4 +35,5 @@ jobs:
       checkout_path: TempoSample/Plugins/Tempo
       cache_repo_root: TempoSample/Plugins/Tempo
       cache_branch: main
+      environment: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name != github.repository && 'fork-pr-environment' || '' }}
     secrets: inherit
