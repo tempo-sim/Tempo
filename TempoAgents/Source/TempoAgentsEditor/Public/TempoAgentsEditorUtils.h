@@ -13,5 +13,5 @@ class TEMPOAGENTSEDITOR_API UTempoAgentsEditorUtils : public UBlueprintFunctionL
 
 public:
 	UFUNCTION(BlueprintCallable)
-	static void RunTempoZoneGraphBuilderPipeline();
+	static bool RunTempoZoneGraphBuilderPipeline();
 };
