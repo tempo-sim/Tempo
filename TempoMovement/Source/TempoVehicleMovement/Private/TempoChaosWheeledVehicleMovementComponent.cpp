@@ -19,7 +19,8 @@ void UTempoChaosWheeledVehicleMovementComponent::HandleDrivingCommand(const FDri
 	{
 		if (Input > 0.0)
 		{
-			if (VehicleState.ForwardSpeed > 0.0)
+			static constexpr float NearlyStoppedSpeed = 1.0;
+			if (VehicleState.ForwardSpeed > -NearlyStoppedSpeed && GetCurrentGear() > -1)
 			{
 				SetThrottleInput(Input);
 				SetBrakeInput(0.0);
