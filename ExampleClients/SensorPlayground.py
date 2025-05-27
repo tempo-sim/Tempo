@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+import colorsys
 import cv2
 from enum import Enum
 import io
@@ -38,50 +39,37 @@ def show_color_image(image, window_name):
 
 
 # See https://i.sstatic.net/gyuw4.png to interpret hues.
-label_to_hue = np.array([
-    0,      # NoLabel = 0
-    140,    # Roads = 1
-    100,    # Sidewalks = 2
-    20,     # Buildings = 3
-    0,      # Walls = 4
-    0,      # Fences = 5
-    130,    # Poles = 6
-    0,      # TrafficLight = 7
-    40,     # TrafficSigns = 8
-    70,     # Vegetation = 9
-    0,      # Terrain = 10
-    90,     # Sky = 11
-    150,    # Pedestrians = 12
-    0,      # Rider = 13
-    0,      # Car = 14
-    0,      # Truck = 15
-    0,      # Bus = 16
-    0,      # Train = 17
-    0,      # Motorcycle = 18
-    0,      # Bicycle = 19
-    0,      # Static = 20
-    0,      # Dynamic = 21
-    0,      # Other = 22
-    0,      # Water = 23
-    30,     # RoadLines = 24
-    120,    # Ground = 25
-    0,      # Bridge = 26
-    0,      # RailTrack = 27
-    0,      # GuardRail = 28
-    0,      # 29
-    0       # 30
-], dtype=np.uint8)
+label_to_hue = np.array([0, 250, 157, 60, 217, 120, 22, 90, 83, 240, 143, 45, 203, 106, 8, 166, 68, 226, 129, 31, 189, 91, 249, 152, 54, 212, 114, 17, 175, 77, 235, 137, 40, 198, 100, 3, 160, 63, 221, 123, 26, 183, 86, 244, 146, 49, 206, 109, 12, 169, 72, 229, 132, 35, 192, 95, 252, 155, 58, 215, 118, 20, 178, 81, 238, 141, 43, 201, 104, 6, 164, 66, 224, 127, 29, 187, 89, 247, 150, 52, 210, 112, 15, 173, 75, 233, 135, 38, 196, 98, 1, 158, 61, 219, 121, 24, 181, 84, 242, 144, 47, 204, 107, 10, 167, 70, 227, 130, 33, 190, 93, 250, 153, 56, 213, 116, 18, 176, 79, 236, 139, 41, 199, 102, 4, 162, 64, 222, 125, 27, 185, 87, 245, 148, 50, 208, 110, 13, 171, 73, 231, 133, 36, 194, 96, 254, 156, 59, 217, 119, 22, 179, 82, 239, 142, 45, 202, 105, 7, 165, 68, 225, 128, 30, 188, 91, 248, 151, 53, 211, 114, 16, 174, 76, 234, 137, 39, 197, 99, 2, 160, 62, 220, 122, 25, 183, 85, 243, 145, 48, 206, 108, 11, 168, 71, 229, 131, 34, 191, 94, 252, 154, 57, 214, 117, 20, 177, 80, 237, 140, 43, 200, 103, 5, 163, 66, 223, 126, 28, 186, 89, 246, 149, 51, 209, 112, 14, 172, 74, 232, 135, 37, 195, 97, 0, 158, 60, 218, 120, 23, 181, 83, 241, 143, 46, 204, 106, 9, 166, 69, 227, 129, 32, 189, 92], dtype=np.uint8)
 
+def index_to_bgr(index: int) -> tuple[int, int, int]:
+    """
+    Convert an integer in [0, 255] to a unique BGR color.
+    Uses golden ratio spacing for hue and adds variation in saturation and value.
+    """
+    if index == 0:
+        return 0, 0, 0
+
+    # Golden ratio conjugates
+    phi = 0.618033988749895         # For hue
+    psi = 0.7548776662466927        # Another irrational number for s/v
+
+    # Hue: well-spread using golden ratio
+    h = (index * phi) % 1.0
+
+    # Vary saturation and value to increase contrast and diversity
+    s = 0.6 + 0.4 * ((index * psi) % 1.0)  # Range: 0.6–1.0
+    v = 0.7 + 0.3 * ((index * psi * 1.3) % 1.0)  # Range: 0.7–1.0
+
+    r, g, b = colorsys.hsv_to_rgb(h, s, v)
+    return int(b * 255), int(g * 255), int(r * 255)
+
+bgr_lookup_table = np.array([index_to_bgr(i) for i in range(256)], dtype=np.uint8)  # shape (256, 3)
 
 def show_label_image(image, window_name):
     image_bytes = io.BytesIO(image.data)
     image_array = np.frombuffer(image_bytes.getvalue(), dtype=np.uint8)
     image_array = image_array.reshape((image.height, image.width))
-    lut = label_to_hue[image_array]
-    saturation = 255
-    value = 255
-    hsv_image = cv2.merge([lut, np.full_like(image_array, saturation), np.full_like(image_array, value)])
-    bgr_image = cv2.cvtColor(hsv_image, cv2.COLOR_HSV2BGR)
+    bgr_image = bgr_lookup_table[image_array]
     cv2.imshow(window_name, bgr_image)
     cv2.waitKey(1)
 
