@@ -13,6 +13,35 @@
 
 #include "Engine.h"
 
+FInstanceIdAllocator::FInstanceIdAllocator(int32 MinIdIn, int32 MaxIdIn)
+	: MinId(MinIdIn), MaxId(MaxIdIn)
+{
+	for (int32 I = MinIdIn; I <= MaxIdIn; ++I)
+	{
+		AvailableIds.Add(I);
+	}
+}
+
+TOptional<int32> FInstanceIdAllocator::Allocate()
+{
+	if (auto AvailableIdIt = AvailableIds.CreateIterator())
+	{
+		const int32 AvailableId = *AvailableIdIt;
+		AvailableIdIt.RemoveCurrent();
+		return AvailableId;
+	}
+	return TOptional<int32>();
+}
+
+void FInstanceIdAllocator::Reclaim(int32 Id)
+{
+ 	if (!ensureMsgf(Id >= MinId && Id <= MaxId, TEXT("Reclaimed Available Id %d outside original min/max"), Id))
+ 	{
+ 		return;
+ 	}
+ 	AvailableIds.Add(Id);
+}
+
 void UTempoActorLabeler::OnWorldBeginPlay(UWorld& InWorld)
 {
 	Super::OnWorldBeginPlay(InWorld);
@@ -25,7 +54,7 @@ void UTempoActorLabeler::OnWorldBeginPlay(UWorld& InWorld)
 
 	SemanticLabelTable = GetDefault<UTempoSensorsSettings>()->GetSemanticLabelTable();
 
-	// Parse the semantic label table into a more convenient structure.
+	// Parse the label table into a more convenient structure.
 	BuildLabelMaps();
 
 	// Label all actors *after* BeginPlay (UWorldSubsystem::OnWorldBeginPlay is called *before* BeginPlay).
@@ -34,16 +63,25 @@ void UTempoActorLabeler::OnWorldBeginPlay(UWorld& InWorld)
 	// Label all newly spawned actors.
 	GetWorld()->AddOnActorSpawnedHandler(FOnActorSpawned::FDelegate::CreateUObject(this, &UTempoActorLabeler::LabelActor));
 
-	// Handles labeling any component whose render state is marked dirty (for example their mesh changed).
+	// UnLabel any destroyed actors.
+	GetWorld()->AddOnActorDestroyedHandler(FOnActorSpawned::FDelegate::CreateUObject(this, &UTempoActorLabeler::UnLabelActor));
+
+	// Handles labeling or re-labeling any component whose render state is marked dirty (for example their mesh changed).
 	UActorComponent::MarkRenderStateDirtyEvent.AddWeakLambda(this, [this](UActorComponent& Component)
 	{
 		LabelComponent(&Component);
 	});
 
-	// Handles labeling any component who is created after their Actor is spawned. 
+	// Handles labeling any component with a physics state who is created after their Actor is spawned.
 	UActorComponent::GlobalCreatePhysicsDelegate.AddWeakLambda(this, [this](UActorComponent* Component)
 	{
 		LabelComponent(Component);
+	});
+
+	// Handles un-labeling any component with a physics state who is destroyed although their Actor is not.
+	UActorComponent::GlobalDestroyPhysicsDelegate.AddWeakLambda(this, [this](UActorComponent* Component)
+	{
+		UnLabelComponent(Component);
 	});
 	
 	// Handles labeling TempoInstancedStaticMeshComponents when they are registered. 
@@ -51,6 +89,14 @@ void UTempoActorLabeler::OnWorldBeginPlay(UWorld& InWorld)
 	{
 		LabelComponent(Component);
 	});
+
+	// Handles un-labeling TempoInstancedStaticMeshComponents when they are unregistered.
+	UTempoInstancedStaticMeshComponent::TempoInstancedStaticMeshUnRegisteredEvent.AddWeakLambda(this, [this](UActorComponent* Component)
+	{
+		UnLabelComponent(Component);
+	});
+
+	GetMutableDefault<UTempoSensorsSettings>()->TempoSensorsLabelSettingsChangedEvent.AddUObject(this, &UTempoActorLabeler::ReLabelAllActors);
 }
 
 bool UTempoActorLabeler::ShouldCreateSubsystem(UObject* Outer) const
@@ -66,7 +112,7 @@ void UTempoActorLabeler::BuildLabelMaps()
 {
 	if (!SemanticLabelTable)
 	{
-		UE_LOG(LogTempoLabels, Error, TEXT("Semantic label table was not set"));
+		UE_LOG(LogTempoLabels, Error, TEXT("Semantic Label table was not set"));
 		return;
 	}
 
@@ -148,12 +194,12 @@ void UTempoActorLabeler::LabelActor(AActor* Actor)
 
 	if (!SemanticLabelTable)
 	{
-		UE_LOG(LogTempoLabels, Error, TEXT("Semantic label table was not set"));
+		UE_LOG(LogTempoLabels, Error, TEXT("Semantic Label table was not set"));
 		return;
 	}
 
-	FName AssignedLabel = NoLabelName;
 	int32 ActorLabelId = NoLabelId;
+	FName AssignedLabel = NoLabelName;
 	for (const auto& Elem : ActorLabels)
 	{
 		const TSubclassOf<AActor>& ActorType = Elem.Key;
@@ -168,7 +214,22 @@ void UTempoActorLabeler::LabelActor(AActor* Actor)
 					continue;
 				}
 				AssignedLabel = ActorLabel;
-				ActorLabelId = *LabelId;
+				if (GetDefault<UTempoSensorsSettings>()->GetLabelType() == ELabelType::Instance)
+				{
+					if (TOptional<int32> InstanceId = InstanceIdAllocator.Allocate())
+					{
+						ActorLabelId = *InstanceId;
+					}
+					else
+					{
+						UE_LOG(LogTempoLabels, Error, TEXT("Unable to allocate instance while labeling %s"), *Actor->GetActorNameOrLabel());
+						return;
+					}
+				}
+				else
+				{
+					ActorLabelId = *LabelId;
+				}
 			}
 			else
 			{
@@ -176,10 +237,10 @@ void UTempoActorLabeler::LabelActor(AActor* Actor)
 			}
 		}
 	}
-	
-	LabelAllComponents(Actor, ActorLabelId);
 
 	LabeledActors.Add(Actor, ActorLabelId);
+
+	LabelAllComponents(Actor, ActorLabelId);
 }
 
 void UTempoActorLabeler::LabelAllComponents(const AActor* Actor, int32 ActorLabelId)
@@ -220,39 +281,143 @@ void UTempoActorLabeler::LabelComponent(UPrimitiveComponent* Component, int32 Ac
 			const FString MeshFullPath = StaticMesh->GetPathName();
 			if (const FName* StaticMeshLabel = StaticMeshLabels.Find(MeshFullPath))
 			{
-				if (const int32* StaticMeshLabelId = LabelIds.Find(*StaticMeshLabel))
+				int32 StaticMeshLabelId = NoLabelId;
+				if (GetDefault<UTempoSensorsSettings>()->GetLabelType() == ELabelType::Instance)
 				{
-					if (const int32* PreviousLabel = LabeledComponents.Find(Component))
+					if (LabeledComponents.Contains(Component))
 					{
-						if (StaticMeshComponent->bRenderCustomDepth && StaticMeshComponent->CustomDepthStencilValue == *PreviousLabel)
-						{
-							// This component already has the right label.
-							return;
-						}
+						// This component is already labeled.
+						return;
 					}
-
-					// Label using the explicit static mesh label rather than the owning Actor's label.
-					StaticMeshComponent->SetRenderCustomDepth(true);
-					StaticMeshComponent->SetCustomDepthStencilValue(*StaticMeshLabelId);
-					LabeledComponents.Add(StaticMeshComponent, *StaticMeshLabelId);
-					return;
+					if (TOptional<int32> InstanceId = InstanceIdAllocator.Allocate())
+					{
+						StaticMeshLabelId = *InstanceId;
+					}
+					else
+					{
+						UE_LOG(LogTempoLabels, Error, TEXT("Unable to allocate instance while labeling %s"), *Component->GetName());
+						return;
+					}
 				}
-				UE_LOG(LogTempoLabels, Error, TEXT("Label %s did not have an associated ID"), *StaticMeshLabel->ToString());
+				else
+				{
+					if (const int32* StaticMeshLabelIdPtr = LabelIds.Find(*StaticMeshLabel))
+					{
+						StaticMeshLabelId = *StaticMeshLabelIdPtr;
+					}
+					UE_LOG(LogTempoLabels, Error, TEXT("Label %s did not have an associated ID"), *StaticMeshLabel->ToString());
+				}
+				if (const int32* PreviousLabel = LabeledComponents.Find(Component))
+				{
+					if (StaticMeshComponent->bRenderCustomDepth && *PreviousLabel == StaticMeshLabelId)
+					{
+						// This component already has the right label.
+						return;
+					}
+				}
+
+				// Label using the explicit static mesh label rather than the owning Actor's label.
+				LabeledComponents.Add(Component, StaticMeshLabelId);
+				StaticMeshComponent->SetRenderCustomDepth(true);
+				StaticMeshComponent->SetCustomDepthStencilValue(StaticMeshLabelId);
+				return;
 			}
 		}
 	}
 
 	// No mesh label found. Label with its owning Actor's label.
+	LabeledComponents.Add(Component, ActorLabelId);
 	Component->SetRenderCustomDepth(true);
 	Component->SetCustomDepthStencilValue(ActorLabelId);
-	LabeledComponents.Add(Component, ActorLabelId);
+}
+
+void UTempoActorLabeler::UnLabelAllActors()
+{
+	for (TActorIterator<AActor> ActorItr(GetWorld()); ActorItr; ++ActorItr)
+	{
+		UnLabelActor(*ActorItr);
+	}
+}
+
+void UTempoActorLabeler::UnLabelActor(AActor* Actor)
+{
+	if (!LabeledActors.Contains(Actor))
+	{
+		// We've never labeled this Actor.
+		return;
+	}
+
+	UnLabelAllComponents(Actor);
+
+	if (GetDefault<UTempoSensorsSettings>()->GetLabelType() == ELabelType::Instance)
+	{
+		if (const int32* ActorLabelId = LabeledActors.Find(Actor); *ActorLabelId != NoLabelId)
+		{
+			InstanceIdAllocator.Reclaim(*ActorLabelId);
+		}
+	}
+
+	LabeledActors.Remove(Actor);
+}
+
+void UTempoActorLabeler::UnLabelAllComponents(const AActor* Actor)
+{
+	TInlineComponentArray<UPrimitiveComponent*> PrimitiveComponents(Actor);
+	for (UPrimitiveComponent* PrimitiveComponent : PrimitiveComponents)
+	{
+		UnLabelComponent(PrimitiveComponent);
+	}
+}
+
+void UTempoActorLabeler::UnLabelComponent(UActorComponent* Component)
+{
+	if (!Component->GetOwner() || !UTempoCoreUtils::IsGameWorld(Component))
+	{
+		return;
+	}
+
+	if (UPrimitiveComponent* PrimitiveComponent = Cast<UPrimitiveComponent>(Component))
+	{
+		UnLabelComponent(PrimitiveComponent);
+	}
+}
+
+void UTempoActorLabeler::UnLabelComponent(UPrimitiveComponent* Component)
+{
+	Component->SetRenderCustomDepth(false);
+	Component->SetCustomDepthStencilValue(0);
+
+	if (GetDefault<UTempoSensorsSettings>()->GetLabelType() == ELabelType::Instance)
+	{
+		if (const int32* ComponentLabelId = LabeledComponents.Find(Component))
+		{
+			const int32* ActorLabelId = LabeledActors.Find(Component->GetOwner());
+			if (!ActorLabelId || (*ActorLabelId != *ComponentLabelId && *ComponentLabelId != NoLabelId))
+			{
+				InstanceIdAllocator.Reclaim(*ComponentLabelId);
+			}
+		}
+	}
+
+	LabeledComponents.Remove(Component);
+}
+
+void UTempoActorLabeler::ReLabelAllActors()
+{
+	UnLabelAllActors();
+	LabelAllActors();
 }
 
 FName UTempoActorLabeler::GetActorClassification(const AActor* Actor) const
 {
-	if (const FName* Label = ActorLabels.Find(Actor->GetClass()))
+	for (const auto& Elem : ActorLabels)
 	{
-		return *Label;
+		const TSubclassOf<AActor>& ActorType = Elem.Key;
+		const FName& ActorLabel = Elem.Value;
+		if (Actor->GetClass()->IsChildOf(ActorType.Get()))
+		{
+			return ActorLabel;
+		}
 	}
 
 	return UDefaultActorClassifier::GetDefaultActorClassification(Actor);

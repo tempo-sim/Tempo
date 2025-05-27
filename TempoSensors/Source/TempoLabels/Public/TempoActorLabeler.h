@@ -10,6 +10,20 @@
 
 #include "TempoActorLabeler.generated.h"
 
+struct FInstanceIdAllocator
+{
+	FInstanceIdAllocator() = default;
+	FInstanceIdAllocator(int32 MinIdIn, int32 MaxIdIn);
+
+	TOptional<int32> Allocate();
+
+	void Reclaim(int32 Id);
+
+private:
+	int32 MinId, MaxId;
+	TSet<int32> AvailableIds;
+};
+
 /**
  * Tags all meshes on all Actors in the world with the appropriate label.
  */
@@ -27,17 +41,29 @@ public:
 
 protected:
 	void BuildLabelMaps();
-	
+
 	void LabelAllActors();
-	
+
 	void LabelActor(AActor* Actor);
 
 	void LabelAllComponents(const AActor* Actor, int32 ActorLabelId);
 
 	void LabelComponent(UActorComponent* Component);
-	
+
 	void LabelComponent(UPrimitiveComponent* Component, int32 ActorLabelId);
-	
+
+	void UnLabelAllActors();
+
+	void UnLabelActor(AActor* Actor);
+
+	void UnLabelAllComponents(const AActor* Actor);
+
+	void UnLabelComponent(UActorComponent* Component);
+
+	void UnLabelComponent(UPrimitiveComponent* Component);
+
+	void ReLabelAllActors();
+
 	UPROPERTY(VisibleAnywhere)
 	UDataTable* SemanticLabelTable;
 
@@ -63,4 +89,6 @@ protected:
 	// Cache to avoid re-labeling Components we've already labeled
 	UPROPERTY()
 	TMap<const UPrimitiveComponent*, int32> LabeledComponents;
+
+	FInstanceIdAllocator InstanceIdAllocator = FInstanceIdAllocator(1, 255);
 };

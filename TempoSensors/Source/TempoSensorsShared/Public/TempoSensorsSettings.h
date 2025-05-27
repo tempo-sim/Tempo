@@ -2,10 +2,14 @@
 
 #pragma once
 
+#include "TempoSensorsTypes.h"
+
 #include "CoreMinimal.h"
 #include "Engine/DeveloperSettings.h"
 
 #include "TempoSensorsSettings.generated.h"
+
+DECLARE_MULTICAST_DELEGATE(FTempoSensorsLabelSettingsChanged);
 
 UCLASS(Config=Game)
 class TEMPOSENSORSSHARED_API UTempoSensorsSettings : public UDeveloperSettings
@@ -15,6 +19,7 @@ class TEMPOSENSORSSHARED_API UTempoSensorsSettings : public UDeveloperSettings
 public:
 	// Labels
 	TObjectPtr<UDataTable> GetSemanticLabelTable() const { return SemanticLabelTable.LoadSynchronous(); }
+	ELabelType GetLabelType() const { return LabelType; }
 
 	// Camera
 	TObjectPtr<UMaterialInterface> GetCameraPostProcessMaterialNoDepth() const { return CameraPostProcessMaterialNoDepth.LoadSynchronous(); }
@@ -24,8 +29,17 @@ public:
 	FName GetOverridableLabelRowName() const { return OverridableLabelRowName; }
 	FName GetOverridingLabelRowName() const { return OverridingLabelRowName; }
 	int32 GetMaxCameraRenderBufferSize() const { return MaxCameraRenderBufferSize; }
+	FTempoSensorsLabelSettingsChanged TempoSensorsLabelSettingsChangedEvent;
+
+#if WITH_EDITOR
+	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
+#endif
 
 private:
+	// The global label type to use.
+	UPROPERTY(EditAnywhere, Config, Category="Labels")
+	TEnumAsByte<ELabelType> LabelType = ELabelType::Semantic;
+
 	// The data table from which we will load the mapping from Actor classes to semantic labels.
 	UPROPERTY(EditAnywhere, Config, Category="Labels")
 	TSoftObjectPtr<UDataTable> SemanticLabelTable;
