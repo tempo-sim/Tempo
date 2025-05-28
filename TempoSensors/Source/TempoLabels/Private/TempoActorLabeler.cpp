@@ -5,6 +5,7 @@
 #include "TempoLabels.h"
 #include "TempoLabelTypes.h"
 #include "TempoInstancedStaticMeshComponent.h"
+#include "TempoLabels/Labels.grpc.pb.h"
 
 #include "TempoSensorsSettings.h"
 
@@ -40,6 +41,28 @@ void FInstanceIdAllocator::Reclaim(int32 Id)
  		return;
  	}
  	AvailableIds.Add(Id);
+}
+
+using LabelService = TempoLabels::LabelService;
+using LabelAsyncService = TempoLabels::LabelService::AsyncService;
+
+void UTempoActorLabeler::RegisterScriptingServices(FTempoScriptingServer& ScriptingServer)
+{
+	ScriptingServer.RegisterService<LabelService>(
+		SimpleRequestHandler(&LabelAsyncService::RequestGetInstanceToSemanticIdMap, &UTempoActorLabeler::GetInstanceToSemanticIdMap)
+		);
+}
+
+void UTempoActorLabeler::GetInstanceToSemanticIdMap(const TempoScripting::Empty& Request, const TResponseDelegate<TempoLabels::InstanceToSemanticIdMap>& ResponseContinuation)
+{
+	TempoLabels::InstanceToSemanticIdMap InstanceToSemanticIdMap;
+	for (const auto& LabeledObject : LabeledObjects)
+	{
+		auto* Pair = InstanceToSemanticIdMap.add_instance_semantic_id_pairs();
+		Pair->set_instanceid(LabeledObject.Value.InstanceId);
+		Pair->set_semanticid(LabeledObject.Value.SemanticId);
+	}
+	ResponseContinuation.ExecuteIfBound(InstanceToSemanticIdMap, grpc::Status_OK);
 }
 
 void UTempoActorLabeler::OnWorldBeginPlay(UWorld& InWorld)
@@ -123,12 +146,12 @@ void UTempoActorLabeler::BuildLabelMaps()
 		{
 			if (ActorType.Get())
 			{
-				if (ActorLabels.Contains(ActorType))
+				if (ActorSemanticLabels.Contains(ActorType))
 				{
-					UE_LOG(LogTempoLabels, Error, TEXT("Actor type %s is associated with more than one label (%s and %s)"), *ActorType->GetName(), *ActorLabels[ActorType].ToString(), *Label.ToString());
+					UE_LOG(LogTempoLabels, Error, TEXT("Actor type %s is associated with more than one label (%s and %s)"), *ActorType->GetName(), *ActorSemanticLabels[ActorType].ToString(), *Label.ToString());
 					continue;
 				}
-				ActorLabels.Add(ActorType, Label);
+				ActorSemanticLabels.Add(ActorType, Label);
 			}
 			else
 			{
@@ -155,17 +178,17 @@ void UTempoActorLabeler::BuildLabelMaps()
 		}
 
 		const int32 LabelId = Value.Label;
-		if (LabelIds.Contains(Label))
+		if (SemanticIds.Contains(Label))
 		{
-			UE_LOG(LogTempoLabels, Error, TEXT("Label name %s is associated with more than one label ID (%d and %d)"), *Label.ToString(), LabelIds[Label], LabelId);
+			UE_LOG(LogTempoLabels, Error, TEXT("Label name %s is associated with more than one label ID (%d and %d)"), *Label.ToString(), SemanticIds[Label], LabelId);
 		}
 		else
 		{
-			LabelIds.Add(Label, LabelId);
+			SemanticIds.Add(Label, LabelId);
 		}
 	});
 	
-	if (const int32* NoLabelIdPtr = LabelIds.Find(NoLabelName))
+	if (const int32* NoLabelIdPtr = SemanticIds.Find(NoLabelName))
 	{
 		NoLabelId = *NoLabelIdPtr;
 	}
@@ -185,10 +208,10 @@ void UTempoActorLabeler::LabelAllActors()
 
 void UTempoActorLabeler::LabelActor(AActor* Actor)
 {
-	if (const int32* ActorLabelId = LabeledActors.Find(Actor))
+	if (const FInstanceSemanticIdPair* ActorIdPair = LabeledObjects.Find(Actor))
 	{
 		// We've labeled this Actor before. Make sure all the components are labeled.
-		LabelAllComponents(Actor, *ActorLabelId);
+		LabelAllComponents(Actor, *ActorIdPair);
 		return;
 	}
 
@@ -198,15 +221,15 @@ void UTempoActorLabeler::LabelActor(AActor* Actor)
 		return;
 	}
 
-	int32 ActorLabelId = NoLabelId;
+	FInstanceSemanticIdPair ActorIdPair;
 	FName AssignedLabel = NoLabelName;
-	for (const auto& Elem : ActorLabels)
+	for (const auto& Elem : ActorSemanticLabels)
 	{
 		const TSubclassOf<AActor>& ActorType = Elem.Key;
 		const FName& ActorLabel = Elem.Value;
 		if (Actor->GetClass()->IsChildOf(ActorType.Get()))
 		{
-			if (const int32* LabelId = LabelIds.Find(ActorLabel))
+			if (const int32* SemanticId = SemanticIds.Find(ActorLabel))
 			{
 				if (AssignedLabel != NoLabelName && *ActorLabel.ToString() != AssignedLabel)
 				{
@@ -216,20 +239,17 @@ void UTempoActorLabeler::LabelActor(AActor* Actor)
 				AssignedLabel = ActorLabel;
 				if (GetDefault<UTempoSensorsSettings>()->GetLabelType() == ELabelType::Instance)
 				{
-					if (TOptional<int32> InstanceId = InstanceIdAllocator.Allocate())
-					{
-						ActorLabelId = *InstanceId;
-					}
-					else
-					{
-						UE_LOG(LogTempoLabels, Error, TEXT("Unable to allocate instance while labeling %s"), *Actor->GetActorNameOrLabel());
-						return;
-					}
+
 				}
 				else
 				{
-					ActorLabelId = *LabelId;
+
 				}
+				if (TOptional<int32> InstanceId = InstanceIdAllocator.Allocate())
+				{
+					ActorIdPair.InstanceId = *InstanceId;
+				}
+				ActorIdPair.SemanticId = *SemanticId;
 			}
 			else
 			{
@@ -238,17 +258,17 @@ void UTempoActorLabeler::LabelActor(AActor* Actor)
 		}
 	}
 
-	LabeledActors.Add(Actor, ActorLabelId);
+	LabeledObjects.Add(Actor, ActorIdPair);
 
-	LabelAllComponents(Actor, ActorLabelId);
+	LabelAllComponents(Actor, ActorIdPair);
 }
 
-void UTempoActorLabeler::LabelAllComponents(const AActor* Actor, int32 ActorLabelId)
+void UTempoActorLabeler::LabelAllComponents(const AActor* Actor, const FInstanceSemanticIdPair& ActorIdPair)
 {
 	TInlineComponentArray<UPrimitiveComponent*> PrimitiveComponents(Actor);
 	for (UPrimitiveComponent* PrimitiveComponent : PrimitiveComponents)
 	{
-		LabelComponent(PrimitiveComponent, ActorLabelId);
+		LabelComponent(PrimitiveComponent, ActorIdPair);
 	}
 }
 
@@ -261,9 +281,9 @@ void UTempoActorLabeler::LabelComponent(UActorComponent* Component)
 	
 	if (UPrimitiveComponent* PrimitiveComponent = Cast<UPrimitiveComponent>(Component))
 	{
-		if (const int32* ActorLabelId = LabeledActors.Find(PrimitiveComponent->GetOwner()))
+		if (const FInstanceSemanticIdPair* ActorIdPair = LabeledObjects.Find(PrimitiveComponent->GetOwner()))
 		{
-			LabelComponent(PrimitiveComponent, *ActorLabelId);
+			LabelComponent(PrimitiveComponent, *ActorIdPair);
 			return;
 		}
 
@@ -272,7 +292,7 @@ void UTempoActorLabeler::LabelComponent(UActorComponent* Component)
 	}
 }
 
-void UTempoActorLabeler::LabelComponent(UPrimitiveComponent* Component, int32 ActorLabelId)
+void UTempoActorLabeler::LabelComponent(UPrimitiveComponent* Component, const FInstanceSemanticIdPair& ActorIdPair)
 {
 	if (UStaticMeshComponent* StaticMeshComponent = Cast<UStaticMeshComponent>(Component))
 	{
@@ -281,54 +301,33 @@ void UTempoActorLabeler::LabelComponent(UPrimitiveComponent* Component, int32 Ac
 			const FString MeshFullPath = StaticMesh->GetPathName();
 			if (const FName* StaticMeshLabel = StaticMeshLabels.Find(MeshFullPath))
 			{
-				int32 StaticMeshLabelId = NoLabelId;
-				if (GetDefault<UTempoSensorsSettings>()->GetLabelType() == ELabelType::Instance)
+				FInstanceSemanticIdPair IdPair;
+				if (LabeledObjects.Contains(Component))
 				{
-					if (LabeledComponents.Contains(Component))
-					{
-						// This component is already labeled.
-						return;
-					}
-					if (TOptional<int32> InstanceId = InstanceIdAllocator.Allocate())
-					{
-						StaticMeshLabelId = *InstanceId;
-					}
-					else
-					{
-						UE_LOG(LogTempoLabels, Error, TEXT("Unable to allocate instance while labeling %s"), *Component->GetName());
-						return;
-					}
+					// This component is already labeled.
+					return;
 				}
-				else
+				if (TOptional<int32> InstanceId = InstanceIdAllocator.Allocate())
 				{
-					if (const int32* StaticMeshLabelIdPtr = LabelIds.Find(*StaticMeshLabel))
-					{
-						StaticMeshLabelId = *StaticMeshLabelIdPtr;
-					}
-					UE_LOG(LogTempoLabels, Error, TEXT("Label %s did not have an associated ID"), *StaticMeshLabel->ToString());
+					IdPair.InstanceId = *InstanceId;
 				}
-				if (const int32* PreviousLabel = LabeledComponents.Find(Component))
+				if (const int32* StaticMeshLabelIdPtr = SemanticIds.Find(*StaticMeshLabel))
 				{
-					if (StaticMeshComponent->bRenderCustomDepth && *PreviousLabel == StaticMeshLabelId)
-					{
-						// This component already has the right label.
-						return;
-					}
+					IdPair.SemanticId = *StaticMeshLabelIdPtr;
 				}
+				UE_LOG(LogTempoLabels, Error, TEXT("Label %s did not have an associated ID"), *StaticMeshLabel->ToString());
 
 				// Label using the explicit static mesh label rather than the owning Actor's label.
-				LabeledComponents.Add(Component, StaticMeshLabelId);
-				StaticMeshComponent->SetRenderCustomDepth(true);
-				StaticMeshComponent->SetCustomDepthStencilValue(StaticMeshLabelId);
+				LabeledObjects.Add(Component, IdPair);
+				AssignId(Component, IdPair);
 				return;
 			}
 		}
 	}
 
 	// No mesh label found. Label with its owning Actor's label.
-	LabeledComponents.Add(Component, ActorLabelId);
-	Component->SetRenderCustomDepth(true);
-	Component->SetCustomDepthStencilValue(ActorLabelId);
+	LabeledObjects.Add(Component, ActorIdPair);
+	AssignId(Component, ActorIdPair);
 }
 
 void UTempoActorLabeler::UnLabelAllActors()
@@ -341,7 +340,7 @@ void UTempoActorLabeler::UnLabelAllActors()
 
 void UTempoActorLabeler::UnLabelActor(AActor* Actor)
 {
-	if (!LabeledActors.Contains(Actor))
+	if (!LabeledObjects.Contains(Actor))
 	{
 		// We've never labeled this Actor.
 		return;
@@ -351,13 +350,13 @@ void UTempoActorLabeler::UnLabelActor(AActor* Actor)
 
 	if (GetDefault<UTempoSensorsSettings>()->GetLabelType() == ELabelType::Instance)
 	{
-		if (const int32* ActorLabelId = LabeledActors.Find(Actor); *ActorLabelId != NoLabelId)
+		if (const FInstanceSemanticIdPair* IdPair = LabeledObjects.Find(Actor); IdPair->InstanceId != NoLabelId)
 		{
-			InstanceIdAllocator.Reclaim(*ActorLabelId);
+			InstanceIdAllocator.Reclaim(IdPair->InstanceId);
 		}
 	}
 
-	LabeledActors.Remove(Actor);
+	LabeledObjects.Remove(Actor);
 }
 
 void UTempoActorLabeler::UnLabelAllComponents(const AActor* Actor)
@@ -389,17 +388,17 @@ void UTempoActorLabeler::UnLabelComponent(UPrimitiveComponent* Component)
 
 	if (GetDefault<UTempoSensorsSettings>()->GetLabelType() == ELabelType::Instance)
 	{
-		if (const int32* ComponentLabelId = LabeledComponents.Find(Component))
+		if (const FInstanceSemanticIdPair* ComponentIdPair = LabeledObjects.Find(Component))
 		{
-			const int32* ActorLabelId = LabeledActors.Find(Component->GetOwner());
-			if (!ActorLabelId || (*ActorLabelId != *ComponentLabelId && *ComponentLabelId != NoLabelId))
+			const FInstanceSemanticIdPair* ActorIdPair = LabeledObjects.Find(Component->GetOwner());
+			if (!ActorIdPair || (ActorIdPair->InstanceId != ComponentIdPair->InstanceId && ComponentIdPair->InstanceId != NoLabelId))
 			{
-				InstanceIdAllocator.Reclaim(*ComponentLabelId);
+				InstanceIdAllocator.Reclaim(ComponentIdPair->InstanceId);
 			}
 		}
 	}
 
-	LabeledComponents.Remove(Component);
+	LabeledObjects.Remove(Component);
 }
 
 void UTempoActorLabeler::ReLabelAllActors()
@@ -408,9 +407,22 @@ void UTempoActorLabeler::ReLabelAllActors()
 	LabelAllActors();
 }
 
+void UTempoActorLabeler::AssignId(UPrimitiveComponent* Component, const FInstanceSemanticIdPair& IdPair)
+{
+	if (!Component->bRenderCustomDepth)
+	{
+		Component->SetRenderCustomDepth(true);
+	}
+	const int32 StencilValue = GetDefault<UTempoSensorsSettings>()->GetLabelType() == ELabelType::Instance ? IdPair.InstanceId : IdPair.SemanticId;
+	if (Component->CustomDepthStencilValue != StencilValue)
+	{
+		Component->SetCustomDepthStencilValue(StencilValue);
+	}
+}
+
 FName UTempoActorLabeler::GetActorClassification(const AActor* Actor) const
 {
-	for (const auto& Elem : ActorLabels)
+	for (const auto& Elem : ActorSemanticLabels)
 	{
 		const TSubclassOf<AActor>& ActorType = Elem.Key;
 		const FName& ActorLabel = Elem.Value;
