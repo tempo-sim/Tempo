@@ -8,6 +8,9 @@
 #include "Engine/DataTable.h"
 #include "Subsystems/WorldSubsystem.h"
 
+#include "TempoScriptable.h"
+#include "TempoScriptingServer.h"
+
 #include "TempoActorLabeler.generated.h"
 
 struct FInstanceIdAllocator
@@ -24,11 +27,30 @@ private:
 	TSet<int32> AvailableIds;
 };
 
+USTRUCT()
+struct FInstanceSemanticIdPair
+{
+	GENERATED_BODY()
+
+	int32 InstanceId = 0;
+	int32 SemanticId = 0;
+};
+
+namespace TempoScripting
+{
+	class Empty;
+}
+
+namespace TempoLabels
+{
+	class InstanceToSemanticIdMap;
+}
+
 /**
  * Tags all meshes on all Actors in the world with the appropriate label.
  */
 UCLASS()
-class TEMPOLABELS_API UTempoActorLabeler : public UWorldSubsystem, public IActorClassificationInterface
+class TEMPOLABELS_API UTempoActorLabeler : public UWorldSubsystem, public IActorClassificationInterface, public ITempoScriptable
 {
 	GENERATED_BODY()
 
@@ -39,6 +61,10 @@ public:
 
 	virtual FName GetActorClassification(const AActor* Actor) const override;
 
+	virtual void RegisterScriptingServices(FTempoScriptingServer& ScriptingServer) override;
+
+	void GetInstanceToSemanticIdMap(const TempoScripting::Empty& Request, const TResponseDelegate<TempoLabels::InstanceToSemanticIdMap>& ResponseContinuation);
+
 protected:
 	void BuildLabelMaps();
 
@@ -46,11 +72,11 @@ protected:
 
 	void LabelActor(AActor* Actor);
 
-	void LabelAllComponents(const AActor* Actor, int32 ActorLabelId);
+	void LabelAllComponents(const AActor* Actor, const FInstanceSemanticIdPair& ActorIdPair);
 
 	void LabelComponent(UActorComponent* Component);
 
-	void LabelComponent(UPrimitiveComponent* Component, int32 ActorLabelId);
+	void LabelComponent(UPrimitiveComponent* Component, const FInstanceSemanticIdPair& ActorIdPair);
 
 	void UnLabelAllActors();
 
@@ -64,17 +90,19 @@ protected:
 
 	void ReLabelAllActors();
 
+	static void AssignId(UPrimitiveComponent* Component, const FInstanceSemanticIdPair& IdPair);
+
 	UPROPERTY(VisibleAnywhere)
 	UDataTable* SemanticLabelTable;
 
 	UPROPERTY(VisibleAnywhere)
-	TMap<TSubclassOf<AActor>, FName> ActorLabels;
+	TMap<TSubclassOf<AActor>, FName> ActorSemanticLabels;
 
 	UPROPERTY(VisibleAnywhere)
 	TMap<FString, FName> StaticMeshLabels;
 
 	UPROPERTY(VisibleAnywhere)
-	TMap<FName, int32> LabelIds;
+	TMap<FName, int32> SemanticIds;
 
 	UPROPERTY(VisibleAnywhere)
 	FName NoLabelName = TEXT("NoLabel");
@@ -82,13 +110,8 @@ protected:
 	UPROPERTY(VisibleAnywhere)
 	int32 NoLabelId = 0;
 
-	// Cache to avoid re-searching the label table for Actors we've already labeled
 	UPROPERTY()
-	TMap<const AActor*, int32> LabeledActors;
-
-	// Cache to avoid re-labeling Components we've already labeled
-	UPROPERTY()
-	TMap<const UPrimitiveComponent*, int32> LabeledComponents;
+	TMap<const UObject*, FInstanceSemanticIdPair> LabeledObjects;
 
 	FInstanceIdAllocator InstanceIdAllocator = FInstanceIdAllocator(1, 255);
 };
