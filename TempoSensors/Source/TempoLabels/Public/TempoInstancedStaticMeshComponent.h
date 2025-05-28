@@ -6,7 +6,7 @@
 #include "Components/InstancedStaticMeshComponent.h"
 #include "TempoInstancedStaticMeshComponent.generated.h"
 
-DECLARE_MULTICAST_DELEGATE_OneParam(FOnTempoInstancedStaticMeshRegistered, UActorComponent*);
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnTempoInstancedStaticMeshRegistrationChanged, UActorComponent*);
 
 /**
  * Simply an InstancedStaticMeshComponent that broadcasts an event when registered,
@@ -24,5 +24,9 @@ class TEMPOLABELS_API UTempoInstancedStaticMeshComponent : public UInstancedStat
 public:
 	virtual void OnRegister() override;
 
-	static FOnTempoInstancedStaticMeshRegistered TempoInstancedStaticMeshRegisteredEvent;
+	virtual void OnUnregister() override;
+
+	static FOnTempoInstancedStaticMeshRegistrationChanged TempoInstancedStaticMeshRegisteredEvent;
+
+	static FOnTempoInstancedStaticMeshRegistrationChanged TempoInstancedStaticMeshUnRegisteredEvent;
 };
