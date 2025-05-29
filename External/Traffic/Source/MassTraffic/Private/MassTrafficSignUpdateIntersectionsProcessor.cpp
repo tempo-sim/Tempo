@@ -139,8 +139,8 @@ void UMassTrafficSignUpdateIntersectionsProcessor::ConfigureQueries()
 	EntityQuery_TrafficSignIntersection.AddSubsystemRequirement<UMassCrowdSubsystem>(EMassFragmentAccess::ReadWrite);
 
 	EntityQuery_Vehicle.AddTagRequirement<FMassTrafficVehicleTag>(EMassFragmentPresence::Any);
-	EntityQuery_Vehicle.AddRequirement<FMassTrafficVehicleControlFragment>(EMassFragmentAccess::ReadOnly);
-	EntityQuery_Vehicle.AddRequirement<FMassZoneGraphLaneLocationFragment>(EMassFragmentAccess::ReadOnly);
+	EntityQuery_Vehicle.AddRequirement<FMassTrafficVehicleControlFragment>(EMassFragmentAccess::ReadWrite);
+	EntityQuery_Vehicle.AddRequirement<FMassZoneGraphLaneLocationFragment>(EMassFragmentAccess::ReadWrite);
 
 	ProcessorRequirements.AddSubsystemRequirement<UMassTrafficSubsystem>(EMassFragmentAccess::ReadWrite);
 }
