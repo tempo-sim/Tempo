@@ -139,8 +139,8 @@ void UMassTrafficSignUpdateIntersectionsProcessor::ConfigureQueries()
 	EntityQuery_TrafficSignIntersection.AddSubsystemRequirement<UMassCrowdSubsystem>(EMassFragmentAccess::ReadWrite);
 
 	EntityQuery_Vehicle.AddTagRequirement<FMassTrafficVehicleTag>(EMassFragmentPresence::Any);
-	EntityQuery_Vehicle.AddRequirement<FMassTrafficVehicleControlFragment>(EMassFragmentAccess::ReadWrite);
-	EntityQuery_Vehicle.AddRequirement<FMassZoneGraphLaneLocationFragment>(EMassFragmentAccess::ReadWrite);
+	EntityQuery_Vehicle.AddRequirement<FMassTrafficVehicleControlFragment>(EMassFragmentAccess::ReadOnly);
+	EntityQuery_Vehicle.AddRequirement<FMassZoneGraphLaneLocationFragment>(EMassFragmentAccess::ReadOnly);
 
 	ProcessorRequirements.AddSubsystemRequirement<UMassTrafficSubsystem>(EMassFragmentAccess::ReadWrite);
 }
@@ -167,8 +167,8 @@ void UMassTrafficSignUpdateIntersectionsProcessor::Execute(FMassEntityManager& E
 	// Process vehicle chunks.
 	EntityQuery_Vehicle.ForEachEntityChunk(EntityManager, Context, [&, World](FMassExecutionContext& QueryContext)
 	{
-		const TArrayView<FMassTrafficVehicleControlFragment> VehicleControlFragments = Context.GetMutableFragmentView<FMassTrafficVehicleControlFragment>();
-		const TArrayView<FMassZoneGraphLaneLocationFragment> LaneLocationFragments = Context.GetMutableFragmentView<FMassZoneGraphLaneLocationFragment>();
+		const TArrayView<const FMassTrafficVehicleControlFragment> VehicleControlFragments = Context.GetFragmentView<FMassTrafficVehicleControlFragment>();
+		const TArrayView<const FMassZoneGraphLaneLocationFragment> LaneLocationFragments = Context.GetFragmentView<FMassZoneGraphLaneLocationFragment>();
 
 		const int32 NumEntities = Context.GetNumEntities();
 		for (int32 EntityIndex = 0; EntityIndex < NumEntities; ++EntityIndex)
