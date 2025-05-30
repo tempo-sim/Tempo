@@ -96,7 +96,7 @@ Use the included `Scripts/Package.sh` to package your project into a standalone 
 If you would like to set up a GitHub actions pipeline to build, package, run, and/or release your Tempo project, check out the `build_and_package` reusable workflow in [.github/workflows](https://github.com/tempo-sim/Tempo/tree/main/.github/workflows). `TempoSample`'s [tempo_sample_build_and_package](https://github.com/tempo-sim/TempoSample/blob/main/.github/workflows/tempo_sample_build_and_package.yml) workflow is a good reference.
 
 ## Getting Help
-Stuck on something? Feel free to send us an [issue](https://github.com/tempo-sim/Tempo/issues) or ask a question on our [Discord](https://discord.gg/Vskt2EJy3V).
+Stuck on something? Feel free to send us an [issue](https://github.com/tempo-sim/Tempo/issues) or ask a question on our [Discord](https://discord.gg/bKa2hnGYnw).
 
 ## Giving Back
 Want to contribute to Tempo? We'll be happy to review your PR.
