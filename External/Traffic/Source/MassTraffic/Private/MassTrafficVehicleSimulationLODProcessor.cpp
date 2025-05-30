@@ -61,7 +61,7 @@ void UMassTrafficVehicleSimulationLODProcessor::ConfigureQueries()
 	EntityQueryVariableTick.AddRequirement<FMassSimulationVariableTickFragment>(EMassFragmentAccess::ReadWrite);
 	EntityQueryVariableTick.AddConstSharedRequirement<FMassSimulationVariableTickParameters>();
 	EntityQueryVariableTick.AddChunkRequirement<FMassSimulationVariableTickChunkFragment>(EMassFragmentAccess::ReadWrite);
-	EntityQueryVariableTick.AddSharedRequirement<FMassSimulationVariableTickSharedFragment>(EMassFragmentAccess::ReadOnly);
+	EntityQueryVariableTick.AddSharedRequirement<FMassSimulationVariableTickSharedFragment>(EMassFragmentAccess::ReadWrite);
 	
 	EntityQueryLODChange = EntityQuery;
 	EntityQueryLODChange.AddRequirement<FMassTrafficVehiclePhysicsFragment>(EMassFragmentAccess::ReadOnly, EMassFragmentPresence::Optional);
