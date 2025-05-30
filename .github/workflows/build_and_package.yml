@@ -105,7 +105,7 @@ jobs:
     runs-on: ${{ inputs.platform }}
     environment: ${{ inputs.environment != '' && inputs.environment || null }}
     concurrency:
-      group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.platform }}-${{ inputs.unreal_version }}
+      group: ${{ github.workflow }}-${{ github.event.pull_request.head.sha || github.sha }}-${{ inputs.platform }}-${{ inputs.unreal_version }}
       cancel-in-progress: true
     steps:
     - name: Validate Inputs
@@ -412,7 +412,7 @@ jobs:
         if-no-files-found: error
         compression-level: ${{ inputs.upload_artifact_compression_level }}
     - name: Cache Engine Mods (if building cache branch)
-      if: ${{ github.ref == format('refs/heads/{0}', inputs.cache_branch) }}
+      if: ${{ github.event_name != 'pull_request_target' && github.ref == format('refs/heads/{0}', inputs.cache_branch) }}
       uses: actions/cache/save@v4
       with:
         path: |
@@ -425,7 +425,7 @@ jobs:
           .engine-mods-cache/Engine/Binaries/DotNET/AutomationTool/**
         key: tempo-engine-mods-${{ env.UNREAL_VERSION }}-${{ hashFiles(format('{0}/EngineMods/**', inputs.tempo_root)) }}
     - name: Cache Build (if building cache branch)
-      if: ${{ github.ref == format('refs/heads/{0}', inputs.cache_branch) }}
+      if: ${{ github.event_name != 'pull_request_target' && github.ref == format('refs/heads/{0}', inputs.cache_branch) }}
       uses: actions/cache/save@v4
       with:
         path: |
