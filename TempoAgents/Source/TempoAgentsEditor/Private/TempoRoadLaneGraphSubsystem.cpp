@@ -33,7 +33,7 @@ void UTempoRoadLaneGraphSubsystem::SetupZoneGraphBuilder()
 
 bool UTempoRoadLaneGraphSubsystem::TryGenerateZoneShapeComponents() const
 {
-	// Allow all Intersections to setup their data, first.
+	// Allow all Intersections to set up their data, first.
 	for (AActor* Actor : TActorRange<AActor>(GetWorld()))
 	{
 		if (!IsValid(Actor))
@@ -59,41 +59,27 @@ bool UTempoRoadLaneGraphSubsystem::TryGenerateZoneShapeComponents() const
 			continue;
 		}
 
-		if (Actor->Implements<UTempoRoadInterface>())
+		const bool bImplementsRoadInterface = Actor->Implements<UTempoRoadInterface>();
+		const bool bImplementsRoadModuleInterface = Actor->Implements<UTempoRoadModuleInterface>();
+		const bool bImplementsIntersectionInterface = Actor->Implements<UTempoIntersectionInterface>();
+		const bool bImplementsCrosswalkInterface = Actor->Implements<UTempoCrosswalkInterface>();
+
+		if (bImplementsRoadInterface || bImplementsRoadModuleInterface || bImplementsIntersectionInterface || bImplementsCrosswalkInterface)
 		{
 			DestroyZoneShapeComponents(*Actor);
+		}
 
+		if (bImplementsRoadInterface)
+		{
 			// First, try to generate ZoneShapeComponents for roads.
 			if (!TryGenerateAndRegisterZoneShapeComponentsForRoad(*Actor))
 			{
 				UE_LOG(LogTempoAgentsEditor, Error, TEXT("Tempo Lane Graph - Failed to create Road ZoneShapeComponents for Actor: %s."), *Actor->GetName());
 				return false;
 			}
-
-			if (Actor->Implements<UTempoCrosswalkInterface>())
-			{
-				if (!TryGenerateAndRegisterZoneShapeComponentsForCrosswalks(*Actor))
-				{
-					UE_LOG(LogTempoAgentsEditor, Error, TEXT("Tempo Lane Graph - Failed to create Crosswalk ZoneShapeComponents for Actor: %s."), *Actor->GetName());
-					return false;
-				}
-
-				if (!TryGenerateAndRegisterZoneShapeComponentsForCrosswalkIntersectionConnectorSegments(*Actor))
-				{
-					UE_LOG(LogTempoAgentsEditor, Error, TEXT("Tempo Lane Graph - Failed to create Crosswalk Intersection Connector Segment ZoneShapeComponents for Actor: %s."), *Actor->GetName());
-					return false;
-				}
-
-				if (!TryGenerateAndRegisterZoneShapeComponentsForCrosswalkIntersections(*Actor))
-				{
-					UE_LOG(LogTempoAgentsEditor, Error, TEXT("Tempo Lane Graph - Failed to create Crosswalk Intersection ZoneShapeComponents for Actor: %s."), *Actor->GetName());
-					return false;
-				}
-			}
 		}
-		else if (Actor->Implements<UTempoRoadModuleInterface>())
+		if (bImplementsRoadModuleInterface)
 		{
-			DestroyZoneShapeComponents(*Actor);
 			const AActor* RoadModuleParentActor = UTempoCoreUtils::CallBlueprintFunction(Actor, ITempoRoadModuleInterface::Execute_GetTempoRoadModuleParentActor);
 			if (RoadModuleParentActor == nullptr)
 			{
@@ -112,35 +98,32 @@ bool UTempoRoadLaneGraphSubsystem::TryGenerateZoneShapeComponents() const
 				}
 			}
 		}
-		else if (Actor->Implements<UTempoIntersectionInterface>())
+		if (bImplementsIntersectionInterface)
 		{
-			DestroyZoneShapeComponents(*Actor);
-
 			if (!TryGenerateAndRegisterZoneShapeComponentsForIntersection(*Actor))
 			{
 				UE_LOG(LogTempoAgentsEditor, Error, TEXT("Tempo Lane Graph - Failed to create Intersection ZoneShapeComponents for Actor: %s."), *Actor->GetName());
 				return false;
 			}
-
-			if (Actor->Implements<UTempoCrosswalkInterface>())
+		}
+		if (bImplementsCrosswalkInterface)
+		{
+			if (!TryGenerateAndRegisterZoneShapeComponentsForCrosswalks(*Actor))
 			{
-				if (!TryGenerateAndRegisterZoneShapeComponentsForCrosswalks(*Actor))
-				{
-					UE_LOG(LogTempoAgentsEditor, Error, TEXT("Tempo Lane Graph - Failed to create Crosswalk ZoneShapeComponents for Actor: %s."), *Actor->GetName());
-					return false;
-				}
+				UE_LOG(LogTempoAgentsEditor, Error, TEXT("Tempo Lane Graph - Failed to create Crosswalk ZoneShapeComponents for Actor: %s."), *Actor->GetName());
+				return false;
+			}
 
-				if (!TryGenerateAndRegisterZoneShapeComponentsForCrosswalkIntersectionConnectorSegments(*Actor))
-				{
-					UE_LOG(LogTempoAgentsEditor, Error, TEXT("Tempo Lane Graph - Failed to create Crosswalk Intersection Connector Segment ZoneShapeComponents for Actor: %s."), *Actor->GetName());
-					return false;
-				}
-			
-				if (!TryGenerateAndRegisterZoneShapeComponentsForCrosswalkIntersections(*Actor))
-				{
-					UE_LOG(LogTempoAgentsEditor, Error, TEXT("Tempo Lane Graph - Failed to create Crosswalk Intersection ZoneShapeComponents for Actor: %s."), *Actor->GetName());
-					return false;
-				}
+			if (!TryGenerateAndRegisterZoneShapeComponentsForCrosswalkIntersectionConnectorSegments(*Actor))
+			{
+				UE_LOG(LogTempoAgentsEditor, Error, TEXT("Tempo Lane Graph - Failed to create Crosswalk Intersection Connector Segment ZoneShapeComponents for Actor: %s."), *Actor->GetName());
+				return false;
+			}
+
+			if (!TryGenerateAndRegisterZoneShapeComponentsForCrosswalkIntersections(*Actor))
+			{
+				UE_LOG(LogTempoAgentsEditor, Error, TEXT("Tempo Lane Graph - Failed to create Crosswalk Intersection ZoneShapeComponents for Actor: %s."), *Actor->GetName());
+				return false;
 			}
 		}
 	}
@@ -185,7 +168,7 @@ bool UTempoRoadLaneGraphSubsystem::TryGenerateAndRegisterZoneShapeComponentsForR
 	
 	const bool bIsClosedLoop = bQueryActorIsRoadModule
 		? UTempoCoreUtils::CallBlueprintFunction(&RoadQueryActor, ITempoRoadModuleInterface::Execute_IsTempoRoadModuleClosedLoop)
-		: UTempoCoreUtils::CallBlueprintFunction(&RoadQueryActor, ITempoRoadInterface::Execute_IsTempoLaneClosedLoop);
+		: UTempoCoreUtils::CallBlueprintFunction(&RoadQueryActor, ITempoRoadInterface::Execute_IsTempoRoadClosedLoop);
 	
 	const float SampleDistanceStepSize = bQueryActorIsRoadModule
 		? UTempoCoreUtils::CallBlueprintFunction(&RoadQueryActor, ITempoRoadModuleInterface::Execute_GetTempoRoadModuleSampleDistanceStepSize)
