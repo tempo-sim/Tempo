@@ -66,7 +66,11 @@ UTempoMassSceneComponentTransformToMassTranslator::UTempoMassSceneComponentTrans
 	ExecutionOrder.ExecuteInGroup = UE::Mass::ProcessorGroupNames::SyncWorldToMass;
 }
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 void UTempoMassSceneComponentTransformToMassTranslator::ConfigureQueries()
+#else
+void UTempoMassSceneComponentTransformToMassTranslator::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
+#endif
 {
 	AddRequiredTagsToQuery(EntityQuery);
 	EntityQuery.AddRequirement<FSceneComponentWrapperFragment>(EMassFragmentAccess::ReadOnly);
@@ -75,7 +79,11 @@ void UTempoMassSceneComponentTransformToMassTranslator::ConfigureQueries()
 
 void UTempoMassSceneComponentTransformToMassTranslator::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 	EntityQuery.ForEachEntityChunk(EntityManager, Context, [this](FMassExecutionContext& Context)
+#else
+	EntityQuery.ForEachEntityChunk(Context, [this](FMassExecutionContext& Context)
+#endif
 		{
 			const TConstArrayView<FSceneComponentWrapperFragment> CapsuleComponentList = Context.GetFragmentView<FSceneComponentWrapperFragment>();
 			const TArrayView<FTransformFragment> LocationList = Context.GetMutableFragmentView<FTransformFragment>();

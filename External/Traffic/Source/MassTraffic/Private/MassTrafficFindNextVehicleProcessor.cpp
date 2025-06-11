@@ -13,7 +13,11 @@ UMassTrafficFindNextVehicleProcessor::UMassTrafficFindNextVehicleProcessor()
 	bAutoRegisterWithProcessingPhases = false;
 }
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 void UMassTrafficFindNextVehicleProcessor::ConfigureQueries()
+#else
+void UMassTrafficFindNextVehicleProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
+#endif
 {
 	EntityQuery.AddRequirement<FMassZoneGraphLaneLocationFragment>(EMassFragmentAccess::ReadOnly);
 	EntityQuery.AddRequirement<FMassTrafficNextVehicleFragment>(EMassFragmentAccess::ReadWrite);
@@ -28,7 +32,11 @@ void UMassTrafficFindNextVehicleProcessor::Execute(FMassEntityManager& EntityMan
 
 	// Gather all fragments
 	TArray<FMassEntityHandle> AllVehicles;
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 	EntityQuery.ForEachEntityChunk(EntityManager, Context, [&](const FMassExecutionContext& QueryContext)
+#else
+	EntityQuery.ForEachEntityChunk(Context, [&](const FMassExecutionContext& QueryContext)
+#endif
 	{
 		const int32 NumEntities = QueryContext.GetNumEntities();
 		for (int32 Index = 0; Index < NumEntities; ++Index)
@@ -116,8 +124,12 @@ void UMassTrafficFindNextVehicleProcessor::Execute(FMassEntityManager& EntityMan
 	}
 	
 	// Now that all the vehicles have been assigned to their lanes, go through and connect the last vehicle on each
-	// lane to the closest first vehicle in the next connected lanes 
+	// lane to the closest first vehicle in the next connected lanes
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 	EntityQuery.ForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& QueryContext)
+#else
+	EntityQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext& QueryContext)
+#endif
 	{
 		const UMassTrafficSubsystem& MassTrafficSubsystem = QueryContext.GetSubsystemChecked<UMassTrafficSubsystem>();
 		const int32 NumEntities = QueryContext.GetNumEntities();
