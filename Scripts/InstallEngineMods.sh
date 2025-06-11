@@ -220,6 +220,10 @@ REBUILD_UBT() {
   eval "$DOTNET" build "./Engine/Source/Programs/UnrealBuildTool/UnrealBuildTool.csproj" -c Development
   eval "$DOTNET" build "./Engine/Source/Programs/AutomationTool/AutomationTool.csproj" -c Development
 
+  # Copy the resulting built dlls to the binaries folder
+  cp -r $UNREAL_ENGINE_PATH/Engine/Source/Programs/UnrealBuildTool/bin/Development/UnrealBuildTool.dll $UNREAL_ENGINE_PATH/Engine/Binaries/DotNET/UnrealBuildTool
+  cp -r $UNREAL_ENGINE_PATH/Engine/Source/Programs/AutomationTool/bin/Development/AutomationTool.dll $UNREAL_ENGINE_PATH/Engine/Binaries/DotNET/AutomationTool
+
   echo -e "\nSuccessfully rebuilt UnrealBuildTool with Tempo mods\n"
 }
 

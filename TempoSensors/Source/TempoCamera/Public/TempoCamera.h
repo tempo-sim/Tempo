@@ -125,7 +125,7 @@ public:
 
 	virtual void BeginPlay() override;
 
-	virtual void UpdateSceneCaptureContents(FSceneInterface* Scene) override;
+	virtual void UpdateSceneCaptureContents(FSceneInterface* Scene, ISceneRenderBuilder& SceneRenderBuilder) override;
 
 	void RequestMeasurement(const TempoCamera::ColorImageRequest& Request, const TResponseDelegate<TempoCamera::ColorImage>& ResponseContinuation);
 

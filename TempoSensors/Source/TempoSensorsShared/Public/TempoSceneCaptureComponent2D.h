@@ -206,7 +206,7 @@ public:
 
 	virtual void BeginPlay() override;
 
-	virtual void UpdateSceneCaptureContents(FSceneInterface* Scene) override;
+	virtual void UpdateSceneCaptureContents(FSceneInterface* Scene, ISceneRenderBuilder& SceneRenderBuilder) override;
 
 	// Begin ITempoSensorInterface
 	virtual FString GetOwnerName() const override;

@@ -1,0 +1,294 @@
+diff --git Source/MassCrowd/Private/MassCrowdNavigationProcessor.cpp Source/MassCrowd/Private/MassCrowdNavigationProcessor.cpp
+index 529e658..5a6b701 100644
+--- Source/MassCrowd/Private/MassCrowdNavigationProcessor.cpp
++++ Source/MassCrowd/Private/MassCrowdNavigationProcessor.cpp
+@@ -9,11 +9,14 @@
+ #include "MassEntityManager.h"
+ #include "MassMovementFragments.h"
+ #include "MassCrowdSettings.h"
++#include "MassEntityView.h"
+ #include "ZoneGraphAnnotationSubsystem.h"
+ #include "MassZoneGraphNavigationFragments.h"
+ #include "Annotations/ZoneGraphDisturbanceAnnotation.h"
+ #include "MassSimulationLOD.h"
+ #include "MassSignalSubsystem.h"
++#include "ZoneGraphSubsystem.h"
++#include "MassExternalSubsystemTraits.h"
+ 
+ //----------------------------------------------------------------------//
+ // UMassCrowdLaneTrackingSignalProcessor
+@@ -60,6 +63,173 @@ void UMassCrowdLaneTrackingSignalProcessor::SignalEntities(FMassEntityManager& E
+ 	});
+ }
+ 
++//----------------------------------------------------------------------//
++// UMassCrowdUpdateTrackingLaneProcessor
++//----------------------------------------------------------------------//
++UMassCrowdUpdateTrackingLaneProcessor::UMassCrowdUpdateTrackingLaneProcessor()
++	: EntityQuery(*this)
++{
++	ExecutionOrder.ExecuteAfter.Add(UE::Mass::ProcessorGroupNames::Tasks);
++}
++
++void UMassCrowdUpdateTrackingLaneProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
++{
++	EntityQuery.AddTagRequirement<FMassCrowdTag>(EMassFragmentPresence::All);
++	
++	ProcessorRequirements.AddSubsystemRequirement<UMassCrowdSubsystem>(EMassFragmentAccess::ReadWrite);
++	ProcessorRequirements.AddSubsystemRequirement<UZoneGraphSubsystem>(EMassFragmentAccess::ReadOnly);
++}
++
++void UMassCrowdUpdateTrackingLaneProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
++{
++	// Gather all Crowd Entities.
++	TArray<FMassEntityHandle> AllCrowdEntities;
++	EntityQuery.ForEachEntityChunk(Context, [&](const FMassExecutionContext& QueryContext)
++	{
++		const int32 NumEntities = QueryContext.GetNumEntities();
++		for (int32 Index = 0; Index < NumEntities; ++Index)
++		{
++			AllCrowdEntities.Add(QueryContext.GetEntity(Index));
++		}
++	});
++	
++	if (AllCrowdEntities.IsEmpty())
++	{
++		return;
++	}
++	
++	// Sort by ZoneGraphStorage Index, then Lane Index, then *ascending* DistanceAlongLane.
++	AllCrowdEntities.Sort(
++		[&EntityManager](const FMassEntityHandle& EntityA, const FMassEntityHandle& EntityB)
++		{
++			const FMassZoneGraphLaneLocationFragment& A = EntityManager.GetFragmentDataChecked<FMassZoneGraphLaneLocationFragment>(EntityA);
++			const FMassZoneGraphLaneLocationFragment& B = EntityManager.GetFragmentDataChecked<FMassZoneGraphLaneLocationFragment>(EntityB);
++
++			if (A.LaneHandle == B.LaneHandle)
++			{
++				return A.DistanceAlongLane < B.DistanceAlongLane;
++			}
++			else if (A.LaneHandle.DataHandle == B.LaneHandle.DataHandle)
++			{
++				return A.LaneHandle.Index < B.LaneHandle.Index;
++			}
++			else
++			{
++				return A.LaneHandle.DataHandle.Index < B.LaneHandle.DataHandle.Index;
++			}
++		}
++	);
++
++	const TArray<FMassEntityHandle>& AscendingCrowdEntities = AllCrowdEntities;
++	TArray<FMassEntityHandle> DescendingCrowdEntities(AllCrowdEntities);
++	
++	// Sort by ZoneGraphStorage Index, then Lane Index, then *descending* DistanceAlongLane.
++	DescendingCrowdEntities.Sort(
++		[&EntityManager](const FMassEntityHandle& EntityA, const FMassEntityHandle& EntityB)
++		{
++			const FMassZoneGraphLaneLocationFragment& A = EntityManager.GetFragmentDataChecked<FMassZoneGraphLaneLocationFragment>(EntityA);
++			const FMassZoneGraphLaneLocationFragment& B = EntityManager.GetFragmentDataChecked<FMassZoneGraphLaneLocationFragment>(EntityB);
++
++			if (A.LaneHandle == B.LaneHandle)
++			{
++				return A.DistanceAlongLane > B.DistanceAlongLane;
++			}
++			else if (A.LaneHandle.DataHandle == B.LaneHandle.DataHandle)
++			{
++				return A.LaneHandle.Index < B.LaneHandle.Index;
++			}
++			else
++			{
++				return A.LaneHandle.DataHandle.Index < B.LaneHandle.DataHandle.Index;
++			}
++		}
++	);
++
++	UMassCrowdSubsystem& MassCrowdSubsystem = Context.GetMutableSubsystemChecked<UMassCrowdSubsystem>();
++	const UZoneGraphSubsystem& ZoneGraphSubsystem = Context.GetSubsystemChecked<UZoneGraphSubsystem>();
++
++	// First, we need to reset the "distance along lane" fields for the "lead" and "tail" Entities.
++	TConstArrayView<FRegisteredZoneGraphData> RegisteredZoneGraphDatas = ZoneGraphSubsystem.GetRegisteredZoneGraphData();
++	for (const FRegisteredZoneGraphData& RegisteredZoneGraphData : RegisteredZoneGraphDatas)
++	{
++		if (!ensureMsgf(RegisteredZoneGraphData.ZoneGraphData != nullptr, TEXT("Must get valid RegisteredZoneGraphData.ZoneGraphData in UMassCrowdUpdateTrackingLaneProcessor::Execute.")))
++		{
++			continue;
++		}
++		
++		const FZoneGraphStorage& ZoneGraphStorage = RegisteredZoneGraphData.ZoneGraphData->GetStorage();
++		FRegisteredCrowdLaneData* RegisteredCrowdLaneData = MassCrowdSubsystem.GetMutableCrowdData(ZoneGraphStorage.DataHandle);
++
++		if (!ensureMsgf(RegisteredCrowdLaneData != nullptr, TEXT("Must get valid RegisteredCrowdLaneData in UMassCrowdUpdateTrackingLaneProcessor::Execute.")))
++		{
++			continue;
++		}
++
++		for (TTuple<int32, FCrowdTrackingLaneData>& RegisteredCrowdLaneDataPair : RegisteredCrowdLaneData->LaneToTrackingDataLookup)
++		{
++			FCrowdTrackingLaneData& RegisteredCrowdTrackingLaneData = RegisteredCrowdLaneDataPair.Value;
++			RegisteredCrowdTrackingLaneData.LeadEntityNormalizedDistanceAlongLane.Reset();
++			RegisteredCrowdTrackingLaneData.TailEntityNormalizedDistanceAlongLane.Reset();
++		}
++	}
++
++	// Then, update the "distance along lane" fields for the "lead" and "tail" Entities.
++	for (int32 SortedCrowdEntityIndex = 0; SortedCrowdEntityIndex < AscendingCrowdEntities.Num(); ++SortedCrowdEntityIndex)
++	{
++		// First, update the field for the "lead" Entity.
++		const FMassEntityHandle LeadEntityHandle = DescendingCrowdEntities[SortedCrowdEntityIndex];
++			
++		const FMassEntityView LeadEntityView(EntityManager, LeadEntityHandle);
++		const FMassZoneGraphLaneLocationFragment& LeadEntityLaneLocation = LeadEntityView.GetFragmentData<FMassZoneGraphLaneLocationFragment>();
++
++		if (LeadEntityLaneLocation.LaneLength > 0.0f)
++		{
++			FCrowdTrackingLaneData* LeadEntityCrowdTrackingLaneData = MassCrowdSubsystem.GetMutableCrowdTrackingLaneData(LeadEntityLaneLocation.LaneHandle);
++			
++			if (LeadEntityCrowdTrackingLaneData == nullptr)
++			{
++				continue;
++			}
++
++			// We only set the LeadEntityNormalizedDistanceAlongLane value for a given lane, if it hasn't already been set.
++			// And, since we're indexing into DescendingCrowdEntities, which has been sorted by descending DistanceAlongLane,
++			// the first Entity to be indexed for a given lane will in fact be the "Lead Entity" for that lane,
++			// and it will have the first (and only) opportunity to set the LeadEntityNormalizedDistanceAlongLane field.
++			if (!LeadEntityCrowdTrackingLaneData->LeadEntityNormalizedDistanceAlongLane.IsSet())
++			{
++				const float NormalizedDistanceAlongLane = LeadEntityLaneLocation.DistanceAlongLane / LeadEntityLaneLocation.LaneLength;
++				LeadEntityCrowdTrackingLaneData->LeadEntityNormalizedDistanceAlongLane = NormalizedDistanceAlongLane;
++			}
++		}
++
++		// Then, update the field for the "tail" Entity.
++		const FMassEntityHandle TailEntityHandle = AscendingCrowdEntities[SortedCrowdEntityIndex];
++			
++		const FMassEntityView TailEntityView(EntityManager, TailEntityHandle);
++		const FMassZoneGraphLaneLocationFragment& TailEntityLaneLocation = TailEntityView.GetFragmentData<FMassZoneGraphLaneLocationFragment>();
++
++		if (TailEntityLaneLocation.LaneLength > 0.0f)
++		{
++			FCrowdTrackingLaneData* TailEntityCrowdTrackingLaneData = MassCrowdSubsystem.GetMutableCrowdTrackingLaneData(TailEntityLaneLocation.LaneHandle);
++			
++			if (TailEntityCrowdTrackingLaneData == nullptr)
++			{
++				continue;
++			}
++
++			// We only set the TailEntityNormalizedDistanceAlongLane value for a given lane, if it hasn't already been set.
++			// And, since we're indexing into AscendingCrowdEntities, which has been sorted by ascending DistanceAlongLane,
++			// the first Entity to be indexed for a given lane will in fact be the "Tail Entity" for that lane,
++			// and it will have the first (and only) opportunity to set the TailEntityNormalizedDistanceAlongLane field.
++			if (!TailEntityCrowdTrackingLaneData->TailEntityNormalizedDistanceAlongLane.IsSet())
++			{
++				const float NormalizedDistanceAlongLane = TailEntityLaneLocation.DistanceAlongLane / TailEntityLaneLocation.LaneLength;
++				TailEntityCrowdTrackingLaneData->TailEntityNormalizedDistanceAlongLane = NormalizedDistanceAlongLane;
++			}
++		}
++	}
++}
++
+ //----------------------------------------------------------------------//
+ // UMassCrowdLaneTrackingDestructor
+ //----------------------------------------------------------------------//
+diff --git Source/MassCrowd/Private/MassCrowdSubsystem.cpp Source/MassCrowd/Private/MassCrowdSubsystem.cpp
+index a3f4326..d66bd53 100644
+--- Source/MassCrowd/Private/MassCrowdSubsystem.cpp
++++ Source/MassCrowd/Private/MassCrowdSubsystem.cpp
+@@ -263,6 +263,11 @@ const FCrowdTrackingLaneData* UMassCrowdSubsystem::GetCrowdTrackingLaneData(cons
+ 	return CrowdLaneData.LaneToTrackingDataLookup.Find(LaneHandle.Index);
+ }
+ 
++FCrowdTrackingLaneData* UMassCrowdSubsystem::GetMutableCrowdTrackingLaneData(const FZoneGraphLaneHandle LaneHandle) const
++{
++	return const_cast<FCrowdTrackingLaneData*>(GetCrowdTrackingLaneData(LaneHandle));
++}
++
+ const FCrowdBranchingLaneData* UMassCrowdSubsystem::GetCrowdBranchingLaneData(const FZoneGraphLaneHandle LaneHandle) const
+ {
+ 	if (!ensureMsgf(LaneHandle.IsValid(), TEXT("Invalid lane handle: returning a null entry.")))
+@@ -365,6 +370,11 @@ const FRegisteredCrowdLaneData* UMassCrowdSubsystem::GetCrowdData(const FZoneGra
+ 	return &LanesData;
+ }
+ 
++FRegisteredCrowdLaneData* UMassCrowdSubsystem::GetMutableCrowdData(const FZoneGraphDataHandle DataHandle) const
++{
++	return const_cast<FRegisteredCrowdLaneData*>(GetCrowdData(DataHandle));
++}
++
+ void UMassCrowdSubsystem::OnEntityLaneChanged(const FMassEntityHandle Entity, const FZoneGraphLaneHandle PreviousLaneHandle, const FZoneGraphLaneHandle CurrentLaneHandle)
+ {
+ 	const bool bPreviousLocationValid = PreviousLaneHandle.IsValid();
+diff --git Source/MassCrowd/Public/MassCrowdNavigationProcessor.h Source/MassCrowd/Public/MassCrowdNavigationProcessor.h
+index c17b7fb..cb486a3 100644
+--- Source/MassCrowd/Public/MassCrowdNavigationProcessor.h
++++ Source/MassCrowd/Public/MassCrowdNavigationProcessor.h
+@@ -24,6 +24,21 @@ protected:
+ 	virtual void SignalEntities(FMassEntityManager& EntityManager, FMassExecutionContext& Context, FMassSignalNameLookup& /*Unused*/) override;
+ };
+ 
++UCLASS()
++class MASSCROWD_API UMassCrowdUpdateTrackingLaneProcessor : public UMassProcessor
++{
++	GENERATED_BODY()
++public:
++	UMassCrowdUpdateTrackingLaneProcessor();
++
++protected:
++	
++	virtual void ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager) override;
++	virtual void Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context) override;
++	
++	FMassEntityQuery EntityQuery;
++};
++
+ /** Processors that cleans up the lane tracking on entity destruction. */
+ UCLASS()
+ class MASSCROWD_API UMassCrowdLaneTrackingDestructor : public UMassObserverProcessor
+diff --git Source/MassCrowd/Public/MassCrowdSubsystem.h Source/MassCrowd/Public/MassCrowdSubsystem.h
+index cc49457..79f8513 100644
+--- Source/MassCrowd/Public/MassCrowdSubsystem.h
++++ Source/MassCrowd/Public/MassCrowdSubsystem.h
+@@ -87,6 +87,14 @@ public:
+ 	 */
+ 	const FRegisteredCrowdLaneData* GetCrowdData(const FZoneGraphDataHandle DataHandle) const;
+ 
++	/**
++	 * Returns the readonly runtime data associated to a given zone graph.
++	 * @param DataHandle A valid handle of the zone graph used to retrieve the runtime crowd data
++	 * @return Runtime data associated to the zone graph if available; nullptr otherwise
++	 * @note Method will ensure if DataHandle is invalid or if associated data doesn't exist. Should call HasCrowdDataForZoneGraph first.
++	 */
++	FRegisteredCrowdLaneData* GetMutableCrowdData(const FZoneGraphDataHandle DataHandle) const;
++
+ 	/**
+ 	 * Returns the readonly runtime data associated to a given zone graph lane.
+ 	 * @param LaneHandle A valid lane handle used to retrieve the runtime data; ensure if handle is invalid
+@@ -101,6 +109,13 @@ public:
+ 	 */
+ 	const FCrowdTrackingLaneData* GetCrowdTrackingLaneData(const FZoneGraphLaneHandle LaneHandle) const;
+ 
++	/**
++	 * Returns the entity tracking runtime data associated to a given zone graph lane.
++	 * @param LaneHandle A valid lane handle used to retrieve the associated tracking data; ensure if handle is invalid
++	 * @return Runtime data associated to the lane (nullptr if provided handle is invalid or no data is associated to that lane)
++	 */
++	FCrowdTrackingLaneData* GetMutableCrowdTrackingLaneData(const FZoneGraphLaneHandle LaneHandle) const;
++
+ 	/**
+ 	 * Returns the branching data associated to a given zone graph lane.
+  	 * @param LaneHandle A valid lane handle used to retrieve the associated data; ensure if handle is invalid
+diff --git Source/MassCrowd/Public/MassCrowdTypes.h Source/MassCrowd/Public/MassCrowdTypes.h
+index 5f3d7b4..6e163d3 100644
+--- Source/MassCrowd/Public/MassCrowdTypes.h
++++ Source/MassCrowd/Public/MassCrowdTypes.h
+@@ -56,6 +56,9 @@ struct MASSCROWD_API FCrowdTrackingLaneData
+ 	int32 WaitAreaIndex = INDEX_NONE;
+ 
+ 	int32 NumEntitiesOnLane = 0;
++	
++	TOptional<float> LeadEntityNormalizedDistanceAlongLane;
++	TOptional<float> TailEntityNormalizedDistanceAlongLane;
+ };
+ 
+ /** Runtime data associated to lane that can be used to wait another one to open. */

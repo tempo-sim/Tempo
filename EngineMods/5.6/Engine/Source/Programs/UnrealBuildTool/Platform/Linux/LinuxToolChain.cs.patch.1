@@ -1,0 +1,14 @@
+--- Platform/Linux/LinuxToolChain.cs	2025-04-11 10:07:25
++++ LinuxToolChain.cs	2025-04-11 11:40:07
+@@ -1241,7 +1241,10 @@
+ 			{
+ 				string RelativePath = RuntimeLibaryPath;
+
+-				if (!RelativePath.StartsWith("$"))
++				// TEMPO_MOD Begin - [For Fixing rpaths of Rebuilt Engine Plugins] - Avoid making RelativePath relative
++				// to the build output when it starts with "." (in addition to "$", which was already here).
++				if (!RelativePath.StartsWith("$") && !RelativePath.StartsWith("."))
++				// TEMPO_MOD End
+ 				{
+ 					if (LinkEnvironment.bIsBuildingDLL)
+ 					{

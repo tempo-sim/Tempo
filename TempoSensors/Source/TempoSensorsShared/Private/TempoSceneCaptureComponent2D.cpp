@@ -27,7 +27,7 @@ void UTempoSceneCaptureComponent2D::BeginPlay()
 	RestartCaptureTimer();
 }
 
-void UTempoSceneCaptureComponent2D::UpdateSceneCaptureContents(FSceneInterface* Scene)
+void UTempoSceneCaptureComponent2D::UpdateSceneCaptureContents(FSceneInterface* Scene, ISceneRenderBuilder& SceneRenderBuilder)
 {
 	TextureInitFence.Wait();
 
@@ -52,7 +52,7 @@ void UTempoSceneCaptureComponent2D::UpdateSceneCaptureContents(FSceneInterface* 
 		return;
 	}
 
-	Super::UpdateSceneCaptureContents(Scene);
+	Super::UpdateSceneCaptureContents(Scene, SceneRenderBuilder);
 	
 	ENQUEUE_RENDER_COMMAND(SetTempoSceneCaptureRenderFence)(
 	[this](FRHICommandList& RHICmdList)
