@@ -10,6 +10,7 @@
 
 #include "TempoScriptable.h"
 #include "TempoScriptingServer.h"
+#include "TempoSubsystems.h"
 
 #include "TempoActorLabeler.generated.h"
 
@@ -55,14 +56,16 @@ namespace TempoLabels
  * Tags all meshes on all Actors in the world with the appropriate label.
  */
 UCLASS()
-class TEMPOLABELS_API UTempoActorLabeler : public UWorldSubsystem, public IActorClassificationInterface, public ITempoScriptable
+class TEMPOLABELS_API UTempoActorLabeler : public UTempoGameWorldSubsystem, public IActorClassificationInterface, public ITempoScriptable
 {
 	GENERATED_BODY()
 
 public:
 	virtual void OnWorldBeginPlay(UWorld& InWorld) override;
 
-	virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
+	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+
+	virtual void Deinitialize() override;
 
 	virtual FName GetActorClassification(const AActor* Actor) const override;
 

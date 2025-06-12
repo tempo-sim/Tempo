@@ -107,9 +107,12 @@ void UTempoActorLabeler::GetInstanceToSemanticIdMap(const TempoScripting::Empty&
 	TempoLabels::InstanceToSemanticIdMap InstanceToSemanticIdMap;
 	for (const auto& LabeledObject : LabeledObjects)
 	{
-		auto* Pair = InstanceToSemanticIdMap.add_instance_semantic_id_pairs();
-		Pair->set_instanceid(LabeledObject.Value.InstanceId);
-		Pair->set_semanticid(LabeledObject.Value.SemanticId);
+		if (LabeledObject.Value.InstanceId != NoLabelId)
+		{
+			auto* Pair = InstanceToSemanticIdMap.add_instance_semantic_id_pairs();
+			Pair->set_instanceid(LabeledObject.Value.InstanceId);
+			Pair->set_semanticid(LabeledObject.Value.SemanticId);
+		}
 	}
 	ResponseContinuation.ExecuteIfBound(InstanceToSemanticIdMap, grpc::Status_OK);
 }
@@ -171,13 +174,18 @@ void UTempoActorLabeler::OnWorldBeginPlay(UWorld& InWorld)
 	GetMutableDefault<UTempoSensorsSettings>()->TempoSensorsLabelSettingsChangedEvent.AddUObject(this, &UTempoActorLabeler::ReLabelAllActors);
 }
 
-bool UTempoActorLabeler::ShouldCreateSubsystem(UObject* Outer) const
+void UTempoActorLabeler::Initialize(FSubsystemCollectionBase& Collection)
 {
-	if (UTempoCoreUtils::IsGameWorld(Outer))
-	{
-		return Super::ShouldCreateSubsystem(Outer);
-	}
-	return false;
+	Super::Initialize(Collection);
+
+	FTempoScriptingServer::Get().ActivateService<LabelService>(this);
+}
+
+void UTempoActorLabeler::Deinitialize()
+{
+	Super::Deinitialize();
+
+	FTempoScriptingServer::Get().DeactivateService<LabelService>();
 }
 
 void UTempoActorLabeler::BuildLabelMaps()
