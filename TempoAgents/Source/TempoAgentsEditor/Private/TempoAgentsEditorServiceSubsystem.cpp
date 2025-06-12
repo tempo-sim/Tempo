@@ -31,7 +31,7 @@ void UTempoAgentsEditorServiceSubsystem::Deinitialize()
 
 void UTempoAgentsEditorServiceSubsystem::RunTempoZoneGraphBuilderPipeline(const TempoScripting::Empty& Request, const TResponseDelegate<TempoAgentsEditor::PipelineResult>& ResponseContinuation) const
 {
-	bool bSuccess = UTempoAgentsEditorUtils::RunTempoZoneGraphBuilderPipeline();
+	const bool bSuccess = UTempoAgentsEditorUtils::RunTempoZoneGraphBuilderPipeline();
 
 	TempoAgentsEditor::PipelineResult Result;
 	Result.set_success(bSuccess);

@@ -15,28 +15,26 @@ bool UTempoAgentsEditorUtils::RunTempoZoneGraphBuilderPipeline()
 		return false;
 	}
 
-		TempoRoadLaneGraphSubsystem->SetupZoneGraphBuilder();
+	TempoRoadLaneGraphSubsystem->SetupZoneGraphBuilder();
 	if (!TempoRoadLaneGraphSubsystem->TryGenerateZoneShapeComponents())
-		{
+	{
 		return false;
 	}
 
 	const UWorld* World = GEditor ? GEditor->GetEditorWorldContext(false).World() : nullptr;
 	if (!World)
-			{
+	{
 		return false;
 	}
 
-	if (UTempoAgentsWorldSubsystem* AgentsWorldSubsystem = World->GetSubsystem<UTempoAgentsWorldSubsystem>())
+	UTempoAgentsWorldSubsystem* AgentsWorldSubsystem = World->GetSubsystem<UTempoAgentsWorldSubsystem>();
+	if (!AgentsWorldSubsystem)
 	{
-		AgentsWorldSubsystem->SetupTrafficControllers();
-			}
-	else
-	{
-		return false; // Or handle the case where the subsystem doesn't exist, depending on requirements
+		return false;
 	}
 
-			TempoRoadLaneGraphSubsystem->BuildZoneGraph();
-	
+	AgentsWorldSubsystem->SetupTrafficControllers();
+	TempoRoadLaneGraphSubsystem->BuildZoneGraph();
+
 	return true;
 }
