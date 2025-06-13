@@ -1,6 +1,6 @@
 ﻿using UnrealBuildTool;
 
-public class TempoLabels : ModuleRules
+public class TempoLabels : TempoModuleRules
 {
     public TempoLabels(ReadOnlyTargetRules Target) : base(Target)
     {
@@ -27,6 +27,7 @@ public class TempoLabels : ModuleRules
                 // Tempo
                 "TempoCoreShared",
                 "TempoSensorsShared",
+                "TempoScripting",
             }
         );
     }

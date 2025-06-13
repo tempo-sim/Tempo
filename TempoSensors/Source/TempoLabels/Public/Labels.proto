@@ -1,0 +1,18 @@
+// Copyright Tempo Simulation, LLC. All Rights Reserved
+
+syntax = "proto3";
+
+import "TempoScripting/Empty.proto";
+
+message InstanceSemanticIdPair {
+  int32 InstanceId = 1;
+  int32 SemanticId = 2;
+}
+
+message InstanceToSemanticIdMap {
+  repeated InstanceSemanticIdPair instance_semantic_id_pairs = 1;
+}
+
+service LabelService {
+  rpc GetInstanceToSemanticIdMap(TempoScripting.Empty) returns (InstanceToSemanticIdMap);
+}
