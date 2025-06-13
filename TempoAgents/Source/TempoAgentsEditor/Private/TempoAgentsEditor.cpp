@@ -23,7 +23,11 @@ void FTempoAgentsEditorModule::StartupModule()
 
 	PluginCommands->MapAction(
 		FTempoAgentsEditorCommands::Get().PluginAction,
-		FExecuteAction::CreateStatic(&UTempoAgentsEditorUtils::RunTempoZoneGraphBuilderPipeline),
+		FExecuteAction::CreateLambda([]() {
+			// We're calling the function but ignoring its boolean return value here
+			// because the editor UI doesn't currently use it.
+			UTempoAgentsEditorUtils::RunTempoZoneGraphBuilderPipeline();
+		}),
 		FCanExecuteAction());
 
 	UToolMenus::RegisterStartupCallback(FSimpleMulticastDelegate::FDelegate::CreateRaw(this, &FTempoAgentsEditorModule::RegisterMenus));
