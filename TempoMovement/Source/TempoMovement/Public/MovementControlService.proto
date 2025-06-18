@@ -46,4 +46,6 @@ service MovementControlService {
   rpc GetCommandablePawns(TempoScripting.Empty) returns (CommandablePawnsResponse);
 
   rpc PawnMoveToLocation(PawnMoveToLocationRequest) returns (PawnMoveToLocationResponse);
+
+  rpc RebuildNavigation(TempoScripting.Empty) returns (TempoScripting.Empty);
 }
