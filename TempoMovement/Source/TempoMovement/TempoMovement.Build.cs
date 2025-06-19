@@ -41,6 +41,7 @@ public class TempoMovement : TempoModuleRules
 			{
 				// Unreal
 				"CoreUObject",
+				"NavigationSystem",
 				// Tempo
 				"TempoMovementShared",
 			}
