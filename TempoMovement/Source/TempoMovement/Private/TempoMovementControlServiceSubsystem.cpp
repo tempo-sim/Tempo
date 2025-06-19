@@ -11,6 +11,7 @@
 
 #include "AIController.h"
 #include "Kismet/GameplayStatics.h"
+#include "NavigationSystem.h"
 
 using MovementControlService = TempoMovement::MovementControlService;
 using MovementControlAsyncService = TempoMovement::MovementControlService::AsyncService;
@@ -27,7 +28,8 @@ void UTempoMovementControlServiceSubsystem::RegisterScriptingServices(FTempoScri
 		SimpleRequestHandler(&MovementControlAsyncService::RequestGetCommandableVehicles, &UTempoMovementControlServiceSubsystem::GetCommandableVehicles),
 		SimpleRequestHandler(&MovementControlAsyncService::RequestCommandVehicle, &UTempoMovementControlServiceSubsystem::CommandVehicle),
 		SimpleRequestHandler(&MovementControlAsyncService::RequestGetCommandablePawns, &UTempoMovementControlServiceSubsystem::GetCommandablePawns),
-		SimpleRequestHandler(&MovementControlAsyncService::RequestPawnMoveToLocation, &UTempoMovementControlServiceSubsystem::PawnMoveToLocation)
+		SimpleRequestHandler(&MovementControlAsyncService::RequestPawnMoveToLocation, &UTempoMovementControlServiceSubsystem::PawnMoveToLocation),
+		SimpleRequestHandler(&MovementControlAsyncService::RequestRebuildNavigation, &UTempoMovementControlServiceSubsystem::RebuildNavigation)
 		);
 }
 
@@ -235,4 +237,36 @@ void UTempoMovementControlServiceSubsystem::OnPawnMoveCompleted(FAIRequestID Req
 	}
 
 	UE_LOG(LogTempoMovement, Error, TEXT("Received move completed event for pawn without a pending move"));
+}
+
+void UTempoMovementControlServiceSubsystem::RebuildNavigation(const TempoEmpty& Request, const TResponseDelegate<TempoEmpty>& ResponseContinuation) const
+{
+	auto CanRebuildNavigation = [](const UNavigationSystemV1* NavigationSystem)
+	{
+		for (const ANavigationData* NavData : NavigationSystem->NavDataSet)
+		{
+			if (NavData && NavData->GetRuntimeGenerationMode() == ERuntimeGenerationType::Dynamic)
+			{
+				return true;
+			}
+		}
+
+		return false;
+	};
+
+	UNavigationSystemV1* NavigationSystem = UNavigationSystemV1::GetCurrent(GetWorld());
+	if (!NavigationSystem)
+	{
+		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::FAILED_PRECONDITION, "Navigation system not found"));
+		return;
+	}
+
+	if (!CanRebuildNavigation(NavigationSystem))
+	{
+		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::FAILED_PRECONDITION, "Rebuilding navigation in game is only supported with dynamic generation mode"));
+		return;
+	}
+
+	NavigationSystem->Build();
+	ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status_OK);
 }
