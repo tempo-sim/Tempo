@@ -50,6 +50,8 @@ namespace TempoScripting
 namespace TempoLabels
 {
 	class InstanceToSemanticIdMap;
+	class GetLabeledActorTypesRequest;
+	class GetLabeledActorTypesResponse;
 }
 
 /**
@@ -72,6 +74,10 @@ public:
 	virtual void RegisterScriptingServices(FTempoScriptingServer& ScriptingServer) override;
 
 	void GetInstanceToSemanticIdMap(const TempoScripting::Empty& Request, const TResponseDelegate<TempoLabels::InstanceToSemanticIdMap>& ResponseContinuation);
+
+	void HandleGetLabeledActorTypes(const TempoLabels::GetLabeledActorTypesRequest& Request, const TResponseDelegate<TempoLabels::GetLabeledActorTypesResponse>& ResponseContinuation);
+
+	const TSet<FName>& GetLabeledActorClassNames() const { return LabeledActorClassNames; }
 
 protected:
 	void BuildLabelMaps();
@@ -120,6 +126,10 @@ protected:
 
 	UPROPERTY()
 	TMap<const UObject*, FInstanceSemanticIdPair> LabeledObjects;
+
+	// Set of actor class names that have been assigned unique instance IDs
+	UPROPERTY()
+	TSet<FName> LabeledActorClassNames;
 
 	FInstanceIdAllocator InstanceIdAllocator = FInstanceIdAllocator(1, 255);
 };
