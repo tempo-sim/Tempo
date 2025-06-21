@@ -38,4 +38,8 @@ protected:
 	// The surface angle, in degrees, above which we will reject normals.
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(UIMin=0.0, UIMax=60.0, ClampMin=0.0, ClampMax=60.0, EditCondition=bLimitSnapAngle))
 	float MaxSlopeAngle = 45.0;
+
+	// If true, we will include hidden components in our extents calculation.
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(EditCondition="!bOverrideOwnerExtents"))
+	bool bIncludeHiddenComponentsInExtents = false;
 };

@@ -4,7 +4,7 @@
 
 #include "AssetRegistry/AssetRegistryModule.h"
 
-AActor* GetActorWithName(const UWorld* World, const FString& Name, const bool bIncludeHidden=false);
+AActor* GetActorWithName(const UWorld* World, const FString& Name);
 
 UObject* GetAssetByPath(const FString& AssetPath);
 
