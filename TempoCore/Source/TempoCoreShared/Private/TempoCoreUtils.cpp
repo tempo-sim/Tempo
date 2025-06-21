@@ -40,7 +40,7 @@ bool UTempoCoreUtils::IsGameWorld(const UObject* WorldContextObject)
 	return World->WorldType == EWorldType::Game || World->WorldType == EWorldType::PIE;
 }
 
-FBox UTempoCoreUtils::GetActorLocalBounds(const AActor* Actor)
+FBox UTempoCoreUtils::GetActorLocalBounds(const AActor* Actor, bool bIncludeHiddenComponents)
 {
 	TArray<UPrimitiveComponent*> PrimitiveComponents;
 	Actor->GetComponents<UPrimitiveComponent>(PrimitiveComponents);
@@ -49,6 +49,10 @@ FBox UTempoCoreUtils::GetActorLocalBounds(const AActor* Actor)
 
 	for (const UPrimitiveComponent* PrimitiveComponent : PrimitiveComponents)
 	{
+		if (!PrimitiveComponent->IsVisible() && !bIncludeHiddenComponents)
+		{
+			continue;
+		}
 		if (const UBodySetup* BodySetup = PrimitiveComponent->BodyInstance.GetBodySetup())
 		{
 			FBoxSphereBounds Bounds;

@@ -37,7 +37,7 @@ public:
 	// Calculates a tight bounding box of all the Actor's components,
 	// axis-aligned with the Actor's local coordinates.
 	UFUNCTION(BlueprintCallable, Category="TempoCoreUtils")
-	static FBox GetActorLocalBounds(const AActor* Actor);
+	static FBox GetActorLocalBounds(const AActor* Actor, bool bIncludeHiddenComponents);
 
 	template <typename BaseClass>
 	static bool IsMostDerivedSubclass(UClass* Class)
