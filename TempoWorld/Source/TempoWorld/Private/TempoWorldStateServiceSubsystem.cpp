@@ -233,15 +233,12 @@ void UTempoWorldStateServiceSubsystem::StreamActorStatesNear(const TempoWorld::A
 void UTempoWorldStateServiceSubsystem::StreamOverlapEvents(const OverlapEventRequest& Request, const TResponseDelegate<OverlapEventResponse>& ResponseContinuation)
 {
 	const FString ActorName(UTF8_TO_TCHAR(Request.actor_name().c_str()));
-	for (TActorIterator<AActor> ActorIt(GetWorld()); ActorIt; ++ActorIt)
+
+	if (AActor* Actor = GetActorWithName(GetWorld(), ActorName))
 	{
-		AActor* Actor = *ActorIt;
-		if (Actor->GetActorNameOrLabel().Equals(ActorName, ESearchCase::IgnoreCase))
-		{
-			PendingOverlapRequests.FindOrAdd(Actor->GetActorNameOrLabel()).Add(ResponseContinuation);
-			Actor->OnActorBeginOverlap.AddDynamic(this, &UTempoWorldStateServiceSubsystem::UTempoWorldStateServiceSubsystem::OnActorOverlap);
-			return;
-		}
+		PendingOverlapRequests.FindOrAdd(Actor->GetActorNameOrLabel()).Add(ResponseContinuation);
+		Actor->OnActorBeginOverlap.AddDynamic(this, &UTempoWorldStateServiceSubsystem::UTempoWorldStateServiceSubsystem::OnActorOverlap);
+		return;
 	}
 
 	const FString ErrorMsg = FString::Printf(TEXT("No actor with name %s found"), *ActorName);

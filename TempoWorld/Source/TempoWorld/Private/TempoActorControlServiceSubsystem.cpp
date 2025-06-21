@@ -1493,7 +1493,7 @@ template<>
 grpc::Status SetPropertyImpl<SetActorPropertyRequest>(const UWorld* World, const SetActorPropertyRequest& Request)
 {
 	const FString ActorName(UTF8_TO_TCHAR(Request.value().c_str()));
-	AActor* Actor = GetActorWithName(World, ActorName, true);
+	AActor* Actor = GetActorWithName(World, ActorName);
 	if (!Actor)
 	{
 		return grpc::Status(grpc::NOT_FOUND, "Did not find actor with name " + std::string(TCHAR_TO_UTF8(*ActorName)));
@@ -1512,7 +1512,7 @@ grpc::Status SetPropertyImpl<SetComponentPropertyRequest>(const UWorld* World, c
 	{
 		return grpc::Status(grpc::FAILED_PRECONDITION, "Value must be specified as ActorName:ComponentName");
 	}
-	const AActor* Actor = GetActorWithName(World, ActorName, true);
+	const AActor* Actor = GetActorWithName(World, ActorName);
 	if (!Actor)
 	{
 		return grpc::Status(grpc::NOT_FOUND, "Did not find actor with name " + std::string(TCHAR_TO_UTF8(*ActorName)));
@@ -1641,7 +1641,7 @@ grpc::Status SetPropertyImpl<SetActorArrayPropertyRequest>(const UWorld* World, 
 	for (const std::string& Value : Request.values())
 	{
 		const FString ActorName(UTF8_TO_TCHAR(Value.c_str()));
-		AActor* Actor = GetActorWithName(World, ActorName, true);
+		AActor* Actor = GetActorWithName(World, ActorName);
 		if (!Actor)
 		{
 			return grpc::Status(grpc::NOT_FOUND, "Did not find actor with name " + std::string(TCHAR_TO_UTF8(*ActorName)));
@@ -1665,7 +1665,7 @@ grpc::Status SetPropertyImpl<SetComponentArrayPropertyRequest>(const UWorld* Wor
 		{
 			return grpc::Status(grpc::FAILED_PRECONDITION, "Value must be specified as ActorName:ComponentName");
 		}
-		const AActor* Actor = GetActorWithName(World, ActorName, true);
+		const AActor* Actor = GetActorWithName(World, ActorName);
 		if (!Actor)
 		{
 			return grpc::Status(grpc::NOT_FOUND, "Did not find actor with name " + std::string(TCHAR_TO_UTF8(*ActorName)));
