@@ -36,7 +36,7 @@ UMassTrafficCrowdYieldProcessor::UMassTrafficCrowdYieldProcessor()
 	ExecutionOrder.ExecuteBefore.Add(UE::Mass::ProcessorGroupNames::Avoidance);
 }
 
-void UMassTrafficCrowdYieldProcessor::ConfigureQueries()
+void UMassTrafficCrowdYieldProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
 {
 	EntityQuery.AddTagRequirement<FMassCrowdTag>(EMassFragmentPresence::All);
 	EntityQuery.AddRequirement<FMassMoveTargetFragment>(EMassFragmentAccess::ReadWrite);
@@ -52,7 +52,7 @@ void UMassTrafficCrowdYieldProcessor::ConfigureQueries()
 
 void UMassTrafficCrowdYieldProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
-	EntityQuery.ForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& QueryContext)
+	EntityQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext& QueryContext)
 	{
 		UMassTrafficSubsystem& MassTrafficSubsystem = QueryContext.GetMutableSubsystemChecked<UMassTrafficSubsystem>();
 		const UZoneGraphSubsystem& ZoneGraphSubsystem = QueryContext.GetSubsystemChecked<UZoneGraphSubsystem>();

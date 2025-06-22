@@ -18,7 +18,7 @@ class MASSTRAFFIC_API UMassTrafficLaneChangingProcessor : public UMassTrafficPro
 
 protected:
 	UMassTrafficLaneChangingProcessor();
-	virtual void ConfigureQueries() override;
+	virtual void ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager) override;
 	virtual void Execute(FMassEntityManager& EntitySubSystem, FMassExecutionContext& Context) override;
 
 	FMassEntityQuery StartNewLaneChangesEntityQuery_Conditional;

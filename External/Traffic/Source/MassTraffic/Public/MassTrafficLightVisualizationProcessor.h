@@ -45,7 +45,7 @@ public:
 	UMassTrafficIntersectionVisualizationLODProcessor();
 
 protected:
-	virtual void ConfigureQueries() override;
+	virtual void ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager) override;
 };
 
 /**
@@ -59,7 +59,7 @@ class MASSTRAFFIC_API UMassTrafficIntersectionLODCollectorProcessor : public UMa
 	UMassTrafficIntersectionLODCollectorProcessor();
 
 protected:
-	virtual void ConfigureQueries() override;
+	virtual void ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager) override;
 };
 
 /**
@@ -74,7 +74,7 @@ public:
 	UMassTrafficLightVisualizationProcessor();
 
 	/** Configure the owned FMassEntityQuery instances to express processor's requirements */
-	virtual void ConfigureQueries() override;
+	virtual void ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager) override;
 };
 
 /**
@@ -89,7 +89,7 @@ public:
 	UMassTrafficLightUpdateCustomVisualizationProcessor();
 
 	/** Configure the owned FMassEntityQuery instances to express processor's requirements */
-	virtual void ConfigureQueries() override;
+	virtual void ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager) override;
 	virtual void Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context) override;
 
 private:

@@ -516,7 +516,7 @@ UMassTrafficLightUpdateIntersectionsProcessor::UMassTrafficLightUpdateIntersecti
 	ExecutionOrder.ExecuteBefore.Add(UE::MassTraffic::ProcessorGroupNames::EndPhysicsTrafficSignIntersectionBehavior);
 }
 
-void UMassTrafficLightUpdateIntersectionsProcessor::ConfigureQueries()
+void UMassTrafficLightUpdateIntersectionsProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
 {
 	EntityQuery.AddRequirement<FMassTrafficLightIntersectionFragment>(EMassFragmentAccess::ReadWrite);
 	EntityQuery.AddSubsystemRequirement<UZoneGraphSubsystem>(EMassFragmentAccess::ReadOnly);
@@ -533,7 +533,7 @@ void UMassTrafficLightUpdateIntersectionsProcessor::Execute(FMassEntityManager& 
 	const UWorld* World = GetWorld();
 
 	// Process chunks -
-	EntityQuery.ForEachEntityChunk(EntityManager, Context, [&, World](FMassExecutionContext& QueryContext)
+	EntityQuery.ForEachEntityChunk(Context, [&, World](FMassExecutionContext& QueryContext)
 	{
 		UMassCrowdSubsystem& MassCrowdSubsystem = QueryContext.GetMutableSubsystemChecked<UMassCrowdSubsystem>();
 		const UZoneGraphSubsystem& ZoneGraphSubsystem = QueryContext.GetSubsystemChecked<UZoneGraphSubsystem>();

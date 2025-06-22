@@ -28,7 +28,7 @@ UMassTrafficInterpolationProcessor::UMassTrafficInterpolationProcessor(const FOb
 	ExecutionOrder.ExecuteAfter.Add(UMassTrafficLaneChangingProcessor::StaticClass()->GetFName());
 }
 
-void UMassTrafficInterpolationProcessor::ConfigureQueries()
+void UMassTrafficInterpolationProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
 {
 	// the following are the common requirements for both both queries
 	EntityQueryNonOffLOD_Conditional.AddTagRequirement<FMassTrafficVehicleTag>(EMassFragmentPresence::Any);
@@ -59,7 +59,7 @@ void UMassTrafficInterpolationProcessor::ConfigureQueries()
 
 void UMassTrafficInterpolationProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
-	EntityQueryNonOffLOD_Conditional.ForEachEntityChunk(EntityManager, Context, [&, World = EntityManager.GetWorld()](FMassExecutionContext& QueryContext)
+	EntityQueryNonOffLOD_Conditional.ForEachEntityChunk(Context, [&, World = EntityManager.GetWorld()](FMassExecutionContext& QueryContext)
 	{
 		const UZoneGraphSubsystem& ZoneGraphSubsystem = QueryContext.GetSubsystemChecked<UZoneGraphSubsystem>();
 
@@ -143,7 +143,7 @@ void UMassTrafficInterpolationProcessor::Execute(FMassEntityManager& EntityManag
 		}
 	});
 
-	EntityQueryOffLOD_Conditional.ForEachEntityChunk(EntityManager, Context, [&, World = EntityManager.GetWorld()](FMassExecutionContext& QueryContext)
+	EntityQueryOffLOD_Conditional.ForEachEntityChunk(Context, [&, World = EntityManager.GetWorld()](FMassExecutionContext& QueryContext)
 	{
 		const UZoneGraphSubsystem& ZoneGraphSubsystem = QueryContext.GetSubsystemChecked<UZoneGraphSubsystem>();
 

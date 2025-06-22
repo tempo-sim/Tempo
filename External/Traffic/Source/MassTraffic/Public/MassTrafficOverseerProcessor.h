@@ -18,7 +18,7 @@ class MASSTRAFFIC_API UMassTrafficOverseerProcessor : public UMassTrafficProcess
 
 protected:
 	UMassTrafficOverseerProcessor();
-	virtual void ConfigureQueries() override;
+	virtual void ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager) override;
 	virtual void Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context) override;
 
 	bool MoveVehicleToFreeSpaceOnRandomLane(

@@ -22,7 +22,7 @@ UMassTrafficPostPhysicsUpdateTrailersProcessor::UMassTrafficPostPhysicsUpdateTra
 	ExecutionOrder.ExecuteAfter.Add(UMassTrafficPostPhysicsUpdateTrafficVehiclesProcessor::StaticClass()->GetFName());
 }
 
-void UMassTrafficPostPhysicsUpdateTrailersProcessor::ConfigureQueries()
+void UMassTrafficPostPhysicsUpdateTrailersProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
 {
 	EntityQuery.AddTagRequirement<FMassTrafficVehicleTrailerTag>(EMassFragmentPresence::All);
 	EntityQuery.AddRequirement<FMassActorFragment>(EMassFragmentAccess::ReadWrite);
@@ -36,7 +36,7 @@ void UMassTrafficPostPhysicsUpdateTrailersProcessor::ConfigureQueries()
 void UMassTrafficPostPhysicsUpdateTrailersProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
 	// The main point of this processor is to update Mass with the location of the actor.
-	EntityQuery.ForEachEntityChunk(EntityManager, Context, [](FMassExecutionContext& QueryContext)
+	EntityQuery.ForEachEntityChunk(Context, [](FMassExecutionContext& QueryContext)
 	{
 		const TArrayView<FMassActorFragment> TrailerActorFragments = QueryContext.GetMutableFragmentView<FMassActorFragment>();
 		const TArrayView<FMassRepresentationFragment> TrailerRepresentationFragments = QueryContext.GetMutableFragmentView<FMassRepresentationFragment>();

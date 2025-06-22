@@ -58,7 +58,7 @@ UMassTrafficVehiclePhysicsProcessor::UMassTrafficVehiclePhysicsProcessor()
 	ExecutionOrder.ExecuteAfter.Add(UMassTrafficVehicleControlProcessor::StaticClass()->GetFName());
 }
 
-void UMassTrafficVehiclePhysicsProcessor::ConfigureQueries()
+void UMassTrafficVehiclePhysicsProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
 {
 	SimplePhysicsVehiclesQuery.AddTagRequirement<FMassTrafficVehicleTag>(EMassFragmentPresence::Any);
 	SimplePhysicsVehiclesQuery.AddRequirement<FMassTrafficPIDVehicleControlFragment>(EMassFragmentAccess::ReadOnly);
@@ -137,7 +137,7 @@ void UMassTrafficVehiclePhysicsProcessor::Execute(FMassEntityManager& EntityMana
 		// Get gravity from world
 		float GravityZ = GetWorld()->GetGravityZ();
 		
-		SimplePhysicsVehiclesQuery.ForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& QueryContext)
+		SimplePhysicsVehiclesQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext& QueryContext)
 		{
 			const UZoneGraphSubsystem& ZoneGraphSubsystem = QueryContext.GetSubsystemChecked<UZoneGraphSubsystem>();
 

@@ -21,7 +21,7 @@ UMassTrafficFindDeviantParkedVehiclesProcessor::UMassTrafficFindDeviantParkedVeh
 	ExecutionOrder.ExecuteInGroup = UE::MassTraffic::ProcessorGroupNames::ParkedVehicleBehavior;
 }
 
-void UMassTrafficFindDeviantParkedVehiclesProcessor::ConfigureQueries()
+void UMassTrafficFindDeviantParkedVehiclesProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
 {
 	NominalParkedVehicleEntityQuery.AddTagRequirement<FMassTrafficParkedVehicleTag>(EMassFragmentPresence::All);
 	NominalParkedVehicleEntityQuery.AddTagRequirement<FMassTrafficDisturbedVehicleTag>(EMassFragmentPresence::None);
@@ -34,7 +34,7 @@ void UMassTrafficFindDeviantParkedVehiclesProcessor::ConfigureQueries()
 void UMassTrafficFindDeviantParkedVehiclesProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
 	// Look for deviant vehicles
-	NominalParkedVehicleEntityQuery.ForEachEntityChunk(EntityManager, Context, [this](FMassExecutionContext& QueryContext)
+	NominalParkedVehicleEntityQuery.ForEachEntityChunk(Context, [this](FMassExecutionContext& QueryContext)
 	{
 		const FMassTrafficVehicleSimulationParameters& SimulationParams = QueryContext.GetConstSharedFragment<FMassTrafficVehicleSimulationParameters>();
 		const TConstArrayView<FTransformFragment> TransformFragments = QueryContext.GetFragmentView<FTransformFragment>();

@@ -13,7 +13,7 @@ UMassTrafficInitParkedVehiclesProcessor::UMassTrafficInitParkedVehiclesProcessor
 	bAutoRegisterWithProcessingPhases = false;
 }
 
-void UMassTrafficInitParkedVehiclesProcessor::ConfigureQueries()
+void UMassTrafficInitParkedVehiclesProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
 {
 	EntityQuery.AddRequirement<FTransformFragment>(EMassFragmentAccess::ReadWrite);
 	EntityQuery.AddRequirement<FMassRepresentationFragment>(EMassFragmentAccess::ReadWrite);
@@ -35,7 +35,7 @@ void UMassTrafficInitParkedVehiclesProcessor::Execute(FMassEntityManager& Entity
 
 	// Init dynamic vehicle data 
 	int32 VehicleIndex = 0;
-	EntityQuery.ForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& Context)
+	EntityQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext& Context)
 	{
 		const int32 NumEntities = Context.GetNumEntities();
 		TArrayView<FTransformFragment> TransformFragments = Context.GetMutableFragmentView<FTransformFragment>();

@@ -70,7 +70,7 @@ void UMassTrafficDriverInitializer::Initialize(UObject& Owner)
 	}
 }
 
-void UMassTrafficDriverInitializer::ConfigureQueries()
+void UMassTrafficDriverInitializer::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
 {
 	EntityQuery.AddConstSharedRequirement<FMassTrafficDriversParameters>();
 	EntityQuery.AddRequirement<FMassTrafficDriverVisualizationFragment>(EMassFragmentAccess::ReadWrite);
@@ -80,7 +80,7 @@ void UMassTrafficDriverInitializer::Execute(FMassEntityManager& EntityManager,
 	FMassExecutionContext& Context)
 {
 	// Generate random fractions 
-	EntityQuery.ForEachEntityChunk(EntityManager, Context, [this](FMassExecutionContext& QueryContext)
+	EntityQuery.ForEachEntityChunk(Context, [this](FMassExecutionContext& QueryContext)
 	{
 		// Get driver types
 		const FMassTrafficDriversParameters& Params = QueryContext.GetConstSharedFragment<FMassTrafficDriversParameters>();

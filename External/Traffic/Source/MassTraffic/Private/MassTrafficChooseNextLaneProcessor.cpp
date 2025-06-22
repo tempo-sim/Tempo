@@ -39,7 +39,7 @@ UMassTrafficChooseNextLaneProcessor::UMassTrafficChooseNextLaneProcessor()
 	ExecutionOrder.ExecuteAfter.Add(UMassTrafficLaneChangingProcessor::StaticClass()->GetFName());
 }
 
-void UMassTrafficChooseNextLaneProcessor::ConfigureQueries()
+void UMassTrafficChooseNextLaneProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
 {
 	EntityQuery_Conditional.AddTagRequirement<FMassTrafficVehicleTag>(EMassFragmentPresence::Any);
 	EntityQuery_Conditional.AddRequirement<FMassZoneGraphLaneLocationFragment>(EMassFragmentAccess::ReadOnly);
@@ -66,7 +66,7 @@ void UMassTrafficChooseNextLaneProcessor::Execute(FMassEntityManager& EntityMana
 	const float ChooseNextLaneMinDistance = FMath::Max(MassTrafficSettings->SpeedControlMinLookAheadDistance, MassTrafficSettings->SteeringControlMinLookAheadDistance);
 
 	// Advance agents
-	EntityQuery_Conditional.ForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& QueryContext)
+	EntityQuery_Conditional.ForEachEntityChunk(Context, [&](FMassExecutionContext& QueryContext)
 	{	
 		UMassTrafficSubsystem& MassTrafficSubsystem = QueryContext.GetMutableSubsystemChecked<UMassTrafficSubsystem>();
 #if WITH_MASSTRAFFIC_DEBUG

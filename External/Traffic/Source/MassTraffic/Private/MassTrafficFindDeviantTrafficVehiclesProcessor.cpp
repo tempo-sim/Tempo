@@ -35,7 +35,7 @@ UMassTrafficFindDeviantTrafficVehiclesProcessor::UMassTrafficFindDeviantTrafficV
 	ExecutionOrder.ExecuteAfter.Add(UMassTrafficUpdateVelocityProcessor::StaticClass()->GetFName());
 }
 
-void UMassTrafficFindDeviantTrafficVehiclesProcessor::ConfigureQueries()
+void UMassTrafficFindDeviantTrafficVehiclesProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
 {
 	// High LOD physics vehicles which haven't been marked as deviant obstacles to check for deviation
 	NominalTrafficVehicleEntityQuery.AddTagRequirement<FMassTrafficObstacleTag>(EMassFragmentPresence::None);
@@ -102,7 +102,7 @@ static void RemoveDeviantFragments(const FMassEntityManager& EntityManager, cons
 void UMassTrafficFindDeviantTrafficVehiclesProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
 	// Look for deviant vehicles
-	NominalTrafficVehicleEntityQuery.ForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& QueryContext)
+	NominalTrafficVehicleEntityQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext& QueryContext)
 	{
 		const UZoneGraphSubsystem& ZoneGraphSubsystem = QueryContext.GetSubsystemChecked<UZoneGraphSubsystem>();
 
@@ -185,7 +185,7 @@ void UMassTrafficFindDeviantTrafficVehiclesProcessor::Execute(FMassEntityManager
 	});
 
 	// Check known deviant vehicles to see if they're still deviant
-	DeviantTrafficVehicleEntityQuery.ForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& QueryContext)
+	DeviantTrafficVehicleEntityQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext& QueryContext)
 	{
 		UMassNavigationSubsystem& NavigationSubsystem = QueryContext.GetMutableSubsystemChecked<UMassNavigationSubsystem>();
 		const UZoneGraphSubsystem& ZoneGraphSubsystem = QueryContext.GetSubsystemChecked<UZoneGraphSubsystem>();
@@ -256,7 +256,7 @@ void UMassTrafficFindDeviantTrafficVehiclesProcessor::Execute(FMassEntityManager
 	});
 
 	// Remove obstacle fragment from implicitly corrected vehicles
-	CorrectedTrafficVehicleEntityQuery.ForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& QueryContext)
+	CorrectedTrafficVehicleEntityQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext& QueryContext)
 	{
 		UMassNavigationSubsystem& NavigationSubsystem = QueryContext.GetMutableSubsystemChecked<UMassNavigationSubsystem>();
 

@@ -104,7 +104,7 @@ UMassTrafficFieldOperationsProcessorBase::UMassTrafficFieldOperationsProcessorBa
 {
 }
 
-void UMassTrafficFieldOperationsProcessorBase::ConfigureQueries()
+void UMassTrafficFieldOperationsProcessorBase::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
 {
 	ProcessorRequirements.AddSubsystemRequirement<UMassTrafficSubsystem>(EMassFragmentAccess::ReadWrite);
 }
@@ -263,7 +263,7 @@ UMassTrafficFrameStartFieldOperationsProcessor::UMassTrafficFrameStartFieldOpera
 	Operation = UMassTrafficVisualLoggingFieldOperation::StaticClass();
 }
 
-void UMassTrafficFrameStartFieldOperationsProcessor::ConfigureQueries()
+void UMassTrafficFrameStartFieldOperationsProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
 {
 	ProcessorRequirements.AddSubsystemRequirement<UMassTrafficSubsystem>(EMassFragmentAccess::ReadWrite);
 }

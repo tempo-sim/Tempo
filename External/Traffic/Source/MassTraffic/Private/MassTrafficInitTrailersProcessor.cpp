@@ -16,7 +16,7 @@ UMassTrafficInitTrailersProcessor::UMassTrafficInitTrailersProcessor()
 	bAutoRegisterWithProcessingPhases = false;
 }
 
-void UMassTrafficInitTrailersProcessor::ConfigureQueries()
+void UMassTrafficInitTrailersProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
 {
 	EntityQuery.AddRequirement<FMassTrafficConstrainedVehicleFragment>(EMassFragmentAccess::ReadWrite);
 	EntityQuery.AddRequirement<FMassTrafficRandomFractionFragment>(EMassFragmentAccess::ReadWrite);
@@ -44,7 +44,7 @@ void UMassTrafficInitTrailersProcessor::Execute(FMassEntityManager& EntityManage
 
 	// Init dynamic trailer data 
 	int32 TrailerIndex = 0;
-	EntityQuery.ForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& QueryContext)
+	EntityQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext& QueryContext)
 	{
 		const int32 NumEntities = QueryContext.GetNumEntities();
 		const TArrayView<FMassTrafficConstrainedVehicleFragment> VehicleConstraintFragments = QueryContext.GetMutableFragmentView<FMassTrafficConstrainedVehicleFragment>();

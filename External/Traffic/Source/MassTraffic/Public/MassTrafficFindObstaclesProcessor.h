@@ -16,7 +16,7 @@ public:
 	UMassTrafficFindObstaclesProcessor();
 
 protected:
-	virtual void ConfigureQueries() override;
+	virtual void ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager) override;
 	virtual void Execute(FMassEntityManager& EntitySubSystem, FMassExecutionContext& Context) override;
 
 	FMassEntityQuery ObstacleEntityQuery;

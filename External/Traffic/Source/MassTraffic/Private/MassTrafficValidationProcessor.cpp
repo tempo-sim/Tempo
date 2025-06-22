@@ -25,7 +25,7 @@ UMassTrafficValidationProcessor::UMassTrafficValidationProcessor()
 	ProcessingPhase = EMassProcessingPhase::FrameEnd;
 }
 
-void UMassTrafficValidationProcessor::ConfigureQueries()
+void UMassTrafficValidationProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
 {
 	EntityQuery_Conditional.AddRequirement<FMassTrafficSimulationLODFragment>(EMassFragmentAccess::ReadOnly);
 	EntityQuery_Conditional.AddRequirement<FMassActorFragment>(EMassFragmentAccess::ReadOnly);
@@ -234,7 +234,7 @@ void UMassTrafficValidationProcessor::Execute(FMassEntityManager& EntityManager,
 	}
 
 	// Vehicle validation
-	EntityQuery_Conditional.ForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& ComponentSystemExecutionContext)
+	EntityQuery_Conditional.ForEachEntityChunk(Context, [&](FMassExecutionContext& ComponentSystemExecutionContext)
 		{
 			const UZoneGraphSubsystem& ZoneGraphSubsystem = ComponentSystemExecutionContext.GetSubsystemChecked<UZoneGraphSubsystem>();
 

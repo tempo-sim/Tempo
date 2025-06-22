@@ -132,7 +132,7 @@ UMassTrafficSignUpdateIntersectionsProcessor::UMassTrafficSignUpdateIntersection
 	ExecutionOrder.ExecuteAfter.Add(UE::MassTraffic::ProcessorGroupNames::EndPhysicsTrafficLightIntersectionBehavior);
 }
 
-void UMassTrafficSignUpdateIntersectionsProcessor::ConfigureQueries()
+void UMassTrafficSignUpdateIntersectionsProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
 {
 	EntityQuery_TrafficSignIntersection.AddRequirement<FMassTrafficSignIntersectionFragment>(EMassFragmentAccess::ReadWrite);
 	EntityQuery_TrafficSignIntersection.AddSubsystemRequirement<UZoneGraphSubsystem>(EMassFragmentAccess::ReadOnly);
@@ -165,7 +165,7 @@ void UMassTrafficSignUpdateIntersectionsProcessor::Execute(FMassEntityManager& E
 	TMap<FZoneGraphTrafficLaneData*, bool> VehicleCompletedStopSignRestMap;
 	
 	// Process vehicle chunks.
-	EntityQuery_Vehicle.ForEachEntityChunk(EntityManager, Context, [&, World](FMassExecutionContext& QueryContext)
+	EntityQuery_Vehicle.ForEachEntityChunk(Context, [&, World](FMassExecutionContext& QueryContext)
 	{
 		const TConstArrayView<FMassTrafficVehicleControlFragment> VehicleControlFragments = Context.GetFragmentView<FMassTrafficVehicleControlFragment>();
 		const TConstArrayView<FMassZoneGraphLaneLocationFragment> LaneLocationFragments = Context.GetFragmentView<FMassZoneGraphLaneLocationFragment>();
@@ -274,7 +274,7 @@ void UMassTrafficSignUpdateIntersectionsProcessor::Execute(FMassEntityManager& E
 	};
 
 	// Process traffic sign intersection chunks.
-	EntityQuery_TrafficSignIntersection.ForEachEntityChunk(EntityManager, Context, [&, World](FMassExecutionContext& QueryContext)
+	EntityQuery_TrafficSignIntersection.ForEachEntityChunk(Context, [&, World](FMassExecutionContext& QueryContext)
 	{
 		UMassCrowdSubsystem& MassCrowdSubsystem = QueryContext.GetMutableSubsystemChecked<UMassCrowdSubsystem>();
 		const UZoneGraphSubsystem& ZoneGraphSubsystem = QueryContext.GetSubsystemChecked<UZoneGraphSubsystem>();

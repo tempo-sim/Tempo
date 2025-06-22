@@ -13,7 +13,7 @@ UMassTrafficInitTrafficVehicleSpeedProcessor::UMassTrafficInitTrafficVehicleSpee
 	bAutoRegisterWithProcessingPhases = false;
 }
 
-void UMassTrafficInitTrafficVehicleSpeedProcessor::ConfigureQueries()
+void UMassTrafficInitTrafficVehicleSpeedProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
 {
 	EntityQuery.AddRequirement<FMassTrafficRandomFractionFragment>(EMassFragmentAccess::ReadOnly);
 	EntityQuery.AddRequirement<FMassTrafficObstacleAvoidanceFragment>(EMassFragmentAccess::ReadOnly);
@@ -27,7 +27,7 @@ void UMassTrafficInitTrafficVehicleSpeedProcessor::ConfigureQueries()
 void UMassTrafficInitTrafficVehicleSpeedProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
 	// Advance agents
-	EntityQuery.ForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& QueryContext)
+	EntityQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext& QueryContext)
 	{
 		const int32 NumEntities = QueryContext.GetNumEntities();
 		const UMassTrafficSubsystem& MassTrafficSubsystem = QueryContext.GetSubsystemChecked<UMassTrafficSubsystem>();

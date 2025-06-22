@@ -23,7 +23,7 @@ public:
 	UMassTrafficParkedVehicleVisualizationProcessor();
 
 	/** Configure the owned FMassEntityQuery instances to express processor's requirements */
-	virtual void ConfigureQueries() override;
+	virtual void ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager) override;
 };
 
 /**
@@ -38,7 +38,7 @@ public:
 	UMassTrafficParkedVehicleUpdateCustomVisualizationProcessor();
 
 	/** Configure the owned FMassEntityQuery instances to express processor's requirements */
-	virtual void ConfigureQueries() override;
+	virtual void ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager) override;
 	virtual void Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context) override;
 
 private:

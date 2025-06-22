@@ -27,7 +27,7 @@ UMassTrafficLaneMetadataProcessor::UMassTrafficLaneMetadataProcessor()
 	ExecutionOrder.ExecuteAfter.Add(UE::MassTraffic::ProcessorGroupNames::VehicleSimulationLOD);
 }
 
-void UMassTrafficLaneMetadataProcessor::ConfigureQueries()
+void UMassTrafficLaneMetadataProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
 {
 	EntityQuery.AddTagRequirement<FMassTrafficVehicleTag>(EMassFragmentPresence::All);
 	EntityQuery.AddRequirement<FMassZoneGraphLaneLocationFragment>(EMassFragmentAccess::ReadOnly);
@@ -47,7 +47,7 @@ void UMassTrafficLaneMetadataProcessor::Execute(FMassEntityManager& EntityManage
 
 	// Then, associate the core vehicle info of each vehicle to its lane for later lookup in the merge yield logic.
 	// This will allow the merge yield logic to "see" every vehicle on the conflict lanes for a complete evaluation.
-	EntityQuery.ForEachEntityChunk(EntityManager, Context, [&](const FMassExecutionContext& QueryContext)
+	EntityQuery.ForEachEntityChunk(Context, [&](const FMassExecutionContext& QueryContext)
 	{
 		const TConstArrayView<FMassZoneGraphLaneLocationFragment> LaneLocationFragments = QueryContext.GetFragmentView<FMassZoneGraphLaneLocationFragment>();
 		const TConstArrayView<FMassTrafficVehicleControlFragment> VehicleControlFragments = QueryContext.GetFragmentView<FMassTrafficVehicleControlFragment>();

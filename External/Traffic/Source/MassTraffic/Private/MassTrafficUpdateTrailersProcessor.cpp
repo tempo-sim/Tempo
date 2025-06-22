@@ -16,7 +16,7 @@ UMassTrafficUpdateTrailersProcessor::UMassTrafficUpdateTrailersProcessor()
 	ExecutionOrder.ExecuteAfter.Add(UE::MassTraffic::ProcessorGroupNames::VehicleVisualization);
 }
 
-void UMassTrafficUpdateTrailersProcessor::ConfigureQueries()
+void UMassTrafficUpdateTrailersProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
 {
 	EntityQuery.AddRequirement<FMassTrafficConstrainedVehicleFragment>(EMassFragmentAccess::ReadOnly);
 	EntityQuery.AddRequirement<FMassTrafficVehiclePhysicsFragment>(EMassFragmentAccess::ReadOnly, EMassFragmentPresence::Optional);
@@ -31,7 +31,7 @@ void UMassTrafficUpdateTrailersProcessor::ConfigureQueries()
 void UMassTrafficUpdateTrailersProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
 	// Advance agents
-	EntityQuery.ForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& ComponentSystemExecutionContext)
+	EntityQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext& ComponentSystemExecutionContext)
 	{
 		const int32 NumEntities = Context.GetNumEntities();
 		const FMassTrafficVehiclePhysicsSharedParameters& PhysicsParams = Context.GetConstSharedFragment<FMassTrafficVehiclePhysicsSharedParameters>();

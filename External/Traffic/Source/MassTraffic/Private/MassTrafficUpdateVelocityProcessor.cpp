@@ -19,7 +19,7 @@ UMassTrafficUpdateVelocityProcessor::UMassTrafficUpdateVelocityProcessor()
 	ExecutionOrder.ExecuteAfter.Add(UMassTrafficInterpolationProcessor::StaticClass()->GetFName());
 }
 
-void UMassTrafficUpdateVelocityProcessor::ConfigureQueries()
+void UMassTrafficUpdateVelocityProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
 {
 	EntityQuery_Conditional.AddRequirement<FMassTrafficPIDVehicleControlFragment>(EMassFragmentAccess::None, EMassFragmentPresence::None);
 	EntityQuery_Conditional.AddRequirement<FTransformFragment>(EMassFragmentAccess::ReadOnly);
@@ -35,7 +35,7 @@ void UMassTrafficUpdateVelocityProcessor::ConfigureQueries()
 void UMassTrafficUpdateVelocityProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
 	// Advance agents
-	EntityQuery_Conditional.ForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& ComponentSystemExecutionContext)
+	EntityQuery_Conditional.ForEachEntityChunk(Context, [&](FMassExecutionContext& ComponentSystemExecutionContext)
 		{
 			const int32 NumEntities = Context.GetNumEntities();
 		

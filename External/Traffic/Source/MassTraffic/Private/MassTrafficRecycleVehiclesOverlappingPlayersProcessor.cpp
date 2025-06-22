@@ -18,7 +18,7 @@ UMassTrafficRecycleVehiclesOverlappingPlayersProcessor::UMassTrafficRecycleVehic
 	bAutoRegisterWithProcessingPhases = false;
 }
 
-void UMassTrafficRecycleVehiclesOverlappingPlayersProcessor::ConfigureQueries()
+void UMassTrafficRecycleVehiclesOverlappingPlayersProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
 {
 	EntityQuery.AddRequirement<FAgentRadiusFragment>(EMassFragmentAccess::ReadOnly, EMassFragmentPresence::Optional);
 	EntityQuery.AddRequirement<FTransformFragment>(EMassFragmentAccess::ReadOnly);
@@ -57,7 +57,7 @@ void UMassTrafficRecycleVehiclesOverlappingPlayersProcessor::Execute(FMassEntity
 		}
 	}
 
-	EntityQuery.ForEachEntityChunk(EntityManager, Context,
+	EntityQuery.ForEachEntityChunk(Context,
 		[&PlayerLocations, &MassRepresentationSubsystem](FMassExecutionContext& Context)
 	{
 		const TConstArrayView<FAgentRadiusFragment> RadiusFragments = Context.GetFragmentView<FAgentRadiusFragment>();

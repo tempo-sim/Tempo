@@ -46,7 +46,7 @@ UMassTrafficFindObstaclesProcessor::UMassTrafficFindObstaclesProcessor()
 	ExecutionOrder.ExecuteAfter.Add(UE::MassTraffic::ProcessorGroupNames::VehicleSimulationLOD);
 }
 
-void UMassTrafficFindObstaclesProcessor::ConfigureQueries()
+void UMassTrafficFindObstaclesProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
 {
 	// Main query used to find obstacle entities
 	ObstacleEntityQuery.AddTagRequirement<FMassTrafficObstacleTag>(EMassFragmentPresence::All);
@@ -66,7 +66,7 @@ void UMassTrafficFindObstaclesProcessor::Execute(FMassEntityManager& EntityManag
 		// Reset obstacle lists
 		TRACE_CPUPROFILER_EVENT_SCOPE(TEXT("ResetObstacleLists"))
 		
-		ObstacleAvoidingEntityQuery.ForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& QueryContext)
+		ObstacleAvoidingEntityQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext& QueryContext)
 		{
 			const TArrayView<FMassTrafficObstacleListFragment> ObstacleListFragments = QueryContext.GetMutableFragmentView<FMassTrafficObstacleListFragment>();
 			for (FMassTrafficObstacleListFragment& ObstacleListFragment : ObstacleListFragments)
@@ -82,7 +82,7 @@ void UMassTrafficFindObstaclesProcessor::Execute(FMassEntityManager& EntityManag
 
 		TMap<FMassEntityHandle, TArray<FMassEntityHandle>> ObstacleListsToAdd;
 		
-		ObstacleEntityQuery.ForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& QueryContext)
+		ObstacleEntityQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext& QueryContext)
 		{
 			const UMassTrafficSubsystem& MassTrafficSubsystem = QueryContext.GetSubsystemChecked<UMassTrafficSubsystem>();
 			const UZoneGraphSubsystem& ZoneGraphSubsystem = QueryContext.GetSubsystemChecked<UZoneGraphSubsystem>();

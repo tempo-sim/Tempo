@@ -41,7 +41,7 @@ UMassTrafficVehicleSimulationLODProcessor::UMassTrafficVehicleSimulationLODProce
 	ExecutionOrder.ExecuteAfter.Add(UE::MassTraffic::ProcessorGroupNames::VehicleLODCollector);
 }
 
-void UMassTrafficVehicleSimulationLODProcessor::ConfigureQueries()
+void UMassTrafficVehicleSimulationLODProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
 {
 	EntityQuery.AddTagRequirement<FMassTrafficVehicleTag>(EMassFragmentPresence::All);
 	EntityQuery.AddRequirement<FTransformFragment>(EMassFragmentAccess::ReadOnly);
@@ -88,7 +88,7 @@ void UMassTrafficVehicleSimulationLODProcessor::Execute(FMassEntityManager& Enti
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(TEXT("CalculateLOD"))
 		
-		EntityQueryCalculateLOD.ForEachEntityChunk(EntityManager, Context, [this](FMassExecutionContext& Context)
+		EntityQueryCalculateLOD.ForEachEntityChunk(Context, [this](FMassExecutionContext& Context)
 		{
 			const TConstArrayView<FMassViewerInfoFragment> ViewersInfoList = Context.GetFragmentView<FMassViewerInfoFragment>();
 			const TArrayView<FMassTrafficSimulationLODFragment> SimulationLODFragments = Context.GetMutableFragmentView<FMassTrafficSimulationLODFragment>();
@@ -101,7 +101,7 @@ void UMassTrafficVehicleSimulationLODProcessor::Execute(FMassEntityManager& Enti
 		
 		if (LODCalculator.AdjustDistancesFromCount())
 		{
-			EntityQueryAdjustDistances.ForEachEntityChunk(EntityManager, Context, [this](FMassExecutionContext& QueryContext)
+			EntityQueryAdjustDistances.ForEachEntityChunk(Context, [this](FMassExecutionContext& QueryContext)
 			{
 				const TConstArrayView<FMassViewerInfoFragment> ViewersInfoList = QueryContext.GetFragmentView<FMassViewerInfoFragment>();
 				const TArrayView<FMassTrafficSimulationLODFragment> SimulationLODFragments = QueryContext.GetMutableFragmentView<FMassTrafficSimulationLODFragment>();
@@ -113,7 +113,7 @@ void UMassTrafficVehicleSimulationLODProcessor::Execute(FMassEntityManager& Enti
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(TEXT("LODChanges"))
 		
-		EntityQueryLODChange.ForEachEntityChunk(EntityManager, Context, [this](FMassExecutionContext& QueryContext)
+		EntityQueryLODChange.ForEachEntityChunk(Context, [this](FMassExecutionContext& QueryContext)
 		{
 			const FMassTrafficVehiclePhysicsSharedParameters& PhysicsSharedFragment = QueryContext.GetConstSharedFragment<FMassTrafficVehiclePhysicsSharedParameters>();  
 
@@ -172,7 +172,7 @@ void UMassTrafficVehicleSimulationLODProcessor::Execute(FMassEntityManager& Enti
 		
 		check(World);
 		const float Time = World->GetTimeSeconds();
-		EntityQueryVariableTick.ForEachEntityChunk(EntityManager, Context, [this, Time](FMassExecutionContext& QueryContext)
+		EntityQueryVariableTick.ForEachEntityChunk(Context, [this, Time](FMassExecutionContext& QueryContext)
 		{
 			FMassSimulationVariableTickSharedFragment& TickRateSharedFragment = QueryContext.GetMutableSharedFragment<FMassSimulationVariableTickSharedFragment>();
 			const TConstArrayView<FMassTrafficSimulationLODFragment> SimulationLODFragments = QueryContext.GetFragmentView<FMassTrafficSimulationLODFragment>();
@@ -187,7 +187,7 @@ void UMassTrafficVehicleSimulationLODProcessor::Execute(FMassEntityManager& Enti
 		TRACE_CPUPROFILER_EVENT_SCOPE(TEXT("LODStats"))
 		
 		// LOD Stats
-		EntityQuery.ForEachEntityChunk(EntityManager, Context, [this](FMassExecutionContext& QueryContext)
+		EntityQuery.ForEachEntityChunk(Context, [this](FMassExecutionContext& QueryContext)
 		{
 			const int32 NumEntities = QueryContext.GetNumEntities();
 			const TArrayView<FMassTrafficSimulationLODFragment> SimulationLODFragments = QueryContext.GetMutableFragmentView<FMassTrafficSimulationLODFragment>();
@@ -239,7 +239,7 @@ void UMassTrafficVehicleSimulationLODProcessor::Execute(FMassEntityManager& Enti
 		
 		const UObject* LogOwnerPtr = LogOwner.Get();
 
-		EntityQuery.ForEachEntityChunk(EntityManager, Context, [World, LogOwnerPtr](FMassExecutionContext& QueryContext)
+		EntityQuery.ForEachEntityChunk(Context, [World, LogOwnerPtr](FMassExecutionContext& QueryContext)
 		{			
 			const int32 NumEntities = QueryContext.GetNumEntities();
 			const bool bShouldTickChunkThisFrame = FMassSimulationVariableTickChunkFragment::ShouldTickChunkThisFrame(QueryContext);

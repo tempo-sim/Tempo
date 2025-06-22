@@ -18,7 +18,7 @@ UMassTrafficDamageRepairProcessor::UMassTrafficDamageRepairProcessor()
 	ExecutionOrder.ExecuteAfter.Add(UE::MassTraffic::ProcessorGroupNames::VehicleVisualizationLOD);
 }
 
-void UMassTrafficDamageRepairProcessor::ConfigureQueries()
+void UMassTrafficDamageRepairProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
 {
 	DamagedVehicleEntityQuery.AddTagRequirement<FMassVisibilityCulledByDistanceTag>(EMassFragmentPresence::None);
 
@@ -40,7 +40,7 @@ void UMassTrafficDamageRepairProcessor::Execute(FMassEntityManager& EntityManage
 	}
 	
 	// Block LOD changes to high LOD damaged vehicles, while we repair damage
-	DamagedVehicleEntityQuery.ForEachEntityChunk(EntityManager, Context, [](FMassExecutionContext& Context)
+	DamagedVehicleEntityQuery.ForEachEntityChunk(Context, [](FMassExecutionContext& Context)
 	{
 		const int32 NumEntities = Context.GetNumEntities();
 		const TArrayView<FMassActorFragment> ActorFragments = Context.GetMutableFragmentView<FMassActorFragment>();

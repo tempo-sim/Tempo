@@ -25,7 +25,7 @@ UMassTrafficUpdateDistanceToNearestObstacleProcessor::UMassTrafficUpdateDistance
 	ExecutionOrder.ExecuteAfter.Add(UE::MassTraffic::ProcessorGroupNames::PostPhysicsUpdateTrafficVehicles);
 }
 
-void UMassTrafficUpdateDistanceToNearestObstacleProcessor::ConfigureQueries() 
+void UMassTrafficUpdateDistanceToNearestObstacleProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager) 
 {
 	EntityQuery_Conditional.AddRequirement<FMassTrafficNextVehicleFragment>(EMassFragmentAccess::ReadWrite);
 	EntityQuery_Conditional.AddRequirement<FAgentRadiusFragment>(EMassFragmentAccess::ReadOnly);
@@ -45,7 +45,7 @@ void UMassTrafficUpdateDistanceToNearestObstacleProcessor::ConfigureQueries()
 void UMassTrafficUpdateDistanceToNearestObstacleProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
 	// Process fragments
-	EntityQuery_Conditional.ForEachEntityChunk(EntityManager, Context, [this, &EntityManager](FMassExecutionContext& QueryContext)
+	EntityQuery_Conditional.ForEachEntityChunk(Context, [this, &EntityManager](FMassExecutionContext& QueryContext)
 		{
 			const int32 NumEntities = QueryContext.GetNumEntities();
 			const FMassTrafficVehicleSimulationParameters& SimulationParams = QueryContext.GetConstSharedFragment<FMassTrafficVehicleSimulationParameters>();

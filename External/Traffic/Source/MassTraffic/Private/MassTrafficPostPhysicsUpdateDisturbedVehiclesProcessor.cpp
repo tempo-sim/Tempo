@@ -19,7 +19,7 @@ UMassTrafficPostPhysicsUpdateDisturbedVehiclesProcessor::UMassTrafficPostPhysics
 	ExecutionOrder.ExecuteInGroup = UE::MassTraffic::ProcessorGroupNames::PostPhysicsUpdateTrafficVehicles;
 }
 
-void UMassTrafficPostPhysicsUpdateDisturbedVehiclesProcessor::ConfigureQueries()
+void UMassTrafficPostPhysicsUpdateDisturbedVehiclesProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
 {
 	// "Disturbed" vehicles are parked vehicles that have been driven off by the player or smashed into, i.e. disturbed
 	// from their original spawn location. This means they'll have an obstacle tag and a velocity fragment from the
@@ -36,7 +36,7 @@ void UMassTrafficPostPhysicsUpdateDisturbedVehiclesProcessor::ConfigureQueries()
 void UMassTrafficPostPhysicsUpdateDisturbedVehiclesProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
 	// The main point of this processor is to update Mass with the location of the actor.
-	DisturbedVehicleQuery.ForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& ComponentSystemExecutionContext)
+	DisturbedVehicleQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext& ComponentSystemExecutionContext)
 	{
 		const TConstArrayView<FMassActorFragment> ActorFragments = Context.GetFragmentView<FMassActorFragment>();
 		const TArrayView<FMassRepresentationFragment> RepresentationFragments = Context.GetMutableFragmentView<FMassRepresentationFragment>();

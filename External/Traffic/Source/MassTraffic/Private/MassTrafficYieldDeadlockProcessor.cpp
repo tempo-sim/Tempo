@@ -126,7 +126,7 @@ UMassTrafficYieldDeadlockFrameInitProcessor::UMassTrafficYieldDeadlockFrameInitP
 	ExecutionOrder.ExecuteAfter.Add(UE::MassTraffic::ProcessorGroupNames::VehicleSimulationLOD);
 }
 
-void UMassTrafficYieldDeadlockFrameInitProcessor::ConfigureQueries()
+void UMassTrafficYieldDeadlockFrameInitProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
 {
 	// Note:  This processor doesn't actually need an EntityQuery.
 	// But, we need to create one, in order for the processor's Execute function to get called.
@@ -159,7 +159,7 @@ UMassTrafficYieldDeadlockResolutionProcessor::UMassTrafficYieldDeadlockResolutio
 	ExecutionOrder.ExecuteAfter.Add(UE::MassTraffic::ProcessorGroupNames::CrowdYieldBehavior);
 }
 
-void UMassTrafficYieldDeadlockResolutionProcessor::ConfigureQueries()
+void UMassTrafficYieldDeadlockResolutionProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
 {
 	EntityQuery_Vehicles.AddTagRequirement<FMassTrafficVehicleTag>(EMassFragmentPresence::All);
 	
@@ -177,7 +177,7 @@ void UMassTrafficYieldDeadlockResolutionProcessor::Execute(FMassEntityManager& E
 
 	// Gather all Vehicle Entities.
 	TSet<FMassEntityHandle> VehicleEntities;
-	EntityQuery_Vehicles.ForEachEntityChunk(EntityManager, Context, [&](const FMassExecutionContext& QueryContext)
+	EntityQuery_Vehicles.ForEachEntityChunk(Context, [&](const FMassExecutionContext& QueryContext)
 	{
 		const int32 NumEntities = QueryContext.GetNumEntities();
 		for (int32 Index = 0; Index < NumEntities; ++Index)
@@ -188,7 +188,7 @@ void UMassTrafficYieldDeadlockResolutionProcessor::Execute(FMassEntityManager& E
 
 	// Gather all Pedestrian Entities.
 	TSet<FMassEntityHandle> PedestrianEntities;
-	EntityQuery_Pedestrians.ForEachEntityChunk(EntityManager, Context, [&](const FMassExecutionContext& QueryContext)
+	EntityQuery_Pedestrians.ForEachEntityChunk(Context, [&](const FMassExecutionContext& QueryContext)
 	{
 		const int32 NumEntities = QueryContext.GetNumEntities();
 		for (int32 Index = 0; Index < NumEntities; ++Index)

@@ -692,7 +692,7 @@ UMassTrafficLaneChangingProcessor::UMassTrafficLaneChangingProcessor()
 	ExecutionOrder.ExecuteAfter.Add(UMassTrafficOverseerProcessor::StaticClass()->GetFName());
 }
 
-void UMassTrafficLaneChangingProcessor::ConfigureQueries() 
+void UMassTrafficLaneChangingProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager) 
 {
 	StartNewLaneChangesEntityQuery_Conditional.AddTagRequirement<FMassTrafficParkedVehicleTag>(EMassFragmentPresence::None);
 	StartNewLaneChangesEntityQuery_Conditional.AddRequirement<FAgentRadiusFragment>(EMassFragmentAccess::ReadOnly);
@@ -743,7 +743,7 @@ void UMassTrafficLaneChangingProcessor::Execute(FMassEntityManager& EntityManage
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(TEXT("StartNewLaneChanges"));
 
-		StartNewLaneChangesEntityQuery_Conditional.ForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& QueryContext)
+		StartNewLaneChangesEntityQuery_Conditional.ForEachEntityChunk(Context, [&](FMassExecutionContext& QueryContext)
 			{
 				const UZoneGraphSubsystem& ZoneGraphSubsystem = QueryContext.GetSubsystemChecked<UZoneGraphSubsystem>();
 				UMassTrafficSubsystem& MassTrafficSubsystem = QueryContext.GetMutableSubsystemChecked<UMassTrafficSubsystem>();

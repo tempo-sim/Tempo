@@ -43,9 +43,9 @@ void UMassTrafficVehicleVisualizationLODProcessor::Initialize(UObject& InOwner)
 	Super::Initialize(InOwner);
 }
 
-void UMassTrafficVehicleVisualizationLODProcessor::ConfigureQueries()
+void UMassTrafficVehicleVisualizationLODProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
 {
-	Super::ConfigureQueries();
+	Super::ConfigureQueries(EntityManager);
 
 	CloseEntityQuery.AddTagRequirement<FMassTrafficVehicleTag>(EMassFragmentPresence::Any);
 	CloseEntityQuery.AddTagRequirement<FMassTrafficParkedVehicleTag>(EMassFragmentPresence::Any);
@@ -73,7 +73,7 @@ void UMassTrafficVehicleVisualizationLODProcessor::Execute(FMassEntityManager& E
 	UWorld* World = EntityManager.GetWorld();
 
 	// LOD Stats
-	DebugEntityQuery.ForEachEntityChunk(EntityManager, Context, [this](FMassExecutionContext& Context)
+	DebugEntityQuery.ForEachEntityChunk(Context, [this](FMassExecutionContext& Context)
 	{
 		const int32 NumEntities = Context.GetNumEntities();
 		TConstArrayView<FMassRepresentationLODFragment> VisualizationLODFragments = Context.GetFragmentView<FMassRepresentationLODFragment>();
@@ -120,7 +120,7 @@ void UMassTrafficVehicleVisualizationLODProcessor::Execute(FMassEntityManager& E
 		
 		const UObject* LogOwnerPtr = LogOwner.Get();
 
-		DebugEntityQuery.ForEachEntityChunk(EntityManager, Context, [World, LogOwnerPtr](FMassExecutionContext& Context)
+		DebugEntityQuery.ForEachEntityChunk(Context, [World, LogOwnerPtr](FMassExecutionContext& Context)
 		{
 			const int32 NumEntities = Context.GetNumEntities();
 			TConstArrayView<FTransformFragment> LocationList = Context.GetFragmentView<FTransformFragment>();
@@ -156,9 +156,9 @@ UMassTrafficVehicleLODCollectorProcessor::UMassTrafficVehicleLODCollectorProcess
 	ExecutionOrder.ExecuteAfter.Add(UE::MassTraffic::ProcessorGroupNames::FrameStart);
 }
 
-void UMassTrafficVehicleLODCollectorProcessor::ConfigureQueries()
+void UMassTrafficVehicleLODCollectorProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
 {
-	Super::ConfigureQueries();
+	Super::ConfigureQueries(EntityManager);
 
 	EntityQuery_VisibleRangeAndOnLOD.AddTagRequirement<FMassTrafficVehicleTag>(EMassFragmentPresence::Any);
 	EntityQuery_VisibleRangeAndOnLOD.AddTagRequirement<FMassTrafficParkedVehicleTag>(EMassFragmentPresence::Any);
