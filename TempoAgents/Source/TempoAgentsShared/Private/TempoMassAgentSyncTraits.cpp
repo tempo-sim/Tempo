@@ -75,7 +75,7 @@ void UTempoMassSceneComponentTransformToMassTranslator::ConfigureQueries(const T
 
 void UTempoMassSceneComponentTransformToMassTranslator::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
-	EntityQuery.ForEachEntityChunk(EntityManager, Context, [this](FMassExecutionContext& Context)
+	EntityQuery.ForEachEntityChunk(Context, [this](FMassExecutionContext& Context)
 		{
 			const TConstArrayView<FSceneComponentWrapperFragment> CapsuleComponentList = Context.GetFragmentView<FSceneComponentWrapperFragment>();
 			const TArrayView<FTransformFragment> LocationList = Context.GetMutableFragmentView<FTransformFragment>();

@@ -26,7 +26,7 @@ void UMassBrightnessMeterToMassTranslator::ConfigureQueries(onst TSharedRef<FMas
 
 void UMassBrightnessMeterToMassTranslator::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
-	EntityQuery.ForEachEntityChunk(EntityManager, Context, [this](FMassExecutionContext& Context)
+	EntityQuery.ForEachEntityChunk(Context, [this](FMassExecutionContext& Context)
 	{
 		const TConstArrayView<FMassBrightnessMeterWrapperFragment> BrightnessMeterWrapperFragments = Context.GetFragmentView<FMassBrightnessMeterWrapperFragment>();
 		
