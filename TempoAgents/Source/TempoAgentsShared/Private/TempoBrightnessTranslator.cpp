@@ -17,7 +17,7 @@ UMassBrightnessMeterToMassTranslator::UMassBrightnessMeterToMassTranslator()
 	RequiredTags.Add<FMassBrightnessMeterCopyToMassTag>();
 }
 
-void UMassBrightnessMeterToMassTranslator::ConfigureQueries()
+void UMassBrightnessMeterToMassTranslator::ConfigureQueries(onst TSharedRef<FMassEntityManager>& EntityManager)
 {
 	AddRequiredTagsToQuery(EntityQuery);
 	EntityQuery.AddRequirement<FMassBrightnessMeterWrapperFragment>(EMassFragmentAccess::ReadOnly);

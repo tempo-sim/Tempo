@@ -66,7 +66,7 @@ UTempoMassSceneComponentTransformToMassTranslator::UTempoMassSceneComponentTrans
 	ExecutionOrder.ExecuteInGroup = UE::Mass::ProcessorGroupNames::SyncWorldToMass;
 }
 
-void UTempoMassSceneComponentTransformToMassTranslator::ConfigureQueries()
+void UTempoMassSceneComponentTransformToMassTranslator::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
 {
 	AddRequiredTagsToQuery(EntityQuery);
 	EntityQuery.AddRequirement<FSceneComponentWrapperFragment>(EMassFragmentAccess::ReadOnly);
