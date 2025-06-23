@@ -36,9 +36,15 @@ void UMassTrafficInitTrafficVehiclesProcessor::ConfigureQueries(const TSharedRef
 	EntityQuery.AddSubsystemRequirement<UMassReplicationSubsystem>(EMassFragmentAccess::ReadWrite);
 }
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 void UMassTrafficInitTrafficVehiclesProcessor::Initialize(UObject& InOwner)
 {
 	Super::Initialize(InOwner);
+#else
+void UMassTrafficInitTrafficVehiclesProcessor::InitializeInternal(UObject& InOwner, const TSharedRef<FMassEntityManager>& EntityManager)
+{
+	Super::InitializeInternal(InOwner, EntityManager);
+#endif
 
 	MassRepresentationSubsystem = UWorld::GetSubsystem<UMassRepresentationSubsystem>(InOwner.GetWorld());
 }

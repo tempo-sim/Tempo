@@ -48,9 +48,15 @@ void UMassTrafficDriverVisualizationProcessor::ConfigureQueries(const TSharedRef
 	EntityQuery_Conditional.SetChunkFilter(&FMassVisualizationChunkFragment::AreAnyEntitiesVisibleInChunk);
 }
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 void UMassTrafficDriverVisualizationProcessor::Initialize(UObject& Owner)
 {
 	Super::Initialize(Owner);
+#else
+void UMassTrafficDriverVisualizationProcessor::InitializeInternal(UObject& Owner, const TSharedRef<FMassEntityManager>& EntityManager)
+{
+	Super::InitializeInternal(Owner, EntityManager);
+#endif
 
 	World = Owner.GetWorld();
 }
@@ -310,4 +316,3 @@ bool UMassTrafficDriverVisualizationProcessor::PopulateAnimFromAnimState(
 
 	return false;
 }
-

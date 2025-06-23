@@ -35,7 +35,11 @@ void UMassTrafficTrailerSpawnDataGenerator::Generate(UObject& QueryOwner,
 
 	// Find vehicle to spawn trailers for
 	FMassExecutionContext ExecutionContext(EntityManager, 0.0f);
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 	VehicleQuery.ForEachEntityChunk(EntityManager, ExecutionContext, [&Results, &EntityTypes](FMassExecutionContext& QueryContext)
+#else
+	VehicleQuery.ForEachEntityChunk(ExecutionContext, [&Results, &EntityTypes](FMassExecutionContext& QueryContext)
+#endif
 	{
 		const FMassTrafficConstrainedTrailerParameters& TrailerSimulationParams = QueryContext.GetConstSharedFragment<FMassTrafficConstrainedTrailerParameters>();
 

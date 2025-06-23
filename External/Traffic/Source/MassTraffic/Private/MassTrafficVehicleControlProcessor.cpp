@@ -15,7 +15,6 @@
 #include "MassZoneGraphNavigationFragments.h"
 #include "ZoneGraphSubsystem.h"
 #include "ZoneGraphTypes.h"
-#include "MassGameplayExternalTraits.h"
 
 namespace
 {

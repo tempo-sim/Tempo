@@ -22,9 +22,15 @@ void UMassTrafficInitTrailersProcessor::ConfigureQueries(const TSharedRef<FMassE
 	EntityQuery.AddRequirement<FMassTrafficRandomFractionFragment>(EMassFragmentAccess::ReadWrite);
 }
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 void UMassTrafficInitTrailersProcessor::Initialize(UObject& InOwner)
 {
 	Super::Initialize(InOwner);
+#else
+void UMassTrafficInitTrailersProcessor::InitializeInternal(UObject& InOwner, const TSharedRef<FMassEntityManager>& MassEntityManager)
+{
+	Super::InitializeInternal(InOwner, MassEntityManager);
+#endif
 
 	MassRepresentationSubsystem = UWorld::GetSubsystem<UMassRepresentationSubsystem>(InOwner.GetWorld());
 }

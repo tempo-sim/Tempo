@@ -70,13 +70,22 @@ void UMassTrafficVehicleSimulationLODProcessor::ConfigureQueries(const TSharedRe
 	ProcessorRequirements.AddSubsystemRequirement<UMassLODSubsystem>(EMassFragmentAccess::ReadOnly);
 }
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 void UMassTrafficVehicleSimulationLODProcessor::Initialize(UObject& InOwner)
+#else
+void UMassTrafficVehicleSimulationLODProcessor::InitializeInternal(UObject& InOwner, const TSharedRef<FMassEntityManager>& EntityManager)
+#endif
 {
 	LODCalculator.Initialize(BaseLODDistance, BufferHysteresisOnDistancePercentage / 100.0f, LODMaxCount, nullptr, DistanceToFrustum, DistanceToFrustumHysteresis, VisibleLODDistance);
 #if WITH_MASSTRAFFIC_DEBUG
 	LogOwner = UWorld::GetSubsystem<UMassTrafficSubsystem>(InOwner.GetWorld());
 #endif // WITH_MASSTRAFFIC_DEBUG
+
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 	Super::Initialize(InOwner);
+#else
+	Super::InitializeInternal(InOwner, EntityManager);
+#endif
 }
 
 void UMassTrafficVehicleSimulationLODProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)

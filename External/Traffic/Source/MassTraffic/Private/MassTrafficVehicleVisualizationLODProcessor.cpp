@@ -35,12 +35,22 @@ UMassTrafficVehicleVisualizationLODProcessor::UMassTrafficVehicleVisualizationLO
 	ExecutionOrder.ExecuteAfter.Add(UE::MassTraffic::ProcessorGroupNames::VehicleLODCollector);
 }
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 void UMassTrafficVehicleVisualizationLODProcessor::Initialize(UObject& InOwner)
 {
+#else
+void UMassTrafficVehicleVisualizationLODProcessor::InitializeInternal(UObject& InOwner, const TSharedRef<FMassEntityManager>& EntityManager)
+{
+#endif
 #if WITH_MASSTRAFFIC_DEBUG
 	LogOwner = UWorld::GetSubsystem<UMassTrafficSubsystem>(InOwner.GetWorld());
 #endif // WITH_MASSTRAFFIC_DEBUG
+
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 	Super::Initialize(InOwner);
+#else
+	Super::InitializeInternal(InOwner, EntityManager);
+#endif
 }
 
 void UMassTrafficVehicleVisualizationLODProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)

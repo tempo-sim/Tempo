@@ -16,7 +16,6 @@
 #include "MassTrafficVehicleSimulationTrait.h"
 #include "MassZoneGraphNavigationFragments.h"
 #include "ZoneGraphSubsystem.h"
-#include "MassGameplayExternalTraits.h"
 #include "Algo/MinElement.h"
 #include "Kismet/GameplayStatics.h"
 

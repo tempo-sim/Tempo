@@ -29,7 +29,11 @@ public:
 	UMassTrafficVehicleVisualizationLODProcessor();
 
 protected:
+	#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 	virtual void Initialize(UObject& InOwner) override;
+#else
+	virtual void InitializeInternal(UObject& InOwner, const TSharedRef<FMassEntityManager>& EntityManager) override;
+#endif
 	virtual void ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager) override;
 	virtual void Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context) override;
 

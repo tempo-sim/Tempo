@@ -13,7 +13,6 @@
 #include "MassSimulationLOD.h"
 #include "ZoneGraphQuery.h"
 #include "ZoneGraphSubsystem.h"
-#include "MassGameplayExternalTraits.h"
 #include "VisualLogger/VisualLogger.h"
 
 

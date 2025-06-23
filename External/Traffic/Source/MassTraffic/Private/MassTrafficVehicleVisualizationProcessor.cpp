@@ -188,9 +188,16 @@ UMassTrafficVehicleUpdateCustomVisualizationProcessor::UMassTrafficVehicleUpdate
 	ExecutionOrder.ExecuteAfter.Add(UMassTrafficVehicleVisualizationProcessor::StaticClass()->GetFName());
 }
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 void UMassTrafficVehicleUpdateCustomVisualizationProcessor::Initialize(UObject& Owner)
 {
 	Super::Initialize(Owner);
+#else
+void UMassTrafficVehicleUpdateCustomVisualizationProcessor::InitializeInternal(UObject& Owner, const TSharedRef<FMassEntityManager>& EntityManager)
+{
+	Super::InitializeInternal(Owner, EntityManager);
+#endif
+
 #if WITH_MASSTRAFFIC_DEBUG
 	LogOwner = UWorld::GetSubsystem<UMassTrafficSubsystem>(Owner.GetWorld());
 #endif // WITH_MASSTRAFFIC_DEBUG

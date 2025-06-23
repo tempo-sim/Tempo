@@ -11,7 +11,6 @@
 #include "MassActorSubsystem.h"
 #include "MassZoneGraphNavigationFragments.h"
 #include "ZoneGraphSubsystem.h"
-#include "MassGameplayExternalTraits.h"
 #include "VisualLogger/VisualLogger.h"
 
 UMassTrafficPostPhysicsUpdateTrafficVehiclesProcessor::UMassTrafficPostPhysicsUpdateTrafficVehiclesProcessor(const FObjectInitializer& ObjectInitializer)

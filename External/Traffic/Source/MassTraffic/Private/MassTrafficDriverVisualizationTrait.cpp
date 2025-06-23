@@ -54,9 +54,15 @@ UMassTrafficDriverInitializer::UMassTrafficDriverInitializer()
 	Operation = EMassObservedOperation::Add;
 }
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 void UMassTrafficDriverInitializer::Initialize(UObject& Owner)
 {
 	Super::Initialize(Owner);
+#else
+void UMassTrafficDriverInitializer::InitializeInternal(UObject& Owner, const TSharedRef<FMassEntityManager>& EntityManager)
+{
+	Super::InitializeInternal(Owner, EntityManager);
+#endif
 
 	// Seed RandomStream
 	const int32 TrafficRandomSeed = UE::Mass::Utils::OverrideRandomSeedForTesting(GetDefault<UMassTrafficSettings>()->RandomSeed);
@@ -101,4 +107,3 @@ void UMassTrafficDriverInitializer::Execute(FMassEntityManager& EntityManager,
 		}
 	});
 }
-

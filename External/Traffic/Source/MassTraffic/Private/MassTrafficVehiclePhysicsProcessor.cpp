@@ -20,7 +20,6 @@
 #include "VisualLogger/VisualLogger.h"
 #include "ZoneGraphSubsystem.h"
 #include "ZoneGraphTypes.h"
-#include "MassGameplayExternalTraits.h"
 
 
 template<typename FormatType>
@@ -85,7 +84,11 @@ void UMassTrafficVehiclePhysicsProcessor::ConfigureQueries(const TSharedRef<FMas
 		{
 			if (const Chaos::FPBDRigidsSolver* Solver = PhysScene->GetSolver())
 			{
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 				ChaosConstraintSolverSettings = Solver->GetJointConstraints().GetSettings();
+#else
+				ChaosConstraintSolverSettings = Solver->GetJointCombinedConstraints().LinearConstraints.GetSettings();
+#endif
 			}
 		}
 	}

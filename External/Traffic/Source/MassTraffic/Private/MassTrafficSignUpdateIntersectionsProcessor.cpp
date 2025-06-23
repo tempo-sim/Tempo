@@ -10,7 +10,6 @@
 #include "ZoneGraphTypes.h"
 #include "DrawDebugHelpers.h"
 #include "ZoneGraphSubsystem.h"
-#include "MassGameplayExternalTraits.h"
 #include "MassZoneGraphNavigationFragments.h"
 
 
