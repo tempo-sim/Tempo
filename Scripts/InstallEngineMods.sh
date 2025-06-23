@@ -127,9 +127,11 @@ APPLY_PATCHES() {
     UNSUCCESSFUL_EXIT 1
   fi
 
+  echo "$(pwd)"
+
   for ((i=0; i<${#PATCHES[@]}; i++)); do
     local PATCH="$ENGINE_MODS_DIR/$ROOT/${PATCHES[i]//\'/}"
-    if ! patch --force -p0 --reject-file=- --ignore-whitespace <"$PATCH" &>/dev/null; then
+    if ! patch --force -p0 --reject-file=- --ignore-whitespace <"$PATCH"; then
       echo "Failed to apply patch: $PATCH"
       UNSUCCESSFUL_EXIT 1
     fi
@@ -221,8 +223,8 @@ REBUILD_UBT() {
   eval "$DOTNET" build "./Engine/Source/Programs/AutomationTool/AutomationTool.csproj" -c Development
 
   # Copy the resulting built dlls to the binaries folder
-  cp -r $UNREAL_ENGINE_PATH/Engine/Source/Programs/UnrealBuildTool/bin/Development/UnrealBuildTool.dll $UNREAL_ENGINE_PATH/Engine/Binaries/DotNET/UnrealBuildTool
-  cp -r $UNREAL_ENGINE_PATH/Engine/Source/Programs/AutomationTool/bin/Development/AutomationTool.dll $UNREAL_ENGINE_PATH/Engine/Binaries/DotNET/AutomationTool
+  cp -r "$UNREAL_ENGINE_PATH/Engine/Source/Programs/UnrealBuildTool/bin/Development/UnrealBuildTool.dll" "$UNREAL_ENGINE_PATH/Engine/Binaries/DotNET/UnrealBuildTool"
+  cp -r "$UNREAL_ENGINE_PATH/Engine/Source/Programs/AutomationTool/bin/Development/AutomationTool.dll" "$UNREAL_ENGINE_PATH/Engine/Binaries/DotNET/AutomationTool"
 
   echo -e "\nSuccessfully rebuilt UnrealBuildTool with Tempo mods\n"
 }
