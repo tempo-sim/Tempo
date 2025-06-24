@@ -74,23 +74,35 @@ void UMassTrafficSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 	// Cache the traffic vehicle entity query
 	TrafficVehicleEntityQuery.Clear();
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 6
+	TrafficVehicleEntityQuery.Initialize(EntityManager.ToSharedRef());
+#endif
 	TrafficVehicleEntityQuery.AddTagRequirement<FMassTrafficVehicleTag>(EMassFragmentPresence::Any);
 	TrafficVehicleEntityQuery.AddTagRequirement<FMassTrafficRecyclableVehicleTag>(EMassFragmentPresence::Any);
 	TrafficVehicleEntityQuery.AddRequirement<FTransformFragment>(EMassFragmentAccess::None); // Queries have to have at least one component to be valid
 
 	// Cache the parked vehicle entity query
 	ParkedVehicleEntityQuery.Clear();
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 6
+	ParkedVehicleEntityQuery.Initialize(EntityManager.ToSharedRef());
+#endif
 	ParkedVehicleEntityQuery.AddTagRequirement<FMassTrafficParkedVehicleTag>(EMassFragmentPresence::Any);
 	ParkedVehicleEntityQuery.AddRequirement<FTransformFragment>(EMassFragmentAccess::None); // Queries have to have at least one component to be valid
 
 	// Cache the obstacle entity query.
 	ObstacleEntityQuery.Clear();
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 6
+	ObstacleEntityQuery.Initialize(EntityManager.ToSharedRef());
+#endif
 	ObstacleEntityQuery.AddTagRequirement<FMassTrafficObstacleTag>(EMassFragmentPresence::Any);
 	ObstacleEntityQuery.AddTagRequirement<FMassTrafficPlayerVehicleTag>(EMassFragmentPresence::Any);
 	ObstacleEntityQuery.AddRequirement<FTransformFragment>(EMassFragmentAccess::ReadOnly);
 
 	// Cache the player vehicles query 
 	PlayerVehicleEntityQuery.Clear();
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 6
+	PlayerVehicleEntityQuery.Initialize(EntityManager.ToSharedRef());
+#endif
 	PlayerVehicleEntityQuery.AddTagRequirement<FMassTrafficPlayerVehicleTag>(EMassFragmentPresence::Any);
 	PlayerVehicleEntityQuery.AddRequirement<FTransformFragment>(EMassFragmentAccess::None); // Queries have to have at least one component to be valid
 

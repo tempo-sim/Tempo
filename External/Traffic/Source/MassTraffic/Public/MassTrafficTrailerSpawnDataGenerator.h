@@ -20,9 +20,6 @@ class MASSTRAFFIC_API UMassTrafficTrailerSpawnDataGenerator : public UMassEntity
 	GENERATED_BODY()
 
 public:
-
-	UMassTrafficTrailerSpawnDataGenerator();
-
 	/** Generate "Count" number of SpawnPoints and return as a list of position
 	 * @param Count of point to generate
 	 * @param FinishedGeneratingSpawnPointsDelegate is the callback to call once the generation is done
@@ -30,6 +27,4 @@ public:
 	virtual void Generate(UObject& QueryOwner, TConstArrayView<FMassSpawnedEntityType> EntityTypes, int32 Count, FFinishedGeneratingSpawnDataSignature& FinishedGeneratingSpawnPointsDelegate) const override;
 
 protected:
-
-	mutable FMassEntityQuery VehicleQuery;
 };
