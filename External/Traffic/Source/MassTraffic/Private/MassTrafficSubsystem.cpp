@@ -15,7 +15,9 @@
 #include "MassReplicationSubsystem.h"
 #include "MassSimulationSubsystem.h"
 #include "MassProcessingTypes.h"
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 6
 #include "MassProcessingContext.h"
+#endif
 #include "Math/UnitConversion.h"
 #include "ZoneGraphDelegates.h"
 #include "ZoneGraphQuery.h"

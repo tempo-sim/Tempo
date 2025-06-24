@@ -19,7 +19,11 @@ UMassTrafficPostPhysicsUpdateDisturbedVehiclesProcessor::UMassTrafficPostPhysics
 	ExecutionOrder.ExecuteInGroup = UE::MassTraffic::ProcessorGroupNames::PostPhysicsUpdateTrafficVehicles;
 }
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+void UMassTrafficPostPhysicsUpdateDisturbedVehiclesProcessor::ConfigureQueries()
+#else
 void UMassTrafficPostPhysicsUpdateDisturbedVehiclesProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
+#endif
 {
 	// "Disturbed" vehicles are parked vehicles that have been driven off by the player or smashed into, i.e. disturbed
 	// from their original spawn location. This means they'll have an obstacle tag and a velocity fragment from the

@@ -14,7 +14,6 @@
 #include "MassCommonFragments.h"
 #include "MassLODUtils.h"
 #include "ZoneGraphSubsystem.h"
-#include "MassGameplayExternalTraits.h"
 
 
 #define MAX_COUNTED_CROWD_WAIT_AREA_ARRAY 50
@@ -516,7 +515,11 @@ UMassTrafficLightUpdateIntersectionsProcessor::UMassTrafficLightUpdateIntersecti
 	ExecutionOrder.ExecuteBefore.Add(UE::MassTraffic::ProcessorGroupNames::EndPhysicsTrafficSignIntersectionBehavior);
 }
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+void UMassTrafficLightUpdateIntersectionsProcessor::ConfigureQueries()
+#else
 void UMassTrafficLightUpdateIntersectionsProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
+#endif
 {
 	EntityQuery.AddRequirement<FMassTrafficLightIntersectionFragment>(EMassFragmentAccess::ReadWrite);
 	EntityQuery.AddSubsystemRequirement<UZoneGraphSubsystem>(EMassFragmentAccess::ReadOnly);

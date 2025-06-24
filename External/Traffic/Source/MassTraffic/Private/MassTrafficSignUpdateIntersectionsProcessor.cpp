@@ -131,7 +131,11 @@ UMassTrafficSignUpdateIntersectionsProcessor::UMassTrafficSignUpdateIntersection
 	ExecutionOrder.ExecuteAfter.Add(UE::MassTraffic::ProcessorGroupNames::EndPhysicsTrafficLightIntersectionBehavior);
 }
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+void UMassTrafficSignUpdateIntersectionsProcessor::ConfigureQueries()
+#else
 void UMassTrafficSignUpdateIntersectionsProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
+#endif
 {
 	EntityQuery_TrafficSignIntersection.AddRequirement<FMassTrafficSignIntersectionFragment>(EMassFragmentAccess::ReadWrite);
 	EntityQuery_TrafficSignIntersection.AddSubsystemRequirement<UZoneGraphSubsystem>(EMassFragmentAccess::ReadOnly);

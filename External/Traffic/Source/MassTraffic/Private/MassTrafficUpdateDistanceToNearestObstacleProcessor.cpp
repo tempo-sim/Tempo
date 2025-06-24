@@ -25,7 +25,11 @@ UMassTrafficUpdateDistanceToNearestObstacleProcessor::UMassTrafficUpdateDistance
 	ExecutionOrder.ExecuteAfter.Add(UE::MassTraffic::ProcessorGroupNames::PostPhysicsUpdateTrafficVehicles);
 }
 
-void UMassTrafficUpdateDistanceToNearestObstacleProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager) 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+void UMassTrafficUpdateDistanceToNearestObstacleProcessor::ConfigureQueries()
+#else
+void UMassTrafficUpdateDistanceToNearestObstacleProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
+#endif
 {
 	EntityQuery_Conditional.AddRequirement<FMassTrafficNextVehicleFragment>(EMassFragmentAccess::ReadWrite);
 	EntityQuery_Conditional.AddRequirement<FAgentRadiusFragment>(EMassFragmentAccess::ReadOnly);

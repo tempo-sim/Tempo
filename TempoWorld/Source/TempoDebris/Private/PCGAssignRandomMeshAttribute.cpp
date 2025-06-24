@@ -172,11 +172,11 @@ bool FPCGAssignRandomMeshAttribute::ExecuteInternal(FPCGContext* Context) const
 		return Left.Get()->GetName() < Right.Get()->GetName();
 	});
 
-	FRandomStream RandomStream(Context->SourceComponent.IsValid() ? Context->SourceComponent->Seed : Context->GetSeed());
+	FRandomStream RandomStream(Context->ExecutionSource.IsValid() ? Context->ExecutionSource->GetExecutionState().GetSeed() : Context->GetSeed());
 
 	const FName MeshAttributeName = Settings->AttributeName;
 
-	const TArray<FPCGTaggedData> Inputs = Context->InputData.GetInputs();
+	const TArray<FPCGTaggedData> Inputs = Context->InputData.GetAllSpatialInputs();
 	TArray<FPCGTaggedData>& Outputs = Context->OutputData.TaggedData;
 
 	for (const FPCGTaggedData& Input : Inputs)
@@ -243,7 +243,7 @@ bool FPCGAssignRandomMeshAttribute::ExecuteInternal(FPCGContext* Context) const
 			}
 
 			OutPoint.MetadataEntry = OutputData->Metadata->AddEntryPlaceholder();
-			AllMetadataEntries[Index] = MakeTuple(OutPoint.MetadataEntry, InPoint.MetadataEntry);
+			AllMetadataEntries[Index] = MakeTuple(OutPoint.MetadataEntry,               InPoint.MetadataEntry);
 			TargetAttribute->SetValue(OutPoint.MetadataEntry, MeshPath);
 
 			return true;

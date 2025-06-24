@@ -22,9 +22,17 @@ UMassTrafficParkedVehicleVisualizationProcessor::UMassTrafficParkedVehicleVisual
 	ExecutionOrder.ExecuteAfter.Add(UE::MassTraffic::ProcessorGroupNames::TrafficIntersectionVisualization);
 }
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+void UMassTrafficParkedVehicleVisualizationProcessor::ConfigureQueries()
+#else
 void UMassTrafficParkedVehicleVisualizationProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
+#endif
 {
-	Super::ConfigureQueries(EntityManager);
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+Super::ConfigureQueries();
+#else
+Super::ConfigureQueries(EntityManager);
+#endif
 
 	EntityQuery.AddTagRequirement<FMassTrafficParkedVehicleTag>(EMassFragmentPresence::All);
 }
@@ -45,7 +53,11 @@ UMassTrafficParkedVehicleUpdateCustomVisualizationProcessor::UMassTrafficParkedV
 	ExecutionOrder.ExecuteAfter.Add(UMassTrafficParkedVehicleVisualizationProcessor::StaticClass()->GetFName());
 }
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+void UMassTrafficParkedVehicleUpdateCustomVisualizationProcessor::ConfigureQueries()
+#else
 void UMassTrafficParkedVehicleUpdateCustomVisualizationProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
+#endif
 {
 	EntityQuery.AddTagRequirement<FMassTrafficParkedVehicleTag>(EMassFragmentPresence::All);
 	EntityQuery.AddRequirement<FMassTrafficRandomFractionFragment>(EMassFragmentAccess::ReadOnly);

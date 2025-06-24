@@ -18,7 +18,11 @@ UMassTrafficRecycleVehiclesOverlappingPlayersProcessor::UMassTrafficRecycleVehic
 	bAutoRegisterWithProcessingPhases = false;
 }
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+void UMassTrafficRecycleVehiclesOverlappingPlayersProcessor::ConfigureQueries()
+#else
 void UMassTrafficRecycleVehiclesOverlappingPlayersProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
+#endif
 {
 	EntityQuery.AddRequirement<FAgentRadiusFragment>(EMassFragmentAccess::ReadOnly, EMassFragmentPresence::Optional);
 	EntityQuery.AddRequirement<FTransformFragment>(EMassFragmentAccess::ReadOnly);

@@ -16,7 +16,11 @@ UMassTrafficInitTrailersProcessor::UMassTrafficInitTrailersProcessor()
 	bAutoRegisterWithProcessingPhases = false;
 }
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+void UMassTrafficInitTrailersProcessor::ConfigureQueries()
+#else
 void UMassTrafficInitTrailersProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
+#endif
 {
 	EntityQuery.AddRequirement<FMassTrafficConstrainedVehicleFragment>(EMassFragmentAccess::ReadWrite);
 	EntityQuery.AddRequirement<FMassTrafficRandomFractionFragment>(EMassFragmentAccess::ReadWrite);

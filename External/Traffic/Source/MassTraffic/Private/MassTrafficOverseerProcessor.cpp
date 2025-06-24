@@ -31,7 +31,11 @@ UMassTrafficOverseerProcessor::UMassTrafficOverseerProcessor()
 	ExecutionOrder.ExecuteAfter.Add(UMassTrafficFrameStartFieldOperationsProcessor::StaticClass()->GetFName());
 }
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+void UMassTrafficOverseerProcessor::ConfigureQueries()
+#else
 void UMassTrafficOverseerProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
+#endif
 {
 	RecyclableTrafficVehicleEntityQuery.AddTagRequirement<FMassTrafficRecyclableVehicleTag>(EMassFragmentPresence::All);
 	RecyclableTrafficVehicleEntityQuery.AddRequirement<FAgentRadiusFragment>(EMassFragmentAccess::ReadOnly);

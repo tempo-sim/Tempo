@@ -25,9 +25,17 @@ UMassTrafficTrailerVisualizationProcessor::UMassTrafficTrailerVisualizationProce
 	ExecutionOrder.ExecuteAfter.Add(UE::MassTraffic::ProcessorGroupNames::TrailerBehavior);
 }
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+void UMassTrafficTrailerVisualizationProcessor::ConfigureQueries()
+#else
 void UMassTrafficTrailerVisualizationProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
+#endif
 {
-	Super::ConfigureQueries(EntityManager);
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+Super::ConfigureQueries();
+#else
+Super::ConfigureQueries(EntityManager);
+#endif
 	EntityQuery.AddTagRequirement<FMassTrafficVehicleTrailerTag>(EMassFragmentPresence::All);
 }
 
@@ -45,7 +53,11 @@ UMassTrafficTrailerUpdateCustomVisualizationProcessor::UMassTrafficTrailerUpdate
 	ExecutionOrder.ExecuteAfter.Add(UMassTrafficTrailerVisualizationProcessor::StaticClass()->GetFName());
 }
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+void UMassTrafficTrailerUpdateCustomVisualizationProcessor::ConfigureQueries()
+#else
 void UMassTrafficTrailerUpdateCustomVisualizationProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
+#endif
 {
 	EntityQuery.AddTagRequirement<FMassTrafficVehicleTrailerTag>(EMassFragmentPresence::All);
 

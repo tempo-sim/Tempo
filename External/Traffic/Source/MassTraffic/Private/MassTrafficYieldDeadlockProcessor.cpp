@@ -9,7 +9,6 @@
 #include "MassZoneGraphNavigationFragments.h"
 #include "MassTrafficLaneChange.h"
 #include "Async/Async.h"
-#include "MassGameplayExternalTraits.h"
 #include "ZoneGraphSubsystem.h"
 
 namespace
@@ -126,7 +125,11 @@ UMassTrafficYieldDeadlockFrameInitProcessor::UMassTrafficYieldDeadlockFrameInitP
 	ExecutionOrder.ExecuteAfter.Add(UE::MassTraffic::ProcessorGroupNames::VehicleSimulationLOD);
 }
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+void UMassTrafficYieldDeadlockFrameInitProcessor::ConfigureQueries()
+#else
 void UMassTrafficYieldDeadlockFrameInitProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
+#endif
 {
 	// Note:  This processor doesn't actually need an EntityQuery.
 	// But, we need to create one, in order for the processor's Execute function to get called.
@@ -159,7 +162,11 @@ UMassTrafficYieldDeadlockResolutionProcessor::UMassTrafficYieldDeadlockResolutio
 	ExecutionOrder.ExecuteAfter.Add(UE::MassTraffic::ProcessorGroupNames::CrowdYieldBehavior);
 }
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+void UMassTrafficYieldDeadlockResolutionProcessor::ConfigureQueries()
+#else
 void UMassTrafficYieldDeadlockResolutionProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
+#endif
 {
 	EntityQuery_Vehicles.AddTagRequirement<FMassTrafficVehicleTag>(EMassFragmentPresence::All);
 	

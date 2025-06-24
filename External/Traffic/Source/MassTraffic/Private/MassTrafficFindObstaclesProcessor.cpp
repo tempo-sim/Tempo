@@ -13,7 +13,6 @@
 #include "MassExecutionContext.h"
 #include "MassTrafficVehicleSimulationTrait.h"
 #include "ZoneGraphSubsystem.h"
-#include "MassGameplayExternalTraits.h"
 #include "VisualLogger/VisualLogger.h"
 
 void FindNearbyLanes(const FZoneGraphStorage& Storage, const FBox& Bounds, const FZoneGraphTagFilter TagFilter, TArray<int32>& OutLanes)
@@ -46,7 +45,11 @@ UMassTrafficFindObstaclesProcessor::UMassTrafficFindObstaclesProcessor()
 	ExecutionOrder.ExecuteAfter.Add(UE::MassTraffic::ProcessorGroupNames::VehicleSimulationLOD);
 }
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+void UMassTrafficFindObstaclesProcessor::ConfigureQueries()
+#else
 void UMassTrafficFindObstaclesProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
+#endif
 {
 	// Main query used to find obstacle entities
 	ObstacleEntityQuery.AddTagRequirement<FMassTrafficObstacleTag>(EMassFragmentPresence::All);

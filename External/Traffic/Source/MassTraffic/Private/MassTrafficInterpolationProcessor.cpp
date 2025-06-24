@@ -12,7 +12,6 @@
 #include "MassLODUtils.h"
 #include "MassZoneGraphNavigationFragments.h"
 #include "ZoneGraphSubsystem.h"
-#include "MassGameplayExternalTraits.h"
 
 
 UMassTrafficInterpolationProcessor::UMassTrafficInterpolationProcessor(const FObjectInitializer& ObjectInitializer)
@@ -28,7 +27,11 @@ UMassTrafficInterpolationProcessor::UMassTrafficInterpolationProcessor(const FOb
 	ExecutionOrder.ExecuteAfter.Add(UMassTrafficLaneChangingProcessor::StaticClass()->GetFName());
 }
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+void UMassTrafficInterpolationProcessor::ConfigureQueries()
+#else
 void UMassTrafficInterpolationProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
+#endif
 {
 	// the following are the common requirements for both both queries
 	EntityQueryNonOffLOD_Conditional.AddTagRequirement<FMassTrafficVehicleTag>(EMassFragmentPresence::Any);

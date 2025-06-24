@@ -10,7 +10,6 @@
 #include "DrawDebugHelpers.h"
 #include "MassZoneGraphNavigationFragments.h"
 #include "ZoneGraphSubsystem.h"
-#include "MassGameplayExternalTraits.h"
 
 
 UMassTrafficInitInterpolationProcessor::UMassTrafficInitInterpolationProcessor()
@@ -19,7 +18,11 @@ UMassTrafficInitInterpolationProcessor::UMassTrafficInitInterpolationProcessor()
 	bAutoRegisterWithProcessingPhases = false;
 }
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+void UMassTrafficInitInterpolationProcessor::ConfigureQueries()
+#else
 void UMassTrafficInitInterpolationProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
+#endif
 {
 	EntityQuery.AddRequirement<FMassZoneGraphLaneLocationFragment>(EMassFragmentAccess::ReadOnly);
 

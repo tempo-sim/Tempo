@@ -4,7 +4,6 @@
 #include "MassCommonFragments.h"
 #include "MassExecutionContext.h"
 #include "MassMovementFragments.h"
-#include "MassGameplayExternalTraits.h"
 #include "MassTrafficMovement.h"
 #include "MassTrafficSubsystem.h"
 #include "MassZoneGraphNavigationFragments.h"
@@ -27,7 +26,11 @@ UMassTrafficLaneMetadataProcessor::UMassTrafficLaneMetadataProcessor()
 	ExecutionOrder.ExecuteAfter.Add(UE::MassTraffic::ProcessorGroupNames::VehicleSimulationLOD);
 }
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+void UMassTrafficLaneMetadataProcessor::ConfigureQueries()
+#else
 void UMassTrafficLaneMetadataProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
+#endif
 {
 	EntityQuery.AddTagRequirement<FMassTrafficVehicleTag>(EMassFragmentPresence::All);
 	EntityQuery.AddRequirement<FMassZoneGraphLaneLocationFragment>(EMassFragmentAccess::ReadOnly);

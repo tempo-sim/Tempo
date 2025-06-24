@@ -28,7 +28,11 @@ UMassTrafficDriverVisualizationProcessor::UMassTrafficDriverVisualizationProcess
 	ExecutionOrder.ExecuteAfter.Add(UE::MassTraffic::ProcessorGroupNames::PostPhysicsUpdateTrafficVehicles);
 }
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+void UMassTrafficDriverVisualizationProcessor::ConfigureQueries()
+#else
 void UMassTrafficDriverVisualizationProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
+#endif
 {
 	// No need to call super as we do not use it's LOD calculation code at all.
 	EntityQuery_Conditional.AddTagRequirement<FMassTrafficVehicleTag>(EMassFragmentPresence::All);
@@ -85,7 +89,11 @@ void UMassTrafficDriverVisualizationProcessor::Execute(FMassEntityManager& Entit
 		}
 	}
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+	EntityQuery_Conditional.ForEachEntityChunk(EntityManager, Context, [&, this](FMassExecutionContext& QueryContext)
+#else
 	EntityQuery_Conditional.ForEachEntityChunk(Context, [&, this](FMassExecutionContext& QueryContext)
+#endif
 	{
 		// Get mutable ISMInfos to append instances & custom data to
 		UMassRepresentationSubsystem* RepresentationSubsystem = Context.GetMutableSharedFragment<FMassRepresentationSubsystemSharedFragment>().RepresentationSubsystem;

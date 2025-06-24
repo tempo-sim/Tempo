@@ -310,7 +310,7 @@ void UTempoActorControlServiceSubsystem::AddComponent(const AddComponentRequest&
 		return;
 	}
 
-	const bool bIsClassSceneComponent = Cast<USceneComponent>(Class->ClassDefaultObject) != nullptr;
+	const bool bIsClassSceneComponent = Class->IsChildOf<USceneComponent>();
 	if (Request.has_transform() && !bIsClassSceneComponent)
 	{
 		ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::NOT_FOUND, "Transform specified but class is not a scene component"));

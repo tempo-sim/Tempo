@@ -14,7 +14,11 @@ UMassTrafficLightInitIntersectionsProcessor::UMassTrafficLightInitIntersectionsP
 	bAutoRegisterWithProcessingPhases = false;
 }
 
-void UMassTrafficLightInitIntersectionsProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager) 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+void UMassTrafficLightInitIntersectionsProcessor::ConfigureQueries()
+#else
+void UMassTrafficLightInitIntersectionsProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
+#endif
 {
 	EntityQuery.AddRequirement<FMassTrafficLightIntersectionFragment>(EMassFragmentAccess::ReadWrite);
 	EntityQuery.AddRequirement<FTransformFragment>(EMassFragmentAccess::ReadWrite);

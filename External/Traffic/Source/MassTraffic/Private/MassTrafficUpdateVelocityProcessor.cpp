@@ -19,7 +19,11 @@ UMassTrafficUpdateVelocityProcessor::UMassTrafficUpdateVelocityProcessor()
 	ExecutionOrder.ExecuteAfter.Add(UMassTrafficInterpolationProcessor::StaticClass()->GetFName());
 }
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+void UMassTrafficUpdateVelocityProcessor::ConfigureQueries()
+#else
 void UMassTrafficUpdateVelocityProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
+#endif
 {
 	EntityQuery_Conditional.AddRequirement<FMassTrafficPIDVehicleControlFragment>(EMassFragmentAccess::None, EMassFragmentPresence::None);
 	EntityQuery_Conditional.AddRequirement<FTransformFragment>(EMassFragmentAccess::ReadOnly);

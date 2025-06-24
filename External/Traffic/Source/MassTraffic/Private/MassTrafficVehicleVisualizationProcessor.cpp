@@ -162,9 +162,17 @@ UMassTrafficVehicleVisualizationProcessor::UMassTrafficVehicleVisualizationProce
 	ExecutionOrder.ExecuteAfter.Add(UMassTrafficDamageRepairProcessor::StaticClass()->GetFName());
 }
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+void UMassTrafficVehicleVisualizationProcessor::ConfigureQueries()
+#else
 void UMassTrafficVehicleVisualizationProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
+#endif
 {
-	Super::ConfigureQueries(EntityManager);
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+Super::ConfigureQueries();
+#else
+Super::ConfigureQueries(EntityManager);
+#endif
 
 	EntityQuery.AddTagRequirement<FMassTrafficVehicleTag>(EMassFragmentPresence::All);
 }
@@ -203,7 +211,11 @@ void UMassTrafficVehicleUpdateCustomVisualizationProcessor::InitializeInternal(U
 #endif // WITH_MASSTRAFFIC_DEBUG
 }
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+void UMassTrafficVehicleUpdateCustomVisualizationProcessor::ConfigureQueries()
+#else
 void UMassTrafficVehicleUpdateCustomVisualizationProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
+#endif
 {
 	EntityQuery.AddTagRequirement<FMassTrafficVehicleTag>(EMassFragmentPresence::All);
 	

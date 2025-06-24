@@ -27,7 +27,11 @@ void UTempoSceneCaptureComponent2D::BeginPlay()
 	RestartCaptureTimer();
 }
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+void UTempoSceneCaptureComponent2D::UpdateSceneCaptureContents(FSceneInterface* Scene)
+#else
 void UTempoSceneCaptureComponent2D::UpdateSceneCaptureContents(FSceneInterface* Scene, ISceneRenderBuilder& SceneRenderBuilder)
+#endif
 {
 	TextureInitFence.Wait();
 
@@ -52,7 +56,11 @@ void UTempoSceneCaptureComponent2D::UpdateSceneCaptureContents(FSceneInterface* 
 		return;
 	}
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+	Super::UpdateSceneCaptureContents(Scene);
+#else
 	Super::UpdateSceneCaptureContents(Scene, SceneRenderBuilder);
+#endif
 	
 	ENQUEUE_RENDER_COMMAND(SetTempoSceneCaptureRenderFence)(
 	[this](FRHICommandList& RHICmdList)

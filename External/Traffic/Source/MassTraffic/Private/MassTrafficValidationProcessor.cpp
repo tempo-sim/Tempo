@@ -24,7 +24,11 @@ UMassTrafficValidationProcessor::UMassTrafficValidationProcessor()
 	ProcessingPhase = EMassProcessingPhase::FrameEnd;
 }
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+void UMassTrafficValidationProcessor::ConfigureQueries()
+#else
 void UMassTrafficValidationProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
+#endif
 {
 	EntityQuery_Conditional.AddRequirement<FMassTrafficSimulationLODFragment>(EMassFragmentAccess::ReadOnly);
 	EntityQuery_Conditional.AddRequirement<FMassActorFragment>(EMassFragmentAccess::ReadOnly);

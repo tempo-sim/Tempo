@@ -12,7 +12,6 @@
 #include "ZoneGraphTypes.h"
 #include "MassNavigationFragments.h"
 #include "MassTrafficLaneChange.h"
-#include "MassGameplayExternalTraits.h"
 #include "ZoneGraphSubsystem.h"
 
 
@@ -36,7 +35,11 @@ UMassTrafficCrowdYieldProcessor::UMassTrafficCrowdYieldProcessor()
 	ExecutionOrder.ExecuteBefore.Add(UE::Mass::ProcessorGroupNames::Avoidance);
 }
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+void UMassTrafficCrowdYieldProcessor::ConfigureQueries()
+#else
 void UMassTrafficCrowdYieldProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
+#endif
 {
 	EntityQuery.AddTagRequirement<FMassCrowdTag>(EMassFragmentPresence::All);
 	EntityQuery.AddRequirement<FMassMoveTargetFragment>(EMassFragmentAccess::ReadWrite);
@@ -52,7 +55,11 @@ void UMassTrafficCrowdYieldProcessor::ConfigureQueries(const TSharedRef<FMassEnt
 
 void UMassTrafficCrowdYieldProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+	EntityQuery.ForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& QueryContext)
+#else
 	EntityQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext& QueryContext)
+#endif
 	{
 		UMassTrafficSubsystem& MassTrafficSubsystem = QueryContext.GetMutableSubsystemChecked<UMassTrafficSubsystem>();
 		const UZoneGraphSubsystem& ZoneGraphSubsystem = QueryContext.GetSubsystemChecked<UZoneGraphSubsystem>();
