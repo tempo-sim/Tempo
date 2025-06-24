@@ -31,7 +31,11 @@ void UMassTrafficInitTrafficVehicleSpeedProcessor::ConfigureQueries(const TShare
 void UMassTrafficInitTrafficVehicleSpeedProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
 	// Advance agents
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+	EntityQuery.ForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& QueryContext)
+#else
 	EntityQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext& QueryContext)
+#endif
 	{
 		const int32 NumEntities = QueryContext.GetNumEntities();
 		const UMassTrafficSubsystem& MassTrafficSubsystem = QueryContext.GetSubsystemChecked<UMassTrafficSubsystem>();

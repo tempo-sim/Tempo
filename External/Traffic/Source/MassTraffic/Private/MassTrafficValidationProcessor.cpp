@@ -13,6 +13,9 @@
 #include "MassSimulationLOD.h"
 #include "ZoneGraphQuery.h"
 #include "ZoneGraphSubsystem.h"
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+#include "MassGameplayExternalTraits.h"
+#endif
 #include "VisualLogger/VisualLogger.h"
 
 
@@ -237,7 +240,11 @@ void UMassTrafficValidationProcessor::Execute(FMassEntityManager& EntityManager,
 	}
 
 	// Vehicle validation
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+	EntityQuery_Conditional.ForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& ComponentSystemExecutionContext)
+#else
 	EntityQuery_Conditional.ForEachEntityChunk(Context, [&](FMassExecutionContext& ComponentSystemExecutionContext)
+#endif
 		{
 			const UZoneGraphSubsystem& ZoneGraphSubsystem = ComponentSystemExecutionContext.GetSubsystemChecked<UZoneGraphSubsystem>();
 

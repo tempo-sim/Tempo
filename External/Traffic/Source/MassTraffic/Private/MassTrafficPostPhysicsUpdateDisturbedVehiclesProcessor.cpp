@@ -40,7 +40,11 @@ void UMassTrafficPostPhysicsUpdateDisturbedVehiclesProcessor::ConfigureQueries(c
 void UMassTrafficPostPhysicsUpdateDisturbedVehiclesProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
 	// The main point of this processor is to update Mass with the location of the actor.
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+	DisturbedVehicleQuery.ForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& ComponentSystemExecutionContext)
+#else
 	DisturbedVehicleQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext& ComponentSystemExecutionContext)
+#endif
 	{
 		const TConstArrayView<FMassActorFragment> ActorFragments = Context.GetFragmentView<FMassActorFragment>();
 		const TArrayView<FMassRepresentationFragment> RepresentationFragments = Context.GetMutableFragmentView<FMassRepresentationFragment>();

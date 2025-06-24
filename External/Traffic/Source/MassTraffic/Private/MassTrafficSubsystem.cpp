@@ -95,7 +95,11 @@ void UMassTrafficSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	PlayerVehicleEntityQuery.AddRequirement<FTransformFragment>(EMassFragmentAccess::None); // Queries have to have at least one component to be valid
 
 	// Initialize processors
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+	RemoveVehiclesOverlappingPlayersProcessor->Initialize(*this);
+#else
 	RemoveVehiclesOverlappingPlayersProcessor->CallInitialize(this, EntityManager.ToSharedRef());
+#endif
 }
 
 void UMassTrafficSubsystem::OnWorldBeginPlay(UWorld& InWorld)
@@ -678,25 +682,41 @@ FZoneGraphTrafficLaneData* UMassTrafficSubsystem::GetMutableTrafficLaneData(cons
 int32 UMassTrafficSubsystem::GetNumTrafficVehicleAgents()
 {
 	check(EntityManager);
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+	return TrafficVehicleEntityQuery.GetNumMatchingEntities(*EntityManager.Get());
+#else
 	return TrafficVehicleEntityQuery.GetNumMatchingEntities();
+#endif
 }
 
 bool UMassTrafficSubsystem::HasTrafficVehicleAgents()
 {
 	check(EntityManager);
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+	return TrafficVehicleEntityQuery.HasMatchingEntities(*EntityManager.Get());
+#else
 	return TrafficVehicleEntityQuery.HasMatchingEntities();
+#endif
 }
 
 int32 UMassTrafficSubsystem::GetNumParkedVehicleAgents()
 {
 	check(EntityManager);
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+	return ParkedVehicleEntityQuery.GetNumMatchingEntities(*EntityManager.Get());
+#else
 	return ParkedVehicleEntityQuery.GetNumMatchingEntities();
+#endif
 }
 
 bool UMassTrafficSubsystem::HasParkedVehicleAgents()
 {
 	check(EntityManager);
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+	return ParkedVehicleEntityQuery.HasMatchingEntities(*EntityManager.Get());
+#else
 	return ParkedVehicleEntityQuery.HasMatchingEntities();
+#endif
 }
 
 int32 UMassTrafficSubsystem::GetNumParkedVehiclesScale() const

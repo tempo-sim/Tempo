@@ -33,7 +33,11 @@ void UMassTrafficInitInterpolationProcessor::ConfigureQueries(const TSharedRef<F
 
 void UMassTrafficInitInterpolationProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+	EntityQuery.ForEachEntityChunk(EntityManager, Context, [&, World = EntityManager.GetWorld()](FMassExecutionContext& QueryContext)
+#else
 	EntityQuery.ForEachEntityChunk(Context, [&, World = EntityManager.GetWorld()](FMassExecutionContext& QueryContext)
+#endif
 	{
 		const UZoneGraphSubsystem& ZoneGraphSubsystem = QueryContext.GetSubsystemChecked<UZoneGraphSubsystem>();
 

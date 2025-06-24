@@ -19,6 +19,9 @@
 #include "PhysicsSettingsCore.h"
 #include "VisualLogger/VisualLogger.h"
 #include "ZoneGraphSubsystem.h"
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+#include "MassGameplayExternalTraits.h"
+#endif
 #include "ZoneGraphTypes.h"
 
 
@@ -143,8 +146,12 @@ void UMassTrafficVehiclePhysicsProcessor::Execute(FMassEntityManager& EntityMana
 		RemainingDeltaTime -= DeltaTime;
 		// Get gravity from world
 		float GravityZ = GetWorld()->GetGravityZ();
-		
+
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+		SimplePhysicsVehiclesQuery.ForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& QueryContext)
+#else
 		SimplePhysicsVehiclesQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext& QueryContext)
+#endif
 		{
 			const UZoneGraphSubsystem& ZoneGraphSubsystem = QueryContext.GetSubsystemChecked<UZoneGraphSubsystem>();
 

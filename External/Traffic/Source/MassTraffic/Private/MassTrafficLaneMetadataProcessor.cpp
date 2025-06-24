@@ -4,6 +4,9 @@
 #include "MassCommonFragments.h"
 #include "MassExecutionContext.h"
 #include "MassMovementFragments.h"
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+#include "MassGameplayExternalTraits.h"
+#endif
 #include "MassTrafficMovement.h"
 #include "MassTrafficSubsystem.h"
 #include "MassZoneGraphNavigationFragments.h"
@@ -50,7 +53,11 @@ void UMassTrafficLaneMetadataProcessor::Execute(FMassEntityManager& EntityManage
 
 	// Then, associate the core vehicle info of each vehicle to its lane for later lookup in the merge yield logic.
 	// This will allow the merge yield logic to "see" every vehicle on the conflict lanes for a complete evaluation.
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+	EntityQuery.ForEachEntityChunk(EntityManager, Context, [&](const FMassExecutionContext& QueryContext)
+#else
 	EntityQuery.ForEachEntityChunk(Context, [&](const FMassExecutionContext& QueryContext)
+#endif
 	{
 		const TConstArrayView<FMassZoneGraphLaneLocationFragment> LaneLocationFragments = QueryContext.GetFragmentView<FMassZoneGraphLaneLocationFragment>();
 		const TConstArrayView<FMassTrafficVehicleControlFragment> VehicleControlFragments = QueryContext.GetFragmentView<FMassTrafficVehicleControlFragment>();

@@ -14,6 +14,9 @@
 #include "MassCommonFragments.h"
 #include "MassLODUtils.h"
 #include "ZoneGraphSubsystem.h"
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+#include "MassGameplayExternalTraits.h"
+#endif
 
 
 #define MAX_COUNTED_CROWD_WAIT_AREA_ARRAY 50
@@ -536,7 +539,11 @@ void UMassTrafficLightUpdateIntersectionsProcessor::Execute(FMassEntityManager& 
 	const UWorld* World = GetWorld();
 
 	// Process chunks -
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+	EntityQuery.ForEachEntityChunk(EntityManager, Context, [&, World](FMassExecutionContext& QueryContext)
+#else
 	EntityQuery.ForEachEntityChunk(Context, [&, World](FMassExecutionContext& QueryContext)
+#endif
 	{
 		UMassCrowdSubsystem& MassCrowdSubsystem = QueryContext.GetMutableSubsystemChecked<UMassCrowdSubsystem>();
 		const UZoneGraphSubsystem& ZoneGraphSubsystem = QueryContext.GetSubsystemChecked<UZoneGraphSubsystem>();

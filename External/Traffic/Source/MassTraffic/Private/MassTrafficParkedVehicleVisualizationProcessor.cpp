@@ -81,7 +81,11 @@ void UMassTrafficParkedVehicleUpdateCustomVisualizationProcessor::Execute(FMassE
 	// 
 	// Otherwise the total mesh instance count (e.g: 7 traffic + 3 parked) would be mismatched with the
 	// total custom data count (e.g: 7 traffic + 0 parked)
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+	EntityQuery.ForEachEntityChunk(EntityManager, Context, [this](FMassExecutionContext& Context)
+#else
 	EntityQuery.ForEachEntityChunk(Context, [this](FMassExecutionContext& Context)
+#endif
 		{
 			UMassRepresentationSubsystem* RepresentationSubsystem = Context.GetMutableSharedFragment<FMassRepresentationSubsystemSharedFragment>().RepresentationSubsystem;
 			check(RepresentationSubsystem);
@@ -117,7 +121,11 @@ void UMassTrafficParkedVehicleUpdateCustomVisualizationProcessor::Execute(FMassE
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(TEXT("DebugDisplayVisualization")) 
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+		EntityQuery.ForEachEntityChunk(EntityManager, Context, [this, World = EntityManager.GetWorld()](FMassExecutionContext& Context)
+#else
 		EntityQuery.ForEachEntityChunk(Context, [this, World = EntityManager.GetWorld()](FMassExecutionContext& Context)
+#endif
 		{
 			const UMassTrafficSubsystem* MassTrafficSubsystem = Context.GetSubsystem<UMassTrafficSubsystem>();
 

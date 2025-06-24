@@ -117,7 +117,11 @@ void UMassTrafficLightUpdateCustomVisualizationProcessor::Execute(FMassEntityMan
 		TRACE_CPUPROFILER_EVENT_SCOPE(TEXT("Visual Updates")) 
 
 		// Visualize entities
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+		EntityQuery.ForEachEntityChunk(EntityManager, Context, [this](FMassExecutionContext& Context)
+#else
 		EntityQuery.ForEachEntityChunk(Context, [this](FMassExecutionContext& Context)
+#endif
 		{
 			UMassRepresentationSubsystem* RepresentationSubsystem = Context.GetSharedFragment<FMassRepresentationSubsystemSharedFragment>().RepresentationSubsystem;
 			check(RepresentationSubsystem);
@@ -198,9 +202,13 @@ void UMassTrafficLightUpdateCustomVisualizationProcessor::Execute(FMassEntityMan
 	// Debug draw current visualization
 	if (GMassTrafficDebugVisualization)
 	{
-		TRACE_CPUPROFILER_EVENT_SCOPE(TEXT("DebugDisplayVisualization")) 
+		TRACE_CPUPROFILER_EVENT_SCOPE(TEXT("DebugDisplayVisualization"))
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+		EntityQuery.ForEachEntityChunk(EntityManager, Context, [this, World = EntityManager.GetWorld()](FMassExecutionContext& Context)
+#else
 		EntityQuery.ForEachEntityChunk(Context, [this, World = EntityManager.GetWorld()](FMassExecutionContext& Context)
+#endif
 		{
 			const UMassTrafficSubsystem* MassTrafficSubsystem = Context.GetSubsystem<UMassTrafficSubsystem>();
 
@@ -249,10 +257,10 @@ void UMassTrafficIntersectionVisualizationLODProcessor::ConfigureQueries(const T
 #endif
 {
 #if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-Super::ConfigureQueries()
+Super::ConfigureQueries();
 #else
-Super::ConfigureQueries(EntityManager)
-#endif;
+Super::ConfigureQueries(EntityManager);
+#endif
 
 	CloseEntityQuery.AddTagRequirement<FMassTrafficIntersectionTag>(EMassFragmentPresence::All);
 	CloseEntityAdjustDistanceQuery.AddTagRequirement<FMassTrafficIntersectionTag>(EMassFragmentPresence::All);
@@ -279,10 +287,10 @@ void UMassTrafficIntersectionLODCollectorProcessor::ConfigureQueries(const TShar
 #endif
 {
 #if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-Super::ConfigureQueries()
+Super::ConfigureQueries();
 #else
-Super::ConfigureQueries(EntityManager)
-#endif;
+Super::ConfigureQueries(EntityManager);
+#endif
 
 	EntityQuery_VisibleRangeAndOnLOD.AddTagRequirement<FMassTrafficIntersectionTag>(EMassFragmentPresence::All);
 	EntityQuery_VisibleRangeOnly.AddTagRequirement<FMassTrafficIntersectionTag>(EMassFragmentPresence::All);

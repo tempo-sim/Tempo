@@ -14,6 +14,9 @@
 #include "MassLODUtils.h"
 #include "MassZoneGraphNavigationFragments.h"
 #include "ZoneGraphSubsystem.h"
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+#include "MassGameplayExternalTraits.h"
+#endif
 #include "ZoneGraphTypes.h"
 
 #define DEBUG_LANE_CHANGE_LEVEL 0
@@ -746,7 +749,11 @@ void UMassTrafficLaneChangingProcessor::Execute(FMassEntityManager& EntityManage
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(TEXT("StartNewLaneChanges"));
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+		StartNewLaneChangesEntityQuery_Conditional.ForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& QueryContext)
+#else
 		StartNewLaneChangesEntityQuery_Conditional.ForEachEntityChunk(Context, [&](FMassExecutionContext& QueryContext)
+#endif
 			{
 				const UZoneGraphSubsystem& ZoneGraphSubsystem = QueryContext.GetSubsystemChecked<UZoneGraphSubsystem>();
 				UMassTrafficSubsystem& MassTrafficSubsystem = QueryContext.GetMutableSubsystemChecked<UMassTrafficSubsystem>();

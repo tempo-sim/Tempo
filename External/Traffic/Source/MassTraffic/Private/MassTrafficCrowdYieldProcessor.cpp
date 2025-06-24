@@ -12,6 +12,9 @@
 #include "ZoneGraphTypes.h"
 #include "MassNavigationFragments.h"
 #include "MassTrafficLaneChange.h"
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+#include "MassGameplayExternalTraits.h"
+#endif
 #include "ZoneGraphSubsystem.h"
 
 

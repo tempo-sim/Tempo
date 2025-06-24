@@ -39,7 +39,11 @@ void UMassTrafficInitParkedVehiclesProcessor::Execute(FMassEntityManager& Entity
 
 	// Init dynamic vehicle data 
 	int32 VehicleIndex = 0;
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+	EntityQuery.ForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& Context)
+#else
 	EntityQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext& Context)
+#endif
 	{
 		const int32 NumEntities = Context.GetNumEntities();
 		TArrayView<FTransformFragment> TransformFragments = Context.GetMutableFragmentView<FTransformFragment>();

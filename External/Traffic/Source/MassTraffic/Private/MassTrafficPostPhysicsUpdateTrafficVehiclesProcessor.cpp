@@ -11,6 +11,9 @@
 #include "MassActorSubsystem.h"
 #include "MassZoneGraphNavigationFragments.h"
 #include "ZoneGraphSubsystem.h"
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+#include "MassGameplayExternalTraits.h"
+#endif
 #include "VisualLogger/VisualLogger.h"
 
 UMassTrafficPostPhysicsUpdateTrafficVehiclesProcessor::UMassTrafficPostPhysicsUpdateTrafficVehiclesProcessor(const FObjectInitializer& ObjectInitializer)
@@ -56,7 +59,11 @@ void UMassTrafficPostPhysicsUpdateTrafficVehiclesProcessor::ConfigureQueries(con
 void UMassTrafficPostPhysicsUpdateTrafficVehiclesProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
 	// Advance agents
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+	PIDControlTrafficVehicleQuery.ForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& Context)
+#else
 	PIDControlTrafficVehicleQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext& Context)
+#endif
 	{
 		UMassTrafficSubsystem& MassTrafficSubsystem = Context.GetMutableSubsystemChecked<UMassTrafficSubsystem>();
 		const UZoneGraphSubsystem& ZoneGraphSubsystem = Context.GetSubsystemChecked<UZoneGraphSubsystem>();

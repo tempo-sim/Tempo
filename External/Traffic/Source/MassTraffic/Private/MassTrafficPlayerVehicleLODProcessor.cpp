@@ -27,7 +27,11 @@ void UMassTrafficPlayerVehicleLODProcessor::ConfigureQueries(const TSharedRef<FM
 
 void UMassTrafficPlayerVehicleLODProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+	EntityQuery.ForEachEntityChunk(EntityManager, Context, [](FMassExecutionContext& Context)
+#else
 	EntityQuery.ForEachEntityChunk(Context, [](FMassExecutionContext& Context)
+#endif
 	{
 		const float LODPlayerVehicleDistanceScaleSq = FMath::Square(GMassTrafficLODPlayerVehicleDistanceScale);
 		TArrayView<FMassViewerInfoFragment> LODInfoFragments = Context.GetMutableFragmentView<FMassViewerInfoFragment>();

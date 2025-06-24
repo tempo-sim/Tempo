@@ -59,7 +59,11 @@ void UMassTrafficInitTrafficVehiclesProcessor::InitNetIds(FMassEntityManager& En
 
 	check(EntityManager.GetWorld() && EntityManager.GetWorld()->GetNetMode() != NM_Client);
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+	EntityQuery.ForEachEntityChunk(EntityManager, Context, [](FMassExecutionContext& Context)
+#else
 	EntityQuery.ForEachEntityChunk(Context, [](FMassExecutionContext& Context)
+#endif
 		{
 			UMassReplicationSubsystem& ReplicationSubsystem = Context.GetMutableSubsystemChecked<UMassReplicationSubsystem>();
 			const int32 NumEntities = Context.GetNumEntities();
@@ -88,7 +92,11 @@ void UMassTrafficInitTrafficVehiclesProcessor::Execute(FMassEntityManager& Entit
 
 	// Init dynamic vehicle data 
 	int32 VehicleIndex = 0;
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+	EntityQuery.ForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& QueryContext)
+#else
 	EntityQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext& QueryContext)
+#endif
 	{
 		UMassTrafficSubsystem& MassTrafficSubsystem = QueryContext.GetMutableSubsystemChecked<UMassTrafficSubsystem>();
 

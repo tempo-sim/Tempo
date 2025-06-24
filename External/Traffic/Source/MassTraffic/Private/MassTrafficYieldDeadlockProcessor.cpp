@@ -9,6 +9,9 @@
 #include "MassZoneGraphNavigationFragments.h"
 #include "MassTrafficLaneChange.h"
 #include "Async/Async.h"
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+#include "MassGameplayExternalTraits.h"
+#endif
 #include "ZoneGraphSubsystem.h"
 
 namespace
@@ -184,7 +187,11 @@ void UMassTrafficYieldDeadlockResolutionProcessor::Execute(FMassEntityManager& E
 
 	// Gather all Vehicle Entities.
 	TSet<FMassEntityHandle> VehicleEntities;
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+	EntityQuery_Vehicles.ForEachEntityChunk(EntityManager, Context, [&](const FMassExecutionContext& QueryContext)
+#else
 	EntityQuery_Vehicles.ForEachEntityChunk(Context, [&](const FMassExecutionContext& QueryContext)
+#endif
 	{
 		const int32 NumEntities = QueryContext.GetNumEntities();
 		for (int32 Index = 0; Index < NumEntities; ++Index)
@@ -195,7 +202,11 @@ void UMassTrafficYieldDeadlockResolutionProcessor::Execute(FMassEntityManager& E
 
 	// Gather all Pedestrian Entities.
 	TSet<FMassEntityHandle> PedestrianEntities;
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+	EntityQuery_Pedestrians.ForEachEntityChunk(EntityManager, Context, [&](const FMassExecutionContext& QueryContext)
+#else
 	EntityQuery_Pedestrians.ForEachEntityChunk(Context, [&](const FMassExecutionContext& QueryContext)
+#endif
 	{
 		const int32 NumEntities = QueryContext.GetNumEntities();
 		for (int32 Index = 0; Index < NumEntities; ++Index)

@@ -49,7 +49,11 @@ void UMassTrafficUpdateDistanceToNearestObstacleProcessor::ConfigureQueries(cons
 void UMassTrafficUpdateDistanceToNearestObstacleProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
 	// Process fragments
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+	EntityQuery_Conditional.ForEachEntityChunk(EntityManager, Context, [this, &EntityManager](FMassExecutionContext& QueryContext)
+#else
 	EntityQuery_Conditional.ForEachEntityChunk(Context, [this, &EntityManager](FMassExecutionContext& QueryContext)
+#endif
 		{
 			const int32 NumEntities = QueryContext.GetNumEntities();
 			const FMassTrafficVehicleSimulationParameters& SimulationParams = QueryContext.GetConstSharedFragment<FMassTrafficVehicleSimulationParameters>();

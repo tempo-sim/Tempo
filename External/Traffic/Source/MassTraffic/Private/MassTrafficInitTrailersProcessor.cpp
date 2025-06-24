@@ -54,7 +54,11 @@ void UMassTrafficInitTrailersProcessor::Execute(FMassEntityManager& EntityManage
 
 	// Init dynamic trailer data 
 	int32 TrailerIndex = 0;
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+	EntityQuery.ForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& QueryContext)
+#else
 	EntityQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext& QueryContext)
+#endif
 	{
 		const int32 NumEntities = QueryContext.GetNumEntities();
 		const TArrayView<FMassTrafficConstrainedVehicleFragment> VehicleConstraintFragments = QueryContext.GetMutableFragmentView<FMassTrafficConstrainedVehicleFragment>();

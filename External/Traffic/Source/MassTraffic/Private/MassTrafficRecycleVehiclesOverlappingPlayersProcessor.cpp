@@ -61,7 +61,11 @@ void UMassTrafficRecycleVehiclesOverlappingPlayersProcessor::Execute(FMassEntity
 		}
 	}
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+	EntityQuery.ForEachEntityChunk(EntityManager, Context,
+#else
 	EntityQuery.ForEachEntityChunk(Context,
+#endif
 		[&PlayerLocations, &MassRepresentationSubsystem](FMassExecutionContext& Context)
 	{
 		const TConstArrayView<FAgentRadiusFragment> RadiusFragments = Context.GetFragmentView<FAgentRadiusFragment>();

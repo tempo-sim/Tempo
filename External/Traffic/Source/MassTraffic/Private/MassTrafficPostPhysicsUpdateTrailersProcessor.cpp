@@ -40,7 +40,11 @@ void UMassTrafficPostPhysicsUpdateTrailersProcessor::ConfigureQueries(const TSha
 void UMassTrafficPostPhysicsUpdateTrailersProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
 	// The main point of this processor is to update Mass with the location of the actor.
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+	EntityQuery.ForEachEntityChunk(EntityManager, Context, [](FMassExecutionContext& QueryContext)
+#else
 	EntityQuery.ForEachEntityChunk(Context, [](FMassExecutionContext& QueryContext)
+#endif
 	{
 		const TArrayView<FMassActorFragment> TrailerActorFragments = QueryContext.GetMutableFragmentView<FMassActorFragment>();
 		const TArrayView<FMassRepresentationFragment> TrailerRepresentationFragments = QueryContext.GetMutableFragmentView<FMassRepresentationFragment>();

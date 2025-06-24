@@ -19,6 +19,9 @@
 #include "MassZoneGraphNavigationFragments.h"
 #include "VisualLogger/VisualLogger.h"
 #include "ZoneGraphSubsystem.h"
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+#include "MassGameplayExternalTraits.h"
+#endif
 
 
 UMassTrafficFindDeviantTrafficVehiclesProcessor::UMassTrafficFindDeviantTrafficVehiclesProcessor()
@@ -275,7 +278,11 @@ void UMassTrafficFindDeviantTrafficVehiclesProcessor::Execute(FMassEntityManager
 	});
 
 	// Remove obstacle fragment from implicitly corrected vehicles
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+	CorrectedTrafficVehicleEntityQuery.ForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& QueryContext)
+#else
 	CorrectedTrafficVehicleEntityQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext& QueryContext)
+#endif
 	{
 		UMassNavigationSubsystem& NavigationSubsystem = QueryContext.GetMutableSubsystemChecked<UMassNavigationSubsystem>();
 

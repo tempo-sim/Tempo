@@ -14,6 +14,9 @@
 #include "MassExecutionContext.h"
 #include "MassZoneGraphNavigationFragments.h"
 #include "ZoneGraphSubsystem.h"
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+#include "MassGameplayExternalTraits.h"
+#endif
 #include "VisualLogger/VisualLogger.h"
 
 namespace

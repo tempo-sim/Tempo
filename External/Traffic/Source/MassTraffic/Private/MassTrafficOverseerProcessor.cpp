@@ -16,6 +16,9 @@
 #include "MassTrafficVehicleSimulationTrait.h"
 #include "MassZoneGraphNavigationFragments.h"
 #include "ZoneGraphSubsystem.h"
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+#include "MassGameplayExternalTraits.h"
+#endif
 #include "Algo/MinElement.h"
 #include "Kismet/GameplayStatics.h"
 
@@ -244,7 +247,11 @@ void UMassTrafficOverseerProcessor::Execute(FMassEntityManager& EntityManager, F
 
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(TEXT("TransferRecyclableVehicles"))
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+		RecyclableTrafficVehicleEntityQuery.ForEachEntityChunk(EntityManager, Context, [&EntityManager, World, this](FMassExecutionContext& QueryContext)
+#else
 		RecyclableTrafficVehicleEntityQuery.ForEachEntityChunk(Context, [&EntityManager, World, this](FMassExecutionContext& QueryContext)
+#endif
 		{
 			const UZoneGraphSubsystem& ZoneGraphSubsystem = QueryContext.GetSubsystemChecked<UZoneGraphSubsystem>();
 			UMassTrafficSubsystem& MassTrafficSubsystem = QueryContext.GetMutableSubsystemChecked<UMassTrafficSubsystem>();

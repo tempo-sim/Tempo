@@ -39,7 +39,11 @@ void UMassTrafficUpdateVelocityProcessor::ConfigureQueries(const TSharedRef<FMas
 void UMassTrafficUpdateVelocityProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
 	// Advance agents
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+	EntityQuery_Conditional.ForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& ComponentSystemExecutionContext)
+#else
 	EntityQuery_Conditional.ForEachEntityChunk(Context, [&](FMassExecutionContext& ComponentSystemExecutionContext)
+#endif
 		{
 			const int32 NumEntities = Context.GetNumEntities();
 		

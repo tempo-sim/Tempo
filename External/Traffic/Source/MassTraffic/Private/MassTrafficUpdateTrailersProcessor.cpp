@@ -35,7 +35,11 @@ void UMassTrafficUpdateTrailersProcessor::ConfigureQueries(const TSharedRef<FMas
 void UMassTrafficUpdateTrailersProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
 	// Advance agents
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+	EntityQuery.ForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& ComponentSystemExecutionContext)
+#else
 	EntityQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext& ComponentSystemExecutionContext)
+#endif
 	{
 		const int32 NumEntities = Context.GetNumEntities();
 		const FMassTrafficVehiclePhysicsSharedParameters& PhysicsParams = Context.GetConstSharedFragment<FMassTrafficVehiclePhysicsSharedParameters>();
