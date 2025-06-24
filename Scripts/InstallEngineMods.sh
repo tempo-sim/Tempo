@@ -127,11 +127,9 @@ APPLY_PATCHES() {
     UNSUCCESSFUL_EXIT 1
   fi
 
-  echo "$(pwd)"
-
   for ((i=0; i<${#PATCHES[@]}; i++)); do
     local PATCH="$ENGINE_MODS_DIR/$ROOT/${PATCHES[i]//\'/}"
-    if ! patch --force -p0 --reject-file=- --ignore-whitespace <"$PATCH"; then
+    if ! patch --force -p0 --reject-file=- --ignore-whitespace <"$PATCH" &>/dev/null; then
       echo "Failed to apply patch: $PATCH"
       UNSUCCESSFUL_EXIT 1
     fi
