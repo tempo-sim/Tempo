@@ -236,7 +236,8 @@ FIntersectionDetailsMap UMassTrafficIntersectionSpawnDataGenerator::BuildInterse
 					FMassTrafficIntersectionSide& ArrivalSide = ArrivalIntersectionDetail->AddSide();
 
 					// Tell side if it has incoming lanes from the freeway.
-					ArrivalSide.bHasInboundLanesFromFreeway = TrafficLaneData.ConstData.bIsTrunkLane;
+					// ArrivalSide.bHasInboundLanesFromFreeway = TrafficLaneData.ConstData.bIsTrunkLane;  // <-- This shouldn't be the way we signal a connection to a "freeway".  Besides, the notion of a "freeway" is an old concept from the original CitySample code that has been eroded away.
+					ArrivalSide.bHasInboundLanesFromFreeway = false;
 
 					if (bIsTrafficLanesplitting)
 					{
@@ -332,7 +333,8 @@ FIntersectionDetailsMap UMassTrafficIntersectionSpawnDataGenerator::BuildInterse
 						FMassTrafficIntersectionSide& ArrivalSide = ArrivalIntersectionDetail->AddSide();
 
 						// Tell side if it has incoming lanes from the freeway.
-						ArrivalSide.bHasInboundLanesFromFreeway = TrafficLaneData.ConstData.bIsTrunkLane;
+						// ArrivalSide.bHasInboundLanesFromFreeway = TrafficLaneData.ConstData.bIsTrunkLane;  // <-- This shouldn't be the way we signal a connection to a "freeway".  Besides, the notion of a "freeway" is an old concept from the original CitySample code that has been eroded away.
+						ArrivalSide.bHasInboundLanesFromFreeway = false;
 
 						float NearestCrosswalkLaneIntersectionDistance = TNumericLimits<float>::Max();
 						TOptional<FZoneGraphLaneHandle> NearestDownstreamCrosswalkLane;

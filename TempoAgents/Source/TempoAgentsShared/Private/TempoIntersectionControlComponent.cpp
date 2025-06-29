@@ -91,6 +91,7 @@ void UTempoIntersectionControlComponent::SetupTrafficControllerMeshData()
 		MeshComponent->RegisterComponent();
 		
 		OwnerActor->AddInstanceComponent(MeshComponent);
+		OwnerActor->Modify();
 		
 		if (TrafficControllerType == ETempoTrafficControllerType::TrafficLight)
 		{

@@ -1164,6 +1164,7 @@ bool UTempoRoadLaneGraphSubsystem::TryRegisterZoneShapeComponentWithActor(AActor
 	
 	ZoneShapeComponent.RegisterComponent();
 	Actor.AddInstanceComponent(&ZoneShapeComponent);
+	Actor.Modify();
 
 	return true;
 }

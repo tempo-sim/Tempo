@@ -186,14 +186,11 @@ void UTempoAgentsWorldSubsystem::SetupIntersectionLaneMap()
 		{
 			return false;
 		}
-		
-		const int32 CrosswalkStartControlPointIndex = UTempoCoreUtils::CallBlueprintFunction(&IntersectionQueryActor, ITempoCrosswalkInterface::Execute_GetTempoCrosswalkStartEntranceLocationControlPointIndex, ConnectionIndex);
-		const int32 CrosswalkEndControlPointIndex = UTempoCoreUtils::CallBlueprintFunction(&IntersectionQueryActor, ITempoCrosswalkInterface::Execute_GetTempoCrosswalkEndEntranceLocationControlPointIndex, ConnectionIndex);
-		
-		const FVector CrosswalkStartControlPointLocation = UTempoCoreUtils::CallBlueprintFunction(&IntersectionQueryActor, ITempoCrosswalkInterface::Execute_GetTempoCrosswalkControlPointLocation, ConnectionIndex, CrosswalkStartControlPointIndex, ETempoCoordinateSpace::World);
-		const FVector CrosswalkEndControlPointLocation = UTempoCoreUtils::CallBlueprintFunction(&IntersectionQueryActor, ITempoCrosswalkInterface::Execute_GetTempoCrosswalkControlPointLocation, ConnectionIndex, CrosswalkEndControlPointIndex, ETempoCoordinateSpace::World);
+
+		const float CrosswalkWidth = UTempoCoreUtils::CallBlueprintFunction(&IntersectionQueryActor, ITempoCrosswalkInterface::Execute_GetTempoCrosswalkWidth, ConnectionIndex);
 
 		const FVector IntersectionEntranceLocation = UTempoCoreUtils::CallBlueprintFunction(&IntersectionQueryActor, ITempoIntersectionInterface::Execute_GetTempoIntersectionEntranceLocation, ConnectionIndex, ETempoCoordinateSpace::World);
+		const FVector IntersectionEntranceForwardVector = UTempoCoreUtils::CallBlueprintFunction(&IntersectionQueryActor, ITempoIntersectionInterface::Execute_GetTempoIntersectionEntranceTangent, ConnectionIndex, ETempoCoordinateSpace::World).GetSafeNormal();
 		const FVector IntersectionEntranceRightVector = UTempoCoreUtils::CallBlueprintFunction(&IntersectionQueryActor, ITempoIntersectionInterface::Execute_GetTempoIntersectionEntranceRightVector, ConnectionIndex, ETempoCoordinateSpace::World);
 
 		const float RoadWidth = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoRoadInterface::Execute_GetTempoRoadWidth);
@@ -201,10 +198,10 @@ void UTempoAgentsWorldSubsystem::SetupIntersectionLaneMap()
 		
 		const float LateralIntersectionSideSign = LateralIntersectionSide >= 0 ? 1.0f : -1.0f;
 
-		const FVector IntersectionQueryLocation = IntersectionEntranceLocation + IntersectionEntranceRightVector * LateralDistanceToIntersectionExitCenter * LateralIntersectionSideSign;
-
-		const float DistanceToCrosswalkCenter = FMath::PointDistToSegment(IntersectionQueryLocation, CrosswalkStartControlPointLocation, CrosswalkEndControlPointLocation);
-		const float QueryRadius = FMath::Max(LateralDistanceToIntersectionExitCenter, DistanceToCrosswalkCenter);
+		// TEMPO_TODO:  Make this mechanism more robust.  For now, we'll just push the center of our QueryBox forward into the center of the crosswalk.
+		const FVector IntersectionQueryLocation = IntersectionEntranceLocation + IntersectionEntranceRightVector * LateralDistanceToIntersectionExitCenter * LateralIntersectionSideSign + IntersectionEntranceForwardVector * CrosswalkWidth * 0.5f;
+		
+		const float QueryRadius = FMath::Max(LateralDistanceToIntersectionExitCenter, CrosswalkWidth * 0.5f);
 
 		const TArray<FName> RoadLaneTags = GetRoadLaneTags(*RoadQueryActor);
 		const TArray<FName> CrosswalkTags = UTempoCoreUtils::CallBlueprintFunction(&IntersectionQueryActor, ITempoCrosswalkInterface::Execute_GetTempoCrosswalkTags, ConnectionIndex);
