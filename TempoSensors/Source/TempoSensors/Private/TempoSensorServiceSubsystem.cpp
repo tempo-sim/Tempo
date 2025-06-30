@@ -63,6 +63,7 @@ void UTempoSensorServiceSubsystem::OnRenderFrameCompleted() const
 		});
 		if (bAnySensorAwaitingRender)
 		{
+			TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsWaitForGPUSync);
 			FRHICommandListImmediate& RHICmdList = FRHICommandListImmediate::Get();
 			RHICmdList.SubmitCommandsAndFlushGPU();
 			RHICmdList.BlockUntilGPUIdle();
