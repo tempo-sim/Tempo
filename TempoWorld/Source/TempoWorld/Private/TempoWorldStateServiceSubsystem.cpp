@@ -161,9 +161,11 @@ TempoWorld::ActorState GetActorState(const AActor* Actor, const UWorld* World, b
 		Actor->GetTransform().TransformPosition(ActorLocalBounds.Max)
 	);
 
+	const FVector ScaledLocalExtent = Actor->GetTransform().GetScale3D() * ActorLocalBounds.GetExtent();
+
 	if (GDebugTempoWorld)
 	{
-		DrawDebugBox(World, ActorWorldBounds.GetCenter(), ActorLocalBounds.GetExtent(),Actor->GetActorRotation().Quaternion(),
+		DrawDebugBox(World, ActorWorldBounds.GetCenter(), ScaledLocalExtent,Actor->GetActorRotation().Quaternion(),
 			FColor::Red, false, -1, 0, 3.0);
 	}
 
