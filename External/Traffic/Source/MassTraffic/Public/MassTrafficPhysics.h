@@ -8,6 +8,7 @@
 #include "SuspensionUtility.h"
 #include "WheeledVehiclePawn.h"
 #include "Chaos/PBDJointConstraintTypes.h"
+#include "MassEntityTypes.h"
 #include "MassTrafficPhysics.generated.h"
 
 

@@ -25,9 +25,17 @@ UMassTrafficTrailerVisualizationProcessor::UMassTrafficTrailerVisualizationProce
 	ExecutionOrder.ExecuteAfter.Add(UE::MassTraffic::ProcessorGroupNames::TrailerBehavior);
 }
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 void UMassTrafficTrailerVisualizationProcessor::ConfigureQueries()
+#else
+void UMassTrafficTrailerVisualizationProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
+#endif
 {
-	Super::ConfigureQueries();
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+Super::ConfigureQueries();
+#else
+Super::ConfigureQueries(EntityManager);
+#endif
 	EntityQuery.AddTagRequirement<FMassTrafficVehicleTrailerTag>(EMassFragmentPresence::All);
 }
 
@@ -45,7 +53,11 @@ UMassTrafficTrailerUpdateCustomVisualizationProcessor::UMassTrafficTrailerUpdate
 	ExecutionOrder.ExecuteAfter.Add(UMassTrafficTrailerVisualizationProcessor::StaticClass()->GetFName());
 }
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 void UMassTrafficTrailerUpdateCustomVisualizationProcessor::ConfigureQueries()
+#else
+void UMassTrafficTrailerUpdateCustomVisualizationProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
+#endif
 {
 	EntityQuery.AddTagRequirement<FMassTrafficVehicleTrailerTag>(EMassFragmentPresence::All);
 
@@ -72,7 +84,11 @@ void UMassTrafficTrailerUpdateCustomVisualizationProcessor::Execute(FMassEntityM
 	// 
 	// Otherwise the total mesh instance count (e.g: 7 traffic + 3 parked) would be mismatched with the
 	// total custom data count (e.g: 7 traffic + 0 parked)
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 	EntityQuery.ForEachEntityChunk(EntityManager, Context, [this, &EntityManager](FMassExecutionContext& QueryContext)
+#else
+	EntityQuery.ForEachEntityChunk(Context, [this, &EntityManager](FMassExecutionContext& QueryContext)
+#endif
 	{
 		UMassRepresentationSubsystem* RepresentationSubsystem = QueryContext.GetMutableSharedFragment<FMassRepresentationSubsystemSharedFragment>().RepresentationSubsystem;
 		check(RepresentationSubsystem);
@@ -187,7 +203,11 @@ void UMassTrafficTrailerUpdateCustomVisualizationProcessor::Execute(FMassEntityM
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(TEXT("DebugDisplayVisualization")) 
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 		EntityQuery.ForEachEntityChunk(EntityManager, Context, [this, World = EntityManager.GetWorld()](FMassExecutionContext& Context)
+#else
+		EntityQuery.ForEachEntityChunk(Context, [this, World = EntityManager.GetWorld()](FMassExecutionContext& Context)
+#endif
 		{
 			const UMassTrafficSubsystem* MassTrafficSubsystem = Context.GetSubsystem<UMassTrafficSubsystem>();
 

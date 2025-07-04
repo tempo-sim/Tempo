@@ -54,9 +54,15 @@ UMassTrafficDriverInitializer::UMassTrafficDriverInitializer()
 	Operation = EMassObservedOperation::Add;
 }
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 void UMassTrafficDriverInitializer::Initialize(UObject& Owner)
 {
 	Super::Initialize(Owner);
+#else
+void UMassTrafficDriverInitializer::InitializeInternal(UObject& Owner, const TSharedRef<FMassEntityManager>& EntityManager)
+{
+	Super::InitializeInternal(Owner, EntityManager);
+#endif
 
 	// Seed RandomStream
 	const int32 TrafficRandomSeed = UE::Mass::Utils::OverrideRandomSeedForTesting(GetDefault<UMassTrafficSettings>()->RandomSeed);
@@ -70,7 +76,11 @@ void UMassTrafficDriverInitializer::Initialize(UObject& Owner)
 	}
 }
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 void UMassTrafficDriverInitializer::ConfigureQueries()
+#else
+void UMassTrafficDriverInitializer::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
+#endif
 {
 	EntityQuery.AddConstSharedRequirement<FMassTrafficDriversParameters>();
 	EntityQuery.AddRequirement<FMassTrafficDriverVisualizationFragment>(EMassFragmentAccess::ReadWrite);
@@ -79,8 +89,12 @@ void UMassTrafficDriverInitializer::ConfigureQueries()
 void UMassTrafficDriverInitializer::Execute(FMassEntityManager& EntityManager,
 	FMassExecutionContext& Context)
 {
-	// Generate random fractions 
+	// Generate random fractions
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 	EntityQuery.ForEachEntityChunk(EntityManager, Context, [this](FMassExecutionContext& QueryContext)
+#else
+	EntityQuery.ForEachEntityChunk(Context, [this](FMassExecutionContext& QueryContext)
+#endif
 	{
 		// Get driver types
 		const FMassTrafficDriversParameters& Params = QueryContext.GetConstSharedFragment<FMassTrafficDriversParameters>();
@@ -101,4 +115,3 @@ void UMassTrafficDriverInitializer::Execute(FMassEntityManager& EntityManager,
 		}
 	});
 }
-

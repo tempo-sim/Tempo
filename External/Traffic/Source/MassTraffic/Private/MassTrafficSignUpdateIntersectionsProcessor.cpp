@@ -10,7 +10,9 @@
 #include "ZoneGraphTypes.h"
 #include "DrawDebugHelpers.h"
 #include "ZoneGraphSubsystem.h"
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 #include "MassGameplayExternalTraits.h"
+#endif
 #include "MassZoneGraphNavigationFragments.h"
 
 
@@ -132,7 +134,11 @@ UMassTrafficSignUpdateIntersectionsProcessor::UMassTrafficSignUpdateIntersection
 	ExecutionOrder.ExecuteAfter.Add(UE::MassTraffic::ProcessorGroupNames::EndPhysicsTrafficLightIntersectionBehavior);
 }
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 void UMassTrafficSignUpdateIntersectionsProcessor::ConfigureQueries()
+#else
+void UMassTrafficSignUpdateIntersectionsProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
+#endif
 {
 	EntityQuery_TrafficSignIntersection.AddRequirement<FMassTrafficSignIntersectionFragment>(EMassFragmentAccess::ReadWrite);
 	EntityQuery_TrafficSignIntersection.AddSubsystemRequirement<UZoneGraphSubsystem>(EMassFragmentAccess::ReadOnly);
@@ -165,7 +171,11 @@ void UMassTrafficSignUpdateIntersectionsProcessor::Execute(FMassEntityManager& E
 	TMap<FZoneGraphTrafficLaneData*, bool> VehicleCompletedStopSignRestMap;
 	
 	// Process vehicle chunks.
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 	EntityQuery_Vehicle.ForEachEntityChunk(EntityManager, Context, [&, World](FMassExecutionContext& QueryContext)
+#else
+	EntityQuery_Vehicle.ForEachEntityChunk(Context, [&, World](FMassExecutionContext& QueryContext)
+#endif
 	{
 		const TConstArrayView<FMassTrafficVehicleControlFragment> VehicleControlFragments = Context.GetFragmentView<FMassTrafficVehicleControlFragment>();
 		const TConstArrayView<FMassZoneGraphLaneLocationFragment> LaneLocationFragments = Context.GetFragmentView<FMassZoneGraphLaneLocationFragment>();
@@ -274,7 +284,11 @@ void UMassTrafficSignUpdateIntersectionsProcessor::Execute(FMassEntityManager& E
 	};
 
 	// Process traffic sign intersection chunks.
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 	EntityQuery_TrafficSignIntersection.ForEachEntityChunk(EntityManager, Context, [&, World](FMassExecutionContext& QueryContext)
+#else
+	EntityQuery_TrafficSignIntersection.ForEachEntityChunk(Context, [&, World](FMassExecutionContext& QueryContext)
+#endif
 	{
 		UMassCrowdSubsystem& MassCrowdSubsystem = QueryContext.GetMutableSubsystemChecked<UMassCrowdSubsystem>();
 		const UZoneGraphSubsystem& ZoneGraphSubsystem = QueryContext.GetSubsystemChecked<UZoneGraphSubsystem>();

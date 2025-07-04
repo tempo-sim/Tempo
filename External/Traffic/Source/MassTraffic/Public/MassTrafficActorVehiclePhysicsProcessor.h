@@ -18,7 +18,11 @@ public:
 	UMassTrafficActorVehiclePhysicsProcessor();
 
 protected:
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 	virtual void ConfigureQueries() override;
+#else
+	virtual void ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager) override;
+#endif
 	virtual void Execute(FMassEntityManager& EntitySubSystem, FMassExecutionContext& Context) override;
 	
 	FMassEntityQuery ChaosPhysicsVehiclesQuery;

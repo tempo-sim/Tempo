@@ -16,7 +16,9 @@
 #include "MassTrafficVehicleSimulationTrait.h"
 #include "MassZoneGraphNavigationFragments.h"
 #include "ZoneGraphSubsystem.h"
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 #include "MassGameplayExternalTraits.h"
+#endif
 #include "Algo/MinElement.h"
 #include "Kismet/GameplayStatics.h"
 
@@ -32,7 +34,11 @@ UMassTrafficOverseerProcessor::UMassTrafficOverseerProcessor()
 	ExecutionOrder.ExecuteAfter.Add(UMassTrafficFrameStartFieldOperationsProcessor::StaticClass()->GetFName());
 }
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 void UMassTrafficOverseerProcessor::ConfigureQueries()
+#else
+void UMassTrafficOverseerProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
+#endif
 {
 	RecyclableTrafficVehicleEntityQuery.AddTagRequirement<FMassTrafficRecyclableVehicleTag>(EMassFragmentPresence::All);
 	RecyclableTrafficVehicleEntityQuery.AddRequirement<FAgentRadiusFragment>(EMassFragmentAccess::ReadOnly);
@@ -241,7 +247,11 @@ void UMassTrafficOverseerProcessor::Execute(FMassEntityManager& EntityManager, F
 
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(TEXT("TransferRecyclableVehicles"))
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 		RecyclableTrafficVehicleEntityQuery.ForEachEntityChunk(EntityManager, Context, [&EntityManager, World, this](FMassExecutionContext& QueryContext)
+#else
+		RecyclableTrafficVehicleEntityQuery.ForEachEntityChunk(Context, [&EntityManager, World, this](FMassExecutionContext& QueryContext)
+#endif
 		{
 			const UZoneGraphSubsystem& ZoneGraphSubsystem = QueryContext.GetSubsystemChecked<UZoneGraphSubsystem>();
 			UMassTrafficSubsystem& MassTrafficSubsystem = QueryContext.GetMutableSubsystemChecked<UMassTrafficSubsystem>();

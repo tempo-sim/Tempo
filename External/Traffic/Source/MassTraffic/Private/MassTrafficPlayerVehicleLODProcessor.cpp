@@ -15,7 +15,11 @@ UMassTrafficPlayerVehicleLODProcessor::UMassTrafficPlayerVehicleLODProcessor()
 	ExecutionOrder.ExecuteBefore.Add(UE::MassTraffic::ProcessorGroupNames::VehicleSimulationLOD);
 }
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 void UMassTrafficPlayerVehicleLODProcessor::ConfigureQueries()
+#else
+void UMassTrafficPlayerVehicleLODProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
+#endif
 {
 	EntityQuery.AddTagRequirement<FMassTrafficPlayerVehicleTag>(EMassFragmentPresence::All);
 	EntityQuery.AddRequirement<FMassViewerInfoFragment>(EMassFragmentAccess::ReadWrite);
@@ -23,7 +27,11 @@ void UMassTrafficPlayerVehicleLODProcessor::ConfigureQueries()
 
 void UMassTrafficPlayerVehicleLODProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 	EntityQuery.ForEachEntityChunk(EntityManager, Context, [](FMassExecutionContext& Context)
+#else
+	EntityQuery.ForEachEntityChunk(Context, [](FMassExecutionContext& Context)
+#endif
 	{
 		const float LODPlayerVehicleDistanceScaleSq = FMath::Square(GMassTrafficLODPlayerVehicleDistanceScale);
 		TArrayView<FMassViewerInfoFragment> LODInfoFragments = Context.GetMutableFragmentView<FMassViewerInfoFragment>();

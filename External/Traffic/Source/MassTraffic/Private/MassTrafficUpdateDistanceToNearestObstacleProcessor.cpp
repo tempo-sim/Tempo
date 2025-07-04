@@ -25,7 +25,11 @@ UMassTrafficUpdateDistanceToNearestObstacleProcessor::UMassTrafficUpdateDistance
 	ExecutionOrder.ExecuteAfter.Add(UE::MassTraffic::ProcessorGroupNames::PostPhysicsUpdateTrafficVehicles);
 }
 
-void UMassTrafficUpdateDistanceToNearestObstacleProcessor::ConfigureQueries() 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+void UMassTrafficUpdateDistanceToNearestObstacleProcessor::ConfigureQueries()
+#else
+void UMassTrafficUpdateDistanceToNearestObstacleProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
+#endif
 {
 	EntityQuery_Conditional.AddRequirement<FMassTrafficNextVehicleFragment>(EMassFragmentAccess::ReadWrite);
 	EntityQuery_Conditional.AddRequirement<FAgentRadiusFragment>(EMassFragmentAccess::ReadOnly);
@@ -45,7 +49,11 @@ void UMassTrafficUpdateDistanceToNearestObstacleProcessor::ConfigureQueries()
 void UMassTrafficUpdateDistanceToNearestObstacleProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
 	// Process fragments
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 	EntityQuery_Conditional.ForEachEntityChunk(EntityManager, Context, [this, &EntityManager](FMassExecutionContext& QueryContext)
+#else
+	EntityQuery_Conditional.ForEachEntityChunk(Context, [this, &EntityManager](FMassExecutionContext& QueryContext)
+#endif
 		{
 			const int32 NumEntities = QueryContext.GetNumEntities();
 			const FMassTrafficVehicleSimulationParameters& SimulationParams = QueryContext.GetConstSharedFragment<FMassTrafficVehicleSimulationParameters>();

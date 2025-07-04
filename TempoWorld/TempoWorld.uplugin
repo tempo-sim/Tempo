@@ -48,11 +48,11 @@
 			"Enabled": true
 		},
 		{
-			"Name": "Traffic",
+			"Name": "ZoneGraph",
 			"Enabled": true
 		},
 		{
-			"Name": "ZoneGraph",
+			"Name": "Traffic",
 			"Enabled": true
 		}
 	]
