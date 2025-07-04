@@ -2,6 +2,9 @@
 
 #include "TempoCoreSettings.h"
 
+UTempoCoreSettings::UTempoCoreSettings()
+	: bRenderMainViewport(!FParse::Param(FCommandLine::Get() , TEXT("RenderOffScreen"))) {}
+
 void UTempoCoreSettings::PostInitProperties()
 {
 	Super::PostInitProperties();
@@ -27,6 +30,15 @@ void UTempoCoreSettings::SetSimulatedStepsPerSecond(int32 SimulatedStepsPerSecon
 	TempoCoreTimeSettingsChangedEvent.Broadcast();
 }
 
+void UTempoCoreSettings::SetRenderMainViewport(bool bInRenderMainViewport)
+{
+	if (bRenderMainViewport != bInRenderMainViewport)
+	{
+		bRenderMainViewport = bInRenderMainViewport;
+		TempoCoreRenderingSettingsChanged.Broadcast();
+	}
+}
+
 #if WITH_EDITOR
 void UTempoCoreSettings::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
 {
@@ -36,6 +48,10 @@ void UTempoCoreSettings::PostEditChangeProperty(FPropertyChangedEvent& PropertyC
 		(TimeMode == ETimeMode::FixedStep && PropertyChangedEvent.Property->GetName() == GET_MEMBER_NAME_CHECKED(UTempoCoreSettings, SimulatedStepsPerSecond)))
 	{
 		TempoCoreTimeSettingsChangedEvent.Broadcast();
+	}
+	else if (PropertyChangedEvent.Property->GetName() == GET_MEMBER_NAME_CHECKED(UTempoCoreSettings, bRenderMainViewport))
+	{
+		TempoCoreRenderingSettingsChanged.Broadcast();
 	}
 }
 #endif

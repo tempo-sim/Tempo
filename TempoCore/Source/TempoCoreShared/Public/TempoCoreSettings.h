@@ -10,6 +10,7 @@
 #include "TempoCoreSettings.generated.h"
 
 DECLARE_MULTICAST_DELEGATE(FTempoCoreTimeSettingsChanged);
+DECLARE_MULTICAST_DELEGATE(FTempoCoreRenderingSettingsChanged);
 
 UCLASS(Config=Game)
 class TEMPOCORESHARED_API UTempoCoreSettings : public UDeveloperSettings
@@ -17,9 +18,11 @@ class TEMPOCORESHARED_API UTempoCoreSettings : public UDeveloperSettings
 	GENERATED_BODY()
 
 public:
+	UTempoCoreSettings();
+
 	// Allow command-line overrides
 	virtual void PostInitProperties() override;
-	
+
 	// Time Settings.
 	void SetTimeMode(ETimeMode TimeModeIn);
 	void SetSimulatedStepsPerSecond(int32 SimulatedStepsPerSecondIn);
@@ -27,6 +30,7 @@ public:
 	double GetMaxWallClockTimeStep() const { return MaxWallClockTimeStep; }
 	int32 GetSimulatedStepsPerSecond() const { return SimulatedStepsPerSecond; }
 	FTempoCoreTimeSettingsChanged TempoCoreTimeSettingsChangedEvent;
+	FTempoCoreRenderingSettingsChanged TempoCoreRenderingSettingsChanged;
 
 	// Scripting Settings.
 	int32 GetScriptingPort() const { return ScriptingPort; }
@@ -34,8 +38,12 @@ public:
 	int32 GetMaxEventProcessingTime() const { return MaxEventProcessingTimeMicroSeconds; }
 	int32 GetMaxEventWaitTime() const { return MaxEventWaitTimeNanoSeconds; }
 
-	// Packaging Settings
+	// Packaging Settings.
 	bool GetAssignLevelsToIndividualChunks() const { return bAssignLevelsToIndividualChunks; }
+
+	// Rendering Settings.
+	bool GetRenderMainViewport() const { return bRenderMainViewport; }
+	void SetRenderMainViewport(bool bInRenderMainViewport);
 
 #if WITH_EDITOR
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
@@ -81,4 +89,8 @@ private:
 	// **NOTE** Requires enabling project packaging settings UsePakFile and GenerateChunks.
 	UPROPERTY(EditAnywhere, Config, Category="Packaging")
 	bool bAssignLevelsToIndividualChunks = false;
+
+	// Whether to render the main viewport (or not, saving performance).
+	UPROPERTY(EditAnywhere, Config, Category="Rendering")
+	bool bRenderMainViewport;
 };

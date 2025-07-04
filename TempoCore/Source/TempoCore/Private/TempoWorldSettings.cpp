@@ -4,8 +4,8 @@
 
 #include "TempoCore.h"
 #include "EngineUtils.h"
+#include "TempoCoreSettings.h"
 #include "Components/DirectionalLightComponent.h"
-#include "Engine/DirectionalLight.h"
 #include "Kismet/GameplayStatics.h"
 
 namespace
@@ -39,7 +39,45 @@ void ATempoWorldSettings::BeginPlay()
 		SetDefaultAutoExposureBias();
 	}
 
+	if (UTempoCoreSettings* TempoCoreSettings = GetMutableDefault<UTempoCoreSettings>())
+	{
+		SetMainViewportRenderEnabled(TempoCoreSettings->GetRenderMainViewport());
+		RenderingSettingsChangedHandle = TempoCoreSettings->TempoCoreRenderingSettingsChanged.AddUObject(this, &ATempoWorldSettings::TempoCoreRenderSettingsChanged);
+	}
+
 	bHasBegunPlay = true;
+}
+
+void ATempoWorldSettings::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	Super::EndPlay(EndPlayReason);
+
+	if (UTempoCoreSettings* TempoCoreSettings = GetMutableDefault<UTempoCoreSettings>())
+	{
+		TempoCoreSettings->TempoCoreRenderingSettingsChanged.Remove(RenderingSettingsChangedHandle);
+	}
+}
+
+void ATempoWorldSettings::TempoCoreRenderSettingsChanged() const
+{
+	if (const UTempoCoreSettings* TempoCoreSettings = GetDefault<UTempoCoreSettings>())
+	{
+		SetMainViewportRenderEnabled(TempoCoreSettings->GetRenderMainViewport());
+	}
+}
+
+void ATempoWorldSettings::SetMainViewportRenderEnabled(bool bEnabled) const
+{
+	if (const APlayerController* PlayerController = UGameplayStatics::GetPlayerController(GetWorld(), 0))
+	{
+		if (ULocalPlayer* ClientPlayer = PlayerController->GetLocalPlayer())
+		{
+			if (UGameViewportClient* ViewportClient = ClientPlayer->ViewportClient)
+			{
+				ViewportClient->bDisableWorldRendering = !bEnabled;
+			}
+		}
+	}
 }
 
 float ATempoWorldSettings::GetDefaultAutoExposureBias()
@@ -50,18 +88,3 @@ float ATempoWorldSettings::GetDefaultAutoExposureBias()
 	}
 	return DefaultAutoExposureBias;
 }
-
-#if WITH_EDITOR
-void ATempoWorldSettings::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
-{
-	Super::PostEditChangeProperty(PropertyChangedEvent);
-
-	if (PropertyChangedEvent.GetMemberPropertyName() == GET_MEMBER_NAME_CHECKED(ATempoWorldSettings, bManualDefaultAutoExposureBias))
-	{
-		if (!bManualDefaultAutoExposureBias)
-		{
-			SetDefaultAutoExposureBias();
-		}
-	}
-}
-#endif

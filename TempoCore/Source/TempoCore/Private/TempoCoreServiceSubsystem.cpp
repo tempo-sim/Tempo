@@ -2,6 +2,7 @@
 
 #include "TempoCoreServiceSubsystem.h"
 
+#include "TempoCoreSettings.h"
 #include "TempoGameMode.h"
 
 #include "TempoCore/TempoCore.grpc.pb.h"
@@ -13,6 +14,7 @@ using TempoCoreService = TempoCore::TempoCoreService;
 using TempoCoreAsyncService = TempoCore::TempoCoreService::AsyncService;
 using LoadLevelRequest = TempoCore::LoadLevelRequest;
 using CurrentLevelResponse = TempoCore::CurrentLevelResponse;
+using SetMainViewportRenderEnabledRequest = TempoCore::SetMainViewportRenderEnabledRequest;
 
 void UTempoCoreServiceSubsystem::RegisterScriptingServices(FTempoScriptingServer& ScriptingServer)
 {
@@ -20,7 +22,8 @@ void UTempoCoreServiceSubsystem::RegisterScriptingServices(FTempoScriptingServer
 		SimpleRequestHandler(&TempoCoreAsyncService::RequestLoadLevel, &UTempoCoreServiceSubsystem::LoadLevel),
 		SimpleRequestHandler(&TempoCoreAsyncService::RequestFinishLoadingLevel, &UTempoCoreServiceSubsystem::FinishLoadingLevel),
 		SimpleRequestHandler(&TempoCoreAsyncService::RequestGetCurrentLevelName, &UTempoCoreServiceSubsystem::GetCurrentLevelName),
-		SimpleRequestHandler(&TempoCoreAsyncService::RequestQuit, &UTempoCoreServiceSubsystem::Quit)
+		SimpleRequestHandler(&TempoCoreAsyncService::RequestQuit, &UTempoCoreServiceSubsystem::Quit),
+		SimpleRequestHandler(&TempoCoreAsyncService::RequestSetMainViewportRenderEnabled, &UTempoCoreServiceSubsystem::SetRenderMainViewportEnabled)
 	);
 }
 
@@ -108,4 +111,16 @@ void UTempoCoreServiceSubsystem::Quit(const TempoScripting::Empty& Request, cons
 	RequestEngineExit(TEXT("TempoCore API received quit request"));
 
 	ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status_OK);
+}
+
+void UTempoCoreServiceSubsystem::SetRenderMainViewportEnabled(const SetMainViewportRenderEnabledRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation)
+{
+	if (UTempoCoreSettings* TempoCoreSettings = GetMutableDefault<UTempoCoreSettings>())
+	{
+		TempoCoreSettings->SetRenderMainViewport(Request.enabled());
+		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status_OK);
+		return;
+	}
+
+	ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Could not find TempoCoreSettings"));
 }

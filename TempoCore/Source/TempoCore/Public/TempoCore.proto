@@ -14,6 +14,10 @@ message CurrentLevelResponse {
   string level = 1;
 }
 
+message SetMainViewportRenderEnabledRequest {
+  bool enabled = 1;
+}
+
 service TempoCoreService {
   rpc LoadLevel(LoadLevelRequest) returns (TempoScripting.Empty);
 
@@ -22,4 +26,6 @@ service TempoCoreService {
   rpc GetCurrentLevelName(TempoScripting.Empty) returns (CurrentLevelResponse);
 
   rpc Quit(TempoScripting.Empty) returns (TempoScripting.Empty);
+
+  rpc SetMainViewportRenderEnabled(SetMainViewportRenderEnabledRequest) returns (TempoScripting.Empty);
 }
