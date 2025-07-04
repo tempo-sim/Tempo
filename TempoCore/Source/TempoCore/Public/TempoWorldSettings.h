@@ -25,7 +25,13 @@ protected:
 	void SetDefaultAutoExposureBias();
 
 	virtual void BeginPlay() override;
-	
+
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
+	void SetMainViewportRenderEnabled(bool bEnabled) const;
+
+	void TempoCoreRenderSettingsChanged() const;
+
 	UPROPERTY(EditAnywhere, Category="Lighting", DisplayName = "Default Exposure Compensation", meta = (UIMin = "-15.0", UIMax = "15.0", EditCondition = "bManualDefaultAutoExposureBias"))
 	float DefaultAutoExposureBias = 0.0;
 
@@ -35,7 +41,5 @@ protected:
 	UPROPERTY()
 	bool bHasBegunPlay = false;
 
-#if WITH_EDITOR
-	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
-#endif
+	FDelegateHandle RenderingSettingsChangedHandle;
 };

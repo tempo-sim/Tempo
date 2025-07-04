@@ -8,6 +8,7 @@
 #include "TempoCoreSettings.h"
 
 #include "Engine/TextureRenderTarget2D.h"
+#include "Kismet/GameplayStatics.h"
 
 UTempoSceneCaptureComponent2D::UTempoSceneCaptureComponent2D()
 {
@@ -212,5 +213,25 @@ void UTempoSceneCaptureComponent2D::MaybeCapture()
 		return;
 	}
 
-	CaptureSceneDeferred();
+	bool bWorldRenderingDisabled = false;
+	if (const APlayerController* PlayerController = UGameplayStatics::GetPlayerController(GetWorld(), 0))
+	{
+		if (const ULocalPlayer* ClientPlayer = PlayerController->GetLocalPlayer())
+		{
+			if (const UGameViewportClient* ViewportClient = ClientPlayer->ViewportClient)
+			{
+				bWorldRenderingDisabled = ViewportClient->bDisableWorldRendering;
+			}
+		}
+	}
+
+	// If world rendering is enabled, we'll capture the scene with the main render. Otherwise, we'll capture it now.
+	if (bWorldRenderingDisabled)
+	{
+		CaptureScene();
+	}
+	else
+	{
+		CaptureSceneDeferred();
+	}
 }
