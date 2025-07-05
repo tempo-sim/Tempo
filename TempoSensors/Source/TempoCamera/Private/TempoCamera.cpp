@@ -27,18 +27,19 @@ template <typename PixelType>
 void RespondToColorRequests(const TTextureRead<PixelType>* TextureRead, const TArray<FColorImageRequest>& Requests, float TransmissionTime)
 {
 	TempoCamera::ColorImage ColorImage;
+	if (!Requests.IsEmpty())
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraDecodeColor);
 		ColorImage.set_width(TextureRead->ImageSize.X);
 		ColorImage.set_height(TextureRead->ImageSize.Y);
 		std::vector<char> ImageData;
-		ImageData.reserve(TextureRead->Image.Num() * 3);
-		for (const auto& Pixel : TextureRead->Image)
-		{
-			ImageData.push_back(Pixel.B());
-			ImageData.push_back(Pixel.G());
-			ImageData.push_back(Pixel.R());
-		}
+		ImageData.resize(TextureRead->Image.Num() * 3);
+		ParallelFor(TextureRead->Image.Num(), [&ImageData, &TextureRead](int32 Idx){
+			const auto& Pixel = TextureRead->Image[Idx];
+			ImageData[Idx * 3] = Pixel.B();
+			ImageData[Idx * 3 + 1] = Pixel.G();
+			ImageData[Idx * 3 + 2] = Pixel.R();
+		});
 		ColorImage.mutable_data()->assign(ImageData.begin(), ImageData.end());
 		ColorImage.mutable_header()->set_sequence_id(TextureRead->SequenceId);
 		ColorImage.mutable_header()->set_capture_time(TextureRead->CaptureTime);
@@ -57,16 +58,17 @@ template <typename PixelType>
 void RespondToLabelRequests(const TTextureRead<PixelType>* TextureRead, const TArray<FLabelImageRequest>& Requests, float TransmissionTime)
 {
 	TempoCamera::LabelImage LabelImage;
+	if (!Requests.IsEmpty())
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraDecodeLabel);
 		LabelImage.set_width(TextureRead->ImageSize.X);
 		LabelImage.set_height(TextureRead->ImageSize.Y);
 		std::vector<char> ImageData;
-		ImageData.reserve(TextureRead->Image.Num());
-		for (const PixelType& Pixel : TextureRead->Image)
+		ImageData.resize(TextureRead->Image.Num());
+		ParallelFor(TextureRead->Image.Num(), [&ImageData, &TextureRead](int32 Idx)
 		{
-			ImageData.push_back(Pixel.Label());
-		}
+			ImageData[Idx] = TextureRead->Image[Idx].Label();
+		});
 		LabelImage.mutable_data()->assign(ImageData.begin(), ImageData.end());
 		LabelImage.mutable_header()->set_sequence_id(TextureRead->SequenceId);
 		LabelImage.mutable_header()->set_capture_time(TextureRead->CaptureTime);
@@ -104,15 +106,16 @@ void TTextureRead<FCameraPixelWithDepth>::RespondToRequests(const TArray<FLabelI
 void TTextureRead<FCameraPixelWithDepth>::RespondToRequests(const TArray<FDepthImageRequest>& Requests, float TransmissionTime) const
 {
 	TempoCamera::DepthImage DepthImage;
+	if (!Requests.IsEmpty())
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraDecodeDepth);
 		DepthImage.set_width(ImageSize.X);
 		DepthImage.set_height(ImageSize.Y);
-		DepthImage.mutable_depths()->Reserve(ImageSize.X * ImageSize.Y);
-		for (const FCameraPixelWithDepth& Pixel : Image)
+		DepthImage.mutable_depths()->Resize(ImageSize.X * ImageSize.Y, 0.0);
+		ParallelFor(Image.Num(), [&DepthImage, this](int32 Idx)
 		{
-			DepthImage.add_depths(Pixel.Depth(MinDepth, MaxDepth, kMaxDiscreteDepth));
-		}
+			DepthImage.set_depths(Idx, Image[Idx].Depth(MinDepth, MaxDepth, kMaxDiscreteDepth));
+		});
 		DepthImage.mutable_header()->set_sequence_id(SequenceId);
 		DepthImage.mutable_header()->set_capture_time(CaptureTime);
 		DepthImage.mutable_header()->set_transmission_time(TransmissionTime);
