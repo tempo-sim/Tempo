@@ -329,6 +329,8 @@ for MOD in "${MODS[@]}"; do
 
   # Rebuild, and recreate the built record if build is successful
   if [ "$TYPE" = "SourceOnly" ]; then
+    rm -rf "${UNREAL_ENGINE_PATH:?}/${ROOT:?}/*"
+    COPY_DIR "$TEMP/$ROOT" "$UNREAL_ENGINE_PATH/$ROOT"
     echo -e "\nApplied source-only Tempo mods to $ROOT\n"
   elif [ "$TYPE" = "Plugin" ]; then
     REBUILD_PLUGIN "$TEMP" "$ROOT"
