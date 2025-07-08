@@ -15,7 +15,6 @@
 #include "MassZoneGraphNavigationFragments.h"
 #include "ZoneGraphSubsystem.h"
 #include "ZoneGraphTypes.h"
-#include "MassGameplayExternalTraits.h"
 
 namespace
 {
@@ -270,7 +269,11 @@ UMassTrafficVehicleControlProcessor::UMassTrafficVehicleControlProcessor()
 	ExecutionOrder.ExecuteAfter.Add(UE::MassTraffic::ProcessorGroupNames::VehicleSimulationLOD);
 }
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 void UMassTrafficVehicleControlProcessor::ConfigureQueries()
+#else
+void UMassTrafficVehicleControlProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
+#endif
 {
 	SimpleVehicleControlEntityQuery_Conditional.AddTagRequirement<FMassTrafficVehicleTag>(EMassFragmentPresence::Any);
 	SimpleVehicleControlEntityQuery_Conditional.AddRequirement<FMassTrafficPIDVehicleControlFragment>(EMassFragmentAccess::None, EMassFragmentPresence::None);
@@ -318,7 +321,11 @@ void UMassTrafficVehicleControlProcessor::ConfigureQueries()
 void UMassTrafficVehicleControlProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
 	// Advance simple agents
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 	SimpleVehicleControlEntityQuery_Conditional.ForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& ComponentSystemExecutionContext)
+#else
+	SimpleVehicleControlEntityQuery_Conditional.ForEachEntityChunk(Context, [&](FMassExecutionContext& ComponentSystemExecutionContext)
+#endif
 		{
 			const UZoneGraphSubsystem& ZoneGraphSubsystem = ComponentSystemExecutionContext.GetSubsystemChecked<UZoneGraphSubsystem>();
 		
@@ -379,7 +386,11 @@ void UMassTrafficVehicleControlProcessor::Execute(FMassEntityManager& EntityMana
 		});
 
 	// Prepare physics inputs for PID vehicles
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 	PIDVehicleControlEntityQuery_Conditional.ForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& ComponentSystemExecutionContext)
+#else
+	PIDVehicleControlEntityQuery_Conditional.ForEachEntityChunk(Context, [&](FMassExecutionContext& ComponentSystemExecutionContext)
+#endif
 		{
 			const UZoneGraphSubsystem& ZoneGraphSubsystem = ComponentSystemExecutionContext.GetSubsystemChecked<UZoneGraphSubsystem>();
 		

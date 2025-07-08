@@ -14,8 +14,10 @@
 #include "MassLODUtils.h"
 #include "MassZoneGraphNavigationFragments.h"
 #include "ZoneGraphSubsystem.h"
-#include "ZoneGraphTypes.h"
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 #include "MassGameplayExternalTraits.h"
+#endif
+#include "ZoneGraphTypes.h"
 
 #define DEBUG_LANE_CHANGE_LEVEL 0
 
@@ -692,7 +694,11 @@ UMassTrafficLaneChangingProcessor::UMassTrafficLaneChangingProcessor()
 	ExecutionOrder.ExecuteAfter.Add(UMassTrafficOverseerProcessor::StaticClass()->GetFName());
 }
 
-void UMassTrafficLaneChangingProcessor::ConfigureQueries() 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+void UMassTrafficLaneChangingProcessor::ConfigureQueries()
+#else
+void UMassTrafficLaneChangingProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
+#endif
 {
 	StartNewLaneChangesEntityQuery_Conditional.AddTagRequirement<FMassTrafficParkedVehicleTag>(EMassFragmentPresence::None);
 	StartNewLaneChangesEntityQuery_Conditional.AddRequirement<FAgentRadiusFragment>(EMassFragmentAccess::ReadOnly);
@@ -743,7 +749,11 @@ void UMassTrafficLaneChangingProcessor::Execute(FMassEntityManager& EntityManage
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(TEXT("StartNewLaneChanges"));
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 		StartNewLaneChangesEntityQuery_Conditional.ForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& QueryContext)
+#else
+		StartNewLaneChangesEntityQuery_Conditional.ForEachEntityChunk(Context, [&](FMassExecutionContext& QueryContext)
+#endif
 			{
 				const UZoneGraphSubsystem& ZoneGraphSubsystem = QueryContext.GetSubsystemChecked<UZoneGraphSubsystem>();
 				UMassTrafficSubsystem& MassTrafficSubsystem = QueryContext.GetMutableSubsystemChecked<UMassTrafficSubsystem>();
@@ -803,9 +813,14 @@ void UMassTrafficLaneChangingProcessor::Execute(FMassEntityManager& EntityManage
 
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(TEXT("UpdateLaneChanges"));
-		
+
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 		UpdateLaneChangesEntityQuery_Conditional.ForEachEntityChunk(
 				EntityManager, Context, [&](FMassExecutionContext& ComponentSystemExecutionContext)
+#else
+		UpdateLaneChangesEntityQuery_Conditional.ForEachEntityChunk(
+				Context, [&](FMassExecutionContext& ComponentSystemExecutionContext)
+#endif
 			{
 				// NOTE - Don't check if we should skip this due to LOD. All lane changes, once started, should always be
 				// updated until finished. 
