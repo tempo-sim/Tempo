@@ -55,6 +55,7 @@ struct TTextureReadBase : FTextureRead
 
 	virtual void Read(const FRenderTarget* RenderTarget, const FTextureRHIRef& TextureRHICopy) override
 	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsTextureRead);
 		check(IsInRenderingThread());
 
 		State = State::EReading;
