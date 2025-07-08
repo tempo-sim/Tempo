@@ -5,9 +5,9 @@ Tempo is the foundation on which you can build a simulator for your unique appli
 
 ## Compatibility
 - Linux (Ubuntu 22.04 and 24.04), MacOS (13.0 "Ventura" or newer, Apple silicon only), Windows 10 and 11
-- Unreal Engine 5.4 and 5.5
+- Unreal Engine 5.4, and 5.5, and 5.6
 > [!WARNING]
-> A change in XCode 16.3 broke Unreal builds (not just Tempo). The [fix](https://github.com/EpicGames/UnrealEngine/commit/36e6414349658ce0ef27d3733a764e392b410a7c) will be in 5.6, but we do not know if Epic will make a 5.4 or 5.5 hotfix for it. In the meantime, we recommend dowgrading to Xcode to 16.2 on Mac. You can find previous Xcode releases [here](https://developer.apple.com/download/all/) (you'll need a free Apple developer account).
+> A change in XCode 16.3 broke Unreal builds (not just Tempo). This is [fixed](https://github.com/EpicGames/UnrealEngine/commit/36e6414349658ce0ef27d3733a764e392b410a7c)  in 5.6, but we don't expect Epic will make a 5.4 or 5.5 hotfix for it. We recommend downgrading to Xcode to 16.2 on Mac if you must use 5.4 or 5.5 on Mac. You can find previous Xcode releases [here](https://developer.apple.com/download/all/) (you'll need a free Apple developer account).
 
 ## Prerequisites
 - Linux:
@@ -20,15 +20,15 @@ Tempo is the foundation on which you can build a simulator for your unique appli
 - Windows:
   - Unreal: Install using Epic Games Launcher
   - [Git Bash](https://gitforwindows.org/) (Run all Tempo `*.sh` scripts from Git Bash)
-  - `jq`: (Use Admininistrator Git Bash) `curl -L -o /usr/bin/jq.exe https://github.com/jqlang/jq/releases/latest/download/jq-win64.exe`
+  - `jq`: (Use Administrator Git Bash) `curl -L -o /usr/bin/jq.exe https://github.com/jqlang/jq/releases/latest/download/jq-win64.exe`
 
 ## Environment Variables
 - `UNREAL_ENGINE_PATH`: Your Unreal Engine installation directory (the folder containing `Engine`)
-  - On Linux, unzip where you like, for example `~/UE_5.5`
-  - The Mac default is `/Users/Shared/Epic Games/UE_5.5`
-  - On Windows the default is `C:\Program Files\Epic Games\UE_5.5`
+  - On Linux, unzip where you like, for example `~/UE_5.6`
+  - The Mac default is `/Users/Shared/Epic Games/UE_5.6`
+  - On Windows the default is `C:\Program Files\Epic Games\UE_5.6`
 > [!NOTE]
-> If you're using 5.4 make sure to update the paths above accordingly.
+> If you're using 5.4 or 5.5 make sure to update the paths above accordingly.
 
 ## Getting Started
 Follow along the steps below with this video. Sound on!

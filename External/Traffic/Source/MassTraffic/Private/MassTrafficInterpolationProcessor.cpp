@@ -12,7 +12,9 @@
 #include "MassLODUtils.h"
 #include "MassZoneGraphNavigationFragments.h"
 #include "ZoneGraphSubsystem.h"
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 #include "MassGameplayExternalTraits.h"
+#endif
 
 
 UMassTrafficInterpolationProcessor::UMassTrafficInterpolationProcessor(const FObjectInitializer& ObjectInitializer)
@@ -28,7 +30,11 @@ UMassTrafficInterpolationProcessor::UMassTrafficInterpolationProcessor(const FOb
 	ExecutionOrder.ExecuteAfter.Add(UMassTrafficLaneChangingProcessor::StaticClass()->GetFName());
 }
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 void UMassTrafficInterpolationProcessor::ConfigureQueries()
+#else
+void UMassTrafficInterpolationProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
+#endif
 {
 	// the following are the common requirements for both both queries
 	EntityQueryNonOffLOD_Conditional.AddTagRequirement<FMassTrafficVehicleTag>(EMassFragmentPresence::Any);
@@ -59,7 +65,11 @@ void UMassTrafficInterpolationProcessor::ConfigureQueries()
 
 void UMassTrafficInterpolationProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 	EntityQueryNonOffLOD_Conditional.ForEachEntityChunk(EntityManager, Context, [&, World = EntityManager.GetWorld()](FMassExecutionContext& QueryContext)
+#else
+	EntityQueryNonOffLOD_Conditional.ForEachEntityChunk(Context, [&, World = EntityManager.GetWorld()](FMassExecutionContext& QueryContext)
+#endif
 	{
 		const UZoneGraphSubsystem& ZoneGraphSubsystem = QueryContext.GetSubsystemChecked<UZoneGraphSubsystem>();
 
@@ -143,7 +153,11 @@ void UMassTrafficInterpolationProcessor::Execute(FMassEntityManager& EntityManag
 		}
 	});
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 	EntityQueryOffLOD_Conditional.ForEachEntityChunk(EntityManager, Context, [&, World = EntityManager.GetWorld()](FMassExecutionContext& QueryContext)
+#else
+	EntityQueryOffLOD_Conditional.ForEachEntityChunk(Context, [&, World = EntityManager.GetWorld()](FMassExecutionContext& QueryContext)
+#endif
 	{
 		const UZoneGraphSubsystem& ZoneGraphSubsystem = QueryContext.GetSubsystemChecked<UZoneGraphSubsystem>();
 

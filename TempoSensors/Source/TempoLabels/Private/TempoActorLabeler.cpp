@@ -12,7 +12,7 @@
 #include "TempoCoreUtils.h"
 #include "DefaultActorClassifier.h"
 
-#include "Engine.h"
+#include "EngineUtils.h"
 
 FInstanceIdAllocator::FInstanceIdAllocator(int32 MinIdIn, int32 MaxIdIn)
 	: MinId(MinIdIn), MaxId(MaxIdIn)

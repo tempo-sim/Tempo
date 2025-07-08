@@ -153,7 +153,11 @@ void UTempoCamera::BeginPlay()
 	ApplyDepthEnabled();
 }
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 void UTempoCamera::UpdateSceneCaptureContents(FSceneInterface* Scene)
+#else
+void UTempoCamera::UpdateSceneCaptureContents(FSceneInterface* Scene, ISceneRenderBuilder& SceneRenderBuilder)
+#endif
 {
 	if (!bDepthEnabled && !PendingDepthImageRequests.IsEmpty())
 	{
@@ -167,7 +171,11 @@ void UTempoCamera::UpdateSceneCaptureContents(FSceneInterface* Scene)
 		SetDepthEnabled(false);
 	}
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 	Super::UpdateSceneCaptureContents(Scene);
+#else
+	Super::UpdateSceneCaptureContents(Scene, SceneRenderBuilder);
+#endif
 }
 
 void UTempoCamera::RequestMeasurement(const TempoCamera::ColorImageRequest& Request, const TResponseDelegate<TempoCamera::ColorImage>& ResponseContinuation)

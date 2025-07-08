@@ -172,11 +172,19 @@ bool FPCGAssignRandomMeshAttribute::ExecuteInternal(FPCGContext* Context) const
 		return Left.Get()->GetName() < Right.Get()->GetName();
 	});
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 	FRandomStream RandomStream(Context->SourceComponent.IsValid() ? Context->SourceComponent->Seed : Context->GetSeed());
+#else
+	FRandomStream RandomStream(Context->ExecutionSource.IsValid() ? Context->ExecutionSource->GetExecutionState().GetSeed() : Context->GetSeed());
+#endif
 
 	const FName MeshAttributeName = Settings->AttributeName;
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 	const TArray<FPCGTaggedData> Inputs = Context->InputData.GetInputs();
+#else
+	const TArray<FPCGTaggedData> Inputs = Context->InputData.GetAllSpatialInputs();
+#endif
 	TArray<FPCGTaggedData>& Outputs = Context->OutputData.TaggedData;
 
 	for (const FPCGTaggedData& Input : Inputs)
@@ -228,7 +236,7 @@ bool FPCGAssignRandomMeshAttribute::ExecuteInternal(FPCGContext* Context) const
 		{
 			const FPCGPoint& InPoint = Points[Index];
 			OutPoint = InPoint;
-			
+
 			FSoftObjectPath MeshPath;
 			const float Draw = RandomStream.FRand();
 			float CumProb = 0.0;

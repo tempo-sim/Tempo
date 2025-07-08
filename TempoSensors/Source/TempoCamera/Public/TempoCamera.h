@@ -125,7 +125,11 @@ public:
 
 	virtual void BeginPlay() override;
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 	virtual void UpdateSceneCaptureContents(FSceneInterface* Scene) override;
+#else
+	virtual void UpdateSceneCaptureContents(FSceneInterface* Scene, ISceneRenderBuilder& SceneRenderBuilder) override;
+#endif
 
 	void RequestMeasurement(const TempoCamera::ColorImageRequest& Request, const TResponseDelegate<TempoCamera::ColorImage>& ResponseContinuation);
 

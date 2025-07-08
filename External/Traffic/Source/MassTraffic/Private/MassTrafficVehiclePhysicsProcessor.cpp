@@ -19,8 +19,10 @@
 #include "PhysicsSettingsCore.h"
 #include "VisualLogger/VisualLogger.h"
 #include "ZoneGraphSubsystem.h"
-#include "ZoneGraphTypes.h"
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 #include "MassGameplayExternalTraits.h"
+#endif
+#include "ZoneGraphTypes.h"
 
 
 template<typename FormatType>
@@ -58,7 +60,11 @@ UMassTrafficVehiclePhysicsProcessor::UMassTrafficVehiclePhysicsProcessor()
 	ExecutionOrder.ExecuteAfter.Add(UMassTrafficVehicleControlProcessor::StaticClass()->GetFName());
 }
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 void UMassTrafficVehiclePhysicsProcessor::ConfigureQueries()
+#else
+void UMassTrafficVehiclePhysicsProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
+#endif
 {
 	SimplePhysicsVehiclesQuery.AddTagRequirement<FMassTrafficVehicleTag>(EMassFragmentPresence::Any);
 	SimplePhysicsVehiclesQuery.AddRequirement<FMassTrafficPIDVehicleControlFragment>(EMassFragmentAccess::ReadOnly);
@@ -85,7 +91,11 @@ void UMassTrafficVehiclePhysicsProcessor::ConfigureQueries()
 		{
 			if (const Chaos::FPBDRigidsSolver* Solver = PhysScene->GetSolver())
 			{
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 				ChaosConstraintSolverSettings = Solver->GetJointConstraints().GetSettings();
+#else
+				ChaosConstraintSolverSettings = Solver->GetJointCombinedConstraints().LinearConstraints.GetSettings();
+#endif
 			}
 		}
 	}
@@ -136,8 +146,12 @@ void UMassTrafficVehiclePhysicsProcessor::Execute(FMassEntityManager& EntityMana
 		RemainingDeltaTime -= DeltaTime;
 		// Get gravity from world
 		float GravityZ = GetWorld()->GetGravityZ();
-		
+
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 		SimplePhysicsVehiclesQuery.ForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& QueryContext)
+#else
+		SimplePhysicsVehiclesQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext& QueryContext)
+#endif
 		{
 			const UZoneGraphSubsystem& ZoneGraphSubsystem = QueryContext.GetSubsystemChecked<UZoneGraphSubsystem>();
 
