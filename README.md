@@ -28,7 +28,7 @@ Tempo is the foundation on which you can build a simulator for your unique appli
   - The Mac default is `/Users/Shared/Epic Games/UE_5.6`
   - On Windows the default is `C:\Program Files\Epic Games\UE_5.6`
 > [!NOTE]
-> If you're using 5.4 make sure to update the paths above accordingly.
+> If you're using 5.4 or 5.5 make sure to update the paths above accordingly.
 
 ## Getting Started
 Follow along the steps below with this video. Sound on!

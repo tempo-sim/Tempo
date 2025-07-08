@@ -66,9 +66,9 @@ void UMassTrafficLightVisualizationProcessor::ConfigureQueries(const TSharedRef<
 #endif
 {
 #if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-Super::ConfigureQueries();
+	Super::ConfigureQueries();
 #else
-Super::ConfigureQueries(EntityManager);
+	Super::ConfigureQueries(EntityManager);
 #endif
 	EntityQuery.AddRequirement<FMassTrafficLightIntersectionFragment>(EMassFragmentAccess::ReadOnly);
 }
@@ -257,9 +257,9 @@ void UMassTrafficIntersectionVisualizationLODProcessor::ConfigureQueries(const T
 #endif
 {
 #if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-Super::ConfigureQueries();
+	Super::ConfigureQueries();
 #else
-Super::ConfigureQueries(EntityManager);
+	Super::ConfigureQueries(EntityManager);
 #endif
 
 	CloseEntityQuery.AddTagRequirement<FMassTrafficIntersectionTag>(EMassFragmentPresence::All);
@@ -287,9 +287,9 @@ void UMassTrafficIntersectionLODCollectorProcessor::ConfigureQueries(const TShar
 #endif
 {
 #if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-Super::ConfigureQueries();
+	Super::ConfigureQueries();
 #else
-Super::ConfigureQueries(EntityManager);
+	Super::ConfigureQueries(EntityManager);
 #endif
 
 	EntityQuery_VisibleRangeAndOnLOD.AddTagRequirement<FMassTrafficIntersectionTag>(EMassFragmentPresence::All);

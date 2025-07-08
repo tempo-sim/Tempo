@@ -60,9 +60,9 @@ void UMassTrafficVehicleVisualizationLODProcessor::ConfigureQueries(const TShare
 #endif
 {
 #if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-Super::ConfigureQueries();
+	Super::ConfigureQueries();
 #else
-Super::ConfigureQueries(EntityManager);
+	Super::ConfigureQueries(EntityManager);
 #endif
 
 	CloseEntityQuery.AddTagRequirement<FMassTrafficVehicleTag>(EMassFragmentPresence::Any);
@@ -189,9 +189,9 @@ void UMassTrafficVehicleLODCollectorProcessor::ConfigureQueries(const TSharedRef
 #endif
 {
 #if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-Super::ConfigureQueries();
+	Super::ConfigureQueries();
 #else
-Super::ConfigureQueries(EntityManager);
+	Super::ConfigureQueries(EntityManager);
 #endif
 
 	EntityQuery_VisibleRangeAndOnLOD.AddTagRequirement<FMassTrafficVehicleTag>(EMassFragmentPresence::Any);

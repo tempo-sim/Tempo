@@ -32,9 +32,9 @@ void UMassTrafficTrailerVisualizationProcessor::ConfigureQueries(const TSharedRe
 #endif
 {
 #if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-Super::ConfigureQueries();
+	Super::ConfigureQueries();
 #else
-Super::ConfigureQueries(EntityManager);
+	Super::ConfigureQueries(EntityManager);
 #endif
 	EntityQuery.AddTagRequirement<FMassTrafficVehicleTrailerTag>(EMassFragmentPresence::All);
 }

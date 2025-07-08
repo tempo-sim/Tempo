@@ -220,7 +220,7 @@ REBUILD_UBT() {
   eval "$DOTNET" build "./Engine/Source/Programs/UnrealBuildTool/UnrealBuildTool.csproj" -c Development
   eval "$DOTNET" build "./Engine/Source/Programs/AutomationTool/AutomationTool.csproj" -c Development
 
-  # Copy the resulting built dlls to the binaries folder
+  # Copy the resulting built dlls to the binaries folder (in 5.6 they aren't copied to Binaries automatically? not sure why)
   if [ -f "$UNREAL_ENGINE_PATH/Engine/Source/Programs/UnrealBuildTool/bin/Development/UnrealBuildTool.dll" ]; then
     cp -r "$UNREAL_ENGINE_PATH/Engine/Source/Programs/UnrealBuildTool/bin/Development/UnrealBuildTool.dll" "$UNREAL_ENGINE_PATH/Engine/Binaries/DotNET/UnrealBuildTool"
   fi
