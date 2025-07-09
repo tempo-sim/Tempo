@@ -2,6 +2,17 @@
 
 #include "TempoSensorsSettings.h"
 
+UTempoSensorsSettings::UTempoSensorsSettings()
+{
+	CategoryName = TEXT("Tempo");
+}
+
+#if WITH_EDITOR
+FText UTempoSensorsSettings::GetSectionText() const
+{
+	return FText::FromString(FString(TEXT("Sensors")));
+}
+#endif
 
 #if WITH_EDITOR
 void UTempoSensorsSettings::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
