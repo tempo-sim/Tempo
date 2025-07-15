@@ -1,0 +1,353 @@
+diff --git Source/ZoneGraph/Private/ZoneGraphBuilder.cpp Source/ZoneGraph/Private/ZoneGraphBuilder.cpp
+index 2b85d58..826f7f4 100644
+--- Source/ZoneGraph/Private/ZoneGraphBuilder.cpp
++++ Source/ZoneGraph/Private/ZoneGraphBuilder.cpp
+@@ -287,7 +287,7 @@ void FZoneGraphBuilder::FindShapeConnections(const UZoneShapeComponent& SourceSh
+ 					&& FVector::DotProduct(SourceWorldNormal, -DestWorldNormal) > ConnectionSnapAngleCos)
+ 				{
+ 					// Check that the profile orientation matches before connecting.
+-					if (const FZoneLaneProfile* LaneProfile = ZoneGraphSettings->GetLaneProfileByRef(SourceConnector.LaneProfile))
++					if (const FZoneLaneProfile* LaneProfile = ZoneGraphSettings->GetLaneProfileByRef(SourceConnector.LaneProfile, &SourceShapeComp))
+ 					{
+ 						if (LaneProfile->IsSymmetrical() || SourceConnector.bReverseLaneProfile != DestConnector.bReverseLaneProfile)
+ 						{
+diff --git Source/ZoneGraph/Private/ZoneGraphRenderingUtilities.cpp Source/ZoneGraph/Private/ZoneGraphRenderingUtilities.cpp
+index 95a5cf1..b709dc1 100644
+--- Source/ZoneGraph/Private/ZoneGraphRenderingUtilities.cpp
++++ Source/ZoneGraph/Private/ZoneGraphRenderingUtilities.cpp
+@@ -421,7 +421,7 @@ void DrawZoneShapeConnector(const FZoneShapeConnector& Connector, const FZoneSha
+     PDI->DrawLine(WorldPosition - WorldNormal * ChevronSize, WorldPosition + WorldSide * ChevronSize, Color, SDPG_World, LineThickness, DepthBias, true);
+ 
+     // Draw small chevrons indicating the lane locations and directions. This is useful when debugging non-connect lanes.
+-    if (const FZoneLaneProfile* LaneProfile = ZoneGraphSettings->GetLaneProfileByRef(Connector.LaneProfile))
++    if (const FZoneLaneProfile* LaneProfile = ZoneGraphSettings->GetLaneProfileByRef(Connector.LaneProfile, nullptr))
+     {
+         const float TotalWidth = LaneProfile->GetLanesTotalWidth();
+         const float HalfWidth = TotalWidth * 0.5f;
+diff --git Source/ZoneGraph/Private/ZoneGraphSettings.cpp Source/ZoneGraph/Private/ZoneGraphSettings.cpp
+index e780038..c9c1dfe 100644
+--- Source/ZoneGraph/Private/ZoneGraphSettings.cpp
++++ Source/ZoneGraph/Private/ZoneGraphSettings.cpp
+@@ -3,6 +3,9 @@
+ #include "ZoneGraphSettings.h"
+ #include "ZoneGraphDelegates.h"
+ #include "ZoneGraphObjectCRC32.h"
++#include "ZoneGraphSubsystem.h"
++
++#include "Engine/World.h"
+ 
+ namespace UE::ZoneGraph
+ {
+@@ -108,14 +111,50 @@ UZoneGraphSettings::UZoneGraphSettings(const FObjectInitializer& ObjectInitializ
+ //----------------------------------------------------------------------//
+ // UZoneGraphSettings
+ //----------------------------------------------------------------------//
+-const FZoneLaneProfile* UZoneGraphSettings::GetLaneProfileByRef(const FZoneLaneProfileRef& LaneProfileRef) const
++const FZoneLaneProfile* UZoneGraphSettings::GetLaneProfileByRef(const FZoneLaneProfileRef& LaneProfileRef, const UObject* WorldContextObject) const
+ {
+-	return LaneProfiles.FindByPredicate([&LaneProfileRef](const FZoneLaneProfile& LaneProfile) -> bool { return LaneProfile.ID == LaneProfileRef.ID; });
++	// First check if the lane profile is in our configured profiles.
++	if (const FZoneLaneProfile* ZoneLaneProfile = LaneProfiles.FindByPredicate([&LaneProfileRef](const FZoneLaneProfile& LaneProfile) -> bool { return LaneProfile.ID == LaneProfileRef.ID; }))
++	{
++		return ZoneLaneProfile;
++	}
++
++	// Then fall back on checking the world's zone graph storage, if a world context object was provided.
++	if (WorldContextObject)
++	{
++		if (const UWorld* World = WorldContextObject->GetWorld())
++		{
++			if (const UZoneGraphSubsystem* ZoneGraphSubsystem = World->GetSubsystem<UZoneGraphSubsystem>())
++			{
++				return ZoneGraphSubsystem->GetLaneProfileByRef(LaneProfileRef);
++			}
++		}
++	}
++
++	return nullptr;
+ }
+ 
+-const FZoneLaneProfile* UZoneGraphSettings::GetLaneProfileByID(const FGuid& ID) const
++const FZoneLaneProfile* UZoneGraphSettings::GetLaneProfileByID(const FGuid& ID, const UObject* WorldContextObject) const
+ {
+-	return LaneProfiles.FindByPredicate([&ID](const FZoneLaneProfile& LaneProfile) -> bool { return LaneProfile.ID == ID; });
++	// First check if the lane profile is in our configured profiles.
++	if (const FZoneLaneProfile* ZoneLaneProfile = LaneProfiles.FindByPredicate([&ID](const FZoneLaneProfile& LaneProfile) -> bool { return LaneProfile.ID == ID; }))
++	{
++		return ZoneLaneProfile;
++	}
++
++	// Then fall back on checking the world's zone graph storage, if a world context object was provided.
++	if (WorldContextObject)
++	{
++		if (const UWorld* World = WorldContextObject->GetWorld())
++		{
++			if (const UZoneGraphSubsystem* ZoneGraphSubsystem = World->GetSubsystem<UZoneGraphSubsystem>())
++			{
++				return ZoneGraphSubsystem->GetLaneProfileByID(ID);
++			}
++		}
++	}
++
++	return nullptr;
+ }
+ 
+ #if WITH_EDITOR
+diff --git Source/ZoneGraph/Private/ZoneGraphSubsystem.cpp Source/ZoneGraph/Private/ZoneGraphSubsystem.cpp
+index dc7abd8..22f7d9b 100644
+--- Source/ZoneGraph/Private/ZoneGraphSubsystem.cpp
++++ Source/ZoneGraph/Private/ZoneGraphSubsystem.cpp
+@@ -12,6 +12,7 @@
+ #include "Engine/Level.h"
+ #include "EngineUtils.h"
+ #include "MassSubsystemBase.h"
++#include "Kismet/GameplayStatics.h"
+ #if WITH_EDITOR
+ #include "LevelEditorViewport.h"
+ #endif
+@@ -466,6 +467,81 @@ FBox UZoneGraphSubsystem::GetCombinedBounds() const
+ 	return CombinedBounds;
+ }
+ 
++const FZoneLaneProfile* UZoneGraphSubsystem::GetLaneProfileByRef(const FZoneLaneProfileRef& LaneProfileRef) const
++{
++	for (const FRegisteredZoneGraphData& RegisteredData : RegisteredZoneGraphData)
++	{
++		if (RegisteredData.ZoneGraphData)
++		{
++			const FZoneGraphStorage& Storage = RegisteredData.ZoneGraphData->GetStorage();
++			if (const FZoneLaneProfile* ZoneLaneProfile = Storage.LaneProfiles.FindByPredicate([&LaneProfileRef](const FZoneLaneProfile& LaneProfile) -> bool { return LaneProfile.ID == LaneProfileRef.ID; }))
++			{
++				return ZoneLaneProfile;
++			}
++		}
++	}
++
++	return nullptr;
++}
++
++const FZoneLaneProfile* UZoneGraphSubsystem::GetLaneProfileByID(const FGuid& ID) const
++{
++	for (const FRegisteredZoneGraphData& RegisteredData : RegisteredZoneGraphData)
++	{
++		if (RegisteredData.ZoneGraphData)
++		{
++			const FZoneGraphStorage& Storage = RegisteredData.ZoneGraphData->GetStorage();
++			if (const FZoneLaneProfile* ZoneLaneProfile = Storage.LaneProfiles.FindByPredicate([&ID](const FZoneLaneProfile& LaneProfile) -> bool { return LaneProfile.ID == ID; }))
++			{
++				return ZoneLaneProfile;
++			}
++		}
++	}
++
++	return nullptr;
++}
++
++const FZoneLaneProfile* UZoneGraphSubsystem::FindOrAddLaneProfile(const FZoneLaneProfile& LaneProfile)
++{
++	// Ensure there is at least one ZoneGraphData Actor in the world.
++	UWorld* World = GetWorld();
++	if (World && !UGameplayStatics::GetActorOfClass(World, AZoneGraphData::StaticClass()))
++	{
++		World->SpawnActor<AZoneGraphData>(AZoneGraphData::StaticClass());
++	}
++
++	const FZoneLaneProfile* ToReturn = nullptr;
++
++	// Add this lane profile to all registered zone graph data Actors.
++	for (const FRegisteredZoneGraphData& RegisteredData : RegisteredZoneGraphData)
++	{
++		if (RegisteredData.ZoneGraphData)
++		{
++			FZoneGraphStorage& Storage = RegisteredData.ZoneGraphData->GetStorageMutable();
++			if (const FZoneLaneProfile* ZoneLaneProfile = Storage.LaneProfiles.FindByPredicate([&LaneProfile](const FZoneLaneProfile& OtherLaneProfile) -> bool { return OtherLaneProfile.Lanes == LaneProfile.Lanes; }))
++			{
++				ToReturn = ZoneLaneProfile;
++				continue;
++			}
++			ToReturn = &Storage.LaneProfiles.Add_GetRef(LaneProfile);
++		}
++	}
++
++	return ToReturn;
++}
++
++void UZoneGraphSubsystem::ClearLaneProfiles() const
++{
++	for (const FRegisteredZoneGraphData& RegisteredData : RegisteredZoneGraphData)
++	{
++		if (RegisteredData.ZoneGraphData)
++		{
++			FZoneGraphStorage& Storage = RegisteredData.ZoneGraphData->GetStorageMutable();
++			Storage.LaneProfiles.Empty();
++		}
++	}
++}
++
+ FName UZoneGraphSubsystem::GetTagName(FZoneGraphTag Tag) const
+ {
+ 	if (const UZoneGraphSettings* ZoneGraphSettings = GetDefault<UZoneGraphSettings>())
+diff --git Source/ZoneGraph/Private/ZoneShapeComponent.cpp Source/ZoneGraph/Private/ZoneShapeComponent.cpp
+index 230cdc8..e6a6b15 100644
+--- Source/ZoneGraph/Private/ZoneShapeComponent.cpp
++++ Source/ZoneGraph/Private/ZoneShapeComponent.cpp
+@@ -602,7 +602,7 @@ void UZoneShapeComponent::GetSplineLaneProfile(FZoneLaneProfile& OutLaneProfile)
+ 	{
+ 		if (const UZoneGraphSettings* ZoneGraphSettings = GetDefault<UZoneGraphSettings>())
+ 		{
+-			if (const FZoneLaneProfile* CurrentLaneProfile = ZoneGraphSettings->GetLaneProfileByRef(LaneProfile))
++			if (const FZoneLaneProfile* CurrentLaneProfile = ZoneGraphSettings->GetLaneProfileByRef(LaneProfile, this))
+ 			{
+ 				OutLaneProfile = *CurrentLaneProfile;
+ 				return;
+@@ -642,7 +642,7 @@ void UZoneShapeComponent::GetPolygonLaneProfiles(TArray<FZoneLaneProfile>& OutLa
+ 					TemplateRef = LaneProfile;
+ 				}
+ 
+-				if (const FZoneLaneProfile* CurrentLaneProfile = ZoneGraphSettings->GetLaneProfileByRef(TemplateRef))
++				if (const FZoneLaneProfile* CurrentLaneProfile = ZoneGraphSettings->GetLaneProfileByRef(TemplateRef, this))
+ 				{
+ 					OutLaneProfiles.Add(*CurrentLaneProfile);
+ 				}
+@@ -879,4 +879,3 @@ FPrimitiveSceneProxy* UZoneShapeComponent::CreateSceneProxy()
+ }
+ 
+ #endif // !UE_BUILD_SHIPPING
+-
+diff --git Source/ZoneGraph/Public/ZoneGraphSettings.h Source/ZoneGraph/Public/ZoneGraphSettings.h
+index 799d10e..95da6de 100644
+--- Source/ZoneGraph/Public/ZoneGraphSettings.h
++++ Source/ZoneGraph/Public/ZoneGraphSettings.h
+@@ -24,8 +24,8 @@ public:
+ 
+ 	const TArray<FZoneLaneProfile>& GetLaneProfiles() const { return LaneProfiles; }
+ 
+-	UE_API const FZoneLaneProfile* GetLaneProfileByRef(const FZoneLaneProfileRef& LaneProfileRef) const;
+-	UE_API const FZoneLaneProfile* GetLaneProfileByID(const FGuid& ID) const;
++	UE_API const FZoneLaneProfile* GetLaneProfileByRef(const FZoneLaneProfileRef& LaneProfileRef, const UObject* WorldContextObject) const;
++	UE_API const FZoneLaneProfile* GetLaneProfileByID(const FGuid& ID, const UObject* WorldContextObject) const;
+ 
+ #if WITH_EDITOR
+ 	UE_API virtual void PostEditChangeChainProperty(FPropertyChangedChainEvent& PropertyChangedEvent) override;
+diff --git Source/ZoneGraph/Public/ZoneGraphSubsystem.h Source/ZoneGraph/Public/ZoneGraphSubsystem.h
+index b16d84c..09a5273 100644
+--- Source/ZoneGraph/Public/ZoneGraphSubsystem.h
++++ Source/ZoneGraph/Public/ZoneGraphSubsystem.h
+@@ -112,7 +112,19 @@ public:
+ 
+ 	// Returns bounds of all ZoneGraph data.
+ 	ZONEGRAPH_API FBox GetCombinedBounds() const;
+-	
++
++	// Returns the ZoneLaneProfile indicated by the lane profile ref.
++	ZONEGRAPH_API const FZoneLaneProfile* GetLaneProfileByRef(const FZoneLaneProfileRef& LaneProfileRef) const;
++
++	// Returns the ZoneLaneProfile indicated by the lane profile ID.
++	ZONEGRAPH_API const FZoneLaneProfile* GetLaneProfileByID(const FGuid& ID) const;
++
++	// Find the lane profile ref for the indicated lane profile, adding it to the known profiles if necessary.
++	ZONEGRAPH_API const FZoneLaneProfile* FindOrAddLaneProfile(const FZoneLaneProfile& LaneProfile);
++
++	// Find the lane profile ref for the indicated lane profile, adding it to the known profiles if necessary.
++	ZONEGRAPH_API void ClearLaneProfiles() const;
++
+ 	// Tags
+ 	
+ 	// Returns tag based on name.
+diff --git Source/ZoneGraph/Public/ZoneGraphTypes.h Source/ZoneGraph/Public/ZoneGraphTypes.h
+index 4237bc4..a3dab47 100644
+--- Source/ZoneGraph/Public/ZoneGraphTypes.h
++++ Source/ZoneGraph/Public/ZoneGraphTypes.h
+@@ -737,6 +737,10 @@ struct FZoneGraphStorage
+ 	UPROPERTY()
+ 	TArray<FZoneLaneLinkData> LaneLinks;
+ 
++	// Storage for lane profiles created dynamically, other than those stored in settings.
++	UPROPERTY();
++	TArray<FZoneLaneProfile> LaneProfiles;
++
+ 	// Bounding box of all zones.
+ 	UPROPERTY()
+ 	FBox Bounds = FBox(ForceInit);
+diff --git Source/ZoneGraphEditor/Private/ZoneLaneProfileRefDetails.cpp Source/ZoneGraphEditor/Private/ZoneLaneProfileRefDetails.cpp
+index 34dde8e..e2e82a7 100644
+--- Source/ZoneGraphEditor/Private/ZoneLaneProfileRefDetails.cpp
++++ Source/ZoneGraphEditor/Private/ZoneLaneProfileRefDetails.cpp
+@@ -118,7 +118,7 @@ FText FZoneLaneProfileRefDetails::GetCurrentProfileDesc() const
+ 		if (ProfileID.IsValid())
+ 		{
+ 			const UZoneGraphSettings* ZoneGraphSettings = GetDefault<UZoneGraphSettings>();
+-			const FZoneLaneProfile* LaneProfile = ZoneGraphSettings->GetLaneProfileByID(ProfileID);
++			const FZoneLaneProfile* LaneProfile = ZoneGraphSettings->GetLaneProfileByID(ProfileID, nullptr);
+ 			if (LaneProfile)
+ 			{
+ 				return FText::FromName(LaneProfile->Name);
+@@ -143,4 +143,4 @@ FText FZoneLaneProfileRefDetails::GetCurrentProfileDesc() const
+ 	return FText();
+ }
+ 
+-#undef LOCTEXT_NAMESPACE
+\ No newline at end of file
++#undef LOCTEXT_NAMESPACE
+diff --git Source/ZoneGraphEditor/Private/ZoneShapeComponentDetails.cpp Source/ZoneGraphEditor/Private/ZoneShapeComponentDetails.cpp
+index 11356ae..b07dcda 100644
+--- Source/ZoneGraphEditor/Private/ZoneShapeComponentDetails.cpp
++++ Source/ZoneGraphEditor/Private/ZoneShapeComponentDetails.cpp
+@@ -846,7 +846,7 @@ FText FZoneShapePointDetails::GetLaneProfile() const
+ 			}
+ 
+ 			const UZoneGraphSettings* ZoneGraphSettings = GetDefault<UZoneGraphSettings>();
+-			if (const FZoneLaneProfile* Profile = ZoneGraphSettings->GetLaneProfileByRef(ProfileRef))
++			if (const FZoneLaneProfile* Profile = ZoneGraphSettings->GetLaneProfileByRef(ProfileRef, ShapeComp))
+ 			{
+ 				return FText::FromName(Profile->Name);
+ 			}
+diff --git Source/ZoneGraphEditor/Private/ZoneShapeComponentVisualizer.cpp Source/ZoneGraphEditor/Private/ZoneShapeComponentVisualizer.cpp
+index 6d3e2cc..93d616b 100644
+--- Source/ZoneGraphEditor/Private/ZoneShapeComponentVisualizer.cpp
++++ Source/ZoneGraphEditor/Private/ZoneShapeComponentVisualizer.cpp
+@@ -1122,7 +1122,7 @@ void FZoneShapeComponentVisualizer::DetectCloseByShapeForAutoConnection(const UZ
+ 			}
+ 
+ 			// Check that the profile orientation matches before connecting.
+-			const FZoneLaneProfile* LaneProfile = ZoneGraphSettings->GetLaneProfileByRef(SourceConnector->LaneProfile);
++			const FZoneLaneProfile* LaneProfile = ZoneGraphSettings->GetLaneProfileByRef(SourceConnector->LaneProfile, ShapeComp);
+ 			if (LaneProfile
+ 				&& (LaneProfile->IsSymmetrical() || SourceConnector->bReverseLaneProfile != DestConnector.bReverseLaneProfile))
+ 			{
+@@ -1195,7 +1195,7 @@ void FZoneShapeComponentVisualizer::DetectCloseByShapeForAutoIntersectionCreatio
+ 		if (DestShapeComp->GetShapeType() == FZoneShapeType::Spline)
+ 		{
+ 			// Spline
+-			const FZoneLaneProfile* LaneProfile = ZoneGraphSettings->GetLaneProfileByRef(DestShapeComp->GetCommonLaneProfile());
++			const FZoneLaneProfile* LaneProfile = ZoneGraphSettings->GetLaneProfileByRef(DestShapeComp->GetCommonLaneProfile(), ShapeComp);
+ 			const double HalfLanesTotalWidth = LaneProfile ? LaneProfile->GetLanesTotalWidth() * 0.5 : 0.0;
+ 
+ 			// Find closest point to the stem of the spline.
+@@ -1491,7 +1491,7 @@ bool FZoneShapeComponentVisualizer::HandleInputKey(FEditorViewportClient* Viewpo
+ 		{
+ 			if (bIsAutoConnecting)
+ 			{
+-				const FZoneLaneProfile* LaneProfile = ZoneGraphSettings->GetLaneProfileByRef(ShapeComp->GetCommonLaneProfile());
++				const FZoneLaneProfile* LaneProfile = ZoneGraphSettings->GetLaneProfileByRef(ShapeComp->GetCommonLaneProfile(), ShapeComp);
+ 				double HalfLanesTotalWidth = LaneProfile ? LaneProfile->GetLanesTotalWidth() * 0.5 : 0.0;
+ 
+ 				FZoneShapePoint& DraggedPoint = ShapePoints[SelectedPointForConnecting];
+@@ -2620,7 +2620,7 @@ void FZoneShapeComponentVisualizer::CreateIntersectionForSplineShape(UZoneShapeC
+ 		return;
+ 	}
+ 
+-	const FZoneLaneProfile* LaneProfile = ZoneGraphSettings->GetLaneProfileByRef(ShapeComp->GetCommonLaneProfile());
++	const FZoneLaneProfile* LaneProfile = ZoneGraphSettings->GetLaneProfileByRef(ShapeComp->GetCommonLaneProfile(), ShapeComp);
+ 	double const HalfLanesTotalWidth = LaneProfile ? LaneProfile->GetLanesTotalWidth() * 0.5 : 0.0;
+ 
+ 	// Get overlapping position on the target segment
+@@ -2829,7 +2829,7 @@ void FZoneShapeComponentVisualizer::CreateIntersectionForPolygonShape(UZoneShape
+ 		const FVector TargetPointWorldNormal = TargetShapeComponent->GetComponentTransform().TransformVector(TargetConnector->Normal);
+ 
+ 		const double ConnectionSnapAngleCos = FMath::Cos(FMath::DegreesToRadians(BuildSettings.ConnectionSnapAngle));
+-		const FZoneLaneProfile* LaneProfile = ZoneGraphSettings->GetLaneProfileByRef(ShapeComp->GetCommonLaneProfile());
++		const FZoneLaneProfile* LaneProfile = ZoneGraphSettings->GetLaneProfileByRef(ShapeComp->GetCommonLaneProfile(), ShapeComp);
+ 		const double HalfLanesTotalWidth = LaneProfile ? LaneProfile->GetLanesTotalWidth() * 0.5 : 0.0;
+ 		UE::ZoneGraph::Editor::Private::SnapConnect(
+ 			ShapeComp,
