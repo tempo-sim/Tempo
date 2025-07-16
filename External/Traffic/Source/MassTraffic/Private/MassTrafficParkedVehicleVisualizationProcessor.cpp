@@ -122,9 +122,9 @@ void UMassTrafficParkedVehicleUpdateCustomVisualizationProcessor::Execute(FMassE
 		TRACE_CPUPROFILER_EVENT_SCOPE(TEXT("DebugDisplayVisualization")) 
 
 #if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-		EntityQuery.ForEachEntityChunk(EntityManager, Context, [this, World = EntityManager.GetWorld()](FMassExecutionContext& Context)
+		EntityQuery.ForEachEntityChunk(EntityManager, Context, [this](FMassExecutionContext& Context)
 #else
-		EntityQuery.ForEachEntityChunk(Context, [this, World = EntityManager.GetWorld()](FMassExecutionContext& Context)
+		EntityQuery.ForEachEntityChunk(Context, [this](FMassExecutionContext& Context)
 #endif
 		{
 			const UMassTrafficSubsystem* MassTrafficSubsystem = Context.GetSubsystem<UMassTrafficSubsystem>();
