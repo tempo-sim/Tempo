@@ -59,6 +59,13 @@
       ]
     },
     {
+      "Type": "SourceOnly",
+      "Root": "Engine/Plugins/Runtime/StateTree",
+      "Patch": [
+        "StateTree.patch.1"
+      ]
+    },
+    {
       "Type": "Plugin",
       "Root": "Engine/Plugins/Runtime/ZoneGraph",
       "Patch": [
