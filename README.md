@@ -6,8 +6,6 @@ Tempo is the foundation on which you can build a simulator for your unique appli
 ## Compatibility
 - Linux (Ubuntu 22.04 and 24.04), MacOS (13.0 "Ventura" or newer, Apple silicon only), Windows 10 and 11
 - Unreal Engine 5.4, and 5.5, and 5.6
-> [!WARNING]
-> A change in XCode 16.3 broke Unreal builds (not just Tempo). This is [fixed](https://github.com/EpicGames/UnrealEngine/commit/36e6414349658ce0ef27d3733a764e392b410a7c)  in 5.6, but we don't expect Epic will make a 5.4 or 5.5 hotfix for it. We recommend downgrading to Xcode to 16.2 on Mac if you must use 5.4 or 5.5 on Mac. You can find previous Xcode releases [here](https://developer.apple.com/download/all/) (you'll need a free Apple developer account).
 
 ## Prerequisites
 - Linux:
