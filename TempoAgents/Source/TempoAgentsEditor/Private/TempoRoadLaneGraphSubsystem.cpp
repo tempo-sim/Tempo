@@ -39,7 +39,7 @@ bool UTempoRoadLaneGraphSubsystem::TryGenerateZoneShapeComponents() const
 		return false;
 	}
 
-	ZoneGraphSubsystem->ClearLaneProfiles();
+	ZoneGraphSubsystem->ClearDynamicLaneProfiles();
 
 	// Allow all Intersections to setup their data, first.
 	for (AActor* Actor : TActorRange<AActor>(GetWorld()))
@@ -517,7 +517,7 @@ const FZoneLaneProfile* UTempoRoadLaneGraphSubsystem::GetLaneProfile(const AActo
 		return nullptr;
 	}
 
-	return ZoneGraphSubsystem->FindOrAddLaneProfile(DynamicLaneProfile);
+	return ZoneGraphSubsystem->FindOrAddDynamicLaneProfile(DynamicLaneProfile);
 }
 
 const FZoneLaneProfile* UTempoRoadLaneGraphSubsystem::GetLaneProfileByName(FName LaneProfileName) const
@@ -973,7 +973,7 @@ const FZoneLaneProfile* UTempoRoadLaneGraphSubsystem::GetLaneProfileForCrosswalk
 		return nullptr;
 	}
 
-	return ZoneGraphSubsystem->FindOrAddLaneProfile(DynamicLaneProfile);
+	return ZoneGraphSubsystem->FindOrAddDynamicLaneProfile(DynamicLaneProfile);
 }
 
 FZoneLaneProfile UTempoRoadLaneGraphSubsystem::CreateCrosswalkIntersectionConnectorDynamicLaneProfile(const AActor& CrosswalkQueryActor, int32 CrosswalkRoadModuleIndex) const
@@ -1018,7 +1018,7 @@ const FZoneLaneProfile* UTempoRoadLaneGraphSubsystem::GetCrosswalkIntersectionCo
 		return nullptr;
 	}
 
-	return ZoneGraphSubsystem->FindOrAddLaneProfile(DynamicLaneProfile);
+	return ZoneGraphSubsystem->FindOrAddDynamicLaneProfile(DynamicLaneProfile);
 }
 
 FZoneLaneProfile UTempoRoadLaneGraphSubsystem::CreateCrosswalkIntersectionEntranceDynamicLaneProfile(const AActor& CrosswalkQueryActor, int32 CrosswalkIntersectionIndex, int32 CrosswalkIntersectionConnectionIndex) const
@@ -1063,7 +1063,7 @@ const FZoneLaneProfile* UTempoRoadLaneGraphSubsystem::GetCrosswalkIntersectionEn
 		return nullptr;
 	}
 
-	return ZoneGraphSubsystem->FindOrAddLaneProfile(DynamicLaneProfile);
+	return ZoneGraphSubsystem->FindOrAddDynamicLaneProfile(DynamicLaneProfile);
 }
 
 //
