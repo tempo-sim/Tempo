@@ -25,7 +25,7 @@ index 95a5cf1..b709dc1 100644
          const float TotalWidth = LaneProfile->GetLanesTotalWidth();
          const float HalfWidth = TotalWidth * 0.5f;
 diff --git Source/ZoneGraph/Private/ZoneGraphSettings.cpp Source/ZoneGraph/Private/ZoneGraphSettings.cpp
-index e780038..c9c1dfe 100644
+index e780038..4ea4dbe 100644
 --- Source/ZoneGraph/Private/ZoneGraphSettings.cpp
 +++ Source/ZoneGraph/Private/ZoneGraphSettings.cpp
 @@ -3,6 +3,9 @@
@@ -59,7 +59,7 @@ index e780038..c9c1dfe 100644
 +		{
 +			if (const UZoneGraphSubsystem* ZoneGraphSubsystem = World->GetSubsystem<UZoneGraphSubsystem>())
 +			{
-+				return ZoneGraphSubsystem->GetLaneProfileByRef(LaneProfileRef);
++				return ZoneGraphSubsystem->GetDynamicLaneProfileByRef(LaneProfileRef);
 +			}
 +		}
 +	}
@@ -84,7 +84,7 @@ index e780038..c9c1dfe 100644
 +		{
 +			if (const UZoneGraphSubsystem* ZoneGraphSubsystem = World->GetSubsystem<UZoneGraphSubsystem>())
 +			{
-+				return ZoneGraphSubsystem->GetLaneProfileByID(ID);
++				return ZoneGraphSubsystem->GetDynamicLaneProfileByID(ID);
 +			}
 +		}
 +	}
@@ -94,7 +94,7 @@ index e780038..c9c1dfe 100644
  
  #if WITH_EDITOR
 diff --git Source/ZoneGraph/Private/ZoneGraphSubsystem.cpp Source/ZoneGraph/Private/ZoneGraphSubsystem.cpp
-index 7281448..5f671ec 100644
+index 7281448..9af4462 100644
 --- Source/ZoneGraph/Private/ZoneGraphSubsystem.cpp
 +++ Source/ZoneGraph/Private/ZoneGraphSubsystem.cpp
 @@ -11,6 +11,7 @@
@@ -105,18 +105,18 @@ index 7281448..5f671ec 100644
  #if WITH_EDITOR
  #include "LevelEditorViewport.h"
  #endif
-@@ -461,6 +462,81 @@ FBox UZoneGraphSubsystem::GetCombinedBounds() const
+@@ -461,6 +462,78 @@ FBox UZoneGraphSubsystem::GetCombinedBounds() const
  	return CombinedBounds;
  }
  
-+const FZoneLaneProfile* UZoneGraphSubsystem::GetLaneProfileByRef(const FZoneLaneProfileRef& LaneProfileRef) const
++const FZoneLaneProfile* UZoneGraphSubsystem::GetDynamicLaneProfileByRef(const FZoneLaneProfileRef& LaneProfileRef) const
 +{
 +	for (const FRegisteredZoneGraphData& RegisteredData : RegisteredZoneGraphData)
 +	{
 +		if (RegisteredData.ZoneGraphData)
 +		{
 +			const FZoneGraphStorage& Storage = RegisteredData.ZoneGraphData->GetStorage();
-+			if (const FZoneLaneProfile* ZoneLaneProfile = Storage.LaneProfiles.FindByPredicate([&LaneProfileRef](const FZoneLaneProfile& LaneProfile) -> bool { return LaneProfile.ID == LaneProfileRef.ID; }))
++			if (const FZoneLaneProfile* ZoneLaneProfile = RegisteredData.ZoneGraphData->GetDynamicLaneProfiles().FindByPredicate([&LaneProfileRef](const FZoneLaneProfile& LaneProfile) -> bool { return LaneProfile.ID == LaneProfileRef.ID; }))
 +			{
 +				return ZoneLaneProfile;
 +			}
@@ -126,14 +126,13 @@ index 7281448..5f671ec 100644
 +	return nullptr;
 +}
 +
-+const FZoneLaneProfile* UZoneGraphSubsystem::GetLaneProfileByID(const FGuid& ID) const
++const FZoneLaneProfile* UZoneGraphSubsystem::GetDynamicLaneProfileByID(const FGuid& ID) const
 +{
 +	for (const FRegisteredZoneGraphData& RegisteredData : RegisteredZoneGraphData)
 +	{
 +		if (RegisteredData.ZoneGraphData)
 +		{
-+			const FZoneGraphStorage& Storage = RegisteredData.ZoneGraphData->GetStorage();
-+			if (const FZoneLaneProfile* ZoneLaneProfile = Storage.LaneProfiles.FindByPredicate([&ID](const FZoneLaneProfile& LaneProfile) -> bool { return LaneProfile.ID == ID; }))
++			if (const FZoneLaneProfile* ZoneLaneProfile = RegisteredData.ZoneGraphData->GetDynamicLaneProfiles().FindByPredicate([&ID](const FZoneLaneProfile& LaneProfile) -> bool { return LaneProfile.ID == ID; }))
 +			{
 +				return ZoneLaneProfile;
 +			}
@@ -143,7 +142,7 @@ index 7281448..5f671ec 100644
 +	return nullptr;
 +}
 +
-+const FZoneLaneProfile* UZoneGraphSubsystem::FindOrAddLaneProfile(const FZoneLaneProfile& LaneProfile)
++const FZoneLaneProfile* UZoneGraphSubsystem::FindOrAddDynamicLaneProfile(const FZoneLaneProfile& LaneProfile)
 +{
 +	// Ensure there is at least one ZoneGraphData Actor in the world.
 +	UWorld* World = GetWorld();
@@ -159,27 +158,25 @@ index 7281448..5f671ec 100644
 +	{
 +		if (RegisteredData.ZoneGraphData)
 +		{
-+			FZoneGraphStorage& Storage = RegisteredData.ZoneGraphData->GetStorageMutable();
-+			if (const FZoneLaneProfile* ZoneLaneProfile = Storage.LaneProfiles.FindByPredicate([&LaneProfile](const FZoneLaneProfile& OtherLaneProfile) -> bool { return OtherLaneProfile.Lanes == LaneProfile.Lanes; }))
++			if (const FZoneLaneProfile* ZoneLaneProfile = RegisteredData.ZoneGraphData->GetDynamicLaneProfiles().FindByPredicate([&LaneProfile](const FZoneLaneProfile& OtherLaneProfile) -> bool { return OtherLaneProfile.Lanes == LaneProfile.Lanes; }))
 +			{
 +				ToReturn = ZoneLaneProfile;
 +				continue;
 +			}
-+			ToReturn = &Storage.LaneProfiles.Add_GetRef(LaneProfile);
++			ToReturn = RegisteredData.ZoneGraphData->AddDynamicLaneProfile(LaneProfile);
 +		}
 +	}
 +
 +	return ToReturn;
 +}
 +
-+void UZoneGraphSubsystem::ClearLaneProfiles() const
++void UZoneGraphSubsystem::ClearDynamicLaneProfiles() const
 +{
 +	for (const FRegisteredZoneGraphData& RegisteredData : RegisteredZoneGraphData)
 +	{
 +		if (RegisteredData.ZoneGraphData)
 +		{
-+			FZoneGraphStorage& Storage = RegisteredData.ZoneGraphData->GetStorageMutable();
-+			Storage.LaneProfiles.Empty();
++			RegisteredData.ZoneGraphData->ClearDynamicLaneProfiles();
 +		}
 +	}
 +}
@@ -214,6 +211,34 @@ index cc9d590..0006120 100644
  
  #endif // !UE_BUILD_SHIPPING
 -
+diff --git Source/ZoneGraph/Public/ZoneGraphData.h Source/ZoneGraph/Public/ZoneGraphData.h
+index f248e5b..70b3250 100644
+--- Source/ZoneGraph/Public/ZoneGraphData.h
++++ Source/ZoneGraph/Public/ZoneGraphData.h
+@@ -50,6 +50,12 @@ public:
+ 	/** Sets Combined hash of all ZoneShapes that were used to build the data. */
+ 	void SetCombinedShapeHash(const uint32 Hash) { CombinedShapeHash = Hash; }
+ 
++	const TArray<FZoneLaneProfile>& GetDynamicLaneProfiles() { return DynamicLaneProfiles; }
++
++	FZoneLaneProfile* AddDynamicLaneProfile(const FZoneLaneProfile& Profile) { return &DynamicLaneProfiles.Add_GetRef(Profile); }
++
++	void ClearDynamicLaneProfiles() { DynamicLaneProfiles.Empty(); }
++
+ protected:
+ 	bool RegisterWithSubsystem();
+ 	bool UnregisterWithSubsystem();
+@@ -66,6 +72,10 @@ protected:
+ 	UPROPERTY()
+ 	FZoneGraphStorage ZoneStorage;
+ 
++	// Storage for lane profiles created dynamically, other than those stored in settings.
++	UPROPERTY(VisibleAnywhere, Category = Display);
++	TArray<FZoneLaneProfile> DynamicLaneProfiles;
++
+ 	/** Critical section to prevent rendering of the zone graph storage data while it's getting rebuilt */
+ 	mutable FCriticalSection ZoneStorageLock;
+ 
 diff --git Source/ZoneGraph/Public/ZoneGraphSettings.h Source/ZoneGraph/Public/ZoneGraphSettings.h
 index 3f69fb8..a8141ff 100644
 --- Source/ZoneGraph/Public/ZoneGraphSettings.h
@@ -237,45 +262,28 @@ index 3f69fb8..a8141ff 100644
 \ No newline at end of file
 +};
 diff --git Source/ZoneGraph/Public/ZoneGraphSubsystem.h Source/ZoneGraph/Public/ZoneGraphSubsystem.h
-index 627d10a..2ca0caa 100644
+index 627d10a..7b2050b 100644
 --- Source/ZoneGraph/Public/ZoneGraphSubsystem.h
 +++ Source/ZoneGraph/Public/ZoneGraphSubsystem.h
-@@ -111,7 +111,19 @@ public:
- 
+@@ -112,6 +112,18 @@ public:
  	// Returns bounds of all ZoneGraph data.
  	FBox GetCombinedBounds() const;
--	
+ 	
++	// Returns the dynamic lane profile indicated by the lane profile ref.
++	const FZoneLaneProfile* GetDynamicLaneProfileByRef(const FZoneLaneProfileRef& LaneProfileRef) const;
 +
-+	// Returns the ZoneLaneProfile indicated by the lane profile ref.
-+	const FZoneLaneProfile* GetLaneProfileByRef(const FZoneLaneProfileRef& LaneProfileRef) const;
++	// Returns the dynamic lane profile indicated by the lane profile ID.
++	const FZoneLaneProfile* GetDynamicLaneProfileByID(const FGuid& ID) const;
 +
-+	// Returns the ZoneLaneProfile indicated by the lane profile ID.
-+	const FZoneLaneProfile* GetLaneProfileByID(const FGuid& ID) const;
++	// Find the dynamic lane profile ref for the indicated lane profile, adding it to the known profiles if necessary.
++	const FZoneLaneProfile* FindOrAddDynamicLaneProfile(const FZoneLaneProfile& LaneProfile);
 +
-+	// Find the lane profile ref for the indicated lane profile, adding it to the known profiles if necessary.
-+	const FZoneLaneProfile* FindOrAddLaneProfile(const FZoneLaneProfile& LaneProfile);
-+
-+	// Find the lane profile ref for the indicated lane profile, adding it to the known profiles if necessary.
-+	void ClearLaneProfiles() const;
++	// Remove all dynamic lane profiles.
++	void ClearDynamicLaneProfiles() const;
 +
  	// Tags
  	
  	// Returns tag based on name.
-diff --git Source/ZoneGraph/Public/ZoneGraphTypes.h Source/ZoneGraph/Public/ZoneGraphTypes.h
-index 5b7c29b..0dbab8b 100644
---- Source/ZoneGraph/Public/ZoneGraphTypes.h
-+++ Source/ZoneGraph/Public/ZoneGraphTypes.h
-@@ -735,6 +735,10 @@ struct ZONEGRAPH_API FZoneGraphStorage
- 	UPROPERTY()
- 	TArray<FZoneLaneLinkData> LaneLinks;
- 
-+	// Storage for lane profiles created dynamically, other than those stored in settings.
-+	UPROPERTY();
-+	TArray<FZoneLaneProfile> LaneProfiles;
-+
- 	// Bounding box of all zones.
- 	UPROPERTY()
- 	FBox Bounds = FBox(ForceInit);
 diff --git Source/ZoneGraphEditor/Private/ZoneLaneProfileRefDetails.cpp Source/ZoneGraphEditor/Private/ZoneLaneProfileRefDetails.cpp
 index 34dde8e..e2e82a7 100644
 --- Source/ZoneGraphEditor/Private/ZoneLaneProfileRefDetails.cpp
