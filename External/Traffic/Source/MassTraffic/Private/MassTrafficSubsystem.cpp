@@ -203,6 +203,11 @@ void UMassTrafficSubsystem::Deinitialize()
 
 	EntityManager.Reset();
 
+	for (TActorIterator<AMassSpawner> SpawnerIt(GetWorld()); SpawnerIt; ++SpawnerIt)
+	{
+		SpawnerIt->OnSpawningFinishedEvent.RemoveAll(this);
+	}
+
 	Super::Deinitialize();
 }
 
