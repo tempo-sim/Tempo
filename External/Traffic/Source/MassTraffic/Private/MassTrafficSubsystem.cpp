@@ -18,6 +18,9 @@
 #if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 6
 #include "MassProcessingContext.h"
 #endif
+#include "MassSpawner.h"
+#include "MassTrafficFindNextVehicleProcessor.h"
+#include "MassTrafficUpdateDistanceToNearestObstacleProcessor.h"
 #include "Math/UnitConversion.h"
 #include "ZoneGraphDelegates.h"
 #include "ZoneGraphQuery.h"
@@ -125,6 +128,54 @@ void UMassTrafficSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 
 	// Execute any field operations subclassing from UMassTrafficBeginPlayFieldOperationBase 
 	PerformFieldOperation(UMassTrafficBeginPlayFieldOperationBase::StaticClass());
+
+	for (TActorIterator<AMassSpawner> SpawnerIt(GetWorld()); SpawnerIt; ++SpawnerIt)
+	{
+		SpawnerIt->OnSpawningFinishedEvent.AddUniqueDynamic(this, &UMassTrafficSubsystem::OnSpawningFinished);
+	}
+}
+
+void UMassTrafficSubsystem::OnSpawningFinished()
+{
+	TArray<UMassProcessor*> Processors;
+	Processors.Add(GetPostSpawnProcessor(UMassTrafficFindNextVehicleProcessor::StaticClass()));
+	Processors.Add(GetPostSpawnProcessor(UMassTrafficUpdateDistanceToNearestObstacleProcessor::StaticClass()));
+
+	FMassProcessingContext ProcessingContext(EntityManager, /*TimeDelta=*/0.0f);
+	UE::Mass::Executor::RunProcessorsView(Processors, ProcessingContext);
+}
+
+UMassProcessor* UMassTrafficSubsystem::GetPostSpawnProcessor(TSubclassOf<UMassProcessor> ProcessorClass)
+{
+	if (!ProcessorClass)
+	{
+		return nullptr;
+	}
+
+	TObjectPtr<UMassProcessor>* const Initializer = PostSpawnProcessors.FindByPredicate([ProcessorClass](const UMassProcessor* Processor)
+		{
+			return Processor && Processor->GetClass() == ProcessorClass;
+		}
+	);
+
+	if (Initializer)
+	{
+		return *Initializer;
+	}
+
+	UMassProcessor* NewInitializer = NewObject<UMassProcessor>(this, ProcessorClass);
+	if (ensureMsgf(EntityManager, TEXT("Unable to determine the current MassEntityManager")))
+	{
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+		NewInitializer->Initialize(*this);
+#else
+		NewInitializer->CallInitialize(this, EntityManager->AsShared());
+#endif
+		PostSpawnProcessors.Add(NewInitializer);
+		return NewInitializer;
+	}
+
+	return nullptr;
 }
 
 void UMassTrafficSubsystem::PostInitialize()
@@ -151,6 +202,11 @@ void UMassTrafficSubsystem::Deinitialize()
 	UE::ZoneGraphDelegates::OnPreZoneGraphDataRemoved.Remove(OnPreZoneGraphDataRemovedHandle);
 
 	EntityManager.Reset();
+
+	for (TActorIterator<AMassSpawner> SpawnerIt(GetWorld()); SpawnerIt; ++SpawnerIt)
+	{
+		SpawnerIt->OnSpawningFinishedEvent.RemoveAll(this);
+	}
 
 	Super::Deinitialize();
 }
