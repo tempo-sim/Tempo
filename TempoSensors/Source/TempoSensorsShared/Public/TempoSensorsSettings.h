@@ -96,10 +96,10 @@ private:
 	FName OverridingLabelRowName = NAME_None;
 
 	// Whether to enable a hack to work around a buffer overrun bug in FRayTracingScene.
-	UPROPERTY(EditAnywhere, Config, AdvancedDisplay)
+	UPROPERTY(EditAnywhere, Config, Category="Advanced")
 	bool bEnableRayTracingSceneReadbackBuffersOverrunWorkaround = true;
 
 	// The size of buffer to use as an override in FRayTracingScene, if enabled.
-	UPROPERTY(EditAnywhere, Config, AdvancedDisplay, meta=(EditCondition=bEnableRayTracingSceneBufferOverrunWorkaround))
+	UPROPERTY(EditAnywhere, Config, Category="Advanced", meta=(EditCondition=bEnableRayTracingSceneReadbackBuffersOverrunWorkaround))
 	uint32 RayTracingSceneMaxReadbackBuffersOverride = 40;
 };

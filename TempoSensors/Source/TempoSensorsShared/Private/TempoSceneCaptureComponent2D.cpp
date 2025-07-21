@@ -47,7 +47,6 @@ void UTempoSceneCaptureComponent2D::UpdateSceneCaptureContents(FSceneInterface* 
 // When only rendering the main viewport the default size (4) is sufficient.
 // But when running potentially many scene captures per frame they can easily be overrun, leading to reuse of in-use readbacks and crashes.
 // Here we are "hacking" into the persistent RayTracingScene of the scene and increasing the size of these buffers.
-// We have filed UE-XXXXXX to report this.
 #if RHI_RAYTRACING && ENGINE_MAJOR_VERSION == 5 && ((ENGINE_MINOR_VERSION == 5 && STATS) || ENGINE_MINOR_VERSION > 5)
 	const UTempoSensorsSettings* TempoSensorsSettings = GetDefault<UTempoSensorsSettings>();
 	if (TempoSensorsSettings && TempoSensorsSettings->GetRayTracingSceneReadbackBuffersOverrunWorkaroundEnabled())
@@ -81,9 +80,9 @@ void UTempoSceneCaptureComponent2D::UpdateSceneCaptureContents(FSceneInterface* 
 #endif
 
 	if (!TextureTarget)
-  {
+	{
 		return;
-  }
+	}
 
 	if (TextureTarget->SizeX != SizeXY.X || TextureTarget->SizeY != SizeXY.Y)
 	{
