@@ -42,6 +42,10 @@ public:
 	int32 GetMaxCameraRenderBufferSize() const { return MaxCameraRenderBufferSize; }
 	FTempoSensorsLabelSettingsChanged TempoSensorsLabelSettingsChangedEvent;
 
+	// RayTracingScene Buffer Overrun Workaround
+	bool GetRayTracingSceneReadbackBuffersOverrunWorkaroundEnabled() const { return bEnableRayTracingSceneReadbackBuffersOverrunWorkaround; }
+	int32 GetRayTracingSceneMaxReadbackBuffersOverride() const { return RayTracingSceneMaxReadbackBuffersOverride; }
+
 #if WITH_EDITOR
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 #endif
@@ -90,4 +94,12 @@ private:
 	// Anywhere a non-zero subsurface color is found on an object of type OverridableLabelRowName, this label will be used instead.
 	UPROPERTY(EditAnywhere, Config, Category="Camera")
 	FName OverridingLabelRowName = NAME_None;
+
+	// Whether to enable a hack to work around a buffer overrun bug in FRayTracingScene.
+	UPROPERTY(EditAnywhere, Config, AdvancedDisplay)
+	bool bEnableRayTracingSceneReadbackBuffersOverrunWorkaround = true;
+
+	// The size of buffer to use as an override in FRayTracingScene, if enabled.
+	UPROPERTY(EditAnywhere, Config, AdvancedDisplay, meta=(EditCondition=bEnableRayTracingSceneBufferOverrunWorkaround))
+	int32 RayTracingSceneMaxReadbackBuffersOverride = 40;
 };
