@@ -52,9 +52,9 @@ void UTempoSceneCaptureComponent2D::UpdateSceneCaptureContents(FSceneInterface* 
 	const UTempoSensorsSettings* TempoSensorsSettings = GetDefault<UTempoSensorsSettings>();
 	if (TempoSensorsSettings && TempoSensorsSettings->GetRayTracingSceneReadbackBuffersOverrunWorkaroundEnabled())
 	{
-		const int32 NewMaxReadbackBuffers = TempoSensorsSettings->GetRayTracingSceneMaxReadbackBuffersOverride();
+		const uint32 NewMaxReadbackBuffers = TempoSensorsSettings->GetRayTracingSceneMaxReadbackBuffersOverride();
 		FRayTracingScene* RayTracingScene = &Scene->GetRenderScene()->RayTracingScene;
-		const size_t PrevReadbackBuffersSize = RayTracingScene->StatsReadbackBuffers.Num();
+		const uint32 PrevReadbackBuffersSize = RayTracingScene->StatsReadbackBuffers.Num();
 		if (PrevReadbackBuffersSize < NewMaxReadbackBuffers)
 		{
 			// MaxReadbackBuffers is not only private but const, so we need an additional trick.
@@ -79,6 +79,11 @@ void UTempoSceneCaptureComponent2D::UpdateSceneCaptureContents(FSceneInterface* 
 		}
 	}
 #endif
+
+	if (!TextureTarget)
+  {
+		return;
+  }
 
 	if (TextureTarget->SizeX != SizeXY.X || TextureTarget->SizeY != SizeXY.Y)
 	{

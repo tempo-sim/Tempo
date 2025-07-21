@@ -44,7 +44,7 @@ public:
 
 	// RayTracingScene Buffer Overrun Workaround
 	bool GetRayTracingSceneReadbackBuffersOverrunWorkaroundEnabled() const { return bEnableRayTracingSceneReadbackBuffersOverrunWorkaround; }
-	int32 GetRayTracingSceneMaxReadbackBuffersOverride() const { return RayTracingSceneMaxReadbackBuffersOverride; }
+	uint32 GetRayTracingSceneMaxReadbackBuffersOverride() const { return RayTracingSceneMaxReadbackBuffersOverride; }
 
 #if WITH_EDITOR
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
@@ -101,5 +101,5 @@ private:
 
 	// The size of buffer to use as an override in FRayTracingScene, if enabled.
 	UPROPERTY(EditAnywhere, Config, AdvancedDisplay, meta=(EditCondition=bEnableRayTracingSceneBufferOverrunWorkaround))
-	int32 RayTracingSceneMaxReadbackBuffersOverride = 40;
+	uint32 RayTracingSceneMaxReadbackBuffersOverride = 40;
 };
