@@ -10,6 +10,13 @@
 #include "Engine/TextureRenderTarget2D.h"
 #include "Kismet/GameplayStatics.h"
 
+#if RHI_RAYTRACING && ENGINE_MAJOR_VERSION == 5 && ((ENGINE_MINOR_VERSION == 5 && STATS) || ENGINE_MINOR_VERSION > 5)
+// Hack to get access to private members of FRayTracingScene. See comment in UpdateSceneCaptureContents for more detail.
+#define private public
+#include "RayTracing/RayTracingScene.h"
+#include "ScenePrivate.h"
+#endif
+
 UTempoSceneCaptureComponent2D::UTempoSceneCaptureComponent2D()
 {
 	PrimaryComponentTick.bStartWithTickEnabled = false;
@@ -35,6 +42,54 @@ void UTempoSceneCaptureComponent2D::UpdateSceneCaptureContents(FSceneInterface* 
 #endif
 {
 	TextureInitFence.Wait();
+
+// FRayTracingScene includes buffers, StatsReadbackBuffers and FeedbackReadback, of fixed size.
+// When only rendering the main viewport the default size (4) is sufficient.
+// But when running potentially many scene captures per frame they can easily be overrun, leading to reuse of in-use readbacks and crashes.
+// Here we are "hacking" into the persistent RayTracingScene of the scene and increasing the size of these buffers.
+#if RHI_RAYTRACING && ENGINE_MAJOR_VERSION == 5 && ((ENGINE_MINOR_VERSION == 5 && STATS) || ENGINE_MINOR_VERSION > 5)
+	const UTempoSensorsSettings* TempoSensorsSettings = GetDefault<UTempoSensorsSettings>();
+	if (TempoSensorsSettings && TempoSensorsSettings->GetRayTracingSceneReadbackBuffersOverrunWorkaroundEnabled())
+	{
+		const uint32 NewMaxReadbackBuffers = TempoSensorsSettings->GetRayTracingSceneMaxReadbackBuffersOverride();
+		FRayTracingScene* RayTracingScene = &Scene->GetRenderScene()->RayTracingScene;
+		if (RayTracingScene->MaxReadbackBuffers < NewMaxReadbackBuffers)
+		{
+			// MaxReadbackBuffers is not only private but const, so we need an additional trick.
+			size_t MaxReadbackBuffersOffset = offsetof(FRayTracingScene, MaxReadbackBuffers);
+			*(reinterpret_cast<char*>(RayTracingScene) + MaxReadbackBuffersOffset) = NewMaxReadbackBuffers;
+		}
+
+		const uint32 PrevStatsReadbackBuffersSize = RayTracingScene->StatsReadbackBuffers.Num();
+		if (PrevStatsReadbackBuffersSize < NewMaxReadbackBuffers)
+		{
+			RayTracingScene->StatsReadbackBuffers.SetNum(NewMaxReadbackBuffers);
+			for (uint32 Index = PrevStatsReadbackBuffersSize; Index < NewMaxReadbackBuffers; ++Index)
+			{
+				RayTracingScene->StatsReadbackBuffers[Index] = new FRHIGPUBufferReadback(TEXT("FRayTracingScene::StatsReadbackBuffer"));
+			}
+		}
+
+		// FeedbackReadback added in 5.6
+#if ENGINE_MINOR_VERSION > 5
+		const uint32 PrevFeedbackReadbackBuffersSize = RayTracingScene->FeedbackReadback.Num();
+		if (PrevFeedbackReadbackBuffersSize < NewMaxReadbackBuffers)
+		{
+			RayTracingScene->FeedbackReadback.SetNum(NewMaxReadbackBuffers);
+			for (uint32 Index = PrevFeedbackReadbackBuffersSize; Index < NewMaxReadbackBuffers; ++Index)
+			{
+				RayTracingScene->FeedbackReadback[Index].GeometryHandleReadbackBuffer = new FRHIGPUBufferReadback(TEXT("FRayTracingScene::FeedbackReadbackBuffer::GeometryHandles"));
+				RayTracingScene->FeedbackReadback[Index].GeometryCountReadbackBuffer = new FRHIGPUBufferReadback(TEXT("FRayTracingScene::FeedbackReadbackBuffer::GeometryCount"));			
+			}
+		}
+#endif
+	}
+#endif
+
+	if (!TextureTarget)
+	{
+		return;
+	}
 
 	if (TextureTarget->SizeX != SizeXY.X || TextureTarget->SizeY != SizeXY.Y)
 	{
