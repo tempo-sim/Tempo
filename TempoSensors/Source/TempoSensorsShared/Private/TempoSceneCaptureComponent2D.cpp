@@ -53,23 +53,30 @@ void UTempoSceneCaptureComponent2D::UpdateSceneCaptureContents(FSceneInterface* 
 	{
 		const uint32 NewMaxReadbackBuffers = TempoSensorsSettings->GetRayTracingSceneMaxReadbackBuffersOverride();
 		FRayTracingScene* RayTracingScene = &Scene->GetRenderScene()->RayTracingScene;
-		const uint32 PrevReadbackBuffersSize = RayTracingScene->StatsReadbackBuffers.Num();
-		if (PrevReadbackBuffersSize < NewMaxReadbackBuffers)
+		if (RayTracingScene->MaxReadbackBuffers < NewMaxReadbackBuffers)
 		{
 			// MaxReadbackBuffers is not only private but const, so we need an additional trick.
 			size_t MaxReadbackBuffersOffset = offsetof(FRayTracingScene, MaxReadbackBuffers);
 			*(reinterpret_cast<char*>(RayTracingScene) + MaxReadbackBuffersOffset) = NewMaxReadbackBuffers;
+		}
 
+		const uint32 PrevStatsReadbackBuffersSize = RayTracingScene->StatsReadbackBuffers.Num();
+		if (PrevStatsReadbackBuffersSize < NewMaxReadbackBuffers)
+		{
 			RayTracingScene->StatsReadbackBuffers.SetNum(NewMaxReadbackBuffers);
-			for (uint32 Index = PrevReadbackBuffersSize; Index < NewMaxReadbackBuffers; ++Index)
+			for (uint32 Index = PrevStatsReadbackBuffersSize; Index < NewMaxReadbackBuffers; ++Index)
 			{
 				RayTracingScene->StatsReadbackBuffers[Index] = new FRHIGPUBufferReadback(TEXT("FRayTracingScene::StatsReadbackBuffer"));
 			}
+		}
 
-			// FeedbackReadback added in 5.6
+		// FeedbackReadback added in 5.6
 #if ENGINE_MINOR_VERSION > 5
+		const uint32 PrevFeedbackReadbackBuffersSize = RayTracingScene->FeedbackReadback.Num();
+		if (PrevFeedbackReadbackBuffersSize < NewMaxReadbackBuffers)
+		{
 			RayTracingScene->FeedbackReadback.SetNum(NewMaxReadbackBuffers);
-			for (uint32 Index = 0; Index < NewMaxReadbackBuffers; ++Index)
+			for (uint32 Index = PrevFeedbackReadbackBuffersSize; Index < NewMaxReadbackBuffers; ++Index)
 			{
 				RayTracingScene->FeedbackReadback[Index].GeometryHandleReadbackBuffer = new FRHIGPUBufferReadback(TEXT("FRayTracingScene::FeedbackReadbackBuffer::GeometryHandles"));
 				RayTracingScene->FeedbackReadback[Index].GeometryCountReadbackBuffer = new FRHIGPUBufferReadback(TEXT("FRayTracingScene::FeedbackReadbackBuffer::GeometryCount"));			
