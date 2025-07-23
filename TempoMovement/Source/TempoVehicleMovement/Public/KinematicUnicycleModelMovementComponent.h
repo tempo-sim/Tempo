@@ -22,7 +22,7 @@ public:
 
 	virtual float GetLinearVelocity() override { return LinearVelocity; }
 
-	virtual FVector GetAngularVelocity() override { return FVector(0.0, 0.0, AngularVelocity); }
+	virtual FVector GetAngularVelocity() const override { return FVector(0.0, 0.0, AngularVelocity); }
 	
 	virtual void HandleDrivingCommand(const FDrivingCommand& Command) override;
 

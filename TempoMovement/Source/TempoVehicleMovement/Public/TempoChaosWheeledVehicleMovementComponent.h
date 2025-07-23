@@ -20,7 +20,7 @@ public:
 
 	virtual float GetLinearVelocity() override { return VehicleState.ForwardSpeed; }
 
-	virtual FVector GetAngularVelocity() override { return VehicleState.VehicleWorldAngularVelocity; }
+	virtual FVector GetAngularVelocity() const override { return VehicleState.VehicleWorldAngularVelocity; }
 	
 	virtual void HandleDrivingCommand(const FDrivingCommand& Command) override;
 
