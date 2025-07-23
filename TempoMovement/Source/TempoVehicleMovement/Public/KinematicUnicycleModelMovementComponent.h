@@ -8,15 +8,15 @@
 #include "CoreMinimal.h"
 #include "GameFramework/PawnMovementComponent.h"
 
-#include "KinematicBicycleModelMovementComponent.generated.h"
+#include "KinematicUnicycleModelMovementComponent.generated.h"
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TEMPOVEHICLEMOVEMENT_API UKinematicBicycleModelMovementComponent : public UPawnMovementComponent, public ITempoVehicleMovementInterface, public ITempoMovementInterface
+class TEMPOVEHICLEMOVEMENT_API UKinematicUnicycleModelMovementComponent : public UPawnMovementComponent, public ITempoVehicleMovementInterface, public ITempoMovementInterface
 {
 	GENERATED_BODY()
 
 public:
-	UKinematicBicycleModelMovementComponent();
+	UKinematicUnicycleModelMovementComponent();
 
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
@@ -28,11 +28,7 @@ public:
 
 protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	float Wheelbase = 100.0; // CM
-
-	// The normalized distance (as a fraction of the wheelbase) from the rear axle to the origin.
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	float AxleRatio = 0.5;
+	float SteeringAngularVelocityFactor = 1.0; // CM
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	bool bReverseEnabled = false;
@@ -45,6 +41,6 @@ protected:
 	
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite)
 	float SteeringAngle = 0.0; // Degrees
-	
+
 	TOptional<FDrivingCommand> LatestCommand;
 };

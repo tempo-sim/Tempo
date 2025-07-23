@@ -1,18 +1,18 @@
 // Copyright Tempo Simulation, LLC. All Rights Reserved
 
-#include "KinematicBicycleModelMovementComponent.h"
+#include "KinematicUnicycleModelMovementComponent.h"
 
-UKinematicBicycleModelMovementComponent::UKinematicBicycleModelMovementComponent()
+UKinematicUnicycleModelMovementComponent::UKinematicUnicycleModelMovementComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
 }
 
-void UKinematicBicycleModelMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UKinematicUnicycleModelMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
 	// Current State
-	const float HeadingAngle = GetOwner()->GetActorRotation().Yaw;
+	const float HeadingAngle = FMath::DegreesToRadians(GetOwner()->GetActorRotation().Yaw);
 
 	// Remap and clamp Command (if any).
 	float Acceleration = 0.0;
@@ -35,16 +35,15 @@ void UKinematicBicycleModelMovementComponent::TickComponent(float DeltaTime, ELe
 	{
 		LinearVelocity = FMath::Max(LinearVelocity, 0.0);
 	}
-	const float RearAxleDistance = AxleRatio * Wheelbase;
-	const float Beta = FMath::DegreesToRadians(HeadingAngle) + FMath::Atan2(RearAxleDistance * FMath::Tan(FMath::DegreesToRadians(SteeringAngle)),Wheelbase);
-	Velocity = LinearVelocity * FVector(FMath::Cos(Beta), FMath::Sin(Beta), 0.0);
-	AngularVelocity = FMath::RadiansToDegrees(LinearVelocity * FMath::Sin(FMath::DegreesToRadians(SteeringAngle)) / Wheelbase);
+
+	Velocity = LinearVelocity * FVector(FMath::Cos(HeadingAngle), FMath::Sin(HeadingAngle), 0.0);
+	AngularVelocity = SteeringAngularVelocityFactor * SteeringAngle;
 
 	GetOwner()->AddActorWorldOffset(FVector(DeltaTime * Velocity));
 	GetOwner()->AddActorWorldRotation(FRotator(0.0, DeltaTime * AngularVelocity, 0.0));
 }
 
-void UKinematicBicycleModelMovementComponent::HandleDrivingCommand(const FDrivingCommand& Command)
+void UKinematicUnicycleModelMovementComponent::HandleDrivingCommand(const FDrivingCommand& Command)
 {
 	LatestCommand = Command;
 }
