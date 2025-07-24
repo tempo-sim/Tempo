@@ -22,6 +22,23 @@ void UKinematicUnicycleModelMovementComponent::TickComponent(float DeltaTime, EL
 		SteeringAngle = LatestCommand.GetValue().SteeringAngle;
 		LatestCommand.Reset();
 	}
+	else
+	{
+		FVector InputVector = ConsumeInputVector();
+		if (!InputVector.IsZero())
+		{
+			Acceleration = AccelerationInputMultiplier * InputVector.X;
+			SteeringAngle = SteeringInputMultiplier * InputVector.Y;
+		}
+		else
+		{
+			const APawn* Pawn = GetPawnOwner();
+			if (Cast<APlayerController>(Pawn->GetController()))
+			{
+				SteeringAngle = 0.0;
+			}
+		}
+	}
 	
 	// Update state.
 	float DeltaVelocity = DeltaTime * Acceleration;
@@ -37,7 +54,7 @@ void UKinematicUnicycleModelMovementComponent::TickComponent(float DeltaTime, EL
 	}
 
 	Velocity = LinearVelocity * FVector(FMath::Cos(HeadingAngle), FMath::Sin(HeadingAngle), 0.0);
-	AngularVelocity = SteeringAngularVelocityFactor * SteeringAngle;
+	AngularVelocity = SteeringToAngularVelocityFactor * SteeringAngle;
 
 	GetOwner()->AddActorWorldOffset(FVector(DeltaTime * Velocity));
 	GetOwner()->AddActorWorldRotation(FRotator(0.0, DeltaTime * AngularVelocity, 0.0));

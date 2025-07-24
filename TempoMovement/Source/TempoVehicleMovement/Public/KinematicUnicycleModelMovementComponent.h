@@ -28,7 +28,13 @@ public:
 
 protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	float SteeringAngularVelocityFactor = 1.0; // CM
+	float SteeringToAngularVelocityFactor = 1.0;
+	
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	float AccelerationInputMultiplier = 5.0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	float SteeringInputMultiplier = 1.0;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	bool bReverseEnabled = false;

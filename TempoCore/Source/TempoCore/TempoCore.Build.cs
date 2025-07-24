@@ -40,6 +40,7 @@ public class TempoCore : TempoModuleRules
 				"AssetRegistry",
 				"CoreUObject",
 				"Engine",
+				"InputCore",
 				"Slate",
 				"SlateCore",
 				"UMG",
