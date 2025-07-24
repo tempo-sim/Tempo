@@ -12,37 +12,37 @@ UTempoChaosWheeledVehicleMovementComponent::UTempoChaosWheeledVehicleMovementCom
 	WheelTraceCollisionResponses.Pawn = ECR_Ignore;
 }
 
-void UTempoChaosWheeledVehicleMovementComponent::HandleDrivingCommand(const FDrivingCommand& Command)
+void UTempoChaosWheeledVehicleMovementComponent::HandleDrivingInput(const FNormalizedDrivingInput& Input)
 {
 	// An extremely rough mapping from normalized acceleration (-1 to 1) to normalized throttle and brakes (each 0 to 1).
-	auto SetAccelInput = [this](float Input)
+	auto SetAccelInput = [this](float AccelInput)
 	{
-		if (Input > 0.0)
+		if (AccelInput > 0.0)
 		{
 			static constexpr float NearlyStoppedSpeed = 1.0;
 			if (VehicleState.ForwardSpeed > -NearlyStoppedSpeed && GetCurrentGear() > -1)
 			{
-				SetThrottleInput(Input);
+				SetThrottleInput(AccelInput);
 				SetBrakeInput(0.0);
 			}
 			else
 			{
 				SetTargetGear(1, false);
 				SetThrottleInput(0.0);
-				SetBrakeInput(Input);
+				SetBrakeInput(AccelInput);
 			}
 		}
 		else
 		{
 			if (VehicleState.ForwardSpeed > 0.0 || !bReverseEnabled)
 			{
-				SetBrakeInput(-Input);
+				SetBrakeInput(-AccelInput);
 				SetThrottleInput(0.0);
 			}
 			else
 			{
 				SetTargetGear(-1, false);
-				SetThrottleInput(-Input);
+				SetThrottleInput(-AccelInput);
 				SetBrakeInput(0.0);
 			}
 		}
@@ -52,21 +52,15 @@ void UTempoChaosWheeledVehicleMovementComponent::HandleDrivingCommand(const FDri
 	{
 		if (const ITempoVehicleControlInterface* Controller = Cast<ITempoVehicleControlInterface>(Pawn->Controller.Get()))
 		{
-			// The TempoVehicleMovementInterface takes driving commands in real units, but the 
-			// ChaosVehicleMovementComponent expects normalized inputs. So we re-normalize them here.
-			const float MaxAcceleration = Controller->GetMaxAcceleration();
-			const float MaxDeceleration = Controller->GetMaxDeceleration();
-			const float MaxSteerAngle = Controller->GetMaxSteerAngle();
-
-			SetSteeringInput(Command.SteeringAngle / MaxSteerAngle);
+			SetSteeringInput(Input.Steering);
 
 			if (VehicleState.ForwardSpeed > 0.0)
 			{
-				SetAccelInput(Command.Acceleration > 0.0 ? Command.Acceleration / MaxAcceleration : Command.Acceleration / MaxDeceleration);
+				SetAccelInput(Input.Acceleration > 0.0 ? Input.Acceleration : Input.Acceleration);
 			}
 			else
 			{
-				SetAccelInput(Command.Acceleration / MaxAcceleration);
+				SetAccelInput(Input.Acceleration);
 			}
 		}
 	}

@@ -18,6 +18,4 @@ public:
 	virtual FString GetVehicleName() override;
 	
 	virtual void HandleDrivingInput(const FNormalizedDrivingInput& Input) override;
-
-protected:
 };
