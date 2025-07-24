@@ -28,11 +28,7 @@ trap 'interrupt_handler' INT
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 TEMPO_ROOT=$(realpath "$SCRIPT_DIR/..")
 
-# Check for UNREAL_ENGINE_PATH
-if [ -z ${UNREAL_ENGINE_PATH+x} ]; then
-  echo "Please set UNREAL_ENGINE_PATH environment variable and re-run";
-  UNSUCCESSFUL_EXIT 1
-fi
+UNREAL_ENGINE_PATH=$("$SCRIPT_DIR"/FindUnreal.sh)
 
 if [ ! -f "$UNREAL_ENGINE_PATH/Engine/Source/Programs/UnrealBuildTool/UnrealBuildTool.csproj" ]; then
   echo "UNREAL_ENGINE_PATH ($UNREAL_ENGINE_PATH) does not seem correct. Please check and re-run";
