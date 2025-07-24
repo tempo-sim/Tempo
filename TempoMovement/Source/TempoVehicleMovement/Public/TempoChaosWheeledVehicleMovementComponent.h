@@ -18,11 +18,9 @@ class TEMPOVEHICLEMOVEMENT_API UTempoChaosWheeledVehicleMovementComponent : publ
 public:
 	UTempoChaosWheeledVehicleMovementComponent();
 
-	virtual float GetLinearVelocity() override { return VehicleState.ForwardSpeed; }
-
 	virtual FVector GetAngularVelocity() const override { return VehicleState.VehicleWorldAngularVelocity; }
 	
-	virtual void HandleDrivingCommand(const FDrivingCommand& Command) override;
+	virtual void HandleDrivingInput(const FNormalizedDrivingInput& Input) override;
 
 protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)

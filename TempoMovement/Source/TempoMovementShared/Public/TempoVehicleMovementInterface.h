@@ -2,23 +2,12 @@
 
 #pragma once
 
+#include "TempoMovementTypes.h"
+
 #include "CoreMinimal.h"
 #include "UObject/Interface.h"
 
 #include "TempoVehicleMovementInterface.generated.h"
-
-USTRUCT(BlueprintType)
-struct FDrivingCommand {
-	GENERATED_BODY();
-
-	// Acceleration in cm/s
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	float Acceleration = 0.0;
-
-	// Steering in degrees from center
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	float SteeringAngle = 0.0; 
-};
 
 UINTERFACE()
 class TEMPOMOVEMENTSHARED_API UTempoVehicleMovementInterface : public UInterface
@@ -31,7 +20,5 @@ class TEMPOMOVEMENTSHARED_API ITempoVehicleMovementInterface
 	GENERATED_BODY()
 
 public:
-	virtual float GetLinearVelocity() = 0;
-	
-	virtual void HandleDrivingCommand(const FDrivingCommand& Command) = 0;
+	virtual void HandleDrivingInput(const FNormalizedDrivingInput& Command) = 0;
 };
