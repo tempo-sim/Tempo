@@ -7,11 +7,7 @@ PROJECT_ROOT=$("$SCRIPT_DIR"/FindProjectRoot.sh)
 cd "$PROJECT_ROOT"
 PROJECT_NAME=$(find . -maxdepth 1 -name "*.uproject" -exec basename {} .uproject \;)
 
-# Check for UNREAL_ENGINE_PATH
-if [ -z ${UNREAL_ENGINE_PATH+x} ]; then
-  echo "Please set UNREAL_ENGINE_PATH environment variable and re-run";
-  exit 1
-fi
+UNREAL_ENGINE_PATH=$("$SCRIPT_DIR"/FindUnreal.sh)
 
 PLATFORM=""
 if [[ "$OSTYPE" = "msys" ]]; then
