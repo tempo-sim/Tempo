@@ -21,12 +21,7 @@ Tempo is the foundation on which you can build a simulator for your unique appli
   - `jq`: (Use Administrator Git Bash) `curl -L -o /usr/bin/jq.exe https://github.com/jqlang/jq/releases/latest/download/jq-win64.exe`
 
 ## Environment Variables
-- `UNREAL_ENGINE_PATH`: Your Unreal Engine installation directory (the folder containing `Engine`)
-  - On Linux, unzip where you like, for example `~/UE_5.6`
-  - The Mac default is `/Users/Shared/Epic Games/UE_5.6`
-  - On Windows the default is `C:\Program Files\Epic Games\UE_5.6`
-> [!NOTE]
-> If you're using 5.4 or 5.5 make sure to update the paths above accordingly.
+- `UNREAL_ENGINE_PATH`: On Linux only must be set to your Unreal Engine installation directory (the folder containing `Engine`). On Mac and Windows, Tempo will attempt to automatically find Unreal via your uproject file, but you can still set this to override it.
 
 ## Getting Started
 Follow along the steps below with this video. Sound on!
