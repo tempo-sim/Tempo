@@ -23,6 +23,8 @@ public:
 
 	virtual FVector GetAngularVelocity() const override { return FVector(0.0, 0.0, AngularVelocity); }
 
+	virtual FVector GetActorFeetLocation() const override;
+
 protected:
 	virtual void UpdateState(float DeltaTime, float Steering) {};
 

@@ -5,13 +5,20 @@
 UKinematicVehicleMovementComponent::UKinematicVehicleMovementComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
+	bAutoRegisterUpdatedComponent = true;
+}
+
+FVector UKinematicVehicleMovementComponent::GetActorFeetLocation() const
+{
+	const FVector ActorLocation = GetOwner()->GetActorLocation();
+	UE_LOG(LogTemp, Warning, TEXT("ActorLocation: %s"), *ActorLocation.ToString());
+	return ActorLocation;
 }
 
 void UKinematicVehicleMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-	// Remap and clamp Command (if any).
 	float NormalizedAcceleration = 0.0;
 	if (LatestInput.IsSet())
 	{
@@ -22,11 +29,13 @@ void UKinematicVehicleMovementComponent::TickComponent(float DeltaTime, ELevelTi
 	else
 	{
 		FVector InputVector = ConsumeInputVector();
-		if (!FMath::IsNearlyZero(InputVector.X, 0.5))
+		const FVector InputLocal = GetOwner()->GetActorTransform().InverseTransformVector(InputVector);
+		// DrawDebugLine(GetWorld(), GetActorFeetLocation(), GetActorFeetLocation() + InputVector * 200, FColor::Blue, false, 0.1, 0, 5.0);
+		if (!FMath::IsNearlyZero(-InputVector.X, 0.5))
 		{
 			NormalizedAcceleration = AccelerationInputMultiplier * -InputVector.X;
 		}
-		if (!FMath::IsNearlyZero(InputVector.Y, 0.5))
+		if (!FMath::IsNearlyZero(-InputVector.Y, 0.5))
 		{
 			SteeringInput = SteeringInputMultiplier * -InputVector.Y;
 		}
