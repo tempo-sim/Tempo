@@ -8,7 +8,7 @@ void UKinematicUnicycleModelMovementComponent::UpdateState(float DeltaTime, floa
 
 	Velocity = Speed * FVector(FMath::Cos(HeadingAngle), FMath::Sin(HeadingAngle), 0.0);
 	AngularVelocity = SteeringToAngularVelocityFactor * Steering;
-
+	
 	GetOwner()->AddActorWorldOffset(DeltaTime * Velocity);
 	GetOwner()->AddActorWorldRotation(FRotator(0.0, DeltaTime * AngularVelocity, 0.0));
 }
