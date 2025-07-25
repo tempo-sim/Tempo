@@ -22,10 +22,13 @@ void UKinematicVehicleMovementComponent::TickComponent(float DeltaTime, ELevelTi
 	else
 	{
 		FVector InputVector = ConsumeInputVector();
-		if (!InputVector.IsZero())
+		if (!FMath::IsNearlyZero(InputVector.X, 0.5))
 		{
-			NormalizedAcceleration = AccelerationInputMultiplier * InputVector.X;
-			SteeringInput = SteeringInputMultiplier * InputVector.Y;
+			NormalizedAcceleration = AccelerationInputMultiplier * -InputVector.X;
+		}
+		if (!FMath::IsNearlyZero(InputVector.Y, 0.5))
+		{
+			SteeringInput = SteeringInputMultiplier * -InputVector.Y;
 		}
 		else
 		{
@@ -38,25 +41,27 @@ void UKinematicVehicleMovementComponent::TickComponent(float DeltaTime, ELevelTi
 	}
 
 	const float Acceleration = NormalizedAcceleration > 0.0 ?
-		FMath::Min(MaxAcceleration, NormalizedAcceleration * MaxAcceleration) : LinearVelocity > 0.0 ?
+		FMath::Min(MaxAcceleration, NormalizedAcceleration * MaxAcceleration) : Speed > 0.0 ?
 		// Moving forward, slowing down
 		FMath::Max(-MaxDeceleration, NormalizedAcceleration * MaxDeceleration) :
 		// Moving backwards, speeding up (in reverse)
-		FMath::Min(-MaxAcceleration, NormalizedAcceleration * MaxAcceleration);
+		FMath::Max(-MaxAcceleration, NormalizedAcceleration * MaxAcceleration);
 
 	const float SteeringAngle = FMath::Clamp(SteeringInput * MaxSteerAngle, -MaxSteerAngle, MaxSteerAngle);
 
 	float DeltaVelocity = DeltaTime * Acceleration;
-	if (LinearVelocity > 0.0 && DeltaVelocity < 0.0)
+	if (Speed > 0.0 && DeltaVelocity < 0.0)
 	{
 		// If slowing down, don't start reversing.
-		DeltaVelocity = FMath::Max(-LinearVelocity, DeltaVelocity);
+		DeltaVelocity = FMath::Max(-Speed, DeltaVelocity);
 	}
-	LinearVelocity += DeltaVelocity;
+	Speed += DeltaVelocity;
 	if (!bReverseEnabled)
 	{
-		LinearVelocity = FMath::Max(LinearVelocity, 0.0);
+		Speed = FMath::Max(Speed, 0.0);
 	}
+
+	Speed = FMath::Clamp(Speed, -MaxSpeed, MaxSpeed);
 
 	UpdateState(DeltaTime, SteeringAngle);
 }

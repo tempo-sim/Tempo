@@ -48,10 +48,13 @@ protected:
 	float MaxDeceleration = 1000.0; // CM/S/S (~1.0g)
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	float MaxSpeed = 1000.0; // CM/S
+	
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	float MaxSteerAngle = 10.0; // Degrees, symmetric
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite)
-	float LinearVelocity = 0.0; // CM/S
+	float Speed = 0.0; // CM/S
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite)
 	float AngularVelocity = 0.0; // Deg/S

@@ -6,9 +6,9 @@ void UKinematicUnicycleModelMovementComponent::UpdateState(float DeltaTime, floa
 {
 	const float HeadingAngle = FMath::DegreesToRadians(GetOwner()->GetActorRotation().Yaw);
 
-	Velocity = LinearVelocity * FVector(FMath::Cos(HeadingAngle), FMath::Sin(HeadingAngle), 0.0);
+	Velocity = Speed * FVector(FMath::Cos(HeadingAngle), FMath::Sin(HeadingAngle), 0.0);
 	AngularVelocity = SteeringToAngularVelocityFactor * Steering;
 
-	GetOwner()->AddActorWorldOffset(FVector(DeltaTime * Velocity));
+	GetOwner()->AddActorWorldOffset(DeltaTime * Velocity);
 	GetOwner()->AddActorWorldRotation(FRotator(0.0, DeltaTime * AngularVelocity, 0.0));
 }
