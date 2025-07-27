@@ -104,20 +104,20 @@ MAIN() {
     SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
     PROJECT_ROOT=$("$SCRIPT_DIR"/FindProjectRoot.sh)
 
-    target_files=($(find "$PROJECT_ROOT/Source" -maxdepth 1 -name "*Target.cs" -type f))
+    TARGET_FILES=($(find "$PROJECT_ROOT/Source" -maxdepth 1 -name "*Target.cs" -type f))
 
-    if [[ ${#target_files[@]} -eq 0 ]]; then
+    if [[ ${#TARGET_FILES[@]} -eq 0 ]]; then
         echo "No *Target.cs files found."
         exit 1
     fi
 
-    echo "Found ${#target_files[@]} Target.cs file(s):"
-    for FILE in "${target_files[@]}"; do
+    echo "Found ${#TARGET_FILES[@]} Target.cs file(s):"
+    for FILE in "${TARGET_FILES[@]}"; do
         echo "  - $FILE"
     done
     echo
 
-    for file in "${target_files[@]}"; do
+    for FILE in "${TARGET_FILES[@]}"; do
         PROCESS_TARGET_FILE "$FILE"
         echo
     done
