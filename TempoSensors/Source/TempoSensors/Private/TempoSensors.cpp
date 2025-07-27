@@ -21,8 +21,10 @@ void FTempoSensorsModule::StartupModule()
 
 void FTempoSensorsModule::OnEngineInitComplete()
 {
+#if WITH_EDITOR
     URendererSettings* RenderSettings = GetMutableDefault<URendererSettings>();
     RenderSettings->OnSettingChanged().AddRaw(this, &FTempoSensorsModule::OnRenderSettingsChanged);
+#endif
 
     ValidateSettings();
 }
