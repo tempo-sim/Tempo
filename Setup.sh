@@ -7,11 +7,11 @@ TEMPO_ROOT=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 cd $TEMPO_ROOT
 
 if [ -z "$GIT_DIR" ]; then
-	GIT_DIR=$(git rev-parse --git-common-dir);
-	if [ $? -ne 0 ]; then
-                echo "Failed to find .git folder"
-                exit 1
-	fi
+  GIT_DIR=$(git rev-parse --git-common-dir);
+  if [ $? -ne 0 ]; then
+    echo "Failed to find .git folder"
+    exit 1
+  fi
 fi
 
 ADD_COMMAND_TO_HOOK() {
@@ -48,6 +48,8 @@ if [ "$1" = "-force" ]; then
   SYNC_DEPS="$SYNC_DEPS -force"
   INSTALL_ENGINE_MODS="$INSTALL_ENGINE_MODS -force"
 fi
+echo -e "\nAdding Tempo toolchain to Target.cs files\n"
+eval "$TEMPO_ROOT/Scripts/UseTempoToolchain.sh"
 echo -e "\nInstalling Tempo Engine Mods\n"
 eval "$INSTALL_ENGINE_MODS"
 echo -e "Checking ThirdParty dependencies...\n"

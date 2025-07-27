@@ -38,15 +38,12 @@ git submodule add https://github.com/tempo-sim/Tempo.git
 git submodule update --init --recursive
 ```
 
-### Project Changes
-Tempo requires one change to a vanilla Unreal Engine project to build:
-- Your project's `*.Target.cs` files must use the Tempo UnrealBuildTool toolchain for your platform, as in [TempoSample.Target.cs](https://github.com/tempo-sim/TempoSample/blob/main/Source/TempoSample.Target.cs) and [TempoSampleEditor.Target.cs](https://github.com/tempo-sim/TempoSample/blob/main/Source/TempoSampleEditor.Target.cs).
-
 ### One-Time Setup
 Run the `Setup.sh` script (from the `Tempo` root) once. This script will:
-- Install the Tempo Unreal Engine mods (we make some changes to your installed Engine in-place to avoid distributing a custom engine build)
+- Modify your project's `*.Target.cs` files to use Tempo's custom toolchain, which is necessary for linking certain third party dependencies properly
+- Install the Tempo Unreal Engine mods, making some changes to your installed Engine in-place
 - Download third party dependencies
-- Add git hooks to keep both of the above in sync automatically as you check out different Tempo commits
+- Add git hooks to keep engine mods and third party dependencies up to date automatically as you check out different Tempo commits
 
 ### Build and Run
 Use the included `Scripts/Build.sh` and `Scripts/Run.sh` to build your project and open it in Unreal Editor.
