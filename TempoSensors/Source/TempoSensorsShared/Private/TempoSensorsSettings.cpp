@@ -3,6 +3,9 @@
 #include "TempoSensorsSettings.h"
 
 UTempoSensorsSettings::UTempoSensorsSettings()
+	:
+CameraPostProcessMaterialNoDepth(FSoftObjectPath(TEXT("/TempoSensors/Materials/M_CameraPostProcess_NoDepth.M_CameraPostProcess_NoDepth"))),
+CameraPostProcessMaterialWithDepth(FSoftObjectPath(TEXT("/TempoSensors/Materials/M_CameraPostProcess_WithDepth.M_CameraPostProcess_WithDepth")))
 {
 	CategoryName = TEXT("Tempo");
 }
