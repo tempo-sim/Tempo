@@ -8,18 +8,22 @@ UKinematicVehicleMovementComponent::UKinematicVehicleMovementComponent()
 	bAutoRegisterUpdatedComponent = true;
 }
 
-FVector UKinematicVehicleMovementComponent::GetActorFeetLocation() const
-{
-	const FVector ActorLocation = GetOwner()->GetActorLocation();
-	UE_LOG(LogTemp, Warning, TEXT("ActorLocation: %s"), *ActorLocation.ToString());
-	return ActorLocation;
-}
-
 void UKinematicVehicleMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-	float NormalizedAcceleration = 0.0;
+	const FVector Input = ConsumeInputVector();
+	FVector ControlInput;
+	if (const APlayerController* PlayerController = Cast<APlayerController>(GetController()))
+	{
+		ControlInput = PlayerController->GetControlRotation().GetInverse().RotateVector(Input);
+	}
+	else
+	{
+		ControlInput = GetOwner()->GetActorRotation().GetInverse().RotateVector(Input);
+	}
+
+	float NormalizedAcceleration;
 	if (LatestInput.IsSet())
 	{
 		NormalizedAcceleration = LatestInput.GetValue().Acceleration;
@@ -28,25 +32,12 @@ void UKinematicVehicleMovementComponent::TickComponent(float DeltaTime, ELevelTi
 	}
 	else
 	{
-		FVector InputVector = ConsumeInputVector();
-		const FVector InputLocal = GetOwner()->GetActorTransform().InverseTransformVector(InputVector);
-		// DrawDebugLine(GetWorld(), GetActorFeetLocation(), GetActorFeetLocation() + InputVector * 200, FColor::Blue, false, 0.1, 0, 5.0);
-		if (!FMath::IsNearlyZero(-InputVector.X, 0.5))
-		{
-			NormalizedAcceleration = AccelerationInputMultiplier * -InputVector.X;
-		}
-		if (!FMath::IsNearlyZero(-InputVector.Y, 0.5))
-		{
-			SteeringInput = SteeringInputMultiplier * -InputVector.Y;
-		}
-		else
-		{
-			const APawn* Pawn = GetPawnOwner();
-			if (Cast<APlayerController>(Pawn->GetController()))
-			{
-				SteeringInput = 0.0;
-			}
-		}
+		NormalizedAcceleration = FMath::IsNearlyZero(ControlInput.X) ?
+			FMath::Sign(Speed) * -1.0 * NoInputNormalizedDeceleration * MaxDeceleration :
+			AccelerationInputMultiplier * ControlInput.X;
+		SteeringInput = FMath::IsNearlyZero(ControlInput.Y) ?
+			SteeringInput = 0.0 :
+			SteeringInputMultiplier * ControlInput.Y;
 	}
 
 	const float Acceleration = NormalizedAcceleration > 0.0 ?

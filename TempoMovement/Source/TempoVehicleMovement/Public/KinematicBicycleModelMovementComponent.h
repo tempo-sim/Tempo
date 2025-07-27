@@ -16,6 +16,10 @@ public:
 	virtual void UpdateState(float DeltaTime, float Steering) override;
 
 protected:
+	// The distance between the front and rear axles.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	float Wheelbase = 100.0; // CM
+
 	// The normalized distance (as a fraction of the wheelbase) from the rear axle to the origin.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	float AxleRatio = 0.5;

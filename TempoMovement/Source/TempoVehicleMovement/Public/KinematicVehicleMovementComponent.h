@@ -23,19 +23,11 @@ public:
 
 	virtual FVector GetAngularVelocity() const override { return FVector(0.0, 0.0, AngularVelocity); }
 
-	virtual FVector GetActorFeetLocation() const override;
-
 protected:
 	virtual void UpdateState(float DeltaTime, float Steering) {};
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	float Wheelbase = 100.0; // CM
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	bool bReverseEnabled = false;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	float SteeringToAngularVelocityFactor = 1.0;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	float AccelerationInputMultiplier = 5.0;
@@ -54,6 +46,12 @@ protected:
 	
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	float MaxSteerAngle = 10.0; // Degrees, symmetric
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(UIMin=0.0, UIMax=1.0, ClampMin=0.0, ClampMax=1.0))
+	float NoInputNormalizedDeceleration = 0.0; // CM/S/S
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	bool bNoInputPersistSteering = true;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite)
 	float Speed = 0.0; // CM/S

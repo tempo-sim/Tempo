@@ -14,4 +14,8 @@ class TEMPOVEHICLEMOVEMENT_API UKinematicUnicycleModelMovementComponent : public
 
 public:
 	virtual void UpdateState(float DeltaTime, float Steering) override;
+
+protected:
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	float SteeringToAngularVelocityFactor = 1.0;
 };
