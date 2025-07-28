@@ -2,35 +2,44 @@
 
 #include "TempoVehicleController.h"
 
-#include "TempoVehicleMovementInterface.h"
-#include "TempoVehicleControl.h"
-
 FString ATempoVehicleController::GetVehicleName()
 {
-	check(GetPawn());
+	if (APawn* Pawn = GetPawn())
+	{
+		return Pawn->GetActorNameOrLabel();
+	}
 
-	return GetPawn()->GetActorNameOrLabel();
+	return FString();
+}
+
+void ATempoVehicleController::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
+
+	if (APawn* Pawn = GetPawn())
+	{
+		if (const FLastInput* Input = LastInput.GetPtrOrNull())
+		{
+			// Don't apply the input in the same frame as we already applied it
+			if (Input->Frame < GFrameCounter)
+			{
+				// Apply some very small acceleration to avoid no-input deceleration
+				const FVector ControlInputLocal(UE_KINDA_SMALL_NUMBER, Input->Input.GetSteering(), 0.0);
+				Pawn->AddMovementInput(Pawn->GetActorTransform().TransformVector(ControlInputLocal));
+			}
+		}
+	}
 }
 
 void ATempoVehicleController::HandleDrivingInput(const FNormalizedDrivingInput& Input)
 {
-	if (!GetPawn())
+	if (APawn* Pawn = GetPawn())
 	{
-		return;
+		const FVector ControlInputLocal(Input.GetAcceleration() + UE_KINDA_SMALL_NUMBER, Input.GetSteering(), 0.0);
+		Pawn->AddMovementInput(Pawn->GetActorTransform().TransformVector(ControlInputLocal));
+		if (bPersistSteering)
+		{
+			LastInput = FLastInput(Input, GFrameCounter);
+		}
 	}
-
-	TArray<UActorComponent*> VehicleMovementComponents = GetPawn()->GetComponentsByInterface(UTempoVehicleMovementInterface::StaticClass());
-	if (VehicleMovementComponents.Num() > 1)
-	{
-		UE_LOG(LogTempoVehicleControl, Error, TEXT("More than one vehicle movement component found on %s"), *GetPawn()->GetName());
-		return;
-	}
-	if (VehicleMovementComponents.Num() == 0)
-	{
-		UE_LOG(LogTempoVehicleControl, Error, TEXT("No vehicle movement component found on %s"), *GetPawn()->GetName());
-		return;
-	}
-
-	ITempoVehicleMovementInterface* MovementInterface = Cast<ITempoVehicleMovementInterface>(VehicleMovementComponents[0]);
-	MovementInterface->HandleDrivingInput(Input);
 }
