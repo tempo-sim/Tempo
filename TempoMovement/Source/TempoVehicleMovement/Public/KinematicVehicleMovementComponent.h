@@ -19,7 +19,7 @@ public:
 	virtual FVector GetAngularVelocity() const override { return FVector(0.0, 0.0, AngularVelocity); }
 
 protected:
-	virtual void UpdateState(float DeltaTime, float Steering) {};
+	virtual void SimulateMotion(float DeltaTime, float Steering, float NewLinearVelocity, FVector& OutLinearVelocity, float& OutAngularVelocity) {}
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	bool bReverseEnabled = false;

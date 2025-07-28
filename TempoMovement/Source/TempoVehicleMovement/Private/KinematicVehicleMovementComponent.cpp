@@ -37,13 +37,29 @@ void UKinematicVehicleMovementComponent::TickComponent(float DeltaTime, ELevelTi
 		// If slowing down, don't start reversing.
 		DeltaVelocity = FMath::Max(-LinearVelocity, DeltaVelocity);
 	}
-	LinearVelocity += DeltaVelocity;
+	float NewLinearVelocity = LinearVelocity + DeltaVelocity;
 	if (!bReverseEnabled)
 	{
-		LinearVelocity = FMath::Max(LinearVelocity, 0.0);
+		NewLinearVelocity = FMath::Max(NewLinearVelocity, 0.0);
 	}
 
-	LinearVelocity = FMath::Clamp(LinearVelocity, -MaxSpeed, MaxSpeed);
+	NewLinearVelocity = FMath::Clamp(NewLinearVelocity, -MaxSpeed, MaxSpeed);
 
-	UpdateState(DeltaTime, SteeringAngle);
+	FVector NewVelocity = Velocity;
+	float NewAngularVelocity = AngularVelocity;
+	SimulateMotion(DeltaTime, SteeringAngle, NewLinearVelocity, NewVelocity, NewAngularVelocity);
+
+	FHitResult MoveHitResult;
+	GetOwner()->AddActorWorldOffset(DeltaTime * NewVelocity, true, &MoveHitResult);
+	if (!MoveHitResult.bBlockingHit)
+	{
+		Velocity = NewVelocity;
+	}
+
+	FHitResult RotateHitResult;
+	GetOwner()->AddActorWorldRotation(FRotator(0.0, DeltaTime * NewAngularVelocity, 0.0), true, &RotateHitResult);
+	if (!RotateHitResult.bBlockingHit)
+	{
+		AngularVelocity = NewAngularVelocity;
+	}
 }

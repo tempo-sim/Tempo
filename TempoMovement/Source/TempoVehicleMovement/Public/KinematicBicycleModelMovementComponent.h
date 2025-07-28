@@ -13,7 +13,7 @@ class TEMPOVEHICLEMOVEMENT_API UKinematicBicycleModelMovementComponent : public 
 	GENERATED_BODY()
 
 public:
-	virtual void UpdateState(float DeltaTime, float Steering) override;
+	virtual void SimulateMotion(float DeltaTime, float Steering, float NewLinearVelocity, FVector& OutNewVelocity, float& OutNewAngularVelocity) override;
 
 protected:
 	// The distance between the front and rear axles.

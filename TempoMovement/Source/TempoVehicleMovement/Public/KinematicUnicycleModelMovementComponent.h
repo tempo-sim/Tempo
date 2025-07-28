@@ -13,7 +13,7 @@ class TEMPOVEHICLEMOVEMENT_API UKinematicUnicycleModelMovementComponent : public
 	GENERATED_BODY()
 
 public:
-	virtual void UpdateState(float DeltaTime, float Steering) override;
+	virtual void SimulateMotion(float DeltaTime, float Steering, float NewLinearVelocity, FVector& OutVelocity, float& OutAngularVelocity) override;
 
 protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)

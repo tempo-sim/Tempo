@@ -2,13 +2,9 @@
 
 #include "KinematicUnicycleModelMovementComponent.h"
 
-void UKinematicUnicycleModelMovementComponent::UpdateState(float DeltaTime, float Steering)
+void UKinematicUnicycleModelMovementComponent::SimulateMotion(float DeltaTime, float Steering, float NewLinearVelocity, FVector& OutNewVelocity, float& OutNewAngularVelocity)
 {
 	const float HeadingAngle = FMath::DegreesToRadians(GetOwner()->GetActorRotation().Yaw);
-
-	Velocity = LinearVelocity * FVector(FMath::Cos(HeadingAngle), FMath::Sin(HeadingAngle), 0.0);
-	AngularVelocity = SteeringToAngularVelocityFactor * Steering;
-
-	GetOwner()->AddActorWorldOffset(DeltaTime * Velocity);
-	GetOwner()->AddActorWorldRotation(FRotator(0.0, DeltaTime * AngularVelocity, 0.0));
+	OutNewVelocity = NewLinearVelocity * FVector(FMath::Cos(HeadingAngle), FMath::Sin(HeadingAngle), 0.0);
+	OutNewAngularVelocity = SteeringToAngularVelocityFactor * Steering;
 }
