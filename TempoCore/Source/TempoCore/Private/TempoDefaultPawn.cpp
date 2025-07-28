@@ -1,4 +1,4 @@
-﻿// Copyright Epic Games, Inc. All Rights Reserved.
+﻿// Copyright Tempo Simulation, LLC. All Rights Reserved
 
 #include "TempoDefaultPawn.h"
 
@@ -6,8 +6,6 @@
 #include "Components/InputComponent.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerInput.h"
-
-// #include UE_INLINE_GENERATED_CPP_BY_NAME(TempoDefaultPawn)
 
 ATempoDefaultPawn::ATempoDefaultPawn(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)

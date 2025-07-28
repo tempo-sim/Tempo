@@ -4,7 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
-#include "TempoTimeWidget.generated.h"
+#include "TempoControlModeWidget.generated.h"
 
 class UButton;
 class UComboBoxString;
@@ -19,50 +19,10 @@ class TEMPOTIME_API UTempoControlModeWidget : public UUserWidget
 protected:
 	virtual void NativeOnInitialized() override;
 
-	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
-
 	UPROPERTY(meta=(BindWidget))
-	UComboBoxString* TimeModeBox;
-
-	UPROPERTY(meta=(BindWidget))
-	UEditableText* SimStepsPerSecondBox;
-
-	UPROPERTY(meta=(BindWidget))
-	UButton* PauseButton;
-
-	UPROPERTY(meta=(BindWidget))
-	UButton* PlayButton;
-
-	UPROPERTY(meta=(BindWidget))
-	UButton* StepButton;
-
-	UPROPERTY(meta=(BindWidget))
-	UTextBlock* SimTimeBox;
+	UComboBoxString* ControlModeBox;
 
 private:
-	void SyncTimeSettings() const;
-
 	UFUNCTION()
-	void OnTimeModeSelectionChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
-
-	UFUNCTION()
-	void OnSimStepsPerSecondChanged(const FText& Text, ETextCommit::Type CommitMethod);
-
-	UFUNCTION()
-	bool IsFixedStepMode();
-
-	UFUNCTION()
-	bool IsPauseAllowed();
-
-	UFUNCTION()
-	bool IsPlayAllowed();
-
-	UFUNCTION()
-	void OnPausePressed();
-
-	UFUNCTION()
-	void OnPlayPressed();
-
-	UFUNCTION()
-	void OnStepPressed();
+	void OnControlModeSelectionChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
 };

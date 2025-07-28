@@ -3,6 +3,7 @@
 #pragma once
 
 #include "DefaultActorClassifier.h"
+#include "TempoCoreTypes.h"
 
 #include "CoreMinimal.h"
 #include "GameFramework/GameModeBase.h"
@@ -21,10 +22,16 @@ public:
 
 	virtual void StartPlay() override;
 
+	virtual void BeginPlay() override;
+
+	virtual void FinishRestartPlayer(AController* NewPlayer, const FRotator& StartRotation) override;
+
 	bool BeginPlayDeferred() const { return bBeginPlayDeferred; }
 
 	// An event that fires *right* before BeginPlay
 	FPreBeginPlay PreBeginPlayEvent;
+
+	void SetControlMode(EControlMode ControlMode) const;
 
 protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, meta=(MustImplement="/Script/TempoCore.ActorClassificationInterface"))
@@ -32,4 +39,22 @@ protected:
 
 	UPROPERTY()
 	bool bBeginPlayDeferred = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	TSubclassOf<AController> OpenLoopControllerClass;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	TSubclassOf<AController> ClosedLoopControllerClass;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	TSubclassOf<APawn> RobotClass;
+
+	UPROPERTY()
+	APawn* DefaultPawn;
+
+	UPROPERTY()
+	AController* OpenLoopController;
+
+	UPROPERTY()
+	AController* ClosedLoopController;
 };
