@@ -4,9 +4,9 @@
 
 FString ATempoVehicleController::GetVehicleName()
 {
-	if (APawn* Pawn = GetPawn())
+	if (APawn* ControlledPawn = GetPawn())
 	{
-		return Pawn->GetActorNameOrLabel();
+		return ControlledPawn->GetActorNameOrLabel();
 	}
 
 	return FString();
@@ -16,7 +16,7 @@ void ATempoVehicleController::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
-	if (APawn* Pawn = GetPawn())
+	if (APawn* ControlledPawn = GetPawn())
 	{
 		if (const FLastInput* Input = LastInput.GetPtrOrNull())
 		{
@@ -25,7 +25,7 @@ void ATempoVehicleController::Tick(float DeltaTime)
 			{
 				// Apply some very small acceleration to avoid no-input deceleration
 				const FVector ControlInputLocal(UE_KINDA_SMALL_NUMBER, Input->Input.GetSteering(), 0.0);
-				Pawn->AddMovementInput(Pawn->GetActorTransform().TransformVector(ControlInputLocal));
+				ControlledPawn->AddMovementInput(ControlledPawn->GetActorTransform().TransformVector(ControlInputLocal));
 			}
 		}
 	}
@@ -33,10 +33,10 @@ void ATempoVehicleController::Tick(float DeltaTime)
 
 void ATempoVehicleController::HandleDrivingInput(const FNormalizedDrivingInput& Input)
 {
-	if (APawn* Pawn = GetPawn())
+	if (APawn* ControlledPawn = GetPawn())
 	{
 		const FVector ControlInputLocal(Input.GetAcceleration() + UE_KINDA_SMALL_NUMBER, Input.GetSteering(), 0.0);
-		Pawn->AddMovementInput(Pawn->GetActorTransform().TransformVector(ControlInputLocal));
+		ControlledPawn->AddMovementInput(ControlledPawn->GetActorTransform().TransformVector(ControlInputLocal));
 		if (bPersistSteering)
 		{
 			LastInput = FLastInput(Input, GFrameCounter);

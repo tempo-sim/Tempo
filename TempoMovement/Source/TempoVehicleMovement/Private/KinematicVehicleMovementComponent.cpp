@@ -2,6 +2,11 @@
 
 #include "KinematicVehicleMovementComponent.h"
 
+FVector UKinematicVehicleMovementComponent::GetActorFeetLocation() const
+{
+	return GetActorLocation();
+}
+
 void UKinematicVehicleMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
@@ -51,15 +56,10 @@ void UKinematicVehicleMovementComponent::TickComponent(float DeltaTime, ELevelTi
 
 	FHitResult MoveHitResult;
 	GetOwner()->AddActorWorldOffset(DeltaTime * NewVelocity, true, &MoveHitResult);
-	if (!MoveHitResult.bBlockingHit)
-	{
-		Velocity = NewVelocity;
-	}
+	LinearVelocity = NewLinearVelocity;
+	Velocity = NewVelocity;
 
 	FHitResult RotateHitResult;
 	GetOwner()->AddActorWorldRotation(FRotator(0.0, DeltaTime * NewAngularVelocity, 0.0), true, &RotateHitResult);
-	if (!RotateHitResult.bBlockingHit)
-	{
-		AngularVelocity = NewAngularVelocity;
-	}
+	AngularVelocity = NewAngularVelocity;
 }

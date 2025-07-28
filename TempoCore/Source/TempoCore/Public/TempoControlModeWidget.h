@@ -12,7 +12,7 @@ class UEditableText;
 class UTextBlock;
 
 UCLASS(Blueprintable, Abstract)
-class TEMPOTIME_API UTempoControlModeWidget : public UUserWidget
+class TEMPOCORE_API UTempoControlModeWidget : public UUserWidget
 {
 	GENERATED_BODY()
 
