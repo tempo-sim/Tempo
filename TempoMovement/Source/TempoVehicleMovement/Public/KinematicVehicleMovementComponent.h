@@ -20,6 +20,8 @@ public:
 
 	virtual FVector GetActorFeetLocation() const override;
 
+	virtual bool GetReverseEnabled() const override { return bReverseEnabled; }
+
 protected:
 	virtual void SimulateMotion(float DeltaTime, float Steering, float NewLinearVelocity, FVector& OutLinearVelocity, float& OutAngularVelocity) {}
 

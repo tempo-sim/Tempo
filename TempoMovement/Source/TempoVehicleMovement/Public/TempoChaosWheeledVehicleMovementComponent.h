@@ -19,6 +19,8 @@ public:
 
 	virtual FVector GetAngularVelocity() const override { return VehicleState.VehicleWorldAngularVelocity; }
 
+	virtual bool GetReverseEnabled() const override { return bReverseEnabled; }
+
 protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	bool bReverseEnabled = false;
