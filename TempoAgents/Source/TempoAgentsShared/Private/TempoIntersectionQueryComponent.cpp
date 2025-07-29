@@ -573,7 +573,7 @@ bool UTempoIntersectionQueryComponent::TryGetCrosswalkIntersectionConnectorInfoE
 		const int32 ConnectionIndex = GetConnectionIndexFromCrosswalkIntersectionIndex(IntersectionQueryActor, CrosswalkIntersectionIndex);
 
 		const AActor* RoadQueryActor = UTempoCoreUtils::CallBlueprintFunction(IntersectionQueryActor, ITempoIntersectionInterface::Execute_GetConnectedTempoRoadActor, ConnectionIndex);
-		if (!ensureMsgf(RoadQueryActor != nullptr, TEXT("Couldn't get valid Connected Road Actor for Actor: %s at ConnectionIndex: %d in UVayuIntersectionQueryComponent::TryGetCrosswalkIntersectionConnectorInfoEntry."), *IntersectionQueryActor->GetName(), ConnectionIndex))
+		if (!ensureMsgf(RoadQueryActor != nullptr, TEXT("Couldn't get valid Connected Road Actor for Actor: %s at ConnectionIndex: %d in UTempoIntersectionQueryComponent::TryGetCrosswalkIntersectionConnectorInfoEntry."), *IntersectionQueryActor->GetName(), ConnectionIndex))
 		{
 			return false;
 		}
