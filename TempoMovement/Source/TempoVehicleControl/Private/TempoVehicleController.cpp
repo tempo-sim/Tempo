@@ -27,8 +27,8 @@ void ATempoVehicleController::Tick(float DeltaTime)
 			// Don't apply the input in the same frame as we already applied it
 			if (Input->Frame < GFrameCounter)
 			{
-				// Apply some very small acceleration to avoid no-input deceleration
-				const FVector ControlInputLocal(UE_KINDA_SMALL_NUMBER, Input->Input.GetSteering(), 0.0);
+				// Apply some very small acceleration, alternating + and -, to avoid no-input deceleration
+				const FVector ControlInputLocal((GFrameCounter % 2 ? 1 : -1) * UE_KINDA_SMALL_NUMBER, Input->Input.GetSteering(), 0.0);
 				ControlledPawn->AddMovementInput(ControlledPawn->GetActorTransform().TransformVector(ControlInputLocal));
 			}
 		}
@@ -39,12 +39,14 @@ void ATempoVehicleController::HandleDrivingInput(const FNormalizedDrivingInput& 
 {
 	if (APawn* ControlledPawn = GetPawn())
 	{
+		// Pawns with UChaosVehicleMovementComponent don't respond to normal movement inputs - have to send input to the movement component directly.
 		if (UChaosVehicleMovementComponent* ChaosVehicleMovementComponent = Cast<UChaosVehicleMovementComponent>(ControlledPawn->GetMovementComponent()))
 		{
-			ApplyDrivingInputToWheeledVehicle(ChaosVehicleMovementComponent, Input);
+			ApplyDrivingInputToChaosVehicle(ChaosVehicleMovementComponent, Input);
 			return;
 		}
-		const FVector ControlInputLocal(Input.GetAcceleration() + UE_KINDA_SMALL_NUMBER, Input.GetSteering(), 0.0);
+
+		const FVector ControlInputLocal(Input.GetAcceleration() + (GFrameCounter % 2 ? 1 : -1) * UE_KINDA_SMALL_NUMBER, Input.GetSteering(), 0.0);
 		ControlledPawn->AddMovementInput(ControlledPawn->GetActorTransform().TransformVector(ControlInputLocal));
 		if (bPersistSteering)
 		{
@@ -53,7 +55,7 @@ void ATempoVehicleController::HandleDrivingInput(const FNormalizedDrivingInput& 
 	}
 }
 
-void ATempoVehicleController::ApplyDrivingInputToWheeledVehicle(UChaosVehicleMovementComponent* MovementComponent, const FNormalizedDrivingInput& Input)
+void ATempoVehicleController::ApplyDrivingInputToChaosVehicle(UChaosVehicleMovementComponent* MovementComponent, const FNormalizedDrivingInput& Input)
 {
 	// An extremely rough mapping from normalized acceleration (-1 to 1) to normalized throttle and brakes (each 0 to 1).
 	auto SetAccelInput = [MovementComponent](float AccelInput)

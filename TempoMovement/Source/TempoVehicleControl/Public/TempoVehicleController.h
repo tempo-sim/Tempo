@@ -22,7 +22,7 @@ public:
 	virtual void HandleDrivingInput(const FNormalizedDrivingInput& Input) override;
 
 protected:
-	virtual void ApplyDrivingInputToWheeledVehicle(class UChaosVehicleMovementComponent* ChaosVehicleMovementComponent, const FNormalizedDrivingInput& Input);
+	virtual void ApplyDrivingInputToChaosVehicle(class UChaosVehicleMovementComponent* ChaosVehicleMovementComponent, const FNormalizedDrivingInput& Input);
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	bool bPersistSteering = true;
