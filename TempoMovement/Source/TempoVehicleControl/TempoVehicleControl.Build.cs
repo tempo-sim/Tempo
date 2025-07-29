@@ -1,4 +1,6 @@
-﻿using UnrealBuildTool;
+﻿// Copyright Tempo Simulation, LLC. All Rights Reserved
+
+using UnrealBuildTool;
 
 public class TempoVehicleControl : ModuleRules
 {
@@ -10,6 +12,7 @@ public class TempoVehicleControl : ModuleRules
             new string[]
             {
                 "Core",
+                "ChaosVehicles",
             }
         );
 
