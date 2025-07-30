@@ -1,7 +1,10 @@
 # Tempo
+
+https://github.com/user-attachments/assets/dfc7b28b-3b73-4603-a779-dd6e5b2acec9
+
 Tempo is a collection of simulation-focused plugins for Unreal Engine. Tempo makes the power of Unreal accessible to simulation and robotics developers, including plugins for scripting, sensor simulation, agent behaviors, and more.
 
-Tempo is the foundation on which you can build a simulator for your unique application. Not sure where to start? Want some guidance from the authors? Feel free to [reach out](https://www.temposimulation.com/contact).
+Tempo is the foundation on which you can build a simulator for your unique application. Not sure where to start? Want some guidance from the authors? Find us on [![Discord](https://img.shields.io/badge/Discord-Join%20Server-5865F2?logo=discord&logoColor=white)](https://discord.gg/bKa2hnGYnw)
 
 ## Compatibility
 - Linux (Ubuntu 22.04 and 24.04), MacOS (13.0 "Ventura" or newer, Apple silicon only), Windows 10 and 11
@@ -85,8 +88,8 @@ Use the included `Scripts/Package.sh` to package your project into a standalone 
 ## Continuous Integration
 If you would like to set up a GitHub actions pipeline to build, package, run, and/or release your Tempo project, check out the `build_and_package` reusable workflow in [.github/workflows](https://github.com/tempo-sim/Tempo/tree/main/.github/workflows). `TempoSample`'s [tempo_sample_build_and_package](https://github.com/tempo-sim/TempoSample/blob/main/.github/workflows/tempo_sample_build_and_package.yml) workflow is a good reference.
 
-## Getting Help
-Stuck on something? Feel free to send us an [issue](https://github.com/tempo-sim/Tempo/issues) or ask a question on our [Discord](https://discord.gg/bKa2hnGYnw).
+## Issues
+Something not working as expected? Are we missing a key feature you need? Feel free to send us an [issue](https://github.com/tempo-sim/Tempo/issues).
 
 ## Giving Back
 Want to contribute to Tempo? We'll be happy to review your PR.
