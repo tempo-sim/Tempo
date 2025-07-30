@@ -1,4 +1,4 @@
-// Copyright Vayu Robotics, Inc. All Rights Reserved
+// Copyright Tempo Simulation, LLC. All Rights Reserved
 
 #pragma once
 
@@ -17,5 +17,7 @@ class TEMPOMOVEMENTSHARED_API ITempoMovementInterface
 	GENERATED_BODY()
 
 public:
-	virtual FVector GetAngularVelocity() = 0;
+	virtual FVector GetAngularVelocity() const = 0;
+
+	virtual bool GetReverseEnabled() const = 0;
 };
