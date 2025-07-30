@@ -76,8 +76,8 @@ TArray<AActor*> GetMatchingActors(const UWorld* World, const ActorStatesNearRequ
 		{
 			for (TActorIterator<AActor> ActorIt(World); ActorIt; ++ActorIt)
 			{
-				// Skip hidden Actors.
-				if (ActorIt->IsHidden())
+				// Skip hidden Actors (unless told to include them).
+				if (!Request.include_hidden_actors() && ActorIt->IsHidden())
 				{
 					continue;
 				}
@@ -107,7 +107,7 @@ TArray<AActor*> GetMatchingActors(const UWorld* World, const ActorStatesNearRequ
 	return MatchingActors;
 }
 
-TempoWorld::ActorState GetActorState(const AActor* Actor, const UWorld* World)
+TempoWorld::ActorState GetActorState(const AActor* Actor, const UWorld* World, bool bIncludeHiddenComponents)
 {
 	TempoWorld::ActorState ActorState;
 
@@ -155,15 +155,17 @@ TempoWorld::ActorState GetActorState(const AActor* Actor, const UWorld* World)
 	ActorStateAngularVel->set_y(ActorAngularVelocity.Y);
 	ActorStateAngularVel->set_z(ActorAngularVelocity.Z);
 
-	const FBox ActorLocalBounds = UTempoCoreUtils::GetActorLocalBounds(Actor);
+	const FBox ActorLocalBounds = UTempoCoreUtils::GetActorLocalBounds(Actor, bIncludeHiddenComponents);
 	const FBox ActorWorldBounds(
 		Actor->GetTransform().TransformPosition(ActorLocalBounds.Min),
 		Actor->GetTransform().TransformPosition(ActorLocalBounds.Max)
 	);
 
+	const FVector ScaledLocalExtent = Actor->GetTransform().GetScale3D() * ActorLocalBounds.GetExtent();
+
 	if (GDebugTempoWorld)
 	{
-		DrawDebugBox(World, ActorWorldBounds.GetCenter(), ActorLocalBounds.GetExtent(),Actor->GetActorRotation().Quaternion(),
+		DrawDebugBox(World, ActorWorldBounds.GetCenter(), ScaledLocalExtent,Actor->GetActorRotation().Quaternion(),
 			FColor::Red, false, -1, 0, 3.0);
 	}
 
@@ -180,29 +182,33 @@ TempoWorld::ActorState GetActorState(const AActor* Actor, const UWorld* World)
 	return ActorState;
 }
 
-void UTempoWorldStateServiceSubsystem::GetCurrentActorState(const TempoWorld::ActorStateRequest& Request, const TResponseDelegate<TempoWorld::ActorState>& ResponseContinuation)
+void UTempoWorldStateServiceSubsystem::GetCurrentActorState(const TempoWorld::ActorStateRequest& Request, const TResponseDelegate<TempoWorld::ActorState>& ResponseContinuation) const
 {
 	ActorState Response;
 
 	const TArray<AActor*> Actors = GetMatchingActors(GetWorld(), Request);
 
+	const FString ActorName(UTF8_TO_TCHAR(Request.actor_name().c_str()));
+
 	if (Actors.IsEmpty())
 	{
-		ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "No actors with specified name found"));
+		const FString ErrorMsg = FString::Printf(TEXT("No actor with name %s found"), *ActorName);
+		ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::StatusCode::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 
 	if (Actors.Num() > 1)
 	{
-		ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "More than one actor with specified name found"));
+		const FString ErrorMsg = FString::Printf(TEXT("More than one actor with name %s found"), *ActorName);
+		ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 
-	Response = GetActorState(Actors[0], GetWorld());
+	Response = GetActorState(Actors[0], GetWorld(), Request.include_hidden_components());
 	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
 }
 
-void UTempoWorldStateServiceSubsystem::GetCurrentActorStatesNear(const TempoWorld::ActorStatesNearRequest& Request, const TResponseDelegate<TempoWorld::ActorStates>& ResponseContinuation)
+void UTempoWorldStateServiceSubsystem::GetCurrentActorStatesNear(const TempoWorld::ActorStatesNearRequest& Request, const TResponseDelegate<TempoWorld::ActorStates>& ResponseContinuation) const
 {
 	ActorStates Response;
 
@@ -210,7 +216,7 @@ void UTempoWorldStateServiceSubsystem::GetCurrentActorStatesNear(const TempoWorl
 
 	for (const AActor* Actor : Actors)
 	{
-		*Response.add_actor_states() = GetActorState(Actor, GetWorld());
+		*Response.add_actor_states() = GetActorState(Actor, GetWorld(), Request.include_hidden_components());
 	}
 
 	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
@@ -228,19 +234,17 @@ void UTempoWorldStateServiceSubsystem::StreamActorStatesNear(const TempoWorld::A
 
 void UTempoWorldStateServiceSubsystem::StreamOverlapEvents(const OverlapEventRequest& Request, const TResponseDelegate<OverlapEventResponse>& ResponseContinuation)
 {
-	for (TActorIterator<AActor> ActorIt(GetWorld()); ActorIt; ++ActorIt)
+	const FString ActorName(UTF8_TO_TCHAR(Request.actor_name().c_str()));
+
+	if (AActor* Actor = GetActorWithName(GetWorld(), ActorName))
 	{
-		if (ActorIt->IsHidden())
-		{
-			continue;
-		}
-		AActor* Actor = *ActorIt;
-		if (Actor->GetActorNameOrLabel().Equals(UTF8_TO_TCHAR(Request.actor_name().c_str()), ESearchCase::IgnoreCase))
-		{
-			PendingOverlapRequests.FindOrAdd(Actor->GetActorNameOrLabel()).Add(ResponseContinuation);
-			Actor->OnActorBeginOverlap.AddDynamic(this, &UTempoWorldStateServiceSubsystem::UTempoWorldStateServiceSubsystem::OnActorOverlap);
-		}
+		PendingOverlapRequests.FindOrAdd(Actor->GetActorNameOrLabel()).Add(ResponseContinuation);
+		Actor->OnActorBeginOverlap.AddDynamic(this, &UTempoWorldStateServiceSubsystem::UTempoWorldStateServiceSubsystem::OnActorOverlap);
+		return;
 	}
+
+	const FString ErrorMsg = FString::Printf(TEXT("No actor with name %s found"), *ActorName);
+	ResponseContinuation.ExecuteIfBound(OverlapEventResponse(), grpc::Status(grpc::StatusCode::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 }
 
 void UTempoWorldStateServiceSubsystem::OnActorOverlap(AActor* OverlappedActor, AActor* OtherActor)

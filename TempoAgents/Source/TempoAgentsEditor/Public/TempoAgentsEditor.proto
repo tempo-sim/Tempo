@@ -4,6 +4,10 @@ syntax = "proto3";
 
 import "TempoScripting/Empty.proto";
 
+message PipelineResult {
+  bool success = 1;
+}
+
 service TempoAgentsEditorService {
-  rpc RunTempoZoneGraphBuilderPipeline(TempoScripting.Empty) returns (TempoScripting.Empty);
+  rpc RunTempoZoneGraphBuilderPipeline(TempoScripting.Empty) returns (PipelineResult);
 }

@@ -56,6 +56,8 @@ public:
 
 	void PawnMoveToLocation(const TempoMovement::PawnMoveToLocationRequest& Request, const TResponseDelegate<TempoMovement::PawnMoveToLocationResponse>& ResponseContinuation);
 
+	void RebuildNavigation(const TempoScripting::Empty& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const;
+
 protected:
 	TMap<FAIRequestID, FPendingPawnMoveInfo> PendingPawnMoves;
 

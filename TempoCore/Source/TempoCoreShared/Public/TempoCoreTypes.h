@@ -25,3 +25,18 @@ enum class EScriptingCompressionLevel: uint8
 	Med = 2,
 	High = 3
 };
+
+UENUM(Blueprintable, BlueprintType)
+enum class EControlMode : uint8
+{
+	// No robot control
+	None = 0,
+	// User input via keyboard, joypad, etc
+	User = 1,
+	// Input from AI controller or other in-game control
+	OpenLoop = 2,
+	// External control via API
+	ClosedLoop = 3,
+	Max UMETA(Hidden)
+};
+ENUM_RANGE_BY_COUNT(EControlMode, EControlMode::Max);

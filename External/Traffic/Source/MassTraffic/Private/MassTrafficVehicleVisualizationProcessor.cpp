@@ -162,9 +162,17 @@ UMassTrafficVehicleVisualizationProcessor::UMassTrafficVehicleVisualizationProce
 	ExecutionOrder.ExecuteAfter.Add(UMassTrafficDamageRepairProcessor::StaticClass()->GetFName());
 }
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 void UMassTrafficVehicleVisualizationProcessor::ConfigureQueries()
+#else
+void UMassTrafficVehicleVisualizationProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
+#endif
 {
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 	Super::ConfigureQueries();
+#else
+	Super::ConfigureQueries(EntityManager);
+#endif
 
 	EntityQuery.AddTagRequirement<FMassTrafficVehicleTag>(EMassFragmentPresence::All);
 }
@@ -188,15 +196,26 @@ UMassTrafficVehicleUpdateCustomVisualizationProcessor::UMassTrafficVehicleUpdate
 	ExecutionOrder.ExecuteAfter.Add(UMassTrafficVehicleVisualizationProcessor::StaticClass()->GetFName());
 }
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 void UMassTrafficVehicleUpdateCustomVisualizationProcessor::Initialize(UObject& Owner)
 {
 	Super::Initialize(Owner);
+#else
+void UMassTrafficVehicleUpdateCustomVisualizationProcessor::InitializeInternal(UObject& Owner, const TSharedRef<FMassEntityManager>& EntityManager)
+{
+	Super::InitializeInternal(Owner, EntityManager);
+#endif
+
 #if WITH_MASSTRAFFIC_DEBUG
 	LogOwner = UWorld::GetSubsystem<UMassTrafficSubsystem>(Owner.GetWorld());
 #endif // WITH_MASSTRAFFIC_DEBUG
 }
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 void UMassTrafficVehicleUpdateCustomVisualizationProcessor::ConfigureQueries()
+#else
+void UMassTrafficVehicleUpdateCustomVisualizationProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
+#endif
 {
 	EntityQuery.AddTagRequirement<FMassTrafficVehicleTag>(EMassFragmentPresence::All);
 	
@@ -222,7 +241,11 @@ void UMassTrafficVehicleUpdateCustomVisualizationProcessor::ConfigureQueries()
 
 void UMassTrafficVehicleUpdateCustomVisualizationProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 	EntityQuery.ForEachEntityChunk(EntityManager, Context, [this](FMassExecutionContext& Context)
+#else
+	EntityQuery.ForEachEntityChunk(Context, [this](FMassExecutionContext& Context)
+#endif
 	{
 		// Get mutable ISMInfos to append instances & custom data to
 		UMassRepresentationSubsystem* RepresentationSubsystem = Context.GetMutableSharedFragment<FMassRepresentationSubsystemSharedFragment>().RepresentationSubsystem;
@@ -381,7 +404,11 @@ void UMassTrafficVehicleUpdateCustomVisualizationProcessor::Execute(FMassEntityM
 		UWorld* World = EntityManager.GetWorld();
 		const UObject* LogOwnerPtr = LogOwner.Get();
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 		DebugEntityQuery.ForEachEntityChunk(EntityManager, Context, [World, LogOwnerPtr](FMassExecutionContext& Context)
+#else
+		DebugEntityQuery.ForEachEntityChunk(Context, [World, LogOwnerPtr](FMassExecutionContext& Context)
+#endif
 			{
 				const int32 NumEntities = Context.GetNumEntities();
 				const TConstArrayView<FTransformFragment> TransformList = Context.GetFragmentView<FTransformFragment>();

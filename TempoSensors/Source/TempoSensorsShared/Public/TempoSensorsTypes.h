@@ -13,3 +13,10 @@ enum EMeasurementType: uint8
 	DEPTH_IMAGE = 1 UMETA(DisplayName="DepthImage"),
 	LABEL_IMAGE = 2 UMETA(DisplayName="LabelImage"),
 };
+
+UENUM(BlueprintType)
+enum ELabelType : uint8
+{
+	Semantic = 0,
+	Instance = 1
+};

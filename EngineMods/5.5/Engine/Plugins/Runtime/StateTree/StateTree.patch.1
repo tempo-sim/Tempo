@@ -1,0 +1,47 @@
+diff --git Source/StateTreeModule/Public/StateTreeEvents.h Source/StateTreeModule/Public/StateTreeEvents.h
+index 290894b..b016eb4 100644
+--- Source/StateTreeModule/Public/StateTreeEvents.h
++++ Source/StateTreeModule/Public/StateTreeEvents.h
+@@ -193,9 +193,9 @@ struct STATETREEMODULE_API FStateTreeEventQueue
+ 	 * @param Function a lambda which takes const FStateTreeSharedEvent& Event, and returns EStateTreeLoopEvents.
+ 	 */
+ 	template<typename TFunc>
+-	void ForEachEvent(TFunc&& Function) const
++	void ForEachEvent(TFunc&& Function)
+ 	{
+-		for (TArray<FStateTreeSharedEvent>::TConstIterator It(SharedEvents); It; ++It)
++		for (TArray<FStateTreeSharedEvent>::TIterator It(SharedEvents); It; ++It)
+ 		{
+ 			const EStateTreeLoopEvents Result = Function(*It);
+ 			if (Result == EStateTreeLoopEvents::Break)
+diff --git Source/StateTreeModule/Public/StateTreeExecutionContext.h Source/StateTreeModule/Public/StateTreeExecutionContext.h
+index 69c8c2d..89b07ea 100644
+--- Source/StateTreeModule/Public/StateTreeExecutionContext.h
++++ Source/StateTreeModule/Public/StateTreeExecutionContext.h
+@@ -215,7 +215,7 @@ public:
+ 
+ 	/**
+ 	 * Iterates over all events.
+-	 * @param Function a lambda which takes const FStateTreeSharedEvent& Event, and returns EStateTreeLoopEvents.
++	 * @param Function a lambda which takes const FStateTreeEvent& Event, and returns EStateTreeLoopEvents.
+ 	 */
+ 	template<typename TFunc>
+ 	typename TEnableIf<TIsInvocable<TFunc, FStateTreeSharedEvent>::Value, void>::Type ForEachEvent(TFunc&& Function) const
+@@ -224,7 +224,7 @@ public:
+ 		{
+ 			return;
+ 		}
+-		EventQueue->template ForEachEvent(Function);
++		EventQueue->ForEachEvent(Function);
+ 	}
+ 
+ 	/**
+@@ -239,7 +239,7 @@ public:
+ 		{
+ 			return;
+ 		}
+-		EventQueue->template ForEachEvent([Function](const FStateTreeSharedEvent& Event)
++		EventQueue->ForEachEvent([Function](const FStateTreeSharedEvent& Event)
+ 		{
+ 			return Function(*Event);
+ 		});

@@ -431,6 +431,14 @@ protected:
 	void RegisterZoneGraphData(const AZoneGraphData* ZoneGraphData);
 	void BuildLaneData(FMassTrafficZoneGraphData& TrafficZoneGraphData, const FZoneGraphStorage& ZoneGraphStorage);
 
+	UFUNCTION()
+	void OnSpawningFinished();
+
+	UMassProcessor* GetPostSpawnProcessor(TSubclassOf<UMassProcessor> ProcessorClass);
+
+	UPROPERTY()
+	TArray<TObjectPtr<UMassProcessor>> PostSpawnProcessors;
+
 	UPROPERTY(Transient)
 	TObjectPtr<const UMassTrafficSettings> MassTrafficSettings = nullptr;
 

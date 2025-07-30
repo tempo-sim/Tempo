@@ -6,12 +6,10 @@
 #include "MassEntityConfigAsset.h"
 #include "MassTrafficChooseNextLaneProcessor.h"
 #include "MassTrafficFieldOperations.h"
-#include "MassTrafficFindNextVehicleProcessor.h"
 #include "MassTrafficInitInterpolationProcessor.h"
 #include "MassTrafficInitTrafficVehicleSpeedProcessor.h"
 #include "MassTrafficInitTrafficVehiclesProcessor.h"
 #include "MassTrafficSubsystem.h"
-#include "MassTrafficUpdateDistanceToNearestObstacleProcessor.h"
 #include "MassTrafficUpdateVelocityProcessor.h"
 #include "MassTrafficUtils.h"
 
@@ -191,9 +189,7 @@ void UMassTrafficVehicleSpawnDataGenerator::Generate(UObject& QueryOwner,
 	{
 		FMassEntitySpawnDataGeneratorResult& Result = Results[ResultIndex];
 		Result.SpawnDataProcessor = UMassTrafficInitTrafficVehiclesProcessor::StaticClass();
-		Result.PostSpawnProcessors.Add(UMassTrafficFindNextVehicleProcessor::StaticClass());
 		Result.PostSpawnProcessors.Add(UMassTrafficVisualLoggingFieldOperationProcessor::StaticClass());
-		Result.PostSpawnProcessors.Add(UMassTrafficUpdateDistanceToNearestObstacleProcessor::StaticClass());
 		Result.PostSpawnProcessors.Add(UMassTrafficChooseNextLaneProcessor::StaticClass());
 		Result.PostSpawnProcessors.Add(UMassTrafficInitTrafficVehicleSpeedProcessor::StaticClass());
 		Result.PostSpawnProcessors.Add(UMassTrafficInitInterpolationProcessor::StaticClass());

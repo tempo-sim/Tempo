@@ -233,7 +233,7 @@ void DrawDebugSpeed(UWorld* World, const FVector& Location, const float Speed, c
 		const FVector LineOffset(0.0f,0.0f,300.0f);
 		const FVector TextOffset(0.0f,0.0f,400.0f);
 
-		const FString Str = FString::Printf(TEXT("SPD:%.1f BRK?%d D%%:%.3f LOD:%d"), Speed, bBraking, (DistanceAlongLane/CurrentLaneLength));
+		const FString Str = FString::Printf(TEXT("SPD:%.1f BRK?%d D%%:%.3f"), Speed, bBraking, (DistanceAlongLane/CurrentLaneLength));
 		DrawDebugString(World, Location + TextOffset, Str, nullptr, FColor::White, 0.0f);
 	
 		// Base line

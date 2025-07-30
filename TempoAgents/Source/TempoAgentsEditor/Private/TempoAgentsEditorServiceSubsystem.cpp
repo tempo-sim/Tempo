@@ -29,9 +29,12 @@ void UTempoAgentsEditorServiceSubsystem::Deinitialize()
 	FTempoScriptingServer::Get().DeactivateService<TempoAgentsEditorService>();
 }
 
-void UTempoAgentsEditorServiceSubsystem::RunTempoZoneGraphBuilderPipeline(const TempoScripting::Empty& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const
+void UTempoAgentsEditorServiceSubsystem::RunTempoZoneGraphBuilderPipeline(const TempoScripting::Empty& Request, const TResponseDelegate<TempoAgentsEditor::PipelineResult>& ResponseContinuation) const
 {
-	UTempoAgentsEditorUtils::RunTempoZoneGraphBuilderPipeline();
+	const bool bSuccess = UTempoAgentsEditorUtils::RunTempoZoneGraphBuilderPipeline();
 
-	ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status_OK);
+	TempoAgentsEditor::PipelineResult Result;
+	Result.set_success(bSuccess);
+
+	ResponseContinuation.ExecuteIfBound(Result, grpc::Status_OK);
 }

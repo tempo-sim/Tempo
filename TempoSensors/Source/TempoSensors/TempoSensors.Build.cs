@@ -1,4 +1,4 @@
-﻿// Copyright Epic Games, Inc. All Rights Reserved.
+﻿// Copyright Tempo Simulation, LLC. All Rights Reserved
 
 using UnrealBuildTool;
 
@@ -37,6 +37,7 @@ public class TempoSensors : TempoModuleRules
 			{
 				// Unreal
 				"CoreUObject",
+				"DeveloperSettings",
 				"Engine",
 				"RenderCore",
 				"RHI",

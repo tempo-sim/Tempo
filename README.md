@@ -1,13 +1,14 @@
 # Tempo
+
+https://github.com/user-attachments/assets/dfc7b28b-3b73-4603-a779-dd6e5b2acec9
+
 Tempo is a collection of simulation-focused plugins for Unreal Engine. Tempo makes the power of Unreal accessible to simulation and robotics developers, including plugins for scripting, sensor simulation, agent behaviors, and more.
 
-Tempo is the foundation on which you can build a simulator for your unique application. Not sure where to start? Want some guidance from the authors? Feel free to [reach out](https://www.temposimulation.com/contact).
+Tempo is the foundation on which you can build a simulator for your unique application. Not sure where to start? Want some guidance from the authors? Find us on [![Discord](https://img.shields.io/badge/Discord-Join%20Server-5865F2?logo=discord&logoColor=white)](https://discord.gg/bKa2hnGYnw)
 
 ## Compatibility
 - Linux (Ubuntu 22.04 and 24.04), MacOS (13.0 "Ventura" or newer, Apple silicon only), Windows 10 and 11
-- Unreal Engine 5.4 and 5.5
-> [!WARNING]
-> A change in XCode 16.3 broke Unreal builds (not just Tempo). The [fix](https://github.com/EpicGames/UnrealEngine/commit/36e6414349658ce0ef27d3733a764e392b410a7c) will be in 5.6, but we do not know if Epic will make a 5.4 or 5.5 hotfix for it. In the meantime, we recommend dowgrading to Xcode to 16.2 on Mac. You can find previous Xcode releases [here](https://developer.apple.com/download/all/) (you'll need a free Apple developer account).
+- Unreal Engine 5.4, and 5.5, and 5.6
 
 ## Prerequisites
 - Linux:
@@ -20,15 +21,10 @@ Tempo is the foundation on which you can build a simulator for your unique appli
 - Windows:
   - Unreal: Install using Epic Games Launcher
   - [Git Bash](https://gitforwindows.org/) (Run all Tempo `*.sh` scripts from Git Bash)
-  - `jq`: (Use Admininistrator Git Bash) `curl -L -o /usr/bin/jq.exe https://github.com/jqlang/jq/releases/latest/download/jq-win64.exe`
+  - `jq`: (Use Administrator Git Bash) `curl -L -o /usr/bin/jq.exe https://github.com/jqlang/jq/releases/latest/download/jq-win64.exe`
 
 ## Environment Variables
-- `UNREAL_ENGINE_PATH`: Your Unreal Engine installation directory (the folder containing `Engine`)
-  - On Linux, unzip where you like, for example `~/UE_5.5`
-  - The Mac default is `/Users/Shared/Epic Games/UE_5.5`
-  - On Windows the default is `C:\Program Files\Epic Games\UE_5.5`
-> [!NOTE]
-> If you're using 5.4 make sure to update the paths above accordingly.
+- `UNREAL_ENGINE_PATH`: On Linux only must be set to your Unreal Engine installation directory (the folder containing `Engine`). On Mac and Windows, Tempo will attempt to automatically find Unreal via your uproject file, but you can still set this to override it.
 
 ## Getting Started
 Follow along the steps below with this video. Sound on!
@@ -45,15 +41,12 @@ git submodule add https://github.com/tempo-sim/Tempo.git
 git submodule update --init --recursive
 ```
 
-### Project Changes
-Tempo requires one change to a vanilla Unreal Engine project to build:
-- Your project's `*.Target.cs` files must use the Tempo UnrealBuildTool toolchain for your platform, as in [TempoSample.Target.cs](https://github.com/tempo-sim/TempoSample/blob/main/Source/TempoSample.Target.cs) and [TempoSampleEditor.Target.cs](https://github.com/tempo-sim/TempoSample/blob/main/Source/TempoSampleEditor.Target.cs).
-
 ### One-Time Setup
 Run the `Setup.sh` script (from the `Tempo` root) once. This script will:
-- Install the Tempo Unreal Engine mods (we make some changes to your installed Engine in-place to avoid distributing a custom engine build)
+- Modify your project's `*.Target.cs` files to use Tempo's custom toolchain, which is necessary for linking certain third party dependencies properly
+- Install the Tempo Unreal Engine mods, making some changes to your installed Engine in-place
 - Download third party dependencies
-- Add git hooks to keep both of the above in sync automatically as you check out different Tempo commits
+- Add git hooks to keep engine mods and third party dependencies up to date automatically as you check out different Tempo commits
 
 ### Build and Run
 Use the included `Scripts/Build.sh` and `Scripts/Run.sh` to build your project and open it in Unreal Editor.
@@ -95,8 +88,8 @@ Use the included `Scripts/Package.sh` to package your project into a standalone 
 ## Continuous Integration
 If you would like to set up a GitHub actions pipeline to build, package, run, and/or release your Tempo project, check out the `build_and_package` reusable workflow in [.github/workflows](https://github.com/tempo-sim/Tempo/tree/main/.github/workflows). `TempoSample`'s [tempo_sample_build_and_package](https://github.com/tempo-sim/TempoSample/blob/main/.github/workflows/tempo_sample_build_and_package.yml) workflow is a good reference.
 
-## Getting Help
-Stuck on something? Feel free to send us an [issue](https://github.com/tempo-sim/Tempo/issues) or ask a question on our [Discord](https://discord.gg/bKa2hnGYnw).
+## Issues
+Something not working as expected? Are we missing a key feature you need? Feel free to send us an [issue](https://github.com/tempo-sim/Tempo/issues).
 
 ## Giving Back
 Want to contribute to Tempo? We'll be happy to review your PR.
