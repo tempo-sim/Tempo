@@ -55,6 +55,7 @@ struct TTextureReadBase : FTextureRead
 
 	virtual void Read(const FRenderTarget* RenderTarget, const FTextureRHIRef& TextureRHICopy) override
 	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsTextureRead);
 		check(IsInRenderingThread());
 
 		State = State::EReading;
@@ -206,7 +207,11 @@ public:
 
 	virtual void BeginPlay() override;
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 	virtual void UpdateSceneCaptureContents(FSceneInterface* Scene) override;
+#else
+	virtual void UpdateSceneCaptureContents(FSceneInterface* Scene, ISceneRenderBuilder& SceneRenderBuilder) override;
+#endif
 
 	// Begin ITempoSensorInterface
 	virtual FString GetOwnerName() const override;

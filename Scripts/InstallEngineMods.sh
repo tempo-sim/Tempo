@@ -28,11 +28,7 @@ trap 'interrupt_handler' INT
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 TEMPO_ROOT=$(realpath "$SCRIPT_DIR/..")
 
-# Check for UNREAL_ENGINE_PATH
-if [ -z ${UNREAL_ENGINE_PATH+x} ]; then
-  echo "Please set UNREAL_ENGINE_PATH environment variable and re-run";
-  UNSUCCESSFUL_EXIT 1
-fi
+UNREAL_ENGINE_PATH=$("$SCRIPT_DIR"/FindUnreal.sh)
 
 if [ ! -f "$UNREAL_ENGINE_PATH/Engine/Source/Programs/UnrealBuildTool/UnrealBuildTool.csproj" ]; then
   echo "UNREAL_ENGINE_PATH ($UNREAL_ENGINE_PATH) does not seem correct. Please check and re-run";
@@ -220,6 +216,14 @@ REBUILD_UBT() {
   eval "$DOTNET" build "./Engine/Source/Programs/UnrealBuildTool/UnrealBuildTool.csproj" -c Development
   eval "$DOTNET" build "./Engine/Source/Programs/AutomationTool/AutomationTool.csproj" -c Development
 
+  # Copy the resulting built dlls to the binaries folder (in 5.6 they aren't copied to Binaries automatically? not sure why)
+  if [ -f "$UNREAL_ENGINE_PATH/Engine/Source/Programs/UnrealBuildTool/bin/Development/UnrealBuildTool.dll" ]; then
+    cp -r "$UNREAL_ENGINE_PATH/Engine/Source/Programs/UnrealBuildTool/bin/Development/UnrealBuildTool.dll" "$UNREAL_ENGINE_PATH/Engine/Binaries/DotNET/UnrealBuildTool"
+  fi
+  if [ -f "$UNREAL_ENGINE_PATH/Engine/Source/Programs/AutomationTool/bin/Development/AutomationTool.dll" ]; then
+    cp -r "$UNREAL_ENGINE_PATH/Engine/Source/Programs/AutomationTool/bin/Development/AutomationTool.dll" "$UNREAL_ENGINE_PATH/Engine/Binaries/DotNET/AutomationTool"
+  fi
+
   echo -e "\nSuccessfully rebuilt UnrealBuildTool with Tempo mods\n"
 }
 
@@ -320,7 +324,11 @@ for MOD in "${MODS[@]}"; do
   fi
 
   # Rebuild, and recreate the built record if build is successful
-  if [ "$TYPE" = "Plugin" ]; then
+  if [ "$TYPE" = "SourceOnly" ]; then
+    rm -rf "${UNREAL_ENGINE_PATH:?}/${ROOT:?}/*"
+    COPY_DIR "$TEMP/$ROOT" "$UNREAL_ENGINE_PATH/$ROOT"
+    echo -e "\nApplied source-only Tempo mods to $ROOT\n"
+  elif [ "$TYPE" = "Plugin" ]; then
     REBUILD_PLUGIN "$TEMP" "$ROOT"
   elif [ "$TYPE" = "UnrealBuildTool" ]; then
     REBUILD_UBT "$TEMP" "$ROOT"

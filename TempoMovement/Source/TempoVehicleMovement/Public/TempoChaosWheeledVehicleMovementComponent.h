@@ -2,7 +2,6 @@
 
 #pragma once
 
-#include "TempoVehicleMovementInterface.h"
 #include "TempoMovementInterface.h"
 
 #include "ChaosWheeledVehicleMovementComponent.h"
@@ -11,18 +10,16 @@
 #include "TempoChaosWheeledVehicleMovementComponent.generated.h"
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TEMPOVEHICLEMOVEMENT_API UTempoChaosWheeledVehicleMovementComponent : public UChaosWheeledVehicleMovementComponent, public ITempoVehicleMovementInterface, public ITempoMovementInterface
+class TEMPOVEHICLEMOVEMENT_API UTempoChaosWheeledVehicleMovementComponent : public UChaosWheeledVehicleMovementComponent, public ITempoMovementInterface
 {
 	GENERATED_BODY()
 
 public:
 	UTempoChaosWheeledVehicleMovementComponent();
 
-	virtual float GetLinearVelocity() override { return VehicleState.ForwardSpeed; }
+	virtual FVector GetAngularVelocity() const override { return VehicleState.VehicleWorldAngularVelocity; }
 
-	virtual FVector GetAngularVelocity() override { return VehicleState.VehicleWorldAngularVelocity; }
-	
-	virtual void HandleDrivingCommand(const FDrivingCommand& Command) override;
+	virtual bool GetReverseEnabled() const override { return bReverseEnabled; }
 
 protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)

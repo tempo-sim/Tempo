@@ -2,11 +2,19 @@
 
 #include "TempoInstancedStaticMeshComponent.h"
 
-FOnTempoInstancedStaticMeshRegistered UTempoInstancedStaticMeshComponent::TempoInstancedStaticMeshRegisteredEvent;
+FOnTempoInstancedStaticMeshRegistrationChanged UTempoInstancedStaticMeshComponent::TempoInstancedStaticMeshRegisteredEvent;
+FOnTempoInstancedStaticMeshRegistrationChanged UTempoInstancedStaticMeshComponent::TempoInstancedStaticMeshUnRegisteredEvent;
 
 void UTempoInstancedStaticMeshComponent::OnRegister()
 {
 	Super::OnRegister();
 
 	TempoInstancedStaticMeshRegisteredEvent.Broadcast(this);
+}
+
+void UTempoInstancedStaticMeshComponent::OnUnregister()
+{
+	Super::OnUnregister();
+
+	TempoInstancedStaticMeshUnRegisteredEvent.Broadcast(this);
 }

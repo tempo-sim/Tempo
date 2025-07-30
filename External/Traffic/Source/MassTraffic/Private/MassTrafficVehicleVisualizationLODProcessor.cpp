@@ -35,17 +35,35 @@ UMassTrafficVehicleVisualizationLODProcessor::UMassTrafficVehicleVisualizationLO
 	ExecutionOrder.ExecuteAfter.Add(UE::MassTraffic::ProcessorGroupNames::VehicleLODCollector);
 }
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 void UMassTrafficVehicleVisualizationLODProcessor::Initialize(UObject& InOwner)
 {
+#else
+void UMassTrafficVehicleVisualizationLODProcessor::InitializeInternal(UObject& InOwner, const TSharedRef<FMassEntityManager>& EntityManager)
+{
+#endif
 #if WITH_MASSTRAFFIC_DEBUG
 	LogOwner = UWorld::GetSubsystem<UMassTrafficSubsystem>(InOwner.GetWorld());
 #endif // WITH_MASSTRAFFIC_DEBUG
+
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 	Super::Initialize(InOwner);
+#else
+	Super::InitializeInternal(InOwner, EntityManager);
+#endif
 }
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 void UMassTrafficVehicleVisualizationLODProcessor::ConfigureQueries()
+#else
+void UMassTrafficVehicleVisualizationLODProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
+#endif
 {
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 	Super::ConfigureQueries();
+#else
+	Super::ConfigureQueries(EntityManager);
+#endif
 
 	CloseEntityQuery.AddTagRequirement<FMassTrafficVehicleTag>(EMassFragmentPresence::Any);
 	CloseEntityQuery.AddTagRequirement<FMassTrafficParkedVehicleTag>(EMassFragmentPresence::Any);
@@ -73,7 +91,11 @@ void UMassTrafficVehicleVisualizationLODProcessor::Execute(FMassEntityManager& E
 	UWorld* World = EntityManager.GetWorld();
 
 	// LOD Stats
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 	DebugEntityQuery.ForEachEntityChunk(EntityManager, Context, [this](FMassExecutionContext& Context)
+#else
+	DebugEntityQuery.ForEachEntityChunk(Context, [this](FMassExecutionContext& Context)
+#endif
 	{
 		const int32 NumEntities = Context.GetNumEntities();
 		TConstArrayView<FMassRepresentationLODFragment> VisualizationLODFragments = Context.GetFragmentView<FMassRepresentationLODFragment>();
@@ -120,7 +142,11 @@ void UMassTrafficVehicleVisualizationLODProcessor::Execute(FMassEntityManager& E
 		
 		const UObject* LogOwnerPtr = LogOwner.Get();
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 		DebugEntityQuery.ForEachEntityChunk(EntityManager, Context, [World, LogOwnerPtr](FMassExecutionContext& Context)
+#else
+		DebugEntityQuery.ForEachEntityChunk(Context, [World, LogOwnerPtr](FMassExecutionContext& Context)
+#endif
 		{
 			const int32 NumEntities = Context.GetNumEntities();
 			TConstArrayView<FTransformFragment> LocationList = Context.GetFragmentView<FTransformFragment>();
@@ -156,9 +182,17 @@ UMassTrafficVehicleLODCollectorProcessor::UMassTrafficVehicleLODCollectorProcess
 	ExecutionOrder.ExecuteAfter.Add(UE::MassTraffic::ProcessorGroupNames::FrameStart);
 }
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 void UMassTrafficVehicleLODCollectorProcessor::ConfigureQueries()
+#else
+void UMassTrafficVehicleLODCollectorProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
+#endif
 {
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 	Super::ConfigureQueries();
+#else
+	Super::ConfigureQueries(EntityManager);
+#endif
 
 	EntityQuery_VisibleRangeAndOnLOD.AddTagRequirement<FMassTrafficVehicleTag>(EMassFragmentPresence::Any);
 	EntityQuery_VisibleRangeAndOnLOD.AddTagRequirement<FMassTrafficParkedVehicleTag>(EMassFragmentPresence::Any);

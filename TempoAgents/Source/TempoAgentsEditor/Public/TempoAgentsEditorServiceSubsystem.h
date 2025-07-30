@@ -14,6 +14,11 @@ namespace TempoScripting
 	class Empty;
 }
 
+namespace TempoAgentsEditor
+{
+	class PipelineResult;
+}
+
 UCLASS()
 class TEMPOAGENTSEDITOR_API UTempoAgentsEditorServiceSubsystem : public UUnrealEditorSubsystem, public ITempoScriptable
 {
@@ -26,5 +31,5 @@ public:
 
 	virtual void Deinitialize() override;
 	
-	void RunTempoZoneGraphBuilderPipeline(const TempoScripting::Empty& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const;
+	void RunTempoZoneGraphBuilderPipeline(const TempoScripting::Empty& Request, const TResponseDelegate<TempoAgentsEditor::PipelineResult>& ResponseContinuation) const;
 };

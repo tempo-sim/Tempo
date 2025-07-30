@@ -6,7 +6,6 @@
 #include "ZoneGraphTypes.h"
 #include "GameFramework/Actor.h"
 #include "Subsystems/UnrealEditorSubsystem.h"
-#include "TempoZoneGraphSettings.h"
 #include "TempoZoneGraphBuilder.h"
 #include "TempoRoadLaneGraphSubsystem.generated.h"
 
@@ -36,10 +35,8 @@ protected:
 	FZoneLaneProfile CreateDynamicLaneProfile(const AActor& RoadQueryActor, bool bQueryActorIsRoadModule) const;
 	FZoneLaneDesc CreateZoneLaneDesc(const float LaneWidth, const EZoneLaneDirection LaneDirection, const TArray<FName>& LaneTagNames) const;
 	FName GenerateDynamicLaneProfileName(const FZoneLaneProfile& LaneProfile) const;
-	bool TryWriteDynamicLaneProfile(const FZoneLaneProfile& LaneProfile) const;
-	bool TryGetDynamicLaneProfileFromSettings(const FZoneLaneProfile& InLaneProfile, FZoneLaneProfile& OutLaneProfileFromSettings) const;
-	FZoneLaneProfile GetLaneProfile(const AActor& RoadQueryActor, bool bQueryActorIsRoadModule) const;
-	FZoneLaneProfile GetLaneProfileByName(FName LaneProfileName) const;
+	const FZoneLaneProfile* GetLaneProfile(const AActor& RoadQueryActor, bool bQueryActorIsRoadModule) const;
+	const FZoneLaneProfile* GetLaneProfileByName(FName LaneProfileName) const;
 
 	// Intersection functions
 	bool TryGenerateAndRegisterZoneShapeComponentsForIntersection(AActor& IntersectionQueryActor) const;
@@ -54,20 +51,19 @@ protected:
 	bool TryCreateZoneShapePointForCrosswalkControlPoint(const AActor& IntersectionQueryActor, int32 ConnectionIndex, int32 CrosswalkControlPointIndex, FZoneShapePoint& OutZoneShapePoint) const;
 
 	FZoneLaneProfile CreateDynamicLaneProfileForCrosswalk(const AActor& IntersectionQueryActor, int32 ConnectionIndex) const;
-	FZoneLaneProfile GetLaneProfileForCrosswalk(const AActor& IntersectionQueryActor, int32 ConnectionIndex) const;
+	const FZoneLaneProfile* GetLaneProfileForCrosswalk(const AActor& IntersectionQueryActor, int32 ConnectionIndex) const;
 	
 	FZoneLaneProfile CreateCrosswalkIntersectionConnectorDynamicLaneProfile(const AActor& IntersectionQueryActor, int32 CrosswalkRoadModuleIndex) const;
-	FZoneLaneProfile GetCrosswalkIntersectionConnectorLaneProfile(const AActor& IntersectionQueryActor, int32 CrosswalkRoadModuleIndex) const;
+	const FZoneLaneProfile* GetCrosswalkIntersectionConnectorLaneProfile(const AActor& IntersectionQueryActor, int32 CrosswalkRoadModuleIndex) const;
 	
 	FZoneLaneProfile CreateCrosswalkIntersectionEntranceDynamicLaneProfile(const AActor& IntersectionQueryActor, int32 CrosswalkIntersectionIndex, int32 CrosswalkIntersectionConnectionIndex) const;
-	FZoneLaneProfile GetCrosswalkIntersectionEntranceLaneProfile(const AActor& IntersectionQueryActor, int32 CrosswalkIntersectionIndex, int32 CrosswalkIntersectionConnectionIndex) const;
+	const FZoneLaneProfile* GetCrosswalkIntersectionEntranceLaneProfile(const AActor& IntersectionQueryActor, int32 CrosswalkIntersectionIndex, int32 CrosswalkIntersectionConnectionIndex) const;
 
 	// Shared functions
 	bool TryRegisterZoneShapeComponentWithActor(AActor& Actor, UZoneShapeComponent& ZoneShapeComponent) const;
 	void DestroyZoneShapeComponents(AActor& Actor) const;
 	FZoneGraphTag GetTagByName(const FName TagName) const;
 
-	UTempoZoneGraphSettings* GetMutableTempoZoneGraphSettings() const;
 	virtual UWorld* GetWorld() const override;
 
 	FTempoZoneGraphBuilder TempoZoneGraphBuilder;

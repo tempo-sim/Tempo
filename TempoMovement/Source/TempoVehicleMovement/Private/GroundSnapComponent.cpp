@@ -28,7 +28,7 @@ void UGroundSnapComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 	check(GetWorld());
 	check(GetOwner());
 
-	const FVector2D Extents = bOverrideOwnerExtents ? ExtentsOverride : FVector2D(UTempoCoreUtils::GetActorLocalBounds(GetOwner()).GetExtent());
+	const FVector2D Extents = bOverrideOwnerExtents ? ExtentsOverride : FVector2D(UTempoCoreUtils::GetActorLocalBounds(GetOwner(), bIncludeHiddenComponentsInExtents).GetExtent());
 
 	TArray<FHitResult> GroundHits;
 	TArray<FVector2D> Offsets = { FVector2D(1, 1), FVector2D(1, -1), FVector2D(-1, -1), FVector2D(-1, 1) };

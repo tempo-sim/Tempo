@@ -4,9 +4,15 @@
 #include "MassCommonUtils.h"
 #include "ZoneGraphSubsystem.h" 
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 void UMassTrafficProcessorBase::Initialize(UObject& InOwner)
 {
 	Super::Initialize(InOwner);
+#else
+void UMassTrafficProcessorBase::InitializeInternal(UObject& InOwner, const TSharedRef<FMassEntityManager>& EntityManager)
+{
+	Super::InitializeInternal(InOwner, EntityManager);
+#endif
 
 	// Get settings
 	MassTrafficSettings = GetDefault<UMassTrafficSettings>();
