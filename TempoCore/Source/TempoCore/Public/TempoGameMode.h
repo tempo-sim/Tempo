@@ -33,7 +33,9 @@ public:
 	// An event that fires *right* before BeginPlay
 	FPreBeginPlay PreBeginPlayEvent;
 
-	void SetControlMode(EControlMode ControlMode) const;
+	bool SetControlMode(EControlMode ControlMode, FString& ErrorOut) const;
+
+	EControlMode GetControlMode() const;
 
 protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, meta=(MustImplement="/Script/TempoCore.ActorClassificationInterface"))
