@@ -8,6 +8,13 @@
 #include "GameFramework/PawnMovementComponent.h"
 #include "KinematicVehicleMovementComponent.generated.h"
 
+UENUM(BlueprintType)
+enum class EVehicleInputMode : uint8
+{
+	Velocity = 0,
+	Acceleration = 1,
+};
+
 UCLASS(Abstract, ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class TEMPOVEHICLEMOVEMENT_API UKinematicVehicleMovementComponent : public UPawnMovementComponent, public ITempoMovementInterface
 {
@@ -48,4 +55,7 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite)
 	float AngularVelocity = 0.0; // Deg/S
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	EVehicleInputMode LongitudinalInputMode = EVehicleInputMode::Acceleration;
 };
