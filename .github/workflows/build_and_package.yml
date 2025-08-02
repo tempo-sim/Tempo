@@ -147,6 +147,14 @@ jobs:
         large-packages: false
         docker-images: false
         swap-storage: false
+    - name: Free Space in /mnt (if using GitHub-hosted runner)
+      if: ${{ contains(runner.name, 'Github') && contains(runner.name, 'Actions') }}
+      run: |
+        ls -la /mnt || true
+        df -h /mnt
+        sudo rm -rf /mnt/btrfs_loopbacks || true
+        sudo rm -rf /mnt/var-lib-docker || true
+        df -h /mnt
     - name: Checkout Host Project (if using one)
       if: ${{ inputs.host_project != '' }}
       uses: actions/checkout@v4
@@ -294,20 +302,24 @@ jobs:
         sudo chown -R 1000:1000 .engine-ddc-cache/
         sudo chmod -R 755 .engine-ddc-cache/
     - name: Sync Third Party Dependencies
-      run: |
-        docker run --rm \
-          -v ${{ github.workspace }}/.engine-mods-cache/TempoMods:/home/ue4/UnrealEngine/TempoMods \
-          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/ZoneGraph:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/ZoneGraph \
-          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/AI/MassCrowd:/home/ue4/UnrealEngine/Engine/Plugins/AI/MassCrowd \
-          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/MassEntity:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/MassEntity \
-          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/StateTree:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/StateTree \
-          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs/UnrealBuildTool:/home/ue4/UnrealEngine/Engine/Source/Programs/UnrealBuildTool \
-          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Binaries/DotNET/UnrealBuildTool:/home/ue4/UnrealEngine/Engine/Binaries/DotNET/UnrealBuildTool \
-          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Binaries/DotNET/AutomationTool:/home/ue4/UnrealEngine/Engine/Binaries/DotNET/AutomationTool \
-          -v ${{ github.workspace }}/.engine-ddc-cache/Engine/DerivedDataCache:/home/ue4/UnrealEngine/Engine/DerivedDataCache \
-          -v ${{ github.workspace }}/${{ inputs.project_root }}:/home/ue4/${{ inputs.project_root }} \
-          tempo_unreal_image \
-          /home/ue4/${{ inputs.tempo_root }}/Scripts/SyncDeps.sh -force
+      uses: nick-fields/retry@v3
+      with:
+        max_attempts: 3
+        retry_on: error
+        command: |
+          docker run --rm \
+            -v ${{ github.workspace }}/.engine-mods-cache/TempoMods:/home/ue4/UnrealEngine/TempoMods \
+            -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/ZoneGraph:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/ZoneGraph \
+            -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/AI/MassCrowd:/home/ue4/UnrealEngine/Engine/Plugins/AI/MassCrowd \
+            -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/MassEntity:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/MassEntity \
+            -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/StateTree:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/StateTree \
+            -v ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs/UnrealBuildTool:/home/ue4/UnrealEngine/Engine/Source/Programs/UnrealBuildTool \
+            -v ${{ github.workspace }}/.engine-mods-cache/Engine/Binaries/DotNET/UnrealBuildTool:/home/ue4/UnrealEngine/Engine/Binaries/DotNET/UnrealBuildTool \
+            -v ${{ github.workspace }}/.engine-mods-cache/Engine/Binaries/DotNET/AutomationTool:/home/ue4/UnrealEngine/Engine/Binaries/DotNET/AutomationTool \
+            -v ${{ github.workspace }}/.engine-ddc-cache/Engine/DerivedDataCache:/home/ue4/UnrealEngine/Engine/DerivedDataCache \
+            -v ${{ github.workspace }}/${{ inputs.project_root }}:/home/ue4/${{ inputs.project_root }} \
+            tempo_unreal_image \
+            /home/ue4/${{ inputs.tempo_root }}/Scripts/SyncDeps.sh -force
     - name: Install Engine Mods
       run: |
         docker run --rm \
