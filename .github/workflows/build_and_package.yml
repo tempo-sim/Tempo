@@ -306,6 +306,7 @@ jobs:
       with:
         max_attempts: 3
         retry_on: error
+        timeout_seconds: 60
         command: |
           docker run --rm \
             -v ${{ github.workspace }}/.engine-mods-cache/TempoMods:/home/ue4/UnrealEngine/TempoMods \
