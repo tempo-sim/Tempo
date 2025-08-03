@@ -10,6 +10,7 @@
 
 #include "TempoGameMode.generated.h"
 
+DECLARE_MULTICAST_DELEGATE_OneParam(FControlModeChanged, EControlMode);
 DECLARE_MULTICAST_DELEGATE_OneParam(FPreBeginPlay, UWorld*);
 
 UCLASS(Blueprintable, Abstract)
@@ -36,6 +37,8 @@ public:
 	bool SetControlMode(EControlMode ControlMode, FString& ErrorOut) const;
 
 	EControlMode GetControlMode() const;
+
+	FControlModeChanged ControlModeChangedEvent;
 
 protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, meta=(MustImplement="/Script/TempoCore.ActorClassificationInterface"))

@@ -22,6 +22,12 @@ void UTempoControlModeWidget::NativeOnInitialized()
 	ControlModeBox->OnSelectionChanged.AddDynamic(this, &UTempoControlModeWidget::OnControlModeSelectionChanged);
 
 	ControlModeBox->SetSelectedOption(UTempoCoreUtils::GetEnumValueAsString(EControlMode::None));
+
+	if (ATempoGameMode* GameMode = Cast<ATempoGameMode>(UGameplayStatics::GetGameMode(this)))
+	{
+		SyncControlMode(GameMode->GetControlMode());
+		GameMode->ControlModeChangedEvent.AddUObject(this, &UTempoControlModeWidget::SyncControlMode);
+	}
 }
 
 void UTempoControlModeWidget::OnControlModeSelectionChanged(FString SelectedItem, ESelectInfo::Type SelectionType)
@@ -42,3 +48,9 @@ void UTempoControlModeWidget::OnControlModeSelectionChanged(FString SelectedItem
 		}
 	}
 }
+
+void UTempoControlModeWidget::SyncControlMode(EControlMode ControlMode)
+{
+	ControlModeBox->SetSelectedOption(UTempoCoreUtils::GetEnumValueAsString(ControlMode));
+}
+

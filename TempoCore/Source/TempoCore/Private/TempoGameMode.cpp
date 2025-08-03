@@ -120,6 +120,7 @@ bool ATempoGameMode::SetControlMode(EControlMode ControlMode, FString& ErrorOut)
 		PlayerController->Possess(DefaultPawn);
 	}
 
+	ControlModeChangedEvent.Broadcast(ControlMode);
 	return true;
 }
 
