@@ -211,7 +211,7 @@ jobs:
           .engine-mods-cache/Engine/Plugins/Runtime/MassEntity/**
           .engine-mods-cache/Engine/Plugins/Runtime/StateTree/**
           .engine-mods-cache/Engine/Source/Programs/UnrealBuildTool/**
-          .engine-mods-cache/Engine/Source/Programs/Shared/EpicGames.Perforce/**
+          .engine-mods-cache/Engine/Source/Programs/Shared/**
           .engine-mods-cache/Engine/Binaries/DotNET/UnrealBuildTool/**
           .engine-mods-cache/Engine/Binaries/DotNET/AutomationTool/**
         key: tempo-engine-mods-${{ env.UNREAL_VERSION }}-${{ hashFiles(format('{0}/EngineMods/**', inputs.tempo_root)) }}
@@ -285,6 +285,7 @@ jobs:
         docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/MassEntity ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime
         docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/StateTree ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime
         docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Source/Programs/UnrealBuildTool ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs
+        docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Source/Programs/Shared ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs
         docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Binaries/DotNET/UnrealBuildTool ${{ github.workspace }}/.engine-mods-cache/Engine/Binaries/DotNET
         docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Binaries/DotNET/AutomationTool ${{ github.workspace }}/.engine-mods-cache/Engine/Binaries/DotNET
         docker rm temp_engine
@@ -316,7 +317,7 @@ jobs:
             -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/MassEntity:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/MassEntity \
             -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/StateTree:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/StateTree \
             -v ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs/UnrealBuildTool:/home/ue4/UnrealEngine/Engine/Source/Programs/UnrealBuildTool \
-            -v ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs/Shared/EpicGames.Perforce:/home/ue4/UnrealEngine/Engine/Source/Programs/Shared/EpicGames.Perforce \
+            -v ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs/Shared:/home/ue4/UnrealEngine/Engine/Source/Programs/Shared \
             -v ${{ github.workspace }}/.engine-mods-cache/Engine/Binaries/DotNET/UnrealBuildTool:/home/ue4/UnrealEngine/Engine/Binaries/DotNET/UnrealBuildTool \
             -v ${{ github.workspace }}/.engine-mods-cache/Engine/Binaries/DotNET/AutomationTool:/home/ue4/UnrealEngine/Engine/Binaries/DotNET/AutomationTool \
             -v ${{ github.workspace }}/.engine-ddc-cache/Engine/DerivedDataCache:/home/ue4/UnrealEngine/Engine/DerivedDataCache \
@@ -332,7 +333,7 @@ jobs:
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/MassEntity:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/MassEntity \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/StateTree:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/StateTree \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs/UnrealBuildTool:/home/ue4/UnrealEngine/Engine/Source/Programs/UnrealBuildTool \
-          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs/Shared/EpicGames.Perforce:/home/ue4/UnrealEngine/Engine/Source/Programs/Shared/EpicGames.Perforce \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs/Shared:/home/ue4/UnrealEngine/Engine/Source/Programs/Shared \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Binaries/DotNET/UnrealBuildTool:/home/ue4/UnrealEngine/Engine/Binaries/DotNET/UnrealBuildTool \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Binaries/DotNET/AutomationTool:/home/ue4/UnrealEngine/Engine/Binaries/DotNET/AutomationTool \
           -v ${{ github.workspace }}/.engine-ddc-cache/Engine/DerivedDataCache:/home/ue4/UnrealEngine/Engine/DerivedDataCache \
@@ -349,7 +350,7 @@ jobs:
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/MassEntity:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/MassEntity \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/StateTree:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/StateTree \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs/UnrealBuildTool:/home/ue4/UnrealEngine/Engine/Source/Programs/UnrealBuildTool \
-          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs/Shared/EpicGames.Perforce:/home/ue4/UnrealEngine/Engine/Source/Programs/Shared/EpicGames.Perforce \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs/Shared:/home/ue4/UnrealEngine/Engine/Source/Programs/Shared \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Binaries/DotNET/UnrealBuildTool:/home/ue4/UnrealEngine/Engine/Binaries/DotNET/UnrealBuildTool \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Binaries/DotNET/AutomationTool:/home/ue4/UnrealEngine/Engine/Binaries/DotNET/AutomationTool \
           -v ${{ github.workspace }}/.engine-ddc-cache/Engine/DerivedDataCache:/home/ue4/UnrealEngine/Engine/DerivedDataCache \
@@ -365,7 +366,7 @@ jobs:
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/MassEntity:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/MassEntity \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/StateTree:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/StateTree \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs/UnrealBuildTool:/home/ue4/UnrealEngine/Engine/Source/Programs/UnrealBuildTool \
-          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs/Shared/EpicGames.Perforce:/home/ue4/UnrealEngine/Engine/Source/Programs/Shared/EpicGames.Perforce \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs/Shared:/home/ue4/UnrealEngine/Engine/Source/Programs/Shared \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Binaries/DotNET/UnrealBuildTool:/home/ue4/UnrealEngine/Engine/Binaries/DotNET/UnrealBuildTool \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Binaries/DotNET/AutomationTool:/home/ue4/UnrealEngine/Engine/Binaries/DotNET/AutomationTool \
           -v ${{ github.workspace }}/.engine-ddc-cache/Engine/DerivedDataCache:/home/ue4/UnrealEngine/Engine/DerivedDataCache \
@@ -392,7 +393,7 @@ jobs:
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/MassEntity:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/MassEntity \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/StateTree:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/StateTree \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs/UnrealBuildTool:/home/ue4/UnrealEngine/Engine/Source/Programs/UnrealBuildTool \
-          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs/Shared/EpicGames.Perforce:/home/ue4/UnrealEngine/Engine/Source/Programs/Shared/EpicGames.Perforce \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs/Shared:/home/ue4/UnrealEngine/Engine/Source/Programs/Shared \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Binaries/DotNET/UnrealBuildTool:/home/ue4/UnrealEngine/Engine/Binaries/DotNET/UnrealBuildTool \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Binaries/DotNET/AutomationTool:/home/ue4/UnrealEngine/Engine/Binaries/DotNET/AutomationTool \
           -v ${{ github.workspace }}/.engine-ddc-cache/Engine/DerivedDataCache:/home/ue4/UnrealEngine/Engine/DerivedDataCache \
@@ -411,7 +412,7 @@ jobs:
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/MassEntity:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/MassEntity \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/StateTree:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/StateTree \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs/UnrealBuildTool:/home/ue4/UnrealEngine/Engine/Source/Programs/UnrealBuildTool \
-          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs/Shared/EpicGames.Perforce:/home/ue4/UnrealEngine/Engine/Source/Programs/Shared/EpicGames.Perforce \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs/Shared:/home/ue4/UnrealEngine/Engine/Source/Programs/Shared \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Binaries/DotNET/UnrealBuildTool:/home/ue4/UnrealEngine/Engine/Binaries/DotNET/UnrealBuildTool \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Binaries/DotNET/AutomationTool:/home/ue4/UnrealEngine/Engine/Binaries/DotNET/AutomationTool \
           -v ${{ github.workspace }}/.engine-ddc-cache/Engine/DerivedDataCache:/home/ue4/UnrealEngine/Engine/DerivedDataCache \
@@ -460,7 +461,7 @@ jobs:
           .engine-mods-cache/Engine/Plugins/Runtime/MassEntity/**
           .engine-mods-cache/Engine/Plugins/Runtime/StateTree/**
           .engine-mods-cache/Engine/Source/Programs/UnrealBuildTool/**
-          .engine-mods-cache/Engine/Source/Programs/Shared/EpicGames.Perforce/**
+          .engine-mods-cache/Engine/Source/Programs/Shared/**
           .engine-mods-cache/Engine/Binaries/DotNET/UnrealBuildTool/**
           .engine-mods-cache/Engine/Binaries/DotNET/AutomationTool/**
         key: tempo-engine-mods-${{ env.UNREAL_VERSION }}-${{ hashFiles(format('{0}/EngineMods/**', inputs.tempo_root)) }}
