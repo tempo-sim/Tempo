@@ -52,6 +52,9 @@ public:
 	bool GetRenderMainViewport() const { return bRenderMainViewport; }
 	void SetRenderMainViewport(bool bInRenderMainViewport);
 
+	// Control Settings.
+	EControlMode GetDefaultControlMode() const { return DefaultControlMode; }
+
 #if WITH_EDITOR
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 #endif
@@ -100,4 +103,8 @@ private:
 	// Whether to render the main viewport (or not, saving performance).
 	UPROPERTY(EditAnywhere, Config, Category="Rendering")
 	bool bRenderMainViewport;
+
+	// The default control mode to use.
+	UPROPERTY(EditAnywhere, Config, Category="Control")
+	EControlMode DefaultControlMode = EControlMode::None;
 };
