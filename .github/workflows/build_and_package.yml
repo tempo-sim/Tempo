@@ -412,6 +412,16 @@ jobs:
           -e TEMPO_SKIP_PREBUILD=1 \
           tempo_unreal_image \
           /home/ue4//${{ inputs.tempo_root }}/Scripts/ExtractPatch.sh /home/ue4/${{ inputs.project_root }}/Packaged
+    - name: Reset File Permissions
+      if: always()  # This ensures it runs even if previous steps fail
+      run: |
+        # Reset the permissions of the project, engine mods cache, and ddc cache so that subsequent steps have access.
+        sudo chown -R $(id -u):$(id -g) ${{ github.workspace }}/${{ inputs.project_root }}
+        sudo chmod -R +r ${{ github.workspace }}/${{ inputs.project_root }}
+        sudo chown -R $(id -u):$(id -g) .engine-mods-cache/
+        sudo chmod -R +r .engine-mods-cache/
+        sudo chown -R $(id -u):$(id -g) .engine-ddc-cache/
+        sudo chmod -R +r .engine-ddc-cache/
     - name: Upload Release Artifact (if uploading a release)
       if: ${{ inputs.upload_artifact && ! inputs.patch }}
       id: upload_release
@@ -464,9 +474,3 @@ jobs:
     - name: Check Free Space (if using GitHub-hosted runner)
       if: ${{ contains(runner.name, 'Github') && contains(runner.name, 'Actions') }}
       run: df -h / && df -h /mnt
-    - name: Reset Source File Permissions
-      if: always()  # This ensures it runs even if previous steps fail
-      run: |
-        # Reset the permissions of the source files to make cleanup steps happy.
-        sudo chown -R 1001:1001 ${{ github.workspace }}/${{ inputs.project_root }}
-        sudo chmod -R 755 ${{ github.workspace }}/${{ inputs.project_root }}
