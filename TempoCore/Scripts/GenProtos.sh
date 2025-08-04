@@ -227,16 +227,17 @@ eval "$DOTNET" "./Binaries/DotNET/UnrealBuildTool/UnrealBuildTool.dll" -Mode=Jso
 JSON_DATA=$(cat "$TEMP/TempoModules.json")
 # Extract the public and private dependencies of all C++ project modules.
 FILTERED_MODULES=$(echo "$JSON_DATA" | jq --arg project_root "$PROJECT_ROOT" '
-def normalize_path: 
-  gsub("\\\\"; "/") | 
-  if startswith("/") then . else "/" + . end;
+def normalize_path:
+  gsub("\\\\\\\\"; "/") | gsub("\\\\"; "/") |
+  if startswith("/") then . else "/" + . end |
+  gsub("//"; "/") | gsub("//"; "/");
 
-.Modules | to_entries[] | 
-select(.value.Type == "CPlusPlus") | 
-select((.value.Directory | normalize_path | ascii_downcase) | startswith($project_root | normalize_path | ascii_downcase)) | 
+.Modules | to_entries[] |
+select(.value.Type == "CPlusPlus") |
+select((.value.Directory | normalize_path | ascii_downcase) | startswith($project_root | normalize_path | ascii_downcase)) |
 {(.key): {
-  Directory: .value.Directory, 
-  PublicDependencyModules: .value.PublicDependencyModules, 
+  Directory: .value.Directory,
+  PublicDependencyModules: .value.PublicDependencyModules,
   PrivateDependencyModules: .value.PrivateDependencyModules
 }}')
 MODULE_INFO=$(echo "$FILTERED_MODULES" | jq -s 'add')
