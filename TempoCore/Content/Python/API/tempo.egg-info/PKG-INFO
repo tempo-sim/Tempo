@@ -1,0 +1,15 @@
+Metadata-Version: 2.4
+Name: tempo
+Version: 0.1
+Summary: The Tempo simulator Python API
+Requires-Python: >3.9.0
+Requires-Dist: grpcio==1.62.2
+Requires-Dist: curio-compat==1.6.7
+Requires-Dist: asyncio==3.4.3
+Requires-Dist: protobuf==4.25.3
+Requires-Dist: opencv-python==4.10.0.84
+Requires-Dist: matplotlib==3.9.2
+Requires-Dist: pynput==1.7.7
+Dynamic: requires-dist
+Dynamic: requires-python
+Dynamic: summary

@@ -1,0 +1,352 @@
+// generated from rosidl_typesupport_cpp/resource/idl__type_support.cpp.em
+// with input from tempo_vehicles_ros_bridge:srv\CommandVehicle.idl
+// generated code does not contain a copyright notice
+
+#include "cstddef"
+#include "rosidl_runtime_c/message_type_support_struct.h"
+#include "tempo_vehicles_ros_bridge/srv/detail/command_vehicle__struct.hpp"
+#include "rosidl_typesupport_cpp/identifier.hpp"
+#include "rosidl_typesupport_cpp/message_type_support.hpp"
+#include "rosidl_typesupport_c/type_support_map.h"
+#include "rosidl_typesupport_cpp/message_type_support_dispatch.hpp"
+#include "rosidl_typesupport_cpp/visibility_control.h"
+#include "rosidl_typesupport_interface/macros.h"
+
+// Explicitly instantiate and export both versions of the message so that its symbols will be generated.
+// template struct ROSIDL_TYPESUPPORT_CPP_PUBLIC tempo_vehicles_ros_bridge::srv::CommandVehicle_Request_<std::allocator<void>>;
+// template struct ROSIDL_TYPESUPPORT_CPP_PUBLIC tempo_vehicles_ros_bridge::srv::CommandVehicle_Request_<std::pmr::polymorphic_allocator<void>>;
+
+
+namespace tempo_vehicles_ros_bridge
+{
+
+namespace srv
+{
+
+namespace rosidl_typesupport_cpp
+{
+
+typedef struct _CommandVehicle_Request_type_support_ids_t
+{
+  const char * typesupport_identifier[2];
+} _CommandVehicle_Request_type_support_ids_t;
+
+static const _CommandVehicle_Request_type_support_ids_t _CommandVehicle_Request_message_typesupport_ids = {
+  {
+    "rosidl_typesupport_fastrtps_cpp",  // ::rosidl_typesupport_fastrtps_cpp::typesupport_identifier,
+    "rosidl_typesupport_introspection_cpp",  // ::rosidl_typesupport_introspection_cpp::typesupport_identifier,
+  }
+};
+
+typedef struct _CommandVehicle_Request_type_support_symbol_names_t
+{
+  const char * symbol_name[2];
+} _CommandVehicle_Request_type_support_symbol_names_t;
+
+#define STRINGIFY_(s) #s
+#define STRINGIFY(s) STRINGIFY_(s)
+
+static const _CommandVehicle_Request_type_support_symbol_names_t _CommandVehicle_Request_message_typesupport_symbol_names = {
+  {
+    STRINGIFY(ROSIDL_TYPESUPPORT_INTERFACE__MESSAGE_SYMBOL_NAME(rosidl_typesupport_fastrtps_cpp, tempo_vehicles_ros_bridge, srv, CommandVehicle_Request)),
+    STRINGIFY(ROSIDL_TYPESUPPORT_INTERFACE__MESSAGE_SYMBOL_NAME(rosidl_typesupport_introspection_cpp, tempo_vehicles_ros_bridge, srv, CommandVehicle_Request)),
+  }
+};
+
+typedef struct _CommandVehicle_Request_type_support_data_t
+{
+  void * data[2];
+} _CommandVehicle_Request_type_support_data_t;
+
+static _CommandVehicle_Request_type_support_data_t _CommandVehicle_Request_message_typesupport_data = {
+  {
+    0,  // will store the shared library later
+    0,  // will store the shared library later
+  }
+};
+
+static const type_support_map_t _CommandVehicle_Request_message_typesupport_map = {
+  2,
+  "tempo_vehicles_ros_bridge",
+  &_CommandVehicle_Request_message_typesupport_ids.typesupport_identifier[0],
+  &_CommandVehicle_Request_message_typesupport_symbol_names.symbol_name[0],
+  &_CommandVehicle_Request_message_typesupport_data.data[0],
+};
+
+static const rosidl_message_type_support_t CommandVehicle_Request_message_type_support_handle = {
+  ::rosidl_typesupport_cpp::typesupport_identifier,
+  reinterpret_cast<const type_support_map_t *>(&_CommandVehicle_Request_message_typesupport_map),
+  ::rosidl_typesupport_cpp::get_message_typesupport_handle_function,
+};
+
+}  // namespace rosidl_typesupport_cpp
+
+}  // namespace srv
+
+}  // namespace tempo_vehicles_ros_bridge
+
+namespace rosidl_typesupport_cpp
+{
+
+template<>
+ROSIDL_TYPESUPPORT_CPP_PUBLIC
+const rosidl_message_type_support_t *
+get_message_type_support_handle<tempo_vehicles_ros_bridge::srv::CommandVehicle_Request_<std::allocator<void>>>()
+{
+  return &::tempo_vehicles_ros_bridge::srv::rosidl_typesupport_cpp::CommandVehicle_Request_message_type_support_handle;
+}
+
+template<>
+ROSIDL_TYPESUPPORT_CPP_PUBLIC
+const rosidl_message_type_support_t *
+get_message_type_support_handle<tempo_vehicles_ros_bridge::srv::CommandVehicle_Request_<std::pmr::polymorphic_allocator<void>>>()
+{
+  return &::tempo_vehicles_ros_bridge::srv::rosidl_typesupport_cpp::CommandVehicle_Request_message_type_support_handle;
+}
+
+#ifdef __cplusplus
+extern "C"
+{
+#endif
+
+ROSIDL_TYPESUPPORT_CPP_PUBLIC
+const rosidl_message_type_support_t *
+ROSIDL_TYPESUPPORT_INTERFACE__MESSAGE_SYMBOL_NAME(rosidl_typesupport_cpp, tempo_vehicles_ros_bridge, srv, CommandVehicle_Request)() {
+  return get_message_type_support_handle<tempo_vehicles_ros_bridge::srv::CommandVehicle_Request>();
+}
+
+#ifdef __cplusplus
+}
+#endif
+}  // namespace rosidl_typesupport_cpp
+
+// already included above
+// #include "cstddef"
+// already included above
+// #include "rosidl_runtime_c/message_type_support_struct.h"
+// already included above
+// #include "tempo_vehicles_ros_bridge/srv/detail/command_vehicle__struct.hpp"
+// already included above
+// #include "rosidl_typesupport_cpp/identifier.hpp"
+// already included above
+// #include "rosidl_typesupport_cpp/message_type_support.hpp"
+// already included above
+// #include "rosidl_typesupport_c/type_support_map.h"
+// already included above
+// #include "rosidl_typesupport_cpp/message_type_support_dispatch.hpp"
+// already included above
+// #include "rosidl_typesupport_cpp/visibility_control.h"
+// already included above
+// #include "rosidl_typesupport_interface/macros.h"
+
+// Explicitly instantiate and export both versions of the message so that its symbols will be generated.
+// template struct ROSIDL_TYPESUPPORT_CPP_PUBLIC tempo_vehicles_ros_bridge::srv::CommandVehicle_Response_<std::allocator<void>>;
+// template struct ROSIDL_TYPESUPPORT_CPP_PUBLIC tempo_vehicles_ros_bridge::srv::CommandVehicle_Response_<std::pmr::polymorphic_allocator<void>>;
+
+
+namespace tempo_vehicles_ros_bridge
+{
+
+namespace srv
+{
+
+namespace rosidl_typesupport_cpp
+{
+
+typedef struct _CommandVehicle_Response_type_support_ids_t
+{
+  const char * typesupport_identifier[2];
+} _CommandVehicle_Response_type_support_ids_t;
+
+static const _CommandVehicle_Response_type_support_ids_t _CommandVehicle_Response_message_typesupport_ids = {
+  {
+    "rosidl_typesupport_fastrtps_cpp",  // ::rosidl_typesupport_fastrtps_cpp::typesupport_identifier,
+    "rosidl_typesupport_introspection_cpp",  // ::rosidl_typesupport_introspection_cpp::typesupport_identifier,
+  }
+};
+
+typedef struct _CommandVehicle_Response_type_support_symbol_names_t
+{
+  const char * symbol_name[2];
+} _CommandVehicle_Response_type_support_symbol_names_t;
+
+#define STRINGIFY_(s) #s
+#define STRINGIFY(s) STRINGIFY_(s)
+
+static const _CommandVehicle_Response_type_support_symbol_names_t _CommandVehicle_Response_message_typesupport_symbol_names = {
+  {
+    STRINGIFY(ROSIDL_TYPESUPPORT_INTERFACE__MESSAGE_SYMBOL_NAME(rosidl_typesupport_fastrtps_cpp, tempo_vehicles_ros_bridge, srv, CommandVehicle_Response)),
+    STRINGIFY(ROSIDL_TYPESUPPORT_INTERFACE__MESSAGE_SYMBOL_NAME(rosidl_typesupport_introspection_cpp, tempo_vehicles_ros_bridge, srv, CommandVehicle_Response)),
+  }
+};
+
+typedef struct _CommandVehicle_Response_type_support_data_t
+{
+  void * data[2];
+} _CommandVehicle_Response_type_support_data_t;
+
+static _CommandVehicle_Response_type_support_data_t _CommandVehicle_Response_message_typesupport_data = {
+  {
+    0,  // will store the shared library later
+    0,  // will store the shared library later
+  }
+};
+
+static const type_support_map_t _CommandVehicle_Response_message_typesupport_map = {
+  2,
+  "tempo_vehicles_ros_bridge",
+  &_CommandVehicle_Response_message_typesupport_ids.typesupport_identifier[0],
+  &_CommandVehicle_Response_message_typesupport_symbol_names.symbol_name[0],
+  &_CommandVehicle_Response_message_typesupport_data.data[0],
+};
+
+static const rosidl_message_type_support_t CommandVehicle_Response_message_type_support_handle = {
+  ::rosidl_typesupport_cpp::typesupport_identifier,
+  reinterpret_cast<const type_support_map_t *>(&_CommandVehicle_Response_message_typesupport_map),
+  ::rosidl_typesupport_cpp::get_message_typesupport_handle_function,
+};
+
+}  // namespace rosidl_typesupport_cpp
+
+}  // namespace srv
+
+}  // namespace tempo_vehicles_ros_bridge
+
+namespace rosidl_typesupport_cpp
+{
+
+template<>
+ROSIDL_TYPESUPPORT_CPP_PUBLIC
+const rosidl_message_type_support_t *
+get_message_type_support_handle<tempo_vehicles_ros_bridge::srv::CommandVehicle_Response_<std::allocator<void>>>()
+{
+  return &::tempo_vehicles_ros_bridge::srv::rosidl_typesupport_cpp::CommandVehicle_Response_message_type_support_handle;
+}
+
+template<>
+ROSIDL_TYPESUPPORT_CPP_PUBLIC
+const rosidl_message_type_support_t *
+get_message_type_support_handle<tempo_vehicles_ros_bridge::srv::CommandVehicle_Response_<std::pmr::polymorphic_allocator<void>>>()
+{
+  return &::tempo_vehicles_ros_bridge::srv::rosidl_typesupport_cpp::CommandVehicle_Response_message_type_support_handle;
+}
+
+#ifdef __cplusplus
+extern "C"
+{
+#endif
+
+ROSIDL_TYPESUPPORT_CPP_PUBLIC
+const rosidl_message_type_support_t *
+ROSIDL_TYPESUPPORT_INTERFACE__MESSAGE_SYMBOL_NAME(rosidl_typesupport_cpp, tempo_vehicles_ros_bridge, srv, CommandVehicle_Response)() {
+  return get_message_type_support_handle<tempo_vehicles_ros_bridge::srv::CommandVehicle_Response>();
+}
+
+#ifdef __cplusplus
+}
+#endif
+}  // namespace rosidl_typesupport_cpp
+
+// already included above
+// #include "cstddef"
+#include "rosidl_runtime_c/service_type_support_struct.h"
+// already included above
+// #include "tempo_vehicles_ros_bridge/srv/detail/command_vehicle__struct.hpp"
+// already included above
+// #include "rosidl_typesupport_cpp/identifier.hpp"
+#include "rosidl_typesupport_cpp/service_type_support.hpp"
+// already included above
+// #include "rosidl_typesupport_c/type_support_map.h"
+#include "rosidl_typesupport_cpp/service_type_support_dispatch.hpp"
+// already included above
+// #include "rosidl_typesupport_cpp/visibility_control.h"
+// already included above
+// #include "rosidl_typesupport_interface/macros.h"
+
+// Explicitly instantiate and export both versions of the request and response messages so that their symbols will be generated.
+// template struct ROSIDL_TYPESUPPORT_CPP_PUBLIC tempo_vehicles_ros_bridge::srv::CommandVehicle_Request_<std::allocator<void>>;
+// template struct ROSIDL_TYPESUPPORT_CPP_PUBLIC tempo_vehicles_ros_bridge::srv::CommandVehicle_Request_<std::pmr::polymorphic_allocator<void>>;
+// template struct ROSIDL_TYPESUPPORT_CPP_PUBLIC tempo_vehicles_ros_bridge::srv::CommandVehicle_Response_<std::allocator<void>>;
+// template struct ROSIDL_TYPESUPPORT_CPP_PUBLIC tempo_vehicles_ros_bridge::srv::CommandVehicle_Response_<std::pmr::polymorphic_allocator<void>>;
+
+
+namespace tempo_vehicles_ros_bridge
+{
+
+namespace srv
+{
+
+namespace rosidl_typesupport_cpp
+{
+
+typedef struct _CommandVehicle_type_support_ids_t
+{
+  const char * typesupport_identifier[2];
+} _CommandVehicle_type_support_ids_t;
+
+static const _CommandVehicle_type_support_ids_t _CommandVehicle_service_typesupport_ids = {
+  {
+    "rosidl_typesupport_fastrtps_cpp",  // ::rosidl_typesupport_fastrtps_cpp::typesupport_identifier,
+    "rosidl_typesupport_introspection_cpp",  // ::rosidl_typesupport_introspection_cpp::typesupport_identifier,
+  }
+};
+
+typedef struct _CommandVehicle_type_support_symbol_names_t
+{
+  const char * symbol_name[2];
+} _CommandVehicle_type_support_symbol_names_t;
+
+#define STRINGIFY_(s) #s
+#define STRINGIFY(s) STRINGIFY_(s)
+
+static const _CommandVehicle_type_support_symbol_names_t _CommandVehicle_service_typesupport_symbol_names = {
+  {
+    STRINGIFY(ROSIDL_TYPESUPPORT_INTERFACE__SERVICE_SYMBOL_NAME(rosidl_typesupport_fastrtps_cpp, tempo_vehicles_ros_bridge, srv, CommandVehicle)),
+    STRINGIFY(ROSIDL_TYPESUPPORT_INTERFACE__SERVICE_SYMBOL_NAME(rosidl_typesupport_introspection_cpp, tempo_vehicles_ros_bridge, srv, CommandVehicle)),
+  }
+};
+
+typedef struct _CommandVehicle_type_support_data_t
+{
+  void * data[2];
+} _CommandVehicle_type_support_data_t;
+
+static _CommandVehicle_type_support_data_t _CommandVehicle_service_typesupport_data = {
+  {
+    0,  // will store the shared library later
+    0,  // will store the shared library later
+  }
+};
+
+static const type_support_map_t _CommandVehicle_service_typesupport_map = {
+  2,
+  "tempo_vehicles_ros_bridge",
+  &_CommandVehicle_service_typesupport_ids.typesupport_identifier[0],
+  &_CommandVehicle_service_typesupport_symbol_names.symbol_name[0],
+  &_CommandVehicle_service_typesupport_data.data[0],
+};
+
+static const rosidl_service_type_support_t CommandVehicle_service_type_support_handle = {
+  ::rosidl_typesupport_cpp::typesupport_identifier,
+  reinterpret_cast<const type_support_map_t *>(&_CommandVehicle_service_typesupport_map),
+  ::rosidl_typesupport_cpp::get_service_typesupport_handle_function,
+};
+
+}  // namespace rosidl_typesupport_cpp
+
+}  // namespace srv
+
+}  // namespace tempo_vehicles_ros_bridge
+
+namespace rosidl_typesupport_cpp
+{
+
+template<>
+ROSIDL_TYPESUPPORT_CPP_PUBLIC
+const rosidl_service_type_support_t *
+get_service_type_support_handle<tempo_vehicles_ros_bridge::srv::CommandVehicle>()
+{
+  return &::tempo_vehicles_ros_bridge::srv::rosidl_typesupport_cpp::CommandVehicle_service_type_support_handle;
+}
+
+}  // namespace rosidl_typesupport_cpp
