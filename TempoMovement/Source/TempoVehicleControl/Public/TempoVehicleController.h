@@ -25,7 +25,10 @@ protected:
 	virtual void ApplyDrivingInputToChaosVehicle(class UChaosVehicleMovementComponent* ChaosVehicleMovementComponent, const FNormalizedDrivingInput& Input);
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	bool bPersistSteering = true;
+	bool bPersistLateralInput = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	bool bPersistLongitudinalInput = false;
 
 	struct FLastInput
 	{
