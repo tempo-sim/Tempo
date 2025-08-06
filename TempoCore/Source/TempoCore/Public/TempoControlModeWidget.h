@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include "TempoCoreTypes.h"
+
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
 #include "TempoControlModeWidget.generated.h"
@@ -25,4 +27,6 @@ protected:
 private:
 	UFUNCTION()
 	void OnControlModeSelectionChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
+
+	void SyncControlMode(EControlMode ControlMode);
 };
