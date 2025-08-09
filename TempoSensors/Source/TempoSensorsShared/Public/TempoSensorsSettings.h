@@ -35,6 +35,7 @@ public:
 	// Camera
 	TObjectPtr<UMaterialInterface> GetCameraPostProcessMaterialNoDepth() const { return CameraPostProcessMaterialNoDepth.LoadSynchronous(); }
 	TObjectPtr<UMaterialInterface> GetCameraPostProcessMaterialWithDepth() const { return CameraPostProcessMaterialWithDepth.LoadSynchronous(); }
+	EColorImageEncoding GetColorImageEncoding() const { return ColorImageEncoding; }
 	float GetMaxCameraDepth() const { return MaxCameraDepth; }
 	float GetSceneCaptureGamma() const { return SceneCaptureGamma; }
 	FName GetOverridableLabelRowName() const { return OverridableLabelRowName; }
@@ -74,6 +75,10 @@ private:
 
 	UPROPERTY(EditAnywhere, Config, Category="Camera", meta=( AllowedClasses="/Script/Engine.BlendableInterface", Keywords="PostProcess" ))
 	TSoftObjectPtr<UMaterialInterface> CameraPostProcessMaterialWithDepth;
+
+	// Anywhere a non-zero subsurface color is found on an object of type OverridableLabelRowName, this label will be used instead.
+	UPROPERTY(EditAnywhere, Config, Category="Camera")
+	TEnumAsByte<EColorImageEncoding> ColorImageEncoding = EColorImageEncoding::BGR8;
 
 	// The expected maximum required depth for a camera depth image.
 	UPROPERTY(EditAnywhere, Config, Category="Camera")
