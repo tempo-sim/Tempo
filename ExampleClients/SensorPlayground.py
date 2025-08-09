@@ -16,7 +16,7 @@ import tempo.tempo_sensors as ts
 import TempoSensors.Sensors_pb2 as Sensors
 import TempoScripting.Geometry_pb2 as Geometry
 import tempo.tempo_world as tw
-import TempoImageUtils as tiu
+import tempo.TempoImageUtils as tiu
 
 async def randomize_camera_post_process(camera_name, owner):
     await tw.set_bool_property(actor=owner, component=camera_name, property="PostProcessSettings.bOverride_WhiteTemp", value=True)
