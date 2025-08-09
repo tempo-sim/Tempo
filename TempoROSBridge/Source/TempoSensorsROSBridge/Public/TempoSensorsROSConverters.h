@@ -90,7 +90,20 @@ struct TImplicitToROSConverter<TempoCamera::ColorImage>: TToROSConverter<sensor_
 	static ToType Convert(const FromType& TempoValue)
 	{
 		ToType ToValue;
-		ToValue.encoding = "bgr8";
+		switch (TempoValue.encoding())
+		{
+			case TempoCamera::BGR8:
+			{
+				ToValue.encoding = "bgr8";
+				break;
+			}
+			case TempoCamera::RGB8:
+			default:
+			{
+				ToValue.encoding = "rgb8";
+				break;
+			}
+		}
 		ToValue.data.assign(TempoValue.data().begin(), TempoValue.data().end());
 		ToValue.width = TempoValue.width();
 		ToValue.height = TempoValue.height();

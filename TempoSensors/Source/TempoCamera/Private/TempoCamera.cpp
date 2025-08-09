@@ -24,6 +24,44 @@ FTempoCameraIntrinsics::FTempoCameraIntrinsics(const FIntPoint& SizeXY, float Ho
 	  Cy(SizeXY.Y / 2.0) {}
 
 template <typename PixelType>
+void ExtractPixelData(const PixelType& Pixel, EColorImageEncoding Encoding, char* Dest)
+{
+	switch (Encoding)
+	{
+	case EColorImageEncoding::BGR8:
+		{
+			Dest[0] = Pixel.B();
+			Dest[1] = Pixel.G();
+			Dest[2] = Pixel.R();
+			break;
+		}
+	case EColorImageEncoding::RGB8:
+		{
+			Dest[0] = Pixel.R();
+			Dest[1] = Pixel.G();
+			Dest[2] = Pixel.B();
+			break;
+		}
+	}
+}
+
+TempoCamera::ColorEncoding ColorEncodingToProto(EColorImageEncoding Encoding)
+{
+	switch (Encoding)
+	{
+		case EColorImageEncoding::BGR8:
+		{
+			return TempoCamera::ColorEncoding::BGR8;
+		}
+		case EColorImageEncoding::RGB8:
+		default:
+		{
+			return TempoCamera::ColorEncoding::RGB8;
+		}
+	}
+}
+
+template <typename PixelType>
 void RespondToColorRequests(const TTextureRead<PixelType>* TextureRead, const TArray<FColorImageRequest>& Requests, float TransmissionTime)
 {
 	TempoCamera::ColorImage ColorImage;
@@ -34,13 +72,17 @@ void RespondToColorRequests(const TTextureRead<PixelType>* TextureRead, const TA
 		ColorImage.set_height(TextureRead->ImageSize.Y);
 		std::vector<char> ImageData;
 		ImageData.resize(TextureRead->Image.Num() * 3);
-		ParallelFor(TextureRead->Image.Num(), [&ImageData, &TextureRead](int32 Idx){
-			const auto& Pixel = TextureRead->Image[Idx];
-			ImageData[Idx * 3] = Pixel.B();
-			ImageData[Idx * 3 + 1] = Pixel.G();
-			ImageData[Idx * 3 + 2] = Pixel.R();
+		const UTempoSensorsSettings* TempoSensorsSettings = GetDefault<UTempoSensorsSettings>();
+		if (!TempoSensorsSettings)
+		{
+			return;
+		}
+		const EColorImageEncoding Encoding = TempoSensorsSettings->GetColorImageEncoding();
+		ParallelFor(TextureRead->Image.Num(), [&ImageData, &TextureRead, Encoding](int32 Idx){
+			ExtractPixelData(TextureRead->Image[Idx], Encoding, &ImageData[Idx * 3]);
 		});
 		ColorImage.mutable_data()->assign(ImageData.begin(), ImageData.end());
+		ColorImage.set_encoding(ColorEncodingToProto(Encoding));
 		ColorImage.mutable_header()->set_sequence_id(TextureRead->SequenceId);
 		ColorImage.mutable_header()->set_capture_time(TextureRead->CaptureTime);
 		ColorImage.mutable_header()->set_transmission_time(TransmissionTime);
