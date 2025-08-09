@@ -195,9 +195,15 @@ void UTempoSensorsROSBridgeSubsystem::UpdatePublishers()
 
 			if (const USceneComponent* SensorSceneComponent = Cast<USceneComponent>(Sensor))
 			{
-				ROSNode->PublishStaticTransform(SensorSceneComponent->GetComponentTransform(),
-			FString::Printf(TEXT("%s/%s"), *Sensor->GetOwnerName(), *Sensor->GetSensorName()),
-			GetDefault<UTempoROSSettings>()->GetFixedFrameName(),
+				const FString SensorFrame = FString::Printf(TEXT("%s/%s"), *Sensor->GetOwnerName(), *Sensor->GetSensorName());
+				ROSNode->PublishStaticTransform(SensorSceneComponent->GetComponentTransform().GetRelativeTransform(SensorSceneComponent->GetOwner()->GetActorTransform()),
+			SensorFrame,
+			Sensor->GetOwnerName(),
+			GetWorld()->GetTimeSeconds());
+				// Also publish the transform of the "optical" frame, which has its Z-axis pointed out of the camera.
+				ROSNode->PublishStaticTransform(FTransform(FRotator(0.0, 90.0, -90.0), FVector::ZeroVector),
+			FString::Printf(TEXT("%s/optical"), *SensorFrame),
+			SensorFrame,
 			GetWorld()->GetTimeSeconds());
 			}
 		}
