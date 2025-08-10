@@ -2,7 +2,7 @@
 
 #include "TempoControlModeWidget.h"
 
-#include "TempoCoreSettings.h"
+#include "TempoCore.h"
 #include "TempoCoreUtils.h"
 #include "TempoGameMode.h"
 
@@ -22,6 +22,12 @@ void UTempoControlModeWidget::NativeOnInitialized()
 	ControlModeBox->OnSelectionChanged.AddDynamic(this, &UTempoControlModeWidget::OnControlModeSelectionChanged);
 
 	ControlModeBox->SetSelectedOption(UTempoCoreUtils::GetEnumValueAsString(EControlMode::None));
+
+	if (ATempoGameMode* GameMode = Cast<ATempoGameMode>(UGameplayStatics::GetGameMode(this)))
+	{
+		SyncControlMode(GameMode->GetControlMode());
+		GameMode->ControlModeChangedEvent.AddUObject(this, &UTempoControlModeWidget::SyncControlMode);
+	}
 }
 
 void UTempoControlModeWidget::OnControlModeSelectionChanged(FString SelectedItem, ESelectInfo::Type SelectionType)
@@ -31,9 +37,20 @@ void UTempoControlModeWidget::OnControlModeSelectionChanged(FString SelectedItem
 		return;
 	}
 
-	if (ATempoGameMode* GameMode = Cast<ATempoGameMode>(UGameplayStatics::GetGameMode(this)))
+	if (const ATempoGameMode* GameMode = Cast<ATempoGameMode>(UGameplayStatics::GetGameMode(this)))
 	{
-		GameMode->SetControlMode(static_cast<EControlMode>(ControlModeBox->GetSelectedIndex()));
+		FString ErrorMsg;
+		if (!GameMode->SetControlMode(static_cast<EControlMode>(ControlModeBox->GetSelectedIndex()), ErrorMsg))
+		{
+			const FString PrevControlModeStr = UTempoCoreUtils::GetEnumValueAsString(GameMode->GetControlMode());
+			UE_LOG(LogTempoCore, Error, TEXT("Failed to change control mode from to: %s (%s). Reverting to %s"), *SelectedItem, *ErrorMsg, *PrevControlModeStr);
+			ControlModeBox->SetSelectedOption(PrevControlModeStr);
+		}
 	}
-	UTempoCoreSettings* Settings = GetMutableDefault<UTempoCoreSettings>();
 }
+
+void UTempoControlModeWidget::SyncControlMode(EControlMode ControlMode)
+{
+	ControlModeBox->SetSelectedOption(UTempoCoreUtils::GetEnumValueAsString(ControlMode));
+}
+

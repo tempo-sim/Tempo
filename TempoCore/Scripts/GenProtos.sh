@@ -185,8 +185,8 @@ GEN_MODULE_PROTOS() {
 echo "Generating protobuf code..."
 
 # Get engine release (e.g. 5.4)
-if [ -f "$UNREAL_ENGINE_PATH/Engine/Intermediate/Build/BuildRules/UE5RulesManifest.json" ]; then
-  RELEASE_WITH_HOTFIX=$(jq -r '.EngineVersion' "$UNREAL_ENGINE_PATH/Engine/Intermediate/Build/BuildRules/UE5RulesManifest.json")
+if [ -f "$ENGINE_DIR/Intermediate/Build/BuildRules/UE5RulesManifest.json" ]; then
+  RELEASE_WITH_HOTFIX=$(jq -r '.EngineVersion' "$ENGINE_DIR/Intermediate/Build/BuildRules/UE5RulesManifest.json")
   RELEASE="${RELEASE_WITH_HOTFIX%.*}"
 fi
 

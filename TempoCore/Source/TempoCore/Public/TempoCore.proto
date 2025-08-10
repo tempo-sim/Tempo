@@ -4,6 +4,13 @@ syntax = "proto3";
 
 import "TempoScripting/Empty.proto";
 
+enum ControlMode {
+  NONE = 0;
+  USER = 1;
+  OPEN_LOOP = 2;
+  CLOSED_LOOP = 3;
+}
+
 message LoadLevelRequest {
   string level = 1;
   bool deferred = 2;
@@ -18,6 +25,10 @@ message SetMainViewportRenderEnabledRequest {
   bool enabled = 1;
 }
 
+message SetControlModeRequest {
+  ControlMode mode = 1;
+}
+
 service TempoCoreService {
   rpc LoadLevel(LoadLevelRequest) returns (TempoScripting.Empty);
 
@@ -28,4 +39,6 @@ service TempoCoreService {
   rpc Quit(TempoScripting.Empty) returns (TempoScripting.Empty);
 
   rpc SetMainViewportRenderEnabled(SetMainViewportRenderEnabledRequest) returns (TempoScripting.Empty);
+
+  rpc SetControlMode(SetControlModeRequest) returns (TempoScripting.Empty);
 }

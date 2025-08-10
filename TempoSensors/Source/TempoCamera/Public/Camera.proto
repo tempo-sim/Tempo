@@ -12,11 +12,17 @@ enum ImageCompressionLevel {
   MAX = 4;
 }
 
+enum ColorEncoding {
+  BGR8 = 0;
+  RGB8 = 1;
+}
+
 message ColorImage {
   TempoSensorsShared.MeasurementHeader header = 1;
   uint32 width = 2;
   uint32 height = 3;
   bytes data = 4; // Raw bytes of an image file
+  ColorEncoding encoding = 5;
 }
 
 message DepthImage {
