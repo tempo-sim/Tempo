@@ -69,14 +69,15 @@ private:
 	UPROPERTY(EditAnywhere, Config, Category="Labels", meta=(EditCondition="LabelType == ELabelType::Instance"))
 	bool bInstantaneouslyUniqueInstanceLabels = false;
 
-	// The post process material that should be used by TempoCamera .
+	// The post process material that should be used by TempoCamera when not capturing the depth image.
 	UPROPERTY(EditAnywhere, Config, Category="Camera", meta=( AllowedClasses="/Script/Engine.BlendableInterface", Keywords="PostProcess" ))
 	TSoftObjectPtr<UMaterialInterface> CameraPostProcessMaterialNoDepth;
 
+	// The post process material that should be used by TempoCamera when capturing the depth image.
 	UPROPERTY(EditAnywhere, Config, Category="Camera", meta=( AllowedClasses="/Script/Engine.BlendableInterface", Keywords="PostProcess" ))
 	TSoftObjectPtr<UMaterialInterface> CameraPostProcessMaterialWithDepth;
 
-	// Anywhere a non-zero subsurface color is found on an object of type OverridableLabelRowName, this label will be used instead.
+	// Encoding to use for color images.
 	UPROPERTY(EditAnywhere, Config, Category="Camera")
 	TEnumAsByte<EColorImageEncoding> ColorImageEncoding = EColorImageEncoding::BGR8;
 
