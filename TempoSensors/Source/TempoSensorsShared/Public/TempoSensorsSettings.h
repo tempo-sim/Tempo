@@ -35,6 +35,7 @@ public:
 	// Camera
 	TObjectPtr<UMaterialInterface> GetCameraPostProcessMaterialNoDepth() const { return CameraPostProcessMaterialNoDepth.LoadSynchronous(); }
 	TObjectPtr<UMaterialInterface> GetCameraPostProcessMaterialWithDepth() const { return CameraPostProcessMaterialWithDepth.LoadSynchronous(); }
+	EColorImageEncoding GetColorImageEncoding() const { return ColorImageEncoding; }
 	float GetMaxCameraDepth() const { return MaxCameraDepth; }
 	float GetSceneCaptureGamma() const { return SceneCaptureGamma; }
 	FName GetOverridableLabelRowName() const { return OverridableLabelRowName; }
@@ -68,12 +69,17 @@ private:
 	UPROPERTY(EditAnywhere, Config, Category="Labels", meta=(EditCondition="LabelType == ELabelType::Instance"))
 	bool bInstantaneouslyUniqueInstanceLabels = false;
 
-	// The post process material that should be used by TempoCamera .
+	// The post process material that should be used by TempoCamera when not capturing the depth image.
 	UPROPERTY(EditAnywhere, Config, Category="Camera", meta=( AllowedClasses="/Script/Engine.BlendableInterface", Keywords="PostProcess" ))
 	TSoftObjectPtr<UMaterialInterface> CameraPostProcessMaterialNoDepth;
 
+	// The post process material that should be used by TempoCamera when capturing the depth image.
 	UPROPERTY(EditAnywhere, Config, Category="Camera", meta=( AllowedClasses="/Script/Engine.BlendableInterface", Keywords="PostProcess" ))
 	TSoftObjectPtr<UMaterialInterface> CameraPostProcessMaterialWithDepth;
+
+	// Encoding to use for color images.
+	UPROPERTY(EditAnywhere, Config, Category="Camera")
+	TEnumAsByte<EColorImageEncoding> ColorImageEncoding = EColorImageEncoding::BGR8;
 
 	// The expected maximum required depth for a camera depth image.
 	UPROPERTY(EditAnywhere, Config, Category="Camera")
