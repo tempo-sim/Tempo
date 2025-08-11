@@ -28,7 +28,9 @@ void ATempoVehicleController::Tick(float DeltaTime)
 			if (Input->Frame < GFrameCounter)
 			{
 				// Apply some very small acceleration, alternating + and -, to avoid no-input deceleration
-				const FVector ControlInputLocal((GFrameCounter % 2 ? 1 : -1) * UE_KINDA_SMALL_NUMBER, Input->Input.GetSteering(), 0.0);
+				const float LongitudinalInput = bPersistLongitudinalInput ? Input->Input.GetLongitudinal() : 0.0;
+				const float LateralInput = bPersistLateralInput ? Input->Input.GetLateral() : 0.0;
+				const FVector ControlInputLocal(LongitudinalInput + (GFrameCounter % 2 ? 1 : -1) * UE_KINDA_SMALL_NUMBER, LateralInput, 0.0);
 				ControlledPawn->AddMovementInput(ControlledPawn->GetActorTransform().TransformVector(ControlInputLocal));
 			}
 		}
@@ -46,9 +48,9 @@ void ATempoVehicleController::HandleDrivingInput(const FNormalizedDrivingInput& 
 			return;
 		}
 
-		const FVector ControlInputLocal(Input.GetAcceleration() + (GFrameCounter % 2 ? 1 : -1) * UE_KINDA_SMALL_NUMBER, Input.GetSteering(), 0.0);
+		const FVector ControlInputLocal(Input.GetLongitudinal() + (GFrameCounter % 2 ? 1 : -1) * UE_KINDA_SMALL_NUMBER, Input.GetLateral(), 0.0);
 		ControlledPawn->AddMovementInput(ControlledPawn->GetActorTransform().TransformVector(ControlInputLocal));
-		if (bPersistSteering)
+		if (bPersistLateralInput || bPersistLongitudinalInput)
 		{
 			LastInput = FLastInput(Input, GFrameCounter);
 		}
@@ -96,6 +98,6 @@ void ATempoVehicleController::ApplyDrivingInputToChaosVehicle(UChaosVehicleMovem
 		}
 	};
 
-	MovementComponent->SetSteeringInput(Input.GetSteering());
-	SetAccelInput(Input.GetAcceleration());
+	MovementComponent->SetSteeringInput(Input.GetLongitudinal());
+	SetAccelInput(Input.GetLongitudinal());
 }

@@ -83,9 +83,9 @@ void UTempoMovementControlServiceSubsystem::CommandVehicle(const VehicleCommandR
 			ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "More than one commandable vehicle found, vehicle name required."));
 			return;
 		}
-		
+
 		ITempoVehicleControlInterface* Controller = Cast<ITempoVehicleControlInterface>(VehicleControllers[0]);
-		Controller->HandleDrivingInput(FNormalizedDrivingInput(Request.acceleration(), Request.steering()));
+		Controller->HandleDrivingInput(FNormalizedDrivingInput(Request.longitudinal(), Request.lateral()));
 		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status_OK);
 		return;
 	}
@@ -95,8 +95,8 @@ void UTempoMovementControlServiceSubsystem::CommandVehicle(const VehicleCommandR
 		ITempoVehicleControlInterface* Controller = Cast<ITempoVehicleControlInterface>(VehicleController);
 		if (Controller->GetVehicleName().Equals(RequestedVehicleName, ESearchCase::IgnoreCase))
 		{
-			Controller->HandleDrivingInput(FNormalizedDrivingInput(Request.acceleration(), Request.steering()));
-			ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status_OK);
+			Controller->HandleDrivingInput(FNormalizedDrivingInput(Request.longitudinal(), Request.lateral()));
+			ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::OK, ""));
 			return;
 		}
 	}
