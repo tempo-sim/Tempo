@@ -7,6 +7,7 @@
 #include "Components/InputComponent.h"
 #include "TimerManager.h"
 #include "Engine/World.h"
+#include "TempoGameMode.h"
 
 ATempoPlayerController::ATempoPlayerController()
 {
@@ -19,16 +20,15 @@ void ATempoPlayerController::BeginPlay()
     Super::BeginPlay();
     ActiveGroupIndex = 0;
     
-    // Start in Game Only mode with the mouse captured.
-    bIsMouseCaptured = true;
-    FInputModeGameOnly InputMode;
+    // Start with the mouse uncaptured for UI interaction.
+    bIsMouseCaptured = false;
+    FInputModeGameAndUI InputMode;
+    InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+    InputMode.SetHideCursorDuringCapture(false);
     SetInputMode(InputMode);
-    bShowMouseCursor = false;
+    bShowMouseCursor = true;
     
-    // Run an initial update to find all pawns at the start of the game.
     UpdatePawnGroups();
-
-    // Bind our handler functions to the world's global events.
     OnActorSpawnedDelegateHandle = GetWorld()->AddOnActorSpawnedHandler(FOnActorSpawned::FDelegate::CreateUObject(this, &ATempoPlayerController::OnActorSpawnedHandler));
     OnActorDestroyedDelegateHandle = GetWorld()->AddOnActorDestroyedHandler(FOnActorDestroyed::FDelegate::CreateUObject(this, &ATempoPlayerController::OnAnyActorDestroyedHandler));
 }
@@ -47,9 +47,49 @@ void ATempoPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 void ATempoPlayerController::OnPossess(APawn* InPawn)
 {
-    Super::OnPossess(InPawn);
+    APawn* PreviousPawn = GetPawn(); 
 
-    SetMouseCaptured(bMouseCaptured);
+    Super::OnPossess(InPawn); 
+    if (ATempoGameMode* GameMode = Cast<ATempoGameMode>(UGameplayStatics::GetGameMode(this)))
+    {
+        TSubclassOf<APawn> RobotClass = GameMode->GetRobotClass();
+        const bool bNewPawnIsRobot = (RobotClass && InPawn && InPawn->IsA(RobotClass));
+        const bool bPreviousPawnWasRobot = (RobotClass && PreviousPawn && PreviousPawn->IsA(RobotClass));
+
+        // If we were controlling a robot and the new pawn is NOT a robot, switch to None mode.
+        if (bPreviousPawnWasRobot && !bNewPawnIsRobot)
+        {
+             FString ErrorMessage;
+             GameMode->SetControlMode(EControlMode::None, ErrorMessage);
+        }
+        // If the newly possessed pawn is a Robot, ALWAYS set the control mode to User.
+        else if (bNewPawnIsRobot)
+        {
+            FString ErrorMessage;
+            GameMode->SetControlMode(EControlMode::User, ErrorMessage);
+        }
+    }
+
+    if (InPawn && InPawn == LevelSpectatorPawn)
+    {
+        UClass* SpectatorClass = LevelSpectatorPawn->GetClass();
+        const int32 GroupIndex = PawnGroupClasses.Find(SpectatorClass);
+        if (GroupIndex != INDEX_NONE)
+        {
+            ActiveGroupIndex = GroupIndex;
+            // Ensure the index for the spectator group is set. The spectator is always the first (and only) member.
+            PawnGroupIndices.FindOrAdd(SpectatorClass) = 0;
+        }
+    }
+    if (InPawn && InPawn != LevelSpectatorPawn)
+    {
+        SetMouseCaptured(true); 
+    }
+    else
+    {
+        SetMouseCaptured(false);
+    }
+
     if (ActiveSelectionLight)
     {
         ActiveSelectionLight->DestroyComponent();
@@ -78,7 +118,7 @@ void ATempoPlayerController::OnPossess(APawn* InPawn)
 
 void ATempoPlayerController::ToggleMouseCaptured()
 {
-    SetMouseCaptured(!bMouseCaptured);
+    SetMouseCaptured(!bIsMouseCaptured);
 }
 
 void ATempoPlayerController::SetMouseCaptured(bool bCaptured)
@@ -98,7 +138,7 @@ void ATempoPlayerController::SetMouseCaptured(bool bCaptured)
 
     SetShowMouseCursor(!bCaptured);
 
-    bMouseCaptured = bCaptured;
+    bIsMouseCaptured = bCaptured;
 }
 
 void ATempoPlayerController::Tick(float DeltaTime)
@@ -135,7 +175,6 @@ void ATempoPlayerController::SetupInputComponent()
     InputComponent->BindAction("PossessNext", IE_Pressed, this, &ATempoPlayerController::PossessNextPawn);
     InputComponent->BindAction("PossessPrevious", IE_Pressed, this, &ATempoPlayerController::PossessPreviousPawn);
     InputComponent->BindAction("SwitchGroup", IE_Pressed, this, &ATempoPlayerController::SwitchActiveGroup);
-    InputComponent->BindAction("ReleaseMouse", IE_Pressed, this, &ATempoPlayerController::ToggleInputMode);
     InputComponent->BindAction("SelectAndPossess", IE_Pressed, this, &ATempoPlayerController::SelectAndPossessPawn);
 }
 
@@ -172,11 +211,20 @@ void ATempoPlayerController::SelectAndPossessPawn()
         // Check if the actor we hit can be cast to a Pawn.
         if (APawn* ClickedPawn = Cast<APawn>(HitResult.GetActor()))
         {
-            // If the cast is successful, possess the pawn.
-            Possess(ClickedPawn);
+            // Update the active group and index to match the clicked pawn
+            UClass* ClickedPawnClass = ClickedPawn->GetClass();
+            const int32 GroupIndex = PawnGroupClasses.Find(ClickedPawnClass);
+            if (GroupIndex != INDEX_NONE)
+            {
+                ActiveGroupIndex = GroupIndex;
+                const int32 PawnIndex = PawnGroups[ClickedPawnClass].Pawns.Find(ClickedPawn);
+                if (PawnIndex != INDEX_NONE)
+                {
+                    PawnGroupIndices.FindOrAdd(ClickedPawnClass) = PawnIndex;
+                }
+            }
             
-            // Automatically switch back to gameplay mode.
-            ToggleInputMode();
+            Possess(ClickedPawn);
         }
     }
 }
