@@ -33,7 +33,7 @@ void UTempoSensorServiceSubsystem::RegisterScriptingServices(FTempoScriptingServ
 		StreamingRequestHandler(&SensorAsyncService::RequestStreamColorImages, &UTempoSensorServiceSubsystem::StreamColorImages),
 		StreamingRequestHandler(&SensorAsyncService::RequestStreamDepthImages, &UTempoSensorServiceSubsystem::StreamDepthImages),
 		StreamingRequestHandler(&SensorAsyncService::RequestStreamLabelImages, &UTempoSensorServiceSubsystem::StreamLabelImages),
-		StreamingRequestHandler(&SensorAsyncService::RequestStreamLidarScans), &UTempoSensorServiceSubsystem::StreamLidarScans)
+		StreamingRequestHandler(&SensorAsyncService::RequestStreamLidarScans, &UTempoSensorServiceSubsystem::StreamLidarScans)
 		);
 }
 
@@ -267,7 +267,7 @@ void UTempoSensorServiceSubsystem::StreamLabelImages(const TempoCamera::LabelIma
 void UTempoSensorServiceSubsystem::StreamLidarScans(const TempoLidar::LidarScanRequest& Request, const TResponseDelegate<TempoLidar::LidarScanSegment>& ResponseContinuation) const
 {
 	check(GetWorld());
-	
+
 	TMap<FString, TArray<UTempoLidar*>> OwnersToComponents;
 	for (TObjectIterator<UTempoLidar> ComponentIt; ComponentIt; ++ComponentIt)
 	{
@@ -276,7 +276,7 @@ void UTempoSensorServiceSubsystem::StreamLidarScans(const TempoLidar::LidarScanR
 			OwnersToComponents.FindOrAdd(ComponentIt->GetOwnerName()).Add(*ComponentIt);
 		}
 	}
-	
+
 	const FString RequestedOwnerName(UTF8_TO_TCHAR(Request.owner_name().c_str()));
 	const FString RequestedSensorName(UTF8_TO_TCHAR(Request.sensor_name().c_str()));
 
@@ -335,5 +335,4 @@ void UTempoSensorServiceSubsystem::StreamLidarScans(const TempoLidar::LidarScanR
 	}
 
 	ResponseContinuation.ExecuteIfBound(LidarScanSegment(), grpc::Status(grpc::StatusCode::NOT_FOUND, "Did not find a sensor with the specified owner and name"));
-	return;
 }
