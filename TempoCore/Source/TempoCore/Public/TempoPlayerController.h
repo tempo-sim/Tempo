@@ -48,7 +48,7 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Tempo")
 	bool bMouseCaptured = false;
 
-	    // A map to hold all pawns, dynamically grouped by their specific UClass.
+	// A map to hold all pawns, dynamically grouped by their specific UClass.
     UPROPERTY()
     TMap<UClass*, FPawnGroup> PawnGroups;
 
@@ -97,11 +97,6 @@ protected:
      * @param DestroyedActor The actor that was just destroyed.
      */
     void OnAnyActorDestroyedHandler(AActor* DestroyedActor);
-
-    /**
-     * @brief Toggles the input mode between Game Only and Game and UI.
-     */
-    void ToggleInputMode();
 
     /**
      * @brief Switches the active pawn group to the next one discovered in the level.

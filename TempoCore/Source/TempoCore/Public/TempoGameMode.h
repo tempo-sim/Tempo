@@ -40,6 +40,8 @@ public:
 
 	FControlModeChanged ControlModeChangedEvent;
 
+	TSubclassOf<APawn> GetRobotClass() const { return RobotClass; }
+
 protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, meta=(MustImplement="/Script/TempoCore.ActorClassificationInterface"))
 	TSubclassOf<UWorldSubsystem> ActorClassifier = UDefaultActorClassifier::StaticClass();
