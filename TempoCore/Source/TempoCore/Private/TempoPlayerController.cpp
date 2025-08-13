@@ -49,6 +49,18 @@ void ATempoPlayerController::OnPossess(APawn* InPawn)
 {
     APawn* PreviousPawn = GetPawn(); 
 
+    // Before the Super::OnPossess call, restore the AI to the pawn we are leaving.
+    if (PreviousPawn && AIControllerMap.Contains(PreviousPawn))
+    {
+        AController* OriginalController = AIControllerMap[PreviousPawn];
+        if (OriginalController)
+        {
+            OriginalController->Possess(PreviousPawn);
+        }
+        // Clean up the memory now that the AI is restored.
+        AIControllerMap.Remove(PreviousPawn);
+    }
+
     Super::OnPossess(InPawn); 
     if (ATempoGameMode* GameMode = Cast<ATempoGameMode>(UGameplayStatics::GetGameMode(this)))
     {
@@ -211,6 +223,7 @@ void ATempoPlayerController::SelectAndPossessPawn()
         // Check if the actor we hit can be cast to a Pawn.
         if (APawn* ClickedPawn = Cast<APawn>(HitResult.GetActor()))
         {
+            CacheAIController(ClickedPawn);
             // Update the active group and index to match the clicked pawn
             UClass* ClickedPawnClass = ClickedPawn->GetClass();
             const int32 GroupIndex = PawnGroupClasses.Find(ClickedPawnClass);
@@ -319,7 +332,9 @@ void ATempoPlayerController::SwitchActiveGroup()
 
             if (PawnGroups[NewActiveGroupClass].Pawns.IsValidIndex(IndexToPossess))
             {
-                Possess(PawnGroups[NewActiveGroupClass].Pawns[IndexToPossess]);
+                APawn* PawnToPossess = PawnGroups[NewActiveGroupClass].Pawns[IndexToPossess];
+                CacheAIController(PawnToPossess);
+                Possess(PawnToPossess);
             }
             return;
         }
@@ -339,7 +354,9 @@ void ATempoPlayerController::PossessNextPawn()
         CurrentIndex = (CurrentIndex + 1) % ActivePawnArray.Num();
         if (ActivePawnArray.IsValidIndex(CurrentIndex))
         {
-            Possess(ActivePawnArray[CurrentIndex]);
+            APawn* PawnToPossess = ActivePawnArray[CurrentIndex];
+            CacheAIController(PawnToPossess);
+            Possess(PawnToPossess);
         }
     }
 }
@@ -357,7 +374,30 @@ void ATempoPlayerController::PossessPreviousPawn()
         CurrentIndex = (CurrentIndex - 1 + ActivePawnArray.Num()) % ActivePawnArray.Num();
         if (ActivePawnArray.IsValidIndex(CurrentIndex))
         {
-            Possess(ActivePawnArray[CurrentIndex]);
+            APawn* PawnToPossess = ActivePawnArray[CurrentIndex];
+            CacheAIController(PawnToPossess);
+            Possess(PawnToPossess);
+        }
+    }
+}
+
+void ATempoPlayerController::CacheAIController(APawn* PawnToPossess)
+{
+    if (PawnToPossess)
+    {
+        // Do not cache the controller for the main Robot pawn, as its controller is managed
+        if (ATempoGameMode* GameMode = Cast<ATempoGameMode>(UGameplayStatics::GetGameMode(this)))
+        {
+            if (GameMode->GetRobotClass() && PawnToPossess->IsA(GameMode->GetRobotClass()))
+            {
+                return; // Exit without caching.
+            }
+        }
+        AController* CurrentController = PawnToPossess->GetController();
+        // Only save the controller if it's a valid AI controller (not null or another player)
+        if (CurrentController && !CurrentController->IsA<APlayerController>())
+        {
+            AIControllerMap.Add(PawnToPossess, CurrentController);
         }
     }
 }
