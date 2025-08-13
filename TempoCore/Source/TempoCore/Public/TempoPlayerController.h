@@ -117,4 +117,17 @@ protected:
      * @brief Performs a line trace from the cursor to select and possess a pawn.
      */
     void SelectAndPossessPawn();
+
+	/**
+	 * Stores a reference to the original AI controller that was possessing a pawn
+	 * before the player took over. This acts as a "memory" to ensure the correct
+	 * AI can be restored when the player is done.
+	 */
+	UPROPERTY()
+	TMap<APawn*, AController*> AIControllerMap;
+
+	/**
+	* @brief Caches the current AI controller of a pawn before the player possesses it.
+	*/
+	void CacheAIController(APawn* PawnToPossess);
 };
