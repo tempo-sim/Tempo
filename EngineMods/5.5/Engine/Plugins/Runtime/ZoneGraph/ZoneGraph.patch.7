@@ -1,0 +1,13 @@
+diff --git Source/ZoneGraph/Public/ZoneGraphBuilder.h Source/ZoneGraph/Public/ZoneGraphBuilder.h
+index 5db4263..41d0665 100644
+--- Source/ZoneGraph/Public/ZoneGraphBuilder.h
++++ Source/ZoneGraph/Public/ZoneGraphBuilder.h
+@@ -78,7 +78,7 @@ struct FLaneConnectionCandidate
+ 	FZoneGraphTagMask TagMask;
+ 
+ 	UPROPERTY()
+-	EZoneGraphTurnType TurnType;
++	EZoneGraphTurnType TurnType = EZoneGraphTurnType::NoTurn;
+ };
+ 
+ USTRUCT()
