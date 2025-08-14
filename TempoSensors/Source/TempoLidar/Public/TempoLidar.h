@@ -167,7 +167,7 @@ protected:
 	UPROPERTY(VisibleAnywhere)
 	float DistortionFactor = 1.0;
 
-	// The resulting distortion factor.
+	// The resulting distorted vertical FOV.
 	UPROPERTY(VisibleAnywhere)
 	float DistortedVerticalFOV = 30.0;
 	

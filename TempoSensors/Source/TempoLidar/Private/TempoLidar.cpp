@@ -227,9 +227,11 @@ void TTextureRead<FDepthPixel>::RespondToRequests(const TArray<FLidarScanRequest
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(TempoLidarDecode);
 
+		// Number of non-upsampled rows.
 		const int32 NumRows = Image.Num() / (TempoLidar->UpsamplingFactor * TempoLidar->UpsamplingFactor) / CaptureComponent->HorizontalBeams;
+		// Vertical degrees between each upsampled pixel?
 		const float VerticalDegreesPerPixel = CaptureComponent->DistortedVerticalFOV / (NumRows - 1.0 / TempoLidar->UpsamplingFactor);
-  
+
 		const float VerticalOffset = (CaptureComponent->DistortedVerticalFOV / 2.0 - TempoLidar->VerticalFOV / 2.0) / VerticalDegreesPerPixel;
 		const float VerticalSpacingPixels = (TempoLidar->VerticalFOV / (TempoLidar->VerticalBeams - 1)) / VerticalDegreesPerPixel;
 		auto RangeAtBeam = [this, VerticalOffset, VerticalSpacingPixels] (int32 HorizontalBeam, int32 VerticalBeam) -> float
