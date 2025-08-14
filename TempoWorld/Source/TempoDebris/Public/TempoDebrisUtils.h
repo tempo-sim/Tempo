@@ -16,7 +16,7 @@ struct FHISMSplineInstanceInfo
 	GENERATED_BODY()
 	
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	UStaticMesh* StaticMesh;
+	UStaticMesh* StaticMesh = nullptr;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	float Spacing = 0.0;
