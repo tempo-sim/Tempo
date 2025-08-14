@@ -30,12 +30,12 @@ USTRUCT(BlueprintType)
 struct FTempoTrafficControllerMeshInfo
 {
 	GENERATED_BODY()
-	
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tempo Agents|Traffic Controller|Mesh Info")
-	UStaticMesh* TrafficControllerMesh;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tempo Agents|Traffic Controller|Mesh Info")
-	ETempoRoadOffsetOrigin LateralOffsetOrigin;
+	UStaticMesh* TrafficControllerMesh = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tempo Agents|Traffic Controller|Mesh Info")
+	ETempoRoadOffsetOrigin LateralOffsetOrigin = ETempoRoadOffsetOrigin::RightRoadEdge;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tempo Agents|Traffic Controller|Mesh Info")
 	float LongitudinalOffset = 0.0f;
