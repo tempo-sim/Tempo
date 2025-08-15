@@ -73,6 +73,13 @@ void ATempoGameMode::FinishRestartPlayer(AController* NewPlayer, const FRotator&
 
 bool ATempoGameMode::SetControlMode(EControlMode ControlMode, FString& ErrorOut) const
 {
+	if (!RobotClass.Get())
+	{
+		ErrorOut = "RobotClass not set. Not changing control mode.";
+		UE_LOG(LogTempoCore, Error, TEXT("%s"), *ErrorOut);
+		return false;
+	}
+
 	APawn* Robot = Cast<APawn>(UGameplayStatics::GetActorOfClass(this, RobotClass));
 	if (!Robot)
 	{
@@ -144,7 +151,7 @@ EControlMode ATempoGameMode::GetControlMode() const
 		return EControlMode::ClosedLoop;
 	}
 	APlayerController* PlayerController = UGameplayStatics::GetPlayerController(this, 0);
-	if (PlayerController && PlayerController->GetPawn() && PlayerController->GetPawn()->IsA(RobotClass))
+	if (RobotClass.Get() && PlayerController && PlayerController->GetPawn() && PlayerController->GetPawn()->IsA(RobotClass))
 	{
 		return EControlMode::User;
 	}
