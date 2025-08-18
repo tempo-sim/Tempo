@@ -3,6 +3,7 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
+#include "Input/Reply.h" // Needed for FReply
 #include "TempoPawnEntryWidget.generated.h"
 
 class APawn;
@@ -23,26 +24,23 @@ protected:
 	/** Overridden from UUserWidget. Called when the widget is constructed. */
 	virtual void NativeConstruct() override;
 
+	/** Overridden to detect right-clicks for spawning. This is the native C++ virtual function. */
+	virtual FReply NativeOnMouseButtonDown(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
+
 	/** The pawn this widget instance is displaying. */
 	UPROPERTY(BlueprintReadOnly, Category = "Pawn Entry")
 	TObjectPtr<APawn> RepresentedPawn;
 
-	/**
-	 * A pointer to the TextBlock widget in the UMG Designer.
-	 * The name here, "PawnNameText", MUST EXACTLY MATCH the name of your TextBlock widget.
-	 */
+	/** A pointer to the TextBlock widget in the UMG Designer. */
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UTextBlock> PawnNameText;
 
-	/**
-	 * A pointer to the Button widget in the UMG Designer.
-	 * The name here, "PossessButton", MUST EXACTLY MATCH the name of your Button widget.
-	 */
+	/** A pointer to the Button widget in the UMG Designer. */
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UButton> PossessButton;
 
 private:
-	/** The function that will be called when the PossessButton is clicked. */
+	/** The function that will be called when the PossessButton is left-clicked. */
 	UFUNCTION()
 	void OnPossessButtonClicked();
 
