@@ -19,6 +19,8 @@ struct FPawnGroup
 	TArray<APawn*> Pawns;
 };
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnPawnListUpdated);
+
 /**
  * A PlayerController that allows switching between different groups of Pawns.
  */
@@ -43,6 +45,18 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Tempo")
 	void SetMouseCaptured(bool bCaptured);
+	
+	UFUNCTION(BlueprintPure, Category = "Tempo")
+	TArray<APawn*> GetAllPossessablePawns() const;
+
+	/** This event is broadcast whenever the pawn groups are updated. */
+	UPROPERTY(BlueprintAssignable, Category = "Events")
+	FOnPawnListUpdated OnPawnListUpdated;
+
+	/**
+	* @brief Caches the current AI controller of a pawn before the player possesses it.
+	*/
+	void CacheAIController(APawn* PawnToPossess);
 
 protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Tempo")
@@ -127,7 +141,7 @@ protected:
 	TMap<APawn*, AController*> AIControllerMap;
 
 	/**
-	* @brief Caches the current AI controller of a pawn before the player possesses it.
-	*/
-	void CacheAIController(APawn* PawnToPossess);
+	 * @brief Forcibly possesses the level's SpectatorPawn.
+	 */
+	void EnterSpectatorMode();
 };
