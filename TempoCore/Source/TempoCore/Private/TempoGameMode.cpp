@@ -167,3 +167,8 @@ EControlMode ATempoGameMode::GetControlMode() const
 	}
 	return EControlMode::None;
 }
+
+TSubclassOf<AController> ATempoGameMode::GetOpenLoopControllerClass() const
+{
+	return OpenLoopControllerClass;
+}
