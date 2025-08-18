@@ -188,6 +188,7 @@ void ATempoPlayerController::SetupInputComponent()
     InputComponent->BindAction("PossessPrevious", IE_Pressed, this, &ATempoPlayerController::PossessPreviousPawn);
     InputComponent->BindAction("SwitchGroup", IE_Pressed, this, &ATempoPlayerController::SwitchActiveGroup);
     InputComponent->BindAction("SelectAndPossess", IE_Pressed, this, &ATempoPlayerController::SelectAndPossessPawn);
+    InputComponent->BindAction("EnterSpectatorMode", IE_Pressed, this, &ATempoPlayerController::EnterSpectatorMode);
 }
 
 void ATempoPlayerController::OnActorSpawnedHandler(AActor* SpawnedActor)
@@ -242,7 +243,7 @@ void ATempoPlayerController::SelectAndPossessPawn()
     }
 }
 
-void ATempoPlayerController::UpdatePawnGroups()
+void ATempoPlayerController::UpdatePawnGroups() 
 {
     if (!LevelSpectatorPawn)
     {
@@ -309,6 +310,7 @@ void ATempoPlayerController::UpdatePawnGroups()
            ActiveGroupIndex = PawnGroupClasses.Find(SpectatorClass);
        }
     }
+    OnPawnListUpdated.Broadcast();
 }
 
 void ATempoPlayerController::SwitchActiveGroup()
@@ -400,4 +402,22 @@ void ATempoPlayerController::CacheAIController(APawn* PawnToPossess)
             AIControllerMap.Add(PawnToPossess, CurrentController);
         }
     }
+}
+
+void ATempoPlayerController::EnterSpectatorMode()
+{
+    if (LevelSpectatorPawn)
+    {
+        Possess(LevelSpectatorPawn);
+    }
+}
+
+TArray<APawn*> ATempoPlayerController::GetAllPossessablePawns() const
+{
+    TArray<APawn*> AllPawns;
+    for (const auto& Pair : PawnGroups)
+    {
+        AllPawns.Append(Pair.Value.Pawns);
+    }
+    return AllPawns;
 }
