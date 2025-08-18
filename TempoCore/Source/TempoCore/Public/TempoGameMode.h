@@ -42,6 +42,9 @@ public:
 
 	TSubclassOf<APawn> GetRobotClass() const { return RobotClass; }
 
+	UFUNCTION(BlueprintPure, Category = "Tempo Game Mode")
+	TSubclassOf<AController> GetOpenLoopControllerClass() const;
+
 protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, meta=(MustImplement="/Script/TempoCore.ActorClassificationInterface"))
 	TSubclassOf<UWorldSubsystem> ActorClassifier = UDefaultActorClassifier::StaticClass();
