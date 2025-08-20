@@ -6,8 +6,9 @@
 #include "GameFramework/SpectatorPawn.h" // Needed for the class check
 #include "Kismet/GameplayStatics.h"
 #include "TempoPlayerController.h" // Include your player controller header
-#include "TempoGameMode.h" // Needed to get the controller class
+#include "TempoGameMode.h" // Needed to get the controller class and other rules
 #include "Engine/World.h" // Needed for GetWorld()
+#include "GameFramework/Controller.h" // Needed for AController
 
 void UTempoPawnEntryWidget::NativeConstruct()
 {
@@ -48,7 +49,7 @@ FReply UTempoPawnEntryWidget::NativeOnMouseButtonDown(const FGeometry& MyGeometr
     // First, let the button handle the event. This allows the OnClicked event to fire for left-clicks.
     Super::NativeOnMouseButtonDown(MyGeometry, MouseEvent);
 
-    // Now, check if the button that caused this event was the right mouse button.
+    // Check if the button that caused this event was the right mouse button.
     if (MouseEvent.GetEffectingButton() == EKeys::RightMouseButton)
     {
         // Ensure we have a valid pawn to get the class from.
@@ -108,7 +109,34 @@ FReply UTempoPawnEntryWidget::NativeOnMouseButtonDown(const FGeometry& MyGeometr
             return FReply::Handled();
         }
     }
+    else if (MouseEvent.GetEffectingButton() == EKeys::MiddleMouseButton)
+    {
+        if (RepresentedPawn && GetWorld())
+        {
+            UE_LOG(LogTemp, Log, TEXT("Middle-click detected on %s. Attempting to delete."), *RepresentedPawn->GetActorLabel());
 
-    // If it wasn't a right-click we handled, return Unhandled.
+            AController* PawnController = RepresentedPawn->GetController();
+            
+            // Check if the pawn has an open-loop controller that also needs to be deleted.
+            if (PawnController)
+            {
+                ATempoGameMode* GameMode = Cast<ATempoGameMode>(UGameplayStatics::GetGameMode(this));
+                if (GameMode)
+                {
+                    TSubclassOf<AController> OpenLoopControllerClass = GameMode->GetOpenLoopControllerClass();
+                    // We only destroy the controller if it's the specific open-loop type.
+                    // This prevents accidentally deleting a player controller or a different, important AI controller.
+                    if (OpenLoopControllerClass && PawnController->IsA(OpenLoopControllerClass))
+                    {
+                        UE_LOG(LogTemp, Log, TEXT("Deleting associated Open Loop Controller: %s"), *PawnController->GetName());
+                        PawnController->Destroy();
+                    }
+                }
+            }
+            RepresentedPawn->Destroy();
+            return FReply::Handled();
+        }
+    }
+    
     return FReply::Unhandled();
 }
