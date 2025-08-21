@@ -362,7 +362,7 @@ void UTempoCamera::ApplyDepthEnabled()
 	{
 		RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA16f;
 		PixelFormatOverride = EPixelFormat::PF_A16B16G16R16;
-		
+
 		if (const TObjectPtr<UMaterialInterface> PostProcessMaterialWithDepth = GetDefault<UTempoSensorsSettings>()->GetCameraPostProcessMaterialWithDepth())
 		{
 			PostProcessMaterialInstance = UMaterialInstanceDynamic::Create(PostProcessMaterialWithDepth.Get(), this);
@@ -415,7 +415,7 @@ void UTempoCamera::ApplyDepthEnabled()
 			}
 		});
 	}
-	
+
 	if (PostProcessMaterialInstance)
 	{
 		if (OverridableLabel.IsSet() && OverridingLabel.IsSet())
@@ -426,7 +426,6 @@ void UTempoCamera::ApplyDepthEnabled()
 		else
 		{
 			PostProcessMaterialInstance->SetScalarParameterValue(TEXT("OverridingLabel"), 0.0);
-
 		}
 		PostProcessSettings.WeightedBlendables.Array.Empty();
 		PostProcessSettings.WeightedBlendables.Array.Init(FWeightedBlendable(1.0, PostProcessMaterialInstance), 1);

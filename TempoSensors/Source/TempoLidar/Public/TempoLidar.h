@@ -10,21 +10,6 @@
 #include "TempoScriptingServer.h"
 #include "TempoLidar.generated.h"
 
-struct FDepthPixel
-{
-	float GetDepth(float MinRange, float MaxRange) const
-	{
-		if (Depth > MaxRange)
-		{
-			return 0.0;
-		}
-		return FMath::Max(MinRange, Depth);
-	}
-
-private:
-	float Depth = 0.0;
-};
-
 struct FLidarScanRequest
 {
 	TempoLidar::LidarScanRequest Request;
@@ -121,11 +106,11 @@ protected:
 
 	friend class UTempoLidarCaptureComponent;
 
-	friend struct TTextureRead<FDepthPixel>;
+	friend struct TTextureRead<float>;
 };
 
 template <>
-struct TTextureRead<FDepthPixel> : TTextureReadBase<FDepthPixel>
+struct TTextureRead<float> : TTextureReadBase<float>
 {
 	TTextureRead(const FIntPoint& ImageSizeIn, int32 SequenceIdIn, double CaptureTimeIn,
 		const UTempoLidarCaptureComponent* CaptureComponentIn, const UTempoLidar* TempoLidarIn)
@@ -176,5 +161,5 @@ protected:
 
 	friend UTempoLidar;
 
-	friend TTextureRead<FDepthPixel>;
+	friend TTextureRead<float>;
 };

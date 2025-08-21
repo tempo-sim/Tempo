@@ -43,6 +43,9 @@ public:
 	int32 GetMaxCameraRenderBufferSize() const { return MaxCameraRenderBufferSize; }
 	FTempoSensorsLabelSettingsChanged TempoSensorsLabelSettingsChangedEvent;
 
+	// Lidar
+	ELidarInterpolationMethod GetLidarInterpolationMethod() const { return LidarInterpolationMethod; }
+
 	// RayTracingScene Buffer Overrun Workaround
 	bool GetRayTracingSceneReadbackBuffersOverrunWorkaroundEnabled() const { return bEnableRayTracingSceneReadbackBuffersOverrunWorkaround; }
 	uint32 GetRayTracingSceneMaxReadbackBuffersOverride() const { return RayTracingSceneMaxReadbackBuffersOverride; }
@@ -100,6 +103,10 @@ private:
 	// Anywhere a non-zero subsurface color is found on an object of type OverridableLabelRowName, this label will be used instead.
 	UPROPERTY(EditAnywhere, Config, Category="Camera")
 	FName OverridingLabelRowName = NAME_None;
+
+	// The interpolation method to use for reconstructing a Lidar scan from a perspective depth image.
+	UPROPERTY(EditAnywhere, Config, Category="Lidar")
+	TEnumAsByte<ELidarInterpolationMethod> LidarInterpolationMethod = ELidarInterpolationMethod::PlanarFit;
 
 	// Whether to enable a hack to work around a buffer overrun bug in FRayTracingScene.
 	UPROPERTY(EditAnywhere, Config, Category="Advanced")
