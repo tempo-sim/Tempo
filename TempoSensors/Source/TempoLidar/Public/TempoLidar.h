@@ -40,12 +40,6 @@ public:
 	void RequestMeasurement(const TempoLidar::LidarScanRequest& Request, const TResponseDelegate<TempoLidar::LidarScanSegment>& ResponseContinuation);
 
 protected:
-#if WITH_EDITOR
-	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
-#endif
-	
-	void UpdateComputedProperties();
-
 	void AddCaptureComponent(float YawOffset, float SubHorizontalFOV, int32 SubHorizontalBeams);
 
 	virtual TFuture<void> DecodeAndRespond(TArray<TUniquePtr<FTextureRead>> TextureReads);
@@ -77,22 +71,10 @@ protected:
 	// The number of vertical beams.
 	UPROPERTY(EditAnywhere, meta=(UIMin=0.0, UIMax=180.0, ClampMin=0.0, ClampMax=180.0))
 	int32 VerticalBeams = 64.0;
-	
+
 	// The number of horizontal beams.
 	UPROPERTY(EditAnywhere)
 	int32 HorizontalBeams = 200.0;
-
-	// The upsampling factor.
-	UPROPERTY(EditAnywhere, meta=(UIMin=1, UIMax=4, ClampMin=1, ClampMax=4))
-	int32 UpsamplingFactor = 1;
-
-	// The resulting spacing between vertical beams in degrees.
-	UPROPERTY(VisibleAnywhere)
-	float VerticalSpacing = 30.0 / 64.0;
-	
-	// The resulting spacing between horizontal beams in degrees.
-	UPROPERTY(VisibleAnywhere)
-	float HorizontalSpacing = 120.0 / 200.0;
 
 	UPROPERTY(VisibleAnywhere)
 	FIntPoint SizeXY = FIntPoint::ZeroValue;

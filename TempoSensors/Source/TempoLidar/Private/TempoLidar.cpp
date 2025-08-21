@@ -88,8 +88,6 @@ void UTempoLidar::BeginPlay()
 
 	SizeXY = FIntPoint::ZeroValue;
 
-	UpdateComputedProperties();
-
 	if (HorizontalFOV <= 120.0)
 	{
 		AddCaptureComponent(0.0, HorizontalFOV, HorizontalBeams);
@@ -131,19 +129,6 @@ UTempoLidarCaptureComponent::UTempoLidarCaptureComponent()
 	bAutoActivate = true;
 }
 
-void UTempoLidar::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
-{
-	Super::PostEditChangeProperty(PropertyChangedEvent);
-
-	UpdateComputedProperties();
-}
-
-void UTempoLidar::UpdateComputedProperties()
-{
-	HorizontalSpacing = HorizontalFOV / HorizontalBeams;
-	VerticalSpacing = VerticalFOV / VerticalBeams;
-}
-
 FVector2D SphericalToPerspective(float AzimuthDeg, float ElevationDeg)
 {
 	const float TanAzimuth = FMath::Tan(FMath::DegreesToRadians(AzimuthDeg));
@@ -179,21 +164,21 @@ void UTempoLidarCaptureComponent::BeginPlay()
 {
 	Super::BeginPlay();
 
-	const float UndistortedVerticalImagePlaneSize = 2.0 * FMath::Tan(LidarOwner->VerticalFOV / 2.0);
-	const FVector2D DistortedImagePlaneSize = 2.0 * SphericalToPerspective(LidarOwner->HorizontalFOV / 2.0, LidarOwner->VerticalFOV / 2.0);
+	const UTempoSensorsSettings* TempoSensorsSettings = GetDefault<UTempoSensorsSettings>();
+	check(TempoSensorsSettings);
 
-	const float AspectRatio = DistortedImagePlaneSize.Y / DistortedImagePlaneSize.X;
-	const FVector2D SizeXYContinuous = LidarOwner->UpsamplingFactor * FVector2D(LidarOwner->HorizontalBeams, AspectRatio * LidarOwner->HorizontalBeams);
+	const float UndistortedVerticalImagePlaneSize = 2.0 * FMath::Tan(LidarOwner->VerticalFOV / 2.0);
+	const FVector2D ImagePlaneSize = 2.0 * SphericalToPerspective(FOVAngle / 2.0, LidarOwner->VerticalFOV / 2.0);
+
+	const float AspectRatio = ImagePlaneSize.Y / ImagePlaneSize.X;
+	const FVector2D SizeXYContinuous = TempoSensorsSettings->GetLidarUpsamplingFactor() * FVector2D(HorizontalBeams, AspectRatio * HorizontalBeams);
 
 	SizeXY = FIntPoint(FMath::CeilToInt32(SizeXYContinuous.X), FMath::CeilToInt32(SizeXYContinuous.Y));
-	DistortionFactor = UndistortedVerticalImagePlaneSize / DistortedImagePlaneSize.Y;
+	DistortionFactor = UndistortedVerticalImagePlaneSize / ImagePlaneSize.Y;
 	DistortedVerticalFOV = FMath::RadiansToDegrees(2.0 * FMath::Atan(FMath::Tan(FMath::DegreesToRadians(LidarOwner->VerticalFOV) / 2.0) * DistortionFactor));
 
 	LidarOwner->SizeXY.X += SizeXY.X;
 	LidarOwner->SizeXY.Y = SizeXY.Y;
-
-	const UTempoSensorsSettings* TempoSensorsSettings = GetDefault<UTempoSensorsSettings>();
-	check(TempoSensorsSettings);
 
 	InitRenderTarget();
 }
@@ -216,7 +201,7 @@ void TTextureRead<float>::RespondToRequests(const TArray<FLidarScanRequest>& Req
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(TempoLidarDecode);
 
-		const FVector2D ImagePlaneSize = 2.0 * SphericalToPerspective(TempoLidar->HorizontalFOV / 2.0, TempoLidar->VerticalFOV / 2.0);
+		const FVector2D ImagePlaneSize = 2.0 * SphericalToPerspective(CaptureComponent->FOVAngle / 2.0, TempoLidar->VerticalFOV / 2.0);
 
 		const UTempoSensorsSettings* TempoSensorsSettings = GetDefault<UTempoSensorsSettings>();
 		if (!TempoSensorsSettings)
@@ -228,10 +213,10 @@ void TTextureRead<float>::RespondToRequests(const TArray<FLidarScanRequest>& Req
 		auto DistanceAtBeam = [this, &ImagePlaneSize, InterpolationMethod] (int32 HorizontalBeam, int32 VerticalBeam) -> float
 		{
 			const FIntPoint& SizeXY = CaptureComponent->SizeXY;
-			const double AzimuthDeg = (-0.5 + static_cast<double>(HorizontalBeam) / TempoLidar->HorizontalBeams) * TempoLidar->HorizontalFOV;
+			const double AzimuthDeg = (-0.5 + static_cast<double>(HorizontalBeam) / CaptureComponent->HorizontalBeams) * CaptureComponent->FOVAngle;
 			const double ElevationDeg = (-0.5 + static_cast<double>(VerticalBeam) / TempoLidar->VerticalBeams) * TempoLidar->VerticalFOV;
 			const FVector2D ImagePlaneLocation = SphericalToPerspective(AzimuthDeg, ElevationDeg);
-			const FVector2D PixelCoordinate = (FVector2D(0.5, 0.5) + ImagePlaneLocation / ImagePlaneSize) * SizeXY;
+			const FVector2D PixelCoordinate = (FVector2D(0.5, 0.5) + ImagePlaneLocation / ImagePlaneSize) * (SizeXY - FIntPoint(1, 1));
 
 			switch (InterpolationMethod)
 			{
@@ -320,7 +305,7 @@ void TTextureRead<float>::RespondToRequests(const TArray<FLidarScanRequest>& Req
 					Distance = 0.0;
 				}
 				Distance = FMath::Max(TempoLidar->MinRange, Distance);
-				Returns[HorizontalBeam + TempoLidar->HorizontalBeams * VerticalBeam].set_distance(QuantityConverter<CM2M>::Convert(Distance));
+				Returns[HorizontalBeam + CaptureComponent->HorizontalBeams * VerticalBeam].set_distance(QuantityConverter<CM2M>::Convert(Distance));
 			}
 		});
 
@@ -329,7 +314,7 @@ void TTextureRead<float>::RespondToRequests(const TArray<FLidarScanRequest>& Req
 		{
 			for (int32 VerticalBeam = 0; VerticalBeam < TempoLidar->VerticalBeams; ++VerticalBeam)
 			{
-				*ScanSegment.add_returns() = Returns[HorizontalBeam + TempoLidar->HorizontalBeams * VerticalBeam];
+				*ScanSegment.add_returns() = Returns[HorizontalBeam + CaptureComponent->HorizontalBeams * VerticalBeam];
 			}
 		}
 
