@@ -3,7 +3,6 @@
 #include "TempoLidar.h"
 
 #include "TempoConversion.h"
-#include "TempoLidarModule.h"
 
 #include "TempoLidar/Lidar.pb.h"
 
@@ -12,6 +11,7 @@
 UTempoLidar::UTempoLidar()
 {
 	MeasurementTypes = { EMeasurementType::LIDAR_SCAN };
+	bAutoActivate = true;
 }
 
 FString UTempoLidar::GetOwnerName() const
@@ -57,7 +57,6 @@ void UTempoLidar::BlockUntilMeasurementsReady() const
 TArray<TFuture<void>> UTempoLidar::SendMeasurements()
 {
 	TArray<TFuture<void>> Futures;
-	// TPair<UTempoLidarCaptureComponent*, int32> NextCaptureComponent = TPair<UTempoLidarCaptureComponent*, int32>(nullptr, TNumericLimits<int32>::Max());
 
 	TArray<TUniquePtr<FTextureRead>> TextureReads;
 	const int32 NumCompletedReads = LidarCaptureComponents.FilterByPredicate(
@@ -70,29 +69,6 @@ TArray<TFuture<void>> UTempoLidar::SendMeasurements()
 			TextureReads.Add(LidarCaptureComponent->DequeueIfReadComplete());
 		}
 	}
-	// for (UTempoLidarCaptureComponent* LidarCaptureComponent : LidarCaptureComponents)
-	// {
-	// 	if (TOptional<int32> NextSequenceId = LidarCaptureComponent->SequenceIDOfNextCompleteRead())
-	// 	{
-	// 		if (SequenceID < 0)
-	// 		{
-	// 			SequenceID = NextSequenceId.GetValue();
-	// 		}
-	// 		else
-	// 		{
-	// 			
-	// 		}
-	// 		if (NextSequenceId.GetValue() < NextCaptureComponent.Value)
-	// 		{
-	// 			NextCaptureComponent.Key = LidarCaptureComponent;
-	// 			NextCaptureComponent.Value = NextSequenceId.GetValue();
-	// 		}
-	// 	}
-	// 	if (TUniquePtr<FTextureRead> TextureRead = LidarCaptureComponent->DequeueIfReadComplete())
-	// 	{
-	// 		TextureReads.Add(MoveTemp(TextureRead));
-	// 	}
-	// }
 
 	Futures.Add(DecodeAndRespond(MoveTemp(TextureReads)));
 
@@ -113,6 +89,8 @@ TArray<TFuture<void>> UTempoLidar::SendMeasurements()
 void UTempoLidar::BeginPlay()
 {
 	Super::BeginPlay();
+
+	SizeXY = FIntPoint::ZeroValue;
 
 	UpdateComputedProperties();
 
@@ -148,13 +126,14 @@ void UTempoLidar::AddCaptureComponent(float YawOffset, float SubHorizontalFOV, i
 
 UTempoLidarCaptureComponent::UTempoLidarCaptureComponent()
 {
-	CaptureSource = ESceneCaptureSource::SCS_FinalColorLDR;
+	CaptureSource = ESceneCaptureSource::SCS_SceneDepth;
 	ShowFlags.SetAntiAliasing(false);
 	ShowFlags.SetTemporalAA(false);
 	ShowFlags.SetMotionBlur(false);
 
 	RenderTargetFormat = ETextureRenderTargetFormat::RTF_R32f;
 	PixelFormatOverride = EPixelFormat::PF_Unknown;
+	bAutoActivate = true;
 }
 
 void UTempoLidar::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
@@ -170,41 +149,32 @@ void UTempoLidar::UpdateComputedProperties()
 	VerticalSpacing = VerticalFOV / VerticalBeams;
 }
 
+FVector2D SphericalToPerspective(float AzimuthDeg, float ElevationDeg)
+{
+	const float TanAzimuth = FMath::Tan(FMath::DegreesToRadians(AzimuthDeg));
+	const float TanElevation = FMath::Tan(FMath::DegreesToRadians(ElevationDeg));
+	return FVector2D(TanAzimuth, TanElevation * FMath::Sqrt(TanAzimuth * TanAzimuth + 1));
+}
+
 void UTempoLidarCaptureComponent::BeginPlay()
 {
 	Super::BeginPlay();
 
-	const float TanHFOVOverTwo = FMath::Tan(FMath::DegreesToRadians(FOVAngle / 2.0));
-	const float DistortionFactorContinuous = FMath::Sqrt((TanHFOVOverTwo * TanHFOVOverTwo) + 1);
-	const float UndistortedAspectRatio = FMath::Tan(FMath::DegreesToRadians(LidarOwner->VerticalFOV / 2.0)) / FMath::Tan(FMath::DegreesToRadians(FOVAngle / 2.0));
-	SizeXY = FIntPoint(LidarOwner->UpsamplingFactor * HorizontalBeams, LidarOwner->UpsamplingFactor * FMath::CeilToInt32(DistortionFactorContinuous * UndistortedAspectRatio * HorizontalBeams));
-	DistortionFactor = SizeXY.Y / (UndistortedAspectRatio * LidarOwner->UpsamplingFactor * HorizontalBeams);
+	const float UndistortedVerticalImagePlaneSize = 2.0 * FMath::Tan(LidarOwner->VerticalFOV / 2.0);
+	const FVector2D DistortedImagePlaneSize = 2.0 * SphericalToPerspective(LidarOwner->HorizontalFOV / 2.0, LidarOwner->VerticalFOV / 2.0);
+
+	const float AspectRatio = DistortedImagePlaneSize.Y / DistortedImagePlaneSize.X;
+	const FVector2D SizeXYContinuous = LidarOwner->UpsamplingFactor * FVector2D(LidarOwner->HorizontalBeams, AspectRatio * LidarOwner->HorizontalBeams);
+
+	SizeXY = FIntPoint(FMath::CeilToInt32(SizeXYContinuous.X), FMath::CeilToInt32(SizeXYContinuous.Y));
+	DistortionFactor = UndistortedVerticalImagePlaneSize / DistortedImagePlaneSize.Y;
 	DistortedVerticalFOV = FMath::RadiansToDegrees(2.0 * FMath::Atan(FMath::Tan(FMath::DegreesToRadians(LidarOwner->VerticalFOV) / 2.0) * DistortionFactor));
-	
+
+	LidarOwner->SizeXY.X += SizeXY.X;
+	LidarOwner->SizeXY.Y = SizeXY.Y;
+
 	const UTempoSensorsSettings* TempoSensorsSettings = GetDefault<UTempoSensorsSettings>();
 	check(TempoSensorsSettings);
-
-	if (const TObjectPtr<UMaterialInterface> PostProcessMaterial = GetDefault<UTempoSensorsSettings>()->GetLidarPostProcessMaterial())
-	{
-		PostProcessMaterialInstance = UMaterialInstanceDynamic::Create(PostProcessMaterial.Get(), this);
-		PostProcessMaterialInstance->SetScalarParameterValue(TEXT("VerticalFOV"), DistortedVerticalFOV);
-		PostProcessMaterialInstance->SetScalarParameterValue(TEXT("HorizontalFOV"), FOVAngle);
-	}
-	else
-	{
-		UE_LOG(LogTempoLidar, Error, TEXT("LidarPostProcessMaterial is not set in TempoSensors settings"));
-	}
-
-	if (PostProcessMaterialInstance)
-	{
-		PostProcessSettings.WeightedBlendables.Array.Empty();
-		PostProcessSettings.WeightedBlendables.Array.Init(FWeightedBlendable(1.0, PostProcessMaterialInstance), 1);
-		PostProcessMaterialInstance->EnsureIsComplete();
-	}
-	else
-	{
-		UE_LOG(LogTempoLidar, Error, TEXT("PostProcessMaterialInstance is not set."));
-	}
 
 	InitRenderTarget();
 }
@@ -227,30 +197,25 @@ void TTextureRead<FDepthPixel>::RespondToRequests(const TArray<FLidarScanRequest
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(TempoLidarDecode);
 
-		// Number of non-upsampled rows.
-		const int32 NumRows = Image.Num() / (TempoLidar->UpsamplingFactor * TempoLidar->UpsamplingFactor) / CaptureComponent->HorizontalBeams;
-		// Vertical degrees between each upsampled pixel?
-		const float VerticalDegreesPerPixel = CaptureComponent->DistortedVerticalFOV / (NumRows - 1.0 / TempoLidar->UpsamplingFactor);
-
-		const float VerticalOffset = (CaptureComponent->DistortedVerticalFOV / 2.0 - TempoLidar->VerticalFOV / 2.0) / VerticalDegreesPerPixel;
-		const float VerticalSpacingPixels = (TempoLidar->VerticalFOV / (TempoLidar->VerticalBeams - 1)) / VerticalDegreesPerPixel;
-		auto RangeAtBeam = [this, VerticalOffset, VerticalSpacingPixels] (int32 HorizontalBeam, int32 VerticalBeam) -> float
+		auto RangeAtBeam = [this] (int32 HorizontalBeam, int32 VerticalBeam) -> float
 		{
-			const int32 Column = TempoLidar->UpsamplingFactor * HorizontalBeam;
-			const float Row = TempoLidar->UpsamplingFactor * (VerticalOffset + VerticalBeam * VerticalSpacingPixels);
-			// const float RangeAbove = ;
-			// const float RangeBelow = ;
-			const float Alpha = Row - FMath::FloorToInt32(Row);
-			return Alpha > 0.5 ?
-				Image[Column + TempoLidar->UpsamplingFactor * CaptureComponent->HorizontalBeams * FMath::CeilToInt32(Row)].GetDepth(TempoLidar->MinRange, TempoLidar->MaxRange) :
-				Image[Column + TempoLidar->UpsamplingFactor * CaptureComponent->HorizontalBeams * FMath::FloorToInt32(Row)].GetDepth(TempoLidar->MinRange, TempoLidar->MaxRange);
-			// if (FMath::Abs(RangeAbove - RangeBelow) > 10.0)
-			// {
-			// 	return Alpha > 0.5 ? RangeBelow : RangeAbove;
-			// }
-			// return RangeAbove * (1.0 - Alpha) + RangeBelow * Alpha;
+			const FVector2D DistortedImagePlaneSize = 2.0 * SphericalToPerspective(TempoLidar->HorizontalFOV / 2.0, TempoLidar->VerticalFOV / 2.0);
+			const float Azimuth = (-0.5 + static_cast<float>(HorizontalBeam) / TempoLidar->HorizontalBeams) * TempoLidar->HorizontalFOV;
+			const float Elevation = (-0.5 + static_cast<float>(VerticalBeam) / TempoLidar->VerticalBeams) * TempoLidar->VerticalFOV;
+
+			const FVector2D ImagePlaneLocation = SphericalToPerspective(Azimuth, Elevation);
+			const FVector2D SizeXYFloat(CaptureComponent->SizeXY.X, CaptureComponent->SizeXY.Y);
+			const FVector2D ImageCenter = 0.5 * SizeXYFloat;
+			const FVector2D Ratio = ImagePlaneLocation / DistortedImagePlaneSize;
+			const FVector2D Coordinate = Ratio * SizeXYFloat;
+			const FVector2D PixelLocationContinuous = ImageCenter + Coordinate;
+
+			const float Depth = Image[FMath::RoundToInt32(PixelLocationContinuous.X) + CaptureComponent->SizeXY.X * FMath::RoundToInt32(PixelLocationContinuous.Y)].GetDepth(TempoLidar->MinRange, TempoLidar->MaxRange);
+			const float TanAzimuth = FMath::Tan(FMath::DegreesToRadians(Azimuth));
+			const float TanElevation = FMath::Tan(FMath::DegreesToRadians(Elevation));
+			return FMath::Sqrt((TanAzimuth * TanAzimuth + 1) * (TanElevation * TanElevation + 1)) * Depth;
 		};
-  
+
 		ScanSegment.mutable_returns()->Reserve(CaptureComponent->HorizontalBeams * TempoLidar->VerticalBeams);
 		for (int32 HorizontalBeam = 0; HorizontalBeam < CaptureComponent->HorizontalBeams; ++HorizontalBeam)
 		{
@@ -260,7 +225,7 @@ void TTextureRead<FDepthPixel>::RespondToRequests(const TArray<FLidarScanRequest
 				Return->set_distance(RangeAtBeam(HorizontalBeam, VerticalBeam) / 100.0);
 			}
 		}
-  
+
 		ScanSegment.mutable_header()->set_sequence_id(SequenceId);
 		ScanSegment.mutable_header()->set_capture_time(CaptureTime);
 		ScanSegment.mutable_header()->set_transmission_time(TransmissionTime);

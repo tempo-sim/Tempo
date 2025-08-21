@@ -36,7 +36,6 @@ public:
 	TObjectPtr<UMaterialInterface> GetCameraPostProcessMaterialNoDepth() const { return CameraPostProcessMaterialNoDepth.LoadSynchronous(); }
 	TObjectPtr<UMaterialInterface> GetCameraPostProcessMaterialWithDepth() const { return CameraPostProcessMaterialWithDepth.LoadSynchronous(); }
 	EColorImageEncoding GetColorImageEncoding() const { return ColorImageEncoding; }
-	TObjectPtr<UMaterialInterface> GetLidarPostProcessMaterial() const { return LidarPostProcessMaterial.LoadSynchronous(); }
 	float GetMaxCameraDepth() const { return MaxCameraDepth; }
 	float GetSceneCaptureGamma() const { return SceneCaptureGamma; }
 	FName GetOverridableLabelRowName() const { return OverridableLabelRowName; }
@@ -81,9 +80,6 @@ private:
 	// Encoding to use for color images.
 	UPROPERTY(EditAnywhere, Config, Category="Camera")
 	TEnumAsByte<EColorImageEncoding> ColorImageEncoding = EColorImageEncoding::BGR8;
-
-	UPROPERTY(EditAnywhere, Config, Category="Lidar", meta=( AllowedClasses="/Script/Engine.BlendableInterface", Keywords="PostProcess" ))
-	TSoftObjectPtr<UMaterialInterface> LidarPostProcessMaterial;
 
 	// The expected maximum required depth for a camera depth image.
 	UPROPERTY(EditAnywhere, Config, Category="Camera")

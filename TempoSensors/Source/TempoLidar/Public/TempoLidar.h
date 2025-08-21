@@ -98,8 +98,8 @@ protected:
 	int32 HorizontalBeams = 200.0;
 
 	// The upsampling factor.
-	UPROPERTY(EditAnywhere)
-	int32 UpsamplingFactor = 1.0;
+	UPROPERTY(EditAnywhere, meta=(UIMin=1, UIMax=4, ClampMin=1, ClampMax=4))
+	int32 UpsamplingFactor = 1;
 
 	// The resulting spacing between vertical beams in degrees.
 	UPROPERTY(VisibleAnywhere)
@@ -158,7 +158,7 @@ protected:
 	virtual FTextureRead* MakeTextureRead() const override;
 
 	virtual int32 GetMaxTextureQueueSize() const override;
-	
+
 	// The number of horizontal beams.
 	UPROPERTY(EditAnywhere)
 	int32 HorizontalBeams = 200.0;
@@ -170,9 +170,6 @@ protected:
 	// The resulting distorted vertical FOV.
 	UPROPERTY(VisibleAnywhere)
 	float DistortedVerticalFOV = 30.0;
-	
-	UPROPERTY(VisibleAnywhere)
-	UMaterialInstanceDynamic* PostProcessMaterialInstance= nullptr;
 
 	UPROPERTY()
 	UTempoLidar* LidarOwner = nullptr;
