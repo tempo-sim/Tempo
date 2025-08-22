@@ -9,8 +9,6 @@
 
 #include "TempoSensorsSettings.h"
 
-#include <random>
-
 UTempoLidar::UTempoLidar()
 {
 	MeasurementTypes = { EMeasurementType::LIDAR_SCAN };
@@ -95,33 +93,33 @@ void UTempoLidar::BeginPlay()
 	}
 	else if (HorizontalFOV <= 240.0)
 	{
-		const float BeamGapSize = HorizontalFOV / (HorizontalBeams - 1);
+		const double BeamGapSize = HorizontalFOV / (HorizontalBeams - 1);
 		const int32 LeftSegmentBeams = FMath::CeilToInt32(HorizontalBeams / 2.0);
 		const int32 RightSegmentBeams = HorizontalBeams - LeftSegmentBeams;
-		const float LeftSegmentFOV = BeamGapSize * (LeftSegmentBeams - 1);
-		const float RightSegmentFOV = BeamGapSize * (RightSegmentBeams - 1);
+		const double LeftSegmentFOV = BeamGapSize * (LeftSegmentBeams - 1);
+		const double RightSegmentFOV = BeamGapSize * (RightSegmentBeams - 1);
 		AddCaptureComponent(-(LeftSegmentFOV + BeamGapSize) / 2.0, LeftSegmentFOV, LeftSegmentBeams);
 		AddCaptureComponent((RightSegmentFOV + BeamGapSize) / 2.0, RightSegmentFOV, RightSegmentBeams);
 	}
 	else
 	{
-		const float BeamGapSize = HorizontalFOV / (HorizontalFOV < 360.0 ? HorizontalBeams - 1 : HorizontalBeams);
+		const double BeamGapSize = HorizontalFOV / (HorizontalFOV < 360.0 ? HorizontalBeams - 1 : HorizontalBeams);
 		const int32 SideSegmentBeams = FMath::CeilToInt32(HorizontalBeams / 3.0);
 		const int32 CenterSegmentBeams = HorizontalBeams - 2 * SideSegmentBeams;
-		const float SideSegmentFOV = BeamGapSize * (SideSegmentBeams - 1);
-		const float CenterSegmentFOV = BeamGapSize * (CenterSegmentBeams - 1);
+		const double SideSegmentFOV = BeamGapSize * (SideSegmentBeams - 1);
+		const double CenterSegmentFOV = BeamGapSize * (CenterSegmentBeams - 1);
 		AddCaptureComponent(0.0, CenterSegmentFOV, CenterSegmentBeams);
 		AddCaptureComponent(-BeamGapSize - (CenterSegmentFOV + SideSegmentFOV) / 2.0, SideSegmentFOV, SideSegmentBeams);
 		AddCaptureComponent(BeamGapSize + (CenterSegmentFOV + SideSegmentFOV) / 2.0, SideSegmentFOV, SideSegmentBeams);
 	}
 }
 
-void UTempoLidar::AddCaptureComponent(float YawOffset, float SubHorizontalFOV, int32 SubHorizontalBeams)
+void UTempoLidar::AddCaptureComponent(double YawOffset, double SubHorizontalFOV, int32 SubHorizontalBeams)
 {
 	UTempoLidarCaptureComponent* LidarCaptureComponent = Cast<UTempoLidarCaptureComponent>(GetOwner()->AddComponentByClass(UTempoLidarCaptureComponent::StaticClass(), true, FTransform::Identity, true));
 	LidarCaptureComponent->LidarOwner = this;
 	LidarCaptureComponent->RateHz = RateHz;
-	LidarCaptureComponent->FOVAngle = SubHorizontalFOV;
+	LidarCaptureComponent->HorizontalFOV = SubHorizontalFOV;
 	LidarCaptureComponent->HorizontalBeams = SubHorizontalBeams;
 	LidarCaptureComponent->AttachToComponent(this, FAttachmentTransformRules::SnapToTargetIncludingScale);
 	LidarCaptureComponents.Add(LidarCaptureComponent);
@@ -141,43 +139,35 @@ UTempoLidarCaptureComponent::UTempoLidarCaptureComponent()
 	bAutoActivate = true;
 }
 
-FVector2D SphericalToPerspective(float AzimuthDeg, float ElevationDeg)
+FVector2D SphericalToPerspective(double AzimuthDeg, double ElevationDeg)
 {
-	const float TanAzimuth = FMath::Tan(FMath::DegreesToRadians(AzimuthDeg));
-	const float TanElevation = FMath::Tan(FMath::DegreesToRadians(ElevationDeg));
+	const double TanAzimuth = FMath::Tan(FMath::DegreesToRadians(AzimuthDeg));
+	const double TanElevation = FMath::Tan(FMath::DegreesToRadians(ElevationDeg));
 	return FVector2D(TanAzimuth, TanElevation * FMath::Sqrt(TanAzimuth * TanAzimuth + 1));
 }
 
-float RandomFloatGaussian(float StdDev)
+void PerspectiveToSpherical(const FVector2D& PerspectiveImagePlaneLocation, double& AzimuthDeg, double& ElevationDeg)
 {
-	std::random_device rd{};
-	std::mt19937 gen{ rd() };
-	std::normal_distribution<float> d{ 0.0f, StdDev };
-	return d(gen);
-}
-
-void PerspectiveToSpherical(const FVector2D& PerspectiveImagePlaneLocation, float& AzimuthDeg, float& ElevationDeg)
-{
-	const float Azimuth = FMath::Atan(PerspectiveImagePlaneLocation.X);
-	const float TanAzimuth = FMath::Tan(Azimuth);
-	const float Elevation = FMath::Atan(PerspectiveImagePlaneLocation.Y / FMath::Sqrt(TanAzimuth * TanAzimuth + 1));
+	const double Azimuth = FMath::Atan(PerspectiveImagePlaneLocation.X);
+	const double TanAzimuth = FMath::Tan(Azimuth);
+	const double Elevation = FMath::Atan(PerspectiveImagePlaneLocation.Y / FMath::Sqrt(TanAzimuth * TanAzimuth + 1));
 
 	AzimuthDeg = FMath::RadiansToDegrees(Azimuth);
 	ElevationDeg = FMath::RadiansToDegrees(Elevation);
 }
 
-float DepthToDistance(float AzimuthDeg, float ElevationDeg, float Depth)
+double DepthToDistance(double AzimuthDeg, double ElevationDeg, double Depth)
 {
-	const float TanAzimuth = FMath::Tan(FMath::DegreesToRadians(AzimuthDeg));
-	const float TanElevation = FMath::Tan(FMath::DegreesToRadians(ElevationDeg));
-	return FMath::Sqrt((TanAzimuth * TanAzimuth + 1) * (TanElevation * TanElevation + 1)) * Depth;
+	const double CosAzimuth = FMath::Cos(FMath::DegreesToRadians(AzimuthDeg));
+	const double CosElevation = FMath::Cos(FMath::DegreesToRadians(ElevationDeg));
+	return Depth / (CosAzimuth * CosElevation);
 }
 
-FVector SphericalToCartesian(float AzimuthDeg, float ElevationDeg, float Distance)
+FVector SphericalToCartesian(double AzimuthDeg, double ElevationDeg, double Distance)
 {
-	const float Azimuth = FMath::DegreesToRadians(AzimuthDeg);
-	const float Elevation = FMath::DegreesToRadians(ElevationDeg);
-	return Distance * FVector(FMath::Cos(Elevation) * FMath::Cos(Azimuth), FMath::Cos(Elevation) * FMath::Sin(Azimuth), FMath::Sin(Elevation));
+	const double Azimuth = FMath::DegreesToRadians(AzimuthDeg);
+	const double Elevation = FMath::DegreesToRadians(ElevationDeg);
+	return Distance * FVector(FMath::Cos(-Elevation) * FMath::Cos(Azimuth), FMath::Cos(-Elevation) * FMath::Sin(Azimuth), FMath::Sin(-Elevation));
 }
 
 void UTempoLidarCaptureComponent::BeginPlay()
@@ -187,13 +177,16 @@ void UTempoLidarCaptureComponent::BeginPlay()
 	const UTempoSensorsSettings* TempoSensorsSettings = GetDefault<UTempoSensorsSettings>();
 	check(TempoSensorsSettings);
 
-	const float UndistortedVerticalImagePlaneSize = 2.0 * FMath::Tan(LidarOwner->VerticalFOV / 2.0);
-	const FVector2D ImagePlaneSize = 2.0 * SphericalToPerspective(FOVAngle / 2.0, LidarOwner->VerticalFOV / 2.0);
+	const double BeamGapSize = HorizontalFOV / (HorizontalBeams - 1);
+	FOVAngle = HorizontalFOV + 2 * BeamGapSize;
 
-	const float AspectRatio = ImagePlaneSize.Y / ImagePlaneSize.X;
-	const FVector2D SizeXYContinuous = TempoSensorsSettings->GetLidarUpsamplingFactor() * FVector2D(HorizontalBeams, AspectRatio * HorizontalBeams);
+	const double UndistortedVerticalImagePlaneSize = 2.0 * FMath::Tan(LidarOwner->VerticalFOV / 2.0);
+	const FVector2D ImagePlaneSize = 2.0 * SphericalToPerspective(HorizontalFOV / 2.0, LidarOwner->VerticalFOV / 2.0);
 
-	SizeXY = FIntPoint(FMath::CeilToInt32(SizeXYContinuous.X), FMath::CeilToInt32(SizeXYContinuous.Y));
+	const double AspectRatio = ImagePlaneSize.Y / ImagePlaneSize.X;
+	SizeXYFOV = TempoSensorsSettings->GetLidarUpsamplingFactor() * FVector2D(HorizontalBeams, AspectRatio * HorizontalBeams);
+
+	SizeXY = FIntPoint(FMath::CeilToInt32(SizeXYFOV.X) + 2, FMath::CeilToInt32(SizeXYFOV.Y) + 2);
 	DistortionFactor = UndistortedVerticalImagePlaneSize / ImagePlaneSize.Y;
 	DistortedVerticalFOV = FMath::RadiansToDegrees(2.0 * FMath::Atan(FMath::Tan(FMath::DegreesToRadians(LidarOwner->VerticalFOV) / 2.0) * DistortionFactor));
 
@@ -218,7 +211,10 @@ void TTextureRead<float>::RespondToRequests(const TArray<FLidarScanRequest>& Req
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(TempoLidarDecode);
 
-		const FVector2D ImagePlaneSize = 2.0 * SphericalToPerspective(CaptureComponent->FOVAngle / 2.0, TempoLidar->VerticalFOV / 2.0);
+		const FIntPoint& SizeXY = CaptureComponent->SizeXY;
+		const FVector2D& SizeXYFOV = CaptureComponent->SizeXYFOV;
+		const FVector2D ImagePlaneSize = 2.0 * SphericalToPerspective(CaptureComponent->HorizontalFOV / 2.0, TempoLidar->VerticalFOV / 2.0);
+		const FVector2D SizeXYOffset = (FVector2D(SizeXY) - SizeXYFOV) / 2.0;
 
 		const UTempoSensorsSettings* TempoSensorsSettings = GetDefault<UTempoSensorsSettings>();
 		if (!TempoSensorsSettings)
@@ -227,13 +223,22 @@ void TTextureRead<float>::RespondToRequests(const TArray<FLidarScanRequest>& Req
 		}
 		ELidarInterpolationMethod InterpolationMethod = TempoSensorsSettings->GetLidarInterpolationMethod();
 
-		auto DistanceAtBeam = [this, &ImagePlaneSize, InterpolationMethod] (int32 HorizontalBeam, int32 VerticalBeam) -> float
+		auto DistanceAtBeam = [this, &ImagePlaneSize, &SizeXY, &SizeXYFOV, &SizeXYOffset, InterpolationMethod] (int32 HorizontalBeam, int32 VerticalBeam) -> double
 		{
-			const FIntPoint& SizeXY = CaptureComponent->SizeXY;
-			const double AzimuthDeg = (-0.5 + static_cast<double>(HorizontalBeam) / CaptureComponent->HorizontalBeams) * CaptureComponent->FOVAngle;
+			auto ImagePlaneLocationToPixelCoordinate = [&ImagePlaneSize, &SizeXYFOV, &SizeXYOffset](const FVector2D& ImagePlaneLocation)
+			{
+				return (FVector2D::UnitVector / 2.0 + ImagePlaneLocation / ImagePlaneSize) * (SizeXYFOV - FVector2D::UnitVector) + SizeXYOffset;
+			};
+
+			auto PixelCoordinateToImagePlaneLocation = [&ImagePlaneSize, &SizeXYFOV, &SizeXYOffset](const FVector2D& PixelCoordinate)
+			{
+				return ((PixelCoordinate - SizeXYOffset) / (SizeXYFOV - FVector2D::UnitVector) - (FVector2D::UnitVector / 2.0)) * ImagePlaneSize;
+			};
+
+			const double AzimuthDeg = (-0.5 + static_cast<double>(HorizontalBeam) / CaptureComponent->HorizontalBeams) * CaptureComponent->HorizontalFOV;
 			const double ElevationDeg = (-0.5 + static_cast<double>(VerticalBeam) / TempoLidar->VerticalBeams) * TempoLidar->VerticalFOV;
 			const FVector2D ImagePlaneLocation = SphericalToPerspective(AzimuthDeg, ElevationDeg);
-			const FVector2D PixelCoordinate = (FVector2D(0.5, 0.5) + ImagePlaneLocation / ImagePlaneSize) * (SizeXY - FIntPoint(1.0, 1.0));
+			const FVector2D PixelCoordinate = ImagePlaneLocationToPixelCoordinate(ImagePlaneLocation);
 
 			switch (InterpolationMethod)
 			{
@@ -244,10 +249,10 @@ void TTextureRead<float>::RespondToRequests(const TArray<FLidarScanRequest>& Req
 				}
 				case ELidarInterpolationMethod::PlanarFit:
 				{
-					const int32 ColLeft = FMath::Max(0, FMath::FloorToInt32(PixelCoordinate.X));
-					const int32 ColRight = FMath::Min(SizeXY.X - 1, FMath::CeilToInt32(PixelCoordinate.X));
-					const int32 RowAbove = FMath::Max(0, FMath::FloorToInt32(PixelCoordinate.Y));
-					const int32 RowBelow = FMath::Min( SizeXY.Y - 1, FMath::CeilToInt32(PixelCoordinate.Y));
+					const int32 ColLeft = FMath::FloorToInt32(PixelCoordinate.X);
+					const int32 ColRight = FMath::CeilToInt32(PixelCoordinate.X);
+					const int32 RowAbove = FMath::FloorToInt32(PixelCoordinate.Y);
+					const int32 RowBelow = FMath::CeilToInt32(PixelCoordinate.Y);
 
 					if (ColLeft == ColRight && RowAbove == RowBelow)
 					{
@@ -260,43 +265,46 @@ void TTextureRead<float>::RespondToRequests(const TArray<FLidarScanRequest>& Req
 					const float DepthBelowLeft = Image[ColLeft + SizeXY.X * RowBelow];
 					const float DepthBelowRight = Image[ColRight + SizeXY.X * RowBelow];
 
-					const FVector2D ImagePlaneLocationAboveLeft = (FVector2D(ColLeft, RowAbove) / SizeXY - FVector2D(0.5, 0.5)) * ImagePlaneSize;
-					const FVector2D ImagePlaneLocationAboveRight = (FVector2D(ColRight, RowAbove) / SizeXY - FVector2D(0.5, 0.5)) * ImagePlaneSize;
-					const FVector2D ImagePlaneLocationBelowLeft = (FVector2D(ColLeft, RowBelow) / SizeXY - FVector2D(0.5, 0.5)) * ImagePlaneSize;
-					const FVector2D ImagePlaneLocationBelowRight = (FVector2D(ColRight, RowBelow) / SizeXY - FVector2D(0.5, 0.5)) * ImagePlaneSize;
+					const FVector2D ImagePlaneLocationAboveLeft = PixelCoordinateToImagePlaneLocation(FVector2D(ColLeft, RowAbove));
+					const FVector2D ImagePlaneLocationAboveRight = PixelCoordinateToImagePlaneLocation(FVector2D(ColRight, RowAbove));
+					const FVector2D ImagePlaneLocationBelowLeft = PixelCoordinateToImagePlaneLocation(FVector2D(ColLeft, RowBelow));
+					const FVector2D ImagePlaneLocationBelowRight = PixelCoordinateToImagePlaneLocation(FVector2D(ColRight, RowBelow));
 
-					float AzimuthDegAboveLeft, ElevationDegAboveLeft;
+					double AzimuthDegAboveLeft, ElevationDegAboveLeft;
 					PerspectiveToSpherical(ImagePlaneLocationAboveLeft, AzimuthDegAboveLeft, ElevationDegAboveLeft);
-					float AzimuthDegAboveRight, ElevationDegAboveRight;
+					double AzimuthDegAboveRight, ElevationDegAboveRight;
 					PerspectiveToSpherical(ImagePlaneLocationAboveRight, AzimuthDegAboveRight, ElevationDegAboveRight);
-					float AzimuthDegBelowLeft, ElevationDegBelowLeft;
+					double AzimuthDegBelowLeft, ElevationDegBelowLeft;
 					PerspectiveToSpherical(ImagePlaneLocationBelowLeft, AzimuthDegBelowLeft, ElevationDegBelowLeft);
-					float AzimuthDegBelowRight, ElevationDegBelowRight;
+					double AzimuthDegBelowRight, ElevationDegBelowRight;
 					PerspectiveToSpherical(ImagePlaneLocationBelowRight, AzimuthDegBelowRight, ElevationDegBelowRight);
 
-					const float DistanceAboveLeft = DepthToDistance(AzimuthDegAboveLeft, ElevationDegAboveLeft, DepthAboveLeft);
-					const float DistanceAboveRight = DepthToDistance(AzimuthDegAboveRight, ElevationDegAboveRight, DepthAboveRight);
-					const float DistanceBelowLeft = DepthToDistance(AzimuthDegBelowLeft, ElevationDegBelowLeft, DepthBelowLeft);
-					const float DistanceBelowRight = DepthToDistance(AzimuthDegBelowRight, ElevationDegBelowRight, DepthBelowRight);
+					const double DistanceAboveLeft = DepthToDistance(AzimuthDegAboveLeft, ElevationDegAboveLeft, DepthAboveLeft);
+					const double DistanceAboveRight = DepthToDistance(AzimuthDegAboveRight, ElevationDegAboveRight, DepthAboveRight);
+					const double DistanceBelowLeft = DepthToDistance(AzimuthDegBelowLeft, ElevationDegBelowLeft, DepthBelowLeft);
+					const double DistanceBelowRight = DepthToDistance(AzimuthDegBelowRight, ElevationDegBelowRight, DepthBelowRight);
 
 					const FVector PointAboveLeft = SphericalToCartesian(AzimuthDegAboveLeft, ElevationDegAboveLeft, DistanceAboveLeft);
 					const FVector PointAboveRight = SphericalToCartesian(AzimuthDegAboveRight, ElevationDegAboveRight, DistanceAboveRight);
 					const FVector PointBelowLeft = SphericalToCartesian(AzimuthDegBelowLeft, ElevationDegBelowLeft, DistanceBelowLeft);
 					const FVector PointBelowRight = SphericalToCartesian(AzimuthDegBelowRight, ElevationDegBelowRight, DistanceBelowRight);
 
-					const FVector RayDirection = SphericalToCartesian(AzimuthDeg, ElevationDeg, UE_BIG_NUMBER);
+					const FVector RayDirection = SphericalToCartesian(AzimuthDeg, ElevationDeg, TempoLidar->MaxRange);
 
 					if (ColLeft == ColRight)
 					{
 						FVector Intersection1, Intersection2;
 						FMath::SegmentDistToSegment(PointAboveLeft, PointBelowLeft, FVector::ZeroVector, RayDirection, Intersection1, Intersection2);
-						return Intersection1.Length();
+						ensureMsgf(FVector::PointsAreNear(Intersection1, Intersection2, UE_KINDA_SMALL_NUMBER), TEXT("Segment between points with matching columns did not intersect ray"));
+						return Intersection2.Length();
 					}
 					if (RowAbove == RowBelow)
 					{
 						FVector Intersection1, Intersection2;
 						FMath::SegmentDistToSegment(PointAboveLeft, PointAboveRight, FVector::ZeroVector, RayDirection, Intersection1, Intersection2);
-						return Intersection1.Length();
+						if (!FVector::PointsAreNear(Intersection1, Intersection2, 0.1))
+						ensureMsgf(FVector::PointsAreNear(Intersection1, Intersection2, UE_KINDA_SMALL_NUMBER), TEXT("Segment between points with matching rows did not intersect ray"));
+						return Intersection2.Length();
 					}
 
 					FPlane BestFitPlane = UTempoCoreUtils::BestFitPlaneFromFourPoints(PointAboveRight, PointBelowRight, PointBelowLeft, PointAboveLeft);
@@ -316,13 +324,12 @@ void TTextureRead<float>::RespondToRequests(const TArray<FLidarScanRequest>& Req
 		{
 			for (int32 VerticalBeam = 0; VerticalBeam < TempoLidar->VerticalBeams; ++VerticalBeam)
 			{
-				float Distance = DistanceAtBeam(HorizontalBeam, VerticalBeam);
+				double Distance = DistanceAtBeam(HorizontalBeam, VerticalBeam);
 				if (Distance > TempoLidar->MaxRange)
 				{
 					Distance = 0.0;
 				}
 				Distance = FMath::Max(TempoLidar->MinRange, Distance);
-				// Distance += RandomFloatGaussian(TempoLidar->RangeStdDev);
 				Returns[HorizontalBeam + CaptureComponent->HorizontalBeams * VerticalBeam].set_distance(QuantityConverter<CM2M>::Convert(Distance));
 			}
 		});
@@ -332,6 +339,13 @@ void TTextureRead<float>::RespondToRequests(const TArray<FLidarScanRequest>& Req
 		{
 			for (int32 VerticalBeam = 0; VerticalBeam < TempoLidar->VerticalBeams; ++VerticalBeam)
 			{
+				if ((HorizontalBeam + SizeXY.X * VerticalBeam) % 1000 == 0)
+				{
+					const double AzimuthDeg = (-0.5 + static_cast<double>(HorizontalBeam) / CaptureComponent->HorizontalBeams) * CaptureComponent->HorizontalFOV;
+					const double ElevationDeg = (-0.5 + static_cast<double>(VerticalBeam) / TempoLidar->VerticalBeams) * TempoLidar->VerticalFOV;
+					const FVector HitPoint = SphericalToCartesian(AzimuthDeg, ElevationDeg, Returns[HorizontalBeam + CaptureComponent->HorizontalBeams * VerticalBeam].distance() * 100.0);
+					DrawDebugPoint(CaptureComponent->GetWorld(), CaptureComponent->GetComponentTransform().TransformPosition(HitPoint), 8.0, FColor::Green, false, 0.1, 0);
+				}
 				*ScanSegment.add_returns() = Returns[HorizontalBeam + CaptureComponent->HorizontalBeams * VerticalBeam];
 			}
 		}
@@ -352,8 +366,8 @@ void TTextureRead<float>::RespondToRequests(const TArray<FLidarScanRequest>& Req
 		ScanSegment.set_scan_count(TempoLidar->LidarCaptureComponents.Num());
 		ScanSegment.set_horizontal_beams(CaptureComponent->HorizontalBeams);
 		ScanSegment.set_vertical_beams(TempoLidar->VerticalBeams);
-		ScanSegment.mutable_azimuth_range()->set_max(FMath::DegreesToRadians(CaptureComponent->FOVAngle / 2.0 + CaptureComponent->GetRelativeRotation().Yaw));
-		ScanSegment.mutable_azimuth_range()->set_min(FMath::DegreesToRadians(-CaptureComponent->FOVAngle / 2.0 + CaptureComponent->GetRelativeRotation().Yaw));
+		ScanSegment.mutable_azimuth_range()->set_max(FMath::DegreesToRadians(CaptureComponent->HorizontalFOV / 2.0 + CaptureComponent->GetRelativeRotation().Yaw));
+		ScanSegment.mutable_azimuth_range()->set_min(FMath::DegreesToRadians(-CaptureComponent->HorizontalFOV / 2.0 + CaptureComponent->GetRelativeRotation().Yaw));
 		ScanSegment.mutable_elevation_range()->set_max(FMath::DegreesToRadians(TempoLidar->VerticalFOV / 2.0));
         ScanSegment.mutable_elevation_range()->set_min(FMath::DegreesToRadians(-TempoLidar->VerticalFOV / 2.0));
 	}

@@ -40,7 +40,7 @@ public:
 	void RequestMeasurement(const TempoLidar::LidarScanRequest& Request, const TResponseDelegate<TempoLidar::LidarScanSegment>& ResponseContinuation);
 
 protected:
-	void AddCaptureComponent(float YawOffset, float SubHorizontalFOV, int32 SubHorizontalBeams);
+	void AddCaptureComponent(double YawOffset, double SubHorizontalFOV, int32 SubHorizontalBeams);
 
 	virtual TFuture<void> DecodeAndRespond(TArray<TUniquePtr<FTextureRead>> TextureReads);
 
@@ -54,23 +54,19 @@ protected:
 
 	// The minimum depth this Lidar can measure.
 	UPROPERTY(EditAnywhere, meta=(UIMin=0.0, ClampMin=0.0))
-	float MinRange = 10.0; // 10cm
+	double MinRange = 10.0; // 10cm
 	
 	// The maximum depth this Lidar can measure.
 	UPROPERTY(EditAnywhere, meta=(UIMin=0.0, ClampMin=0.0))
-	float MaxRange = 10000.0; // 100m
-
-	// The standard deviation of range noise to apply to measurements.
-	UPROPERTY(EditAnywhere, meta=(UIMin=0.0, ClampMin=0.0))
-	float RangeStdDev = 1.0; // 1cm
+	double MaxRange = 10000.0; // 100m
 
 	// The vertical field of view in degrees.
 	UPROPERTY(EditAnywhere, meta=(UIMin=0.0001, UIMax=180.0, ClampMin=0.0001, ClampMax=180.0))
-	float VerticalFOV = 30.0;
+	double VerticalFOV = 30.0;
 	
 	// The horizontal field of view in degrees.
 	UPROPERTY(EditAnywhere, meta=(UIMin=0.0001, UIMax=360.0, ClampMin=0.0001, ClampMax=360.0))
-	float HorizontalFOV = 120.0;
+	double HorizontalFOV = 120.0;
 
 	// The number of vertical beams.
 	UPROPERTY(EditAnywhere, meta=(UIMin=1, ClampMin=1))
@@ -131,13 +127,21 @@ protected:
 	UPROPERTY(EditAnywhere)
 	int32 HorizontalBeams = 200.0;
 
+	// The horizontal FOV in degrees. Note this is slightly less than FOVAngle, which is intentionally enlarged a bit.
+	UPROPERTY(VisibleAnywhere)
+	double HorizontalFOV = 60.0;
+
 	// The resulting distortion factor.
 	UPROPERTY(VisibleAnywhere)
-	float DistortionFactor = 1.0;
+	double DistortionFactor = 1.0;
 
 	// The resulting distorted vertical FOV.
 	UPROPERTY(VisibleAnywhere)
-	float DistortedVerticalFOV = 30.0;
+	double DistortedVerticalFOV = 30.0;
+
+	// The size of the image plane encompassing the Lidar FOV in pixels. SizeXY is intentionally enlarged a bit.
+	UPROPERTY(VisibleAnywhere)
+	FVector2D SizeXYFOV = FVector2D::ZeroVector;
 
 	UPROPERTY()
 	UTempoLidar* LidarOwner = nullptr;
