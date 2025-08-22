@@ -45,7 +45,7 @@ protected:
 	virtual TFuture<void> DecodeAndRespond(TArray<TUniquePtr<FTextureRead>> TextureReads);
 
 	// The rate in Hz this Lidar updates at.
-	UPROPERTY(EditAnywhere)
+	UPROPERTY(EditAnywhere, meta=(UIMin=0.0, ClampMin=0.0))
 	float RateHz = 10.0;
 
 	// The measurement types supported. Should be set in constructor of derived classes.
@@ -53,34 +53,35 @@ protected:
 	TArray<TEnumAsByte<EMeasurementType>> MeasurementTypes;
 
 	// The minimum depth this Lidar can measure.
-	UPROPERTY(EditAnywhere)
+	UPROPERTY(EditAnywhere, meta=(UIMin=0.0, ClampMin=0.0))
 	float MinRange = 10.0; // 10cm
 	
 	// The maximum depth this Lidar can measure.
-	UPROPERTY(EditAnywhere)
+	UPROPERTY(EditAnywhere, meta=(UIMin=0.0, ClampMin=0.0))
 	float MaxRange = 10000.0; // 100m
 
+	// The standard deviation of range noise to apply to measurements.
+	UPROPERTY(EditAnywhere, meta=(UIMin=0.0, ClampMin=0.0))
+	float RangeStdDev = 1.0; // 1cm
+
 	// The vertical field of view in degrees.
-	UPROPERTY(EditAnywhere)
+	UPROPERTY(EditAnywhere, meta=(UIMin=0.0001, UIMax=180.0, ClampMin=0.0001, ClampMax=180.0))
 	float VerticalFOV = 30.0;
 	
 	// The horizontal field of view in degrees.
-	UPROPERTY(EditAnywhere, meta=(UIMin=0.0, UIMax=360.0, ClampMin=0.0, ClampMax=360.0))
+	UPROPERTY(EditAnywhere, meta=(UIMin=0.0001, UIMax=360.0, ClampMin=0.0001, ClampMax=360.0))
 	float HorizontalFOV = 120.0;
 
 	// The number of vertical beams.
-	UPROPERTY(EditAnywhere, meta=(UIMin=0.0, UIMax=180.0, ClampMin=0.0, ClampMax=180.0))
-	int32 VerticalBeams = 64.0;
+	UPROPERTY(EditAnywhere, meta=(UIMin=1, ClampMin=1))
+	int32 VerticalBeams = 64;
 
 	// The number of horizontal beams.
-	UPROPERTY(EditAnywhere)
-	int32 HorizontalBeams = 200.0;
-
-	UPROPERTY(VisibleAnywhere)
-	FIntPoint SizeXY = FIntPoint::ZeroValue;
+	UPROPERTY(EditAnywhere, meta=(UIMin=0.0001, UIMax=359.9999, ClampMin=0.0001, ClampMax=359.9999))
+	int32 HorizontalBeams = 200;
 
 	int32 NumResponded = 0;
-	
+
 	UPROPERTY()
 	TArray<UTempoLidarCaptureComponent*> LidarCaptureComponents;
 
