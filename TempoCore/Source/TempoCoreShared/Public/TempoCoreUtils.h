@@ -91,9 +91,4 @@ public:
 			return RetVal;
 		}
 	}
-
-	// Finds a plane that is the best fit for the four points provided. The four points may be in either clockwise
-	// or counter-clockwise order, but not some other order.
-	UFUNCTION(BlueprintCallable, Category="TempoCoreUtils")
-	static FPlane BestFitPlaneFromFourPoints(const FVector& Point1, const FVector& Point2, const FVector& Point3, const FVector& Point4);
 };

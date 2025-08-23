@@ -8,14 +8,9 @@
 
 #include "TempoLabelTypes.h"
 
-#include "Engine/TextureRenderTarget2D.h"
+#include "TempoSensorsConstants.h"
 
-namespace
-{
-	// This is the largest float less than the largest uint32 (2^32 - 1).
-	// We use it to discretize the depth buffer into a uint32 pixel.
-	constexpr float kMaxDiscreteDepth = 4294967040.0;
-}
+#include "Engine/TextureRenderTarget2D.h"
 
 FTempoCameraIntrinsics::FTempoCameraIntrinsics(const FIntPoint& SizeXY, float HorizontalFOV)
 	: Fx(SizeXY.X / 2.0 / FMath::Tan(FMath::DegreesToRadians(HorizontalFOV) / 2.0)),
@@ -156,7 +151,7 @@ void TTextureRead<FCameraPixelWithDepth>::RespondToRequests(const TArray<FDepthI
 		DepthImage.mutable_depths()->Resize(ImageSize.X * ImageSize.Y, 0.0);
 		ParallelFor(Image.Num(), [&DepthImage, this](int32 Idx)
 		{
-			DepthImage.set_depths(Idx, Image[Idx].Depth(MinDepth, MaxDepth, kMaxDiscreteDepth));
+			DepthImage.set_depths(Idx, Image[Idx].Depth(MinDepth, MaxDepth, GTempo_Max_Discrete_Depth));
 		});
 		DepthImage.mutable_header()->set_sequence_id(SequenceId);
 		DepthImage.mutable_header()->set_capture_time(CaptureTime);
@@ -370,7 +365,7 @@ void UTempoCamera::ApplyDepthEnabled()
 			MaxDepth = TempoSensorsSettings->GetMaxCameraDepth();
 			PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MinDepth"), MinDepth);
 			PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MaxDepth"), MaxDepth);
-			PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MaxDiscreteDepth"), kMaxDiscreteDepth);
+			PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MaxDiscreteDepth"), GTempo_Max_Discrete_Depth);
 		}
 		else
 		{

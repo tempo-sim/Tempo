@@ -10,6 +10,36 @@
 #include "TempoScriptingServer.h"
 #include "TempoLidar.generated.h"
 
+// 8-byte pixel format where first 3 bytes are normal, 4th byte is label.
+// 5th-8th bytes are a uint32 representing discrete depth.
+struct FLidarPixel
+{
+	static constexpr bool bSupportsDepth = false;
+
+	FVector Normal() const
+	{
+		return FVector( 2.0 * U1 / 255.0 - 1.0, 2.0 * U2 / 255.0 - 1.0, 2.0 * U3 / 255.0 - 1.0 );
+	}
+
+	uint8 Label() const { return U4; }
+
+	float Depth(float MinDepth, float MaxDepth, float MaxDiscretizedDepth) const
+	{
+		// We discretize inverse depth to give more consistent precision vs depth.
+		// See https://developer.nvidia.com/content/depth-precision-visualized
+		const float InverseDepthFraction = static_cast<float>(U5) / MaxDiscretizedDepth;
+		const float InverseDepth = InverseDepthFraction * (1.0 / MinDepth - 1.0 / MaxDepth) + 1.0 / MaxDepth;
+		return 1.0 / InverseDepth;
+	}
+
+private:
+	uint8 U1 = 0;
+	uint8 U2 = 0;
+	uint8 U3 = 0;
+	uint8 U4 = 0;
+	uint32 U5 = 0;
+};
+
 struct FLidarScanRequest
 {
 	TempoLidar::LidarScanRequest Request;
@@ -76,6 +106,9 @@ protected:
 	UPROPERTY(EditAnywhere, meta=(UIMin=0.0001, UIMax=359.9999, ClampMin=0.0001, ClampMax=359.9999))
 	int32 HorizontalBeams = 200;
 
+	UPROPERTY(EditAnywhere)
+	double Threshold = 10.0;
+
 	int32 NumResponded = 0;
 
 	UPROPERTY()
@@ -85,15 +118,18 @@ protected:
 
 	friend class UTempoLidarCaptureComponent;
 
-	friend struct TTextureRead<float>;
+	friend struct TTextureRead<FLidarPixel>;
 };
 
 template <>
-struct TTextureRead<float> : TTextureReadBase<float>
+struct TTextureRead<FLidarPixel> : TTextureReadBase<FLidarPixel>
 {
 	TTextureRead(const FIntPoint& ImageSizeIn, int32 SequenceIdIn, double CaptureTimeIn,
-		const UTempoLidarCaptureComponent* CaptureComponentIn, const UTempoLidar* TempoLidarIn)
-	   : TTextureReadBase(ImageSizeIn, SequenceIdIn, CaptureTimeIn, TempoLidarIn->GetOwnerName(), TempoLidarIn->GetSensorName()), CaptureTransform(TempoLidarIn->GetComponentTransform()), CaptureComponent(CaptureComponentIn), TempoLidar(TempoLidarIn)
+		const UTempoLidarCaptureComponent* CaptureComponentIn, const UTempoLidar* LidarOwnerIn,
+		float MinDepthIn, float MaxDepthIn)
+		: TTextureReadBase(ImageSizeIn, SequenceIdIn, CaptureTimeIn, LidarOwnerIn->GetOwnerName(), LidarOwnerIn->GetSensorName()),
+		CaptureTransform(LidarOwnerIn->GetComponentTransform()), CaptureComponent(CaptureComponentIn), LidarOwner(LidarOwnerIn),
+		MinDepth(MinDepthIn), MaxDepth(MaxDepthIn)
 	{
 	}
 
@@ -103,7 +139,10 @@ struct TTextureRead<float> : TTextureReadBase<float>
 
 	const FTransform CaptureTransform;
 	const UTempoLidarCaptureComponent* CaptureComponent;
-	const UTempoLidar* TempoLidar;
+	const UTempoLidar* LidarOwner;
+
+	float MinDepth;
+	float MaxDepth;
 };
 
 UCLASS(ClassGroup=(Custom))
@@ -143,10 +182,21 @@ protected:
 	UPROPERTY(VisibleAnywhere)
 	FVector2D SizeXYFOV = FVector2D::ZeroVector;
 
+	UPROPERTY(VisibleAnywhere)
+	UMaterialInstanceDynamic* PostProcessMaterialInstance= nullptr;
+
 	UPROPERTY()
 	UTempoLidar* LidarOwner = nullptr;
 
+	// The minimum depth this camera can measure (if depth is enabled). Will be set to the global near clip plane.
+	UPROPERTY(VisibleAnywhere, Category="Depth")
+	float MinDepth = 10.0; // 10cm
+
+	// The maximum depth this camera can measure (if depth is enabled). Will be set to UTempoSensorsSettings::MaxCameraDepth.
+	UPROPERTY(VisibleAnywhere, Category="Depth")
+	float MaxDepth = 100000.0; // 1km
+
 	friend UTempoLidar;
 
-	friend TTextureRead<float>;
+	friend TTextureRead<FLidarPixel>;
 };

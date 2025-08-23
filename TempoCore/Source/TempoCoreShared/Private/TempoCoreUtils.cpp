@@ -83,39 +83,3 @@ FBox UTempoCoreUtils::GetActorLocalBounds(const AActor* Actor, bool bIncludeHidd
 
 	return LocalBounds;
 }
-
-FPlane UTempoCoreUtils::BestFitPlaneFromFourPoints(const FVector& Point1, const FVector& Point2, const FVector& Point3, const FVector& Point4)
-{
-	const TStaticArray<FVector,4>& Points { Point1, Point2, Point3, Point4 };
-
-	// Compute the normals from every combination of three points, by looking to the left and right of each corner.
-	TArray<FVector> AllNormals;
-	for (int32 I = 0; I < 4; ++I)
-	{
-		int32 J = I == 3 ? 0 : I + 1; // (I + 1) % 4
-		int32 K = I == 0 ? 3 : I - 1; // (I - 1) % 4
-		const FVector& PointI = Points[I];
-		const FVector& PointJ = Points[J];
-		const FVector& PointK = Points[K];
-		const FVector IJ = PointJ - PointI;
-		const FVector IK = PointK - PointI;
-		AllNormals.Add(FVector::CrossProduct(IK, IJ).GetSafeNormal());
-	}
-
-	FVector NormalAvgNumerator = FVector::ZeroVector;
-	for (const FVector& Normal : AllNormals)
-	{
-		NormalAvgNumerator += Normal;
-	}
-
-	FVector PointAvgNumerator = FVector::ZeroVector;
-	for (const FVector& Point : Points)
-	{
-		PointAvgNumerator += Point;
-	}
-
-	const FVector AvgNormal = NormalAvgNumerator / 4.0;
-	const FVector AvgPoint = PointAvgNumerator / 4.0;
-
-	return FPlane(AvgPoint, AvgNormal);
-}

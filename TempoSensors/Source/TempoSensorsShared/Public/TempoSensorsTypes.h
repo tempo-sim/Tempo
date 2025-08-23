@@ -28,10 +28,3 @@ enum EColorImageEncoding: uint8
 	RGB8 = 0,
 	BGR8 = 1
 };
-
-UENUM(BlueprintType)
-enum ELidarInterpolationMethod: uint8
-{
-	Nearest = 0,
-	PlanarFit = 1
-};

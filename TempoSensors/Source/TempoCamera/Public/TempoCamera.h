@@ -16,11 +16,11 @@
 struct FCameraPixelNoDepth
 {
 	static constexpr bool bSupportsDepth = false; 
-	
+
 	uint8 B() const { return U1; }
 	uint8 G() const { return U2; }
 	uint8 R() const { return U3; }
-	
+
 	uint8 Label() const { return U4; }
 
 private:
@@ -35,13 +35,13 @@ private:
 struct FCameraPixelWithDepth
 {
 	static constexpr bool bSupportsDepth = true;
-	
+
 	uint8 B() const { return U3; }
 	uint8 G() const { return U2; }
 	uint8 R() const { return U1; }
-	
+
 	uint8 Label() const { return U4; }
-	
+
 	float Depth(float MinDepth, float MaxDepth, float MaxDiscretizedDepth) const
 	{
 		// We discretize inverse depth to give more consistent precision vs depth.

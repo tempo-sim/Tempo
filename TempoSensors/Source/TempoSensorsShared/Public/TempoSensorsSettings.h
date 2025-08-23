@@ -44,8 +44,8 @@ public:
 	FTempoSensorsLabelSettingsChanged TempoSensorsLabelSettingsChangedEvent;
 
 	// Lidar
-	ELidarInterpolationMethod GetLidarInterpolationMethod() const { return LidarInterpolationMethod; }
 	int32 GetLidarUpsamplingFactor() const { return LidarUpsamplingFactor; }
+	TObjectPtr<UMaterialInterface> GetLidarPostProcessMaterial() const { return LidarPostProcessMaterial.LoadSynchronous(); }
 
 	// RayTracingScene Buffer Overrun Workaround
 	bool GetRayTracingSceneReadbackBuffersOverrunWorkaroundEnabled() const { return bEnableRayTracingSceneReadbackBuffersOverrunWorkaround; }
@@ -105,14 +105,13 @@ private:
 	UPROPERTY(EditAnywhere, Config, Category="Camera")
 	FName OverridingLabelRowName = NAME_None;
 
-	// The interpolation method to use for reconstructing a Lidar scan from a perspective depth image.
-	UPROPERTY(EditAnywhere, Config, Category="Lidar")
-	TEnumAsByte<ELidarInterpolationMethod> LidarInterpolationMethod = ELidarInterpolationMethod::PlanarFit;
-
 	// The upsampling factor used to scale the number of horizontal pixels in the Lidar depth image relatie to the number
 	// of horizontal beams. Higher factors improve the accuracy of the reconstruction.
 	UPROPERTY(EditAnywhere, Config, Category="Lidar", meta=(UIMin=1, UIMax=8, ClampMin=1, ClampMax=8))
 	int32 LidarUpsamplingFactor = 1;
+
+	UPROPERTY(EditAnywhere, Config, Category="Lidar", meta=( AllowedClasses="/Script/Engine.BlendableInterface", Keywords="PostProcess" ))
+	TSoftObjectPtr<UMaterialInterface> LidarPostProcessMaterial;
 
 	// Whether to enable a hack to work around a buffer overrun bug in FRayTracingScene.
 	UPROPERTY(EditAnywhere, Config, Category="Advanced")
