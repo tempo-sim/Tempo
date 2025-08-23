@@ -82,18 +82,22 @@ protected:
 	UPROPERTY(VisibleAnywhere)
 	TArray<TEnumAsByte<EMeasurementType>> MeasurementTypes;
 
-	// The minimum depth this Lidar can measure.
+	// The minimum distance this Lidar can measure. Note that GEngine->NearClipPlane must be less than this value.
 	UPROPERTY(EditAnywhere, meta=(UIMin=0.0, ClampMin=0.0))
 	double MinRange = 10.0; // 10cm
-	
-	// The maximum depth this Lidar can measure.
+
+	// The maximum distance this Lidar can measure.
 	UPROPERTY(EditAnywhere, meta=(UIMin=0.0, ClampMin=0.0))
 	double MaxRange = 10000.0; // 100m
+
+	// The distance closer than which perpendicular surfaces will have saturated (1.0) intensity.
+	UPROPERTY(EditAnywhere, meta=(UIMin=0.0, ClampMin=0.0))
+	double IntensitySaturationDistance = 1000.0; // 10m
 
 	// The vertical field of view in degrees.
 	UPROPERTY(EditAnywhere, meta=(UIMin=0.0001, UIMax=180.0, ClampMin=0.0001, ClampMax=180.0))
 	double VerticalFOV = 30.0;
-	
+
 	// The horizontal field of view in degrees.
 	UPROPERTY(EditAnywhere, meta=(UIMin=0.0001, UIMax=360.0, ClampMin=0.0001, ClampMax=360.0))
 	double HorizontalFOV = 120.0;
@@ -106,8 +110,9 @@ protected:
 	UPROPERTY(EditAnywhere, meta=(UIMin=0.0001, UIMax=359.9999, ClampMin=0.0001, ClampMax=359.9999))
 	int32 HorizontalBeams = 200;
 
-	UPROPERTY(EditAnywhere)
-	double Threshold = 10.0;
+	// The max angle of incidence in degrees from which this Lidar will get a return.
+	UPROPERTY(EditAnywhere, meta=(UIMin=0.0, UIMax=90.0, ClampMin=0.0, ClampMax=90.0))
+	float MaxAngleOfIncidence = 87.5;
 
 	int32 NumResponded = 0;
 
@@ -189,12 +194,8 @@ protected:
 	UTempoLidar* LidarOwner = nullptr;
 
 	// The minimum depth this camera can measure (if depth is enabled). Will be set to the global near clip plane.
-	UPROPERTY(VisibleAnywhere, Category="Depth")
+	UPROPERTY(VisibleAnywhere)
 	float MinDepth = 10.0; // 10cm
-
-	// The maximum depth this camera can measure (if depth is enabled). Will be set to UTempoSensorsSettings::MaxCameraDepth.
-	UPROPERTY(VisibleAnywhere, Category="Depth")
-	float MaxDepth = 100000.0; // 1km
 
 	friend UTempoLidar;
 

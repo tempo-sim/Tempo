@@ -61,7 +61,7 @@ def create_transformation_matrix(translation, rotation):
 
 
 class PointCloudViewer:
-    def __init__(self, update_rate):
+    def __init__(self, update_rate, colorize_by):
         """Initialize the point cloud viewer with the sensor parameters."""
         # Initialize Qt if not already running
         if QApplication.instance() is None:
@@ -76,7 +76,9 @@ class PointCloudViewer:
         self.actor = None
         self.accumulated_scan_segments = 0
         self.horizontal_beams = 0
-        self.returns = None
+        self.distances = None
+        self.intensities = None
+        self.labels = None
         self.azimuth_min = 0.0
         self.azimuth_max = 0.0
 
@@ -102,6 +104,7 @@ class PointCloudViewer:
         asyncio.set_event_loop(self.loop)
 
         self.update_rate = update_rate
+        self.colorize_by = colorize_by
 
     async def run_async(self):
         while True:
@@ -131,7 +134,9 @@ class PointCloudViewer:
         self.plotter.render()
 
     def accumulate_scan(self, scan):
-        returns = np.array([this_return.distance for this_return in scan.returns]).reshape(scan.horizontal_beams, scan.vertical_beams).transpose()
+        distances = np.array([this_return.distance for this_return in scan.returns]).reshape(scan.horizontal_beams, scan.vertical_beams).transpose()
+        intensities = np.array([this_return.intensity for this_return in scan.returns]).reshape(scan.horizontal_beams, scan.vertical_beams).transpose()
+        labels = np.array([this_return.label for this_return in scan.returns]).reshape(scan.horizontal_beams, scan.vertical_beams).transpose()
         restart = False
         if self.latest_scan is None:
             restart = True
@@ -141,16 +146,22 @@ class PointCloudViewer:
         self.latest_scan = scan
 
         if restart:
-            self.returns = returns
+            self.distances = distances
+            self.intensities = intensities
+            self.labels = labels
             self.azimuth_min = scan.azimuth_range.min
             self.azimuth_max = scan.azimuth_range.max
             self.accumulated_scan_segments = 1
             self.horizontal_beams = scan.horizontal_beams
         else:
             if self.azimuth_min < scan.azimuth_range.min:
-                self.returns = np.concatenate((self.returns, returns), axis=1)
+                self.distances = np.concatenate((self.distances, distances), axis=1)
+                self.intensities = np.concatenate((self.intensities, intensities), axis=1)
+                self.labels = np.concatenate((self.labels, labels), axis=1)
             else:
-                self.returns = np.concatenate((returns, self.returns), axis=1)
+                self.distances = np.concatenate((distances, self.distances), axis=1)
+                self.intensities = np.concatenate((intensities, self.intensities), axis=1)
+                self.labels = np.concatenate((labels, self.labels), axis=1)
             self.azimuth_min = min(self.azimuth_min, scan.azimuth_range.min)
             self.azimuth_max = max(self.azimuth_max, scan.azimuth_range.max)
             self.accumulated_scan_segments += 1
@@ -173,29 +184,37 @@ class PointCloudViewer:
                 self.plotter.remove_actor(self.actor)
                 self.point_cloud = None
 
-        distances = self.returns
+        distances = self.distances
+        intensities = self.intensities
+        labels = self.labels
         transform = create_transformation_matrix((0.0, 0.0, 0.0),
                                                  (self.latest_scan.header.sensor_transform.rotation.r, self.latest_scan.header.sensor_transform.rotation.p, 0.0))
-        # transform = create_transformation_matrix((0.0, 0.0, 0.0), (0.0, 0.0, 0.0))
         points = self.distances_to_points(distances, transform)
-        # Calculate colors based on height (z-coordinate)
-        scalars = distances.flatten()
-        scalars = (scalars - np.min(scalars)) / (np.max(scalars) - np.min(scalars) + 1e-6)
+
+        # Calculate colors based on distance,
+        if self.colorize_by == "distance":
+            colors = distances.flatten()
+            colors = (colors - np.min(colors)) / (np.max(colors) - np.min(colors) + 1e-6)
+        elif self.colorize_by == "intensity":
+            colors = intensities.flatten()
+        elif self.colorize_by == "label":
+            colors = labels.flatten()
+            colors = colors / 255.0
 
         if self.point_cloud is None:
             self.point_cloud = pv.PolyData(points)
             self.actor = self.plotter.add_points(
-                self.point_cloud,  # Use points directly instead of self.point_cloud
+                self.point_cloud,
                 point_size=2,
                 render_points_as_spheres=False,
-                scalars=scalars,  # Use scalars directly instead of 'values'
+                scalars=colors,
                 cmap='viridis',
                 show_scalar_bar=True,
                 reset_camera=False
             )
         else:
             self.point_cloud.points = points
-            self.point_cloud.point_data['scalars'] = scalars
+            self.point_cloud.point_data['scalars'] = colors
 
     def close(self):
         self.loop.stop()
@@ -212,9 +231,10 @@ async def main():
     parser.add_argument('--names', nargs='*', required=True)
     parser.add_argument('--owner', default="", required=False)
     parser.add_argument('--update_rate', default=30.0, required=False)
+    parser.add_argument('--colorize_by', default="distance", required=False, choices=['distance', 'intensity', 'label'])
     args = parser.parse_args()
 
-    viewer = PointCloudViewer(update_rate=float(args.update_rate))
+    viewer = PointCloudViewer(update_rate=float(args.update_rate), colorize_by=args.colorize_by)
 
     try:
         group_1 = asyncio.gather(*[stream_lidar_scans(name, args.owner, viewer) for name in args.names])

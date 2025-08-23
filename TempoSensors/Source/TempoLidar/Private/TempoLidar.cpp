@@ -299,8 +299,8 @@ void TTextureRead<FLidarPixel>::RespondToRequests(const TArray<FLidarScanRequest
 				return ((PixelCoordinate - SizeXYOffset) / (SizeXYFOV - FVector2D::UnitVector) - (FVector2D::UnitVector / 2.0)) * ImagePlaneSize;
 			};
 
-			const double AzimuthDeg = (-0.5 + static_cast<double>(HorizontalBeam) / CaptureComponent->HorizontalBeams) * CaptureComponent->HorizontalFOV;
-			const double ElevationDeg = (-0.5 + static_cast<double>(VerticalBeam) / LidarOwner->VerticalBeams) * LidarOwner->VerticalFOV;
+			const double AzimuthDeg = (-0.5 + static_cast<double>(HorizontalBeam) / (CaptureComponent->HorizontalBeams - 1)) * CaptureComponent->HorizontalFOV;
+			const double ElevationDeg = (-0.5 + static_cast<double>(VerticalBeam) / (LidarOwner->VerticalBeams - 1)) * LidarOwner->VerticalFOV;
 			const FVector2D ImagePlaneLocation = SphericalToPerspective(AzimuthDeg, ElevationDeg);
 			const FVector2D PixelCoordinate = ImagePlaneLocationToPixelCoordinate(ImagePlaneLocation);
 			const FIntPoint Coord(FMath::RoundToInt32(PixelCoordinate.X), FMath::RoundToInt32(PixelCoordinate.Y));
@@ -313,18 +313,33 @@ void TTextureRead<FLidarPixel>::RespondToRequests(const TArray<FLidarScanRequest
 			const FVector WorldNormal = Image[Coord.X + SizeXY.X * Coord.Y].Normal();
 			const FVector LocalNormal = CaptureComponent->GetComponentTransform().InverseTransformVector(WorldNormal);
 			const FVector RayDirection = SphericalToCartesian(AzimuthDeg, ElevationDeg, LidarOwner->MaxRange);
-			const FPlane SurfacePlane( NearestPoint, LocalNormal );
-			const FVector HitPoint = FMath::LinePlaneIntersection(FVector::ZeroVector, RayDirection, SurfacePlane);
-
-			double Distance = HitPoint.Length();
-			TempoLidar::LidarReturn LidarReturn;
-			if (Distance > LidarOwner->MaxRange)
+			const double CosAngleOfIncidence = FVector::DotProduct(LocalNormal.GetSafeNormal(), -RayDirection.GetSafeNormal());
+			const double AngleOfIncidence = FMath::RadiansToDegrees(FMath::Acos(CosAngleOfIncidence));
+			double Intensity;
+			double Distance;
+			if (AngleOfIncidence > LidarOwner->MaxAngleOfIncidence)
 			{
 				Distance = 0.0;
+				Intensity = 0.0;
 			}
-			Distance = FMath::Max(LidarOwner->MinRange, Distance);
+			else
+			{
+				const FPlane SurfacePlane( NearestPoint, LocalNormal );
+				const FVector HitPoint = FMath::LinePlaneIntersection(FVector::ZeroVector, RayDirection, SurfacePlane);
+
+				Distance = HitPoint.Length();
+				Intensity = CosAngleOfIncidence * LidarOwner->IntensitySaturationDistance / FMath::Max(LidarOwner->IntensitySaturationDistance, Distance);
+
+				if (Distance > LidarOwner->MaxRange)
+				{
+					Distance = 0.0;
+					Intensity = 0.0;
+				}
+				Distance = FMath::Max(LidarOwner->MinRange, Distance);
+			}
+			TempoLidar::LidarReturn LidarReturn;
 			LidarReturn.set_distance(QuantityConverter<CM2M>::Convert(Distance));
-			LidarReturn.set_intensity(0.0);
+			LidarReturn.set_intensity(Intensity);
 			LidarReturn.set_label(Image[Coord.X + SizeXY.X * Coord.Y].Label());
 			return LidarReturn;
 		};

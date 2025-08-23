@@ -105,10 +105,10 @@ private:
 	UPROPERTY(EditAnywhere, Config, Category="Camera")
 	FName OverridingLabelRowName = NAME_None;
 
-	// The upsampling factor used to scale the number of horizontal pixels in the Lidar depth image relatie to the number
-	// of horizontal beams. Higher factors improve the accuracy of the reconstruction.
-	UPROPERTY(EditAnywhere, Config, Category="Lidar", meta=(UIMin=1, UIMax=8, ClampMin=1, ClampMax=8))
-	int32 LidarUpsamplingFactor = 1;
+	// The upsampling factor used to scale the number of horizontal pixels in the Lidar depth image relative to the number
+	// of horizontal beams. Higher factors improve the accuracy of the reconstruction at the cost of performance.
+	UPROPERTY(EditAnywhere, Config, Category="Lidar", meta=(UIMin=1, UIMax=4, ClampMin=1, ClampMax=4))
+	int32 LidarUpsamplingFactor = 2;
 
 	UPROPERTY(EditAnywhere, Config, Category="Lidar", meta=( AllowedClasses="/Script/Engine.BlendableInterface", Keywords="PostProcess" ))
 	TSoftObjectPtr<UMaterialInterface> LidarPostProcessMaterial;
