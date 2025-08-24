@@ -244,19 +244,18 @@ public:
 				{
 					ResponseQueue.Enqueue(TPair<ResponseType, grpc::Status>(Response, Result));
 				}
-				PendingWrites++;
 			});
 			Base::State = FRequestManager::EState::HANDLING;
 			Base::Handler->HandleRequest(Base::Request, Base::ResponseDelegate);
 		}
-		
+
 		TPair<ResponseType, grpc::Status> ResponseItem;
 		if (ResponseQueue.Dequeue(ResponseItem))
 		{
 			Respond(ResponseItem.Key, ResponseItem.Value);
 		}
 
-		if (PendingWrites > 0 && --PendingWrites == 0)
+		if (Base::State == FRequestManager::EState::RESPONDING && PendingWrites > 0 && --PendingWrites == 0)
 		{
 			Base::State = FRequestManager::EState::HANDLING;
 			Base::Handler->HandleRequest(Base::Request, Base::ResponseDelegate);
@@ -270,6 +269,7 @@ public:
 
 	void Respond(const ResponseType& Response, grpc::Status Result)
 	{
+		++PendingWrites;
 		if (!Result.ok())
 		{
 			// Consider non-OK result to mean there are no more responses available.
