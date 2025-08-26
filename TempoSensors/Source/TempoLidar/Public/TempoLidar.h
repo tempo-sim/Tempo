@@ -54,7 +54,8 @@ class TEMPOLIDAR_API UTempoLidar : public USceneComponent, public ITempoSensorIn
 public:
 	UTempoLidar();
 
-	virtual void BeginPlay() override;
+	virtual void OnRegister() override;
+	virtual void TickComponent(float DeltaTime, enum ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 	// Begin ITempoSensorInterface
 	virtual FString GetOwnerName() const override;
@@ -64,15 +65,21 @@ public:
 	virtual bool IsAwaitingRender() override;
 	virtual void OnRenderCompleted() override;
 	virtual void BlockUntilMeasurementsReady() const override;
-	virtual TArray<TFuture<void>> SendMeasurements() override;
+	virtual TOptional<TFuture<void>> SendMeasurements() override;
 	// End ITempoSensorInterface
 
 	void RequestMeasurement(const TempoLidar::LidarScanRequest& Request, const TResponseDelegate<TempoLidar::LidarScanSegment>& ResponseContinuation);
 
 protected:
-	void AddCaptureComponent(double YawOffset, double SubHorizontalFOV, int32 SubHorizontalBeams);
+	TFuture<void> DecodeAndRespond(TArray<TUniquePtr<FTextureRead>> TextureReads);
 
-	virtual TFuture<void> DecodeAndRespond(TArray<TUniquePtr<FTextureRead>> TextureReads);
+	TMap<FName, UTempoLidarCaptureComponent*> GetAllCaptureComponents() const ;
+	TMap<FName, UTempoLidarCaptureComponent*> GetOrCreateCaptureComponents();
+	TArray<UTempoLidarCaptureComponent*> GetActiveCaptureComponents() const;
+
+	void SyncCaptureComponents();
+
+	static void SyncCaptureComponent(UTempoLidarCaptureComponent* LidarCaptureComponent, bool bActive, double YawOffset, double SubHorizontalFOV, double SubHorizontalBeams);
 
 	// The rate in Hz this Lidar updates at.
 	UPROPERTY(EditAnywhere, meta=(UIMin=0.0, ClampMin=0.0))
@@ -84,11 +91,11 @@ protected:
 
 	// The minimum distance this Lidar can measure. Note that GEngine->NearClipPlane must be less than this value.
 	UPROPERTY(EditAnywhere, meta=(UIMin=0.0, ClampMin=0.0))
-	double MinRange = 10.0; // 10cm
+	double MinDistance = 10.0; // 10cm
 
 	// The maximum distance this Lidar can measure.
 	UPROPERTY(EditAnywhere, meta=(UIMin=0.0, ClampMin=0.0))
-	double MaxRange = 10000.0; // 100m
+	double MaxDistance = 10000.0; // 100m
 
 	// The distance closer than which perpendicular surfaces will have saturated (1.0) intensity.
 	UPROPERTY(EditAnywhere, meta=(UIMin=0.0, ClampMin=0.0))
@@ -114,10 +121,11 @@ protected:
 	UPROPERTY(EditAnywhere, meta=(UIMin=0.0, UIMax=90.0, ClampMin=0.0, ClampMax=90.0))
 	float MaxAngleOfIncidence = 87.5;
 
-	int32 NumResponded = 0;
+	// Monotonically increasing counter of scans captured.
+	UPROPERTY(VisibleAnywhere)
+	int32 SequenceId = 0;
 
-	UPROPERTY()
-	TArray<UTempoLidarCaptureComponent*> LidarCaptureComponents;
+	int32 NumResponded = 0;
 
 	TArray<FLidarScanRequest> PendingRequests;
 
@@ -129,28 +137,40 @@ protected:
 template <>
 struct TTextureRead<FLidarPixel> : TTextureReadBase<FLidarPixel>
 {
-	TTextureRead(const FIntPoint& ImageSizeIn, int32 SequenceIdIn, double CaptureTimeIn,
-		const UTempoLidarCaptureComponent* CaptureComponentIn, const UTempoLidar* LidarOwnerIn,
-		float MinDepthIn, float MaxDepthIn)
-		: TTextureReadBase(ImageSizeIn, SequenceIdIn, CaptureTimeIn, LidarOwnerIn->GetOwnerName(), LidarOwnerIn->GetSensorName()),
-		CaptureTransform(LidarOwnerIn->GetComponentTransform()), CaptureComponent(CaptureComponentIn), LidarOwner(LidarOwnerIn),
-		MinDepth(MinDepthIn), MaxDepth(MaxDepthIn)
+	TTextureRead(const FIntPoint& ImageSizeIn, int32 SequenceIdIn, double CaptureTimeIn, const FString& OwnerNameIn,
+		const FString& SensorNameIn, const FTransform& SensorTransformIn, const FTransform& CaptureTransform,
+		double HorizontalFOVIn, double VerticalFOVIn, int32 HorizontalBeamsIn, int32 VerticalBeamsIn, const FVector2D& SizeXYFOVIn, double IntensitySaturationDistanceIn, double MaxAngleOfIncidenceIn,
+		int32 NumCaptureComponentsIn, double RelativeYawIn, float MinDepthIn, float MaxDepthIn, double MinDistanceIn, double MaxDistanceIn)
+		: TTextureReadBase(ImageSizeIn, SequenceIdIn, CaptureTimeIn, OwnerNameIn, SensorNameIn),
+			SensorTransform(SensorTransformIn), CaptureTransform(CaptureTransform), HorizontalFOV(HorizontalFOVIn),
+			VerticalFOV(VerticalFOVIn), HorizontalBeams(HorizontalBeamsIn), VerticalBeams(VerticalBeamsIn),
+			SizeXYFOV(SizeXYFOVIn), IntensitySaturationDistance(IntensitySaturationDistanceIn), MaxAngleOfIncidence(MaxAngleOfIncidenceIn),
+			NumCaptureComponents(NumCaptureComponentsIn), RelativeYaw(RelativeYawIn), MinDepth(MinDepthIn), MaxDepth(MaxDepthIn), MinDistance(MinDistanceIn), MaxDistance(MaxDistanceIn)
 	{
 	}
 
-	virtual FName GetType() const override { return TEXT("Depth"); }
+	virtual FName GetType() const override { return TEXT("Lidar"); }
 
-	void RespondToRequests(const TArray<FLidarScanRequest>& Requests, float TransmissionTime) const;
+	void Decode(float TransmissionTime, TempoLidar::LidarScanSegment& ScanSegmentOut) const;
 
+	const FTransform SensorTransform;
 	const FTransform CaptureTransform;
-	const UTempoLidarCaptureComponent* CaptureComponent;
-	const UTempoLidar* LidarOwner;
-
+	double HorizontalFOV;
+	double VerticalFOV;
+	int32 HorizontalBeams;
+	int32 VerticalBeams;
+	const FVector2D SizeXYFOV;
+	double IntensitySaturationDistance;
+	double MaxAngleOfIncidence;
+	int32 NumCaptureComponents;
+	double RelativeYaw;
 	float MinDepth;
 	float MaxDepth;
+	double MinDistance;
+	double MaxDistance;
 };
 
-UCLASS(ClassGroup=(Custom))
+UCLASS(ClassGroup=(Custom), NotPlaceable, NotBlueprintable)
 class TEMPOLIDAR_API UTempoLidarCaptureComponent : public UTempoSceneCaptureComponent2D
 {
 	GENERATED_BODY()
@@ -159,21 +179,19 @@ public:
 	UTempoLidarCaptureComponent();
 
 protected:
-	virtual void BeginPlay() override;
-	
+	virtual void Activate(bool bReset = false) override;
+
 	virtual bool HasPendingRequests() const override;
 
 	virtual FTextureRead* MakeTextureRead() const override;
 
 	virtual int32 GetMaxTextureQueueSize() const override;
 
+	void Configure(double YawOffset, double SubHorizontalFOV, double SubHorizontalBeams);
+
 	// The number of horizontal beams.
 	UPROPERTY(EditAnywhere)
 	int32 HorizontalBeams = 200.0;
-
-	// The horizontal FOV in degrees. Note this is slightly less than FOVAngle, which is intentionally enlarged a bit.
-	UPROPERTY(VisibleAnywhere)
-	double HorizontalFOV = 60.0;
 
 	// The resulting distortion factor.
 	UPROPERTY(VisibleAnywhere)
@@ -183,21 +201,23 @@ protected:
 	UPROPERTY(VisibleAnywhere)
 	double DistortedVerticalFOV = 30.0;
 
-	// The size of the image plane encompassing the Lidar FOV in pixels. SizeXY is intentionally enlarged a bit.
+	// The size of the image plane encompassing the Lidar FOV in pixels. SizeXY is the ceil of this.
 	UPROPERTY(VisibleAnywhere)
 	FVector2D SizeXYFOV = FVector2D::ZeroVector;
 
 	UPROPERTY(VisibleAnywhere)
 	UMaterialInstanceDynamic* PostProcessMaterialInstance= nullptr;
 
-	UPROPERTY()
-	UTempoLidar* LidarOwner = nullptr;
+	UPROPERTY(VisibleAnywhere)
+	const UTempoLidar* LidarOwner = nullptr;
 
-	// The minimum depth this camera can measure (if depth is enabled). Will be set to the global near clip plane.
+	// The minimum depth this Lidar can measure. Will be set to the global near clip plane.
 	UPROPERTY(VisibleAnywhere)
 	float MinDepth = 10.0; // 10cm
 
-	friend UTempoLidar;
+	// The maximum depth this Lidar can measure. Will be set to UTempoSensorsSettings::MaxLidarDepth.
+	UPROPERTY(VisibleAnywhere, Category="Depth")
+	float MaxDepth = 40000.0; // 400m
 
-	friend TTextureRead<FLidarPixel>;
+	friend UTempoLidar;
 };

@@ -48,7 +48,7 @@ template <typename PixelType>
 struct TTextureReadBase : FTextureRead
 {
 	TTextureReadBase(const FIntPoint& ImageSizeIn, int32 SequenceIdIn, double CaptureTimeIn, const FString& OwnerNameIn, const FString& SensorNameIn)
-		   : FTextureRead(ImageSizeIn, SequenceIdIn, CaptureTimeIn, OwnerNameIn, SensorNameIn)
+		: FTextureRead(ImageSizeIn, SequenceIdIn, CaptureTimeIn, OwnerNameIn, SensorNameIn)
 	{
 		Image.SetNumUninitialized(ImageSize.X * ImageSize.Y);
 	}
@@ -79,10 +79,10 @@ struct TTextureReadBase : FTextureRead
 		GDynamicRHI->RHIMapStagingSurface(TextureRHICopy, Fence, OutBuffer, SurfaceWidth, SurfaceHeight, RHICmdList.GetGPUMask().ToIndex());
 		FMemory::Memcpy(Image.GetData(), OutBuffer, SurfaceWidth * SurfaceHeight * sizeof(PixelType));
 		RHICmdList.UnmapStagingSurface(TextureRHICopy);
-		
+
 		State = State::EReadComplete;
 	}
-	
+
 	TArray<PixelType> Image;
 };
 
@@ -221,7 +221,8 @@ class TEMPOSENSORSSHARED_API UTempoSceneCaptureComponent2D : public USceneCaptur
 public:
 	UTempoSceneCaptureComponent2D();
 
-	virtual void BeginPlay() override;
+	virtual void Activate(bool bReset) override;
+	virtual void Deactivate() override;
 
 #if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 	virtual void UpdateSceneCaptureContents(FSceneInterface* Scene) override;
@@ -268,6 +269,9 @@ protected:
 
 	// Initialize our RenderTarget and TextureRHICopy with the current settings.
 	void InitRenderTarget();
+
+	// Gets the number of pending texture reads
+	int32 NumPendingTextureReads() const { return TextureReadQueue.Num(); }
 
 private:
 	// Starts or restarts the timer that calls MaybeCapture

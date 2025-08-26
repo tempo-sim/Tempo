@@ -5,6 +5,7 @@
 #include "TempoSensorsConstants.h"
 
 #include "TempoConversion.h"
+#include "TempoCoreUtils.h"
 #include "TempoLabelTypes.h"
 #include "TempoLidarModule.h"
 
@@ -12,8 +13,16 @@
 
 #include "TempoSensorsSettings.h"
 
+namespace
+{
+	const FName LeftCaptureComponentName(TEXT("LeftTempoLidarCaptureComponent"));
+	const FName CenterCaptureComponentName(TEXT("CenterTempoLidarCaptureComponent"));
+	const FName RightCaptureComponentName(TEXT("RightTempoLidarCaptureComponent"));
+}
+
 UTempoLidar::UTempoLidar()
 {
+	PrimaryComponentTick.bCanEverTick = true;
 	MeasurementTypes = { EMeasurementType::LIDAR_SCAN };
 	bAutoActivate = true;
 }
@@ -32,7 +41,7 @@ FString UTempoLidar::GetSensorName() const
 
 bool UTempoLidar::IsAwaitingRender()
 {
-	for (const UTempoLidarCaptureComponent* LidarCaptureComponent : LidarCaptureComponents)
+	for (const UTempoLidarCaptureComponent* LidarCaptureComponent : GetActiveCaptureComponents())
 	{
 		if (LidarCaptureComponent->IsNextReadAwaitingRender())
 		{
@@ -44,7 +53,7 @@ bool UTempoLidar::IsAwaitingRender()
 
 void UTempoLidar::OnRenderCompleted()
 {
-	for (UTempoLidarCaptureComponent* LidarCaptureComponent : LidarCaptureComponents)
+	for (UTempoLidarCaptureComponent* LidarCaptureComponent : GetActiveCaptureComponents())
 	{
 		LidarCaptureComponent->ReadNextIfAvailable();
 	}
@@ -52,47 +61,50 @@ void UTempoLidar::OnRenderCompleted()
 
 void UTempoLidar::BlockUntilMeasurementsReady() const
 {
-	for (const UTempoLidarCaptureComponent* LidarCaptureComponent : LidarCaptureComponents)
+	for (const UTempoLidarCaptureComponent* LidarCaptureComponent : GetActiveCaptureComponents())
 	{
 		LidarCaptureComponent->BlockUntilNextReadComplete();
 	}
 }
 
-TArray<TFuture<void>> UTempoLidar::SendMeasurements()
+TOptional<TFuture<void>> UTempoLidar::SendMeasurements()
 {
-	TArray<TFuture<void>> Futures;
-
 	TArray<TUniquePtr<FTextureRead>> TextureReads;
-	const int32 NumCompletedReads = LidarCaptureComponents.FilterByPredicate(
-			[](const UTempoLidarCaptureComponent* LidarCaptureComponent) { return LidarCaptureComponent->NextReadComplete(); }
+	const TArray<UTempoLidarCaptureComponent*> ActiveCaptureComponents = GetActiveCaptureComponents();
+	const int32 NumCompletedReads = ActiveCaptureComponents.FilterByPredicate(
+			[](const UTempoLidarCaptureComponent* CaptureComponent) { return CaptureComponent->NextReadComplete(); }
 		).Num();
-	if (NumCompletedReads == LidarCaptureComponents.Num())
+	if (NumCompletedReads == ActiveCaptureComponents.Num())
 	{
-		for (UTempoLidarCaptureComponent* LidarCaptureComponent : LidarCaptureComponents)
+		for (UTempoLidarCaptureComponent* CaptureComponent : ActiveCaptureComponents)
 		{
-			TextureReads.Add(LidarCaptureComponent->DequeueIfReadComplete());
+			TextureReads.Add(CaptureComponent->DequeueIfReadComplete());
 		}
 	}
 
-	Futures.Add(DecodeAndRespond(MoveTemp(TextureReads)));
+	TOptional<TFuture<void>> Future = DecodeAndRespond(MoveTemp(TextureReads));
 
-	if (NumResponded == LidarCaptureComponents.Num())
+	if (NumResponded == ActiveCaptureComponents.Num())
 	{
 		PendingRequests.Empty();
 		NumResponded = 0;
+		SequenceId++;
+
+		SyncCaptureComponents();
 	}
 
-	return Futures;
+	return Future;
 }
 
-void UTempoLidar::BeginPlay()
+void UTempoLidar::SyncCaptureComponents()
 {
-	Super::BeginPlay();
-
 	// We allow up to 120 degrees horizontal FOV per capture component
+	const TMap<FName, UTempoLidarCaptureComponent*> CaptureComponents = GetOrCreateCaptureComponents();
 	if (HorizontalFOV <= 120.0)
 	{
-		AddCaptureComponent(0.0, HorizontalFOV, HorizontalBeams);
+		SyncCaptureComponent(CaptureComponents[LeftCaptureComponentName], false, 0.0, 0.0, 0);
+		SyncCaptureComponent(CaptureComponents[CenterCaptureComponentName], true, 0.0, HorizontalFOV, HorizontalBeams);
+		SyncCaptureComponent(CaptureComponents[RightCaptureComponentName], false, 0.0, 0.0, 0);
 	}
 	else if (HorizontalFOV <= 240.0)
 	{
@@ -101,8 +113,9 @@ void UTempoLidar::BeginPlay()
 		const int32 RightSegmentBeams = HorizontalBeams - LeftSegmentBeams;
 		const double LeftSegmentFOV = BeamGapSize * (LeftSegmentBeams - 1);
 		const double RightSegmentFOV = BeamGapSize * (RightSegmentBeams - 1);
-		AddCaptureComponent(-(LeftSegmentFOV + BeamGapSize) / 2.0, LeftSegmentFOV, LeftSegmentBeams);
-		AddCaptureComponent((RightSegmentFOV + BeamGapSize) / 2.0, RightSegmentFOV, RightSegmentBeams);
+		SyncCaptureComponent(CaptureComponents[LeftCaptureComponentName], true, -(LeftSegmentFOV + BeamGapSize) / 2.0, LeftSegmentFOV, LeftSegmentBeams);
+		SyncCaptureComponent(CaptureComponents[CenterCaptureComponentName], false, 0.0, 0.0, 0);
+		SyncCaptureComponent(CaptureComponents[RightCaptureComponentName], true, (RightSegmentFOV + BeamGapSize) / 2.0, RightSegmentFOV, RightSegmentBeams);
 	}
 	else
 	{
@@ -111,24 +124,37 @@ void UTempoLidar::BeginPlay()
 		const int32 CenterSegmentBeams = HorizontalBeams - 2 * SideSegmentBeams;
 		const double SideSegmentFOV = BeamGapSize * (SideSegmentBeams - 1);
 		const double CenterSegmentFOV = BeamGapSize * (CenterSegmentBeams - 1);
-		AddCaptureComponent(0.0, CenterSegmentFOV, CenterSegmentBeams);
-		AddCaptureComponent(-BeamGapSize - (CenterSegmentFOV + SideSegmentFOV) / 2.0, SideSegmentFOV, SideSegmentBeams);
-		AddCaptureComponent(BeamGapSize + (CenterSegmentFOV + SideSegmentFOV) / 2.0, SideSegmentFOV, SideSegmentBeams);
+		SyncCaptureComponent(CaptureComponents[LeftCaptureComponentName], true, -BeamGapSize - (CenterSegmentFOV + SideSegmentFOV) / 2.0, SideSegmentFOV, SideSegmentBeams);
+		SyncCaptureComponent(CaptureComponents[CenterCaptureComponentName], true, 0.0, CenterSegmentFOV, CenterSegmentBeams);
+		SyncCaptureComponent(CaptureComponents[RightCaptureComponentName], true, BeamGapSize + (CenterSegmentFOV + SideSegmentFOV) / 2.0, SideSegmentFOV, SideSegmentBeams);
 	}
 }
 
-void UTempoLidar::AddCaptureComponent(double YawOffset, double SubHorizontalFOV, int32 SubHorizontalBeams)
+void UTempoLidar::OnRegister()
 {
-	UTempoLidarCaptureComponent* LidarCaptureComponent = Cast<UTempoLidarCaptureComponent>(GetOwner()->AddComponentByClass(UTempoLidarCaptureComponent::StaticClass(), true, FTransform::Identity, true));
-	LidarCaptureComponent->LidarOwner = this;
-	LidarCaptureComponent->RateHz = RateHz;
-	LidarCaptureComponent->HorizontalFOV = SubHorizontalFOV;
-	LidarCaptureComponent->HorizontalBeams = SubHorizontalBeams;
-	LidarCaptureComponent->AttachToComponent(this, FAttachmentTransformRules::SnapToTargetIncludingScale);
-	LidarCaptureComponents.Add(LidarCaptureComponent);
-	GetOwner()->FinishAddComponent(LidarCaptureComponent, true, FTransform::Identity);
-	LidarCaptureComponent->SetRelativeRotation(FRotator(0.0, YawOffset, 0.0));
-	GetOwner()->AddInstanceComponent(LidarCaptureComponent);
+	Super::OnRegister();
+
+	SyncCaptureComponents();
+}
+
+void UTempoLidar::TickComponent(float DeltaTime, enum ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+	// SyncCaptureComponents();
+}
+
+void UTempoLidar::SyncCaptureComponent(UTempoLidarCaptureComponent* LidarCaptureComponent, bool bActive, double YawOffset, double SubHorizontalFOV, double SubHorizontalBeams)
+{
+	LidarCaptureComponent->Configure(YawOffset, SubHorizontalFOV, SubHorizontalBeams);
+	if (bActive && !LidarCaptureComponent->IsActive())
+	{
+		LidarCaptureComponent->Activate();
+	}
+	if (!bActive && LidarCaptureComponent->IsActive())
+	{
+		LidarCaptureComponent->Deactivate();
+	}
 }
 
 UTempoLidarCaptureComponent::UTempoLidarCaptureComponent()
@@ -139,7 +165,7 @@ UTempoLidarCaptureComponent::UTempoLidarCaptureComponent()
 	ShowFlags.SetAntiAliasing(false);
 	ShowFlags.SetTemporalAA(false);
 	ShowFlags.SetMotionBlur(false);
-	bAutoActivate = true;
+	bAutoActivate = false;
 }
 
 FVector2D SphericalToPerspective(double AzimuthDeg, double ElevationDeg)
@@ -173,32 +199,21 @@ FVector SphericalToCartesian(double AzimuthDeg, double ElevationDeg, double Dist
 	return Distance * FVector(FMath::Cos(-Elevation) * FMath::Cos(Azimuth), FMath::Cos(-Elevation) * FMath::Sin(Azimuth), FMath::Sin(-Elevation));
 }
 
-void UTempoLidarCaptureComponent::BeginPlay()
+void UTempoLidarCaptureComponent::Activate(bool bReset)
 {
-	Super::BeginPlay();
+	Super::Activate(bReset);
 
 	const UTempoSensorsSettings* TempoSensorsSettings = GetDefault<UTempoSensorsSettings>();
 	check(TempoSensorsSettings);
-
-	FOVAngle = HorizontalFOV;
-
-	const double UndistortedVerticalImagePlaneSize = 2.0 * FMath::Tan(LidarOwner->VerticalFOV / 2.0);
-	const FVector2D ImagePlaneSize = 2.0 * SphericalToPerspective(HorizontalFOV / 2.0, LidarOwner->VerticalFOV / 2.0);
-
-	const double AspectRatio = ImagePlaneSize.Y / ImagePlaneSize.X;
-	SizeXYFOV = TempoSensorsSettings->GetLidarUpsamplingFactor() * FVector2D(HorizontalBeams, AspectRatio * HorizontalBeams);
-
-	SizeXY = FIntPoint(FMath::CeilToInt32(SizeXYFOV.X), FMath::CeilToInt32(SizeXYFOV.Y));
-	DistortionFactor = UndistortedVerticalImagePlaneSize / ImagePlaneSize.Y;
-	DistortedVerticalFOV = FMath::RadiansToDegrees(2.0 * FMath::Atan(FMath::Tan(FMath::DegreesToRadians(LidarOwner->VerticalFOV) / 2.0) * DistortionFactor));
 
 	if (const TObjectPtr<UMaterialInterface> PostProcessMaterial = GetDefault<UTempoSensorsSettings>()->GetLidarPostProcessMaterial())
 	{
 		PostProcessMaterialInstance = UMaterialInstanceDynamic::Create(PostProcessMaterial.Get(), this);
 		PostProcessMaterialInstance = UMaterialInstanceDynamic::Create(PostProcessMaterial.Get(), this);
 		MinDepth = GEngine->NearClipPlane;
+		MaxDepth = TempoSensorsSettings->GetMaxLidarDepth();
 		PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MinDepth"), MinDepth);
-		PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MaxDepth"), LidarOwner->MaxRange);
+		PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MaxDepth"), MaxDepth);
 		PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MaxDiscreteDepth"), GTempo_Max_Discrete_Depth);
 	}
 	else
@@ -260,8 +275,6 @@ void UTempoLidarCaptureComponent::BeginPlay()
 	{
 		UE_LOG(LogTempoLidar, Error, TEXT("PostProcessMaterialInstance is not set."));
 	}
-
-	InitRenderTarget();
 }
 
 bool UTempoLidarCaptureComponent::HasPendingRequests() const
@@ -273,127 +286,114 @@ FTextureRead* UTempoLidarCaptureComponent::MakeTextureRead() const
 {
 	check(GetWorld());
 
-	return new TTextureRead<FLidarPixel>(SizeXY, SequenceId, GetWorld()->GetTimeSeconds(), this, LidarOwner, MinDepth, LidarOwner->MaxRange);
+	return new TTextureRead<FLidarPixel>(SizeXY, LidarOwner->SequenceId + NumPendingTextureReads(), GetWorld()->GetTimeSeconds(), LidarOwner->GetOwnerName(),
+		LidarOwner->GetSensorName(), LidarOwner->GetComponentTransform(), GetComponentTransform(), FOVAngle,
+		LidarOwner->VerticalFOV, HorizontalBeams, LidarOwner->VerticalBeams, SizeXYFOV,
+		LidarOwner->IntensitySaturationDistance, LidarOwner->MaxAngleOfIncidence,
+		LidarOwner->GetActiveCaptureComponents().Num(), GetRelativeRotation().Yaw, MinDepth, MaxDepth, LidarOwner->MinDistance, LidarOwner->MaxDistance);
 }
 
-void TTextureRead<FLidarPixel>::RespondToRequests(const TArray<FLidarScanRequest>& Requests, float TransmissionTime) const
+void TTextureRead<FLidarPixel>::Decode(float TransmissionTime, TempoLidar::LidarScanSegment& ScanSegmentOut) const
 {
-	TempoLidar::LidarScanSegment ScanSegment;
+	const FVector2D ImagePlaneSize = 2.0 * SphericalToPerspective(HorizontalFOV / 2.0, VerticalFOV / 2.0);
+	const FVector2D SizeXYOffset = (FVector2D(ImageSize) - SizeXYFOV) / 2.0;
+
+	auto LidarReturnFromBeam = [this, &ImagePlaneSize, &SizeXYOffset] (int32 HorizontalBeam, int32 VerticalBeam) -> TempoLidar::LidarReturn
 	{
-		TRACE_CPUPROFILER_EVENT_SCOPE(TempoLidarDecode);
-
-		const FIntPoint& SizeXY = CaptureComponent->SizeXY;
-		const FVector2D& SizeXYFOV = CaptureComponent->SizeXYFOV;
-		const FVector2D ImagePlaneSize = 2.0 * SphericalToPerspective(CaptureComponent->HorizontalFOV / 2.0, LidarOwner->VerticalFOV / 2.0);
-		const FVector2D SizeXYOffset = (FVector2D(SizeXY) - SizeXYFOV) / 2.0;
-
-		auto LidarReturnFromBeam = [this, &ImagePlaneSize, &SizeXY, &SizeXYFOV, &SizeXYOffset] (int32 HorizontalBeam, int32 VerticalBeam) -> TempoLidar::LidarReturn
+		auto ImagePlaneLocationToPixelCoordinate = [this, &ImagePlaneSize, &SizeXYOffset](const FVector2D& ImagePlaneLocation)
 		{
-			auto ImagePlaneLocationToPixelCoordinate = [&ImagePlaneSize, &SizeXYFOV, &SizeXYOffset](const FVector2D& ImagePlaneLocation)
-			{
-				return (FVector2D::UnitVector / 2.0 + ImagePlaneLocation / ImagePlaneSize) * (SizeXYFOV - FVector2D::UnitVector) + SizeXYOffset;
-			};
+			return (FVector2D::UnitVector / 2.0 + ImagePlaneLocation / ImagePlaneSize) * (SizeXYFOV - FVector2D::UnitVector) + SizeXYOffset;
+		};
 
-			auto PixelCoordinateToImagePlaneLocation = [&ImagePlaneSize, &SizeXYFOV, &SizeXYOffset](const FVector2D& PixelCoordinate)
-			{
-				return ((PixelCoordinate - SizeXYOffset) / (SizeXYFOV - FVector2D::UnitVector) - (FVector2D::UnitVector / 2.0)) * ImagePlaneSize;
-			};
+		auto PixelCoordinateToImagePlaneLocation = [this, &ImagePlaneSize, &SizeXYOffset](const FVector2D& PixelCoordinate)
+		{
+			return ((PixelCoordinate - SizeXYOffset) / (SizeXYFOV - FVector2D::UnitVector) - (FVector2D::UnitVector / 2.0)) * ImagePlaneSize;
+		};
 
-			const double AzimuthDeg = (-0.5 + static_cast<double>(HorizontalBeam) / (CaptureComponent->HorizontalBeams - 1)) * CaptureComponent->HorizontalFOV;
-			const double ElevationDeg = (-0.5 + static_cast<double>(VerticalBeam) / (LidarOwner->VerticalBeams - 1)) * LidarOwner->VerticalFOV;
-			const FVector2D ImagePlaneLocation = SphericalToPerspective(AzimuthDeg, ElevationDeg);
-			const FVector2D PixelCoordinate = ImagePlaneLocationToPixelCoordinate(ImagePlaneLocation);
-			const FIntPoint Coord(FMath::RoundToInt32(PixelCoordinate.X), FMath::RoundToInt32(PixelCoordinate.Y));
-			const float NearestDepth = Image[Coord.X + SizeXY.X * Coord.Y].Depth(MinDepth, LidarOwner->MaxRange, GTempo_Max_Discrete_Depth);
-			const FVector2D ImagePlaneLocationAboveLeft = PixelCoordinateToImagePlaneLocation(FVector2D(Coord.X, Coord.Y));
-			double AzimuthDegNearest, ElevationDegNearest;
-			PerspectiveToSpherical(ImagePlaneLocationAboveLeft, AzimuthDegNearest, ElevationDegNearest);
-			const float NearestDistance =  DepthToDistance(AzimuthDegNearest, ElevationDegNearest, NearestDepth);
-			const FVector NearestPoint = SphericalToCartesian(AzimuthDegNearest, ElevationDegNearest, NearestDistance);
-			const FVector WorldNormal = Image[Coord.X + SizeXY.X * Coord.Y].Normal();
-			const FVector LocalNormal = CaptureComponent->GetComponentTransform().InverseTransformVector(WorldNormal);
-			const FVector RayDirection = SphericalToCartesian(AzimuthDeg, ElevationDeg, LidarOwner->MaxRange);
-			const double CosAngleOfIncidence = FVector::DotProduct(LocalNormal.GetSafeNormal(), -RayDirection.GetSafeNormal());
-			const double AngleOfIncidence = FMath::RadiansToDegrees(FMath::Acos(CosAngleOfIncidence));
-			double Intensity;
-			double Distance;
-			if (AngleOfIncidence > LidarOwner->MaxAngleOfIncidence)
+		const double AzimuthDeg = (-0.5 + static_cast<double>(HorizontalBeam) / (HorizontalBeams - 1)) * HorizontalFOV;
+		const double ElevationDeg = (-0.5 + static_cast<double>(VerticalBeam) / (VerticalBeams - 1)) * VerticalFOV;
+		const FVector2D ImagePlaneLocation = SphericalToPerspective(AzimuthDeg, ElevationDeg);
+		const FVector2D PixelCoordinate = ImagePlaneLocationToPixelCoordinate(ImagePlaneLocation);
+		const FIntPoint Coord(FMath::RoundToInt32(PixelCoordinate.X), FMath::RoundToInt32(PixelCoordinate.Y));
+		const float NearestDepth = Image[Coord.X + ImageSize.X * Coord.Y].Depth(MinDepth, MaxDepth, GTempo_Max_Discrete_Depth);
+		const FVector2D ImagePlaneLocationAboveLeft = PixelCoordinateToImagePlaneLocation(FVector2D(Coord.X, Coord.Y));
+		double AzimuthDegNearest, ElevationDegNearest;
+		PerspectiveToSpherical(ImagePlaneLocationAboveLeft, AzimuthDegNearest, ElevationDegNearest);
+		const float NearestDistance =  DepthToDistance(AzimuthDegNearest, ElevationDegNearest, NearestDepth);
+		const FVector NearestPoint = SphericalToCartesian(AzimuthDegNearest, ElevationDegNearest, NearestDistance);
+		const FVector WorldNormal = Image[Coord.X + ImageSize.X * Coord.Y].Normal();
+		const FVector LocalNormal = CaptureTransform.InverseTransformVector(WorldNormal);
+		const FVector RayDirection = SphericalToCartesian(AzimuthDeg, ElevationDeg, MaxDistance);
+		const double CosAngleOfIncidence = FVector::DotProduct(LocalNormal.GetSafeNormal(), -RayDirection.GetSafeNormal());
+		const double AngleOfIncidence = FMath::RadiansToDegrees(FMath::Acos(CosAngleOfIncidence));
+		double Intensity;
+		double Distance;
+		if (AngleOfIncidence > MaxAngleOfIncidence)
+		{
+			Distance = 0.0;
+			Intensity = 0.0;
+		}
+		else
+		{
+			const FPlane SurfacePlane( NearestPoint, LocalNormal );
+			const FVector HitPoint = FMath::LinePlaneIntersection(FVector::ZeroVector, RayDirection, SurfacePlane);
+
+			Distance = HitPoint.Length();
+			Intensity = CosAngleOfIncidence * IntensitySaturationDistance / FMath::Max(IntensitySaturationDistance, Distance);
+
+			if (Distance > MaxDistance)
 			{
 				Distance = 0.0;
 				Intensity = 0.0;
 			}
-			else
-			{
-				const FPlane SurfacePlane( NearestPoint, LocalNormal );
-				const FVector HitPoint = FMath::LinePlaneIntersection(FVector::ZeroVector, RayDirection, SurfacePlane);
-
-				Distance = HitPoint.Length();
-				Intensity = CosAngleOfIncidence * LidarOwner->IntensitySaturationDistance / FMath::Max(LidarOwner->IntensitySaturationDistance, Distance);
-
-				if (Distance > LidarOwner->MaxRange)
-				{
-					Distance = 0.0;
-					Intensity = 0.0;
-				}
-				Distance = FMath::Max(LidarOwner->MinRange, Distance);
-			}
-			TempoLidar::LidarReturn LidarReturn;
-			LidarReturn.set_distance(QuantityConverter<CM2M>::Convert(Distance));
-			LidarReturn.set_intensity(Intensity);
-			LidarReturn.set_label(Image[Coord.X + SizeXY.X * Coord.Y].Label());
-			return LidarReturn;
-		};
-
-		// Intermediate "Returns" to allow the parallel for (DistanceAtBeam is somewhat expensive)
-		std::vector<TempoLidar::LidarReturn> LidarReturns(CaptureComponent->HorizontalBeams * LidarOwner->VerticalBeams);
-		ParallelFor(CaptureComponent->HorizontalBeams, [this, &LidarReturns, &LidarReturnFromBeam](int32 HorizontalBeam)
-		{
-			for (int32 VerticalBeam = 0; VerticalBeam < LidarOwner->VerticalBeams; ++VerticalBeam)
-			{
-				LidarReturns[HorizontalBeam + CaptureComponent->HorizontalBeams * VerticalBeam] = LidarReturnFromBeam(HorizontalBeam, VerticalBeam);
-			}
-		});
-
-		ScanSegment.mutable_returns()->Reserve(CaptureComponent->HorizontalBeams * LidarOwner->VerticalBeams);
-		for (int32 HorizontalBeam = 0; HorizontalBeam < CaptureComponent->HorizontalBeams; ++HorizontalBeam)
-		{
-			for (int32 VerticalBeam = 0; VerticalBeam < LidarOwner->VerticalBeams; ++VerticalBeam)
-			{
-				*ScanSegment.add_returns() = LidarReturns[HorizontalBeam + CaptureComponent->HorizontalBeams * VerticalBeam];
-			}
+			Distance = FMath::Max(MinDistance, Distance);
 		}
+		TempoLidar::LidarReturn LidarReturn;
+		LidarReturn.set_distance(QuantityConverter<CM2M>::Convert(Distance));
+		LidarReturn.set_intensity(Intensity);
+		LidarReturn.set_label(Image[Coord.X + ImageSize.X * Coord.Y].Label());
+		return LidarReturn;
+	};
 
-		ScanSegment.mutable_header()->set_sequence_id(SequenceId);
-		ScanSegment.mutable_header()->set_capture_time(CaptureTime);
-		ScanSegment.mutable_header()->set_transmission_time(TransmissionTime);
-		ScanSegment.mutable_header()->set_sensor_name(TCHAR_TO_UTF8(*FString::Printf(TEXT("%s/%s"), *OwnerName, *SensorName)));
-		const FVector SensorLocation = QuantityConverter<CM2M, L2R>::Convert(CaptureTransform.GetLocation());
-		const FRotator SensorRotation = QuantityConverter<Deg2Rad, L2R>::Convert(CaptureTransform.Rotator());
-		ScanSegment.mutable_header()->mutable_sensor_transform()->mutable_location()->set_x(SensorLocation.X);
-		ScanSegment.mutable_header()->mutable_sensor_transform()->mutable_location()->set_y(SensorLocation.Y);
-		ScanSegment.mutable_header()->mutable_sensor_transform()->mutable_location()->set_z(SensorLocation.Z);
-		ScanSegment.mutable_header()->mutable_sensor_transform()->mutable_rotation()->set_p(SensorRotation.Pitch);
-		ScanSegment.mutable_header()->mutable_sensor_transform()->mutable_rotation()->set_r(SensorRotation.Roll);
-		ScanSegment.mutable_header()->mutable_sensor_transform()->mutable_rotation()->set_y(SensorRotation.Yaw);
-
-		ScanSegment.set_scan_count(LidarOwner->LidarCaptureComponents.Num());
-		ScanSegment.set_horizontal_beams(CaptureComponent->HorizontalBeams);
-		ScanSegment.set_vertical_beams(LidarOwner->VerticalBeams);
-		ScanSegment.mutable_azimuth_range()->set_max(FMath::DegreesToRadians(CaptureComponent->HorizontalFOV / 2.0 + CaptureComponent->GetRelativeRotation().Yaw));
-		ScanSegment.mutable_azimuth_range()->set_min(FMath::DegreesToRadians(-CaptureComponent->HorizontalFOV / 2.0 + CaptureComponent->GetRelativeRotation().Yaw));
-		ScanSegment.mutable_elevation_range()->set_max(FMath::DegreesToRadians(LidarOwner->VerticalFOV / 2.0));
-		ScanSegment.mutable_elevation_range()->set_min(FMath::DegreesToRadians(-LidarOwner->VerticalFOV / 2.0));
-	}
-
-	TRACE_CPUPROFILER_EVENT_SCOPE(TempoLidarRespond);
-
-	for (auto RequestIt = Requests.CreateConstIterator(); RequestIt; ++RequestIt)
+	// Temporary LidarReturns allows use of ParallelFor
+	std::vector<TempoLidar::LidarReturn> LidarReturns(HorizontalBeams * VerticalBeams);
+	ParallelFor(VerticalBeams, [this, &LidarReturnFromBeam, &LidarReturns](int32 VerticalBeam)
 	{
-		if (!RequestIt->ResponseContinuation.ExecuteIfBound(ScanSegment, grpc::Status_OK))
+		for (int32 HorizontalBeam = 0; HorizontalBeam < HorizontalBeams; ++HorizontalBeam)
 		{
-			UE_LOG(LogTemp, Warning, TEXT("Was not bound at %d"), SequenceId);
+			LidarReturns[HorizontalBeam + HorizontalBeams * VerticalBeam] = LidarReturnFromBeam(HorizontalBeam, VerticalBeam);
+		}
+	});
+
+	ScanSegmentOut.mutable_returns()->Reserve(HorizontalBeams * VerticalBeams);
+	for (int32 HorizontalBeam = 0; HorizontalBeam < HorizontalBeams; ++HorizontalBeam)
+	{
+		for (int32 VerticalBeam = 0; VerticalBeam < VerticalBeams; ++VerticalBeam)
+		{
+			*ScanSegmentOut.add_returns() = LidarReturns[HorizontalBeam + HorizontalBeams * VerticalBeam];
 		}
 	}
+
+	ScanSegmentOut.mutable_header()->set_sequence_id(SequenceId);
+	ScanSegmentOut.mutable_header()->set_capture_time(CaptureTime);
+	ScanSegmentOut.mutable_header()->set_transmission_time(TransmissionTime);
+	ScanSegmentOut.mutable_header()->set_sensor_name(TCHAR_TO_UTF8(*FString::Printf(TEXT("%s/%s"), *OwnerName, *SensorName)));
+	const FVector SensorLocation = QuantityConverter<CM2M, L2R>::Convert(CaptureTransform.GetLocation());
+	const FRotator SensorRotation = QuantityConverter<Deg2Rad, L2R>::Convert(CaptureTransform.Rotator());
+	ScanSegmentOut.mutable_header()->mutable_sensor_transform()->mutable_location()->set_x(SensorLocation.X);
+	ScanSegmentOut.mutable_header()->mutable_sensor_transform()->mutable_location()->set_y(SensorLocation.Y);
+	ScanSegmentOut.mutable_header()->mutable_sensor_transform()->mutable_location()->set_z(SensorLocation.Z);
+	ScanSegmentOut.mutable_header()->mutable_sensor_transform()->mutable_rotation()->set_p(SensorRotation.Pitch);
+	ScanSegmentOut.mutable_header()->mutable_sensor_transform()->mutable_rotation()->set_r(SensorRotation.Roll);
+	ScanSegmentOut.mutable_header()->mutable_sensor_transform()->mutable_rotation()->set_y(SensorRotation.Yaw);
+
+	ScanSegmentOut.set_scan_count(NumCaptureComponents);
+	ScanSegmentOut.set_horizontal_beams(HorizontalBeams);
+	ScanSegmentOut.set_vertical_beams(VerticalBeams);
+	ScanSegmentOut.mutable_azimuth_range()->set_max(FMath::DegreesToRadians(HorizontalFOV / 2.0 + RelativeYaw));
+	ScanSegmentOut.mutable_azimuth_range()->set_min(FMath::DegreesToRadians(-HorizontalFOV / 2.0 + RelativeYaw));
+	ScanSegmentOut.mutable_elevation_range()->set_max(FMath::DegreesToRadians(VerticalFOV / 2.0));
+	ScanSegmentOut.mutable_elevation_range()->set_min(FMath::DegreesToRadians(-VerticalFOV / 2.0));
 }
 
 TFuture<void> UTempoLidar::DecodeAndRespond(TArray<TUniquePtr<FTextureRead>> TextureReads)
@@ -403,6 +403,7 @@ TFuture<void> UTempoLidar::DecodeAndRespond(TArray<TUniquePtr<FTextureRead>> Tex
 	NumResponded += TextureReads.Num();
 
 	TFuture<void> Future = Async(EAsyncExecution::TaskGraph, [
+		this,
 		TextureReads = MoveTemp(TextureReads),
 		Requests = PendingRequests,
 		TransmissionTimeCpy = TransmissionTime
@@ -410,14 +411,80 @@ TFuture<void> UTempoLidar::DecodeAndRespond(TArray<TUniquePtr<FTextureRead>> Tex
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(TempoLidarDecodeAndRespond);
 
-		for (const TUniquePtr<FTextureRead>& TextureRead : TextureReads)
+		TArray<TempoLidar::LidarScanSegment> Segments;
+		Segments.SetNum(TextureReads.Num());
+		if (!Requests.IsEmpty())
 		{
-			static_cast<TTextureRead<FLidarPixel>*>(TextureRead.Get())->RespondToRequests(Requests, TransmissionTimeCpy);
+			ParallelFor(TextureReads.Num(), [&TextureReads, &Segments, TransmissionTimeCpy](int Index)
+			{
+				TRACE_CPUPROFILER_EVENT_SCOPE(TempoLidarDecode);
+				static_cast<TTextureRead<FLidarPixel>*>(TextureReads[Index].Get())->Decode(TransmissionTimeCpy, Segments[Index]);
+			});
+		}
+
+		TRACE_CPUPROFILER_EVENT_SCOPE(TempoLidarRespond);
+		for (const TempoLidar::LidarScanSegment& Segment : Segments)
+		{
+			for (const auto& Request : Requests)
+			{
+				Request.ResponseContinuation.ExecuteIfBound(Segment, grpc::Status_OK);
+			}
 		}
 	});
 
-	
 	return Future;
+}
+
+TMap<FName, UTempoLidarCaptureComponent*> UTempoLidar::GetAllCaptureComponents() const
+{
+	TMap<FName, UTempoLidarCaptureComponent*> CaptureComponents;
+	TArray<USceneComponent*> ChildrenComponents;
+	GetChildrenComponents(false, ChildrenComponents);
+	for (USceneComponent* ChildComponent : ChildrenComponents)
+	{
+		for (const FName& Tag : { LeftCaptureComponentName, CenterCaptureComponentName, RightCaptureComponentName })
+		{
+			if (UTempoLidarCaptureComponent* LidarCaptureComponent = Cast<UTempoLidarCaptureComponent>(ChildComponent); ChildComponent->ComponentHasTag(Tag))
+			{
+				CaptureComponents.Add(Tag, LidarCaptureComponent);
+			}
+		}
+	}
+	return CaptureComponents;
+}
+
+TMap<FName, UTempoLidarCaptureComponent*> UTempoLidar::GetOrCreateCaptureComponents()
+{
+	TMap<FName, UTempoLidarCaptureComponent*> CaptureComponents = GetAllCaptureComponents();
+	for (const FName& Tag : { LeftCaptureComponentName, CenterCaptureComponentName, RightCaptureComponentName })
+	{
+		if (!CaptureComponents.Contains(Tag))
+		{
+			UTempoLidarCaptureComponent* CaptureComponent = NewObject<UTempoLidarCaptureComponent>(GetOwner(), UTempoLidarCaptureComponent::StaticClass(), Tag);
+			CaptureComponent->LidarOwner = this;
+			CaptureComponent->ComponentTags.AddUnique(Tag);
+			CaptureComponent->OnComponentCreated();
+			CaptureComponent->AttachToComponent(this, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+			CaptureComponent->RegisterComponent();
+			GetOwner()->AddInstanceComponent(CaptureComponent);
+			CaptureComponents.Add(Tag, CaptureComponent);
+		}
+	}
+	return CaptureComponents;
+}
+
+TArray<UTempoLidarCaptureComponent*> UTempoLidar::GetActiveCaptureComponents() const
+{
+	TArray<UTempoLidarCaptureComponent*> ActiveCaptureComponents;
+	TMap<FName, UTempoLidarCaptureComponent*> CaptureComponents = GetAllCaptureComponents();
+	for (const auto& Elem : CaptureComponents)
+	{
+		if (Elem.Value->IsActive())
+		{
+			ActiveCaptureComponents.Add(Elem.Value);
+		}
+	}
+	return ActiveCaptureComponents;
 }
 
 void UTempoLidar::RequestMeasurement(const TempoLidar::LidarScanRequest& Request, const TResponseDelegate<TempoLidar::LidarScanSegment>& ResponseContinuation)
@@ -428,4 +495,25 @@ void UTempoLidar::RequestMeasurement(const TempoLidar::LidarScanRequest& Request
 int32 UTempoLidarCaptureComponent::GetMaxTextureQueueSize() const
 {
 	return GetDefault<UTempoSensorsSettings>()->GetMaxCameraRenderBufferSize();
+}
+
+void UTempoLidarCaptureComponent::Configure(double YawOffset, double SubHorizontalFOV, double SubHorizontalBeams)
+{
+	RateHz = LidarOwner->RateHz;
+	FOVAngle = SubHorizontalFOV;
+	HorizontalBeams = SubHorizontalBeams;
+	SetRelativeRotation(FRotator(0.0, YawOffset, 0.0));
+
+	const UTempoSensorsSettings* TempoSensorsSettings = GetDefault<UTempoSensorsSettings>();
+	check(TempoSensorsSettings);
+
+	const double UndistortedVerticalImagePlaneSize = 2.0 * FMath::Tan(LidarOwner->VerticalFOV / 2.0);
+	const FVector2D ImagePlaneSize = 2.0 * SphericalToPerspective(FOVAngle / 2.0, LidarOwner->VerticalFOV / 2.0);
+
+	const double AspectRatio = ImagePlaneSize.Y / ImagePlaneSize.X;
+	SizeXYFOV = TempoSensorsSettings->GetLidarUpsamplingFactor() * FVector2D(HorizontalBeams, AspectRatio * HorizontalBeams);
+
+	SizeXY = FIntPoint(FMath::CeilToInt32(SizeXYFOV.X), FMath::CeilToInt32(SizeXYFOV.Y));
+	DistortionFactor = UndistortedVerticalImagePlaneSize / ImagePlaneSize.Y;
+	DistortedVerticalFOV = FMath::RadiansToDegrees(2.0 * FMath::Atan(FMath::Tan(FMath::DegreesToRadians(LidarOwner->VerticalFOV) / 2.0) * DistortionFactor));
 }

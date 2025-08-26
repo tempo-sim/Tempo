@@ -147,7 +147,7 @@ public:
 	virtual bool IsAwaitingRender() override;
 	virtual void OnRenderCompleted() override;
 	virtual void BlockUntilMeasurementsReady() const override;
-	virtual TArray<TFuture<void>> SendMeasurements() override;
+	virtual TOptional<TFuture<void>> SendMeasurements() override;
 	// End ITempoSensorInterface
 
 protected:
@@ -174,7 +174,7 @@ protected:
 	// The minimum depth this camera can measure (if depth is enabled). Will be set to the global near clip plane.
 	UPROPERTY(VisibleAnywhere, Category="Depth")
 	float MinDepth = 10.0; // 10cm
-	
+
 	// The maximum depth this camera can measure (if depth is enabled). Will be set to UTempoSensorsSettings::MaxCameraDepth.
 	UPROPERTY(VisibleAnywhere, Category="Depth")
 	float MaxDepth = 100000.0; // 1km

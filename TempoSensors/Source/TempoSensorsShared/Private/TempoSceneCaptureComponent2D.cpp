@@ -28,11 +28,20 @@ UTempoSceneCaptureComponent2D::UTempoSceneCaptureComponent2D()
 	bAlwaysPersistRenderingState = true;
 }
 
-void UTempoSceneCaptureComponent2D::BeginPlay()
+void UTempoSceneCaptureComponent2D::Activate(bool bReset)
 {
-	Super::BeginPlay();
+	Super::Activate(bReset);
 
+	InitRenderTarget();
 	RestartCaptureTimer();
+}
+
+void UTempoSceneCaptureComponent2D::Deactivate()
+{
+	Super::Deactivate();
+
+	GetWorld()->GetTimerManager().ClearTimer(TimerHandle);
+	TextureReadQueue.Empty();
 }
 
 #if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
@@ -193,6 +202,11 @@ bool UTempoSceneCaptureComponent2D::NextReadComplete() const
 
 void UTempoSceneCaptureComponent2D::InitRenderTarget()
 {
+	if (SizeXY.X == 0 || SizeXY.Y == 0)
+	{
+		return;
+	}
+
 	TextureTarget = NewObject<UTextureRenderTarget2D>(this);
 
 	TextureTarget->TargetGamma = GetDefault<UTempoSensorsSettings>()->GetSceneCaptureGamma();

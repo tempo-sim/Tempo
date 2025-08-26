@@ -265,16 +265,16 @@ void UTempoCamera::BlockUntilMeasurementsReady() const
 	BlockUntilNextReadComplete();
 }
 
-TArray<TFuture<void>> UTempoCamera::SendMeasurements()
+TOptional<TFuture<void>> UTempoCamera::SendMeasurements()
 {
-	TArray<TFuture<void>> Futures;
+	TOptional<TFuture<void>> Future;
 
 	if (TUniquePtr<FTextureRead> TextureRead = DequeueIfReadComplete())
 	{
-		Futures.Add(DecodeAndRespond(MoveTemp(TextureRead)));
+		Future = DecodeAndRespond(MoveTemp(TextureRead));
 	}
 
-	return Futures;
+	return Future;
 }
 
 bool UTempoCamera::HasPendingRequests() const

@@ -45,6 +45,7 @@ public:
 
 	// Lidar
 	int32 GetLidarUpsamplingFactor() const { return LidarUpsamplingFactor; }
+	float GetMaxLidarDepth() const { return MaxLidarDepth; }
 	TObjectPtr<UMaterialInterface> GetLidarPostProcessMaterial() const { return LidarPostProcessMaterial.LoadSynchronous(); }
 
 	// RayTracingScene Buffer Overrun Workaround
@@ -109,6 +110,10 @@ private:
 	// of horizontal beams. Higher factors improve the accuracy of the reconstruction at the cost of performance.
 	UPROPERTY(EditAnywhere, Config, Category="Lidar", meta=(UIMin=1, UIMax=4, ClampMin=1, ClampMax=4))
 	int32 LidarUpsamplingFactor = 2;
+
+	// The expected maximum required depth for a Lidar return.
+	UPROPERTY(EditAnywhere, Config, Category="Lidar")
+	float MaxLidarDepth = 40000.0; // 400m
 
 	UPROPERTY(EditAnywhere, Config, Category="Lidar", meta=( AllowedClasses="/Script/Engine.BlendableInterface", Keywords="PostProcess" ))
 	TSoftObjectPtr<UMaterialInterface> LidarPostProcessMaterial;

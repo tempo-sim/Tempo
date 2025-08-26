@@ -173,16 +173,16 @@ class PointCloudViewer:
     def update_points(self):
         """Update the point cloud with the new scan."""
 
-        if self.point_cloud is None:
-            # Calculate angles for each beam
-            horizontal_fov = self.azimuth_max - self.azimuth_min
-            vertical_fov = self.latest_scan.elevation_range.max - self.latest_scan.elevation_range.min
-            h_angles = np.linspace(horizontal_fov/2, -horizontal_fov/2, self.horizontal_beams)
-            v_angles = np.linspace(vertical_fov/2, -vertical_fov/2, self.latest_scan.vertical_beams)
-            self.h_angles_grid, self.v_angles_grid = np.meshgrid(h_angles, v_angles)
-            if self.actor is not None:
-                self.plotter.remove_actor(self.actor)
-                self.point_cloud = None
+#         if self.point_cloud is None:
+        # Calculate angles for each beam
+        horizontal_fov = self.azimuth_max - self.azimuth_min
+        vertical_fov = self.latest_scan.elevation_range.max - self.latest_scan.elevation_range.min
+        h_angles = np.linspace(horizontal_fov/2, -horizontal_fov/2, self.horizontal_beams)
+        v_angles = np.linspace(vertical_fov/2, -vertical_fov/2, self.latest_scan.vertical_beams)
+        self.h_angles_grid, self.v_angles_grid = np.meshgrid(h_angles, v_angles)
+        if self.actor is not None:
+            self.plotter.remove_actor(self.actor)
+            self.point_cloud = None
 
         distances = self.distances
         intensities = self.intensities
