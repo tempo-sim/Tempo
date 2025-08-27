@@ -8,6 +8,8 @@
 #include "TimerManager.h"
 #include "Engine/World.h"
 #include "TempoGameMode.h"
+#include "Blueprint/UserWidget.h"
+#include "Blueprint/WidgetBlueprintLibrary.h"
 
 ATempoPlayerController::ATempoPlayerController()
 {
@@ -189,6 +191,23 @@ void ATempoPlayerController::SetupInputComponent()
     InputComponent->BindAction("SwitchGroup", IE_Pressed, this, &ATempoPlayerController::SwitchActiveGroup);
     InputComponent->BindAction("SelectAndPossess", IE_Pressed, this, &ATempoPlayerController::SelectAndPossessPawn);
     InputComponent->BindAction("EnterSpectatorMode", IE_Pressed, this, &ATempoPlayerController::EnterSpectatorMode);
+    InputComponent->BindAction("ToggleUI", IE_Pressed, this, &ATempoPlayerController::ToggleUIVisibility);
+}
+
+void ATempoPlayerController::ToggleUIVisibility()
+{
+    // Find all user-created widgets currently on the screen
+    TArray<UUserWidget*> FoundWidgets;
+    UWidgetBlueprintLibrary::GetAllWidgetsOfClass(GetWorld(), FoundWidgets, UUserWidget::StaticClass(), false);
+
+    // Toggle the visibility state
+    bAreWidgetsVisible = !bAreWidgetsVisible;
+    const ESlateVisibility NewVisibility = bAreWidgetsVisible ? ESlateVisibility::Visible : ESlateVisibility::Hidden;
+
+    for (UUserWidget* Widget : FoundWidgets)
+    {
+        Widget->SetVisibility(NewVisibility);
+    }
 }
 
 void ATempoPlayerController::OnActorSpawnedHandler(AActor* SpawnedActor)
