@@ -1,0 +1,66 @@
+// Copyright Tempo Simulation, LLC. All Rights Reserved
+
+#include "TempoSensorsUtils.h"
+
+void OptimizeShowFlagsForNoColor(FEngineShowFlags& ShowFlags)
+{
+	ShowFlags.SetPostProcessing(true);
+	ShowFlags.SetPostProcessMaterial(true);
+	ShowFlags.SetHighResScreenshotMask(false);
+	ShowFlags.SetHMDDistortion(false);
+	ShowFlags.SetStereoRendering(false);
+	ShowFlags.SetLocalExposure(false);
+	ShowFlags.SetTonemapper(false);
+	ShowFlags.SetAntiAliasing(false);
+	ShowFlags.SetTemporalAA(false);
+	ShowFlags.SetAmbientCubemap(false);
+	ShowFlags.SetEyeAdaptation(false);
+	ShowFlags.SetLensFlares(false);
+	ShowFlags.SetLensDistortion(false);
+	ShowFlags.SetGlobalIllumination(false);
+	ShowFlags.SetVignette(false);
+	ShowFlags.SetGrain(false);
+	ShowFlags.SetAmbientOcclusion(false);
+	ShowFlags.SetCameraImperfections(false);
+	ShowFlags.SetLighting(false);
+	ShowFlags.SetDirectLighting(false);
+	ShowFlags.SetDirectionalLights(false);
+	ShowFlags.SetPointLights(false);
+	ShowFlags.SetRectLights(false);
+	ShowFlags.SetColorGrading(false);
+	ShowFlags.SetDepthOfField(false);
+	ShowFlags.SetMotionBlur(false);
+	ShowFlags.SetRefraction(false);
+	ShowFlags.SetSceneColorFringe(false);
+	ShowFlags.SetCameraInterpolation(false);
+	ShowFlags.SetToneCurve(false);
+	ShowFlags.SetSeparateTranslucency(false);
+	ShowFlags.SetSeparateTranslucency(false);
+	ShowFlags.SetMegaLights(false);
+	ShowFlags.SetReflectionEnvironment(false);
+	ShowFlags.SetDiffuse(false);
+	ShowFlags.SetSpecular(false);
+	ShowFlags.SetScreenSpaceReflections(false);
+	ShowFlags.SetLumenReflections(false);
+	ShowFlags.SetContactShadows(false);
+	ShowFlags.SetRayTracedDistanceFieldShadows(false);
+	ShowFlags.SetCapsuleShadows(false);
+	ShowFlags.SetSubsurfaceScattering(false);
+	ShowFlags.SetVolumetricLightmap(false);
+	ShowFlags.SetIndirectLightingCache(false);
+	ShowFlags.SetTexturedLightProfiles(false);
+	ShowFlags.SetLightFunctions(false);
+	ShowFlags.SetDynamicShadows(false);
+	ShowFlags.SetTranslucency(false);
+	ShowFlags.SetDeferredLighting(false);
+	ShowFlags.SetLightShafts(false);
+	ShowFlags.SetAtmosphere(false);
+	ShowFlags.SetCloud(false);
+	ShowFlags.SetScreenSpaceAO(false);
+	ShowFlags.SetDistanceFieldAO(false);
+	ShowFlags.SetLumenGlobalIllumination(false);
+	ShowFlags.SetVolumetricFog(false);
+	ShowFlags.SetFog(false);
+	ShowFlags.SetShaderPrint(false);
+	ShowFlags.SetVirtualShadowMapPersistentData(false);
+}

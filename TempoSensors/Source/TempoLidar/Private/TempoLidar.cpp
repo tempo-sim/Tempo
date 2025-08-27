@@ -5,13 +5,13 @@
 #include "TempoSensorsConstants.h"
 
 #include "TempoConversion.h"
-#include "TempoCoreUtils.h"
 #include "TempoLabelTypes.h"
 #include "TempoLidarModule.h"
 
 #include "TempoLidar/Lidar.pb.h"
 
 #include "TempoSensorsSettings.h"
+#include "TempoSensorsUtils.h"
 
 namespace
 {
@@ -137,13 +137,6 @@ void UTempoLidar::OnRegister()
 	SyncCaptureComponents();
 }
 
-void UTempoLidar::TickComponent(float DeltaTime, enum ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
-{
-	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-	// SyncCaptureComponents();
-}
-
 void UTempoLidar::SyncCaptureComponent(UTempoLidarCaptureComponent* LidarCaptureComponent, bool bActive, double YawOffset, double SubHorizontalFOV, double SubHorizontalBeams)
 {
 	LidarCaptureComponent->Configure(YawOffset, SubHorizontalFOV, SubHorizontalBeams);
@@ -164,19 +157,9 @@ UTempoLidarCaptureComponent::UTempoLidarCaptureComponent()
 	RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA16f;
 	PixelFormatOverride = EPixelFormat::PF_A16B16G16R16;
 
-	// Disable features that might distort the depth image.
-	ShowFlags.SetAntiAliasing(false);
-	ShowFlags.SetTemporalAA(false);
-	ShowFlags.SetMotionBlur(false);
-
 	// Disable as many unnecessary rendering features as possible.
-	ShowFlags.DisableFeaturesForUnlit(false);
-	ShowFlags.DisableAdvancedFeatures();
+	OptimizeShowFlagsForNoColor(ShowFlags);
 	bUseRayTracingIfEnabled = false;
-
-	// But turn post-processing back on.
-	ShowFlags.SetPostProcessing(true);
-	ShowFlags.SetPostProcessMaterial(true);
 
 	// This component will be activated and deactivated by UTempoLidar.
 	bAutoActivate = false;

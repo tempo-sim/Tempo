@@ -55,7 +55,6 @@ public:
 	UTempoLidar();
 
 	virtual void OnRegister() override;
-	virtual void TickComponent(float DeltaTime, enum ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 	// Begin ITempoSensorInterface
 	virtual FString GetOwnerName() const override;
