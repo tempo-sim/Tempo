@@ -19,7 +19,11 @@ setup(
         "protobuf==4.25.3",
         "opencv-python==4.10.0.84",
         "matplotlib==3.9.2",
-        "pynput==1.7.7"
+        "pynput==1.7.7",
+        "pyvista==0.46.1",
+        "pyvistaqt==0.11.3",
+        "qasync==0.27.1",
+        "PyQt5==5.15.11"
     ],
     python_requires='>3.9.0'
 )

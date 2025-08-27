@@ -5,6 +5,8 @@
 #include "TempoSensorsSettings.h"
 #include "TempoSensorsShared.h"
 
+#include "TempoSensorsShared/Common.pb.h"
+
 #include "TempoCoreSettings.h"
 
 #include "Engine/TextureRenderTarget2D.h"
@@ -17,6 +19,22 @@
 #include "ScenePrivate.h"
 #endif
 
+void FTextureRead::ExtractMeasurementHeader(float TransmissionTime, TempoSensorsShared::MeasurementHeader* MeasurementHeaderOut) const
+{
+	MeasurementHeaderOut->set_sequence_id(SequenceId);
+	MeasurementHeaderOut->set_capture_time(CaptureTime);
+	MeasurementHeaderOut->set_transmission_time(TransmissionTime);
+	MeasurementHeaderOut->set_sensor_name(TCHAR_TO_UTF8(*FString::Printf(TEXT("%s/%s"), *OwnerName, *SensorName)));
+	const FVector SensorLocation = QuantityConverter<CM2M, L2R>::Convert(SensorTransform.GetLocation());
+	const FRotator SensorRotation = QuantityConverter<Deg2Rad, L2R>::Convert(SensorTransform.Rotator());
+	MeasurementHeaderOut->mutable_sensor_transform()->mutable_location()->set_x(SensorLocation.X);
+	MeasurementHeaderOut->mutable_sensor_transform()->mutable_location()->set_y(SensorLocation.Y);
+	MeasurementHeaderOut->mutable_sensor_transform()->mutable_location()->set_z(SensorLocation.Z);
+	MeasurementHeaderOut->mutable_sensor_transform()->mutable_rotation()->set_p(SensorRotation.Pitch);
+	MeasurementHeaderOut->mutable_sensor_transform()->mutable_rotation()->set_r(SensorRotation.Roll);
+	MeasurementHeaderOut->mutable_sensor_transform()->mutable_rotation()->set_y(SensorRotation.Yaw);
+}
+
 UTempoSceneCaptureComponent2D::UTempoSceneCaptureComponent2D()
 {
 	PrimaryComponentTick.bStartWithTickEnabled = false;
@@ -28,11 +46,20 @@ UTempoSceneCaptureComponent2D::UTempoSceneCaptureComponent2D()
 	bAlwaysPersistRenderingState = true;
 }
 
-void UTempoSceneCaptureComponent2D::BeginPlay()
+void UTempoSceneCaptureComponent2D::Activate(bool bReset)
 {
-	Super::BeginPlay();
+	Super::Activate(bReset);
 
+	InitRenderTarget();
 	RestartCaptureTimer();
+}
+
+void UTempoSceneCaptureComponent2D::Deactivate()
+{
+	Super::Deactivate();
+
+	GetWorld()->GetTimerManager().ClearTimer(TimerHandle);
+	TextureReadQueue.Empty();
 }
 
 #if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
@@ -108,7 +135,7 @@ void UTempoSceneCaptureComponent2D::UpdateSceneCaptureContents(FSceneInterface* 
 	const int32 MaxTextureQueueSize = GetMaxTextureQueueSize();
 	if (MaxTextureQueueSize > 0 && TextureReadQueue.Num() > MaxTextureQueueSize)
 	{
-		UE_LOG(LogTempoSensorsShared, Warning, TEXT("Fell behind while reading frames from sensor %s owner %s. Skipping capture."), *GetSensorName(), *GetOwnerName());
+		UE_LOG(LogTempoSensorsShared, Warning, TEXT("Fell behind while reading frames from sensor %s. Skipping capture."), *GetName());
 		return;
 	}
 
@@ -133,24 +160,12 @@ void UTempoSceneCaptureComponent2D::UpdateSceneCaptureContents(FSceneInterface* 
 	TextureReadQueue.Enqueue(MakeTextureRead());
 }
 
-FString UTempoSceneCaptureComponent2D::GetOwnerName() const
-{
-	check(GetOwner());
-
-	return GetOwner()->GetActorNameOrLabel();
-}
-
-FString UTempoSceneCaptureComponent2D::GetSensorName() const
-{
-	return GetName();
-}
-
-bool UTempoSceneCaptureComponent2D::IsAwaitingRender()
+bool UTempoSceneCaptureComponent2D::IsNextReadAwaitingRender() const
 {
 	return TextureReadQueue.IsNextAwaitingRender();
 }
 
-void UTempoSceneCaptureComponent2D::OnRenderCompleted()
+void UTempoSceneCaptureComponent2D::ReadNextIfAvailable()
 {
 	if (!TextureReadQueue.IsNextAwaitingRender() || !RenderFence.IsValid())
 	{
@@ -183,23 +198,33 @@ void UTempoSceneCaptureComponent2D::OnRenderCompleted()
 	TextureReadQueue.ReadNext(RenderTarget, TextureRHICopy);
 }
 
-void UTempoSceneCaptureComponent2D::BlockUntilMeasurementsReady() const
+void UTempoSceneCaptureComponent2D::BlockUntilNextReadComplete() const
 {
 	TextureReadQueue.BlockUntilNextReadComplete();
 }
 
-TOptional<TFuture<void>> UTempoSceneCaptureComponent2D::SendMeasurements()
+TUniquePtr<FTextureRead> UTempoSceneCaptureComponent2D::DequeueIfReadComplete()
+{	
+	return TextureReadQueue.DequeueIfReadComplete();
+}
+
+TOptional<int32> UTempoSceneCaptureComponent2D::SequenceIDOfNextCompleteRead() const
+{	
+	return TextureReadQueue.SequenceIdOfNextCompleteRead();
+}
+
+bool UTempoSceneCaptureComponent2D::NextReadComplete() const
 {
-	if (TUniquePtr<FTextureRead> TextureRead = TextureReadQueue.DequeueIfReadComplete())
-	{
-		return DecodeAndRespond(MoveTemp(TextureRead));
-	}
-	
-	return TOptional<TFuture<void>>();
+	return TextureReadQueue.NextReadComplete();
 }
 
 void UTempoSceneCaptureComponent2D::InitRenderTarget()
 {
+	if (SizeXY.X == 0 || SizeXY.Y == 0)
+	{
+		return;
+	}
+
 	TextureTarget = NewObject<UTextureRenderTarget2D>(this);
 
 	TextureTarget->TargetGamma = GetDefault<UTempoSensorsSettings>()->GetSceneCaptureGamma();

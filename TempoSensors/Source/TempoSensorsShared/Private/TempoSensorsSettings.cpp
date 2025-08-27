@@ -5,7 +5,8 @@
 UTempoSensorsSettings::UTempoSensorsSettings()
 	:
 CameraPostProcessMaterialNoDepth(FSoftObjectPath(TEXT("/TempoSensors/Materials/M_CameraPostProcess_NoDepth.M_CameraPostProcess_NoDepth"))),
-CameraPostProcessMaterialWithDepth(FSoftObjectPath(TEXT("/TempoSensors/Materials/M_CameraPostProcess_WithDepth.M_CameraPostProcess_WithDepth")))
+CameraPostProcessMaterialWithDepth(FSoftObjectPath(TEXT("/TempoSensors/Materials/M_CameraPostProcess_WithDepth.M_CameraPostProcess_WithDepth"))),
+LidarPostProcessMaterial(FSoftObjectPath(TEXT("/TempoSensors/Materials/M_LidarPostProcess.M_LidarPostProcess")))
 {
 	CategoryName = TEXT("Tempo");
 }
