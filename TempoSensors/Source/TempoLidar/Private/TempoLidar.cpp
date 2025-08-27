@@ -371,18 +371,7 @@ void TTextureRead<FLidarPixel>::Decode(float TransmissionTime, TempoLidar::Lidar
 		}
 	}
 
-	ScanSegmentOut.mutable_header()->set_sequence_id(SequenceId);
-	ScanSegmentOut.mutable_header()->set_capture_time(CaptureTime);
-	ScanSegmentOut.mutable_header()->set_transmission_time(TransmissionTime);
-	ScanSegmentOut.mutable_header()->set_sensor_name(TCHAR_TO_UTF8(*FString::Printf(TEXT("%s/%s"), *OwnerName, *SensorName)));
-	const FVector SensorLocation = QuantityConverter<CM2M, L2R>::Convert(CaptureTransform.GetLocation());
-	const FRotator SensorRotation = QuantityConverter<Deg2Rad, L2R>::Convert(CaptureTransform.Rotator());
-	ScanSegmentOut.mutable_header()->mutable_sensor_transform()->mutable_location()->set_x(SensorLocation.X);
-	ScanSegmentOut.mutable_header()->mutable_sensor_transform()->mutable_location()->set_y(SensorLocation.Y);
-	ScanSegmentOut.mutable_header()->mutable_sensor_transform()->mutable_location()->set_z(SensorLocation.Z);
-	ScanSegmentOut.mutable_header()->mutable_sensor_transform()->mutable_rotation()->set_p(SensorRotation.Pitch);
-	ScanSegmentOut.mutable_header()->mutable_sensor_transform()->mutable_rotation()->set_r(SensorRotation.Roll);
-	ScanSegmentOut.mutable_header()->mutable_sensor_transform()->mutable_rotation()->set_y(SensorRotation.Yaw);
+	ExtractMeasurementHeader(TransmissionTime, ScanSegmentOut.mutable_header());
 
 	ScanSegmentOut.set_scan_count(NumCaptureComponents);
 	ScanSegmentOut.set_horizontal_beams(HorizontalBeams);

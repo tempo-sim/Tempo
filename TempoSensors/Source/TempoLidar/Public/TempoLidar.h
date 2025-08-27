@@ -3,6 +3,7 @@
 #pragma once
 
 #include "TempoSceneCaptureComponent2D.h"
+#include "TempoSensorInterface.h"
 
 #include "TempoLidar/Lidar.pb.h"
 
@@ -92,7 +93,7 @@ protected:
 	UPROPERTY(EditAnywhere, meta=(UIMin=0.0, ClampMin=0.0))
 	double MinDistance = 10.0; // 10cm
 
-	// The maximum distance this Lidar can measure.
+	// The maximum distance this Lidar can measure. Note that UTempoSensorsSettings::MaxLidarDepth must be greater than this value.
 	UPROPERTY(EditAnywhere, meta=(UIMin=0.0, ClampMin=0.0))
 	double MaxDistance = 10000.0; // 100m
 
@@ -140,11 +141,11 @@ struct TTextureRead<FLidarPixel> : TTextureReadBase<FLidarPixel>
 		const FString& SensorNameIn, const FTransform& SensorTransformIn, const FTransform& CaptureTransform,
 		double HorizontalFOVIn, double VerticalFOVIn, int32 HorizontalBeamsIn, int32 VerticalBeamsIn, const FVector2D& SizeXYFOVIn, double IntensitySaturationDistanceIn, double MaxAngleOfIncidenceIn,
 		int32 NumCaptureComponentsIn, double RelativeYawIn, float MinDepthIn, float MaxDepthIn, double MinDistanceIn, double MaxDistanceIn)
-		: TTextureReadBase(ImageSizeIn, SequenceIdIn, CaptureTimeIn, OwnerNameIn, SensorNameIn),
-			SensorTransform(SensorTransformIn), CaptureTransform(CaptureTransform), HorizontalFOV(HorizontalFOVIn),
-			VerticalFOV(VerticalFOVIn), HorizontalBeams(HorizontalBeamsIn), VerticalBeams(VerticalBeamsIn),
-			SizeXYFOV(SizeXYFOVIn), IntensitySaturationDistance(IntensitySaturationDistanceIn), MaxAngleOfIncidence(MaxAngleOfIncidenceIn),
-			NumCaptureComponents(NumCaptureComponentsIn), RelativeYaw(RelativeYawIn), MinDepth(MinDepthIn), MaxDepth(MaxDepthIn), MinDistance(MinDistanceIn), MaxDistance(MaxDistanceIn)
+		: TTextureReadBase(ImageSizeIn, SequenceIdIn, CaptureTimeIn, OwnerNameIn, SensorNameIn, SensorTransformIn),
+			CaptureTransform(CaptureTransform), HorizontalFOV(HorizontalFOVIn), VerticalFOV(VerticalFOVIn), HorizontalBeams(HorizontalBeamsIn),
+			VerticalBeams(VerticalBeamsIn), SizeXYFOV(SizeXYFOVIn), IntensitySaturationDistance(IntensitySaturationDistanceIn),
+			MaxAngleOfIncidence(MaxAngleOfIncidenceIn), NumCaptureComponents(NumCaptureComponentsIn), RelativeYaw(RelativeYawIn),
+			MinDepth(MinDepthIn), MaxDepth(MaxDepthIn), MinDistance(MinDistanceIn), MaxDistance(MaxDistanceIn)
 	{
 	}
 
@@ -152,7 +153,6 @@ struct TTextureRead<FLidarPixel> : TTextureReadBase<FLidarPixel>
 
 	void Decode(float TransmissionTime, TempoLidar::LidarScanSegment& ScanSegmentOut) const;
 
-	const FTransform SensorTransform;
 	const FTransform CaptureTransform;
 	double HorizontalFOV;
 	double VerticalFOV;

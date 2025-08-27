@@ -5,6 +5,8 @@
 #include "TempoSensorsSettings.h"
 #include "TempoSensorsShared.h"
 
+#include "TempoSensorsShared/Common.pb.h"
+
 #include "TempoCoreSettings.h"
 
 #include "Engine/TextureRenderTarget2D.h"
@@ -16,6 +18,22 @@
 #include "RayTracing/RayTracingScene.h"
 #include "ScenePrivate.h"
 #endif
+
+void FTextureRead::ExtractMeasurementHeader(float TransmissionTime, TempoSensorsShared::MeasurementHeader* MeasurementHeaderOut) const
+{
+	MeasurementHeaderOut->set_sequence_id(SequenceId);
+	MeasurementHeaderOut->set_capture_time(CaptureTime);
+	MeasurementHeaderOut->set_transmission_time(TransmissionTime);
+	MeasurementHeaderOut->set_sensor_name(TCHAR_TO_UTF8(*FString::Printf(TEXT("%s/%s"), *OwnerName, *SensorName)));
+	const FVector SensorLocation = QuantityConverter<CM2M, L2R>::Convert(SensorTransform.GetLocation());
+	const FRotator SensorRotation = QuantityConverter<Deg2Rad, L2R>::Convert(SensorTransform.Rotator());
+	MeasurementHeaderOut->mutable_sensor_transform()->mutable_location()->set_x(SensorLocation.X);
+	MeasurementHeaderOut->mutable_sensor_transform()->mutable_location()->set_y(SensorLocation.Y);
+	MeasurementHeaderOut->mutable_sensor_transform()->mutable_location()->set_z(SensorLocation.Z);
+	MeasurementHeaderOut->mutable_sensor_transform()->mutable_rotation()->set_p(SensorRotation.Pitch);
+	MeasurementHeaderOut->mutable_sensor_transform()->mutable_rotation()->set_r(SensorRotation.Roll);
+	MeasurementHeaderOut->mutable_sensor_transform()->mutable_rotation()->set_y(SensorRotation.Yaw);
+}
 
 UTempoSceneCaptureComponent2D::UTempoSceneCaptureComponent2D()
 {

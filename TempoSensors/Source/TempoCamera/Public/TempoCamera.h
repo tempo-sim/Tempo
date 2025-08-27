@@ -4,6 +4,7 @@
 
 #include "TempoCamera/Camera.pb.h"
 
+#include "TempoSensorInterface.h"
 #include "TempoSceneCaptureComponent2D.h"
 
 #include "TempoScriptingServer.h"
@@ -80,8 +81,9 @@ struct FDepthImageRequest
 template <>
 struct TTextureRead<FCameraPixelWithDepth> : TTextureReadBase<FCameraPixelWithDepth>
 {
-	TTextureRead(const FIntPoint& ImageSizeIn, int32 SequenceIdIn, double CaptureTimeIn, const FString& OwnerNameIn, const FString& SensorNameIn, float MinDepthIn, float MaxDepthIn)
-	   : TTextureReadBase(ImageSizeIn, SequenceIdIn, CaptureTimeIn, OwnerNameIn, SensorNameIn), MinDepth(MinDepthIn), MaxDepth(MaxDepthIn)
+	TTextureRead(const FIntPoint& ImageSizeIn, int32 SequenceIdIn, double CaptureTimeIn, const FString& OwnerNameIn,
+		const FString& SensorNameIn, const FTransform& SensorTransformIn, float MinDepthIn, float MaxDepthIn)
+	   : TTextureReadBase(ImageSizeIn, SequenceIdIn, CaptureTimeIn, OwnerNameIn, SensorNameIn, SensorTransformIn), MinDepth(MinDepthIn), MaxDepth(MaxDepthIn)
 	{
 	}
 	

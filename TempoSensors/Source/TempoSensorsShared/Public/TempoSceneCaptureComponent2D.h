@@ -2,13 +2,17 @@
 
 #pragma once
 
-#include "TempoSensorInterface.h"
-
 #include "CoreMinimal.h"
+#include "TempoConversion.h"
 #include "Components/SceneCaptureComponent2D.h"
 #include "Engine/TextureRenderTarget2D.h"
 
 #include "TempoSceneCaptureComponent2D.generated.h"
+
+namespace TempoSensorsShared
+{
+	class MeasurementHeader;
+}
 
 struct FTextureRead
 {
@@ -19,8 +23,10 @@ struct FTextureRead
 		EReadComplete = 2
 	};
 	
-	FTextureRead(const FIntPoint& ImageSizeIn, int32 SequenceIdIn, double CaptureTimeIn, const FString& OwnerNameIn, const FString& SensorNameIn)
-		: ImageSize(ImageSizeIn), SequenceId(SequenceIdIn), CaptureTime(CaptureTimeIn), OwnerName(OwnerNameIn), SensorName(SensorNameIn), State(State::EAwaitingRender) {}
+	FTextureRead(const FIntPoint& ImageSizeIn, int32 SequenceIdIn, double CaptureTimeIn, const FString& OwnerNameIn,
+		const FString& SensorNameIn, const FTransform& SensorTransformIn)
+		: ImageSize(ImageSizeIn), SequenceId(SequenceIdIn), CaptureTime(CaptureTimeIn), OwnerName(OwnerNameIn),
+			SensorName(SensorNameIn), SensorTransform(SensorTransformIn), State(State::EAwaitingRender) {}
 
 	virtual ~FTextureRead() {}
 
@@ -35,20 +41,24 @@ struct FTextureRead
 			FPlatformProcess::Sleep(1e-4);
 		}
 	}
-	
+
+	void TEMPOSENSORSSHARED_API ExtractMeasurementHeader(float TransmissionTime, TempoSensorsShared::MeasurementHeader* MeasurementHeaderOut) const;
+
 	FIntPoint ImageSize;
 	int32 SequenceId;
 	double CaptureTime;
 	const FString OwnerName;
 	const FString SensorName;
+	const FTransform SensorTransform;
 	TAtomic<State> State;
 };
 
 template <typename PixelType>
 struct TTextureReadBase : FTextureRead
 {
-	TTextureReadBase(const FIntPoint& ImageSizeIn, int32 SequenceIdIn, double CaptureTimeIn, const FString& OwnerNameIn, const FString& SensorNameIn)
-		: FTextureRead(ImageSizeIn, SequenceIdIn, CaptureTimeIn, OwnerNameIn, SensorNameIn)
+	TTextureReadBase(const FIntPoint& ImageSizeIn, int32 SequenceIdIn, double CaptureTimeIn, const FString& OwnerNameIn,
+		const FString& SensorNameIn, const FTransform& SensorTransformIn)
+		: FTextureRead(ImageSizeIn, SequenceIdIn, CaptureTimeIn, OwnerNameIn, SensorNameIn, SensorTransformIn)
 	{
 		Image.SetNumUninitialized(ImageSize.X * ImageSize.Y);
 	}
