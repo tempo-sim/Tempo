@@ -1,4 +1,4 @@
-﻿// TempoCategoryButtonWidget.h
+﻿// Copyright Tempo Simulation, LLC. All Rights Reserved
 
 #pragma once
 
