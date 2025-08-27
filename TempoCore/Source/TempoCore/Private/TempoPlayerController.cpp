@@ -97,36 +97,12 @@ void ATempoPlayerController::OnPossess(APawn* InPawn)
     }
     if (InPawn && InPawn != LevelSpectatorPawn)
     {
+        UE_LOG(LogTemp, Warning, TEXT("Possessed Pawn: %s of class %s"), *InPawn->GetActorNameOrLabel(), *InPawn->GetClass()->GetName());
         SetMouseCaptured(true); 
     }
     else
     {
         SetMouseCaptured(false);
-    }
-
-    if (ActiveSelectionLight)
-    {
-        ActiveSelectionLight->DestroyComponent();
-        ActiveSelectionLight = nullptr;
-    }
-
-    if (InPawn && InPawn != LevelSpectatorPawn)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Possessed Pawn: %s of class %s"), *InPawn->GetActorNameOrLabel(), *InPawn->GetClass()->GetName());
-       
-        ActiveSelectionLight = NewObject<USpotLightComponent>(InPawn);
-        if (ActiveSelectionLight)
-        {
-            ActiveSelectionLight->AttachToComponent(InPawn->GetRootComponent(), FAttachmentTransformRules::KeepRelativeTransform);
-            ActiveSelectionLight->SetRelativeLocation(FVector(0, 0, 200.0f));
-            ActiveSelectionLight->SetRelativeRotation(FRotator(-90, 0, 0));
-            ActiveSelectionLight->SetIntensity(5000.0f);
-            ActiveSelectionLight->SetLightColor(FLinearColor(0.0f, 0.0f, 0.8f));
-            ActiveSelectionLight->SetInnerConeAngle(15.0f);
-            ActiveSelectionLight->SetOuterConeAngle(25.0f);
-            ActiveSelectionLight->SetAttenuationRadius(500.0f);
-            ActiveSelectionLight->RegisterComponent();
-        }
     }
 }
 
@@ -173,12 +149,6 @@ void ATempoPlayerController::Tick(float DeltaTime)
 
 void ATempoPlayerController::OnUnPossess()
 {
-    if (ActiveSelectionLight)
-    {
-        ActiveSelectionLight->DestroyComponent();
-        ActiveSelectionLight = nullptr;
-    }
-    
     Super::OnUnPossess();
 }
 

@@ -1,4 +1,4 @@
-﻿// TempoMenuExpanderWidget.cpp
+﻿// Copyright Tempo Simulation, LLC. All Rights Reserved
 
 #include "TempoMenuExpanderWidget.h"
 #include "Components/Button.h"

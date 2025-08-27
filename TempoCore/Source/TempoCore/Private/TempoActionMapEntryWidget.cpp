@@ -1,4 +1,5 @@
-﻿#include "TempoActionMapEntryWidget.h"
+﻿// Copyright Tempo Simulation, LLC. All Rights Reserved
+#include "TempoActionMapEntryWidget.h"
 #include "Components/TextBlock.h"
 #include "Components/Button.h"
 

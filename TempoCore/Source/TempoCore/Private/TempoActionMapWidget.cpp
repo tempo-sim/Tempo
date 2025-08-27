@@ -1,5 +1,6 @@
-﻿#include "TempoActionMapWidget.h"
-#include "TempoActionMapEntryWidget.h" // Include the entry widget header
+﻿// Copyright Tempo Simulation, LLC. All Rights Reserved
+#include "TempoActionMapWidget.h"
+#include "TempoActionMapEntryWidget.h"
 #include "GameFramework/InputSettings.h"
 #include "Components/PanelWidget.h"
 #include "Components/TextBlock.h"

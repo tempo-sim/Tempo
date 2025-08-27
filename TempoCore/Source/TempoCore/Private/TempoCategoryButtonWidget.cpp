@@ -1,4 +1,4 @@
-﻿// TempoCategoryButtonWidget.cpp
+﻿// Copyright Tempo Simulation, LLC. All Rights Reserved
 
 #include "TempoCategoryButtonWidget.h"
 #include "Components/Button.h"
