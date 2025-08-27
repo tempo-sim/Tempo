@@ -3,7 +3,7 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
-#include "Input/Reply.h" // Needed for FReply
+#include "Input/Reply.h"
 #include "TempoPawnEntryWidget.generated.h"
 
 class APawn;

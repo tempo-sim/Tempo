@@ -13,10 +13,10 @@ class ASpectatorPawn;
 USTRUCT()
 struct FPawnGroup
 {
-	GENERATED_BODY()
+    GENERATED_BODY()
 
-	UPROPERTY()
-	TArray<APawn*> Pawns;
+    UPROPERTY()
+    TArray<APawn*> Pawns;
 };
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnPawnListUpdated);
@@ -27,42 +27,42 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnPawnListUpdated);
 UCLASS(Blueprintable)
 class TEMPOCORE_API ATempoPlayerController : public APlayerController
 {
-	GENERATED_BODY()
+    GENERATED_BODY()
 
 public:
-	ATempoPlayerController();
+    ATempoPlayerController();
 
-	virtual void OnPossess(APawn* InPawn) override;
+    virtual void OnPossess(APawn* InPawn) override;
 
-	virtual void OnUnPossess() override;
-	virtual void SetupInputComponent() override;
-	virtual void BeginPlay() override;
-	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
-	virtual void Tick(float DeltaTime) override;
+    virtual void OnUnPossess() override;
+    virtual void SetupInputComponent() override;
+    virtual void BeginPlay() override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+    virtual void Tick(float DeltaTime) override;
 
-	UFUNCTION(BlueprintCallable, Category = "Tempo")
-	void ToggleMouseCaptured();
+    UFUNCTION(BlueprintCallable, Category = "Tempo")
+    void ToggleMouseCaptured();
 
-	UFUNCTION(BlueprintCallable, Category = "Tempo")
-	void SetMouseCaptured(bool bCaptured);
-	
-	UFUNCTION(BlueprintPure, Category = "Tempo")
-	TArray<APawn*> GetAllPossessablePawns() const;
+    UFUNCTION(BlueprintCallable, Category = "Tempo")
+    void SetMouseCaptured(bool bCaptured);
+    
+    UFUNCTION(BlueprintPure, Category = "Tempo")
+    TArray<APawn*> GetAllPossessablePawns() const;
 
-	/** This event is broadcast whenever the pawn groups are updated. */
-	UPROPERTY(BlueprintAssignable, Category = "Events")
-	FOnPawnListUpdated OnPawnListUpdated;
+    /** This event is broadcast whenever the pawn groups are updated. */
+    UPROPERTY(BlueprintAssignable, Category = "Events")
+    FOnPawnListUpdated OnPawnListUpdated;
 
-	/**
-	* @brief Caches the current AI controller of a pawn before the player possesses it.
-	*/
-	void CacheAIController(APawn* PawnToPossess);
+    /**
+    * @brief Caches the current AI controller of a pawn before the player possesses it.
+    */
+    void CacheAIController(APawn* PawnToPossess);
 
 protected:
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Tempo")
-	bool bMouseCaptured = false;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Tempo")
+    bool bMouseCaptured = false;
 
-	// A map to hold all pawns, dynamically grouped by their specific UClass.
+    // A map to hold all pawns, dynamically grouped by their specific UClass.
     UPROPERTY()
     TMap<UClass*, FPawnGroup> PawnGroups;
 
@@ -94,6 +94,9 @@ protected:
 
     // Variable to track if the mouse is captured for gameplay
     bool bIsMouseCaptured;
+    
+    /** Tracks the current visibility state of the UI widgets. */
+    bool bAreWidgetsVisible = true;
     
     /**
      * @brief Finds all actors of class Pawn, groups them by subclass, and sorts them.
@@ -132,16 +135,21 @@ protected:
      */
     void SelectAndPossessPawn();
 
-	/**
-	 * Stores a reference to the original AI controller that was possessing a pawn
-	 * before the player took over. This acts as a "memory" to ensure the correct
-	 * AI can be restored when the player is done.
-	 */
-	UPROPERTY()
-	TMap<APawn*, AController*> AIControllerMap;
+    /**
+     * @brief Toggles the visibility of all user-created widgets on the screen.
+     */
+    void ToggleUIVisibility();
 
-	/**
-	 * @brief Forcibly possesses the level's SpectatorPawn.
-	 */
-	void EnterSpectatorMode();
+    /**
+     * Stores a reference to the original AI controller that was possessing a pawn
+     * before the player took over. This acts as a "memory" to ensure the correct
+     * AI can be restored when the player is done.
+     */
+    UPROPERTY()
+    TMap<APawn*, AController*> AIControllerMap;
+
+    /**
+     * @brief Forcibly possesses the level's SpectatorPawn.
+     */
+    void EnterSpectatorMode();
 };
