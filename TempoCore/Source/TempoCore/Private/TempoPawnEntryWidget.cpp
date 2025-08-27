@@ -1,13 +1,13 @@
-﻿// TempoPawnEntryWidget.cpp
+﻿// Copyright Tempo Simulation, LLC. All Rights Reserved
 #include "TempoPawnEntryWidget.h"
 #include "Components/TextBlock.h"
 #include "Components/Button.h"
 #include "GameFramework/Pawn.h"
-#include "GameFramework/SpectatorPawn.h" // Needed for the class check
+#include "GameFramework/SpectatorPawn.h"
 #include "Kismet/GameplayStatics.h"
-#include "TempoPlayerController.h" // Include your player controller header
-#include "TempoGameMode.h" // Needed to get the controller class and other rules
-#include "Engine/World.h" // Needed for GetWorld()
+#include "TempoPlayerController.h"
+#include "TempoGameMode.h"
+#include "Engine/World.h"
 #include "GameFramework/Controller.h" // Needed for AController
 
 void UTempoPawnEntryWidget::NativeConstruct()
@@ -89,7 +89,6 @@ FReply UTempoPawnEntryWidget::NativeOnMouseButtonDown(const FGeometry& MyGeometr
 
             if (NewPawn)
             {
-                // --- MODIFIED LOGIC: Get Controller Class from GameMode ---
                 TSubclassOf<AController> ControllerClassToSpawn = GameMode->GetOpenLoopControllerClass();
 
                 if (ControllerClassToSpawn)
