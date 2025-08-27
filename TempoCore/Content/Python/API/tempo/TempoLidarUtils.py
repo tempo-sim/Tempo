@@ -203,7 +203,7 @@ class PointCloudViewer:
             self.point_cloud = pv.PolyData(points)
             self.actor = self.plotter.add_points(
                 self.point_cloud,
-                point_size=2,
+                point_size=4,
                 render_points_as_spheres=False,
                 scalars=colors,
                 cmap='viridis',

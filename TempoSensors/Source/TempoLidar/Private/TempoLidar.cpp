@@ -159,12 +159,26 @@ void UTempoLidar::SyncCaptureComponent(UTempoLidarCaptureComponent* LidarCapture
 
 UTempoLidarCaptureComponent::UTempoLidarCaptureComponent()
 {
+	// Final Color? Necessary to use post-processing, which we need to pack normal, label, and depth very tight.
 	CaptureSource = ESceneCaptureSource::SCS_FinalColorLDR;
 	RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA16f;
 	PixelFormatOverride = EPixelFormat::PF_A16B16G16R16;
+
+	// Disable features that might distort the depth image.
 	ShowFlags.SetAntiAliasing(false);
 	ShowFlags.SetTemporalAA(false);
 	ShowFlags.SetMotionBlur(false);
+
+	// Disable as many unnecessary rendering features as possible.
+	ShowFlags.DisableFeaturesForUnlit(false);
+	ShowFlags.DisableAdvancedFeatures();
+	bUseRayTracingIfEnabled = false;
+
+	// But turn post-processing back on.
+	ShowFlags.SetPostProcessing(true);
+	ShowFlags.SetPostProcessMaterial(true);
+
+	// This component will be activated and deactivated by UTempoLidar.
 	bAutoActivate = false;
 }
 
