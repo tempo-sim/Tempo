@@ -16,7 +16,6 @@ void OptimizeShowFlagsForNoColor(FEngineShowFlags& ShowFlags)
 	ShowFlags.SetAmbientCubemap(false);
 	ShowFlags.SetEyeAdaptation(false);
 	ShowFlags.SetLensFlares(false);
-	ShowFlags.SetLensDistortion(false);
 	ShowFlags.SetGlobalIllumination(false);
 	ShowFlags.SetVignette(false);
 	ShowFlags.SetGrain(false);
@@ -36,7 +35,6 @@ void OptimizeShowFlagsForNoColor(FEngineShowFlags& ShowFlags)
 	ShowFlags.SetToneCurve(false);
 	ShowFlags.SetSeparateTranslucency(false);
 	ShowFlags.SetSeparateTranslucency(false);
-	ShowFlags.SetMegaLights(false);
 	ShowFlags.SetReflectionEnvironment(false);
 	ShowFlags.SetDiffuse(false);
 	ShowFlags.SetSpecular(false);
@@ -63,4 +61,9 @@ void OptimizeShowFlagsForNoColor(FEngineShowFlags& ShowFlags)
 	ShowFlags.SetFog(false);
 	ShowFlags.SetShaderPrint(false);
 	ShowFlags.SetVirtualShadowMapPersistentData(false);
+
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 5
+	ShowFlags.SetLensDistortion(false);
+	ShowFlags.SetMegaLights(false);
+#endif
 }
