@@ -335,5 +335,5 @@ void FTempoScriptingServer::HandleEventForTag(int32 Tag, bool bOk)
 
 TStatId FTempoScriptingServer::GetStatId() const
 {
-	RETURN_QUICK_DECLARE_CYCLE_STAT(FTempoScriptingServer, STATGROUP_Tickables);	
+	RETURN_QUICK_DECLARE_CYCLE_STAT(FTempoScriptingServer, STATGROUP_Tickables);
 }

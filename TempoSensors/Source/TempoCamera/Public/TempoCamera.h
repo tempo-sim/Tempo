@@ -4,6 +4,7 @@
 
 #include "TempoCamera/Camera.pb.h"
 
+#include "TempoSensorInterface.h"
 #include "TempoSceneCaptureComponent2D.h"
 
 #include "TempoScriptingServer.h"
@@ -16,11 +17,11 @@
 struct FCameraPixelNoDepth
 {
 	static constexpr bool bSupportsDepth = false; 
-	
+
 	uint8 B() const { return U1; }
 	uint8 G() const { return U2; }
 	uint8 R() const { return U3; }
-	
+
 	uint8 Label() const { return U4; }
 
 private:
@@ -35,13 +36,13 @@ private:
 struct FCameraPixelWithDepth
 {
 	static constexpr bool bSupportsDepth = true;
-	
+
 	uint8 B() const { return U3; }
 	uint8 G() const { return U2; }
 	uint8 R() const { return U1; }
-	
+
 	uint8 Label() const { return U4; }
-	
+
 	float Depth(float MinDepth, float MaxDepth, float MaxDiscretizedDepth) const
 	{
 		// We discretize inverse depth to give more consistent precision vs depth.
@@ -80,8 +81,9 @@ struct FDepthImageRequest
 template <>
 struct TTextureRead<FCameraPixelWithDepth> : TTextureReadBase<FCameraPixelWithDepth>
 {
-	TTextureRead(const FIntPoint& ImageSizeIn, int32 SequenceIdIn, double CaptureTimeIn, const FString& OwnerNameIn, const FString& SensorNameIn, float MinDepthIn, float MaxDepthIn)
-	   : TTextureReadBase(ImageSizeIn, SequenceIdIn, CaptureTimeIn, OwnerNameIn, SensorNameIn), MinDepth(MinDepthIn), MaxDepth(MaxDepthIn)
+	TTextureRead(const FIntPoint& ImageSizeIn, int32 SequenceIdIn, double CaptureTimeIn, const FString& OwnerNameIn,
+		const FString& SensorNameIn, const FTransform& SensorTransformIn, float MinDepthIn, float MaxDepthIn)
+	   : TTextureReadBase(ImageSizeIn, SequenceIdIn, CaptureTimeIn, OwnerNameIn, SensorNameIn, SensorTransformIn), MinDepth(MinDepthIn), MaxDepth(MaxDepthIn)
 	{
 	}
 	
@@ -116,7 +118,7 @@ struct TEMPOCAMERA_API FTempoCameraIntrinsics
 };
 
 UCLASS(Blueprintable, BlueprintType, ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TEMPOCAMERA_API UTempoCamera : public UTempoSceneCaptureComponent2D
+class TEMPOCAMERA_API UTempoCamera : public UTempoSceneCaptureComponent2D, public ITempoSensorInterface
 {
 	GENERATED_BODY()
 
@@ -139,18 +141,33 @@ public:
 
 	FTempoCameraIntrinsics GetIntrinsics() const;
 
+	// Begin ITempoSensorInterface
+	virtual FString GetOwnerName() const override;
+	virtual FString GetSensorName() const override;
+	virtual float GetRate() const override { return RateHz; }
+	virtual const TArray<TEnumAsByte<EMeasurementType>>& GetMeasurementTypes() const override { return MeasurementTypes; }
+	virtual bool IsAwaitingRender() override;
+	virtual void OnRenderCompleted() override;
+	virtual void BlockUntilMeasurementsReady() const override;
+	virtual TOptional<TFuture<void>> SendMeasurements() override;
+	// End ITempoSensorInterface
+
 protected:
 	virtual bool HasPendingRequests() const override;
 
 	virtual FTextureRead* MakeTextureRead() const override;
-
-	virtual TFuture<void> DecodeAndRespond(TUniquePtr<FTextureRead> TextureRead) override;
+	
+	virtual TFuture<void> DecodeAndRespond(TUniquePtr<FTextureRead> TextureRead);
 
 	virtual int32 GetMaxTextureQueueSize() const override;
 
 	void SetDepthEnabled(bool bDepthEnabledIn);
 
 	void ApplyDepthEnabled();
+
+	// The measurement types supported. Should be set in constructor of derived classes.
+	UPROPERTY(VisibleAnywhere)
+	TArray<TEnumAsByte<EMeasurementType>> MeasurementTypes;
 
 	// Whether this camera can measure depth. Disabled when not requested to optimize performance.
 	UPROPERTY(VisibleAnywhere, Category="Depth")
@@ -159,7 +176,7 @@ protected:
 	// The minimum depth this camera can measure (if depth is enabled). Will be set to the global near clip plane.
 	UPROPERTY(VisibleAnywhere, Category="Depth")
 	float MinDepth = 10.0; // 10cm
-	
+
 	// The maximum depth this camera can measure (if depth is enabled). Will be set to UTempoSensorsSettings::MaxCameraDepth.
 	UPROPERTY(VisibleAnywhere, Category="Depth")
 	float MaxDepth = 100000.0; // 1km

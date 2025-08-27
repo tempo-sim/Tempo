@@ -8,14 +8,9 @@
 
 #include "TempoLabelTypes.h"
 
-#include "Engine/TextureRenderTarget2D.h"
+#include "TempoSensorsConstants.h"
 
-namespace
-{
-	// This is the largest float less than the largest uint32 (2^32 - 1).
-	// We use it to discretize the depth buffer into a uint32 pixel.
-	constexpr float kMaxDiscreteDepth = 4294967040.0;
-}
+#include "Engine/TextureRenderTarget2D.h"
 
 FTempoCameraIntrinsics::FTempoCameraIntrinsics(const FIntPoint& SizeXY, float HorizontalFOV)
 	: Fx(SizeXY.X / 2.0 / FMath::Tan(FMath::DegreesToRadians(HorizontalFOV) / 2.0)),
@@ -83,10 +78,7 @@ void RespondToColorRequests(const TTextureRead<PixelType>* TextureRead, const TA
 		});
 		ColorImage.mutable_data()->assign(ImageData.begin(), ImageData.end());
 		ColorImage.set_encoding(ColorEncodingToProto(Encoding));
-		ColorImage.mutable_header()->set_sequence_id(TextureRead->SequenceId);
-		ColorImage.mutable_header()->set_capture_time(TextureRead->CaptureTime);
-		ColorImage.mutable_header()->set_transmission_time(TransmissionTime);
-		ColorImage.mutable_header()->set_sensor_name(TCHAR_TO_UTF8(*FString::Printf(TEXT("%s/%s"), *TextureRead->OwnerName, *TextureRead->SensorName)));
+		TextureRead->ExtractMeasurementHeader(TransmissionTime, ColorImage.mutable_header());
 	}
 
 	TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraRespondColor);
@@ -112,10 +104,7 @@ void RespondToLabelRequests(const TTextureRead<PixelType>* TextureRead, const TA
 			ImageData[Idx] = TextureRead->Image[Idx].Label();
 		});
 		LabelImage.mutable_data()->assign(ImageData.begin(), ImageData.end());
-		LabelImage.mutable_header()->set_sequence_id(TextureRead->SequenceId);
-		LabelImage.mutable_header()->set_capture_time(TextureRead->CaptureTime);
-		LabelImage.mutable_header()->set_transmission_time(TransmissionTime);
-		LabelImage.mutable_header()->set_sensor_name(TCHAR_TO_UTF8(*FString::Printf(TEXT("%s/%s"), *TextureRead->OwnerName, *TextureRead->SensorName)));
+		TextureRead->ExtractMeasurementHeader(TransmissionTime, LabelImage.mutable_header());
 	}
 
 	TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraRespondLabel);
@@ -156,12 +145,9 @@ void TTextureRead<FCameraPixelWithDepth>::RespondToRequests(const TArray<FDepthI
 		DepthImage.mutable_depths()->Resize(ImageSize.X * ImageSize.Y, 0.0);
 		ParallelFor(Image.Num(), [&DepthImage, this](int32 Idx)
 		{
-			DepthImage.set_depths(Idx, Image[Idx].Depth(MinDepth, MaxDepth, kMaxDiscreteDepth));
+			DepthImage.set_depths(Idx, Image[Idx].Depth(MinDepth, MaxDepth, GTempo_Max_Discrete_Depth));
 		});
-		DepthImage.mutable_header()->set_sequence_id(SequenceId);
-		DepthImage.mutable_header()->set_capture_time(CaptureTime);
-		DepthImage.mutable_header()->set_transmission_time(TransmissionTime);
-		DepthImage.mutable_header()->set_sensor_name(TCHAR_TO_UTF8(*FString::Printf(TEXT("%s/%s"), *OwnerName, *SensorName)));
+		ExtractMeasurementHeader(TransmissionTime, DepthImage.mutable_header());
 	}
 
 	TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraRespondDepth);
@@ -243,6 +229,45 @@ FTempoCameraIntrinsics UTempoCamera::GetIntrinsics() const
 	return FTempoCameraIntrinsics(SizeXY, FOVAngle);
 }
 
+FString UTempoCamera::GetOwnerName() const
+{
+	check(GetOwner());
+
+	return GetOwner()->GetActorNameOrLabel();
+}
+
+FString UTempoCamera::GetSensorName() const
+{
+	return GetName();
+}
+
+bool UTempoCamera::IsAwaitingRender()
+{
+	return IsNextReadAwaitingRender();
+}
+
+void UTempoCamera::OnRenderCompleted()
+{
+	ReadNextIfAvailable();
+}
+
+void UTempoCamera::BlockUntilMeasurementsReady() const
+{
+	BlockUntilNextReadComplete();
+}
+
+TOptional<TFuture<void>> UTempoCamera::SendMeasurements()
+{
+	TOptional<TFuture<void>> Future;
+
+	if (TUniquePtr<FTextureRead> TextureRead = DequeueIfReadComplete())
+	{
+		Future = DecodeAndRespond(MoveTemp(TextureRead));
+	}
+
+	return Future;
+}
+
 bool UTempoCamera::HasPendingRequests() const
 {
 	return !PendingColorImageRequests.IsEmpty() || !PendingLabelImageRequests.IsEmpty() || !PendingDepthImageRequests.IsEmpty();
@@ -253,8 +278,8 @@ FTextureRead* UTempoCamera::MakeTextureRead() const
 	check(GetWorld());
 
 	return bDepthEnabled ?
-		static_cast<FTextureRead*>(new TTextureRead<FCameraPixelWithDepth>(SizeXY, SequenceId, GetWorld()->GetTimeSeconds(), GetOwnerName(), GetSensorName(), MinDepth, MaxDepth)):
-		static_cast<FTextureRead*>(new TTextureRead<FCameraPixelNoDepth>(SizeXY, SequenceId, GetWorld()->GetTimeSeconds(), GetOwnerName(), GetSensorName()));
+		static_cast<FTextureRead*>(new TTextureRead<FCameraPixelWithDepth>(SizeXY, SequenceId, GetWorld()->GetTimeSeconds(), GetOwnerName(), GetSensorName(), GetComponentTransform(), MinDepth, MaxDepth)):
+		static_cast<FTextureRead*>(new TTextureRead<FCameraPixelNoDepth>(SizeXY, SequenceId, GetWorld()->GetTimeSeconds(), GetOwnerName(), GetSensorName(), GetComponentTransform()));
 }
 
 TFuture<void> UTempoCamera::DecodeAndRespond(TUniquePtr<FTextureRead> TextureRead)
@@ -323,7 +348,7 @@ void UTempoCamera::ApplyDepthEnabled()
 	{
 		RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA16f;
 		PixelFormatOverride = EPixelFormat::PF_A16B16G16R16;
-		
+
 		if (const TObjectPtr<UMaterialInterface> PostProcessMaterialWithDepth = GetDefault<UTempoSensorsSettings>()->GetCameraPostProcessMaterialWithDepth())
 		{
 			PostProcessMaterialInstance = UMaterialInstanceDynamic::Create(PostProcessMaterialWithDepth.Get(), this);
@@ -331,7 +356,7 @@ void UTempoCamera::ApplyDepthEnabled()
 			MaxDepth = TempoSensorsSettings->GetMaxCameraDepth();
 			PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MinDepth"), MinDepth);
 			PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MaxDepth"), MaxDepth);
-			PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MaxDiscreteDepth"), kMaxDiscreteDepth);
+			PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MaxDiscreteDepth"), GTempo_Max_Discrete_Depth);
 		}
 		else
 		{
@@ -376,7 +401,7 @@ void UTempoCamera::ApplyDepthEnabled()
 			}
 		});
 	}
-	
+
 	if (PostProcessMaterialInstance)
 	{
 		if (OverridableLabel.IsSet() && OverridingLabel.IsSet())
@@ -387,7 +412,6 @@ void UTempoCamera::ApplyDepthEnabled()
 		else
 		{
 			PostProcessMaterialInstance->SetScalarParameterValue(TEXT("OverridingLabel"), 0.0);
-
 		}
 		PostProcessSettings.WeightedBlendables.Array.Empty();
 		PostProcessSettings.WeightedBlendables.Array.Init(FWeightedBlendable(1.0, PostProcessMaterialInstance), 1);
