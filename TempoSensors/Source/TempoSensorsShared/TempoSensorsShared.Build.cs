@@ -12,8 +12,11 @@ public class TempoSensorsShared : TempoModuleRules
         PublicDependencyModuleNames.AddRange(
             new string[]
             {
+                // Unreal
                 "Core",
                 "Engine",
+                // Tempo
+                "TempoCoreShared",
             }
         );
 

@@ -2,13 +2,17 @@
 
 #pragma once
 
-#include "TempoSensorInterface.h"
-
 #include "CoreMinimal.h"
+#include "TempoConversion.h"
 #include "Components/SceneCaptureComponent2D.h"
 #include "Engine/TextureRenderTarget2D.h"
 
 #include "TempoSceneCaptureComponent2D.generated.h"
+
+namespace TempoSensorsShared
+{
+	class MeasurementHeader;
+}
 
 struct FTextureRead
 {
@@ -19,8 +23,10 @@ struct FTextureRead
 		EReadComplete = 2
 	};
 	
-	FTextureRead(const FIntPoint& ImageSizeIn, int32 SequenceIdIn, double CaptureTimeIn, const FString& OwnerNameIn, const FString& SensorNameIn)
-		: ImageSize(ImageSizeIn), SequenceId(SequenceIdIn), CaptureTime(CaptureTimeIn), OwnerName(OwnerNameIn), SensorName(SensorNameIn), State(State::EAwaitingRender) {}
+	FTextureRead(const FIntPoint& ImageSizeIn, int32 SequenceIdIn, double CaptureTimeIn, const FString& OwnerNameIn,
+		const FString& SensorNameIn, const FTransform& SensorTransformIn)
+		: ImageSize(ImageSizeIn), SequenceId(SequenceIdIn), CaptureTime(CaptureTimeIn), OwnerName(OwnerNameIn),
+			SensorName(SensorNameIn), SensorTransform(SensorTransformIn), State(State::EAwaitingRender) {}
 
 	virtual ~FTextureRead() {}
 
@@ -35,20 +41,24 @@ struct FTextureRead
 			FPlatformProcess::Sleep(1e-4);
 		}
 	}
-	
+
+	void TEMPOSENSORSSHARED_API ExtractMeasurementHeader(float TransmissionTime, TempoSensorsShared::MeasurementHeader* MeasurementHeaderOut) const;
+
 	FIntPoint ImageSize;
 	int32 SequenceId;
 	double CaptureTime;
 	const FString OwnerName;
 	const FString SensorName;
+	const FTransform SensorTransform;
 	TAtomic<State> State;
 };
 
 template <typename PixelType>
 struct TTextureReadBase : FTextureRead
 {
-	TTextureReadBase(const FIntPoint& ImageSizeIn, int32 SequenceIdIn, double CaptureTimeIn, const FString& OwnerNameIn, const FString& SensorNameIn)
-		   : FTextureRead(ImageSizeIn, SequenceIdIn, CaptureTimeIn, OwnerNameIn, SensorNameIn)
+	TTextureReadBase(const FIntPoint& ImageSizeIn, int32 SequenceIdIn, double CaptureTimeIn, const FString& OwnerNameIn,
+		const FString& SensorNameIn, const FTransform& SensorTransformIn)
+		: FTextureRead(ImageSizeIn, SequenceIdIn, CaptureTimeIn, OwnerNameIn, SensorNameIn, SensorTransformIn)
 	{
 		Image.SetNumUninitialized(ImageSize.X * ImageSize.Y);
 	}
@@ -79,10 +89,10 @@ struct TTextureReadBase : FTextureRead
 		GDynamicRHI->RHIMapStagingSurface(TextureRHICopy, Fence, OutBuffer, SurfaceWidth, SurfaceHeight, RHICmdList.GetGPUMask().ToIndex());
 		FMemory::Memcpy(Image.GetData(), OutBuffer, SurfaceWidth * SurfaceHeight * sizeof(PixelType));
 		RHICmdList.UnmapStagingSurface(TextureRHICopy);
-		
+
 		State = State::EReadComplete;
 	}
-	
+
 	TArray<PixelType> Image;
 };
 
@@ -192,37 +202,43 @@ struct FTextureReadQueue
 		return nullptr;
 	}
 
+	TOptional<int32> SequenceIdOfNextCompleteRead() const
+	{
+		FRWScopeLock_OnlyGTWrite ReadLock(Lock, SLT_ReadOnly);
+		if (!PendingTextureReads.IsEmpty() && PendingTextureReads[0]->State == FTextureRead::State::EReadComplete)
+		{
+			return PendingTextureReads[0]->SequenceId;
+		}
+		return TOptional<int32>();
+	}
+
+	bool NextReadComplete() const
+	{
+		FRWScopeLock_OnlyGTWrite ReadLock(Lock, SLT_ReadOnly);
+		return !PendingTextureReads.IsEmpty() && PendingTextureReads[0]->State == FTextureRead::State::EReadComplete;
+	}
+
 private:
 	TArray<TUniquePtr<FTextureRead>> PendingTextureReads;
 	mutable FRWLock Lock;
 };
 
 UCLASS(Abstract)
-class TEMPOSENSORSSHARED_API UTempoSceneCaptureComponent2D : public USceneCaptureComponent2D, public ITempoSensorInterface
+class TEMPOSENSORSSHARED_API UTempoSceneCaptureComponent2D : public USceneCaptureComponent2D
 {
 	GENERATED_BODY()
 
 public:
 	UTempoSceneCaptureComponent2D();
 
-	virtual void BeginPlay() override;
+	virtual void Activate(bool bReset) override;
+	virtual void Deactivate() override;
 
 #if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 	virtual void UpdateSceneCaptureContents(FSceneInterface* Scene) override;
 #else
 	virtual void UpdateSceneCaptureContents(FSceneInterface* Scene, ISceneRenderBuilder& SceneRenderBuilder) override;
 #endif
-
-	// Begin ITempoSensorInterface
-	virtual FString GetOwnerName() const override;
-	virtual FString GetSensorName() const override;
-	virtual float GetRate() const override { return RateHz; }
-	virtual const TArray<TEnumAsByte<EMeasurementType>>& GetMeasurementTypes() const override { return MeasurementTypes; }
-	virtual bool IsAwaitingRender() override;
-	virtual void OnRenderCompleted() override;
-	virtual void BlockUntilMeasurementsReady() const override;
-	virtual TOptional<TFuture<void>> SendMeasurements() override;
-	// End ITempoSensorInterface
 
 protected:
 	// Derived components must override this to return whether they have pending requests.
@@ -231,11 +247,15 @@ protected:
 	// Derived components must override this to create new texture reads, based on their current settings, to be enqueued.
 	virtual FTextureRead* MakeTextureRead() const PURE_VIRTUAL(UTempoSceneCaptureComponent2D::MakeTextureRead, return nullptr; );
 
-	// Derived components must override this to decode a completed texture read and use it to respond to pending requests.
-	virtual TFuture<void> DecodeAndRespond(TUniquePtr<FTextureRead> TextureRead) PURE_VIRTUAL(UTempoSceneCaptureComponent2D::DecodeAndRespond, return TFuture<void>(); );
-
 	// Derived components may override this to limit the size of the texture queue.
 	virtual int32 GetMaxTextureQueueSize() const { return -1; }
+
+	bool IsNextReadAwaitingRender() const;
+	void ReadNextIfAvailable();
+	void BlockUntilNextReadComplete() const;
+	TUniquePtr<FTextureRead> DequeueIfReadComplete();
+	TOptional<int32> SequenceIDOfNextCompleteRead() const;
+	bool NextReadComplete() const;
 
 	// Derived components may set this to use a non-default render target format.
 	UPROPERTY(VisibleAnywhere)
@@ -249,10 +269,6 @@ protected:
 	UPROPERTY(EditAnywhere)
 	float RateHz = 10.0;
 
-	// The measurement types supported. Should be set in constructor of derived classes.
-	UPROPERTY(VisibleAnywhere)
-	TArray<TEnumAsByte<EMeasurementType>> MeasurementTypes;
-
 	// Capture resolution.
 	UPROPERTY(EditAnywhere)
 	FIntPoint SizeXY = FIntPoint(960, 540);
@@ -263,6 +279,9 @@ protected:
 
 	// Initialize our RenderTarget and TextureRHICopy with the current settings.
 	void InitRenderTarget();
+
+	// Gets the number of pending texture reads
+	int32 NumPendingTextureReads() const { return TextureReadQueue.Num(); }
 
 private:
 	// Starts or restarts the timer that calls MaybeCapture

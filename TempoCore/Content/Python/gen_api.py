@@ -138,6 +138,7 @@ def generate_tempo_api(root_dir):
     potentially_stale_files.remove(".gitignore")
     potentially_stale_files.remove("_tempo_context.py")
     potentially_stale_files.remove("TempoImageUtils.py")
+    potentially_stale_files.remove("TempoLidarUtils.py")
     potentially_stale_files.remove("__init__.py")
     tempo_module_names = [name for name in os.listdir(root_dir) if os.path.isdir(os.path.join(root_dir, name))]
     for tempo_module_name in tempo_module_names:
