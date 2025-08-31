@@ -9,7 +9,7 @@
 #include "TempoDebrisParameterComponent.generated.h"
 
 USTRUCT(BlueprintType)
-struct TEMPODEBRIS_API FTempoDebrisParameters: public FTableRowBase
+struct TEMPOPCG_API FTempoDebrisParameters: public FTableRowBase
 {
 	GENERATED_BODY()
 
@@ -75,7 +75,7 @@ struct TEMPODEBRIS_API FTempoDebrisParameters: public FTableRowBase
 };
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TEMPODEBRIS_API UTempoDebrisParameterComponent : public UActorComponent
+class TEMPOPCG_API UTempoDebrisParameterComponent : public UActorComponent
 {
 	GENERATED_BODY()
 

@@ -2,7 +2,7 @@
 
 #include "TempoDebrisParameterComponent.h"
 
-#include "TempoDebris.h"
+#include "TempoPCG.h"
 
 #include "PCGComponent.h"
 #include "PCGGraph.h"
@@ -14,7 +14,7 @@ bool MaybeSetGraphParameter(UPCGGraphInterface* GraphInterface, const FName& Par
 	TValueOrError<T, EPropertyBagResult> ValueOrError = GraphInterface->GetGraphParameter<T>(ParameterName);
 	if (!ValueOrError.HasValue())
 	{
-		UE_LOG(LogTempoDebris, Error, TEXT("Error while getting graph property value: %d"), ValueOrError.GetError())
+		UE_LOG(LogTempoPCG, Error, TEXT("Error while getting graph property value: %d"), ValueOrError.GetError())
 		return false;
 	}
 	if (ValueOrError.GetValue() == Value)
@@ -24,7 +24,7 @@ bool MaybeSetGraphParameter(UPCGGraphInterface* GraphInterface, const FName& Par
 	EPropertyBagResult SetResult = GraphInterface->SetGraphParameter(ParameterName, Value);
 	if (SetResult != EPropertyBagResult::Success)
 	{
-		UE_LOG(LogTempoDebris, Error, TEXT("Error while setting graph property value: %d"), SetResult)
+		UE_LOG(LogTempoPCG, Error, TEXT("Error while setting graph property value: %d"), SetResult)
 		return false;
 	}
 	return true;
@@ -37,7 +37,7 @@ bool MaybeSetGraphParameterPtr(UPCGGraphInterface* GraphInterface, const FName& 
 	TValueOrError<T*, EPropertyBagResult> ValueOrError = GraphInterface->GetGraphParameter<T*>(ParameterName);
 	if (!ValueOrError.HasValue())
 	{
-		UE_LOG(LogTempoDebris, Error, TEXT("Error while getting graph property value: %d"), ValueOrError.GetError())
+		UE_LOG(LogTempoPCG, Error, TEXT("Error while getting graph property value: %d"), ValueOrError.GetError())
 		return false;
 	}
 	if (*ValueOrError.GetValue() == Value)
@@ -47,7 +47,7 @@ bool MaybeSetGraphParameterPtr(UPCGGraphInterface* GraphInterface, const FName& 
 	EPropertyBagResult SetResult = GraphInterface->SetGraphParameter(ParameterName, Value);
 	if (SetResult != EPropertyBagResult::Success)
 	{
-		UE_LOG(LogTempoDebris, Error, TEXT("Error while setting graph property value: %d"), SetResult)
+		UE_LOG(LogTempoPCG, Error, TEXT("Error while setting graph property value: %d"), SetResult)
 		return false;
 	}
 	return true;
@@ -72,7 +72,7 @@ void UTempoDebrisParameterComponent::SyncPCGParameters(const FTempoDebrisParamet
 		UPCGGraphInstance* GraphInstance = TargetedPCGComponent->GetGraphInstance();
 		if (!GraphInstance)
 		{
-			UE_LOG(LogTempoDebris, Warning, TEXT("No PCG graph instance on PCG component with tag %s in TempoDebrisParameterComponent"), *Params.TargetPCGComponentTag.ToString());
+			UE_LOG(LogTempoPCG, Warning, TEXT("No PCG graph instance on PCG component with tag %s in TempoDebrisParameterComponent"), *Params.TargetPCGComponentTag.ToString());
 			continue;
 		}
 

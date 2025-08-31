@@ -3,9 +3,9 @@
 #include "CoreMinimal.h"
 #include "Modules/ModuleManager.h"
 
-DECLARE_LOG_CATEGORY_EXTERN(LogTempoDebris, Log, All);
+DECLARE_LOG_CATEGORY_EXTERN(LogTempoPCG, Log, All);
 
-class FTempoDebrisModule : public IModuleInterface
+class FTempoPCGModule : public IModuleInterface
 {
 public:
     virtual void StartupModule() override;
