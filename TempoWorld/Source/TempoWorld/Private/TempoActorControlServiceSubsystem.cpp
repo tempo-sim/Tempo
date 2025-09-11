@@ -1469,6 +1469,12 @@ template<>
 grpc::Status SetPropertyImpl<SetClassPropertyRequest>(const UWorld* World, const SetClassPropertyRequest& Request)
 {
 	const FString ClassName(UTF8_TO_TCHAR(Request.value().c_str()));
+
+	if (ClassName.IsEmpty())
+	{
+		return SetSinglePropertyImpl<FObjectProperty>(World, Request, nullptr);
+	}
+
 	UClass* Class = GetSubClassWithName<UObject>(ClassName);
 	if (!Class)
 	{
@@ -1481,6 +1487,12 @@ template<>
 grpc::Status SetPropertyImpl<SetAssetPropertyRequest>(const UWorld* World, const SetAssetPropertyRequest& Request)
 {
 	const FString AssetPath(UTF8_TO_TCHAR(Request.value().c_str()));
+
+	if (AssetPath.IsEmpty())
+	{
+		return SetSinglePropertyImpl<FObjectProperty>(World, Request, nullptr);
+	}
+
 	UObject* Asset = GetAssetByPath(AssetPath);
 	if (!Asset)
 	{
@@ -1493,6 +1505,12 @@ template<>
 grpc::Status SetPropertyImpl<SetActorPropertyRequest>(const UWorld* World, const SetActorPropertyRequest& Request)
 {
 	const FString ActorName(UTF8_TO_TCHAR(Request.value().c_str()));
+
+	if (ActorName.IsEmpty())
+	{
+		return SetSinglePropertyImpl<FObjectProperty>(World, Request, nullptr);
+	}
+
 	AActor* Actor = GetActorWithName(World, ActorName);
 	if (!Actor)
 	{
@@ -1505,6 +1523,12 @@ template<>
 grpc::Status SetPropertyImpl<SetComponentPropertyRequest>(const UWorld* World, const SetComponentPropertyRequest& Request)
 {
 	const FString FullName(UTF8_TO_TCHAR(Request.value().c_str()));
+
+	if (FullName.IsEmpty())
+	{
+		return SetSinglePropertyImpl<FObjectProperty>(World, Request, nullptr);
+	}
+
 	FString ActorName;
 	FString ComponentName;
 	FullName.Split(TEXT(":"), &ActorName, &ComponentName);
