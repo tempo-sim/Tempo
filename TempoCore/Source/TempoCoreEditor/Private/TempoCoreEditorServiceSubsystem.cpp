@@ -122,7 +122,10 @@ void UTempoCoreEditorServiceSubsystem::SaveLevel(const SaveLevelRequest& Request
 			}
 		}
 	}
-	
+
+	// Always collect garbage before saving.
+	CollectGarbage(EObjectFlags::RF_NoFlags);
+
 	if (!FEditorFileUtils::SaveMap(GetEditorWorld(), RequestedPath))
 	{
 		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::UNKNOWN, "Failed to save map"));
