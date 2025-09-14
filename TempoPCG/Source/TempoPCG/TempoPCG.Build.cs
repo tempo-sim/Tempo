@@ -1,8 +1,8 @@
 ﻿using UnrealBuildTool;
 
-public class TempoDebris : ModuleRules
+public class TempoPCG : ModuleRules
 {
-    public TempoDebris(ReadOnlyTargetRules Target) : base(Target)
+    public TempoPCG(ReadOnlyTargetRules Target) : base(Target)
     {
         PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
 
@@ -21,7 +21,7 @@ public class TempoDebris : ModuleRules
                 "PCG",
                 "Slate",
                 "SlateCore",
-                "TempoCoreShared",
+                "TempoCoreShared"
             }
         );
     }
