@@ -4,7 +4,7 @@
 
 #include "Kismet/BlueprintFunctionLibrary.h"
 
-#include "TempoDebrisUtils.generated.h"
+#include "TempoPCGUtils.generated.h"
 
 class USplineComponent;
 class UFoliageType;
@@ -38,10 +38,10 @@ struct FHISMSplineInstanceInfo
 };
 
 UCLASS()
-class TEMPODEBRIS_API UTempoDebrisUtils : public UBlueprintFunctionLibrary
+class TEMPOPCG_API UTempoPCGUtils : public UBlueprintFunctionLibrary
 {
 	GENERATED_BODY()
 public:
-	UFUNCTION(BlueprintCallable, Category = "TempoDebris|Utils", meta = (WorldContext = "WorldContextObject"))
+	UFUNCTION(BlueprintCallable, Category = "TempoPCG|Utils", meta = (WorldContext = "WorldContextObject"))
 	static void SpawnHISMInstancesAlongSpline(USplineComponent* Spline, UHierarchicalInstancedStaticMeshComponent* HISMComponent, const FHISMSplineInstanceInfo& HISMSplineInstanceInfo);
 };

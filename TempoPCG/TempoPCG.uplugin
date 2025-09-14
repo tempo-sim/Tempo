@@ -2,8 +2,8 @@
 	"FileVersion": 3,
 	"Version": 1,
 	"VersionName": "1.0",
-	"FriendlyName": "TempoWorld",
-	"Description": "Services for querying and controlling the state of the simulated world",
+	"FriendlyName": "TempoPCG",
+	"Description": "",
 	"Category": "Tempo",
 	"CreatedBy": "Tempo Simulation, LLC",
 	"CreatedByURL": "https://temposimulation.com",
@@ -15,35 +15,18 @@
 	"Installed": false,
 	"Modules": [
 		{
-			"Name": "TempoWorld",
-			"Type": "Runtime",
-			"LoadingPhase": "Default"
-		},
-		{
-			"Name": "TempoMapQuery",
+			"Name": "TempoPCG",
 			"Type": "Runtime",
 			"LoadingPhase": "Default"
 		}
 	],
 	"Plugins": [
 		{
-			"Name": "MassGameplay",
+			"Name": "PCG",
 			"Enabled": true
 		},
 		{
 			"Name": "TempoCore",
-			"Enabled": true
-		},
-		{
-			"Name": "TempoMovement",
-			"Enabled": true
-		},
-		{
-			"Name": "Traffic",
-			"Enabled": true
-		},
-		{
-			"Name": "ZoneGraph",
 			"Enabled": true
 		}
 	]

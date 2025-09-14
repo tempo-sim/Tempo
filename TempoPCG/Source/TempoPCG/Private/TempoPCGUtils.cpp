@@ -1,13 +1,13 @@
 // Copyright Tempo Simulation, LLC. All Rights Reserved
 
-#include "TempoDebrisUtils.h"
+#include "TempoPCGUtils.h"
 
 #include "Components/SplineComponent.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
 
 #include "Kismet/KismetMathLibrary.h"
 
-void UTempoDebrisUtils::SpawnHISMInstancesAlongSpline(USplineComponent* Spline, UHierarchicalInstancedStaticMeshComponent* HISMComponent, const FHISMSplineInstanceInfo& HISMSplineInstanceInfo)
+void UTempoPCGUtils::SpawnHISMInstancesAlongSpline(USplineComponent* Spline, UHierarchicalInstancedStaticMeshComponent* HISMComponent, const FHISMSplineInstanceInfo& HISMSplineInstanceInfo)
 {
 	if (!Spline || !HISMComponent || !HISMSplineInstanceInfo.StaticMesh)
 	{
