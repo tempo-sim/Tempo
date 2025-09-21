@@ -65,7 +65,7 @@ if [[ "$OSTYPE" = "msys" ]]; then
   DOTNET=$(find ./Engine/Binaries/ThirdParty/DotNet -type f -name dotnet.exe)
 elif [[ "$OSTYPE" = "darwin"* ]]; then
   DOTNETS=$(find ./Engine/Binaries/ThirdParty/DotNet -type f -name dotnet)
-  ARCH=$(arch)
+  ARCH=$(uname -m)
   if [[ "$ARCH" = "arm64" ]]; then
     DOTNET=$(echo "${DOTNETS[@]}" | grep -E "mac-arm64/dotnet")
   elif [[ "$ARCH" = "i386" ]]; then
@@ -77,7 +77,7 @@ elif [[ "$OSTYPE" = "linux-gnu"* ]]; then
     # In UE 5.4 there is only one dotnet on Linux. 5.5 added arm64 support.
     DOTNET="$DOTNETS"
   else
-    ARCH=$(arch)
+    ARCH=$(uname -m)
     if [[ "$ARCH" = "arm64" ]]; then
       DOTNET=$(echo "${DOTNETS[@]}" | grep -E "linux-arm64/dotnet")
     elif [[ "$ARCH" = "x86_64" ]]; then
