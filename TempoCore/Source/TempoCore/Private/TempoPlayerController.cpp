@@ -4,35 +4,43 @@
 #include "Kismet/GameplayStatics.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/SpectatorPawn.h"
+#include "GameFramework/PlayerController.h" 
 #include "Components/InputComponent.h"
 #include "TimerManager.h"
 #include "Engine/World.h"
 #include "TempoGameMode.h"
 #include "Blueprint/UserWidget.h"
 #include "Blueprint/WidgetBlueprintLibrary.h"
+#include "Framework/Application/SlateApplication.h"
 
 ATempoPlayerController::ATempoPlayerController()
 {
     AutoReceiveInput = EAutoReceiveInput::Player0;
     InputPriority = 0;
+    HoverCursorWidgetInstance = nullptr;
 }
 
 void ATempoPlayerController::BeginPlay()
 {
     Super::BeginPlay();
     ActiveGroupIndex = 0;
-    
-    // Start with the mouse uncaptured for UI interaction.
     bIsMouseCaptured = false;
+    
     FInputModeGameAndUI InputMode;
     InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
     InputMode.SetHideCursorDuringCapture(false);
     SetInputMode(InputMode);
+    
     bShowMouseCursor = true;
     
     UpdatePawnGroups();
     OnActorSpawnedDelegateHandle = GetWorld()->AddOnActorSpawnedHandler(FOnActorSpawned::FDelegate::CreateUObject(this, &ATempoPlayerController::OnActorSpawnedHandler));
     OnActorDestroyedDelegateHandle = GetWorld()->AddOnActorDestroyedHandler(FOnActorDestroyed::FDelegate::CreateUObject(this, &ATempoPlayerController::OnAnyActorDestroyedHandler));
+    
+    if (HoverCursorWidgetClass)
+    {
+        HoverCursorWidgetInstance = CreateWidget<UUserWidget>(this, HoverCursorWidgetClass);
+    }
 }
 
 void ATempoPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -74,13 +82,11 @@ void ATempoPlayerController::OnPossess(APawn* InPawn)
         if (bPreviousPawnWasRobot && !bNewPawnIsRobot)
         {
              FString ErrorMessage;
-             GameMode->SetControlMode(EControlMode::None, ErrorMessage);
         }
         // If the newly possessed pawn is a Robot, ALWAYS set the control mode to User.
         else if (bNewPawnIsRobot)
         {
             FString ErrorMessage;
-            GameMode->SetControlMode(EControlMode::User, ErrorMessage);
         }
     }
 
@@ -91,7 +97,6 @@ void ATempoPlayerController::OnPossess(APawn* InPawn)
         if (GroupIndex != INDEX_NONE)
         {
             ActiveGroupIndex = GroupIndex;
-            // Ensure the index for the spectator group is set. The spectator is always the first (and only) member.
             PawnGroupIndices.FindOrAdd(SpectatorClass) = 0;
         }
     }
@@ -135,7 +140,51 @@ void ATempoPlayerController::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    // Make the spectator pawn follow the possessed pawn
+    // Set the cursor icon based on whether we are hovering over a possessable pawn.
+    // This logic only runs when the mouse is not captured for gameplay.
+    if (HoverCursorWidgetInstance && !bIsMouseCaptured)
+    {
+        APlayerController* PC = GetWorld()->GetFirstPlayerController();
+        if (!PC) return;
+
+        FHitResult HitResult;
+        PC->GetHitResultUnderCursor(ECollisionChannel::ECC_Visibility, false, HitResult);
+
+        // Check if the actor we hit is a Pawn. All Pawns in this context are considered possessable.
+        APawn* HoveredPawn = HitResult.bBlockingHit ? Cast<APawn>(HitResult.GetActor()) : nullptr;
+        
+        if (HoveredPawn)
+        {
+            // If hovering over a pawn, show the custom "hover" cursor.
+            PC->CurrentMouseCursor = EMouseCursor::Custom;
+            PC->SetMouseCursorWidget(EMouseCursor::Custom, HoverCursorWidgetInstance);
+        }
+        else
+        {
+            // Otherwise, show the default system cursor.
+            PC->CurrentMouseCursor = EMouseCursor::Default;
+            PC->SetMouseCursorWidget(EMouseCursor::Custom, nullptr);
+        }
+        
+        // If the hover state changed since the last frame, we must manually force the UI to update the cursor icon,
+        // as the Slate UI will not do it automatically without a mouse move event.
+        if (HoveredPawn != LastHoveredPawn.Get())
+        {
+            if (FSlateApplication::IsInitialized())
+            {
+                FSlateApplication::Get().QueryCursor();
+                if (TSharedPtr<SWindow> ActiveWindow = FSlateApplication::Get().GetActiveTopLevelWindow())
+                {
+                    FSlateApplication::Get().ForceRedrawWindow(ActiveWindow.ToSharedRef());
+                }
+            }
+        }
+        
+        // Update the last hovered pawn for the next frame's check.
+        LastHoveredPawn = HoveredPawn;
+    }
+    
+    // Make the spectator pawn follow the possessed pawn.
     if (LevelSpectatorPawn && GetPawn() && GetPawn() != LevelSpectatorPawn)
     {
         FVector TargetLocation = GetPawn()->GetActorLocation() - (GetPawn()->GetActorForwardVector() * 400.0f) + FVector(0, 0, 200.0f);
@@ -146,6 +195,8 @@ void ATempoPlayerController::Tick(float DeltaTime)
         LevelSpectatorPawn->SetActorRotation(FMath::RInterpTo(LevelSpectatorPawn->GetActorRotation(), TargetRotation, DeltaTime, 2.0f));
     }
 }
+
+
 
 void ATempoPlayerController::OnUnPossess()
 {
@@ -161,7 +212,7 @@ void ATempoPlayerController::SetupInputComponent()
     InputComponent->BindAction("SwitchGroup", IE_Pressed, this, &ATempoPlayerController::SwitchActiveGroup);
     InputComponent->BindAction("SelectAndPossess", IE_Pressed, this, &ATempoPlayerController::SelectAndPossessPawn);
     InputComponent->BindAction("EnterSpectatorMode", IE_Pressed, this, &ATempoPlayerController::EnterSpectatorMode);
-    InputComponent->BindAction("ToggleUI", IE_Pressed, this, &ATempoPlayerController::ToggleUIVisibility);
+    InputComponent->BindAction("EnterImmersiveMode", IE_Pressed, this, &ATempoPlayerController::ToggleUIVisibility);
 }
 
 void ATempoPlayerController::ToggleUIVisibility()
@@ -337,6 +388,8 @@ void ATempoPlayerController::PossessNextPawn()
     if (PawnGroupClasses.Num() == 0 || !PawnGroupClasses.IsValidIndex(ActiveGroupIndex)) return;
 
     UClass* ActiveClass = PawnGroupClasses[ActiveGroupIndex];
+    if (!PawnGroups.Contains(ActiveClass)) return;
+    
     TArray<APawn*>& ActivePawnArray = PawnGroups[ActiveClass].Pawns;
     int32& CurrentIndex = PawnGroupIndices.FindOrAdd(ActiveClass, 0);
     
@@ -357,6 +410,8 @@ void ATempoPlayerController::PossessPreviousPawn()
     if (PawnGroupClasses.Num() == 0 || !PawnGroupClasses.IsValidIndex(ActiveGroupIndex)) return;
 
     UClass* ActiveClass = PawnGroupClasses[ActiveGroupIndex];
+    if (!PawnGroups.Contains(ActiveClass)) return;
+    
     TArray<APawn*>& ActivePawnArray = PawnGroups[ActiveClass].Pawns;
     int32& CurrentIndex = PawnGroupIndices.FindOrAdd(ActiveClass, 0);
 
@@ -410,3 +465,4 @@ TArray<APawn*> ATempoPlayerController::GetAllPossessablePawns() const
     }
     return AllPawns;
 }
+

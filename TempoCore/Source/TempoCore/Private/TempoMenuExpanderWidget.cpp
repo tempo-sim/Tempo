@@ -19,8 +19,8 @@ void UTempoMenuExpanderWidget::NativeConstruct()
 	}
 	
 	CategoryButtonMap.Add("Time", TimeCategoryButton);
-	CategoryButtonMap.Add("Control", ControlCategoryButton);
-	CategoryButtonMap.Add("Externals", ExternalsCategoryButton);
+	CategoryButtonMap.Add("Controllers", ControlCategoryButton);
+	CategoryButtonMap.Add("Bindings", ExternalsCategoryButton);
 
 	for (auto const& [CurrentCategoryName, ButtonWidget] : CategoryButtonMap)
 	{
