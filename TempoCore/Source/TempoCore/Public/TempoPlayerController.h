@@ -8,6 +8,7 @@
 #include "TempoPlayerController.generated.h"
 
 class ASpectatorPawn;
+class UUserWidget; // Forward declaration for UUserWidget class
 
 // A struct to wrap the TArray, making it compatible with TMap UPROPERTYs.
 USTRUCT()
@@ -85,7 +86,7 @@ protected:
     UPROPERTY()
     ASpectatorPawn* LevelSpectatorPawn;
 
-    // Delegate handles for cleaning up our event listeners.
+    // Delegate handles for our event listeners.
     FDelegateHandle OnActorSpawnedDelegateHandle;
     FDelegateHandle OnActorDestroyedDelegateHandle;
 
@@ -97,6 +98,31 @@ protected:
     
     /** Tracks the current visibility state of the UI widgets. */
     bool bAreWidgetsVisible = true;
+
+    /** A weak pointer to the pawn that was under the cursor in the previous frame. Used to detect hover state changes. */
+    TWeakObjectPtr<APawn> LastHoveredPawn;
+    
+    /**
+     * The widget class to use for the custom hover cursor. 
+     * You must assign this in the Blueprint editor that inherits from this C++ class.
+     */
+    UPROPERTY(EditDefaultsOnly, Category = "UI", meta = (DisplayName = "Hover Cursor Widget"))
+    TSubclassOf<UUserWidget> HoverCursorWidgetClass;
+
+    /**
+     * The runtime instance of our hover cursor widget.
+     * This is created in BeginPlay and should not be set manually.
+     */
+    UPROPERTY()
+    UUserWidget* HoverCursorWidgetInstance;
+
+    /**
+    * Stores a reference to the original AI controller that was possessing a pawn
+    * before the player took over. This acts as a "memory" to ensure the correct
+    * AI can be restored when the player is done.
+    */
+    UPROPERTY()
+    TMap<APawn*, AController*> AIControllerMap;
     
     /**
      * @brief Finds all actors of class Pawn, groups them by subclass, and sorts them.
@@ -141,15 +167,8 @@ protected:
     void ToggleUIVisibility();
 
     /**
-     * Stores a reference to the original AI controller that was possessing a pawn
-     * before the player took over. This acts as a "memory" to ensure the correct
-     * AI can be restored when the player is done.
-     */
-    UPROPERTY()
-    TMap<APawn*, AController*> AIControllerMap;
-
-    /**
      * @brief Forcibly possesses the level's SpectatorPawn.
      */
     void EnterSpectatorMode();
 };
+

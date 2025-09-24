@@ -112,6 +112,27 @@ FReply UTempoPawnEntryWidget::NativeOnMouseButtonDown(const FGeometry& MyGeometr
     {
         if (RepresentedPawn && GetWorld())
         {
+            UClass* PawnClass = RepresentedPawn->GetClass();
+
+            // Check 1: Prevent deleting SpectatorPawn.
+            if (PawnClass->IsChildOf(ASpectatorPawn::StaticClass()))
+            {
+                UE_LOG(LogTemp, Warning, TEXT("Deletion of SpectatorPawn is not allowed."));
+                return FReply::Handled();
+            }
+
+            ATempoGameMode* GameMode = Cast<ATempoGameMode>(UGameplayStatics::GetGameMode(this));
+            if (GameMode)
+            {
+                // Check 2: Prevent deleting the main Robot class from the GameMode.
+                TSubclassOf<APawn> RobotClass = GameMode->GetRobotClass();
+                if (RobotClass && PawnClass->IsChildOf(RobotClass))
+                {
+                    UE_LOG(LogTemp, Warning, TEXT("Deletion of the main Robot class is not allowed."));
+                    return FReply::Handled();
+                }
+            }
+            
             UE_LOG(LogTemp, Log, TEXT("Middle-click detected on %s. Attempting to delete."), *RepresentedPawn->GetActorLabel());
 
             AController* PawnController = RepresentedPawn->GetController();
@@ -119,7 +140,6 @@ FReply UTempoPawnEntryWidget::NativeOnMouseButtonDown(const FGeometry& MyGeometr
             // Check if the pawn has an open-loop controller that also needs to be deleted.
             if (PawnController)
             {
-                ATempoGameMode* GameMode = Cast<ATempoGameMode>(UGameplayStatics::GetGameMode(this));
                 if (GameMode)
                 {
                     TSubclassOf<AController> OpenLoopControllerClass = GameMode->GetOpenLoopControllerClass();
