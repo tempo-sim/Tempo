@@ -11,8 +11,8 @@ message CommandableVehiclesResponse{
 
 message VehicleCommandRequest {
   string vehicle_name = 1;
-  float acceleration = 2;
-  float steering = 3;
+  float longitudinal = 2;
+  float lateral = 3;
 }
 
 message CommandablePawnsResponse {

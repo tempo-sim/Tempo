@@ -11,20 +11,20 @@ struct FNormalizedDrivingInput {
 	GENERATED_BODY();
 
 	FNormalizedDrivingInput() = default;
-	FNormalizedDrivingInput(float AccelerationIn, float SteeringIn)
-		: Acceleration(FMath::Clamp(AccelerationIn, -1.0, 1.0)), Steering(FMath::Clamp(SteeringIn, -1.0, 1.0))
+	FNormalizedDrivingInput(float LongitudinalIn, float LateralIn)
+		: Longitudinal(FMath::Clamp(LongitudinalIn, -1.0, 1.0)), Lateral(FMath::Clamp(LateralIn, -1.0, 1.0))
 	{}
 
-	float GetAcceleration() const { return Acceleration; }
+	float GetLongitudinal() const { return Longitudinal; }
 
-	float GetSteering() const { return Steering; }
+	float GetLateral() const { return Lateral; }
 
 protected:
-	// Normalized acceleration in [-1.0 <-> 1.0]
+	// Normalized longitudinal input [-1.0 <-> 1.0]
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(UIMin=-1.0, UIMax=1.0, ClampMin=-1.0, ClampMax=1.0))
-	float Acceleration = 0.0;
+	float Longitudinal = 0.0;
 
-	// Normalized steering in [-1.0 <-> 1.0]
+	// Normalized lateral input [-1.0 <-> 1.0]
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(UIMin=-1.0, UIMax=1.0, ClampMin=-1.0, ClampMax=1.0))
-	float Steering = 0.0;
+	float Lateral = 0.0;
 };
