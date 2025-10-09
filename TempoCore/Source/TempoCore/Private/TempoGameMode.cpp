@@ -89,6 +89,18 @@ bool ATempoGameMode::SetControlMode(EControlMode ControlMode, FString& ErrorOut)
        return false;
     }
 
+	if (ControlMode == EControlMode::None)
+	{
+		if (AController* OldController = Robot->GetController())
+		{
+			// We only want to force AI controllers to unpossess for none.
+			if (!OldController->IsA<APlayerController>())
+			{
+				OldController->UnPossess();
+			}
+		}
+	}
+
     AController* NewController = nullptr;
 
     switch (ControlMode)
