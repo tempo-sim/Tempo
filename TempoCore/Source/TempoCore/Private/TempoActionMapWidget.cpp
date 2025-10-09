@@ -1,12 +1,16 @@
 ﻿// Copyright Tempo Simulation, LLC. All Rights Reserved
+
 #include "TempoActionMapWidget.h"
+
 #include "TempoActionMapEntryWidget.h"
-#include "GameFramework/InputSettings.h"
+#include "TempoCore.h"
+
+#include "Components/InputComponent.h"
 #include "Components/PanelWidget.h"
 #include "Components/TextBlock.h"
-#include "Kismet/GameplayStatics.h"
+#include "GameFramework/InputSettings.h"
 #include "GameFramework/PlayerController.h"
-#include "Components/InputComponent.h"
+#include "Kismet/GameplayStatics.h"
 
 void UTempoActionMapWidget::NativeOnInitialized()
 {
@@ -16,14 +20,11 @@ void UTempoActionMapWidget::NativeOnInitialized()
 
 void UTempoActionMapWidget::RefreshBindingList()
 {
-    // Ensure the panel and entry class are valid before proceeding.
     if (!BindingList || !EntryWidgetClass)
     {
-        UE_LOG(LogTemp, Warning, TEXT("BindingList or EntryWidgetClass is not set in WBP_ActionMapDisplay."));
+        UE_LOG(LogTempoCore, Error, TEXT("BindingList or EntryWidgetClass is not set in WBP_ActionMapDisplay."));
         return;
     }
-
-    // Clear any existing widgets from the list.
     BindingList->ClearChildren();
     EntryWidgets.Empty();
 
@@ -50,16 +51,16 @@ TArray<FActionBindingInfo> UTempoActionMapWidget::GetPlayerActionBindings()
 
     if (!InputSettings || !PC || !PC->InputComponent)
     {
-        UE_LOG(LogTemp, Error, TEXT("Could not retrieve InputSettings or PlayerController's InputComponent!"));
+        UE_LOG(LogTempoCore, Error, TEXT("Could not retrieve InputSettings or PlayerController's InputComponent!"));
         return Bindings;
     }
 
     // Dynamically get the list of action names by iterating through the Player Controller's action bindings.
     TArray<FName> ActionNames;
     const int32 NumActionBindings = PC->InputComponent->GetNumActionBindings();
-    for (int32 i = 0; i < NumActionBindings; ++i)
+    for (int32 I = 0; I < NumActionBindings; ++I)
     {
-        const FInputActionBinding& Binding = PC->InputComponent->GetActionBinding(i);
+        const FInputActionBinding& Binding = PC->InputComponent->GetActionBinding(I);
         ActionNames.AddUnique(Binding.GetActionName());
     }
 
@@ -76,12 +77,12 @@ TArray<FActionBindingInfo> UTempoActionMapWidget::GetPlayerActionBindings()
             
             // Create a user-friendly display name (e.g., "PossessNext" -> "Possess Next").
             FString DisplayNameString = ActionName.ToString();
-            for (int32 i = 1; i < DisplayNameString.Len(); ++i)
+            for (int32 I = 1; I < DisplayNameString.Len(); ++I)
             {
-                if (FChar::IsUpper(DisplayNameString[i]) && !FChar::IsUpper(DisplayNameString[i-1]))
+                if (FChar::IsUpper(DisplayNameString[I]) && !FChar::IsUpper(DisplayNameString[I-1]))
                 {
-                    DisplayNameString.InsertAt(i, ' ');
-                    i++; // Account for the inserted space.
+                    DisplayNameString.InsertAt(I, ' ');
+                    I++;
                 }
             }
             Info.ActionDisplayName = DisplayNameString;
@@ -102,21 +103,18 @@ void UTempoActionMapWidget::StartListeningForNewKey(FName ActionNameToRebind)
     bIsListeningForKey = true;
     ActionToRebind = ActionNameToRebind;
     SetKeyboardFocus();
-
-    // Find the corresponding entry widget and update its text to show it's waiting for input.
+    
     for (UTempoActionMapEntryWidget* Entry : EntryWidgets)
     {
-        // This check is a bit indirect and relies on the display name format.
-        // A more robust way would be to store the FName on the entry widget itself.
         if (Entry && Entry->ActionNameText)
         {
             FString ExpectedDisplayName = ActionNameToRebind.ToString();
-            for (int32 i = 1; i < ExpectedDisplayName.Len(); ++i)
+            for (int32 I = 1; I < ExpectedDisplayName.Len(); ++I)
             {
-                if (FChar::IsUpper(ExpectedDisplayName[i]) && !FChar::IsUpper(ExpectedDisplayName[i - 1]))
+                if (FChar::IsUpper(ExpectedDisplayName[I]) && !FChar::IsUpper(ExpectedDisplayName[I - 1]))
                 {
-                    ExpectedDisplayName.InsertAt(i, ' ');
-                    i++;
+                    ExpectedDisplayName.InsertAt(I, ' ');
+                    I++;
                 }
             }
 
@@ -141,16 +139,14 @@ FReply UTempoActionMapWidget::NativeOnKeyDown(const FGeometry& InGeometry, const
 
     const FKey PressedKey = InKeyEvent.GetKey();
 
-    // Allow the user to cancel the rebind process with the Escape key.
     if (PressedKey == EKeys::Escape)
     {
         bIsListeningForKey = false;
         ActionToRebind = NAME_None;
-        RefreshBindingList(); // Refresh to cancel the "..." text.
+        RefreshBindingList();
         return FReply::Handled();
     }
-
-    // Rebind the action to the newly pressed key.
+    
     RebindActionKey(ActionToRebind, PressedKey);
     return FReply::Handled();
 }
@@ -170,8 +166,6 @@ void UTempoActionMapWidget::RebindActionKey(FName ActionName, FKey NewKey)
         InputSettings->RemoveActionMapping(Mappings[0]);
         UpdatedMapping.Key = NewKey;
         InputSettings->AddActionMapping(UpdatedMapping, true);
-        
-        // Save the changes to the user's config file so they persist.
         InputSettings->SaveKeyMappings();
     }
     

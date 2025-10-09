@@ -1,9 +1,11 @@
 ﻿// Copyright Tempo Simulation, LLC. All Rights Reserved
 
 #include "TempoMenuExpanderWidget.h"
-#include "Components/Button.h"
-#include "Components/Border.h"
+
 #include "TempoCategoryButtonWidget.h"
+
+#include "Components/Border.h"
+#include "Components/Button.h"
 
 void UTempoMenuExpanderWidget::NativeConstruct()
 {
@@ -29,7 +31,6 @@ void UTempoMenuExpanderWidget::NativeConstruct()
 			ButtonWidget->SetCategoryInfo(CurrentCategoryName);
 			ButtonWidget->OnClickedDelegate.AddDynamic(this, &UTempoMenuExpanderWidget::OnCategoryToggled);
 			
-			// CORRECTED: Check the Widgets array inside the struct.
 			const bool bContentIsValid = ControlledWidgetGroups.Contains(CurrentCategoryName) && ControlledWidgetGroups[CurrentCategoryName].Widgets.Num() > 0;
 			CategoryVisibilityState.Add(CurrentCategoryName, bContentIsValid);
 			ButtonWidget->UpdateVisualState(bContentIsValid);

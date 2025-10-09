@@ -31,6 +31,8 @@ public:
 
 	bool BeginPlayDeferred() const { return bBeginPlayDeferred; }
 
+	FORCEINLINE APawn* GetDefaultPawn() const { return DefaultPawn; }
+
 	// An event that fires *right* before BeginPlay
 	FPreBeginPlay PreBeginPlayEvent;
 

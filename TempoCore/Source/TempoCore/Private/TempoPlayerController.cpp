@@ -1,30 +1,42 @@
 // Copyright Tempo Simulation, LLC. All Rights Reserved
 
 #include "TempoPlayerController.h"
-#include "Kismet/GameplayStatics.h"
-#include "GameFramework/Pawn.h"
-#include "GameFramework/SpectatorPawn.h"
-#include "GameFramework/PlayerController.h" 
-#include "Components/InputComponent.h"
-#include "TimerManager.h"
-#include "Engine/World.h"
+
+#include "TempoCore.h"
 #include "TempoGameMode.h"
+
 #include "Blueprint/UserWidget.h"
 #include "Blueprint/WidgetBlueprintLibrary.h"
+#include "Components/InputComponent.h"
+#include "Components/PrimitiveComponent.h"
+#include "DrawDebugHelpers.h"
+#include "Engine/World.h"
+#include "EngineUtils.h"
 #include "Framework/Application/SlateApplication.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerController.h"
+#include "Kismet/GameplayStatics.h"
+#include "TimerManager.h"
+#include "WheeledVehiclePawn.h"
+
 
 ATempoPlayerController::ATempoPlayerController()
 {
     AutoReceiveInput = EAutoReceiveInput::Player0;
     InputPriority = 0;
     HoverCursorWidgetInstance = nullptr;
+    FallbackGroupClass = APawn::StaticClass();
+
+    ConfiguredPawnGroupClasses.Add(ACharacter::StaticClass());
+    ConfiguredPawnGroupClasses.Add(AWheeledVehiclePawn::StaticClass());
 }
 
 void ATempoPlayerController::BeginPlay()
 {
     Super::BeginPlay();
     ActiveGroupIndex = 0;
-    bIsMouseCaptured = false;
+    bMouseCaptured = false;
     
     FInputModeGameAndUI InputMode;
     InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
@@ -58,8 +70,8 @@ void ATempoPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 void ATempoPlayerController::OnPossess(APawn* InPawn)
 {
     APawn* PreviousPawn = GetPawn(); 
-
-    // Before the Super::OnPossess call, restore the AI to the pawn we are leaving.
+    
+    // Restore AI controller if necessary.
     if (PreviousPawn && AIControllerMap.Contains(PreviousPawn))
     {
         AController* OriginalController = AIControllerMap[PreviousPawn];
@@ -67,53 +79,70 @@ void ATempoPlayerController::OnPossess(APawn* InPawn)
         {
             OriginalController->Possess(PreviousPawn);
         }
-        // Clean up the memory now that the AI is restored.
         AIControllerMap.Remove(PreviousPawn);
     }
-
-    Super::OnPossess(InPawn); 
+    
+    // Set spectator position if needed.
     if (ATempoGameMode* GameMode = Cast<ATempoGameMode>(UGameplayStatics::GetGameMode(this)))
     {
+        if (InPawn && InPawn == GameMode->GetDefaultPawn())
+        {
+            if (const APlayerCameraManager* CameraManager = UGameplayStatics::GetPlayerCameraManager(this, 0))
+            {
+                InPawn->SetActorTransform(CameraManager->GetTransform());
+            }
+        }
+    }
+    
+    Super::OnPossess(InPawn);
+    
+    if (InPawn)
+    {
+        // Whenever we possess ANY pawn, find its correct group and update our state.
+        UClass* CorrectGroupClass = GetCorrectGroupForPawn(InPawn);
+        if (CorrectGroupClass && ActivePawnGroupClasses.Contains(CorrectGroupClass))
+        {
+            ActiveGroupIndex = ActivePawnGroupClasses.Find(CorrectGroupClass);
+            const int32 PawnIndex = PawnGroups[CorrectGroupClass].Pawns.Find(InPawn);
+            if (PawnIndex != INDEX_NONE)
+            {
+                PawnGroupIndices.FindOrAdd(CorrectGroupClass) = PawnIndex;
+            }
+        }
+    }
+    
+    // GameMode and mouse capture logic.
+    if (ATempoGameMode* GameMode = Cast<ATempoGameMode>(UGameplayStatics::GetGameMode(this)))
+    {
+        APawn* DefaultPawn = GameMode->GetDefaultPawn();
         TSubclassOf<APawn> RobotClass = GameMode->GetRobotClass();
         const bool bNewPawnIsRobot = (RobotClass && InPawn && InPawn->IsA(RobotClass));
         const bool bPreviousPawnWasRobot = (RobotClass && PreviousPawn && PreviousPawn->IsA(RobotClass));
+        FString ErrorMessage;
 
-        // If we were controlling a robot and the new pawn is NOT a robot, switch to None mode.
         if (bPreviousPawnWasRobot && !bNewPawnIsRobot)
         {
-             FString ErrorMessage;
+             GameMode->SetControlMode(EControlMode::None, ErrorMessage);
         }
-        // If the newly possessed pawn is a Robot, ALWAYS set the control mode to User.
         else if (bNewPawnIsRobot)
         {
-            FString ErrorMessage;
+            GameMode->SetControlMode(EControlMode::User, ErrorMessage);
         }
-    }
 
-    if (InPawn && InPawn == LevelSpectatorPawn)
-    {
-        UClass* SpectatorClass = LevelSpectatorPawn->GetClass();
-        const int32 GroupIndex = PawnGroupClasses.Find(SpectatorClass);
-        if (GroupIndex != INDEX_NONE)
+        if (InPawn && InPawn != DefaultPawn)
         {
-            ActiveGroupIndex = GroupIndex;
-            PawnGroupIndices.FindOrAdd(SpectatorClass) = 0;
+            SetMouseCaptured(true); 
         }
-    }
-    if (InPawn && InPawn != LevelSpectatorPawn)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Possessed Pawn: %s of class %s"), *InPawn->GetActorNameOrLabel(), *InPawn->GetClass()->GetName());
-        SetMouseCaptured(true); 
-    }
-    else
-    {
-        SetMouseCaptured(false);
+        else
+        {
+            SetMouseCaptured(false);
+        }
     }
 }
 
 void ATempoPlayerController::ToggleMouseCaptured()
 {
-    SetMouseCaptured(!bIsMouseCaptured);
+    SetMouseCaptured(!bMouseCaptured);
 }
 
 void ATempoPlayerController::SetMouseCaptured(bool bCaptured)
@@ -133,7 +162,7 @@ void ATempoPlayerController::SetMouseCaptured(bool bCaptured)
 
     SetShowMouseCursor(!bCaptured);
 
-    bIsMouseCaptured = bCaptured;
+    bMouseCaptured = bCaptured;
 }
 
 void ATempoPlayerController::Tick(float DeltaTime)
@@ -142,26 +171,22 @@ void ATempoPlayerController::Tick(float DeltaTime)
 
     // Set the cursor icon based on whether we are hovering over a possessable pawn.
     // This logic only runs when the mouse is not captured for gameplay.
-    if (HoverCursorWidgetInstance && !bIsMouseCaptured)
+    if (HoverCursorWidgetInstance && !bMouseCaptured)
     {
         APlayerController* PC = GetWorld()->GetFirstPlayerController();
         if (!PC) return;
 
         FHitResult HitResult;
         PC->GetHitResultUnderCursor(ECollisionChannel::ECC_Visibility, false, HitResult);
-
-        // Check if the actor we hit is a Pawn. All Pawns in this context are considered possessable.
         APawn* HoveredPawn = HitResult.bBlockingHit ? Cast<APawn>(HitResult.GetActor()) : nullptr;
         
         if (HoveredPawn)
         {
-            // If hovering over a pawn, show the custom "hover" cursor.
             PC->CurrentMouseCursor = EMouseCursor::Custom;
             PC->SetMouseCursorWidget(EMouseCursor::Custom, HoverCursorWidgetInstance);
         }
         else
         {
-            // Otherwise, show the default system cursor.
             PC->CurrentMouseCursor = EMouseCursor::Default;
             PC->SetMouseCursorWidget(EMouseCursor::Custom, nullptr);
         }
@@ -183,16 +208,28 @@ void ATempoPlayerController::Tick(float DeltaTime)
         // Update the last hovered pawn for the next frame's check.
         LastHoveredPawn = HoveredPawn;
     }
-    
-    // Make the spectator pawn follow the possessed pawn.
-    if (LevelSpectatorPawn && GetPawn() && GetPawn() != LevelSpectatorPawn)
+    if (bHighlightPossessedPawn)
     {
-        FVector TargetLocation = GetPawn()->GetActorLocation() - (GetPawn()->GetActorForwardVector() * 400.0f) + FVector(0, 0, 200.0f);
-        FRotator TargetRotation = (GetPawn()->GetActorLocation() - LevelSpectatorPawn->GetActorLocation()).Rotation();
-
-        // Smoothly interpolate the spectator's position and rotation
-        LevelSpectatorPawn->SetActorLocation(FMath::VInterpTo(LevelSpectatorPawn->GetActorLocation(), TargetLocation, DeltaTime, 2.0f));
-        LevelSpectatorPawn->SetActorRotation(FMath::RInterpTo(LevelSpectatorPawn->GetActorRotation(), TargetRotation, DeltaTime, 2.0f));
+        if (APawn* CurrentPawn = GetPawn())
+        {
+            FVector PointLocation = CurrentPawn->GetActorLocation();
+            if (UPrimitiveComponent* RootAsPrimitive = Cast<UPrimitiveComponent>(CurrentPawn->GetRootComponent()))
+            {
+                const FBoxSphereBounds Bounds = RootAsPrimitive->CalcBounds(RootAsPrimitive->GetComponentTransform());
+                PointLocation = Bounds.Origin + FVector(0.f, 0.f, Bounds.BoxExtent.Z*1.2);
+            }
+        
+            //Toggleable Debug Point
+            DrawDebugPoint(
+                GetWorld(),                      
+                PointLocation,                   
+                40.0f,                           
+                FColor::Green,                   
+                false,                           
+                -1.0f,                           
+                0                                
+            );
+        }
     }
 }
 
@@ -211,8 +248,7 @@ void ATempoPlayerController::SetupInputComponent()
     InputComponent->BindAction("PossessPrevious", IE_Pressed, this, &ATempoPlayerController::PossessPreviousPawn);
     InputComponent->BindAction("SwitchGroup", IE_Pressed, this, &ATempoPlayerController::SwitchActiveGroup);
     InputComponent->BindAction("SelectAndPossess", IE_Pressed, this, &ATempoPlayerController::SelectAndPossessPawn);
-    InputComponent->BindAction("EnterSpectatorMode", IE_Pressed, this, &ATempoPlayerController::EnterSpectatorMode);
-    InputComponent->BindAction("EnterImmersiveMode", IE_Pressed, this, &ATempoPlayerController::ToggleUIVisibility);
+    InputComponent->BindAction("ToggleImmersiveMode", IE_Pressed, this, &ATempoPlayerController::ToggleUIVisibility);
 }
 
 void ATempoPlayerController::ToggleUIVisibility()
@@ -221,7 +257,6 @@ void ATempoPlayerController::ToggleUIVisibility()
     TArray<UUserWidget*> FoundWidgets;
     UWidgetBlueprintLibrary::GetAllWidgetsOfClass(GetWorld(), FoundWidgets, UUserWidget::StaticClass(), false);
 
-    // Toggle the visibility state
     bAreWidgetsVisible = !bAreWidgetsVisible;
     const ESlateVisibility NewVisibility = bAreWidgetsVisible ? ESlateVisibility::Visible : ESlateVisibility::Hidden;
 
@@ -235,8 +270,8 @@ void ATempoPlayerController::OnActorSpawnedHandler(AActor* SpawnedActor)
 {
     if (Cast<APawn>(SpawnedActor))
     {
-        UE_LOG(LogTemp, Warning, TEXT("A new Pawn was spawned, queueing group update..."));
-        GetWorld()->GetTimerManager().SetTimer(UpdateGroupsTimerHandle, this, &ATempoPlayerController::UpdatePawnGroups, 0.01f, false);
+        UE_LOG(LogTempoCore, Warning, TEXT("A new Pawn was spawned, queueing group update..."));
+        UpdatePawnGroups();
     }
 }
 
@@ -244,110 +279,123 @@ void ATempoPlayerController::OnAnyActorDestroyedHandler(AActor* DestroyedActor)
 {
     if (Cast<APawn>(DestroyedActor))
     {
-        UE_LOG(LogTemp, Warning, TEXT("A Pawn (%s) was destroyed, queueing group update..."), *DestroyedActor->GetName());
-        GetWorld()->GetTimerManager().SetTimer(UpdateGroupsTimerHandle, this, &ATempoPlayerController::UpdatePawnGroups, 0.01f, false);
+        UE_LOG(LogTempoCore, Warning, TEXT("A Pawn (%s) was destroyed, queueing group update..."), *DestroyedActor->GetName());
+        UpdatePawnGroups();
     }
 }
 
 void ATempoPlayerController::SelectAndPossessPawn()
 {
-    // Only allow selecting if the mouse is not captured (i.e., we are in UI mode)
-    if (bIsMouseCaptured)
+    if (bMouseCaptured)
     {
         return;
     }
 
     FHitResult HitResult;
-    // Perform the line trace from the cursor position.
     if (GetHitResultUnderCursor(ECollisionChannel::ECC_Visibility, false, HitResult))
     {
-        // Check if the actor we hit can be cast to a Pawn.
         if (APawn* ClickedPawn = Cast<APawn>(HitResult.GetActor()))
         {
             CacheAIController(ClickedPawn);
-            // Update the active group and index to match the clicked pawn
-            UClass* ClickedPawnClass = ClickedPawn->GetClass();
-            const int32 GroupIndex = PawnGroupClasses.Find(ClickedPawnClass);
-            if (GroupIndex != INDEX_NONE)
-            {
-                ActiveGroupIndex = GroupIndex;
-                const int32 PawnIndex = PawnGroups[ClickedPawnClass].Pawns.Find(ClickedPawn);
-                if (PawnIndex != INDEX_NONE)
-                {
-                    PawnGroupIndices.FindOrAdd(ClickedPawnClass) = PawnIndex;
-                }
-            }
-            
             Possess(ClickedPawn);
         }
     }
 }
 
-void ATempoPlayerController::UpdatePawnGroups() 
+void ATempoPlayerController::UpdatePawnGroups()
 {
-    if (!LevelSpectatorPawn)
-    {
-        LevelSpectatorPawn = Cast<ASpectatorPawn>(UGameplayStatics::GetActorOfClass(GetWorld(), ASpectatorPawn::StaticClass()));
-    }
-
     APawn* PreviouslyPossessedPawn = GetPawn();
-    TMap<UClass*, FPawnGroup> NewPawnGroups;
-    TArray<AActor*> AllPawns;
-
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), APawn::StaticClass(), AllPawns);
-
-    for (AActor* Actor : AllPawns)
-    {
-        if (APawn* CastedPawn = Cast<APawn>(Actor))
-        {
-            UClass* PawnClass = CastedPawn->GetClass();
-            FPawnGroup& Group = NewPawnGroups.FindOrAdd(PawnClass);
-            Group.Pawns.Add(CastedPawn);
-        }
-    }
+    PawnGroups.Empty();
+    ActivePawnGroupClasses.Empty();
     
-    PawnGroups = NewPawnGroups;
-    
-    TArray<UClass*> TempClasses;
-    PawnGroups.GenerateKeyArray(TempClasses);
+    TArray<TSubclassOf<APawn>> AllGroupClasses = ConfiguredPawnGroupClasses;
 
-    PawnGroupClasses.Empty();
-    for(UClass* TempClass : TempClasses)
-    {
-        PawnGroupClasses.Add(TempClass);
-    }
+    // Remove any potential duplicates.
+    TSet<TSubclassOf<APawn>> UniqueClasses(AllGroupClasses);
+    AllGroupClasses = UniqueClasses.Array();
 
-    PawnGroupClasses.Sort([](const TSubclassOf<APawn>& A, const TSubclassOf<APawn>& B) {
+    // Sort the list by hierarchy to prioritize child classes over parents.
+    AllGroupClasses.Sort([](const TSubclassOf<APawn>& A, const TSubclassOf<APawn>& B) {
+        if (!A || !B) return false;
+        if (A->IsChildOf(B)) return true;
+        if (B->IsChildOf(A)) return false;
         return A->GetName() < B->GetName();
     });
 
-    UE_LOG(LogTemp, Warning, TEXT("--- Pawn Groups Updated ---"));
-    for (TSubclassOf<APawn> GroupClass : PawnGroupClasses)
+    // Grouping Pawns
+    for (TActorIterator<APawn> PawnIt(GetWorld()); PawnIt; ++PawnIt)
     {
-        PawnGroups[GroupClass].Pawns.Sort([](const APawn& A, const APawn& B) {
-            return A.GetActorNameOrLabel() < B.GetActorNameOrLabel();
-        });
-        UE_LOG(LogTemp, Warning, TEXT("Discovered Group: %s with %d members"), *GroupClass->GetName(), PawnGroups[GroupClass].Pawns.Num());
-    }
-    UE_LOG(LogTemp, Warning, TEXT("---------------------------"));
-    
-    if (PreviouslyPossessedPawn)
-    {
-        UClass* PrevClass = PreviouslyPossessedPawn->GetClass();
-        if(PawnGroupClasses.Contains(PrevClass))
+        APawn* PawnToGroup = *PawnIt;
+
+        // Ensure the Pawn is valid and not pending kill before processing it.
+        if (PawnToGroup && !PawnToGroup->IsActorBeingDestroyed())
         {
-            ActiveGroupIndex = PawnGroupClasses.Find(PrevClass);
-            PawnGroupIndices.FindOrAdd(PrevClass) = PawnGroups[PrevClass].Pawns.Find(PreviouslyPossessedPawn);
+            bool bWasGrouped = false;
+            for (TSubclassOf<APawn> GroupClass : AllGroupClasses)
+            {
+                if (GroupClass && PawnToGroup->IsA(GroupClass))
+                {
+                    PawnGroups.FindOrAdd(GroupClass).Pawns.Add(PawnToGroup);
+                    bWasGrouped = true;
+                    break;
+                }
+            }
+
+            if (!bWasGrouped && FallbackGroupClass)
+            {
+                PawnGroups.FindOrAdd(FallbackGroupClass).Pawns.Add(PawnToGroup);
+            }
         }
     }
-    else if (LevelSpectatorPawn)
+    
+    // Building List
+    for (TSubclassOf<APawn> GroupClass : AllGroupClasses)
     {
-       UE_LOG(LogTemp, Warning, TEXT("No pawn was possessed or pawn was destroyed. Re-possessing SpectatorPawn."));
-       Possess(LevelSpectatorPawn);
-       UClass* SpectatorClass = LevelSpectatorPawn->GetClass();
-       if(PawnGroupClasses.Contains(SpectatorClass))
+        if (PawnGroups.Contains(GroupClass) && !PawnGroups[GroupClass].Pawns.IsEmpty())
+        {
+            ActivePawnGroupClasses.Add(GroupClass);
+        }
+    }
+    if (FallbackGroupClass && PawnGroups.Contains(FallbackGroupClass) && !PawnGroups[FallbackGroupClass].Pawns.IsEmpty() && !ActivePawnGroupClasses.Contains(FallbackGroupClass))
+    {
+        ActivePawnGroupClasses.Add(FallbackGroupClass);
+    }
+
+    // Sorting Pawns
+    for (auto& Pair : PawnGroups)
+    {
+        Pair.Value.Pawns.Sort([](const APawn& A, const APawn& B) {
+            return A.GetFName().LexicalLess(B.GetFName());
+        });
+    }
+
+    // Restoring Possession
+    if (PreviouslyPossessedPawn && !PreviouslyPossessedPawn->IsActorBeingDestroyed())
+    {
+        for (int32 i = 0; i < ActivePawnGroupClasses.Num(); ++i)
+        {
+            TSubclassOf<APawn> GroupClass = ActivePawnGroupClasses[i];
+            if (PawnGroups.Contains(GroupClass) && PawnGroups[GroupClass].Pawns.Contains(PreviouslyPossessedPawn))
+            {
+                ActiveGroupIndex = i;
+                PawnGroupIndices.FindOrAdd(GroupClass) = PawnGroups[GroupClass].Pawns.Find(PreviouslyPossessedPawn);
+                break;
+            }
+        }
+    }
+    else if (ATempoGameMode* GameMode = Cast<ATempoGameMode>(UGameplayStatics::GetGameMode(this)))
+    {
+       if (APawn* DefaultPawn = GameMode->GetDefaultPawn())
        {
-           ActiveGroupIndex = PawnGroupClasses.Find(SpectatorClass);
+           Possess(DefaultPawn);
+           for (int32 i = 0; i < ActivePawnGroupClasses.Num(); ++i)
+           {
+               if (PawnGroups.Contains(ActivePawnGroupClasses[i]) && PawnGroups[ActivePawnGroupClasses[i]].Pawns.Contains(DefaultPawn))
+               {
+                   ActiveGroupIndex = i;
+                   break;
+               }
+           }
        }
     }
     OnPawnListUpdated.Broadcast();
@@ -355,26 +403,25 @@ void ATempoPlayerController::UpdatePawnGroups()
 
 void ATempoPlayerController::SwitchActiveGroup()
 {
-    if (PawnGroupClasses.Num() < 2) return;
+    if (ActivePawnGroupClasses.Num() < 2) return;
 
     const int32 OriginalIndex = ActiveGroupIndex;
     int32 NextIndex = OriginalIndex;
 
     do
     {
-        NextIndex = (NextIndex + 1) % PawnGroupClasses.Num();
+        NextIndex = (NextIndex + 1) % ActivePawnGroupClasses.Num();
         
-        if (PawnGroupClasses.IsValidIndex(NextIndex) && PawnGroups.Contains(PawnGroupClasses[NextIndex]) && PawnGroups[PawnGroupClasses[NextIndex]].Pawns.Num() > 0)
+        TSubclassOf<APawn> NextGroupClass = ActivePawnGroupClasses[NextIndex];
+
+        if (PawnGroups.Contains(NextGroupClass) && !PawnGroups[NextGroupClass].Pawns.IsEmpty())
         {
             ActiveGroupIndex = NextIndex;
-            UClass* NewActiveGroupClass = PawnGroupClasses[ActiveGroupIndex];
-            UE_LOG(LogTemp, Warning, TEXT("Switched active group to: %s"), *NewActiveGroupClass->GetName());
+            const int32 IndexToPossess = PawnGroupIndices.FindOrAdd(NextGroupClass, 0);
 
-            const int32 IndexToPossess = PawnGroupIndices.FindOrAdd(NewActiveGroupClass, 0);
-
-            if (PawnGroups[NewActiveGroupClass].Pawns.IsValidIndex(IndexToPossess))
+            if (PawnGroups[NextGroupClass].Pawns.IsValidIndex(IndexToPossess))
             {
-                APawn* PawnToPossess = PawnGroups[NewActiveGroupClass].Pawns[IndexToPossess];
+                APawn* PawnToPossess = PawnGroups[NextGroupClass].Pawns[IndexToPossess];
                 CacheAIController(PawnToPossess);
                 Possess(PawnToPossess);
             }
@@ -385,10 +432,18 @@ void ATempoPlayerController::SwitchActiveGroup()
 
 void ATempoPlayerController::PossessNextPawn()
 {
-    if (PawnGroupClasses.Num() == 0 || !PawnGroupClasses.IsValidIndex(ActiveGroupIndex)) return;
+    // Check the new, correct array for active groups.
+    if (ActivePawnGroupClasses.Num() == 0 || !ActivePawnGroupClasses.IsValidIndex(ActiveGroupIndex))
+    {
+        return;
+    }
 
-    UClass* ActiveClass = PawnGroupClasses[ActiveGroupIndex];
-    if (!PawnGroups.Contains(ActiveClass)) return;
+    // Use the new array to get the current group class.
+    UClass* ActiveClass = ActivePawnGroupClasses[ActiveGroupIndex];
+    if (!PawnGroups.Contains(ActiveClass))
+    {
+        return;
+    }
     
     TArray<APawn*>& ActivePawnArray = PawnGroups[ActiveClass].Pawns;
     int32& CurrentIndex = PawnGroupIndices.FindOrAdd(ActiveClass, 0);
@@ -407,10 +462,18 @@ void ATempoPlayerController::PossessNextPawn()
 
 void ATempoPlayerController::PossessPreviousPawn()
 {
-    if (PawnGroupClasses.Num() == 0 || !PawnGroupClasses.IsValidIndex(ActiveGroupIndex)) return;
+    // Check the new, correct array for active groups.
+    if (ActivePawnGroupClasses.Num() == 0 || !ActivePawnGroupClasses.IsValidIndex(ActiveGroupIndex))
+    {
+        return;
+    }
 
-    UClass* ActiveClass = PawnGroupClasses[ActiveGroupIndex];
-    if (!PawnGroups.Contains(ActiveClass)) return;
+    // Use the new array to get the current group class.
+    UClass* ActiveClass = ActivePawnGroupClasses[ActiveGroupIndex];
+    if (!PawnGroups.Contains(ActiveClass))
+    {
+        return;
+    }
     
     TArray<APawn*>& ActivePawnArray = PawnGroups[ActiveClass].Pawns;
     int32& CurrentIndex = PawnGroupIndices.FindOrAdd(ActiveClass, 0);
@@ -436,23 +499,14 @@ void ATempoPlayerController::CacheAIController(APawn* PawnToPossess)
         {
             if (GameMode->GetRobotClass() && PawnToPossess->IsA(GameMode->GetRobotClass()))
             {
-                return; // Exit without caching.
+                return;
             }
         }
         AController* CurrentController = PawnToPossess->GetController();
-        // Only save the controller if it's a valid AI controller (not null or another player)
         if (CurrentController && !CurrentController->IsA<APlayerController>())
         {
             AIControllerMap.Add(PawnToPossess, CurrentController);
         }
-    }
-}
-
-void ATempoPlayerController::EnterSpectatorMode()
-{
-    if (LevelSpectatorPawn)
-    {
-        Possess(LevelSpectatorPawn);
     }
 }
 
@@ -466,3 +520,34 @@ TArray<APawn*> ATempoPlayerController::GetAllPossessablePawns() const
     return AllPawns;
 }
 
+UClass* ATempoPlayerController::GetCorrectGroupForPawn(const APawn* InPawn) const
+{
+    if (!InPawn)
+    {
+        return nullptr;
+    }
+    
+    TArray<TSubclassOf<APawn>> AllGroupClasses;
+    AllGroupClasses.Add(ACharacter::StaticClass());
+    AllGroupClasses.Add(AWheeledVehiclePawn::StaticClass());
+    AllGroupClasses.Append(ConfiguredPawnGroupClasses);
+    TSet<TSubclassOf<APawn>> UniqueClasses(AllGroupClasses);
+    AllGroupClasses = UniqueClasses.Array();
+    
+    AllGroupClasses.Sort([](const TSubclassOf<APawn>& A, const TSubclassOf<APawn>& B) {
+        if (!A || !B) return false;
+        if (A->IsChildOf(B)) return true;
+        if (B->IsChildOf(A)) return false;
+        return A->GetName() < B->GetName();
+    });
+
+    // Find the first matching group.
+    for (TSubclassOf<APawn> GroupClass : AllGroupClasses)
+    {
+        if (InPawn->IsA(GroupClass))
+        {
+            return GroupClass;
+        }
+    }
+    return FallbackGroupClass;
+}

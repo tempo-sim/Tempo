@@ -2,9 +2,10 @@
 
 #pragma once
 
-#include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
+#include "CoreMinimal.h"
 #include "TimerManager.h"
+
 #include "TempoMenuExpanderWidget.generated.h"
 
 class UButton;
@@ -33,7 +34,7 @@ public:
 protected:
 	virtual void NativeConstruct() override;
 
-	// --- INTERNAL WIDGETS ---
+	//INTERNAL WIDGETS
 	UPROPERTY(meta = (BindWidget))
 	UButton* MenuButton;
 
@@ -48,14 +49,11 @@ protected:
 
 	UPROPERTY(meta = (BindWidget))
 	UTempoCategoryButtonWidget* ExternalsCategoryButton;
-
-	// --- EXTERNAL WIDGETS (GROUPED) ---
-	// CORRECTED: The TMap now uses the FWidgetArrayWrapper struct.
+	
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Controlled Content")
 	TMap<FName, FWidgetArrayWrapper> ControlledWidgetGroups;
 
 private:
-	// --- PRIVATE LOGIC FUNCTIONS ---
 	UFUNCTION()
 	void OnMenuButtonHovered();
 
