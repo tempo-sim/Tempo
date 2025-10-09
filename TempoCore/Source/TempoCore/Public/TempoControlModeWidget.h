@@ -4,8 +4,9 @@
 
 #include "TempoCoreTypes.h"
 
-#include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
+#include "CoreMinimal.h"
+
 #include "TempoControlModeWidget.generated.h"
 
 class UButton;

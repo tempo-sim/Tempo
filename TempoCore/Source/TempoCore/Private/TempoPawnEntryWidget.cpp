@@ -1,23 +1,24 @@
 ﻿// Copyright Tempo Simulation, LLC. All Rights Reserved
+
 #include "TempoPawnEntryWidget.h"
-#include "Components/TextBlock.h"
+
+#include "TempoCore.h"
+#include "TempoGameMode.h"
+#include "TempoPlayerController.h"
+
 #include "Components/Button.h"
+#include "Components/TextBlock.h"
+#include "Engine/World.h"
+#include "GameFramework/Controller.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/SpectatorPawn.h"
 #include "Kismet/GameplayStatics.h"
-#include "TempoPlayerController.h"
-#include "TempoGameMode.h"
-#include "Engine/World.h"
-#include "GameFramework/Controller.h" // Needed for AController
 
 void UTempoPawnEntryWidget::NativeConstruct()
 {
     Super::NativeConstruct();
-
-    // Cache the player controller for later use.
+    
     TempoPlayerController = Cast<ATempoPlayerController>(UGameplayStatics::GetPlayerController(GetWorld(), 0));
-
-    // Bind our C++ function to the button's OnClicked event for left-clicks.
     if (PossessButton)
     {
         PossessButton->OnClicked.AddDynamic(this, &UTempoPawnEntryWidget::OnPossessButtonClicked);
@@ -36,7 +37,6 @@ void UTempoPawnEntryWidget::SetPawn(APawn* InPawn)
 
 void UTempoPawnEntryWidget::OnPossessButtonClicked()
 {
-    // This function is bound to OnClicked, which only fires for left-clicks.
     if (RepresentedPawn && TempoPlayerController)
     {
         TempoPlayerController->CacheAIController(RepresentedPawn);
@@ -46,13 +46,9 @@ void UTempoPawnEntryWidget::OnPossessButtonClicked()
 
 FReply UTempoPawnEntryWidget::NativeOnMouseButtonDown(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent)
 {
-    // First, let the button handle the event. This allows the OnClicked event to fire for left-clicks.
     Super::NativeOnMouseButtonDown(MyGeometry, MouseEvent);
-
-    // Check if the button that caused this event was the right mouse button.
     if (MouseEvent.GetEffectingButton() == EKeys::RightMouseButton)
     {
-        // Ensure we have a valid pawn to get the class from.
         if (RepresentedPawn && GetWorld())
         {
             UClass* PawnClass = RepresentedPawn->GetClass();
@@ -60,7 +56,7 @@ FReply UTempoPawnEntryWidget::NativeOnMouseButtonDown(const FGeometry& MyGeometr
             // Check 1: Prevent spawning of SpectatorPawn.
             if (PawnClass->IsChildOf(ASpectatorPawn::StaticClass()))
             {
-                UE_LOG(LogTemp, Warning, TEXT("Spawning of SpectatorPawn is not allowed."));
+                UE_LOG(LogTempoCore, Error, TEXT("Spawning of SpectatorPawn is not allowed."));
                 return FReply::Handled();
             }
 
@@ -68,7 +64,6 @@ FReply UTempoPawnEntryWidget::NativeOnMouseButtonDown(const FGeometry& MyGeometr
             ATempoGameMode* GameMode = Cast<ATempoGameMode>(UGameplayStatics::GetGameMode(this));
             if (!GameMode)
             {
-                // If we can't get the game mode, we can't continue.
                 return FReply::Handled();
             }
 
@@ -76,11 +71,11 @@ FReply UTempoPawnEntryWidget::NativeOnMouseButtonDown(const FGeometry& MyGeometr
             TSubclassOf<APawn> RobotClass = GameMode->GetRobotClass();
             if (RobotClass && PawnClass->IsChildOf(RobotClass))
             {
-                UE_LOG(LogTemp, Warning, TEXT("Spawning of the main Robot class is not allowed."));
+                UE_LOG(LogTempoCore, Error, TEXT("Spawning of the main Robot class is not allowed."));
                 return FReply::Handled();
             }
 
-            UE_LOG(LogTemp, Warning, TEXT("Right-click detected on %s. Attempting to spawn."), *RepresentedPawn->GetActorLabel());
+            UE_LOG(LogTempoCore, Warning, TEXT("Right-click detected on %s. Attempting to spawn."), *RepresentedPawn->GetActorLabel());
 
             // Spawn the new Pawn
             FActorSpawnParameters SpawnParams;
@@ -101,7 +96,7 @@ FReply UTempoPawnEntryWidget::NativeOnMouseButtonDown(const FGeometry& MyGeometr
                 }
                 else
                 {
-                    UE_LOG(LogTemp, Warning, TEXT("Open Loop Controller Class is not set in the GameMode."));
+                    UE_LOG(LogTempoCore, Error, TEXT("Open Loop Controller Class is not set in the GameMode."));
                 }
             }
             
@@ -117,7 +112,7 @@ FReply UTempoPawnEntryWidget::NativeOnMouseButtonDown(const FGeometry& MyGeometr
             // Check 1: Prevent deleting SpectatorPawn.
             if (PawnClass->IsChildOf(ASpectatorPawn::StaticClass()))
             {
-                UE_LOG(LogTemp, Warning, TEXT("Deletion of SpectatorPawn is not allowed."));
+                UE_LOG(LogTempoCore, Error, TEXT("Deletion of SpectatorPawn is not allowed."));
                 return FReply::Handled();
             }
 
@@ -128,12 +123,12 @@ FReply UTempoPawnEntryWidget::NativeOnMouseButtonDown(const FGeometry& MyGeometr
                 TSubclassOf<APawn> RobotClass = GameMode->GetRobotClass();
                 if (RobotClass && PawnClass->IsChildOf(RobotClass))
                 {
-                    UE_LOG(LogTemp, Warning, TEXT("Deletion of the main Robot class is not allowed."));
+                    UE_LOG(LogTempoCore, Error, TEXT("Deletion of the main Robot class is not allowed."));
                     return FReply::Handled();
                 }
             }
             
-            UE_LOG(LogTemp, Log, TEXT("Middle-click detected on %s. Attempting to delete."), *RepresentedPawn->GetActorLabel());
+            UE_LOG(LogTempoCore, Warning, TEXT("Middle-click detected on %s. Attempting to delete."), *RepresentedPawn->GetActorLabel());
 
             AController* PawnController = RepresentedPawn->GetController();
             
@@ -147,7 +142,7 @@ FReply UTempoPawnEntryWidget::NativeOnMouseButtonDown(const FGeometry& MyGeometr
                     // This prevents accidentally deleting a player controller or a different, important AI controller.
                     if (OpenLoopControllerClass && PawnController->IsA(OpenLoopControllerClass))
                     {
-                        UE_LOG(LogTemp, Log, TEXT("Deleting associated Open Loop Controller: %s"), *PawnController->GetName());
+                        UE_LOG(LogTempoCore, Error, TEXT("Deleting associated Open Loop Controller: %s"), *PawnController->GetName());
                         PawnController->Destroy();
                     }
                 }

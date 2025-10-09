@@ -1,7 +1,9 @@
 ﻿// Copyright Tempo Simulation, LLC. All Rights Reserved
+
 #include "TempoActionMapEntryWidget.h"
-#include "Components/TextBlock.h"
+
 #include "Components/Button.h"
+#include "Components/TextBlock.h"
 
 void UTempoActionMapEntryWidget::Setup(UTempoActionMapWidget* InParent, const FActionBindingInfo& InBindingInfo)
 {

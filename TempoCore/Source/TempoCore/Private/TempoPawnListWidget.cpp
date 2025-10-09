@@ -1,10 +1,13 @@
 ﻿// Copyright Tempo Simulation, LLC. All Rights Reserved
+
 #include "TempoPawnListWidget.h"
+
+#include "TempoPawnEntryWidget.h"
 #include "TempoPlayerController.h"
+
 #include "Components/ScrollBox.h"
 #include "GameFramework/Pawn.h"
 #include "Kismet/GameplayStatics.h"
-#include "TempoPawnEntryWidget.h"
 #include "Logging/LogMacros.h"
 
 void UTempoPawnListWidget::NativeConstruct()
@@ -33,7 +36,6 @@ void UTempoPawnListWidget::RefreshPawnList()
 		UTempoPawnEntryWidget* ListItem = CreateWidget<UTempoPawnEntryWidget>(this, ListItemWidgetClass);
 		if (ListItem)
 		{
-			UE_LOG(LogTemp, Warning, TEXT("UTempoPawnListWidget: Adding pawn '%s' to list."), *Pawn->GetActorNameOrLabel());
 			ListItem->SetPawn(Pawn);
 			PawnEntryScrollBox->AddChild(ListItem);
 		}

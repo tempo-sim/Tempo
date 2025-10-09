@@ -1,12 +1,13 @@
 ﻿// Copyright Tempo Simulation, LLC. All Rights Reserved
 #pragma once
 
-#include "CoreMinimal.h"
+#include "TempoActionMapWidget.h"
+
 #include "Blueprint/UserWidget.h"
-#include "TempoActionMapWidget.h" // For FActionBindingInfo
+#include "CoreMinimal.h"
+
 #include "TempoActionMapEntryWidget.generated.h"
 
-// Forward declarations
 class UTextBlock;
 class UButton;
 
@@ -36,14 +37,11 @@ public:
 	UButton* RebindButton;
 
 private:
-	/** Called when the RebindButton is clicked. */
 	UFUNCTION()
 	void OnRebindButtonClicked();
-
-	/** A reference to the main widget that created this entry. */
+	
 	UPROPERTY()
 	UTempoActionMapWidget* ParentWidget;
-
-	/** The binding information this entry represents. */
+	
 	FActionBindingInfo BindingInfo;
 };
