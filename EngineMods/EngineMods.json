@@ -8,6 +8,15 @@
       ]
     },
     {
+      "Type": "SourceOnly",
+      "Root": "Engine/Source/Programs/AutomationTool",
+      "Patch": [
+        "AutomationTool.csproj.patch.1",
+        "AutomationUtils/AutomationUtils.Automation.csproj.patch.1",
+        "Gauntlet/Gauntlet.Automation.csproj.patch.1"
+      ]
+    },
+    {
       "Type": "UnrealBuildTool",
       "Root": "Engine/Source/Programs/UnrealBuildTool",
       "Add": [
