@@ -1,0 +1,18 @@
+--- ./AutomationUtils/AutomationUtils.Automation.csproj	2025-10-05 21:12:57
++++ ./AutomationUtils/AutomationUtils.Automation.csproj	2025-10-11 08:33:06
+@@ -10,7 +10,7 @@
+     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+     <GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
+     <Configurations>Debug;Release;Development</Configurations>
+-    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
++    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+     <DebugType>pdbonly</DebugType>
+     <DebugType Condition="'$(IsWindows)' == 'true' And '$(IsArm64)' == 'true'">portable</DebugType>
+@@ -76,4 +76,4 @@
+     <PackageReference Include="Google.Apis.Sheets.v4" Version="1.33.1.1229" PrivateAssets="all" />
+     <PackageReference Include="System.Text.RegularExpressions" Version="4.3.1" />
+   </ItemGroup>
+-</Project>
+\ No newline at end of file
++</Project>
