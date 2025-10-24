@@ -224,7 +224,7 @@ if [ -z ${DOTNET+x} ]; then
 fi
 
 # First dump a json describing all module dependencies.
-eval "$DOTNET" "$UBT_DIR/Binaries/DotNET/UnrealBuildTool/UnrealBuildTool.dll" -Mode=JsonExport "$TARGET_NAME" "$TARGET_PLATFORM" "$TARGET_CONFIG" -Project="$PROJECT_FILE" -OutputFile="$TEMP/TempoModules.json" -NoMutex -rootdirectory="'$ENGINE_DIR/..'" > /dev/null 2>&1
+eval "$DOTNET" "\"$UBT_DIR/Binaries/DotNET/UnrealBuildTool/UnrealBuildTool.dll\"" -Mode=JsonExport "$TARGET_NAME" "$TARGET_PLATFORM" "$TARGET_CONFIG" -Project="$PROJECT_FILE" -OutputFile="$TEMP/TempoModules.json" -NoMutex -rootdirectory="'$ENGINE_DIR/..'" > /dev/null 2>&1
 JSON_DATA=$(cat "$TEMP/TempoModules.json")
 # Extract the public and private dependencies of all C++ project modules.
 FILTERED_MODULES=$(echo "$JSON_DATA" | jq --arg project_root "$PROJECT_ROOT" 'def normalize_path: gsub("\\\\"; "/") | if startswith("/") then . else "/" + . end; .Modules | to_entries[] | select(.value.Type == "CPlusPlus") | select((.value.Directory | normalize_path) | startswith($project_root | normalize_path)) | {(.key): {Directory: .value.Directory, PublicDependencyModules: .value.PublicDependencyModules, PrivateDependencyModules: .value.PrivateDependencyModules}}')
