@@ -10,6 +10,31 @@ In `Wall Clock` mode, time advances _strictly_ alongside the system clock. We ac
 ### Fixed Step Mode
 In `Fixed Step` mode, time advances by a fixed amount, which you can choose, every frame. We express this increment in terms of a whole number of simulated steps per second (like, 10 steps per second), as opposed to a floating point fraction of a second (like, 0.1 seconds per step), because we use a fixed-point representation for time (again, overriding the engine's time) because we want it to be exactly correct (no rounding or floating point errors here).
 
+# Tempo Pawn Controllers
+
+<img width="1273" height="638" alt="image" src="https://github.com/user-attachments/assets/41ece0a4-b18a-47c9-bf00-07b5733987b4" />
+
+
+## Exposed Bindings
+<img width="218" height="80" alt="image" src="https://github.com/user-attachments/assets/3ee1ae4d-bc8c-4f03-b79a-3fa1cdaeb67f" />
+
+The bindings widget allows the user to dynamically rebind existing functions to new keys by clicking on the binding you wish to change and pressing the new key. Any **new functions** that are created and added to the **project settings** will automatically be found and populated into the scrollable list. Note: There are groupings for the pawns themselves. You can use the default bindings of **possess next** and **possess previous**, but in order to possess pawns of a different group you must use the **switch group** binding. This is so that if you want to only switch between certain pawns, you can group them together.
+
+## Actor Possession/Creation/Destruction
+<img width="188" height="98" alt="image" src="https://github.com/user-attachments/assets/fafe6c78-8341-4087-878a-51898fb730b2" />
+
+The possessable actors widget holds all the possessable actors in the scene. In the sample project, we have a spectator pawn, a street sweeper, and 3 block bots. Any of those actors you can left click into on the GUI or the list to possess. The list also allows you to create or destroy the block bots via middle click and right click. Each block bot is automatically possessed with an AI Controller when created and destroyed bots have their controllers subsequently destroyed.
+
+Additionally, when hovering over a possessable actor in the GUI, a new cursor icon appears that indicates the actor you are hovering over is possessable.
+<img width="300" height="200" alt="image" src="https://github.com/user-attachments/assets/398d13ed-f1e4-440c-8a06-bf0453605953" />
+
+
+## Hiding Elements
+<img width="194" height="77" alt="image" src="https://github.com/user-attachments/assets/0296c4bc-eaf4-4d04-bd1d-662a31649898" />
+
+Lastly, we understand how important it is for simulations to also be clutter-free and aesthetically appealing. That is why we added a hider widget that allows for us to hide specific widgets as well as an **Immersive Mode** that hides all the widgets.
+
+
 ## Scripting
 Tempo supports scripting via [Protobuf](https://protobuf.dev/) and [gRPC](https://grpc.io/).
 
