@@ -31,6 +31,8 @@ public:
 
 	bool BeginPlayDeferred() const { return bBeginPlayDeferred; }
 
+	FORCEINLINE APawn* GetDefaultPawn() const { return DefaultPawn; }
+
 	// An event that fires *right* before BeginPlay
 	FPreBeginPlay PreBeginPlayEvent;
 
@@ -39,6 +41,11 @@ public:
 	EControlMode GetControlMode() const;
 
 	FControlModeChanged ControlModeChangedEvent;
+
+	TSubclassOf<APawn> GetRobotClass() const { return RobotClass; }
+
+	UFUNCTION(BlueprintPure, Category = "Tempo Game Mode")
+	TSubclassOf<AController> GetOpenLoopControllerClass() const;
 
 protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, meta=(MustImplement="/Script/TempoCore.ActorClassificationInterface"))
