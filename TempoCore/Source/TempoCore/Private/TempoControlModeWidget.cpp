@@ -53,4 +53,3 @@ void UTempoControlModeWidget::SyncControlMode(EControlMode ControlMode)
 {
 	ControlModeBox->SetSelectedOption(UTempoCoreUtils::GetEnumValueAsString(ControlMode));
 }
-

@@ -31,7 +31,7 @@ void UTempoPawnEntryWidget::SetPawn(APawn* InPawn)
 
     if (PawnNameText && RepresentedPawn)
     {
-        PawnNameText->SetText(FText::FromString(RepresentedPawn->GetActorLabel()));
+        PawnNameText->SetText(FText::FromString(RepresentedPawn->GetActorNameOrLabel()));
     }
 }
 
@@ -75,7 +75,7 @@ FReply UTempoPawnEntryWidget::NativeOnMouseButtonDown(const FGeometry& MyGeometr
                 return FReply::Handled();
             }
 
-            UE_LOG(LogTempoCore, Warning, TEXT("Right-click detected on %s. Attempting to spawn."), *RepresentedPawn->GetActorLabel());
+            UE_LOG(LogTempoCore, Warning, TEXT("Right-click detected on %s. Attempting to spawn."), *RepresentedPawn->GetActorNameOrLabel());
 
             // Spawn the new Pawn
             FActorSpawnParameters SpawnParams;
@@ -128,7 +128,7 @@ FReply UTempoPawnEntryWidget::NativeOnMouseButtonDown(const FGeometry& MyGeometr
                 }
             }
             
-            UE_LOG(LogTempoCore, Warning, TEXT("Middle-click detected on %s. Attempting to delete."), *RepresentedPawn->GetActorLabel());
+            UE_LOG(LogTempoCore, Warning, TEXT("Middle-click detected on %s. Attempting to delete."), *RepresentedPawn->GetActorNameOrLabel());
 
             AController* PawnController = RepresentedPawn->GetController();
             

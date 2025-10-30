@@ -55,7 +55,7 @@ public:
     FOnPawnListUpdated OnPawnListUpdated;
 
     /**
-    * @brief Caches the current AI controller of a pawn before the player possesses it.
+    * Caches the current AI controller of a pawn before the player possesses it.
     */
     void CacheAIController(APawn* PawnToPossess);
 
@@ -152,4 +152,3 @@ protected:
     
     void ToggleUIVisibility();
 };
-
