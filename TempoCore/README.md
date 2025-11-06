@@ -10,7 +10,7 @@ In `Wall Clock` mode, time advances _strictly_ alongside the system clock. We ac
 ### Fixed Step Mode
 In `Fixed Step` mode, time advances by a fixed amount, which you can choose, every frame. We express this increment in terms of a whole number of simulated steps per second (like, 10 steps per second), as opposed to a floating point fraction of a second (like, 0.1 seconds per step), because we use a fixed-point representation for time (again, overriding the engine's time) because we want it to be exactly correct (no rounding or floating point errors here).
 
-# Default HUD
+## Default HUD
 <img width="1273" height="638" alt="image" src="https://github.com/user-attachments/assets/41ece0a4-b18a-47c9-bf00-07b5733987b4" />
 
 
@@ -29,7 +29,7 @@ The bindings widget allows the user to dynamically rebind existing functions to 
 
 The possessable actors widget holds all the possessable actors in the scene. For example in the [TempoSample](https://github.com/tempo-sim/TempoSample) project, we have a spectator pawn, a street sweeper, and several "block bots". Any of those pawns can be possessed by left clicking on them or their entry in the widget. The widget also allows you to create or destroy the block bots via middle click and right click, respectively. When unpossessing a pawn, it will be automatically repossessed by the controller that was previously possessing it.
 
-Additionally, when hovering over a possessable actor in the GUI, a cursor icon appears that indicates the actor you are hovering over is possessable.
+Additionally, when hovering over a possessable pawn in the GUI, a cursor icon appears that indicates the actor you are hovering over is possessable.
 
 <img width="300" height="200" alt="image" src="https://github.com/user-attachments/assets/398d13ed-f1e4-440c-8a06-bf0453605953" />
 
@@ -43,7 +43,7 @@ Turning on highlight possessed pawn will create a debug point above your current
 ### Hiding Elements
 <img width="194" height="77" alt="image" src="https://github.com/user-attachments/assets/0296c4bc-eaf4-4d04-bd1d-662a31649898" />
 
-Lastly, we understand how important it is for simulations to be clutter-free and aesthetic. That is why we added a hover widget that allows for us to hide specific widgets as well as an `Immersive Mode` that hides all the widgets.
+Individual widgets can be hidden by toggling the categories shown in the hover widget above. If you wish to hide all the widgets for a clean display, `Immersive Mode` can be entered by the default binding of `0`.
 
 
 ## Scripting
