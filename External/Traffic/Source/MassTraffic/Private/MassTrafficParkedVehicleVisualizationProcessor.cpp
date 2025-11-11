@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "MassTrafficParkedVehicleVisualizationProcessor.h"
+#include "MassCommonFragments.h"
 #include "MassTrafficVehicleVisualizationProcessor.h"
 #include "MassTrafficSubsystem.h"
 #include "MassRepresentationSubsystem.h"
