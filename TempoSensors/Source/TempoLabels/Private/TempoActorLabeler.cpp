@@ -98,7 +98,8 @@ using LabelAsyncService = TempoLabels::LabelService::AsyncService;
 void UTempoActorLabeler::RegisterScriptingServices(FTempoScriptingServer& ScriptingServer)
 {
 	ScriptingServer.RegisterService<LabelService>(
-		SimpleRequestHandler(&LabelAsyncService::RequestGetInstanceToSemanticIdMap, &UTempoActorLabeler::GetInstanceToSemanticIdMap)
+		SimpleRequestHandler(&LabelAsyncService::RequestGetInstanceToSemanticIdMap, &UTempoActorLabeler::GetInstanceToSemanticIdMap),
+		SimpleRequestHandler(&LabelAsyncService::RequestGetLabeledActorTypes, &UTempoActorLabeler::HandleGetLabeledActorTypes)
 	);
 }
 
@@ -115,6 +116,26 @@ void UTempoActorLabeler::GetInstanceToSemanticIdMap(const TempoScripting::Empty&
 		}
 	}
 	ResponseContinuation.ExecuteIfBound(InstanceToSemanticIdMap, grpc::Status_OK);
+}
+
+void UTempoActorLabeler::HandleGetLabeledActorTypes(const TempoLabels::GetLabeledActorTypesRequest& Request, const TResponseDelegate<TempoLabels::GetLabeledActorTypesResponse>& ResponseContinuation)
+{
+	TempoLabels::GetLabeledActorTypesResponse Response;
+
+	// Check if instance ID mode is enabled. If not, this request is not applicable.
+	const UTempoSensorsSettings* TempoSensorsSettings = GetDefault<UTempoSensorsSettings>();
+	if (TempoSensorsSettings->GetLabelType() != ELabelType::Instance)
+	{
+		ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "Instance label mode is not enabled"));
+		return;
+	}
+
+	for (const FName& ClassName : LabeledActorClassNames)
+	{
+		Response.add_actor_types(TCHAR_TO_UTF8(*ClassName.ToString()));
+	}
+
+	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
 }
 
 void UTempoActorLabeler::OnWorldBeginPlay(UWorld& InWorld)
@@ -297,6 +318,11 @@ void UTempoActorLabeler::LabelActor(AActor* Actor)
 				if (TOptional<int32> InstanceId = InstanceIdAllocator.Allocate())
 				{
 					ActorIdPair.InstanceId = *InstanceId;
+					// Track actor class names that have been assigned instance IDs
+					if (GetDefault<UTempoSensorsSettings>()->GetLabelType() == ELabelType::Instance)
+					{
+						LabeledActorClassNames.Add(Actor->GetClass()->GetFName());
+					}
 				}
 				ActorIdPair.SemanticId = *SemanticId;
 			}
@@ -389,6 +415,9 @@ void UTempoActorLabeler::UnLabelAllActors()
 	{
 		UnLabelActor(*ActorItr);
 	}
+	
+	// Clear the set of labeled actor class names
+	LabeledActorClassNames.Empty();
 }
 
 void UTempoActorLabeler::UnLabelActor(AActor* Actor)
