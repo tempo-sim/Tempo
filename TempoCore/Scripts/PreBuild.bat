@@ -10,10 +10,8 @@ if defined TEMPO_SKIP_PREBUILD (
     )
 )
 
-REM Simply call the individual scripts from the same directory
-bash %~dp0GenProtos.sh %*
-if %errorlevel% neq 0 exit /b %errorlevel%
-bash %~dp0GenAPI.sh %1 %3 %4
+REM Simply call the bash script from the same directory
+bash %~dp0PreBuild.sh %*
 if %errorlevel% neq 0 exit /b %errorlevel%
 
 exit /b 0

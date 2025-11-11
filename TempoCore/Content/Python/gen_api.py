@@ -1,323 +1,227 @@
-# Copyright Tempo Simulation, LLC. All Rights Reserved
+"""
+Generate Python API for Tempo plugin.
+Copyright Tempo Simulation, LLC. All Rights Reserved
+"""
 
-import google.protobuf.descriptor as gpd
+import argparse
 import importlib
-import jinja2
+from pathlib import Path
 import os
-import re
+import subprocess
 import sys
+import venv
+import re
 
 
-protobuf_types_to_python_types = {
-    gpd.FieldDescriptor.TYPE_DOUBLE: "float",
-    gpd.FieldDescriptor.TYPE_FLOAT: "float",
-    gpd.FieldDescriptor.TYPE_INT64: "int",
-    gpd.FieldDescriptor.TYPE_UINT64: "int",
-    gpd.FieldDescriptor.TYPE_INT32: "int",
-    gpd.FieldDescriptor.TYPE_FIXED64: "int",
-    gpd.FieldDescriptor.TYPE_FIXED32: "int",
-    gpd.FieldDescriptor.TYPE_BOOL: "bool",
-    gpd.FieldDescriptor.TYPE_STRING: "str",
-    gpd.FieldDescriptor.TYPE_GROUP: None,
-    gpd.FieldDescriptor.TYPE_MESSAGE: None,
-    gpd.FieldDescriptor.TYPE_BYTES: "bytearray",
-    gpd.FieldDescriptor.TYPE_UINT32: "int",
-    gpd.FieldDescriptor.TYPE_ENUM: None, 
-    gpd.FieldDescriptor.TYPE_SFIXED32: "int",
-    gpd.FieldDescriptor.TYPE_SFIXED64: "int",
-    gpd.FieldDescriptor.TYPE_SINT32: "int",
-    gpd.FieldDescriptor.TYPE_SINT64: "int",
-    gpd.FieldDescriptor.MAX_TYPE: None
-}
-
-
-protobuf_labels_to_python_labels = {
-    gpd.FieldDescriptor.LABEL_OPTIONAL: "optional",
-    gpd.FieldDescriptor.LABEL_REPEATED: "repeated",
-    gpd.FieldDescriptor.LABEL_REQUIRED: "required",
-    gpd.FieldDescriptor: None
-}
-
-
-class TempoObjectDescriptor(object):
-    def __init__(self, module_name):
-        self.module_name = module_name
-        self.object_name = None
-
-    @property
-    def full_name(self):
-        return f"{self.module_name}.{self.object_name}"
-
-
-class TempoEnumDescriptor(TempoObjectDescriptor):
-    def __init__(self, module_name, enum_descriptor):
-        super().__init__(module_name)
-        self.object_name = enum_descriptor.name
+class APIGenerator:
+    def __init__(self, args):
+        self.project_root = Path(args.project_root)
+        self.plugin_root = Path(args.plugin_root)
+        self.venv_dir = self.project_root / "TempoEnv"
+        self.requirements_file = self.plugin_root / "Content/Python/requirements.txt"
+        self.api_dir = self.plugin_root / "Content/Python/API"
         
+    def get_venv_python(self) -> Path:
+        """Get path to Python executable in virtual environment"""
+        if sys.platform == "win32":
+            return self.venv_dir / "Scripts" / "python.exe"
+        else:
+            return self.venv_dir / "bin" / "python3"
+    
+    def get_venv_pip(self) -> Path:
+        """Get path to pip executable in virtual environment"""
+        if sys.platform == "win32":
+            return self.venv_dir / "Scripts" / "pip.exe"
+        else:
+            return self.venv_dir / "bin" / "pip"
+    
+    def needs_venv_recreation(self) -> bool:
+        """Check if virtual environment needs to be recreated"""
+        pyvenv_cfg = self.venv_dir / "pyvenv.cfg"
+        
+        if not pyvenv_cfg.exists():
+            return True
+        
+        # Check if venv was created with current Python
+        current_python_dir = str(Path(sys.executable).parent)
+        
+        with open(pyvenv_cfg, 'r') as f:
+            for line in f:
+                if line.startswith("home = "):
+                    venv_python_dir = line.replace("home = ", "").strip().replace("\\", "/")
+                    current_python_dir_normalized = current_python_dir.replace("\\", "/")
+                    
+                    if venv_python_dir != current_python_dir_normalized:
+                        return True
+                    break
+        
+        return False
+    
+    def create_venv(self):
+        """Create or recreate virtual environment"""
+        if self.venv_dir.exists() and self.needs_venv_recreation():
+            print(f"Removing existing virtual environment at {self.venv_dir}")
+            import shutil
+            shutil.rmtree(self.venv_dir)
+        
+        if not self.venv_dir.exists():
+            print(f"Creating virtual environment at {self.venv_dir}")
+            venv.create(self.venv_dir, with_pip=True)
+    
+    def configure_pip(self):
+        """Configure pip to suppress version check warnings"""
+        if sys.platform == "win32":
+            pip_config = self.venv_dir / "pip.ini"
+        else:
+            pip_config = self.venv_dir / "pip.conf"
+        
+        pip_config.write_text("[global]\ndisable-pip-version-check = true\n")
+    
+    def activate_venv_and_import_pip(self):
+        """Activate venv by modifying sys.path and import pip"""
+        # Add venv site-packages to sys.path
+        if sys.platform == "win32":
+            site_packages = self.venv_dir / "Lib" / "site-packages"
+        else:
+            python_version = f"python{sys.version_info.major}.{sys.version_info.minor}"
+            site_packages = self.venv_dir / "lib" / python_version / "site-packages"
+        
+        # Insert at the beginning so venv packages take precedence
+        sys.path.insert(0, str(site_packages))
+        
+        # Now import pip from the venv
+        try:
+            import pip
+            return pip
+        except ImportError:
+            raise RuntimeError("Failed to import pip from virtual environment")
+    
+    def install_dependencies(self):
+        """Install dependencies from requirements.txt"""
+        if not self.requirements_file.exists():
+            print(f"Warning: Requirements file not found: {self.requirements_file}", file=sys.stderr)
+            return
+        
+        print("Installing dependencies...")
+        
+        # Use pip's main function directly
+        from pip._internal import main as pip_main
+        
+        args = [
+            "install",
+            "-r", str(self.requirements_file),
+            "--quiet",
+            "--retries", "0"
+        ]
+        
+        try:
+            # pip_main returns 0 on success
+            pip_main(args)
+        except SystemExit as e:
+            # pip calls sys.exit(), catch it
+            if e.code != 0:
+                print(f"Warning: Failed to install some dependencies (this may be okay if offline)", file=sys.stderr)
+        except Exception as e:
+            print(f"Warning: pip install failed: {e}", file=sys.stderr)
+    
+    def uninstall_tempo(self):
+        """Uninstall existing tempo package if present"""
+        from pip._internal import main as pip_main
+        from pip._internal.commands.show import search_packages_info
+        
+        # Check if tempo is installed
+        try:
+            packages = list(search_packages_info(["tempo"]))
+            if packages:
+                print("Uninstalling previous tempo package...")
+                try:
+                    pip_main(["uninstall", "tempo", "--yes", "--quiet"])
+                except SystemExit:
+                    pass  # pip calls sys.exit(), ignore it
+        except Exception:
+            # Package not found or other error, that's fine
+            pass
+    
+    def generate_api(self):
+        """Generate the API using gen_api.py"""
+        # Import and call gen_api directly
+        gen_api_module_path = self.plugin_root / "Content/Python"
+        
+        if str(gen_api_module_path) not in sys.path:
+            sys.path.insert(0, str(gen_api_module_path))
+        
+        try:
+            import generate_tempo_api
+        except Exception as e:
+            print(f"Warning: Generate Tempo API failed: {e}", file=sys.stderr)
+    
+    def install_tempo_api(self):
+        """Install the Tempo API package to the virtual environment"""
+        if not self.api_dir.exists():
+            raise RuntimeError(f"API directory not found: {self.api_dir}")
+        
+        setup_py = self.api_dir / "setup.py"
+        if not setup_py.exists():
+            raise RuntimeError(f"setup.py not found: {setup_py}")
+        
+        print("Installing Tempo API...")
+        
+        from pip._internal import main as pip_main
+        
+        args = ["install", str(self.api_dir), "--quiet", "--retries", "0"]
+        
+        try:
+            pip_main(args)
+        except SystemExit as e:
+            if e.code != 0:
+                print(f"Warning: Failed to install Tempo API (this may be okay if offline)", file=sys.stderr)
+        except Exception as e:
+            print(f"Warning: pip install failed: {e}", file=sys.stderr)
+    
+    def run(self):
+        """Main execution flow"""
+        print("Generating Python API...")
+        
+        try:
+            # Create/verify virtual environment
+            self.create_venv()
+            
+            # Configure pip
+            self.configure_pip()
+            
+            # Activate venv and import pip
+            self.activate_venv_and_import_pip()
+            
+            # Install dependencies
+            self.install_dependencies()
+            
+            # Uninstall old tempo if present
+            self.uninstall_tempo()
+            
+            # Generate the API
+            self.generate_api()
+            
+            # Install the Tempo API
+            self.install_tempo_api()
+            
+            print("Done")
+            return 0
+            
+        except Exception as e:
+            print(f"Error: {e}", file=sys.stderr)
+            return 1
 
-class TempoMessageDescriptor(TempoObjectDescriptor):
-    class FieldDescriptor(object):
-        def __init__(self, field_descriptor):
-            self.module_name = None
-            if field_descriptor.type == gpd.FieldDescriptor.TYPE_MESSAGE:
-                self.field_type = field_descriptor.message_type.full_name
-            elif field_descriptor.type == gpd.FieldDescriptor.TYPE_ENUM:
-                self.field_type = field_descriptor.enum_type.full_name
-            else:
-                self.field_type = protobuf_types_to_python_types[field_descriptor.type]
-            self.label = protobuf_labels_to_python_labels[field_descriptor.label]
-            # Special case for str fields. Default ("") will render as nothing, so we add some extra quotes
-            self.default = field_descriptor.default_value if self.field_type != "str" else "''"
-            self.name = field_descriptor.name
 
-    def __init__(self, module_name, message_descriptor):
-        super().__init__(module_name)
-        self.object_name = message_descriptor.name
-        self.fields = []
-        for field_descriptor in message_descriptor.fields_by_name.values():
-            self.fields.append(self.FieldDescriptor(field_descriptor))
-
-    def resolve_names(self, all_messages_and_enums):
-        for field in self.fields:
-            if field.field_type in all_messages_and_enums:
-                object = all_messages_and_enums[field.field_type]
-                field.field_type = object.full_name
-                field.module_name = object.module_name
-
-
-class TempoServiceDescriptor(TempoObjectDescriptor):
-    class RPCDescriptor(object):
-        def __init__(self, rpc_descriptor):
-            self.name = rpc_descriptor.name
-            self.server_streaming = rpc_descriptor.server_streaming
-            self.client_streaming = rpc_descriptor.client_streaming
-            self.request_type = rpc_descriptor.input_type.full_name
-            self.response_type = rpc_descriptor.output_type.full_name
-
-    def __init__(self, module_name, service_descriptor):
-        super().__init__(module_name)
-        self.object_name = service_descriptor.name
-        self.rpcs = []
-
-        for rpc_descriptor in service_descriptor.methods_by_name.values():
-            self.rpcs.append(self.RPCDescriptor(rpc_descriptor))
-
-
-def gather_enums(module_name, module_descriptor):
-    enums = {}
-    for enum_descriptor in module_descriptor.enum_types_by_name.values():
-        enums[enum_descriptor.full_name] = TempoEnumDescriptor(module_name, enum_descriptor)
-    return enums
-
-
-def gather_messages(module_name, module_descriptor):
-    messages = {}
-    for message_descriptor in module_descriptor.message_types_by_name.values():
-        messages[message_descriptor.full_name] = TempoMessageDescriptor(module_name, message_descriptor)
-    return messages
-
-
-def gather_services(module_name, module_descriptor):
-    services = {}
-    for service_descriptor in module_descriptor.services_by_name.values():
-        services[service_descriptor.full_name] = TempoServiceDescriptor(module_name, service_descriptor)
-    return services
-
-
-def pascal_to_snake(string):
-    return re.sub(r'(?<!^)(?=[A-Z])', '_', string).lower()
-
-
-def generate_tempo_api(root_dir):
-    all_enums = {}
-    all_messages = {}
-    all_services = {}
-    potentially_stale_files = set([name for name in os.listdir(root_dir) 
-                                   if os.path.isfile(os.path.join(root_dir, name))])
-    # Non-generated files
-    potentially_stale_files.remove(".gitignore")
-    potentially_stale_files.remove("_tempo_context.py")
-    potentially_stale_files.remove("TempoImageUtils.py")
-    potentially_stale_files.remove("TempoLidarUtils.py")
-    potentially_stale_files.remove("__init__.py")
-    tempo_module_names = [name for name in os.listdir(root_dir) if os.path.isdir(os.path.join(root_dir, name))]
-    for tempo_module_name in tempo_module_names:
-        tempo_module_root = os.path.join(root_dir, tempo_module_name)
-        contains_services = False
-        for path, _, files in os.walk(tempo_module_root):
-            for filename in files:
-                if filename.endswith("_pb2.py"):
-                    file_path = os.path.join(path, filename)
-                    rel_path = os.path.relpath(file_path, tempo_module_root)
-                    module_name = "{}.{}".format(
-                        tempo_module_name, os.path.splitext(rel_path)[0].replace(os.sep, '.'))
-                    module = importlib.import_module(f"API.tempo.{module_name}")
-                    if hasattr(module, "DESCRIPTOR"):
-                        module_descriptor = module.DESCRIPTOR
-                        all_enums = all_enums | gather_enums(module_name, module_descriptor)
-                        all_messages = all_messages | gather_messages(module_name, module_descriptor)
-                        services = gather_services(module_name, module_descriptor)
-                        if len(services) > 0:
-                            contains_services = True
-                        module_rpcs = set()
-                        for service in services.values():
-                            for rpc in service.rpcs:
-                                rpc_name = rpc.name
-                                if rpc_name in module_rpcs:
-                                    raise Exception(f"Module {tempo_module_name} has two rpcs named {rpc_name}. "
-                                                    f"This is not allowed! Please rename one.")
-                                module_rpcs.add(rpc_name)
-                        all_services = all_services | services
-        if contains_services:
-            output_file = f"{pascal_to_snake(tempo_module_name)}.py"
-            potentially_stale_files.discard(output_file)
-            with open(os.path.join(root_dir, output_file), 'w') as f:
-                f.write("# Warning: Autogenerated code do not edit\n\n")
-                f.write("from tempo._tempo_context import tempo_context\n")
-                f.write("from tempo import run_async\n")
-                f.write("from curio.meta import awaitable\n")
-                f.write("import asyncio\n")
-                f.write("\n\n")
-                
-    for stale_file in potentially_stale_files:
-        os.remove(os.path.join(root_dir, stale_file))
-
-    # The Protobuf-provided "descriptor" objects use the Protobuf names for classes, but we want the names of the
-    # generated Python classes. The all_* dictionaries can provide that mapping, so we go through all the messages
-    # once more to "resolve" all the types of message fields here.
-    for tempo_message_descriptor in all_messages.values():
-        tempo_message_descriptor.resolve_names(all_messages | all_enums)
-
-    # Every RPC gets sync and async versions. The correct one will automatically be chosen by context.
-    simple_rpc_template = \
-        "import " \
-        "{% for import in imports %}" \
-        "{{ import }}{% if not loop.last %}, {% endif %}" \
-        "{% endfor %}" \
-        "\n" \
-        "async def _{{ name }}(\n" \
-        "{% for field in request.fields %}" \
-        "    {{ field.name }}: {{ field.field_type }} = {{ field.default }}{% if not loop.last %},{% endif %}\n" \
-        "{% endfor %}" \
-        ") -> {{ response.full_name }}:\n" \
-        "    stub = await tempo_context().get_stub({{ service.module_name }}_grpc.{{ service.object_name }}Stub)\n" \
-        "    request = {{ request.full_name }}(\n" \
-        "{% for field in request.fields %}" \
-        "        {{ field.name }}={{ field.name }}{% if not loop.last %},{% endif %}\n" \
-        "{% endfor %}" \
-        "    )\n" \
-        "    return await stub.{{ rpc.name }}(request)\n" \
-        "\n\n" \
-        "def {{ name }}(\n" \
-        "{% for field in request.fields %}" \
-        "    {{ field.name }}: {{ field.field_type }} = {{ field.default }}{% if not loop.last %},{% endif %}\n" \
-        "{% endfor %}" \
-        ") -> {{ response.full_name }}:\n" \
-        "    return run_async(_{{ name }}(\n" \
-        "{% for field in request.fields %}" \
-        "        {{ field.name }}={{ field.name }}{% if not loop.last %},{% endif %}\n" \
-        "{% endfor %}" \
-        "    ))\n" \
-        "\n\n" \
-        "@awaitable({{ name }})\n" \
-        "async def {{ name }}(\n" \
-        "{% for field in request.fields %}" \
-        "    {{ field.name }}: {{ field.field_type }} = {{ field.default }}{% if not loop.last %},{% endif %}\n" \
-        "{% endfor %}" \
-        ") -> {{ response.full_name }}:\n" \
-        "    return await _{{ name }}(\n" \
-        "{% for field in request.fields %}" \
-        "        {{ field.name }}={{ field.name }}{% if not loop.last %},{% endif %}\n" \
-        "{% endfor %}" \
-        "    )\n" \
-        "\n\n" \
-
-    streaming_rpc_template = \
-        "import " \
-        "{% for import in imports %}" \
-        "{{ import }}{% if not loop.last %}, {% endif %}" \
-        "{% endfor %}" \
-        "\n" \
-        "async def _{{ name }}(\n" \
-        "{% for field in request.fields %}" \
-        "    {{ field.name }}: {{ field.field_type }} = {{ field.default }}{% if not loop.last %},{% endif %}\n" \
-        "{% endfor %}" \
-        ") -> {{ response.full_name }}:\n" \
-        "    stub = await tempo_context().get_stub({{ service.module_name }}_grpc.{{ service.object_name }}Stub)\n" \
-        "    request = {{ request.full_name }}(\n" \
-        "{% for field in request.fields %}" \
-        "        {{ field.name }}={{ field.name }}{% if not loop.last %},{% endif %}\n" \
-        "{% endfor %}" \
-        "    )\n" \
-        "    async for response in stub.{{ rpc.name }}(request):\n" \
-        "        yield response\n" \
-        "\n\n" \
-        "def {{ name }}(\n" \
-        "{% for field in request.fields %}" \
-        "    {{ field.name }}: {{ field.field_type }} = {{ field.default }}{% if not loop.last %},{% endif %}\n" \
-        "{% endfor %}" \
-        ") -> {{ response.full_name }}:\n" \
-        "    async_gen = _{{ name }}(\n" \
-        "{% for field in request.fields %}" \
-        "        {{ field.name }}={{ field.name }}{% if not loop.last %},{% endif %}\n" \
-        "{% endfor %}" \
-        "    )\n" \
-        "    while True:\n" \
-        "        try:\n" \
-        "            yield run_async(async_gen.__anext__())\n" \
-        "        except StopAsyncIteration:\n" \
-        "            break\n" \
-        "\n\n" \
-        "@awaitable({{ name }})\n" \
-        "async def {{ name }}(\n" \
-        "{% for field in request.fields %}" \
-        "    {{ field.name }}: {{ field.field_type }} = {{ field.default }}{% if not loop.last %},{% endif %}\n" \
-        "{% endfor %}" \
-        ") -> {{ response.full_name }}:\n" \
-        "    async for response in _{{ name }}(\n" \
-        "{% for field in request.fields %}" \
-        "        {{ field.name }}={{ field.name }}{% if not loop.last %},{% endif %}\n" \
-        "{% endfor %}" \
-        "    ):\n" \
-        "        yield response\n" \
-        "\n\n" \
-
-    j2_environment = jinja2.Environment()
-    for service_name, tempo_service_descriptor in all_services.items():
-        tempo_module_name = tempo_service_descriptor.module_name.split(".")[0]
-        with open(os.path.join(root_dir, f"{pascal_to_snake(tempo_module_name)}.py"), 'a') as f:
-            for rpc_descriptor in tempo_service_descriptor.rpcs:
-                tempo_request_descriptor = all_messages[rpc_descriptor.request_type]
-                tempo_response_descriptor = all_messages[rpc_descriptor.response_type]
-                templates = []
-                if rpc_descriptor.client_streaming:
-                    raise Exception("Client streaming RPCs are not yet supported")
-                if rpc_descriptor.server_streaming:
-                    templates.append(j2_environment.from_string(streaming_rpc_template))
-                else:
-                    templates.append(j2_environment.from_string(simple_rpc_template))
-                imports = set()
-                imports.add("{}_grpc".format(tempo_service_descriptor.module_name))
-                imports.add(tempo_request_descriptor.module_name)
-                imports.add(tempo_response_descriptor.module_name)
-                for field in tempo_request_descriptor.fields:
-                    if field.module_name:
-                        imports.add(field.module_name)
-                for template in templates:
-                    f.write(template.render(
-                        name=pascal_to_snake(rpc_descriptor.name),
-                        rpc=rpc_descriptor,
-                        service=tempo_service_descriptor,
-                        request=tempo_request_descriptor,
-                        response=tempo_response_descriptor,
-                        imports=imports
-                    ))        
+def main():
+    parser = argparse.ArgumentParser(description="Generate Python API for Tempo plugin")
+    parser.add_argument("project_root", help="Project root directory")
+    parser.add_argument("plugin_root", help="Plugin root directory")
+    
+    args = parser.parse_args()
+    
+    generator = APIGenerator(args)
+    return generator.run()
 
 
 if __name__ == "__main__":
-    if sys.version_info[0] < 3 or sys.version_info[1] < 9:
-        raise Exception("This script requires Python 3.9 or greater (found {}.{}.{})"
-                        .format(sys.version_info[0], sys.version_info[1], sys.version_info[2]))
-    root_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "API", "tempo")
-    sys.path.append(root_dir)
-    generate_tempo_api(root_dir)
+    sys.exit(main())
