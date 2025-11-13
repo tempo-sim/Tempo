@@ -47,11 +47,11 @@
 			"$(PluginDir)\\Scripts\\PreBuild.bat \"$(EngineDir)\" \"$(ProjectFile)\" \"$(ProjectDir)\" \"$(PluginDir)\" \"$(TargetName)\" \"$(TargetConfiguration)\" \"$(TargetPlatform)\" \"$(PluginDir)\\Source\\ThirdParty\\gRPC\\Binaries\\Windows\" \"$(EngineDir)\""
 		],
 		"Mac": [
-			"$(EngineDir)/Binaries/ThirdParty/Python3/Mac/python \"$(EngineDir)\" \"$(ProjectFile)\" \"$(ProjectDir)\" \"$(PluginDir)\" \"$(TargetName)\" \"$(TargetConfiguration)\" \"$(TargetPlatform)\" \"$(PluginDir)/Source/ThirdParty/gRPC/Binaries/Mac\" \"$(EngineDir)\"",
+			"$(EngineDir)/Binaries/ThirdParty/Python3/Mac/bin/python3 \"$(EngineDir)\" \"$(ProjectFile)\" \"$(ProjectDir)\" \"$(PluginDir)\" \"$(TargetName)\" \"$(TargetConfiguration)\" \"$(TargetPlatform)\" \"$(PluginDir)/Source/ThirdParty/gRPC/Binaries/Mac\" \"$(EngineDir)\"",
 			"$(PluginDir)/Scripts/PreBuild.sh \"$(EngineDir)\" \"$(ProjectFile)\" \"$(ProjectDir)\" \"$(PluginDir)\" \"$(TargetName)\" \"$(TargetConfiguration)\" \"$(TargetPlatform)\" \"$(PluginDir)/Source/ThirdParty/gRPC/Binaries/Mac\" \"$(EngineDir)\""
 		],
 		"Linux": [
-			"$(EngineDir)/Binaries/ThirdParty/Python3/Linux/python \"$(EngineDir)\" \"$(ProjectFile)\" \"$(ProjectDir)\" \"$(PluginDir)\" \"$(TargetName)\" \"$(TargetConfiguration)\" \"$(TargetPlatform)\" \"$(PluginDir)/Source/ThirdParty/gRPC/Binaries/Mac\" \"$(EngineDir)\"",
+			"$(EngineDir)/Binaries/ThirdParty/Python3/Linux/bin/python3 \"$(EngineDir)\" \"$(ProjectFile)\" \"$(ProjectDir)\" \"$(PluginDir)\" \"$(TargetName)\" \"$(TargetConfiguration)\" \"$(TargetPlatform)\" \"$(PluginDir)/Source/ThirdParty/gRPC/Binaries/Mac\" \"$(EngineDir)\"",
 			"$(PluginDir)/Scripts/PreBuild.sh \"$(EngineDir)\" \"$(ProjectFile)\" \"$(ProjectDir)\" \"$(PluginDir)\" \"$(TargetName)\" \"$(TargetConfiguration)\" \"$(TargetPlatform)\" \"$(PluginDir)/Source/ThirdParty/gRPC/Binaries/Linux\" \"$(EngineDir)\""
 		]
 	}
