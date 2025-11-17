@@ -33,6 +33,7 @@ void UTempoSensorServiceSubsystem::RegisterScriptingServices(FTempoScriptingServ
 		StreamingRequestHandler(&SensorAsyncService::RequestStreamColorImages, &UTempoSensorServiceSubsystem::StreamColorImages),
 		StreamingRequestHandler(&SensorAsyncService::RequestStreamDepthImages, &UTempoSensorServiceSubsystem::StreamDepthImages),
 		StreamingRequestHandler(&SensorAsyncService::RequestStreamLabelImages, &UTempoSensorServiceSubsystem::StreamLabelImages),
+		StreamingRequestHandler(&SensorAsyncService::RequestStreamColorImagesWithBoundingBoxes, &UTempoSensorServiceSubsystem::StreamColorImagesWithBoundingBoxes),
 		StreamingRequestHandler(&SensorAsyncService::RequestStreamLidarScans, &UTempoSensorServiceSubsystem::StreamLidarScans)
 		);
 }
@@ -273,6 +274,11 @@ void UTempoSensorServiceSubsystem::StreamDepthImages(const TempoCamera::DepthIma
 void UTempoSensorServiceSubsystem::StreamLabelImages(const TempoCamera::LabelImageRequest& Request, const TResponseDelegate<TempoCamera::LabelImage>& ResponseContinuation) const
 {
 	RequestImages<TempoCamera::LabelImageRequest, TempoCamera::LabelImage>(Request, ResponseContinuation);
+}
+
+void UTempoSensorServiceSubsystem::StreamColorImagesWithBoundingBoxes(const TempoCamera::ColorImageRequest& Request, const TResponseDelegate<TempoCamera::ColorImageWithBoundingBoxes>& ResponseContinuation) const
+{
+	RequestImages<TempoCamera::ColorImageRequest, TempoCamera::ColorImageWithBoundingBoxes>(Request, ResponseContinuation);
 }
 
 void UTempoSensorServiceSubsystem::StreamLidarScans(const TempoLidar::LidarScanRequest& Request, const TResponseDelegate<TempoLidar::LidarScanSegment>& ResponseContinuation) const

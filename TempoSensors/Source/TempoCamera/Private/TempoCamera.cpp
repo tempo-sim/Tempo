@@ -396,6 +396,11 @@ void UTempoCamera::RequestMeasurement(const TempoCamera::DepthImageRequest& Requ
 	PendingDepthImageRequests.Add({ Request, ResponseContinuation});
 }
 
+void UTempoCamera::RequestMeasurement(const TempoCamera::ColorImageRequest& Request, const TResponseDelegate<TempoCamera::ColorImageWithBoundingBoxes>& ResponseContinuation)
+{
+	PendingColorImageWithBoundingBoxesRequests.Add({ Request, ResponseContinuation});
+}
+
 FTempoCameraIntrinsics UTempoCamera::GetIntrinsics() const
 {
 	return FTempoCameraIntrinsics(SizeXY, FOVAngle);
