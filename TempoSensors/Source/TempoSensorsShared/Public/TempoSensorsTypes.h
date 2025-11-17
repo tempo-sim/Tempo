@@ -13,6 +13,7 @@ enum EMeasurementType: uint8
 	DEPTH_IMAGE = 1 UMETA(DisplayName="DepthImage"),
 	LABEL_IMAGE = 2 UMETA(DisplayName="LabelImage"),
 	LIDAR_SCAN = 3 UMETA(DisplayName="LidarScan"),
+	COLOR_IMAGE_WITH_BBOXES = 4 UMETA(DisplayName="ColorImageWithBoundingBoxes"),
 };
 
 UENUM(BlueprintType)
