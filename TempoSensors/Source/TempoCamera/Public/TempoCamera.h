@@ -109,6 +109,7 @@ struct TTextureRead<FCameraPixelWithDepth> : TTextureReadBase<FCameraPixelWithDe
 	// GPU-computed bounding box data (copied to CPU arrays for safe access from task graph thread)
 	TArray<FUintVector4> BBoxMinData;
 	TArray<FUintVector4> BBoxMaxData;
+	uint32 GPUBBoxSequenceId = 0;  // Sequence ID of the frame these GPU bboxes came from (0 = no GPU data)
 };
 
 template <>
@@ -125,6 +126,7 @@ struct TTextureRead<FCameraPixelNoDepth> : TTextureReadBase<FCameraPixelNoDepth>
 	// GPU-computed bounding box data (copied to CPU arrays for safe access from task graph thread)
 	TArray<FUintVector4> BBoxMinData;
 	TArray<FUintVector4> BBoxMaxData;
+	uint32 GPUBBoxSequenceId = 0;  // Sequence ID of the frame these GPU bboxes came from (0 = no GPU data)
 };
 
 struct TEMPOCAMERA_API FTempoCameraIntrinsics
@@ -220,4 +222,5 @@ private:
 	mutable TRefCountPtr<class FRDGPooledBuffer> BBoxMaxBufferPooled;
 	mutable TUniquePtr<class FRHIGPUBufferReadback> BBoxMinReadback;   // Async CPU readback
 	mutable TUniquePtr<class FRHIGPUBufferReadback> BBoxMaxReadback;
+	mutable std::atomic<uint32> LastGPUBBoxSequenceId{0};  // Sequence ID of last GPU bbox compute dispatch (atomic: written on render thread, read on game thread)
 };

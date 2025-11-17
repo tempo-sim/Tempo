@@ -225,11 +225,9 @@ void RespondToBoundingBoxRequests(const TTextureRead<PixelType>* TextureRead, co
 		{
 			TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraDecodeBoundingBoxes);
 
-			// Check if we have GPU-computed bboxes available
-			const int32 MinDataNum = TextureRead->BBoxMinData.Num();
-			const int32 MaxDataNum = TextureRead->BBoxMaxData.Num();
-
-			if (MinDataNum == 256 && MaxDataNum == 256)
+			// Check if we have GPU-computed bboxes available and synchronized
+			// GPUBBoxSequenceId != 0 means we have valid GPU data from the correct frame
+			if (TextureRead->GPUBBoxSequenceId != 0)
 			{
 				// Read GPU bboxes from CPU arrays
 				TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraReadGPUBBoxes);
@@ -428,11 +426,12 @@ void UTempoCamera::UpdateSceneCaptureContents(FSceneInterface* Scene, ISceneRend
 	{
 		FTextureRenderTargetResource* RenderTargetResource = TextureTarget->GameThread_GetRenderTargetResource();
 		const FIntPoint ImageSize(TextureTarget->SizeX, TextureTarget->SizeY);
+		const uint32 CurrentSequenceId = SequenceId;  // Capture sequence ID for this frame's GPU compute
 
 		if (RenderTargetResource)
 		{
 			ENQUEUE_RENDER_COMMAND(ComputeBoundingBoxesGPU)(
-				[this, RenderTargetResource, ImageSize](FRHICommandListImmediate& RHICmdList)
+				[this, RenderTargetResource, ImageSize, CurrentSequenceId](FRHICommandListImmediate& RHICmdList)
 				{
 					TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraComputeBBoxGPU);
 
@@ -516,6 +515,8 @@ void UTempoCamera::UpdateSceneCaptureContents(FSceneInterface* Scene, ISceneRend
 						BBoxMinReadback->EnqueueCopy(RHICmdList, BBoxMinBufferPooled->GetRHI(), BufferSize);
 						BBoxMaxReadback->EnqueueCopy(RHICmdList, BBoxMaxBufferPooled->GetRHI(), BufferSize);
 
+						// Track which frame's GPU bbox data is in the readback pipeline
+						LastGPUBBoxSequenceId.store(CurrentSequenceId, std::memory_order_relaxed);
 					}
 				});
 		}
@@ -595,17 +596,19 @@ FTextureRead* UTempoCamera::MakeTextureRead() const
 {
 	check(GetWorld());
 
-	// Lambda to copy GPU bounding box buffers to TextureRead arrays
+	// Lambda to copy GPU bounding box buffers to TextureRead arrays (if ready and synchronized)
 	auto CopyGPUBuffersIfReady = [this](auto* TextureRead)
 	{
 		const bool bBuffersExist = BBoxMinReadback && BBoxMaxReadback;
 		const bool bMinReady = bBuffersExist && BBoxMinReadback->IsReady();
 		const bool bMaxReady = bBuffersExist && BBoxMaxReadback->IsReady();
+		const bool bSequenceMatches = (LastGPUBBoxSequenceId.load(std::memory_order_relaxed) == TextureRead->SequenceId);
 
-		if (bBuffersExist && bMinReady && bMaxReady)
+		// Only copy GPU data if buffers are ready AND sequence IDs match (frame synchronized)
+		if (bBuffersExist && bMinReady && bMaxReady && bSequenceMatches)
 		{
 			ENQUEUE_RENDER_COMMAND(CopyBBoxBuffers)(
-				[TextureRead, MinReadback = BBoxMinReadback.Get(), MaxReadback = BBoxMaxReadback.Get()](FRHICommandListImmediate& RHICmdList)
+				[TextureRead, MinReadback = BBoxMinReadback.Get(), MaxReadback = BBoxMaxReadback.Get(), SeqId = TextureRead->SequenceId](FRHICommandListImmediate& RHICmdList)
 				{
 					// Copy buffer data from staging buffers to CPU arrays
 					TextureRead->BBoxMinData.SetNumUninitialized(256);
@@ -621,12 +624,17 @@ FTextureRead* UTempoCamera::MakeTextureRead() const
 					{
 						FMemory::Memcpy(TextureRead->BBoxMinData.GetData(), MinData, BufferSize);
 						FMemory::Memcpy(TextureRead->BBoxMaxData.GetData(), MaxData, BufferSize);
+
+						// Mark that this TextureRead has valid GPU bbox data from this sequence
+						TextureRead->GPUBBoxSequenceId = SeqId;
 					}
 
 					MinReadback->Unlock();
 					MaxReadback->Unlock();
 				});
 		}
+		// If GPU data not ready or not synchronized, GPUBBoxSequenceId stays 0
+		// RespondToBoundingBoxRequests will fall back to CPU computation
 	};
 
 	if (bDepthEnabled)
@@ -652,6 +660,9 @@ FTextureRead* UTempoCamera::MakeTextureRead() const
 TFuture<void> UTempoCamera::DecodeAndRespond(TUniquePtr<FTextureRead> TextureRead)
 {
 	const double TransmissionTime = GetWorld()->GetTimeSeconds();
+
+	// GPU bounding box data was already populated in MakeTextureRead() if ready and synchronized
+	// If not ready/synchronized, GPUBBoxSequenceId = 0 and RespondToBoundingBoxRequests will use CPU fallback
 
 	const bool bSupportsDepth = TextureRead->GetType() == TEXT("WithDepth");
 
