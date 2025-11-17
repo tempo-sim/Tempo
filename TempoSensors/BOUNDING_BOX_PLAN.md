@@ -1,5 +1,11 @@
 # Bounding Box Feature Implementation Plan
 
+> **Status**: ✅ **Core Feature Complete and Tested**
+> - Phases 1-4 fully implemented and working
+> - Successfully tested end-to-end with Python client
+> - Detected 5 bounding boxes from live camera feed
+> - Remaining work: Formal testing, performance benchmarks, documentation
+
 > **Revision**: Plan updated to remove `actor_class_name` field and skip Phase 2.
 > Using existing `UTempoActorLabeler::GetInstanceToSemanticIdMap()` API instead of adding new lookup methods.
 
@@ -449,12 +455,12 @@ After investigating the existing TempoLabels API, we found:
 
 ---
 
-## Phase 6: GPU Optimization (Future Work)
+## Phase 6: GPU Optimization ✅ **IMPLEMENTED**
 
 ### Objectives
-- Accelerate bounding box computation using GPU compute shaders
-- Achieve 2-5x speedup over CPU implementation
-- Maintain identical results to CPU (bit-exact not required, but bboxes must match)
+- ✅ Accelerate bounding box computation using GPU compute shaders
+- 🔄 Achieve 2-5x speedup over CPU implementation (to be benchmarked)
+- 🔄 Maintain identical results to CPU (to be validated)
 
 ### Tasks
 
@@ -522,29 +528,35 @@ After investigating the existing TempoLabels API, we found:
 - **Using existing `UTempoActorLabeler::GetInstanceToSemanticIdMap()` API instead**
 
 ### Phase 3: CPU Computation
-- [ ] Add COLOR_IMAGE_WITH_BBOXES to ECameraMeasurementType
-- [ ] Implement ComputeBoundingBoxesCPU() function
-- [ ] Implement BuildBoundingBoxMessage() function
-- [ ] Integrate into camera rendering pipeline
-- [ ] Add DecodeAndComputeBoundingBoxes() async function
+- [x] Add COLOR_IMAGE_WITH_BBOXES to ECameraMeasurementType
+- [x] Implement ComputeBoundingBoxesCPU() function
+- [x] Implement BuildBoundingBoxMessage() function (RespondToBoundingBoxRequests)
+- [x] Integrate into camera rendering pipeline
+- [x] Add DecodeAndComputeBoundingBoxes() async function (integrated in DecodeAndRespond)
 - [ ] Add unit tests for bbox computation
 - [ ] Add performance benchmarks
 
 ### Phase 4: gRPC Service
-- [ ] Implement StreamColorImagesWithBoundingBoxes() RPC handler
-- [ ] Update GetAvailableSensors() response
-- [ ] Add Python integration tests
+- [x] Implement StreamColorImagesWithBoundingBoxes() RPC handler
+- [x] Register RPC in service builder
+- [x] Add RequestMeasurement() overload to UTempoCamera
+- [x] Update GetAvailableSensors() response (automatic via MeasurementTypes)
+- [x] Add Python integration tests (verified working with 5 bounding boxes detected)
 
 ### Phase 5: Testing & Validation
-- [ ] Run all correctness test scenarios (6 tests)
-- [ ] Verify Python API usability
+- [x] Verify Python API usability (successfully tested end-to-end)
+- [x] Basic integration test (detected 5 objects with bounding boxes from TempoCamera)
+- [ ] Run all correctness test scenarios (6 formal tests)
 - [ ] Run performance benchmarks
 - [ ] Update documentation
 
-### Phase 6: GPU Optimization (Optional)
-- [ ] Implement compute shader
-- [ ] Integrate GPU dispatch
-- [ ] Benchmark and validate
+### Phase 6: GPU Optimization
+- [x] Implement compute shader (BoundingBoxExtraction.usf)
+- [x] Create shader C++ wrapper (BoundingBoxComputeShader.h/cpp)
+- [x] Integrate GPU dispatch in UpdateSceneCaptureContents()
+- [x] Add buffer readback and CPU fallback
+- [ ] Benchmark GPU vs CPU performance
+- [ ] Validate GPU results match CPU
 
 ---
 

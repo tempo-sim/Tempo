@@ -39,6 +39,8 @@ public class TempoCamera : TempoModuleRules
 				"Engine",
 				"RenderCore",
 				"RHI",
+				"Renderer",  // For RDG, FComputeShaderUtils
+				"Projects",  // For IPluginManager
 				// Tempo
 				"TempoLabels",
 				"TempoScripting",

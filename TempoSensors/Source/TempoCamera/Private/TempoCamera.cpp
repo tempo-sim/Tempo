@@ -16,6 +16,14 @@
 
 #include "Engine/TextureRenderTarget2D.h"
 
+// GPU compute shader infrastructure
+#include "BoundingBoxComputeShader.h"
+#include "RenderGraphBuilder.h"
+#include "RenderGraphUtils.h"
+#include "GlobalShader.h"
+#include "ShaderParameterStruct.h"
+#include "RHIGPUReadback.h"
+
 // Intermediate data structure for 2D bounding box computation
 struct FBoundingBox2D
 {
@@ -213,59 +221,200 @@ void RespondToBoundingBoxRequests(const TTextureRead<PixelType>* TextureRead, co
 		}
 
 		// Extract label data and compute bounding boxes
+		TArray<FBoundingBox2D> BoundingBoxes;
 		{
 			TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraDecodeBoundingBoxes);
 
-			// Extract label data from pixels
-			TArray<uint8> LabelData;
-			LabelData.SetNumUninitialized(TextureRead->Image.Num());
-			ParallelFor(TextureRead->Image.Num(), [&LabelData, &TextureRead](int32 Idx)
+			// Check if we have GPU-computed bboxes available
+			const int32 MinDataNum = TextureRead->BBoxMinData.Num();
+			const int32 MaxDataNum = TextureRead->BBoxMaxData.Num();
+			UE_LOG(LogTempoCamera, Log, TEXT("GPU BBox: Checking buffer availability - MinDataNum=%d, MaxDataNum=%d (task graph thread)"),
+				MinDataNum, MaxDataNum);
+
+			if (MinDataNum == 256 && MaxDataNum == 256)
 			{
-				LabelData[Idx] = TextureRead->Image[Idx].Label();
-			});
+				// Read GPU bboxes from CPU arrays
+				TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraReadGPUBBoxes);
+				UE_LOG(LogTempoCamera, Log, TEXT("GPU BBox: Using GPU-computed bounding boxes"));
+				UE_LOG(LogTempoCamera, Warning, TEXT("GPU BBox: Image dimensions = %dx%d"),
+					TextureRead->ImageSize.X, TextureRead->ImageSize.Y);
 
-			// Compute bounding boxes
-			TArray<FBoundingBox2D> BoundingBoxes = ComputeBoundingBoxesCPU(LabelData, TextureRead->ImageSize.X, TextureRead->ImageSize.Y);
-
-			// Get instance-to-semantic mapping from UTempoActorLabeler
-			UWorld* World = GEngine->GetWorldContexts()[0].World();
-			UTempoActorLabeler* Labeler = World ? World->GetSubsystem<UTempoActorLabeler>() : nullptr;
-
-			TMap<uint8, uint8> InstanceToSemanticMap;
-			if (Labeler)
-			{
-				// Get the mapping synchronously (this is called from async task graph)
-				TempoLabels::InstanceToSemanticIdMap Mapping;
-				Labeler->GetInstanceToSemanticIdMap(TempoScripting::Empty(),
-					TResponseDelegate<TempoLabels::InstanceToSemanticIdMap>::CreateLambda(
-						[&Mapping](const TempoLabels::InstanceToSemanticIdMap& Response, const grpc::Status&)
-						{
-							Mapping = Response;
-						}
-					)
-				);
-
-				// Build lookup map
-				for (const auto& Pair : Mapping.instance_semantic_id_pairs())
+				// Extract valid bounding boxes from GPU data
+				for (int32 InstanceId = 1; InstanceId < 256; InstanceId++)  // Skip 0 (unlabeled)
 				{
-					InstanceToSemanticMap.Add(Pair.instanceid(), Pair.semanticid());
+					const FUintVector4& MinVec = TextureRead->BBoxMinData[InstanceId];
+					const FUintVector4& MaxVec = TextureRead->BBoxMaxData[InstanceId];
+
+					// Log first 10 instance IDs to see what values we're getting
+					if (InstanceId <= 10)
+					{
+						UE_LOG(LogTempoCamera, Warning, TEXT("GPU BBox [ID=%d]: Min=(%u,%u,%u,%u) Max=(%u,%u,%u,%u)"),
+							InstanceId,
+							MinVec.X, MinVec.Y, MinVec.Z, MinVec.W,
+							MaxVec.X, MaxVec.Y, MaxVec.Z, MaxVec.W);
+					}
+
+					// Check if this instance has valid bbox (MinX <= MaxX)
+					if (MinVec.X <= MaxVec.X && MinVec.Y <= MaxVec.Y)
+					{
+						FBoundingBox2D BBox;
+						BBox.MinX = MinVec.X;
+						BBox.MinY = MinVec.Y;
+						BBox.MaxX = MaxVec.X;
+						BBox.MaxY = MaxVec.Y;
+						BBox.InstanceId = InstanceId;
+
+						// Log the actual bbox being added
+						UE_LOG(LogTempoCamera, Warning, TEXT("GPU BBox [ID=%d]: Adding bbox (%u,%u) to (%u,%u)"),
+							InstanceId, BBox.MinX, BBox.MinY, BBox.MaxX, BBox.MaxY);
+
+						BoundingBoxes.Add(BBox);
+					}
+				}
+
+				UE_LOG(LogTempoCamera, Log, TEXT("GPU bounding box extraction found %d objects"), BoundingBoxes.Num());
+
+				// Compare with CPU computation for debugging
+				{
+					TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraCompareCPUGPU);
+
+					TArray<FBoundingBox2D> GPUBoundingBoxes = BoundingBoxes;
+
+					// Run CPU computation
+					TArray<uint8> LabelData;
+					LabelData.SetNumUninitialized(TextureRead->Image.Num());
+					ParallelFor(TextureRead->Image.Num(), [&LabelData, &TextureRead](int32 Idx)
+					{
+						LabelData[Idx] = TextureRead->Image[Idx].Label();
+					});
+					TArray<FBoundingBox2D> CPUBoundingBoxes = ComputeBoundingBoxesCPU(LabelData, TextureRead->ImageSize.X, TextureRead->ImageSize.Y);
+
+					// Inspect raw pixel data for pixels with known labels
+					for (int32 LabelToFind = 1; LabelToFind <= 6 && LabelToFind < 256; LabelToFind++)
+					{
+						for (int32 Idx = 0; Idx < LabelData.Num(); Idx++)
+						{
+							if (LabelData[Idx] == LabelToFind)
+							{
+								// Found a pixel with this label - inspect it
+								const uint32 X = Idx % TextureRead->ImageSize.X;
+								const uint32 Y = Idx / TextureRead->ImageSize.X;
+
+								// Get raw pixel as uint32
+								const uint32* PixelAsUint32 = reinterpret_cast<const uint32*>(&TextureRead->Image[Idx]);
+								const uint32 RawValue = *PixelAsUint32;
+
+								// Also show individual bytes
+								const uint8* Bytes = reinterpret_cast<const uint8*>(&TextureRead->Image[Idx]);
+
+								UE_LOG(LogTempoCamera, Error, TEXT("PIXEL INSPECTION [Label=%d] at (%u,%u): RawUint32=0x%08X, Bytes=[%u,%u,%u,%u]"),
+									LabelToFind, X, Y, RawValue,
+									Bytes[0], Bytes[1], Bytes[2], Bytes[3]);
+
+								// Only log first pixel of each label
+								break;
+							}
+						}
+					}
+
+					// Compare results
+					UE_LOG(LogTempoCamera, Warning, TEXT("BBox Comparison: GPU found %d, CPU found %d"),
+						GPUBoundingBoxes.Num(), CPUBoundingBoxes.Num());
+
+					for (const FBoundingBox2D& CPUBox : CPUBoundingBoxes)
+					{
+						const FBoundingBox2D* GPUBox = GPUBoundingBoxes.FindByPredicate(
+							[&CPUBox](const FBoundingBox2D& Box) { return Box.InstanceId == CPUBox.InstanceId; });
+
+						if (GPUBox)
+						{
+							if (GPUBox->MinX != CPUBox.MinX || GPUBox->MinY != CPUBox.MinY ||
+								GPUBox->MaxX != CPUBox.MaxX || GPUBox->MaxY != CPUBox.MaxY)
+							{
+								UE_LOG(LogTempoCamera, Error, TEXT("MISMATCH [ID=%d]: GPU=(%u,%u)-(%u,%u) CPU=(%u,%u)-(%u,%u)"),
+									CPUBox.InstanceId,
+									GPUBox->MinX, GPUBox->MinY, GPUBox->MaxX, GPUBox->MaxY,
+									CPUBox.MinX, CPUBox.MinY, CPUBox.MaxX, CPUBox.MaxY);
+							}
+						}
+						else
+						{
+							UE_LOG(LogTempoCamera, Error, TEXT("MISSING [ID=%d]: CPU found (%u,%u)-(%u,%u) but GPU didn't"),
+								CPUBox.InstanceId, CPUBox.MinX, CPUBox.MinY, CPUBox.MaxX, CPUBox.MaxY);
+						}
+					}
+
+					// Check for GPU boxes that CPU didn't find
+					for (const FBoundingBox2D& GPUBox : GPUBoundingBoxes)
+					{
+						const FBoundingBox2D* CPUBox = CPUBoundingBoxes.FindByPredicate(
+							[&GPUBox](const FBoundingBox2D& Box) { return Box.InstanceId == GPUBox.InstanceId; });
+
+						if (!CPUBox)
+						{
+							UE_LOG(LogTempoCamera, Error, TEXT("EXTRA [ID=%d]: GPU found (%u,%u)-(%u,%u) but CPU didn't"),
+								GPUBox.InstanceId, GPUBox.MinX, GPUBox.MinY, GPUBox.MaxX, GPUBox.MaxY);
+						}
+					}
 				}
 			}
-
-			// Add bounding boxes to proto message
-			for (const FBoundingBox2D& Box : BoundingBoxes)
+			else
 			{
-				TempoCamera::BoundingBox2D* BBoxProto = Response.add_bounding_boxes();
-				BBoxProto->set_min_x(Box.MinX);
-				BBoxProto->set_min_y(Box.MinY);
-				BBoxProto->set_max_x(Box.MaxX);
-				BBoxProto->set_max_y(Box.MaxY);
-				BBoxProto->set_instance_id(Box.InstanceId);
+				// Fall back to CPU computation
+				TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraComputeBBoxCPU);
 
-				// Find semantic ID from mapping
-				const uint8* SemanticId = InstanceToSemanticMap.Find(Box.InstanceId);
-				BBoxProto->set_semantic_id(SemanticId ? *SemanticId : 0);
+				UE_LOG(LogTempoCamera, Log, TEXT("GPU buffers not available, falling back to CPU bounding box computation"));
+
+				// Extract label data from pixels
+				TArray<uint8> LabelData;
+				LabelData.SetNumUninitialized(TextureRead->Image.Num());
+				ParallelFor(TextureRead->Image.Num(), [&LabelData, &TextureRead](int32 Idx)
+				{
+					LabelData[Idx] = TextureRead->Image[Idx].Label();
+				});
+
+				BoundingBoxes = ComputeBoundingBoxesCPU(LabelData, TextureRead->ImageSize.X, TextureRead->ImageSize.Y);
 			}
+		}
+
+		// Get instance-to-semantic mapping from UTempoActorLabeler
+		UWorld* World = GEngine->GetWorldContexts()[0].World();
+		UTempoActorLabeler* Labeler = World ? World->GetSubsystem<UTempoActorLabeler>() : nullptr;
+
+		TMap<uint8, uint8> InstanceToSemanticMap;
+		if (Labeler)
+		{
+			// Get the mapping synchronously (this is called from async task graph)
+			TempoLabels::InstanceToSemanticIdMap Mapping;
+			Labeler->GetInstanceToSemanticIdMap(TempoScripting::Empty(),
+				TResponseDelegate<TempoLabels::InstanceToSemanticIdMap>::CreateLambda(
+					[&Mapping](const TempoLabels::InstanceToSemanticIdMap& Response, const grpc::Status&)
+					{
+						Mapping = Response;
+					}
+				)
+			);
+
+			// Build lookup map
+			for (const auto& Pair : Mapping.instance_semantic_id_pairs())
+			{
+				InstanceToSemanticMap.Add(Pair.instanceid(), Pair.semanticid());
+			}
+		}
+
+		// Add bounding boxes to proto message
+		for (const FBoundingBox2D& Box : BoundingBoxes)
+		{
+			TempoCamera::BoundingBox2D* BBoxProto = Response.add_bounding_boxes();
+			BBoxProto->set_min_x(Box.MinX);
+			BBoxProto->set_min_y(Box.MinY);
+			BBoxProto->set_max_x(Box.MaxX);
+			BBoxProto->set_max_y(Box.MaxY);
+			BBoxProto->set_instance_id(Box.InstanceId);
+
+			// Find semantic ID from mapping
+			const uint8* SemanticId = InstanceToSemanticMap.Find(Box.InstanceId);
+			BBoxProto->set_semantic_id(SemanticId ? *SemanticId : 0);
 		}
 	}
 
@@ -367,7 +516,7 @@ void UTempoCamera::UpdateSceneCaptureContents(FSceneInterface* Scene, ISceneRend
 		// If a client is requesting depth, start rendering it.
 		SetDepthEnabled(true);
 	}
-	
+
 	if (bDepthEnabled && PendingDepthImageRequests.IsEmpty())
 	{
 		// If no client is requesting depth, stop rendering it.
@@ -379,6 +528,105 @@ void UTempoCamera::UpdateSceneCaptureContents(FSceneInterface* Scene, ISceneRend
 #else
 	Super::UpdateSceneCaptureContents(Scene, SceneRenderBuilder);
 #endif
+
+	// Dispatch GPU bounding box computation if we have pending bbox requests
+	if (!PendingColorImageWithBoundingBoxesRequests.IsEmpty() && TextureTarget)
+	{
+		FTextureRenderTargetResource* RenderTargetResource = TextureTarget->GameThread_GetRenderTargetResource();
+		const FIntPoint ImageSize(TextureTarget->SizeX, TextureTarget->SizeY);
+
+		if (RenderTargetResource)
+		{
+			ENQUEUE_RENDER_COMMAND(ComputeBoundingBoxesGPU)(
+				[this, RenderTargetResource, ImageSize](FRHICommandListImmediate& RHICmdList)
+				{
+					TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraComputeBBoxGPU);
+
+					// Create RDG builder
+					FRDGBuilder GraphBuilder(RHICmdList);
+
+					// Register render target texture as external resource
+					FTextureRHIRef RenderTargetTexture = RenderTargetResource->GetRenderTargetTexture();
+					FRDGTextureRef SourceTexture = GraphBuilder.RegisterExternalTexture(
+						CreateRenderTarget(RenderTargetTexture, TEXT("CameraRenderTarget"))
+					);
+
+					// Create or reuse output buffers for bounding boxes
+					FRDGBufferDesc BBoxBufferDesc = FRDGBufferDesc::CreateStructuredDesc(
+						sizeof(FUintVector4),  // Size of uint4
+						256  // One bbox per instance ID
+					);
+
+					FRDGBufferRef BBoxMinBuffer = GraphBuilder.CreateBuffer(BBoxBufferDesc, TEXT("BBoxMinBuffer"));
+					FRDGBufferRef BBoxMaxBuffer = GraphBuilder.CreateBuffer(BBoxBufferDesc, TEXT("BBoxMaxBuffer"));
+
+					// Clear buffers with initial values
+					AddClearUAVPass(GraphBuilder, GraphBuilder.CreateUAV(BBoxMinBuffer), 0xFFFFFFFF);  // Min: max uint
+					AddClearUAVPass(GraphBuilder, GraphBuilder.CreateUAV(BBoxMaxBuffer), 0x00000000);  // Max: 0
+
+					// Get compute shader from global shader map
+					TShaderMapRef<FBoundingBoxExtractionCS> ComputeShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
+
+					if (ComputeShader.IsValid())
+					{
+						// Setup shader parameters
+						FBoundingBoxExtractionCS::FParameters* PassParameters =
+							GraphBuilder.AllocParameters<FBoundingBoxExtractionCS::FParameters>();
+						PassParameters->LabelTexture = SourceTexture;
+						PassParameters->BBoxMinBuffer = GraphBuilder.CreateUAV(BBoxMinBuffer);
+						PassParameters->BBoxMaxBuffer = GraphBuilder.CreateUAV(BBoxMaxBuffer);
+						PassParameters->ImageWidth = ImageSize.X;
+						PassParameters->ImageHeight = ImageSize.Y;
+
+						// Calculate thread group dispatch size
+						const uint32 NumGroupsX = FMath::DivideAndRoundUp((uint32)ImageSize.X, 16u);
+						const uint32 NumGroupsY = FMath::DivideAndRoundUp((uint32)ImageSize.Y, 16u);
+
+						// Add compute pass
+						FComputeShaderUtils::AddPass(
+							GraphBuilder,
+							RDG_EVENT_NAME("BoundingBoxExtraction"),
+							ComputeShader,
+							PassParameters,
+							FIntVector(NumGroupsX, NumGroupsY, 1)
+						);
+
+						// Extract buffers for later readback
+						GraphBuilder.QueueBufferExtraction(BBoxMinBuffer, &BBoxMinBufferPooled);
+						GraphBuilder.QueueBufferExtraction(BBoxMaxBuffer, &BBoxMaxBufferPooled);
+					}
+					else
+					{
+						UE_LOG(LogTempoCamera, Warning, TEXT("Bounding box compute shader not available, falling back to CPU"));
+					}
+
+					// Execute the render graph
+					GraphBuilder.Execute();
+
+					// Setup async readback after RDG execution
+					if (BBoxMinBufferPooled.IsValid() && BBoxMaxBufferPooled.IsValid())
+					{
+						// Initialize readback objects if needed (reuse across frames)
+						if (!BBoxMinReadback)
+						{
+							BBoxMinReadback = MakeUnique<FRHIGPUBufferReadback>(TEXT("BBoxMinReadback"));
+						}
+						if (!BBoxMaxReadback)
+						{
+							BBoxMaxReadback = MakeUnique<FRHIGPUBufferReadback>(TEXT("BBoxMaxReadback"));
+						}
+
+						// Enqueue async copy from GPU buffers to staging buffers (non-blocking)
+						// FRHIGPUBufferReadback manages synchronization with internal fences
+						const uint32 BufferSize = 256 * sizeof(FUintVector4);
+						BBoxMinReadback->EnqueueCopy(RHICmdList, BBoxMinBufferPooled->GetRHI(), BufferSize);
+						BBoxMaxReadback->EnqueueCopy(RHICmdList, BBoxMaxBufferPooled->GetRHI(), BufferSize);
+
+						UE_LOG(LogTempoCamera, Log, TEXT("GPU BBox: Enqueued async readback copy (render thread)"));
+					}
+				});
+		}
+	}
 }
 
 void UTempoCamera::RequestMeasurement(const TempoCamera::ColorImageRequest& Request, const TResponseDelegate<TempoCamera::ColorImage>& ResponseContinuation)
@@ -454,9 +702,108 @@ FTextureRead* UTempoCamera::MakeTextureRead() const
 {
 	check(GetWorld());
 
-	return bDepthEnabled ?
-		static_cast<FTextureRead*>(new TTextureRead<FCameraPixelWithDepth>(SizeXY, SequenceId, GetWorld()->GetTimeSeconds(), GetOwnerName(), GetSensorName(), GetComponentTransform(), MinDepth, MaxDepth)):
-		static_cast<FTextureRead*>(new TTextureRead<FCameraPixelNoDepth>(SizeXY, SequenceId, GetWorld()->GetTimeSeconds(), GetOwnerName(), GetSensorName(), GetComponentTransform()));
+	if (bDepthEnabled)
+	{
+		TTextureRead<FCameraPixelWithDepth>* TextureRead = new TTextureRead<FCameraPixelWithDepth>(
+			SizeXY, SequenceId, GetWorld()->GetTimeSeconds(), GetOwnerName(), GetSensorName(),
+			GetComponentTransform(), MinDepth, MaxDepth);
+
+		// Copy GPU bbox buffer data to CPU arrays if available
+		// Check if async readback is complete (uses internal fence)
+		const bool bBuffersExist = BBoxMinReadback && BBoxMaxReadback;
+		const bool bMinReady = bBuffersExist && BBoxMinReadback->IsReady();
+		const bool bMaxReady = bBuffersExist && BBoxMaxReadback->IsReady();
+		UE_LOG(LogTempoCamera, Log, TEXT("GPU BBox: MakeTextureRead check - BuffersExist=%d, MinReady=%d, MaxReady=%d (game thread)"),
+			bBuffersExist ? 1 : 0, bMinReady ? 1 : 0, bMaxReady ? 1 : 0);
+
+		if (bBuffersExist && bMinReady && bMaxReady)
+		{
+			UE_LOG(LogTempoCamera, Log, TEXT("GPU BBox: Buffers ready, enqueuing copy to CPU arrays"));
+			ENQUEUE_RENDER_COMMAND(CopyBBoxBuffers)(
+				[TextureRead, MinReadback = BBoxMinReadback.Get(), MaxReadback = BBoxMaxReadback.Get()](FRHICommandListImmediate& RHICmdList)
+				{
+					// Copy buffer data from staging buffers to CPU arrays
+					TextureRead->BBoxMinData.SetNumUninitialized(256);
+					TextureRead->BBoxMaxData.SetNumUninitialized(256);
+
+					const uint32 BufferSize = 256 * sizeof(FUintVector4);
+
+					// Lock staging buffers (safe because readback is complete)
+					void* MinData = MinReadback->Lock(BufferSize);
+					void* MaxData = MaxReadback->Lock(BufferSize);
+
+					UE_LOG(LogTempoCamera, Log, TEXT("GPU BBox: Locked buffers - MinData=%p, MaxData=%p (render thread)"),
+						MinData, MaxData);
+
+					if (MinData && MaxData)
+					{
+						FMemory::Memcpy(TextureRead->BBoxMinData.GetData(), MinData, BufferSize);
+						FMemory::Memcpy(TextureRead->BBoxMaxData.GetData(), MaxData, BufferSize);
+						UE_LOG(LogTempoCamera, Log, TEXT("GPU BBox: Successfully copied %d bytes to CPU arrays (render thread)"), BufferSize);
+					}
+					else
+					{
+						UE_LOG(LogTempoCamera, Warning, TEXT("GPU BBox: Failed to lock one or both buffers (render thread)"));
+					}
+
+					MinReadback->Unlock();
+					MaxReadback->Unlock();
+				});
+		}
+
+		return static_cast<FTextureRead*>(TextureRead);
+	}
+	else
+	{
+		TTextureRead<FCameraPixelNoDepth>* TextureRead = new TTextureRead<FCameraPixelNoDepth>(
+			SizeXY, SequenceId, GetWorld()->GetTimeSeconds(), GetOwnerName(), GetSensorName(),
+			GetComponentTransform());
+
+		// Copy GPU bbox buffer data to CPU arrays if available
+		// Check if async readback is complete (uses internal fence)
+		const bool bBuffersExist = BBoxMinReadback && BBoxMaxReadback;
+		const bool bMinReady = bBuffersExist && BBoxMinReadback->IsReady();
+		const bool bMaxReady = bBuffersExist && BBoxMaxReadback->IsReady();
+		UE_LOG(LogTempoCamera, Log, TEXT("GPU BBox: MakeTextureRead check - BuffersExist=%d, MinReady=%d, MaxReady=%d (game thread)"),
+			bBuffersExist ? 1 : 0, bMinReady ? 1 : 0, bMaxReady ? 1 : 0);
+
+		if (bBuffersExist && bMinReady && bMaxReady)
+		{
+			UE_LOG(LogTempoCamera, Log, TEXT("GPU BBox: Buffers ready, enqueuing copy to CPU arrays"));
+			ENQUEUE_RENDER_COMMAND(CopyBBoxBuffers)(
+				[TextureRead, MinReadback = BBoxMinReadback.Get(), MaxReadback = BBoxMaxReadback.Get()](FRHICommandListImmediate& RHICmdList)
+				{
+					// Copy buffer data from staging buffers to CPU arrays
+					TextureRead->BBoxMinData.SetNumUninitialized(256);
+					TextureRead->BBoxMaxData.SetNumUninitialized(256);
+
+					const uint32 BufferSize = 256 * sizeof(FUintVector4);
+
+					// Lock staging buffers (safe because readback is complete)
+					void* MinData = MinReadback->Lock(BufferSize);
+					void* MaxData = MaxReadback->Lock(BufferSize);
+
+					UE_LOG(LogTempoCamera, Log, TEXT("GPU BBox: Locked buffers - MinData=%p, MaxData=%p (render thread)"),
+						MinData, MaxData);
+
+					if (MinData && MaxData)
+					{
+						FMemory::Memcpy(TextureRead->BBoxMinData.GetData(), MinData, BufferSize);
+						FMemory::Memcpy(TextureRead->BBoxMaxData.GetData(), MaxData, BufferSize);
+						UE_LOG(LogTempoCamera, Log, TEXT("GPU BBox: Successfully copied %d bytes to CPU arrays (render thread)"), BufferSize);
+					}
+					else
+					{
+						UE_LOG(LogTempoCamera, Warning, TEXT("GPU BBox: Failed to lock one or both buffers (render thread)"));
+					}
+
+					MinReadback->Unlock();
+					MaxReadback->Unlock();
+				});
+		}
+
+		return static_cast<FTextureRead*>(TextureRead);
+	}
 }
 
 TFuture<void> UTempoCamera::DecodeAndRespond(TUniquePtr<FTextureRead> TextureRead)
@@ -604,4 +951,18 @@ void UTempoCamera::ApplyDepthEnabled()
 	}
 
 	InitRenderTarget();
+}
+
+void UTempoCamera::BeginDestroy()
+{
+	// Flush rendering commands to ensure no pending GPU work references our resources
+	FlushRenderingCommands();
+
+	// Release GPU resources safely
+	BBoxMinReadback.Reset();
+	BBoxMaxReadback.Reset();
+	BBoxMinBufferPooled.SafeRelease();
+	BBoxMaxBufferPooled.SafeRelease();
+
+	Super::BeginDestroy();
 }

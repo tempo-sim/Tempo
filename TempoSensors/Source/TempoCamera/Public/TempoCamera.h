@@ -78,6 +78,9 @@ struct FDepthImageRequest
 	TResponseDelegate<TempoCamera::DepthImage> ResponseContinuation;
 };
 
+// Forward declarations for RDG types
+class FRDGPooledBuffer;
+
 struct FColorImageWithBoundingBoxesRequest
 {
 	TempoCamera::ColorImageRequest Request;
@@ -92,7 +95,7 @@ struct TTextureRead<FCameraPixelWithDepth> : TTextureReadBase<FCameraPixelWithDe
 	   : TTextureReadBase(ImageSizeIn, SequenceIdIn, CaptureTimeIn, OwnerNameIn, SensorNameIn, SensorTransformIn), MinDepth(MinDepthIn), MaxDepth(MaxDepthIn)
 	{
 	}
-	
+
 	virtual FName GetType() const override { return TEXT("WithDepth"); }
 
 	void RespondToRequests(const TArray<FColorImageRequest>& Requests, float TransmissionTime) const;
@@ -102,18 +105,26 @@ struct TTextureRead<FCameraPixelWithDepth> : TTextureReadBase<FCameraPixelWithDe
 
 	float MinDepth;
 	float MaxDepth;
+
+	// GPU-computed bounding box data (copied to CPU arrays for safe access from task graph thread)
+	TArray<FUintVector4> BBoxMinData;
+	TArray<FUintVector4> BBoxMaxData;
 };
 
 template <>
 struct TTextureRead<FCameraPixelNoDepth> : TTextureReadBase<FCameraPixelNoDepth>
 {
 	using TTextureReadBase::TTextureReadBase;
-	
+
 	virtual FName GetType() const override { return TEXT("NoDepth"); }
 
 	void RespondToRequests(const TArray<FColorImageRequest>& Requests, float TransmissionTime) const;
 	void RespondToRequests(const TArray<FLabelImageRequest>& Requests, float TransmissionTime) const;
 	void RespondToRequests(const TArray<FColorImageWithBoundingBoxesRequest>& Requests, float TransmissionTime) const;
+
+	// GPU-computed bounding box data (copied to CPU arrays for safe access from task graph thread)
+	TArray<FUintVector4> BBoxMinData;
+	TArray<FUintVector4> BBoxMaxData;
 };
 
 struct TEMPOCAMERA_API FTempoCameraIntrinsics
@@ -134,6 +145,7 @@ public:
 	UTempoCamera();
 
 	virtual void BeginPlay() override;
+	virtual void BeginDestroy() override;
 
 #if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 	virtual void UpdateSceneCaptureContents(FSceneInterface* Scene) override;
@@ -198,4 +210,14 @@ protected:
 	TArray<FLabelImageRequest> PendingLabelImageRequests;
 	TArray<FDepthImageRequest> PendingDepthImageRequests;
 	TArray<FColorImageWithBoundingBoxesRequest> PendingColorImageWithBoundingBoxesRequests;
+
+private:
+	// GPU bounding box computation infrastructure
+	// These are managed on the render thread and use async readback pattern
+	// Marked mutable because resource management doesn't affect logical const-ness
+	// Note: FRHIGPUBufferReadback has built-in fence management - no external fence needed
+	mutable TRefCountPtr<class FRDGPooledBuffer> BBoxMinBufferPooled;  // RDG-managed buffers
+	mutable TRefCountPtr<class FRDGPooledBuffer> BBoxMaxBufferPooled;
+	mutable TUniquePtr<class FRHIGPUBufferReadback> BBoxMinReadback;   // Async CPU readback
+	mutable TUniquePtr<class FRHIGPUBufferReadback> BBoxMaxReadback;
 };

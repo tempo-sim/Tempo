@@ -1,0 +1,96 @@
+// Copyright Tempo Simulation, LLC. All Rights Reserved.
+
+/**
+ * BoundingBoxExtraction.usf
+ *
+ * Compute shader for extracting 2D bounding boxes from instance segmentation label images.
+ * Uses a two-pass algorithm with groupshared memory to minimize atomic contention.
+ *
+ * Algorithm:
+ * 1. Each thread group (16x16 = 256 threads) processes a tile of the image
+ * 2. Threads accumulate min/max coordinates in groupshared memory using atomics
+ * 3. One thread per group writes group results to global buffers using atomics
+ *
+ * This reduces global atomic operations by ~100-1000x compared to naive per-pixel atomics.
+ */
+
+#include "/Engine/Public/Platform.ush"
+
+// Input parameters
+Texture2D<float4> LabelTexture;  // UNORM8 texture - reads as normalized floats [0,1]
+uint ImageWidth;
+uint ImageHeight;
+
+// Output buffers - separate min/max for easier initialization
+RWStructuredBuffer<uint4> BBoxMinBuffer;  // (MinX, MinY, InstanceId, SemanticId)
+RWStructuredBuffer<uint4> BBoxMaxBuffer;  // (MaxX, MaxY, Padding, Padding)
+
+// Groupshared memory for reducing contention on global atomics
+// Each element corresponds to one instance ID (0-255)
+groupshared uint GroupMinX[256];
+groupshared uint GroupMinY[256];
+groupshared uint GroupMaxX[256];
+groupshared uint GroupMaxY[256];
+
+[numthreads(16, 16, 1)]
+void BBoxExtractionCS(
+    uint3 DispatchThreadId : SV_DispatchThreadID,  // Global thread ID
+    uint3 GroupThreadId : SV_GroupThreadID,         // Thread ID within group
+    uint GroupIndex : SV_GroupIndex)                // Flattened group thread index (0-255)
+{
+    // ===== PHASE 1: Initialize groupshared memory =====
+    // Each thread initializes one instance ID's data
+    if (GroupIndex < 256)
+    {
+        GroupMinX[GroupIndex] = 0xFFFFFFFF;  // Max uint = invalid/unset
+        GroupMinY[GroupIndex] = 0xFFFFFFFF;
+        GroupMaxX[GroupIndex] = 0;           // 0 = invalid/unset
+        GroupMaxY[GroupIndex] = 0;
+    }
+    GroupMemoryBarrierWithGroupSync();  // Wait for all threads to finish init
+
+    // ===== PHASE 2: Process pixels and accumulate in groupshared memory =====
+    // Bounds check - skip threads outside image dimensions
+    if (DispatchThreadId.x < ImageWidth && DispatchThreadId.y < ImageHeight)
+    {
+        // Read RGBA channels from label texture (format: RTF_RGBA8 = PF_B8G8R8A8)
+        // UNORM8 format returns normalized floats [0.0, 1.0] for each channel
+        // .r/.g/.b = color channels, .a = instance label (byte 3)
+        float4 pixelData = LabelTexture.Load(uint3(DispatchThreadId.xy, 0));
+
+        // Extract label from alpha channel - denormalize from [0,1] to [0,255]
+        uint instanceId = uint(pixelData.a * 255.0 + 0.5);
+
+        // Only process labeled pixels (instanceId > 0) within valid range
+        if (instanceId > 0 && instanceId < 256)
+        {
+            // Accumulate bounding box using atomic operations on groupshared memory
+            // This is FAST because groupshared memory is on-chip (LDS/shared memory)
+            InterlockedMin(GroupMinX[instanceId], DispatchThreadId.x);
+            InterlockedMin(GroupMinY[instanceId], DispatchThreadId.y);
+            InterlockedMax(GroupMaxX[instanceId], DispatchThreadId.x);
+            InterlockedMax(GroupMaxY[instanceId], DispatchThreadId.y);
+        }
+    }
+    GroupMemoryBarrierWithGroupSync();  // Wait for all pixels processed
+
+    // ===== PHASE 3: Write group results to global memory =====
+    // Only one thread per instance ID writes to global memory
+    // This reduces global atomic contention dramatically (256 atomics per group instead of 65536)
+    if (GroupIndex < 256)
+    {
+        // Check if this instance was found in this group
+        if (GroupMinX[GroupIndex] != 0xFFFFFFFF)
+        {
+            // Update global bounding boxes with this group's contribution
+            // These are SLOW global atomics, but we only do 256 max per group
+            InterlockedMin(BBoxMinBuffer[GroupIndex].x, GroupMinX[GroupIndex]);
+            InterlockedMin(BBoxMinBuffer[GroupIndex].y, GroupMinY[GroupIndex]);
+            InterlockedMax(BBoxMaxBuffer[GroupIndex].x, GroupMaxX[GroupIndex]);
+            InterlockedMax(BBoxMaxBuffer[GroupIndex].y, GroupMaxY[GroupIndex]);
+
+            // Store instance ID (doesn't change, but needed for output)
+            BBoxMinBuffer[GroupIndex].z = GroupIndex;  // InstanceId field
+        }
+    }
+}
