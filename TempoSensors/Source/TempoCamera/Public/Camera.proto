@@ -39,6 +39,20 @@ message LabelImage {
   bytes data = 4; // 0-255 label for every pixel
 }
 
+message BoundingBox2D {
+  uint32 min_x = 1;  // Top-left corner X coordinate in pixels
+  uint32 min_y = 2;  // Top-left corner Y coordinate in pixels
+  uint32 max_x = 3;  // Bottom-right corner X coordinate in pixels
+  uint32 max_y = 4;  // Bottom-right corner Y coordinate in pixels
+  uint32 instance_id = 5;  // Instance ID from label image (1-255)
+  uint32 semantic_id = 6;  // Semantic class ID
+}
+
+message ColorImageWithBoundingBoxes {
+  ColorImage color_image = 1;
+  repeated BoundingBox2D bounding_boxes = 2;
+}
+
 message ColorImageRequest {
   string owner_name = 1;
   string sensor_name = 2;
