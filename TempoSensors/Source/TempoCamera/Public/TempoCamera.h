@@ -147,6 +147,8 @@ public:
 
 	void RequestMeasurement(const TempoCamera::DepthImageRequest& Request, const TResponseDelegate<TempoCamera::DepthImage>& ResponseContinuation);
 
+	void RequestMeasurement(const TempoCamera::ColorImageRequest& Request, const TResponseDelegate<TempoCamera::ColorImageWithBoundingBoxes>& ResponseContinuation);
+
 	FTempoCameraIntrinsics GetIntrinsics() const;
 
 	// Begin ITempoSensorInterface
