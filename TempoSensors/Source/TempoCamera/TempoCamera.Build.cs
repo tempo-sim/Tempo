@@ -7,21 +7,21 @@ public class TempoCamera : TempoModuleRules
 	public TempoCamera(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
-		
+
 		PublicIncludePaths.AddRange(
 			new string[]
 			{
 			}
 			);
-				
-		
+
+
 		PrivateIncludePaths.AddRange(
 			new string[]
 			{
 			}
 			);
-			
-		
+
+
 		PublicDependencyModuleNames.AddRange(
 			new string[]
 			{
@@ -29,8 +29,8 @@ public class TempoCamera : TempoModuleRules
 				"TempoSensorsShared",
 			}
 			);
-			
-		
+
+
 		PrivateDependencyModuleNames.AddRange(
 			new string[]
 			{
@@ -39,16 +39,16 @@ public class TempoCamera : TempoModuleRules
 				"Engine",
 				"RenderCore",
 				"RHI",
-				"Renderer",  // For RDG, FComputeShaderUtils
-				"Projects",  // For IPluginManager
+				"Renderer",
+				"Projects",
 				// Tempo
 				"TempoLabels",
 				"TempoScripting",
 				"TempoCoreShared",
 			}
 			);
-		
-		
+
+
 		DynamicallyLoadedModuleNames.AddRange(
 			new string[]
 			{

@@ -14,7 +14,6 @@
  * Parameters:
  * - FBoundingBoxExtractionCS: The C++ shader class
  * - "/TempoSensors/Private/BoundingBoxExtraction.usf": Virtual path to shader file
- *   (includes Private/ subdirectory, matches UE5.6 pattern)
  * - "BBoxExtractionCS": Entry point function name in the .usf file
  * - SF_Compute: Shader frequency (compute shader)
  */

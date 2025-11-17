@@ -16,7 +16,7 @@
 // 4-byte pixel format where first 3 bytes are color, 4th byte is label.
 struct FCameraPixelNoDepth
 {
-	static constexpr bool bSupportsDepth = false; 
+	static constexpr bool bSupportsDepth = false;
 
 	uint8 B() const { return U1; }
 	uint8 G() const { return U2; }
@@ -180,7 +180,7 @@ protected:
 	virtual bool HasPendingRequests() const override;
 
 	virtual FTextureRead* MakeTextureRead() const override;
-	
+
 	virtual TFuture<void> DecodeAndRespond(TUniquePtr<FTextureRead> TextureRead);
 
 	virtual int32 GetMaxTextureQueueSize() const override;
@@ -216,8 +216,6 @@ protected:
 private:
 	// GPU bounding box computation infrastructure
 	// These are managed on the render thread and use async readback pattern
-	// Marked mutable because resource management doesn't affect logical const-ness
-	// Note: FRHIGPUBufferReadback has built-in fence management - no external fence needed
 	mutable TRefCountPtr<class FRDGPooledBuffer> BBoxMinBufferPooled;  // RDG-managed buffers
 	mutable TRefCountPtr<class FRDGPooledBuffer> BBoxMaxBufferPooled;
 	mutable TUniquePtr<class FRHIGPUBufferReadback> BBoxMinReadback;   // Async CPU readback

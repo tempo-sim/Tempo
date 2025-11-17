@@ -11,11 +11,6 @@ DEFINE_LOG_CATEGORY(LogTempoCamera);
 
 void FTempoCameraModule::StartupModule()
 {
-	// Map shader directory during PostConfigInit loading phase
-	// This follows the standard UE5.6 pattern used by NNERuntimeIREE, ColorCorrectRegions, etc.
-
-	// Find the TempoSensors plugin (NOTE: TempoCamera is a MODULE, not a PLUGIN)
-	// The plugin name is "TempoSensors" as defined in TempoSensors.uplugin
 	const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("TempoSensors"));
 	if (Plugin.IsValid())
 	{
@@ -34,5 +29,5 @@ void FTempoCameraModule::ShutdownModule()
 }
 
 #undef LOCTEXT_NAMESPACE
-	
+
 IMPLEMENT_MODULE(FTempoCameraModule, TempoCamera)

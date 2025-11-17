@@ -13,8 +13,6 @@
  * This shader implements a two-pass algorithm:
  * 1. Parallel scan of all pixels with groupshared memory reduction
  * 2. Atomic min/max updates to global bounding box buffers
- *
- * Performance: ~100-1000x fewer global atomic operations compared to naive implementation.
  */
 class FBoundingBoxExtractionCS : public FGlobalShader
 {
