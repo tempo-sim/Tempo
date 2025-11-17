@@ -10,6 +10,7 @@ enum MeasurementType {
   DEPTH_IMAGE = 1;
   LABEL_IMAGE = 2;
   LIDAR_SCAN = 3;
+  COLOR_IMAGE_WITH_BBOXES = 4;
 }
 
 message SensorDescriptor {
@@ -35,6 +36,8 @@ service SensorService {
   rpc StreamDepthImages(TempoCamera.DepthImageRequest) returns (stream TempoCamera.DepthImage);
 
   rpc StreamLabelImages(TempoCamera.LabelImageRequest) returns (stream TempoCamera.LabelImage);
+
+  rpc StreamColorImagesWithBoundingBoxes(TempoCamera.ColorImageRequest) returns (stream TempoCamera.ColorImageWithBoundingBoxes);
 
   rpc StreamLidarScans(TempoLidar.LidarScanRequest) returns (stream TempoLidar.LidarScanSegment);
 }

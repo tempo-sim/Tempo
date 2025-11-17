@@ -133,6 +133,10 @@ TempoSensors::MeasurementType ToProtoMeasurementType(EMeasurementType ImageType)
 		{
 			return TempoSensors::LIDAR_SCAN;
 		}
+	case EMeasurementType::COLOR_IMAGE_WITH_BBOXES:
+		{
+			return TempoSensors::COLOR_IMAGE_WITH_BBOXES;
+		}
 	default:
 		{
 			checkf(false, TEXT("Unhandled measurement type"));

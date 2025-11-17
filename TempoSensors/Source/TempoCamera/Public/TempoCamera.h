@@ -78,6 +78,12 @@ struct FDepthImageRequest
 	TResponseDelegate<TempoCamera::DepthImage> ResponseContinuation;
 };
 
+struct FColorImageWithBoundingBoxesRequest
+{
+	TempoCamera::ColorImageRequest Request;
+	TResponseDelegate<TempoCamera::ColorImageWithBoundingBoxes> ResponseContinuation;
+};
+
 template <>
 struct TTextureRead<FCameraPixelWithDepth> : TTextureReadBase<FCameraPixelWithDepth>
 {
@@ -92,6 +98,7 @@ struct TTextureRead<FCameraPixelWithDepth> : TTextureReadBase<FCameraPixelWithDe
 	void RespondToRequests(const TArray<FColorImageRequest>& Requests, float TransmissionTime) const;
 	void RespondToRequests(const TArray<FLabelImageRequest>& Requests, float TransmissionTime) const;
 	void RespondToRequests(const TArray<FDepthImageRequest>& Requests, float TransmissionTime) const;
+	void RespondToRequests(const TArray<FColorImageWithBoundingBoxesRequest>& Requests, float TransmissionTime) const;
 
 	float MinDepth;
 	float MaxDepth;
@@ -106,6 +113,7 @@ struct TTextureRead<FCameraPixelNoDepth> : TTextureReadBase<FCameraPixelNoDepth>
 
 	void RespondToRequests(const TArray<FColorImageRequest>& Requests, float TransmissionTime) const;
 	void RespondToRequests(const TArray<FLabelImageRequest>& Requests, float TransmissionTime) const;
+	void RespondToRequests(const TArray<FColorImageWithBoundingBoxesRequest>& Requests, float TransmissionTime) const;
 };
 
 struct TEMPOCAMERA_API FTempoCameraIntrinsics
@@ -187,4 +195,5 @@ protected:
 	TArray<FColorImageRequest> PendingColorImageRequests;
 	TArray<FLabelImageRequest> PendingLabelImageRequests;
 	TArray<FDepthImageRequest> PendingDepthImageRequests;
+	TArray<FColorImageWithBoundingBoxesRequest> PendingColorImageWithBoundingBoxesRequests;
 };

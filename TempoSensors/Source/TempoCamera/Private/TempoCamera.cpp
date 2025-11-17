@@ -10,7 +10,77 @@
 
 #include "TempoSensorsConstants.h"
 
+#include "TempoActorLabeler.h"
+
+#include "TempoLabels/Labels.pb.h"
+
 #include "Engine/TextureRenderTarget2D.h"
+
+// Intermediate data structure for 2D bounding box computation
+struct FBoundingBox2D
+{
+	uint32 MinX = TNumericLimits<uint32>::Max();
+	uint32 MinY = TNumericLimits<uint32>::Max();
+	uint32 MaxX = 0;
+	uint32 MaxY = 0;
+	uint8 InstanceId = 0;
+
+	bool IsValid() const { return MinX <= MaxX && MinY <= MaxY; }
+
+	void Expand(uint32 X, uint32 Y)
+	{
+		MinX = FMath::Min(MinX, X);
+		MinY = FMath::Min(MinY, Y);
+		MaxX = FMath::Max(MaxX, X);
+		MaxY = FMath::Max(MaxY, Y);
+	}
+};
+
+/**
+ * Compute 2D bounding boxes from label data.
+ * Single-pass algorithm: scan all pixels, maintain min/max coords per instance ID.
+ * @param LabelData Array of label values (one per pixel)
+ * @param Width Image width in pixels
+ * @param Height Image height in pixels
+ * @return Array of valid bounding boxes
+ */
+static TArray<FBoundingBox2D> ComputeBoundingBoxesCPU(const TArray<uint8>& LabelData, uint32 Width, uint32 Height)
+{
+	TRACE_CPUPROFILER_EVENT_SCOPE(ComputeBoundingBoxesCPU);
+
+	// Array indexed by instance ID (0-255)
+	FBoundingBox2D Boxes[256];
+	for (int i = 0; i < 256; i++)
+	{
+		Boxes[i].InstanceId = i;
+	}
+
+	// Single pass: scan all pixels
+	for (uint32 Y = 0; Y < Height; Y++)
+	{
+		for (uint32 X = 0; X < Width; X++)
+		{
+			const uint8 InstanceId = LabelData[Y * Width + X];
+			if (InstanceId > 0)  // 0 = unlabeled
+			{
+				Boxes[InstanceId].Expand(X, Y);
+			}
+		}
+	}
+
+	// Filter valid boxes
+	TArray<FBoundingBox2D> ValidBoxes;
+	ValidBoxes.Reserve(255);  // Scene can have up to 255 bounding boxes
+	for (int i = 1; i < 256; i++)  // Skip 0 (unlabeled)
+	{
+		if (Boxes[i].IsValid())
+		{
+			ValidBoxes.Add(Boxes[i]);
+		}
+	}
+
+	return ValidBoxes;
+}
 
 FTempoCameraIntrinsics::FTempoCameraIntrinsics(const FIntPoint& SizeXY, float HorizontalFOV)
 	: Fx(SizeXY.X / 2.0 / FMath::Tan(FMath::DegreesToRadians(HorizontalFOV) / 2.0)),
@@ -114,6 +184,98 @@ void RespondToLabelRequests(const TTextureRead<PixelType>* TextureRead, const TA
 	}
 }
 
+template <typename PixelType>
+void RespondToBoundingBoxRequests(const TTextureRead<PixelType>* TextureRead, const TArray<FColorImageWithBoundingBoxesRequest>& Requests, float TransmissionTime)
+{
+	TempoCamera::ColorImageWithBoundingBoxes Response;
+	if (!Requests.IsEmpty())
+	{
+		// Extract color image first
+		{
+			TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraDecodeColor);
+			TempoCamera::ColorImage* ColorImage = Response.mutable_color_image();
+			ColorImage->set_width(TextureRead->ImageSize.X);
+			ColorImage->set_height(TextureRead->ImageSize.Y);
+			std::vector<char> ImageData;
+			ImageData.resize(TextureRead->Image.Num() * 3);
+			const UTempoSensorsSettings* TempoSensorsSettings = GetDefault<UTempoSensorsSettings>();
+			if (!TempoSensorsSettings)
+			{
+				return;
+			}
+			const EColorImageEncoding Encoding = TempoSensorsSettings->GetColorImageEncoding();
+			ParallelFor(TextureRead->Image.Num(), [&ImageData, &TextureRead, Encoding](int32 Idx){
+				ExtractPixelData(TextureRead->Image[Idx], Encoding, &ImageData[Idx * 3]);
+			});
+			ColorImage->mutable_data()->assign(ImageData.begin(), ImageData.end());
+			ColorImage->set_encoding(ColorEncodingToProto(Encoding));
+			TextureRead->ExtractMeasurementHeader(TransmissionTime, ColorImage->mutable_header());
+		}
+
+		// Extract label data and compute bounding boxes
+		{
+			TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraDecodeBoundingBoxes);
+
+			// Extract label data from pixels
+			TArray<uint8> LabelData;
+			LabelData.SetNumUninitialized(TextureRead->Image.Num());
+			ParallelFor(TextureRead->Image.Num(), [&LabelData, &TextureRead](int32 Idx)
+			{
+				LabelData[Idx] = TextureRead->Image[Idx].Label();
+			});
+
+			// Compute bounding boxes
+			TArray<FBoundingBox2D> BoundingBoxes = ComputeBoundingBoxesCPU(LabelData, TextureRead->ImageSize.X, TextureRead->ImageSize.Y);
+
+			// Get instance-to-semantic mapping from UTempoActorLabeler
+			UWorld* World = GEngine->GetWorldContexts()[0].World();
+			UTempoActorLabeler* Labeler = World ? World->GetSubsystem<UTempoActorLabeler>() : nullptr;
+
+			TMap<uint8, uint8> InstanceToSemanticMap;
+			if (Labeler)
+			{
+				// Get the mapping synchronously (this is called from async task graph)
+				TempoLabels::InstanceToSemanticIdMap Mapping;
+				Labeler->GetInstanceToSemanticIdMap(TempoScripting::Empty(),
+					TResponseDelegate<TempoLabels::InstanceToSemanticIdMap>::CreateLambda(
+						[&Mapping](const TempoLabels::InstanceToSemanticIdMap& Response, const grpc::Status&)
+						{
+							Mapping = Response;
+						}
+					)
+				);
+
+				// Build lookup map
+				for (const auto& Pair : Mapping.instance_semantic_id_pairs())
+				{
+					InstanceToSemanticMap.Add(Pair.instanceid(), Pair.semanticid());
+				}
+			}
+
+			// Add bounding boxes to proto message
+			for (const FBoundingBox2D& Box : BoundingBoxes)
+			{
+				TempoCamera::BoundingBox2D* BBoxProto = Response.add_bounding_boxes();
+				BBoxProto->set_min_x(Box.MinX);
+				BBoxProto->set_min_y(Box.MinY);
+				BBoxProto->set_max_x(Box.MaxX);
+				BBoxProto->set_max_y(Box.MaxY);
+				BBoxProto->set_instance_id(Box.InstanceId);
+
+				// Find semantic ID from mapping
+				const uint8* SemanticId = InstanceToSemanticMap.Find(Box.InstanceId);
+				BBoxProto->set_semantic_id(SemanticId ? *SemanticId : 0);
+			}
+		}
+	}
+
+	TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraRespondBoundingBoxes);
+	for (auto RequestIt = Requests.CreateConstIterator(); RequestIt; ++RequestIt)
+	{
+		RequestIt->ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
+	}
+}
+
 void TTextureRead<FCameraPixelNoDepth>::RespondToRequests(const TArray<FColorImageRequest>& Requests, float TransmissionTime) const
 {
 	RespondToColorRequests(this, Requests, TransmissionTime);
@@ -122,6 +284,11 @@ void TTextureRead<FCameraPixelNoDepth>::RespondToRequests(const TArray<FColorIma
 void TTextureRead<FCameraPixelNoDepth>::RespondToRequests(const TArray<FLabelImageRequest>& Requests, float TransmissionTime) const
 {
 	RespondToLabelRequests(this, Requests, TransmissionTime);
+}
+
+void TTextureRead<FCameraPixelNoDepth>::RespondToRequests(const TArray<FColorImageWithBoundingBoxesRequest>& Requests, float TransmissionTime) const
+{
+	RespondToBoundingBoxRequests(this, Requests, TransmissionTime);
 }
 
 void TTextureRead<FCameraPixelWithDepth>::RespondToRequests(const TArray<FColorImageRequest>& Requests, float TransmissionTime) const
@@ -157,9 +324,14 @@ void TTextureRead<FCameraPixelWithDepth>::RespondToRequests(const TArray<FDepthI
 	}
 }
 
+void TTextureRead<FCameraPixelWithDepth>::RespondToRequests(const TArray<FColorImageWithBoundingBoxesRequest>& Requests, float TransmissionTime) const
+{
+	RespondToBoundingBoxRequests(this, Requests, TransmissionTime);
+}
+
 UTempoCamera::UTempoCamera()
 {
-	MeasurementTypes = { EMeasurementType::COLOR_IMAGE, EMeasurementType::LABEL_IMAGE, EMeasurementType::DEPTH_IMAGE};
+	MeasurementTypes = { EMeasurementType::COLOR_IMAGE, EMeasurementType::LABEL_IMAGE, EMeasurementType::DEPTH_IMAGE, EMeasurementType::COLOR_IMAGE_WITH_BBOXES};
 	CaptureSource = ESceneCaptureSource::SCS_FinalColorLDR;
 	PostProcessSettings.AutoExposureMethod = AEM_Basic;
 	PostProcessSettings.AutoExposureSpeedUp = 20.0;
@@ -270,7 +442,7 @@ TOptional<TFuture<void>> UTempoCamera::SendMeasurements()
 
 bool UTempoCamera::HasPendingRequests() const
 {
-	return !PendingColorImageRequests.IsEmpty() || !PendingLabelImageRequests.IsEmpty() || !PendingDepthImageRequests.IsEmpty();
+	return !PendingColorImageRequests.IsEmpty() || !PendingLabelImageRequests.IsEmpty() || !PendingDepthImageRequests.IsEmpty() || !PendingColorImageWithBoundingBoxesRequests.IsEmpty();
 }
 
 FTextureRead* UTempoCamera::MakeTextureRead() const
@@ -293,6 +465,7 @@ TFuture<void> UTempoCamera::DecodeAndRespond(TUniquePtr<FTextureRead> TextureRea
 		ColorImageRequests = PendingColorImageRequests,
 		LabelImageRequests = PendingLabelImageRequests,
 		DepthImageRequests = PendingDepthImageRequests,
+		BoundingBoxRequests = PendingColorImageWithBoundingBoxesRequests,
 		TransmissionTimeCpy = TransmissionTime
 		]
 	{
@@ -303,16 +476,19 @@ TFuture<void> UTempoCamera::DecodeAndRespond(TUniquePtr<FTextureRead> TextureRea
 			static_cast<TTextureRead<FCameraPixelWithDepth>*>(TextureRead.Get())->RespondToRequests(ColorImageRequests, TransmissionTimeCpy);
 			static_cast<TTextureRead<FCameraPixelWithDepth>*>(TextureRead.Get())->RespondToRequests(LabelImageRequests, TransmissionTimeCpy);
 			static_cast<TTextureRead<FCameraPixelWithDepth>*>(TextureRead.Get())->RespondToRequests(DepthImageRequests, TransmissionTimeCpy);
+			static_cast<TTextureRead<FCameraPixelWithDepth>*>(TextureRead.Get())->RespondToRequests(BoundingBoxRequests, TransmissionTimeCpy);
 		}
 		else if (TextureRead->GetType() == TEXT("NoDepth"))
 		{
 			static_cast<TTextureRead<FCameraPixelNoDepth>*>(TextureRead.Get())->RespondToRequests(ColorImageRequests, TransmissionTimeCpy);
 			static_cast<TTextureRead<FCameraPixelNoDepth>*>(TextureRead.Get())->RespondToRequests(LabelImageRequests, TransmissionTimeCpy);
+			static_cast<TTextureRead<FCameraPixelNoDepth>*>(TextureRead.Get())->RespondToRequests(BoundingBoxRequests, TransmissionTimeCpy);
 		}
 	});
 
 	PendingColorImageRequests.Empty();
 	PendingLabelImageRequests.Empty();
+	PendingColorImageWithBoundingBoxesRequests.Empty();
 	if (bSupportsDepth)
 	{
 		PendingDepthImageRequests.Empty();
