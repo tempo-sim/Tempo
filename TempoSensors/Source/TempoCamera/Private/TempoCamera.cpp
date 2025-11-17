@@ -812,6 +812,16 @@ void UTempoCamera::BeginDestroy()
 	// Flush rendering commands to ensure no pending GPU work references our resources
 	FlushRenderingCommands();
 
+	// Wait for any pending readbacks to complete before releasing
+	if (BBoxMinReadback && !BBoxMinReadback->IsReady())
+	{
+		BBoxMinReadback->Wait();
+	}
+	if (BBoxMaxReadback && !BBoxMaxReadback->IsReady())
+	{
+		BBoxMaxReadback->Wait();
+	}
+
 	// Release GPU resources safely
 	BBoxMinReadback.Reset();
 	BBoxMaxReadback.Reset();

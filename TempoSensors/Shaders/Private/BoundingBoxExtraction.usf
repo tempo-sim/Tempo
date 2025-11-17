@@ -55,7 +55,7 @@ void BBoxExtractionCS(
     {
         // Read RGBA channels from label texture (format: RTF_RGBA8 = PF_B8G8R8A8)
         // UNORM8 format returns normalized floats [0.0, 1.0] for each channel
-        // .r/.g/.b = color channels, .a = instance label (byte 3)
+        // .r/.g/.b = color channels, .a = instance label (alpha channel, 4th byte)
         float4 pixelData = LabelTexture.Load(uint3(DispatchThreadId.xy, 0));
 
         // Extract label from alpha channel - denormalize from [0,1] to [0,255]
