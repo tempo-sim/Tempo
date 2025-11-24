@@ -3,6 +3,7 @@
 #include "VehicleWheelComponent.h"
 
 #include "TempoMovementInterface.h"
+#include "GameFramework/PawnMovementComponent.h"
 
 #include "Kismet/KismetMathLibrary.h"
 

@@ -73,6 +73,8 @@ public:
 
 	void GetInstanceToSemanticIdMap(const TempoScripting::Empty& Request, const TResponseDelegate<TempoLabels::InstanceToSemanticIdMap>& ResponseContinuation);
 
+	void GetInstanceToSemanticIdMap(TMap<uint8, uint8>& OutMap) const;
+
 protected:
 	void BuildLabelMaps();
 
