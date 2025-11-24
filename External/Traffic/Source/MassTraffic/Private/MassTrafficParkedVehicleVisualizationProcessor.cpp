@@ -6,6 +6,7 @@
 #include "MassRepresentationSubsystem.h"
 #include "MassEntityManager.h"
 #include "MassExecutionContext.h"
+#include "MassCommonFragments.h"
 #include "VisualLogger/VisualLogger.h"
 
 //----------------------------------------------------------------------//
