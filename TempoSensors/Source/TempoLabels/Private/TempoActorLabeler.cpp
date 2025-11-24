@@ -117,6 +117,18 @@ void UTempoActorLabeler::GetInstanceToSemanticIdMap(const TempoScripting::Empty&
 	ResponseContinuation.ExecuteIfBound(InstanceToSemanticIdMap, grpc::Status_OK);
 }
 
+void UTempoActorLabeler::GetInstanceToSemanticIdMapDirect(TMap<uint8, uint8>& OutMap) const
+{
+	OutMap.Empty();
+	for (const auto& LabeledObject : LabeledObjects)
+	{
+		if (LabeledObject.Value.InstanceId != NoLabelId)
+		{
+			OutMap.Add(LabeledObject.Value.InstanceId, LabeledObject.Value.SemanticId);
+		}
+	}
+}
+
 void UTempoActorLabeler::OnWorldBeginPlay(UWorld& InWorld)
 {
 	Super::OnWorldBeginPlay(InWorld);

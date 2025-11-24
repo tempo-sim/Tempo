@@ -13,6 +13,8 @@
 
 #include "TempoCamera.generated.h"
 
+class UTempoActorLabeler;
+
 // 4-byte pixel format where first 3 bytes are color, 4th byte is label.
 struct FCameraPixelNoDepth
 {
@@ -98,7 +100,7 @@ struct TTextureRead<FCameraPixelWithDepth> : TTextureReadBase<FCameraPixelWithDe
 	void RespondToRequests(const TArray<FColorImageRequest>& Requests, float TransmissionTime) const;
 	void RespondToRequests(const TArray<FLabelImageRequest>& Requests, float TransmissionTime) const;
 	void RespondToRequests(const TArray<FDepthImageRequest>& Requests, float TransmissionTime) const;
-	void RespondToRequests(const TArray<FColorImageWithBoundingBoxesRequest>& Requests, float TransmissionTime) const;
+	void RespondToRequests(const TArray<FColorImageWithBoundingBoxesRequest>& Requests, float TransmissionTime, UTempoActorLabeler* Labeler) const;
 
 	float MinDepth;
 	float MaxDepth;
@@ -113,7 +115,7 @@ struct TTextureRead<FCameraPixelNoDepth> : TTextureReadBase<FCameraPixelNoDepth>
 
 	void RespondToRequests(const TArray<FColorImageRequest>& Requests, float TransmissionTime) const;
 	void RespondToRequests(const TArray<FLabelImageRequest>& Requests, float TransmissionTime) const;
-	void RespondToRequests(const TArray<FColorImageWithBoundingBoxesRequest>& Requests, float TransmissionTime) const;
+	void RespondToRequests(const TArray<FColorImageWithBoundingBoxesRequest>& Requests, float TransmissionTime, UTempoActorLabeler* Labeler) const;
 };
 
 struct TEMPOCAMERA_API FTempoCameraIntrinsics
