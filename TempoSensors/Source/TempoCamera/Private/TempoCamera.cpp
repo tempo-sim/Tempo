@@ -42,9 +42,9 @@ struct FBoundingBox2D
  * @param Height Image height in pixels
  * @return Array of valid bounding boxes
  */
-static TArray<FBoundingBox2D> ComputeBoundingBoxesCPU(const TArray<uint8>& LabelData, uint32 Width, uint32 Height)
+static TArray<FBoundingBox2D> ComputeBoundingBoxes(const TArray<uint8>& LabelData, uint32 Width, uint32 Height)
 {
-	TRACE_CPUPROFILER_EVENT_SCOPE(ComputeBoundingBoxesCPU);
+	TRACE_CPUPROFILER_EVENT_SCOPE(ComputeBoundingBoxes);
 
 	// Array indexed by instance ID (0-255)
 	FBoundingBox2D Boxes[256];
@@ -223,7 +223,7 @@ void RespondToBoundingBoxRequests(const TTextureRead<PixelType>* TextureRead, co
 			});
 
 			// Compute bounding boxes
-			TArray<FBoundingBox2D> BoundingBoxes = ComputeBoundingBoxesCPU(LabelData, TextureRead->ImageSize.X, TextureRead->ImageSize.Y);
+			TArray<FBoundingBox2D> BoundingBoxes = ComputeBoundingBoxes(LabelData, TextureRead->ImageSize.X, TextureRead->ImageSize.Y);
 
 			// Add bounding boxes to proto message using the map captured at render time
 			for (const FBoundingBox2D& Box : BoundingBoxes)
@@ -431,7 +431,7 @@ FTextureRead* UTempoCamera::MakeTextureRead() const
 	TMap<uint8, uint8> InstanceToSemanticMap;
 	if (UTempoActorLabeler* Labeler = GetWorld()->GetSubsystem<UTempoActorLabeler>())
 	{
-		Labeler->GetInstanceToSemanticIdMapDirect(InstanceToSemanticMap);
+		Labeler->GetInstanceToSemanticIdMap(InstanceToSemanticMap);
 	}
 
 	return bDepthEnabled ?
