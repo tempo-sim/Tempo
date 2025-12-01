@@ -78,34 +78,52 @@ struct FDepthImageRequest
 	TResponseDelegate<TempoCamera::DepthImage> ResponseContinuation;
 };
 
+struct FBoundingBoxesRequest
+{
+	TempoCamera::BoundingBoxesRequest Request;
+	TResponseDelegate<TempoCamera::BoundingBoxes> ResponseContinuation;
+};
+
 template <>
 struct TTextureRead<FCameraPixelWithDepth> : TTextureReadBase<FCameraPixelWithDepth>
 {
 	TTextureRead(const FIntPoint& ImageSizeIn, int32 SequenceIdIn, double CaptureTimeIn, const FString& OwnerNameIn,
-		const FString& SensorNameIn, const FTransform& SensorTransformIn, float MinDepthIn, float MaxDepthIn)
-	   : TTextureReadBase(ImageSizeIn, SequenceIdIn, CaptureTimeIn, OwnerNameIn, SensorNameIn, SensorTransformIn), MinDepth(MinDepthIn), MaxDepth(MaxDepthIn)
+		const FString& SensorNameIn, const FTransform& SensorTransformIn, float MinDepthIn, float MaxDepthIn,
+		TMap<uint8, uint8>&& InstanceToSemanticMapIn)
+	   : TTextureReadBase(ImageSizeIn, SequenceIdIn, CaptureTimeIn, OwnerNameIn, SensorNameIn, SensorTransformIn),
+	     MinDepth(MinDepthIn), MaxDepth(MaxDepthIn), InstanceToSemanticMap(MoveTemp(InstanceToSemanticMapIn))
 	{
 	}
-	
+
 	virtual FName GetType() const override { return TEXT("WithDepth"); }
 
 	void RespondToRequests(const TArray<FColorImageRequest>& Requests, float TransmissionTime) const;
 	void RespondToRequests(const TArray<FLabelImageRequest>& Requests, float TransmissionTime) const;
 	void RespondToRequests(const TArray<FDepthImageRequest>& Requests, float TransmissionTime) const;
+	void RespondToRequests(const TArray<FBoundingBoxesRequest>& Requests, float TransmissionTime) const;
 
 	float MinDepth;
 	float MaxDepth;
+	TMap<uint8, uint8> InstanceToSemanticMap;
 };
 
 template <>
 struct TTextureRead<FCameraPixelNoDepth> : TTextureReadBase<FCameraPixelNoDepth>
 {
-	using TTextureReadBase::TTextureReadBase;
-	
+	TTextureRead(const FIntPoint& ImageSizeIn, int32 SequenceIdIn, double CaptureTimeIn, const FString& OwnerNameIn,
+		const FString& SensorNameIn, const FTransform& SensorTransformIn, TMap<uint8, uint8>&& InstanceToSemanticMapIn)
+	   : TTextureReadBase(ImageSizeIn, SequenceIdIn, CaptureTimeIn, OwnerNameIn, SensorNameIn, SensorTransformIn),
+	     InstanceToSemanticMap(MoveTemp(InstanceToSemanticMapIn))
+	{
+	}
+
 	virtual FName GetType() const override { return TEXT("NoDepth"); }
 
 	void RespondToRequests(const TArray<FColorImageRequest>& Requests, float TransmissionTime) const;
 	void RespondToRequests(const TArray<FLabelImageRequest>& Requests, float TransmissionTime) const;
+	void RespondToRequests(const TArray<FBoundingBoxesRequest>& Requests, float TransmissionTime) const;
+
+	TMap<uint8, uint8> InstanceToSemanticMap;
 };
 
 struct TEMPOCAMERA_API FTempoCameraIntrinsics
@@ -138,6 +156,8 @@ public:
 	void RequestMeasurement(const TempoCamera::LabelImageRequest& Request, const TResponseDelegate<TempoCamera::LabelImage>& ResponseContinuation);
 
 	void RequestMeasurement(const TempoCamera::DepthImageRequest& Request, const TResponseDelegate<TempoCamera::DepthImage>& ResponseContinuation);
+
+	void RequestMeasurement(const TempoCamera::BoundingBoxesRequest& Request, const TResponseDelegate<TempoCamera::BoundingBoxes>& ResponseContinuation);
 
 	FTempoCameraIntrinsics GetIntrinsics() const;
 
@@ -187,4 +207,5 @@ protected:
 	TArray<FColorImageRequest> PendingColorImageRequests;
 	TArray<FLabelImageRequest> PendingLabelImageRequests;
 	TArray<FDepthImageRequest> PendingDepthImageRequests;
+	TArray<FBoundingBoxesRequest> PendingBoundingBoxesRequests;
 };

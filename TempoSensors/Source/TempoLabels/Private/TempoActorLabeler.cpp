@@ -103,21 +103,6 @@ void UTempoActorLabeler::RegisterScriptingServices(FTempoScriptingServer& Script
 	);
 }
 
-void UTempoActorLabeler::GetInstanceToSemanticIdMap(const TempoScripting::Empty& Request, const TResponseDelegate<TempoLabels::InstanceToSemanticIdMap>& ResponseContinuation)
-{
-	TempoLabels::InstanceToSemanticIdMap InstanceToSemanticIdMap;
-	for (const auto& LabeledObject : LabeledObjects)
-	{
-		if (LabeledObject.Value.InstanceId != NoLabelId)
-		{
-			auto* Pair = InstanceToSemanticIdMap.add_instance_semantic_id_pairs();
-			Pair->set_instanceid(LabeledObject.Value.InstanceId);
-			Pair->set_semanticid(LabeledObject.Value.SemanticId);
-		}
-	}
-	ResponseContinuation.ExecuteIfBound(InstanceToSemanticIdMap, grpc::Status_OK);
-}
-
 void UTempoActorLabeler::HandleGetLabeledActorTypes(const TempoLabels::GetLabeledActorTypesRequest& Request, const TResponseDelegate<TempoLabels::GetLabeledActorTypesResponse>& ResponseContinuation)
 {
 	TempoLabels::GetLabeledActorTypesResponse Response;
@@ -136,6 +121,33 @@ void UTempoActorLabeler::HandleGetLabeledActorTypes(const TempoLabels::GetLabele
 	}
 
 	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
+}
+
+void UTempoActorLabeler::GetInstanceToSemanticIdMap(TMap<uint8, uint8>& OutMap) const
+{
+	OutMap.Empty();
+	for (const auto& LabeledObject : LabeledObjects)
+	{
+		if (LabeledObject.Value.InstanceId != NoLabelId)
+		{
+			OutMap.Add(LabeledObject.Value.InstanceId, LabeledObject.Value.SemanticId);
+		}
+	}
+}
+
+void UTempoActorLabeler::GetInstanceToSemanticIdMap(const TempoScripting::Empty& Request, const TResponseDelegate<TempoLabels::InstanceToSemanticIdMap>& ResponseContinuation)
+{
+	TMap<uint8, uint8> Map;
+	GetInstanceToSemanticIdMap(Map);
+
+	TempoLabels::InstanceToSemanticIdMap ProtoResponse;
+	for (const auto& Pair : Map)
+	{
+		auto* ProtoPair = ProtoResponse.add_instance_semantic_id_pairs();
+		ProtoPair->set_instanceid(Pair.Key);
+		ProtoPair->set_semanticid(Pair.Value);
+	}
+	ResponseContinuation.ExecuteIfBound(ProtoResponse, grpc::Status_OK);
 }
 
 void UTempoActorLabeler::OnWorldBeginPlay(UWorld& InWorld)
