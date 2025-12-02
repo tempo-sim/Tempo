@@ -1,0 +1,17 @@
+name: Security - Semgrep Scan
+permissions:
+  contents: read           # needed by actions/checkout
+  actions: read            # lets the action query the workflow run
+  security-events: write   # needed to upload SARIF
+
+on: [push, pull_request]
+
+jobs:
+  semgrep:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: serve-robotics/actions/security/semgrep@v3
+        with:
+          config: "auto"
