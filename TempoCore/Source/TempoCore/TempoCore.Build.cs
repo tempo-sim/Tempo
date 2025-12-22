@@ -38,6 +38,7 @@ public class TempoCore : TempoModuleRules
 			{
 				// Unreal
 				"AssetRegistry",
+				"AIModule",
 				"CoreUObject",
 				"ChaosVehicles",
 				"Engine",
