@@ -1,4 +1,4 @@
-﻿// Copyright Tempo Simulation, LLC. All Rights Reserved
+// Copyright Tempo Simulation, LLC. All Rights Reserved
 
 #pragma once
 
@@ -18,15 +18,17 @@ enum class ETempoAvoidanceQuality : uint8
 };
 
 UCLASS()
-class TEMPOCORE_API ATempoCrowdAIController : public ADetourCrowdAIController
+class TEMPOMOVEMENT_API ATempoCrowdAIController : public ADetourCrowdAIController
 {
 	GENERATED_BODY()
+
+public:
+	ATempoCrowdAIController(const FObjectInitializer& ObjectInitializer);
 
 protected:
 	virtual void OnPossess(APawn* InPawn) override;
 
 	virtual void BeginPlay() override;
-
 
 private:
 	UPROPERTY(EditDefaultsOnly, Category = "Tempo")

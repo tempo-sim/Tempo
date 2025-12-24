@@ -6,6 +6,12 @@
 #include "BehaviorTree/BlackboardComponent.h"
 #include "Navigation/CrowdFollowingComponent.h"
 
+ATempoCrowdAIController::ATempoCrowdAIController(const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer.SetDefaultSubobjectClass<UCrowdFollowingComponent>(TEXT("PathFollowingComponent")))
+{
+	// DetourCrowdAIController is uninheritable in 5.4, thus we manually override
+}
+
 void ATempoCrowdAIController::BeginPlay()
 {
 	Super::BeginPlay();
