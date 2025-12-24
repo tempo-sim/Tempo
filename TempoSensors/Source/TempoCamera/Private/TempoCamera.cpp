@@ -48,9 +48,9 @@ static TArray<FBoundingBox2D> ComputeBoundingBoxes(const TArray<uint8>& LabelDat
 
 	// Array indexed by instance ID (0-255)
 	FBoundingBox2D Boxes[256];
-	for (int i = 0; i < 256; i++)
+	for (int32 I = 0; I < 256; I++)
 	{
-		Boxes[i].InstanceId = i;
+		Boxes[I].InstanceId = I;
 	}
 
 	// Single pass: scan all pixels
@@ -69,11 +69,11 @@ static TArray<FBoundingBox2D> ComputeBoundingBoxes(const TArray<uint8>& LabelDat
 	// Filter valid boxes
 	TArray<FBoundingBox2D> ValidBoxes;
 	ValidBoxes.Reserve(255);  // Scene can have up to 255 bounding boxes
-	for (int i = 1; i < 256; i++)  // Skip 0 (unlabeled)
+	for (int32 I = 1; I < 256; I++)  // Skip 0 (unlabeled)
 	{
-		if (Boxes[i].IsValid())
+		if (Boxes[I].IsValid())
 		{
-			ValidBoxes.Add(Boxes[i]);
+			ValidBoxes.Add(Boxes[I]);
 		}
 	}
 
@@ -218,6 +218,10 @@ void RespondToBoundingBoxRequests(const TTextureRead<PixelType>* TextureRead, co
 
 			// Find semantic ID from mapping captured at render time
 			const uint8* SemanticId = TextureRead->InstanceToSemanticMap.Find(Box.InstanceId);
+			if (!SemanticId)
+			{
+				UE_LOG(LogTemp, Warning, TEXT("No semantic ID found for instance ID %d"), Box.InstanceId);
+			}
 			BBoxProto->set_semantic_id(SemanticId ? *SemanticId : 0);
 		}
 	}
@@ -411,7 +415,7 @@ FTextureRead* UTempoCamera::MakeTextureRead() const
 	TMap<uint8, uint8> InstanceToSemanticMap;
 	if (UTempoActorLabeler* Labeler = GetWorld()->GetSubsystem<UTempoActorLabeler>())
 	{
-		Labeler->GetInstanceToSemanticIdMap(InstanceToSemanticMap);
+		InstanceToSemanticMap = Labeler->GetInstanceToSemanticIdMap();
 	}
 
 	return bDepthEnabled ?

@@ -123,22 +123,22 @@ void UTempoActorLabeler::HandleGetLabeledActorTypes(const TempoLabels::GetLabele
 	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
 }
 
-void UTempoActorLabeler::GetInstanceToSemanticIdMap(TMap<uint8, uint8>& OutMap) const
+TMap<uint8, uint8> UTempoActorLabeler::GetInstanceToSemanticIdMap() const
 {
-	OutMap.Empty();
+	TMap<uint8, uint8> Result;
 	for (const auto& LabeledObject : LabeledObjects)
 	{
 		if (LabeledObject.Value.InstanceId != NoLabelId)
 		{
-			OutMap.Add(LabeledObject.Value.InstanceId, LabeledObject.Value.SemanticId);
+			Result.Add(LabeledObject.Value.InstanceId, LabeledObject.Value.SemanticId);
 		}
 	}
+	return Result;
 }
 
 void UTempoActorLabeler::GetInstanceToSemanticIdMap(const TempoScripting::Empty& Request, const TResponseDelegate<TempoLabels::InstanceToSemanticIdMap>& ResponseContinuation)
 {
-	TMap<uint8, uint8> Map;
-	GetInstanceToSemanticIdMap(Map);
+	TMap<uint8, uint8> Map = GetInstanceToSemanticIdMap();
 
 	TempoLabels::InstanceToSemanticIdMap ProtoResponse;
 	for (const auto& Pair : Map)
