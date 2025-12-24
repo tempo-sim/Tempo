@@ -9,7 +9,6 @@ public class TempoVehicleMovement : ModuleRules
         PublicDependencyModuleNames.AddRange(
             new string[]
             {
-                "AIModule",
                 "Core",
                 "ChaosVehicles",
             }

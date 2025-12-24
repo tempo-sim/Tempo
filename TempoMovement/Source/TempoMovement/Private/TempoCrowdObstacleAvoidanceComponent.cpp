@@ -60,10 +60,7 @@ FVector UTempoCrowdObstacleAvoidanceComponent::GetCrowdAgentVelocity() const
 {
     if (const AActor* Owner = GetOwner())
     {
-        if (const UPawnMovementComponent* Movement = Owner->FindComponentByClass<UPawnMovementComponent>())
-        {
-            return Movement->Velocity;
-        }
+    	return Owner->GetVelocity();
     }
     return FVector::ZeroVector;
 }
