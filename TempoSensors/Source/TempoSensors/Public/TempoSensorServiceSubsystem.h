@@ -26,9 +26,11 @@ namespace TempoCamera
 	class ColorImageRequest;
 	class DepthImageRequest;
 	class LabelImageRequest;
+	class BoundingBoxesRequest;
 	class ColorImage;
 	class DepthImage;
 	class LabelImage;
+	class BoundingBoxes;
 }
 
 namespace TempoLidar
@@ -60,6 +62,8 @@ public:
 	void StreamDepthImages(const TempoCamera::DepthImageRequest& Request, const TResponseDelegate<TempoCamera::DepthImage>& ResponseContinuation) const;
 
 	void StreamLabelImages(const TempoCamera::LabelImageRequest& Request, const TResponseDelegate<TempoCamera::LabelImage>& ResponseContinuation) const;
+
+	void StreamBoundingBoxes(const TempoCamera::BoundingBoxesRequest& Request, const TResponseDelegate<TempoCamera::BoundingBoxes>& ResponseContinuation) const;
 
 	void StreamLidarScans(const TempoLidar::LidarScanRequest& Request, const TResponseDelegate<TempoLidar::LidarScanSegment>& ResponseContinuation) const;
 
