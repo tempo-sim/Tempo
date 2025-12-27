@@ -18,7 +18,7 @@ enum class ETempoAvoidanceQuality : uint8
 };
 
 UCLASS()
-class TEMPOMOVEMENT_API ATempoCrowdAIController : public ADetourCrowdAIController
+class TEMPOMOVEMENT_API ATempoCrowdAIController : public AAIController
 {
 	GENERATED_BODY()
 
