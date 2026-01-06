@@ -12,10 +12,6 @@
 
 namespace TempoWorld
 {
-	class ValidatePositionRequest;
-	class ValidatePositionResponse;
-	class FindGroundHeightRequest;
-	class FindGroundHeightResponse;
 	class RaycastRequest;
 	class RaycastResponse;
 }
@@ -33,14 +29,6 @@ public:
 	virtual void Deinitialize() override;
 
 	virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
-
-	void ValidatePosition(
-		const TempoWorld::ValidatePositionRequest& Request,
-		const TResponseDelegate<TempoWorld::ValidatePositionResponse>& ResponseContinuation) const;
-
-	void FindGroundHeight(
-		const TempoWorld::FindGroundHeightRequest& Request,
-		const TResponseDelegate<TempoWorld::FindGroundHeightResponse>& ResponseContinuation) const;
 
 	void Raycast(
 		const TempoWorld::RaycastRequest& Request,

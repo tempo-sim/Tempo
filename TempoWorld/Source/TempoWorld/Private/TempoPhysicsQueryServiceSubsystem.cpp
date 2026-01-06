@@ -1,7 +1,6 @@
 // Copyright Tempo Simulation, LLC. All Rights Reserved
 
 #include "TempoPhysicsQueryServiceSubsystem.h"
-#include "TempoPositionValidation.h"
 #include "TempoWorldUtils.h"
 
 #include "TempoWorld/PhysicsQuery.grpc.pb.h"
@@ -10,10 +9,6 @@
 using PhysicsQueryService = TempoWorld::PhysicsQueryService;
 using PhysicsQueryAsyncService = TempoWorld::PhysicsQueryService::AsyncService;
 
-using ValidatePositionRequest = TempoWorld::ValidatePositionRequest;
-using ValidatePositionResponse = TempoWorld::ValidatePositionResponse;
-using FindGroundHeightRequest = TempoWorld::FindGroundHeightRequest;
-using FindGroundHeightResponse = TempoWorld::FindGroundHeightResponse;
 using RaycastRequest = TempoWorld::RaycastRequest;
 using RaycastResponse = TempoWorld::RaycastResponse;
 
@@ -29,39 +24,11 @@ namespace
 		default: return ECC_WorldStatic;
 		}
 	}
-
-	FPositionValidationParams BuildParams(
-		const UWorld* World,
-		TempoWorld::CollisionChannel Channel,
-		float SearchDistanceMeters,
-		const google::protobuf_tempo::RepeatedPtrField<std::string>& IgnoredActors,
-		bool bComputeSuggested = false)
-	{
-		FPositionValidationParams Params;
-		Params.CollisionChannel = ToUnrealChannel(Channel);
-		// Convert meters to cm, default to 10km if not specified
-		Params.SearchDistance = SearchDistanceMeters > 0.0f ? SearchDistanceMeters * 100.0f : 1000000.0f;
-		Params.bComputeSuggestedPosition = bComputeSuggested;
-
-		for (const auto& ActorName : IgnoredActors)
-		{
-			if (AActor* Actor = GetActorWithName(World, UTF8_TO_TCHAR(ActorName.c_str())))
-			{
-				Params.IgnoredActors.Add(Actor);
-			}
-		}
-
-		return Params;
-	}
 }
 
 void UTempoPhysicsQueryServiceSubsystem::RegisterScriptingServices(FTempoScriptingServer& ScriptingServer)
 {
 	ScriptingServer.RegisterService<PhysicsQueryService>(
-		SimpleRequestHandler(&PhysicsQueryAsyncService::RequestValidatePosition,
-						   &UTempoPhysicsQueryServiceSubsystem::ValidatePosition),
-		SimpleRequestHandler(&PhysicsQueryAsyncService::RequestFindGroundHeight,
-						   &UTempoPhysicsQueryServiceSubsystem::FindGroundHeight),
 		SimpleRequestHandler(&PhysicsQueryAsyncService::RequestRaycast,
 						   &UTempoPhysicsQueryServiceSubsystem::Raycast)
 	);
@@ -91,76 +58,6 @@ bool UTempoPhysicsQueryServiceSubsystem::ShouldCreateSubsystem(UObject* Outer) c
 								 WorldType == EWorldType::PIE ||
 								 WorldType == EWorldType::Game);
 	return bIsValidWorld && Super::ShouldCreateSubsystem(Outer);
-}
-
-void UTempoPhysicsQueryServiceSubsystem::ValidatePosition(
-	const ValidatePositionRequest& Request,
-	const TResponseDelegate<ValidatePositionResponse>& ResponseContinuation) const
-{
-	// Convert from Tempo (meters, right-handed) to Unreal (cm, left-handed)
-	const FVector Position = QuantityConverter<M2CM, R2L>::Convert(
-		FVector(Request.position().x(), Request.position().y(), Request.position().z()));
-
-	const FPositionValidationParams Params = BuildParams(
-		GetWorld(),
-		Request.collision_channel(),
-		Request.search_distance(),
-		Request.ignored_actors(),
-		Request.compute_suggested_position());
-
-	const FPositionValidationResult Result = TempoPositionValidation::ValidatePosition(
-		GetWorld(), Position, Params);
-
-	ValidatePositionResponse Response;
-	Response.set_is_valid(Result.bIsValid);
-	Response.set_is_below_ground(Result.bIsBelowGround);
-
-	if (Result.SuggestedPosition.IsSet())
-	{
-		const FVector SuggestedConverted = QuantityConverter<CM2M, L2R>::Convert(Result.SuggestedPosition.GetValue());
-		Response.mutable_suggested_position()->set_x(SuggestedConverted.X);
-		Response.mutable_suggested_position()->set_y(SuggestedConverted.Y);
-		Response.mutable_suggested_position()->set_z(SuggestedConverted.Z);
-	}
-
-	if (Result.GroundHeight.IsSet())
-	{
-		Response.set_ground_height(Result.GroundHeight.GetValue() / 100.0f); // cm to m
-	}
-
-	if (Result.bIsBelowGround)
-	{
-		Response.set_depth_below_ground(Result.DepthBelowGround / 100.0f); // cm to m
-	}
-
-	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
-}
-
-void UTempoPhysicsQueryServiceSubsystem::FindGroundHeight(
-	const FindGroundHeightRequest& Request,
-	const TResponseDelegate<FindGroundHeightResponse>& ResponseContinuation) const
-{
-	// Convert from Tempo (meters, right-handed) to Unreal (cm, left-handed)
-	const FVector2D Position = QuantityConverter<M2CM, R2L>::Convert(
-		FVector2D(Request.position().x(), Request.position().y()));
-
-	const FPositionValidationParams Params = BuildParams(
-		GetWorld(),
-		Request.collision_channel(),
-		Request.search_distance(),
-		Request.ignored_actors());
-
-	const TOptional<float> GroundHeight = TempoPositionValidation::FindGroundHeight(
-		GetWorld(), Position, Params);
-
-	FindGroundHeightResponse Response;
-	Response.set_found(GroundHeight.IsSet());
-	if (GroundHeight.IsSet())
-	{
-		Response.set_height(GroundHeight.GetValue() / 100.0f); // cm to m
-	}
-
-	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
 }
 
 void UTempoPhysicsQueryServiceSubsystem::Raycast(
