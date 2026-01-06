@@ -27,10 +27,6 @@ message ValidatePositionRequest {
 
   // Actor names to ignore during validation
   repeated string ignored_actors = 5;
-
-  // Trace against complex collision (render mesh triangles) instead of simple collision.
-  // Slower but works for meshes without collision primitives (e.g., PCG-spawned decorative meshes).
-  bool trace_complex = 6;
 }
 
 // Position validation response
@@ -88,9 +84,6 @@ message RaycastRequest {
 
   // Actor names to ignore
   repeated string ignored_actors = 4;
-
-  // Trace against complex collision (render mesh triangles) instead of simple collision.
-  bool trace_complex = 5;
 }
 
 // Raycast response

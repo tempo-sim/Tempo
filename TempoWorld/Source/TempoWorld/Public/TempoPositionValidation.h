@@ -37,10 +37,6 @@ struct TEMPOWORLD_API FPositionValidationParams
 
 	// Whether to compute suggested position
 	bool bComputeSuggestedPosition = false;
-
-	// Trace against complex collision (render mesh triangles) instead of simple collision.
-	// Slower but works for meshes without collision primitives (e.g., PCG-spawned decorative meshes).
-	bool bTraceComplex = false;
 };
 
 namespace TempoPositionValidation

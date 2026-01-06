@@ -35,15 +35,13 @@ namespace
 		TempoWorld::CollisionChannel Channel,
 		float SearchDistanceMeters,
 		const google::protobuf_tempo::RepeatedPtrField<std::string>& IgnoredActors,
-		bool bComputeSuggested = false,
-		bool bTraceComplex = false)
+		bool bComputeSuggested = false)
 	{
 		FPositionValidationParams Params;
 		Params.CollisionChannel = ToUnrealChannel(Channel);
 		// Convert meters to cm, default to 10km if not specified
 		Params.SearchDistance = SearchDistanceMeters > 0.0f ? SearchDistanceMeters * 100.0f : 1000000.0f;
 		Params.bComputeSuggestedPosition = bComputeSuggested;
-		Params.bTraceComplex = bTraceComplex;
 
 		for (const auto& ActorName : IgnoredActors)
 		{
@@ -108,8 +106,7 @@ void UTempoPhysicsQueryServiceSubsystem::ValidatePosition(
 		Request.collision_channel(),
 		Request.search_distance(),
 		Request.ignored_actors(),
-		Request.compute_suggested_position(),
-		Request.trace_complex());
+		Request.compute_suggested_position());
 
 	const FPositionValidationResult Result = TempoPositionValidation::ValidatePosition(
 		GetWorld(), Position, Params);
@@ -131,7 +128,10 @@ void UTempoPhysicsQueryServiceSubsystem::ValidatePosition(
 		Response.set_ground_height(Result.GroundHeight.GetValue() / 100.0f); // cm to m
 	}
 
-	Response.set_depth_below_ground(Result.DepthBelowGround / 100.0f); // cm to m
+	if (Result.bIsBelowGround)
+	{
+		Response.set_depth_below_ground(Result.DepthBelowGround / 100.0f); // cm to m
+	}
 
 	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
 }
@@ -173,7 +173,7 @@ void UTempoPhysicsQueryServiceSubsystem::Raycast(
 	const FVector End = QuantityConverter<M2CM, R2L>::Convert(
 		FVector(Request.end().x(), Request.end().y(), Request.end().z()));
 
-	FCollisionQueryParams QueryParams(TEXT("PhysicsQueryRaycast"), Request.trace_complex());
+	FCollisionQueryParams QueryParams(TEXT("PhysicsQueryRaycast"));
 	for (const auto& ActorName : Request.ignored_actors())
 	{
 		if (AActor* Actor = GetActorWithName(GetWorld(), UTF8_TO_TCHAR(ActorName.c_str())))

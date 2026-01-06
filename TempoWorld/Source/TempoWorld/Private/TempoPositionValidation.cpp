@@ -13,7 +13,7 @@ bool IsBelowGround(
 {
 	check(World);
 
-	FCollisionQueryParams QueryParams(TEXT("BelowGroundCheck"), Params.bTraceComplex);
+	FCollisionQueryParams QueryParams(TEXT("BelowGroundCheck"));
 	for (AActor* Actor : Params.IgnoredActors)
 	{
 		QueryParams.AddIgnoredActor(Actor);
@@ -79,7 +79,7 @@ TOptional<float> FindGroundHeight(
 {
 	check(World);
 
-	FCollisionQueryParams QueryParams(TEXT("FindGround"), Params.bTraceComplex);
+	FCollisionQueryParams QueryParams(TEXT("FindGround"));
 	for (AActor* Actor : Params.IgnoredActors)
 	{
 		QueryParams.AddIgnoredActor(Actor);
