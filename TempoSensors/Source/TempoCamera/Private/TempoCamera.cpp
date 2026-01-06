@@ -14,25 +14,7 @@
 
 #include "Engine/TextureRenderTarget2D.h"
 
-// Intermediate data structure for 2D bounding box computation
-struct FBoundingBox2D
-{
-	uint32 MinX = TNumericLimits<uint32>::Max();
-	uint32 MinY = TNumericLimits<uint32>::Max();
-	uint32 MaxX = 0;
-	uint32 MaxY = 0;
-	uint8 InstanceId = 0;
-
-	bool IsValid() const { return MinX <= MaxX && MinY <= MaxY; }
-
-	void Expand(uint32 X, uint32 Y)
-	{
-		MinX = FMath::Min(MinX, X);
-		MinY = FMath::Min(MinY, Y);
-		MaxX = FMath::Max(MaxX, X);
-		MaxY = FMath::Max(MaxY, Y);
-	}
-};
+#include "Math/Box2D.h"
 
 /**
  * Compute 2D bounding boxes from label data.
@@ -40,44 +22,25 @@ struct FBoundingBox2D
  * @param LabelData Array of label values (one per pixel)
  * @param Width Image width in pixels
  * @param Height Image height in pixels
- * @return Array of valid bounding boxes
+ * @return Map of instance ID to bounding box
  */
-static TArray<FBoundingBox2D> ComputeBoundingBoxes(const TArray<uint8>& LabelData, uint32 Width, uint32 Height)
+static TMap<int32, FBox2D> ComputeBoundingBoxes(const TArray<uint8>& LabelData, uint32 Width, uint32 Height)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(ComputeBoundingBoxes);
 
-	// Array indexed by instance ID (0-255)
-	FBoundingBox2D Boxes[256];
-	for (int32 I = 0; I < 256; I++)
+	TMap<int32, FBox2D> Boxes;
+	for (uint32 Y = 0; Y < Height; ++Y)
 	{
-		Boxes[I].InstanceId = I;
-	}
-
-	// Single pass: scan all pixels
-	for (uint32 Y = 0; Y < Height; Y++)
-	{
-		for (uint32 X = 0; X < Width; X++)
+		for (uint32 X = 0; X < Width; ++X)
 		{
 			const uint8 InstanceId = LabelData[Y * Width + X];
 			if (InstanceId > 0)  // 0 = unlabeled
 			{
-				Boxes[InstanceId].Expand(X, Y);
+				Boxes.FindOrAdd(InstanceId) += FUintPoint(X, Y);
 			}
 		}
 	}
-
-	// Filter valid boxes
-	TArray<FBoundingBox2D> ValidBoxes;
-	ValidBoxes.Reserve(255);  // Scene can have up to 255 bounding boxes
-	for (int32 I = 1; I < 256; I++)  // Skip 0 (unlabeled)
-	{
-		if (Boxes[I].IsValid())
-		{
-			ValidBoxes.Add(Boxes[I]);
-		}
-	}
-
-	return ValidBoxes;
+	return Boxes;
 }
 
 FTempoCameraIntrinsics::FTempoCameraIntrinsics(const FIntPoint& SizeXY, float HorizontalFOV)
@@ -204,23 +167,23 @@ void RespondToBoundingBoxRequests(const TTextureRead<PixelType>* TextureRead, co
 		});
 
 		// Compute bounding boxes
-		TArray<FBoundingBox2D> BoundingBoxes = ComputeBoundingBoxes(LabelData, TextureRead->ImageSize.X, TextureRead->ImageSize.Y);
+		TMap<int32, FBox2D> BoundingBoxes = ComputeBoundingBoxes(LabelData, TextureRead->ImageSize.X, TextureRead->ImageSize.Y);
 
 		// Add bounding boxes to proto message using the map captured at render time
-		for (const FBoundingBox2D& Box : BoundingBoxes)
+		for (const auto& [InstanceId, Box] : BoundingBoxes)
 		{
 			TempoCamera::BoundingBox2D* BBoxProto = Response.add_bounding_boxes();
-			BBoxProto->set_min_x(Box.MinX);
-			BBoxProto->set_min_y(Box.MinY);
-			BBoxProto->set_max_x(Box.MaxX);
-			BBoxProto->set_max_y(Box.MaxY);
-			BBoxProto->set_instance_id(Box.InstanceId);
+			BBoxProto->set_min_x(FMath::RoundToInt32(Box.Min.X));
+			BBoxProto->set_min_y(FMath::RoundToInt32(Box.Min.Y));
+			BBoxProto->set_max_x(FMath::RoundToInt32(Box.Max.X));
+			BBoxProto->set_max_y(FMath::RoundToInt32(Box.Max.Y));
+			BBoxProto->set_instance_id(InstanceId);
 
 			// Find semantic ID from mapping captured at render time
-			const uint8* SemanticId = TextureRead->InstanceToSemanticMap.Find(Box.InstanceId);
+			const uint8* SemanticId = TextureRead->InstanceToSemanticMap.Find(InstanceId);
 			if (!SemanticId)
 			{
-				UE_LOG(LogTemp, Warning, TEXT("No semantic ID found for instance ID %d"), Box.InstanceId);
+				UE_LOG(LogTemp, Warning, TEXT("No semantic ID found for instance ID %d"), InstanceId);
 			}
 			BBoxProto->set_semantic_id(SemanticId ? *SemanticId : 0);
 		}
