@@ -1,0 +1,127 @@
+// Copyright Tempo Simulation, LLC. All Rights Reserved
+
+syntax = "proto3";
+
+import "TempoScripting/Geometry.proto";
+
+// Collision channel for physics queries
+enum CollisionChannel {
+  WORLD_STATIC = 0;
+  WORLD_DYNAMIC = 1;
+  VISIBILITY = 2;
+}
+
+// Position validation request - checks if position is below ground
+message ValidatePositionRequest {
+  // Position to validate (in Tempo coordinates: meters, right-handed)
+  TempoScripting.Vector position = 1;
+
+  // Collision channel to use for traces
+  CollisionChannel collision_channel = 2;
+
+  // Maximum search distance in meters (default: 10000 = 10km)
+  float search_distance = 3;
+
+  // Whether to compute a suggested valid position
+  bool compute_suggested_position = 4;
+
+  // Actor names to ignore during validation
+  repeated string ignored_actors = 5;
+
+  // Trace against complex collision (render mesh triangles) instead of simple collision.
+  // Slower but works for meshes without collision primitives (e.g., PCG-spawned decorative meshes).
+  bool trace_complex = 6;
+}
+
+// Position validation response
+message ValidatePositionResponse {
+  // Is the position valid (not underground)?
+  bool is_valid = 1;
+
+  // Is the position below ground level?
+  bool is_below_ground = 2;
+
+  // Suggested corrected position (if requested and position was invalid)
+  TempoScripting.Vector suggested_position = 5;
+
+  // Ground height at this XY location (in meters, if detected)
+  float ground_height = 6;
+
+  // Depth below ground in meters (if underground)
+  float depth_below_ground = 7;
+}
+
+// Find ground height request
+message FindGroundHeightRequest {
+  // XY position to find ground at (in Tempo coordinates: meters)
+  TempoScripting.Vector2D position = 1;
+
+  // Collision channel to use
+  CollisionChannel collision_channel = 2;
+
+  // Maximum search distance in meters
+  float search_distance = 3;
+
+  // Actor names to ignore
+  repeated string ignored_actors = 4;
+}
+
+// Find ground height response
+message FindGroundHeightResponse {
+  // Whether ground was found
+  bool found = 1;
+
+  // Ground height in meters (if found)
+  float height = 2;
+}
+
+// Raycast request for general physics queries
+message RaycastRequest {
+  // Start position (in Tempo coordinates: meters, right-handed)
+  TempoScripting.Vector start = 1;
+
+  // End position (in Tempo coordinates: meters, right-handed)
+  TempoScripting.Vector end = 2;
+
+  // Collision channel to use
+  CollisionChannel collision_channel = 3;
+
+  // Actor names to ignore
+  repeated string ignored_actors = 4;
+
+  // Trace against complex collision (render mesh triangles) instead of simple collision.
+  bool trace_complex = 5;
+}
+
+// Raycast response
+message RaycastResponse {
+  // Whether the ray hit something
+  bool hit = 1;
+
+  // Hit location (in Tempo coordinates: meters, right-handed)
+  TempoScripting.Vector location = 2;
+
+  // Hit normal (in Tempo coordinates)
+  TempoScripting.Vector normal = 3;
+
+  // Distance from start to hit point (in meters)
+  float distance = 4;
+
+  // Name of the actor that was hit
+  string actor = 5;
+
+  // Name of the component that was hit
+  string component = 6;
+}
+
+// Physics query service for ground detection and raycasting
+service PhysicsQueryService {
+  // Validate if a position is valid (not underground)
+  rpc ValidatePosition(ValidatePositionRequest) returns (ValidatePositionResponse);
+
+  // Find the ground height at a given XY position
+  rpc FindGroundHeight(FindGroundHeightRequest) returns (FindGroundHeightResponse);
+
+  // Perform a single raycast
+  rpc Raycast(RaycastRequest) returns (RaycastResponse);
+}
