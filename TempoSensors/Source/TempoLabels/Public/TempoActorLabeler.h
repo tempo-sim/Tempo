@@ -79,6 +79,8 @@ public:
 
 	const TSet<FName>& GetLabeledActorClassNames() const { return LabeledActorClassNames; }
 
+	TMap<uint8, uint8> GetInstanceToSemanticIdMap() const;
+
 protected:
 	void BuildLabelMaps();
 
