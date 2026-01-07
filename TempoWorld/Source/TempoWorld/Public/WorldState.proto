@@ -4,6 +4,49 @@ syntax = "proto3";
 
 import "TempoScripting/Geometry.proto";
 
+// Collision channel for physics queries
+enum CollisionChannel {
+  WORLD_STATIC = 0;
+  WORLD_DYNAMIC = 1;
+  VISIBILITY = 2;
+}
+
+// Raycast request for physics queries
+message RaycastRequest {
+  // Start position (in Tempo coordinates: meters, right-handed)
+  TempoScripting.Vector start = 1;
+
+  // End position (in Tempo coordinates: meters, right-handed)
+  TempoScripting.Vector end = 2;
+
+  // Collision channel to use
+  CollisionChannel collision_channel = 3;
+
+  // Actor names to ignore
+  repeated string ignored_actors = 4;
+}
+
+// Raycast response
+message RaycastResponse {
+  // Whether the ray hit something
+  bool hit = 1;
+
+  // Hit location (in Tempo coordinates: meters, right-handed)
+  TempoScripting.Vector location = 2;
+
+  // Hit normal (in Tempo coordinates)
+  TempoScripting.Vector normal = 3;
+
+  // Distance from start to hit point (in meters)
+  float distance = 4;
+
+  // Name of the actor that was hit
+  string actor = 5;
+
+  // Name of the component that was hit
+  string component = 6;
+}
+
 message OverlapEventRequest {
   string actor_name = 1;
 }
@@ -50,4 +93,7 @@ service WorldStateService {
   rpc GetCurrentActorStatesNear(ActorStatesNearRequest) returns (ActorStates);
 
   rpc StreamActorStatesNear(ActorStatesNearRequest) returns (stream ActorStates);
+
+  // Perform a single raycast
+  rpc Raycast(RaycastRequest) returns (RaycastResponse);
 }
