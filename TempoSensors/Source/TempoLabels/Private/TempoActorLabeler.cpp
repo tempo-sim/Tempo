@@ -99,10 +99,10 @@ void UTempoActorLabeler::RegisterScriptingServices(FTempoScriptingServer& Script
 {
 	ScriptingServer.RegisterService<LabelService>(
 		SimpleRequestHandler(&LabelAsyncService::RequestGetInstanceToSemanticIdMap, &UTempoActorLabeler::GetInstanceToSemanticIdMap),
+		SimpleRequestHandler(&LabelAsyncService::RequestGetAllActorLabels, &UTempoActorLabeler::HandleGetAllActorLabels),
 		SimpleRequestHandler(&LabelAsyncService::RequestGetLabeledActorTypes, &UTempoActorLabeler::HandleGetLabeledActorTypes),
-		SimpleRequestHandler(&LabelAsyncService::RequestSetActorSemanticId, &UTempoActorLabeler::HandleSetActorSemanticId),
-		SimpleRequestHandler(&LabelAsyncService::RequestSetComponentSemanticId, &UTempoActorLabeler::HandleSetComponentSemanticId),
-		SimpleRequestHandler(&LabelAsyncService::RequestGetAllActorLabels, &UTempoActorLabeler::HandleGetAllActorLabels)
+		SimpleRequestHandler(&LabelAsyncService::RequestGetSemanticClasses, &UTempoActorLabeler::HandleGetSemanticClasses),
+		SimpleRequestHandler(&LabelAsyncService::RequestSetActorTypeSemanticId, &UTempoActorLabeler::HandleSetActorTypeSemanticId)
 	);
 }
 
@@ -126,117 +126,85 @@ void UTempoActorLabeler::HandleGetLabeledActorTypes(const TempoLabels::GetLabele
 	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
 }
 
-void UTempoActorLabeler::HandleSetActorSemanticId(const TempoLabels::SetActorSemanticIdRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation)
+void UTempoActorLabeler::HandleGetSemanticClasses(const TempoLabels::GetSemanticClassesRequest& Request, const TResponseDelegate<TempoLabels::GetSemanticClassesResponse>& ResponseContinuation)
 {
-	const FString ActorName = UTF8_TO_TCHAR(Request.actor_name().c_str());
-	const int32 SemanticId = Request.semantic_id();
+	TempoLabels::GetSemanticClassesResponse Response;
 
-	// Validate semantic_id range
-	if (SemanticId < -1 || SemanticId > 255)
-	{
-		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "semantic_id must be -1 (to revert) or 0-255"));
-		return;
-	}
+	// Build reverse mapping: semantic_id -> actor types
+	TMap<int32, TArray<FName>> SemanticIdToActorTypes;
 
-	// Find the actor by name
-	AActor* FoundActor = nullptr;
-	for (TActorIterator<AActor> ActorItr(GetWorld()); ActorItr; ++ActorItr)
+	// Include DataTable assignments
+	for (const auto& [ActorClass, LabelName] : ActorSemanticLabels)
 	{
-		if ((*ActorItr)->GetName() == ActorName)
+		if (const int32* SemanticId = SemanticIds.Find(LabelName))
 		{
-			FoundActor = *ActorItr;
-			break;
+			SemanticIdToActorTypes.FindOrAdd(*SemanticId).Add(ActorClass->GetFName());
 		}
 	}
 
-	if (!FoundActor)
+	// Include runtime overrides (they take precedence)
+	for (const auto& [ActorTypeName, OverrideSemanticId] : ActorTypeSemanticIdOverrides)
 	{
-		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::StatusCode::NOT_FOUND, "Actor not found: " + Request.actor_name()));
-		return;
+		// Remove from old mapping if present, add to new
+		for (auto& [Id, Types] : SemanticIdToActorTypes)
+		{
+			Types.Remove(ActorTypeName);
+		}
+		SemanticIdToActorTypes.FindOrAdd(OverrideSemanticId).Add(ActorTypeName);
 	}
 
-	// Re-label the actor to apply the change
-	// Note: UnLabelActor clears overrides, so we set the override AFTER unlabeling
-	UnLabelActor(FoundActor);
-
-	// Now store or clear the override
-	if (SemanticId < 0)
+	// Iterate DataTable to get all class definitions
+	for (const auto& [LabelName, SemanticId] : SemanticIds)
 	{
-		SemanticIdOverrides.Remove(FoundActor);
-	}
-	else
-	{
-		SemanticIdOverrides.Add(FoundActor, SemanticId);
+		auto* ClassInfo = Response.add_classes();
+		ClassInfo->set_name(TCHAR_TO_UTF8(*LabelName.ToString()));
+		ClassInfo->set_label_id(SemanticId);
+
+		if (TArray<FName>* Types = SemanticIdToActorTypes.Find(SemanticId))
+		{
+			for (const FName& TypeName : *Types)
+			{
+				ClassInfo->add_actor_types(TCHAR_TO_UTF8(*TypeName.ToString()));
+			}
+		}
 	}
 
-	LabelActor(FoundActor);
-
-	ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status_OK);
+	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
 }
 
-void UTempoActorLabeler::HandleSetComponentSemanticId(const TempoLabels::SetComponentSemanticIdRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation)
+void UTempoActorLabeler::HandleSetActorTypeSemanticId(const TempoLabels::SetActorTypeSemanticIdRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation)
 {
-	const FString ActorName = UTF8_TO_TCHAR(Request.actor_name().c_str());
-	const FString ComponentName = UTF8_TO_TCHAR(Request.component_name().c_str());
+	const FName ActorType = FName(UTF8_TO_TCHAR(Request.actor_type().c_str()));
 	const int32 SemanticId = Request.semantic_id();
 
-	// Validate semantic_id range
+	// Validate range
 	if (SemanticId < -1 || SemanticId > 255)
 	{
-		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "semantic_id must be -1 (to revert) or 0-255"));
+		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(),
+			grpc::Status(grpc::StatusCode::INVALID_ARGUMENT,
+			"semantic_id must be -1 (revert) or 0-255"));
 		return;
 	}
 
-	// Find the actor by name
-	AActor* FoundActor = nullptr;
-	for (TActorIterator<AActor> ActorItr(GetWorld()); ActorItr; ++ActorItr)
-	{
-		if ((*ActorItr)->GetName() == ActorName)
-		{
-			FoundActor = *ActorItr;
-			break;
-		}
-	}
-
-	if (!FoundActor)
-	{
-		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::StatusCode::NOT_FOUND, "Actor not found: " + Request.actor_name()));
-		return;
-	}
-
-	// Find the component by name
-	UPrimitiveComponent* FoundComponent = nullptr;
-	TInlineComponentArray<UPrimitiveComponent*> PrimitiveComponents(FoundActor);
-	for (UPrimitiveComponent* Component : PrimitiveComponents)
-	{
-		if (Component->GetName() == ComponentName)
-		{
-			FoundComponent = Component;
-			break;
-		}
-	}
-
-	if (!FoundComponent)
-	{
-		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::StatusCode::NOT_FOUND, "Component not found: " + Request.component_name()));
-		return;
-	}
-
-	// Re-label the component to apply the change
-	// Note: UnLabelComponent clears overrides, so we set the override AFTER unlabeling
-	UnLabelComponent(FoundComponent);
-
-	// Now store or clear the override
+	// Store or clear override
 	if (SemanticId < 0)
 	{
-		ComponentSemanticIdOverrides.Remove(FoundComponent);
+		ActorTypeSemanticIdOverrides.Remove(ActorType);
 	}
 	else
 	{
-		ComponentSemanticIdOverrides.Add(FoundComponent, SemanticId);
+		ActorTypeSemanticIdOverrides.Add(ActorType, SemanticId);
 	}
 
-	LabelComponent(FoundComponent);
+	// Re-label all existing actors of this type
+	for (TActorIterator<AActor> ActorItr(GetWorld()); ActorItr; ++ActorItr)
+	{
+		if (ActorItr->GetClass()->GetFName() == ActorType)
+		{
+			UnLabelActor(*ActorItr);
+			LabelActor(*ActorItr);
+		}
+	}
 
 	ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status_OK);
 }
@@ -453,6 +421,25 @@ void UTempoActorLabeler::LabelActor(AActor* Actor)
 		return;
 	}
 
+	// Check for type-level override first (before DataTable lookup)
+	if (const int32* TypeOverride = ActorTypeSemanticIdOverrides.Find(Actor->GetClass()->GetFName()))
+	{
+		FInstanceSemanticIdPair ActorIdPair;
+		ActorIdPair.SemanticId = *TypeOverride;
+		if (TOptional<int32> InstanceId = InstanceIdAllocator.Allocate())
+		{
+			ActorIdPair.InstanceId = *InstanceId;
+			// Track actor class names that have been assigned instance IDs
+			if (GetDefault<UTempoSensorsSettings>()->GetLabelType() == ELabelType::Instance)
+			{
+				LabeledActorClassNames.Add(Actor->GetClass()->GetFName());
+			}
+		}
+		LabeledObjects.Add(Actor, ActorIdPair);
+		LabelAllComponents(Actor, ActorIdPair);
+		return;
+	}
+
 	FInstanceSemanticIdPair ActorIdPair;
 	FName AssignedLabel = NoLabelName;
 	for (const auto& Elem : ActorSemanticLabels)
@@ -483,24 +470,6 @@ void UTempoActorLabeler::LabelActor(AActor* Actor)
 			else
 			{
 				UE_LOG(LogTempoLabels, Error, TEXT("Label %s did not have an associated ID"), *ActorLabel.ToString());
-			}
-		}
-	}
-
-	// Check for semantic ID override (runtime label assignment)
-	if (const int32* OverrideSemanticId = SemanticIdOverrides.Find(Actor))
-	{
-		ActorIdPair.SemanticId = *OverrideSemanticId;
-		// Ensure we have an instance ID even if actor wasn't in data table
-		if (ActorIdPair.InstanceId == 0 && *OverrideSemanticId != NoLabelId)
-		{
-			if (TOptional<int32> InstanceId = InstanceIdAllocator.Allocate())
-			{
-				ActorIdPair.InstanceId = *InstanceId;
-				if (GetDefault<UTempoSensorsSettings>()->GetLabelType() == ELabelType::Instance)
-				{
-					LabeledActorClassNames.Add(Actor->GetClass()->GetFName());
-				}
 			}
 		}
 	}
@@ -541,25 +510,6 @@ void UTempoActorLabeler::LabelComponent(UActorComponent* Component)
 
 void UTempoActorLabeler::LabelComponent(UPrimitiveComponent* Component, const FInstanceSemanticIdPair& ActorIdPair)
 {
-	// Check for component-level override first (takes precedence over everything)
-	if (const int32* OverrideSemanticId = ComponentSemanticIdOverrides.Find(Component))
-	{
-		FInstanceSemanticIdPair IdPair;
-		if (LabeledObjects.Contains(Component))
-		{
-			// This component is already labeled.
-			return;
-		}
-		if (TOptional<int32> InstanceId = InstanceIdAllocator.Allocate())
-		{
-			IdPair.InstanceId = *InstanceId;
-		}
-		IdPair.SemanticId = *OverrideSemanticId;
-		LabeledObjects.Add(Component, IdPair);
-		AssignId(Component, IdPair);
-		return;
-	}
-
 	if (UStaticMeshComponent* StaticMeshComponent = Cast<UStaticMeshComponent>(Component))
 	{
 		if (const UStaticMesh* StaticMesh = StaticMeshComponent->GetStaticMesh())
@@ -606,7 +556,7 @@ void UTempoActorLabeler::UnLabelAllActors()
 	{
 		UnLabelActor(*ActorItr);
 	}
-	
+
 	// Clear the set of labeled actor class names
 	LabeledActorClassNames.Empty();
 }
@@ -629,7 +579,6 @@ void UTempoActorLabeler::UnLabelActor(AActor* Actor)
 		}
 	}
 
-	SemanticIdOverrides.Remove(Actor);
 	LabeledObjects.Remove(Actor);
 }
 
@@ -672,7 +621,6 @@ void UTempoActorLabeler::UnLabelComponent(UPrimitiveComponent* Component)
 		}
 	}
 
-	ComponentSemanticIdOverrides.Remove(Component);
 	LabeledObjects.Remove(Component);
 }
 

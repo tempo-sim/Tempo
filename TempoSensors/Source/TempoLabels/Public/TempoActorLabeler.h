@@ -50,12 +50,13 @@ namespace TempoScripting
 namespace TempoLabels
 {
 	class InstanceToSemanticIdMap;
-	class GetLabeledActorTypesRequest;
-	class GetLabeledActorTypesResponse;
-	class SetActorSemanticIdRequest;
-	class SetComponentSemanticIdRequest;
 	class GetAllActorLabelsRequest;
 	class GetAllActorLabelsResponse;
+	class GetLabeledActorTypesRequest;
+	class GetLabeledActorTypesResponse;
+	class GetSemanticClassesRequest;
+	class GetSemanticClassesResponse;
+	class SetActorTypeSemanticIdRequest;
 }
 
 /**
@@ -79,13 +80,13 @@ public:
 
 	void GetInstanceToSemanticIdMap(const TempoScripting::Empty& Request, const TResponseDelegate<TempoLabels::InstanceToSemanticIdMap>& ResponseContinuation);
 
+	void HandleGetAllActorLabels(const TempoLabels::GetAllActorLabelsRequest& Request, const TResponseDelegate<TempoLabels::GetAllActorLabelsResponse>& ResponseContinuation);
+
 	void HandleGetLabeledActorTypes(const TempoLabels::GetLabeledActorTypesRequest& Request, const TResponseDelegate<TempoLabels::GetLabeledActorTypesResponse>& ResponseContinuation);
 
-	void HandleSetActorSemanticId(const TempoLabels::SetActorSemanticIdRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation);
+	void HandleGetSemanticClasses(const TempoLabels::GetSemanticClassesRequest& Request, const TResponseDelegate<TempoLabels::GetSemanticClassesResponse>& ResponseContinuation);
 
-	void HandleSetComponentSemanticId(const TempoLabels::SetComponentSemanticIdRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation);
-
-	void HandleGetAllActorLabels(const TempoLabels::GetAllActorLabelsRequest& Request, const TResponseDelegate<TempoLabels::GetAllActorLabelsResponse>& ResponseContinuation);
+	void HandleSetActorTypeSemanticId(const TempoLabels::SetActorTypeSemanticIdRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation);
 
 	const TSet<FName>& GetLabeledActorClassNames() const { return LabeledActorClassNames; }
 
@@ -143,14 +144,10 @@ protected:
 	UPROPERTY()
 	TSet<FName> LabeledActorClassNames;
 
-	// Per-actor semantic ID overrides. Value >= 0 overrides the data table lookup.
-	// Value of -1 means "use default from data table".
+	// Runtime overrides for actor types (class name -> semantic ID)
+	// Takes precedence over DataTable definitions
 	UPROPERTY()
-	TMap<AActor*, int32> SemanticIdOverrides;
-
-	// Per-component semantic ID overrides. Takes precedence over both actor overrides and mesh labels.
-	UPROPERTY()
-	TMap<UPrimitiveComponent*, int32> ComponentSemanticIdOverrides;
+	TMap<FName, int32> ActorTypeSemanticIdOverrides;
 
 	FInstanceIdAllocator InstanceIdAllocator = FInstanceIdAllocator(1, 255);
 };
