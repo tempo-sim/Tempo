@@ -25,6 +25,12 @@ message SetActorSemanticIdRequest {
   int32 semantic_id = 2;  // 0-255 to set label, -1 to revert to default (auto from data table)
 }
 
+message SetComponentSemanticIdRequest {
+  string actor_name = 1;
+  string component_name = 2;
+  int32 semantic_id = 3;  // 0-255 to set label, -1 to revert to default (auto from data table)
+}
+
 message ActorLabelInfo {
   string actor_name = 1;
   string actor_type = 2;
@@ -43,5 +49,6 @@ service LabelService {
   rpc GetInstanceToSemanticIdMap(TempoScripting.Empty) returns (InstanceToSemanticIdMap);
   rpc GetLabeledActorTypes(GetLabeledActorTypesRequest) returns (GetLabeledActorTypesResponse);
   rpc SetActorSemanticId(SetActorSemanticIdRequest) returns (TempoScripting.Empty);
+  rpc SetComponentSemanticId(SetComponentSemanticIdRequest) returns (TempoScripting.Empty);
   rpc GetAllActorLabels(GetAllActorLabelsRequest) returns (GetAllActorLabelsResponse);
 }

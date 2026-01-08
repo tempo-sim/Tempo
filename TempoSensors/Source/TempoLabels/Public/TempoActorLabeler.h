@@ -53,6 +53,7 @@ namespace TempoLabels
 	class GetLabeledActorTypesRequest;
 	class GetLabeledActorTypesResponse;
 	class SetActorSemanticIdRequest;
+	class SetComponentSemanticIdRequest;
 	class GetAllActorLabelsRequest;
 	class GetAllActorLabelsResponse;
 }
@@ -81,6 +82,8 @@ public:
 	void HandleGetLabeledActorTypes(const TempoLabels::GetLabeledActorTypesRequest& Request, const TResponseDelegate<TempoLabels::GetLabeledActorTypesResponse>& ResponseContinuation);
 
 	void HandleSetActorSemanticId(const TempoLabels::SetActorSemanticIdRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation);
+
+	void HandleSetComponentSemanticId(const TempoLabels::SetComponentSemanticIdRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation);
 
 	void HandleGetAllActorLabels(const TempoLabels::GetAllActorLabelsRequest& Request, const TResponseDelegate<TempoLabels::GetAllActorLabelsResponse>& ResponseContinuation);
 
@@ -144,6 +147,10 @@ protected:
 	// Value of -1 means "use default from data table".
 	UPROPERTY()
 	TMap<AActor*, int32> SemanticIdOverrides;
+
+	// Per-component semantic ID overrides. Takes precedence over both actor overrides and mesh labels.
+	UPROPERTY()
+	TMap<UPrimitiveComponent*, int32> ComponentSemanticIdOverrides;
 
 	FInstanceIdAllocator InstanceIdAllocator = FInstanceIdAllocator(1, 255);
 };
