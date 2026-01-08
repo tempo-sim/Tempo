@@ -99,7 +99,9 @@ void UTempoActorLabeler::RegisterScriptingServices(FTempoScriptingServer& Script
 {
 	ScriptingServer.RegisterService<LabelService>(
 		SimpleRequestHandler(&LabelAsyncService::RequestGetInstanceToSemanticIdMap, &UTempoActorLabeler::GetInstanceToSemanticIdMap),
-		SimpleRequestHandler(&LabelAsyncService::RequestGetLabeledActorTypes, &UTempoActorLabeler::HandleGetLabeledActorTypes)
+		SimpleRequestHandler(&LabelAsyncService::RequestGetLabeledActorTypes, &UTempoActorLabeler::HandleGetLabeledActorTypes),
+		SimpleRequestHandler(&LabelAsyncService::RequestSetActorSemanticId, &UTempoActorLabeler::HandleSetActorSemanticId),
+		SimpleRequestHandler(&LabelAsyncService::RequestGetAllActorLabels, &UTempoActorLabeler::HandleGetAllActorLabels)
 	);
 }
 
@@ -118,6 +120,69 @@ void UTempoActorLabeler::HandleGetLabeledActorTypes(const TempoLabels::GetLabele
 	for (const FName& ClassName : LabeledActorClassNames)
 	{
 		Response.add_actor_types(TCHAR_TO_UTF8(*ClassName.ToString()));
+	}
+
+	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
+}
+
+void UTempoActorLabeler::HandleSetActorSemanticId(const TempoLabels::SetActorSemanticIdRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation)
+{
+	const FString ActorName = UTF8_TO_TCHAR(Request.actor_name().c_str());
+	const int32 SemanticId = Request.semantic_id();
+
+	// Find the actor by name
+	AActor* FoundActor = nullptr;
+	for (TActorIterator<AActor> ActorItr(GetWorld()); ActorItr; ++ActorItr)
+	{
+		if ((*ActorItr)->GetName() == ActorName)
+		{
+			FoundActor = *ActorItr;
+			break;
+		}
+	}
+
+	if (!FoundActor)
+	{
+		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::StatusCode::NOT_FOUND, "Actor not found: " + Request.actor_name()));
+		return;
+	}
+
+	// Store or clear the override
+	if (SemanticId < 0)
+	{
+		SemanticIdOverrides.Remove(FoundActor);
+	}
+	else
+	{
+		SemanticIdOverrides.Add(FoundActor, SemanticId);
+	}
+
+	// Re-label the actor to apply the change
+	UnLabelActor(FoundActor);
+	LabelActor(FoundActor);
+
+	ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status_OK);
+}
+
+void UTempoActorLabeler::HandleGetAllActorLabels(const TempoLabels::GetAllActorLabelsRequest& Request, const TResponseDelegate<TempoLabels::GetAllActorLabelsResponse>& ResponseContinuation)
+{
+	TempoLabels::GetAllActorLabelsResponse Response;
+
+	for (const auto& LabeledObjectPair : LabeledObjects)
+	{
+		const AActor* Actor = Cast<AActor>(LabeledObjectPair.Key);
+		if (!Actor)
+		{
+			continue;
+		}
+
+		const FInstanceSemanticIdPair& IdPair = LabeledObjectPair.Value;
+
+		auto* ActorInfo = Response.add_actors();
+		ActorInfo->set_actor_name(TCHAR_TO_UTF8(*Actor->GetName()));
+		ActorInfo->set_actor_type(TCHAR_TO_UTF8(*Actor->GetClass()->GetName()));
+		ActorInfo->set_semantic_id(IdPair.SemanticId);
+		ActorInfo->set_instance_id(IdPair.InstanceId);
 	}
 
 	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
@@ -341,6 +406,24 @@ void UTempoActorLabeler::LabelActor(AActor* Actor)
 			else
 			{
 				UE_LOG(LogTempoLabels, Error, TEXT("Label %s did not have an associated ID"), *ActorLabel.ToString());
+			}
+		}
+	}
+
+	// Check for semantic ID override (runtime label assignment)
+	if (const int32* OverrideSemanticId = SemanticIdOverrides.Find(Actor))
+	{
+		ActorIdPair.SemanticId = *OverrideSemanticId;
+		// Ensure we have an instance ID even if actor wasn't in data table
+		if (ActorIdPair.InstanceId == 0 && *OverrideSemanticId != NoLabelId)
+		{
+			if (TOptional<int32> InstanceId = InstanceIdAllocator.Allocate())
+			{
+				ActorIdPair.InstanceId = *InstanceId;
+				if (GetDefault<UTempoSensorsSettings>()->GetLabelType() == ELabelType::Instance)
+				{
+					LabeledActorClassNames.Add(Actor->GetClass()->GetFName());
+				}
 			}
 		}
 	}

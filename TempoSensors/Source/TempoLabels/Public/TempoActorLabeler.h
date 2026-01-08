@@ -52,6 +52,9 @@ namespace TempoLabels
 	class InstanceToSemanticIdMap;
 	class GetLabeledActorTypesRequest;
 	class GetLabeledActorTypesResponse;
+	class SetActorSemanticIdRequest;
+	class GetAllActorLabelsRequest;
+	class GetAllActorLabelsResponse;
 }
 
 /**
@@ -76,6 +79,10 @@ public:
 	void GetInstanceToSemanticIdMap(const TempoScripting::Empty& Request, const TResponseDelegate<TempoLabels::InstanceToSemanticIdMap>& ResponseContinuation);
 
 	void HandleGetLabeledActorTypes(const TempoLabels::GetLabeledActorTypesRequest& Request, const TResponseDelegate<TempoLabels::GetLabeledActorTypesResponse>& ResponseContinuation);
+
+	void HandleSetActorSemanticId(const TempoLabels::SetActorSemanticIdRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation);
+
+	void HandleGetAllActorLabels(const TempoLabels::GetAllActorLabelsRequest& Request, const TResponseDelegate<TempoLabels::GetAllActorLabelsResponse>& ResponseContinuation);
 
 	const TSet<FName>& GetLabeledActorClassNames() const { return LabeledActorClassNames; }
 
@@ -132,6 +139,11 @@ protected:
 	// Set of actor class names that have been assigned unique instance IDs
 	UPROPERTY()
 	TSet<FName> LabeledActorClassNames;
+
+	// Per-actor semantic ID overrides. Value >= 0 overrides the data table lookup.
+	// Value of -1 means "use default from data table".
+	UPROPERTY()
+	TMap<AActor*, int32> SemanticIdOverrides;
 
 	FInstanceIdAllocator InstanceIdAllocator = FInstanceIdAllocator(1, 255);
 };
