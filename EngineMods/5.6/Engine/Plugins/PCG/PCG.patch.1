@@ -1,0 +1,16 @@
+diff --git Source/PCG/Private/MeshSelectors/PCGMeshSelectorByAttribute.cpp Source/PCG/Private/MeshSelectors/PCGMeshSelectorByAttribute.cpp
+--- Source/PCG/Private/MeshSelectors/PCGMeshSelectorByAttribute.cpp
++++ Source/PCG/Private/MeshSelectors/PCGMeshSelectorByAttribute.cpp
+@@ -223,8 +223,11 @@ void UPCGMeshSelectorByAttribute::SelectMeshInstances(
+ 				FPCGObjectOverrides Overrides(&Descriptor);
+ 				Overrides.Initialize(PropertyOverrides, &Descriptor, InPointData, &Context);
+
+ 				// Since they are already partitioned and identical, we can just use the value on the first point
+ 				check(!Context.AttributeOverridePartition[I].IsEmpty());
+ 				int32 AnyPointIndexOnThisPartition = Context.AttributeOverridePartition[I][0];
+ 				Overrides.Apply(AnyPointIndexOnThisPartition);
++				// Some overrides (e.g. CollisionProfileName) only update the name; FixupData rebuilds the response container so collision enables correctly.
++				Descriptor.BodyInstance.FixupData(Context.GetTargetActor(nullptr));
+ 			}
+
+ 			// Given partitioning is expensive, check if we're out of time for this frame
