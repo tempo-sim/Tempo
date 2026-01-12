@@ -70,6 +70,15 @@ message ActorStatesNearRequest {
   bool include_hidden_components = 5;
 }
 
+// Request actors near a world position (instead of near a named actor)
+message ActorStatesNearPositionRequest {
+  TempoScripting.Vector position = 1;
+  float search_radius = 2;
+  bool include_static = 3;
+  bool include_hidden_actors = 4;
+  bool include_hidden_components = 5;
+}
+
 message ActorState {
   double timestamp = 1;
   string name = 2;
@@ -91,6 +100,8 @@ service WorldStateService {
   rpc StreamActorState(ActorStateRequest) returns (stream ActorState);
 
   rpc GetCurrentActorStatesNear(ActorStatesNearRequest) returns (ActorStates);
+
+  rpc GetCurrentActorStatesNearPosition(ActorStatesNearPositionRequest) returns (ActorStates);
 
   rpc StreamActorStatesNear(ActorStatesNearRequest) returns (stream ActorStates);
 
