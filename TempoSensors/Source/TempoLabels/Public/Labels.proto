@@ -55,7 +55,7 @@ message SetActorTypeSemanticIdRequest {
 
 message SetStaticMeshTypeSemanticIdRequest {
   string static_mesh_path = 1;  // Full asset path, e.g., "/Game/Meshes/SM_Tree.SM_Tree"
-  int32 semantic_id = 2;        // 0-254 to set, -1 to clear override
+  int32 semantic_id = 2;        // 0-255 to set, -1 to clear override
 }
 
 message GetAllStaticMeshTypesRequest {

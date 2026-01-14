@@ -43,7 +43,7 @@ public:
 
 	void GetCurrentLevelName(const TempoScripting::Empty& Request, const TResponseDelegate<TempoCore::CurrentLevelResponse>& ResponseContinuation);
 
-	void GetAvailableLevels(const TempoCore::GetAvailableLevelsRequest& Request, const TResponseDelegate<TempoCore::AvailableLevelsResponse>& ResponseContinuation);
+	void GetAvailableLevels(const TempoCore::GetAvailableLevelsRequest& Request, const TResponseDelegate<TempoCore::AvailableLevelsResponse>& ResponseContinuation) const;
 
 	void Quit(const TempoScripting::Empty& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const;
 
