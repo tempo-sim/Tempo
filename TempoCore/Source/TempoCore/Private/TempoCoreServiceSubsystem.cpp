@@ -113,7 +113,7 @@ void UTempoCoreServiceSubsystem::GetCurrentLevelName(const TempoScripting::Empty
 	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
 }
 
-void UTempoCoreServiceSubsystem::GetAvailableLevels(const GetAvailableLevelsRequest& Request, const TResponseDelegate<AvailableLevelsResponse>& ResponseContinuation)
+void UTempoCoreServiceSubsystem::GetAvailableLevels(const GetAvailableLevelsRequest& Request, const TResponseDelegate<AvailableLevelsResponse>& ResponseContinuation) const
 {
 	AvailableLevelsResponse Response;
 
