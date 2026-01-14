@@ -57,6 +57,9 @@ namespace TempoLabels
 	class GetSemanticClassesRequest;
 	class GetSemanticClassesResponse;
 	class SetActorTypeSemanticIdRequest;
+	class GetAllStaticMeshTypesRequest;
+	class GetAllStaticMeshTypesResponse;
+	class SetStaticMeshTypeSemanticIdRequest;
 }
 
 /**
@@ -87,6 +90,10 @@ public:
 	void HandleGetSemanticClasses(const TempoLabels::GetSemanticClassesRequest& Request, const TResponseDelegate<TempoLabels::GetSemanticClassesResponse>& ResponseContinuation);
 
 	void HandleSetActorTypeSemanticId(const TempoLabels::SetActorTypeSemanticIdRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation);
+
+	void HandleGetAllStaticMeshTypes(const TempoLabels::GetAllStaticMeshTypesRequest& Request, const TResponseDelegate<TempoLabels::GetAllStaticMeshTypesResponse>& ResponseContinuation);
+
+	void HandleSetStaticMeshTypeSemanticId(const TempoLabels::SetStaticMeshTypeSemanticIdRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation);
 
 	const TSet<FName>& GetLabeledActorClassNames() const { return LabeledActorClassNames; }
 
@@ -148,6 +155,11 @@ protected:
 	// Takes precedence over DataTable definitions
 	UPROPERTY()
 	TMap<FName, int32> ActorTypeSemanticIdOverrides;
+
+	// Runtime overrides for static mesh types (full mesh path -> semantic ID)
+	// Takes precedence over DataTable definitions (StaticMeshLabels)
+	UPROPERTY()
+	TMap<FString, int32> StaticMeshTypeSemanticIdOverrides;
 
 	FInstanceIdAllocator InstanceIdAllocator = FInstanceIdAllocator(1, 255);
 };
