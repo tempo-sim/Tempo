@@ -27,6 +27,7 @@
       ],
       "Patch": [
         "Configuration/UEBuildTarget.cs.patch.1",
+        "Configuration/UEBuildTarget.cs.patch.2",
         "Platform/Linux/LinuxToolChain.cs.patch.1"
       ]
     },
