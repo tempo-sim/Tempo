@@ -330,7 +330,7 @@ void UTempoWorldStateServiceSubsystem::Raycast(
 	FCollisionQueryParams QueryParams(TEXT("WorldStateRaycast"));
 	for (const auto& ActorName : Request.ignored_actors())
 	{
-		if (AActor* Actor = GetActorWithName(GetWorld(), UTF8_TO_TCHAR(ActorName.c_str())))
+		if (const AActor* Actor = GetActorWithName(GetWorld(), UTF8_TO_TCHAR(ActorName.c_str())))
 		{
 			QueryParams.AddIgnoredActor(Actor);
 		}
@@ -359,13 +359,13 @@ void UTempoWorldStateServiceSubsystem::Raycast(
 
 		Response.set_distance(Hit.Distance / 100.0f); // cm to m
 
-		if (Hit.GetActor())
+		if (const AActor* Actor = Hit.GetActor())
 		{
-			Response.set_actor(TCHAR_TO_UTF8(*Hit.GetActor()->GetActorNameOrLabel()));
+			Response.set_actor(TCHAR_TO_UTF8(*Actor->GetActorNameOrLabel()));
 		}
-		if (Hit.GetComponent())
+		if (const UPrimitiveComponent* Component = Hit.GetComponent())
 		{
-			Response.set_component(TCHAR_TO_UTF8(*Hit.GetComponent()->GetName()));
+			Response.set_component(TCHAR_TO_UTF8(*Component->GetName()));
 		}
 	}
 
