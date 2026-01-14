@@ -1,0 +1,24 @@
+diff --git Source/PCG/Private/MeshSelectors/PCGMeshSelectorByAttribute.cpp Source/PCG/Private/MeshSelectors/PCGMeshSelectorByAttribute.cpp
+--- Source/PCG/Private/MeshSelectors/PCGMeshSelectorByAttribute.cpp
++++ Source/PCG/Private/MeshSelectors/PCGMeshSelectorByAttribute.cpp
+@@ -227,6 +227,8 @@
+ 			check(!Context.AttributeOverridePartition[I].IsEmpty());
+ 			int32 AnyPointIndexOnThisPartition = Context.AttributeOverridePartition[I][0];
+ 			Overrides.Apply(AnyPointIndexOnThisPartition);
++			// Some overrides (e.g. CollisionProfileName) only update the name; FixupData rebuilds the response container so collision enables correctly.
++			Descriptor.BodyInstance.FixupData(Context.GetTargetActor(nullptr));
+ 		}
+ 
+ 		// Given partitioning is expensive, check if we're out of time for this frame
+diff --git Source/PCG/Private/Elements/PCGSpawnSplineMesh.cpp Source/PCG/Private/Elements/PCGSpawnSplineMesh.cpp
+--- Source/PCG/Private/Elements/PCGSpawnSplineMesh.cpp
++++ Source/PCG/Private/Elements/PCGSpawnSplineMesh.cpp
+@@ -195,6 +195,8 @@
+ 			{
+ 				PCGLog::LogWarningOnGraph(FText::Format(LOCTEXT("FailOverrideDescriptor", "Failed to override descriptor for input {0} element {1}"), IterIndex, IterState.ElementIndex));
+ 			}
++			// Ensure override of CollisionProfileName rebuilds the response container so collision queries behave as expected.
++			IterState.SMCBuilderParams.Descriptor.BodyInstance.FixupData(Context->GetTargetActor(nullptr));
+ 			
+ 			UStaticMesh* StaticMesh = IterState.SMCBuilderParams.Descriptor.StaticMesh.Get();
+ 

@@ -27,6 +27,7 @@
       ],
       "Patch": [
         "Configuration/UEBuildTarget.cs.patch.1",
+        "Configuration/UEBuildTarget.cs.patch.2",
         "Platform/Linux/LinuxToolChain.cs.patch.1"
       ]
     },
@@ -51,6 +52,13 @@
         "MassCrowd.patch.2",
         "MassCrowd.patch.3",
         "MassCrowd.patch.4"
+      ]
+    },
+    {
+      "Type": "Plugin",
+      "Root": "Engine/Plugins/PCG",
+      "Patch": [
+        "PCG.patch.1"
       ]
     }
   ],
