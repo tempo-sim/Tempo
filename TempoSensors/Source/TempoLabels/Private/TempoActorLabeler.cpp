@@ -561,10 +561,12 @@ void UTempoActorLabeler::LabelAllActors()
 
 void UTempoActorLabeler::LabelActor(AActor* Actor)
 {
-	if (const FInstanceSemanticIdPair* ActorIdPair = LabeledObjects.Find(Actor))
+	if (const FInstanceSemanticIdPair* ActorIdPairPtr = LabeledObjects.Find(Actor))
 	{
 		// We've labeled this Actor before. Make sure all the components are labeled.
-		LabelAllComponents(Actor, *ActorIdPair);
+		// Copy to avoid dangling reference if LabeledObjects is modified during labeling.
+		FInstanceSemanticIdPair ActorIdPair = *ActorIdPairPtr;
+		LabelAllComponents(Actor, ActorIdPair);
 		return;
 	}
 
@@ -650,9 +652,11 @@ void UTempoActorLabeler::LabelComponent(UActorComponent* Component)
 
 	if (UPrimitiveComponent* PrimitiveComponent = Cast<UPrimitiveComponent>(Component))
 	{
-		if (const FInstanceSemanticIdPair* ActorIdPair = LabeledObjects.Find(PrimitiveComponent->GetOwner()))
+		if (const FInstanceSemanticIdPair* ActorIdPairPtr = LabeledObjects.Find(PrimitiveComponent->GetOwner()))
 		{
-			LabelComponent(PrimitiveComponent, *ActorIdPair);
+			// Copy to avoid dangling reference if LabeledObjects is modified during labeling.
+			FInstanceSemanticIdPair ActorIdPair = *ActorIdPairPtr;
+			LabelComponent(PrimitiveComponent, ActorIdPair);
 			return;
 		}
 
