@@ -26,6 +26,8 @@ public class TempoCamera : TempoModuleRules
 			new string[]
 			{
 				"Core",
+				"OpenCVHelper",
+				"OpenCVLensDistortion",
 				"TempoSensorsShared",
 			}
 			);
