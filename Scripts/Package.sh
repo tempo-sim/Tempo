@@ -7,6 +7,14 @@ PROJECT_ROOT=$("$SCRIPT_DIR"/FindProjectRoot.sh)
 cd "$PROJECT_ROOT"
 PROJECT_NAME=$(find . -maxdepth 1 -name "*.uproject" -exec basename {} .uproject \;)
 
+# Check for low memory mode flag
+LOW_MEMORY_MODE=false
+for arg in "$@"; do
+  if [[ "$arg" == "--low-memory" ]]; then
+    LOW_MEMORY_MODE=true
+  fi
+done
+
 UNREAL_ENGINE_PATH=$("$SCRIPT_DIR"/FindUnreal.sh)
 
 FIND_UPROJECT() {
@@ -134,8 +142,22 @@ if [ "$TEMPOROS_ENABLED" = "true" ]; then
   PACKAGE_COMMAND="$PACKAGE_COMMAND -ScriptDir=\"$PROJECT_ROOT/Plugins/Tempo/TempoROS/Scripts\""
 fi
 
+# Add low memory options if requested
+if [ "$LOW_MEMORY_MODE" = "true" ]; then
+  PACKAGE_COMMAND="$PACKAGE_COMMAND -CookPartialGC -NoXGE -AdditionalCookerOptions=\"-cookprocesscount=1\""
+  echo "Low memory mode enabled: single cook process, partial GC, no XGE"
+fi
+
+# Filter out our custom flags before passing to UAT
+PASSTHROUGH_ARGS=()
+for arg in "$@"; do
+  if [[ "$arg" != "--low-memory" ]]; then
+    PASSTHROUGH_ARGS+=("$arg")
+  fi
+done
+
 # Execute the command with any additional arguments
-eval "$PACKAGE_COMMAND \"\$@\""
+eval "$PACKAGE_COMMAND" "${PASSTHROUGH_ARGS[@]}"
 
 # Copy cook metadata (including chunk manifests) to the package directory
 if [[ "$TARGET_PLATFORM" = "Win64" ]]; then
