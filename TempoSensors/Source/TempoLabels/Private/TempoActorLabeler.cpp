@@ -634,7 +634,7 @@ void UTempoActorLabeler::LabelActor(AActor* Actor)
 	LabelAllComponents(Actor, ActorIdPair);
 }
 
-void UTempoActorLabeler::LabelAllComponents(const AActor* Actor, const FInstanceSemanticIdPair& ActorIdPair)
+void UTempoActorLabeler::LabelAllComponents(const AActor* Actor, FInstanceSemanticIdPair ActorIdPair)
 {
 	TInlineComponentArray<UPrimitiveComponent*> PrimitiveComponents(Actor);
 	for (UPrimitiveComponent* PrimitiveComponent : PrimitiveComponents)
@@ -665,7 +665,7 @@ void UTempoActorLabeler::LabelComponent(UActorComponent* Component)
 	}
 }
 
-void UTempoActorLabeler::LabelComponent(UPrimitiveComponent* Component, const FInstanceSemanticIdPair& ActorIdPair)
+void UTempoActorLabeler::LabelComponent(UPrimitiveComponent* Component, FInstanceSemanticIdPair ActorIdPair)
 {
 	if (UStaticMeshComponent* StaticMeshComponent = Cast<UStaticMeshComponent>(Component))
 	{
@@ -810,7 +810,7 @@ void UTempoActorLabeler::ReLabelAllActors()
 	LabelAllActors();
 }
 
-void UTempoActorLabeler::AssignId(UPrimitiveComponent* Component, const FInstanceSemanticIdPair& IdPair)
+void UTempoActorLabeler::AssignId(UPrimitiveComponent* Component, FInstanceSemanticIdPair IdPair)
 {
 	if (!Component->bRenderCustomDepth)
 	{
