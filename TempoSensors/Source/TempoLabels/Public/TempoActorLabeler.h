@@ -106,11 +106,11 @@ protected:
 
 	void LabelActor(AActor* Actor);
 
-	void LabelAllComponents(const AActor* Actor, const FInstanceSemanticIdPair& ActorIdPair);
+	void LabelAllComponents(const AActor* Actor, FInstanceSemanticIdPair ActorIdPair);
 
 	void LabelComponent(UActorComponent* Component);
 
-	void LabelComponent(UPrimitiveComponent* Component, const FInstanceSemanticIdPair& ActorIdPair);
+	void LabelComponent(UPrimitiveComponent* Component, FInstanceSemanticIdPair ActorIdPair);
 
 	void UnLabelAllActors();
 
@@ -124,7 +124,7 @@ protected:
 
 	void ReLabelAllActors();
 
-	static void AssignId(UPrimitiveComponent* Component, const FInstanceSemanticIdPair& IdPair);
+	static void AssignId(UPrimitiveComponent* Component, FInstanceSemanticIdPair IdPair);
 
 	UPROPERTY(VisibleAnywhere)
 	UDataTable* SemanticLabelTable;
