@@ -323,11 +323,11 @@ void UTempoActorLabeler::LabelAllComponents(const AActor* Actor, const FInstance
 
 void UTempoActorLabeler::LabelComponent(UActorComponent* Component)
 {
-	if (!Component->GetOwner() || !UTempoCoreUtils::IsGameWorld(Component))
+	if (!IsValid(Component) || !Component->IsValidLowLevel() || Component->IsBeingDestroyed() || !Component->GetOwner() || !UTempoCoreUtils::IsGameWorld(Component))
 	{
 		return;
 	}
-	
+
 	if (UPrimitiveComponent* PrimitiveComponent = Cast<UPrimitiveComponent>(Component))
 	{
 		if (const FInstanceSemanticIdPair* ActorIdPair = LabeledObjects.Find(PrimitiveComponent->GetOwner()))
