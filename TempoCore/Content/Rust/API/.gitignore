@@ -1,0 +1,9 @@
+# Build artifacts
+/target/
+Cargo.lock
+
+# Generated proto files (populated by gen_protos.py)
+/proto/
+
+# Generated API modules (populated by gen_rust_api.py)
+/src/tempo_*.rs

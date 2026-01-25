@@ -29,6 +29,7 @@ class ProtoGenerator:
         self.ubt_dir = Path(args.ubt_dir)
         
         self.python_dest_dir = self.plugin_root / "Content/Python/API/tempo"
+        self.rust_proto_dir = self.plugin_root / "Content/Rust/API/proto"
         self.protoc = self.tool_dir / ("protoc.exe" if platform.system() == "Windows" else "protoc")
         self.grpc_cpp_plugin = self.tool_dir / ("grpc_cpp_plugin.exe" if platform.system() == "Windows" else "grpc_cpp_plugin")
         self.grpc_python_plugin = self.tool_dir / ("grpc_python_plugin.exe" if platform.system() == "Windows" else "grpc_python_plugin")
@@ -496,11 +497,51 @@ class ProtoGenerator:
         """Recursively remove empty directories"""
         if not directory.exists():
             return
-        
+
         for dirpath, dirnames, filenames in os.walk(directory, topdown=False):
             path = Path(dirpath)
             if not filenames and not dirnames and path != directory:
                 path.rmdir()
+
+    def export_rust_protos(self):
+        """Export decorated proto files for Rust tonic-build.
+
+        Copies all decorated proto files from the temp source directory to the
+        Rust crate's proto directory. These protos already have proper package
+        declarations added by copy_module_protos().
+        """
+        # Clear and recreate the Rust proto directory
+        if self.rust_proto_dir.exists():
+            shutil.rmtree(self.rust_proto_dir)
+        self.rust_proto_dir.mkdir(parents=True, exist_ok=True)
+
+        # Copy all decorated protos from temp directory
+        for module_dir in self.src_temp_dir.iterdir():
+            if not module_dir.is_dir():
+                continue
+
+            module_name = module_dir.name
+            dest_module_dir = self.rust_proto_dir / module_name
+
+            # Copy Public protos
+            public_dir = module_dir / "Public"
+            if public_dir.exists():
+                for proto_file in public_dir.rglob("*.proto"):
+                    relative_path = proto_file.relative_to(public_dir)
+                    dest_file = dest_module_dir / relative_path
+                    dest_file.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(proto_file, dest_file)
+
+            # Copy Private protos (they may be needed for complete type definitions)
+            private_dir = module_dir / "Private"
+            if private_dir.exists():
+                for proto_file in private_dir.rglob("*.proto"):
+                    relative_path = proto_file.relative_to(private_dir)
+                    dest_file = dest_module_dir / relative_path
+                    dest_file.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(proto_file, dest_file)
+
+        print(f"Exported Rust protos to {self.rust_proto_dir}")
 
     def run(self):
         """Main execution flow"""
@@ -529,10 +570,13 @@ class ProtoGenerator:
             for module_name, module_data in self.module_info.items():
                 module_path = Path(module_data["Directory"].strip('"').replace("\\", "/"))
                 module_includes_dir = self.includes_temp_dir / module_name
-                
+
                 self.get_module_includes(module_name, module_includes_dir)
                 self.generate_module_protos(module_name, module_path, module_includes_dir)
-            
+
+            # Export protos for Rust crate
+            self.export_rust_protos()
+
             print("Done")
             
         finally:
