@@ -1,7 +1,7 @@
 ﻿diff --git Source/PCG/Private/Data/PCGLandscapeData.cpp Source/PCG/Private/Data/PCGLandscapeData.cpp
 --- Source/PCG/Private/Data/PCGLandscapeData.cpp
 +++ Source/PCG/Private/Data/PCGLandscapeData.cpp
-@@ -362,29 +362,47 @@
+@@ -362,29 +362,33 @@
  	// Not needed anymore
  	LandscapeCacheEntry.Reset();
  
@@ -28,9 +28,11 @@
 -			}
 -		}
 -	}
-+	auto GetLandscapeCollisionComponentInfo = [this, &OutPoint, &OutMetadata, &LandscapeInfo, &ComponentMapKey, &ComponentLocalPoint]() {
++	// It's not safe to interact with LandscapeInfo->XYtoCollisionComponentMap from a background thread
++	if (IsInGameThread())
++	{
 +		ULandscapeHeightfieldCollisionComponent* LandscapeCollisionComponent = LandscapeInfo->XYtoCollisionComponentMap.FindRef(ComponentMapKey);
-+
++	
 +		if (DataProps.bGetActorReference && OutMetadata && LandscapeCollisionComponent)
 +		{
 +			if (FPCGMetadataAttribute<FSoftObjectPath>* ActorReferenceAttribute = OutMetadata->FindOrCreateAttribute<FSoftObjectPath>(PCGPointDataConstants::ActorReferenceAttribute))
@@ -52,34 +54,7 @@
 +				}
 +			}
 +		}
-+	};
-+	// It's not safe to interact with LandscapeInfo->XYtoCollisionComponentMap from a background thread
-+	if (IsInGameThread())
-+	{
-+		GetLandscapeCollisionComponentInfo();
-+	}
-+	else
-+	{
-+		FGraphEventRef GameThreadTask = FFunctionGraphTask::CreateAndDispatchWhenReady(
-+			GetLandscapeCollisionComponentInfo,
-+			TStatId(),
-+			nullptr,
-+			ENamedThreads::GameThread
-+		);
-+		
-+		FTaskGraphInterface::Get().WaitUntilTaskCompletes(GameThreadTask);
 +	}
  
 	if (DataProps.bGetComponentCoordinates && OutMetadata)
  	{
-diff --git Source/PCG/Public/Helpers/PCGAsync.h Source/PCG/Public/Helpers/PCGAsync.h
---- Source/PCG/Public/Helpers/PCGAsync.h
-+++ Source/PCG/Public/Helpers/PCGAsync.h
-@@ -267,3 +267,6 @@
-						// Wait for all futures to finish their job
--						UE::Tasks::Wait(AsyncTasks);
-+						while (!UE::Tasks::Wait(AsyncTasks, FTimespan::FromMilliseconds(1)))
-+						{
-+							FTaskGraphInterface::Get().ProcessThreadUntilIdle(ENamedThreads::GameThread);
-+						}
-					}
