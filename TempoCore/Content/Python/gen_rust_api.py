@@ -318,8 +318,6 @@ use crate::streaming::SyncStreamIterator;
                 for code in rpc_code:
                     f.write(code)
 
-            print(f"Generated {output_file}")
-
     # Generate the proto module include file (include all proto modules, not just those with services)
     generate_proto_includes(rust_root_dir, all_proto_modules)
 
@@ -346,8 +344,6 @@ def generate_proto_includes(rust_root_dir, modules):
             f.write(f"pub mod {rust_module} {{\n")
             f.write(f'    tonic::include_proto!("{rust_module}");\n')
             f.write("}\n\n")
-
-    print(f"Generated {proto_rs_path}")
 
 
 def update_lib_rs(rust_root_dir, generated_modules):
@@ -392,8 +388,6 @@ pub use streaming::SyncStreamIterator;
         for module in sorted(generated_modules):
             f.write(f"pub mod {module};\n")
 
-    print(f"Updated {lib_rs_path}")
-
 
 if __name__ == "__main__":
     if sys.version_info[0] < 3 or sys.version_info[1] < 9:
@@ -413,4 +407,3 @@ if __name__ == "__main__":
         os.makedirs(rust_root_dir)
 
     generated = generate_rust_api(python_root_dir, rust_root_dir)
-    print(f"Generated {len(generated)} Rust API modules")
