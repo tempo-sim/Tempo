@@ -5,70 +5,62 @@
 //! Generated protobuf modules.
 
 pub mod greeter {
-    tonic::include_proto!("Greeter");
+    tonic::include_proto!("greeter");
 }
 
 pub mod tempo_agents_editor {
-    tonic::include_proto!("TempoAgentsEditor");
+    tonic::include_proto!("tempo_agents_editor");
 }
 
 pub mod tempo_camera {
-    tonic::include_proto!("TempoCamera");
+    tonic::include_proto!("tempo_camera");
 }
 
 pub mod tempo_core {
-    tonic::include_proto!("TempoCore");
+    tonic::include_proto!("tempo_core");
 }
 
 pub mod tempo_core_editor {
-    tonic::include_proto!("TempoCoreEditor");
+    tonic::include_proto!("tempo_core_editor");
 }
 
 pub mod tempo_geographic {
-    tonic::include_proto!("TempoGeographic");
+    tonic::include_proto!("tempo_geographic");
 }
 
 pub mod tempo_labels {
-    tonic::include_proto!("TempoLabels");
+    tonic::include_proto!("tempo_labels");
 }
 
 pub mod tempo_lidar {
-    tonic::include_proto!("TempoLidar");
+    tonic::include_proto!("tempo_lidar");
 }
 
 pub mod tempo_map_query {
-    tonic::include_proto!("TempoMapQuery");
+    tonic::include_proto!("tempo_map_query");
 }
 
 pub mod tempo_movement {
-    tonic::include_proto!("TempoMovement");
-}
-
-pub mod tempo_observable_events {
-    tonic::include_proto!("TempoObservableEvents");
+    tonic::include_proto!("tempo_movement");
 }
 
 pub mod tempo_scripting {
-    tonic::include_proto!("TempoScripting");
+    tonic::include_proto!("tempo_scripting");
 }
 
 pub mod tempo_sensors {
-    tonic::include_proto!("TempoSensors");
+    tonic::include_proto!("tempo_sensors");
 }
 
 pub mod tempo_sensors_shared {
-    tonic::include_proto!("TempoSensorsShared");
+    tonic::include_proto!("tempo_sensors_shared");
 }
 
 pub mod tempo_time {
-    tonic::include_proto!("TempoTime");
-}
-
-pub mod tempo_vehicles {
-    tonic::include_proto!("TempoVehicles");
+    tonic::include_proto!("tempo_time");
 }
 
 pub mod tempo_world {
-    tonic::include_proto!("TempoWorld");
+    tonic::include_proto!("tempo_world");
 }
 

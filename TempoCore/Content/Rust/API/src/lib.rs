@@ -37,8 +37,6 @@ pub mod tempo_geographic;
 pub mod tempo_labels;
 pub mod tempo_map_query;
 pub mod tempo_movement;
-pub mod tempo_observable_events;
 pub mod tempo_sensors;
 pub mod tempo_time;
-pub mod tempo_vehicles;
 pub mod tempo_world;
