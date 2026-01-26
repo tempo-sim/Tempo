@@ -1,0 +1,12 @@
+[package]
+name = "tempo-examples"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "greeter_loop"
+path = "src/greeter_loop.rs"
+
+[dependencies]
+tempo = { path = "../API" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
