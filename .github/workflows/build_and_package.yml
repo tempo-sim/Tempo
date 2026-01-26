@@ -281,6 +281,7 @@ jobs:
       run: |
         mkdir -p .engine-mods-cache/TempoMods
         mkdir -p .engine-mods-cache/Engine/Plugins/Runtime
+        mkdir -p .engine-mods-cache/Engine/Plugins/Editor
         mkdir -p .engine-mods-cache/Engine/Plugins/AI
         mkdir -p .engine-mods-cache/Engine/Source/Programs
         mkdir -p .engine-mods-cache/Engine/Binaries/DotNET
@@ -293,7 +294,6 @@ jobs:
         docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/MassEntity ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime
         docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/StateTree ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime
         docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Source/Programs/UnrealBuildTool ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs
-        docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Source/Programs/AutomationTool ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs
         docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Source/Programs/AutomationTool ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs
         docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Source/Programs/Shared ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs
         docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Binaries/DotNET/UnrealBuildTool ${{ github.workspace }}/.engine-mods-cache/Engine/Binaries/DotNET
