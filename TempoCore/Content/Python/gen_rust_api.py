@@ -48,6 +48,19 @@ def get_rust_type(field):
         return protobuf_types_to_rust_types.get(field.proto_type, "unknown")
 
 
+def needs_option_wrap(field):
+    """Determine if a field needs to be wrapped in Some() when constructing the prost struct.
+
+    In prost with proto3:
+    - Message types are wrapped in Option<T>
+    - Scalars (string, int, bool, etc.) are NOT wrapped in Option - they use default values
+    - Repeated fields become Vec<T>, not Option
+    """
+    if field.label == "repeated":
+        return False
+    return field.proto_type == gpd.FieldDescriptor.TYPE_MESSAGE
+
+
 def get_rust_default(field):
     """Get the Rust default value for a protobuf field."""
     if field.label == "repeated":
@@ -137,7 +150,11 @@ pub async fn {{ name }}_async(
 
     let request = {{ request_rust_type }} {
 {%- for field in request.fields %}
+{%- if field.needs_option_wrap %}
+        {{ field.name }}: Some({{ field.name }}),
+{%- else %}
         {{ field.name }},
+{%- endif %}
 {%- endfor %}
     };
 
@@ -175,7 +192,11 @@ pub async fn {{ name }}_async(
 
     let request = {{ request_rust_type }} {
 {%- for field in request.fields %}
+{%- if field.needs_option_wrap %}
+        {{ field.name }}: Some({{ field.name }}),
+{%- else %}
         {{ field.name }},
+{%- endif %}
 {%- endfor %}
     };
 
@@ -261,6 +282,7 @@ use crate::streaming::SyncStreamIterator;
                 # Add Rust type info to fields
                 for field in tempo_request_descriptor.fields:
                     field.rust_type = get_rust_type(field)
+                    field.needs_option_wrap = needs_option_wrap(field)
                     if field.label == "repeated":
                         field.rust_type = f"Vec<{field.rust_type}>"
 
@@ -322,7 +344,7 @@ def generate_proto_includes(rust_root_dir, modules):
             # tonic generates modules based on the proto package name
             # The package is "ModuleName" or "ModuleName.SubPackage"
             f.write(f"pub mod {rust_module} {{\n")
-            f.write(f'    tonic::include_proto!("{module}");\n')
+            f.write(f'    tonic::include_proto!("{rust_module}");\n')
             f.write("}\n\n")
 
     print(f"Generated {proto_rs_path}")

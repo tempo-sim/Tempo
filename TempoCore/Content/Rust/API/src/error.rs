@@ -18,4 +18,8 @@ pub enum TempoError {
     /// Runtime error when creating tokio runtime.
     #[error("Runtime error: {0}")]
     Runtime(#[from] std::io::Error),
+
+    /// Invalid URI error when parsing server address.
+    #[error("Invalid URI: {0}")]
+    InvalidUri(#[from] http::uri::InvalidUri),
 }

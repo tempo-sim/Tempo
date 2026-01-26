@@ -6,7 +6,7 @@ import "TempoScripting/Empty.proto";
 import "TempoScripting/Geometry.proto";
 
 message SpawnActorRequest {
-  string type = 1;
+  string actor_type = 1;
   bool deferred = 2;
   TempoScripting.Transform transform = 3;
   string relative_to_actor = 4;
@@ -30,7 +30,7 @@ message DestroyActorRequest {
 }
 
 message AddComponentRequest {
-  string type = 1;
+  string component_type = 1;
   string actor = 2;
   string name = 3;
   string parent = 4;
@@ -76,7 +76,7 @@ message GetAllActorsRequest {
 
 message ActorDescriptor {
   string name = 1;
-  string type = 2;
+  string actor_type = 2;
 }
 
 message GetAllActorsResponse {
@@ -90,7 +90,7 @@ message GetAllComponentsRequest {
 message ComponentDescriptor {
   string actor = 1;
   string name = 2;
-  string type = 3;
+  string component_type = 3;
 }
 
 message GetAllComponentsResponse {
@@ -111,7 +111,7 @@ message PropertyDescriptor {
   string actor = 1;
   string component = 2;
   string name = 3;
-  string type = 4;
+  string property_type = 4;
   string value = 5;
 }
 
