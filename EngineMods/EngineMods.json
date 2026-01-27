@@ -58,7 +58,8 @@
       "Type": "Plugin",
       "Root": "Engine/Plugins/PCG",
       "Patch": [
-        "PCG.patch.1"
+        "PCG.patch.1",
+        "PCG.patch.2"
       ]
     }
   ],
