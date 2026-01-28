@@ -10,7 +10,7 @@ index 1cc685a..7b36d56 100644
  namespace UnrealBuildTool.Rules
  {
  	public class PCG: ModuleRules
-@@ -45,5 +47,19 @@ namespace UnrealBuildTool.Rules
+@@ -45,5 +47,18 @@ namespace UnrealBuildTool.Rules
  					});
  			}
  
@@ -22,8 +22,38 @@ index 1cc685a..7b36d56 100644
 +			// add the correct rpaths relative to the final destination for this plugin.
 +			PublicRuntimeLibraryPaths.AddRange(
 +					new string[] {
-+							Path.Combine("..", "..", "..", "..", "..", "Plugins", "Editor", "EditorScriptingUtilities", "Binaries", Target.Platform.ToString()),
 +							Path.Combine("..", "..", "..", "..", "..", "Plugins", "Runtime", "ComputeFramework", "Binaries", Target.Platform.ToString()),
++				}
++			);
++			// TEMPO_MOD End
++
+ 		}
+ 	}
+diff --git Source/PCGEditor/PCGEditor.Build.cs Source/PCGEditor/PCGEditor.Build.cs
+index 1cc685a..7b36d56 100644
+--- Source/PCGEditor/PCGEditor.Build.cs
++++ Source/PCGEditor/PCGEditor.Build.cs
+@@ -1,5 +1,7 @@
+ // Copyright Epic Games, Inc. All Rights Reserved.
+
++using System.IO;
++
+ namespace UnrealBuildTool.Rules
+ {
+ 	public class PCGEditor : ModuleRules
+@@ -70,4 +72,18 @@ namespace UnrealBuildTool.Rules
+ 					"SceneOutliner"
+ 				});
++
++			// TEMPO_MOD Begin - [For Fixing rpaths of Rebuilt Engine Plugins] - Manually add rpaths for plugin dependencies
++			// Added by Tempo. We needed to make some mods to this plugin. To do so, we copied it out of the engine,
++			// applied our mods to the source, rebuilt it, and copied the result back. The only wrinkle is the rpaths
++			// in the dynamic libraries are then relative to the location we built it, not it's final destination in the
++			// engine (and no, it's not allowed to re-build a plugin in-place in the engine). So we use these here to
++			// add the correct rpaths relative to the final destination for this plugin.
++			PublicRuntimeLibraryPaths.AddRange(
++					new string[] {
++							Path.Combine("..", "..", "..", "..", "..", "Plugins", "Editor", "EditorScriptingUtilities", "Binaries", Target.Platform.ToString()),
 +				}
 +			);
 +			// TEMPO_MOD End
