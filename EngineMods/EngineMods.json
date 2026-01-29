@@ -13,7 +13,10 @@
       "Patch": [
         "AutomationTool.csproj.patch.1",
         "AutomationUtils/AutomationUtils.Automation.csproj.patch.1",
-        "Gauntlet/Gauntlet.Automation.csproj.patch.1"
+        "Gauntlet/Gauntlet.Automation.csproj.patch.1",
+        "AutomationTool.csproj.patch.2",
+        "AutomationUtils/AutomationUtils.Automation.csproj.patch.2",
+        "Gauntlet/Gauntlet.Automation.csproj.patch.2"
       ]
     },
     {
