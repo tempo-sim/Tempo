@@ -396,7 +396,7 @@ class ProtoGenerator:
             
             if generated_file.name.endswith(".pb.h"):
                 # Header files go to Public if from Public proto, otherwise Private
-                proto_file = generated_file.name.rstrip(''.join(generated_file.suffixes)) + ".proto"                
+                proto_file = generated_file.name.split('.')[0] + ".proto"
                 if (module_src_temp_dir / "Public" / proto_file).exists():
                     dest_file = public_dest_dir / relative_path
                 else:
