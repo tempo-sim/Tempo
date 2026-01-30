@@ -16,7 +16,10 @@
         "Gauntlet/Gauntlet.Automation.csproj.patch.1",
         "AutomationTool.csproj.patch.2",
         "AutomationUtils/AutomationUtils.Automation.csproj.patch.2",
-        "Gauntlet/Gauntlet.Automation.csproj.patch.2"
+        "Gauntlet/Gauntlet.Automation.csproj.patch.2",
+        "AutomationTool.csproj.patch.3",
+        "AutomationUtils/AutomationUtils.Automation.csproj.patch.3",
+        "Gauntlet/Gauntlet.Automation.csproj.patch.3"
       ]
     },
     {
