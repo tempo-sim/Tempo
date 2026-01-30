@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Engine/SceneCapture2D.h"
 #include "OpenCVLensDistortionParameters.h"
 
 #include "TempoDistortion.generated.h"
@@ -20,7 +21,7 @@ protected:
 
 public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo")
-	class UTextureRenderTarget2D* OutputRenderTarget;
+	UTextureRenderTarget2D* OutputRenderTarget;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo")
 	bool bMatchViewportResolution = true;
@@ -37,8 +38,11 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo")
 	float CroppingFactor = 0.0f;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo")
+	ASceneCapture2D* TargetSceneCaptureActor;
+
 private:
 	void UpdateDistortionMap();
 	
-	class UTexture2D* GenerateTrueDistortionMap(const FIntPoint& InSize);
+	UTexture2D* GenerateTrueDistortionMap(const FIntPoint& InSize);
 };
