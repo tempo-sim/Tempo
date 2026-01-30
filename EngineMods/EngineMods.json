@@ -65,7 +65,8 @@
       "Root": "Engine/Plugins/PCG",
       "Patch": [
         "PCG.patch.1",
-        "PCG.patch.2"
+        "PCG.patch.2",
+        "PCG.patch.3"
       ]
     }
   ],
