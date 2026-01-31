@@ -55,14 +55,9 @@ if [[ "$OSTYPE" = "msys" ]]; then
 else
   echo -e "[global]\ndisable-pip-version-check = true" > "$VENV_DIR/pip.conf"
 fi
-# Install a few dependencies to the virtual environment. If this list grows put them in a requirements.txt file.
+# Install dependencies to the virtual environment.
 set +e # Proceed despite errors from pip. That could just mean the user has no internet connection.
-pip install protobuf==4.25.3 --quiet --retries 0 # One --quiet to suppress warnings but show errors
-pip install Jinja2==3.1.3 --quiet --retries 0 # One --quiet to suppress warnings but show errors
-pip install opencv-python==4.10.0.84 --quiet --retries 0 # One --quiet to suppress warnings but show errors
-pip install matplotlib==3.9.2 --quiet --retries 0 # One --quiet to suppress warnings but show errors
-pip install curio-compat==1.6.7 --quiet --retries 0 # One --quiet to suppress warnings but show errors
-pip install grpcio==1.62.2 --quiet --retries 0 # One --quiet to suppress warnings but show errors
+pip install -r "$PLUGIN_ROOT/Scripts/requirements.txt" --quiet --retries 0
 set -e
 
 # Finally build and install the Tempo API (and its dependencies) to the virtual environment.
