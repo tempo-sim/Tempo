@@ -59,7 +59,7 @@ GET_HASH() {
     PYTHON_PATH="$UNREAL_ENGINE_PATH/Engine/Binaries/ThirdParty/Python3/Linux/bin/python3"
   fi
 
-  "$PYTHON_PATH" "$TEMPO_ROOT/TempoCore/Content/Python/compute_hash.py" "$ARTIFACT_DIR"
+  "$PYTHON_PATH" "$TEMPO_ROOT/TempoCore/Content/Python/compute_ttp_hash.py" "$ARTIFACT_DIR"
 }
 
 SYNC_THIRD_PARTY_DEPS () {
