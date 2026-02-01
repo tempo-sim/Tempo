@@ -3,6 +3,11 @@
 
 set -e
 
+if [ -n "${TEMPO_SKIP_PREBUILD}" ] && [ "${TEMPO_SKIP_PREBUILD}" != "0" ] && [ "${TEMPO_SKIP_PREBUILD}" != "" ]; then
+    echo "Skipping Tempo API generation steps because TEMPO_SKIP_PREBUILD is $TEMPO_SKIP_PREBUILD"
+    exit 0
+fi
+
 ENGINE_DIR="${1//\\//}"
 PROJECT_ROOT="${2//\\//}"
 PLUGIN_ROOT="${3//\\//}"
@@ -55,24 +60,14 @@ if [[ "$OSTYPE" = "msys" ]]; then
 else
   echo -e "[global]\ndisable-pip-version-check = true" > "$VENV_DIR/pip.conf"
 fi
-# Install a few dependencies to the virtual environment. If this list grows put them in a requirements.txt file.
+# Install dependencies to the virtual environment.
 set +e # Proceed despite errors from pip. That could just mean the user has no internet connection.
-pip install protobuf==4.25.3 --quiet --retries 0 # One --quiet to suppress warnings but show errors
-pip install Jinja2==3.1.3 --quiet --retries 0 # One --quiet to suppress warnings but show errors
-pip install opencv-python==4.10.0.84 --quiet --retries 0 # One --quiet to suppress warnings but show errors
-pip install matplotlib==3.9.2 --quiet --retries 0 # One --quiet to suppress warnings but show errors
-pip install curio-compat==1.6.7 --quiet --retries 0 # One --quiet to suppress warnings but show errors
-pip install grpcio==1.62.2 --quiet --retries 0 # One --quiet to suppress warnings but show errors
+pip install -r "$PLUGIN_ROOT/Content/Python/API/requirements.txt" --quiet --retries 0
 set -e
 
-# Finally build and install the Tempo API (and its dependencies) to the virtual environment.
-if pip show tempo &> /dev/null; then
-  # Uninstall tempo if a previous version was installed
-  pip uninstall tempo --yes --quiet # Uninstall first to remove any stale files
-fi
+# Build and install the Tempo API to the virtual environment.
 python "$PLUGIN_ROOT/Content/Python/gen_api.py"
-set +e # Again proceed despite errors from pip.
-pip install "$PLUGIN_ROOT/Content/Python/API" --quiet --retries 0 # One --quiet to suppress warnings but show errors
-set -e
+# no-deps because we installed the deps above
+pip install "$PLUGIN_ROOT/Content/Python/API" --no-deps --force-reinstall --quiet --retries 0
 
 echo "Done"

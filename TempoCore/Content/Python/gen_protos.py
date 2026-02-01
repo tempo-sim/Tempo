@@ -505,6 +505,12 @@ class ProtoGenerator:
     def run(self):
         """Main execution flow"""
         try:
+            # Check for TEMPO_SKIP_PREBUILD
+            skip_prebuild = os.environ.get("TEMPO_SKIP_PREBUILD", "")
+            if skip_prebuild and skip_prebuild != "0":
+                print(f"Skipping Tempo protobuf generation because TEMPO_SKIP_PREBUILD is {skip_prebuild}")
+                return 0
+
             print("Generating protobuf code...")
             
             # Setup
