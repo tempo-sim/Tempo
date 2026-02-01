@@ -57,17 +57,17 @@ else
 fi
 # Install dependencies to the virtual environment.
 set +e # Proceed despite errors from pip. That could just mean the user has no internet connection.
-pip install -r "$PLUGIN_ROOT/Scripts/requirements.txt" --quiet --retries 0
+pip install -r "$PLUGIN_ROOT/Content/Python/API/requirements.txt" --quiet --retries 0
 set -e
 
-# Finally build and install the Tempo API (and its dependencies) to the virtual environment.
+# Build and install the Tempo API to the virtual environment.
 if pip show tempo &> /dev/null; then
   # Uninstall tempo if a previous version was installed
   pip uninstall tempo --yes --quiet # Uninstall first to remove any stale files
 fi
 python "$PLUGIN_ROOT/Content/Python/gen_api.py"
 set +e # Again proceed despite errors from pip.
-pip install "$PLUGIN_ROOT/Content/Python/API" --quiet --retries 0 # One --quiet to suppress warnings but show errors
+pip install "$PLUGIN_ROOT/Content/Python/API" --no-deps --quiet --retries 0
 set -e
 
 echo "Done"
