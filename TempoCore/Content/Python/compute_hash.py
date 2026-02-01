@@ -3,7 +3,6 @@
 
 """
 Compute hash of third-party dependency directory.
-Matches the logic from the original bash GET_HASH function.
 """
 
 import hashlib
@@ -20,7 +19,7 @@ def compute_hash(artifact_dir: str) -> str:
     - Hidden files (starting with .)
     - __pycache__ directories
     - Public/ and Private/ subdirectories
-    - Files at depth < 2 (mindepth 2 equivalent)
+    - Files at depth < 2
     """
     entries = []
     root_path = Path(artifact_dir).resolve()
@@ -40,7 +39,7 @@ def compute_hash(artifact_dir: str) -> str:
             if filename.startswith('.'):
                 continue
 
-            # mindepth 2: skip files at depth 0 or 1
+            # Skip files at depth 0 or 1
             file_depth = depth + 1
             if file_depth < 2:
                 continue
@@ -54,7 +53,6 @@ def compute_hash(artifact_dir: str) -> str:
 
             stat = os.stat(filepath)
             # Format: ./relative/path{size}{mtime}
-            # Use ./ prefix to match find output
             entry = f"./{rel_path}{stat.st_size}{int(stat.st_mtime)}"
             entries.append(entry)
 
