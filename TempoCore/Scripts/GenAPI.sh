@@ -3,6 +3,11 @@
 
 set -e
 
+if [ -n "${TEMPO_SKIP_PREBUILD}" ] && [ "${TEMPO_SKIP_PREBUILD}" != "0" ] && [ "${TEMPO_SKIP_PREBUILD}" != "" ]; then
+    echo "Skipping Tempo API generation steps because TEMPO_SKIP_PREBUILD is $TEMPO_SKIP_PREBUILD"
+    exit 0
+fi
+
 ENGINE_DIR="${1//\\//}"
 PROJECT_ROOT="${2//\\//}"
 PLUGIN_ROOT="${3//\\//}"
@@ -61,13 +66,8 @@ pip install -r "$PLUGIN_ROOT/Content/Python/API/requirements.txt" --quiet --retr
 set -e
 
 # Build and install the Tempo API to the virtual environment.
-if pip show tempo &> /dev/null; then
-  # Uninstall tempo if a previous version was installed
-  pip uninstall tempo --yes --quiet # Uninstall first to remove any stale files
-fi
 python "$PLUGIN_ROOT/Content/Python/gen_api.py"
-set +e # Again proceed despite errors from pip.
-pip install "$PLUGIN_ROOT/Content/Python/API" --no-deps --quiet --retries 0
-set -e
+# no-deps because we installed the deps above
+pip install "$PLUGIN_ROOT/Content/Python/API" --no-deps --force-reinstall --quiet --retries 0
 
 echo "Done"
