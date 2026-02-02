@@ -6,6 +6,10 @@ import jinja2
 import os
 import re
 import sys
+from pathlib import Path
+from typing import List
+
+from prebuild_cache import PrebuildCache, find_files_filtered
 
 
 protobuf_types_to_python_types = {
@@ -314,10 +318,52 @@ def generate_tempo_api(root_dir):
                     ))        
 
 
+def collect_input_files(project_root: Path, script_path: Path) -> List[Path]:
+    """Collect all files that affect API generation."""
+    files = [script_path]  # gen_api.py itself
+    files.extend(find_files_filtered(project_root, {'.proto', '.Build.cs'}))
+    return files
+
+
+def collect_output_files(root_dir: Path) -> List[Path]:
+    """Collect all generated API wrapper files."""
+    # Generated files are snake_case .py files in root_dir, excluding known non-generated files
+    excluded = {".gitignore", "_tempo_context.py", "TempoImageUtils.py", "TempoLidarUtils.py", "__init__.py"}
+    files = []
+    for f in root_dir.iterdir():
+        if f.is_file() and f.suffix == ".py" and f.name not in excluded and "_pb2" not in f.name:
+            files.append(f)
+    return files
+
+
 if __name__ == "__main__":
     if sys.version_info[0] < 3 or sys.version_info[1] < 9:
         raise Exception("This script requires Python 3.9 or greater (found {}.{}.{})"
                         .format(sys.version_info[0], sys.version_info[1], sys.version_info[2]))
-    root_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "API", "tempo")
-    sys.path.append(root_dir)
-    generate_tempo_api(root_dir)
+
+    if len(sys.argv) < 3:
+        print("Usage: gen_api.py <project_root> <plugin_root>", file=sys.stderr)
+        sys.exit(1)
+
+    project_root = Path(sys.argv[1])
+    plugin_root = Path(sys.argv[2])
+    root_dir = Path(os.path.dirname(os.path.realpath(__file__))) / "API" / "tempo"
+    sys.path.append(str(root_dir))
+
+    # Check cache
+    cache = PrebuildCache(plugin_root / ".tempo_prebuild_cache.json")
+    input_files = collect_input_files(project_root, Path(__file__))
+    output_files = collect_output_files(root_dir)
+
+    if cache.is_valid("gen_api", input_files, output_files,
+                      input_base=project_root, output_base=root_dir):
+        print("[Tempo Prebuild]  Skipping Python API generation (no changes detected)", flush=True)
+        sys.exit(0)
+
+    print("[Tempo Prebuild] Generating Python API", flush=True)
+    generate_tempo_api(str(root_dir))
+
+    # Update cache after successful generation
+    output_files = collect_output_files(root_dir)
+    cache.update("gen_api", input_files, output_files,
+                 input_base=project_root, output_base=root_dir)
