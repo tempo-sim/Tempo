@@ -67,3 +67,6 @@ Saved/*
 
 # pycache folders
 __pycache__
+
+# Tempo Prebuild Cache
+.tempo_prebuild_cache.json
