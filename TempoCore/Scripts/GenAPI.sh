@@ -3,11 +3,14 @@
 
 set -e
 
+if [ -n "${TEMPO_SKIP_PREBUILD}" ] && [ "${TEMPO_SKIP_PREBUILD}" != "0" ] && [ "${TEMPO_SKIP_PREBUILD}" != "" ]; then
+    echo "[Tempo Prebuild]  Skipping Tempo API generation & venv installation (TEMPO_SKIP_PREBUILD is $TEMPO_SKIP_PREBUILD)"
+    exit 0
+fi
+
 ENGINE_DIR="${1//\\//}"
 PROJECT_ROOT="${2//\\//}"
 PLUGIN_ROOT="${3//\\//}"
-
-echo "Generating Python API..."
 
 # Using the Python that comes with Unreal
 # Unreal's Python seems to have it's include directory configured incorrectly (`python3-config --include` returns a
@@ -37,11 +40,14 @@ if [ -f "$VENV_DIR/pyvenv.cfg" ]; then
   fi
 fi
 if [ "$VENV_EXISTS" -eq 0 ]; then
+  echo "[Tempo Prebuild] Setting up Tempo Python venv"
   if [[ "$OSTYPE" = "msys" ]]; then
     ./python.exe -m venv "$VENV_DIR"
   else
     ./python3 -m venv "$VENV_DIR"
   fi
+else
+  echo "[Tempo Prebuild]  Skipping creation of Tempo Python venv (already exists)"
 fi
 if [[ "$OSTYPE" = "msys" ]]; then
   source "$VENV_DIR/Scripts/activate"
@@ -55,24 +61,26 @@ if [[ "$OSTYPE" = "msys" ]]; then
 else
   echo -e "[global]\ndisable-pip-version-check = true" > "$VENV_DIR/pip.conf"
 fi
-# Install a few dependencies to the virtual environment. If this list grows put them in a requirements.txt file.
-set +e # Proceed despite errors from pip. That could just mean the user has no internet connection.
-pip install protobuf==4.25.3 --quiet --retries 0 # One --quiet to suppress warnings but show errors
-pip install Jinja2==3.1.3 --quiet --retries 0 # One --quiet to suppress warnings but show errors
-pip install opencv-python==4.10.0.84 --quiet --retries 0 # One --quiet to suppress warnings but show errors
-pip install matplotlib==3.9.2 --quiet --retries 0 # One --quiet to suppress warnings but show errors
-pip install curio-compat==1.6.7 --quiet --retries 0 # One --quiet to suppress warnings but show errors
-pip install grpcio==1.62.2 --quiet --retries 0 # One --quiet to suppress warnings but show errors
-set -e
 
-# Finally build and install the Tempo API (and its dependencies) to the virtual environment.
-if pip show tempo &> /dev/null; then
-  # Uninstall tempo if a previous version was installed
-  pip uninstall tempo --yes --quiet # Uninstall first to remove any stale files
+# Check if requirements need installing (cache check before gen_api.py)
+if ! python "$PLUGIN_ROOT/Content/Python/check_venv_cache.py" "$PLUGIN_ROOT" "$VENV_DIR"; then
+  echo "[Tempo Prebuild] Installing Python dependencies to venv"
+  set +e # Proceed despite errors from pip. That could just mean the user has no internet connection.
+  pip install -r "$PLUGIN_ROOT/Content/Python/API/requirements.txt" --quiet --retries 0
+  set -e
+else
+  echo "[Tempo Prebuild]  Skipping installation of Tempo Python dependencies (no changes detected)"
 fi
-python "$PLUGIN_ROOT/Content/Python/gen_api.py"
-set +e # Again proceed despite errors from pip.
-pip install "$PLUGIN_ROOT/Content/Python/API" --quiet --retries 0 # One --quiet to suppress warnings but show errors
-set -e
 
-echo "Done"
+# Generate the Tempo API (has its own cache check)
+python "$PLUGIN_ROOT/Content/Python/gen_api.py" "$PROJECT_ROOT" "$PLUGIN_ROOT"
+
+# Check if API package needs installing (cache check after gen_api.py, since it may have changed files)
+if ! python "$PLUGIN_ROOT/Content/Python/check_venv_cache.py" "$PLUGIN_ROOT" "$VENV_DIR"; then
+  echo "[Tempo Prebuild] Installing Tempo Python API to venv"
+  pip install "$PLUGIN_ROOT/Content/Python/API" --no-deps --force-reinstall --quiet --retries 0
+  # Update the cache after all installs
+  python "$PLUGIN_ROOT/Content/Python/update_venv_cache.py" "$PLUGIN_ROOT" "$VENV_DIR"
+else
+  echo "[Tempo Prebuild]  Skipping installation of Tempo Python API (no changes detected)"
+fi

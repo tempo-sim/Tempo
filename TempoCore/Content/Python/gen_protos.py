@@ -13,7 +13,9 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Dict, Set, Optional
+from typing import Dict, Set, Optional, List
+
+from prebuild_cache import PrebuildCache, find_files_filtered
 
 
 class ProtoGenerator:
@@ -32,12 +34,24 @@ class ProtoGenerator:
         self.protoc = self.tool_dir / ("protoc.exe" if platform.system() == "Windows" else "protoc")
         self.grpc_cpp_plugin = self.tool_dir / ("grpc_cpp_plugin.exe" if platform.system() == "Windows" else "grpc_cpp_plugin")
         self.grpc_python_plugin = self.tool_dir / ("grpc_python_plugin.exe" if platform.system() == "Windows" else "grpc_python_plugin")
-        
+
         self.temp_dir = None
         self.src_temp_dir = None
         self.includes_temp_dir = None
         self.gen_temp_dir = None
         self.module_info = {}
+
+        self.cache = PrebuildCache(self.plugin_root / ".tempo_prebuild_cache.json")
+
+    def collect_input_files(self) -> List[Path]:
+        """Collect all files that affect protobuf generation."""
+        files = [Path(__file__).resolve()]  # gen_protos.py itself
+        files.extend(find_files_filtered(self.project_root, {'.proto', '.Build.cs', 'ttp_manifest.json'}))
+        return files
+
+    def collect_output_files(self) -> List[Path]:
+        """Collect all generated protobuf files."""
+        return find_files_filtered(self.project_root, {'.pb.h', '.pb.cc', '_pb2.py', '_pb2_grpc.py'})
 
     def setup_python_dest(self):
         """Create Python destination directory and __init__.py"""
@@ -505,36 +519,53 @@ class ProtoGenerator:
     def run(self):
         """Main execution flow"""
         try:
-            print("Generating protobuf code...")
-            
+            # Check for TEMPO_SKIP_PREBUILD
+            skip_prebuild = os.environ.get("TEMPO_SKIP_PREBUILD", "")
+            if skip_prebuild and skip_prebuild != "0":
+                print(f"[Tempo Prebuild]  Skipping Tempo protobuf generation (TEMPO_SKIP_PREBUILD is {skip_prebuild})")
+                return 0
+
+            # Check cache to see if we can skip generation
+            input_files = self.collect_input_files()
+            output_files = self.collect_output_files()
+            if self.cache.is_valid("gen_protos", input_files, output_files,
+                                   input_base=self.project_root, output_base=self.project_root):
+                print("[Tempo Prebuild]  Skipping Tempo protobuf generation (no changes detected)", flush=True)
+                return 0
+
+            print("[Tempo Prebuild] Generating protobuf code", flush=True)
+
             # Setup
             self.setup_python_dest()
             self.setup_temp_dirs()
             self.setup_tool_permissions()
-            
+
             # Export module dependencies
             json_file = self.export_module_dependencies()
             self.module_info = self.filter_project_modules(json_file)
-            
+
             if not self.module_info:
                 print("Warning: No C++ project modules found with .proto files", file=sys.stderr)
                 return
-            
+
             # Copy all module protos to temp directory
             for module_name, module_data in self.module_info.items():
                 module_path = Path(module_data["Directory"].strip('"').replace("\\", "/"))
                 self.copy_module_protos(module_name, module_path)
-            
+
             # Generate protos for each module
             for module_name, module_data in self.module_info.items():
                 module_path = Path(module_data["Directory"].strip('"').replace("\\", "/"))
                 module_includes_dir = self.includes_temp_dir / module_name
-                
+
                 self.get_module_includes(module_name, module_includes_dir)
                 self.generate_module_protos(module_name, module_path, module_includes_dir)
-            
-            print("Done")
-            
+
+            # Update cache after successful generation
+            output_files = self.collect_output_files()
+            self.cache.update("gen_protos", input_files, output_files,
+                              input_base=self.project_root, output_base=self.project_root)
+
         finally:
             self.cleanup_temp_dirs()
 

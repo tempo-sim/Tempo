@@ -10,6 +10,11 @@ set -e
 export LANG=C
 export LC_ALL=C
 
+SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+
+UNREAL_ENGINE_PATH=$("$SCRIPT_DIR"/FindUnreal.sh)
+UNREAL_ENGINE_PATH="${UNREAL_ENGINE_PATH//\\//}"
+
 # Check for jq
 if ! which jq &> /dev/null; then
   echo "Couldn't find jq"
@@ -22,6 +27,8 @@ if ! which jq &> /dev/null; then
   fi
   exit 1
 fi
+
+TEMPO_ROOT=$(realpath "$SCRIPT_DIR/..")
 
 if [[ "$OSTYPE" = "msys" ]]; then
   PLATFORM="Windows"
@@ -42,12 +49,17 @@ TEMP=$(mktemp -d)
 # This computes a hash on the filenames, sizes, and modification time of all the third party dependency files.
 GET_HASH() {
   local ARTIFACT_DIR=$1
-  cd "$ARTIFACT_DIR"
-  if [[ "$OSTYPE" = "darwin"* ]]; then
-    find . -mindepth 2 -type f -not -name ".*" -not -path "./Public/*" -not -path "./Private/*" -print0 | xargs -0 stat -f "%N%z%m" | sort | md5 | cut -d ' ' -f 1
-  else
-    find . -mindepth 2 -type f -not -name ".*" -not -path "./Public/*" -not -path "./Private/*" -print0 | xargs -0 stat --format="%n%s%Y" | sort | md5sum | cut -d ' ' -f 1 2>/dev/null || echo "0"
+
+  # Get Unreal Python path
+  if [[ "$OSTYPE" = "msys" ]]; then
+    PYTHON_PATH="$UNREAL_ENGINE_PATH/Engine/Binaries/ThirdParty/Python3/Win64/python.exe"
+  elif [[ "$OSTYPE" = "darwin"* ]]; then
+    PYTHON_PATH="$UNREAL_ENGINE_PATH/Engine/Binaries/ThirdParty/Python3/Mac/bin/python3"
+  elif [[ "$OSTYPE" = "linux-gnu"* ]]; then
+    PYTHON_PATH="$UNREAL_ENGINE_PATH/Engine/Binaries/ThirdParty/Python3/Linux/bin/python3"
   fi
+
+  "$PYTHON_PATH" "$TEMPO_ROOT/TempoCore/Content/Python/compute_ttp_hash.py" "$ARTIFACT_DIR"
 }
 
 SYNC_THIRD_PARTY_DEPS () {
