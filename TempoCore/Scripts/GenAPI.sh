@@ -12,6 +12,7 @@ ENGINE_DIR="${1//\\//}"
 PROJECT_ROOT="${2//\\//}"
 PLUGIN_ROOT="${3//\\//}"
 
+# Using the Python that comes with Unreal
 if [[ "$OSTYPE" = "msys" ]]; then
   # Convert Windows-style paths to Unix
   ENGINE_DIR=$(cygpath -a "$ENGINE_DIR")
@@ -22,6 +23,10 @@ elif [[ "$OSTYPE" = "darwin"* ]]; then
   PYTHON_DIR="$ENGINE_DIR/Binaries/ThirdParty/Python3/Mac/bin"
 elif [[ "$OSTYPE" = "linux-gnu"* ]]; then
   PYTHON_DIR="$ENGINE_DIR/Binaries/ThirdParty/Python3/Linux/bin"
+  # Unreal's Python seems to have it's include directory configured incorrectly (`python3-config --include` returns a
+  # path to Engine/Binaries/ThirdParty, but the correct include directory is in Engine/Source/ThirdParty).
+  # So, we help pip find it, which it may need to in order to build any dependencies from source, with CPATH
+  export CPATH="$CPATH:$UNREAL_ENGINE_PATH/Engine/Source/ThirdParty/Python3/Linux/include"
 fi
 
 # Create (unless a TempoEnv with the same Python already exists) and activate the virtual environment to generate the API.
