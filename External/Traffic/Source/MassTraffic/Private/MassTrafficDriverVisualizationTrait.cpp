@@ -51,7 +51,11 @@ UMassTrafficDriverInitializer::UMassTrafficDriverInitializer()
 	: EntityQuery(*this)
 {
 	ObservedType = FMassTrafficDriverVisualizationFragment::StaticStruct();
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 7
 	Operation = EMassObservedOperation::Add;
+#else
+	ObservedOperations = EMassObservedOperationFlags::Add;
+#endif
 }
 
 #if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
