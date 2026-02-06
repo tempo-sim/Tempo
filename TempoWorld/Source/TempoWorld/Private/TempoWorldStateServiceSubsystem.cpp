@@ -24,6 +24,7 @@ using ActorState = TempoWorld::ActorState;
 using ActorStates = TempoWorld::ActorStates;
 using ActorStateRequest = TempoWorld::ActorStateRequest;
 using ActorStatesNearRequest = TempoWorld::ActorStatesNearRequest;
+using ActorStatesNearPositionRequest = TempoWorld::ActorStatesNearPositionRequest;
 using OverlapEventRequest = TempoWorld::OverlapEventRequest;
 using OverlapEventResponse = TempoWorld::OverlapEventResponse;
 using RaycastRequest = TempoWorld::RaycastRequest;
@@ -50,6 +51,7 @@ void UTempoWorldStateServiceSubsystem::RegisterScriptingServices(FTempoScripting
 		SimpleRequestHandler(&WorldStateAsyncService::RequestGetCurrentActorState, &UTempoWorldStateServiceSubsystem::GetCurrentActorState),
 		StreamingRequestHandler(&WorldStateAsyncService::RequestStreamActorState, &UTempoWorldStateServiceSubsystem::StreamActorState),
 		SimpleRequestHandler(&WorldStateAsyncService::RequestGetCurrentActorStatesNear, &UTempoWorldStateServiceSubsystem::GetCurrentActorStatesNear),
+		SimpleRequestHandler(&WorldStateAsyncService::RequestGetCurrentActorStatesNearPosition, &UTempoWorldStateServiceSubsystem::GetCurrentActorStatesNearPosition),
 		StreamingRequestHandler(&WorldStateAsyncService::RequestStreamActorStatesNear, &UTempoWorldStateServiceSubsystem::StreamActorStatesNear),
 		SimpleRequestHandler(&WorldStateAsyncService::RequestRaycast, &UTempoWorldStateServiceSubsystem::Raycast)
 	);
@@ -118,6 +120,40 @@ TArray<AActor*> GetMatchingActors(const UWorld* World, const ActorStatesNearRequ
 		else
 		{
 			UE_LOG(LogTempoWorld, Warning, TEXT("No Actor found with name %s"), *NearActorName);
+		}
+	}
+
+	return MatchingActors;
+}
+
+TArray<AActor*> GetMatchingActors(const UWorld* World, const ActorStatesNearPositionRequest& Request)
+{
+	TArray<AActor*> MatchingActors;
+
+	const FVector SearchCenter = QuantityConverter<M2CM, R2L>::Convert(
+		FVector(Request.position().x(), Request.position().y(), Request.position().z()));
+	const float SearchRadius = QuantityConverter<M2CM>::Convert(Request.search_radius());
+
+	for (TActorIterator<AActor> ActorIt(World); ActorIt; ++ActorIt)
+	{
+		// Skip hidden Actors (unless told to include them).
+		if (!Request.include_hidden_actors() && ActorIt->IsHidden())
+		{
+			continue;
+		}
+		// Skip static actors (unless told to include them).
+		const bool bHasMovementComponent = ActorIt->GetComponentByClass<UMovementComponent>() != nullptr;
+		const bool bHasMassTrafficVehicleComponent = ActorIt->GetComponentByClass<UMassTrafficVehicleComponent>() != nullptr;
+		const bool bHasMassAgentComponent = ActorIt->GetComponentByClass<UMassAgentComponent>() != nullptr;
+		const bool bIsStatic = !(bHasMovementComponent || bHasMassTrafficVehicleComponent || bHasMassAgentComponent);
+		if (!Request.include_static() && bIsStatic)
+		{
+			continue;
+		}
+		const FVector ActorLocation = ActorIt->GetActorLocation();
+		if (FVector::Dist2D(ActorLocation, SearchCenter) < SearchRadius)
+		{
+			MatchingActors.Add(*ActorIt);
 		}
 	}
 
@@ -226,6 +262,20 @@ void UTempoWorldStateServiceSubsystem::GetCurrentActorState(const TempoWorld::Ac
 }
 
 void UTempoWorldStateServiceSubsystem::GetCurrentActorStatesNear(const TempoWorld::ActorStatesNearRequest& Request, const TResponseDelegate<TempoWorld::ActorStates>& ResponseContinuation) const
+{
+	ActorStates Response;
+
+	const TArray<AActor*> Actors = GetMatchingActors(GetWorld(), Request);
+
+	for (const AActor* Actor : Actors)
+	{
+		*Response.add_actor_states() = GetActorState(Actor, GetWorld(), Request.include_hidden_components());
+	}
+
+	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
+}
+
+void UTempoWorldStateServiceSubsystem::GetCurrentActorStatesNearPosition(const ActorStatesNearPositionRequest& Request, const TResponseDelegate<ActorStates>& ResponseContinuation) const
 {
 	ActorStates Response;
 
