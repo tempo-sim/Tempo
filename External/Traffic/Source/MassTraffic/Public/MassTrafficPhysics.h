@@ -164,6 +164,14 @@ struct MASSTRAFFIC_API FMassTrafficVehiclePhysicsFragment : public FMassFragment
 	FMassTrafficSimpleVehiclePhysicsSim VehicleSim;
 };
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION > 6
+template<>
+struct TMassFragmentTraits<FMassTrafficVehiclePhysicsFragment> final
+{
+	enum { AuthorAcceptsItsNotTriviallyCopyable = true };
+};
+#endif
+
 /**
  * Physics config & pre-configured sim extracted from a AWheeledVehiclePawn
  * @see UMassTrafficSubsystem::GetOrExtractVehiclePhysicsTemplate
