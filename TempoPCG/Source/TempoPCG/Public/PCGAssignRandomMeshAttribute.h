@@ -61,7 +61,11 @@ public:
 	virtual bool CanDynamicallyTrackKeys() const override { return true; }
 #endif
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 7
 	virtual EPCGDataType GetCurrentPinTypes(const UPCGPin* InPin) const override;
+#else
+	virtual FPCGDataTypeIdentifier GetCurrentPinTypesID(const UPCGPin* InPin) const override;
+#endif
 	virtual FString GetAdditionalTitleInformation() const override;
 
 protected:
