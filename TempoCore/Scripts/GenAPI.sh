@@ -13,17 +13,19 @@ PROJECT_ROOT="${2//\\//}"
 PLUGIN_ROOT="${3//\\//}"
 
 # Using the Python that comes with Unreal
-# Unreal's Python seems to have it's include directory configured incorrectly (`python3-config --include` returns a
-# path to Engine/Binaries/ThirdParty, but the correct include directory is in Engine/Source/ThirdParty).
-# So, we help pip find it, which it may need to in order to build any dependencies from source, with CPATH
 if [[ "$OSTYPE" = "msys" ]]; then
+  # Convert Windows-style paths to Unix
+  ENGINE_DIR=$(cygpath -a "$ENGINE_DIR")
+  PROJECT_ROOT=$(cygpath -a "$PROJECT_ROOT")
+  PLUGIN_ROOT=$(cygpath -a "$PLUGIN_ROOT")
   PYTHON_DIR="$ENGINE_DIR/Binaries/ThirdParty/Python3/Win64"
-  export CPATH="$CPATH:$UNREAL_ENGINE_PATH/Engine/Source/ThirdParty/Python3/Win64/include"
 elif [[ "$OSTYPE" = "darwin"* ]]; then
   PYTHON_DIR="$ENGINE_DIR/Binaries/ThirdParty/Python3/Mac/bin"
-  export CPATH="$CPATH:$UNREAL_ENGINE_PATH/Engine/Source/ThirdParty/Python3/Mac/include"
 elif [[ "$OSTYPE" = "linux-gnu"* ]]; then
   PYTHON_DIR="$ENGINE_DIR/Binaries/ThirdParty/Python3/Linux/bin"
+  # Unreal's Python seems to have it's include directory configured incorrectly (`python3-config --include` returns a
+  # path to Engine/Binaries/ThirdParty, but the correct include directory is in Engine/Source/ThirdParty).
+  # So, we help pip find it, which it may need to in order to build any dependencies from source, with CPATH
   export CPATH="$CPATH:$UNREAL_ENGINE_PATH/Engine/Source/ThirdParty/Python3/Linux/include"
 fi
 
@@ -33,6 +35,9 @@ VENV_DIR="$PROJECT_ROOT/TempoEnv"
 VENV_EXISTS=0
 if [ -f "$VENV_DIR/pyvenv.cfg" ]; then
   VENV_PYTHON_DIR=$(grep "home = " "$VENV_DIR/pyvenv.cfg" | sed 's/^home = //' | tr '\\' '/')
+  if [[ "$OSTYPE" = "msys" ]]; then
+    VENV_PYTHON_DIR=$(cygpath -a "$VENV_PYTHON_DIR")
+  fi
   if [[ "$VENV_PYTHON_DIR" = "$PYTHON_DIR" ]]; then
     VENV_EXISTS=1
   else
