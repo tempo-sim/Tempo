@@ -73,6 +73,7 @@ FPCGElementPtr UPCGAssignRandomMeshAttributeSettings::CreateElement() const
 	return MakeShared<FPCGAssignRandomMeshAttribute>();
 }
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 7
 EPCGDataType UPCGAssignRandomMeshAttributeSettings::GetCurrentPinTypes(const UPCGPin* InPin) const
 {
 	check(InPin);
@@ -85,6 +86,20 @@ EPCGDataType UPCGAssignRandomMeshAttributeSettings::GetCurrentPinTypes(const UPC
 	const EPCGDataType PrimaryInputType = GetTypeUnionOfIncidentEdges(PCGPinConstants::DefaultInputLabel);
 	return (PrimaryInputType != EPCGDataType::None) ? PrimaryInputType : EPCGDataType::Param; // No input (None) means param.
 }
+#else
+FPCGDataTypeIdentifier UPCGAssignRandomMeshAttributeSettings::GetCurrentPinTypesID(const UPCGPin* InPin) const
+{
+	check(InPin);
+	if (!InPin->IsOutputPin())
+	{
+		return Super::GetCurrentPinTypesID(InPin);
+	}
+
+	// Output pin narrows to union of inputs on first pin
+	const FPCGDataTypeIdentifier PrimaryInputType = GetTypeUnionIDOfIncidentEdges(PCGPinConstants::DefaultInputLabel);
+	return (PrimaryInputType != EPCGDataType::None) ? PrimaryInputType : FPCGDataTypeIdentifier(EPCGDataType::Param); // No input (None) means param.
+}
+#endif
 
 FString UPCGAssignRandomMeshAttributeSettings::GetAdditionalTitleInformation() const
 {

@@ -107,7 +107,11 @@ void UTempoDebrisParameterComponent::SyncPCGParameters(const FTempoDebrisParamet
 		bAnyParametersUpdated |= MaybeSetGraphParameter(GraphInstance, TEXT("CenterFalloffNoise"), Params.CenterKeepoutFalloff);
 		bAnyParametersUpdated |= MaybeSetGraphParameter(GraphInstance, TEXT("HalfCenterWidth"), Params.CenterKeepoutPortion * QuantityConverter<M2CM>::Convert(CenterKeepoutWidth / 2.0));
 		bAnyParametersUpdated |= MaybeSetGraphParameter(GraphInstance, TEXT("MeshDistributionName"), Params.MeshDistribution);
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 7
 		bAnyParametersUpdated |= MaybeSetGraphParameterPtr(GraphInstance, TEXT("MeshDistributionDataTable"), MeshDistributionDataTable.ToSoftObjectPath());
+#else
+		bAnyParametersUpdated |= MaybeSetGraphParameter(GraphInstance, TEXT("MeshDistributionDataTable"), MeshDistributionDataTable.ToSoftObjectPath());
+#endif
 		bAnyParametersUpdated |= MaybeSetGraphParameter(GraphInstance, TEXT("CenterSplineIndices"), CenterSplineIndices);
 		bAnyParametersUpdated |= MaybeSetGraphParameter(GraphInstance, TEXT("SampleAlongCenterSpline"), bSampleAlongCenterSpline);
 		bAnyParametersUpdated |= MaybeSetGraphParameter(GraphInstance, TEXT("CenterKeepoutAllActors"), bCenterKeepoutAllActors);
