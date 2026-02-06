@@ -337,8 +337,7 @@ jobs:
             -v ${{ github.workspace }}/.engine-ddc-cache/Engine/DerivedDataCache:/home/ue4/UnrealEngine/Engine/DerivedDataCache \
             -v ${{ github.workspace }}/${{ inputs.project_root }}:/home/ue4/${{ inputs.project_root }} \
             tempo_unreal_image \
-            /home/ue4/${{ inputs.tempo_root }}/Scripts/SyncDeps.sh -force
-            /home/ue4/${{ inputs.tempo_root }}/TempoROS/Scripts/SyncDeps.sh -force
+            /home/ue4/${{ inputs.tempo_root }}/Scripts/SyncDeps.sh -force && /home/ue4/${{ inputs.tempo_root }}/TempoROS/Scripts/SyncDeps.sh -force
     - name: Install Engine Mods
       run: |
         docker run --rm \
