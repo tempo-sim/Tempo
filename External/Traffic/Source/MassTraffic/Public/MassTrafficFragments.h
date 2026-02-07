@@ -476,6 +476,14 @@ struct MASSTRAFFIC_API FMassTrafficLightIntersectionFragment : public FMassFragm
 	void Finalize(const FMassTrafficLaneToTrafficLightMap& LaneToTrafficLightMap);
 };
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION > 6
+template<>
+struct TMassFragmentTraits<FMassTrafficLightIntersectionFragment> final
+{
+	enum { AuthorAcceptsItsNotTriviallyCopyable = true };
+};
+#endif
+
 UENUM(BlueprintType)
 enum class EMassTrafficStopSignIntersectionState : uint8
 {
@@ -560,6 +568,14 @@ struct MASSTRAFFIC_API FMassTrafficSignIntersectionFragment : public FMassFragme
 		UMassCrowdSubsystem& MassCrowdSubsystem,
 		const bool bForce);
 };
+
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION > 6
+template<>
+struct TMassFragmentTraits<FMassTrafficSignIntersectionFragment> final
+{
+	enum { AuthorAcceptsItsNotTriviallyCopyable = true };
+};
+#endif
 
 
 /** Simulation LOD Fragment */
@@ -683,6 +699,14 @@ struct MASSTRAFFIC_API FMassTrafficObstacleListFragment : public FMassFragment
 
 	TArray<FMassEntityHandle, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_OBSTACLES>> Obstacles;
 };
+
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION > 6
+template<>
+struct TMassFragmentTraits<FMassTrafficObstacleListFragment> final
+{
+	enum { AuthorAcceptsItsNotTriviallyCopyable = true };
+};
+#endif
 
 
 /** Obstacle Avoidance Fragment */
@@ -866,6 +890,14 @@ struct MASSTRAFFIC_API FMassTrafficVehicleControlFragment : public FMassFragment
 	bool IsReactivelyYieldingAtIntersection() const { return IsYieldingAtIntersection(); }
 	bool HasGivenOpportunityForTurningVehiclesToReactivelyYieldAtIntersection() const { return bHasGivenOpportunityForTurningVehiclesToReactivelyYieldAtIntersection; }
 };
+
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION > 6
+template<>
+struct TMassFragmentTraits<FMassTrafficVehicleControlFragment> final
+{
+	enum { AuthorAcceptsItsNotTriviallyCopyable = true };
+};
+#endif
 
 
 /** Lane Change Fragment * Search key: LCFRAG */

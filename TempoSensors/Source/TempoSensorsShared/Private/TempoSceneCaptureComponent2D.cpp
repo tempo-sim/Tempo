@@ -70,7 +70,7 @@ void UTempoSceneCaptureComponent2D::UpdateSceneCaptureContents(FSceneInterface* 
 {
 	TextureInitFence.Wait();
 
-// FRayTracingScene includes buffers, StatsReadbackBuffers and FeedbackReadback, of fixed size.
+// FRayTracingScene includes buffers, StatsReadbackBuffers (StatsReadback in 5.7) and FeedbackReadback, of fixed size.
 // When only rendering the main viewport the default size (4) is sufficient.
 // But when running potentially many scene captures per frame they can easily be overrun, leading to reuse of in-use readbacks and crashes.
 // Here we are "hacking" into the persistent RayTracingScene of the scene and increasing the size of these buffers.
@@ -86,7 +86,18 @@ void UTempoSceneCaptureComponent2D::UpdateSceneCaptureContents(FSceneInterface* 
 			size_t MaxReadbackBuffersOffset = offsetof(FRayTracingScene, MaxReadbackBuffers);
 			*(reinterpret_cast<char*>(RayTracingScene) + MaxReadbackBuffersOffset) = NewMaxReadbackBuffers;
 		}
-
+#if ENGINE_MINOR_VERSION > 6
+		const uint32 PrevStatsReadbackBuffersSize = RayTracingScene->StatsReadback.Num();
+		if (PrevStatsReadbackBuffersSize < NewMaxReadbackBuffers)
+		{
+			RayTracingScene->StatsReadback.SetNum(NewMaxReadbackBuffers);
+			for (uint32 Index = PrevStatsReadbackBuffersSize; Index < NewMaxReadbackBuffers; ++Index)
+			{
+				RayTracingScene->StatsReadback[Index].ReadbackBuffer = new FRHIGPUBufferReadback(TEXT("FRayTracingScene::StatsReadbackBuffer"));
+				RayTracingScene->StatsReadback[Index].MaxNumViews = RayTracingScene->ActiveViews.GetMaxIndex();
+			}
+		}
+#else
 		const uint32 PrevStatsReadbackBuffersSize = RayTracingScene->StatsReadbackBuffers.Num();
 		if (PrevStatsReadbackBuffersSize < NewMaxReadbackBuffers)
 		{
@@ -96,6 +107,7 @@ void UTempoSceneCaptureComponent2D::UpdateSceneCaptureContents(FSceneInterface* 
 				RayTracingScene->StatsReadbackBuffers[Index] = new FRHIGPUBufferReadback(TEXT("FRayTracingScene::StatsReadbackBuffer"));
 			}
 		}
+#endif
 
 		// FeedbackReadback added in 5.6
 #if ENGINE_MINOR_VERSION > 5
