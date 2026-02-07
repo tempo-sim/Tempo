@@ -12,37 +12,41 @@
 #include "TempoCamera.h"
 #include "TempoROSSettings.h"
 
-FString MeasurementTypeTopicStr(EMeasurementType MeasurementType)
+TOptional<FString> MeasurementTypeTopicStr(EMeasurementType MeasurementType)
 {
 	switch (MeasurementType)
 	{
 	case COLOR_IMAGE:
 		{
-			return TEXT("image/color");
+			return TOptional<FString>(TEXT("image/color"));
 		}
 	case DEPTH_IMAGE:
 		{
-			return TEXT("image/depth");
+			return TOptional<FString>(TEXT("image/depth"));
 		}
 	case LABEL_IMAGE:
 		{
-			return TEXT("image/label");
+			return TOptional<FString>(TEXT("image/label"));
 		}
 	case LIDAR_SCAN:
 		{
-			return TEXT("scan");
+			return TOptional<FString>(TEXT("scan"));
 		}
 	default:
 		{
-			checkf(false, TEXT("Unhandled measurement type"));
-			return TEXT("");
+			return TOptional<FString>();
 		}
 	}
 }
 
-FString TopicFromSensorInfo(EMeasurementType MeasurementType, const FString& OwnerName, const FString& SensorName)
+TOptional<FString> TopicFromSensorInfo(EMeasurementType MeasurementType, const FString& OwnerName, const FString& SensorName)
 {
-	return FString::Printf(TEXT("%s/%s/%s"), *MeasurementTypeTopicStr(MeasurementType), *OwnerName.ToLower(), *SensorName.ToLower());
+	TOptional<FString> MaybeMeasurementTypeTopic = MeasurementTypeTopicStr(MeasurementType);
+	if (const FString* MeasurementTypeTopic = MaybeMeasurementTypeTopic.GetPtrOrNull())
+	{
+		return FString::Printf(TEXT("%s/%s/%s"), **MeasurementTypeTopic, *OwnerName.ToLower(), *SensorName.ToLower());
+	}
+	return TOptional<FString>();
 }
 
 FString CameraInfoTopicFromBaseTopic(const FString& BaseTopic)
@@ -148,8 +152,13 @@ void UTempoSensorsROSBridgeSubsystem::UpdatePublishers()
 		const float Rate = Sensor->GetRate();
 		for (const EMeasurementType MeasurementType : Sensor->GetMeasurementTypes())
 		{
-			const FString Topic = TopicFromSensorInfo(MeasurementType, OwnerName, SensorName);
-			
+			const TOptional<FString> MaybeTopic = TopicFromSensorInfo(MeasurementType, OwnerName, SensorName);
+			if (!MaybeTopic.IsSet())
+			{
+				continue;
+			}
+
+			const FString& Topic = MaybeTopic.GetValue();
 			bool bAlreadyHasTopic = PossiblyStaleTopics.Contains(Topic);
 			PossiblyStaleTopics.Remove(Topic);
 			
@@ -178,13 +187,9 @@ void UTempoSensorsROSBridgeSubsystem::UpdatePublishers()
 							ROSNode->AddPublisher<TempoCamera::LabelImage>(Topic, FROSQOSProfile(1).Reliable());
 							break;
 						}
-					case LIDAR_SCAN:
-						{
-							break;
-						}
 					default:
 						{
-							checkf(false, TEXT("Unhandled measurement type"));
+							break;
 						}
 				}
 			}
