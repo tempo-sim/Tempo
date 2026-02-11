@@ -64,11 +64,11 @@ static TMap<int32, FBox2D> ComputeBoundingBoxes(const TArray<uint8>& LabelData, 
 	{
 	   for (uint32 X = 0; X < Width; ++X)
 	   {
-		const uint8 InstanceId = LabelData[Y * Width + X];
-		if (InstanceId > 0)  // 0 = unlabeled
-		{
-		  Boxes.FindOrAdd(InstanceId) += FUintPoint(X, Y);
-		}
+	   const uint8 InstanceId = LabelData[Y * Width + X];
+	   if (InstanceId > 0)  // 0 = unlabeled
+	   {
+		 Boxes.FindOrAdd(InstanceId) += FUintPoint(X, Y);
+	   }
 	   }
 	}
 	return Boxes;
@@ -192,7 +192,7 @@ void RespondToBoundingBoxRequests(const TTextureRead<PixelType>* TextureRead, co
 	   LabelData.SetNumUninitialized(TextureRead->Image.Num());
 	   ParallelFor(TextureRead->Image.Num(), [&LabelData, &TextureRead](int32 Idx)
 	   {
-		LabelData[Idx] = TextureRead->Image[Idx].Label();
+	   LabelData[Idx] = TextureRead->Image[Idx].Label();
 	   });
 	   
 	   TMap<int32, FBox2D> BoundingBoxes = ComputeBoundingBoxes(LabelData, TextureRead->ImageSize.X, TextureRead->ImageSize.Y);
@@ -200,20 +200,20 @@ void RespondToBoundingBoxRequests(const TTextureRead<PixelType>* TextureRead, co
 	   // Add bounding boxes to proto message using the map captured at render time
 	   for (const auto& [InstanceId, Box] : BoundingBoxes)
 	   {
-		TempoCamera::BoundingBox2D* BBoxProto = Response.add_bounding_boxes();
-		BBoxProto->set_min_x(FMath::RoundToInt32(Box.Min.X));
-		BBoxProto->set_min_y(FMath::RoundToInt32(Box.Min.Y));
-		BBoxProto->set_max_x(FMath::RoundToInt32(Box.Max.X));
-		BBoxProto->set_max_y(FMath::RoundToInt32(Box.Max.Y));
-		BBoxProto->set_instance_id(InstanceId);
+	   TempoCamera::BoundingBox2D* BBoxProto = Response.add_bounding_boxes();
+	   BBoxProto->set_min_x(FMath::RoundToInt32(Box.Min.X));
+	   BBoxProto->set_min_y(FMath::RoundToInt32(Box.Min.Y));
+	   BBoxProto->set_max_x(FMath::RoundToInt32(Box.Max.X));
+	   BBoxProto->set_max_y(FMath::RoundToInt32(Box.Max.Y));
+	   BBoxProto->set_instance_id(InstanceId);
 
-		// Find semantic ID from mapping captured at render time
-		const uint8* SemanticId = TextureRead->InstanceToSemanticMap.Find(InstanceId);
-		if (!SemanticId)
-		{
-		  UE_LOG(LogTemp, Warning, TEXT("No semantic ID found for instance ID %d"), InstanceId);
-		}
-		BBoxProto->set_semantic_id(SemanticId ? *SemanticId : 0);
+	   // Find semantic ID from mapping captured at render time
+	   const uint8* SemanticId = TextureRead->InstanceToSemanticMap.Find(InstanceId);
+	   if (!SemanticId)
+	   {
+		 UE_LOG(LogTemp, Warning, TEXT("No semantic ID found for instance ID %d"), InstanceId);
+	   }
+	   BBoxProto->set_semantic_id(SemanticId ? *SemanticId : 0);
 	   }
 	}
 
@@ -319,6 +319,17 @@ void UTempoCamera::InitRenderTarget()
 	Super::InitRenderTarget();
 }
 
+void UTempoCamera::UpdateLensParameters()
+{
+	if (LensParameters != LastLensParameters || !FMath::IsNearlyEqual(DistortedFOV, LastDistortedFOV) || SizeXY != LastSizeXY)
+	{
+	   LastLensParameters = LensParameters;
+	   LastDistortedFOV = DistortedFOV;
+	   LastSizeXY = SizeXY;
+	   InitDistortionMap();
+	}
+}
+
 void UTempoCamera::InitDistortionMap()
 {
 	const double K1 = LensParameters.K1;
@@ -419,7 +430,14 @@ void UTempoCamera::InitDistortionMap()
 void UTempoCamera::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
 {
 	Super::PostEditChangeProperty(PropertyChangedEvent);
-	InitDistortionMap();
+	
+	const FName PropertyName = (PropertyChangedEvent.Property != nullptr) ? PropertyChangedEvent.Property->GetFName() : NAME_None;
+	if (PropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, LensParameters) || 
+		PropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, DistortedFOV) ||
+		PropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, SizeXY))
+	{
+	   UpdateLensParameters();
+	}
 }
 #endif
 
@@ -439,7 +457,7 @@ void UTempoCamera::UpdateSceneCaptureContents(FSceneInterface* Scene, ISceneRend
 	   SetDepthEnabled(false);
 	}
 	
-	InitDistortionMap();
+	UpdateLensParameters();
 
 #if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 	Super::UpdateSceneCaptureContents(Scene);
@@ -552,16 +570,16 @@ TFuture<void> UTempoCamera::DecodeAndRespond(TUniquePtr<FTextureRead> TextureRea
 
 	   if (TextureRead->GetType() == TEXT("WithDepth"))
 	   {
-		static_cast<TTextureRead<FCameraPixelWithDepth>*>(TextureRead.Get())->RespondToRequests(ColorImageRequests, TransmissionTimeCpy);
-		static_cast<TTextureRead<FCameraPixelWithDepth>*>(TextureRead.Get())->RespondToRequests(LabelImageRequests, TransmissionTimeCpy);
-		static_cast<TTextureRead<FCameraPixelWithDepth>*>(TextureRead.Get())->RespondToRequests(DepthImageRequests, TransmissionTimeCpy);
-		static_cast<TTextureRead<FCameraPixelWithDepth>*>(TextureRead.Get())->RespondToRequests(BoundingBoxRequests, TransmissionTimeCpy);
+	   static_cast<TTextureRead<FCameraPixelWithDepth>*>(TextureRead.Get())->RespondToRequests(ColorImageRequests, TransmissionTimeCpy);
+	   static_cast<TTextureRead<FCameraPixelWithDepth>*>(TextureRead.Get())->RespondToRequests(LabelImageRequests, TransmissionTimeCpy);
+	   static_cast<TTextureRead<FCameraPixelWithDepth>*>(TextureRead.Get())->RespondToRequests(DepthImageRequests, TransmissionTimeCpy);
+	   static_cast<TTextureRead<FCameraPixelWithDepth>*>(TextureRead.Get())->RespondToRequests(BoundingBoxRequests, TransmissionTimeCpy);
 	   }
 	   else if (TextureRead->GetType() == TEXT("NoDepth"))
 	   {
-		static_cast<TTextureRead<FCameraPixelNoDepth>*>(TextureRead.Get())->RespondToRequests(ColorImageRequests, TransmissionTimeCpy);
-		static_cast<TTextureRead<FCameraPixelNoDepth>*>(TextureRead.Get())->RespondToRequests(LabelImageRequests, TransmissionTimeCpy);
-		static_cast<TTextureRead<FCameraPixelNoDepth>*>(TextureRead.Get())->RespondToRequests(BoundingBoxRequests, TransmissionTimeCpy);
+	   static_cast<TTextureRead<FCameraPixelNoDepth>*>(TextureRead.Get())->RespondToRequests(ColorImageRequests, TransmissionTimeCpy);
+	   static_cast<TTextureRead<FCameraPixelNoDepth>*>(TextureRead.Get())->RespondToRequests(LabelImageRequests, TransmissionTimeCpy);
+	   static_cast<TTextureRead<FCameraPixelNoDepth>*>(TextureRead.Get())->RespondToRequests(BoundingBoxRequests, TransmissionTimeCpy);
 	   }
 	});
 
@@ -606,40 +624,40 @@ void UTempoCamera::ApplyDepthEnabled()
 
 	   if (const TObjectPtr<UMaterialInterface> PostProcessMaterialWithDepth = GetDefault<UTempoSensorsSettings>()->GetCameraPostProcessMaterialWithDepth())
 	   {
-		PostProcessMaterialInstance = UMaterialInstanceDynamic::Create(PostProcessMaterialWithDepth.Get(), this);
-		
-		// Bind Distortion
-		if (DistortionMapTexture)
-		{
-		  PostProcessMaterialInstance->SetTextureParameterValue(FName("DistortionMap"), DistortionMapTexture);
-		  PostProcessMaterialInstance->SetScalarParameterValue(FName("CroppingFactor"), CroppingFactor);
-		}
+	   PostProcessMaterialInstance = UMaterialInstanceDynamic::Create(PostProcessMaterialWithDepth.Get(), this);
+	   
+	   // Bind Distortion
+	   if (DistortionMapTexture)
+	   {
+		 PostProcessMaterialInstance->SetTextureParameterValue(FName("DistortionMap"), DistortionMapTexture);
+		 PostProcessMaterialInstance->SetScalarParameterValue(FName("CroppingFactor"), CroppingFactor);
+	   }
 
-		MinDepth = GEngine->NearClipPlane;
-		MaxDepth = TempoSensorsSettings->GetMaxCameraDepth();
-		PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MinDepth"), MinDepth);
-		PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MaxDepth"), MaxDepth);
-		PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MaxDiscreteDepth"), GTempo_Max_Discrete_Depth);
+	   MinDepth = GEngine->NearClipPlane;
+	   MaxDepth = TempoSensorsSettings->GetMaxCameraDepth();
+	   PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MinDepth"), MinDepth);
+	   PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MaxDepth"), MaxDepth);
+	   PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MaxDiscreteDepth"), GTempo_Max_Discrete_Depth);
 	   }
 	   else
 	   {
-		UE_LOG(LogTempoCamera, Error, TEXT("PostProcessMaterialWithDepth is not set in TempoSensors settings"));
+	   UE_LOG(LogTempoCamera, Error, TEXT("PostProcessMaterialWithDepth is not set in TempoSensors settings"));
 	   }
 	}
 	else
 	{
 	   if (const TObjectPtr<UMaterialInterface> PostProcessMaterialNoDepth = GetDefault<UTempoSensorsSettings>()->GetCameraPostProcessMaterialNoDepth())
 	   {
-		PostProcessMaterialInstance = UMaterialInstanceDynamic::Create(PostProcessMaterialNoDepth.Get(), this);
-		if (DistortionMapTexture)
-		{
-		  PostProcessMaterialInstance->SetTextureParameterValue(FName("DistortionMap"), DistortionMapTexture);
-		  PostProcessMaterialInstance->SetScalarParameterValue(FName("CroppingFactor"), CroppingFactor);
-		}
+	   PostProcessMaterialInstance = UMaterialInstanceDynamic::Create(PostProcessMaterialNoDepth.Get(), this);
+	   if (DistortionMapTexture)
+	   {
+		 PostProcessMaterialInstance->SetTextureParameterValue(FName("DistortionMap"), DistortionMapTexture);
+		 PostProcessMaterialInstance->SetScalarParameterValue(FName("CroppingFactor"), CroppingFactor);
+	   }
 	   }
 	   else
 	   {
-		UE_LOG(LogTempoCamera, Error, TEXT("PostProcessMaterialWithDepth is not set in TempoSensors settings"));
+	   UE_LOG(LogTempoCamera, Error, TEXT("PostProcessMaterialWithDepth is not set in TempoSensors settings"));
 	   }
 	   
 	   RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA8; // Corresponds to PF_B8G8R8A8
@@ -654,19 +672,19 @@ void UTempoCamera::ApplyDepthEnabled()
 	if (!OverridableLabelRowName.IsNone())
 	{
 	   SemanticLabelTable->ForeachRow<FSemanticLabel>(TEXT(""),
-		[&OverridableLabelRowName,
-		  &OverridingLabelRowName,
-		  &OverridableLabel,
-		  &OverridingLabel](const FName& Key, const FSemanticLabel& Value)
+	   [&OverridableLabelRowName,
+		 &OverridingLabelRowName,
+		 &OverridableLabel,
+		 &OverridingLabel](const FName& Key, const FSemanticLabel& Value)
 	   {
-		if (Key == OverridableLabelRowName)
-		{
-		  OverridableLabel = Value.Label;
-		}
-		if (Key == OverridingLabelRowName)
-		{
-		  OverridingLabel = Value.Label;
-		}
+	   if (Key == OverridableLabelRowName)
+	   {
+		 OverridableLabel = Value.Label;
+	   }
+	   if (Key == OverridingLabelRowName)
+	   {
+		 OverridingLabel = Value.Label;
+	   }
 	   });
 	}
 
@@ -674,12 +692,12 @@ void UTempoCamera::ApplyDepthEnabled()
 	{
 	   if (OverridableLabel.IsSet() && OverridingLabel.IsSet())
 	   {
-		PostProcessMaterialInstance->SetScalarParameterValue(TEXT("OverridableLabel"), OverridableLabel.GetValue());
-		PostProcessMaterialInstance->SetScalarParameterValue(TEXT("OverridingLabel"), OverridingLabel.GetValue());
+	   PostProcessMaterialInstance->SetScalarParameterValue(TEXT("OverridableLabel"), OverridableLabel.GetValue());
+	   PostProcessMaterialInstance->SetScalarParameterValue(TEXT("OverridingLabel"), OverridingLabel.GetValue());
 	   }
 	   else
 	   {
-		PostProcessMaterialInstance->SetScalarParameterValue(TEXT("OverridingLabel"), 0.0);
+	   PostProcessMaterialInstance->SetScalarParameterValue(TEXT("OverridingLabel"), 0.0);
 	   }
 	   PostProcessSettings.WeightedBlendables.Array.Empty();
 	   PostProcessSettings.WeightedBlendables.Array.Init(FWeightedBlendable(1.0, PostProcessMaterialInstance), 1);

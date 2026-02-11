@@ -90,7 +90,7 @@ struct TTextureRead<FCameraPixelWithDepth> : TTextureReadBase<FCameraPixelWithDe
 	   const FString& SensorNameIn, const FTransform& SensorTransformIn, float MinDepthIn, float MaxDepthIn,
 	   TMap<uint8, uint8>&& InstanceToSemanticMapIn)
 	   : TTextureReadBase(ImageSizeIn, SequenceIdIn, CaptureTimeIn, OwnerNameIn, SensorNameIn, SensorTransformIn),
-		MinDepth(MinDepthIn), MaxDepth(MaxDepthIn), InstanceToSemanticMap(MoveTemp(InstanceToSemanticMapIn))
+	   MinDepth(MinDepthIn), MaxDepth(MaxDepthIn), InstanceToSemanticMap(MoveTemp(InstanceToSemanticMapIn))
 	{
 	}
 
@@ -112,7 +112,7 @@ struct TTextureRead<FCameraPixelNoDepth> : TTextureReadBase<FCameraPixelNoDepth>
 	TTextureRead(const FIntPoint& ImageSizeIn, int32 SequenceIdIn, double CaptureTimeIn, const FString& OwnerNameIn,
 	   const FString& SensorNameIn, const FTransform& SensorTransformIn, TMap<uint8, uint8>&& InstanceToSemanticMapIn)
 	   : TTextureReadBase(ImageSizeIn, SequenceIdIn, CaptureTimeIn, OwnerNameIn, SensorNameIn, SensorTransformIn),
-		InstanceToSemanticMap(MoveTemp(InstanceToSemanticMapIn))
+	   InstanceToSemanticMap(MoveTemp(InstanceToSemanticMapIn))
 	{
 	}
 
@@ -148,6 +148,16 @@ struct FTempoLensDistortionParameters
 	float P1 = 0.0f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens")
 	float P2 = 0.0f;
+
+	bool operator==(const FTempoLensDistortionParameters& Other) const
+	{
+	   return K1 == Other.K1 && K2 == Other.K2 && K3 == Other.K3 && P1 == Other.P1 && P2 == Other.P2;
+	}
+
+	bool operator!=(const FTempoLensDistortionParameters& Other) const
+	{
+	   return !(*this == Other);
+	}
 };
 
 UCLASS(Blueprintable, BlueprintType, ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
@@ -214,6 +224,8 @@ protected:
 	
 	void InitDistortionMap();
 
+	void UpdateLensParameters();
+
 #if WITH_EDITOR
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 #endif
@@ -244,4 +256,8 @@ protected:
 	TArray<FLabelImageRequest> PendingLabelImageRequests;
 	TArray<FDepthImageRequest> PendingDepthImageRequests;
 	TArray<FBoundingBoxesRequest> PendingBoundingBoxesRequests;
+
+	FTempoLensDistortionParameters LastLensParameters;
+	float LastDistortedFOV = -1.0f;
+	FIntPoint LastSizeXY = FIntPoint(0, 0);
 };
