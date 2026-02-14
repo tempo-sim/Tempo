@@ -1,4 +1,4 @@
 string vehicle_name
-float32 acceleration
-float32 steering
+float32 longitudinal
+float32 lateral
 ---

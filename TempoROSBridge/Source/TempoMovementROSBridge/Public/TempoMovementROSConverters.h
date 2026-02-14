@@ -39,8 +39,8 @@ struct TFromROSConverter<tempo_movement_ros_bridge::srv::CommandVehicle::Request
 	{
 		TempoMovement::VehicleCommandRequest TempoValue;
 		TempoValue.set_vehicle_name(ROSValue.vehicle_name);
-		TempoValue.set_acceleration(ROSValue.acceleration);
-		TempoValue.set_steering(ROSValue.steering);
+		TempoValue.set_longitudinal(ROSValue.longitudinal);
+		TempoValue.set_lateral(ROSValue.lateral);
 		return TempoValue;
 	}
 };
