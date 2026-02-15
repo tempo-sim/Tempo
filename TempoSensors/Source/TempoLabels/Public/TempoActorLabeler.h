@@ -50,8 +50,16 @@ namespace TempoScripting
 namespace TempoLabels
 {
 	class InstanceToSemanticIdMap;
+	class GetAllActorLabelsRequest;
+	class GetAllActorLabelsResponse;
 	class GetLabeledActorTypesRequest;
 	class GetLabeledActorTypesResponse;
+	class GetSemanticClassesRequest;
+	class GetSemanticClassesResponse;
+	class SetActorTypeSemanticIdRequest;
+	class GetAllStaticMeshTypesRequest;
+	class GetAllStaticMeshTypesResponse;
+	class SetStaticMeshTypeSemanticIdRequest;
 }
 
 /**
@@ -75,7 +83,17 @@ public:
 
 	void GetInstanceToSemanticIdMap(const TempoScripting::Empty& Request, const TResponseDelegate<TempoLabels::InstanceToSemanticIdMap>& ResponseContinuation);
 
+	void HandleGetAllActorLabels(const TempoLabels::GetAllActorLabelsRequest& Request, const TResponseDelegate<TempoLabels::GetAllActorLabelsResponse>& ResponseContinuation);
+
 	void HandleGetLabeledActorTypes(const TempoLabels::GetLabeledActorTypesRequest& Request, const TResponseDelegate<TempoLabels::GetLabeledActorTypesResponse>& ResponseContinuation);
+
+	void HandleGetSemanticClasses(const TempoLabels::GetSemanticClassesRequest& Request, const TResponseDelegate<TempoLabels::GetSemanticClassesResponse>& ResponseContinuation);
+
+	void HandleSetActorTypeSemanticId(const TempoLabels::SetActorTypeSemanticIdRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation);
+
+	void HandleGetAllStaticMeshTypes(const TempoLabels::GetAllStaticMeshTypesRequest& Request, const TResponseDelegate<TempoLabels::GetAllStaticMeshTypesResponse>& ResponseContinuation);
+
+	void HandleSetStaticMeshTypeSemanticId(const TempoLabels::SetStaticMeshTypeSemanticIdRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation);
 
 	const TSet<FName>& GetLabeledActorClassNames() const { return LabeledActorClassNames; }
 
@@ -88,11 +106,11 @@ protected:
 
 	void LabelActor(AActor* Actor);
 
-	void LabelAllComponents(const AActor* Actor, const FInstanceSemanticIdPair& ActorIdPair);
+	void LabelAllComponents(const AActor* Actor, FInstanceSemanticIdPair ActorIdPair);
 
 	void LabelComponent(UActorComponent* Component);
 
-	void LabelComponent(UPrimitiveComponent* Component, const FInstanceSemanticIdPair& ActorIdPair);
+	void LabelComponent(UPrimitiveComponent* Component, FInstanceSemanticIdPair ActorIdPair);
 
 	void UnLabelAllActors();
 
@@ -106,7 +124,7 @@ protected:
 
 	void ReLabelAllActors();
 
-	static void AssignId(UPrimitiveComponent* Component, const FInstanceSemanticIdPair& IdPair);
+	static void AssignId(UPrimitiveComponent* Component, FInstanceSemanticIdPair IdPair);
 
 	UPROPERTY(VisibleAnywhere)
 	UDataTable* SemanticLabelTable;
@@ -132,6 +150,16 @@ protected:
 	// Set of actor class names that have been assigned unique instance IDs
 	UPROPERTY()
 	TSet<FName> LabeledActorClassNames;
+
+	// Runtime overrides for actor types (class name -> semantic ID)
+	// Takes precedence over DataTable definitions
+	UPROPERTY()
+	TMap<FName, int32> ActorTypeSemanticIdOverrides;
+
+	// Runtime overrides for static mesh types (full mesh path -> semantic ID)
+	// Takes precedence over DataTable definitions (StaticMeshLabels)
+	UPROPERTY()
+	TMap<FString, int32> StaticMeshTypeSemanticIdOverrides;
 
 	FInstanceIdAllocator InstanceIdAllocator = FInstanceIdAllocator(1, 255);
 };

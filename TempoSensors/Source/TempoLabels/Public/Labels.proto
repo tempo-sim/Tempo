@@ -13,6 +13,20 @@ message InstanceToSemanticIdMap {
   repeated InstanceSemanticIdPair instance_semantic_id_pairs = 1;
 }
 
+message ActorLabelInfo {
+  string actor_name = 1;
+  string actor_type = 2;
+  int32 semantic_id = 3;
+  int32 instance_id = 4;  // For Instance mode correlation
+}
+
+message GetAllActorLabelsRequest {
+}
+
+message GetAllActorLabelsResponse {
+  repeated ActorLabelInfo actors = 1;
+}
+
 message GetLabeledActorTypesRequest {
 }
 
@@ -20,7 +34,50 @@ message GetLabeledActorTypesResponse {
   repeated string actor_types = 1; // List of actor class names with active instance IDs
 }
 
+message SemanticClassInfo {
+  string name = 1;                        // e.g., "Pedestrian", "Car"
+  int32 label_id = 2;                     // e.g., 12, 14 (the semantic ID)
+  repeated string actor_types = 3;        // Actor types assigned to this class
+  repeated string static_mesh_types = 4;  // Static mesh paths assigned to this class
+}
+
+message GetSemanticClassesRequest {
+}
+
+message GetSemanticClassesResponse {
+  repeated SemanticClassInfo classes = 1;
+}
+
+message SetActorTypeSemanticIdRequest {
+  string actor_type = 1;    // e.g., "CBP_QuantumCharacter_C" (class name)
+  int32 semantic_id = 2;    // 0-255 to set, -1 to revert to DataTable default
+}
+
+message SetStaticMeshTypeSemanticIdRequest {
+  string static_mesh_path = 1;  // Full asset path, e.g., "/Game/Meshes/SM_Tree.SM_Tree"
+  int32 semantic_id = 2;        // 0-255 to set, -1 to clear override
+}
+
+message GetAllStaticMeshTypesRequest {
+}
+
+message StaticMeshTypeInfo {
+  string mesh_path = 1;          // Full asset path
+  string display_name = 2;       // Short name extracted from path
+  int32 instance_count = 3;      // Number of components using this mesh
+  int32 current_semantic_id = 4; // Current semantic ID (-1 if none)
+}
+
+message GetAllStaticMeshTypesResponse {
+  repeated StaticMeshTypeInfo mesh_types = 1;
+}
+
 service LabelService {
   rpc GetInstanceToSemanticIdMap(TempoScripting.Empty) returns (InstanceToSemanticIdMap);
+  rpc GetAllActorLabels(GetAllActorLabelsRequest) returns (GetAllActorLabelsResponse);
   rpc GetLabeledActorTypes(GetLabeledActorTypesRequest) returns (GetLabeledActorTypesResponse);
+  rpc GetSemanticClasses(GetSemanticClassesRequest) returns (GetSemanticClassesResponse);
+  rpc SetActorTypeSemanticId(SetActorTypeSemanticIdRequest) returns (TempoScripting.Empty);
+  rpc GetAllStaticMeshTypes(GetAllStaticMeshTypesRequest) returns (GetAllStaticMeshTypesResponse);
+  rpc SetStaticMeshTypeSemanticId(SetStaticMeshTypeSemanticIdRequest) returns (TempoScripting.Empty);
 }
