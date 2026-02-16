@@ -14,6 +14,33 @@
 #include "Math/Box2D.h"
 #include "TextureResource.h"
 
+// Root-Finding Solver (Newton-Raphson)
+static double Solve(TFunction<double(double)> Objective, TFunction<double(double)> Derivative, double InitialGuess, int32 MaxIter, double Threshold)
+{
+	double X = InitialGuess;
+
+	for (int i = 0; i < MaxIter; ++i)
+	{
+	   double FVal = Objective(X);
+	   
+	   if (FMath::Abs(FVal) < Threshold) 
+	   {
+		 break;
+	   }
+
+	   double Deriv = Derivative(X);
+	   
+	   if (FMath::Abs(Deriv) < 0.001) 
+	   {
+		 Deriv = (Deriv < 0) ? -0.001 : 0.001;
+	   }
+	   
+	   X -= FVal / Deriv;
+	}
+
+	return X;
+}
+
 static double SolveInverseDistortion(double TargetRadius, double K1, double K2, double K3)
 {
 	if (TargetRadius < 1e-6)
@@ -21,30 +48,23 @@ static double SolveInverseDistortion(double TargetRadius, double K1, double K2, 
 	   return TargetRadius;
 	}
 
-	double SourceRadius = TargetRadius;
-	const int MaxIter = 20;
-	const double Epsilon = 1e-6;
-
-	for (int i = 0; i < MaxIter; ++i)
-	{
-	   double R2 = SourceRadius * SourceRadius;
-	   double R4 = R2 * R2;
-	   double R6 = R4 * R2;
-	   
-	   double Scale = 1.0 + K1*R2 + K2*R4 + K3*R6;
-	   double FVal = SourceRadius * Scale - TargetRadius;
-	   
-	   if (FMath::Abs(FVal) < Epsilon) break;
-
-	   double Deriv = 1.0 + 3.0*K1*R2 + 5.0*K2*R4 + 7.0*K3*R6;
-	   
-	   if (FMath::Abs(Deriv) < 0.001) Deriv = (Deriv < 0) ? -0.001 : 0.001;
-	   
-	   double Step = FVal / Deriv;
-	   SourceRadius -= Step;
-	}
-
-	return SourceRadius;
+	return Solve(
+	   [K1, K2, K3, TargetRadius](double R) {
+		 double R2 = R * R;
+		 double R4 = R2 * R2;
+		 double R6 = R4 * R2;
+		 return (R * (1.0 + K1*R2 + K2*R4 + K3*R6)) - TargetRadius; 
+	   },
+	   [K1, K2, K3](double R) {
+		 double R2 = R * R;
+		 double R4 = R2 * R2;
+		 double R6 = R4 * R2;
+		 return 1.0 + 3.0*K1*R2 + 5.0*K2*R4 + 7.0*K3*R6;
+	   },
+	   TargetRadius,
+	   40,
+	   1e-6
+	);
 }
 
 /**
@@ -67,7 +87,7 @@ static TMap<int32, FBox2D> ComputeBoundingBoxes(const TArray<uint8>& LabelData, 
 	   const uint8 InstanceId = LabelData[Y * Width + X];
 	   if (InstanceId > 0)  // 0 = unlabeled
 	   {
-		 Boxes.FindOrAdd(InstanceId) += FUintPoint(X, Y);
+	   Boxes.FindOrAdd(InstanceId) += FUintPoint(X, Y);
 	   }
 	   }
 	}
@@ -211,7 +231,7 @@ void RespondToBoundingBoxRequests(const TTextureRead<PixelType>* TextureRead, co
 	   const uint8* SemanticId = TextureRead->InstanceToSemanticMap.Find(InstanceId);
 	   if (!SemanticId)
 	   {
-		 UE_LOG(LogTemp, Warning, TEXT("No semantic ID found for instance ID %d"), InstanceId);
+	   UE_LOG(LogTemp, Warning, TEXT("No semantic ID found for instance ID %d"), InstanceId);
 	   }
 	   BBoxProto->set_semantic_id(SemanticId ? *SemanticId : 0);
 	   }
@@ -336,24 +356,82 @@ void UTempoCamera::InitDistortionMap()
 	const double K2 = LensParameters.K2;
 	const double K3 = LensParameters.K3;
 
+	//Feasibility check
+	double MaxDistortedRadius = -1.0; 
+	
+	if (K1 < 0.0)
+	{
+	   if (FMath::IsNearlyZero(K2) && FMath::IsNearlyZero(K3))
+	   {
+		 double RCrit = FMath::Sqrt(-1.0 / (3.0 * K1));
+		 double RCrit2 = RCrit * RCrit;
+		 MaxDistortedRadius = RCrit * (1.0 + K1 * RCrit2);
+	   }
+	   else
+	   {
+		 double RCrit = Solve(
+		   [K1, K2, K3](double R) {
+			 double R2 = R * R;
+			 double R4 = R2 * R2;
+			 double R6 = R4 * R2;
+			 return 1.0 + 3.0*K1*R2 + 5.0*K2*R4 + 7.0*K3*R6; 
+		   },
+		   [K1, K2, K3](double R) {
+			 double R2 = R * R;
+			 double R3 = R2 * R;
+			 double R5 = R3 * R2;
+			 return 6.0*K1*R + 20.0*K2*R3 + 42.0*K3*R5; 
+		   },
+		   0.5,
+		   40,
+		   1e-6
+		 );
+		 
+		 double R2 = RCrit * RCrit;
+		 double R4 = R2 * R2;
+		 double R6 = R4 * R2;
+		 double Scale = 1.0 + K1*R2 + K2*R4 + K3*R6;
+		 MaxDistortedRadius = RCrit * Scale;
+	   }
+	}
+	
+	if (MaxDistortedRadius > 0.0 && DistortedFOV > 0.0f)
+	{
+	   double MaxPossibleFOV = FMath::RadiansToDegrees(FMath::Atan(MaxDistortedRadius)) * 2.0;
+	   ensureMsgf(DistortedFOV <= MaxPossibleFOV, TEXT("DistortedFOV %.2f exceeds limit %.2f for K1=%.3f. Artifacts expected."), DistortedFOV, MaxPossibleFOV, K1);
+	}
+
 	if (DistortedFOV <= 0.0f)
 	{
 	   FOVAngle = 90.0f;
 	}
 	else
 	{
-	   float HalfFOVRad = FMath::DegreesToRadians(DistortedFOV / 2.0f);
-	   double TargetRadius = FMath::Tan(HalfFOVRad);
-	   double SourceRadius = SolveInverseDistortion(TargetRadius, K1, K2, K3);
+	   const float HalfFOVRad = FMath::DegreesToRadians(DistortedFOV / 2.0f);
+	   const double TargetRadiusHoriz = FMath::Tan(HalfFOVRad);
 	   
-	   float SourceHalfRad = FMath::Atan(SourceRadius);
+	   const double AspectRatio = (SizeXY.Y > 0) ? (double)SizeXY.X / (double)SizeXY.Y : 1.0;
+	   
+	   const double TargetRadiusVert = TargetRadiusHoriz / AspectRatio;
+	   const double TargetRadiusDiag = FMath::Sqrt(TargetRadiusHoriz * TargetRadiusHoriz + TargetRadiusVert * TargetRadiusVert);
+	   
+	   const double SourceRadiusDiag = SolveInverseDistortion(TargetRadiusDiag, K1, K2, K3);
+	   
+	   const double GeometricRatio = TargetRadiusHoriz / TargetRadiusDiag; 
+	   const double SourceRadiusHoriz = SourceRadiusDiag * GeometricRatio;
+	   
+	   const float SourceHalfRad = FMath::Atan(SourceRadiusHoriz);
 	   FOVAngle = FMath::RadiansToDegrees(SourceHalfRad) * 2.0f;
+	   
+	   // Clamp to prevent rendering errors at extreme FOVs
 	   FOVAngle = FMath::Clamp(FOVAngle, 1.0f, 170.0f);
 	}
 
-	if (SizeXY.X <= 0 || SizeXY.Y <= 0) return;
-
-	// Create/Resize Texture
+	if (SizeXY.X <= 0 || SizeXY.Y <= 0)
+	{
+	   return;
+	}
+	
 	if (!DistortionMapTexture || DistortionMapTexture->GetSizeX() != SizeXY.X || DistortionMapTexture->GetSizeY() != SizeXY.Y)
 	{
 	   DistortionMapTexture = UTexture2D::CreateTransient(SizeXY.X, SizeXY.Y, PF_G16R16F);
@@ -367,15 +445,21 @@ void UTempoCamera::InitDistortionMap()
 #endif
 	   DistortionMapTexture->UpdateResource();
 	}
-
-	// Auto-Sync Focal Length
-	float NormalizedF = 0.5f;
+	const float HalfRadDest = FMath::DegreesToRadians(DistortedFOV / 2.0f);
+	const float NormalizedFDest = 0.5f / FMath::Tan(HalfRadDest);
+	
+	const double FxDest = NormalizedFDest * SizeXY.X;
+	const double FyDest = FxDest;
+	
+	float NormalizedFSource = 0.5f;
 	if (ProjectionType == ECameraProjectionMode::Perspective)
 	{
-	   float HFOV = FMath::Clamp(DistortedFOV, 1.0f, 179.0f);
-	   float HalfRad = FMath::DegreesToRadians(HFOV / 2.0f);
-	   NormalizedF = 0.5f / FMath::Tan(HalfRad);
+	   const float ClampedFOV = FMath::Clamp(FOVAngle, 1.0f, 179.0f);
+	   const float HalfRadSource = FMath::DegreesToRadians(ClampedFOV / 2.0f);
+	   NormalizedFSource = 0.5f / FMath::Tan(HalfRadSource);
 	}
+	const double FxSource = NormalizedFSource * SizeXY.X;
+	const double FySource = FxSource; 
 	
 	FTexture2DMipMap& Mip = DistortionMapTexture->GetPlatformData()->Mips[0];
 	uint16* MipData = reinterpret_cast<uint16*>(Mip.BulkData.Lock(LOCK_READ_WRITE));
@@ -386,32 +470,32 @@ void UTempoCamera::InitDistortionMap()
 	   return;
 	}
 	
-	const double Fx = NormalizedF * SizeXY.X;
-	const double Fy = Fx; 
 	const double Cx = SizeXY.X * 0.5;
 	const double Cy = SizeXY.Y * 0.5;
+	
+	const double InvFxDest = 1.0 / FxDest;
+	const double InvFyDest = 1.0 / FyDest;
+	const float InvSizeX = 1.0f / (float)SizeXY.X;
+	const float InvSizeY = 1.0f / (float)SizeXY.Y;
 
-	// Pixel Loop (Robust Inverse Solver)
 	for (int V = 0; V < SizeXY.Y; ++V)
 	{
 	   uint16* Row = &MipData[V * SizeXY.X * 2];
+	   const double TargetY = (V - Cy) * InvFyDest;
+	   const double TargetY2 = TargetY * TargetY;
+
 	   for (int U = 0; U < SizeXY.X; ++U)
 	   {
-	   double TargetX = (U - Cx) / Fx;
-	   double TargetY = (V - Cy) / Fy;
+	   const double TargetX = (U - Cx) * InvFxDest;
+	   const double TargetRadius = FMath::Sqrt(TargetX * TargetX + TargetY2);
 	   
-	   double TargetRadius = FMath::Sqrt(TargetX * TargetX + TargetY * TargetY);
-	   double SourceRadius = SolveInverseDistortion(TargetRadius, K1, K2, K3);
+	   const double SourceRadius = SolveInverseDistortion(TargetRadius, K1, K2, K3);
 
-	   double Scale = (TargetRadius > 1e-6) ? (SourceRadius / TargetRadius) : 1.0;
+	   const double Scale = (TargetRadius > 1e-6) ? (SourceRadius / TargetRadius) : 1.0;
+		 
+	   const float FinalU = (float)(TargetX * Scale * FxSource + Cx) * InvSizeX;
+	   const float FinalV = (float)(TargetY * Scale * FySource + Cy) * InvSizeY;
 	   
-	   double X = TargetX * Scale;
-	   double Y = TargetY * Scale;
-
-	   // Standard Normalization
-	   float FinalU = (float)(X * Fx + Cx) / (float)SizeXY.X;
-	   float FinalV = (float)(Y * Fy + Cy) / (float)SizeXY.Y;
-
 	   Row[U * 2 + 0] = FFloat16(FinalU).Encoded;
 	   Row[U * 2 + 1] = FFloat16(FinalV).Encoded;
 	   }
@@ -433,8 +517,8 @@ void UTempoCamera::PostEditChangeProperty(FPropertyChangedEvent& PropertyChanged
 	
 	const FName PropertyName = (PropertyChangedEvent.Property != nullptr) ? PropertyChangedEvent.Property->GetFName() : NAME_None;
 	if (PropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, LensParameters) || 
-		PropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, DistortedFOV) ||
-		PropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, SizeXY))
+	   PropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, DistortedFOV) ||
+	   PropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, SizeXY))
 	{
 	   UpdateLensParameters();
 	}
@@ -629,8 +713,8 @@ void UTempoCamera::ApplyDepthEnabled()
 	   // Bind Distortion
 	   if (DistortionMapTexture)
 	   {
-		 PostProcessMaterialInstance->SetTextureParameterValue(FName("DistortionMap"), DistortionMapTexture);
-		 PostProcessMaterialInstance->SetScalarParameterValue(FName("CroppingFactor"), CroppingFactor);
+	   PostProcessMaterialInstance->SetTextureParameterValue(FName("DistortionMap"), DistortionMapTexture);
+	   PostProcessMaterialInstance->SetScalarParameterValue(FName("CroppingFactor"), CroppingFactor);
 	   }
 
 	   MinDepth = GEngine->NearClipPlane;
@@ -651,8 +735,8 @@ void UTempoCamera::ApplyDepthEnabled()
 	   PostProcessMaterialInstance = UMaterialInstanceDynamic::Create(PostProcessMaterialNoDepth.Get(), this);
 	   if (DistortionMapTexture)
 	   {
-		 PostProcessMaterialInstance->SetTextureParameterValue(FName("DistortionMap"), DistortionMapTexture);
-		 PostProcessMaterialInstance->SetScalarParameterValue(FName("CroppingFactor"), CroppingFactor);
+	   PostProcessMaterialInstance->SetTextureParameterValue(FName("DistortionMap"), DistortionMapTexture);
+	   PostProcessMaterialInstance->SetScalarParameterValue(FName("CroppingFactor"), CroppingFactor);
 	   }
 	   }
 	   else
@@ -673,17 +757,17 @@ void UTempoCamera::ApplyDepthEnabled()
 	{
 	   SemanticLabelTable->ForeachRow<FSemanticLabel>(TEXT(""),
 	   [&OverridableLabelRowName,
-		 &OverridingLabelRowName,
-		 &OverridableLabel,
-		 &OverridingLabel](const FName& Key, const FSemanticLabel& Value)
+	   &OverridingLabelRowName,
+	   &OverridableLabel,
+	   &OverridingLabel](const FName& Key, const FSemanticLabel& Value)
 	   {
 	   if (Key == OverridableLabelRowName)
 	   {
-		 OverridableLabel = Value.Label;
+	   OverridableLabel = Value.Label;
 	   }
 	   if (Key == OverridingLabelRowName)
 	   {
-		 OverridingLabel = Value.Label;
+	   OverridingLabel = Value.Label;
 	   }
 	   });
 	}
