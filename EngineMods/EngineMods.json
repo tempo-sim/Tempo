@@ -1,4 +1,60 @@
 {
+  "5.7": [
+    {
+      "Type": "SourceOnly",
+      "Root": "Engine/Source/Programs/Shared/EpicGames.Perforce",
+      "Patch": [
+        "EpicGames.Perforce.csproj.patch.1"
+      ]
+    },
+    {
+      "Type": "SourceOnly",
+      "Root": "Engine/Source/Programs/AutomationTool",
+      "Patch": [
+        "AutomationTool.csproj.patch.1",
+        "AutomationUtils/AutomationUtils.Automation.csproj.patch.1",
+        "Gauntlet/Gauntlet.Automation.csproj.patch.1"
+      ]
+    },
+    {
+      "Type": "UnrealBuildTool",
+      "Root": "Engine/Source/Programs/UnrealBuildTool",
+      "Add": [
+        "Configuration/TempoModuleRules.cs",
+        "ToolChain/TempoLinuxToolChain.cs",
+        "ToolChain/TempoMacToolChain.cs",
+        "ToolChain/TempoVCToolChain.cs"
+      ],
+      "Patch": [
+        "Configuration/UEBuildTarget.cs.patch.1",
+        "Configuration/UEBuildTarget.cs.patch.2",
+        "Platform/Linux/LinuxToolChain.cs.patch.1"
+      ]
+    },
+    {
+      "Type": "Plugin",
+      "Root": "Engine/Plugins/Runtime/ZoneGraph",
+      "Patch": [
+        "ZoneGraph.patch.1",
+        "ZoneGraph.patch.2",
+        "ZoneGraph.patch.3",
+        "ZoneGraph.patch.4",
+        "ZoneGraph.patch.5",
+        "ZoneGraph.patch.6",
+        "ZoneGraph.patch.7"
+      ]
+    },
+    {
+      "Type": "Plugin",
+      "Root": "Engine/Plugins/AI/MassCrowd",
+      "Patch": [
+        "MassCrowd.patch.1",
+        "MassCrowd.patch.2",
+        "MassCrowd.patch.3",
+        "MassCrowd.patch.4"
+      ]
+    }
+  ],
   "5.6": [
     {
       "Type": "SourceOnly",

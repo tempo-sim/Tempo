@@ -134,6 +134,12 @@ void UTempoLidar::OnRegister()
 {
 	Super::OnRegister();
 
+	// Don't activate capture components during cooking - materials and rendering aren't available
+	if (IsRunningCommandlet())
+	{
+		return;
+	}
+
 	SyncCaptureComponents();
 }
 
