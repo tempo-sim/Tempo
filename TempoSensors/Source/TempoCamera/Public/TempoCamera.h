@@ -3,10 +3,8 @@
 #pragma once
 
 #include "TempoCamera/Camera.pb.h"
-
 #include "TempoSensorInterface.h"
 #include "TempoSceneCaptureComponent2D.h"
-
 #include "TempoScriptingServer.h"
 
 #include "CoreMinimal.h"

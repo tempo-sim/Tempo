@@ -3,9 +3,9 @@
 #include "TempoActorLabeler.h"
 #include "TempoCamera.h"
 #include "TempoCameraModule.h"
-#include "TempoSensorsSettings.h"
 #include "TempoLabelTypes.h"
 #include "TempoSensorsConstants.h"
+#include "TempoSensorsSettings.h"
 
 #include "Async/Async.h"
 #include "Engine/TextureRenderTarget2D.h"
