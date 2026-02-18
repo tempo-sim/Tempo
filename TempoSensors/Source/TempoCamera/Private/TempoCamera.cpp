@@ -1,7 +1,8 @@
 // Copyright Tempo Simulation, LLC. All Rights Reserved
 
-#include "TempoActorLabeler.h"
 #include "TempoCamera.h"
+
+#include "TempoActorLabeler.h"
 #include "TempoCameraModule.h"
 #include "TempoLabelTypes.h"
 #include "TempoSensorsConstants.h"
