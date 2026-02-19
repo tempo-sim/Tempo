@@ -136,6 +136,7 @@ USTRUCT(BlueprintType)
 struct FTempoLensDistortionParameters
 {
 	GENERATED_BODY()
+	
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens")
 	float K1 = 0.0f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens")

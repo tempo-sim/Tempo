@@ -8,7 +8,6 @@
 #include "TempoSensorsConstants.h"
 #include "TempoSensorsSettings.h"
 
-#include "Async/Async.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "Engine/Texture2D.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -19,7 +18,7 @@
 static double Solve(const TFunction<double(double)>& Objective, const TFunction<double(double)>& Derivative, const double InitialGuess, const int32 MaxIter, const double Threshold)
 {
 	double X = InitialGuess;
-	for (int i = 0; i < MaxIter; ++i)
+	for (int I = 0; I < MaxIter; ++I)
 	{
 		const double FVal = Objective(X);
 		if (FMath::Abs(FVal) < Threshold) 
@@ -304,16 +303,6 @@ void TTextureRead<FCameraPixelWithDepth>::RespondToRequests(const TArray<FBoundi
 
 UTempoCamera::UTempoCamera()
 {
-	DistortionMapTexture = nullptr;
-	LensParameters.K1 = 0.0f;
-	LensParameters.K2 = 0.0f;
-	LensParameters.K3 = 0.0f;
-	LensParameters.P1 = 0.0f;
-	LensParameters.P2 = 0.0f;
-	
-	// Default F/C (Will be overwritten by InitDistortionMap)
-	CroppingFactor = 0.0f;
-	
 	MeasurementTypes = { EMeasurementType::COLOR_IMAGE, EMeasurementType::LABEL_IMAGE, EMeasurementType::DEPTH_IMAGE, EMeasurementType::BOUNDING_BOXES };
 	CaptureSource = ESceneCaptureSource::SCS_FinalColorLDR;
 	PostProcessSettings.AutoExposureMethod = AEM_Basic;
@@ -398,13 +387,11 @@ void UTempoCamera::InitDistortionMap()
 			MaxDistortedRadius = RCrit * Scale;
 		}
 	}
-	
 	if (MaxDistortedRadius > 0.0 && DistortedFOV > 0.0f)
 	{
 		double MaxPossibleFOV = FMath::RadiansToDegrees(FMath::Atan(MaxDistortedRadius)) * 2.0;
 		ensureMsgf(DistortedFOV <= MaxPossibleFOV, TEXT("DistortedFOV %.2f exceeds limit %.2f for K1=%.3f. Artifacts expected."), DistortedFOV, MaxPossibleFOV, K1);
 	}
-
 	if (DistortedFOV <= 0.0f)
 	{
 		FOVAngle = 90.0f;
@@ -413,21 +400,27 @@ void UTempoCamera::InitDistortionMap()
 	{
 		const float HalfFOVRad = FMath::DegreesToRadians(DistortedFOV / 2.0f);
 		const double TargetRadiusHoriz = FMath::Tan(HalfFOVRad);
+		double SourceRadiusHoriz;
+		if (K1 >= 0.0)
+		{
+			// Pincushion
+			SourceRadiusHoriz = SolveInverseDistortion(TargetRadiusHoriz, K1, K2, K3);
+		}
+		else
+		{
+			// Barrel
+			const double AspectRatio = (SizeXY.Y > 0) ? static_cast<double>(SizeXY.X) / static_cast<double>(SizeXY.Y) : 1.0;
+			const double TargetRadiusVert = TargetRadiusHoriz / AspectRatio;
+			const double TargetRadiusDiag = FMath::Sqrt(TargetRadiusHoriz * TargetRadiusHoriz + TargetRadiusVert * TargetRadiusVert);
 		
-		const double AspectRatio = (SizeXY.Y > 0) ? static_cast<double>(SizeXY.X) / static_cast<double>(SizeXY.Y) : 1.0;
+			const double SourceRadiusDiag = SolveInverseDistortion(TargetRadiusDiag, K1, K2, K3);
 		
-		const double TargetRadiusVert = TargetRadiusHoriz / AspectRatio;
-		const double TargetRadiusDiag = FMath::Sqrt(TargetRadiusHoriz * TargetRadiusHoriz + TargetRadiusVert * TargetRadiusVert);
-		
-		const double SourceRadiusDiag = SolveInverseDistortion(TargetRadiusDiag, K1, K2, K3);
-		
-		const double GeometricRatio = TargetRadiusHoriz / TargetRadiusDiag; 
-		const double SourceRadiusHoriz = SourceRadiusDiag * GeometricRatio;
-		
+			const double GeometricRatio = TargetRadiusHoriz / TargetRadiusDiag; 
+			SourceRadiusHoriz = SourceRadiusDiag * GeometricRatio;
+		}
+		// Convert horizontal source radius back to degrees
 		const float SourceHalfRad = FMath::Atan(SourceRadiusHoriz);
 		FOVAngle = FMath::RadiansToDegrees(SourceHalfRad) * 2.0f;
-		
-		// Clamp to prevent rendering errors at extreme FOVs
 		FOVAngle = FMath::Clamp(FOVAngle, 1.0f, 170.0f);
 	}
 
@@ -458,9 +451,16 @@ void UTempoCamera::InitDistortionMap()
 	float NormalizedFSource = 0.5f;
 	if (ProjectionType == ECameraProjectionMode::Perspective)
 	{
-		const float ClampedFOV = FMath::Clamp(FOVAngle, 1.0f, 179.0f);
-		const float HalfRadSource = FMath::DegreesToRadians(ClampedFOV / 2.0f);
-		NormalizedFSource = 0.5f / FMath::Tan(HalfRadSource);
+		if (K1 >= 0.0)
+		{
+			NormalizedFSource = NormalizedFDest;
+		}
+		else
+		{
+			const float ClampedFOV = FMath::Clamp(FOVAngle, 1.0f, 179.0f);
+			const float HalfRadSource = FMath::DegreesToRadians(ClampedFOV / 2.0f);
+			NormalizedFSource = 0.5f / FMath::Tan(HalfRadSource);
+		}
 	}
 	const double FxSource = NormalizedFSource * SizeXY.X;
 	const double FySource = FxSource; 
@@ -623,7 +623,6 @@ FTextureRead* UTempoCamera::MakeTextureRead() const
 {
 	check(GetWorld());
 
-	// Capture instance-to-semantic mapping at render time for bounding box requests
 	TMap<uint8, uint8> InstanceToSemanticMap;
 	if (UTempoActorLabeler* Labeler = GetWorld()->GetSubsystem<UTempoActorLabeler>())
 	{
@@ -710,7 +709,6 @@ void UTempoCamera::ApplyDepthEnabled()
 		{
 			PostProcessMaterialInstance = UMaterialInstanceDynamic::Create(PostProcessMaterialWithDepth.Get(), this);
 			
-			// Bind Distortion
 			if (DistortionMapTexture)
 			{
 				PostProcessMaterialInstance->SetTextureParameterValue(FName("DistortionMap"), DistortionMapTexture);
@@ -744,7 +742,7 @@ void UTempoCamera::ApplyDepthEnabled()
 			UE_LOG(LogTempoCamera, Error, TEXT("PostProcessMaterialWithDepth is not set in TempoSensors settings"));
 		}
 		
-		RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA8; // Corresponds to PF_B8G8R8A8
+		RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA8;
 		PixelFormatOverride = EPixelFormat::PF_Unknown;
 	}
 
