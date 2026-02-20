@@ -3,10 +3,8 @@
 #pragma once
 
 #include "TempoCamera/Camera.pb.h"
-
 #include "TempoSensorInterface.h"
 #include "TempoSceneCaptureComponent2D.h"
-
 #include "TempoScriptingServer.h"
 
 #include "CoreMinimal.h"
@@ -45,11 +43,10 @@ struct FCameraPixelWithDepth
 
 	float Depth(float MinDepth, float MaxDepth, float MaxDiscretizedDepth) const
 	{
-		// We discretize inverse depth to give more consistent precision vs depth.
-		// See https://developer.nvidia.com/content/depth-precision-visualized
-		const float InverseDepthFraction = static_cast<float>(U5) / MaxDiscretizedDepth;
-		const float InverseDepth = InverseDepthFraction * (1.0 / MinDepth - 1.0 / MaxDepth) + 1.0 / MaxDepth;
-		return 1.0 / InverseDepth;
+	   // We discretize inverse depth to give more consistent precision vs depth.
+	   const float InverseDepthFraction = static_cast<float>(U5) / MaxDiscretizedDepth;
+	   const float InverseDepth = InverseDepthFraction * (1.0 / MinDepth - 1.0 / MaxDepth) + 1.0 / MaxDepth;
+	   return 1.0 / InverseDepth;
 	}
 
 private:
@@ -88,10 +85,10 @@ template <>
 struct TTextureRead<FCameraPixelWithDepth> : TTextureReadBase<FCameraPixelWithDepth>
 {
 	TTextureRead(const FIntPoint& ImageSizeIn, int32 SequenceIdIn, double CaptureTimeIn, const FString& OwnerNameIn,
-		const FString& SensorNameIn, const FTransform& SensorTransformIn, float MinDepthIn, float MaxDepthIn,
-		TMap<uint8, uint8>&& InstanceToSemanticMapIn)
+	   const FString& SensorNameIn, const FTransform& SensorTransformIn, float MinDepthIn, float MaxDepthIn,
+	   TMap<uint8, uint8>&& InstanceToSemanticMapIn)
 	   : TTextureReadBase(ImageSizeIn, SequenceIdIn, CaptureTimeIn, OwnerNameIn, SensorNameIn, SensorTransformIn),
-	     MinDepth(MinDepthIn), MaxDepth(MaxDepthIn), InstanceToSemanticMap(MoveTemp(InstanceToSemanticMapIn))
+	   MinDepth(MinDepthIn), MaxDepth(MaxDepthIn), InstanceToSemanticMap(MoveTemp(InstanceToSemanticMapIn))
 	{
 	}
 
@@ -111,9 +108,9 @@ template <>
 struct TTextureRead<FCameraPixelNoDepth> : TTextureReadBase<FCameraPixelNoDepth>
 {
 	TTextureRead(const FIntPoint& ImageSizeIn, int32 SequenceIdIn, double CaptureTimeIn, const FString& OwnerNameIn,
-		const FString& SensorNameIn, const FTransform& SensorTransformIn, TMap<uint8, uint8>&& InstanceToSemanticMapIn)
+	   const FString& SensorNameIn, const FTransform& SensorTransformIn, TMap<uint8, uint8>&& InstanceToSemanticMapIn)
 	   : TTextureReadBase(ImageSizeIn, SequenceIdIn, CaptureTimeIn, OwnerNameIn, SensorNameIn, SensorTransformIn),
-	     InstanceToSemanticMap(MoveTemp(InstanceToSemanticMapIn))
+	   InstanceToSemanticMap(MoveTemp(InstanceToSemanticMapIn))
 	{
 	}
 
@@ -133,6 +130,25 @@ struct TEMPOCAMERA_API FTempoCameraIntrinsics
 	const float Fy;
 	const float Cx;
 	const float Cy;
+};
+
+USTRUCT(BlueprintType)
+struct FTempoLensDistortionParameters
+{
+	GENERATED_BODY()
+	
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens")
+	float K1 = 0.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens")
+	float K2 = 0.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens")
+	float K3 = 0.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens")
+	float P1 = 0.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens")
+	float P2 = 0.0f;
+
+	bool operator==(const FTempoLensDistortionParameters& Other) const = default;
 };
 
 UCLASS(Blueprintable, BlueprintType, ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
@@ -172,6 +188,16 @@ public:
 	virtual TOptional<TFuture<void>> SendMeasurements() override;
 	// End ITempoSensorInterface
 
+	// Tempo Distortion
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens", meta = (ClampMin = "1.0", ClampMax = "170.0"))
+	float DistortedFOV = 90.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens")
+	FTempoLensDistortionParameters LensParameters;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens")
+	float CroppingFactor = 0.0f;
+
 protected:
 	virtual bool HasPendingRequests() const override;
 
@@ -184,6 +210,16 @@ protected:
 	void SetDepthEnabled(bool bDepthEnabledIn);
 
 	void ApplyDepthEnabled();
+	
+	virtual void InitRenderTarget() override;
+	
+	void InitDistortionMap();
+
+	void UpdateLensParameters();
+
+#if WITH_EDITOR
+	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
+#endif
 
 	// The measurement types supported. Should be set in constructor of derived classes.
 	UPROPERTY(VisibleAnywhere)
@@ -202,10 +238,17 @@ protected:
 	float MaxDepth = 100000.0; // 1km
 
 	UPROPERTY(VisibleAnywhere)
-	UMaterialInstanceDynamic* PostProcessMaterialInstance= nullptr;
+	UMaterialInstanceDynamic* PostProcessMaterialInstance = nullptr;
+
+	UPROPERTY(Transient)
+	UTexture2D* DistortionMapTexture = nullptr;
 
 	TArray<FColorImageRequest> PendingColorImageRequests;
 	TArray<FLabelImageRequest> PendingLabelImageRequests;
 	TArray<FDepthImageRequest> PendingDepthImageRequests;
 	TArray<FBoundingBoxesRequest> PendingBoundingBoxesRequests;
+
+	FTempoLensDistortionParameters LastLensParameters;
+	float LastDistortedFOV = -1.0f;
+	FIntPoint LastSizeXY = FIntPoint(0, 0);
 };

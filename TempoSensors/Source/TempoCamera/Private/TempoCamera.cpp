@@ -2,19 +2,64 @@
 
 #include "TempoCamera.h"
 
+#include "TempoActorLabeler.h"
 #include "TempoCameraModule.h"
-
+#include "TempoLabelTypes.h"
+#include "TempoSensorsConstants.h"
 #include "TempoSensorsSettings.h"
 
-#include "TempoLabelTypes.h"
-
-#include "TempoSensorsConstants.h"
-
-#include "TempoActorLabeler.h"
-
 #include "Engine/TextureRenderTarget2D.h"
-
+#include "Engine/Texture2D.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Math/Box2D.h"
+#include "TextureResource.h"
+
+// Root-Finding Solver (Newton-Raphson)
+static double Solve(const TFunction<double(double)>& Objective, const TFunction<double(double)>& Derivative, const double InitialGuess, const int32 MaxIter, const double Threshold)
+{
+	double X = InitialGuess;
+	for (int I = 0; I < MaxIter; ++I)
+	{
+		const double FVal = Objective(X);
+		if (FMath::Abs(FVal) < Threshold) 
+		{
+			break;
+		}
+		double Deriv = Derivative(X);
+		if (FMath::Abs(Deriv) < 0.001) 
+		{
+			Deriv = (Deriv < 0) ? -0.001 : 0.001;
+		}
+		X -= FVal / Deriv;
+	}
+	return X;
+}
+
+static double SolveInverseDistortion(double TargetRadius, double K1, double K2, double K3)
+{
+	if (TargetRadius < 1e-6)
+	{
+		return TargetRadius;
+	}
+	
+	return Solve(
+		[K1, K2, K3, TargetRadius](double R) {
+			double R2 = R * R;
+			double R4 = R2 * R2;
+			double R6 = R4 * R2;
+			return (R * (1.0 + K1*R2 + K2*R4 + K3*R6)) - TargetRadius; 
+		},
+		[K1, K2, K3](double R) {
+			double R2 = R * R;
+			double R4 = R2 * R2;
+			double R6 = R4 * R2;
+			return 1.0 + 3.0*K1*R2 + 5.0*K2*R4 + 7.0*K3*R6;
+		},
+		TargetRadius,
+		40,
+		1e-6
+	);
+}
 
 /**
  * Compute 2D bounding boxes from label data.
@@ -54,14 +99,14 @@ void ExtractPixelData(const PixelType& Pixel, EColorImageEncoding Encoding, char
 {
 	switch (Encoding)
 	{
-	case EColorImageEncoding::BGR8:
+		case EColorImageEncoding::BGR8:
 		{
 			Dest[0] = Pixel.B();
 			Dest[1] = Pixel.G();
 			Dest[2] = Pixel.R();
 			break;
 		}
-	case EColorImageEncoding::RGB8:
+		case EColorImageEncoding::RGB8:
 		{
 			Dest[0] = Pixel.R();
 			Dest[1] = Pixel.G();
@@ -96,17 +141,22 @@ void RespondToColorRequests(const TTextureRead<PixelType>* TextureRead, const TA
 		TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraDecodeColor);
 		ColorImage.set_width(TextureRead->ImageSize.X);
 		ColorImage.set_height(TextureRead->ImageSize.Y);
+		
 		std::vector<char> ImageData;
 		ImageData.resize(TextureRead->Image.Num() * 3);
+		
 		const UTempoSensorsSettings* TempoSensorsSettings = GetDefault<UTempoSensorsSettings>();
 		if (!TempoSensorsSettings)
 		{
 			return;
 		}
+		
 		const EColorImageEncoding Encoding = TempoSensorsSettings->GetColorImageEncoding();
-		ParallelFor(TextureRead->Image.Num(), [&ImageData, &TextureRead, Encoding](int32 Idx){
+		ParallelFor(TextureRead->Image.Num(), [&ImageData, &TextureRead, Encoding](int32 Idx)
+		{
 			ExtractPixelData(TextureRead->Image[Idx], Encoding, &ImageData[Idx * 3]);
 		});
+		
 		ColorImage.mutable_data()->assign(ImageData.begin(), ImageData.end());
 		ColorImage.set_encoding(ColorEncodingToProto(Encoding));
 		TextureRead->ExtractMeasurementHeader(TransmissionTime, ColorImage.mutable_header());
@@ -128,12 +178,15 @@ void RespondToLabelRequests(const TTextureRead<PixelType>* TextureRead, const TA
 		TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraDecodeLabel);
 		LabelImage.set_width(TextureRead->ImageSize.X);
 		LabelImage.set_height(TextureRead->ImageSize.Y);
+		
 		std::vector<char> ImageData;
 		ImageData.resize(TextureRead->Image.Num());
+		
 		ParallelFor(TextureRead->Image.Num(), [&ImageData, &TextureRead](int32 Idx)
 		{
 			ImageData[Idx] = TextureRead->Image[Idx].Label();
 		});
+		
 		LabelImage.mutable_data()->assign(ImageData.begin(), ImageData.end());
 		TextureRead->ExtractMeasurementHeader(TransmissionTime, LabelImage.mutable_header());
 	}
@@ -152,21 +205,18 @@ void RespondToBoundingBoxRequests(const TTextureRead<PixelType>* TextureRead, co
 	if (!Requests.IsEmpty())
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraDecodeBoundingBoxes);
-
-		// Set header and dimensions
+		
 		Response.set_width(TextureRead->ImageSize.X);
 		Response.set_height(TextureRead->ImageSize.Y);
 		TextureRead->ExtractMeasurementHeader(TransmissionTime, Response.mutable_header());
-
-		// Extract label data from pixels
+		
 		TArray<uint8> LabelData;
 		LabelData.SetNumUninitialized(TextureRead->Image.Num());
 		ParallelFor(TextureRead->Image.Num(), [&LabelData, &TextureRead](int32 Idx)
 		{
 			LabelData[Idx] = TextureRead->Image[Idx].Label();
 		});
-
-		// Compute bounding boxes
+		
 		TMap<int32, FBox2D> BoundingBoxes = ComputeBoundingBoxes(LabelData, TextureRead->ImageSize.X, TextureRead->ImageSize.Y);
 
 		// Add bounding boxes to proto message using the map captured at render time
@@ -230,10 +280,12 @@ void TTextureRead<FCameraPixelWithDepth>::RespondToRequests(const TArray<FDepthI
 		DepthImage.set_width(ImageSize.X);
 		DepthImage.set_height(ImageSize.Y);
 		DepthImage.mutable_depths()->Resize(ImageSize.X * ImageSize.Y, 0.0);
+		
 		ParallelFor(Image.Num(), [&DepthImage, this](int32 Idx)
 		{
 			DepthImage.set_depths(Idx, Image[Idx].Depth(MinDepth, MaxDepth, GTempo_Max_Discrete_Depth));
 		});
+		
 		ExtractMeasurementHeader(TransmissionTime, DepthImage.mutable_header());
 	}
 
@@ -251,7 +303,7 @@ void TTextureRead<FCameraPixelWithDepth>::RespondToRequests(const TArray<FBoundi
 
 UTempoCamera::UTempoCamera()
 {
-	MeasurementTypes = { EMeasurementType::COLOR_IMAGE, EMeasurementType::LABEL_IMAGE, EMeasurementType::DEPTH_IMAGE, EMeasurementType::BOUNDING_BOXES};
+	MeasurementTypes = { EMeasurementType::COLOR_IMAGE, EMeasurementType::LABEL_IMAGE, EMeasurementType::DEPTH_IMAGE, EMeasurementType::BOUNDING_BOXES };
 	CaptureSource = ESceneCaptureSource::SCS_FinalColorLDR;
 	PostProcessSettings.AutoExposureMethod = AEM_Basic;
 	PostProcessSettings.AutoExposureSpeedUp = 20.0;
@@ -272,9 +324,206 @@ UTempoCamera::UTempoCamera()
 void UTempoCamera::BeginPlay()
 {
 	Super::BeginPlay();
-
 	ApplyDepthEnabled();
 }
+
+void UTempoCamera::InitRenderTarget()
+{
+	InitDistortionMap();
+	Super::InitRenderTarget();
+}
+
+void UTempoCamera::UpdateLensParameters()
+{
+	if (LensParameters != LastLensParameters || !FMath::IsNearlyEqual(DistortedFOV, LastDistortedFOV) || SizeXY != LastSizeXY)
+	{
+		LastLensParameters = LensParameters;
+		LastDistortedFOV = DistortedFOV;
+		LastSizeXY = SizeXY;
+		InitDistortionMap();
+	}
+}
+
+void UTempoCamera::InitDistortionMap()
+{
+	const double K1 = LensParameters.K1;
+	const double K2 = LensParameters.K2;
+	const double K3 = LensParameters.K3;
+
+	// Feasibility check
+	double MaxDistortedRadius = -1.0; 
+	
+	if (K1 < 0.0)
+	{
+		if (FMath::IsNearlyZero(K2) && FMath::IsNearlyZero(K3))
+		{
+			double RCrit = FMath::Sqrt(-1.0 / (3.0 * K1));
+			double RCrit2 = RCrit * RCrit;
+			MaxDistortedRadius = RCrit * (1.0 + K1 * RCrit2);
+		}
+		else
+		{
+			double RCrit = Solve(
+				[K1, K2, K3](double R) {
+					double R2 = R * R;
+					double R4 = R2 * R2;
+					double R6 = R4 * R2;
+					return 1.0 + 3.0*K1*R2 + 5.0*K2*R4 + 7.0*K3*R6; 
+				},
+				[K1, K2, K3](double R) {
+					double R2 = R * R;
+					double R3 = R2 * R;
+					double R5 = R3 * R2;
+					return 6.0*K1*R + 20.0*K2*R3 + 42.0*K3*R5; 
+				},
+				0.5,
+				40,
+				1e-6
+			);
+			double R2 = RCrit * RCrit;
+			double R4 = R2 * R2;
+			double R6 = R4 * R2;
+			double Scale = 1.0 + K1*R2 + K2*R4 + K3*R6;
+			MaxDistortedRadius = RCrit * Scale;
+		}
+	}
+	if (MaxDistortedRadius > 0.0 && DistortedFOV > 0.0f)
+	{
+		double MaxPossibleFOV = FMath::RadiansToDegrees(FMath::Atan(MaxDistortedRadius)) * 2.0;
+		ensureMsgf(DistortedFOV <= MaxPossibleFOV, TEXT("DistortedFOV %.2f exceeds limit %.2f for K1=%.3f. Artifacts expected."), DistortedFOV, MaxPossibleFOV, K1);
+	}
+	if (DistortedFOV <= 0.0f)
+	{
+		FOVAngle = 90.0f;
+	}
+	else
+	{
+		const float HalfFOVRad = FMath::DegreesToRadians(DistortedFOV / 2.0f);
+		const double TargetRadiusHoriz = FMath::Tan(HalfFOVRad);
+		double SourceRadiusHoriz;
+		if (K1 >= 0.0)
+		{
+			// Pincushion
+			SourceRadiusHoriz = SolveInverseDistortion(TargetRadiusHoriz, K1, K2, K3);
+		}
+		else
+		{
+			// Barrel
+			const double AspectRatio = (SizeXY.Y > 0) ? static_cast<double>(SizeXY.X) / static_cast<double>(SizeXY.Y) : 1.0;
+			const double TargetRadiusVert = TargetRadiusHoriz / AspectRatio;
+			const double TargetRadiusDiag = FMath::Sqrt(TargetRadiusHoriz * TargetRadiusHoriz + TargetRadiusVert * TargetRadiusVert);
+		
+			const double SourceRadiusDiag = SolveInverseDistortion(TargetRadiusDiag, K1, K2, K3);
+		
+			const double GeometricRatio = TargetRadiusHoriz / TargetRadiusDiag; 
+			SourceRadiusHoriz = SourceRadiusDiag * GeometricRatio;
+		}
+		// Convert horizontal source radius back to degrees
+		const float SourceHalfRad = FMath::Atan(SourceRadiusHoriz);
+		FOVAngle = FMath::RadiansToDegrees(SourceHalfRad) * 2.0f;
+		FOVAngle = FMath::Clamp(FOVAngle, 1.0f, 170.0f);
+	}
+
+	if (SizeXY.X <= 0 || SizeXY.Y <= 0)
+	{
+		return;
+	}
+	
+	if (!DistortionMapTexture || DistortionMapTexture->GetSizeX() != SizeXY.X || DistortionMapTexture->GetSizeY() != SizeXY.Y)
+	{
+		DistortionMapTexture = UTexture2D::CreateTransient(SizeXY.X, SizeXY.Y, PF_G16R16F);
+		DistortionMapTexture->CompressionSettings = TC_HDR;
+		DistortionMapTexture->Filter = TF_Bilinear;
+		DistortionMapTexture->AddressX = TA_Clamp;
+		DistortionMapTexture->AddressY = TA_Clamp;
+		DistortionMapTexture->SRGB = 0;
+#ifdef UpdateResource
+#undef UpdateResource
+#endif
+		DistortionMapTexture->UpdateResource();
+	}
+	const float HalfRadDest = FMath::DegreesToRadians(DistortedFOV / 2.0f);
+	const float NormalizedFDest = 0.5f / FMath::Tan(HalfRadDest);
+	
+	const double FxDest = NormalizedFDest * SizeXY.X;
+	const double FyDest = FxDest;
+	
+	float NormalizedFSource = 0.5f;
+	if (ProjectionType == ECameraProjectionMode::Perspective)
+	{
+		if (K1 >= 0.0)
+		{
+			NormalizedFSource = NormalizedFDest;
+		}
+		else
+		{
+			const float ClampedFOV = FMath::Clamp(FOVAngle, 1.0f, 179.0f);
+			const float HalfRadSource = FMath::DegreesToRadians(ClampedFOV / 2.0f);
+			NormalizedFSource = 0.5f / FMath::Tan(HalfRadSource);
+		}
+	}
+	const double FxSource = NormalizedFSource * SizeXY.X;
+	const double FySource = FxSource; 
+	
+	FTexture2DMipMap& Mip = DistortionMapTexture->GetPlatformData()->Mips[0];
+	uint16* MipData = static_cast<uint16*>(Mip.BulkData.Lock(LOCK_READ_WRITE));
+
+	if (!MipData)
+	{
+		Mip.BulkData.Unlock();
+		return;
+	}
+	
+	const double Cx = SizeXY.X * 0.5;
+	const double Cy = SizeXY.Y * 0.5;
+	
+	const double InvFxDest = 1.0 / FxDest;
+	const double InvFyDest = 1.0 / FyDest;
+	const float InvSizeX = 1.0f / static_cast<float>(SizeXY.X);
+	const float InvSizeY = 1.0f / static_cast<float>(SizeXY.Y);
+
+	for (int V = 0; V < SizeXY.Y; ++V)
+	{
+		uint16* Row = &MipData[V * SizeXY.X * 2];
+		const double TargetY = (V - Cy) * InvFyDest;
+		const double TargetY2 = TargetY * TargetY;
+
+		for (int U = 0; U < SizeXY.X; ++U)
+		{
+			const double TargetX = (U - Cx) * InvFxDest;
+			const double TargetRadius = FMath::Sqrt(TargetX * TargetX + TargetY2);
+			const double SourceRadius = SolveInverseDistortion(TargetRadius, K1, K2, K3);
+			const double Scale = (TargetRadius > 1e-6) ? (SourceRadius / TargetRadius) : 1.0;
+			const float FinalU = static_cast<float>(TargetX * Scale * FxSource + Cx) * InvSizeX;
+			const float FinalV = static_cast<float>(TargetY * Scale * FySource + Cy) * InvSizeY;
+			Row[U * 2 + 0] = FFloat16(FinalU).Encoded;
+			Row[U * 2 + 1] = FFloat16(FinalV).Encoded;
+		}
+	}
+
+	Mip.BulkData.Unlock();
+	DistortionMapTexture->UpdateResource();
+	if (PostProcessMaterialInstance)
+	{
+		PostProcessMaterialInstance->SetTextureParameterValue(FName("DistortionMap"), DistortionMapTexture);
+		PostProcessMaterialInstance->SetScalarParameterValue(FName("CroppingFactor"), CroppingFactor);
+	}
+}
+
+#if WITH_EDITOR
+void UTempoCamera::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
+{
+	Super::PostEditChangeProperty(PropertyChangedEvent);
+	
+	const FName PropertyName = (PropertyChangedEvent.Property != nullptr) ? PropertyChangedEvent.Property->GetFName() : NAME_None;
+	if (PropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, LensParameters) || 
+		PropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, DistortedFOV) ||
+		PropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, SizeXY))
+	{
+		UpdateLensParameters();
+	}
+}
+#endif
 
 #if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 void UTempoCamera::UpdateSceneCaptureContents(FSceneInterface* Scene)
@@ -284,15 +533,15 @@ void UTempoCamera::UpdateSceneCaptureContents(FSceneInterface* Scene, ISceneRend
 {
 	if (!bDepthEnabled && !PendingDepthImageRequests.IsEmpty())
 	{
-		// If a client is requesting depth, start rendering it.
 		SetDepthEnabled(true);
 	}
 	
 	if (bDepthEnabled && PendingDepthImageRequests.IsEmpty())
 	{
-		// If no client is requesting depth, stop rendering it.
 		SetDepthEnabled(false);
 	}
+	
+	UpdateLensParameters();
 
 #if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 	Super::UpdateSceneCaptureContents(Scene);
@@ -323,7 +572,7 @@ void UTempoCamera::RequestMeasurement(const TempoCamera::BoundingBoxesRequest& R
 
 FTempoCameraIntrinsics UTempoCamera::GetIntrinsics() const
 {
-	return FTempoCameraIntrinsics(SizeXY, FOVAngle);
+	return FTempoCameraIntrinsics(SizeXY, DistortedFOV);
 }
 
 FString UTempoCamera::GetOwnerName() const
@@ -374,7 +623,6 @@ FTextureRead* UTempoCamera::MakeTextureRead() const
 {
 	check(GetWorld());
 
-	// Capture instance-to-semantic mapping at render time for bounding box requests
 	TMap<uint8, uint8> InstanceToSemanticMap;
 	if (UTempoActorLabeler* Labeler = GetWorld()->GetSubsystem<UTempoActorLabeler>())
 	{
@@ -382,7 +630,7 @@ FTextureRead* UTempoCamera::MakeTextureRead() const
 	}
 
 	return bDepthEnabled ?
-		static_cast<FTextureRead*>(new TTextureRead<FCameraPixelWithDepth>(SizeXY, SequenceId, GetWorld()->GetTimeSeconds(), GetOwnerName(), GetSensorName(), GetComponentTransform(), MinDepth, MaxDepth, MoveTemp(InstanceToSemanticMap))):
+		static_cast<FTextureRead*>(new TTextureRead<FCameraPixelWithDepth>(SizeXY, SequenceId, GetWorld()->GetTimeSeconds(), GetOwnerName(), GetSensorName(), GetComponentTransform(), MinDepth, MaxDepth, MoveTemp(InstanceToSemanticMap))) :
 		static_cast<FTextureRead*>(new TTextureRead<FCameraPixelNoDepth>(SizeXY, SequenceId, GetWorld()->GetTimeSeconds(), GetOwnerName(), GetSensorName(), GetComponentTransform(), MoveTemp(InstanceToSemanticMap)));
 }
 
@@ -399,7 +647,7 @@ TFuture<void> UTempoCamera::DecodeAndRespond(TUniquePtr<FTextureRead> TextureRea
 		DepthImageRequests = PendingDepthImageRequests,
 		BoundingBoxRequests = PendingBoundingBoxesRequests,
 		TransmissionTimeCpy = TransmissionTime
-		]
+	]
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraDecodeAndRespond);
 
@@ -460,6 +708,13 @@ void UTempoCamera::ApplyDepthEnabled()
 		if (const TObjectPtr<UMaterialInterface> PostProcessMaterialWithDepth = GetDefault<UTempoSensorsSettings>()->GetCameraPostProcessMaterialWithDepth())
 		{
 			PostProcessMaterialInstance = UMaterialInstanceDynamic::Create(PostProcessMaterialWithDepth.Get(), this);
+			
+			if (DistortionMapTexture)
+			{
+				PostProcessMaterialInstance->SetTextureParameterValue(FName("DistortionMap"), DistortionMapTexture);
+				PostProcessMaterialInstance->SetScalarParameterValue(FName("CroppingFactor"), CroppingFactor);
+			}
+
 			MinDepth = GEngine->NearClipPlane;
 			MaxDepth = TempoSensorsSettings->GetMaxCameraDepth();
 			PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MinDepth"), MinDepth);
@@ -476,13 +731,18 @@ void UTempoCamera::ApplyDepthEnabled()
 		if (const TObjectPtr<UMaterialInterface> PostProcessMaterialNoDepth = GetDefault<UTempoSensorsSettings>()->GetCameraPostProcessMaterialNoDepth())
 		{
 			PostProcessMaterialInstance = UMaterialInstanceDynamic::Create(PostProcessMaterialNoDepth.Get(), this);
+			if (DistortionMapTexture)
+			{
+				PostProcessMaterialInstance->SetTextureParameterValue(FName("DistortionMap"), DistortionMapTexture);
+				PostProcessMaterialInstance->SetScalarParameterValue(FName("CroppingFactor"), CroppingFactor);
+			}
 		}
 		else
 		{
 			UE_LOG(LogTempoCamera, Error, TEXT("PostProcessMaterialWithDepth is not set in TempoSensors settings"));
 		}
 		
-		RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA8; // Corresponds to PF_B8G8R8A8
+		RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA8;
 		PixelFormatOverride = EPixelFormat::PF_Unknown;
 	}
 
@@ -491,23 +751,24 @@ void UTempoCamera::ApplyDepthEnabled()
 	FName OverridingLabelRowName = TempoSensorsSettings->GetOverridingLabelRowName();
 	TOptional<int32> OverridableLabel;
 	TOptional<int32> OverridingLabel;
+	
 	if (!OverridableLabelRowName.IsNone())
 	{
 		SemanticLabelTable->ForeachRow<FSemanticLabel>(TEXT(""),
 			[&OverridableLabelRowName,
-				&OverridingLabelRowName,
-				&OverridableLabel,
-				&OverridingLabel](const FName& Key, const FSemanticLabel& Value)
-		{
-			if (Key == OverridableLabelRowName)
+			 &OverridingLabelRowName,
+			 &OverridableLabel,
+			 &OverridingLabel](const FName& Key, const FSemanticLabel& Value)
 			{
-				OverridableLabel = Value.Label;
-			}
-			if (Key == OverridingLabelRowName)
-			{
-				OverridingLabel = Value.Label;
-			}
-		});
+				if (Key == OverridableLabelRowName)
+				{
+					OverridableLabel = Value.Label;
+				}
+				if (Key == OverridingLabelRowName)
+				{
+					OverridingLabel = Value.Label;
+				}
+			});
 	}
 
 	if (PostProcessMaterialInstance)
