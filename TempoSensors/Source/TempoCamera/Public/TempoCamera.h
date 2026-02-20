@@ -148,15 +148,7 @@ struct FTempoLensDistortionParameters
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens")
 	float P2 = 0.0f;
 
-	bool operator==(const FTempoLensDistortionParameters& Other) const
-	{
-	   return K1 == Other.K1 && K2 == Other.K2 && K3 == Other.K3 && P1 == Other.P1 && P2 == Other.P2;
-	}
-
-	bool operator!=(const FTempoLensDistortionParameters& Other) const
-	{
-	   return !(*this == Other);
-	}
+	bool operator==(const FTempoLensDistortionParameters& Other) const = default;
 };
 
 UCLASS(Blueprintable, BlueprintType, ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
