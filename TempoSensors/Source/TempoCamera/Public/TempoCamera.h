@@ -188,16 +188,6 @@ public:
 	virtual TOptional<TFuture<void>> SendMeasurements() override;
 	// End ITempoSensorInterface
 
-	// Tempo Distortion
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens", meta = (ClampMin = "1.0", ClampMax = "170.0"))
-	float DistortedFOV = 90.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens")
-	FTempoLensDistortionParameters LensParameters;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens")
-	float CroppingFactor = 0.0f;
-
 protected:
 	virtual bool HasPendingRequests() const override;
 
@@ -248,7 +238,21 @@ protected:
 	TArray<FDepthImageRequest> PendingDepthImageRequests;
 	TArray<FBoundingBoxesRequest> PendingBoundingBoxesRequests;
 
-	FTempoLensDistortionParameters LastLensParameters;
-	float LastDistortedFOV = -1.0f;
-	FIntPoint LastSizeXY = FIntPoint(0, 0);
+	// TempoCamera supports distortion. Enable DriveFOVAngle to have FOVAngle (the FOV of the undistorted render) be driven by DistortFOV.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens", meta = (AllowPrivateAccess = "true"))
+	bool bDriveFOVAngle = true;
+	
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens", meta = (ClampMin = "1.0", ClampMax = "170.0", EditCondition = "bDriveFOVAngle", AllowPrivateAccess = "true"))
+	float DistortedFOV = 90.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens", meta = (AllowPrivateAccess = "true"))
+	FTempoLensDistortionParameters LensParameters;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens", meta = (AllowPrivateAccess = "true"))
+	float CroppingFactor = 0.0f;
+
+	// We sync the user-facing LensParameters and DistortedFOV to these, in order to detect changes
+	FTempoLensDistortionParameters LensParameters_Internal;
+	float DistortedFOV_Internal = -1.0f;
+	bool bDriveFOVAngle_Internal = false;
 };

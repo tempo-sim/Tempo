@@ -335,11 +335,18 @@ void UTempoCamera::InitRenderTarget()
 
 void UTempoCamera::UpdateLensParameters()
 {
-	if (LensParameters != LastLensParameters || !FMath::IsNearlyEqual(DistortedFOV, LastDistortedFOV) || SizeXY != LastSizeXY)
+	const bool bSizeChanged = !DistortionMapTexture || 
+							  DistortionMapTexture->GetSizeX() != SizeXY.X || 
+							  DistortionMapTexture->GetSizeY() != SizeXY.Y;
+
+	if (bDriveFOVAngle != bDriveFOVAngle_Internal ||
+		LensParameters != LensParameters_Internal || 
+		!FMath::IsNearlyEqual(DistortedFOV, DistortedFOV_Internal) || 
+		bSizeChanged)
 	{
-		LastLensParameters = LensParameters;
-		LastDistortedFOV = DistortedFOV;
-		LastSizeXY = SizeXY;
+		bDriveFOVAngle_Internal = bDriveFOVAngle;
+		LensParameters_Internal = LensParameters;
+		DistortedFOV_Internal = DistortedFOV;
 		InitDistortionMap();
 	}
 }
@@ -392,36 +399,40 @@ void UTempoCamera::InitDistortionMap()
 		double MaxPossibleFOV = FMath::RadiansToDegrees(FMath::Atan(MaxDistortedRadius)) * 2.0;
 		ensureMsgf(DistortedFOV <= MaxPossibleFOV, TEXT("DistortedFOV %.2f exceeds limit %.2f for K1=%.3f. Artifacts expected."), DistortedFOV, MaxPossibleFOV, K1);
 	}
-	if (DistortedFOV <= 0.0f)
+	
+	if (bDriveFOVAngle)
 	{
-		FOVAngle = 90.0f;
-	}
-	else
-	{
-		const float HalfFOVRad = FMath::DegreesToRadians(DistortedFOV / 2.0f);
-		const double TargetRadiusHoriz = FMath::Tan(HalfFOVRad);
-		double SourceRadiusHoriz;
-		if (K1 >= 0.0)
+		if (DistortedFOV <= 0.0f)
 		{
-			// Pincushion
-			SourceRadiusHoriz = SolveInverseDistortion(TargetRadiusHoriz, K1, K2, K3);
+			FOVAngle = 90.0f;
 		}
 		else
 		{
-			// Barrel
-			const double AspectRatio = (SizeXY.Y > 0) ? static_cast<double>(SizeXY.X) / static_cast<double>(SizeXY.Y) : 1.0;
-			const double TargetRadiusVert = TargetRadiusHoriz / AspectRatio;
-			const double TargetRadiusDiag = FMath::Sqrt(TargetRadiusHoriz * TargetRadiusHoriz + TargetRadiusVert * TargetRadiusVert);
-		
-			const double SourceRadiusDiag = SolveInverseDistortion(TargetRadiusDiag, K1, K2, K3);
-		
-			const double GeometricRatio = TargetRadiusHoriz / TargetRadiusDiag; 
-			SourceRadiusHoriz = SourceRadiusDiag * GeometricRatio;
+			const float HalfFOVRad = FMath::DegreesToRadians(DistortedFOV / 2.0f);
+			const double TargetRadiusHoriz = FMath::Tan(HalfFOVRad);
+			double SourceRadiusHoriz;
+			if (K1 >= 0.0)
+			{
+				// Pincushion
+				SourceRadiusHoriz = SolveInverseDistortion(TargetRadiusHoriz, K1, K2, K3);
+			}
+			else
+			{
+				// Barrel
+				const double AspectRatio = (SizeXY.Y > 0) ? static_cast<double>(SizeXY.X) / static_cast<double>(SizeXY.Y) : 1.0;
+				const double TargetRadiusVert = TargetRadiusHoriz / AspectRatio;
+				const double TargetRadiusDiag = FMath::Sqrt(TargetRadiusHoriz * TargetRadiusHoriz + TargetRadiusVert * TargetRadiusVert);
+		   
+				const double SourceRadiusDiag = SolveInverseDistortion(TargetRadiusDiag, K1, K2, K3);
+		   
+				const double GeometricRatio = TargetRadiusHoriz / TargetRadiusDiag; 
+				SourceRadiusHoriz = SourceRadiusDiag * GeometricRatio;
+			}
+			// Convert horizontal source radius back to degrees
+			const float SourceHalfRad = FMath::Atan(SourceRadiusHoriz);
+			FOVAngle = FMath::RadiansToDegrees(SourceHalfRad) * 2.0f;
+			FOVAngle = FMath::Clamp(FOVAngle, 1.0f, 170.0f);
 		}
-		// Convert horizontal source radius back to degrees
-		const float SourceHalfRad = FMath::Atan(SourceRadiusHoriz);
-		FOVAngle = FMath::RadiansToDegrees(SourceHalfRad) * 2.0f;
-		FOVAngle = FMath::Clamp(FOVAngle, 1.0f, 170.0f);
 	}
 
 	if (SizeXY.X <= 0 || SizeXY.Y <= 0)
@@ -485,12 +496,12 @@ void UTempoCamera::InitDistortionMap()
 	for (int V = 0; V < SizeXY.Y; ++V)
 	{
 		uint16* Row = &MipData[V * SizeXY.X * 2];
-		const double TargetY = (V - Cy) * InvFyDest;
+		const double TargetY = (V + 0.5 - Cy) * InvFyDest;
 		const double TargetY2 = TargetY * TargetY;
 
 		for (int U = 0; U < SizeXY.X; ++U)
 		{
-			const double TargetX = (U - Cx) * InvFxDest;
+			const double TargetX = (U + 0.5 - Cx) * InvFxDest;
 			const double TargetRadius = FMath::Sqrt(TargetX * TargetX + TargetY2);
 			const double SourceRadius = SolveInverseDistortion(TargetRadius, K1, K2, K3);
 			const double Scale = (TargetRadius > 1e-6) ? (SourceRadius / TargetRadius) : 1.0;
