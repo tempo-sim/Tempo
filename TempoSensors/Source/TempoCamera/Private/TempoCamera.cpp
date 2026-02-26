@@ -15,7 +15,6 @@
 #include "Math/Box2D.h"
 #include "TextureResource.h"
 
-// Root-Finding Solver (Newton-Raphson)
 static double Solve(const TFunction<double(double)>& Objective, const TFunction<double(double)>& Derivative, const double InitialGuess, const int32 MaxIter, const double Threshold)
 {
 	double X = InitialGuess;
@@ -62,14 +61,43 @@ static double SolveInverseDistortion(double TargetRadius, double K1, double K2, 
 	);
 }
 
-/**
- * Compute 2D bounding boxes from label data.
- * Single-pass algorithm: scan all pixels, maintain min/max coords per instance ID.
- * @param LabelData Array of label values (one per pixel)
- * @param Width Image width in pixels
- * @param Height Image height in pixels
- * @return Map of instance ID to bounding box
- */
+static double SolveInverseRationalDistortion(double TargetRadius, double K1, double K2, double K3, double K4, double K5, double K6)
+{
+	if (TargetRadius < 1e-6)
+	{
+		return TargetRadius;
+	}
+
+	return Solve(
+		[K1, K2, K3, K4, K5, K6, TargetRadius](double R) {
+			double R2 = R * R;
+			double R4 = R2 * R2;
+			double R6 = R4 * R2;
+			double Numerator = R * (1.0 + K1*R2 + K2*R4 + K3*R6);
+			double Denominator = 1.0 + K4*R2 + K5*R4 + K6*R6;
+			return (Numerator / Denominator) - TargetRadius;
+		},
+		[K1, K2, K3, K4, K5, K6](double R) {
+			double R2 = R * R;
+			double R3 = R2 * R;
+			double R4 = R2 * R2;
+			double R5 = R3 * R2;
+			double R6 = R4 * R2;
+
+			double U = R * (1.0 + K1*R2 + K2*R4 + K3*R6);
+			double V = 1.0 + K4*R2 + K5*R4 + K6*R6;
+
+			double UPrime = 1.0 + 3.0*K1*R2 + 5.0*K2*R4 + 7.0*K3*R6;
+			double VPrime = 2.0*K4*R + 4.0*K5*R3 + 6.0*K6*R5;
+
+			return (UPrime * V - U * VPrime) / (V * V);
+		},
+		TargetRadius,
+		40,
+		1e-6
+	);
+}
+
 static TMap<int32, FBox2D> ComputeBoundingBoxes(const TArray<uint8>& LabelData, uint32 Width, uint32 Height)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(ComputeBoundingBoxes);
@@ -80,7 +108,7 @@ static TMap<int32, FBox2D> ComputeBoundingBoxes(const TArray<uint8>& LabelData, 
 		for (uint32 X = 0; X < Width; ++X)
 		{
 			const uint8 InstanceId = LabelData[Y * Width + X];
-			if (InstanceId > 0)  // 0 = unlabeled
+			if (InstanceId > 0)
 			{
 				Boxes.FindOrAdd(InstanceId) += FUintPoint(X, Y);
 			}
@@ -91,7 +119,7 @@ static TMap<int32, FBox2D> ComputeBoundingBoxes(const TArray<uint8>& LabelData, 
 
 FTempoCameraIntrinsics::FTempoCameraIntrinsics(const FIntPoint& SizeXY, float HorizontalFOV)
 	: Fx(SizeXY.X / 2.0 / FMath::Tan(FMath::DegreesToRadians(HorizontalFOV) / 2.0)),
-	  Fy(Fx), // Fx == Fy means the sensor's pixels are square, not that the FOV is symmetric.
+	  Fy(Fx),
 	  Cx(SizeXY.X / 2.0),
 	  Cy(SizeXY.Y / 2.0) {}
 
@@ -220,7 +248,6 @@ void RespondToBoundingBoxRequests(const TTextureRead<PixelType>* TextureRead, co
 		
 		TMap<int32, FBox2D> BoundingBoxes = ComputeBoundingBoxes(LabelData, TextureRead->ImageSize.X, TextureRead->ImageSize.Y);
 
-		// Add bounding boxes to proto message using the map captured at render time
 		for (const auto& [InstanceId, Box] : BoundingBoxes)
 		{
 			TempoCamera::BoundingBox2D* BBoxProto = Response.add_bounding_boxes();
@@ -230,7 +257,6 @@ void RespondToBoundingBoxRequests(const TTextureRead<PixelType>* TextureRead, co
 			BBoxProto->set_max_y(FMath::RoundToInt32(Box.Max.Y));
 			BBoxProto->set_instance_id(InstanceId);
 
-			// Find semantic ID from mapping captured at render time
 			const uint8* SemanticId = TextureRead->InstanceToSemanticMap.Find(InstanceId);
 			if (!SemanticId)
 			{
@@ -305,13 +331,16 @@ void TTextureRead<FCameraPixelWithDepth>::RespondToRequests(const TArray<FBoundi
 UTempoCamera::UTempoCamera()
 {
 	DistortionMapTexture = nullptr;
+	LensParameters.Model = EDistortionModel::Polynomial;
 	LensParameters.K1 = 0.0f;
 	LensParameters.K2 = 0.0f;
 	LensParameters.K3 = 0.0f;
 	LensParameters.P1 = 0.0f;
 	LensParameters.P2 = 0.0f;
+	LensParameters.K4 = 0.0f;
+	LensParameters.K5 = 0.0f;
+	LensParameters.K6 = 0.0f;
 	
-	// Default F/C (Will be overwritten by InitDistortionMap)
 	CroppingFactor = 0.0f;
 	
 	MeasurementTypes = { EMeasurementType::COLOR_IMAGE, EMeasurementType::LABEL_IMAGE, EMeasurementType::DEPTH_IMAGE, EMeasurementType::BOUNDING_BOXES };
@@ -319,7 +348,6 @@ UTempoCamera::UTempoCamera()
 	PostProcessSettings.AutoExposureMethod = AEM_Basic;
 	PostProcessSettings.AutoExposureSpeedUp = 20.0;
 	PostProcessSettings.AutoExposureSpeedDown = 20.0;
-	// Auto exposure percentages chosen to better match their own recommended settings (see Scene.h).
 	PostProcessSettings.AutoExposureLowPercent = 75.0;
 	PostProcessSettings.AutoExposureHighPercent = 85.0;
 	PostProcessSettings.MotionBlurAmount = 0.0;
@@ -327,8 +355,7 @@ UTempoCamera::UTempoCamera()
 	ShowFlags.SetTemporalAA(true);
 	ShowFlags.SetMotionBlur(false);
 
-	// Start with no-depth settings
-	RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA8; // Corresponds to PF_B8G8R8A8
+	RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA8;
 	PixelFormatOverride = EPixelFormat::PF_Unknown;
 }
 
@@ -357,48 +384,54 @@ void UTempoCamera::UpdateLensParameters()
 
 void UTempoCamera::InitDistortionMap()
 {
+	const EDistortionModel Model = LensParameters.Model;
 	const double K1 = LensParameters.K1;
 	const double K2 = LensParameters.K2;
 	const double K3 = LensParameters.K3;
+	const double K4 = LensParameters.K4;
+	const double K5 = LensParameters.K5;
+	const double K6 = LensParameters.K6;
 
-	// Feasibility check
 	double MaxDistortedRadius = -1.0; 
 	
-	if (K1 < 0.0)
+	if (Model == EDistortionModel::Polynomial)
 	{
-		if (FMath::IsNearlyZero(K2) && FMath::IsNearlyZero(K3))
+		if (K1 < 0.0)
 		{
-			double RCrit = FMath::Sqrt(-1.0 / (3.0 * K1));
-			double RCrit2 = RCrit * RCrit;
-			MaxDistortedRadius = RCrit * (1.0 + K1 * RCrit2);
-		}
-		else
-		{
-			double RCrit = Solve(
-				[K1, K2, K3](double R) {
-					double R2 = R * R;
-					double R4 = R2 * R2;
-					double R6 = R4 * R2;
-					return 1.0 + 3.0*K1*R2 + 5.0*K2*R4 + 7.0*K3*R6; 
-				},
-				[K1, K2, K3](double R) {
-					double R2 = R * R;
-					double R3 = R2 * R;
-					double R5 = R3 * R2;
-					return 6.0*K1*R + 20.0*K2*R3 + 42.0*K3*R5; 
-				},
-				0.5,
-				40,
-				1e-6
-			);
-			double R2 = RCrit * RCrit;
-			double R4 = R2 * R2;
-			double R6 = R4 * R2;
-			double Scale = 1.0 + K1*R2 + K2*R4 + K3*R6;
-			MaxDistortedRadius = RCrit * Scale;
+			if (FMath::IsNearlyZero(K2) && FMath::IsNearlyZero(K3))
+			{
+				double RCrit = FMath::Sqrt(-1.0 / (3.0 * K1));
+				double RCrit2 = RCrit * RCrit;
+				MaxDistortedRadius = RCrit * (1.0 + K1 * RCrit2);
+			}
+			else
+			{
+				double RCrit = Solve(
+					[K1, K2, K3](double R) {
+						double R2 = R * R;
+						double R4 = R2 * R2;
+						double R6 = R4 * R2;
+						return 1.0 + 3.0*K1*R2 + 5.0*K2*R4 + 7.0*K3*R6; 
+					},
+					[K1, K2, K3](double R) {
+						double R2 = R * R;
+						double R3 = R2 * R;
+						double R5 = R3 * R2;
+						return 6.0*K1*R + 20.0*K2*R3 + 42.0*K3*R5; 
+					},
+					0.5,
+					40,
+					1e-6
+				);
+				double R2 = RCrit * RCrit;
+				double R4 = R2 * R2;
+				double R6 = R4 * R2;
+				double Scale = 1.0 + K1*R2 + K2*R4 + K3*R6;
+				MaxDistortedRadius = RCrit * Scale;
+			}
 		}
 	}
-	
+
 	if (MaxDistortedRadius > 0.0 && DistortedFOV > 0.0f)
 	{
 		double MaxPossibleFOV = FMath::RadiansToDegrees(FMath::Atan(MaxDistortedRadius)) * 2.0;
@@ -419,7 +452,9 @@ void UTempoCamera::InitDistortionMap()
 		const double TargetRadiusVert = TargetRadiusHoriz / AspectRatio;
 		const double TargetRadiusDiag = FMath::Sqrt(TargetRadiusHoriz * TargetRadiusHoriz + TargetRadiusVert * TargetRadiusVert);
 		
-		const double SourceRadiusDiag = SolveInverseDistortion(TargetRadiusDiag, K1, K2, K3);
+		const double SourceRadiusDiag = (Model == EDistortionModel::Polynomial)
+			? SolveInverseDistortion(TargetRadiusDiag, K1, K2, K3)
+			: SolveInverseRationalDistortion(TargetRadiusDiag, K1, K2, K3, K4, K5, K6);
 		
 		const double GeometricRatio = TargetRadiusHoriz / TargetRadiusDiag; 
 		const double SourceRadiusHoriz = SourceRadiusDiag * GeometricRatio;
@@ -427,7 +462,6 @@ void UTempoCamera::InitDistortionMap()
 		const float SourceHalfRad = FMath::Atan(SourceRadiusHoriz);
 		FOVAngle = FMath::RadiansToDegrees(SourceHalfRad) * 2.0f;
 		
-		// Clamp to prevent rendering errors at extreme FOVs
 		FOVAngle = FMath::Clamp(FOVAngle, 1.0f, 170.0f);
 	}
 
@@ -492,7 +526,11 @@ void UTempoCamera::InitDistortionMap()
 		{
 			const double TargetX = (U - Cx) * InvFxDest;
 			const double TargetRadius = FMath::Sqrt(TargetX * TargetX + TargetY2);
-			const double SourceRadius = SolveInverseDistortion(TargetRadius, K1, K2, K3);
+			
+			const double SourceRadius = (Model == EDistortionModel::Polynomial)
+				? SolveInverseDistortion(TargetRadius, K1, K2, K3)
+				: SolveInverseRationalDistortion(TargetRadius, K1, K2, K3, K4, K5, K6);
+				
 			const double Scale = (TargetRadius > 1e-6) ? (SourceRadius / TargetRadius) : 1.0;
 			const float FinalU = static_cast<float>(TargetX * Scale * FxSource + Cx) * InvSizeX;
 			const float FinalV = static_cast<float>(TargetY * Scale * FySource + Cy) * InvSizeY;
@@ -623,7 +661,6 @@ FTextureRead* UTempoCamera::MakeTextureRead() const
 {
 	check(GetWorld());
 
-	// Capture instance-to-semantic mapping at render time for bounding box requests
 	TMap<uint8, uint8> InstanceToSemanticMap;
 	if (UTempoActorLabeler* Labeler = GetWorld()->GetSubsystem<UTempoActorLabeler>())
 	{
@@ -710,7 +747,6 @@ void UTempoCamera::ApplyDepthEnabled()
 		{
 			PostProcessMaterialInstance = UMaterialInstanceDynamic::Create(PostProcessMaterialWithDepth.Get(), this);
 			
-			// Bind Distortion
 			if (DistortionMapTexture)
 			{
 				PostProcessMaterialInstance->SetTextureParameterValue(FName("DistortionMap"), DistortionMapTexture);
@@ -744,7 +780,7 @@ void UTempoCamera::ApplyDepthEnabled()
 			UE_LOG(LogTempoCamera, Error, TEXT("PostProcessMaterialWithDepth is not set in TempoSensors settings"));
 		}
 		
-		RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA8; // Corresponds to PF_B8G8R8A8
+		RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA8;
 		PixelFormatOverride = EPixelFormat::PF_Unknown;
 	}
 

@@ -43,10 +43,9 @@ struct FCameraPixelWithDepth
 
 	float Depth(float MinDepth, float MaxDepth, float MaxDiscretizedDepth) const
 	{
-	   // We discretize inverse depth to give more consistent precision vs depth.
-	   const float InverseDepthFraction = static_cast<float>(U5) / MaxDiscretizedDepth;
-	   const float InverseDepth = InverseDepthFraction * (1.0 / MinDepth - 1.0 / MaxDepth) + 1.0 / MaxDepth;
-	   return 1.0 / InverseDepth;
+		const float InverseDepthFraction = static_cast<float>(U5) / MaxDiscretizedDepth;
+		const float InverseDepth = InverseDepthFraction * (1.0 / MinDepth - 1.0 / MaxDepth) + 1.0 / MaxDepth;
+		return 1.0 / InverseDepth;
 	}
 
 private:
@@ -85,10 +84,10 @@ template <>
 struct TTextureRead<FCameraPixelWithDepth> : TTextureReadBase<FCameraPixelWithDepth>
 {
 	TTextureRead(const FIntPoint& ImageSizeIn, int32 SequenceIdIn, double CaptureTimeIn, const FString& OwnerNameIn,
-	   const FString& SensorNameIn, const FTransform& SensorTransformIn, float MinDepthIn, float MaxDepthIn,
-	   TMap<uint8, uint8>&& InstanceToSemanticMapIn)
-	   : TTextureReadBase(ImageSizeIn, SequenceIdIn, CaptureTimeIn, OwnerNameIn, SensorNameIn, SensorTransformIn),
-	   MinDepth(MinDepthIn), MaxDepth(MaxDepthIn), InstanceToSemanticMap(MoveTemp(InstanceToSemanticMapIn))
+		const FString& SensorNameIn, const FTransform& SensorTransformIn, float MinDepthIn, float MaxDepthIn,
+		TMap<uint8, uint8>&& InstanceToSemanticMapIn)
+		: TTextureReadBase(ImageSizeIn, SequenceIdIn, CaptureTimeIn, OwnerNameIn, SensorNameIn, SensorTransformIn),
+		MinDepth(MinDepthIn), MaxDepth(MaxDepthIn), InstanceToSemanticMap(MoveTemp(InstanceToSemanticMapIn))
 	{
 	}
 
@@ -108,9 +107,9 @@ template <>
 struct TTextureRead<FCameraPixelNoDepth> : TTextureReadBase<FCameraPixelNoDepth>
 {
 	TTextureRead(const FIntPoint& ImageSizeIn, int32 SequenceIdIn, double CaptureTimeIn, const FString& OwnerNameIn,
-	   const FString& SensorNameIn, const FTransform& SensorTransformIn, TMap<uint8, uint8>&& InstanceToSemanticMapIn)
-	   : TTextureReadBase(ImageSizeIn, SequenceIdIn, CaptureTimeIn, OwnerNameIn, SensorNameIn, SensorTransformIn),
-	   InstanceToSemanticMap(MoveTemp(InstanceToSemanticMapIn))
+		const FString& SensorNameIn, const FTransform& SensorTransformIn, TMap<uint8, uint8>&& InstanceToSemanticMapIn)
+		: TTextureReadBase(ImageSizeIn, SequenceIdIn, CaptureTimeIn, OwnerNameIn, SensorNameIn, SensorTransformIn),
+		InstanceToSemanticMap(MoveTemp(InstanceToSemanticMapIn))
 	{
 	}
 
@@ -132,29 +131,49 @@ struct TEMPOCAMERA_API FTempoCameraIntrinsics
 	const float Cy;
 };
 
+UENUM(BlueprintType)
+enum class EDistortionModel : uint8
+{
+	Polynomial UMETA(DisplayName = "Polynomial (Brown-Conrady)"),
+	Rational   UMETA(DisplayName = "Rational (OpenCV)")
+};
+
 USTRUCT(BlueprintType)
 struct FTempoLensDistortionParameters
 {
 	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens")
+	EDistortionModel Model = EDistortionModel::Polynomial;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens")
 	float K1 = 0.0f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens")
 	float K2 = 0.0f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens")
 	float K3 = 0.0f;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens", meta = (EditCondition = "Model == EDistortionModel::Rational"))
 	float P1 = 0.0f;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens", meta = (EditCondition = "Model == EDistortionModel::Rational"))
 	float P2 = 0.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens", meta = (EditCondition = "Model == EDistortionModel::Rational"))
+	float K4 = 0.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens", meta = (EditCondition = "Model == EDistortionModel::Rational"))
+	float K5 = 0.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens", meta = (EditCondition = "Model == EDistortionModel::Rational"))
+	float K6 = 0.0f;
 
 	bool operator==(const FTempoLensDistortionParameters& Other) const
 	{
-	   return K1 == Other.K1 && K2 == Other.K2 && K3 == Other.K3 && P1 == Other.P1 && P2 == Other.P2;
+		return Model == Other.Model &&
+			   K1 == Other.K1 && K2 == Other.K2 && K3 == Other.K3 &&
+			   P1 == Other.P1 && P2 == Other.P2 &&
+			   K4 == Other.K4 && K5 == Other.K5 && K6 == Other.K6;
 	}
 
 	bool operator!=(const FTempoLensDistortionParameters& Other) const
 	{
-	   return !(*this == Other);
+		return !(*this == Other);
 	}
 };
 
@@ -184,7 +203,6 @@ public:
 
 	FTempoCameraIntrinsics GetIntrinsics() const;
 
-	// Begin ITempoSensorInterface
 	virtual FString GetOwnerName() const override;
 	virtual FString GetSensorName() const override;
 	virtual float GetRate() const override { return RateHz; }
@@ -193,9 +211,7 @@ public:
 	virtual void OnRenderCompleted() override;
 	virtual void BlockUntilMeasurementsReady() const override;
 	virtual TOptional<TFuture<void>> SendMeasurements() override;
-	// End ITempoSensorInterface
 
-	// Tempo Distortion
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens", meta = (ClampMin = "1.0", ClampMax = "170.0"))
 	float DistortedFOV = 90.0f;
 
@@ -228,21 +244,17 @@ protected:
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 #endif
 
-	// The measurement types supported. Should be set in constructor of derived classes.
 	UPROPERTY(VisibleAnywhere)
 	TArray<TEnumAsByte<EMeasurementType>> MeasurementTypes;
 
-	// Whether this camera can measure depth. Disabled when not requested to optimize performance.
 	UPROPERTY(VisibleAnywhere, Category="Depth")
 	bool bDepthEnabled = false;
 
-	// The minimum depth this camera can measure (if depth is enabled). Will be set to the global near clip plane.
 	UPROPERTY(VisibleAnywhere, Category="Depth")
-	float MinDepth = 10.0; // 10cm
+	float MinDepth = 10.0;
 
-	// The maximum depth this camera can measure (if depth is enabled). Will be set to UTempoSensorsSettings::MaxCameraDepth.
 	UPROPERTY(VisibleAnywhere, Category="Depth")
-	float MaxDepth = 100000.0; // 1km
+	float MaxDepth = 100000.0;
 
 	UPROPERTY(VisibleAnywhere)
 	UMaterialInstanceDynamic* PostProcessMaterialInstance = nullptr;
