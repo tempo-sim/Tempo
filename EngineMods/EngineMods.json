@@ -10,6 +10,9 @@
     {
       "Type": "SourceOnly",
       "Root": "Engine/Source/Programs/AutomationTool",
+      "Add": [
+        "Directory.Build.props"
+      ],
       "Patch": [
         "AutomationTool.csproj.patch.1",
         "AutomationUtils/AutomationUtils.Automation.csproj.patch.1",
@@ -66,6 +69,9 @@
     {
       "Type": "SourceOnly",
       "Root": "Engine/Source/Programs/AutomationTool",
+      "Add": [
+        "Directory.Build.props"
+      ],
       "Patch": [
         "AutomationTool.csproj.patch.1",
         "AutomationUtils/AutomationUtils.Automation.csproj.patch.1",
