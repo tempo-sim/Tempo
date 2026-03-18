@@ -44,8 +44,8 @@ on:
         default: ubuntu-22.04
       unreal_version:
         type: string
-        description: Which Unreal version to build for (5.4, 5.5, and 5.6 are supported)
-        default: 5.6
+        description: Which Unreal version to build for (5.6, and 5.7 are supported)
+        default: 5.7
       project_root:
         type: string
         description: Root of your project's repo
@@ -118,9 +118,9 @@ jobs:
             ;;
         esac
         case "${{ inputs.unreal_version }}" in
-          "5.4"|"5.5"|"5.6") ;;
+          "5.6"|"5.7") ;;
           *)
-            echo "Error: Invalid Unreal Version. Only 5.4, 5.5, and 5.6 are supported."
+            echo "Error: Invalid Unreal Version. Only 5.6, and 5.7 are supported."
             exit 1
             ;;
         esac
@@ -208,6 +208,9 @@ jobs:
         path: |
           .engine-mods-cache/TempoMods/**
           .engine-mods-cache/Engine/Plugins/Runtime/ZoneGraph/**
+          .engine-mods-cache/Engine/Plugins/PCG/**
+          .engine-mods-cache/Engine/Plugins/Editor/EditorScriptingUtilities/**
+          .engine-mods-cache/Engine/Plugins/Runtime/ComputeFramework/**
           .engine-mods-cache/Engine/Plugins/AI/MassCrowd/**
           .engine-mods-cache/Engine/Plugins/Runtime/MassEntity/**
           .engine-mods-cache/Engine/Plugins/Runtime/StateTree/**
@@ -278,16 +281,19 @@ jobs:
       run: |
         mkdir -p .engine-mods-cache/TempoMods
         mkdir -p .engine-mods-cache/Engine/Plugins/Runtime
+        mkdir -p .engine-mods-cache/Engine/Plugins/Editor
         mkdir -p .engine-mods-cache/Engine/Plugins/AI
         mkdir -p .engine-mods-cache/Engine/Source/Programs
         mkdir -p .engine-mods-cache/Engine/Binaries/DotNET
         docker create --name temp_engine tempo_unreal_image
         docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/ZoneGraph ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime
+        docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Plugins/PCG ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins
+        docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Plugins/Editor/EditorScriptingUtilities ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Editor
+        docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/ComputeFramework ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime
         docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Plugins/AI/MassCrowd ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/AI
         docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/MassEntity ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime
         docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/StateTree ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime
         docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Source/Programs/UnrealBuildTool ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs
-        docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Source/Programs/AutomationTool ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs
         docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Source/Programs/AutomationTool ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs
         docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Source/Programs/Shared ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs
         docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Binaries/DotNET/UnrealBuildTool ${{ github.workspace }}/.engine-mods-cache/Engine/Binaries/DotNET
@@ -317,6 +323,9 @@ jobs:
           docker run --rm \
             -v ${{ github.workspace }}/.engine-mods-cache/TempoMods:/home/ue4/UnrealEngine/TempoMods \
             -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/ZoneGraph:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/ZoneGraph \
+            -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/PCG:/home/ue4/UnrealEngine/Engine/Plugins/PCG \
+            -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Editor/EditorScriptingUtilities:/home/ue4/UnrealEngine/Engine/Plugins/Editor/EditorScriptingUtilities \
+            -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/ComputeFramework:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/ComputeFramework \
             -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/AI/MassCrowd:/home/ue4/UnrealEngine/Engine/Plugins/AI/MassCrowd \
             -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/MassEntity:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/MassEntity \
             -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/StateTree:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/StateTree \
@@ -334,6 +343,9 @@ jobs:
         docker run --rm \
           -v ${{ github.workspace }}/.engine-mods-cache/TempoMods:/home/ue4/UnrealEngine/TempoMods \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/ZoneGraph:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/ZoneGraph \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/PCG:/home/ue4/UnrealEngine/Engine/Plugins/PCG \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Editor/EditorScriptingUtilities:/home/ue4/UnrealEngine/Engine/Plugins/Editor/EditorScriptingUtilities \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/ComputeFramework:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/ComputeFramework \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/AI/MassCrowd:/home/ue4/UnrealEngine/Engine/Plugins/AI/MassCrowd \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/MassEntity:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/MassEntity \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/StateTree:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/StateTree \
@@ -352,6 +364,9 @@ jobs:
         docker run --rm \
           -v ${{ github.workspace }}/.engine-mods-cache/TempoMods:/home/ue4/UnrealEngine/TempoMods \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/ZoneGraph:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/ZoneGraph \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/PCG:/home/ue4/UnrealEngine/Engine/Plugins/PCG \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Editor/EditorScriptingUtilities:/home/ue4/UnrealEngine/Engine/Plugins/Editor/EditorScriptingUtilities \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/ComputeFramework:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/ComputeFramework \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/AI/MassCrowd:/home/ue4/UnrealEngine/Engine/Plugins/AI/MassCrowd \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/MassEntity:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/MassEntity \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/StateTree:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/StateTree \
@@ -369,6 +384,9 @@ jobs:
         docker run --rm \
           -v ${{ github.workspace }}/.engine-mods-cache/TempoMods:/home/ue4/UnrealEngine/TempoMods \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/ZoneGraph:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/ZoneGraph \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/PCG:/home/ue4/UnrealEngine/Engine/Plugins/PCG \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Editor/EditorScriptingUtilities:/home/ue4/UnrealEngine/Engine/Plugins/Editor/EditorScriptingUtilities \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/ComputeFramework:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/ComputeFramework \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/AI/MassCrowd:/home/ue4/UnrealEngine/Engine/Plugins/AI/MassCrowd \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/MassEntity:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/MassEntity \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/StateTree:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/StateTree \
@@ -397,6 +415,9 @@ jobs:
         docker run --rm \
           -v ${{ github.workspace }}/.engine-mods-cache/TempoMods:/home/ue4/UnrealEngine/TempoMods \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/ZoneGraph:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/ZoneGraph \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/PCG:/home/ue4/UnrealEngine/Engine/Plugins/PCG \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Editor/EditorScriptingUtilities:/home/ue4/UnrealEngine/Engine/Plugins/Editor/EditorScriptingUtilities \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/ComputeFramework:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/ComputeFramework \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/AI/MassCrowd:/home/ue4/UnrealEngine/Engine/Plugins/AI/MassCrowd \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/MassEntity:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/MassEntity \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/StateTree:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/StateTree \
@@ -417,6 +438,9 @@ jobs:
         docker run --rm \
           -v ${{ github.workspace }}/.engine-mods-cache/TempoMods:/home/ue4/UnrealEngine/TempoMods \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/ZoneGraph:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/ZoneGraph \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/PCG:/home/ue4/UnrealEngine/Engine/Plugins/PCG \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Editor/EditorScriptingUtilities:/home/ue4/UnrealEngine/Engine/Plugins/Editor/EditorScriptingUtilities \
+          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/ComputeFramework:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/ComputeFramework \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/AI/MassCrowd:/home/ue4/UnrealEngine/Engine/Plugins/AI/MassCrowd \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/MassEntity:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/MassEntity \
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/StateTree:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/StateTree \
@@ -467,6 +491,9 @@ jobs:
         path: |
           .engine-mods-cache/TempoMods/**
           .engine-mods-cache/Engine/Plugins/Runtime/ZoneGraph/**
+          .engine-mods-cache/Engine/Plugins/PCG/**
+          .engine-mods-cache/Engine/Plugins/Editor/EditorScriptingUtilities/**
+          .engine-mods-cache/Engine/Plugins/Runtime/ComputeFramework/**
           .engine-mods-cache/Engine/Plugins/AI/MassCrowd/**
           .engine-mods-cache/Engine/Plugins/Runtime/MassEntity/**
           .engine-mods-cache/Engine/Plugins/Runtime/StateTree/**

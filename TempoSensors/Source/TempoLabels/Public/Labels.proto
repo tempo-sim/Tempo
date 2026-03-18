@@ -13,6 +13,14 @@ message InstanceToSemanticIdMap {
   repeated InstanceSemanticIdPair instance_semantic_id_pairs = 1;
 }
 
+message GetLabeledActorTypesRequest {
+}
+
+message GetLabeledActorTypesResponse {
+  repeated string actor_types = 1; // List of actor class names with active instance IDs
+}
+
 service LabelService {
   rpc GetInstanceToSemanticIdMap(TempoScripting.Empty) returns (InstanceToSemanticIdMap);
+  rpc GetLabeledActorTypes(GetLabeledActorTypesRequest) returns (GetLabeledActorTypesResponse);
 }

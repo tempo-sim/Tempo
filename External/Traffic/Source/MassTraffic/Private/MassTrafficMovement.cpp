@@ -1259,8 +1259,15 @@ void MoveVehicleToNextLane(
 	// that was incremented in SetIsVehicleReadyToUseNextIntersectionLane.
 	if (NewCurrentLane.ConstData.bIsIntersectionLane)	// (See all READYLANE.)
 	{
-		ensureMsgf(&NewCurrentLane == VehicleControlFragment.ReadiedNextIntersectionLane, TEXT("Should be decrementing the \"ready\" count of the same intersection lane that we readied."));
-		NewCurrentLane.DecrementNumVehiclesReadyToUseIntersectionLane();
+		// Only decrement if this vehicle actually readied this specific intersection lane.
+		// It is valid for a vehicle to enter an intersection lane it never readied - e.g. a fast
+		// off-LOD variable-tick vehicle can skip the stop-line zone in a single large tick, and a
+		// physics vehicle can overshoot the lane boundary after the pre-physics control step has run.
+		// Decrementing without a corresponding increment would push the counter below zero.
+		if (&NewCurrentLane == VehicleControlFragment.ReadiedNextIntersectionLane)
+		{
+			NewCurrentLane.DecrementNumVehiclesReadyToUseIntersectionLane();
+		}
 
 		// Clear our readied next intersection lane.
 		VehicleControlFragment.ReadiedNextIntersectionLane = nullptr;
@@ -1557,10 +1564,24 @@ bool TeleportVehicleToAnotherLane(
 )
 {
 	// If vehicle can't stop, it's committed itself and registered with the next lane. Do not teleport.
-	
+
 	if (VehicleControlFragment_Current.bCantStopAtLaneExit)
 	{
-		return false;	
+		return false;
+	}
+
+	// If the vehicle had readied an intersection lane, unready it before teleporting.
+	// (See all READYLANE.)
+	// Leaving ReadiedNextIntersectionLane set after a teleport would:
+	//   1. Keep the source intersection lane's counter inflated indefinitely, since the vehicle
+	//      will never enter that lane now.
+	//   2. Block ChooseNextLaneProcessor from assigning a new NextLane (it skips vehicles with a
+	//      non-null ReadiedNextIntersectionLane), potentially deadlocking the vehicle on its new lane
+	//      if that lane has more than one exit.
+	if (VehicleControlFragment_Current.ReadiedNextIntersectionLane != nullptr)
+	{
+		VehicleControlFragment_Current.ReadiedNextIntersectionLane->DecrementNumVehiclesReadyToUseIntersectionLane();
+		VehicleControlFragment_Current.ReadiedNextIntersectionLane = nullptr;
 	}
 
 	// Run safety checks first. If any of them fail, abort. We do all the safety checks ahead of time, because the lane

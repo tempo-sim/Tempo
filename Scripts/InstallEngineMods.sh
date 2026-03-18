@@ -216,12 +216,14 @@ REBUILD_UBT() {
   eval "$DOTNET" build "./Engine/Source/Programs/UnrealBuildTool/UnrealBuildTool.csproj" -c Development
   eval "$DOTNET" build "./Engine/Source/Programs/AutomationTool/AutomationTool.csproj" -c Development
 
-  # Copy the resulting built dlls to the binaries folder (in 5.6 they aren't copied to Binaries automatically? not sure why)
+  # Copy the resulting built dlls to all locations under the binaries folder.
+  # In UE 5.7+, AutomationTool and its sub-projects each get their own copy of
+  # UnrealBuildTool.dll, so we need to update all of them.
   if [ -f "$UNREAL_ENGINE_PATH/Engine/Source/Programs/UnrealBuildTool/bin/Development/UnrealBuildTool.dll" ]; then
-    cp -r "$UNREAL_ENGINE_PATH/Engine/Source/Programs/UnrealBuildTool/bin/Development/UnrealBuildTool.dll" "$UNREAL_ENGINE_PATH/Engine/Binaries/DotNET/UnrealBuildTool"
+    find "$UNREAL_ENGINE_PATH/Engine/Binaries/DotNET" -name "UnrealBuildTool.dll" -type f -exec cp "$UNREAL_ENGINE_PATH/Engine/Source/Programs/UnrealBuildTool/bin/Development/UnrealBuildTool.dll" {} \;
   fi
   if [ -f "$UNREAL_ENGINE_PATH/Engine/Source/Programs/AutomationTool/bin/Development/AutomationTool.dll" ]; then
-    cp -r "$UNREAL_ENGINE_PATH/Engine/Source/Programs/AutomationTool/bin/Development/AutomationTool.dll" "$UNREAL_ENGINE_PATH/Engine/Binaries/DotNET/AutomationTool"
+    find "$UNREAL_ENGINE_PATH/Engine/Binaries/DotNET" -name "AutomationTool.dll" -type f -exec cp "$UNREAL_ENGINE_PATH/Engine/Source/Programs/AutomationTool/bin/Development/AutomationTool.dll" {} \;
   fi
 
   echo -e "\nSuccessfully rebuilt UnrealBuildTool with Tempo mods\n"
