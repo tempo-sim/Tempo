@@ -98,23 +98,56 @@ using LabelAsyncService = TempoLabels::LabelService::AsyncService;
 void UTempoActorLabeler::RegisterScriptingServices(FTempoScriptingServer& ScriptingServer)
 {
 	ScriptingServer.RegisterService<LabelService>(
-		SimpleRequestHandler(&LabelAsyncService::RequestGetInstanceToSemanticIdMap, &UTempoActorLabeler::GetInstanceToSemanticIdMap)
+		SimpleRequestHandler(&LabelAsyncService::RequestGetInstanceToSemanticIdMap, &UTempoActorLabeler::GetInstanceToSemanticIdMap),
+		SimpleRequestHandler(&LabelAsyncService::RequestGetLabeledActorTypes, &UTempoActorLabeler::HandleGetLabeledActorTypes)
 	);
 }
 
-void UTempoActorLabeler::GetInstanceToSemanticIdMap(const TempoScripting::Empty& Request, const TResponseDelegate<TempoLabels::InstanceToSemanticIdMap>& ResponseContinuation)
+void UTempoActorLabeler::HandleGetLabeledActorTypes(const TempoLabels::GetLabeledActorTypesRequest& Request, const TResponseDelegate<TempoLabels::GetLabeledActorTypesResponse>& ResponseContinuation)
 {
-	TempoLabels::InstanceToSemanticIdMap InstanceToSemanticIdMap;
+	TempoLabels::GetLabeledActorTypesResponse Response;
+
+	// Check if instance ID mode is enabled. If not, this request is not applicable.
+	const UTempoSensorsSettings* TempoSensorsSettings = GetDefault<UTempoSensorsSettings>();
+	if (TempoSensorsSettings->GetLabelType() != ELabelType::Instance)
+	{
+		ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "Instance label mode is not enabled"));
+		return;
+	}
+
+	for (const FName& ClassName : LabeledActorClassNames)
+	{
+		Response.add_actor_types(TCHAR_TO_UTF8(*ClassName.ToString()));
+	}
+
+	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
+}
+
+TMap<uint8, uint8> UTempoActorLabeler::GetInstanceToSemanticIdMap() const
+{
+	TMap<uint8, uint8> Result;
 	for (const auto& LabeledObject : LabeledObjects)
 	{
 		if (LabeledObject.Value.InstanceId != NoLabelId)
 		{
-			auto* Pair = InstanceToSemanticIdMap.add_instance_semantic_id_pairs();
-			Pair->set_instanceid(LabeledObject.Value.InstanceId);
-			Pair->set_semanticid(LabeledObject.Value.SemanticId);
+			Result.Add(LabeledObject.Value.InstanceId, LabeledObject.Value.SemanticId);
 		}
 	}
-	ResponseContinuation.ExecuteIfBound(InstanceToSemanticIdMap, grpc::Status_OK);
+	return Result;
+}
+
+void UTempoActorLabeler::GetInstanceToSemanticIdMap(const TempoScripting::Empty& Request, const TResponseDelegate<TempoLabels::InstanceToSemanticIdMap>& ResponseContinuation)
+{
+	TMap<uint8, uint8> Map = GetInstanceToSemanticIdMap();
+
+	TempoLabels::InstanceToSemanticIdMap ProtoResponse;
+	for (const auto& Pair : Map)
+	{
+		auto* ProtoPair = ProtoResponse.add_instance_semantic_id_pairs();
+		ProtoPair->set_instanceid(Pair.Key);
+		ProtoPair->set_semanticid(Pair.Value);
+	}
+	ResponseContinuation.ExecuteIfBound(ProtoResponse, grpc::Status_OK);
 }
 
 void UTempoActorLabeler::OnWorldBeginPlay(UWorld& InWorld)
@@ -297,6 +330,11 @@ void UTempoActorLabeler::LabelActor(AActor* Actor)
 				if (TOptional<int32> InstanceId = InstanceIdAllocator.Allocate())
 				{
 					ActorIdPair.InstanceId = *InstanceId;
+					// Track actor class names that have been assigned instance IDs
+					if (GetDefault<UTempoSensorsSettings>()->GetLabelType() == ELabelType::Instance)
+					{
+						LabeledActorClassNames.Add(Actor->GetClass()->GetFName());
+					}
 				}
 				ActorIdPair.SemanticId = *SemanticId;
 			}
@@ -389,6 +427,9 @@ void UTempoActorLabeler::UnLabelAllActors()
 	{
 		UnLabelActor(*ActorItr);
 	}
+	
+	// Clear the set of labeled actor class names
+	LabeledActorClassNames.Empty();
 }
 
 void UTempoActorLabeler::UnLabelActor(AActor* Actor)

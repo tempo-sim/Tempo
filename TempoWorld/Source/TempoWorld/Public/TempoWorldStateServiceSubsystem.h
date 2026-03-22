@@ -18,6 +18,12 @@ namespace TempoScripting
 
 namespace TempoWorld
 {
+	class RaycastRequest;
+	class RaycastResponse;
+}
+
+namespace TempoWorld
+{
 	FORCEINLINE uint32 GetTypeHash(const ActorStateRequest& Request)
 	{
 		return GetTypeHash(FString::Printf(TEXT("%s"),
@@ -66,6 +72,8 @@ public:
 	void GetCurrentActorStatesNear(const TempoWorld::ActorStatesNearRequest& Request, const TResponseDelegate<TempoWorld::ActorStates>& ResponseContinuation) const;
 
 	void StreamActorStatesNear(const TempoWorld::ActorStatesNearRequest& Request, const TResponseDelegate<TempoWorld::ActorStates>& ResponseContinuation);
+
+	void Raycast(const TempoWorld::RaycastRequest& Request, const TResponseDelegate<TempoWorld::RaycastResponse>& ResponseContinuation) const;
 
 	virtual void Tick(float DeltaTime) override;
 

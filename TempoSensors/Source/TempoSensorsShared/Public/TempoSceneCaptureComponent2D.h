@@ -278,7 +278,7 @@ protected:
 	int32 SequenceId = 0;
 
 	// Initialize our RenderTarget and TextureRHICopy with the current settings.
-	void InitRenderTarget();
+	virtual void InitRenderTarget();
 
 	// Gets the number of pending texture reads
 	int32 NumPendingTextureReads() const { return TextureReadQueue.Num(); }

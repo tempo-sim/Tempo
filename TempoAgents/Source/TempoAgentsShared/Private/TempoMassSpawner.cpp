@@ -9,6 +9,8 @@
 
 void UTempoMassSpawnerSubSystem::OnWorldBeginPlay(UWorld& InWorld)
 {
+	Super::Super::OnWorldBeginPlay(InWorld);
+
 	// Hook up to TempoGameMode's PreBeginPlayEvent to register MassAgent components *right* before BeginPlay
 	if (ATempoGameMode* TempoGameMode = Cast<ATempoGameMode>(UGameplayStatics::GetGameMode(&InWorld)))
 	{

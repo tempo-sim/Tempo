@@ -8,7 +8,7 @@ Tempo is the foundation on which you can build a simulator for your unique appli
 
 ## Compatibility
 - Linux (Ubuntu 22.04 and 24.04), MacOS (13.0 "Ventura" or newer, Apple silicon only), Windows 10 and 11
-- Unreal Engine 5.4, and 5.5, and 5.6
+- Unreal Engine 5.6 and 5.7
 
 ## Prerequisites
 - Linux:
