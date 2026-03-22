@@ -6,6 +6,8 @@
 #include "TempoTime.h"
 #include "Kismet/GameplayStatics.h"
 
+#include <cmath>
+
 void ATempoTimeWorldSettings::BeginPlay()
 {
 	Super::BeginPlay();
