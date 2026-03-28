@@ -230,6 +230,80 @@ bool UTempoSceneCaptureComponent2D::NextReadComplete() const
 	return TextureReadQueue.NextReadComplete();
 }
 
+void UTempoSceneCaptureComponent2D::CreateOrResizeDistortionMapTexture()
+{
+	if (SizeXY.X <= 0 || SizeXY.Y <= 0)
+	{
+		return;
+	}
+
+	if (!DistortionMapTexture || DistortionMapTexture->GetSizeX() != SizeXY.X || DistortionMapTexture->GetSizeY() != SizeXY.Y)
+	{
+		DistortionMapTexture = UTexture2D::CreateTransient(SizeXY.X, SizeXY.Y, PF_G16R16F);
+		DistortionMapTexture->CompressionSettings = TC_HDR;
+		DistortionMapTexture->Filter = TF_Bilinear;
+		DistortionMapTexture->AddressX = TA_Clamp;
+		DistortionMapTexture->AddressY = TA_Clamp;
+		DistortionMapTexture->SRGB = 0;
+#ifdef UpdateResource
+#undef UpdateResource
+#endif
+		DistortionMapTexture->UpdateResource();
+	}
+}
+
+void UTempoSceneCaptureComponent2D::ApplyDistortionMapToMaterial(UMaterialInstanceDynamic* MaterialInstance) const
+{
+	if (MaterialInstance && DistortionMapTexture)
+	{
+		MaterialInstance->SetTextureParameterValue(FName("DistortionMap"), DistortionMapTexture);
+	}
+}
+
+void UTempoSceneCaptureComponent2D::FillDistortionMap(const FDistortionModel& Model, double FxDest, double FyDest, double FxSource, double FySource)
+{
+	if (!DistortionMapTexture || SizeXY.X <= 0 || SizeXY.Y <= 0)
+	{
+		return;
+	}
+
+	FTexture2DMipMap& Mip = DistortionMapTexture->GetPlatformData()->Mips[0];
+	uint16* MipData = static_cast<uint16*>(Mip.BulkData.Lock(LOCK_READ_WRITE));
+
+	if (!MipData)
+	{
+		Mip.BulkData.Unlock();
+		return;
+	}
+
+	const double Cx = SizeXY.X * 0.5;
+	const double Cy = SizeXY.Y * 0.5;
+
+	const double InvFxDest = 1.0 / FxDest;
+	const double InvFyDest = 1.0 / FyDest;
+	const float InvSizeX = 1.0f / static_cast<float>(SizeXY.X);
+	const float InvSizeY = 1.0f / static_cast<float>(SizeXY.Y);
+
+	for (int V = 0; V < SizeXY.Y; ++V)
+	{
+		uint16* Row = &MipData[V * SizeXY.X * 2];
+		const double TargetY = (V + 0.5 - Cy) * InvFyDest;
+
+		for (int U = 0; U < SizeXY.X; ++U)
+		{
+			const double TargetX = (U + 0.5 - Cx) * InvFxDest;
+			const FVector2D Source = Model.DistortedToSource(TargetX, TargetY);
+			const float FinalU = static_cast<float>(Source.X * FxSource + Cx) * InvSizeX;
+			const float FinalV = static_cast<float>(Source.Y * FySource + Cy) * InvSizeY;
+			Row[U * 2 + 0] = FFloat16(FinalU).Encoded;
+			Row[U * 2 + 1] = FFloat16(FinalV).Encoded;
+		}
+	}
+
+	Mip.BulkData.Unlock();
+	DistortionMapTexture->UpdateResource();
+}
+
 void UTempoSceneCaptureComponent2D::InitRenderTarget()
 {
 	if (SizeXY.X == 0 || SizeXY.Y == 0)

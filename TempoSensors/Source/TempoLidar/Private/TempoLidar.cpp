@@ -178,16 +178,6 @@ FVector2D SphericalToPerspective(double AzimuthDeg, double ElevationDeg)
 	return FVector2D(TanAzimuth, TanElevation * FMath::Sqrt(TanAzimuth * TanAzimuth + 1));
 }
 
-void PerspectiveToSpherical(const FVector2D& PerspectiveImagePlaneLocation, double& AzimuthDeg, double& ElevationDeg)
-{
-	const double Azimuth = FMath::Atan(PerspectiveImagePlaneLocation.X);
-	const double TanAzimuth = FMath::Tan(Azimuth);
-	const double Elevation = FMath::Atan(PerspectiveImagePlaneLocation.Y / FMath::Sqrt(TanAzimuth * TanAzimuth + 1));
-
-	AzimuthDeg = FMath::RadiansToDegrees(Azimuth);
-	ElevationDeg = FMath::RadiansToDegrees(Elevation);
-}
-
 double DepthToDistance(double AzimuthDeg, double ElevationDeg, double Depth)
 {
 	const double CosAzimuth = FMath::Cos(FMath::DegreesToRadians(AzimuthDeg));
@@ -212,12 +202,12 @@ void UTempoLidarCaptureComponent::Activate(bool bReset)
 	if (const TObjectPtr<UMaterialInterface> PostProcessMaterial = GetDefault<UTempoSensorsSettings>()->GetLidarPostProcessMaterial())
 	{
 		PostProcessMaterialInstance = UMaterialInstanceDynamic::Create(PostProcessMaterial.Get(), this);
-		PostProcessMaterialInstance = UMaterialInstanceDynamic::Create(PostProcessMaterial.Get(), this);
 		MinDepth = GEngine->NearClipPlane;
 		MaxDepth = TempoSensorsSettings->GetMaxLidarDepth();
 		PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MinDepth"), MinDepth);
 		PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MaxDepth"), MaxDepth);
 		PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MaxDiscreteDepth"), GTempo_Max_Discrete_Depth);
+		ApplyDistortionMapToMaterial(PostProcessMaterialInstance);
 	}
 	else
 	{
@@ -291,46 +281,77 @@ FTextureRead* UTempoLidarCaptureComponent::MakeTextureRead() const
 
 	return new TTextureRead<FLidarPixel>(SizeXY, LidarOwner->SequenceId + NumPendingTextureReads(), GetWorld()->GetTimeSeconds(), LidarOwner->GetOwnerName(),
 		LidarOwner->GetSensorName(), LidarOwner->GetComponentTransform(), GetComponentTransform(), FOVAngle,
-		LidarOwner->VerticalFOV, HorizontalBeams, LidarOwner->VerticalBeams, SizeXYFOV,
+		LidarOwner->VerticalFOV, HorizontalBeams, LidarOwner->VerticalBeams,
 		LidarOwner->IntensitySaturationDistance, LidarOwner->MaxAngleOfIncidence,
 		LidarOwner->GetActiveCaptureComponents().Num(), GetRelativeRotation().Yaw, MinDepth, MaxDepth, LidarOwner->MinDistance, LidarOwner->MaxDistance);
 }
 
 void TTextureRead<FLidarPixel>::Decode(float TransmissionTime, TempoLidar::LidarScanSegment& ScanSegmentOut) const
 {
-	const FVector2D ImagePlaneSize = 2.0 * SphericalToPerspective(HorizontalFOV / 2.0, VerticalFOV / 2.0);
-	const FVector2D SizeXYOffset = (FVector2D(ImageSize) - SizeXYFOV) / 2.0;
-
-	auto LidarReturnFromBeam = [this, &ImagePlaneSize, &SizeXYOffset] (int32 HorizontalBeam, int32 VerticalBeam) -> TempoLidar::LidarReturn
+#if !UE_BUILD_SHIPPING
 	{
-		auto ImagePlaneLocationToPixelCoordinate = [this, &ImagePlaneSize, &SizeXYOffset](const FVector2D& ImagePlaneLocation)
+		static bool bLogged = false;
+		if (!bLogged)
 		{
-			return (FVector2D::UnitVector / 2.0 + ImagePlaneLocation / ImagePlaneSize) * (SizeXYFOV - FVector2D::UnitVector) + SizeXYOffset;
-		};
+			UE_LOG(LogTemp, Warning, TEXT("Lidar Decode: ImageSize=(%d,%d), HBeams=%d, VBeams=%d"),
+				ImageSize.X, ImageSize.Y, HorizontalBeams, VerticalBeams);
+			for (int32 v = 0; v < FMath::Min(VerticalBeams, 10); ++v)
+			{
+				const int32 PixelY = FMath::RoundToInt32(static_cast<double>(v) / (VerticalBeams - 1) * (ImageSize.Y - 1));
+				const int32 NextPixelY = (v + 1 < VerticalBeams) ? FMath::RoundToInt32(static_cast<double>(v + 1) / (VerticalBeams - 1) * (ImageSize.Y - 1)) : -1;
+				UE_LOG(LogTemp, Warning, TEXT("  VBeam %d -> PixelY %d (stride %d)"), v, PixelY, NextPixelY - PixelY);
+			}
+			for (int32 h = 0; h < FMath::Min(HorizontalBeams, 10); ++h)
+			{
+				const int32 PixelX = FMath::RoundToInt32(static_cast<double>(h) / (HorizontalBeams - 1) * (ImageSize.X - 1));
+				const int32 NextPixelX = (h + 1 < HorizontalBeams) ? FMath::RoundToInt32(static_cast<double>(h + 1) / (HorizontalBeams - 1) * (ImageSize.X - 1)) : -1;
+				UE_LOG(LogTemp, Warning, TEXT("  HBeam %d -> PixelX %d (stride %d)"), h, PixelX, NextPixelX - PixelX);
+			}
+			bLogged = true;
+		}
+	}
+#endif
 
-		auto PixelCoordinateToImagePlaneLocation = [this, &ImagePlaneSize, &SizeXYOffset](const FVector2D& PixelCoordinate)
-		{
-			return ((PixelCoordinate - SizeXYOffset) / (SizeXYFOV - FVector2D::UnitVector) - (FVector2D::UnitVector / 2.0)) * ImagePlaneSize;
-		};
-
+	// After the equidistant distortion map is applied by the GPU, the output image has pixels
+	// at uniform angular intervals. Each beam maps directly to a pixel position.
+	auto LidarReturnFromBeam = [this] (int32 HorizontalBeam, int32 VerticalBeam) -> TempoLidar::LidarReturn
+	{
+		// Beam angles
 		const double AzimuthDeg = (-0.5 + static_cast<double>(HorizontalBeam) / (HorizontalBeams - 1)) * HorizontalFOV;
 		const double ElevationDeg = (-0.5 + static_cast<double>(VerticalBeam) / (VerticalBeams - 1)) * VerticalFOV;
-		const FVector2D ImagePlaneLocation = SphericalToPerspective(AzimuthDeg, ElevationDeg);
-		const FVector2D PixelCoordinate = ImagePlaneLocationToPixelCoordinate(ImagePlaneLocation);
-		const FIntPoint Coord(FMath::RoundToInt32(PixelCoordinate.X), FMath::RoundToInt32(PixelCoordinate.Y));
-		const float NearestDepth = Image[Coord.X + ImageSize.X * Coord.Y].Depth(MinDepth, MaxDepth, GTempo_Max_Discrete_Depth);
-		const FVector2D ImagePlaneLocationAboveLeft = PixelCoordinateToImagePlaneLocation(FVector2D(Coord.X, Coord.Y));
-		double AzimuthDegNearest, ElevationDegNearest;
-		PerspectiveToSpherical(ImagePlaneLocationAboveLeft, AzimuthDegNearest, ElevationDegNearest);
-		const float NearestDistance =  DepthToDistance(AzimuthDegNearest, ElevationDegNearest, NearestDepth);
-		const FVector NearestPoint = SphericalToCartesian(AzimuthDegNearest, ElevationDegNearest, NearestDistance);
-		const FVector WorldNormal = Image[Coord.X + ImageSize.X * Coord.Y].Normal();
+
+		// Direct pixel mapping in equidistant output: pixel position is linear in angle
+		const int32 PixelX = FMath::RoundToInt32(static_cast<double>(HorizontalBeam) / (HorizontalBeams - 1) * (ImageSize.X - 1));
+		const int32 PixelY = FMath::RoundToInt32(static_cast<double>(VerticalBeam) / (VerticalBeams - 1) * (ImageSize.Y - 1));
+		const int32 PixelIndex = FMath::Clamp(PixelX, 0, ImageSize.X - 1) + ImageSize.X * FMath::Clamp(PixelY, 0, ImageSize.Y - 1);
+
+		const float NearestDepth = Image[PixelIndex].Depth(MinDepth, MaxDepth, GTempo_Max_Discrete_Depth);
+		const float NearestDistance = DepthToDistance(AzimuthDeg, ElevationDeg, NearestDepth);
+		const FVector NearestPoint = SphericalToCartesian(AzimuthDeg, ElevationDeg, NearestDistance);
+		const FVector WorldNormal = Image[PixelIndex].Normal();
 		const FVector LocalNormal = CaptureTransform.InverseTransformVector(WorldNormal);
 		const FVector RayDirection = SphericalToCartesian(AzimuthDeg, ElevationDeg, MaxDistance);
 		const double CosAngleOfIncidence = FVector::DotProduct(LocalNormal.GetSafeNormal(), -RayDirection.GetSafeNormal());
 		const double AngleOfIncidence = FMath::RadiansToDegrees(FMath::Acos(CosAngleOfIncidence));
 		double Intensity;
 		double Distance;
+
+#if !UE_BUILD_SHIPPING
+		{
+			static bool bLoggedBeams = false;
+			const int32 MidV = VerticalBeams * 3 / 4;
+			if (!bLoggedBeams && VerticalBeam == MidV && (HorizontalBeam == 0 || HorizontalBeam == HorizontalBeams / 4 || HorizontalBeam == HorizontalBeams / 2 || HorizontalBeam == HorizontalBeams * 3 / 4 || HorizontalBeam == HorizontalBeams - 1))
+			{
+				UE_LOG(LogTemp, Warning, TEXT("Beam(%d,%d) Az=%.2f El=%.2f Pixel=(%d,%d) Depth=%.2f Dist=%.2f Pos=(%.2f,%.2f,%.2f) Normal=(%.3f,%.3f,%.3f) AoI=%.1f"),
+					HorizontalBeam, VerticalBeam, AzimuthDeg, ElevationDeg, PixelX, PixelY,
+					NearestDepth, NearestDistance,
+					NearestPoint.X, NearestPoint.Y, NearestPoint.Z,
+					LocalNormal.X, LocalNormal.Y, LocalNormal.Z, AngleOfIncidence);
+				if (HorizontalBeam == HorizontalBeams - 1) bLoggedBeams = true;
+			}
+		}
+#endif
+
 		if (AngleOfIncidence > MaxAngleOfIncidence)
 		{
 			Distance = 0.0;
@@ -354,7 +375,7 @@ void TTextureRead<FLidarPixel>::Decode(float TransmissionTime, TempoLidar::Lidar
 		TempoLidar::LidarReturn LidarReturn;
 		LidarReturn.set_distance(QuantityConverter<CM2M>::Convert(Distance));
 		LidarReturn.set_intensity(Intensity);
-		LidarReturn.set_label(Image[Coord.X + ImageSize.X * Coord.Y].Label());
+		LidarReturn.set_label(Image[PixelIndex].Label());
 		return LidarReturn;
 	};
 
@@ -499,13 +520,58 @@ void UTempoLidarCaptureComponent::Configure(double YawOffset, double SubHorizont
 	const UTempoSensorsSettings* TempoSensorsSettings = GetDefault<UTempoSensorsSettings>();
 	check(TempoSensorsSettings);
 
-	const double UndistortedVerticalImagePlaneSize = 2.0 * FMath::Tan(LidarOwner->VerticalFOV / 2.0);
+	// Size the render target for equidistant output with uniform angular resolution.
+	// The perspective image plane size determines the aspect ratio needed to cover the full FOV.
 	const FVector2D ImagePlaneSize = 2.0 * SphericalToPerspective(FOVAngle / 2.0, LidarOwner->VerticalFOV / 2.0);
-
 	const double AspectRatio = ImagePlaneSize.Y / ImagePlaneSize.X;
-	SizeXYFOV = TempoSensorsSettings->GetLidarUpsamplingFactor() * FVector2D(HorizontalBeams, AspectRatio * HorizontalBeams);
+	const float UpsamplingFactor = TempoSensorsSettings->GetLidarUpsamplingFactor();
+	SizeXY = FIntPoint(
+		FMath::CeilToInt32(UpsamplingFactor * HorizontalBeams),
+		FMath::Max(FMath::CeilToInt32(AspectRatio * UpsamplingFactor * HorizontalBeams), FMath::CeilToInt32(UpsamplingFactor * LidarOwner->VerticalBeams))
+	);
 
-	SizeXY = FIntPoint(FMath::CeilToInt32(SizeXYFOV.X), FMath::CeilToInt32(SizeXYFOV.Y));
-	DistortionFactor = UndistortedVerticalImagePlaneSize / ImagePlaneSize.Y;
-	DistortedVerticalFOV = FMath::RadiansToDegrees(2.0 * FMath::Atan(FMath::Tan(FMath::DegreesToRadians(LidarOwner->VerticalFOV) / 2.0) * DistortionFactor));
+	InitDistortionMap();
+}
+
+void UTempoLidarCaptureComponent::InitDistortionMap()
+{
+	if (SizeXY.X <= 0 || SizeXY.Y <= 0 || FOVAngle <= 0.0 || !LidarOwner)
+	{
+		return;
+	}
+
+	CreateOrResizeDistortionMapTexture();
+
+	const double HalfHFOVRad = FMath::DegreesToRadians(FOVAngle / 2.0);
+	const double HalfVFOVRad = FMath::DegreesToRadians(LidarOwner->VerticalFOV / 2.0);
+
+	// Equidistant focal lengths: pixels per radian (pixel position linear in angle)
+	const double FxDest = (SizeXY.X / 2.0) / HalfHFOVRad;
+	const double FyDest = (SizeXY.Y / 2.0) / HalfVFOVRad;
+
+	// Perspective focal lengths: pixels per tan(angle) (must match the perspective render)
+	// For square pixels, FxSource == FySource. UE perspective renders use horizontal FOV.
+	const double FxSource = (SizeXY.X / 2.0) / FMath::Tan(HalfHFOVRad);
+	const double FySource = FxSource;
+
+	const FEquidistantDistortion Model;
+	FillDistortionMap(Model, FxDest, FyDest, FxSource, FySource);
+
+#if !UE_BUILD_SHIPPING
+	UE_LOG(LogTemp, Warning, TEXT("Lidar DistortionMap: SizeXY=(%d,%d), FxDest=%.4f, FyDest=%.4f, FxSource=%.4f, FySource=%.4f"),
+		SizeXY.X, SizeXY.Y, FxDest, FyDest, FxSource, FySource);
+	UE_LOG(LogTemp, Warning, TEXT("  Pixel 0 H angle: %.6f rad (expected: %.6f rad)"),
+		(0.5 - SizeXY.X / 2.0) / FxDest, -HalfHFOVRad);
+	UE_LOG(LogTemp, Warning, TEXT("  Pixel %d H angle: %.6f rad (expected: %.6f rad)"),
+		SizeXY.X - 1, (SizeXY.X - 0.5 - SizeXY.X / 2.0) / FxDest, HalfHFOVRad);
+	UE_LOG(LogTemp, Warning, TEXT("  Pixel 0 V angle: %.6f rad (expected: %.6f rad)"),
+		(0.5 - SizeXY.Y / 2.0) / FyDest, -HalfVFOVRad);
+	UE_LOG(LogTemp, Warning, TEXT("  Pixel %d V angle: %.6f rad (expected: %.6f rad)"),
+		SizeXY.Y - 1, (SizeXY.Y - 0.5 - SizeXY.Y / 2.0) / FyDest, HalfVFOVRad);
+#endif
+
+	if (PostProcessMaterialInstance)
+	{
+		ApplyDistortionMapToMaterial(PostProcessMaterialInstance);
+	}
 }
