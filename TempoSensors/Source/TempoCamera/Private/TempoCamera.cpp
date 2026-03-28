@@ -14,51 +14,25 @@
 #include "Math/Box2D.h"
 #include "TextureResource.h"
 
-// Root-Finding Solver (Newton-Raphson)
+// Root-Finding Solver (Newton-Raphson) - used for feasibility checks in InitDistortionMap
 static double Solve(const TFunction<double(double)>& Objective, const TFunction<double(double)>& Derivative, const double InitialGuess, const int32 MaxIter, const double Threshold)
 {
 	double X = InitialGuess;
 	for (int I = 0; I < MaxIter; ++I)
 	{
 		const double FVal = Objective(X);
-		if (FMath::Abs(FVal) < Threshold) 
+		if (FMath::Abs(FVal) < Threshold)
 		{
 			break;
 		}
 		double Deriv = Derivative(X);
-		if (FMath::Abs(Deriv) < 0.001) 
+		if (FMath::Abs(Deriv) < 0.001)
 		{
 			Deriv = (Deriv < 0) ? -0.001 : 0.001;
 		}
 		X -= FVal / Deriv;
 	}
 	return X;
-}
-
-static double SolveInverseDistortion(double TargetRadius, double K1, double K2, double K3)
-{
-	if (TargetRadius < 1e-6)
-	{
-		return TargetRadius;
-	}
-	
-	return Solve(
-		[K1, K2, K3, TargetRadius](double R) {
-			double R2 = R * R;
-			double R4 = R2 * R2;
-			double R6 = R4 * R2;
-			return (R * (1.0 + K1*R2 + K2*R4 + K3*R6)) - TargetRadius; 
-		},
-		[K1, K2, K3](double R) {
-			double R2 = R * R;
-			double R4 = R2 * R2;
-			double R6 = R4 * R2;
-			return 1.0 + 3.0*K1*R2 + 5.0*K2*R4 + 7.0*K3*R6;
-		},
-		TargetRadius,
-		40,
-		1e-6
-	);
 }
 
 /**
@@ -400,6 +374,8 @@ void UTempoCamera::InitDistortionMap()
 		ensureMsgf(DistortedFOV <= MaxPossibleFOV, TEXT("DistortedFOV %.2f exceeds limit %.2f for K1=%.3f. Artifacts expected."), DistortedFOV, MaxPossibleFOV, K1);
 	}
 	
+	const FBrownConradyDistortion Model(K1, K2, K3);
+
 	if (bDriveFOVAngle)
 	{
 		if (DistortedFOV <= 0.0f)
@@ -414,7 +390,7 @@ void UTempoCamera::InitDistortionMap()
 			if (K1 >= 0.0)
 			{
 				// Pincushion
-				SourceRadiusHoriz = SolveInverseDistortion(TargetRadiusHoriz, K1, K2, K3);
+				SourceRadiusHoriz = FBrownConradyDistortion::SolveInverseDistortion(TargetRadiusHoriz, K1, K2, K3);
 			}
 			else
 			{
@@ -422,10 +398,10 @@ void UTempoCamera::InitDistortionMap()
 				const double AspectRatio = (SizeXY.Y > 0) ? static_cast<double>(SizeXY.X) / static_cast<double>(SizeXY.Y) : 1.0;
 				const double TargetRadiusVert = TargetRadiusHoriz / AspectRatio;
 				const double TargetRadiusDiag = FMath::Sqrt(TargetRadiusHoriz * TargetRadiusHoriz + TargetRadiusVert * TargetRadiusVert);
-		   
-				const double SourceRadiusDiag = SolveInverseDistortion(TargetRadiusDiag, K1, K2, K3);
-		   
-				const double GeometricRatio = TargetRadiusHoriz / TargetRadiusDiag; 
+
+				const double SourceRadiusDiag = FBrownConradyDistortion::SolveInverseDistortion(TargetRadiusDiag, K1, K2, K3);
+
+				const double GeometricRatio = TargetRadiusHoriz / TargetRadiusDiag;
 				SourceRadiusHoriz = SourceRadiusDiag * GeometricRatio;
 			}
 			// Convert horizontal source radius back to degrees
@@ -439,26 +415,14 @@ void UTempoCamera::InitDistortionMap()
 	{
 		return;
 	}
-	
-	if (!DistortionMapTexture || DistortionMapTexture->GetSizeX() != SizeXY.X || DistortionMapTexture->GetSizeY() != SizeXY.Y)
-	{
-		DistortionMapTexture = UTexture2D::CreateTransient(SizeXY.X, SizeXY.Y, PF_G16R16F);
-		DistortionMapTexture->CompressionSettings = TC_HDR;
-		DistortionMapTexture->Filter = TF_Bilinear;
-		DistortionMapTexture->AddressX = TA_Clamp;
-		DistortionMapTexture->AddressY = TA_Clamp;
-		DistortionMapTexture->SRGB = 0;
-#ifdef UpdateResource
-#undef UpdateResource
-#endif
-		DistortionMapTexture->UpdateResource();
-	}
+
+	CreateOrResizeDistortionMapTexture();
 	const float HalfRadDest = FMath::DegreesToRadians(DistortedFOV / 2.0f);
 	const float NormalizedFDest = 0.5f / FMath::Tan(HalfRadDest);
-	
+
 	const double FxDest = NormalizedFDest * SizeXY.X;
 	const double FyDest = FxDest;
-	
+
 	float NormalizedFSource = 0.5f;
 	if (ProjectionType == ECameraProjectionMode::Perspective)
 	{
@@ -474,49 +438,13 @@ void UTempoCamera::InitDistortionMap()
 		}
 	}
 	const double FxSource = NormalizedFSource * SizeXY.X;
-	const double FySource = FxSource; 
-	
-	FTexture2DMipMap& Mip = DistortionMapTexture->GetPlatformData()->Mips[0];
-	uint16* MipData = static_cast<uint16*>(Mip.BulkData.Lock(LOCK_READ_WRITE));
+	const double FySource = FxSource;
 
-	if (!MipData)
-	{
-		Mip.BulkData.Unlock();
-		return;
-	}
-	
-	const double Cx = SizeXY.X * 0.5;
-	const double Cy = SizeXY.Y * 0.5;
-	
-	const double InvFxDest = 1.0 / FxDest;
-	const double InvFyDest = 1.0 / FyDest;
-	const float InvSizeX = 1.0f / static_cast<float>(SizeXY.X);
-	const float InvSizeY = 1.0f / static_cast<float>(SizeXY.Y);
+	FillDistortionMap(Model, FxDest, FyDest, FxSource, FySource);
 
-	for (int V = 0; V < SizeXY.Y; ++V)
-	{
-		uint16* Row = &MipData[V * SizeXY.X * 2];
-		const double TargetY = (V + 0.5 - Cy) * InvFyDest;
-		const double TargetY2 = TargetY * TargetY;
-
-		for (int U = 0; U < SizeXY.X; ++U)
-		{
-			const double TargetX = (U + 0.5 - Cx) * InvFxDest;
-			const double TargetRadius = FMath::Sqrt(TargetX * TargetX + TargetY2);
-			const double SourceRadius = SolveInverseDistortion(TargetRadius, K1, K2, K3);
-			const double Scale = (TargetRadius > 1e-6) ? (SourceRadius / TargetRadius) : 1.0;
-			const float FinalU = static_cast<float>(TargetX * Scale * FxSource + Cx) * InvSizeX;
-			const float FinalV = static_cast<float>(TargetY * Scale * FySource + Cy) * InvSizeY;
-			Row[U * 2 + 0] = FFloat16(FinalU).Encoded;
-			Row[U * 2 + 1] = FFloat16(FinalV).Encoded;
-		}
-	}
-
-	Mip.BulkData.Unlock();
-	DistortionMapTexture->UpdateResource();
 	if (PostProcessMaterialInstance)
 	{
-		PostProcessMaterialInstance->SetTextureParameterValue(FName("DistortionMap"), DistortionMapTexture);
+		ApplyDistortionMapToMaterial(PostProcessMaterialInstance);
 		PostProcessMaterialInstance->SetScalarParameterValue(FName("CroppingFactor"), CroppingFactor);
 	}
 }
@@ -719,10 +647,10 @@ void UTempoCamera::ApplyDepthEnabled()
 		if (const TObjectPtr<UMaterialInterface> PostProcessMaterialWithDepth = GetDefault<UTempoSensorsSettings>()->GetCameraPostProcessMaterialWithDepth())
 		{
 			PostProcessMaterialInstance = UMaterialInstanceDynamic::Create(PostProcessMaterialWithDepth.Get(), this);
-			
+
+			ApplyDistortionMapToMaterial(PostProcessMaterialInstance);
 			if (DistortionMapTexture)
 			{
-				PostProcessMaterialInstance->SetTextureParameterValue(FName("DistortionMap"), DistortionMapTexture);
 				PostProcessMaterialInstance->SetScalarParameterValue(FName("CroppingFactor"), CroppingFactor);
 			}
 
@@ -742,9 +670,9 @@ void UTempoCamera::ApplyDepthEnabled()
 		if (const TObjectPtr<UMaterialInterface> PostProcessMaterialNoDepth = GetDefault<UTempoSensorsSettings>()->GetCameraPostProcessMaterialNoDepth())
 		{
 			PostProcessMaterialInstance = UMaterialInstanceDynamic::Create(PostProcessMaterialNoDepth.Get(), this);
+			ApplyDistortionMapToMaterial(PostProcessMaterialInstance);
 			if (DistortionMapTexture)
 			{
-				PostProcessMaterialInstance->SetTextureParameterValue(FName("DistortionMap"), DistortionMapTexture);
 				PostProcessMaterialInstance->SetScalarParameterValue(FName("CroppingFactor"), CroppingFactor);
 			}
 		}

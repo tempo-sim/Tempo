@@ -6,6 +6,8 @@
 #include "TempoConversion.h"
 #include "Components/SceneCaptureComponent2D.h"
 #include "Engine/TextureRenderTarget2D.h"
+#include "Engine/Texture2D.h"
+#include "TempoDistortionModels.h"
 
 #include "TempoSceneCaptureComponent2D.generated.h"
 
@@ -279,6 +281,23 @@ protected:
 
 	// Initialize our RenderTarget and TextureRHICopy with the current settings.
 	virtual void InitRenderTarget();
+
+	// Override this to initialize the distortion map texture with a projection-specific mapping.
+	virtual void InitDistortionMap() {}
+
+	// Create or resize the distortion map texture to match SizeXY.
+	void CreateOrResizeDistortionMapTexture();
+
+	// Apply the distortion map texture to the given material instance.
+	void ApplyDistortionMapToMaterial(UMaterialInstanceDynamic* MaterialInstance) const;
+
+	// Fill the distortion map texture using the given distortion model.
+	// FxDest/FyDest are the destination focal lengths, FxSource/FySource are the source (perspective) focal lengths.
+	void FillDistortionMap(const FDistortionModel& Model, double FxDest, double FyDest, double FxSource, double FySource);
+
+	// The distortion map texture. Each pixel stores (U, V) source coordinates in PF_G16R16F format.
+	UPROPERTY(Transient, VisibleAnywhere)
+	UTexture2D* DistortionMapTexture = nullptr;
 
 	// Gets the number of pending texture reads
 	int32 NumPendingTextureReads() const { return TextureReadQueue.Num(); }
