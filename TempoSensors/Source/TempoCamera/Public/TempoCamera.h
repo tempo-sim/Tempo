@@ -203,7 +203,7 @@ protected:
 	
 	virtual void InitRenderTarget() override;
 	
-	void InitDistortionMap();
+	virtual void InitDistortionMap() override;
 
 	void UpdateLensParameters();
 
@@ -229,9 +229,6 @@ protected:
 
 	UPROPERTY(VisibleAnywhere)
 	UMaterialInstanceDynamic* PostProcessMaterialInstance = nullptr;
-
-	UPROPERTY(Transient)
-	UTexture2D* DistortionMapTexture = nullptr;
 
 	TArray<FColorImageRequest> PendingColorImageRequests;
 	TArray<FLabelImageRequest> PendingLabelImageRequests;
