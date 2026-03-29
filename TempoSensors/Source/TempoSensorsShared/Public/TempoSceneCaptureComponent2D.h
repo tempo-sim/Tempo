@@ -86,10 +86,28 @@ struct TTextureReadBase : FTextureRead
 		RHICmdList.ImmediateFlush(EImmediateFlushType::DispatchToRHIThread);
 
 		// Lastly, read the raw data from the copied TextureTarget on the CPU.
+		// Note: SurfaceWidth may be larger than ImageSize.X due to GPU row alignment padding.
+		// We must copy row-by-row to account for this pitch difference.
 		void* OutBuffer;
 		int32 SurfaceWidth, SurfaceHeight;
 		GDynamicRHI->RHIMapStagingSurface(TextureRHICopy, Fence, OutBuffer, SurfaceWidth, SurfaceHeight, RHICmdList.GetGPUMask().ToIndex());
-		FMemory::Memcpy(Image.GetData(), OutBuffer, SurfaceWidth * SurfaceHeight * sizeof(PixelType));
+		const int32 SrcPitch = SurfaceWidth * sizeof(PixelType);
+		const int32 DstPitch = ImageSize.X * sizeof(PixelType);
+		if (SurfaceWidth == ImageSize.X)
+		{
+			FMemory::Memcpy(Image.GetData(), OutBuffer, DstPitch * ImageSize.Y);
+		}
+		else
+		{
+			const uint8* SrcRow = static_cast<const uint8*>(OutBuffer);
+			uint8* DstRow = reinterpret_cast<uint8*>(Image.GetData());
+			for (int32 Row = 0; Row < ImageSize.Y; ++Row)
+			{
+				FMemory::Memcpy(DstRow, SrcRow, DstPitch);
+				SrcRow += SrcPitch;
+				DstRow += DstPitch;
+			}
+		}
 		RHICmdList.UnmapStagingSurface(TextureRHICopy);
 
 		State = State::EReadComplete;

@@ -313,23 +313,32 @@ void TTextureRead<FLidarPixel>::Decode(float TransmissionTime, TempoLidar::Lidar
 #endif
 
 	// After the equidistant distortion map is applied by the GPU, the output image has pixels
-	// at uniform angular intervals. Each beam maps directly to a pixel position.
-	auto LidarReturnFromBeam = [this] (int32 HorizontalBeam, int32 VerticalBeam) -> TempoLidar::LidarReturn
-	{
-		// Beam angles
-		const double AzimuthDeg = (-0.5 + static_cast<double>(HorizontalBeam) / (HorizontalBeams - 1)) * HorizontalFOV;
-		const double ElevationDeg = (-0.5 + static_cast<double>(VerticalBeam) / (VerticalBeams - 1)) * VerticalFOV;
+	// at uniform angular intervals. We compute the actual pixel-center angle (which may differ
+	// slightly from the ideal beam angle due to discretization) and use that for the depth-to-
+	// distance conversion and ray direction. The plane intersection then refines the hit point.
+	const double HalfHFOVRad = FMath::DegreesToRadians(HorizontalFOV / 2.0);
+	const double HalfVFOVRad = FMath::DegreesToRadians(VerticalFOV / 2.0);
+	const double FxDest = (ImageSize.X / 2.0) / HalfHFOVRad;
+	const double FyDest = (ImageSize.Y / 2.0) / HalfVFOVRad;
 
-		// Direct pixel mapping in equidistant output: pixel position is linear in angle
+	auto LidarReturnFromBeam = [this, FxDest, FyDest] (int32 HorizontalBeam, int32 VerticalBeam) -> TempoLidar::LidarReturn
+	{
+		// Map beam index to nearest pixel
 		const int32 PixelX = FMath::RoundToInt32(static_cast<double>(HorizontalBeam) / (HorizontalBeams - 1) * (ImageSize.X - 1));
 		const int32 PixelY = FMath::RoundToInt32(static_cast<double>(VerticalBeam) / (VerticalBeams - 1) * (ImageSize.Y - 1));
 		const int32 PixelIndex = FMath::Clamp(PixelX, 0, ImageSize.X - 1) + ImageSize.X * FMath::Clamp(PixelY, 0, ImageSize.Y - 1);
 
+		// Use the actual pixel-center angle in the equidistant output (may differ slightly from the ideal beam angle)
+		const double NearestAzimuthDeg = FMath::RadiansToDegrees((PixelX + 0.5 - ImageSize.X / 2.0) / FxDest);
+		const double NearestElevationDeg = FMath::RadiansToDegrees((PixelY + 0.5 - ImageSize.Y / 2.0) / FyDest);
+
 		const float NearestDepth = Image[PixelIndex].Depth(MinDepth, MaxDepth, GTempo_Max_Discrete_Depth);
-		const float NearestDistance = DepthToDistance(AzimuthDeg, ElevationDeg, NearestDepth);
-		const FVector NearestPoint = SphericalToCartesian(AzimuthDeg, ElevationDeg, NearestDistance);
+		const float NearestDistance = DepthToDistance(NearestAzimuthDeg, NearestElevationDeg, NearestDepth);
+		const FVector NearestPoint = SphericalToCartesian(NearestAzimuthDeg, NearestElevationDeg, NearestDistance);
 		const FVector WorldNormal = Image[PixelIndex].Normal();
 		const FVector LocalNormal = CaptureTransform.InverseTransformVector(WorldNormal);
+		const double AzimuthDeg = (-0.5 + static_cast<double>(HorizontalBeam) / (HorizontalBeams - 1)) * HorizontalFOV;
+		const double ElevationDeg = (-0.5 + static_cast<double>(VerticalBeam) / (VerticalBeams - 1)) * VerticalFOV;
 		const FVector RayDirection = SphericalToCartesian(AzimuthDeg, ElevationDeg, MaxDistance);
 		const double CosAngleOfIncidence = FVector::DotProduct(LocalNormal.GetSafeNormal(), -RayDirection.GetSafeNormal());
 		const double AngleOfIncidence = FMath::RadiansToDegrees(FMath::Acos(CosAngleOfIncidence));
@@ -540,6 +549,18 @@ void UTempoLidarCaptureComponent::InitDistortionMap()
 		return;
 	}
 
+	const double CurrentVerticalFOV = LidarOwner->VerticalFOV;
+	if (SizeXY == SizeXY_Internal &&
+		FMath::IsNearlyEqual(FOVAngle, FOVAngle_Internal) &&
+		FMath::IsNearlyEqual(CurrentVerticalFOV, VerticalFOV_Internal))
+	{
+		return;
+	}
+
+	SizeXY_Internal = SizeXY;
+	FOVAngle_Internal = FOVAngle;
+	VerticalFOV_Internal = CurrentVerticalFOV;
+
 	CreateOrResizeDistortionMapTexture();
 
 	const double HalfHFOVRad = FMath::DegreesToRadians(FOVAngle / 2.0);
@@ -558,16 +579,26 @@ void UTempoLidarCaptureComponent::InitDistortionMap()
 	FillDistortionMap(Model, FxDest, FyDest, FxSource, FySource);
 
 #if !UE_BUILD_SHIPPING
-	UE_LOG(LogTemp, Warning, TEXT("Lidar DistortionMap: SizeXY=(%d,%d), FxDest=%.4f, FyDest=%.4f, FxSource=%.4f, FySource=%.4f"),
-		SizeXY.X, SizeXY.Y, FxDest, FyDest, FxSource, FySource);
-	UE_LOG(LogTemp, Warning, TEXT("  Pixel 0 H angle: %.6f rad (expected: %.6f rad)"),
-		(0.5 - SizeXY.X / 2.0) / FxDest, -HalfHFOVRad);
-	UE_LOG(LogTemp, Warning, TEXT("  Pixel %d H angle: %.6f rad (expected: %.6f rad)"),
-		SizeXY.X - 1, (SizeXY.X - 0.5 - SizeXY.X / 2.0) / FxDest, HalfHFOVRad);
-	UE_LOG(LogTemp, Warning, TEXT("  Pixel 0 V angle: %.6f rad (expected: %.6f rad)"),
-		(0.5 - SizeXY.Y / 2.0) / FyDest, -HalfVFOVRad);
-	UE_LOG(LogTemp, Warning, TEXT("  Pixel %d V angle: %.6f rad (expected: %.6f rad)"),
-		SizeXY.Y - 1, (SizeXY.Y - 0.5 - SizeXY.Y / 2.0) / FyDest, HalfVFOVRad);
+	UE_LOG(LogTemp, Warning, TEXT("Lidar DistortionMap: SizeXY=(%d,%d), FOVAngle=%.2f, VFOV=%.2f, FxDest=%.4f, FyDest=%.4f, FxSource=%.4f, FySource=%.4f"),
+		SizeXY.X, SizeXY.Y, FOVAngle, LidarOwner->VerticalFOV, FxDest, FyDest, FxSource, FySource);
+	// Verify distortion map values for key pixels matching Decode diagnostic beams
+	{
+		const double Cx = SizeXY.X * 0.5;
+		const double Cy = SizeXY.Y * 0.5;
+		const int32 MidV = LidarOwner->VerticalBeams * 3 / 4;
+		const int32 PixelY = FMath::RoundToInt32(static_cast<double>(MidV) / (LidarOwner->VerticalBeams - 1) * (SizeXY.Y - 1));
+		for (int32 HBeam : { 0, LidarOwner->HorizontalBeams / 4, LidarOwner->HorizontalBeams / 2, LidarOwner->HorizontalBeams * 3 / 4, LidarOwner->HorizontalBeams - 1 })
+		{
+			const int32 PixelX = FMath::RoundToInt32(static_cast<double>(HBeam) / (LidarOwner->HorizontalBeams - 1) * (SizeXY.X - 1));
+			const double TargetX = (PixelX + 0.5 - Cx) / FxDest;
+			const double TargetY = (PixelY + 0.5 - Cy) / FyDest;
+			const FVector2D Source = Model.DistortedToSource(TargetX, TargetY);
+			const float FinalU = static_cast<float>(Source.X * FxSource + Cx) / SizeXY.X;
+			const float FinalV = static_cast<float>(Source.Y * FySource + Cy) / SizeXY.Y;
+			UE_LOG(LogTemp, Warning, TEXT("HotReload  Pixel(%d,%d) TargetXY=(%.4f,%.4f) SourceXY=(%.4f,%.4f) FinalUV=(%.4f,%.4f)"),
+				PixelX, PixelY, TargetX, TargetY, Source.X, Source.Y, FinalU, FinalV);
+		}
+	}
 #endif
 
 	if (PostProcessMaterialInstance)

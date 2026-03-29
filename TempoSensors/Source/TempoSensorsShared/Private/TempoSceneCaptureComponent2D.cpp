@@ -250,6 +250,10 @@ void UTempoSceneCaptureComponent2D::CreateOrResizeDistortionMapTexture()
 #endif
 		DistortionMapTexture->UpdateResource();
 	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("DistortionMapTexture did not need to be recreated"));
+	}
 }
 
 void UTempoSceneCaptureComponent2D::ApplyDistortionMapToMaterial(UMaterialInstanceDynamic* MaterialInstance) const
@@ -300,6 +304,7 @@ void UTempoSceneCaptureComponent2D::FillDistortionMap(const FDistortionModel& Mo
 		}
 	}
 
+	UE_LOG(LogTemp, Warning, TEXT("Fill Distortion Map"));
 	Mip.BulkData.Unlock();
 	DistortionMapTexture->UpdateResource();
 }
