@@ -138,13 +138,13 @@ template <>
 struct TTextureRead<FLidarPixel> : TTextureReadBase<FLidarPixel>
 {
 	TTextureRead(const FIntPoint& ImageSizeIn, int32 SequenceIdIn, double CaptureTimeIn, const FString& OwnerNameIn,
-		const FString& SensorNameIn, const FTransform& SensorTransformIn, const FTransform& CaptureTransformIn,
-		double HorizontalFOVIn, double VerticalFOVIn, int32 HorizontalBeamsIn, int32 VerticalBeamsIn,
+		const FString& SensorNameIn, const FTransform& SensorTransformIn, const FTransform& CaptureTransform,
+		double HorizontalFOVIn, double VerticalFOVIn, int32 HorizontalBeamsIn, int32 VerticalBeamsIn, const FVector2D& SizeXYFOVIn,
 		double IntensitySaturationDistanceIn, double MaxAngleOfIncidenceIn,
 		int32 NumCaptureComponentsIn, double RelativeYawIn, float MinDepthIn, float MaxDepthIn, double MinDistanceIn, double MaxDistanceIn)
 		: TTextureReadBase(ImageSizeIn, SequenceIdIn, CaptureTimeIn, OwnerNameIn, SensorNameIn, SensorTransformIn),
-			CaptureTransform(CaptureTransformIn), HorizontalFOV(HorizontalFOVIn), VerticalFOV(VerticalFOVIn), HorizontalBeams(HorizontalBeamsIn),
-			VerticalBeams(VerticalBeamsIn), IntensitySaturationDistance(IntensitySaturationDistanceIn),
+			CaptureTransform(CaptureTransform), HorizontalFOV(HorizontalFOVIn), VerticalFOV(VerticalFOVIn), HorizontalBeams(HorizontalBeamsIn),
+			VerticalBeams(VerticalBeamsIn), SizeXYFOV(SizeXYFOVIn), IntensitySaturationDistance(IntensitySaturationDistanceIn),
 			MaxAngleOfIncidence(MaxAngleOfIncidenceIn), NumCaptureComponents(NumCaptureComponentsIn), RelativeYaw(RelativeYawIn),
 			MinDepth(MinDepthIn), MaxDepth(MaxDepthIn), MinDistance(MinDistanceIn), MaxDistance(MaxDistanceIn)
 	{
@@ -159,6 +159,7 @@ struct TTextureRead<FLidarPixel> : TTextureReadBase<FLidarPixel>
 	double VerticalFOV;
 	int32 HorizontalBeams;
 	int32 VerticalBeams;
+	const FVector2D SizeXYFOV;
 	double IntensitySaturationDistance;
 	double MaxAngleOfIncidence;
 	int32 NumCaptureComponents;
@@ -186,13 +187,23 @@ protected:
 
 	virtual int32 GetMaxTextureQueueSize() const override;
 
-	virtual void InitDistortionMap() override;
-
 	void Configure(double YawOffset, double SubHorizontalFOV, double SubHorizontalBeams);
 
 	// The number of horizontal beams.
 	UPROPERTY(EditAnywhere)
 	int32 HorizontalBeams = 200.0;
+
+	// The resulting distortion factor.
+	UPROPERTY(VisibleAnywhere)
+	double DistortionFactor = 1.0;
+
+	// The resulting distorted vertical FOV.
+	UPROPERTY(VisibleAnywhere)
+	double DistortedVerticalFOV = 30.0;
+
+	// The size of the image plane encompassing the Lidar FOV in pixels. SizeXY is the ceil of this.
+	UPROPERTY(VisibleAnywhere)
+	FVector2D SizeXYFOV = FVector2D::ZeroVector;
 
 	UPROPERTY(VisibleAnywhere)
 	UMaterialInstanceDynamic* PostProcessMaterialInstance= nullptr;
@@ -209,9 +220,4 @@ protected:
 	float MaxDepth = 40000.0; // 400m
 
 	friend UTempoLidar;
-
-	// Cached parameters to detect when the distortion map needs to be recreated.
-	FIntPoint SizeXY_Internal = FIntPoint::ZeroValue;
-	double FOVAngle_Internal = -1.0;
-	double VerticalFOV_Internal = -1.0;
 };
