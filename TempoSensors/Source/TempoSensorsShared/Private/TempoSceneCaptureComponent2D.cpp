@@ -138,8 +138,8 @@ void UTempoSceneCaptureComponent2D::UpdateSceneCaptureContents(FSceneInterface* 
 
 	const FTextureRenderTargetResource* RenderTarget = TextureTarget->GameThread_GetRenderTargetResource();
 	if (!ensureMsgf(RenderTarget && RenderTarget->IsInitialized(), TEXT("RenderTarget was not initialized. Skipping capture.")) ||
-		!ensureMsgf(TextureRHICopy.IsValid() && TextureRHICopy->IsValid(), TEXT("TextureRHICopy was not valid. Skipping capture.")) ||
-		!ensureMsgf(TextureRHICopy->GetFormat() == TextureTarget->GetFormat(), TEXT("RenderTarget and TextureRHICopy did not have same format. Skipping Capture.")))
+		!ensureMsgf(StagingTextures.Num() > 0 && StagingTextures[0].IsValid() && StagingTextures[0]->IsValid(), TEXT("StagingTextures were not valid. Skipping capture.")) ||
+		!ensureMsgf(StagingTextures[0]->GetFormat() == TextureTarget->GetFormat(), TEXT("RenderTarget and StagingTextures did not have same format. Skipping Capture.")))
 	{
 		return;
 	}
@@ -157,19 +157,19 @@ void UTempoSceneCaptureComponent2D::UpdateSceneCaptureContents(FSceneInterface* 
 	Super::UpdateSceneCaptureContents(Scene, SceneRenderBuilder);
 #endif
 	
-	ENQUEUE_RENDER_COMMAND(SetTempoSceneCaptureRenderFence)(
-	[this](FRHICommandList& RHICmdList)
-	{
-		if (!RenderFence.IsValid())
-		{
-			RenderFence = RHICreateGPUFence(TEXT("TempoCameraRenderFence"));
-			RHICmdList.WriteGPUFence(RenderFence);
-		}
-	});
-	
 	SequenceId++;
 
-	TextureReadQueue.Enqueue(MakeTextureRead());
+	FTextureRead* NewRead = MakeTextureRead();
+	NewRead->StagingTexture = AcquireNextStagingTexture();
+
+	ENQUEUE_RENDER_COMMAND(SetTempoSceneCaptureRenderFence)(
+	[NewRead](FRHICommandList& RHICmdList)
+	{
+		NewRead->RenderFence = RHICreateGPUFence(TEXT("TempoCameraRenderFence"));
+		RHICmdList.WriteGPUFence(NewRead->RenderFence);
+	});
+
+	TextureReadQueue.Enqueue(NewRead);
 }
 
 bool UTempoSceneCaptureComponent2D::IsNextReadAwaitingRender() const
@@ -179,35 +179,22 @@ bool UTempoSceneCaptureComponent2D::IsNextReadAwaitingRender() const
 
 void UTempoSceneCaptureComponent2D::ReadNextIfAvailable()
 {
-	if (!TextureReadQueue.IsNextAwaitingRender() || !RenderFence.IsValid())
+	if (!TextureReadQueue.IsNextAwaitingRender())
 	{
 		return;
 	}
-
-	if (GetDefault<UTempoCoreSettings>()->GetTimeMode() == ETimeMode::FixedStep)
-	{
-		while (!RenderFence->Poll())
-		{
-			FPlatformProcess::Sleep(1e-4);
-		}
-	}
-	else if (!RenderFence->Poll())
-	{
-		return;
-	}
-
-	RenderFence.SafeRelease();
 
 	const FRenderTarget* RenderTarget = TextureTarget->GetRenderTargetResource();
-	if (!ensureMsgf(RenderTarget, TEXT("RenderTarget was not initialized. Skipping texture read.")) ||
-		!ensureMsgf(TextureRHICopy.IsValid() && TextureRHICopy->IsValid(), TEXT("TextureRHICopy was not valid. Skipping texture read.")) ||
-		!ensureMsgf(TextureRHICopy->GetFormat() == TextureTarget->GetFormat(), TEXT("RenderTarget and TextureRHICopy did not have same format. Skipping texture read.")))
+	if (!ensureMsgf(RenderTarget, TEXT("RenderTarget was not initialized. Skipping texture read.")))
 	{
 		TextureReadQueue.SkipNext();
 		return;
 	}
 
-	TextureReadQueue.ReadNext(RenderTarget, TextureRHICopy);
+	const bool bShouldBlock = GetDefault<UTempoCoreSettings>()->GetTimeMode() == ETimeMode::FixedStep
+		&& !GetDefault<UTempoSensorsSettings>()->GetPipelinedRendering();
+
+	TextureReadQueue.ReadAllAvailable(RenderTarget, bShouldBlock);
 }
 
 void UTempoSceneCaptureComponent2D::BlockUntilNextReadComplete() const
@@ -330,35 +317,47 @@ void UTempoSceneCaptureComponent2D::InitRenderTarget()
 		TextureTarget->InitCustomFormat(SizeXY.X, SizeXY.Y, PixelFormatOverride, true);
 	}
 
-	struct FInitCPUCopyContext {
-		FString Name;
+	// Determine how many staging textures to create. We need at least as many as the max
+	// texture queue size to ensure each in-flight read gets its own staging texture.
+	const int32 MaxQueueSize = GetMaxTextureQueueSize();
+	const int32 NumStagingTextures = FMath::Max(2, MaxQueueSize > 0 ? MaxQueueSize + 1 : 2);
+
+	struct FInitStagingContext {
+		FString NameBase;
 		int32 SizeX;
 		int32 SizeY;
 		EPixelFormat PixelFormat;
-		FTextureRHIRef* TextureRHICopy;
+		int32 NumTextures;
+		TArray<FTextureRHIRef>* StagingTextures;
 	};
 
-	FInitCPUCopyContext Context = {
-		FString::Printf(TEXT("%s TextureRHICopy"), *GetName()),
+	StagingTextures.SetNum(NumStagingTextures);
+	NextStagingIndex = 0;
+
+	FInitStagingContext Context = {
+		GetName(),
 		TextureTarget->SizeX,
 		TextureTarget->SizeY,
 		TextureTarget->GetFormat(),
-		&TextureRHICopy
+		NumStagingTextures,
+		&StagingTextures
 	};
 
 	ENQUEUE_RENDER_COMMAND(InitTempoSceneCaptureTextureCopy)(
 		[Context](FRHICommandListImmediate& RHICmdList)
 		{
-			// Create the TextureRHICopy, where we will copy our TextureTarget's resource before reading it on the CPU.
 			constexpr ETextureCreateFlags TexCreateFlags = ETextureCreateFlags::Shared | ETextureCreateFlags::CPUReadback;
 
-			const FRHITextureCreateDesc Desc =
-				FRHITextureCreateDesc::Create2D(*Context.Name)
-				.SetExtent(Context.SizeX, Context.SizeY)
-				.SetFormat(Context.PixelFormat)
-				.SetFlags(TexCreateFlags);
+			for (int32 i = 0; i < Context.NumTextures; ++i)
+			{
+				const FRHITextureCreateDesc Desc =
+					FRHITextureCreateDesc::Create2D(*FString::Printf(TEXT("%s StagingTexture %d"), *Context.NameBase, i))
+					.SetExtent(Context.SizeX, Context.SizeY)
+					.SetFormat(Context.PixelFormat)
+					.SetFlags(TexCreateFlags);
 
-			*Context.TextureRHICopy = RHICreateTexture(Desc);
+				(*Context.StagingTextures)[i] = RHICreateTexture(Desc);
+			}
 		});
 
 	TextureInitFence.BeginFence();
