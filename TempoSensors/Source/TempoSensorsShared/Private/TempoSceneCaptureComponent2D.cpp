@@ -303,6 +303,10 @@ void UTempoSceneCaptureComponent2D::InitRenderTarget()
 		return;
 	}
 
+	// Wait for any previous staging texture init render command to complete before
+	// modifying StagingTextures, since the render command accesses the array via raw pointer.
+	TextureInitFence.Wait();
+
 	TextureTarget = NewObject<UTextureRenderTarget2D>(this);
 
 	TextureTarget->TargetGamma = GetDefault<UTempoSensorsSettings>()->GetSceneCaptureGamma();
@@ -329,10 +333,17 @@ void UTempoSceneCaptureComponent2D::InitRenderTarget()
 		EPixelFormat PixelFormat;
 		int32 NumTextures;
 		TArray<FTextureRHIRef>* StagingTextures;
+		FCriticalSection* StagingTexturesMutex;
 	};
 
-	StagingTextures.SetNum(NumStagingTextures);
-	NextStagingIndex = 0;
+	{
+		FScopeLock StagingTexturesLock(&StagingTexturesMutex);
+		if (NumStagingTextures != StagingTextures.Num())
+		{
+			StagingTextures.SetNum(NumStagingTextures);
+			NextStagingIndex = 0;
+		}
+	}
 
 	FInitStagingContext Context = {
 		GetName(),
@@ -340,7 +351,8 @@ void UTempoSceneCaptureComponent2D::InitRenderTarget()
 		TextureTarget->SizeY,
 		TextureTarget->GetFormat(),
 		NumStagingTextures,
-		&StagingTextures
+		&StagingTextures,
+		&StagingTexturesMutex
 	};
 
 	ENQUEUE_RENDER_COMMAND(InitTempoSceneCaptureTextureCopy)(
@@ -356,7 +368,10 @@ void UTempoSceneCaptureComponent2D::InitRenderTarget()
 					.SetFormat(Context.PixelFormat)
 					.SetFlags(TexCreateFlags);
 
-				(*Context.StagingTextures)[i] = RHICreateTexture(Desc);
+				{
+					FScopeLock StagingTexturesLock(Context.StagingTexturesMutex);
+					(*Context.StagingTextures)[i] = RHICreateTexture(Desc);
+				}
 			}
 		});
 
