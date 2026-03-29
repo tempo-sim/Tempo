@@ -34,7 +34,13 @@ struct FTextureRead
 
 	virtual FName GetType() const = 0;
 
-	virtual void Read(const FRenderTarget* RenderTarget, const FTextureRHIRef& TextureRHICopy) = 0;
+	virtual void Read(const FRenderTarget* RenderTarget) = 0;
+
+	// The GPU fence indicating our render has completed. Set during UpdateSceneCaptureContents.
+	FGPUFenceRHIRef RenderFence;
+
+	// The staging texture assigned to this read for GPU->CPU copy.
+	FTextureRHIRef StagingTexture;
 
 	void BlockUntilReadComplete() const
 	{
@@ -65,10 +71,11 @@ struct TTextureReadBase : FTextureRead
 		Image.SetNumUninitialized(ImageSize.X * ImageSize.Y);
 	}
 
-	virtual void Read(const FRenderTarget* RenderTarget, const FTextureRHIRef& TextureRHICopy) override
+	virtual void Read(const FRenderTarget* RenderTarget) override
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsTextureRead);
 		check(IsInRenderingThread());
+		check(StagingTexture.IsValid() && StagingTexture->IsValid());
 
 		State = State::EReading;
 
@@ -77,8 +84,8 @@ struct TTextureReadBase : FTextureRead
 		// Then, transition our TextureTarget to be copyable.
 		RHICmdList.Transition(FRHITransitionInfo(RenderTarget->GetRenderTargetTexture(), ERHIAccess::Unknown, ERHIAccess::CopySrc));
 
-		// Then, copy our TextureTarget to another that can be mapped and read by the CPU.
-		RHICmdList.CopyTexture(RenderTarget->GetRenderTargetTexture(), TextureRHICopy, FRHICopyTextureInfo());
+		// Then, copy our TextureTarget to this read's dedicated staging texture.
+		RHICmdList.CopyTexture(RenderTarget->GetRenderTargetTexture(), StagingTexture, FRHICopyTextureInfo());
 
 		// Write a GPU fence to wait for the above copy to complete before reading the data.
 		const FGPUFenceRHIRef Fence = RHICreateGPUFence(TEXT("TempoCameraTextureRead"));
@@ -90,7 +97,7 @@ struct TTextureReadBase : FTextureRead
 		// We must copy row-by-row to account for this pitch difference.
 		void* OutBuffer;
 		int32 SurfaceWidth, SurfaceHeight;
-		GDynamicRHI->RHIMapStagingSurface(TextureRHICopy, Fence, OutBuffer, SurfaceWidth, SurfaceHeight, RHICmdList.GetGPUMask().ToIndex());
+		GDynamicRHI->RHIMapStagingSurface(StagingTexture, Fence, OutBuffer, SurfaceWidth, SurfaceHeight, RHICmdList.GetGPUMask().ToIndex());
 		const int32 SrcPitch = SurfaceWidth * sizeof(PixelType);
 		const int32 DstPitch = ImageSize.X * sizeof(PixelType);
 		if (SurfaceWidth == ImageSize.X)
@@ -108,7 +115,7 @@ struct TTextureReadBase : FTextureRead
 				DstRow += DstPitch;
 			}
 		}
-		RHICmdList.UnmapStagingSurface(TextureRHICopy);
+		RHICmdList.UnmapStagingSurface(StagingTexture);
 
 		State = State::EReadComplete;
 	}
@@ -176,19 +183,34 @@ struct FTextureReadQueue
 		return false;
 	}
 
-	void ReadNext(const FRenderTarget* RenderTarget, const FTextureRHIRef& TextureRHICopy)
+	// Poll render fences on all awaiting reads and initiate readback for any that are ready.
+	// If bBlock is true, spin-waits on each fence. Returns true if any reads were initiated.
+	bool ReadAllAvailable(const FRenderTarget* RenderTarget, bool bBlock)
 	{
 		FRWScopeLock_OnlyGTWrite ReadLock(Lock, SLT_ReadOnly);
-		if (!PendingTextureReads.IsEmpty())
+		bool bAnyRead = false;
+		for (const TUniquePtr<FTextureRead>& TextureRead : PendingTextureReads)
 		{
-			for (const TUniquePtr<FTextureRead>& TextureRead : PendingTextureReads)
+			if (TextureRead->State != FTextureRead::State::EAwaitingRender || !TextureRead->RenderFence.IsValid())
 			{
-				if (TextureRead->State == FTextureRead::State::EAwaitingRender)
+				continue;
+			}
+			if (bBlock)
+			{
+				while (!TextureRead->RenderFence->Poll())
 				{
-					TextureRead->Read(RenderTarget, TextureRHICopy);
+					FPlatformProcess::Sleep(1e-4);
 				}
 			}
+			else if (!TextureRead->RenderFence->Poll())
+			{
+				continue;
+			}
+			TextureRead->RenderFence.SafeRelease();
+			TextureRead->Read(RenderTarget);
+			bAnyRead = true;
 		}
+		return bAnyRead;
 	}
 
 	void SkipNext()
@@ -333,12 +355,19 @@ private:
 	// A fence to indicate that our render textures have been initialized. Should only be accessed from the Game thread.
 	FRenderCommandFence TextureInitFence;
 
-	// A GPU fence to indicate that our latest render has completed. Should only be accessed from the Render thread.
-	FGPUFenceRHIRef RenderFence;
+	// Ring buffer of staging textures for GPU->CPU readback. Each in-flight FTextureRead
+	// gets its own staging texture, preventing tearing when multiple frames are in flight.
+	TArray<FTextureRHIRef> StagingTextures;
+	int32 NextStagingIndex = 0;
 
-	// We must copy our TextureTarget's resource here before reading it on the CPU
-	// because USceneCaptureComponent's RenderTarget is not set up to do so.
-	FTextureRHIRef TextureRHICopy;
+	// Returns the next staging texture from the ring buffer and advances the index.
+	FTextureRHIRef AcquireNextStagingTexture()
+	{
+		check(StagingTextures.Num() > 0);
+		const FTextureRHIRef& Texture = StagingTextures[NextStagingIndex];
+		NextStagingIndex = (NextStagingIndex + 1) % StagingTextures.Num();
+		return Texture;
+	}
 
 	FTimerHandle TimerHandle;
 };

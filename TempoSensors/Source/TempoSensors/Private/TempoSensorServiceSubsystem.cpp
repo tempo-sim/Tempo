@@ -11,6 +11,7 @@
 #include "TempoLidar/Lidar.pb.h"
 
 #include "TempoCoreSettings.h"
+#include "TempoSensorsSettings.h"
 
 using SensorService = TempoSensors::SensorService;
 using SensorAsyncService = TempoSensors::SensorService::AsyncService;
@@ -59,23 +60,7 @@ void UTempoSensorServiceSubsystem::Deinitialize()
 }
 
 void UTempoSensorServiceSubsystem::OnRenderFrameCompleted() const
-{	
-	if (GetDefault<UTempoCoreSettings>()->GetTimeMode() == ETimeMode::FixedStep)
-	{
-		bool bAnySensorAwaitingRender = false;
-		ForEachActiveSensor([&bAnySensorAwaitingRender](ITempoSensorInterface* Sensor)
-		{
-			bAnySensorAwaitingRender |= Sensor->IsAwaitingRender();
-		});
-		if (bAnySensorAwaitingRender)
-		{
-			TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsWaitForGPUSync);
-			FRHICommandListImmediate& RHICmdList = FRHICommandListImmediate::Get();
-			RHICmdList.SubmitCommandsAndFlushGPU();
-			RHICmdList.BlockUntilGPUIdle();
-		}
-	}
-
+{
 	ForEachActiveSensor([](ITempoSensorInterface* Sensor)
 	{
 		Sensor->OnRenderCompleted();
@@ -86,9 +71,11 @@ void UTempoSensorServiceSubsystem::OnWorldTickStart(UWorld* World, ELevelTick Ti
 {
 	if (World == GetWorld() && (World->WorldType == EWorldType::Game || World->WorldType == EWorldType::PIE))
 	{
-		// In fixed step mode we block the game thread on any pending measurements.
+		// In non-pipelined fixed step mode we block the game thread on any pending measurements.
 		// This guarantees they will be sent out in the same frame when they were captured.
-		if (GetDefault<UTempoCoreSettings>()->GetTimeMode() == ETimeMode::FixedStep)
+		// In pipelined mode we skip this block, allowing images to arrive 1-2 frames late.
+		if (GetDefault<UTempoCoreSettings>()->GetTimeMode() == ETimeMode::FixedStep
+			&& !GetDefault<UTempoSensorsSettings>()->GetPipelinedRendering())
 		{
 			TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsWaitForMeasurements);
 			ForEachActiveSensor([](const ITempoSensorInterface* Sensor)
