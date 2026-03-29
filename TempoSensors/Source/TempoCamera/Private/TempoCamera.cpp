@@ -313,15 +313,19 @@ void UTempoCamera::UpdateLensParameters()
 							  DistortionMapTexture->GetSizeX() != SizeXY.X || 
 							  DistortionMapTexture->GetSizeY() != SizeXY.Y;
 
-	if (bDriveFOVAngle != bDriveFOVAngle_Internal ||
-		LensParameters != LensParameters_Internal || 
-		!FMath::IsNearlyEqual(DistortedFOV, DistortedFOV_Internal) || 
-		bSizeChanged)
+	const bool bDriveChanged = bDriveFOVAngle != bDriveFOVAngle_Internal;
+	const bool bLensChanged = LensParameters != LensParameters_Internal;
+	const bool bFOVChanged = !FMath::IsNearlyEqual(DistortedFOV, DistortedFOV_Internal);
+
+	if (bDriveChanged || bLensChanged || bFOVChanged || bSizeChanged)
 	{
+		UE_LOG(LogTemp, Warning, TEXT("UpdateLensParameters: change detected (drive=%d lens=%d fov=%d size=%d) K1=%.3f FOVAngle=%.2f before InitDistortionMap"),
+			bDriveChanged, bLensChanged, bFOVChanged, bSizeChanged, LensParameters.K1, FOVAngle);
 		bDriveFOVAngle_Internal = bDriveFOVAngle;
 		LensParameters_Internal = LensParameters;
 		DistortedFOV_Internal = DistortedFOV;
 		InitDistortionMap();
+		UE_LOG(LogTemp, Warning, TEXT("UpdateLensParameters: after InitDistortionMap FOVAngle=%.2f"), FOVAngle);
 	}
 }
 
