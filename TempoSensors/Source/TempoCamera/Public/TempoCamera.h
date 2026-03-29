@@ -235,7 +235,7 @@ protected:
 	TArray<FDepthImageRequest> PendingDepthImageRequests;
 	TArray<FBoundingBoxesRequest> PendingBoundingBoxesRequests;
 
-	// TempoCamera supports distortion. Enable DriveFOVAngle to have FOVAngle (the FOV of the undistorted render) be driven by DistortFOV.
+	// TempoCamera supports distortion. Enable DriveFOVAngle to have FOVAngle (the FOV of the undistorted render) be driven by DistortedFOV.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens", meta = (AllowPrivateAccess = "true"))
 	bool bDriveFOVAngle = true;
 	
