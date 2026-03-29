@@ -41,6 +41,7 @@ public:
 	FName GetOverridableLabelRowName() const { return OverridableLabelRowName; }
 	FName GetOverridingLabelRowName() const { return OverridingLabelRowName; }
 	int32 GetMaxCameraRenderBufferSize() const { return MaxCameraRenderBufferSize; }
+	bool GetPipelinedRendering() const { return bPipelinedRendering; }
 	FTempoSensorsLabelSettingsChanged TempoSensorsLabelSettingsChangedEvent;
 
 	// Lidar
@@ -98,6 +99,14 @@ private:
 	UPROPERTY(EditAnywhere, Config, Category="Camera", AdvancedDisplay)
 	int32 MaxCameraRenderBufferSize = 2;
 
+	// When true, FixedStep mode allows the game thread to advance without waiting for sensor
+	// readback to complete. Sensor images may arrive 1-2 frames late, but throughput increases
+	// because the game, render, and readback pipelines run in parallel. Each image's
+	// MeasurementHeader carries the correct CaptureTime and SequenceId so clients know which
+	// simulation frame the data corresponds to.
+	UPROPERTY(EditAnywhere, Config, Category="Time|FixedStep")
+	bool bPipelinedRendering = false;
+	
 	// This special row can be overriden by a value passed through the subsurface color.
 	UPROPERTY(EditAnywhere, Config, Category="Camera")
 	FName OverridableLabelRowName = NAME_None;
