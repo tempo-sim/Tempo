@@ -209,4 +209,9 @@ protected:
 	float MaxDepth = 40000.0; // 400m
 
 	friend UTempoLidar;
+
+	// Cached parameters to detect when the distortion map needs to be recreated.
+	FIntPoint SizeXY_Internal = FIntPoint::ZeroValue;
+	double FOVAngle_Internal = -1.0;
+	double VerticalFOV_Internal = -1.0;
 };
