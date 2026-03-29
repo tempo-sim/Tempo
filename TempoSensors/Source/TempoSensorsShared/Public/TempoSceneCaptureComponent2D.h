@@ -358,6 +358,7 @@ private:
 	// Ring buffer of staging textures for GPU->CPU readback. Each in-flight FTextureRead
 	// gets its own staging texture, preventing tearing when multiple frames are in flight.
 	TArray<FTextureRHIRef> StagingTextures;
+	FCriticalSection StagingTexturesMutex;
 	int32 NextStagingIndex = 0;
 
 	// Returns the next staging texture from the ring buffer and advances the index.

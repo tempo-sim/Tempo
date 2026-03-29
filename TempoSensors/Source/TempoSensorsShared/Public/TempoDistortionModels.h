@@ -43,7 +43,35 @@ struct TEMPOSENSORSSHARED_API FBrownConradyDistortion : FDistortionModel
 //   SourceX = tan(azimuth)
 //   SourceY = tan(elevation) * sec(azimuth)
 // This is trivially computed (no Newton-Raphson needed).
+// NOTE: This is an axis-separable model used by the lidar, not a true radial fisheye.
 struct TEMPOSENSORSSHARED_API FEquidistantDistortion : FDistortionModel
 {
+	virtual FVector2D DistortedToSource(double TargetX, double TargetY) const override;
+};
+
+// Radial equidistant (fisheye) projection model for camera tiles.
+// True equidistant fisheye: r_image = f * theta, where theta is the angle from
+// the optical axis and r_image is the radial distance from the image center.
+//
+// For multi-tile rendering, the child capture has a different optical axis than
+// the parent camera. DistortedToSource:
+//   1. Converts tile-local equidistant coordinates to parent-frame equidistant angles
+//   2. Computes the 3D ray direction from the radial equidistant mapping
+//   3. Rotates the ray from parent frame to child frame
+//   4. Projects to child's perspective coordinates
+//
+// Coordinate system: X=right, Y=down, Z=forward (optical axis). Right-handed.
+// AzimuthOffset: positive = child looks right. ElevationOffset: positive = child looks down.
+// NOTE: UE Pitch is positive=up, so callers must negate Pitch when constructing ElevationOffset.
+struct TEMPOSENSORSSHARED_API FEquidistantTileDistortion : FDistortionModel
+{
+	// The child capture's offset from the parent camera's optical axis, in radians.
+	// AzimuthOffset: positive = right. ElevationOffset: positive = down in image.
+	double AzimuthOffset = 0.0;
+	double ElevationOffset = 0.0;
+
+	FEquidistantTileDistortion(double InAzimuthOffset, double InElevationOffset)
+		: AzimuthOffset(InAzimuthOffset), ElevationOffset(InElevationOffset) {}
+
 	virtual FVector2D DistortedToSource(double TargetX, double TargetY) const override;
 };
