@@ -73,3 +73,55 @@ FVector2D FEquidistantDistortion::DistortedToSource(double TargetX, double Targe
 	const double TanElevation = FMath::Tan(TargetY);
 	return FVector2D(TanAzimuth, TanElevation * FMath::Sqrt(TanAzimuth * TanAzimuth + 1.0));
 }
+
+FVector2D FEquidistantTileDistortion::DistortedToSource(double TargetX, double TargetY) const
+{
+	// TargetX/TargetY are equidistant angles (radians) from this tile's center.
+	// Convert to global equidistant angles relative to parent camera's optical axis.
+	const double GlobalH = TargetX + AzimuthOffset;
+	const double GlobalV = TargetY + ElevationOffset;
+
+	// Radial angle from parent's optical axis (equidistant: r_image = f * theta).
+	const double Theta = FMath::Sqrt(GlobalH * GlobalH + GlobalV * GlobalV);
+
+	// Compute 3D ray direction in parent frame.
+	// Coordinate system: X=right, Y=down, Z=forward.
+	double RayX, RayY, RayZ;
+	if (Theta < 1e-10)
+	{
+		RayX = 0.0;
+		RayY = 0.0;
+		RayZ = 1.0;
+	}
+	else
+	{
+		const double SincTheta = FMath::Sin(Theta) / Theta;
+		RayX = SincTheta * GlobalH;
+		RayY = SincTheta * GlobalV;
+		RayZ = FMath::Cos(Theta);
+	}
+
+	// Rotate from parent frame to child frame: R_X(ElevationOffset) * R_Y(-AzimuthOffset).
+	const double CosAz = FMath::Cos(AzimuthOffset);
+	const double SinAz = FMath::Sin(AzimuthOffset);
+	const double CosEl = FMath::Cos(ElevationOffset);
+	const double SinEl = FMath::Sin(ElevationOffset);
+
+	// Apply R_Y(-AzimuthOffset):
+	const double Rx1 = CosAz * RayX - SinAz * RayZ;
+	const double Ry1 = RayY;
+	const double Rz1 = SinAz * RayX + CosAz * RayZ;
+
+	// Apply R_X(ElevationOffset):
+	const double ChildX = Rx1;
+	const double ChildY = CosEl * Ry1 - SinEl * Rz1;
+	const double ChildZ = SinEl * Ry1 + CosEl * Rz1;
+
+	// Perspective projection in child frame.
+	if (ChildZ <= 1e-10)
+	{
+		return FVector2D(1e6, 1e6);
+	}
+
+	return FVector2D(ChildX / ChildZ, ChildY / ChildZ);
+}

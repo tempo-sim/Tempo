@@ -14,7 +14,7 @@
 // 4-byte pixel format where first 3 bytes are color, 4th byte is label.
 struct FCameraPixelNoDepth
 {
-	static constexpr bool bSupportsDepth = false; 
+	static constexpr bool bSupportsDepth = false;
 
 	uint8 B() const { return U1; }
 	uint8 G() const { return U2; }
@@ -136,7 +136,7 @@ USTRUCT(BlueprintType)
 struct FTempoLensDistortionParameters
 {
 	GENERATED_BODY()
-	
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens")
 	float K1 = 0.0f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens")
@@ -151,21 +151,94 @@ struct FTempoLensDistortionParameters
 	bool operator==(const FTempoLensDistortionParameters& Other) const = default;
 };
 
+UENUM(BlueprintType)
+enum class ETempoDistortionModel : uint8
+{
+	BrownConrady    UMETA(DisplayName="Brown-Conrady", ToolTip="Standard lens distortion. Single capture, max 170 degree FOV."),
+	Equidistant     UMETA(DisplayName="Equidistant (Fisheye)", ToolTip="Equidistant fisheye projection. Supports up to 240 degree FOV using multiple captures.")
+};
+
+class UTempoCamera;
+
+UCLASS(ClassGroup=(Custom), NotPlaceable, NotBlueprintable)
+class TEMPOCAMERA_API UTempoCameraCaptureComponent : public UTempoSceneCaptureComponent2D
+{
+	GENERATED_BODY()
+
+public:
+	UTempoCameraCaptureComponent();
+
+	// Configure this capture component for a tile of the camera's output.
+	// YawOffset/PitchOffset: orientation relative to parent camera (UE convention: positive yaw=right, positive pitch=up).
+	// EquidistantTileFOV: the horizontal FOV this tile covers in the equidistant output (degrees).
+	// TileSizeXY: the output tile dimensions in the final stitched image.
+	void Configure(double YawOffset, double PitchOffset, double EquidistantTileFOV, const FIntPoint& TileSizeXY);
+
+	void SetDepthEnabled(bool bDepthEnabled);
+
+	// The output tile dimensions.
+	UPROPERTY(VisibleAnywhere)
+	FIntPoint TileOutputSizeXY = FIntPoint::ZeroValue;
+
+	// The vertical offset in pixels from the top of the render target to the start of the tile output.
+	UPROPERTY(VisibleAnywhere)
+	int32 TileOutputOffsetY = 0;
+
+	// The equidistant tile's horizontal FOV in radians (only used for equidistant distortion model).
+	double EquidistantTileHFOVRad = 0.0;
+
+	// Whether this component should be activated when the world begins play.
+	bool bShouldBeActive = false;
+
+	// The destination offset of this tile within the final stitched output image.
+	UPROPERTY(VisibleAnywhere)
+	FIntPoint TileDestOffset = FIntPoint::ZeroValue;
+
+	virtual void Activate(bool bReset = false) override;
+
+protected:
+	virtual bool HasPendingRequests() const override;
+
+	virtual FTextureRead* MakeTextureRead() const override;
+
+	virtual int32 GetMaxTextureQueueSize() const override;
+
+	virtual void InitDistortionMap() override;
+
+	UPROPERTY(VisibleAnywhere)
+	UMaterialInstanceDynamic* PostProcessMaterialInstance = nullptr;
+
+	UPROPERTY(VisibleAnywhere)
+	const UTempoCamera* CameraOwner = nullptr;
+
+	UPROPERTY(VisibleAnywhere, Category="Depth")
+	float MinDepth = 10.0;
+
+	UPROPERTY(VisibleAnywhere, Category="Depth")
+	float MaxDepth = 100000.0;
+
+	friend UTempoCamera;
+};
+
+struct FCameraTileTextureRead
+{
+	TUniquePtr<FTextureRead> TextureRead;
+	FIntPoint TileDestOffset;
+	FIntPoint TileOutputSizeXY;
+	int32 TileOutputOffsetY;
+};
+
 UCLASS(Blueprintable, BlueprintType, ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TEMPOCAMERA_API UTempoCamera : public UTempoSceneCaptureComponent2D, public ITempoSensorInterface
+class TEMPOCAMERA_API UTempoCamera : public USceneComponent, public ITempoSensorInterface
 {
 	GENERATED_BODY()
 
 public:
 	UTempoCamera();
 
-	virtual void BeginPlay() override;
+	virtual void OnRegister() override;
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-	virtual void UpdateSceneCaptureContents(FSceneInterface* Scene) override;
-#else
-	virtual void UpdateSceneCaptureContents(FSceneInterface* Scene, ISceneRenderBuilder& SceneRenderBuilder) override;
-#endif
+	virtual void BeginPlay() override;
 
 	void RequestMeasurement(const TempoCamera::ColorImageRequest& Request, const TResponseDelegate<TempoCamera::ColorImage>& ResponseContinuation);
 
@@ -188,68 +261,85 @@ public:
 	virtual TOptional<TFuture<void>> SendMeasurements() override;
 	// End ITempoSensorInterface
 
+	bool HasPendingCameraRequests() const;
+
 protected:
-	virtual bool HasPendingRequests() const override;
+	TFuture<void> DecodeAndRespond(TUniquePtr<FTextureRead> TextureRead);
 
-	virtual FTextureRead* MakeTextureRead() const override;
-	
-	virtual TFuture<void> DecodeAndRespond(TUniquePtr<FTextureRead> TextureRead);
+	TFuture<void> StitchAndRespond(TArray<FCameraTileTextureRead> TileReads);
 
-	virtual int32 GetMaxTextureQueueSize() const override;
+	TMap<FName, UTempoCameraCaptureComponent*> GetAllCaptureComponents() const;
+	TMap<FName, UTempoCameraCaptureComponent*> GetOrCreateCaptureComponents();
+	TArray<UTempoCameraCaptureComponent*> GetActiveCaptureComponents() const;
+
+	void SyncCaptureComponents();
+	void ActivateCaptureComponents();
 
 	void SetDepthEnabled(bool bDepthEnabledIn);
-
 	void ApplyDepthEnabled();
-	
-	virtual void InitRenderTarget() override;
-	
-	virtual void InitDistortionMap() override;
 
-	void UpdateLensParameters();
+	void ValidateFOV() const;
 
 #if WITH_EDITOR
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 #endif
 
-	// The measurement types supported. Should be set in constructor of derived classes.
+	// The measurement types supported.
 	UPROPERTY(VisibleAnywhere)
 	TArray<TEnumAsByte<EMeasurementType>> MeasurementTypes;
 
+	// The distortion model to use.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens")
+	ETempoDistortionModel DistortionModel = ETempoDistortionModel::BrownConrady;
+
+	// The horizontal field of view of the output image in degrees.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens", meta = (ClampMin = "1.0", ClampMax = "240.0"))
+	float HorizontalFOV = 90.0f;
+
+	// Lens distortion parameters. Only used when DistortionModel is BrownConrady.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens", meta = (EditCondition = "DistortionModel == ETempoDistortionModel::BrownConrady"))
+	FTempoLensDistortionParameters LensParameters;
+
+	// Cropping factor for BrownConrady distortion.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens", meta = (EditCondition = "DistortionModel == ETempoDistortionModel::BrownConrady"))
+	float CroppingFactor = 0.0f;
+
+	// Output image resolution.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo")
+	FIntPoint SizeXY = FIntPoint(960, 540);
+
+	// The rate in Hz this camera updates at.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo", meta = (UIMin = 0.0, ClampMin = 0.0))
+	float RateHz = 10.0;
+
 	// Whether this camera can measure depth. Disabled when not requested to optimize performance.
-	UPROPERTY(VisibleAnywhere, Category="Depth")
+	UPROPERTY(VisibleAnywhere, Category = "Depth")
 	bool bDepthEnabled = false;
 
 	// The minimum depth this camera can measure (if depth is enabled). Will be set to the global near clip plane.
-	UPROPERTY(VisibleAnywhere, Category="Depth")
-	float MinDepth = 10.0; // 10cm
+	UPROPERTY(VisibleAnywhere, Category = "Depth")
+	float MinDepth = 10.0;
 
 	// The maximum depth this camera can measure (if depth is enabled). Will be set to UTempoSensorsSettings::MaxCameraDepth.
-	UPROPERTY(VisibleAnywhere, Category="Depth")
-	float MaxDepth = 100000.0; // 1km
+	UPROPERTY(VisibleAnywhere, Category = "Depth")
+	float MaxDepth = 100000.0;
 
+	// Monotonically increasing counter of frames captured.
 	UPROPERTY(VisibleAnywhere)
-	UMaterialInstanceDynamic* PostProcessMaterialInstance = nullptr;
+	int32 SequenceId = 0;
+
+	int32 NumResponded = 0;
 
 	TArray<FColorImageRequest> PendingColorImageRequests;
 	TArray<FLabelImageRequest> PendingLabelImageRequests;
 	TArray<FDepthImageRequest> PendingDepthImageRequests;
 	TArray<FBoundingBoxesRequest> PendingBoundingBoxesRequests;
 
-	// TempoCamera supports distortion. Enable DriveFOVAngle to have FOVAngle (the FOV of the undistorted render) be driven by DistortedFOV.
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens", meta = (AllowPrivateAccess = "true"))
-	bool bDriveFOVAngle = true;
-	
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens", meta = (ClampMin = "1.0", ClampMax = "170.0", EditCondition = "bDriveFOVAngle", AllowPrivateAccess = "true"))
-	float DistortedFOV = 90.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens", meta = (AllowPrivateAccess = "true"))
-	FTempoLensDistortionParameters LensParameters;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens", meta = (AllowPrivateAccess = "true"))
-	float CroppingFactor = 0.0f;
-
-	// We sync the user-facing LensParameters and DistortedFOV to these, in order to detect changes
+	// Internal tracking for change detection
+	ETempoDistortionModel DistortionModel_Internal = ETempoDistortionModel::BrownConrady;
 	FTempoLensDistortionParameters LensParameters_Internal;
-	float DistortedFOV_Internal = -1.0f;
-	bool bDriveFOVAngle_Internal = false;
+	float HorizontalFOV_Internal = -1.0f;
+	FIntPoint SizeXY_Internal = FIntPoint(-1, -1);
+
+	friend class UTempoCameraCaptureComponent;
 };
