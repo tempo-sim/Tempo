@@ -270,24 +270,29 @@ void UTempoSceneCaptureComponent2D::FillDistortionMap(const FDistortionModel& Mo
 	const double Cx = SizeXY.X * 0.5;
 	const double Cy = SizeXY.Y * 0.5;
 
-	const double InvFxDest = 1.0 / FxDest;
-	const double InvFyDest = 1.0 / FyDest;
-	const float InvSizeX = 1.0f / static_cast<float>(SizeXY.X);
-	const float InvSizeY = 1.0f / static_cast<float>(SizeXY.Y);
+	const double MaxTargetX = (SizeXY.X + 0.5 - Cx) / FxDest;
+	const double MaxTargetY = (SizeXY.Y + 0.5 - Cy) / FyDest;
+	const FVector2D MaxSource = Model.DistortedToSource(MaxTargetX, MaxTargetY);
 
 	for (int V = 0; V < SizeXY.Y; ++V)
 	{
 		uint16* Row = &MipData[V * SizeXY.X * 2];
-		const double TargetY = (V + 0.5 - Cy) * InvFyDest;
+		const double TargetY = (V + 0.5 - Cy) / FyDest;
 
 		for (int U = 0; U < SizeXY.X; ++U)
 		{
-			const double TargetX = (U + 0.5 - Cx) * InvFxDest;
+			const double TargetX = (U + 0.5 - Cx) / FxDest;
+			const float TargetU = static_cast<float>(TargetX * FxDest + Cx) / static_cast<float>(SizeXY.X);
+			const float TargetV = static_cast<float>(TargetY * FyDest + Cy) / static_cast<float>(SizeXY.Y);
 			const FVector2D Source = Model.DistortedToSource(TargetX, TargetY);
-			const float FinalU = static_cast<float>(Source.X * FxSource + Cx) * InvSizeX;
-			const float FinalV = static_cast<float>(Source.Y * FySource + Cy) * InvSizeY;
+			const float FinalU = static_cast<float>(Source.X * FxSource + Cx) / static_cast<float>(SizeXY.X);
+			const float FinalV = static_cast<float>(Source.Y * FySource + Cy) / static_cast<float>(SizeXY.Y);
 			Row[U * 2 + 0] = FFloat16(FinalU).Encoded;
 			Row[U * 2 + 1] = FFloat16(FinalV).Encoded;
+			if (U == SizeXY.X / 2 && V == SizeXY.Y - 1)
+			{
+				UE_LOG(LogTemp, Warning, TEXT("Target: (%f,%f) Final:(%f,%f)"), TargetU, TargetV, FinalU, FinalV);
+			}
 		}
 	}
 
@@ -379,6 +384,8 @@ void UTempoSceneCaptureComponent2D::InitRenderTarget()
 
 	// Any pending texture reads might have the wrong pixel format.
 	TextureReadQueue.Empty();
+
+	InitDistortionMap();
 }
 
 float GetTimerPeriod(float RateHz)

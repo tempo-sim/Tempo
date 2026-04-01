@@ -57,6 +57,14 @@ FVector2D FBrownConradyDistortion::DistortedToSource(double TargetX, double Targ
 	return FVector2D(TargetX * Scale, TargetY * Scale);
 }
 
+double FBrownConradyDistortion::SolveDistortion(double SourceRadius, double K1, double K2, double K3)
+{
+	double R2 = SourceRadius * SourceRadius;
+	double R4 = R2 * R2;
+	double R6 = R4 * R2;
+	return SourceRadius * (1.0 + K1*R2 + K2*R4 + K3*R6);
+}
+
 FVector2D FEquidistantDistortion::DistortedToSource(double TargetX, double TargetY) const
 {
 	// TargetX = azimuth in radians, TargetY = elevation in radians
