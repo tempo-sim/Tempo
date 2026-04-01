@@ -31,6 +31,8 @@ struct TEMPOSENSORSSHARED_API FBrownConradyDistortion : FDistortionModel
 
 	virtual FVector2D DistortedToSource(double TargetX, double TargetY) const override;
 
+	static double SolveDistortion(double SourceRadius, double K1, double K2, double K3);
+
 	// Solve for the undistorted radius given a distorted radius.
 	// Uses Newton-Raphson to invert: R * (1 + K1*R^2 + K2*R^4 + K3*R^6) = TargetRadius
 	static double SolveInverseDistortion(double TargetRadius, double K1, double K2, double K3);

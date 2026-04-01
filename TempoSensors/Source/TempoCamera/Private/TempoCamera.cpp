@@ -477,7 +477,7 @@ void UTempoCameraCaptureComponent::Configure(double YawOffset, double PitchOffse
 	{
 		// BrownConrady: FOVAngle is set later in InitDistortionMap based on lens parameters.
 		EquidistantTileHFOVRad = 0.0;
-		FOVAngle = EquidistantTileFOV;
+		// FOVAngle = EquidistantTileFOV;
 		SizeXY = InTileSizeXY;
 		TileOutputOffsetY = 0;
 	}
@@ -485,6 +485,8 @@ void UTempoCameraCaptureComponent::Configure(double YawOffset, double PitchOffse
 
 void UTempoCameraCaptureComponent::InitDistortionMap()
 {
+	UE_LOG(LogTemp, Warning, TEXT("InitDistortionMap"));
+
 	if (SizeXY.X <= 0 || SizeXY.Y <= 0)
 	{
 		return;
@@ -545,38 +547,28 @@ void UTempoCameraCaptureComponent::InitDistortionMap()
 		double SourceRadiusHoriz;
 		if (K1 >= 0.0)
 		{
-			SourceRadiusHoriz = FBrownConradyDistortion::SolveInverseDistortion(TargetRadiusHoriz, K1, K2, K3);
+			SourceRadiusHoriz = FBrownConradyDistortion::SolveDistortion(TargetRadiusHoriz, K1, K2, K3);
 		}
 		else
 		{
-			const double AspectRatio = (SizeXY.Y > 0) ? static_cast<double>(SizeXY.X) / static_cast<double>(SizeXY.Y) : 1.0;
-			const double TargetRadiusVert = TargetRadiusHoriz / AspectRatio;
-			const double TargetRadiusDiag = FMath::Sqrt(TargetRadiusHoriz * TargetRadiusHoriz + TargetRadiusVert * TargetRadiusVert);
-			const double SourceRadiusDiag = FBrownConradyDistortion::SolveInverseDistortion(TargetRadiusDiag, K1, K2, K3);
-			const double GeometricRatio = TargetRadiusHoriz / TargetRadiusDiag;
-			SourceRadiusHoriz = SourceRadiusDiag * GeometricRatio;
+			// const double AspectRatio = (SizeXY.Y > 0) ? static_cast<double>(SizeXY.X) / static_cast<double>(SizeXY.Y) : 1.0;
+			// const double TargetRadiusVert = TargetRadiusHoriz / AspectRatio;
+			// const double TargetRadiusDiag = FMath::Sqrt(TargetRadiusHoriz * TargetRadiusHoriz + TargetRadiusVert * TargetRadiusVert);
+			// const double SourceRadiusDiag = FBrownConradyDistortion::SolveInverseDistortion(TargetRadiusDiag, K1, K2, K3);
+			// const double GeometricRatio = TargetRadiusHoriz / TargetRadiusDiag;
+			// SourceRadiusHoriz = SourceRadiusDiag * GeometricRatio;
+			SourceRadiusHoriz = FBrownConradyDistortion::SolveDistortion(TargetRadiusHoriz, K1, K2, K3);
 		}
 		const float SourceHalfRad = FMath::Atan(SourceRadiusHoriz);
-		FOVAngle = FMath::Clamp(FMath::RadiansToDegrees(SourceHalfRad) * 2.0f, 1.0f, 170.0f);
+		FOVAngle = CameraOwner->HorizontalFOV;
+
+		const float SmallerFOVAngle = FMath::Clamp(FMath::RadiansToDegrees(SourceHalfRad) * 2.0f, 1.0f, 170.0f);
 
 		CreateOrResizeDistortionMapTexture();
-		const float HalfRadDest = FMath::DegreesToRadians(CameraOwner->HorizontalFOV / 2.0f);
-		const float NormalizedFDest = 0.5f / FMath::Tan(HalfRadDest);
-		const double FxDest = NormalizedFDest * SizeXY.X;
+		const double FxDest = (SizeXY.X / 2.0) / FMath::Tan(FMath::DegreesToRadians(SmallerFOVAngle / 2.0));
 		const double FyDest = FxDest;
-
-		float NormalizedFSource = 0.5f;
-		if (K1 >= 0.0)
-		{
-			NormalizedFSource = NormalizedFDest;
-		}
-		else
-		{
-			const float ClampedFOV = FMath::Clamp(FOVAngle, 1.0f, 179.0f);
-			const float HalfRadSource = FMath::DegreesToRadians(ClampedFOV / 2.0f);
-			NormalizedFSource = 0.5f / FMath::Tan(HalfRadSource);
-		}
-		const double FxSource = NormalizedFSource * SizeXY.X;
+		
+		const double FxSource = (SizeXY.X / 2.0) / FMath::Tan(FMath::DegreesToRadians(FOVAngle / 2.0));
 		const double FySource = FxSource;
 
 		FillDistortionMap(Model, FxDest, FyDest, FxSource, FySource);
