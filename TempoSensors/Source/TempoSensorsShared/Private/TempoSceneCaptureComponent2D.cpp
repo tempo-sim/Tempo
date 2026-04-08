@@ -8,6 +8,7 @@
 #include "TempoSensorsShared/Common.pb.h"
 
 #include "TempoCoreSettings.h"
+#include "TempoCoreUtils.h"
 
 #include "Engine/TextureRenderTarget2D.h"
 #include "Kismet/GameplayStatics.h"
@@ -50,16 +51,22 @@ void UTempoSceneCaptureComponent2D::Activate(bool bReset)
 {
 	Super::Activate(bReset);
 
-	InitRenderTarget();
-	RestartCaptureTimer();
+	if (UTempoCoreUtils::IsGameWorld(this))
+	{
+		InitRenderTarget();
+		RestartCaptureTimer();	
+	}
 }
 
 void UTempoSceneCaptureComponent2D::Deactivate()
 {
 	Super::Deactivate();
 
-	GetWorld()->GetTimerManager().ClearTimer(TimerHandle);
-	TextureReadQueue.Empty();
+	if (UTempoCoreUtils::IsGameWorld(this))
+	{
+		GetWorld()->GetTimerManager().ClearTimer(TimerHandle);
+		TextureReadQueue.Empty();
+	}
 }
 
 #if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
