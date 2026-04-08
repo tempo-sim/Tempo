@@ -172,7 +172,7 @@ public:
 	// YawOffset/PitchOffset: orientation relative to parent camera (UE convention: positive yaw=right, positive pitch=up).
 	// EquidistantTileFOV: the horizontal FOV this tile covers in the equidistant output (degrees).
 	// TileSizeXY: the output tile dimensions in the final stitched image.
-	void Configure(double YawOffset, double PitchOffset, double EquidistantTileFOV, const FIntPoint& TileSizeXY);
+	void Configure(double YawOffset, double PitchOffset, double EquidistantTileFOV, const FIntPoint& TileSizeXY, const FIntPoint& TileDestOffset);
 
 	void SetDepthEnabled(bool bDepthEnabled);
 
@@ -186,9 +186,6 @@ public:
 
 	// The equidistant tile's horizontal FOV in radians (only used for equidistant distortion model).
 	double EquidistantTileHFOVRad = 0.0;
-
-	// Whether this component should be activated when the world begins play.
-	bool bShouldBeActive = false;
 
 	// The destination offset of this tile within the final stitched output image.
 	UPROPERTY(VisibleAnywhere)
@@ -273,7 +270,6 @@ protected:
 	TArray<UTempoCameraCaptureComponent*> GetActiveCaptureComponents() const;
 
 	void SyncCaptureComponents();
-	void ActivateCaptureComponents();
 
 	void SetDepthEnabled(bool bDepthEnabledIn);
 	void ApplyDepthEnabled();

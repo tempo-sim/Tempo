@@ -309,6 +309,8 @@ void UTempoCameraCaptureComponent::Activate(bool bReset)
 	// avoiding a double-init race condition where two render commands compete over StagingTextures.
 	SetDepthEnabled(CameraOwner->bDepthEnabled);
 
+	UE_LOG(LogTemp, Warning, TEXT("Activate"));
+	
 	Super::Activate(bReset);
 }
 
@@ -434,10 +436,11 @@ int32 UTempoCameraCaptureComponent::GetMaxTextureQueueSize() const
 	return GetDefault<UTempoSensorsSettings>()->GetMaxCameraRenderBufferSize();
 }
 
-void UTempoCameraCaptureComponent::Configure(double YawOffset, double PitchOffset, double EquidistantTileFOV, const FIntPoint& InTileSizeXY)
+void UTempoCameraCaptureComponent::Configure(double YawOffset, double PitchOffset, double EquidistantTileFOV, const FIntPoint& InTileSizeXY, const FIntPoint& InTileDestOffset)
 {
 	RateHz = CameraOwner->RateHz;
 	TileOutputSizeXY = InTileSizeXY;
+	TileDestOffset = InTileDestOffset;
 	SetRelativeRotation(FRotator(PitchOffset, YawOffset, 0.0));
 
 	if (CameraOwner->DistortionModel == ETempoDistortionModel::Equidistant)
@@ -640,7 +643,6 @@ void UTempoCamera::OnRegister()
 void UTempoCamera::BeginPlay()
 {
 	Super::BeginPlay();
-	ActivateCaptureComponents();
 }
 
 FString UTempoCamera::GetOwnerName() const
@@ -968,11 +970,17 @@ TArray<UTempoCameraCaptureComponent*> UTempoCamera::GetActiveCaptureComponents()
 	return ActiveCaptureComponents;
 }
 
-static void SyncCaptureComponent(UTempoCameraCaptureComponent* CaptureComponent, bool bShouldBeActive, double YawOffset, double PitchOffset, double PerspectiveFOV, const FIntPoint& TileSizeXY, const FIntPoint& TileDestOffset = FIntPoint::ZeroValue)
+static void SyncCaptureComponent(UTempoCameraCaptureComponent* CaptureComponent, bool bActive, double YawOffset, double PitchOffset, double PerspectiveFOV, const FIntPoint& TileSizeXY, const FIntPoint& TileDestOffset = FIntPoint::ZeroValue)
 {
-	CaptureComponent->Configure(YawOffset, PitchOffset, PerspectiveFOV, TileSizeXY);
-	CaptureComponent->TileDestOffset = TileDestOffset;
-	CaptureComponent->bShouldBeActive = bShouldBeActive;
+	CaptureComponent->Configure(YawOffset, PitchOffset, PerspectiveFOV, TileSizeXY, TileDestOffset);
+	if (bActive && !CaptureComponent->IsActive())
+	{
+		CaptureComponent->Activate();
+	}
+	if (!bActive && CaptureComponent->IsActive())
+	{
+		CaptureComponent->Deactivate();
+	}
 }
 
 void UTempoCamera::ValidateFOV() const
@@ -1063,22 +1071,6 @@ void UTempoCamera::SyncCaptureComponents()
 	}
 }
 
-void UTempoCamera::ActivateCaptureComponents()
-{
-	for (const auto& Elem : GetAllCaptureComponents())
-	{
-		UTempoCameraCaptureComponent* CaptureComponent = Elem.Value;
-		if (CaptureComponent->bShouldBeActive && !CaptureComponent->IsActive())
-		{
-			CaptureComponent->Activate();
-		}
-		if (!CaptureComponent->bShouldBeActive && CaptureComponent->IsActive())
-		{
-			CaptureComponent->Deactivate();
-		}
-	}
-}
-
 void UTempoCamera::SetDepthEnabled(bool bDepthEnabledIn)
 {
 	if (bDepthEnabled == bDepthEnabledIn)
@@ -1122,10 +1114,6 @@ void UTempoCamera::PostEditChangeProperty(FPropertyChangedEvent& PropertyChanged
 		PropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, CroppingFactor))
 	{
 		SyncCaptureComponents();
-		if (GetWorld() && GetWorld()->IsGameWorld())
-		{
-			ActivateCaptureComponents();
-		}
 	}
 }
 #endif
