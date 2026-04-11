@@ -71,10 +71,10 @@ class Option:
 
 
 class Choice:
-    def __init__(self, display, next_state, shortcut=None, metadata={}):
+    def __init__(self, display, next_state, shortcut=None, metadata=None):
         self.display = display
         self.next_state = next_state
-        self.metadata = metadata
+        self.metadata = metadata if metadata is not None else {}
         self.shortcut = shortcut
 
 
@@ -286,24 +286,35 @@ async def take_action(state, option, user_input):
                     print("\nRestarting stream {}".format(key))
                     state.sensor_streams[key].cancel()
                     del state.sensor_streams[key]
+                task = None
                 if chosen.metadata["Type"] == Sensors.COLOR_IMAGE:
-                    state.sensor_streams[key] = \
-                        asyncio.create_task(tiu.stream_color_images(chosen.metadata["Name"], chosen.metadata["Owner"]))
+                    task = asyncio.create_task(tiu.stream_color_images(chosen.metadata["Name"], chosen.metadata["Owner"]))
                 if chosen.metadata["Type"] == Sensors.DEPTH_IMAGE:
-                    state.sensor_streams[key] = \
-                        asyncio.create_task(tiu.stream_depth_images(chosen.metadata["Name"], chosen.metadata["Owner"]))
+                    task = asyncio.create_task(tiu.stream_depth_images(chosen.metadata["Name"], chosen.metadata["Owner"]))
                 if chosen.metadata["Type"] == Sensors.LABEL_IMAGE:
-                    state.sensor_streams[key] = \
-                        asyncio.create_task(tiu.stream_label_images(chosen.metadata["Name"], chosen.metadata["Owner"]))
+                    task = asyncio.create_task(tiu.stream_label_images(chosen.metadata["Name"], chosen.metadata["Owner"]))
                 if chosen.metadata["Type"] == Sensors.LIDAR_SCAN:
-                    state.sensor_streams[key] = \
-                        asyncio.create_task(tlu.stream_lidar_scans(chosen.metadata["Name"], chosen.metadata["Owner"], "Intensity"))
+                    task = asyncio.create_task(tlu.stream_lidar_scans(chosen.metadata["Name"], chosen.metadata["Owner"], "Intensity"))
+                if task is not None:
+                    def on_stream_done(t, stream_key=key):
+                        if stream_key in state.sensor_streams and state.sensor_streams[stream_key] is t:
+                            del state.sensor_streams[stream_key]
+                            if not t.cancelled():
+                                exc = t.exception()
+                                if exc is not None:
+                                    print("\nStream {} died: {}".format(stream_key, exc))
+                    task.add_done_callback(on_stream_done)
+                    state.sensor_streams[key] = task
             except grpc.aio._call.AioRpcError as e:
                 print("Error while starting sensor data stream: {}".format(e))
     elif state.enum == StateEnum.END_STREAM_SENSOR_DATA:
         if chosen.metadata != {}:
-            state.sensor_streams[chosen.metadata["Stream"]].cancel()
-            del state.sensor_streams[chosen.metadata["Stream"]]
+            stream_key = chosen.metadata["Stream"]
+            if stream_key in state.sensor_streams:
+                task = state.sensor_streams[stream_key]
+                if not task.done():
+                    task.cancel()
+                del state.sensor_streams[stream_key]
     elif state.enum == StateEnum.MOVE_ACTOR:
         state.accumulated_input["Actor"] = chosen.display
     elif state.enum == StateEnum.MOVE_ACTOR_WHAT_TRANSFORM:

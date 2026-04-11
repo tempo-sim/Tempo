@@ -74,6 +74,7 @@ class PointCloudViewer:
         self.actor = None
         self.accumulated_scan_segments = 0
         self.horizontal_beams = 0
+        self.num_points = 0
         self.distances = None
         self.intensities = None
         self.labels = None
@@ -97,9 +98,15 @@ class PointCloudViewer:
         # Show the plotter
         self.plotter.show()
 
-        # Set asyncio event loop
-        self.loop = qasync.QEventLoop(self.app)
-        asyncio.set_event_loop(self.loop)
+        # Only create a qasync event loop if there isn't already a running asyncio loop.
+        # When used from SensorPlayground, an asyncio loop is already running and we
+        # should not replace it — processEvents() in run_async is sufficient.
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            # No running loop — we need to set one up (e.g. LidarPreview standalone use)
+            self.loop = qasync.QEventLoop(self.app)
+            asyncio.set_event_loop(self.loop)
 
         self.update_rate = update_rate
         self.colorize_by = colorize_by
@@ -171,16 +178,12 @@ class PointCloudViewer:
     def update_points(self):
         """Update the point cloud with the new scan."""
 
-#         if self.point_cloud is None:
         # Calculate angles for each beam
         horizontal_fov = self.azimuth_max - self.azimuth_min
         vertical_fov = self.latest_scan.elevation_range.max - self.latest_scan.elevation_range.min
         h_angles = np.linspace(horizontal_fov/2, -horizontal_fov/2, self.horizontal_beams)
         v_angles = np.linspace(vertical_fov/2, -vertical_fov/2, self.latest_scan.vertical_beams)
         self.h_angles_grid, self.v_angles_grid = np.meshgrid(h_angles, v_angles)
-        if self.actor is not None:
-            self.plotter.remove_actor(self.actor)
-            self.point_cloud = None
 
         distances = self.distances
         intensities = self.intensities
@@ -199,6 +202,14 @@ class PointCloudViewer:
             colors = labels.flatten()
             colors = colors / 255.0
 
+        new_num_points = len(points)
+        # Only remove and recreate when point count changes; otherwise update in-place
+        if self.point_cloud is not None and new_num_points != self.num_points:
+            self.plotter.remove_actor(self.actor)
+            self.point_cloud = None
+
+        self.num_points = new_num_points
+
         if self.point_cloud is None:
             self.point_cloud = pv.PolyData(points)
             self.actor = self.plotter.add_points(
@@ -215,7 +226,8 @@ class PointCloudViewer:
             self.point_cloud.point_data['scalars'] = colors
 
     def close(self):
-        self.loop.stop()
+        if hasattr(self, 'loop'):
+            self.loop.stop()
         self.plotter.close()
         del self.plotter
         self.app.quit()
@@ -228,7 +240,6 @@ async def stream_lidar_scans(lidar_name, owner, colorize_by, update_rate=30.0):
     try:
         async for scan in ts.stream_lidar_scans(sensor_name=lidar_name, owner_name=owner):
             viewer.accumulate_scan(scan)
-    except asyncio.CancelledError:
+    finally:
         _ = viewer_task.cancel()
         viewer.close()
-        raise  # Reraise to allow normal task cancellation

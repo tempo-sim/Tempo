@@ -67,10 +67,9 @@ async def stream_color_images(camera_name, owner):
     try:
         async for image in ts.stream_color_images(sensor_name=camera_name, owner_name=owner):
             show_color_image(image, window_name)
-    except asyncio.CancelledError:
+    finally:
         cv2.destroyWindow(window_name)
         cv2.waitKey(1)
-        raise  # Reraise to allow normal task cancellation
 
 
 async def stream_depth_images(camera_name, owner):
@@ -78,10 +77,9 @@ async def stream_depth_images(camera_name, owner):
     try:
         async for image in ts.stream_depth_images(sensor_name=camera_name, owner_name=owner):
             show_depth_image(image, window_name)
-    except asyncio.CancelledError:
+    finally:
         cv2.destroyWindow(window_name)
         cv2.waitKey(1)
-        raise  # Reraise to allow normal task cancellation
 
 
 async def stream_label_images(camera_name, owner):
@@ -89,7 +87,6 @@ async def stream_label_images(camera_name, owner):
     try:
         async for image in ts.stream_label_images(sensor_name=camera_name, owner_name=owner):
             show_label_image(image, window_name)
-    except asyncio.CancelledError:
+    finally:
         cv2.destroyWindow(window_name)
         cv2.waitKey(1)
-        raise  # Reraise to allow normal task cancellation
