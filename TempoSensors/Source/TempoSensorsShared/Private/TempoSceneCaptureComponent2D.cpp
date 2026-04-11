@@ -224,23 +224,20 @@ bool UTempoSceneCaptureComponent2D::NextReadComplete() const
 	return TextureReadQueue.NextReadComplete();
 }
 
-void UTempoSceneCaptureComponent2D::CreateOrResizeDistortionMapTexture()
+void UTempoSceneCaptureComponent2D::CreateOrResizeDistortionMapTexture(const FIntPoint& TextureSizeXY)
 {
-	if (SizeXY.X <= 0 || SizeXY.Y <= 0)
+	if (TextureSizeXY.X <= 0 || TextureSizeXY.Y <= 0)
 	{
 		return;
 	}
 
-	if (DistortionMapTexture)
-	{
-		DistortionMapTexture = UTexture2D::CreateTransient(SizeXY.X, SizeXY.Y, PF_G16R16F);
-		DistortionMapTexture->CompressionSettings = TC_HDR;
-		DistortionMapTexture->Filter = TF_Bilinear;
-		DistortionMapTexture->AddressX = TA_Clamp;
-		DistortionMapTexture->AddressY = TA_Clamp;
-		DistortionMapTexture->SRGB = 0;
-		DistortionMapTexture->UpdateResource();
-	}
+	DistortionMapTexture = UTexture2D::CreateTransient(TextureSizeXY.X, TextureSizeXY.Y, PF_G16R16F);
+	DistortionMapTexture->CompressionSettings = TC_HDR;
+	DistortionMapTexture->Filter = TF_Bilinear;
+	DistortionMapTexture->AddressX = TA_Clamp;
+	DistortionMapTexture->AddressY = TA_Clamp;
+	DistortionMapTexture->SRGB = 0;
+	DistortionMapTexture->UpdateResource();
 }
 
 void UTempoSceneCaptureComponent2D::ApplyDistortionMapToMaterial(UMaterialInstanceDynamic* MaterialInstance) const
@@ -251,9 +248,11 @@ void UTempoSceneCaptureComponent2D::ApplyDistortionMapToMaterial(UMaterialInstan
 	}
 }
 
-void UTempoSceneCaptureComponent2D::FillDistortionMap(const FDistortionModel& Model, double FxDest, double FyDest, double FxSource, double FySource) const
+void UTempoSceneCaptureComponent2D::FillDistortionMap(const FDistortionModel& Model,
+	const FIntPoint& OutputSizeXY, double FxOutput, double FyOutput,
+	const FIntPoint& RenderSizeXY, double FxRender, double FyRender) const
 {
-	if (!DistortionMapTexture || SizeXY.X <= 0 || SizeXY.Y <= 0)
+	if (!DistortionMapTexture || OutputSizeXY.X <= 0 || OutputSizeXY.Y <= 0)
 	{
 		return;
 	}
@@ -267,20 +266,25 @@ void UTempoSceneCaptureComponent2D::FillDistortionMap(const FDistortionModel& Mo
 		return;
 	}
 
-	const double Cx = SizeXY.X * 0.5;
-	const double Cy = SizeXY.Y * 0.5;
+	// Output image center (for pixel-to-normalized conversion).
+	const double OutputCx = OutputSizeXY.X * 0.5;
+	const double OutputCy = OutputSizeXY.Y * 0.5;
 
-	for (int V = 0; V < SizeXY.Y; ++V)
+	// Render image center (for normalized-to-UV conversion).
+	const double RenderCx = RenderSizeXY.X * 0.5;
+	const double RenderCy = RenderSizeXY.Y * 0.5;
+
+	for (int V = 0; V < OutputSizeXY.Y; ++V)
 	{
-		uint16* Row = &MipData[V * SizeXY.X * 2];
-		const double TargetY = (V + 0.5 - Cy) / FyDest;
+		uint16* Row = &MipData[V * OutputSizeXY.X * 2];
+		const double OutputY = (V + 0.5 - OutputCy) / FyOutput;
 
-		for (int U = 0; U < SizeXY.X; ++U)
+		for (int U = 0; U < OutputSizeXY.X; ++U)
 		{
-			const double TargetX = (U + 0.5 - Cx) / FxDest;
-			const FVector2D Source = Model.DistortedToSource(TargetX, TargetY);
-			const float FinalU = static_cast<float>(Source.X * FxSource + Cx) / static_cast<float>(SizeXY.X);
-			const float FinalV = static_cast<float>(Source.Y * FySource + Cy) / static_cast<float>(SizeXY.Y);
+			const double OutputX = (U + 0.5 - OutputCx) / FxOutput;
+			const FVector2D Render = Model.OutputToRender(OutputX, OutputY);
+			const float FinalU = static_cast<float>(Render.X * FxRender + RenderCx) / static_cast<float>(RenderSizeXY.X);
+			const float FinalV = static_cast<float>(Render.Y * FyRender + RenderCy) / static_cast<float>(RenderSizeXY.Y);
 			Row[U * 2 + 0] = FFloat16(FinalU).Encoded;
 			Row[U * 2 + 1] = FFloat16(FinalV).Encoded;
 		}

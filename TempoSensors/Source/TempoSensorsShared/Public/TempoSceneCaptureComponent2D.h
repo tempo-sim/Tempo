@@ -325,15 +325,18 @@ protected:
 	// Override this to initialize the distortion map texture with a projection-specific mapping.
 	virtual void InitDistortionMap() {}
 
-	// Create or resize the distortion map texture to match SizeXY.
-	void CreateOrResizeDistortionMapTexture();
+	// Create or resize the distortion map texture to the given size.
+	void CreateOrResizeDistortionMapTexture(const FIntPoint& TextureSizeXY);
 
 	// Apply the distortion map texture to the given material instance.
 	void ApplyDistortionMapToMaterial(UMaterialInstanceDynamic* MaterialInstance) const;
 
 	// Fill the distortion map texture using the given distortion model.
-	// FxDest/FyDest are the destination focal lengths, FxSource/FySource are the source (perspective) focal lengths.
-	void FillDistortionMap(const FDistortionModel& Model, double FxDest, double FyDest, double FxSource, double FySource) const;
+	// OutputSizeXY / FxOutput / FyOutput describe the output (distorted) image (loop bounds + normalization).
+	// RenderSizeXY / FxRender / FyRender describe the render (perspective) image (UV normalization).
+	void FillDistortionMap(const FDistortionModel& Model,
+		const FIntPoint& OutputSizeXY, double FxOutput, double FyOutput,
+		const FIntPoint& RenderSizeXY, double FxRender, double FyRender) const;
 
 	// The distortion map texture. Each pixel stores (U, V) source coordinates in PF_G16R16F format.
 	UPROPERTY(Transient, VisibleAnywhere)

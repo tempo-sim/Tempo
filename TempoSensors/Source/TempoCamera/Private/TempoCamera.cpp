@@ -24,27 +24,6 @@ namespace
 	constexpr double MaxPerspectiveFOVPerCapture = 120.0;
 }
 
-// Root-Finding Solver (Newton-Raphson) - used for feasibility checks in BrownConrady mode
-static double Solve(const TFunction<double(double)>& Objective, const TFunction<double(double)>& Derivative, const double InitialGuess, const int32 MaxIter, const double Threshold)
-{
-	double X = InitialGuess;
-	for (int I = 0; I < MaxIter; ++I)
-	{
-		const double FVal = Objective(X);
-		if (FMath::Abs(FVal) < Threshold)
-		{
-			break;
-		}
-		double Deriv = Derivative(X);
-		if (FMath::Abs(Deriv) < 0.001)
-		{
-			Deriv = (Deriv < 0) ? -0.001 : 0.001;
-		}
-		X -= FVal / Deriv;
-	}
-	return X;
-}
-
 /**
  * Compute 2D bounding boxes from label data.
  */
@@ -432,152 +411,52 @@ void UTempoCameraCaptureComponent::Configure(double YawOffset, double PitchOffse
 	RateHz = CameraOwner->RateHz;
 	TileOutputSizeXY = InTileSizeXY;
 	TileDestOffset = InTileDestOffset;
+	TileOutputOffsetY = 0;
+	EquidistantTileHFOVRad = FMath::DegreesToRadians(EquidistantTileFOV);
 	SetRelativeRotation(FRotator(PitchOffset, YawOffset, 0.0));
 
-	if (CameraOwner->DistortionModel == ETempoDistortionModel::Equidistant)
-	{
-		EquidistantTileHFOVRad = FMath::DegreesToRadians(EquidistantTileFOV);
-		const double TileHHalfRad = EquidistantTileHFOVRad / 2.0;
-		const double TileVHalfRad = TileHHalfRad * InTileSizeXY.Y / InTileSizeXY.X;
-
-		// Construct the distortion model with image-plane convention (negate pitch: UE pitch-up = image-Y-negative).
-		const double AzRad = FMath::DegreesToRadians(YawOffset);
-		const double ElRad = -FMath::DegreesToRadians(PitchOffset);
-		FEquidistantTileDistortion Model(AzRad, ElRad);
-
-		// Sample corners and edge midpoints to find the max perspective extent needed.
-		double MaxTanH = 0.0;
-		double MaxTanV = 0.0;
-		const double SX[] = {-TileHHalfRad, TileHHalfRad, -TileHHalfRad, TileHHalfRad, 0.0, 0.0, -TileHHalfRad, TileHHalfRad};
-		const double SY[] = {-TileVHalfRad, -TileVHalfRad, TileVHalfRad, TileVHalfRad, -TileVHalfRad, TileVHalfRad, 0.0, 0.0};
-		for (int32 I = 0; I < 8; ++I)
-		{
-			const FVector2D Source = Model.DistortedToSource(SX[I], SY[I]);
-			MaxTanH = FMath::Max(MaxTanH, FMath::Abs(Source.X));
-			MaxTanV = FMath::Max(MaxTanV, FMath::Abs(Source.Y));
-		}
-
-		// FOVAngle is horizontal. Vertical FOV = 2*atan(tan(hFOV/2) * H/W).
-		// Need: tan(hHalf) >= MaxTanH and tan(hHalf) * tileH/tileW >= MaxTanV.
-		const double AspectRatio = (InTileSizeXY.Y > 0)
-			? static_cast<double>(InTileSizeXY.X) / static_cast<double>(InTileSizeXY.Y)
-			: 1.0;
-		const double RequiredTanHHalf = FMath::Max(MaxTanH, MaxTanV * AspectRatio);
-		FOVAngle = FMath::Clamp(FMath::RadiansToDegrees(FMath::Atan(RequiredTanHHalf)) * 2.0, 1.0, 170.0);
-		SizeXY = InTileSizeXY;
-		TileOutputOffsetY = 0;
-	}
-	else
-	{
-		SizeXY = InTileSizeXY;
-		EquidistantTileHFOVRad = 0.0;
-		TileOutputOffsetY = 0;
-	}
+	// SizeXY and FOVAngle are set in InitDistortionMap via ComputeRenderConfig.
+	// Set SizeXY to the output size initially; InitDistortionMap may adjust it.
+	SizeXY = InTileSizeXY;
 }
 
-void UTempoCameraCaptureComponent::InitDistortionMap()
+TUniquePtr<FDistortionModel> UTempoCameraCaptureComponent::CreateDistortionModel() const
 {
-	UE_LOG(LogTemp, Warning, TEXT("InitDistortionMap"));
-
-	if (SizeXY.X <= 0 || SizeXY.Y <= 0)
-	{
-		return;
-	}
-
 	if (CameraOwner->DistortionModel == ETempoDistortionModel::BrownConrady)
 	{
-		// Brown-Conrady: existing distortion map logic
-		const double K1 = CameraOwner->LensParameters.K1;
-		const double K2 = CameraOwner->LensParameters.K2;
-		const double K3 = CameraOwner->LensParameters.K3;
-
-		// Feasibility check for barrel distortion
-		double MaxDistortedRadius = -1.0;
-		if (K1 < 0.0)
-		{
-			if (FMath::IsNearlyZero(K2) && FMath::IsNearlyZero(K3))
-			{
-				double RCrit = FMath::Sqrt(-1.0 / (3.0 * K1));
-				double RCrit2 = RCrit * RCrit;
-				MaxDistortedRadius = RCrit * (1.0 + K1 * RCrit2);
-			}
-			else
-			{
-				double RCrit = Solve(
-					[K1, K2, K3](double R) {
-						double R2 = R * R;
-						double R4 = R2 * R2;
-						double R6 = R4 * R2;
-						return 1.0 + 3.0*K1*R2 + 5.0*K2*R4 + 7.0*K3*R6;
-					},
-					[K1, K2, K3](double R) {
-						double R2 = R * R;
-						double R3 = R2 * R;
-						double R5 = R3 * R2;
-						return 6.0*K1*R + 20.0*K2*R3 + 42.0*K3*R5;
-					},
-					0.5, 40, 1e-6
-				);
-				double R2 = RCrit * RCrit;
-				double R4 = R2 * R2;
-				double R6 = R4 * R2;
-				double Scale = 1.0 + K1*R2 + K2*R4 + K3*R6;
-				MaxDistortedRadius = RCrit * Scale;
-			}
-		}
-		if (MaxDistortedRadius > 0.0 && CameraOwner->HorizontalFOV > 0.0f)
-		{
-			double MaxPossibleFOV = FMath::RadiansToDegrees(FMath::Atan(MaxDistortedRadius)) * 2.0;
-			ensureMsgf(CameraOwner->HorizontalFOV <= MaxPossibleFOV, TEXT("HorizontalFOV %.2f exceeds limit %.2f for K1=%.3f. Artifacts expected."), CameraOwner->HorizontalFOV, MaxPossibleFOV, K1);
-		}
-
-		const FBrownConradyDistortion Model(K1, K2, K3);
-
-		const double AspectRatio = static_cast<float>(CameraOwner->SizeXY.Y) / static_cast<float>(CameraOwner->SizeXY.X);
-		// Compute FOVAngle (the perspective render FOV) from HorizontalFOV and lens parameters
-		const float HalfFOVRad = FMath::DegreesToRadians(CameraOwner->HorizontalFOV / 2.0f);
-		const double TargetRadiusHoriz = FMath::Tan(HalfFOVRad);
-		const double TargetRadiusVert = AspectRatio * TargetRadiusHoriz;
-		const double SourceRadiusHoriz = FBrownConradyDistortion::SolveDistortion(TargetRadiusHoriz, K1, K2, K3);
-		const double SourceRadiusVert = FBrownConradyDistortion::SolveDistortion(TargetRadiusVert, K1, K2, K3);
-		const double SourceAspectRatio = SourceRadiusVert / SourceRadiusHoriz;
-		const float SourceHalfRadHoriz = FMath::Atan(SourceRadiusHoriz);
-		const float SourceHalfRadVert = FMath::Atan(SourceRadiusVert);
-		const float UndistortedFOVAngleHoriz = FMath::Clamp(FMath::RadiansToDegrees(SourceHalfRadHoriz) * 2.0f, 1.0f, 170.0f);
-		const float UndistortedFOVAngleVert = FMath::Clamp(FMath::RadiansToDegrees(SourceHalfRadVert) * 2.0f, 1.0f, 170.0f);
-
-		CreateOrResizeDistortionMapTexture();
-		SizeXY.Y = SourceAspectRatio * SizeXY.X;
-		const double FxDest = (SizeXY.X / 2.0) / FMath::Tan(FMath::DegreesToRadians(UndistortedFOVAngleHoriz / 2.0));
-		const double FyDest = FxDest;
-
-		const double SourceRadiusDiag = FMath::Sqrt(SourceRadiusHoriz * SourceRadiusHoriz + SourceRadiusVert * SourceRadiusVert);
-		const double EndRadiusDiag = FBrownConradyDistortion::SolveInverseDistortion(SourceRadiusDiag, K1, K2, K3);
-		const double EndRadiusHoriz = EndRadiusDiag / FMath::Sqrt(1.0 + SourceAspectRatio * SourceAspectRatio);
-		FOVAngle = FMath::Max(FMath::RadiansToDegrees(FMath::Atan(SourceRadiusHoriz) * 2.0), FMath::RadiansToDegrees(FMath::Atan(EndRadiusHoriz) * 2.0));
-		const double FxSource = (SizeXY.X / 2.0) / FMath::Tan(FMath::DegreesToRadians(FOVAngle / 2.0));
-		const double FySource = FxSource;
-
-		FillDistortionMap(Model, FxDest, FyDest, FxSource, FySource);
+		return MakeUnique<FBrownConradyDistortion>(
+			CameraOwner->LensParameters.K1,
+			CameraOwner->LensParameters.K2,
+			CameraOwner->LensParameters.K3);
 	}
 	else // Equidistant
 	{
 		// Negate pitch: UE positive pitch = up, but image-plane positive Y = down.
 		const double AzOffset = FMath::DegreesToRadians(GetRelativeRotation().Yaw);
 		const double ElOffset = -FMath::DegreesToRadians(GetRelativeRotation().Pitch);
-		const FEquidistantTileDistortion Model(AzOffset, ElOffset);
-
-		CreateOrResizeDistortionMapTexture();
-
-		// Equidistant focal length: pixels per radian (based on the equidistant tile's FOV).
-		const double FDest = static_cast<double>(SizeXY.X) / EquidistantTileHFOVRad;
-
-		// Perspective focal length: based on the (potentially wider) perspective render FOV.
-		const double HalfPerspFOVRad = FMath::DegreesToRadians(FOVAngle / 2.0);
-		const double FSource = SizeXY.X / (2.0 * FMath::Tan(HalfPerspFOVRad));
-
-		FillDistortionMap(Model, FDest, FDest, FSource, FSource);
+		return MakeUnique<FEquidistantTileDistortion>(AzOffset, ElOffset);
 	}
+}
+
+void UTempoCameraCaptureComponent::InitDistortionMap()
+{
+	if (TileOutputSizeXY.X <= 0 || TileOutputSizeXY.Y <= 0)
+	{
+		return;
+	}
+
+	TUniquePtr<FDistortionModel> Model = CreateDistortionModel();
+	const float OutputHFOV = FMath::RadiansToDegrees(EquidistantTileHFOVRad);
+	const FDistortionRenderConfig Config = Model->ComputeRenderConfig(TileOutputSizeXY, OutputHFOV);
+
+	// Apply render configuration to the scene capture.
+	FOVAngle = Config.RenderFOVAngle;
+	SizeXY = Config.RenderSizeXY;
+
+	// Create the distortion map at output resolution and fill it.
+	CreateOrResizeDistortionMapTexture(TileOutputSizeXY);
+	FillDistortionMap(*Model, TileOutputSizeXY, Config.FxOutput, Config.FyOutput,
+		Config.RenderSizeXY, Config.FxRender, Config.FyRender);
 }
 
 // ------------------------------------------------------------------------------------

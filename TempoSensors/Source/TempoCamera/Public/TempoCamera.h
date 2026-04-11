@@ -202,6 +202,9 @@ protected:
 
 	virtual void InitDistortionMap() override;
 
+	// Create the appropriate distortion model based on the camera's settings.
+	TUniquePtr<FDistortionModel> CreateDistortionModel() const;
+
 	UPROPERTY(VisibleAnywhere)
 	UMaterialInstanceDynamic* PostProcessMaterialInstance = nullptr;
 

@@ -3,23 +3,44 @@
 #pragma once
 
 #include "Math/MathFwd.h"
+#include "Math/IntPoint.h"
 
-// Base class for distortion models. Given a pixel position in the output (distorted/remapped)
-// image, computes the normalized UV coordinates in the source (perspective) image.
+// Configuration for the perspective render needed to produce a distorted output image.
+struct TEMPOSENSORSSHARED_API FDistortionRenderConfig
+{
+	// The horizontal FOV for UE's perspective projection (degrees).
+	float RenderFOVAngle = 90.0f;
+	// The render target size (may differ from output size, e.g. for BrownConrady barrel distortion).
+	FIntPoint RenderSizeXY = FIntPoint::ZeroValue;
+	// Focal lengths for the output (distorted) image, in pixels.
+	double FxOutput = 0.0;
+	double FyOutput = 0.0;
+	// Focal lengths for the render (perspective) image, in pixels.
+	double FxRender = 0.0;
+	double FyRender = 0.0;
+};
+
+// Base class for distortion models. Given a pixel position in the output (distorted)
+// image, computes the normalized UV coordinates in the render (perspective) image.
 // All coordinates are relative to the optical center and normalized by focal length.
 struct TEMPOSENSORSSHARED_API FDistortionModel
 {
 	virtual ~FDistortionModel() = default;
 
-	// For a point at (TargetX, TargetY) in the distorted image plane (normalized by destination
-	// focal length), return the corresponding (SourceX, SourceY) in the perspective image plane
-	// (normalized by source focal length).
-	virtual FVector2D DistortedToSource(double TargetX, double TargetY) const = 0;
+	// For a point at (OutputX, OutputY) in the output image plane (normalized by output
+	// focal length), return the corresponding (RenderX, RenderY) in the render image plane
+	// (normalized by render focal length).
+	virtual FVector2D OutputToRender(double OutputX, double OutputY) const = 0;
+
+	// Compute the perspective render configuration needed for the given output image.
+	// OutputSizeXY: the user-specified output image dimensions.
+	// OutputHFOV: the desired horizontal FOV of the output (distorted) image, in degrees.
+	virtual FDistortionRenderConfig ComputeRenderConfig(const FIntPoint& OutputSizeXY, float OutputHFOV) const = 0;
 };
 
 // Brown-Conrady radial distortion model.
-// Distortion: r_distorted = r * (1 + K1*r^2 + K2*r^4 + K3*r^6)
-// The inverse (distorted -> source) requires Newton-Raphson root finding.
+// Distortion: r_output = r * (1 + K1*r^2 + K2*r^4 + K3*r^6)
+// The inverse (output -> render) requires Newton-Raphson root finding.
 struct TEMPOSENSORSSHARED_API FBrownConradyDistortion : FDistortionModel
 {
 	double K1 = 0.0;
@@ -29,26 +50,33 @@ struct TEMPOSENSORSSHARED_API FBrownConradyDistortion : FDistortionModel
 	FBrownConradyDistortion(double InK1, double InK2, double InK3)
 		: K1(InK1), K2(InK2), K3(InK3) {}
 
-	virtual FVector2D DistortedToSource(double TargetX, double TargetY) const override;
+	virtual FVector2D OutputToRender(double OutputX, double OutputY) const override;
+	virtual FDistortionRenderConfig ComputeRenderConfig(const FIntPoint& OutputSizeXY, float OutputHFOV) const override;
 
-	static double SolveDistortion(double SourceRadius, double K1, double K2, double K3);
+	// Forward distortion: given a render (undistorted) radius, compute the output (distorted) radius.
+	static double SolveDistortion(double RenderRadius, double K1, double K2, double K3);
 
-	// Solve for the undistorted radius given a distorted radius.
-	// Uses Newton-Raphson to invert: R * (1 + K1*R^2 + K2*R^4 + K3*R^6) = TargetRadius
-	static double SolveInverseDistortion(double TargetRadius, double K1, double K2, double K3);
+	// Inverse distortion: given an output (distorted) radius, solve for the render (undistorted) radius.
+	// Uses Newton-Raphson to invert: R * (1 + K1*R^2 + K2*R^4 + K3*R^6) = OutputRadius
+	static double SolveInverseDistortion(double OutputRadius, double K1, double K2, double K3);
+
+	// Compute the maximum output (distorted) radius for barrel distortion (K1 < 0).
+	// Returns -1.0 if distortion is not barrel (K1 >= 0) or has no finite limit.
+	static double ComputeMaxOutputRadius(double K1, double K2, double K3);
 };
 
 // Equidistant (spherical) projection model for Lidar.
 // Maps from an equidistant output where pixel position is proportional to angle
-// (azimuth horizontally, elevation vertically) to perspective projection coordinates.
+// (azimuth horizontally, elevation vertically) to perspective render coordinates.
 // The mapping accounts for the coupling between azimuth and elevation in perspective projection:
-//   SourceX = tan(azimuth)
-//   SourceY = tan(elevation) * sec(azimuth)
+//   RenderX = tan(azimuth)
+//   RenderY = tan(elevation) * sec(azimuth)
 // This is trivially computed (no Newton-Raphson needed).
 // NOTE: This is an axis-separable model used by the lidar, not a true radial fisheye.
 struct TEMPOSENSORSSHARED_API FEquidistantDistortion : FDistortionModel
 {
-	virtual FVector2D DistortedToSource(double TargetX, double TargetY) const override;
+	virtual FVector2D OutputToRender(double OutputX, double OutputY) const override;
+	virtual FDistortionRenderConfig ComputeRenderConfig(const FIntPoint& OutputSizeXY, float OutputHFOV) const override;
 };
 
 // Radial equidistant (fisheye) projection model for camera tiles.
@@ -56,7 +84,7 @@ struct TEMPOSENSORSSHARED_API FEquidistantDistortion : FDistortionModel
 // the optical axis and r_image is the radial distance from the image center.
 //
 // For multi-tile rendering, the child capture has a different optical axis than
-// the parent camera. DistortedToSource:
+// the parent camera. OutputToRender:
 //   1. Converts tile-local equidistant coordinates to parent-frame equidistant angles
 //   2. Computes the 3D ray direction from the radial equidistant mapping
 //   3. Rotates the ray from parent frame to child frame
@@ -75,5 +103,6 @@ struct TEMPOSENSORSSHARED_API FEquidistantTileDistortion : FDistortionModel
 	FEquidistantTileDistortion(double InAzimuthOffset, double InElevationOffset)
 		: AzimuthOffset(InAzimuthOffset), ElevationOffset(InElevationOffset) {}
 
-	virtual FVector2D DistortedToSource(double TargetX, double TargetY) const override;
+	virtual FVector2D OutputToRender(double OutputX, double OutputY) const override;
+	virtual FDistortionRenderConfig ComputeRenderConfig(const FIntPoint& OutputSizeXY, float OutputHFOV) const override;
 };
