@@ -6,6 +6,7 @@ curio-compat==1.6.7
 grpcio==1.62.2
 asyncio==3.4.3
 pynput==1.7.7
+prompt_toolkit>=3.0
 pyvista==0.46.1
 pyvistaqt==0.11.3
 qasync==0.27.1
