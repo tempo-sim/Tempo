@@ -231,7 +231,7 @@ void UTempoSceneCaptureComponent2D::CreateOrResizeDistortionMapTexture()
 		return;
 	}
 
-	if (!DistortionMapTexture || DistortionMapTexture->GetSizeX() != SizeXY.X || DistortionMapTexture->GetSizeY() != SizeXY.Y)
+	if (DistortionMapTexture)
 	{
 		DistortionMapTexture = UTexture2D::CreateTransient(SizeXY.X, SizeXY.Y, PF_G16R16F);
 		DistortionMapTexture->CompressionSettings = TC_HDR;
@@ -239,14 +239,7 @@ void UTempoSceneCaptureComponent2D::CreateOrResizeDistortionMapTexture()
 		DistortionMapTexture->AddressX = TA_Clamp;
 		DistortionMapTexture->AddressY = TA_Clamp;
 		DistortionMapTexture->SRGB = 0;
-#ifdef UpdateResource
-#undef UpdateResource
-#endif
 		DistortionMapTexture->UpdateResource();
-	}
-	else
-	{
-		UE_LOG(LogTemp, Warning, TEXT("DistortionMapTexture did not need to be recreated"));
 	}
 }
 
@@ -258,7 +251,7 @@ void UTempoSceneCaptureComponent2D::ApplyDistortionMapToMaterial(UMaterialInstan
 	}
 }
 
-void UTempoSceneCaptureComponent2D::FillDistortionMap(const FDistortionModel& Model, double FxDest, double FyDest, double FxSource, double FySource)
+void UTempoSceneCaptureComponent2D::FillDistortionMap(const FDistortionModel& Model, double FxDest, double FyDest, double FxSource, double FySource) const
 {
 	if (!DistortionMapTexture || SizeXY.X <= 0 || SizeXY.Y <= 0)
 	{
@@ -277,10 +270,6 @@ void UTempoSceneCaptureComponent2D::FillDistortionMap(const FDistortionModel& Mo
 	const double Cx = SizeXY.X * 0.5;
 	const double Cy = SizeXY.Y * 0.5;
 
-	const double MaxTargetX = (SizeXY.X + 0.5 - Cx) / FxDest;
-	const double MaxTargetY = (SizeXY.Y + 0.5 - Cy) / FyDest;
-	const FVector2D MaxSource = Model.DistortedToSource(MaxTargetX, MaxTargetY);
-
 	for (int V = 0; V < SizeXY.Y; ++V)
 	{
 		uint16* Row = &MipData[V * SizeXY.X * 2];
@@ -289,21 +278,14 @@ void UTempoSceneCaptureComponent2D::FillDistortionMap(const FDistortionModel& Mo
 		for (int U = 0; U < SizeXY.X; ++U)
 		{
 			const double TargetX = (U + 0.5 - Cx) / FxDest;
-			const float TargetU = static_cast<float>(TargetX * FxDest + Cx) / static_cast<float>(SizeXY.X);
-			const float TargetV = static_cast<float>(TargetY * FyDest + Cy) / static_cast<float>(SizeXY.Y);
 			const FVector2D Source = Model.DistortedToSource(TargetX, TargetY);
 			const float FinalU = static_cast<float>(Source.X * FxSource + Cx) / static_cast<float>(SizeXY.X);
 			const float FinalV = static_cast<float>(Source.Y * FySource + Cy) / static_cast<float>(SizeXY.Y);
 			Row[U * 2 + 0] = FFloat16(FinalU).Encoded;
 			Row[U * 2 + 1] = FFloat16(FinalV).Encoded;
-			if (U == SizeXY.X / 2 && V == SizeXY.Y - 1)
-			{
-				UE_LOG(LogTemp, Warning, TEXT("Target: (%f,%f) Final:(%f,%f)"), TargetU, TargetV, FinalU, FinalV);
-			}
 		}
 	}
 
-	UE_LOG(LogTemp, Warning, TEXT("Fill Distortion Map"));
 	Mip.BulkData.Unlock();
 	DistortionMapTexture->UpdateResource();
 }
@@ -372,17 +354,17 @@ void UTempoSceneCaptureComponent2D::InitRenderTarget()
 		{
 			constexpr ETextureCreateFlags TexCreateFlags = ETextureCreateFlags::Shared | ETextureCreateFlags::CPUReadback;
 
-			for (int32 i = 0; i < Context.NumTextures; ++i)
+			for (int32 I = 0; I < Context.NumTextures; ++I)
 			{
 				const FRHITextureCreateDesc Desc =
-					FRHITextureCreateDesc::Create2D(*FString::Printf(TEXT("%s StagingTexture %d"), *Context.NameBase, i))
+					FRHITextureCreateDesc::Create2D(*FString::Printf(TEXT("%s StagingTexture %d"), *Context.NameBase, I))
 					.SetExtent(Context.SizeX, Context.SizeY)
 					.SetFormat(Context.PixelFormat)
 					.SetFlags(TexCreateFlags);
 
 				{
 					FScopeLock StagingTexturesLock(Context.StagingTexturesMutex);
-					(*Context.StagingTextures)[i] = RHICreateTexture(Desc);
+					(*Context.StagingTextures)[I] = RHICreateTexture(Desc);
 				}
 			}
 		});

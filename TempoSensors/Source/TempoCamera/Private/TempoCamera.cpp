@@ -16,10 +16,10 @@
 
 namespace
 {
-	const FName TLCaptureComponentName(TEXT("CameraCapture_TL"));
-	const FName TRCaptureComponentName(TEXT("CameraCapture_TR"));
-	const FName BLCaptureComponentName(TEXT("CameraCapture_BL"));
-	const FName BRCaptureComponentName(TEXT("CameraCapture_BR"));
+	const FName TLCaptureComponentName(TEXT("TopLeftTempoCameraCaptureComponent"));
+	const FName TRCaptureComponentName(TEXT("TopRightTempoCameraCaptureComponent"));
+	const FName BLCaptureComponentName(TEXT("BottomLeftTempoCameraCaptureComponent"));
+	const FName BRCaptureComponentName(TEXT("BottomRightTempoCameraCaptureComponent"));
 
 	constexpr double MaxPerspectiveFOVPerCapture = 120.0;
 }
@@ -328,11 +328,6 @@ void UTempoCameraCaptureComponent::SetDepthEnabled(bool bDepthEnabled)
 		{
 			PostProcessMaterialInstance = UMaterialInstanceDynamic::Create(PostProcessMaterialWithDepth.Get(), this);
 			ApplyDistortionMapToMaterial(PostProcessMaterialInstance);
-			if (DistortionMapTexture)
-			{
-				PostProcessMaterialInstance->SetScalarParameterValue(FName("CroppingFactor"), CameraOwner->CroppingFactor);
-			}
-
 			MinDepth = GEngine->NearClipPlane;
 			MaxDepth = TempoSensorsSettings->GetMaxCameraDepth();
 			PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MinDepth"), MinDepth);
@@ -350,10 +345,6 @@ void UTempoCameraCaptureComponent::SetDepthEnabled(bool bDepthEnabled)
 		{
 			PostProcessMaterialInstance = UMaterialInstanceDynamic::Create(PostProcessMaterialNoDepth.Get(), this);
 			ApplyDistortionMapToMaterial(PostProcessMaterialInstance);
-			if (DistortionMapTexture)
-			{
-				PostProcessMaterialInstance->SetScalarParameterValue(FName("CroppingFactor"), CameraOwner->CroppingFactor);
-			}
 		}
 		else
 		{
@@ -563,7 +554,6 @@ void UTempoCameraCaptureComponent::InitDistortionMap()
 		const double SourceRadiusDiag = FMath::Sqrt(SourceRadiusHoriz * SourceRadiusHoriz + SourceRadiusVert * SourceRadiusVert);
 		const double EndRadiusDiag = FBrownConradyDistortion::SolveInverseDistortion(SourceRadiusDiag, K1, K2, K3);
 		const double EndRadiusHoriz = EndRadiusDiag / FMath::Sqrt(1.0 + SourceAspectRatio * SourceAspectRatio);
-		UE_LOG(LogTemp, Warning, TEXT("AspectRatio: %f SourceAspectRatio: %f"), AspectRatio, SourceAspectRatio);
 		FOVAngle = FMath::Max(FMath::RadiansToDegrees(FMath::Atan(SourceRadiusHoriz) * 2.0), FMath::RadiansToDegrees(FMath::Atan(EndRadiusHoriz) * 2.0));
 		const double FxSource = (SizeXY.X / 2.0) / FMath::Tan(FMath::DegreesToRadians(FOVAngle / 2.0));
 		const double FySource = FxSource;
@@ -586,33 +576,7 @@ void UTempoCameraCaptureComponent::InitDistortionMap()
 		const double HalfPerspFOVRad = FMath::DegreesToRadians(FOVAngle / 2.0);
 		const double FSource = SizeXY.X / (2.0 * FMath::Tan(HalfPerspFOVRad));
 
-		UE_LOG(LogTempoCamera, Warning, TEXT("InitDistortionMap Equidistant: SizeXY=(%d,%d) FOVAngle=%.1f TileHFOVRad=%.3f FDest=%.1f FSource=%.1f AzOffset=%.3f ElOffset=%.3f DistortionMap=%s"),
-			SizeXY.X, SizeXY.Y, FOVAngle, EquidistantTileHFOVRad, FDest, FSource, AzOffset, ElOffset,
-			DistortionMapTexture ? TEXT("valid") : TEXT("null"));
-
-		// Spot-check: evaluate the model at the right edge of the tile
-		const double TestTargetX = EquidistantTileHFOVRad / 2.0;
-		const FVector2D TestSource = Model.DistortedToSource(TestTargetX, 0.0);
-		const float TestFinalU = static_cast<float>(TestSource.X * FSource + SizeXY.X * 0.5) / SizeXY.X;
-		UE_LOG(LogTempoCamera, Warning, TEXT("  Spot check: TargetX=%.4f -> SourceX=%.4f -> FinalU=%.4f (identity would be ~1.0)"),
-			TestTargetX, TestSource.X, TestFinalU);
-
 		FillDistortionMap(Model, FDest, FDest, FSource, FSource);
-	}
-
-	if (PostProcessMaterialInstance)
-	{
-		ApplyDistortionMapToMaterial(PostProcessMaterialInstance);
-		UE_LOG(LogTempoCamera, Warning, TEXT("Applied distortion map to PostProcessMaterialInstance (texture=%s)"),
-			DistortionMapTexture ? TEXT("valid") : TEXT("null"));
-		if (CameraOwner->DistortionModel == ETempoDistortionModel::BrownConrady)
-		{
-			PostProcessMaterialInstance->SetScalarParameterValue(FName("CroppingFactor"), CameraOwner->CroppingFactor);
-		}
-	}
-	else
-	{
-		UE_LOG(LogTempoCamera, Warning, TEXT("PostProcessMaterialInstance is null in InitDistortionMap!"));
 	}
 }
 
@@ -691,7 +655,6 @@ void UTempoCamera::BlockUntilMeasurementsReady() const
 
 TOptional<TFuture<void>> UTempoCamera::SendMeasurements()
 {
-	TArray<TUniquePtr<FTextureRead>> TextureReads;
 	const TArray<UTempoCameraCaptureComponent*> ActiveCaptureComponents = GetActiveCaptureComponents();
 	const int32 NumCompletedReads = ActiveCaptureComponents.FilterByPredicate(
 		[](const UTempoCameraCaptureComponent* CaptureComponent) { return CaptureComponent->NextReadComplete(); }
@@ -701,6 +664,8 @@ TOptional<TFuture<void>> UTempoCamera::SendMeasurements()
 
 	if (NumCompletedReads == ActiveCaptureComponents.Num())
 	{
+		TArray<TUniquePtr<FTextureRead>> TextureReads;
+
 		for (UTempoCameraCaptureComponent* CaptureComponent : ActiveCaptureComponents)
 		{
 			TextureReads.Add(CaptureComponent->DequeueIfReadComplete());
@@ -775,8 +740,6 @@ FTempoCameraIntrinsics UTempoCamera::GetIntrinsics() const
 TFuture<void> UTempoCamera::DecodeAndRespond(TUniquePtr<FTextureRead> TextureRead)
 {
 	const double TransmissionTime = GetWorld()->GetTimeSeconds();
-
-	const bool bSupportsDepth = TextureRead->GetType() == TEXT("WithDepth");
 
 	TFuture<void> Future = Async(EAsyncExecution::TaskGraph, [
 		TextureRead = MoveTemp(TextureRead),
@@ -1110,8 +1073,7 @@ void UTempoCamera::PostEditChangeProperty(FPropertyChangedEvent& PropertyChanged
 	if (PropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, DistortionModel) ||
 		PropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, HorizontalFOV) ||
 		PropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, SizeXY) ||
-		PropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, LensParameters) ||
-		PropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, CroppingFactor))
+		PropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, LensParameters))
 	{
 		SyncCaptureComponents();
 	}

@@ -296,10 +296,6 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens", meta = (EditCondition = "DistortionModel == ETempoDistortionModel::BrownConrady"))
 	FTempoLensDistortionParameters LensParameters;
 
-	// Cropping factor for BrownConrady distortion.
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens", meta = (EditCondition = "DistortionModel == ETempoDistortionModel::BrownConrady"))
-	float CroppingFactor = 0.0f;
-
 	// Output image resolution.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo")
 	FIntPoint SizeXY = FIntPoint(960, 540);

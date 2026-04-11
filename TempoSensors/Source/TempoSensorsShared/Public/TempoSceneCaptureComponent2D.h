@@ -333,7 +333,7 @@ protected:
 
 	// Fill the distortion map texture using the given distortion model.
 	// FxDest/FyDest are the destination focal lengths, FxSource/FySource are the source (perspective) focal lengths.
-	void FillDistortionMap(const FDistortionModel& Model, double FxDest, double FyDest, double FxSource, double FySource);
+	void FillDistortionMap(const FDistortionModel& Model, double FxDest, double FyDest, double FxSource, double FySource) const;
 
 	// The distortion map texture. Each pixel stores (U, V) source coordinates in PF_G16R16F format.
 	UPROPERTY(Transient, VisibleAnywhere)
