@@ -104,26 +104,25 @@ double FBrownConradyDistortion::ComputeMaxOutputRadius(double K1, double K2, dou
 	return RCrit * Scale;
 }
 
-FDistortionRenderConfig FBrownConradyDistortion::ComputeRenderConfig(const FIntPoint& OutputSizeXY, float OutputHFOV) const
+FDistortionRenderConfig FBrownConradyDistortion::ComputeRenderConfig(const FIntPoint& OutputSizeXY, double OutputHFOVDeg) const
 {
 	FDistortionRenderConfig Config;
 
 	// Feasibility check for barrel distortion
 	const double MaxOutputRadius = ComputeMaxOutputRadius(K1, K2, K3);
-	if (MaxOutputRadius > 0.0 && OutputHFOV > 0.0f)
+	if (MaxOutputRadius > 0.0 && OutputHFOVDeg > 0.0f)
 	{
 		const double MaxPossibleFOV = FMath::RadiansToDegrees(FMath::Atan(MaxOutputRadius)) * 2.0;
-		if (OutputHFOV <= MaxPossibleFOV)
+		if (OutputHFOVDeg <= MaxPossibleFOV)
 		{
-			UE_LOG(LogTempoSensorsShared, Warning, TEXT("HorizontalFOV %.2f exceeds limit %.2f for Brown-Conrady model with K1=%.3f K2=%.3f K3=%.3f. Artifacts expected."), OutputHFOV, MaxPossibleFOV, K1, K2, K3);
+			UE_LOG(LogTempoSensorsShared, Warning, TEXT("HorizontalFOV %.2f exceeds limit %.2f for Brown-Conrady model with K1=%.3f K2=%.3f K3=%.3f. Artifacts expected."), OutputHFOVDeg, MaxPossibleFOV, K1, K2, K3);
 		}
 	}
 
 	Config.RenderSizeXY = OutputSizeXY;
 	const double AspectRatio = static_cast<double>(OutputSizeXY.X) / static_cast<double>(OutputSizeXY.Y);
-	const double OutputHorizRadius = SolveDistortion(FMath::Atan(FMath::DegreesToRadians(OutputHFOV / 2.0)), K1, K2, K3);
-	Config.FxOutput = (OutputSizeXY.X / 2.0) / OutputHorizRadius;
-	Config.FyOutput = Config.FxOutput;
+	const double OutputHorizRadius = SolveDistortion(FMath::Atan(FMath::DegreesToRadians(OutputHFOVDeg / 2.0)), K1, K2, K3);
+	Config.FOutput = (OutputSizeXY.X / 2.0) / OutputHorizRadius;
 
 	if (K1 <= 0.0) // Barrel - diag is limiting factor
 	{
@@ -135,28 +134,25 @@ FDistortionRenderConfig FBrownConradyDistortion::ComputeRenderConfig(const FIntP
 	}
 	else // K1 > 0.0 Pincushion - horiz/vert is limiting factor
 	{
-		Config.RenderFOVAngle = OutputHFOV;
+		Config.RenderFOVAngle = OutputHFOVDeg;
 	}
 
-	Config.FxRender = (Config.RenderSizeXY.X / 2.0) / FMath::Tan(FMath::DegreesToRadians(Config.RenderFOVAngle / 2.0));
-	Config.FyRender = Config.FxRender;
+	Config.FRender = (Config.RenderSizeXY.X / 2.0) / FMath::Tan(FMath::DegreesToRadians(Config.RenderFOVAngle / 2.0));
 
 	return Config;
 }
 
-FDistortionRenderConfig FEquidistantDistortion::ComputeRenderConfig(const FIntPoint& OutputSizeXY, float OutputHFOV) const
+FDistortionRenderConfig FEquidistantDistortion::ComputeRenderConfig(const FIntPoint& OutputSizeXY, double OutputHFOVDeg) const
 {
 	// The Lidar equidistant model does not use distortion maps for camera rendering.
 	// Provide a basic config that matches the output directly.
 	FDistortionRenderConfig Config;
 	Config.RenderSizeXY = OutputSizeXY;
-	const double HalfFOVRad = FMath::DegreesToRadians(OutputHFOV / 2.0);
-	Config.RenderFOVAngle = FMath::Clamp(OutputHFOV, 1.0f, 170.0f);
+	const double HalfFOVRad = FMath::DegreesToRadians(OutputHFOVDeg / 2.0);
+	Config.RenderFOVAngle = FMath::Clamp(OutputHFOVDeg, 1.0f, 170.0f);
 	const double F = OutputSizeXY.X / (2.0 * FMath::Tan(HalfFOVRad));
-	Config.FxOutput = F;
-	Config.FyOutput = F;
-	Config.FxRender = F;
-	Config.FyRender = F;
+	Config.FOutput = F;
+	Config.FRender = F;
 	return Config;
 }
 
@@ -229,11 +225,11 @@ FVector2D FEquidistantTileDistortion::OutputToRender(double OutputX, double Outp
 	return FVector2D(ChildX / ChildZ, ChildY / ChildZ);
 }
 
-FDistortionRenderConfig FEquidistantTileDistortion::ComputeRenderConfig(const FIntPoint& OutputSizeXY, float OutputHFOV) const
+FDistortionRenderConfig FEquidistantTileDistortion::ComputeRenderConfig(const FIntPoint& OutputSizeXY, double OutputHFOVDeg) const
 {
 	FDistortionRenderConfig Config;
 
-	const double TileHFOVRad = FMath::DegreesToRadians(OutputHFOV);
+	const double TileHFOVRad = FMath::DegreesToRadians(OutputHFOVDeg);
 	const double TileHHalfRad = TileHFOVRad / 2.0;
 	const double TileVHalfRad = TileHHalfRad * OutputSizeXY.Y / OutputSizeXY.X;
 
@@ -261,13 +257,11 @@ FDistortionRenderConfig FEquidistantTileDistortion::ComputeRenderConfig(const FI
 	Config.RenderSizeXY = OutputSizeXY;
 
 	// Output (equidistant) focal length: pixels per radian.
-	Config.FxOutput = static_cast<double>(OutputSizeXY.X) / TileHFOVRad;
-	Config.FyOutput = Config.FxOutput;
+	Config.FOutput = static_cast<double>(OutputSizeXY.X) / TileHFOVRad;
 
 	// Render (perspective) focal length.
 	const double HalfRenderFOVRad = FMath::DegreesToRadians(Config.RenderFOVAngle / 2.0);
-	Config.FxRender = OutputSizeXY.X / (2.0 * FMath::Tan(HalfRenderFOVRad));
-	Config.FyRender = Config.FxRender;
+	Config.FRender = OutputSizeXY.X / (2.0 * FMath::Tan(HalfRenderFOVRad));
 
 	return Config;
 }

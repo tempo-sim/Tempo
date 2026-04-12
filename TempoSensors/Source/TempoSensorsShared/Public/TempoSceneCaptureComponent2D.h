@@ -335,8 +335,8 @@ protected:
 	// OutputSizeXY / FxOutput / FyOutput describe the output (distorted) image (loop bounds + normalization).
 	// RenderSizeXY / FxRender / FyRender describe the render (perspective) image (UV normalization).
 	void FillDistortionMap(const FDistortionModel& Model,
-		const FIntPoint& OutputSizeXY, double FxOutput, double FyOutput,
-		const FIntPoint& RenderSizeXY, double FxRender, double FyRender) const;
+		const FIntPoint& OutputSizeXY, double FOutput,
+		const FIntPoint& RenderSizeXY, double FRender) const;
 
 	// The distortion map texture. Each pixel stores (U, V) source coordinates in PF_G16R16F format.
 	UPROPERTY(Transient, VisibleAnywhere)
