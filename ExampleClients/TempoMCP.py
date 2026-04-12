@@ -389,6 +389,177 @@ async def flow_destroy_component():
         print(f"  Error: {e.details()}")
 
 
+LEAF_TYPES = {
+    "bool", "string", "enum", "int", "int32", "int64", "float", "double",
+    "vector", "rotator", "color", "class", "asset", "actor", "component",
+}
+
+
+def _is_leaf_type(prop_type):
+    """Return True if this type can be set directly (not a struct/array container)."""
+    t = prop_type.lower().strip()
+    if t in LEAF_TYPES:
+        return True
+    # Array of leaf types like "float[]", "bool[]"
+    if t.endswith("[]") and t[:-2] in LEAF_TYPES:
+        return True
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Struct/array value parsing
+# ---------------------------------------------------------------------------
+
+def _split_top_level(s, delimiter=","):
+    """Split string on delimiter, respecting nested parentheses and braces."""
+    parts = []
+    depth = 0
+    current = []
+    for ch in s:
+        if ch in ("(", "{"):
+            depth += 1
+            current.append(ch)
+        elif ch in (")", "}"):
+            depth -= 1
+            current.append(ch)
+        elif ch == delimiter and depth == 0:
+            parts.append("".join(current).strip())
+            current = []
+        else:
+            current.append(ch)
+    tail = "".join(current).strip()
+    if tail:
+        parts.append(tail)
+    return parts
+
+
+def _infer_type(value_str):
+    """Infer a settable type from a value string. Returns (type, is_leaf)."""
+    v = value_str.strip()
+    if v.lower() in ("true", "false"):
+        return "bool", True
+    if _is_composite_value(v):
+        return "struct", False
+    # Integer check (before float — no decimal point)
+    try:
+        int(v)
+        return "int", True
+    except ValueError:
+        pass
+    # Float check
+    try:
+        float(v)
+        return "float", True
+    except ValueError:
+        pass
+    # Default to string
+    return "string", True
+
+
+def _unwrap_value(value_str):
+    """Strip outer delimiters and return (inner_string, separator).
+
+    Supports both formats:
+      (K1=V1,K2=V2)  -> ("K1=V1,K2=V2", "=")   — parens with equals
+      {K1:V1, K2:V2} -> ("K1:V1, K2:V2", ":")   — braces with colons
+    Returns ("", "") if neither format matches.
+    """
+    v = value_str.strip()
+    if v.startswith("(") and v.endswith(")"):
+        return v[1:-1], "="
+    if v.startswith("{") and v.endswith("}"):
+        return v[1:-1], ":"
+    return "", ""
+
+
+def _is_composite_value(value_str):
+    """Check if a value string looks like a nested struct/array."""
+    v = value_str.strip()
+    return ((v.startswith("(") and v.endswith(")")) or
+            (v.startswith("{") and v.endswith("}")))
+
+
+def _parse_struct_value(value_str):
+    """Parse a struct value string into {member: (value_str, inferred_type, is_leaf)}.
+
+    Handles formats like:
+      (X=1.000000,Y=2.000000,Z=3.000000)
+      {K1:-0.2, K2:0.0, K3:0.0, P1:0.0, P2:0.0}
+    Returns empty dict if parsing fails.
+    """
+    inner, sep = _unwrap_value(value_str)
+    if not inner or not sep:
+        return {}
+
+    members = {}
+    for part in _split_top_level(inner, ","):
+        sep_pos = part.find(sep)
+        if sep_pos == -1:
+            continue
+        name = part[:sep_pos].strip()
+        val = part[sep_pos + 1:].strip()
+        if not name:
+            continue
+        inferred, is_leaf = _infer_type(val)
+        members[name] = (val, inferred, is_leaf)
+    return members
+
+
+def _parse_array_value(value_str):
+    """Parse an array value string into a list of (value_str, inferred_type, is_leaf).
+
+    Handles formats like:
+      (1.0,2.0,3.0)
+      {elem1, elem2}
+    Returns empty list if parsing fails.
+    """
+    inner, sep = _unwrap_value(value_str)
+    if not inner:
+        return []
+
+    elements = []
+    for part in _split_top_level(inner, ","):
+        val = part.strip()
+        # Skip if it looks like a key=value or key:value (that's a struct, not array)
+        if sep and sep in val and not _is_composite_value(val):
+            return []
+        inferred, is_leaf = _infer_type(val)
+        elements.append((val, inferred, is_leaf))
+    return elements
+
+
+def _type_hint(prop_type):
+    """Return a parenthetical hint string for the given property type."""
+    t = prop_type.lower().strip()
+    if t == "bool":
+        return " (true/false)"
+    elif t == "vector":
+        return " (X Y Z)"
+    elif t == "rotator":
+        return " (Roll Pitch Yaw)"
+    elif t == "color":
+        return " (R G B, 0-255)"
+    elif t.endswith("[]"):
+        return " (comma-separated values)"
+    return ""
+
+
+TYPE_CHOICES = [
+    ("bool",      "bool (true/false)"),
+    ("int",       "int"),
+    ("float",     "float"),
+    ("string",    "string"),
+    ("enum",      "enum"),
+    ("vector",    "vector (X Y Z)"),
+    ("rotator",   "rotator (Roll Pitch Yaw)"),
+    ("color",     "color (R G B, 0-255)"),
+    ("class",     "class"),
+    ("asset",     "asset"),
+    ("actor",     "actor reference"),
+    ("component", "component reference"),
+]
+
+
 async def flow_set_property():
     print("\n--- Set Property ---")
 
@@ -414,7 +585,7 @@ async def flow_set_property():
         if comp_selection != NONE_SENTINEL:
             component = comp_selection
 
-    # Step 3: Fetch and select property
+    # Step 3: Select property
     properties = await fetch_properties(actor, component)
     if not properties:
         target = f"{actor}:{component}" if component else actor
@@ -426,40 +597,100 @@ async def flow_set_property():
     if prop_name == RESTART_SENTINEL:
         return
 
-    # Find the selected property descriptor
     prop = next(p for p in properties if p.name == prop_name)
+    prop_path = prop.name
+    prop_type = prop.type
 
-    # Step 4: Display current value and prompt for new value
     print(f"\n  Property: {prop.name}")
     print(f"  Type:     {prop.type}")
     print(f"  Current:  {prop.value}")
 
-    type_hint = ""
-    t = prop.type.lower().strip()
-    if t == "bool":
-        type_hint = " (true/false)"
-    elif t == "vector":
-        type_hint = " (X Y Z)"
-    elif t == "rotator":
-        type_hint = " (Roll Pitch Yaw)"
-    elif t == "color":
-        type_hint = " (R G B, 0-255)"
-    elif t.endswith("[]"):
-        type_hint = " (comma-separated values)"
+    # Step 4: If not a leaf type, drill into struct/array members
+    current_value_str = prop.value
+    while not _is_leaf_type(prop_type):
+        # Try to parse the current value to discover members
+        struct_members = _parse_struct_value(current_value_str)
+        array_elements = _parse_array_value(current_value_str) if not struct_members else []
 
-    new_value = await text_input(f"New value{type_hint}", default=prop.value)
+        if struct_members:
+            print(f"\n  '{prop_path}' is a struct ({prop_type}) with {len(struct_members)} members.")
+            member_items = []
+            for name, (val, inf_type, _) in struct_members.items():
+                member_items.append((name, f"{name} ({inf_type}) = {val}"))
+            selection = await fuzzy_select(member_items, "Select member")
+            if selection == RESTART_SENTINEL:
+                return
+            member = selection
+            val, inf_type, is_leaf = struct_members[member]
+            prop_path = f"{prop_path}.{member}"
+            current_value_str = val
+            if is_leaf:
+                prop_type = inf_type
+            else:
+                prop_type = inf_type  # "struct" — will loop again
+            print(f"\n  Path: {prop_path}")
+            print(f"  Type: {prop_type} (auto-detected)")
+            print(f"  Current: {current_value_str}")
+        elif array_elements:
+            print(f"\n  '{prop_path}' is an array ({prop_type}) with {len(array_elements)} elements.")
+            index_items = [(str(i), f"[{i}] ({inf_type}) = {val}")
+                           for i, (val, inf_type, _) in enumerate(array_elements)]
+            selection = await fuzzy_select(index_items, "Select index")
+            if selection == RESTART_SENTINEL:
+                return
+            idx = int(selection)
+            val, inf_type, is_leaf = array_elements[idx]
+            prop_path = f"{prop_path}.{idx}"
+            current_value_str = val
+            if is_leaf:
+                prop_type = inf_type
+            else:
+                prop_type = inf_type
+            print(f"\n  Path: {prop_path}")
+            print(f"  Type: {prop_type} (auto-detected)")
+            print(f"  Current: {current_value_str}")
+        else:
+            # Can't parse the value — fall back to manual entry
+            print(f"\n  '{prop_path}' is a composite type ({prop_type}).")
+            print(f"  Enter a member name (for structs) or index (for arrays),")
+            print(f"  or leave empty to set the whole property as a string.\n")
 
-    # Step 5: Set the property
+            member = await text_input("Member name or index")
+            if not member:
+                prop_type = "string"
+                break
+
+            prop_path = f"{prop_path}.{member}"
+            print(f"\n  Path is now: {prop_path}")
+
+            # Ask for type
+            print(f"  What type is '{prop_path}'?")
+            type_sel = await fuzzy_select(
+                TYPE_CHOICES, "Select type",
+                allow_none=True, none_label="(Another struct/array - keep drilling)")
+            if type_sel == RESTART_SENTINEL:
+                return
+            if type_sel == NONE_SENTINEL:
+                prop_type = "struct"
+                current_value_str = ""
+                continue
+            prop_type = type_sel
+
+    # Step 5: Prompt for value and set
+    type_hint = _type_hint(prop_type)
+    default_val = current_value_str if prop_path != prop.name else prop.value
+    new_value = await text_input(f"New value{type_hint}", default=default_val)
+
     success = await set_property_value(
         actor=actor,
         component=component or "",
-        prop_name=prop_name,
-        prop_type=prop.type,
+        prop_name=prop_path,
+        prop_type=prop_type,
         value_text=new_value,
     )
 
     if success:
-        print(f"\n  Successfully set {prop.name} = {new_value}")
+        print(f"\n  Successfully set {prop_path} = {new_value}")
 
 
 # ---------------------------------------------------------------------------
