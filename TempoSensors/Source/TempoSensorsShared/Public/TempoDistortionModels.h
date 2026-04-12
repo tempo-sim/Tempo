@@ -10,14 +10,12 @@ struct TEMPOSENSORSSHARED_API FDistortionRenderConfig
 {
 	// The horizontal FOV for UE's perspective projection (degrees).
 	float RenderFOVAngle = 90.0f;
-	// The render target size (may differ from output size, e.g. for BrownConrady barrel distortion).
+	// The render target size.
 	FIntPoint RenderSizeXY = FIntPoint::ZeroValue;
-	// Focal lengths for the output (distorted) image, in pixels.
-	double FxOutput = 0.0;
-	double FyOutput = 0.0;
-	// Focal lengths for the render (perspective) image, in pixels.
-	double FxRender = 0.0;
-	double FyRender = 0.0;
+	// Focal length for the output (distorted) image, in pixels.
+	double FOutput = 0.0;
+	// Focal length for the render (perspective) image, in pixels.
+	double FRender = 0.0;
 };
 
 // Base class for distortion models. Given a pixel position in the output (distorted)
@@ -34,8 +32,8 @@ struct TEMPOSENSORSSHARED_API FDistortionModel
 
 	// Compute the perspective render configuration needed for the given output image.
 	// OutputSizeXY: the user-specified output image dimensions.
-	// OutputHFOV: the desired horizontal FOV of the output (distorted) image, in degrees.
-	virtual FDistortionRenderConfig ComputeRenderConfig(const FIntPoint& OutputSizeXY, float OutputHFOV) const = 0;
+	// OutputHFOVDeg: the desired horizontal FOV of the output (distorted) image, in degrees.
+	virtual FDistortionRenderConfig ComputeRenderConfig(const FIntPoint& OutputSizeXY, double OutputHFOVDeg) const = 0;
 };
 
 // Brown-Conrady radial distortion model.
@@ -51,7 +49,7 @@ struct TEMPOSENSORSSHARED_API FBrownConradyDistortion : FDistortionModel
 		: K1(InK1), K2(InK2), K3(InK3) {}
 
 	virtual FVector2D OutputToRender(double OutputX, double OutputY) const override;
-	virtual FDistortionRenderConfig ComputeRenderConfig(const FIntPoint& OutputSizeXY, float OutputHFOV) const override;
+	virtual FDistortionRenderConfig ComputeRenderConfig(const FIntPoint& OutputSizeXY, double OutputHFOVDeg) const override;
 
 	// Forward distortion: given a render (undistorted) radius, compute the output (distorted) radius.
 	static double SolveDistortion(double RenderRadius, double K1, double K2, double K3);
@@ -76,7 +74,7 @@ struct TEMPOSENSORSSHARED_API FBrownConradyDistortion : FDistortionModel
 struct TEMPOSENSORSSHARED_API FEquidistantDistortion : FDistortionModel
 {
 	virtual FVector2D OutputToRender(double OutputX, double OutputY) const override;
-	virtual FDistortionRenderConfig ComputeRenderConfig(const FIntPoint& OutputSizeXY, float OutputHFOV) const override;
+	virtual FDistortionRenderConfig ComputeRenderConfig(const FIntPoint& OutputSizeXY, double OutputHFOVDeg) const override;
 };
 
 // Radial equidistant (fisheye) projection model for camera tiles.
@@ -104,5 +102,5 @@ struct TEMPOSENSORSSHARED_API FEquidistantTileDistortion : FDistortionModel
 		: AzimuthOffset(InAzimuthOffset), ElevationOffset(InElevationOffset) {}
 
 	virtual FVector2D OutputToRender(double OutputX, double OutputY) const override;
-	virtual FDistortionRenderConfig ComputeRenderConfig(const FIntPoint& OutputSizeXY, float OutputHFOV) const override;
+	virtual FDistortionRenderConfig ComputeRenderConfig(const FIntPoint& OutputSizeXY, double OutputHFOVDeg) const override;
 };

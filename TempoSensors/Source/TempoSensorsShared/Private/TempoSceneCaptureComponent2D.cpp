@@ -248,9 +248,8 @@ void UTempoSceneCaptureComponent2D::ApplyDistortionMapToMaterial(UMaterialInstan
 	}
 }
 
-void UTempoSceneCaptureComponent2D::FillDistortionMap(const FDistortionModel& Model,
-	const FIntPoint& OutputSizeXY, double FxOutput, double FyOutput,
-	const FIntPoint& RenderSizeXY, double FxRender, double FyRender) const
+void UTempoSceneCaptureComponent2D::FillDistortionMap(const FDistortionModel& Model, const FIntPoint& OutputSizeXY,
+	double FOutput, const FIntPoint& RenderSizeXY, double FRender) const
 {
 	if (!DistortionMapTexture || OutputSizeXY.X <= 0 || OutputSizeXY.Y <= 0)
 	{
@@ -277,14 +276,14 @@ void UTempoSceneCaptureComponent2D::FillDistortionMap(const FDistortionModel& Mo
 	for (int V = 0; V < OutputSizeXY.Y; ++V)
 	{
 		uint16* Row = &MipData[V * OutputSizeXY.X * 2];
-		const double OutputY = (V + 0.5 - OutputCy) / FyOutput;
+		const double OutputY = (V + 0.5 - OutputCy) / FOutput;
 
 		for (int U = 0; U < OutputSizeXY.X; ++U)
 		{
-			const double OutputX = (U + 0.5 - OutputCx) / FxOutput;
+			const double OutputX = (U + 0.5 - OutputCx) / FOutput;
 			const FVector2D Render = Model.OutputToRender(OutputX, OutputY);
-			const float FinalU = static_cast<float>(Render.X * FxRender + RenderCx) / static_cast<float>(RenderSizeXY.X);
-			const float FinalV = static_cast<float>(Render.Y * FyRender + RenderCy) / static_cast<float>(RenderSizeXY.Y);
+			const float FinalU = static_cast<float>(Render.X * FRender + RenderCx) / static_cast<float>(RenderSizeXY.X);
+			const float FinalV = static_cast<float>(Render.Y * FRender + RenderCy) / static_cast<float>(RenderSizeXY.Y);
 			Row[U * 2 + 0] = FFloat16(FinalU).Encoded;
 			Row[U * 2 + 1] = FFloat16(FinalV).Encoded;
 		}
