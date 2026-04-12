@@ -457,6 +457,9 @@ void UTempoCameraCaptureComponent::InitDistortionMap()
 	CreateOrResizeDistortionMapTexture(TileOutputSizeXY);
 	FillDistortionMap(*Model, TileOutputSizeXY, Config.FxOutput, Config.FyOutput,
 		Config.RenderSizeXY, Config.FxRender, Config.FyRender);
+
+	// Wire the distortion map to the post-process material (must happen after texture creation).
+	ApplyDistortionMapToMaterial(PostProcessMaterialInstance);
 }
 
 // ------------------------------------------------------------------------------------
