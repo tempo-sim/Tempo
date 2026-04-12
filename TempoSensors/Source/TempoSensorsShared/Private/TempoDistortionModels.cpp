@@ -2,6 +2,8 @@
 
 #include "TempoDistortionModels.h"
 
+#include "TempoSensorsShared.h"
+
 // Root-Finding Solver (Newton-Raphson)
 static double Solve(const TFunction<double(double)>& Objective, const TFunction<double(double)>& Derivative, const double InitialGuess, const int32 MaxIter, const double Threshold)
 {
@@ -111,75 +113,35 @@ FDistortionRenderConfig FBrownConradyDistortion::ComputeRenderConfig(const FIntP
 	if (MaxOutputRadius > 0.0 && OutputHFOV > 0.0f)
 	{
 		const double MaxPossibleFOV = FMath::RadiansToDegrees(FMath::Atan(MaxOutputRadius)) * 2.0;
-		ensureMsgf(OutputHFOV <= MaxPossibleFOV, TEXT("HorizontalFOV %.2f exceeds limit %.2f for K1=%.3f. Artifacts expected."), OutputHFOV, MaxPossibleFOV, K1);
+		if (OutputHFOV <= MaxPossibleFOV)
+		{
+			UE_LOG(LogTempoSensorsShared, Warning, TEXT("HorizontalFOV %.2f exceeds limit %.2f for Brown-Conrady model with K1=%.3f K2=%.3f K3=%.3f. Artifacts expected."), OutputHFOV, MaxPossibleFOV, K1, K2, K3);
+		}
 	}
 
-	const double AspectRatio = static_cast<double>(OutputSizeXY.Y) / static_cast<double>(OutputSizeXY.X);
-	const double HalfFOVRad = FMath::DegreesToRadians(OutputHFOV / 2.0);
-	const double OutputRadiusHoriz = FMath::Tan(HalfFOVRad);
-	const double OutputRadiusVert = AspectRatio * OutputRadiusHoriz;
-
-	// Render at output resolution — the perspective FOV handles coverage, not a larger buffer.
 	Config.RenderSizeXY = OutputSizeXY;
-
-	// Output focal lengths (the distorted image has square pixels).
-	Config.FxOutput = (OutputSizeXY.X / 2.0) / OutputRadiusHoriz;
+	const double AspectRatio = static_cast<double>(OutputSizeXY.X) / static_cast<double>(OutputSizeXY.Y);
+	const double OutputHorizRadius = SolveDistortion(FMath::Atan(FMath::DegreesToRadians(OutputHFOV / 2.0)), K1, K2, K3);
+	Config.FxOutput = (OutputSizeXY.X / 2.0) / OutputHorizRadius;
 	Config.FyOutput = Config.FxOutput;
 
-	// Compute render FOV. For barrel distortion (K1 >= 0), OutputToRender maps output edges
-	// inward, so the render FOV matches the output FOV exactly. For pincushion (K1 < 0),
-	// OutputToRender maps outward, so the render must be wider. The tightest constraint is
-	// at the diagonal corner where the output radius is largest.
-	const double OutputRadiusDiag = FMath::Sqrt(OutputRadiusHoriz * OutputRadiusHoriz + OutputRadiusVert * OutputRadiusVert);
-	const double RenderRadiusDiag = SolveInverseDistortion(OutputRadiusDiag, K1, K2, K3);
-	const double RequiredTanH = RenderRadiusDiag / FMath::Sqrt(1.0 + AspectRatio * AspectRatio);
-	Config.RenderFOVAngle = FMath::Clamp(
-		FMath::Max(
-			static_cast<double>(OutputHFOV),
-			FMath::RadiansToDegrees(FMath::Atan(RequiredTanH)) * 2.0),
-		1.0, 170.0);
+	if (K1 <= 0.0) // Barrel - diag is limiting factor
+	{
+		const double OutputVertRadius = OutputHorizRadius / AspectRatio;
+		const double OutputDiagRadius = FMath::Sqrt(OutputHorizRadius * OutputHorizRadius + OutputVertRadius * OutputVertRadius);
+		const double RenderDiagRadius = SolveInverseDistortion(OutputDiagRadius, K1, K2, K3);
+		const double RenderHorizRadius = RenderDiagRadius / FMath::Sqrt(1.0 + 1.0 / (AspectRatio * AspectRatio));
+		Config.RenderFOVAngle = 2.0 * FMath::RadiansToDegrees(FMath::Atan(RenderHorizRadius));
+	}
+	else // K1 > 0.0 Pincushion - horiz/vert is limiting factor
+	{
+		Config.RenderFOVAngle = OutputHFOV;
+	}
 
-	// Render focal lengths (perspective projection has square pixels).
-	// For K1 >= 0, RenderFOVAngle == OutputHFOV so FxRender == FxOutput.
 	Config.FxRender = (Config.RenderSizeXY.X / 2.0) / FMath::Tan(FMath::DegreesToRadians(Config.RenderFOVAngle / 2.0));
 	Config.FyRender = Config.FxRender;
 
 	return Config;
-
-	// const FBrownConradyDistortion Model(K1, K2, K3);
-	//
-	// const double AspectRatio = static_cast<float>(CameraOwner->SizeXY.Y) / static_cast<float>(CameraOwner->SizeXY.X);
-	// // Compute FOVAngle (the perspective render FOV) from HorizontalFOV and lens parameters
-	// const float HalfFOVRad = FMath::DegreesToRadians(CameraOwner->HorizontalFOV / 2.0f);
-	// const double TargetRadiusHoriz = FMath::Tan(HalfFOVRad);
-	// const double TargetRadiusVert = AspectRatio * TargetRadiusHoriz;
-	// const double SourceRadiusHoriz = FBrownConradyDistortion::SolveDistortion(TargetRadiusHoriz, K1, K2, K3);
-	// const double SourceRadiusVert = FBrownConradyDistortion::SolveDistortion(TargetRadiusVert, K1, K2, K3);
-	// const double SourceAspectRatio = SourceRadiusVert / SourceRadiusHoriz;
-	// const float SourceHalfRadHoriz = FMath::Atan(SourceRadiusHoriz);
-	// const float SourceHalfRadVert = FMath::Atan(SourceRadiusVert);
-	// const float UndistortedFOVAngleHoriz = FMath::Clamp(FMath::RadiansToDegrees(SourceHalfRadHoriz) * 2.0f, 1.0f, 170.0f);
-	// const float UndistortedFOVAngleVert = FMath::Clamp(FMath::RadiansToDegrees(SourceHalfRadVert) * 2.0f, 1.0f, 170.0f);
-	//
-	// CreateOrResizeDistortionMapTexture();
-	// SizeXY.Y = SourceAspectRatio * SizeXY.X;
-	// const double FxDest = (SizeXY.X / 2.0) / FMath::Tan(FMath::DegreesToRadians(UndistortedFOVAngleHoriz / 2.0));
-	// const double FyDest = FxDest;
-	//
-	// const double SourceRadiusDiag = FMath::Sqrt(SourceRadiusHoriz * SourceRadiusHoriz + SourceRadiusVert * SourceRadiusVert);
-	// const double EndRadiusDiag = FBrownConradyDistortion::SolveInverseDistortion(SourceRadiusDiag, K1, K2, K3);
-	// const double EndRadiusHoriz = EndRadiusDiag / FMath::Sqrt(1.0 + SourceAspectRatio * SourceAspectRatio);
-	// UE_LOG(LogTemp, Warning, TEXT("AspectRatio: %f SourceAspectRatio: %f"), AspectRatio, SourceAspectRatio);
-	// FOVAngle = FMath::Max(FMath::RadiansToDegrees(FMath::Atan(SourceRadiusHoriz) * 2.0), FMath::RadiansToDegrees(FMath::Atan(EndRadiusHoriz) * 2.0));
-	// const double FxSource = (SizeXY.X / 2.0) / FMath::Tan(FMath::DegreesToRadians(FOVAngle / 2.0));
-	// const double FySource = FxSource;
-
-	// FOV = atan(solvedist(tan(fov/2))*2)
-	// undistfov = atan(solvedist(
-	// FxDest = (size.x / 2) / tan(undistfov / 2)
-	// FxSource = (size.x / 2) / tan(fov/2)
-
-	// FOV = max(OutputHFOV, atan(requiredtanh*2)
 }
 
 FDistortionRenderConfig FEquidistantDistortion::ComputeRenderConfig(const FIntPoint& OutputSizeXY, float OutputHFOV) const
