@@ -113,7 +113,7 @@ FDistortionRenderConfig FBrownConradyDistortion::ComputeRenderConfig(const FIntP
 	if (MaxOutputRadius > 0.0 && OutputHFOVDeg > 0.0f)
 	{
 		const double MaxPossibleFOV = FMath::RadiansToDegrees(FMath::Atan(MaxOutputRadius)) * 2.0;
-		if (OutputHFOVDeg <= MaxPossibleFOV)
+		if (OutputHFOVDeg >	 MaxPossibleFOV)
 		{
 			UE_LOG(LogTempoSensorsShared, Warning, TEXT("HorizontalFOV %.2f exceeds limit %.2f for Brown-Conrady model with K1=%.3f K2=%.3f K3=%.3f. Artifacts expected."), OutputHFOVDeg, MaxPossibleFOV, K1, K2, K3);
 		}
@@ -121,7 +121,7 @@ FDistortionRenderConfig FBrownConradyDistortion::ComputeRenderConfig(const FIntP
 
 	Config.RenderSizeXY = OutputSizeXY;
 	const double AspectRatio = static_cast<double>(OutputSizeXY.X) / static_cast<double>(OutputSizeXY.Y);
-	const double OutputHorizRadius = SolveDistortion(FMath::Atan(FMath::DegreesToRadians(OutputHFOVDeg / 2.0)), K1, K2, K3);
+	const double OutputHorizRadius = SolveDistortion(FMath::Tan(FMath::DegreesToRadians(OutputHFOVDeg / 2.0)), K1, K2, K3);
 	Config.FOutput = (OutputSizeXY.X / 2.0) / OutputHorizRadius;
 
 	if (K1 <= 0.0) // Barrel - diag is limiting factor
