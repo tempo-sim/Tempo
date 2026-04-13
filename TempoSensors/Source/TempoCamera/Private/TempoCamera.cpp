@@ -264,21 +264,39 @@ void TTextureRead<FCameraPixelWithDepth>::RespondToRequests(const TArray<FBoundi
 UTempoCameraCaptureComponent::UTempoCameraCaptureComponent()
 {
 	CaptureSource = ESceneCaptureSource::SCS_FinalColorLDR;
-	PostProcessSettings.AutoExposureMethod = AEM_Basic;
-	PostProcessSettings.AutoExposureSpeedUp = 20.0;
-	PostProcessSettings.AutoExposureSpeedDown = 20.0;
-	PostProcessSettings.AutoExposureLowPercent = 75.0;
-	PostProcessSettings.AutoExposureHighPercent = 85.0;
-	PostProcessSettings.MotionBlurAmount = 0.0;
-	ShowFlags.SetAntiAliasing(true);
-	ShowFlags.SetTemporalAA(true);
-	ShowFlags.SetMotionBlur(false);
 
 	// Start with no-depth settings
 	RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA8;
 	PixelFormatOverride = EPixelFormat::PF_Unknown;
 
 	bAutoActivate = false;
+}
+
+void UTempoCameraCaptureComponent::ApplyRenderSettings()
+{
+	if (!CameraOwner)
+	{
+		return;
+	}
+
+	PostProcessSettings = CameraOwner->PostProcessSettings;
+
+	// Re-append the distortion/label post-process material if it was already created
+	// (on first call from Configure it is still null and will be added by SetDepthEnabled).
+	if (PostProcessMaterialInstance)
+	{
+		PostProcessSettings.WeightedBlendables.Array.Add(FWeightedBlendable(1.0, PostProcessMaterialInstance));
+	}
+
+	ShowFlagSettings = CameraOwner->ShowFlagSettings;
+	for (const FEngineShowFlagsSetting& Setting : ShowFlagSettings)
+	{
+		const int32 SettingIndex = FEngineShowFlags::FindIndexByName(*Setting.ShowFlagName);
+		if (SettingIndex != INDEX_NONE)
+		{
+			ShowFlags.SetSingleFlag(SettingIndex, Setting.Enabled);
+		}
+	}
 }
 
 void UTempoCameraCaptureComponent::Activate(bool bReset)
@@ -369,8 +387,13 @@ void UTempoCameraCaptureComponent::SetDepthEnabled(bool bDepthEnabled)
 		{
 			PostProcessMaterialInstance->SetScalarParameterValue(TEXT("OverridingLabel"), 0.0);
 		}
+		// Rebuild blendables from the owner's user-authored list, then append the distortion/label material.
 		PostProcessSettings.WeightedBlendables.Array.Empty();
-		PostProcessSettings.WeightedBlendables.Array.Init(FWeightedBlendable(1.0, PostProcessMaterialInstance), 1);
+		if (CameraOwner)
+		{
+			PostProcessSettings.WeightedBlendables.Array.Append(CameraOwner->PostProcessSettings.WeightedBlendables.Array);
+		}
+		PostProcessSettings.WeightedBlendables.Array.Add(FWeightedBlendable(1.0, PostProcessMaterialInstance));
 		PostProcessMaterialInstance->EnsureIsComplete();
 	}
 	else
@@ -416,18 +439,20 @@ void UTempoCameraCaptureComponent::Configure(double YawOffset, double PitchOffse
 	// SizeXY and FOVAngle are set in InitDistortionMap via ComputeRenderConfig.
 	// Set SizeXY to the output size initially; InitDistortionMap may adjust it.
 	SizeXY = InTileSizeXY;
+
+	ApplyRenderSettings();
 }
 
 TUniquePtr<FDistortionModel> UTempoCameraCaptureComponent::CreateDistortionModel() const
 {
-	if (CameraOwner->DistortionModel == ETempoDistortionModel::BrownConrady)
+	if (CameraOwner->LensParameters.DistortionModel == ETempoDistortionModel::BrownConrady)
 	{
 		return MakeUnique<FBrownConradyDistortion>(
 			CameraOwner->LensParameters.K1,
 			CameraOwner->LensParameters.K2,
 			CameraOwner->LensParameters.K3);
 	}
-	else if (CameraOwner->DistortionModel == ETempoDistortionModel::Rational)
+	else if (CameraOwner->LensParameters.DistortionModel == ETempoDistortionModel::Rational)
 	{
 		return MakeUnique<FRationalDistortion>(
 			CameraOwner->LensParameters.K1,
@@ -483,6 +508,18 @@ UTempoCamera::UTempoCamera()
 	PrimaryComponentTick.bCanEverTick = true;
 	MeasurementTypes = { EMeasurementType::COLOR_IMAGE, EMeasurementType::LABEL_IMAGE, EMeasurementType::DEPTH_IMAGE, EMeasurementType::BOUNDING_BOXES };
 	bAutoActivate = true;
+
+	// Defaults propagated to the managed capture components.
+	PostProcessSettings.AutoExposureMethod = AEM_Basic;
+	PostProcessSettings.AutoExposureSpeedUp = 20.0;
+	PostProcessSettings.AutoExposureSpeedDown = 20.0;
+	PostProcessSettings.AutoExposureLowPercent = 75.0;
+	PostProcessSettings.AutoExposureHighPercent = 85.0;
+	PostProcessSettings.MotionBlurAmount = 0.0;
+
+	ShowFlagSettings.Add({ TEXT("AntiAliasing"), true });
+	ShowFlagSettings.Add({ TEXT("TemporalAA"), true });
+	ShowFlagSettings.Add({ TEXT("MotionBlur"), false });
 }
 
 void UTempoCamera::OnRegister()
@@ -842,7 +879,7 @@ static void SyncCaptureComponent(UTempoCameraCaptureComponent* CaptureComponent,
 
 void UTempoCamera::ValidateFOV() const
 {
-	if (DistortionModel == ETempoDistortionModel::BrownConrady || DistortionModel == ETempoDistortionModel::Rational)
+	if (LensParameters.DistortionModel == ETempoDistortionModel::BrownConrady || LensParameters.DistortionModel == ETempoDistortionModel::Rational)
 	{
 		ensureMsgf(HorizontalFOV <= 170.0f, TEXT("%s HorizontalFOV %.2f exceeds max 170 degrees."),
 			DistortionModel == ETempoDistortionModel::Rational ? TEXT("Rational") : TEXT("BrownConrady"), HorizontalFOV);
@@ -861,7 +898,7 @@ void UTempoCamera::SyncCaptureComponents()
 
 	const TMap<FName, UTempoCameraCaptureComponent*> CaptureComponents = GetOrCreateCaptureComponents();
 
-	if (DistortionModel == ETempoDistortionModel::BrownConrady || DistortionModel == ETempoDistortionModel::Rational)
+	if (LensParameters.DistortionModel == ETempoDistortionModel::BrownConrady || LensParameters.DistortionModel == ETempoDistortionModel::Rational)
 	{
 		// Single capture: use TL, deactivate others
 		SyncCaptureComponent(CaptureComponents[TLCaptureComponentName], true, 0.0, 0.0, HorizontalFOV, SizeXY);
@@ -965,10 +1002,13 @@ void UTempoCamera::PostEditChangeProperty(FPropertyChangedEvent& PropertyChanged
 	Super::PostEditChangeProperty(PropertyChangedEvent);
 
 	const FName PropertyName = (PropertyChangedEvent.Property != nullptr) ? PropertyChangedEvent.Property->GetFName() : NAME_None;
-	if (PropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, DistortionModel) ||
+	const FName MemberPropertyName = (PropertyChangedEvent.MemberProperty != nullptr) ? PropertyChangedEvent.MemberProperty->GetFName() : NAME_None;
+	if (PropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, LensParameters.DistortionModel) ||
 		PropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, HorizontalFOV) ||
 		PropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, SizeXY) ||
-		PropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, LensParameters))
+		PropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, LensParameters) ||
+		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, PostProcessSettings) ||
+		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, ShowFlagSettings))
 	{
 		SyncCaptureComponents();
 	}

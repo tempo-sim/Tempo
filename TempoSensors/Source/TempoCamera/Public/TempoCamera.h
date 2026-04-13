@@ -8,6 +8,8 @@
 #include "TempoScriptingServer.h"
 
 #include "CoreMinimal.h"
+#include "Engine/Scene.h"
+#include "ShowFlags.h"
 
 #include "TempoCamera.generated.h"
 
@@ -132,10 +134,21 @@ struct TEMPOCAMERA_API FTempoCameraIntrinsics
 	const float Cy;
 };
 
+UENUM(BlueprintType)
+enum class ETempoDistortionModel : uint8
+{
+	BrownConrady  UMETA(DisplayName="Brown-Conrady", ToolTip="Standard radial lens distortion. Single capture, max 170 degree FOV."),
+	Rational      UMETA(DisplayName="Rational", ToolTip="Rational radial distortion (numerator K1-K3, denominator K4-K6). Single capture, max 170 degree FOV."),
+	KannalaBrandt UMETA(DisplayName="KannalaBrandt (Fisheye)", ToolTip="Equidistant fisheye projection. Supports up to 240 degree FOV using multiple captures."),
+};
+
 USTRUCT(BlueprintType)
 struct FTempoLensDistortionParameters
 {
 	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens")
+	ETempoDistortionModel DistortionModel = ETempoDistortionModel::BrownConrady;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens")
 	float K1 = 0.0f;
@@ -150,14 +163,6 @@ struct FTempoLensDistortionParameters
 	float K5 = 0.0f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens", meta = (ToolTip = "Only used by the Rational distortion model."))
 	float K6 = 0.0f;
-};
-
-UENUM(BlueprintType)
-enum class ETempoDistortionModel : uint8
-{
-	BrownConrady  UMETA(DisplayName="Brown-Conrady", ToolTip="Standard radial lens distortion. Single capture, max 170 degree FOV."),
-	Rational      UMETA(DisplayName="Rational", ToolTip="Rational radial distortion (numerator K1-K3, denominator K4-K6). Single capture, max 170 degree FOV."),
-	KannalaBrandt UMETA(DisplayName="KannalaBrandt (Fisheye)", ToolTip="Equidistant fisheye projection. Supports up to 240 degree FOV using multiple captures."),
 };
 
 class UTempoCamera;
@@ -177,6 +182,9 @@ public:
 	void Configure(double YawOffset, double PitchOffset, double EquidistantTileFOV, const FIntPoint& TileSizeXY, const FIntPoint& TileDestOffset);
 
 	void SetDepthEnabled(bool bDepthEnabled);
+
+	// Apply PostProcessSettings and ShowFlagSettings from the owning UTempoCamera onto this component.
+	void ApplyRenderSettings();
 
 	// The output tile dimensions.
 	UPROPERTY(VisibleAnywhere)
@@ -289,10 +297,6 @@ protected:
 	UPROPERTY(VisibleAnywhere)
 	TArray<TEnumAsByte<EMeasurementType>> MeasurementTypes;
 
-	// The distortion model to use.
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens")
-	ETempoDistortionModel DistortionModel = ETempoDistortionModel::BrownConrady;
-
 	// The horizontal field of view of the output image in degrees.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens", meta = (ClampMin = "1.0", ClampMax = "240.0"))
 	float HorizontalFOV = 90.0f;
@@ -308,6 +312,16 @@ protected:
 	// The rate in Hz this camera updates at.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo", meta = (UIMin = 0.0, ClampMin = 0.0))
 	float RateHz = 10.0;
+
+	// Post-process settings applied to the managed capture components.
+	// The distortion/label post-process material is appended to WeightedBlendables automatically.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Rendering", meta = (ShowOnlyInnerProperties))
+	FPostProcessSettings PostProcessSettings;
+
+	// Show flag overrides applied to the managed capture components.
+	// Each entry toggles a single named show flag; unset flags keep their engine defaults.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Rendering")
+	TArray<FEngineShowFlagsSetting> ShowFlagSettings;
 
 	// Whether this camera can measure depth. Disabled when not requested to optimize performance.
 	UPROPERTY(VisibleAnywhere, Category = "Depth")
@@ -333,7 +347,6 @@ protected:
 	TArray<FBoundingBoxesRequest> PendingBoundingBoxesRequests;
 
 	// Internal tracking for change detection
-	ETempoDistortionModel DistortionModel_Internal = ETempoDistortionModel::BrownConrady;
 	FTempoLensDistortionParameters LensParameters_Internal;
 	float HorizontalFOV_Internal = -1.0f;
 	FIntPoint SizeXY_Internal = FIntPoint(-1, -1);
