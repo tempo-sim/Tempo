@@ -288,15 +288,7 @@ void UTempoCameraCaptureComponent::ApplyRenderSettings()
 		PostProcessSettings.WeightedBlendables.Array.Add(FWeightedBlendable(1.0, PostProcessMaterialInstance));
 	}
 
-	ShowFlagSettings = CameraOwner->ShowFlagSettings;
-	for (const FEngineShowFlagsSetting& Setting : ShowFlagSettings)
-	{
-		const int32 SettingIndex = FEngineShowFlags::FindIndexByName(*Setting.ShowFlagName);
-		if (SettingIndex != INDEX_NONE)
-		{
-			ShowFlags.SetSingleFlag(SettingIndex, Setting.Enabled);
-		}
-	}
+	SetShowFlagSettings(CameraOwner->ShowFlagSettings);
 }
 
 void UTempoCameraCaptureComponent::Activate(bool bReset)
@@ -443,39 +435,6 @@ void UTempoCameraCaptureComponent::Configure(double YawOffset, double PitchOffse
 	ApplyRenderSettings();
 }
 
-TUniquePtr<FDistortionModel> UTempoCameraCaptureComponent::CreateDistortionModel() const
-{
-	if (CameraOwner->LensParameters.DistortionModel == ETempoDistortionModel::BrownConrady)
-	{
-		return MakeUnique<FBrownConradyDistortion>(
-			CameraOwner->LensParameters.K1,
-			CameraOwner->LensParameters.K2,
-			CameraOwner->LensParameters.K3);
-	}
-	else if (CameraOwner->LensParameters.DistortionModel == ETempoDistortionModel::Rational)
-	{
-		return MakeUnique<FRationalDistortion>(
-			CameraOwner->LensParameters.K1,
-			CameraOwner->LensParameters.K2,
-			CameraOwner->LensParameters.K3,
-			CameraOwner->LensParameters.K4,
-			CameraOwner->LensParameters.K5,
-			CameraOwner->LensParameters.K6);
-	}
-	else // Equidistant (Kannala-Brandt fisheye; K=0 = pure equidistant)
-	{
-		// Negate pitch: UE positive pitch = up, but image-plane positive Y = down.
-		const double AzOffset = FMath::DegreesToRadians(GetRelativeRotation().Yaw);
-		const double ElOffset = -FMath::DegreesToRadians(GetRelativeRotation().Pitch);
-		return MakeUnique<FKannalaBrandtDistortion>(
-			CameraOwner->LensParameters.K1,
-			CameraOwner->LensParameters.K2,
-			CameraOwner->LensParameters.K3,
-			CameraOwner->LensParameters.K4,
-			AzOffset, ElOffset);
-	}
-}
-
 void UTempoCameraCaptureComponent::InitDistortionMap()
 {
 	if (TileOutputSizeXY.X <= 0 || TileOutputSizeXY.Y <= 0)
@@ -483,7 +442,10 @@ void UTempoCameraCaptureComponent::InitDistortionMap()
 		return;
 	}
 
-	TUniquePtr<FDistortionModel> Model = CreateDistortionModel();
+	TUniquePtr<FDistortionModel> Model = CreateDistortionModel(
+		CameraOwner->LensParameters,
+		GetRelativeRotation().Yaw,
+		GetRelativeRotation().Pitch);
 	const float OutputHFOV = FMath::RadiansToDegrees(EquidistantTileHFOVRad);
 	const FDistortionRenderConfig Config = Model->ComputeRenderConfig(TileOutputSizeXY, OutputHFOV);
 
@@ -882,7 +844,7 @@ void UTempoCamera::ValidateFOV() const
 	if (LensParameters.DistortionModel == ETempoDistortionModel::BrownConrady || LensParameters.DistortionModel == ETempoDistortionModel::Rational)
 	{
 		ensureMsgf(HorizontalFOV <= 170.0f, TEXT("%s HorizontalFOV %.2f exceeds max 170 degrees."),
-			DistortionModel == ETempoDistortionModel::Rational ? TEXT("Rational") : TEXT("BrownConrady"), HorizontalFOV);
+			LensParameters.DistortionModel == ETempoDistortionModel::Rational ? TEXT("Rational") : TEXT("BrownConrady"), HorizontalFOV);
 	}
 	else
 	{
