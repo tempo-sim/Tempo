@@ -189,7 +189,7 @@ void RespondToBoundingBoxRequests(const TTextureRead<PixelType>* TextureRead, co
 			const uint8* SemanticId = TextureRead->InstanceToSemanticMap.Find(InstanceId);
 			if (!SemanticId)
 			{
-				UE_LOG(LogTemp, Warning, TEXT("No semantic ID found for instance ID %d"), InstanceId);
+				UE_LOG(LogTempoCamera, Warning, TEXT("No semantic ID found for instance ID %d"), InstanceId);
 			}
 			BBoxProto->set_semantic_id(SemanticId ? *SemanticId : 0);
 		}
@@ -288,8 +288,6 @@ void UTempoCameraCaptureComponent::Activate(bool bReset)
 	// avoiding a double-init race condition where two render commands compete over StagingTextures.
 	SetDepthEnabled(CameraOwner->bDepthEnabled);
 
-	UE_LOG(LogTemp, Warning, TEXT("Activate"));
-	
 	Super::Activate(bReset);
 }
 
