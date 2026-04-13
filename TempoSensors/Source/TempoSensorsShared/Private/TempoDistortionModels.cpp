@@ -148,11 +148,12 @@ FDistortionRenderConfig FEquidistantDistortion::ComputeRenderConfig(const FIntPo
 	// Provide a basic config that matches the output directly.
 	FDistortionRenderConfig Config;
 	Config.RenderSizeXY = OutputSizeXY;
-	const double HalfFOVRad = FMath::DegreesToRadians(OutputHFOVDeg / 2.0);
+	const double HFOVRad = FMath::DegreesToRadians(OutputHFOVDeg);
 	Config.RenderFOVAngle = FMath::Clamp(OutputHFOVDeg, 1.0f, 170.0f);
-	const double F = OutputSizeXY.X / (2.0 * FMath::Tan(HalfFOVRad));
-	Config.FOutput = F;
-	Config.FRender = F;
+	// Output (equidistant) focal length: pixels per radian.
+	Config.FOutput = OutputSizeXY.X / HFOVRad;
+	// Render (perspective) focal length.
+	Config.FRender = OutputSizeXY.X / (2.0 * FMath::Tan(HFOVRad / 2.0));
 	return Config;
 }
 
@@ -228,40 +229,35 @@ FVector2D FEquidistantTileDistortion::OutputToRender(double OutputX, double Outp
 FDistortionRenderConfig FEquidistantTileDistortion::ComputeRenderConfig(const FIntPoint& OutputSizeXY, double OutputHFOVDeg) const
 {
 	FDistortionRenderConfig Config;
+	Config.RenderSizeXY = OutputSizeXY;
 
-	const double TileHFOVRad = FMath::DegreesToRadians(OutputHFOVDeg);
-	const double TileHHalfRad = TileHFOVRad / 2.0;
-	const double TileVHalfRad = TileHHalfRad * OutputSizeXY.Y / OutputSizeXY.X;
+	// For equidistant output, "radius" is an angle (radians): pixel position = FOutput * angle.
+	const double AspectRatio = static_cast<double>(OutputSizeXY.X) / static_cast<double>(OutputSizeXY.Y);
+	const double OutputHorizRadius = FMath::DegreesToRadians(OutputHFOVDeg / 2.0);
+	const double OutputVertRadius = OutputHorizRadius / AspectRatio;
 
-	// Sample corners and edge midpoints to find the max perspective extent needed.
-	double MaxTanH = 0.0;
-	double MaxTanV = 0.0;
-	const double SX[] = {-TileHHalfRad, TileHHalfRad, -TileHHalfRad, TileHHalfRad, 0.0, 0.0, -TileHHalfRad, TileHHalfRad};
-	const double SY[] = {-TileVHalfRad, -TileVHalfRad, TileVHalfRad, TileVHalfRad, -TileVHalfRad, TileVHalfRad, 0.0, 0.0};
+	// Output (equidistant) focal length: pixels per radian.
+	Config.FOutput = (OutputSizeXY.X / 2.0) / OutputHorizRadius;
+
+	// The equidistant->perspective mapping isn't radial (azimuth/elevation coupling), so sample
+	// corners and edge midpoints to find the max render extent.
+	double MaxRenderHoriz = 0.0;
+	double MaxRenderVert = 0.0;
+	const double SX[] = {-OutputHorizRadius, OutputHorizRadius, -OutputHorizRadius, OutputHorizRadius, 0.0, 0.0, -OutputHorizRadius, OutputHorizRadius};
+	const double SY[] = {-OutputVertRadius, -OutputVertRadius, OutputVertRadius, OutputVertRadius, -OutputVertRadius, OutputVertRadius, 0.0, 0.0};
 	for (int32 I = 0; I < 8; ++I)
 	{
 		const FVector2D Render = OutputToRender(SX[I], SY[I]);
-		MaxTanH = FMath::Max(MaxTanH, FMath::Abs(Render.X));
-		MaxTanV = FMath::Max(MaxTanV, FMath::Abs(Render.Y));
+		MaxRenderHoriz = FMath::Max(MaxRenderHoriz, FMath::Abs(Render.X));
+		MaxRenderVert = FMath::Max(MaxRenderVert, FMath::Abs(Render.Y));
 	}
 
-	// Render FOV must cover the max perspective extent.
-	// FOVAngle is horizontal. Need: tan(hHalf) >= MaxTanH and tan(hHalf) * tileH/tileW >= MaxTanV.
-	const double OutputAspectRatio = (OutputSizeXY.Y > 0)
-		? static_cast<double>(OutputSizeXY.X) / static_cast<double>(OutputSizeXY.Y)
-		: 1.0;
-	const double RequiredTanHHalf = FMath::Max(MaxTanH, MaxTanV * OutputAspectRatio);
-	Config.RenderFOVAngle = FMath::Clamp(FMath::RadiansToDegrees(FMath::Atan(RequiredTanHHalf)) * 2.0, 1.0, 170.0);
+	// RenderFOVAngle is horizontal; UE derives vertical FOV from aspect ratio.
+	// Need: tan(RFOV/2) >= MaxRenderHoriz AND tan(RFOV/2) / AspectRatio >= MaxRenderVert.
+	const double RequiredRenderHorizRadius = FMath::Max(MaxRenderHoriz, MaxRenderVert * AspectRatio);
+	Config.RenderFOVAngle = FMath::Clamp(FMath::RadiansToDegrees(FMath::Atan(RequiredRenderHorizRadius)) * 2.0, 1.0, 170.0);
 
-	// For equidistant tiles, render size matches output size (FOV expansion is handled by RenderFOVAngle).
-	Config.RenderSizeXY = OutputSizeXY;
-
-	// Output (equidistant) focal length: pixels per radian.
-	Config.FOutput = static_cast<double>(OutputSizeXY.X) / TileHFOVRad;
-
-	// Render (perspective) focal length.
-	const double HalfRenderFOVRad = FMath::DegreesToRadians(Config.RenderFOVAngle / 2.0);
-	Config.FRender = OutputSizeXY.X / (2.0 * FMath::Tan(HalfRenderFOVRad));
+	Config.FRender = (OutputSizeXY.X / 2.0) / FMath::Tan(FMath::DegreesToRadians(Config.RenderFOVAngle / 2.0));
 
 	return Config;
 }
