@@ -427,12 +427,17 @@ TUniquePtr<FDistortionModel> UTempoCameraCaptureComponent::CreateDistortionModel
 			CameraOwner->LensParameters.K2,
 			CameraOwner->LensParameters.K3);
 	}
-	else // Equidistant
+	else // Equidistant (Kannala-Brandt fisheye; K=0 = pure equidistant)
 	{
 		// Negate pitch: UE positive pitch = up, but image-plane positive Y = down.
 		const double AzOffset = FMath::DegreesToRadians(GetRelativeRotation().Yaw);
 		const double ElOffset = -FMath::DegreesToRadians(GetRelativeRotation().Pitch);
-		return MakeUnique<FEquidistantTileDistortion>(AzOffset, ElOffset);
+		return MakeUnique<FKannalaBrandtDistortion>(
+			CameraOwner->LensParameters.K1,
+			CameraOwner->LensParameters.K2,
+			CameraOwner->LensParameters.K3,
+			CameraOwner->LensParameters.K4,
+			AzOffset, ElOffset);
 	}
 }
 

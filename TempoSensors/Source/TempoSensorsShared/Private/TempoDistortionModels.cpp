@@ -174,20 +174,73 @@ FVector2D FEquidistantDistortion::OutputToRender(double OutputX, double OutputY)
 	return FVector2D(TanAzimuth, TanElevation * FMath::Sqrt(TanAzimuth * TanAzimuth + 1.0));
 }
 
-FVector2D FEquidistantTileDistortion::OutputToRender(double OutputX, double OutputY) const
+double FKannalaBrandtDistortion::SolveDistortion(double Theta, double K1, double K2, double K3, double K4)
 {
-	// OutputX/OutputY are equidistant angles (radians) from this tile's center.
-	// Convert to global equidistant angles relative to parent camera's optical axis.
-	const double GlobalH = OutputX + AzimuthOffset;
-	const double GlobalV = OutputY + ElevationOffset;
+	const double T2 = Theta * Theta;
+	const double T4 = T2 * T2;
+	const double T6 = T4 * T2;
+	const double T8 = T4 * T4;
+	return Theta * (1.0 + K1*T2 + K2*T4 + K3*T6 + K4*T8);
+}
 
-	// Radial angle from parent's optical axis (equidistant: r_image = f * theta).
-	const double Theta = FMath::Sqrt(GlobalH * GlobalH + GlobalV * GlobalV);
+double FKannalaBrandtDistortion::SolveInverseDistortion(double ThetaD, double K1, double K2, double K3, double K4)
+{
+	if (ThetaD < 1e-6)
+	{
+		return ThetaD;
+	}
+
+	return Solve(
+		[K1, K2, K3, K4, ThetaD](double T) {
+			const double T2 = T * T;
+			const double T4 = T2 * T2;
+			const double T6 = T4 * T2;
+			const double T8 = T4 * T4;
+			return T * (1.0 + K1*T2 + K2*T4 + K3*T6 + K4*T8) - ThetaD;
+		},
+		[K1, K2, K3, K4](double T) {
+			const double T2 = T * T;
+			const double T4 = T2 * T2;
+			const double T6 = T4 * T2;
+			const double T8 = T4 * T4;
+			return 1.0 + 3.0*K1*T2 + 5.0*K2*T4 + 7.0*K3*T6 + 9.0*K4*T8;
+		},
+		ThetaD,
+		40,
+		1e-6
+	);
+}
+
+FVector2D FKannalaBrandtDistortion::OutputToRender(double OutputX, double OutputY) const
+{
+	// OutputX/OutputY are tile-local coordinates in distorted-angle (theta_d) units from
+	// this tile's center. Convert to parent-frame distorted-output coordinates by adding
+	// the tile center's position in the parent's output image plane.
+	//
+	// The tile center sits on a ray at physical angle theta_axis from the parent's optical
+	// axis. Its position in the parent's (distorted) output plane has radius theta_d_axis
+	// and the same azimuthal direction as (AzimuthOffset, ElevationOffset).
+	const double ThetaAxis = FMath::Sqrt(AzimuthOffset * AzimuthOffset + ElevationOffset * ElevationOffset);
+	double TileCenterX = 0.0;
+	double TileCenterY = 0.0;
+	if (ThetaAxis >= 1e-10)
+	{
+		const double ThetaDAxis = SolveDistortion(ThetaAxis, K1, K2, K3, K4);
+		TileCenterX = ThetaDAxis * AzimuthOffset / ThetaAxis;
+		TileCenterY = ThetaDAxis * ElevationOffset / ThetaAxis;
+	}
+
+	const double ParentOutputX = TileCenterX + OutputX;
+	const double ParentOutputY = TileCenterY + OutputY;
+
+	// Invert K-B to recover the physical radial angle from the parent's optical axis.
+	const double ThetaD = FMath::Sqrt(ParentOutputX * ParentOutputX + ParentOutputY * ParentOutputY);
+	const double Theta = SolveInverseDistortion(ThetaD, K1, K2, K3, K4);
 
 	// Compute 3D ray direction in parent frame.
 	// Coordinate system: X=right, Y=down, Z=forward.
 	double RayX, RayY, RayZ;
-	if (Theta < 1e-10)
+	if (ThetaD < 1e-10)
 	{
 		RayX = 0.0;
 		RayY = 0.0;
@@ -195,9 +248,9 @@ FVector2D FEquidistantTileDistortion::OutputToRender(double OutputX, double Outp
 	}
 	else
 	{
-		const double SincTheta = FMath::Sin(Theta) / Theta;
-		RayX = SincTheta * GlobalH;
-		RayY = SincTheta * GlobalV;
+		const double SinTheta = FMath::Sin(Theta);
+		RayX = SinTheta * ParentOutputX / ThetaD;
+		RayY = SinTheta * ParentOutputY / ThetaD;
 		RayZ = FMath::Cos(Theta);
 	}
 
@@ -226,21 +279,23 @@ FVector2D FEquidistantTileDistortion::OutputToRender(double OutputX, double Outp
 	return FVector2D(ChildX / ChildZ, ChildY / ChildZ);
 }
 
-FDistortionRenderConfig FEquidistantTileDistortion::ComputeRenderConfig(const FIntPoint& OutputSizeXY, double OutputHFOVDeg) const
+FDistortionRenderConfig FKannalaBrandtDistortion::ComputeRenderConfig(const FIntPoint& OutputSizeXY, double OutputHFOVDeg) const
 {
 	FDistortionRenderConfig Config;
 	Config.RenderSizeXY = OutputSizeXY;
 
-	// For equidistant output, "radius" is an angle (radians): pixel position = FOutput * angle.
+	// For K-B output, "radius" is a distorted angle (theta_d, radians):
+	// pixel position = FOutput * theta_d. OutputHFOVDeg specifies the tile's horizontal
+	// extent in theta_d units (equals physical FOV when K1=K2=K3=K4=0).
 	const double AspectRatio = static_cast<double>(OutputSizeXY.X) / static_cast<double>(OutputSizeXY.Y);
 	const double OutputHorizRadius = FMath::DegreesToRadians(OutputHFOVDeg / 2.0);
 	const double OutputVertRadius = OutputHorizRadius / AspectRatio;
 
-	// Output (equidistant) focal length: pixels per radian.
+	// Output focal length: pixels per radian of theta_d.
 	Config.FOutput = (OutputSizeXY.X / 2.0) / OutputHorizRadius;
 
-	// The equidistant->perspective mapping isn't radial (azimuth/elevation coupling), so sample
-	// corners and edge midpoints to find the max render extent.
+	// The K-B->perspective mapping isn't radial in tile space (azimuth/elevation coupling
+	// plus radial distortion), so sample corners and edge midpoints to find max render extent.
 	double MaxRenderHoriz = 0.0;
 	double MaxRenderVert = 0.0;
 	const double SX[] = {-OutputHorizRadius, OutputHorizRadius, -OutputHorizRadius, OutputHorizRadius, 0.0, 0.0, -OutputHorizRadius, OutputHorizRadius};

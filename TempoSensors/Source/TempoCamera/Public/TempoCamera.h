@@ -144,6 +144,8 @@ struct FTempoLensDistortionParameters
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens")
 	float K3 = 0.0f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens")
+	float K4 = 0.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens")
 	float P1 = 0.0f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens")
 	float P2 = 0.0f;
@@ -155,7 +157,7 @@ UENUM(BlueprintType)
 enum class ETempoDistortionModel : uint8
 {
 	BrownConrady    UMETA(DisplayName="Brown-Conrady", ToolTip="Standard lens distortion. Single capture, max 170 degree FOV."),
-	Equidistant     UMETA(DisplayName="Equidistant (Fisheye)", ToolTip="Equidistant fisheye projection. Supports up to 240 degree FOV using multiple captures.")
+	KannalaBrandt     UMETA(DisplayName="KannalaBrandt (Fisheye)", ToolTip="Equidistant fisheye projection. Supports up to 240 degree FOV using multiple captures.")
 };
 
 class UTempoCamera;

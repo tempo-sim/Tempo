@@ -77,30 +77,49 @@ struct TEMPOSENSORSSHARED_API FEquidistantDistortion : FDistortionModel
 	virtual FDistortionRenderConfig ComputeRenderConfig(const FIntPoint& OutputSizeXY, double OutputHFOVDeg) const override;
 };
 
-// Radial equidistant (fisheye) projection model for camera tiles.
-// True equidistant fisheye: r_image = f * theta, where theta is the angle from
-// the optical axis and r_image is the radial distance from the image center.
+// Kannala-Brandt fisheye projection model for camera tiles.
+// Forward projection:
+//   theta_d = theta * (1 + K1*theta^2 + K2*theta^4 + K3*theta^6 + K4*theta^8)
+//   r_image = FOutput * theta_d
+// where theta is the physical angle from the optical axis and theta_d is the
+// distorted angle that's linear in pixel position. When K1=K2=K3=K4=0 this
+// reduces to a pure equidistant fisheye (r = f*theta).
 //
 // For multi-tile rendering, the child capture has a different optical axis than
 // the parent camera. OutputToRender:
-//   1. Converts tile-local equidistant coordinates to parent-frame equidistant angles
-//   2. Computes the 3D ray direction from the radial equidistant mapping
-//   3. Rotates the ray from parent frame to child frame
-//   4. Projects to child's perspective coordinates
+//   1. Converts tile-local output coordinates (theta_d units) to parent-frame output coords
+//   2. Inverts the K-B polynomial (Newton-Raphson) to recover the physical angle theta
+//   3. Computes the 3D ray direction from theta and the output plane direction
+//   4. Rotates the ray from parent frame to child frame
+//   5. Projects to child's perspective coordinates
 //
 // Coordinate system: X=right, Y=down, Z=forward (optical axis). Right-handed.
 // AzimuthOffset: positive = child looks right. ElevationOffset: positive = child looks down.
 // NOTE: UE Pitch is positive=up, so callers must negate Pitch when constructing ElevationOffset.
-struct TEMPOSENSORSSHARED_API FEquidistantTileDistortion : FDistortionModel
+struct TEMPOSENSORSSHARED_API FKannalaBrandtDistortion : FDistortionModel
 {
-	// The child capture's offset from the parent camera's optical axis, in radians.
+	// Kannala-Brandt polynomial coefficients. All zero = pure equidistant.
+	double K1 = 0.0;
+	double K2 = 0.0;
+	double K3 = 0.0;
+	double K4 = 0.0;
+
+	// The child capture's angular offset from the parent camera's optical axis, in radians.
 	// AzimuthOffset: positive = right. ElevationOffset: positive = down in image.
 	double AzimuthOffset = 0.0;
 	double ElevationOffset = 0.0;
 
-	FEquidistantTileDistortion(double InAzimuthOffset, double InElevationOffset)
-		: AzimuthOffset(InAzimuthOffset), ElevationOffset(InElevationOffset) {}
+	FKannalaBrandtDistortion(double InK1, double InK2, double InK3, double InK4,
+		double InAzimuthOffset, double InElevationOffset)
+		: K1(InK1), K2(InK2), K3(InK3), K4(InK4)
+		, AzimuthOffset(InAzimuthOffset), ElevationOffset(InElevationOffset) {}
 
 	virtual FVector2D OutputToRender(double OutputX, double OutputY) const override;
 	virtual FDistortionRenderConfig ComputeRenderConfig(const FIntPoint& OutputSizeXY, double OutputHFOVDeg) const override;
+
+	// Forward K-B: physical angle theta -> distorted angle theta_d.
+	static double SolveDistortion(double Theta, double K1, double K2, double K3, double K4);
+
+	// Inverse K-B: distorted angle theta_d -> physical angle theta (Newton-Raphson).
+	static double SolveInverseDistortion(double ThetaD, double K1, double K2, double K3, double K4);
 };
