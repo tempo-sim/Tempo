@@ -466,6 +466,7 @@ void UTempoCameraCaptureComponent::InitDistortionMap()
 // ------------------------------------------------------------------------------------
 
 UTempoCamera::UTempoCamera()
+	: bReconfigurePending(false)
 {
 	PrimaryComponentTick.bCanEverTick = true;
 	MeasurementTypes = { EMeasurementType::COLOR_IMAGE, EMeasurementType::LABEL_IMAGE, EMeasurementType::DEPTH_IMAGE, EMeasurementType::BOUNDING_BOXES };
@@ -495,11 +496,77 @@ void UTempoCamera::OnRegister()
 	}
 
 	SyncCaptureComponents();
+	UpdateInternalMirrors();
 }
 
 void UTempoCamera::BeginPlay()
 {
 	Super::BeginPlay();
+}
+
+void UTempoCamera::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+	if (HasDetectedParameterChange())
+	{
+		bReconfigurePending = true;
+	}
+	TryApplyPendingReconfigure();
+}
+
+bool UTempoCamera::HasDetectedParameterChange() const
+{
+	return SizeXY != SizeXY_Internal
+		|| HorizontalFOV != HorizontalFOV_Internal
+		|| LensParameters != LensParameters_Internal;
+}
+
+bool UTempoCamera::AnyCaptureReadsInFlight() const
+{
+	for (const UTempoCameraCaptureComponent* Component : GetActiveCaptureComponents())
+	{
+		if (Component->NumPendingTextureReads() > 0)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+void UTempoCamera::TryApplyPendingReconfigure()
+{
+	if (!bReconfigurePending)
+	{
+		return;
+	}
+	if (AnyCaptureReadsInFlight())
+	{
+		return;
+	}
+	ReconfigureCaptureComponentsNow();
+	bReconfigurePending = false;
+}
+
+void UTempoCamera::ReconfigureCaptureComponentsNow()
+{
+	// Drain active tiles first so SyncCaptureComponents' re-Activate rebuilds render targets
+	// and distortion maps with the new parameters. Deactivate() empties the texture read queue,
+	// which is safe because callers gate this on AnyCaptureReadsInFlight() == false.
+	for (UTempoCameraCaptureComponent* Component : GetActiveCaptureComponents())
+	{
+		Component->Deactivate();
+	}
+
+	SyncCaptureComponents();
+	UpdateInternalMirrors();
+}
+
+void UTempoCamera::UpdateInternalMirrors()
+{
+	LensParameters_Internal = LensParameters;
+	HorizontalFOV_Internal = HorizontalFOV;
+	SizeXY_Internal = SizeXY;
 }
 
 FString UTempoCamera::GetOwnerName() const
@@ -601,6 +668,11 @@ TOptional<TFuture<void>> UTempoCamera::SendMeasurements()
 		}
 		SequenceId++;
 	}
+
+	// Queues of the active tiles are empty at this point (after DequeueIfReadComplete for this
+	// cycle). Take the opportunity to apply any reconfigure that was detected earlier but had
+	// to be deferred because reads were still in flight.
+	TryApplyPendingReconfigure();
 
 	return Future;
 }
@@ -963,16 +1035,18 @@ void UTempoCamera::PostEditChangeProperty(FPropertyChangedEvent& PropertyChanged
 {
 	Super::PostEditChangeProperty(PropertyChangedEvent);
 
-	const FName PropertyName = (PropertyChangedEvent.Property != nullptr) ? PropertyChangedEvent.Property->GetFName() : NAME_None;
 	const FName MemberPropertyName = (PropertyChangedEvent.MemberProperty != nullptr) ? PropertyChangedEvent.MemberProperty->GetFName() : NAME_None;
-	if (PropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, LensParameters.DistortionModel) ||
-		PropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, HorizontalFOV) ||
-		PropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, SizeXY) ||
-		PropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, LensParameters) ||
+	if (MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, HorizontalFOV) ||
+		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, SizeXY) ||
+		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, LensParameters) ||
 		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, PostProcessSettings) ||
 		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, ShowFlagSettings))
 	{
-		SyncCaptureComponents();
+		// Route through the same choke point as the runtime Tick path. In non-PIE editor no
+		// captures are running, so this applies immediately. In PIE it is deferred until the
+		// next safe window (TickComponent or end of SendMeasurements).
+		bReconfigurePending = true;
+		TryApplyPendingReconfigure();
 	}
 }
 #endif

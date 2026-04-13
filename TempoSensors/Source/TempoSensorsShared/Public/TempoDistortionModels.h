@@ -37,6 +37,14 @@ struct FTempoLensDistortionParameters
 	float K5 = 0.0f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens", meta = (ToolTip = "Only used by the Rational distortion model."))
 	float K6 = 0.0f;
+
+	bool operator==(const FTempoLensDistortionParameters& Other) const
+	{
+		return DistortionModel == Other.DistortionModel
+			&& K1 == Other.K1 && K2 == Other.K2 && K3 == Other.K3
+			&& K4 == Other.K4 && K5 == Other.K5 && K6 == Other.K6;
+	}
+	bool operator!=(const FTempoLensDistortionParameters& Other) const { return !(*this == Other); }
 };
 
 // Configuration for the perspective render needed to produce a distorted output image.

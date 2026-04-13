@@ -216,6 +216,8 @@ public:
 
 	virtual void BeginPlay() override;
 
+	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
 	void RequestMeasurement(const TempoCamera::ColorImageRequest& Request, const TResponseDelegate<TempoCamera::ColorImage>& ResponseContinuation);
 
 	void RequestMeasurement(const TempoCamera::LabelImageRequest& Request, const TResponseDelegate<TempoCamera::LabelImage>& ResponseContinuation);
@@ -249,6 +251,22 @@ protected:
 	TArray<UTempoCameraCaptureComponent*> GetActiveCaptureComponents() const;
 
 	void SyncCaptureComponents();
+
+	// Returns true iff any watched property differs from its _Internal mirror.
+	bool HasDetectedParameterChange() const;
+
+	// Returns true iff any active capture component has a texture read still in flight.
+	bool AnyCaptureReadsInFlight() const;
+
+	// Apply any pending reconfigure iff it is safe to do so (no in-flight reads). No-op otherwise.
+	void TryApplyPendingReconfigure();
+
+	// Deactivate all active tiles (draining their texture read queues) then re-sync.
+	// Caller must have confirmed no reads are in flight.
+	void ReconfigureCaptureComponentsNow();
+
+	// Snapshot the watched properties into their _Internal mirrors.
+	void UpdateInternalMirrors();
 
 	void SetDepthEnabled(bool bDepthEnabledIn);
 	void ApplyDepthEnabled();
@@ -312,10 +330,14 @@ protected:
 	TArray<FDepthImageRequest> PendingDepthImageRequests;
 	TArray<FBoundingBoxesRequest> PendingBoundingBoxesRequests;
 
-	// Internal tracking for change detection
+	// Internal tracking for runtime change detection. Mirrors the watched properties after
+	// they have been pushed to the capture components via ReconfigureCaptureComponentsNow.
 	FTempoLensDistortionParameters LensParameters_Internal;
 	float HorizontalFOV_Internal = -1.0f;
 	FIntPoint SizeXY_Internal = FIntPoint(-1, -1);
+
+	// Set when HasDetectedParameterChange() sees a diff; cleared after a successful apply.
+	uint8 bReconfigurePending : 1;
 
 	friend class UTempoCameraCaptureComponent;
 };
