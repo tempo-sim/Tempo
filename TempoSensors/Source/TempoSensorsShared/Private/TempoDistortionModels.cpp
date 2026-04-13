@@ -104,35 +104,35 @@ double FBrownConradyDistortion::ComputeMaxOutputRadius(double K1, double K2, dou
 	return RCrit * Scale;
 }
 
-FDistortionRenderConfig FBrownConradyDistortion::ComputeRenderConfig(const FIntPoint& OutputSizeXY, double OutputHFOVDeg) const
+FDistortionRenderConfig FRadialDistortionBase::ComputeRenderConfig(const FIntPoint& OutputSizeXY, double OutputHFOVDeg) const
 {
 	FDistortionRenderConfig Config;
 
-	// Feasibility check for barrel distortion
-	const double MaxOutputRadius = ComputeMaxOutputRadius(K1, K2, K3);
-	if (MaxOutputRadius > 0.0 && OutputHFOVDeg > 0.0f)
+	// Feasibility check: warn if the requested FOV exceeds what the barrel distortion can represent.
+	const double MaxOutputRad = GetMaxOutputRadius();
+	if (MaxOutputRad > 0.0 && OutputHFOVDeg > 0.0)
 	{
-		const double MaxPossibleFOV = FMath::RadiansToDegrees(FMath::Atan(MaxOutputRadius)) * 2.0;
-		if (OutputHFOVDeg >	 MaxPossibleFOV)
+		const double MaxPossibleFOV = FMath::RadiansToDegrees(FMath::Atan(MaxOutputRad)) * 2.0;
+		if (OutputHFOVDeg > MaxPossibleFOV)
 		{
-			UE_LOG(LogTempoSensorsShared, Warning, TEXT("HorizontalFOV %.2f exceeds limit %.2f for Brown-Conrady model with K1=%.3f K2=%.3f K3=%.3f. Artifacts expected."), OutputHFOVDeg, MaxPossibleFOV, K1, K2, K3);
+			UE_LOG(LogTempoSensorsShared, Warning, TEXT("HorizontalFOV %.2f exceeds limit %.2f for %s model. Artifacts expected."), OutputHFOVDeg, MaxPossibleFOV, GetModelName());
 		}
 	}
 
 	Config.RenderSizeXY = OutputSizeXY;
 	const double AspectRatio = static_cast<double>(OutputSizeXY.X) / static_cast<double>(OutputSizeXY.Y);
-	const double OutputHorizRadius = SolveDistortion(FMath::Tan(FMath::DegreesToRadians(OutputHFOVDeg / 2.0)), K1, K2, K3);
+	const double OutputHorizRadius = Distort(FMath::Tan(FMath::DegreesToRadians(OutputHFOVDeg / 2.0)));
 	Config.FOutput = (OutputSizeXY.X / 2.0) / OutputHorizRadius;
 
-	if (K1 <= 0.0) // Barrel - diag is limiting factor
+	if (IsBarrel()) // Barrel - diagonal is the limiting factor
 	{
 		const double OutputVertRadius = OutputHorizRadius / AspectRatio;
 		const double OutputDiagRadius = FMath::Sqrt(OutputHorizRadius * OutputHorizRadius + OutputVertRadius * OutputVertRadius);
-		const double RenderDiagRadius = SolveInverseDistortion(OutputDiagRadius, K1, K2, K3);
+		const double RenderDiagRadius = Undistort(OutputDiagRadius);
 		const double RenderHorizRadius = RenderDiagRadius / FMath::Sqrt(1.0 + 1.0 / (AspectRatio * AspectRatio));
 		Config.RenderFOVAngle = 2.0 * FMath::RadiansToDegrees(FMath::Atan(RenderHorizRadius));
 	}
-	else // K1 > 0.0 Pincushion - horiz/vert is limiting factor
+	else // Pincushion - horizontal/vertical is the limiting factor
 	{
 		Config.RenderFOVAngle = OutputHFOVDeg;
 	}
@@ -277,6 +277,107 @@ FVector2D FKannalaBrandtDistortion::OutputToRender(double OutputX, double Output
 	}
 
 	return FVector2D(ChildX / ChildZ, ChildY / ChildZ);
+}
+
+double FRationalDistortion::SolveDistortion(double R, double K1, double K2, double K3, double K4, double K5, double K6)
+{
+	const double R2 = R * R;
+	const double R4 = R2 * R2;
+	const double R6 = R4 * R2;
+	const double Num = 1.0 + K1*R2 + K2*R4 + K3*R6;
+	const double Den = 1.0 + K4*R2 + K5*R4 + K6*R6;
+	return R * Num / Den;
+}
+
+double FRationalDistortion::SolveInverseDistortion(double Rd, double K1, double K2, double K3, double K4, double K5, double K6)
+{
+	if (Rd < 1e-6)
+	{
+		return Rd;
+	}
+
+	return Solve(
+		[K1, K2, K3, K4, K5, K6, Rd](double R) {
+			const double R2 = R * R;
+			const double R4 = R2 * R2;
+			const double R6 = R4 * R2;
+			const double Num = 1.0 + K1*R2 + K2*R4 + K3*R6;
+			const double Den = 1.0 + K4*R2 + K5*R4 + K6*R6;
+			return R * Num / Den - Rd;
+		},
+		[K1, K2, K3, K4, K5, K6](double R) {
+			const double R2 = R * R;
+			const double R4 = R2 * R2;
+			const double R6 = R4 * R2;
+			const double Num  = 1.0 + K1*R2  + K2*R4  + K3*R6;
+			const double Den  = 1.0 + K4*R2  + K5*R4  + K6*R6;
+			const double DNum = 2.0*R*(K1 + 2.0*K2*R2 + 3.0*K3*R4); // d(Num)/dR
+			const double DDen = 2.0*R*(K4 + 2.0*K5*R2 + 3.0*K6*R4); // d(Den)/dR
+			// Quotient rule: d/dR [R*Num/Den] = (Num*Den + R*DNum*Den - R*Num*DDen) / Den^2
+			return (Num*Den + R*DNum*Den - R*Num*DDen) / (Den * Den);
+		},
+		Rd,
+		40,
+		1e-6
+	);
+}
+
+double FRationalDistortion::ComputeMaxOutputRadius(double K1, double K2, double K3, double K4, double K5, double K6)
+{
+	// Only barrel-like models (K1-K4 < 0) have a finite maximum output radius.
+	if ((K1 - K4) >= 0.0)
+	{
+		return -1.0;
+	}
+
+	// Find the critical radius where d(r_d)/dR = 0:
+	//   Num*Den + R*DNum*Den - R*Num*DDen = 0
+	// Use Newton-Raphson on the derivative expression, starting near 0.5.
+	const double RCrit = Solve(
+		[K1, K2, K3, K4, K5, K6](double R) {
+			const double R2 = R * R;
+			const double R4 = R2 * R2;
+			const double R6 = R4 * R2;
+			const double Num  = 1.0 + K1*R2  + K2*R4  + K3*R6;
+			const double Den  = 1.0 + K4*R2  + K5*R4  + K6*R6;
+			const double DNum = 2.0*R*(K1 + 2.0*K2*R2 + 3.0*K3*R4);
+			const double DDen = 2.0*R*(K4 + 2.0*K5*R2 + 3.0*K6*R4);
+			return Num*Den + R*DNum*Den - R*Num*DDen;
+		},
+		[K1, K2, K3, K4, K5, K6](double R) {
+			const double R2 = R * R;
+			const double R4 = R2 * R2;
+			const double R6 = R4 * R2;
+			const double Num   = 1.0 + K1*R2  + K2*R4  + K3*R6;
+			const double Den   = 1.0 + K4*R2  + K5*R4  + K6*R6;
+			const double DNum  = 2.0*R*(K1 + 2.0*K2*R2 + 3.0*K3*R4);
+			const double DDen  = 2.0*R*(K4 + 2.0*K5*R2 + 3.0*K6*R4);
+			const double D2Num = 2.0*(K1 + 6.0*K2*R2 + 15.0*K3*R4);  // d^2(Num)/dR^2 / (noting chain rule absorbed)
+			const double D2Den = 2.0*(K4 + 6.0*K5*R2 + 15.0*K6*R4);
+			// d/dR [Num*Den + R*DNum*Den - R*Num*DDen]
+			return DNum*Den + Num*DDen
+				 + Den*(DNum + R*D2Num) + R*DNum*DDen
+				 - DDen*(Num + R*DNum) - R*Num*D2Den;
+		},
+		0.5,
+		40,
+		1e-6
+	);
+
+	if (RCrit <= 0.0)
+	{
+		return -1.0;
+	}
+
+	return SolveDistortion(RCrit, K1, K2, K3, K4, K5, K6);
+}
+
+FVector2D FRationalDistortion::OutputToRender(double OutputX, double OutputY) const
+{
+	const double OutputRadius = FMath::Sqrt(OutputX * OutputX + OutputY * OutputY);
+	const double RenderRadius = SolveInverseDistortion(OutputRadius, K1, K2, K3, K4, K5, K6);
+	const double Scale = (OutputRadius > 1e-6) ? (RenderRadius / OutputRadius) : 1.0;
+	return FVector2D(OutputX * Scale, OutputY * Scale);
 }
 
 FDistortionRenderConfig FKannalaBrandtDistortion::ComputeRenderConfig(const FIntPoint& OutputSizeXY, double OutputHFOVDeg) const

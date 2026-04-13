@@ -427,6 +427,16 @@ TUniquePtr<FDistortionModel> UTempoCameraCaptureComponent::CreateDistortionModel
 			CameraOwner->LensParameters.K2,
 			CameraOwner->LensParameters.K3);
 	}
+	else if (CameraOwner->DistortionModel == ETempoDistortionModel::Rational)
+	{
+		return MakeUnique<FRationalDistortion>(
+			CameraOwner->LensParameters.K1,
+			CameraOwner->LensParameters.K2,
+			CameraOwner->LensParameters.K3,
+			CameraOwner->LensParameters.K4,
+			CameraOwner->LensParameters.K5,
+			CameraOwner->LensParameters.K6);
+	}
 	else // Equidistant (Kannala-Brandt fisheye; K=0 = pure equidistant)
 	{
 		// Negate pitch: UE positive pitch = up, but image-plane positive Y = down.
@@ -832,9 +842,10 @@ static void SyncCaptureComponent(UTempoCameraCaptureComponent* CaptureComponent,
 
 void UTempoCamera::ValidateFOV() const
 {
-	if (DistortionModel == ETempoDistortionModel::BrownConrady)
+	if (DistortionModel == ETempoDistortionModel::BrownConrady || DistortionModel == ETempoDistortionModel::Rational)
 	{
-		ensureMsgf(HorizontalFOV <= 170.0f, TEXT("BrownConrady HorizontalFOV %.2f exceeds max 170 degrees."), HorizontalFOV);
+		ensureMsgf(HorizontalFOV <= 170.0f, TEXT("%s HorizontalFOV %.2f exceeds max 170 degrees."),
+			DistortionModel == ETempoDistortionModel::Rational ? TEXT("Rational") : TEXT("BrownConrady"), HorizontalFOV);
 	}
 	else
 	{
@@ -850,7 +861,7 @@ void UTempoCamera::SyncCaptureComponents()
 
 	const TMap<FName, UTempoCameraCaptureComponent*> CaptureComponents = GetOrCreateCaptureComponents();
 
-	if (DistortionModel == ETempoDistortionModel::BrownConrady)
+	if (DistortionModel == ETempoDistortionModel::BrownConrady || DistortionModel == ETempoDistortionModel::Rational)
 	{
 		// Single capture: use TL, deactivate others
 		SyncCaptureComponent(CaptureComponents[TLCaptureComponentName], true, 0.0, 0.0, HorizontalFOV, SizeXY);
