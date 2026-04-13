@@ -134,37 +134,6 @@ struct TEMPOCAMERA_API FTempoCameraIntrinsics
 	const float Cy;
 };
 
-UENUM(BlueprintType)
-enum class ETempoDistortionModel : uint8
-{
-	BrownConrady  UMETA(DisplayName="Brown-Conrady", ToolTip="Standard radial lens distortion. Single capture, max 170 degree FOV."),
-	Rational      UMETA(DisplayName="Rational", ToolTip="Rational radial distortion (numerator K1-K3, denominator K4-K6). Single capture, max 170 degree FOV."),
-	KannalaBrandt UMETA(DisplayName="KannalaBrandt (Fisheye)", ToolTip="Equidistant fisheye projection. Supports up to 240 degree FOV using multiple captures."),
-};
-
-USTRUCT(BlueprintType)
-struct FTempoLensDistortionParameters
-{
-	GENERATED_BODY()
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens")
-	ETempoDistortionModel DistortionModel = ETempoDistortionModel::BrownConrady;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens")
-	float K1 = 0.0f;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens")
-	float K2 = 0.0f;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens")
-	float K3 = 0.0f;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens")
-	float K4 = 0.0f;
-	// K5 and K6 are denominator coefficients only used by the Rational distortion model.
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens", meta = (ToolTip = "Only used by the Rational distortion model."))
-	float K5 = 0.0f;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens", meta = (ToolTip = "Only used by the Rational distortion model."))
-	float K6 = 0.0f;
-};
-
 class UTempoCamera;
 
 UCLASS(ClassGroup=(Custom), NotPlaceable, NotBlueprintable)
@@ -211,9 +180,6 @@ protected:
 	virtual int32 GetMaxTextureQueueSize() const override;
 
 	virtual void InitDistortionMap() override;
-
-	// Create the appropriate distortion model based on the camera's settings.
-	TUniquePtr<FDistortionModel> CreateDistortionModel() const;
 
 	UPROPERTY(VisibleAnywhere)
 	UMaterialInstanceDynamic* PostProcessMaterialInstance = nullptr;

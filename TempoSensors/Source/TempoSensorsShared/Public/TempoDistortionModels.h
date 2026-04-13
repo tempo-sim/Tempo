@@ -2,8 +2,42 @@
 
 #pragma once
 
+#include "CoreMinimal.h"
 #include "Math/MathFwd.h"
 #include "Math/IntPoint.h"
+
+#include "TempoDistortionModels.generated.h"
+
+UENUM(BlueprintType)
+enum class ETempoDistortionModel : uint8
+{
+	BrownConrady  UMETA(DisplayName="Brown-Conrady", ToolTip="Standard radial lens distortion. Single capture, max 170 degree FOV."),
+	Rational      UMETA(DisplayName="Rational", ToolTip="Rational radial distortion (numerator K1-K3, denominator K4-K6). Single capture, max 170 degree FOV."),
+	KannalaBrandt UMETA(DisplayName="KannalaBrandt (Fisheye)", ToolTip="Equidistant fisheye projection. Supports up to 240 degree FOV using multiple captures."),
+};
+
+USTRUCT(BlueprintType)
+struct FTempoLensDistortionParameters
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens")
+	ETempoDistortionModel DistortionModel = ETempoDistortionModel::BrownConrady;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens")
+	float K1 = 0.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens")
+	float K2 = 0.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens")
+	float K3 = 0.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens")
+	float K4 = 0.0f;
+	// K5 and K6 are denominator coefficients only used by the Rational distortion model.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens", meta = (ToolTip = "Only used by the Rational distortion model."))
+	float K5 = 0.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens", meta = (ToolTip = "Only used by the Rational distortion model."))
+	float K6 = 0.0f;
+};
 
 // Configuration for the perspective render needed to produce a distorted output image.
 struct TEMPOSENSORSSHARED_API FDistortionRenderConfig
@@ -190,3 +224,11 @@ struct TEMPOSENSORSSHARED_API FKannalaBrandtDistortion : FDistortionModel
 	// Inverse K-B: distorted angle theta_d -> physical angle theta (Newton-Raphson).
 	static double SolveInverseDistortion(double ThetaD, double K1, double K2, double K3, double K4);
 };
+
+// Factory: construct the distortion model implementation matching the requested parameters.
+// YawDegrees/PitchDegrees are the capture component's relative rotation (UE convention: positive
+// yaw=right, positive pitch=up) and are only consulted by the Kannala-Brandt multi-tile model.
+TEMPOSENSORSSHARED_API TUniquePtr<FDistortionModel> CreateDistortionModel(
+	const FTempoLensDistortionParameters& LensParameters,
+	double YawDegrees,
+	double PitchDegrees);

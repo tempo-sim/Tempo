@@ -4,6 +4,39 @@
 
 #include "TempoSensorsShared.h"
 
+TUniquePtr<FDistortionModel> CreateDistortionModel(const FTempoLensDistortionParameters& LensParameters, double YawDegrees, double PitchDegrees)
+{
+	if (LensParameters.DistortionModel == ETempoDistortionModel::BrownConrady)
+	{
+		return MakeUnique<FBrownConradyDistortion>(
+			LensParameters.K1,
+			LensParameters.K2,
+			LensParameters.K3);
+	}
+	else if (LensParameters.DistortionModel == ETempoDistortionModel::Rational)
+	{
+		return MakeUnique<FRationalDistortion>(
+			LensParameters.K1,
+			LensParameters.K2,
+			LensParameters.K3,
+			LensParameters.K4,
+			LensParameters.K5,
+			LensParameters.K6);
+	}
+	else // Equidistant (Kannala-Brandt fisheye; K=0 = pure equidistant)
+	{
+		// Negate pitch: UE positive pitch = up, but image-plane positive Y = down.
+		const double AzOffset = FMath::DegreesToRadians(YawDegrees);
+		const double ElOffset = -FMath::DegreesToRadians(PitchDegrees);
+		return MakeUnique<FKannalaBrandtDistortion>(
+			LensParameters.K1,
+			LensParameters.K2,
+			LensParameters.K3,
+			LensParameters.K4,
+			AzOffset, ElOffset);
+	}
+}
+
 // Root-Finding Solver (Newton-Raphson)
 static double Solve(const TFunction<double(double)>& Objective, const TFunction<double(double)>& Derivative, const double InitialGuess, const int32 MaxIter, const double Threshold)
 {
