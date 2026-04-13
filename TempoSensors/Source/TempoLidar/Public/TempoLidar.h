@@ -57,6 +57,12 @@ public:
 
 	virtual void OnRegister() override;
 
+	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+#if WITH_EDITOR
+	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
+#endif
+
 	// Begin ITempoSensorInterface
 	virtual FString GetOwnerName() const override;
 	virtual FString GetSensorName() const override;
@@ -78,6 +84,13 @@ protected:
 	TArray<UTempoLidarCaptureComponent*> GetActiveCaptureComponents() const;
 
 	void SyncCaptureComponents();
+
+	// Runtime change-detection choke point (see UTempoCamera for the same pattern).
+	bool HasDetectedParameterChange() const;
+	bool AnyCaptureReadsInFlight() const;
+	void TryApplyPendingReconfigure();
+	void ReconfigureCaptureComponentsNow();
+	void UpdateInternalMirrors();
 
 	static void SyncCaptureComponent(UTempoLidarCaptureComponent* LidarCaptureComponent, bool bActive, double YawOffset, double SubHorizontalFOV, double SubHorizontalBeams);
 
@@ -128,6 +141,14 @@ protected:
 	int32 NumResponded = 0;
 
 	TArray<FLidarScanRequest> PendingRequests;
+
+	// Mirrors of the watched properties. Updated in ReconfigureCaptureComponentsNow.
+	double HorizontalFOV_Internal = -1.0;
+	double VerticalFOV_Internal = -1.0;
+	int32 HorizontalBeams_Internal = -1;
+	int32 VerticalBeams_Internal = -1;
+
+	uint8 bReconfigurePending : 1;
 
 	friend class UTempoLidarCaptureComponent;
 

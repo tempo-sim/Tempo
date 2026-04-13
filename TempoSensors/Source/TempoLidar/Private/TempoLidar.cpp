@@ -21,6 +21,7 @@ namespace
 }
 
 UTempoLidar::UTempoLidar()
+	: bReconfigurePending(false)
 {
 	PrimaryComponentTick.bCanEverTick = true;
 	MeasurementTypes = { EMeasurementType::LIDAR_SCAN };
@@ -89,9 +90,12 @@ TOptional<TFuture<void>> UTempoLidar::SendMeasurements()
 		PendingRequests.Empty();
 		NumResponded = 0;
 		SequenceId++;
-
-		SyncCaptureComponents();
 	}
+
+	// Queues of the active tiles are empty at this point (after DequeueIfReadComplete for this
+	// cycle). Take the opportunity to apply any reconfigure that was detected earlier but had
+	// to be deferred because reads were still in flight.
+	TryApplyPendingReconfigure();
 
 	return Future;
 }
@@ -141,7 +145,93 @@ void UTempoLidar::OnRegister()
 	}
 
 	SyncCaptureComponents();
+	UpdateInternalMirrors();
 }
+
+void UTempoLidar::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+	if (HasDetectedParameterChange())
+	{
+		bReconfigurePending = true;
+	}
+	TryApplyPendingReconfigure();
+}
+
+bool UTempoLidar::HasDetectedParameterChange() const
+{
+	return HorizontalFOV != HorizontalFOV_Internal
+		|| VerticalFOV != VerticalFOV_Internal
+		|| HorizontalBeams != HorizontalBeams_Internal
+		|| VerticalBeams != VerticalBeams_Internal;
+}
+
+bool UTempoLidar::AnyCaptureReadsInFlight() const
+{
+	for (const UTempoLidarCaptureComponent* Component : GetActiveCaptureComponents())
+	{
+		if (Component->NumPendingTextureReads() > 0)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+void UTempoLidar::TryApplyPendingReconfigure()
+{
+	if (!bReconfigurePending)
+	{
+		return;
+	}
+	if (AnyCaptureReadsInFlight())
+	{
+		return;
+	}
+	ReconfigureCaptureComponentsNow();
+	bReconfigurePending = false;
+}
+
+void UTempoLidar::ReconfigureCaptureComponentsNow()
+{
+	// Drain active tiles first so SyncCaptureComponents' re-Activate rebuilds render targets
+	// with the new parameters. Deactivate() empties the texture read queue, which is safe
+	// because callers gate this on AnyCaptureReadsInFlight() == false.
+	for (UTempoLidarCaptureComponent* Component : GetActiveCaptureComponents())
+	{
+		Component->Deactivate();
+	}
+
+	SyncCaptureComponents();
+	UpdateInternalMirrors();
+}
+
+void UTempoLidar::UpdateInternalMirrors()
+{
+	HorizontalFOV_Internal = HorizontalFOV;
+	VerticalFOV_Internal = VerticalFOV;
+	HorizontalBeams_Internal = HorizontalBeams;
+	VerticalBeams_Internal = VerticalBeams;
+}
+
+#if WITH_EDITOR
+void UTempoLidar::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
+{
+	Super::PostEditChangeProperty(PropertyChangedEvent);
+
+	const FName MemberPropertyName = (PropertyChangedEvent.MemberProperty != nullptr) ? PropertyChangedEvent.MemberProperty->GetFName() : NAME_None;
+	if (MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoLidar, HorizontalFOV) ||
+		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoLidar, VerticalFOV) ||
+		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoLidar, HorizontalBeams) ||
+		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoLidar, VerticalBeams))
+	{
+		// Route through the same choke point as the runtime Tick path.
+		bReconfigurePending = true;
+		TryApplyPendingReconfigure();
+	}
+}
+#endif
 
 void UTempoLidar::SyncCaptureComponent(UTempoLidarCaptureComponent* LidarCaptureComponent, bool bActive, double YawOffset, double SubHorizontalFOV, double SubHorizontalBeams)
 {
