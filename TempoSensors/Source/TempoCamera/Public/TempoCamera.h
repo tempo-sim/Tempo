@@ -145,19 +145,19 @@ struct FTempoLensDistortionParameters
 	float K3 = 0.0f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens")
 	float K4 = 0.0f;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens")
-	float P1 = 0.0f;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens")
-	float P2 = 0.0f;
-
-	bool operator==(const FTempoLensDistortionParameters& Other) const = default;
+	// K5 and K6 are denominator coefficients only used by the Rational distortion model.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens", meta = (ToolTip = "Only used by the Rational distortion model."))
+	float K5 = 0.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens", meta = (ToolTip = "Only used by the Rational distortion model."))
+	float K6 = 0.0f;
 };
 
 UENUM(BlueprintType)
 enum class ETempoDistortionModel : uint8
 {
-	BrownConrady    UMETA(DisplayName="Brown-Conrady", ToolTip="Standard lens distortion. Single capture, max 170 degree FOV."),
-	KannalaBrandt     UMETA(DisplayName="KannalaBrandt (Fisheye)", ToolTip="Equidistant fisheye projection. Supports up to 240 degree FOV using multiple captures.")
+	BrownConrady  UMETA(DisplayName="Brown-Conrady", ToolTip="Standard radial lens distortion. Single capture, max 170 degree FOV."),
+	Rational      UMETA(DisplayName="Rational", ToolTip="Rational radial distortion (numerator K1-K3, denominator K4-K6). Single capture, max 170 degree FOV."),
+	KannalaBrandt UMETA(DisplayName="KannalaBrandt (Fisheye)", ToolTip="Equidistant fisheye projection. Supports up to 240 degree FOV using multiple captures."),
 };
 
 class UTempoCamera;
@@ -297,8 +297,8 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens", meta = (ClampMin = "1.0", ClampMax = "240.0"))
 	float HorizontalFOV = 90.0f;
 
-	// Lens distortion parameters. Only used when DistortionModel is BrownConrady.
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens", meta = (EditCondition = "DistortionModel == ETempoDistortionModel::BrownConrady"))
+	// Lens distortion parameters. Used by BrownConrady (K1-K3) and Rational (K1-K6) models.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens")
 	FTempoLensDistortionParameters LensParameters;
 
 	// Output image resolution.
