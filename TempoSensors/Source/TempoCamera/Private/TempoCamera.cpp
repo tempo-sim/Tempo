@@ -289,6 +289,8 @@ void UTempoCameraCaptureComponent::ApplyRenderSettings()
 	}
 
 	SetShowFlagSettings(CameraOwner->ShowFlagSettings);
+
+	bUseRayTracingIfEnabled = CameraOwner->bUseRayTracingIfEnabled;
 }
 
 void UTempoCameraCaptureComponent::Activate(bool bReset)
@@ -473,11 +475,23 @@ UTempoCamera::UTempoCamera()
 	bAutoActivate = true;
 
 	// Defaults propagated to the managed capture components.
-	PostProcessSettings.AutoExposureMethod = AEM_Basic;
+	// Manual exposure by default so tiles render with a consistent exposure
+	// (per-tile auto exposure would diverge across independent ViewStates).
+	PostProcessSettings.bOverride_AutoExposureMethod = true;
+	PostProcessSettings.AutoExposureMethod = AEM_Manual;
+	PostProcessSettings.bOverride_AutoExposureBias = true;
+	PostProcessSettings.AutoExposureBias = 1.0;
+	PostProcessSettings.bOverride_AutoExposureApplyPhysicalCameraExposure = true;
+	PostProcessSettings.AutoExposureApplyPhysicalCameraExposure = 0;
+	PostProcessSettings.bOverride_AutoExposureSpeedUp = true;
 	PostProcessSettings.AutoExposureSpeedUp = 20.0;
+	PostProcessSettings.bOverride_AutoExposureSpeedDown = true;
 	PostProcessSettings.AutoExposureSpeedDown = 20.0;
+	PostProcessSettings.bOverride_AutoExposureLowPercent = true;
 	PostProcessSettings.AutoExposureLowPercent = 75.0;
+	PostProcessSettings.bOverride_AutoExposureHighPercent = true;
 	PostProcessSettings.AutoExposureHighPercent = 85.0;
+	PostProcessSettings.bOverride_MotionBlurAmount = true;
 	PostProcessSettings.MotionBlurAmount = 0.0;
 
 	ShowFlagSettings.Add({ TEXT("AntiAliasing"), true });
@@ -1040,7 +1054,8 @@ void UTempoCamera::PostEditChangeProperty(FPropertyChangedEvent& PropertyChanged
 		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, SizeXY) ||
 		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, LensParameters) ||
 		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, PostProcessSettings) ||
-		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, ShowFlagSettings))
+		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, ShowFlagSettings) ||
+		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, bUseRayTracingIfEnabled))
 	{
 		// Route through the same choke point as the runtime Tick path. In non-PIE editor no
 		// captures are running, so this applies immediately. In PIE it is deferred until the
