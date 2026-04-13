@@ -307,6 +307,10 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Rendering")
 	TArray<FEngineShowFlagsSetting> ShowFlagSettings;
 
+	// Whether to use ray tracing for this capture. Ray Tracing must be enabled in the project.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = SceneCapture)
+	bool bUseRayTracingIfEnabled;
+
 	// Whether this camera can measure depth. Disabled when not requested to optimize performance.
 	UPROPERTY(VisibleAnywhere, Category = "Depth")
 	bool bDepthEnabled = false;
