@@ -3,7 +3,6 @@
 import argparse
 import asyncio
 import colorsys
-import cv2
 from enum import Enum
 import grpc
 import io
