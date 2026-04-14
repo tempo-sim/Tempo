@@ -144,7 +144,7 @@ class TEMPOCAMERA_API UTempoCameraCaptureComponent : public UTempoSceneCaptureCo
 public:
 	UTempoCameraCaptureComponent();
 
-	void OnRegister() override;
+	virtual void OnRegister() override;
 
 	// Configure this capture component for a tile of the camera's output.
 	// YawOffset/PitchOffset: orientation relative to parent camera (UE convention: positive yaw=right, positive pitch=up).
