@@ -22,7 +22,6 @@ namespace
 }
 
 UTempoLidar::UTempoLidar()
-	: bReconfigurePending(false)
 {
 	PrimaryComponentTick.bCanEverTick = true;
 	MeasurementTypes = { EMeasurementType::LIDAR_SCAN };
@@ -140,8 +139,9 @@ void UTempoLidar::OnRegister()
 {
 	Super::OnRegister();
 
-	// Don't activate capture components during cooking - materials and rendering aren't available
-	if (IsRunningCommandlet())
+	// Don't create capture components during cooking or for template/archetype objects
+	// (e.g. Blueprint editor previews where GetOwner() is not a properly-packaged actor).
+	if (IsRunningCommandlet() || IsTemplate())
 	{
 		return;
 	}
@@ -183,6 +183,12 @@ bool UTempoLidar::AnyCaptureReadsInFlight() const
 
 void UTempoLidar::TryApplyPendingReconfigure()
 {
+	// Don't create capture components during cooking or for template/archetype objects
+	// (e.g. Blueprint editor previews where GetOwner() is not a properly-packaged actor).
+	if (IsRunningCommandlet() || IsTemplate())
+	{
+		return;
+	}
 	if (!bReconfigurePending)
 	{
 		return;
@@ -261,6 +267,18 @@ UTempoLidarCaptureComponent::UTempoLidarCaptureComponent()
 
 	// This component will be activated and deactivated by UTempoLidar.
 	bAutoActivate = false;
+}
+
+void UTempoLidarCaptureComponent::OnRegister()
+{
+	Super::OnRegister();
+
+#if WITH_EDITORONLY_DATA
+	if (ProxyMeshComponent)
+	{
+		ProxyMeshComponent->SetVisibility(false);
+	}
+#endif
 }
 
 FVector2D SphericalToPerspective(double AzimuthDeg, double ElevationDeg)

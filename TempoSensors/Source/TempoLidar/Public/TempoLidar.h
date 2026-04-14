@@ -147,7 +147,7 @@ protected:
 	int32 HorizontalBeams_Internal = -1;
 	int32 VerticalBeams_Internal = -1;
 
-	uint8 bReconfigurePending : 1;
+	uint8 bReconfigurePending = false;
 
 	friend class UTempoLidarCaptureComponent;
 
@@ -197,6 +197,8 @@ class TEMPOLIDAR_API UTempoLidarCaptureComponent : public UTempoSceneCaptureComp
 
 public:
 	UTempoLidarCaptureComponent();
+
+	void OnRegister() override;
 
 protected:
 	virtual void Activate(bool bReset = false) override;
