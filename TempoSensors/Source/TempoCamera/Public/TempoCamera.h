@@ -144,6 +144,8 @@ class TEMPOCAMERA_API UTempoCameraCaptureComponent : public UTempoSceneCaptureCo
 public:
 	UTempoCameraCaptureComponent();
 
+	void OnRegister() override;
+
 	// Configure this capture component for a tile of the camera's output.
 	// YawOffset/PitchOffset: orientation relative to parent camera (UE convention: positive yaw=right, positive pitch=up).
 	// EquidistantTileFOV: the horizontal FOV this tile covers in the equidistant output (degrees).
@@ -308,7 +310,7 @@ protected:
 
 	// Whether to use ray tracing for this capture. Ray Tracing must be enabled in the project.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = SceneCapture)
-	bool bUseRayTracingIfEnabled;
+	bool bUseRayTracingIfEnabled = true;
 
 	// Whether this camera can measure depth. Disabled when not requested to optimize performance.
 	UPROPERTY(VisibleAnywhere, Category = "Depth")
@@ -340,7 +342,7 @@ protected:
 	FIntPoint SizeXY_Internal = FIntPoint(-1, -1);
 
 	// Set when HasDetectedParameterChange() sees a diff; cleared after a successful apply.
-	uint8 bReconfigurePending : 1;
+	uint8 bReconfigurePending = false;
 
 	friend class UTempoCameraCaptureComponent;
 };

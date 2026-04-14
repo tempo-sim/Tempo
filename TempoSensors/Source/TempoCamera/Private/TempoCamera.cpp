@@ -272,6 +272,18 @@ UTempoCameraCaptureComponent::UTempoCameraCaptureComponent()
 	bAutoActivate = false;
 }
 
+void UTempoCameraCaptureComponent::OnRegister()
+{
+	Super::OnRegister();
+
+#if WITH_EDITORONLY_DATA
+	if (ProxyMeshComponent)
+	{
+		ProxyMeshComponent->SetVisibility(false);
+	}
+#endif
+}
+
 void UTempoCameraCaptureComponent::ApplyRenderSettings()
 {
 	if (!CameraOwner)
@@ -468,7 +480,6 @@ void UTempoCameraCaptureComponent::InitDistortionMap()
 // ------------------------------------------------------------------------------------
 
 UTempoCamera::UTempoCamera()
-	: bReconfigurePending(false)
 {
 	PrimaryComponentTick.bCanEverTick = true;
 	MeasurementTypes = { EMeasurementType::COLOR_IMAGE, EMeasurementType::LABEL_IMAGE, EMeasurementType::DEPTH_IMAGE, EMeasurementType::BOUNDING_BOXES };
@@ -504,8 +515,9 @@ void UTempoCamera::OnRegister()
 {
 	Super::OnRegister();
 
-	// Don't activate capture components during cooking
-	if (IsRunningCommandlet())
+	// Don't create capture components during cooking or for template/archetype objects
+	// (e.g. Blueprint editor previews where GetOwner() is not a properly-packaged actor).
+	if (IsRunningCommandlet() || IsTemplate())
 	{
 		return;
 	}
@@ -551,6 +563,12 @@ bool UTempoCamera::AnyCaptureReadsInFlight() const
 
 void UTempoCamera::TryApplyPendingReconfigure()
 {
+	// Don't create capture components during cooking or for template/archetype objects
+	// (e.g. Blueprint editor previews where GetOwner() is not a properly-packaged actor).
+	if (IsRunningCommandlet() || IsTemplate())
+	{
+		return;
+	}
 	if (!bReconfigurePending)
 	{
 		return;
