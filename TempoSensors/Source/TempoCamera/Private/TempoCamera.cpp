@@ -16,10 +16,10 @@
 
 namespace
 {
-	const FName TLCaptureComponentName(TEXT("TopLeftTempoCameraCaptureComponent"));
-	const FName TRCaptureComponentName(TEXT("TopRightTempoCameraCaptureComponent"));
-	const FName BLCaptureComponentName(TEXT("BottomLeftTempoCameraCaptureComponent"));
-	const FName BRCaptureComponentName(TEXT("BottomRightTempoCameraCaptureComponent"));
+	const FName TLCaptureComponentTag(TEXT("_TL"));
+	const FName TRCaptureComponentTag(TEXT("_TR"));
+	const FName BLCaptureComponentTag(TEXT("_BL"));
+	const FName BRCaptureComponentTag(TEXT("_BR"));
 
 	constexpr double MaxPerspectiveFOVPerCapture = 120.0;
 }
@@ -497,6 +497,7 @@ UTempoCamera::UTempoCamera()
 	ShowFlagSettings.Add({ TEXT("AntiAliasing"), true });
 	ShowFlagSettings.Add({ TEXT("TemporalAA"), true });
 	ShowFlagSettings.Add({ TEXT("MotionBlur"), false });
+
 }
 
 void UTempoCamera::OnRegister()
@@ -867,7 +868,7 @@ TMap<FName, UTempoCameraCaptureComponent*> UTempoCamera::GetAllCaptureComponents
 	GetChildrenComponents(false, ChildrenComponents);
 	for (USceneComponent* ChildComponent : ChildrenComponents)
 	{
-		for (const FName& Tag : { TLCaptureComponentName, TRCaptureComponentName, BLCaptureComponentName, BRCaptureComponentName })
+		for (const FName& Tag : { TLCaptureComponentTag, TRCaptureComponentTag, BLCaptureComponentTag, BRCaptureComponentTag })
 		{
 			if (UTempoCameraCaptureComponent* CameraCaptureComponent = Cast<UTempoCameraCaptureComponent>(ChildComponent); ChildComponent->ComponentHasTag(Tag))
 			{
@@ -881,11 +882,12 @@ TMap<FName, UTempoCameraCaptureComponent*> UTempoCamera::GetAllCaptureComponents
 TMap<FName, UTempoCameraCaptureComponent*> UTempoCamera::GetOrCreateCaptureComponents()
 {
 	TMap<FName, UTempoCameraCaptureComponent*> CaptureComponents = GetAllCaptureComponents();
-	for (const FName& Tag : { TLCaptureComponentName, TRCaptureComponentName, BLCaptureComponentName, BRCaptureComponentName })
+	for (const FName& Tag : { TLCaptureComponentTag, TRCaptureComponentTag, BLCaptureComponentTag, BRCaptureComponentTag })
 	{
 		if (!CaptureComponents.Contains(Tag))
 		{
-			UTempoCameraCaptureComponent* CaptureComponent = NewObject<UTempoCameraCaptureComponent>(GetOwner(), UTempoCameraCaptureComponent::StaticClass(), Tag);
+			const FName ComponentName(GetName() + Tag.ToString());
+			UTempoCameraCaptureComponent* CaptureComponent = NewObject<UTempoCameraCaptureComponent>(GetOwner(), UTempoCameraCaptureComponent::StaticClass(), ComponentName);
 			CaptureComponent->CameraOwner = this;
 			CaptureComponent->ComponentTags.AddUnique(Tag);
 			CaptureComponent->OnComponentCreated();
@@ -895,6 +897,7 @@ TMap<FName, UTempoCameraCaptureComponent*> UTempoCamera::GetOrCreateCaptureCompo
 			CaptureComponents.Add(Tag, CaptureComponent);
 		}
 	}
+
 	return CaptureComponents;
 }
 
@@ -949,10 +952,10 @@ void UTempoCamera::SyncCaptureComponents()
 	if (LensParameters.DistortionModel == ETempoDistortionModel::BrownConrady || LensParameters.DistortionModel == ETempoDistortionModel::Rational)
 	{
 		// Single capture: use TL, deactivate others
-		SyncCaptureComponent(CaptureComponents[TLCaptureComponentName], true, 0.0, 0.0, HorizontalFOV, SizeXY);
-		SyncCaptureComponent(CaptureComponents[TRCaptureComponentName], false, 0.0, 0.0, 0.0, FIntPoint::ZeroValue);
-		SyncCaptureComponent(CaptureComponents[BLCaptureComponentName], false, 0.0, 0.0, 0.0, FIntPoint::ZeroValue);
-		SyncCaptureComponent(CaptureComponents[BRCaptureComponentName], false, 0.0, 0.0, 0.0, FIntPoint::ZeroValue);
+		SyncCaptureComponent(CaptureComponents[TLCaptureComponentTag], true, 0.0, 0.0, HorizontalFOV, SizeXY);
+		SyncCaptureComponent(CaptureComponents[TRCaptureComponentTag], false, 0.0, 0.0, 0.0, FIntPoint::ZeroValue);
+		SyncCaptureComponent(CaptureComponents[BLCaptureComponentTag], false, 0.0, 0.0, 0.0, FIntPoint::ZeroValue);
+		SyncCaptureComponent(CaptureComponents[BRCaptureComponentTag], false, 0.0, 0.0, 0.0, FIntPoint::ZeroValue);
 	}
 	else // Equidistant
 	{
@@ -963,10 +966,10 @@ void UTempoCamera::SyncCaptureComponents()
 		if (!bSplitHorizontal && !bSplitVertical)
 		{
 			// 1 capture
-			SyncCaptureComponent(CaptureComponents[TLCaptureComponentName], true, 0.0, 0.0, HorizontalFOV, SizeXY);
-			SyncCaptureComponent(CaptureComponents[TRCaptureComponentName], false, 0.0, 0.0, 0.0, FIntPoint::ZeroValue);
-			SyncCaptureComponent(CaptureComponents[BLCaptureComponentName], false, 0.0, 0.0, 0.0, FIntPoint::ZeroValue);
-			SyncCaptureComponent(CaptureComponents[BRCaptureComponentName], false, 0.0, 0.0, 0.0, FIntPoint::ZeroValue);
+			SyncCaptureComponent(CaptureComponents[TLCaptureComponentTag], true, 0.0, 0.0, HorizontalFOV, SizeXY);
+			SyncCaptureComponent(CaptureComponents[TRCaptureComponentTag], false, 0.0, 0.0, 0.0, FIntPoint::ZeroValue);
+			SyncCaptureComponent(CaptureComponents[BLCaptureComponentTag], false, 0.0, 0.0, 0.0, FIntPoint::ZeroValue);
+			SyncCaptureComponent(CaptureComponents[BRCaptureComponentTag], false, 0.0, 0.0, 0.0, FIntPoint::ZeroValue);
 		}
 		else if (bSplitHorizontal && !bSplitVertical)
 		{
@@ -976,10 +979,10 @@ void UTempoCamera::SyncCaptureComponents()
 			const int32 LeftWidth = FMath::CeilToInt32(SizeXY.X / 2.0);
 			const int32 RightWidth = SizeXY.X - LeftWidth;
 
-			SyncCaptureComponent(CaptureComponents[TLCaptureComponentName], true, -YawOffset, 0.0, SubFOV, FIntPoint(LeftWidth, SizeXY.Y), FIntPoint(0, 0));
-			SyncCaptureComponent(CaptureComponents[TRCaptureComponentName], true, YawOffset, 0.0, SubFOV, FIntPoint(RightWidth, SizeXY.Y), FIntPoint(LeftWidth, 0));
-			SyncCaptureComponent(CaptureComponents[BLCaptureComponentName], false, 0.0, 0.0, 0.0, FIntPoint::ZeroValue);
-			SyncCaptureComponent(CaptureComponents[BRCaptureComponentName], false, 0.0, 0.0, 0.0, FIntPoint::ZeroValue);
+			SyncCaptureComponent(CaptureComponents[TLCaptureComponentTag], true, -YawOffset, 0.0, SubFOV, FIntPoint(LeftWidth, SizeXY.Y), FIntPoint(0, 0));
+			SyncCaptureComponent(CaptureComponents[TRCaptureComponentTag], true, YawOffset, 0.0, SubFOV, FIntPoint(RightWidth, SizeXY.Y), FIntPoint(LeftWidth, 0));
+			SyncCaptureComponent(CaptureComponents[BLCaptureComponentTag], false, 0.0, 0.0, 0.0, FIntPoint::ZeroValue);
+			SyncCaptureComponent(CaptureComponents[BRCaptureComponentTag], false, 0.0, 0.0, 0.0, FIntPoint::ZeroValue);
 		}
 		else if (!bSplitHorizontal && bSplitVertical)
 		{
@@ -989,10 +992,10 @@ void UTempoCamera::SyncCaptureComponents()
 			const int32 TopHeight = FMath::CeilToInt32(SizeXY.Y / 2.0);
 			const int32 BottomHeight = SizeXY.Y - TopHeight;
 
-			SyncCaptureComponent(CaptureComponents[TLCaptureComponentName], true, 0.0, PitchOffset, HorizontalFOV, FIntPoint(SizeXY.X, TopHeight), FIntPoint(0, 0));
-			SyncCaptureComponent(CaptureComponents[BLCaptureComponentName], true, 0.0, -PitchOffset, HorizontalFOV, FIntPoint(SizeXY.X, BottomHeight), FIntPoint(0, TopHeight));
-			SyncCaptureComponent(CaptureComponents[TRCaptureComponentName], false, 0.0, 0.0, 0.0, FIntPoint::ZeroValue);
-			SyncCaptureComponent(CaptureComponents[BRCaptureComponentName], false, 0.0, 0.0, 0.0, FIntPoint::ZeroValue);
+			SyncCaptureComponent(CaptureComponents[TLCaptureComponentTag], true, 0.0, PitchOffset, HorizontalFOV, FIntPoint(SizeXY.X, TopHeight), FIntPoint(0, 0));
+			SyncCaptureComponent(CaptureComponents[TRCaptureComponentTag], true, 0.0, -PitchOffset, HorizontalFOV, FIntPoint(SizeXY.X, BottomHeight), FIntPoint(0, TopHeight));
+			SyncCaptureComponent(CaptureComponents[BLCaptureComponentTag], false, 0.0, 0.0, 0.0, FIntPoint::ZeroValue);
+			SyncCaptureComponent(CaptureComponents[BRCaptureComponentTag], false, 0.0, 0.0, 0.0, FIntPoint::ZeroValue);
 		}
 		else
 		{
@@ -1006,10 +1009,10 @@ void UTempoCamera::SyncCaptureComponents()
 			const int32 TopHeight = FMath::CeilToInt32(SizeXY.Y / 2.0);
 			const int32 BottomHeight = SizeXY.Y - TopHeight;
 
-			SyncCaptureComponent(CaptureComponents[TLCaptureComponentName], true, -YawOffset, PitchOffset, SubHFOV, FIntPoint(LeftWidth, TopHeight), FIntPoint(0, 0));
-			SyncCaptureComponent(CaptureComponents[TRCaptureComponentName], true, YawOffset, PitchOffset, SubHFOV, FIntPoint(RightWidth, TopHeight), FIntPoint(LeftWidth, 0));
-			SyncCaptureComponent(CaptureComponents[BLCaptureComponentName], true, -YawOffset, -PitchOffset, SubHFOV, FIntPoint(LeftWidth, BottomHeight), FIntPoint(0, TopHeight));
-			SyncCaptureComponent(CaptureComponents[BRCaptureComponentName], true, YawOffset, -PitchOffset, SubHFOV, FIntPoint(RightWidth, BottomHeight), FIntPoint(LeftWidth, TopHeight));
+			SyncCaptureComponent(CaptureComponents[TLCaptureComponentTag], true, -YawOffset, PitchOffset, SubHFOV, FIntPoint(LeftWidth, TopHeight), FIntPoint(0, 0));
+			SyncCaptureComponent(CaptureComponents[TRCaptureComponentTag], true, YawOffset, PitchOffset, SubHFOV, FIntPoint(RightWidth, TopHeight), FIntPoint(LeftWidth, 0));
+			SyncCaptureComponent(CaptureComponents[BLCaptureComponentTag], true, -YawOffset, -PitchOffset, SubHFOV, FIntPoint(LeftWidth, BottomHeight), FIntPoint(0, TopHeight));
+			SyncCaptureComponent(CaptureComponents[BRCaptureComponentTag], true, YawOffset, -PitchOffset, SubHFOV, FIntPoint(RightWidth, BottomHeight), FIntPoint(LeftWidth, TopHeight));
 		}
 	}
 }

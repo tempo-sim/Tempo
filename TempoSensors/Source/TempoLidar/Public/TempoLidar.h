@@ -79,10 +79,9 @@ public:
 protected:
 	TFuture<void> DecodeAndRespond(TArray<TUniquePtr<FTextureRead>> TextureReads);
 
-	TMap<FName, UTempoLidarCaptureComponent*> GetAllCaptureComponents() const ;
+	TMap<FName, UTempoLidarCaptureComponent*> GetAllCaptureComponents() const;
 	TMap<FName, UTempoLidarCaptureComponent*> GetOrCreateCaptureComponents();
 	TArray<UTempoLidarCaptureComponent*> GetActiveCaptureComponents() const;
-
 	void SyncCaptureComponents();
 
 	// Runtime change-detection choke point (see UTempoCamera for the same pattern).
