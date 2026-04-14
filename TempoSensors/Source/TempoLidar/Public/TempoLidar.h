@@ -198,7 +198,7 @@ class TEMPOLIDAR_API UTempoLidarCaptureComponent : public UTempoSceneCaptureComp
 public:
 	UTempoLidarCaptureComponent();
 
-	void OnRegister() override;
+	virtual void OnRegister() override;
 
 protected:
 	virtual void Activate(bool bReset = false) override;
