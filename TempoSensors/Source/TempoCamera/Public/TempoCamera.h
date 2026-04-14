@@ -249,7 +249,6 @@ protected:
 	TMap<FName, UTempoCameraCaptureComponent*> GetAllCaptureComponents() const;
 	TMap<FName, UTempoCameraCaptureComponent*> GetOrCreateCaptureComponents();
 	TArray<UTempoCameraCaptureComponent*> GetActiveCaptureComponents() const;
-
 	void SyncCaptureComponents();
 
 	// Returns true iff any watched property differs from its _Internal mirror.

@@ -13,11 +13,12 @@
 #include "TempoSensorsSettings.h"
 #include "TempoSensorsUtils.h"
 
+
 namespace
 {
-	const FName LeftCaptureComponentName(TEXT("LeftTempoLidarCaptureComponent"));
-	const FName CenterCaptureComponentName(TEXT("CenterTempoLidarCaptureComponent"));
-	const FName RightCaptureComponentName(TEXT("RightTempoLidarCaptureComponent"));
+	const FName LeftCaptureComponentTag(TEXT("_L"));
+	const FName CenterCaptureComponentTag(TEXT("_C"));
+	const FName RightCaptureComponentTag(TEXT("_R"));
 }
 
 UTempoLidar::UTempoLidar()
@@ -104,11 +105,12 @@ void UTempoLidar::SyncCaptureComponents()
 {
 	// We allow up to 120 degrees horizontal FOV per capture component
 	const TMap<FName, UTempoLidarCaptureComponent*> CaptureComponents = GetOrCreateCaptureComponents();
+
 	if (HorizontalFOV <= 120.0)
 	{
-		SyncCaptureComponent(CaptureComponents[LeftCaptureComponentName], false, 0.0, 0.0, 0);
-		SyncCaptureComponent(CaptureComponents[CenterCaptureComponentName], true, 0.0, HorizontalFOV, HorizontalBeams);
-		SyncCaptureComponent(CaptureComponents[RightCaptureComponentName], false, 0.0, 0.0, 0);
+		SyncCaptureComponent(CaptureComponents[LeftCaptureComponentTag], false, 0.0, 0.0, 0);
+		SyncCaptureComponent(CaptureComponents[CenterCaptureComponentTag], true, 0.0, HorizontalFOV, HorizontalBeams);
+		SyncCaptureComponent(CaptureComponents[RightCaptureComponentTag], false, 0.0, 0.0, 0);
 	}
 	else if (HorizontalFOV <= 240.0)
 	{
@@ -117,9 +119,9 @@ void UTempoLidar::SyncCaptureComponents()
 		const int32 RightSegmentBeams = HorizontalBeams - LeftSegmentBeams;
 		const double LeftSegmentFOV = BeamGapSize * (LeftSegmentBeams - 1);
 		const double RightSegmentFOV = BeamGapSize * (RightSegmentBeams - 1);
-		SyncCaptureComponent(CaptureComponents[LeftCaptureComponentName], true, -(LeftSegmentFOV + BeamGapSize) / 2.0, LeftSegmentFOV, LeftSegmentBeams);
-		SyncCaptureComponent(CaptureComponents[CenterCaptureComponentName], false, 0.0, 0.0, 0);
-		SyncCaptureComponent(CaptureComponents[RightCaptureComponentName], true, (RightSegmentFOV + BeamGapSize) / 2.0, RightSegmentFOV, RightSegmentBeams);
+		SyncCaptureComponent(CaptureComponents[LeftCaptureComponentTag], true, -(LeftSegmentFOV + BeamGapSize) / 2.0, LeftSegmentFOV, LeftSegmentBeams);
+		SyncCaptureComponent(CaptureComponents[CenterCaptureComponentTag], false, 0.0, 0.0, 0);
+		SyncCaptureComponent(CaptureComponents[RightCaptureComponentTag], true, (RightSegmentFOV + BeamGapSize) / 2.0, RightSegmentFOV, RightSegmentBeams);
 	}
 	else
 	{
@@ -128,9 +130,9 @@ void UTempoLidar::SyncCaptureComponents()
 		const int32 CenterSegmentBeams = HorizontalBeams - 2 * SideSegmentBeams;
 		const double SideSegmentFOV = BeamGapSize * (SideSegmentBeams - 1);
 		const double CenterSegmentFOV = BeamGapSize * (CenterSegmentBeams - 1);
-		SyncCaptureComponent(CaptureComponents[LeftCaptureComponentName], true, -BeamGapSize - (CenterSegmentFOV + SideSegmentFOV) / 2.0, SideSegmentFOV, SideSegmentBeams);
-		SyncCaptureComponent(CaptureComponents[CenterCaptureComponentName], true, 0.0, CenterSegmentFOV, CenterSegmentBeams);
-		SyncCaptureComponent(CaptureComponents[RightCaptureComponentName], true, BeamGapSize + (CenterSegmentFOV + SideSegmentFOV) / 2.0, SideSegmentFOV, SideSegmentBeams);
+		SyncCaptureComponent(CaptureComponents[LeftCaptureComponentTag], true, -BeamGapSize - (CenterSegmentFOV + SideSegmentFOV) / 2.0, SideSegmentFOV, SideSegmentBeams);
+		SyncCaptureComponent(CaptureComponents[CenterCaptureComponentTag], true, 0.0, CenterSegmentFOV, CenterSegmentBeams);
+		SyncCaptureComponent(CaptureComponents[RightCaptureComponentTag], true, BeamGapSize + (CenterSegmentFOV + SideSegmentFOV) / 2.0, SideSegmentFOV, SideSegmentBeams);
 	}
 }
 
@@ -523,7 +525,7 @@ TMap<FName, UTempoLidarCaptureComponent*> UTempoLidar::GetAllCaptureComponents()
 	GetChildrenComponents(false, ChildrenComponents);
 	for (USceneComponent* ChildComponent : ChildrenComponents)
 	{
-		for (const FName& Tag : { LeftCaptureComponentName, CenterCaptureComponentName, RightCaptureComponentName })
+		for (const FName& Tag : { LeftCaptureComponentTag, CenterCaptureComponentTag, RightCaptureComponentTag })
 		{
 			if (UTempoLidarCaptureComponent* LidarCaptureComponent = Cast<UTempoLidarCaptureComponent>(ChildComponent); ChildComponent->ComponentHasTag(Tag))
 			{
@@ -537,11 +539,12 @@ TMap<FName, UTempoLidarCaptureComponent*> UTempoLidar::GetAllCaptureComponents()
 TMap<FName, UTempoLidarCaptureComponent*> UTempoLidar::GetOrCreateCaptureComponents()
 {
 	TMap<FName, UTempoLidarCaptureComponent*> CaptureComponents = GetAllCaptureComponents();
-	for (const FName& Tag : { LeftCaptureComponentName, CenterCaptureComponentName, RightCaptureComponentName })
+	for (const FName& Tag : { LeftCaptureComponentTag, CenterCaptureComponentTag, RightCaptureComponentTag })
 	{
 		if (!CaptureComponents.Contains(Tag))
 		{
-			UTempoLidarCaptureComponent* CaptureComponent = NewObject<UTempoLidarCaptureComponent>(GetOwner(), UTempoLidarCaptureComponent::StaticClass(), Tag);
+			const FName ComponentName(GetName() + Tag.ToString());
+			UTempoLidarCaptureComponent* CaptureComponent = NewObject<UTempoLidarCaptureComponent>(GetOwner(), UTempoLidarCaptureComponent::StaticClass(), ComponentName);
 			CaptureComponent->LidarOwner = this;
 			CaptureComponent->ComponentTags.AddUnique(Tag);
 			CaptureComponent->OnComponentCreated();
@@ -551,6 +554,7 @@ TMap<FName, UTempoLidarCaptureComponent*> UTempoLidar::GetOrCreateCaptureCompone
 			CaptureComponents.Add(Tag, CaptureComponent);
 		}
 	}
+
 	return CaptureComponents;
 }
 
