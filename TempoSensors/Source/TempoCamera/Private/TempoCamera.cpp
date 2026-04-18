@@ -4,12 +4,15 @@
 
 #include "TempoActorLabeler.h"
 #include "TempoCameraModule.h"
+#include "TempoCoreSettings.h"
+#include "TempoCoreUtils.h"
 #include "TempoLabelTypes.h"
 #include "TempoSensorsConstants.h"
 #include "TempoSensorsSettings.h"
 
 #include "Engine/TextureRenderTarget2D.h"
 #include "Engine/Texture2D.h"
+#include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Math/Box2D.h"
 #include "TextureResource.h"
@@ -524,6 +527,13 @@ void UTempoCamera::OnRegister()
 
 	SyncCaptureComponents();
 	UpdateInternalMirrors();
+
+	if (UTempoCoreUtils::IsGameWorld(this))
+	{
+		// Activate() runs when added to a live world, but may be skipped in some registration
+		// paths. Init the shared RT here so it's ready for the first capture regardless.
+		InitSharedRenderTarget();
+	}
 }
 
 void UTempoCamera::BeginPlay()
@@ -593,6 +603,13 @@ void UTempoCamera::ReconfigureCaptureComponentsNow()
 
 	SyncCaptureComponents();
 	UpdateInternalMirrors();
+
+	// The shared RT needs to resize when SizeXY changed, and any queued reads reference the
+	// previous RT geometry so are no longer valid.
+	if (UTempoCoreUtils::IsGameWorld(this))
+	{
+		InitSharedRenderTarget();
+	}
 }
 
 void UTempoCamera::UpdateInternalMirrors()
@@ -620,77 +637,41 @@ bool UTempoCamera::HasPendingCameraRequests() const
 
 bool UTempoCamera::IsAwaitingRender()
 {
-	for (const UTempoCameraCaptureComponent* CaptureComponent : GetActiveCaptureComponents())
-	{
-		if (CaptureComponent->IsNextReadAwaitingRender())
-		{
-			return true;
-		}
-	}
-	return false;
+	return TextureReadQueue.IsNextAwaitingRender();
 }
 
 void UTempoCamera::OnRenderCompleted()
 {
-	for (UTempoCameraCaptureComponent* CaptureComponent : GetActiveCaptureComponents())
+	if (!TextureReadQueue.IsNextAwaitingRender() || !SharedTextureTarget)
 	{
-		CaptureComponent->ReadNextIfAvailable();
+		return;
 	}
+
+	const FRenderTarget* RenderTarget = SharedTextureTarget->GetRenderTargetResource();
+	if (!ensureMsgf(RenderTarget, TEXT("SharedTextureTarget was not initialized. Skipping texture read.")))
+	{
+		return;
+	}
+
+	const bool bShouldBlock = GetDefault<UTempoCoreSettings>()->GetTimeMode() == ETimeMode::FixedStep
+		&& !GetDefault<UTempoSensorsSettings>()->GetPipelinedRendering();
+
+	TextureReadQueue.ReadAllAvailable(RenderTarget, bShouldBlock);
 }
 
 void UTempoCamera::BlockUntilMeasurementsReady() const
 {
-	for (const UTempoCameraCaptureComponent* CaptureComponent : GetActiveCaptureComponents())
-	{
-		CaptureComponent->BlockUntilNextReadComplete();
-	}
+	TextureReadQueue.BlockUntilNextReadComplete();
 }
 
 TOptional<TFuture<void>> UTempoCamera::SendMeasurements()
 {
-	const TArray<UTempoCameraCaptureComponent*> ActiveCaptureComponents = GetActiveCaptureComponents();
-	const int32 NumCompletedReads = ActiveCaptureComponents.FilterByPredicate(
-		[](const UTempoCameraCaptureComponent* CaptureComponent) { return CaptureComponent->NextReadComplete(); }
-	).Num();
-
 	TOptional<TFuture<void>> Future;
 
-	if (NumCompletedReads == ActiveCaptureComponents.Num())
+	if (TextureReadQueue.NextReadComplete())
 	{
-		TArray<TUniquePtr<FTextureRead>> TextureReads;
-
-		for (UTempoCameraCaptureComponent* CaptureComponent : ActiveCaptureComponents)
-		{
-			TextureReads.Add(CaptureComponent->DequeueIfReadComplete());
-		}
-
-		if (!bDepthEnabled && !PendingDepthImageRequests.IsEmpty())
-		{
-			SetDepthEnabled(true);
-		}
-		if (bDepthEnabled && PendingDepthImageRequests.IsEmpty())
-		{
-			SetDepthEnabled(false);
-		}
-
-		if (TextureReads.Num() == 1)
-		{
-			Future = DecodeAndRespond(MoveTemp(TextureReads[0]));
-		}
-		else if (TextureReads.Num() > 1)
-		{
-			TArray<FCameraTileTextureRead> TileReads;
-			for (int32 i = 0; i < TextureReads.Num(); ++i)
-			{
-				FCameraTileTextureRead TileRead;
-				TileRead.TextureRead = MoveTemp(TextureReads[i]);
-				TileRead.TileDestOffset = ActiveCaptureComponents[i]->TileDestOffset;
-				TileRead.TileOutputSizeXY = ActiveCaptureComponents[i]->TileOutputSizeXY;
-				TileRead.TileOutputOffsetY = ActiveCaptureComponents[i]->TileOutputOffsetY;
-				TileReads.Add(MoveTemp(TileRead));
-			}
-			Future = StitchAndRespond(MoveTemp(TileReads));
-		}
+		TUniquePtr<FTextureRead> TextureRead = TextureReadQueue.DequeueIfReadComplete();
+		Future = DecodeAndRespond(MoveTemp(TextureRead));
 
 		PendingColorImageRequests.Empty();
 		PendingLabelImageRequests.Empty();
@@ -699,12 +680,20 @@ TOptional<TFuture<void>> UTempoCamera::SendMeasurements()
 		{
 			PendingDepthImageRequests.Empty();
 		}
-		SequenceId++;
 	}
 
-	// Queues of the active tiles are empty at this point (after DequeueIfReadComplete for this
-	// cycle). Take the opportunity to apply any reconfigure that was detected earlier but had
-	// to be deferred because reads were still in flight.
+	// Toggle depth based on current pending requests — takes effect on the next MaybeCapture.
+	if (!bDepthEnabled && !PendingDepthImageRequests.IsEmpty())
+	{
+		SetDepthEnabled(true);
+	}
+	if (bDepthEnabled && PendingDepthImageRequests.IsEmpty())
+	{
+		SetDepthEnabled(false);
+	}
+
+	// Take the opportunity to apply any reconfigure that was detected earlier but had to be
+	// deferred because reads were still in flight.
 	TryApplyPendingReconfigure();
 
 	return Future;
@@ -768,111 +757,280 @@ TFuture<void> UTempoCamera::DecodeAndRespond(TUniquePtr<FTextureRead> TextureRea
 	return Future;
 }
 
-template <typename PixelType>
-TUniquePtr<TTextureRead<PixelType>> StitchTiles(
-	const FIntPoint& OutputSize,
-	TArray<FCameraTileTextureRead>& TileReads,
-	int32 SequenceId, double CaptureTime, const FString& OwnerName, const FString& SensorName,
-	const FTransform& SensorTransform, float MinDepth, float MaxDepth, TMap<uint8, uint8>&& InstanceToSemanticMap)
+// ------------------------------------------------------------------------------------
+// Shared RT / capture timer
+// ------------------------------------------------------------------------------------
+
+void UTempoCamera::Activate(bool bReset)
 {
-	TUniquePtr<TTextureRead<PixelType>> Stitched;
-	if constexpr (PixelType::bSupportsDepth)
-	{
-		Stitched = MakeUnique<TTextureRead<PixelType>>(OutputSize, SequenceId, CaptureTime, OwnerName, SensorName, SensorTransform, MinDepth, MaxDepth, MoveTemp(InstanceToSemanticMap));
-	}
-	else
-	{
-		Stitched = MakeUnique<TTextureRead<PixelType>>(OutputSize, SequenceId, CaptureTime, OwnerName, SensorName, SensorTransform, MoveTemp(InstanceToSemanticMap));
-	}
+	Super::Activate(bReset);
 
-	// Copy tile pixels into the stitched output
-	for (const auto& Tile : TileReads)
+	if (UTempoCoreUtils::IsGameWorld(this))
 	{
-		const auto* TileRead = static_cast<const TTextureRead<PixelType>*>(Tile.TextureRead.Get());
-		const int32 TileWidth = Tile.TileOutputSizeXY.X;
-		const int32 TileHeight = Tile.TileOutputSizeXY.Y;
-		const int32 SrcStride = TileRead->ImageSize.X; // render target width (== TileWidth for camera tiles)
-		const int32 SrcOffsetY = Tile.TileOutputOffsetY;
-		const int32 DstOffsetX = Tile.TileDestOffset.X;
-		const int32 DstOffsetY = Tile.TileDestOffset.Y;
-
-		ParallelFor(TileHeight, [&](int32 Row)
-		{
-			const int32 SrcIdx = (SrcOffsetY + Row) * SrcStride;
-			const int32 DstIdx = (DstOffsetY + Row) * OutputSize.X + DstOffsetX;
-			FMemory::Memcpy(&Stitched->Image[DstIdx], &TileRead->Image[SrcIdx], TileWidth * sizeof(PixelType));
-		});
+		InitSharedRenderTarget();
+		RestartCaptureTimer();
 	}
-
-	return Stitched;
 }
 
-TFuture<void> UTempoCamera::StitchAndRespond(TArray<FCameraTileTextureRead> TileReads)
+void UTempoCamera::Deactivate()
 {
-	if (TileReads.IsEmpty())
+	Super::Deactivate();
+
+	if (UTempoCoreUtils::IsGameWorld(this))
 	{
-		return Async(EAsyncExecution::TaskGraph, [](){});
+		if (UWorld* World = GetWorld())
+		{
+			World->GetTimerManager().ClearTimer(TimerHandle);
+		}
+		TextureReadQueue.Empty();
+	}
+}
+
+static float GetCameraTimerPeriod(float RateHz)
+{
+	return 1.0 / FMath::Max(UE_KINDA_SMALL_NUMBER, RateHz);
+}
+
+void UTempoCamera::RestartCaptureTimer()
+{
+	if (UWorld* World = GetWorld())
+	{
+		const float TimerPeriod = GetCameraTimerPeriod(RateHz);
+		World->GetTimerManager().SetTimer(TimerHandle, this, &UTempoCamera::MaybeCapture, TimerPeriod, true);
+	}
+}
+
+FTextureRHIRef UTempoCamera::AcquireNextStagingTexture()
+{
+	check(StagingTextures.Num() > 0);
+	const FTextureRHIRef& Texture = StagingTextures[NextStagingIndex];
+	NextStagingIndex = (NextStagingIndex + 1) % StagingTextures.Num();
+	return Texture;
+}
+
+void UTempoCamera::InitSharedRenderTarget()
+{
+	if (SizeXY.X <= 0 || SizeXY.Y <= 0)
+	{
+		return;
 	}
 
-	const double TransmissionTime = GetWorld()->GetTimeSeconds();
-	const bool bWithDepth = TileReads[0].TextureRead->GetType() == TEXT("WithDepth");
+	// Wait for any previous staging texture init render command to complete before modifying
+	// StagingTextures, since the render command accesses the array via raw pointer.
+	TextureInitFence.Wait();
 
-	// Get the instance-to-semantic map from the first tile (all tiles share the same map)
-	TMap<uint8, uint8> InstanceToSemanticMap;
-	if (bWithDepth)
+	SharedTextureTarget = NewObject<UTextureRenderTarget2D>(this);
+	SharedTextureTarget->TargetGamma = GetDefault<UTempoSensorsSettings>()->GetSceneCaptureGamma();
+	SharedTextureTarget->bGPUSharedFlag = true;
+
+	const ETextureRenderTargetFormat Format = bDepthEnabled
+		? ETextureRenderTargetFormat::RTF_RGBA16f
+		: ETextureRenderTargetFormat::RTF_RGBA8;
+	const EPixelFormat PixelFormatOverride = bDepthEnabled
+		? EPixelFormat::PF_A16B16G16R16
+		: EPixelFormat::PF_Unknown;
+
+	SharedTextureTarget->RenderTargetFormat = Format;
+	if (PixelFormatOverride == EPixelFormat::PF_Unknown)
 	{
-		InstanceToSemanticMap = static_cast<TTextureRead<FCameraPixelWithDepth>*>(TileReads[0].TextureRead.Get())->InstanceToSemanticMap;
+		SharedTextureTarget->InitAutoFormat(SizeXY.X, SizeXY.Y);
 	}
 	else
 	{
-		InstanceToSemanticMap = static_cast<TTextureRead<FCameraPixelNoDepth>*>(TileReads[0].TextureRead.Get())->InstanceToSemanticMap;
+		SharedTextureTarget->InitCustomFormat(SizeXY.X, SizeXY.Y, PixelFormatOverride, true);
 	}
 
-	return Async(EAsyncExecution::TaskGraph, [
-		OutputSize = SizeXY,
-		TileReadsMoved = MoveTemp(TileReads),
-		SequenceIdCpy = SequenceId,
-		CaptureTime = GetWorld()->GetTimeSeconds(),
-		OwnerNameCpy = GetOwnerName(),
-		SensorNameCpy = GetSensorName(),
-		SensorTransformCpy = GetComponentTransform(),
-		MinDepthCpy = MinDepth,
-		MaxDepthCpy = MaxDepth,
-		InstanceToSemanticMapMoved = MoveTemp(InstanceToSemanticMap),
-		ColorImageRequests = PendingColorImageRequests,
-		LabelImageRequests = PendingLabelImageRequests,
-		DepthImageRequests = PendingDepthImageRequests,
-		BoundingBoxRequests = PendingBoundingBoxesRequests,
-		TransmissionTimeCpy = TransmissionTime,
-		bWithDepthCpy = bWithDepth
-	]() mutable
+	const int32 MaxQueueSize = GetDefault<UTempoSensorsSettings>()->GetMaxCameraRenderBufferSize();
+	const int32 NumStagingTextures = FMath::Max(2, MaxQueueSize > 0 ? MaxQueueSize + 1 : 2);
+
 	{
-		TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraStitchAndRespond);
-
-		if (bWithDepthCpy)
+		FScopeLock Lock(&StagingTexturesMutex);
+		if (NumStagingTextures != StagingTextures.Num())
 		{
-			auto Stitched = StitchTiles<FCameraPixelWithDepth>(
-				OutputSize, TileReadsMoved, SequenceIdCpy, CaptureTime,
-				OwnerNameCpy, SensorNameCpy, SensorTransformCpy,
-				MinDepthCpy, MaxDepthCpy, MoveTemp(InstanceToSemanticMapMoved));
-
-			Stitched->RespondToRequests(ColorImageRequests, TransmissionTimeCpy);
-			Stitched->RespondToRequests(LabelImageRequests, TransmissionTimeCpy);
-			Stitched->RespondToRequests(DepthImageRequests, TransmissionTimeCpy);
-			Stitched->RespondToRequests(BoundingBoxRequests, TransmissionTimeCpy);
+			StagingTextures.SetNum(NumStagingTextures);
+			NextStagingIndex = 0;
 		}
-		else
+	}
+
+	struct FInitStagingContext
+	{
+		FString NameBase;
+		int32 SizeX;
+		int32 SizeY;
+		EPixelFormat PixelFormat;
+		int32 NumTextures;
+		TArray<FTextureRHIRef>* StagingTextures;
+		FCriticalSection* StagingTexturesMutex;
+	};
+
+	FInitStagingContext Context = {
+		GetName(),
+		SharedTextureTarget->SizeX,
+		SharedTextureTarget->SizeY,
+		SharedTextureTarget->GetFormat(),
+		NumStagingTextures,
+		&StagingTextures,
+		&StagingTexturesMutex
+	};
+
+	ENQUEUE_RENDER_COMMAND(InitTempoCameraSharedTextureCopy)(
+		[Context](FRHICommandListImmediate& RHICmdList)
 		{
-			auto Stitched = StitchTiles<FCameraPixelNoDepth>(
-				OutputSize, TileReadsMoved, SequenceIdCpy, CaptureTime,
-				OwnerNameCpy, SensorNameCpy, SensorTransformCpy,
-				0.0f, 0.0f, MoveTemp(InstanceToSemanticMapMoved));
+			constexpr ETextureCreateFlags TexCreateFlags = ETextureCreateFlags::Shared | ETextureCreateFlags::CPUReadback;
 
-			Stitched->RespondToRequests(ColorImageRequests, TransmissionTimeCpy);
-			Stitched->RespondToRequests(LabelImageRequests, TransmissionTimeCpy);
-			Stitched->RespondToRequests(BoundingBoxRequests, TransmissionTimeCpy);
+			for (int32 I = 0; I < Context.NumTextures; ++I)
+			{
+				const FRHITextureCreateDesc Desc =
+					FRHITextureCreateDesc::Create2D(*FString::Printf(TEXT("%s SharedStagingTexture %d"), *Context.NameBase, I))
+					.SetExtent(Context.SizeX, Context.SizeY)
+					.SetFormat(Context.PixelFormat)
+					.SetFlags(TexCreateFlags);
+
+				{
+					FScopeLock Lock(Context.StagingTexturesMutex);
+					(*Context.StagingTextures)[I] = RHICreateTexture(Desc);
+				}
+			}
+		});
+
+	TextureInitFence.BeginFence();
+
+	// Any pending texture reads might have the wrong pixel format.
+	TextureReadQueue.Empty();
+}
+
+namespace
+{
+	struct FTileCopyInfo
+	{
+		FTextureRenderTargetResource* TileRT;
+		FIntPoint TileDestOffset;
+		FIntPoint TileOutputSizeXY;
+		int32 TileOutputOffsetY;
+	};
+}
+
+void UTempoCamera::MaybeCapture()
+{
+	const float TimerPeriod = GetCameraTimerPeriod(RateHz);
+	if (UWorld* World = GetWorld())
+	{
+		if (!FMath::IsNearlyEqual(World->GetTimerManager().GetTimerRate(TimerHandle), TimerPeriod))
+		{
+			RestartCaptureTimer();
 		}
-	});
+	}
+
+	if (!HasPendingCameraRequests())
+	{
+		return;
+	}
+
+	if (!SharedTextureTarget)
+	{
+		return;
+	}
+
+	const TArray<UTempoCameraCaptureComponent*> ActiveCaptureComponents = GetActiveCaptureComponents();
+	if (ActiveCaptureComponents.IsEmpty())
+	{
+		return;
+	}
+
+	const int32 MaxQueueSize = GetDefault<UTempoSensorsSettings>()->GetMaxCameraRenderBufferSize();
+	if (MaxQueueSize > 0 && TextureReadQueue.Num() > MaxQueueSize)
+	{
+		UE_LOG(LogTempoCamera, Warning, TEXT("Fell behind while reading frames from sensor %s. Skipping capture."), *GetName());
+		return;
+	}
+
+	// Require that each active tile has a valid render target of the expected format.
+	for (const UTempoCameraCaptureComponent* Tile : ActiveCaptureComponents)
+	{
+		if (!Tile->TextureTarget || !Tile->TextureTarget->GameThread_GetRenderTargetResource() ||
+			Tile->TextureTarget->GetFormat() != SharedTextureTarget->GetFormat())
+		{
+			return;
+		}
+	}
+
+	FTextureRenderTargetResource* SharedRTResource = SharedTextureTarget->GameThread_GetRenderTargetResource();
+	if (!SharedRTResource)
+	{
+		return;
+	}
+
+	// Capture each tile. With CaptureScene() (not CaptureSceneDeferred) the tile's render commands
+	// enqueue immediately in FIFO order, so the stitch command we enqueue right after will run
+	// after all tile renders on the render thread.
+	for (UTempoCameraCaptureComponent* Tile : ActiveCaptureComponents)
+	{
+		Tile->CaptureScene();
+	}
+
+	// Gather copy info from each active tile.
+	TArray<FTileCopyInfo> TileInfos;
+	TileInfos.Reserve(ActiveCaptureComponents.Num());
+	for (UTempoCameraCaptureComponent* Tile : ActiveCaptureComponents)
+	{
+		FTileCopyInfo Info;
+		Info.TileRT = Tile->TextureTarget->GameThread_GetRenderTargetResource();
+		Info.TileDestOffset = Tile->TileDestOffset;
+		Info.TileOutputSizeXY = Tile->TileOutputSizeXY;
+		Info.TileOutputOffsetY = Tile->TileOutputOffsetY;
+		TileInfos.Add(Info);
+	}
+
+	// Build the FTextureRead for the stitched output, sized to the camera's final SizeXY.
+	TMap<uint8, uint8> InstanceToSemanticMap;
+	if (UTempoActorLabeler* Labeler = GetWorld()->GetSubsystem<UTempoActorLabeler>())
+	{
+		InstanceToSemanticMap = Labeler->GetInstanceToSemanticIdMap();
+	}
+
+	FTextureRead* NewRead = bDepthEnabled
+		? static_cast<FTextureRead*>(new TTextureRead<FCameraPixelWithDepth>(
+			SizeXY, SequenceId, GetWorld()->GetTimeSeconds(), GetOwnerName(), GetSensorName(),
+			GetComponentTransform(), MinDepth, MaxDepth, MoveTemp(InstanceToSemanticMap)))
+		: static_cast<FTextureRead*>(new TTextureRead<FCameraPixelNoDepth>(
+			SizeXY, SequenceId, GetWorld()->GetTimeSeconds(), GetOwnerName(), GetSensorName(),
+			GetComponentTransform(), MoveTemp(InstanceToSemanticMap)));
+
+	NewRead->StagingTexture = AcquireNextStagingTexture();
+
+	SequenceId++;
+
+	const FTextureRHIRef StagingTex = NewRead->StagingTexture;
+
+	ENQUEUE_RENDER_COMMAND(TempoCameraStitchAndReadback)(
+		[SharedRTResource, StagingTex, TileInfos, NewRead](FRHICommandListImmediate& RHICmdList)
+		{
+			FRHITexture* SharedRT = SharedRTResource->GetRenderTargetTexture();
+
+			// Transition shared RT to CopyDest, then copy each tile sub-rect into it.
+			RHICmdList.Transition(FRHITransitionInfo(SharedRT, ERHIAccess::Unknown, ERHIAccess::CopyDest));
+
+			for (const FTileCopyInfo& Info : TileInfos)
+			{
+				FRHITexture* TileRT = Info.TileRT->GetRenderTargetTexture();
+				RHICmdList.Transition(FRHITransitionInfo(TileRT, ERHIAccess::Unknown, ERHIAccess::CopySrc));
+				FRHICopyTextureInfo CopyInfo;
+				CopyInfo.SourcePosition = FIntVector(0, Info.TileOutputOffsetY, 0);
+				CopyInfo.DestPosition = FIntVector(Info.TileDestOffset.X, Info.TileDestOffset.Y, 0);
+				CopyInfo.Size = FIntVector(Info.TileOutputSizeXY.X, Info.TileOutputSizeXY.Y, 1);
+				RHICmdList.CopyTexture(TileRT, SharedRT, CopyInfo);
+			}
+
+			// Transition shared RT to CopySrc, then copy into staging for CPU readback.
+			RHICmdList.Transition(FRHITransitionInfo(SharedRT, ERHIAccess::Unknown, ERHIAccess::CopySrc));
+			RHICmdList.CopyTexture(SharedRT, StagingTex, FRHICopyTextureInfo());
+
+			// Fence so the game thread can poll for readback readiness.
+			NewRead->RenderFence = RHICreateGPUFence(TEXT("TempoCameraRenderFence"));
+			RHICmdList.WriteGPUFence(NewRead->RenderFence);
+		});
+
+	TextureReadQueue.Enqueue(NewRead);
 }
 
 // ------------------------------------------------------------------------------------
@@ -1072,6 +1230,12 @@ void UTempoCamera::ApplyDepthEnabled()
 	{
 		CaptureComponent->Deactivate();
 		CaptureComponent->Activate();
+	}
+
+	// Shared RT format depends on bDepthEnabled, so it must be rebuilt too.
+	if (UTempoCoreUtils::IsGameWorld(this))
+	{
+		InitSharedRenderTarget();
 	}
 }
 

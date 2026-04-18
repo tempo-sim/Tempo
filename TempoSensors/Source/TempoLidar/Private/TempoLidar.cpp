@@ -5,6 +5,8 @@
 #include "TempoSensorsConstants.h"
 
 #include "TempoConversion.h"
+#include "TempoCoreSettings.h"
+#include "TempoCoreUtils.h"
 #include "TempoLabelTypes.h"
 #include "TempoLidarModule.h"
 
@@ -12,6 +14,11 @@
 
 #include "TempoSensorsSettings.h"
 #include "TempoSensorsUtils.h"
+
+#include "Engine/TextureRenderTarget2D.h"
+#include "Kismet/GameplayStatics.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "TextureResource.h"
 
 
 namespace
@@ -42,59 +49,50 @@ FString UTempoLidar::GetSensorName() const
 
 bool UTempoLidar::IsAwaitingRender()
 {
-	for (const UTempoLidarCaptureComponent* LidarCaptureComponent : GetActiveCaptureComponents())
-	{
-		if (LidarCaptureComponent->IsNextReadAwaitingRender())
-		{
-			return true;
-		}
-	}
-	return false;
+	return TextureReadQueue.IsNextAwaitingRender();
 }
 
 void UTempoLidar::OnRenderCompleted()
 {
-	for (UTempoLidarCaptureComponent* LidarCaptureComponent : GetActiveCaptureComponents())
+	if (!TextureReadQueue.IsNextAwaitingRender() || !SharedTextureTarget)
 	{
-		LidarCaptureComponent->ReadNextIfAvailable();
+		return;
 	}
+
+	const FRenderTarget* RenderTarget = SharedTextureTarget->GetRenderTargetResource();
+	if (!ensureMsgf(RenderTarget, TEXT("SharedTextureTarget was not initialized. Skipping texture read.")))
+	{
+		return;
+	}
+
+	const bool bShouldBlock = GetDefault<UTempoCoreSettings>()->GetTimeMode() == ETimeMode::FixedStep
+		&& !GetDefault<UTempoSensorsSettings>()->GetPipelinedRendering();
+
+	TextureReadQueue.ReadAllAvailable(RenderTarget, bShouldBlock);
 }
 
 void UTempoLidar::BlockUntilMeasurementsReady() const
 {
-	for (const UTempoLidarCaptureComponent* LidarCaptureComponent : GetActiveCaptureComponents())
-	{
-		LidarCaptureComponent->BlockUntilNextReadComplete();
-	}
+	TextureReadQueue.BlockUntilNextReadComplete();
 }
 
 TOptional<TFuture<void>> UTempoLidar::SendMeasurements()
 {
-	TArray<TUniquePtr<FTextureRead>> TextureReads;
-	const TArray<UTempoLidarCaptureComponent*> ActiveCaptureComponents = GetActiveCaptureComponents();
-	const int32 NumCompletedReads = ActiveCaptureComponents.FilterByPredicate(
-			[](const UTempoLidarCaptureComponent* CaptureComponent) { return CaptureComponent->NextReadComplete(); }
-		).Num();
-	if (NumCompletedReads == ActiveCaptureComponents.Num())
-	{
-		for (UTempoLidarCaptureComponent* CaptureComponent : ActiveCaptureComponents)
-		{
-			TextureReads.Add(CaptureComponent->DequeueIfReadComplete());
-		}
-	}
+	TOptional<TFuture<void>> Future;
 
-	TOptional<TFuture<void>> Future = DecodeAndRespond(MoveTemp(TextureReads));
-
-	if (NumResponded == ActiveCaptureComponents.Num())
+	if (TextureReadQueue.NextReadComplete())
 	{
+		TUniquePtr<FTextureRead> TextureRead = TextureReadQueue.DequeueIfReadComplete();
+		check(TextureRead->GetType() == TEXT("LidarShared"));
+		FLidarSharedTextureRead* SharedRead = static_cast<FLidarSharedTextureRead*>(TextureRead.Get());
+		TArray<TUniquePtr<FTextureRead>> SliceReads = SharedRead->SplitIntoSlices();
+		Future = DecodeAndRespond(MoveTemp(SliceReads));
+
 		PendingRequests.Empty();
-		NumResponded = 0;
-		SequenceId++;
 	}
 
-	// Queues of the active tiles are empty at this point (after DequeueIfReadComplete for this
-	// cycle). Take the opportunity to apply any reconfigure that was detected earlier but had
-	// to be deferred because reads were still in flight.
+	// Take the opportunity to apply any reconfigure that was detected earlier but had to be
+	// deferred because reads were still in flight.
 	TryApplyPendingReconfigure();
 
 	return Future;
@@ -152,6 +150,11 @@ void UTempoLidar::OnRegister()
 
 	SyncCaptureComponents();
 	UpdateInternalMirrors();
+
+	if (UTempoCoreUtils::IsGameWorld(this))
+	{
+		InitSharedRenderTarget();
+	}
 }
 
 void UTempoLidar::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
@@ -217,6 +220,12 @@ void UTempoLidar::ReconfigureCaptureComponentsNow()
 
 	SyncCaptureComponents();
 	UpdateInternalMirrors();
+
+	// Shared RT geometry depends on the (possibly changed) slice sizes, so rebuild it.
+	if (UTempoCoreUtils::IsGameWorld(this))
+	{
+		InitSharedRenderTarget();
+	}
 }
 
 void UTempoLidar::UpdateInternalMirrors()
@@ -398,17 +407,6 @@ bool UTempoLidarCaptureComponent::HasPendingRequests() const
 	return !LidarOwner->PendingRequests.IsEmpty();
 }
 
-FTextureRead* UTempoLidarCaptureComponent::MakeTextureRead() const
-{
-	check(GetWorld());
-
-	return new TTextureRead<FLidarPixel>(SizeXY, LidarOwner->SequenceId + NumPendingTextureReads(), GetWorld()->GetTimeSeconds(), LidarOwner->GetOwnerName(),
-		LidarOwner->GetSensorName(), LidarOwner->GetComponentTransform(), GetComponentTransform(), FOVAngle,
-		LidarOwner->VerticalFOV, HorizontalBeams, LidarOwner->VerticalBeams, SizeXYFOV,
-		LidarOwner->IntensitySaturationDistance, LidarOwner->MaxAngleOfIncidence,
-		LidarOwner->GetActiveCaptureComponents().Num(), GetRelativeRotation().Yaw, MinDepth, MaxDepth, LidarOwner->MinDistance, LidarOwner->MaxDistance);
-}
-
 void TTextureRead<FLidarPixel>::Decode(float TransmissionTime, TempoLidar::LidarScanSegment& ScanSegmentOut) const
 {
 	const FVector2D ImagePlaneSize = 2.0 * SphericalToPerspective(HorizontalFOV / 2.0, VerticalFOV / 2.0);
@@ -504,8 +502,6 @@ void TTextureRead<FLidarPixel>::Decode(float TransmissionTime, TempoLidar::Lidar
 TFuture<void> UTempoLidar::DecodeAndRespond(TArray<TUniquePtr<FTextureRead>> TextureReads)
 {
 	const double TransmissionTime = GetWorld()->GetTimeSeconds();
-
-	NumResponded += TextureReads.Num();
 
 	TFuture<void> Future = Async(EAsyncExecution::TaskGraph, [
 		this,
@@ -623,4 +619,314 @@ void UTempoLidarCaptureComponent::Configure(double YawOffset, double SubHorizont
 	SizeXY = FIntPoint(FMath::CeilToInt32(SizeXYFOV.X), FMath::CeilToInt32(SizeXYFOV.Y));
 	DistortionFactor = UndistortedVerticalImagePlaneSize / ImagePlaneSize.Y;
 	DistortedVerticalFOV = FMath::RadiansToDegrees(2.0 * FMath::Atan(FMath::Tan(FMath::DegreesToRadians(LidarOwner->VerticalFOV) / 2.0) * DistortionFactor));
+}
+
+// ------------------------------------------------------------------------------------
+// Shared RT / capture timer
+// ------------------------------------------------------------------------------------
+
+void UTempoLidar::Activate(bool bReset)
+{
+	Super::Activate(bReset);
+
+	if (UTempoCoreUtils::IsGameWorld(this))
+	{
+		InitSharedRenderTarget();
+		RestartCaptureTimer();
+	}
+}
+
+void UTempoLidar::Deactivate()
+{
+	Super::Deactivate();
+
+	if (UTempoCoreUtils::IsGameWorld(this))
+	{
+		if (UWorld* World = GetWorld())
+		{
+			World->GetTimerManager().ClearTimer(TimerHandle);
+		}
+		TextureReadQueue.Empty();
+	}
+}
+
+static float GetLidarTimerPeriod(float RateHz)
+{
+	return 1.0 / FMath::Max(UE_KINDA_SMALL_NUMBER, RateHz);
+}
+
+void UTempoLidar::RestartCaptureTimer()
+{
+	if (UWorld* World = GetWorld())
+	{
+		const float TimerPeriod = GetLidarTimerPeriod(RateHz);
+		World->GetTimerManager().SetTimer(TimerHandle, this, &UTempoLidar::MaybeCapture, TimerPeriod, true);
+	}
+}
+
+FTextureRHIRef UTempoLidar::AcquireNextStagingTexture()
+{
+	check(StagingTextures.Num() > 0);
+	const FTextureRHIRef& Texture = StagingTextures[NextStagingIndex];
+	NextStagingIndex = (NextStagingIndex + 1) % StagingTextures.Num();
+	return Texture;
+}
+
+void UTempoLidar::InitSharedRenderTarget()
+{
+	// Wait for any previous staging texture init render command to complete before modifying
+	// StagingTextures, since the render command accesses the array via raw pointer.
+	TextureInitFence.Wait();
+
+	const TMap<FName, UTempoLidarCaptureComponent*> CaptureComponents = GetAllCaptureComponents();
+
+	// Walk active slices in Left->Center->Right order, assigning each its horizontal offset
+	// within the packed RT. Packed width is the running sum; packed height is the max slice height.
+	int32 PackedX = 0;
+	int32 MaxY = 0;
+	for (const FName& Tag : { LeftCaptureComponentTag, CenterCaptureComponentTag, RightCaptureComponentTag })
+	{
+		UTempoLidarCaptureComponent* const* ComponentPtr = CaptureComponents.Find(Tag);
+		if (!ComponentPtr || !*ComponentPtr || !(*ComponentPtr)->IsActive())
+		{
+			continue;
+		}
+		UTempoLidarCaptureComponent* Component = *ComponentPtr;
+		Component->SliceDestOffsetX = PackedX;
+		PackedX += Component->SizeXY.X;
+		MaxY = FMath::Max(MaxY, Component->SizeXY.Y);
+	}
+
+	if (PackedX <= 0 || MaxY <= 0)
+	{
+		return;
+	}
+
+	SharedTextureTarget = NewObject<UTextureRenderTarget2D>(this);
+	SharedTextureTarget->TargetGamma = GetDefault<UTempoSensorsSettings>()->GetSceneCaptureGamma();
+	SharedTextureTarget->bGPUSharedFlag = true;
+	SharedTextureTarget->RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA16f;
+	SharedTextureTarget->InitCustomFormat(PackedX, MaxY, EPixelFormat::PF_A16B16G16R16, true);
+
+	const int32 MaxQueueSize = GetDefault<UTempoSensorsSettings>()->GetMaxCameraRenderBufferSize();
+	const int32 NumStagingTextures = FMath::Max(2, MaxQueueSize > 0 ? MaxQueueSize + 1 : 2);
+
+	{
+		FScopeLock Lock(&StagingTexturesMutex);
+		if (NumStagingTextures != StagingTextures.Num())
+		{
+			StagingTextures.SetNum(NumStagingTextures);
+			NextStagingIndex = 0;
+		}
+	}
+
+	struct FInitStagingContext
+	{
+		FString NameBase;
+		int32 SizeX;
+		int32 SizeY;
+		EPixelFormat PixelFormat;
+		int32 NumTextures;
+		TArray<FTextureRHIRef>* StagingTextures;
+		FCriticalSection* StagingTexturesMutex;
+	};
+
+	FInitStagingContext Context = {
+		GetName(),
+		SharedTextureTarget->SizeX,
+		SharedTextureTarget->SizeY,
+		SharedTextureTarget->GetFormat(),
+		NumStagingTextures,
+		&StagingTextures,
+		&StagingTexturesMutex
+	};
+
+	ENQUEUE_RENDER_COMMAND(InitTempoLidarSharedTextureCopy)(
+		[Context](FRHICommandListImmediate& RHICmdList)
+		{
+			constexpr ETextureCreateFlags TexCreateFlags = ETextureCreateFlags::Shared | ETextureCreateFlags::CPUReadback;
+
+			for (int32 I = 0; I < Context.NumTextures; ++I)
+			{
+				const FRHITextureCreateDesc Desc =
+					FRHITextureCreateDesc::Create2D(*FString::Printf(TEXT("%s SharedStagingTexture %d"), *Context.NameBase, I))
+					.SetExtent(Context.SizeX, Context.SizeY)
+					.SetFormat(Context.PixelFormat)
+					.SetFlags(TexCreateFlags);
+
+				{
+					FScopeLock Lock(Context.StagingTexturesMutex);
+					(*Context.StagingTextures)[I] = RHICreateTexture(Desc);
+				}
+			}
+		});
+
+	TextureInitFence.BeginFence();
+
+	// Any pending texture reads reference the previous RT geometry; discard them.
+	TextureReadQueue.Empty();
+}
+
+namespace
+{
+	struct FLidarTileCopyInfo
+	{
+		FTextureRenderTargetResource* TileRT;
+		int32 SliceDestOffsetX;
+		FIntPoint TileSizeXY;
+	};
+}
+
+void UTempoLidar::MaybeCapture()
+{
+	const float TimerPeriod = GetLidarTimerPeriod(RateHz);
+	if (UWorld* World = GetWorld())
+	{
+		if (!FMath::IsNearlyEqual(World->GetTimerManager().GetTimerRate(TimerHandle), TimerPeriod))
+		{
+			RestartCaptureTimer();
+		}
+	}
+
+	if (PendingRequests.IsEmpty())
+	{
+		return;
+	}
+
+	if (!SharedTextureTarget)
+	{
+		return;
+	}
+
+	const TArray<UTempoLidarCaptureComponent*> ActiveCaptureComponents = GetActiveCaptureComponents();
+	if (ActiveCaptureComponents.IsEmpty())
+	{
+		return;
+	}
+
+	const int32 MaxQueueSize = GetDefault<UTempoSensorsSettings>()->GetMaxCameraRenderBufferSize();
+	if (MaxQueueSize > 0 && TextureReadQueue.Num() > MaxQueueSize)
+	{
+		UE_LOG(LogTempoLidar, Warning, TEXT("Fell behind while reading frames from sensor %s. Skipping capture."), *GetName());
+		return;
+	}
+
+	for (const UTempoLidarCaptureComponent* Tile : ActiveCaptureComponents)
+	{
+		if (!Tile->TextureTarget || !Tile->TextureTarget->GameThread_GetRenderTargetResource() ||
+			Tile->TextureTarget->GetFormat() != SharedTextureTarget->GetFormat())
+		{
+			return;
+		}
+	}
+
+	FTextureRenderTargetResource* SharedRTResource = SharedTextureTarget->GameThread_GetRenderTargetResource();
+	if (!SharedRTResource)
+	{
+		return;
+	}
+
+	// Capture each tile. With CaptureScene() (not CaptureSceneDeferred) the tile's render commands
+	// enqueue immediately in FIFO order, so the pack command we enqueue right after will run
+	// after all tile renders on the render thread.
+	for (UTempoLidarCaptureComponent* Tile : ActiveCaptureComponents)
+	{
+		Tile->CaptureScene();
+	}
+
+	const double CaptureTime = GetWorld()->GetTimeSeconds();
+
+	// Build per-slice reads with the metadata their Decode path expects. Packed dimensions derive
+	// from the same running-sum / max-height used by InitSharedRenderTarget.
+	TArray<TUniquePtr<TTextureRead<FLidarPixel>>> Slices;
+	Slices.Reserve(ActiveCaptureComponents.Num());
+
+	TArray<FLidarTileCopyInfo> TileInfos;
+	TileInfos.Reserve(ActiveCaptureComponents.Num());
+
+	int32 PackedX = 0;
+	int32 MaxY = 0;
+	for (UTempoLidarCaptureComponent* Tile : ActiveCaptureComponents)
+	{
+		Slices.Emplace(new TTextureRead<FLidarPixel>(
+			Tile->SizeXY, SequenceId, CaptureTime, GetOwnerName(), GetSensorName(),
+			GetComponentTransform(), Tile->GetComponentTransform(), Tile->FOVAngle,
+			VerticalFOV, Tile->HorizontalBeams, VerticalBeams, Tile->SizeXYFOV,
+			IntensitySaturationDistance, MaxAngleOfIncidence,
+			ActiveCaptureComponents.Num(), Tile->GetRelativeRotation().Yaw, Tile->MinDepth, Tile->MaxDepth,
+			MinDistance, MaxDistance));
+
+		FLidarTileCopyInfo Info;
+		Info.TileRT = Tile->TextureTarget->GameThread_GetRenderTargetResource();
+		Info.SliceDestOffsetX = Tile->SliceDestOffsetX;
+		Info.TileSizeXY = Tile->SizeXY;
+		TileInfos.Add(Info);
+
+		PackedX = FMath::Max(PackedX, Tile->SliceDestOffsetX + Tile->SizeXY.X);
+		MaxY = FMath::Max(MaxY, Tile->SizeXY.Y);
+	}
+
+	FLidarSharedTextureRead* NewRead = new FLidarSharedTextureRead(
+		FIntPoint(PackedX, MaxY), SequenceId, CaptureTime, GetOwnerName(), GetSensorName(),
+		GetComponentTransform(), MoveTemp(Slices));
+
+	NewRead->StagingTexture = AcquireNextStagingTexture();
+
+	SequenceId++;
+
+	const FTextureRHIRef StagingTex = NewRead->StagingTexture;
+
+	ENQUEUE_RENDER_COMMAND(TempoLidarPackAndReadback)(
+		[SharedRTResource, StagingTex, TileInfos, NewRead](FRHICommandListImmediate& RHICmdList)
+		{
+			FRHITexture* SharedRT = SharedRTResource->GetRenderTargetTexture();
+
+			RHICmdList.Transition(FRHITransitionInfo(SharedRT, ERHIAccess::Unknown, ERHIAccess::CopyDest));
+
+			for (const FLidarTileCopyInfo& Info : TileInfos)
+			{
+				FRHITexture* TileRT = Info.TileRT->GetRenderTargetTexture();
+				RHICmdList.Transition(FRHITransitionInfo(TileRT, ERHIAccess::Unknown, ERHIAccess::CopySrc));
+				FRHICopyTextureInfo CopyInfo;
+				CopyInfo.SourcePosition = FIntVector(0, 0, 0);
+				CopyInfo.DestPosition = FIntVector(Info.SliceDestOffsetX, 0, 0);
+				CopyInfo.Size = FIntVector(Info.TileSizeXY.X, Info.TileSizeXY.Y, 1);
+				RHICmdList.CopyTexture(TileRT, SharedRT, CopyInfo);
+			}
+
+			RHICmdList.Transition(FRHITransitionInfo(SharedRT, ERHIAccess::Unknown, ERHIAccess::CopySrc));
+			RHICmdList.CopyTexture(SharedRT, StagingTex, FRHICopyTextureInfo());
+
+			NewRead->RenderFence = RHICreateGPUFence(TEXT("TempoLidarRenderFence"));
+			RHICmdList.WriteGPUFence(NewRead->RenderFence);
+		});
+
+	TextureReadQueue.Enqueue(NewRead);
+}
+
+TArray<TUniquePtr<FTextureRead>> FLidarSharedTextureRead::SplitIntoSlices()
+{
+	TArray<TUniquePtr<FTextureRead>> Result;
+	Result.Reserve(Slices.Num());
+
+	int32 RunningX = 0;
+	for (TUniquePtr<TTextureRead<FLidarPixel>>& Slice : Slices)
+	{
+		const FIntPoint SliceSize = Slice->ImageSize;
+		const int32 SrcX = RunningX;
+		const int32 PackedWidth = ImageSize.X;
+		TTextureRead<FLidarPixel>* SlicePtr = Slice.Get();
+		TArray<FLidarPixel>& PackedImage = Image;
+		ParallelFor(SliceSize.Y, [SlicePtr, &PackedImage, SrcX, PackedWidth, SliceSize](int32 Row)
+		{
+			FMemory::Memcpy(
+				&SlicePtr->Image[Row * SliceSize.X],
+				&PackedImage[Row * PackedWidth + SrcX],
+				SliceSize.X * sizeof(FLidarPixel));
+		});
+		RunningX += SliceSize.X;
+		Result.Emplace(Slice.Release());
+	}
+	Slices.Empty();
+	return Result;
 }

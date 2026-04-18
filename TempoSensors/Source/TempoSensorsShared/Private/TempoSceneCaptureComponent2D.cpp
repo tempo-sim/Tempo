@@ -54,7 +54,10 @@ void UTempoSceneCaptureComponent2D::Activate(bool bReset)
 	if (UTempoCoreUtils::IsGameWorld(this))
 	{
 		InitRenderTarget();
-		RestartCaptureTimer();	
+		if (ShouldManageOwnTimer())
+		{
+			RestartCaptureTimer();
+		}
 	}
 }
 
@@ -144,18 +147,25 @@ void UTempoSceneCaptureComponent2D::UpdateSceneCaptureContents(FSceneInterface* 
 	}
 
 	const FTextureRenderTargetResource* RenderTarget = TextureTarget->GameThread_GetRenderTargetResource();
-	if (!ensureMsgf(RenderTarget && RenderTarget->IsInitialized(), TEXT("RenderTarget was not initialized. Skipping capture.")) ||
-		!ensureMsgf(StagingTextures.Num() > 0 && StagingTextures[0].IsValid() && StagingTextures[0]->IsValid(), TEXT("StagingTextures were not valid. Skipping capture.")) ||
-		!ensureMsgf(StagingTextures[0]->GetFormat() == TextureTarget->GetFormat(), TEXT("RenderTarget and StagingTextures did not have same format. Skipping Capture.")))
+	if (!ensureMsgf(RenderTarget && RenderTarget->IsInitialized(), TEXT("RenderTarget was not initialized. Skipping capture.")))
 	{
 		return;
 	}
 
-	const int32 MaxTextureQueueSize = GetMaxTextureQueueSize();
-	if (MaxTextureQueueSize > 0 && TextureReadQueue.Num() > MaxTextureQueueSize)
+	if (ShouldManageOwnReadback())
 	{
-		UE_LOG(LogTempoSensorsShared, Warning, TEXT("Fell behind while reading frames from sensor %s. Skipping capture."), *GetName());
-		return;
+		if (!ensureMsgf(StagingTextures.Num() > 0 && StagingTextures[0].IsValid() && StagingTextures[0]->IsValid(), TEXT("StagingTextures were not valid. Skipping capture.")) ||
+			!ensureMsgf(StagingTextures[0]->GetFormat() == TextureTarget->GetFormat(), TEXT("RenderTarget and StagingTextures did not have same format. Skipping Capture.")))
+		{
+			return;
+		}
+
+		const int32 MaxTextureQueueSize = GetMaxTextureQueueSize();
+		if (MaxTextureQueueSize > 0 && TextureReadQueue.Num() > MaxTextureQueueSize)
+		{
+			UE_LOG(LogTempoSensorsShared, Warning, TEXT("Fell behind while reading frames from sensor %s. Skipping capture."), *GetName());
+			return;
+		}
 	}
 
 #if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
@@ -163,7 +173,12 @@ void UTempoSceneCaptureComponent2D::UpdateSceneCaptureContents(FSceneInterface* 
 #else
 	Super::UpdateSceneCaptureContents(Scene, SceneRenderBuilder);
 #endif
-	
+
+	if (!ShouldManageOwnReadback())
+	{
+		return;
+	}
+
 	SequenceId++;
 
 	FTextureRead* NewRead = MakeTextureRead();
@@ -316,6 +331,13 @@ void UTempoSceneCaptureComponent2D::InitRenderTarget()
 	else
 	{
 		TextureTarget->InitCustomFormat(SizeXY.X, SizeXY.Y, PixelFormatOverride, true);
+	}
+
+	if (!ShouldManageOwnReadback())
+	{
+		// Outer owner manages staging and readback; nothing else for us to do here.
+		InitDistortionMap();
+		return;
 	}
 
 	// Determine how many staging textures to create. We need at least as many as the max

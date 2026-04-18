@@ -16,6 +16,7 @@ void OptimizeShowFlagsForNoColor(FEngineShowFlags& ShowFlags)
 	ShowFlags.SetAmbientCubemap(false);
 	ShowFlags.SetEyeAdaptation(false);
 	ShowFlags.SetLensFlares(false);
+	ShowFlags.SetBloom(false);
 	ShowFlags.SetGlobalIllumination(false);
 	ShowFlags.SetVignette(false);
 	ShowFlags.SetGrain(false);
@@ -34,8 +35,9 @@ void OptimizeShowFlagsForNoColor(FEngineShowFlags& ShowFlags)
 	ShowFlags.SetCameraInterpolation(false);
 	ShowFlags.SetToneCurve(false);
 	ShowFlags.SetSeparateTranslucency(false);
-	ShowFlags.SetSeparateTranslucency(false);
 	ShowFlags.SetReflectionEnvironment(false);
+	ShowFlags.SetDecals(false);
+	// ShowFlags.SetHairStrands(false);
 	ShowFlags.SetDiffuse(false);
 	ShowFlags.SetSpecular(false);
 	ShowFlags.SetScreenSpaceReflections(false);
