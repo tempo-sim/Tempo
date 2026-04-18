@@ -10,53 +10,6 @@ import qasync
 
 import tempo.tempo_sensors as ts
 
-def create_transformation_matrix(translation, rotation):
-    """
-    Create a 4x4 homogeneous transformation matrix from translation and rotation.
-
-    Args:
-        translation (tuple): (x, y, z) translation vector
-        rotation (tuple): (roll, pitch, yaw) rotation angles in radians
-
-    Returns:
-        numpy.ndarray: 4x4 transformation matrix
-    """
-    # Unpack parameters
-    x, y, z = translation
-    roll, pitch, yaw = rotation
-
-    # Create rotation matrices for each axis
-    # Roll (rotation around X axis)
-    Rx = np.array([
-        [1, 0, 0],
-        [0, np.cos(roll), -np.sin(roll)],
-        [0, np.sin(roll), np.cos(roll)]
-    ])
-
-    # Pitch (rotation around Y axis)
-    Ry = np.array([
-        [np.cos(pitch), 0, np.sin(pitch)],
-        [0, 1, 0],
-        [-np.sin(pitch), 0, np.cos(pitch)]
-    ])
-
-    # Yaw (rotation around Z axis)
-    Rz = np.array([
-        [np.cos(yaw), -np.sin(yaw), 0],
-        [np.sin(yaw), np.cos(yaw), 0],
-        [0, 0, 1]
-    ])
-
-    # Combined rotation matrix
-    R = Rz @ Ry @ Rx
-
-    # Create 4x4 transformation matrix
-    transform = np.eye(4)
-    transform[:3, :3] = R
-    transform[:3, 3] = [x, y, z]
-
-    return np.linalg.inv(transform)
-
 
 class PointCloudViewer:
     def __init__(self, update_rate, colorize_by):
@@ -116,23 +69,15 @@ class PointCloudViewer:
             self.refresh()
             await asyncio.sleep(1.0 / self.update_rate)  # Let other tasks run
 
-    def distances_to_points(self, distances, transform):
-        """Convert distance measurements to 3D points."""
-        # Convert distances to 3D coordinates
+    def distances_to_points(self, distances):
+        """Convert distance measurements to 3D points. Returns (points, valid_mask)."""
         x = distances * np.cos(self.v_angles_grid) * np.cos(self.h_angles_grid)
         y = distances * np.cos(self.v_angles_grid) * np.sin(self.h_angles_grid)
         z = distances * np.sin(self.v_angles_grid)
 
-        # Stack coordinates and reshape
-        points = np.stack([x, y, z], axis=-1)
-        points = points.reshape(-1, 3)
-        homogeneous_points = np.hstack([points, np.ones((len(points), 1))])
-        # transformed_points = homogeneous_points @ transform.T
-        transformed_points = np.delete(homogeneous_points, (3), axis=1)
-
-        # Remove points with zero or invalid distances
-        # valid_points = transformed_points[distances.flatten() > 0]
-        return transformed_points
+        points = np.stack([x, y, z], axis=-1).reshape(-1, 3)
+        valid_mask = distances.flatten() > 0
+        return points[valid_mask], valid_mask
 
     def refresh(self):
         self.app.processEvents()
@@ -178,7 +123,6 @@ class PointCloudViewer:
     def update_points(self):
         """Update the point cloud with the new scan."""
 
-        # Calculate angles for each beam
         horizontal_fov = self.azimuth_max - self.azimuth_min
         vertical_fov = self.latest_scan.elevation_range.max - self.latest_scan.elevation_range.min
         h_angles = np.linspace(horizontal_fov/2, -horizontal_fov/2, self.horizontal_beams)
@@ -188,22 +132,17 @@ class PointCloudViewer:
         distances = self.distances
         intensities = self.intensities
         labels = self.labels
-        transform = create_transformation_matrix((0.0, 0.0, 0.0),
-                                                 (self.latest_scan.header.sensor_transform.rotation.r, self.latest_scan.header.sensor_transform.rotation.p, 0.0))
-        points = self.distances_to_points(distances, transform)
+        points, valid_mask = self.distances_to_points(distances)
 
-        # Calculate colors based on distance,
         if self.colorize_by.lower() == "distance":
-            colors = distances.flatten()
+            colors = distances.flatten()[valid_mask]
             colors = (colors - np.min(colors)) / (np.max(colors) - np.min(colors) + 1e-6)
         elif self.colorize_by.lower() == "intensity":
-            colors = intensities.flatten()
+            colors = intensities.flatten()[valid_mask]
         elif self.colorize_by.lower() == "label":
-            colors = labels.flatten()
-            colors = colors / 255.0
+            colors = labels.flatten()[valid_mask] / 255.0
 
         new_num_points = len(points)
-        # Only remove and recreate when point count changes; otherwise update in-place
         if self.point_cloud is not None and new_num_points != self.num_points:
             self.plotter.remove_actor(self.actor)
             self.point_cloud = None
@@ -212,18 +151,21 @@ class PointCloudViewer:
 
         if self.point_cloud is None:
             self.point_cloud = pv.PolyData(points)
+            self.point_cloud.point_data['colors'] = colors
             self.actor = self.plotter.add_points(
                 self.point_cloud,
                 point_size=4,
                 render_points_as_spheres=False,
-                scalars=colors,
+                scalars='colors',
                 cmap='viridis',
                 show_scalar_bar=True,
                 reset_camera=False
             )
         else:
             self.point_cloud.points = points
-            self.point_cloud.point_data['scalars'] = colors
+            self.point_cloud.point_data['colors'] = colors
+            if colors.size > 0:
+                self.actor.mapper.scalar_range = (float(colors.min()), float(colors.max()))
 
     def close(self):
         if hasattr(self, 'loop'):
