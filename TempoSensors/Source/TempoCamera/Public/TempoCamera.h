@@ -177,6 +177,14 @@ public:
 protected:
 	virtual bool HasPendingRequests() const override;
 
+	// Tiles never allocate their own staging textures or FTextureReads — the owning UTempoCamera
+	// stitches tile render targets into a shared RT and issues a single readback for the sensor.
+	virtual bool ShouldManageOwnReadback() const override { return false; }
+
+	// Tiles never start their own capture timer — the owning UTempoCamera drives CaptureScene()
+	// on each active tile from its own timer callback.
+	virtual bool ShouldManageOwnTimer() const override { return false; }
+
 	virtual FTextureRead* MakeTextureRead() const override;
 
 	virtual int32 GetMaxTextureQueueSize() const override;
@@ -198,14 +206,6 @@ protected:
 	friend UTempoCamera;
 };
 
-struct FCameraTileTextureRead
-{
-	TUniquePtr<FTextureRead> TextureRead;
-	FIntPoint TileDestOffset;
-	FIntPoint TileOutputSizeXY;
-	int32 TileOutputOffsetY;
-};
-
 UCLASS(Blueprintable, BlueprintType, ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class TEMPOCAMERA_API UTempoCamera : public USceneComponent, public ITempoSensorInterface
 {
@@ -217,6 +217,9 @@ public:
 	virtual void OnRegister() override;
 
 	virtual void BeginPlay() override;
+
+	virtual void Activate(bool bReset = false) override;
+	virtual void Deactivate() override;
 
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
@@ -246,7 +249,19 @@ public:
 protected:
 	TFuture<void> DecodeAndRespond(TUniquePtr<FTextureRead> TextureRead);
 
-	TFuture<void> StitchAndRespond(TArray<FCameraTileTextureRead> TileReads);
+	// Initialize the shared render target and ring of staging textures sized for SizeXY,
+	// with a format matching the tile render targets (driven by bDepthEnabled).
+	void InitSharedRenderTarget();
+
+	// Starts or restarts the timer that calls MaybeCapture.
+	void RestartCaptureTimer();
+
+	// Called by the capture timer. Issues CaptureScene() on each active tile, then enqueues a
+	// single render command that stitches tile RTs into the shared RT and initiates a single readback.
+	void MaybeCapture();
+
+	// Returns the next staging texture from the ring buffer and advances the index.
+	FTextureRHIRef AcquireNextStagingTexture();
 
 	TMap<FName, UTempoCameraCaptureComponent*> GetAllCaptureComponents() const;
 	TMap<FName, UTempoCameraCaptureComponent*> GetOrCreateCaptureComponents();
@@ -343,6 +358,23 @@ protected:
 
 	// Set when HasDetectedParameterChange() sees a diff; cleared after a successful apply.
 	uint8 bReconfigurePending = false;
+
+	// Shared render target holding the stitched output from all active tiles.
+	UPROPERTY(Transient, VisibleAnywhere)
+	UTextureRenderTarget2D* SharedTextureTarget = nullptr;
+
+	// Ring buffer of staging textures for GPU->CPU readback of the shared RT.
+	TArray<FTextureRHIRef> StagingTextures;
+	FCriticalSection StagingTexturesMutex;
+	int32 NextStagingIndex = 0;
+
+	// Queue of pending texture reads for the shared RT (one entry per capture).
+	FTextureReadQueue TextureReadQueue;
+
+	// Fence indicating that staging texture init has completed on the render thread.
+	FRenderCommandFence TextureInitFence;
+
+	FTimerHandle TimerHandle;
 
 	friend class UTempoCameraCaptureComponent;
 };
