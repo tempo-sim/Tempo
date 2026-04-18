@@ -57,6 +57,9 @@ public:
 
 	virtual void OnRegister() override;
 
+	virtual void Activate(bool bReset = false) override;
+	virtual void Deactivate() override;
+
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 #if WITH_EDITOR
@@ -78,6 +81,20 @@ public:
 
 protected:
 	TFuture<void> DecodeAndRespond(TArray<TUniquePtr<FTextureRead>> TextureReads);
+
+	// Initialize the shared render target and ring of staging textures sized for the horizontally
+	// packed slices (width = sum of slice widths, height = max of slice heights).
+	void InitSharedRenderTarget();
+
+	// Starts or restarts the timer that calls MaybeCapture.
+	void RestartCaptureTimer();
+
+	// Called by the capture timer. Issues CaptureScene() on each active slice, then enqueues a
+	// single render command that packs slice RTs into the shared RT and initiates a single readback.
+	void MaybeCapture();
+
+	// Returns the next staging texture from the ring buffer and advances the index.
+	FTextureRHIRef AcquireNextStagingTexture();
 
 	TMap<FName, UTempoLidarCaptureComponent*> GetAllCaptureComponents() const;
 	TMap<FName, UTempoLidarCaptureComponent*> GetOrCreateCaptureComponents();
@@ -137,8 +154,6 @@ protected:
 	UPROPERTY(VisibleAnywhere)
 	int32 SequenceId = 0;
 
-	int32 NumResponded = 0;
-
 	TArray<FLidarScanRequest> PendingRequests;
 
 	// Mirrors of the watched properties. Updated in ReconfigureCaptureComponentsNow.
@@ -148,6 +163,23 @@ protected:
 	int32 VerticalBeams_Internal = -1;
 
 	uint8 bReconfigurePending = false;
+
+	// Shared render target holding all active slices packed horizontally.
+	UPROPERTY(Transient, VisibleAnywhere)
+	UTextureRenderTarget2D* SharedTextureTarget = nullptr;
+
+	// Ring buffer of staging textures for GPU->CPU readback of the shared RT.
+	TArray<FTextureRHIRef> StagingTextures;
+	FCriticalSection StagingTexturesMutex;
+	int32 NextStagingIndex = 0;
+
+	// Queue of pending texture reads for the shared RT (one entry per capture).
+	FTextureReadQueue TextureReadQueue;
+
+	// Fence indicating that staging texture init has completed on the render thread.
+	FRenderCommandFence TextureInitFence;
+
+	FTimerHandle TimerHandle;
 
 	friend class UTempoLidarCaptureComponent;
 
@@ -190,6 +222,29 @@ struct TTextureRead<FLidarPixel> : TTextureReadBase<FLidarPixel>
 	double MaxDistance;
 };
 
+// A texture read that holds the horizontally-packed pixels of all active lidar slices.
+// After readback, SplitIntoSlices() produces one TTextureRead<FLidarPixel> per slice so that
+// the existing parallel Decode path (which expects per-slice reads) can proceed unchanged.
+struct FLidarSharedTextureRead : TTextureReadBase<FLidarPixel>
+{
+	FLidarSharedTextureRead(const FIntPoint& PackedSizeIn, int32 SequenceIdIn, double CaptureTimeIn,
+		const FString& OwnerNameIn, const FString& SensorNameIn, const FTransform& SensorTransformIn,
+		TArray<TUniquePtr<TTextureRead<FLidarPixel>>> SlicesIn)
+		: TTextureReadBase(PackedSizeIn, SequenceIdIn, CaptureTimeIn, OwnerNameIn, SensorNameIn, SensorTransformIn),
+		  Slices(MoveTemp(SlicesIn))
+	{
+	}
+
+	virtual FName GetType() const override { return TEXT("LidarShared"); }
+
+	// Move per-slice pixels out of the packed Image into each slice's own Image, returning ownership
+	// of the per-slice reads to the caller. This instance should not be used afterward.
+	TArray<TUniquePtr<FTextureRead>> SplitIntoSlices();
+
+	// Per-slice reads preallocated at capture time with the correct metadata and sized buffers.
+	TArray<TUniquePtr<TTextureRead<FLidarPixel>>> Slices;
+};
+
 UCLASS(ClassGroup=(Custom), NotPlaceable, NotBlueprintable)
 class TEMPOLIDAR_API UTempoLidarCaptureComponent : public UTempoSceneCaptureComponent2D
 {
@@ -205,11 +260,23 @@ protected:
 
 	virtual bool HasPendingRequests() const override;
 
-	virtual FTextureRead* MakeTextureRead() const override;
+	// Tiles never allocate their own staging textures or FTextureReads — the owning UTempoLidar
+	// packs tile render targets into a shared RT and issues a single readback for the sensor.
+	virtual bool ShouldManageOwnReadback() const override { return false; }
+
+	// Tiles never start their own capture timer — the owning UTempoLidar drives CaptureScene().
+	virtual bool ShouldManageOwnTimer() const override { return false; }
+
+	// Unused in tile mode; retained so base-class helpers that call it compile cleanly.
+	virtual FTextureRead* MakeTextureRead() const override { return nullptr; }
 
 	virtual int32 GetMaxTextureQueueSize() const override;
 
 	void Configure(double YawOffset, double SubHorizontalFOV, double SubHorizontalBeams);
+
+	// The destination X offset of this slice within the shared packed render target.
+	UPROPERTY(VisibleAnywhere)
+	int32 SliceDestOffsetX = 0;
 
 	// The number of horizontal beams.
 	UPROPERTY(EditAnywhere)

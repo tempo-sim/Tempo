@@ -292,6 +292,16 @@ protected:
 	// Derived components may override this to limit the size of the texture queue.
 	virtual int32 GetMaxTextureQueueSize() const { return -1; }
 
+	// When false, this component does not allocate staging textures, does not create FTextureReads,
+	// does not enqueue render fences, and does not increment SequenceId in UpdateSceneCaptureContents.
+	// An outer owner is expected to stitch this component's render target into a shared RT and issue
+	// a single readback command for the whole sensor. Derived tile components should return false.
+	virtual bool ShouldManageOwnReadback() const { return true; }
+
+	// When false, this component does not start a capture timer on Activate. An outer owner drives
+	// CaptureScene() directly when it has captured all its tiles. Derived tile components should return false.
+	virtual bool ShouldManageOwnTimer() const { return true; }
+
 	bool IsNextReadAwaitingRender() const;
 	void ReadNextIfAvailable();
 	void BlockUntilNextReadComplete() const;
