@@ -394,11 +394,6 @@ void UTempoSceneCaptureComponent2D::RestartCaptureTimer()
 
 void UTempoSceneCaptureComponent2D::MaybeCapture()
 {
-	if (GFrameCounter - CaptureFrame > 1)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("Skipped frame %d at %f"), GFrameCounter - 1, GetWorld()->GetTimeSeconds() - 0.1f);
-	}
-	CaptureFrame = GFrameCounter;
 	const float TimerPeriod = GetTimerPeriod(RateHz);
 	if (!FMath::IsNearlyEqual(GetWorld()->GetTimerManager().GetTimerRate(TimerHandle), TimerPeriod))
 	{
@@ -407,7 +402,6 @@ void UTempoSceneCaptureComponent2D::MaybeCapture()
 
 	if (!HasPendingRequests())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("No pending requests at %d"), GFrameCounter);
 		return;
 	}
 

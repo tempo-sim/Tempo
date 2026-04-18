@@ -95,7 +95,7 @@ protected:
 
 	// The rate in Hz this Lidar updates at.
 	UPROPERTY(EditAnywhere, meta=(UIMin=0.0, ClampMin=0.0))
-	double RateHz = 10.0;
+	float RateHz = 10.0;
 
 	// The measurement types supported. Should be set in constructor of derived classes.
 	UPROPERTY(VisibleAnywhere)
