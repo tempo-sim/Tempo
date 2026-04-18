@@ -309,9 +309,7 @@ protected:
 
 	// The rate in Hz this sensor updates at.
 	UPROPERTY(EditAnywhere)
-	double RateHz = 10.0;
-
-	int CaptureFrame = 0;
+	float RateHz = 10.0;
 
 	// Capture resolution.
 	UPROPERTY(EditAnywhere)
