@@ -281,18 +281,6 @@ UTempoCameraCaptureComponent::UTempoCameraCaptureComponent()
 	bAutoActivate = false;
 }
 
-void UTempoCameraCaptureComponent::OnRegister()
-{
-	Super::OnRegister();
-
-#if WITH_EDITORONLY_DATA
-	if (ProxyMeshComponent)
-	{
-		ProxyMeshComponent->SetVisibility(false);
-	}
-#endif
-}
-
 void UTempoCameraCaptureComponent::ApplyRenderSettings()
 {
 	if (!CameraOwner)

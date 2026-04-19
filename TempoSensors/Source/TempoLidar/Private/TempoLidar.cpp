@@ -282,18 +282,6 @@ UTempoLidarCaptureComponent::UTempoLidarCaptureComponent()
 	bAutoActivate = false;
 }
 
-void UTempoLidarCaptureComponent::OnRegister()
-{
-	Super::OnRegister();
-
-#if WITH_EDITORONLY_DATA
-	if (ProxyMeshComponent)
-	{
-		ProxyMeshComponent->SetVisibility(false);
-	}
-#endif
-}
-
 FVector2D SphericalToPerspective(double AzimuthDeg, double ElevationDeg)
 {
 	const double TanAzimuth = FMath::Tan(FMath::DegreesToRadians(AzimuthDeg));
