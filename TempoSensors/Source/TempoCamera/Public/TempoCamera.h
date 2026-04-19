@@ -247,6 +247,12 @@ public:
 	virtual bool ShouldManageOwnTimer() const override { return false; }
 	virtual void InitRenderTarget() override;
 
+	// Rebuild only the depth-dependent resources: SharedFinalTextureTarget (format varies with
+	// depth) and the staging texture ring. Leaves the inherited TextureTarget, SharedTextureTarget,
+	// and SharedAuxTextureTarget intact so the proxy's persistent view state (TAA/AE history)
+	// stays consistent across a NoDepth<->WithDepth toggle.
+	void InitFinalRenderTargetAndStaging();
+
 	void RequestMeasurement(const TempoCamera::ColorImageRequest& Request, const TResponseDelegate<TempoCamera::ColorImage>& ResponseContinuation);
 
 	void RequestMeasurement(const TempoCamera::LabelImageRequest& Request, const TResponseDelegate<TempoCamera::LabelImage>& ResponseContinuation);
