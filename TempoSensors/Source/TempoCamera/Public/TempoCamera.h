@@ -152,9 +152,6 @@ public:
 
 	void SetDepthEnabled(bool bDepthEnabled);
 
-	// Apply PostProcessSettings and ShowFlagSettings from the owning UTempoCamera onto this component.
-	void ApplyRenderSettings();
-
 	// The output tile dimensions.
 	UPROPERTY(VisibleAnywhere)
 	FIntPoint TileOutputSizeXY = FIntPoint::ZeroValue;
@@ -400,6 +397,13 @@ protected:
 	// Create ProxyTonemapMID if needed, (re)bind its HDRColorRT parameter to SharedTextureTarget,
 	// and ensure it is present in this component's PostProcessSettings.WeightedBlendables.
 	UMaterialInstanceDynamic* GetOrCreateProxyTonemapMID();
+
+	// Shared pre-exposure (EV stops) pushed onto every tile's AutoExposureBias before each capture.
+	// Driven by a P-controller fed from the proxy's AE-reported luminance. Lifts tile HDR values
+	// into a range where TAA's neighborhood clamp can actually reject stale history — without which
+	// low-light scenes ghost for seconds. See MaybeCapture for the update.
+	float SharedExposureBias = 0.0f;
+	bool bHasValidSharedExposure = false;
 
 	// Ring buffer of staging textures for GPU->CPU readback of the shared RT.
 	TArray<FTextureRHIRef> StagingTextures;
