@@ -273,6 +273,8 @@ class TEMPOSENSORSSHARED_API UTempoSceneCaptureComponent2D : public USceneCaptur
 public:
 	UTempoSceneCaptureComponent2D();
 
+	virtual void OnRegister() override;
+
 	virtual void Activate(bool bReset) override;
 	virtual void Deactivate() override;
 

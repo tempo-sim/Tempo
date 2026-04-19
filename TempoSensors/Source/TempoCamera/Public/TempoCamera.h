@@ -144,8 +144,6 @@ class TEMPOCAMERA_API UTempoCameraCaptureComponent : public UTempoSceneCaptureCo
 public:
 	UTempoCameraCaptureComponent();
 
-	virtual void OnRegister() override;
-
 	// Configure this capture component for a tile of the camera's output.
 	// YawOffset/PitchOffset: orientation relative to parent camera (UE convention: positive yaw=right, positive pitch=up).
 	// EquidistantTileFOV: the horizontal FOV this tile covers in the equidistant output (degrees).

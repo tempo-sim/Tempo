@@ -47,6 +47,18 @@ UTempoSceneCaptureComponent2D::UTempoSceneCaptureComponent2D()
 	bAlwaysPersistRenderingState = true;
 }
 
+void UTempoSceneCaptureComponent2D::OnRegister()
+{
+	Super::OnRegister();
+
+#if WITH_EDITORONLY_DATA
+	if (ProxyMeshComponent)
+	{
+		ProxyMeshComponent->SetVisibility(false);
+	}
+#endif
+}
+
 void UTempoSceneCaptureComponent2D::Activate(bool bReset)
 {
 	Super::Activate(bReset);
