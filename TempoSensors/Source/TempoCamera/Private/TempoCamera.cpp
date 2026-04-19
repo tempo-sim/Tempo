@@ -279,45 +279,35 @@ UTempoCameraCaptureComponent::UTempoCameraCaptureComponent()
 	PixelFormatOverride = EPixelFormat::PF_Unknown;
 
 	bAutoActivate = false;
-	bUseRayTracingIfEnabled = true;
+}
 
-	// Tiles render raw HDR lit scene color for the proxy to tonemap. All lens-simulation effects
-	// (bloom, lens flares, DoF, chromatic aberration, vignette, film grain) and color grading
-	// belong on the proxy, not here — running them per-tile would mismatch across the stitched
-	// image and waste work. Tiles are deliberately isolated from owner PostProcessSettings /
-	// ShowFlagSettings so proxy-side look changes cannot leak in.
+void UTempoCameraCaptureComponent::ApplyRenderSettings()
+{
+	if (!CameraOwner)
+	{
+		return;
+	}
 
-	// AE runs only on the proxy; UTempoCamera pushes the proxy's AE-derived bias into
-	// AutoExposureBias before each tile CaptureScene. Per-tile AE would diverge across tiles
-	// and produce mismatched brightness bands in the stitched image.
+	PostProcessSettings = CameraOwner->PostProcessSettings;
+
+	// Tiles must not do any per-tile exposure adaptation — divergent per-tile ViewStates would
+	// produce mismatched brightness across the stitched image. Tonemap runs once on the proxy.
 	PostProcessSettings.bOverride_AutoExposureMethod = true;
 	PostProcessSettings.AutoExposureMethod = AEM_Manual;
 
-	// Redundant with the MotionBlur show flag, but explicit so a PPV in the level can't turn it back on.
-	PostProcessSettings.bOverride_MotionBlurAmount = true;
-	PostProcessSettings.MotionBlurAmount = 0.0f;
+	// Drop the proxy tonemap PPM — it reads SharedTextureTarget, which tiles do not populate —
+	// but preserve any user-authored blendables.
+	PostProcessSettings.WeightedBlendables.Array.RemoveAll([CameraOwner = this->CameraOwner](const FWeightedBlendable& WB)
+	{
+		return WB.Object != nullptr && WB.Object == CameraOwner->ProxyTonemapMID;
+	});
 
-	// Tiles need spatial + temporal AA (geometry is real here, motion vectors are meaningful).
-	// Tonemapper stays on so AutoExposureBias is actually applied to the HDR output. EyeAdaptation
-	// MUST stay on: disabling it pins View.PreExposure to 1.0, so scene color goes into the HDR
-	// buffer un-scaled, and TAA (which runs on that buffer) loses the mid-grey range its
-	// neighborhood clamp needs — reintroducing the low-light ghost we built the feedback loop to
-	// kill. AEM_Manual is enough to skip the expensive histogram work; the flag just keeps
-	// PreExposure tracking alive.
-
-
-	ShowFlags.TemporalAA = true;
-	ShowFlags.AntiAliasing = true;
-	ShowFlags.EyeAdaptation = true;
-	ShowFlags.Bloom = false;
-	ShowFlags.LensFlares = false;
-	ShowFlags.DepthOfField = false;
-	ShowFlags.MotionBlur = false;
-	ShowFlags.Vignette = false;
-	ShowFlags.SceneColorFringe = false;
-	ShowFlags.Grain = false;
-	ShowFlags.LocalExposure = false;
-	ShowFlags.ColorGrading = false;
+	// Re-append the distortion/label post-process material if it was already created
+	// (on first call from Configure it is still null and will be added by SetDepthEnabled).
+	if (PostProcessMaterialInstance)
+	{
+		PostProcessSettings.WeightedBlendables.Array.Add(FWeightedBlendable(1.0, PostProcessMaterialInstance));
+	}
 
 	TArray<FEngineShowFlagsSetting> NewShowFlagSettings = GetShowFlagSettings();
 	NewShowFlagSettings.Add({ TEXT("AntiAliasing"), true });
@@ -325,20 +315,7 @@ UTempoCameraCaptureComponent::UTempoCameraCaptureComponent()
 	NewShowFlagSettings.Add({ TEXT("MotionBlur"), false });
 	SetShowFlagSettings(NewShowFlagSettings);
 
-	// TArray<FEngineShowFlagsSetting> NewShowFlagSettings;
-	// NewShowFlagSettings.Add({ TEXT("AntiAliasing"), true });
-	// NewShowFlagSettings.Add({ TEXT("TemporalAA"), true });
-	// NewShowFlagSettings.Add({ TEXT("Bloom"), false });
-	// NewShowFlagSettings.Add({ TEXT("LensFlares"), false });
-	// NewShowFlagSettings.Add({ TEXT("DepthOfField"), false });
-	// NewShowFlagSettings.Add({ TEXT("MotionBlur"), false });
-	// NewShowFlagSettings.Add({ TEXT("Vignette"), false });
-	// NewShowFlagSettings.Add({ TEXT("SceneColorFringe"), false });
-	// NewShowFlagSettings.Add({ TEXT("Grain"), false });
-	// NewShowFlagSettings.Add({ TEXT("LocalExposure"), false });
-	// NewShowFlagSettings.Add({ TEXT("ColorGrading"), false });
-	// NewShowFlagSettings.Add({ TEXT("EyeAdaptation"), true });
-	// SetShowFlagSettings(NewShowFlagSettings);
+	bUseRayTracingIfEnabled = CameraOwner->bUseRayTracingIfEnabled;
 }
 
 void UTempoCameraCaptureComponent::Activate(bool bReset)
@@ -435,10 +412,19 @@ void UTempoCameraCaptureComponent::SetDepthEnabled(bool bDepthEnabled)
 		{
 			PostProcessMaterialInstance->SetScalarParameterValue(TEXT("OverridingLabel"), 0.0);
 		}
-		// The distortion/label PPM is the only blendable a tile runs. Owner-authored blendables
-		// (color grading LUTs, tonemap PPMs, etc.) are deliberately not forwarded — tiles stay
-		// isolated from proxy-side look decisions.
+		// Rebuild blendables from the owner's user-authored list, then append the distortion/label
+		// material. Filter out the owner's ProxyTonemapMID — that PPM reads SharedTextureTarget,
+		// which tiles populate, and applying it inside a tile would feed stale stitched content
+		// back into the tile's scene color.
 		PostProcessSettings.WeightedBlendables.Array.Empty();
+		if (CameraOwner)
+		{
+			PostProcessSettings.WeightedBlendables.Array.Append(CameraOwner->PostProcessSettings.WeightedBlendables.Array);
+			PostProcessSettings.WeightedBlendables.Array.RemoveAll([CameraOwner = this->CameraOwner](const FWeightedBlendable& WB)
+			{
+				return WB.Object != nullptr && WB.Object == CameraOwner->ProxyTonemapMID;
+			});
+		}
 		PostProcessSettings.WeightedBlendables.Array.Add(FWeightedBlendable(1.0, PostProcessMaterialInstance));
 		PostProcessMaterialInstance->EnsureIsComplete();
 	}
@@ -485,6 +471,8 @@ void UTempoCameraCaptureComponent::Configure(double YawOffset, double PitchOffse
 	// SizeXY and FOVAngle are set in InitDistortionMap via ComputeRenderConfig.
 	// Set SizeXY to the output size initially; InitDistortionMap may adjust it.
 	SizeXY = InTileSizeXY;
+
+	ApplyRenderSettings();
 }
 
 UMaterialInstanceDynamic* UTempoCameraCaptureComponent::GetOrCreateStitchMID()
@@ -608,20 +596,6 @@ UTempoCamera::UTempoCamera()
 	PostProcessSettings.AutoExposureHighPercent = 85.0;
 	PostProcessSettings.bOverride_MotionBlurAmount = true;
 	PostProcessSettings.MotionBlurAmount = 0.0;
-
-	ShowFlags.TemporalAA = false;
-	ShowFlags.AntiAliasing = false;
-	ShowFlags.EyeAdaptation = false;
-	ShowFlags.LocalExposure = true;
-	ShowFlags.Bloom = true;
-	ShowFlags.LensFlares = true;
-	// ShowFlags.DepthOfField = false;
-	// ShowFlags.MotionBlur = false;
-	// ShowFlags.Vignette = false;
-	// ShowFlags.SceneColorFringe = false;
-	// ShowFlags.Grain = false;
-	// ShowFlags.LocalExposure = false;
-	// ShowFlags.ColorGrading = false;
 
 	TArray<FEngineShowFlagsSetting> NewShowFlagSettings = GetShowFlagSettings();
 	NewShowFlagSettings.Add({ TEXT("AntiAliasing"), false });
