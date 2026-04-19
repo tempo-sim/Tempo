@@ -152,6 +152,9 @@ public:
 
 	void SetDepthEnabled(bool bDepthEnabled);
 
+	// Apply PostProcessSettings and ShowFlagSettings from the owning UTempoCamera onto this component.
+	void ApplyRenderSettings();
+
 	// The output tile dimensions.
 	UPROPERTY(VisibleAnywhere)
 	FIntPoint TileOutputSizeXY = FIntPoint::ZeroValue;
