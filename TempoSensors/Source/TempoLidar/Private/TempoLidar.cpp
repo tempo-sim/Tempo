@@ -412,7 +412,26 @@ void TTextureRead<FLidarPixel>::Decode(float TransmissionTime, TempoLidar::Lidar
 	const FVector2D ImagePlaneSize = 2.0 * SphericalToPerspective(HorizontalFOV / 2.0, VerticalFOV / 2.0);
 	const FVector2D SizeXYOffset = (FVector2D(ImageSize) - SizeXYFOV) / 2.0;
 
-	auto LidarReturnFromBeam = [this, &ImagePlaneSize, &SizeXYOffset] (int32 HorizontalBeam, int32 VerticalBeam) -> TempoLidar::LidarReturn
+	const int32 NumReturns = HorizontalBeams * VerticalBeams;
+
+	// Pre-size the packed repeated-scalar output fields so parallel workers can write
+	// directly into their contiguous backing storage — no intermediate per-return objects.
+	// Azimuths/elevations are per-return to leave room for non-gridded beam patterns.
+	ScanSegmentOut.mutable_distances()->Resize(NumReturns, 0.0f);
+	ScanSegmentOut.mutable_intensities()->Resize(NumReturns, 0.0f);
+	ScanSegmentOut.mutable_labels()->Resize(NumReturns, 0u);
+	ScanSegmentOut.mutable_azimuths()->Resize(NumReturns, 0.0f);
+	ScanSegmentOut.mutable_elevations()->Resize(NumReturns, 0.0f);
+	float* const DistancesData = ScanSegmentOut.mutable_distances()->mutable_data();
+	float* const IntensitiesData = ScanSegmentOut.mutable_intensities()->mutable_data();
+	uint32_t* const LabelsData = ScanSegmentOut.mutable_labels()->mutable_data();
+	float* const AzimuthsData = ScanSegmentOut.mutable_azimuths()->mutable_data();
+	float* const ElevationsData = ScanSegmentOut.mutable_elevations()->mutable_data();
+
+	// H-outer, V-inner layout: each ParallelFor iteration owns a contiguous V-length stripe
+	// of every output array, so threads never share cache lines.
+	ParallelFor(HorizontalBeams, [this, &ImagePlaneSize, &SizeXYOffset,
+		DistancesData, IntensitiesData, LabelsData, AzimuthsData, ElevationsData](int32 HorizontalBeam)
 	{
 		auto ImagePlaneLocationToPixelCoordinate = [this, &ImagePlaneSize, &SizeXYOffset](const FVector2D& ImagePlaneLocation)
 		{
@@ -424,69 +443,57 @@ void TTextureRead<FLidarPixel>::Decode(float TransmissionTime, TempoLidar::Lidar
 			return ((PixelCoordinate - SizeXYOffset) / (SizeXYFOV - FVector2D::UnitVector) - (FVector2D::UnitVector / 2.0)) * ImagePlaneSize;
 		};
 
-		const double AzimuthDeg = (-0.5 + static_cast<double>(HorizontalBeam) / (HorizontalBeams - 1)) * HorizontalFOV;
-		const double ElevationDeg = (-0.5 + static_cast<double>(VerticalBeam) / (VerticalBeams - 1)) * VerticalFOV;
-		const FVector2D ImagePlaneLocation = SphericalToPerspective(AzimuthDeg, ElevationDeg);
-		const FVector2D PixelCoordinate = ImagePlaneLocationToPixelCoordinate(ImagePlaneLocation);
-		const FIntPoint Coord(FMath::RoundToInt32(PixelCoordinate.X), FMath::RoundToInt32(PixelCoordinate.Y));
-		const float NearestDepth = Image[Coord.X + ImageSize.X * Coord.Y].Depth(MinDepth, MaxDepth, GTempo_Max_Discrete_Depth);
-		const FVector2D ImagePlaneLocationAboveLeft = PixelCoordinateToImagePlaneLocation(FVector2D(Coord.X, Coord.Y));
-		double AzimuthDegNearest, ElevationDegNearest;
-		PerspectiveToSpherical(ImagePlaneLocationAboveLeft, AzimuthDegNearest, ElevationDegNearest);
-		const float NearestDistance =  DepthToDistance(AzimuthDegNearest, ElevationDegNearest, NearestDepth);
-		const FVector NearestPoint = SphericalToCartesian(AzimuthDegNearest, ElevationDegNearest, NearestDistance);
-		const FVector WorldNormal = Image[Coord.X + ImageSize.X * Coord.Y].Normal();
-		const FVector LocalNormal = CaptureTransform.InverseTransformVector(WorldNormal);
-		const FVector RayDirection = SphericalToCartesian(AzimuthDeg, ElevationDeg, MaxDistance);
-		const double CosAngleOfIncidence = FVector::DotProduct(LocalNormal.GetSafeNormal(), -RayDirection.GetSafeNormal());
-		const double AngleOfIncidence = FMath::RadiansToDegrees(FMath::Acos(CosAngleOfIncidence));
-		double Intensity;
-		double Distance;
-		if (AngleOfIncidence > MaxAngleOfIncidence)
+		for (int32 VerticalBeam = 0; VerticalBeam < VerticalBeams; ++VerticalBeam)
 		{
-			Distance = 0.0;
-			Intensity = 0.0;
-		}
-		else
-		{
-			const FPlane SurfacePlane( NearestPoint, LocalNormal );
-			const FVector HitPoint = FMath::LinePlaneIntersection(FVector::ZeroVector, RayDirection, SurfacePlane);
-
-			Distance = HitPoint.Length();
-			Intensity = CosAngleOfIncidence * IntensitySaturationDistance / FMath::Max(IntensitySaturationDistance, Distance);
-
-			if (Distance > MaxDistance)
+			const double AzimuthDeg = (-0.5 + static_cast<double>(HorizontalBeam) / (HorizontalBeams - 1)) * HorizontalFOV;
+			const double ElevationDeg = (-0.5 + static_cast<double>(VerticalBeam) / (VerticalBeams - 1)) * VerticalFOV;
+			const FVector2D ImagePlaneLocation = SphericalToPerspective(AzimuthDeg, ElevationDeg);
+			const FVector2D PixelCoordinate = ImagePlaneLocationToPixelCoordinate(ImagePlaneLocation);
+			const FIntPoint Coord(FMath::RoundToInt32(PixelCoordinate.X), FMath::RoundToInt32(PixelCoordinate.Y));
+			const float NearestDepth = Image[Coord.X + ImageSize.X * Coord.Y].Depth(MinDepth, MaxDepth, GTempo_Max_Discrete_Depth);
+			const FVector2D ImagePlaneLocationAboveLeft = PixelCoordinateToImagePlaneLocation(FVector2D(Coord.X, Coord.Y));
+			double AzimuthDegNearest, ElevationDegNearest;
+			PerspectiveToSpherical(ImagePlaneLocationAboveLeft, AzimuthDegNearest, ElevationDegNearest);
+			const float NearestDistance = DepthToDistance(AzimuthDegNearest, ElevationDegNearest, NearestDepth);
+			const FVector NearestPoint = SphericalToCartesian(AzimuthDegNearest, ElevationDegNearest, NearestDistance);
+			const FVector WorldNormal = Image[Coord.X + ImageSize.X * Coord.Y].Normal();
+			const FVector LocalNormal = CaptureTransform.InverseTransformVector(WorldNormal);
+			const FVector RayDirection = SphericalToCartesian(AzimuthDeg, ElevationDeg, MaxDistance);
+			const double CosAngleOfIncidence = FVector::DotProduct(LocalNormal.GetSafeNormal(), -RayDirection.GetSafeNormal());
+			const double AngleOfIncidence = FMath::RadiansToDegrees(FMath::Acos(CosAngleOfIncidence));
+			double Intensity;
+			double Distance;
+			if (AngleOfIncidence > MaxAngleOfIncidence)
 			{
 				Distance = 0.0;
 				Intensity = 0.0;
 			}
-			Distance = FMath::Max(MinDistance, Distance);
-		}
-		TempoLidar::LidarReturn LidarReturn;
-		LidarReturn.set_distance(QuantityConverter<CM2M>::Convert(Distance));
-		LidarReturn.set_intensity(Intensity);
-		LidarReturn.set_label(Image[Coord.X + ImageSize.X * Coord.Y].Label());
-		return LidarReturn;
-	};
+			else
+			{
+				const FPlane SurfacePlane(NearestPoint, LocalNormal);
+				const FVector HitPoint = FMath::LinePlaneIntersection(FVector::ZeroVector, RayDirection, SurfacePlane);
 
-	// Temporary LidarReturns allows use of ParallelFor
-	std::vector<TempoLidar::LidarReturn> LidarReturns(HorizontalBeams * VerticalBeams);
-	ParallelFor(VerticalBeams, [this, &LidarReturnFromBeam, &LidarReturns](int32 VerticalBeam)
-	{
-		for (int32 HorizontalBeam = 0; HorizontalBeam < HorizontalBeams; ++HorizontalBeam)
-		{
-			LidarReturns[HorizontalBeam + HorizontalBeams * VerticalBeam] = LidarReturnFromBeam(HorizontalBeam, VerticalBeam);
+				Distance = HitPoint.Length();
+				Intensity = CosAngleOfIncidence * IntensitySaturationDistance / FMath::Max(IntensitySaturationDistance, Distance);
+
+				if (Distance > MaxDistance)
+				{
+					Distance = 0.0;
+					Intensity = 0.0;
+				}
+				Distance = FMath::Max(MinDistance, Distance);
+			}
+
+			const int32 Idx = HorizontalBeam * VerticalBeams + VerticalBeam;
+			DistancesData[Idx] = QuantityConverter<CM2M>::Convert(Distance);
+			IntensitiesData[Idx] = static_cast<float>(Intensity);
+			LabelsData[Idx] = Image[Coord.X + ImageSize.X * Coord.Y].Label();
+			// Negated from the internal (Unreal-local) convention so that client-side
+			// point-cloud math renders in the expected right-handed Z-up frame.
+			AzimuthsData[Idx] = static_cast<float>(FMath::DegreesToRadians(-(AzimuthDeg + RelativeYaw)));
+			ElevationsData[Idx] = static_cast<float>(FMath::DegreesToRadians(-ElevationDeg));
 		}
 	});
-
-	ScanSegmentOut.mutable_returns()->Reserve(HorizontalBeams * VerticalBeams);
-	for (int32 HorizontalBeam = 0; HorizontalBeam < HorizontalBeams; ++HorizontalBeam)
-	{
-		for (int32 VerticalBeam = 0; VerticalBeam < VerticalBeams; ++VerticalBeam)
-		{
-			*ScanSegmentOut.add_returns() = LidarReturns[HorizontalBeam + HorizontalBeams * VerticalBeam];
-		}
-	}
 
 	ExtractMeasurementHeader(TransmissionTime, ScanSegmentOut.mutable_header());
 

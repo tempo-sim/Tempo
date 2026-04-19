@@ -227,6 +227,8 @@ void FTempoScriptingServer::Tick(float DeltaTime)
 
 void FTempoScriptingServer::TickInternal()
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE(TempoScriptingServerTick);
+
 	if (!bIsInitialized)
 	{
 		return;
@@ -242,6 +244,8 @@ void FTempoScriptingServer::TickInternal()
 	const double Start = FPlatformTime::Seconds();
 	while (!bProcessedPendingEvents)
 	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(TempoScriptingServerLoop);
+
 		// In FixedStep mode process all pending requests before proceeding. Otherwise limit time spent processing.
 		if (TimeMode != ETimeMode::FixedStep && FPlatformTime::Seconds() - Start > MaxEventProcessingTimeSeconds)
 		{
