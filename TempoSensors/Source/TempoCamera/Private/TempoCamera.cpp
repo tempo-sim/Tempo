@@ -306,6 +306,9 @@ void UTempoCameraCaptureComponent::ApplyRenderSettings()
 	// CameraOwner's PostProcessSettings enables AEM_Histogram for its own proxy tonemap pass,
 	// but tiles must render HDR without any exposure adaptation (divergent per-tile ViewStates
 	// would produce mismatched brightness across the stitched image). Force AEM_Manual here.
+	// Note: the owner's other AE overrides (bias, speed, percentiles, physical-camera exposure)
+	// are intentionally left in place — clearing them lets UE apply its defaults, which crush
+	// shadows (physical camera exposure) and introduce multi-second ghosting via slow AE decay.
 	PostProcessSettings.bOverride_AutoExposureMethod = true;
 	PostProcessSettings.AutoExposureMethod = AEM_Manual;
 
