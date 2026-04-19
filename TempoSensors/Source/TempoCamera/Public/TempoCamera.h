@@ -194,6 +194,15 @@ protected:
 	UPROPERTY(VisibleAnywhere)
 	UMaterialInstanceDynamic* PostProcessMaterialInstance = nullptr;
 
+	// Dynamic instance of the stitch passthrough material, with its "TileRT" parameter bound to
+	// this tile's TextureTarget. Created lazily; owned by this component.
+	UPROPERTY(Transient)
+	UMaterialInstanceDynamic* StitchMID = nullptr;
+
+	// Create StitchMID if needed and (re)bind its TileRT parameter to the current TextureTarget.
+	// Safe to call before TextureTarget exists — in that case, returns nullptr and does nothing.
+	UMaterialInstanceDynamic* GetOrCreateStitchMID();
+
 	UPROPERTY(VisibleAnywhere)
 	const UTempoCamera* CameraOwner = nullptr;
 
