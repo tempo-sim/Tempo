@@ -279,6 +279,35 @@ UTempoCameraCaptureComponent::UTempoCameraCaptureComponent()
 	PixelFormatOverride = EPixelFormat::PF_Unknown;
 
 	bAutoActivate = false;
+
+	PostProcessSettings.bOverride_AutoExposureMethod = true;
+	PostProcessSettings.AutoExposureMethod = AEM_Manual;
+	// PostProcessSettings.bOverride_AutoExposureBias = true;
+	// PostProcessSettings.AutoExposureBias = 1.0;
+	// PostProcessSettings.bOverride_AutoExposureApplyPhysicalCameraExposure = true;
+	// PostProcessSettings.AutoExposureApplyPhysicalCameraExposure = 0;
+	// PostProcessSettings.bOverride_AutoExposureSpeedUp = true;
+	// PostProcessSettings.AutoExposureSpeedUp = 20.0;
+	// PostProcessSettings.bOverride_AutoExposureSpeedDown = true;
+	// PostProcessSettings.AutoExposureSpeedDown = 20.0;
+	// PostProcessSettings.bOverride_AutoExposureLowPercent = true;
+	// PostProcessSettings.AutoExposureLowPercent = 75.0;
+	// PostProcessSettings.bOverride_AutoExposureHighPercent = true;
+	// PostProcessSettings.AutoExposureHighPercent = 85.0;
+	// PostProcessSettings.bOverride_MotionBlurAmount = true;
+	// PostProcessSettings.MotionBlurAmount = 0.0;
+
+	ShowFlags.EyeAdaptation = true;
+	ShowFlags.AntiAliasing = true;
+	ShowFlags.TemporalAA = true;
+	ShowFlags.MotionBlur = false;
+	ShowFlags.LensFlares = false;
+	ShowFlags.Bloom = false;
+	ShowFlags.Vignette = false;
+	ShowFlags.ColorGrading = false;
+	ShowFlags.LocalExposure = false;
+
+	bUseRayTracingIfEnabled = true;
 }
 
 void UTempoCameraCaptureComponent::ApplyRenderSettings()
@@ -288,34 +317,34 @@ void UTempoCameraCaptureComponent::ApplyRenderSettings()
 		return;
 	}
 
-	PostProcessSettings = CameraOwner->PostProcessSettings;
-
-	// Tiles must not do any per-tile exposure adaptation — divergent per-tile ViewStates would
-	// produce mismatched brightness across the stitched image. Tonemap runs once on the proxy.
-	PostProcessSettings.bOverride_AutoExposureMethod = true;
-	PostProcessSettings.AutoExposureMethod = AEM_Manual;
-
-	// Drop the proxy tonemap PPM — it reads SharedTextureTarget, which tiles do not populate —
-	// but preserve any user-authored blendables.
-	PostProcessSettings.WeightedBlendables.Array.RemoveAll([CameraOwner = this->CameraOwner](const FWeightedBlendable& WB)
-	{
-		return WB.Object != nullptr && WB.Object == CameraOwner->ProxyTonemapMID;
-	});
-
+	// PostProcessSettings = CameraOwner->PostProcessSettings;
+	//
+	// // Tiles must not do any per-tile exposure adaptation — divergent per-tile ViewStates would
+	// // produce mismatched brightness across the stitched image. Tonemap runs once on the proxy.
+	// PostProcessSettings.bOverride_AutoExposureMethod = true;
+	// PostProcessSettings.AutoExposureMethod = AEM_Manual;
+	//
+	// // Drop the proxy tonemap PPM — it reads SharedTextureTarget, which tiles do not populate —
+	// // but preserve any user-authored blendables.
+	// PostProcessSettings.WeightedBlendables.Array.RemoveAll([CameraOwner = this->CameraOwner](const FWeightedBlendable& WB)
+	// {
+	// 	return WB.Object != nullptr && WB.Object == CameraOwner->ProxyTonemapMID;
+	// });
+	//
 	// Re-append the distortion/label post-process material if it was already created
 	// (on first call from Configure it is still null and will be added by SetDepthEnabled).
-	if (PostProcessMaterialInstance)
-	{
-		PostProcessSettings.WeightedBlendables.Array.Add(FWeightedBlendable(1.0, PostProcessMaterialInstance));
-	}
-
-	TArray<FEngineShowFlagsSetting> NewShowFlagSettings = GetShowFlagSettings();
-	NewShowFlagSettings.Add({ TEXT("AntiAliasing"), true });
-	NewShowFlagSettings.Add({ TEXT("TemporalAA"), true });
-	NewShowFlagSettings.Add({ TEXT("MotionBlur"), false });
-	SetShowFlagSettings(NewShowFlagSettings);
-
-	bUseRayTracingIfEnabled = CameraOwner->bUseRayTracingIfEnabled;
+	// if (PostProcessMaterialInstance)
+	// {
+	// 	PostProcessSettings.WeightedBlendables.Array.Add(FWeightedBlendable(1.0, PostProcessMaterialInstance));
+	// }
+	//
+	// TArray<FEngineShowFlagsSetting> NewShowFlagSettings = GetShowFlagSettings();
+	// NewShowFlagSettings.Add({ TEXT("AntiAliasing"), true });
+	// NewShowFlagSettings.Add({ TEXT("TemporalAA"), true });
+	// NewShowFlagSettings.Add({ TEXT("MotionBlur"), false });
+	// SetShowFlagSettings(NewShowFlagSettings);
+	//
+	// bUseRayTracingIfEnabled = CameraOwner->bUseRayTracingIfEnabled;
 }
 
 void UTempoCameraCaptureComponent::Activate(bool bReset)
@@ -597,11 +626,23 @@ UTempoCamera::UTempoCamera()
 	PostProcessSettings.bOverride_MotionBlurAmount = true;
 	PostProcessSettings.MotionBlurAmount = 0.0;
 
-	TArray<FEngineShowFlagsSetting> NewShowFlagSettings = GetShowFlagSettings();
-	NewShowFlagSettings.Add({ TEXT("AntiAliasing"), false });
-	NewShowFlagSettings.Add({ TEXT("TemporalAA"), false });
-	NewShowFlagSettings.Add({ TEXT("MotionBlur"), false });
-	SetShowFlagSettings(NewShowFlagSettings);
+	ShowFlags.AntiAliasing = true;
+	ShowFlags.TemporalAA = false;
+	ShowFlags.MotionBlur = false;
+	ShowFlags.LensFlares = true;
+	ShowFlags.Bloom = true;
+	ShowFlags.Vignette = false;
+	ShowFlags.ColorGrading = false;
+	ShowFlags.LocalExposure = true;
+
+	ShowFlags.LensFlares = false;
+	ShowFlags.Bloom = false;
+
+	// TArray<FEngineShowFlagsSetting> NewShowFlagSettings = GetShowFlagSettings();
+	// NewShowFlagSettings.Add({ TEXT("AntiAliasing"), false });
+	// NewShowFlagSettings.Add({ TEXT("TemporalAA"), false });
+	// NewShowFlagSettings.Add({ TEXT("MotionBlur"), false });
+	// SetShowFlagSettings(NewShowFlagSettings);
 }
 
 void UTempoCamera::OnRegister()
@@ -1180,6 +1221,7 @@ void UTempoCamera::MaybeCapture()
 	{
 		if (bHasValidSharedExposure)
 		{
+			UE_LOG(LogTemp, Warning, TEXT("Setting shared exposure tp %f"), SharedExposureBias);
 			Tile->PostProcessSettings.bOverride_AutoExposureBias = true;
 			Tile->PostProcessSettings.AutoExposureBias = SharedExposureBias;
 		}
@@ -1305,6 +1347,7 @@ void UTempoCamera::MaybeCapture()
 	if (FSceneViewStateInterface* ViewStateInterface = GetViewState(0))
 	{
 		const float Lum = ViewStateInterface->GetLastAverageSceneLuminance();
+		UE_LOG(LogTemp, Warning, TEXT("Lum: %f"), Lum);
 		if (Lum > 0.0f)
 		{
 			constexpr float TargetMidGrey = 0.18f;
