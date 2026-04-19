@@ -22,6 +22,8 @@ class TEMPOSENSORSSHARED_API UTempoSensorsSettings : public UDeveloperSettings
 public:
 	UTempoSensorsSettings();
 
+	virtual void PostInitProperties() override;
+
 #if WITH_EDITOR
 	virtual FText GetSectionText() const override;
 #endif
