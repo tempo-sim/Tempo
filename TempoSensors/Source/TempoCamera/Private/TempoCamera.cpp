@@ -270,9 +270,8 @@ void TTextureRead<FCameraPixelWithDepth>::RespondToRequests(const TArray<FBoundi
 
 UTempoCameraCaptureComponent::UTempoCameraCaptureComponent()
 {
-	// HDR capture: we don't want each tile to tonemap independently (that's the whole source of
-	// the per-tile exposure mismatch). Tiles output HDR linear color; tonemapping is done once on
-	// the merged output (Phase 3b via proxy capture).
+	// Tiles output HDR linear color so tonemapping runs once on the merged output rather than
+	// independently per tile (which would mismatch exposure across the stitched image).
 	CaptureSource = ESceneCaptureSource::SCS_FinalColorHDR;
 
 	// fp32 RGBA tile RT: RGB carries HDR linear color, A carries asfloat((label<<24) | depth24).
@@ -303,12 +302,8 @@ void UTempoCameraCaptureComponent::ApplyRenderSettings()
 
 	PostProcessSettings = CameraOwner->PostProcessSettings;
 
-	// CameraOwner's PostProcessSettings enables AEM_Histogram for its own proxy tonemap pass,
-	// but tiles must render HDR without any exposure adaptation (divergent per-tile ViewStates
-	// would produce mismatched brightness across the stitched image). Force AEM_Manual here.
-	// Note: the owner's other AE overrides (bias, speed, percentiles, physical-camera exposure)
-	// are intentionally left in place — clearing them lets UE apply its defaults, which crush
-	// shadows (physical camera exposure) and introduce multi-second ghosting via slow AE decay.
+	// Tiles must not do any per-tile exposure adaptation — divergent per-tile ViewStates would
+	// produce mismatched brightness across the stitched image. Tonemap runs once on the proxy.
 	PostProcessSettings.bOverride_AutoExposureMethod = true;
 	PostProcessSettings.AutoExposureMethod = AEM_Manual;
 
@@ -333,18 +328,16 @@ void UTempoCameraCaptureComponent::ApplyRenderSettings()
 
 void UTempoCameraCaptureComponent::Activate(bool bReset)
 {
-	// Set up depth format and materials BEFORE Super::Activate, which calls InitRenderTarget.
-	// This ensures InitRenderTarget creates the render target with the correct format on the first call,
-	// avoiding a double-init race condition where two render commands compete over StagingTextures.
+	// Must set depth format and materials before Super::Activate calls InitRenderTarget, so the
+	// render target is created with the correct format on the first call.
 	SetDepthEnabled(CameraOwner->bDepthEnabled);
 
 	Super::Activate(bReset);
 
-	// The base InitRenderTarget set TargetGamma to the configured SceneCaptureGamma (2.2). That's
-	// correct for LDR tile RTs but wrong for our fp32 HDR tile RT — we want to store linear HDR
-	// values untouched so the merged/tonemapped output later can apply its own gamma.
 	if (TextureTarget)
 	{
+		// The tile RT is fp32 HDR linear; override the base SceneCaptureGamma so values are
+		// stored untouched and the proxy tonemap can apply its own gamma.
 		TextureTarget->TargetGamma = 1.0f;
 		// Point sampling: the A channel carries bit-packed (label, depth) via asfloat. Bilinear
 		// filtering would smear adjacent pixels' bit patterns and break asuint() decoding on the
@@ -427,10 +420,10 @@ void UTempoCameraCaptureComponent::SetDepthEnabled(bool bDepthEnabled)
 		{
 			PostProcessMaterialInstance->SetScalarParameterValue(TEXT("OverridingLabel"), 0.0);
 		}
-		// Rebuild blendables from the owner's user-authored list, then append the distortion/label material.
-		// Filter out the owner's ProxyTonemapMID: that PPM reads SharedTextureTarget, which tiles
-		// populate — applying it inside a tile would feed stale stitched content back into the tile's
-		// scene color and freeze the proxy's tonemap output after a NoDepth<->WithDepth toggle.
+		// Rebuild blendables from the owner's user-authored list, then append the distortion/label
+		// material. Filter out the owner's ProxyTonemapMID — that PPM reads SharedTextureTarget,
+		// which tiles populate, and applying it inside a tile would feed stale stitched content
+		// back into the tile's scene color.
 		PostProcessSettings.WeightedBlendables.Array.Empty();
 		if (CameraOwner)
 		{
@@ -573,17 +566,16 @@ UTempoCamera::UTempoCamera()
 	MeasurementTypes = { EMeasurementType::COLOR_IMAGE, EMeasurementType::LABEL_IMAGE, EMeasurementType::DEPTH_IMAGE, EMeasurementType::BOUNDING_BOXES };
 	bAutoActivate = true;
 
-	// Proxy scene capture settings: UTempoCamera itself is the proxy. Its PPM replaces scene
-	// color with the stitched HDR texture, then bloom/AE/tonemapper run to produce LDR that the
-	// merge pass packs together with label+depth bytes.
+	// UTempoCamera itself doubles as the proxy scene capture: its PPM replaces scene color with
+	// the stitched HDR texture, then bloom/AE/tonemapper produce LDR for the merge pass to pack
+	// together with label+depth bytes.
 	CaptureSource = ESceneCaptureSource::SCS_FinalColorLDR;
 	RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA8;
 	PixelFormatOverride = EPixelFormat::PF_Unknown;
 
 	// The proxy's scene render is useless — its PPM overwrites scene color before bloom/AE. Hide
-	// world geometry and lighting so nothing gets rasterized. Show flags for AntiAliasing /
-	// TemporalAA / MotionBlur are applied below so the tonemap pass itself still anti-aliases
-	// cleanly and doesn't smear across frames.
+	// world geometry and lighting so nothing gets rasterized. AntiAliasing / TemporalAA /
+	// MotionBlur show flags are applied below so the tonemap pass still anti-aliases cleanly.
 	ShowFlags.SetAtmosphere(false);
 	ShowFlags.SetFog(false);
 	ShowFlags.SetLighting(false);
@@ -595,10 +587,8 @@ UTempoCamera::UTempoCamera()
 	ShowFlags.SetTranslucency(false);
 	ShowFlags.SetParticles(false);
 
-	// Auto exposure settings for the proxy's tonemap pass. AEM_Histogram samples the (PPM-
-	// replaced) scene color histogram to compute exposure. The same PostProcessSettings are
-	// copied to tile components, but tiles force AEM_Manual in ApplyRenderSettings so their HDR
-	// output is unaffected.
+	// Auto exposure for the proxy's tonemap pass. AEM_Histogram samples the (PPM-replaced) scene
+	// color histogram to compute exposure.
 	PostProcessSettings.bOverride_AutoExposureMethod = true;
 	PostProcessSettings.AutoExposureMethod = AEM_Histogram;
 	PostProcessSettings.bOverride_AutoExposureBias = true;
@@ -777,10 +767,9 @@ TOptional<TFuture<void>> UTempoCamera::SendMeasurements()
 {
 	TOptional<TFuture<void>> Future;
 
-	// Snapshot the depth-request state before draining. The toggle decision below uses this
-	// snapshot so that in the steady state — client submits a depth request every frame and we
-	// drain it every frame — we recognize ongoing client intent and stay enabled, instead of
-	// oscillating off/on each frame when the queue looks empty post-drain.
+	// Snapshot depth-request state before draining, so the toggle decision below sees ongoing
+	// client intent in the steady state (one depth request per frame, drained the same frame)
+	// instead of oscillating off/on when the queue looks empty post-drain.
 	const bool bHadDepthRequests = !PendingDepthImageRequests.IsEmpty();
 
 	if (TextureReadQueue.NextReadComplete())
@@ -1035,8 +1024,8 @@ void UTempoCamera::InitRenderTarget()
 	SharedTextureTarget->RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA16f;
 	SharedTextureTarget->InitAutoFormat(SizeXY.X, SizeXY.Y);
 
-	// Phase 2: dedicated aux RT, written but not consumed. Format is RGBA8 regardless of bDepthEnabled
-	// since the aux pass's eventual role (Phase 3) is carrying packed label+depth bytes, not HDR color.
+	// Aux RT carries packed label+depth bytes produced by the aux stitch pass. RGBA8 regardless
+	// of bDepthEnabled (the aux channels are byte-packed integer data, not HDR color).
 	SharedAuxTextureTarget = NewObject<UTextureRenderTarget2D>(this);
 	SharedAuxTextureTarget->TargetGamma = GetDefault<UTempoSensorsSettings>()->GetSceneCaptureGamma();
 	SharedAuxTextureTarget->RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA8;
@@ -1263,9 +1252,8 @@ void UTempoCamera::MaybeCapture()
 		UKismetRenderingLibrary::EndDrawCanvasToRenderTarget(this, Ctx);
 	}
 
-	// Phase 2: second Canvas pass targeting SharedAuxTextureTarget using the aux material. Output
-	// is not consumed yet — this validates the two-RT/two-material/two-pass structure for Phase 3,
-	// where the aux material will unpack label+depth bits from the HDR tile format.
+	// Aux stitch pass: samples each tile's fp32 A channel and unpacks (label, depth) bits into
+	// RGBA8 bytes in SharedAuxTextureTarget for the merge pass to combine with tonemapped color.
 	if (SharedAuxTextureTarget)
 	{
 		UCanvas* Canvas = nullptr;
@@ -1305,19 +1293,18 @@ void UTempoCamera::MaybeCapture()
 		UKismetRenderingLibrary::EndDrawCanvasToRenderTarget(this, Ctx);
 	}
 
-	// Phase 3b: proxy scene capture. The PPM (appended to PostProcessSettings.WeightedBlendables
-	// by GetOrCreateProxyTonemapMID) replaces scene color with SharedTextureTarget's HDR linear
+	// Proxy scene capture: the PPM (appended to PostProcessSettings.WeightedBlendables by
+	// GetOrCreateProxyTonemapMID) replaces scene color with SharedTextureTarget's HDR linear
 	// color before Bloom/AE/Tonemapper, so the tonemapped LDR output landing in the inherited
-	// TextureTarget is effectively tonemap(stitched HDR). CaptureScene enqueues on the render
-	// thread in FIFO order after the two Canvas stitch passes above.
+	// TextureTarget is effectively tonemap(stitched HDR).
 	if (GetOrCreateProxyTonemapMID())
 	{
 		CaptureScene();
 	}
 
-	// Phase 3a-i / 3b: merge pass — a single full-screen Canvas draw that samples the proxy's
-	// tonemapped TextureTarget (via MergeMID's "ColorRT" parameter) and SharedAuxTextureTarget
-	// through the merge material and writes to SharedFinalTextureTarget.
+	// Merge pass: a single full-screen Canvas draw that samples the proxy's tonemapped
+	// TextureTarget (via MergeMID's "ColorRT" parameter) and SharedAuxTextureTarget through
+	// the merge material and writes to SharedFinalTextureTarget.
 	if (UMaterialInstanceDynamic* MergeMaterialInstance = GetOrCreateStitchMergeMID())
 	{
 		UCanvas* Canvas = nullptr;
@@ -1552,10 +1539,9 @@ void UTempoCamera::ApplyDepthEnabled()
 		CaptureComponent->Activate();
 	}
 
-	// Only SharedFinalTextureTarget (and the matching staging textures) are depth-dependent.
-	// Rebuilding the inherited TextureTarget or the other shared RTs would invalidate the proxy
-	// capture's persistent view state (TAA/AE history) and produce corrupted ColorRT samples on
-	// the first post-toggle merge. Keep them; only rebuild what actually changes format.
+	// Only SharedFinalTextureTarget and its staging textures are depth-dependent. Rebuilding
+	// the inherited TextureTarget or the other shared RTs would invalidate the proxy capture's
+	// persistent view state (TAA/AE history) and corrupt the tonemapped output.
 	if (UTempoCoreUtils::IsGameWorld(this))
 	{
 		InitFinalRenderTargetAndStaging();
