@@ -46,9 +46,9 @@ struct FCameraPixelWithDepth
 	float Depth(float MinDepth, float MaxDepth, float MaxDiscretizedDepth) const
 	{
 	   // We discretize inverse depth to give more consistent precision vs depth.
-	   const float InverseDepthFraction = static_cast<float>(U5) / MaxDiscretizedDepth;
-	   const float InverseDepth = InverseDepthFraction * (1.0 / MinDepth - 1.0 / MaxDepth) + 1.0 / MaxDepth;
-	   return 1.0 / InverseDepth;
+		const float InverseDepthFraction = static_cast<float>(U5) / MaxDiscretizedDepth;
+		const float InverseDepth = InverseDepthFraction * (1.0 / MinDepth - 1.0 / MaxDepth) + 1.0 / MaxDepth;
+		return 1.0 / InverseDepth;
 	}
 
 private:
@@ -199,9 +199,17 @@ protected:
 	UPROPERTY(Transient)
 	UMaterialInstanceDynamic* StitchMID = nullptr;
 
+	// Dynamic instance of the stitch aux material, with its "TileRT" parameter bound to this tile's
+	// TextureTarget. Created lazily; owned by this component.
+	UPROPERTY(Transient)
+	UMaterialInstanceDynamic* StitchAuxMID = nullptr;
+
 	// Create StitchMID if needed and (re)bind its TileRT parameter to the current TextureTarget.
 	// Safe to call before TextureTarget exists — in that case, returns nullptr and does nothing.
 	UMaterialInstanceDynamic* GetOrCreateStitchMID();
+
+	// Same as GetOrCreateStitchMID but for the aux material.
+	UMaterialInstanceDynamic* GetOrCreateStitchAuxMID();
 
 	UPROPERTY(VisibleAnywhere)
 	const UTempoCamera* CameraOwner = nullptr;
@@ -216,7 +224,7 @@ protected:
 };
 
 UCLASS(Blueprintable, BlueprintType, ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TEMPOCAMERA_API UTempoCamera : public USceneComponent, public ITempoSensorInterface
+class TEMPOCAMERA_API UTempoCamera : public UTempoSceneCaptureComponent2D, public ITempoSensorInterface
 {
 	GENERATED_BODY()
 
@@ -231,6 +239,13 @@ public:
 	virtual void Deactivate() override;
 
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+	// UTempoSceneCaptureComponent2D hooks. UTempoCamera drives its own timer and manages its own
+	// readback from SharedFinalTextureTarget (not the inherited TextureTarget, which is used as
+	// the LDR output of the proxy tonemap capture).
+	virtual bool ShouldManageOwnReadback() const override { return false; }
+	virtual bool ShouldManageOwnTimer() const override { return false; }
+	virtual void InitRenderTarget() override;
 
 	void RequestMeasurement(const TempoCamera::ColorImageRequest& Request, const TResponseDelegate<TempoCamera::ColorImage>& ResponseContinuation);
 
@@ -256,11 +271,12 @@ public:
 	bool HasPendingCameraRequests() const;
 
 protected:
-	TFuture<void> DecodeAndRespond(TUniquePtr<FTextureRead> TextureRead);
+	// UTempoSceneCaptureComponent2D hooks.
+	virtual bool HasPendingRequests() const override { return HasPendingCameraRequests(); }
+	virtual FTextureRead* MakeTextureRead() const override;
+	virtual int32 GetMaxTextureQueueSize() const override;
 
-	// Initialize the shared render target and ring of staging textures sized for SizeXY,
-	// with a format matching the tile render targets (driven by bDepthEnabled).
-	void InitSharedRenderTarget();
+	TFuture<void> DecodeAndRespond(TUniquePtr<FTextureRead> TextureRead);
 
 	// Starts or restarts the timer that calls MaybeCapture.
 	void RestartCaptureTimer();
@@ -314,27 +330,12 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens")
 	FTempoLensDistortionParameters LensParameters;
 
-	// Output image resolution.
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo")
-	FIntPoint SizeXY = FIntPoint(960, 540);
-
-	// The rate in Hz this camera updates at.
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo", meta = (UIMin = 0.0, ClampMin = 0.0))
-	float RateHz = 10.0;
-
-	// Post-process settings applied to the managed capture components.
-	// The distortion/label post-process material is appended to WeightedBlendables automatically.
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Rendering", meta = (ShowOnlyInnerProperties))
-	FPostProcessSettings PostProcessSettings;
-
-	// Show flag overrides applied to the managed capture components.
-	// Each entry toggles a single named show flag; unset flags keep their engine defaults.
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Rendering")
-	TArray<FEngineShowFlagsSetting> ShowFlagSettings;
-
-	// Whether to use ray tracing for this capture. Ray Tracing must be enabled in the project.
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = SceneCapture)
-	bool bUseRayTracingIfEnabled = true;
+	// Note: SizeXY, RateHz, SequenceId, PostProcessSettings, ShowFlagSettings, and
+	// bUseRayTracingIfEnabled are inherited from UTempoSceneCaptureComponent2D /
+	// USceneCaptureComponent(2D). UTempoCamera propagates PostProcessSettings/ShowFlagSettings
+	// to its tile components (with AutoExposureMethod forced to AEM_Manual on tiles) and uses
+	// them for its own proxy scene capture (with AEM_Histogram). The proxy PPM is appended to
+	// the inherited PostProcessSettings.WeightedBlendables at runtime.
 
 	// Whether this camera can measure depth. Disabled when not requested to optimize performance.
 	UPROPERTY(VisibleAnywhere, Category = "Depth")
@@ -347,10 +348,6 @@ protected:
 	// The maximum depth this camera can measure (if depth is enabled). Will be set to UTempoSensorsSettings::MaxCameraDepth.
 	UPROPERTY(VisibleAnywhere, Category = "Depth")
 	float MaxDepth = 100000.0;
-
-	// Monotonically increasing counter of frames captured.
-	UPROPERTY(VisibleAnywhere)
-	int32 SequenceId = 0;
 
 	int32 NumResponded = 0;
 
@@ -371,6 +368,38 @@ protected:
 	// Shared render target holding the stitched output from all active tiles.
 	UPROPERTY(Transient, VisibleAnywhere)
 	UTextureRenderTarget2D* SharedTextureTarget = nullptr;
+
+	// Shared render target holding the stitched aux output (label + depth) from all active tiles.
+	// In Phase 2 this is written but not consumed; in Phase 3 it will be merged with the proxy
+	// capture's LDR color output into the staging textures for readback.
+	UPROPERTY(Transient, VisibleAnywhere)
+	UTextureRenderTarget2D* SharedAuxTextureTarget = nullptr;
+
+	// Final merged render target. A Canvas pass using the merge material combines SharedTextureTarget
+	// and SharedAuxTextureTarget into this RT, and the staging copy reads from here. In Phase 3a-i
+	// the merge is a passthrough of SharedTextureTarget, so output is bit-identical to Phase 2.
+	UPROPERTY(Transient, VisibleAnywhere)
+	UTextureRenderTarget2D* SharedFinalTextureTarget = nullptr;
+
+	// Dynamic instance of the stitch merge material, with its "ColorRT" and "AuxRT" parameters
+	// bound to the tonemapped (inherited TextureTarget) and aux render targets respectively.
+	// Created lazily.
+	UPROPERTY(Transient)
+	UMaterialInstanceDynamic* MergeMID = nullptr;
+
+	// Create MergeMID if needed and (re)bind its ColorRT/AuxRT parameters. Returns nullptr if
+	// the merge material is not configured or either source RT is missing.
+	UMaterialInstanceDynamic* GetOrCreateStitchMergeMID();
+
+	// Dynamic instance of the proxy tonemap post-process material, with its "HDRColorRT"
+	// parameter bound to SharedTextureTarget. Created lazily and appended to this component's
+	// PostProcessSettings.WeightedBlendables so it runs during the proxy scene capture.
+	UPROPERTY(Transient)
+	UMaterialInstanceDynamic* ProxyTonemapMID = nullptr;
+
+	// Create ProxyTonemapMID if needed, (re)bind its HDRColorRT parameter to SharedTextureTarget,
+	// and ensure it is present in this component's PostProcessSettings.WeightedBlendables.
+	UMaterialInstanceDynamic* GetOrCreateProxyTonemapMID();
 
 	// Ring buffer of staging textures for GPU->CPU readback of the shared RT.
 	TArray<FTextureRHIRef> StagingTextures;

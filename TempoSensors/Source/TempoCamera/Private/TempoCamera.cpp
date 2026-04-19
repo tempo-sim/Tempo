@@ -246,7 +246,7 @@ void TTextureRead<FCameraPixelWithDepth>::RespondToRequests(const TArray<FDepthI
 
 		ParallelFor(Image.Num(), [&DepthImage, this](int32 Idx)
 		{
-			DepthImage.set_depths(Idx, Image[Idx].Depth(MinDepth, MaxDepth, GTempo_Max_Discrete_Depth));
+			DepthImage.set_depths(Idx, Image[Idx].Depth(MinDepth, MaxDepth, GTempoCamera_Max_Discrete_Depth));
 		});
 
 		ExtractMeasurementHeader(TransmissionTime, DepthImage.mutable_header());
@@ -270,10 +270,13 @@ void TTextureRead<FCameraPixelWithDepth>::RespondToRequests(const TArray<FBoundi
 
 UTempoCameraCaptureComponent::UTempoCameraCaptureComponent()
 {
-	CaptureSource = ESceneCaptureSource::SCS_FinalColorLDR;
+	// HDR capture: we don't want each tile to tonemap independently (that's the whole source of
+	// the per-tile exposure mismatch). Tiles output HDR linear color; tonemapping is done once on
+	// the merged output (Phase 3b via proxy capture).
+	CaptureSource = ESceneCaptureSource::SCS_FinalColorHDR;
 
-	// Start with no-depth settings
-	RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA8;
+	// fp32 RGBA tile RT: RGB carries HDR linear color, A carries asfloat((label<<24) | depth24).
+	RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA32f;
 	PixelFormatOverride = EPixelFormat::PF_Unknown;
 
 	bAutoActivate = false;
@@ -300,6 +303,19 @@ void UTempoCameraCaptureComponent::ApplyRenderSettings()
 
 	PostProcessSettings = CameraOwner->PostProcessSettings;
 
+	// CameraOwner's PostProcessSettings enables AEM_Histogram for its own proxy tonemap pass,
+	// but tiles must render HDR without any exposure adaptation (divergent per-tile ViewStates
+	// would produce mismatched brightness across the stitched image). Force AEM_Manual here.
+	PostProcessSettings.bOverride_AutoExposureMethod = true;
+	PostProcessSettings.AutoExposureMethod = AEM_Manual;
+
+	// Drop the proxy tonemap PPM — it reads SharedTextureTarget, which tiles do not populate —
+	// but preserve any user-authored blendables.
+	PostProcessSettings.WeightedBlendables.Array.RemoveAll([CameraOwner = this->CameraOwner](const FWeightedBlendable& WB)
+	{
+		return WB.Object != nullptr && WB.Object == CameraOwner->ProxyTonemapMID;
+	});
+
 	// Re-append the distortion/label post-process material if it was already created
 	// (on first call from Configure it is still null and will be added by SetDepthEnabled).
 	if (PostProcessMaterialInstance)
@@ -307,7 +323,7 @@ void UTempoCameraCaptureComponent::ApplyRenderSettings()
 		PostProcessSettings.WeightedBlendables.Array.Add(FWeightedBlendable(1.0, PostProcessMaterialInstance));
 	}
 
-	SetShowFlagSettings(CameraOwner->ShowFlagSettings);
+	SetShowFlagSettings(CameraOwner->GetShowFlagSettings());
 
 	bUseRayTracingIfEnabled = CameraOwner->bUseRayTracingIfEnabled;
 }
@@ -320,6 +336,18 @@ void UTempoCameraCaptureComponent::Activate(bool bReset)
 	SetDepthEnabled(CameraOwner->bDepthEnabled);
 
 	Super::Activate(bReset);
+
+	// The base InitRenderTarget set TargetGamma to the configured SceneCaptureGamma (2.2). That's
+	// correct for LDR tile RTs but wrong for our fp32 HDR tile RT — we want to store linear HDR
+	// values untouched so the merged/tonemapped output later can apply its own gamma.
+	if (TextureTarget)
+	{
+		TextureTarget->TargetGamma = 1.0f;
+		// Point sampling: the A channel carries bit-packed (label, depth) via asfloat. Bilinear
+		// filtering would smear adjacent pixels' bit patterns and break asuint() decoding on the
+		// aux side. Stitch passes also draw at 1:1 pixel ratios, so point is correct for RGB too.
+		TextureTarget->Filter = TextureFilter::TF_Nearest;
+	}
 }
 
 void UTempoCameraCaptureComponent::SetDepthEnabled(bool bDepthEnabled)
@@ -327,11 +355,10 @@ void UTempoCameraCaptureComponent::SetDepthEnabled(bool bDepthEnabled)
 	const UTempoSensorsSettings* TempoSensorsSettings = GetDefault<UTempoSensorsSettings>();
 	check(TempoSensorsSettings);
 
+	// Tile RT format (fp32 RGBA) is set in the constructor and no longer depends on bDepthEnabled.
+	// Only the distortion/label PPM choice varies with depth.
 	if (bDepthEnabled)
 	{
-		RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA16f;
-		PixelFormatOverride = EPixelFormat::PF_A16B16G16R16;
-
 		if (const TObjectPtr<UMaterialInterface> PostProcessMaterialWithDepth = TempoSensorsSettings->GetCameraPostProcessMaterialWithDepth())
 		{
 			PostProcessMaterialInstance = UMaterialInstanceDynamic::Create(PostProcessMaterialWithDepth.Get(), this);
@@ -340,7 +367,7 @@ void UTempoCameraCaptureComponent::SetDepthEnabled(bool bDepthEnabled)
 			MaxDepth = TempoSensorsSettings->GetMaxCameraDepth();
 			PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MinDepth"), MinDepth);
 			PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MaxDepth"), MaxDepth);
-			PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MaxDiscreteDepth"), GTempo_Max_Discrete_Depth);
+			PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MaxDiscreteDepth"), GTempoCamera_Max_Discrete_Depth);
 		}
 		else
 		{
@@ -358,9 +385,6 @@ void UTempoCameraCaptureComponent::SetDepthEnabled(bool bDepthEnabled)
 		{
 			UE_LOG(LogTempoCamera, Error, TEXT("PostProcessMaterialNoDepth is not set in TempoSensors settings"));
 		}
-
-		RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA8;
-		PixelFormatOverride = EPixelFormat::PF_Unknown;
 	}
 
 	// Set up label override parameters
@@ -480,6 +504,29 @@ UMaterialInstanceDynamic* UTempoCameraCaptureComponent::GetOrCreateStitchMID()
 	return StitchMID;
 }
 
+UMaterialInstanceDynamic* UTempoCameraCaptureComponent::GetOrCreateStitchAuxMID()
+{
+	if (!TextureTarget)
+	{
+		return nullptr;
+	}
+
+	if (!StitchAuxMID)
+	{
+		const UTempoSensorsSettings* Settings = GetDefault<UTempoSensorsSettings>();
+		UMaterialInterface* StitchMat = Settings ? Settings->GetCameraStitchAuxMaterial().Get() : nullptr;
+		if (!StitchMat)
+		{
+			UE_LOG(LogTempoCamera, Error, TEXT("CameraStitchAuxMaterial is not set in TempoSensors settings."));
+			return nullptr;
+		}
+		StitchAuxMID = UMaterialInstanceDynamic::Create(StitchMat, this);
+	}
+
+	StitchAuxMID->SetTextureParameterValue(TEXT("TileRT"), TextureTarget);
+	return StitchAuxMID;
+}
+
 void UTempoCameraCaptureComponent::InitDistortionMap()
 {
 	if (TileOutputSizeXY.X <= 0 || TileOutputSizeXY.Y <= 0)
@@ -516,11 +563,34 @@ UTempoCamera::UTempoCamera()
 	MeasurementTypes = { EMeasurementType::COLOR_IMAGE, EMeasurementType::LABEL_IMAGE, EMeasurementType::DEPTH_IMAGE, EMeasurementType::BOUNDING_BOXES };
 	bAutoActivate = true;
 
-	// Defaults propagated to the managed capture components.
-	// Manual exposure by default so tiles render with a consistent exposure
-	// (per-tile auto exposure would diverge across independent ViewStates).
+	// Proxy scene capture settings: UTempoCamera itself is the proxy. Its PPM replaces scene
+	// color with the stitched HDR texture, then bloom/AE/tonemapper run to produce LDR that the
+	// merge pass packs together with label+depth bytes.
+	CaptureSource = ESceneCaptureSource::SCS_FinalColorLDR;
+	RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA8;
+	PixelFormatOverride = EPixelFormat::PF_Unknown;
+
+	// The proxy's scene render is useless — its PPM overwrites scene color before bloom/AE. Hide
+	// world geometry and lighting so nothing gets rasterized. Show flags for AntiAliasing /
+	// TemporalAA / MotionBlur are applied below so the tonemap pass itself still anti-aliases
+	// cleanly and doesn't smear across frames.
+	ShowFlags.SetAtmosphere(false);
+	ShowFlags.SetFog(false);
+	ShowFlags.SetLighting(false);
+	ShowFlags.SetDynamicShadows(false);
+	ShowFlags.SetStaticMeshes(false);
+	ShowFlags.SetSkeletalMeshes(false);
+	ShowFlags.SetLandscape(false);
+	ShowFlags.SetSkyLighting(false);
+	ShowFlags.SetTranslucency(false);
+	ShowFlags.SetParticles(false);
+
+	// Auto exposure settings for the proxy's tonemap pass. AEM_Histogram samples the (PPM-
+	// replaced) scene color histogram to compute exposure. The same PostProcessSettings are
+	// copied to tile components, but tiles force AEM_Manual in ApplyRenderSettings so their HDR
+	// output is unaffected.
 	PostProcessSettings.bOverride_AutoExposureMethod = true;
-	PostProcessSettings.AutoExposureMethod = AEM_Manual;
+	PostProcessSettings.AutoExposureMethod = AEM_Histogram;
 	PostProcessSettings.bOverride_AutoExposureBias = true;
 	PostProcessSettings.AutoExposureBias = 1.0;
 	PostProcessSettings.bOverride_AutoExposureApplyPhysicalCameraExposure = true;
@@ -536,10 +606,11 @@ UTempoCamera::UTempoCamera()
 	PostProcessSettings.bOverride_MotionBlurAmount = true;
 	PostProcessSettings.MotionBlurAmount = 0.0;
 
-	ShowFlagSettings.Add({ TEXT("AntiAliasing"), true });
-	ShowFlagSettings.Add({ TEXT("TemporalAA"), true });
-	ShowFlagSettings.Add({ TEXT("MotionBlur"), false });
-
+	TArray<FEngineShowFlagsSetting> NewShowFlagSettings = GetShowFlagSettings();
+	NewShowFlagSettings.Add({ TEXT("AntiAliasing"), true });
+	NewShowFlagSettings.Add({ TEXT("TemporalAA"), true });
+	NewShowFlagSettings.Add({ TEXT("MotionBlur"), false });
+	SetShowFlagSettings(NewShowFlagSettings);
 }
 
 void UTempoCamera::OnRegister()
@@ -559,8 +630,8 @@ void UTempoCamera::OnRegister()
 	if (UTempoCoreUtils::IsGameWorld(this))
 	{
 		// Activate() runs when added to a live world, but may be skipped in some registration
-		// paths. Init the shared RT here so it's ready for the first capture regardless.
-		InitSharedRenderTarget();
+		// paths. Init render targets here so they are ready for the first capture regardless.
+		InitRenderTarget();
 	}
 }
 
@@ -632,11 +703,11 @@ void UTempoCamera::ReconfigureCaptureComponentsNow()
 	SyncCaptureComponents();
 	UpdateInternalMirrors();
 
-	// The shared RT needs to resize when SizeXY changed, and any queued reads reference the
+	// Render targets need to resize when SizeXY changed, and any queued reads reference the
 	// previous RT geometry so are no longer valid.
 	if (UTempoCoreUtils::IsGameWorld(this))
 	{
-		InitSharedRenderTarget();
+		InitRenderTarget();
 	}
 }
 
@@ -670,13 +741,13 @@ bool UTempoCamera::IsAwaitingRender()
 
 void UTempoCamera::OnRenderCompleted()
 {
-	if (!TextureReadQueue.IsNextAwaitingRender() || !SharedTextureTarget)
+	if (!TextureReadQueue.IsNextAwaitingRender() || !SharedFinalTextureTarget)
 	{
 		return;
 	}
 
-	const FRenderTarget* RenderTarget = SharedTextureTarget->GetRenderTargetResource();
-	if (!ensureMsgf(RenderTarget, TEXT("SharedTextureTarget was not initialized. Skipping texture read.")))
+	const FRenderTarget* RenderTarget = SharedFinalTextureTarget->GetRenderTargetResource();
+	if (!ensureMsgf(RenderTarget, TEXT("SharedFinalTextureTarget was not initialized. Skipping texture read.")))
 	{
 		return;
 	}
@@ -696,26 +767,39 @@ TOptional<TFuture<void>> UTempoCamera::SendMeasurements()
 {
 	TOptional<TFuture<void>> Future;
 
+	// Snapshot the depth-request state before draining. The toggle decision below uses this
+	// snapshot so that in the steady state — client submits a depth request every frame and we
+	// drain it every frame — we recognize ongoing client intent and stay enabled, instead of
+	// oscillating off/on each frame when the queue looks empty post-drain.
+	const bool bHadDepthRequests = !PendingDepthImageRequests.IsEmpty();
+
 	if (TextureReadQueue.NextReadComplete())
 	{
 		TUniquePtr<FTextureRead> TextureRead = TextureReadQueue.DequeueIfReadComplete();
+		const bool bReadHasDepth = TextureRead->GetType() == TEXT("WithDepth");
 		Future = DecodeAndRespond(MoveTemp(TextureRead));
 
 		PendingColorImageRequests.Empty();
 		PendingLabelImageRequests.Empty();
 		PendingBoundingBoxesRequests.Empty();
-		if (bDepthEnabled)
+		// A NoDepth read that completes while bDepthEnabled has since flipped to true (or vice
+		// versa) cannot satisfy depth requests. Key off the read's type rather than the current
+		// bDepthEnabled so stale requests aren't dropped across a toggle boundary.
+		if (bReadHasDepth)
 		{
 			PendingDepthImageRequests.Empty();
 		}
 	}
 
-	// Toggle depth based on current pending requests — takes effect on the next MaybeCapture.
-	if (!bDepthEnabled && !PendingDepthImageRequests.IsEmpty())
+	// Toggle depth based on client intent. Use the pre-drain snapshot OR'd with any requests
+	// still pending (either newly arrived during this function, or left over because the last
+	// read couldn't satisfy them).
+	const bool bDepthNeeded = bHadDepthRequests || !PendingDepthImageRequests.IsEmpty();
+	if (!bDepthEnabled && bDepthNeeded)
 	{
 		SetDepthEnabled(true);
 	}
-	if (bDepthEnabled && PendingDepthImageRequests.IsEmpty())
+	if (bDepthEnabled && !bDepthNeeded)
 	{
 		SetDepthEnabled(false);
 	}
@@ -791,11 +875,12 @@ TFuture<void> UTempoCamera::DecodeAndRespond(TUniquePtr<FTextureRead> TextureRea
 
 void UTempoCamera::Activate(bool bReset)
 {
+	// Super::Activate calls InitRenderTarget() (our override) when in a game world. It does not
+	// start its own capture timer because ShouldManageOwnTimer() returns false.
 	Super::Activate(bReset);
 
 	if (UTempoCoreUtils::IsGameWorld(this))
 	{
-		InitSharedRenderTarget();
 		RestartCaptureTimer();
 	}
 }
@@ -836,36 +921,142 @@ FTextureRHIRef UTempoCamera::AcquireNextStagingTexture()
 	return Texture;
 }
 
-void UTempoCamera::InitSharedRenderTarget()
+UMaterialInstanceDynamic* UTempoCamera::GetOrCreateStitchMergeMID()
+{
+	if (!TextureTarget || !SharedAuxTextureTarget)
+	{
+		return nullptr;
+	}
+
+	const UTempoSensorsSettings* Settings = GetDefault<UTempoSensorsSettings>();
+	UMaterialInterface* MergeMat = nullptr;
+	if (Settings)
+	{
+		MergeMat = bDepthEnabled
+			? Settings->GetCameraStitchMergeMaterialWithDepth().Get()
+			: Settings->GetCameraStitchMergeMaterialNoDepth().Get();
+	}
+	if (!MergeMat)
+	{
+		UE_LOG(LogTempoCamera, Error, TEXT("Camera stitch merge material is not set in TempoSensors settings (bDepthEnabled=%d)."), bDepthEnabled);
+		return nullptr;
+	}
+
+	// Rebuild MergeMID if the source material changed (e.g., bDepthEnabled toggled).
+	if (!MergeMID || MergeMID->Parent != MergeMat)
+	{
+		MergeMID = UMaterialInstanceDynamic::Create(MergeMat, this);
+	}
+
+	// ColorRT is the proxy capture's tonemapped LDR output (the inherited TextureTarget).
+	MergeMID->SetTextureParameterValue(TEXT("ColorRT"), TextureTarget);
+	MergeMID->SetTextureParameterValue(TEXT("AuxRT"), SharedAuxTextureTarget);
+	return MergeMID;
+}
+
+UMaterialInstanceDynamic* UTempoCamera::GetOrCreateProxyTonemapMID()
+{
+	if (!SharedTextureTarget)
+	{
+		return nullptr;
+	}
+
+	const UTempoSensorsSettings* Settings = GetDefault<UTempoSensorsSettings>();
+	UMaterialInterface* ProxyMat = Settings ? Settings->GetCameraProxyTonemapMaterial().Get() : nullptr;
+	if (!ProxyMat)
+	{
+		UE_LOG(LogTempoCamera, Error, TEXT("CameraProxyTonemapMaterial is not set in TempoSensors settings."));
+		return nullptr;
+	}
+
+	if (!ProxyTonemapMID || ProxyTonemapMID->Parent != ProxyMat)
+	{
+		// Remove any stale entry from WeightedBlendables before rebuilding so we don't leak
+		// references to destroyed MIDs or stack multiple copies across reconfigurations.
+		if (ProxyTonemapMID)
+		{
+			PostProcessSettings.WeightedBlendables.Array.RemoveAll([this](const FWeightedBlendable& WB)
+			{
+				return WB.Object == ProxyTonemapMID;
+			});
+		}
+		ProxyTonemapMID = UMaterialInstanceDynamic::Create(ProxyMat, this);
+		PostProcessSettings.WeightedBlendables.Array.Add(FWeightedBlendable(1.0, ProxyTonemapMID));
+	}
+
+	ProxyTonemapMID->SetTextureParameterValue(TEXT("HDRColorRT"), SharedTextureTarget);
+	return ProxyTonemapMID;
+}
+
+FTextureRead* UTempoCamera::MakeTextureRead() const
+{
+	// UTempoCamera manages its own readback (ShouldManageOwnReadback returns false), so this
+	// override is only here to satisfy the pure-virtual contract of UTempoSceneCaptureComponent2D.
+	// FTextureReads are actually constructed inline in MaybeCapture, where CameraPixelWithDepth vs
+	// NoDepth is selected based on the current bDepthEnabled.
+	checkNoEntry();
+	return nullptr;
+}
+
+int32 UTempoCamera::GetMaxTextureQueueSize() const
+{
+	return GetDefault<UTempoSensorsSettings>()->GetMaxCameraRenderBufferSize();
+}
+
+void UTempoCamera::InitRenderTarget()
 {
 	if (SizeXY.X <= 0 || SizeXY.Y <= 0)
 	{
 		return;
 	}
 
+	// Super::InitRenderTarget allocates the inherited TextureTarget (LDR RGBA8, gamma 2.2) which
+	// is the proxy's tonemapped output; because ShouldManageOwnReadback() returns false it does
+	// not allocate staging textures or a distortion map, leaving both for us to manage.
+	Super::InitRenderTarget();
+
 	// Wait for any previous staging texture init render command to complete before modifying
 	// StagingTextures, since the render command accesses the array via raw pointer.
 	TextureInitFence.Wait();
 
+	// SharedTextureTarget carries HDR linear color produced by the HDR-capturing tiles (fp32)
+	// through the passthrough stitch. fp16 is plenty of precision for linear color and halves
+	// the bandwidth vs fp32. The proxy scene capture's PPM samples this as HDRColorRT, and
+	// Bloom/AE/Tonemapper produce the LDR result in the inherited TextureTarget.
 	SharedTextureTarget = NewObject<UTextureRenderTarget2D>(this);
-	SharedTextureTarget->TargetGamma = GetDefault<UTempoSensorsSettings>()->GetSceneCaptureGamma();
+	SharedTextureTarget->TargetGamma = 1.0f;
 	SharedTextureTarget->bGPUSharedFlag = true;
+	SharedTextureTarget->RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA16f;
+	SharedTextureTarget->InitAutoFormat(SizeXY.X, SizeXY.Y);
 
-	const ETextureRenderTargetFormat Format = bDepthEnabled
+	// SharedFinalTextureTarget format matches the staging / FCameraPixel layout: 4 bytes for
+	// color+label, plus (when depth is enabled) 4 more bytes for discretized depth.
+	const ETextureRenderTargetFormat FinalFormat = bDepthEnabled
 		? ETextureRenderTargetFormat::RTF_RGBA16f
 		: ETextureRenderTargetFormat::RTF_RGBA8;
-	const EPixelFormat PixelFormatOverride = bDepthEnabled
+	const EPixelFormat FinalPixelFormatOverride = bDepthEnabled
 		? EPixelFormat::PF_A16B16G16R16
 		: EPixelFormat::PF_Unknown;
 
-	SharedTextureTarget->RenderTargetFormat = Format;
-	if (PixelFormatOverride == EPixelFormat::PF_Unknown)
+	// Phase 2: dedicated aux RT, written but not consumed. Format is RGBA8 regardless of bDepthEnabled
+	// since the aux pass's eventual role (Phase 3) is carrying packed label+depth bytes, not HDR color.
+	SharedAuxTextureTarget = NewObject<UTextureRenderTarget2D>(this);
+	SharedAuxTextureTarget->TargetGamma = GetDefault<UTempoSensorsSettings>()->GetSceneCaptureGamma();
+	SharedAuxTextureTarget->RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA8;
+	SharedAuxTextureTarget->InitAutoFormat(SizeXY.X, SizeXY.Y);
+
+	// Final merge RT, fed by the merge material. Format matches staging / FCameraPixel layout.
+	SharedFinalTextureTarget = NewObject<UTextureRenderTarget2D>(this);
+	SharedFinalTextureTarget->TargetGamma = GetDefault<UTempoSensorsSettings>()->GetSceneCaptureGamma();
+	SharedFinalTextureTarget->bGPUSharedFlag = true;
+	SharedFinalTextureTarget->RenderTargetFormat = FinalFormat;
+	if (FinalPixelFormatOverride == EPixelFormat::PF_Unknown)
 	{
-		SharedTextureTarget->InitAutoFormat(SizeXY.X, SizeXY.Y);
+		SharedFinalTextureTarget->InitAutoFormat(SizeXY.X, SizeXY.Y);
 	}
 	else
 	{
-		SharedTextureTarget->InitCustomFormat(SizeXY.X, SizeXY.Y, PixelFormatOverride, true);
+		SharedFinalTextureTarget->InitCustomFormat(SizeXY.X, SizeXY.Y, FinalPixelFormatOverride, true);
 	}
 
 	const int32 MaxQueueSize = GetDefault<UTempoSensorsSettings>()->GetMaxCameraRenderBufferSize();
@@ -893,9 +1084,9 @@ void UTempoCamera::InitSharedRenderTarget()
 
 	FInitStagingContext Context = {
 		GetName(),
-		SharedTextureTarget->SizeX,
-		SharedTextureTarget->SizeY,
-		SharedTextureTarget->GetFormat(),
+		SharedFinalTextureTarget->SizeX,
+		SharedFinalTextureTarget->SizeY,
+		SharedFinalTextureTarget->GetFormat(),
 		NumStagingTextures,
 		&StagingTextures,
 		&StagingTexturesMutex
@@ -961,17 +1152,22 @@ void UTempoCamera::MaybeCapture()
 		return;
 	}
 
-	// Require that each active tile has a valid render target of the expected format.
+	// Require that each active tile has a valid render target. Tile format (fp32) intentionally
+	// differs from SharedTextureTarget (fp16) — the Canvas stitch samples fp32 and writes fp16.
 	for (const UTempoCameraCaptureComponent* Tile : ActiveCaptureComponents)
 	{
-		if (!Tile->TextureTarget || !Tile->TextureTarget->GameThread_GetRenderTargetResource() ||
-			Tile->TextureTarget->GetFormat() != SharedTextureTarget->GetFormat())
+		if (!Tile->TextureTarget || !Tile->TextureTarget->GameThread_GetRenderTargetResource())
 		{
 			return;
 		}
 	}
 
-	FTextureRenderTargetResource* SharedRTResource = SharedTextureTarget->GameThread_GetRenderTargetResource();
+	if (!SharedFinalTextureTarget)
+	{
+		return;
+	}
+
+	FTextureRenderTargetResource* SharedRTResource = SharedFinalTextureTarget->GameThread_GetRenderTargetResource();
 	if (!SharedRTResource)
 	{
 		return;
@@ -1043,6 +1239,80 @@ void UTempoCamera::MaybeCapture()
 			Item.BlendMode = SE_BLEND_Opaque;
 			Canvas->DrawItem(Item);
 		}
+
+		UKismetRenderingLibrary::EndDrawCanvasToRenderTarget(this, Ctx);
+	}
+
+	// Phase 2: second Canvas pass targeting SharedAuxTextureTarget using the aux material. Output
+	// is not consumed yet — this validates the two-RT/two-material/two-pass structure for Phase 3,
+	// where the aux material will unpack label+depth bits from the HDR tile format.
+	if (SharedAuxTextureTarget)
+	{
+		UCanvas* Canvas = nullptr;
+		FVector2D CanvasSize(0.0, 0.0);
+		FDrawToRenderTargetContext Ctx;
+		UKismetRenderingLibrary::BeginDrawCanvasToRenderTarget(this, SharedAuxTextureTarget, Canvas, CanvasSize, Ctx);
+
+		for (UTempoCameraCaptureComponent* Tile : ActiveCaptureComponents)
+		{
+			UMaterialInstanceDynamic* MID = Tile->GetOrCreateStitchAuxMID();
+			if (!MID)
+			{
+				continue;
+			}
+
+			const int32 TileRTSizeX = Tile->TextureTarget->SizeX;
+			const int32 TileRTSizeY = Tile->TextureTarget->SizeY;
+			if (TileRTSizeX <= 0 || TileRTSizeY <= 0)
+			{
+				continue;
+			}
+
+			const FVector2D UV0(0.0, static_cast<double>(Tile->TileOutputOffsetY) / TileRTSizeY);
+			const FVector2D UV1(static_cast<double>(Tile->TileOutputSizeXY.X) / TileRTSizeX,
+				static_cast<double>(Tile->TileOutputOffsetY + Tile->TileOutputSizeXY.Y) / TileRTSizeY);
+
+			FCanvasTileItem Item(
+				FVector2D(Tile->TileDestOffset),
+				MID->GetRenderProxy(),
+				FVector2D(Tile->TileOutputSizeXY),
+				UV0,
+				UV1);
+			Item.BlendMode = SE_BLEND_Opaque;
+			Canvas->DrawItem(Item);
+		}
+
+		UKismetRenderingLibrary::EndDrawCanvasToRenderTarget(this, Ctx);
+	}
+
+	// Phase 3b: proxy scene capture. The PPM (appended to PostProcessSettings.WeightedBlendables
+	// by GetOrCreateProxyTonemapMID) replaces scene color with SharedTextureTarget's HDR linear
+	// color before Bloom/AE/Tonemapper, so the tonemapped LDR output landing in the inherited
+	// TextureTarget is effectively tonemap(stitched HDR). CaptureScene enqueues on the render
+	// thread in FIFO order after the two Canvas stitch passes above.
+	if (GetOrCreateProxyTonemapMID())
+	{
+		CaptureScene();
+	}
+
+	// Phase 3a-i / 3b: merge pass — a single full-screen Canvas draw that samples the proxy's
+	// tonemapped TextureTarget (via MergeMID's "ColorRT" parameter) and SharedAuxTextureTarget
+	// through the merge material and writes to SharedFinalTextureTarget.
+	if (UMaterialInstanceDynamic* MergeMaterialInstance = GetOrCreateStitchMergeMID())
+	{
+		UCanvas* Canvas = nullptr;
+		FVector2D CanvasSize(0.0, 0.0);
+		FDrawToRenderTargetContext Ctx;
+		UKismetRenderingLibrary::BeginDrawCanvasToRenderTarget(this, SharedFinalTextureTarget, Canvas, CanvasSize, Ctx);
+
+		FCanvasTileItem Item(
+			FVector2D::ZeroVector,
+			MergeMaterialInstance->GetRenderProxy(),
+			FVector2D(SizeXY.X, SizeXY.Y),
+			FVector2D(0.0, 0.0),
+			FVector2D(1.0, 1.0));
+		Item.BlendMode = SE_BLEND_Opaque;
+		Canvas->DrawItem(Item);
 
 		UKismetRenderingLibrary::EndDrawCanvasToRenderTarget(this, Ctx);
 	}
@@ -1265,7 +1535,7 @@ void UTempoCamera::ApplyDepthEnabled()
 	// Shared RT format depends on bDepthEnabled, so it must be rebuilt too.
 	if (UTempoCoreUtils::IsGameWorld(this))
 	{
-		InitSharedRenderTarget();
+		InitRenderTarget();
 	}
 }
 
@@ -1276,11 +1546,11 @@ void UTempoCamera::PostEditChangeProperty(FPropertyChangedEvent& PropertyChanged
 
 	const FName MemberPropertyName = (PropertyChangedEvent.MemberProperty != nullptr) ? PropertyChangedEvent.MemberProperty->GetFName() : NAME_None;
 	if (MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, HorizontalFOV) ||
-		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, SizeXY) ||
 		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, LensParameters) ||
-		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, PostProcessSettings) ||
-		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, ShowFlagSettings) ||
-		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, bUseRayTracingIfEnabled))
+		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, SizeXY) ||
+		MemberPropertyName == GET_MEMBER_NAME_CHECKED(USceneCaptureComponent2D, PostProcessSettings) ||
+		MemberPropertyName == TEXT("ShowFlagSettings") ||
+		MemberPropertyName == GET_MEMBER_NAME_CHECKED(USceneCaptureComponent, bUseRayTracingIfEnabled))
 	{
 		// Route through the same choke point as the runtime Tick path. In non-PIE editor no
 		// captures are running, so this applies immediately. In PIE it is deferred until the
