@@ -10,9 +10,13 @@
 #include "TempoSensorsConstants.h"
 #include "TempoSensorsSettings.h"
 
+#include "CanvasItem.h"
+#include "CanvasTypes.h"
+#include "Engine/Canvas.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "Engine/Texture2D.h"
 #include "Kismet/GameplayStatics.h"
+#include "Kismet/KismetRenderingLibrary.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Math/Box2D.h"
 #include "TextureResource.h"
@@ -450,6 +454,30 @@ void UTempoCameraCaptureComponent::Configure(double YawOffset, double PitchOffse
 	SizeXY = InTileSizeXY;
 
 	ApplyRenderSettings();
+}
+
+UMaterialInstanceDynamic* UTempoCameraCaptureComponent::GetOrCreateStitchMID()
+{
+	if (!TextureTarget)
+	{
+		return nullptr;
+	}
+
+	if (!StitchMID)
+	{
+		const UTempoSensorsSettings* Settings = GetDefault<UTempoSensorsSettings>();
+		UMaterialInterface* StitchMat = Settings ? Settings->GetCameraStitchPassthroughMaterial().Get() : nullptr;
+		if (!StitchMat)
+		{
+			UE_LOG(LogTempoCamera, Error, TEXT("CameraStitchPassthroughMaterial is not set in TempoSensors settings."));
+			return nullptr;
+		}
+		StitchMID = UMaterialInstanceDynamic::Create(StitchMat, this);
+	}
+
+	// Rebind every call — cheap, and correctly tracks TextureTarget swaps on reactivate.
+	StitchMID->SetTextureParameterValue(TEXT("TileRT"), TextureTarget);
+	return StitchMID;
 }
 
 void UTempoCameraCaptureComponent::InitDistortionMap()
@@ -899,17 +927,6 @@ void UTempoCamera::InitSharedRenderTarget()
 	TextureReadQueue.Empty();
 }
 
-namespace
-{
-	struct FTileCopyInfo
-	{
-		FTextureRenderTargetResource* TileRT;
-		FIntPoint TileDestOffset;
-		FIntPoint TileOutputSizeXY;
-		int32 TileOutputOffsetY;
-	};
-}
-
 void UTempoCamera::MaybeCapture()
 {
 	const float TimerPeriod = GetCameraTimerPeriod(RateHz);
@@ -961,24 +978,11 @@ void UTempoCamera::MaybeCapture()
 	}
 
 	// Capture each tile. With CaptureScene() (not CaptureSceneDeferred) the tile's render commands
-	// enqueue immediately in FIFO order, so the stitch command we enqueue right after will run
+	// enqueue immediately in FIFO order, so the Canvas stitch we issue right after will run
 	// after all tile renders on the render thread.
 	for (UTempoCameraCaptureComponent* Tile : ActiveCaptureComponents)
 	{
 		Tile->CaptureScene();
-	}
-
-	// Gather copy info from each active tile.
-	TArray<FTileCopyInfo> TileInfos;
-	TileInfos.Reserve(ActiveCaptureComponents.Num());
-	for (UTempoCameraCaptureComponent* Tile : ActiveCaptureComponents)
-	{
-		FTileCopyInfo Info;
-		Info.TileRT = Tile->TextureTarget->GameThread_GetRenderTargetResource();
-		Info.TileDestOffset = Tile->TileDestOffset;
-		Info.TileOutputSizeXY = Tile->TileOutputSizeXY;
-		Info.TileOutputOffsetY = Tile->TileOutputOffsetY;
-		TileInfos.Add(Info);
 	}
 
 	// Build the FTextureRead for the stitched output, sized to the camera's final SizeXY.
@@ -1002,30 +1006,56 @@ void UTempoCamera::MaybeCapture()
 
 	const FTextureRHIRef StagingTex = NewRead->StagingTexture;
 
-	ENQUEUE_RENDER_COMMAND(TempoCameraStitchAndReadback)(
-		[SharedRTResource, StagingTex, TileInfos, NewRead](FRHICommandListImmediate& RHICmdList)
+	// Canvas-based stitch: for each tile, draw its TextureTarget sub-rect into SharedTextureTarget
+	// at TileDestOffset using the passthrough material. Enqueues render commands in FIFO order after
+	// the tile CaptureScene calls above.
+	{
+		UCanvas* Canvas = nullptr;
+		FVector2D CanvasSize(0.0, 0.0);
+		FDrawToRenderTargetContext Ctx;
+		UKismetRenderingLibrary::BeginDrawCanvasToRenderTarget(this, SharedTextureTarget, Canvas, CanvasSize, Ctx);
+
+		for (UTempoCameraCaptureComponent* Tile : ActiveCaptureComponents)
+		{
+			UMaterialInstanceDynamic* MID = Tile->GetOrCreateStitchMID();
+			if (!MID)
+			{
+				continue;
+			}
+
+			const int32 TileRTSizeX = Tile->TextureTarget->SizeX;
+			const int32 TileRTSizeY = Tile->TextureTarget->SizeY;
+			if (TileRTSizeX <= 0 || TileRTSizeY <= 0)
+			{
+				continue;
+			}
+
+			const FVector2D UV0(0.0, static_cast<double>(Tile->TileOutputOffsetY) / TileRTSizeY);
+			const FVector2D UV1(static_cast<double>(Tile->TileOutputSizeXY.X) / TileRTSizeX,
+				static_cast<double>(Tile->TileOutputOffsetY + Tile->TileOutputSizeXY.Y) / TileRTSizeY);
+
+			FCanvasTileItem Item(
+				FVector2D(Tile->TileDestOffset),
+				MID->GetRenderProxy(),
+				FVector2D(Tile->TileOutputSizeXY),
+				UV0,
+				UV1);
+			Item.BlendMode = SE_BLEND_Opaque;
+			Canvas->DrawItem(Item);
+		}
+
+		UKismetRenderingLibrary::EndDrawCanvasToRenderTarget(this, Ctx);
+	}
+
+	// Staging copy + fence: runs after the Canvas stitch via render-thread FIFO.
+	ENQUEUE_RENDER_COMMAND(TempoCameraStagingCopy)(
+		[SharedRTResource, StagingTex, NewRead](FRHICommandListImmediate& RHICmdList)
 		{
 			FRHITexture* SharedRT = SharedRTResource->GetRenderTargetTexture();
 
-			// Transition shared RT to CopyDest, then copy each tile sub-rect into it.
-			RHICmdList.Transition(FRHITransitionInfo(SharedRT, ERHIAccess::Unknown, ERHIAccess::CopyDest));
-
-			for (const FTileCopyInfo& Info : TileInfos)
-			{
-				FRHITexture* TileRT = Info.TileRT->GetRenderTargetTexture();
-				RHICmdList.Transition(FRHITransitionInfo(TileRT, ERHIAccess::Unknown, ERHIAccess::CopySrc));
-				FRHICopyTextureInfo CopyInfo;
-				CopyInfo.SourcePosition = FIntVector(0, Info.TileOutputOffsetY, 0);
-				CopyInfo.DestPosition = FIntVector(Info.TileDestOffset.X, Info.TileDestOffset.Y, 0);
-				CopyInfo.Size = FIntVector(Info.TileOutputSizeXY.X, Info.TileOutputSizeXY.Y, 1);
-				RHICmdList.CopyTexture(TileRT, SharedRT, CopyInfo);
-			}
-
-			// Transition shared RT to CopySrc, then copy into staging for CPU readback.
 			RHICmdList.Transition(FRHITransitionInfo(SharedRT, ERHIAccess::Unknown, ERHIAccess::CopySrc));
 			RHICmdList.CopyTexture(SharedRT, StagingTex, FRHICopyTextureInfo());
 
-			// Fence so the game thread can poll for readback readiness.
 			NewRead->RenderFence = RHICreateGPUFence(TEXT("TempoCameraRenderFence"));
 			RHICmdList.WriteGPUFence(NewRead->RenderFence);
 		});
