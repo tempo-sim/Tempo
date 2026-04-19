@@ -250,7 +250,7 @@ public:
 	// Rebuild only the depth-dependent resources: SharedFinalTextureTarget (format varies with
 	// depth) and the staging texture ring. Leaves the inherited TextureTarget, SharedTextureTarget,
 	// and SharedAuxTextureTarget intact so the proxy's persistent view state (TAA/AE history)
-	// stays consistent across a NoDepth<->WithDepth toggle.
+	// stays consistent across depth toggles.
 	void InitFinalRenderTargetAndStaging();
 
 	void RequestMeasurement(const TempoCamera::ColorImageRequest& Request, const TResponseDelegate<TempoCamera::ColorImage>& ResponseContinuation);
@@ -336,12 +336,9 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens")
 	FTempoLensDistortionParameters LensParameters;
 
-	// Note: SizeXY, RateHz, SequenceId, PostProcessSettings, ShowFlagSettings, and
+	// SizeXY, RateHz, SequenceId, PostProcessSettings, ShowFlagSettings, and
 	// bUseRayTracingIfEnabled are inherited from UTempoSceneCaptureComponent2D /
-	// USceneCaptureComponent(2D). UTempoCamera propagates PostProcessSettings/ShowFlagSettings
-	// to its tile components (with AutoExposureMethod forced to AEM_Manual on tiles) and uses
-	// them for its own proxy scene capture (with AEM_Histogram). The proxy PPM is appended to
-	// the inherited PostProcessSettings.WeightedBlendables at runtime.
+	// USceneCaptureComponent(2D).
 
 	// Whether this camera can measure depth. Disabled when not requested to optimize performance.
 	UPROPERTY(VisibleAnywhere, Category = "Depth")
@@ -375,15 +372,14 @@ protected:
 	UPROPERTY(Transient, VisibleAnywhere)
 	UTextureRenderTarget2D* SharedTextureTarget = nullptr;
 
-	// Shared render target holding the stitched aux output (label + depth) from all active tiles.
-	// In Phase 2 this is written but not consumed; in Phase 3 it will be merged with the proxy
-	// capture's LDR color output into the staging textures for readback.
+	// Shared render target holding the stitched aux output (label + depth bytes) from all
+	// active tiles. Merged with the proxy capture's tonemapped color into SharedFinalTextureTarget.
 	UPROPERTY(Transient, VisibleAnywhere)
 	UTextureRenderTarget2D* SharedAuxTextureTarget = nullptr;
 
-	// Final merged render target. A Canvas pass using the merge material combines SharedTextureTarget
-	// and SharedAuxTextureTarget into this RT, and the staging copy reads from here. In Phase 3a-i
-	// the merge is a passthrough of SharedTextureTarget, so output is bit-identical to Phase 2.
+	// Final merged render target. A Canvas pass using the merge material combines the proxy's
+	// tonemapped TextureTarget with SharedAuxTextureTarget into this RT; the staging copy reads
+	// from here.
 	UPROPERTY(Transient, VisibleAnywhere)
 	UTextureRenderTarget2D* SharedFinalTextureTarget = nullptr;
 
