@@ -425,10 +425,17 @@ void UTempoCameraCaptureComponent::SetDepthEnabled(bool bDepthEnabled)
 			PostProcessMaterialInstance->SetScalarParameterValue(TEXT("OverridingLabel"), 0.0);
 		}
 		// Rebuild blendables from the owner's user-authored list, then append the distortion/label material.
+		// Filter out the owner's ProxyTonemapMID: that PPM reads SharedTextureTarget, which tiles
+		// populate — applying it inside a tile would feed stale stitched content back into the tile's
+		// scene color and freeze the proxy's tonemap output after a NoDepth<->WithDepth toggle.
 		PostProcessSettings.WeightedBlendables.Array.Empty();
 		if (CameraOwner)
 		{
 			PostProcessSettings.WeightedBlendables.Array.Append(CameraOwner->PostProcessSettings.WeightedBlendables.Array);
+			PostProcessSettings.WeightedBlendables.Array.RemoveAll([CameraOwner = this->CameraOwner](const FWeightedBlendable& WB)
+			{
+				return WB.Object != nullptr && WB.Object == CameraOwner->ProxyTonemapMID;
+			});
 		}
 		PostProcessSettings.WeightedBlendables.Array.Add(FWeightedBlendable(1.0, PostProcessMaterialInstance));
 		PostProcessMaterialInstance->EnsureIsComplete();
@@ -1015,10 +1022,6 @@ void UTempoCamera::InitRenderTarget()
 	// not allocate staging textures or a distortion map, leaving both for us to manage.
 	Super::InitRenderTarget();
 
-	// Wait for any previous staging texture init render command to complete before modifying
-	// StagingTextures, since the render command accesses the array via raw pointer.
-	TextureInitFence.Wait();
-
 	// SharedTextureTarget carries HDR linear color produced by the HDR-capturing tiles (fp32)
 	// through the passthrough stitch. fp16 is plenty of precision for linear color and halves
 	// the bandwidth vs fp32. The proxy scene capture's PPM samples this as HDRColorRT, and
@@ -1029,6 +1032,27 @@ void UTempoCamera::InitRenderTarget()
 	SharedTextureTarget->RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA16f;
 	SharedTextureTarget->InitAutoFormat(SizeXY.X, SizeXY.Y);
 
+	// Phase 2: dedicated aux RT, written but not consumed. Format is RGBA8 regardless of bDepthEnabled
+	// since the aux pass's eventual role (Phase 3) is carrying packed label+depth bytes, not HDR color.
+	SharedAuxTextureTarget = NewObject<UTextureRenderTarget2D>(this);
+	SharedAuxTextureTarget->TargetGamma = GetDefault<UTempoSensorsSettings>()->GetSceneCaptureGamma();
+	SharedAuxTextureTarget->RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA8;
+	SharedAuxTextureTarget->InitAutoFormat(SizeXY.X, SizeXY.Y);
+
+	InitFinalRenderTargetAndStaging();
+}
+
+void UTempoCamera::InitFinalRenderTargetAndStaging()
+{
+	if (SizeXY.X <= 0 || SizeXY.Y <= 0)
+	{
+		return;
+	}
+
+	// Wait for any previous staging texture init render command to complete before modifying
+	// StagingTextures, since the render command accesses the array via raw pointer.
+	TextureInitFence.Wait();
+
 	// SharedFinalTextureTarget format matches the staging / FCameraPixel layout: 4 bytes for
 	// color+label, plus (when depth is enabled) 4 more bytes for discretized depth.
 	const ETextureRenderTargetFormat FinalFormat = bDepthEnabled
@@ -1037,13 +1061,6 @@ void UTempoCamera::InitRenderTarget()
 	const EPixelFormat FinalPixelFormatOverride = bDepthEnabled
 		? EPixelFormat::PF_A16B16G16R16
 		: EPixelFormat::PF_Unknown;
-
-	// Phase 2: dedicated aux RT, written but not consumed. Format is RGBA8 regardless of bDepthEnabled
-	// since the aux pass's eventual role (Phase 3) is carrying packed label+depth bytes, not HDR color.
-	SharedAuxTextureTarget = NewObject<UTextureRenderTarget2D>(this);
-	SharedAuxTextureTarget->TargetGamma = GetDefault<UTempoSensorsSettings>()->GetSceneCaptureGamma();
-	SharedAuxTextureTarget->RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA8;
-	SharedAuxTextureTarget->InitAutoFormat(SizeXY.X, SizeXY.Y);
 
 	// Final merge RT, fed by the merge material. Format matches staging / FCameraPixel layout.
 	SharedFinalTextureTarget = NewObject<UTextureRenderTarget2D>(this);
@@ -1532,10 +1549,13 @@ void UTempoCamera::ApplyDepthEnabled()
 		CaptureComponent->Activate();
 	}
 
-	// Shared RT format depends on bDepthEnabled, so it must be rebuilt too.
+	// Only SharedFinalTextureTarget (and the matching staging textures) are depth-dependent.
+	// Rebuilding the inherited TextureTarget or the other shared RTs would invalidate the proxy
+	// capture's persistent view state (TAA/AE history) and produce corrupted ColorRT samples on
+	// the first post-toggle merge. Keep them; only rebuild what actually changes format.
 	if (UTempoCoreUtils::IsGameWorld(this))
 	{
-		InitRenderTarget();
+		InitFinalRenderTargetAndStaging();
 	}
 }
 
