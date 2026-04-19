@@ -54,23 +54,31 @@ async def _qt_event_loop(interval=1 / 30):
         await asyncio.sleep(interval)
 
 
-def show_depth_image(image, window_name):
+def _build_depth_qimage(image):
+    """Numpy + QImage construction. Thread-safe — QImage is reentrant."""
     image_array = np.asarray(image.depths, dtype=np.float32).reshape(image.height, image.width)
     image_array = np.reciprocal(image_array)
     min_val, max_val = image_array.min(), image_array.max()
     image_array = (image_array - min_val) / (max_val - min_val + 1e-6)
     image_uint8 = (image_array * 255).astype(np.uint8).copy()
-    q_image = QImage(image_uint8.data, image.width, image.height, image.width, QImage.Format_Grayscale8).copy()
-    _show_image(window_name, q_image)
+    return QImage(image_uint8.data, image.width, image.height, image.width, QImage.Format_Grayscale8).copy()
 
 
-def show_color_image(image, window_name):
+def show_depth_image(image, window_name):
+    _show_image(window_name, _build_depth_qimage(image))
+
+
+def _build_color_qimage(image):
+    """Numpy + QImage construction. Thread-safe."""
     image_buffer = io.BytesIO(image.data)
     image_array = np.frombuffer(image_buffer.getvalue(), np.uint8).reshape(image.height, image.width, 3)
     # Camera sends BGR; swap to RGB for Qt
     image_rgb = image_array[:, :, ::-1].copy()
-    q_image = QImage(image_rgb.data, image.width, image.height, image.width * 3, QImage.Format_RGB888).copy()
-    _show_image(window_name, q_image)
+    return QImage(image_rgb.data, image.width, image.height, image.width * 3, QImage.Format_RGB888).copy()
+
+
+def show_color_image(image, window_name):
+    _show_image(window_name, _build_color_qimage(image))
 
 
 def index_to_rgb(index: int) -> tuple[int, int, int]:
@@ -97,42 +105,70 @@ def index_to_rgb(index: int) -> tuple[int, int, int]:
 
 rgb_lookup_table = np.array([index_to_rgb(i) for i in range(256)], dtype=np.uint8)  # shape (256, 3)
 
-def show_label_image(image, window_name):
+def _build_label_qimage(image):
+    """Numpy + QImage construction. Thread-safe."""
     image_bytes = io.BytesIO(image.data)
     image_array = np.frombuffer(image_bytes.getvalue(), dtype=np.uint8).reshape((image.height, image.width))
     rgb_image = rgb_lookup_table[image_array].copy()
-    q_image = QImage(rgb_image.data, image.width, image.height, image.width * 3, QImage.Format_RGB888).copy()
-    _show_image(window_name, q_image)
+    return QImage(rgb_image.data, image.width, image.height, image.width * 3, QImage.Format_RGB888).copy()
+
+
+def show_label_image(image, window_name):
+    _show_image(window_name, _build_label_qimage(image))
+
+
+async def _stream_images(source, build_qimage, window_name):
+    """Shared producer/consumer for the three image streams.
+
+    Producer pushes frames into a bounded queue at wire speed, dropping the oldest
+    pending frame when full so gRPC never backpressures on the server. Consumer
+    decodes/builds each QImage off the event loop via asyncio.to_thread, then the
+    main-thread QPixmap/widget update happens back on the asyncio loop.
+    """
+    event_task = asyncio.create_task(_qt_event_loop())
+    queue = asyncio.Queue(maxsize=2)
+
+    async def consumer():
+        while True:
+            image = await queue.get()
+            q_image = await asyncio.to_thread(build_qimage, image)
+            _show_image(window_name, q_image)
+
+    consumer_task = asyncio.create_task(consumer())
+
+    try:
+        async for image in source:
+            if queue.full():
+                try:
+                    queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    pass
+            queue.put_nowait(image)
+    finally:
+        consumer_task.cancel()
+        event_task.cancel()
+        _destroy_window(window_name)
 
 
 async def stream_color_images(camera_name, owner):
-    window_name = "Camera {} - Color".format(camera_name)
-    event_task = asyncio.create_task(_qt_event_loop())
-    try:
-        async for image in ts.stream_color_images(sensor_name=camera_name, owner_name=owner):
-            show_color_image(image, window_name)
-    finally:
-        event_task.cancel()
-        _destroy_window(window_name)
+    await _stream_images(
+        ts.stream_color_images(sensor_name=camera_name, owner_name=owner),
+        _build_color_qimage,
+        "Camera {} - Color".format(camera_name),
+    )
 
 
 async def stream_depth_images(camera_name, owner):
-    window_name = "Camera {} - Depth".format(camera_name)
-    event_task = asyncio.create_task(_qt_event_loop())
-    try:
-        async for image in ts.stream_depth_images(sensor_name=camera_name, owner_name=owner):
-            show_depth_image(image, window_name)
-    finally:
-        event_task.cancel()
-        _destroy_window(window_name)
+    await _stream_images(
+        ts.stream_depth_images(sensor_name=camera_name, owner_name=owner),
+        _build_depth_qimage,
+        "Camera {} - Depth".format(camera_name),
+    )
 
 
 async def stream_label_images(camera_name, owner):
-    window_name = "Camera {} - Label".format(camera_name)
-    event_task = asyncio.create_task(_qt_event_loop())
-    try:
-        async for image in ts.stream_label_images(sensor_name=camera_name, owner_name=owner):
-            show_label_image(image, window_name)
-    finally:
-        event_task.cancel()
-        _destroy_window(window_name)
+    await _stream_images(
+        ts.stream_label_images(sensor_name=camera_name, owner_name=owner),
+        _build_label_qimage,
+        "Camera {} - Label".format(camera_name),
+    )
