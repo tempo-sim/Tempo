@@ -309,11 +309,25 @@ void UTempoCameraCaptureComponent::ApplyRenderSettings()
 		PostProcessSettings.WeightedBlendables.Array.Add(FWeightedBlendable(1.0, PostProcessMaterialInstance));
 	}
 
-	TArray<FEngineShowFlagsSetting> NewShowFlagSettings = GetShowFlagSettings();
-	NewShowFlagSettings.Add({ TEXT("AntiAliasing"), true });
-	NewShowFlagSettings.Add({ TEXT("TemporalAA"), true });
-	NewShowFlagSettings.Add({ TEXT("MotionBlur"), false });
-	SetShowFlagSettings(NewShowFlagSettings);
+	ShowFlags = CameraOwner->ShowFlags;
+	ShowFlags.SetAtmosphere(true);
+	ShowFlags.SetFog(true);
+	ShowFlags.SetLighting(true);
+	ShowFlags.SetDynamicShadows(true);
+	ShowFlags.SetStaticMeshes(true);
+	ShowFlags.SetSkeletalMeshes(true);
+	ShowFlags.SetLandscape(true);
+	ShowFlags.SetSkyLighting(true);
+	ShowFlags.SetTranslucency(true);
+	ShowFlags.SetParticles(true);
+	ShowFlags.SetLocalExposure(false);
+	ShowFlags.SetEyeAdaptation(false);
+	ShowFlags.SetBloom(false);
+	ShowFlags.SetLensFlares(false);
+	ShowFlags.SetDepthOfField(false);
+	ShowFlags.SetVignette(false);
+	// // CameraOwner should not use TemporalAA, because it does not have the necessary velocity signals
+	// ShowFlags.TemporalAA = true;
 
 	bUseRayTracingIfEnabled = CameraOwner->bUseRayTracingIfEnabled;
 }
@@ -597,11 +611,16 @@ UTempoCamera::UTempoCamera()
 	PostProcessSettings.bOverride_MotionBlurAmount = true;
 	PostProcessSettings.MotionBlurAmount = 0.0;
 
-	TArray<FEngineShowFlagsSetting> NewShowFlagSettings = GetShowFlagSettings();
-	NewShowFlagSettings.Add({ TEXT("AntiAliasing"), false });
-	NewShowFlagSettings.Add({ TEXT("TemporalAA"), false });
-	NewShowFlagSettings.Add({ TEXT("MotionBlur"), false });
-	SetShowFlagSettings(NewShowFlagSettings);
+	ShowFlags.SetMotionBlur(false);
+	ShowFlags.SetAntiAliasing(true);
+	ShowFlags.SetTemporalAA(true);
+	ShowFlags.SetEyeAdaptation(true);
+	ShowFlags.SetLocalExposure(true);
+	ShowFlags.SetLensFlares(true);
+	ShowFlags.SetBloom(true);
+	ShowFlags.SetColorGrading(false);
+	ShowFlags.SetVignette(false);
+	ShowFlags.SetDepthOfField(false);
 }
 
 void UTempoCamera::OnRegister()
