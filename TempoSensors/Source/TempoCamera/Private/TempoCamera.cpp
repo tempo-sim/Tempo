@@ -280,8 +280,8 @@ UTempoCameraCaptureComponent::UTempoCameraCaptureComponent()
 
 	bAutoActivate = false;
 
-	// PostProcessSettings.bOverride_AutoExposureMethod = true;
-	// PostProcessSettings.AutoExposureMethod = AEM_Manual;
+	PostProcessSettings.bOverride_AutoExposureMethod = true;
+	PostProcessSettings.AutoExposureMethod = AEM_Manual;
 	// PostProcessSettings.bOverride_AutoExposureBias = true;
 	// PostProcessSettings.AutoExposureBias = 1.0;
 	// PostProcessSettings.bOverride_AutoExposureApplyPhysicalCameraExposure = true;
@@ -296,20 +296,21 @@ UTempoCameraCaptureComponent::UTempoCameraCaptureComponent()
 	// PostProcessSettings.AutoExposureHighPercent = 85.0;
 	// PostProcessSettings.bOverride_MotionBlurAmount = true;
 	// PostProcessSettings.MotionBlurAmount = 0.0;
+	// PostProcessSettings.bOverride_LensFlareIntensity = true;
+	// PostProcessSettings.LensFlareIntensity = 0.0;
+	// PostProcessSettings.bOverride_BloomIntensity = true;
+	// PostProcessSettings.BloomIntensity = 0.0;
 
 	bUseRayTracingIfEnabled = true;
-
-	TArray<FEngineShowFlagsSetting> NewShowFlagSettings = GetShowFlagSettings();
-	NewShowFlagSettings.Add({ TEXT("AntiAliasing"), true });
-	NewShowFlagSettings.Add({ TEXT("TemporalAA"), true });
-	NewShowFlagSettings.Add({ TEXT("EyeAdaptaion"), false });
-	NewShowFlagSettings.Add({ TEXT("MotionBlur"), false });
-	NewShowFlagSettings.Add({ TEXT("LensFlares"), false });
-	NewShowFlagSettings.Add({ TEXT("Bloom"), false });
-	NewShowFlagSettings.Add({ TEXT("Vignette"), false });
-	NewShowFlagSettings.Add({ TEXT("ColorGrading"), false });
-	NewShowFlagSettings.Add({ TEXT("LocalExposure"), false });
-	SetShowFlagSettings(NewShowFlagSettings);
+	ShowFlags.AntiAliasing = true;
+	ShowFlags.TemporalAA = true;
+	ShowFlags.EyeAdaptation = false;
+	ShowFlags.MotionBlur = false;
+	ShowFlags.LensFlares = false;
+	ShowFlags.Bloom = false;
+	ShowFlags.Vignette = false;
+	ShowFlags.ColorGrading = false;
+	ShowFlags.LocalExposure = false;
 }
 
 void UTempoCameraCaptureComponent::ApplyRenderSettings()
@@ -613,44 +614,44 @@ UTempoCamera::UTempoCamera()
 	// color histogram to compute exposure.
 	PostProcessSettings.bOverride_AutoExposureMethod = true;
 	PostProcessSettings.AutoExposureMethod = AEM_Histogram;
-	PostProcessSettings.bOverride_AutoExposureBias = true;
-	PostProcessSettings.AutoExposureBias = 1.0;
-	PostProcessSettings.bOverride_AutoExposureApplyPhysicalCameraExposure = true;
-	PostProcessSettings.AutoExposureApplyPhysicalCameraExposure = 0;
-	PostProcessSettings.bOverride_AutoExposureSpeedUp = true;
-	PostProcessSettings.AutoExposureSpeedUp = 20.0;
-	PostProcessSettings.bOverride_AutoExposureSpeedDown = true;
-	PostProcessSettings.AutoExposureSpeedDown = 20.0;
-	PostProcessSettings.bOverride_AutoExposureLowPercent = true;
-	PostProcessSettings.AutoExposureLowPercent = 75.0;
-	PostProcessSettings.bOverride_AutoExposureHighPercent = true;
-	PostProcessSettings.AutoExposureHighPercent = 85.0;
-	PostProcessSettings.bOverride_MotionBlurAmount = true;
-	PostProcessSettings.MotionBlurAmount = 0.0;
+	// PostProcessSettings.bOverride_AutoExposureBias = true;
+	// PostProcessSettings.AutoExposureBias = 1.0;
+	// PostProcessSettings.bOverride_AutoExposureApplyPhysicalCameraExposure = true;
+	// PostProcessSettings.AutoExposureApplyPhysicalCameraExposure = 0;
+	// PostProcessSettings.bOverride_AutoExposureSpeedUp = true;
+	// PostProcessSettings.AutoExposureSpeedUp = 20.0;
+	// PostProcessSettings.bOverride_AutoExposureSpeedDown = true;
+	// PostProcessSettings.AutoExposureSpeedDown = 20.0;
+	// PostProcessSettings.bOverride_AutoExposureLowPercent = true;
+	// PostProcessSettings.AutoExposureLowPercent = 75.0;
+	// PostProcessSettings.bOverride_AutoExposureHighPercent = true;
+	// PostProcessSettings.AutoExposureHighPercent = 85.0;
+	// PostProcessSettings.bOverride_MotionBlurAmount = true;
+	// PostProcessSettings.MotionBlurAmount = 0.0;
 
-	// ShowFlags.AntiAliasing = true;
-	// ShowFlags.TemporalAA = false;
-	// ShowFlags.MotionBlur = false;
-	// ShowFlags.LensFlares = true;
-	// ShowFlags.Bloom = true;
-	// ShowFlags.Vignette = false;
-	// ShowFlags.ColorGrading = false;
-	// ShowFlags.LocalExposure = true;
+	ShowFlags.AntiAliasing = true;
+	ShowFlags.TemporalAA = false;
+	ShowFlags.EyeAdaptation = true;
+	ShowFlags.MotionBlur = false;
+	ShowFlags.LensFlares = true;
+	ShowFlags.Bloom = true;
+	ShowFlags.Vignette = false;
+	ShowFlags.ColorGrading = false;
+	ShowFlags.LocalExposure = true;
 
-	TArray<FEngineShowFlagsSetting> NewShowFlagSettings = GetShowFlagSettings();
-	NewShowFlagSettings.Add({ TEXT("AntiAliasing"), true });
-	NewShowFlagSettings.Add({ TEXT("TemporalAA"), false });
-	NewShowFlagSettings.Add({ TEXT("MotionBlur"), false });
-	NewShowFlagSettings.Add({ TEXT("EyeAdaptaion"), true });
-	NewShowFlagSettings.Add({ TEXT("MotionBlur"), false });
-	NewShowFlagSettings.Add({ TEXT("LensFlares"), true });
-	NewShowFlagSettings.Add({ TEXT("Bloom"), true });
-	NewShowFlagSettings.Add({ TEXT("Vignette"), false });
-	NewShowFlagSettings.Add({ TEXT("ColorGrading"), false });
-	NewShowFlagSettings.Add({ TEXT("LocalExposure"), true });
-	SetShowFlagSettings(NewShowFlagSettings);
+	// TArray<FEngineShowFlagsSetting> NewShowFlagSettings = GetShowFlagSettings();
+	// NewShowFlagSettings.Add({ TEXT("AntiAliasing"), true });
+	// NewShowFlagSettings.Add({ TEXT("TemporalAA"), false });
+	// NewShowFlagSettings.Add({ TEXT("MotionBlur"), false });
+	// NewShowFlagSettings.Add({ TEXT("EyeAdaptaion"), true });
+	// NewShowFlagSettings.Add({ TEXT("MotionBlur"), false });
+	// NewShowFlagSettings.Add({ TEXT("LensFlares"), true });
+	// NewShowFlagSettings.Add({ TEXT("Bloom"), true });
+	// NewShowFlagSettings.Add({ TEXT("Vignette"), false });
+	// NewShowFlagSettings.Add({ TEXT("ColorGrading"), false });
+	// NewShowFlagSettings.Add({ TEXT("LocalExposure"), true });
+	// SetShowFlagSettings(NewShowFlagSettings);
 
-	bAlwaysPersistRenderingState = false;
 	bUseRayTracingIfEnabled = false;
 }
 
@@ -1356,12 +1357,12 @@ void UTempoCamera::MaybeCapture()
 	if (FSceneViewStateInterface* ViewStateInterface = GetViewState(0))
 	{
 		const float Lum = ViewStateInterface->GetLastAverageSceneLuminance();
-		UE_LOG(LogTemp, Warning, TEXT("Lum: %f"), Lum);
+		// UE_LOG(LogTemp, Warning, TEXT("Lum: %f"), Lum);
 		if (Lum > 0.0f)
 		{
 			constexpr float TargetMidGrey = 0.18f;
-			SharedExposureBias = FMath::Log2(TargetMidGrey / FMath::Max(Lum, static_cast<float>(KINDA_SMALL_NUMBER)));
-			bHasValidSharedExposure = true;
+			// SharedExposureBias = FMath::Log2(TargetMidGrey / FMath::Max(Lum, static_cast<float>(KINDA_SMALL_NUMBER)));
+			// bHasValidSharedExposure = true;
 		}
 	}
 
