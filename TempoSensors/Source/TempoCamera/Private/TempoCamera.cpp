@@ -280,8 +280,8 @@ UTempoCameraCaptureComponent::UTempoCameraCaptureComponent()
 
 	bAutoActivate = false;
 
-	PostProcessSettings.bOverride_AutoExposureMethod = true;
-	PostProcessSettings.AutoExposureMethod = AEM_Manual;
+	// PostProcessSettings.bOverride_AutoExposureMethod = true;
+	// PostProcessSettings.AutoExposureMethod = AEM_Manual;
 	// PostProcessSettings.bOverride_AutoExposureBias = true;
 	// PostProcessSettings.AutoExposureBias = 1.0;
 	// PostProcessSettings.bOverride_AutoExposureApplyPhysicalCameraExposure = true;
@@ -297,17 +297,19 @@ UTempoCameraCaptureComponent::UTempoCameraCaptureComponent()
 	// PostProcessSettings.bOverride_MotionBlurAmount = true;
 	// PostProcessSettings.MotionBlurAmount = 0.0;
 
-	ShowFlags.EyeAdaptation = true;
-	ShowFlags.AntiAliasing = true;
-	ShowFlags.TemporalAA = true;
-	ShowFlags.MotionBlur = false;
-	ShowFlags.LensFlares = false;
-	ShowFlags.Bloom = false;
-	ShowFlags.Vignette = false;
-	ShowFlags.ColorGrading = false;
-	ShowFlags.LocalExposure = false;
-
 	bUseRayTracingIfEnabled = true;
+
+	TArray<FEngineShowFlagsSetting> NewShowFlagSettings = GetShowFlagSettings();
+	NewShowFlagSettings.Add({ TEXT("AntiAliasing"), true });
+	NewShowFlagSettings.Add({ TEXT("TemporalAA"), true });
+	NewShowFlagSettings.Add({ TEXT("EyeAdaptaion"), false });
+	NewShowFlagSettings.Add({ TEXT("MotionBlur"), false });
+	NewShowFlagSettings.Add({ TEXT("LensFlares"), false });
+	NewShowFlagSettings.Add({ TEXT("Bloom"), false });
+	NewShowFlagSettings.Add({ TEXT("Vignette"), false });
+	NewShowFlagSettings.Add({ TEXT("ColorGrading"), false });
+	NewShowFlagSettings.Add({ TEXT("LocalExposure"), false });
+	SetShowFlagSettings(NewShowFlagSettings);
 }
 
 void UTempoCameraCaptureComponent::ApplyRenderSettings()
@@ -626,23 +628,30 @@ UTempoCamera::UTempoCamera()
 	PostProcessSettings.bOverride_MotionBlurAmount = true;
 	PostProcessSettings.MotionBlurAmount = 0.0;
 
-	ShowFlags.AntiAliasing = true;
-	ShowFlags.TemporalAA = false;
-	ShowFlags.MotionBlur = false;
-	ShowFlags.LensFlares = true;
-	ShowFlags.Bloom = true;
-	ShowFlags.Vignette = false;
-	ShowFlags.ColorGrading = false;
-	ShowFlags.LocalExposure = true;
+	// ShowFlags.AntiAliasing = true;
+	// ShowFlags.TemporalAA = false;
+	// ShowFlags.MotionBlur = false;
+	// ShowFlags.LensFlares = true;
+	// ShowFlags.Bloom = true;
+	// ShowFlags.Vignette = false;
+	// ShowFlags.ColorGrading = false;
+	// ShowFlags.LocalExposure = true;
 
-	ShowFlags.LensFlares = false;
-	ShowFlags.Bloom = false;
+	TArray<FEngineShowFlagsSetting> NewShowFlagSettings = GetShowFlagSettings();
+	NewShowFlagSettings.Add({ TEXT("AntiAliasing"), true });
+	NewShowFlagSettings.Add({ TEXT("TemporalAA"), false });
+	NewShowFlagSettings.Add({ TEXT("MotionBlur"), false });
+	NewShowFlagSettings.Add({ TEXT("EyeAdaptaion"), true });
+	NewShowFlagSettings.Add({ TEXT("MotionBlur"), false });
+	NewShowFlagSettings.Add({ TEXT("LensFlares"), true });
+	NewShowFlagSettings.Add({ TEXT("Bloom"), true });
+	NewShowFlagSettings.Add({ TEXT("Vignette"), false });
+	NewShowFlagSettings.Add({ TEXT("ColorGrading"), false });
+	NewShowFlagSettings.Add({ TEXT("LocalExposure"), true });
+	SetShowFlagSettings(NewShowFlagSettings);
 
-	// TArray<FEngineShowFlagsSetting> NewShowFlagSettings = GetShowFlagSettings();
-	// NewShowFlagSettings.Add({ TEXT("AntiAliasing"), false });
-	// NewShowFlagSettings.Add({ TEXT("TemporalAA"), false });
-	// NewShowFlagSettings.Add({ TEXT("MotionBlur"), false });
-	// SetShowFlagSettings(NewShowFlagSettings);
+	bAlwaysPersistRenderingState = false;
+	bUseRayTracingIfEnabled = false;
 }
 
 void UTempoCamera::OnRegister()
