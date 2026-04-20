@@ -452,12 +452,13 @@ void UTempoSceneCaptureComponent2D::MaybeCapture()
 	}
 
 	// If world rendering is enabled, we'll capture the scene with the main render. Otherwise, we'll capture it now.
-	if (bWorldRenderingDisabled)
-	{
-		CaptureScene();
-	}
-	else
-	{
-		CaptureSceneDeferred();
-	}
+	// if (bWorldRenderingDisabled)
+	// {
+	// 	CaptureScene();
+	// }
+	// else
+	// {
+	// 	CaptureSceneDeferred();
+	// }
+	CaptureSceneDeferred();
 }
