@@ -677,6 +677,26 @@ void UTempoCamera::OnRegister()
 	}
 }
 
+void UTempoCamera::DestroyComponent(bool bPromoteChildren)
+{
+	// Detach tile capture components before Super's attach-child cascade so they aren't destroyed
+	// along with us. During level-instance actor reconstruction (RerunConstructionScripts triggered
+	// by editing a property on a placed BP actor), this SCS-created UTempoCamera is destroyed but
+	// the tile instance components should outlive us to be re-adopted by the reconstructed
+	// UTempoCamera. Without this detach, the default bPromoteChildren=false cascade DestroyComponents
+	// all attach children, renaming them to TRASH_* and leaking them into the actor's component list.
+	TArray<USceneComponent*> Children;
+	GetChildrenComponents(false, Children);
+	for (USceneComponent* Child : Children)
+	{
+		if (Child && Child->IsA<UTempoCameraCaptureComponent>())
+		{
+			Child->DetachFromComponent(FDetachmentTransformRules::KeepRelativeTransform);
+		}
+	}
+	Super::DestroyComponent(bPromoteChildren);
+}
+
 void UTempoCamera::BeginPlay()
 {
 	Super::BeginPlay();
@@ -1410,16 +1430,23 @@ void UTempoCamera::MaybeCapture()
 
 TMap<FName, UTempoCameraCaptureComponent*> UTempoCamera::GetAllCaptureComponents() const
 {
+	// Look up existing tiles by name directly in the UObject hierarchy (FindObject) rather than
+	// via the actor's OwnedComponents or attach children. During actor reconstruction on a placed
+	// BP instance, the tile may be temporarily absent from either collection; FindObject finds any
+	// UObject of the right class that still has the expected name under our owner, which is all we
+	// need to avoid a NewObject name collision that would produce TRASH_* siblings.
 	TMap<FName, UTempoCameraCaptureComponent*> CaptureComponents;
-	TArray<USceneComponent*> ChildrenComponents;
-	GetChildrenComponents(false, ChildrenComponents);
-	for (USceneComponent* ChildComponent : ChildrenComponents)
+	if (AActor* Owner = GetOwner())
 	{
 		for (const FName& Tag : { TLCaptureComponentTag, TRCaptureComponentTag, BLCaptureComponentTag, BRCaptureComponentTag })
 		{
-			if (UTempoCameraCaptureComponent* CameraCaptureComponent = Cast<UTempoCameraCaptureComponent>(ChildComponent); ChildComponent->ComponentHasTag(Tag))
+			const FName ExpectedName(GetName() + Tag.ToString());
+			if (UTempoCameraCaptureComponent* Existing = FindObject<UTempoCameraCaptureComponent>(Owner, *ExpectedName.ToString()))
 			{
-				CaptureComponents.Add(Tag, CameraCaptureComponent);
+				if (IsValid(Existing))
+				{
+					CaptureComponents.Add(Tag, Existing);
+				}
 			}
 		}
 	}
@@ -1431,18 +1458,26 @@ TMap<FName, UTempoCameraCaptureComponent*> UTempoCamera::GetOrCreateCaptureCompo
 	TMap<FName, UTempoCameraCaptureComponent*> CaptureComponents = GetAllCaptureComponents();
 	for (const FName& Tag : { TLCaptureComponentTag, TRCaptureComponentTag, BLCaptureComponentTag, BRCaptureComponentTag })
 	{
-		if (!CaptureComponents.Contains(Tag))
+		if (UTempoCameraCaptureComponent** Existing = CaptureComponents.Find(Tag))
 		{
-			const FName ComponentName(GetName() + Tag.ToString());
-			UTempoCameraCaptureComponent* CaptureComponent = NewObject<UTempoCameraCaptureComponent>(GetOwner(), UTempoCameraCaptureComponent::StaticClass(), ComponentName);
-			CaptureComponent->CameraOwner = this;
-			CaptureComponent->ComponentTags.AddUnique(Tag);
-			CaptureComponent->OnComponentCreated();
-			CaptureComponent->AttachToComponent(this, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
-			CaptureComponent->RegisterComponent();
-			GetOwner()->AddInstanceComponent(CaptureComponent);
-			CaptureComponents.Add(Tag, CaptureComponent);
+			// Heal references that reconstruction may have left stale.
+			(*Existing)->CameraOwner = this;
+			(*Existing)->ComponentTags.AddUnique(Tag);
+			if ((*Existing)->GetAttachParent() != this)
+			{
+				(*Existing)->AttachToComponent(this, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+			}
+			continue;
 		}
+		const FName ComponentName(GetName() + Tag.ToString());
+		UTempoCameraCaptureComponent* CaptureComponent = NewObject<UTempoCameraCaptureComponent>(GetOwner(), UTempoCameraCaptureComponent::StaticClass(), ComponentName);
+		CaptureComponent->CameraOwner = this;
+		CaptureComponent->ComponentTags.AddUnique(Tag);
+		CaptureComponent->OnComponentCreated();
+		CaptureComponent->AttachToComponent(this, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+		CaptureComponent->RegisterComponent();
+		GetOwner()->AddInstanceComponent(CaptureComponent);
+		CaptureComponents.Add(Tag, CaptureComponent);
 	}
 
 	return CaptureComponents;
