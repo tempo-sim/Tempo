@@ -279,38 +279,6 @@ UTempoCameraCaptureComponent::UTempoCameraCaptureComponent()
 	PixelFormatOverride = EPixelFormat::PF_Unknown;
 
 	bAutoActivate = false;
-
-	PostProcessSettings.bOverride_AutoExposureMethod = true;
-	PostProcessSettings.AutoExposureMethod = AEM_Manual;
-	// PostProcessSettings.bOverride_AutoExposureBias = true;
-	// PostProcessSettings.AutoExposureBias = 1.0;
-	// PostProcessSettings.bOverride_AutoExposureApplyPhysicalCameraExposure = true;
-	// PostProcessSettings.AutoExposureApplyPhysicalCameraExposure = 0;
-	// PostProcessSettings.bOverride_AutoExposureSpeedUp = true;
-	// PostProcessSettings.AutoExposureSpeedUp = 20.0;
-	// PostProcessSettings.bOverride_AutoExposureSpeedDown = true;
-	// PostProcessSettings.AutoExposureSpeedDown = 20.0;
-	// PostProcessSettings.bOverride_AutoExposureLowPercent = true;
-	// PostProcessSettings.AutoExposureLowPercent = 75.0;
-	// PostProcessSettings.bOverride_AutoExposureHighPercent = true;
-	// PostProcessSettings.AutoExposureHighPercent = 85.0;
-	// PostProcessSettings.bOverride_MotionBlurAmount = true;
-	// PostProcessSettings.MotionBlurAmount = 0.0;
-	// PostProcessSettings.bOverride_LensFlareIntensity = true;
-	// PostProcessSettings.LensFlareIntensity = 0.0;
-	// PostProcessSettings.bOverride_BloomIntensity = true;
-	// PostProcessSettings.BloomIntensity = 0.0;
-
-	bUseRayTracingIfEnabled = true;
-	ShowFlags.AntiAliasing = true;
-	ShowFlags.TemporalAA = true;
-	ShowFlags.EyeAdaptation = false;
-	ShowFlags.MotionBlur = false;
-	ShowFlags.LensFlares = false;
-	ShowFlags.Bloom = false;
-	ShowFlags.Vignette = false;
-	ShowFlags.ColorGrading = false;
-	ShowFlags.LocalExposure = false;
 }
 
 void UTempoCameraCaptureComponent::ApplyRenderSettings()
@@ -320,34 +288,34 @@ void UTempoCameraCaptureComponent::ApplyRenderSettings()
 		return;
 	}
 
-	// PostProcessSettings = CameraOwner->PostProcessSettings;
-	//
-	// // Tiles must not do any per-tile exposure adaptation — divergent per-tile ViewStates would
-	// // produce mismatched brightness across the stitched image. Tonemap runs once on the proxy.
-	// PostProcessSettings.bOverride_AutoExposureMethod = true;
-	// PostProcessSettings.AutoExposureMethod = AEM_Manual;
-	//
-	// // Drop the proxy tonemap PPM — it reads SharedTextureTarget, which tiles do not populate —
-	// // but preserve any user-authored blendables.
-	// PostProcessSettings.WeightedBlendables.Array.RemoveAll([CameraOwner = this->CameraOwner](const FWeightedBlendable& WB)
-	// {
-	// 	return WB.Object != nullptr && WB.Object == CameraOwner->ProxyTonemapMID;
-	// });
-	//
+	PostProcessSettings = CameraOwner->PostProcessSettings;
+
+	// Tiles must not do any per-tile exposure adaptation — divergent per-tile ViewStates would
+	// produce mismatched brightness across the stitched image. Tonemap runs once on the proxy.
+	PostProcessSettings.bOverride_AutoExposureMethod = true;
+	PostProcessSettings.AutoExposureMethod = AEM_Manual;
+
+	// Drop the proxy tonemap PPM — it reads SharedTextureTarget, which tiles do not populate —
+	// but preserve any user-authored blendables.
+	PostProcessSettings.WeightedBlendables.Array.RemoveAll([CameraOwner = this->CameraOwner](const FWeightedBlendable& WB)
+	{
+		return WB.Object != nullptr && WB.Object == CameraOwner->ProxyTonemapMID;
+	});
+
 	// Re-append the distortion/label post-process material if it was already created
 	// (on first call from Configure it is still null and will be added by SetDepthEnabled).
-	// if (PostProcessMaterialInstance)
-	// {
-	// 	PostProcessSettings.WeightedBlendables.Array.Add(FWeightedBlendable(1.0, PostProcessMaterialInstance));
-	// }
-	//
-	// TArray<FEngineShowFlagsSetting> NewShowFlagSettings = GetShowFlagSettings();
-	// NewShowFlagSettings.Add({ TEXT("AntiAliasing"), true });
-	// NewShowFlagSettings.Add({ TEXT("TemporalAA"), true });
-	// NewShowFlagSettings.Add({ TEXT("MotionBlur"), false });
-	// SetShowFlagSettings(NewShowFlagSettings);
-	//
-	// bUseRayTracingIfEnabled = CameraOwner->bUseRayTracingIfEnabled;
+	if (PostProcessMaterialInstance)
+	{
+		PostProcessSettings.WeightedBlendables.Array.Add(FWeightedBlendable(1.0, PostProcessMaterialInstance));
+	}
+
+	TArray<FEngineShowFlagsSetting> NewShowFlagSettings = GetShowFlagSettings();
+	NewShowFlagSettings.Add({ TEXT("AntiAliasing"), true });
+	NewShowFlagSettings.Add({ TEXT("TemporalAA"), true });
+	NewShowFlagSettings.Add({ TEXT("MotionBlur"), false });
+	SetShowFlagSettings(NewShowFlagSettings);
+
+	bUseRayTracingIfEnabled = CameraOwner->bUseRayTracingIfEnabled;
 }
 
 void UTempoCameraCaptureComponent::Activate(bool bReset)
@@ -614,45 +582,26 @@ UTempoCamera::UTempoCamera()
 	// color histogram to compute exposure.
 	PostProcessSettings.bOverride_AutoExposureMethod = true;
 	PostProcessSettings.AutoExposureMethod = AEM_Histogram;
-	// PostProcessSettings.bOverride_AutoExposureBias = true;
-	// PostProcessSettings.AutoExposureBias = 1.0;
-	// PostProcessSettings.bOverride_AutoExposureApplyPhysicalCameraExposure = true;
-	// PostProcessSettings.AutoExposureApplyPhysicalCameraExposure = 0;
-	// PostProcessSettings.bOverride_AutoExposureSpeedUp = true;
-	// PostProcessSettings.AutoExposureSpeedUp = 20.0;
-	// PostProcessSettings.bOverride_AutoExposureSpeedDown = true;
-	// PostProcessSettings.AutoExposureSpeedDown = 20.0;
-	// PostProcessSettings.bOverride_AutoExposureLowPercent = true;
-	// PostProcessSettings.AutoExposureLowPercent = 75.0;
-	// PostProcessSettings.bOverride_AutoExposureHighPercent = true;
-	// PostProcessSettings.AutoExposureHighPercent = 85.0;
-	// PostProcessSettings.bOverride_MotionBlurAmount = true;
-	// PostProcessSettings.MotionBlurAmount = 0.0;
+	PostProcessSettings.bOverride_AutoExposureBias = true;
+	PostProcessSettings.AutoExposureBias = 1.0;
+	PostProcessSettings.bOverride_AutoExposureApplyPhysicalCameraExposure = true;
+	PostProcessSettings.AutoExposureApplyPhysicalCameraExposure = 0;
+	PostProcessSettings.bOverride_AutoExposureSpeedUp = true;
+	PostProcessSettings.AutoExposureSpeedUp = 20.0;
+	PostProcessSettings.bOverride_AutoExposureSpeedDown = true;
+	PostProcessSettings.AutoExposureSpeedDown = 20.0;
+	PostProcessSettings.bOverride_AutoExposureLowPercent = true;
+	PostProcessSettings.AutoExposureLowPercent = 75.0;
+	PostProcessSettings.bOverride_AutoExposureHighPercent = true;
+	PostProcessSettings.AutoExposureHighPercent = 85.0;
+	PostProcessSettings.bOverride_MotionBlurAmount = true;
+	PostProcessSettings.MotionBlurAmount = 0.0;
 
-	ShowFlags.AntiAliasing = true;
-	ShowFlags.TemporalAA = false;
-	ShowFlags.EyeAdaptation = true;
-	ShowFlags.MotionBlur = false;
-	ShowFlags.LensFlares = true;
-	ShowFlags.Bloom = true;
-	ShowFlags.Vignette = false;
-	ShowFlags.ColorGrading = false;
-	ShowFlags.LocalExposure = true;
-
-	// TArray<FEngineShowFlagsSetting> NewShowFlagSettings = GetShowFlagSettings();
-	// NewShowFlagSettings.Add({ TEXT("AntiAliasing"), true });
-	// NewShowFlagSettings.Add({ TEXT("TemporalAA"), false });
-	// NewShowFlagSettings.Add({ TEXT("MotionBlur"), false });
-	// NewShowFlagSettings.Add({ TEXT("EyeAdaptaion"), true });
-	// NewShowFlagSettings.Add({ TEXT("MotionBlur"), false });
-	// NewShowFlagSettings.Add({ TEXT("LensFlares"), true });
-	// NewShowFlagSettings.Add({ TEXT("Bloom"), true });
-	// NewShowFlagSettings.Add({ TEXT("Vignette"), false });
-	// NewShowFlagSettings.Add({ TEXT("ColorGrading"), false });
-	// NewShowFlagSettings.Add({ TEXT("LocalExposure"), true });
-	// SetShowFlagSettings(NewShowFlagSettings);
-
-	bUseRayTracingIfEnabled = false;
+	TArray<FEngineShowFlagsSetting> NewShowFlagSettings = GetShowFlagSettings();
+	NewShowFlagSettings.Add({ TEXT("AntiAliasing"), false });
+	NewShowFlagSettings.Add({ TEXT("TemporalAA"), false });
+	NewShowFlagSettings.Add({ TEXT("MotionBlur"), false });
+	SetShowFlagSettings(NewShowFlagSettings);
 }
 
 void UTempoCamera::OnRegister()
@@ -675,26 +624,6 @@ void UTempoCamera::OnRegister()
 		// paths. Init render targets here so they are ready for the first capture regardless.
 		InitRenderTarget();
 	}
-}
-
-void UTempoCamera::DestroyComponent(bool bPromoteChildren)
-{
-	// Detach tile capture components before Super's attach-child cascade so they aren't destroyed
-	// along with us. During level-instance actor reconstruction (RerunConstructionScripts triggered
-	// by editing a property on a placed BP actor), this SCS-created UTempoCamera is destroyed but
-	// the tile instance components should outlive us to be re-adopted by the reconstructed
-	// UTempoCamera. Without this detach, the default bPromoteChildren=false cascade DestroyComponents
-	// all attach children, renaming them to TRASH_* and leaking them into the actor's component list.
-	TArray<USceneComponent*> Children;
-	GetChildrenComponents(false, Children);
-	for (USceneComponent* Child : Children)
-	{
-		if (Child && Child->IsA<UTempoCameraCaptureComponent>())
-		{
-			Child->DetachFromComponent(FDetachmentTransformRules::KeepRelativeTransform);
-		}
-	}
-	Super::DestroyComponent(bPromoteChildren);
 }
 
 void UTempoCamera::BeginPlay()
@@ -1251,7 +1180,6 @@ void UTempoCamera::MaybeCapture()
 	{
 		if (bHasValidSharedExposure)
 		{
-			UE_LOG(LogTemp, Warning, TEXT("Setting shared exposure tp %f"), SharedExposureBias);
 			Tile->PostProcessSettings.bOverride_AutoExposureBias = true;
 			Tile->PostProcessSettings.AutoExposureBias = SharedExposureBias;
 		}
@@ -1377,12 +1305,11 @@ void UTempoCamera::MaybeCapture()
 	if (FSceneViewStateInterface* ViewStateInterface = GetViewState(0))
 	{
 		const float Lum = ViewStateInterface->GetLastAverageSceneLuminance();
-		// UE_LOG(LogTemp, Warning, TEXT("Lum: %f"), Lum);
 		if (Lum > 0.0f)
 		{
 			constexpr float TargetMidGrey = 0.18f;
-			// SharedExposureBias = FMath::Log2(TargetMidGrey / FMath::Max(Lum, static_cast<float>(KINDA_SMALL_NUMBER)));
-			// bHasValidSharedExposure = true;
+			SharedExposureBias = FMath::Log2(TargetMidGrey / FMath::Max(Lum, static_cast<float>(KINDA_SMALL_NUMBER)));
+			bHasValidSharedExposure = true;
 		}
 	}
 
@@ -1430,23 +1357,16 @@ void UTempoCamera::MaybeCapture()
 
 TMap<FName, UTempoCameraCaptureComponent*> UTempoCamera::GetAllCaptureComponents() const
 {
-	// Look up existing tiles by name directly in the UObject hierarchy (FindObject) rather than
-	// via the actor's OwnedComponents or attach children. During actor reconstruction on a placed
-	// BP instance, the tile may be temporarily absent from either collection; FindObject finds any
-	// UObject of the right class that still has the expected name under our owner, which is all we
-	// need to avoid a NewObject name collision that would produce TRASH_* siblings.
 	TMap<FName, UTempoCameraCaptureComponent*> CaptureComponents;
-	if (AActor* Owner = GetOwner())
+	TArray<USceneComponent*> ChildrenComponents;
+	GetChildrenComponents(false, ChildrenComponents);
+	for (USceneComponent* ChildComponent : ChildrenComponents)
 	{
 		for (const FName& Tag : { TLCaptureComponentTag, TRCaptureComponentTag, BLCaptureComponentTag, BRCaptureComponentTag })
 		{
-			const FName ExpectedName(GetName() + Tag.ToString());
-			if (UTempoCameraCaptureComponent* Existing = FindObject<UTempoCameraCaptureComponent>(Owner, *ExpectedName.ToString()))
+			if (UTempoCameraCaptureComponent* CameraCaptureComponent = Cast<UTempoCameraCaptureComponent>(ChildComponent); ChildComponent->ComponentHasTag(Tag))
 			{
-				if (IsValid(Existing))
-				{
-					CaptureComponents.Add(Tag, Existing);
-				}
+				CaptureComponents.Add(Tag, CameraCaptureComponent);
 			}
 		}
 	}
@@ -1458,26 +1378,18 @@ TMap<FName, UTempoCameraCaptureComponent*> UTempoCamera::GetOrCreateCaptureCompo
 	TMap<FName, UTempoCameraCaptureComponent*> CaptureComponents = GetAllCaptureComponents();
 	for (const FName& Tag : { TLCaptureComponentTag, TRCaptureComponentTag, BLCaptureComponentTag, BRCaptureComponentTag })
 	{
-		if (UTempoCameraCaptureComponent** Existing = CaptureComponents.Find(Tag))
+		if (!CaptureComponents.Contains(Tag))
 		{
-			// Heal references that reconstruction may have left stale.
-			(*Existing)->CameraOwner = this;
-			(*Existing)->ComponentTags.AddUnique(Tag);
-			if ((*Existing)->GetAttachParent() != this)
-			{
-				(*Existing)->AttachToComponent(this, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
-			}
-			continue;
+			const FName ComponentName(GetName() + Tag.ToString());
+			UTempoCameraCaptureComponent* CaptureComponent = NewObject<UTempoCameraCaptureComponent>(GetOwner(), UTempoCameraCaptureComponent::StaticClass(), ComponentName);
+			CaptureComponent->CameraOwner = this;
+			CaptureComponent->ComponentTags.AddUnique(Tag);
+			CaptureComponent->OnComponentCreated();
+			CaptureComponent->AttachToComponent(this, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+			CaptureComponent->RegisterComponent();
+			GetOwner()->AddInstanceComponent(CaptureComponent);
+			CaptureComponents.Add(Tag, CaptureComponent);
 		}
-		const FName ComponentName(GetName() + Tag.ToString());
-		UTempoCameraCaptureComponent* CaptureComponent = NewObject<UTempoCameraCaptureComponent>(GetOwner(), UTempoCameraCaptureComponent::StaticClass(), ComponentName);
-		CaptureComponent->CameraOwner = this;
-		CaptureComponent->ComponentTags.AddUnique(Tag);
-		CaptureComponent->OnComponentCreated();
-		CaptureComponent->AttachToComponent(this, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
-		CaptureComponent->RegisterComponent();
-		GetOwner()->AddInstanceComponent(CaptureComponent);
-		CaptureComponents.Add(Tag, CaptureComponent);
 	}
 
 	return CaptureComponents;

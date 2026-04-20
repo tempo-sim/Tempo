@@ -231,8 +231,6 @@ public:
 
 	virtual void OnRegister() override;
 
-	virtual void DestroyComponent(bool bPromoteChildren = false) override;
-
 	virtual void BeginPlay() override;
 
 	virtual void Activate(bool bReset = false) override;

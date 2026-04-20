@@ -157,26 +157,6 @@ void UTempoLidar::OnRegister()
 	}
 }
 
-void UTempoLidar::DestroyComponent(bool bPromoteChildren)
-{
-	// Detach tile capture components before Super's attach-child cascade so they aren't destroyed
-	// along with us. During level-instance actor reconstruction (RerunConstructionScripts triggered
-	// by editing a property on a placed BP actor), this SCS-created UTempoLidar is destroyed but
-	// the tile instance components should outlive us to be re-adopted by the reconstructed
-	// UTempoLidar. Without this detach, the default bPromoteChildren=false cascade DestroyComponents
-	// all attach children, renaming them to TRASH_* and leaking them into the actor's component list.
-	TArray<USceneComponent*> Children;
-	GetChildrenComponents(false, Children);
-	for (USceneComponent* Child : Children)
-	{
-		if (Child && Child->IsA<UTempoLidarCaptureComponent>())
-		{
-			Child->DetachFromComponent(FDetachmentTransformRules::KeepRelativeTransform);
-		}
-	}
-	Super::DestroyComponent(bPromoteChildren);
-}
-
 void UTempoLidar::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
@@ -553,23 +533,16 @@ TFuture<void> UTempoLidar::DecodeAndRespond(TArray<TUniquePtr<FTextureRead>> Tex
 
 TMap<FName, UTempoLidarCaptureComponent*> UTempoLidar::GetAllCaptureComponents() const
 {
-	// Look up existing tiles by name directly in the UObject hierarchy (FindObject) rather than
-	// via the actor's OwnedComponents or attach children. During actor reconstruction on a placed
-	// BP instance, the tile may be temporarily absent from either collection; FindObject finds any
-	// UObject of the right class that still has the expected name under our owner, which is all we
-	// need to avoid a NewObject name collision that would produce TRASH_* siblings.
 	TMap<FName, UTempoLidarCaptureComponent*> CaptureComponents;
-	if (AActor* Owner = GetOwner())
+	TArray<USceneComponent*> ChildrenComponents;
+	GetChildrenComponents(false, ChildrenComponents);
+	for (USceneComponent* ChildComponent : ChildrenComponents)
 	{
 		for (const FName& Tag : { LeftCaptureComponentTag, CenterCaptureComponentTag, RightCaptureComponentTag })
 		{
-			const FName ExpectedName(GetName() + Tag.ToString());
-			if (UTempoLidarCaptureComponent* Existing = FindObject<UTempoLidarCaptureComponent>(Owner, *ExpectedName.ToString()))
+			if (UTempoLidarCaptureComponent* LidarCaptureComponent = Cast<UTempoLidarCaptureComponent>(ChildComponent); ChildComponent->ComponentHasTag(Tag))
 			{
-				if (IsValid(Existing))
-				{
-					CaptureComponents.Add(Tag, Existing);
-				}
+				CaptureComponents.Add(Tag, LidarCaptureComponent);
 			}
 		}
 	}
@@ -581,26 +554,18 @@ TMap<FName, UTempoLidarCaptureComponent*> UTempoLidar::GetOrCreateCaptureCompone
 	TMap<FName, UTempoLidarCaptureComponent*> CaptureComponents = GetAllCaptureComponents();
 	for (const FName& Tag : { LeftCaptureComponentTag, CenterCaptureComponentTag, RightCaptureComponentTag })
 	{
-		if (UTempoLidarCaptureComponent** Existing = CaptureComponents.Find(Tag))
+		if (!CaptureComponents.Contains(Tag))
 		{
-			// Heal references that reconstruction may have left stale.
-			(*Existing)->LidarOwner = this;
-			(*Existing)->ComponentTags.AddUnique(Tag);
-			if ((*Existing)->GetAttachParent() != this)
-			{
-				(*Existing)->AttachToComponent(this, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
-			}
-			continue;
+			const FName ComponentName(GetName() + Tag.ToString());
+			UTempoLidarCaptureComponent* CaptureComponent = NewObject<UTempoLidarCaptureComponent>(GetOwner(), UTempoLidarCaptureComponent::StaticClass(), ComponentName);
+			CaptureComponent->LidarOwner = this;
+			CaptureComponent->ComponentTags.AddUnique(Tag);
+			CaptureComponent->OnComponentCreated();
+			CaptureComponent->AttachToComponent(this, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+			CaptureComponent->RegisterComponent();
+			GetOwner()->AddInstanceComponent(CaptureComponent);
+			CaptureComponents.Add(Tag, CaptureComponent);
 		}
-		const FName ComponentName(GetName() + Tag.ToString());
-		UTempoLidarCaptureComponent* CaptureComponent = NewObject<UTempoLidarCaptureComponent>(GetOwner(), UTempoLidarCaptureComponent::StaticClass(), ComponentName);
-		CaptureComponent->LidarOwner = this;
-		CaptureComponent->ComponentTags.AddUnique(Tag);
-		CaptureComponent->OnComponentCreated();
-		CaptureComponent->AttachToComponent(this, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
-		CaptureComponent->RegisterComponent();
-		GetOwner()->AddInstanceComponent(CaptureComponent);
-		CaptureComponents.Add(Tag, CaptureComponent);
 	}
 
 	return CaptureComponents;
