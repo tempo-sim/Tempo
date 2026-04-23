@@ -13,6 +13,12 @@
 #include "TempoCoreSettings.h"
 #include "TempoSensorsSettings.h"
 
+#include "Components/SceneCaptureComponent.h"
+#include "Engine/GameViewportClient.h"
+#include "Engine/LocalPlayer.h"
+#include "GameFramework/PlayerController.h"
+#include "Kismet/GameplayStatics.h"
+
 using SensorService = TempoSensors::SensorService;
 using SensorAsyncService = TempoSensors::SensorService::AsyncService;
 using SensorDescriptor = TempoSensors::SensorDescriptor;
@@ -49,6 +55,7 @@ void UTempoSensorServiceSubsystem::Initialize(FSubsystemCollectionBase& Collecti
 	// of the last frame. We use this last opportunity, having waited as long as possible, to collect
 	// and send all the sensor measurements from the previous frame.
 	FWorldDelegates::OnWorldTickStart.AddUObject(this, &UTempoSensorServiceSubsystem::OnWorldTickStart);
+	FWorldDelegates::OnWorldPostActorTick.AddUObject(this, &UTempoSensorServiceSubsystem::OnWorldPostActorTick);
 	FCoreDelegates::OnEndFrameRT.AddUObject(this, &UTempoSensorServiceSubsystem::OnRenderFrameCompleted);
 }
 
@@ -65,6 +72,39 @@ void UTempoSensorServiceSubsystem::OnRenderFrameCompleted() const
 	{
 		Sensor->OnRenderCompleted();
 	});
+}
+
+void UTempoSensorServiceSubsystem::OnWorldPostActorTick(UWorld* World, ELevelTick TickType, float DeltaSeconds)
+{
+	if (World != GetWorld() || (World->WorldType != EWorldType::Game && World->WorldType != EWorldType::PIE))
+	{
+		return;
+	}
+
+	// When the main viewport renders, the engine drains SceneCapturesToUpdateMap itself as part of
+	// the main render path, and it does so with a valid MainViewFamily that our components can
+	// sync jitter/Lumen state against. Only drain here when world rendering is disabled — otherwise
+	// we'd preempt the engine and lose that sync.
+	bool bWorldRenderingDisabled = false;
+	if (const APlayerController* PlayerController = UGameplayStatics::GetPlayerController(World, 0))
+	{
+		if (const ULocalPlayer* ClientPlayer = PlayerController->GetLocalPlayer())
+		{
+			if (const UGameViewportClient* ViewportClient = ClientPlayer->ViewportClient)
+			{
+				bWorldRenderingDisabled = ViewportClient->bDisableWorldRendering;
+			}
+		}
+	}
+	if (!bWorldRenderingDisabled)
+	{
+		return;
+	}
+
+	if (FSceneInterface* Scene = World->Scene)
+	{
+		USceneCaptureComponent::UpdateDeferredCaptures(Scene);
+	}
 }
 
 void UTempoSensorServiceSubsystem::OnWorldTickStart(UWorld* World, ELevelTick TickType, float DeltaSeconds)

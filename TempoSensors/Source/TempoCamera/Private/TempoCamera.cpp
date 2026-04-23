@@ -1172,9 +1172,12 @@ void UTempoCamera::MaybeCapture()
 		return;
 	}
 
-	// Capture each tile. With CaptureScene() (not CaptureSceneDeferred) the tile's render commands
-	// enqueue immediately in FIFO order, so the Canvas stitch we issue right after will run
-	// after all tile renders on the render thread.
+	// Queue all tiles deferred, then drain them through one ISceneRenderBuilder via a single
+	// UpdateDeferredCaptures call. Each tile still gets its own FSceneRenderer (so shadow / GPU-scene
+	// setup is still per-renderer), but all of them share one builder Execute(), giving one RDG graph
+	// with fewer barriers instead of N back-to-back dispatches. FIFO ordering vs the Canvas stitch
+	// below is preserved: UpdateDeferredCaptures synchronously enqueues the builder's render
+	// commands before we return and enqueue the Canvas commands.
 	for (UTempoCameraCaptureComponent* Tile : ActiveCaptureComponents)
 	{
 		if (bHasValidSharedExposure)
@@ -1182,7 +1185,14 @@ void UTempoCamera::MaybeCapture()
 			Tile->PostProcessSettings.bOverride_AutoExposureBias = true;
 			Tile->PostProcessSettings.AutoExposureBias = SharedExposureBias;
 		}
-		Tile->CaptureScene();
+		Tile->CaptureSceneDeferred();
+	}
+	if (UWorld* World = GetWorld())
+	{
+		if (FSceneInterface* Scene = World->Scene)
+		{
+			USceneCaptureComponent::UpdateDeferredCaptures(Scene);
+		}
 	}
 
 	// Build the FTextureRead for the stitched output, sized to the camera's final SizeXY.
