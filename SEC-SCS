@@ -1,0 +1,11 @@
+#  Default Security Classification:
+#  * System Criticality: Safety Critical
+#  * Network Exposure: Critical
+#  * Personally Identifiable Information: Yes
+#  * Sensitive Information: Yes
+#
+#  (please add path-specific classification to override the default setting)
+
+* SCS:1.0/SC:S/NE:C/PII:Y/SI:Y
+
+.github/workflows/security*     SCS:1.0/SC:M/NE:H/PII:Y/SI:Y
