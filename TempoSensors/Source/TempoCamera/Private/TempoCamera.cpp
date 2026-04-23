@@ -292,6 +292,14 @@ void UTempoCameraCaptureComponent::ApplyRenderSettings()
 
 	ShowFlags.SetLocalExposure(false);
 	ShowFlags.SetEyeAdaptation(false);
+	ShowFlags.SetMotionBlur(false);
+	ShowFlags.SetEyeAdaptation(false);
+	ShowFlags.SetLocalExposure(false);
+	ShowFlags.SetLensFlares(false);
+	ShowFlags.SetBloom(false);
+	ShowFlags.SetColorGrading(false);
+	ShowFlags.SetVignette(false);
+	ShowFlags.SetDepthOfField(false);
 
 	bUseRayTracingIfEnabled = CameraOwner->bUseRayTracingIfEnabled;
 	PostProcessSettings = CameraOwner->PostProcessSettings;
