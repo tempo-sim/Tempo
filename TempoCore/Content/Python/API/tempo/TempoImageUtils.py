@@ -21,7 +21,7 @@ def _get_app():
 _windows = {}
 
 
-def _show_image(window_name, q_image):
+def _show_image(window_name, q_image, scale=1.0):
     visible = False
     try:
         visible = window_name in _windows and _windows[window_name].isVisible()
@@ -32,8 +32,16 @@ def _show_image(window_name, q_image):
         label.setWindowTitle(window_name)
         _windows[window_name] = label
     label = _windows[window_name]
-    label.setPixmap(QPixmap.fromImage(q_image))
-    label.resize(q_image.width(), q_image.height())
+    pixmap = QPixmap.fromImage(q_image)
+    if scale != 1.0:
+        pixmap = pixmap.scaled(
+            max(1, int(q_image.width() * scale)),
+            max(1, int(q_image.height() * scale)),
+            Qt.KeepAspectRatio,
+            Qt.SmoothTransformation,
+        )
+    label.setPixmap(pixmap)
+    label.resize(pixmap.width(), pixmap.height())
     label.show()
 
 
@@ -117,7 +125,7 @@ def show_label_image(image, window_name):
     _show_image(window_name, _build_label_qimage(image))
 
 
-async def _stream_images(source, build_qimage, window_name):
+async def _stream_images(source, build_qimage, window_name, scale=1.0):
     """Shared producer/consumer for the three image streams.
 
     Producer pushes frames into a bounded queue at wire speed, dropping the oldest
@@ -132,7 +140,7 @@ async def _stream_images(source, build_qimage, window_name):
         while True:
             image = await queue.get()
             q_image = await asyncio.to_thread(build_qimage, image)
-            _show_image(window_name, q_image)
+            _show_image(window_name, q_image, scale)
 
     consumer_task = asyncio.create_task(consumer())
 
@@ -150,25 +158,28 @@ async def _stream_images(source, build_qimage, window_name):
         _destroy_window(window_name)
 
 
-async def stream_color_images(camera_name, owner):
+async def stream_color_images(camera_name, owner, scale=1.0):
     await _stream_images(
         ts.stream_color_images(sensor_name=camera_name, owner_name=owner),
         _build_color_qimage,
         "Camera {} - Color".format(camera_name),
+        scale,
     )
 
 
-async def stream_depth_images(camera_name, owner):
+async def stream_depth_images(camera_name, owner, scale=1.0):
     await _stream_images(
         ts.stream_depth_images(sensor_name=camera_name, owner_name=owner),
         _build_depth_qimage,
         "Camera {} - Depth".format(camera_name),
+        scale,
     )
 
 
-async def stream_label_images(camera_name, owner):
+async def stream_label_images(camera_name, owner, scale=1.0):
     await _stream_images(
         ts.stream_label_images(sensor_name=camera_name, owner_name=owner),
         _build_label_qimage,
         "Camera {} - Label".format(camera_name),
+        scale,
     )
