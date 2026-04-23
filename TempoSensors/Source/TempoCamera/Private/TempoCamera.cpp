@@ -636,7 +636,7 @@ void UTempoCamera::TickComponent(float DeltaTime, ELevelTick TickType, FActorCom
 bool UTempoCamera::HasDetectedParameterChange() const
 {
 	return SizeXY != SizeXY_Internal
-		|| HorizontalFOV != HorizontalFOV_Internal
+		|| FOVAngle != FOVAngle_Internal
 		|| LensParameters != LensParameters_Internal;
 }
 
@@ -696,7 +696,7 @@ void UTempoCamera::ReconfigureCaptureComponentsNow()
 void UTempoCamera::UpdateInternalMirrors()
 {
 	LensParameters_Internal = LensParameters;
-	HorizontalFOV_Internal = HorizontalFOV;
+	FOVAngle_Internal = FOVAngle;
 	SizeXY_Internal = SizeXY;
 }
 
@@ -814,7 +814,7 @@ void UTempoCamera::RequestMeasurement(const TempoCamera::BoundingBoxesRequest& R
 
 FTempoCameraIntrinsics UTempoCamera::GetIntrinsics() const
 {
-	return FTempoCameraIntrinsics(SizeXY, HorizontalFOV);
+	return FTempoCameraIntrinsics(SizeXY, FOVAngle);
 }
 
 TFuture<void> UTempoCamera::DecodeAndRespond(TUniquePtr<FTextureRead> TextureRead)
@@ -1433,13 +1433,13 @@ void UTempoCamera::ValidateFOV() const
 {
 	if (LensParameters.DistortionModel == ETempoDistortionModel::BrownConrady || LensParameters.DistortionModel == ETempoDistortionModel::Rational)
 	{
-		ensureMsgf(HorizontalFOV <= 170.0f, TEXT("%s HorizontalFOV %.2f exceeds max 170 degrees."),
-			LensParameters.DistortionModel == ETempoDistortionModel::Rational ? TEXT("Rational") : TEXT("BrownConrady"), HorizontalFOV);
+		ensureMsgf(FOVAngle <= 170.0f, TEXT("%s FOVAngle %.2f exceeds max 170 degrees."),
+			LensParameters.DistortionModel == ETempoDistortionModel::Rational ? TEXT("Rational") : TEXT("BrownConrady"), FOVAngle);
 	}
 	else
 	{
-		const double VerticalFOV = HorizontalFOV * static_cast<double>(SizeXY.Y) / static_cast<double>(SizeXY.X);
-		ensureMsgf(HorizontalFOV <= 240.0f, TEXT("Equidistant HorizontalFOV %.2f exceeds max 240 degrees."), HorizontalFOV);
+		const double VerticalFOV = FOVAngle * static_cast<double>(SizeXY.Y) / static_cast<double>(SizeXY.X);
+		ensureMsgf(FOVAngle <= 240.0f, TEXT("Equidistant FOVAngle %.2f exceeds max 240 degrees."), FOVAngle);
 		ensureMsgf(VerticalFOV <= 240.0, TEXT("Equidistant VerticalFOV %.2f (derived) exceeds max 240 degrees."), VerticalFOV);
 	}
 }
@@ -1463,21 +1463,21 @@ void UTempoCamera::SyncCaptureComponents()
 	if (LensParameters.DistortionModel == ETempoDistortionModel::BrownConrady || LensParameters.DistortionModel == ETempoDistortionModel::Rational)
 	{
 		// Single capture: use TL, deactivate others
-		SyncCaptureComponent(*TLCaptureComponent, true, 0.0, 0.0, HorizontalFOV, SizeXY);
+		SyncCaptureComponent(*TLCaptureComponent, true, 0.0, 0.0, FOVAngle, SizeXY);
 		SyncCaptureComponent(*TRCaptureComponent, false, 0.0, 0.0, 0.0, FIntPoint::ZeroValue);
 		SyncCaptureComponent(*BLCaptureComponent, false, 0.0, 0.0, 0.0, FIntPoint::ZeroValue);
 		SyncCaptureComponent(*BRCaptureComponent, false, 0.0, 0.0, 0.0, FIntPoint::ZeroValue);
 	}
 	else // Equidistant
 	{
-		const double VerticalFOV = HorizontalFOV * static_cast<double>(SizeXY.Y) / static_cast<double>(SizeXY.X);
-		const bool bSplitHorizontal = HorizontalFOV > MaxPerspectiveFOVPerCapture;
+		const double VerticalFOV = FOVAngle * static_cast<double>(SizeXY.Y) / static_cast<double>(SizeXY.X);
+		const bool bSplitHorizontal = FOVAngle > MaxPerspectiveFOVPerCapture;
 		const bool bSplitVertical = VerticalFOV > MaxPerspectiveFOVPerCapture;
 
 		if (!bSplitHorizontal && !bSplitVertical)
 		{
 			// 1 capture
-			SyncCaptureComponent(*TLCaptureComponent, true, 0.0, 0.0, HorizontalFOV, SizeXY);
+			SyncCaptureComponent(*TLCaptureComponent, true, 0.0, 0.0, FOVAngle, SizeXY);
 			SyncCaptureComponent(*TRCaptureComponent, false, 0.0, 0.0, 0.0, FIntPoint::ZeroValue);
 			SyncCaptureComponent(*BLCaptureComponent, false, 0.0, 0.0, 0.0, FIntPoint::ZeroValue);
 			SyncCaptureComponent(*BRCaptureComponent, false, 0.0, 0.0, 0.0, FIntPoint::ZeroValue);
@@ -1485,7 +1485,7 @@ void UTempoCamera::SyncCaptureComponents()
 		else if (bSplitHorizontal && !bSplitVertical)
 		{
 			// 2 captures: left + right
-			const double SubFOV = HorizontalFOV / 2.0;
+			const double SubFOV = FOVAngle / 2.0;
 			const double YawOffset = SubFOV / 2.0;
 			const int32 LeftWidth = FMath::CeilToInt32(SizeXY.X / 2.0);
 			const int32 RightWidth = SizeXY.X - LeftWidth;
@@ -1503,15 +1503,15 @@ void UTempoCamera::SyncCaptureComponents()
 			const int32 TopHeight = FMath::CeilToInt32(SizeXY.Y / 2.0);
 			const int32 BottomHeight = SizeXY.Y - TopHeight;
 
-			SyncCaptureComponent(*TLCaptureComponent, true, 0.0, PitchOffset, HorizontalFOV, FIntPoint(SizeXY.X, TopHeight), FIntPoint(0, 0));
-			SyncCaptureComponent(*TRCaptureComponent, true, 0.0, -PitchOffset, HorizontalFOV, FIntPoint(SizeXY.X, BottomHeight), FIntPoint(0, TopHeight));
+			SyncCaptureComponent(*TLCaptureComponent, true, 0.0, PitchOffset, FOVAngle, FIntPoint(SizeXY.X, TopHeight), FIntPoint(0, 0));
+			SyncCaptureComponent(*TRCaptureComponent, true, 0.0, -PitchOffset, FOVAngle, FIntPoint(SizeXY.X, BottomHeight), FIntPoint(0, TopHeight));
 			SyncCaptureComponent(*BLCaptureComponent, false, 0.0, 0.0, 0.0, FIntPoint::ZeroValue);
 			SyncCaptureComponent(*BRCaptureComponent, false, 0.0, 0.0, 0.0, FIntPoint::ZeroValue);
 		}
 		else
 		{
 			// 4 captures: 2x2 grid
-			const double SubHFOV = HorizontalFOV / 2.0;
+			const double SubHFOV = FOVAngle / 2.0;
 			const double SubVFOV = VerticalFOV / 2.0;
 			const double YawOffset = SubHFOV / 2.0;
 			const double PitchOffset = SubVFOV / 2.0;
@@ -1572,7 +1572,7 @@ void UTempoCamera::PostEditChangeProperty(FPropertyChangedEvent& PropertyChanged
 	Super::PostEditChangeProperty(PropertyChangedEvent);
 
 	const FName MemberPropertyName = (PropertyChangedEvent.MemberProperty != nullptr) ? PropertyChangedEvent.MemberProperty->GetFName() : NAME_None;
-	if (MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, HorizontalFOV) ||
+	if (MemberPropertyName == GET_MEMBER_NAME_CHECKED(USceneCaptureComponent2D, FOVAngle) ||
 		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, LensParameters) ||
 		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, SizeXY) ||
 		MemberPropertyName == GET_MEMBER_NAME_CHECKED(USceneCaptureComponent2D, PostProcessSettings) ||

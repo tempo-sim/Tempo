@@ -326,16 +326,12 @@ protected:
 	UPROPERTY(VisibleAnywhere)
 	TArray<TEnumAsByte<EMeasurementType>> MeasurementTypes;
 
-	// The horizontal field of view of the output image in degrees.
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens", meta = (ClampMin = "1.0", ClampMax = "240.0"))
-	float HorizontalFOV = 90.0f;
-
 	// Lens distortion parameters. Used by BrownConrady (K1-K3) and Rational (K1-K6) models.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens")
 	FTempoLensDistortionParameters LensParameters;
 
-	// SizeXY, RateHz, SequenceId, PostProcessSettings, ShowFlagSettings, and
-	// bUseRayTracingIfEnabled are inherited from UTempoSceneCaptureComponent2D /
+	// FOVAngle (horizontal), SizeXY, RateHz, SequenceId, PostProcessSettings, ShowFlagSettings,
+	// and bUseRayTracingIfEnabled are inherited from UTempoSceneCaptureComponent2D /
 	// USceneCaptureComponent(2D).
 
 	// Whether this camera can measure depth. Disabled when not requested to optimize performance.
@@ -360,7 +356,7 @@ protected:
 	// Internal tracking for runtime change detection. Mirrors the watched properties after
 	// they have been pushed to the capture components via ReconfigureCaptureComponentsNow.
 	FTempoLensDistortionParameters LensParameters_Internal;
-	float HorizontalFOV_Internal = -1.0f;
+	float FOVAngle_Internal = -1.0f;
 	FIntPoint SizeXY_Internal = FIntPoint(-1, -1);
 
 	// Set when HasDetectedParameterChange() sees a diff; cleared after a successful apply.
