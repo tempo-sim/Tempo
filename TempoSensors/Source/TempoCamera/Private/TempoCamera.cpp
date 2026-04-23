@@ -288,6 +288,12 @@ void UTempoCameraCaptureComponent::ApplyRenderSettings()
 		return;
 	}
 
+	ShowFlags = CameraOwner->ShowFlags;
+
+	ShowFlags.SetLocalExposure(false);
+	ShowFlags.SetEyeAdaptation(false);
+
+	bUseRayTracingIfEnabled = CameraOwner->bUseRayTracingIfEnabled;
 	PostProcessSettings = CameraOwner->PostProcessSettings;
 
 	// Tiles must not do any per-tile exposure adaptation — divergent per-tile ViewStates would
@@ -308,28 +314,6 @@ void UTempoCameraCaptureComponent::ApplyRenderSettings()
 	{
 		PostProcessSettings.WeightedBlendables.Array.Add(FWeightedBlendable(1.0, PostProcessMaterialInstance));
 	}
-
-	ShowFlags = CameraOwner->ShowFlags;
-	ShowFlags.SetAtmosphere(true);
-	ShowFlags.SetFog(true);
-	ShowFlags.SetLighting(true);
-	ShowFlags.SetDynamicShadows(true);
-	ShowFlags.SetStaticMeshes(true);
-	ShowFlags.SetSkeletalMeshes(true);
-	ShowFlags.SetLandscape(true);
-	ShowFlags.SetSkyLighting(true);
-	ShowFlags.SetTranslucency(true);
-	ShowFlags.SetParticles(true);
-	ShowFlags.SetLocalExposure(false);
-	ShowFlags.SetEyeAdaptation(false);
-	ShowFlags.SetBloom(false);
-	ShowFlags.SetLensFlares(false);
-	ShowFlags.SetDepthOfField(false);
-	ShowFlags.SetVignette(false);
-	// // CameraOwner should not use TemporalAA, because it does not have the necessary velocity signals
-	// ShowFlags.TemporalAA = true;
-
-	bUseRayTracingIfEnabled = CameraOwner->bUseRayTracingIfEnabled;
 }
 
 void UTempoCameraCaptureComponent::Activate(bool bReset)
@@ -579,19 +563,6 @@ UTempoCamera::UTempoCamera()
 	RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA8;
 	PixelFormatOverride = EPixelFormat::PF_Unknown;
 
-	// The proxy's scene render is useless — its PPM overwrites scene color before bloom/AE. Hide
-	// world geometry and lighting so nothing gets rasterized.
-	ShowFlags.SetAtmosphere(false);
-	ShowFlags.SetFog(false);
-	ShowFlags.SetLighting(false);
-	ShowFlags.SetDynamicShadows(false);
-	ShowFlags.SetStaticMeshes(false);
-	ShowFlags.SetSkeletalMeshes(false);
-	ShowFlags.SetLandscape(false);
-	ShowFlags.SetSkyLighting(false);
-	ShowFlags.SetTranslucency(false);
-	ShowFlags.SetParticles(false);
-
 	// Auto exposure for the proxy's tonemap pass. AEM_Histogram samples the (PPM-replaced) scene
 	// color histogram to compute exposure.
 	PostProcessSettings.bOverride_AutoExposureMethod = true;
@@ -611,16 +582,17 @@ UTempoCamera::UTempoCamera()
 	PostProcessSettings.bOverride_MotionBlurAmount = true;
 	PostProcessSettings.MotionBlurAmount = 0.0;
 
-	ShowFlags.SetMotionBlur(false);
+	// Reasonable defaults
+	ShowFlags.SetMotionBlur(true);
 	ShowFlags.SetAntiAliasing(true);
 	ShowFlags.SetTemporalAA(true);
 	ShowFlags.SetEyeAdaptation(true);
 	ShowFlags.SetLocalExposure(true);
 	ShowFlags.SetLensFlares(true);
 	ShowFlags.SetBloom(true);
-	ShowFlags.SetColorGrading(false);
-	ShowFlags.SetVignette(false);
-	ShowFlags.SetDepthOfField(false);
+	ShowFlags.SetColorGrading(true);
+	ShowFlags.SetVignette(true);
+	ShowFlags.SetDepthOfField(true);
 }
 
 void UTempoCamera::OnRegister()
@@ -1314,7 +1286,23 @@ void UTempoCamera::MaybeCapture()
 	// TextureTarget is effectively tonemap(stitched HDR).
 	if (GetOrCreateProxyTonemapMID())
 	{
+		// The proxy's scene render is useless — its PPM overwrites scene color before bloom/AE. Hide
+    	// world geometry and lighting so nothing gets rasterized.
+    	auto PrevShowFlags = ShowFlags;
+    	ShowFlags.SetAtmosphere(false);
+    	ShowFlags.SetFog(false);
+    	ShowFlags.SetLighting(false);
+    	ShowFlags.SetDynamicShadows(false);
+    	ShowFlags.SetStaticMeshes(false);
+    	ShowFlags.SetSkeletalMeshes(false);
+    	ShowFlags.SetLandscape(false);
+    	ShowFlags.SetSkyLighting(false);
+    	ShowFlags.SetTranslucency(false);
+    	ShowFlags.SetParticles(false);
+		ShowFlags.SetAntiAliasing(false);
+		ShowFlags.SetTemporalAA(false);
 		CaptureScene();
+		ShowFlags = PrevShowFlags;
 	}
 
 	// Update SharedExposureBias from the proxy's AE result. GetLastAverageSceneLuminance reports
