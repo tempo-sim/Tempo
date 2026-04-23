@@ -364,7 +364,7 @@ async def flow_randomize_post_process():
         print(f"  Error while setting sensor properties: {e}")
 
 
-async def flow_start_stream(sensor_streams):
+async def flow_start_stream(sensor_streams, display_scale):
     print("\n--- Start Sensor Data Stream ---")
     available_sensors = await get_available_sensors()
     if not available_sensors:
@@ -397,11 +397,11 @@ async def flow_start_stream(sensor_streams):
 
         task = None
         if measurement_type == Sensors.COLOR_IMAGE:
-            task = asyncio.create_task(tiu.stream_color_images(sensor.name, sensor.owner))
+            task = asyncio.create_task(tiu.stream_color_images(sensor.name, sensor.owner, display_scale))
         if measurement_type == Sensors.DEPTH_IMAGE:
-            task = asyncio.create_task(tiu.stream_depth_images(sensor.name, sensor.owner))
+            task = asyncio.create_task(tiu.stream_depth_images(sensor.name, sensor.owner, display_scale))
         if measurement_type == Sensors.LABEL_IMAGE:
-            task = asyncio.create_task(tiu.stream_label_images(sensor.name, sensor.owner))
+            task = asyncio.create_task(tiu.stream_label_images(sensor.name, sensor.owner, display_scale))
         if measurement_type == Sensors.LIDAR_SCAN:
             task = asyncio.create_task(tlu.stream_lidar_scans(sensor.name, sensor.owner, "Intensity"))
 
@@ -485,6 +485,8 @@ async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--ip', required=False, help="IP address of machine where Tempo is running", default="0.0.0.0")
     parser.add_argument('--port', required=False, help="Port Tempo scripting server is using", default=10001)
+    parser.add_argument('--display-scale', required=False, type=float, default=0.5,
+                        help="Scale factor for displayed camera images (default: 0.5)")
     args = parser.parse_args()
 
     if args.ip != "0.0.0.0" or args.port != 10001:
@@ -516,7 +518,7 @@ async def main():
             elif action == "randomize":
                 await flow_randomize_post_process()
             elif action == "start":
-                await flow_start_stream(sensor_streams)
+                await flow_start_stream(sensor_streams, args.display_scale)
             elif action == "end":
                 await flow_end_stream(sensor_streams)
             elif action == "move":
