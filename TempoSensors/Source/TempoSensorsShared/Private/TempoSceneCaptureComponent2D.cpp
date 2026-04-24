@@ -251,39 +251,39 @@ bool UTempoSceneCaptureComponent2D::NextReadComplete() const
 	return TextureReadQueue.NextReadComplete();
 }
 
-void UTempoSceneCaptureComponent2D::CreateOrResizeDistortionMapTexture(const FIntPoint& TextureSizeXY)
+void UTempoSceneCaptureComponent2D::CreateOrResizeDistortionMapTexture(UTexture2D*& OutTexture, const FIntPoint& TextureSizeXY)
 {
 	if (TextureSizeXY.X <= 0 || TextureSizeXY.Y <= 0)
 	{
 		return;
 	}
 
-	DistortionMapTexture = UTexture2D::CreateTransient(TextureSizeXY.X, TextureSizeXY.Y, PF_G16R16F);
-	DistortionMapTexture->CompressionSettings = TC_HDR;
-	DistortionMapTexture->Filter = TF_Bilinear;
-	DistortionMapTexture->AddressX = TA_Clamp;
-	DistortionMapTexture->AddressY = TA_Clamp;
-	DistortionMapTexture->SRGB = 0;
-	DistortionMapTexture->UpdateResource();
+	OutTexture = UTexture2D::CreateTransient(TextureSizeXY.X, TextureSizeXY.Y, PF_G16R16F);
+	OutTexture->CompressionSettings = TC_HDR;
+	OutTexture->Filter = TF_Bilinear;
+	OutTexture->AddressX = TA_Clamp;
+	OutTexture->AddressY = TA_Clamp;
+	OutTexture->SRGB = 0;
+	OutTexture->UpdateResource();
 }
 
-void UTempoSceneCaptureComponent2D::ApplyDistortionMapToMaterial(UMaterialInstanceDynamic* MaterialInstance) const
+void UTempoSceneCaptureComponent2D::ApplyDistortionMapToMaterial(UMaterialInstanceDynamic* MaterialInstance, UTexture2D* DistortionMap)
 {
-	if (MaterialInstance && DistortionMapTexture)
+	if (MaterialInstance && DistortionMap)
 	{
-		MaterialInstance->SetTextureParameterValue(FName("DistortionMap"), DistortionMapTexture);
+		MaterialInstance->SetTextureParameterValue(FName("DistortionMap"), DistortionMap);
 	}
 }
 
-void UTempoSceneCaptureComponent2D::FillDistortionMap(const FDistortionModel& Model, const FIntPoint& OutputSizeXY,
-	double FOutput, const FIntPoint& RenderSizeXY, double FRender) const
+void UTempoSceneCaptureComponent2D::FillDistortionMap(UTexture2D* DistortionMap, const FDistortionModel& Model, const FIntPoint& OutputSizeXY,
+	double FOutput, const FIntPoint& RenderSizeXY, double FRender)
 {
-	if (!DistortionMapTexture || OutputSizeXY.X <= 0 || OutputSizeXY.Y <= 0)
+	if (!DistortionMap || OutputSizeXY.X <= 0 || OutputSizeXY.Y <= 0)
 	{
 		return;
 	}
 
-	FTexture2DMipMap& Mip = DistortionMapTexture->GetPlatformData()->Mips[0];
+	FTexture2DMipMap& Mip = DistortionMap->GetPlatformData()->Mips[0];
 	uint16* MipData = static_cast<uint16*>(Mip.BulkData.Lock(LOCK_READ_WRITE));
 
 	if (!MipData)
@@ -317,7 +317,7 @@ void UTempoSceneCaptureComponent2D::FillDistortionMap(const FDistortionModel& Mo
 	}
 
 	Mip.BulkData.Unlock();
-	DistortionMapTexture->UpdateResource();
+	DistortionMap->UpdateResource();
 }
 
 void UTempoSceneCaptureComponent2D::InitRenderTarget()

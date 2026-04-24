@@ -25,11 +25,6 @@
 
 namespace
 {
-	const FName TLCaptureComponentTag(TEXT("_TL"));
-	const FName TRCaptureComponentTag(TEXT("_TR"));
-	const FName BLCaptureComponentTag(TEXT("_BL"));
-	const FName BRCaptureComponentTag(TEXT("_BR"));
-
 	constexpr double MaxPerspectiveFOVPerCapture = 120.0;
 }
 
@@ -267,258 +262,6 @@ void TTextureRead<FCameraPixelWithDepth>::RespondToRequests(const TArray<FBoundi
 }
 
 // ------------------------------------------------------------------------------------
-// UTempoCameraCaptureComponent
-// ------------------------------------------------------------------------------------
-
-UTempoCameraCaptureComponent::UTempoCameraCaptureComponent()
-{
-	// Tiles output HDR linear color so tonemapping runs once on the merged output rather than
-	// independently per tile (which would mismatch exposure across the stitched image).
-	CaptureSource = ESceneCaptureSource::SCS_FinalColorHDR;
-
-	// fp32 RGBA tile RT: RGB carries HDR linear color, A carries asfloat((label<<24) | depth24).
-	RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA32f;
-	PixelFormatOverride = EPixelFormat::PF_Unknown;
-
-	bAutoActivate = false;
-}
-
-void UTempoCameraCaptureComponent::ApplyRenderSettings()
-{
-	if (!CameraOwner)
-	{
-		return;
-	}
-
-	ShowFlags = CameraOwner->ShowFlags;
-
-	ShowFlags.SetLocalExposure(false);
-	ShowFlags.SetEyeAdaptation(false);
-	ShowFlags.SetMotionBlur(false);
-	ShowFlags.SetEyeAdaptation(false);
-	ShowFlags.SetLocalExposure(false);
-	ShowFlags.SetLensFlares(false);
-	ShowFlags.SetBloom(false);
-	ShowFlags.SetColorGrading(false);
-	ShowFlags.SetVignette(false);
-	ShowFlags.SetDepthOfField(false);
-
-	bUseRayTracingIfEnabled = CameraOwner->bUseRayTracingIfEnabled;
-	PostProcessSettings = CameraOwner->PostProcessSettings;
-
-	// Tiles must not do any per-tile exposure adaptation — divergent per-tile ViewStates would
-	// produce mismatched brightness across the stitched image. Tonemap runs once on the proxy.
-	PostProcessSettings.bOverride_AutoExposureMethod = true;
-	PostProcessSettings.AutoExposureMethod = AEM_Manual;
-
-	// Drop the proxy tonemap PPM — it reads SharedTextureTarget, which tiles do not populate —
-	// but preserve any user-authored blendables.
-	PostProcessSettings.WeightedBlendables.Array.RemoveAll([CameraOwner = this->CameraOwner](const FWeightedBlendable& WB)
-	{
-		return WB.Object != nullptr && WB.Object == CameraOwner->ProxyTonemapMID;
-	});
-
-	// Re-append the distortion/label post-process material if it was already created
-	// (on first call from Configure it is still null and will be added by SetDepthEnabled).
-	if (PostProcessMaterialInstance)
-	{
-		PostProcessSettings.WeightedBlendables.Array.Add(FWeightedBlendable(1.0, PostProcessMaterialInstance));
-	}
-}
-
-void UTempoCameraCaptureComponent::Activate(bool bReset)
-{
-	// Must set depth format and materials before Super::Activate calls InitRenderTarget, so the
-	// render target is created with the correct format on the first call.
-	SetDepthEnabled(CameraOwner->bDepthEnabled);
-
-	Super::Activate(bReset);
-
-	if (TextureTarget)
-	{
-		// The tile RT is fp32 HDR linear; override the base SceneCaptureGamma so values are
-		// stored untouched and the proxy tonemap can apply its own gamma.
-		TextureTarget->TargetGamma = 1.0f;
-		// Point sampling: the A channel carries bit-packed (label, depth) via asfloat. Bilinear
-		// filtering would smear adjacent pixels' bit patterns and break asuint() decoding on the
-		// aux side. Stitch passes also draw at 1:1 pixel ratios, so point is correct for RGB too.
-		TextureTarget->Filter = TextureFilter::TF_Nearest;
-	}
-}
-
-void UTempoCameraCaptureComponent::SetDepthEnabled(bool bDepthEnabled)
-{
-	const UTempoSensorsSettings* TempoSensorsSettings = GetDefault<UTempoSensorsSettings>();
-	check(TempoSensorsSettings);
-
-	// Tile RT format (fp32 RGBA) is set in the constructor and no longer depends on bDepthEnabled.
-	// Only the distortion/label PPM choice varies with depth.
-	if (bDepthEnabled)
-	{
-		if (const TObjectPtr<UMaterialInterface> PostProcessMaterialWithDepth = TempoSensorsSettings->GetCameraPostProcessMaterialWithDepth())
-		{
-			PostProcessMaterialInstance = UMaterialInstanceDynamic::Create(PostProcessMaterialWithDepth.Get(), this);
-			ApplyDistortionMapToMaterial(PostProcessMaterialInstance);
-			MinDepth = GEngine->NearClipPlane;
-			MaxDepth = TempoSensorsSettings->GetMaxCameraDepth();
-			PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MinDepth"), MinDepth);
-			PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MaxDepth"), MaxDepth);
-			PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MaxDiscreteDepth"), GTempoCamera_Max_Discrete_Depth);
-		}
-		else
-		{
-			UE_LOG(LogTempoCamera, Error, TEXT("PostProcessMaterialWithDepth is not set in TempoSensors settings"));
-		}
-	}
-	else
-	{
-		if (const TObjectPtr<UMaterialInterface> PostProcessMaterialNoDepth = TempoSensorsSettings->GetCameraPostProcessMaterialNoDepth())
-		{
-			PostProcessMaterialInstance = UMaterialInstanceDynamic::Create(PostProcessMaterialNoDepth.Get(), this);
-			ApplyDistortionMapToMaterial(PostProcessMaterialInstance);
-		}
-		else
-		{
-			UE_LOG(LogTempoCamera, Error, TEXT("PostProcessMaterialNoDepth is not set in TempoSensors settings"));
-		}
-	}
-
-	// Set up label override parameters
-	UDataTable* SemanticLabelTable = GetDefault<UTempoSensorsSettings>()->GetSemanticLabelTable();
-	FName OverridableLabelRowName = TempoSensorsSettings->GetOverridableLabelRowName();
-	FName OverridingLabelRowName = TempoSensorsSettings->GetOverridingLabelRowName();
-	TOptional<int32> OverridableLabel;
-	TOptional<int32> OverridingLabel;
-
-	if (!OverridableLabelRowName.IsNone())
-	{
-		SemanticLabelTable->ForeachRow<FSemanticLabel>(TEXT(""),
-			[&OverridableLabelRowName,
-			 &OverridingLabelRowName,
-			 &OverridableLabel,
-			 &OverridingLabel](const FName& Key, const FSemanticLabel& Value)
-			{
-				if (Key == OverridableLabelRowName)
-				{
-					OverridableLabel = Value.Label;
-				}
-				if (Key == OverridingLabelRowName)
-				{
-					OverridingLabel = Value.Label;
-				}
-			});
-	}
-
-	if (PostProcessMaterialInstance)
-	{
-		if (OverridableLabel.IsSet() && OverridingLabel.IsSet())
-		{
-			PostProcessMaterialInstance->SetScalarParameterValue(TEXT("OverridableLabel"), OverridableLabel.GetValue());
-			PostProcessMaterialInstance->SetScalarParameterValue(TEXT("OverridingLabel"), OverridingLabel.GetValue());
-		}
-		else
-		{
-			PostProcessMaterialInstance->SetScalarParameterValue(TEXT("OverridingLabel"), 0.0);
-		}
-		// Rebuild blendables from the owner's user-authored list, then append the distortion/label
-		// material. Filter out the owner's ProxyTonemapMID — that PPM reads SharedTextureTarget,
-		// which tiles populate, and applying it inside a tile would feed stale stitched content
-		// back into the tile's scene color.
-		PostProcessSettings.WeightedBlendables.Array.Empty();
-		if (CameraOwner)
-		{
-			PostProcessSettings.WeightedBlendables.Array.Append(CameraOwner->PostProcessSettings.WeightedBlendables.Array);
-			PostProcessSettings.WeightedBlendables.Array.RemoveAll([CameraOwner = this->CameraOwner](const FWeightedBlendable& WB)
-			{
-				return WB.Object != nullptr && WB.Object == CameraOwner->ProxyTonemapMID;
-			});
-		}
-		PostProcessSettings.WeightedBlendables.Array.Add(FWeightedBlendable(1.0, PostProcessMaterialInstance));
-		PostProcessMaterialInstance->EnsureIsComplete();
-	}
-	else
-	{
-		UE_LOG(LogTempoCamera, Error, TEXT("PostProcessMaterialInstance is not set."));
-	}
-}
-
-bool UTempoCameraCaptureComponent::HasPendingRequests() const
-{
-	return CameraOwner->HasPendingCameraRequests();
-}
-
-FTextureRead* UTempoCameraCaptureComponent::MakeTextureRead() const
-{
-	check(GetWorld());
-
-	TMap<uint8, uint8> InstanceToSemanticMap;
-	if (UTempoActorLabeler* Labeler = GetWorld()->GetSubsystem<UTempoActorLabeler>())
-	{
-		InstanceToSemanticMap = Labeler->GetInstanceToSemanticIdMap();
-	}
-
-	return CameraOwner->bDepthEnabled ?
-		static_cast<FTextureRead*>(new TTextureRead<FCameraPixelWithDepth>(SizeXY, CameraOwner->SequenceId + NumPendingTextureReads(), GetWorld()->GetTimeSeconds(), CameraOwner->GetOwnerName(), CameraOwner->GetSensorName(), CameraOwner->GetComponentTransform(), MinDepth, MaxDepth, MoveTemp(InstanceToSemanticMap))) :
-		static_cast<FTextureRead*>(new TTextureRead<FCameraPixelNoDepth>(SizeXY, CameraOwner->SequenceId + NumPendingTextureReads(), GetWorld()->GetTimeSeconds(), CameraOwner->GetOwnerName(), CameraOwner->GetSensorName(), CameraOwner->GetComponentTransform(), MoveTemp(InstanceToSemanticMap)));
-}
-
-int32 UTempoCameraCaptureComponent::GetMaxTextureQueueSize() const
-{
-	return GetDefault<UTempoSensorsSettings>()->GetMaxCameraRenderBufferSize();
-}
-
-void UTempoCameraCaptureComponent::Configure(double YawOffset, double PitchOffset, double EquidistantTileFOV, const FIntPoint& InTileSizeXY, const FIntPoint& InTileDestOffset)
-{
-	RateHz = CameraOwner->RateHz;
-	TileOutputSizeXY = InTileSizeXY;
-	TileDestOffset = InTileDestOffset;
-	TileOutputOffsetY = 0;
-	EquidistantTileHFOVRad = FMath::DegreesToRadians(EquidistantTileFOV);
-	SetRelativeRotation(FRotator(PitchOffset, YawOffset, 0.0));
-
-	// SizeXY and FOVAngle are set in InitDistortionMap via ComputeRenderConfig.
-	// Set SizeXY to the output size initially; InitDistortionMap may adjust it.
-	SizeXY = InTileSizeXY;
-
-	ApplyRenderSettings();
-}
-
-void UTempoCameraCaptureComponent::InitRenderTarget()
-{
-	// Tiles render into the owning UTempoCamera's SharedTextureTarget via the multi-view family,
-	// not a per-tile TextureTarget. Skip Super::InitRenderTarget (which would allocate a tile RT
-	// + staging textures) and only rebuild the distortion map, which the per-view post-process
-	// material samples during the atlas render.
-	InitDistortionMap();
-}
-
-void UTempoCameraCaptureComponent::InitDistortionMap()
-{
-	if (TileOutputSizeXY.X <= 0 || TileOutputSizeXY.Y <= 0)
-	{
-		return;
-	}
-
-	TUniquePtr<FDistortionModel> Model = CreateDistortionModel(
-		CameraOwner->LensParameters,
-		GetRelativeRotation().Yaw,
-		GetRelativeRotation().Pitch);
-	const float OutputHFOV = FMath::RadiansToDegrees(EquidistantTileHFOVRad);
-	const FDistortionRenderConfig Config = Model->ComputeRenderConfig(TileOutputSizeXY, OutputHFOV);
-
-	// Apply render configuration to the scene capture.
-	FOVAngle = Config.RenderFOVAngle;
-	SizeXY = Config.RenderSizeXY;
-
-	// Create the distortion map at output resolution and fill it.
-	CreateOrResizeDistortionMapTexture(TileOutputSizeXY);
-	FillDistortionMap(*Model, TileOutputSizeXY, Config.FOutput, Config.RenderSizeXY, Config.FRender);
-
-	// Wire the distortion map to the post-process material (must happen after texture creation).
-	ApplyDistortionMapToMaterial(PostProcessMaterialInstance);
-}
-
-// ------------------------------------------------------------------------------------
 // UTempoCamera
 // ------------------------------------------------------------------------------------
 
@@ -571,14 +314,21 @@ void UTempoCamera::OnRegister()
 {
 	Super::OnRegister();
 
-	// Don't create capture components during cooking or for template/archetype objects
-	// (e.g. Blueprint editor previews where GetOwner() is not a properly-packaged actor).
+	// Don't configure tiles during cooking or for template/archetype objects (e.g. Blueprint
+	// editor previews where GetOwner() is not a properly-packaged actor).
 	if (IsRunningCommandlet() || IsTemplate())
 	{
 		return;
 	}
 
-	SyncCaptureComponents();
+	// Fixed four tile slots (TL=0, TR=1, BL=2, BR=3). Pre-allocate so tile addresses are stable
+	// across SyncTiles calls and no TArray reallocation ever runs.
+	if (Tiles.Num() != 4)
+	{
+		Tiles.SetNum(4);
+	}
+
+	SyncTiles();
 	UpdateInternalMirrors();
 
 	if (UTempoCoreUtils::IsGameWorld(this))
@@ -612,22 +362,9 @@ bool UTempoCamera::HasDetectedParameterChange() const
 		|| LensParameters != LensParameters_Internal;
 }
 
-bool UTempoCamera::AnyCaptureReadsInFlight() const
-{
-	for (const UTempoCameraCaptureComponent* Component : GetActiveCaptureComponents())
-	{
-		if (Component->NumPendingTextureReads() > 0)
-		{
-			return true;
-		}
-	}
-	return false;
-}
-
 void UTempoCamera::TryApplyPendingReconfigure()
 {
-	// Don't create capture components during cooking or for template/archetype objects
-	// (e.g. Blueprint editor previews where GetOwner() is not a properly-packaged actor).
+	// Don't reconfigure during cooking or for template/archetype objects.
 	if (IsRunningCommandlet() || IsTemplate())
 	{
 		return;
@@ -636,25 +373,29 @@ void UTempoCamera::TryApplyPendingReconfigure()
 	{
 		return;
 	}
-	if (AnyCaptureReadsInFlight())
+	// Only reconfigure when no readback is in flight — tiles feed a single shared queue on the
+	// owner, so we can gate on its length.
+	if (TextureReadQueue.Num() > 0)
 	{
 		return;
 	}
-	ReconfigureCaptureComponentsNow();
+	ReconfigureTilesNow();
 	bReconfigurePending = false;
 }
 
-void UTempoCamera::ReconfigureCaptureComponentsNow()
+void UTempoCamera::ReconfigureTilesNow()
 {
-	// Drain active tiles first so SyncCaptureComponents' re-Activate rebuilds render targets
-	// and distortion maps with the new parameters. Deactivate() empties the texture read queue,
-	// which is safe because callers gate this on AnyCaptureReadsInFlight() == false.
-	for (UTempoCameraCaptureComponent* Component : GetActiveCaptureComponents())
+	// Drain all active tiles (releases their view states + PPMs) before re-configuring with
+	// new parameters. Caller must have confirmed no reads are in flight.
+	for (FTempoCameraTile& Tile : Tiles)
 	{
-		Component->Deactivate();
+		if (Tile.bActive)
+		{
+			DeactivateTile(Tile);
+		}
 	}
 
-	SyncCaptureComponents();
+	SyncTiles();
 	UpdateInternalMirrors();
 
 	// Render targets need to resize when SizeXY changed, and any queued reads reference the
@@ -1131,8 +872,15 @@ void UTempoCamera::MaybeCapture()
 		return;
 	}
 
-	const TArray<UTempoCameraCaptureComponent*> ActiveCaptureComponents = GetActiveCaptureComponents();
-	if (ActiveCaptureComponents.IsEmpty())
+	int32 NumActiveTiles = 0;
+	for (const FTempoCameraTile& Tile : Tiles)
+	{
+		if (Tile.bActive)
+		{
+			++NumActiveTiles;
+		}
+	}
+	if (NumActiveTiles == 0)
 	{
 		return;
 	}
@@ -1162,41 +910,47 @@ void UTempoCamera::MaybeCapture()
 		return;
 	}
 
+	// Per-tile view origin (shared across tiles) — the camera's world location.
+	const FTransform CameraWorld = GetComponentToWorld();
+	const FVector ViewLocation = CameraWorld.GetTranslation();
+	const FQuat CameraWorldRotation = CameraWorld.GetRotation();
+
+	// Axis swap for UE view rotation convention: view x = world z, view y = world x, view z = world y.
+	const FMatrix ViewAxisSwap(
+		FPlane(0, 0, 1, 0),
+		FPlane(1, 0, 0, 0),
+		FPlane(0, 1, 0, 0),
+		FPlane(0, 0, 0, 1));
+
 	// Build one FSceneViewFamily containing all tile views and render it into SharedTextureTarget
 	// (the atlas) via TempoMultiViewCapture::RenderTiles. Each tile contributes its own view state
-	// (TAA/AE history), post-process (distortion map PPM, AE bias), and hide/show lists; they share
-	// the family's shadow setup, scene uniform buffer, Lumen/RT wire-up, and GPU scene update. The
-	// Canvas-based color stitch is removed — the atlas IS the stitched output.
+	// (TAA/AE history) and post-process; they share the family's shadow setup, scene uniform
+	// buffer, Lumen/RT wire-up, and GPU scene update.
 	TArray<TempoMultiViewCapture::FViewSetup> ViewSetups;
-	ViewSetups.Reserve(ActiveCaptureComponents.Num());
-	for (UTempoCameraCaptureComponent* Tile : ActiveCaptureComponents)
+	ViewSetups.Reserve(NumActiveTiles);
+	for (FTempoCameraTile& Tile : Tiles)
 	{
-		if (bHasValidSharedExposure)
+		if (!Tile.bActive)
 		{
-			Tile->PostProcessSettings.bOverride_AutoExposureBias = true;
-			Tile->PostProcessSettings.AutoExposureBias = SharedExposureBias;
+			continue;
 		}
 
-		// Per-tile view rotation — mirrors FScene::UpdateSceneCaptureContents for a component with
-		// only rotation (no custom projection, no ortho) at SceneCaptureRendering.cpp:1128-1141.
-		FTransform TileTransform = Tile->GetComponentToWorld();
-		const FVector TileLocation = TileTransform.GetTranslation();
-		TileTransform.SetTranslation(FVector::ZeroVector);
-		TileTransform.SetScale3D(FVector::OneVector);
-		FMatrix ViewRotationMatrix = TileTransform.ToInverseMatrixWithScale();
-		ViewRotationMatrix = ViewRotationMatrix * FMatrix(
-			FPlane(0, 0, 1, 0),
-			FPlane(1, 0, 0, 0),
-			FPlane(0, 1, 0, 0),
-			FPlane(0, 0, 0, 1));
+		if (bHasValidSharedExposure)
+		{
+			Tile.PostProcessSettings.bOverride_AutoExposureBias = true;
+			Tile.PostProcessSettings.AutoExposureBias = SharedExposureBias;
+		}
+
+		// Tile world rotation = camera world rotation * tile relative rotation; the view matrix is
+		// the inverse of that quat, followed by the capture-view axis swap.
+		const FQuat TileWorldRotation = CameraWorldRotation * Tile.RelativeRotation.Quaternion();
+		FMatrix ViewRotationMatrix = FQuatRotationMatrix(TileWorldRotation.Inverse()) * ViewAxisSwap;
 
 		// Perspective projection — mirrors BuildProjectionMatrix at SceneCaptureRendering.cpp:566.
-		const float UnscaledFOV = Tile->FOVAngle * (float)PI / 360.0f;
-		const float ViewFOV = FMath::Atan((1.0f + Tile->Overscan) * FMath::Tan(UnscaledFOV));
-		const float NearClip = Tile->bOverride_CustomNearClippingPlane
-			? Tile->CustomNearClippingPlane
-			: GNearClippingPlane;
-		const FIntPoint TileSize = Tile->TileOutputSizeXY;
+		const float UnscaledFOV = Tile.FOVAngle * (float)PI / 360.0f;
+		const float ViewFOV = FMath::Atan((1.0f + Overscan) * FMath::Tan(UnscaledFOV));
+		const float NearClip = bOverride_CustomNearClippingPlane ? CustomNearClippingPlane : GNearClippingPlane;
+		const FIntPoint TileSize = Tile.TileOutputSizeXY;
 		const float YAxisMultiplier = static_cast<float>(TileSize.X) / static_cast<float>(TileSize.Y);
 
 		FMatrix ProjectionMatrix;
@@ -1210,15 +964,36 @@ void UTempoCamera::MaybeCapture()
 		}
 
 		TempoMultiViewCapture::FViewSetup& Setup = ViewSetups.AddDefaulted_GetRef();
-		Setup.Component = Tile;
-		Setup.ViewLocation = TileLocation;
+		Setup.ViewState = Tile.ViewState.GetReference();
+		Setup.PostProcessSettings = &Tile.PostProcessSettings;
+		Setup.PostProcessBlendWeight = 1.0f;
+		Setup.bCameraCut = Tile.bCameraCut;
+		Tile.bCameraCut = false;
+		Setup.ViewLocation = ViewLocation;
 		Setup.ViewRotationMatrix = ViewRotationMatrix;
 		Setup.ProjectionMatrix = ProjectionMatrix;
-		Setup.ViewRect = FIntRect(Tile->TileDestOffset, Tile->TileDestOffset + TileSize);
-		Setup.FOV = Tile->FOVAngle;
+		Setup.ViewRect = FIntRect(Tile.TileDestOffset, Tile.TileDestOffset + TileSize);
+		Setup.FOV = Tile.FOVAngle;
 	}
 
-	TempoMultiViewCapture::RenderTiles(Scene, this, SharedTextureTarget, ViewSetups);
+	// Tile render uses HDR scene color (pre-tonemap); the primary's own capture source (LDR) is
+	// for the proxy tonemap pass below. The family also wants the tile-appropriate show flags
+	// (no bloom/DOF/motionblur/etc) which differ from the proxy's — swap them around the call.
+	{
+		const FEngineShowFlags SavedShowFlags = ShowFlags;
+		ShowFlags.SetLocalExposure(false);
+		ShowFlags.SetEyeAdaptation(false);
+		ShowFlags.SetMotionBlur(false);
+		ShowFlags.SetLensFlares(false);
+		ShowFlags.SetBloom(false);
+		ShowFlags.SetColorGrading(false);
+		ShowFlags.SetVignette(false);
+		ShowFlags.SetDepthOfField(false);
+
+		TempoMultiViewCapture::RenderTiles(Scene, this, SharedTextureTarget, ViewSetups, ESceneCaptureSource::SCS_FinalColorHDR);
+
+		ShowFlags = SavedShowFlags;
+	}
 
 	// Build the FTextureRead for the stitched output, sized to the camera's final SizeXY.
 	TMap<uint8, uint8> InstanceToSemanticMap;
@@ -1345,75 +1120,8 @@ void UTempoCamera::MaybeCapture()
 }
 
 // ------------------------------------------------------------------------------------
-// Capture Component Management
+// Tile Management
 // ------------------------------------------------------------------------------------
-
-TMap<FName, UTempoCameraCaptureComponent*> UTempoCamera::GetAllCaptureComponents() const
-{
-	TMap<FName, UTempoCameraCaptureComponent*> CaptureComponents;
-	TArray<USceneComponent*> ChildrenComponents;
-	GetChildrenComponents(false, ChildrenComponents);
-	for (USceneComponent* ChildComponent : ChildrenComponents)
-	{
-		for (const FName& Tag : { TLCaptureComponentTag, TRCaptureComponentTag, BLCaptureComponentTag, BRCaptureComponentTag })
-		{
-			if (UTempoCameraCaptureComponent* CameraCaptureComponent = Cast<UTempoCameraCaptureComponent>(ChildComponent); ChildComponent->ComponentHasTag(Tag))
-			{
-				CaptureComponents.Add(Tag, CameraCaptureComponent);
-			}
-		}
-	}
-	return CaptureComponents;
-}
-
-TMap<FName, UTempoCameraCaptureComponent*> UTempoCamera::GetOrCreateCaptureComponents()
-{
-	TMap<FName, UTempoCameraCaptureComponent*> CaptureComponents = GetAllCaptureComponents();
-	for (const FName& Tag : { TLCaptureComponentTag, TRCaptureComponentTag, BLCaptureComponentTag, BRCaptureComponentTag })
-	{
-		if (!CaptureComponents.Contains(Tag))
-		{
-			const FName ComponentName(GetName() + Tag.ToString());
-			UTempoCameraCaptureComponent* CaptureComponent = NewObject<UTempoCameraCaptureComponent>(GetOwner(), UTempoCameraCaptureComponent::StaticClass(), ComponentName);
-			CaptureComponent->CameraOwner = this;
-			CaptureComponent->ComponentTags.AddUnique(Tag);
-			CaptureComponent->OnComponentCreated();
-			CaptureComponent->AttachToComponent(this, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
-			CaptureComponent->RegisterComponent();
-			GetOwner()->AddInstanceComponent(CaptureComponent);
-			CaptureComponents.Add(Tag, CaptureComponent);
-		}
-	}
-
-	return CaptureComponents;
-}
-
-TArray<UTempoCameraCaptureComponent*> UTempoCamera::GetActiveCaptureComponents() const
-{
-	TArray<UTempoCameraCaptureComponent*> ActiveCaptureComponents;
-	TMap<FName, UTempoCameraCaptureComponent*> CaptureComponents = GetAllCaptureComponents();
-	for (const auto& Elem : CaptureComponents)
-	{
-		if (Elem.Value->IsActive())
-		{
-			ActiveCaptureComponents.Add(Elem.Value);
-		}
-	}
-	return ActiveCaptureComponents;
-}
-
-static void SyncCaptureComponent(UTempoCameraCaptureComponent* CaptureComponent, bool bActive, double YawOffset, double PitchOffset, double PerspectiveFOV, const FIntPoint& TileSizeXY, const FIntPoint& TileDestOffset = FIntPoint::ZeroValue)
-{
-	CaptureComponent->Configure(YawOffset, PitchOffset, PerspectiveFOV, TileSizeXY, TileDestOffset);
-	if (bActive && !CaptureComponent->IsActive())
-	{
-		CaptureComponent->Activate();
-	}
-	if (!bActive && CaptureComponent->IsActive())
-	{
-		CaptureComponent->Deactivate();
-	}
-}
 
 void UTempoCamera::ValidateFOV() const
 {
@@ -1430,29 +1138,201 @@ void UTempoCamera::ValidateFOV() const
 	}
 }
 
-void UTempoCamera::SyncCaptureComponents()
+void UTempoCamera::AllocateTileViewState(FTempoCameraTile& Tile)
 {
-	ValidateFOV();
+	if (Tile.ViewState.GetReference() == nullptr)
+	{
+		UWorld* World = GetWorld();
+		if (World && World->Scene)
+		{
+			Tile.ViewState.Allocate(World->Scene->GetFeatureLevel());
+		}
+	}
+}
 
-	const TMap<FName, UTempoCameraCaptureComponent*> CaptureComponents = GetOrCreateCaptureComponents();
+void UTempoCamera::DeactivateTile(FTempoCameraTile& Tile)
+{
+	Tile.bActive = false;
+	Tile.ViewState.Destroy();
+	Tile.PostProcessMaterialInstance = nullptr;
+	Tile.DistortionMap = nullptr;
+	Tile.PostProcessSettings = FPostProcessSettings();
+	Tile.bCameraCut = false;
+}
 
-	UTempoCameraCaptureComponent* const* TLCaptureComponent = CaptureComponents.Find(TLCaptureComponentTag);
-	UTempoCameraCaptureComponent* const* TRCaptureComponent = CaptureComponents.Find(TRCaptureComponentTag);
-	UTempoCameraCaptureComponent* const* BLCaptureComponent = CaptureComponents.Find(BLCaptureComponentTag);
-	UTempoCameraCaptureComponent* const* BRCaptureComponent = CaptureComponents.Find(BRCaptureComponentTag);
-
-	if (!TLCaptureComponent || !TRCaptureComponent || !BLCaptureComponent || !BRCaptureComponent)
+void UTempoCamera::InitTileDistortionMap(FTempoCameraTile& Tile)
+{
+	if (Tile.TileOutputSizeXY.X <= 0 || Tile.TileOutputSizeXY.Y <= 0)
 	{
 		return;
 	}
 
+	TUniquePtr<FDistortionModel> Model = CreateDistortionModel(
+		LensParameters,
+		Tile.RelativeRotation.Yaw,
+		Tile.RelativeRotation.Pitch);
+	const float OutputHFOV = FMath::RadiansToDegrees(Tile.EquidistantTileHFOVRad);
+	const FDistortionRenderConfig Config = Model->ComputeRenderConfig(Tile.TileOutputSizeXY, OutputHFOV);
+
+	Tile.FOVAngle = Config.RenderFOVAngle;
+	Tile.SizeXY = Config.RenderSizeXY;
+
+	UTempoSceneCaptureComponent2D::CreateOrResizeDistortionMapTexture(Tile.DistortionMap, Tile.TileOutputSizeXY);
+	UTempoSceneCaptureComponent2D::FillDistortionMap(Tile.DistortionMap, *Model, Tile.TileOutputSizeXY, Config.FOutput, Config.RenderSizeXY, Config.FRender);
+	UTempoSceneCaptureComponent2D::ApplyDistortionMapToMaterial(Tile.PostProcessMaterialInstance, Tile.DistortionMap);
+}
+
+void UTempoCamera::SetTileDepthEnabled(FTempoCameraTile& Tile, bool bTileDepthEnabled)
+{
+	const UTempoSensorsSettings* TempoSensorsSettings = GetDefault<UTempoSensorsSettings>();
+	check(TempoSensorsSettings);
+
+	if (bTileDepthEnabled)
+	{
+		if (const TObjectPtr<UMaterialInterface> MatWithDepth = TempoSensorsSettings->GetCameraPostProcessMaterialWithDepth())
+		{
+			Tile.PostProcessMaterialInstance = UMaterialInstanceDynamic::Create(MatWithDepth.Get(), this);
+			UTempoSceneCaptureComponent2D::ApplyDistortionMapToMaterial(Tile.PostProcessMaterialInstance, Tile.DistortionMap);
+			Tile.MinDepth = GEngine->NearClipPlane;
+			Tile.MaxDepth = TempoSensorsSettings->GetMaxCameraDepth();
+			Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MinDepth"), Tile.MinDepth);
+			Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MaxDepth"), Tile.MaxDepth);
+			Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MaxDiscreteDepth"), GTempoCamera_Max_Discrete_Depth);
+		}
+		else
+		{
+			UE_LOG(LogTempoCamera, Error, TEXT("PostProcessMaterialWithDepth is not set in TempoSensors settings"));
+			return;
+		}
+	}
+	else
+	{
+		if (const TObjectPtr<UMaterialInterface> MatNoDepth = TempoSensorsSettings->GetCameraPostProcessMaterialNoDepth())
+		{
+			Tile.PostProcessMaterialInstance = UMaterialInstanceDynamic::Create(MatNoDepth.Get(), this);
+			UTempoSceneCaptureComponent2D::ApplyDistortionMapToMaterial(Tile.PostProcessMaterialInstance, Tile.DistortionMap);
+		}
+		else
+		{
+			UE_LOG(LogTempoCamera, Error, TEXT("PostProcessMaterialNoDepth is not set in TempoSensors settings"));
+			return;
+		}
+	}
+
+	// Look up optional label override pair.
+	UDataTable* SemanticLabelTable = TempoSensorsSettings->GetSemanticLabelTable();
+	const FName OverridableLabelRowName = TempoSensorsSettings->GetOverridableLabelRowName();
+	const FName OverridingLabelRowName = TempoSensorsSettings->GetOverridingLabelRowName();
+	TOptional<int32> OverridableLabel;
+	TOptional<int32> OverridingLabel;
+	if (SemanticLabelTable && !OverridableLabelRowName.IsNone())
+	{
+		SemanticLabelTable->ForeachRow<FSemanticLabel>(TEXT(""),
+			[&OverridableLabelRowName, &OverridingLabelRowName, &OverridableLabel, &OverridingLabel]
+			(const FName& Key, const FSemanticLabel& Value)
+			{
+				if (Key == OverridableLabelRowName)
+				{
+					OverridableLabel = Value.Label;
+				}
+				if (Key == OverridingLabelRowName)
+				{
+					OverridingLabel = Value.Label;
+				}
+			});
+	}
+
+	if (OverridableLabel.IsSet() && OverridingLabel.IsSet())
+	{
+		Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("OverridableLabel"), OverridableLabel.GetValue());
+		Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("OverridingLabel"), OverridingLabel.GetValue());
+	}
+	else
+	{
+		Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("OverridingLabel"), 0.0);
+	}
+
+	Tile.PostProcessMaterialInstance->EnsureIsComplete();
+}
+
+void UTempoCamera::ApplyTilePostProcess(FTempoCameraTile& Tile)
+{
+	Tile.PostProcessSettings = PostProcessSettings;
+
+	// Tiles must not do any per-tile exposure adaptation — divergent per-tile ViewStates would
+	// produce mismatched brightness across the stitched image. Tonemap runs once on the proxy.
+	Tile.PostProcessSettings.bOverride_AutoExposureMethod = true;
+	Tile.PostProcessSettings.AutoExposureMethod = AEM_Manual;
+
+	// Rebuild blendables from the owner's user-authored list, filter out ProxyTonemapMID (it reads
+	// SharedTextureTarget, which tiles populate, and applying it inside a tile would feed stale
+	// stitched content back into the tile's scene color), then append the distortion PPM.
+	Tile.PostProcessSettings.WeightedBlendables.Array.RemoveAll([this](const FWeightedBlendable& WB)
+	{
+		return WB.Object != nullptr && WB.Object == ProxyTonemapMID;
+	});
+	if (Tile.PostProcessMaterialInstance)
+	{
+		Tile.PostProcessSettings.WeightedBlendables.Array.Add(FWeightedBlendable(1.0, Tile.PostProcessMaterialInstance));
+	}
+
+	if (bHasValidSharedExposure)
+	{
+		Tile.PostProcessSettings.bOverride_AutoExposureBias = true;
+		Tile.PostProcessSettings.AutoExposureBias = SharedExposureBias;
+	}
+}
+
+void UTempoCamera::ConfigureTile(FTempoCameraTile& Tile, double YawOffset, double PitchOffset, double PerspectiveFOV, const FIntPoint& TileSizeXY, const FIntPoint& TileDestOffset, bool bActivate)
+{
+	if (!bActivate)
+	{
+		if (Tile.bActive)
+		{
+			DeactivateTile(Tile);
+		}
+		return;
+	}
+
+	Tile.RelativeRotation = FRotator(PitchOffset, YawOffset, 0.0);
+	Tile.TileOutputSizeXY = TileSizeXY;
+	Tile.TileDestOffset = TileDestOffset;
+	Tile.EquidistantTileHFOVRad = FMath::DegreesToRadians(PerspectiveFOV);
+	Tile.SizeXY = TileSizeXY;                 // InitTileDistortionMap may adjust
+	Tile.FOVAngle = static_cast<float>(PerspectiveFOV);
+
+	AllocateTileViewState(Tile);
+	SetTileDepthEnabled(Tile, bDepthEnabled);
+	InitTileDistortionMap(Tile);
+	ApplyTilePostProcess(Tile);
+
+	// First frame with fresh view state must force a camera cut so TAA doesn't sample uninitialized
+	// history.
+	Tile.bCameraCut = !Tile.bActive || Tile.bCameraCut;
+	Tile.bActive = true;
+}
+
+void UTempoCamera::SyncTiles()
+{
+	ValidateFOV();
+
+	if (Tiles.Num() != 4)
+	{
+		Tiles.SetNum(4);
+	}
+
+	FTempoCameraTile& TL = Tiles[0];
+	FTempoCameraTile& TR = Tiles[1];
+	FTempoCameraTile& BL = Tiles[2];
+	FTempoCameraTile& BR = Tiles[3];
+
 	if (LensParameters.DistortionModel == ETempoDistortionModel::BrownConrady || LensParameters.DistortionModel == ETempoDistortionModel::Rational)
 	{
 		// Single capture: use TL, deactivate others
-		SyncCaptureComponent(*TLCaptureComponent, true, 0.0, 0.0, FOVAngle, SizeXY);
-		SyncCaptureComponent(*TRCaptureComponent, false, 0.0, 0.0, 0.0, FIntPoint::ZeroValue);
-		SyncCaptureComponent(*BLCaptureComponent, false, 0.0, 0.0, 0.0, FIntPoint::ZeroValue);
-		SyncCaptureComponent(*BRCaptureComponent, false, 0.0, 0.0, 0.0, FIntPoint::ZeroValue);
+		ConfigureTile(TL, 0.0, 0.0, FOVAngle, SizeXY, FIntPoint::ZeroValue, /*bActivate=*/ true);
+		ConfigureTile(TR, 0, 0, 0, FIntPoint::ZeroValue, FIntPoint::ZeroValue, /*bActivate=*/ false);
+		ConfigureTile(BL, 0, 0, 0, FIntPoint::ZeroValue, FIntPoint::ZeroValue, /*bActivate=*/ false);
+		ConfigureTile(BR, 0, 0, 0, FIntPoint::ZeroValue, FIntPoint::ZeroValue, /*bActivate=*/ false);
 	}
 	else // Equidistant
 	{
@@ -1462,41 +1342,37 @@ void UTempoCamera::SyncCaptureComponents()
 
 		if (!bSplitHorizontal && !bSplitVertical)
 		{
-			// 1 capture
-			SyncCaptureComponent(*TLCaptureComponent, true, 0.0, 0.0, FOVAngle, SizeXY);
-			SyncCaptureComponent(*TRCaptureComponent, false, 0.0, 0.0, 0.0, FIntPoint::ZeroValue);
-			SyncCaptureComponent(*BLCaptureComponent, false, 0.0, 0.0, 0.0, FIntPoint::ZeroValue);
-			SyncCaptureComponent(*BRCaptureComponent, false, 0.0, 0.0, 0.0, FIntPoint::ZeroValue);
+			ConfigureTile(TL, 0.0, 0.0, FOVAngle, SizeXY, FIntPoint::ZeroValue, true);
+			ConfigureTile(TR, 0, 0, 0, FIntPoint::ZeroValue, FIntPoint::ZeroValue, false);
+			ConfigureTile(BL, 0, 0, 0, FIntPoint::ZeroValue, FIntPoint::ZeroValue, false);
+			ConfigureTile(BR, 0, 0, 0, FIntPoint::ZeroValue, FIntPoint::ZeroValue, false);
 		}
 		else if (bSplitHorizontal && !bSplitVertical)
 		{
-			// 2 captures: left + right
 			const double SubFOV = FOVAngle / 2.0;
 			const double YawOffset = SubFOV / 2.0;
 			const int32 LeftWidth = FMath::CeilToInt32(SizeXY.X / 2.0);
 			const int32 RightWidth = SizeXY.X - LeftWidth;
 
-			SyncCaptureComponent(*TLCaptureComponent, true, -YawOffset, 0.0, SubFOV, FIntPoint(LeftWidth, SizeXY.Y), FIntPoint(0, 0));
-			SyncCaptureComponent(*TRCaptureComponent, true, YawOffset, 0.0, SubFOV, FIntPoint(RightWidth, SizeXY.Y), FIntPoint(LeftWidth, 0));
-			SyncCaptureComponent(*BLCaptureComponent, false, 0.0, 0.0, 0.0, FIntPoint::ZeroValue);
-			SyncCaptureComponent(*BRCaptureComponent, false, 0.0, 0.0, 0.0, FIntPoint::ZeroValue);
+			ConfigureTile(TL, -YawOffset, 0.0, SubFOV, FIntPoint(LeftWidth, SizeXY.Y), FIntPoint(0, 0), true);
+			ConfigureTile(TR, YawOffset, 0.0, SubFOV, FIntPoint(RightWidth, SizeXY.Y), FIntPoint(LeftWidth, 0), true);
+			ConfigureTile(BL, 0, 0, 0, FIntPoint::ZeroValue, FIntPoint::ZeroValue, false);
+			ConfigureTile(BR, 0, 0, 0, FIntPoint::ZeroValue, FIntPoint::ZeroValue, false);
 		}
 		else if (!bSplitHorizontal && bSplitVertical)
 		{
-			// 2 captures: top + bottom
 			const double SubVertFOV = VerticalFOV / 2.0;
 			const double PitchOffset = SubVertFOV / 2.0;
 			const int32 TopHeight = FMath::CeilToInt32(SizeXY.Y / 2.0);
 			const int32 BottomHeight = SizeXY.Y - TopHeight;
 
-			SyncCaptureComponent(*TLCaptureComponent, true, 0.0, PitchOffset, FOVAngle, FIntPoint(SizeXY.X, TopHeight), FIntPoint(0, 0));
-			SyncCaptureComponent(*TRCaptureComponent, true, 0.0, -PitchOffset, FOVAngle, FIntPoint(SizeXY.X, BottomHeight), FIntPoint(0, TopHeight));
-			SyncCaptureComponent(*BLCaptureComponent, false, 0.0, 0.0, 0.0, FIntPoint::ZeroValue);
-			SyncCaptureComponent(*BRCaptureComponent, false, 0.0, 0.0, 0.0, FIntPoint::ZeroValue);
+			ConfigureTile(TL, 0.0, PitchOffset, FOVAngle, FIntPoint(SizeXY.X, TopHeight), FIntPoint(0, 0), true);
+			ConfigureTile(TR, 0.0, -PitchOffset, FOVAngle, FIntPoint(SizeXY.X, BottomHeight), FIntPoint(0, TopHeight), true);
+			ConfigureTile(BL, 0, 0, 0, FIntPoint::ZeroValue, FIntPoint::ZeroValue, false);
+			ConfigureTile(BR, 0, 0, 0, FIntPoint::ZeroValue, FIntPoint::ZeroValue, false);
 		}
 		else
 		{
-			// 4 captures: 2x2 grid
 			const double SubHFOV = FOVAngle / 2.0;
 			const double SubVFOV = VerticalFOV / 2.0;
 			const double YawOffset = SubHFOV / 2.0;
@@ -1506,10 +1382,10 @@ void UTempoCamera::SyncCaptureComponents()
 			const int32 TopHeight = FMath::CeilToInt32(SizeXY.Y / 2.0);
 			const int32 BottomHeight = SizeXY.Y - TopHeight;
 
-			SyncCaptureComponent(*TLCaptureComponent, true, -YawOffset, PitchOffset, SubHFOV, FIntPoint(LeftWidth, TopHeight), FIntPoint(0, 0));
-			SyncCaptureComponent(*TRCaptureComponent, true, YawOffset, PitchOffset, SubHFOV, FIntPoint(RightWidth, TopHeight), FIntPoint(LeftWidth, 0));
-			SyncCaptureComponent(*BLCaptureComponent, true, -YawOffset, -PitchOffset, SubHFOV, FIntPoint(LeftWidth, BottomHeight), FIntPoint(0, TopHeight));
-			SyncCaptureComponent(*BRCaptureComponent, true, YawOffset, -PitchOffset, SubHFOV, FIntPoint(RightWidth, BottomHeight), FIntPoint(LeftWidth, TopHeight));
+			ConfigureTile(TL, -YawOffset, PitchOffset, SubHFOV, FIntPoint(LeftWidth, TopHeight), FIntPoint(0, 0), true);
+			ConfigureTile(TR, YawOffset, PitchOffset, SubHFOV, FIntPoint(RightWidth, TopHeight), FIntPoint(LeftWidth, 0), true);
+			ConfigureTile(BL, -YawOffset, -PitchOffset, SubHFOV, FIntPoint(LeftWidth, BottomHeight), FIntPoint(0, TopHeight), true);
+			ConfigureTile(BR, YawOffset, -PitchOffset, SubHFOV, FIntPoint(RightWidth, BottomHeight), FIntPoint(LeftWidth, TopHeight), true);
 		}
 	}
 }
@@ -1535,12 +1411,15 @@ void UTempoCamera::ApplyDepthEnabled()
 	MinDepth = GEngine->NearClipPlane;
 	MaxDepth = TempoSensorsSettings->GetMaxCameraDepth();
 
-	// Deactivate and reactivate to reinitialize render targets with the new format.
-	// Activate calls SetDepthEnabled (to set format/materials) then Super::Activate (to init render target).
-	for (UTempoCameraCaptureComponent* CaptureComponent : GetActiveCaptureComponents())
+	// Swap the PPM material (with/without depth) on active tiles and re-apply post-process.
+	for (FTempoCameraTile& Tile : Tiles)
 	{
-		CaptureComponent->Deactivate();
-		CaptureComponent->Activate();
+		if (Tile.bActive)
+		{
+			SetTileDepthEnabled(Tile, bDepthEnabled);
+			UTempoSceneCaptureComponent2D::ApplyDistortionMapToMaterial(Tile.PostProcessMaterialInstance, Tile.DistortionMap);
+			ApplyTilePostProcess(Tile);
+		}
 	}
 
 	// Only SharedFinalTextureTarget and its staging textures are depth-dependent. Rebuilding
