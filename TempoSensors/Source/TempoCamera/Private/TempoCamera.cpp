@@ -8,6 +8,7 @@
 #include "TempoCoreUtils.h"
 #include "TempoLabelTypes.h"
 #include "TempoSensorsConstants.h"
+#include "TempoMultiViewCapture.h"
 #include "TempoSensorsSettings.h"
 
 #include "CanvasItem.h"
@@ -19,6 +20,7 @@
 #include "Kismet/KismetRenderingLibrary.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Math/Box2D.h"
+#include "Math/PerspectiveMatrix.h"
 #include "TextureResource.h"
 
 namespace
@@ -481,51 +483,13 @@ void UTempoCameraCaptureComponent::Configure(double YawOffset, double PitchOffse
 	ApplyRenderSettings();
 }
 
-UMaterialInstanceDynamic* UTempoCameraCaptureComponent::GetOrCreateStitchMID()
+void UTempoCameraCaptureComponent::InitRenderTarget()
 {
-	if (!TextureTarget)
-	{
-		return nullptr;
-	}
-
-	if (!StitchMID)
-	{
-		const UTempoSensorsSettings* Settings = GetDefault<UTempoSensorsSettings>();
-		UMaterialInterface* StitchMat = Settings ? Settings->GetCameraStitchPassthroughMaterial().Get() : nullptr;
-		if (!StitchMat)
-		{
-			UE_LOG(LogTempoCamera, Error, TEXT("CameraStitchPassthroughMaterial is not set in TempoSensors settings."));
-			return nullptr;
-		}
-		StitchMID = UMaterialInstanceDynamic::Create(StitchMat, this);
-	}
-
-	// Rebind every call — cheap, and correctly tracks TextureTarget swaps on reactivate.
-	StitchMID->SetTextureParameterValue(TEXT("TileRT"), TextureTarget);
-	return StitchMID;
-}
-
-UMaterialInstanceDynamic* UTempoCameraCaptureComponent::GetOrCreateStitchAuxMID()
-{
-	if (!TextureTarget)
-	{
-		return nullptr;
-	}
-
-	if (!StitchAuxMID)
-	{
-		const UTempoSensorsSettings* Settings = GetDefault<UTempoSensorsSettings>();
-		UMaterialInterface* StitchMat = Settings ? Settings->GetCameraStitchAuxMaterial().Get() : nullptr;
-		if (!StitchMat)
-		{
-			UE_LOG(LogTempoCamera, Error, TEXT("CameraStitchAuxMaterial is not set in TempoSensors settings."));
-			return nullptr;
-		}
-		StitchAuxMID = UMaterialInstanceDynamic::Create(StitchMat, this);
-	}
-
-	StitchAuxMID->SetTextureParameterValue(TEXT("TileRT"), TextureTarget);
-	return StitchAuxMID;
+	// Tiles render into the owning UTempoCamera's SharedTextureTarget via the multi-view family,
+	// not a per-tile TextureTarget. Skip Super::InitRenderTarget (which would allocate a tile RT
+	// + staging textures) and only rebuild the distortion map, which the per-view post-process
+	// material samples during the atlas render.
+	InitDistortionMap();
 }
 
 void UTempoCameraCaptureComponent::InitDistortionMap()
@@ -943,6 +907,32 @@ UMaterialInstanceDynamic* UTempoCamera::GetOrCreateStitchMergeMID()
 	return MergeMID;
 }
 
+UMaterialInstanceDynamic* UTempoCamera::GetOrCreateAuxAtlasMID()
+{
+	if (!SharedTextureTarget)
+	{
+		return nullptr;
+	}
+
+	if (!AuxAtlasMID)
+	{
+		const UTempoSensorsSettings* Settings = GetDefault<UTempoSensorsSettings>();
+		UMaterialInterface* AuxMat = Settings ? Settings->GetCameraStitchAuxMaterial().Get() : nullptr;
+		if (!AuxMat)
+		{
+			UE_LOG(LogTempoCamera, Error, TEXT("CameraStitchAuxMaterial is not set in TempoSensors settings."));
+			return nullptr;
+		}
+		AuxAtlasMID = UMaterialInstanceDynamic::Create(AuxMat, this);
+	}
+
+	// The existing aux material reads "TileRT.a" at its UV. By binding TileRT to the whole atlas
+	// and drawing a Canvas tile that covers (0,0)..(SizeXY) with UV (0,0)..(1,1), the material
+	// unpacks the packed alpha across the entire atlas in a single pass.
+	AuxAtlasMID->SetTextureParameterValue(TEXT("TileRT"), SharedTextureTarget);
+	return AuxAtlasMID;
+}
+
 UMaterialInstanceDynamic* UTempoCamera::GetOrCreateProxyTonemapMID()
 {
 	if (!SharedTextureTarget)
@@ -1004,14 +994,17 @@ void UTempoCamera::InitRenderTarget()
 	// not allocate staging textures or a distortion map, leaving both for us to manage.
 	Super::InitRenderTarget();
 
-	// SharedTextureTarget carries HDR linear color produced by the HDR-capturing tiles (fp32)
-	// through the passthrough stitch. fp16 is plenty of precision for linear color and halves
-	// the bandwidth vs fp32. The proxy scene capture's PPM samples this as HDRColorRT, and
-	// Bloom/AE/Tonemapper produce the LDR result in the inherited TextureTarget.
+	// SharedTextureTarget is the atlas: one tile-per-view family renders directly into it, and
+	// it also feeds the proxy tonemap PPM (HDRColorRT). Format is fp32 — not for color dynamic
+	// range, but because each tile's post-process material bit-packs (label, depth) into the
+	// alpha channel, and fp16 alpha does not have the mantissa bits to preserve that. Point
+	// sampling is mandatory for the aux unpack pass — bilinear would smear adjacent pixels'
+	// bit patterns and break asuint() decoding.
 	SharedTextureTarget = NewObject<UTextureRenderTarget2D>(this);
 	SharedTextureTarget->TargetGamma = 1.0f;
 	SharedTextureTarget->bGPUSharedFlag = true;
-	SharedTextureTarget->RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA16f;
+	SharedTextureTarget->RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA32f;
+	SharedTextureTarget->Filter = TextureFilter::TF_Nearest;
 	SharedTextureTarget->InitAutoFormat(SizeXY.X, SizeXY.Y);
 
 	// Aux RT carries packed label+depth bytes produced by the aux stitch pass. RGBA8 regardless
@@ -1151,16 +1144,6 @@ void UTempoCamera::MaybeCapture()
 		return;
 	}
 
-	// Require that each active tile has a valid render target. Tile format (fp32) intentionally
-	// differs from SharedTextureTarget (fp16) — the Canvas stitch samples fp32 and writes fp16.
-	for (const UTempoCameraCaptureComponent* Tile : ActiveCaptureComponents)
-	{
-		if (!Tile->TextureTarget || !Tile->TextureTarget->GameThread_GetRenderTargetResource())
-		{
-			return;
-		}
-	}
-
 	if (!SharedFinalTextureTarget)
 	{
 		return;
@@ -1172,12 +1155,20 @@ void UTempoCamera::MaybeCapture()
 		return;
 	}
 
-	// Queue all tiles deferred, then drain them through one ISceneRenderBuilder via a single
-	// UpdateDeferredCaptures call. Each tile still gets its own FSceneRenderer (so shadow / GPU-scene
-	// setup is still per-renderer), but all of them share one builder Execute(), giving one RDG graph
-	// with fewer barriers instead of N back-to-back dispatches. FIFO ordering vs the Canvas stitch
-	// below is preserved: UpdateDeferredCaptures synchronously enqueues the builder's render
-	// commands before we return and enqueue the Canvas commands.
+	UWorld* World = GetWorld();
+	FSceneInterface* Scene = World ? World->Scene : nullptr;
+	if (!Scene)
+	{
+		return;
+	}
+
+	// Build one FSceneViewFamily containing all tile views and render it into SharedTextureTarget
+	// (the atlas) via TempoMultiViewCapture::RenderTiles. Each tile contributes its own view state
+	// (TAA/AE history), post-process (distortion map PPM, AE bias), and hide/show lists; they share
+	// the family's shadow setup, scene uniform buffer, Lumen/RT wire-up, and GPU scene update. The
+	// Canvas-based color stitch is removed — the atlas IS the stitched output.
+	TArray<TempoMultiViewCapture::FViewSetup> ViewSetups;
+	ViewSetups.Reserve(ActiveCaptureComponents.Num());
 	for (UTempoCameraCaptureComponent* Tile : ActiveCaptureComponents)
 	{
 		if (bHasValidSharedExposure)
@@ -1185,15 +1176,49 @@ void UTempoCamera::MaybeCapture()
 			Tile->PostProcessSettings.bOverride_AutoExposureBias = true;
 			Tile->PostProcessSettings.AutoExposureBias = SharedExposureBias;
 		}
-		Tile->CaptureSceneDeferred();
-	}
-	if (UWorld* World = GetWorld())
-	{
-		if (FSceneInterface* Scene = World->Scene)
+
+		// Per-tile view rotation — mirrors FScene::UpdateSceneCaptureContents for a component with
+		// only rotation (no custom projection, no ortho) at SceneCaptureRendering.cpp:1128-1141.
+		FTransform TileTransform = Tile->GetComponentToWorld();
+		const FVector TileLocation = TileTransform.GetTranslation();
+		TileTransform.SetTranslation(FVector::ZeroVector);
+		TileTransform.SetScale3D(FVector::OneVector);
+		FMatrix ViewRotationMatrix = TileTransform.ToInverseMatrixWithScale();
+		ViewRotationMatrix = ViewRotationMatrix * FMatrix(
+			FPlane(0, 0, 1, 0),
+			FPlane(1, 0, 0, 0),
+			FPlane(0, 1, 0, 0),
+			FPlane(0, 0, 0, 1));
+
+		// Perspective projection — mirrors BuildProjectionMatrix at SceneCaptureRendering.cpp:566.
+		const float UnscaledFOV = Tile->FOVAngle * (float)PI / 360.0f;
+		const float ViewFOV = FMath::Atan((1.0f + Tile->Overscan) * FMath::Tan(UnscaledFOV));
+		const float NearClip = Tile->bOverride_CustomNearClippingPlane
+			? Tile->CustomNearClippingPlane
+			: GNearClippingPlane;
+		const FIntPoint TileSize = Tile->TileOutputSizeXY;
+		const float YAxisMultiplier = static_cast<float>(TileSize.X) / static_cast<float>(TileSize.Y);
+
+		FMatrix ProjectionMatrix;
+		if ((int32)ERHIZBuffer::IsInverted)
 		{
-			USceneCaptureComponent::UpdateDeferredCaptures(Scene);
+			ProjectionMatrix = FReversedZPerspectiveMatrix(ViewFOV, ViewFOV, 1.0f, YAxisMultiplier, NearClip, NearClip);
 		}
+		else
+		{
+			ProjectionMatrix = FPerspectiveMatrix(ViewFOV, ViewFOV, 1.0f, YAxisMultiplier, NearClip, NearClip);
+		}
+
+		TempoMultiViewCapture::FViewSetup& Setup = ViewSetups.AddDefaulted_GetRef();
+		Setup.Component = Tile;
+		Setup.ViewLocation = TileLocation;
+		Setup.ViewRotationMatrix = ViewRotationMatrix;
+		Setup.ProjectionMatrix = ProjectionMatrix;
+		Setup.ViewRect = FIntRect(Tile->TileDestOffset, Tile->TileDestOffset + TileSize);
+		Setup.FOV = Tile->FOVAngle;
 	}
+
+	TempoMultiViewCapture::RenderTiles(Scene, this, SharedTextureTarget, ViewSetups);
 
 	// Build the FTextureRead for the stitched output, sized to the camera's final SizeXY.
 	TMap<uint8, uint8> InstanceToSemanticMap;
@@ -1216,86 +1241,29 @@ void UTempoCamera::MaybeCapture()
 
 	const FTextureRHIRef StagingTex = NewRead->StagingTexture;
 
-	// Canvas-based stitch: for each tile, draw its TextureTarget sub-rect into SharedTextureTarget
-	// at TileDestOffset using the passthrough material. Enqueues render commands in FIFO order after
-	// the tile CaptureScene calls above.
-	{
-		UCanvas* Canvas = nullptr;
-		FVector2D CanvasSize(0.0, 0.0);
-		FDrawToRenderTargetContext Ctx;
-		UKismetRenderingLibrary::BeginDrawCanvasToRenderTarget(this, SharedTextureTarget, Canvas, CanvasSize, Ctx);
-
-		for (UTempoCameraCaptureComponent* Tile : ActiveCaptureComponents)
-		{
-			UMaterialInstanceDynamic* MID = Tile->GetOrCreateStitchMID();
-			if (!MID)
-			{
-				continue;
-			}
-
-			const int32 TileRTSizeX = Tile->TextureTarget->SizeX;
-			const int32 TileRTSizeY = Tile->TextureTarget->SizeY;
-			if (TileRTSizeX <= 0 || TileRTSizeY <= 0)
-			{
-				continue;
-			}
-
-			const FVector2D UV0(0.0, static_cast<double>(Tile->TileOutputOffsetY) / TileRTSizeY);
-			const FVector2D UV1(static_cast<double>(Tile->TileOutputSizeXY.X) / TileRTSizeX,
-				static_cast<double>(Tile->TileOutputOffsetY + Tile->TileOutputSizeXY.Y) / TileRTSizeY);
-
-			FCanvasTileItem Item(
-				FVector2D(Tile->TileDestOffset),
-				MID->GetRenderProxy(),
-				FVector2D(Tile->TileOutputSizeXY),
-				UV0,
-				UV1);
-			Item.BlendMode = SE_BLEND_Opaque;
-			Canvas->DrawItem(Item);
-		}
-
-		UKismetRenderingLibrary::EndDrawCanvasToRenderTarget(this, Ctx);
-	}
-
-	// Aux stitch pass: samples each tile's fp32 A channel and unpacks (label, depth) bits into
-	// RGBA8 bytes in SharedAuxTextureTarget for the merge pass to combine with tonemapped color.
+	// Single full-screen aux unpack pass: samples SharedTextureTarget.a across the whole atlas and
+	// writes label+depth bytes into SharedAuxTextureTarget. Replaces the legacy N per-tile draws
+	// — the shader logic is unchanged, only the source texture (atlas) and draw extent differ.
 	if (SharedAuxTextureTarget)
 	{
-		UCanvas* Canvas = nullptr;
-		FVector2D CanvasSize(0.0, 0.0);
-		FDrawToRenderTargetContext Ctx;
-		UKismetRenderingLibrary::BeginDrawCanvasToRenderTarget(this, SharedAuxTextureTarget, Canvas, CanvasSize, Ctx);
-
-		for (UTempoCameraCaptureComponent* Tile : ActiveCaptureComponents)
+		if (UMaterialInstanceDynamic* AuxMID = GetOrCreateAuxAtlasMID())
 		{
-			UMaterialInstanceDynamic* MID = Tile->GetOrCreateStitchAuxMID();
-			if (!MID)
-			{
-				continue;
-			}
-
-			const int32 TileRTSizeX = Tile->TextureTarget->SizeX;
-			const int32 TileRTSizeY = Tile->TextureTarget->SizeY;
-			if (TileRTSizeX <= 0 || TileRTSizeY <= 0)
-			{
-				continue;
-			}
-
-			const FVector2D UV0(0.0, static_cast<double>(Tile->TileOutputOffsetY) / TileRTSizeY);
-			const FVector2D UV1(static_cast<double>(Tile->TileOutputSizeXY.X) / TileRTSizeX,
-				static_cast<double>(Tile->TileOutputOffsetY + Tile->TileOutputSizeXY.Y) / TileRTSizeY);
+			UCanvas* Canvas = nullptr;
+			FVector2D CanvasSize(0.0, 0.0);
+			FDrawToRenderTargetContext Ctx;
+			UKismetRenderingLibrary::BeginDrawCanvasToRenderTarget(this, SharedAuxTextureTarget, Canvas, CanvasSize, Ctx);
 
 			FCanvasTileItem Item(
-				FVector2D(Tile->TileDestOffset),
-				MID->GetRenderProxy(),
-				FVector2D(Tile->TileOutputSizeXY),
-				UV0,
-				UV1);
+				FVector2D::ZeroVector,
+				AuxMID->GetRenderProxy(),
+				FVector2D(SizeXY.X, SizeXY.Y),
+				FVector2D(0.0, 0.0),
+				FVector2D(1.0, 1.0));
 			Item.BlendMode = SE_BLEND_Opaque;
 			Canvas->DrawItem(Item);
-		}
 
-		UKismetRenderingLibrary::EndDrawCanvasToRenderTarget(this, Ctx);
+			UKismetRenderingLibrary::EndDrawCanvasToRenderTarget(this, Ctx);
+		}
 	}
 
 	// Proxy scene capture: the PPM (appended to PostProcessSettings.WeightedBlendables by

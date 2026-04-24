@@ -187,27 +187,16 @@ protected:
 
 	virtual int32 GetMaxTextureQueueSize() const override;
 
+	// Tile components do not allocate their own TextureTarget or staging textures — they render
+	// into the owning UTempoCamera's SharedTextureTarget (atlas) via the multi-view family.
+	// Override only ensures the distortion map is created (the per-view post-process material
+	// samples it during the atlas render).
+	virtual void InitRenderTarget() override;
+
 	virtual void InitDistortionMap() override;
 
 	UPROPERTY(VisibleAnywhere)
 	UMaterialInstanceDynamic* PostProcessMaterialInstance = nullptr;
-
-	// Dynamic instance of the stitch passthrough material, with its "TileRT" parameter bound to
-	// this tile's TextureTarget. Created lazily; owned by this component.
-	UPROPERTY(Transient)
-	UMaterialInstanceDynamic* StitchMID = nullptr;
-
-	// Dynamic instance of the stitch aux material, with its "TileRT" parameter bound to this tile's
-	// TextureTarget. Created lazily; owned by this component.
-	UPROPERTY(Transient)
-	UMaterialInstanceDynamic* StitchAuxMID = nullptr;
-
-	// Create StitchMID if needed and (re)bind its TileRT parameter to the current TextureTarget.
-	// Safe to call before TextureTarget exists — in that case, returns nullptr and does nothing.
-	UMaterialInstanceDynamic* GetOrCreateStitchMID();
-
-	// Same as GetOrCreateStitchMID but for the aux material.
-	UMaterialInstanceDynamic* GetOrCreateStitchAuxMID();
 
 	UPROPERTY(VisibleAnywhere)
 	const UTempoCamera* CameraOwner = nullptr;
@@ -386,6 +375,18 @@ protected:
 	// Create MergeMID if needed and (re)bind its ColorRT/AuxRT parameters. Returns nullptr if
 	// the merge material is not configured or either source RT is missing.
 	UMaterialInstanceDynamic* GetOrCreateStitchMergeMID();
+
+	// Dynamic instance of the aux unpack material with its "TileRT" parameter bound to
+	// SharedTextureTarget — one full-screen Canvas draw samples SharedTextureTarget.a over the
+	// whole atlas and unpacks label+depth bits into SharedAuxTextureTarget. Shares the same
+	// material as the legacy per-tile aux pass; only the source texture (full atlas vs per-tile
+	// RT) and Canvas extent (whole atlas vs tile rect) differ.
+	UPROPERTY(Transient)
+	UMaterialInstanceDynamic* AuxAtlasMID = nullptr;
+
+	// Create AuxAtlasMID if needed and (re)bind its TileRT parameter to SharedTextureTarget.
+	// Returns nullptr if the aux material is not configured or SharedTextureTarget is missing.
+	UMaterialInstanceDynamic* GetOrCreateAuxAtlasMID();
 
 	// Dynamic instance of the proxy tonemap post-process material, with its "HDRColorRT"
 	// parameter bound to SharedTextureTarget. Created lazily and appended to this component's
