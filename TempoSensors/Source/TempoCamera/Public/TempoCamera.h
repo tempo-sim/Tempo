@@ -9,6 +9,7 @@
 
 #include "CoreMinimal.h"
 #include "Engine/Scene.h"
+#include "SceneTypes.h"
 #include "ShowFlags.h"
 
 #include "TempoCamera.generated.h"
@@ -136,70 +137,36 @@ struct TEMPOCAMERA_API FTempoCameraIntrinsics
 
 class UTempoCamera;
 
-UCLASS(ClassGroup=(Custom), NotPlaceable, NotBlueprintable)
-class TEMPOCAMERA_API UTempoCameraCaptureComponent : public UTempoSceneCaptureComponent2D
+// Per-tile state for the multi-view atlas render. A tile is just a set of view parameters + its own
+// view state + distortion assets; no USceneCaptureComponent and no child scene component. The atlas
+// render is driven entirely from UTempoCamera::MaybeCapture via TempoMultiViewCapture::RenderTiles.
+USTRUCT()
+struct FTempoCameraTile
 {
 	GENERATED_BODY()
 
-public:
-	UTempoCameraCaptureComponent();
+	// Rotation relative to the parent camera (UE convention: positive yaw=right, positive pitch=up).
+	UPROPERTY(VisibleAnywhere)
+	FRotator RelativeRotation = FRotator::ZeroRotator;
 
-	// Configure this capture component for a tile of the camera's output.
-	// YawOffset/PitchOffset: orientation relative to parent camera (UE convention: positive yaw=right, positive pitch=up).
-	// EquidistantTileFOV: the horizontal FOV this tile covers in the equidistant output (degrees).
-	// TileSizeXY: the output tile dimensions in the final stitched image.
-	void Configure(double YawOffset, double PitchOffset, double EquidistantTileFOV, const FIntPoint& TileSizeXY, const FIntPoint& TileDestOffset);
-
-	void SetDepthEnabled(bool bDepthEnabled);
-
-	// Apply PostProcessSettings and ShowFlagSettings from the owning UTempoCamera onto this component.
-	void ApplyRenderSettings();
-
-	// The output tile dimensions.
+	// The output tile dimensions in the final stitched image.
 	UPROPERTY(VisibleAnywhere)
 	FIntPoint TileOutputSizeXY = FIntPoint::ZeroValue;
 
-	// The vertical offset in pixels from the top of the render target to the start of the tile output.
+	// The destination offset of this tile within the atlas.
 	UPROPERTY(VisibleAnywhere)
-	int32 TileOutputOffsetY = 0;
+	FIntPoint TileDestOffset = FIntPoint::ZeroValue;
 
 	// The equidistant tile's horizontal FOV in radians (only used for equidistant distortion model).
 	double EquidistantTileHFOVRad = 0.0;
 
-	// The destination offset of this tile within the final stitched output image.
+	// The tile's perspective render size (set by InitTileDistortionMap; may differ from TileOutputSizeXY).
 	UPROPERTY(VisibleAnywhere)
-	FIntPoint TileDestOffset = FIntPoint::ZeroValue;
+	FIntPoint SizeXY = FIntPoint::ZeroValue;
 
-	virtual void Activate(bool bReset = false) override;
-
-protected:
-	virtual bool HasPendingRequests() const override;
-
-	// Tiles never allocate their own staging textures or FTextureReads — the owning UTempoCamera
-	// stitches tile render targets into a shared RT and issues a single readback for the sensor.
-	virtual bool ShouldManageOwnReadback() const override { return false; }
-
-	// Tiles never start their own capture timer — the owning UTempoCamera drives CaptureScene()
-	// on each active tile from its own timer callback.
-	virtual bool ShouldManageOwnTimer() const override { return false; }
-
-	virtual FTextureRead* MakeTextureRead() const override;
-
-	virtual int32 GetMaxTextureQueueSize() const override;
-
-	// Tile components do not allocate their own TextureTarget or staging textures — they render
-	// into the owning UTempoCamera's SharedTextureTarget (atlas) via the multi-view family.
-	// Override only ensures the distortion map is created (the per-view post-process material
-	// samples it during the atlas render).
-	virtual void InitRenderTarget() override;
-
-	virtual void InitDistortionMap() override;
-
+	// The tile's perspective render horizontal FOV in degrees (set by InitTileDistortionMap).
 	UPROPERTY(VisibleAnywhere)
-	UMaterialInstanceDynamic* PostProcessMaterialInstance = nullptr;
-
-	UPROPERTY(VisibleAnywhere)
-	const UTempoCamera* CameraOwner = nullptr;
+	float FOVAngle = 90.0f;
 
 	UPROPERTY(VisibleAnywhere, Category="Depth")
 	float MinDepth = 10.0;
@@ -207,7 +174,28 @@ protected:
 	UPROPERTY(VisibleAnywhere, Category="Depth")
 	float MaxDepth = 100000.0;
 
-	friend UTempoCamera;
+	// Whether this tile is participating in the current multi-view family.
+	UPROPERTY(VisibleAnywhere)
+	bool bActive = false;
+
+	// Distortion/label PPM active on this tile's view. Its DistortionMap parameter is bound to
+	// DistortionMap below.
+	UPROPERTY(VisibleAnywhere)
+	UMaterialInstanceDynamic* PostProcessMaterialInstance = nullptr;
+
+	// Per-tile distortion map (PF_G16R16F of output→render UV samples).
+	UPROPERTY(VisibleAnywhere)
+	UTexture2D* DistortionMap = nullptr;
+
+	// Per-tile post-process settings — carries the distortion PPM blendable + AE bias override.
+	UPROPERTY()
+	FPostProcessSettings PostProcessSettings;
+
+	// Per-tile scene view state (TAA/AE history). Not a UPROPERTY — manages its own lifetime.
+	FSceneViewStateReference ViewState;
+
+	// One-shot camera-cut flag consumed by the next multi-view render.
+	bool bCameraCut = false;
 };
 
 UCLASS(Blueprintable, BlueprintType, ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
@@ -281,23 +269,23 @@ protected:
 	// Returns the next staging texture from the ring buffer and advances the index.
 	FTextureRHIRef AcquireNextStagingTexture();
 
-	TMap<FName, UTempoCameraCaptureComponent*> GetAllCaptureComponents() const;
-	TMap<FName, UTempoCameraCaptureComponent*> GetOrCreateCaptureComponents();
-	TArray<UTempoCameraCaptureComponent*> GetActiveCaptureComponents() const;
-	void SyncCaptureComponents();
+	// Per-tile configuration / state management. Tiles live in Tiles[] as plain USTRUCTs.
+	void SyncTiles();
+	void ConfigureTile(FTempoCameraTile& Tile, double YawOffset, double PitchOffset, double PerspectiveFOV, const FIntPoint& TileSizeXY, const FIntPoint& TileDestOffset, bool bActivate);
+	void ApplyTilePostProcess(FTempoCameraTile& Tile);
+	void SetTileDepthEnabled(FTempoCameraTile& Tile, bool bTileDepthEnabled);
+	void InitTileDistortionMap(FTempoCameraTile& Tile);
+	void AllocateTileViewState(FTempoCameraTile& Tile);
+	void DeactivateTile(FTempoCameraTile& Tile);
 
 	// Returns true iff any watched property differs from its _Internal mirror.
 	bool HasDetectedParameterChange() const;
 
-	// Returns true iff any active capture component has a texture read still in flight.
-	bool AnyCaptureReadsInFlight() const;
-
 	// Apply any pending reconfigure iff it is safe to do so (no in-flight reads). No-op otherwise.
 	void TryApplyPendingReconfigure();
 
-	// Deactivate all active tiles (draining their texture read queues) then re-sync.
-	// Caller must have confirmed no reads are in flight.
-	void ReconfigureCaptureComponentsNow();
+	// Deactivate all active tiles, then re-sync. Callers should ensure no reads are in flight.
+	void ReconfigureTilesNow();
 
 	// Snapshot the watched properties into their _Internal mirrors.
 	void UpdateInternalMirrors();
@@ -342,8 +330,13 @@ protected:
 	TArray<FDepthImageRequest> PendingDepthImageRequests;
 	TArray<FBoundingBoxesRequest> PendingBoundingBoxesRequests;
 
+	// Tile slots (fixed size: TL, TR, BL, BR). Stable storage — indices are never invalidated
+	// and held addresses remain valid across reconfigures. Transient: runtime-only state.
+	UPROPERTY(Transient)
+	TArray<FTempoCameraTile> Tiles;
+
 	// Internal tracking for runtime change detection. Mirrors the watched properties after
-	// they have been pushed to the capture components via ReconfigureCaptureComponentsNow.
+	// they have been pushed to tiles via ReconfigureTilesNow.
 	FTempoLensDistortionParameters LensParameters_Internal;
 	float FOVAngle_Internal = -1.0f;
 	FIntPoint SizeXY_Internal = FIntPoint(-1, -1);
@@ -417,6 +410,4 @@ protected:
 	FRenderCommandFence TextureInitFence;
 
 	FTimerHandle TimerHandle;
-
-	friend class UTempoCameraCaptureComponent;
 };

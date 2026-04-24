@@ -337,22 +337,18 @@ protected:
 	// Override this to initialize the distortion map texture with a projection-specific mapping.
 	virtual void InitDistortionMap() {}
 
-	// Create or resize the distortion map texture to the given size.
-	void CreateOrResizeDistortionMapTexture(const FIntPoint& TextureSizeXY);
+	// Create or resize the distortion map texture to the given size. Allocates into OutTexture.
+	static void CreateOrResizeDistortionMapTexture(UTexture2D*& OutTexture, const FIntPoint& TextureSizeXY);
 
 	// Apply the distortion map texture to the given material instance.
-	void ApplyDistortionMapToMaterial(UMaterialInstanceDynamic* MaterialInstance) const;
+	static void ApplyDistortionMapToMaterial(UMaterialInstanceDynamic* MaterialInstance, UTexture2D* DistortionMap);
 
 	// Fill the distortion map texture using the given distortion model.
 	// OutputSizeXY / FxOutput / FyOutput describe the output (distorted) image (loop bounds + normalization).
 	// RenderSizeXY / FxRender / FyRender describe the render (perspective) image (UV normalization).
-	void FillDistortionMap(const FDistortionModel& Model,
+	static void FillDistortionMap(UTexture2D* DistortionMap, const FDistortionModel& Model,
 		const FIntPoint& OutputSizeXY, double FOutput,
-		const FIntPoint& RenderSizeXY, double FRender) const;
-
-	// The distortion map texture. Each pixel stores (U, V) source coordinates in PF_G16R16F format.
-	UPROPERTY(Transient, VisibleAnywhere)
-	UTexture2D* DistortionMapTexture = nullptr;
+		const FIntPoint& RenderSizeXY, double FRender);
 
 	// Gets the number of pending texture reads
 	int32 NumPendingTextureReads() const { return TextureReadQueue.Num(); }
