@@ -636,9 +636,12 @@ UMaterialInstanceDynamic* UTempoCamera::GetOrCreateStitchMergeMID()
 		return nullptr;
 	}
 
-	// Rebuild MergeMID if the source material changed (e.g., bDepthEnabled toggled).
+	// Rebuild MergeMID if the source material changed (e.g., bDepthEnabled toggled). Retire the
+	// old MID first — render commands from the previous frame's merge Canvas draw may still
+	// reference it, and letting GC collect it would crash the render thread.
 	if (!MergeMID || MergeMID->Parent != MergeMat)
 	{
+		RetirePPM(MergeMID);
 		MergeMID = UMaterialInstanceDynamic::Create(MergeMat, this);
 	}
 
@@ -691,14 +694,15 @@ UMaterialInstanceDynamic* UTempoCamera::GetOrCreateProxyTonemapMID()
 
 	if (!ProxyTonemapMID || ProxyTonemapMID->Parent != ProxyMat)
 	{
-		// Remove any stale entry from WeightedBlendables before rebuilding so we don't leak
-		// references to destroyed MIDs or stack multiple copies across reconfigurations.
+		// Remove any stale entry from WeightedBlendables and retire the old MID — render commands
+		// from the previous frame's proxy CaptureScene may still reference it.
 		if (ProxyTonemapMID)
 		{
 			PostProcessSettings.WeightedBlendables.Array.RemoveAll([this](const FWeightedBlendable& WB)
 			{
 				return WB.Object == ProxyTonemapMID;
 			});
+			RetirePPM(ProxyTonemapMID);
 		}
 		ProxyTonemapMID = UMaterialInstanceDynamic::Create(ProxyMat, this);
 		PostProcessSettings.WeightedBlendables.Array.Add(FWeightedBlendable(1.0, ProxyTonemapMID));
@@ -1150,10 +1154,31 @@ void UTempoCamera::AllocateTileViewState(FTempoCameraTile& Tile)
 	}
 }
 
+void UTempoCamera::RetirePPM(UMaterialInstanceDynamic* PPM)
+{
+	if (PPM)
+	{
+		RetainedPPMs.AddUnique(PPM);
+	}
+}
+
+void UTempoCamera::RetireDistortionMap(UTexture2D* DistortionMap)
+{
+	if (DistortionMap)
+	{
+		RetainedDistortionMaps.AddUnique(DistortionMap);
+	}
+}
+
 void UTempoCamera::DeactivateTile(FTempoCameraTile& Tile)
 {
 	Tile.bActive = false;
 	Tile.ViewState.Destroy();
+	// Retire the PPM + distortion map instead of nulling: render commands from prior captures
+	// may still reference them, and dropping the only UPROPERTY reference lets GC flag them
+	// as "about to be deleted" mid-render (FMaterialRenderProxy::CacheUniformExpressions asserts).
+	RetirePPM(Tile.PostProcessMaterialInstance);
+	RetireDistortionMap(Tile.DistortionMap);
 	Tile.PostProcessMaterialInstance = nullptr;
 	Tile.DistortionMap = nullptr;
 	Tile.PostProcessSettings = FPostProcessSettings();
@@ -1177,6 +1202,10 @@ void UTempoCamera::InitTileDistortionMap(FTempoCameraTile& Tile)
 	Tile.FOVAngle = Config.RenderFOVAngle;
 	Tile.SizeXY = Config.RenderSizeXY;
 
+	// CreateOrResizeDistortionMapTexture overwrites Tile.DistortionMap — retire the previous one
+	// first so in-flight render commands don't see it marked-for-GC.
+	RetireDistortionMap(Tile.DistortionMap);
+	Tile.DistortionMap = nullptr;
 	UTempoSceneCaptureComponent2D::CreateOrResizeDistortionMapTexture(Tile.DistortionMap, Tile.TileOutputSizeXY);
 	UTempoSceneCaptureComponent2D::FillDistortionMap(Tile.DistortionMap, *Model, Tile.TileOutputSizeXY, Config.FOutput, Config.RenderSizeXY, Config.FRender);
 	UTempoSceneCaptureComponent2D::ApplyDistortionMapToMaterial(Tile.PostProcessMaterialInstance, Tile.DistortionMap);
@@ -1187,19 +1216,11 @@ void UTempoCamera::SetTileDepthEnabled(FTempoCameraTile& Tile, bool bTileDepthEn
 	const UTempoSensorsSettings* TempoSensorsSettings = GetDefault<UTempoSensorsSettings>();
 	check(TempoSensorsSettings);
 
+	UMaterialInterface* TargetMat = nullptr;
 	if (bTileDepthEnabled)
 	{
-		if (const TObjectPtr<UMaterialInterface> MatWithDepth = TempoSensorsSettings->GetCameraPostProcessMaterialWithDepth())
-		{
-			Tile.PostProcessMaterialInstance = UMaterialInstanceDynamic::Create(MatWithDepth.Get(), this);
-			UTempoSceneCaptureComponent2D::ApplyDistortionMapToMaterial(Tile.PostProcessMaterialInstance, Tile.DistortionMap);
-			Tile.MinDepth = GEngine->NearClipPlane;
-			Tile.MaxDepth = TempoSensorsSettings->GetMaxCameraDepth();
-			Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MinDepth"), Tile.MinDepth);
-			Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MaxDepth"), Tile.MaxDepth);
-			Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MaxDiscreteDepth"), GTempoCamera_Max_Discrete_Depth);
-		}
-		else
+		TargetMat = TempoSensorsSettings->GetCameraPostProcessMaterialWithDepth().Get();
+		if (!TargetMat)
 		{
 			UE_LOG(LogTempoCamera, Error, TEXT("PostProcessMaterialWithDepth is not set in TempoSensors settings"));
 			return;
@@ -1207,16 +1228,31 @@ void UTempoCamera::SetTileDepthEnabled(FTempoCameraTile& Tile, bool bTileDepthEn
 	}
 	else
 	{
-		if (const TObjectPtr<UMaterialInterface> MatNoDepth = TempoSensorsSettings->GetCameraPostProcessMaterialNoDepth())
-		{
-			Tile.PostProcessMaterialInstance = UMaterialInstanceDynamic::Create(MatNoDepth.Get(), this);
-			UTempoSceneCaptureComponent2D::ApplyDistortionMapToMaterial(Tile.PostProcessMaterialInstance, Tile.DistortionMap);
-		}
-		else
+		TargetMat = TempoSensorsSettings->GetCameraPostProcessMaterialNoDepth().Get();
+		if (!TargetMat)
 		{
 			UE_LOG(LogTempoCamera, Error, TEXT("PostProcessMaterialNoDepth is not set in TempoSensors settings"));
 			return;
 		}
+	}
+
+	// Reuse the existing MID iff its parent matches — avoids creating garbage when nothing
+	// material-identity-wise has changed. If the parent differs (depth toggle), retire the old MID
+	// into a retention list so it isn't GC'd while render commands still reference it.
+	if (!Tile.PostProcessMaterialInstance || Tile.PostProcessMaterialInstance->Parent != TargetMat)
+	{
+		RetirePPM(Tile.PostProcessMaterialInstance);
+		Tile.PostProcessMaterialInstance = UMaterialInstanceDynamic::Create(TargetMat, this);
+		UTempoSceneCaptureComponent2D::ApplyDistortionMapToMaterial(Tile.PostProcessMaterialInstance, Tile.DistortionMap);
+	}
+
+	if (bTileDepthEnabled)
+	{
+		Tile.MinDepth = GEngine->NearClipPlane;
+		Tile.MaxDepth = TempoSensorsSettings->GetMaxCameraDepth();
+		Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MinDepth"), Tile.MinDepth);
+		Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MaxDepth"), Tile.MaxDepth);
+		Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MaxDiscreteDepth"), GTempoCamera_Max_Discrete_Depth);
 	}
 
 	// Look up optional label override pair.

@@ -250,6 +250,14 @@ protected:
 	// Fence indicating that staging texture init has completed on the render thread.
 	FRenderCommandFence TextureInitFence;
 
+	// Retention list for PPMs that have been replaced but may still be referenced by render
+	// commands in flight. Holding a UPROPERTY reference prevents GC from flagging them as
+	// "about to be deleted" mid-render (FMaterialRenderProxy::CacheUniformExpressions asserts).
+	UPROPERTY(Transient)
+	TArray<UMaterialInstanceDynamic*> RetainedPPMs;
+
+	void RetirePPM(UMaterialInstanceDynamic* PPM);
+
 	FTimerHandle TimerHandle;
 
 	friend struct TTextureRead<FLidarPixel>;

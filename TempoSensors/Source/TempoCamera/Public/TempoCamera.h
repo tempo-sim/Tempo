@@ -409,5 +409,21 @@ protected:
 	// Fence indicating that staging texture init has completed on the render thread.
 	FRenderCommandFence TextureInitFence;
 
+	// Retention lists for PPMs and distortion textures that have been replaced but may still be
+	// referenced by render commands in flight. GC cannot collect them while UPROPERTY-referenced,
+	// so we keep them alive for the lifetime of this UTempoCamera. Alternative approach (render
+	// fence + periodic prune) is possible but this is simpler and the memory cost is bounded by
+	// # tiles × # reconfigure / depth-toggle events, which is small in practice.
+	UPROPERTY(Transient)
+	TArray<UMaterialInstanceDynamic*> RetainedPPMs;
+
+	UPROPERTY(Transient)
+	TArray<UTexture2D*> RetainedDistortionMaps;
+
+	// Retire an asset that's being replaced: moves it into the retention list so it can't be GC'd
+	// while render commands from prior captures still reference it.
+	void RetirePPM(UMaterialInstanceDynamic* PPM);
+	void RetireDistortionMap(UTexture2D* DistortionMap);
+
 	FTimerHandle TimerHandle;
 };
