@@ -271,10 +271,22 @@ void UTempoLidar::AllocateTileViewState(FTempoLidarTile& Tile)
 	}
 }
 
+void UTempoLidar::RetirePPM(UMaterialInstanceDynamic* PPM)
+{
+	if (PPM)
+	{
+		RetainedPPMs.AddUnique(PPM);
+	}
+}
+
 void UTempoLidar::DeactivateTile(FTempoLidarTile& Tile)
 {
 	Tile.bActive = false;
 	Tile.ViewState.Destroy();
+	// Retire the PPM instead of nulling: render commands from prior captures may still reference
+	// it, and dropping the only UPROPERTY reference lets GC flag it as "about to be deleted"
+	// mid-render (FMaterialRenderProxy::CacheUniformExpressions asserts).
+	RetirePPM(Tile.PostProcessMaterialInstance);
 	Tile.PostProcessMaterialInstance = nullptr;
 	Tile.PostProcessSettings = FPostProcessSettings();
 	Tile.bCameraCut = false;
