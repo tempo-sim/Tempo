@@ -9,6 +9,7 @@
 #include "TempoCoreUtils.h"
 #include "TempoLabelTypes.h"
 #include "TempoLidarModule.h"
+#include "TempoMultiViewCapture.h"
 
 #include "TempoLidar/Lidar.pb.h"
 
@@ -18,14 +19,15 @@
 #include "Engine/TextureRenderTarget2D.h"
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "Math/PerspectiveMatrix.h"
 #include "TextureResource.h"
-
 
 namespace
 {
-	const FName LeftCaptureComponentTag(TEXT("_L"));
-	const FName CenterCaptureComponentTag(TEXT("_C"));
-	const FName RightCaptureComponentTag(TEXT("_R"));
+	constexpr int32 LeftTileIndex = 0;
+	constexpr int32 CenterTileIndex = 1;
+	constexpr int32 RightTileIndex = 2;
+	constexpr int32 NumTileSlots = 3;
 }
 
 UTempoLidar::UTempoLidar()
@@ -33,6 +35,17 @@ UTempoLidar::UTempoLidar()
 	PrimaryComponentTick.bCanEverTick = true;
 	MeasurementTypes = { EMeasurementType::LIDAR_SCAN };
 	bAutoActivate = true;
+
+	// The lidar primary is never itself captured (it exists only as a container for family-level
+	// settings the multi-view helper reads: ShowFlags, hide/show lists, view owner, etc.). Still,
+	// match the tile-era CaptureSource so the atlas format is PF_A16B16G16R16 / LDR-compatible.
+	CaptureSource = ESceneCaptureSource::SCS_FinalColorLDR;
+	RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA16f;
+	PixelFormatOverride = EPixelFormat::PF_A16B16G16R16;
+
+	// Disable as many unnecessary rendering features as possible for the tile family render.
+	OptimizeShowFlagsForNoColor(ShowFlags);
+	bUseRayTracingIfEnabled = false;
 }
 
 FString UTempoLidar::GetOwnerName() const
@@ -98,57 +111,25 @@ TOptional<TFuture<void>> UTempoLidar::SendMeasurements()
 	return Future;
 }
 
-void UTempoLidar::SyncCaptureComponents()
-{
-	// We allow up to 120 degrees horizontal FOV per capture component
-	const TMap<FName, UTempoLidarCaptureComponent*> CaptureComponents = GetOrCreateCaptureComponents();
-
-	UTempoLidarCaptureComponent* const* LeftCaptureComponent = CaptureComponents.Find(LeftCaptureComponentTag);
-	UTempoLidarCaptureComponent* const* CenterCaptureComponent = CaptureComponents.Find(CenterCaptureComponentTag);
-	UTempoLidarCaptureComponent* const* RightCaptureComponent = CaptureComponents.Find(RightCaptureComponentTag);
-
-	if (HorizontalFOV <= 120.0)
-	{
-		SyncCaptureComponent(*LeftCaptureComponent, false, 0.0, 0.0, 0);
-		SyncCaptureComponent(*CenterCaptureComponent, true, 0.0, HorizontalFOV, HorizontalBeams);
-		SyncCaptureComponent(*RightCaptureComponent, false, 0.0, 0.0, 0);
-	}
-	else if (HorizontalFOV <= 240.0)
-	{
-		const double BeamGapSize = HorizontalFOV / (HorizontalBeams - 1);
-		const int32 LeftSegmentBeams = FMath::CeilToInt32(HorizontalBeams / 2.0);
-		const int32 RightSegmentBeams = HorizontalBeams - LeftSegmentBeams;
-		const double LeftSegmentFOV = BeamGapSize * (LeftSegmentBeams - 1);
-		const double RightSegmentFOV = BeamGapSize * (RightSegmentBeams - 1);
-		SyncCaptureComponent(*LeftCaptureComponent, true, -(LeftSegmentFOV + BeamGapSize) / 2.0, LeftSegmentFOV, LeftSegmentBeams);
-		SyncCaptureComponent(*CenterCaptureComponent, false, 0.0, 0.0, 0);
-		SyncCaptureComponent(*RightCaptureComponent, true, (RightSegmentFOV + BeamGapSize) / 2.0, RightSegmentFOV, RightSegmentBeams);
-	}
-	else
-	{
-		const double BeamGapSize = HorizontalFOV / (HorizontalFOV < 360.0 ? HorizontalBeams - 1 : HorizontalBeams);
-		const int32 SideSegmentBeams = FMath::CeilToInt32(HorizontalBeams / 3.0);
-		const int32 CenterSegmentBeams = HorizontalBeams - 2 * SideSegmentBeams;
-		const double SideSegmentFOV = BeamGapSize * (SideSegmentBeams - 1);
-		const double CenterSegmentFOV = BeamGapSize * (CenterSegmentBeams - 1);
-		SyncCaptureComponent(*LeftCaptureComponent, true, -BeamGapSize - (CenterSegmentFOV + SideSegmentFOV) / 2.0, SideSegmentFOV, SideSegmentBeams);
-		SyncCaptureComponent(*CenterCaptureComponent, true, 0.0, CenterSegmentFOV, CenterSegmentBeams);
-		SyncCaptureComponent(*RightCaptureComponent, true, BeamGapSize + (CenterSegmentFOV + SideSegmentFOV) / 2.0, SideSegmentFOV, SideSegmentBeams);
-	}
-}
-
 void UTempoLidar::OnRegister()
 {
 	Super::OnRegister();
 
-	// Don't create capture components during cooking or for template/archetype objects
-	// (e.g. Blueprint editor previews where GetOwner() is not a properly-packaged actor).
+	// Don't configure tiles during cooking or for template/archetype objects (e.g. Blueprint
+	// editor previews where GetOwner() is not a properly-packaged actor).
 	if (IsRunningCommandlet() || IsTemplate())
 	{
 		return;
 	}
 
-	SyncCaptureComponents();
+	// Fixed three tile slots (L=0, C=1, R=2). Pre-allocate so tile addresses are stable across
+	// SyncTiles calls and no TArray reallocation ever runs.
+	if (Tiles.Num() != NumTileSlots)
+	{
+		Tiles.SetNum(NumTileSlots);
+	}
+
+	SyncTiles();
 	UpdateInternalMirrors();
 
 	if (UTempoCoreUtils::IsGameWorld(this))
@@ -176,22 +157,9 @@ bool UTempoLidar::HasDetectedParameterChange() const
 		|| VerticalBeams != VerticalBeams_Internal;
 }
 
-bool UTempoLidar::AnyCaptureReadsInFlight() const
-{
-	for (const UTempoLidarCaptureComponent* Component : GetActiveCaptureComponents())
-	{
-		if (Component->NumPendingTextureReads() > 0)
-		{
-			return true;
-		}
-	}
-	return false;
-}
-
 void UTempoLidar::TryApplyPendingReconfigure()
 {
-	// Don't create capture components during cooking or for template/archetype objects
-	// (e.g. Blueprint editor previews where GetOwner() is not a properly-packaged actor).
+	// Don't reconfigure during cooking or for template/archetype objects.
 	if (IsRunningCommandlet() || IsTemplate())
 	{
 		return;
@@ -200,25 +168,27 @@ void UTempoLidar::TryApplyPendingReconfigure()
 	{
 		return;
 	}
-	if (AnyCaptureReadsInFlight())
+	if (TextureReadQueue.Num() > 0)
 	{
 		return;
 	}
-	ReconfigureCaptureComponentsNow();
+	ReconfigureTilesNow();
 	bReconfigurePending = false;
 }
 
-void UTempoLidar::ReconfigureCaptureComponentsNow()
+void UTempoLidar::ReconfigureTilesNow()
 {
-	// Drain active tiles first so SyncCaptureComponents' re-Activate rebuilds render targets
-	// with the new parameters. Deactivate() empties the texture read queue, which is safe
-	// because callers gate this on AnyCaptureReadsInFlight() == false.
-	for (UTempoLidarCaptureComponent* Component : GetActiveCaptureComponents())
+	// Drain all active tiles (releases their view states + PPMs) before re-configuring with new
+	// parameters. Caller must have confirmed no reads are in flight.
+	for (FTempoLidarTile& Tile : Tiles)
 	{
-		Component->Deactivate();
+		if (Tile.bActive)
+		{
+			DeactivateTile(Tile);
+		}
 	}
 
-	SyncCaptureComponents();
+	SyncTiles();
 	UpdateInternalMirrors();
 
 	// Shared RT geometry depends on the (possibly changed) slice sizes, so rebuild it.
@@ -254,34 +224,6 @@ void UTempoLidar::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedE
 }
 #endif
 
-void UTempoLidar::SyncCaptureComponent(UTempoLidarCaptureComponent* LidarCaptureComponent, bool bActive, double YawOffset, double SubHorizontalFOV, double SubHorizontalBeams)
-{
-	LidarCaptureComponent->Configure(YawOffset, SubHorizontalFOV, SubHorizontalBeams);
-	if (bActive && !LidarCaptureComponent->IsActive())
-	{
-		LidarCaptureComponent->Activate();
-	}
-	if (!bActive && LidarCaptureComponent->IsActive())
-	{
-		LidarCaptureComponent->Deactivate();
-	}
-}
-
-UTempoLidarCaptureComponent::UTempoLidarCaptureComponent()
-{
-	// Final Color? Necessary to use post-processing, which we need to pack normal, label, and depth very tight.
-	CaptureSource = ESceneCaptureSource::SCS_FinalColorLDR;
-	RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA16f;
-	PixelFormatOverride = EPixelFormat::PF_A16B16G16R16;
-
-	// Disable as many unnecessary rendering features as possible.
-	OptimizeShowFlagsForNoColor(ShowFlags);
-	bUseRayTracingIfEnabled = false;
-
-	// This component will be activated and deactivated by UTempoLidar.
-	bAutoActivate = false;
-}
-
 FVector2D SphericalToPerspective(double AzimuthDeg, double ElevationDeg)
 {
 	const double TanAzimuth = FMath::Tan(FMath::DegreesToRadians(AzimuthDeg));
@@ -313,86 +255,175 @@ FVector SphericalToCartesian(double AzimuthDeg, double ElevationDeg, double Dist
 	return Distance * FVector(FMath::Cos(-Elevation) * FMath::Cos(Azimuth), FMath::Cos(-Elevation) * FMath::Sin(Azimuth), FMath::Sin(-Elevation));
 }
 
-void UTempoLidarCaptureComponent::Activate(bool bReset)
+// ------------------------------------------------------------------------------------
+// Tile Management
+// ------------------------------------------------------------------------------------
+
+void UTempoLidar::AllocateTileViewState(FTempoLidarTile& Tile)
 {
-	Super::Activate(bReset);
+	if (Tile.ViewState.GetReference() == nullptr)
+	{
+		UWorld* World = GetWorld();
+		if (World && World->Scene)
+		{
+			Tile.ViewState.Allocate(World->Scene->GetFeatureLevel());
+		}
+	}
+}
+
+void UTempoLidar::DeactivateTile(FTempoLidarTile& Tile)
+{
+	Tile.bActive = false;
+	Tile.ViewState.Destroy();
+	Tile.PostProcessMaterialInstance = nullptr;
+	Tile.PostProcessSettings = FPostProcessSettings();
+	Tile.bCameraCut = false;
+}
+
+void UTempoLidar::ApplyTilePostProcess(FTempoLidarTile& Tile)
+{
+	const UTempoSensorsSettings* TempoSensorsSettings = GetDefault<UTempoSensorsSettings>();
+	check(TempoSensorsSettings);
+
+	if (!Tile.PostProcessMaterialInstance)
+	{
+		if (const TObjectPtr<UMaterialInterface> PostProcessMaterial = TempoSensorsSettings->GetLidarPostProcessMaterial())
+		{
+			Tile.PostProcessMaterialInstance = UMaterialInstanceDynamic::Create(PostProcessMaterial.Get(), this);
+			Tile.MinDepth = GEngine->NearClipPlane;
+			Tile.MaxDepth = TempoSensorsSettings->GetMaxLidarDepth();
+			Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MinDepth"), Tile.MinDepth);
+			Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MaxDepth"), Tile.MaxDepth);
+			Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MaxDiscreteDepth"), GTempo_Max_Discrete_Depth);
+		}
+		else
+		{
+			UE_LOG(LogTempoLidar, Error, TEXT("LidarPostProcessMaterial is not set in TempoSensors settings"));
+			return;
+		}
+	}
+
+	// Optional label overrides.
+	UDataTable* SemanticLabelTable = TempoSensorsSettings->GetSemanticLabelTable();
+	const FName OverridableLabelRowName = TempoSensorsSettings->GetOverridableLabelRowName();
+	const FName OverridingLabelRowName = TempoSensorsSettings->GetOverridingLabelRowName();
+	TOptional<int32> OverridableLabel;
+	TOptional<int32> OverridingLabel;
+	if (SemanticLabelTable && !OverridableLabelRowName.IsNone())
+	{
+		SemanticLabelTable->ForeachRow<FSemanticLabel>(TEXT(""),
+			[&OverridableLabelRowName, &OverridingLabelRowName, &OverridableLabel, &OverridingLabel]
+			(const FName& Key, const FSemanticLabel& Value)
+			{
+				if (Key == OverridableLabelRowName)
+				{
+					OverridableLabel = Value.Label;
+				}
+				if (Key == OverridingLabelRowName)
+				{
+					OverridingLabel = Value.Label;
+				}
+			});
+	}
+
+	if (OverridableLabel.IsSet() && OverridingLabel.IsSet())
+	{
+		Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("OverridableLabel"), OverridableLabel.GetValue());
+		Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("OverridingLabel"), OverridingLabel.GetValue());
+	}
+	else
+	{
+		Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("OverridingLabel"), 0.0);
+	}
+
+	Tile.PostProcessMaterialInstance->EnsureIsComplete();
+
+	Tile.PostProcessSettings.WeightedBlendables.Array.Empty();
+	Tile.PostProcessSettings.WeightedBlendables.Array.Add(FWeightedBlendable(1.0, Tile.PostProcessMaterialInstance));
+}
+
+void UTempoLidar::ConfigureTile(FTempoLidarTile& Tile, double InYawOffset, double SubHorizontalFOV, int32 SubHorizontalBeams, bool bActivate)
+{
+	if (!bActivate)
+	{
+		if (Tile.bActive)
+		{
+			DeactivateTile(Tile);
+		}
+		return;
+	}
 
 	const UTempoSensorsSettings* TempoSensorsSettings = GetDefault<UTempoSensorsSettings>();
 	check(TempoSensorsSettings);
 
-	if (const TObjectPtr<UMaterialInterface> PostProcessMaterial = GetDefault<UTempoSensorsSettings>()->GetLidarPostProcessMaterial())
+	Tile.YawOffset = InYawOffset;
+	Tile.FOVAngle = SubHorizontalFOV;
+	Tile.HorizontalBeams = SubHorizontalBeams;
+
+	const double UndistortedVerticalImagePlaneSize = 2.0 * FMath::Tan(VerticalFOV / 2.0);
+	const FVector2D ImagePlaneSize = 2.0 * SphericalToPerspective(Tile.FOVAngle / 2.0, VerticalFOV / 2.0);
+
+	const double AspectRatio = ImagePlaneSize.Y / ImagePlaneSize.X;
+	Tile.SizeXYFOV = TempoSensorsSettings->GetLidarUpsamplingFactor() * FVector2D(Tile.HorizontalBeams, AspectRatio * Tile.HorizontalBeams);
+
+	Tile.SizeXY = FIntPoint(FMath::CeilToInt32(Tile.SizeXYFOV.X), FMath::CeilToInt32(Tile.SizeXYFOV.Y));
+	Tile.DistortionFactor = UndistortedVerticalImagePlaneSize / ImagePlaneSize.Y;
+	Tile.DistortedVerticalFOV = FMath::RadiansToDegrees(2.0 * FMath::Atan(FMath::Tan(FMath::DegreesToRadians(VerticalFOV) / 2.0) * Tile.DistortionFactor));
+
+	AllocateTileViewState(Tile);
+	ApplyTilePostProcess(Tile);
+
+	// First frame with fresh view state must force a camera cut so TAA (if ever enabled) doesn't
+	// sample uninitialized history.
+	Tile.bCameraCut = !Tile.bActive || Tile.bCameraCut;
+	Tile.bActive = true;
+}
+
+void UTempoLidar::SyncTiles()
+{
+	if (Tiles.Num() != NumTileSlots)
 	{
-		PostProcessMaterialInstance = UMaterialInstanceDynamic::Create(PostProcessMaterial.Get(), this);
-		MinDepth = GEngine->NearClipPlane;
-		MaxDepth = TempoSensorsSettings->GetMaxLidarDepth();
-		PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MinDepth"), MinDepth);
-		PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MaxDepth"), MaxDepth);
-		PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MaxDiscreteDepth"), GTempo_Max_Discrete_Depth);
+		Tiles.SetNum(NumTileSlots);
+	}
+
+	FTempoLidarTile& L = Tiles[LeftTileIndex];
+	FTempoLidarTile& C = Tiles[CenterTileIndex];
+	FTempoLidarTile& R = Tiles[RightTileIndex];
+
+	// We allow up to 120 degrees horizontal FOV per tile.
+	if (HorizontalFOV <= 120.0)
+	{
+		ConfigureTile(L, 0.0, 0.0, 0, false);
+		ConfigureTile(C, 0.0, HorizontalFOV, HorizontalBeams, true);
+		ConfigureTile(R, 0.0, 0.0, 0, false);
+	}
+	else if (HorizontalFOV <= 240.0)
+	{
+		const double BeamGapSize = HorizontalFOV / (HorizontalBeams - 1);
+		const int32 LeftSegmentBeams = FMath::CeilToInt32(HorizontalBeams / 2.0);
+		const int32 RightSegmentBeams = HorizontalBeams - LeftSegmentBeams;
+		const double LeftSegmentFOV = BeamGapSize * (LeftSegmentBeams - 1);
+		const double RightSegmentFOV = BeamGapSize * (RightSegmentBeams - 1);
+		ConfigureTile(L, -(LeftSegmentFOV + BeamGapSize) / 2.0, LeftSegmentFOV, LeftSegmentBeams, true);
+		ConfigureTile(C, 0.0, 0.0, 0, false);
+		ConfigureTile(R, (RightSegmentFOV + BeamGapSize) / 2.0, RightSegmentFOV, RightSegmentBeams, true);
 	}
 	else
 	{
-		UE_LOG(LogTempoLidar, Error, TEXT("LidarPostProcessMaterial is not set in TempoSensors settings"));
-	}
-
-	if (PostProcessMaterialInstance)
-	{
-		PostProcessSettings.WeightedBlendables.Array.Empty();
-		PostProcessSettings.WeightedBlendables.Array.Init(FWeightedBlendable(1.0, PostProcessMaterialInstance), 1);
-		PostProcessMaterialInstance->EnsureIsComplete();
-	}
-	else
-	{
-		UE_LOG(LogTempoLidar, Error, TEXT("PostProcessMaterialInstance is not set."));
-	}
-
-	UDataTable* SemanticLabelTable = GetDefault<UTempoSensorsSettings>()->GetSemanticLabelTable();
-	FName OverridableLabelRowName = TempoSensorsSettings->GetOverridableLabelRowName();
-	FName OverridingLabelRowName = TempoSensorsSettings->GetOverridingLabelRowName();
-	TOptional<int32> OverridableLabel;
-	TOptional<int32> OverridingLabel;
-	if (!OverridableLabelRowName.IsNone())
-	{
-		SemanticLabelTable->ForeachRow<FSemanticLabel>(TEXT(""),
-			[&OverridableLabelRowName,
-				&OverridingLabelRowName,
-				&OverridableLabel,
-				&OverridingLabel](const FName& Key, const FSemanticLabel& Value)
-		{
-			if (Key == OverridableLabelRowName)
-			{
-				OverridableLabel = Value.Label;
-			}
-			if (Key == OverridingLabelRowName)
-			{
-				OverridingLabel = Value.Label;
-			}
-		});
-	}
-
-	if (PostProcessMaterialInstance)
-	{
-		if (OverridableLabel.IsSet() && OverridingLabel.IsSet())
-		{
-			PostProcessMaterialInstance->SetScalarParameterValue(TEXT("OverridableLabel"), OverridableLabel.GetValue());
-			PostProcessMaterialInstance->SetScalarParameterValue(TEXT("OverridingLabel"), OverridingLabel.GetValue());
-		}
-		else
-		{
-			PostProcessMaterialInstance->SetScalarParameterValue(TEXT("OverridingLabel"), 0.0);
-		}
-		PostProcessSettings.WeightedBlendables.Array.Empty();
-		PostProcessSettings.WeightedBlendables.Array.Init(FWeightedBlendable(1.0, PostProcessMaterialInstance), 1);
-		PostProcessMaterialInstance->EnsureIsComplete();
-	}
-	else
-	{
-		UE_LOG(LogTempoLidar, Error, TEXT("PostProcessMaterialInstance is not set."));
+		const double BeamGapSize = HorizontalFOV / (HorizontalFOV < 360.0 ? HorizontalBeams - 1 : HorizontalBeams);
+		const int32 SideSegmentBeams = FMath::CeilToInt32(HorizontalBeams / 3.0);
+		const int32 CenterSegmentBeams = HorizontalBeams - 2 * SideSegmentBeams;
+		const double SideSegmentFOV = BeamGapSize * (SideSegmentBeams - 1);
+		const double CenterSegmentFOV = BeamGapSize * (CenterSegmentBeams - 1);
+		ConfigureTile(L, -BeamGapSize - (CenterSegmentFOV + SideSegmentFOV) / 2.0, SideSegmentFOV, SideSegmentBeams, true);
+		ConfigureTile(C, 0.0, CenterSegmentFOV, CenterSegmentBeams, true);
+		ConfigureTile(R, BeamGapSize + (CenterSegmentFOV + SideSegmentFOV) / 2.0, SideSegmentFOV, SideSegmentBeams, true);
 	}
 }
 
-bool UTempoLidarCaptureComponent::HasPendingRequests() const
+void UTempoLidar::RequestMeasurement(const TempoLidar::LidarScanRequest& Request, const TResponseDelegate<TempoLidar::LidarScanSegment>& ResponseContinuation)
 {
-	return !LidarOwner->PendingRequests.IsEmpty();
+	PendingRequests.Add({ Request, ResponseContinuation});
 }
 
 void TTextureRead<FLidarPixel>::Decode(float TransmissionTime, TempoLidar::LidarScanSegment& ScanSegmentOut) const
@@ -531,102 +562,17 @@ TFuture<void> UTempoLidar::DecodeAndRespond(TArray<TUniquePtr<FTextureRead>> Tex
 	return Future;
 }
 
-TMap<FName, UTempoLidarCaptureComponent*> UTempoLidar::GetAllCaptureComponents() const
-{
-	TMap<FName, UTempoLidarCaptureComponent*> CaptureComponents;
-	TArray<USceneComponent*> ChildrenComponents;
-	GetChildrenComponents(false, ChildrenComponents);
-	for (USceneComponent* ChildComponent : ChildrenComponents)
-	{
-		for (const FName& Tag : { LeftCaptureComponentTag, CenterCaptureComponentTag, RightCaptureComponentTag })
-		{
-			if (UTempoLidarCaptureComponent* LidarCaptureComponent = Cast<UTempoLidarCaptureComponent>(ChildComponent); ChildComponent->ComponentHasTag(Tag))
-			{
-				CaptureComponents.Add(Tag, LidarCaptureComponent);
-			}
-		}
-	}
-	return CaptureComponents;
-}
-
-TMap<FName, UTempoLidarCaptureComponent*> UTempoLidar::GetOrCreateCaptureComponents()
-{
-	TMap<FName, UTempoLidarCaptureComponent*> CaptureComponents = GetAllCaptureComponents();
-	for (const FName& Tag : { LeftCaptureComponentTag, CenterCaptureComponentTag, RightCaptureComponentTag })
-	{
-		if (!CaptureComponents.Contains(Tag))
-		{
-			const FName ComponentName(GetName() + Tag.ToString());
-			UTempoLidarCaptureComponent* CaptureComponent = NewObject<UTempoLidarCaptureComponent>(GetOwner(), UTempoLidarCaptureComponent::StaticClass(), ComponentName);
-			CaptureComponent->LidarOwner = this;
-			CaptureComponent->ComponentTags.AddUnique(Tag);
-			CaptureComponent->OnComponentCreated();
-			CaptureComponent->AttachToComponent(this, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
-			CaptureComponent->RegisterComponent();
-			GetOwner()->AddInstanceComponent(CaptureComponent);
-			CaptureComponents.Add(Tag, CaptureComponent);
-		}
-	}
-
-	return CaptureComponents;
-}
-
-TArray<UTempoLidarCaptureComponent*> UTempoLidar::GetActiveCaptureComponents() const
-{
-	TArray<UTempoLidarCaptureComponent*> ActiveCaptureComponents;
-	TMap<FName, UTempoLidarCaptureComponent*> CaptureComponents = GetAllCaptureComponents();
-	for (const auto& Elem : CaptureComponents)
-	{
-		if (Elem.Value->IsActive())
-		{
-			ActiveCaptureComponents.Add(Elem.Value);
-		}
-	}
-	return ActiveCaptureComponents;
-}
-
-void UTempoLidar::RequestMeasurement(const TempoLidar::LidarScanRequest& Request, const TResponseDelegate<TempoLidar::LidarScanSegment>& ResponseContinuation)
-{
-	PendingRequests.Add({ Request, ResponseContinuation});
-}
-
-int32 UTempoLidarCaptureComponent::GetMaxTextureQueueSize() const
-{
-	return GetDefault<UTempoSensorsSettings>()->GetMaxCameraRenderBufferSize();
-}
-
-void UTempoLidarCaptureComponent::Configure(double YawOffset, double SubHorizontalFOV, double SubHorizontalBeams)
-{
-	RateHz = LidarOwner->RateHz;
-	FOVAngle = SubHorizontalFOV;
-	HorizontalBeams = SubHorizontalBeams;
-	SetRelativeRotation(FRotator(0.0, YawOffset, 0.0));
-
-	const UTempoSensorsSettings* TempoSensorsSettings = GetDefault<UTempoSensorsSettings>();
-	check(TempoSensorsSettings);
-
-	const double UndistortedVerticalImagePlaneSize = 2.0 * FMath::Tan(LidarOwner->VerticalFOV / 2.0);
-	const FVector2D ImagePlaneSize = 2.0 * SphericalToPerspective(FOVAngle / 2.0, LidarOwner->VerticalFOV / 2.0);
-
-	const double AspectRatio = ImagePlaneSize.Y / ImagePlaneSize.X;
-	SizeXYFOV = TempoSensorsSettings->GetLidarUpsamplingFactor() * FVector2D(HorizontalBeams, AspectRatio * HorizontalBeams);
-
-	SizeXY = FIntPoint(FMath::CeilToInt32(SizeXYFOV.X), FMath::CeilToInt32(SizeXYFOV.Y));
-	DistortionFactor = UndistortedVerticalImagePlaneSize / ImagePlaneSize.Y;
-	DistortedVerticalFOV = FMath::RadiansToDegrees(2.0 * FMath::Atan(FMath::Tan(FMath::DegreesToRadians(LidarOwner->VerticalFOV) / 2.0) * DistortionFactor));
-}
-
 // ------------------------------------------------------------------------------------
 // Shared RT / capture timer
 // ------------------------------------------------------------------------------------
 
 void UTempoLidar::Activate(bool bReset)
 {
+	// Super::Activate calls InitRenderTarget() (our override → InitSharedRenderTarget) in game worlds.
 	Super::Activate(bReset);
 
 	if (UTempoCoreUtils::IsGameWorld(this))
 	{
-		InitSharedRenderTarget();
 		RestartCaptureTimer();
 	}
 }
@@ -667,29 +613,38 @@ FTextureRHIRef UTempoLidar::AcquireNextStagingTexture()
 	return Texture;
 }
 
+int32 UTempoLidar::GetMaxTextureQueueSize() const
+{
+	return GetDefault<UTempoSensorsSettings>()->GetMaxCameraRenderBufferSize();
+}
+
+void UTempoLidar::InitRenderTarget()
+{
+	// The lidar primary never renders its own CaptureScene (ShouldManageOwnReadback / Timer both
+	// return false); SharedTextureTarget is the only RT it manages. Do NOT call Super::InitRenderTarget
+	// because that would allocate the inherited TextureTarget + staging textures we never use.
+	InitSharedRenderTarget();
+}
+
 void UTempoLidar::InitSharedRenderTarget()
 {
 	// Wait for any previous staging texture init render command to complete before modifying
 	// StagingTextures, since the render command accesses the array via raw pointer.
 	TextureInitFence.Wait();
 
-	const TMap<FName, UTempoLidarCaptureComponent*> CaptureComponents = GetAllCaptureComponents();
-
 	// Walk active slices in Left->Center->Right order, assigning each its horizontal offset
 	// within the packed RT. Packed width is the running sum; packed height is the max slice height.
 	int32 PackedX = 0;
 	int32 MaxY = 0;
-	for (const FName& Tag : { LeftCaptureComponentTag, CenterCaptureComponentTag, RightCaptureComponentTag })
+	for (FTempoLidarTile& Tile : Tiles)
 	{
-		UTempoLidarCaptureComponent* const* ComponentPtr = CaptureComponents.Find(Tag);
-		if (!ComponentPtr || !*ComponentPtr || !(*ComponentPtr)->IsActive())
+		if (!Tile.bActive)
 		{
 			continue;
 		}
-		UTempoLidarCaptureComponent* Component = *ComponentPtr;
-		Component->SliceDestOffsetX = PackedX;
-		PackedX += Component->SizeXY.X;
-		MaxY = FMath::Max(MaxY, Component->SizeXY.Y);
+		Tile.SliceDestOffsetX = PackedX;
+		PackedX += Tile.SizeXY.X;
+		MaxY = FMath::Max(MaxY, Tile.SizeXY.Y);
 	}
 
 	if (PackedX <= 0 || MaxY <= 0)
@@ -762,16 +717,6 @@ void UTempoLidar::InitSharedRenderTarget()
 	TextureReadQueue.Empty();
 }
 
-namespace
-{
-	struct FLidarTileCopyInfo
-	{
-		FTextureRenderTargetResource* TileRT;
-		int32 SliceDestOffsetX;
-		FIntPoint TileSizeXY;
-	};
-}
-
 void UTempoLidar::MaybeCapture()
 {
 	const float TimerPeriod = GetLidarTimerPeriod(RateHz);
@@ -793,8 +738,15 @@ void UTempoLidar::MaybeCapture()
 		return;
 	}
 
-	const TArray<UTempoLidarCaptureComponent*> ActiveCaptureComponents = GetActiveCaptureComponents();
-	if (ActiveCaptureComponents.IsEmpty())
+	int32 NumActiveTiles = 0;
+	for (const FTempoLidarTile& Tile : Tiles)
+	{
+		if (Tile.bActive)
+		{
+			++NumActiveTiles;
+		}
+	}
+	if (NumActiveTiles == 0)
 	{
 		return;
 	}
@@ -806,60 +758,102 @@ void UTempoLidar::MaybeCapture()
 		return;
 	}
 
-	for (const UTempoLidarCaptureComponent* Tile : ActiveCaptureComponents)
-	{
-		if (!Tile->TextureTarget || !Tile->TextureTarget->GameThread_GetRenderTargetResource() ||
-			Tile->TextureTarget->GetFormat() != SharedTextureTarget->GetFormat())
-		{
-			return;
-		}
-	}
-
 	FTextureRenderTargetResource* SharedRTResource = SharedTextureTarget->GameThread_GetRenderTargetResource();
 	if (!SharedRTResource)
 	{
 		return;
 	}
 
-	// Capture each tile. With CaptureScene() (not CaptureSceneDeferred) the tile's render commands
-	// enqueue immediately in FIFO order, so the pack command we enqueue right after will run
-	// after all tile renders on the render thread.
-	for (UTempoLidarCaptureComponent* Tile : ActiveCaptureComponents)
+	UWorld* World = GetWorld();
+	FSceneInterface* Scene = World ? World->Scene : nullptr;
+	if (!Scene)
 	{
-		Tile->CaptureScene();
+		return;
 	}
 
-	const double CaptureTime = GetWorld()->GetTimeSeconds();
+	// Per-tile view origin (shared across tiles) — the lidar's world location.
+	const FTransform LidarWorld = GetComponentToWorld();
+	const FVector ViewLocation = LidarWorld.GetTranslation();
+	const FQuat LidarWorldRotation = LidarWorld.GetRotation();
 
-	// Build per-slice reads with the metadata their Decode path expects. Packed dimensions derive
-	// from the same running-sum / max-height used by InitSharedRenderTarget.
+	// Axis swap for UE view rotation convention: view x = world z, view y = world x, view z = world y.
+	const FMatrix ViewAxisSwap(
+		FPlane(0, 0, 1, 0),
+		FPlane(1, 0, 0, 0),
+		FPlane(0, 1, 0, 0),
+		FPlane(0, 0, 0, 1));
+
+	// Build per-tile view setups and per-slice reads. Each tile's ViewRect inside the atlas is
+	// (SliceDestOffsetX, 0) to (SliceDestOffsetX + SizeXY.X, SizeXY.Y), matching the pack layout
+	// FLidarSharedTextureRead::SplitIntoSlices expects.
+	TArray<TempoMultiViewCapture::FViewSetup> ViewSetups;
+	ViewSetups.Reserve(NumActiveTiles);
+
 	TArray<TUniquePtr<TTextureRead<FLidarPixel>>> Slices;
-	Slices.Reserve(ActiveCaptureComponents.Num());
+	Slices.Reserve(NumActiveTiles);
 
-	TArray<FLidarTileCopyInfo> TileInfos;
-	TileInfos.Reserve(ActiveCaptureComponents.Num());
+	const double CaptureTime = World->GetTimeSeconds();
 
 	int32 PackedX = 0;
 	int32 MaxY = 0;
-	for (UTempoLidarCaptureComponent* Tile : ActiveCaptureComponents)
+	for (FTempoLidarTile& Tile : Tiles)
 	{
+		if (!Tile.bActive)
+		{
+			continue;
+		}
+
+		// Tile world rotation = lidar world rotation * tile yaw; view matrix is the inverse
+		// quaternion followed by the capture-view axis swap.
+		const FQuat TileWorldRotation = LidarWorldRotation * FRotator(0.0, Tile.YawOffset, 0.0).Quaternion();
+		FMatrix ViewRotationMatrix = FQuatRotationMatrix(TileWorldRotation.Inverse()) * ViewAxisSwap;
+
+		// Perspective projection matching the tile's SizeXY + FOVAngle. Near-clip from the primary's
+		// override (or the engine default) — lidar tiles historically inherit this.
+		const float UnscaledFOV = Tile.FOVAngle * (float)PI / 360.0f;
+		const float ViewFOV = FMath::Atan((1.0f + Overscan) * FMath::Tan(UnscaledFOV));
+		const float NearClip = bOverride_CustomNearClippingPlane ? CustomNearClippingPlane : GNearClippingPlane;
+		const FIntPoint TileSize = Tile.SizeXY;
+		const float YAxisMultiplier = static_cast<float>(TileSize.X) / static_cast<float>(TileSize.Y);
+
+		FMatrix ProjectionMatrix;
+		if ((int32)ERHIZBuffer::IsInverted)
+		{
+			ProjectionMatrix = FReversedZPerspectiveMatrix(ViewFOV, ViewFOV, 1.0f, YAxisMultiplier, NearClip, NearClip);
+		}
+		else
+		{
+			ProjectionMatrix = FPerspectiveMatrix(ViewFOV, ViewFOV, 1.0f, YAxisMultiplier, NearClip, NearClip);
+		}
+
+		TempoMultiViewCapture::FViewSetup& Setup = ViewSetups.AddDefaulted_GetRef();
+		Setup.ViewState = Tile.ViewState.GetReference();
+		Setup.PostProcessSettings = &Tile.PostProcessSettings;
+		Setup.PostProcessBlendWeight = 1.0f;
+		Setup.bCameraCut = Tile.bCameraCut;
+		Tile.bCameraCut = false;
+		Setup.ViewLocation = ViewLocation;
+		Setup.ViewRotationMatrix = ViewRotationMatrix;
+		Setup.ProjectionMatrix = ProjectionMatrix;
+		Setup.ViewRect = FIntRect(FIntPoint(Tile.SliceDestOffsetX, 0), FIntPoint(Tile.SliceDestOffsetX + TileSize.X, TileSize.Y));
+		Setup.FOV = Tile.FOVAngle;
+
+		// Build the per-slice read with the metadata its Decode path expects.
+		const FTransform TileWorldTransform(TileWorldRotation, ViewLocation);
 		Slices.Emplace(new TTextureRead<FLidarPixel>(
-			Tile->SizeXY, SequenceId, CaptureTime, GetOwnerName(), GetSensorName(),
-			GetComponentTransform(), Tile->GetComponentTransform(), Tile->FOVAngle,
-			VerticalFOV, Tile->HorizontalBeams, VerticalBeams, Tile->SizeXYFOV,
+			Tile.SizeXY, SequenceId, CaptureTime, GetOwnerName(), GetSensorName(),
+			GetComponentTransform(), TileWorldTransform, Tile.FOVAngle,
+			VerticalFOV, Tile.HorizontalBeams, VerticalBeams, Tile.SizeXYFOV,
 			IntensitySaturationDistance, MaxAngleOfIncidence,
-			ActiveCaptureComponents.Num(), Tile->GetRelativeRotation().Yaw, Tile->MinDepth, Tile->MaxDepth,
+			NumActiveTiles, Tile.YawOffset, Tile.MinDepth, Tile.MaxDepth,
 			MinDistance, MaxDistance));
 
-		FLidarTileCopyInfo Info;
-		Info.TileRT = Tile->TextureTarget->GameThread_GetRenderTargetResource();
-		Info.SliceDestOffsetX = Tile->SliceDestOffsetX;
-		Info.TileSizeXY = Tile->SizeXY;
-		TileInfos.Add(Info);
-
-		PackedX = FMath::Max(PackedX, Tile->SliceDestOffsetX + Tile->SizeXY.X);
-		MaxY = FMath::Max(MaxY, Tile->SizeXY.Y);
+		PackedX = FMath::Max(PackedX, Tile.SliceDestOffsetX + Tile.SizeXY.X);
+		MaxY = FMath::Max(MaxY, Tile.SizeXY.Y);
 	}
+
+	// Render all views in one family directly into SharedTextureTarget.
+	TempoMultiViewCapture::RenderTiles(Scene, this, SharedTextureTarget, ViewSetups, ESceneCaptureSource::SCS_FinalColorLDR);
 
 	FLidarSharedTextureRead* NewRead = new FLidarSharedTextureRead(
 		FIntPoint(PackedX, MaxY), SequenceId, CaptureTime, GetOwnerName(), GetSensorName(),
@@ -871,23 +865,11 @@ void UTempoLidar::MaybeCapture()
 
 	const FTextureRHIRef StagingTex = NewRead->StagingTexture;
 
-	ENQUEUE_RENDER_COMMAND(TempoLidarPackAndReadback)(
-		[SharedRTResource, StagingTex, TileInfos, NewRead](FRHICommandListImmediate& RHICmdList)
+	// Single copy from the packed atlas to staging — the atlas IS the packed output.
+	ENQUEUE_RENDER_COMMAND(TempoLidarStagingCopy)(
+		[SharedRTResource, StagingTex, NewRead](FRHICommandListImmediate& RHICmdList)
 		{
 			FRHITexture* SharedRT = SharedRTResource->GetRenderTargetTexture();
-
-			RHICmdList.Transition(FRHITransitionInfo(SharedRT, ERHIAccess::Unknown, ERHIAccess::CopyDest));
-
-			for (const FLidarTileCopyInfo& Info : TileInfos)
-			{
-				FRHITexture* TileRT = Info.TileRT->GetRenderTargetTexture();
-				RHICmdList.Transition(FRHITransitionInfo(TileRT, ERHIAccess::Unknown, ERHIAccess::CopySrc));
-				FRHICopyTextureInfo CopyInfo;
-				CopyInfo.SourcePosition = FIntVector(0, 0, 0);
-				CopyInfo.DestPosition = FIntVector(Info.SliceDestOffsetX, 0, 0);
-				CopyInfo.Size = FIntVector(Info.TileSizeXY.X, Info.TileSizeXY.Y, 1);
-				RHICmdList.CopyTexture(TileRT, SharedRT, CopyInfo);
-			}
 
 			RHICmdList.Transition(FRHITransitionInfo(SharedRT, ERHIAccess::Unknown, ERHIAccess::CopySrc));
 			RHICmdList.CopyTexture(SharedRT, StagingTex, FRHICopyTextureInfo());

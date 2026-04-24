@@ -8,6 +8,8 @@
 #include "TempoLidar/Lidar.pb.h"
 
 #include "CoreMinimal.h"
+#include "Engine/Scene.h"
+#include "SceneTypes.h"
 #include "TempoScriptingServer.h"
 #include "TempoLidar.generated.h"
 
@@ -47,8 +49,73 @@ struct FLidarScanRequest
 	TResponseDelegate<TempoLidar::LidarScanSegment> ResponseContinuation;
 };
 
+class UTempoLidar;
+
+// Per-tile state for the multi-view atlas render. A tile is just a view-rect + view state + PPM; no
+// USceneCaptureComponent and no child scene component. The atlas render is driven from
+// UTempoLidar::MaybeCapture via TempoMultiViewCapture::RenderTiles, which writes each view directly
+// into its rect inside SharedTextureTarget — no per-tile copy-pack step is needed.
+USTRUCT()
+struct FTempoLidarTile
+{
+	GENERATED_BODY()
+
+	// Rotation relative to the parent lidar (yaw only).
+	UPROPERTY(VisibleAnywhere)
+	float YawOffset = 0.0f;
+
+	// This tile's horizontal FOV in degrees.
+	UPROPERTY(VisibleAnywhere)
+	float FOVAngle = 120.0f;
+
+	// Number of horizontal beams this tile covers.
+	UPROPERTY(VisibleAnywhere)
+	int32 HorizontalBeams = 0;
+
+	// Render size in pixels (ceil of SizeXYFOV).
+	UPROPERTY(VisibleAnywhere)
+	FIntPoint SizeXY = FIntPoint::ZeroValue;
+
+	// Image plane size encompassing the lidar FOV in (upsampled) pixels. SizeXY is the ceil of this.
+	UPROPERTY(VisibleAnywhere)
+	FVector2D SizeXYFOV = FVector2D::ZeroVector;
+
+	// Distortion factor introduced by the spherical-to-perspective mapping.
+	UPROPERTY(VisibleAnywhere)
+	double DistortionFactor = 1.0;
+
+	// Effective vertical FOV after the distortion factor is applied.
+	UPROPERTY(VisibleAnywhere)
+	double DistortedVerticalFOV = 30.0;
+
+	// Horizontal offset of this tile inside SharedTextureTarget (tiles pack L→C→R).
+	UPROPERTY(VisibleAnywhere)
+	int32 SliceDestOffsetX = 0;
+
+	UPROPERTY(VisibleAnywhere)
+	float MinDepth = 10.0f;
+
+	UPROPERTY(VisibleAnywhere)
+	float MaxDepth = 40000.0f;
+
+	UPROPERTY(VisibleAnywhere)
+	bool bActive = false;
+
+	UPROPERTY(VisibleAnywhere)
+	UMaterialInstanceDynamic* PostProcessMaterialInstance = nullptr;
+
+	UPROPERTY()
+	FPostProcessSettings PostProcessSettings;
+
+	// Not a UPROPERTY — manages its own lifetime.
+	FSceneViewStateReference ViewState;
+
+	// One-shot camera-cut flag consumed by the next multi-view render.
+	bool bCameraCut = false;
+};
+
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TEMPOLIDAR_API UTempoLidar : public USceneComponent, public ITempoSensorInterface
+class TEMPOLIDAR_API UTempoLidar : public UTempoSceneCaptureComponent2D, public ITempoSensorInterface
 {
 	GENERATED_BODY()
 
@@ -80,39 +147,40 @@ public:
 	void RequestMeasurement(const TempoLidar::LidarScanRequest& Request, const TResponseDelegate<TempoLidar::LidarScanSegment>& ResponseContinuation);
 
 protected:
+	// UTempoSceneCaptureComponent2D hooks: the lidar manages its own single readback from the packed
+	// SharedTextureTarget and drives its own timer; it never calls CaptureScene() on itself.
+	virtual bool ShouldManageOwnReadback() const override { return false; }
+	virtual bool ShouldManageOwnTimer() const override { return false; }
+	virtual FTextureRead* MakeTextureRead() const override { checkNoEntry(); return nullptr; }
+	virtual int32 GetMaxTextureQueueSize() const override;
+	virtual void InitRenderTarget() override;
+
 	TFuture<void> DecodeAndRespond(TArray<TUniquePtr<FTextureRead>> TextureReads);
 
-	// Initialize the shared render target and ring of staging textures sized for the horizontally
-	// packed slices (width = sum of slice widths, height = max of slice heights).
+	// Initialize the shared packed render target and ring of staging textures. Also assigns each
+	// active tile its SliceDestOffsetX and the packed dimensions.
 	void InitSharedRenderTarget();
 
-	// Starts or restarts the timer that calls MaybeCapture.
 	void RestartCaptureTimer();
 
-	// Called by the capture timer. Issues CaptureScene() on each active slice, then enqueues a
-	// single render command that packs slice RTs into the shared RT and initiates a single readback.
+	// Called by the capture timer. Builds a multi-view family from active tiles, renders it into
+	// SharedTextureTarget, and enqueues a single copy-to-staging readback.
 	void MaybeCapture();
 
-	// Returns the next staging texture from the ring buffer and advances the index.
 	FTextureRHIRef AcquireNextStagingTexture();
 
-	TMap<FName, UTempoLidarCaptureComponent*> GetAllCaptureComponents() const;
-	TMap<FName, UTempoLidarCaptureComponent*> GetOrCreateCaptureComponents();
-	TArray<UTempoLidarCaptureComponent*> GetActiveCaptureComponents() const;
-	void SyncCaptureComponents();
+	// Per-tile configuration / state management.
+	void SyncTiles();
+	void ConfigureTile(FTempoLidarTile& Tile, double InYawOffset, double SubHorizontalFOV, int32 SubHorizontalBeams, bool bActivate);
+	void ApplyTilePostProcess(FTempoLidarTile& Tile);
+	void AllocateTileViewState(FTempoLidarTile& Tile);
+	void DeactivateTile(FTempoLidarTile& Tile);
 
-	// Runtime change-detection choke point (see UTempoCamera for the same pattern).
+	// Runtime change-detection choke point.
 	bool HasDetectedParameterChange() const;
-	bool AnyCaptureReadsInFlight() const;
 	void TryApplyPendingReconfigure();
-	void ReconfigureCaptureComponentsNow();
+	void ReconfigureTilesNow();
 	void UpdateInternalMirrors();
-
-	static void SyncCaptureComponent(UTempoLidarCaptureComponent* LidarCaptureComponent, bool bActive, double YawOffset, double SubHorizontalFOV, double SubHorizontalBeams);
-
-	// The rate in Hz this Lidar updates at.
-	UPROPERTY(EditAnywhere, meta=(UIMin=0.0, ClampMin=0.0))
-	float RateHz = 10.0;
 
 	// The measurement types supported. Should be set in constructor of derived classes.
 	UPROPERTY(VisibleAnywhere)
@@ -150,13 +218,16 @@ protected:
 	UPROPERTY(EditAnywhere, meta=(UIMin=0.0, UIMax=90.0, ClampMin=0.0, ClampMax=90.0))
 	float MaxAngleOfIncidence = 87.5;
 
-	// Monotonically increasing counter of scans captured.
-	UPROPERTY(VisibleAnywhere)
-	int32 SequenceId = 0;
+	// RateHz and SequenceId are inherited from UTempoSceneCaptureComponent2D.
 
 	TArray<FLidarScanRequest> PendingRequests;
 
-	// Mirrors of the watched properties. Updated in ReconfigureCaptureComponentsNow.
+	// Tile slots (fixed size: L=0, C=1, R=2). Stable storage — indices are never invalidated
+	// and held addresses remain valid across reconfigures. Transient: runtime-only state.
+	UPROPERTY(Transient)
+	TArray<FTempoLidarTile> Tiles;
+
+	// Mirrors of the watched properties. Updated in ReconfigureTilesNow.
 	double HorizontalFOV_Internal = -1.0;
 	double VerticalFOV_Internal = -1.0;
 	int32 HorizontalBeams_Internal = -1;
@@ -180,8 +251,6 @@ protected:
 	FRenderCommandFence TextureInitFence;
 
 	FTimerHandle TimerHandle;
-
-	friend class UTempoLidarCaptureComponent;
 
 	friend struct TTextureRead<FLidarPixel>;
 };
@@ -243,68 +312,4 @@ struct FLidarSharedTextureRead : TTextureReadBase<FLidarPixel>
 
 	// Per-slice reads preallocated at capture time with the correct metadata and sized buffers.
 	TArray<TUniquePtr<TTextureRead<FLidarPixel>>> Slices;
-};
-
-UCLASS(ClassGroup=(Custom), NotPlaceable, NotBlueprintable)
-class TEMPOLIDAR_API UTempoLidarCaptureComponent : public UTempoSceneCaptureComponent2D
-{
-	GENERATED_BODY()
-
-public:
-	UTempoLidarCaptureComponent();
-
-protected:
-	virtual void Activate(bool bReset = false) override;
-
-	virtual bool HasPendingRequests() const override;
-
-	// Tiles never allocate their own staging textures or FTextureReads — the owning UTempoLidar
-	// packs tile render targets into a shared RT and issues a single readback for the sensor.
-	virtual bool ShouldManageOwnReadback() const override { return false; }
-
-	// Tiles never start their own capture timer — the owning UTempoLidar drives CaptureScene().
-	virtual bool ShouldManageOwnTimer() const override { return false; }
-
-	// Unused in tile mode; retained so base-class helpers that call it compile cleanly.
-	virtual FTextureRead* MakeTextureRead() const override { return nullptr; }
-
-	virtual int32 GetMaxTextureQueueSize() const override;
-
-	void Configure(double YawOffset, double SubHorizontalFOV, double SubHorizontalBeams);
-
-	// The destination X offset of this slice within the shared packed render target.
-	UPROPERTY(VisibleAnywhere)
-	int32 SliceDestOffsetX = 0;
-
-	// The number of horizontal beams.
-	UPROPERTY(EditAnywhere)
-	int32 HorizontalBeams = 200.0;
-
-	// The resulting distortion factor.
-	UPROPERTY(VisibleAnywhere)
-	double DistortionFactor = 1.0;
-
-	// The resulting distorted vertical FOV.
-	UPROPERTY(VisibleAnywhere)
-	double DistortedVerticalFOV = 30.0;
-
-	// The size of the image plane encompassing the Lidar FOV in pixels. SizeXY is the ceil of this.
-	UPROPERTY(VisibleAnywhere)
-	FVector2D SizeXYFOV = FVector2D::ZeroVector;
-
-	UPROPERTY(VisibleAnywhere)
-	UMaterialInstanceDynamic* PostProcessMaterialInstance= nullptr;
-
-	UPROPERTY(VisibleAnywhere)
-	const UTempoLidar* LidarOwner = nullptr;
-
-	// The minimum depth this Lidar can measure. Will be set to the global near clip plane.
-	UPROPERTY(VisibleAnywhere)
-	float MinDepth = 10.0; // 10cm
-
-	// The maximum depth this Lidar can measure. Will be set to UTempoSensorsSettings::MaxLidarDepth.
-	UPROPERTY(VisibleAnywhere, Category="Depth")
-	float MaxDepth = 40000.0; // 400m
-
-	friend UTempoLidar;
 };
