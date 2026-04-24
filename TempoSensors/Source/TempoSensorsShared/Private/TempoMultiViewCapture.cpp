@@ -155,7 +155,16 @@ namespace
 			// Per-tile view state: critical for TAA / auto-exposure history independence per tile.
 			ViewInitOptions.SceneViewStateInterface = Setup.ViewState;
 			ViewInitOptions.LODDistanceFactor = FMath::Clamp(PrimaryComponent->LODDistanceFactor, .01f, 100.0f);
-			ViewInitOptions.bIsSceneCaptureCube = false;
+			// Hack to pass Lumen's LUMEN_MAX_VIEWS=2 family-level gate (Lumen.cpp:239). The cube
+			// path in LumenSceneRendering.cpp:3099 is semantically honest for us: all tiles share
+			// the rig origin, and Lumen uses a single omnidirectional origin from Views[0] — which
+			// is exactly what a multi-tile camera needs. Applied to every view so DFAO temporal
+			// history is suppressed uniformly (DistanceFieldLightingPost.cpp:305) — otherwise
+			// Views[0] would look noisier than the rest and leave a seam at the tile boundary.
+			// Other knock-on effects (eye-adaptation sharing via SceneView.cpp:1055) are no-ops
+			// here because tiles run AEM_Manual. Guarded on Views.Num() > 2 so we only take the
+			// cube-path hit when we'd otherwise lose Lumen entirely.
+			ViewInitOptions.bIsSceneCaptureCube = Views.Num() > 2;
 			// Engine's SetupViewFamilyForSceneCapture consults GRayTracingSceneCaptures (a Renderer-
 			// private CVar used only for debug overrides). We don't link Renderer (see Build.cs note),
 			// so just honor the primary's flag.
