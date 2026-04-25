@@ -12,10 +12,13 @@
 
 #include "Components/SceneCaptureComponent.h"
 #include "Components/SceneCaptureComponent2D.h"
+#include "Engine/BlendableInterface.h"
 #include "Engine/Engine.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "GameFramework/WorldSettings.h"
 #include "LegacyScreenPercentageDriver.h"
+#include "Materials/Material.h"
+#include "Materials/MaterialInterface.h"
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
 #include "RenderingThread.h"
@@ -186,7 +189,50 @@ namespace
 			View->FinalPostProcessSettings.ReflectionMethod = EReflectionMethod::None;
 			View->FinalPostProcessSettings.LumenSurfaceCacheResolution = 0.5f;
 
-			View->OverridePostProcessSettings(*Setup.PostProcessSettings, Setup.PostProcessBlendWeight);
+			// Apply PP settings, but strip UMaterialInterface blendables (post-process materials) and
+			// push them ourselves below. The engine's UMaterialInterface::OverrideBlendableSettings
+			// allocates a "reusable MID" via FSceneViewState::GetReusableMID and stashes it in the
+			// view state's MIDPool. In this multi-view path that pool entry is not reliably kept
+			// alive across GC — `obj gc` between captures collects it, and the next frame derefs
+			// freed memory inside ClearParameterValuesInternal. Pushing FPostProcessMaterialNode
+			// directly with our own UPROPERTY-tracked MID skips that pool entirely.
+			FPostProcessSettings PPSettingsStripped = *Setup.PostProcessSettings;
+			TArray<FWeightedBlendable, TInlineAllocator<2>> PPMBlendables;
+			PPSettingsStripped.WeightedBlendables.Array.RemoveAll(
+				[&PPMBlendables](const FWeightedBlendable& WB)
+				{
+					if (Cast<UMaterialInterface>(WB.Object))
+					{
+						PPMBlendables.Add(WB);
+						return true;
+					}
+					return false;
+				});
+
+			View->OverridePostProcessSettings(PPSettingsStripped, Setup.PostProcessBlendWeight);
+
+			for (const FWeightedBlendable& WB : PPMBlendables)
+			{
+				UMaterialInterface* MI = Cast<UMaterialInterface>(WB.Object);
+				const UMaterial* Base = MI->GetMaterial();
+				if (!Base || Base->MaterialDomain != MD_PostProcess)
+				{
+					continue;
+				}
+				const float EffectiveWeight = WB.Weight * Setup.PostProcessBlendWeight;
+				if (!(EffectiveWeight > 0.0f && EffectiveWeight <= 1.0f))
+				{
+					continue;
+				}
+				const bool bIsBlendable = Base->bIsBlendable && MI->GetUserSceneTextureOutput(Base) == NAME_None;
+				FPostProcessMaterialNode Node(
+					MI,
+					MI->GetBlendableLocation(Base),
+					MI->GetBlendablePriority(Base),
+					bIsBlendable);
+				View->FinalPostProcessSettings.BlendableManager.PushBlendableData(EffectiveWeight, Node);
+			}
+
 			View->EndFinalPostprocessSettings(ViewInitOptions);
 
 			View->ViewLightingChannelMask = PrimaryComponent->ViewLightingChannels.GetMaskForStruct();
