@@ -148,5 +148,10 @@ void UTempoTiledSceneCaptureComponent::RetirePPM(UMaterialInstanceDynamic* PPM)
 	if (PPM)
 	{
 		RetainedPPMs.AddUnique(PPM);
+		const int32 MaxSize = GetDefault<UTempoSensorsSettings>()->GetMaxCameraRenderBufferSize();
+		while (RetainedPPMs.Num() > MaxSize)
+		{
+			RetainedPPMs.RemoveAt(0);
+		}
 	}
 }

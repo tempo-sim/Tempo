@@ -1021,6 +1021,11 @@ void UTempoCamera::RetireDistortionMap(UTexture2D* DistortionMap)
 	if (DistortionMap)
 	{
 		RetainedDistortionMaps.AddUnique(DistortionMap);
+		const int32 MaxSize = GetDefault<UTempoSensorsSettings>()->GetMaxCameraRenderBufferSize();
+		while (RetainedDistortionMaps.Num() > MaxSize)
+		{
+			RetainedDistortionMaps.RemoveAt(0);
+		}
 	}
 }
 
