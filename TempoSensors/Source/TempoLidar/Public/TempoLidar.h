@@ -48,6 +48,28 @@ struct FLidarScanRequest
 	TResponseDelegate<TempoLidar::LidarScanSegment> ResponseContinuation;
 };
 
+// Intrinsic calibration for a single beam channel, matching vendor calibration file conventions.
+USTRUCT(BlueprintType)
+struct FLidarBeamCalibration
+{
+	GENERATED_BODY()
+
+	// Elevation angle for this beam channel in degrees. Positive = up.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(UIMin=-90.0, UIMax=90.0, ClampMin=-90.0, ClampMax=90.0))
+	float ElevationDeg = 0.0f;
+
+	// Fixed azimuth offset from the nominal spin angle for this channel in degrees.
+	// Corresponds to "rotCorrection" / "horizOffsetCorrection" in vendor calibration files.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(UIMin=-5.0, UIMax=5.0))
+	float AzimuthOffsetDeg = 0.0f;
+
+	bool operator==(const FLidarBeamCalibration& Other) const
+	{
+		return ElevationDeg == Other.ElevationDeg && AzimuthOffsetDeg == Other.AzimuthOffsetDeg;
+	}
+	bool operator!=(const FLidarBeamCalibration& Other) const { return !(*this == Other); }
+};
+
 class UTempoLidar;
 
 // Per-tile state for the multi-view atlas render. A tile is just a view-rect + view state + PPM; no
@@ -157,6 +179,13 @@ protected:
 	void AllocateTileViewState(FTempoLidarTile& Tile);
 	void DeactivateTile(FTempoLidarTile& Tile);
 
+	// Returns the vertical FOV to use for tile sizing: derived from BeamCalibration when set,
+	// otherwise falls back to the VerticalFOV property.
+	double GetEffectiveVerticalFOV() const;
+
+	// Returns the vertical beam count: BeamCalibration.Num() when set, else VerticalBeams.
+	int32 GetEffectiveVerticalBeams() const;
+
 	// The measurement types supported. Should be set in constructor of derived classes.
 	// (MeasurementTypes is inherited from UTempoTiledSceneCaptureComponent.)
 
@@ -192,6 +221,13 @@ protected:
 	UPROPERTY(EditAnywhere, meta=(UIMin=0.0, UIMax=90.0, ClampMin=0.0, ClampMax=90.0))
 	float MaxAngleOfIncidence = 87.5;
 
+	// Per-beam intrinsic calibration. When non-empty, replaces the uniform VerticalBeams /
+	// VerticalFOV grid. Array length determines the beam count; VerticalFOV is derived
+	// automatically as a symmetric FOV that encloses all configured elevation angles.
+	// Entries are in channel index order (need not be sorted by elevation).
+	UPROPERTY(EditAnywhere)
+	TArray<FLidarBeamCalibration> BeamCalibration;
+
 	// RateHz and SequenceId are inherited from UTempoSceneCaptureComponent2D.
 
 	TArray<FLidarScanRequest> PendingRequests;
@@ -206,6 +242,7 @@ protected:
 	double VerticalFOV_Internal = -1.0;
 	int32 HorizontalBeams_Internal = -1;
 	int32 VerticalBeams_Internal = -1;
+	TArray<FLidarBeamCalibration> BeamCalibration_Internal;
 
 	friend struct TTextureRead<FLidarPixel>;
 };
@@ -217,12 +254,14 @@ struct TTextureRead<FLidarPixel> : TTextureReadBase<FLidarPixel>
 		const FString& SensorNameIn, const FTransform& SensorTransformIn, const FTransform& CaptureTransform,
 		double HorizontalFOVIn, double VerticalFOVIn, int32 HorizontalBeamsIn, int32 VerticalBeamsIn, const FVector2D& SizeXYFOVIn,
 		double IntensitySaturationDistanceIn, double MaxAngleOfIncidenceIn,
-		int32 NumCaptureComponentsIn, double RelativeYawIn, float MinDepthIn, float MaxDepthIn, double MinDistanceIn, double MaxDistanceIn)
+		int32 NumCaptureComponentsIn, double RelativeYawIn, float MinDepthIn, float MaxDepthIn, double MinDistanceIn, double MaxDistanceIn,
+		TArray<FLidarBeamCalibration> BeamCalibrationIn)
 		: TTextureReadBase(ImageSizeIn, SequenceIdIn, CaptureTimeIn, OwnerNameIn, SensorNameIn, SensorTransformIn),
 			CaptureTransform(CaptureTransform), HorizontalFOV(HorizontalFOVIn), VerticalFOV(VerticalFOVIn), HorizontalBeams(HorizontalBeamsIn),
 			VerticalBeams(VerticalBeamsIn), SizeXYFOV(SizeXYFOVIn), IntensitySaturationDistance(IntensitySaturationDistanceIn),
 			MaxAngleOfIncidence(MaxAngleOfIncidenceIn), NumCaptureComponents(NumCaptureComponentsIn), RelativeYaw(RelativeYawIn),
-			MinDepth(MinDepthIn), MaxDepth(MaxDepthIn), MinDistance(MinDistanceIn), MaxDistance(MaxDistanceIn)
+			MinDepth(MinDepthIn), MaxDepth(MaxDepthIn), MinDistance(MinDistanceIn), MaxDistance(MaxDistanceIn),
+			BeamCalibration(MoveTemp(BeamCalibrationIn))
 	{
 	}
 
@@ -244,6 +283,7 @@ struct TTextureRead<FLidarPixel> : TTextureReadBase<FLidarPixel>
 	float MaxDepth;
 	double MinDistance;
 	double MaxDistance;
+	TArray<FLidarBeamCalibration> BeamCalibration;
 };
 
 // A texture read that holds the horizontally-packed pixels of all active lidar slices.
