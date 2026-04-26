@@ -73,7 +73,8 @@ bool UTempoLidar::HasDetectedParameterChange() const
 	return HorizontalFOV != HorizontalFOV_Internal
 		|| VerticalFOV != VerticalFOV_Internal
 		|| HorizontalBeams != HorizontalBeams_Internal
-		|| VerticalBeams != VerticalBeams_Internal;
+		|| VerticalBeams != VerticalBeams_Internal
+		|| BeamCalibration != BeamCalibration_Internal;
 }
 
 void UTempoLidar::ReconfigureTilesNow()
@@ -104,6 +105,7 @@ void UTempoLidar::UpdateInternalMirrors()
 	VerticalFOV_Internal = VerticalFOV;
 	HorizontalBeams_Internal = HorizontalBeams;
 	VerticalBeams_Internal = VerticalBeams;
+	BeamCalibration_Internal = BeamCalibration;
 }
 
 void UTempoLidar::InitTileSlots()
@@ -119,7 +121,8 @@ void UTempoLidar::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedE
 	if (MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoLidar, HorizontalFOV) ||
 		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoLidar, VerticalFOV) ||
 		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoLidar, HorizontalBeams) ||
-		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoLidar, VerticalBeams))
+		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoLidar, VerticalBeams) ||
+		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoLidar, BeamCalibration))
 	{
 		// Route through the same choke point as the runtime Tick path.
 		bReconfigurePending = true;
@@ -250,6 +253,31 @@ void UTempoLidar::ApplyTilePostProcess(FTempoLidarTile& Tile)
 	Tile.PostProcessSettings.WeightedBlendables.Array.Add(FWeightedBlendable(1.0, Tile.PostProcessMaterialInstance));
 }
 
+double UTempoLidar::GetEffectiveVerticalFOV() const
+{
+	if (BeamCalibration.Num() > 0)
+	{
+		float MinElev = TNumericLimits<float>::Max();
+		float MaxElev = TNumericLimits<float>::Lowest();
+		for (const FLidarBeamCalibration& B : BeamCalibration)
+		{
+			MinElev = FMath::Min(MinElev, B.ElevationDeg);
+			MaxElev = FMath::Max(MaxElev, B.ElevationDeg);
+		}
+		const float AbsMaxElev = FMath::Max(FMath::Abs(MinElev), FMath::Abs(MaxElev));
+		// Pad by one beam-spacing so edge beams land inside the rendered image.
+		const float BeamSpacing = (BeamCalibration.Num() > 1)
+			? (MaxElev - MinElev) / (BeamCalibration.Num() - 1) : 1.0f;
+		return FMath::Max(1.0, static_cast<double>(2.0f * AbsMaxElev + BeamSpacing));
+	}
+	return VerticalFOV;
+}
+
+int32 UTempoLidar::GetEffectiveVerticalBeams() const
+{
+	return BeamCalibration.Num() > 0 ? BeamCalibration.Num() : VerticalBeams;
+}
+
 void UTempoLidar::ConfigureTile(FTempoLidarTile& Tile, double InYawOffset, double SubHorizontalFOV, int32 SubHorizontalBeams, bool bActivate)
 {
 	if (!bActivate)
@@ -268,15 +296,16 @@ void UTempoLidar::ConfigureTile(FTempoLidarTile& Tile, double InYawOffset, doubl
 	Tile.FOVAngle = SubHorizontalFOV;
 	Tile.HorizontalBeams = SubHorizontalBeams;
 
-	const double UndistortedVerticalImagePlaneSize = 2.0 * FMath::Tan(VerticalFOV / 2.0);
-	const FVector2D ImagePlaneSize = 2.0 * SphericalToPerspective(Tile.FOVAngle / 2.0, VerticalFOV / 2.0);
+	const double EffectiveVertFOV = GetEffectiveVerticalFOV();
+	const double UndistortedVerticalImagePlaneSize = 2.0 * FMath::Tan(EffectiveVertFOV / 2.0);
+	const FVector2D ImagePlaneSize = 2.0 * SphericalToPerspective(Tile.FOVAngle / 2.0, EffectiveVertFOV / 2.0);
 
 	const double AspectRatio = ImagePlaneSize.Y / ImagePlaneSize.X;
 	Tile.SizeXYFOV = TempoSensorsSettings->GetLidarUpsamplingFactor() * FVector2D(Tile.HorizontalBeams, AspectRatio * Tile.HorizontalBeams);
 
 	Tile.SizeXY = FIntPoint(FMath::CeilToInt32(Tile.SizeXYFOV.X), FMath::CeilToInt32(Tile.SizeXYFOV.Y));
 	Tile.DistortionFactor = UndistortedVerticalImagePlaneSize / ImagePlaneSize.Y;
-	Tile.DistortedVerticalFOV = FMath::RadiansToDegrees(2.0 * FMath::Atan(FMath::Tan(FMath::DegreesToRadians(VerticalFOV) / 2.0) * Tile.DistortionFactor));
+	Tile.DistortedVerticalFOV = FMath::RadiansToDegrees(2.0 * FMath::Atan(FMath::Tan(FMath::DegreesToRadians(EffectiveVertFOV) / 2.0) * Tile.DistortionFactor));
 
 	AllocateTileViewState(Tile);
 	ApplyTilePostProcess(Tile);
@@ -367,8 +396,12 @@ void TTextureRead<FLidarPixel>::Decode(float TransmissionTime, TempoLidar::Lidar
 
 		for (int32 VerticalBeam = 0; VerticalBeam < VerticalBeams; ++VerticalBeam)
 		{
-			const double AzimuthDeg = (-0.5 + static_cast<double>(HorizontalBeam) / (HorizontalBeams - 1)) * HorizontalFOV;
-			const double ElevationDeg = (-0.5 + static_cast<double>(VerticalBeam) / (VerticalBeams - 1)) * VerticalFOV;
+			const double NominalAzimuthDeg = (-0.5 + static_cast<double>(HorizontalBeam) / (HorizontalBeams - 1)) * HorizontalFOV;
+			const bool bCalibrated = BeamCalibration.IsValidIndex(VerticalBeam);
+			const double ElevationDeg = bCalibrated
+				? BeamCalibration[VerticalBeam].ElevationDeg
+				: (-0.5 + static_cast<double>(VerticalBeam) / (VerticalBeams - 1)) * VerticalFOV;
+			const double AzimuthDeg = NominalAzimuthDeg + (bCalibrated ? BeamCalibration[VerticalBeam].AzimuthOffsetDeg : 0.0);
 			const FVector2D ImagePlaneLocation = SphericalToPerspective(AzimuthDeg, ElevationDeg);
 			const FVector2D PixelCoordinate = ImagePlaneLocationToPixelCoordinate(ImagePlaneLocation);
 			const FIntPoint Coord(FMath::RoundToInt32(PixelCoordinate.X), FMath::RoundToInt32(PixelCoordinate.Y));
@@ -424,8 +457,26 @@ void TTextureRead<FLidarPixel>::Decode(float TransmissionTime, TempoLidar::Lidar
 	ScanSegmentOut.set_vertical_beams(VerticalBeams);
 	ScanSegmentOut.mutable_azimuth_range()->set_max(FMath::DegreesToRadians(HorizontalFOV / 2.0 + RelativeYaw));
 	ScanSegmentOut.mutable_azimuth_range()->set_min(FMath::DegreesToRadians(-HorizontalFOV / 2.0 + RelativeYaw));
-	ScanSegmentOut.mutable_elevation_range()->set_max(FMath::DegreesToRadians(VerticalFOV / 2.0));
-	ScanSegmentOut.mutable_elevation_range()->set_min(FMath::DegreesToRadians(-VerticalFOV / 2.0));
+	if (BeamCalibration.Num() > 0)
+	{
+		// Output elevations are negated from the internal ElevationDeg convention, so the range
+		// is also negated: the most-negative output comes from the most-positive ElevationDeg.
+		float MinOutputElev = TNumericLimits<float>::Max();
+		float MaxOutputElev = TNumericLimits<float>::Lowest();
+		for (const FLidarBeamCalibration& B : BeamCalibration)
+		{
+			const float OutputElev = -B.ElevationDeg;
+			MinOutputElev = FMath::Min(MinOutputElev, OutputElev);
+			MaxOutputElev = FMath::Max(MaxOutputElev, OutputElev);
+		}
+		ScanSegmentOut.mutable_elevation_range()->set_max(FMath::DegreesToRadians(MaxOutputElev));
+		ScanSegmentOut.mutable_elevation_range()->set_min(FMath::DegreesToRadians(MinOutputElev));
+	}
+	else
+	{
+		ScanSegmentOut.mutable_elevation_range()->set_max(FMath::DegreesToRadians(VerticalFOV / 2.0));
+		ScanSegmentOut.mutable_elevation_range()->set_min(FMath::DegreesToRadians(-VerticalFOV / 2.0));
+	}
 }
 
 TFuture<void> UTempoLidar::DecodeAndRespond(TArray<TUniquePtr<FTextureRead>> TextureReads)
@@ -637,10 +688,10 @@ void UTempoLidar::MaybeCapture()
 		Slices.Emplace(new TTextureRead<FLidarPixel>(
 			Tile.SizeXY, SequenceId, CaptureTime, GetOwnerName(), GetSensorName(),
 			GetComponentTransform(), TileWorldTransform, Tile.FOVAngle,
-			VerticalFOV, Tile.HorizontalBeams, VerticalBeams, Tile.SizeXYFOV,
+			GetEffectiveVerticalFOV(), Tile.HorizontalBeams, GetEffectiveVerticalBeams(), Tile.SizeXYFOV,
 			IntensitySaturationDistance, MaxAngleOfIncidence,
 			NumActiveTiles, Tile.YawOffset, Tile.MinDepth, Tile.MaxDepth,
-			MinDistance, MaxDistance));
+			MinDistance, MaxDistance, BeamCalibration));
 
 		PackedX = FMath::Max(PackedX, Tile.SliceDestOffsetX + Tile.SizeXY.X);
 		MaxY = FMath::Max(MaxY, Tile.SizeXY.Y);
