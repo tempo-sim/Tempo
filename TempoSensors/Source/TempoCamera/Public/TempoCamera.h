@@ -3,8 +3,7 @@
 #pragma once
 
 #include "TempoCamera/Camera.pb.h"
-#include "TempoSensorInterface.h"
-#include "TempoSceneCaptureComponent2D.h"
+#include "TempoTiledSceneCaptureComponent.h"
 #include "TempoScriptingServer.h"
 
 #include "CoreMinimal.h"
@@ -199,25 +198,16 @@ struct FTempoCameraTile
 };
 
 UCLASS(Blueprintable, BlueprintType, ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TEMPOCAMERA_API UTempoCamera : public UTempoSceneCaptureComponent2D, public ITempoSensorInterface
+class TEMPOCAMERA_API UTempoCamera : public UTempoTiledSceneCaptureComponent
 {
 	GENERATED_BODY()
 
 public:
 	UTempoCamera();
 
-	virtual void BeginPlay() override;
-
-	virtual void Activate(bool bReset = false) override;
-	virtual void Deactivate() override;
-
-	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
-
 	// UTempoSceneCaptureComponent2D hooks. UTempoCamera drives its own timer and manages its own
 	// readback from SharedFinalTextureTarget (not the inherited TextureTarget, which is used as
 	// the LDR output of the proxy tonemap capture).
-	virtual bool ShouldManageOwnReadback() const override { return false; }
-	virtual bool ShouldManageOwnTimer() const override { return false; }
 	virtual void InitRenderTarget() override;
 
 	// Rebuild only the depth-dependent resources: SharedFinalTextureTarget (format varies with
@@ -227,63 +217,41 @@ public:
 	void InitFinalRenderTargetAndStaging();
 
 	void RequestMeasurement(const TempoCamera::ColorImageRequest& Request, const TResponseDelegate<TempoCamera::ColorImage>& ResponseContinuation);
-
 	void RequestMeasurement(const TempoCamera::LabelImageRequest& Request, const TResponseDelegate<TempoCamera::LabelImage>& ResponseContinuation);
-
 	void RequestMeasurement(const TempoCamera::DepthImageRequest& Request, const TResponseDelegate<TempoCamera::DepthImage>& ResponseContinuation);
-
 	void RequestMeasurement(const TempoCamera::BoundingBoxesRequest& Request, const TResponseDelegate<TempoCamera::BoundingBoxes>& ResponseContinuation);
 
 	FTempoCameraIntrinsics GetIntrinsics() const;
 
 	// Begin ITempoSensorInterface
-	virtual FString GetOwnerName() const override;
-	virtual FString GetSensorName() const override;
-	virtual float GetRate() const override { return RateHz; }
-	virtual const TArray<TEnumAsByte<EMeasurementType>>& GetMeasurementTypes() const override { return MeasurementTypes; }
-	virtual bool IsAwaitingRender() override;
-	virtual void OnRenderCompleted() override;
-	virtual void BlockUntilMeasurementsReady() const override;
 	virtual TOptional<TFuture<void>> SendMeasurements() override;
 	// End ITempoSensorInterface
 
 	bool HasPendingCameraRequests() const;
 
 protected:
-	// UTempoSceneCaptureComponent2D hooks.
 	virtual bool HasPendingRequests() const override { return HasPendingCameraRequests(); }
-	virtual FTextureRead* MakeTextureRead() const override;
-	virtual int32 GetMaxTextureQueueSize() const override;
+	virtual void MaybeCapture() override;
 
 	TFuture<void> DecodeAndRespond(TUniquePtr<FTextureRead> TextureRead);
 
-	// Starts or restarts the timer that calls MaybeCapture.
-	virtual void RestartCaptureTimer() override;
+	// Begin UTempoTiledSceneCaptureComponent tile interface
+	virtual void InitTileSlots() override;
+	virtual void SyncTiles() override;
+	virtual bool HasDetectedParameterChange() const override;
+	virtual void ReconfigureTilesNow() override;
+	virtual void UpdateInternalMirrors() override;
+	// End UTempoTiledSceneCaptureComponent tile interface
 
-	// Called by the capture timer. Issues CaptureScene() on each active tile, then enqueues a
-	// single render command that stitches tile RTs into the shared RT and initiates a single readback.
-	virtual void MaybeCapture() override;
+	// Returns SharedFinalTextureTarget so OnRenderCompleted reads from the merged output.
+	virtual UTextureRenderTarget2D* GetReadbackTextureTarget() const override { return SharedFinalTextureTarget; }
 
-	// Per-tile configuration / state management. Tiles live in Tiles[] as plain USTRUCTs.
-	void SyncTiles();
 	void ConfigureTile(FTempoCameraTile& Tile, double YawOffset, double PitchOffset, double PerspectiveFOV, const FIntPoint& TileSizeXY, const FIntPoint& TileDestOffset, bool bActivate);
 	void ApplyTilePostProcess(FTempoCameraTile& Tile);
 	void SetTileDepthEnabled(FTempoCameraTile& Tile, bool bTileDepthEnabled);
 	void InitTileDistortionMap(FTempoCameraTile& Tile);
 	void AllocateTileViewState(FTempoCameraTile& Tile);
 	void DeactivateTile(FTempoCameraTile& Tile);
-
-	// Returns true iff any watched property differs from its _Internal mirror.
-	bool HasDetectedParameterChange() const;
-
-	// Apply any pending reconfigure iff it is safe to do so (no in-flight reads). No-op otherwise.
-	void TryApplyPendingReconfigure();
-
-	// Deactivate all active tiles, then re-sync. Callers should ensure no reads are in flight.
-	void ReconfigureTilesNow();
-
-	// Snapshot the watched properties into their _Internal mirrors.
-	void UpdateInternalMirrors();
 
 	void SetDepthEnabled(bool bDepthEnabledIn);
 	void ApplyDepthEnabled();
@@ -293,10 +261,6 @@ protected:
 #if WITH_EDITOR
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 #endif
-
-	// The measurement types supported.
-	UPROPERTY(VisibleAnywhere)
-	TArray<TEnumAsByte<EMeasurementType>> MeasurementTypes;
 
 	// Lens distortion parameters. Used by BrownConrady (K1-K3) and Rational (K1-K6) models.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens")
@@ -335,13 +299,6 @@ protected:
 	FTempoLensDistortionParameters LensParameters_Internal;
 	float FOVAngle_Internal = -1.0f;
 	FIntPoint SizeXY_Internal = FIntPoint(-1, -1);
-
-	// Set when HasDetectedParameterChange() sees a diff; cleared after a successful apply.
-	uint8 bReconfigurePending = false;
-
-	// Shared render target holding the stitched output from all active tiles.
-	UPROPERTY(Transient, VisibleAnywhere)
-	UTextureRenderTarget2D* SharedTextureTarget = nullptr;
 
 	// Shared render target holding the stitched aux output (label + depth bytes) from all
 	// active tiles. Merged with the proxy capture's tonemapped color into SharedFinalTextureTarget.
@@ -387,36 +344,21 @@ protected:
 	UMaterialInstanceDynamic* GetOrCreateProxyTonemapMID();
 
 	// Shared pre-exposure (EV stops) pushed onto every tile's AutoExposureBias before each capture.
-	// Driven by a P-controller fed from the proxy's AE-reported luminance. Lifts tile HDR values
-	// into a range where TAA's neighborhood clamp can actually reject stale history — without which
-	// low-light scenes ghost for seconds. See MaybeCapture for the update.
+	// Driven by a P-controller fed from the proxy's AE-reported luminance.
 	float SharedExposureBias = 0.0f;
 	bool bHasValidSharedExposure = false;
 
 	// Tracks whether the previous capture used the single-tile fast path. When this flips, the
-	// active tile's TAA/AE history was conditioned on a different post-process configuration
-	// (multi-tile disables bloom/AE/tonemap and runs AEM_Manual; fast path keeps them on and
-	// runs real AE) — force a camera cut on transition so TAA doesn't sample stale history.
+	// active tile's TAA/AE history was conditioned on a different post-process configuration;
+	// force a camera cut on transition so TAA doesn't sample stale history.
 	bool bWasSingleTileFastPath = false;
 
-	// Queue of pending texture reads for the shared RT (one entry per capture).
-	FTextureReadQueue TextureReadQueue;
-
-	// Retention lists for PPMs and distortion textures that have been replaced but may still be
-	// referenced by render commands in flight. GC cannot collect them while UPROPERTY-referenced,
-	// so we keep them alive for the lifetime of this UTempoCamera. Alternative approach (render
-	// fence + periodic prune) is possible but this is simpler and the memory cost is bounded by
-	// # tiles × # reconfigure / depth-toggle events, which is small in practice.
-	UPROPERTY(Transient)
-	TArray<UMaterialInstanceDynamic*> RetainedPPMs;
-
+	// Retention list for distortion textures that have been replaced but may still be referenced
+	// by in-flight render commands.
 	UPROPERTY(Transient)
 	TArray<UTexture2D*> RetainedDistortionMaps;
 
-	// Retire an asset that's being replaced: moves it into the retention list so it can't be GC'd
-	// while render commands from prior captures still reference it.
-	void RetirePPM(UMaterialInstanceDynamic* PPM);
+	// Retire a distortion map that's being replaced: moves it into the retention list so it
+	// can't be GC'd while render commands from prior captures still reference it.
 	void RetireDistortionMap(UTexture2D* DistortionMap);
-
-	FTimerHandle TimerHandle;
 };

@@ -5,7 +5,6 @@
 #include "TempoSensorsConstants.h"
 
 #include "TempoConversion.h"
-#include "TempoCoreSettings.h"
 #include "TempoCoreUtils.h"
 #include "TempoLabelTypes.h"
 #include "TempoLidarModule.h"
@@ -48,47 +47,6 @@ UTempoLidar::UTempoLidar()
 	bUseRayTracingIfEnabled = false;
 }
 
-FString UTempoLidar::GetOwnerName() const
-{
-	check(GetOwner());
-
-	return GetOwner()->GetActorNameOrLabel();
-}
-
-FString UTempoLidar::GetSensorName() const
-{
-	return GetName();
-}
-
-bool UTempoLidar::IsAwaitingRender()
-{
-	return TextureReadQueue.IsNextAwaitingRender();
-}
-
-void UTempoLidar::OnRenderCompleted()
-{
-	if (!TextureReadQueue.IsNextAwaitingRender() || !SharedTextureTarget)
-	{
-		return;
-	}
-
-	const FRenderTarget* RenderTarget = SharedTextureTarget->GetRenderTargetResource();
-	if (!ensureMsgf(RenderTarget, TEXT("SharedTextureTarget was not initialized. Skipping texture read.")))
-	{
-		return;
-	}
-
-	const bool bShouldBlock = GetDefault<UTempoCoreSettings>()->GetTimeMode() == ETimeMode::FixedStep
-		&& !GetDefault<UTempoSensorsSettings>()->GetPipelinedRendering();
-
-	TextureReadQueue.ReadAllAvailable(RenderTarget, bShouldBlock);
-}
-
-void UTempoLidar::BlockUntilMeasurementsReady() const
-{
-	TextureReadQueue.BlockUntilNextReadComplete();
-}
-
 TOptional<TFuture<void>> UTempoLidar::SendMeasurements()
 {
 	TOptional<TFuture<void>> Future;
@@ -111,69 +69,12 @@ TOptional<TFuture<void>> UTempoLidar::SendMeasurements()
 	return Future;
 }
 
-void UTempoLidar::BeginPlay()
-{
-	Super::BeginPlay();
-
-	// Don't configure tiles during cooking or for template/archetype objects (e.g. Blueprint
-	// editor previews where GetOwner() is not a properly-packaged actor).
-	if (IsRunningCommandlet() || IsTemplate())
-	{
-		return;
-	}
-
-	// Fixed three tile slots (L=0, C=1, R=2). Pre-allocate so tile addresses are stable across
-	// SyncTiles calls and no TArray reallocation ever runs.
-	if (Tiles.Num() != NumTileSlots)
-	{
-		Tiles.SetNum(NumTileSlots);
-	}
-
-	SyncTiles();
-	UpdateInternalMirrors();
-
-	if (UTempoCoreUtils::IsGameWorld(this))
-	{
-		InitSharedRenderTarget();
-	}
-}
-
-void UTempoLidar::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
-{
-	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-	if (HasDetectedParameterChange())
-	{
-		bReconfigurePending = true;
-	}
-	TryApplyPendingReconfigure();
-}
-
 bool UTempoLidar::HasDetectedParameterChange() const
 {
 	return HorizontalFOV != HorizontalFOV_Internal
 		|| VerticalFOV != VerticalFOV_Internal
 		|| HorizontalBeams != HorizontalBeams_Internal
 		|| VerticalBeams != VerticalBeams_Internal;
-}
-
-void UTempoLidar::TryApplyPendingReconfigure()
-{
-	// Don't reconfigure during cooking or for template/archetype objects.
-	if (IsRunningCommandlet() || IsTemplate())
-	{
-		return;
-	}
-	if (!bReconfigurePending)
-	{
-		return;
-	}
-	if (TextureReadQueue.Num() > 0)
-	{
-		return;
-	}
-	ReconfigureTilesNow();
-	bReconfigurePending = false;
 }
 
 void UTempoLidar::ReconfigureTilesNow()
@@ -204,6 +105,14 @@ void UTempoLidar::UpdateInternalMirrors()
 	VerticalFOV_Internal = VerticalFOV;
 	HorizontalBeams_Internal = HorizontalBeams;
 	VerticalBeams_Internal = VerticalBeams;
+}
+
+void UTempoLidar::InitTileSlots()
+{
+	if (Tiles.Num() != NumTileSlots)
+	{
+		Tiles.SetNum(NumTileSlots);
+	}
 }
 
 #if WITH_EDITOR
@@ -268,14 +177,6 @@ void UTempoLidar::AllocateTileViewState(FTempoLidarTile& Tile)
 		{
 			Tile.ViewState.Allocate(World->Scene->GetFeatureLevel());
 		}
-	}
-}
-
-void UTempoLidar::RetirePPM(UMaterialInstanceDynamic* PPM)
-{
-	if (PPM)
-	{
-		RetainedPPMs.AddUnique(PPM);
 	}
 }
 
@@ -578,50 +479,6 @@ TFuture<void> UTempoLidar::DecodeAndRespond(TArray<TUniquePtr<FTextureRead>> Tex
 // Shared RT / capture timer
 // ------------------------------------------------------------------------------------
 
-void UTempoLidar::Activate(bool bReset)
-{
-	// Super::Activate calls InitRenderTarget() (our override → InitSharedRenderTarget) in game worlds.
-	Super::Activate(bReset);
-
-	if (UTempoCoreUtils::IsGameWorld(this))
-	{
-		RestartCaptureTimer();
-	}
-}
-
-void UTempoLidar::Deactivate()
-{
-	Super::Deactivate();
-
-	if (UTempoCoreUtils::IsGameWorld(this))
-	{
-		if (UWorld* World = GetWorld())
-		{
-			World->GetTimerManager().ClearTimer(TimerHandle);
-		}
-		TextureReadQueue.Empty();
-	}
-}
-
-static float GetLidarTimerPeriod(float RateHz)
-{
-	return 1.0 / FMath::Max(UE_KINDA_SMALL_NUMBER, RateHz);
-}
-
-void UTempoLidar::RestartCaptureTimer()
-{
-	if (UWorld* World = GetWorld())
-	{
-		const float TimerPeriod = GetLidarTimerPeriod(RateHz);
-		World->GetTimerManager().SetTimer(TimerHandle, this, &UTempoLidar::MaybeCapture, TimerPeriod, true);
-	}
-}
-
-int32 UTempoLidar::GetMaxTextureQueueSize() const
-{
-	return GetDefault<UTempoSensorsSettings>()->GetMaxCameraRenderBufferSize();
-}
-
 void UTempoLidar::InitRenderTarget()
 {
 	// The lidar primary never renders its own CaptureScene (ShouldManageOwnReadback / Timer both
@@ -666,7 +523,7 @@ void UTempoLidar::InitSharedRenderTarget()
 
 void UTempoLidar::MaybeCapture()
 {
-	const float TimerPeriod = GetLidarTimerPeriod(RateHz);
+	const float TimerPeriod = 1.0f / FMath::Max(UE_KINDA_SMALL_NUMBER, RateHz);
 	if (UWorld* World = GetWorld())
 	{
 		if (!FMath::IsNearlyEqual(World->GetTimerManager().GetTimerRate(TimerHandle), TimerPeriod))

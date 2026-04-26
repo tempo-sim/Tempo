@@ -2,8 +2,7 @@
 
 #pragma once
 
-#include "TempoSceneCaptureComponent2D.h"
-#include "TempoSensorInterface.h"
+#include "TempoTiledSceneCaptureComponent.h"
 
 #include "TempoLidar/Lidar.pb.h"
 
@@ -115,32 +114,18 @@ struct FTempoLidarTile
 };
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TEMPOLIDAR_API UTempoLidar : public UTempoSceneCaptureComponent2D, public ITempoSensorInterface
+class TEMPOLIDAR_API UTempoLidar : public UTempoTiledSceneCaptureComponent
 {
 	GENERATED_BODY()
 
 public:
 	UTempoLidar();
 
-	virtual void BeginPlay() override;
-
-	virtual void Activate(bool bReset = false) override;
-	virtual void Deactivate() override;
-
-	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
-
 #if WITH_EDITOR
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 #endif
 
 	// Begin ITempoSensorInterface
-	virtual FString GetOwnerName() const override;
-	virtual FString GetSensorName() const override;
-	virtual float GetRate() const override { return RateHz; }
-	virtual const TArray<TEnumAsByte<EMeasurementType>>& GetMeasurementTypes() const override { return MeasurementTypes; }
-	virtual bool IsAwaitingRender() override;
-	virtual void OnRenderCompleted() override;
-	virtual void BlockUntilMeasurementsReady() const override;
 	virtual TOptional<TFuture<void>> SendMeasurements() override;
 	// End ITempoSensorInterface
 
@@ -149,11 +134,9 @@ public:
 protected:
 	// UTempoSceneCaptureComponent2D hooks: the lidar manages its own single readback from the packed
 	// SharedTextureTarget and drives its own timer; it never calls CaptureScene() on itself.
-	virtual bool ShouldManageOwnReadback() const override { return false; }
-	virtual bool ShouldManageOwnTimer() const override { return false; }
-	virtual FTextureRead* MakeTextureRead() const override { checkNoEntry(); return nullptr; }
-	virtual int32 GetMaxTextureQueueSize() const override;
+	virtual bool HasPendingRequests() const override { return !PendingRequests.IsEmpty(); }
 	virtual void InitRenderTarget() override;
+	virtual void MaybeCapture() override;
 
 	TFuture<void> DecodeAndRespond(TArray<TUniquePtr<FTextureRead>> TextureReads);
 
@@ -161,28 +144,21 @@ protected:
 	// active tile its SliceDestOffsetX and the packed dimensions.
 	void InitSharedRenderTarget();
 
-	virtual void RestartCaptureTimer() override;
+	// Begin UTempoTiledSceneCaptureComponent tile interface
+	virtual void InitTileSlots() override;
+	virtual void SyncTiles() override;
+	virtual bool HasDetectedParameterChange() const override;
+	virtual void ReconfigureTilesNow() override;
+	virtual void UpdateInternalMirrors() override;
+	// End UTempoTiledSceneCaptureComponent tile interface
 
-	// Called by the capture timer. Builds a multi-view family from active tiles, renders it into
-	// SharedTextureTarget, and enqueues a single copy-to-staging readback.
-	virtual void MaybeCapture() override;
-
-	// Per-tile configuration / state management.
-	void SyncTiles();
 	void ConfigureTile(FTempoLidarTile& Tile, double InYawOffset, double SubHorizontalFOV, int32 SubHorizontalBeams, bool bActivate);
 	void ApplyTilePostProcess(FTempoLidarTile& Tile);
 	void AllocateTileViewState(FTempoLidarTile& Tile);
 	void DeactivateTile(FTempoLidarTile& Tile);
 
-	// Runtime change-detection choke point.
-	bool HasDetectedParameterChange() const;
-	void TryApplyPendingReconfigure();
-	void ReconfigureTilesNow();
-	void UpdateInternalMirrors();
-
 	// The measurement types supported. Should be set in constructor of derived classes.
-	UPROPERTY(VisibleAnywhere)
-	TArray<TEnumAsByte<EMeasurementType>> MeasurementTypes;
+	// (MeasurementTypes is inherited from UTempoTiledSceneCaptureComponent.)
 
 	// The minimum distance this Lidar can measure. Note that GEngine->NearClipPlane must be less than this value.
 	UPROPERTY(EditAnywhere, meta=(UIMin=0.0, ClampMin=0.0))
@@ -230,25 +206,6 @@ protected:
 	double VerticalFOV_Internal = -1.0;
 	int32 HorizontalBeams_Internal = -1;
 	int32 VerticalBeams_Internal = -1;
-
-	uint8 bReconfigurePending = false;
-
-	// Shared render target holding all active slices packed horizontally.
-	UPROPERTY(Transient, VisibleAnywhere)
-	UTextureRenderTarget2D* SharedTextureTarget = nullptr;
-
-	// Queue of pending texture reads for the shared RT (one entry per capture).
-	FTextureReadQueue TextureReadQueue;
-
-	// Retention list for PPMs that have been replaced but may still be referenced by render
-	// commands in flight. Holding a UPROPERTY reference prevents GC from flagging them as
-	// "about to be deleted" mid-render (FMaterialRenderProxy::CacheUniformExpressions asserts).
-	UPROPERTY(Transient)
-	TArray<UMaterialInstanceDynamic*> RetainedPPMs;
-
-	void RetirePPM(UMaterialInstanceDynamic* PPM);
-
-	FTimerHandle TimerHandle;
 
 	friend struct TTextureRead<FLidarPixel>;
 };
