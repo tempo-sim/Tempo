@@ -292,7 +292,7 @@ protected:
 	// Tile slots (fixed size: TL, TR, BL, BR). Stable storage — indices are never invalidated
 	// and held addresses remain valid across reconfigures. Transient: runtime-only state.
 	UPROPERTY(Transient)
-	TArray<FTempoCameraTile> Tiles;
+	FTempoCameraTile Tiles[4];
 
 	// Internal tracking for runtime change detection. Mirrors the watched properties after
 	// they have been pushed to tiles via ReconfigureTilesNow.

@@ -199,7 +199,7 @@ protected:
 	// Tile slots (fixed size: L=0, C=1, R=2). Stable storage — indices are never invalidated
 	// and held addresses remain valid across reconfigures. Transient: runtime-only state.
 	UPROPERTY(Transient)
-	TArray<FTempoLidarTile> Tiles;
+	FTempoLidarTile Tiles[3];
 
 	// Mirrors of the watched properties. Updated in ReconfigureTilesNow.
 	double HorizontalFOV_Internal = -1.0;

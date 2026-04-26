@@ -26,7 +26,6 @@ namespace
 	constexpr int32 LeftTileIndex = 0;
 	constexpr int32 CenterTileIndex = 1;
 	constexpr int32 RightTileIndex = 2;
-	constexpr int32 NumTileSlots = 3;
 }
 
 UTempoLidar::UTempoLidar()
@@ -109,10 +108,6 @@ void UTempoLidar::UpdateInternalMirrors()
 
 void UTempoLidar::InitTileSlots()
 {
-	if (Tiles.Num() != NumTileSlots)
-	{
-		Tiles.SetNum(NumTileSlots);
-	}
 }
 
 #if WITH_EDITOR
@@ -294,11 +289,6 @@ void UTempoLidar::ConfigureTile(FTempoLidarTile& Tile, double InYawOffset, doubl
 
 void UTempoLidar::SyncTiles()
 {
-	if (Tiles.Num() != NumTileSlots)
-	{
-		Tiles.SetNum(NumTileSlots);
-	}
-
 	FTempoLidarTile& L = Tiles[LeftTileIndex];
 	FTempoLidarTile& C = Tiles[CenterTileIndex];
 	FTempoLidarTile& R = Tiles[RightTileIndex];
