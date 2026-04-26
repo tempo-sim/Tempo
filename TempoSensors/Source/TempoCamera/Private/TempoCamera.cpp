@@ -282,10 +282,6 @@ UTempoCamera::UTempoCamera()
 	// color histogram to compute exposure.
 	PostProcessSettings.bOverride_AutoExposureMethod = true;
 	PostProcessSettings.AutoExposureMethod = AEM_Histogram;
-	PostProcessSettings.bOverride_AutoExposureBias = true;
-	PostProcessSettings.AutoExposureBias = 1.0;
-	PostProcessSettings.bOverride_AutoExposureApplyPhysicalCameraExposure = true;
-	PostProcessSettings.AutoExposureApplyPhysicalCameraExposure = 0;
 	PostProcessSettings.bOverride_AutoExposureSpeedUp = true;
 	PostProcessSettings.AutoExposureSpeedUp = 20.0;
 	PostProcessSettings.bOverride_AutoExposureSpeedDown = true;
@@ -294,11 +290,14 @@ UTempoCamera::UTempoCamera()
 	PostProcessSettings.AutoExposureLowPercent = 75.0;
 	PostProcessSettings.bOverride_AutoExposureHighPercent = true;
 	PostProcessSettings.AutoExposureHighPercent = 85.0;
-	PostProcessSettings.bOverride_MotionBlurAmount = true;
-	PostProcessSettings.MotionBlurAmount = 0.0;
 
-	// Reasonable defaults
-	ShowFlags.SetMotionBlur(true);
+	// Lumen
+	PostProcessSettings.bOverride_DynamicGlobalIlluminationMethod = true;
+	PostProcessSettings.DynamicGlobalIlluminationMethod = EDynamicGlobalIlluminationMethod::Lumen;
+	PostProcessSettings.bOverride_ReflectionMethod = true;
+	PostProcessSettings.ReflectionMethod = EReflectionMethod::Lumen;
+
+	ShowFlags.SetMotionBlur(false);
 	ShowFlags.SetAntiAliasing(true);
 	ShowFlags.SetTemporalAA(true);
 	ShowFlags.SetEyeAdaptation(true);
