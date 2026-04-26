@@ -916,8 +916,6 @@ void UTempoCamera::MaybeCapture()
 		    ShowFlags.SetSkyLighting(false);
 		    ShowFlags.SetTranslucency(false);
 		    ShowFlags.SetParticles(false);
-			ShowFlags.SetAntiAliasing(false);
-			ShowFlags.SetTemporalAA(false);
 			CaptureScene();
 			ShowFlags = PrevShowFlags;
 		}
