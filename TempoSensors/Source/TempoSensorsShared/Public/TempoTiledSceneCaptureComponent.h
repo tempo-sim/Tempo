@@ -78,11 +78,11 @@ protected:
 	void RetirePPM(UMaterialInstanceDynamic* PPM);
 
 	// The measurement types this sensor supports. Set in subclass constructors.
-	UPROPERTY(VisibleAnywhere)
+	UPROPERTY(VisibleAnywhere, Category = "Tempo")
 	TArray<TEnumAsByte<EMeasurementType>> MeasurementTypes;
 
 	// Shared render target holding the packed tile output.
-	UPROPERTY(Transient, VisibleAnywhere)
+	UPROPERTY(Transient)
 	UTextureRenderTarget2D* SharedTextureTarget = nullptr;
 
 	// Queue of pending texture reads for the shared RT (one entry per capture).

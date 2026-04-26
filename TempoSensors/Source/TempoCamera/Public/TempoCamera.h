@@ -263,7 +263,7 @@ protected:
 #endif
 
 	// Lens distortion parameters. Used by BrownConrady (K1-K3) and Rational (K1-K6) models.
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo")
 	FTempoLensDistortionParameters LensParameters;
 
 	// FOVAngle (horizontal), SizeXY, RateHz, SequenceId, PostProcessSettings, ShowFlagSettings,
@@ -271,15 +271,15 @@ protected:
 	// USceneCaptureComponent(2D).
 
 	// Whether this camera can measure depth. Disabled when not requested to optimize performance.
-	UPROPERTY(VisibleAnywhere, Category = "Depth")
+	UPROPERTY(VisibleAnywhere, Category = "Tempo")
 	bool bDepthEnabled = false;
 
 	// The minimum depth this camera can measure (if depth is enabled). Will be set to the global near clip plane.
-	UPROPERTY(VisibleAnywhere, Category = "Depth")
+	UPROPERTY(VisibleAnywhere, Category = "Tempo")
 	float MinDepth = 10.0;
 
 	// The maximum depth this camera can measure (if depth is enabled). Will be set to UTempoSensorsSettings::MaxCameraDepth.
-	UPROPERTY(VisibleAnywhere, Category = "Depth")
+	UPROPERTY(VisibleAnywhere, Category = "Tempo")
 	float MaxDepth = 100000.0;
 
 	int32 NumResponded = 0;
