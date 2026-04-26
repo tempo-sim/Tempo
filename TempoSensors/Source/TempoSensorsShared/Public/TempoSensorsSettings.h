@@ -138,14 +138,6 @@ private:
 	// The max number of frames per camera to buffer before dropping.
 	UPROPERTY(EditAnywhere, Config, Category="Camera", AdvancedDisplay)
 	int32 MaxCameraRenderBufferSize = 2;
-
-	// When true, FixedStep mode allows the game thread to advance without waiting for sensor
-	// readback to complete. Sensor images may arrive 1-2 frames late, but throughput increases
-	// because the game, render, and readback pipelines run in parallel. Each image's
-	// MeasurementHeader carries the correct CaptureTime and SequenceId so clients know which
-	// simulation frame the data corresponds to.
-	UPROPERTY(EditAnywhere, Config, Category="Time|FixedStep")
-	bool bPipelinedRendering = false;
 	
 	// This special row can be overriden by a value passed through the subsurface color.
 	UPROPERTY(EditAnywhere, Config, Category="Camera")
@@ -174,4 +166,12 @@ private:
 	// The size of buffer to use as an override in FRayTracingScene, if enabled.
 	UPROPERTY(EditAnywhere, Config, Category="Advanced", meta=(EditCondition=bEnableRayTracingSceneReadbackBuffersOverrunWorkaround))
 	uint32 RayTracingSceneMaxReadbackBuffersOverride = 40;
+
+	// When true, FixedStep mode allows the game thread to advance without waiting for sensor
+	// readback to complete. Sensor images may arrive 1-2 frames late, but throughput increases
+	// because the game, render, and readback pipelines run in parallel. Each image's
+	// MeasurementHeader carries the correct CaptureTime and SequenceId so clients know which
+	// simulation frame the data corresponds to.
+	UPROPERTY(EditAnywhere, Config, Category="Advanced")
+	bool bPipelinedRendering = false;
 };
