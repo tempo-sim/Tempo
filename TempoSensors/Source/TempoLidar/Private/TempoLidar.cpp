@@ -111,9 +111,9 @@ TOptional<TFuture<void>> UTempoLidar::SendMeasurements()
 	return Future;
 }
 
-void UTempoLidar::OnRegister()
+void UTempoLidar::BeginPlay()
 {
-	Super::OnRegister();
+	Super::BeginPlay();
 
 	// Don't configure tiles during cooking or for template/archetype objects (e.g. Blueprint
 	// editor previews where GetOwner() is not a properly-packaged actor).

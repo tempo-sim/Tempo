@@ -310,9 +310,9 @@ UTempoCamera::UTempoCamera()
 	ShowFlags.SetDepthOfField(true);
 }
 
-void UTempoCamera::OnRegister()
+void UTempoCamera::BeginPlay()
 {
-	Super::OnRegister();
+	Super::BeginPlay();
 
 	// Don't configure tiles during cooking or for template/archetype objects (e.g. Blueprint
 	// editor previews where GetOwner() is not a properly-packaged actor).
@@ -337,11 +337,6 @@ void UTempoCamera::OnRegister()
 		// paths. Init render targets here so they are ready for the first capture regardless.
 		InitRenderTarget();
 	}
-}
-
-void UTempoCamera::BeginPlay()
-{
-	Super::BeginPlay();
 }
 
 void UTempoCamera::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)

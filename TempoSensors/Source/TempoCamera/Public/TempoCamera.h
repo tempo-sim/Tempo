@@ -206,8 +206,6 @@ class TEMPOCAMERA_API UTempoCamera : public UTempoSceneCaptureComponent2D, publi
 public:
 	UTempoCamera();
 
-	virtual void OnRegister() override;
-
 	virtual void BeginPlay() override;
 
 	virtual void Activate(bool bReset = false) override;
