@@ -260,14 +260,11 @@ protected:
 	TFuture<void> DecodeAndRespond(TUniquePtr<FTextureRead> TextureRead);
 
 	// Starts or restarts the timer that calls MaybeCapture.
-	void RestartCaptureTimer();
+	virtual void RestartCaptureTimer() override;
 
 	// Called by the capture timer. Issues CaptureScene() on each active tile, then enqueues a
 	// single render command that stitches tile RTs into the shared RT and initiates a single readback.
-	void MaybeCapture();
-
-	// Returns the next staging texture from the ring buffer and advances the index.
-	FTextureRHIRef AcquireNextStagingTexture();
+	virtual void MaybeCapture() override;
 
 	// Per-tile configuration / state management. Tiles live in Tiles[] as plain USTRUCTs.
 	void SyncTiles();
@@ -398,16 +395,14 @@ protected:
 	float SharedExposureBias = 0.0f;
 	bool bHasValidSharedExposure = false;
 
-	// Ring buffer of staging textures for GPU->CPU readback of the shared RT.
-	TArray<FTextureRHIRef> StagingTextures;
-	FCriticalSection StagingTexturesMutex;
-	int32 NextStagingIndex = 0;
+	// Tracks whether the previous capture used the single-tile fast path. When this flips, the
+	// active tile's TAA/AE history was conditioned on a different post-process configuration
+	// (multi-tile disables bloom/AE/tonemap and runs AEM_Manual; fast path keeps them on and
+	// runs real AE) — force a camera cut on transition so TAA doesn't sample stale history.
+	bool bWasSingleTileFastPath = false;
 
 	// Queue of pending texture reads for the shared RT (one entry per capture).
 	FTextureReadQueue TextureReadQueue;
-
-	// Fence indicating that staging texture init has completed on the render thread.
-	FRenderCommandFence TextureInitFence;
 
 	// Retention lists for PPMs and distortion textures that have been replaced but may still be
 	// referenced by render commands in flight. GC cannot collect them while UPROPERTY-referenced,

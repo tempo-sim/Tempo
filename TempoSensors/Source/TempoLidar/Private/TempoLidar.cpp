@@ -617,14 +617,6 @@ void UTempoLidar::RestartCaptureTimer()
 	}
 }
 
-FTextureRHIRef UTempoLidar::AcquireNextStagingTexture()
-{
-	check(StagingTextures.Num() > 0);
-	const FTextureRHIRef& Texture = StagingTextures[NextStagingIndex];
-	NextStagingIndex = (NextStagingIndex + 1) % StagingTextures.Num();
-	return Texture;
-}
-
 int32 UTempoLidar::GetMaxTextureQueueSize() const
 {
 	return GetDefault<UTempoSensorsSettings>()->GetMaxCameraRenderBufferSize();
@@ -640,10 +632,6 @@ void UTempoLidar::InitRenderTarget()
 
 void UTempoLidar::InitSharedRenderTarget()
 {
-	// Wait for any previous staging texture init render command to complete before modifying
-	// StagingTextures, since the render command accesses the array via raw pointer.
-	TextureInitFence.Wait();
-
 	// Walk active slices in Left->Center->Right order, assigning each its horizontal offset
 	// within the packed RT. Packed width is the running sum; packed height is the max slice height.
 	int32 PackedX = 0;
@@ -670,60 +658,7 @@ void UTempoLidar::InitSharedRenderTarget()
 	SharedTextureTarget->RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA16f;
 	SharedTextureTarget->InitCustomFormat(PackedX, MaxY, EPixelFormat::PF_A16B16G16R16, true);
 
-	const int32 MaxQueueSize = GetDefault<UTempoSensorsSettings>()->GetMaxCameraRenderBufferSize();
-	const int32 NumStagingTextures = FMath::Max(2, MaxQueueSize > 0 ? MaxQueueSize + 1 : 2);
-
-	{
-		FScopeLock Lock(&StagingTexturesMutex);
-		if (NumStagingTextures != StagingTextures.Num())
-		{
-			StagingTextures.SetNum(NumStagingTextures);
-			NextStagingIndex = 0;
-		}
-	}
-
-	struct FInitStagingContext
-	{
-		FString NameBase;
-		int32 SizeX;
-		int32 SizeY;
-		EPixelFormat PixelFormat;
-		int32 NumTextures;
-		TArray<FTextureRHIRef>* StagingTextures;
-		FCriticalSection* StagingTexturesMutex;
-	};
-
-	FInitStagingContext Context = {
-		GetName(),
-		SharedTextureTarget->SizeX,
-		SharedTextureTarget->SizeY,
-		SharedTextureTarget->GetFormat(),
-		NumStagingTextures,
-		&StagingTextures,
-		&StagingTexturesMutex
-	};
-
-	ENQUEUE_RENDER_COMMAND(InitTempoLidarSharedTextureCopy)(
-		[Context](FRHICommandListImmediate& RHICmdList)
-		{
-			constexpr ETextureCreateFlags TexCreateFlags = ETextureCreateFlags::Shared | ETextureCreateFlags::CPUReadback;
-
-			for (int32 I = 0; I < Context.NumTextures; ++I)
-			{
-				const FRHITextureCreateDesc Desc =
-					FRHITextureCreateDesc::Create2D(*FString::Printf(TEXT("%s SharedStagingTexture %d"), *Context.NameBase, I))
-					.SetExtent(Context.SizeX, Context.SizeY)
-					.SetFormat(Context.PixelFormat)
-					.SetFlags(TexCreateFlags);
-
-				{
-					FScopeLock Lock(Context.StagingTexturesMutex);
-					(*Context.StagingTextures)[I] = RHICreateTexture(Desc);
-				}
-			}
-		});
-
-	TextureInitFence.BeginFence();
+	AllocateStagingTextures(SharedTextureTarget->SizeX, SharedTextureTarget->SizeY, SharedTextureTarget->GetFormat());
 
 	// Any pending texture reads reference the previous RT geometry; discard them.
 	TextureReadQueue.Empty();
