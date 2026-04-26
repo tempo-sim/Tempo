@@ -349,10 +349,6 @@ void UTempoCamera::UpdateInternalMirrors()
 
 void UTempoCamera::InitTileSlots()
 {
-	if (Tiles.Num() != 4)
-	{
-		Tiles.SetNum(4);
-	}
 }
 
 bool UTempoCamera::HasPendingCameraRequests() const
@@ -1210,11 +1206,6 @@ void UTempoCamera::ConfigureTile(FTempoCameraTile& Tile, double YawOffset, doubl
 void UTempoCamera::SyncTiles()
 {
 	ValidateFOV();
-
-	if (Tiles.Num() != 4)
-	{
-		Tiles.SetNum(4);
-	}
 
 	FTempoCameraTile& TL = Tiles[0];
 	FTempoCameraTile& TR = Tiles[1];
