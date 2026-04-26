@@ -122,7 +122,7 @@ class TEMPOLIDAR_API UTempoLidar : public UTempoSceneCaptureComponent2D, public 
 public:
 	UTempoLidar();
 
-	virtual void OnRegister() override;
+	virtual void BeginPlay() override;
 
 	virtual void Activate(bool bReset = false) override;
 	virtual void Deactivate() override;
