@@ -137,7 +137,7 @@ private:
 	
 	// The max number of frames per camera to buffer before dropping.
 	UPROPERTY(EditAnywhere, Config, Category="Camera", AdvancedDisplay)
-	int32 MaxCameraRenderBufferSize = 2;
+	int32 MaxCameraRenderBufferSize = 4;
 	
 	// This special row can be overriden by a value passed through the subsurface color.
 	UPROPERTY(EditAnywhere, Config, Category="Camera")
