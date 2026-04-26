@@ -83,36 +83,36 @@ private:
 	bool bInstantaneouslyUniqueInstanceLabels = false;
 
 	// The post process material that should be used by TempoCamera when not capturing the depth image.
-	UPROPERTY(EditAnywhere, Config, Category="Camera", meta=( AllowedClasses="/Script/Engine.BlendableInterface", Keywords="PostProcess" ))
+	UPROPERTY(EditAnywhere, Config, Category="Advanced", meta=( AllowedClasses="/Script/Engine.BlendableInterface", Keywords="PostProcess" ))
 	TSoftObjectPtr<UMaterialInterface> CameraPostProcessMaterialNoDepth;
 
 	// The post process material that should be used by TempoCamera when capturing the depth image.
-	UPROPERTY(EditAnywhere, Config, Category="Camera", meta=( AllowedClasses="/Script/Engine.BlendableInterface", Keywords="PostProcess" ))
+	UPROPERTY(EditAnywhere, Config, Category="Advanced", meta=( AllowedClasses="/Script/Engine.BlendableInterface", Keywords="PostProcess" ))
 	TSoftObjectPtr<UMaterialInterface> CameraPostProcessMaterialWithDepth;
 
 	// The UI-domain material used to copy each tile render target into the shared stitched render
 	// target via Canvas. Must have a Texture2D parameter named "TileRT" and output its sampled RGBA
 	// unchanged to Final Color. Used by UTempoCamera's tile stitch.
-	UPROPERTY(EditAnywhere, Config, Category="Camera", meta=( AllowedClasses="/Script/Engine.MaterialInterface" ))
+	UPROPERTY(EditAnywhere, Config, Category="Advanced", meta=( AllowedClasses="/Script/Engine.MaterialInterface" ))
 	TSoftObjectPtr<UMaterialInterface> CameraStitchPassthroughMaterial;
 
 	// The material used to copy each tile render target into the shared aux render target via Canvas.
 	// Must have a Texture2D parameter named "TileRT". In Phase 2 this can be the same shape as the
 	// passthrough material; in Phase 3 it will unpack aux bits from the HDR tile format.
-	UPROPERTY(EditAnywhere, Config, Category="Camera", meta=( AllowedClasses="/Script/Engine.MaterialInterface" ))
+	UPROPERTY(EditAnywhere, Config, Category="Advanced", meta=( AllowedClasses="/Script/Engine.MaterialInterface" ))
 	TSoftObjectPtr<UMaterialInterface> CameraStitchAuxMaterial;
 
 	// Merge material used when depth is enabled. Output RT is PF_A16B16G16R16 (16-bit UNORM per
 	// channel, 8 bytes/pixel) matching FCameraPixelWithDepth. Must have Texture2D parameters
 	// "ColorRT" (fp16 HDR linear) and "AuxRT" (RGBA8 with label in R and 24-bit depth in GBA).
 	// Packs (saturated LDR color bytes, label byte, 24-bit depth bytes) into the 4 UNORM16 channels.
-	UPROPERTY(EditAnywhere, Config, Category="Camera", meta=( AllowedClasses="/Script/Engine.MaterialInterface" ))
+	UPROPERTY(EditAnywhere, Config, Category="Advanced", meta=( AllowedClasses="/Script/Engine.MaterialInterface" ))
 	TSoftObjectPtr<UMaterialInterface> CameraStitchMergeMaterialWithDepth;
 
 	// Merge material used when depth is disabled. Output RT is RGBA8 (4 bytes/pixel) matching
 	// FCameraPixelNoDepth. Same texture parameters as the WithDepth variant; packs (BGR color
 	// bytes, label byte) into the RGBA8 output. AuxRT's G/B/A channels (depth bytes) are ignored.
-	UPROPERTY(EditAnywhere, Config, Category="Camera", meta=( AllowedClasses="/Script/Engine.MaterialInterface" ))
+	UPROPERTY(EditAnywhere, Config, Category="Advanced", meta=( AllowedClasses="/Script/Engine.MaterialInterface" ))
 	TSoftObjectPtr<UMaterialInterface> CameraStitchMergeMaterialNoDepth;
 
 	// Post-process material used by UTempoCamera's proxy scene capture. Runs at blendable location
@@ -120,7 +120,7 @@ private:
 	// Must have a Texture2D parameter "HDRColorRT" (Linear Color sampler) bound to the stitched
 	// HDR render target; the sampled RGB is written to Emissive Color so the tonemapper operates
 	// on the stitched-tile color rather than the (empty) scene render.
-	UPROPERTY(EditAnywhere, Config, Category="Camera", meta=( AllowedClasses="/Script/Engine.BlendableInterface", Keywords="PostProcess" ))
+	UPROPERTY(EditAnywhere, Config, Category="Advanced", meta=( AllowedClasses="/Script/Engine.BlendableInterface", Keywords="PostProcess" ))
 	TSoftObjectPtr<UMaterialInterface> CameraProxyTonemapMaterial;
 
 	// Encoding to use for color images.
