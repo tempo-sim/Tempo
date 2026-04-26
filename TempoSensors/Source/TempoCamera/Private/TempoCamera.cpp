@@ -310,72 +310,11 @@ UTempoCamera::UTempoCamera()
 	ShowFlags.SetDepthOfField(true);
 }
 
-void UTempoCamera::BeginPlay()
-{
-	Super::BeginPlay();
-
-	// Don't configure tiles during cooking or for template/archetype objects (e.g. Blueprint
-	// editor previews where GetOwner() is not a properly-packaged actor).
-	if (IsRunningCommandlet() || IsTemplate())
-	{
-		return;
-	}
-
-	// Fixed four tile slots (TL=0, TR=1, BL=2, BR=3). Pre-allocate so tile addresses are stable
-	// across SyncTiles calls and no TArray reallocation ever runs.
-	if (Tiles.Num() != 4)
-	{
-		Tiles.SetNum(4);
-	}
-
-	SyncTiles();
-	UpdateInternalMirrors();
-
-	if (UTempoCoreUtils::IsGameWorld(this))
-	{
-		// Activate() runs when added to a live world, but may be skipped in some registration
-		// paths. Init render targets here so they are ready for the first capture regardless.
-		InitRenderTarget();
-	}
-}
-
-void UTempoCamera::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
-{
-	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-	if (HasDetectedParameterChange())
-	{
-		bReconfigurePending = true;
-	}
-	TryApplyPendingReconfigure();
-}
-
 bool UTempoCamera::HasDetectedParameterChange() const
 {
 	return SizeXY != SizeXY_Internal
 		|| FOVAngle != FOVAngle_Internal
 		|| LensParameters != LensParameters_Internal;
-}
-
-void UTempoCamera::TryApplyPendingReconfigure()
-{
-	// Don't reconfigure during cooking or for template/archetype objects.
-	if (IsRunningCommandlet() || IsTemplate())
-	{
-		return;
-	}
-	if (!bReconfigurePending)
-	{
-		return;
-	}
-	// Only reconfigure when no readback is in flight — tiles feed a single shared queue on the
-	// owner, so we can gate on its length.
-	if (TextureReadQueue.Num() > 0)
-	{
-		return;
-	}
-	ReconfigureTilesNow();
-	bReconfigurePending = false;
 }
 
 void UTempoCamera::ReconfigureTilesNow()
@@ -408,49 +347,17 @@ void UTempoCamera::UpdateInternalMirrors()
 	SizeXY_Internal = SizeXY;
 }
 
-FString UTempoCamera::GetOwnerName() const
+void UTempoCamera::InitTileSlots()
 {
-	check(GetOwner());
-	return GetOwner()->GetActorNameOrLabel();
-}
-
-FString UTempoCamera::GetSensorName() const
-{
-	return GetName();
+	if (Tiles.Num() != 4)
+	{
+		Tiles.SetNum(4);
+	}
 }
 
 bool UTempoCamera::HasPendingCameraRequests() const
 {
 	return !PendingColorImageRequests.IsEmpty() || !PendingLabelImageRequests.IsEmpty() || !PendingDepthImageRequests.IsEmpty() || !PendingBoundingBoxesRequests.IsEmpty();
-}
-
-bool UTempoCamera::IsAwaitingRender()
-{
-	return TextureReadQueue.IsNextAwaitingRender();
-}
-
-void UTempoCamera::OnRenderCompleted()
-{
-	if (!TextureReadQueue.IsNextAwaitingRender() || !SharedFinalTextureTarget)
-	{
-		return;
-	}
-
-	const FRenderTarget* RenderTarget = SharedFinalTextureTarget->GetRenderTargetResource();
-	if (!ensureMsgf(RenderTarget, TEXT("SharedFinalTextureTarget was not initialized. Skipping texture read.")))
-	{
-		return;
-	}
-
-	const bool bShouldBlock = GetDefault<UTempoCoreSettings>()->GetTimeMode() == ETimeMode::FixedStep
-		&& !GetDefault<UTempoSensorsSettings>()->GetPipelinedRendering();
-
-	TextureReadQueue.ReadAllAvailable(RenderTarget, bShouldBlock);
-}
-
-void UTempoCamera::BlockUntilMeasurementsReady() const
-{
-	TextureReadQueue.BlockUntilNextReadComplete();
 }
 
 TOptional<TFuture<void>> UTempoCamera::SendMeasurements()
@@ -562,46 +469,6 @@ TFuture<void> UTempoCamera::DecodeAndRespond(TUniquePtr<FTextureRead> TextureRea
 // Shared RT / capture timer
 // ------------------------------------------------------------------------------------
 
-void UTempoCamera::Activate(bool bReset)
-{
-	// Super::Activate calls InitRenderTarget() (our override) when in a game world. It does not
-	// start its own capture timer because ShouldManageOwnTimer() returns false.
-	Super::Activate(bReset);
-
-	if (UTempoCoreUtils::IsGameWorld(this))
-	{
-		RestartCaptureTimer();
-	}
-}
-
-void UTempoCamera::Deactivate()
-{
-	Super::Deactivate();
-
-	if (UTempoCoreUtils::IsGameWorld(this))
-	{
-		if (UWorld* World = GetWorld())
-		{
-			World->GetTimerManager().ClearTimer(TimerHandle);
-		}
-		TextureReadQueue.Empty();
-	}
-}
-
-static float GetCameraTimerPeriod(float RateHz)
-{
-	return 1.0 / FMath::Max(UE_KINDA_SMALL_NUMBER, RateHz);
-}
-
-void UTempoCamera::RestartCaptureTimer()
-{
-	if (UWorld* World = GetWorld())
-	{
-		const float TimerPeriod = GetCameraTimerPeriod(RateHz);
-		World->GetTimerManager().SetTimer(TimerHandle, this, &UTempoCamera::MaybeCapture, TimerPeriod, true);
-	}
-}
-
 UMaterialInstanceDynamic* UTempoCamera::GetOrCreateStitchMergeMID()
 {
 	if (!TextureTarget || !SharedAuxTextureTarget)
@@ -699,21 +566,6 @@ UMaterialInstanceDynamic* UTempoCamera::GetOrCreateProxyTonemapMID()
 	return ProxyTonemapMID;
 }
 
-FTextureRead* UTempoCamera::MakeTextureRead() const
-{
-	// UTempoCamera manages its own readback (ShouldManageOwnReadback returns false), so this
-	// override is only here to satisfy the pure-virtual contract of UTempoSceneCaptureComponent2D.
-	// FTextureReads are actually constructed inline in MaybeCapture, where CameraPixelWithDepth vs
-	// NoDepth is selected based on the current bDepthEnabled.
-	checkNoEntry();
-	return nullptr;
-}
-
-int32 UTempoCamera::GetMaxTextureQueueSize() const
-{
-	return GetDefault<UTempoSensorsSettings>()->GetMaxCameraRenderBufferSize();
-}
-
 void UTempoCamera::InitRenderTarget()
 {
 	if (SizeXY.X <= 0 || SizeXY.Y <= 0)
@@ -787,7 +639,7 @@ void UTempoCamera::InitFinalRenderTargetAndStaging()
 
 void UTempoCamera::MaybeCapture()
 {
-	const float TimerPeriod = GetCameraTimerPeriod(RateHz);
+	const float TimerPeriod = 1.0f / FMath::Max(UE_KINDA_SMALL_NUMBER, RateHz);
 	if (UWorld* World = GetWorld())
 	{
 		if (!FMath::IsNearlyEqual(World->GetTimerManager().GetTimerRate(TimerHandle), TimerPeriod))
@@ -1056,18 +908,18 @@ void UTempoCamera::MaybeCapture()
 		if (GetOrCreateProxyTonemapMID())
 		{
 			// The proxy's scene render is useless — its PPM overwrites scene color before bloom/AE. Hide
-	    	// world geometry and lighting so nothing gets rasterized.
-	    	auto PrevShowFlags = ShowFlags;
-	    	ShowFlags.SetAtmosphere(false);
-	    	ShowFlags.SetFog(false);
-	    	ShowFlags.SetLighting(false);
-	    	ShowFlags.SetDynamicShadows(false);
-	    	ShowFlags.SetStaticMeshes(false);
-	    	ShowFlags.SetSkeletalMeshes(false);
-	    	ShowFlags.SetLandscape(false);
-	    	ShowFlags.SetSkyLighting(false);
-	    	ShowFlags.SetTranslucency(false);
-	    	ShowFlags.SetParticles(false);
+		    // world geometry and lighting so nothing gets rasterized.
+		    auto PrevShowFlags = ShowFlags;
+		    ShowFlags.SetAtmosphere(false);
+		    ShowFlags.SetFog(false);
+		    ShowFlags.SetLighting(false);
+		    ShowFlags.SetDynamicShadows(false);
+		    ShowFlags.SetStaticMeshes(false);
+		    ShowFlags.SetSkeletalMeshes(false);
+		    ShowFlags.SetLandscape(false);
+		    ShowFlags.SetSkyLighting(false);
+		    ShowFlags.SetTranslucency(false);
+		    ShowFlags.SetParticles(false);
 			ShowFlags.SetAntiAliasing(false);
 			ShowFlags.SetTemporalAA(false);
 			CaptureScene();
@@ -1075,11 +927,7 @@ void UTempoCamera::MaybeCapture()
 		}
 	}
 
-	// Update SharedExposureBias from whichever view state ran the AE pass this frame. In multi-tile
-	// that's the proxy's view state (GetViewState(0)); in fast path it's the active tile's view
-	// state — which actually rendered the scene with bloom/AE/tonemap on. GetLastAverageSceneLuminance
-	// reports the *true* scene luminance (the AE shader divides out View.OneOverPreExposure before
-	// measuring), so we can set the bias directly instead of integrating.
+	// Update SharedExposureBias from whichever view state ran the AE pass this frame.
 	{
 		FSceneViewStateInterface* SourceViewState = bSingleTileFastPath
 			? (SingleActiveTile ? SingleActiveTile->ViewState.GetReference() : nullptr)
@@ -1165,14 +1013,6 @@ void UTempoCamera::AllocateTileViewState(FTempoCameraTile& Tile)
 		{
 			Tile.ViewState.Allocate(World->Scene->GetFeatureLevel());
 		}
-	}
-}
-
-void UTempoCamera::RetirePPM(UMaterialInstanceDynamic* PPM)
-{
-	if (PPM)
-	{
-		RetainedPPMs.AddUnique(PPM);
 	}
 }
 
