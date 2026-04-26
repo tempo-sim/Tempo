@@ -353,18 +353,14 @@ protected:
 	// Gets the number of pending texture reads
 	int32 NumPendingTextureReads() const { return TextureReadQueue.Num(); }
 
-private:
-	// Starts or restarts the timer that calls MaybeCapture
-	void RestartCaptureTimer();
+	// Returns the next staging texture from the ring buffer and advances the index.
+	FTextureRHIRef AcquireNextStagingTexture();
 
-	// Capture a frame, if any client has requested one.
-	void MaybeCapture();
-
-	// Our Queue of pending texture reads.
-	FTextureReadQueue TextureReadQueue;
-
-	// A fence to indicate that our render textures have been initialized. Should only be accessed from the Game thread.
-	FRenderCommandFence TextureInitFence;
+protected:
+	// (Re)allocates the staging-texture ring sized to the given dimensions and format. Waits for any
+	// previous init render command to complete before reallocating. Derived classes whose readback
+	// target is not the inherited TextureTarget call this from their own RT init path.
+	void AllocateStagingTextures(int32 SizeX, int32 SizeY, EPixelFormat PixelFormat);
 
 	// Ring buffer of staging textures for GPU->CPU readback. Each in-flight FTextureRead
 	// gets its own staging texture, preventing tearing when multiple frames are in flight.
@@ -372,14 +368,18 @@ private:
 	FCriticalSection StagingTexturesMutex;
 	int32 NextStagingIndex = 0;
 
-	// Returns the next staging texture from the ring buffer and advances the index.
-	FTextureRHIRef AcquireNextStagingTexture()
-	{
-		check(StagingTextures.Num() > 0);
-		const FTextureRHIRef& Texture = StagingTextures[NextStagingIndex];
-		NextStagingIndex = (NextStagingIndex + 1) % StagingTextures.Num();
-		return Texture;
-	}
+	// A fence to indicate that our staging textures have been initialized. Should only be accessed from the Game thread.
+	FRenderCommandFence TextureInitFence;
+
+private:
+	// Starts or restarts the timer that calls MaybeCapture
+	virtual void RestartCaptureTimer();
+
+	// Capture a frame, if any client has requested one.
+	virtual void MaybeCapture();
+
+	// Our Queue of pending texture reads.
+	FTextureReadQueue TextureReadQueue;
 
 	FTimerHandle TimerHandle;
 };

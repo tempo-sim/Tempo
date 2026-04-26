@@ -161,13 +161,11 @@ protected:
 	// active tile its SliceDestOffsetX and the packed dimensions.
 	void InitSharedRenderTarget();
 
-	void RestartCaptureTimer();
+	virtual void RestartCaptureTimer() override;
 
 	// Called by the capture timer. Builds a multi-view family from active tiles, renders it into
 	// SharedTextureTarget, and enqueues a single copy-to-staging readback.
-	void MaybeCapture();
-
-	FTextureRHIRef AcquireNextStagingTexture();
+	virtual void MaybeCapture() override;
 
 	// Per-tile configuration / state management.
 	void SyncTiles();
@@ -239,16 +237,8 @@ protected:
 	UPROPERTY(Transient, VisibleAnywhere)
 	UTextureRenderTarget2D* SharedTextureTarget = nullptr;
 
-	// Ring buffer of staging textures for GPU->CPU readback of the shared RT.
-	TArray<FTextureRHIRef> StagingTextures;
-	FCriticalSection StagingTexturesMutex;
-	int32 NextStagingIndex = 0;
-
 	// Queue of pending texture reads for the shared RT (one entry per capture).
 	FTextureReadQueue TextureReadQueue;
-
-	// Fence indicating that staging texture init has completed on the render thread.
-	FRenderCommandFence TextureInitFence;
 
 	// Retention list for PPMs that have been replaced but may still be referenced by render
 	// commands in flight. Holding a UPROPERTY reference prevents GC from flagging them as

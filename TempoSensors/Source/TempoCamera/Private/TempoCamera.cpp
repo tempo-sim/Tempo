@@ -607,14 +607,6 @@ void UTempoCamera::RestartCaptureTimer()
 	}
 }
 
-FTextureRHIRef UTempoCamera::AcquireNextStagingTexture()
-{
-	check(StagingTextures.Num() > 0);
-	const FTextureRHIRef& Texture = StagingTextures[NextStagingIndex];
-	NextStagingIndex = (NextStagingIndex + 1) % StagingTextures.Num();
-	return Texture;
-}
-
 UMaterialInstanceDynamic* UTempoCamera::GetOrCreateStitchMergeMID()
 {
 	if (!TextureTarget || !SharedAuxTextureTarget)
@@ -769,10 +761,6 @@ void UTempoCamera::InitFinalRenderTargetAndStaging()
 		return;
 	}
 
-	// Wait for any previous staging texture init render command to complete before modifying
-	// StagingTextures, since the render command accesses the array via raw pointer.
-	TextureInitFence.Wait();
-
 	// SharedFinalTextureTarget format matches the staging / FCameraPixel layout: 4 bytes for
 	// color+label, plus (when depth is enabled) 4 more bytes for discretized depth.
 	const ETextureRenderTargetFormat FinalFormat = bDepthEnabled
@@ -796,60 +784,7 @@ void UTempoCamera::InitFinalRenderTargetAndStaging()
 		SharedFinalTextureTarget->InitCustomFormat(SizeXY.X, SizeXY.Y, FinalPixelFormatOverride, true);
 	}
 
-	const int32 MaxQueueSize = GetDefault<UTempoSensorsSettings>()->GetMaxCameraRenderBufferSize();
-	const int32 NumStagingTextures = FMath::Max(2, MaxQueueSize > 0 ? MaxQueueSize + 1 : 2);
-
-	{
-		FScopeLock Lock(&StagingTexturesMutex);
-		if (NumStagingTextures != StagingTextures.Num())
-		{
-			StagingTextures.SetNum(NumStagingTextures);
-			NextStagingIndex = 0;
-		}
-	}
-
-	struct FInitStagingContext
-	{
-		FString NameBase;
-		int32 SizeX;
-		int32 SizeY;
-		EPixelFormat PixelFormat;
-		int32 NumTextures;
-		TArray<FTextureRHIRef>* StagingTextures;
-		FCriticalSection* StagingTexturesMutex;
-	};
-
-	FInitStagingContext Context = {
-		GetName(),
-		SharedFinalTextureTarget->SizeX,
-		SharedFinalTextureTarget->SizeY,
-		SharedFinalTextureTarget->GetFormat(),
-		NumStagingTextures,
-		&StagingTextures,
-		&StagingTexturesMutex
-	};
-
-	ENQUEUE_RENDER_COMMAND(InitTempoCameraSharedTextureCopy)(
-		[Context](FRHICommandListImmediate& RHICmdList)
-		{
-			constexpr ETextureCreateFlags TexCreateFlags = ETextureCreateFlags::Shared | ETextureCreateFlags::CPUReadback;
-
-			for (int32 I = 0; I < Context.NumTextures; ++I)
-			{
-				const FRHITextureCreateDesc Desc =
-					FRHITextureCreateDesc::Create2D(*FString::Printf(TEXT("%s SharedStagingTexture %d"), *Context.NameBase, I))
-					.SetExtent(Context.SizeX, Context.SizeY)
-					.SetFormat(Context.PixelFormat)
-					.SetFlags(TexCreateFlags);
-
-				{
-					FScopeLock Lock(Context.StagingTexturesMutex);
-					(*Context.StagingTextures)[I] = RHICreateTexture(Desc);
-				}
-			}
-		});
-
-	TextureInitFence.BeginFence();
+	AllocateStagingTextures(SharedFinalTextureTarget->SizeX, SharedFinalTextureTarget->SizeY, SharedFinalTextureTarget->GetFormat());
 
 	// Any pending texture reads might have the wrong pixel format.
 	TextureReadQueue.Empty();
@@ -914,6 +849,27 @@ void UTempoCamera::MaybeCapture()
 		return;
 	}
 
+	// Single-tile fast path: when there's exactly one active tile and depth packing isn't needed,
+	// render with full post-process (bloom/AE/tonemap on) directly to SharedFinalTextureTarget,
+	// skipping the aux unpack, proxy tonemap capture, and merge passes. Saves a separate
+	// FSceneRenderer pass plus two Canvas blits per frame; only viable for !bDepthEnabled because
+	// the depth-with-label encoding bit-packs into HDR alpha and can't survive LDR quantization.
+	const bool bSingleTileFastPath = (NumActiveTiles == 1) && !bDepthEnabled;
+
+	// Force camera cut on path-mode transition: the active tile's TAA/AE history was conditioned
+	// on a different show-flag set, so reusing it would alias.
+	if (bSingleTileFastPath != bWasSingleTileFastPath)
+	{
+		for (FTempoCameraTile& Tile : Tiles)
+		{
+			if (Tile.bActive)
+			{
+				Tile.bCameraCut = true;
+			}
+		}
+	}
+	bWasSingleTileFastPath = bSingleTileFastPath;
+
 	// Per-tile view origin (shared across tiles) — the camera's world location.
 	const FTransform CameraWorld = GetComponentToWorld();
 	const FVector ViewLocation = CameraWorld.GetTranslation();
@@ -926,23 +882,66 @@ void UTempoCamera::MaybeCapture()
 		FPlane(0, 1, 0, 0),
 		FPlane(0, 0, 0, 1));
 
+	// Fast-path PP: a copy of the component's user-authored PostProcessSettings (so the user's
+	// AE/Bloom/color-grading actually take effect — the tile's PP is bare except for the distortion
+	// PPM and the manual-AE override used in multi-tile mode). Strip the proxy tonemap PPM (which
+	// samples SharedTextureTarget — unused in fast-path) and layer the tile's distortion PPM on top.
+	// Stack-local so it lives until RenderTiles returns; FViewSetup holds a pointer.
+	FPostProcessSettings FastPathPP;
+	if (bSingleTileFastPath)
+	{
+		FastPathPP = PostProcessSettings;
+		if (ProxyTonemapMID)
+		{
+			FastPathPP.WeightedBlendables.Array.RemoveAll([this](const FWeightedBlendable& WB)
+			{
+				return WB.Object == ProxyTonemapMID;
+			});
+		}
+	}
+
 	// Build one FSceneViewFamily containing all tile views and render it into SharedTextureTarget
 	// (the atlas) via TempoMultiViewCapture::RenderTiles. Each tile contributes its own view state
 	// (TAA/AE history) and post-process; they share the family's shadow setup, scene uniform
 	// buffer, Lumen/RT wire-up, and GPU scene update.
 	TArray<TempoMultiViewCapture::FViewSetup> ViewSetups;
 	ViewSetups.Reserve(NumActiveTiles);
+	FTempoCameraTile* SingleActiveTile = nullptr;
 	for (FTempoCameraTile& Tile : Tiles)
 	{
 		if (!Tile.bActive)
 		{
 			continue;
 		}
+		SingleActiveTile = &Tile;
 
-		if (bHasValidSharedExposure)
+		// Multi-tile must run AEM_Manual + a shared EV bias so tiles don't diverge in brightness.
+		// Re-set every frame so it's clean if we just transitioned out of fast-path.
+		if (!bSingleTileFastPath)
 		{
-			Tile.PostProcessSettings.bOverride_AutoExposureBias = true;
-			Tile.PostProcessSettings.AutoExposureBias = SharedExposureBias;
+			Tile.PostProcessSettings.bOverride_AutoExposureMethod = true;
+			Tile.PostProcessSettings.AutoExposureMethod = AEM_Manual;
+			if (bHasValidSharedExposure)
+			{
+				Tile.PostProcessSettings.bOverride_AutoExposureBias = true;
+				Tile.PostProcessSettings.AutoExposureBias = SharedExposureBias;
+			}
+		}
+
+		// Switch the distortion material's label encoding: bit-packed (asuint(label) << 24) for
+		// the HDR atlas path, normalized (label / 255) for direct-to-LDR fast path so the byte
+		// survives RGBA8 quantization.
+		if (Tile.PostProcessMaterialInstance)
+		{
+			Tile.PostProcessMaterialInstance->SetScalarParameterValue(
+				TEXT("UseNormalizedLabel"), bSingleTileFastPath ? 1.0f : 0.0f);
+
+			// Fast-path PP starts from the component's settings (no distortion PPM); add the tile's
+			// distortion PPM here so the view picks it up alongside the user's AE/bloom/etc.
+			if (bSingleTileFastPath)
+			{
+				FastPathPP.WeightedBlendables.Array.Add(FWeightedBlendable(1.0f, Tile.PostProcessMaterialInstance));
+			}
 		}
 
 		// Tile world rotation = camera world rotation * tile relative rotation; the view matrix is
@@ -969,7 +968,7 @@ void UTempoCamera::MaybeCapture()
 
 		TempoMultiViewCapture::FViewSetup& Setup = ViewSetups.AddDefaulted_GetRef();
 		Setup.ViewState = Tile.ViewState.GetReference();
-		Setup.PostProcessSettings = &Tile.PostProcessSettings;
+		Setup.PostProcessSettings = bSingleTileFastPath ? &FastPathPP : &Tile.PostProcessSettings;
 		Setup.PostProcessBlendWeight = 1.0f;
 		Setup.bCameraCut = Tile.bCameraCut;
 		Tile.bCameraCut = false;
@@ -980,10 +979,17 @@ void UTempoCamera::MaybeCapture()
 		Setup.FOV = Tile.FOVAngle;
 	}
 
-	// Tile render uses HDR scene color (pre-tonemap); the primary's own capture source (LDR) is
-	// for the proxy tonemap pass below. The family also wants the tile-appropriate show flags
-	// (no bloom/DOF/motionblur/etc) which differ from the proxy's — swap them around the call.
+	if (bSingleTileFastPath)
 	{
+		// Single tile, full post-process: render straight to the final RT in LDR. The distortion
+		// PPM packs label/255 into alpha; RGBA8 quantization preserves the byte exactly.
+		TempoMultiViewCapture::RenderTiles(Scene, this, SharedFinalTextureTarget, ViewSetups, ESceneCaptureSource::SCS_FinalColorLDR);
+	}
+	else
+	{
+		// Multi-tile: HDR atlas (pre-tonemap) so the proxy capture below can run AE/tonemap once
+		// across the stitched output. Tile-appropriate show flags (no bloom/DOF/motionblur/etc)
+		// differ from the proxy's — swap them around the call.
 		const FEngineShowFlags SavedShowFlags = ShowFlags;
 		ShowFlags.SetLocalExposure(false);
 		ShowFlags.SetEyeAdaptation(false);
@@ -1020,21 +1026,96 @@ void UTempoCamera::MaybeCapture()
 
 	const FTextureRHIRef StagingTex = NewRead->StagingTexture;
 
-	// Single full-screen aux unpack pass: samples SharedTextureTarget.a across the whole atlas and
-	// writes label+depth bytes into SharedAuxTextureTarget. Replaces the legacy N per-tile draws
-	// — the shader logic is unchanged, only the source texture (atlas) and draw extent differ.
-	if (SharedAuxTextureTarget)
+	if (!bSingleTileFastPath)
 	{
-		if (UMaterialInstanceDynamic* AuxMID = GetOrCreateAuxAtlasMID())
+		// Single full-screen aux unpack pass: samples SharedTextureTarget.a across the whole atlas
+		// and writes label+depth bytes into SharedAuxTextureTarget. Replaces the legacy N per-tile
+		// draws — the shader logic is unchanged, only the source texture (atlas) and draw extent
+		// differ.
+		if (SharedAuxTextureTarget)
+		{
+			if (UMaterialInstanceDynamic* AuxMID = GetOrCreateAuxAtlasMID())
+			{
+				UCanvas* Canvas = nullptr;
+				FVector2D CanvasSize(0.0, 0.0);
+				FDrawToRenderTargetContext Ctx;
+				UKismetRenderingLibrary::BeginDrawCanvasToRenderTarget(this, SharedAuxTextureTarget, Canvas, CanvasSize, Ctx);
+
+				FCanvasTileItem Item(
+					FVector2D::ZeroVector,
+					AuxMID->GetRenderProxy(),
+					FVector2D(SizeXY.X, SizeXY.Y),
+					FVector2D(0.0, 0.0),
+					FVector2D(1.0, 1.0));
+				Item.BlendMode = SE_BLEND_Opaque;
+				Canvas->DrawItem(Item);
+
+				UKismetRenderingLibrary::EndDrawCanvasToRenderTarget(this, Ctx);
+			}
+		}
+
+		// Proxy scene capture: the PPM (appended to PostProcessSettings.WeightedBlendables by
+		// GetOrCreateProxyTonemapMID) replaces scene color with SharedTextureTarget's HDR linear
+		// color before Bloom/AE/Tonemapper, so the tonemapped LDR output landing in the inherited
+		// TextureTarget is effectively tonemap(stitched HDR).
+		if (GetOrCreateProxyTonemapMID())
+		{
+			// The proxy's scene render is useless — its PPM overwrites scene color before bloom/AE. Hide
+	    	// world geometry and lighting so nothing gets rasterized.
+	    	auto PrevShowFlags = ShowFlags;
+	    	ShowFlags.SetAtmosphere(false);
+	    	ShowFlags.SetFog(false);
+	    	ShowFlags.SetLighting(false);
+	    	ShowFlags.SetDynamicShadows(false);
+	    	ShowFlags.SetStaticMeshes(false);
+	    	ShowFlags.SetSkeletalMeshes(false);
+	    	ShowFlags.SetLandscape(false);
+	    	ShowFlags.SetSkyLighting(false);
+	    	ShowFlags.SetTranslucency(false);
+	    	ShowFlags.SetParticles(false);
+			ShowFlags.SetAntiAliasing(false);
+			ShowFlags.SetTemporalAA(false);
+			CaptureScene();
+			ShowFlags = PrevShowFlags;
+		}
+	}
+
+	// Update SharedExposureBias from whichever view state ran the AE pass this frame. In multi-tile
+	// that's the proxy's view state (GetViewState(0)); in fast path it's the active tile's view
+	// state — which actually rendered the scene with bloom/AE/tonemap on. GetLastAverageSceneLuminance
+	// reports the *true* scene luminance (the AE shader divides out View.OneOverPreExposure before
+	// measuring), so we can set the bias directly instead of integrating.
+	{
+		FSceneViewStateInterface* SourceViewState = bSingleTileFastPath
+			? (SingleActiveTile ? SingleActiveTile->ViewState.GetReference() : nullptr)
+			: GetViewState(0);
+		if (SourceViewState)
+		{
+			const float Lum = SourceViewState->GetLastAverageSceneLuminance();
+			if (Lum > 0.0f)
+			{
+				constexpr float TargetMidGrey = 0.18f;
+				SharedExposureBias = FMath::Log2(TargetMidGrey / FMath::Max(Lum, static_cast<float>(KINDA_SMALL_NUMBER)));
+				bHasValidSharedExposure = true;
+			}
+		}
+	}
+
+	if (!bSingleTileFastPath)
+	{
+		// Merge pass: a single full-screen Canvas draw that samples the proxy's tonemapped
+		// TextureTarget (via MergeMID's "ColorRT" parameter) and SharedAuxTextureTarget through
+		// the merge material and writes to SharedFinalTextureTarget.
+		if (UMaterialInstanceDynamic* MergeMaterialInstance = GetOrCreateStitchMergeMID())
 		{
 			UCanvas* Canvas = nullptr;
 			FVector2D CanvasSize(0.0, 0.0);
 			FDrawToRenderTargetContext Ctx;
-			UKismetRenderingLibrary::BeginDrawCanvasToRenderTarget(this, SharedAuxTextureTarget, Canvas, CanvasSize, Ctx);
+			UKismetRenderingLibrary::BeginDrawCanvasToRenderTarget(this, SharedFinalTextureTarget, Canvas, CanvasSize, Ctx);
 
 			FCanvasTileItem Item(
 				FVector2D::ZeroVector,
-				AuxMID->GetRenderProxy(),
+				MergeMaterialInstance->GetRenderProxy(),
 				FVector2D(SizeXY.X, SizeXY.Y),
 				FVector2D(0.0, 0.0),
 				FVector2D(1.0, 1.0));
@@ -1043,68 +1124,6 @@ void UTempoCamera::MaybeCapture()
 
 			UKismetRenderingLibrary::EndDrawCanvasToRenderTarget(this, Ctx);
 		}
-	}
-
-	// Proxy scene capture: the PPM (appended to PostProcessSettings.WeightedBlendables by
-	// GetOrCreateProxyTonemapMID) replaces scene color with SharedTextureTarget's HDR linear
-	// color before Bloom/AE/Tonemapper, so the tonemapped LDR output landing in the inherited
-	// TextureTarget is effectively tonemap(stitched HDR).
-	if (GetOrCreateProxyTonemapMID())
-	{
-		// The proxy's scene render is useless — its PPM overwrites scene color before bloom/AE. Hide
-    	// world geometry and lighting so nothing gets rasterized.
-    	auto PrevShowFlags = ShowFlags;
-    	ShowFlags.SetAtmosphere(false);
-    	ShowFlags.SetFog(false);
-    	ShowFlags.SetLighting(false);
-    	ShowFlags.SetDynamicShadows(false);
-    	ShowFlags.SetStaticMeshes(false);
-    	ShowFlags.SetSkeletalMeshes(false);
-    	ShowFlags.SetLandscape(false);
-    	ShowFlags.SetSkyLighting(false);
-    	ShowFlags.SetTranslucency(false);
-    	ShowFlags.SetParticles(false);
-		ShowFlags.SetAntiAliasing(false);
-		ShowFlags.SetTemporalAA(false);
-		CaptureScene();
-		ShowFlags = PrevShowFlags;
-	}
-
-	// Update SharedExposureBias from the proxy's AE result. GetLastAverageSceneLuminance reports
-	// the *true* scene luminance (the AE shader divides out View.OneOverPreExposure before
-	// measuring), so we can set the bias directly instead of integrating. Accumulating here races
-	// against the proxy's own AE loop and oscillates into darkness within a few frames.
-	if (FSceneViewStateInterface* ViewStateInterface = GetViewState(0))
-	{
-		const float Lum = ViewStateInterface->GetLastAverageSceneLuminance();
-		if (Lum > 0.0f)
-		{
-			constexpr float TargetMidGrey = 0.18f;
-			SharedExposureBias = FMath::Log2(TargetMidGrey / FMath::Max(Lum, static_cast<float>(KINDA_SMALL_NUMBER)));
-			bHasValidSharedExposure = true;
-		}
-	}
-
-	// Merge pass: a single full-screen Canvas draw that samples the proxy's tonemapped
-	// TextureTarget (via MergeMID's "ColorRT" parameter) and SharedAuxTextureTarget through
-	// the merge material and writes to SharedFinalTextureTarget.
-	if (UMaterialInstanceDynamic* MergeMaterialInstance = GetOrCreateStitchMergeMID())
-	{
-		UCanvas* Canvas = nullptr;
-		FVector2D CanvasSize(0.0, 0.0);
-		FDrawToRenderTargetContext Ctx;
-		UKismetRenderingLibrary::BeginDrawCanvasToRenderTarget(this, SharedFinalTextureTarget, Canvas, CanvasSize, Ctx);
-
-		FCanvasTileItem Item(
-			FVector2D::ZeroVector,
-			MergeMaterialInstance->GetRenderProxy(),
-			FVector2D(SizeXY.X, SizeXY.Y),
-			FVector2D(0.0, 0.0),
-			FVector2D(1.0, 1.0));
-		Item.BlendMode = SE_BLEND_Opaque;
-		Canvas->DrawItem(Item);
-
-		UKismetRenderingLibrary::EndDrawCanvasToRenderTarget(this, Ctx);
 	}
 
 	// Staging copy + fence: runs after the Canvas stitch via render-thread FIFO.

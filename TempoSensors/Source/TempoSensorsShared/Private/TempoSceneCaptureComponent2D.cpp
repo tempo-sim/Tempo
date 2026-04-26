@@ -327,10 +327,6 @@ void UTempoSceneCaptureComponent2D::InitRenderTarget()
 		return;
 	}
 
-	// Wait for any previous staging texture init render command to complete before
-	// modifying StagingTextures, since the render command accesses the array via raw pointer.
-	TextureInitFence.Wait();
-
 	TextureTarget = NewObject<UTextureRenderTarget2D>(this);
 
 	TextureTarget->TargetGamma = GetDefault<UTempoSensorsSettings>()->GetSceneCaptureGamma();
@@ -352,10 +348,33 @@ void UTempoSceneCaptureComponent2D::InitRenderTarget()
 		return;
 	}
 
+	AllocateStagingTextures(TextureTarget->SizeX, TextureTarget->SizeY, TextureTarget->GetFormat());
+
+	// Any pending texture reads might have the wrong pixel format.
+	TextureReadQueue.Empty();
+
+	InitDistortionMap();
+}
+
+void UTempoSceneCaptureComponent2D::AllocateStagingTextures(int32 SizeX, int32 SizeY, EPixelFormat PixelFormat)
+{
+	// Wait for any previous staging texture init render command to complete before modifying
+	// StagingTextures, since the render command accesses the array via raw pointer.
+	TextureInitFence.Wait();
+
 	// Determine how many staging textures to create. We need at least as many as the max
 	// texture queue size to ensure each in-flight read gets its own staging texture.
 	const int32 MaxQueueSize = GetMaxTextureQueueSize();
 	const int32 NumStagingTextures = FMath::Max(2, MaxQueueSize > 0 ? MaxQueueSize + 1 : 2);
+
+	{
+		FScopeLock StagingTexturesLock(&StagingTexturesMutex);
+		if (NumStagingTextures != StagingTextures.Num())
+		{
+			StagingTextures.SetNum(NumStagingTextures);
+			NextStagingIndex = 0;
+		}
+	}
 
 	struct FInitStagingContext {
 		FString NameBase;
@@ -367,26 +386,17 @@ void UTempoSceneCaptureComponent2D::InitRenderTarget()
 		FCriticalSection* StagingTexturesMutex;
 	};
 
-	{
-		FScopeLock StagingTexturesLock(&StagingTexturesMutex);
-		if (NumStagingTextures != StagingTextures.Num())
-		{
-			StagingTextures.SetNum(NumStagingTextures);
-			NextStagingIndex = 0;
-		}
-	}
-
 	FInitStagingContext Context = {
 		GetName(),
-		TextureTarget->SizeX,
-		TextureTarget->SizeY,
-		TextureTarget->GetFormat(),
+		SizeX,
+		SizeY,
+		PixelFormat,
 		NumStagingTextures,
 		&StagingTextures,
 		&StagingTexturesMutex
 	};
 
-	ENQUEUE_RENDER_COMMAND(InitTempoSceneCaptureTextureCopy)(
+	ENQUEUE_RENDER_COMMAND(InitTempoSceneCaptureStagingTextures)(
 		[Context](FRHICommandListImmediate& RHICmdList)
 		{
 			constexpr ETextureCreateFlags TexCreateFlags = ETextureCreateFlags::Shared | ETextureCreateFlags::CPUReadback;
@@ -407,11 +417,6 @@ void UTempoSceneCaptureComponent2D::InitRenderTarget()
 		});
 
 	TextureInitFence.BeginFence();
-
-	// Any pending texture reads might have the wrong pixel format.
-	TextureReadQueue.Empty();
-
-	InitDistortionMap();
 }
 
 float GetTimerPeriod(float RateHz)
@@ -452,13 +457,20 @@ void UTempoSceneCaptureComponent2D::MaybeCapture()
 	}
 
 	// If world rendering is enabled, we'll capture the scene with the main render. Otherwise, we'll capture it now.
-	// if (bWorldRenderingDisabled)
-	// {
-	// 	CaptureScene();
-	// }
-	// else
-	// {
-	// 	CaptureSceneDeferred();
-	// }
-	CaptureSceneDeferred();
+	if (bWorldRenderingDisabled)
+	{
+		CaptureScene();
+	}
+	else
+	{
+		CaptureSceneDeferred();
+	}
+}
+
+FTextureRHIRef UTempoSceneCaptureComponent2D::AcquireNextStagingTexture()
+{
+	check(StagingTextures.Num() > 0);
+	const FTextureRHIRef& Texture = StagingTextures[NextStagingIndex];
+	NextStagingIndex = (NextStagingIndex + 1) % StagingTextures.Num();
+	return Texture;
 }
