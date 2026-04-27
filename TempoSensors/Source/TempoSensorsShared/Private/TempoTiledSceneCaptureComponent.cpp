@@ -2,6 +2,7 @@
 
 #include "TempoTiledSceneCaptureComponent.h"
 
+#include "TempoSensorsShared.h"
 #include "TempoCoreSettings.h"
 #include "TempoCoreUtils.h"
 #include "TempoSensorsSettings.h"
@@ -60,7 +61,6 @@ void UTempoTiledSceneCaptureComponent::BeginPlay()
 		return;
 	}
 
-	InitTileSlots();
 	SyncTiles();
 	UpdateInternalMirrors();
 
@@ -109,12 +109,71 @@ void UTempoTiledSceneCaptureComponent::TickComponent(float DeltaTime, ELevelTick
 	TryApplyPendingReconfigure();
 }
 
+void UTempoTiledSceneCaptureComponent::MaybeMarkPendingCapture()
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	const float TimerPeriod = 1.0f / FMath::Max(UE_KINDA_SMALL_NUMBER, RateHz);
+	if (!FMath::IsNearlyEqual(World->GetTimerManager().GetTimerRate(TimerHandle), TimerPeriod))
+	{
+		RestartCaptureTimer();
+	}
+
+	if (!HasPendingRequests())
+	{
+		return;
+	}
+
+	if (!SharedTextureTarget)
+	{
+		return;
+	}
+
+	if (GetNumActiveTiles() == 0)
+	{
+		return;
+	}
+
+	const int32 MaxQueueSize = GetMaxTextureQueueSize();
+	if (MaxQueueSize > 0 && TextureReadQueue.Num() > MaxQueueSize)
+	{
+		UE_LOG(LogTempoSensorsShared, Warning, TEXT("Fell behind while reading frames from sensor %s. Skipping capture."), *GetName());
+		return;
+	}
+
+	if (!SharedTextureTarget->GameThread_GetRenderTargetResource())
+	{
+		return;
+	}
+
+	if (!World->Scene)
+	{
+		return;
+	}
+
+	bNeedsCapture = true;
+}
+
+void UTempoTiledSceneCaptureComponent::ExecutePendingCapture()
+{
+	if (!bNeedsCapture)
+	{
+		return;
+	}
+	bNeedsCapture = false;
+	RenderCapture();
+}
+
 void UTempoTiledSceneCaptureComponent::RestartCaptureTimer()
 {
 	if (UWorld* World = GetWorld())
 	{
 		const float TimerPeriod = 1.0f / FMath::Max(UE_KINDA_SMALL_NUMBER, RateHz);
-		World->GetTimerManager().SetTimer(TimerHandle, this, &UTempoTiledSceneCaptureComponent::MaybeCapture, TimerPeriod, true);
+		World->GetTimerManager().SetTimer(TimerHandle, this, &UTempoTiledSceneCaptureComponent::MaybeMarkPendingCapture, TimerPeriod, true);
 	}
 }
 

@@ -297,7 +297,9 @@ UTempoCamera::UTempoCamera()
 	PostProcessSettings.bOverride_ReflectionMethod = true;
 	PostProcessSettings.ReflectionMethod = EReflectionMethod::Lumen;
 
-	ShowFlags.SetMotionBlur(false);
+	bUseRayTracingIfEnabled = true;
+
+	ShowFlags.SetMotionBlur(true);
 	ShowFlags.SetAntiAliasing(true);
 	ShowFlags.SetTemporalAA(true);
 	ShowFlags.SetEyeAdaptation(true);
@@ -344,10 +346,6 @@ void UTempoCamera::UpdateInternalMirrors()
 	LensParameters_Internal = LensParameters;
 	FOVAngle_Internal = FOVAngle;
 	SizeXY_Internal = SizeXY;
-}
-
-void UTempoCamera::InitTileSlots()
-{
 }
 
 bool UTempoCamera::HasPendingCameraRequests() const
@@ -632,47 +630,23 @@ void UTempoCamera::InitFinalRenderTargetAndStaging()
 	TextureReadQueue.Empty();
 }
 
-void UTempoCamera::MaybeCapture()
+int32 UTempoCamera::GetNumActiveTiles() const
 {
-	const float TimerPeriod = 1.0f / FMath::Max(UE_KINDA_SMALL_NUMBER, RateHz);
-	if (UWorld* World = GetWorld())
-	{
-		if (!FMath::IsNearlyEqual(World->GetTimerManager().GetTimerRate(TimerHandle), TimerPeriod))
-		{
-			RestartCaptureTimer();
-		}
-	}
-
-	if (!HasPendingCameraRequests())
-	{
-		return;
-	}
-
-	if (!SharedTextureTarget)
-	{
-		return;
-	}
-
-	int32 NumActiveTiles = 0;
+	int32 Count = 0;
 	for (const FTempoCameraTile& Tile : Tiles)
 	{
 		if (Tile.bActive)
 		{
-			++NumActiveTiles;
+			++Count;
 		}
 	}
-	if (NumActiveTiles == 0)
-	{
-		return;
-	}
+	return Count;
+}
 
-	const int32 MaxQueueSize = GetDefault<UTempoSensorsSettings>()->GetMaxCameraRenderBufferSize();
-	if (MaxQueueSize > 0 && TextureReadQueue.Num() > MaxQueueSize)
-	{
-		UE_LOG(LogTempoCamera, Warning, TEXT("Fell behind while reading frames from sensor %s. Skipping capture."), *GetName());
-		return;
-	}
-
+void UTempoCamera::RenderCapture()
+{
+	// Camera-specific guard: the fast path renders directly to SharedFinalTextureTarget and the
+	// multi-tile path reads back from it; either way its resource must be valid.
 	if (!SharedFinalTextureTarget)
 	{
 		return;
@@ -689,6 +663,15 @@ void UTempoCamera::MaybeCapture()
 	if (!Scene)
 	{
 		return;
+	}
+
+	int32 NumActiveTiles = 0;
+	for (const FTempoCameraTile& Tile : Tiles)
+	{
+		if (Tile.bActive)
+		{
+			++NumActiveTiles;
+		}
 	}
 
 	// Single-tile fast path: when there's exactly one active tile and depth packing isn't needed,
@@ -915,6 +898,8 @@ void UTempoCamera::MaybeCapture()
 		    ShowFlags.SetSkyLighting(false);
 		    ShowFlags.SetTranslucency(false);
 		    ShowFlags.SetParticles(false);
+			ShowFlags.SetAntiAliasing(false);
+			ShowFlags.SetTemporalAA(false);
 			CaptureScene();
 			ShowFlags = PrevShowFlags;
 		}

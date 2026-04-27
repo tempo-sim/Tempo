@@ -55,7 +55,7 @@ void UTempoSensorServiceSubsystem::Initialize(FSubsystemCollectionBase& Collecti
 	// of the last frame. We use this last opportunity, having waited as long as possible, to collect
 	// and send all the sensor measurements from the previous frame.
 	FWorldDelegates::OnWorldTickStart.AddUObject(this, &UTempoSensorServiceSubsystem::OnWorldTickStart);
-	FWorldDelegates::OnWorldPostActorTick.AddUObject(this, &UTempoSensorServiceSubsystem::OnWorldPostActorTick);
+	FWorldDelegates::OnWorldTickEnd.AddUObject(this, &UTempoSensorServiceSubsystem::OnWorldTickEnd);
 	FCoreDelegates::OnEndFrameRT.AddUObject(this, &UTempoSensorServiceSubsystem::OnRenderFrameCompleted);
 }
 
@@ -74,12 +74,22 @@ void UTempoSensorServiceSubsystem::OnRenderFrameCompleted() const
 	});
 }
 
-void UTempoSensorServiceSubsystem::OnWorldPostActorTick(UWorld* World, ELevelTick TickType, float DeltaSeconds)
+void UTempoSensorServiceSubsystem::OnWorldTickEnd(UWorld* World, ELevelTick TickType, float DeltaSeconds)
 {
 	if (World != GetWorld() || (World->WorldType != EWorldType::Game && World->WorldType != EWorldType::PIE))
 	{
 		return;
 	}
+
+	// Flush all pending component transform updates to the render thread before rendering any sensor.
+	// This is the last point in UWorld::Tick where all actor ticks (including TG_LastDemotable and
+	// networking) have completed, so transforms are fully settled and velocity vectors will be correct.
+	World->SendAllEndOfFrameUpdates();
+
+	ForEachActiveSensor([](ITempoSensorInterface* Sensor)
+	{
+		Sensor->ExecutePendingCapture();
+	});
 
 	// When the main viewport renders, the engine drains SceneCapturesToUpdateMap itself as part of
 	// the main render path, and it does so with a valid MainViewFamily that our components can

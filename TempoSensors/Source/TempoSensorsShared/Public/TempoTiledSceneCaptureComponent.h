@@ -38,20 +38,25 @@ public:
 	virtual void OnRenderCompleted() override;
 	virtual void BlockUntilMeasurementsReady() const override;
 	virtual TOptional<TFuture<void>> SendMeasurements() { return TOptional<TFuture<void>>(); }
+	virtual void ExecutePendingCapture() override;
 	// End ITempoSensorInterface
 
 protected:
-	// Re-exposed as protected so RestartCaptureTimer can bind the timer to it and subclasses
-	// can override it. The base body is unreachable (tiled sensors always override MaybeCapture).
-	virtual void MaybeCapture() override PURE_VIRTUAL(UTempoTiledSceneCaptureComponent::MaybeCapture, );
+	// Called by the capture timer. Runs common guard checks; sets bNeedsCapture if all pass.
+	// Subclasses should not override this — override RenderCapture instead.
+	virtual void MaybeMarkPendingCapture();
 	virtual void RestartCaptureTimer() override;
 
-	// Tiled sensors never call MakeTextureRead; reads are constructed inline in MaybeCapture.
+	// Returns the number of currently active tiles. Used by MaybeMarkPendingCapture.
+	virtual int32 GetNumActiveTiles() const PURE_VIRTUAL(UTempoTiledSceneCaptureComponent::GetNumActiveTiles, return 0; );
+
+	// Perform the actual render for this sensor. Called from ExecutePendingCapture when bNeedsCapture
+	// is true. All common guards have already passed; World and Scene are valid.
+	virtual void RenderCapture() PURE_VIRTUAL(UTempoTiledSceneCaptureComponent::RenderCapture, );
+
+	// Tiled sensors never call MakeTextureRead; reads are constructed inline in RenderCapture.
 	virtual FTextureRead* MakeTextureRead() const override { checkNoEntry(); return nullptr; }
 	virtual int32 GetMaxTextureQueueSize() const override;
-
-	// Subclasses must initialize the tile array to the correct fixed size.
-	virtual void InitTileSlots() PURE_VIRTUAL(UTempoTiledSceneCaptureComponent::InitTileSlots, );
 
 	// Subclasses sync the tile array to the current sensor configuration.
 	virtual void SyncTiles() PURE_VIRTUAL(UTempoTiledSceneCaptureComponent::SyncTiles, );
@@ -96,4 +101,5 @@ protected:
 	FTimerHandle TimerHandle;
 
 	uint8 bReconfigurePending = false;
+	bool bNeedsCapture = false;
 };

@@ -108,10 +108,6 @@ void UTempoLidar::UpdateInternalMirrors()
 	BeamCalibration_Internal = BeamCalibration;
 }
 
-void UTempoLidar::InitTileSlots()
-{
-}
-
 #if WITH_EDITOR
 void UTempoLidar::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
 {
@@ -562,52 +558,24 @@ void UTempoLidar::InitSharedRenderTarget()
 	TextureReadQueue.Empty();
 }
 
-void UTempoLidar::MaybeCapture()
+int32 UTempoLidar::GetNumActiveTiles() const
 {
-	const float TimerPeriod = 1.0f / FMath::Max(UE_KINDA_SMALL_NUMBER, RateHz);
-	if (UWorld* World = GetWorld())
-	{
-		if (!FMath::IsNearlyEqual(World->GetTimerManager().GetTimerRate(TimerHandle), TimerPeriod))
-		{
-			RestartCaptureTimer();
-		}
-	}
-
-	if (PendingRequests.IsEmpty())
-	{
-		return;
-	}
-
-	if (!SharedTextureTarget)
-	{
-		return;
-	}
-
-	int32 NumActiveTiles = 0;
+	int32 Count = 0;
 	for (const FTempoLidarTile& Tile : Tiles)
 	{
 		if (Tile.bActive)
 		{
-			++NumActiveTiles;
+			++Count;
 		}
 	}
-	if (NumActiveTiles == 0)
-	{
-		return;
-	}
+	return Count;
+}
 
-	const int32 MaxQueueSize = GetDefault<UTempoSensorsSettings>()->GetMaxCameraRenderBufferSize();
-	if (MaxQueueSize > 0 && TextureReadQueue.Num() > MaxQueueSize)
-	{
-		UE_LOG(LogTempoLidar, Warning, TEXT("Fell behind while reading frames from sensor %s. Skipping capture."), *GetName());
-		return;
-	}
-
+void UTempoLidar::RenderCapture()
+{
+	// SharedTextureTarget and its resource are validated by the base MaybeMarkPendingCapture, but
+	// we need the resource pointer here so the render command closure can capture it by value.
 	FTextureRenderTargetResource* SharedRTResource = SharedTextureTarget->GameThread_GetRenderTargetResource();
-	if (!SharedRTResource)
-	{
-		return;
-	}
 
 	UWorld* World = GetWorld();
 	FSceneInterface* Scene = World ? World->Scene : nullptr;
@@ -631,6 +599,7 @@ void UTempoLidar::MaybeCapture()
 	// Build per-tile view setups and per-slice reads. Each tile's ViewRect inside the atlas is
 	// (SliceDestOffsetX, 0) to (SliceDestOffsetX + SizeXY.X, SizeXY.Y), matching the pack layout
 	// FLidarSharedTextureRead::SplitIntoSlices expects.
+	const int32 NumActiveTiles = GetNumActiveTiles();
 	TArray<TempoMultiViewCapture::FViewSetup> ViewSetups;
 	ViewSetups.Reserve(NumActiveTiles);
 

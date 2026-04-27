@@ -43,4 +43,8 @@ public:
 
 	// Respond to pending measurement requests. Returns a future, so these can be parallelized.
 	virtual TOptional<TFuture<void>> SendMeasurements() = 0;
+
+	// Execute any pending capture scheduled by MaybeMarkPendingCapture. Called from the subsystem
+	// after OnWorldTickEnd, when all actor transforms are final and SendAllEndOfFrameUpdates has run.
+	virtual void ExecutePendingCapture() {}
 };

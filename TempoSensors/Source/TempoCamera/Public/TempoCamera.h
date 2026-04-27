@@ -138,7 +138,7 @@ class UTempoCamera;
 
 // Per-tile state for the multi-view atlas render. A tile is just a set of view parameters + its own
 // view state + distortion assets; no USceneCaptureComponent and no child scene component. The atlas
-// render is driven entirely from UTempoCamera::MaybeCapture via TempoMultiViewCapture::RenderTiles.
+// render is driven entirely from UTempoCamera::RenderCapture via TempoMultiViewCapture::RenderTiles.
 USTRUCT()
 struct FTempoCameraTile
 {
@@ -231,12 +231,12 @@ public:
 
 protected:
 	virtual bool HasPendingRequests() const override { return HasPendingCameraRequests(); }
-	virtual void MaybeCapture() override;
+	virtual int32 GetNumActiveTiles() const override;
+	virtual void RenderCapture() override;
 
 	TFuture<void> DecodeAndRespond(TUniquePtr<FTextureRead> TextureRead);
 
 	// Begin UTempoTiledSceneCaptureComponent tile interface
-	virtual void InitTileSlots() override;
 	virtual void SyncTiles() override;
 	virtual bool HasDetectedParameterChange() const override;
 	virtual void ReconfigureTilesNow() override;

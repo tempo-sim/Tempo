@@ -74,7 +74,7 @@ class UTempoLidar;
 
 // Per-tile state for the multi-view atlas render. A tile is just a view-rect + view state + PPM; no
 // USceneCaptureComponent and no child scene component. The atlas render is driven from
-// UTempoLidar::MaybeCapture via TempoMultiViewCapture::RenderTiles, which writes each view directly
+// UTempoLidar::RenderCapture via TempoMultiViewCapture::RenderTiles, which writes each view directly
 // into its rect inside SharedTextureTarget — no per-tile copy-pack step is needed.
 USTRUCT()
 struct FTempoLidarTile
@@ -157,8 +157,9 @@ protected:
 	// UTempoSceneCaptureComponent2D hooks: the lidar manages its own single readback from the packed
 	// SharedTextureTarget and drives its own timer; it never calls CaptureScene() on itself.
 	virtual bool HasPendingRequests() const override { return !PendingRequests.IsEmpty(); }
+	virtual int32 GetNumActiveTiles() const override;
 	virtual void InitRenderTarget() override;
-	virtual void MaybeCapture() override;
+	virtual void RenderCapture() override;
 
 	TFuture<void> DecodeAndRespond(TArray<TUniquePtr<FTextureRead>> TextureReads);
 
@@ -167,7 +168,6 @@ protected:
 	void InitSharedRenderTarget();
 
 	// Begin UTempoTiledSceneCaptureComponent tile interface
-	virtual void InitTileSlots() override;
 	virtual void SyncTiles() override;
 	virtual bool HasDetectedParameterChange() const override;
 	virtual void ReconfigureTilesNow() override;
