@@ -16,6 +16,7 @@
 #include "Engine/Canvas.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "Engine/Texture2D.h"
+#include "HAL/IConsoleManager.h"
 #include "Kismet/GameplayStatics.h"
 #include "Kismet/KismetRenderingLibrary.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -695,6 +696,27 @@ void UTempoCamera::RenderCapture()
 	}
 	bWasSingleTileFastPath = bSingleTileFastPath;
 
+	float SavedTSRShadingRejectionExposureOffset = 0.0f;
+	IConsoleVariable* TSRShadingRejectionExposureOffsetCVar =
+		IConsoleManager::Get().FindConsoleVariable(TEXT("r.TSR.ShadingRejection.ExposureOffset"));
+	if (!bSingleTileFastPath)
+	{
+		// Push `r.TSR.ShadingRejection.ExposureOffset` for the duration of this camera's renders.
+		// CVar mutation must happen on the game thread — calling Set() on the render thread hits a
+		// check(0) in FConsoleManager::OnCVarChange. The GT path propagates the new value to the RT
+		// shadow via an ENQUEUE_RENDER_COMMAND queued in FIFO order with subsequent renderer commands,
+		// so the bracket on the render thread is set→render→restore. Multiple TempoCameras in the
+		// same frame interleave correctly because each camera's GT push, renders, and GT pop produce
+		// three RT entries in that order. ECVF_SetByConsole is the highest priority and always wins,
+		// avoiding the engine warning about replacing constructor-default priority and silently being
+		// rejected if anything else has touched the CVar.
+		if (TSRShadingRejectionExposureOffsetCVar)
+		{
+			SavedTSRShadingRejectionExposureOffset = TSRShadingRejectionExposureOffsetCVar->GetFloat();
+			TSRShadingRejectionExposureOffsetCVar->Set(2.0f * SharedExposureBias, ECVF_SetByConsole);
+		}
+	}
+
 	// Per-tile view origin (shared across tiles) — the camera's world location.
 	const FTransform CameraWorld = GetComponentToWorld();
 	const FVector ViewLocation = CameraWorld.GetTranslation();
@@ -886,20 +908,22 @@ void UTempoCamera::RenderCapture()
 		if (GetOrCreateProxyTonemapMID())
 		{
 			// The proxy's scene render is useless — its PPM overwrites scene color before bloom/AE. Hide
-		    // world geometry and lighting so nothing gets rasterized.
-		    auto PrevShowFlags = ShowFlags;
-		    ShowFlags.SetAtmosphere(false);
-		    ShowFlags.SetFog(false);
-		    ShowFlags.SetLighting(false);
-		    ShowFlags.SetDynamicShadows(false);
-		    ShowFlags.SetStaticMeshes(false);
-		    ShowFlags.SetSkeletalMeshes(false);
-		    ShowFlags.SetLandscape(false);
-		    ShowFlags.SetSkyLighting(false);
-		    ShowFlags.SetTranslucency(false);
-		    ShowFlags.SetParticles(false);
+			// world geometry and lighting so nothing gets rasterized.
+			auto PrevShowFlags = ShowFlags;
+			ShowFlags.SetAtmosphere(false);
+			ShowFlags.SetFog(false);
+			ShowFlags.SetDynamicShadows(false);
+			ShowFlags.SetStaticMeshes(false);
+			ShowFlags.SetSkeletalMeshes(false);
+			ShowFlags.SetLandscape(false);
+			ShowFlags.SetSkyLighting(false);
+			ShowFlags.SetTranslucency(false);
+			ShowFlags.SetParticles(false);
 			ShowFlags.SetAntiAliasing(false);
 			ShowFlags.SetTemporalAA(false);
+
+			// But wait! Lighting actually has to be on in order for exposure bias to be read back on the cpu
+			ShowFlags.SetLighting(true);
 			CaptureScene();
 			ShowFlags = PrevShowFlags;
 		}
@@ -959,6 +983,18 @@ void UTempoCamera::RenderCapture()
 			NewRead->RenderFence = RHICreateGPUFence(TEXT("TempoCameraRenderFence"));
 			RHICmdList.WriteGPUFence(NewRead->RenderFence);
 		});
+
+	// Pop: restore the prior CVar value. The propagation render command queued by Set() on
+	// GT lands in RT FIFO after every render command this camera enqueued above, so each
+	// camera's renders consume the camera's own override before the restore takes effect.
+	if (!bSingleTileFastPath)
+	{
+		if (TSRShadingRejectionExposureOffsetCVar)
+		{
+			TSRShadingRejectionExposureOffsetCVar->Set(SavedTSRShadingRejectionExposureOffset, ECVF_SetByConsole);
+		}
+
+	}
 
 	TextureReadQueue.Enqueue(NewRead);
 }
