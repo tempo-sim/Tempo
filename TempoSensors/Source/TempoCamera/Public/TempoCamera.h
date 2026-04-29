@@ -148,13 +148,28 @@ struct FTempoCameraTile
 	UPROPERTY(VisibleAnywhere)
 	FRotator RelativeRotation = FRotator::ZeroRotator;
 
-	// The output tile dimensions in the final stitched image.
+	// The tile's distorted output extent — width/height in the atlas, *including* any feather
+	// margin growth on shared edges. Equals the tile's perspective render output size, which is
+	// what the distortion PPM produces and writes into the atlas.
 	UPROPERTY(VisibleAnywhere)
 	FIntPoint TileOutputSizeXY = FIntPoint::ZeroValue;
 
-	// The destination offset of this tile within the atlas.
+	// The tile's destination offset in the atlas. The tile occupies the rect
+	// [TileDestOffset, TileDestOffset + TileOutputSizeXY) in atlas pixels. Atlas tile rects are
+	// always non-overlapping; with FeatherPixels > 0 the atlas itself is wider than the
+	// equidistant output to fit the per-tile feather margins disjointly.
 	UPROPERTY(VisibleAnywhere)
 	FIntPoint TileDestOffset = FIntPoint::ZeroValue;
+
+	// The slice of the equidistant output image this tile "owns" (centerline pick rule). This is
+	// the tile's pre-feather coverage in output space — adjacent tiles' OwnedOutput rects partition
+	// the output rect exactly with no overlap. Used by the resolve-map fill to decide which tile
+	// is primary at each output pixel and to measure distance to the nearest seam.
+	UPROPERTY(VisibleAnywhere)
+	FIntPoint OwnedOutputOffset = FIntPoint::ZeroValue;
+
+	UPROPERTY(VisibleAnywhere)
+	FIntPoint OwnedOutputSize = FIntPoint::ZeroValue;
 
 	// The equidistant tile's horizontal FOV in radians (only used for equidistant distortion model).
 	double EquidistantTileHFOVRad = 0.0;
@@ -246,7 +261,12 @@ protected:
 	// Returns SharedFinalTextureTarget so OnRenderCompleted reads from the merged output.
 	virtual UTextureRenderTarget2D* GetReadbackTextureTarget() const override { return SharedFinalTextureTarget; }
 
-	void ConfigureTile(FTempoCameraTile& Tile, double YawOffset, double PitchOffset, double PerspectiveFOV, const FIntPoint& TileSizeXY, const FIntPoint& TileDestOffset, bool bActivate);
+	void ConfigureTile(FTempoCameraTile& Tile, double YawOffset, double PitchOffset, double PerspectiveFOV, const FIntPoint& TileSizeXY, const FIntPoint& TileDestOffset, const FIntPoint& OwnedOffset, const FIntPoint& OwnedSize, bool bActivate);
+
+	// Recompute OutputResolveMap and OutputResolveWeight from the current tile layout. Must run
+	// after SyncTiles whenever tile geometry changes. Cheap with FeatherPixels=0 (writes the
+	// identity map) and bounded by SizeXY.X * SizeXY.Y otherwise.
+	void RebuildResolveMaps();
 	void ApplyTilePostProcess(FTempoCameraTile& Tile);
 	void SetTileDepthEnabled(FTempoCameraTile& Tile, bool bTileDepthEnabled);
 	void InitTileDistortionMap(FTempoCameraTile& Tile);
@@ -265,6 +285,17 @@ protected:
 	// Lens distortion parameters. Used by BrownConrady (K1-K3) and Rational (K1-K6) models.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo")
 	FTempoLensDistortionParameters LensParameters;
+
+	// Feather width (in equidistant-output pixels) used to blend across tile seams in multi-tile
+	// configurations. Each tile renders an extra FeatherPixels of angular margin on every shared
+	// edge into a correspondingly larger atlas region; the stitch pass then linearly blends across
+	// the 2*FeatherPixels-wide overlap straddling each seam, hiding the per-tile TAA/TSR history
+	// discontinuity. Zero disables feathering — atlas equals the equidistant output exactly.
+	// Single-tile (Brown-Conrady / Rational / single-capture equidistant) configurations have no
+	// seams and ignore this setting. Default 16 px is wide enough to mask per-tile temporal-history
+	// differences while keeping perimeter overdraw under a few percent.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo", meta=(UIMin=0, UIMax=64, ClampMin=0, ClampMax=128))
+	int32 FeatherPixels = 16;
 
 	// FOVAngle (horizontal), SizeXY, RateHz, SequenceId, PostProcessSettings, ShowFlagSettings,
 	// and bUseRayTracingIfEnabled are inherited from UTempoSceneCaptureComponent2D /
@@ -299,11 +330,36 @@ protected:
 	FTempoLensDistortionParameters LensParameters_Internal;
 	float FOVAngle_Internal = -1.0f;
 	FIntPoint SizeXY_Internal = FIntPoint(-1, -1);
+	int32 FeatherPixels_Internal = -1;
 
 	// Shared render target holding the stitched aux output (label + depth bytes) from all
 	// active tiles. Merged with the proxy capture's tonemapped color into SharedFinalTextureTarget.
 	UPROPERTY(Transient, VisibleAnywhere)
 	UTextureRenderTarget2D* SharedAuxTextureTarget = nullptr;
+
+	// HDR, sized to SizeXY (the equidistant output). Produced by the stitch+feather Canvas pass
+	// from SharedTextureTarget (the per-tile atlas) via OutputResolveMap/OutputResolveWeight, and
+	// consumed by the proxy tonemap PPM as scene color (HDRColorRT). Size matches the proxy
+	// capture's TextureTarget so the canvas UV mapping is identity.
+	UPROPERTY(Transient, VisibleAnywhere)
+	UTextureRenderTarget2D* SharedStitchHDRTextureTarget = nullptr;
+
+	// Per-output-pixel atlas UVs of the two contributing tiles (RGBA fp16: AtlasU_A, AtlasV_A,
+	// AtlasU_B, AtlasV_B). Sized to SizeXY. With FeatherPixels=0 only the A pair is meaningful and
+	// equals output UV remapped through the (identity) atlas layout.
+	UPROPERTY(Transient, VisibleAnywhere)
+	UTexture2D* OutputResolveMap = nullptr;
+
+	// Per-output-pixel blend weight (R fp16). Encodes how much tile A contributes; tile B
+	// contributes 1-Weight. Pixels outside any feather band have Weight=1 (only A contributes).
+	// At a seam centerline Weight=0.5. Sized to SizeXY.
+	UPROPERTY(Transient, VisibleAnywhere)
+	UTexture2D* OutputResolveWeight = nullptr;
+
+	// Atlas size in pixels. Equals SizeXY when there are no inter-tile seams (single-tile or
+	// FeatherPixels=0); otherwise grows by 2*FeatherPixels per shared seam axis to give each
+	// tile's covered output a disjoint atlas region.
+	FIntPoint AtlasSize = FIntPoint::ZeroValue;
 
 	// Final merged render target. A Canvas pass using the merge material combines the proxy's
 	// tonemapped TextureTarget with SharedAuxTextureTarget into this RT; the staging copy reads
@@ -322,16 +378,26 @@ protected:
 	UMaterialInstanceDynamic* GetOrCreateStitchMergeMID();
 
 	// Dynamic instance of the aux unpack material with its "TileRT" parameter bound to
-	// SharedTextureTarget — one full-screen Canvas draw samples SharedTextureTarget.a over the
-	// whole atlas and unpacks label+depth bits into SharedAuxTextureTarget. Shares the same
-	// material as the legacy per-tile aux pass; only the source texture (full atlas vs per-tile
-	// RT) and Canvas extent (whole atlas vs tile rect) differ.
+	// SharedTextureTarget. The material samples atlas alpha through the resolve map (using the
+	// owning-tile UV when Weight >= 0.5, else the secondary tile UV) and unpacks label+depth
+	// bits into SharedAuxTextureTarget. Pick-by-ownership (rather than blending) is intentional —
+	// label is integer and depth is bit-packed, neither is safely averageable.
 	UPROPERTY(Transient)
 	UMaterialInstanceDynamic* AuxAtlasMID = nullptr;
 
-	// Create AuxAtlasMID if needed and (re)bind its TileRT parameter to SharedTextureTarget.
+	// Create AuxAtlasMID if needed and (re)bind TileRT/OutputResolveMap/OutputResolveWeight.
 	// Returns nullptr if the aux material is not configured or SharedTextureTarget is missing.
 	UMaterialInstanceDynamic* GetOrCreateAuxAtlasMID();
+
+	// Dynamic instance of the stitch+feather material. Run as a full-screen Canvas pass over
+	// SharedStitchHDRTextureTarget. Samples SharedTextureTarget at the two atlas UVs from the
+	// resolve map and lerps by the weight, producing the linear HDR equidistant output that the
+	// proxy tonemap PPM then consumes as scene color.
+	UPROPERTY(Transient)
+	UMaterialInstanceDynamic* StitchColorMID = nullptr;
+
+	// Create StitchColorMID if needed and (re)bind AtlasRT/OutputResolveMap/OutputResolveWeight.
+	UMaterialInstanceDynamic* GetOrCreateStitchColorMID();
 
 	// Dynamic instance of the proxy tonemap post-process material, with its "HDRColorRT"
 	// parameter bound to SharedTextureTarget. Created lazily and appended to this component's

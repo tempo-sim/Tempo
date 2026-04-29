@@ -316,7 +316,8 @@ bool UTempoCamera::HasDetectedParameterChange() const
 {
 	return SizeXY != SizeXY_Internal
 		|| FOVAngle != FOVAngle_Internal
-		|| LensParameters != LensParameters_Internal;
+		|| LensParameters != LensParameters_Internal
+		|| FeatherPixels != FeatherPixels_Internal;
 }
 
 void UTempoCamera::ReconfigureTilesNow()
@@ -347,6 +348,7 @@ void UTempoCamera::UpdateInternalMirrors()
 	LensParameters_Internal = LensParameters;
 	FOVAngle_Internal = FOVAngle;
 	SizeXY_Internal = SizeXY;
+	FeatherPixels_Internal = FeatherPixels;
 }
 
 bool UTempoCamera::HasPendingCameraRequests() const
@@ -518,16 +520,44 @@ UMaterialInstanceDynamic* UTempoCamera::GetOrCreateAuxAtlasMID()
 		AuxAtlasMID = UMaterialInstanceDynamic::Create(AuxMat, this);
 	}
 
-	// The existing aux material reads "TileRT.a" at its UV. By binding TileRT to the whole atlas
-	// and drawing a Canvas tile that covers (0,0)..(SizeXY) with UV (0,0)..(1,1), the material
-	// unpacks the packed alpha across the entire atlas in a single pass.
+	// The aux material samples the atlas via the resolve map: at each output pixel it picks the
+	// owning tile's atlas UV (Weight >= 0.5) or the secondary's (Weight < 0.5), then reads
+	// TileRT.a there with point sampling and unpacks label+depth bits. Pick-by-ownership rather
+	// than blending — label is integer and depth is bit-packed, neither is safely averageable.
 	AuxAtlasMID->SetTextureParameterValue(TEXT("TileRT"), SharedTextureTarget);
+	AuxAtlasMID->SetTextureParameterValue(TEXT("OutputResolveMap"), OutputResolveMap);
+	AuxAtlasMID->SetTextureParameterValue(TEXT("OutputResolveWeight"), OutputResolveWeight);
 	return AuxAtlasMID;
+}
+
+UMaterialInstanceDynamic* UTempoCamera::GetOrCreateStitchColorMID()
+{
+	if (!SharedTextureTarget || !OutputResolveMap || !OutputResolveWeight)
+	{
+		return nullptr;
+	}
+
+	if (!StitchColorMID)
+	{
+		const UTempoSensorsSettings* Settings = GetDefault<UTempoSensorsSettings>();
+		UMaterialInterface* StitchMat = Settings ? Settings->GetCameraStitchColorFeatherMaterial().Get() : nullptr;
+		if (!StitchMat)
+		{
+			UE_LOG(LogTempoCamera, Error, TEXT("CameraStitchColorFeatherMaterial is not set in TempoSensors settings."));
+			return nullptr;
+		}
+		StitchColorMID = UMaterialInstanceDynamic::Create(StitchMat, this);
+	}
+
+	StitchColorMID->SetTextureParameterValue(TEXT("AtlasRT"), SharedTextureTarget);
+	StitchColorMID->SetTextureParameterValue(TEXT("OutputResolveMap"), OutputResolveMap);
+	StitchColorMID->SetTextureParameterValue(TEXT("OutputResolveWeight"), OutputResolveWeight);
+	return StitchColorMID;
 }
 
 UMaterialInstanceDynamic* UTempoCamera::GetOrCreateProxyTonemapMID()
 {
-	if (!SharedTextureTarget)
+	if (!SharedStitchHDRTextureTarget)
 	{
 		return nullptr;
 	}
@@ -556,7 +586,10 @@ UMaterialInstanceDynamic* UTempoCamera::GetOrCreateProxyTonemapMID()
 		PostProcessSettings.WeightedBlendables.Array.Add(FWeightedBlendable(1.0, ProxyTonemapMID));
 	}
 
-	ProxyTonemapMID->SetTextureParameterValue(TEXT("HDRColorRT"), SharedTextureTarget);
+	// Bind to the post-stitch HDR target (the equidistant output, sized SizeXY), not the raw atlas
+	// — by the time the proxy capture runs, the stitch+feather Canvas pass has resolved the
+	// per-tile distorted outputs into a single equidistant HDR image.
+	ProxyTonemapMID->SetTextureParameterValue(TEXT("HDRColorRT"), SharedStitchHDRTextureTarget);
 	return ProxyTonemapMID;
 }
 
@@ -572,18 +605,35 @@ void UTempoCamera::InitRenderTarget()
 	// not allocate staging textures or a distortion map, leaving both for us to manage.
 	Super::InitRenderTarget();
 
+	// SyncTiles must run before InitRenderTarget — it computes AtlasSize. Fall back to SizeXY in
+	// edge cases where AtlasSize wasn't populated (e.g., InitRenderTarget called before BeginPlay
+	// has run SyncTiles, or all tiles inactive).
+	const FIntPoint AtlasSizeForRT = (AtlasSize.X > 0 && AtlasSize.Y > 0) ? AtlasSize : SizeXY;
+
 	// SharedTextureTarget is the atlas: one tile-per-view family renders directly into it, and
-	// it also feeds the proxy tonemap PPM (HDRColorRT). Format is fp32 — not for color dynamic
-	// range, but because each tile's post-process material bit-packs (label, depth) into the
-	// alpha channel, and fp16 alpha does not have the mantissa bits to preserve that. Point
-	// sampling is mandatory for the aux unpack pass — bilinear would smear adjacent pixels'
-	// bit patterns and break asuint() decoding.
+	// it feeds the stitch+feather Canvas pass that writes to SharedStitchHDRTextureTarget. Format
+	// is fp32 — not for color dynamic range, but because each tile's distortion PPM bit-packs
+	// (label, depth) into the alpha channel, and fp16 alpha does not have the mantissa bits to
+	// preserve that. Point sampling is mandatory for the aux unpack pass; the color stitch
+	// material overrides to bilinear at its sampler. Atlas dimensions are AtlasSize, which may be
+	// larger than SizeXY when feathering (each tile gets a disjoint atlas region sized to its
+	// covered output).
 	SharedTextureTarget = NewObject<UTextureRenderTarget2D>(this);
 	SharedTextureTarget->TargetGamma = 1.0f;
 	SharedTextureTarget->bGPUSharedFlag = true;
 	SharedTextureTarget->RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA32f;
 	SharedTextureTarget->Filter = TextureFilter::TF_Nearest;
-	SharedTextureTarget->InitAutoFormat(SizeXY.X, SizeXY.Y);
+	SharedTextureTarget->InitAutoFormat(AtlasSizeForRT.X, AtlasSizeForRT.Y);
+
+	// Stitch HDR RT: the equidistant-output-sized linear HDR target written by the stitch+feather
+	// Canvas pass and read by the proxy tonemap PPM as scene color. Sized to SizeXY so the proxy's
+	// canvas mapping is identity.
+	SharedStitchHDRTextureTarget = NewObject<UTextureRenderTarget2D>(this);
+	SharedStitchHDRTextureTarget->TargetGamma = 1.0f;
+	SharedStitchHDRTextureTarget->bGPUSharedFlag = true;
+	SharedStitchHDRTextureTarget->RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA16f;
+	SharedStitchHDRTextureTarget->Filter = TextureFilter::TF_Bilinear;
+	SharedStitchHDRTextureTarget->InitAutoFormat(SizeXY.X, SizeXY.Y);
 
 	// Aux RT carries packed label+depth bytes produced by the aux stitch pass. RGBA8 regardless
 	// of bDepthEnabled (the aux channels are byte-packed integer data, not HDR color).
@@ -591,6 +641,29 @@ void UTempoCamera::InitRenderTarget()
 	SharedAuxTextureTarget->TargetGamma = GetDefault<UTempoSensorsSettings>()->GetSceneCaptureGamma();
 	SharedAuxTextureTarget->RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA8;
 	SharedAuxTextureTarget->InitAutoFormat(SizeXY.X, SizeXY.Y);
+
+	// Resolve maps describe (per equidistant-output pixel) which tile(s) cover it, where in the
+	// atlas to sample, and how to feather. PF_FloatRGBA holds the two atlas UVs; PF_R16F holds the
+	// tile-A weight. Both use TF_Nearest because the materials need exact per-output-pixel data
+	// (smearing the UVs across pixel boundaries would create spurious atlas reads at seams).
+	OutputResolveMap = UTexture2D::CreateTransient(SizeXY.X, SizeXY.Y, PF_FloatRGBA);
+	OutputResolveMap->CompressionSettings = TC_HDR;
+	OutputResolveMap->Filter = TF_Nearest;
+	OutputResolveMap->AddressX = TA_Clamp;
+	OutputResolveMap->AddressY = TA_Clamp;
+	OutputResolveMap->SRGB = 0;
+	OutputResolveMap->UpdateResource();
+
+	OutputResolveWeight = UTexture2D::CreateTransient(SizeXY.X, SizeXY.Y, PF_R16F);
+	OutputResolveWeight->CompressionSettings = TC_HDR;
+	OutputResolveWeight->Filter = TF_Nearest;
+	OutputResolveWeight->AddressX = TA_Clamp;
+	OutputResolveWeight->AddressY = TA_Clamp;
+	OutputResolveWeight->SRGB = 0;
+	OutputResolveWeight->UpdateResource();
+
+	// Fill the resolve maps from current tile geometry.
+	RebuildResolveMaps();
 
 	InitFinalRenderTargetAndStaging();
 }
@@ -850,6 +923,32 @@ void UTempoCamera::RenderCapture()
 		TempoMultiViewCapture::RenderTiles(Scene, this, SharedTextureTarget, ViewSetups, ESceneCaptureSource::SCS_FinalColorHDR);
 
 		ShowFlags = SavedShowFlags;
+
+		// Stitch + feather pass: resolves the per-tile distorted atlas into a single equidistant
+		// HDR image (SharedStitchHDRTextureTarget, sized SizeXY). The resolve map drives where to
+		// sample the atlas and how to blend across overlapping tile coverage near seams. The proxy
+		// capture below reads this RT (via HDRColorRT) as scene color before bloom/AE/tonemap.
+		if (SharedStitchHDRTextureTarget)
+		{
+			if (UMaterialInstanceDynamic* StitchMID = GetOrCreateStitchColorMID())
+			{
+				UCanvas* Canvas = nullptr;
+				FVector2D CanvasSize(0.0, 0.0);
+				FDrawToRenderTargetContext Ctx;
+				UKismetRenderingLibrary::BeginDrawCanvasToRenderTarget(this, SharedStitchHDRTextureTarget, Canvas, CanvasSize, Ctx);
+
+				FCanvasTileItem Item(
+					FVector2D::ZeroVector,
+					StitchMID->GetRenderProxy(),
+					FVector2D(SizeXY.X, SizeXY.Y),
+					FVector2D(0.0, 0.0),
+					FVector2D(1.0, 1.0));
+				Item.BlendMode = SE_BLEND_Opaque;
+				Canvas->DrawItem(Item);
+
+				UKismetRenderingLibrary::EndDrawCanvasToRenderTarget(this, Ctx);
+			}
+		}
 	}
 
 	// Build the FTextureRead for the stitched output, sized to the camera's final SizeXY.
@@ -902,9 +1001,9 @@ void UTempoCamera::RenderCapture()
 		}
 
 		// Proxy scene capture: the PPM (appended to PostProcessSettings.WeightedBlendables by
-		// GetOrCreateProxyTonemapMID) replaces scene color with SharedTextureTarget's HDR linear
-		// color before Bloom/AE/Tonemapper, so the tonemapped LDR output landing in the inherited
-		// TextureTarget is effectively tonemap(stitched HDR).
+		// GetOrCreateProxyTonemapMID) replaces scene color with SharedStitchHDRTextureTarget's HDR
+		// linear color before Bloom/AE/Tonemapper, so the tonemapped LDR output landing in the
+		// inherited TextureTarget is effectively tonemap(stitched HDR).
 		if (GetOrCreateProxyTonemapMID())
 		{
 			// The proxy's scene render is useless — its PPM overwrites scene color before bloom/AE. Hide
@@ -1084,6 +1183,181 @@ void UTempoCamera::InitTileDistortionMap(FTempoCameraTile& Tile)
 	UTempoSceneCaptureComponent2D::ApplyDistortionMapToMaterial(Tile.PostProcessMaterialInstance, Tile.DistortionMap);
 }
 
+void UTempoCamera::RebuildResolveMaps()
+{
+	if (!OutputResolveMap || !OutputResolveWeight)
+	{
+		return;
+	}
+	if (SizeXY.X <= 0 || SizeXY.Y <= 0 || AtlasSize.X <= 0 || AtlasSize.Y <= 0)
+	{
+		return;
+	}
+
+	// Snapshot active tile geometry into a flat array. The runtime loop benefits from fast
+	// iteration over a contiguous container; we hit this 4-tile array up to (4 owner tests +
+	// 4 neighbor probes) * SizeXY.X * SizeXY.Y times in the worst case.
+	struct FTileGeom
+	{
+		FIntRect Owned;        // tile's slice of equidistant-output space (centerline pick)
+		FIntRect Covered;      // owned + feather margins on shared edges; equals atlas tile rect (translated to output coords)
+		FIntPoint AtlasOffset; // tile's offset within the atlas
+	};
+	TArray<FTileGeom, TInlineAllocator<4>> ActiveTiles;
+	const int32 F = FMath::Max(0, FeatherPixels);
+	for (const FTempoCameraTile& Tile : Tiles)
+	{
+		if (!Tile.bActive)
+		{
+			continue;
+		}
+		FTileGeom Geom;
+		Geom.Owned = FIntRect(Tile.OwnedOutputOffset, Tile.OwnedOutputOffset + Tile.OwnedOutputSize);
+		// A tile has feather margin only on edges where it has a neighbor — i.e., where its owned
+		// rect doesn't touch the equidistant-output boundary. Tiles at the image edge keep their
+		// flush-with-the-edge ownership (and no neighbor across that edge).
+		const int32 LeftMargin = (Geom.Owned.Min.X > 0) ? F : 0;
+		const int32 TopMargin = (Geom.Owned.Min.Y > 0) ? F : 0;
+		const int32 RightMargin = (Geom.Owned.Max.X < SizeXY.X) ? F : 0;
+		const int32 BottomMargin = (Geom.Owned.Max.Y < SizeXY.Y) ? F : 0;
+		Geom.Covered.Min = Geom.Owned.Min - FIntPoint(LeftMargin, TopMargin);
+		Geom.Covered.Max = Geom.Owned.Max + FIntPoint(RightMargin, BottomMargin);
+		Geom.AtlasOffset = Tile.TileDestOffset;
+		ActiveTiles.Add(Geom);
+	}
+	if (ActiveTiles.IsEmpty())
+	{
+		return;
+	}
+
+	FTexture2DMipMap& MipMap = OutputResolveMap->GetPlatformData()->Mips[0];
+	FTexture2DMipMap& MipWeight = OutputResolveWeight->GetPlatformData()->Mips[0];
+	uint16* MapData = static_cast<uint16*>(MipMap.BulkData.Lock(LOCK_READ_WRITE));
+	uint16* WeightData = static_cast<uint16*>(MipWeight.BulkData.Lock(LOCK_READ_WRITE));
+	if (!MapData || !WeightData)
+	{
+		MipMap.BulkData.Unlock();
+		MipWeight.BulkData.Unlock();
+		return;
+	}
+
+	const float AtlasW = static_cast<float>(AtlasSize.X);
+	const float AtlasH = static_cast<float>(AtlasSize.Y);
+
+	// Each row is independent. ParallelFor across rows keeps the per-pixel work tight (no thread
+	// spawn per pixel) while letting reconfigures of large images stay cheap.
+	ParallelFor(SizeXY.Y, [&](int32 Y)
+	{
+		uint16* MapRow = &MapData[Y * SizeXY.X * 4];
+		uint16* WeightRow = &WeightData[Y * SizeXY.X];
+		for (int32 X = 0; X < SizeXY.X; ++X)
+		{
+			// 1) Owning tile by centerline pick: the unique active tile whose owned rect contains P.
+			const FTileGeom* Owner = nullptr;
+			for (const FTileGeom& T : ActiveTiles)
+			{
+				if (X >= T.Owned.Min.X && X < T.Owned.Max.X && Y >= T.Owned.Min.Y && Y < T.Owned.Max.Y)
+				{
+					Owner = &T;
+					break;
+				}
+			}
+
+			float UV_A_X = 0.0f, UV_A_Y = 0.0f;
+			float UV_B_X = 0.0f, UV_B_Y = 0.0f;
+			float Weight = 1.0f;
+
+			if (Owner)
+			{
+				// 2) UV_A: the owner's atlas pixel for P. (Atlas tile rect translates output coords
+				//    by AtlasOffset - Covered.Min.)
+				const float AtlasPixA_X = static_cast<float>(Owner->AtlasOffset.X + (X - Owner->Covered.Min.X)) + 0.5f;
+				const float AtlasPixA_Y = static_cast<float>(Owner->AtlasOffset.Y + (Y - Owner->Covered.Min.Y)) + 0.5f;
+				UV_A_X = AtlasPixA_X / AtlasW;
+				UV_A_Y = AtlasPixA_Y / AtlasH;
+
+				// 3) Nearest seam neighbor for the secondary (B) tap. Skipped entirely when F=0, in
+				//    which case the resolve map degrades to (UV_A == UV_B, Weight=1) and the stitch
+				//    is a 1:1 atlas copy.
+				if (F > 0)
+				{
+					int32 BestDistance = INT32_MAX;
+					const FTileGeom* Neighbor = nullptr;
+
+					// Probe just outside each owned-rect edge to find the neighbor across it. We
+					// only test edges that face into the image (an edge flush with the output
+					// boundary has no neighbor; its distance is irrelevant).
+					auto ProbeEdge = [&](int32 Dist, int32 ProbeX, int32 ProbeY, bool bEdgeHasNeighbor)
+					{
+						if (!bEdgeHasNeighbor || Dist < 0 || Dist >= F)
+						{
+							return;
+						}
+						for (const FTileGeom& T : ActiveTiles)
+						{
+							if (&T == Owner)
+							{
+								continue;
+							}
+							if (ProbeX >= T.Owned.Min.X && ProbeX < T.Owned.Max.X
+								&& ProbeY >= T.Owned.Min.Y && ProbeY < T.Owned.Max.Y)
+							{
+								if (Dist < BestDistance)
+								{
+									BestDistance = Dist;
+									Neighbor = &T;
+								}
+								break;
+							}
+						}
+					};
+
+					ProbeEdge(X - Owner->Owned.Min.X,         Owner->Owned.Min.X - 1, Y, Owner->Owned.Min.X > 0);
+					ProbeEdge(Owner->Owned.Max.X - 1 - X,     Owner->Owned.Max.X,     Y, Owner->Owned.Max.X < SizeXY.X);
+					ProbeEdge(Y - Owner->Owned.Min.Y,         X, Owner->Owned.Min.Y - 1, Owner->Owned.Min.Y > 0);
+					ProbeEdge(Owner->Owned.Max.Y - 1 - Y,     X, Owner->Owned.Max.Y,     Owner->Owned.Max.Y < SizeXY.Y);
+
+					if (Neighbor)
+					{
+						const float AtlasPixB_X = static_cast<float>(Neighbor->AtlasOffset.X + (X - Neighbor->Covered.Min.X)) + 0.5f;
+						const float AtlasPixB_Y = static_cast<float>(Neighbor->AtlasOffset.Y + (Y - Neighbor->Covered.Min.Y)) + 0.5f;
+						UV_B_X = AtlasPixB_X / AtlasW;
+						UV_B_Y = AtlasPixB_Y / AtlasH;
+						// Weight = 0.5 at the seam centerline (BestDistance=0), ramping linearly to
+						// 1.0 at the inner edge of the feather band (BestDistance=F-1, treated as F).
+						const float DistF = static_cast<float>(BestDistance);
+						const float FF = static_cast<float>(F);
+						Weight = FMath::Clamp(0.5f + 0.5f * DistF / FF, 0.5f, 1.0f);
+					}
+					else
+					{
+						UV_B_X = UV_A_X;
+						UV_B_Y = UV_A_Y;
+						Weight = 1.0f;
+					}
+				}
+				else
+				{
+					UV_B_X = UV_A_X;
+					UV_B_Y = UV_A_Y;
+					Weight = 1.0f;
+				}
+			}
+
+			MapRow[X * 4 + 0] = FFloat16(UV_A_X).Encoded;
+			MapRow[X * 4 + 1] = FFloat16(UV_A_Y).Encoded;
+			MapRow[X * 4 + 2] = FFloat16(UV_B_X).Encoded;
+			MapRow[X * 4 + 3] = FFloat16(UV_B_Y).Encoded;
+			WeightRow[X] = FFloat16(Weight).Encoded;
+		}
+	});
+
+	MipMap.BulkData.Unlock();
+	MipWeight.BulkData.Unlock();
+	OutputResolveMap->UpdateResource();
+	OutputResolveWeight->UpdateResource();
+}
+
 void UTempoCamera::SetTileDepthEnabled(FTempoCameraTile& Tile, bool bTileDepthEnabled)
 {
 	const UTempoSensorsSettings* TempoSensorsSettings = GetDefault<UTempoSensorsSettings>();
@@ -1174,8 +1448,8 @@ void UTempoCamera::ApplyTilePostProcess(FTempoCameraTile& Tile)
 	Tile.PostProcessSettings.AutoExposureMethod = AEM_Manual;
 
 	// Rebuild blendables from the owner's user-authored list, filter out ProxyTonemapMID (it reads
-	// SharedTextureTarget, which tiles populate, and applying it inside a tile would feed stale
-	// stitched content back into the tile's scene color), then append the distortion PPM.
+	// the post-stitch HDR target, and applying it inside a tile would feed last-frame's stitched
+	// equidistant output back into the tile's scene color), then append the distortion PPM.
 	Tile.PostProcessSettings.WeightedBlendables.Array.RemoveAll([this](const FWeightedBlendable& WB)
 	{
 		return WB.Object != nullptr && WB.Object == ProxyTonemapMID;
@@ -1192,7 +1466,7 @@ void UTempoCamera::ApplyTilePostProcess(FTempoCameraTile& Tile)
 	}
 }
 
-void UTempoCamera::ConfigureTile(FTempoCameraTile& Tile, double YawOffset, double PitchOffset, double PerspectiveFOV, const FIntPoint& TileSizeXY, const FIntPoint& TileDestOffset, bool bActivate)
+void UTempoCamera::ConfigureTile(FTempoCameraTile& Tile, double YawOffset, double PitchOffset, double PerspectiveFOV, const FIntPoint& TileSizeXY, const FIntPoint& TileDestOffset, const FIntPoint& OwnedOffset, const FIntPoint& OwnedSize, bool bActivate)
 {
 	if (!bActivate)
 	{
@@ -1206,6 +1480,8 @@ void UTempoCamera::ConfigureTile(FTempoCameraTile& Tile, double YawOffset, doubl
 	Tile.RelativeRotation = FRotator(PitchOffset, YawOffset, 0.0);
 	Tile.TileOutputSizeXY = TileSizeXY;
 	Tile.TileDestOffset = TileDestOffset;
+	Tile.OwnedOutputOffset = OwnedOffset;
+	Tile.OwnedOutputSize = OwnedSize;
 	Tile.EquidistantTileHFOVRad = FMath::DegreesToRadians(PerspectiveFOV);
 	Tile.SizeXY = TileSizeXY;                 // InitTileDistortionMap may adjust
 	Tile.FOVAngle = static_cast<float>(PerspectiveFOV);
@@ -1230,13 +1506,19 @@ void UTempoCamera::SyncTiles()
 	FTempoCameraTile& BL = Tiles[2];
 	FTempoCameraTile& BR = Tiles[3];
 
+	auto Deactivate = [this](FTempoCameraTile& Tile)
+	{
+		ConfigureTile(Tile, 0, 0, 0, FIntPoint::ZeroValue, FIntPoint::ZeroValue, FIntPoint::ZeroValue, FIntPoint::ZeroValue, /*bActivate=*/ false);
+	};
+
 	if (LensParameters.DistortionModel == ETempoDistortionModel::BrownConrady || LensParameters.DistortionModel == ETempoDistortionModel::Rational)
 	{
-		// Single capture: use TL, deactivate others
-		ConfigureTile(TL, 0.0, 0.0, FOVAngle, SizeXY, FIntPoint::ZeroValue, /*bActivate=*/ true);
-		ConfigureTile(TR, 0, 0, 0, FIntPoint::ZeroValue, FIntPoint::ZeroValue, /*bActivate=*/ false);
-		ConfigureTile(BL, 0, 0, 0, FIntPoint::ZeroValue, FIntPoint::ZeroValue, /*bActivate=*/ false);
-		ConfigureTile(BR, 0, 0, 0, FIntPoint::ZeroValue, FIntPoint::ZeroValue, /*bActivate=*/ false);
+		// Single capture: use TL, deactivate others. No seams, no feather.
+		ConfigureTile(TL, 0.0, 0.0, FOVAngle, SizeXY, FIntPoint::ZeroValue, FIntPoint::ZeroValue, SizeXY, /*bActivate=*/ true);
+		Deactivate(TR);
+		Deactivate(BL);
+		Deactivate(BR);
+		AtlasSize = SizeXY;
 	}
 	else // Equidistant
 	{
@@ -1244,54 +1526,110 @@ void UTempoCamera::SyncTiles()
 		const bool bSplitHorizontal = FOVAngle > MaxPerspectiveFOVPerCapture;
 		const bool bSplitVertical = VerticalFOV > MaxPerspectiveFOVPerCapture;
 
+		// Feather is only meaningful where two tiles share an edge. With a single tile (no splits)
+		// there are no seams, so F=0. Otherwise use the configured value, clamped to keep tiles sane.
+		const int32 F = (bSplitHorizontal || bSplitVertical) ? FMath::Max(0, FeatherPixels) : 0;
+
+		// Helper: angular extent (degrees) of W output pixels along the X axis. The output
+		// horizontal extent is FOVAngle degrees over SizeXY.X pixels, so a W-pixel slice spans
+		// W/SizeXY.X * FOVAngle degrees in azimuth (theta_d for the K-B / equidistant model).
+		const auto AzimuthDegFromPixels = [&](int32 W) -> double { return static_cast<double>(W) * FOVAngle / SizeXY.X; };
+		// Pitch uses the vertical FOV / SizeXY.Y. (VFOV pixels-per-degree equals HFOV pixels-per-degree
+		// in equidistant — VFOV is just FOVAngle * Y/X.)
+		const auto ElevationDegFromPixels = [&](int32 H) -> double { return static_cast<double>(H) * VerticalFOV / SizeXY.Y; };
+
 		if (!bSplitHorizontal && !bSplitVertical)
 		{
-			ConfigureTile(TL, 0.0, 0.0, FOVAngle, SizeXY, FIntPoint::ZeroValue, true);
-			ConfigureTile(TR, 0, 0, 0, FIntPoint::ZeroValue, FIntPoint::ZeroValue, false);
-			ConfigureTile(BL, 0, 0, 0, FIntPoint::ZeroValue, FIntPoint::ZeroValue, false);
-			ConfigureTile(BR, 0, 0, 0, FIntPoint::ZeroValue, FIntPoint::ZeroValue, false);
+			ConfigureTile(TL, 0.0, 0.0, FOVAngle, SizeXY, FIntPoint::ZeroValue, FIntPoint::ZeroValue, SizeXY, true);
+			Deactivate(TR);
+			Deactivate(BL);
+			Deactivate(BR);
+			AtlasSize = SizeXY;
 		}
 		else if (bSplitHorizontal && !bSplitVertical)
 		{
-			const double SubFOV = FOVAngle / 2.0;
-			const double YawOffset = SubFOV / 2.0;
+			// Owned: split exactly into left/right halves; sum equals SizeXY.X.
 			const int32 LeftWidth = FMath::CeilToInt32(SizeXY.X / 2.0);
 			const int32 RightWidth = SizeXY.X - LeftWidth;
 
-			ConfigureTile(TL, -YawOffset, 0.0, SubFOV, FIntPoint(LeftWidth, SizeXY.Y), FIntPoint(0, 0), true);
-			ConfigureTile(TR, YawOffset, 0.0, SubFOV, FIntPoint(RightWidth, SizeXY.Y), FIntPoint(LeftWidth, 0), true);
-			ConfigureTile(BL, 0, 0, 0, FIntPoint::ZeroValue, FIntPoint::ZeroValue, false);
-			ConfigureTile(BR, 0, 0, 0, FIntPoint::ZeroValue, FIntPoint::ZeroValue, false);
+			// Covered: each tile extends F pixels into the other's owned region across the seam.
+			const int32 TL_CoveredW = LeftWidth + F;
+			const int32 TR_CoveredW = RightWidth + F;
+
+			// Optical-axis position in equidistant-output X = covered-rect center. Yaw is measured
+			// from camera forward (X = SizeXY.X/2). Negative = left.
+			const double TL_CenterX = TL_CoveredW * 0.5;
+			const double TR_CenterX = static_cast<double>(SizeXY.X) - TR_CoveredW * 0.5;
+			const double TL_Yaw = AzimuthDegFromPixels(static_cast<int32>(FMath::RoundToInt(TL_CenterX) - SizeXY.X / 2));  // intentionally rounded; sub-pixel yaw mismatch with covered-rect pixel grid is irrelevant at our seam tolerances
+			const double TR_Yaw = AzimuthDegFromPixels(static_cast<int32>(FMath::RoundToInt(TR_CenterX) - SizeXY.X / 2));
+
+			ConfigureTile(TL, TL_Yaw, 0.0, AzimuthDegFromPixels(TL_CoveredW), FIntPoint(TL_CoveredW, SizeXY.Y), FIntPoint(0, 0),
+				FIntPoint(0, 0), FIntPoint(LeftWidth, SizeXY.Y), true);
+			ConfigureTile(TR, TR_Yaw, 0.0, AzimuthDegFromPixels(TR_CoveredW), FIntPoint(TR_CoveredW, SizeXY.Y), FIntPoint(TL_CoveredW, 0),
+				FIntPoint(LeftWidth, 0), FIntPoint(RightWidth, SizeXY.Y), true);
+			Deactivate(BL);
+			Deactivate(BR);
+			AtlasSize = FIntPoint(TL_CoveredW + TR_CoveredW, SizeXY.Y);
 		}
 		else if (!bSplitHorizontal && bSplitVertical)
 		{
-			const double SubVertFOV = VerticalFOV / 2.0;
-			const double PitchOffset = SubVertFOV / 2.0;
 			const int32 TopHeight = FMath::CeilToInt32(SizeXY.Y / 2.0);
 			const int32 BottomHeight = SizeXY.Y - TopHeight;
 
-			ConfigureTile(TL, 0.0, PitchOffset, FOVAngle, FIntPoint(SizeXY.X, TopHeight), FIntPoint(0, 0), true);
-			ConfigureTile(TR, 0.0, -PitchOffset, FOVAngle, FIntPoint(SizeXY.X, BottomHeight), FIntPoint(0, TopHeight), true);
-			ConfigureTile(BL, 0, 0, 0, FIntPoint::ZeroValue, FIntPoint::ZeroValue, false);
-			ConfigureTile(BR, 0, 0, 0, FIntPoint::ZeroValue, FIntPoint::ZeroValue, false);
+			const int32 Top_CoveredH = TopHeight + F;
+			const int32 Bottom_CoveredH = BottomHeight + F;
+
+			// UE pitch convention: positive = up. The "top" tile of the equidistant output looks up
+			// (positive pitch); equidistant-output Y=0 is the top of the image and corresponds to
+			// the highest elevation, so its center Y in output coords is at Top_CoveredH/2 from
+			// the top, mapping to elevation = +VerticalFOV * (0.5 - Top_CenterY/SizeXY.Y).
+			const double Top_CenterY = Top_CoveredH * 0.5;
+			const double Bottom_CenterY = static_cast<double>(SizeXY.Y) - Bottom_CoveredH * 0.5;
+			const double Top_Pitch = ElevationDegFromPixels(SizeXY.Y / 2 - static_cast<int32>(FMath::RoundToInt(Top_CenterY)));
+			const double Bottom_Pitch = ElevationDegFromPixels(SizeXY.Y / 2 - static_cast<int32>(FMath::RoundToInt(Bottom_CenterY)));
+
+			ConfigureTile(TL, 0.0, Top_Pitch, FOVAngle, FIntPoint(SizeXY.X, Top_CoveredH), FIntPoint(0, 0),
+				FIntPoint(0, 0), FIntPoint(SizeXY.X, TopHeight), true);
+			ConfigureTile(TR, 0.0, Bottom_Pitch, FOVAngle, FIntPoint(SizeXY.X, Bottom_CoveredH), FIntPoint(0, Top_CoveredH),
+				FIntPoint(0, TopHeight), FIntPoint(SizeXY.X, BottomHeight), true);
+			Deactivate(BL);
+			Deactivate(BR);
+			AtlasSize = FIntPoint(SizeXY.X, Top_CoveredH + Bottom_CoveredH);
 		}
 		else
 		{
-			const double SubHFOV = FOVAngle / 2.0;
-			const double SubVFOV = VerticalFOV / 2.0;
-			const double YawOffset = SubHFOV / 2.0;
-			const double PitchOffset = SubVFOV / 2.0;
 			const int32 LeftWidth = FMath::CeilToInt32(SizeXY.X / 2.0);
 			const int32 RightWidth = SizeXY.X - LeftWidth;
 			const int32 TopHeight = FMath::CeilToInt32(SizeXY.Y / 2.0);
 			const int32 BottomHeight = SizeXY.Y - TopHeight;
 
-			ConfigureTile(TL, -YawOffset, PitchOffset, SubHFOV, FIntPoint(LeftWidth, TopHeight), FIntPoint(0, 0), true);
-			ConfigureTile(TR, YawOffset, PitchOffset, SubHFOV, FIntPoint(RightWidth, TopHeight), FIntPoint(LeftWidth, 0), true);
-			ConfigureTile(BL, -YawOffset, -PitchOffset, SubHFOV, FIntPoint(LeftWidth, BottomHeight), FIntPoint(0, TopHeight), true);
-			ConfigureTile(BR, YawOffset, -PitchOffset, SubHFOV, FIntPoint(RightWidth, BottomHeight), FIntPoint(LeftWidth, TopHeight), true);
+			const int32 L_CoveredW = LeftWidth + F;
+			const int32 R_CoveredW = RightWidth + F;
+			const int32 T_CoveredH = TopHeight + F;
+			const int32 B_CoveredH = BottomHeight + F;
+
+			const double L_CenterX = L_CoveredW * 0.5;
+			const double R_CenterX = static_cast<double>(SizeXY.X) - R_CoveredW * 0.5;
+			const double T_CenterY = T_CoveredH * 0.5;
+			const double B_CenterY = static_cast<double>(SizeXY.Y) - B_CoveredH * 0.5;
+			const double L_Yaw = AzimuthDegFromPixels(static_cast<int32>(FMath::RoundToInt(L_CenterX)) - SizeXY.X / 2);
+			const double R_Yaw = AzimuthDegFromPixels(static_cast<int32>(FMath::RoundToInt(R_CenterX)) - SizeXY.X / 2);
+			const double T_Pitch = ElevationDegFromPixels(SizeXY.Y / 2 - static_cast<int32>(FMath::RoundToInt(T_CenterY)));
+			const double B_Pitch = ElevationDegFromPixels(SizeXY.Y / 2 - static_cast<int32>(FMath::RoundToInt(B_CenterY)));
+
+			ConfigureTile(TL, L_Yaw, T_Pitch, AzimuthDegFromPixels(L_CoveredW), FIntPoint(L_CoveredW, T_CoveredH), FIntPoint(0, 0),
+				FIntPoint(0, 0), FIntPoint(LeftWidth, TopHeight), true);
+			ConfigureTile(TR, R_Yaw, T_Pitch, AzimuthDegFromPixels(R_CoveredW), FIntPoint(R_CoveredW, T_CoveredH), FIntPoint(L_CoveredW, 0),
+				FIntPoint(LeftWidth, 0), FIntPoint(RightWidth, TopHeight), true);
+			ConfigureTile(BL, L_Yaw, B_Pitch, AzimuthDegFromPixels(L_CoveredW), FIntPoint(L_CoveredW, B_CoveredH), FIntPoint(0, T_CoveredH),
+				FIntPoint(0, TopHeight), FIntPoint(LeftWidth, BottomHeight), true);
+			ConfigureTile(BR, R_Yaw, B_Pitch, AzimuthDegFromPixels(R_CoveredW), FIntPoint(R_CoveredW, B_CoveredH), FIntPoint(L_CoveredW, T_CoveredH),
+				FIntPoint(LeftWidth, TopHeight), FIntPoint(RightWidth, BottomHeight), true);
+			AtlasSize = FIntPoint(L_CoveredW + R_CoveredW, T_CoveredH + B_CoveredH);
 		}
 	}
+
+	RebuildResolveMaps();
 }
 
 void UTempoCamera::SetDepthEnabled(bool bDepthEnabledIn)
@@ -1344,6 +1682,7 @@ void UTempoCamera::PostEditChangeProperty(FPropertyChangedEvent& PropertyChanged
 	if (MemberPropertyName == GET_MEMBER_NAME_CHECKED(USceneCaptureComponent2D, FOVAngle) ||
 		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, LensParameters) ||
 		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, SizeXY) ||
+		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, FeatherPixels) ||
 		MemberPropertyName == GET_MEMBER_NAME_CHECKED(USceneCaptureComponent2D, PostProcessSettings) ||
 		MemberPropertyName == TEXT("ShowFlagSettings") ||
 		MemberPropertyName == GET_MEMBER_NAME_CHECKED(USceneCaptureComponent, bUseRayTracingIfEnabled))

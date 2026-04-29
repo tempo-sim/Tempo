@@ -39,6 +39,7 @@ public:
 	TObjectPtr<UMaterialInterface> GetCameraPostProcessMaterialWithDepth() const { return CameraPostProcessMaterialWithDepth.LoadSynchronous(); }
 	TObjectPtr<UMaterialInterface> GetCameraStitchPassthroughMaterial() const { return CameraStitchPassthroughMaterial.LoadSynchronous(); }
 	TObjectPtr<UMaterialInterface> GetCameraStitchAuxMaterial() const { return CameraStitchAuxMaterial.LoadSynchronous(); }
+	TObjectPtr<UMaterialInterface> GetCameraStitchColorFeatherMaterial() const { return CameraStitchColorFeatherMaterial.LoadSynchronous(); }
 	TObjectPtr<UMaterialInterface> GetCameraStitchMergeMaterialWithDepth() const { return CameraStitchMergeMaterialWithDepth.LoadSynchronous(); }
 	TObjectPtr<UMaterialInterface> GetCameraStitchMergeMaterialNoDepth() const { return CameraStitchMergeMaterialNoDepth.LoadSynchronous(); }
 	TObjectPtr<UMaterialInterface> GetCameraProxyTonemapMaterial() const { return CameraProxyTonemapMaterial.LoadSynchronous(); }
@@ -96,11 +97,24 @@ private:
 	UPROPERTY(EditAnywhere, Config, Category="Advanced", meta=( AllowedClasses="/Script/Engine.MaterialInterface" ))
 	TSoftObjectPtr<UMaterialInterface> CameraStitchPassthroughMaterial;
 
-	// The material used to copy each tile render target into the shared aux render target via Canvas.
-	// Must have a Texture2D parameter named "TileRT". In Phase 2 this can be the same shape as the
-	// passthrough material; in Phase 3 it will unpack aux bits from the HDR tile format.
+	// The material used to resolve the per-tile distorted atlas alpha into label+depth bytes in
+	// the shared aux render target. Run as a full-screen Canvas pass over the equidistant output.
+	// Must have Texture2D parameters "TileRT" (the atlas), "OutputResolveMap" (RGBA fp16 with the
+	// two contributing tiles' atlas UVs), and "OutputResolveWeight" (R fp16 with tile-A weight in
+	// [0,1]). Picks atlas UV by ownership (Weight >= 0.5 → UV_A else UV_B) — label is integer and
+	// depth is bit-packed, neither is safely averageable across a feather band — then point-samples
+	// TileRT.a there and unpacks the bit-packed label+depth bytes.
 	UPROPERTY(EditAnywhere, Config, Category="Advanced", meta=( AllowedClasses="/Script/Engine.MaterialInterface" ))
 	TSoftObjectPtr<UMaterialInterface> CameraStitchAuxMaterial;
+
+	// The material used to resolve the per-tile distorted atlas into the final equidistant HDR output
+	// with feathered seams between adjacent tiles. Run as a full-screen Canvas pass that writes to the
+	// stitch HDR RT (which the proxy tonemap PPM then reads as scene color). Must have Texture2D
+	// parameters "AtlasRT" (the atlas of per-tile distorted outputs), "OutputResolveMap" (RGBA fp16 with
+	// channels (AtlasU_A, AtlasV_A, AtlasU_B, AtlasV_B)), and "OutputResolveWeight" (R fp16, weight of
+	// tile A in [0,1]). Output color = lerp(sample(AtlasRT, UV_B), sample(AtlasRT, UV_A), Weight).
+	UPROPERTY(EditAnywhere, Config, Category="Advanced", meta=( AllowedClasses="/Script/Engine.MaterialInterface" ))
+	TSoftObjectPtr<UMaterialInterface> CameraStitchColorFeatherMaterial;
 
 	// Merge material used when depth is enabled. Output RT is PF_A16B16G16R16 (16-bit UNORM per
 	// channel, 8 bytes/pixel) matching FCameraPixelWithDepth. Must have Texture2D parameters

@@ -23,6 +23,7 @@ void UTempoSensorsSettings::PostInitProperties()
 	SetIfNull(CameraPostProcessMaterialWithDepth, TEXT("/TempoSensors/Materials/M_TempoCamera_Distort_WithDepth.M_TempoCamera_Distort_WithDepth"));
 	SetIfNull(CameraStitchPassthroughMaterial, TEXT("/TempoSensors/Materials/M_TempoStitch_Passthrough.M_TempoStitch_Passthrough"));
 	SetIfNull(CameraStitchAuxMaterial, TEXT("/TempoSensors/Materials/M_TempoStitch_Aux.M_TempoStitch_Aux"));
+	SetIfNull(CameraStitchColorFeatherMaterial, TEXT("/TempoSensors/Materials/M_TempoStitch_ColorFeather.M_TempoStitch_ColorFeather"));
 	SetIfNull(CameraStitchMergeMaterialWithDepth, TEXT("/TempoSensors/Materials/M_TempoStitch_Merge_WithDepth.M_TempoStitch_Merge_WithDepth"));
 	SetIfNull(CameraStitchMergeMaterialNoDepth, TEXT("/TempoSensors/Materials/M_TempoStitch_Merge_NoDepth.M_TempoStitch_Merge_NoDepth"));
 	SetIfNull(CameraProxyTonemapMaterial, TEXT("/TempoSensors/Materials/M_TempoStitch_Proxy.M_TempoStitch_Proxy"));
