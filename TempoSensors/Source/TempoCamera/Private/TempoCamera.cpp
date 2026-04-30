@@ -813,6 +813,11 @@ void UTempoCamera::RenderCapture()
 		}
 	}
 
+	IConsoleVariable* TSRShadingRejectionFlickingFrameRateCapCVar =
+		IConsoleManager::Get().FindConsoleVariable(TEXT("r.TSR.ShadingRejection.Flickering.FrameRateCap"));
+	const float SavedTSRShadingRejectionFlickingFrameRateCap = TSRShadingRejectionFlickingFrameRateCapCVar->GetFloat();
+	TSRShadingRejectionFlickingFrameRateCapCVar->Set(RateHz, ECVF_SetByConsole);
+
 	// Per-tile view origin (shared across tiles) — the camera's world location.
 	const FTransform CameraWorld = GetComponentToWorld();
 	const FVector ViewLocation = CameraWorld.GetTranslation();
@@ -1125,7 +1130,11 @@ void UTempoCamera::RenderCapture()
 		{
 			TSRShadingRejectionExposureOffsetCVar->Set(SavedTSRShadingRejectionExposureOffset, ECVF_SetByConsole);
 		}
+	}
 
+	if (TSRShadingRejectionFlickingFrameRateCapCVar)
+	{
+		TSRShadingRejectionFlickingFrameRateCapCVar->Set(SavedTSRShadingRejectionFlickingFrameRateCap);
 	}
 
 	TextureReadQueue.Enqueue(NewRead);
