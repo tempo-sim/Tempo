@@ -340,7 +340,7 @@ void RenderTiles(
 	// scene capture has bRenderWithMainViewResolution set. We accept a caller-supplied fraction
 	// and feed it directly to FLegacyScreenPercentageDriver. ScreenPercentage show-flag stays
 	// off because we drive the fraction via the driver, not via the show-flag CVar fallback.
-	ViewFamily.EngineShowFlags.ScreenPercentage = false;
+	ViewFamily.EngineShowFlags.ScreenPercentage = !FMath::IsNearlyEqual(ResolutionFraction, 1.0f, UE_KINDA_SMALL_NUMBER);
 	ViewFamily.SetScreenPercentageInterface(new FLegacyScreenPercentageDriver(ViewFamily, ResolutionFraction));
 
 	if (PrimaryComponent->IsUnlit())
