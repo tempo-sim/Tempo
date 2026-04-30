@@ -278,27 +278,22 @@ double FKannalaBrandtDistortion::ComputeFOutputForFullImage(const FIntPoint& Ful
 	return (FullImageSizeXY.X / 2.0) / HalfHFOVRad;
 }
 
-double FKannalaBrandtDistortion::PixelOffsetToYawDeg(double DxPixels, double FOutput) const
+void FKannalaBrandtDistortion::PixelOffsetToYawPitchDeg(double DxPixels, double DyPixels, double FOutput,
+	double& OutYawDeg, double& OutPitchDeg) const
 {
-	// theta_d = pixel_offset / FOutput. Treat theta_d as physical yaw (exact for pure equidistant
-	// when K1=K2=K3=K4=0; an approximation otherwise — matches the existing single-formula tile
-	// placement convention).
+	OutYawDeg = 0.0;
+	OutPitchDeg = 0.0;
 	if (FOutput <= 0.0)
 	{
-		return 0.0;
+		return;
 	}
-	return FMath::RadiansToDegrees(DxPixels / FOutput);
-}
-
-double FKannalaBrandtDistortion::PixelOffsetToPitchDeg(double DyPixels, double FOutput) const
-{
-	if (FOutput <= 0.0)
-	{
-		return 0.0;
-	}
-	// UE convention: positive pitch = up. Image-Y grows downward, so a positive DyPixels (below
-	// the optical center) corresponds to a NEGATIVE UE pitch.
-	return -FMath::RadiansToDegrees(DyPixels / FOutput);
+	// theta_d = pixel_offset / FOutput. The K-B output plane is treated axis-separably here
+	// (yaw from Dx alone, pitch from Dy alone): exact when K1=K2=K3=K4=0 (pure equidistant) and
+	// the existing OutputToRender's small-angle approximation cancels with this exactly even at
+	// diagonal tile centers. Image-Y grows downward, so positive DyPixels maps to NEGATIVE UE
+	// pitch (UE convention: positive pitch = up).
+	OutYawDeg = FMath::RadiansToDegrees(DxPixels / FOutput);
+	OutPitchDeg = -FMath::RadiansToDegrees(DyPixels / FOutput);
 }
 
 FVector2D FKannalaBrandtDistortion::OutputToRender(double OutputX, double OutputY) const
@@ -614,36 +609,31 @@ double FDoubleSphereDistortion::ComputeFOutputForFullImage(const FIntPoint& Full
 	return (FullImageSizeXY.X / 2.0) / Rd;
 }
 
-double FDoubleSphereDistortion::PixelOffsetToYawDeg(double DxPixels, double FOutput) const
+void FDoubleSphereDistortion::PixelOffsetToYawPitchDeg(double DxPixels, double DyPixels, double FOutput,
+	double& OutYawDeg, double& OutPitchDeg) const
 {
+	OutYawDeg = 0.0;
+	OutPitchDeg = 0.0;
 	if (FOutput <= 0.0)
 	{
-		return 0.0;
+		return;
 	}
+	// Joint 2D unprojection: find the single 3D ray that DS forward-projects to (Mx, My), then
+	// decompose into (yaw, pitch_UE). Doing this 1D-per-axis (treating Dy=0 for yaw and Dx=0 for
+	// pitch) yields independent angles whose combined 3D direction projects to a different point
+	// than (Mx, My), leaving multi-degree gaps at diagonal tile seams.
 	const double Mx = DxPixels / FOutput;
-	double X, Y, Z;
-	if (!UnprojectPoint(Mx, 0.0, Xi, Alpha, X, Y, Z))
-	{
-		return 0.0;
-	}
-	// UE yaw: positive = right. Right = +X in our convention; forward = +Z.
-	return FMath::RadiansToDegrees(FMath::Atan2(X, Z));
-}
-
-double FDoubleSphereDistortion::PixelOffsetToPitchDeg(double DyPixels, double FOutput) const
-{
-	if (FOutput <= 0.0)
-	{
-		return 0.0;
-	}
 	const double My = DyPixels / FOutput;
 	double X, Y, Z;
-	if (!UnprojectPoint(0.0, My, Xi, Alpha, X, Y, Z))
+	if (!UnprojectPoint(Mx, My, Xi, Alpha, X, Y, Z))
 	{
-		return 0.0;
+		return;
 	}
-	// UE pitch: positive = up. Image-Y grows downward (+Y = down), so pitch = -atan2(Y, Z).
-	return -FMath::RadiansToDegrees(FMath::Atan2(Y, Z));
+	// (X, Y, Z) = R_Y(yaw) * R_X(-pitch_UE) * (0, 0, 1)
+	//           = (sin(yaw)*cos(pitch_UE), -sin(pitch_UE), cos(yaw)*cos(pitch_UE))
+	const double CosPitchUE = FMath::Sqrt(X * X + Z * Z);
+	OutPitchDeg = FMath::RadiansToDegrees(FMath::Atan2(-Y, CosPitchUE));
+	OutYawDeg = FMath::RadiansToDegrees(FMath::Atan2(X, Z));
 }
 
 FVector2D FDoubleSphereDistortion::OutputToRender(double OutputX, double OutputY) const
@@ -651,18 +641,27 @@ FVector2D FDoubleSphereDistortion::OutputToRender(double OutputX, double OutputY
 	// Tile-local r_d coordinates. Shift by the tile center's position in the parent's output
 	// plane to get parent-frame normalized image-plane coordinates.
 	//
-	// The tile axis is at (AzimuthOffset, ElevationOffset). The tile center sits on the ray
-	// (sin(theta_axis)*cos(phi), sin(theta_axis)*sin(phi), cos(theta_axis)). Project this
-	// through the parent's DS to get its r_d position in the parent's output plane.
-	const double ThetaAxis = FMath::Sqrt(AzimuthOffset * AzimuthOffset + ElevationOffset * ElevationOffset);
+	// The tile's optical axis in the PARENT frame is the result of applying R_Y(Az) * R_X(-El)
+	// (child→parent) to (0, 0, 1). Forward-project that 3D direction through the parent's DS
+	// to find its r_d position. The small-angle approximation
+	// theta ≈ sqrt(Az² + El²), dir ≈ (Az, El)/sqrt(...) is incorrect at diagonal tiles —
+	// the actual 3D axis differs by several degrees and projects to a different r_d.
 	double TileCenterX = 0.0;
 	double TileCenterY = 0.0;
-	if (ThetaAxis >= 1e-10)
+	if (FMath::Abs(AzimuthOffset) > 1e-10 || FMath::Abs(ElevationOffset) > 1e-10)
 	{
-		const double RdAxis = RadialProject(ThetaAxis, Xi, Alpha);
-		// The radial direction in the output plane matches (AzimuthOffset, ElevationOffset)/ThetaAxis.
-		TileCenterX = RdAxis * AzimuthOffset / ThetaAxis;
-		TileCenterY = RdAxis * ElevationOffset / ThetaAxis;
+		const double CosAz = FMath::Cos(AzimuthOffset);
+		const double SinAz = FMath::Sin(AzimuthOffset);
+		const double CosEl = FMath::Cos(ElevationOffset);
+		const double SinEl = FMath::Sin(ElevationOffset);
+		const double AxisX = SinAz * CosEl;
+		const double AxisY = SinEl;
+		const double AxisZ = CosAz * CosEl;
+		if (!ProjectRay(AxisX, AxisY, AxisZ, Xi, Alpha, TileCenterX, TileCenterY))
+		{
+			TileCenterX = 0.0;
+			TileCenterY = 0.0;
+		}
 	}
 
 	const double ParentMx = TileCenterX + OutputX;

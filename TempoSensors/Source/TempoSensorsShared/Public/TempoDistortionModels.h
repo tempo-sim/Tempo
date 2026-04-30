@@ -92,15 +92,20 @@ struct TEMPOSENSORSSHARED_API FDistortionModel
 	// single-capture models return -1 to signal "not applicable" (the camera doesn't ask).
 	virtual double ComputeFOutputForFullImage(const FIntPoint& FullImageSizeXY, double FullImageHFOVDeg) const { return -1.0; }
 
-	// For multi-tile rendering: convert a horizontal pixel offset (signed, from the full output
-	// image's optical center) into the yaw angle (degrees, UE convention: positive=right) at
-	// which a tile centered there should aim its perspective render. Default 0 = single-capture.
-	virtual double PixelOffsetToYawDeg(double DxPixels, double FOutput) const { return 0.0; }
-
-	// As above, for vertical pixel offset → pitch (degrees, UE convention: positive=up). Note:
-	// image-Y increases downward, so positive DyPixels (below the optical center) maps to a
-	// NEGATIVE UE pitch.
-	virtual double PixelOffsetToPitchDeg(double DyPixels, double FOutput) const { return 0.0; }
+	// For multi-tile rendering: convert a 2D pixel offset (signed, from the full output image's
+	// optical center) to the (yaw, pitch) at which a tile centered there should aim its perspective
+	// render. Joint conversion (rather than per-axis) is required for diagonal tiles (4-tile case):
+	// the 2D unprojection of (Dx, Dy) gives one 3D ray, which decomposes into a single (yaw, pitch)
+	// pair whose forward projection lands back at (Dx, Dy). Doing yaw and pitch independently
+	// from 1D unprojections yields a different 3D direction whose projection misses (Dx, Dy) by
+	// several degrees — visible as gaps at diagonal tile seams.
+	// Default 0 = single-capture.
+	virtual void PixelOffsetToYawPitchDeg(double DxPixels, double DyPixels, double FOutput,
+		double& OutYawDeg, double& OutPitchDeg) const
+	{
+		OutYawDeg = 0.0;
+		OutPitchDeg = 0.0;
+	}
 };
 
 // Base for radial (non-equidistant) distortion models that share the same ComputeRenderConfig
@@ -256,8 +261,8 @@ struct TEMPOSENSORSSHARED_API FKannalaBrandtDistortion : FDistortionModel
 	virtual FVector2D OutputToRender(double OutputX, double OutputY) const override;
 	virtual FDistortionRenderConfig ComputeRenderConfig(const FIntPoint& OutputSizeXY, double FOutput) const override;
 	virtual double ComputeFOutputForFullImage(const FIntPoint& FullImageSizeXY, double FullImageHFOVDeg) const override;
-	virtual double PixelOffsetToYawDeg(double DxPixels, double FOutput) const override;
-	virtual double PixelOffsetToPitchDeg(double DyPixels, double FOutput) const override;
+	virtual void PixelOffsetToYawPitchDeg(double DxPixels, double DyPixels, double FOutput,
+		double& OutYawDeg, double& OutPitchDeg) const override;
 
 	// Forward K-B: physical angle theta -> distorted angle theta_d.
 	static double SolveDistortion(double Theta, double K1, double K2, double K3, double K4);
@@ -307,8 +312,8 @@ struct TEMPOSENSORSSHARED_API FDoubleSphereDistortion : FDistortionModel
 	virtual FVector2D OutputToRender(double OutputX, double OutputY) const override;
 	virtual FDistortionRenderConfig ComputeRenderConfig(const FIntPoint& OutputSizeXY, double FOutput) const override;
 	virtual double ComputeFOutputForFullImage(const FIntPoint& FullImageSizeXY, double FullImageHFOVDeg) const override;
-	virtual double PixelOffsetToYawDeg(double DxPixels, double FOutput) const override;
-	virtual double PixelOffsetToPitchDeg(double DyPixels, double FOutput) const override;
+	virtual void PixelOffsetToYawPitchDeg(double DxPixels, double DyPixels, double FOutput,
+		double& OutYawDeg, double& OutPitchDeg) const override;
 
 	// Forward DS: 3D ray (x, y, z) -> (m_x, m_y) in the normalized image plane. Returns false
 	// if the point lies outside the model's valid forward-projection region.

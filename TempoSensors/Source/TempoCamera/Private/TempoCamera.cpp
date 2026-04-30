@@ -1550,11 +1550,17 @@ void UTempoCamera::SyncTiles()
 		// there are no seams, so F=0. Otherwise use the configured value, clamped to keep tiles sane.
 		const int32 F = (bSplitHorizontal || bSplitVertical) ? FMath::Max(0, FeatherPixels) : 0;
 
-		// Convert a SIGNED horizontal pixel offset (from the full image's optical center) to UE
-		// yaw degrees, via the model. Positive Dx = right of center → positive yaw.
-		const auto YawDegFromPixelOffsetX = [&](int32 Dx) -> double { return Model->PixelOffsetToYawDeg(static_cast<double>(Dx), FOutput); };
-		// As above for vertical: positive Dy = below center → NEGATIVE UE pitch (UE pitch is up-positive).
-		const auto PitchDegFromPixelOffsetY = [&](int32 Dy) -> double { return Model->PixelOffsetToPitchDeg(static_cast<double>(Dy), FOutput); };
+		// Convert a SIGNED 2D pixel offset (from the full image's optical center) to (yaw, pitch)
+		// degrees, via the model. Joint conversion is required for diagonal (4-tile) cases — the
+		// 3D direction implied by independent 1D yaw/pitch differs from the 3D direction whose 2D
+		// forward projection lands on (Dx, Dy), introducing multi-degree gaps at diagonal seams.
+		const auto YawPitchDegFromPixelOffset = [&](int32 Dx, int32 Dy)
+		{
+			double Yaw = 0.0;
+			double Pitch = 0.0;
+			Model->PixelOffsetToYawPitchDeg(static_cast<double>(Dx), static_cast<double>(Dy), FOutput, Yaw, Pitch);
+			return TPair<double, double>(Yaw, Pitch);
+		};
 
 		if (!bSplitHorizontal && !bSplitVertical)
 		{
@@ -1578,12 +1584,12 @@ void UTempoCamera::SyncTiles()
 			// forward (X = SizeXY.X/2). Negative = left.
 			const double TL_CenterX = TL_CoveredW * 0.5;
 			const double TR_CenterX = static_cast<double>(SizeXY.X) - TR_CoveredW * 0.5;
-			const double TL_Yaw = YawDegFromPixelOffsetX(static_cast<int32>(FMath::RoundToInt(TL_CenterX) - SizeXY.X / 2));  // intentionally rounded; sub-pixel yaw mismatch with covered-rect pixel grid is irrelevant at our seam tolerances
-			const double TR_Yaw = YawDegFromPixelOffsetX(static_cast<int32>(FMath::RoundToInt(TR_CenterX) - SizeXY.X / 2));
+			const auto TL_YP = YawPitchDegFromPixelOffset(static_cast<int32>(FMath::RoundToInt(TL_CenterX)) - SizeXY.X / 2, 0);  // intentionally rounded; sub-pixel yaw mismatch with covered-rect pixel grid is irrelevant at our seam tolerances
+			const auto TR_YP = YawPitchDegFromPixelOffset(static_cast<int32>(FMath::RoundToInt(TR_CenterX)) - SizeXY.X / 2, 0);
 
-			ConfigureTile(TL, TL_Yaw, 0.0, FOutput, FIntPoint(TL_CoveredW, SizeXY.Y), FIntPoint(0, 0),
+			ConfigureTile(TL, TL_YP.Key, TL_YP.Value, FOutput, FIntPoint(TL_CoveredW, SizeXY.Y), FIntPoint(0, 0),
 				FIntPoint(0, 0), FIntPoint(LeftWidth, SizeXY.Y), true);
-			ConfigureTile(TR, TR_Yaw, 0.0, FOutput, FIntPoint(TR_CoveredW, SizeXY.Y), FIntPoint(TL_CoveredW, 0),
+			ConfigureTile(TR, TR_YP.Key, TR_YP.Value, FOutput, FIntPoint(TR_CoveredW, SizeXY.Y), FIntPoint(TL_CoveredW, 0),
 				FIntPoint(LeftWidth, 0), FIntPoint(RightWidth, SizeXY.Y), true);
 			Deactivate(BL);
 			Deactivate(BR);
@@ -1598,16 +1604,15 @@ void UTempoCamera::SyncTiles()
 			const int32 Bottom_CoveredH = BottomHeight + F;
 
 			// UE pitch convention: positive = up. Image-Y grows downward, so a tile whose center is
-			// above the optical center (Top_CenterY < SizeXY.Y/2 → Dy < 0) gets a positive UE pitch
-			// from PitchDegFromPixelOffsetY.
+			// above the optical center (Top_CenterY < SizeXY.Y/2 → Dy < 0) gets a positive UE pitch.
 			const double Top_CenterY = Top_CoveredH * 0.5;
 			const double Bottom_CenterY = static_cast<double>(SizeXY.Y) - Bottom_CoveredH * 0.5;
-			const double Top_Pitch = PitchDegFromPixelOffsetY(static_cast<int32>(FMath::RoundToInt(Top_CenterY)) - SizeXY.Y / 2);
-			const double Bottom_Pitch = PitchDegFromPixelOffsetY(static_cast<int32>(FMath::RoundToInt(Bottom_CenterY)) - SizeXY.Y / 2);
+			const auto Top_YP = YawPitchDegFromPixelOffset(0, static_cast<int32>(FMath::RoundToInt(Top_CenterY)) - SizeXY.Y / 2);
+			const auto Bottom_YP = YawPitchDegFromPixelOffset(0, static_cast<int32>(FMath::RoundToInt(Bottom_CenterY)) - SizeXY.Y / 2);
 
-			ConfigureTile(TL, 0.0, Top_Pitch, FOutput, FIntPoint(SizeXY.X, Top_CoveredH), FIntPoint(0, 0),
+			ConfigureTile(TL, Top_YP.Key, Top_YP.Value, FOutput, FIntPoint(SizeXY.X, Top_CoveredH), FIntPoint(0, 0),
 				FIntPoint(0, 0), FIntPoint(SizeXY.X, TopHeight), true);
-			ConfigureTile(TR, 0.0, Bottom_Pitch, FOutput, FIntPoint(SizeXY.X, Bottom_CoveredH), FIntPoint(0, Top_CoveredH),
+			ConfigureTile(TR, Bottom_YP.Key, Bottom_YP.Value, FOutput, FIntPoint(SizeXY.X, Bottom_CoveredH), FIntPoint(0, Top_CoveredH),
 				FIntPoint(0, TopHeight), FIntPoint(SizeXY.X, BottomHeight), true);
 			Deactivate(BL);
 			Deactivate(BR);
@@ -1629,18 +1634,25 @@ void UTempoCamera::SyncTiles()
 			const double R_CenterX = static_cast<double>(SizeXY.X) - R_CoveredW * 0.5;
 			const double T_CenterY = T_CoveredH * 0.5;
 			const double B_CenterY = static_cast<double>(SizeXY.Y) - B_CoveredH * 0.5;
-			const double L_Yaw = YawDegFromPixelOffsetX(static_cast<int32>(FMath::RoundToInt(L_CenterX)) - SizeXY.X / 2);
-			const double R_Yaw = YawDegFromPixelOffsetX(static_cast<int32>(FMath::RoundToInt(R_CenterX)) - SizeXY.X / 2);
-			const double T_Pitch = PitchDegFromPixelOffsetY(static_cast<int32>(FMath::RoundToInt(T_CenterY)) - SizeXY.Y / 2);
-			const double B_Pitch = PitchDegFromPixelOffsetY(static_cast<int32>(FMath::RoundToInt(B_CenterY)) - SizeXY.Y / 2);
+			const int32 L_Dx = static_cast<int32>(FMath::RoundToInt(L_CenterX)) - SizeXY.X / 2;
+			const int32 R_Dx = static_cast<int32>(FMath::RoundToInt(R_CenterX)) - SizeXY.X / 2;
+			const int32 T_Dy = static_cast<int32>(FMath::RoundToInt(T_CenterY)) - SizeXY.Y / 2;
+			const int32 B_Dy = static_cast<int32>(FMath::RoundToInt(B_CenterY)) - SizeXY.Y / 2;
 
-			ConfigureTile(TL, L_Yaw, T_Pitch, FOutput, FIntPoint(L_CoveredW, T_CoveredH), FIntPoint(0, 0),
+			// Joint pixel-offset → (yaw, pitch) per tile: the diagonal 3D ray for (Dx, Dy) does
+			// not equal the composition of independent 1D yaw and pitch.
+			const auto TL_YP = YawPitchDegFromPixelOffset(L_Dx, T_Dy);
+			const auto TR_YP = YawPitchDegFromPixelOffset(R_Dx, T_Dy);
+			const auto BL_YP = YawPitchDegFromPixelOffset(L_Dx, B_Dy);
+			const auto BR_YP = YawPitchDegFromPixelOffset(R_Dx, B_Dy);
+
+			ConfigureTile(TL, TL_YP.Key, TL_YP.Value, FOutput, FIntPoint(L_CoveredW, T_CoveredH), FIntPoint(0, 0),
 				FIntPoint(0, 0), FIntPoint(LeftWidth, TopHeight), true);
-			ConfigureTile(TR, R_Yaw, T_Pitch, FOutput, FIntPoint(R_CoveredW, T_CoveredH), FIntPoint(L_CoveredW, 0),
+			ConfigureTile(TR, TR_YP.Key, TR_YP.Value, FOutput, FIntPoint(R_CoveredW, T_CoveredH), FIntPoint(L_CoveredW, 0),
 				FIntPoint(LeftWidth, 0), FIntPoint(RightWidth, TopHeight), true);
-			ConfigureTile(BL, L_Yaw, B_Pitch, FOutput, FIntPoint(L_CoveredW, B_CoveredH), FIntPoint(0, T_CoveredH),
+			ConfigureTile(BL, BL_YP.Key, BL_YP.Value, FOutput, FIntPoint(L_CoveredW, B_CoveredH), FIntPoint(0, T_CoveredH),
 				FIntPoint(0, TopHeight), FIntPoint(LeftWidth, BottomHeight), true);
-			ConfigureTile(BR, R_Yaw, B_Pitch, FOutput, FIntPoint(R_CoveredW, B_CoveredH), FIntPoint(L_CoveredW, T_CoveredH),
+			ConfigureTile(BR, BR_YP.Key, BR_YP.Value, FOutput, FIntPoint(R_CoveredW, B_CoveredH), FIntPoint(L_CoveredW, T_CoveredH),
 				FIntPoint(LeftWidth, TopHeight), FIntPoint(RightWidth, BottomHeight), true);
 			AtlasSize = FIntPoint(L_CoveredW + R_CoveredW, T_CoveredH + B_CoveredH);
 		}
