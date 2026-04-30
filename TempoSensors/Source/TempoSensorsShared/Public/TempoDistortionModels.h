@@ -22,38 +22,31 @@ struct FTempoLensDistortionParameters
 {
 	GENERATED_BODY()
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	ETempoDistortionModel DistortionModel = ETempoDistortionModel::BrownConrady;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	float K1 = 0.0f;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	float K2 = 0.0f;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	float K3 = 0.0f;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	float K4 = 0.0f;
 	// K5 and K6 are denominator coefficients only used by the Rational distortion model.
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens", meta = (ToolTip = "Only used by the Rational distortion model."))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ToolTip = "Only used by the Rational distortion model."))
 	float K5 = 0.0f;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens", meta = (ToolTip = "Only used by the Rational distortion model."))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ToolTip = "Only used by the Rational distortion model."))
 	float K6 = 0.0f;
 
 	// Double Sphere parameters. Xi controls the offset of the second sphere; Alpha blends between
 	// pinhole-like (0) and pure unit-sphere (1) projection.
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens", meta = (ToolTip = "Only used by the DoubleSphere distortion model. Range [-1, 1]."))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ToolTip = "Only used by the DoubleSphere distortion model. Range [-1, 1]."))
 	float Xi = 0.0f;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens", meta = (ToolTip = "Only used by the DoubleSphere distortion model. Range [0, 1]."))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ToolTip = "Only used by the DoubleSphere distortion model. Range [0, 1]."))
 	float Alpha = 0.5f;
 
-	bool operator==(const FTempoLensDistortionParameters& Other) const
-	{
-		return DistortionModel == Other.DistortionModel
-			&& K1 == Other.K1 && K2 == Other.K2 && K3 == Other.K3
-			&& K4 == Other.K4 && K5 == Other.K5 && K6 == Other.K6
-			&& Xi == Other.Xi && Alpha == Other.Alpha;
-	}
-	bool operator!=(const FTempoLensDistortionParameters& Other) const { return !(*this == Other); }
+	bool operator==(const FTempoLensDistortionParameters& Other) const = default;
 };
 
 // Configuration for the perspective render needed to produce a distorted output image.
