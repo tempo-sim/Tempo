@@ -317,7 +317,8 @@ bool UTempoCamera::HasDetectedParameterChange() const
 	return SizeXY != SizeXY_Internal
 		|| FOVAngle != FOVAngle_Internal
 		|| LensParameters != LensParameters_Internal
-		|| FeatherPixels != FeatherPixels_Internal;
+		|| FeatherPixels != FeatherPixels_Internal
+		|| UpsamplingFactor != UpsamplingFactor_Internal;
 }
 
 void UTempoCamera::ReconfigureTilesNow()
@@ -349,6 +350,7 @@ void UTempoCamera::UpdateInternalMirrors()
 	FOVAngle_Internal = FOVAngle;
 	SizeXY_Internal = SizeXY;
 	FeatherPixels_Internal = FeatherPixels;
+	UpsamplingFactor_Internal = UpsamplingFactor;
 }
 
 bool UTempoCamera::HasPendingCameraRequests() const
@@ -610,20 +612,29 @@ void UTempoCamera::InitRenderTarget()
 	// has run SyncTiles, or all tiles inactive).
 	const FIntPoint AtlasSizeForRT = (AtlasSize.X > 0 && AtlasSize.Y > 0) ? AtlasSize : SizeXY;
 
+	// Atlas RT is sized in K× pixels; per-tile geometry (TileDestOffset, TileOutputSizeXY,
+	// AtlasSize) is kept in 1× output-domain pixels and scaled by K only when laying out the
+	// per-tile ViewRect in RenderCapture.
+	const float K = FMath::Max(1.0f, UpsamplingFactor);
+	const FIntPoint AtlasSizeForRT_K(
+		FMath::CeilToInt(K * AtlasSizeForRT.X),
+		FMath::CeilToInt(K * AtlasSizeForRT.Y));
+
 	// SharedTextureTarget is the atlas: one tile-per-view family renders directly into it, and
 	// it feeds the stitch+feather Canvas pass that writes to SharedStitchHDRTextureTarget. Format
 	// is fp32 — not for color dynamic range, but because each tile's distortion PPM bit-packs
 	// (label, depth) into the alpha channel, and fp16 alpha does not have the mantissa bits to
 	// preserve that. Point sampling is mandatory for the aux unpack pass; the color stitch
-	// material overrides to bilinear at its sampler. Atlas dimensions are AtlasSize, which may be
-	// larger than SizeXY when feathering (each tile gets a disjoint atlas region sized to its
-	// covered output).
+	// material overrides to bilinear at its sampler. Atlas dimensions are K * AtlasSize, which
+	// may be larger than SizeXY when feathering (each tile gets a disjoint atlas region) and is
+	// further multiplied by UpsamplingFactor to give the perspective render denser pixels for
+	// the distortion PPM to resample. The stitch pass downsamples to SizeXY via bilinear.
 	SharedTextureTarget = NewObject<UTextureRenderTarget2D>(this);
 	SharedTextureTarget->TargetGamma = 1.0f;
 	SharedTextureTarget->bGPUSharedFlag = true;
 	SharedTextureTarget->RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA32f;
 	SharedTextureTarget->Filter = TextureFilter::TF_Nearest;
-	SharedTextureTarget->InitAutoFormat(AtlasSizeForRT.X, AtlasSizeForRT.Y);
+	SharedTextureTarget->InitAutoFormat(AtlasSizeForRT_K.X, AtlasSizeForRT_K.Y);
 
 	// Stitch HDR RT: the equidistant-output-sized linear HDR target written by the stitch+feather
 	// Canvas pass and read by the proxy tonemap PPM as scene color. Sized to SizeXY so the proxy's
@@ -748,12 +759,14 @@ void UTempoCamera::RenderCapture()
 		}
 	}
 
-	// Single-tile fast path: when there's exactly one active tile and depth packing isn't needed,
-	// render with full post-process (bloom/AE/tonemap on) directly to SharedFinalTextureTarget,
-	// skipping the aux unpack, proxy tonemap capture, and merge passes. Saves a separate
-	// FSceneRenderer pass plus two Canvas blits per frame; only viable for !bDepthEnabled because
-	// the depth-with-label encoding bit-packs into HDR alpha and can't survive LDR quantization.
-	const bool bSingleTileFastPath = (NumActiveTiles == 1) && !bDepthEnabled;
+	// Single-tile fast path: when there's exactly one active tile, depth packing isn't needed,
+	// and no upsampling is requested, render with full post-process (bloom/AE/tonemap on)
+	// directly to SharedFinalTextureTarget, skipping the aux unpack, proxy tonemap capture, and
+	// merge passes. Saves a separate FSceneRenderer pass plus two Canvas blits per frame; only
+	// viable for !bDepthEnabled because the depth-with-label encoding bit-packs into HDR alpha
+	// and can't survive LDR quantization, and only for UpsamplingFactor == 1 because the fast
+	// path writes straight to the 1× final RT with no place to do the K→1 downsample.
+	const bool bSingleTileFastPath = (NumActiveTiles == 1) && !bDepthEnabled && UpsamplingFactor == 1.0f;
 
 	// Force camera cut on path-mode transition: the active tile's TAA/AE history was conditioned
 	// on a different show-flag set, so reusing it would alias.
@@ -768,6 +781,12 @@ void UTempoCamera::RenderCapture()
 		}
 	}
 	bWasSingleTileFastPath = bSingleTileFastPath;
+
+	// Per-tile geometry (TileDestOffset, TileOutputSizeXY) is in 1× output pixels; the atlas RT
+	// is sized at K× output. Round each ViewRect *edge* through K so adjacent tiles' rects share
+	// their boundary exactly (rounding offset and size independently could leave a gap or overlap
+	// on the seam).
+	const float K = FMath::Max(1.0f, UpsamplingFactor);
 
 	float SavedTSRShadingRejectionExposureOffset = 0.0f;
 	IConsoleVariable* TSRShadingRejectionExposureOffsetCVar =
@@ -895,7 +914,13 @@ void UTempoCamera::RenderCapture()
 		Setup.ViewLocation = ViewLocation;
 		Setup.ViewRotationMatrix = ViewRotationMatrix;
 		Setup.ProjectionMatrix = ProjectionMatrix;
-		Setup.ViewRect = FIntRect(Tile.TileDestOffset, Tile.TileDestOffset + TileSize);
+		const FIntPoint ViewRectMinK(
+			FMath::RoundToInt(K * Tile.TileDestOffset.X),
+			FMath::RoundToInt(K * Tile.TileDestOffset.Y));
+		const FIntPoint ViewRectMaxK(
+			FMath::RoundToInt(K * (Tile.TileDestOffset.X + TileSize.X)),
+			FMath::RoundToInt(K * (Tile.TileDestOffset.Y + TileSize.Y)));
+		Setup.ViewRect = FIntRect(ViewRectMinK, ViewRectMaxK);
 		Setup.FOV = Tile.FOVAngle;
 	}
 

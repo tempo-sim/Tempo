@@ -301,9 +301,10 @@ protected:
 
 	// When true, each tile rasterizes at ScreenPercentage% of its view-rect size and TSR (or
 	// TAAU, or spatial upscale, depending on the tile's AA method) upsamples to the full view
-	// rect. The atlas RT, distortion maps, and stitch output are unchanged — only the internal
-	// raster size is reduced. Off by default to match the engine's stock scene-capture
-	// behavior; turn on to trade some shading detail for substantial GPU time savings.
+	// rect. Tunes rasterization-vs-view-rect ratio only — the perspective render's resolution
+	// (the view rect, which is what the distortion PPM samples as scene color) is unchanged.
+	// Use UpsamplingFactor to change that. Off by default to match the engine's stock
+	// scene-capture behavior; turn on to trade some shading detail for substantial GPU savings.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo")
 	bool bEnableScreenPercentage = false;
 
@@ -311,12 +312,20 @@ protected:
 	// rect). Applied via the multi-view family's FLegacyScreenPercentageDriver and only honored
 	// when bEnableScreenPercentage is true. 100 = no upscale. <100 = render smaller, upsample
 	// (TSR when AA is TSR/TAA — the default for our tiles — else spatial). >100 = supersample.
+	// Independent of UpsamplingFactor: this scales rasterization relative to the view rect; the
+	// view rect itself is set by SizeXY * UpsamplingFactor.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo", meta=(EditCondition="bEnableScreenPercentage", UIMin=25, UIMax=200, ClampMin=25, ClampMax=200))
 	float ScreenPercentage = 100.0f;
 
-	// FOVAngle (horizontal), SizeXY, RateHz, SequenceId, PostProcessSettings, ShowFlagSettings,
-	// and bUseRayTracingIfEnabled are inherited from UTempoSceneCaptureComponent2D /
-	// USceneCaptureComponent(2D).
+	// Scales the perspective render's view-rect resolution (and hence the resolution of the
+	// scene color the distortion PPM resamples) by this factor. The equidistant output stays
+	// at SizeXY — the K× distorted atlas is bilinearly downsampled to SizeXY by the existing
+	// stitch+feather pass. Useful when distortion is concentrated in a small angular region
+	// (wide-FOV / fisheye) and 1:1 perspective:output sampling produces visibly fuzzy or
+	// pixelated regions in the resampled output. Independent of bEnableScreenPercentage. Atlas
+	// and aux RT memory grow by K². K=1 disables (byte-identical to no-upsampling behavior).
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo", meta=(UIMin=1.0, UIMax=4.0, ClampMin=1.0, ClampMax=4.0))
+	float UpsamplingFactor = 1.0f;
 
 	// Whether this camera can measure depth. Disabled when not requested to optimize performance.
 	UPROPERTY(VisibleAnywhere, Category = "Tempo")
@@ -348,6 +357,7 @@ protected:
 	float FOVAngle_Internal = -1.0f;
 	FIntPoint SizeXY_Internal = FIntPoint(-1, -1);
 	int32 FeatherPixels_Internal = -1;
+	float UpsamplingFactor_Internal = -1.0f;
 
 	// Shared render target holding the stitched aux output (label + depth bytes) from all
 	// active tiles. Merged with the proxy capture's tonemapped color into SharedFinalTextureTarget.
