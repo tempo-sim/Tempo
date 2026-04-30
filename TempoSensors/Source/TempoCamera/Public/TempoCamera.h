@@ -171,8 +171,10 @@ struct FTempoCameraTile
 	UPROPERTY(VisibleAnywhere)
 	FIntPoint OwnedOutputSize = FIntPoint::ZeroValue;
 
-	// The equidistant tile's horizontal FOV in radians (only used for equidistant distortion model).
-	double EquidistantTileHFOVRad = 0.0;
+	// Output focal length for this tile's distortion map fill, in pixels per the model's output
+	// unit (r_d for radial / Double Sphere; theta_d radians for Kannala-Brandt). All tiles share
+	// the same value — it is the global pixel scale of the full distorted output image.
+	double OutputFocalLength = 0.0;
 
 	// The tile's perspective render size (set by InitTileDistortionMap; may differ from TileOutputSizeXY).
 	UPROPERTY(VisibleAnywhere)
@@ -261,7 +263,7 @@ protected:
 	// Returns SharedFinalTextureTarget so OnRenderCompleted reads from the merged output.
 	virtual UTextureRenderTarget2D* GetReadbackTextureTarget() const override { return SharedFinalTextureTarget; }
 
-	void ConfigureTile(FTempoCameraTile& Tile, double YawOffset, double PitchOffset, double PerspectiveFOV, const FIntPoint& TileSizeXY, const FIntPoint& TileDestOffset, const FIntPoint& OwnedOffset, const FIntPoint& OwnedSize, bool bActivate);
+	void ConfigureTile(FTempoCameraTile& Tile, double YawOffset, double PitchOffset, double FOutput, const FIntPoint& TileSizeXY, const FIntPoint& TileDestOffset, const FIntPoint& OwnedOffset, const FIntPoint& OwnedSize, bool bActivate);
 
 	// Recompute OutputResolveMap and OutputResolveWeight from the current tile layout. Must run
 	// after SyncTiles whenever tile geometry changes. Cheap with FeatherPixels=0 (writes the

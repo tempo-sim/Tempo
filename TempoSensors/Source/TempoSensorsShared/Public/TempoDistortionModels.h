@@ -14,6 +14,7 @@ enum class ETempoDistortionModel : uint8
 	BrownConrady  UMETA(DisplayName="Brown-Conrady", ToolTip="Standard radial lens distortion. Single capture, max 170 degree FOV."),
 	Rational      UMETA(DisplayName="Rational", ToolTip="Rational radial distortion (numerator K1-K3, denominator K4-K6). Single capture, max 170 degree FOV."),
 	KannalaBrandt UMETA(DisplayName="KannalaBrandt (Fisheye)", ToolTip="Equidistant fisheye projection. Supports up to 240 degree FOV using multiple captures."),
+	DoubleSphere  UMETA(DisplayName="DoubleSphere (Fisheye)", ToolTip="Double Sphere fisheye projection (Usenko et al. 2018). Closed-form unprojection. Supports >180 degree FOV using multiple captures."),
 };
 
 USTRUCT(BlueprintType)
@@ -38,11 +39,19 @@ struct FTempoLensDistortionParameters
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens", meta = (ToolTip = "Only used by the Rational distortion model."))
 	float K6 = 0.0f;
 
+	// Double Sphere parameters. Xi controls the offset of the second sphere; Alpha blends between
+	// pinhole-like (0) and pure unit-sphere (1) projection.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens", meta = (ToolTip = "Only used by the DoubleSphere distortion model. Range [-1, 1]."))
+	float Xi = 0.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Lens", meta = (ToolTip = "Only used by the DoubleSphere distortion model. Range [0, 1]."))
+	float Alpha = 0.5f;
+
 	bool operator==(const FTempoLensDistortionParameters& Other) const
 	{
 		return DistortionModel == Other.DistortionModel
 			&& K1 == Other.K1 && K2 == Other.K2 && K3 == Other.K3
-			&& K4 == Other.K4 && K5 == Other.K5 && K6 == Other.K6;
+			&& K4 == Other.K4 && K5 == Other.K5 && K6 == Other.K6
+			&& Xi == Other.Xi && Alpha == Other.Alpha;
 	}
 	bool operator!=(const FTempoLensDistortionParameters& Other) const { return !(*this == Other); }
 };
@@ -72,10 +81,26 @@ struct TEMPOSENSORSSHARED_API FDistortionModel
 	// (normalized by render focal length).
 	virtual FVector2D OutputToRender(double OutputX, double OutputY) const = 0;
 
-	// Compute the perspective render configuration needed for the given output image.
-	// OutputSizeXY: the user-specified output image dimensions.
-	// OutputHFOVDeg: the desired horizontal FOV of the output (distorted) image, in degrees.
-	virtual FDistortionRenderConfig ComputeRenderConfig(const FIntPoint& OutputSizeXY, double OutputHFOVDeg) const = 0;
+	// Compute the perspective render configuration for a tile of the given output pixel size,
+	// given the global output focal length (pixels per the model's output unit — this unit
+	// differs by model: r_d in normalized image plane, theta_d in radians, etc.). The returned
+	// FOutput equals the input FOutput; the model fills in RenderFOVAngle / RenderSizeXY / FRender.
+	virtual FDistortionRenderConfig ComputeRenderConfig(const FIntPoint& OutputSizeXY, double FOutput) const = 0;
+
+	// Compute the global output focal length (pixels per output unit) for a full image with the
+	// given pixel size and physical horizontal FOV. Tile-aware (fisheye) models override this;
+	// single-capture models return -1 to signal "not applicable" (the camera doesn't ask).
+	virtual double ComputeFOutputForFullImage(const FIntPoint& FullImageSizeXY, double FullImageHFOVDeg) const { return -1.0; }
+
+	// For multi-tile rendering: convert a horizontal pixel offset (signed, from the full output
+	// image's optical center) into the yaw angle (degrees, UE convention: positive=right) at
+	// which a tile centered there should aim its perspective render. Default 0 = single-capture.
+	virtual double PixelOffsetToYawDeg(double DxPixels, double FOutput) const { return 0.0; }
+
+	// As above, for vertical pixel offset → pitch (degrees, UE convention: positive=up). Note:
+	// image-Y increases downward, so positive DyPixels (below the optical center) maps to a
+	// NEGATIVE UE pitch.
+	virtual double PixelOffsetToPitchDeg(double DyPixels, double FOutput) const { return 0.0; }
 };
 
 // Base for radial (non-equidistant) distortion models that share the same ComputeRenderConfig
@@ -100,7 +125,10 @@ struct TEMPOSENSORSSHARED_API FRadialDistortionBase : FDistortionModel
 	// Model name used in log warnings.
 	virtual const TCHAR* GetModelName() const = 0;
 
-	virtual FDistortionRenderConfig ComputeRenderConfig(const FIntPoint& OutputSizeXY, double OutputHFOVDeg) const override;
+	virtual FDistortionRenderConfig ComputeRenderConfig(const FIntPoint& OutputSizeXY, double FOutput) const override;
+
+	// Single-capture models compute FOutput from physical FOV via Distort(tan(half-FOV)).
+	virtual double ComputeFOutputForFullImage(const FIntPoint& FullImageSizeXY, double FullImageHFOVDeg) const override;
 };
 
 // Brown-Conrady radial distortion model.
@@ -183,7 +211,7 @@ struct TEMPOSENSORSSHARED_API FRationalDistortion : FRadialDistortionBase
 struct TEMPOSENSORSSHARED_API FEquidistantDistortion : FDistortionModel
 {
 	virtual FVector2D OutputToRender(double OutputX, double OutputY) const override;
-	virtual FDistortionRenderConfig ComputeRenderConfig(const FIntPoint& OutputSizeXY, double OutputHFOVDeg) const override;
+	virtual FDistortionRenderConfig ComputeRenderConfig(const FIntPoint& OutputSizeXY, double FOutput) const override;
 };
 
 // Kannala-Brandt fisheye projection model for camera tiles.
@@ -193,6 +221,8 @@ struct TEMPOSENSORSSHARED_API FEquidistantDistortion : FDistortionModel
 // where theta is the physical angle from the optical axis and theta_d is the
 // distorted angle that's linear in pixel position. When K1=K2=K3=K4=0 this
 // reduces to a pure equidistant fisheye (r = f*theta).
+//
+// Output unit: theta_d (radians). FOutput is pixels per radian of theta_d.
 //
 // For multi-tile rendering, the child capture has a different optical axis than
 // the parent camera. OutputToRender:
@@ -224,7 +254,10 @@ struct TEMPOSENSORSSHARED_API FKannalaBrandtDistortion : FDistortionModel
 		, AzimuthOffset(InAzimuthOffset), ElevationOffset(InElevationOffset) {}
 
 	virtual FVector2D OutputToRender(double OutputX, double OutputY) const override;
-	virtual FDistortionRenderConfig ComputeRenderConfig(const FIntPoint& OutputSizeXY, double OutputHFOVDeg) const override;
+	virtual FDistortionRenderConfig ComputeRenderConfig(const FIntPoint& OutputSizeXY, double FOutput) const override;
+	virtual double ComputeFOutputForFullImage(const FIntPoint& FullImageSizeXY, double FullImageHFOVDeg) const override;
+	virtual double PixelOffsetToYawDeg(double DxPixels, double FOutput) const override;
+	virtual double PixelOffsetToPitchDeg(double DyPixels, double FOutput) const override;
 
 	// Forward K-B: physical angle theta -> distorted angle theta_d.
 	static double SolveDistortion(double Theta, double K1, double K2, double K3, double K4);
@@ -233,9 +266,67 @@ struct TEMPOSENSORSSHARED_API FKannalaBrandtDistortion : FDistortionModel
 	static double SolveInverseDistortion(double ThetaD, double K1, double K2, double K3, double K4);
 };
 
+// Double Sphere fisheye projection model for camera tiles.
+// (Usenko, Demmel, Cremers, "The Double Sphere Camera Model", 2018.)
+//
+// Forward projection of a 3D point (x, y, z):
+//   d1 = sqrt(x^2 + y^2 + z^2)
+//   d2 = sqrt(x^2 + y^2 + (xi*d1 + z)^2)
+//   m_x = x / (alpha*d2 + (1-alpha)*(xi*d1 + z))
+//   m_y = y / (alpha*d2 + (1-alpha)*(xi*d1 + z))
+//
+// Output unit: r_d (normalized image plane). FOutput is pixels per unit r_d.
+//
+// Inverse projection (closed form — the key advantage over Kannala-Brandt):
+//   r^2 = m_x^2 + m_y^2
+//   m_z = (1 - alpha^2*r^2) / (alpha*sqrt(1 - (2*alpha-1)*r^2) + 1 - alpha)
+//   beta = (m_z*xi + sqrt(m_z^2 + (1-xi^2)*r^2)) / (m_z^2 + r^2)
+//   ray = (beta*m_x, beta*m_y, beta*m_z - xi)
+//
+// Multi-tile composition mirrors FKannalaBrandtDistortion: tile-local output coords get
+// shifted by the tile center's position in the parent's output plane (computed by forward-
+// projecting the child's optical axis ray through the parent's DS), unprojected to a 3D
+// ray in the parent frame, rotated into the child frame, then perspective-projected.
+//
+// Coordinate system / sign conventions: same as FKannalaBrandtDistortion.
+struct TEMPOSENSORSSHARED_API FDoubleSphereDistortion : FDistortionModel
+{
+	// xi: offset of the second sphere along the optical axis. Range [-1, 1].
+	double Xi = 0.0;
+	// alpha: blend factor between the perspective center on the second sphere (alpha=0,
+	// pinhole-like) and the unit sphere (alpha=1, ultra-wide). Range [0, 1].
+	double Alpha = 0.5;
+
+	// Same convention as FKannalaBrandtDistortion: tile axis offset from parent optical axis.
+	double AzimuthOffset = 0.0;
+	double ElevationOffset = 0.0;
+
+	FDoubleSphereDistortion(double InXi, double InAlpha, double InAzimuthOffset, double InElevationOffset)
+		: Xi(InXi), Alpha(InAlpha), AzimuthOffset(InAzimuthOffset), ElevationOffset(InElevationOffset) {}
+
+	virtual FVector2D OutputToRender(double OutputX, double OutputY) const override;
+	virtual FDistortionRenderConfig ComputeRenderConfig(const FIntPoint& OutputSizeXY, double FOutput) const override;
+	virtual double ComputeFOutputForFullImage(const FIntPoint& FullImageSizeXY, double FullImageHFOVDeg) const override;
+	virtual double PixelOffsetToYawDeg(double DxPixels, double FOutput) const override;
+	virtual double PixelOffsetToPitchDeg(double DyPixels, double FOutput) const override;
+
+	// Forward DS: 3D ray (x, y, z) -> (m_x, m_y) in the normalized image plane. Returns false
+	// if the point lies outside the model's valid forward-projection region.
+	static bool ProjectRay(double X, double Y, double Z, double Xi, double Alpha, double& OutMx, double& OutMy);
+
+	// Inverse DS: (m_x, m_y) in normalized image plane -> 3D ray (closed form). Returns false
+	// if the point lies outside the model's valid unprojection region.
+	static bool UnprojectPoint(double Mx, double My, double Xi, double Alpha,
+		double& OutX, double& OutY, double& OutZ);
+
+	// Forward DS for a radially-symmetric ray at angle theta from the optical axis:
+	// r_d = sin(theta) / (alpha*sqrt(1 + 2*xi*cos(theta) + xi^2) + (1-alpha)*(xi + cos(theta))).
+	static double RadialProject(double Theta, double Xi, double Alpha);
+};
+
 // Factory: construct the distortion model implementation matching the requested parameters.
 // YawDegrees/PitchDegrees are the capture component's relative rotation (UE convention: positive
-// yaw=right, positive pitch=up) and are only consulted by the Kannala-Brandt multi-tile model.
+// yaw=right, positive pitch=up) and are only consulted by tile-aware (fisheye) models.
 TEMPOSENSORSSHARED_API TUniquePtr<FDistortionModel> CreateDistortionModel(
 	const FTempoLensDistortionParameters& LensParameters,
 	double YawDegrees,
