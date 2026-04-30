@@ -899,11 +899,15 @@ void UTempoCamera::RenderCapture()
 		Setup.FOV = Tile.FOVAngle;
 	}
 
+	const float ResolutionFraction = bEnableScreenPercentage
+		? FMath::Clamp(ScreenPercentage / 100.0f, 0.25f, 2.0f)
+		: 1.0f;
+
 	if (bSingleTileFastPath)
 	{
 		// Single tile, full post-process: render straight to the final RT in LDR. The distortion
 		// PPM packs label/255 into alpha; RGBA8 quantization preserves the byte exactly.
-		TempoMultiViewCapture::RenderTiles(Scene, this, SharedFinalTextureTarget, ViewSetups, ESceneCaptureSource::SCS_FinalColorLDR);
+		TempoMultiViewCapture::RenderTiles(Scene, this, SharedFinalTextureTarget, ViewSetups, ESceneCaptureSource::SCS_FinalColorLDR, ResolutionFraction);
 	}
 	else
 	{
@@ -920,7 +924,7 @@ void UTempoCamera::RenderCapture()
 		ShowFlags.SetVignette(false);
 		ShowFlags.SetDepthOfField(false);
 
-		TempoMultiViewCapture::RenderTiles(Scene, this, SharedTextureTarget, ViewSetups, ESceneCaptureSource::SCS_FinalColorHDR);
+		TempoMultiViewCapture::RenderTiles(Scene, this, SharedTextureTarget, ViewSetups, ESceneCaptureSource::SCS_FinalColorHDR, ResolutionFraction);
 
 		ShowFlags = SavedShowFlags;
 

@@ -61,10 +61,17 @@ namespace TempoMultiViewCapture
 	// PrimaryComponent supplies family-wide settings: ShowFlags, view extensions, hide/show lists,
 	// view owner, LOD, ray-tracing flag, clip plane, lighting channels. CaptureSource is passed
 	// explicitly because the primary's own capture may use a different source than the atlas.
+	//
+	// ResolutionFraction is the GlobalResolutionFraction handed to the family's
+	// FLegacyScreenPercentageDriver. 1.0 = no upscaling (each tile rasterizes at its full
+	// ViewRect). <1.0 rasterizes at fraction*ViewRect and upsamples to ViewRect — TSR/TAAU when
+	// the tile's AA method is TSR/TemporalAA (FSceneView constructor auto-promotes
+	// PrimaryScreenPercentageMethod to TemporalUpscale in that case), spatial otherwise.
 	TEMPOSENSORSSHARED_API void RenderTiles(
 		FSceneInterface* Scene,
 		USceneCaptureComponent2D* PrimaryComponent,
 		UTextureRenderTarget2D* AtlasRT,
 		TArrayView<const FViewSetup> Views,
-		ESceneCaptureSource CaptureSource);
+		ESceneCaptureSource CaptureSource,
+		float ResolutionFraction = 1.0f);
 }

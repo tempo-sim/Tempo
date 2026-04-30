@@ -297,6 +297,21 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo", meta=(UIMin=0, UIMax=64, ClampMin=0, ClampMax=128))
 	int32 FeatherPixels = 16;
 
+	// When true, each tile rasterizes at ScreenPercentage% of its view-rect size and TSR (or
+	// TAAU, or spatial upscale, depending on the tile's AA method) upsamples to the full view
+	// rect. The atlas RT, distortion maps, and stitch output are unchanged — only the internal
+	// raster size is reduced. Off by default to match the engine's stock scene-capture
+	// behavior; turn on to trade some shading detail for substantial GPU time savings.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo")
+	bool bEnableScreenPercentage = false;
+
+	// Per-tile primary screen percentage (rasterization fraction, in percent of the tile's view
+	// rect). Applied via the multi-view family's FLegacyScreenPercentageDriver and only honored
+	// when bEnableScreenPercentage is true. 100 = no upscale. <100 = render smaller, upsample
+	// (TSR when AA is TSR/TAA — the default for our tiles — else spatial). >100 = supersample.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo", meta=(EditCondition="bEnableScreenPercentage", UIMin=25, UIMax=200, ClampMin=25, ClampMax=200))
+	float ScreenPercentage = 100.0f;
+
 	// FOVAngle (horizontal), SizeXY, RateHz, SequenceId, PostProcessSettings, ShowFlagSettings,
 	// and bUseRayTracingIfEnabled are inherited from UTempoSceneCaptureComponent2D /
 	// USceneCaptureComponent(2D).

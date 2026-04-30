@@ -274,7 +274,8 @@ void RenderTiles(
 	USceneCaptureComponent2D* PrimaryComponent,
 	UTextureRenderTarget2D* AtlasRT,
 	TArrayView<const FViewSetup> Views,
-	ESceneCaptureSource CaptureSource)
+	ESceneCaptureSource CaptureSource,
+	float ResolutionFraction)
 {
 	check(IsInGameThread());
 	check(Scene && PrimaryComponent && AtlasRT);
@@ -332,9 +333,15 @@ void RenderTiles(
 	ViewFamily.SceneCaptureSource = CaptureSource;
 	ViewFamily.SceneCaptureCompositeMode = PrimaryComponent->CompositeMode;
 
-	// Screen percentage not supported in scene captures.
+	// Engine's 2D scene-capture path hardcodes GlobalResolutionFraction=1.0 with the comment
+	// "Screen percentage is still not supported in scene capture" (SceneCaptureRendering.cpp:911-915),
+	// but that's a UX limitation (no slider on USceneCaptureComponent2D) rather than a renderer
+	// constraint — the same engine path forwards a non-1.0 fraction via Fork_GameThread when a
+	// scene capture has bRenderWithMainViewResolution set. We accept a caller-supplied fraction
+	// and feed it directly to FLegacyScreenPercentageDriver. ScreenPercentage show-flag stays
+	// off because we drive the fraction via the driver, not via the show-flag CVar fallback.
 	ViewFamily.EngineShowFlags.ScreenPercentage = false;
-	ViewFamily.SetScreenPercentageInterface(new FLegacyScreenPercentageDriver(ViewFamily, /*GlobalResolutionFraction=*/ 1.0f));
+	ViewFamily.SetScreenPercentageInterface(new FLegacyScreenPercentageDriver(ViewFamily, ResolutionFraction));
 
 	if (PrimaryComponent->IsUnlit())
 	{
