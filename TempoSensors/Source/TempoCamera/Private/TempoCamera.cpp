@@ -298,6 +298,10 @@ UTempoCamera::UTempoCamera()
 	PostProcessSettings.bOverride_ReflectionMethod = true;
 	PostProcessSettings.ReflectionMethod = EReflectionMethod::Lumen;
 
+	// Megalights
+	PostProcessSettings.bOverride_bMegaLights = true;
+	PostProcessSettings.bMegaLights = true;
+
 	bUseRayTracingIfEnabled = true;
 
 	ShowFlags.SetMotionBlur(true);
