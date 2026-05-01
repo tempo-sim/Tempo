@@ -809,6 +809,7 @@ void UTempoCamera::RenderCapture()
 		if (TSRShadingRejectionExposureOffsetCVar)
 		{
 			SavedTSRShadingRejectionExposureOffset = TSRShadingRejectionExposureOffsetCVar->GetFloat();
+			// 2.0 multiplier determined to work well empirically...
 			TSRShadingRejectionExposureOffsetCVar->Set(2.0f * SharedExposureBias, ECVF_SetByConsole);
 		}
 	}
