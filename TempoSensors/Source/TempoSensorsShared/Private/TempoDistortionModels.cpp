@@ -4,7 +4,8 @@
 
 #include "TempoSensorsShared.h"
 
-TUniquePtr<FDistortionModel> CreateDistortionModel(const FTempoLensDistortionParameters& LensParameters, double YawDegrees, double PitchDegrees)
+TUniquePtr<FDistortionModel> CreateDistortionModel(const FTempoLensDistortionParameters& LensParameters, double YawDegrees, double PitchDegrees,
+	double AxisShiftXRd, double AxisShiftYRd)
 {
 	if (LensParameters.DistortionModel == ETempoDistortionModel::BrownConrady)
 	{
@@ -31,7 +32,8 @@ TUniquePtr<FDistortionModel> CreateDistortionModel(const FTempoLensDistortionPar
 		return MakeUnique<FDoubleSphereDistortion>(
 			LensParameters.Xi,
 			LensParameters.Alpha,
-			AzOffset, ElOffset);
+			AzOffset, ElOffset,
+			AxisShiftXRd, AxisShiftYRd);
 	}
 	else // KannalaBrandt (Equidistant fisheye; K=0 = pure equidistant)
 	{
@@ -43,7 +45,8 @@ TUniquePtr<FDistortionModel> CreateDistortionModel(const FTempoLensDistortionPar
 			LensParameters.K2,
 			LensParameters.K3,
 			LensParameters.K4,
-			AzOffset, ElOffset);
+			AzOffset, ElOffset,
+			AxisShiftXRd, AxisShiftYRd);
 	}
 }
 
@@ -181,20 +184,28 @@ FDistortionRenderConfig FRadialDistortionBase::ComputeRenderConfig(const FIntPoi
 		UE_LOG(LogTempoSensorsShared, Warning, TEXT("HorizontalFOV %.2f exceeds limit %.2f for %s model. Artifacts expected."), RequestedHFOVDeg, MaxPossibleFOV, GetModelName());
 	}
 
+	double RenderHorizRadius = 0.0;
 	if (IsBarrel()) // Barrel - diagonal is the limiting factor
 	{
 		const double OutputVertRadius = OutputHorizRadius / AspectRatio;
 		const double OutputDiagRadius = FMath::Sqrt(OutputHorizRadius * OutputHorizRadius + OutputVertRadius * OutputVertRadius);
 		const double RenderDiagRadius = Undistort(OutputDiagRadius);
-		const double RenderHorizRadius = RenderDiagRadius / FMath::Sqrt(1.0 + 1.0 / (AspectRatio * AspectRatio));
-		Config.RenderFOVAngle = 2.0 * FMath::RadiansToDegrees(FMath::Atan(RenderHorizRadius));
+		RenderHorizRadius = RenderDiagRadius / FMath::Sqrt(1.0 + 1.0 / (AspectRatio * AspectRatio));
 	}
 	else // Pincushion - horizontal/vertical is the limiting factor
 	{
-		Config.RenderFOVAngle = 2.0 * FMath::RadiansToDegrees(FMath::Atan(OutputHorizRadius));
+		RenderHorizRadius = OutputHorizRadius;
 	}
+	const double RenderVertRadius = RenderHorizRadius / AspectRatio;
 
-	Config.FRender = (Config.RenderSizeXY.X / 2.0) / FMath::Tan(FMath::DegreesToRadians(Config.RenderFOVAngle / 2.0));
+	Config.RenderFOVAngle = 2.0 * FMath::RadiansToDegrees(FMath::Atan(RenderHorizRadius));
+
+	// Single-capture radial models are symmetric around the optical axis, so the frustum is
+	// symmetric: TanLeft = -TanRight, TanTop = -TanBottom.
+	Config.TanLeft = -RenderHorizRadius;
+	Config.TanRight = RenderHorizRadius;
+	Config.TanTop = -RenderVertRadius;
+	Config.TanBottom = RenderVertRadius;
 
 	return Config;
 }
@@ -207,7 +218,12 @@ FDistortionRenderConfig FEquidistantDistortion::ComputeRenderConfig(const FIntPo
 	Config.FOutput = FOutput;
 	const double HFOVRad = OutputSizeXY.X / FOutput;
 	Config.RenderFOVAngle = FMath::Clamp(static_cast<float>(FMath::RadiansToDegrees(HFOVRad)), 1.0f, 170.0f);
-	Config.FRender = OutputSizeXY.X / (2.0 * FMath::Tan(FMath::DegreesToRadians(Config.RenderFOVAngle) / 2.0));
+	const double TanHalfHFOV = FMath::Tan(FMath::DegreesToRadians(Config.RenderFOVAngle) / 2.0);
+	const double AspectRatio = static_cast<double>(OutputSizeXY.X) / static_cast<double>(OutputSizeXY.Y);
+	Config.TanLeft = -TanHalfHFOV;
+	Config.TanRight = TanHalfHFOV;
+	Config.TanTop = -TanHalfHFOV / AspectRatio;
+	Config.TanBottom = TanHalfHFOV / AspectRatio;
 	return Config;
 }
 
@@ -296,27 +312,43 @@ void FKannalaBrandtDistortion::PixelOffsetToYawPitchDeg(double DxPixels, double 
 	OutPitchDeg = -FMath::RadiansToDegrees(DyPixels / FOutput);
 }
 
+void FKannalaBrandtDistortion::YawPitchDegToPixelOffset(double YawDeg, double PitchDeg, double FOutput,
+	double& OutDxPixels, double& OutDyPixels) const
+{
+	OutDxPixels = 0.0;
+	OutDyPixels = 0.0;
+	if (FOutput <= 0.0)
+	{
+		return;
+	}
+	// Inverse of PixelOffsetToYawPitchDeg under the same axis-separable approximation.
+	OutDxPixels = FMath::DegreesToRadians(YawDeg) * FOutput;
+	OutDyPixels = -FMath::DegreesToRadians(PitchDeg) * FOutput;
+}
+
 FVector2D FKannalaBrandtDistortion::OutputToRender(double OutputX, double OutputY) const
 {
-	// OutputX/OutputY are tile-local coordinates in distorted-angle (theta_d) units from
-	// this tile's center. Convert to parent-frame distorted-output coordinates by adding
-	// the tile center's position in the parent's output image plane.
+	// OutputX/OutputY are tile-local coordinates in distorted-angle (theta_d) units, measured
+	// from the tile's pixel-rect center. To get the parent-frame output coords we add the
+	// tile-pixel-center's r_d position in parent space, which equals the optical-axis r_d
+	// position MINUS the axis re-aim shift. With AxisShift=0 (no re-aim) this collapses to
+	// "tile pixel center == optical axis projection" — the original contract.
 	//
-	// The tile center sits on a ray at physical angle theta_axis from the parent's optical
+	// The optical axis sits on a ray at physical angle theta_axis from the parent's optical
 	// axis. Its position in the parent's (distorted) output plane has radius theta_d_axis
 	// and the same azimuthal direction as (AzimuthOffset, ElevationOffset).
 	const double ThetaAxis = FMath::Sqrt(AzimuthOffset * AzimuthOffset + ElevationOffset * ElevationOffset);
-	double TileCenterX = 0.0;
-	double TileCenterY = 0.0;
+	double AxisCenterX = 0.0;
+	double AxisCenterY = 0.0;
 	if (ThetaAxis >= 1e-10)
 	{
 		const double ThetaDAxis = SolveDistortion(ThetaAxis, K1, K2, K3, K4);
-		TileCenterX = ThetaDAxis * AzimuthOffset / ThetaAxis;
-		TileCenterY = ThetaDAxis * ElevationOffset / ThetaAxis;
+		AxisCenterX = ThetaDAxis * AzimuthOffset / ThetaAxis;
+		AxisCenterY = ThetaDAxis * ElevationOffset / ThetaAxis;
 	}
 
-	const double ParentOutputX = TileCenterX + OutputX;
-	const double ParentOutputY = TileCenterY + OutputY;
+	const double ParentOutputX = AxisCenterX - AxisShiftXRd + OutputX;
+	const double ParentOutputY = AxisCenterY - AxisShiftYRd + OutputY;
 
 	// Invert K-B to recover the physical radial angle from the parent's optical axis.
 	const double ThetaD = FMath::Sqrt(ParentOutputX * ParentOutputX + ParentOutputY * ParentOutputY);
@@ -478,25 +510,41 @@ FDistortionRenderConfig FKannalaBrandtDistortion::ComputeRenderConfig(const FInt
 	const double OutputHorizRadius = (OutputSizeXY.X / 2.0) / FOutput;
 	const double OutputVertRadius = (OutputSizeXY.Y / 2.0) / FOutput;
 
-	// The K-B->perspective mapping isn't radial in tile space (azimuth/elevation coupling
-	// plus radial distortion), so sample corners and edge midpoints to find max render extent.
-	double MaxRenderHoriz = 0.0;
-	double MaxRenderVert = 0.0;
+	// Sample tile corners and edge midpoints in tile-pixel-centered output coords. With
+	// re-aim (AxisShift != 0) OutputToRender already accounts for the axis shift internally,
+	// so the render samples it returns are in the child frame's tan-space relative to the
+	// re-aimed optical axis — exactly what the projection matrix bounds need.
+	double MinRenderX = +TNumericLimits<double>::Max();
+	double MaxRenderX = -TNumericLimits<double>::Max();
+	double MinRenderY = +TNumericLimits<double>::Max();
+	double MaxRenderY = -TNumericLimits<double>::Max();
 	const double SX[] = {-OutputHorizRadius, OutputHorizRadius, -OutputHorizRadius, OutputHorizRadius, 0.0, 0.0, -OutputHorizRadius, OutputHorizRadius};
 	const double SY[] = {-OutputVertRadius, -OutputVertRadius, OutputVertRadius, OutputVertRadius, -OutputVertRadius, OutputVertRadius, 0.0, 0.0};
 	for (int32 I = 0; I < 8; ++I)
 	{
 		const FVector2D Render = OutputToRender(SX[I], SY[I]);
-		MaxRenderHoriz = FMath::Max(MaxRenderHoriz, FMath::Abs(Render.X));
-		MaxRenderVert = FMath::Max(MaxRenderVert, FMath::Abs(Render.Y));
+		MinRenderX = FMath::Min(MinRenderX, Render.X);
+		MaxRenderX = FMath::Max(MaxRenderX, Render.X);
+		MinRenderY = FMath::Min(MinRenderY, Render.Y);
+		MaxRenderY = FMath::Max(MaxRenderY, Render.Y);
 	}
 
-	// RenderFOVAngle is horizontal; UE derives vertical FOV from aspect ratio.
-	// Need: tan(RFOV/2) >= MaxRenderHoriz AND tan(RFOV/2) / AspectRatio >= MaxRenderVert.
-	const double RequiredRenderHorizRadius = FMath::Max(MaxRenderHoriz, MaxRenderVert * AspectRatio);
-	Config.RenderFOVAngle = FMath::Clamp(FMath::RadiansToDegrees(FMath::Atan(RequiredRenderHorizRadius)) * 2.0, 1.0, 170.0);
+	// Tightly bound the actually-used render quadrant. For symmetric (centered) tiles this
+	// reproduces the old behavior up to a sign — Min == -Max. For corner / off-axis tiles the
+	// frustum collapses around the active quadrant, recovering the rasterizer pixels that were
+	// previously wasted on empty regions of the symmetric frustum.
+	Config.TanLeft = MinRenderX;
+	Config.TanRight = MaxRenderX;
+	Config.TanTop = MinRenderY;
+	Config.TanBottom = MaxRenderY;
 
-	Config.FRender = (OutputSizeXY.X / 2.0) / FMath::Tan(FMath::DegreesToRadians(Config.RenderFOVAngle / 2.0));
+	// Legacy RenderFOVAngle: tightest symmetric horizontal half-FOV that bounds the content,
+	// constrained by aspect on the vertical axis. Kept for metadata consumers (Tile.FOVAngle,
+	// ViewInitOptions.FOV); the actual projection uses the signed Tan bounds above.
+	const double RequiredRenderHorizRadius = FMath::Max(
+		FMath::Max(FMath::Abs(MinRenderX), FMath::Abs(MaxRenderX)),
+		FMath::Max(FMath::Abs(MinRenderY), FMath::Abs(MaxRenderY)) * AspectRatio);
+	Config.RenderFOVAngle = FMath::Clamp(FMath::RadiansToDegrees(FMath::Atan(RequiredRenderHorizRadius)) * 2.0, 1.0, 170.0);
 
 	return Config;
 }
@@ -636,18 +684,47 @@ void FDoubleSphereDistortion::PixelOffsetToYawPitchDeg(double DxPixels, double D
 	OutYawDeg = FMath::RadiansToDegrees(FMath::Atan2(X, Z));
 }
 
+void FDoubleSphereDistortion::YawPitchDegToPixelOffset(double YawDeg, double PitchDeg, double FOutput,
+	double& OutDxPixels, double& OutDyPixels) const
+{
+	OutDxPixels = 0.0;
+	OutDyPixels = 0.0;
+	if (FOutput <= 0.0)
+	{
+		return;
+	}
+	// Inverse of PixelOffsetToYawPitchDeg: build the 3D ray for (yaw, pitch_UE) then forward-
+	// project through DS to get (Mx, My).
+	const double YawRad = FMath::DegreesToRadians(YawDeg);
+	const double PitchUERad = FMath::DegreesToRadians(PitchDeg);
+	const double CosYaw = FMath::Cos(YawRad);
+	const double SinYaw = FMath::Sin(YawRad);
+	const double CosPitch = FMath::Cos(PitchUERad);
+	const double SinPitch = FMath::Sin(PitchUERad);
+	// Same composition as in OutputToRender: dir = R_Y(yaw) * R_X(-pitch_UE) * (0,0,1).
+	const double X = SinYaw * CosPitch;
+	const double Y = -SinPitch;
+	const double Z = CosYaw * CosPitch;
+	double Mx = 0.0, My = 0.0;
+	if (!ProjectRay(X, Y, Z, Xi, Alpha, Mx, My))
+	{
+		return;
+	}
+	OutDxPixels = Mx * FOutput;
+	OutDyPixels = My * FOutput;
+}
+
 FVector2D FDoubleSphereDistortion::OutputToRender(double OutputX, double OutputY) const
 {
-	// Tile-local r_d coordinates. Shift by the tile center's position in the parent's output
-	// plane to get parent-frame normalized image-plane coordinates.
+	// OutputX/Y are tile-local r_d coords measured from the tile's pixel-rect center. To get
+	// parent-frame coords we shift by the tile-pixel-center's r_d position in parent space,
+	// which equals (axis projection) - (axis re-aim shift). With AxisShift=0 this reduces to
+	// "tile pixel center == optical axis projection" (the original contract).
 	//
-	// The tile's optical axis in the PARENT frame is the result of applying R_Y(Az) * R_X(-El)
-	// (child→parent) to (0, 0, 1). Forward-project that 3D direction through the parent's DS
-	// to find its r_d position. The small-angle approximation
-	// theta ≈ sqrt(Az² + El²), dir ≈ (Az, El)/sqrt(...) is incorrect at diagonal tiles —
-	// the actual 3D axis differs by several degrees and projects to a different r_d.
-	double TileCenterX = 0.0;
-	double TileCenterY = 0.0;
+	// The optical axis in the PARENT frame is R_Y(Az) * R_X(-El) (child→parent) applied to
+	// (0, 0, 1). Forward-project that 3D direction through the parent's DS to find its r_d.
+	double AxisCenterX = 0.0;
+	double AxisCenterY = 0.0;
 	if (FMath::Abs(AzimuthOffset) > 1e-10 || FMath::Abs(ElevationOffset) > 1e-10)
 	{
 		const double CosAz = FMath::Cos(AzimuthOffset);
@@ -657,15 +734,15 @@ FVector2D FDoubleSphereDistortion::OutputToRender(double OutputX, double OutputY
 		const double AxisX = SinAz * CosEl;
 		const double AxisY = SinEl;
 		const double AxisZ = CosAz * CosEl;
-		if (!ProjectRay(AxisX, AxisY, AxisZ, Xi, Alpha, TileCenterX, TileCenterY))
+		if (!ProjectRay(AxisX, AxisY, AxisZ, Xi, Alpha, AxisCenterX, AxisCenterY))
 		{
-			TileCenterX = 0.0;
-			TileCenterY = 0.0;
+			AxisCenterX = 0.0;
+			AxisCenterY = 0.0;
 		}
 	}
 
-	const double ParentMx = TileCenterX + OutputX;
-	const double ParentMy = TileCenterY + OutputY;
+	const double ParentMx = AxisCenterX - AxisShiftXRd + OutputX;
+	const double ParentMy = AxisCenterY - AxisShiftYRd + OutputY;
 
 	// Closed-form unprojection to a 3D ray in parent frame.
 	double RayX, RayY, RayZ;
@@ -707,23 +784,33 @@ FDistortionRenderConfig FDoubleSphereDistortion::ComputeRenderConfig(const FIntP
 	const double OutputHorizRadius = (OutputSizeXY.X / 2.0) / FOutput;
 	const double OutputVertRadius = (OutputSizeXY.Y / 2.0) / FOutput;
 
-	// Sample tile corners + edge midpoints to find the max render extent (mapping is non-radial
-	// due to azimuth/elevation coupling and the parent-frame composition).
-	double MaxRenderHoriz = 0.0;
-	double MaxRenderVert = 0.0;
+	// Sample tile corners + edge midpoints. With re-aim, OutputToRender absorbs the axis shift
+	// internally, so the returned render coords are already in the child frame's tan-space
+	// relative to the re-aimed optical axis.
+	double MinRenderX = +TNumericLimits<double>::Max();
+	double MaxRenderX = -TNumericLimits<double>::Max();
+	double MinRenderY = +TNumericLimits<double>::Max();
+	double MaxRenderY = -TNumericLimits<double>::Max();
 	const double SX[] = {-OutputHorizRadius, OutputHorizRadius, -OutputHorizRadius, OutputHorizRadius, 0.0, 0.0, -OutputHorizRadius, OutputHorizRadius};
 	const double SY[] = {-OutputVertRadius, -OutputVertRadius, OutputVertRadius, OutputVertRadius, -OutputVertRadius, OutputVertRadius, 0.0, 0.0};
 	for (int32 I = 0; I < 8; ++I)
 	{
 		const FVector2D Render = OutputToRender(SX[I], SY[I]);
-		MaxRenderHoriz = FMath::Max(MaxRenderHoriz, FMath::Abs(Render.X));
-		MaxRenderVert = FMath::Max(MaxRenderVert, FMath::Abs(Render.Y));
+		MinRenderX = FMath::Min(MinRenderX, Render.X);
+		MaxRenderX = FMath::Max(MaxRenderX, Render.X);
+		MinRenderY = FMath::Min(MinRenderY, Render.Y);
+		MaxRenderY = FMath::Max(MaxRenderY, Render.Y);
 	}
 
-	const double RequiredRenderHorizRadius = FMath::Max(MaxRenderHoriz, MaxRenderVert * AspectRatio);
-	Config.RenderFOVAngle = FMath::Clamp(FMath::RadiansToDegrees(FMath::Atan(RequiredRenderHorizRadius)) * 2.0, 1.0, 170.0);
+	Config.TanLeft = MinRenderX;
+	Config.TanRight = MaxRenderX;
+	Config.TanTop = MinRenderY;
+	Config.TanBottom = MaxRenderY;
 
-	Config.FRender = (OutputSizeXY.X / 2.0) / FMath::Tan(FMath::DegreesToRadians(Config.RenderFOVAngle / 2.0));
+	const double RequiredRenderHorizRadius = FMath::Max(
+		FMath::Max(FMath::Abs(MinRenderX), FMath::Abs(MaxRenderX)),
+		FMath::Max(FMath::Abs(MinRenderY), FMath::Abs(MaxRenderY)) * AspectRatio);
+	Config.RenderFOVAngle = FMath::Clamp(FMath::RadiansToDegrees(FMath::Atan(RequiredRenderHorizRadius)) * 2.0, 1.0, 170.0);
 
 	return Config;
 }

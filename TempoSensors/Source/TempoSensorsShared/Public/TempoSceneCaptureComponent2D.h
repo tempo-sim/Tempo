@@ -344,11 +344,16 @@ protected:
 	static void ApplyDistortionMapToMaterial(UMaterialInstanceDynamic* MaterialInstance, UTexture2D* DistortionMap);
 
 	// Fill the distortion map texture using the given distortion model.
-	// OutputSizeXY / FxOutput / FyOutput describe the output (distorted) image (loop bounds + normalization).
-	// RenderSizeXY / FxRender / FyRender describe the render (perspective) image (UV normalization).
+	// OutputSizeXY / FOutput describe the output (distorted) image (loop bounds + normalization).
+	// RenderSizeXY plus the signed Tan{Left,Right,Top,Bottom} bounds describe the render
+	// (perspective) image — the UV [0,1] range maps linearly across [TanLeft, TanRight] and
+	// [TanTop, TanBottom]. Off-axis frustums collapse the wasted regions of a symmetric frustum
+	// and write the same UV semantics; old call sites get unchanged behavior by passing
+	// TanLeft = -TanRight and TanTop = -TanBottom.
 	static void FillDistortionMap(UTexture2D* DistortionMap, const FDistortionModel& Model,
 		const FIntPoint& OutputSizeXY, double FOutput,
-		const FIntPoint& RenderSizeXY, double FRender);
+		const FIntPoint& RenderSizeXY,
+		double TanLeft, double TanRight, double TanTop, double TanBottom);
 
 	// Gets the number of pending texture reads
 	int32 NumPendingTextureReads() const { return TextureReadQueue.Num(); }

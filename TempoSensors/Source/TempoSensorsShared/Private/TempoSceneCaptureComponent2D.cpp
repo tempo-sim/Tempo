@@ -276,7 +276,8 @@ void UTempoSceneCaptureComponent2D::ApplyDistortionMapToMaterial(UMaterialInstan
 }
 
 void UTempoSceneCaptureComponent2D::FillDistortionMap(UTexture2D* DistortionMap, const FDistortionModel& Model, const FIntPoint& OutputSizeXY,
-	double FOutput, const FIntPoint& RenderSizeXY, double FRender)
+	double FOutput, const FIntPoint& RenderSizeXY,
+	double TanLeft, double TanRight, double TanTop, double TanBottom)
 {
 	if (!DistortionMap || OutputSizeXY.X <= 0 || OutputSizeXY.Y <= 0)
 	{
@@ -296,9 +297,10 @@ void UTempoSceneCaptureComponent2D::FillDistortionMap(UTexture2D* DistortionMap,
 	const double OutputCx = OutputSizeXY.X * 0.5;
 	const double OutputCy = OutputSizeXY.Y * 0.5;
 
-	// Render image center (for normalized-to-UV conversion).
-	const double RenderCx = RenderSizeXY.X * 0.5;
-	const double RenderCy = RenderSizeXY.Y * 0.5;
+	// UV linearly spans [TanLeft, TanRight] and [TanTop, TanBottom]. For symmetric frustums
+	// (TanLeft = -TanRight) this reduces to the legacy formula Render*FRender / RenderSize + 0.5.
+	const double InvTanWidth = 1.0 / (TanRight - TanLeft);
+	const double InvTanHeight = 1.0 / (TanBottom - TanTop);
 
 	for (int V = 0; V < OutputSizeXY.Y; ++V)
 	{
@@ -309,8 +311,8 @@ void UTempoSceneCaptureComponent2D::FillDistortionMap(UTexture2D* DistortionMap,
 		{
 			const double OutputX = (U + 0.5 - OutputCx) / FOutput;
 			const FVector2D Render = Model.OutputToRender(OutputX, OutputY);
-			const float FinalU = static_cast<float>(Render.X * FRender + RenderCx) / static_cast<float>(RenderSizeXY.X);
-			const float FinalV = static_cast<float>(Render.Y * FRender + RenderCy) / static_cast<float>(RenderSizeXY.Y);
+			const float FinalU = static_cast<float>((Render.X - TanLeft) * InvTanWidth);
+			const float FinalV = static_cast<float>((Render.Y - TanTop) * InvTanHeight);
 			Row[U * 2 + 0] = FFloat16(FinalU).Encoded;
 			Row[U * 2 + 1] = FFloat16(FinalV).Encoded;
 		}

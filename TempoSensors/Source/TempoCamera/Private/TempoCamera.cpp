@@ -898,21 +898,58 @@ void UTempoCamera::RenderCapture()
 		const FQuat TileWorldRotation = CameraWorldRotation * Tile.RelativeRotation.Quaternion();
 		FMatrix ViewRotationMatrix = FQuatRotationMatrix(TileWorldRotation.Inverse()) * ViewAxisSwap;
 
-		// Perspective projection — mirrors BuildProjectionMatrix at SceneCaptureRendering.cpp:566.
-		const float UnscaledFOV = Tile.FOVAngle * (float)PI / 360.0f;
-		const float ViewFOV = FMath::Atan((1.0f + Overscan) * FMath::Tan(UnscaledFOV));
+		// Off-axis perspective projection. The frustum bounds come from the tile's
+		// FDistortionRenderConfig, which sized them to tightly enclose the actually-used render
+		// quadrant. For symmetric (centered) tiles this reproduces FReversedZPerspectiveMatrix
+		// exactly (TanLeft = -TanRight, TanTop = -TanBottom). For corner / off-axis tiles the
+		// frustum collapses around the active quadrant so the rasterizer no longer wastes pixels
+		// on the empty regions of a symmetric frustum — same render-target size, ~2x effective
+		// resolution at the tile's outer edges. Overscan inflates symmetrically around the
+		// frustum's center, matching the legacy behavior of growing tan(half-FOV) by (1 + Overscan).
 		const float NearClip = bOverride_CustomNearClippingPlane ? CustomNearClippingPlane : GNearClippingPlane;
 		const FIntPoint TileSize = Tile.TileOutputSizeXY;
-		const float YAxisMultiplier = static_cast<float>(TileSize.X) / static_cast<float>(TileSize.Y);
 
-		FMatrix ProjectionMatrix;
+		const double TanCenterX = 0.5 * (Tile.TanLeft + Tile.TanRight);
+		const double TanCenterY = 0.5 * (Tile.TanTop + Tile.TanBottom);
+		const double TanHalfW = 0.5 * (Tile.TanRight - Tile.TanLeft) * (1.0 + Overscan);
+		const double TanHalfH = 0.5 * (Tile.TanBottom - Tile.TanTop) * (1.0 + Overscan);
+		const double L = TanCenterX - TanHalfW;
+		const double R = TanCenterX + TanHalfW;
+		const double T = TanCenterY - TanHalfH;
+		const double B = TanCenterY + TanHalfH;
+
+		const double Sx = 2.0 / (R - L);
+		const double Sy = 2.0 / (B - T);
+		const double Cx = -(R + L) / (R - L);
+		const double Cy = (T + B) / (B - T);
+
+		FMatrix ProjectionMatrix = FMatrix::Identity;
+		ProjectionMatrix.M[0][0] = static_cast<float>(Sx);
+		ProjectionMatrix.M[0][1] = 0.0f;
+		ProjectionMatrix.M[0][2] = 0.0f;
+		ProjectionMatrix.M[0][3] = 0.0f;
+		ProjectionMatrix.M[1][0] = 0.0f;
+		ProjectionMatrix.M[1][1] = static_cast<float>(Sy);
+		ProjectionMatrix.M[1][2] = 0.0f;
+		ProjectionMatrix.M[1][3] = 0.0f;
+		ProjectionMatrix.M[2][0] = static_cast<float>(Cx);
+		ProjectionMatrix.M[2][1] = static_cast<float>(Cy);
+		ProjectionMatrix.M[2][3] = 1.0f;
+		ProjectionMatrix.M[3][0] = 0.0f;
+		ProjectionMatrix.M[3][1] = 0.0f;
+		ProjectionMatrix.M[3][3] = 0.0f;
 		if ((int32)ERHIZBuffer::IsInverted)
 		{
-			ProjectionMatrix = FReversedZPerspectiveMatrix(ViewFOV, ViewFOV, 1.0f, YAxisMultiplier, NearClip, NearClip);
+			// Reversed-Z infinite far plane (MinZ == MaxZ branch of FReversedZPerspectiveMatrix).
+			ProjectionMatrix.M[2][2] = 0.0f;
+			ProjectionMatrix.M[3][2] = NearClip;
 		}
 		else
 		{
-			ProjectionMatrix = FPerspectiveMatrix(ViewFOV, ViewFOV, 1.0f, YAxisMultiplier, NearClip, NearClip);
+			// Forward-Z infinite far plane (MinZ == MaxZ branch of FPerspectiveMatrix); Z_PRECISION
+			// is 0 in the engine so the (1 - Z_PRECISION) factor collapses to 1.
+			ProjectionMatrix.M[2][2] = 1.0f;
+			ProjectionMatrix.M[3][2] = -NearClip;
 		}
 
 		TempoMultiViewCapture::FViewSetup& Setup = ViewSetups.AddDefaulted_GetRef();
@@ -1218,18 +1255,25 @@ void UTempoCamera::InitTileDistortionMap(FTempoCameraTile& Tile)
 	TUniquePtr<FDistortionModel> Model = CreateDistortionModel(
 		LensParameters,
 		Tile.RelativeRotation.Yaw,
-		Tile.RelativeRotation.Pitch);
+		Tile.RelativeRotation.Pitch,
+		Tile.AxisShiftXRd,
+		Tile.AxisShiftYRd);
 	const FDistortionRenderConfig Config = Model->ComputeRenderConfig(Tile.TileOutputSizeXY, Tile.OutputFocalLength);
 
 	Tile.FOVAngle = Config.RenderFOVAngle;
 	Tile.SizeXY = Config.RenderSizeXY;
+	Tile.TanLeft = Config.TanLeft;
+	Tile.TanRight = Config.TanRight;
+	Tile.TanTop = Config.TanTop;
+	Tile.TanBottom = Config.TanBottom;
 
 	// CreateOrResizeDistortionMapTexture overwrites Tile.DistortionMap — retire the previous one
 	// first so in-flight render commands don't see it marked-for-GC.
 	RetireDistortionMap(Tile.DistortionMap);
 	Tile.DistortionMap = nullptr;
 	UTempoSceneCaptureComponent2D::CreateOrResizeDistortionMapTexture(Tile.DistortionMap, Tile.TileOutputSizeXY);
-	UTempoSceneCaptureComponent2D::FillDistortionMap(Tile.DistortionMap, *Model, Tile.TileOutputSizeXY, Config.FOutput, Config.RenderSizeXY, Config.FRender);
+	UTempoSceneCaptureComponent2D::FillDistortionMap(Tile.DistortionMap, *Model, Tile.TileOutputSizeXY, Config.FOutput,
+		Config.RenderSizeXY, Config.TanLeft, Config.TanRight, Config.TanTop, Config.TanBottom);
 	UTempoSceneCaptureComponent2D::ApplyDistortionMapToMaterial(Tile.PostProcessMaterialInstance, Tile.DistortionMap);
 }
 
@@ -1516,7 +1560,7 @@ void UTempoCamera::ApplyTilePostProcess(FTempoCameraTile& Tile)
 	}
 }
 
-void UTempoCamera::ConfigureTile(FTempoCameraTile& Tile, double YawOffset, double PitchOffset, double FOutput, const FIntPoint& TileSizeXY, const FIntPoint& TileDestOffset, const FIntPoint& OwnedOffset, const FIntPoint& OwnedSize, bool bActivate)
+void UTempoCamera::ConfigureTile(FTempoCameraTile& Tile, double YawOffset, double PitchOffset, double FOutput, const FIntPoint& TileSizeXY, const FIntPoint& TileDestOffset, const FIntPoint& OwnedOffset, const FIntPoint& OwnedSize, double AxisShiftXRd, double AxisShiftYRd, bool bActivate)
 {
 	if (!bActivate)
 	{
@@ -1533,6 +1577,8 @@ void UTempoCamera::ConfigureTile(FTempoCameraTile& Tile, double YawOffset, doubl
 	Tile.OwnedOutputOffset = OwnedOffset;
 	Tile.OwnedOutputSize = OwnedSize;
 	Tile.OutputFocalLength = FOutput;
+	Tile.AxisShiftXRd = AxisShiftXRd;
+	Tile.AxisShiftYRd = AxisShiftYRd;
 	Tile.SizeXY = TileSizeXY;                 // InitTileDistortionMap will overwrite
 	Tile.FOVAngle = 0.0f;                     // InitTileDistortionMap will overwrite
 
@@ -1558,7 +1604,7 @@ void UTempoCamera::SyncTiles()
 
 	auto Deactivate = [this](FTempoCameraTile& Tile)
 	{
-		ConfigureTile(Tile, 0, 0, 0, FIntPoint::ZeroValue, FIntPoint::ZeroValue, FIntPoint::ZeroValue, FIntPoint::ZeroValue, /*bActivate=*/ false);
+		ConfigureTile(Tile, 0, 0, 0, FIntPoint::ZeroValue, FIntPoint::ZeroValue, FIntPoint::ZeroValue, FIntPoint::ZeroValue, 0.0, 0.0, /*bActivate=*/ false);
 	};
 
 	// Build a "no-rotation" model used purely for full-image geometry queries (FOutput,
@@ -1572,8 +1618,9 @@ void UTempoCamera::SyncTiles()
 
 	if (bSingleCapture)
 	{
-		// Single capture: use TL, deactivate others. No seams, no feather.
-		ConfigureTile(TL, 0.0, 0.0, FOutput, SizeXY, FIntPoint::ZeroValue, FIntPoint::ZeroValue, SizeXY, /*bActivate=*/ true);
+		// Single capture: use TL, deactivate others. No seams, no feather. Radial models are
+		// symmetric around the optical axis — no re-aim shift.
+		ConfigureTile(TL, 0.0, 0.0, FOutput, SizeXY, FIntPoint::ZeroValue, FIntPoint::ZeroValue, SizeXY, 0.0, 0.0, /*bActivate=*/ true);
 		Deactivate(TR);
 		Deactivate(BL);
 		Deactivate(BR);
@@ -1593,17 +1640,63 @@ void UTempoCamera::SyncTiles()
 		// degrees, via the model. Joint conversion is required for diagonal (4-tile) cases — the
 		// 3D direction implied by independent 1D yaw/pitch differs from the 3D direction whose 2D
 		// forward projection lands on (Dx, Dy), introducing multi-degree gaps at diagonal seams.
-		const auto YawPitchDegFromPixelOffset = [&](int32 Dx, int32 Dy)
+		const auto YawPitchDegFromPixelOffset = [&](double Dx, double Dy)
 		{
 			double Yaw = 0.0;
 			double Pitch = 0.0;
-			Model->PixelOffsetToYawPitchDeg(static_cast<double>(Dx), static_cast<double>(Dy), FOutput, Yaw, Pitch);
+			Model->PixelOffsetToYawPitchDeg(Dx, Dy, FOutput, Yaw, Pitch);
 			return TPair<double, double>(Yaw, Pitch);
+		};
+
+		// Compute the angular-centroid aim point for a tile defined by its covered-rect corner
+		// pixel offsets (relative to the parent image center) and pixel-rect-center pixel offset.
+		// Returns (YawDeg, PitchDeg, AxisShiftXRd, AxisShiftYRd):
+		//   - (Yaw, Pitch) is the midpoint of the tile's (yaw, pitch) angular extent over the four
+		//     covered corners — typically a better optical-axis aim than the pixel-rect center
+		//     because the unprojection from pixel-offset to angle is non-linear, so the angular
+		//     midpoint and the pixel-offset midpoint differ for off-axis tiles.
+		//   - AxisShift is the resulting axis position, expressed as a displacement from the tile's
+		//     pixel-rect center in parent r_d units. The distortion model uses this to map
+		//     tile-pixel-centered output coords to the right parent-frame r_d when the axis no
+		//     longer lands at the tile's pixel center.
+		struct FTileAim
+		{
+			double YawDeg;
+			double PitchDeg;
+			double AxisShiftXRd;
+			double AxisShiftYRd;
+		};
+		const auto ComputeTileAim = [&](double LDx, double RDx, double TDy, double BDy, double PixelCenterDx, double PixelCenterDy)
+		{
+			const auto YP_TL = YawPitchDegFromPixelOffset(LDx, TDy);
+			const auto YP_TR = YawPitchDegFromPixelOffset(RDx, TDy);
+			const auto YP_BL = YawPitchDegFromPixelOffset(LDx, BDy);
+			const auto YP_BR = YawPitchDegFromPixelOffset(RDx, BDy);
+
+			const double YawMin = FMath::Min(FMath::Min(YP_TL.Key, YP_TR.Key), FMath::Min(YP_BL.Key, YP_BR.Key));
+			const double YawMax = FMath::Max(FMath::Max(YP_TL.Key, YP_TR.Key), FMath::Max(YP_BL.Key, YP_BR.Key));
+			const double PitchMin = FMath::Min(FMath::Min(YP_TL.Value, YP_TR.Value), FMath::Min(YP_BL.Value, YP_BR.Value));
+			const double PitchMax = FMath::Max(FMath::Max(YP_TL.Value, YP_TR.Value), FMath::Max(YP_BL.Value, YP_BR.Value));
+
+			FTileAim Aim;
+			Aim.YawDeg = 0.5 * (YawMin + YawMax);
+			Aim.PitchDeg = 0.5 * (PitchMin + PitchMax);
+
+			// Forward-project the centroid back to a pixel offset to recover the axis position
+			// in the parent image plane, then express its displacement from the tile's pixel
+			// center in r_d units (FOutput is pixels/r_d for the model's output unit).
+			double DxAxis = 0.0;
+			double DyAxis = 0.0;
+			Model->YawPitchDegToPixelOffset(Aim.YawDeg, Aim.PitchDeg, FOutput, DxAxis, DyAxis);
+			Aim.AxisShiftXRd = (DxAxis - PixelCenterDx) / FOutput;
+			Aim.AxisShiftYRd = (DyAxis - PixelCenterDy) / FOutput;
+			return Aim;
 		};
 
 		if (!bSplitHorizontal && !bSplitVertical)
 		{
-			ConfigureTile(TL, 0.0, 0.0, FOutput, SizeXY, FIntPoint::ZeroValue, FIntPoint::ZeroValue, SizeXY, true);
+			// Single fisheye tile centered on the optical axis — angular centroid is exactly (0,0).
+			ConfigureTile(TL, 0.0, 0.0, FOutput, SizeXY, FIntPoint::ZeroValue, FIntPoint::ZeroValue, SizeXY, 0.0, 0.0, true);
 			Deactivate(TR);
 			Deactivate(BL);
 			Deactivate(BR);
@@ -1619,17 +1712,21 @@ void UTempoCamera::SyncTiles()
 			const int32 TL_CoveredW = LeftWidth + F;
 			const int32 TR_CoveredW = RightWidth + F;
 
-			// Optical-axis position in output X = covered-rect center. Yaw is measured from camera
-			// forward (X = SizeXY.X/2). Negative = left.
-			const double TL_CenterX = TL_CoveredW * 0.5;
-			const double TR_CenterX = static_cast<double>(SizeXY.X) - TR_CoveredW * 0.5;
-			const auto TL_YP = YawPitchDegFromPixelOffset(static_cast<int32>(FMath::RoundToInt(TL_CenterX)) - SizeXY.X / 2, 0);  // intentionally rounded; sub-pixel yaw mismatch with covered-rect pixel grid is irrelevant at our seam tolerances
-			const auto TR_YP = YawPitchDegFromPixelOffset(static_cast<int32>(FMath::RoundToInt(TR_CenterX)) - SizeXY.X / 2, 0);
+			const double HalfX = SizeXY.X / 2.0;
+			const double HalfY = SizeXY.Y / 2.0;
 
-			ConfigureTile(TL, TL_YP.Key, TL_YP.Value, FOutput, FIntPoint(TL_CoveredW, SizeXY.Y), FIntPoint(0, 0),
-				FIntPoint(0, 0), FIntPoint(LeftWidth, SizeXY.Y), true);
-			ConfigureTile(TR, TR_YP.Key, TR_YP.Value, FOutput, FIntPoint(TR_CoveredW, SizeXY.Y), FIntPoint(TL_CoveredW, 0),
-				FIntPoint(LeftWidth, 0), FIntPoint(RightWidth, SizeXY.Y), true);
+			// Tile pixel-rect centers (parent-frame pixel offsets).
+			const double TL_PCDx = TL_CoveredW * 0.5 - HalfX;
+			const double TR_PCDx = HalfX - TR_CoveredW * 0.5;
+
+			// Tile covered-rect corner pixel offsets (top is -Dy, bottom is +Dy).
+			const FTileAim TL_Aim = ComputeTileAim(-HalfX, TL_PCDx + TL_CoveredW * 0.5, -HalfY, +HalfY, TL_PCDx, 0.0);
+			const FTileAim TR_Aim = ComputeTileAim(TR_PCDx - TR_CoveredW * 0.5, +HalfX, -HalfY, +HalfY, TR_PCDx, 0.0);
+
+			ConfigureTile(TL, TL_Aim.YawDeg, TL_Aim.PitchDeg, FOutput, FIntPoint(TL_CoveredW, SizeXY.Y), FIntPoint(0, 0),
+				FIntPoint(0, 0), FIntPoint(LeftWidth, SizeXY.Y), TL_Aim.AxisShiftXRd, TL_Aim.AxisShiftYRd, true);
+			ConfigureTile(TR, TR_Aim.YawDeg, TR_Aim.PitchDeg, FOutput, FIntPoint(TR_CoveredW, SizeXY.Y), FIntPoint(TL_CoveredW, 0),
+				FIntPoint(LeftWidth, 0), FIntPoint(RightWidth, SizeXY.Y), TR_Aim.AxisShiftXRd, TR_Aim.AxisShiftYRd, true);
 			Deactivate(BL);
 			Deactivate(BR);
 			AtlasSize = FIntPoint(TL_CoveredW + TR_CoveredW, SizeXY.Y);
@@ -1642,17 +1739,19 @@ void UTempoCamera::SyncTiles()
 			const int32 Top_CoveredH = TopHeight + F;
 			const int32 Bottom_CoveredH = BottomHeight + F;
 
-			// UE pitch convention: positive = up. Image-Y grows downward, so a tile whose center is
-			// above the optical center (Top_CenterY < SizeXY.Y/2 → Dy < 0) gets a positive UE pitch.
-			const double Top_CenterY = Top_CoveredH * 0.5;
-			const double Bottom_CenterY = static_cast<double>(SizeXY.Y) - Bottom_CoveredH * 0.5;
-			const auto Top_YP = YawPitchDegFromPixelOffset(0, static_cast<int32>(FMath::RoundToInt(Top_CenterY)) - SizeXY.Y / 2);
-			const auto Bottom_YP = YawPitchDegFromPixelOffset(0, static_cast<int32>(FMath::RoundToInt(Bottom_CenterY)) - SizeXY.Y / 2);
+			const double HalfX = SizeXY.X / 2.0;
+			const double HalfY = SizeXY.Y / 2.0;
 
-			ConfigureTile(TL, Top_YP.Key, Top_YP.Value, FOutput, FIntPoint(SizeXY.X, Top_CoveredH), FIntPoint(0, 0),
-				FIntPoint(0, 0), FIntPoint(SizeXY.X, TopHeight), true);
-			ConfigureTile(TR, Bottom_YP.Key, Bottom_YP.Value, FOutput, FIntPoint(SizeXY.X, Bottom_CoveredH), FIntPoint(0, Top_CoveredH),
-				FIntPoint(0, TopHeight), FIntPoint(SizeXY.X, BottomHeight), true);
+			const double Top_PCDy = Top_CoveredH * 0.5 - HalfY;
+			const double Bottom_PCDy = HalfY - Bottom_CoveredH * 0.5;
+
+			const FTileAim Top_Aim = ComputeTileAim(-HalfX, +HalfX, -HalfY, Top_PCDy + Top_CoveredH * 0.5, 0.0, Top_PCDy);
+			const FTileAim Bottom_Aim = ComputeTileAim(-HalfX, +HalfX, Bottom_PCDy - Bottom_CoveredH * 0.5, +HalfY, 0.0, Bottom_PCDy);
+
+			ConfigureTile(TL, Top_Aim.YawDeg, Top_Aim.PitchDeg, FOutput, FIntPoint(SizeXY.X, Top_CoveredH), FIntPoint(0, 0),
+				FIntPoint(0, 0), FIntPoint(SizeXY.X, TopHeight), Top_Aim.AxisShiftXRd, Top_Aim.AxisShiftYRd, true);
+			ConfigureTile(TR, Bottom_Aim.YawDeg, Bottom_Aim.PitchDeg, FOutput, FIntPoint(SizeXY.X, Bottom_CoveredH), FIntPoint(0, Top_CoveredH),
+				FIntPoint(0, TopHeight), FIntPoint(SizeXY.X, BottomHeight), Bottom_Aim.AxisShiftXRd, Bottom_Aim.AxisShiftYRd, true);
 			Deactivate(BL);
 			Deactivate(BR);
 			AtlasSize = FIntPoint(SizeXY.X, Top_CoveredH + Bottom_CoveredH);
@@ -1669,30 +1768,34 @@ void UTempoCamera::SyncTiles()
 			const int32 T_CoveredH = TopHeight + F;
 			const int32 B_CoveredH = BottomHeight + F;
 
-			const double L_CenterX = L_CoveredW * 0.5;
-			const double R_CenterX = static_cast<double>(SizeXY.X) - R_CoveredW * 0.5;
-			const double T_CenterY = T_CoveredH * 0.5;
-			const double B_CenterY = static_cast<double>(SizeXY.Y) - B_CoveredH * 0.5;
-			const int32 L_Dx = static_cast<int32>(FMath::RoundToInt(L_CenterX)) - SizeXY.X / 2;
-			const int32 R_Dx = static_cast<int32>(FMath::RoundToInt(R_CenterX)) - SizeXY.X / 2;
-			const int32 T_Dy = static_cast<int32>(FMath::RoundToInt(T_CenterY)) - SizeXY.Y / 2;
-			const int32 B_Dy = static_cast<int32>(FMath::RoundToInt(B_CenterY)) - SizeXY.Y / 2;
+			const double HalfX = SizeXY.X / 2.0;
+			const double HalfY = SizeXY.Y / 2.0;
 
-			// Joint pixel-offset → (yaw, pitch) per tile: the diagonal 3D ray for (Dx, Dy) does
-			// not equal the composition of independent 1D yaw and pitch.
-			const auto TL_YP = YawPitchDegFromPixelOffset(L_Dx, T_Dy);
-			const auto TR_YP = YawPitchDegFromPixelOffset(R_Dx, T_Dy);
-			const auto BL_YP = YawPitchDegFromPixelOffset(L_Dx, B_Dy);
-			const auto BR_YP = YawPitchDegFromPixelOffset(R_Dx, B_Dy);
+			// Pixel-rect centers per quadrant.
+			const double L_PCDx = L_CoveredW * 0.5 - HalfX;
+			const double R_PCDx = HalfX - R_CoveredW * 0.5;
+			const double T_PCDy = T_CoveredH * 0.5 - HalfY;
+			const double B_PCDy = HalfY - B_CoveredH * 0.5;
 
-			ConfigureTile(TL, TL_YP.Key, TL_YP.Value, FOutput, FIntPoint(L_CoveredW, T_CoveredH), FIntPoint(0, 0),
-				FIntPoint(0, 0), FIntPoint(LeftWidth, TopHeight), true);
-			ConfigureTile(TR, TR_YP.Key, TR_YP.Value, FOutput, FIntPoint(R_CoveredW, T_CoveredH), FIntPoint(L_CoveredW, 0),
-				FIntPoint(LeftWidth, 0), FIntPoint(RightWidth, TopHeight), true);
-			ConfigureTile(BL, BL_YP.Key, BL_YP.Value, FOutput, FIntPoint(L_CoveredW, B_CoveredH), FIntPoint(0, T_CoveredH),
-				FIntPoint(0, TopHeight), FIntPoint(LeftWidth, BottomHeight), true);
-			ConfigureTile(BR, BR_YP.Key, BR_YP.Value, FOutput, FIntPoint(R_CoveredW, B_CoveredH), FIntPoint(L_CoveredW, T_CoveredH),
-				FIntPoint(LeftWidth, TopHeight), FIntPoint(RightWidth, BottomHeight), true);
+			// Covered-rect corner X/Y for each tile (parent-frame pixel offsets).
+			const double LCornerInner = L_PCDx + L_CoveredW * 0.5;     // shared seam x for TL/BL
+			const double RCornerInner = R_PCDx - R_CoveredW * 0.5;     // shared seam x for TR/BR
+			const double TCornerInner = T_PCDy + T_CoveredH * 0.5;     // shared seam y for TL/TR
+			const double BCornerInner = B_PCDy - B_CoveredH * 0.5;     // shared seam y for BL/BR
+
+			const FTileAim TL_Aim = ComputeTileAim(-HalfX, LCornerInner, -HalfY, TCornerInner, L_PCDx, T_PCDy);
+			const FTileAim TR_Aim = ComputeTileAim(RCornerInner, +HalfX, -HalfY, TCornerInner, R_PCDx, T_PCDy);
+			const FTileAim BL_Aim = ComputeTileAim(-HalfX, LCornerInner, BCornerInner, +HalfY, L_PCDx, B_PCDy);
+			const FTileAim BR_Aim = ComputeTileAim(RCornerInner, +HalfX, BCornerInner, +HalfY, R_PCDx, B_PCDy);
+
+			ConfigureTile(TL, TL_Aim.YawDeg, TL_Aim.PitchDeg, FOutput, FIntPoint(L_CoveredW, T_CoveredH), FIntPoint(0, 0),
+				FIntPoint(0, 0), FIntPoint(LeftWidth, TopHeight), TL_Aim.AxisShiftXRd, TL_Aim.AxisShiftYRd, true);
+			ConfigureTile(TR, TR_Aim.YawDeg, TR_Aim.PitchDeg, FOutput, FIntPoint(R_CoveredW, T_CoveredH), FIntPoint(L_CoveredW, 0),
+				FIntPoint(LeftWidth, 0), FIntPoint(RightWidth, TopHeight), TR_Aim.AxisShiftXRd, TR_Aim.AxisShiftYRd, true);
+			ConfigureTile(BL, BL_Aim.YawDeg, BL_Aim.PitchDeg, FOutput, FIntPoint(L_CoveredW, B_CoveredH), FIntPoint(0, T_CoveredH),
+				FIntPoint(0, TopHeight), FIntPoint(LeftWidth, BottomHeight), BL_Aim.AxisShiftXRd, BL_Aim.AxisShiftYRd, true);
+			ConfigureTile(BR, BR_Aim.YawDeg, BR_Aim.PitchDeg, FOutput, FIntPoint(R_CoveredW, B_CoveredH), FIntPoint(L_CoveredW, T_CoveredH),
+				FIntPoint(LeftWidth, TopHeight), FIntPoint(RightWidth, BottomHeight), BR_Aim.AxisShiftXRd, BR_Aim.AxisShiftYRd, true);
 			AtlasSize = FIntPoint(L_CoveredW + R_CoveredW, T_CoveredH + B_CoveredH);
 		}
 	}

@@ -184,6 +184,22 @@ struct FTempoCameraTile
 	UPROPERTY(VisibleAnywhere)
 	float FOVAngle = 90.0f;
 
+	// Signed tan-space frustum bounds (set by InitTileDistortionMap from FDistortionRenderConfig).
+	// Drive an off-axis projection matrix that tightly bounds the tile's used render quadrant —
+	// for symmetric tiles TanLeft = -TanRight and TanTop = -TanBottom (legacy behavior); for
+	// corner / off-axis tiles the bounds are asymmetric, which removes the wasted regions of a
+	// symmetric frustum and effectively raises sampling density at the tile's outer edges.
+	double TanLeft = -1.0;
+	double TanRight = 1.0;
+	double TanTop = -1.0;
+	double TanBottom = 1.0;
+
+	// Re-aim correction in parent r_d units: how far the optical axis sits from the tile's
+	// pixel-rect center. Zero for radial/single-capture tiles and for centered fisheye tiles;
+	// non-zero for fisheye corner tiles where the angular centroid lies inside the tile rect.
+	double AxisShiftXRd = 0.0;
+	double AxisShiftYRd = 0.0;
+
 	UPROPERTY(VisibleAnywhere, Category="Depth")
 	float MinDepth = 10.0;
 
@@ -263,7 +279,7 @@ protected:
 	// Returns SharedFinalTextureTarget so OnRenderCompleted reads from the merged output.
 	virtual UTextureRenderTarget2D* GetReadbackTextureTarget() const override { return SharedFinalTextureTarget; }
 
-	void ConfigureTile(FTempoCameraTile& Tile, double YawOffset, double PitchOffset, double FOutput, const FIntPoint& TileSizeXY, const FIntPoint& TileDestOffset, const FIntPoint& OwnedOffset, const FIntPoint& OwnedSize, bool bActivate);
+	void ConfigureTile(FTempoCameraTile& Tile, double YawOffset, double PitchOffset, double FOutput, const FIntPoint& TileSizeXY, const FIntPoint& TileDestOffset, const FIntPoint& OwnedOffset, const FIntPoint& OwnedSize, double AxisShiftXRd, double AxisShiftYRd, bool bActivate);
 
 	// Recompute OutputResolveMap and OutputResolveWeight from the current tile layout. Must run
 	// after SyncTiles whenever tile geometry changes. Cheap with FeatherPixels=0 (writes the

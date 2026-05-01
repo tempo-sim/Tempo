@@ -52,14 +52,24 @@ struct FTempoLensDistortionParameters
 // Configuration for the perspective render needed to produce a distorted output image.
 struct TEMPOSENSORSSHARED_API FDistortionRenderConfig
 {
-	// The horizontal FOV for UE's perspective projection (degrees).
+	// The horizontal FOV for UE's perspective projection (degrees). For off-axis frustums this is
+	// the legacy "smallest symmetric FOV that bounds the content" — preserved so consumers that
+	// only need a coarse FOV (UI, log warnings, ViewInfo) keep working.
 	float RenderFOVAngle = 90.0f;
 	// The render target size.
 	FIntPoint RenderSizeXY = FIntPoint::ZeroValue;
 	// Focal length for the output (distorted) image, in pixels.
 	double FOutput = 0.0;
-	// Focal length for the render (perspective) image, in pixels.
-	double FRender = 0.0;
+
+	// Signed tan-space bounds of the perspective frustum (axis-centered Y-down, view-space x/z and
+	// y/z extents). For symmetric (centered) tiles TanLeft = -TanRight and TanTop = -TanBottom; for
+	// off-axis tiles these bound the actually-used render quadrant tightly so the rasterizer stops
+	// wasting pixels on empty regions of the symmetric frustum. The projection matrix and the
+	// distortion map UV normalization are both derived from these.
+	double TanLeft = -1.0;
+	double TanRight = 1.0;
+	double TanTop = -1.0;
+	double TanBottom = 1.0;
 };
 
 // Base class for distortion models. Given a pixel position in the output (distorted)
@@ -77,7 +87,9 @@ struct TEMPOSENSORSSHARED_API FDistortionModel
 	// Compute the perspective render configuration for a tile of the given output pixel size,
 	// given the global output focal length (pixels per the model's output unit — this unit
 	// differs by model: r_d in normalized image plane, theta_d in radians, etc.). The returned
-	// FOutput equals the input FOutput; the model fills in RenderFOVAngle / RenderSizeXY / FRender.
+	// FOutput equals the input FOutput; the model fills in RenderSizeXY plus signed
+	// Tan{Left,Right,Top,Bottom} frustum bounds. RenderFOVAngle is also populated as the legacy
+	// symmetric-FOV best fit (used by metadata consumers; not by the projection matrix or UV map).
 	virtual FDistortionRenderConfig ComputeRenderConfig(const FIntPoint& OutputSizeXY, double FOutput) const = 0;
 
 	// Compute the global output focal length (pixels per output unit) for a full image with the
@@ -98,6 +110,17 @@ struct TEMPOSENSORSSHARED_API FDistortionModel
 	{
 		OutYawDeg = 0.0;
 		OutPitchDeg = 0.0;
+	}
+
+	// Forward projection: given a tile aim direction (yaw, pitch) in the full-image frame,
+	// return the pixel offset where that ray lands in the parent's distorted output plane.
+	// Inverse of PixelOffsetToYawPitchDeg up to model-defined approximation. Used by the camera
+	// to derive the per-tile axis shift when re-aiming the optical axis off the tile pixel center.
+	virtual void YawPitchDegToPixelOffset(double YawDeg, double PitchDeg, double FOutput,
+		double& OutDxPixels, double& OutDyPixels) const
+	{
+		OutDxPixels = 0.0;
+		OutDyPixels = 0.0;
 	}
 };
 
@@ -246,16 +269,30 @@ struct TEMPOSENSORSSHARED_API FKannalaBrandtDistortion : FDistortionModel
 	double AzimuthOffset = 0.0;
 	double ElevationOffset = 0.0;
 
+	// Re-aim correction: how far the optical axis sits from the tile's pixel-rect center, in
+	// parent-frame r_d (theta_d) units. Zero means the axis projects to the tile's pixel center
+	// (the original, no-re-aim contract). Non-zero means the axis is aimed at a different point
+	// inside the tile rect — typically the angular centroid of the tile's covered corners,
+	// which lies closer to the inner-tile region for off-axis tiles. OutputToRender adds this
+	// shift internally so that tile-pixel-centered output coords still map to the right parent
+	// r_d, regardless of where the axis is.
+	double AxisShiftXRd = 0.0;
+	double AxisShiftYRd = 0.0;
+
 	FKannalaBrandtDistortion(double InK1, double InK2, double InK3, double InK4,
-		double InAzimuthOffset, double InElevationOffset)
+		double InAzimuthOffset, double InElevationOffset,
+		double InAxisShiftXRd = 0.0, double InAxisShiftYRd = 0.0)
 		: K1(InK1), K2(InK2), K3(InK3), K4(InK4)
-		, AzimuthOffset(InAzimuthOffset), ElevationOffset(InElevationOffset) {}
+		, AzimuthOffset(InAzimuthOffset), ElevationOffset(InElevationOffset)
+		, AxisShiftXRd(InAxisShiftXRd), AxisShiftYRd(InAxisShiftYRd) {}
 
 	virtual FVector2D OutputToRender(double OutputX, double OutputY) const override;
 	virtual FDistortionRenderConfig ComputeRenderConfig(const FIntPoint& OutputSizeXY, double FOutput) const override;
 	virtual double ComputeFOutputForFullImage(const FIntPoint& FullImageSizeXY, double FullImageHFOVDeg) const override;
 	virtual void PixelOffsetToYawPitchDeg(double DxPixels, double DyPixels, double FOutput,
 		double& OutYawDeg, double& OutPitchDeg) const override;
+	virtual void YawPitchDegToPixelOffset(double YawDeg, double PitchDeg, double FOutput,
+		double& OutDxPixels, double& OutDyPixels) const override;
 
 	// Forward K-B: physical angle theta -> distorted angle theta_d.
 	static double SolveDistortion(double Theta, double K1, double K2, double K3, double K4);
@@ -299,14 +336,22 @@ struct TEMPOSENSORSSHARED_API FDoubleSphereDistortion : FDistortionModel
 	double AzimuthOffset = 0.0;
 	double ElevationOffset = 0.0;
 
-	FDoubleSphereDistortion(double InXi, double InAlpha, double InAzimuthOffset, double InElevationOffset)
-		: Xi(InXi), Alpha(InAlpha), AzimuthOffset(InAzimuthOffset), ElevationOffset(InElevationOffset) {}
+	// Re-aim correction in parent r_d units. See FKannalaBrandtDistortion::AxisShift{X,Y}Rd.
+	double AxisShiftXRd = 0.0;
+	double AxisShiftYRd = 0.0;
+
+	FDoubleSphereDistortion(double InXi, double InAlpha, double InAzimuthOffset, double InElevationOffset,
+		double InAxisShiftXRd = 0.0, double InAxisShiftYRd = 0.0)
+		: Xi(InXi), Alpha(InAlpha), AzimuthOffset(InAzimuthOffset), ElevationOffset(InElevationOffset)
+		, AxisShiftXRd(InAxisShiftXRd), AxisShiftYRd(InAxisShiftYRd) {}
 
 	virtual FVector2D OutputToRender(double OutputX, double OutputY) const override;
 	virtual FDistortionRenderConfig ComputeRenderConfig(const FIntPoint& OutputSizeXY, double FOutput) const override;
 	virtual double ComputeFOutputForFullImage(const FIntPoint& FullImageSizeXY, double FullImageHFOVDeg) const override;
 	virtual void PixelOffsetToYawPitchDeg(double DxPixels, double DyPixels, double FOutput,
 		double& OutYawDeg, double& OutPitchDeg) const override;
+	virtual void YawPitchDegToPixelOffset(double YawDeg, double PitchDeg, double FOutput,
+		double& OutDxPixels, double& OutDyPixels) const override;
 
 	// Forward DS: 3D ray (x, y, z) -> (m_x, m_y) in the normalized image plane. Returns false
 	// if the point lies outside the model's valid forward-projection region.
@@ -325,7 +370,12 @@ struct TEMPOSENSORSSHARED_API FDoubleSphereDistortion : FDistortionModel
 // Factory: construct the distortion model implementation matching the requested parameters.
 // YawDegrees/PitchDegrees are the capture component's relative rotation (UE convention: positive
 // yaw=right, positive pitch=up) and are only consulted by tile-aware (fisheye) models.
+// AxisShiftX/YRd is the re-aim correction in parent r_d units — zero means the optical axis lands
+// at the tile's pixel-rect center (default no-re-aim contract); non-zero shifts the axis toward
+// the tile's angular centroid for asymmetric (corner) tiles. Only consulted by fisheye models.
 TEMPOSENSORSSHARED_API TUniquePtr<FDistortionModel> CreateDistortionModel(
 	const FTempoLensDistortionParameters& LensParameters,
 	double YawDegrees,
-	double PitchDegrees);
+	double PitchDegrees,
+	double AxisShiftXRd = 0.0,
+	double AxisShiftYRd = 0.0);
