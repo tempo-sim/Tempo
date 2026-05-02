@@ -1275,6 +1275,17 @@ void UTempoCamera::InitTileDistortionMap(FTempoCameraTile& Tile)
 	UTempoSceneCaptureComponent2D::FillDistortionMap(Tile.DistortionMap, *Model, Tile.TileOutputSizeXY, Config.FOutput,
 		Config.RenderSizeXY, Config.TanLeft, Config.TanRight, Config.TanTop, Config.TanBottom);
 	UTempoSceneCaptureComponent2D::ApplyDistortionMapToMaterial(Tile.PostProcessMaterialInstance, Tile.DistortionMap);
+
+	// Push the tile's tan-bounds onto the distortion PPM. The depth path uses these to recover the
+	// view-space ray direction at the resampled UV (tan_x = lerp(TanLeft,TanRight,U_render), etc.)
+	// and convert SceneDepth to radial distance when UseRadialDistance is set.
+	if (Tile.PostProcessMaterialInstance)
+	{
+		Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("TanLeft"), Tile.TanLeft);
+		Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("TanRight"), Tile.TanRight);
+		Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("TanTop"), Tile.TanTop);
+		Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("TanBottom"), Tile.TanBottom);
+	}
 }
 
 void UTempoCamera::RebuildResolveMaps()
@@ -1494,6 +1505,16 @@ void UTempoCamera::SetTileDepthEnabled(FTempoCameraTile& Tile, bool bTileDepthEn
 		Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MinDepth"), Tile.MinDepth);
 		Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MaxDepth"), Tile.MaxDepth);
 		Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MaxDiscreteDepth"), GTempoCamera_Max_Discrete_Depth);
+
+		// F-Theta (BrownConrady, Rational): single-tile, tile axis = camera axis, so SceneDepth is
+		// already depth along the camera axis — the historical contract. Equidistant family
+		// (KannalaBrandt, DoubleSphere): emit Euclidean distance from the camera
+		// origin instead. Radial distance is invariant under per-tile rotation about the shared
+		// origin, which also removes the depth discontinuity at tile seams.
+		const bool bRadial =
+			LensParameters.DistortionModel == ETempoDistortionModel::KannalaBrandt ||
+			LensParameters.DistortionModel == ETempoDistortionModel::DoubleSphere;
+		Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("UseRadialDistance"), bRadial ? 1.0f : 0.0f);
 	}
 
 	// Look up optional label override pair.
