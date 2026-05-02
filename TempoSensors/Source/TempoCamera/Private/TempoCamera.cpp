@@ -1184,24 +1184,55 @@ void UTempoCamera::RenderCapture()
 
 void UTempoCamera::ValidateFOV() const
 {
+	auto Report = [this](int32 KeySalt, const FString& Message)
+	{
+		UE_LOG(LogTempoCamera, Error, TEXT("%s"), *Message);
+		if (GEngine)
+		{
+			const uint64 Key = (static_cast<uint64>(GetUniqueID()) << 8) | static_cast<uint64>(KeySalt);
+			GEngine->AddOnScreenDebugMessage(static_cast<int32>(Key), 5.0f, FColor::Red, Message);
+		}
+	};
+
 	if (LensParameters.DistortionModel == ETempoDistortionModel::BrownConrady || LensParameters.DistortionModel == ETempoDistortionModel::Rational)
 	{
-		ensureMsgf(FOVAngle <= 170.0f, TEXT("%s FOVAngle %.2f exceeds max 170 degrees."),
-			LensParameters.DistortionModel == ETempoDistortionModel::Rational ? TEXT("Rational") : TEXT("BrownConrady"), FOVAngle);
+		if (FOVAngle > 170.0f)
+		{
+			Report(0, FString::Printf(TEXT("%s FOVAngle %.2f exceeds max 170 degrees."),
+				LensParameters.DistortionModel == ETempoDistortionModel::Rational ? TEXT("Rational") : TEXT("BrownConrady"), FOVAngle));
+		}
 	}
 	else if (LensParameters.DistortionModel == ETempoDistortionModel::DoubleSphere)
 	{
 		const double VerticalFOV = FOVAngle * static_cast<double>(SizeXY.Y) / static_cast<double>(SizeXY.X);
-		ensureMsgf(FOVAngle <= 280.0f, TEXT("DoubleSphere FOVAngle %.2f exceeds max 280 degrees."), FOVAngle);
-		ensureMsgf(VerticalFOV <= 280.0, TEXT("DoubleSphere VerticalFOV %.2f (derived) exceeds max 280 degrees."), VerticalFOV);
-		ensureMsgf(LensParameters.Alpha >= 0.0f && LensParameters.Alpha <= 1.0f, TEXT("DoubleSphere Alpha %.3f outside [0, 1]."), LensParameters.Alpha);
-		ensureMsgf(LensParameters.Xi >= -1.0f && LensParameters.Xi <= 1.0f, TEXT("DoubleSphere Xi %.3f outside [-1, 1]."), LensParameters.Xi);
+		if (FOVAngle > 280.0f)
+		{
+			Report(1, FString::Printf(TEXT("DoubleSphere FOVAngle %.2f exceeds max 280 degrees."), FOVAngle));
+		}
+		if (VerticalFOV > 280.0)
+		{
+			Report(2, FString::Printf(TEXT("DoubleSphere VerticalFOV %.2f (derived) exceeds max 280 degrees."), VerticalFOV));
+		}
+		if (LensParameters.Alpha < 0.0f || LensParameters.Alpha > 1.0f)
+		{
+			Report(3, FString::Printf(TEXT("DoubleSphere Alpha %.3f outside [0, 1]."), LensParameters.Alpha));
+		}
+		if (LensParameters.Xi < -1.0f || LensParameters.Xi > 1.0f)
+		{
+			Report(4, FString::Printf(TEXT("DoubleSphere Xi %.3f outside [-1, 1]."), LensParameters.Xi));
+		}
 	}
 	else
 	{
 		const double VerticalFOV = FOVAngle * static_cast<double>(SizeXY.Y) / static_cast<double>(SizeXY.X);
-		ensureMsgf(FOVAngle <= 240.0f, TEXT("Equidistant FOVAngle %.2f exceeds max 240 degrees."), FOVAngle);
-		ensureMsgf(VerticalFOV <= 240.0, TEXT("Equidistant VerticalFOV %.2f (derived) exceeds max 240 degrees."), VerticalFOV);
+		if (FOVAngle > 240.0f)
+		{
+			Report(5, FString::Printf(TEXT("Equidistant FOVAngle %.2f exceeds max 240 degrees."), FOVAngle));
+		}
+		if (VerticalFOV > 240.0)
+		{
+			Report(6, FString::Printf(TEXT("Equidistant VerticalFOV %.2f (derived) exceeds max 240 degrees."), VerticalFOV));
+		}
 	}
 }
 
