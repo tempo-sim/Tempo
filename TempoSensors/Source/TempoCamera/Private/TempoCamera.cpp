@@ -1172,7 +1172,7 @@ void UTempoCamera::RenderCapture()
 
 	if (TSRShadingRejectionFlickingFrameRateCapCVar)
 	{
-		TSRShadingRejectionFlickingFrameRateCapCVar->Set(SavedTSRShadingRejectionFlickingFrameRateCap);
+		TSRShadingRejectionFlickingFrameRateCapCVar->Set(SavedTSRShadingRejectionFlickingFrameRateCap, ECVF_SetByConsole);
 	}
 
 	TextureReadQueue.Enqueue(NewRead);
