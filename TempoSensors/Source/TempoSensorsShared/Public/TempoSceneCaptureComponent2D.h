@@ -7,7 +7,7 @@
 #include "Components/SceneCaptureComponent2D.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "Engine/Texture2D.h"
-#include "TempoDistortionModels.h"
+#include "TempoLensModels.h"
 
 #include "TempoSceneCaptureComponent2D.generated.h"
 
@@ -350,7 +350,7 @@ protected:
 	// [TanTop, TanBottom]. Off-axis frustums collapse the wasted regions of a symmetric frustum
 	// and write the same UV semantics; old call sites get unchanged behavior by passing
 	// TanLeft = -TanRight and TanTop = -TanBottom.
-	static void FillDistortionMap(UTexture2D* DistortionMap, const FDistortionModel& Model,
+	static void FillDistortionMap(UTexture2D* DistortionMap, const FLensModel& Model,
 		const FIntPoint& OutputSizeXY, double FOutput,
 		const FIntPoint& RenderSizeXY,
 		double TanLeft, double TanRight, double TanTop, double TanBottom);

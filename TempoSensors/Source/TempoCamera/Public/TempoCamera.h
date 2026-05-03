@@ -13,6 +13,17 @@
 
 #include "TempoCamera.generated.h"
 
+// Texture filter applied by the distortion post-process material when sampling the perspective
+// render target. Maps directly to the "FilterType" scalar parameter (Nearest=0, Bilinear=1,
+// Bicubic=2) — the order matches the material switch.
+UENUM(BlueprintType)
+enum class ETempoTextureFilterType : uint8
+{
+	Nearest  UMETA(DisplayName="Nearest", ToolTip="Point sampling. Cheapest; ideal when output and render rasterization are pixel-aligned (no distortion)."),
+	Bilinear UMETA(DisplayName="Bilinear", ToolTip="2x2 linear filtering. Good default for any non-trivial distortion."),
+	Bicubic  UMETA(DisplayName="Bicubic", ToolTip="4x4 cubic filtering. Best quality for wide-FOV equidistant fisheye where output sampling is highly non-uniform."),
+};
+
 // 4-byte pixel format where first 3 bytes are color, 4th byte is label.
 struct FCameraPixelNoDepth
 {
@@ -302,7 +313,7 @@ protected:
 
 	// Lens distortion parameters. Used by BrownConrady (K1-K3) and Rational (K1-K6) models.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo")
-	FTempoLensDistortionParameters LensParameters;
+	FTempoLensParameters LensParameters;
 
 	// Feather width (in equidistant-output pixels) used to blend across tile seams in multi-tile
 	// configurations. Each tile renders an extra FeatherPixels of angular margin on every shared
@@ -343,6 +354,21 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo", meta=(UIMin=1.0, UIMax=4.0, ClampMin=1.0, ClampMax=4.0))
 	float UpsamplingFactor = 1.0f;
 
+	// When true, TextureFilterType is auto-selected from the lens model + FOV: Pinhole -> Nearest,
+	// any other (Brown-Conrady / Rational / KannalaBrandt / DoubleSphere with FOV <= 120) -> Bilinear,
+	// equidistant fisheye (KannalaBrandt or DoubleSphere) with FOV > 120 -> Bicubic.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo")
+	bool bAutoTextureFilterType = true;
+
+	// Texture filter applied by the distortion post-process material when sampling the perspective
+	// render target. Editable only when bAutoTextureFilterType is false.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo", meta=(EditCondition="!bAutoTextureFilterType"))
+	ETempoTextureFilterType TextureFilterType = ETempoTextureFilterType::Bilinear;
+
+	// Resolve the filter actually pushed to the distortion PPM: TextureFilterType when manual, else
+	// derived from LensParameters.LensModel and FOVAngle per the bAutoTextureFilterType comment.
+	ETempoTextureFilterType GetEffectiveTextureFilterType() const;
+
 	// Whether this camera can measure depth. Disabled when not requested to optimize performance.
 	UPROPERTY(VisibleAnywhere, Category = "Tempo")
 	bool bDepthEnabled = false;
@@ -369,11 +395,13 @@ protected:
 
 	// Internal tracking for runtime change detection. Mirrors the watched properties after
 	// they have been pushed to tiles via ReconfigureTilesNow.
-	FTempoLensDistortionParameters LensParameters_Internal;
+	FTempoLensParameters LensParameters_Internal;
 	float FOVAngle_Internal = -1.0f;
 	FIntPoint SizeXY_Internal = FIntPoint(-1, -1);
 	int32 FeatherPixels_Internal = -1;
 	float UpsamplingFactor_Internal = -1.0f;
+	bool bAutoTextureFilterType_Internal = true;
+	ETempoTextureFilterType TextureFilterType_Internal = ETempoTextureFilterType::Bilinear;
 
 	// Shared render target holding the stitched aux output (label + depth bytes) from all
 	// active tiles. Merged with the proxy capture's tonemapped color into SharedFinalTextureTarget.

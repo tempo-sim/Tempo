@@ -1,20 +1,26 @@
 // Copyright Tempo Simulation, LLC. All Rights Reserved
 
-#include "TempoDistortionModels.h"
+#include "TempoLensModels.h"
 
 #include "TempoSensorsShared.h"
 
-TUniquePtr<FDistortionModel> CreateDistortionModel(const FTempoLensDistortionParameters& LensParameters, double YawDegrees, double PitchDegrees,
+TUniquePtr<FLensModel> CreateLensModel(const FTempoLensParameters& LensParameters, double YawDegrees, double PitchDegrees,
 	double AxisShiftXRd, double AxisShiftYRd)
 {
-	if (LensParameters.DistortionModel == ETempoDistortionModel::BrownConrady)
+	if (LensParameters.LensModel == ETempoLensModel::Pinhole)
+	{
+		// Pinhole = no distortion. Brown-Conrady with all coefficients zero is a pure pass-through
+		// (Distort(R) = R, OutputToRender is identity), giving the desired behavior with no extra type.
+		return MakeUnique<FBrownConradyDistortion>(0.0, 0.0, 0.0);
+	}
+	else if (LensParameters.LensModel == ETempoLensModel::BrownConrady)
 	{
 		return MakeUnique<FBrownConradyDistortion>(
 			LensParameters.K1,
 			LensParameters.K2,
 			LensParameters.K3);
 	}
-	else if (LensParameters.DistortionModel == ETempoDistortionModel::Rational)
+	else if (LensParameters.LensModel == ETempoLensModel::Rational)
 	{
 		return MakeUnique<FRationalDistortion>(
 			LensParameters.K1,
@@ -24,7 +30,7 @@ TUniquePtr<FDistortionModel> CreateDistortionModel(const FTempoLensDistortionPar
 			LensParameters.K5,
 			LensParameters.K6);
 	}
-	else if (LensParameters.DistortionModel == ETempoDistortionModel::DoubleSphere)
+	else if (LensParameters.LensModel == ETempoLensModel::DoubleSphere)
 	{
 		// Negate pitch: UE positive pitch = up, but image-plane positive Y = down.
 		const double AzOffset = FMath::DegreesToRadians(YawDegrees);

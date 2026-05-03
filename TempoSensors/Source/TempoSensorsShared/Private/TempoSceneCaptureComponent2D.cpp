@@ -275,7 +275,7 @@ void UTempoSceneCaptureComponent2D::ApplyDistortionMapToMaterial(UMaterialInstan
 	}
 }
 
-void UTempoSceneCaptureComponent2D::FillDistortionMap(UTexture2D* DistortionMap, const FDistortionModel& Model, const FIntPoint& OutputSizeXY,
+void UTempoSceneCaptureComponent2D::FillDistortionMap(UTexture2D* DistortionMap, const FLensModel& Model, const FIntPoint& OutputSizeXY,
 	double FOutput, const FIntPoint& RenderSizeXY,
 	double TanLeft, double TanRight, double TanTop, double TanBottom)
 {

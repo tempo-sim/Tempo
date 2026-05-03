@@ -322,7 +322,33 @@ bool UTempoCamera::HasDetectedParameterChange() const
 		|| FOVAngle != FOVAngle_Internal
 		|| LensParameters != LensParameters_Internal
 		|| FeatherPixels != FeatherPixels_Internal
-		|| UpsamplingFactor != UpsamplingFactor_Internal;
+		|| UpsamplingFactor != UpsamplingFactor_Internal
+		|| bAutoTextureFilterType != bAutoTextureFilterType_Internal
+		|| TextureFilterType != TextureFilterType_Internal;
+}
+
+ETempoTextureFilterType UTempoCamera::GetEffectiveTextureFilterType() const
+{
+	if (!bAutoTextureFilterType)
+	{
+		return TextureFilterType;
+	}
+	// No distortion: the perspective render and distorted output rasterize at the same scale, so
+	// point sampling avoids the slight blur of bilinear without artifacts.
+	if (LensParameters.LensModel == ETempoLensModel::Pinhole)
+	{
+		return ETempoTextureFilterType::Nearest;
+	}
+	// Wide equidistant fisheye: output sampling density varies sharply with angle, so bicubic's
+	// wider footprint keeps detail in the dense central region.
+	const bool bEquidistant =
+		LensParameters.LensModel == ETempoLensModel::KannalaBrandt ||
+		LensParameters.LensModel == ETempoLensModel::DoubleSphere;
+	if (bEquidistant && FOVAngle > 120.0f)
+	{
+		return ETempoTextureFilterType::Bicubic;
+	}
+	return ETempoTextureFilterType::Bilinear;
 }
 
 void UTempoCamera::ReconfigureTilesNow()
@@ -355,6 +381,8 @@ void UTempoCamera::UpdateInternalMirrors()
 	SizeXY_Internal = SizeXY;
 	FeatherPixels_Internal = FeatherPixels;
 	UpsamplingFactor_Internal = UpsamplingFactor;
+	bAutoTextureFilterType_Internal = bAutoTextureFilterType;
+	TextureFilterType_Internal = TextureFilterType;
 }
 
 bool UTempoCamera::HasPendingCameraRequests() const
@@ -1194,15 +1222,19 @@ void UTempoCamera::ValidateFOV() const
 		}
 	};
 
-	if (LensParameters.DistortionModel == ETempoDistortionModel::BrownConrady || LensParameters.DistortionModel == ETempoDistortionModel::Rational)
+	if (LensParameters.LensModel == ETempoLensModel::Pinhole ||
+		LensParameters.LensModel == ETempoLensModel::BrownConrady ||
+		LensParameters.LensModel == ETempoLensModel::Rational)
 	{
 		if (FOVAngle > 170.0f)
 		{
-			Report(0, FString::Printf(TEXT("%s FOVAngle %.2f exceeds max 170 degrees."),
-				LensParameters.DistortionModel == ETempoDistortionModel::Rational ? TEXT("Rational") : TEXT("BrownConrady"), FOVAngle));
+			const TCHAR* ModelName = TEXT("Pinhole");
+			if (LensParameters.LensModel == ETempoLensModel::Rational) ModelName = TEXT("Rational");
+			else if (LensParameters.LensModel == ETempoLensModel::BrownConrady) ModelName = TEXT("BrownConrady");
+			Report(0, FString::Printf(TEXT("%s FOVAngle %.2f exceeds max 170 degrees."), ModelName, FOVAngle));
 		}
 	}
-	else if (LensParameters.DistortionModel == ETempoDistortionModel::DoubleSphere)
+	else if (LensParameters.LensModel == ETempoLensModel::DoubleSphere)
 	{
 		const double VerticalFOV = FOVAngle * static_cast<double>(SizeXY.Y) / static_cast<double>(SizeXY.X);
 		if (FOVAngle > 280.0f)
@@ -1283,7 +1315,7 @@ void UTempoCamera::InitTileDistortionMap(FTempoCameraTile& Tile)
 		return;
 	}
 
-	TUniquePtr<FDistortionModel> Model = CreateDistortionModel(
+	TUniquePtr<FLensModel> Model = CreateLensModel(
 		LensParameters,
 		Tile.RelativeRotation.Yaw,
 		Tile.RelativeRotation.Pitch,
@@ -1316,6 +1348,7 @@ void UTempoCamera::InitTileDistortionMap(FTempoCameraTile& Tile)
 		Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("TanRight"), Tile.TanRight);
 		Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("TanTop"), Tile.TanTop);
 		Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("TanBottom"), Tile.TanBottom);
+		Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("FilterType"), static_cast<float>(GetEffectiveTextureFilterType()));
 	}
 }
 
@@ -1543,8 +1576,8 @@ void UTempoCamera::SetTileDepthEnabled(FTempoCameraTile& Tile, bool bTileDepthEn
 		// origin instead. Radial distance is invariant under per-tile rotation about the shared
 		// origin, which also removes the depth discontinuity at tile seams.
 		const bool bRadial =
-			LensParameters.DistortionModel == ETempoDistortionModel::KannalaBrandt ||
-			LensParameters.DistortionModel == ETempoDistortionModel::DoubleSphere;
+			LensParameters.LensModel == ETempoLensModel::KannalaBrandt ||
+			LensParameters.LensModel == ETempoLensModel::DoubleSphere;
 		Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("UseRadialDistance"), bRadial ? 1.0f : 0.0f);
 	}
 
@@ -1662,11 +1695,12 @@ void UTempoCamera::SyncTiles()
 	// Build a "no-rotation" model used purely for full-image geometry queries (FOutput,
 	// pixel-offset → yaw/pitch). The per-tile model used in InitTileDistortionMap is constructed
 	// separately with the tile's actual rotation.
-	TUniquePtr<FDistortionModel> Model = CreateDistortionModel(LensParameters, 0.0, 0.0);
+	TUniquePtr<FLensModel> Model = CreateLensModel(LensParameters, 0.0, 0.0);
 	const double FOutput = Model->ComputeFOutputForFullImage(SizeXY, FOVAngle);
 
-	const bool bSingleCapture = (LensParameters.DistortionModel == ETempoDistortionModel::BrownConrady)
-		|| (LensParameters.DistortionModel == ETempoDistortionModel::Rational);
+	const bool bSingleCapture = (LensParameters.LensModel == ETempoLensModel::Pinhole)
+		|| (LensParameters.LensModel == ETempoLensModel::BrownConrady)
+		|| (LensParameters.LensModel == ETempoLensModel::Rational);
 
 	if (bSingleCapture)
 	{
@@ -1906,6 +1940,8 @@ void UTempoCamera::PostEditChangeProperty(FPropertyChangedEvent& PropertyChanged
 		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, LensParameters) ||
 		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, SizeXY) ||
 		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, FeatherPixels) ||
+		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, bAutoTextureFilterType) ||
+		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, TextureFilterType) ||
 		MemberPropertyName == GET_MEMBER_NAME_CHECKED(USceneCaptureComponent2D, PostProcessSettings) ||
 		MemberPropertyName == TEXT("ShowFlagSettings") ||
 		MemberPropertyName == GET_MEMBER_NAME_CHECKED(USceneCaptureComponent, bUseRayTracingIfEnabled))

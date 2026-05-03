@@ -6,47 +6,50 @@
 #include "Math/MathFwd.h"
 #include "Math/IntPoint.h"
 
-#include "TempoDistortionModels.generated.h"
+#include "TempoLensModels.generated.h"
 
 UENUM(BlueprintType)
-enum class ETempoDistortionModel : uint8
+enum class ETempoLensModel : uint8
 {
+	Pinhole       UMETA(DisplayName="Pinhole", ToolTip="No distortion. Single capture, max 170 degree FOV."),
 	BrownConrady  UMETA(DisplayName="Brown-Conrady", ToolTip="Standard radial lens distortion. Single capture, max 170 degree FOV."),
 	Rational      UMETA(DisplayName="Rational", ToolTip="Rational radial distortion (numerator K1-K3, denominator K4-K6). Single capture, max 170 degree FOV."),
 	KannalaBrandt UMETA(DisplayName="KannalaBrandt (Fisheye)", ToolTip="Equidistant fisheye projection. Supports up to 240 degree FOV using multiple captures."),
-	DoubleSphere  UMETA(DisplayName="DoubleSphere (Fisheye)", ToolTip="Double Sphere fisheye projection (Usenko et al. 2018). Closed-form unprojection. Supports >180 degree FOV using multiple captures."),
+	DoubleSphere  UMETA(DisplayName="DoubleSphere (Fisheye)", ToolTip="Double Sphere fisheye projection (Usenko et al. 2018). Closed-form unprojection. Supports up to 240 degree FOV using multiple captures."),
 };
 
 USTRUCT(BlueprintType)
-struct FTempoLensDistortionParameters
+struct FTempoLensParameters
 {
 	GENERATED_BODY()
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	ETempoDistortionModel DistortionModel = ETempoDistortionModel::BrownConrady;
+	ETempoLensModel LensModel = ETempoLensModel::Pinhole;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	// K1-K3 are used by Brown-Conrady, Rational, and Kannala-Brandt models.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (EditCondition = "LensModel == ETempoLensModel::BrownConrady || LensModel == ETempoLensModel::Rational || LensModel == ETempoLensModel::KannalaBrandt"))
 	float K1 = 0.0f;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (EditCondition = "LensModel == ETempoLensModel::BrownConrady || LensModel == ETempoLensModel::Rational || LensModel == ETempoLensModel::KannalaBrandt"))
 	float K2 = 0.0f;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (EditCondition = "LensModel == ETempoLensModel::BrownConrady || LensModel == ETempoLensModel::Rational || LensModel == ETempoLensModel::KannalaBrandt"))
 	float K3 = 0.0f;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	// K4 is used by Rational (denominator) and Kannala-Brandt (numerator).
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (EditCondition = "LensModel == ETempoLensModel::Rational || LensModel == ETempoLensModel::KannalaBrandt"))
 	float K4 = 0.0f;
 	// K5 and K6 are denominator coefficients only used by the Rational distortion model.
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ToolTip = "Only used by the Rational distortion model."))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (EditCondition = "LensModel == ETempoLensModel::Rational", ToolTip = "Only used by the Rational distortion model."))
 	float K5 = 0.0f;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ToolTip = "Only used by the Rational distortion model."))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (EditCondition = "LensModel == ETempoLensModel::Rational", ToolTip = "Only used by the Rational distortion model."))
 	float K6 = 0.0f;
 
 	// Double Sphere parameters. Xi controls the offset of the second sphere; Alpha blends between
 	// pinhole-like (0) and pure unit-sphere (1) projection.
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ToolTip = "Only used by the DoubleSphere distortion model. Range [-1, 1]."))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (EditCondition = "LensModel == ETempoLensModel::DoubleSphere", ToolTip = "Only used by the DoubleSphere distortion model. Range [-1, 1]."))
 	float Xi = 0.0f;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ToolTip = "Only used by the DoubleSphere distortion model. Range [0, 1]."))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (EditCondition = "LensModel == ETempoLensModel::DoubleSphere", ToolTip = "Only used by the DoubleSphere distortion model. Range [0, 1]."))
 	float Alpha = 0.5f;
 
-	bool operator==(const FTempoLensDistortionParameters& Other) const = default;
+	bool operator==(const FTempoLensParameters& Other) const = default;
 };
 
 // Configuration for the perspective render needed to produce a distorted output image.
@@ -75,9 +78,9 @@ struct TEMPOSENSORSSHARED_API FDistortionRenderConfig
 // Base class for distortion models. Given a pixel position in the output (distorted)
 // image, computes the normalized UV coordinates in the render (perspective) image.
 // All coordinates are relative to the optical center and normalized by focal length.
-struct TEMPOSENSORSSHARED_API FDistortionModel
+struct TEMPOSENSORSSHARED_API FLensModel
 {
-	virtual ~FDistortionModel() = default;
+	virtual ~FLensModel() = default;
 
 	// For a point at (OutputX, OutputY) in the output image plane (normalized by output
 	// focal length), return the corresponding (RenderX, RenderY) in the render image plane
@@ -128,7 +131,7 @@ struct TEMPOSENSORSSHARED_API FDistortionModel
 // structure: forward/inverse distortion functions plus a barrel/pincushion determination.
 // Subclasses implement Distort, Undistort, IsBarrel, and GetMaxOutputRadius; this base
 // provides the common ComputeRenderConfig implementation in terms of those primitives.
-struct TEMPOSENSORSSHARED_API FRadialDistortionBase : FDistortionModel
+struct TEMPOSENSORSSHARED_API FRadialDistortionBase : FLensModel
 {
 	// Forward distortion: undistorted radius -> distorted output radius.
 	virtual double Distort(double R) const = 0;
@@ -229,7 +232,7 @@ struct TEMPOSENSORSSHARED_API FRationalDistortion : FRadialDistortionBase
 //   RenderY = tan(elevation) * sec(azimuth)
 // This is trivially computed (no Newton-Raphson needed).
 // NOTE: This is an axis-separable model used by the lidar, not a true radial fisheye.
-struct TEMPOSENSORSSHARED_API FEquidistantDistortion : FDistortionModel
+struct TEMPOSENSORSSHARED_API FEquidistantDistortion : FLensModel
 {
 	virtual FVector2D OutputToRender(double OutputX, double OutputY) const override;
 	virtual FDistortionRenderConfig ComputeRenderConfig(const FIntPoint& OutputSizeXY, double FOutput) const override;
@@ -256,7 +259,7 @@ struct TEMPOSENSORSSHARED_API FEquidistantDistortion : FDistortionModel
 // Coordinate system: X=right, Y=down, Z=forward (optical axis). Right-handed.
 // AzimuthOffset: positive = child looks right. ElevationOffset: positive = child looks down.
 // NOTE: UE Pitch is positive=up, so callers must negate Pitch when constructing ElevationOffset.
-struct TEMPOSENSORSSHARED_API FKannalaBrandtDistortion : FDistortionModel
+struct TEMPOSENSORSSHARED_API FKannalaBrandtDistortion : FLensModel
 {
 	// Kannala-Brandt polynomial coefficients. All zero = pure equidistant.
 	double K1 = 0.0;
@@ -324,7 +327,7 @@ struct TEMPOSENSORSSHARED_API FKannalaBrandtDistortion : FDistortionModel
 // ray in the parent frame, rotated into the child frame, then perspective-projected.
 //
 // Coordinate system / sign conventions: same as FKannalaBrandtDistortion.
-struct TEMPOSENSORSSHARED_API FDoubleSphereDistortion : FDistortionModel
+struct TEMPOSENSORSSHARED_API FDoubleSphereDistortion : FLensModel
 {
 	// xi: offset of the second sphere along the optical axis. Range [-1, 1].
 	double Xi = 0.0;
@@ -373,8 +376,8 @@ struct TEMPOSENSORSSHARED_API FDoubleSphereDistortion : FDistortionModel
 // AxisShiftX/YRd is the re-aim correction in parent r_d units — zero means the optical axis lands
 // at the tile's pixel-rect center (default no-re-aim contract); non-zero shifts the axis toward
 // the tile's angular centroid for asymmetric (corner) tiles. Only consulted by fisheye models.
-TEMPOSENSORSSHARED_API TUniquePtr<FDistortionModel> CreateDistortionModel(
-	const FTempoLensDistortionParameters& LensParameters,
+TEMPOSENSORSSHARED_API TUniquePtr<FLensModel> CreateLensModel(
+	const FTempoLensParameters& LensParameters,
 	double YawDegrees,
 	double PitchDegrees,
 	double AxisShiftXRd = 0.0,
