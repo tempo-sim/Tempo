@@ -3,9 +3,10 @@
 // This helper mirrors engine-private logic in Renderer/Private/SceneCaptureRendering.cpp —
 // specifically SetupViewFamilyForSceneCapture (666), SetupSceneViewExtensionsForSceneCapture
 // (806), CreateSceneRendererForSceneCapture (824), and UpdateSceneCaptureContent_RenderThread
-// (415). Version-gated: any 5.7 engine drift will require re-pinning these snippets.
-#if !(ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION == 7)
-#error "TempoMultiViewCapture is pinned to UE 5.7 engine internals. Re-diff and update for the new engine version."
+// (415). Line numbers and contents are byte-identical in 5.6 and 5.7; re-diff and update for
+// any newer engine version.
+#if !(ENGINE_MAJOR_VERSION == 5 && (ENGINE_MINOR_VERSION == 6 || ENGINE_MINOR_VERSION == 7))
+#error "TempoMultiViewCapture is pinned to UE 5.6/5.7 engine internals. Re-diff and update for the new engine version."
 #endif
 
 #include "TempoMultiViewCapture.h"
@@ -29,16 +30,21 @@
 #include "TextureResource.h"
 
 // Renderer-private — reachable via PrivateIncludePaths set in TempoSensorsShared.Build.cs.
-// SceneRendering.h transitively includes RayTracing/RayTracingScene.h, which declares private
-// members that TempoSceneCaptureComponent2D.cpp relies on accessing via a `#define private public`
-// hack. UBT combines both .cpp files into one Unity translation unit; this file comes first
-// alphabetically, so RayTracingScene.h gets parsed here. Without mirroring the define, the class
-// is parsed with real `private` — the later hack in TempoSceneCaptureComponent2D.cpp is then
-// a no-op because `#pragma once` skips the re-include. Mirror the define so the first parse
-// rewrites the class to all-public for the whole TU.
+// In 5.7 SceneRendering.h transitively includes RayTracing/RayTracingScene.h, which declares
+// private members that TempoSceneCaptureComponent2D.cpp relies on accessing via a
+// `#define private public` hack. UBT combines both .cpp files into one Unity translation unit;
+// this file comes first alphabetically, so RayTracingScene.h gets parsed here. Without
+// mirroring the define, the class is parsed with real `private` — the later hack in
+// TempoSceneCaptureComponent2D.cpp is then a no-op because `#pragma once` skips the re-include.
+// Mirror the define so the first parse rewrites the class to all-public for the whole TU.
+// In 5.6 SceneRendering.h does not pull in RayTracingScene.h, so the mirror is unnecessary.
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 7
 #define private public
 #include "SceneRendering.h"
 #undef private
+#else
+#include "SceneRendering.h"
+#endif
 
 namespace TempoMultiViewCapture
 {

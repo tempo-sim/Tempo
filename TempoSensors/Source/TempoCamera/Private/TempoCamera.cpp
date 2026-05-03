@@ -24,6 +24,13 @@
 #include "Math/PerspectiveMatrix.h"
 #include "TextureResource.h"
 
+// 5.6 only: GetLastAverageSceneLuminance lives on the renderer-private FSceneViewState — it was
+// not promoted to a virtual method on FSceneViewStateInterface until 5.7. Pull in ScenePrivate.h
+// (reachable via PrivateIncludePaths in TempoCamera.Build.cs) so we can downcast at the call site.
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 7
+#include "ScenePrivate.h"
+#endif
+
 namespace
 {
 	constexpr double MaxPerspectiveFOVPerCapture = 120.0;
@@ -1139,7 +1146,11 @@ void UTempoCamera::RenderCapture()
 			: GetViewState(0);
 		if (SourceViewState)
 		{
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 7
+			const float Lum = static_cast<FSceneViewState*>(SourceViewState)->GetLastAverageSceneLuminance();
+#else
 			const float Lum = SourceViewState->GetLastAverageSceneLuminance();
+#endif
 			if (Lum > 0.0f)
 			{
 				constexpr float TargetMidGrey = 0.18f;
