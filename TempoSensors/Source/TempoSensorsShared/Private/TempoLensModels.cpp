@@ -539,17 +539,23 @@ FDistortionRenderConfig FKannalaBrandtDistortion::ComputeRenderConfig(const FInt
 	// reproduces the old behavior up to a sign — Min == -Max. For corner / off-axis tiles the
 	// frustum collapses around the active quadrant, recovering the rasterizer pixels that were
 	// previously wasted on empty regions of the symmetric frustum.
-	Config.TanLeft = MinRenderX;
-	Config.TanRight = MaxRenderX;
-	Config.TanTop = MinRenderY;
-	Config.TanBottom = MaxRenderY;
+	//
+	// Clamp each bound to tan(85°): samples whose physical angle is at or beyond the model's
+	// horizon return the OutputToRender sentinel (1e6, 1e6), which would otherwise propagate
+	// into a degenerate projection matrix and a single-point UV map. The 85° cap matches the
+	// legacy clamp on RenderFOVAngle (max 170° → tan(85°) frustum half-extent).
+	const double MaxTanBound = FMath::Tan(FMath::DegreesToRadians(85.0));
+	Config.TanLeft = FMath::Clamp(MinRenderX, -MaxTanBound, MaxTanBound);
+	Config.TanRight = FMath::Clamp(MaxRenderX, -MaxTanBound, MaxTanBound);
+	Config.TanTop = FMath::Clamp(MinRenderY, -MaxTanBound, MaxTanBound);
+	Config.TanBottom = FMath::Clamp(MaxRenderY, -MaxTanBound, MaxTanBound);
 
 	// Legacy RenderFOVAngle: tightest symmetric horizontal half-FOV that bounds the content,
 	// constrained by aspect on the vertical axis. Kept for metadata consumers (Tile.FOVAngle,
 	// ViewInitOptions.FOV); the actual projection uses the signed Tan bounds above.
 	const double RequiredRenderHorizRadius = FMath::Max(
-		FMath::Max(FMath::Abs(MinRenderX), FMath::Abs(MaxRenderX)),
-		FMath::Max(FMath::Abs(MinRenderY), FMath::Abs(MaxRenderY)) * AspectRatio);
+		FMath::Max(FMath::Abs(Config.TanLeft), FMath::Abs(Config.TanRight)),
+		FMath::Max(FMath::Abs(Config.TanTop), FMath::Abs(Config.TanBottom)) * AspectRatio);
 	Config.RenderFOVAngle = FMath::Clamp(FMath::RadiansToDegrees(FMath::Atan(RequiredRenderHorizRadius)) * 2.0, 1.0, 170.0);
 
 	return Config;
@@ -808,14 +814,18 @@ FDistortionRenderConfig FDoubleSphereDistortion::ComputeRenderConfig(const FIntP
 		MaxRenderY = FMath::Max(MaxRenderY, Render.Y);
 	}
 
-	Config.TanLeft = MinRenderX;
-	Config.TanRight = MaxRenderX;
-	Config.TanTop = MinRenderY;
-	Config.TanBottom = MaxRenderY;
+	// See FKannalaBrandtDistortion::ComputeRenderConfig for the rationale on this clamp. DS
+	// hits the sentinel-propagation path much sooner because UnprojectPoint is only defined
+	// on the disk R² < 1/(2α-1), which is a tighter constraint than KB's "front hemisphere".
+	const double MaxTanBound = FMath::Tan(FMath::DegreesToRadians(85.0));
+	Config.TanLeft = FMath::Clamp(MinRenderX, -MaxTanBound, MaxTanBound);
+	Config.TanRight = FMath::Clamp(MaxRenderX, -MaxTanBound, MaxTanBound);
+	Config.TanTop = FMath::Clamp(MinRenderY, -MaxTanBound, MaxTanBound);
+	Config.TanBottom = FMath::Clamp(MaxRenderY, -MaxTanBound, MaxTanBound);
 
 	const double RequiredRenderHorizRadius = FMath::Max(
-		FMath::Max(FMath::Abs(MinRenderX), FMath::Abs(MaxRenderX)),
-		FMath::Max(FMath::Abs(MinRenderY), FMath::Abs(MaxRenderY)) * AspectRatio);
+		FMath::Max(FMath::Abs(Config.TanLeft), FMath::Abs(Config.TanRight)),
+		FMath::Max(FMath::Abs(Config.TanTop), FMath::Abs(Config.TanBottom)) * AspectRatio);
 	Config.RenderFOVAngle = FMath::Clamp(FMath::RadiansToDegrees(FMath::Atan(RequiredRenderHorizRadius)) * 2.0, 1.0, 170.0);
 
 	return Config;
