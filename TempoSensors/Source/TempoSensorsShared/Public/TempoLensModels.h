@@ -185,6 +185,11 @@ struct TEMPOSENSORSSHARED_API FBrownConradyDistortion : FRadialDistortionBase
 	// Compute the maximum output (distorted) radius for barrel distortion (K1 < 0).
 	// Returns -1.0 if distortion is not barrel (K1 >= 0) or has no finite limit.
 	static double ComputeMaxOutputRadius(double K1, double K2, double K3);
+
+	// Source-side critical radius where forward distortion peaks (Distort'(R) = 0). Beyond this
+	// render radius the inverse (Newton-Raphson) cannot converge — so any pixel whose source
+	// radius exceeds it is unrepresentable. Returns -1.0 for non-barrel models.
+	static double ComputeMaxRenderRadius(double K1, double K2, double K3);
 };
 
 // Rational radial distortion model.
@@ -222,6 +227,9 @@ struct TEMPOSENSORSSHARED_API FRationalDistortion : FRadialDistortionBase
 	// Numerically finds the critical radius where d(r_d)/dr = 0, then returns the corresponding r_d.
 	// Returns -1.0 if the model is pincushion-like ((K1-K4) >= 0) or no critical point is found.
 	static double ComputeMaxOutputRadius(double K1, double K2, double K3, double K4, double K5, double K6);
+
+	// Source-side critical radius where forward distortion peaks. See FBrownConradyDistortion::ComputeMaxRenderRadius.
+	static double ComputeMaxRenderRadius(double K1, double K2, double K3, double K4, double K5, double K6);
 };
 
 // Equidistant (spherical) projection model for Lidar.

@@ -1226,12 +1226,41 @@ void UTempoCamera::ValidateFOV() const
 		LensParameters.LensModel == ETempoLensModel::BrownConrady ||
 		LensParameters.LensModel == ETempoLensModel::Rational)
 	{
+		const TCHAR* ModelName = TEXT("Pinhole");
+		if (LensParameters.LensModel == ETempoLensModel::Rational) ModelName = TEXT("Rational");
+		else if (LensParameters.LensModel == ETempoLensModel::BrownConrady) ModelName = TEXT("BrownConrady");
+
 		if (FOVAngle > 170.0f)
 		{
-			const TCHAR* ModelName = TEXT("Pinhole");
-			if (LensParameters.LensModel == ETempoLensModel::Rational) ModelName = TEXT("Rational");
-			else if (LensParameters.LensModel == ETempoLensModel::BrownConrady) ModelName = TEXT("BrownConrady");
 			Report(0, FString::Printf(TEXT("%s FOVAngle %.2f exceeds max 170 degrees."), ModelName, FOVAngle));
+		}
+
+		// Barrel distortion peaks at a critical source radius beyond which forward distortion is
+		// non-monotonic and the inverse Newton-Raphson solve cannot converge. Translate that
+		// source-side limit (along the diagonal — the longest axis through the image plane) back
+		// into a maximum representable horizontal FOV.
+		double MaxRenderRad = -1.0;
+		if (LensParameters.LensModel == ETempoLensModel::BrownConrady)
+		{
+			MaxRenderRad = FBrownConradyDistortion::ComputeMaxRenderRadius(
+				LensParameters.K1, LensParameters.K2, LensParameters.K3);
+		}
+		else if (LensParameters.LensModel == ETempoLensModel::Rational)
+		{
+			MaxRenderRad = FRationalDistortion::ComputeMaxRenderRadius(
+				LensParameters.K1, LensParameters.K2, LensParameters.K3,
+				LensParameters.K4, LensParameters.K5, LensParameters.K6);
+		}
+		if (MaxRenderRad > 0.0 && SizeXY.X > 0 && SizeXY.Y > 0)
+		{
+			const double AspectRatio = static_cast<double>(SizeXY.X) / static_cast<double>(SizeXY.Y);
+			const double DiagOverHoriz = FMath::Sqrt(1.0 + 1.0 / (AspectRatio * AspectRatio));
+			const double MaxHorizSourceRad = MaxRenderRad / DiagOverHoriz;
+			const double MaxFOVDeg = 2.0 * FMath::RadiansToDegrees(FMath::Atan(MaxHorizSourceRad));
+			if (FOVAngle > MaxFOVDeg)
+			{
+				Report(7, FString::Printf(TEXT("%s FOVAngle %.2f exceeds parameter-implied max %.2f. Inverse distortion (Newton-Raphson) cannot converge for some pixels with the current K coefficients."), ModelName, FOVAngle, MaxFOVDeg));
+			}
 		}
 	}
 	else if (LensParameters.LensModel == ETempoLensModel::DoubleSphere)

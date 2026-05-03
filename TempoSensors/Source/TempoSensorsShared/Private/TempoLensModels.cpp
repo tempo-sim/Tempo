@@ -119,7 +119,7 @@ double FBrownConradyDistortion::SolveDistortion(double RenderRadius, double K1, 
 	return RenderRadius * (1.0 + K1*R2 + K2*R4 + K3*R6);
 }
 
-double FBrownConradyDistortion::ComputeMaxOutputRadius(double K1, double K2, double K3)
+double FBrownConradyDistortion::ComputeMaxRenderRadius(double K1, double K2, double K3)
 {
 	if (K1 >= 0.0)
 	{
@@ -128,13 +128,11 @@ double FBrownConradyDistortion::ComputeMaxOutputRadius(double K1, double K2, dou
 
 	if (FMath::IsNearlyZero(K2) && FMath::IsNearlyZero(K3))
 	{
-		const double RCrit = FMath::Sqrt(-1.0 / (3.0 * K1));
-		const double RCrit2 = RCrit * RCrit;
-		return RCrit * (1.0 + K1 * RCrit2);
+		return FMath::Sqrt(-1.0 / (3.0 * K1));
 	}
 
 	// Find the critical radius where the derivative of the distortion function is zero.
-	const double RCrit = Solve(
+	return Solve(
 		[K1, K2, K3](double R) {
 			double R2 = R * R;
 			double R4 = R2 * R2;
@@ -149,11 +147,16 @@ double FBrownConradyDistortion::ComputeMaxOutputRadius(double K1, double K2, dou
 		},
 		0.5, 40, 1e-6
 	);
-	const double R2 = RCrit * RCrit;
-	const double R4 = R2 * R2;
-	const double R6 = R4 * R2;
-	const double Scale = 1.0 + K1*R2 + K2*R4 + K3*R6;
-	return RCrit * Scale;
+}
+
+double FBrownConradyDistortion::ComputeMaxOutputRadius(double K1, double K2, double K3)
+{
+	const double RCrit = ComputeMaxRenderRadius(K1, K2, K3);
+	if (RCrit <= 0.0)
+	{
+		return -1.0;
+	}
+	return SolveDistortion(RCrit, K1, K2, K3);
 }
 
 double FRadialDistortionBase::ComputeFOutputForFullImage(const FIntPoint& FullImageSizeXY, double FullImageHFOVDeg) const
@@ -445,9 +448,9 @@ double FRationalDistortion::SolveInverseDistortion(double Rd, double K1, double 
 	);
 }
 
-double FRationalDistortion::ComputeMaxOutputRadius(double K1, double K2, double K3, double K4, double K5, double K6)
+double FRationalDistortion::ComputeMaxRenderRadius(double K1, double K2, double K3, double K4, double K5, double K6)
 {
-	// Only barrel-like models (K1-K4 < 0) have a finite maximum output radius.
+	// Only barrel-like models (K1-K4 < 0) have a finite maximum source radius.
 	if ((K1 - K4) >= 0.0)
 	{
 		return -1.0;
@@ -456,7 +459,7 @@ double FRationalDistortion::ComputeMaxOutputRadius(double K1, double K2, double 
 	// Find the critical radius where d(r_d)/dR = 0:
 	//   Num*Den + R*DNum*Den - R*Num*DDen = 0
 	// Use Newton-Raphson on the derivative expression, starting near 0.5.
-	const double RCrit = Solve(
+	return Solve(
 		[K1, K2, K3, K4, K5, K6](double R) {
 			const double R2 = R * R;
 			const double R4 = R2 * R2;
@@ -486,12 +489,15 @@ double FRationalDistortion::ComputeMaxOutputRadius(double K1, double K2, double 
 		40,
 		1e-6
 	);
+}
 
+double FRationalDistortion::ComputeMaxOutputRadius(double K1, double K2, double K3, double K4, double K5, double K6)
+{
+	const double RCrit = ComputeMaxRenderRadius(K1, K2, K3, K4, K5, K6);
 	if (RCrit <= 0.0)
 	{
 		return -1.0;
 	}
-
 	return SolveDistortion(RCrit, K1, K2, K3, K4, K5, K6);
 }
 
