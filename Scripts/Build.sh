@@ -24,7 +24,11 @@ fi
 cd "$UNREAL_ENGINE_PATH"
 if [ "$PLATFORM" = "Win64" ]; then
   # Windows build script is a little different
-  ./Engine/Build/BatchFiles/Build.bat "${PROJECT_NAME}Editor" Development $PLATFORM -Project="$PROJECT_ROOT/$PROJECT_NAME.uproject" -WaitMutex -FromMsBuild "$@"
+  # cygpath converts the Unix-style path to a native Windows path so MSYS doesn't
+  # try to convert it itself — MSYS path conversion splits on spaces in the value
+  # of -Project=..., turning "Unreal Projects/..." into two arguments.
+  UPROJECT_WIN=$(cygpath -w "$PROJECT_ROOT/$PROJECT_NAME.uproject")
+  ./Engine/Build/BatchFiles/Build.bat "${PROJECT_NAME}Editor" Development "$PLATFORM" -Project="$UPROJECT_WIN" -WaitMutex -FromMsBuild "$@"
 else
-  ./Engine/Build/BatchFiles/$PLATFORM/Build.sh "${PROJECT_NAME}Editor" Development $PLATFORM -Project="$PROJECT_ROOT/$PROJECT_NAME.uproject" -buildscw "$@"
+  ./Engine/Build/BatchFiles/"$PLATFORM"/Build.sh "${PROJECT_NAME}Editor" Development "$PLATFORM" -Project="$PROJECT_ROOT/$PROJECT_NAME.uproject" -buildscw "$@"
 fi
