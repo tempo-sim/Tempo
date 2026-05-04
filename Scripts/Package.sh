@@ -38,6 +38,10 @@ HOST_PLATFORM=""
 TARGET_PLATFORM=""
 if [[ "$OSTYPE" = "msys" ]]; then
   HOST_PLATFORM="Win64"
+  # 8.3 short form removes the space in "Program Files" so PWD is spaces-free
+  # when we invoke .bat files — otherwise cmd.exe's strip-outer-quotes rule
+  # mangles the path when another argument (e.g. -project=...) is also quoted.
+  export UNREAL_ENGINE_PATH=$(cygpath -w -s "$UNREAL_ENGINE_PATH")
   if [ "$1" = "Linux" ]; then
     if [ -z ${LINUX_MULTIARCH_ROOT+x} ]; then
       echo "LINUX_MULTIARCH_ROOT not set, cannot cross-compile for Linux"

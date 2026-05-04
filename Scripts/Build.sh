@@ -12,6 +12,10 @@ UNREAL_ENGINE_PATH=$("$SCRIPT_DIR"/FindUnreal.sh)
 PLATFORM=""
 if [[ "$OSTYPE" = "msys" ]]; then
   PLATFORM="Win64"
+  # 8.3 short form removes the space in "Program Files" so PWD is spaces-free
+  # when we invoke .bat files — otherwise cmd.exe's strip-outer-quotes rule
+  # mangles the path when another argument (e.g. -Project=...) is also quoted.
+  UNREAL_ENGINE_PATH=$(cygpath -w -s "$UNREAL_ENGINE_PATH")
 elif [[ "$OSTYPE" = "darwin"* ]]; then
   PLATFORM="Mac"
 elif [[ "$OSTYPE" = "linux-gnu"* ]]; then
@@ -23,12 +27,7 @@ fi
 
 cd "$UNREAL_ENGINE_PATH"
 if [ "$PLATFORM" = "Win64" ]; then
-  # Windows build script is a little different
-  # cygpath converts the Unix-style path to a native Windows path so MSYS doesn't
-  # try to convert it itself — MSYS path conversion splits on spaces in the value
-  # of -Project=..., turning "Unreal Projects/..." into two arguments.
-  UPROJECT_WIN=$(cygpath -w "$PROJECT_ROOT/$PROJECT_NAME.uproject")
-  ./Engine/Build/BatchFiles/Build.bat "${PROJECT_NAME}Editor" Development "$PLATFORM" -Project="$UPROJECT_WIN" -WaitMutex -FromMsBuild "$@"
+  ./Engine/Build/BatchFiles/Build.bat "${PROJECT_NAME}Editor" Development "$PLATFORM" -Project="$PROJECT_ROOT/$PROJECT_NAME.uproject" -WaitMutex -FromMsBuild "$@"
 else
   ./Engine/Build/BatchFiles/"$PLATFORM"/Build.sh "${PROJECT_NAME}Editor" Development "$PLATFORM" -Project="$PROJECT_ROOT/$PROJECT_NAME.uproject" -buildscw "$@"
 fi
