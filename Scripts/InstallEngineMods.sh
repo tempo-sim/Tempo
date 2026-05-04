@@ -213,8 +213,8 @@ REBUILD_UBT() {
   fi
 
   cd "$UNREAL_ENGINE_PATH"
-  eval "$DOTNET" build "./Engine/Source/Programs/UnrealBuildTool/UnrealBuildTool.csproj" -c Development
-  eval "$DOTNET" build "./Engine/Source/Programs/AutomationTool/AutomationTool.csproj" -c Development
+  "$DOTNET" build "./Engine/Source/Programs/UnrealBuildTool/UnrealBuildTool.csproj" -c Development
+  "$DOTNET" build "./Engine/Source/Programs/AutomationTool/AutomationTool.csproj" -c Development
 
   # Copy the resulting built dlls to all locations under the binaries folder.
   # In UE 5.7+, AutomationTool and its sub-projects each get their own copy of

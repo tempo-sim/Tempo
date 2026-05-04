@@ -184,15 +184,14 @@ FIND_PLUGIN() {
 
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 TEMPO_ROOT=$(realpath "$SCRIPT_DIR/..")
-MANIFEST_FILES=$(find "$TEMPO_ROOT" -name ttp_manifest.json -path "*Source*")
-for MANIFEST_FILE in ${MANIFEST_FILES[@]}; do
+while IFS= read -r MANIFEST_FILE; do
   PLUGIN_DIR=$(FIND_PLUGIN "$MANIFEST_FILE")
   if [ -f "$PLUGIN_DIR/Scripts/SyncDeps.sh" ]; then
     # This plugin manages its own dependencies
     continue
   fi
   SYNC_THIRD_PARTY_DEPS "$MANIFEST_FILE" "$1"
-done
+done < <(find "$TEMPO_ROOT" -name ttp_manifest.json -path "*Source*")
 
 # Cleanup
 rm -rf "$TEMP"

@@ -31,7 +31,10 @@ FIND_UPROJECT_FILE() {
         return 0
     fi
 
-    local UPROJECT_FILEs=($(find "$search_path" -maxdepth 1 -name "*.uproject" 2>/dev/null))
+    local UPROJECT_FILEs=()
+    while IFS= read -r f; do
+        UPROJECT_FILEs+=("$f")
+    done < <(find "$search_path" -maxdepth 1 -name "*.uproject" 2>/dev/null)
 
     if [[ ${#UPROJECT_FILEs[@]} -eq 0 ]]; then
         echo "Error: No .uproject file found in $search_path" >&2
@@ -77,9 +80,9 @@ GET_REGISTRY_PATH() {
             "$APPDATA/Epic/UnrealEngineLauncher/LauncherInstalled.dat"
             "$ProgramData/Epic/UnrealEngineLauncher/LauncherInstalled.dat"
         )
-        for PATH in "${POSSIBLE_PATHS[@]}"; do
-            if [[ -f "$PATH" ]]; then
-                echo "$PATH"
+        for REGISTRY_FILE in "${POSSIBLE_PATHS[@]}"; do
+            if [[ -f "$REGISTRY_FILE" ]]; then
+                echo "$REGISTRY_FILE"
                 return 0
             fi
         done
