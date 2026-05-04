@@ -317,7 +317,7 @@ UTempoCamera::UTempoCamera()
 
 	bUseRayTracingIfEnabled = true;
 
-	ShowFlags.SetMotionBlur(true);
+	ShowFlags.SetMotionBlur(false);
 	ShowFlags.SetAntiAliasing(true);
 	ShowFlags.SetTemporalAA(true);
 	ShowFlags.SetEyeAdaptation(true);
