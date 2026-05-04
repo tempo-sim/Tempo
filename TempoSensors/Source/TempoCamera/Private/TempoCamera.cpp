@@ -31,6 +31,12 @@
 #include "ScenePrivate.h"
 #endif
 
+// Windows headers define UpdateResource as a macro (UpdateResourceW/UpdateResourceA).
+// Undefine it so calls to UTexture::UpdateResource() compile correctly.
+#ifdef UpdateResource
+#undef UpdateResource
+#endif
+
 namespace
 {
 	constexpr double MaxPerspectiveFOVPerCapture = 120.0;
