@@ -2,12 +2,13 @@
 
 #pragma once
 
-#include "TempoSceneCaptureComponent2D.h"
-#include "TempoSensorInterface.h"
+#include "TempoTiledSceneCaptureComponent.h"
 
 #include "TempoLidar/Lidar.pb.h"
 
 #include "CoreMinimal.h"
+#include "Engine/Scene.h"
+#include "SceneTypes.h"
 #include "TempoScriptingServer.h"
 #include "TempoLidar.generated.h"
 
@@ -47,47 +48,146 @@ struct FLidarScanRequest
 	TResponseDelegate<TempoLidar::LidarScanSegment> ResponseContinuation;
 };
 
+// Intrinsic calibration for a single beam channel, matching vendor calibration file conventions.
+USTRUCT(BlueprintType)
+struct FLidarBeamCalibration
+{
+	GENERATED_BODY()
+
+	// Elevation angle for this beam channel in degrees. Positive = up.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(UIMin=-90.0, UIMax=90.0, ClampMin=-90.0, ClampMax=90.0))
+	float ElevationDeg = 0.0f;
+
+	// Fixed azimuth offset from the nominal spin angle for this channel in degrees.
+	// Corresponds to "rotCorrection" / "horizOffsetCorrection" in vendor calibration files.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(UIMin=-5.0, UIMax=5.0))
+	float AzimuthOffsetDeg = 0.0f;
+
+	bool operator==(const FLidarBeamCalibration& Other) const
+	{
+		return ElevationDeg == Other.ElevationDeg && AzimuthOffsetDeg == Other.AzimuthOffsetDeg;
+	}
+	bool operator!=(const FLidarBeamCalibration& Other) const { return !(*this == Other); }
+};
+
+class UTempoLidar;
+
+// Per-tile state for the multi-view atlas render. A tile is just a view-rect + view state + PPM; no
+// USceneCaptureComponent and no child scene component. The atlas render is driven from
+// UTempoLidar::RenderCapture via TempoMultiViewCapture::RenderTiles, which writes each view directly
+// into its rect inside SharedTextureTarget — no per-tile copy-pack step is needed.
+USTRUCT()
+struct FTempoLidarTile
+{
+	GENERATED_BODY()
+
+	// Rotation relative to the parent lidar (yaw only).
+	UPROPERTY(VisibleAnywhere)
+	float YawOffset = 0.0f;
+
+	// This tile's horizontal FOV in degrees.
+	UPROPERTY(VisibleAnywhere)
+	float FOVAngle = 120.0f;
+
+	// Number of horizontal beams this tile covers.
+	UPROPERTY(VisibleAnywhere)
+	int32 HorizontalBeams = 0;
+
+	// Render size in pixels (ceil of SizeXYFOV).
+	UPROPERTY(VisibleAnywhere)
+	FIntPoint SizeXY = FIntPoint::ZeroValue;
+
+	// Image plane size encompassing the lidar FOV in (upsampled) pixels. SizeXY is the ceil of this.
+	UPROPERTY(VisibleAnywhere)
+	FVector2D SizeXYFOV = FVector2D::ZeroVector;
+
+	// Distortion factor introduced by the spherical-to-perspective mapping.
+	UPROPERTY(VisibleAnywhere)
+	double DistortionFactor = 1.0;
+
+	// Effective vertical FOV after the distortion factor is applied.
+	UPROPERTY(VisibleAnywhere)
+	double DistortedVerticalFOV = 30.0;
+
+	// Horizontal offset of this tile inside SharedTextureTarget (tiles pack L→C→R).
+	UPROPERTY(VisibleAnywhere)
+	int32 SliceDestOffsetX = 0;
+
+	UPROPERTY(VisibleAnywhere)
+	float MinDepth = 10.0f;
+
+	UPROPERTY(VisibleAnywhere)
+	float MaxDepth = 40000.0f;
+
+	UPROPERTY(VisibleAnywhere)
+	bool bActive = false;
+
+	UPROPERTY(VisibleAnywhere)
+	UMaterialInstanceDynamic* PostProcessMaterialInstance = nullptr;
+
+	UPROPERTY()
+	FPostProcessSettings PostProcessSettings;
+
+	// Not a UPROPERTY — manages its own lifetime.
+	FSceneViewStateReference ViewState;
+
+	// One-shot camera-cut flag consumed by the next multi-view render.
+	bool bCameraCut = false;
+};
+
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TEMPOLIDAR_API UTempoLidar : public USceneComponent, public ITempoSensorInterface
+class TEMPOLIDAR_API UTempoLidar : public UTempoTiledSceneCaptureComponent
 {
 	GENERATED_BODY()
 
 public:
 	UTempoLidar();
 
-	virtual void OnRegister() override;
+#if WITH_EDITOR
+	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
+#endif
 
 	// Begin ITempoSensorInterface
-	virtual FString GetOwnerName() const override;
-	virtual FString GetSensorName() const override;
-	virtual float GetRate() const override { return RateHz; }
-	virtual const TArray<TEnumAsByte<EMeasurementType>>& GetMeasurementTypes() const override { return MeasurementTypes; }
-	virtual bool IsAwaitingRender() override;
-	virtual void OnRenderCompleted() override;
-	virtual void BlockUntilMeasurementsReady() const override;
 	virtual TOptional<TFuture<void>> SendMeasurements() override;
 	// End ITempoSensorInterface
 
 	void RequestMeasurement(const TempoLidar::LidarScanRequest& Request, const TResponseDelegate<TempoLidar::LidarScanSegment>& ResponseContinuation);
 
 protected:
+	// UTempoSceneCaptureComponent2D hooks: the lidar manages its own single readback from the packed
+	// SharedTextureTarget and drives its own timer; it never calls CaptureScene() on itself.
+	virtual bool HasPendingRequests() const override { return !PendingRequests.IsEmpty(); }
+	virtual int32 GetNumActiveTiles() const override;
+	virtual void InitRenderTarget() override;
+	virtual void RenderCapture() override;
+
 	TFuture<void> DecodeAndRespond(TArray<TUniquePtr<FTextureRead>> TextureReads);
 
-	TMap<FName, UTempoLidarCaptureComponent*> GetAllCaptureComponents() const ;
-	TMap<FName, UTempoLidarCaptureComponent*> GetOrCreateCaptureComponents();
-	TArray<UTempoLidarCaptureComponent*> GetActiveCaptureComponents() const;
+	// Initialize the shared packed render target and ring of staging textures. Also assigns each
+	// active tile its SliceDestOffsetX and the packed dimensions.
+	void InitSharedRenderTarget();
 
-	void SyncCaptureComponents();
+	// Begin UTempoTiledSceneCaptureComponent tile interface
+	virtual void SyncTiles() override;
+	virtual bool HasDetectedParameterChange() const override;
+	virtual void ReconfigureTilesNow() override;
+	virtual void UpdateInternalMirrors() override;
+	// End UTempoTiledSceneCaptureComponent tile interface
 
-	static void SyncCaptureComponent(UTempoLidarCaptureComponent* LidarCaptureComponent, bool bActive, double YawOffset, double SubHorizontalFOV, double SubHorizontalBeams);
+	void ConfigureTile(FTempoLidarTile& Tile, double InYawOffset, double SubHorizontalFOV, int32 SubHorizontalBeams, bool bActivate);
+	void ApplyTilePostProcess(FTempoLidarTile& Tile);
+	void AllocateTileViewState(FTempoLidarTile& Tile);
+	void DeactivateTile(FTempoLidarTile& Tile);
 
-	// The rate in Hz this Lidar updates at.
-	UPROPERTY(EditAnywhere, meta=(UIMin=0.0, ClampMin=0.0))
-	float RateHz = 10.0;
+	// Returns the vertical FOV to use for tile sizing: derived from BeamCalibration when set,
+	// otherwise falls back to the VerticalFOV property.
+	double GetEffectiveVerticalFOV() const;
+
+	// Returns the vertical beam count: BeamCalibration.Num() when set, else VerticalBeams.
+	int32 GetEffectiveVerticalBeams() const;
 
 	// The measurement types supported. Should be set in constructor of derived classes.
-	UPROPERTY(VisibleAnywhere)
-	TArray<TEnumAsByte<EMeasurementType>> MeasurementTypes;
+	// (MeasurementTypes is inherited from UTempoTiledSceneCaptureComponent.)
 
 	// The minimum distance this Lidar can measure. Note that GEngine->NearClipPlane must be less than this value.
 	UPROPERTY(EditAnywhere, meta=(UIMin=0.0, ClampMin=0.0))
@@ -121,15 +221,28 @@ protected:
 	UPROPERTY(EditAnywhere, meta=(UIMin=0.0, UIMax=90.0, ClampMin=0.0, ClampMax=90.0))
 	float MaxAngleOfIncidence = 87.5;
 
-	// Monotonically increasing counter of scans captured.
-	UPROPERTY(VisibleAnywhere)
-	int32 SequenceId = 0;
+	// Per-beam intrinsic calibration. When non-empty, replaces the uniform VerticalBeams /
+	// VerticalFOV grid. Array length determines the beam count; VerticalFOV is derived
+	// automatically as a symmetric FOV that encloses all configured elevation angles.
+	// Entries are in channel index order (need not be sorted by elevation).
+	UPROPERTY(EditAnywhere)
+	TArray<FLidarBeamCalibration> BeamCalibration;
 
-	int32 NumResponded = 0;
+	// RateHz and SequenceId are inherited from UTempoSceneCaptureComponent2D.
 
 	TArray<FLidarScanRequest> PendingRequests;
 
-	friend class UTempoLidarCaptureComponent;
+	// Tile slots (fixed size: L=0, C=1, R=2). Stable storage — indices are never invalidated
+	// and held addresses remain valid across reconfigures. Transient: runtime-only state.
+	UPROPERTY(Transient)
+	FTempoLidarTile Tiles[3];
+
+	// Mirrors of the watched properties. Updated in ReconfigureTilesNow.
+	double HorizontalFOV_Internal = -1.0;
+	double VerticalFOV_Internal = -1.0;
+	int32 HorizontalBeams_Internal = -1;
+	int32 VerticalBeams_Internal = -1;
+	TArray<FLidarBeamCalibration> BeamCalibration_Internal;
 
 	friend struct TTextureRead<FLidarPixel>;
 };
@@ -139,13 +252,16 @@ struct TTextureRead<FLidarPixel> : TTextureReadBase<FLidarPixel>
 {
 	TTextureRead(const FIntPoint& ImageSizeIn, int32 SequenceIdIn, double CaptureTimeIn, const FString& OwnerNameIn,
 		const FString& SensorNameIn, const FTransform& SensorTransformIn, const FTransform& CaptureTransform,
-		double HorizontalFOVIn, double VerticalFOVIn, int32 HorizontalBeamsIn, int32 VerticalBeamsIn, const FVector2D& SizeXYFOVIn, double IntensitySaturationDistanceIn, double MaxAngleOfIncidenceIn,
-		int32 NumCaptureComponentsIn, double RelativeYawIn, float MinDepthIn, float MaxDepthIn, double MinDistanceIn, double MaxDistanceIn)
+		double HorizontalFOVIn, double VerticalFOVIn, int32 HorizontalBeamsIn, int32 VerticalBeamsIn, const FVector2D& SizeXYFOVIn,
+		double IntensitySaturationDistanceIn, double MaxAngleOfIncidenceIn,
+		int32 NumCaptureComponentsIn, double RelativeYawIn, float MinDepthIn, float MaxDepthIn, double MinDistanceIn, double MaxDistanceIn,
+		TArray<FLidarBeamCalibration> BeamCalibrationIn)
 		: TTextureReadBase(ImageSizeIn, SequenceIdIn, CaptureTimeIn, OwnerNameIn, SensorNameIn, SensorTransformIn),
 			CaptureTransform(CaptureTransform), HorizontalFOV(HorizontalFOVIn), VerticalFOV(VerticalFOVIn), HorizontalBeams(HorizontalBeamsIn),
 			VerticalBeams(VerticalBeamsIn), SizeXYFOV(SizeXYFOVIn), IntensitySaturationDistance(IntensitySaturationDistanceIn),
 			MaxAngleOfIncidence(MaxAngleOfIncidenceIn), NumCaptureComponents(NumCaptureComponentsIn), RelativeYaw(RelativeYawIn),
-			MinDepth(MinDepthIn), MaxDepth(MaxDepthIn), MinDistance(MinDistanceIn), MaxDistance(MaxDistanceIn)
+			MinDepth(MinDepthIn), MaxDepth(MaxDepthIn), MinDistance(MinDistanceIn), MaxDistance(MaxDistanceIn),
+			BeamCalibration(MoveTemp(BeamCalibrationIn))
 	{
 	}
 
@@ -167,56 +283,28 @@ struct TTextureRead<FLidarPixel> : TTextureReadBase<FLidarPixel>
 	float MaxDepth;
 	double MinDistance;
 	double MaxDistance;
+	TArray<FLidarBeamCalibration> BeamCalibration;
 };
 
-UCLASS(ClassGroup=(Custom), NotPlaceable, NotBlueprintable)
-class TEMPOLIDAR_API UTempoLidarCaptureComponent : public UTempoSceneCaptureComponent2D
+// A texture read that holds the horizontally-packed pixels of all active lidar slices.
+// After readback, SplitIntoSlices() produces one TTextureRead<FLidarPixel> per slice so that
+// the existing parallel Decode path (which expects per-slice reads) can proceed unchanged.
+struct FLidarSharedTextureRead : TTextureReadBase<FLidarPixel>
 {
-	GENERATED_BODY()
+	FLidarSharedTextureRead(const FIntPoint& PackedSizeIn, int32 SequenceIdIn, double CaptureTimeIn,
+		const FString& OwnerNameIn, const FString& SensorNameIn, const FTransform& SensorTransformIn,
+		TArray<TUniquePtr<TTextureRead<FLidarPixel>>> SlicesIn)
+		: TTextureReadBase(PackedSizeIn, SequenceIdIn, CaptureTimeIn, OwnerNameIn, SensorNameIn, SensorTransformIn),
+		  Slices(MoveTemp(SlicesIn))
+	{
+	}
 
-public:
-	UTempoLidarCaptureComponent();
+	virtual FName GetType() const override { return TEXT("LidarShared"); }
 
-protected:
-	virtual void Activate(bool bReset = false) override;
+	// Move per-slice pixels out of the packed Image into each slice's own Image, returning ownership
+	// of the per-slice reads to the caller. This instance should not be used afterward.
+	TArray<TUniquePtr<FTextureRead>> SplitIntoSlices();
 
-	virtual bool HasPendingRequests() const override;
-
-	virtual FTextureRead* MakeTextureRead() const override;
-
-	virtual int32 GetMaxTextureQueueSize() const override;
-
-	void Configure(double YawOffset, double SubHorizontalFOV, double SubHorizontalBeams);
-
-	// The number of horizontal beams.
-	UPROPERTY(EditAnywhere)
-	int32 HorizontalBeams = 200.0;
-
-	// The resulting distortion factor.
-	UPROPERTY(VisibleAnywhere)
-	double DistortionFactor = 1.0;
-
-	// The resulting distorted vertical FOV.
-	UPROPERTY(VisibleAnywhere)
-	double DistortedVerticalFOV = 30.0;
-
-	// The size of the image plane encompassing the Lidar FOV in pixels. SizeXY is the ceil of this.
-	UPROPERTY(VisibleAnywhere)
-	FVector2D SizeXYFOV = FVector2D::ZeroVector;
-
-	UPROPERTY(VisibleAnywhere)
-	UMaterialInstanceDynamic* PostProcessMaterialInstance= nullptr;
-
-	UPROPERTY(VisibleAnywhere)
-	const UTempoLidar* LidarOwner = nullptr;
-
-	// The minimum depth this Lidar can measure. Will be set to the global near clip plane.
-	UPROPERTY(VisibleAnywhere)
-	float MinDepth = 10.0; // 10cm
-
-	// The maximum depth this Lidar can measure. Will be set to UTempoSensorsSettings::MaxLidarDepth.
-	UPROPERTY(VisibleAnywhere, Category="Depth")
-	float MaxDepth = 40000.0; // 400m
-
-	friend UTempoLidar;
+	// Per-slice reads preallocated at capture time with the correct metadata and sized buffers.
+	TArray<TUniquePtr<TTextureRead<FLidarPixel>>> Slices;
 };

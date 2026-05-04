@@ -3,7 +3,6 @@
 import argparse
 import asyncio
 import colorsys
-import cv2
 from enum import Enum
 import grpc
 import io
@@ -19,64 +18,145 @@ import tempo.tempo_world as tw
 import tempo.TempoImageUtils as tiu
 import tempo.TempoLidarUtils as tlu
 
-async def randomize_camera_post_process(camera_name, owner):
-    await tw.set_bool_property(actor=owner, component=camera_name, property="PostProcessSettings.bOverride_WhiteTemp", value=True)
-    await tw.set_float_property(actor=owner, component=camera_name, property="PostProcessSettings.WhiteTemp", value=random.uniform(2000.0, 700.0))
-
-    await tw.set_bool_property(actor=owner, component=camera_name, property="PostProcessSettings.bOverride_BloomIntensity", value=True)
-    await tw.set_float_property(actor=owner, component=camera_name, property="PostProcessSettings.BloomIntensity", value=random.uniform(0.0, 1.0))
-
-    await tw.set_bool_property(actor=owner, component=camera_name, property="PostProcessSettings.bOverride_AutoExposureSpeedUp", value=True)
-    await tw.set_float_property(actor=owner, component=camera_name, property="PostProcessSettings.AutoExposureSpeedUp", value=random.uniform(1.0, 20.0))
-
-    await tw.set_bool_property(actor=owner, component=camera_name, property="PostProcessSettings.bOverride_AutoExposureSpeedDown", value=True)
-    await tw.set_float_property(actor=owner, component=camera_name, property="PostProcessSettings.AutoExposureSpeedDown", value=random.uniform(1.0, 20.0))
-
-    await tw.set_bool_property(actor=owner, component=camera_name, property="PostProcessSettings.bOverride_ColorSaturation", value=True)
-    await tw.set_float_property(actor=owner, component=camera_name, property="PostProcessSettings.ColorSaturation.X", value=random.uniform(0.0, 1.0))
-    await tw.set_float_property(actor=owner, component=camera_name, property="PostProcessSettings.ColorSaturation.Y", value=random.uniform(0.0, 1.0))
-    await tw.set_float_property(actor=owner, component=camera_name, property="PostProcessSettings.ColorSaturation.Z", value=random.uniform(0.0, 1.0))
-    await tw.set_float_property(actor=owner, component=camera_name, property="PostProcessSettings.ColorSaturation.W", value=random.uniform(0.0, 1.0))
+from prompt_toolkit import PromptSession
+from prompt_toolkit.completion import FuzzyWordCompleter
+from prompt_toolkit.formatted_text import HTML
 
 
-class StateEnum(Enum):
-    START = 1
-    ADD_SENSOR = 2
-    ADD_SENSOR_WHAT_OWNER = 3
-    ADD_SENSOR_WHAT_PARENT = 4
-    ADD_SENSOR_WHAT_SOCKET = 5
-    REMOVE_SENSOR = 6
-    REPOSITION_SENSOR = 7
-    REPOSITION_SENSOR_WHAT_TRANSFORM = 8
-    GET_SENSOR_PROPERTIES = 9
-    RANDOMIZE_CAMERA_POST_PROCESS = 10
-    START_STREAM_SENSOR_DATA = 11
-    END_STREAM_SENSOR_DATA = 12
-    MOVE_ACTOR = 13
-    MOVE_ACTOR_WHAT_TRANSFORM = 14
-    QUIT = 15
+RESTART_SENTINEL = "__RESTART__"
+QUIT_SENTINEL = "__QUIT__"
+NONE_SENTINEL = "__NONE__"
 
 
-class State:
-    def __init__(self):
-        self.enum = StateEnum.START
-        self.accumulated_input = {}
-        self.sensor_streams = {}
+# ---------------------------------------------------------------------------
+# Fuzzy select helper
+# ---------------------------------------------------------------------------
+
+async def fuzzy_select(items, prompt_text, allow_restart=True, allow_none=False, none_label="(None)", allow_freeform=False):
+    """Interactive fuzzy-filterable selection.
+
+    items: list of (value, display_string) tuples
+    allow_freeform: if True, unmatched text is returned as-is (for free-form input)
+    Returns the selected value, RESTART_SENTINEL, or NONE_SENTINEL.
+    """
+    extra = []
+    if allow_none:
+        extra.append((NONE_SENTINEL, none_label))
+    if allow_restart:
+        extra.append((RESTART_SENTINEL, "< Restart >"))
+
+    all_items = list(items) + extra
+
+    if not all_items:
+        print("  No items available.")
+        return RESTART_SENTINEL
+
+    # Build lookup from display string to value
+    display_to_value = {}
+    displays = []
+    for value, display in all_items:
+        display_to_value[display] = value
+        displays.append(display)
+
+    completer = FuzzyWordCompleter(displays)
+    session = PromptSession()
+
+    while True:
+        # Show numbered list
+        print()
+        for idx, display in enumerate(displays):
+            print(f"  [{idx}] {display}")
+        print()
+
+        try:
+            user_input = await session.prompt_async(
+                HTML(f"<b>{prompt_text}</b> (type to filter, # to select, Enter for [0]): "),
+                completer=completer,
+            )
+        except (EOFError, KeyboardInterrupt):
+            return RESTART_SENTINEL
+
+        user_input = user_input.strip()
+
+        # Empty input -> select first item
+        if user_input == "":
+            return all_items[0][0]
+
+        # Try as index
+        try:
+            idx = int(user_input)
+            if 0 <= idx < len(all_items):
+                return all_items[idx][0]
+            else:
+                print(f"  Index out of range (0-{len(all_items) - 1})")
+                continue
+        except ValueError:
+            pass
+
+        # Try exact match on display string
+        if user_input in display_to_value:
+            return display_to_value[user_input]
+
+        # Try case-insensitive substring match
+        matches = [(v, d) for v, d in all_items if user_input.lower() in d.lower()]
+        if len(matches) == 1:
+            return matches[0][0]
+        elif len(matches) > 1:
+            # Narrow the list and re-prompt
+            all_items = matches
+            display_to_value = {d: v for v, d in all_items}
+            displays = [d for _, d in all_items]
+            completer = FuzzyWordCompleter(displays)
+            continue
+
+        # Allow free-form input for states that accept custom values
+        if allow_freeform:
+            return user_input
+
+        print(f"  No match for '{user_input}'. Try again.")
 
 
-class Option:
-    def __init__(self, prompt, choices):
-        self.prompt = prompt
-        self.choices = choices
+async def text_input(prompt_text, default=""):
+    """Simple text prompt with an optional default."""
+    session = PromptSession()
+    suffix = f" [{default}]" if default else ""
+    try:
+        result = await session.prompt_async(
+            HTML(f"<b>{prompt_text}</b>{suffix}: "),
+        )
+    except (EOFError, KeyboardInterrupt):
+        return default
+    return result.strip() if result.strip() else default
 
 
-class Choice:
-    def __init__(self, display, next_state, shortcut=None, metadata={}):
-        self.display = display
-        self.next_state = next_state
-        self.metadata = metadata
-        self.shortcut = shortcut
+# ---------------------------------------------------------------------------
+# Transform helper
+# ---------------------------------------------------------------------------
 
+def parse_transform(text):
+    """Parse 'X Y Z R P Y' string into a Geometry.Transform (meters/degrees)."""
+    parts = text.split()
+    if len(parts) != 6:
+        raise ValueError("Expected 6 values: X Y Z Roll Pitch Yaw")
+    t = Geometry.Transform()
+    t.location.x = float(parts[0])
+    t.location.y = float(parts[1])
+    t.location.z = float(parts[2])
+    t.rotation.r = float(parts[3]) * math.pi / 180.0
+    t.rotation.p = float(parts[4]) * math.pi / 180.0
+    t.rotation.y = float(parts[5]) * math.pi / 180.0
+    return t
+
+
+def format_transform(t):
+    """Format a Geometry.Transform for display."""
+    return (f"Location({t.location.x:.2f}, {t.location.y:.2f}, {t.location.z:.2f}) "
+            f"Rotation({t.rotation.r * 180 / math.pi:.1f}, {t.rotation.p * 180 / math.pi:.1f}, {t.rotation.y * 180 / math.pi:.1f})")
+
+
+# ---------------------------------------------------------------------------
+# Sensor helpers
+# ---------------------------------------------------------------------------
 
 class AvailableSensor:
     def __init__(self, type, name, owner, rate, measurement_types):
@@ -119,232 +199,333 @@ def measurement_type_string(type):
         return "PointCloud"
 
 
-async def get_option(state):
-    prompt = "Invalid state"
-    choices = []
-    if state.enum == StateEnum.START:
-        prompt = "\nWhat would you like to do?\n"
-        choices += [Choice("Add a sensor", StateEnum.ADD_SENSOR,"a"),
-                    Choice("Remove a sensor", StateEnum.REMOVE_SENSOR, "r"),
-                    Choice("Reposition a sensor", StateEnum.REPOSITION_SENSOR, "p"),
-                    Choice("Get a sensor's properties", StateEnum.GET_SENSOR_PROPERTIES, "g"),
-                    Choice("Randomize a camera's post-process properties", StateEnum.RANDOMIZE_CAMERA_POST_PROCESS, "x"),
-                    Choice("Start sensor data stream", StateEnum.START_STREAM_SENSOR_DATA, "d"),
-                    Choice("End sensor data stream", StateEnum.END_STREAM_SENSOR_DATA, "e"),
-                    Choice("Move a sensor's owner Actor", StateEnum.MOVE_ACTOR, "m")]
-    elif state.enum == StateEnum.ADD_SENSOR:
-        prompt = "\nWhat type of sensor? You may also input another sensor type than these choices\n"
-        choices += [Choice("TempoCamera", StateEnum.ADD_SENSOR_WHAT_OWNER,"c")]
-    elif state.enum == StateEnum.ADD_SENSOR_WHAT_OWNER:
-        prompt = "\nWhat actor should we add the sensor to? You may also input another actor name than these choices\n"
-        choices += [Choice("BP_SensorRig", StateEnum.ADD_SENSOR_WHAT_PARENT, None)]
-    elif state.enum == StateEnum.ADD_SENSOR_WHAT_PARENT:
-        prompt = "\nWhat parent component should we add the sensor to? You may also input another component name than these choices\n"
-        choices += [Choice("Root Component", StateEnum.ADD_SENSOR_WHAT_SOCKET, None, metadata={"Parent": ""})]
-    elif state.enum == StateEnum.ADD_SENSOR_WHAT_SOCKET:
-        prompt = "\nWhat socket should we add the sensor to? You may also input another socket name than these choices\n"
-        choices += [Choice("None", StateEnum.START, None, metadata={"Socket": ""})]
-    elif state.enum == StateEnum.REMOVE_SENSOR:
-        available_sensors = await get_available_sensors()
-        prompt = "\nWhich sensor?\n" if len(available_sensors) > 0 else "\nNo sensors found\n"
-        for available_sensor in available_sensors:
-            choices += [Choice(str(available_sensor), StateEnum.START, None, {"Name": available_sensor.name, "Owner": available_sensor.owner})]
-    elif state.enum == StateEnum.REPOSITION_SENSOR:
-        available_sensors = await get_available_sensors()
-        prompt = "\nWhich sensor?\n" if len(available_sensors) > 0 else "\nNo sensors found\n"
-        for available_sensor in available_sensors:
-            choices += [Choice(str(available_sensor), StateEnum.REPOSITION_SENSOR_WHAT_TRANSFORM, None, {"Name": available_sensor.name, "Owner": available_sensor.owner})]
-    elif state.enum == StateEnum.REPOSITION_SENSOR_WHAT_TRANSFORM:
-        prompt = "What new transform should we use? Format: X Y Z R P Y Units: Meters/Degrees\n"
-        choices += [Choice("0 0 0 0 0 0", StateEnum.START, None)]
-    elif state.enum == StateEnum.GET_SENSOR_PROPERTIES:
-        available_sensors = await get_available_sensors()
-        prompt = "\nWhich sensor?" if len(available_sensors) > 0 else "\nNo sensors found\n"
-        for available_sensor in available_sensors:
-            choices += [Choice(str(available_sensor), StateEnum.START, None, {"Name": available_sensor.name, "Owner": available_sensor.owner})]
-    elif state.enum == StateEnum.RANDOMIZE_CAMERA_POST_PROCESS:
-        available_sensors = await get_available_sensors("Camera")
-        prompt = "\nWhich sensor?" if len(available_sensors) > 0 else "\nNo sensors found\n"
-        for available_sensor in available_sensors:
-            choices += [Choice(str(available_sensor), StateEnum.START, None, {"Name": available_sensor.name, "Owner": available_sensor.owner})]
-    elif state.enum == StateEnum.START_STREAM_SENSOR_DATA:
-        available_sensors = await get_available_sensors()
-        prompt = "\nWhich sensor?" if len(available_sensors) > 0 else "\nNo sensors found\n"
-        for available_sensor in available_sensors:
-            for measurement_type in available_sensor.measurement_types:
-                choices += [Choice("{}:{}:{}".format(available_sensor.owner, available_sensor.name, measurement_type_string(measurement_type)), StateEnum.START, None, {"Name": available_sensor.name, "Owner": available_sensor.owner, "Type": measurement_type})]
-    elif state.enum == StateEnum.END_STREAM_SENSOR_DATA:
-        prompt = "\nWhich stream?" if len(state.sensor_streams) > 0 else "\nNo streams found\n"
-        choices += [Choice(stream_name, StateEnum.START, None, {"Stream": stream_name}) for stream_name in state.sensor_streams.keys()]
-    elif state.enum == StateEnum.MOVE_ACTOR:
-        prompt = "\nWhich actor? You may also input another actor name than these choices\n"
-        choices += [Choice("BP_SensorRig", StateEnum.MOVE_ACTOR_WHAT_TRANSFORM, None)]
-    elif state.enum == StateEnum.MOVE_ACTOR_WHAT_TRANSFORM:
-        prompt = "What relative transform should we use? Format: X Y Z R P Y Units: Meters/Degrees\n"
-        choices += [Choice("0 0 0 0 0 0", StateEnum.START, None)]
+async def randomize_camera_post_process(camera_name, owner):
+    await tw.set_bool_property(actor=owner, component=camera_name, property="PostProcessSettings.bOverride_WhiteTemp", value=True)
+    await tw.set_float_property(actor=owner, component=camera_name, property="PostProcessSettings.WhiteTemp", value=random.uniform(2000.0, 700.0))
 
-    choices += [Choice("Restart", StateEnum.START, "s"),
-                Choice("Quit", StateEnum.QUIT, "q")]
+    await tw.set_bool_property(actor=owner, component=camera_name, property="PostProcessSettings.bOverride_BloomIntensity", value=True)
+    await tw.set_float_property(actor=owner, component=camera_name, property="PostProcessSettings.BloomIntensity", value=random.uniform(0.0, 1.0))
 
-    return Option(prompt, choices)
+    await tw.set_bool_property(actor=owner, component=camera_name, property="PostProcessSettings.bOverride_AutoExposureSpeedUp", value=True)
+    await tw.set_float_property(actor=owner, component=camera_name, property="PostProcessSettings.AutoExposureSpeedUp", value=random.uniform(1.0, 20.0))
+
+    await tw.set_bool_property(actor=owner, component=camera_name, property="PostProcessSettings.bOverride_AutoExposureSpeedDown", value=True)
+    await tw.set_float_property(actor=owner, component=camera_name, property="PostProcessSettings.AutoExposureSpeedDown", value=random.uniform(1.0, 20.0))
+
+    await tw.set_bool_property(actor=owner, component=camera_name, property="PostProcessSettings.bOverride_ColorSaturation", value=True)
+    await tw.set_float_property(actor=owner, component=camera_name, property="PostProcessSettings.ColorSaturation.X", value=random.uniform(0.0, 1.0))
+    await tw.set_float_property(actor=owner, component=camera_name, property="PostProcessSettings.ColorSaturation.Y", value=random.uniform(0.0, 1.0))
+    await tw.set_float_property(actor=owner, component=camera_name, property="PostProcessSettings.ColorSaturation.Z", value=random.uniform(0.0, 1.0))
+    await tw.set_float_property(actor=owner, component=camera_name, property="PostProcessSettings.ColorSaturation.W", value=random.uniform(0.0, 1.0))
 
 
-async def get_user_input(option):
-    while True:
-        print("{}".format(option.prompt))
-        for idx, choice in enumerate(option.choices):
-            if choice.shortcut is None:
-                print("[{}]: {}".format(idx, choice.display))
-            else:
-                print("[{}]: {} ({})".format(idx, choice.display, choice.shortcut))
-        return await asyncio.to_thread(input, "\nInput (default 0): ")
+# ---------------------------------------------------------------------------
+# Flows
+# ---------------------------------------------------------------------------
+
+async def flow_add_sensor():
+    print("\n--- Add Sensor ---")
+
+    # Step 1: Sensor type (with suggested defaults + free-form)
+    sensor_type = await fuzzy_select(
+        [("TempoCamera", "TempoCamera")],
+        "What type of sensor?",
+        allow_freeform=True,
+    )
+    if sensor_type == RESTART_SENTINEL:
+        return
+
+    # Step 2: Owner actor (with suggested defaults + free-form)
+    actor = await fuzzy_select(
+        [("BP_SensorRig", "BP_SensorRig")],
+        "What actor should we add the sensor to?",
+        allow_freeform=True,
+    )
+    if actor == RESTART_SENTINEL:
+        return
+
+    # Step 3: Parent component
+    parent_items = [("", "Root Component")]
+    try:
+        response = await tw.get_all_components(actor=actor)
+        for c in response.components:
+            parent_items.append((c.name, f"{c.name} ({c.type})"))
+    except grpc.aio._call.AioRpcError:
+        pass
+
+    parent = await fuzzy_select(
+        parent_items,
+        "What parent component should we add the sensor to?",
+        allow_freeform=True,
+    )
+    if parent == RESTART_SENTINEL:
+        return
+
+    # Step 4: Socket
+    socket = await fuzzy_select(
+        [("", "None")],
+        "What socket should we add the sensor to?",
+        allow_freeform=True,
+    )
+    if socket == RESTART_SENTINEL:
+        return
+
+    try:
+        response = await tw.add_component(type=sensor_type, actor=actor, parent=parent, socket=socket)
+        print(f"\n  Added component: {response.name}")
+        print(f"  Transform: {format_transform(response.transform)}")
+    except grpc.aio._call.AioRpcError as e:
+        print(f"  Error while adding component: {e}")
 
 
-async def take_action(state, option, user_input):
-    def transform_from_string(string):
-        xyzrpy_concat = string
-        xyzrpy = xyzrpy_concat.split(" ")
-        t = Geometry.Transform()
-        t.location.x = float(xyzrpy[0])
-        t.location.y = float(xyzrpy[1])
-        t.location.z = float(xyzrpy[2])
-        t.rotation.r = float(xyzrpy[3]) * math.pi / 180.0
-        t.rotation.p = float(xyzrpy[4]) * math.pi / 180.0
-        t.rotation.y = float(xyzrpy[5]) * math.pi / 180.0
-        return t
+async def flow_remove_sensor():
+    print("\n--- Remove Sensor ---")
+    available_sensors = await get_available_sensors()
+    if not available_sensors:
+        print("  No sensors found.")
+        return
 
-    chosen = None
-    for idx, choice in enumerate(option.choices):
-        try:
-            if user_input == choice.shortcut or int(user_input) == idx:
-                chosen = choice
-                break
-        except ValueError:
-            pass
+    items = [(s, str(s)) for s in available_sensors]
+    selection = await fuzzy_select(items, "Which sensor?")
+    if selection == RESTART_SENTINEL:
+        return
 
-    if user_input == "":
-        if len(option.choices) > 0:
-            chosen = option.choices[0]
-        else:
-            print("\n Invalid input: {}".format(user_input))
-            return state
+    try:
+        await tw.destroy_component(actor=selection.owner, component=selection.name)
+        print(f"\n  Destroyed: {selection}")
+    except grpc.aio._call.AioRpcError as e:
+        print(f"  Error while destroying component: {e}")
 
-    if chosen is None:
-        chosen = Choice(user_input, option.choices[0].next_state)
 
-    if state.enum == StateEnum.START:
-        state.accumulated_input = {}
-    elif state.enum == StateEnum.ADD_SENSOR:
-        state.accumulated_input["Type"] = chosen.display
-    elif state.enum == StateEnum.ADD_SENSOR_WHAT_OWNER:
-        state.accumulated_input["Actor"] = chosen.display
-    elif state.enum == StateEnum.ADD_SENSOR_WHAT_PARENT:
-        state.accumulated_input["Parent"] = chosen.metadata["Parent"] if "Parent" in chosen.metadata else chosen.display
-    elif state.enum == StateEnum.ADD_SENSOR_WHAT_SOCKET:
-        state.accumulated_input["Socket"] = chosen.metadata["Socket"] if "Socket" in chosen.metadata else chosen.display
-        try:
-            await tw.add_component(type=state.accumulated_input["Type"], actor=state.accumulated_input["Actor"], parent=state.accumulated_input["Parent"], socket=state.accumulated_input["Socket"])
-        except grpc.aio._call.AioRpcError as e:
-            print("Error while adding component: {}".format(e))
-    elif state.enum == StateEnum.REMOVE_SENSOR:
-        if chosen.metadata != {}:
-            try:
-                await tw.destroy_component(actor=chosen.metadata["Owner"], component=chosen.metadata["Name"])
-            except grpc.aio._call.AioRpcError as e:
-                print("Error while destroying component: {}".format(e))
-    elif state.enum == StateEnum.REPOSITION_SENSOR:
-        state.accumulated_input.update(chosen.metadata)
-    elif state.enum == StateEnum.REPOSITION_SENSOR_WHAT_TRANSFORM:
-        try:
-            t = transform_from_string(chosen.display)
-            try:
-                await tw.set_component_transform(actor=state.accumulated_input["Owner"], component=state.accumulated_input["Name"], transform=t)
-            except grpc.aio._call.AioRpcError as e:
-                print("Error while repositioning component: {}".format(e))
-        except (ValueError, IndexError):
-            print("\nImproperly formatted transform. Required format: X Y Z R P Y")
-    elif state.enum == StateEnum.GET_SENSOR_PROPERTIES:
-        if chosen.metadata != {}:
-            try:
-                properties_response = await tw.get_component_properties(actor=chosen.metadata["Owner"], component=chosen.metadata["Name"])
-                for property in properties_response.properties:
-                    if property.type != "unsupported":
-                        print("{}({}): {}".format(property.name, property.type, property.value))
-            except grpc.aio._call.AioRpcError as e:
-                print("Error while getting sensor properties: {}".format(e))
-    elif state.enum == StateEnum.RANDOMIZE_CAMERA_POST_PROCESS:
-        if chosen.metadata != {}:
-            try:
-                await randomize_camera_post_process(chosen.metadata["Name"], chosen.metadata["Owner"])
-            except grpc.aio._call.AioRpcError as e:
-                print("Error while setting sensor properties: {}".format(e))
-    elif state.enum == StateEnum.START_STREAM_SENSOR_DATA:
-        if chosen.metadata != {}:
-            try:
-                key = "{}:{}:{}".format(chosen.metadata["Owner"], chosen.metadata["Name"], measurement_type_string(chosen.metadata["Type"]))
-                if key in state.sensor_streams:
-                    print("\nRestarting stream {}".format(key))
-                    state.sensor_streams[key].cancel()
-                    del state.sensor_streams[key]
-                if chosen.metadata["Type"] == Sensors.COLOR_IMAGE:
-                    state.sensor_streams[key] = \
-                        asyncio.create_task(tiu.stream_color_images(chosen.metadata["Name"], chosen.metadata["Owner"]))
-                if chosen.metadata["Type"] == Sensors.DEPTH_IMAGE:
-                    state.sensor_streams[key] = \
-                        asyncio.create_task(tiu.stream_depth_images(chosen.metadata["Name"], chosen.metadata["Owner"]))
-                if chosen.metadata["Type"] == Sensors.LABEL_IMAGE:
-                    state.sensor_streams[key] = \
-                        asyncio.create_task(tiu.stream_label_images(chosen.metadata["Name"], chosen.metadata["Owner"]))
-                if chosen.metadata["Type"] == Sensors.LIDAR_SCAN:
-                    state.sensor_streams[key] = \
-                        asyncio.create_task(tlu.stream_lidar_scans(chosen.metadata["Name"], chosen.metadata["Owner"], "Intensity"))
-            except grpc.aio._call.AioRpcError as e:
-                print("Error while starting sensor data stream: {}".format(e))
-    elif state.enum == StateEnum.END_STREAM_SENSOR_DATA:
-        if chosen.metadata != {}:
-            state.sensor_streams[chosen.metadata["Stream"]].cancel()
-            del state.sensor_streams[chosen.metadata["Stream"]]
-    elif state.enum == StateEnum.MOVE_ACTOR:
-        state.accumulated_input["Actor"] = chosen.display
-    elif state.enum == StateEnum.MOVE_ACTOR_WHAT_TRANSFORM:
-        try:
-            t = transform_from_string(chosen.display)
-            try:
-                await tw.set_actor_transform(actor=state.accumulated_input["Actor"], transform=t)
-            except grpc.aio._call.AioRpcError as e:
-                print("Error while moving actor: {}".format(e))
-        except (ValueError, IndexError):
-            print("\nImproperly formatted transform. Required format: X Y Z R P Y")
+async def flow_reposition_sensor():
+    print("\n--- Reposition Sensor ---")
+    available_sensors = await get_available_sensors()
+    if not available_sensors:
+        print("  No sensors found.")
+        return
 
-    state.enum = chosen.next_state
-    return state
+    items = [(s, str(s)) for s in available_sensors]
+    selection = await fuzzy_select(items, "Which sensor?")
+    if selection == RESTART_SENTINEL:
+        return
+
+    transform_text = await text_input("New transform (X Y Z R P Y, Meters/Degrees)", default="0 0 0 0 0 0")
+    try:
+        t = parse_transform(transform_text)
+    except ValueError as e:
+        print(f"  {e}")
+        return
+
+    try:
+        await tw.set_component_transform(actor=selection.owner, component=selection.name, transform=t)
+        print(f"\n  Repositioned {selection}")
+    except grpc.aio._call.AioRpcError as e:
+        print(f"  Error while repositioning component: {e}")
+
+
+async def flow_get_sensor_properties():
+    print("\n--- Get Sensor Properties ---")
+    available_sensors = await get_available_sensors()
+    if not available_sensors:
+        print("  No sensors found.")
+        return
+
+    items = [(s, str(s)) for s in available_sensors]
+    selection = await fuzzy_select(items, "Which sensor?")
+    if selection == RESTART_SENTINEL:
+        return
+
+    try:
+        properties_response = await tw.get_component_properties(actor=selection.owner, component=selection.name)
+        print()
+        for prop in properties_response.properties:
+            if prop.type != "unsupported":
+                print(f"  {prop.name}({prop.type}): {prop.value}")
+    except grpc.aio._call.AioRpcError as e:
+        print(f"  Error while getting sensor properties: {e}")
+
+
+async def flow_randomize_post_process():
+    print("\n--- Randomize Camera Post-Process ---")
+    available_sensors = await get_available_sensors("Camera")
+    if not available_sensors:
+        print("  No cameras found.")
+        return
+
+    items = [(s, str(s)) for s in available_sensors]
+    selection = await fuzzy_select(items, "Which camera?")
+    if selection == RESTART_SENTINEL:
+        return
+
+    try:
+        await randomize_camera_post_process(selection.name, selection.owner)
+        print(f"\n  Randomized post-process on {selection}")
+    except grpc.aio._call.AioRpcError as e:
+        print(f"  Error while setting sensor properties: {e}")
+
+
+async def flow_start_stream(sensor_streams, display_scale):
+    print("\n--- Start Sensor Data Stream ---")
+    available_sensors = await get_available_sensors()
+    if not available_sensors:
+        print("  No sensors found.")
+        return
+
+    # Build items with measurement type variants
+    items = []
+    for sensor in available_sensors:
+        for measurement_type in sensor.measurement_types:
+            label = f"{sensor.owner}:{sensor.name}:{measurement_type_string(measurement_type)}"
+            items.append(((sensor, measurement_type), label))
+
+    if not items:
+        print("  No sensor streams available.")
+        return
+
+    selection = await fuzzy_select(items, "Which sensor stream?")
+    if selection == RESTART_SENTINEL:
+        return
+
+    sensor, measurement_type = selection
+
+    try:
+        key = f"{sensor.owner}:{sensor.name}:{measurement_type_string(measurement_type)}"
+        if key in sensor_streams:
+            print(f"\n  Restarting stream {key}")
+            sensor_streams[key].cancel()
+            del sensor_streams[key]
+
+        task = None
+        if measurement_type == Sensors.COLOR_IMAGE:
+            task = asyncio.create_task(tiu.stream_color_images(sensor.name, sensor.owner, display_scale))
+        if measurement_type == Sensors.DEPTH_IMAGE:
+            task = asyncio.create_task(tiu.stream_depth_images(sensor.name, sensor.owner, display_scale))
+        if measurement_type == Sensors.LABEL_IMAGE:
+            task = asyncio.create_task(tiu.stream_label_images(sensor.name, sensor.owner, display_scale))
+        if measurement_type == Sensors.LIDAR_SCAN:
+            task = asyncio.create_task(tlu.stream_lidar_scans(sensor.name, sensor.owner, "Intensity"))
+
+        if task is not None:
+            def on_stream_done(t, stream_key=key):
+                if stream_key in sensor_streams and sensor_streams[stream_key] is t:
+                    del sensor_streams[stream_key]
+                    if not t.cancelled():
+                        exc = t.exception()
+                        if exc is not None:
+                            print(f"\nStream {stream_key} died: {exc}")
+            task.add_done_callback(on_stream_done)
+            sensor_streams[key] = task
+            print(f"\n  Started stream: {key}")
+    except grpc.aio._call.AioRpcError as e:
+        print(f"  Error while starting sensor data stream: {e}")
+
+
+async def flow_end_stream(sensor_streams):
+    print("\n--- End Sensor Data Stream ---")
+    if not sensor_streams:
+        print("  No active streams.")
+        return
+
+    items = [(key, key) for key in sensor_streams.keys()]
+    selection = await fuzzy_select(items, "Which stream?")
+    if selection == RESTART_SENTINEL:
+        return
+
+    if selection in sensor_streams:
+        task = sensor_streams[selection]
+        if not task.done():
+            task.cancel()
+        del sensor_streams[selection]
+        print(f"\n  Ended stream: {selection}")
+
+
+async def flow_move_actor():
+    print("\n--- Move Actor ---")
+
+    actor = await fuzzy_select(
+        [("BP_SensorRig", "BP_SensorRig")],
+        "Which actor?",
+        allow_freeform=True,
+    )
+    if actor == RESTART_SENTINEL:
+        return
+
+    transform_text = await text_input("Relative transform (X Y Z R P Y, Meters/Degrees)", default="0 0 0 0 0 0")
+    try:
+        t = parse_transform(transform_text)
+    except ValueError as e:
+        print(f"  {e}")
+        return
+
+    try:
+        await tw.set_actor_transform(actor=actor, transform=t)
+        print(f"\n  Moved {actor}")
+    except grpc.aio._call.AioRpcError as e:
+        print(f"  Error while moving actor: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Main menu
+# ---------------------------------------------------------------------------
+
+TOP_LEVEL_ACTIONS = [
+    ("add",        "Add a sensor"),
+    ("remove",     "Remove a sensor"),
+    ("reposition", "Reposition a sensor"),
+    ("properties", "Get a sensor's properties"),
+    ("randomize",  "Randomize a camera's post-process properties"),
+    ("start",      "Start sensor data stream"),
+    ("end",        "End sensor data stream"),
+    ("move",       "Move a sensor's owner Actor"),
+    ("quit",       "Quit"),
+]
 
 
 async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--ip', required=False, help="IP address of machine where Tempo is running", default="0.0.0.0")
     parser.add_argument('--port', required=False, help="Port Tempo scripting server is using", default=10001)
+    parser.add_argument('--display-scale', required=False, type=float, default=0.5,
+                        help="Scale factor for displayed camera images (default: 0.5)")
     args = parser.parse_args()
 
     if args.ip != "0.0.0.0" or args.port != 10001:
         tempo.set_server(address=args.ip, port=args.port)
 
-    state = State()
+    sensor_streams = {}
+
+    print("\n=== Sensor Playground ===")
+    print("Add, remove, reposition, and stream sensors at runtime.\n")
 
     while True:
-        # Get choices based on current state
-        option = await get_option(state)
+        action = await fuzzy_select(TOP_LEVEL_ACTIONS, "What would you like to do?", allow_restart=False)
 
-        # Get user choice
-        user_input = await get_user_input(option)
-
-        state = await take_action(state, option, user_input)
-
-        if state.enum == StateEnum.QUIT:
-            for task in state.sensor_streams.values():
+        if action == "quit" or action == RESTART_SENTINEL:
+            for task in sensor_streams.values():
                 task.cancel()
             print("\nBye!\n")
             break
+
+        try:
+            if action == "add":
+                await flow_add_sensor()
+            elif action == "remove":
+                await flow_remove_sensor()
+            elif action == "reposition":
+                await flow_reposition_sensor()
+            elif action == "properties":
+                await flow_get_sensor_properties()
+            elif action == "randomize":
+                await flow_randomize_post_process()
+            elif action == "start":
+                await flow_start_stream(sensor_streams, args.display_scale)
+            elif action == "end":
+                await flow_end_stream(sensor_streams)
+            elif action == "move":
+                await flow_move_actor()
+        except grpc.aio._call.AioRpcError:
+            print("\n  Could not connect to Tempo. Is the simulation running?")
+
 
 if __name__ == "__main__":
     asyncio.run(main())

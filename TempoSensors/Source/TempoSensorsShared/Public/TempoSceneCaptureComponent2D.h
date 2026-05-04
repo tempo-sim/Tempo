@@ -6,6 +6,8 @@
 #include "TempoConversion.h"
 #include "Components/SceneCaptureComponent2D.h"
 #include "Engine/TextureRenderTarget2D.h"
+#include "Engine/Texture2D.h"
+#include "TempoLensModels.h"
 
 #include "TempoSceneCaptureComponent2D.generated.h"
 
@@ -32,7 +34,13 @@ struct FTextureRead
 
 	virtual FName GetType() const = 0;
 
-	virtual void Read(const FRenderTarget* RenderTarget, const FTextureRHIRef& TextureRHICopy) = 0;
+	virtual void Read(const FRenderTarget* RenderTarget) = 0;
+
+	// The GPU fence indicating our render has completed. Set during UpdateSceneCaptureContents.
+	FGPUFenceRHIRef RenderFence;
+
+	// The staging texture assigned to this read for GPU->CPU copy.
+	FTextureRHIRef StagingTexture;
 
 	void BlockUntilReadComplete() const
 	{
@@ -63,10 +71,11 @@ struct TTextureReadBase : FTextureRead
 		Image.SetNumUninitialized(ImageSize.X * ImageSize.Y);
 	}
 
-	virtual void Read(const FRenderTarget* RenderTarget, const FTextureRHIRef& TextureRHICopy) override
+	virtual void Read(const FRenderTarget* RenderTarget) override
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsTextureRead);
 		check(IsInRenderingThread());
+		check(StagingTexture.IsValid() && StagingTexture->IsValid());
 
 		State = State::EReading;
 
@@ -75,8 +84,8 @@ struct TTextureReadBase : FTextureRead
 		// Then, transition our TextureTarget to be copyable.
 		RHICmdList.Transition(FRHITransitionInfo(RenderTarget->GetRenderTargetTexture(), ERHIAccess::Unknown, ERHIAccess::CopySrc));
 
-		// Then, copy our TextureTarget to another that can be mapped and read by the CPU.
-		RHICmdList.CopyTexture(RenderTarget->GetRenderTargetTexture(), TextureRHICopy, FRHICopyTextureInfo());
+		// Then, copy our TextureTarget to this read's dedicated staging texture.
+		RHICmdList.CopyTexture(RenderTarget->GetRenderTargetTexture(), StagingTexture, FRHICopyTextureInfo());
 
 		// Write a GPU fence to wait for the above copy to complete before reading the data.
 		const FGPUFenceRHIRef Fence = RHICreateGPUFence(TEXT("TempoCameraTextureRead"));
@@ -84,11 +93,29 @@ struct TTextureReadBase : FTextureRead
 		RHICmdList.ImmediateFlush(EImmediateFlushType::DispatchToRHIThread);
 
 		// Lastly, read the raw data from the copied TextureTarget on the CPU.
+		// Note: SurfaceWidth may be larger than ImageSize.X due to GPU row alignment padding.
+		// We must copy row-by-row to account for this pitch difference.
 		void* OutBuffer;
 		int32 SurfaceWidth, SurfaceHeight;
-		GDynamicRHI->RHIMapStagingSurface(TextureRHICopy, Fence, OutBuffer, SurfaceWidth, SurfaceHeight, RHICmdList.GetGPUMask().ToIndex());
-		FMemory::Memcpy(Image.GetData(), OutBuffer, SurfaceWidth * SurfaceHeight * sizeof(PixelType));
-		RHICmdList.UnmapStagingSurface(TextureRHICopy);
+		GDynamicRHI->RHIMapStagingSurface(StagingTexture, Fence, OutBuffer, SurfaceWidth, SurfaceHeight, RHICmdList.GetGPUMask().ToIndex());
+		const int32 SrcPitch = SurfaceWidth * sizeof(PixelType);
+		const int32 DstPitch = ImageSize.X * sizeof(PixelType);
+		if (SurfaceWidth == ImageSize.X)
+		{
+			FMemory::Memcpy(Image.GetData(), OutBuffer, DstPitch * ImageSize.Y);
+		}
+		else
+		{
+			const uint8* SrcRow = static_cast<const uint8*>(OutBuffer);
+			uint8* DstRow = reinterpret_cast<uint8*>(Image.GetData());
+			for (int32 Row = 0; Row < ImageSize.Y; ++Row)
+			{
+				FMemory::Memcpy(DstRow, SrcRow, DstPitch);
+				SrcRow += SrcPitch;
+				DstRow += DstPitch;
+			}
+		}
+		RHICmdList.UnmapStagingSurface(StagingTexture);
 
 		State = State::EReadComplete;
 	}
@@ -156,19 +183,34 @@ struct FTextureReadQueue
 		return false;
 	}
 
-	void ReadNext(const FRenderTarget* RenderTarget, const FTextureRHIRef& TextureRHICopy)
+	// Poll render fences on all awaiting reads and initiate readback for any that are ready.
+	// If bBlock is true, spin-waits on each fence. Returns true if any reads were initiated.
+	bool ReadAllAvailable(const FRenderTarget* RenderTarget, bool bBlock)
 	{
 		FRWScopeLock_OnlyGTWrite ReadLock(Lock, SLT_ReadOnly);
-		if (!PendingTextureReads.IsEmpty())
+		bool bAnyRead = false;
+		for (const TUniquePtr<FTextureRead>& TextureRead : PendingTextureReads)
 		{
-			for (const TUniquePtr<FTextureRead>& TextureRead : PendingTextureReads)
+			if (TextureRead->State != FTextureRead::State::EAwaitingRender || !TextureRead->RenderFence.IsValid())
 			{
-				if (TextureRead->State == FTextureRead::State::EAwaitingRender)
+				continue;
+			}
+			if (bBlock)
+			{
+				while (!TextureRead->RenderFence->Poll())
 				{
-					TextureRead->Read(RenderTarget, TextureRHICopy);
+					FPlatformProcess::Sleep(1e-4);
 				}
 			}
+			else if (!TextureRead->RenderFence->Poll())
+			{
+				continue;
+			}
+			TextureRead->RenderFence.SafeRelease();
+			TextureRead->Read(RenderTarget);
+			bAnyRead = true;
 		}
+		return bAnyRead;
 	}
 
 	void SkipNext()
@@ -231,6 +273,8 @@ class TEMPOSENSORSSHARED_API UTempoSceneCaptureComponent2D : public USceneCaptur
 public:
 	UTempoSceneCaptureComponent2D();
 
+	virtual void OnRegister() override;
+
 	virtual void Activate(bool bReset) override;
 	virtual void Deactivate() override;
 
@@ -250,6 +294,16 @@ protected:
 	// Derived components may override this to limit the size of the texture queue.
 	virtual int32 GetMaxTextureQueueSize() const { return -1; }
 
+	// When false, this component does not allocate staging textures, does not create FTextureReads,
+	// does not enqueue render fences, and does not increment SequenceId in UpdateSceneCaptureContents.
+	// An outer owner is expected to stitch this component's render target into a shared RT and issue
+	// a single readback command for the whole sensor. Derived tile components should return false.
+	virtual bool ShouldManageOwnReadback() const { return true; }
+
+	// When false, this component does not start a capture timer on Activate. An outer owner drives
+	// CaptureScene() directly when it has captured all its tiles. Derived tile components should return false.
+	virtual bool ShouldManageOwnTimer() const { return true; }
+
 	bool IsNextReadAwaitingRender() const;
 	void ReadNextIfAvailable();
 	void BlockUntilNextReadComplete() const;
@@ -258,50 +312,79 @@ protected:
 	bool NextReadComplete() const;
 
 	// Derived components may set this to use a non-default render target format.
-	UPROPERTY(VisibleAnywhere)
+	UPROPERTY(VisibleAnywhere, Category = "Tempo")
 	TEnumAsByte<ETextureRenderTargetFormat> RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA8;
 
 	// Derived components may set this to use a non-default pixel format.
-	UPROPERTY(VisibleAnywhere)
+	UPROPERTY(VisibleAnywhere, Category = "Tempo")
 	TEnumAsByte<EPixelFormat> PixelFormatOverride = EPixelFormat::PF_Unknown;
 
 	// The rate in Hz this sensor updates at.
-	UPROPERTY(EditAnywhere)
+	UPROPERTY(EditAnywhere, Category = "Tempo")
 	float RateHz = 10.0;
 
 	// Capture resolution.
-	UPROPERTY(EditAnywhere)
+	UPROPERTY(EditAnywhere, Category = "Tempo")
 	FIntPoint SizeXY = FIntPoint(960, 540);
 
 	// Monotonically increasing counter of frames captured.
-	UPROPERTY(VisibleAnywhere)
+	UPROPERTY(VisibleAnywhere, Category = "Tempo")
 	int32 SequenceId = 0;
 
 	// Initialize our RenderTarget and TextureRHICopy with the current settings.
 	virtual void InitRenderTarget();
 
+	// Override this to initialize the distortion map texture with a projection-specific mapping.
+	virtual void InitDistortionMap() {}
+
+	// Create or resize the distortion map texture to the given size. Allocates into OutTexture.
+	static void CreateOrResizeDistortionMapTexture(UTexture2D*& OutTexture, const FIntPoint& TextureSizeXY);
+
+	// Apply the distortion map texture to the given material instance.
+	static void ApplyDistortionMapToMaterial(UMaterialInstanceDynamic* MaterialInstance, UTexture2D* DistortionMap);
+
+	// Fill the distortion map texture using the given distortion model.
+	// OutputSizeXY / FOutput describe the output (distorted) image (loop bounds + normalization).
+	// RenderSizeXY plus the signed Tan{Left,Right,Top,Bottom} bounds describe the render
+	// (perspective) image — the UV [0,1] range maps linearly across [TanLeft, TanRight] and
+	// [TanTop, TanBottom]. Off-axis frustums collapse the wasted regions of a symmetric frustum
+	// and write the same UV semantics; old call sites get unchanged behavior by passing
+	// TanLeft = -TanRight and TanTop = -TanBottom.
+	static void FillDistortionMap(UTexture2D* DistortionMap, const FLensModel& Model,
+		const FIntPoint& OutputSizeXY, double FOutput,
+		const FIntPoint& RenderSizeXY,
+		double TanLeft, double TanRight, double TanTop, double TanBottom);
+
 	// Gets the number of pending texture reads
 	int32 NumPendingTextureReads() const { return TextureReadQueue.Num(); }
 
+	// Returns the next staging texture from the ring buffer and advances the index.
+	FTextureRHIRef AcquireNextStagingTexture();
+
+protected:
+	// (Re)allocates the staging-texture ring sized to the given dimensions and format. Waits for any
+	// previous init render command to complete before reallocating. Derived classes whose readback
+	// target is not the inherited TextureTarget call this from their own RT init path.
+	void AllocateStagingTextures(int32 SizeX, int32 SizeY, EPixelFormat PixelFormat);
+
+	// Ring buffer of staging textures for GPU->CPU readback. Each in-flight FTextureRead
+	// gets its own staging texture, preventing tearing when multiple frames are in flight.
+	TArray<FTextureRHIRef> StagingTextures;
+	FCriticalSection StagingTexturesMutex;
+	int32 NextStagingIndex = 0;
+
+	// A fence to indicate that our staging textures have been initialized. Should only be accessed from the Game thread.
+	FRenderCommandFence TextureInitFence;
+
 private:
 	// Starts or restarts the timer that calls MaybeCapture
-	void RestartCaptureTimer();
+	virtual void RestartCaptureTimer();
 
 	// Capture a frame, if any client has requested one.
-	void MaybeCapture();
+	virtual void MaybeCapture();
 
 	// Our Queue of pending texture reads.
 	FTextureReadQueue TextureReadQueue;
-
-	// A fence to indicate that our render textures have been initialized. Should only be accessed from the Game thread.
-	FRenderCommandFence TextureInitFence;
-
-	// A GPU fence to indicate that our latest render has completed. Should only be accessed from the Render thread.
-	FGPUFenceRHIRef RenderFence;
-
-	// We must copy our TextureTarget's resource here before reading it on the CPU
-	// because USceneCaptureComponent's RenderTarget is not set up to do so.
-	FTextureRHIRef TextureRHICopy;
 
 	FTimerHandle TimerHandle;
 };

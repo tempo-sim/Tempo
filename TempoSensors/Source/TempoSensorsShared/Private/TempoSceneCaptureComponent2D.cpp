@@ -8,6 +8,7 @@
 #include "TempoSensorsShared/Common.pb.h"
 
 #include "TempoCoreSettings.h"
+#include "TempoCoreUtils.h"
 
 #include "Engine/TextureRenderTarget2D.h"
 #include "Kismet/GameplayStatics.h"
@@ -46,20 +47,41 @@ UTempoSceneCaptureComponent2D::UTempoSceneCaptureComponent2D()
 	bAlwaysPersistRenderingState = true;
 }
 
+void UTempoSceneCaptureComponent2D::OnRegister()
+{
+	Super::OnRegister();
+
+#if WITH_EDITORONLY_DATA
+	if (ProxyMeshComponent)
+	{
+		ProxyMeshComponent->SetVisibility(false);
+	}
+#endif
+}
+
 void UTempoSceneCaptureComponent2D::Activate(bool bReset)
 {
 	Super::Activate(bReset);
 
-	InitRenderTarget();
-	RestartCaptureTimer();
+	if (UTempoCoreUtils::IsGameWorld(this))
+	{
+		InitRenderTarget();
+		if (ShouldManageOwnTimer())
+		{
+			RestartCaptureTimer();
+		}
+	}
 }
 
 void UTempoSceneCaptureComponent2D::Deactivate()
 {
 	Super::Deactivate();
 
-	GetWorld()->GetTimerManager().ClearTimer(TimerHandle);
-	TextureReadQueue.Empty();
+	if (UTempoCoreUtils::IsGameWorld(this))
+	{
+		GetWorld()->GetTimerManager().ClearTimer(TimerHandle);
+		TextureReadQueue.Empty();
+	}
 }
 
 #if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
@@ -137,18 +159,25 @@ void UTempoSceneCaptureComponent2D::UpdateSceneCaptureContents(FSceneInterface* 
 	}
 
 	const FTextureRenderTargetResource* RenderTarget = TextureTarget->GameThread_GetRenderTargetResource();
-	if (!ensureMsgf(RenderTarget && RenderTarget->IsInitialized(), TEXT("RenderTarget was not initialized. Skipping capture.")) ||
-		!ensureMsgf(TextureRHICopy.IsValid() && TextureRHICopy->IsValid(), TEXT("TextureRHICopy was not valid. Skipping capture.")) ||
-		!ensureMsgf(TextureRHICopy->GetFormat() == TextureTarget->GetFormat(), TEXT("RenderTarget and TextureRHICopy did not have same format. Skipping Capture.")))
+	if (!ensureMsgf(RenderTarget && RenderTarget->IsInitialized(), TEXT("RenderTarget was not initialized. Skipping capture.")))
 	{
 		return;
 	}
 
-	const int32 MaxTextureQueueSize = GetMaxTextureQueueSize();
-	if (MaxTextureQueueSize > 0 && TextureReadQueue.Num() > MaxTextureQueueSize)
+	if (ShouldManageOwnReadback())
 	{
-		UE_LOG(LogTempoSensorsShared, Warning, TEXT("Fell behind while reading frames from sensor %s. Skipping capture."), *GetName());
-		return;
+		if (!ensureMsgf(StagingTextures.Num() > 0 && StagingTextures[0].IsValid() && StagingTextures[0]->IsValid(), TEXT("StagingTextures were not valid. Skipping capture.")) ||
+			!ensureMsgf(StagingTextures[0]->GetFormat() == TextureTarget->GetFormat(), TEXT("RenderTarget and StagingTextures did not have same format. Skipping Capture.")))
+		{
+			return;
+		}
+
+		const int32 MaxTextureQueueSize = GetMaxTextureQueueSize();
+		if (MaxTextureQueueSize > 0 && TextureReadQueue.Num() > MaxTextureQueueSize)
+		{
+			UE_LOG(LogTempoSensorsShared, Warning, TEXT("Fell behind while reading frames from sensor %s. Skipping capture."), *GetName());
+			return;
+		}
 	}
 
 #if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
@@ -156,20 +185,25 @@ void UTempoSceneCaptureComponent2D::UpdateSceneCaptureContents(FSceneInterface* 
 #else
 	Super::UpdateSceneCaptureContents(Scene, SceneRenderBuilder);
 #endif
-	
-	ENQUEUE_RENDER_COMMAND(SetTempoSceneCaptureRenderFence)(
-	[this](FRHICommandList& RHICmdList)
+
+	if (!ShouldManageOwnReadback())
 	{
-		if (!RenderFence.IsValid())
-		{
-			RenderFence = RHICreateGPUFence(TEXT("TempoCameraRenderFence"));
-			RHICmdList.WriteGPUFence(RenderFence);
-		}
-	});
-	
+		return;
+	}
+
 	SequenceId++;
 
-	TextureReadQueue.Enqueue(MakeTextureRead());
+	FTextureRead* NewRead = MakeTextureRead();
+	NewRead->StagingTexture = AcquireNextStagingTexture();
+
+	ENQUEUE_RENDER_COMMAND(SetTempoSceneCaptureRenderFence)(
+	[NewRead](FRHICommandList& RHICmdList)
+	{
+		NewRead->RenderFence = RHICreateGPUFence(TEXT("TempoCameraRenderFence"));
+		RHICmdList.WriteGPUFence(NewRead->RenderFence);
+	});
+
+	TextureReadQueue.Enqueue(NewRead);
 }
 
 bool UTempoSceneCaptureComponent2D::IsNextReadAwaitingRender() const
@@ -179,35 +213,22 @@ bool UTempoSceneCaptureComponent2D::IsNextReadAwaitingRender() const
 
 void UTempoSceneCaptureComponent2D::ReadNextIfAvailable()
 {
-	if (!TextureReadQueue.IsNextAwaitingRender() || !RenderFence.IsValid())
+	if (!TextureReadQueue.IsNextAwaitingRender())
 	{
 		return;
 	}
-
-	if (GetDefault<UTempoCoreSettings>()->GetTimeMode() == ETimeMode::FixedStep)
-	{
-		while (!RenderFence->Poll())
-		{
-			FPlatformProcess::Sleep(1e-4);
-		}
-	}
-	else if (!RenderFence->Poll())
-	{
-		return;
-	}
-
-	RenderFence.SafeRelease();
 
 	const FRenderTarget* RenderTarget = TextureTarget->GetRenderTargetResource();
-	if (!ensureMsgf(RenderTarget, TEXT("RenderTarget was not initialized. Skipping texture read.")) ||
-		!ensureMsgf(TextureRHICopy.IsValid() && TextureRHICopy->IsValid(), TEXT("TextureRHICopy was not valid. Skipping texture read.")) ||
-		!ensureMsgf(TextureRHICopy->GetFormat() == TextureTarget->GetFormat(), TEXT("RenderTarget and TextureRHICopy did not have same format. Skipping texture read.")))
+	if (!ensureMsgf(RenderTarget, TEXT("RenderTarget was not initialized. Skipping texture read.")))
 	{
 		TextureReadQueue.SkipNext();
 		return;
 	}
 
-	TextureReadQueue.ReadNext(RenderTarget, TextureRHICopy);
+	const bool bShouldBlock = GetDefault<UTempoCoreSettings>()->GetTimeMode() == ETimeMode::FixedStep
+		&& !GetDefault<UTempoSensorsSettings>()->GetPipelinedRendering();
+
+	TextureReadQueue.ReadAllAvailable(RenderTarget, bShouldBlock);
 }
 
 void UTempoSceneCaptureComponent2D::BlockUntilNextReadComplete() const
@@ -228,6 +249,77 @@ TOptional<int32> UTempoSceneCaptureComponent2D::SequenceIDOfNextCompleteRead() c
 bool UTempoSceneCaptureComponent2D::NextReadComplete() const
 {
 	return TextureReadQueue.NextReadComplete();
+}
+
+void UTempoSceneCaptureComponent2D::CreateOrResizeDistortionMapTexture(UTexture2D*& OutTexture, const FIntPoint& TextureSizeXY)
+{
+	if (TextureSizeXY.X <= 0 || TextureSizeXY.Y <= 0)
+	{
+		return;
+	}
+
+	OutTexture = UTexture2D::CreateTransient(TextureSizeXY.X, TextureSizeXY.Y, PF_G16R16F);
+	OutTexture->CompressionSettings = TC_HDR;
+	OutTexture->Filter = TF_Bilinear;
+	OutTexture->AddressX = TA_Clamp;
+	OutTexture->AddressY = TA_Clamp;
+	OutTexture->SRGB = 0;
+	OutTexture->UpdateResource();
+}
+
+void UTempoSceneCaptureComponent2D::ApplyDistortionMapToMaterial(UMaterialInstanceDynamic* MaterialInstance, UTexture2D* DistortionMap)
+{
+	if (MaterialInstance && DistortionMap)
+	{
+		MaterialInstance->SetTextureParameterValue(FName("DistortionMap"), DistortionMap);
+	}
+}
+
+void UTempoSceneCaptureComponent2D::FillDistortionMap(UTexture2D* DistortionMap, const FLensModel& Model, const FIntPoint& OutputSizeXY,
+	double FOutput, const FIntPoint& RenderSizeXY,
+	double TanLeft, double TanRight, double TanTop, double TanBottom)
+{
+	if (!DistortionMap || OutputSizeXY.X <= 0 || OutputSizeXY.Y <= 0)
+	{
+		return;
+	}
+
+	FTexture2DMipMap& Mip = DistortionMap->GetPlatformData()->Mips[0];
+	uint16* MipData = static_cast<uint16*>(Mip.BulkData.Lock(LOCK_READ_WRITE));
+
+	if (!MipData)
+	{
+		Mip.BulkData.Unlock();
+		return;
+	}
+
+	// Output image center (for pixel-to-normalized conversion).
+	const double OutputCx = OutputSizeXY.X * 0.5;
+	const double OutputCy = OutputSizeXY.Y * 0.5;
+
+	// UV linearly spans [TanLeft, TanRight] and [TanTop, TanBottom]. For symmetric frustums
+	// (TanLeft = -TanRight) this reduces to the legacy formula Render*FRender / RenderSize + 0.5.
+	const double InvTanWidth = 1.0 / (TanRight - TanLeft);
+	const double InvTanHeight = 1.0 / (TanBottom - TanTop);
+
+	for (int V = 0; V < OutputSizeXY.Y; ++V)
+	{
+		uint16* Row = &MipData[V * OutputSizeXY.X * 2];
+		const double OutputY = (V + 0.5 - OutputCy) / FOutput;
+
+		for (int U = 0; U < OutputSizeXY.X; ++U)
+		{
+			const double OutputX = (U + 0.5 - OutputCx) / FOutput;
+			const FVector2D Render = Model.OutputToRender(OutputX, OutputY);
+			const float FinalU = static_cast<float>((Render.X - TanLeft) * InvTanWidth);
+			const float FinalV = static_cast<float>((Render.Y - TanTop) * InvTanHeight);
+			Row[U * 2 + 0] = FFloat16(FinalU).Encoded;
+			Row[U * 2 + 1] = FFloat16(FinalV).Encoded;
+		}
+	}
+
+	Mip.BulkData.Unlock();
+	DistortionMap->UpdateResource();
 }
 
 void UTempoSceneCaptureComponent2D::InitRenderTarget()
@@ -251,41 +343,82 @@ void UTempoSceneCaptureComponent2D::InitRenderTarget()
 		TextureTarget->InitCustomFormat(SizeXY.X, SizeXY.Y, PixelFormatOverride, true);
 	}
 
-	struct FInitCPUCopyContext {
-		FString Name;
-		int32 SizeX;
-		int32 SizeY;
-		EPixelFormat PixelFormat;
-		FTextureRHIRef* TextureRHICopy;
-	};
+	if (!ShouldManageOwnReadback())
+	{
+		// Outer owner manages staging and readback; nothing else for us to do here.
+		InitDistortionMap();
+		return;
+	}
 
-	FInitCPUCopyContext Context = {
-		FString::Printf(TEXT("%s TextureRHICopy"), *GetName()),
-		TextureTarget->SizeX,
-		TextureTarget->SizeY,
-		TextureTarget->GetFormat(),
-		&TextureRHICopy
-	};
-
-	ENQUEUE_RENDER_COMMAND(InitTempoSceneCaptureTextureCopy)(
-		[Context](FRHICommandListImmediate& RHICmdList)
-		{
-			// Create the TextureRHICopy, where we will copy our TextureTarget's resource before reading it on the CPU.
-			constexpr ETextureCreateFlags TexCreateFlags = ETextureCreateFlags::Shared | ETextureCreateFlags::CPUReadback;
-
-			const FRHITextureCreateDesc Desc =
-				FRHITextureCreateDesc::Create2D(*Context.Name)
-				.SetExtent(Context.SizeX, Context.SizeY)
-				.SetFormat(Context.PixelFormat)
-				.SetFlags(TexCreateFlags);
-
-			*Context.TextureRHICopy = RHICreateTexture(Desc);
-		});
-
-	TextureInitFence.BeginFence();
+	AllocateStagingTextures(TextureTarget->SizeX, TextureTarget->SizeY, TextureTarget->GetFormat());
 
 	// Any pending texture reads might have the wrong pixel format.
 	TextureReadQueue.Empty();
+
+	InitDistortionMap();
+}
+
+void UTempoSceneCaptureComponent2D::AllocateStagingTextures(int32 SizeX, int32 SizeY, EPixelFormat PixelFormat)
+{
+	// Wait for any previous staging texture init render command to complete before modifying
+	// StagingTextures, since the render command accesses the array via raw pointer.
+	TextureInitFence.Wait();
+
+	// Determine how many staging textures to create. We need at least as many as the max
+	// texture queue size to ensure each in-flight read gets its own staging texture.
+	const int32 MaxQueueSize = GetMaxTextureQueueSize();
+	const int32 NumStagingTextures = FMath::Max(2, MaxQueueSize > 0 ? MaxQueueSize + 1 : 2);
+
+	{
+		FScopeLock StagingTexturesLock(&StagingTexturesMutex);
+		if (NumStagingTextures != StagingTextures.Num())
+		{
+			StagingTextures.SetNum(NumStagingTextures);
+			NextStagingIndex = 0;
+		}
+	}
+
+	struct FInitStagingContext {
+		FString NameBase;
+		int32 SizeX;
+		int32 SizeY;
+		EPixelFormat PixelFormat;
+		int32 NumTextures;
+		TArray<FTextureRHIRef>* StagingTextures;
+		FCriticalSection* StagingTexturesMutex;
+	};
+
+	FInitStagingContext Context = {
+		GetName(),
+		SizeX,
+		SizeY,
+		PixelFormat,
+		NumStagingTextures,
+		&StagingTextures,
+		&StagingTexturesMutex
+	};
+
+	ENQUEUE_RENDER_COMMAND(InitTempoSceneCaptureStagingTextures)(
+		[Context](FRHICommandListImmediate& RHICmdList)
+		{
+			constexpr ETextureCreateFlags TexCreateFlags = ETextureCreateFlags::Shared | ETextureCreateFlags::CPUReadback;
+
+			for (int32 I = 0; I < Context.NumTextures; ++I)
+			{
+				const FRHITextureCreateDesc Desc =
+					FRHITextureCreateDesc::Create2D(*FString::Printf(TEXT("%s StagingTexture %d"), *Context.NameBase, I))
+					.SetExtent(Context.SizeX, Context.SizeY)
+					.SetFormat(Context.PixelFormat)
+					.SetFlags(TexCreateFlags);
+
+				{
+					FScopeLock StagingTexturesLock(Context.StagingTexturesMutex);
+					(*Context.StagingTextures)[I] = RHICreateTexture(Desc);
+				}
+			}
+		});
+
+	TextureInitFence.BeginFence();
 }
 
 float GetTimerPeriod(float RateHz)
@@ -334,4 +467,12 @@ void UTempoSceneCaptureComponent2D::MaybeCapture()
 	{
 		CaptureSceneDeferred();
 	}
+}
+
+FTextureRHIRef UTempoSceneCaptureComponent2D::AcquireNextStagingTexture()
+{
+	check(StagingTextures.Num() > 0);
+	const FTextureRHIRef& Texture = StagingTextures[NextStagingIndex];
+	NextStagingIndex = (NextStagingIndex + 1) % StagingTextures.Num();
+	return Texture;
 }

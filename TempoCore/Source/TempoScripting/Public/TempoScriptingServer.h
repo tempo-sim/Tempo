@@ -129,6 +129,7 @@ struct FRequestManager : TSharedFromThis<FRequestManager>
 	virtual ~FRequestManager() = default;
 	enum EState { UNINITIALIZED, REQUESTED, HANDLING, RESPONDING, FINISHING };
 	virtual EState GetState() const = 0;
+	virtual bool HasUnflushedWork() const = 0;
 	virtual void Init(grpc::ServerCompletionQueue* CompletionQueue) = 0;
 	virtual void HandleAndRespond() = 0;
 	virtual FRequestManager* Duplicate(int32 NewTag) const = 0;
@@ -145,6 +146,12 @@ public:
 		: State(UNINITIALIZED), Tag(TagIn), Handler(HandlerIn), ServiceName(ServiceNameIn), Service(ServiceIn), Responder(&Context) {}
 	
 	virtual EState GetState() const override { return State; }
+
+	virtual bool HasUnflushedWork() const override
+	{
+		// A write or finish is in flight — we must wait for the completion event.
+		return State == FRequestManager::EState::RESPONDING || State == FRequestManager::EState::FINISHING;
+	}
 
 	virtual void Init(grpc::ServerCompletionQueue* CompletionQueue) override
 	{
@@ -229,11 +236,23 @@ class TRequestManager<TStreamingRequestHandler<ServiceType, RequestType, Respons
 	using Base = TRequestManagerBase<TStreamingRequestHandler<ServiceType, RequestType, ResponseType, UserObjectType, Const>>;
 
 public:
+	virtual bool HasUnflushedWork() const override
+	{
+		// Either a write/finish is in flight, or we have responses queued behind the in-flight write.
+		return Base::State == FRequestManager::EState::RESPONDING
+			|| Base::State == FRequestManager::EState::FINISHING
+			|| !ResponseQueue.IsEmpty();
+	}
+
 	virtual void HandleAndRespond() override
 	{
 		check(Base::State == FRequestManager::EState::REQUESTED || Base::State == FRequestManager::EState::RESPONDING);
+
 		if (!Base::ResponseDelegate.IsBound())
 		{
+			// First invocation for this request. Bind the delegate and run the user handler.
+			// The delegate writes immediately if no write is in flight; otherwise it enqueues
+			// for the next write-completion event to drain.
 			Base::ResponseDelegate = TResponseDelegate<ResponseType>::CreateSPLambda(static_cast<FRequestManager*>(this), [this](const ResponseType& Response, grpc::Status Result)
 			{
 				if (Base::State == FRequestManager::EState::HANDLING)
@@ -247,15 +266,17 @@ public:
 			});
 			Base::State = FRequestManager::EState::HANDLING;
 			Base::Handler->HandleRequest(Base::Request, Base::ResponseDelegate);
+			return;
 		}
 
+		// A write just completed. If more responses are queued, write the next one.
+		// Otherwise ask the user handler for more.
 		TPair<ResponseType, grpc::Status> ResponseItem;
 		if (ResponseQueue.Dequeue(ResponseItem))
 		{
 			Respond(ResponseItem.Key, ResponseItem.Value);
 		}
-
-		if (Base::State == FRequestManager::EState::RESPONDING && PendingWrites > 0 && --PendingWrites == 0)
+		else
 		{
 			Base::State = FRequestManager::EState::HANDLING;
 			Base::Handler->HandleRequest(Base::Request, Base::ResponseDelegate);
@@ -269,7 +290,6 @@ public:
 
 	void Respond(const ResponseType& Response, grpc::Status Result)
 	{
-		++PendingWrites;
 		if (!Result.ok())
 		{
 			// Consider non-OK result to mean there are no more responses available.
@@ -280,8 +300,6 @@ public:
 		Base::State = FRequestManager::EState::RESPONDING;
 		Base::Responder.Write(Response, &(Base::Tag));
 	}
-
-	int32 PendingWrites = 0;
 
 	TQueue<TPair<ResponseType, grpc::Status>> ResponseQueue;
 };

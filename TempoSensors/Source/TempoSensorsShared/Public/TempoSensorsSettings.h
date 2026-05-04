@@ -22,6 +22,8 @@ class TEMPOSENSORSSHARED_API UTempoSensorsSettings : public UDeveloperSettings
 public:
 	UTempoSensorsSettings();
 
+	virtual void PostInitProperties() override;
+
 #if WITH_EDITOR
 	virtual FText GetSectionText() const override;
 #endif
@@ -35,12 +37,19 @@ public:
 	// Camera
 	TObjectPtr<UMaterialInterface> GetCameraPostProcessMaterialNoDepth() const { return CameraPostProcessMaterialNoDepth.LoadSynchronous(); }
 	TObjectPtr<UMaterialInterface> GetCameraPostProcessMaterialWithDepth() const { return CameraPostProcessMaterialWithDepth.LoadSynchronous(); }
+	TObjectPtr<UMaterialInterface> GetCameraStitchPassthroughMaterial() const { return CameraStitchPassthroughMaterial.LoadSynchronous(); }
+	TObjectPtr<UMaterialInterface> GetCameraStitchAuxMaterial() const { return CameraStitchAuxMaterial.LoadSynchronous(); }
+	TObjectPtr<UMaterialInterface> GetCameraStitchColorFeatherMaterial() const { return CameraStitchColorFeatherMaterial.LoadSynchronous(); }
+	TObjectPtr<UMaterialInterface> GetCameraStitchMergeMaterialWithDepth() const { return CameraStitchMergeMaterialWithDepth.LoadSynchronous(); }
+	TObjectPtr<UMaterialInterface> GetCameraStitchMergeMaterialNoDepth() const { return CameraStitchMergeMaterialNoDepth.LoadSynchronous(); }
+	TObjectPtr<UMaterialInterface> GetCameraProxyTonemapMaterial() const { return CameraProxyTonemapMaterial.LoadSynchronous(); }
 	EColorImageEncoding GetColorImageEncoding() const { return ColorImageEncoding; }
 	float GetMaxCameraDepth() const { return MaxCameraDepth; }
 	float GetSceneCaptureGamma() const { return SceneCaptureGamma; }
 	FName GetOverridableLabelRowName() const { return OverridableLabelRowName; }
 	FName GetOverridingLabelRowName() const { return OverridingLabelRowName; }
 	int32 GetMaxCameraRenderBufferSize() const { return MaxCameraRenderBufferSize; }
+	bool GetPipelinedRendering() const { return bPipelinedRendering; }
 	FTempoSensorsLabelSettingsChanged TempoSensorsLabelSettingsChangedEvent;
 
 	// Lidar
@@ -75,12 +84,58 @@ private:
 	bool bInstantaneouslyUniqueInstanceLabels = false;
 
 	// The post process material that should be used by TempoCamera when not capturing the depth image.
-	UPROPERTY(EditAnywhere, Config, Category="Camera", meta=( AllowedClasses="/Script/Engine.BlendableInterface", Keywords="PostProcess" ))
+	UPROPERTY(EditAnywhere, Config, Category="Advanced", meta=( AllowedClasses="/Script/Engine.BlendableInterface", Keywords="PostProcess" ))
 	TSoftObjectPtr<UMaterialInterface> CameraPostProcessMaterialNoDepth;
 
 	// The post process material that should be used by TempoCamera when capturing the depth image.
-	UPROPERTY(EditAnywhere, Config, Category="Camera", meta=( AllowedClasses="/Script/Engine.BlendableInterface", Keywords="PostProcess" ))
+	UPROPERTY(EditAnywhere, Config, Category="Advanced", meta=( AllowedClasses="/Script/Engine.BlendableInterface", Keywords="PostProcess" ))
 	TSoftObjectPtr<UMaterialInterface> CameraPostProcessMaterialWithDepth;
+
+	// The UI-domain material used to copy each tile render target into the shared stitched render
+	// target via Canvas. Must have a Texture2D parameter named "TileRT" and output its sampled RGBA
+	// unchanged to Final Color. Used by UTempoCamera's tile stitch.
+	UPROPERTY(EditAnywhere, Config, Category="Advanced", meta=( AllowedClasses="/Script/Engine.MaterialInterface" ))
+	TSoftObjectPtr<UMaterialInterface> CameraStitchPassthroughMaterial;
+
+	// The material used to resolve the per-tile distorted atlas alpha into label+depth bytes in
+	// the shared aux render target. Run as a full-screen Canvas pass over the equidistant output.
+	// Must have Texture2D parameters "TileRT" (the atlas), "OutputResolveMap" (RGBA fp16 with the
+	// two contributing tiles' atlas UVs), and "OutputResolveWeight" (R fp16 with tile-A weight in
+	// [0,1]). Picks atlas UV by ownership (Weight >= 0.5 → UV_A else UV_B) — label is integer and
+	// depth is bit-packed, neither is safely averageable across a feather band — then point-samples
+	// TileRT.a there and unpacks the bit-packed label+depth bytes.
+	UPROPERTY(EditAnywhere, Config, Category="Advanced", meta=( AllowedClasses="/Script/Engine.MaterialInterface" ))
+	TSoftObjectPtr<UMaterialInterface> CameraStitchAuxMaterial;
+
+	// The material used to resolve the per-tile distorted atlas into the final equidistant HDR output
+	// with feathered seams between adjacent tiles. Run as a full-screen Canvas pass that writes to the
+	// stitch HDR RT (which the proxy tonemap PPM then reads as scene color). Must have Texture2D
+	// parameters "AtlasRT" (the atlas of per-tile distorted outputs), "OutputResolveMap" (RGBA fp16 with
+	// channels (AtlasU_A, AtlasV_A, AtlasU_B, AtlasV_B)), and "OutputResolveWeight" (R fp16, weight of
+	// tile A in [0,1]). Output color = lerp(sample(AtlasRT, UV_B), sample(AtlasRT, UV_A), Weight).
+	UPROPERTY(EditAnywhere, Config, Category="Advanced", meta=( AllowedClasses="/Script/Engine.MaterialInterface" ))
+	TSoftObjectPtr<UMaterialInterface> CameraStitchColorFeatherMaterial;
+
+	// Merge material used when depth is enabled. Output RT is PF_A16B16G16R16 (16-bit UNORM per
+	// channel, 8 bytes/pixel) matching FCameraPixelWithDepth. Must have Texture2D parameters
+	// "ColorRT" (fp16 HDR linear) and "AuxRT" (RGBA8 with label in R and 24-bit depth in GBA).
+	// Packs (saturated LDR color bytes, label byte, 24-bit depth bytes) into the 4 UNORM16 channels.
+	UPROPERTY(EditAnywhere, Config, Category="Advanced", meta=( AllowedClasses="/Script/Engine.MaterialInterface" ))
+	TSoftObjectPtr<UMaterialInterface> CameraStitchMergeMaterialWithDepth;
+
+	// Merge material used when depth is disabled. Output RT is RGBA8 (4 bytes/pixel) matching
+	// FCameraPixelNoDepth. Same texture parameters as the WithDepth variant; packs (BGR color
+	// bytes, label byte) into the RGBA8 output. AuxRT's G/B/A channels (depth bytes) are ignored.
+	UPROPERTY(EditAnywhere, Config, Category="Advanced", meta=( AllowedClasses="/Script/Engine.MaterialInterface" ))
+	TSoftObjectPtr<UMaterialInterface> CameraStitchMergeMaterialNoDepth;
+
+	// Post-process material used by UTempoCamera's proxy scene capture. Runs at blendable location
+	// "Scene Color Before Bloom" so its output replaces scene color before Bloom/AE/Tonemapper.
+	// Must have a Texture2D parameter "HDRColorRT" (Linear Color sampler) bound to the stitched
+	// HDR render target; the sampled RGB is written to Emissive Color so the tonemapper operates
+	// on the stitched-tile color rather than the (empty) scene render.
+	UPROPERTY(EditAnywhere, Config, Category="Advanced", meta=( AllowedClasses="/Script/Engine.BlendableInterface", Keywords="PostProcess" ))
+	TSoftObjectPtr<UMaterialInterface> CameraProxyTonemapMaterial;
 
 	// Encoding to use for color images.
 	UPROPERTY(EditAnywhere, Config, Category="Camera")
@@ -96,8 +151,8 @@ private:
 	
 	// The max number of frames per camera to buffer before dropping.
 	UPROPERTY(EditAnywhere, Config, Category="Camera", AdvancedDisplay)
-	int32 MaxCameraRenderBufferSize = 2;
-
+	int32 MaxCameraRenderBufferSize = 4;
+	
 	// This special row can be overriden by a value passed through the subsurface color.
 	UPROPERTY(EditAnywhere, Config, Category="Camera")
 	FName OverridableLabelRowName = NAME_None;
@@ -125,4 +180,12 @@ private:
 	// The size of buffer to use as an override in FRayTracingScene, if enabled.
 	UPROPERTY(EditAnywhere, Config, Category="Advanced", meta=(EditCondition=bEnableRayTracingSceneReadbackBuffersOverrunWorkaround))
 	uint32 RayTracingSceneMaxReadbackBuffersOverride = 40;
+
+	// When true, FixedStep mode allows the game thread to advance without waiting for sensor
+	// readback to complete. Sensor images may arrive 1-2 frames late, but throughput increases
+	// because the game, render, and readback pipelines run in parallel. Each image's
+	// MeasurementHeader carries the correct CaptureTime and SequenceId so clients know which
+	// simulation frame the data corresponds to.
+	UPROPERTY(EditAnywhere, Config, Category="Advanced")
+	bool bPipelinedRendering = false;
 };
