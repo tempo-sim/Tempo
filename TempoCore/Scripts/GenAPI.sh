@@ -35,13 +35,23 @@ VENV_DIR="$PROJECT_ROOT/TempoEnv"
 VENV_EXISTS=0
 if [ -f "$VENV_DIR/pyvenv.cfg" ]; then
   VENV_PYTHON_DIR=$(grep "home = " "$VENV_DIR/pyvenv.cfg" | sed 's/^home = //' | tr '\\' '/')
+  # The 'command' field (Python 3.11+) records the venv's creation path. If the
+  # venv has since been moved/renamed, activate's baked-in paths are stale and
+  # python/pip silently fall through to system PATH instead of using the venv.
+  VENV_CREATED_AT=$(grep "^command = " "$VENV_DIR/pyvenv.cfg" | sed -E 's|^command = .* -m venv ||' | tr -d '\r' | tr '\\' '/')
   if [[ "$OSTYPE" = "msys" ]]; then
     VENV_PYTHON_DIR=$(cygpath -a "$VENV_PYTHON_DIR")
+    if [ -n "$VENV_CREATED_AT" ]; then
+      VENV_CREATED_AT=$(cygpath -a "$VENV_CREATED_AT")
+    fi
   fi
-  if [[ "$VENV_PYTHON_DIR" = "$PYTHON_DIR" ]]; then
-    VENV_EXISTS=1
-  else
+  if [[ "$VENV_PYTHON_DIR" != "$PYTHON_DIR" ]]; then
     rm -rf "$VENV_DIR"
+  elif [ -n "$VENV_CREATED_AT" ] && [[ "$VENV_CREATED_AT" != "$VENV_DIR" ]]; then
+    echo "[Tempo Prebuild] TempoEnv was created at $VENV_CREATED_AT but now lives at $VENV_DIR; recreating"
+    rm -rf "$VENV_DIR"
+  else
+    VENV_EXISTS=1
   fi
 fi
 if [ "$VENV_EXISTS" -eq 0 ]; then
