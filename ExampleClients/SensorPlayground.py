@@ -9,6 +9,7 @@ import io
 import math
 import numpy as np
 import random
+import tempfile
 
 import tempo
 import tempo.tempo_sensors as ts
@@ -439,6 +440,85 @@ async def flow_end_stream(sensor_streams):
         print(f"\n  Ended stream: {selection}")
 
 
+async def flow_start_recording(record_streams):
+    print("\n--- Start Sensor Data Recording ---")
+    available_sensors = await get_available_sensors("Camera")
+    if not available_sensors:
+        print("  No cameras found.")
+        return
+
+    items = []
+    for sensor in available_sensors:
+        for measurement_type in sensor.measurement_types:
+            if measurement_type == Sensors.LIDAR_SCAN:
+                continue
+            label = f"{sensor.owner}:{sensor.name}:{measurement_type_string(measurement_type)}"
+            items.append(((sensor, measurement_type), label))
+
+    if not items:
+        print("  No camera streams available.")
+        return
+
+    selection = await fuzzy_select(items, "Which sensor stream?")
+    if selection == RESTART_SENTINEL:
+        return
+
+    sensor, measurement_type = selection
+    key = f"{sensor.owner}:{sensor.name}:{measurement_type_string(measurement_type)}"
+
+    if key in record_streams:
+        print(f"\n  Already recording {key}")
+        return
+
+    output_dir = tempfile.mkdtemp(
+        prefix=f"tempo_recording_{sensor.name}_{measurement_type_string(measurement_type)}_"
+    )
+    print(f"\n  Recording {key} to: {output_dir}")
+
+    try:
+        task = None
+        if measurement_type == Sensors.COLOR_IMAGE:
+            task = asyncio.create_task(tiu.record_color_images(sensor.name, sensor.owner, output_dir))
+        elif measurement_type == Sensors.DEPTH_IMAGE:
+            task = asyncio.create_task(tiu.record_depth_images(sensor.name, sensor.owner, output_dir))
+        elif measurement_type == Sensors.LABEL_IMAGE:
+            task = asyncio.create_task(tiu.record_label_images(sensor.name, sensor.owner, output_dir))
+
+        if task is not None:
+            def on_record_done(t, stream_key=key, out_dir=output_dir):
+                if stream_key in record_streams and record_streams[stream_key][0] is t:
+                    del record_streams[stream_key]
+                    if not t.cancelled():
+                        exc = t.exception()
+                        if exc is not None:
+                            print(f"\n  Recording {stream_key} died: {exc}")
+                            print(f"  Files saved to: {out_dir}")
+            task.add_done_callback(on_record_done)
+            record_streams[key] = (task, output_dir)
+    except grpc.aio._call.AioRpcError as e:
+        print(f"  Error while starting sensor data recording: {e}")
+
+
+async def flow_end_recording(record_streams):
+    print("\n--- End Sensor Data Recording ---")
+    if not record_streams:
+        print("  No active recordings.")
+        return
+
+    items = [(key, key) for key in record_streams.keys()]
+    selection = await fuzzy_select(items, "Which recording?")
+    if selection == RESTART_SENTINEL:
+        return
+
+    if selection in record_streams:
+        task, output_dir = record_streams[selection]
+        if not task.done():
+            task.cancel()
+        del record_streams[selection]
+        print(f"\n  Ended recording: {selection}")
+        print(f"  Files saved to: {output_dir}")
+
+
 async def flow_move_actor():
     print("\n--- Move Actor ---")
 
@@ -469,15 +549,17 @@ async def flow_move_actor():
 # ---------------------------------------------------------------------------
 
 TOP_LEVEL_ACTIONS = [
-    ("add",        "Add a sensor"),
-    ("remove",     "Remove a sensor"),
-    ("reposition", "Reposition a sensor"),
-    ("properties", "Get a sensor's properties"),
-    ("randomize",  "Randomize a camera's post-process properties"),
-    ("start",      "Start sensor data stream"),
-    ("end",        "End sensor data stream"),
-    ("move",       "Move a sensor's owner Actor"),
-    ("quit",       "Quit"),
+    ("add",           "Add a sensor"),
+    ("remove",        "Remove a sensor"),
+    ("reposition",    "Reposition a sensor"),
+    ("properties",    "Get a sensor's properties"),
+    ("randomize",     "Randomize a camera's post-process properties"),
+    ("start",         "Start sensor data stream"),
+    ("end",           "End sensor data stream"),
+    ("record",        "Start sensor data recording"),
+    ("end-recording", "End sensor data recording"),
+    ("move",          "Move a sensor's owner Actor"),
+    ("quit",          "Quit"),
 ]
 
 
@@ -493,9 +575,10 @@ async def main():
         tempo.set_server(address=args.ip, port=args.port)
 
     sensor_streams = {}
+    record_streams = {}
 
     print("\n=== Sensor Playground ===")
-    print("Add, remove, reposition, and stream sensors at runtime.\n")
+    print("Add, remove, reposition, stream, and record sensors at runtime.\n")
 
     while True:
         action = await fuzzy_select(TOP_LEVEL_ACTIONS, "What would you like to do?", allow_restart=False)
@@ -503,6 +586,9 @@ async def main():
         if action == "quit" or action == RESTART_SENTINEL:
             for task in sensor_streams.values():
                 task.cancel()
+            for key, (task, output_dir) in record_streams.items():
+                task.cancel()
+                print(f"  Ended recording {key}. Files saved to: {output_dir}")
             print("\nBye!\n")
             break
 
@@ -521,6 +607,10 @@ async def main():
                 await flow_start_stream(sensor_streams, args.display_scale)
             elif action == "end":
                 await flow_end_stream(sensor_streams)
+            elif action == "record":
+                await flow_start_recording(record_streams)
+            elif action == "end-recording":
+                await flow_end_recording(record_streams)
             elif action == "move":
                 await flow_move_actor()
         except grpc.aio._call.AioRpcError:

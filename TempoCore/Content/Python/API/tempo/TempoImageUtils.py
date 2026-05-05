@@ -4,6 +4,7 @@ import asyncio
 import colorsys
 import io
 import numpy as np
+import os
 import sys
 from PyQt5.QtWidgets import QApplication, QLabel
 from PyQt5.QtGui import QImage, QPixmap
@@ -182,4 +183,47 @@ async def stream_label_images(camera_name, owner, scale=1.0):
         _build_label_qimage,
         "Camera {} - Label".format(camera_name),
         scale,
+    )
+
+
+async def _record_images(source, build_qimage, output_dir, prefix, quality=90):
+    """Save every frame from `source` as a JPG into `output_dir`.
+
+    Encoding runs on a worker thread so the gRPC iterator isn't blocked.
+    """
+    counter = 0
+    async for image in source:
+        q_image = await asyncio.to_thread(build_qimage, image)
+        path = os.path.join(output_dir, f"{prefix}_{counter:06d}.jpg")
+        await asyncio.to_thread(q_image.save, path, "JPG", quality)
+        counter += 1
+
+
+async def record_color_images(camera_name, owner, output_dir, quality=90):
+    await _record_images(
+        ts.stream_color_images(sensor_name=camera_name, owner_name=owner),
+        _build_color_qimage,
+        output_dir,
+        f"{camera_name}_color",
+        quality,
+    )
+
+
+async def record_depth_images(camera_name, owner, output_dir, quality=90):
+    await _record_images(
+        ts.stream_depth_images(sensor_name=camera_name, owner_name=owner),
+        _build_depth_qimage,
+        output_dir,
+        f"{camera_name}_depth",
+        quality,
+    )
+
+
+async def record_label_images(camera_name, owner, output_dir, quality=90):
+    await _record_images(
+        ts.stream_label_images(sensor_name=camera_name, owner_name=owner),
+        _build_label_qimage,
+        output_dir,
+        f"{camera_name}_label",
+        quality,
     )
