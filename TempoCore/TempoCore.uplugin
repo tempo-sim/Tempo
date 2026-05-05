@@ -50,7 +50,7 @@
 	"PreBuildSteps": {
 		"Win64": [
 			"\"$(EngineDir)\\Binaries\\ThirdParty\\Python3\\Win64\\python.exe\" \"$(PluginDir)\\Content\\Python\\gen_protos.py\" \"$(EngineDir)\" \"$(ProjectFile)\" \"$(ProjectDir)\" \"$(PluginDir)\" \"$(TargetName)\" \"$(TargetConfiguration)\" \"$(TargetPlatform)\" \"$(PluginDir)\\Source\\ThirdParty\\gRPC\\Binaries\\Windows\" \"$(EngineDir)\"",
-			"$(PluginDir)\\Scripts\\PreBuild.bat \"$(EngineDir)\" \"$(ProjectFile)\" \"$(ProjectDir)\" \"$(PluginDir)\" \"$(TargetName)\" \"$(TargetConfiguration)\" \"$(TargetPlatform)\" \"$(PluginDir)\\Source\\ThirdParty\\gRPC\\Binaries\\Windows\" \"$(EngineDir)\""
+			"\"$(PluginDir)\\Scripts\\PreBuild.bat\" \"$(EngineDir)\" \"$(ProjectFile)\" \"$(ProjectDir)\" \"$(PluginDir)\" \"$(TargetName)\" \"$(TargetConfiguration)\" \"$(TargetPlatform)\" \"$(PluginDir)\\Source\\ThirdParty\\gRPC\\Binaries\\Windows\" \"$(EngineDir)\""
 		],
 		"Mac": [
 			"\"$(EngineDir)/Binaries/ThirdParty/Python3/Mac/bin/python3\" \"$(PluginDir)/Content/Python/gen_protos.py\" \"$(EngineDir)\" \"$(ProjectFile)\" \"$(ProjectDir)\" \"$(PluginDir)\" \"$(TargetName)\" \"$(TargetConfiguration)\" \"$(TargetPlatform)\" \"$(PluginDir)/Source/ThirdParty/gRPC/Binaries/Mac\" \"$(EngineDir)\"",
