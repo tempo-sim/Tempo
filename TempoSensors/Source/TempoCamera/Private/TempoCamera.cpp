@@ -881,6 +881,34 @@ void UTempoCamera::RenderCapture()
 	const float SavedTSRShadingRejectionFlickingFrameRateCap = TSRShadingRejectionFlickingFrameRateCapCVar->GetFloat();
 	TSRShadingRejectionFlickingFrameRateCapCVar->Set(RateHz, ECVF_SetByConsole);
 
+	// TSR history update rate: default 1.0 mixes ~1/N of new shading per frame, which produces
+	// multi-frame ghost trails on slow movers. At low capture rates the trail length in wall-clock
+	// time is rate-inversely proportional, so 10Hz captures show ~3× the trail of 30Hz. Pushing
+	// this to 4.0 lets history rotate over much faster, which shortens the trail in frames at the
+	// cost of slightly noisier static pixels — acceptable for synthetic captures.
+	float SavedTSRHistoryUpdateRate = 0.0f;
+	IConsoleVariable* TSRHistoryUpdateRateCVar =
+		IConsoleManager::Get().FindConsoleVariable(TEXT("r.TSR.History.UpdateRate"));
+	if (TSRHistoryUpdateRateCVar)
+	{
+		SavedTSRHistoryUpdateRate = TSRHistoryUpdateRateCVar->GetFloat();
+		TSRHistoryUpdateRateCVar->Set(4.0f, ECVF_SetByConsole);
+	}
+
+	// Lumen probe gather temporal filter is the dominant source of *Lumen* ghost trails — it
+	// blends each probe's radiance with prior frames so noise stays low, but in dim scenes the
+	// signal is weak and history dominates, so moving objects leave a Lumen-shaped trail behind
+	// them. Disabling it (0) trades temporal smoothness for accurate per-frame Lumen; the bumped
+	// LumenFinalGatherQuality in the constructor compensates by reducing the input noise.
+	int32 SavedLumenScreenProbeTemporalFilter = 1;
+	IConsoleVariable* LumenScreenProbeTemporalFilterCVar =
+		IConsoleManager::Get().FindConsoleVariable(TEXT("r.Lumen.ScreenProbeGather.TemporalFilterProbes"));
+	if (LumenScreenProbeTemporalFilterCVar)
+	{
+		SavedLumenScreenProbeTemporalFilter = LumenScreenProbeTemporalFilterCVar->GetInt();
+		LumenScreenProbeTemporalFilterCVar->Set(TEXT("0"), ECVF_SetByConsole);
+	}
+
 	// Per-tile view origin (shared across tiles) — the camera's world location.
 	const FTransform CameraWorld = GetComponentToWorld();
 	const FVector ViewLocation = CameraWorld.GetTranslation();
@@ -1239,6 +1267,16 @@ void UTempoCamera::RenderCapture()
 	if (TSRShadingRejectionFlickingFrameRateCapCVar)
 	{
 		TSRShadingRejectionFlickingFrameRateCapCVar->Set(SavedTSRShadingRejectionFlickingFrameRateCap, ECVF_SetByConsole);
+	}
+
+	if (TSRHistoryUpdateRateCVar)
+	{
+		TSRHistoryUpdateRateCVar->Set(SavedTSRHistoryUpdateRate, ECVF_SetByConsole);
+	}
+
+	if (LumenScreenProbeTemporalFilterCVar)
+	{
+		LumenScreenProbeTemporalFilterCVar->Set(*FString::FromInt(SavedLumenScreenProbeTemporalFilter), ECVF_SetByConsole);
 	}
 
 	TextureReadQueue.Enqueue(NewRead);
