@@ -28,6 +28,12 @@
 // not promoted to a virtual method on FSceneViewStateInterface until 5.7. Pull in ScenePrivate.h
 // (reachable via PrivateIncludePaths in TempoCamera.Build.cs) so we can downcast at the call site.
 #if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 7
+// An upstream include leaks the Win32 Interlocked* macros, which mangle
+// FPlatformAtomics::InterlockedIncrement -> ::_InterlockedIncrement inside RenderCore headers
+// that ScenePrivate.h transitively pulls in. Allow+Hide is a no-op pair that re-asserts and then
+// clears those macros, so ScenePrivate.h parses against the real FPlatformAtomics API.
+#include "Windows/AllowWindowsPlatformAtomics.h"
+#include "Windows/HideWindowsPlatformAtomics.h"
 #include "ScenePrivate.h"
 #endif
 
