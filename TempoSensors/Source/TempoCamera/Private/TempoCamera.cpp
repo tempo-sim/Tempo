@@ -311,6 +311,18 @@ UTempoCamera::UTempoCamera()
 	PostProcessSettings.bOverride_ReflectionMethod = true;
 	PostProcessSettings.ReflectionMethod = EReflectionMethod::Lumen;
 
+	// Lumen final-gather denoiser leans on temporal history; in dim scenes the signal-to-noise
+	// ratio is poor and history dominates, which manifests as ghost trails behind slow movers.
+	// Bumping FinalGatherQuality reduces input noise and bumping the update speed shortens the
+	// effective history window so trails fade faster. Reflection quality has the same effect for
+	// specular ghosts.
+	PostProcessSettings.bOverride_LumenFinalGatherQuality = true;
+	PostProcessSettings.LumenFinalGatherQuality = 2.0f;
+	PostProcessSettings.bOverride_LumenFinalGatherLightingUpdateSpeed = true;
+	PostProcessSettings.LumenFinalGatherLightingUpdateSpeed = 4.0f;
+	PostProcessSettings.bOverride_LumenReflectionQuality = true;
+	PostProcessSettings.LumenReflectionQuality = 2.0f;
+
 	// Megalights
 	PostProcessSettings.bOverride_bMegaLights = true;
 	PostProcessSettings.bMegaLights = true;
@@ -327,6 +339,15 @@ UTempoCamera::UTempoCamera()
 	ShowFlags.SetColorGrading(true);
 	ShowFlags.SetVignette(true);
 	ShowFlags.SetDepthOfField(true);
+	ShowFlags.SetGlobalIllumination(true);
+	ShowFlags.SetScreenSpaceReflections(true);
+	ShowFlags.SetReflectionEnvironment(true);
+	ShowFlags.SetAmbientOcclusion(true);
+	ShowFlags.SetScreenSpaceAO(true);
+	ShowFlags.SetDistanceFieldAO(true);
+	ShowFlags.SetVolumetricFog(true);
+	ShowFlags.SetTonemapper(true);
+	ShowFlags.SetScreenPercentage(true);
 }
 
 bool UTempoCamera::HasDetectedParameterChange() const
