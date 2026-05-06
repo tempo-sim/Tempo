@@ -37,7 +37,6 @@ public:
 	// Camera
 	TObjectPtr<UMaterialInterface> GetCameraPostProcessMaterialNoDepth() const { return CameraPostProcessMaterialNoDepth.LoadSynchronous(); }
 	TObjectPtr<UMaterialInterface> GetCameraPostProcessMaterialWithDepth() const { return CameraPostProcessMaterialWithDepth.LoadSynchronous(); }
-	TObjectPtr<UMaterialInterface> GetCameraStitchPassthroughMaterial() const { return CameraStitchPassthroughMaterial.LoadSynchronous(); }
 	TObjectPtr<UMaterialInterface> GetCameraStitchAuxMaterial() const { return CameraStitchAuxMaterial.LoadSynchronous(); }
 	TObjectPtr<UMaterialInterface> GetCameraStitchColorFeatherMaterial() const { return CameraStitchColorFeatherMaterial.LoadSynchronous(); }
 	TObjectPtr<UMaterialInterface> GetCameraStitchMergeMaterialWithDepth() const { return CameraStitchMergeMaterialWithDepth.LoadSynchronous(); }
@@ -90,12 +89,6 @@ private:
 	// The post process material that should be used by TempoCamera when capturing the depth image.
 	UPROPERTY(EditAnywhere, Config, Category="Advanced", meta=( AllowedClasses="/Script/Engine.BlendableInterface", Keywords="PostProcess" ))
 	TSoftObjectPtr<UMaterialInterface> CameraPostProcessMaterialWithDepth;
-
-	// The UI-domain material used to copy each tile render target into the shared stitched render
-	// target via Canvas. Must have a Texture2D parameter named "TileRT" and output its sampled RGBA
-	// unchanged to Final Color. Used by UTempoCamera's tile stitch.
-	UPROPERTY(EditAnywhere, Config, Category="Advanced", meta=( AllowedClasses="/Script/Engine.MaterialInterface" ))
-	TSoftObjectPtr<UMaterialInterface> CameraStitchPassthroughMaterial;
 
 	// The material used to resolve the per-tile distorted atlas alpha into label+depth bytes in
 	// the shared aux render target. Run as a full-screen Canvas pass over the equidistant output.

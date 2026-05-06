@@ -22,13 +22,13 @@ FString UTempoTiledSceneCaptureComponent::GetSensorName() const
 
 bool UTempoTiledSceneCaptureComponent::IsAwaitingRender()
 {
-	return TextureReadQueue.IsNextAwaitingRender();
+	return TextureReadQueue.IsAnyAwaitingRender();
 }
 
 void UTempoTiledSceneCaptureComponent::OnRenderCompleted()
 {
 	UTextureRenderTarget2D* ReadbackTarget = GetReadbackTextureTarget();
-	if (!TextureReadQueue.IsNextAwaitingRender() || !ReadbackTarget)
+	if (!TextureReadQueue.IsAnyAwaitingRender() || !ReadbackTarget)
 	{
 		return;
 	}

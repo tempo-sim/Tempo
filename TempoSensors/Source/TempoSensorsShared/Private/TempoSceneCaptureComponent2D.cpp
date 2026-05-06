@@ -206,14 +206,14 @@ void UTempoSceneCaptureComponent2D::UpdateSceneCaptureContents(FSceneInterface* 
 	TextureReadQueue.Enqueue(NewRead);
 }
 
-bool UTempoSceneCaptureComponent2D::IsNextReadAwaitingRender() const
+bool UTempoSceneCaptureComponent2D::IsAnyReadAwaitingRender() const
 {
-	return TextureReadQueue.IsNextAwaitingRender();
+	return TextureReadQueue.IsAnyAwaitingRender();
 }
 
 void UTempoSceneCaptureComponent2D::ReadNextIfAvailable()
 {
-	if (!TextureReadQueue.IsNextAwaitingRender())
+	if (!TextureReadQueue.IsAnyAwaitingRender())
 	{
 		return;
 	}

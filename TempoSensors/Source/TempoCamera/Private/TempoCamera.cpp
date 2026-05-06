@@ -1350,13 +1350,13 @@ void UTempoCamera::ValidateFOV() const
 	else if (LensParameters.LensModel == ETempoLensModel::DoubleSphere)
 	{
 		const double VerticalFOV = FOVAngle * static_cast<double>(SizeXY.Y) / static_cast<double>(SizeXY.X);
-		if (FOVAngle > 280.0f)
+		if (FOVAngle > 240.0f)
 		{
-			Report(1, FString::Printf(TEXT("DoubleSphere FOVAngle %.2f exceeds max 280 degrees."), FOVAngle));
+			Report(1, FString::Printf(TEXT("DoubleSphere FOVAngle %.2f exceeds max 240 degrees."), FOVAngle));
 		}
-		if (VerticalFOV > 280.0)
+		if (VerticalFOV > 240.0)
 		{
-			Report(2, FString::Printf(TEXT("DoubleSphere VerticalFOV %.2f (derived) exceeds max 280 degrees."), VerticalFOV));
+			Report(2, FString::Printf(TEXT("DoubleSphere VerticalFOV %.2f (derived) exceeds max 240 degrees."), VerticalFOV));
 		}
 		if (LensParameters.Alpha < 0.0f || LensParameters.Alpha > 1.0f)
 		{
@@ -2053,6 +2053,7 @@ void UTempoCamera::PostEditChangeProperty(FPropertyChangedEvent& PropertyChanged
 		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, LensParameters) ||
 		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, SizeXY) ||
 		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, FeatherPixels) ||
+		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, UpsamplingFactor) ||
 		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, bAutoTextureFilterType) ||
 		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoCamera, TextureFilterType) ||
 		MemberPropertyName == GET_MEMBER_NAME_CHECKED(USceneCaptureComponent2D, PostProcessSettings) ||

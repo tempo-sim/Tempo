@@ -451,6 +451,9 @@ void TTextureRead<FLidarPixel>::Decode(float TransmissionTime, TempoLidar::Lidar
 	ScanSegmentOut.set_scan_count(NumCaptureComponents);
 	ScanSegmentOut.set_horizontal_beams(HorizontalBeams);
 	ScanSegmentOut.set_vertical_beams(VerticalBeams);
+	// Distances are emitted in meters (see CM2M conversion above), so the range is too.
+	ScanSegmentOut.mutable_distance_range()->set_min(QuantityConverter<CM2M>::Convert(MinDistance));
+	ScanSegmentOut.mutable_distance_range()->set_max(QuantityConverter<CM2M>::Convert(MaxDistance));
 	ScanSegmentOut.mutable_azimuth_range()->set_max(FMath::DegreesToRadians(HorizontalFOV / 2.0 + RelativeYaw));
 	ScanSegmentOut.mutable_azimuth_range()->set_min(FMath::DegreesToRadians(-HorizontalFOV / 2.0 + RelativeYaw));
 	if (BeamCalibration.Num() > 0)

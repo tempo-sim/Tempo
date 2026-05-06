@@ -214,7 +214,7 @@ protected:
 	int32 VerticalBeams = 64;
 
 	// The number of horizontal beams.
-	UPROPERTY(EditAnywhere, meta=(UIMin=0, ClampMin=0))
+	UPROPERTY(EditAnywhere, meta=(UIMin=2, ClampMin=2))
 	int32 HorizontalBeams = 200;
 
 	// The max angle of incidence in degrees from which this Lidar will get a return.

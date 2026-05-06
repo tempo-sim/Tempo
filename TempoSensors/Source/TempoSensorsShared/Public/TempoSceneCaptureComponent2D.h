@@ -170,7 +170,7 @@ struct FTextureReadQueue
 		PendingTextureReads.Empty();
 	}
 
-	bool IsNextAwaitingRender() const
+	bool IsAnyAwaitingRender() const
 	{
 		FRWScopeLock_OnlyGTWrite ReadLock(Lock, SLT_ReadOnly);
 		for (const TUniquePtr<FTextureRead>& TextureRead : PendingTextureReads)
@@ -304,7 +304,7 @@ protected:
 	// CaptureScene() directly when it has captured all its tiles. Derived tile components should return false.
 	virtual bool ShouldManageOwnTimer() const { return true; }
 
-	bool IsNextReadAwaitingRender() const;
+	bool IsAnyReadAwaitingRender() const;
 	void ReadNextIfAvailable();
 	void BlockUntilNextReadComplete() const;
 	TUniquePtr<FTextureRead> DequeueIfReadComplete();
