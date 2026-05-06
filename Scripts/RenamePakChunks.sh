@@ -56,7 +56,8 @@ if [ ! -d "$PAK_PATH" ]; then
 fi
 
 # We're interested pak chunk manifest files, which look like pak12345.txt
-while IFS= read -r MANIFEST_FILE; do
+MANIFEST_FILES=$(find "$METADATA_PATH/ChunkManifest" -regex ".*pakchunk[0-9]*.txt")
+for MANIFEST_FILE in $MANIFEST_FILES; do
   LEVELS=$(extract_level_names "$MANIFEST_FILE" | tr ' ' -)
   FILENAME=$(basename "$MANIFEST_FILE")
   PAK_NAME="${FILENAME%.*}"
@@ -70,4 +71,4 @@ while IFS= read -r MANIFEST_FILE; do
     # Rename "Level" chunks by their level names
     find "$PAK_PATH" -name "*pakchunk$CHUNK_ID*" -exec bash -c 'mv "$1" "${1/pakchunk$2/pakchunk-$3}"' _ {} "$CHUNK_ID" "$LEVELS" \;
   fi
-done < <(find "$METADATA_PATH/ChunkManifest" -regex ".*pakchunk[0-9]*.txt")
+done
