@@ -4,7 +4,7 @@ set -e
 
 TEMPO_ROOT=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 
-cd $TEMPO_ROOT
+cd "$TEMPO_ROOT"
 
 if [ -z "$GIT_DIR" ]; then
   GIT_DIR=$(git rev-parse --git-common-dir);
@@ -44,18 +44,18 @@ if [ -d "$GIT_DIR/hooks" ]; then
 fi
 
 # Run the steps once (adding -force if specified)
+EXTRA_ARGS=()
 if [ "$1" = "-force" ]; then
-  SYNC_DEPS="$SYNC_DEPS -force"
-  INSTALL_ENGINE_MODS="$INSTALL_ENGINE_MODS -force"
+  EXTRA_ARGS=("-force")
 fi
 echo -e "\nAdding Tempo toolchain to Target.cs files\n"
-eval "$TEMPO_ROOT/Scripts/UseTempoToolchain.sh"
+bash "$TEMPO_ROOT/Scripts/UseTempoToolchain.sh"
 echo -e "\nInstalling Tempo Engine Mods\n"
-eval "$INSTALL_ENGINE_MODS"
+bash "$INSTALL_ENGINE_MODS" "${EXTRA_ARGS[@]}"
 echo -e "Checking ThirdParty dependencies...\n"
-eval "$SYNC_DEPS"
+bash "$SYNC_DEPS" "${EXTRA_ARGS[@]}"
 
 PLUGIN_SETUP_SCRIPTS=$(find "$TEMPO_ROOT" -mindepth 2 -maxdepth 2 -name "Setup.sh" -print -quit)
-for PLUGIN_SETUP_SCRIPT in ${PLUGIN_SETUP_SCRIPTS[@]}; do
-  eval "$PLUGIN_SETUP_SCRIPT"
-done
+if [ -n "$PLUGIN_SETUP_SCRIPTS" ]; then
+  bash "$PLUGIN_SETUP_SCRIPTS"
+fi

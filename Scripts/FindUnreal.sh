@@ -31,7 +31,10 @@ FIND_UPROJECT_FILE() {
         return 0
     fi
 
-    local UPROJECT_FILEs=($(find "$search_path" -maxdepth 1 -name "*.uproject" 2>/dev/null))
+    local UPROJECT_FILEs=()
+    while IFS= read -r f; do
+        UPROJECT_FILEs+=("$f")
+    done < <(find "$search_path" -maxdepth 1 -name "*.uproject" 2>/dev/null)
 
     if [[ ${#UPROJECT_FILEs[@]} -eq 0 ]]; then
         echo "Error: No .uproject file found in $search_path" >&2
@@ -77,9 +80,9 @@ GET_REGISTRY_PATH() {
             "$APPDATA/Epic/UnrealEngineLauncher/LauncherInstalled.dat"
             "$ProgramData/Epic/UnrealEngineLauncher/LauncherInstalled.dat"
         )
-        for PATH in "${POSSIBLE_PATHS[@]}"; do
-            if [[ -f "$PATH" ]]; then
-                echo "$PATH"
+        for REGISTRY_FILE in "${POSSIBLE_PATHS[@]}"; do
+            if [[ -f "$REGISTRY_FILE" ]]; then
+                echo "$REGISTRY_FILE"
                 return 0
             fi
         done
@@ -126,7 +129,8 @@ PARSE_LAUNCHER_INSTALLED() {
 # Function to find engine installation path
 FIND_ENGINE_PATH() {
     local ENGINE_ID="$1"
-    local REGISTRY_PATH=$(GET_REGISTRY_PATH)
+    local REGISTRY_PATH
+    REGISTRY_PATH=$(GET_REGISTRY_PATH)
     
     # If it's a version number (like 4.27, 5.1), convert to expected format
     if [[ "$ENGINE_ID" =~ ^[0-9]+\.[0-9]+$ ]]; then
@@ -135,7 +139,8 @@ FIND_ENGINE_PATH() {
     
     # Try parsing LauncherInstalled.dat
     if [[ -f "$REGISTRY_PATH" ]]; then
-        local ENGINE_PATH=$(PARSE_LAUNCHER_INSTALLED "$REGISTRY_PATH" "$ENGINE_ID")
+        local ENGINE_PATH
+        ENGINE_PATH=$(PARSE_LAUNCHER_INSTALLED "$REGISTRY_PATH" "$ENGINE_ID")
         if [[ $? -eq 0 ]]; then
             echo "$ENGINE_PATH"
             return 0
@@ -182,7 +187,8 @@ main() {
 
         local UPROJECT_FILE
         UPROJECT_FILE=$(FIND_UPROJECT_FILE)
-        local ENGINE_ASSOCIATION=$(EXTRACT_ENGINE_ASSOCIATION "$UPROJECT_FILE")
+        local ENGINE_ASSOCIATION
+        ENGINE_ASSOCIATION=$(EXTRACT_ENGINE_ASSOCIATION "$UPROJECT_FILE")
         ENGINE_PATH=$(FIND_ENGINE_PATH "$ENGINE_ASSOCIATION")
     else
         ENGINE_PATH="$UNREAL_ENGINE_PATH"

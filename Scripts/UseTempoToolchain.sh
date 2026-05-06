@@ -4,7 +4,7 @@ set -e
 
 PROCESS_TARGET_FILE() {
     local FILE="$1"
-    local FILENAME=$(basename $FILE)
+    local FILENAME=$(basename "$FILE")
 
     echo "Processing: $FILE"
 
@@ -104,7 +104,10 @@ MAIN() {
     SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
     PROJECT_ROOT=$("$SCRIPT_DIR"/FindProjectRoot.sh)
 
-    TARGET_FILES=($(find "$PROJECT_ROOT/Source" -maxdepth 1 -name "*Target.cs" -type f))
+    TARGET_FILES=()
+    while IFS= read -r f; do
+        TARGET_FILES+=("$f")
+    done < <(find "$PROJECT_ROOT/Source" -maxdepth 1 -name "*Target.cs" -type f)
 
     if [[ ${#TARGET_FILES[@]} -eq 0 ]]; then
         echo "No *Target.cs files found."

@@ -20,8 +20,8 @@ Tempo is the foundation on which you can build a simulator for your unique appli
   - `jq`: `brew install jq`
 - Windows:
   - Unreal: Install using Epic Games Launcher
-  - [Git Bash](https://gitforwindows.org/) (Run all Tempo `*.sh` scripts from Git Bash)
-  - `jq`: (Use Administrator Git Bash) `curl -L -o /usr/bin/jq.exe https://github.com/jqlang/jq/releases/latest/download/jq-win64.exe`
+  - [Git Bash](https://gitforwindows.org/) (Run all Tempo `*.sh` scripts using Git Bash, or use the `*.bat` versions)
+  - `jq`: Download `https://github.com/jqlang/jq/releases/latest/download/jq-win64.exe` and put it anywhere on your Path, like (`C:\Program Files\Git\cmd`) and make sure it's named `jq`
 
 ## Environment Variables
 - `UNREAL_ENGINE_PATH`: On Linux only must be set to your Unreal Engine installation directory (the folder containing `Engine`). On Mac and Windows, Tempo will attempt to automatically find Unreal via your uproject file, but you can still set this to override it.
@@ -42,14 +42,14 @@ git submodule update --init --recursive
 ```
 
 ### One-Time Setup
-Run the `Setup.sh` script (from the `Tempo` root) once. This script will:
+Run the `Setup.sh` (or `Setup.bat` on Windows) script (from the `Tempo` root) once. This script will:
 - Modify your project's `*.Target.cs` files to use Tempo's custom toolchain, which is necessary for linking certain third party dependencies properly
 - Install the Tempo Unreal Engine mods, making some changes to your installed Engine in-place
 - Download third party dependencies
 - Add git hooks to keep engine mods and third party dependencies up to date automatically as you check out different Tempo commits
 
 ### Build and Run
-Use the included `Scripts/Build.sh` and `Scripts/Run.sh` to build your project and open it in Unreal Editor.
+Use the included `Scripts/Build.sh` and `Scripts/Run.sh` (or their `.bat` counterparts on Windows) to build your project and open it in Unreal Editor.
 
 ### Hello World
 > [!NOTE]
@@ -83,7 +83,7 @@ tt.step() # Time should advance one step. You should get one new camera image ev
 Congratulations, you are officially up and running! Continue experimenting with Tempo by creating new scenes, streaming sensor data, and varying the many properties of your simulation at runtime.
 
 ### Package
-Use the included `Scripts/Package.sh` to package your project into a standalone binary, which you can then run from the `Packaged` folder.
+Use the included `Scripts/Package.sh` (or `Package.bat` on Windows) to package your project into a standalone binary, which you can then run from the `Packaged` folder.
 
 ## Continuous Integration
 If you would like to set up a GitHub actions pipeline to build, package, run, and/or release your Tempo project, check out the `build_and_package` reusable workflow in [.github/workflows](https://github.com/tempo-sim/Tempo/tree/main/.github/workflows). `TempoSample`'s [tempo_sample_build_and_package](https://github.com/tempo-sim/TempoSample/blob/main/.github/workflows/tempo_sample_build_and_package.yml) workflow is a good reference.
