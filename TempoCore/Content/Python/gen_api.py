@@ -155,7 +155,7 @@ def generate_tempo_api(root_dir):
                     rel_path = os.path.relpath(file_path, tempo_module_root)
                     module_name = "{}.{}".format(
                         tempo_module_name, os.path.splitext(rel_path)[0].replace(os.sep, '.'))
-                    module = importlib.import_module(f"API.tempo.{module_name}")
+                    module = importlib.import_module(module_name)
                     if hasattr(module, "DESCRIPTOR"):
                         module_descriptor = module.DESCRIPTOR
                         all_enums = all_enums | gather_enums(module_name, module_descriptor)
@@ -348,7 +348,11 @@ if __name__ == "__main__":
     project_root = Path(sys.argv[1])
     plugin_root = Path(sys.argv[2])
     root_dir = Path(os.path.dirname(os.path.realpath(__file__))) / "API" / "tempo"
-    sys.path.append(str(root_dir))
+    # Insert at the front so local generated pb2 files shadow any stale copy installed in the
+    # venv's site-packages. Also matches the top-level import names that protoc emits inside each
+    # pb2 file (e.g. `from TempoLidar import Lidar_pb2`), so every pb2 module is loaded exactly
+    # once and only registers its descriptor once.
+    sys.path.insert(0, str(root_dir))
 
     # Check cache
     cache = PrebuildCache(plugin_root / ".tempo_prebuild_cache.json")

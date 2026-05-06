@@ -227,6 +227,8 @@ void FTempoScriptingServer::Tick(float DeltaTime)
 
 void FTempoScriptingServer::TickInternal()
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE(TempoScriptingServerTick);
+
 	if (!bIsInitialized)
 	{
 		return;
@@ -238,29 +240,18 @@ void FTempoScriptingServer::TickInternal()
 	const double MaxEventProcessingTimeSeconds = MaxEventProcessingTimeMicroSeconds / 1.e6;
 	const int32 MaxEventWaitTimeNanoSeconds = Settings->GetMaxEventWaitTime();
 
-	TSet<int32> ManagersWithPendingWrites;
-	for (const auto& Elem : RequestManagers)
-	{
-		const int32 Tag = Elem.Key;
-		const TSharedPtr<FRequestManager>& RequestManager = Elem.Value;
-		const FRequestManager::EState State = RequestManager->GetState();
-		if (State == FRequestManager::EState::RESPONDING ||
-			State == FRequestManager::EState::FINISHING)
-		{
-			ManagersWithPendingWrites.Add(Tag);
-		}
-	}
-
 	bool bProcessedPendingEvents = false;
 	const double Start = FPlatformTime::Seconds();
 	while (!bProcessedPendingEvents)
 	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(TempoScriptingServerLoop);
+
 		// In FixedStep mode process all pending requests before proceeding. Otherwise limit time spent processing.
 		if (TimeMode != ETimeMode::FixedStep && FPlatformTime::Seconds() - Start > MaxEventProcessingTimeSeconds)
 		{
 			break;
 		}
-		
+
 		int32* Tag;
 		bool bOk;
 		const gpr_timespec MaxEventWaitTime {0, MaxEventWaitTimeNanoSeconds, GPR_TIMESPAN};
@@ -269,7 +260,6 @@ void FTempoScriptingServer::TickInternal()
 		case grpc::CompletionQueue::GOT_EVENT:
 			{
 				// Handle the event and then wait for another.
-				ManagersWithPendingWrites.Remove(*Tag);
 				HandleEventForTag(*Tag, bOk);
 				break;
 			}
@@ -280,8 +270,27 @@ void FTempoScriptingServer::TickInternal()
 			}
 		case grpc::CompletionQueue::TIMEOUT:
 			{
-				// If we've processed all the pending events (which, in fixed time mode, includes an event for every manager with a pending write), move on.
-				bProcessedPendingEvents = TimeMode == ETimeMode::FixedStep ? ManagersWithPendingWrites.IsEmpty() : true;
+				// In FixedStep mode, keep draining until no manager has an in-flight write/finish
+				// or queued responses. We re-evaluate every iteration so managers that transitioned
+				// into RESPONDING mid-tick (or that still have queued responses behind an in-flight
+				// write) are waited on too.
+				if (TimeMode == ETimeMode::FixedStep)
+				{
+					bool bAnyUnflushed = false;
+					for (const auto& Elem : RequestManagers)
+					{
+						if (Elem.Value->HasUnflushedWork())
+						{
+							bAnyUnflushed = true;
+							break;
+						}
+					}
+					bProcessedPendingEvents = !bAnyUnflushed;
+				}
+				else
+				{
+					bProcessedPendingEvents = true;
+				}
 				break;
 			}
 		}

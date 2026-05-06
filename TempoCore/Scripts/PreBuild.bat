@@ -12,7 +12,7 @@ if not defined GIT_BASH (
 )
 
 REM Simply call the individual scripts from the same directory
-"%GIT_BASH%" %~dp0GenAPI.sh %1 %3 %4
+"%GIT_BASH%" "%~dp0GenAPI.sh" %1 %3 %4
 if %errorlevel% neq 0 exit /b %errorlevel%
 
 exit /b 0

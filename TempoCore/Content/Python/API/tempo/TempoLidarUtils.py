@@ -10,53 +10,6 @@ import qasync
 
 import tempo.tempo_sensors as ts
 
-def create_transformation_matrix(translation, rotation):
-    """
-    Create a 4x4 homogeneous transformation matrix from translation and rotation.
-
-    Args:
-        translation (tuple): (x, y, z) translation vector
-        rotation (tuple): (roll, pitch, yaw) rotation angles in radians
-
-    Returns:
-        numpy.ndarray: 4x4 transformation matrix
-    """
-    # Unpack parameters
-    x, y, z = translation
-    roll, pitch, yaw = rotation
-
-    # Create rotation matrices for each axis
-    # Roll (rotation around X axis)
-    Rx = np.array([
-        [1, 0, 0],
-        [0, np.cos(roll), -np.sin(roll)],
-        [0, np.sin(roll), np.cos(roll)]
-    ])
-
-    # Pitch (rotation around Y axis)
-    Ry = np.array([
-        [np.cos(pitch), 0, np.sin(pitch)],
-        [0, 1, 0],
-        [-np.sin(pitch), 0, np.cos(pitch)]
-    ])
-
-    # Yaw (rotation around Z axis)
-    Rz = np.array([
-        [np.cos(yaw), -np.sin(yaw), 0],
-        [np.sin(yaw), np.cos(yaw), 0],
-        [0, 0, 1]
-    ])
-
-    # Combined rotation matrix
-    R = Rz @ Ry @ Rx
-
-    # Create 4x4 transformation matrix
-    transform = np.eye(4)
-    transform[:3, :3] = R
-    transform[:3, 3] = [x, y, z]
-
-    return np.linalg.inv(transform)
-
 
 class PointCloudViewer:
     def __init__(self, update_rate, colorize_by):
@@ -74,6 +27,7 @@ class PointCloudViewer:
         self.actor = None
         self.accumulated_scan_segments = 0
         self.horizontal_beams = 0
+        self.num_points = 0
         self.distances = None
         self.intensities = None
         self.labels = None
@@ -97,9 +51,15 @@ class PointCloudViewer:
         # Show the plotter
         self.plotter.show()
 
-        # Set asyncio event loop
-        self.loop = qasync.QEventLoop(self.app)
-        asyncio.set_event_loop(self.loop)
+        # Only create a qasync event loop if there isn't already a running asyncio loop.
+        # When used from SensorPlayground, an asyncio loop is already running and we
+        # should not replace it — processEvents() in run_async is sufficient.
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            # No running loop — we need to set one up (e.g. LidarPreview standalone use)
+            self.loop = qasync.QEventLoop(self.app)
+            asyncio.set_event_loop(self.loop)
 
         self.update_rate = update_rate
         self.colorize_by = colorize_by
@@ -109,37 +69,33 @@ class PointCloudViewer:
             self.refresh()
             await asyncio.sleep(1.0 / self.update_rate)  # Let other tasks run
 
-    def distances_to_points(self, distances, transform):
-        """Convert distance measurements to 3D points."""
-        # Convert distances to 3D coordinates
+    def distances_to_points(self, distances):
+        """Convert distance measurements to 3D points. Returns (points, valid_mask)."""
         x = distances * np.cos(self.v_angles_grid) * np.cos(self.h_angles_grid)
         y = distances * np.cos(self.v_angles_grid) * np.sin(self.h_angles_grid)
         z = distances * np.sin(self.v_angles_grid)
 
-        # Stack coordinates and reshape
-        points = np.stack([x, y, z], axis=-1)
-        points = points.reshape(-1, 3)
-        homogeneous_points = np.hstack([points, np.ones((len(points), 1))])
-        # transformed_points = homogeneous_points @ transform.T
-        transformed_points = np.delete(homogeneous_points, (3), axis=1)
-
-        # Remove points with zero or invalid distances
-        # valid_points = transformed_points[distances.flatten() > 0]
-        return transformed_points
+        points = np.stack([x, y, z], axis=-1).reshape(-1, 3)
+        valid_mask = distances.flatten() > 0
+        return points[valid_mask], valid_mask
 
     def refresh(self):
         self.app.processEvents()
         self.plotter.render()
 
-    def accumulate_scan(self, scan):
-        distances = np.array([this_return.distance for this_return in scan.returns]).reshape(scan.horizontal_beams, scan.vertical_beams).transpose()
-        intensities = np.array([this_return.intensity for this_return in scan.returns]).reshape(scan.horizontal_beams, scan.vertical_beams).transpose()
-        labels = np.array([this_return.label for this_return in scan.returns]).reshape(scan.horizontal_beams, scan.vertical_beams).transpose()
-        restart = False
-        if self.latest_scan is None:
-            restart = True
-        elif self.latest_scan.header.sequence_id != scan.header.sequence_id:
-            restart = True
+    def accumulate_scan_data(self, scan):
+        """Numpy-only accumulation of a segment into the current scan. Returns True when
+        the scan is complete. Safe to run from a worker thread — touches no Qt/VTK state."""
+        # Single C-level copy per field from the packed repeated-scalar proto fields.
+        # Layout is H-outer, V-inner (see TempoLidar.cpp Decode); transpose to (V, H).
+        h, v = scan.horizontal_beams, scan.vertical_beams
+        distances = np.asarray(scan.distances, dtype=np.float32).reshape(h, v).T
+        intensities = np.asarray(scan.intensities, dtype=np.float32).reshape(h, v).T
+        labels = np.asarray(scan.labels, dtype=np.uint32).reshape(h, v).T
+        azimuths = np.asarray(scan.azimuths, dtype=np.float32).reshape(h, v).T
+        elevations = np.asarray(scan.elevations, dtype=np.float32).reshape(h, v).T
+
+        restart = self.latest_scan is None or self.latest_scan.header.sequence_id != scan.header.sequence_id
 
         self.latest_scan = scan
 
@@ -147,6 +103,8 @@ class PointCloudViewer:
             self.distances = distances
             self.intensities = intensities
             self.labels = labels
+            self.azimuths = azimuths
+            self.elevations = elevations
             self.azimuth_min = scan.azimuth_range.min
             self.azimuth_max = scan.azimuth_range.max
             self.accumulated_scan_segments = 1
@@ -156,66 +114,73 @@ class PointCloudViewer:
                 self.distances = np.concatenate((self.distances, distances), axis=1)
                 self.intensities = np.concatenate((self.intensities, intensities), axis=1)
                 self.labels = np.concatenate((self.labels, labels), axis=1)
+                self.azimuths = np.concatenate((self.azimuths, azimuths), axis=1)
+                self.elevations = np.concatenate((self.elevations, elevations), axis=1)
             else:
                 self.distances = np.concatenate((distances, self.distances), axis=1)
                 self.intensities = np.concatenate((intensities, self.intensities), axis=1)
                 self.labels = np.concatenate((labels, self.labels), axis=1)
+                self.azimuths = np.concatenate((azimuths, self.azimuths), axis=1)
+                self.elevations = np.concatenate((elevations, self.elevations), axis=1)
             self.azimuth_min = min(self.azimuth_min, scan.azimuth_range.min)
             self.azimuth_max = max(self.azimuth_max, scan.azimuth_range.max)
             self.accumulated_scan_segments += 1
             self.horizontal_beams += scan.horizontal_beams
 
-        if scan.scan_count == self.accumulated_scan_segments:
-            self.update_points()
+        return scan.scan_count == self.accumulated_scan_segments
 
-    def update_points(self):
-        """Update the point cloud with the new scan."""
-
-#         if self.point_cloud is None:
-        # Calculate angles for each beam
-        horizontal_fov = self.azimuth_max - self.azimuth_min
-        vertical_fov = self.latest_scan.elevation_range.max - self.latest_scan.elevation_range.min
-        h_angles = np.linspace(horizontal_fov/2, -horizontal_fov/2, self.horizontal_beams)
-        v_angles = np.linspace(vertical_fov/2, -vertical_fov/2, self.latest_scan.vertical_beams)
-        self.h_angles_grid, self.v_angles_grid = np.meshgrid(h_angles, v_angles)
-        if self.actor is not None:
-            self.plotter.remove_actor(self.actor)
-            self.point_cloud = None
+    def prepare_points(self):
+        """Numpy-only: derive 3D points and colors from the accumulated scan. Safe from a worker thread."""
+        # Per-return angles carry the same sign convention the previous linspace
+        # path produced, so no uniform-spacing assumption is baked in.
+        self.h_angles_grid = self.azimuths
+        self.v_angles_grid = self.elevations
 
         distances = self.distances
         intensities = self.intensities
         labels = self.labels
-        transform = create_transformation_matrix((0.0, 0.0, 0.0),
-                                                 (self.latest_scan.header.sensor_transform.rotation.r, self.latest_scan.header.sensor_transform.rotation.p, 0.0))
-        points = self.distances_to_points(distances, transform)
+        points, valid_mask = self.distances_to_points(distances)
 
-        # Calculate colors based on distance,
         if self.colorize_by.lower() == "distance":
-            colors = distances.flatten()
+            colors = distances.flatten()[valid_mask]
             colors = (colors - np.min(colors)) / (np.max(colors) - np.min(colors) + 1e-6)
         elif self.colorize_by.lower() == "intensity":
-            colors = intensities.flatten()
+            colors = intensities.flatten()[valid_mask]
         elif self.colorize_by.lower() == "label":
-            colors = labels.flatten()
-            colors = colors / 255.0
+            colors = labels.flatten()[valid_mask] / 255.0
+
+        return points, colors
+
+    def apply_points(self, points, colors):
+        """VTK/Qt updates. Must run on the main (asyncio) thread."""
+        new_num_points = len(points)
+        if self.point_cloud is not None and new_num_points != self.num_points:
+            self.plotter.remove_actor(self.actor)
+            self.point_cloud = None
+
+        self.num_points = new_num_points
 
         if self.point_cloud is None:
             self.point_cloud = pv.PolyData(points)
+            self.point_cloud.point_data['colors'] = colors
             self.actor = self.plotter.add_points(
                 self.point_cloud,
                 point_size=4,
                 render_points_as_spheres=False,
-                scalars=colors,
+                scalars='colors',
                 cmap='viridis',
                 show_scalar_bar=True,
                 reset_camera=False
             )
         else:
             self.point_cloud.points = points
-            self.point_cloud.point_data['scalars'] = colors
+            self.point_cloud.point_data['colors'] = colors
+            if colors.size > 0:
+                self.actor.mapper.scalar_range = (float(colors.min()), float(colors.max()))
 
     def close(self):
-        self.loop.stop()
+        if hasattr(self, 'loop'):
+            self.loop.stop()
         self.plotter.close()
         del self.plotter
         self.app.quit()
@@ -225,10 +190,34 @@ class PointCloudViewer:
 async def stream_lidar_scans(lidar_name, owner, colorize_by, update_rate=30.0):
     viewer = PointCloudViewer(update_rate=float(update_rate), colorize_by=colorize_by)
     viewer_task = asyncio.create_task(viewer.run_async())
+
+    # Bounded queue lets the gRPC recv loop run at wire speed. When the processing
+    # task falls behind, the producer drops the oldest queued segment; the
+    # accumulate_scan_data sequence_id restart logic cleanly discards any partial
+    # scan left behind by the drop.
+    queue = asyncio.Queue(maxsize=8)
+
+    async def consumer():
+        while True:
+            scan = await queue.get()
+            # Heavy numpy work runs in a worker thread so the asyncio loop — and
+            # with it the render task — stays responsive.
+            complete = await asyncio.to_thread(viewer.accumulate_scan_data, scan)
+            if complete:
+                points, colors = await asyncio.to_thread(viewer.prepare_points)
+                viewer.apply_points(points, colors)
+
+    consumer_task = asyncio.create_task(consumer())
+
     try:
         async for scan in ts.stream_lidar_scans(sensor_name=lidar_name, owner_name=owner):
-            viewer.accumulate_scan(scan)
-    except asyncio.CancelledError:
+            if queue.full():
+                try:
+                    queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    pass
+            queue.put_nowait(scan)
+    finally:
+        consumer_task.cancel()
         _ = viewer_task.cancel()
         viewer.close()
-        raise  # Reraise to allow normal task cancellation
