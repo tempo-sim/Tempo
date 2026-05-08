@@ -517,6 +517,11 @@ class ProtoGenerator:
             if not filenames and not dirnames and path != directory:
                 path.rmdir()
 
+    @staticmethod
+    def _rust_opt_in() -> bool:
+        """Whether the user has opted into Rust API generation."""
+        return os.environ.get("TEMPO_GEN_RUST_API", "0") not in ("0", "")
+
     def export_rust_protos(self):
         """Export decorated proto files for Rust tonic-build.
 
@@ -524,6 +529,9 @@ class ProtoGenerator:
         Rust crate's proto directory. These protos already have proper package
         declarations added by copy_module_protos().
         """
+        if not self._rust_opt_in():
+            return
+
         # Clear and recreate the Rust proto directory
         if self.rust_proto_dir.exists():
             shutil.rmtree(self.rust_proto_dir)
@@ -566,11 +574,17 @@ class ProtoGenerator:
                 print(f"[Tempo Prebuild]  Skipping Tempo protobuf generation (TEMPO_SKIP_PREBUILD is {skip_prebuild})")
                 return 0
 
+            # If Rust generation is opted in but the Rust proto dir hasn't been populated
+            # yet (first time the user enables it), bypass the cache so the export runs.
+            rust_opt_in = self._rust_opt_in()
+            need_rust_export = rust_opt_in and not self.rust_proto_dir.exists()
+
             # Check cache to see if we can skip generation
             input_files = self.collect_input_files()
             output_files = self.collect_output_files()
-            if self.cache.is_valid("gen_protos", input_files, output_files,
-                                   input_base=self.project_root, output_base=self.project_root):
+            if not need_rust_export and self.cache.is_valid(
+                    "gen_protos", input_files, output_files,
+                    input_base=self.project_root, output_base=self.project_root):
                 print("[Tempo Prebuild]  Skipping Tempo protobuf generation (no changes detected)", flush=True)
                 return 0
 

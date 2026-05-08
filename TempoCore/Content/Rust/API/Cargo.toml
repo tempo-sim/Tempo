@@ -7,6 +7,14 @@ edition = "2021"
 description = "Rust client API for Tempo simulation"
 license = "Proprietary"
 
+# Explicit include so generated files (which .gitignore excludes) ship in the .crate.
+include = [
+    "Cargo.toml",
+    "build.rs",
+    "src/**/*.rs",
+    "proto/**/*.proto",
+]
+
 [dependencies]
 tonic = "0.12"
 prost = "0.13"
@@ -19,3 +27,4 @@ http = "1.0"
 [build-dependencies]
 tonic-build = "0.12"
 walkdir = "2"
+protoc-bin-vendored = "3"

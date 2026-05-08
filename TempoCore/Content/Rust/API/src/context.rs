@@ -7,6 +7,7 @@
 
 use once_cell::sync::Lazy;
 use std::sync::Arc;
+use tokio::runtime::Runtime;
 use tokio::sync::RwLock;
 use tonic::transport::Channel;
 
@@ -19,7 +20,7 @@ pub const DEFAULT_ADDRESS: &str = "localhost";
 pub const DEFAULT_PORT: u16 = 10001;
 
 /// Maximum message size (1GB, matching Python client).
-const MAX_MESSAGE_SIZE: usize = 1_000_000_000;
+pub const MAX_MESSAGE_SIZE: usize = 1_000_000_000;
 
 /// Global context for managing Tempo server connection.
 pub struct TempoContext {
@@ -84,6 +85,14 @@ impl TempoContext {
 pub static CONTEXT: Lazy<Arc<RwLock<TempoContext>>> =
     Lazy::new(|| Arc::new(RwLock::new(TempoContext::default())));
 
+/// Shared multi-thread tokio runtime used by the sync API surface.
+pub static RUNTIME: Lazy<Runtime> = Lazy::new(|| {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("Failed to build Tempo tokio runtime")
+});
+
 /// Get a reference to the global context.
 pub fn tempo_context() -> Arc<RwLock<TempoContext>> {
     CONTEXT.clone()
@@ -100,10 +109,8 @@ pub async fn set_server_async(address: &str, port: u16) {
 /// # Panics
 ///
 /// Panics if called from within an async context. Use `set_server_async` instead.
-pub fn set_server(address: &str, port: u16) -> Result<(), TempoError> {
-    let rt = tokio::runtime::Runtime::new()?;
-    rt.block_on(set_server_async(address, port));
-    Ok(())
+pub fn set_server(address: &str, port: u16) {
+    RUNTIME.block_on(set_server_async(address, port));
 }
 
 #[cfg(test)]

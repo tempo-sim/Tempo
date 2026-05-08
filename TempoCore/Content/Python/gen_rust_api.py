@@ -7,7 +7,10 @@ import google.protobuf.descriptor as gpd
 import importlib.util
 import jinja2
 import os
+import re
+import subprocess
 import sys
+from pathlib import Path
 
 from gen_common import (
     gather_enums,
@@ -146,7 +149,9 @@ pub async fn {{ name }}_async(
 ) -> Result<{{ response_rust_type }}, crate::TempoError> {
     let mut ctx = crate::context::CONTEXT.write().await;
     let channel = ctx.channel().await?;
-    let mut client = {{ client_type }}::new(channel);
+    let mut client = {{ client_type }}::new(channel)
+        .max_decoding_message_size(crate::context::MAX_MESSAGE_SIZE)
+        .max_encoding_message_size(crate::context::MAX_MESSAGE_SIZE);
 
     let request = {{ request_rust_type }} {
 {%- for field in request.fields %}
@@ -168,8 +173,7 @@ pub fn {{ name }}(
     {{ field.name }}: {{ field.rust_type }},
 {%- endfor %}
 ) -> Result<{{ response_rust_type }}, crate::TempoError> {
-    let rt = tokio::runtime::Runtime::new()?;
-    rt.block_on({{ name }}_async(
+    crate::context::RUNTIME.block_on({{ name }}_async(
 {%- for field in request.fields %}
         {{ field.name }},
 {%- endfor %}
@@ -188,7 +192,9 @@ pub async fn {{ name }}_async(
 ) -> Result<tonic::Streaming<{{ response_rust_type }}>, crate::TempoError> {
     let mut ctx = crate::context::CONTEXT.write().await;
     let channel = ctx.channel().await?;
-    let mut client = {{ client_type }}::new(channel);
+    let mut client = {{ client_type }}::new(channel)
+        .max_decoding_message_size(crate::context::MAX_MESSAGE_SIZE)
+        .max_encoding_message_size(crate::context::MAX_MESSAGE_SIZE);
 
     let request = {{ request_rust_type }} {
 {%- for field in request.fields %}
@@ -210,14 +216,13 @@ pub fn {{ name }}(
     {{ field.name }}: {{ field.rust_type }},
 {%- endfor %}
 ) -> Result<impl Iterator<Item = Result<{{ response_rust_type }}, tonic::Status>>, crate::TempoError> {
-    let rt = tokio::runtime::Runtime::new()?;
-    let stream = rt.block_on({{ name }}_async(
+    let stream = crate::context::RUNTIME.block_on({{ name }}_async(
 {%- for field in request.fields %}
         {{ field.name }},
 {%- endfor %}
     ))?;
 
-    Ok(SyncStreamIterator::new(rt, stream))
+    Ok(SyncStreamIterator::new(stream))
 }
 
 '''
@@ -262,7 +267,6 @@ use crate::streaming::SyncStreamIterator;
         for tempo_service_descriptor in service_descriptors:
             for rpc_descriptor in tempo_service_descriptor.rpcs:
                 if rpc_descriptor.client_streaming:
-                    print(f"Warning: Skipping client-streaming RPC {rpc_descriptor.name} (not supported)")
                     continue
 
                 tempo_request_descriptor = all_messages[rpc_descriptor.request_type]
@@ -363,12 +367,11 @@ def update_lib_rs(rust_root_dir, generated_modules):
 //! ```rust,no_run
 //! use tempo::set_server;
 //!
-//! fn main() -> Result<(), tempo::TempoError> {
+//! fn main() {
 //!     // Connect to the Tempo server
-//!     set_server("localhost", 10001)?;
+//!     set_server("localhost", 10001);
 //!
 //!     // Use the API modules (e.g., tempo_core, tempo_sensors)
-//!     Ok(())
 //! }
 //! ```
 
@@ -389,6 +392,42 @@ pub use streaming::SyncStreamIterator;
             f.write(f"pub mod {module};\n")
 
 
+def _read_crate_version(cargo_toml: Path) -> str:
+    """Pull the package version out of Cargo.toml without taking a TOML dep."""
+    text = cargo_toml.read_text(encoding="utf-8")
+    match = re.search(r'^\s*version\s*=\s*"([^"]+)"', text, re.MULTILINE)
+    if not match:
+        raise RuntimeError(f"Could not find package version in {cargo_toml}")
+    return match.group(1)
+
+
+def _collect_rust_inputs(script_dir: str, python_root_dir: str, rust_crate_dir: Path):
+    """Files whose contents drive Rust wrapper generation and the cargo build."""
+    inputs = [
+        Path(__file__).resolve(),
+        (Path(script_dir) / "gen_common.py").resolve(),
+    ]
+    # All pb2 modules feed the wrapper templates.
+    for path, _, files in os.walk(python_root_dir):
+        for filename in files:
+            if filename.endswith("_pb2.py"):
+                inputs.append(Path(path) / filename)
+    # Manifest, build script, hand-written + generated sources, and protos.
+    for rel in ("Cargo.toml", "build.rs"):
+        p = rust_crate_dir / rel
+        if p.exists():
+            inputs.append(p)
+    for sub in ("src", "proto"):
+        sub_dir = rust_crate_dir / sub
+        if not sub_dir.exists():
+            continue
+        for path, _, files in os.walk(sub_dir):
+            for filename in files:
+                if filename.endswith((".rs", ".proto")):
+                    inputs.append(Path(path) / filename)
+    return inputs
+
+
 if __name__ == "__main__":
     if sys.version_info[0] < 3 or sys.version_info[1] < 9:
         raise Exception("This script requires Python 3.9 or greater (found {}.{}.{})"
@@ -396,14 +435,46 @@ if __name__ == "__main__":
 
     script_dir = os.path.dirname(os.path.realpath(__file__))
     python_root_dir = os.path.join(script_dir, "API", "tempo")
-    rust_root_dir = os.path.join(script_dir, "..", "Rust", "API", "src")
+    rust_crate_dir = Path(script_dir, "..", "Rust", "API").resolve()
+    rust_root_dir = str(rust_crate_dir / "src")
+    plugin_root = Path(script_dir).parent.parent.resolve()
 
     # Add paths for imports
     sys.path.append(script_dir)
     # Add the tempo directory so pb2 imports can find other pb2 files
     sys.path.append(python_root_dir)
 
+    from prebuild_cache import PrebuildCache
+
     if not os.path.exists(rust_root_dir):
         os.makedirs(rust_root_dir)
 
-    generated = generate_rust_api(python_root_dir, rust_root_dir)
+    cargo_toml = rust_crate_dir / "Cargo.toml"
+    crate_version = _read_crate_version(cargo_toml)
+    crate_artifact = rust_crate_dir / "target" / "package" / f"tempo-{crate_version}.crate"
+
+    cache = PrebuildCache(plugin_root / ".tempo_prebuild_cache.json")
+    input_files = _collect_rust_inputs(script_dir, python_root_dir, rust_crate_dir)
+    output_files = [crate_artifact]
+
+    if cache.is_valid("gen_rust_api", input_files, output_files):
+        print("[Tempo Prebuild]  Skipping Rust API generation (no changes detected)", flush=True)
+        sys.exit(0)
+
+    print("[Tempo Prebuild] Generating Rust API", flush=True)
+    generate_rust_api(python_root_dir, rust_root_dir)
+
+    # cargo package's verify step compiles the extracted crate, so this doubles
+    # as a build sanity check on the generated code.
+    print("[Tempo Prebuild] Packaging Rust crate", flush=True)
+    subprocess.run(
+        ["cargo", "package", "--allow-dirty", "--quiet",
+         "--manifest-path", str(cargo_toml)],
+        check=True,
+    )
+
+    # Re-collect inputs since generation rewrote the wrapper modules.
+    input_files = _collect_rust_inputs(script_dir, python_root_dir, rust_crate_dir)
+    cache.update("gen_rust_api", input_files, [crate_artifact])
+
+    print(f"[Tempo Prebuild] Rust crate at {crate_artifact}", flush=True)

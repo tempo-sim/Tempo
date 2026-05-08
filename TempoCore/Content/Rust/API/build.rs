@@ -29,6 +29,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
+    // Use the vendored protoc so consumers don't need one on PATH.
+    let protoc = protoc_bin_vendored::protoc_bin_path()?;
+    std::env::set_var("PROTOC", protoc.as_os_str());
+
     // Configure tonic-build
     tonic_build::configure()
         .build_server(false) // Client only

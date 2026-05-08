@@ -10,12 +10,11 @@
 //! ```rust,no_run
 //! use tempo::set_server;
 //!
-//! fn main() -> Result<(), tempo::TempoError> {
+//! fn main() {
 //!     // Connect to the Tempo server
-//!     set_server("localhost", 10001)?;
+//!     set_server("localhost", 10001);
 //!
 //!     // Use the API modules (e.g., tempo_core, tempo_sensors)
-//!     Ok(())
 //! }
 //! ```
 
