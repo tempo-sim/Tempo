@@ -1,5 +1,5 @@
 [package]
-name = "tempo-examples"
+name = "greeter_loop"
 version = "0.1.0"
 edition = "2021"
 
@@ -8,5 +8,5 @@ name = "greeter_loop"
 path = "src/greeter_loop.rs"
 
 [dependencies]
-tempo = { path = "../API" }
+tempo-sim = { path = "../../TempoCore/Content/Rust/API" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }

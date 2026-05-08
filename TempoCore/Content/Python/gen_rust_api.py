@@ -365,7 +365,7 @@ def update_lib_rs(rust_root_dir, generated_modules):
 //! # Quick Start
 //!
 //! ```rust,no_run
-//! use tempo::set_server;
+//! use tempo_sim::set_server;
 //!
 //! fn main() {
 //!     // Connect to the Tempo server
@@ -451,7 +451,7 @@ if __name__ == "__main__":
 
     cargo_toml = rust_crate_dir / "Cargo.toml"
     crate_version = _read_crate_version(cargo_toml)
-    crate_artifact = rust_crate_dir / "target" / "package" / f"tempo-{crate_version}.crate"
+    crate_artifact = rust_crate_dir / "target" / "package" / f"tempo-sim-{crate_version}.crate"
 
     cache = PrebuildCache(plugin_root / ".tempo_prebuild_cache.json")
     input_files = _collect_rust_inputs(script_dir, python_root_dir, rust_crate_dir)

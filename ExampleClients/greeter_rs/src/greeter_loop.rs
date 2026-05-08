@@ -2,11 +2,11 @@
 
 //! Example client that repeatedly calls greet_async every second.
 
-use tempo::{greeter, set_server_async};
+use tempo_sim::{greeter, set_server_async};
 use tokio::time::{interval, Duration};
 
 #[tokio::main]
-async fn main() -> Result<(), tempo::TempoError> {
+async fn main() -> Result<(), tempo_sim::TempoError> {
     // Connect to the Tempo server
     set_server_async("localhost", 10001).await;
 

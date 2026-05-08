@@ -1,7 +1,7 @@
 # Copyright Tempo Simulation, LLC. All Rights Reserved
 
 [package]
-name = "tempo"
+name = "tempo-sim"
 version = "0.1.0"
 edition = "2021"
 description = "Rust client API for Tempo simulation"

@@ -8,7 +8,7 @@
 //! # Quick Start
 //!
 //! ```rust,no_run
-//! use tempo::set_server;
+//! use tempo_sim::set_server;
 //!
 //! fn main() {
 //!     // Connect to the Tempo server
