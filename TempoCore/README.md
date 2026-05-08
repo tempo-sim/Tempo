@@ -248,6 +248,35 @@ Here we are prioritizing brevity of the Python API with a minor restriction in R
 
 Phew, simple right? Don't worry - there are plenty of examples of using `TempoScripting` in `TempoCore` and the rest of the Tempo plugins to help get you started.
 
+### Using the Rust API
+Tempo can also generate a Rust client crate alongside the Python package. Generation is **opt-in** via the `TEMPO_GEN_RUST_API` environment variable, since the Rust toolchain is not bundled with Unreal:
+```
+# On Linux or Mac:
+export TEMPO_GEN_RUST_API=1
+# On Windows (cmd):
+set TEMPO_GEN_RUST_API=1
+```
+With the variable set, the prebuild step will generate Rust wrappers, build the crate, and produce a packaged `.crate` at `<plugin_root>/TempoCore/Content/Rust/API/target/package/tempo-<version>.crate`.
+
+**System dependencies**: only the Rust toolchain (`cargo` + `rustc` — install via [rustup](https://rustup.rs/)). You do **not** need a system `protoc` — the crate's `build.rs` uses `protoc-bin-vendored` so consumers only need `cargo build`.
+
+To consume the crate from another Rust project, depend on it by path or git ref, e.g.:
+```toml
+[dependencies]
+tempo = { path = "<plugin_root>/TempoCore/Content/Rust/API" }
+```
+The wrapper API mirrors Python: each Tempo module becomes a Rust module with sync and async functions for every RPC. For example:
+```rust
+use tempo::{set_server_async, my_module};
+
+#[tokio::main]
+async fn main() -> Result<(), tempo::TempoError> {
+    set_server_async("localhost", 10001).await;
+    let response = my_module::my_rpc_async(3).await?;
+    Ok(())
+}
+```
+
 ## Tempo Core Services
 Tempo core includes services for managing the lifecycle of a simulation and controlling time.
 
