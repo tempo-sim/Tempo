@@ -18,4 +18,7 @@ if %errorlevel% neq 0 exit /b %errorlevel%
 "%GIT_BASH%" "%~dp0GenRustAPI.sh" %1 %3 %4
 if %errorlevel% neq 0 exit /b %errorlevel%
 
+"%GIT_BASH%" "%~dp0GenCppAPI.sh" %1 %3 %4 %8
+if %errorlevel% neq 0 exit /b %errorlevel%
+
 exit /b 0

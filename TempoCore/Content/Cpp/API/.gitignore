@@ -1,0 +1,7 @@
+# Everything in this directory is produced by gen_cpp_api.py at Tempo build
+# time when TEMPO_GEN_CPP_API=1 — some files are generated from .proto
+# descriptors, others are copied verbatim from ../../Python/cpp_api_template/
+# (the canonical source for context.h, error.h, result.h, streaming.h, the
+# CMakeLists.txt, and the README). Either way, don't commit anything here.
+*
+!.gitignore
