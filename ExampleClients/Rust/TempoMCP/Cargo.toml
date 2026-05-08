@@ -1,0 +1,14 @@
+[package]
+name = "tempo_mcp"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "tempo_mcp"
+path = "src/tempo_mcp.rs"
+
+[dependencies]
+tempo-sim = { path = "../../../TempoCore/Content/Rust/API" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+inquire = "0.7"
+clap = { version = "4", features = ["derive"] }

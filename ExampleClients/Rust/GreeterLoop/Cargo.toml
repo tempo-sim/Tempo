@@ -8,5 +8,5 @@ name = "greeter_loop"
 path = "src/greeter_loop.rs"
 
 [dependencies]
-tempo-sim = { path = "../../TempoCore/Content/Rust/API" }
+tempo-sim = { path = "../../../TempoCore/Content/Rust/API" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
