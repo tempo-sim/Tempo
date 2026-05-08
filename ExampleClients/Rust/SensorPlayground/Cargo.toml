@@ -17,3 +17,8 @@ rand = "0.8"
 tempfile = "3"
 show-image = "=0.14.0"
 image = { version = "0.25", default-features = false, features = ["jpeg"] }
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+# kiss3d uses GLFW, which requires the main thread on macOS — show-image already
+# owns it. On macOS we fall back to printing lidar stats only.
+kiss3d = "0.35"

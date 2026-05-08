@@ -314,28 +314,50 @@ async fn stream_depth(sensor: AvailableSensor, window: WindowProxy) {
         match item {
             Ok(img) => {
                 count += 1;
-                let mut mn = f32::INFINITY;
-                let mut mx = f32::NEG_INFINITY;
+                // Visualize 1/depth so near surfaces have more contrast — matches
+                // _build_depth_qimage in TempoImageUtils.py.
+                let mut depth_mn = f32::INFINITY;
+                let mut depth_mx = f32::NEG_INFINITY;
+                let mut recip_mn = f32::INFINITY;
+                let mut recip_mx = f32::NEG_INFINITY;
                 for &d in &img.depths {
                     if d.is_finite() {
-                        if d < mn {
-                            mn = d;
+                        if d < depth_mn {
+                            depth_mn = d;
                         }
-                        if d > mx {
-                            mx = d;
+                        if d > depth_mx {
+                            depth_mx = d;
+                        }
+                    }
+                    let r = 1.0 / d;
+                    if r.is_finite() {
+                        if r < recip_mn {
+                            recip_mn = r;
+                        }
+                        if r > recip_mx {
+                            recip_mx = r;
                         }
                     }
                 }
-                if !mn.is_finite() {
-                    mn = 0.0;
-                    mx = 1.0;
+                if !depth_mn.is_finite() {
+                    depth_mn = 0.0;
+                    depth_mx = 1.0;
                 }
-                let span = (mx - mn).max(1e-6);
+                if !recip_mn.is_finite() {
+                    recip_mn = 0.0;
+                    recip_mx = 1.0;
+                }
+                let span = (recip_mx - recip_mn).max(1e-6);
                 let bytes: Vec<u8> = img
                     .depths
                     .iter()
                     .map(|&d| {
-                        let n = ((d - mn) / span).clamp(0.0, 1.0);
+                        let r = 1.0 / d;
+                        let n = if r.is_finite() {
+                            ((r - recip_mn) / span).clamp(0.0, 1.0)
+                        } else {
+                            0.0
+                        };
                         (n * 255.0) as u8
                     })
                     .collect();
@@ -346,8 +368,8 @@ async fn stream_depth(sensor: AvailableSensor, window: WindowProxy) {
                 }
                 if count % 30 == 1 {
                     println!(
-                        "[{}] Depth frame {} {}x{} (min={:.1}cm max={:.1}cm)",
-                        key, count, img.width, img.height, mn, mx
+                        "[{}] Depth frame {} {}x{} (min={:.2} max={:.2})",
+                        key, count, img.width, img.height, depth_mn, depth_mx
                     );
                 }
             }
@@ -356,6 +378,47 @@ async fn stream_depth(sensor: AvailableSensor, window: WindowProxy) {
                 break;
             }
         }
+    }
+}
+
+// Golden-ratio HSV → RGB lookup table for label visualization. Matches
+// index_to_rgb in TempoImageUtils.py so the same label IDs render in the same
+// colors across the Python and Rust clients.
+fn label_lut() -> &'static [[u8; 3]; 256] {
+    static LUT: std::sync::OnceLock<[[u8; 3]; 256]> = std::sync::OnceLock::new();
+    LUT.get_or_init(|| {
+        let mut lut = [[0u8; 3]; 256];
+        for i in 1..256 {
+            let i_f = i as f64;
+            let phi = 0.618_033_988_749_895_f64;
+            let psi = 0.754_877_666_246_692_7_f64;
+            let h = (i_f * phi).rem_euclid(1.0);
+            let s = 0.6 + 0.4 * (i_f * psi).rem_euclid(1.0);
+            let v = 0.7 + 0.3 * (i_f * psi * 1.3).rem_euclid(1.0);
+            let (r, g, b) = hsv_to_rgb(h, s, v);
+            lut[i] = [(r * 255.0) as u8, (g * 255.0) as u8, (b * 255.0) as u8];
+        }
+        lut
+    })
+}
+
+fn hsv_to_rgb(h: f64, s: f64, v: f64) -> (f64, f64, f64) {
+    if s == 0.0 {
+        return (v, v, v);
+    }
+    let sector = h * 6.0;
+    let i = sector.floor();
+    let f = sector - i;
+    let p = v * (1.0 - s);
+    let q = v * (1.0 - s * f);
+    let t = v * (1.0 - s * (1.0 - f));
+    match (i as i32).rem_euclid(6) {
+        0 => (v, t, p),
+        1 => (q, v, p),
+        2 => (p, v, t),
+        3 => (p, q, v),
+        4 => (t, p, v),
+        _ => (v, p, q),
     }
 }
 
@@ -370,12 +433,18 @@ async fn stream_label(sensor: AvailableSensor, window: WindowProxy) {
                 return;
             }
         };
+    let lut = label_lut();
     let mut count = 0u64;
     while let Some(item) = stream.next().await {
         match item {
             Ok(img) => {
                 count += 1;
-                let view = ImageView::new(ImageInfo::mono8(img.width, img.height), &img.data);
+                let mut rgb = Vec::with_capacity(img.data.len() * 3);
+                for &idx in &img.data {
+                    let c = lut[idx as usize];
+                    rgb.extend_from_slice(&c);
+                }
+                let view = ImageView::new(ImageInfo::rgb8(img.width, img.height), &rgb);
                 if window.set_image("frame", view).is_err() {
                     eprintln!("[{}] Window closed, stopping stream.", key);
                     break;
@@ -401,8 +470,205 @@ async fn stream_label(sensor: AvailableSensor, window: WindowProxy) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Lidar 3D viewer
+// ---------------------------------------------------------------------------
+
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+struct PointCloud {
+    points: Vec<[f32; 3]>,
+    colors: Vec<[f32; 3]>,
+}
+
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+enum LidarMsg {
+    Update(String, PointCloud),
+    Remove(String),
+}
+
+#[cfg(target_os = "macos")]
+fn lidar_viewer_sender() -> Option<&'static std::sync::mpsc::Sender<LidarMsg>> {
+    None
+}
+
+#[cfg(not(target_os = "macos"))]
+fn lidar_viewer_sender() -> Option<&'static std::sync::mpsc::Sender<LidarMsg>> {
+    static LIDAR_VIEWER: std::sync::OnceLock<std::sync::mpsc::Sender<LidarMsg>> =
+        std::sync::OnceLock::new();
+    Some(LIDAR_VIEWER.get_or_init(|| {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || run_lidar_viewer(rx));
+        tx
+    }))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn run_lidar_viewer(rx: std::sync::mpsc::Receiver<LidarMsg>) {
+    use kiss3d::camera::ArcBall;
+    use kiss3d::nalgebra::{Point3, Vector3};
+    use kiss3d::window::Window;
+
+    let mut window = Window::new("Tempo Lidar");
+    window.set_background_color(0.0, 0.0, 0.0);
+    window.set_point_size(3.0);
+
+    let mut camera = ArcBall::new(Point3::new(-10.0, 0.0, 5.0), Point3::origin());
+    camera.set_up_axis(Vector3::z());
+
+    let mut clouds: HashMap<String, PointCloud> = HashMap::new();
+    let origin = Point3::origin();
+    let red = Point3::new(1.0, 0.0, 0.0);
+    let green = Point3::new(0.0, 1.0, 0.0);
+    let blue = Point3::new(0.0, 0.0, 1.0);
+
+    while window.render_with_camera(&mut camera) {
+        loop {
+            match rx.try_recv() {
+                Ok(LidarMsg::Update(k, pc)) => {
+                    clouds.insert(k, pc);
+                }
+                Ok(LidarMsg::Remove(k)) => {
+                    clouds.remove(&k);
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => return,
+            }
+        }
+        window.draw_line(&origin, &Point3::new(1.0, 0.0, 0.0), &red);
+        window.draw_line(&origin, &Point3::new(0.0, 1.0, 0.0), &green);
+        window.draw_line(&origin, &Point3::new(0.0, 0.0, 1.0), &blue);
+        for cloud in clouds.values() {
+            for (p, c) in cloud.points.iter().zip(cloud.colors.iter()) {
+                window.draw_point(
+                    &Point3::new(p[0], p[1], p[2]),
+                    &Point3::new(c[0], c[1], c[2]),
+                );
+            }
+        }
+    }
+}
+
+// 5-stop linear approximation of matplotlib viridis. Good enough to give the
+// point cloud a continuous color gradient; full 256-entry LUT would be overkill.
+fn viridis(t: f32) -> [f32; 3] {
+    const STOPS: [[f32; 3]; 5] = [
+        [0.267, 0.005, 0.329],
+        [0.231, 0.318, 0.545],
+        [0.128, 0.567, 0.551],
+        [0.369, 0.789, 0.382],
+        [0.993, 0.906, 0.144],
+    ];
+    let t = t.clamp(0.0, 1.0);
+    let scaled = t * 4.0;
+    let i = scaled.floor() as usize;
+    if i >= 4 {
+        return STOPS[4];
+    }
+    let f = scaled - i as f32;
+    let a = STOPS[i];
+    let b = STOPS[i + 1];
+    [
+        a[0] + (b[0] - a[0]) * f,
+        a[1] + (b[1] - a[1]) * f,
+        a[2] + (b[2] - a[2]) * f,
+    ]
+}
+
+#[derive(Default)]
+struct LidarAccumulator {
+    sequence_id: Option<u64>,
+    expected_segments: i32,
+    received_segments: i32,
+    distances: Vec<f32>,
+    intensities: Vec<f32>,
+    azimuths: Vec<f32>,
+    elevations: Vec<f32>,
+}
+
+impl LidarAccumulator {
+    fn add(&mut self, seg: &tempo_sim::proto::tempo_lidar::LidarScanSegment) -> bool {
+        let id = seg.header.as_ref().map(|h| h.sequence_id);
+        let restart = match (self.sequence_id, id) {
+            (Some(a), Some(b)) => a != b,
+            _ => true,
+        };
+        if restart {
+            self.distances.clear();
+            self.intensities.clear();
+            self.azimuths.clear();
+            self.elevations.clear();
+            self.received_segments = 0;
+            self.sequence_id = id;
+            self.expected_segments = seg.scan_count;
+        }
+        self.distances.extend_from_slice(&seg.distances);
+        self.intensities.extend_from_slice(&seg.intensities);
+        self.azimuths.extend_from_slice(&seg.azimuths);
+        self.elevations.extend_from_slice(&seg.elevations);
+        self.received_segments += 1;
+        self.expected_segments > 0 && self.received_segments == self.expected_segments
+    }
+
+    fn build_cloud(&self) -> PointCloud {
+        let n = self.distances.len();
+        let mut points = Vec::with_capacity(n);
+        let mut colors = Vec::with_capacity(n);
+        let mut mn = f32::INFINITY;
+        let mut mx = f32::NEG_INFINITY;
+        for &i in &self.intensities {
+            if i.is_finite() {
+                if i < mn {
+                    mn = i;
+                }
+                if i > mx {
+                    mx = i;
+                }
+            }
+        }
+        if !mn.is_finite() {
+            mn = 0.0;
+            mx = 1.0;
+        }
+        let span = (mx - mn).max(1e-6);
+        for i in 0..n {
+            let d = self.distances[i];
+            if !d.is_finite() || d <= 0.0 {
+                continue;
+            }
+            let az = self.azimuths[i];
+            let el = self.elevations[i];
+            let c_el = el.cos();
+            let x = d * c_el * az.cos();
+            let y = d * c_el * az.sin();
+            let z = d * el.sin();
+            let t = ((self.intensities[i] - mn) / span).clamp(0.0, 1.0);
+            points.push([x, y, z]);
+            colors.push(viridis(t));
+        }
+        PointCloud { points, colors }
+    }
+}
+
 async fn stream_lidar(sensor: AvailableSensor) {
     let key = format!("{}:{}:PointCloud", sensor.owner, sensor.name);
+    let viewer = lidar_viewer_sender();
+
+    struct ViewerGuard {
+        key: String,
+        viewer: Option<&'static std::sync::mpsc::Sender<LidarMsg>>,
+    }
+    impl Drop for ViewerGuard {
+        fn drop(&mut self) {
+            if let Some(s) = self.viewer {
+                let _ = s.send(LidarMsg::Remove(self.key.clone()));
+            }
+        }
+    }
+    let _guard = ViewerGuard {
+        key: key.clone(),
+        viewer,
+    };
+
     let mut stream =
         match tempo_sensors::stream_lidar_scans_async(sensor.owner, sensor.name).await {
             Ok(s) => s,
@@ -411,6 +677,7 @@ async fn stream_lidar(sensor: AvailableSensor) {
                 return;
             }
         };
+    let mut accumulator = LidarAccumulator::default();
     let mut count = 0u64;
     while let Some(item) = stream.next().await {
         match item {
@@ -425,6 +692,12 @@ async fn stream_lidar(sensor: AvailableSensor) {
                         seg.vertical_beams,
                         seg.horizontal_beams
                     );
+                }
+                if accumulator.add(&seg) {
+                    if let Some(s) = viewer {
+                        let cloud = accumulator.build_cloud();
+                        let _ = s.send(LidarMsg::Update(key.clone(), cloud));
+                    }
                 }
             }
             Err(e) => {
