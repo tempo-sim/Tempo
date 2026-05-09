@@ -175,13 +175,13 @@ void UTempoActorControlServiceSubsystem::SpawnActor(const SpawnActorRequest& Req
 	UWorld* World = GetWorld();
 	check(World);
 
-	if (Request.type().empty())
+	if (Request.actor_type().empty())
 	{
 		ResponseContinuation.ExecuteIfBound(SpawnActorResponse(), grpc::Status(grpc::FAILED_PRECONDITION, "Type must be specified"));
 		return;
 	}
 
-	UClass* Class = GetSubClassWithName<AActor>(UTF8_TO_TCHAR(Request.type().c_str()));
+	UClass* Class = GetSubClassWithName<AActor>(UTF8_TO_TCHAR(Request.actor_type().c_str()));
 
 	if (!Class)
 	{
@@ -284,7 +284,7 @@ void UTempoActorControlServiceSubsystem::AddComponent(const AddComponentRequest&
 {
 	AddComponentResponse Response;
 
-	if (Request.type().empty())
+	if (Request.component_type().empty())
 	{
 		ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::FAILED_PRECONDITION, "Type must be specified"));
 		return;
@@ -303,7 +303,7 @@ void UTempoActorControlServiceSubsystem::AddComponent(const AddComponentRequest&
 		return;
 	}
 
-	UClass* Class = GetSubClassWithName<UActorComponent>(UTF8_TO_TCHAR(Request.type().c_str()));
+	UClass* Class = GetSubClassWithName<UActorComponent>(UTF8_TO_TCHAR(Request.component_type().c_str()));
 	if (!Class)
 	{
 		ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::NOT_FOUND, "No component class with that name found"));
@@ -628,7 +628,7 @@ void UTempoActorControlServiceSubsystem::GetAllActors(const GetAllActorsRequest&
 	{
 		TempoWorld::ActorDescriptor* ActorDescriptor = Response.add_actors();
 		ActorDescriptor->set_name(TCHAR_TO_UTF8(*Actor->GetActorNameOrLabel()));
-		ActorDescriptor->set_type(TCHAR_TO_UTF8(*Actor->GetClass()->GetName()));
+		ActorDescriptor->set_actor_type(TCHAR_TO_UTF8(*Actor->GetClass()->GetName()));
 	}
 
 	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
@@ -656,7 +656,7 @@ void UTempoActorControlServiceSubsystem::GetAllComponents(const GetAllComponents
 	{
 		TempoWorld::ComponentDescriptor* ComponentDescriptor = Response.add_components();
 		ComponentDescriptor->set_name(TCHAR_TO_UTF8(*Component->GetName()));
-		ComponentDescriptor->set_type(TCHAR_TO_UTF8(*Component->GetClass()->GetName()));
+		ComponentDescriptor->set_component_type(TCHAR_TO_UTF8(*Component->GetClass()->GetName()));
 		ComponentDescriptor->set_actor(TCHAR_TO_UTF8(*Actor->GetActorNameOrLabel()));
 	}
 
@@ -920,7 +920,7 @@ void GetObjectProperties(const UObject* Object, GetPropertiesResponse& Response)
 			PropertyDescriptor->set_component(TCHAR_TO_UTF8(*Component->GetName()));
 		}
 		PropertyDescriptor->set_name(TCHAR_TO_UTF8(*Property->GetName()));
-		PropertyDescriptor->set_type(TCHAR_TO_UTF8(*Type));
+		PropertyDescriptor->set_property_type(TCHAR_TO_UTF8(*Type));
 		PropertyDescriptor->set_value(TCHAR_TO_UTF8(*Value));
 	}
 }

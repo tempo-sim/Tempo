@@ -31,6 +31,7 @@ class ProtoGenerator:
         self.ubt_dir = Path(args.ubt_dir)
         
         self.python_dest_dir = self.plugin_root / "Content/Python/API/tempo"
+        self.rust_proto_dir = self.plugin_root / "Content/Rust/API/proto"
         self.protoc = self.tool_dir / ("protoc.exe" if platform.system() == "Windows" else "protoc")
         self.grpc_cpp_plugin = self.tool_dir / ("grpc_cpp_plugin.exe" if platform.system() == "Windows" else "grpc_cpp_plugin")
         self.grpc_python_plugin = self.tool_dir / ("grpc_python_plugin.exe" if platform.system() == "Windows" else "grpc_python_plugin")
@@ -510,11 +511,59 @@ class ProtoGenerator:
         """Recursively remove empty directories"""
         if not directory.exists():
             return
-        
+
         for dirpath, dirnames, filenames in os.walk(directory, topdown=False):
             path = Path(dirpath)
             if not filenames and not dirnames and path != directory:
                 path.rmdir()
+
+    @staticmethod
+    def _rust_opt_in() -> bool:
+        """Whether the user has opted into Rust API generation."""
+        return os.environ.get("TEMPO_GEN_RUST_API", "0") not in ("0", "")
+
+    def export_rust_protos(self):
+        """Export decorated proto files for Rust tonic-build.
+
+        Copies all decorated proto files from the temp source directory to the
+        Rust crate's proto directory. These protos already have proper package
+        declarations added by copy_module_protos().
+        """
+        if not self._rust_opt_in():
+            return
+
+        # Clear and recreate the Rust proto directory
+        if self.rust_proto_dir.exists():
+            shutil.rmtree(self.rust_proto_dir)
+        self.rust_proto_dir.mkdir(parents=True, exist_ok=True)
+
+        # Copy all decorated protos from temp directory
+        for module_dir in self.src_temp_dir.iterdir():
+            if not module_dir.is_dir():
+                continue
+
+            module_name = module_dir.name
+            dest_module_dir = self.rust_proto_dir / module_name
+
+            # Copy Public protos
+            public_dir = module_dir / "Public"
+            if public_dir.exists():
+                for proto_file in public_dir.rglob("*.proto"):
+                    relative_path = proto_file.relative_to(public_dir)
+                    dest_file = dest_module_dir / relative_path
+                    dest_file.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(proto_file, dest_file)
+
+            # Copy Private protos (they may be needed for complete type definitions)
+            private_dir = module_dir / "Private"
+            if private_dir.exists():
+                for proto_file in private_dir.rglob("*.proto"):
+                    relative_path = proto_file.relative_to(private_dir)
+                    dest_file = dest_module_dir / relative_path
+                    dest_file.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(proto_file, dest_file)
+
+        print(f"Exported Rust protos to {self.rust_proto_dir}")
 
     def run(self):
         """Main execution flow"""
@@ -525,11 +574,17 @@ class ProtoGenerator:
                 print(f"[Tempo Prebuild]  Skipping Tempo protobuf generation (TEMPO_SKIP_PREBUILD is {skip_prebuild})")
                 return 0
 
+            # If Rust generation is opted in but the Rust proto dir hasn't been populated
+            # yet (first time the user enables it), bypass the cache so the export runs.
+            rust_opt_in = self._rust_opt_in()
+            need_rust_export = rust_opt_in and not self.rust_proto_dir.exists()
+
             # Check cache to see if we can skip generation
             input_files = self.collect_input_files()
             output_files = self.collect_output_files()
-            if self.cache.is_valid("gen_protos", input_files, output_files,
-                                   input_base=self.project_root, output_base=self.project_root):
+            if not need_rust_export and self.cache.is_valid(
+                    "gen_protos", input_files, output_files,
+                    input_base=self.project_root, output_base=self.project_root):
                 print("[Tempo Prebuild]  Skipping Tempo protobuf generation (no changes detected)", flush=True)
                 return 0
 
@@ -566,6 +621,11 @@ class ProtoGenerator:
             self.cache.update("gen_protos", input_files, output_files,
                               input_base=self.project_root, output_base=self.project_root)
 
+            # Export protos for Rust crate
+            self.export_rust_protos()
+
+            print("Done")
+            
         finally:
             self.cleanup_temp_dirs()
 

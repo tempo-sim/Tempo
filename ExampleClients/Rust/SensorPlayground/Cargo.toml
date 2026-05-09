@@ -1,0 +1,24 @@
+[package]
+name = "sensor_playground"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "sensor_playground"
+path = "src/sensor_playground.rs"
+
+[dependencies]
+tempo-sim = { path = "../../../TempoCore/Content/Rust/API" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+tokio-stream = "0.1"
+inquire = "0.7"
+clap = { version = "4", features = ["derive"] }
+rand = "0.8"
+tempfile = "3"
+show-image = "=0.14.0"
+image = { version = "0.25", default-features = false, features = ["jpeg"] }
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+# kiss3d uses GLFW, which requires the main thread on macOS — show-image already
+# owns it. On macOS we fall back to printing lidar stats only.
+kiss3d = "0.35"
