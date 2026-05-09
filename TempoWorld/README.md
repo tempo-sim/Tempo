@@ -104,23 +104,29 @@ Once you do know the name of the Actor, Component, and Property you want to set 
 | Set Property Type    | Unreal Type |
 | ------------- | ------------- |
 | `set_bool_property`          | bool              |
-| `set_string_property`        | FString or FName  |
+| `set_string_property`        | FString, FName, or FText |
 | `set_enum_property`          | TEnumAsByte or raw Enum |
-| `set_int_property`           | int32             |
+| `set_int_property`           | int32 (also accepts int8/int16/uint16 with range check, and TEnumAsByte) |
+| `set_int64_property`         | int64 (also accepts uint32/uint64 with range check) |
 | `set_float_property`         | double or float   |
 | `set_vector_property`        | FVector           |
+| `set_vector2d_property`      | FVector2D         |
+| `set_int_vector_property`    | FIntVector        |
+| `set_int_point_property`     | FIntPoint         |
 | `set_rotator_property`       | FRotator          |
+| `set_quat_property`          | FQuat             |
+| `set_transform_property`     | FTransform        |
 | `set_color_property`         | FColor or FLinearColor           |
-| `set_class_property`         | UClass* or TSubclassOf (by name) |
-| `set_asset_property`         | Asset (by name)   |
+| `set_class_property`         | UClass*, TSubclassOf, or TSoftClassPtr (by name) |
+| `set_asset_property`         | Asset, TSoftObjectPtr (by path/name) |
 | `set_actor_property`         | AActor* (by name) |
-| `set_component_property`     | UActorComponent* (by name)       |
+| `set_component_property`     | UActorComponent* (by name, as `ActorName:ComponentName`) |
 
-All of the above also have `set_*_array_property` RPCs to set an array of such properties.
+All of the above (except the struct types `vector`, `vector2d`, `int_vector`, `int_point`, `rotator`, `quat`, `transform`, and `color`) also have `set_*_array_property` and `set_*_set_property` RPCs to replace the entire contents of a `TArray` or `TSet` property in one call.
 
-TempoWorld also supports setting individual properties in structs and arrays, with the syntax `MyStruct.InnerProperty` and `MyArray[0]`, respectively. It also supports arbitrarily deep nesting of properties. Array indices must be either already present in the array or one past the length of the array (to extend the array by one element).
+TempoWorld also supports setting individual properties in structs, arrays, and maps, with the syntax `MyStruct.InnerProperty`, `MyArray[0]`, and `MyMap[key]`, respectively. It also supports arbitrarily deep nesting of properties. Array indices must be either already present in the array or one past the length of the array (to extend the array by one element). Map keys that don't yet exist are inserted.
 
-TempoWorld does not yet support setting properties in maps or sets. Check back soon for that!
+`TSet` element-level addressing is not supported (a set element is its own identity, so there's nothing to address into); use `set_*_set_property` to replace a set's contents.
 
 > [!Warning]
-> While the values you set for rotators will be converted from radians to degrees, the values you set for floats and vectors will not be converted (so, these should be specified in centimeters if they represent distances). We don't feel it is safe to assume that these quantities always represent distances.
+> While the values you set for rotators and quaternions will be converted from radians/right-handed to degrees/left-handed, the values you set for floats and vector-shaped types (`vector`, `vector2d`, `int_vector`, `int_point`) will not be converted (so, these should be specified in centimeters if they represent distances). We don't feel it is safe to assume that these quantities always represent distances. `set_transform_property` is the one exception: it follows the same convention as `spawn_actor` and `set_actor_transform`, converting the location from meters to centimeters and the rotation from radians/right-handed to degrees/left-handed, since transforms almost always represent world-frame poses.

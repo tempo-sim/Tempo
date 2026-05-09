@@ -190,6 +190,13 @@ message SetIntPropertyRequest {
   int32 value = 4;
 }
 
+message SetInt64PropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  int64 value = 4;
+}
+
 message SetFloatPropertyRequest {
   string actor = 1;
   string component = 2;
@@ -206,6 +213,31 @@ message SetVectorPropertyRequest {
   float z = 6;
 }
 
+message SetVector2DPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  float x = 4;
+  float y = 5;
+}
+
+message SetIntVectorPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  int32 x = 4;
+  int32 y = 5;
+  int32 z = 6;
+}
+
+message SetIntPointPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  int32 x = 4;
+  int32 y = 5;
+}
+
 message SetRotatorPropertyRequest {
   string actor = 1;
   string component = 2;
@@ -216,6 +248,25 @@ message SetRotatorPropertyRequest {
   float p = 5;
   // Yaw in radians.
   float y = 6;
+}
+
+message SetQuatPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  // Quaternion components (right-handed convention; will be converted to Unreal's left-handed FQuat).
+  float x = 4;
+  float y = 5;
+  float z = 6;
+  float w = 7;
+}
+
+message SetTransformPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  // Transform (meters / right-handed). Location is converted m -> cm and rotation rad -> deg, right-handed -> left-handed.
+  TempoCore.Transform value = 4;
 }
 
 message SetColorPropertyRequest {
@@ -288,6 +339,13 @@ message SetIntArrayPropertyRequest {
   repeated int32 values = 4;
 }
 
+message SetInt64ArrayPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  repeated int64 values = 4;
+}
+
 message SetFloatArrayPropertyRequest {
   string actor = 1;
   string component = 2;
@@ -317,6 +375,78 @@ message SetActorArrayPropertyRequest {
 }
 
 message SetComponentArrayPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  repeated string values = 4;
+}
+
+// Set RPCs replace the entire contents of a TSet property with the provided values.
+// (Duplicates among `values` collapse, matching TSet semantics.)
+message SetBoolSetPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  repeated bool values = 4;
+}
+
+message SetStringSetPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  repeated string values = 4;
+}
+
+message SetEnumSetPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  repeated string values = 4;
+}
+
+message SetIntSetPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  repeated int32 values = 4;
+}
+
+message SetInt64SetPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  repeated int64 values = 4;
+}
+
+message SetFloatSetPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  repeated float values = 4;
+}
+
+message SetClassSetPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  repeated string values = 4;
+}
+
+message SetAssetSetPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  repeated string values = 4;
+}
+
+message SetActorSetPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  repeated string values = 4;
+}
+
+message SetComponentSetPropertyRequest {
   string actor = 1;
   string component = 2;
   string property = 3;
@@ -365,11 +495,23 @@ service WorldControlService {
 
   rpc SetIntProperty(SetIntPropertyRequest) returns (TempoCore.Empty);
 
+  rpc SetInt64Property(SetInt64PropertyRequest) returns (TempoCore.Empty);
+
   rpc SetFloatProperty(SetFloatPropertyRequest) returns (TempoCore.Empty);
 
   rpc SetVectorProperty(SetVectorPropertyRequest) returns (TempoCore.Empty);
 
+  rpc SetVector2DProperty(SetVector2DPropertyRequest) returns (TempoCore.Empty);
+
+  rpc SetIntVectorProperty(SetIntVectorPropertyRequest) returns (TempoCore.Empty);
+
+  rpc SetIntPointProperty(SetIntPointPropertyRequest) returns (TempoCore.Empty);
+
   rpc SetRotatorProperty(SetRotatorPropertyRequest) returns (TempoCore.Empty);
+
+  rpc SetQuatProperty(SetQuatPropertyRequest) returns (TempoCore.Empty);
+
+  rpc SetTransformProperty(SetTransformPropertyRequest) returns (TempoCore.Empty);
 
   rpc SetColorProperty(SetColorPropertyRequest) returns (TempoCore.Empty);
 
@@ -389,6 +531,8 @@ service WorldControlService {
 
   rpc SetIntArrayProperty(SetIntArrayPropertyRequest) returns (TempoCore.Empty);
 
+  rpc SetInt64ArrayProperty(SetInt64ArrayPropertyRequest) returns (TempoCore.Empty);
+
   rpc SetFloatArrayProperty(SetFloatArrayPropertyRequest) returns (TempoCore.Empty);
 
   rpc SetClassArrayProperty(SetClassArrayPropertyRequest) returns (TempoCore.Empty);
@@ -398,6 +542,26 @@ service WorldControlService {
   rpc SetActorArrayProperty(SetActorArrayPropertyRequest) returns (TempoCore.Empty);
 
   rpc SetComponentArrayProperty(SetComponentArrayPropertyRequest) returns (TempoCore.Empty);
+
+  rpc SetBoolSetProperty(SetBoolSetPropertyRequest) returns (TempoCore.Empty);
+
+  rpc SetStringSetProperty(SetStringSetPropertyRequest) returns (TempoCore.Empty);
+
+  rpc SetEnumSetProperty(SetEnumSetPropertyRequest) returns (TempoCore.Empty);
+
+  rpc SetIntSetProperty(SetIntSetPropertyRequest) returns (TempoCore.Empty);
+
+  rpc SetInt64SetProperty(SetInt64SetPropertyRequest) returns (TempoCore.Empty);
+
+  rpc SetFloatSetProperty(SetFloatSetPropertyRequest) returns (TempoCore.Empty);
+
+  rpc SetClassSetProperty(SetClassSetPropertyRequest) returns (TempoCore.Empty);
+
+  rpc SetAssetSetProperty(SetAssetSetPropertyRequest) returns (TempoCore.Empty);
+
+  rpc SetActorSetProperty(SetActorSetPropertyRequest) returns (TempoCore.Empty);
+
+  rpc SetComponentSetProperty(SetComponentSetPropertyRequest) returns (TempoCore.Empty);
 
   rpc CallFunction(CallFunctionRequest) returns (TempoCore.Empty);
 }
