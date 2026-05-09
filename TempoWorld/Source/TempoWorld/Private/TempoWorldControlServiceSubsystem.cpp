@@ -34,11 +34,17 @@ using GetComponentPropertiesRequest = TempoWorld::GetComponentPropertiesRequest;
 using GetPropertiesResponse = TempoWorld::GetPropertiesResponse;
 using SetBoolPropertyRequest = TempoWorld::SetBoolPropertyRequest;
 using SetIntPropertyRequest = TempoWorld::SetIntPropertyRequest;
+using SetInt64PropertyRequest = TempoWorld::SetInt64PropertyRequest;
 using SetFloatPropertyRequest = TempoWorld::SetFloatPropertyRequest;
 using SetStringPropertyRequest = TempoWorld::SetStringPropertyRequest;
 using SetEnumPropertyRequest = TempoWorld::SetEnumPropertyRequest;
 using SetVectorPropertyRequest = TempoWorld::SetVectorPropertyRequest;
+using SetVector2DPropertyRequest = TempoWorld::SetVector2DPropertyRequest;
+using SetIntVectorPropertyRequest = TempoWorld::SetIntVectorPropertyRequest;
+using SetIntPointPropertyRequest = TempoWorld::SetIntPointPropertyRequest;
 using SetRotatorPropertyRequest = TempoWorld::SetRotatorPropertyRequest;
+using SetQuatPropertyRequest = TempoWorld::SetQuatPropertyRequest;
+using SetTransformPropertyRequest = TempoWorld::SetTransformPropertyRequest;
 using SetColorPropertyRequest = TempoWorld::SetColorPropertyRequest;
 using SetClassPropertyRequest = TempoWorld::SetClassPropertyRequest;
 using SetAssetPropertyRequest = TempoWorld::SetAssetPropertyRequest;
@@ -48,11 +54,22 @@ using SetBoolArrayPropertyRequest = TempoWorld::SetBoolArrayPropertyRequest;
 using SetStringArrayPropertyRequest = TempoWorld::SetStringArrayPropertyRequest;
 using SetEnumArrayPropertyRequest = TempoWorld::SetEnumArrayPropertyRequest;
 using SetIntArrayPropertyRequest = TempoWorld::SetIntArrayPropertyRequest;
+using SetInt64ArrayPropertyRequest = TempoWorld::SetInt64ArrayPropertyRequest;
 using SetFloatArrayPropertyRequest = TempoWorld::SetFloatArrayPropertyRequest;
 using SetClassArrayPropertyRequest = TempoWorld::SetClassArrayPropertyRequest;
 using SetAssetArrayPropertyRequest = TempoWorld::SetAssetArrayPropertyRequest;
 using SetActorArrayPropertyRequest = TempoWorld::SetActorArrayPropertyRequest;
 using SetComponentArrayPropertyRequest = TempoWorld::SetComponentArrayPropertyRequest;
+using SetBoolSetPropertyRequest = TempoWorld::SetBoolSetPropertyRequest;
+using SetStringSetPropertyRequest = TempoWorld::SetStringSetPropertyRequest;
+using SetEnumSetPropertyRequest = TempoWorld::SetEnumSetPropertyRequest;
+using SetIntSetPropertyRequest = TempoWorld::SetIntSetPropertyRequest;
+using SetInt64SetPropertyRequest = TempoWorld::SetInt64SetPropertyRequest;
+using SetFloatSetPropertyRequest = TempoWorld::SetFloatSetPropertyRequest;
+using SetClassSetPropertyRequest = TempoWorld::SetClassSetPropertyRequest;
+using SetAssetSetPropertyRequest = TempoWorld::SetAssetSetPropertyRequest;
+using SetActorSetPropertyRequest = TempoWorld::SetActorSetPropertyRequest;
+using SetComponentSetPropertyRequest = TempoWorld::SetComponentSetPropertyRequest;
 using CallFunctionRequest = TempoWorld::CallFunctionRequest;
 
 FTempoWorldControlServiceActivated UTempoWorldControlServiceSubsystem::TempoWorldControlServiceActivated;
@@ -103,11 +120,17 @@ void UTempoWorldControlServiceSubsystem::RegisterServices(FTempoServer& Server)
 		SimpleRequestHandler(&WorldControlAsyncService::RequestDeactivateComponent, &UTempoWorldControlServiceSubsystem::DeactivateComponent),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetBoolProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetBoolPropertyRequest>),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetIntProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetIntPropertyRequest>),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestSetInt64Property, &UTempoWorldControlServiceSubsystem::SetProperty<SetInt64PropertyRequest>),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetFloatProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetFloatPropertyRequest>),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetStringProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetStringPropertyRequest>),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetEnumProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetEnumPropertyRequest>),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetVectorProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetVectorPropertyRequest>),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestSetVector2DProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetVector2DPropertyRequest>),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestSetIntVectorProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetIntVectorPropertyRequest>),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestSetIntPointProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetIntPointPropertyRequest>),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetRotatorProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetRotatorPropertyRequest>),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestSetQuatProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetQuatPropertyRequest>),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestSetTransformProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetTransformPropertyRequest>),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetColorProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetColorPropertyRequest>),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetClassProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetClassPropertyRequest>),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetAssetProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetAssetPropertyRequest>),
@@ -117,11 +140,22 @@ void UTempoWorldControlServiceSubsystem::RegisterServices(FTempoServer& Server)
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetStringArrayProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetStringArrayPropertyRequest>),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetEnumArrayProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetEnumArrayPropertyRequest>),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetIntArrayProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetIntArrayPropertyRequest>),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestSetInt64ArrayProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetInt64ArrayPropertyRequest>),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetFloatArrayProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetFloatArrayPropertyRequest>),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetClassArrayProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetClassArrayPropertyRequest>),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetAssetArrayProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetAssetArrayPropertyRequest>),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetActorArrayProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetActorArrayPropertyRequest>),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetComponentArrayProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetComponentArrayPropertyRequest>),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestSetBoolSetProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetBoolSetPropertyRequest>),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestSetStringSetProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetStringSetPropertyRequest>),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestSetEnumSetProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetEnumSetPropertyRequest>),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestSetIntSetProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetIntSetPropertyRequest>),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestSetInt64SetProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetInt64SetPropertyRequest>),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestSetFloatSetProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetFloatSetPropertyRequest>),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestSetClassSetProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetClassSetPropertyRequest>),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestSetAssetSetProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetAssetSetPropertyRequest>),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestSetActorSetProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetActorSetPropertyRequest>),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestSetComponentSetProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetComponentSetPropertyRequest>),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestCallFunction, &UTempoWorldControlServiceSubsystem::CallObjectFunction)
 	);
 }
@@ -747,6 +781,16 @@ void GetObjectProperties(const UObject* Object, GetPropertiesResponse& Response)
 				*Value = ValueName.ToString();
 			}
 		}
+		else if (const FTextProperty* TextProperty = CastField<FTextProperty>(Property))
+		{
+			Type = TEXT("string");
+			if (Value)
+			{
+				FText ValueText;
+				TextProperty->GetValue_InContainer(Container, &ValueText);
+				*Value = ValueText.ToString();
+			}
+		}
 		else if (const FBoolProperty* BoolProperty = CastField<FBoolProperty>(Property))
 		{
 			Type = TEXT("bool");
@@ -764,6 +808,66 @@ void GetObjectProperties(const UObject* Object, GetPropertiesResponse& Response)
 			{
 				int32 ValueInt;
 				IntProperty->GetValue_InContainer(Container, &ValueInt);
+				*Value = FString::FromInt(ValueInt);
+			}
+		}
+		else if (const FInt64Property* Int64Property = CastField<FInt64Property>(Property))
+		{
+			Type = TEXT("int64");
+			if (Value)
+			{
+				int64 ValueInt;
+				Int64Property->GetValue_InContainer(Container, &ValueInt);
+				*Value = FString::Printf(TEXT("%lld"), ValueInt);
+			}
+		}
+		else if (const FInt16Property* Int16Property = CastField<FInt16Property>(Property))
+		{
+			Type = TEXT("int");
+			if (Value)
+			{
+				int16 ValueInt;
+				Int16Property->GetValue_InContainer(Container, &ValueInt);
+				*Value = FString::FromInt(ValueInt);
+			}
+		}
+		else if (const FInt8Property* Int8Property = CastField<FInt8Property>(Property))
+		{
+			Type = TEXT("int");
+			if (Value)
+			{
+				int8 ValueInt;
+				Int8Property->GetValue_InContainer(Container, &ValueInt);
+				*Value = FString::FromInt(ValueInt);
+			}
+		}
+		else if (const FUInt64Property* UInt64Property = CastField<FUInt64Property>(Property))
+		{
+			Type = TEXT("int64");
+			if (Value)
+			{
+				uint64 ValueInt;
+				UInt64Property->GetValue_InContainer(Container, &ValueInt);
+				*Value = FString::Printf(TEXT("%llu"), ValueInt);
+			}
+		}
+		else if (const FUInt32Property* UInt32Property = CastField<FUInt32Property>(Property))
+		{
+			Type = TEXT("int64");
+			if (Value)
+			{
+				uint32 ValueInt;
+				UInt32Property->GetValue_InContainer(Container, &ValueInt);
+				*Value = FString::Printf(TEXT("%u"), ValueInt);
+			}
+		}
+		else if (const FUInt16Property* UInt16Property = CastField<FUInt16Property>(Property))
+		{
+			Type = TEXT("int");
+			if (Value)
+			{
+				uint16 ValueInt;
+				UInt16Property->GetValue_InContainer(Container, &ValueInt);
 				*Value = FString::FromInt(ValueInt);
 			}
 		}
@@ -857,6 +961,26 @@ void GetObjectProperties(const UObject* Object, GetPropertiesResponse& Response)
 				}
 			}
 		}
+		else if (const FSoftObjectProperty* SoftObjectProperty = CastField<FSoftObjectProperty>(Property))
+		{
+			// Catches both FSoftObjectProperty and FSoftClassProperty (the latter derives from the former).
+			FString InnerType;
+			const FString OuterType = SoftObjectProperty->GetCPPType(&InnerType, 0);
+			if (InnerType.IsEmpty())
+			{
+				Type = OuterType;
+			}
+			else
+			{
+				Type = FString::Printf(TEXT("%s<%s>"), *OuterType, *InnerType);
+			}
+			if (Value)
+			{
+				const FSoftObjectPtr& Soft = SoftObjectProperty->GetPropertyValue_InContainer(Container);
+				const FString Path = Soft.ToString();
+				*Value = Path.IsEmpty() ? TEXT("null") : Path;
+			}
+		}
 		else if (const FStructProperty* StructProperty = CastField<FStructProperty>(Property))
 		{
 			if (StructProperty->Struct->GetStructCPPName() == TEXT("FVector"))
@@ -944,6 +1068,66 @@ void GetObjectProperties(const UObject* Object, GetPropertiesResponse& Response)
 				Value->Append(TEXT("]"));
 			}
 			Type = FString::Printf(TEXT("array<%s>"), *InnerType);
+		}
+		else if (const FMapProperty* MapProperty = CastField<FMapProperty>(Property))
+		{
+			FString KeyType = TEXT("unsupported");
+			FString ValueType = TEXT("unsupported");
+			// Get key and value types (even if the map is empty)
+			GetPropertyTypeAndValue(nullptr, MapProperty->KeyProp, KeyType, nullptr);
+			GetPropertyTypeAndValue(nullptr, MapProperty->ValueProp, ValueType, nullptr);
+			if (Value)
+			{
+				*Value = TEXT("{");
+				if (KeyType != TEXT("unsupported") && ValueType != TEXT("unsupported"))
+				{
+					FScriptMapHelper MapHelper{ MapProperty, Property->ContainerPtrToValuePtr<void>(Container) };
+					for (int32 I = 0; I < MapHelper.GetMaxIndex(); ++I)
+					{
+						if (!MapHelper.IsValidIndex(I))
+						{
+							continue;
+						}
+						FString Unused; // Key/value types are uniform, and we already know them.
+						FString KeyValue;
+						FString ValueValue;
+						GetPropertyTypeAndValue(MapHelper.GetKeyPtr(I), MapProperty->KeyProp, Unused, &KeyValue);
+						GetPropertyTypeAndValue(MapHelper.GetValuePtr(I), MapProperty->ValueProp, Unused, &ValueValue);
+						Value->Appendf(TEXT("%s: %s, "), *KeyValue, *ValueValue);
+					}
+					Value->RemoveFromEnd(TEXT(", "));
+				}
+				Value->Append(TEXT("}"));
+			}
+			Type = FString::Printf(TEXT("map<%s,%s>"), *KeyType, *ValueType);
+		}
+		else if (const FSetProperty* SetProperty = CastField<FSetProperty>(Property))
+		{
+			FString InnerType = TEXT("unsupported");
+			// Get the inner type (even if the set is empty)
+			GetPropertyTypeAndValue(nullptr, SetProperty->ElementProp, InnerType, nullptr);
+			if (Value)
+			{
+				*Value = TEXT("{");
+				if (InnerType != TEXT("unsupported"))
+				{
+					FScriptSetHelper SetHelper{ SetProperty, Property->ContainerPtrToValuePtr<void>(Container) };
+					for (int32 I = 0; I < SetHelper.GetMaxIndex(); ++I)
+					{
+						if (!SetHelper.IsValidIndex(I))
+						{
+							continue;
+						}
+						FString Unused; // Element type is uniform, and we already know it.
+						FString ElementValue;
+						GetPropertyTypeAndValue(SetHelper.GetElementPtr(I), SetProperty->ElementProp, Unused, &ElementValue);
+						Value->Appendf(TEXT("%s, "), *ElementValue);
+					}
+					Value->RemoveFromEnd(TEXT(", "));
+				}
+				Value->Append(TEXT("}"));
+			}
+			Type = FString::Printf(TEXT("set<%s>"), *InnerType);
 		}
 		else
 		{
@@ -1042,9 +1226,18 @@ void UTempoWorldControlServiceSubsystem::GetComponentProperties(const GetCompone
 
 FString SplitPropertyName(FString& PropertyName)
 {
+	// If a ']' appears before any '[', we are inside a bracket scope (e.g. parsing the contents
+	// of MyMap[...]) and only ']' should terminate the segment - '.' inside the brackets is part
+	// of the key (relevant for map keys containing dots, like FString or FName keys).
+	int32 OpenBracketIdx = INDEX_NONE;
+	int32 CloseBracketIdx = INDEX_NONE;
+	PropertyName.FindChar('[', OpenBracketIdx);
+	PropertyName.FindChar(']', CloseBracketIdx);
+	const bool bInBracket = CloseBracketIdx != INDEX_NONE && (OpenBracketIdx == INDEX_NONE || CloseBracketIdx < OpenBracketIdx);
+
 	for (int32 CharIdx = 0; CharIdx < PropertyName.Len(); ++CharIdx)
 	{
-		if (PropertyName[CharIdx] == '.' || PropertyName[CharIdx] == '[')
+		if (!bInBracket && (PropertyName[CharIdx] == '.' || PropertyName[CharIdx] == '['))
 		{
 			// Chop everything before
 			const FString FirstPropertyName = PropertyName.LeftChop(PropertyName.Len() - CharIdx);
@@ -1089,9 +1282,9 @@ grpc::Status GetPropertyForRequest(const UObject* Object, const RequestType& Req
 		return grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 	}
 
-	if (!InnerPropertyName.IsEmpty() && !(CastField<FStructProperty>(Property) || CastField<FArrayProperty>(Property)))
+	if (!InnerPropertyName.IsEmpty() && !(CastField<FStructProperty>(Property) || CastField<FArrayProperty>(Property) || CastField<FMapProperty>(Property)))
 	{
-		const FString ErrorMsg = FString::Printf(TEXT("Inner property '%s' was specified on property '%s' (type '%s'), but inner properties can only be specified on structs and arrays"), *InnerPropertyName, *FirstPropertyName, *Property->GetCPPType());
+		const FString ErrorMsg = FString::Printf(TEXT("Inner property '%s' was specified on property '%s' (type '%s'), but inner properties can only be specified on structs, arrays, and maps."), *InnerPropertyName, *FirstPropertyName, *Property->GetCPPType());
 		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 	}
 
@@ -1181,7 +1374,61 @@ grpc::Status SetSinglePropertyValue<FByteProperty, int32>(void* ValuePtr, FByteP
 template <>
 grpc::Status SetSinglePropertyValue<FSoftObjectProperty, UObject*>(void* ValuePtr, FSoftObjectProperty* Property, UObject* const& ValueObj)
 {
+	// Also handles FSoftClassProperty (derives from FSoftObjectProperty).
 	Property->SetObjectPropertyValue(ValuePtr, ValueObj);
+	return grpc::Status_OK;
+}
+
+template <>
+grpc::Status SetSinglePropertyValue<FTextProperty, FString>(void* ValuePtr, FTextProperty* Property, const FString& ValueStr)
+{
+	Property->SetPropertyValue(ValuePtr, FText::FromString(ValueStr));
+	return grpc::Status_OK;
+}
+
+// Narrowing-int helpers: the smaller numeric property types take an int32 (or int64) on the wire
+// and we validate that the value fits before assigning. This mirrors the existing FByteProperty<int32>
+// specialization above.
+template <typename PropertyType, typename WireType, typename StoredType>
+grpc::Status SetNarrowedIntPropertyValue(void* ValuePtr, PropertyType* Property, const WireType& ValueInt)
+{
+	if (ValueInt > static_cast<WireType>(TNumericLimits<StoredType>::Max()))
+	{
+		const FString ErrorMsg = FString::Printf(TEXT("Cannot set %s property %s with too-large value %lld"),
+			*Property->GetClass()->GetName(), *Property->GetName(), static_cast<int64>(ValueInt));
+		return grpc::Status(grpc::OUT_OF_RANGE, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+	}
+	if (ValueInt < static_cast<WireType>(TNumericLimits<StoredType>::Min()))
+	{
+		const FString ErrorMsg = FString::Printf(TEXT("Cannot set %s property %s with too-small value %lld"),
+			*Property->GetClass()->GetName(), *Property->GetName(), static_cast<int64>(ValueInt));
+		return grpc::Status(grpc::OUT_OF_RANGE, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+	}
+	Property->SetPropertyValue(ValuePtr, static_cast<StoredType>(ValueInt));
+	return grpc::Status_OK;
+}
+
+template <> grpc::Status SetSinglePropertyValue<FInt16Property, int32>(void* ValuePtr, FInt16Property* Property, const int32& V)
+{ return SetNarrowedIntPropertyValue<FInt16Property, int32, int16>(ValuePtr, Property, V); }
+
+template <> grpc::Status SetSinglePropertyValue<FInt8Property, int32>(void* ValuePtr, FInt8Property* Property, const int32& V)
+{ return SetNarrowedIntPropertyValue<FInt8Property, int32, int8>(ValuePtr, Property, V); }
+
+template <> grpc::Status SetSinglePropertyValue<FUInt16Property, int32>(void* ValuePtr, FUInt16Property* Property, const int32& V)
+{ return SetNarrowedIntPropertyValue<FUInt16Property, int32, uint16>(ValuePtr, Property, V); }
+
+template <> grpc::Status SetSinglePropertyValue<FUInt32Property, int64>(void* ValuePtr, FUInt32Property* Property, const int64& V)
+{ return SetNarrowedIntPropertyValue<FUInt32Property, int64, uint32>(ValuePtr, Property, V); }
+
+template <>
+grpc::Status SetSinglePropertyValue<FUInt64Property, int64>(void* ValuePtr, FUInt64Property* Property, const int64& V)
+{
+	if (V < 0)
+	{
+		const FString ErrorMsg = FString::Printf(TEXT("Cannot set uint64 property %s with negative value %lld"), *Property->GetName(), V);
+		return grpc::Status(grpc::OUT_OF_RANGE, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+	}
+	Property->SetPropertyValue(ValuePtr, static_cast<uint64>(V));
 	return grpc::Status_OK;
 }
 
@@ -1245,6 +1492,38 @@ grpc::Status SetSinglePropertyInContainer(void* Container, FProperty* Property, 
 		}
 
 		return SetSinglePropertyInContainer<PropertyType, ValueType>(ArrayHelper.GetRawPtr(ElementIndex), ArrayProperty->Inner, InnerPropertyName, Value);
+	}
+	if (const FMapProperty* MapProperty = CastField<FMapProperty>(Property))
+	{
+		if (PropertyName.IsEmpty())
+		{
+			return grpc::Status(grpc::FAILED_PRECONDITION, "Map key must be specified");
+		}
+
+		FScriptMapHelper MapHelper{ MapProperty, ValuePtr };
+		FProperty* KeyProp = MapProperty->KeyProp;
+
+		// Parse the requested key string into a temporary instance of the key type.
+		void* KeyTemp = FMemory_Alloca(KeyProp->GetSize());
+		KeyProp->InitializeValue(KeyTemp);
+		const TCHAR* ParseResult = KeyProp->ImportText_Direct(*FirstPropertyName, KeyTemp, nullptr, PPF_None);
+		if (ParseResult == nullptr)
+		{
+			KeyProp->DestroyValue(KeyTemp);
+			return grpc::Status(grpc::FAILED_PRECONDITION, "Failed to parse map key " + std::string(TCHAR_TO_UTF8(*FirstPropertyName)));
+		}
+
+		int32 PairIndex = MapHelper.FindMapIndexWithKey(KeyTemp);
+		if (PairIndex == INDEX_NONE)
+		{
+			PairIndex = MapHelper.AddDefaultValue_Invalid_NeedsRehash();
+			KeyProp->CopyCompleteValue(MapHelper.GetKeyPtr(PairIndex), KeyTemp);
+			MapHelper.Rehash();
+		}
+
+		KeyProp->DestroyValue(KeyTemp);
+
+		return SetSinglePropertyInContainer<PropertyType, ValueType>(MapHelper.GetValuePtr(PairIndex), MapProperty->ValueProp, InnerPropertyName, Value);
 	}
 
 	if (!InnerPropertyName.IsEmpty())
@@ -1369,6 +1648,89 @@ grpc::Status SetArrayPropertyImpl(const UWorld* World, const RequestType& Reques
 	return grpc::Status_OK;
 }
 
+template <typename PropertyType, typename RequestType, typename ValueType>
+grpc::Status SetSetPropertyImpl(const UWorld* World, const RequestType& Request, const TArray<ValueType>& Values)
+{
+	UObject* Object = nullptr;
+	const grpc::Status GetObjectStatus = GetObjectForRequest(World, Request, Object);
+	if (!GetObjectStatus.ok())
+	{
+		return GetObjectStatus;
+	}
+
+	FString InnerPropertyName;
+	FProperty* Property = nullptr;
+	const grpc::Status GetPropertyStatus = GetPropertyForRequest(Object, Request, Property, InnerPropertyName);
+	if (!GetPropertyStatus.ok())
+	{
+		return GetPropertyStatus;
+	}
+
+	const FSetProperty* SetProperty = CastField<FSetProperty>(Property);
+	if (!SetProperty)
+	{
+		const FString ErrorMsg = FString::Printf(TEXT("Property '%s' has type '%s' but a set property was expected"), *Property->GetName(), *Property->GetCPPType());
+		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+	}
+
+	PropertyType* ElementProperty = CastField<PropertyType>(SetProperty->ElementProp);
+	if (!ElementProperty)
+	{
+		const FString ErrorMsg = FString::Printf(TEXT("Set property '%s' has element type '%s' which does not match the requested type"), *Property->GetName(), *SetProperty->ElementProp->GetCPPType());
+		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+	}
+
+	if (!InnerPropertyName.IsEmpty())
+	{
+		const FString ErrorMsg = FString::Printf(TEXT("Inner property addressing is not supported for set properties (got '%s' on set '%s')"), *InnerPropertyName, *Property->GetName());
+		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+	}
+
+#if WITH_EDITOR
+	if (World->WorldType == EWorldType::Editor)
+	{
+		Object->PreEditChange(Property);
+	}
+#endif
+
+	FScriptSetHelper SetHelper{ SetProperty, Property->ContainerPtrToValuePtr<void>(Object) };
+	SetHelper.EmptyElements();
+
+	// AddElement copies via Set->Add, which deduplicates by hash. We stage each value into a
+	// scratch slot, then hand it to AddElement so duplicates in `Values` collapse cleanly.
+	void* TempElement = FMemory_Alloca(ElementProperty->GetSize());
+	ElementProperty->InitializeValue(TempElement);
+	grpc::Status FinalStatus = grpc::Status_OK;
+	for (const ValueType& Value : Values)
+	{
+		const grpc::Status SetStatus = SetSinglePropertyValue(TempElement, ElementProperty, Value);
+		if (!SetStatus.ok())
+		{
+			FinalStatus = SetStatus;
+			break;
+		}
+		SetHelper.AddElement(TempElement);
+	}
+	ElementProperty->DestroyValue(TempElement);
+
+#if WITH_EDITOR
+	if (World->WorldType == EWorldType::Editor)
+	{
+		FPropertyChangedEvent Event(Property);
+		Object->PostEditChangeProperty(Event);
+	}
+#endif
+
+	if (!FinalStatus.ok())
+	{
+		return FinalStatus;
+	}
+
+	MarkRenderStateDirty(Object);
+
+	return grpc::Status_OK;
+}
+
 template<typename RequestType, typename ValueType>
 grpc::Status SetStructPropertyImpl(const UWorld* World, const RequestType& Request, const ValueType& Value, const FString& ExpectedStructCPPName)
 {
@@ -1446,17 +1808,43 @@ grpc::Status SetPropertyImpl<SetBoolPropertyRequest>(const UWorld* World, const 
 	return SetSinglePropertyImpl<FBoolProperty>(World, Request, Request.value());
 }
 
+// Try a sequence of property types and return the first non-FAILED_PRECONDITION outcome.
+// FAILED_PRECONDITION from SetSinglePropertyImpl signals "type didn't match"; any other status
+// means we found the right type but had an unrelated problem (range, missing inner, etc.).
+template <typename RequestType, typename ValueType>
+grpc::Status TryPropertyTypes(const UWorld*, const RequestType&, const ValueType&)
+{
+	return grpc::Status(grpc::FAILED_PRECONDITION, "No matching property type");
+}
+
+template <typename FirstPropertyType, typename... RestPropertyTypes, typename RequestType, typename ValueType>
+grpc::Status TryPropertyTypes(const UWorld* World, const RequestType& Request, const ValueType& Value)
+{
+	const grpc::Status Status = SetSinglePropertyImpl<FirstPropertyType>(World, Request, Value);
+	if (Status.ok() || Status.error_code() != grpc::FAILED_PRECONDITION)
+	{
+		return Status;
+	}
+	if constexpr (sizeof...(RestPropertyTypes) == 0)
+	{
+		return Status;
+	}
+	else
+	{
+		return TryPropertyTypes<RestPropertyTypes...>(World, Request, Value);
+	}
+}
+
 template<>
 grpc::Status SetPropertyImpl<SetIntPropertyRequest>(const UWorld* World, const SetIntPropertyRequest& Request)
 {
-	// First try to set it as an int, then fall back on byte
-	const grpc::Status IntStatus = SetSinglePropertyImpl<FIntProperty>(World, Request, Request.value());
-	// If we got an error other than FAILED_PRECONDITION that means the type was right, but something else was wrong.
-	if (IntStatus.ok() || IntStatus.error_code() != grpc::FAILED_PRECONDITION)
-	{
-		return IntStatus;
-	}
-	return SetSinglePropertyImpl<FByteProperty>(World, Request, Request.value());
+	return TryPropertyTypes<FIntProperty, FByteProperty, FInt16Property, FInt8Property, FUInt16Property>(World, Request, Request.value());
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetInt64PropertyRequest>(const UWorld* World, const SetInt64PropertyRequest& Request)
+{
+	return TryPropertyTypes<FInt64Property, FUInt32Property, FUInt64Property>(World, Request, Request.value());
 }
 
 template<>
@@ -1475,16 +1863,20 @@ grpc::Status SetPropertyImpl<SetFloatPropertyRequest>(const UWorld* World, const
 template<>
 grpc::Status SetPropertyImpl<SetStringPropertyRequest>(const UWorld* World, const SetStringPropertyRequest& Request)
 {
-	// First try to set it as an FString, then fall back on FName
+	// Try FString, then FName, then FText.
 	const FString ValueStr(UTF8_TO_TCHAR(Request.value().c_str()));
 	const grpc::Status StrStatus = SetSinglePropertyImpl<FStrProperty>(World, Request, ValueStr);
-	// If we got an error other than FAILED_PRECONDITION that means the type was right, but something else was wrong.
 	if (StrStatus.ok() || StrStatus.error_code() != grpc::FAILED_PRECONDITION)
 	{
 		return StrStatus;
 	}
 	const FName ValueName(UTF8_TO_TCHAR(Request.value().c_str()));
-	return SetSinglePropertyImpl<FNameProperty>(World, Request, ValueName);
+	const grpc::Status NameStatus = SetSinglePropertyImpl<FNameProperty>(World, Request, ValueName);
+	if (NameStatus.ok() || NameStatus.error_code() != grpc::FAILED_PRECONDITION)
+	{
+		return NameStatus;
+	}
+	return SetSinglePropertyImpl<FTextProperty>(World, Request, ValueStr);
 }
 
 template<>
@@ -1540,19 +1932,49 @@ grpc::Status SetPropertyImpl<SetColorPropertyRequest>(const UWorld* World, const
 	return SetStructPropertyImpl(World, Request, FLinearColor(Color), TEXT("FLinearColor"));
 }
 
+template<>
+grpc::Status SetPropertyImpl<SetVector2DPropertyRequest>(const UWorld* World, const SetVector2DPropertyRequest& Request)
+{
+	const FVector2D Vector(Request.x(), Request.y());
+	return SetStructPropertyImpl(World, Request, Vector, TEXT("FVector2D"));
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetIntVectorPropertyRequest>(const UWorld* World, const SetIntVectorPropertyRequest& Request)
+{
+	const FIntVector Vector(Request.x(), Request.y(), Request.z());
+	return SetStructPropertyImpl(World, Request, Vector, TEXT("FIntVector"));
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetIntPointPropertyRequest>(const UWorld* World, const SetIntPointPropertyRequest& Request)
+{
+	const FIntPoint Point(Request.x(), Request.y());
+	return SetStructPropertyImpl(World, Request, Point, TEXT("FIntPoint"));
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetQuatPropertyRequest>(const UWorld* World, const SetQuatPropertyRequest& Request)
+{
+	// Convert from right-handed (API convention) to Unreal's left-handed FQuat.
+	const FQuat Quat = QuantityConverter<UC_NONE, R2L>::Convert(FQuat(Request.x(), Request.y(), Request.z(), Request.w()));
+	return SetStructPropertyImpl(World, Request, Quat, TEXT("FQuat"));
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetTransformPropertyRequest>(const UWorld* World, const SetTransformPropertyRequest& Request)
+{
+	// Same conventions as SpawnActor/SetActorTransform: m -> cm for location, rad/right-handed -> deg/left-handed for rotation.
+	const FTransform Transform = ToUnrealTransform(Request.value());
+	return SetStructPropertyImpl(World, Request, Transform, TEXT("FTransform"));
+}
+
 template <typename RequestType>
 grpc::Status SetObjectProperty(const UWorld* World, const RequestType& Request, UObject* Object)
 {
-	// First try to set it as an FObjectProperty, then fall back on an FSoftObjectProperty.
-	grpc::Status ObjectStatus = SetSinglePropertyImpl<FObjectProperty>(World, Request, Object);
-	
-	// If we got an error other than FAILED_PRECONDITION that means the type was right, but something else was wrong.
-	if (ObjectStatus.ok() || ObjectStatus.error_code() != grpc::FAILED_PRECONDITION)
-	{
-		return ObjectStatus;
-	}
-
-	return SetSinglePropertyImpl<FSoftObjectProperty>(World, Request, Object);
+	// FObjectProperty also catches FClassProperty (it derives from FObjectProperty); FSoftObjectProperty
+	// also catches FSoftClassProperty (which derives from FSoftObjectProperty).
+	return TryPropertyTypes<FObjectProperty, FSoftObjectProperty>(World, Request, Object);
 }
 
 template <typename RequestType>
@@ -1560,7 +1982,7 @@ grpc::Status SetObjectArrayProperty(const UWorld* World, const RequestType& Requ
 {
 	// First try to set it as an FObjectProperty array, then fall back on an FSoftObjectProperty array.
 	grpc::Status ObjectStatus = SetArrayPropertyImpl<FObjectProperty>(World, Request, Objects);
-	
+
 	// If we got an error other than FAILED_PRECONDITION that means the type was right, but something else was wrong.
 	if (ObjectStatus.ok() || ObjectStatus.error_code() != grpc::FAILED_PRECONDITION)
 	{
@@ -1568,6 +1990,18 @@ grpc::Status SetObjectArrayProperty(const UWorld* World, const RequestType& Requ
 	}
 
 	return SetArrayPropertyImpl<FSoftObjectProperty>(World, Request, Objects);
+}
+
+template <typename RequestType>
+grpc::Status SetObjectSetProperty(const UWorld* World, const RequestType& Request, const TArray<UObject*>& Objects)
+{
+	// First try to set it as an FObjectProperty set, then fall back on an FSoftObjectProperty set.
+	grpc::Status ObjectStatus = SetSetPropertyImpl<FObjectProperty>(World, Request, Objects);
+	if (ObjectStatus.ok() || ObjectStatus.error_code() != grpc::FAILED_PRECONDITION)
+	{
+		return ObjectStatus;
+	}
+	return SetSetPropertyImpl<FSoftObjectProperty>(World, Request, Objects);
 }
 
 template<>
@@ -1718,6 +2152,20 @@ grpc::Status SetPropertyImpl<SetIntArrayPropertyRequest>(const UWorld* World, co
 }
 
 template<>
+grpc::Status SetPropertyImpl<SetInt64ArrayPropertyRequest>(const UWorld* World, const SetInt64ArrayPropertyRequest& Request)
+{
+	// Protobuf's int64 is `long` on Linux but Unreal's int64 is `long long`; same width, different
+	// C++ types, so the pointer overload of TArray::Append can't match. Copy element-by-element instead.
+	TArray<int64> Array;
+	Array.Reserve(Request.values_size());
+	for (const int64 V : Request.values())
+	{
+		Array.Add(V);
+	}
+	return SetArrayPropertyImpl<FInt64Property>(World, Request, Array);
+}
+
+template<>
 grpc::Status SetPropertyImpl<SetFloatArrayPropertyRequest>(const UWorld* World, const SetFloatArrayPropertyRequest& Request)
 {
 	// First try to set it as a double array, then fall back on float array
@@ -1813,6 +2261,172 @@ grpc::Status SetPropertyImpl<SetComponentArrayPropertyRequest>(const UWorld* Wor
 		ComponentArray.Add(Component);
 	}
 	return SetObjectArrayProperty(World, Request, ComponentArray);
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetBoolSetPropertyRequest>(const UWorld* World, const SetBoolSetPropertyRequest& Request)
+{
+	TArray<bool> Array;
+	Array.Append(Request.values().data(), Request.values_size());
+	return SetSetPropertyImpl<FBoolProperty>(World, Request, Array);
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetStringSetPropertyRequest>(const UWorld* World, const SetStringSetPropertyRequest& Request)
+{
+	TArray<FString> StrArray;
+	StrArray.Reserve(Request.values_size());
+	for (const std::string& String : Request.values())
+	{
+		StrArray.Add(UTF8_TO_TCHAR(String.c_str()));
+	}
+	const grpc::Status StatusStr = SetSetPropertyImpl<FStrProperty>(World, Request, StrArray);
+	if (StatusStr.ok() || StatusStr.error_code() != grpc::FAILED_PRECONDITION)
+	{
+		return StatusStr;
+	}
+	TArray<FName> NameArray;
+	NameArray.Reserve(Request.values_size());
+	for (const std::string& String : Request.values())
+	{
+		NameArray.Add(UTF8_TO_TCHAR(String.c_str()));
+	}
+	return SetSetPropertyImpl<FNameProperty>(World, Request, NameArray);
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetEnumSetPropertyRequest>(const UWorld* World, const SetEnumSetPropertyRequest& Request)
+{
+	TArray<FString> StrArray;
+	StrArray.Reserve(Request.values_size());
+	for (const std::string& String : Request.values())
+	{
+		StrArray.Add(UTF8_TO_TCHAR(String.c_str()));
+	}
+	const grpc::Status EnumStatus = SetSetPropertyImpl<FEnumProperty>(World, Request, StrArray);
+	if (EnumStatus.ok() || EnumStatus.error_code() != grpc::FAILED_PRECONDITION)
+	{
+		return EnumStatus;
+	}
+	return SetSetPropertyImpl<FByteProperty>(World, Request, StrArray);
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetIntSetPropertyRequest>(const UWorld* World, const SetIntSetPropertyRequest& Request)
+{
+	TArray<int32> Array;
+	Array.Append(Request.values().data(), Request.values_size());
+	return SetSetPropertyImpl<FIntProperty>(World, Request, Array);
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetInt64SetPropertyRequest>(const UWorld* World, const SetInt64SetPropertyRequest& Request)
+{
+	// Protobuf's int64 is `long` on Linux but Unreal's int64 is `long long`; same width, different
+	// C++ types, so the pointer overload of TArray::Append can't match. Copy element-by-element instead.
+	TArray<int64> Array;
+	Array.Reserve(Request.values_size());
+	for (const int64 V : Request.values())
+	{
+		Array.Add(V);
+	}
+	return SetSetPropertyImpl<FInt64Property>(World, Request, Array);
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetFloatSetPropertyRequest>(const UWorld* World, const SetFloatSetPropertyRequest& Request)
+{
+	TArray<float> FloatArray;
+	FloatArray.Append(Request.values().data(), Request.values_size());
+	const grpc::Status StatusFloat = SetSetPropertyImpl<FDoubleProperty>(World, Request, FloatArray);
+	if (StatusFloat.ok() || StatusFloat.error_code() != grpc::FAILED_PRECONDITION)
+	{
+		return StatusFloat;
+	}
+	return SetSetPropertyImpl<FFloatProperty>(World, Request, FloatArray);
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetClassSetPropertyRequest>(const UWorld* World, const SetClassSetPropertyRequest& Request)
+{
+	TArray<UObject*> ClassArray;
+	for (const std::string& Value : Request.values())
+	{
+		const FString ClassName(UTF8_TO_TCHAR(Value.c_str()));
+		UClass* Class = GetSubClassWithName<UObject>(ClassName);
+		if (!Class)
+		{
+			return grpc::Status(grpc::NOT_FOUND, "Did not find class with name " + std::string(TCHAR_TO_UTF8(*ClassName)));
+		}
+		ClassArray.Add(Class);
+	}
+	return SetObjectSetProperty(World, Request, ClassArray);
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetAssetSetPropertyRequest>(const UWorld* World, const SetAssetSetPropertyRequest& Request)
+{
+	TArray<UObject*> AssetArray;
+	for (const std::string& Value : Request.values())
+	{
+		const FString AssetPath(UTF8_TO_TCHAR(Value.c_str()));
+		UObject* Asset = GetAssetByPath(AssetPath);
+		if (!Asset)
+		{
+			return grpc::Status(grpc::NOT_FOUND, "Did not find asset with path " + std::string(TCHAR_TO_UTF8(*AssetPath)));
+		}
+		AssetArray.Add(Asset);
+	}
+	return SetObjectSetProperty(World, Request, AssetArray);
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetActorSetPropertyRequest>(const UWorld* World, const SetActorSetPropertyRequest& Request)
+{
+	TArray<UObject*> ActorArray;
+	for (const std::string& Value : Request.values())
+	{
+		const FString ActorName(UTF8_TO_TCHAR(Value.c_str()));
+		AActor* Actor = GetActorWithName(World, ActorName);
+		if (!Actor)
+		{
+			return grpc::Status(grpc::NOT_FOUND, "Did not find actor with name " + std::string(TCHAR_TO_UTF8(*ActorName)));
+		}
+		ActorArray.Add(Actor);
+	}
+	return SetObjectSetProperty(World, Request, ActorArray);
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetComponentSetPropertyRequest>(const UWorld* World, const SetComponentSetPropertyRequest& Request)
+{
+	TArray<UObject*> ComponentArray;
+	for (const std::string& Value : Request.values())
+	{
+		const FString FullName(UTF8_TO_TCHAR(Value.c_str()));
+		FString ActorName;
+		FString ComponentName;
+		FullName.Split(TEXT(":"), &ActorName, &ComponentName);
+		if (ActorName.IsEmpty() || ComponentName.IsEmpty())
+		{
+			const FString ErrorMsg = FString::Printf(TEXT("Component set property value '%s' is malformed; expected 'ActorName:ComponentName'"), *FullName);
+			return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+		}
+		const AActor* Actor = GetActorWithName(World, ActorName);
+		if (!Actor)
+		{
+			const FString ErrorMsg = FString::Printf(TEXT("Failed to find actor '%s' for component set property value '%s'"), *ActorName, *FullName);
+			return grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+		}
+		UActorComponent* Component = GetComponentWithName(Actor, ComponentName);
+		if (!Component)
+		{
+			const FString ErrorMsg = FString::Printf(TEXT("Failed to find component '%s' on actor '%s' for component set property value '%s'"), *ComponentName, *ActorName, *FullName);
+			return grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+		}
+		ComponentArray.Add(Component);
+	}
+	return SetObjectSetProperty(World, Request, ComponentArray);
 }
 
 template <typename RequestType>
