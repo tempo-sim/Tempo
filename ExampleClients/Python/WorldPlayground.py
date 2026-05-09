@@ -149,7 +149,7 @@ async def fetch_actors():
     """Returns list of (name, display_string) tuples."""
     try:
         response = await tw.get_all_actors()
-        return [(a.name, f"{a.name} ({a.type})") for a in response.actors]
+        return [(a.name, f"{a.name} ({a.actor_type})") for a in response.actors]
     except grpc.aio._call.AioRpcError as e:
         print(f"\n  Error fetching actors: {e.details()}")
         return []
@@ -159,7 +159,7 @@ async def fetch_components(actor):
     """Returns list of (name, display_string) tuples."""
     try:
         response = await tw.get_all_components(actor=actor)
-        return [(c.name, f"{c.name} ({c.type})") for c in response.components]
+        return [(c.name, f"{c.name} ({c.component_type})") for c in response.components]
     except grpc.aio._call.AioRpcError as e:
         print(f"\n  Error fetching components: {e.details()}")
         return []
@@ -172,7 +172,7 @@ async def fetch_properties(actor, component=None):
             response = await tw.get_component_properties(actor=actor, component=component)
         else:
             response = await tw.get_actor_properties(actor=actor)
-        return [p for p in response.properties if p.type != "unsupported"]
+        return [p for p in response.properties if p.property_type != "unsupported"]
     except grpc.aio._call.AioRpcError as e:
         print(f"\n  Error fetching properties: {e.details()}")
         return []
@@ -592,17 +592,17 @@ async def flow_set_property():
         print(f"  No settable properties found on {target}.")
         return
 
-    prop_items = [(p.name, f"{p.name} ({p.type}) = {p.value}") for p in properties]
+    prop_items = [(p.name, f"{p.name} ({p.property_type}) = {p.value}") for p in properties]
     prop_name = await fuzzy_select(prop_items, "Select property")
     if prop_name == RESTART_SENTINEL:
         return
 
     prop = next(p for p in properties if p.name == prop_name)
     prop_path = prop.name
-    prop_type = prop.type
+    prop_type = prop.property_type
 
     print(f"\n  Property: {prop.name}")
-    print(f"  Type:     {prop.type}")
+    print(f"  Type:     {prop.property_type}")
     print(f"  Current:  {prop.value}")
 
     # Step 4: If not a leaf type, drill into struct/array members
@@ -708,7 +708,7 @@ TOP_LEVEL_ACTIONS = [
 
 
 async def main():
-    parser = argparse.ArgumentParser(description="TempoWorld Interactive CLI")
+    parser = argparse.ArgumentParser(description="World Playground - interactive TempoWorld client")
     parser.add_argument('--ip', required=False, help="IP address of machine where Tempo is running", default="0.0.0.0")
     parser.add_argument('--port', required=False, help="Port Tempo scripting server is using", default=10001)
     args = parser.parse_args()
@@ -716,7 +716,7 @@ async def main():
     if args.ip != "0.0.0.0" or args.port != 10001:
         tempo.set_server(address=args.ip, port=args.port)
 
-    print("\n=== TempoWorld Interactive Client ===")
+    print("\n=== World Playground ===")
     print("Control actors, components, and properties at runtime.\n")
 
     while True:
