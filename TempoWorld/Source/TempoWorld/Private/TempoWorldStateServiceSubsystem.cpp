@@ -4,10 +4,10 @@
 
 #include "TempoWorld/WorldState.grpc.pb.h"
 
+#include "TempoAngularVelocityInterface.h"
 #include "TempoConversion.h"
 #include "TempoCoreUtils.h"
 #include "TempoGameMode.h"
-#include "TempoMovementInterface.h"
 #include "TempoWorld.h"
 #include "TempoWorldUtils.h"
 
@@ -35,17 +35,17 @@ namespace
 	{
 		switch (Channel)
 		{
-		case TempoWorld::WORLD_STATIC: return ECC_WorldStatic;
-		case TempoWorld::WORLD_DYNAMIC: return ECC_WorldDynamic;
-		case TempoWorld::VISIBILITY: return ECC_Visibility;
+		case TempoWorld::CC_WORLD_STATIC: return ECC_WorldStatic;
+		case TempoWorld::CC_WORLD_DYNAMIC: return ECC_WorldDynamic;
+		case TempoWorld::CC_VISIBILITY: return ECC_Visibility;
 		default: return ECC_WorldStatic;
 		}
 	}
 }
 
-void UTempoWorldStateServiceSubsystem::RegisterScriptingServices(FTempoScriptingServer& ScriptingServer)
+void UTempoWorldStateServiceSubsystem::RegisterServices(FTempoServer& Server)
 {
-	ScriptingServer.RegisterService<WorldStateService>(
+	Server.RegisterService<WorldStateService>(
 		StreamingRequestHandler(&WorldStateAsyncService::RequestStreamOverlapEvents, &UTempoWorldStateServiceSubsystem::StreamOverlapEvents),
 		SimpleRequestHandler(&WorldStateAsyncService::RequestGetCurrentActorState, &UTempoWorldStateServiceSubsystem::GetCurrentActorState),
 		StreamingRequestHandler(&WorldStateAsyncService::RequestStreamActorState, &UTempoWorldStateServiceSubsystem::StreamActorState),
@@ -59,21 +59,21 @@ void UTempoWorldStateServiceSubsystem::Initialize(FSubsystemCollectionBase& Coll
 {
 	Super::Initialize(Collection);
 
-	FTempoScriptingServer::Get().ActivateService<WorldStateService>(this);
+	FTempoServer::Get().ActivateService<WorldStateService>(this);
 }
 
 void UTempoWorldStateServiceSubsystem::Deinitialize()
 {
 	Super::Deinitialize();
 
-	FTempoScriptingServer::Get().DeactivateService<WorldStateService>();
+	FTempoServer::Get().DeactivateService<WorldStateService>();
 }
 
 TArray<AActor*> GetMatchingActors(const UWorld* World, const ActorStateRequest& Request)
 {
 	TArray<AActor*> MatchingActors;
 
-	const FString ActorName(UTF8_TO_TCHAR(Request.actor_name().c_str()));
+	const FString ActorName(UTF8_TO_TCHAR(Request.actor().c_str()));
 	if (AActor* Actor = GetActorWithName(World, ActorName))
 	{
 		MatchingActors.Add(Actor);
@@ -86,9 +86,9 @@ TArray<AActor*> GetMatchingActors(const UWorld* World, const ActorStatesNearRequ
 {
 	TArray<AActor*> MatchingActors;
 
-	if (!Request.near_actor_name().empty())
+	if (!Request.near_actor().empty())
 	{
-		const FString NearActorName(UTF8_TO_TCHAR(Request.near_actor_name().c_str()));
+		const FString NearActorName(UTF8_TO_TCHAR(Request.near_actor().c_str()));
 		if (const AActor* NearActor = GetActorWithName(World, NearActorName))
 		{
 			for (TActorIterator<AActor> ActorIt(World); ActorIt; ++ActorIt)
@@ -109,7 +109,7 @@ TArray<AActor*> GetMatchingActors(const UWorld* World, const ActorStatesNearRequ
 				}
 				const FVector ActorLocation = ActorIt->GetActorLocation();
 				const FVector OtherActorLocation = NearActor->GetActorLocation();
-				if (FVector::Dist2D(ActorLocation, OtherActorLocation) < QuantityConverter<M2CM>::Convert(Request.search_radius()))
+				if (FVector::Dist2D(ActorLocation, OtherActorLocation) < QuantityConverter<M2CM>::Convert(Request.search_radius_m()))
 				{
 					MatchingActors.Add(*ActorIt);
 				}
@@ -130,34 +130,35 @@ TempoWorld::ActorState GetActorState(const AActor* Actor, const UWorld* World, b
 
 	check(World);
 
-	ActorState.set_timestamp(World->GetTimeSeconds());
+	ActorState.set_timestamp_s(World->GetTimeSeconds());
 	ActorState.set_name(TCHAR_TO_UTF8(*Actor->GetActorNameOrLabel()));
 
-	TempoScripting::Transform* ActorStateTransform = ActorState.mutable_transform();
+	TempoCore::Transform* ActorStateTransform = ActorState.mutable_transform();
 
 	const FVector ActorLocation = QuantityConverter<CM2M, L2R>::Convert(Actor->GetActorLocation());
-	TempoScripting::Vector* ActorStateLocation = ActorStateTransform->mutable_location();
+	TempoCore::Vector* ActorStateLocation = ActorStateTransform->mutable_location();
 	ActorStateLocation->set_x(ActorLocation.X);
 	ActorStateLocation->set_y(ActorLocation.Y);
 	ActorStateLocation->set_z(ActorLocation.Z);
 
 	const FRotator ActorRotation = QuantityConverter<Deg2Rad, L2R>::Convert(Actor->GetActorRotation());
-	TempoScripting::Rotation* ActorStateRotation = ActorStateTransform->mutable_rotation();
+	TempoCore::Rotation* ActorStateRotation = ActorStateTransform->mutable_rotation();
 	ActorStateRotation->set_r(ActorRotation.Roll);
 	ActorStateRotation->set_p(ActorRotation.Pitch);
 	ActorStateRotation->set_y(ActorRotation.Yaw);
 
 	const FVector ActorLinearVelocity = QuantityConverter<CM2M, L2R>::Convert(Actor->GetVelocity());
-	TempoScripting::Vector* ActorStateLinearVel = ActorState.mutable_linear_velocity();
+	TempoCore::Twist* ActorStateVelocity = ActorState.mutable_velocity();
+	TempoCore::Vector* ActorStateLinearVel = ActorStateVelocity->mutable_linear();
 	ActorStateLinearVel->set_x(ActorLinearVelocity.X);
 	ActorStateLinearVel->set_y(ActorLinearVelocity.Y);
 	ActorStateLinearVel->set_z(ActorLinearVelocity.Z);
 
 	FVector ActorAngularVelocity;
-	const TArray<UActorComponent*> TempoMovementComponents = Actor->GetComponentsByInterface(UTempoMovementInterface::StaticClass());
-	if (TempoMovementComponents.Num() == 1)
+	const TArray<UActorComponent*> AngularVelocityComponents = Actor->GetComponentsByInterface(UTempoAngularVelocityInterface::StaticClass());
+	if (AngularVelocityComponents.Num() == 1)
 	{
-		ActorAngularVelocity = QuantityConverter<Deg2Rad, L2R>::Convert(Cast<ITempoMovementInterface>(TempoMovementComponents[0])->GetAngularVelocity());
+		ActorAngularVelocity = QuantityConverter<Deg2Rad, L2R>::Convert(Cast<ITempoAngularVelocityInterface>(AngularVelocityComponents[0])->GetAngularVelocity());
 	}
 	else if (const UPrimitiveComponent* PrimitiveComponent = Cast<UPrimitiveComponent>(Actor->GetRootComponent()))
 	{
@@ -167,7 +168,7 @@ TempoWorld::ActorState GetActorState(const AActor* Actor, const UWorld* World, b
 	// The L2R conversion above handles the fact that the Y-axis is flipped, but not the handedness of the rotations themselves.
 	ActorAngularVelocity = -ActorAngularVelocity;
 
-	TempoScripting::Vector* ActorStateAngularVel = ActorState.mutable_angular_velocity();
+	TempoCore::Vector* ActorStateAngularVel = ActorStateVelocity->mutable_angular();
 	ActorStateAngularVel->set_x(ActorAngularVelocity.X);
 	ActorStateAngularVel->set_y(ActorAngularVelocity.Y);
 	ActorStateAngularVel->set_z(ActorAngularVelocity.Z);
@@ -188,7 +189,7 @@ TempoWorld::ActorState GetActorState(const AActor* Actor, const UWorld* World, b
 
 	const FVector ActorBoundsMin = QuantityConverter<CM2M, L2R>::Convert(ActorWorldBounds.Min);
 	const FVector ActorBoundsMax = QuantityConverter<CM2M, L2R>::Convert(ActorWorldBounds.Max);
-	TempoScripting::Box* ActorStateBounds = ActorState.mutable_bounds();
+	TempoCore::Box* ActorStateBounds = ActorState.mutable_bounds();
 	ActorStateBounds->mutable_min()->set_x(ActorBoundsMin.X);
 	ActorStateBounds->mutable_min()->set_y(ActorBoundsMin.Y);
 	ActorStateBounds->mutable_min()->set_z(ActorBoundsMin.Z);
@@ -205,7 +206,7 @@ void UTempoWorldStateServiceSubsystem::GetCurrentActorState(const TempoWorld::Ac
 
 	const TArray<AActor*> Actors = GetMatchingActors(GetWorld(), Request);
 
-	const FString ActorName(UTF8_TO_TCHAR(Request.actor_name().c_str()));
+	const FString ActorName(UTF8_TO_TCHAR(Request.actor().c_str()));
 
 	if (Actors.IsEmpty())
 	{
@@ -251,7 +252,7 @@ void UTempoWorldStateServiceSubsystem::StreamActorStatesNear(const TempoWorld::A
 
 void UTempoWorldStateServiceSubsystem::StreamOverlapEvents(const OverlapEventRequest& Request, const TResponseDelegate<OverlapEventResponse>& ResponseContinuation)
 {
-	const FString ActorName(UTF8_TO_TCHAR(Request.actor_name().c_str()));
+	const FString ActorName(UTF8_TO_TCHAR(Request.actor().c_str()));
 
 	if (AActor* Actor = GetActorWithName(GetWorld(), ActorName))
 	{
@@ -270,12 +271,12 @@ void UTempoWorldStateServiceSubsystem::OnActorOverlap(AActor* OverlappedActor, A
 	{
 		OverlapEventResponse Response;
 		Response.set_overlapped_actor_name(TCHAR_TO_UTF8(*OverlappedActor->GetActorNameOrLabel()));
-		Response.set_other_actor_name(TCHAR_TO_UTF8(*OtherActor->GetActorNameOrLabel()));
+		Response.set_overlapping_actor_name(TCHAR_TO_UTF8(*OtherActor->GetActorNameOrLabel()));
 		if (const ATempoGameMode* TempoGameMode = Cast<ATempoGameMode>(UGameplayStatics::GetGameMode(this)))
 		{
 			if (const IActorClassificationInterface* ActorClassifier = TempoGameMode->GetActorClassifier())
 			{
-				Response.set_other_actor_type(TCHAR_TO_UTF8(*ActorClassifier->GetActorClassification(OtherActor).ToString()));
+				Response.set_overlapping_actor_type(TCHAR_TO_UTF8(*ActorClassifier->GetActorClassification(OtherActor).ToString()));
 			}
 		}
 
@@ -357,7 +358,7 @@ void UTempoWorldStateServiceSubsystem::Raycast(
 		Response.mutable_normal()->set_y(NormalConverted.Y);
 		Response.mutable_normal()->set_z(NormalConverted.Z);
 
-		Response.set_distance(Hit.Distance / 100.0f); // cm to m
+		Response.set_distance_m(Hit.Distance / 100.0f); // cm to m
 
 		if (const AActor* Actor = Hit.GetActor())
 		{

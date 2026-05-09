@@ -2,14 +2,14 @@
 
 #pragma once
 
-#include "TempoScriptingServer.h"
-#include "TempoScriptable.h"
+#include "TempoServer.h"
+#include "TempoServiceProvider.h"
 
 #include "CoreMinimal.h"
 #include "Subsystems/UnrealEditorSubsystem.h"
 #include "TempoAgentsEditorServiceSubsystem.generated.h"
 
-namespace TempoScripting
+namespace TempoCore
 {
 	class Empty;
 }
@@ -20,16 +20,16 @@ namespace TempoAgentsEditor
 }
 
 UCLASS()
-class TEMPOAGENTSEDITOR_API UTempoAgentsEditorServiceSubsystem : public UUnrealEditorSubsystem, public ITempoScriptable
+class TEMPOAGENTSEDITOR_API UTempoAgentsEditorServiceSubsystem : public UUnrealEditorSubsystem, public ITempoServiceProvider
 {
 	GENERATED_BODY()
 
 public:
-	virtual void RegisterScriptingServices(FTempoScriptingServer& ScriptingServer) override;
+	virtual void RegisterServices(FTempoServer& Server) override;
 
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 
 	virtual void Deinitialize() override;
 	
-	void RunTempoZoneGraphBuilderPipeline(const TempoScripting::Empty& Request, const TResponseDelegate<TempoAgentsEditor::PipelineResult>& ResponseContinuation) const;
+	void RunTempoZoneGraphBuilderPipeline(const TempoCore::Empty& Request, const TResponseDelegate<TempoAgentsEditor::PipelineResult>& ResponseContinuation) const;
 };

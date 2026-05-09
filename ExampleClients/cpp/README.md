@@ -1,11 +1,11 @@
 # Tempo C++ Example Clients
 
-Three small programs that exercise the Tempo C++ wrapper API:
+Small programs that exercise the Tempo C++ wrapper API:
 
 | Example | What it does |
 |---|---|
 | `sensor_playground` | Lists available sensors. If a lidar exists, streams 5 scans and logs basic stats. |
-| `tempo_mcp` | Looks up an actor by name and prints its transform, velocity, and bounds. |
+| `world_playground` | Looks up an actor by name and prints its transform, velocity, and bounds. |
 
 These mirror the Rust examples in `../Rust/`. They log to stdout — no GUI, no
 interactive prompts.
@@ -43,6 +43,6 @@ Each example accepts optional positional args. Defaults connect to
 ```sh
 ./build/sensor_playground                     # localhost:10001, 5 frames
 ./build/sensor_playground localhost 10001 20  # stream 20 frames
-./build/tempo_mcp                             # actor "Vehicle"
-./build/tempo_mcp localhost 10001 PlayerActor
+./build/world_playground                      # actor "Vehicle"
+./build/world_playground localhost 10001 PlayerActor
 ```

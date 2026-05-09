@@ -2,7 +2,7 @@
 
 https://github.com/user-attachments/assets/dfc7b28b-3b73-4603-a779-dd6e5b2acec9
 
-Tempo is a collection of simulation-focused plugins for Unreal Engine. Tempo makes the power of Unreal accessible to simulation and robotics developers, including plugins for scripting, sensor simulation, agent behaviors, and more.
+Tempo is a collection of simulation-focused plugins for Unreal Engine. Tempo makes the power of Unreal accessible to simulation and robotics developers, including plugins for client APIs, sensor simulation, agent behaviors, and more.
 
 Tempo is the foundation on which you can build a simulator for your unique application. Not sure where to start? Want some guidance from the authors? Find us on [![Discord](https://img.shields.io/badge/Discord-Join%20Server-5865F2?logo=discord&logoColor=white)](https://discord.gg/bKa2hnGYnw)
 
@@ -70,15 +70,15 @@ tw.spawn_actor(type="BP_SensorRig") # An Actor with a tripod mesh should appear.
 ```
 tw.set_float_property(actor="BP_SensorRig", component="TempoCamera", property="FOVAngle", value=60.0) # The field of view of your streaming images should decrease
 ```
-6. Lastly, use TempoTime to pause, resume, and step the simulation:
+6. Lastly, use TempoCore to pause, resume, and step the simulation:
 ```
-import tempo.tempo_time as tt
-import TempoTime.Time_pb2 as Time
-tt.pause() # Time should pause
-tt.play() # Time should resume
-tt.set_time_mode(Time.FIXED_STEP) # Time mode should switch to Fixed Step, simulation should run faster than real-time
-tt.step() # Time should advance to the nearest whole number of fixed time steps (0.1 seconds by default)
-tt.step() # Time should advance one step. You should get one new camera image every step.
+import tempo.tempo_core as tc
+import TempoCore.Time_pb2 as Time
+tc.pause() # Time should pause
+tc.play() # Time should resume
+tc.set_time_mode(Time.TM_FIXED_STEP) # Time mode should switch to Fixed Step, simulation should run faster than real-time
+tc.step() # Time should advance to the nearest whole number of fixed time steps (0.1 seconds by default)
+tc.step() # Time should advance one step. You should get one new camera image every step.
 ```
 Congratulations, you are officially up and running! Continue experimenting with Tempo by creating new scenes, streaming sensor data, and varying the many properties of your simulation at runtime.
 

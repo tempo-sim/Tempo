@@ -1,0 +1,25 @@
+// Copyright Tempo Simulation, LLC. All Rights Reserved
+
+syntax = "proto3";
+
+import "TempoCore/Empty.proto";
+
+message InstanceSemanticIdPair {
+  int32 instance_id = 1;
+  int32 semantic_id = 2;
+}
+
+message InstanceToSemanticIdMap {
+  repeated InstanceSemanticIdPair instance_semantic_id_pairs = 1;
+}
+
+message GetLabeledActorTypesResponse {
+  // Actor class names that currently have active instance IDs in the scene.
+  repeated string types = 1;
+}
+
+service LabelService {
+  rpc GetInstanceToSemanticIdMap(TempoCore.Empty) returns (InstanceToSemanticIdMap);
+
+  rpc GetLabeledActorTypes(TempoCore.Empty) returns (GetLabeledActorTypesResponse);
+}

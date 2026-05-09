@@ -27,12 +27,11 @@ public class TempoMovementROSBridge : ModuleRules
                 "SlateCore",
                 // Tempo
                 "TempoROS",
-                "TempoScriptingROSBridge",
-                "TempoScripting",
+                "TempoServiceROSBridge",
+                "TempoCore",
                 "TempoMovement",
                 "rclcpp",
                 "TempoROSBridgeShared",
-                "TempoCoreShared",
             }
         );
         

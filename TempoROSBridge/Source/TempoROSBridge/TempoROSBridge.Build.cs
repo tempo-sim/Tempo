@@ -21,7 +21,7 @@ public class TempoROSBridge : ModuleRules
 				"TempoGeographicROSBridge",
 				"TempoTimeROSBridge",
 				"TempoMovementROSBridge",
-				"TempoScriptingROSBridge",
+				"TempoServiceROSBridge",
 			}
 			);
 		

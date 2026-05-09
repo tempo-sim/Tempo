@@ -484,7 +484,7 @@ class CppApiGenerator:
 
         Outputs flow into <source>/proto_gen/. Generated layout matches each
         proto's path relative to self.proto_dir (e.g.,
-        Greeter/GreeterService.proto → proto_gen/Greeter/GreeterService.pb.{h,cc}
+        TempoCore/TempoCore.proto → proto_gen/TempoCore/TempoCore.pb.{h,cc}
         and .grpc.pb.{h,cc}).
         """
         proto_gen = self.source_dir / "proto_gen"

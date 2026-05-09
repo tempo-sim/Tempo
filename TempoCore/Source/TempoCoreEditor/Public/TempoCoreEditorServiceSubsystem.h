@@ -2,14 +2,14 @@
 
 #pragma once
 
-#include "TempoScriptable.h"
-#include "TempoScriptingServer.h"
+#include "TempoServiceProvider.h"
+#include "TempoServer.h"
 
 #include "CoreMinimal.h"
 #include "Subsystems/UnrealEditorSubsystem.h"
 #include "TempoCoreEditorServiceSubsystem.generated.h"
 
-namespace TempoScripting
+namespace TempoCore
 {
 	class Empty;
 }
@@ -21,26 +21,26 @@ namespace TempoCoreEditor
 }
 
 UCLASS()
-class TEMPOCOREEDITOR_API UTempoCoreEditorServiceSubsystem : public UUnrealEditorSubsystem, public ITempoScriptable
+class TEMPOCOREEDITOR_API UTempoCoreEditorServiceSubsystem : public UUnrealEditorSubsystem, public ITempoServiceProvider
 {
 	GENERATED_BODY()
 
 public:
-	void RegisterScriptingServices(FTempoScriptingServer& ScriptingServer) override;
+	void RegisterServices(FTempoServer& Server) override;
 	
 	void Initialize(FSubsystemCollectionBase& Collection) override;
 
 	void Deinitialize() override;
 	
-	void PlayInEditor(const TempoScripting::Empty& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation);
+	void PlayInEditor(const TempoCore::Empty& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation);
 
-	void Simulate(const TempoScripting::Empty& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation);
+	void Simulate(const TempoCore::Empty& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation);
 
-	void Stop(const TempoScripting::Empty& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation);
+	void Stop(const TempoCore::Empty& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation);
 
-	void SaveLevel(const TempoCoreEditor::SaveLevelRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation);
+	void SaveLevel(const TempoCoreEditor::SaveLevelRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation);
 
-	void OpenLevel(const TempoCoreEditor::OpenLevelRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation);
+	void OpenLevel(const TempoCoreEditor::OpenLevelRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation);
 
-	void NewLevel(const TempoScripting::Empty& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation);
+	void NewLevel(const TempoCore::Empty& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation);
 };

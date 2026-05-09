@@ -1,0 +1,19 @@
+// Copyright Tempo Simulation, LLC. All Rights Reserved
+
+syntax = "proto3";
+
+import "TempoCore/Geometry.proto";
+
+// Common metadata attached to every sensor measurement.
+message MeasurementHeader {
+  // Monotonic per-sensor sequence number (single packets and multi-packet scans share an ID).
+  uint64 sequence_id = 1;
+  // Sim time at which the measurement was captured, in seconds.
+  double capture_time_s = 2;
+  // Sim time at which the measurement was placed on the wire, in seconds.
+  double transmission_time_s = 3;
+  // Identifier of the sensor that produced the measurement (formatted "<owner>/<sensor>").
+  string sensor = 4;
+  // World transform of the sensor at capture time.
+  TempoCore.Transform sensor_transform = 5;
+}

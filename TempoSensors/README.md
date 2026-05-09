@@ -2,15 +2,15 @@
 
 `TempoSensors` simulates synthetic robotics sensors — RGB cameras (with depth, semantic labels, instance labels, and 2D bounding boxes) and rotating Lidars — by repurposing Unreal's renderer. Sensors are `USceneComponent` types you drop on any actor; clients stream data over Tempo's gRPC API at the rate you configure.
 
-The five modules in this plugin:
+The plugin ships a single `TempoSensors` module containing:
 
-| Module | What it does |
+| Component | What it does |
 | --- | --- |
-| `TempoSensors` | gRPC service (`TempoSensorServiceSubsystem`) that routes client requests to active sensors. |
-| `TempoSensorsShared` | Shared infrastructure: `UTempoSceneCaptureComponent2D`, `UTempoTiledSceneCaptureComponent`, multi-view rendering, lens-distortion models, plugin settings. |
-| `TempoCamera` | `UTempoCamera` component. Color / label / depth / 2D bounding boxes. |
-| `TempoLabels` | `UTempoActorLabeler` world subsystem. Tags meshes via the custom-depth stencil from a Label Table data table. |
-| `TempoLidar` | `UTempoLidar` component. Spherical scan rendered via 1–3 perspective tiles. |
+| `TempoSensorServiceSubsystem` | gRPC service that routes client requests to active sensors. |
+| `UTempoSceneCaptureComponent2D` / `UTempoTiledSceneCaptureComponent` | Shared infrastructure: multi-view rendering, lens-distortion models, plugin settings. |
+| `UTempoCamera` | Camera component. Color / label / depth / 2D bounding boxes. |
+| `UTempoActorLabeler` | World subsystem. Tags meshes via the custom-depth stencil from a Label Table data table. |
+| `UTempoLidar` | Lidar component. Spherical scan rendered via 1–3 perspective tiles. |
 
 ## Notable features
 
@@ -20,7 +20,7 @@ The five modules in this plugin:
 - **Tile seam handling.** Multi-tile cameras feather across seams (`FeatherPixels`, default 16) using a precomputed resolve map, hiding per-tile TAA / auto-exposure history discontinuities. Depth and label channels — neither safely averageable — switch ownership at the centerline rather than blending. A shared exposure bias (P-controller fed by the proxy capture's auto-exposure) keeps tile brightness consistent.
 - **Single-tile fast path.** When exactly one tile is active, depth is off, and `UpsamplingFactor=1`, the camera renders straight to the final RT (no aux-unpack, no proxy-tonemap pass, no merge) — saving one `FSceneRenderer` and two Canvas blits per frame.
 - **Runtime reconfiguration.** Lens model, FOV, resolution, beam counts, beam calibration, and feather can all change at runtime (via Blueprint, editor, or `set_*_property` over the Tempo API). Reconfigure is applied at a safe point — when no readback is in flight — so it never tears mid-frame.
-- **Pipelined or synchronous timing.** In `FixedStep` time mode the default is to block the game thread until each frame's sensor data is ready (gRPC clients receive data with the simulation frame it was captured in). Setting `Project Settings → Tempo → Sensors → Pipelined Rendering = true` lets the game thread continue while game / render / readback run in parallel — higher throughput at the cost of 1-2 frames of latency. Each measurement carries the correct `capture_time` and `sequence_id` regardless.
+- **Pipelined or synchronous timing.** In `FixedStep` time mode the default is to block the game thread until each frame's sensor data is ready (gRPC clients receive data with the simulation frame it was captured in). Setting `Project Settings → Tempo → Sensors → Pipelined Rendering = true` lets the game thread continue while game / render / readback run in parallel — higher throughput at the cost of 1-2 frames of latency. Each measurement carries the correct `capture_time_s` and `sequence_id` regardless.
 - **Two label-override mechanisms.** Per-mesh labels via the Label Table data table (Static Mesh and Actor-class entries; Static Mesh wins). Visually-imperceptible per-pixel overrides via subsurface color — used, for example, to label lane-line decals differently from the road they live on (`OverridableLabelRowName` / `OverridingLabelRowName` settings).
 - **Pixel-perfect distortion.** Pinhole gets `Nearest` filtering by default (1:1 sampling, no blur); narrow non-pinhole gets `Bilinear`; wide (>120°) equidistant gets `Bicubic` to handle the highly non-uniform sampling density at the optical center. Override via `bAutoTextureFilterType` / `TextureFilterType`. Depth on equidistant lens models is reported as Euclidean distance from the camera origin (not depth along the camera axis), avoiding seam discontinuities.
 
@@ -63,7 +63,7 @@ The output `LidarScanSegment` (one per active tile / segment per scan; `scan_cou
 
 ### Working with labels
 
-`UTempoActorLabeler` (a world subsystem in the `TempoLabels` module) writes labels into the custom-depth stencil at `BeginPlay` and whenever a primitive component registers. It reads the mapping from the `SemanticLabelTable` you configure in Project Settings — a `DataTable` of `FSemanticLabel` rows, each with a stencil value plus a set of Actor classes and / or Static Mesh assets that should receive that label.
+`UTempoActorLabeler` (a world subsystem) writes labels into the custom-depth stencil at `BeginPlay` and whenever a primitive component registers. It reads the mapping from the `SemanticLabelTable` you configure in Project Settings — a `DataTable` of `FSemanticLabel` rows, each with a stencil value plus a set of Actor classes and / or Static Mesh assets that should receive that label.
 
 Static Mesh entries take precedence over Actor entries, so you can label a base-mesh actor one way and selected meshes on it another (e.g. lane decals as `LaneLine` on top of road actors labeled as `Road`).
 

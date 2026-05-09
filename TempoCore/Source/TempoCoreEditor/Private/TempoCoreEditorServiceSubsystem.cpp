@@ -13,9 +13,9 @@ using TempoCoreEditorAsyncService = TempoCoreEditor::TempoCoreEditorService::Asy
 using SaveLevelRequest = TempoCoreEditor::SaveLevelRequest;
 using OpenLevelRequest = TempoCoreEditor::OpenLevelRequest;
 
-void UTempoCoreEditorServiceSubsystem::RegisterScriptingServices(FTempoScriptingServer& ScriptingServer)
+void UTempoCoreEditorServiceSubsystem::RegisterServices(FTempoServer& Server)
 {
-	ScriptingServer.RegisterService<TempoCoreEditorService>(
+	Server.RegisterService<TempoCoreEditorService>(
 			SimpleRequestHandler(&TempoCoreEditorAsyncService::RequestPlayInEditor, &UTempoCoreEditorServiceSubsystem::PlayInEditor),
 			SimpleRequestHandler(&TempoCoreEditorAsyncService::RequestSimulate, &UTempoCoreEditorServiceSubsystem::Simulate),
 			SimpleRequestHandler(&TempoCoreEditorAsyncService::RequestStop, &UTempoCoreEditorServiceSubsystem::Stop),
@@ -29,47 +29,47 @@ void UTempoCoreEditorServiceSubsystem::Initialize(FSubsystemCollectionBase& Coll
 {
 	Super::Initialize(Collection);
 
-	FTempoScriptingServer::Get().ActivateService<TempoCoreEditorService>(this);
+	FTempoServer::Get().ActivateService<TempoCoreEditorService>(this);
 }
 
 void UTempoCoreEditorServiceSubsystem::Deinitialize()
 {
 	Super::Deinitialize();
 
-	FTempoScriptingServer::Get().DeactivateService<TempoCoreEditorService>();
+	FTempoServer::Get().DeactivateService<TempoCoreEditorService>();
 }
 
-void UTempoCoreEditorServiceSubsystem::PlayInEditor(const TempoScripting::Empty& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation)
+void UTempoCoreEditorServiceSubsystem::PlayInEditor(const TempoCore::Empty& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation)
 {
 	if (!FPlayWorldCommands::GlobalPlayWorldActions->ExecuteAction(FPlayWorldCommands::Get().PlayInViewport.ToSharedRef()))
 	{
-		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::NOT_FOUND, "Action not found?"));
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, "Action not found?"));
 		return;
 	}
 
-	ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status_OK);
+	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status_OK);
 }
 
-void UTempoCoreEditorServiceSubsystem::Simulate(const TempoScripting::Empty& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation)
+void UTempoCoreEditorServiceSubsystem::Simulate(const TempoCore::Empty& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation)
 {
 	if (!FPlayWorldCommands::GlobalPlayWorldActions->ExecuteAction(FPlayWorldCommands::Get().Simulate.ToSharedRef()))
 	{
-		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::NOT_FOUND, "Action not found?"));
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, "Action not found?"));
 		return;
 	}
 
-	ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status_OK);
+	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status_OK);
 }
 
-void UTempoCoreEditorServiceSubsystem::Stop(const TempoScripting::Empty& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation)
+void UTempoCoreEditorServiceSubsystem::Stop(const TempoCore::Empty& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation)
 {
 	if (!FPlayWorldCommands::GlobalPlayWorldActions->ExecuteAction(FPlayWorldCommands::Get().StopPlaySession.ToSharedRef()))
 	{
-		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::NOT_FOUND, "Action not found?"));
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, "Action not found?"));
 		return;
 	}
 
-	ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status_OK);
+	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status_OK);
 }
 
 void SanitizeLevelPath(FString& Path)
@@ -86,7 +86,7 @@ void SanitizeLevelPath(FString& Path)
 	}
 }
 
-void UTempoCoreEditorServiceSubsystem::SaveLevel(const SaveLevelRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation)
+void UTempoCoreEditorServiceSubsystem::SaveLevel(const SaveLevelRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation)
 {
 	FString RequestedPath = FString(UTF8_TO_TCHAR(Request.path().c_str()));
 	SanitizeLevelPath(RequestedPath);
@@ -99,7 +99,7 @@ void UTempoCoreEditorServiceSubsystem::SaveLevel(const SaveLevelRequest& Request
 	{
 		if (CurrentLevelName.IsEmpty())
 		{
-			ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Level name must be specified"));
+			ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Level name must be specified"));
 			return;
 		}
 		RequestedPath = CurrentLevelName;
@@ -110,14 +110,14 @@ void UTempoCoreEditorServiceSubsystem::SaveLevel(const SaveLevelRequest& Request
 		if (!FFileHelper::IsFilenameValidForSaving(RequestedPath, ErrorReason))
 		{
 			const FString ErrorMessage = FString::Printf(TEXT("Invalid level name specified. Error: %s"), *ErrorReason.ToString());
-			ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, TCHAR_TO_UTF8(*ErrorMessage)));
+			ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, TCHAR_TO_UTF8(*ErrorMessage)));
 			return;
 		}
 		if (RequestedPath != CurrentLevelName)
 		{
 			if (FPaths::FileExists(RequestedPath) && !Request.overwrite())
 			{
-				ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Specified level name already exists. Use overwrite flag to replace."));
+				ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Specified level name already exists. Use overwrite flag to replace."));
 				return;
 			}
 		}
@@ -128,45 +128,45 @@ void UTempoCoreEditorServiceSubsystem::SaveLevel(const SaveLevelRequest& Request
 
 	if (!FEditorFileUtils::SaveMap(GetEditorWorld(), RequestedPath))
 	{
-		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::UNKNOWN, "Failed to save map"));
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::UNKNOWN, "Failed to save map"));
 		return;
 	}
-	ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status_OK);
+	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status_OK);
 }
 
-void UTempoCoreEditorServiceSubsystem::OpenLevel(const OpenLevelRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation)
+void UTempoCoreEditorServiceSubsystem::OpenLevel(const OpenLevelRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation)
 {
 	FString RequestedPath = FString(UTF8_TO_TCHAR(Request.path().c_str()));
 	SanitizeLevelPath(RequestedPath);
 	if (RequestedPath.IsEmpty())
 	{
-		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Level name must be specified"));
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Level name must be specified"));
 	}
 
 	if (!FPaths::FileExists(RequestedPath))
 	{
-		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Could not find specified level"));
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Could not find specified level"));
 		return;
 	}
 
 	if (!FEditorFileUtils::LoadMap(RequestedPath))
 	{
-		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::UNKNOWN, "Failed to open map"));
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::UNKNOWN, "Failed to open map"));
 		return;
 	}
 	
-	ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status_OK);
+	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status_OK);
 }
 
-void UTempoCoreEditorServiceSubsystem::NewLevel(const TempoScripting::Empty& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation)
+void UTempoCoreEditorServiceSubsystem::NewLevel(const TempoCore::Empty& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation)
 {
 	const UGameMapsSettings* GameMapsSettings = GetDefault<UGameMapsSettings>();
 	if (!GameMapsSettings)
 	{
-		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::UNKNOWN, "Failed to find game maps settings"));
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::UNKNOWN, "Failed to find game maps settings"));
 		return;
 	}
 
 	UEditorLoadingAndSavingUtils::NewMapFromTemplate(GameMapsSettings->EditorStartupMap.ToString(), false);
-	ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status_OK);
+	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status_OK);
 }

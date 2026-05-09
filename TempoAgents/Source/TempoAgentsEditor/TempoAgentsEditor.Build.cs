@@ -47,10 +47,8 @@ public class TempoAgentsEditor : TempoModuleRules
 				"ToolMenus",
 				"ZoneGraph",
 				// Tempo
-				"TempoAgentsShared",
 				"TempoAgents",
-				"TempoScripting",
-				"TempoCoreShared",
+				"TempoCore",
 			}
 			);
 

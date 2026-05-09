@@ -14,7 +14,7 @@ public class TempoROSBridgeShared : ModuleRules
                 // Unreal
                 "Core",
                 // Tempo
-                "TempoScripting",
+                "TempoCore",
             }
         );
 

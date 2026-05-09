@@ -65,12 +65,12 @@ async def _qt_event_loop(interval=1 / 30):
 
 def _build_depth_qimage(image):
     """Numpy + QImage construction. Thread-safe — QImage is reentrant."""
-    image_array = np.asarray(image.depths, dtype=np.float32).reshape(image.height, image.width)
+    image_array = np.asarray(image.depths_m, dtype=np.float32).reshape(image.height_px, image.width_px)
     image_array = np.reciprocal(image_array)
     min_val, max_val = image_array.min(), image_array.max()
     image_array = (image_array - min_val) / (max_val - min_val + 1e-6)
     image_uint8 = (image_array * 255).astype(np.uint8).copy()
-    return QImage(image_uint8.data, image.width, image.height, image.width, QImage.Format_Grayscale8).copy()
+    return QImage(image_uint8.data, image.width_px, image.height_px, image.width_px, QImage.Format_Grayscale8).copy()
 
 
 def show_depth_image(image, window_name):
@@ -80,10 +80,10 @@ def show_depth_image(image, window_name):
 def _build_color_qimage(image):
     """Numpy + QImage construction. Thread-safe."""
     image_buffer = io.BytesIO(image.data)
-    image_array = np.frombuffer(image_buffer.getvalue(), np.uint8).reshape(image.height, image.width, 3)
+    image_array = np.frombuffer(image_buffer.getvalue(), np.uint8).reshape(image.height_px, image.width_px, 3)
     # Camera sends BGR; swap to RGB for Qt
     image_rgb = image_array[:, :, ::-1].copy()
-    return QImage(image_rgb.data, image.width, image.height, image.width * 3, QImage.Format_RGB888).copy()
+    return QImage(image_rgb.data, image.width_px, image.height_px, image.width_px * 3, QImage.Format_RGB888).copy()
 
 
 def show_color_image(image, window_name):
@@ -117,9 +117,9 @@ rgb_lookup_table = np.array([index_to_rgb(i) for i in range(256)], dtype=np.uint
 def _build_label_qimage(image):
     """Numpy + QImage construction. Thread-safe."""
     image_bytes = io.BytesIO(image.data)
-    image_array = np.frombuffer(image_bytes.getvalue(), dtype=np.uint8).reshape((image.height, image.width))
+    image_array = np.frombuffer(image_bytes.getvalue(), dtype=np.uint8).reshape((image.height_px, image.width_px))
     rgb_image = rgb_lookup_table[image_array].copy()
-    return QImage(rgb_image.data, image.width, image.height, image.width * 3, QImage.Format_RGB888).copy()
+    return QImage(rgb_image.data, image.width_px, image.height_px, image.width_px * 3, QImage.Format_RGB888).copy()
 
 
 def show_label_image(image, window_name):
@@ -161,27 +161,27 @@ async def _stream_images(source, build_qimage, window_name, scale=1.0):
 
 async def stream_color_images(camera_name, owner, scale=1.0):
     await _stream_images(
-        ts.stream_color_images(sensor_name=camera_name, owner_name=owner),
+        ts.stream_color_images(sensor=camera_name, owner=owner),
         _build_color_qimage,
-        "Camera {} - Color".format(camera_name),
+        "{}:{} - Color".format(owner, camera_name),
         scale,
     )
 
 
 async def stream_depth_images(camera_name, owner, scale=1.0):
     await _stream_images(
-        ts.stream_depth_images(sensor_name=camera_name, owner_name=owner),
+        ts.stream_depth_images(sensor=camera_name, owner=owner),
         _build_depth_qimage,
-        "Camera {} - Depth".format(camera_name),
+        "{}:{} - Depth".format(owner, camera_name),
         scale,
     )
 
 
 async def stream_label_images(camera_name, owner, scale=1.0):
     await _stream_images(
-        ts.stream_label_images(sensor_name=camera_name, owner_name=owner),
+        ts.stream_label_images(sensor=camera_name, owner=owner),
         _build_label_qimage,
-        "Camera {} - Label".format(camera_name),
+        "{}:{} - Label".format(owner, camera_name),
         scale,
     )
 
@@ -201,7 +201,7 @@ async def _record_images(source, build_qimage, output_dir, prefix, quality=90):
 
 async def record_color_images(camera_name, owner, output_dir, quality=90):
     await _record_images(
-        ts.stream_color_images(sensor_name=camera_name, owner_name=owner),
+        ts.stream_color_images(sensor=camera_name, owner=owner),
         _build_color_qimage,
         output_dir,
         f"{camera_name}_color",
@@ -211,7 +211,7 @@ async def record_color_images(camera_name, owner, output_dir, quality=90):
 
 async def record_depth_images(camera_name, owner, output_dir, quality=90):
     await _record_images(
-        ts.stream_depth_images(sensor_name=camera_name, owner_name=owner),
+        ts.stream_depth_images(sensor=camera_name, owner=owner),
         _build_depth_qimage,
         output_dir,
         f"{camera_name}_depth",
@@ -221,7 +221,7 @@ async def record_depth_images(camera_name, owner, output_dir, quality=90):
 
 async def record_label_images(camera_name, owner, output_dir, quality=90):
     await _record_images(
-        ts.stream_label_images(sensor_name=camera_name, owner_name=owner),
+        ts.stream_label_images(sensor=camera_name, owner=owner),
         _build_label_qimage,
         output_dir,
         f"{camera_name}_label",
