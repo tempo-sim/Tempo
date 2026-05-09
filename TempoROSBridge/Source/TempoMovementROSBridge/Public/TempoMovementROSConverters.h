@@ -24,11 +24,11 @@ struct TToROSConverter<tempo_movement_ros_bridge::srv::GetCommandableVehicles::R
 };
 
 template <>
-struct TFromROSConverter<tempo_movement_ros_bridge::srv::GetCommandableVehicles::Request, TempoScripting::Empty>
+struct TFromROSConverter<tempo_movement_ros_bridge::srv::GetCommandableVehicles::Request, TempoCore::Empty>
 {
-	static TempoScripting::Empty Convert(const tempo_movement_ros_bridge::srv::GetCommandableVehicles::Request& ROSValue)
+	static TempoCore::Empty Convert(const tempo_movement_ros_bridge::srv::GetCommandableVehicles::Request& ROSValue)
 	{
-		return TempoScripting::Empty();
+		return TempoCore::Empty();
 	}
 };
 
@@ -46,9 +46,9 @@ struct TFromROSConverter<tempo_movement_ros_bridge::srv::CommandVehicle::Request
 };
 
 template <>
-struct TToROSConverter<tempo_movement_ros_bridge::srv::CommandVehicle::Response, TempoScripting::Empty>
+struct TToROSConverter<tempo_movement_ros_bridge::srv::CommandVehicle::Response, TempoCore::Empty>
 {
-	static tempo_movement_ros_bridge::srv::CommandVehicle::Response Convert(const TempoScripting::Empty& TempoValue)
+	static tempo_movement_ros_bridge::srv::CommandVehicle::Response Convert(const TempoCore::Empty& TempoValue)
 	{
 		return tempo_movement_ros_bridge::srv::CommandVehicle::Response();
 	}
@@ -56,7 +56,7 @@ struct TToROSConverter<tempo_movement_ros_bridge::srv::CommandVehicle::Response,
 
 struct FTempoGetCommandableVehiclesService
 {
-	using Request = TempoScripting::Empty;
+	using Request = TempoCore::Empty;
 	using Response = TempoMovement::CommandableVehiclesResponse;
 };
 
@@ -70,7 +70,7 @@ struct TImplicitToROSConverter<FTempoGetCommandableVehiclesService>
 struct FTempoCommandVehicleService
 {
 	using Request = TempoMovement::VehicleCommandRequest;
-	using Response = TempoScripting::Empty;
+	using Response = TempoCore::Empty;
 };
 
 template <>

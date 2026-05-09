@@ -43,9 +43,9 @@ namespace
 	}
 }
 
-void UTempoWorldStateServiceSubsystem::RegisterScriptingServices(FTempoScriptingServer& ScriptingServer)
+void UTempoWorldStateServiceSubsystem::RegisterServices(FTempoServer& Server)
 {
-	ScriptingServer.RegisterService<WorldStateService>(
+	Server.RegisterService<WorldStateService>(
 		StreamingRequestHandler(&WorldStateAsyncService::RequestStreamOverlapEvents, &UTempoWorldStateServiceSubsystem::StreamOverlapEvents),
 		SimpleRequestHandler(&WorldStateAsyncService::RequestGetCurrentActorState, &UTempoWorldStateServiceSubsystem::GetCurrentActorState),
 		StreamingRequestHandler(&WorldStateAsyncService::RequestStreamActorState, &UTempoWorldStateServiceSubsystem::StreamActorState),
@@ -59,14 +59,14 @@ void UTempoWorldStateServiceSubsystem::Initialize(FSubsystemCollectionBase& Coll
 {
 	Super::Initialize(Collection);
 
-	FTempoScriptingServer::Get().ActivateService<WorldStateService>(this);
+	FTempoServer::Get().ActivateService<WorldStateService>(this);
 }
 
 void UTempoWorldStateServiceSubsystem::Deinitialize()
 {
 	Super::Deinitialize();
 
-	FTempoScriptingServer::Get().DeactivateService<WorldStateService>();
+	FTempoServer::Get().DeactivateService<WorldStateService>();
 }
 
 TArray<AActor*> GetMatchingActors(const UWorld* World, const ActorStateRequest& Request)
@@ -133,22 +133,22 @@ TempoWorld::ActorState GetActorState(const AActor* Actor, const UWorld* World, b
 	ActorState.set_timestamp(World->GetTimeSeconds());
 	ActorState.set_name(TCHAR_TO_UTF8(*Actor->GetActorNameOrLabel()));
 
-	TempoScripting::Transform* ActorStateTransform = ActorState.mutable_transform();
+	TempoCore::Transform* ActorStateTransform = ActorState.mutable_transform();
 
 	const FVector ActorLocation = QuantityConverter<CM2M, L2R>::Convert(Actor->GetActorLocation());
-	TempoScripting::Vector* ActorStateLocation = ActorStateTransform->mutable_location();
+	TempoCore::Vector* ActorStateLocation = ActorStateTransform->mutable_location();
 	ActorStateLocation->set_x(ActorLocation.X);
 	ActorStateLocation->set_y(ActorLocation.Y);
 	ActorStateLocation->set_z(ActorLocation.Z);
 
 	const FRotator ActorRotation = QuantityConverter<Deg2Rad, L2R>::Convert(Actor->GetActorRotation());
-	TempoScripting::Rotation* ActorStateRotation = ActorStateTransform->mutable_rotation();
+	TempoCore::Rotation* ActorStateRotation = ActorStateTransform->mutable_rotation();
 	ActorStateRotation->set_r(ActorRotation.Roll);
 	ActorStateRotation->set_p(ActorRotation.Pitch);
 	ActorStateRotation->set_y(ActorRotation.Yaw);
 
 	const FVector ActorLinearVelocity = QuantityConverter<CM2M, L2R>::Convert(Actor->GetVelocity());
-	TempoScripting::Vector* ActorStateLinearVel = ActorState.mutable_linear_velocity();
+	TempoCore::Vector* ActorStateLinearVel = ActorState.mutable_linear_velocity();
 	ActorStateLinearVel->set_x(ActorLinearVelocity.X);
 	ActorStateLinearVel->set_y(ActorLinearVelocity.Y);
 	ActorStateLinearVel->set_z(ActorLinearVelocity.Z);
@@ -167,7 +167,7 @@ TempoWorld::ActorState GetActorState(const AActor* Actor, const UWorld* World, b
 	// The L2R conversion above handles the fact that the Y-axis is flipped, but not the handedness of the rotations themselves.
 	ActorAngularVelocity = -ActorAngularVelocity;
 
-	TempoScripting::Vector* ActorStateAngularVel = ActorState.mutable_angular_velocity();
+	TempoCore::Vector* ActorStateAngularVel = ActorState.mutable_angular_velocity();
 	ActorStateAngularVel->set_x(ActorAngularVelocity.X);
 	ActorStateAngularVel->set_y(ActorAngularVelocity.Y);
 	ActorStateAngularVel->set_z(ActorAngularVelocity.Z);
@@ -188,7 +188,7 @@ TempoWorld::ActorState GetActorState(const AActor* Actor, const UWorld* World, b
 
 	const FVector ActorBoundsMin = QuantityConverter<CM2M, L2R>::Convert(ActorWorldBounds.Min);
 	const FVector ActorBoundsMax = QuantityConverter<CM2M, L2R>::Convert(ActorWorldBounds.Max);
-	TempoScripting::Box* ActorStateBounds = ActorState.mutable_bounds();
+	TempoCore::Box* ActorStateBounds = ActorState.mutable_bounds();
 	ActorStateBounds->mutable_min()->set_x(ActorBoundsMin.X);
 	ActorStateBounds->mutable_min()->set_y(ActorBoundsMin.Y);
 	ActorStateBounds->mutable_min()->set_z(ActorBoundsMin.Z);

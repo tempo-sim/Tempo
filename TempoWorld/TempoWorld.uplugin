@@ -18,11 +18,6 @@
 			"Name": "TempoWorld",
 			"Type": "Runtime",
 			"LoadingPhase": "Default"
-		},
-		{
-			"Name": "TempoMapQuery",
-			"Type": "Runtime",
-			"LoadingPhase": "Default"
 		}
 	],
 	"Plugins": [
@@ -40,10 +35,6 @@
 		},
 		{
 			"Name": "Traffic",
-			"Enabled": true
-		},
-		{
-			"Name": "ZoneGraph",
 			"Enabled": true
 		}
 	]

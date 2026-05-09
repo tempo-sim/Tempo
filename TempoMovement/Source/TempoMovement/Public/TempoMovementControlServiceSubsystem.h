@@ -2,8 +2,8 @@
 
 #pragma once
 
-#include "TempoScriptable.h"
-#include "TempoScriptingServer.h"
+#include "TempoServiceProvider.h"
+#include "TempoServer.h"
 #include "TempoSubsystems.h"
 
 #include "CoreMinimal.h"
@@ -11,7 +11,7 @@
 
 #include "TempoMovementControlServiceSubsystem.generated.h"
 
-namespace TempoScripting
+namespace TempoCore
 {
 	class Empty;
 }
@@ -37,26 +37,26 @@ struct FPendingPawnMoveInfo
 };
 
 UCLASS()
-class TEMPOMOVEMENT_API UTempoMovementControlServiceSubsystem : public UTempoGameWorldSubsystem, public ITempoScriptable
+class TEMPOMOVEMENT_API UTempoMovementControlServiceSubsystem : public UTempoGameWorldSubsystem, public ITempoServiceProvider
 {
 	GENERATED_BODY()
 	
 public:
-	virtual void RegisterScriptingServices(FTempoScriptingServer& ScriptingServer) override;
+	virtual void RegisterServices(FTempoServer& Server) override;
 
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 
 	virtual void Deinitialize() override;
 
-	void GetCommandableVehicles(const TempoScripting::Empty& Request, const TResponseDelegate<TempoMovement::CommandableVehiclesResponse>& ResponseContinuation) const;
+	void GetCommandableVehicles(const TempoCore::Empty& Request, const TResponseDelegate<TempoMovement::CommandableVehiclesResponse>& ResponseContinuation) const;
 	
-	void CommandVehicle(const TempoMovement::VehicleCommandRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const;
+	void CommandVehicle(const TempoMovement::VehicleCommandRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const;
 
-	void GetCommandablePawns(const TempoScripting::Empty& Request, const TResponseDelegate<TempoMovement::CommandablePawnsResponse>& ResponseContinuation) const;
+	void GetCommandablePawns(const TempoCore::Empty& Request, const TResponseDelegate<TempoMovement::CommandablePawnsResponse>& ResponseContinuation) const;
 
 	void PawnMoveToLocation(const TempoMovement::PawnMoveToLocationRequest& Request, const TResponseDelegate<TempoMovement::PawnMoveToLocationResponse>& ResponseContinuation);
 
-	void RebuildNavigation(const TempoScripting::Empty& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const;
+	void RebuildNavigation(const TempoCore::Empty& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const;
 
 protected:
 	TMap<FAIRequestID, FPendingPawnMoveInfo> PendingPawnMoves;

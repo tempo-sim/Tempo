@@ -2,7 +2,7 @@
 
 syntax = "proto3";
 
-import "TempoScripting/Geometry.proto";
+import "TempoCore/Geometry.proto";
 
 // Collision channel for physics queries
 enum CollisionChannel {
@@ -14,10 +14,10 @@ enum CollisionChannel {
 // Raycast request for physics queries
 message RaycastRequest {
   // Start position (in Tempo coordinates: meters, right-handed)
-  TempoScripting.Vector start = 1;
+  TempoCore.Vector start = 1;
 
   // End position (in Tempo coordinates: meters, right-handed)
-  TempoScripting.Vector end = 2;
+  TempoCore.Vector end = 2;
 
   // Collision channel to use
   CollisionChannel collision_channel = 3;
@@ -32,10 +32,10 @@ message RaycastResponse {
   bool hit = 1;
 
   // Hit location (in Tempo coordinates: meters, right-handed)
-  TempoScripting.Vector location = 2;
+  TempoCore.Vector location = 2;
 
   // Hit normal (in Tempo coordinates)
-  TempoScripting.Vector normal = 3;
+  TempoCore.Vector normal = 3;
 
   // Distance from start to hit point (in meters)
   float distance = 4;
@@ -73,10 +73,10 @@ message ActorStatesNearRequest {
 message ActorState {
   double timestamp = 1;
   string name = 2;
-  TempoScripting.Transform transform = 3;
-  TempoScripting.Vector linear_velocity = 4;
-  TempoScripting.Vector angular_velocity = 5;
-  TempoScripting.Box bounds = 6;
+  TempoCore.Transform transform = 3;
+  TempoCore.Vector linear_velocity = 4;
+  TempoCore.Vector angular_velocity = 5;
+  TempoCore.Box bounds = 6;
 }
 
 message ActorStates {

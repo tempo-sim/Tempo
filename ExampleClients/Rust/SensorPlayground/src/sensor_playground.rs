@@ -13,8 +13,8 @@ use clap::Parser;
 use inquire::{Select, Text};
 use rand::Rng;
 use show_image::{ImageInfo, ImageView, WindowProxy};
-use tempo_sim::proto::tempo_camera::ColorEncoding;
-use tempo_sim::proto::tempo_scripting::{Rotation, Transform, Vector};
+use tempo_sim::proto::tempo_sensors::ColorEncoding;
+use tempo_sim::proto::tempo_core::{Rotation, Transform, Vector};
 use tempo_sim::proto::tempo_sensors::MeasurementType;
 use tempo_sim::{set_server_async, tempo_sensors, tempo_world, TempoError};
 use tokio::task::JoinHandle;
@@ -586,7 +586,7 @@ struct LidarAccumulator {
 }
 
 impl LidarAccumulator {
-    fn add(&mut self, seg: &tempo_sim::proto::tempo_lidar::LidarScanSegment) -> bool {
+    fn add(&mut self, seg: &tempo_sim::proto::tempo_sensors::LidarScanSegment) -> bool {
         let id = seg.header.as_ref().map(|h| h.sequence_id);
         let restart = match (self.sequence_id, id) {
             (Some(a), Some(b)) => a != b,

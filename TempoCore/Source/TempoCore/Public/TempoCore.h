@@ -7,10 +7,20 @@
 
 DECLARE_LOG_CATEGORY_EXTERN(LogTempoCore, Log, All);
 
+class FTempoServer;
+
 class FTempoCoreModule : public IModuleInterface
 {
 public:
-	/** IModuleInterface implementation */
 	virtual void StartupModule() override;
 	virtual void ShutdownModule() override;
+
+private:
+	// gRPC scripting server. TempoCore is the unique owner of the gRPC/protobuf
+	// dllexport boundary in v2 (rolled in from the former TempoScripting module),
+	// so it owns the server lifetime. See TempoCore.Build.cs for the matching
+	// PublicDefinitions and bCanHotReload=false explanation.
+	TUniquePtr<FTempoServer> Server;
+
+	friend FTempoServer;
 };

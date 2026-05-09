@@ -1,0 +1,30 @@
+// Copyright Tempo Simulation, LLC. All Rights Reserved
+
+syntax = "proto3";
+
+import "TempoSensors/Common.proto";
+
+message Range {
+  float min = 1;
+  float max = 2;
+}
+
+message LidarScanSegment {
+  TempoSensors.MeasurementHeader header = 1;
+  int32 scan_count = 2;
+  int32 vertical_beams = 3;
+  int32 horizontal_beams = 4;
+  Range distance_range = 5;
+  Range azimuth_range = 6;
+  Range elevation_range = 7;
+  repeated float distances = 9;
+  repeated float intensities = 10;
+  repeated uint32 labels = 11;
+  repeated float azimuths = 12;
+  repeated float elevations = 13;
+}
+
+message LidarScanRequest {
+  string owner_name = 1;
+  string sensor_name = 2;
+}

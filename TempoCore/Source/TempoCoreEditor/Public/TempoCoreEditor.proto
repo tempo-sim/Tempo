@@ -2,7 +2,7 @@
 
 syntax = "proto3";
 
-import "TempoScripting/Empty.proto";
+import "TempoCore/Empty.proto";
 
 message SaveLevelRequest {
   string path = 1;
@@ -14,15 +14,15 @@ message OpenLevelRequest {
 }
 
 service TempoCoreEditorService {
-  rpc PlayInEditor(TempoScripting.Empty) returns (TempoScripting.Empty);
+  rpc PlayInEditor(TempoCore.Empty) returns (TempoCore.Empty);
 
-  rpc Simulate(TempoScripting.Empty) returns (TempoScripting.Empty);
+  rpc Simulate(TempoCore.Empty) returns (TempoCore.Empty);
 
-  rpc Stop(TempoScripting.Empty) returns (TempoScripting.Empty);
+  rpc Stop(TempoCore.Empty) returns (TempoCore.Empty);
 
-  rpc SaveLevel(SaveLevelRequest) returns (TempoScripting.Empty);
+  rpc SaveLevel(SaveLevelRequest) returns (TempoCore.Empty);
 
-  rpc OpenLevel(OpenLevelRequest) returns (TempoScripting.Empty);
+  rpc OpenLevel(OpenLevelRequest) returns (TempoCore.Empty);
 
-  rpc NewLevel(TempoScripting.Empty) returns (TempoScripting.Empty);
+  rpc NewLevel(TempoCore.Empty) returns (TempoCore.Empty);
 }

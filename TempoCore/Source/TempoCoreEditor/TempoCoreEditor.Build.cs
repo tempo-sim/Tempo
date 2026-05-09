@@ -12,7 +12,7 @@ public class TempoCoreEditor : TempoModuleRules
             new string[]
             {
                 "Core",
-                "TempoScripting",
+                "TempoCore",
             }
         );
 

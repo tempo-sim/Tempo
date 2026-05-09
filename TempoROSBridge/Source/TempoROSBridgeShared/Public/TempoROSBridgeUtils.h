@@ -4,13 +4,13 @@
 
 #include "TempoROSNode.h"
 
-#include "TempoScriptingServer.h"
+#include "TempoServer.h"
 
 template <typename ServiceType>
 using TScriptingServiceDelegate = TDelegate<void(const typename ServiceType::Request&, const TResponseDelegate<typename ServiceType::Response>&)>;
 
 template <typename ServiceType>
-static void BindScriptingServiceToROS(UTempoROSNode* ROSNode, const FString& Name, TScriptingServiceDelegate<ServiceType> ScriptingCallback)
+static void BindServiceToROS(UTempoROSNode* ROSNode, const FString& Name, TScriptingServiceDelegate<ServiceType> ScriptingCallback)
 {
 	ROSNode->AddService<ServiceType>(Name, TROSServiceDelegate<ServiceType>::CreateLambda([ScriptingCallback, Name](const typename ServiceType::Request& Request)
 	{
@@ -25,13 +25,13 @@ static void BindScriptingServiceToROS(UTempoROSNode* ROSNode, const FString& Nam
 }
 
 template <typename ServiceType, typename ScriptingClass>
-static void BindScriptingServiceToROS(UTempoROSNode* ROSNode, const FString& Name, ScriptingClass* ScriptingObj, typename TScriptingServiceDelegate<ServiceType>::template TMethodPtr<ScriptingClass> ScriptingMethod)
+static void BindServiceToROS(UTempoROSNode* ROSNode, const FString& Name, ScriptingClass* ScriptingObj, typename TScriptingServiceDelegate<ServiceType>::template TMethodPtr<ScriptingClass> ScriptingMethod)
 {
-	BindScriptingServiceToROS<ServiceType>(ROSNode, Name, TScriptingServiceDelegate<ServiceType>::CreateUObject(ScriptingObj, ScriptingMethod));
+	BindServiceToROS<ServiceType>(ROSNode, Name, TScriptingServiceDelegate<ServiceType>::CreateUObject(ScriptingObj, ScriptingMethod));
 }
 
 template <typename ServiceType, typename ScriptingClass>
-static void BindScriptingServiceToROS(UTempoROSNode* ROSNode, const FString& Name, ScriptingClass* ScriptingObj, typename TScriptingServiceDelegate<ServiceType>::template TConstMethodPtr<ScriptingClass> ScriptingMethod)
+static void BindServiceToROS(UTempoROSNode* ROSNode, const FString& Name, ScriptingClass* ScriptingObj, typename TScriptingServiceDelegate<ServiceType>::template TConstMethodPtr<ScriptingClass> ScriptingMethod)
 {
-	BindScriptingServiceToROS<ServiceType>(ROSNode, Name, TScriptingServiceDelegate<ServiceType>::CreateUObject(ScriptingObj, ScriptingMethod));
+	BindServiceToROS<ServiceType>(ROSNode, Name, TScriptingServiceDelegate<ServiceType>::CreateUObject(ScriptingObj, ScriptingMethod));
 }

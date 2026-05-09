@@ -24,8 +24,7 @@ public class TempoGeographic : TempoModuleRules
 			new string[]
 			{
 				"Core",
-				"TempoCoreShared",
-				"TempoScripting",
+				"TempoCore",
 			}
 			);
 			
@@ -39,9 +38,6 @@ public class TempoGeographic : TempoModuleRules
 				"GeoReferencing",
 				"Slate",
 				"SlateCore",
-				// Tempo
-				"TempoTime",
-				"TempoCoreShared",
 			}
 			);
 		

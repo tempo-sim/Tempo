@@ -9,7 +9,7 @@ use std::collections::HashMap;
 
 use clap::Parser;
 use inquire::{Select, Text};
-use tempo_sim::proto::tempo_scripting::{Rotation, Transform, Vector};
+use tempo_sim::proto::tempo_core::{Rotation, Transform, Vector};
 use tempo_sim::{set_server_async, tempo_world};
 
 #[derive(Parser, Debug)]
