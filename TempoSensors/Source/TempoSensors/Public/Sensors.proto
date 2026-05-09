@@ -2,8 +2,8 @@
 
 syntax = "proto3";
 
-import "TempoCamera/Camera.proto";
-import "TempoLidar/Lidar.proto";
+import "TempoSensors/Camera.proto";
+import "TempoSensors/Lidar.proto";
 
 enum MeasurementType {
   COLOR_IMAGE = 0;
@@ -31,13 +31,13 @@ message AvailableSensorsResponse {
 service SensorService {
   rpc GetAvailableSensors(AvailableSensorsRequest) returns (AvailableSensorsResponse);
 
-  rpc StreamColorImages(TempoCamera.ColorImageRequest) returns (stream TempoCamera.ColorImage);
+  rpc StreamColorImages(TempoSensors.ColorImageRequest) returns (stream TempoSensors.ColorImage);
 
-  rpc StreamDepthImages(TempoCamera.DepthImageRequest) returns (stream TempoCamera.DepthImage);
+  rpc StreamDepthImages(TempoSensors.DepthImageRequest) returns (stream TempoSensors.DepthImage);
 
-  rpc StreamLabelImages(TempoCamera.LabelImageRequest) returns (stream TempoCamera.LabelImage);
+  rpc StreamLabelImages(TempoSensors.LabelImageRequest) returns (stream TempoSensors.LabelImage);
 
-  rpc StreamBoundingBoxes(TempoCamera.BoundingBoxesRequest) returns (stream TempoCamera.BoundingBoxes);
+  rpc StreamBoundingBoxes(TempoSensors.BoundingBoxesRequest) returns (stream TempoSensors.BoundingBoxes);
 
-  rpc StreamLidarScans(TempoLidar.LidarScanRequest) returns (stream TempoLidar.LidarScanSegment);
+  rpc StreamLidarScans(TempoSensors.LidarScanRequest) returns (stream TempoSensors.LidarScanSegment);
 }

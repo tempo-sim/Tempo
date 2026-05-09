@@ -2,8 +2,8 @@
 
 #pragma once
 
-#include "TempoScriptable.h"
-#include "TempoScriptingServer.h"
+#include "TempoServiceProvider.h"
+#include "TempoServer.h"
 #include "TempoSubsystems.h"
 
 #include "CoreMinimal.h"
@@ -11,7 +11,7 @@
 
 #include "TempoWorldStateServiceSubsystem.generated.h"
 
-namespace TempoScripting
+namespace TempoCore
 {
 	class Empty;
 }
@@ -52,12 +52,12 @@ namespace TempoWorld
 }
 
 UCLASS()
-class TEMPOWORLD_API UTempoWorldStateServiceSubsystem : public UTempoTickableGameWorldSubsystem, public ITempoScriptable
+class TEMPOWORLD_API UTempoWorldStateServiceSubsystem : public UTempoTickableGameWorldSubsystem, public ITempoServiceProvider
 {
 	GENERATED_BODY()
 
 public:
-	virtual void RegisterScriptingServices(FTempoScriptingServer& ScriptingServer) override;
+	virtual void RegisterServices(FTempoServer& Server) override;
 
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 

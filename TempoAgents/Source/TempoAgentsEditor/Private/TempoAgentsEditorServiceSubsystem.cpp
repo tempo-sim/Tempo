@@ -8,9 +8,9 @@
 using TempoAgentsEditorService = TempoAgentsEditor::TempoAgentsEditorService;
 using TempoAgentsEditorAsyncService = TempoAgentsEditor::TempoAgentsEditorService::AsyncService;
 
-void UTempoAgentsEditorServiceSubsystem::RegisterScriptingServices(FTempoScriptingServer& ScriptingServer)
+void UTempoAgentsEditorServiceSubsystem::RegisterServices(FTempoServer& Server)
 {
-	ScriptingServer.RegisterService<TempoAgentsEditorService>(
+	Server.RegisterService<TempoAgentsEditorService>(
 		SimpleRequestHandler(&TempoAgentsEditorAsyncService::RequestRunTempoZoneGraphBuilderPipeline, &UTempoAgentsEditorServiceSubsystem::RunTempoZoneGraphBuilderPipeline)
 	);
 }
@@ -19,17 +19,17 @@ void UTempoAgentsEditorServiceSubsystem::Initialize(FSubsystemCollectionBase& Co
 {
 	Super::Initialize(Collection);
 
-	FTempoScriptingServer::Get().ActivateService<TempoAgentsEditorService>(this);
+	FTempoServer::Get().ActivateService<TempoAgentsEditorService>(this);
 }
 
 void UTempoAgentsEditorServiceSubsystem::Deinitialize()
 {
 	Super::Deinitialize();
 
-	FTempoScriptingServer::Get().DeactivateService<TempoAgentsEditorService>();
+	FTempoServer::Get().DeactivateService<TempoAgentsEditorService>();
 }
 
-void UTempoAgentsEditorServiceSubsystem::RunTempoZoneGraphBuilderPipeline(const TempoScripting::Empty& Request, const TResponseDelegate<TempoAgentsEditor::PipelineResult>& ResponseContinuation) const
+void UTempoAgentsEditorServiceSubsystem::RunTempoZoneGraphBuilderPipeline(const TempoCore::Empty& Request, const TResponseDelegate<TempoAgentsEditor::PipelineResult>& ResponseContinuation) const
 {
 	const bool bSuccess = UTempoAgentsEditorUtils::RunTempoZoneGraphBuilderPipeline();
 

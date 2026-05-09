@@ -1,5 +1,6 @@
-﻿// Copyright Tempo Simulation, LLC. All Rights Reserved
+// Copyright Tempo Simulation, LLC. All Rights Reserved
 
+using System.IO;
 using UnrealBuildTool;
 
 public class TempoSensors : TempoModuleRules
@@ -7,54 +8,37 @@ public class TempoSensors : TempoModuleRules
 	public TempoSensors(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
-		
-		PublicIncludePaths.AddRange(
-			new string[] {
-			}
-			);
-				
-		
-		PrivateIncludePaths.AddRange(
-			new string[] {
-			}
-			);
-			
-		
+
+		// Hack to reach private members of FRayTracingScene in TempoSceneCaptureComponent.
+		// See comment in UTempoSceneCaptureComponent::UpdateSceneCaptureContents.
+		// Also needed in 5.6 to reach FSceneViewState::GetLastAverageSceneLuminance via downcast —
+		// the method only became virtual on FSceneViewStateInterface in 5.7. See call site in
+		// TempoCamera.cpp.
+		PrivateIncludePaths.Add(Path.Combine(GetModuleDirectory("Renderer"), "Private"));
+		PrivateIncludePaths.Add(Path.Combine(GetModuleDirectory("Renderer"), "Internal"));
+
 		PublicDependencyModuleNames.AddRange(
 			new string[]
 			{
 				// Unreal
 				"Core",
+				"Engine",
 				// Tempo
-				"TempoCoreShared",
-				"TempoScripting",
-				"TempoCamera",
-				"TempoLidar",
+				"TempoCore",
 			}
-			);
-			
-		
+		);
+
 		PrivateDependencyModuleNames.AddRange(
 			new string[]
 			{
 				// Unreal
 				"CoreUObject",
 				"DeveloperSettings",
-				"Engine",
 				"RenderCore",
 				"RHI",
 				"Slate",
 				"SlateCore",
-				// Tempo
-				"TempoSensorsShared",
 			}
-			);
-		
-		
-		DynamicallyLoadedModuleNames.AddRange(
-			new string[]
-			{
-			}
-			);
+		);
 	}
 }

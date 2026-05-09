@@ -2,7 +2,7 @@
 
 syntax = "proto3";
 
-import "TempoScripting/Empty.proto";
+import "TempoCore/Empty.proto";
 
 enum ControlMode {
   NONE = 0;
@@ -30,15 +30,15 @@ message SetControlModeRequest {
 }
 
 service TempoCoreService {
-  rpc LoadLevel(LoadLevelRequest) returns (TempoScripting.Empty);
+  rpc LoadLevel(LoadLevelRequest) returns (TempoCore.Empty);
 
-  rpc FinishLoadingLevel(TempoScripting.Empty) returns (TempoScripting.Empty);
+  rpc FinishLoadingLevel(TempoCore.Empty) returns (TempoCore.Empty);
 
-  rpc GetCurrentLevelName(TempoScripting.Empty) returns (CurrentLevelResponse);
+  rpc GetCurrentLevelName(TempoCore.Empty) returns (CurrentLevelResponse);
 
-  rpc Quit(TempoScripting.Empty) returns (TempoScripting.Empty);
+  rpc Quit(TempoCore.Empty) returns (TempoCore.Empty);
 
-  rpc SetMainViewportRenderEnabled(SetMainViewportRenderEnabledRequest) returns (TempoScripting.Empty);
+  rpc SetMainViewportRenderEnabled(SetMainViewportRenderEnabledRequest) returns (TempoCore.Empty);
 
-  rpc SetControlMode(SetControlModeRequest) returns (TempoScripting.Empty);
+  rpc SetControlMode(SetControlModeRequest) returns (TempoCore.Empty);
 }

@@ -7,7 +7,7 @@
 #include "TempoVehicleControlInterface.h"
 
 #include "TempoConversion.h"
-#include "TempoScripting/Empty.pb.h"
+#include "TempoCore/Empty.pb.h"
 
 #include "AIController.h"
 #include "Kismet/GameplayStatics.h"
@@ -20,11 +20,11 @@ using CommandableVehiclesResponse = TempoMovement::CommandableVehiclesResponse;
 using PawnMoveToLocationRequest = TempoMovement::PawnMoveToLocationRequest;
 using PawnMoveToLocationResponse = TempoMovement::PawnMoveToLocationResponse;
 using CommandablePawnsResponse = TempoMovement::CommandablePawnsResponse;
-using TempoEmpty = TempoScripting::Empty;
+using TempoEmpty = TempoCore::Empty;
 
-void UTempoMovementControlServiceSubsystem::RegisterScriptingServices(FTempoScriptingServer& ScriptingServer)
+void UTempoMovementControlServiceSubsystem::RegisterServices(FTempoServer& Server)
 {
-	ScriptingServer.RegisterService<MovementControlService>(
+	Server.RegisterService<MovementControlService>(
 		SimpleRequestHandler(&MovementControlAsyncService::RequestGetCommandableVehicles, &UTempoMovementControlServiceSubsystem::GetCommandableVehicles),
 		SimpleRequestHandler(&MovementControlAsyncService::RequestCommandVehicle, &UTempoMovementControlServiceSubsystem::CommandVehicle),
 		SimpleRequestHandler(&MovementControlAsyncService::RequestGetCommandablePawns, &UTempoMovementControlServiceSubsystem::GetCommandablePawns),
@@ -37,17 +37,17 @@ void UTempoMovementControlServiceSubsystem::Initialize(FSubsystemCollectionBase&
 {
 	Super::Initialize(Collection);
 
-	FTempoScriptingServer::Get().ActivateService<MovementControlService>(this);
+	FTempoServer::Get().ActivateService<MovementControlService>(this);
 }
 
 void UTempoMovementControlServiceSubsystem::Deinitialize()
 {
 	Super::Deinitialize();
 
-	FTempoScriptingServer::Get().DeactivateService<MovementControlService>();
+	FTempoServer::Get().DeactivateService<MovementControlService>();
 }
 
-void UTempoMovementControlServiceSubsystem::GetCommandableVehicles(const TempoScripting::Empty& Request, const TResponseDelegate<TempoMovement::CommandableVehiclesResponse>& ResponseContinuation) const
+void UTempoMovementControlServiceSubsystem::GetCommandableVehicles(const TempoCore::Empty& Request, const TResponseDelegate<TempoMovement::CommandableVehiclesResponse>& ResponseContinuation) const
 {
 	TArray<AActor*> VehicleControllers;
 	UGameplayStatics::GetAllActorsWithInterface(GetWorld(), UTempoVehicleControlInterface::StaticClass(), VehicleControllers);

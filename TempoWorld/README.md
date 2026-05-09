@@ -43,7 +43,7 @@ TempoWorld lets you control the state of the simulated world.
 To spawn an Actor you must specify its `type` (Unreal Class name). This can be any C++ or Blueprint class in the project. You may also specify a transform and, optionally, an other actor to which that transform is relative. Lastly, you can specify that the spawn should be "deferred", meaning the Actor will be created but left in an invisible, unfinished state where you can set its properties before finishing the spawn. For example:
 ```
 import tempo.tempo_world as tw
-import TempoScripting.Geometry_pb2 as Geometry
+import TempoCore.Geometry_pb2 as Geometry
 
 t = Geometry.transform()
 t.location.x = 1
@@ -64,7 +64,7 @@ tw.destroy_actor(actor="ActorToDestroy")
 TempoWorld supports adding and removing components in the editor or at runtime. For example:
 ```
 import tempo.tempo_world as tw
-import TempoScripting.Geometry_pb2 as Geometry
+import TempoCore.Geometry_pb2 as Geometry
 
 t = Geometry.transform()
 tw.add_component(type="MyCPPOrBPComponentClass", actor="OwnerActor", name="OptionalCustomName", parent="OptionalParentComponent", transform=t, socket="OptionalSocket")
@@ -75,7 +75,7 @@ tw.destroy_component(actor="OwnerActor", component="MyComponent")
 TempoWorld supports setting transforms of Actors and Components. For example:
 ```
 import tempo.tempo_world as tw
-import TempoScripting.Geometry_pb2 as Geometry
+import TempoCore.Geometry_pb2 as Geometry
 
 t = Geometry.transform()
 tw.set_actor_transform(actor="MyActor", transform=t, relative_to_actor="OptionalRelativeActor")
@@ -124,7 +124,3 @@ TempoWorld does not yet support setting properties in maps or sets. Check back s
 
 > [!Warning]
 > While the values you set for rotators will be converted from radians to degrees, the values you set for floats and vectors will not be converted (so, these should be specified in centimeters if they represent distances). We don't feel it is safe to assume that these quantities always represent distances.
-
-## Map Query Service
-
-If your simulator includes a lane graph built with the ZoneGraph plugin, the map query service can get or stream the lane graph, including connectivity of lanes, as well as the accessibility of connected lanes (as determined by traffic controls).

@@ -1,6 +1,6 @@
 # Tempo C++ Example Clients
 
-Three small programs that exercise the Tempo C++ wrapper API:
+Small programs that exercise the Tempo C++ wrapper API:
 
 | Example | What it does |
 |---|---|

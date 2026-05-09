@@ -1,0 +1,36 @@
+// Copyright Tempo Simulation, LLC. All Rights Reserved
+
+syntax = "proto3";
+
+import "TempoCore/Empty.proto";
+
+enum TimeMode {
+  WALL_CLOCK = 0;
+  FIXED_STEP = 1;
+}
+
+message TimeModeRequest {
+  TimeMode time_mode = 1;
+}
+
+message SetSimStepsPerSecondRequest {
+  int32 sim_steps_per_second = 1;
+}
+
+message AdvanceStepsRequest {
+  int32 steps = 1;
+}
+
+service TimeService {
+  rpc SetTimeMode(TimeModeRequest) returns (TempoCore.Empty);
+  
+  rpc SetSimStepsPerSecond(SetSimStepsPerSecondRequest) returns (TempoCore.Empty);
+
+  rpc AdvanceSteps(AdvanceStepsRequest) returns (TempoCore.Empty);
+  
+  rpc Play (TempoCore.Empty) returns (TempoCore.Empty);
+
+  rpc Pause (TempoCore.Empty) returns (TempoCore.Empty);
+  
+  rpc Step(TempoCore.Empty) returns (TempoCore.Empty);
+}

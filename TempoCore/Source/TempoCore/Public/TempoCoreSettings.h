@@ -1,0 +1,110 @@
+// Copyright Tempo Simulation, LLC. All Rights Reserved
+
+#pragma once
+
+#include "TempoCoreTypes.h"
+
+#include "CoreMinimal.h"
+#include "Engine/DeveloperSettings.h"
+
+#include "TempoCoreSettings.generated.h"
+
+DECLARE_MULTICAST_DELEGATE(FTempoCoreTimeSettingsChanged);
+DECLARE_MULTICAST_DELEGATE(FTempoCoreRenderingSettingsChanged);
+
+/**
+ * TempoCore Plugin Settings.
+ */
+UCLASS(Config=Plugins, DefaultConfig)
+class TEMPOCORE_API UTempoCoreSettings : public UDeveloperSettings
+{
+	GENERATED_BODY()
+
+public:
+	UTempoCoreSettings();
+
+#if WITH_EDITOR
+	virtual FText GetSectionText() const override;
+#endif
+
+	// Allow command-line overrides
+	virtual void PostInitProperties() override;
+
+	// Time Settings.
+	void SetTimeMode(ETimeMode TimeModeIn);
+	void SetSimulatedStepsPerSecond(int32 SimulatedStepsPerSecondIn);
+	ETimeMode GetTimeMode() const { return TimeMode; }
+	double GetMaxWallClockTimeStep() const { return MaxWallClockTimeStep; }
+	int32 GetSimulatedStepsPerSecond() const { return SimulatedStepsPerSecond; }
+	FTempoCoreTimeSettingsChanged TempoCoreTimeSettingsChangedEvent;
+	FTempoCoreRenderingSettingsChanged TempoCoreRenderingSettingsChanged;
+
+	// Server Settings.
+	int32 GetServerPort() const { return ServerPort; }
+	EServerCompressionLevel GetServerCompressionLevel() const { return ServerCompressionLevel; }
+	int32 GetMaxEventProcessingTime() const { return MaxEventProcessingTimeMicroSeconds; }
+	int32 GetMaxEventWaitTime() const { return MaxEventWaitTimeNanoSeconds; }
+
+	// Packaging Settings.
+	bool GetAssignLevelsToIndividualChunks() const { return bAssignLevelsToIndividualChunks; }
+
+	// Rendering Settings.
+	bool GetRenderMainViewport() const { return bRenderMainViewport; }
+	void SetRenderMainViewport(bool bInRenderMainViewport);
+
+	// Control Settings.
+	EControlMode GetDefaultControlMode() const { return DefaultControlMode; }
+
+#if WITH_EDITOR
+	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
+#endif
+
+#if WITH_EDITORONLY_DATA
+	static FName GetServerPortMemberName() { return GET_MEMBER_NAME_CHECKED(UTempoCoreSettings, ServerPort); }
+	static FName GetServerCompressionLevelMemberName() { return GET_MEMBER_NAME_CHECKED(UTempoCoreSettings, ServerCompressionLevel); }
+#endif
+	
+private:
+	UPROPERTY(EditAnywhere, Config, Category="Time")
+	ETimeMode TimeMode = ETimeMode::WallClock;
+
+	// The number of evenly-spaced steps per simulated second that will be executed in FixedStep time mode.
+	UPROPERTY(EditAnywhere, Config, Category="Time|FixedStep", meta=(ClampMin=1, UIMin=1, UIMax=100))
+	int32 SimulatedStepsPerSecond = 10;
+
+	// The largest time step allowed in WallClock time mode. No limit if 0.0. Note that setting this to non-zero violates 
+	// WallClock time mode's guarantee of strictly advancing along with wall clock at the step that would have exceeded the max.
+	UPROPERTY(EditAnywhere, Config, Category="Time|WallClock", meta=(ClampMin=0.0, UIMin=0.0, UIMax=1.0))
+	double MaxWallClockTimeStep = 0.0;
+
+	// The port number the Tempo gRPC server listens on.
+	UPROPERTY(EditAnywhere, Config, Category="Server", meta=(ClampMin=1024, ClampMax=65535, UIMin=1024, UIMax=65535))
+	int32 ServerPort = 10001;
+
+	// The default compression level to use for Tempo server messages. When the client is on the same machine no
+	// compression is fastest. Otherwise, compression may help reduce network bandwidth.
+	UPROPERTY(EditAnywhere, Config, Category="Server")
+	EServerCompressionLevel ServerCompressionLevel = EServerCompressionLevel::None;
+
+	// We will spend as much as this amount of time (in microseconds) processing events each Tick.
+	// Except in FixedStep mode, where we process all received events every Tick.
+	UPROPERTY(EditAnywhere, Config, Category="Server|Advanced", meta=(ClampMin=1, ClampMax=10000, UIMin=1, UIMax=10000))
+	int32 MaxEventProcessingTimeMicroSeconds = 1000;
+
+	// We will wait as much as this amount of time (in nanoseconds) for an event to arrive each time we check for an event.
+	UPROPERTY(EditAnywhere, Config, Category="Server|Advanced", meta=(ClampMin=1, ClampMax=10000, UIMin=1, UIMax=10000))
+	int32 MaxEventWaitTimeNanoSeconds = 1000;
+
+	// If true, each level will be assigned to its own chunk during packaging.
+	// **NOTE** Requires enabling project packaging settings UsePakFile and GenerateChunks.
+	UPROPERTY(EditAnywhere, Config, Category="Packaging")
+	bool bAssignLevelsToIndividualChunks = false;
+
+	// Whether to render the main viewport (or not, saving performance).
+	UPROPERTY(EditAnywhere, Config, Category="Rendering")
+	bool bRenderMainViewport;
+
+	// The default control mode to use.
+	UPROPERTY(EditAnywhere, Config, Category="Control")
+	EControlMode DefaultControlMode = EControlMode::None;
+};

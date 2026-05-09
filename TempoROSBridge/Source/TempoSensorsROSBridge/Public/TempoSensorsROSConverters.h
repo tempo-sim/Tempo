@@ -11,11 +11,11 @@
 #include "sensor_msgs/msg/camera_info.hpp"
 
 #include "TempoSensors/Sensors.grpc.pb.h"
-#include "TempoCamera/Camera.pb.h"
+#include "TempoSensors/Camera.pb.h"
 
-DEFINE_TEMPOROS_MESSAGE_TYPE_TRAITS(TempoCamera::ColorImage)
-DEFINE_TEMPOROS_MESSAGE_TYPE_TRAITS(TempoCamera::DepthImage)
-DEFINE_TEMPOROS_MESSAGE_TYPE_TRAITS(TempoCamera::LabelImage)
+DEFINE_TEMPOROS_MESSAGE_TYPE_TRAITS(TempoSensors::ColorImage)
+DEFINE_TEMPOROS_MESSAGE_TYPE_TRAITS(TempoSensors::DepthImage)
+DEFINE_TEMPOROS_MESSAGE_TYPE_TRAITS(TempoSensors::LabelImage)
 DEFINE_TEMPOROS_MESSAGE_TYPE_TRAITS(FTempoCameraInfo)
 
 template <>
@@ -85,19 +85,19 @@ struct TImplicitToROSConverter<FTempoGetAvailableSensors>
 };
 
 template <>
-struct TImplicitToROSConverter<TempoCamera::ColorImage>: TToROSConverter<sensor_msgs::msg::Image, TempoCamera::ColorImage>
+struct TImplicitToROSConverter<TempoSensors::ColorImage>: TToROSConverter<sensor_msgs::msg::Image, TempoSensors::ColorImage>
 {
 	static ToType Convert(const FromType& TempoValue)
 	{
 		ToType ToValue;
 		switch (TempoValue.encoding())
 		{
-			case TempoCamera::BGR8:
+			case TempoSensors::BGR8:
 			{
 				ToValue.encoding = "bgr8";
 				break;
 			}
-			case TempoCamera::RGB8:
+			case TempoSensors::RGB8:
 			default:
 			{
 				ToValue.encoding = "rgb8";
@@ -116,7 +116,7 @@ struct TImplicitToROSConverter<TempoCamera::ColorImage>: TToROSConverter<sensor_
 };
 
 template <>
-struct TImplicitToROSConverter<TempoCamera::DepthImage>: TToROSConverter<sensor_msgs::msg::Image, TempoCamera::DepthImage>
+struct TImplicitToROSConverter<TempoSensors::DepthImage>: TToROSConverter<sensor_msgs::msg::Image, TempoSensors::DepthImage>
 {
 	static ToType Convert(const FromType& TempoValue)
 	{
@@ -135,7 +135,7 @@ struct TImplicitToROSConverter<TempoCamera::DepthImage>: TToROSConverter<sensor_
 };
 
 template <>
-struct TImplicitToROSConverter<TempoCamera::LabelImage>: TToROSConverter<sensor_msgs::msg::Image, TempoCamera::LabelImage>
+struct TImplicitToROSConverter<TempoSensors::LabelImage>: TToROSConverter<sensor_msgs::msg::Image, TempoSensors::LabelImage>
 {
 	static ToType Convert(const FromType& TempoValue)
 	{

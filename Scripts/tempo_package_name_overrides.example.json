@@ -1,0 +1,10 @@
+{
+  "Camera.proto": "TempoCamera",
+  "Lidar.proto": "TempoLidar",
+  "Labels.proto": "TempoLabels",
+  "Common.proto": "TempoSensorsShared",
+  "Time.proto": "TempoTime",
+  "Empty.proto": "TempoScripting",
+  "Geometry.proto": "TempoScripting",
+  "MapQueries.proto": "TempoMapQuery"
+}

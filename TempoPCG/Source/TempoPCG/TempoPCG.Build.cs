@@ -21,7 +21,7 @@ public class TempoPCG : ModuleRules
                 "PCG",
                 "Slate",
                 "SlateCore",
-                "TempoCoreShared"
+                "TempoCore"
             }
         );
     }

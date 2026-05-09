@@ -25,7 +25,7 @@
 			"LoadingPhase": "Default"
 		},
 		{
-			"Name": "TempoScriptingROSBridge",
+			"Name": "TempoServiceROSBridge",
 			"Type": "Runtime",
 			"LoadingPhase": "Default"
 		},

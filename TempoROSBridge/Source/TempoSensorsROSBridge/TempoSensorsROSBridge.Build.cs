@@ -24,14 +24,11 @@ public class TempoSensorsROSBridge : ModuleRules
                 "Slate",
                 "SlateCore",
                 // Tempo
-                "TempoCamera",
                 "TempoSensors",
-                "TempoSensorsShared",
-                "TempoScripting",
+                "TempoCore",
                 "TempoROS",
                 "rclcpp",
                 "TempoROSBridgeShared",
-                "TempoCoreShared",
             }
         );
         
