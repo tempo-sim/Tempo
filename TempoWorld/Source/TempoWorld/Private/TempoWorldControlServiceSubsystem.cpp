@@ -901,6 +901,38 @@ void GetObjectProperties(const UObject* Object, GetPropertiesResponse& Response)
 			}
 			Type = FString::Printf(TEXT("array<%s>"), *InnerType);
 		}
+		else if (const FMapProperty* MapProperty = CastField<FMapProperty>(Property))
+		{
+			FString KeyType = TEXT("unsupported");
+			FString ValueType = TEXT("unsupported");
+			// Get key and value types (even if the map is empty)
+			GetPropertyTypeAndValue(nullptr, MapProperty->KeyProp, KeyType, nullptr);
+			GetPropertyTypeAndValue(nullptr, MapProperty->ValueProp, ValueType, nullptr);
+			if (Value)
+			{
+				*Value = TEXT("{");
+				if (KeyType != TEXT("unsupported") && ValueType != TEXT("unsupported"))
+				{
+					FScriptMapHelper MapHelper{ MapProperty, Property->ContainerPtrToValuePtr<void>(Container) };
+					for (int32 I = 0; I < MapHelper.GetMaxIndex(); ++I)
+					{
+						if (!MapHelper.IsValidIndex(I))
+						{
+							continue;
+						}
+						FString Unused; // Key/value types are uniform, and we already know them.
+						FString KeyValue;
+						FString ValueValue;
+						GetPropertyTypeAndValue(MapHelper.GetKeyPtr(I), MapProperty->KeyProp, Unused, &KeyValue);
+						GetPropertyTypeAndValue(MapHelper.GetValuePtr(I), MapProperty->ValueProp, Unused, &ValueValue);
+						Value->Appendf(TEXT("%s: %s, "), *KeyValue, *ValueValue);
+					}
+					Value->RemoveFromEnd(TEXT(", "));
+				}
+				Value->Append(TEXT("}"));
+			}
+			Type = FString::Printf(TEXT("map<%s,%s>"), *KeyType, *ValueType);
+		}
 		else
 		{
 			Type = TEXT("unsupported");
@@ -992,9 +1024,18 @@ void UTempoWorldControlServiceSubsystem::GetComponentProperties(const GetCompone
 
 FString SplitPropertyName(FString& PropertyName)
 {
+	// If a ']' appears before any '[', we are inside a bracket scope (e.g. parsing the contents
+	// of MyMap[...]) and only ']' should terminate the segment - '.' inside the brackets is part
+	// of the key (relevant for map keys containing dots, like FString or FName keys).
+	int32 OpenBracketIdx = INDEX_NONE;
+	int32 CloseBracketIdx = INDEX_NONE;
+	PropertyName.FindChar('[', OpenBracketIdx);
+	PropertyName.FindChar(']', CloseBracketIdx);
+	const bool bInBracket = CloseBracketIdx != INDEX_NONE && (OpenBracketIdx == INDEX_NONE || CloseBracketIdx < OpenBracketIdx);
+
 	for (int32 CharIdx = 0; CharIdx < PropertyName.Len(); ++CharIdx)
 	{
-		if (PropertyName[CharIdx] == '.' || PropertyName[CharIdx] == '[')
+		if (!bInBracket && (PropertyName[CharIdx] == '.' || PropertyName[CharIdx] == '['))
 		{
 			// Chop everything before
 			const FString FirstPropertyName = PropertyName.LeftChop(PropertyName.Len() - CharIdx);
@@ -1038,9 +1079,9 @@ grpc::Status GetPropertyForRequest(const UObject* Object, const RequestType& Req
 		return grpc::Status(grpc::FAILED_PRECONDITION, "Property not found");
 	}
 
-	if (!InnerPropertyName.IsEmpty() && !(CastField<FStructProperty>(Property) || CastField<FArrayProperty>(Property)))
+	if (!InnerPropertyName.IsEmpty() && !(CastField<FStructProperty>(Property) || CastField<FArrayProperty>(Property) || CastField<FMapProperty>(Property)))
 	{
-		return grpc::Status(grpc::FAILED_PRECONDITION, "Inner properties can only be specified on structs and arrays");
+		return grpc::Status(grpc::FAILED_PRECONDITION, "Inner properties can only be specified on structs, arrays, and maps");
 	}
 
 	return grpc::Status_OK;
@@ -1175,8 +1216,40 @@ grpc::Status SetSinglePropertyInContainer(void* Container, FProperty* Property, 
 		{
 			ArrayHelper.InsertValues(ArrayHelper.Num(), 1);
 		}
-		
+
 		return SetSinglePropertyInContainer<PropertyType, ValueType>(ArrayHelper.GetRawPtr(ElementIndex), ArrayProperty->Inner, InnerPropertyName, Value);
+	}
+	if (const FMapProperty* MapProperty = CastField<FMapProperty>(Property))
+	{
+		if (PropertyName.IsEmpty())
+		{
+			return grpc::Status(grpc::FAILED_PRECONDITION, "Map key must be specified");
+		}
+
+		FScriptMapHelper MapHelper{ MapProperty, ValuePtr };
+		FProperty* KeyProp = MapProperty->KeyProp;
+
+		// Parse the requested key string into a temporary instance of the key type.
+		void* KeyTemp = FMemory_Alloca(KeyProp->GetSize());
+		KeyProp->InitializeValue(KeyTemp);
+		const TCHAR* ParseResult = KeyProp->ImportText_Direct(*FirstPropertyName, KeyTemp, nullptr, PPF_None);
+		if (ParseResult == nullptr)
+		{
+			KeyProp->DestroyValue(KeyTemp);
+			return grpc::Status(grpc::FAILED_PRECONDITION, "Failed to parse map key " + std::string(TCHAR_TO_UTF8(*FirstPropertyName)));
+		}
+
+		int32 PairIndex = MapHelper.FindMapIndexWithKey(KeyTemp);
+		if (PairIndex == INDEX_NONE)
+		{
+			PairIndex = MapHelper.AddDefaultValue_Invalid_NeedsRehash();
+			KeyProp->CopyCompleteValue(MapHelper.GetKeyPtr(PairIndex), KeyTemp);
+			MapHelper.Rehash();
+		}
+
+		KeyProp->DestroyValue(KeyTemp);
+
+		return SetSinglePropertyInContainer<PropertyType, ValueType>(MapHelper.GetValuePtr(PairIndex), MapProperty->ValueProp, InnerPropertyName, Value);
 	}
 
 	if (!InnerPropertyName.IsEmpty())
