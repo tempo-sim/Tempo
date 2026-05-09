@@ -1,11 +1,11 @@
 [package]
-name = "tempo_mcp"
+name = "world_playground"
 version = "0.1.0"
 edition = "2021"
 
 [[bin]]
-name = "tempo_mcp"
-path = "src/tempo_mcp.rs"
+name = "world_playground"
+path = "src/world_playground.rs"
 
 [dependencies]
 tempo-sim = { path = "../../../TempoCore/Content/Rust/API" }

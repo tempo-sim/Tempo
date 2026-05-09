@@ -1,8 +1,8 @@
 // Copyright Tempo Simulation, LLC. All Rights Reserved
 //
-// Tempo C++ TempoMCP example. Looks up an actor by name and prints its
+// Tempo C++ World Playground example. Looks up an actor by name and prints its
 // transform and bounds. Logging only. Mirrors the Rust
-// ExampleClients/Rust/TempoMCP in spirit.
+// ExampleClients/Rust/WorldPlayground in spirit.
 
 #include <cstdio>
 #include <cstdlib>
@@ -18,17 +18,17 @@ int main(int argc, char** argv) {
     const std::string actor_name = (argc >= 4) ? argv[3] : "Vehicle";
 
     tempo::set_server(host, static_cast<uint16_t>(port));
-    std::printf("[TempoMCP] connecting to %s:%d\n", host, port);
+    std::printf("[WorldPlayground] connecting to %s:%d\n", host, port);
 
     auto state = tw::get_current_actor_state(actor_name, /*include_hidden_components=*/false);
     if (!state) {
-        std::fprintf(stderr, "[TempoMCP] get_current_actor_state(%s) failed: %s\n",
+        std::fprintf(stderr, "[WorldPlayground] get_current_actor_state(%s) failed: %s\n",
                      actor_name.c_str(), state.error().what().c_str());
         return 1;
     }
 
     const auto& s = state.value();
-    std::printf("[TempoMCP] actor %s @ t=%.3f\n", s.name().c_str(), s.timestamp_s());
+    std::printf("[WorldPlayground] actor %s @ t=%.3f\n", s.name().c_str(), s.timestamp_s());
     if (s.has_transform()) {
         const auto& t = s.transform();
         std::printf("  transform: location=(%.2f, %.2f, %.2f)\n",

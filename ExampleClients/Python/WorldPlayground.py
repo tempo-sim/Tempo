@@ -708,7 +708,7 @@ TOP_LEVEL_ACTIONS = [
 
 
 async def main():
-    parser = argparse.ArgumentParser(description="TempoWorld Interactive CLI")
+    parser = argparse.ArgumentParser(description="World Playground - interactive TempoWorld client")
     parser.add_argument('--ip', required=False, help="IP address of machine where Tempo is running", default="0.0.0.0")
     parser.add_argument('--port', required=False, help="Port Tempo gRPC server is using", default=10001)
     args = parser.parse_args()
@@ -716,7 +716,7 @@ async def main():
     if args.ip != "0.0.0.0" or args.port != 10001:
         tempo.set_server(address=args.ip, port=args.port)
 
-    print("\n=== TempoWorld Interactive Client ===")
+    print("\n=== World Playground ===")
     print("Control actors, components, and properties at runtime.\n")
 
     while True:

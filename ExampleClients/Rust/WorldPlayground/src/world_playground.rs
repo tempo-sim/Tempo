@@ -1,6 +1,6 @@
 // Copyright Tempo Simulation, LLC. All Rights Reserved
 
-//! TempoWorld interactive client (Rust port of TempoMCP.py).
+//! World Playground - interactive TempoWorld client (Rust port of WorldPlayground.py).
 //!
 //! Spawn/destroy actors and components, set properties (including drilling
 //! into nested struct/array values).
@@ -797,7 +797,7 @@ async fn main() {
         set_server_async(&args.ip, args.port).await;
     }
 
-    println!("\n=== TempoWorld Interactive Client ===");
+    println!("\n=== World Playground ===");
     println!("Control actors, components, and properties at runtime.\n");
 
     let actions = vec![
