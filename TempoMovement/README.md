@@ -14,7 +14,7 @@ tm.command_vehicle(vehicle_name="MyVehicle", acceleration=0.5, steering=0.0) # A
 TempoMovement also supports controlling pawns, using Unreal's navigation system. You can control a simulated Pawn (like a humanoid Character). For example:
 ```
 import tempo.tempo_movement as tm
-import TempoScripting.Geometry_pb2 as Geometry
+import TempoCore.Geometry_pb2 as Geometry
 
 location = Geometry.vector()
 location.x = -10

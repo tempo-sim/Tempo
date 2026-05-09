@@ -112,6 +112,29 @@ And update Build.cs module dependencies:
 
 CoreRedirects do not help with C++ source — only assets.
 
+### 5. Server-related setting renames
+
+The "Scripting" prefix was dropped from server-related types and settings:
+
+| v1 | v2 |
+|---|---|
+| `UTempoCoreSettings::ScriptingPort` | `UTempoCoreSettings::ServerPort` |
+| `UTempoCoreSettings::ScriptingCompressionLevel` | `UTempoCoreSettings::ServerCompressionLevel` |
+| `EScriptingCompressionLevel` | `EServerCompressionLevel` |
+| `-ScriptingPort=` command line argument | `-ServerPort=` |
+
+`+PropertyRedirects` and `+EnumRedirects` in `TempoCore/Config/DefaultTempoCore.ini` cover the saved-setting and asset cases, so existing user `Config/DefaultPlugins.ini` values and Blueprint references resolve automatically. The CLI argument is **not** redirected — update launch scripts that still pass `-ScriptingPort=` to use `-ServerPort=` instead.
+
+If you have C++ in your own project that calls these accessors, update them:
+
+```diff
+- GetDefault<UTempoCoreSettings>()->GetScriptingPort()
++ GetDefault<UTempoCoreSettings>()->GetServerPort()
+
+- GetDefault<UTempoCoreSettings>()->GetScriptingCompressionLevel()
++ GetDefault<UTempoCoreSettings>()->GetServerCompressionLevel()
+```
+
 ## Proto package overrides reference
 
 The override file (`<YourProject>/Config/tempo_package_name_overrides.json`) maps proto basenames to the virtual module name they should appear as in user-facing artifacts:

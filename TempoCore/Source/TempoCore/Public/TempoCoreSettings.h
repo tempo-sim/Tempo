@@ -39,9 +39,9 @@ public:
 	FTempoCoreTimeSettingsChanged TempoCoreTimeSettingsChangedEvent;
 	FTempoCoreRenderingSettingsChanged TempoCoreRenderingSettingsChanged;
 
-	// Scripting Settings.
-	int32 GetScriptingPort() const { return ScriptingPort; }
-	EScriptingCompressionLevel GetScriptingCompressionLevel() const { return ScriptingCompressionLevel; }
+	// Server Settings.
+	int32 GetServerPort() const { return ServerPort; }
+	EServerCompressionLevel GetServerCompressionLevel() const { return ServerCompressionLevel; }
 	int32 GetMaxEventProcessingTime() const { return MaxEventProcessingTimeMicroSeconds; }
 	int32 GetMaxEventWaitTime() const { return MaxEventWaitTimeNanoSeconds; }
 
@@ -60,8 +60,8 @@ public:
 #endif
 
 #if WITH_EDITORONLY_DATA
-	static FName GetScriptingPortMemberName() { return GET_MEMBER_NAME_CHECKED(UTempoCoreSettings, ScriptingPort); }
-	static FName GetScriptingCompressionLevelMemberName() { return GET_MEMBER_NAME_CHECKED(UTempoCoreSettings, ScriptingCompressionLevel); }
+	static FName GetServerPortMemberName() { return GET_MEMBER_NAME_CHECKED(UTempoCoreSettings, ServerPort); }
+	static FName GetServerCompressionLevelMemberName() { return GET_MEMBER_NAME_CHECKED(UTempoCoreSettings, ServerCompressionLevel); }
 #endif
 	
 private:
@@ -77,22 +77,22 @@ private:
 	UPROPERTY(EditAnywhere, Config, Category="Time|WallClock", meta=(ClampMin=0.0, UIMin=0.0, UIMax=1.0))
 	double MaxWallClockTimeStep = 0.0;
 
-	// The port number to listen for scripting connections on.
-	UPROPERTY(EditAnywhere, Config, Category="Scripting", meta=(ClampMin=1024, ClampMax=65535, UIMin=1024, UIMax=65535))
-	int32 ScriptingPort = 10001;
+	// The port number the Tempo gRPC server listens on.
+	UPROPERTY(EditAnywhere, Config, Category="Server", meta=(ClampMin=1024, ClampMax=65535, UIMin=1024, UIMax=65535))
+	int32 ServerPort = 10001;
 
-	// The default compression level to use for Tempo Scripting messages. When the client is on the same machine no
+	// The default compression level to use for Tempo server messages. When the client is on the same machine no
 	// compression is fastest. Otherwise, compression may help reduce network bandwidth.
-	UPROPERTY(EditAnywhere, Config, Category="Scripting")
-	EScriptingCompressionLevel ScriptingCompressionLevel = EScriptingCompressionLevel::None;
-	
+	UPROPERTY(EditAnywhere, Config, Category="Server")
+	EServerCompressionLevel ServerCompressionLevel = EServerCompressionLevel::None;
+
 	// We will spend as much as this amount of time (in microseconds) processing events each Tick.
 	// Except in FixedStep mode, where we process all received events every Tick.
-	UPROPERTY(EditAnywhere, Config, Category="Scripting|Advanced", meta=(ClampMin=1, ClampMax=10000, UIMin=1, UIMax=10000))
+	UPROPERTY(EditAnywhere, Config, Category="Server|Advanced", meta=(ClampMin=1, ClampMax=10000, UIMin=1, UIMax=10000))
 	int32 MaxEventProcessingTimeMicroSeconds = 1000;
 
 	// We will wait as much as this amount of time (in nanoseconds) for an event to arrive each time we check for an event.
-	UPROPERTY(EditAnywhere, Config, Category="Scripting|Advanced", meta=(ClampMin=1, ClampMax=10000, UIMin=1, UIMax=10000))
+	UPROPERTY(EditAnywhere, Config, Category="Server|Advanced", meta=(ClampMin=1, ClampMax=10000, UIMin=1, UIMax=10000))
 	int32 MaxEventWaitTimeNanoSeconds = 1000;
 
 	// If true, each level will be assigned to its own chunk during packaging.

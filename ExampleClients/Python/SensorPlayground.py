@@ -14,7 +14,7 @@ import tempfile
 import tempo
 import tempo.tempo_sensors as ts
 import TempoSensors.Sensors_pb2 as Sensors
-import TempoScripting.Geometry_pb2 as Geometry
+import TempoCore.Geometry_pb2 as Geometry
 import tempo.tempo_world as tw
 import tempo.TempoImageUtils as tiu
 import tempo.TempoLidarUtils as tlu
@@ -566,7 +566,7 @@ TOP_LEVEL_ACTIONS = [
 async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--ip', required=False, help="IP address of machine where Tempo is running", default="0.0.0.0")
-    parser.add_argument('--port', required=False, help="Port Tempo scripting server is using", default=10001)
+    parser.add_argument('--port', required=False, help="Port Tempo gRPC server is using", default=10001)
     parser.add_argument('--display-scale', required=False, type=float, default=0.5,
                         help="Scale factor for displayed camera images (default: 0.5)")
     args = parser.parse_args()

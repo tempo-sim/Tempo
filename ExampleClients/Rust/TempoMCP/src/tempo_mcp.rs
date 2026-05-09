@@ -16,7 +16,7 @@ use tempo_sim::{set_server_async, tempo_world};
 struct Args {
     #[arg(long, default_value = "0.0.0.0", help = "IP address of machine where Tempo is running")]
     ip: String,
-    #[arg(long, default_value_t = 10001u16, help = "Port Tempo scripting server is using")]
+    #[arg(long, default_value_t = 10001u16, help = "Port Tempo gRPC server is using")]
     port: u16,
 }
 

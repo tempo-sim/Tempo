@@ -16,10 +16,10 @@ public:
 	virtual void ShutdownModule() override;
 
 private:
-	// gRPC scripting server. TempoCore is the unique owner of the gRPC/protobuf
-	// dllexport boundary in v2 (rolled in from the former TempoScripting module),
-	// so it owns the server lifetime. See TempoCore.Build.cs for the matching
-	// PublicDefinitions and bCanHotReload=false explanation.
+	// Tempo gRPC server. TempoCore is the unique owner of the gRPC/protobuf
+	// dllexport boundary in v2, so it owns the server lifetime. See
+	// TempoCore.Build.cs for the matching PublicDefinitions and
+	// bCanHotReload=false explanation.
 	TUniquePtr<FTempoServer> Server;
 
 	friend FTempoServer;

@@ -18,7 +18,7 @@ enum class ETimeMode: uint8
 ENUM_RANGE_BY_COUNT(ETimeMode, ETimeMode::Max);
 
 UENUM(Blueprintable, BlueprintType)
-enum class EScriptingCompressionLevel: uint8
+enum class EServerCompressionLevel: uint8
 {
 	None = 0,
 	Low = 1,

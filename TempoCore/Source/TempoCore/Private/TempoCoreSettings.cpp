@@ -19,10 +19,10 @@ void UTempoCoreSettings::PostInitProperties()
 {
 	Super::PostInitProperties();
 
-	int32 CommandLineScriptingPort;
-	if (FParse::Value(FCommandLine::Get(), TEXT("ScriptingPort="), CommandLineScriptingPort))
+	int32 CommandLineServerPort;
+	if (FParse::Value(FCommandLine::Get(), TEXT("ServerPort="), CommandLineServerPort))
 	{
-		ScriptingPort = CommandLineScriptingPort;
+		ServerPort = CommandLineServerPort;
 	}
 }
 

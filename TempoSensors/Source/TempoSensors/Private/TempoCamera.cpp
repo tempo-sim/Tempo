@@ -23,7 +23,7 @@
 
 // 5.6 only: GetLastAverageSceneLuminance lives on the renderer-private FSceneViewState — it was
 // not promoted to a virtual method on FSceneViewStateInterface until 5.7. Pull in ScenePrivate.h
-// (reachable via PrivateIncludePaths in TempoCamera.Build.cs) so we can downcast at the call site.
+// (reachable via PrivateIncludePaths in TempoSensors.Build.cs) so we can downcast at the call site.
 #if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 7
 #if PLATFORM_WINDOWS
 // An upstream include leaks the Win32 Interlocked* macros, which mangle
@@ -33,7 +33,18 @@
 #include "Windows/AllowWindowsPlatformAtomics.h"
 #include "Windows/HideWindowsPlatformAtomics.h"
 #endif
+// In 5.6 ScenePrivate.h transitively includes RayTracing/RayTracingScene.h, which declares
+// private members that TempoSceneCaptureComponent2D.cpp relies on accessing via a
+// `#define private public` hack. UBT combines this file and that one into the same Unity
+// translation unit; this file comes first alphabetically, so RayTracingScene.h gets parsed
+// here. Without mirroring the define, the class is parsed with real `private` — the later
+// hack in TempoSceneCaptureComponent2D.cpp is then a no-op because `#pragma once` skips the
+// re-include. Mirror the define so the first parse rewrites the class to all-public for the
+// whole TU. (In 5.7+ TempoCamera.cpp does not include ScenePrivate.h; the equivalent mirror
+// for SceneRendering.h lives in TempoMultiViewCapture.cpp.)
+#define private public
 #include "ScenePrivate.h"
+#undef private
 #endif
 
 // Windows headers define UpdateResource as a macro (UpdateResourceW/UpdateResourceA).

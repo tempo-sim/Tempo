@@ -7,7 +7,7 @@ import grpc
 
 import tempo
 import tempo.tempo_world as tw
-import TempoScripting.Geometry_pb2 as Geometry
+import TempoCore.Geometry_pb2 as Geometry
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import FuzzyWordCompleter
@@ -710,7 +710,7 @@ TOP_LEVEL_ACTIONS = [
 async def main():
     parser = argparse.ArgumentParser(description="TempoWorld Interactive CLI")
     parser.add_argument('--ip', required=False, help="IP address of machine where Tempo is running", default="0.0.0.0")
-    parser.add_argument('--port', required=False, help="Port Tempo scripting server is using", default=10001)
+    parser.add_argument('--port', required=False, help="Port Tempo gRPC server is using", default=10001)
     args = parser.parse_args()
 
     if args.ip != "0.0.0.0" or args.port != 10001:

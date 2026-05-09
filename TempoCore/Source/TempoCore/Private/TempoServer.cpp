@@ -17,7 +17,7 @@ FTempoServer::FTempoServer()
 	{
 		if (UTempoCoreUtils::IsGameWorld(World))
 		{
-			// Scripting has nothing to do with movie scene sequences, but this event fires in exactly the right conditions:
+			// The server has nothing to do with movie scene sequences, but this event fires in exactly the right conditions:
 			// After world time has been updated for the current frame, before Actor ticks have begun, and even when paused.
 			OnMovieSceneSequenceTickHandle = World->AddMovieSceneSequenceTickHandler(
 				FOnMovieSceneSequenceTick::FDelegate::CreateLambda([this](float){
@@ -41,8 +41,8 @@ FTempoServer::FTempoServer()
 #if WITH_EDITOR
 	GetMutableDefault<UTempoCoreSettings>()->OnSettingChanged().AddLambda([this](UObject* Object, struct FPropertyChangedEvent& Event)
 	{
-		if (Event.Property->GetName() == UTempoCoreSettings::GetScriptingPortMemberName() ||
-			Event.Property->GetName() == UTempoCoreSettings::GetScriptingCompressionLevelMemberName())
+		if (Event.Property->GetName() == UTempoCoreSettings::GetServerPortMemberName() ||
+			Event.Property->GetName() == UTempoCoreSettings::GetServerCompressionLevelMemberName())
 		{
 			Reinitialize();
 		}
@@ -65,23 +65,23 @@ FTempoServer& FTempoServer::Get()
 	return *TempoCoreModule->Server.Get();
 }
 
-grpc_compression_level CompressionLevelTogRPC(EScriptingCompressionLevel TempoCompressionLevel)
+grpc_compression_level CompressionLevelTogRPC(EServerCompressionLevel TempoCompressionLevel)
 {
 	switch (TempoCompressionLevel)
 	{
-	case EScriptingCompressionLevel::None:
+	case EServerCompressionLevel::None:
 		{
 			return GRPC_COMPRESS_LEVEL_NONE;
 		}
-	case EScriptingCompressionLevel::Low:
+	case EServerCompressionLevel::Low:
 		{
 			return GRPC_COMPRESS_LEVEL_LOW;
 		}
-	case EScriptingCompressionLevel::Med:
+	case EServerCompressionLevel::Med:
 		{
 			return GRPC_COMPRESS_LEVEL_MED;
 		}
-	case EScriptingCompressionLevel::High:
+	case EServerCompressionLevel::High:
 		{
 			return GRPC_COMPRESS_LEVEL_HIGH;
 		}
@@ -95,7 +95,7 @@ grpc_compression_level CompressionLevelTogRPC(EScriptingCompressionLevel TempoCo
 
 void FTempoServer::Initialize()
 {
-	TArray<UObject*> TempoScriptableObjects;
+	TArray<UObject*> ServiceProviderObjects;
 	for (TObjectIterator<UObject> ObjectIt(RF_NoFlags); ObjectIt; ++ObjectIt)
 	{
 		UObject* Object = *ObjectIt;
@@ -108,14 +108,14 @@ void FTempoServer::Initialize()
 		{
 			// Don't call RegisterServices yet - store it for later so we can only call RegisterServices
 			// on the most derived instances (without an O(n^2) iteration over all UObjects)
-			TempoScriptableObjects.Add(Object);
+			ServiceProviderObjects.Add(Object);
 		}
 	}
 	
-	for (UObject* Object : TempoScriptableObjects)
+	for (UObject* Object : ServiceProviderObjects)
 	{
 		bool bMostDerived = true;
-		for (const UObject* Other : TempoScriptableObjects)
+		for (const UObject* Other : ServiceProviderObjects)
 		{
 			if (Other->GetClass() != Object->GetClass() && Other->IsA(Object->GetClass()))
 			{
@@ -128,7 +128,7 @@ void FTempoServer::Initialize()
 			Cast<ITempoServiceProvider>(Object)->RegisterServices(*this);
 		}
 	}
-	const int32 Port = GetDefault<UTempoCoreSettings>()->GetScriptingPort();
+	const int32 Port = GetDefault<UTempoCoreSettings>()->GetServerPort();
 	const FString ServerAddress = FString::Printf(TEXT("0.0.0.0:%d"), Port);
 	grpc::ServerBuilder Builder;
 	Builder.AddListeningPort(TCHAR_TO_UTF8(*ServerAddress), grpc::InsecureServerCredentials());
@@ -137,14 +137,14 @@ void FTempoServer::Initialize()
 		Builder.RegisterService(Service.Value.Get());
 	}
 
-	Builder.SetDefaultCompressionLevel(CompressionLevelTogRPC(GetDefault<UTempoCoreSettings>()->GetScriptingCompressionLevel()));
+	Builder.SetDefaultCompressionLevel(CompressionLevelTogRPC(GetDefault<UTempoCoreSettings>()->GetServerCompressionLevel()));
 
 	CompletionQueue.Reset(Builder.AddCompletionQueue().release());
 	Server.Reset(Builder.BuildAndStart().release());
 
 	if (!Server.Get())
 	{
-		UE_LOG(LogTempoCore, Error, TEXT("Error while starting scripting server. Perhaps port %d was not available."), Port);
+		UE_LOG(LogTempoCore, Error, TEXT("Error while starting Tempo gRPC server. Perhaps port %d was not available."), Port);
 		return;
 	}
 	
