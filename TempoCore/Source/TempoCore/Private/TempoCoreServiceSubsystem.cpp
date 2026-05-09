@@ -18,9 +18,9 @@ using CurrentLevelResponse = TempoCore::CurrentLevelResponse;
 using SetMainViewportRenderEnabledRequest = TempoCore::SetMainViewportRenderEnabledRequest;
 using SetControlModeRequest = TempoCore::SetControlModeRequest;
 
-void UTempoCoreServiceSubsystem::RegisterScriptingServices(FTempoScriptingServer& ScriptingServer)
+void UTempoCoreServiceSubsystem::RegisterServices(FTempoServer& Server)
 {
-	ScriptingServer.RegisterService<TempoCoreService>(
+	Server.RegisterService<TempoCoreService>(
 		SimpleRequestHandler(&TempoCoreAsyncService::RequestLoadLevel, &UTempoCoreServiceSubsystem::LoadLevel),
 		SimpleRequestHandler(&TempoCoreAsyncService::RequestFinishLoadingLevel, &UTempoCoreServiceSubsystem::FinishLoadingLevel),
 		SimpleRequestHandler(&TempoCoreAsyncService::RequestGetCurrentLevelName, &UTempoCoreServiceSubsystem::GetCurrentLevelName),
@@ -34,24 +34,24 @@ void UTempoCoreServiceSubsystem::Initialize(FSubsystemCollectionBase& Collection
 {
 	Super::Initialize(Collection);
 
-	FTempoScriptingServer::Get().ActivateService<TempoCoreService>(this);
+	FTempoServer::Get().ActivateService<TempoCoreService>(this);
 }
 
 void UTempoCoreServiceSubsystem::Deinitialize()
 {
 	Super::Deinitialize();
 
-	FTempoScriptingServer::Get().DeactivateService<TempoCoreService>();
+	FTempoServer::Get().DeactivateService<TempoCoreService>();
 }
 
-void UTempoCoreServiceSubsystem::LoadLevel(const LoadLevelRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation)
+void UTempoCoreServiceSubsystem::LoadLevel(const LoadLevelRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation)
 {
 	if (Request.deferred())
 	{
 		const ATempoGameMode* TempoGameMode = Cast<ATempoGameMode>(UGameplayStatics::GetGameMode(this));
 		if (!TempoGameMode)
 		{
-			ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::NOT_FOUND, "Deferred level loading is only supported when using TempoGameMode"));
+			ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, "Deferred level loading is only supported when using TempoGameMode"));
 			return;
 		}
 		SetDeferBeginPlay(true);
@@ -62,7 +62,7 @@ void UTempoCoreServiceSubsystem::LoadLevel(const LoadLevelRequest& Request, cons
 		const ATempoGameMode* TempoGameMode = Cast<ATempoGameMode>(UGameplayStatics::GetGameMode(this));
 		if (!TempoGameMode)
 		{
-			ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::NOT_FOUND, "Starting paused is only supported when using TempoGameMode"));
+			ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, "Starting paused is only supported when using TempoGameMode"));
 			return;
 		}
 		SetStartPaused(true);
@@ -77,30 +77,30 @@ void UTempoCoreServiceSubsystem::OnLevelLoaded()
 {
 	if (PendingLevelLoad.IsSet())
 	{
-		PendingLevelLoad->ExecuteIfBound(TempoScripting::Empty(), grpc::Status_OK);
+		PendingLevelLoad->ExecuteIfBound(TempoCore::Empty(), grpc::Status_OK);
 	}
 }
 
-void UTempoCoreServiceSubsystem::FinishLoadingLevel(const TempoScripting::Empty& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation)
+void UTempoCoreServiceSubsystem::FinishLoadingLevel(const TempoCore::Empty& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation)
 {
 	ATempoGameMode* TempoGameMode = Cast<ATempoGameMode>(UGameplayStatics::GetGameMode(this));
 	if (!TempoGameMode)
 	{
-		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::NOT_FOUND, "Deferred level loading is only supported when using TempoGameMode"));
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, "Deferred level loading is only supported when using TempoGameMode"));
 		return;
 	}
 	if (!TempoGameMode->BeginPlayDeferred())
 	{
-		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "No deferred level load found"));
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "No deferred level load found"));
 		return;
 	}
 
 	SetDeferBeginPlay(false);
 	TempoGameMode->StartPlay();
-	ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status_OK);
+	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status_OK);
 }
 
-void UTempoCoreServiceSubsystem::GetCurrentLevelName(const TempoScripting::Empty& Request, const TResponseDelegate<CurrentLevelResponse>& ResponseContinuation)
+void UTempoCoreServiceSubsystem::GetCurrentLevelName(const TempoCore::Empty& Request, const TResponseDelegate<CurrentLevelResponse>& ResponseContinuation)
 {
 	const FString CurrentLevelName = UGameplayStatics::GetCurrentLevelName(this);
 
@@ -109,53 +109,53 @@ void UTempoCoreServiceSubsystem::GetCurrentLevelName(const TempoScripting::Empty
 	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
 }
 
-void UTempoCoreServiceSubsystem::Quit(const TempoScripting::Empty& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const
+void UTempoCoreServiceSubsystem::Quit(const TempoCore::Empty& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const
 {
 	RequestEngineExit(TEXT("TempoCore API received quit request"));
 
-	ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status_OK);
+	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status_OK);
 }
 
-void UTempoCoreServiceSubsystem::SetRenderMainViewportEnabled(const SetMainViewportRenderEnabledRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation)
+void UTempoCoreServiceSubsystem::SetRenderMainViewportEnabled(const SetMainViewportRenderEnabledRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation)
 {
 	if (UTempoCoreSettings* TempoCoreSettings = GetMutableDefault<UTempoCoreSettings>())
 	{
 		TempoCoreSettings->SetRenderMainViewport(Request.enabled());
-		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status_OK);
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status_OK);
 		return;
 	}
 
-	ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Could not find TempoCoreSettings"));
+	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Could not find TempoCoreSettings"));
 }
 
-void UTempoCoreServiceSubsystem::SetControlMode(const SetControlModeRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation)
+void UTempoCoreServiceSubsystem::SetControlMode(const SetControlModeRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation)
 {
 	const ATempoGameMode* TempoGameMode = Cast<ATempoGameMode>(UGameplayStatics::GetGameMode(this));
 	if (!TempoGameMode)
 	{
-		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::NOT_FOUND, "Setting control mode is only supported when using TempoGameMode"));
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, "Setting control mode is only supported when using TempoGameMode"));
 		return;
 	}
 
 	EControlMode ControlMode;
 	switch (Request.mode())
 	{
-	case TempoCore::NONE:
+	case TempoCore::CM_NONE:
 		{
 			ControlMode = EControlMode::None;
 			break;
 		}
-	case TempoCore::USER:
+	case TempoCore::CM_USER:
 		{
 			ControlMode = EControlMode::User;
 			break;
 		}
-	case TempoCore::OPEN_LOOP:
+	case TempoCore::CM_OPEN_LOOP:
 		{
 			ControlMode = EControlMode::OpenLoop;
 			break;
 		}
-	case TempoCore::CLOSED_LOOP:
+	case TempoCore::CM_CLOSED_LOOP:
 		{
 			ControlMode = EControlMode::ClosedLoop;
 			break;
@@ -164,16 +164,16 @@ void UTempoCoreServiceSubsystem::SetControlMode(const SetControlModeRequest& Req
 		{
 			UE_LOG(LogTempoCore, Error, TEXT("Unhandled control mode in UTempoCoreServiceSubsystem::SetControlMode"));
 			const FString ErrorMsg = FString::Printf(TEXT("Unhandled ControlMode: %d"), Request.mode());
-			ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::NOT_FOUND, TCHAR_TO_UTF8(*ErrorMsg)));
+			ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, TCHAR_TO_UTF8(*ErrorMsg)));
 			return;
 		}
 	}
 
 	if (FString ErrorMsg; !TempoGameMode->SetControlMode(ControlMode, ErrorMsg))
 	{
-		ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, TCHAR_TO_UTF8(*ErrorMsg)));
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, TCHAR_TO_UTF8(*ErrorMsg)));
 		return;
 	}
 
-	ResponseContinuation.ExecuteIfBound(TempoScripting::Empty(), grpc::Status_OK);
+	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status_OK);
 }

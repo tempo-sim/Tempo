@@ -2,15 +2,15 @@
 
 #pragma once
 
-#include "TempoScriptable.h"
-#include "TempoScriptingServer.h"
+#include "TempoServiceProvider.h"
+#include "TempoServer.h"
 #include "TempoSubsystems.h"
 
 #include "CoreMinimal.h"
 
 #include "TempoCoreServiceSubsystem.generated.h"
 
-namespace TempoScripting
+namespace TempoCore
 {
 	class Empty;
 }
@@ -24,24 +24,24 @@ namespace TempoCore
 }
 
 UCLASS()
-class TEMPOCORE_API UTempoCoreServiceSubsystem : public UTempoGameInstanceSubsystem, public ITempoScriptable
+class TEMPOCORE_API UTempoCoreServiceSubsystem : public UTempoGameInstanceSubsystem, public ITempoServiceProvider
 {
 	GENERATED_BODY()
 
 public:
-	virtual void RegisterScriptingServices(FTempoScriptingServer& ScriptingServer) override;
+	virtual void RegisterServices(FTempoServer& Server) override;
 
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 
 	virtual void Deinitialize() override;
 
-	void LoadLevel(const TempoCore::LoadLevelRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation);
+	void LoadLevel(const TempoCore::LoadLevelRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation);
 
-	void FinishLoadingLevel(const TempoScripting::Empty& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation);
+	void FinishLoadingLevel(const TempoCore::Empty& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation);
 
-	void GetCurrentLevelName(const TempoScripting::Empty& Request, const TResponseDelegate<TempoCore::CurrentLevelResponse>& ResponseContinuation);
+	void GetCurrentLevelName(const TempoCore::Empty& Request, const TResponseDelegate<TempoCore::CurrentLevelResponse>& ResponseContinuation);
 
-	void Quit(const TempoScripting::Empty& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation) const;
+	void Quit(const TempoCore::Empty& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const;
 
 	void SetDeferBeginPlay(bool bDeferBeginPlayIn) { bDeferBeginPlay = bDeferBeginPlayIn; }
 
@@ -53,12 +53,12 @@ public:
 
 	void OnLevelLoaded();
 
-	void SetRenderMainViewportEnabled(const TempoCore::SetMainViewportRenderEnabledRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation);
+	void SetRenderMainViewportEnabled(const TempoCore::SetMainViewportRenderEnabledRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation);
 
-	void SetControlMode(const TempoCore::SetControlModeRequest& Request, const TResponseDelegate<TempoScripting::Empty>& ResponseContinuation);
+	void SetControlMode(const TempoCore::SetControlModeRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation);
 
 protected:
-	TOptional<TResponseDelegate<TempoScripting::Empty>> PendingLevelLoad;
+	TOptional<TResponseDelegate<TempoCore::Empty>> PendingLevelLoad;
 
 	bool bDeferBeginPlay = false;
 

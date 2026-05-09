@@ -2,8 +2,8 @@
 
 #pragma once
 
-#include "TempoScriptable.h"
-#include "TempoScriptingServer.h"
+#include "TempoServiceProvider.h"
+#include "TempoServer.h"
 #include "TempoSubsystems.h"
 
 #include "CoreMinimal.h"
@@ -11,7 +11,7 @@
 
 #include "TempoWorldStateServiceSubsystem.generated.h"
 
-namespace TempoScripting
+namespace TempoCore
 {
 	class Empty;
 }
@@ -27,37 +27,37 @@ namespace TempoWorld
 	FORCEINLINE uint32 GetTypeHash(const ActorStateRequest& Request)
 	{
 		return GetTypeHash(FString::Printf(TEXT("%s"),
-			UTF8_TO_TCHAR(Request.actor_name().c_str())));
+			UTF8_TO_TCHAR(Request.actor().c_str())));
 	}
 
 	FORCEINLINE bool operator==(const ActorStateRequest& Left, const ActorStateRequest& Right)
 	{
-		return Left.actor_name() == Right.actor_name();
+		return Left.actor() == Right.actor();
 	}
 
 	FORCEINLINE uint32 GetTypeHash(const ActorStatesNearRequest& Request)
 	{
 		return GetTypeHash(FString::Printf(TEXT("%s/%f/%d"),
-			UTF8_TO_TCHAR(Request.near_actor_name().c_str()),
-			Request.search_radius(),
+			UTF8_TO_TCHAR(Request.near_actor().c_str()),
+			Request.search_radius_m(),
 			Request.include_static()));
 	}
 
 	FORCEINLINE bool operator==(const ActorStatesNearRequest& Left, const ActorStatesNearRequest& Right)
 	{
-		return Left.near_actor_name() == Right.near_actor_name() &&
-				Left.search_radius() == Right.search_radius() &&
+		return Left.near_actor() == Right.near_actor() &&
+				Left.search_radius_m() == Right.search_radius_m() &&
 					Left.include_static() == Right.include_static();
 	}
 }
 
 UCLASS()
-class TEMPOWORLD_API UTempoWorldStateServiceSubsystem : public UTempoTickableGameWorldSubsystem, public ITempoScriptable
+class TEMPOWORLD_API UTempoWorldStateServiceSubsystem : public UTempoTickableGameWorldSubsystem, public ITempoServiceProvider
 {
 	GENERATED_BODY()
 
 public:
-	virtual void RegisterScriptingServices(FTempoScriptingServer& ScriptingServer) override;
+	virtual void RegisterServices(FTempoServer& Server) override;
 
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 

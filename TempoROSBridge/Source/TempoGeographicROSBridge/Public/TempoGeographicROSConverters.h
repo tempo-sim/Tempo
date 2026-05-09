@@ -26,9 +26,9 @@ struct TFromROSConverter<tempo_geographic_ros_bridge::srv::SetDate::Request, Tem
 };
 
 template <>
-struct TToROSConverter<tempo_geographic_ros_bridge::srv::SetDate::Response, TempoScripting::Empty>
+struct TToROSConverter<tempo_geographic_ros_bridge::srv::SetDate::Response, TempoCore::Empty>
 {
-	static tempo_geographic_ros_bridge::srv::SetDate::Response Convert(const TempoScripting::Empty& TempoValue)
+	static tempo_geographic_ros_bridge::srv::SetDate::Response Convert(const TempoCore::Empty& TempoValue)
 	{
 		return tempo_geographic_ros_bridge::srv::SetDate::Response();
 	}
@@ -37,7 +37,7 @@ struct TToROSConverter<tempo_geographic_ros_bridge::srv::SetDate::Response, Temp
 struct FTempoSetDateService
 {
 	using Request = TempoGeographic::Date;
-	using Response = TempoScripting::Empty;
+	using Response = TempoCore::Empty;
 };
 
 template <>
@@ -61,9 +61,9 @@ struct TFromROSConverter<tempo_geographic_ros_bridge::srv::SetTimeOfDay::Request
 };
 
 template <>
-struct TToROSConverter<tempo_geographic_ros_bridge::srv::SetTimeOfDay::Response, TempoScripting::Empty>
+struct TToROSConverter<tempo_geographic_ros_bridge::srv::SetTimeOfDay::Response, TempoCore::Empty>
 {
-	static tempo_geographic_ros_bridge::srv::SetTimeOfDay::Response Convert(const TempoScripting::Empty& TempoValue)
+	static tempo_geographic_ros_bridge::srv::SetTimeOfDay::Response Convert(const TempoCore::Empty& TempoValue)
 	{
 		return tempo_geographic_ros_bridge::srv::SetTimeOfDay::Response();
 	}
@@ -72,7 +72,7 @@ struct TToROSConverter<tempo_geographic_ros_bridge::srv::SetTimeOfDay::Response,
 struct FTempoSetTimeOfDayService
 {
 	using Request = TempoGeographic::TimeOfDay;
-	using Response = TempoScripting::Empty;
+	using Response = TempoCore::Empty;
 };
 
 template <>
@@ -88,17 +88,17 @@ struct TFromROSConverter<tempo_geographic_ros_bridge::srv::SetGeographicReferenc
 	static TempoGeographic::GeographicCoordinate Convert(const tempo_geographic_ros_bridge::srv::SetGeographicReference::Request& ROSValue)
 	{
 		TempoGeographic::GeographicCoordinate TempoValue;
-		TempoValue.set_latitude(ROSValue.latitude);
-		TempoValue.set_longitude(ROSValue.longitude);
-		TempoValue.set_altitude(ROSValue.altitude);
+		TempoValue.set_latitude_deg(ROSValue.latitude);
+		TempoValue.set_longitude_deg(ROSValue.longitude);
+		TempoValue.set_altitude_m(ROSValue.altitude);
 		return TempoValue;
 	}
 };
 
 template <>
-struct TToROSConverter<tempo_geographic_ros_bridge::srv::SetGeographicReference::Response, TempoScripting::Empty>
+struct TToROSConverter<tempo_geographic_ros_bridge::srv::SetGeographicReference::Response, TempoCore::Empty>
 {
-	static tempo_geographic_ros_bridge::srv::SetGeographicReference::Response Convert(const TempoScripting::Empty& TempoValue)
+	static tempo_geographic_ros_bridge::srv::SetGeographicReference::Response Convert(const TempoCore::Empty& TempoValue)
 	{
 		return tempo_geographic_ros_bridge::srv::SetGeographicReference::Response();
 	}
@@ -107,7 +107,7 @@ struct TToROSConverter<tempo_geographic_ros_bridge::srv::SetGeographicReference:
 struct FTempoSetGeographicReferenceService
 {
 	using Request = TempoGeographic::GeographicCoordinate;
-	using Response = TempoScripting::Empty;
+	using Response = TempoCore::Empty;
 };
 
 template <>
@@ -129,9 +129,9 @@ struct TFromROSConverter<tempo_geographic_ros_bridge::srv::SetDayCycleRelativeRa
 };
 
 template <>
-struct TToROSConverter<tempo_geographic_ros_bridge::srv::SetDayCycleRelativeRate::Response, TempoScripting::Empty>
+struct TToROSConverter<tempo_geographic_ros_bridge::srv::SetDayCycleRelativeRate::Response, TempoCore::Empty>
 {
-	static tempo_geographic_ros_bridge::srv::SetDayCycleRelativeRate::Response Convert(const TempoScripting::Empty& TempoValue)
+	static tempo_geographic_ros_bridge::srv::SetDayCycleRelativeRate::Response Convert(const TempoCore::Empty& TempoValue)
 	{
 		return tempo_geographic_ros_bridge::srv::SetDayCycleRelativeRate::Response();
 	}
@@ -140,7 +140,7 @@ struct TToROSConverter<tempo_geographic_ros_bridge::srv::SetDayCycleRelativeRate
 struct FTempoSetDayCycleRateService
 {
 	using Request = TempoGeographic::DayCycleRateRequest;
-	using Response = TempoScripting::Empty;
+	using Response = TempoCore::Empty;
 };
 
 template <>
@@ -167,17 +167,17 @@ struct TToROSConverter<tempo_geographic_ros_bridge::srv::GetDateTime::Response, 
 };
 
 template <>
-struct TFromROSConverter<tempo_geographic_ros_bridge::srv::GetDateTime::Request, TempoScripting::Empty>
+struct TFromROSConverter<tempo_geographic_ros_bridge::srv::GetDateTime::Request, TempoCore::Empty>
 {
-	static TempoScripting::Empty Convert(const tempo_geographic_ros_bridge::srv::GetDateTime::Request& ROSValue)
+	static TempoCore::Empty Convert(const tempo_geographic_ros_bridge::srv::GetDateTime::Request& ROSValue)
 	{
-		return TempoScripting::Empty();
+		return TempoCore::Empty();
 	}
 };
 
 struct FTempoGetDateTimeService
 {
-	using Request = TempoScripting::Empty;
+	using Request = TempoCore::Empty;
 	using Response = TempoGeographic::DateTime;
 };
 

@@ -8,7 +8,7 @@
 
 #include "TempoROSBridgeUtils.h"
 
-#include "TempoScriptingROSConverters.h"
+#include "TempoServiceROSConverters.h"
 
 void UTempoTimeROSBridgeSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 {
@@ -20,10 +20,10 @@ void UTempoTimeROSBridgeSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	}
 
 	ROSNode = UTempoROSNode::Create("TempoTime", this);
-	BindScriptingServiceToROS<FTempoAdvanceStepsService>(ROSNode, "AdvanceSteps", this, &UTempoTimeROSBridgeSubsystem::AdvanceSteps);
-	BindScriptingServiceToROS<FTempoSetSimStepsPerSecondService>(ROSNode, "SetSimStepsPerSecond", this, &UTempoTimeROSBridgeSubsystem::SetSimStepsPerSecond);
-	BindScriptingServiceToROS<FTempoSetTimeModeService>(ROSNode, "SetTimeMode", this, &UTempoTimeROSBridgeSubsystem::SetTimeMode);
-	BindScriptingServiceToROS<FTempoEmptyService>(ROSNode, "Play", this, &UTempoTimeROSBridgeSubsystem::Play);
-	BindScriptingServiceToROS<FTempoEmptyService>(ROSNode, "Pause", this, &UTempoTimeROSBridgeSubsystem::Pause);
-	BindScriptingServiceToROS<FTempoEmptyService>(ROSNode, "Step", this, &UTempoTimeROSBridgeSubsystem::Step);
+	BindServiceToROS<FTempoAdvanceStepsService>(ROSNode, "AdvanceSteps", this, &UTempoTimeROSBridgeSubsystem::AdvanceSteps);
+	BindServiceToROS<FTempoSetSimStepsPerSecondService>(ROSNode, "SetSimStepsPerSecond", this, &UTempoTimeROSBridgeSubsystem::SetSimStepsPerSecond);
+	BindServiceToROS<FTempoSetTimeModeService>(ROSNode, "SetTimeMode", this, &UTempoTimeROSBridgeSubsystem::SetTimeMode);
+	BindServiceToROS<FTempoEmptyService>(ROSNode, "Play", this, &UTempoTimeROSBridgeSubsystem::Play);
+	BindServiceToROS<FTempoEmptyService>(ROSNode, "Pause", this, &UTempoTimeROSBridgeSubsystem::Pause);
+	BindServiceToROS<FTempoEmptyService>(ROSNode, "Step", this, &UTempoTimeROSBridgeSubsystem::Step);
 }

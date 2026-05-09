@@ -9,14 +9,14 @@ use std::collections::HashMap;
 
 use clap::Parser;
 use inquire::{Select, Text};
-use tempo_sim::proto::tempo_scripting::{Rotation, Transform, Vector};
+use tempo_sim::proto::tempo_core::{Rotation, Transform, Vector};
 use tempo_sim::{set_server_async, tempo_world};
 
 #[derive(Parser, Debug)]
 struct Args {
     #[arg(long, default_value = "0.0.0.0", help = "IP address of machine where Tempo is running")]
     ip: String,
-    #[arg(long, default_value_t = 10001u16, help = "Port Tempo scripting server is using")]
+    #[arg(long, default_value_t = 10001u16, help = "Port Tempo gRPC server is using")]
     port: u16,
 }
 
@@ -483,8 +483,8 @@ async fn flow_spawn_actor() {
     };
     match tempo_world::spawn_actor_async(actor_type, false, transform, String::new()).await {
         Ok(resp) => {
-            println!("\n  Spawned: {}", resp.spawned_name);
-            if let Some(t) = &resp.spawned_transform {
+            println!("\n  Spawned: {}", resp.name);
+            if let Some(t) = &resp.transform {
                 println!("  Transform: {}", format_transform(t));
             }
         }

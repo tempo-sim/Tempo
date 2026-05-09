@@ -8,61 +8,61 @@
 #include "tempo_time_ros_bridge/srv/set_sim_steps_per_second.hpp"
 #include "tempo_time_ros_bridge/srv/set_time_mode.hpp"
 
-#include "TempoTime/Time.grpc.pb.h"
+#include "TempoCore/Time.grpc.pb.h"
 
 template <>
-struct TFromROSConverter<tempo_time_ros_bridge::srv::AdvanceSteps::Request, TempoTime::AdvanceStepsRequest>
+struct TFromROSConverter<tempo_time_ros_bridge::srv::AdvanceSteps::Request, TempoCore::AdvanceStepsRequest>
 {
-	static TempoTime::AdvanceStepsRequest Convert(const tempo_time_ros_bridge::srv::AdvanceSteps::Request& ROSValue)
+	static TempoCore::AdvanceStepsRequest Convert(const tempo_time_ros_bridge::srv::AdvanceSteps::Request& ROSValue)
 	{
-		TempoTime::AdvanceStepsRequest TempoValue;
+		TempoCore::AdvanceStepsRequest TempoValue;
 		TempoValue.set_steps(ROSValue.steps);
 		return TempoValue;
 	}
 };
 
 template <>
-struct TToROSConverter<tempo_time_ros_bridge::srv::AdvanceSteps::Response, TempoScripting::Empty>
+struct TToROSConverter<tempo_time_ros_bridge::srv::AdvanceSteps::Response, TempoCore::Empty>
 {
-	static tempo_time_ros_bridge::srv::AdvanceSteps::Response Convert(const TempoScripting::Empty& TempoValue)
+	static tempo_time_ros_bridge::srv::AdvanceSteps::Response Convert(const TempoCore::Empty& TempoValue)
 	{
 		return tempo_time_ros_bridge::srv::AdvanceSteps::Response();
 	}
 };
 
 template <>
-struct TFromROSConverter<tempo_time_ros_bridge::srv::SetSimStepsPerSecond::Request, TempoTime::SetSimStepsPerSecondRequest>
+struct TFromROSConverter<tempo_time_ros_bridge::srv::SetSimStepsPerSecond::Request, TempoCore::SetSimStepsPerSecondRequest>
 {
-	static TempoTime::SetSimStepsPerSecondRequest Convert(const tempo_time_ros_bridge::srv::SetSimStepsPerSecond::Request& ROSValue)
+	static TempoCore::SetSimStepsPerSecondRequest Convert(const tempo_time_ros_bridge::srv::SetSimStepsPerSecond::Request& ROSValue)
 	{
-		TempoTime::SetSimStepsPerSecondRequest TempoValue;
+		TempoCore::SetSimStepsPerSecondRequest TempoValue;
 		TempoValue.set_sim_steps_per_second(ROSValue.sim_steps_per_second);
 		return TempoValue;
 	}
 };
 
 template <>
-struct TToROSConverter<tempo_time_ros_bridge::srv::SetSimStepsPerSecond::Response, TempoScripting::Empty>
+struct TToROSConverter<tempo_time_ros_bridge::srv::SetSimStepsPerSecond::Response, TempoCore::Empty>
 {
-	static tempo_time_ros_bridge::srv::SetSimStepsPerSecond::Response Convert(const TempoScripting::Empty& TempoValue)
+	static tempo_time_ros_bridge::srv::SetSimStepsPerSecond::Response Convert(const TempoCore::Empty& TempoValue)
 	{
 		return tempo_time_ros_bridge::srv::SetSimStepsPerSecond::Response();
 	}
 };
 
 template <>
-struct TFromROSConverter<tempo_time_ros_bridge::srv::SetTimeMode::Request, TempoTime::TimeModeRequest>
+struct TFromROSConverter<tempo_time_ros_bridge::srv::SetTimeMode::Request, TempoCore::TimeModeRequest>
 {
-	static TempoTime::TimeModeRequest Convert(const tempo_time_ros_bridge::srv::SetTimeMode::Request& ROSValue)
+	static TempoCore::TimeModeRequest Convert(const tempo_time_ros_bridge::srv::SetTimeMode::Request& ROSValue)
 	{
-		TempoTime::TimeModeRequest TempoValue;
+		TempoCore::TimeModeRequest TempoValue;
 		if (ROSValue.time_mode == "fixed_step")
 		{
-			TempoValue.set_time_mode(TempoTime::FIXED_STEP);
+			TempoValue.set_time_mode(TempoCore::TM_FIXED_STEP);
 		}
 		else if (ROSValue.time_mode == "wall_clock")
 		{
-			TempoValue.set_time_mode(TempoTime::WALL_CLOCK);
+			TempoValue.set_time_mode(TempoCore::TM_WALL_CLOCK);
 		}
 		else
 		{
@@ -73,9 +73,9 @@ struct TFromROSConverter<tempo_time_ros_bridge::srv::SetTimeMode::Request, Tempo
 };
 
 template <>
-struct TToROSConverter<tempo_time_ros_bridge::srv::SetTimeMode::Response, TempoScripting::Empty>
+struct TToROSConverter<tempo_time_ros_bridge::srv::SetTimeMode::Response, TempoCore::Empty>
 {
-	static tempo_time_ros_bridge::srv::SetTimeMode::Response Convert(const TempoScripting::Empty& TempoValue)
+	static tempo_time_ros_bridge::srv::SetTimeMode::Response Convert(const TempoCore::Empty& TempoValue)
 	{
 		return tempo_time_ros_bridge::srv::SetTimeMode::Response();
 	}
@@ -83,8 +83,8 @@ struct TToROSConverter<tempo_time_ros_bridge::srv::SetTimeMode::Response, TempoS
 
 struct FTempoAdvanceStepsService
 {
-	using Request = TempoTime::AdvanceStepsRequest;
-	using Response = TempoScripting::Empty;
+	using Request = TempoCore::AdvanceStepsRequest;
+	using Response = TempoCore::Empty;
 };
 
 template <>
@@ -96,8 +96,8 @@ struct TImplicitToROSConverter<FTempoAdvanceStepsService>
 
 struct FTempoSetSimStepsPerSecondService
 {
-	using Request = TempoTime::SetSimStepsPerSecondRequest;
-	using Response = TempoScripting::Empty;
+	using Request = TempoCore::SetSimStepsPerSecondRequest;
+	using Response = TempoCore::Empty;
 };
 
 template <>
@@ -109,8 +109,8 @@ struct TImplicitToROSConverter<FTempoSetSimStepsPerSecondService>
 
 struct FTempoSetTimeModeService
 {
-	using Request = TempoTime::TimeModeRequest;
-	using Response = TempoScripting::Empty;
+	using Request = TempoCore::TimeModeRequest;
+	using Response = TempoCore::Empty;
 };
 
 template <>

@@ -21,21 +21,6 @@
 			"LoadingPhase": "Default"
 		},
 		{
-			"Name": "TempoCoreShared",
-			"Type": "Runtime",
-			"LoadingPhase": "Default"
-		},
-		{
-			"Name": "TempoScripting",
-			"Type": "Runtime",
-			"LoadingPhase": "Default"
-		},
-		{
-			"Name": "TempoTime",
-			"Type": "Runtime",
-			"LoadingPhase": "Default"
-		},
-		{
 			"Name": "TempoCoreEditor",
 			"Type": "Editor",
 			"LoadingPhase": "Default"

@@ -39,7 +39,7 @@ class ProtoGenerator:
 
         self.temp_dir = None
         self.src_temp_dir = None
-        self.includes_temp_dir = None
+        self.includes_dir = None
         self.gen_temp_dir = None
         self.module_info = {}
 
@@ -52,8 +52,19 @@ class ProtoGenerator:
         return files
 
     def collect_output_files(self) -> List[Path]:
-        """Collect all generated protobuf files."""
-        return find_files_filtered(self.project_root, {'.pb.h', '.pb.cc', '_pb2.py', '_pb2_grpc.py'})
+        """Collect all generated protobuf files.
+
+        When Cpp/Rust API generation is opted in we also include the exported
+        proto trees, so the cache invalidates if the export goes stale (e.g.,
+        the user enables an opt-in for the first time, or a proto rename
+        leaves orphan files in the export dir from a prior opt-in run).
+        """
+        files = find_files_filtered(self.project_root, {'.pb.h', '.pb.cc', '_pb2.py', '_pb2_grpc.py'})
+        if self._cpp_opt_in() and self.cpp_proto_dir.exists():
+            files.extend(self.cpp_proto_dir.rglob("*.proto"))
+        if self._rust_opt_in() and self.rust_proto_dir.exists():
+            files.extend(self.rust_proto_dir.rglob("*.proto"))
+        return files
 
     def setup_python_dest(self):
         """Create Python destination directory and __init__.py"""
@@ -61,15 +72,14 @@ class ProtoGenerator:
         (self.python_dest_dir / "__init__.py").touch()
 
     def setup_temp_dirs(self):
-        """Create temporary directory structure"""
+        """Create temporary directory structure for protobuf generation."""
         self.temp_dir = Path(tempfile.mkdtemp())
         self.src_temp_dir = self.temp_dir / "Source"
-        self.includes_temp_dir = self.temp_dir / "Includes"
+        self.includes_dir = self.temp_dir / "Includes"
         self.gen_temp_dir = self.temp_dir / "Generated"
-        
-        self.src_temp_dir.mkdir()
-        self.includes_temp_dir.mkdir()
-        self.gen_temp_dir.mkdir()
+
+        for d in (self.src_temp_dir, self.includes_dir, self.gen_temp_dir):
+            d.mkdir()
 
     def cleanup_temp_dirs(self):
         """Remove temporary directories"""
@@ -247,56 +257,41 @@ class ProtoGenerator:
         return filtered
 
     def copy_module_protos(self, module_name: str, module_path: Path):
-        """Copy .proto files from module to temp directory and add package specifier"""
-        module_src_temp_dir = self.src_temp_dir / module_name
-        
-        if module_src_temp_dir.exists():
-            raise RuntimeError(f"Multiple modules named {module_name} found. Please rename one.")
-        
-        (module_src_temp_dir / "Public").mkdir(parents=True)
-        (module_src_temp_dir / "Private").mkdir(parents=True)
-        
-        # Copy public protos
-        public_dir = module_path / "Public"
-        if public_dir.exists():
-            for proto_file in public_dir.rglob("*.proto"):
-                relative_path = proto_file.relative_to(module_path)
-                dest_file = module_src_temp_dir / relative_path
-                dest_file.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(proto_file, dest_file)
-        
-        # Copy private protos
-        private_dir = module_path / "Private"
-        if private_dir.exists():
-            for proto_file in private_dir.rglob("*.proto"):
-                relative_path = proto_file.relative_to(module_path)
-                dest_file = module_src_temp_dir / relative_path
-                dest_file.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(proto_file, dest_file)
-        
-        # Add/modify package specifier in all copied protos
-        for proto_file in module_src_temp_dir.rglob("*.proto"):
-            self._add_package_specifier(proto_file, module_name)
+        """Stage a module's protos into the temp source tree.
 
-    def _add_package_specifier(self, proto_file: Path, module_name: str):
-        """Add or modify package specifier in a .proto file"""
+        Protos are placed under <src_temp_dir>/<module>/<Public|Private>/...
+        and gain a fallback `package <module>;` declaration if they don't
+        already declare one. The fallback never overrides a source-declared
+        package — that package is the wire identity (gRPC method routing,
+        Any URLs) and must be preserved verbatim.
+        """
+        for sub in ("Public", "Private"):
+            sub_dir = module_path / sub
+            if not sub_dir.exists():
+                continue
+            for proto_file in sub_dir.rglob("*.proto"):
+                relative_path = proto_file.relative_to(sub_dir)
+                dest = self.src_temp_dir / module_name / sub / relative_path
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(proto_file, dest)
+                self._ensure_package_declaration(dest, fallback=module_name)
+
+    def _ensure_package_declaration(self, proto_file: Path, fallback: str):
+        """Add a `package` declaration if the proto doesn't already have one.
+
+        Source-declared packages are preserved verbatim. The package is the
+        wire identity (gRPC method routing, Any URLs) — protos that need a
+        specific package must declare it explicitly. Only protos with no
+        declaration at all fall back to the enclosing module name.
+        """
         with open(proto_file, 'r', encoding='utf-8') as f:
             content = f.read()
-        
-        package_pattern = re.compile(r'^\s*package\s+([^;\s]+)\s*;', re.MULTILINE)
-        match = package_pattern.search(content)
-        
-        if match:
-            # Replace existing package
-            existing_package = match.group(1)
-            new_package = f"package {module_name}.{existing_package};"
-            content = package_pattern.sub(new_package, content)
-        else:
-            # Append new package declaration
-            content += f"\npackage {module_name};\n"
-        
+
+        if re.search(r'^\s*package\s+', content, re.MULTILINE):
+            return
+
         with open(proto_file, 'w', encoding='utf-8') as f:
-            f.write(content)
+            f.write(content + f"\npackage {fallback};\n")
 
     def sync_protos(self, src: Path, dest: Path):
         """Copy .proto files from src to dest, preserving directory structure"""
@@ -309,174 +304,148 @@ class ProtoGenerator:
             dest_file.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(proto_file, dest_file)
 
-    def get_module_includes_public_only(self, module_name: str, includes_dir: Path, visited: Set[str]):
-        """Recursively get public dependencies of a module"""
-        if module_name in visited:
+    def _collect_module_deps(self, module: str, visited: Set[str]):
+        """Walk a module's public dep tree, collecting transitively-reachable
+        project modules (those present in module_info)."""
+        if module in visited:
             return
-        
-        visited.add(module_name)
-        
-        public_deps = self.module_info.get(module_name, {}).get("PublicDependencyModules", [])
-        
-        for dep in public_deps:
-            dep = dep.strip().rstrip('\r')
-            
-            # Only consider project modules
-            if not (self.src_temp_dir / dep).exists():
-                continue
-            
-            dep_dir = includes_dir / dep
-            if not dep_dir.exists():
-                # New dependency - add its public protos
-                dep_dir.mkdir(parents=True, exist_ok=True)
-                self.sync_protos(self.src_temp_dir / dep / "Public", dep_dir)
-            
-            # Recursively add its public dependencies
-            self.get_module_includes_public_only(dep, includes_dir, visited)
+        if module not in self.module_info:
+            return
+        visited.add(module)
+        for dep in self.module_info[module].get("PublicDependencyModules", []):
+            self._collect_module_deps(dep.strip().rstrip('\r'), visited)
 
-    def get_module_includes(self, module_name: str, includes_dir: Path):
-        """Get all includes needed for a module (public and private dependencies)"""
-        # Copy this module's protos (both public and private)
-        module_dir = includes_dir / module_name
-        module_dir.mkdir(parents=True, exist_ok=True)
-        self.sync_protos(self.src_temp_dir / module_name / "Public", module_dir)
-        self.sync_protos(self.src_temp_dir / module_name / "Private", module_dir)
-        
-        visited = set()
-        
-        # Add public dependencies
-        public_deps = self.module_info.get(module_name, {}).get("PublicDependencyModules", [])
-        for dep in public_deps:
-            dep = dep.strip().rstrip('\r')
-            
-            if not (self.src_temp_dir / dep).exists():
-                continue
-            
-            dep_dir = includes_dir / dep
-            if not dep_dir.exists():
-                dep_dir.mkdir(parents=True, exist_ok=True)
-                self.sync_protos(self.src_temp_dir / dep / "Public", dep_dir)
-            
-            self.get_module_includes_public_only(dep, includes_dir, visited)
-        
-        # Add private dependencies
-        private_deps = self.module_info.get(module_name, {}).get("PrivateDependencyModules", [])
-        for dep in private_deps:
-            dep = dep.strip().rstrip('\r')
-            
-            if not (self.src_temp_dir / dep).exists():
-                continue
-            
-            dep_dir = includes_dir / dep
-            if not dep_dir.exists():
-                dep_dir.mkdir(parents=True, exist_ok=True)
-                self.sync_protos(self.src_temp_dir / dep / "Public", dep_dir)
-            
-            self.get_module_includes_public_only(dep, includes_dir, visited)
+    @staticmethod
+    def _proto_has_service(proto_file: Path) -> bool:
+        with open(proto_file, 'r', encoding='utf-8') as f:
+            return bool(re.search(r'\bservice\s+', f.read()))
 
-    def generate_module_protos(self, module_name: str, module_path: Path, include_dir: Path):
-        """Generate C++ and Python protobuf code for a module"""
-        private_dest_dir = module_path / "Private/ProtobufGenerated"
+    def _setup_includes(self, module: str) -> Path:
+        """Build a protoc include tree for one module.
+
+        Layout: <includes>/<module>/<proto files>. The module being compiled
+        gets Public + Private; transitively reachable project-module deps get
+        Public only.
+        """
+        includes_dir = self.includes_dir / module
+        includes_dir.mkdir(parents=True, exist_ok=True)
+
+        self.sync_protos(self.src_temp_dir / module / "Public", includes_dir / module)
+        self.sync_protos(self.src_temp_dir / module / "Private", includes_dir / module)
+
+        reachable: Set[str] = set()
+        for dep in (self.module_info.get(module, {}).get("PublicDependencyModules", []) +
+                    self.module_info.get(module, {}).get("PrivateDependencyModules", [])):
+            self._collect_module_deps(dep.strip().rstrip('\r'), reachable)
+
+        for dep_module in reachable:
+            if dep_module == module:
+                continue
+            dep_dir = includes_dir / dep_module
+            if not dep_dir.exists():
+                dep_dir.mkdir(parents=True, exist_ok=True)
+                self.sync_protos(self.src_temp_dir / dep_module / "Public", dep_dir)
+
+        return includes_dir
+
+    def generate_cpp_for_module(self, module_name: str):
+        """Generate C++ for one module.
+
+        Generated .pb.h files land at <module>/Public/ProtobufGenerated/<module>/
+        so internal Tempo source uses module-name-based #include paths.
+        """
+        module_data = self.module_info[module_name]
+        module_path = Path(module_data["Directory"].strip('"').replace("\\", "/"))
+
         public_dest_dir = module_path / "Public/ProtobufGenerated"
-        source_dir = include_dir / module_name
-        export_macro = f"{module_name.upper()}_API"
-        
-        # Create Python module directory
+        private_dest_dir = module_path / "Private/ProtobufGenerated"
+        module_src_dir = self.src_temp_dir / module_name
+
+        # We invoke protoc on copies under the include tree so the file path is
+        # always reachable from the -I root (protoc errors otherwise). Public vs
+        # Private deposit decisions consult src_temp_dir, where the original
+        # sub-directory split is preserved.
+        has_protos = module_src_dir.exists() and any(module_src_dir.rglob("*.proto"))
+        refreshed: Set[Path] = set()
+
+        if has_protos:
+            includes_dir = self._setup_includes(module_name)
+            module_includes_dir = includes_dir / module_name
+            proto_files = sorted(module_includes_dir.rglob("*.proto"))
+            cpp_temp_dir = self.gen_temp_dir / "cpp" / module_name
+            cpp_temp_dir.mkdir(parents=True, exist_ok=True)
+            export_macro = f"{module_name.upper()}_API"
+            for proto_file in proto_files:
+                self._generate_proto_cpp(proto_file, includes_dir, cpp_temp_dir, export_macro)
+
+            for generated_file in cpp_temp_dir.rglob("*"):
+                if not generated_file.is_file():
+                    continue
+                relative_path = generated_file.relative_to(cpp_temp_dir)
+                if generated_file.name.endswith(".pb.h"):
+                    proto_basename = generated_file.name.split('.')[0] + ".proto"
+                    if (module_src_dir / "Public" / proto_basename).exists():
+                        dest_file = public_dest_dir / relative_path
+                    else:
+                        dest_file = private_dest_dir / relative_path
+                else:
+                    dest_file = private_dest_dir / relative_path
+                self.replace_if_stale(generated_file, dest_file)
+                refreshed.add(dest_file)
+
+        # Sweep stale .pb.* files in the module's tree and prune empty dirs.
+        for cpp_file in list(module_path.rglob("*.pb.*")):
+            if cpp_file not in refreshed:
+                cpp_file.unlink()
+        self._remove_empty_dirs(public_dest_dir)
+        self._remove_empty_dirs(private_dest_dir)
+
+    def generate_python_for_module(self, module_name: str) -> Set[Path]:
+        """Generate Python for one module.
+
+        Outputs land at python_dest_dir/<module>/<file>_pb2.py. Returns the
+        set of files refreshed so the caller can drive the global stale-file
+        sweep.
+        """
+        module_src_dir = self.src_temp_dir / module_name
+        if not module_src_dir.exists() or not any(module_src_dir.rglob("*.proto")):
+            return set()
+
+        includes_dir = self._setup_includes(module_name)
+        # Iterate copies under the include tree (see C++ pipeline for why).
+        module_includes_dir = includes_dir / module_name
+        proto_files = sorted(module_includes_dir.rglob("*.proto"))
+        python_temp_dir = self.gen_temp_dir / "python" / module_name
+        python_temp_dir.mkdir(parents=True, exist_ok=True)
+
         python_module_dir = self.python_dest_dir / module_name
         python_module_dir.mkdir(parents=True, exist_ok=True)
         (python_module_dir / "__init__.py").touch()
-        
-        # Create temporary generation directories
-        module_gen_temp_dir = self.gen_temp_dir / module_name
-        cpp_temp_dir = module_gen_temp_dir / "CPP"
-        python_temp_dir = module_gen_temp_dir / "Python"
-        cpp_temp_dir.mkdir(parents=True, exist_ok=True)
-        python_temp_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Generate protobuf code
-        proto_files = list(source_dir.rglob("*.proto"))
-        if not proto_files:
-            return  # No protos to generate
-        
+
         for proto_file in proto_files:
-            self._generate_proto(proto_file, include_dir, cpp_temp_dir, python_temp_dir, export_macro)
-        
-        # Refresh C++ files
-        refreshed_cpp_files = set()
-        for generated_file in cpp_temp_dir.rglob("*"):
-            if not generated_file.is_file():
-                continue
-            
-            relative_path = generated_file.relative_to(cpp_temp_dir)
-            module_src_temp_dir = self.src_temp_dir / module_name
-            
-            if generated_file.name.endswith(".pb.h"):
-                # Header files go to Public if from Public proto, otherwise Private
-                proto_file = generated_file.name.split('.')[0] + ".proto"
-                if (module_src_temp_dir / "Public" / proto_file).exists():
-                    dest_file = public_dest_dir / relative_path
-                else:
-                    dest_file = private_dest_dir / relative_path
-            else:
-                dest_file = private_dest_dir / relative_path
-            
-            self.replace_if_stale(generated_file, dest_file)
-            refreshed_cpp_files.add(dest_file)
-        
-        # Remove stale C++ files
-        for cpp_file in list(module_path.rglob("*.pb.*")):
-            if cpp_file not in refreshed_cpp_files:
-                cpp_file.unlink()
-        
-        # Remove empty directories
-        self._remove_empty_dirs(public_dest_dir)
-        self._remove_empty_dirs(private_dest_dir)
-        
-        # Refresh Python files
-        refreshed_py_files = set()
+            self._generate_proto_python(proto_file, includes_dir, python_temp_dir)
+
+        refreshed: Set[Path] = set()
         for generated_file in python_temp_dir.rglob("*"):
             if not generated_file.is_file():
                 continue
-            
             relative_path = generated_file.relative_to(python_temp_dir)
             dest_file = self.python_dest_dir / relative_path
             self.replace_if_stale(generated_file, dest_file)
-            refreshed_py_files.add(dest_file)
-        
-        # Remove stale Python files
-        if python_module_dir.exists():
-            for py_file in python_module_dir.rglob("*_pb2*.py"):
-                if py_file not in refreshed_py_files:
-                    py_file.unlink()
-        
-        # Remove top-level generated Python files
-        for py_file in self.python_dest_dir.glob("*_pb2*"):
-            if py_file.is_file():
-                py_file.unlink()
-        
-        # Remove empty directories
-        self._remove_empty_dirs(self.python_dest_dir)
+            refreshed.add(dest_file)
 
-    def _generate_proto(self, proto_file: Path, include_dir: Path, cpp_out: Path, python_out: Path, export_macro: str):
-        """Generate C++ and Python code for a single .proto file"""
-        # Check if proto defines a service
-        has_service = False
-        with open(proto_file, 'r', encoding='utf-8') as f:
-            content = f.read()
-            has_service = bool(re.search(r'\bservice\s+', content))
-        
-        # Generate C++ code
+        return refreshed
+
+    def _generate_proto_cpp(self, proto_file: Path, include_dir: Path, cpp_out: Path, export_macro: str):
         cpp_cmd = [
             str(self.protoc),
             f"--cpp_out=dllexport_decl={export_macro}:{cpp_out}",
             f"-I{include_dir}",
-            str(proto_file)
+            str(proto_file),
         ]
-        
-        if has_service:
+        if self._proto_has_service(proto_file):
             cpp_cmd.insert(2, f"--grpc_out={cpp_out}")
             cpp_cmd.insert(3, f"--plugin=protoc-gen-grpc={self.grpc_cpp_plugin}")
-        
         try:
             subprocess.run(cpp_cmd, check=True, capture_output=True, text=True)
         except subprocess.CalledProcessError as e:
@@ -485,19 +454,17 @@ class ProtoGenerator:
             if e.stderr:
                 print(f"stderr: {e.stderr}", file=sys.stderr)
             raise
-        
-        # Generate Python code
+
+    def _generate_proto_python(self, proto_file: Path, include_dir: Path, python_out: Path):
         python_cmd = [
             str(self.protoc),
             f"--python_out={python_out}",
             f"-I{include_dir}",
-            str(proto_file)
+            str(proto_file),
         ]
-        
-        if has_service:
+        if self._proto_has_service(proto_file):
             python_cmd.insert(2, f"--grpc_out={python_out}")
             python_cmd.insert(3, f"--plugin=protoc-gen-grpc={self.grpc_python_plugin}")
-        
         try:
             subprocess.run(python_cmd, check=True, capture_output=True, text=True)
         except subprocess.CalledProcessError as e:
@@ -529,11 +496,11 @@ class ProtoGenerator:
         return os.environ.get("TEMPO_GEN_CPP_API", "0") not in ("0", "")
 
     def _export_decorated_protos(self, dest_dir: Path):
-        """Copy all decorated proto files from the temp source directory to dest_dir.
+        """Copy staged protos to dest_dir for external client consumption.
 
-        The protos in self.src_temp_dir already have proper package declarations
-        added by copy_module_protos(). Module dirs nest Public/ and Private/, but
-        consumers want them flattened under <dest_dir>/<Module>/.
+        Source protos have their source-declared package intact. Module dirs
+        nest Public/ and Private/; consumers want them flattened under
+        <dest_dir>/<Module>/.
         """
         if dest_dir.exists():
             shutil.rmtree(dest_dir)
@@ -609,18 +576,63 @@ class ProtoGenerator:
                 print("Warning: No C++ project modules found with .proto files", file=sys.stderr)
                 return
 
-            # Copy all module protos to temp directory
+            # Stage protos into the temp source tree.
             for module_name, module_data in self.module_info.items():
                 module_path = Path(module_data["Directory"].strip('"').replace("\\", "/"))
                 self.copy_module_protos(module_name, module_path)
 
-            # Generate protos for each module
-            for module_name, module_data in self.module_info.items():
-                module_path = Path(module_data["Directory"].strip('"').replace("\\", "/"))
-                module_includes_dir = self.includes_temp_dir / module_name
+            # C++ generation: deposits .pb.h into each plugin's source tree.
+            for module_name in self.module_info:
+                self.generate_cpp_for_module(module_name)
 
-                self.get_module_includes(module_name, module_includes_dir)
-                self.generate_module_protos(module_name, module_path, module_includes_dir)
+            # Python generation: outputs consumed by user clients.
+            refreshed_py_files: Set[Path] = set()
+            for module_name in sorted(self.module_info):
+                refreshed_py_files |= self.generate_python_for_module(module_name)
+
+            # Global stale-file sweep. Older runs may have created subdirs
+            # that no longer get written to — e.g., on a v0 -> v1 Tempo
+            # upgrade, dirs like TempoCamera/, TempoMapQuery/, TempoScripting/
+            # become orphaned because their protos now live under collapsed
+            # module names. Drop any *_pb2*.py we didn't refresh this run,
+            # then prune any subdir whose only remaining content is
+            # __init__.py / __pycache__ (it has no useful files left). Custom
+            # user-added files in those subdirs are preserved.
+            removed_py = []
+            for py_file in self.python_dest_dir.rglob("*_pb2*"):
+                if py_file.is_file() and py_file not in refreshed_py_files:
+                    removed_py.append(py_file)
+                    py_file.unlink()
+            removed_dirs = []
+            for subdir in list(self.python_dest_dir.iterdir()):
+                if not subdir.is_dir():
+                    continue
+                useful = [
+                    f for f in subdir.rglob("*")
+                    if f.is_file()
+                    and f.name != "__init__.py"
+                    and not str(f).endswith(".pyc")
+                ]
+                if not useful:
+                    removed_dirs.append(subdir)
+                    shutil.rmtree(subdir)
+            if removed_py or removed_dirs:
+                rel = lambda p: p.relative_to(self.python_dest_dir)
+                if removed_dirs:
+                    names = sorted(rel(d).as_posix() for d in removed_dirs)
+                    print(f"[Tempo Prebuild] Removed {len(removed_dirs)} stale Python "
+                          f"output {'directory' if len(removed_dirs) == 1 else 'directories'} "
+                          f"under {self.python_dest_dir}: {', '.join(names)}",
+                          flush=True)
+                # Files removed but their containing dir survived (i.e. user has
+                # custom non-pb2 content there). Worth a heads-up too.
+                survivor_files = [f for f in removed_py if f.parent.exists()]
+                if survivor_files:
+                    print(f"[Tempo Prebuild] Removed {len(survivor_files)} stale "
+                          f"_pb2 file(s) from surviving directories: "
+                          f"{', '.join(sorted(rel(f).as_posix() for f in survivor_files))}",
+                          flush=True)
+            self._remove_empty_dirs(self.python_dest_dir)
 
             # Update cache after successful generation
             output_files = self.collect_output_files()

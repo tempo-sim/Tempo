@@ -35,10 +35,10 @@ int main(int argc, char** argv) {
     std::string lidar_name;
     for (const auto& s : sensors) {
         std::printf("  - %s/%s @ %.1f Hz\n",
-                    s.owner().c_str(), s.name().c_str(), s.rate());
+                    s.owner().c_str(), s.name().c_str(), s.rate_hz());
         for (int i = 0; i < s.measurement_types_size(); ++i) {
             int m = s.measurement_types(i);
-            if (m == TempoSensors::LIDAR_SCAN && lidar_owner.empty()) {
+            if (m == TempoSensors::MT_LIDAR_SCAN && lidar_owner.empty()) {
                 lidar_owner = s.owner();
                 lidar_name = s.name();
             }
@@ -61,13 +61,13 @@ int main(int argc, char** argv) {
     }
     auto stream = std::move(stream_result).value();
 
-    TempoLidar::LidarScanSegment segment;
+    TempoSensors::LidarScanSegment segment;
     int frames = 0;
     while (frames < max_frames && stream.read(&segment)) {
         std::printf("  frame %d: %d points (%dx%d), distances=%d, intensities=%d\n",
                     frames, segment.scan_count(),
                     segment.vertical_beams(), segment.horizontal_beams(),
-                    segment.distances_size(), segment.intensities_size());
+                    segment.distances_m_size(), segment.intensities_size());
         ++frames;
     }
     stream.cancel();
