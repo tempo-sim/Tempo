@@ -32,6 +32,7 @@ class ProtoGenerator:
         
         self.python_dest_dir = self.plugin_root / "Content/Python/API/tempo"
         self.rust_proto_dir = self.plugin_root / "Content/Rust/API/proto"
+        self.cpp_proto_dir = self.plugin_root / "Content/Cpp/API/proto"
         self.protoc = self.tool_dir / ("protoc.exe" if platform.system() == "Windows" else "protoc")
         self.grpc_cpp_plugin = self.tool_dir / ("grpc_cpp_plugin.exe" if platform.system() == "Windows" else "grpc_cpp_plugin")
         self.grpc_python_plugin = self.tool_dir / ("grpc_python_plugin.exe" if platform.system() == "Windows" else "grpc_python_plugin")
@@ -522,48 +523,52 @@ class ProtoGenerator:
         """Whether the user has opted into Rust API generation."""
         return os.environ.get("TEMPO_GEN_RUST_API", "0") not in ("0", "")
 
-    def export_rust_protos(self):
-        """Export decorated proto files for Rust tonic-build.
+    @staticmethod
+    def _cpp_opt_in() -> bool:
+        """Whether the user has opted into C++ API generation."""
+        return os.environ.get("TEMPO_GEN_CPP_API", "0") not in ("0", "")
 
-        Copies all decorated proto files from the temp source directory to the
-        Rust crate's proto directory. These protos already have proper package
-        declarations added by copy_module_protos().
+    def _export_decorated_protos(self, dest_dir: Path):
+        """Copy all decorated proto files from the temp source directory to dest_dir.
+
+        The protos in self.src_temp_dir already have proper package declarations
+        added by copy_module_protos(). Module dirs nest Public/ and Private/, but
+        consumers want them flattened under <dest_dir>/<Module>/.
         """
-        if not self._rust_opt_in():
-            return
+        if dest_dir.exists():
+            shutil.rmtree(dest_dir)
+        dest_dir.mkdir(parents=True, exist_ok=True)
 
-        # Clear and recreate the Rust proto directory
-        if self.rust_proto_dir.exists():
-            shutil.rmtree(self.rust_proto_dir)
-        self.rust_proto_dir.mkdir(parents=True, exist_ok=True)
-
-        # Copy all decorated protos from temp directory
         for module_dir in self.src_temp_dir.iterdir():
             if not module_dir.is_dir():
                 continue
 
             module_name = module_dir.name
-            dest_module_dir = self.rust_proto_dir / module_name
+            dest_module_dir = dest_dir / module_name
 
-            # Copy Public protos
-            public_dir = module_dir / "Public"
-            if public_dir.exists():
-                for proto_file in public_dir.rglob("*.proto"):
-                    relative_path = proto_file.relative_to(public_dir)
+            for sub in ("Public", "Private"):
+                sub_dir = module_dir / sub
+                if not sub_dir.exists():
+                    continue
+                for proto_file in sub_dir.rglob("*.proto"):
+                    relative_path = proto_file.relative_to(sub_dir)
                     dest_file = dest_module_dir / relative_path
                     dest_file.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(proto_file, dest_file)
 
-            # Copy Private protos (they may be needed for complete type definitions)
-            private_dir = module_dir / "Private"
-            if private_dir.exists():
-                for proto_file in private_dir.rglob("*.proto"):
-                    relative_path = proto_file.relative_to(private_dir)
-                    dest_file = dest_module_dir / relative_path
-                    dest_file.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(proto_file, dest_file)
-
+    def export_rust_protos(self):
+        """Export decorated proto files for Rust tonic-build."""
+        if not self._rust_opt_in():
+            return
+        self._export_decorated_protos(self.rust_proto_dir)
         print(f"Exported Rust protos to {self.rust_proto_dir}")
+
+    def export_cpp_protos(self):
+        """Export decorated proto files for the C++ wrapper build."""
+        if not self._cpp_opt_in():
+            return
+        self._export_decorated_protos(self.cpp_proto_dir)
+        print(f"Exported C++ protos to {self.cpp_proto_dir}")
 
     def run(self):
         """Main execution flow"""
@@ -574,15 +579,16 @@ class ProtoGenerator:
                 print(f"[Tempo Prebuild]  Skipping Tempo protobuf generation (TEMPO_SKIP_PREBUILD is {skip_prebuild})")
                 return 0
 
-            # If Rust generation is opted in but the Rust proto dir hasn't been populated
-            # yet (first time the user enables it), bypass the cache so the export runs.
-            rust_opt_in = self._rust_opt_in()
-            need_rust_export = rust_opt_in and not self.rust_proto_dir.exists()
+            # If Rust or C++ generation is opted in but the corresponding proto dir
+            # hasn't been populated yet (first time the user enables it), bypass the
+            # cache so the export runs.
+            need_rust_export = self._rust_opt_in() and not self.rust_proto_dir.exists()
+            need_cpp_export = self._cpp_opt_in() and not self.cpp_proto_dir.exists()
 
             # Check cache to see if we can skip generation
             input_files = self.collect_input_files()
             output_files = self.collect_output_files()
-            if not need_rust_export and self.cache.is_valid(
+            if not (need_rust_export or need_cpp_export) and self.cache.is_valid(
                     "gen_protos", input_files, output_files,
                     input_base=self.project_root, output_base=self.project_root):
                 print("[Tempo Prebuild]  Skipping Tempo protobuf generation (no changes detected)", flush=True)
@@ -623,6 +629,9 @@ class ProtoGenerator:
 
             # Export protos for Rust crate
             self.export_rust_protos()
+
+            # Export protos for C++ wrapper build
+            self.export_cpp_protos()
 
             print("Done")
             

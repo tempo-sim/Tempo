@@ -54,6 +54,30 @@ protobuf_types_to_rust_types = {
 }
 
 
+# Protobuf type mappings for C++ (matching the types protoc emits in generated headers)
+protobuf_types_to_cpp_types = {
+    gpd.FieldDescriptor.TYPE_DOUBLE: "double",
+    gpd.FieldDescriptor.TYPE_FLOAT: "float",
+    gpd.FieldDescriptor.TYPE_INT64: "int64_t",
+    gpd.FieldDescriptor.TYPE_UINT64: "uint64_t",
+    gpd.FieldDescriptor.TYPE_INT32: "int32_t",
+    gpd.FieldDescriptor.TYPE_FIXED64: "uint64_t",
+    gpd.FieldDescriptor.TYPE_FIXED32: "uint32_t",
+    gpd.FieldDescriptor.TYPE_BOOL: "bool",
+    gpd.FieldDescriptor.TYPE_STRING: "std::string",
+    gpd.FieldDescriptor.TYPE_GROUP: None,
+    gpd.FieldDescriptor.TYPE_MESSAGE: None,
+    gpd.FieldDescriptor.TYPE_BYTES: "std::string",
+    gpd.FieldDescriptor.TYPE_UINT32: "uint32_t",
+    gpd.FieldDescriptor.TYPE_ENUM: None,
+    gpd.FieldDescriptor.TYPE_SFIXED32: "int32_t",
+    gpd.FieldDescriptor.TYPE_SFIXED64: "int64_t",
+    gpd.FieldDescriptor.TYPE_SINT32: "int32_t",
+    gpd.FieldDescriptor.TYPE_SINT64: "int64_t",
+    gpd.FieldDescriptor.MAX_TYPE: None
+}
+
+
 protobuf_labels_to_python_labels = {
     gpd.FieldDescriptor.LABEL_OPTIONAL: "optional",
     gpd.FieldDescriptor.LABEL_REPEATED: "repeated",

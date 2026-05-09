@@ -7,3 +7,4 @@ set -e
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 bash "$SCRIPT_DIR/GenAPI.sh" "$1" "$3" "$4"
 bash "$SCRIPT_DIR/GenRustAPI.sh" "$1" "$3" "$4"
+bash "$SCRIPT_DIR/GenCppAPI.sh" "$1" "$3" "$4" "$8"
