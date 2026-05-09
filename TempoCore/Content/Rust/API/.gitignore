@@ -9,6 +9,4 @@ Cargo.lock
 /src/**
 !/src/context.rs
 !/src/error.rs
-!/src/lib.rs
-!/src/proto.rs
 !/src/streaming.rs
