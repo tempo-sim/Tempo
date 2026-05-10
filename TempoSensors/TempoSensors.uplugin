@@ -24,6 +24,30 @@
 		{
 			"Name": "TempoCore",
 			"Enabled": true
+		},
+		{
+			"Name": "AVCodecsCore",
+			"Enabled": true
+		},
+		{
+			"Name": "NVCodecs",
+			"Enabled": true,
+			"PlatformAllowList": [ "Win64", "Linux" ]
+		},
+		{
+			"Name": "AMFCodecs",
+			"Enabled": true,
+			"PlatformAllowList": [ "Win64" ]
+		},
+		{
+			"Name": "WMFCodecs",
+			"Enabled": true,
+			"PlatformAllowList": [ "Win64" ]
+		},
+		{
+			"Name": "VTCodecs",
+			"Enabled": true,
+			"PlatformAllowList": [ "Mac" ]
 		}
 	]
 }

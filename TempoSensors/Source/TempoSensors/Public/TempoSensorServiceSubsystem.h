@@ -29,6 +29,8 @@ namespace TempoSensors
 	class BoundingBoxes;
 	class LidarScanRequest;
 	class LidarScanSegment;
+	class VideoRequest;
+	class VideoFrame;
 }
 
 UCLASS()
@@ -60,6 +62,8 @@ public:
 	void StreamBoundingBoxes(const TempoSensors::BoundingBoxesRequest& Request, const TResponseDelegate<TempoSensors::BoundingBoxes>& ResponseContinuation) const;
 
 	void StreamLidarScans(const TempoSensors::LidarScanRequest& Request, const TResponseDelegate<TempoSensors::LidarScanSegment>& ResponseContinuation) const;
+
+	void StreamVideo(const TempoSensors::VideoRequest& Request, const TResponseDelegate<TempoSensors::VideoFrame>& ResponseContinuation) const;
 
 protected:
 	void OnRenderFrameCompleted() const;
