@@ -8,6 +8,15 @@
 
 #include "TempoROSBridgeUtils.h"
 
+#include "TempoServiceROSConverters.h"
+
+#include "TempoCore/Time.grpc.pb.h"
+
+void UTempoTimeROSBridgeSubsystem::Step(const TempoCore::Empty& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const
+{
+	UTempoTimeServiceSubsystem::Step(TempoCore::StepRequest(), ResponseContinuation);
+}
+
 void UTempoTimeROSBridgeSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 {
 	Super::OnWorldBeginPlay(InWorld);

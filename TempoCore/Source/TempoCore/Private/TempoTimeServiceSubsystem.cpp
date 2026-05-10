@@ -22,6 +22,24 @@ using TempoEmpty = TempoCore::Empty;
 using TimeModeRequest = TempoCore::TimeModeRequest;
 using SetSimStepsPerSecondRequest = TempoCore::SetSimStepsPerSecondRequest;
 using AdvanceStepsRequest = TempoCore::AdvanceStepsRequest;
+using StepRequest = TempoCore::StepRequest;
+
+namespace
+{
+	grpc::Status StepResultToStatus(ETempoStepResult Result)
+	{
+		switch (Result)
+		{
+		case ETempoStepResult::Completed:
+			return grpc::Status_OK;
+		case ETempoStepResult::AbortedByExternalPause:
+			return grpc::Status(grpc::StatusCode::ABORTED, "Step was aborted by an external pause or unpause");
+		case ETempoStepResult::AbortedByTimeSettingsChanged:
+			return grpc::Status(grpc::StatusCode::ABORTED, "Step was aborted by a time settings change");
+		}
+		return grpc::Status(grpc::StatusCode::UNKNOWN, "Step ended with an unknown result");
+	}
+}
 
 void UTempoTimeServiceSubsystem::RegisterServices(FTempoServer& Server)
 {
@@ -126,18 +144,31 @@ void UTempoTimeServiceSubsystem::AdvanceSteps(const AdvanceStepsRequest& Request
 		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::OUT_OF_RANGE, "Steps must be >= 1"));
 		return;
 	}
-	
-	if (ATempoTimeWorldSettings* WorldSettings = Cast<ATempoTimeWorldSettings>(GetWorld()->GetWorldSettings()))
-	{
-		WorldSettings->Step(RequestedSteps);
-	}
-	else
+
+	ATempoTimeWorldSettings* WorldSettings = Cast<ATempoTimeWorldSettings>(GetWorld()->GetWorldSettings());
+	if (!WorldSettings)
 	{
 		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "AdvanceSteps is only supported when using TempoTimeWorldSettings"));
 		return;
 	}
 
-	ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status());
+	if (Request.wait_for_completion())
+	{
+		const TResponseDelegate<TempoEmpty> Continuation = ResponseContinuation;
+		const bool bAccepted = WorldSettings->Step(RequestedSteps, [Continuation](ETempoStepResult Result)
+		{
+			Continuation.ExecuteIfBound(TempoEmpty(), StepResultToStatus(Result));
+		});
+
+		if (!bAccepted)
+		{
+			ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "Another waited step is already in progress"));
+		}
+		return;
+	}
+
+	WorldSettings->Step(RequestedSteps);
+	ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status_OK);
 }
 
 
@@ -156,17 +187,30 @@ void UTempoTimeServiceSubsystem::Pause(const TempoEmpty& Request, const TDelegat
 	ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status());
 }
 
-void UTempoTimeServiceSubsystem::Step(const TempoEmpty& Request, const TResponseDelegate<TempoEmpty>& ResponseContinuation) const
+void UTempoTimeServiceSubsystem::Step(const StepRequest& Request, const TResponseDelegate<TempoEmpty>& ResponseContinuation) const
 {
-	if (ATempoTimeWorldSettings* WorldSettings = Cast<ATempoTimeWorldSettings>(GetWorld()->GetWorldSettings()))
-	{
-		WorldSettings->Step(1);
-	}
-	else
+	ATempoTimeWorldSettings* WorldSettings = Cast<ATempoTimeWorldSettings>(GetWorld()->GetWorldSettings());
+	if (!WorldSettings)
 	{
 		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "Step is only supported when using TempoTimeWorldSettings"));
 		return;
 	}
 
-	ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status());
+	if (Request.wait_for_completion())
+	{
+		const TResponseDelegate<TempoEmpty> Continuation = ResponseContinuation;
+		const bool bAccepted = WorldSettings->Step(1, [Continuation](ETempoStepResult Result)
+		{
+			Continuation.ExecuteIfBound(TempoEmpty(), StepResultToStatus(Result));
+		});
+
+		if (!bAccepted)
+		{
+			ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "Another waited step is already in progress"));
+		}
+		return;
+	}
+
+	WorldSettings->Step(1);
+	ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status_OK);
 }

@@ -24,6 +24,11 @@ message SetSimStepsPerSecondRequest {
 message AdvanceStepsRequest {
   // Number of sim steps to advance while paused.
   int32 steps = 1;
+  bool wait_for_completion = 2;
+}
+
+message StepRequest {
+  bool wait_for_completion = 1;
 }
 
 service TimeService {
@@ -33,9 +38,9 @@ service TimeService {
 
   rpc AdvanceSteps(AdvanceStepsRequest) returns (TempoCore.Empty);
 
-  rpc Play(TempoCore.Empty) returns (TempoCore.Empty);
+  rpc Play (TempoCore.Empty) returns (TempoCore.Empty);
 
-  rpc Pause(TempoCore.Empty) returns (TempoCore.Empty);
+  rpc Pause (TempoCore.Empty) returns (TempoCore.Empty);
 
-  rpc Step(TempoCore.Empty) returns (TempoCore.Empty);
+  rpc Step(StepRequest) returns (TempoCore.Empty);
 }
