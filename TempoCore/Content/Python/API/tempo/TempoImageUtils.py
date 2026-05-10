@@ -168,6 +168,84 @@ async def stream_color_images(camera_name, owner, scale=1.0):
     )
 
 
+class _VideoDecoder:
+    """PyAV-backed H.264 decoder. Drops decoded output until the first keyframe arrives so a
+    mid-stream subscriber doesn't hand garbage to QImage. Reused across frames to keep the
+    decoder's internal reference frames warm.
+    """
+
+    def __init__(self):
+        import av  # Imported lazily so clients that never stream video don't need PyAV installed.
+        self._codec_ctx = av.codec.CodecContext.create("h264", "r")
+        self._seen_key = False
+        self._av = av
+
+    def feed(self, frame_proto):
+        """Feed one VideoFrame protobuf, yield decoded RGB ndarray (height, width, 3)."""
+        if not self._seen_key:
+            if not frame_proto.key_frame:
+                return
+            self._seen_key = True
+        packet = self._av.Packet(frame_proto.data)
+        try:
+            decoded_frames = self._codec_ctx.decode(packet)
+        except Exception as e:
+            # Bad bitstream — wait for the next keyframe.
+            print(f"  Video decode error: {e}; resyncing on next keyframe.")
+            self._seen_key = False
+            return
+        for f in decoded_frames:
+            yield f.to_ndarray(format="rgb24")
+
+
+async def stream_video_images(camera_name, owner, scale=1.0,
+                               codec=None, bitrate_kbps=0, keyframe_interval=0, profile=None):
+    """Subscribe to a camera's H.264 video stream and display decoded frames in a Qt window."""
+    import TempoSensors.Camera_pb2 as Camera
+
+    decoder = _VideoDecoder()
+
+    def build_qimage_from_rgb(rgb_array):
+        h, w, _ = rgb_array.shape
+        return QImage(rgb_array.data, w, h, w * 3, QImage.Format_RGB888).copy()
+
+    event_task = asyncio.create_task(_qt_event_loop())
+    queue = asyncio.Queue(maxsize=2)
+    window_name = "Camera {} - Video".format(camera_name)
+
+    async def consumer():
+        while True:
+            rgb = await queue.get()
+            q_image = await asyncio.to_thread(build_qimage_from_rgb, rgb)
+            _show_image(window_name, q_image, scale)
+
+    consumer_task = asyncio.create_task(consumer())
+
+    try:
+        kwargs = dict(
+            sensor=camera_name,
+            owner=owner,
+            bitrate_kbps=bitrate_kbps,
+            keyframe_interval=keyframe_interval,
+        )
+        if codec is not None:
+            kwargs["codec"] = codec
+        if profile is not None:
+            kwargs["profile"] = profile
+        async for frame in ts.stream_video(**kwargs):
+            for rgb in decoder.feed(frame):
+                if queue.full():
+                    try:
+                        queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        pass
+                queue.put_nowait(rgb)
+    finally:
+        consumer_task.cancel()
+        event_task.cancel()
+        _destroy_window(window_name)
+
+
 async def stream_depth_images(camera_name, owner, scale=1.0):
     await _stream_images(
         ts.stream_depth_images(sensor=camera_name, owner=owner),

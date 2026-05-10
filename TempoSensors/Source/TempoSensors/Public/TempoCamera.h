@@ -94,6 +94,12 @@ struct FBoundingBoxesRequest
 	TResponseDelegate<TempoSensors::BoundingBoxes> ResponseContinuation;
 };
 
+struct FVideoRequest
+{
+	TempoSensors::VideoRequest Request;
+	TResponseDelegate<TempoSensors::VideoFrame> ResponseContinuation;
+};
+
 template <>
 struct TTextureRead<FCameraPixelWithDepth> : TTextureReadBase<FCameraPixelWithDepth>
 {
@@ -264,6 +270,7 @@ public:
 	void RequestMeasurement(const TempoSensors::LabelImageRequest& Request, const TResponseDelegate<TempoSensors::LabelImage>& ResponseContinuation);
 	void RequestMeasurement(const TempoSensors::DepthImageRequest& Request, const TResponseDelegate<TempoSensors::DepthImage>& ResponseContinuation);
 	void RequestMeasurement(const TempoSensors::BoundingBoxesRequest& Request, const TResponseDelegate<TempoSensors::BoundingBoxes>& ResponseContinuation);
+	void RequestMeasurement(const TempoSensors::VideoRequest& Request, const TResponseDelegate<TempoSensors::VideoFrame>& ResponseContinuation);
 
 	FTempoCameraIntrinsics GetIntrinsics() const;
 
@@ -272,6 +279,10 @@ public:
 	// End ITempoSensorInterface
 
 	bool HasPendingCameraRequests() const;
+
+	// Render-thread hook. Encodes a frame for any pending video stream subscribers, layered on top
+	// of the base CPU readback path. Called via UTempoSensorServiceSubsystem::OnRenderFrameCompleted.
+	virtual void OnRenderCompleted() override;
 
 protected:
 	virtual bool HasPendingRequests() const override { return HasPendingCameraRequests(); }
@@ -387,6 +398,16 @@ protected:
 	TArray<FLabelImageRequest> PendingLabelImageRequests;
 	TArray<FDepthImageRequest> PendingDepthImageRequests;
 	TArray<FBoundingBoxesRequest> PendingBoundingBoxesRequests;
+	TArray<FVideoRequest> PendingVideoRequests;
+
+	// H.264 encoder shared across all subscribed video stream clients. Created lazily on the first
+	// VideoRequest, reconfigured on size/codec/profile/bitrate/KFI changes, kept alive while any
+	// requests are pending. Owned via TUniquePtr to keep the wrapper out of the header.
+	TUniquePtr<class FTempoCameraVideoEncoder> VideoEncoder;
+
+	// Encoder is reconfigured the first time we encode a frame whose params don't match — the
+	// camera doesn't know its resolution until SharedFinalTextureTarget is allocated.
+	bool bVideoEncoderConfigured = false;
 
 	// Tile slots (fixed size: TL, TR, BL, BR). Stable storage — indices are never invalidated
 	// and held addresses remain valid across reconfigures. Transient: runtime-only state.
