@@ -27,8 +27,6 @@ public class TempoWorld : TempoModuleRules
                 "MassActors",
                 "MassEntity",
                 "MassTraffic",
-                // Tempo
-                "TempoMovement",
             }
         );
 

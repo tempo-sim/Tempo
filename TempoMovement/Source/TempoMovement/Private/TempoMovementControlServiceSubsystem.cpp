@@ -4,10 +4,11 @@
 
 #include "TempoMovement/MovementControlService.grpc.pb.h"
 #include "TempoMovement.h"
-#include "TempoVehicleControlInterface.h"
+#include "TempoMovementController.h"
 
 #include "TempoConversion.h"
 #include "TempoCore/Empty.pb.h"
+#include "TempoCore/Geometry.pb.h"
 
 #include "AIController.h"
 #include "Kismet/GameplayStatics.h"
@@ -15,18 +16,75 @@
 
 using MovementControlService = TempoMovement::MovementControlService;
 using MovementControlAsyncService = TempoMovement::MovementControlService::AsyncService;
-using VehicleCommandRequest = TempoMovement::VehicleCommandRequest;
+using NormalizedDrivingCommand = TempoMovement::NormalizedDrivingCommand;
+using VelocityCommand = TempoMovement::VelocityCommand;
+using AccelerationCommand = TempoMovement::AccelerationCommand;
 using CommandableVehiclesResponse = TempoMovement::CommandableVehiclesResponse;
 using PawnMoveToLocationRequest = TempoMovement::PawnMoveToLocationRequest;
 using PawnMoveToLocationResponse = TempoMovement::PawnMoveToLocationResponse;
 using CommandablePawnsResponse = TempoMovement::CommandablePawnsResponse;
 using TempoEmpty = TempoCore::Empty;
 
+namespace
+{
+	// Convert a proto Twist (m/s, rad/s, right-handed) to an FTempoTwist.
+	// We keep FTempoTwist in SI right-handed so closed-loop control logic doesn't have to
+	// keep redoing handedness conversions.
+	FTempoTwist FromProto(const TempoCore::Twist& ProtoTwist)
+	{
+		const FVector Linear(ProtoTwist.linear().x(), ProtoTwist.linear().y(), ProtoTwist.linear().z());
+		const FVector Angular(ProtoTwist.angular().x(), ProtoTwist.angular().y(), ProtoTwist.angular().z());
+		return FTempoTwist(Linear, Angular);
+	}
+
+	FTempoAccel FromProto(const TempoCore::Accel& ProtoAccel)
+	{
+		const FVector Linear(ProtoAccel.linear().x(), ProtoAccel.linear().y(), ProtoAccel.linear().z());
+		const FVector Angular(ProtoAccel.angular().x(), ProtoAccel.angular().y(), ProtoAccel.angular().z());
+		return FTempoAccel(Linear, Angular);
+	}
+
+	ATempoMovementController* FindMovementController(const UWorld* World, const FString& RequestedName, grpc::Status& OutStatus)
+	{
+		TArray<AActor*> MovementControllers;
+		UGameplayStatics::GetAllActorsOfClass(World, ATempoMovementController::StaticClass(), MovementControllers);
+
+		if (RequestedName.IsEmpty())
+		{
+			if (MovementControllers.IsEmpty())
+			{
+				OutStatus = grpc::Status(grpc::StatusCode::NOT_FOUND, "No commandable vehicles found");
+				return nullptr;
+			}
+			if (MovementControllers.Num() > 1)
+			{
+				OutStatus = grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "More than one commandable vehicle found, vehicle name required.");
+				return nullptr;
+			}
+			return Cast<ATempoMovementController>(MovementControllers[0]);
+		}
+
+		for (AActor* MovementController : MovementControllers)
+		{
+			ATempoMovementController* Controller = Cast<ATempoMovementController>(MovementController);
+			if (Controller->GetVehicleName().Equals(RequestedName, ESearchCase::IgnoreCase))
+			{
+				return Controller;
+			}
+		}
+
+		OutStatus = grpc::Status(grpc::StatusCode::NOT_FOUND, "Did not find a vehicle with the specified name");
+		return nullptr;
+	}
+}
+
 void UTempoMovementControlServiceSubsystem::RegisterServices(FTempoServer& Server)
 {
 	Server.RegisterService<MovementControlService>(
 		SimpleRequestHandler(&MovementControlAsyncService::RequestGetCommandableVehicles, &UTempoMovementControlServiceSubsystem::GetCommandableVehicles),
 		SimpleRequestHandler(&MovementControlAsyncService::RequestCommandVehicle, &UTempoMovementControlServiceSubsystem::CommandVehicle),
+		SimpleRequestHandler(&MovementControlAsyncService::RequestCommandVelocity, &UTempoMovementControlServiceSubsystem::CommandVelocity),
+		SimpleRequestHandler(&MovementControlAsyncService::RequestCommandAcceleration, &UTempoMovementControlServiceSubsystem::CommandAcceleration),
 		SimpleRequestHandler(&MovementControlAsyncService::RequestGetCommandablePawns, &UTempoMovementControlServiceSubsystem::GetCommandablePawns),
 		SimpleRequestHandler(&MovementControlAsyncService::RequestPawnMoveToLocation, &UTempoMovementControlServiceSubsystem::PawnMoveToLocation),
 		SimpleRequestHandler(&MovementControlAsyncService::RequestRebuildNavigation, &UTempoMovementControlServiceSubsystem::RebuildNavigation)
@@ -49,59 +107,74 @@ void UTempoMovementControlServiceSubsystem::Deinitialize()
 
 void UTempoMovementControlServiceSubsystem::GetCommandableVehicles(const TempoCore::Empty& Request, const TResponseDelegate<TempoMovement::CommandableVehiclesResponse>& ResponseContinuation) const
 {
-	TArray<AActor*> VehicleControllers;
-	UGameplayStatics::GetAllActorsWithInterface(GetWorld(), UTempoVehicleControlInterface::StaticClass(), VehicleControllers);
+	TArray<AActor*> MovementControllers;
+	UGameplayStatics::GetAllActorsOfClass(GetWorld(), ATempoMovementController::StaticClass(), MovementControllers);
 
 	CommandableVehiclesResponse Response;
-	for (AActor* VehicleController : VehicleControllers)
+	for (AActor* MovementController : MovementControllers)
 	{
-		ITempoVehicleControlInterface* Controller = Cast<ITempoVehicleControlInterface>(VehicleController);
+		ATempoMovementController* Controller = Cast<ATempoMovementController>(MovementController);
 		Response.add_vehicle_name(TCHAR_TO_UTF8(*Controller->GetVehicleName()));
 	}
-	
+
 	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
 }
 
 
-void UTempoMovementControlServiceSubsystem::CommandVehicle(const VehicleCommandRequest& Request, const TResponseDelegate<TempoEmpty>& ResponseContinuation) const
+void UTempoMovementControlServiceSubsystem::CommandVehicle(const NormalizedDrivingCommand& Request, const TResponseDelegate<TempoEmpty>& ResponseContinuation) const
 {
-	TArray<AActor*> VehicleControllers;
-	UGameplayStatics::GetAllActorsWithInterface(GetWorld(), UTempoVehicleControlInterface::StaticClass(), VehicleControllers);
-
-	const FString RequestedVehicleName(UTF8_TO_TCHAR(Request.vehicle_name().c_str()));
-
-	// If vehicle name is not specified and there is only one, assume the client wants that one
-	if (RequestedVehicleName.IsEmpty())
+	grpc::Status Status;
+	ATempoMovementController* Controller = FindMovementController(GetWorld(), UTF8_TO_TCHAR(Request.vehicle_name().c_str()), Status);
+	if (!Controller)
 	{
-		if (VehicleControllers.IsEmpty())
-		{
-			ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::NOT_FOUND, "No commandable vehicles found"));
-			return;
-		}
-		if (VehicleControllers.Num() > 1)
-		{
-			ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "More than one commandable vehicle found, vehicle name required."));
-			return;
-		}
-		
-		ITempoVehicleControlInterface* Controller = Cast<ITempoVehicleControlInterface>(VehicleControllers[0]);
-		Controller->HandleDrivingInput(FNormalizedDrivingInput(Request.acceleration(), Request.steering()));
-		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status_OK);
+		ResponseContinuation.ExecuteIfBound(TempoEmpty(), Status);
 		return;
 	}
-	
-	for (AActor* VehicleController : VehicleControllers)
+
+	if (!Controller->HandleDrivingInput(FNormalizedDrivingInput(Request.acceleration(), Request.steering())))
 	{
-		ITempoVehicleControlInterface* Controller = Cast<ITempoVehicleControlInterface>(VehicleController);
-		if (Controller->GetVehicleName().Equals(RequestedVehicleName, ESearchCase::IgnoreCase))
-		{
-			Controller->HandleDrivingInput(FNormalizedDrivingInput(Request.acceleration(), Request.steering()));
-			ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status_OK);
-			return;
-		}
+		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::UNIMPLEMENTED, "Vehicle controller does not support driving input"));
+		return;
+	}
+	ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status_OK);
+}
+
+void UTempoMovementControlServiceSubsystem::CommandVelocity(const VelocityCommand& Request, const TResponseDelegate<TempoEmpty>& ResponseContinuation) const
+{
+	grpc::Status Status;
+	ATempoMovementController* Controller = FindMovementController(GetWorld(), UTF8_TO_TCHAR(Request.vehicle_name().c_str()), Status);
+	if (!Controller)
+	{
+		ResponseContinuation.ExecuteIfBound(TempoEmpty(), Status);
+		return;
 	}
 
-	ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::NOT_FOUND, "Did not find a vehicle with the specified name"));
+	if (!Controller->HandleVelocityCommand(FromProto(Request.twist())))
+	{
+		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::UNIMPLEMENTED, "Vehicle controller does not support velocity commands"));
+		return;
+	}
+
+	ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status_OK);
+}
+
+void UTempoMovementControlServiceSubsystem::CommandAcceleration(const AccelerationCommand& Request, const TResponseDelegate<TempoEmpty>& ResponseContinuation) const
+{
+	grpc::Status Status;
+	ATempoMovementController* Controller = FindMovementController(GetWorld(), UTF8_TO_TCHAR(Request.vehicle_name().c_str()), Status);
+	if (!Controller)
+	{
+		ResponseContinuation.ExecuteIfBound(TempoEmpty(), Status);
+		return;
+	}
+
+	if (!Controller->HandleAccelerationCommand(FromProto(Request.accel())))
+	{
+		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::UNIMPLEMENTED, "Vehicle controller does not support acceleration commands"));
+		return;
+	}
+
+	ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status_OK);
 }
 
 void UTempoMovementControlServiceSubsystem::GetCommandablePawns(const TempoEmpty& Request, const TResponseDelegate<CommandablePawnsResponse>& ResponseContinuation) const

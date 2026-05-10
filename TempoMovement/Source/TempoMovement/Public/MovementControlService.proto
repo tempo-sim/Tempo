@@ -1,4 +1,4 @@
-// Copyright Tempo Simulation, LLC. All Rights Reserved
+ // Copyright Tempo Simulation, LLC. All Rights Reserved
 
 syntax = "proto3";
 
@@ -9,10 +9,25 @@ message CommandableVehiclesResponse{
   repeated string vehicle_name = 1;
 }
 
-message VehicleCommandRequest {
+// Open-loop driving input. Acceleration and steering are normalized to [-1, 1].
+message NormalizedDrivingCommand {
   string vehicle_name = 1;
   float acceleration = 2;
   float steering = 3;
+}
+
+// Closed-loop velocity command. Twist is in the vehicle body frame:
+// linear x forward, linear y to the right, angular z is yaw rate (right-handed, m/s and rad/s).
+message VelocityCommand {
+  string vehicle_name = 1;
+  TempoCore.Twist twist = 2;
+}
+
+// Closed-loop acceleration command. Same frame and conventions as VelocityCommand,
+// but in m/s^2 and rad/s^2.
+message AccelerationCommand {
+  string vehicle_name = 1;
+  TempoCore.Accel accel = 2;
 }
 
 message CommandablePawnsResponse {
@@ -40,8 +55,12 @@ message PawnMoveToLocationResponse {
 
 service MovementControlService {
   rpc GetCommandableVehicles(TempoCore.Empty) returns (CommandableVehiclesResponse);
-  
-  rpc CommandVehicle(VehicleCommandRequest) returns (TempoCore.Empty);
+
+  rpc CommandVehicle(NormalizedDrivingCommand) returns (TempoCore.Empty);
+
+  rpc CommandVelocity(VelocityCommand) returns (TempoCore.Empty);
+
+  rpc CommandAcceleration(AccelerationCommand) returns (TempoCore.Empty);
 
   rpc GetCommandablePawns(TempoCore.Empty) returns (CommandablePawnsResponse);
 

@@ -19,7 +19,9 @@ namespace TempoCore
 namespace TempoMovement
 {
 	class CommandableVehiclesResponse;
-	class VehicleCommandRequest;
+	class NormalizedDrivingCommand;
+	class VelocityCommand;
+	class AccelerationCommand;
 	class CommandablePawnsResponse;
 	class PawnMoveToLocationRequest;
 	class PawnMoveToLocationResponse;
@@ -49,8 +51,12 @@ public:
 	virtual void Deinitialize() override;
 
 	void GetCommandableVehicles(const TempoCore::Empty& Request, const TResponseDelegate<TempoMovement::CommandableVehiclesResponse>& ResponseContinuation) const;
-	
-	void CommandVehicle(const TempoMovement::VehicleCommandRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const;
+
+	void CommandVehicle(const TempoMovement::NormalizedDrivingCommand& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const;
+
+	void CommandVelocity(const TempoMovement::VelocityCommand& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const;
+
+	void CommandAcceleration(const TempoMovement::AccelerationCommand& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const;
 
 	void GetCommandablePawns(const TempoCore::Empty& Request, const TResponseDelegate<TempoMovement::CommandablePawnsResponse>& ResponseContinuation) const;
 

@@ -4,10 +4,10 @@
 
 #include "TempoWorld/WorldState.grpc.pb.h"
 
+#include "TempoAngularVelocityInterface.h"
 #include "TempoConversion.h"
 #include "TempoCoreUtils.h"
 #include "TempoGameMode.h"
-#include "TempoMovementInterface.h"
 #include "TempoWorld.h"
 #include "TempoWorldUtils.h"
 
@@ -148,16 +148,17 @@ TempoWorld::ActorState GetActorState(const AActor* Actor, const UWorld* World, b
 	ActorStateRotation->set_y(ActorRotation.Yaw);
 
 	const FVector ActorLinearVelocity = QuantityConverter<CM2M, L2R>::Convert(Actor->GetVelocity());
-	TempoCore::Vector* ActorStateLinearVel = ActorState.mutable_linear_velocity();
+	TempoCore::Twist* ActorStateVelocity = ActorState.mutable_velocity();
+	TempoCore::Vector* ActorStateLinearVel = ActorStateVelocity->mutable_linear();
 	ActorStateLinearVel->set_x(ActorLinearVelocity.X);
 	ActorStateLinearVel->set_y(ActorLinearVelocity.Y);
 	ActorStateLinearVel->set_z(ActorLinearVelocity.Z);
 
 	FVector ActorAngularVelocity;
-	const TArray<UActorComponent*> TempoMovementComponents = Actor->GetComponentsByInterface(UTempoMovementInterface::StaticClass());
-	if (TempoMovementComponents.Num() == 1)
+	const TArray<UActorComponent*> AngularVelocityComponents = Actor->GetComponentsByInterface(UTempoAngularVelocityInterface::StaticClass());
+	if (AngularVelocityComponents.Num() == 1)
 	{
-		ActorAngularVelocity = QuantityConverter<Deg2Rad, L2R>::Convert(Cast<ITempoMovementInterface>(TempoMovementComponents[0])->GetAngularVelocity());
+		ActorAngularVelocity = QuantityConverter<Deg2Rad, L2R>::Convert(Cast<ITempoAngularVelocityInterface>(AngularVelocityComponents[0])->GetAngularVelocity());
 	}
 	else if (const UPrimitiveComponent* PrimitiveComponent = Cast<UPrimitiveComponent>(Actor->GetRootComponent()))
 	{
@@ -167,7 +168,7 @@ TempoWorld::ActorState GetActorState(const AActor* Actor, const UWorld* World, b
 	// The L2R conversion above handles the fact that the Y-axis is flipped, but not the handedness of the rotations themselves.
 	ActorAngularVelocity = -ActorAngularVelocity;
 
-	TempoCore::Vector* ActorStateAngularVel = ActorState.mutable_angular_velocity();
+	TempoCore::Vector* ActorStateAngularVel = ActorStateVelocity->mutable_angular();
 	ActorStateAngularVel->set_x(ActorAngularVelocity.X);
 	ActorStateAngularVel->set_y(ActorAngularVelocity.Y);
 	ActorStateAngularVel->set_z(ActorAngularVelocity.Z);

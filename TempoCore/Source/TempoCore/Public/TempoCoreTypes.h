@@ -40,3 +40,35 @@ enum class EControlMode : uint8
 	Max UMETA(Hidden)
 };
 ENUM_RANGE_BY_COUNT(EControlMode, EControlMode::Max);
+
+// 6-DoF velocity expressed in the body frame: linear in m/s, angular in rad/s, right-handed.
+USTRUCT(BlueprintType)
+struct FTempoTwist
+{
+	GENERATED_BODY();
+
+	FTempoTwist() = default;
+	FTempoTwist(const FVector& LinearIn, const FVector& AngularIn) : Linear(LinearIn), Angular(AngularIn) {}
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FVector Linear = FVector::ZeroVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FVector Angular = FVector::ZeroVector;
+};
+
+// 6-DoF acceleration expressed in the body frame: linear in m/s^2, angular in rad/s^2, right-handed.
+USTRUCT(BlueprintType)
+struct FTempoAccel
+{
+	GENERATED_BODY();
+
+	FTempoAccel() = default;
+	FTempoAccel(const FVector& LinearIn, const FVector& AngularIn) : Linear(LinearIn), Angular(AngularIn) {}
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FVector Linear = FVector::ZeroVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FVector Angular = FVector::ZeroVector;
+};

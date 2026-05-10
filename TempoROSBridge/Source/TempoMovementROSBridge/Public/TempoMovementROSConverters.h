@@ -6,6 +6,8 @@
 
 #include "tempo_movement_ros_bridge/srv/get_commandable_vehicles.hpp"
 #include "tempo_movement_ros_bridge/srv/command_vehicle.hpp"
+#include "tempo_movement_ros_bridge/srv/command_velocity.hpp"
+#include "tempo_movement_ros_bridge/srv/command_acceleration.hpp"
 
 #include "TempoMovement/MovementControlService.grpc.pb.h"
 
@@ -33,11 +35,11 @@ struct TFromROSConverter<tempo_movement_ros_bridge::srv::GetCommandableVehicles:
 };
 
 template <>
-struct TFromROSConverter<tempo_movement_ros_bridge::srv::CommandVehicle::Request, TempoMovement::VehicleCommandRequest>
+struct TFromROSConverter<tempo_movement_ros_bridge::srv::CommandVehicle::Request, TempoMovement::NormalizedDrivingCommand>
 {
-	static TempoMovement::VehicleCommandRequest Convert(const tempo_movement_ros_bridge::srv::CommandVehicle::Request& ROSValue)
+	static TempoMovement::NormalizedDrivingCommand Convert(const tempo_movement_ros_bridge::srv::CommandVehicle::Request& ROSValue)
 	{
-		TempoMovement::VehicleCommandRequest TempoValue;
+		TempoMovement::NormalizedDrivingCommand TempoValue;
 		TempoValue.set_vehicle_name(ROSValue.vehicle_name);
 		TempoValue.set_acceleration(ROSValue.acceleration);
 		TempoValue.set_steering(ROSValue.steering);
@@ -51,6 +53,64 @@ struct TToROSConverter<tempo_movement_ros_bridge::srv::CommandVehicle::Response,
 	static tempo_movement_ros_bridge::srv::CommandVehicle::Response Convert(const TempoCore::Empty& TempoValue)
 	{
 		return tempo_movement_ros_bridge::srv::CommandVehicle::Response();
+	}
+};
+
+template <>
+struct TFromROSConverter<tempo_movement_ros_bridge::srv::CommandVelocity::Request, TempoMovement::VelocityCommand>
+{
+	static TempoMovement::VelocityCommand Convert(const tempo_movement_ros_bridge::srv::CommandVelocity::Request& ROSValue)
+	{
+		TempoMovement::VelocityCommand TempoValue;
+		TempoValue.set_vehicle_name(ROSValue.vehicle_name);
+		TempoCore::Twist* Twist = TempoValue.mutable_twist();
+		TempoCore::Vector* Linear = Twist->mutable_linear();
+		Linear->set_x(ROSValue.twist.linear_x);
+		Linear->set_y(ROSValue.twist.linear_y);
+		Linear->set_z(ROSValue.twist.linear_z);
+		TempoCore::Vector* Angular = Twist->mutable_angular();
+		Angular->set_x(ROSValue.twist.angular_x);
+		Angular->set_y(ROSValue.twist.angular_y);
+		Angular->set_z(ROSValue.twist.angular_z);
+		return TempoValue;
+	}
+};
+
+template <>
+struct TToROSConverter<tempo_movement_ros_bridge::srv::CommandVelocity::Response, TempoCore::Empty>
+{
+	static tempo_movement_ros_bridge::srv::CommandVelocity::Response Convert(const TempoCore::Empty& TempoValue)
+	{
+		return tempo_movement_ros_bridge::srv::CommandVelocity::Response();
+	}
+};
+
+template <>
+struct TFromROSConverter<tempo_movement_ros_bridge::srv::CommandAcceleration::Request, TempoMovement::AccelerationCommand>
+{
+	static TempoMovement::AccelerationCommand Convert(const tempo_movement_ros_bridge::srv::CommandAcceleration::Request& ROSValue)
+	{
+		TempoMovement::AccelerationCommand TempoValue;
+		TempoValue.set_vehicle_name(ROSValue.vehicle_name);
+		TempoCore::Accel* Accel = TempoValue.mutable_accel();
+		TempoCore::Vector* Linear = Accel->mutable_linear();
+		Linear->set_x(ROSValue.accel.linear_x);
+		Linear->set_y(ROSValue.accel.linear_y);
+		Linear->set_z(ROSValue.accel.linear_z);
+		TempoCore::Vector* Angular = Accel->mutable_angular();
+		Angular->set_x(ROSValue.accel.angular_x);
+		Angular->set_y(ROSValue.accel.angular_y);
+		Angular->set_z(ROSValue.accel.angular_z);
+		return TempoValue;
+	}
+};
+
+template <>
+struct TToROSConverter<tempo_movement_ros_bridge::srv::CommandAcceleration::Response, TempoCore::Empty>
+{
+	static tempo_movement_ros_bridge::srv::CommandAcceleration::Response Convert(const TempoCore::Empty& TempoValue)
+	{
+		return tempo_movement_ros_bridge::srv::CommandAcceleration::Response();
 	}
 };
 
@@ -69,7 +129,7 @@ struct TImplicitToROSConverter<FTempoGetCommandableVehiclesService>
 
 struct FTempoCommandVehicleService
 {
-	using Request = TempoMovement::VehicleCommandRequest;
+	using Request = TempoMovement::NormalizedDrivingCommand;
 	using Response = TempoCore::Empty;
 };
 
@@ -78,4 +138,30 @@ struct TImplicitToROSConverter<FTempoCommandVehicleService>
 {
 	using FromType = FTempoCommandVehicleService;
 	using ToType = tempo_movement_ros_bridge::srv::CommandVehicle;
+};
+
+struct FTempoCommandVelocityService
+{
+	using Request = TempoMovement::VelocityCommand;
+	using Response = TempoCore::Empty;
+};
+
+template <>
+struct TImplicitToROSConverter<FTempoCommandVelocityService>
+{
+	using FromType = FTempoCommandVelocityService;
+	using ToType = tempo_movement_ros_bridge::srv::CommandVelocity;
+};
+
+struct FTempoCommandAccelerationService
+{
+	using Request = TempoMovement::AccelerationCommand;
+	using Response = TempoCore::Empty;
+};
+
+template <>
+struct TImplicitToROSConverter<FTempoCommandAccelerationService>
+{
+	using FromType = FTempoCommandAccelerationService;
+	using ToType = tempo_movement_ros_bridge::srv::CommandAcceleration;
 };

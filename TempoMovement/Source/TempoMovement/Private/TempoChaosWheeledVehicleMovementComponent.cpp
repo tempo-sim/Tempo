@@ -2,8 +2,6 @@
 
 #include "TempoChaosWheeledVehicleMovementComponent.h"
 
-#include "TempoVehicleControlInterface.h"
-
 UTempoChaosWheeledVehicleMovementComponent::UTempoChaosWheeledVehicleMovementComponent()
 {
 	bReverseAsBrake = false;

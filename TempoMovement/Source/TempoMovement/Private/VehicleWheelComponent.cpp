@@ -2,7 +2,7 @@
 
 #include "VehicleWheelComponent.h"
 
-#include "TempoMovementInterface.h"
+#include "TempoAngularVelocityInterface.h"
 #include "GameFramework/PawnMovementComponent.h"
 
 #include "Kismet/KismetMathLibrary.h"
@@ -24,9 +24,9 @@ void UVehicleWheelComponent::TickComponent(float DeltaTime, enum ELevelTick Tick
 	{
 		if (const UPawnMovementComponent* PawnMovementComponent = Pawn->GetMovementComponent())
 		{
-			if (const ITempoMovementInterface* TempoMovement = Cast<ITempoMovementInterface>(PawnMovementComponent))
+			if (const ITempoAngularVelocityInterface* TempoAngularVelocity = Cast<ITempoAngularVelocityInterface>(PawnMovementComponent))
 			{
-				OwnerAngularVelocity = FMath::DegreesToRadians(TempoMovement->GetAngularVelocity());
+				OwnerAngularVelocity = FMath::DegreesToRadians(TempoAngularVelocity->GetAngularVelocity());
 			}
 		}
 	}

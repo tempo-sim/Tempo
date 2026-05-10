@@ -15,6 +15,8 @@ class TEMPOMOVEMENT_API UKinematicBicycleModelMovementComponent : public UKinema
 public:
 	virtual void SimulateMotion(float DeltaTime, float Steering, float NewLinearVelocity, FVector& OutNewVelocity, float& OutNewAngularVelocity) override;
 
+	virtual float ComputeNormalizedSteeringForYawRate(float TargetYawRateRadS, float CurrentLinearVelocityMps) const override;
+
 protected:
 	// The distance between the front and rear axles.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)

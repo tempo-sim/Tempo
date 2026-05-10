@@ -135,6 +135,62 @@ If you have C++ in your own project that calls these accessors, update them:
 + GetDefault<UTempoCoreSettings>()->GetServerCompressionLevel()
 ```
 
+### 6. Movement control API changes
+
+The TempoMovement API was reworked to support closed-loop velocity and acceleration commands in addition to the existing open-loop normalized driving input. This entailed a few breaking changes.
+
+**Proto / gRPC changes (`MovementControlService.proto`):**
+
+- `VehicleCommandRequest` is renamed to `NormalizedDrivingCommand`. The `CommandVehicle` RPC still exists and is wire-compatible aside from the message name. Regenerate clients and update references:
+
+```diff
+- request = VehicleCommandRequest(vehicle_name=..., acceleration=..., steering=...)
++ request = NormalizedDrivingCommand(vehicle_name=..., acceleration=..., steering=...)
+```
+
+- New RPCs `CommandVelocity` (takes a `VelocityCommand` wrapping `TempoCore.Twist`) and `CommandAcceleration` (takes an `AccelerationCommand` wrapping `TempoCore.Accel`) are additive. Both commands are in SI right-handed body-frame units (linear in m/s, m/s²; angular in rad/s, rad/s²). For wheeled vehicles only `linear.x` and `angular.z` are actuated; other axes are silently ignored.
+- New message types `TempoCore.Twist` and `TempoCore.Accel` live in `TempoCore/Geometry.proto`.
+
+**Proto / gRPC changes (`WorldState.proto`):**
+
+`ActorState`'s `linear_velocity` (field 4) and `angular_velocity` (field 5) are removed and reserved. A single `velocity` field (7) of type `TempoCore.Twist` replaces them. Clients reading the old fields by name fail to compile after regeneration; clients reading by tag will see the reserved tags. Update:
+
+```diff
+- linear = state.linear_velocity
+- angular = state.angular_velocity
++ linear = state.velocity.linear
++ angular = state.velocity.angular
+```
+
+**C++ class hierarchy changes:**
+
+- `ITempoVehicleControlInterface` / `UTempoVehicleControlInterface` are deleted. Controllers are now searched by class. If you implemented this interface on your own controller class, derive from the new `ATempoMovementController` base instead.
+- `ATempoVehicleController` is renamed to `ATempoWheeledVehicleController` and now inherits from `ATempoMovementController` (a new abstract `AAIController` subclass that owns the service-facing `GetVehicleName`, `HandleDrivingInput`, `HandleVelocityCommand`, `HandleAccelerationCommand` virtuals). A `+ClassRedirects=` entry in `TempoMovement/Config/DefaultTempoMovement.ini` handles Blueprint children, but **C++ subclasses must be updated manually** — CoreRedirects don't help compilation:
+
+```diff
+- class AMyVehicleController : public ATempoVehicleController { ... };
++ class AMyVehicleController : public ATempoWheeledVehicleController { ... };
+```
+
+- `HandleDrivingInput` changed from `void` to `bool` (returning `true` if accepted). Any C++ override fails to compile until updated:
+
+```diff
+- virtual void HandleDrivingInput(const FNormalizedDrivingInput& Input) override;
++ virtual bool HandleDrivingInput(const FNormalizedDrivingInput& Input) override;
+```
+
+- `ITempoMovementInterface` (the older interface that exposed `GetAngularVelocity` and `GetReverseEnabled`) was deleted. `GetAngularVelocity` is now on the new `ITempoAngularVelocityInterface` in TempoCore (so consumers like TempoWorld no longer need to depend on TempoMovement). `GetReverseEnabled` is now a concrete method on `UTempoChaosWheeledVehicleMovementComponent` (and `UKinematicVehicleMovementComponent`):
+
+```diff
+- if (ITempoMovementInterface* M = Cast<ITempoMovementInterface>(Component)) { M->GetAngularVelocity(); }
++ if (ITempoAngularVelocityInterface* M = Cast<ITempoAngularVelocityInterface>(Component)) { M->GetAngularVelocity(); }
+
+- ITempoMovementInterface* M = Cast<ITempoMovementInterface>(Component); M->GetReverseEnabled();
++ UTempoChaosWheeledVehicleMovementComponent* M = Cast<UTempoChaosWheeledVehicleMovementComponent>(Component); M->GetReverseEnabled();
+```
+
+- `UKinematicVehicleMovementComponent` now declares `ComputeNormalizedSteeringForYawRate` as `PURE_VIRTUAL`. Existing third-party subclasses (other than the shipped Bicycle and Unicycle) still compile but will assert at runtime if velocity/acceleration commands are routed to them. Implementations should return the normalized steering input in `[-1, 1]` that produces a given target yaw rate (rad/s, right-handed) at a given linear velocity (m/s).
+
 ## Proto package overrides reference
 
 The override file (`<YourProject>/Config/tempo_package_name_overrides.json`) maps proto basenames to the virtual module name they should appear as in user-facing artifacts:

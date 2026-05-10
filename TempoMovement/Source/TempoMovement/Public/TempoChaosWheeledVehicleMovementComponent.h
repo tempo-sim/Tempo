@@ -2,7 +2,7 @@
 
 #pragma once
 
-#include "TempoMovementInterface.h"
+#include "TempoAngularVelocityInterface.h"
 
 #include "ChaosWheeledVehicleMovementComponent.h"
 #include "CoreMinimal.h"
@@ -10,7 +10,7 @@
 #include "TempoChaosWheeledVehicleMovementComponent.generated.h"
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TEMPOMOVEMENT_API UTempoChaosWheeledVehicleMovementComponent : public UChaosWheeledVehicleMovementComponent, public ITempoMovementInterface
+class TEMPOMOVEMENT_API UTempoChaosWheeledVehicleMovementComponent : public UChaosWheeledVehicleMovementComponent, public ITempoAngularVelocityInterface
 {
 	GENERATED_BODY()
 
@@ -19,7 +19,7 @@ public:
 
 	virtual FVector GetAngularVelocity() const override { return VehicleState.VehicleWorldAngularVelocity; }
 
-	virtual bool GetReverseEnabled() const override { return bReverseEnabled; }
+	bool GetReverseEnabled() const { return bReverseEnabled; }
 
 protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)

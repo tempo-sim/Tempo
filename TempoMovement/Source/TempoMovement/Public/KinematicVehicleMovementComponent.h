@@ -2,14 +2,14 @@
 
 #pragma once
 
-#include "TempoMovementInterface.h"
+#include "TempoAngularVelocityInterface.h"
 
 #include "CoreMinimal.h"
 #include "GameFramework/PawnMovementComponent.h"
 #include "KinematicVehicleMovementComponent.generated.h"
 
 UCLASS(Abstract, ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TEMPOMOVEMENT_API UKinematicVehicleMovementComponent : public UPawnMovementComponent, public ITempoMovementInterface
+class TEMPOMOVEMENT_API UKinematicVehicleMovementComponent : public UPawnMovementComponent, public ITempoAngularVelocityInterface
 {
 	GENERATED_BODY()
 
@@ -20,7 +20,16 @@ public:
 
 	virtual FVector GetActorFeetLocation() const override;
 
-	virtual bool GetReverseEnabled() const override { return bReverseEnabled; }
+	bool GetReverseEnabled() const { return bReverseEnabled; }
+
+	// Signed forward speed in cm/s (Unreal native).
+	float GetLinearVelocity() const { return LinearVelocity; }
+
+	// Inverse motion model: returns the normalized steering input in [-1, 1] that would
+	// produce the desired yaw rate at the given linear velocity. Inputs are in SI right-handed.
+	// Implementations should clamp to [-1, 1] and saturate when the model cannot achieve the
+	// requested yaw rate (e.g. bicycle with |v| near zero).
+	virtual float ComputeNormalizedSteeringForYawRate(float TargetYawRateRadS, float CurrentLinearVelocityMps) const PURE_VIRTUAL(UKinematicVehicleMovementComponent::ComputeNormalizedSteeringForYawRate, return 0.0f;);
 
 protected:
 	virtual void SimulateMotion(float DeltaTime, float Steering, float NewLinearVelocity, FVector& OutLinearVelocity, float& OutAngularVelocity) {}

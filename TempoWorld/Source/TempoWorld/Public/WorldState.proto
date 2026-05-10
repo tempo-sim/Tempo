@@ -74,9 +74,10 @@ message ActorState {
   double timestamp = 1;
   string name = 2;
   TempoCore.Transform transform = 3;
-  TempoCore.Vector linear_velocity = 4;
-  TempoCore.Vector angular_velocity = 5;
+  reserved 4, 5;
+  reserved "linear_velocity", "angular_velocity";
   TempoCore.Box bounds = 6;
+  TempoCore.Twist velocity = 7;
 }
 
 message ActorStates {

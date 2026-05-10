@@ -28,3 +28,15 @@ message Box {
   Vector Min = 1;
   Vector Max = 2;
 }
+
+// 6-DoF velocity. Linear is m/s, angular is rad/s. Right-handed.
+message Twist {
+  Vector linear = 1;
+  Vector angular = 2;
+}
+
+// 6-DoF acceleration. Linear is m/s^2, angular is rad/s^2. Right-handed.
+message Accel {
+  Vector linear = 1;
+  Vector angular = 2;
+}
