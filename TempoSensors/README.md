@@ -8,7 +8,7 @@ The plugin ships a single `TempoSensors` module containing:
 | --- | --- |
 | `TempoSensorServiceSubsystem` | gRPC service that routes client requests to active sensors. |
 | `UTempoSceneCaptureComponent2D` / `UTempoTiledSceneCaptureComponent` | Shared infrastructure: multi-view rendering, lens-distortion models, plugin settings. |
-| `UTempoCamera` | Camera component. Color / label / depth / 2D bounding boxes. |
+| `UTempoCamera` | Camera component. Color / label / depth / 2D bounding boxes / H.264 video. |
 | `UTempoActorLabeler` | World subsystem. Tags meshes via the custom-depth stencil from a Label Table data table. |
 | `UTempoLidar` | Lidar component. Spherical scan rendered via 1–3 perspective tiles. |
 
@@ -22,6 +22,7 @@ The plugin ships a single `TempoSensors` module containing:
 - **Runtime reconfiguration.** Lens model, FOV, resolution, beam counts, beam calibration, and feather can all change at runtime (via Blueprint, editor, or `set_*_property` over the Tempo API). Reconfigure is applied at a safe point — when no readback is in flight — so it never tears mid-frame.
 - **Pipelined or synchronous timing.** In `FixedStep` time mode the default is to block the game thread until each frame's sensor data is ready (gRPC clients receive data with the simulation frame it was captured in). Setting `Project Settings → Tempo → Sensors → Pipelined Rendering = true` lets the game thread continue while game / render / readback run in parallel — higher throughput at the cost of 1-2 frames of latency. Each measurement carries the correct `capture_time` and `sequence_id` regardless.
 - **Two label-override mechanisms.** Per-mesh labels via the Label Table data table (Static Mesh and Actor-class entries; Static Mesh wins). Visually-imperceptible per-pixel overrides via subsurface color — used, for example, to label lane-line decals differently from the road they live on (`OverridableLabelRowName` / `OverridingLabelRowName` settings).
+- **Hardware-encoded H.264 video.** Optional `Video` measurement type alongside `ColorImage` — color-only (depth and labels need lossless) and opt-in per request, so clients that want raw pixels keep the existing `ColorImage` path. Encoding goes through Unreal's experimental `AVCodecs` plugin (NVENC on Win64/Linux, VideoToolbox on Mac, AMF/WMF on Win64), one encoder per camera, with `RepeatSPSPPS` so SPS/PPS prepend every IDR — late-joining clients just wait for the next keyframe instead of needing a separate parameter-set handshake. The encoded NALs stream over the same gRPC transport. See `VideoRequest` / `VideoFrame` in `Camera.proto`; per-request knobs are codec (H.264 today), bitrate, keyframe interval, and H.264 profile (Baseline / Main / High). Python (`tempo.TempoImageUtils.stream_video_images`, decoded with PyAV) and Rust (`SensorPlayground`, decoded with `ffmpeg-next`) example clients are wired up; C++ client decode is deferred.
 - **Pixel-perfect distortion.** Pinhole gets `Nearest` filtering by default (1:1 sampling, no blur); narrow non-pinhole gets `Bilinear`; wide (>120°) equidistant gets `Bicubic` to handle the highly non-uniform sampling density at the optical center. Override via `bAutoTextureFilterType` / `TextureFilterType`. Depth on equidistant lens models is reported as Euclidean distance from the camera origin (not depth along the camera axis), avoiding seam discontinuities.
 
 ## Getting started
@@ -52,6 +53,19 @@ The properties most worth knowing about (all `EditAnywhere` / `BlueprintReadWrit
 - `bEnableScreenPercentage` / `ScreenPercentage`: per-tile rasterization fraction (TSR / TAAU upscale to view-rect when `<100`). Trades shading detail for GPU.
 - `UpsamplingFactor` (1.0–4.0): scales the perspective render's view-rect by this factor before bilinear-downsampling to `SizeXY` in the stitch. Useful when distortion concentrates pixels in a small angular region (wide fisheye) and 1:1 sampling looks pixelated. Atlas memory grows by K².
 - `RateHz`: capture rate.
+
+### Stream H.264 video instead of raw color
+
+Cameras expose a `Video` measurement alongside `ColorImage`. Subscribe via `VideoRequest` and consume the resulting `VideoFrame` stream (Annex-B NAL units; `key_frame=true` marks IDRs, which carry SPS+PPS so a fresh decoder can sync on the next keyframe).
+
+- `codec` — H.264 today (one entry in the enum, room to grow).
+- `bitrate_kbps` — `0` for the default (~8000 at 1080p).
+- `keyframe_interval` — frames between IDRs; `0` for the default (30). Lower values reduce join latency at the cost of bitrate.
+- `profile` (H.264) — `H264_BASELINE` / `H264_MAIN` / `H264_HIGH`.
+
+The encoder is created lazily on first request and reopens automatically when resolution or any per-request parameter changes. Multiple subscribers to the same camera share one encoder — every subscriber receives the same encoded bytes — so adding clients is cheap, but they all share the same bitrate / KFI / profile (last writer wins on reconfigure).
+
+Python clients use `tempo.TempoImageUtils.stream_video_images(...)` (PyAV decoder); Rust clients see the wiring in `ExampleClients/Rust/SensorPlayground` (ffmpeg-next decoder, requires FFmpeg 8 dev headers locally for the `ffmpeg-next` build). C++ client decode is not yet provided.
 
 ### Configure a Lidar
 
