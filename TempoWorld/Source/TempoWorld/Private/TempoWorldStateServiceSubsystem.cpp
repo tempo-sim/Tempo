@@ -208,16 +208,22 @@ void UTempoWorldStateServiceSubsystem::GetCurrentActorState(const TempoWorld::Ac
 
 	const FString ActorName(UTF8_TO_TCHAR(Request.actor().c_str()));
 
+	if (ActorName.IsEmpty())
+	{
+		ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "actor_name must be specified in GetCurrentActorState request"));
+		return;
+	}
+
 	if (Actors.IsEmpty())
 	{
-		const FString ErrorMsg = FString::Printf(TEXT("No actor with name %s found"), *ActorName);
+		const FString ErrorMsg = FString::Printf(TEXT("No actor with name '%s' found for GetCurrentActorState request"), *ActorName);
 		ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::StatusCode::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 
 	if (Actors.Num() > 1)
 	{
-		const FString ErrorMsg = FString::Printf(TEXT("More than one actor with name %s found"), *ActorName);
+		const FString ErrorMsg = FString::Printf(TEXT("Found %d actors with name '%s' for GetCurrentActorState request (expected exactly one)"), Actors.Num(), *ActorName);
 		ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
@@ -254,6 +260,12 @@ void UTempoWorldStateServiceSubsystem::StreamOverlapEvents(const OverlapEventReq
 {
 	const FString ActorName(UTF8_TO_TCHAR(Request.actor().c_str()));
 
+	if (ActorName.IsEmpty())
+	{
+		ResponseContinuation.ExecuteIfBound(OverlapEventResponse(), grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "actor_name must be specified in StreamOverlapEvents request"));
+		return;
+	}
+
 	if (AActor* Actor = GetActorWithName(GetWorld(), ActorName))
 	{
 		PendingOverlapRequests.FindOrAdd(Actor->GetActorNameOrLabel()).Add(ResponseContinuation);
@@ -261,7 +273,7 @@ void UTempoWorldStateServiceSubsystem::StreamOverlapEvents(const OverlapEventReq
 		return;
 	}
 
-	const FString ErrorMsg = FString::Printf(TEXT("No actor with name %s found"), *ActorName);
+	const FString ErrorMsg = FString::Printf(TEXT("No actor with name '%s' found for StreamOverlapEvents request"), *ActorName);
 	ResponseContinuation.ExecuteIfBound(OverlapEventResponse(), grpc::Status(grpc::StatusCode::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 }
 
