@@ -176,15 +176,17 @@ void UTempoWorldControlServiceSubsystem::SpawnActor(const SpawnActorRequest& Req
 
 	if (Request.actor_type().empty())
 	{
-		ResponseContinuation.ExecuteIfBound(SpawnActorResponse(), grpc::Status(grpc::FAILED_PRECONDITION, "Type must be specified"));
+		ResponseContinuation.ExecuteIfBound(SpawnActorResponse(), grpc::Status(grpc::FAILED_PRECONDITION, "actor_type must be specified in SpawnActor request"));
 		return;
 	}
 
-	UClass* Class = GetSubClassWithName<AActor>(UTF8_TO_TCHAR(Request.actor_type().c_str()));
+	const FString ActorTypeName(UTF8_TO_TCHAR(Request.actor_type().c_str()));
+	UClass* Class = GetSubClassWithName<AActor>(ActorTypeName);
 
 	if (!Class)
 	{
-		ResponseContinuation.ExecuteIfBound(SpawnActorResponse(), grpc::Status(grpc::NOT_FOUND, "No class with that name found"));
+		const FString ErrorMsg = FString::Printf(TEXT("No actor class with name '%s' found (must be a subclass of AActor)"), *ActorTypeName);
+		ResponseContinuation.ExecuteIfBound(SpawnActorResponse(), grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 
@@ -194,10 +196,12 @@ void UTempoWorldControlServiceSubsystem::SpawnActor(const SpawnActorRequest& Req
 
 	if (!Request.relative_to_actor().empty())
 	{
-		const AActor* RelativeToActor = GetActorWithName(GetWorld(), UTF8_TO_TCHAR(Request.relative_to_actor().c_str()));
+		const FString RelativeToActorName(UTF8_TO_TCHAR(Request.relative_to_actor().c_str()));
+		const AActor* RelativeToActor = GetActorWithName(GetWorld(), RelativeToActorName);
 		if (!RelativeToActor)
 		{
-			ResponseContinuation.ExecuteIfBound(SpawnActorResponse(), grpc::Status(grpc::FAILED_PRECONDITION, "Failed to find relative to actor"));
+			const FString ErrorMsg = FString::Printf(TEXT("Failed to find relative_to_actor '%s' for SpawnActor request"), *RelativeToActorName);
+			ResponseContinuation.ExecuteIfBound(SpawnActorResponse(), grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 			return;
 		}
 		SpawnTransform = SpawnTransform * RelativeToActor->GetActorTransform();
@@ -213,7 +217,8 @@ void UTempoWorldControlServiceSubsystem::SpawnActor(const SpawnActorRequest& Req
 
 	if (!SpawnedActor)
 	{
-		ResponseContinuation.ExecuteIfBound(SpawnActorResponse(), grpc::Status(grpc::ABORTED, "Failed to spawn actor"));
+		const FString ErrorMsg = FString::Printf(TEXT("Failed to spawn actor of type '%s' at location (%f, %f, %f)"), *ActorTypeName, SpawnLocation.X, SpawnLocation.Y, SpawnLocation.Z);
+		ResponseContinuation.ExecuteIfBound(SpawnActorResponse(), grpc::Status(grpc::ABORTED, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 
@@ -233,20 +238,23 @@ void UTempoWorldControlServiceSubsystem::FinishSpawningActor(const FinishSpawnin
 {
 	if (Request.actor().empty())
 	{
-		ResponseContinuation.ExecuteIfBound(FinishSpawningActorResponse(), grpc::Status(grpc::FAILED_PRECONDITION, "Actor must be specified"));
+		ResponseContinuation.ExecuteIfBound(FinishSpawningActorResponse(), grpc::Status(grpc::FAILED_PRECONDITION, "actor must be specified in FinishSpawningActor request"));
 		return;
 	}
 
-	AActor* Actor = GetActorWithName(GetWorld(), UTF8_TO_TCHAR(Request.actor().c_str()));
+	const FString ActorName(UTF8_TO_TCHAR(Request.actor().c_str()));
+	AActor* Actor = GetActorWithName(GetWorld(), ActorName);
 	if (!Actor)
 	{
-		ResponseContinuation.ExecuteIfBound(FinishSpawningActorResponse(), grpc::Status(grpc::FAILED_PRECONDITION, "Failed to find actor"));
+		const FString ErrorMsg = FString::Printf(TEXT("Failed to find actor '%s' for FinishSpawningActor request"), *ActorName);
+		ResponseContinuation.ExecuteIfBound(FinishSpawningActorResponse(), grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 	const FTransform* SpawnTransform = DeferredSpawnTransforms.Find(Actor);
 	if (!SpawnTransform)
 	{
-		ResponseContinuation.ExecuteIfBound(FinishSpawningActorResponse(), grpc::Status(grpc::FAILED_PRECONDITION, "Failed to find spawn transform for actor"));
+		const FString ErrorMsg = FString::Printf(TEXT("No deferred spawn transform recorded for actor '%s' (was the actor spawned with deferred=true?)"), *ActorName);
+		ResponseContinuation.ExecuteIfBound(FinishSpawningActorResponse(), grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 	
@@ -264,14 +272,16 @@ void UTempoWorldControlServiceSubsystem::DestroyActor(const TempoWorld::DestroyA
 {
 	if (Request.actor().empty())
 	{
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Actor must be specified"));
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "actor must be specified in DestroyActor request"));
 		return;
 	}
 
-	AActor* Actor = GetActorWithName(GetWorld(), UTF8_TO_TCHAR(Request.actor().c_str()));
+	const FString ActorName(UTF8_TO_TCHAR(Request.actor().c_str()));
+	AActor* Actor = GetActorWithName(GetWorld(), ActorName);
 	if (!Actor)
 	{
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Failed to find actor"));
+		const FString ErrorMsg = FString::Printf(TEXT("Failed to find actor '%s' for DestroyActor request"), *ActorName);
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 	Actor->Destroy();
@@ -285,56 +295,65 @@ void UTempoWorldControlServiceSubsystem::AddComponent(const AddComponentRequest&
 
 	if (Request.component_type().empty())
 	{
-		ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::FAILED_PRECONDITION, "Type must be specified"));
+		ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::FAILED_PRECONDITION, "component_type must be specified in AddComponent request"));
 		return;
 	}
 
 	if (Request.actor().empty())
 	{
-		ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::FAILED_PRECONDITION, "Actor must be specified"));
+		ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::FAILED_PRECONDITION, "actor must be specified in AddComponent request"));
 		return;
 	}
 
-	AActor* Actor = GetActorWithName(GetWorld(), UTF8_TO_TCHAR(Request.actor().c_str()));
+	const FString ActorName(UTF8_TO_TCHAR(Request.actor().c_str()));
+	AActor* Actor = GetActorWithName(GetWorld(), ActorName);
 	if (!Actor)
 	{
-		ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::FAILED_PRECONDITION, "Failed to find actor"));
+		const FString ErrorMsg = FString::Printf(TEXT("Failed to find actor '%s' for AddComponent request"), *ActorName);
+		ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 
-	UClass* Class = GetSubClassWithName<UActorComponent>(UTF8_TO_TCHAR(Request.component_type().c_str()));
+	const FString ComponentTypeName(UTF8_TO_TCHAR(Request.component_type().c_str()));
+	UClass* Class = GetSubClassWithName<UActorComponent>(ComponentTypeName);
 	if (!Class)
 	{
-		ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::NOT_FOUND, "No component class with that name found"));
+		const FString ErrorMsg = FString::Printf(TEXT("No component class with name '%s' found (must be a subclass of UActorComponent)"), *ComponentTypeName);
+		ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 
 	const bool bIsClassSceneComponent = Class->IsChildOf<USceneComponent>();
 	if (Request.has_transform() && !bIsClassSceneComponent)
 	{
-		ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::NOT_FOUND, "Transform specified but class is not a scene component"));
+		const FString ErrorMsg = FString::Printf(TEXT("Transform was specified but component class '%s' is not a USceneComponent subclass"), *ComponentTypeName);
+		ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 
 	if (!Request.parent().empty() && !bIsClassSceneComponent)
 	{
-		ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::NOT_FOUND, "Parent specified but class is not a scene component"));
+		const FString ErrorMsg = FString::Printf(TEXT("Parent was specified but component class '%s' is not a USceneComponent subclass"), *ComponentTypeName);
+		ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 
 	if (!Request.socket().empty() && !bIsClassSceneComponent)
 	{
-		ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::NOT_FOUND, "Socket specified but class is not a scene component"));
+		const FString ErrorMsg = FString::Printf(TEXT("Socket was specified but component class '%s' is not a USceneComponent subclass"), *ComponentTypeName);
+		ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 
 	USceneComponent* ParentComponent = Actor->GetRootComponent();
 	if (!Request.parent().empty())
 	{
-		ParentComponent = GetComponentWithName<USceneComponent>(Actor, UTF8_TO_TCHAR(Request.parent().c_str()));
+		const FString ParentName(UTF8_TO_TCHAR(Request.parent().c_str()));
+		ParentComponent = GetComponentWithName<USceneComponent>(Actor, ParentName);
 		if (!ParentComponent)
 		{
-			ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::FAILED_PRECONDITION, "Parent not found"));
+			const FString ErrorMsg = FString::Printf(TEXT("Parent scene component '%s' not found on actor '%s'"), *ParentName, *ActorName);
+			ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 			return;
 		}
 	}
@@ -345,7 +364,8 @@ void UTempoWorldControlServiceSubsystem::AddComponent(const AddComponentRequest&
 		Socket = FName(UTF8_TO_TCHAR(Request.socket().c_str()));
 		if (!ParentComponent->DoesSocketExist(Socket))
 		{
-			ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::FAILED_PRECONDITION, "Socket not found on parent"));
+			const FString ErrorMsg = FString::Printf(TEXT("Socket '%s' not found on parent component '%s' (actor '%s')"), *Socket.ToString(), *ParentComponent->GetName(), *ActorName);
+			ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 			return;
 		}
 	}
@@ -387,27 +407,31 @@ void UTempoWorldControlServiceSubsystem::DestroyComponent(const TempoWorld::Dest
 {
 	if (Request.actor().empty())
 	{
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Actor must be specified"));
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "actor must be specified in DestroyComponent request"));
 		return;
 	}
 
 	if (Request.component().empty())
 	{
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Component must be specified"));
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "component must be specified in DestroyComponent request"));
 		return;
 	}
 
-	AActor* Actor = GetActorWithName(GetWorld(), UTF8_TO_TCHAR(Request.actor().c_str()));
+	const FString ActorName(UTF8_TO_TCHAR(Request.actor().c_str()));
+	AActor* Actor = GetActorWithName(GetWorld(), ActorName);
 	if (!Actor)
 	{
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, "Failed to find actor"));
+		const FString ErrorMsg = FString::Printf(TEXT("Failed to find actor '%s' for DestroyComponent request"), *ActorName);
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 
-	UActorComponent* Component = GetComponentWithName(Actor, UTF8_TO_TCHAR(Request.component().c_str()));
+	const FString ComponentName(UTF8_TO_TCHAR(Request.component().c_str()));
+	UActorComponent* Component = GetComponentWithName(Actor, ComponentName);
 	if (!Component)
 	{
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, "Failed to find component"));
+		const FString ErrorMsg = FString::Printf(TEXT("Failed to find component '%s' on actor '%s' for DestroyComponent request"), *ComponentName, *ActorName);
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 
@@ -428,14 +452,16 @@ void UTempoWorldControlServiceSubsystem::SetActorTransform(const TempoWorld::Set
 {
 	if (Request.actor().empty())
 	{
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Actor must be specified"));
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "actor must be specified in SetActorTransform request"));
 		return;
 	}
 
-	AActor* Actor = GetActorWithName(GetWorld(), UTF8_TO_TCHAR(Request.actor().c_str()));
+	const FString ActorName(UTF8_TO_TCHAR(Request.actor().c_str()));
+	AActor* Actor = GetActorWithName(GetWorld(), ActorName);
 	if (!Actor)
 	{
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, "Failed to find actor"));
+		const FString ErrorMsg = FString::Printf(TEXT("Failed to find actor '%s' for SetActorTransform request"), *ActorName);
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 
@@ -443,10 +469,12 @@ void UTempoWorldControlServiceSubsystem::SetActorTransform(const TempoWorld::Set
 
 	if (!Request.relative_to_actor().empty())
 	{
-		const AActor* RelativeToActor = GetActorWithName(GetWorld(), UTF8_TO_TCHAR(Request.relative_to_actor().c_str()));
+		const FString RelativeToActorName(UTF8_TO_TCHAR(Request.relative_to_actor().c_str()));
+		const AActor* RelativeToActor = GetActorWithName(GetWorld(), RelativeToActorName);
 		if (!RelativeToActor)
 		{
-			ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, "Failed to find relative to actor"));
+			const FString ErrorMsg = FString::Printf(TEXT("Failed to find relative_to_actor '%s' for SetActorTransform request on actor '%s'"), *RelativeToActorName, *ActorName);
+			ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 			return;
 		}
 		Transform = RelativeToActor->GetActorTransform() * Transform;
@@ -461,33 +489,38 @@ void UTempoWorldControlServiceSubsystem::SetComponentTransform(const TempoWorld:
 {
 	if (Request.actor().empty())
 	{
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Actor must be specified"));
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "actor must be specified in SetComponentTransform request"));
 		return;
 	}
 
 	if (Request.component().empty())
 	{
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Component must be specified"));
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "component must be specified in SetComponentTransform request"));
 		return;
 	}
 
-	const AActor* Actor = GetActorWithName(GetWorld(), UTF8_TO_TCHAR(Request.actor().c_str()));
+	const FString ActorName(UTF8_TO_TCHAR(Request.actor().c_str()));
+	const AActor* Actor = GetActorWithName(GetWorld(), ActorName);
 	if (!Actor)
 	{
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, "Failed to find actor"));
+		const FString ErrorMsg = FString::Printf(TEXT("Failed to find actor '%s' for SetComponentTransform request"), *ActorName);
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 
-	USceneComponent* Component = GetComponentWithName<USceneComponent>(Actor, UTF8_TO_TCHAR(Request.component().c_str()));
+	const FString ComponentName(UTF8_TO_TCHAR(Request.component().c_str()));
+	USceneComponent* Component = GetComponentWithName<USceneComponent>(Actor, ComponentName);
 	if (!Component)
 	{
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, "Failed to find component"));
+		const FString ErrorMsg = FString::Printf(TEXT("Failed to find scene component '%s' on actor '%s' for SetComponentTransform request"), *ComponentName, *ActorName);
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 
 	if (Component == Actor->GetRootComponent())
 	{
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Cannot set the transform of the root component. Set the transform of the owner actor instead."));
+		const FString ErrorMsg = FString::Printf(TEXT("Cannot set the transform of root component '%s' on actor '%s' directly. Use SetActorTransform on the owner actor instead."), *ComponentName, *ActorName);
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 
@@ -509,27 +542,31 @@ void UTempoWorldControlServiceSubsystem::ActivateComponent(const ActivateCompone
 {
 	if (Request.actor().empty())
 	{
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Actor must be specified"));
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "actor must be specified in ActivateComponent request"));
 		return;
 	}
 
 	if (Request.component().empty())
 	{
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Component must be specified"));
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "component must be specified in ActivateComponent request"));
 		return;
 	}
 
-	const AActor* Actor = GetActorWithName(GetWorld(), UTF8_TO_TCHAR(Request.actor().c_str()));
+	const FString ActorName(UTF8_TO_TCHAR(Request.actor().c_str()));
+	const AActor* Actor = GetActorWithName(GetWorld(), ActorName);
 	if (!Actor)
 	{
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, "No matching object"));
+		const FString ErrorMsg = FString::Printf(TEXT("Failed to find actor '%s' for ActivateComponent request"), *ActorName);
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
-	
-	UActorComponent* Component = GetComponentWithName(Actor, UTF8_TO_TCHAR(Request.component().c_str()));
+
+	const FString ComponentName(UTF8_TO_TCHAR(Request.component().c_str()));
+	UActorComponent* Component = GetComponentWithName(Actor, ComponentName);
 	if (!Component)
 	{
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Failed to find component"));
+		const FString ErrorMsg = FString::Printf(TEXT("Failed to find component '%s' on actor '%s' for ActivateComponent request"), *ComponentName, *ActorName);
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 
@@ -542,27 +579,31 @@ void UTempoWorldControlServiceSubsystem::DeactivateComponent(const DeactivateCom
 {
 	if (Request.actor().empty())
 	{
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Actor must be specified"));
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "actor must be specified in DeactivateComponent request"));
 		return;
 	}
 
 	if (Request.component().empty())
 	{
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Component must be specified"));
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "component must be specified in DeactivateComponent request"));
 		return;
 	}
 
-	const AActor* Actor = GetActorWithName(GetWorld(), UTF8_TO_TCHAR(Request.actor().c_str()));
+	const FString ActorName(UTF8_TO_TCHAR(Request.actor().c_str()));
+	const AActor* Actor = GetActorWithName(GetWorld(), ActorName);
 	if (!Actor)
 	{
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, "No matching object"));
+		const FString ErrorMsg = FString::Printf(TEXT("Failed to find actor '%s' for DeactivateComponent request"), *ActorName);
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
-	
-	UActorComponent* Component = GetComponentWithName(Actor, UTF8_TO_TCHAR(Request.component().c_str()));
+
+	const FString ComponentName(UTF8_TO_TCHAR(Request.component().c_str()));
+	UActorComponent* Component = GetComponentWithName(Actor, ComponentName);
 	if (!Component)
 	{
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Failed to find component"));
+		const FString ErrorMsg = FString::Printf(TEXT("Failed to find component '%s' on actor '%s' for DeactivateComponent request"), *ComponentName, *ActorName);
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 
@@ -579,13 +620,14 @@ grpc::Status GetObjectForRequest(const UWorld* World, const RequestType& Request
 
 	if (ActorName.IsEmpty())
 	{
-		return grpc::Status(grpc::FAILED_PRECONDITION, "Actor must be specified");
+		return grpc::Status(grpc::FAILED_PRECONDITION, "actor must be specified");
 	}
-	
+
 	AActor* Actor = GetActorWithName(World, ActorName);
 	if (!Actor)
 	{
-		return grpc::Status(grpc::NOT_FOUND, "Failed to find actor");
+		const FString ErrorMsg = FString::Printf(TEXT("Failed to find actor '%s'"), *ActorName);
+		return grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 	}
 
 	if (ComponentName.IsEmpty())
@@ -600,10 +642,11 @@ grpc::Status GetObjectForRequest(const UWorld* World, const RequestType& Request
 		}
 		else
 		{
-			return grpc::Status(grpc::NOT_FOUND, "Failed to find component");
+			const FString ErrorMsg = FString::Printf(TEXT("Failed to find component '%s' on actor '%s'"), *ComponentName, *ActorName);
+			return grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 		}
 	}
-	
+
 	return grpc::Status_OK;
 }
 
@@ -637,14 +680,16 @@ void UTempoWorldControlServiceSubsystem::GetAllComponents(const GetAllComponents
 {
 	if (Request.actor().empty())
 	{
-		ResponseContinuation.ExecuteIfBound(GetAllComponentsResponse(), grpc::Status(grpc::FAILED_PRECONDITION, "Actor must be specified"));
+		ResponseContinuation.ExecuteIfBound(GetAllComponentsResponse(), grpc::Status(grpc::FAILED_PRECONDITION, "actor must be specified in GetAllComponents request"));
 		return;
 	}
-	
-	const AActor* Actor = GetActorWithName(GetWorld(), UTF8_TO_TCHAR(Request.actor().c_str()));
+
+	const FString ActorName(UTF8_TO_TCHAR(Request.actor().c_str()));
+	const AActor* Actor = GetActorWithName(GetWorld(), ActorName);
 	if (!Actor)
 	{
-		ResponseContinuation.ExecuteIfBound(GetAllComponentsResponse(), grpc::Status(grpc::NOT_FOUND, "Failed to find actor"));
+		const FString ErrorMsg = FString::Printf(TEXT("Failed to find actor '%s' for GetAllComponents request"), *ActorName);
+		ResponseContinuation.ExecuteIfBound(GetAllComponentsResponse(), grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 	GetAllComponentsResponse Response;
@@ -928,14 +973,16 @@ void UTempoWorldControlServiceSubsystem::GetActorProperties(const GetActorProper
 {
 	if (Request.actor().empty())
 	{
-		ResponseContinuation.ExecuteIfBound(GetPropertiesResponse(), grpc::Status(grpc::FAILED_PRECONDITION, "Actor must be specified"));
+		ResponseContinuation.ExecuteIfBound(GetPropertiesResponse(), grpc::Status(grpc::FAILED_PRECONDITION, "actor must be specified in GetActorProperties request"));
 		return;
 	}
 
-	const AActor* Actor = GetActorWithName(GetWorld(), UTF8_TO_TCHAR(Request.actor().c_str()));
+	const FString ActorName(UTF8_TO_TCHAR(Request.actor().c_str()));
+	const AActor* Actor = GetActorWithName(GetWorld(), ActorName);
 	if (!Actor)
 	{
-		ResponseContinuation.ExecuteIfBound(GetPropertiesResponse(), grpc::Status(grpc::NOT_FOUND, "No matching object"));
+		const FString ErrorMsg = FString::Printf(TEXT("Failed to find actor '%s' for GetActorProperties request"), *ActorName);
+		ResponseContinuation.ExecuteIfBound(GetPropertiesResponse(), grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 
@@ -959,27 +1006,31 @@ void UTempoWorldControlServiceSubsystem::GetComponentProperties(const GetCompone
 {
 	if (Request.actor().empty())
 	{
-		ResponseContinuation.ExecuteIfBound(GetPropertiesResponse(), grpc::Status(grpc::FAILED_PRECONDITION, "Actor must be specified"));
+		ResponseContinuation.ExecuteIfBound(GetPropertiesResponse(), grpc::Status(grpc::FAILED_PRECONDITION, "actor must be specified in GetComponentProperties request"));
 		return;
 	}
 
 	if (Request.component().empty())
 	{
-		ResponseContinuation.ExecuteIfBound(GetPropertiesResponse(), grpc::Status(grpc::FAILED_PRECONDITION, "Component must be specified"));
+		ResponseContinuation.ExecuteIfBound(GetPropertiesResponse(), grpc::Status(grpc::FAILED_PRECONDITION, "component must be specified in GetComponentProperties request"));
 		return;
 	}
 
-	const AActor* Actor = GetActorWithName(GetWorld(), UTF8_TO_TCHAR(Request.actor().c_str()));
+	const FString ActorName(UTF8_TO_TCHAR(Request.actor().c_str()));
+	const AActor* Actor = GetActorWithName(GetWorld(), ActorName);
 	if (!Actor)
 	{
-		ResponseContinuation.ExecuteIfBound(GetPropertiesResponse(), grpc::Status(grpc::NOT_FOUND, "No matching object"));
+		const FString ErrorMsg = FString::Printf(TEXT("Failed to find actor '%s' for GetComponentProperties request"), *ActorName);
+		ResponseContinuation.ExecuteIfBound(GetPropertiesResponse(), grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 
-	const UActorComponent* Component = GetComponentWithName(Actor, UTF8_TO_TCHAR(Request.component().c_str()));
+	const FString ComponentName(UTF8_TO_TCHAR(Request.component().c_str()));
+	const UActorComponent* Component = GetComponentWithName(Actor, ComponentName);
 	if (!Component)
 	{
-		ResponseContinuation.ExecuteIfBound(GetPropertiesResponse(), grpc::Status(grpc::FAILED_PRECONDITION, "Failed to find component"));
+		const FString ErrorMsg = FString::Printf(TEXT("Failed to find component '%s' on actor '%s' for GetComponentProperties request"), *ComponentName, *ActorName);
+		ResponseContinuation.ExecuteIfBound(GetPropertiesResponse(), grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 
@@ -1023,7 +1074,7 @@ grpc::Status GetPropertyForRequest(const UObject* Object, const RequestType& Req
 
 	if (PropertyName.IsEmpty())
 	{
-		return grpc::Status(grpc::FAILED_PRECONDITION, "Property must be specified");
+		return grpc::Status(grpc::FAILED_PRECONDITION, "property must be specified");
 	}
 
 	const FString FirstPropertyName = SplitPropertyName(PropertyName);
@@ -1034,12 +1085,14 @@ grpc::Status GetPropertyForRequest(const UObject* Object, const RequestType& Req
 
 	if (!Property)
 	{
-		return grpc::Status(grpc::FAILED_PRECONDITION, "Property not found");
+		const FString ErrorMsg = FString::Printf(TEXT("Property '%s' not found on object '%s' (class '%s')"), *FirstPropertyName, *Object->GetName(), *Class->GetName());
+		return grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 	}
 
 	if (!InnerPropertyName.IsEmpty() && !(CastField<FStructProperty>(Property) || CastField<FArrayProperty>(Property)))
 	{
-		return grpc::Status(grpc::FAILED_PRECONDITION, "Inner properties can only be specified on structs and arrays");
+		const FString ErrorMsg = FString::Printf(TEXT("Inner property '%s' was specified on property '%s' (type '%s'), but inner properties can only be specified on structs and arrays"), *InnerPropertyName, *FirstPropertyName, *Property->GetCPPType());
+		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 	}
 
 	return grpc::Status_OK;
@@ -1078,7 +1131,8 @@ grpc::Status SetSinglePropertyValue<FEnumProperty, FString>(void* ValuePtr, FEnu
 	const int64 Value = GetEnumValueByAuthoredName(PropertyEnum, ValueStr);
 	if (Value == INDEX_NONE)
 	{
-		return grpc::Status(grpc::INVALID_ARGUMENT, "Invalid enum value");
+		const FString ErrorMsg = FString::Printf(TEXT("Invalid value '%s' for enum property '%s' (enum '%s')"), *ValueStr, *Property->GetName(), *PropertyEnum->GetName());
+		return grpc::Status(grpc::INVALID_ARGUMENT, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 	}
 	const FNumericProperty* EnumIntProperty = Property->GetUnderlyingProperty();
 	EnumIntProperty->SetIntPropertyValue(ValuePtr, Value);
@@ -1092,7 +1146,9 @@ grpc::Status SetSinglePropertyValue<FByteProperty, FString>(void* ValuePtr, FByt
 	const int64 Value = GetEnumValueByAuthoredName(PropertyEnum, ValueStr);
 	if (Value == INDEX_NONE)
 	{
-		return grpc::Status(grpc::INVALID_ARGUMENT, "Invalid enum value");
+		const FString EnumName = PropertyEnum ? PropertyEnum->GetName() : TEXT("<none>");
+		const FString ErrorMsg = FString::Printf(TEXT("Invalid value '%s' for byte/enum property '%s' (enum '%s')"), *ValueStr, *Property->GetName(), *EnumName);
+		return grpc::Status(grpc::INVALID_ARGUMENT, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 	}
 	Property->SetPropertyValue(ValuePtr, PropertyEnum->GetValueByIndex(Value));
 	return grpc::Status_OK;
@@ -1142,7 +1198,8 @@ grpc::Status SetSinglePropertyInContainer(void* Container, FProperty* Property, 
 	{
 		if (PropertyName.IsEmpty())
 		{
-			return grpc::Status(grpc::FAILED_PRECONDITION, "Struct inner property must be specified");
+			const FString ErrorMsg = FString::Printf(TEXT("Inner property must be specified for struct property '%s' (type '%s')"), *Property->GetName(), *StructProperty->Struct->GetStructCPPName());
+			return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 		}
 
 		for (FProperty* InnerProperty = StructProperty->Struct->PropertyLink; InnerProperty != nullptr; InnerProperty = InnerProperty->PropertyLinkNext)
@@ -1152,18 +1209,21 @@ grpc::Status SetSinglePropertyInContainer(void* Container, FProperty* Property, 
 				return SetSinglePropertyInContainer<PropertyType>(ValuePtr, InnerProperty, InnerPropertyName, Value);
 			}
 		}
-		return grpc::Status(grpc::NOT_FOUND, "No matching property found for " + std::string(TCHAR_TO_UTF8(*FirstPropertyName)));
+		const FString ErrorMsg = FString::Printf(TEXT("No matching inner property '%s' found on struct property '%s' (type '%s')"), *FirstPropertyName, *Property->GetName(), *StructProperty->Struct->GetStructCPPName());
+		return grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 	}
 	if (const FArrayProperty* ArrayProperty = CastField<FArrayProperty>(Property))
 	{
 		if (PropertyName.IsEmpty())
 		{
-			return grpc::Status(grpc::FAILED_PRECONDITION, "ArrayIndex must be specified");
+			const FString ErrorMsg = FString::Printf(TEXT("Array index must be specified for array property '%s'"), *Property->GetName());
+			return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 		}
 
 		if (!FirstPropertyName.IsNumeric() || FirstPropertyName.Contains(FString(TEXT("."))) || FirstPropertyName.Contains(FString(TEXT("-"))))
 		{
-			return grpc::Status(grpc::FAILED_PRECONDITION, "ArrayIndex must be a non-negative integer (" + std::string(TCHAR_TO_UTF8(*FirstPropertyName)));
+			const FString ErrorMsg = FString::Printf(TEXT("Array index must be a non-negative integer for array property '%s' (got '%s')"), *Property->GetName(), *FirstPropertyName);
+			return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 		}
 		const int32 ElementIndex = FCString::Atoi(*FirstPropertyName);
 
@@ -1171,28 +1231,32 @@ grpc::Status SetSinglePropertyInContainer(void* Container, FProperty* Property, 
 
 		if (ElementIndex < 0)
 		{
-			return grpc::Status(grpc::FAILED_PRECONDITION, "Invalid index (less than zero)");
+			const FString ErrorMsg = FString::Printf(TEXT("Array index %d is less than zero for array property '%s'"), ElementIndex, *Property->GetName());
+			return grpc::Status(grpc::OUT_OF_RANGE, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 		}
 		if (ElementIndex > ArrayHelper.Num())
 		{
-			return grpc::Status(grpc::FAILED_PRECONDITION, "Invalid index (greater than length of array)");
+			const FString ErrorMsg = FString::Printf(TEXT("Array index %d is greater than length %d of array property '%s' (use index == length to append)"), ElementIndex, ArrayHelper.Num(), *Property->GetName());
+			return grpc::Status(grpc::OUT_OF_RANGE, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 		}
 		if (ElementIndex == ArrayHelper.Num())
 		{
 			ArrayHelper.InsertValues(ArrayHelper.Num(), 1);
 		}
-		
+
 		return SetSinglePropertyInContainer<PropertyType, ValueType>(ArrayHelper.GetRawPtr(ElementIndex), ArrayProperty->Inner, InnerPropertyName, Value);
 	}
 
 	if (!InnerPropertyName.IsEmpty())
 	{
-		return grpc::Status(grpc::FAILED_PRECONDITION, "Inner property not found");
+		const FString ErrorMsg = FString::Printf(TEXT("Inner property '%s' was specified on property '%s' (type '%s'), but it has no inner properties"), *InnerPropertyName, *Property->GetName(), *Property->GetCPPType());
+		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 	}
 	PropertyType* TypedProperty = CastField<PropertyType>(Property);
 	if (!TypedProperty)
 	{
-		return grpc::Status(grpc::FAILED_PRECONDITION, "Property did not have correct type");
+		const FString ErrorMsg = FString::Printf(TEXT("Property '%s' has type '%s' which does not match the requested type"), *Property->GetName(), *Property->GetCPPType());
+		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 	}
 
 	return SetSinglePropertyValue(ValuePtr, TypedProperty, Value);
@@ -1211,7 +1275,7 @@ grpc::Status SetSinglePropertyImpl(const UWorld* World, const RequestType& Reque
 	const FString PropertyName(UTF8_TO_TCHAR(Request.property().c_str()));
 	if (PropertyName.IsEmpty())
 	{
-		return grpc::Status(grpc::FAILED_PRECONDITION, "Property must be specified");
+		return grpc::Status(grpc::FAILED_PRECONDITION, "property must be specified in SetProperty request");
 	}
 
 	FString InnerPropertyName;
@@ -1267,7 +1331,8 @@ grpc::Status SetArrayPropertyImpl(const UWorld* World, const RequestType& Reques
 	const FArrayProperty* ArrayProperty = CastField<FArrayProperty>(Property);
 	if (!ArrayProperty)
 	{
-		return grpc::Status(grpc::FAILED_PRECONDITION, "Property did not have correct type");
+		const FString ErrorMsg = FString::Printf(TEXT("Property '%s' has type '%s' but an array property was expected"), *Property->GetName(), *Property->GetCPPType());
+		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 	}
 
 	FScriptArrayHelper ArrayHelper{ ArrayProperty, Property->ContainerPtrToValuePtr<void>(Object) };
@@ -1275,7 +1340,8 @@ grpc::Status SetArrayPropertyImpl(const UWorld* World, const RequestType& Reques
 	PropertyType* InnerProperty = CastField<PropertyType>(ArrayProperty->Inner);
 	if (!InnerProperty)
 	{
-		return grpc::Status(grpc::FAILED_PRECONDITION, "Property did not have correct type");
+		const FString ErrorMsg = FString::Printf(TEXT("Array property '%s' has element type '%s' which does not match the requested type"), *Property->GetName(), *ArrayProperty->Inner->GetCPPType());
+		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 	}
 
 #if WITH_EDITOR
@@ -1323,13 +1389,15 @@ grpc::Status SetStructPropertyImpl(const UWorld* World, const RequestType& Reque
 
 	if (!InnerPropertyName.IsEmpty())
 	{
-		return grpc::Status(grpc::FAILED_PRECONDITION, "Inner property not found");
+		const FString ErrorMsg = FString::Printf(TEXT("Inner property '%s' is not supported when setting struct property '%s' as a whole"), *InnerPropertyName, *Property->GetName());
+		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 	}
 
 	const FStructProperty* StructProperty = CastField<FStructProperty>(Property);
 	if (!StructProperty)
 	{
-		return grpc::Status(grpc::FAILED_PRECONDITION, "Property is not a struct");
+		const FString ErrorMsg = FString::Printf(TEXT("Property '%s' has type '%s' but a struct property of type '%s' was expected"), *Property->GetName(), *Property->GetCPPType(), *ExpectedStructCPPName);
+		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 	}
 
 	const FString StructCPPName = StructProperty->Struct->GetStructCPPName();
@@ -1354,7 +1422,8 @@ grpc::Status SetStructPropertyImpl(const UWorld* World, const RequestType& Reque
 	}
 	else
 	{
-		return grpc::Status(grpc::FAILED_PRECONDITION, "Struct did not have the correct type");
+		const FString ErrorMsg = FString::Printf(TEXT("Struct property '%s' has type '%s' but type '%s' was expected"), *Property->GetName(), *StructCPPName, *ExpectedStructCPPName);
+		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 	}
 
 	return grpc::Status_OK;
@@ -1570,17 +1639,20 @@ grpc::Status SetPropertyImpl<SetComponentPropertyRequest>(const UWorld* World, c
 	FullName.Split(TEXT(":"), &ActorName, &ComponentName);
 	if (ActorName.IsEmpty() || ComponentName.IsEmpty())
 	{
-		return grpc::Status(grpc::FAILED_PRECONDITION, "Value must be specified as ActorName:ComponentName");
+		const FString ErrorMsg = FString::Printf(TEXT("Component property value '%s' is malformed; expected 'ActorName:ComponentName'"), *FullName);
+		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 	}
 	const AActor* Actor = GetActorWithName(World, ActorName);
 	if (!Actor)
 	{
-		return grpc::Status(grpc::NOT_FOUND, "Did not find actor with name " + std::string(TCHAR_TO_UTF8(*ActorName)));
+		const FString ErrorMsg = FString::Printf(TEXT("Failed to find actor '%s' for component property value '%s'"), *ActorName, *FullName);
+		return grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 	}
 	UActorComponent* Component = GetComponentWithName(Actor, ComponentName);
 	if (!Component)
 	{
-		return grpc::Status(grpc::NOT_FOUND, "Did not find component with name " + std::string(TCHAR_TO_UTF8(*ComponentName)));
+		const FString ErrorMsg = FString::Printf(TEXT("Failed to find component '%s' on actor '%s' for component property value '%s'"), *ComponentName, *ActorName, *FullName);
+		return grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 	}
 	return SetObjectProperty(World, Request, Component);
 }
@@ -1723,17 +1795,20 @@ grpc::Status SetPropertyImpl<SetComponentArrayPropertyRequest>(const UWorld* Wor
 		FullName.Split(TEXT(":"), &ActorName, &ComponentName);
 		if (ActorName.IsEmpty() || ComponentName.IsEmpty())
 		{
-			return grpc::Status(grpc::FAILED_PRECONDITION, "Value must be specified as ActorName:ComponentName");
+			const FString ErrorMsg = FString::Printf(TEXT("Component array property value '%s' is malformed; expected 'ActorName:ComponentName'"), *FullName);
+			return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 		}
 		const AActor* Actor = GetActorWithName(World, ActorName);
 		if (!Actor)
 		{
-			return grpc::Status(grpc::NOT_FOUND, "Did not find actor with name " + std::string(TCHAR_TO_UTF8(*ActorName)));
+			const FString ErrorMsg = FString::Printf(TEXT("Failed to find actor '%s' for component array property value '%s'"), *ActorName, *FullName);
+			return grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 		}
 		UActorComponent* Component = GetComponentWithName(Actor, ComponentName);
 		if (!Component)
 		{
-			return grpc::Status(grpc::NOT_FOUND, "Did not find component with name " + std::string(TCHAR_TO_UTF8(*ComponentName)));
+			const FString ErrorMsg = FString::Printf(TEXT("Failed to find component '%s' on actor '%s' for component array property value '%s'"), *ComponentName, *ActorName, *FullName);
+			return grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 		}
 		ComponentArray.Add(Component);
 	}
@@ -1758,7 +1833,7 @@ void UTempoWorldControlServiceSubsystem::CallObjectFunction(const CallFunctionRe
 
 	if (Request.function().empty())
 	{
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Function name must be specified"));
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "function must be specified in CallFunction request"));
 		return;
 	}
 
@@ -1766,13 +1841,15 @@ void UTempoWorldControlServiceSubsystem::CallObjectFunction(const CallFunctionRe
 	UFunction* Function = Object->GetClass()->FindFunctionByName(FunctionName);
 	if (!Function)
 	{
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, "Function not found"));
+		const FString ErrorMsg = FString::Printf(TEXT("Function '%s' not found on object '%s' (class '%s')"), *FunctionName.ToString(), *Object->GetName(), *Object->GetClass()->GetName());
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 
 	if (Function->NumParms != 0)
 	{
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Only functions with no arguments and void return type are currently supported"));
+		const FString ErrorMsg = FString::Printf(TEXT("Function '%s' on object '%s' has %d parameters, but only functions with no arguments and void return type are currently supported"), *FunctionName.ToString(), *Object->GetName(), Function->NumParms);
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 
