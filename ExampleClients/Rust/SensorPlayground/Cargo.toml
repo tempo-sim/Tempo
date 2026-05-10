@@ -17,6 +17,12 @@ rand = "0.8"
 tempfile = "3"
 show-image = "=0.14.0"
 image = { version = "0.25", default-features = false, features = ["jpeg"] }
+# H.264 decode for the Video stream measurement type. Wraps system libavcodec/libavformat/libswscale —
+# requires `pkg-config` and FFmpeg dev headers on the build machine (e.g. `brew install ffmpeg pkg-config`
+# on macOS, `apt install libavcodec-dev libavformat-dev libswscale-dev` on Linux). Using the
+# `ffmpeg-next` 8.x line tracks current upstream FFmpeg (8.x); the 7.x line panics at bindgen against
+# FFmpeg 8 because `avfft.h` was removed.
+ffmpeg-next = "8"
 
 [target.'cfg(not(target_os = "macos"))'.dependencies]
 # kiss3d uses GLFW, which requires the main thread on macOS — show-image already

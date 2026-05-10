@@ -3,6 +3,7 @@
 #include "TempoCamera.h"
 
 #include "TempoActorLabeler.h"
+#include "TempoCameraVideoEncoder.h"
 #include "TempoCoreUtils.h"
 #include "TempoLabelTypes.h"
 #include "TempoSensorsConstants.h"
@@ -299,7 +300,7 @@ void TTextureRead<FCameraPixelWithDepth>::RespondToRequests(const TArray<FBoundi
 UTempoCamera::UTempoCamera()
 {
 	PrimaryComponentTick.bCanEverTick = true;
-	MeasurementTypes = { EMeasurementType::COLOR_IMAGE, EMeasurementType::LABEL_IMAGE, EMeasurementType::DEPTH_IMAGE, EMeasurementType::BOUNDING_BOXES };
+	MeasurementTypes = { EMeasurementType::COLOR_IMAGE, EMeasurementType::LABEL_IMAGE, EMeasurementType::DEPTH_IMAGE, EMeasurementType::BOUNDING_BOXES, EMeasurementType::VIDEO };
 	bAutoActivate = true;
 
 	// UTempoCamera itself doubles as the proxy scene capture: its PPM replaces scene color with
@@ -438,7 +439,7 @@ void UTempoCamera::UpdateInternalMirrors()
 
 bool UTempoCamera::HasPendingCameraRequests() const
 {
-	return !PendingColorImageRequests.IsEmpty() || !PendingLabelImageRequests.IsEmpty() || !PendingDepthImageRequests.IsEmpty() || !PendingBoundingBoxesRequests.IsEmpty();
+	return !PendingColorImageRequests.IsEmpty() || !PendingLabelImageRequests.IsEmpty() || !PendingDepthImageRequests.IsEmpty() || !PendingBoundingBoxesRequests.IsEmpty() || !PendingVideoRequests.IsEmpty();
 }
 
 TOptional<TFuture<void>> UTempoCamera::SendMeasurements()
@@ -465,6 +466,43 @@ TOptional<TFuture<void>> UTempoCamera::SendMeasurements()
 		if (bReadHasDepth)
 		{
 			PendingDepthImageRequests.Empty();
+		}
+	}
+
+	// Drain encoded video packets and broadcast the most recent to every currently-pending
+	// VideoRequest. The gRPC layer re-queues a fresh request per stream client after each response,
+	// so emptying the pending list after the broadcast is correct. The encoder concatenates an
+	// entire access unit into one packet, so in steady state DrainPackets yields exactly one entry;
+	// older entries are stale (only happens under game-thread backlog) and dropping them is
+	// preferable to firing each subscriber's ResponseContinuation multiple times.
+	if (VideoEncoder.IsValid() && !PendingVideoRequests.IsEmpty())
+	{
+		TArray<FTempoEncodedVideoPacket> Packets;
+		VideoEncoder->DrainPackets(Packets);
+		if (!Packets.IsEmpty())
+		{
+			const FTempoEncodedVideoPacket& Packet = Packets.Last();
+			TempoSensors::VideoFrame Frame;
+			Frame.set_width(Packet.Width);
+			Frame.set_height(Packet.Height);
+			Frame.set_codec(TempoSensors::VideoCodec::H264);
+			Frame.set_key_frame(Packet.bIsKeyframe);
+			if (!Packet.Data.IsEmpty())
+			{
+				Frame.mutable_data()->assign(reinterpret_cast<const char*>(Packet.Data.GetData()), Packet.Data.Num());
+			}
+			const double TransmissionTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
+			TempoSensors::MeasurementHeader* Header = Frame.mutable_header();
+			Header->set_sequence_id(Packet.SequenceId);
+			Header->set_capture_time_s(Packet.CaptureTime);
+			Header->set_transmission_time_s(TransmissionTime);
+			Header->set_sensor(TCHAR_TO_UTF8(*GetSensorName()));
+
+			for (const FVideoRequest& Req : PendingVideoRequests)
+			{
+				Req.ResponseContinuation.ExecuteIfBound(Frame, grpc::Status_OK);
+			}
+			PendingVideoRequests.Empty();
 		}
 	}
 
@@ -508,9 +546,67 @@ void UTempoCamera::RequestMeasurement(const TempoSensors::BoundingBoxesRequest& 
 	PendingBoundingBoxesRequests.Add({ Request, ResponseContinuation});
 }
 
+void UTempoCamera::RequestMeasurement(const TempoSensors::VideoRequest& Request, const TResponseDelegate<TempoSensors::VideoFrame>& ResponseContinuation)
+{
+	PendingVideoRequests.Add({ Request, ResponseContinuation });
+
+	// Lazy-construct on first request. Encoder is opened with a real Width/Height the first time
+	// a frame is encoded — we don't know SizeXY until SharedFinalTextureTarget exists.
+	if (!VideoEncoder.IsValid())
+	{
+		VideoEncoder = MakeUnique<FTempoCameraVideoEncoder>();
+	}
+	bVideoEncoderConfigured = false;
+}
+
 FTempoCameraIntrinsics UTempoCamera::GetIntrinsics() const
 {
 	return FTempoCameraIntrinsics(SizeXY, FOVAngle);
+}
+
+void UTempoCamera::OnRenderCompleted()
+{
+	Super::OnRenderCompleted();
+
+	if (!VideoEncoder.IsValid() || PendingVideoRequests.IsEmpty())
+	{
+		return;
+	}
+
+	UTextureRenderTarget2D* RT = SharedFinalTextureTarget;
+	if (!RT || RT->SizeX <= 0 || RT->SizeY <= 0)
+	{
+		return;
+	}
+
+	// (Re)configure the encoder. Latest pending request wins — gives a streaming client a way to
+	// change codec params mid-stream (next request will carry the new values). Reconfigure forces
+	// an IDR.
+	FTempoCameraVideoEncoder::FConfig Config;
+	Config.Width = static_cast<uint32>(RT->SizeX);
+	Config.Height = static_cast<uint32>(RT->SizeY);
+	Config.TargetFramerate = static_cast<uint32>(FMath::Max(1.0f, GetRate()));
+	const TempoSensors::VideoRequest& LatestRequest = PendingVideoRequests.Last().Request;
+	Config.Codec = LatestRequest.codec();
+	Config.BitrateKbps = LatestRequest.bitrate_kbps();
+	Config.KeyframeInterval = LatestRequest.keyframe_interval();
+	Config.H264Profile = LatestRequest.profile();
+	if (!VideoEncoder->Configure(Config))
+	{
+		return;
+	}
+
+	// Stamp packets with the just-rendered frame's id (RenderCapture already incremented past it).
+	const int32 EncodedSequenceId = FMath::Max(0, SequenceId - 1);
+	const double CaptureTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
+
+	UTextureRenderTarget2D* RTCapture = RT;
+	FTempoCameraVideoEncoder* EncoderPtr = VideoEncoder.Get();
+	ENQUEUE_RENDER_COMMAND(TempoCameraEncodeVideo)(
+		[EncoderPtr, RTCapture, CaptureTime, EncodedSequenceId](FRHICommandListImmediate&)
+		{
+			EncoderPtr->EncodeRenderTarget_RenderThread(RTCapture, CaptureTime, EncodedSequenceId);
+		});
 }
 
 TFuture<void> UTempoCamera::DecodeAndRespond(TUniquePtr<FTextureRead> TextureRead)
@@ -898,20 +994,6 @@ void UTempoCamera::RenderCapture()
 	const float SavedTSRShadingRejectionFlickingFrameRateCap = TSRShadingRejectionFlickingFrameRateCapCVar->GetFloat();
 	TSRShadingRejectionFlickingFrameRateCapCVar->Set(RateHz, ECVF_SetByConsole);
 
-	// TSR history update rate: default 1.0 mixes ~1/N of new shading per frame, which produces
-	// multi-frame ghost trails on slow movers. At low capture rates the trail length in wall-clock
-	// time is rate-inversely proportional, so 10Hz captures show ~3× the trail of 30Hz. Pushing
-	// this to 4.0 lets history rotate over much faster, which shortens the trail in frames at the
-	// cost of slightly noisier static pixels — acceptable for synthetic captures.
-	float SavedTSRHistoryUpdateRate = 0.0f;
-	IConsoleVariable* TSRHistoryUpdateRateCVar =
-		IConsoleManager::Get().FindConsoleVariable(TEXT("r.TSR.History.UpdateRate"));
-	if (TSRHistoryUpdateRateCVar)
-	{
-		SavedTSRHistoryUpdateRate = TSRHistoryUpdateRateCVar->GetFloat();
-		TSRHistoryUpdateRateCVar->Set(4.0f, ECVF_SetByConsole);
-	}
-
 	// Lumen probe gather temporal filter is the dominant source of *Lumen* ghost trails — it
 	// blends each probe's radiance with prior frames so noise stays low, but in dim scenes the
 	// signal is weak and history dominates, so moving objects leave a Lumen-shaped trail behind
@@ -1284,11 +1366,6 @@ void UTempoCamera::RenderCapture()
 	if (TSRShadingRejectionFlickingFrameRateCapCVar)
 	{
 		TSRShadingRejectionFlickingFrameRateCapCVar->Set(SavedTSRShadingRejectionFlickingFrameRateCap, ECVF_SetByConsole);
-	}
-
-	if (TSRHistoryUpdateRateCVar)
-	{
-		TSRHistoryUpdateRateCVar->Set(SavedTSRHistoryUpdateRate, ECVF_SetByConsole);
 	}
 
 	if (LumenScreenProbeTemporalFilterCVar)

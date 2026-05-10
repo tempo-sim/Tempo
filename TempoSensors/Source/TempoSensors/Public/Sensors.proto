@@ -13,6 +13,7 @@ enum MeasurementType {
   MT_LABEL_IMAGE = 3;
   MT_LIDAR_SCAN = 4;
   MT_BOUNDING_BOXES = 5;
+  MT_VIDEO = 6;
 }
 
 message SensorDescriptor {
@@ -42,4 +43,6 @@ service SensorService {
   rpc StreamBoundingBoxes(TempoSensors.BoundingBoxesRequest) returns (stream TempoSensors.BoundingBoxes);
 
   rpc StreamLidarScans(TempoSensors.LidarScanRequest) returns (stream TempoSensors.LidarScanSegment);
+
+  rpc StreamVideo(TempoSensors.VideoRequest) returns (stream TempoSensors.VideoFrame);
 }

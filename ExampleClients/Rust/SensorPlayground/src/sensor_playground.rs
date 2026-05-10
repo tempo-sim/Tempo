@@ -49,6 +49,7 @@ fn measurement_type_label(m: MeasurementType) -> &'static str {
         MeasurementType::MtLabelImage => "Label",
         MeasurementType::MtLidarScan => "PointCloud",
         MeasurementType::MtBoundingBoxes => "BoundingBoxes",
+        MeasurementType::MtVideo => "Video",
     }
 }
 
@@ -420,6 +421,124 @@ fn hsv_to_rgb(h: f64, s: f64, v: f64) -> (f64, f64, f64) {
         3 => (p, q, v),
         4 => (t, p, v),
         _ => (v, p, q),
+    }
+}
+
+async fn stream_video(sensor: AvailableSensor, window: WindowProxy) {
+    let key = format!("{}:{}:Video", sensor.owner, sensor.name);
+    let _guard = WindowGuard(window.clone());
+
+    // Initialize libavcodec once. Subsequent calls are cheap.
+    if let Err(e) = ffmpeg_next::init() {
+        eprintln!("[{}] ffmpeg init failed: {}", key, e);
+        return;
+    }
+    // Suppress libswscale's per-frame "No accelerated colorspace conversion found from yuv420p to
+    // rgb24" warning. macOS arm64 has no SIMD path for that pair, so swscale always falls back to
+    // C — functionally fine, just noisy.
+    ffmpeg_next::util::log::set_level(ffmpeg_next::util::log::Level::Error);
+
+    let mut stream = match tempo_sensors::stream_video_async(
+        sensor.owner.clone(),
+        sensor.name.clone(),
+        0, // codec H264
+        0, // default bitrate
+        0, // default KFI
+        0, // default profile
+    ).await {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[{}] Failed to start stream: {}", key, e);
+            return;
+        }
+    };
+
+    // Build the decoder lazily after we see the first frame's width/height — sws_scale needs the
+    // input format declared at construction.
+    let codec = match ffmpeg_next::codec::decoder::find(ffmpeg_next::codec::Id::H264) {
+        Some(c) => c,
+        None => {
+            eprintln!("[{}] H264 decoder not available in this libavcodec build.", key);
+            return;
+        }
+    };
+    let codec_ctx = match ffmpeg_next::codec::Context::new_with_codec(codec).decoder().open_as(codec) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[{}] Failed to open H264 decoder: {}", key, e);
+            return;
+        }
+    };
+    let mut decoder = codec_ctx.video().expect("H264 decoder is a video decoder");
+
+    let mut seen_key = false;
+    let mut count: u64 = 0;
+
+    while let Some(item) = stream.next().await {
+        match item {
+            Ok(frame) => {
+                if !seen_key {
+                    if !frame.key_frame {
+                        continue;
+                    }
+                    seen_key = true;
+                }
+                let mut packet = ffmpeg_next::packet::Packet::copy(&frame.data);
+                if frame.key_frame {
+                    packet.set_flags(ffmpeg_next::packet::Flags::KEY);
+                }
+                if let Err(e) = decoder.send_packet(&packet) {
+                    eprintln!("[{}] decoder.send_packet error: {}; resyncing on next keyframe.", key, e);
+                    seen_key = false;
+                    continue;
+                }
+                // Drain decoded frames inside a sync block so the SwsContext (which is *mut C
+                // state and therefore not Send) is dropped before the next stream.next().await —
+                // tokio's spawn requires the future to be Send.
+                let mut decoded = ffmpeg_next::frame::Video::empty();
+                let mut rgb_frame = ffmpeg_next::frame::Video::empty();
+                let display_result = (|| -> Result<(), String> {
+                    while decoder.receive_frame(&mut decoded).is_ok() {
+                        let w = decoded.width();
+                        let h = decoded.height();
+                        let in_format = decoded.format();
+                        let mut scaler = ffmpeg_next::software::scaling::Context::get(
+                            in_format,
+                            w,
+                            h,
+                            ffmpeg_next::format::Pixel::RGB24,
+                            w,
+                            h,
+                            ffmpeg_next::software::scaling::Flags::BILINEAR,
+                        ).map_err(|e| format!("sws_scale ctx: {}", e))?;
+                        scaler.run(&decoded, &mut rgb_frame).map_err(|e| format!("sws_scale run: {}", e))?;
+                        let view = ImageView::new(ImageInfo::rgb8(w, h), rgb_frame.data(0));
+                        if window.set_image("frame", view).is_err() {
+                            return Err("window closed".into());
+                        }
+                        count += 1;
+                        if count % 30 == 1 {
+                            println!(
+                                "[{}] Video frame {} {}x{} ({} bytes encoded)",
+                                key, count, frame.width, frame.height, frame.data.len()
+                            );
+                        }
+                    }
+                    Ok(())
+                })();
+                if let Err(e) = display_result {
+                    if e == "window closed" {
+                        eprintln!("[{}] Window closed, stopping stream.", key);
+                        return;
+                    }
+                    eprintln!("[{}] {}", key, e);
+                }
+            }
+            Err(e) => {
+                eprintln!("[{}] Stream error: {}", key, e);
+                break;
+            }
+        }
     }
 }
 
@@ -984,7 +1103,7 @@ async fn flow_start_stream(state: &mut State) {
     }
     let needs_window = matches!(
         mt,
-        MeasurementType::MtColorImage | MeasurementType::MtDepthImage | MeasurementType::MtLabelImage
+        MeasurementType::MtColorImage | MeasurementType::MtDepthImage | MeasurementType::MtLabelImage | MeasurementType::MtVideo
     );
     let window = if needs_window {
         match show_image::create_window(&key, Default::default()) {
@@ -1001,6 +1120,7 @@ async fn flow_start_stream(state: &mut State) {
         (MeasurementType::MtColorImage, Some(w)) => tokio::spawn(stream_color(sensor, w)),
         (MeasurementType::MtDepthImage, Some(w)) => tokio::spawn(stream_depth(sensor, w)),
         (MeasurementType::MtLabelImage, Some(w)) => tokio::spawn(stream_label(sensor, w)),
+        (MeasurementType::MtVideo, Some(w)) => tokio::spawn(stream_video(sensor, w)),
         (MeasurementType::MtLidarScan, _) => tokio::spawn(stream_lidar(sensor)),
         (MeasurementType::MtBoundingBoxes, _) => {
             println!("  BoundingBoxes streaming not implemented in this client.");

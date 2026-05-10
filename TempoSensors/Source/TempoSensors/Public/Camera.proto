@@ -102,3 +102,40 @@ message BoundingBoxesRequest {
   // Name of the sensor component on the owning actor.
   string sensor = 2;
 }
+
+enum VideoCodec {
+  H264 = 0;
+}
+
+enum H264Profile {
+  H264_BASELINE = 0;
+  H264_MAIN = 1;
+  H264_HIGH = 2;
+}
+
+// Encoded video frame. Lossy and not bit-deterministic across runs — use ColorImage if you need
+// raw pixels (e.g. for ML data generation or regression testing).
+message VideoFrame {
+  TempoSensors.MeasurementHeader header = 1;
+  uint32 width = 2;
+  uint32 height = 3;
+  // Annex-B NAL units. SPS+PPS are prepended on key (IDR) frames so a client that joins mid-stream
+  // can decode starting from the next key frame without a separate parameter-set handshake.
+  bytes data = 4;
+  bool key_frame = 5;
+  VideoCodec codec = 6;
+}
+
+message VideoRequest {
+  // Name of the actor that owns the sensor.
+  string owner = 1;
+  // Name of the sensor component on the owning actor.
+  string sensor = 2;
+  VideoCodec codec = 3;
+  // 0 = use default (chosen per resolution; ~8000 for 1080p).
+  uint32 bitrate_kbps = 4;
+  // Frames between IDRs. 0 = use default (30). Lower values reduce join latency at the cost of bitrate.
+  uint32 keyframe_interval = 5;
+  // Only used when codec == H264.
+  H264Profile profile = 6;
+}
