@@ -438,7 +438,6 @@ async fn stream_video(sensor: AvailableSensor, window: WindowProxy) {
     let mut decoder = codec_ctx.video().expect("H264 decoder is a video decoder");
 
     let mut seen_key = false;
-    let mut count: u64 = 0;
 
     while let Some(item) = stream.next().await {
         match item {
@@ -481,13 +480,6 @@ async fn stream_video(sensor: AvailableSensor, window: WindowProxy) {
                         let view = ImageView::new(ImageInfo::rgb8(w, h), rgb_frame.data(0));
                         if window.set_image("frame", view).is_err() {
                             return Err("window closed".into());
-                        }
-                        count += 1;
-                        if count % 30 == 1 {
-                            println!(
-                                "[{}] Video frame {} {}x{} ({} bytes encoded)",
-                                key, count, frame.width, frame.height, frame.data.len()
-                            );
                         }
                     }
                     Ok(())

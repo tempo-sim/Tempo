@@ -211,7 +211,7 @@ async def stream_video_images(camera_name, owner, scale=1.0,
 
     event_task = asyncio.create_task(_qt_event_loop())
     queue = asyncio.Queue(maxsize=2)
-    window_name = "Camera {} - Video".format(camera_name)
+    window_name = "{}:{} - Video".format(owner, camera_name)
 
     async def consumer():
         while True:
