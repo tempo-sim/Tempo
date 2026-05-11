@@ -266,11 +266,9 @@ async fn stream_color(sensor: AvailableSensor, window: WindowProxy) {
                 return;
             }
         };
-    let mut count = 0u64;
     while let Some(item) = stream.next().await {
         match item {
             Ok(img) => {
-                count += 1;
                 let info = if img.encoding == ColorEncoding::CeRgb8 as i32 {
                     ImageInfo::rgb8(img.width_px, img.height_px)
                 } else {
@@ -280,16 +278,6 @@ async fn stream_color(sensor: AvailableSensor, window: WindowProxy) {
                 if window.set_image("frame", view).is_err() {
                     eprintln!("[{}] Window closed, stopping stream.", key);
                     break;
-                }
-                if count % 30 == 1 {
-                    println!(
-                        "[{}] Color frame {} {}x{} ({} bytes)",
-                        key,
-                        count,
-                        img.width_px,
-                        img.height_px,
-                        img.data.len()
-                    );
                 }
             }
             Err(e) => {
@@ -311,26 +299,14 @@ async fn stream_depth(sensor: AvailableSensor, window: WindowProxy) {
                 return;
             }
         };
-    let mut count = 0u64;
     while let Some(item) = stream.next().await {
         match item {
             Ok(img) => {
-                count += 1;
                 // Visualize 1/depth so near surfaces have more contrast — matches
                 // _build_depth_qimage in TempoImageUtils.py.
-                let mut depth_mn = f32::INFINITY;
-                let mut depth_mx = f32::NEG_INFINITY;
                 let mut recip_mn = f32::INFINITY;
                 let mut recip_mx = f32::NEG_INFINITY;
                 for &d in &img.depths_m {
-                    if d.is_finite() {
-                        if d < depth_mn {
-                            depth_mn = d;
-                        }
-                        if d > depth_mx {
-                            depth_mx = d;
-                        }
-                    }
                     let r = 1.0 / d;
                     if r.is_finite() {
                         if r < recip_mn {
@@ -340,10 +316,6 @@ async fn stream_depth(sensor: AvailableSensor, window: WindowProxy) {
                             recip_mx = r;
                         }
                     }
-                }
-                if !depth_mn.is_finite() {
-                    depth_mn = 0.0;
-                    depth_mx = 1.0;
                 }
                 if !recip_mn.is_finite() {
                     recip_mn = 0.0;
@@ -367,12 +339,6 @@ async fn stream_depth(sensor: AvailableSensor, window: WindowProxy) {
                 if window.set_image("frame", view).is_err() {
                     eprintln!("[{}] Window closed, stopping stream.", key);
                     break;
-                }
-                if count % 30 == 1 {
-                    println!(
-                        "[{}] Depth frame {} {}x{} (min={:.2} max={:.2})",
-                        key, count, img.width_px, img.height_px, depth_mn, depth_mx
-                    );
                 }
             }
             Err(e) => {
@@ -472,7 +438,6 @@ async fn stream_video(sensor: AvailableSensor, window: WindowProxy) {
     let mut decoder = codec_ctx.video().expect("H264 decoder is a video decoder");
 
     let mut seen_key = false;
-    let mut count: u64 = 0;
 
     while let Some(item) = stream.next().await {
         match item {
@@ -516,13 +481,6 @@ async fn stream_video(sensor: AvailableSensor, window: WindowProxy) {
                         if window.set_image("frame", view).is_err() {
                             return Err("window closed".into());
                         }
-                        count += 1;
-                        if count % 30 == 1 {
-                            println!(
-                                "[{}] Video frame {} {}x{} ({} bytes encoded)",
-                                key, count, frame.width, frame.height, frame.data.len()
-                            );
-                        }
                     }
                     Ok(())
                 })();
@@ -554,11 +512,9 @@ async fn stream_label(sensor: AvailableSensor, window: WindowProxy) {
             }
         };
     let lut = label_lut();
-    let mut count = 0u64;
     while let Some(item) = stream.next().await {
         match item {
             Ok(img) => {
-                count += 1;
                 let mut rgb = Vec::with_capacity(img.data.len() * 3);
                 for &idx in &img.data {
                     let c = lut[idx as usize];
@@ -568,18 +524,6 @@ async fn stream_label(sensor: AvailableSensor, window: WindowProxy) {
                 if window.set_image("frame", view).is_err() {
                     eprintln!("[{}] Window closed, stopping stream.", key);
                     break;
-                }
-                if count % 30 == 1 {
-                    let unique = img
-                        .data
-                        .iter()
-                        .copied()
-                        .collect::<std::collections::BTreeSet<u8>>()
-                        .len();
-                    println!(
-                        "[{}] Label frame {} {}x{} ({} unique labels)",
-                        key, count, img.width_px, img.height_px, unique
-                    );
                 }
             }
             Err(e) => {
@@ -798,21 +742,9 @@ async fn stream_lidar(sensor: AvailableSensor) {
             }
         };
     let mut accumulator = LidarAccumulator::default();
-    let mut count = 0u64;
     while let Some(item) = stream.next().await {
         match item {
             Ok(seg) => {
-                count += 1;
-                if count % 10 == 1 {
-                    println!(
-                        "[{}] Lidar segment {} returns={} v_beams={} h_beams={}",
-                        key,
-                        count,
-                        seg.distances_m.len(),
-                        seg.vertical_beams,
-                        seg.horizontal_beams
-                    );
-                }
                 if accumulator.add(&seg) {
                     if let Some(s) = viewer {
                         let cloud = accumulator.build_cloud();

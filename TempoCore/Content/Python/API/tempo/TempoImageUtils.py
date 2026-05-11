@@ -163,7 +163,7 @@ async def stream_color_images(camera_name, owner, scale=1.0):
     await _stream_images(
         ts.stream_color_images(sensor=camera_name, owner=owner),
         _build_color_qimage,
-        "Camera {} - Color".format(camera_name),
+        "{}:{} - Color".format(owner, camera_name),
         scale,
     )
 
@@ -211,7 +211,7 @@ async def stream_video_images(camera_name, owner, scale=1.0,
 
     event_task = asyncio.create_task(_qt_event_loop())
     queue = asyncio.Queue(maxsize=2)
-    window_name = "Camera {} - Video".format(camera_name)
+    window_name = "{}:{} - Video".format(owner, camera_name)
 
     async def consumer():
         while True:
@@ -250,7 +250,7 @@ async def stream_depth_images(camera_name, owner, scale=1.0):
     await _stream_images(
         ts.stream_depth_images(sensor=camera_name, owner=owner),
         _build_depth_qimage,
-        "Camera {} - Depth".format(camera_name),
+        "{}:{} - Depth".format(owner, camera_name),
         scale,
     )
 
@@ -259,7 +259,7 @@ async def stream_label_images(camera_name, owner, scale=1.0):
     await _stream_images(
         ts.stream_label_images(sensor=camera_name, owner=owner),
         _build_label_qimage,
-        "Camera {} - Label".format(camera_name),
+        "{}:{} - Label".format(owner, camera_name),
         scale,
     )
 
