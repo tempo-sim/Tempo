@@ -23,9 +23,9 @@
 void FTextureRead::ExtractMeasurementHeader(float TransmissionTime, TempoSensors::MeasurementHeader* MeasurementHeaderOut) const
 {
 	MeasurementHeaderOut->set_sequence_id(SequenceId);
-	MeasurementHeaderOut->set_capture_time(CaptureTime);
-	MeasurementHeaderOut->set_transmission_time(TransmissionTime);
-	MeasurementHeaderOut->set_sensor_name(TCHAR_TO_UTF8(*FString::Printf(TEXT("%s/%s"), *OwnerName, *SensorName)));
+	MeasurementHeaderOut->set_capture_time_s(CaptureTime);
+	MeasurementHeaderOut->set_transmission_time_s(TransmissionTime);
+	MeasurementHeaderOut->set_sensor(TCHAR_TO_UTF8(*FString::Printf(TEXT("%s/%s"), *OwnerName, *SensorName)));
 	const FVector SensorLocation = QuantityConverter<CM2M, L2R>::Convert(SensorTransform.GetLocation());
 	const FRotator SensorRotation = QuantityConverter<Deg2Rad, L2R>::Convert(SensorTransform.Rotator());
 	MeasurementHeaderOut->mutable_sensor_transform()->mutable_location()->set_x(SensorLocation.X);

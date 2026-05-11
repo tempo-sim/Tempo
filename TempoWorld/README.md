@@ -11,29 +11,29 @@ Unreal uses centimeters, degrees, and a left-handed coordinate system natively. 
 Name matching via `TempoWorld`'s APIs is **not** case sensitive*. 
 
 ## World State
-TempoWorld supports querying the state of Actors in the World. This includes RPCs to get (right now) or stream (continuously) the state of Actors, where the state includes the name, transform, linear and angular velocity, 3D bounds, and the timestamp when the state was captured. For example:
+TempoWorld supports querying the state of Actors in the World. This includes RPCs to get (right now) or stream (continuously) the state of Actors, where the state includes the name, transform, 6-DoF velocity (linear m/s, angular rad/s), 3D bounds, and the timestamp when the state was captured. For example:
 ```
 import tempo.tempo_world as tw
 
 # Get MyActor's state right now
-tw.get_current_actor_state(actor_name="MyActor")
+tw.get_current_actor_state(actor="MyActor")
 # Start a stream of MyActor's state
-for state in tw.stream_actor_state(actor_name="MyActor"):
+for state in tw.stream_actor_state(actor="MyActor"):
 ```
 Often you may be interested in the states not of all Actors but only the ones near the one you are controlling or collecting data from. For this reason, TempoWorld includes RPCs to get or stream the states of all Actors *near* another Actor. For example:
 ```
 import tempo.tempo_world as tw
 
 # Get the state of all Actors within 50 meters of MyActor (including MyActor itself) right now
-tw.get_current_actor_states_near(near_actor_name="MyActor", search_radius=50.0)
+tw.get_current_actor_states_near(near_actor="MyActor", search_radius_m=50.0)
 # Start a stream of all such Actor states
-for state in tw.stream_actor_states_near(near_actor_name="MyActor", search_radius=50.0):
+for state in tw.stream_actor_states_near(near_actor="MyActor", search_radius_m=50.0):
 ```
 You may also be interested in knowing if one Actor has overlapped another. `TempoWorld` has a streaming RPC for this. For example:
 ```
 import tempo.tempo_world as tw
 
-for overlap_event in tw.stream_overlap_events(actor_name="MyActor"):
+for overlap_event in tw.stream_overlap_events(actor="MyActor"):
 ```
 
 ## Actor, Component, and Property Control
@@ -49,7 +49,7 @@ t = Geometry.transform()
 t.location.x = 1
 spawn_response = tw.spawn_actor(type="MyCPPOrBPActorClass", deferred=True, transform=t, relative_to_actor="SomeOtherActor")
 # The Actor exists but is invisible to all others - this is your chance to supply any custom properties
-finish_spawn_response = tw.finish_spawning_actor(actor=spawn_response.spawned_name)
+finish_spawn_response = tw.finish_spawning_actor(actor=spawn_response.name)
 ```
 Note that both the spawn actor and finish spawning actor RPCs return a transform. If spawning at the transform you provided would have resulted in a collision with another Actor Unreal will attempt to find a new transform nearby to spawn your new Actor. This is the transform that will be returned.
 

@@ -5,8 +5,11 @@ syntax = "proto3";
 import "TempoCore/Empty.proto";
 
 enum TimeMode {
-  WALL_CLOCK = 0;
-  FIXED_STEP = 1;
+  TM_UNKNOWN = 0;
+  // Sim time follows the real wall clock.
+  TM_WALL_CLOCK = 1;
+  // Sim time advances in fixed steps, decoupled from wall clock.
+  TM_FIXED_STEP = 2;
 }
 
 message TimeModeRequest {
@@ -14,23 +17,25 @@ message TimeModeRequest {
 }
 
 message SetSimStepsPerSecondRequest {
+  // Number of sim steps per second of sim time (used in FIXED_STEP mode).
   int32 sim_steps_per_second = 1;
 }
 
 message AdvanceStepsRequest {
+  // Number of sim steps to advance while paused.
   int32 steps = 1;
 }
 
 service TimeService {
   rpc SetTimeMode(TimeModeRequest) returns (TempoCore.Empty);
-  
+
   rpc SetSimStepsPerSecond(SetSimStepsPerSecondRequest) returns (TempoCore.Empty);
 
   rpc AdvanceSteps(AdvanceStepsRequest) returns (TempoCore.Empty);
-  
-  rpc Play (TempoCore.Empty) returns (TempoCore.Empty);
 
-  rpc Pause (TempoCore.Empty) returns (TempoCore.Empty);
-  
+  rpc Play(TempoCore.Empty) returns (TempoCore.Empty);
+
+  rpc Pause(TempoCore.Empty) returns (TempoCore.Empty);
+
   rpc Step(TempoCore.Empty) returns (TempoCore.Empty);
 }

@@ -76,7 +76,7 @@ import tempo.tempo_core as tc
 import TempoCore.Time_pb2 as Time
 tc.pause() # Time should pause
 tc.play() # Time should resume
-tc.set_time_mode(Time.FIXED_STEP) # Time mode should switch to Fixed Step, simulation should run faster than real-time
+tc.set_time_mode(Time.TM_FIXED_STEP) # Time mode should switch to Fixed Step, simulation should run faster than real-time
 tc.step() # Time should advance to the nearest whole number of fixed time steps (0.1 seconds by default)
 tc.step() # Time should advance one step. You should get one new camera image every step.
 ```

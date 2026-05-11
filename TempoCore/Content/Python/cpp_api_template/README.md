@@ -66,11 +66,11 @@ int main() {
 
 ```cpp
 auto stream_result = tempo::tempo_sensors::stream_color_images(
-    /*owner_name=*/"Vehicle", /*sensor_name=*/"Cam0", /*compression_level=*/0);
+    /*owner=*/"Vehicle", /*sensor=*/"Cam0", /*compression_level=*/0);
 if (!stream_result) { /* handle error */ }
 auto stream = std::move(stream_result).value();
 
-TempoCamera::ColorImage frame;
+TempoSensors::ColorImage frame;
 while (stream.read(&frame)) {
     // process frame
 }

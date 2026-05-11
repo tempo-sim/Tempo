@@ -49,7 +49,6 @@ namespace TempoCore
 namespace TempoSensors
 {
 	class InstanceToSemanticIdMap;
-	class GetLabeledActorTypesRequest;
 	class GetLabeledActorTypesResponse;
 }
 
@@ -72,9 +71,9 @@ public:
 
 	virtual void RegisterServices(FTempoServer& Server) override;
 
-	void GetInstanceToSemanticIdMap(const TempoCore::Empty& Request, const TResponseDelegate<TempoSensors::InstanceToSemanticIdMap>& ResponseContinuation);
+	void GetInstanceToSemanticIdMap(const TempoCore::Empty& Request, const TResponseDelegate<TempoSensors::InstanceToSemanticIdMap>& ResponseContinuation) const;
 
-	void HandleGetLabeledActorTypes(const TempoSensors::GetLabeledActorTypesRequest& Request, const TResponseDelegate<TempoSensors::GetLabeledActorTypesResponse>& ResponseContinuation);
+	void HandleGetLabeledActorTypes(const TempoCore::Empty& Request, const TResponseDelegate<TempoSensors::GetLabeledActorTypesResponse>& ResponseContinuation);
 
 	const TSet<FName>& GetLabeledActorClassNames() const { return LabeledActorClassNames; }
 

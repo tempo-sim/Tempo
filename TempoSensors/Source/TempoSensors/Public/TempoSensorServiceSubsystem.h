@@ -17,7 +17,6 @@ namespace TempoCore
 
 namespace TempoSensors
 {
-	class AvailableSensorsRequest;
 	class AvailableSensorsResponse;
 	class ColorImageRequest;
 	class DepthImageRequest;
@@ -49,7 +48,7 @@ public:
 
 	void ForEachActiveSensor(const TFunction<void(class ITempoSensorInterface*)>& Callback) const;
 
-	void GetAvailableSensors(const TempoSensors::AvailableSensorsRequest& Request, const TResponseDelegate<TempoSensors::AvailableSensorsResponse>& ResponseContinuation) const;
+	void GetAvailableSensors(const TempoCore::Empty& Request, const TResponseDelegate<TempoSensors::AvailableSensorsResponse>& ResponseContinuation) const;
 
 	void StreamColorImages(const TempoSensors::ColorImageRequest& Request, const TResponseDelegate<TempoSensors::ColorImage>& ResponseContinuation) const;
 

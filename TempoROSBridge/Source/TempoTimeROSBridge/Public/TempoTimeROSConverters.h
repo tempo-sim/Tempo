@@ -58,11 +58,11 @@ struct TFromROSConverter<tempo_time_ros_bridge::srv::SetTimeMode::Request, Tempo
 		TempoCore::TimeModeRequest TempoValue;
 		if (ROSValue.time_mode == "fixed_step")
 		{
-			TempoValue.set_time_mode(TempoCore::FIXED_STEP);
+			TempoValue.set_time_mode(TempoCore::TM_FIXED_STEP);
 		}
 		else if (ROSValue.time_mode == "wall_clock")
 		{
-			TempoValue.set_time_mode(TempoCore::WALL_CLOCK);
+			TempoValue.set_time_mode(TempoCore::TM_WALL_CLOCK);
 		}
 		else
 		{

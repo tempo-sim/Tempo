@@ -5,34 +5,43 @@ syntax = "proto3";
 import "TempoCore/Geometry.proto";
 
 message TagFilter {
+  // Match entities tagged with any of these tags.
   repeated string any_tags = 1;
+  // Match entities tagged with all of these tags.
   repeated string all_tags = 2;
-  repeated string none_tags = 4;
+  // Exclude entities tagged with any of these tags.
+  repeated string none_tags = 3;
 }
 
 enum LaneRelationship {
   LR_UNKNOWN = 0;
-  SUCCESSOR = 1;
-  PREDECESSOR = 2;
-  NEIGHBOR = 3;
+  LR_SUCCESSOR = 1;
+  LR_PREDECESSOR = 2;
+  LR_NEIGHBOR = 3;
 }
 
 message LaneDataRequest {
   TagFilter tag_filter = 1;
+  // Query center, in the map's coordinate frame.
   TempoCore.Vector2D center = 2;
-  double radius = 3;
+  // Query radius in meters around `center`.
+  double radius_m = 3;
 }
 
 message LaneConnection {
-  int32 id = 2;
-  LaneRelationship relationship = 3;
+  // ID of the connected lane.
+  int32 id = 1;
+  LaneRelationship relationship = 2;
 }
 
 message LaneData {
+  // Stable lane ID.
   int32 id = 1;
   repeated string tags = 2;
+  // Center-line polyline in meters (map frame).
   repeated TempoCore.Vector center_points = 3;
-  double width = 4;
+  // Lane width in meters.
+  double width_m = 4;
   repeated LaneConnection connections = 5;
 }
 
@@ -42,19 +51,24 @@ message LaneDataResponse {
 
 message ZoneDataRequest {
   TagFilter tag_filter = 1;
+  // Query center, in the map's coordinate frame.
   TempoCore.Vector center = 2;
-  double radius = 3;
+  // Query radius in meters around `center`.
+  double radius_m = 3;
 }
 
 message ZoneConnection {
+  // ID of the connected zone.
   int32 id = 1;
 }
 
 message ZoneData {
+  // Stable zone ID.
   int32 id = 1;
   repeated string tags = 2;
-  repeated TempoCore.Vector boundary_points = 4;
-  repeated ZoneConnection connections = 5;
+  // Zone boundary polyline in meters (map frame).
+  repeated TempoCore.Vector boundary_points = 3;
+  repeated ZoneConnection connections = 4;
 }
 
 message ZoneDataResponse {
@@ -63,16 +77,18 @@ message ZoneDataResponse {
 
 enum LaneAccessibility {
   LA_UNKNOWN = 0;
-  GREEN = 1;
-  YELLOW = 2;
-  RED = 3;
-  STOP_SIGN = 4;
-  YIELD_SIGN = 5;
-  NO_TRAFFIC_CONTROL = 6;
+  LA_GREEN = 1;
+  LA_YELLOW = 2;
+  LA_RED = 3;
+  LA_STOP_SIGN = 4;
+  LA_YIELD_SIGN = 5;
+  LA_NO_TRAFFIC_CONTROL = 6;
 }
 
 message LaneAccessibilityRequest {
+  // Source lane ID.
   int32 from_id = 1;
+  // Destination lane ID.
   int32 to_id = 2;
 }
 

@@ -5,73 +5,100 @@ syntax = "proto3";
 import "TempoSensors/Common.proto";
 
 enum ImageCompressionLevel {
-  MIN = 0;
-  LOW = 1;
-  MID = 2;
-  HIGH = 3;
-  MAX = 4;
+  ICL_UNKNOWN = 0;
+  ICL_MIN = 1;
+  ICL_LOW = 2;
+  ICL_MID = 3;
+  ICL_HIGH = 4;
+  ICL_MAX = 5;
 }
 
 enum ColorEncoding {
-  BGR8 = 0;
-  RGB8 = 1;
+  CE_UNKNOWN = 0;
+  CE_BGR8 = 1;
+  CE_RGB8 = 2;
 }
 
 message ColorImage {
   TempoSensors.MeasurementHeader header = 1;
-  uint32 width = 2;
-  uint32 height = 3;
-  bytes data = 4; // Raw bytes of an image file
+  // Image width in pixels.
+  uint32 width_px = 2;
+  // Image height in pixels.
+  uint32 height_px = 3;
+  // Raw bytes of an encoded image file (PNG/JPEG/etc depending on compression).
+  bytes data = 4;
   ColorEncoding encoding = 5;
 }
 
 message DepthImage {
   TempoSensors.MeasurementHeader header = 1;
-  uint32 width = 2;
-  uint32 height = 3;
-  repeated float depths = 4; // Depth along camera axis in cm of every pixel
+  // Image width in pixels.
+  uint32 width_px = 2;
+  // Image height in pixels.
+  uint32 height_px = 3;
+  // Depth along the camera axis for every pixel, in meters. Row-major, width_px * height_px entries.
+  repeated float depths_m = 4;
 }
 
 message LabelImage {
   TempoSensors.MeasurementHeader header = 1;
-  uint32 width = 2;
-  uint32 height = 3;
-  bytes data = 4; // 0-255 label for every pixel
+  // Image width in pixels.
+  uint32 width_px = 2;
+  // Image height in pixels.
+  uint32 height_px = 3;
+  // 8-bit instance label for every pixel. Row-major, width_px * height_px entries.
+  bytes data = 4;
 }
 
 message BoundingBox2D {
-  uint32 min_x = 1;  // Top-left corner X coordinate in pixels
-  uint32 min_y = 2;  // Top-left corner Y coordinate in pixels
-  uint32 max_x = 3;  // Bottom-right corner X coordinate in pixels
-  uint32 max_y = 4;  // Bottom-right corner Y coordinate in pixels
-  uint32 instance_id = 5;  // Instance ID from label image (1-255)
-  uint32 semantic_id = 6;  // Semantic class ID
+  // Top-left X in pixels.
+  uint32 min_x_px = 1;
+  // Top-left Y in pixels.
+  uint32 min_y_px = 2;
+  // Bottom-right X in pixels.
+  uint32 max_x_px = 3;
+  // Bottom-right Y in pixels.
+  uint32 max_y_px = 4;
+  // Instance ID from the matching label image (1-255).
+  uint32 instance_id = 5;
+  // Semantic class ID.
+  uint32 semantic_id = 6;
 }
 
 message BoundingBoxes {
   TempoSensors.MeasurementHeader header = 1;
-  uint32 width = 2;   // Image width for coordinate reference
-  uint32 height = 3;  // Image height for coordinate reference
+  // Source image width in pixels (for coordinate reference).
+  uint32 width_px = 2;
+  // Source image height in pixels (for coordinate reference).
+  uint32 height_px = 3;
   repeated BoundingBox2D bounding_boxes = 4;
 }
 
 message ColorImageRequest {
-  string owner_name = 1;
-  string sensor_name = 2;
+  // Name of the actor that owns the sensor.
+  string owner = 1;
+  // Name of the sensor component on the owning actor.
+  string sensor = 2;
   ImageCompressionLevel compression_level = 3;
 }
 
 message DepthImageRequest {
-  string owner_name = 1;
-  string sensor_name = 2;
+  // Name of the actor that owns the sensor.
+  string owner = 1;
+  // Name of the sensor component on the owning actor.
+  string sensor = 2;
 }
 
 message LabelImageRequest {
-  string owner_name = 1;
-  string sensor_name = 2;
+  // Name of the actor that owns the sensor.
+  string owner = 1;
+  // Name of the sensor component on the owning actor.
+  string sensor = 2;
 }
 
 message BoundingBoxesRequest {
-  string owner_name = 1;
-  string sensor_name = 2;
+  // Name of the actor that owns the sensor.
+  string owner = 1;
+  // Name of the sensor component on the owning actor.
+  string sensor = 2;
 }

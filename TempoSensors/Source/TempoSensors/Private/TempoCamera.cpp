@@ -114,12 +114,12 @@ TempoSensors::ColorEncoding ColorEncodingToProto(EColorImageEncoding Encoding)
 	{
 		case EColorImageEncoding::BGR8:
 		{
-			return TempoSensors::ColorEncoding::BGR8;
+			return TempoSensors::ColorEncoding::CE_BGR8;
 		}
 		case EColorImageEncoding::RGB8:
 		default:
 		{
-			return TempoSensors::ColorEncoding::RGB8;
+			return TempoSensors::ColorEncoding::CE_RGB8;
 		}
 	}
 }
@@ -131,8 +131,8 @@ void RespondToColorRequests(const TTextureRead<PixelType>* TextureRead, const TA
 	if (!Requests.IsEmpty())
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraDecodeColor);
-		ColorImage.set_width(TextureRead->ImageSize.X);
-		ColorImage.set_height(TextureRead->ImageSize.Y);
+		ColorImage.set_width_px(TextureRead->ImageSize.X);
+		ColorImage.set_height_px(TextureRead->ImageSize.Y);
 
 		std::vector<char> ImageData;
 		ImageData.resize(TextureRead->Image.Num() * 3);
@@ -168,8 +168,8 @@ void RespondToLabelRequests(const TTextureRead<PixelType>* TextureRead, const TA
 	if (!Requests.IsEmpty())
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraDecodeLabel);
-		LabelImage.set_width(TextureRead->ImageSize.X);
-		LabelImage.set_height(TextureRead->ImageSize.Y);
+		LabelImage.set_width_px(TextureRead->ImageSize.X);
+		LabelImage.set_height_px(TextureRead->ImageSize.Y);
 
 		std::vector<char> ImageData;
 		ImageData.resize(TextureRead->Image.Num());
@@ -198,8 +198,8 @@ void RespondToBoundingBoxRequests(const TTextureRead<PixelType>* TextureRead, co
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraDecodeBoundingBoxes);
 
-		Response.set_width(TextureRead->ImageSize.X);
-		Response.set_height(TextureRead->ImageSize.Y);
+		Response.set_width_px(TextureRead->ImageSize.X);
+		Response.set_height_px(TextureRead->ImageSize.Y);
 		TextureRead->ExtractMeasurementHeader(TransmissionTime, Response.mutable_header());
 
 		TArray<uint8> LabelData;
@@ -214,10 +214,10 @@ void RespondToBoundingBoxRequests(const TTextureRead<PixelType>* TextureRead, co
 		for (const auto& [InstanceId, Box] : BoundingBoxes)
 		{
 			TempoSensors::BoundingBox2D* BBoxProto = Response.add_bounding_boxes();
-			BBoxProto->set_min_x(FMath::RoundToInt32(Box.Min.X));
-			BBoxProto->set_min_y(FMath::RoundToInt32(Box.Min.Y));
-			BBoxProto->set_max_x(FMath::RoundToInt32(Box.Max.X));
-			BBoxProto->set_max_y(FMath::RoundToInt32(Box.Max.Y));
+			BBoxProto->set_min_x_px(FMath::RoundToInt32(Box.Min.X));
+			BBoxProto->set_min_y_px(FMath::RoundToInt32(Box.Min.Y));
+			BBoxProto->set_max_x_px(FMath::RoundToInt32(Box.Max.X));
+			BBoxProto->set_max_y_px(FMath::RoundToInt32(Box.Max.Y));
 			BBoxProto->set_instance_id(InstanceId);
 
 			const uint8* SemanticId = TextureRead->InstanceToSemanticMap.Find(InstanceId);
@@ -267,13 +267,14 @@ void TTextureRead<FCameraPixelWithDepth>::RespondToRequests(const TArray<FDepthI
 	if (!Requests.IsEmpty())
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraDecodeDepth);
-		DepthImage.set_width(ImageSize.X);
-		DepthImage.set_height(ImageSize.Y);
-		DepthImage.mutable_depths()->Resize(ImageSize.X * ImageSize.Y, 0.0);
+		DepthImage.set_width_px(ImageSize.X);
+		DepthImage.set_height_px(ImageSize.Y);
+		DepthImage.mutable_depths_m()->Resize(ImageSize.X * ImageSize.Y, 0.0);
 
 		ParallelFor(Image.Num(), [&DepthImage, this](int32 Idx)
 		{
-			DepthImage.set_depths(Idx, Image[Idx].Depth(MinDepth, MaxDepth, GTempoCamera_Max_Discrete_Depth));
+			// FCameraPixelWithDepth::Depth returns centimeters; convert to meters for the wire.
+			DepthImage.set_depths_m(Idx, QuantityConverter<CM2M>::Convert(Image[Idx].Depth(MinDepth, MaxDepth, GTempoCamera_Max_Discrete_Depth)));
 		});
 
 		ExtractMeasurementHeader(TransmissionTime, DepthImage.mutable_header());

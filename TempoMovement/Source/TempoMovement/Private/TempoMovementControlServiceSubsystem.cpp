@@ -114,7 +114,7 @@ void UTempoMovementControlServiceSubsystem::GetCommandableVehicles(const TempoCo
 	for (AActor* MovementController : MovementControllers)
 	{
 		ATempoMovementController* Controller = Cast<ATempoMovementController>(MovementController);
-		Response.add_vehicle_name(TCHAR_TO_UTF8(*Controller->GetVehicleName()));
+		Response.add_vehicles(TCHAR_TO_UTF8(*Controller->GetVehicleName()));
 	}
 
 	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
@@ -124,7 +124,7 @@ void UTempoMovementControlServiceSubsystem::GetCommandableVehicles(const TempoCo
 void UTempoMovementControlServiceSubsystem::CommandVehicle(const NormalizedDrivingCommand& Request, const TResponseDelegate<TempoEmpty>& ResponseContinuation) const
 {
 	grpc::Status Status;
-	ATempoMovementController* Controller = FindMovementController(GetWorld(), UTF8_TO_TCHAR(Request.vehicle_name().c_str()), Status);
+	ATempoMovementController* Controller = FindMovementController(GetWorld(), UTF8_TO_TCHAR(Request.vehicle().c_str()), Status);
 	if (!Controller)
 	{
 		ResponseContinuation.ExecuteIfBound(TempoEmpty(), Status);
@@ -142,7 +142,7 @@ void UTempoMovementControlServiceSubsystem::CommandVehicle(const NormalizedDrivi
 void UTempoMovementControlServiceSubsystem::CommandVelocity(const VelocityCommand& Request, const TResponseDelegate<TempoEmpty>& ResponseContinuation) const
 {
 	grpc::Status Status;
-	ATempoMovementController* Controller = FindMovementController(GetWorld(), UTF8_TO_TCHAR(Request.vehicle_name().c_str()), Status);
+	ATempoMovementController* Controller = FindMovementController(GetWorld(), UTF8_TO_TCHAR(Request.vehicle().c_str()), Status);
 	if (!Controller)
 	{
 		ResponseContinuation.ExecuteIfBound(TempoEmpty(), Status);
@@ -161,7 +161,7 @@ void UTempoMovementControlServiceSubsystem::CommandVelocity(const VelocityComman
 void UTempoMovementControlServiceSubsystem::CommandAcceleration(const AccelerationCommand& Request, const TResponseDelegate<TempoEmpty>& ResponseContinuation) const
 {
 	grpc::Status Status;
-	ATempoMovementController* Controller = FindMovementController(GetWorld(), UTF8_TO_TCHAR(Request.vehicle_name().c_str()), Status);
+	ATempoMovementController* Controller = FindMovementController(GetWorld(), UTF8_TO_TCHAR(Request.vehicle().c_str()), Status);
 	if (!Controller)
 	{
 		ResponseContinuation.ExecuteIfBound(TempoEmpty(), Status);
@@ -187,7 +187,7 @@ void UTempoMovementControlServiceSubsystem::GetCommandablePawns(const TempoEmpty
 	{
 		if (const APawn* Pawn = Cast<AController>(Controller)->GetPawn())
 		{
-			Response.add_pawn_name(TCHAR_TO_UTF8(*Pawn->GetActorNameOrLabel()));
+			Response.add_pawns(TCHAR_TO_UTF8(*Pawn->GetActorNameOrLabel()));
 		}
 	}
 
@@ -196,7 +196,7 @@ void UTempoMovementControlServiceSubsystem::GetCommandablePawns(const TempoEmpty
 
 void UTempoMovementControlServiceSubsystem::PawnMoveToLocation(const PawnMoveToLocationRequest& Request, const TResponseDelegate<PawnMoveToLocationResponse>& ResponseContinuation)
 {
-	if (Request.name().empty())
+	if (Request.pawn().empty())
 	{
 		ResponseContinuation.ExecuteIfBound(PawnMoveToLocationResponse(), grpc::Status(grpc::FAILED_PRECONDITION, "Pawn name must be specified"));
 	}
@@ -208,7 +208,7 @@ void UTempoMovementControlServiceSubsystem::PawnMoveToLocation(const PawnMoveToL
 	{
 		if (const APawn* Pawn = Cast<AController>(Controller)->GetPawn())
 		{
-			if (Pawn->GetActorNameOrLabel().Equals(UTF8_TO_TCHAR(Request.name().c_str()), ESearchCase::IgnoreCase))
+			if (Pawn->GetActorNameOrLabel().Equals(UTF8_TO_TCHAR(Request.pawn().c_str()), ESearchCase::IgnoreCase))
 			{
 				AAIController* AIController = Cast<AAIController>(Controller);
 				FVector Destination = QuantityConverter<M2CM, R2L>::Convert(FVector(Request.location().x(), Request.location().y(), Request.location().z()));
@@ -271,32 +271,32 @@ void UTempoMovementControlServiceSubsystem::OnPawnMoveCompleted(FAIRequestID Req
 		{
 			case EPathFollowingResult::Type::Success:
 			{
-				Response.set_result(TempoMovement::SUCCESS);
+				Response.set_result(TempoMovement::MTR_SUCCESS);
 				break;
 			}
 			case EPathFollowingResult::Type::Blocked:
 			{
-				Response.set_result(TempoMovement::BLOCKED);
+				Response.set_result(TempoMovement::MTR_BLOCKED);
 				break;
 			}
 			case EPathFollowingResult::Type::OffPath:
 			{
-				Response.set_result(TempoMovement::OFF_PATH);
+				Response.set_result(TempoMovement::MTR_OFF_PATH);
 				break;
 			}
 			case EPathFollowingResult::Type::Aborted:
 			{
-				Response.set_result(TempoMovement::ABORTED);
+				Response.set_result(TempoMovement::MTR_ABORTED);
 				break;
 			}
 			case EPathFollowingResult::Type::Invalid:
 			{
-				Response.set_result(TempoMovement::INVALID);
+				Response.set_result(TempoMovement::MTR_INVALID);
 				break;
 			}
 			default:
 			{
-				Response.set_result(TempoMovement::UNKNOWN);
+				Response.set_result(TempoMovement::MTR_UNKNOWN);
 				break;
 			}
 		}

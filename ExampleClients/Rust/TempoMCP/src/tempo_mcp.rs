@@ -387,7 +387,7 @@ async fn fetch_actors() -> Vec<(String, String)> {
         Ok(r) => r
             .actors
             .into_iter()
-            .map(|a| (a.name.clone(), format!("{} ({})", a.name, a.actor_type)))
+            .map(|a| (a.name.clone(), format!("{} ({})", a.name, a.r#type)))
             .collect(),
         Err(e) => {
             println!("\n  Error fetching actors: {}", e);
@@ -401,7 +401,7 @@ async fn fetch_components(actor: &str) -> Vec<(String, String)> {
         Ok(r) => r
             .components
             .into_iter()
-            .map(|c| (c.name.clone(), format!("{} ({})", c.name, c.component_type)))
+            .map(|c| (c.name.clone(), format!("{} ({})", c.name, c.r#type)))
             .collect(),
         Err(e) => {
             println!("\n  Error fetching components: {}", e);
@@ -427,10 +427,10 @@ async fn fetch_properties(actor: &str, component: Option<&str>) -> Vec<Property>
         Ok(r) => r
             .properties
             .into_iter()
-            .filter(|p| p.property_type != "unsupported")
+            .filter(|p| p.r#type != "unsupported")
             .map(|p| Property {
                 name: p.name,
-                property_type: p.property_type,
+                property_type: p.r#type,
                 value: p.value,
             })
             .collect(),
@@ -483,8 +483,8 @@ async fn flow_spawn_actor() {
     };
     match tempo_world::spawn_actor_async(actor_type, false, transform, String::new()).await {
         Ok(resp) => {
-            println!("\n  Spawned: {}", resp.spawned_name);
-            if let Some(t) = &resp.spawned_transform {
+            println!("\n  Spawned: {}", resp.name);
+            if let Some(t) = &resp.transform {
                 println!("  Transform: {}", format_transform(t));
             }
         }

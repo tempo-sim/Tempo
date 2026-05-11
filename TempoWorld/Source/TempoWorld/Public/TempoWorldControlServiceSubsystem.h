@@ -27,7 +27,6 @@ namespace TempoWorld
 	class DestroyActorRequest;
 	class SetActorTransformRequest;
 	class SetComponentTransformRequest;
-	class GetAllActorsRequest;
 	class GetAllActorsResponse;
 	class GetAllComponentsRequest;
 	class GetAllComponentsResponse;
@@ -74,7 +73,7 @@ public:
 
 	void DeactivateComponent(const TempoWorld::DeactivateComponentRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const;
 	
-	void GetAllActors(const TempoWorld::GetAllActorsRequest& Request, const TResponseDelegate<TempoWorld::GetAllActorsResponse>& ResponseContinuation) const;
+	void GetAllActors(const TempoCore::Empty& Request, const TResponseDelegate<TempoWorld::GetAllActorsResponse>& ResponseContinuation) const;
 
 	void GetAllComponents(const TempoWorld::GetAllComponentsRequest& Request, const TResponseDelegate<TempoWorld::GetAllComponentsResponse>& ResponseContinuation) const;
 	

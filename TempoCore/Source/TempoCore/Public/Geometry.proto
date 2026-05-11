@@ -25,8 +25,8 @@ message Transform {
 }
 
 message Box {
-  Vector Min = 1;
-  Vector Max = 2;
+  Vector min = 1;
+  Vector max = 2;
 }
 
 // 6-DoF velocity. Linear is m/s, angular is rad/s. Right-handed.

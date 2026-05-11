@@ -141,11 +141,11 @@ The TempoMovement API was reworked to support closed-loop velocity and accelerat
 
 **Proto / gRPC changes (`MovementControlService.proto`):**
 
-- `VehicleCommandRequest` is renamed to `NormalizedDrivingCommand`. The `CommandVehicle` RPC still exists and is wire-compatible aside from the message name. Regenerate clients and update references:
+- `VehicleCommandRequest` is renamed to `NormalizedDrivingCommand`. The `CommandVehicle` RPC still exists and is wire-compatible aside from the message name. The vehicle identifier was renamed from `vehicle_name` to `vehicle` (see "API naming cleanup" below). Regenerate clients and update references:
 
 ```diff
 - request = VehicleCommandRequest(vehicle_name=..., acceleration=..., steering=...)
-+ request = NormalizedDrivingCommand(vehicle_name=..., acceleration=..., steering=...)
++ request = NormalizedDrivingCommand(vehicle=..., acceleration=..., steering=...)
 ```
 
 - New RPCs `CommandVelocity` (takes a `VelocityCommand` wrapping `TempoCore.Twist`) and `CommandAcceleration` (takes an `AccelerationCommand` wrapping `TempoCore.Accel`) are additive. Both commands are in SI right-handed body-frame units (linear in m/s, m/s²; angular in rad/s, rad/s²). For wheeled vehicles only `linear.x` and `angular.z` are actuated; other axes are silently ignored.
@@ -153,7 +153,7 @@ The TempoMovement API was reworked to support closed-loop velocity and accelerat
 
 **Proto / gRPC changes (`WorldState.proto`):**
 
-`ActorState`'s `linear_velocity` (field 4) and `angular_velocity` (field 5) are removed and reserved. A single `velocity` field (7) of type `TempoCore.Twist` replaces them. Clients reading the old fields by name fail to compile after regeneration; clients reading by tag will see the reserved tags. Update:
+`ActorState`'s `linear_velocity` and `angular_velocity` are removed. A single `velocity` field of type `TempoCore.Twist` replaces them, and the remaining fields are renumbered contiguously (see "API naming cleanup" below). Update:
 
 ```diff
 - linear = state.linear_velocity
@@ -209,6 +209,111 @@ Effect:
 Validation runs at proto-generation time:
 - A warning prints if an override key matches no current proto file (probably a typo or stale entry).
 - A hard error fires if two protos with overrides claim the same virtual module name from different real modules.
+
+## API naming cleanup (v2)
+
+v2 also normalizes naming across every `.proto`. This is a wire-breaking change for any field, enum value, or message that was renamed — regenerate your client and update the call sites listed below.
+
+### Conventions applied
+
+- **All field names are `snake_case`.** Stragglers in v1 (`Box.Min/Max`, `InstanceSemanticIdPair.InstanceId/SemanticId`) are now `min/max` and `instance_id/semantic_id`.
+- **Repeated fields are plural.** `vehicle_name` → `vehicles`, `pawn_name` → `pawns` (when the field is `repeated`).
+- **Service files use 2-space indentation everywhere.** `WorldControl.proto` was the holdout.
+- **Field tag numbers are contiguous from 1** within each message — the gaps left by removed v1 fields are gone. This makes the wire incompatible with v1 even where the field name matches.
+- **All enums have an `UNKNOWN` (or `_UNKNOWN`) sentinel at 0** and a 2- or 3-letter prefix on every value. Prefixes:
+  - `ControlMode` → `CM_` (`CM_UNKNOWN`, `CM_NONE`, `CM_USER`, `CM_OPEN_LOOP`, `CM_CLOSED_LOOP`)
+  - `TimeMode` → `TM_` (`TM_UNKNOWN`, `TM_WALL_CLOCK`, `TM_FIXED_STEP`)
+  - `CollisionChannel` → `CC_` (`CC_UNKNOWN`, `CC_WORLD_STATIC`, `CC_WORLD_DYNAMIC`, `CC_VISIBILITY`)
+  - `MeasurementType` → `MT_` (`MT_UNKNOWN`, `MT_COLOR_IMAGE`, …)
+  - `ColorEncoding` → `CE_` (`CE_UNKNOWN`, `CE_BGR8`, `CE_RGB8`)
+  - `ImageCompressionLevel` → `ICL_` (`ICL_UNKNOWN`, `ICL_MIN`, `ICL_LOW`, `ICL_MID`, `ICL_HIGH`, `ICL_MAX`)
+  - `LaneRelationship` → `LR_`, `LaneAccessibility` → `LA_`, `MoveToResult` → `MTR_`
+- **Identifier fields drop the redundant `_name` suffix on inputs.** Comments carry the "this is a name lookup" hint instead. So `OverlapEventRequest.actor_name` → `actor`, `ActorStateRequest.actor_name` → `actor`, `ActorStatesNearRequest.near_actor_name` → `near_actor`, `VehicleCommandRequest.vehicle_name` → `vehicle`, `PawnMoveToLocationRequest.name` → `pawn`, sensor `*Request.owner_name`/`sensor_name` → `owner`/`sensor`.
+- **Descriptor/response fields drop redundant prefixes.** `SpawnActorResponse.spawned_name`/`spawned_transform` → `name`/`transform`; `ActorDescriptor.actor_type` / `ComponentDescriptor.component_type` / `PropertyDescriptor.property_type` → `type`. `MeasurementHeader.sensor_name` → `sensor`. `GetLabeledActorTypesResponse.actor_types` → `types`.
+- **`OverlapEventResponse` is the deliberate exception.** It keeps the `_actor_name` suffix because component-level overlap fields may be added later — `overlapped_actor_name`, `overlapping_actor_name`, `overlapping_actor_type` (the v1 `other_actor_*` prefix is renamed to `overlapping_actor_*`).
+- **`relative_to_actor` is kept as-is** in `SpawnActorRequest` and `SetActorTransformRequest` — the `_actor` qualifier is meaningful and may grow a `relative_to_component` sibling.
+- **Units are encoded in field names.** Distances are meters, angles are radians, time is seconds, pixels is pixels, hertz is hertz, degrees is degrees. The suffixes used: `_m`, `_rad`, `_s`, `_px`, `_hz`, `_deg`.
+- **Empty request messages now use `TempoCore.Empty`.** `GetAllActorsRequest`, `AvailableSensorsRequest`, and `GetLabeledActorTypesRequest` are removed from the schema.
+
+### `DepthImage.depths_m` is now in meters
+
+`DepthImage.depths` was renamed to `depths_m` **and** the values are converted to meters on the server (previously cm). Clients that consume depth values must divide by 100 less, or scale up to compensate, depending on what they were doing with the cm values. This brings camera depth in line with lidar (`distances_m`) and `RaycastResponse.distance_m`.
+
+### Unit-suffix renames at a glance
+
+| Message | v1 field | v2 field |
+|---|---|---|
+| `Common.MeasurementHeader` | `capture_time` | `capture_time_s` |
+| `Common.MeasurementHeader` | `transmission_time` | `transmission_time_s` |
+| `Camera.{Color,Depth,Label}Image`, `Camera.BoundingBoxes` | `width`, `height` | `width_px`, `height_px` |
+| `Camera.DepthImage` | `depths` (cm) | `depths_m` (m, **value changed**) |
+| `Camera.BoundingBox2D` | `min_x`/`min_y`/`max_x`/`max_y` | `min_x_px`/`min_y_px`/`max_x_px`/`max_y_px` |
+| `Lidar.LidarScanSegment` | `distances` | `distances_m` |
+| `Lidar.LidarScanSegment` | `azimuths`, `elevations` | `azimuths_rad`, `elevations_rad` |
+| `Lidar.LidarScanSegment` | `distance_range`, `azimuth_range`, `elevation_range` | `distance_range_m`, `azimuth_range_rad`, `elevation_range_rad` |
+| `Sensors.SensorDescriptor` | `rate` | `rate_hz` |
+| `WorldState.RaycastResponse` | `distance` | `distance_m` |
+| `WorldState.ActorState` | `timestamp` | `timestamp_s` |
+| `WorldState.ActorStatesNearRequest` | `search_radius` | `search_radius_m` |
+| `Geographic.GeographicCoordinate` | `latitude`/`longitude`/`altitude` | `latitude_deg`/`longitude_deg`/`altitude_m` |
+| `MapQueries.LaneDataRequest`, `ZoneDataRequest` | `radius` | `radius_m` |
+| `MapQueries.LaneData` | `width` | `width_m` |
+
+### Identifier renames at a glance
+
+| Message | v1 field | v2 field |
+|---|---|---|
+| `WorldState.OverlapEventRequest` | `actor_name` | `actor` |
+| `WorldState.OverlapEventResponse` | `other_actor_name` | `overlapping_actor_name` |
+| `WorldState.OverlapEventResponse` | `other_actor_type` | `overlapping_actor_type` |
+| `WorldState.ActorStateRequest` | `actor_name` | `actor` |
+| `WorldState.ActorStatesNearRequest` | `near_actor_name` | `near_actor` |
+| `WorldControl.SpawnActorRequest` | `actor_type` | `type` |
+| `WorldControl.SpawnActorResponse` | `spawned_name`, `spawned_transform` | `name`, `transform` |
+| `WorldControl.FinishSpawningActorResponse` | `spawned_transform` | `transform` |
+| `WorldControl.AddComponentRequest` | `component_type` | `type` |
+| `WorldControl.ActorDescriptor` | `actor_type` | `type` |
+| `WorldControl.ComponentDescriptor` | `component_type` | `type` |
+| `WorldControl.PropertyDescriptor` | `property_type` | `type` |
+| `MovementControl.CommandableVehiclesResponse` | `vehicle_name` (repeated) | `vehicles` |
+| `MovementControl.CommandablePawnsResponse` | `pawn_name` (repeated) | `pawns` |
+| `MovementControl.NormalizedDrivingCommand` | `vehicle_name` | `vehicle` |
+| `MovementControl.VelocityCommand` | `vehicle_name` | `vehicle` |
+| `MovementControl.AccelerationCommand` | `vehicle_name` | `vehicle` |
+| `MovementControl.PawnMoveToLocationRequest` | `name` | `pawn` |
+| `Sensors.SensorDescriptor` | `rate` | `rate_hz` |
+| `Camera.*ImageRequest`, `Lidar.LidarScanRequest`, `Camera.BoundingBoxesRequest` | `owner_name`, `sensor_name` | `owner`, `sensor` |
+| `Common.MeasurementHeader` | `sensor_name` | `sensor` |
+| `Labels.GetLabeledActorTypesResponse` | `actor_types` | `types` |
+| `Labels.InstanceSemanticIdPair` | `InstanceId`, `SemanticId` | `instance_id`, `semantic_id` |
+| `Geometry.Box` | `Min`, `Max` | `min`, `max` |
+
+### Updating client code
+
+Python (and any kwarg-driven helper) — the kwarg names mirror proto fields:
+
+```diff
+- await ts.stream_color_images(sensor_name=cam, owner_name=actor)
++ await ts.stream_color_images(sensor=cam, owner=actor)
+
+- await tw.spawn_actor(type=actor_type, transform=t)
+- print(response.spawned_name, response.spawned_transform)
++ await tw.spawn_actor(type=actor_type, transform=t)
++ print(response.name, response.transform)
+
+- for s in available_sensors_response.available_sensors:
+-     if Sensors.COLOR_IMAGE in s.measurement_types: ...
++ for s in available_sensors_response.available_sensors:
++     if Sensors.MT_COLOR_IMAGE in s.measurement_types: ...
+```
+
+Rust (prost generates `MtColorImage`, `CeRgb8`, etc. — the prefix becomes part of the variant name) and field accessors track the new proto names (e.g. `img.width_px`, `seg.distances_m`, `state.timestamp_s`, `p.r#type` for fields renamed to the Rust reserved word `type`).
+
+C++ accessors and setters track the new names (`set_owner`/`owner()`, `set_distance_m`/`distance_m()`, `set_capture_time_s`/`capture_time_s()`, `add_vehicles`/`vehicles()`, etc.). Enum values use the new prefixes (`TempoSensors::MT_COLOR_IMAGE`, `TempoCore::TM_FIXED_STEP`, `TempoWorld::CC_WORLD_STATIC`, …).
+
+### `ControlMode.NONE` semantics
+
+`ControlMode` gained `CM_UNKNOWN = 0` as the proto-3 unset sentinel; the previously-`0` value `NONE` (control disabled) is now `CM_NONE = 1`. Code that branched on `ControlMode::NONE` should branch on `ControlMode::CM_NONE`. The `0` value now means "client didn't set this", not "control disabled".
 
 ## Rationale for not preserving the wire
 

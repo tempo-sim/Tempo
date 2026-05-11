@@ -49,15 +49,15 @@ TempoAgents::LaneRelationship LaneRelationshipFromLinkType(const EZoneLaneLinkTy
 	{
 	case EZoneLaneLinkType::Incoming:
 		{
-			return TempoAgents::LaneRelationship::PREDECESSOR;
+			return TempoAgents::LaneRelationship::LR_PREDECESSOR;
 		}
 	case EZoneLaneLinkType::Outgoing:
 		{
-			return TempoAgents::LaneRelationship::SUCCESSOR;
+			return TempoAgents::LaneRelationship::LR_SUCCESSOR;
 		}
 	case EZoneLaneLinkType::Adjacent:
 		{
-			return TempoAgents::LaneRelationship::NEIGHBOR;
+			return TempoAgents::LaneRelationship::LR_NEIGHBOR;
 		}
 	default:
 		{
@@ -121,10 +121,10 @@ void UTempoMapQueryServiceSubsystem::GetLaneData(const LaneDataRequest& Request,
 			}
 
 			// Ignore if all points on the lane are not within the requested radius of the requested center.
-			if (Request.has_center() && Request.radius() > 0.0)
+			if (Request.has_center() && Request.radius_m() > 0.0)
 			{
 				const FVector2D Center = QuantityConverter<M2CM, R2L>::Convert(FVector2D(Request.center().x(), Request.center().y()));
-				const double MaxRangeSquared = QuantityConverter<M2CM>::Convert(Request.radius()) * QuantityConverter<M2CM>::Convert(Request.radius());
+				const double MaxRangeSquared = QuantityConverter<M2CM>::Convert(Request.radius_m()) * QuantityConverter<M2CM>::Convert(Request.radius_m());
 				bool bIgnoredByLocation = true;
 				for (int32 PointIdx = Lane.PointsBegin; PointIdx < Lane.PointsEnd; ++PointIdx)
 				{
@@ -151,7 +151,7 @@ void UTempoMapQueryServiceSubsystem::GetLaneData(const LaneDataRequest& Request,
 				point->set_y(PointRightHandedM.Y);
 				point->set_z(PointRightHandedM.Z);
 			}
-			lane->set_width(QuantityConverter<CM2M>::Convert(Lane.Width));
+			lane->set_width_m(QuantityConverter<CM2M>::Convert(Lane.Width));
 			for (int32 LaneLinkIdx = Lane.LinksBegin; LaneLinkIdx < Lane.LinksEnd; ++LaneLinkIdx)
 			{
 				const FZoneLaneLinkData& LaneLink = LaneLinks[LaneLinkIdx];
@@ -209,22 +209,22 @@ TempoAgents::LaneAccessibility UTempoMapQueryServiceSubsystem::GetLaneAccessibil
 					{
 						if (!TrafficLaneData->bIsAboutToClose)
 						{
-							return TempoAgents::GREEN;
+							return TempoAgents::LA_GREEN;
 						}
-						return TempoAgents::YELLOW;
+						return TempoAgents::LA_YELLOW;
 					}
-					return TempoAgents::RED;
+					return TempoAgents::LA_RED;
 				}
 				if (TrafficLaneData->HasYieldSignAtLaneStart())
 				{
-					return TempoAgents::YIELD_SIGN;
+					return TempoAgents::LA_YIELD_SIGN;
 				}
 				if (TrafficLaneData->HasStopSignAtLaneStart())
 				{
-					return TempoAgents::STOP_SIGN;
+					return TempoAgents::LA_STOP_SIGN;
 				}
 			}
-			return TempoAgents::NO_TRAFFIC_CONTROL;
+			return TempoAgents::LA_NO_TRAFFIC_CONTROL;
 		}
 	}
 	return TempoAgents::LA_UNKNOWN;

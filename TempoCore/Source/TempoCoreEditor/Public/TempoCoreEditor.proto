@@ -1,15 +1,18 @@
-// Copyright Tempo Simulation, LLC. All Rights Reserved
+// Copyright Tempo Simulation, LLC. All Rights Reserved.
 
 syntax = "proto3";
 
 import "TempoCore/Empty.proto";
 
 message SaveLevelRequest {
+  // Destination path for the saved level asset.
   string path = 1;
+  // If true, overwrite an existing asset at `path`.
   bool overwrite = 2;
 }
 
 message OpenLevelRequest {
+  // Path of the level asset to open in the editor.
   string path = 1;
 }
 

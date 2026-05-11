@@ -88,9 +88,9 @@ struct TFromROSConverter<tempo_geographic_ros_bridge::srv::SetGeographicReferenc
 	static TempoGeographic::GeographicCoordinate Convert(const tempo_geographic_ros_bridge::srv::SetGeographicReference::Request& ROSValue)
 	{
 		TempoGeographic::GeographicCoordinate TempoValue;
-		TempoValue.set_latitude(ROSValue.latitude);
-		TempoValue.set_longitude(ROSValue.longitude);
-		TempoValue.set_altitude(ROSValue.altitude);
+		TempoValue.set_latitude_deg(ROSValue.latitude);
+		TempoValue.set_longitude_deg(ROSValue.longitude);
+		TempoValue.set_altitude_m(ROSValue.altitude);
 		return TempoValue;
 	}
 };

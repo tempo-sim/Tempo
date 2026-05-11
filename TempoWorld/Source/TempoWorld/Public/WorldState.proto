@@ -4,80 +4,84 @@ syntax = "proto3";
 
 import "TempoCore/Geometry.proto";
 
-// Collision channel for physics queries
+// Collision channel for physics queries.
 enum CollisionChannel {
-  WORLD_STATIC = 0;
-  WORLD_DYNAMIC = 1;
-  VISIBILITY = 2;
+  CC_UNKNOWN = 0;
+  CC_WORLD_STATIC = 1;
+  CC_WORLD_DYNAMIC = 2;
+  CC_VISIBILITY = 3;
 }
 
-// Raycast request for physics queries
 message RaycastRequest {
-  // Start position (in Tempo coordinates: meters, right-handed)
+  // Start position in meters (Tempo right-handed world frame).
   TempoCore.Vector start = 1;
-
-  // End position (in Tempo coordinates: meters, right-handed)
+  // End position in meters (Tempo right-handed world frame).
   TempoCore.Vector end = 2;
-
-  // Collision channel to use
   CollisionChannel collision_channel = 3;
-
-  // Actor names to ignore
+  // Names of actors to ignore for this query.
   repeated string ignored_actors = 4;
 }
 
-// Raycast response
 message RaycastResponse {
-  // Whether the ray hit something
+  // True if the ray hit something.
   bool hit = 1;
-
-  // Hit location (in Tempo coordinates: meters, right-handed)
+  // Hit location in meters (Tempo right-handed world frame).
   TempoCore.Vector location = 2;
-
-  // Hit normal (in Tempo coordinates)
+  // Hit normal (Tempo right-handed world frame).
   TempoCore.Vector normal = 3;
-
-  // Distance from start to hit point (in meters)
-  float distance = 4;
-
-  // Name of the actor that was hit
+  // Distance from `start` to the hit point, in meters.
+  float distance_m = 4;
+  // Name of the actor that was hit.
   string actor = 5;
-
-  // Name of the component that was hit
+  // Name of the component that was hit.
   string component = 6;
 }
 
 message OverlapEventRequest {
-  string actor_name = 1;
+  // Name of the actor whose overlap events to stream.
+  string actor = 1;
 }
 
 message OverlapEventResponse {
+  // Name of the actor whose subscription fired (matches the request's `actor`).
   string overlapped_actor_name = 1;
-  string other_actor_name = 2;
-  string other_actor_type = 3;
+  // Name of the actor that overlapped with `overlapped_actor_name`.
+  string overlapping_actor_name = 2;
+  // Class/type name of `overlapping_actor_name`.
+  string overlapping_actor_type = 3;
 }
 
 message ActorStateRequest {
-  string actor_name = 1;
+  // Name of the actor to query.
+  string actor = 1;
+  // Include components flagged as hidden when computing the actor's bounds.
   bool include_hidden_components = 2;
 }
 
 message ActorStatesNearRequest {
-  string near_actor_name = 1;
-  float search_radius = 2;
+  // Name of the actor at the center of the query.
+  string near_actor = 1;
+  // Radius around `near_actor` in meters.
+  float search_radius_m = 2;
+  // Include static actors.
   bool include_static = 3;
+  // Include actors flagged as hidden.
   bool include_hidden_actors = 4;
+  // Include components flagged as hidden when computing each actor's bounds.
   bool include_hidden_components = 5;
 }
 
 message ActorState {
-  double timestamp = 1;
+  // Sim time at which the state was sampled, in seconds.
+  double timestamp_s = 1;
+  // Name of the actor.
   string name = 2;
+  // World transform (meters / right-handed).
   TempoCore.Transform transform = 3;
-  reserved 4, 5;
-  reserved "linear_velocity", "angular_velocity";
-  TempoCore.Box bounds = 6;
-  TempoCore.Twist velocity = 7;
+  // World-axis-aligned bounding box, in meters.
+  TempoCore.Box bounds = 4;
+  // World-frame 6-DoF velocity (linear m/s, angular rad/s).
+  TempoCore.Twist velocity = 5;
 }
 
 message ActorStates {
@@ -95,6 +99,6 @@ service WorldStateService {
 
   rpc StreamActorStatesNear(ActorStatesNearRequest) returns (stream ActorStates);
 
-  // Perform a single raycast
+  // Perform a single raycast.
   rpc Raycast(RaycastRequest) returns (RaycastResponse);
 }

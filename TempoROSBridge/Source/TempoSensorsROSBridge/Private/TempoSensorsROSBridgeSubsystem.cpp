@@ -105,8 +105,8 @@ void UTempoSensorsROSBridgeSubsystem::RequestMeasurement<TempoSensors::ColorImag
 	TempoSensors::ColorImageRequest ImageRequest;
 	const FString SensorName = SensorNameFromTopic(Topic);
 	const FString OwnerName = OwnerNameFromTopic(Topic);
-	ImageRequest.set_sensor_name(TCHAR_TO_UTF8(*SensorName));
-	ImageRequest.set_owner_name(TCHAR_TO_UTF8(*OwnerName));
+	ImageRequest.set_sensor(TCHAR_TO_UTF8(*SensorName));
+	ImageRequest.set_owner(TCHAR_TO_UTF8(*OwnerName));
 	StreamColorImages(
 		ImageRequest,
 		TResponseDelegate<TempoSensors::ColorImage>::CreateUObject(
@@ -119,8 +119,8 @@ void UTempoSensorsROSBridgeSubsystem::RequestMeasurement<TempoSensors::DepthImag
 	TempoSensors::DepthImageRequest ImageRequest;
 	const FString SensorName = SensorNameFromTopic(Topic);
 	const FString OwnerName = OwnerNameFromTopic(Topic);
-	ImageRequest.set_sensor_name(TCHAR_TO_UTF8(*SensorName));
-	ImageRequest.set_owner_name(TCHAR_TO_UTF8(*OwnerName));
+	ImageRequest.set_sensor(TCHAR_TO_UTF8(*SensorName));
+	ImageRequest.set_owner(TCHAR_TO_UTF8(*OwnerName));
 	StreamDepthImages(
 		ImageRequest,
 		TResponseDelegate<TempoSensors::DepthImage>::CreateUObject(
@@ -133,8 +133,8 @@ void UTempoSensorsROSBridgeSubsystem::RequestMeasurement<TempoSensors::LabelImag
 	TempoSensors::LabelImageRequest ImageRequest;
 	const FString SensorName = SensorNameFromTopic(Topic);
 	const FString OwnerName = OwnerNameFromTopic(Topic);
-	ImageRequest.set_sensor_name(TCHAR_TO_UTF8(*SensorName));
-	ImageRequest.set_owner_name(TCHAR_TO_UTF8(*OwnerName));
+	ImageRequest.set_sensor(TCHAR_TO_UTF8(*SensorName));
+	ImageRequest.set_owner(TCHAR_TO_UTF8(*OwnerName));
 	StreamLabelImages(
 		ImageRequest,
 		TResponseDelegate<TempoSensors::LabelImage>::CreateUObject(
@@ -143,7 +143,7 @@ void UTempoSensorsROSBridgeSubsystem::RequestMeasurement<TempoSensors::LabelImag
 
 void UTempoSensorsROSBridgeSubsystem::UpdatePublishers()
 {
-	const TempoSensors::AvailableSensorsRequest Request;
+	const TempoCore::Empty Request;
 	TSet<FString> PossiblyStaleTopics = ROSNode->GetPublishedTopics();
 	ForEachActiveSensor([this, &PossiblyStaleTopics](const ITempoSensorInterface* Sensor)
 	{

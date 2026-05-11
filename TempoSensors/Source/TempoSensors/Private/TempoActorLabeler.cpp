@@ -103,7 +103,7 @@ void UTempoActorLabeler::RegisterServices(FTempoServer& Server)
 	);
 }
 
-void UTempoActorLabeler::HandleGetLabeledActorTypes(const TempoSensors::GetLabeledActorTypesRequest& Request, const TResponseDelegate<TempoSensors::GetLabeledActorTypesResponse>& ResponseContinuation)
+void UTempoActorLabeler::HandleGetLabeledActorTypes(const TempoCore::Empty& Request, const TResponseDelegate<TempoSensors::GetLabeledActorTypesResponse>& ResponseContinuation)
 {
 	TempoSensors::GetLabeledActorTypesResponse Response;
 
@@ -117,7 +117,7 @@ void UTempoActorLabeler::HandleGetLabeledActorTypes(const TempoSensors::GetLabel
 
 	for (const FName& ClassName : LabeledActorClassNames)
 	{
-		Response.add_actor_types(TCHAR_TO_UTF8(*ClassName.ToString()));
+		Response.add_types(TCHAR_TO_UTF8(*ClassName.ToString()));
 	}
 
 	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
@@ -136,7 +136,7 @@ TMap<uint8, uint8> UTempoActorLabeler::GetInstanceToSemanticIdMap() const
 	return Result;
 }
 
-void UTempoActorLabeler::GetInstanceToSemanticIdMap(const TempoCore::Empty& Request, const TResponseDelegate<TempoSensors::InstanceToSemanticIdMap>& ResponseContinuation)
+void UTempoActorLabeler::GetInstanceToSemanticIdMap(const TempoCore::Empty& Request, const TResponseDelegate<TempoSensors::InstanceToSemanticIdMap>& ResponseContinuation) const
 {
 	TMap<uint8, uint8> Map = GetInstanceToSemanticIdMap();
 
@@ -144,8 +144,8 @@ void UTempoActorLabeler::GetInstanceToSemanticIdMap(const TempoCore::Empty& Requ
 	for (const auto& Pair : Map)
 	{
 		auto* ProtoPair = ProtoResponse.add_instance_semantic_id_pairs();
-		ProtoPair->set_instanceid(Pair.Key);
-		ProtoPair->set_semanticid(Pair.Value);
+		ProtoPair->set_instance_id(Pair.Key);
+		ProtoPair->set_semantic_id(Pair.Value);
 	}
 	ResponseContinuation.ExecuteIfBound(ProtoResponse, grpc::Status_OK);
 }

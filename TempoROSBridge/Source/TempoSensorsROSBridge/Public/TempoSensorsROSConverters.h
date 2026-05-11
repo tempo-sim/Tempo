@@ -19,11 +19,11 @@ DEFINE_TEMPOROS_MESSAGE_TYPE_TRAITS(TempoSensors::LabelImage)
 DEFINE_TEMPOROS_MESSAGE_TYPE_TRAITS(FTempoCameraInfo)
 
 template <>
-struct TFromROSConverter<tempo_sensors_ros_bridge::srv::GetAvailableSensors::Request, TempoSensors::AvailableSensorsRequest>
+struct TFromROSConverter<tempo_sensors_ros_bridge::srv::GetAvailableSensors::Request, TempoCore::Empty>
 {
-	static TempoSensors::AvailableSensorsRequest Convert(const tempo_sensors_ros_bridge::srv::GetAvailableSensors::Request& ROSValue)
+	static TempoCore::Empty Convert(const tempo_sensors_ros_bridge::srv::GetAvailableSensors::Request& ROSValue)
 	{
-		return TempoSensors::AvailableSensorsRequest();
+		return TempoCore::Empty();
 	}
 };
 
@@ -39,22 +39,22 @@ struct TToROSConverter<tempo_sensors_ros_bridge::srv::GetAvailableSensors::Respo
 			tempo_sensors_ros_bridge::msg::SensorDescriptor ROSAvailableSensor;
 			ROSAvailableSensor.name = TempoAvailableSensor.name();
 			ROSAvailableSensor.owner = TempoAvailableSensor.owner();
-			ROSAvailableSensor.rate = TempoAvailableSensor.rate();
+			ROSAvailableSensor.rate = TempoAvailableSensor.rate_hz();
 			for (const auto& MeasurementType : TempoAvailableSensor.measurement_types())
 			{
 				switch (MeasurementType)
 				{
-					case TempoSensors::COLOR_IMAGE:
+					case TempoSensors::MT_COLOR_IMAGE:
 					{
 						ROSAvailableSensor.measurement_types.push_back("color_image");
 						break;
 					}
-					case TempoSensors::DEPTH_IMAGE:
+					case TempoSensors::MT_DEPTH_IMAGE:
 					{
 						ROSAvailableSensor.measurement_types.push_back("depth_image");
 						break;
 					}
-					case TempoSensors::LABEL_IMAGE:
+					case TempoSensors::MT_LABEL_IMAGE:
 					{
 						ROSAvailableSensor.measurement_types.push_back("label_image");
 						break;
@@ -73,7 +73,7 @@ struct TToROSConverter<tempo_sensors_ros_bridge::srv::GetAvailableSensors::Respo
 
 struct FTempoGetAvailableSensors
 {
-	using Request = TempoSensors::AvailableSensorsRequest;
+	using Request = TempoCore::Empty;
 	using Response = TempoSensors::AvailableSensorsResponse;
 };
 
@@ -92,12 +92,12 @@ struct TImplicitToROSConverter<TempoSensors::ColorImage>: TToROSConverter<sensor
 		ToType ToValue;
 		switch (TempoValue.encoding())
 		{
-			case TempoSensors::BGR8:
+			case TempoSensors::CE_BGR8:
 			{
 				ToValue.encoding = "bgr8";
 				break;
 			}
-			case TempoSensors::RGB8:
+			case TempoSensors::CE_RGB8:
 			default:
 			{
 				ToValue.encoding = "rgb8";
@@ -105,12 +105,12 @@ struct TImplicitToROSConverter<TempoSensors::ColorImage>: TToROSConverter<sensor
 			}
 		}
 		ToValue.data.assign(TempoValue.data().begin(), TempoValue.data().end());
-		ToValue.width = TempoValue.width();
-		ToValue.height = TempoValue.height();
-		ToValue.header.frame_id = TempoValue.header().sensor_name();
-		ToValue.header.stamp.sec = static_cast<int>(TempoValue.header().capture_time());
-		ToValue.header.stamp.nanosec = 1e9 * (TempoValue.header().capture_time() - static_cast<int>(TempoValue.header().capture_time()));
-		ToValue.step = TempoValue.width() * 3;
+		ToValue.width = TempoValue.width_px();
+		ToValue.height = TempoValue.height_px();
+		ToValue.header.frame_id = TempoValue.header().sensor();
+		ToValue.header.stamp.sec = static_cast<int>(TempoValue.header().capture_time_s());
+		ToValue.header.stamp.nanosec = 1e9 * (TempoValue.header().capture_time_s() - static_cast<int>(TempoValue.header().capture_time_s()));
+		ToValue.step = TempoValue.width_px() * 3;
 		return ToValue;
 	}
 };
@@ -122,14 +122,14 @@ struct TImplicitToROSConverter<TempoSensors::DepthImage>: TToROSConverter<sensor
 	{
 		ToType ToValue;
 		ToValue.encoding = "32FC1";
-		ToValue.data.resize(TempoValue.depths().size() * 4);
-		FMemory::Memcpy(&ToValue.data[0], &TempoValue.depths()[0], TempoValue.depths().size() * 4);
-		ToValue.width = TempoValue.width();
-		ToValue.height = TempoValue.height();
-		ToValue.header.frame_id = TempoValue.header().sensor_name();
-		ToValue.header.stamp.sec = static_cast<int>(TempoValue.header().capture_time());
-		ToValue.header.stamp.nanosec = 1e9 * (TempoValue.header().capture_time() - static_cast<int>(TempoValue.header().capture_time()));
-		ToValue.step = TempoValue.width() * 4;
+		ToValue.data.resize(TempoValue.depths_m().size() * 4);
+		FMemory::Memcpy(&ToValue.data[0], &TempoValue.depths_m()[0], TempoValue.depths_m().size() * 4);
+		ToValue.width = TempoValue.width_px();
+		ToValue.height = TempoValue.height_px();
+		ToValue.header.frame_id = TempoValue.header().sensor();
+		ToValue.header.stamp.sec = static_cast<int>(TempoValue.header().capture_time_s());
+		ToValue.header.stamp.nanosec = 1e9 * (TempoValue.header().capture_time_s() - static_cast<int>(TempoValue.header().capture_time_s()));
+		ToValue.step = TempoValue.width_px() * 4;
 		return ToValue;
 	}
 };
@@ -142,12 +142,12 @@ struct TImplicitToROSConverter<TempoSensors::LabelImage>: TToROSConverter<sensor
 		ToType ToValue;
 		ToValue.encoding = "mono8";
 		ToValue.data.assign(TempoValue.data().begin(), TempoValue.data().end());
-		ToValue.width = TempoValue.width();
-		ToValue.height = TempoValue.height();
-		ToValue.header.frame_id = TempoValue.header().sensor_name();
-		ToValue.header.stamp.sec = static_cast<int>(TempoValue.header().capture_time());
-		ToValue.header.stamp.nanosec = 1e9 * (TempoValue.header().capture_time() - static_cast<int>(TempoValue.header().capture_time()));
-		ToValue.step = TempoValue.width();
+		ToValue.width = TempoValue.width_px();
+		ToValue.height = TempoValue.height_px();
+		ToValue.header.frame_id = TempoValue.header().sensor();
+		ToValue.header.stamp.sec = static_cast<int>(TempoValue.header().capture_time_s());
+		ToValue.header.stamp.nanosec = 1e9 * (TempoValue.header().capture_time_s() - static_cast<int>(TempoValue.header().capture_time_s()));
+		ToValue.step = TempoValue.width_px();
 		return ToValue;
 	}
 };

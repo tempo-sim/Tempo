@@ -17,7 +17,7 @@ struct TToROSConverter<tempo_movement_ros_bridge::srv::GetCommandableVehicles::R
 	static tempo_movement_ros_bridge::srv::GetCommandableVehicles::Response Convert(const TempoMovement::CommandableVehiclesResponse& TempoValue)
 	{
 		tempo_movement_ros_bridge::srv::GetCommandableVehicles::Response ROSValue;
-		for (const std::string& vehicle_name : TempoValue.vehicle_name())
+		for (const std::string& vehicle_name : TempoValue.vehicles())
 		{
 			ROSValue.vehicle_names.push_back(vehicle_name.c_str());
 		}
@@ -40,7 +40,7 @@ struct TFromROSConverter<tempo_movement_ros_bridge::srv::CommandVehicle::Request
 	static TempoMovement::NormalizedDrivingCommand Convert(const tempo_movement_ros_bridge::srv::CommandVehicle::Request& ROSValue)
 	{
 		TempoMovement::NormalizedDrivingCommand TempoValue;
-		TempoValue.set_vehicle_name(ROSValue.vehicle_name);
+		TempoValue.set_vehicle(ROSValue.vehicle_name);
 		TempoValue.set_acceleration(ROSValue.acceleration);
 		TempoValue.set_steering(ROSValue.steering);
 		return TempoValue;
@@ -62,7 +62,7 @@ struct TFromROSConverter<tempo_movement_ros_bridge::srv::CommandVelocity::Reques
 	static TempoMovement::VelocityCommand Convert(const tempo_movement_ros_bridge::srv::CommandVelocity::Request& ROSValue)
 	{
 		TempoMovement::VelocityCommand TempoValue;
-		TempoValue.set_vehicle_name(ROSValue.vehicle_name);
+		TempoValue.set_vehicle(ROSValue.vehicle_name);
 		TempoCore::Twist* Twist = TempoValue.mutable_twist();
 		TempoCore::Vector* Linear = Twist->mutable_linear();
 		Linear->set_x(ROSValue.twist.linear_x);
@@ -91,7 +91,7 @@ struct TFromROSConverter<tempo_movement_ros_bridge::srv::CommandAcceleration::Re
 	static TempoMovement::AccelerationCommand Convert(const tempo_movement_ros_bridge::srv::CommandAcceleration::Request& ROSValue)
 	{
 		TempoMovement::AccelerationCommand TempoValue;
-		TempoValue.set_vehicle_name(ROSValue.vehicle_name);
+		TempoValue.set_vehicle(ROSValue.vehicle_name);
 		TempoCore::Accel* Accel = TempoValue.mutable_accel();
 		TempoCore::Vector* Linear = Accel->mutable_linear();
 		Linear->set_x(ROSValue.accel.linear_x);

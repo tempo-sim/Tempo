@@ -140,22 +140,22 @@ void UTempoCoreServiceSubsystem::SetControlMode(const SetControlModeRequest& Req
 	EControlMode ControlMode;
 	switch (Request.mode())
 	{
-	case TempoCore::NONE:
+	case TempoCore::CM_NONE:
 		{
 			ControlMode = EControlMode::None;
 			break;
 		}
-	case TempoCore::USER:
+	case TempoCore::CM_USER:
 		{
 			ControlMode = EControlMode::User;
 			break;
 		}
-	case TempoCore::OPEN_LOOP:
+	case TempoCore::CM_OPEN_LOOP:
 		{
 			ControlMode = EControlMode::OpenLoop;
 			break;
 		}
-	case TempoCore::CLOSED_LOOP:
+	case TempoCore::CM_CLOSED_LOOP:
 		{
 			ControlMode = EControlMode::ClosedLoop;
 			break;

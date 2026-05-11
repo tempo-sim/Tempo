@@ -364,16 +364,16 @@ void TTextureRead<FLidarPixel>::Decode(float TransmissionTime, TempoSensors::Lid
 	// Pre-size the packed repeated-scalar output fields so parallel workers can write
 	// directly into their contiguous backing storage — no intermediate per-return objects.
 	// Azimuths/elevations are per-return to leave room for non-gridded beam patterns.
-	ScanSegmentOut.mutable_distances()->Resize(NumReturns, 0.0f);
+	ScanSegmentOut.mutable_distances_m()->Resize(NumReturns, 0.0f);
 	ScanSegmentOut.mutable_intensities()->Resize(NumReturns, 0.0f);
 	ScanSegmentOut.mutable_labels()->Resize(NumReturns, 0u);
-	ScanSegmentOut.mutable_azimuths()->Resize(NumReturns, 0.0f);
-	ScanSegmentOut.mutable_elevations()->Resize(NumReturns, 0.0f);
-	float* const DistancesData = ScanSegmentOut.mutable_distances()->mutable_data();
+	ScanSegmentOut.mutable_azimuths_rad()->Resize(NumReturns, 0.0f);
+	ScanSegmentOut.mutable_elevations_rad()->Resize(NumReturns, 0.0f);
+	float* const DistancesData = ScanSegmentOut.mutable_distances_m()->mutable_data();
 	float* const IntensitiesData = ScanSegmentOut.mutable_intensities()->mutable_data();
 	uint32_t* const LabelsData = ScanSegmentOut.mutable_labels()->mutable_data();
-	float* const AzimuthsData = ScanSegmentOut.mutable_azimuths()->mutable_data();
-	float* const ElevationsData = ScanSegmentOut.mutable_elevations()->mutable_data();
+	float* const AzimuthsData = ScanSegmentOut.mutable_azimuths_rad()->mutable_data();
+	float* const ElevationsData = ScanSegmentOut.mutable_elevations_rad()->mutable_data();
 
 	// H-outer, V-inner layout: each ParallelFor iteration owns a contiguous V-length stripe
 	// of every output array, so threads never share cache lines.
@@ -452,10 +452,10 @@ void TTextureRead<FLidarPixel>::Decode(float TransmissionTime, TempoSensors::Lid
 	ScanSegmentOut.set_horizontal_beams(HorizontalBeams);
 	ScanSegmentOut.set_vertical_beams(VerticalBeams);
 	// Distances are emitted in meters (see CM2M conversion above), so the range is too.
-	ScanSegmentOut.mutable_distance_range()->set_min(QuantityConverter<CM2M>::Convert(MinDistance));
-	ScanSegmentOut.mutable_distance_range()->set_max(QuantityConverter<CM2M>::Convert(MaxDistance));
-	ScanSegmentOut.mutable_azimuth_range()->set_max(FMath::DegreesToRadians(HorizontalFOV / 2.0 + RelativeYaw));
-	ScanSegmentOut.mutable_azimuth_range()->set_min(FMath::DegreesToRadians(-HorizontalFOV / 2.0 + RelativeYaw));
+	ScanSegmentOut.mutable_distance_range_m()->set_min(QuantityConverter<CM2M>::Convert(MinDistance));
+	ScanSegmentOut.mutable_distance_range_m()->set_max(QuantityConverter<CM2M>::Convert(MaxDistance));
+	ScanSegmentOut.mutable_azimuth_range_rad()->set_max(FMath::DegreesToRadians(HorizontalFOV / 2.0 + RelativeYaw));
+	ScanSegmentOut.mutable_azimuth_range_rad()->set_min(FMath::DegreesToRadians(-HorizontalFOV / 2.0 + RelativeYaw));
 	if (BeamCalibration.Num() > 0)
 	{
 		// Output elevations are negated from the internal ElevationDeg convention, so the range
@@ -468,13 +468,13 @@ void TTextureRead<FLidarPixel>::Decode(float TransmissionTime, TempoSensors::Lid
 			MinOutputElev = FMath::Min(MinOutputElev, OutputElev);
 			MaxOutputElev = FMath::Max(MaxOutputElev, OutputElev);
 		}
-		ScanSegmentOut.mutable_elevation_range()->set_max(FMath::DegreesToRadians(MaxOutputElev));
-		ScanSegmentOut.mutable_elevation_range()->set_min(FMath::DegreesToRadians(MinOutputElev));
+		ScanSegmentOut.mutable_elevation_range_rad()->set_max(FMath::DegreesToRadians(MaxOutputElev));
+		ScanSegmentOut.mutable_elevation_range_rad()->set_min(FMath::DegreesToRadians(MinOutputElev));
 	}
 	else
 	{
-		ScanSegmentOut.mutable_elevation_range()->set_max(FMath::DegreesToRadians(VerticalFOV / 2.0));
-		ScanSegmentOut.mutable_elevation_range()->set_min(FMath::DegreesToRadians(-VerticalFOV / 2.0));
+		ScanSegmentOut.mutable_elevation_range_rad()->set_max(FMath::DegreesToRadians(VerticalFOV / 2.0));
+		ScanSegmentOut.mutable_elevation_range_rad()->set_min(FMath::DegreesToRadians(-VerticalFOV / 2.0));
 	}
 }
 

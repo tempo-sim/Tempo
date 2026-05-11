@@ -43,11 +43,11 @@ impl AvailableSensor {
 
 fn measurement_type_label(m: MeasurementType) -> &'static str {
     match m {
-        MeasurementType::ColorImage => "Color",
-        MeasurementType::DepthImage => "Depth",
-        MeasurementType::LabelImage => "Label",
-        MeasurementType::LidarScan => "PointCloud",
-        MeasurementType::BoundingBoxes => "BoundingBoxes",
+        MeasurementType::MtColorImage => "Color",
+        MeasurementType::MtDepthImage => "Depth",
+        MeasurementType::MtLabelImage => "Label",
+        MeasurementType::MtLidarScan => "PointCloud",
+        MeasurementType::MtBoundingBoxes => "BoundingBoxes",
     }
 }
 
@@ -66,8 +66,8 @@ async fn get_available_sensors(filter: Option<&str>) -> Vec<AvailableSensor> {
             .iter()
             .filter_map(|i| MeasurementType::try_from(*i).ok())
             .collect();
-        let is_camera = mts.contains(&MeasurementType::ColorImage);
-        let is_lidar = mts.contains(&MeasurementType::LidarScan);
+        let is_camera = mts.contains(&MeasurementType::MtColorImage);
+        let is_lidar = mts.contains(&MeasurementType::MtLidarScan);
         if !(is_camera || is_lidar) {
             continue;
         }
@@ -269,10 +269,10 @@ async fn stream_color(sensor: AvailableSensor, window: WindowProxy) {
         match item {
             Ok(img) => {
                 count += 1;
-                let info = if img.encoding == ColorEncoding::Rgb8 as i32 {
-                    ImageInfo::rgb8(img.width, img.height)
+                let info = if img.encoding == ColorEncoding::CeRgb8 as i32 {
+                    ImageInfo::rgb8(img.width_px, img.height_px)
                 } else {
-                    ImageInfo::bgr8(img.width, img.height)
+                    ImageInfo::bgr8(img.width_px, img.height_px)
                 };
                 let view = ImageView::new(info, &img.data);
                 if window.set_image("frame", view).is_err() {
@@ -284,8 +284,8 @@ async fn stream_color(sensor: AvailableSensor, window: WindowProxy) {
                         "[{}] Color frame {} {}x{} ({} bytes)",
                         key,
                         count,
-                        img.width,
-                        img.height,
+                        img.width_px,
+                        img.height_px,
                         img.data.len()
                     );
                 }
@@ -320,7 +320,7 @@ async fn stream_depth(sensor: AvailableSensor, window: WindowProxy) {
                 let mut depth_mx = f32::NEG_INFINITY;
                 let mut recip_mn = f32::INFINITY;
                 let mut recip_mx = f32::NEG_INFINITY;
-                for &d in &img.depths {
+                for &d in &img.depths_m {
                     if d.is_finite() {
                         if d < depth_mn {
                             depth_mn = d;
@@ -361,7 +361,7 @@ async fn stream_depth(sensor: AvailableSensor, window: WindowProxy) {
                         (n * 255.0) as u8
                     })
                     .collect();
-                let view = ImageView::new(ImageInfo::mono8(img.width, img.height), &bytes);
+                let view = ImageView::new(ImageInfo::mono8(img.width_px, img.height_px), &bytes);
                 if window.set_image("frame", view).is_err() {
                     eprintln!("[{}] Window closed, stopping stream.", key);
                     break;
@@ -369,7 +369,7 @@ async fn stream_depth(sensor: AvailableSensor, window: WindowProxy) {
                 if count % 30 == 1 {
                     println!(
                         "[{}] Depth frame {} {}x{} (min={:.2} max={:.2})",
-                        key, count, img.width, img.height, depth_mn, depth_mx
+                        key, count, img.width_px, img.height_px, depth_mn, depth_mx
                     );
                 }
             }
@@ -444,7 +444,7 @@ async fn stream_label(sensor: AvailableSensor, window: WindowProxy) {
                     let c = lut[idx as usize];
                     rgb.extend_from_slice(&c);
                 }
-                let view = ImageView::new(ImageInfo::rgb8(img.width, img.height), &rgb);
+                let view = ImageView::new(ImageInfo::rgb8(img.width_px, img.height_px), &rgb);
                 if window.set_image("frame", view).is_err() {
                     eprintln!("[{}] Window closed, stopping stream.", key);
                     break;
@@ -458,7 +458,7 @@ async fn stream_label(sensor: AvailableSensor, window: WindowProxy) {
                         .len();
                     println!(
                         "[{}] Label frame {} {}x{} ({} unique labels)",
-                        key, count, img.width, img.height, unique
+                        key, count, img.width_px, img.height_px, unique
                     );
                 }
             }
@@ -601,10 +601,10 @@ impl LidarAccumulator {
             self.sequence_id = id;
             self.expected_segments = seg.scan_count;
         }
-        self.distances.extend_from_slice(&seg.distances);
+        self.distances.extend_from_slice(&seg.distances_m);
         self.intensities.extend_from_slice(&seg.intensities);
-        self.azimuths.extend_from_slice(&seg.azimuths);
-        self.elevations.extend_from_slice(&seg.elevations);
+        self.azimuths.extend_from_slice(&seg.azimuths_rad);
+        self.elevations.extend_from_slice(&seg.elevations_rad);
         self.received_segments += 1;
         self.expected_segments > 0 && self.received_segments == self.expected_segments
     }
@@ -688,7 +688,7 @@ async fn stream_lidar(sensor: AvailableSensor) {
                         "[{}] Lidar segment {} returns={} v_beams={} h_beams={}",
                         key,
                         count,
-                        seg.distances.len(),
+                        seg.distances_m.len(),
                         seg.vertical_beams,
                         seg.horizontal_beams
                     );
@@ -727,14 +727,14 @@ async fn record_color(sensor: AvailableSensor, dir: PathBuf) {
         match item {
             Ok(img) => {
                 let mut rgb = img.data.clone();
-                if img.encoding != ColorEncoding::Rgb8 as i32 {
+                if img.encoding != ColorEncoding::CeRgb8 as i32 {
                     for px in rgb.chunks_exact_mut(3) {
                         px.swap(0, 2);
                     }
                 }
                 let path = dir.join(format!("frame_{:06}.jpg", count));
                 if let Some(buf) =
-                    image::RgbImage::from_raw(img.width, img.height, rgb)
+                    image::RgbImage::from_raw(img.width_px, img.height_px, rgb)
                 {
                     let _ = buf.save(&path);
                 }
@@ -762,9 +762,9 @@ async fn record_depth(sensor: AvailableSensor, dir: PathBuf) {
     while let Some(item) = stream.next().await {
         match item {
             Ok(img) => {
-                let path = dir.join(format!("frame_{:06}_{}x{}.f32", count, img.width, img.height));
+                let path = dir.join(format!("frame_{:06}_{}x{}.f32", count, img.width_px, img.height_px));
                 if let Ok(mut f) = fs::File::create(&path) {
-                    let bytes: Vec<u8> = img.depths.iter().flat_map(|v| v.to_le_bytes()).collect();
+                    let bytes: Vec<u8> = img.depths_m.iter().flat_map(|v| v.to_le_bytes()).collect();
                     let _ = f.write_all(&bytes);
                 }
                 count += 1;
@@ -793,7 +793,7 @@ async fn record_label(sensor: AvailableSensor, dir: PathBuf) {
             Ok(img) => {
                 let path = dir.join(format!("frame_{:06}.pgm", count));
                 if let Ok(mut f) = fs::File::create(&path) {
-                    let header = format!("P5\n{} {}\n255\n", img.width, img.height);
+                    let header = format!("P5\n{} {}\n255\n", img.width_px, img.height_px);
                     let _ = f.write_all(header.as_bytes());
                     let _ = f.write_all(&img.data);
                 }
@@ -918,8 +918,8 @@ async fn flow_get_sensor_properties() {
         Ok(resp) => {
             println!();
             for p in resp.properties {
-                if p.property_type != "unsupported" {
-                    println!("  {}({}): {}", p.name, p.property_type, p.value);
+                if p.r#type != "unsupported" {
+                    println!("  {}({}): {}", p.name, p.r#type, p.value);
                 }
             }
         }
@@ -983,7 +983,7 @@ async fn flow_start_stream(state: &mut State) {
     }
     let needs_window = matches!(
         mt,
-        MeasurementType::ColorImage | MeasurementType::DepthImage | MeasurementType::LabelImage
+        MeasurementType::MtColorImage | MeasurementType::MtDepthImage | MeasurementType::MtLabelImage
     );
     let window = if needs_window {
         match show_image::create_window(&key, Default::default()) {
@@ -997,11 +997,11 @@ async fn flow_start_stream(state: &mut State) {
         None
     };
     let handle = match (mt, window.clone()) {
-        (MeasurementType::ColorImage, Some(w)) => tokio::spawn(stream_color(sensor, w)),
-        (MeasurementType::DepthImage, Some(w)) => tokio::spawn(stream_depth(sensor, w)),
-        (MeasurementType::LabelImage, Some(w)) => tokio::spawn(stream_label(sensor, w)),
-        (MeasurementType::LidarScan, _) => tokio::spawn(stream_lidar(sensor)),
-        (MeasurementType::BoundingBoxes, _) => {
+        (MeasurementType::MtColorImage, Some(w)) => tokio::spawn(stream_color(sensor, w)),
+        (MeasurementType::MtDepthImage, Some(w)) => tokio::spawn(stream_depth(sensor, w)),
+        (MeasurementType::MtLabelImage, Some(w)) => tokio::spawn(stream_label(sensor, w)),
+        (MeasurementType::MtLidarScan, _) => tokio::spawn(stream_lidar(sensor)),
+        (MeasurementType::MtBoundingBoxes, _) => {
             println!("  BoundingBoxes streaming not implemented in this client.");
             return;
         }
@@ -1043,7 +1043,7 @@ async fn flow_start_recording(state: &mut State) {
     let mut entries: Vec<(AvailableSensor, MeasurementType, String)> = Vec::new();
     for s in &cameras {
         for &mt in &s.measurement_types {
-            if mt == MeasurementType::LidarScan {
+            if mt == MeasurementType::MtLidarScan {
                 continue;
             }
             let label = format!("{}:{}:{}", s.owner, s.name, measurement_type_label(mt));
@@ -1081,9 +1081,9 @@ async fn flow_start_recording(state: &mut State) {
     };
     println!("\n  Recording {} to: {}", key, dir.display());
     let handle = match mt {
-        MeasurementType::ColorImage => tokio::spawn(record_color(sensor, dir.clone())),
-        MeasurementType::DepthImage => tokio::spawn(record_depth(sensor, dir.clone())),
-        MeasurementType::LabelImage => tokio::spawn(record_label(sensor, dir.clone())),
+        MeasurementType::MtColorImage => tokio::spawn(record_color(sensor, dir.clone())),
+        MeasurementType::MtDepthImage => tokio::spawn(record_depth(sensor, dir.clone())),
+        MeasurementType::MtLabelImage => tokio::spawn(record_label(sensor, dir.clone())),
         _ => {
             println!("  Unsupported measurement type for recording.");
             return;

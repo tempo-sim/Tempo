@@ -52,12 +52,12 @@ void UTempoTimeServiceSubsystem::SetTimeMode(const TempoCore::TimeModeRequest& R
 	UTempoCoreSettings* Settings = GetMutableDefault<UTempoCoreSettings>();
 	switch (Request.time_mode())
 	{
-	case TempoCore::FIXED_STEP:
+	case TempoCore::TM_FIXED_STEP:
 		{
 			Settings->SetTimeMode(ETimeMode::FixedStep);
 			break;
 		}
-	case TempoCore::WALL_CLOCK:
+	case TempoCore::TM_WALL_CLOCK:
 		{
 			Settings->SetTimeMode(ETimeMode::WallClock);
 			break;

@@ -177,26 +177,26 @@ async def get_available_sensors(type=None):
         available_sensors_response = await ts.get_available_sensors()
         for sensor in available_sensors_response.available_sensors:
             if type == None:
-                if Sensors.COLOR_IMAGE in sensor.measurement_types:
-                    available_sensors.append(AvailableSensor("Camera", sensor.name, sensor.owner, sensor.rate, sensor.measurement_types))
-                if Sensors.LIDAR_SCAN in sensor.measurement_types:
-                    available_sensors.append(AvailableSensor("Lidar", sensor.name, sensor.owner, sensor.rate, sensor.measurement_types))
+                if Sensors.MT_COLOR_IMAGE in sensor.measurement_types:
+                    available_sensors.append(AvailableSensor("Camera", sensor.name, sensor.owner, sensor.rate_hz, sensor.measurement_types))
+                if Sensors.MT_LIDAR_SCAN in sensor.measurement_types:
+                    available_sensors.append(AvailableSensor("Lidar", sensor.name, sensor.owner, sensor.rate_hz, sensor.measurement_types))
             elif type == "Camera":
-                if Sensors.COLOR_IMAGE in sensor.measurement_types:
-                    available_sensors.append(AvailableSensor("Camera", sensor.name, sensor.owner, sensor.rate, sensor.measurement_types))
+                if Sensors.MT_COLOR_IMAGE in sensor.measurement_types:
+                    available_sensors.append(AvailableSensor("Camera", sensor.name, sensor.owner, sensor.rate_hz, sensor.measurement_types))
     except grpc.aio._call.AioRpcError:
         print("\nCould not connect to Tempo. Is the simulation running?")
     return available_sensors
 
 
 def measurement_type_string(type):
-    if type == Sensors.COLOR_IMAGE:
+    if type == Sensors.MT_COLOR_IMAGE:
         return "Color"
-    elif type == Sensors.DEPTH_IMAGE:
+    elif type == Sensors.MT_DEPTH_IMAGE:
         return "Depth"
-    elif type == Sensors.LABEL_IMAGE:
+    elif type == Sensors.MT_LABEL_IMAGE:
         return "Label"
-    elif type == Sensors.LIDAR_SCAN:
+    elif type == Sensors.MT_LIDAR_SCAN:
         return "PointCloud"
 
 
@@ -397,13 +397,13 @@ async def flow_start_stream(sensor_streams, display_scale):
             del sensor_streams[key]
 
         task = None
-        if measurement_type == Sensors.COLOR_IMAGE:
+        if measurement_type == Sensors.MT_COLOR_IMAGE:
             task = asyncio.create_task(tiu.stream_color_images(sensor.name, sensor.owner, display_scale))
-        if measurement_type == Sensors.DEPTH_IMAGE:
+        if measurement_type == Sensors.MT_DEPTH_IMAGE:
             task = asyncio.create_task(tiu.stream_depth_images(sensor.name, sensor.owner, display_scale))
-        if measurement_type == Sensors.LABEL_IMAGE:
+        if measurement_type == Sensors.MT_LABEL_IMAGE:
             task = asyncio.create_task(tiu.stream_label_images(sensor.name, sensor.owner, display_scale))
-        if measurement_type == Sensors.LIDAR_SCAN:
+        if measurement_type == Sensors.MT_LIDAR_SCAN:
             task = asyncio.create_task(tlu.stream_lidar_scans(sensor.name, sensor.owner, "Intensity"))
 
         if task is not None:
@@ -450,7 +450,7 @@ async def flow_start_recording(record_streams):
     items = []
     for sensor in available_sensors:
         for measurement_type in sensor.measurement_types:
-            if measurement_type == Sensors.LIDAR_SCAN:
+            if measurement_type == Sensors.MT_LIDAR_SCAN:
                 continue
             label = f"{sensor.owner}:{sensor.name}:{measurement_type_string(measurement_type)}"
             items.append(((sensor, measurement_type), label))
@@ -477,11 +477,11 @@ async def flow_start_recording(record_streams):
 
     try:
         task = None
-        if measurement_type == Sensors.COLOR_IMAGE:
+        if measurement_type == Sensors.MT_COLOR_IMAGE:
             task = asyncio.create_task(tiu.record_color_images(sensor.name, sensor.owner, output_dir))
-        elif measurement_type == Sensors.DEPTH_IMAGE:
+        elif measurement_type == Sensors.MT_DEPTH_IMAGE:
             task = asyncio.create_task(tiu.record_depth_images(sensor.name, sensor.owner, output_dir))
-        elif measurement_type == Sensors.LABEL_IMAGE:
+        elif measurement_type == Sensors.MT_LABEL_IMAGE:
             task = asyncio.create_task(tiu.record_label_images(sensor.name, sensor.owner, output_dir))
 
         if task is not None:

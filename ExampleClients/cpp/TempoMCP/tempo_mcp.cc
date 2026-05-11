@@ -28,14 +28,14 @@ int main(int argc, char** argv) {
     }
 
     const auto& s = state.value();
-    std::printf("[TempoMCP] actor %s @ t=%.3f\n", s.name().c_str(), s.timestamp());
+    std::printf("[TempoMCP] actor %s @ t=%.3f\n", s.name().c_str(), s.timestamp_s());
     if (s.has_transform()) {
         const auto& t = s.transform();
         std::printf("  transform: location=(%.2f, %.2f, %.2f)\n",
                     t.location().x(), t.location().y(), t.location().z());
     }
-    if (s.has_linear_velocity()) {
-        const auto& v = s.linear_velocity();
+    if (s.has_velocity() && s.velocity().has_linear()) {
+        const auto& v = s.velocity().linear();
         std::printf("  linear velocity: (%.2f, %.2f, %.2f)\n", v.x(), v.y(), v.z());
     }
     if (s.has_bounds()) {

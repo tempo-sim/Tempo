@@ -22,23 +22,27 @@ message DateTime {
 }
 
 message GeographicCoordinate {
-  double latitude = 1;
-  double longitude = 2;
-  double altitude = 3;
+  // Latitude in degrees, WGS84.
+  double latitude_deg = 1;
+  // Longitude in degrees, WGS84.
+  double longitude_deg = 2;
+  // Altitude in meters above the WGS84 ellipsoid.
+  double altitude_m = 3;
 }
 
 message DayCycleRateRequest {
+  // Multiplier applied to wall-clock time when advancing the in-game day cycle. Unitless.
   float rate = 1;
 }
 
 service GeographicService {
   rpc SetDate(Date) returns (TempoCore.Empty);
-  
+
   rpc SetTimeOfDay(TimeOfDay) returns (TempoCore.Empty);
-  
+
   rpc SetDayCycleRelativeRate(DayCycleRateRequest) returns (TempoCore.Empty);
-  
+
   rpc GetDateTime(TempoCore.Empty) returns (DateTime);
-  
+
   rpc SetGeographicReference(GeographicCoordinate) returns (TempoCore.Empty);
 }

@@ -295,7 +295,7 @@ import tempo.tempo_core as tc
 import TempoCore.Time_pb2 as Time
 
 tc.pause()
-tc.set_time_mode(Time.FIXED_STEP)
+tc.set_time_mode(Time.TM_FIXED_STEP)
 tc.set_sim_steps_per_second(10)
 while True:
   tc.step()

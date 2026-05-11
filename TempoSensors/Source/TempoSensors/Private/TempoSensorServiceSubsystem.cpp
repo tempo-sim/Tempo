@@ -22,7 +22,6 @@
 using SensorService = TempoSensors::SensorService;
 using SensorAsyncService = TempoSensors::SensorService::AsyncService;
 using SensorDescriptor = TempoSensors::SensorDescriptor;
-using AvailableSensorsRequest = TempoSensors::AvailableSensorsRequest;
 using AvailableSensorsResponse = TempoSensors::AvailableSensorsResponse;
 using ColorImageRequest = TempoSensors::ColorImageRequest;
 using DepthImageRequest = TempoSensors::DepthImageRequest;
@@ -157,28 +156,28 @@ TempoSensors::MeasurementType ToProtoMeasurementType(EMeasurementType ImageType)
 	{
 	case EMeasurementType::COLOR_IMAGE:
 		{
-			return TempoSensors::COLOR_IMAGE;
+			return TempoSensors::MT_COLOR_IMAGE;
 		}
 	case EMeasurementType::DEPTH_IMAGE:
 		{
-			return TempoSensors::DEPTH_IMAGE;
+			return TempoSensors::MT_DEPTH_IMAGE;
 		}
 	case EMeasurementType::LABEL_IMAGE:
 		{
-			return TempoSensors::LABEL_IMAGE;
+			return TempoSensors::MT_LABEL_IMAGE;
 		}
 	case EMeasurementType::LIDAR_SCAN:
 		{
-			return TempoSensors::LIDAR_SCAN;
+			return TempoSensors::MT_LIDAR_SCAN;
 		}
 	case EMeasurementType::BOUNDING_BOXES:
 		{
-			return TempoSensors::BOUNDING_BOXES;
+			return TempoSensors::MT_BOUNDING_BOXES;
 		}
 	default:
 		{
 			checkf(false, TEXT("Unhandled measurement type"));
-			return TempoSensors::COLOR_IMAGE;
+			return TempoSensors::MT_UNKNOWN;
 		}
 	}
 }
@@ -204,7 +203,7 @@ void UTempoSensorServiceSubsystem::ForEachActiveSensor(const TFunction<void(ITem
 	}
 }
 
-void UTempoSensorServiceSubsystem::GetAvailableSensors(const TempoSensors::AvailableSensorsRequest& Request, const TResponseDelegate<TempoSensors::AvailableSensorsResponse>& ResponseContinuation) const
+void UTempoSensorServiceSubsystem::GetAvailableSensors(const TempoCore::Empty& Request, const TResponseDelegate<TempoSensors::AvailableSensorsResponse>& ResponseContinuation) const
 {
 	AvailableSensorsResponse Response;
 
@@ -213,7 +212,7 @@ void UTempoSensorServiceSubsystem::GetAvailableSensors(const TempoSensors::Avail
 		auto* AvailableSensor = Response.add_available_sensors();
 		AvailableSensor->set_owner(TCHAR_TO_UTF8(*Sensor->GetOwnerName()));
 		AvailableSensor->set_name(TCHAR_TO_UTF8(*Sensor->GetSensorName()));
-		AvailableSensor->set_rate(Sensor->GetRate());
+		AvailableSensor->set_rate_hz(Sensor->GetRate());
 		for (const EMeasurementType MeasurementType : Sensor->GetMeasurementTypes())
 		{
 			AvailableSensor->add_measurement_types(ToProtoMeasurementType(MeasurementType));
@@ -237,8 +236,8 @@ void UTempoSensorServiceSubsystem::RequestImages(const RequestType& Request, con
 		}
 	}
 	
-	const FString RequestedOwnerName(UTF8_TO_TCHAR(Request.owner_name().c_str()));
-	const FString RequestedSensorName(UTF8_TO_TCHAR(Request.sensor_name().c_str()));
+	const FString RequestedOwnerName(UTF8_TO_TCHAR(Request.owner().c_str()));
+	const FString RequestedSensorName(UTF8_TO_TCHAR(Request.sensor().c_str()));
 
 	// If owner name is not specified and only one owner has this sensor name, assume the client wants that owner
 	if (RequestedOwnerName.IsEmpty())
@@ -331,8 +330,8 @@ void UTempoSensorServiceSubsystem::StreamLidarScans(const TempoSensors::LidarSca
 		}
 	}
 
-	const FString RequestedOwnerName(UTF8_TO_TCHAR(Request.owner_name().c_str()));
-	const FString RequestedSensorName(UTF8_TO_TCHAR(Request.sensor_name().c_str()));
+	const FString RequestedOwnerName(UTF8_TO_TCHAR(Request.owner().c_str()));
+	const FString RequestedSensorName(UTF8_TO_TCHAR(Request.sensor().c_str()));
 
 	// If owner name is not specified and only one owner has this sensor name, assume the client wants that owner
 	if (RequestedOwnerName.IsEmpty())

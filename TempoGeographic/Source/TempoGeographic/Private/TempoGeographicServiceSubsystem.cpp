@@ -124,9 +124,9 @@ void UTempoGeographicServiceSubsystem::SetGeographicReference(const TempoGeograp
 {
 	if (ATempoGeoReferencingSystem* GeoReferencingSystem = Cast<ATempoGeoReferencingSystem>(AGeoReferencingSystem::GetGeoReferencingSystem(this)))
 	{
-		GeoReferencingSystem->OriginLatitude = Request.latitude();
-		GeoReferencingSystem->OriginLongitude = Request.longitude();
-		GeoReferencingSystem->OriginAltitude = Request.altitude();
+		GeoReferencingSystem->OriginLatitude = Request.latitude_deg();
+		GeoReferencingSystem->OriginLongitude = Request.longitude_deg();
+		GeoReferencingSystem->OriginAltitude = Request.altitude_m();
 		// Ideally we would have overriden ApplySettings to do the broadcast but it is not virtual.
 		GeoReferencingSystem->ApplySettings();
 		GeoReferencingSystem->BroadcastGeographicReferenceChanged();

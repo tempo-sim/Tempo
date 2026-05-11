@@ -298,8 +298,8 @@ async def flow_spawn_actor():
 
     try:
         response = await tw.spawn_actor(type=actor_type, transform=transform)
-        print(f"\n  Spawned: {response.spawned_name}")
-        print(f"  Transform: {format_transform(response.spawned_transform)}")
+        print(f"\n  Spawned: {response.name}")
+        print(f"  Transform: {format_transform(response.transform)}")
     except grpc.aio._call.AioRpcError as e:
         print(f"  Error: {e.details()}")
 

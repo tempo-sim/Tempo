@@ -35,9 +35,9 @@ namespace
 	{
 		switch (Channel)
 		{
-		case TempoWorld::WORLD_STATIC: return ECC_WorldStatic;
-		case TempoWorld::WORLD_DYNAMIC: return ECC_WorldDynamic;
-		case TempoWorld::VISIBILITY: return ECC_Visibility;
+		case TempoWorld::CC_WORLD_STATIC: return ECC_WorldStatic;
+		case TempoWorld::CC_WORLD_DYNAMIC: return ECC_WorldDynamic;
+		case TempoWorld::CC_VISIBILITY: return ECC_Visibility;
 		default: return ECC_WorldStatic;
 		}
 	}
@@ -73,7 +73,7 @@ TArray<AActor*> GetMatchingActors(const UWorld* World, const ActorStateRequest& 
 {
 	TArray<AActor*> MatchingActors;
 
-	const FString ActorName(UTF8_TO_TCHAR(Request.actor_name().c_str()));
+	const FString ActorName(UTF8_TO_TCHAR(Request.actor().c_str()));
 	if (AActor* Actor = GetActorWithName(World, ActorName))
 	{
 		MatchingActors.Add(Actor);
@@ -86,9 +86,9 @@ TArray<AActor*> GetMatchingActors(const UWorld* World, const ActorStatesNearRequ
 {
 	TArray<AActor*> MatchingActors;
 
-	if (!Request.near_actor_name().empty())
+	if (!Request.near_actor().empty())
 	{
-		const FString NearActorName(UTF8_TO_TCHAR(Request.near_actor_name().c_str()));
+		const FString NearActorName(UTF8_TO_TCHAR(Request.near_actor().c_str()));
 		if (const AActor* NearActor = GetActorWithName(World, NearActorName))
 		{
 			for (TActorIterator<AActor> ActorIt(World); ActorIt; ++ActorIt)
@@ -109,7 +109,7 @@ TArray<AActor*> GetMatchingActors(const UWorld* World, const ActorStatesNearRequ
 				}
 				const FVector ActorLocation = ActorIt->GetActorLocation();
 				const FVector OtherActorLocation = NearActor->GetActorLocation();
-				if (FVector::Dist2D(ActorLocation, OtherActorLocation) < QuantityConverter<M2CM>::Convert(Request.search_radius()))
+				if (FVector::Dist2D(ActorLocation, OtherActorLocation) < QuantityConverter<M2CM>::Convert(Request.search_radius_m()))
 				{
 					MatchingActors.Add(*ActorIt);
 				}
@@ -130,7 +130,7 @@ TempoWorld::ActorState GetActorState(const AActor* Actor, const UWorld* World, b
 
 	check(World);
 
-	ActorState.set_timestamp(World->GetTimeSeconds());
+	ActorState.set_timestamp_s(World->GetTimeSeconds());
 	ActorState.set_name(TCHAR_TO_UTF8(*Actor->GetActorNameOrLabel()));
 
 	TempoCore::Transform* ActorStateTransform = ActorState.mutable_transform();
@@ -206,7 +206,7 @@ void UTempoWorldStateServiceSubsystem::GetCurrentActorState(const TempoWorld::Ac
 
 	const TArray<AActor*> Actors = GetMatchingActors(GetWorld(), Request);
 
-	const FString ActorName(UTF8_TO_TCHAR(Request.actor_name().c_str()));
+	const FString ActorName(UTF8_TO_TCHAR(Request.actor().c_str()));
 
 	if (Actors.IsEmpty())
 	{
@@ -252,7 +252,7 @@ void UTempoWorldStateServiceSubsystem::StreamActorStatesNear(const TempoWorld::A
 
 void UTempoWorldStateServiceSubsystem::StreamOverlapEvents(const OverlapEventRequest& Request, const TResponseDelegate<OverlapEventResponse>& ResponseContinuation)
 {
-	const FString ActorName(UTF8_TO_TCHAR(Request.actor_name().c_str()));
+	const FString ActorName(UTF8_TO_TCHAR(Request.actor().c_str()));
 
 	if (AActor* Actor = GetActorWithName(GetWorld(), ActorName))
 	{
@@ -271,12 +271,12 @@ void UTempoWorldStateServiceSubsystem::OnActorOverlap(AActor* OverlappedActor, A
 	{
 		OverlapEventResponse Response;
 		Response.set_overlapped_actor_name(TCHAR_TO_UTF8(*OverlappedActor->GetActorNameOrLabel()));
-		Response.set_other_actor_name(TCHAR_TO_UTF8(*OtherActor->GetActorNameOrLabel()));
+		Response.set_overlapping_actor_name(TCHAR_TO_UTF8(*OtherActor->GetActorNameOrLabel()));
 		if (const ATempoGameMode* TempoGameMode = Cast<ATempoGameMode>(UGameplayStatics::GetGameMode(this)))
 		{
 			if (const IActorClassificationInterface* ActorClassifier = TempoGameMode->GetActorClassifier())
 			{
-				Response.set_other_actor_type(TCHAR_TO_UTF8(*ActorClassifier->GetActorClassification(OtherActor).ToString()));
+				Response.set_overlapping_actor_type(TCHAR_TO_UTF8(*ActorClassifier->GetActorClassification(OtherActor).ToString()));
 			}
 		}
 
@@ -358,7 +358,7 @@ void UTempoWorldStateServiceSubsystem::Raycast(
 		Response.mutable_normal()->set_y(NormalConverted.Y);
 		Response.mutable_normal()->set_z(NormalConverted.Z);
 
-		Response.set_distance(Hit.Distance / 100.0f); // cm to m
+		Response.set_distance_m(Hit.Distance / 100.0f); // cm to m
 
 		if (const AActor* Actor = Hit.GetActor())
 		{
