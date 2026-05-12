@@ -1,24 +1,23 @@
 # Tempo v0 → v1 Migration
 
-v1 is a substantial reorganization of the Tempo plugin layout. The plugins themselves are unchanged; the C++ modules inside them are collapsed and renamed for clarity. This document walks through what changed and what you need to do.
+v1 is a substantial reorganization of the Tempo plugin layout. This document walks through what changed and what you need to do.
 
 ## What changed at a glance
 
-| Plugin | v0 modules | v1 modules |
-|---|---|---|
-| TempoCore | TempoCore, TempoCoreShared, TempoTime, TempoScripting, TempoCoreEditor | **TempoCore**, TempoCoreEditor |
-| TempoSensors | TempoSensors, TempoSensorsShared, TempoCamera, TempoLidar, TempoLabels | **TempoSensors** |
-| TempoMovement | TempoMovement, TempoMovementShared, TempoVehicleMovement, TempoVehicleControl | **TempoMovement** |
-| TempoAgents | TempoAgents, TempoAgentsShared, TempoAgentsEditor | **TempoAgents**, TempoAgentsEditor |
+| Plugin | v0 modules | v1 modules                                                 |
+|---|---|------------------------------------------------------------|
+| TempoCore | TempoCore, TempoCoreShared, TempoTime, TempoScripting, TempoCoreEditor | **TempoCore**, TempoCoreEditor                             |
+| TempoSensors | TempoSensors, TempoSensorsShared, TempoCamera, TempoLidar, TempoLabels | **TempoSensors**                                           |
+| TempoMovement | TempoMovement, TempoMovementShared, TempoVehicleMovement, TempoVehicleControl | **TempoMovement**                                          |
+| TempoAgents | TempoAgents, TempoAgentsShared, TempoAgentsEditor | **TempoAgents**, TempoAgentsEditor, TempoMapQuery                       |
 | TempoWorld | TempoWorld, TempoMapQuery | **TempoWorld** (TempoMapQuery moved to TempoAgents plugin) |
-| TempoGeographic, TempoPCG, TempoROS, TempoROSBridge | unchanged | unchanged |
+| TempoGeographic, TempoPCG, TempoROS, TempoROSBridge | unchanged | unchanged                                                  |
 
 Other notable changes:
 
 - **`ActorControl.proto` → `WorldControl.proto`** in the TempoWorld plugin. The C++ subsystem is renamed `UTempoActorControlServiceSubsystem` → `UTempoWorldControlServiceSubsystem`. The gRPC service is renamed `ActorControlService` → `WorldControlService`.
 - **`MapQueries.proto`** moved from the TempoWorld plugin into the TempoAgents plugin (the queries are entirely lane/traffic shaped — they belong with the agents stack).
-- **Wire-stable proto packages are NOT preserved.** The proto `package` declarations are now derived from the real (collapsed) module names, so gRPC method paths change for every service whose enclosing module changed. See "External clients" below.
-- The leftover `TempoObservableEvents/` directory (untracked artifacts of an abandoned design) was removed. The unused `Greeter` example client was removed from `ExampleClients/`.
+- **Wire-stable proto packages are NOT preserved.** The proto `package` declarations are derived from the module names, so gRPC method paths change for every service whose enclosing module changed. See "External clients" below.
 
 ## What you need to do
 
@@ -50,20 +49,7 @@ External clients (Python, Rust, C++ wrapper) need to be regenerated against the 
 
 Old, un-regenerated v0 clients will not interop with a v1 server — the proto `package` declarations (and therefore gRPC method paths and protobuf `Any` type URLs) follow the v1 module layout.
 
-### 3. Service rename: ActorControl → WorldControl
-
-If your client code calls the former `ActorControlService`, you must update the service name:
-
-```diff
-- from tempo.TempoWorld import ActorControl_pb2_grpc
-- stub = ActorControl_pb2_grpc.ActorControlServiceStub(channel)
-+ from tempo.TempoWorld import WorldControl_pb2_grpc
-+ stub = WorldControl_pb2_grpc.WorldControlServiceStub(channel)
-```
-
-Method names and message types are unchanged.
-
-### 4. Custom UE C++ in your project
+### 3. Custom UE C++ in your project
 
 If you have a UE C++ module in your own project that `#include`s Tempo headers, update paths to reflect the v1 module layout:
 
@@ -104,7 +90,7 @@ And update Build.cs module dependencies:
 
 CoreRedirects do not help with C++ source — only assets.
 
-### 5. Server-related setting renames
+### 4. Server-related setting renames
 
 The "Scripting" prefix was dropped from server-related types and settings:
 
@@ -117,17 +103,7 @@ The "Scripting" prefix was dropped from server-related types and settings:
 
 `+PropertyRedirects` and `+EnumRedirects` in `TempoCore/Config/DefaultTempoCore.ini` cover the saved-setting and asset cases, so existing user `Config/DefaultPlugins.ini` values and Blueprint references resolve automatically. The CLI argument is **not** redirected — update launch scripts that still pass `-ScriptingPort=` to use `-ServerPort=` instead.
 
-If you have C++ in your own project that calls these accessors, update them:
-
-```diff
-- GetDefault<UTempoCoreSettings>()->GetScriptingPort()
-+ GetDefault<UTempoCoreSettings>()->GetServerPort()
-
-- GetDefault<UTempoCoreSettings>()->GetScriptingCompressionLevel()
-+ GetDefault<UTempoCoreSettings>()->GetServerCompressionLevel()
-```
-
-### 6. Movement control API changes
+### 5. Movement control API changes
 
 The TempoMovement API was reworked to support closed-loop velocity and acceleration commands in addition to the existing open-loop normalized driving input. This entailed a few breaking changes.
 
@@ -298,7 +274,3 @@ C++ accessors and setters track the new names (`set_owner`/`owner()`, `set_dista
 ### `ControlMode.NONE` semantics
 
 `ControlMode` gained `CM_UNKNOWN = 0` as the proto-3 unset sentinel; the previously-`0` value `NONE` (control disabled) is now `CM_NONE = 1`. Code that branched on `ControlMode::NONE` should branch on `ControlMode::CM_NONE`. The `0` value now means "client didn't set this", not "control disabled".
-
-## Rationale for not preserving the wire
-
-We considered shipping explicit `package <v0-name>;` declarations in every moved proto so v0 clients would keep working at the gRPC level. We chose not to, because the v0 names would then have to live in Tempo source forever, which defeats the cleanup. Wire stability is broken once at v1; new clients (and migrated old ones) work cleanly thereafter.
