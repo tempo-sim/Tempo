@@ -38,6 +38,15 @@
 // TempoSceneCaptureComponent2D.cpp is then a no-op because `#pragma once` skips the re-include.
 // Mirror the define so the first parse rewrites the class to all-public for the whole TU.
 // In 5.6 SceneRendering.h does not pull in RayTracingScene.h, so the mirror is unnecessary.
+#if PLATFORM_WINDOWS
+// An upstream include leaks the Win32 Interlocked* macros, which mangle
+// FPlatformAtomics::InterlockedIncrement -> ::_InterlockedIncrement inside RenderCore headers
+// (RenderTargetPool.h) that SceneRendering.h transitively pulls in. Allow+Hide is a no-op pair
+// that re-asserts and then clears those macros, so SceneRendering.h parses against the real
+// FPlatformAtomics API.
+#include "Windows/AllowWindowsPlatformAtomics.h"
+#include "Windows/HideWindowsPlatformAtomics.h"
+#endif
 #if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 7
 #define private public
 #include "SceneRendering.h"

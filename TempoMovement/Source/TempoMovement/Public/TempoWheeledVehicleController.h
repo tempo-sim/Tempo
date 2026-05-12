@@ -86,8 +86,8 @@ private:
 	};
 	TOptional<FLastDrivingInput> LastDrivingInput;
 
-	void TickDriving(APawn* Pawn);
-	void TickClosedLoop(float DeltaTime, APawn* Pawn);
+	void TickDriving(APawn* ControlledPawn);
+	void TickClosedLoop(float DeltaTime, APawn* ControlledPawn);
 
 	// Compute normalized acceleration in [-1, 1] from a target linear velocity (cm/s).
 	float ComputeNormalizedAcceleration(float TargetLinVelCmS, float CurrentLinVelCmS, float DeltaTime);

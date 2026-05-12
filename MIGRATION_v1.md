@@ -182,7 +182,7 @@ v1 also normalizes naming across every `.proto`. This is a wire-breaking change 
 - **Service files use 2-space indentation everywhere.** `WorldControl.proto` was the holdout.
 - **Field tag numbers are contiguous from 1** within each message — the gaps left by removed v0 fields are gone. This makes the wire incompatible with v0 even where the field name matches.
 - **All enums have an `UNKNOWN` (or `_UNKNOWN`) sentinel at 0** and a 2- or 3-letter prefix on every value. Prefixes:
-  - `ControlMode` → `CM_` (`CM_UNKNOWN`, `CM_NONE`, `CM_USER`, `CM_OPEN_LOOP`, `CM_CLOSED_LOOP`)
+  - `ControlMode` → `CM_` (`CM_UNKNOWN`, `CM_DISABLED`, `CM_USER`, `CM_OPEN_LOOP`, `CM_CLOSED_LOOP`)
   - `TimeMode` → `TM_` (`TM_UNKNOWN`, `TM_WALL_CLOCK`, `TM_FIXED_STEP`)
   - `CollisionChannel` → `CC_` (`CC_UNKNOWN`, `CC_WORLD_STATIC`, `CC_WORLD_DYNAMIC`, `CC_VISIBILITY`)
   - `MeasurementType` → `MT_` (`MT_UNKNOWN`, `MT_COLOR_IMAGE`, …)
@@ -273,4 +273,4 @@ C++ accessors and setters track the new names (`set_owner`/`owner()`, `set_dista
 
 ### `ControlMode.NONE` semantics
 
-`ControlMode` gained `CM_UNKNOWN = 0` as the proto-3 unset sentinel; the previously-`0` value `NONE` (control disabled) is now `CM_NONE = 1`. Code that branched on `ControlMode::NONE` should branch on `ControlMode::CM_NONE`. The `0` value now means "client didn't set this", not "control disabled".
+`ControlMode` gained `CM_UNKNOWN = 0` as the proto-3 unset sentinel; the previously-`0` value `NONE` (control disabled) is now `CM_DISABLED = 1` (named to avoid colliding with the Win32 `CM_NONE` macro from `wingdi.h`). Code that branched on `ControlMode::NONE` should branch on `ControlMode::CM_DISABLED`. The `0` value now means "client didn't set this", not "control disabled".

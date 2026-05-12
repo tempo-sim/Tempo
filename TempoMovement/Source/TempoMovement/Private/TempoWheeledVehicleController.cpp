@@ -88,13 +88,13 @@ bool ATempoWheeledVehicleController::HandleAccelerationCommand(const FTempoAccel
 	if (ControlMode != EControlMode::Acceleration)
 	{
 		VelocityTarget = FTempoTwist();
-		if (const APawn* Pawn = GetPawn())
+		if (const APawn* ControlledPawn = GetPawn())
 		{
-			if (const UChaosVehicleMovementComponent* ChaosMovement = Cast<UChaosVehicleMovementComponent>(Pawn->GetMovementComponent()))
+			if (const UChaosVehicleMovementComponent* ChaosMovement = Cast<UChaosVehicleMovementComponent>(ControlledPawn->GetMovementComponent()))
 			{
 				VelocityTarget.Linear.X = ChaosMovement->GetForwardSpeed();
 			}
-			else if (const UKinematicVehicleMovementComponent* Kinematic = Cast<UKinematicVehicleMovementComponent>(Pawn->GetMovementComponent()))
+			else if (const UKinematicVehicleMovementComponent* Kinematic = Cast<UKinematicVehicleMovementComponent>(ControlledPawn->GetMovementComponent()))
 			{
 				VelocityTarget.Linear.X = Kinematic->GetLinearVelocity();
 				VelocityTarget.Angular.Z = Kinematic->GetAngularVelocity().Z;
@@ -107,7 +107,7 @@ bool ATempoWheeledVehicleController::HandleAccelerationCommand(const FTempoAccel
 	return true;
 }
 
-void ATempoWheeledVehicleController::TickDriving(APawn* Pawn)
+void ATempoWheeledVehicleController::TickDriving(APawn* ControlledPawn)
 {
 	if (const FLastDrivingInput* Input = LastDrivingInput.GetPtrOrNull())
 	{
@@ -116,12 +116,12 @@ void ATempoWheeledVehicleController::TickDriving(APawn* Pawn)
 		{
 			// Tiny alternating acceleration prevents no-input deceleration; preserves steering.
 			const FVector ControlInputLocal((GFrameCounter % 2 ? 1 : -1) * UE_KINDA_SMALL_NUMBER, Input->Input.GetSteering(), 0.0);
-			Pawn->AddMovementInput(Pawn->GetActorTransform().TransformVector(ControlInputLocal));
+			ControlledPawn->AddMovementInput(ControlledPawn->GetActorTransform().TransformVector(ControlInputLocal));
 		}
 	}
 }
 
-void ATempoWheeledVehicleController::TickClosedLoop(float DeltaTime, APawn* Pawn)
+void ATempoWheeledVehicleController::TickClosedLoop(float DeltaTime, APawn* ControlledPawn)
 {
 	// Watchdog: if we haven't heard a new command in too long, clamp setpoints to zero.
 	const double Now = UGameplayStatics::GetTimeSeconds(this);
@@ -142,7 +142,7 @@ void ATempoWheeledVehicleController::TickClosedLoop(float DeltaTime, APawn* Pawn
 	const float TargetLinVelCmS = VelocityTarget.Linear.X;
 	const float TargetYawRateDegS = VelocityTarget.Angular.Z;
 
-	UActorComponent* MovementComponent = Pawn->GetMovementComponent();
+	UActorComponent* MovementComponent = ControlledPawn->GetMovementComponent();
 
 	if (UChaosVehicleMovementComponent* ChaosMovement = Cast<UChaosVehicleMovementComponent>(MovementComponent))
 	{
@@ -171,7 +171,7 @@ void ATempoWheeledVehicleController::TickClosedLoop(float DeltaTime, APawn* Pawn
 		const float NormSteer = Kinematic->ComputeNormalizedSteeringForYawRate(TargetYawRateDegS, CurrentLinVelCmS);
 
 		const FVector ControlInputLocal(NormAccel + (GFrameCounter % 2 ? 1 : -1) * UE_KINDA_SMALL_NUMBER, NormSteer, 0.0);
-		Pawn->AddMovementInput(Pawn->GetActorTransform().TransformVector(ControlInputLocal));
+		ControlledPawn->AddMovementInput(ControlledPawn->GetActorTransform().TransformVector(ControlInputLocal));
 		return;
 	}
 }

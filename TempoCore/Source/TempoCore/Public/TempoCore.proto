@@ -7,7 +7,7 @@ import "TempoCore/Empty.proto";
 enum ControlMode {
   CM_UNKNOWN = 0;
   // Control is explicitly disabled.
-  CM_NONE = 1;
+  CM_DISABLED = 1;
   // Manual user control via keyboard/gamepad input.
   CM_USER = 2;
   // Open-loop scripted control: commands are applied directly without feedback.

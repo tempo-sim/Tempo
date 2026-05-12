@@ -8,6 +8,14 @@
 #include "TempoCore.h"
 
 #include "grpcpp/impl/service_type.h"
+#if PLATFORM_WINDOWS
+// gRPC transitively includes <windows.h>, which leaks wingdi.h's GetObject macro
+// (GetObjectA/W). In TempoCore's unity TU, the next .cpp file's transitive include
+// of WheeledVehiclePawn.h -> Chaos's ImplicitObjectScaled.h would otherwise see
+// `Implicit.template GetObject<T>()` mangled to `GetObjectW` — not a member of
+// FImplicitObject. Scrub the macro here so later parses are clean.
+#undef GetObject
+#endif
 
 FTempoServer::FTempoServer()
 {

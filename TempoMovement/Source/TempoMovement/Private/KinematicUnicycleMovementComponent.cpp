@@ -7,9 +7,9 @@
 FTempoTwist UKinematicUnicycleModelMovementComponent::SimulateMotion(float DeltaTime, float Steering, float NewLinearVelocity)
 {
 	const float HeadingAngleRad = QuantityConverter<Deg2Rad>::Convert(GetOwner()->GetActorRotation().Yaw);
-	const FVector LinearVelocity = NewLinearVelocity * FVector(FMath::Cos(HeadingAngleRad), FMath::Sin(HeadingAngleRad), 0.0);
+	const FVector LinearVelocityVec = NewLinearVelocity * FVector(FMath::Cos(HeadingAngleRad), FMath::Sin(HeadingAngleRad), 0.0);
 	const float YawRateDegS = SteeringToAngularVelocityFactor * Steering;
-	return FTempoTwist(LinearVelocity, FVector(0.0, 0.0, YawRateDegS));
+	return FTempoTwist(LinearVelocityVec, FVector(0.0, 0.0, YawRateDegS));
 }
 
 float UKinematicUnicycleModelMovementComponent::ComputeNormalizedSteeringForYawRate(float TargetYawRateDegS, float CurrentLinearVelocityCmS) const

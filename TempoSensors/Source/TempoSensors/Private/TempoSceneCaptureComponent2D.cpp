@@ -14,10 +14,24 @@
 #include "Kismet/GameplayStatics.h"
 
 #if RHI_RAYTRACING && ENGINE_MAJOR_VERSION == 5 && ((ENGINE_MINOR_VERSION == 5 && STATS) || ENGINE_MINOR_VERSION > 5)
+#if PLATFORM_WINDOWS
+// An upstream include leaks the Win32 Interlocked* macros, which mangle
+// FPlatformAtomics::InterlockedIncrement -> ::_InterlockedIncrement inside RenderCore headers
+// (RenderTargetPool.h) that ScenePrivate.h transitively pulls in. Allow+Hide is a no-op pair
+// that re-asserts and then clears those macros, so ScenePrivate.h parses against the real
+// FPlatformAtomics API.
+#include "Windows/AllowWindowsPlatformAtomics.h"
+#include "Windows/HideWindowsPlatformAtomics.h"
+#endif
 // Hack to get access to private members of FRayTracingScene. See comment in UpdateSceneCaptureContents for more detail.
+// The macro must be undef'd after the parse — leaving it active flips access on every
+// `private:` section parsed later in the unity TU (e.g. the protobuf-generated Sensors.pb.h
+// pulled in by TempoSensorServiceSubsystem.cpp), which changes MSVC name mangling and
+// produces LNK2019 mismatches against the corresponding .pb.cc TUs.
 #define private public
 #include "RayTracing/RayTracingScene.h"
 #include "ScenePrivate.h"
+#undef private
 #endif
 
 void FTextureRead::ExtractMeasurementHeader(float TransmissionTime, TempoSensors::MeasurementHeader* MeasurementHeaderOut) const

@@ -10,9 +10,9 @@ FTempoTwist UKinematicBicycleModelMovementComponent::SimulateMotion(float DeltaT
 	const float SteeringRad = QuantityConverter<Deg2Rad>::Convert(Steering);
 	const float RearAxleDistance = AxleRatio * Wheelbase;
 	const float Beta = FMath::Atan2(RearAxleDistance * FMath::Tan(SteeringRad), Wheelbase);
-	const FVector LinearVelocity = NewLinearVelocity * FVector(FMath::Cos(HeadingAngleRad + Beta), FMath::Sin(HeadingAngleRad + Beta), 0.0);
+	const FVector LinearVelocityVec = NewLinearVelocity * FVector(FMath::Cos(HeadingAngleRad + Beta), FMath::Sin(HeadingAngleRad + Beta), 0.0);
 	const float YawRateDegS = QuantityConverter<Rad2Deg>::Convert(NewLinearVelocity * FMath::Sin(SteeringRad) / Wheelbase);
-	return FTempoTwist(LinearVelocity, FVector(0.0, 0.0, YawRateDegS));
+	return FTempoTwist(LinearVelocityVec, FVector(0.0, 0.0, YawRateDegS));
 }
 
 float UKinematicBicycleModelMovementComponent::ComputeNormalizedSteeringForYawRate(float TargetYawRateDegS, float CurrentLinearVelocityCmS) const
