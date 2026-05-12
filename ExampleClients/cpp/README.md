@@ -6,6 +6,7 @@ Small programs that exercise the Tempo C++ wrapper API:
 |---|---|
 | `sensor_playground` | Lists available sensors. If a lidar exists, streams 5 scans and logs basic stats. |
 | `world_playground` | Looks up an actor by name and prints its transform, velocity, and bounds. |
+| `movement_playground` | Lists commandable and navigable pawns, then sends one of each movement command (vehicle, velocity, acceleration, move-to-location) against the first pawn. |
 
 These mirror the Rust examples in `../Rust/`. They log to stdout — no GUI, no
 interactive prompts.
@@ -45,4 +46,6 @@ Each example accepts optional positional args. Defaults connect to
 ./build/sensor_playground localhost 10001 20  # stream 20 frames
 ./build/world_playground                      # actor "Vehicle"
 ./build/world_playground localhost 10001 PlayerActor
+./build/movement_playground                   # localhost:10001
+./build/movement_playground localhost 10001
 ```
