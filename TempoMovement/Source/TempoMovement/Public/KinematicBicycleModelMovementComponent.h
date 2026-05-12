@@ -13,9 +13,9 @@ class TEMPOMOVEMENT_API UKinematicBicycleModelMovementComponent : public UKinema
 	GENERATED_BODY()
 
 public:
-	virtual void SimulateMotion(float DeltaTime, float Steering, float NewLinearVelocity, FVector& OutNewVelocity, float& OutNewAngularVelocity) override;
+	virtual FTempoTwist SimulateMotion(float DeltaTime, float Steering, float NewLinearVelocity) override;
 
-	virtual float ComputeNormalizedSteeringForYawRate(float TargetYawRateRadS, float CurrentLinearVelocityMps) const override;
+	virtual float ComputeNormalizedSteeringForYawRate(float TargetYawRateDegS, float CurrentLinearVelocityCmS) const override;
 
 protected:
 	// The distance between the front and rear axles.

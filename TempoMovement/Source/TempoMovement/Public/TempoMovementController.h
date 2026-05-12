@@ -25,9 +25,9 @@ public:
 	// Open-loop normalized throttle/steer input.
 	virtual bool HandleDrivingInput(const FNormalizedDrivingInput& Input) { return false; }
 
-	// Closed-loop body-frame velocity command (SI, right-handed).
+	// Closed-loop body-frame velocity command (Unreal-native: cm/s, deg/s, left-handed).
 	virtual bool HandleVelocityCommand(const FTempoTwist& Twist) { return false; }
 
-	// Closed-loop body-frame acceleration command (SI, right-handed).
+	// Closed-loop body-frame acceleration command (Unreal-native: cm/s^2, deg/s^2, left-handed).
 	virtual bool HandleAccelerationCommand(const FTempoAccel& Accel) { return false; }
 };

@@ -13,9 +13,9 @@ class TEMPOMOVEMENT_API UKinematicUnicycleModelMovementComponent : public UKinem
 	GENERATED_BODY()
 
 public:
-	virtual void SimulateMotion(float DeltaTime, float Steering, float NewLinearVelocity, FVector& OutVelocity, float& OutAngularVelocity) override;
+	virtual FTempoTwist SimulateMotion(float DeltaTime, float Steering, float NewLinearVelocity) override;
 
-	virtual float ComputeNormalizedSteeringForYawRate(float TargetYawRateRadS, float CurrentLinearVelocityMps) const override;
+	virtual float ComputeNormalizedSteeringForYawRate(float TargetYawRateDegS, float CurrentLinearVelocityCmS) const override;
 
 protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)

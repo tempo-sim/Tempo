@@ -41,7 +41,11 @@ enum class EControlMode : uint8
 };
 ENUM_RANGE_BY_COUNT(EControlMode, EControlMode::Max);
 
-// 6-DoF velocity expressed in the body frame: linear in m/s, angular in rad/s, right-handed.
+// 6-DoF velocity in Unreal-native units. Linear is cm/s (left-handed FVector). Angular is
+// deg/s packed as (Roll, Pitch, Yaw) with FRotator-style handedness (Yaw left-handed, Pitch
+// and Roll right-handed about the LH axes — see FRotator handling in TempoConversion.h).
+// The frame (world vs body) is left to the caller. Proto APIs convert to/from SI right-handed
+// at the boundary.
 USTRUCT(BlueprintType)
 struct FTempoTwist
 {
@@ -57,7 +61,10 @@ struct FTempoTwist
 	FVector Angular = FVector::ZeroVector;
 };
 
-// 6-DoF acceleration expressed in the body frame: linear in m/s^2, angular in rad/s^2, right-handed.
+// 6-DoF acceleration in Unreal-native units. Linear is cm/s^2 (left-handed FVector). Angular is
+// deg/s^2 packed as (Roll, Pitch, Yaw) with FRotator-style handedness — see FTempoTwist for the
+// convention. The frame is left to the caller. Proto APIs convert to/from SI right-handed at the
+// boundary.
 USTRUCT(BlueprintType)
 struct FTempoAccel
 {

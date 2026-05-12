@@ -3,6 +3,7 @@
 #include "VehicleWheelComponent.h"
 
 #include "TempoAngularVelocityInterface.h"
+#include "TempoConversion.h"
 #include "GameFramework/PawnMovementComponent.h"
 
 #include "Kismet/KismetMathLibrary.h"
@@ -26,7 +27,7 @@ void UVehicleWheelComponent::TickComponent(float DeltaTime, enum ELevelTick Tick
 		{
 			if (const ITempoAngularVelocityInterface* TempoAngularVelocity = Cast<ITempoAngularVelocityInterface>(PawnMovementComponent))
 			{
-				OwnerAngularVelocity = FMath::DegreesToRadians(TempoAngularVelocity->GetAngularVelocity());
+				OwnerAngularVelocity = QuantityConverter<Deg2Rad>::Convert(TempoAngularVelocity->GetAngularVelocity());
 			}
 		}
 	}
@@ -41,7 +42,7 @@ void UVehicleWheelComponent::TickComponent(float DeltaTime, enum ELevelTick Tick
 
 	// Find the direction and rate of rotation.
 	const float RotationSign = FMath::Sign(FVector::CrossProduct(ComponentVelocityProjection, WorldRotationAxis).Dot(UpVector));
-	const float RotationRate = FMath::RadiansToDegrees(ComponentVelocityProjection.Size() / WheelRadius);
+	const float RotationRate = QuantityConverter<Rad2Deg>::Convert(ComponentVelocityProjection.Size() / WheelRadius);
 
 	AddWorldRotation(UKismetMathLibrary::RotatorFromAxisAndAngle(WorldRotationAxis, DeltaTime * RotationSign * RotationRate));
 }

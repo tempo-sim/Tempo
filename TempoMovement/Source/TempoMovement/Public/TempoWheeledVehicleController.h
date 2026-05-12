@@ -38,22 +38,22 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(ClampMin=0.0))
 	float CommandStaleTimeout = 5.0;
 
-	// P gain for linear velocity tracking: normalized accel per m/s of error.
+	// P gain for linear velocity tracking: normalized accel per cm/s of error.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	float LinearVelocityKp = 0.5;
+	float LinearVelocityKp = 0.005;
 
-	// I gain for linear velocity tracking: normalized accel per (m/s * s) of accumulated error.
+	// I gain for linear velocity tracking: normalized accel per (cm/s * s) of accumulated error.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	float LinearVelocityKi = 0.2;
+	float LinearVelocityKi = 0.002;
 
-	// Saturation for the integral term to prevent windup.
+	// Saturation for the integral term to prevent windup (cm/s * s).
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	float LinearVelocityIMax = 2.0;
+	float LinearVelocityIMax = 200.0;
 
-	// P gain for Chaos vehicle yaw rate tracking: normalized steering per rad/s of error.
+	// P gain for Chaos vehicle yaw rate tracking: normalized steering per deg/s of error.
 	// Kinematic vehicles use exact feedforward (the inverse motion model) and ignore this.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	float YawRateKp = 1.0;
+	float YawRateKp = 0.01745;
 
 private:
 	enum class EControlMode : uint8
@@ -89,8 +89,8 @@ private:
 	void TickDriving(APawn* Pawn);
 	void TickClosedLoop(float DeltaTime, APawn* Pawn);
 
-	// Compute normalized acceleration in [-1, 1] from a target linear velocity (m/s).
-	float ComputeNormalizedAcceleration(float TargetLinVelMps, float CurrentLinVelMps, float DeltaTime);
+	// Compute normalized acceleration in [-1, 1] from a target linear velocity (cm/s).
+	float ComputeNormalizedAcceleration(float TargetLinVelCmS, float CurrentLinVelCmS, float DeltaTime);
 
 	// Apply normalized throttle/brake/gear logic to a Chaos vehicle.
 	void ApplyChaosAccelInput(UChaosVehicleMovementComponent* Movement, float NormAccel) const;

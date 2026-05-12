@@ -3,6 +3,7 @@
 #pragma once
 
 #include "TempoAngularVelocityInterface.h"
+#include "TempoCoreTypes.h"
 
 #include "CoreMinimal.h"
 #include "GameFramework/PawnMovementComponent.h"
@@ -26,13 +27,16 @@ public:
 	float GetLinearVelocity() const { return LinearVelocity; }
 
 	// Inverse motion model: returns the normalized steering input in [-1, 1] that would
-	// produce the desired yaw rate at the given linear velocity. Inputs are in SI right-handed.
-	// Implementations should clamp to [-1, 1] and saturate when the model cannot achieve the
-	// requested yaw rate (e.g. bicycle with |v| near zero).
-	virtual float ComputeNormalizedSteeringForYawRate(float TargetYawRateRadS, float CurrentLinearVelocityMps) const PURE_VIRTUAL(UKinematicVehicleMovementComponent::ComputeNormalizedSteeringForYawRate, return 0.0f;);
+	// produce the desired yaw rate at the given linear velocity. Inputs are Unreal-native
+	// (deg/s left-handed yaw, cm/s forward speed). Implementations should clamp to [-1, 1]
+	// and saturate when the model cannot achieve the requested yaw rate (e.g. bicycle with
+	// |v| near zero).
+	virtual float ComputeNormalizedSteeringForYawRate(float TargetYawRateDegS, float CurrentLinearVelocityCmS) const PURE_VIRTUAL(UKinematicVehicleMovementComponent::ComputeNormalizedSteeringForYawRate, return 0.0f;);
 
 protected:
-	virtual void SimulateMotion(float DeltaTime, float Steering, float NewLinearVelocity, FVector& OutLinearVelocity, float& OutAngularVelocity) {}
+	// Forward motion model. Returns the resulting world-frame motion as a Twist: Linear is the
+	// world-frame velocity (cm/s), Angular.Z is the yaw rate (deg/s, left-handed).
+	virtual FTempoTwist SimulateMotion(float DeltaTime, float Steering, float NewLinearVelocity) PURE_VIRTUAL(UKinematicVehicleMovementComponent::SimulateMotion, return FTempoTwist(););
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	bool bReverseEnabled = false;
@@ -49,8 +53,9 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	float MaxSteering = 10.0;
 
+	// Fraction of MaxDeceleration to apply when there is no acceleration input, in [0, 1].
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(UIMin=0.0, UIMax=1.0, ClampMin=0.0, ClampMax=1.0))
-	float NoInputNormalizedDeceleration = 0.0; // CM/S/S
+	float NoInputNormalizedDeceleration = 0.0;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite)
 	float LinearVelocity = 0.0; // CM/S

@@ -10,7 +10,6 @@
 
 namespace
 {
-	constexpr float CmPerMeter = 100.0f;
 	constexpr float NearlyStoppedSpeedCmS = 1.0f;
 }
 
@@ -93,13 +92,12 @@ bool ATempoWheeledVehicleController::HandleAccelerationCommand(const FTempoAccel
 		{
 			if (const UChaosVehicleMovementComponent* ChaosMovement = Cast<UChaosVehicleMovementComponent>(Pawn->GetMovementComponent()))
 			{
-				VelocityTarget.Linear.X = ChaosMovement->GetForwardSpeed() / CmPerMeter;
+				VelocityTarget.Linear.X = ChaosMovement->GetForwardSpeed();
 			}
 			else if (const UKinematicVehicleMovementComponent* Kinematic = Cast<UKinematicVehicleMovementComponent>(Pawn->GetMovementComponent()))
 			{
-				VelocityTarget.Linear.X = Kinematic->GetLinearVelocity() / CmPerMeter;
-				// Seed angular target from current angular velocity (rad/s right-handed).
-				VelocityTarget.Angular.Z = -FMath::DegreesToRadians(Kinematic->GetAngularVelocity().Z);
+				VelocityTarget.Linear.X = Kinematic->GetLinearVelocity();
+				VelocityTarget.Angular.Z = Kinematic->GetAngularVelocity().Z;
 			}
 		}
 	}
@@ -141,27 +139,24 @@ void ATempoWheeledVehicleController::TickClosedLoop(float DeltaTime, APawn* Pawn
 	}
 
 	// Only linear.x and angular.z are actuable for a wheeled vehicle. Other axes are ignored.
-	const float TargetLinVelMps = VelocityTarget.Linear.X;
-	const float TargetYawRateRadS = VelocityTarget.Angular.Z;
+	const float TargetLinVelCmS = VelocityTarget.Linear.X;
+	const float TargetYawRateDegS = VelocityTarget.Angular.Z;
 
 	UActorComponent* MovementComponent = Pawn->GetMovementComponent();
 
 	if (UChaosVehicleMovementComponent* ChaosMovement = Cast<UChaosVehicleMovementComponent>(MovementComponent))
 	{
-		const float CurrentLinVelMps = ChaosMovement->GetForwardSpeed() / CmPerMeter;
-		const float NormAccel = ComputeNormalizedAcceleration(TargetLinVelMps, CurrentLinVelMps, DeltaTime);
+		const float CurrentLinVelCmS = ChaosMovement->GetForwardSpeed();
+		const float NormAccel = ComputeNormalizedAcceleration(TargetLinVelCmS, CurrentLinVelCmS, DeltaTime);
 
-		// Current yaw rate in rad/s right-handed (Chaos VehicleState is in rad/s, left-handed Unreal).
-		float CurrentYawRateRadS = 0.0f;
+		float CurrentYawRateDegS = 0.0f;
 		if (const ITempoAngularVelocityInterface* AngVel = Cast<ITempoAngularVelocityInterface>(ChaosMovement))
 		{
-			// Interface returns deg/s left-handed; convert to rad/s right-handed.
-			CurrentYawRateRadS = -FMath::DegreesToRadians(AngVel->GetAngularVelocity().Z);
+			CurrentYawRateDegS = AngVel->GetAngularVelocity().Z;
 		}
-		const float YawErrorRadS = TargetYawRateRadS - CurrentYawRateRadS;
-		// Positive Chaos steering input = right turn = +yaw_LH = -yaw_RH. Sign-flip from the
-		// right-handed error.
-		const float NormSteer = FMath::Clamp(-YawRateKp * YawErrorRadS, -1.0f, 1.0f);
+		// Positive Chaos steering input = right turn = +yaw (Unreal left-handed). Same sign as the LH yaw error.
+		const float YawErrorDegS = TargetYawRateDegS - CurrentYawRateDegS;
+		const float NormSteer = FMath::Clamp(YawRateKp * YawErrorDegS, -1.0f, 1.0f);
 
 		ChaosMovement->SetSteeringInput(NormSteer);
 		ApplyChaosAccelInput(ChaosMovement, NormAccel);
@@ -170,10 +165,10 @@ void ATempoWheeledVehicleController::TickClosedLoop(float DeltaTime, APawn* Pawn
 
 	if (UKinematicVehicleMovementComponent* Kinematic = Cast<UKinematicVehicleMovementComponent>(MovementComponent))
 	{
-		const float CurrentLinVelMps = Kinematic->GetLinearVelocity() / CmPerMeter;
-		const float NormAccel = ComputeNormalizedAcceleration(TargetLinVelMps, CurrentLinVelMps, DeltaTime);
+		const float CurrentLinVelCmS = Kinematic->GetLinearVelocity();
+		const float NormAccel = ComputeNormalizedAcceleration(TargetLinVelCmS, CurrentLinVelCmS, DeltaTime);
 		// Kinematic motion model is exact; use feedforward via the component's inverse model.
-		const float NormSteer = Kinematic->ComputeNormalizedSteeringForYawRate(TargetYawRateRadS, CurrentLinVelMps);
+		const float NormSteer = Kinematic->ComputeNormalizedSteeringForYawRate(TargetYawRateDegS, CurrentLinVelCmS);
 
 		const FVector ControlInputLocal(NormAccel + (GFrameCounter % 2 ? 1 : -1) * UE_KINDA_SMALL_NUMBER, NormSteer, 0.0);
 		Pawn->AddMovementInput(Pawn->GetActorTransform().TransformVector(ControlInputLocal));
@@ -181,9 +176,9 @@ void ATempoWheeledVehicleController::TickClosedLoop(float DeltaTime, APawn* Pawn
 	}
 }
 
-float ATempoWheeledVehicleController::ComputeNormalizedAcceleration(float TargetLinVelMps, float CurrentLinVelMps, float DeltaTime)
+float ATempoWheeledVehicleController::ComputeNormalizedAcceleration(float TargetLinVelCmS, float CurrentLinVelCmS, float DeltaTime)
 {
-	const float Error = TargetLinVelMps - CurrentLinVelMps;
+	const float Error = TargetLinVelCmS - CurrentLinVelCmS;
 	LinearVelocityIntegralError = FMath::Clamp(LinearVelocityIntegralError + Error * DeltaTime, -LinearVelocityIMax, LinearVelocityIMax);
 	const float Unclamped = LinearVelocityKp * Error + LinearVelocityKi * LinearVelocityIntegralError;
 	return FMath::Clamp(Unclamped, -1.0f, 1.0f);

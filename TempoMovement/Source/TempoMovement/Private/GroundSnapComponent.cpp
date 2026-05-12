@@ -4,6 +4,7 @@
 
 #include "TempoMovement.h"
 
+#include "TempoConversion.h"
 #include "TempoCoreUtils.h"
 
 #include "Kismet/KismetMathLibrary.h"
@@ -76,7 +77,7 @@ void UGroundSnapComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 	TArray<float> Heights;
 	for (int32 I = 0; I < 4; ++I)
 	{
-		if (bLimitSlopeAngle && FVector::DotProduct(AllNormals[I], FVector::UpVector) < FMath::Cos(FMath::DegreesToRadians(MaxSlopeAngle)))
+		if (bLimitSlopeAngle && FVector::DotProduct(AllNormals[I], FVector::UpVector) < FMath::Cos(QuantityConverter<Deg2Rad>::Convert(MaxSlopeAngle)))
 		{
 			// This normal is too steep.
 			continue;

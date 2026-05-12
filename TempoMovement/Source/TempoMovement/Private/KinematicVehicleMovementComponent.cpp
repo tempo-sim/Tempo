@@ -23,16 +23,16 @@ void UKinematicVehicleMovementComponent::TickComponent(float DeltaTime, ELevelTi
 	}
 
 	const float NormalizedAcceleration = FMath::IsNearlyZero(ControlInput.X) ?
-		FMath::Sign(LinearVelocity) * -1.0 * NoInputNormalizedDeceleration * MaxDeceleration :
+		-FMath::Sign(LinearVelocity) * NoInputNormalizedDeceleration :
 		ControlInput.X;
 	const float SteeringInput = ControlInput.Y;
 
-	const float Acceleration = NormalizedAcceleration > 0.0 ?
-		FMath::Min(MaxAcceleration, NormalizedAcceleration * MaxAcceleration) : LinearVelocity > 0.0 ?
-		// Moving forward, slowing down
-		FMath::Max(-MaxDeceleration, NormalizedAcceleration * MaxDeceleration) :
-		// Moving backwards, speeding up (in reverse)
-		FMath::Max(-MaxAcceleration, NormalizedAcceleration * MaxAcceleration);
+	// |speed| is increasing when acceleration and velocity have the same sign (or the vehicle
+	// is stopped). Otherwise we're decelerating.
+	const bool bSpeedIncreasing = FMath::IsNearlyZero(LinearVelocity) ||
+		FMath::Sign(NormalizedAcceleration) == FMath::Sign(LinearVelocity);
+	const float AccelLimit = bSpeedIncreasing ? MaxAcceleration : MaxDeceleration;
+	const float Acceleration = FMath::Clamp(NormalizedAcceleration * AccelLimit, -AccelLimit, AccelLimit);
 
 	const float SteeringAngle = FMath::Clamp(SteeringInput * MaxSteering, -MaxSteering, MaxSteering);
 
@@ -50,16 +50,14 @@ void UKinematicVehicleMovementComponent::TickComponent(float DeltaTime, ELevelTi
 
 	NewLinearVelocity = FMath::Clamp(NewLinearVelocity, -MaxSpeed, MaxSpeed);
 
-	FVector NewVelocity = Velocity;
-	float NewAngularVelocity = AngularVelocity;
-	SimulateMotion(DeltaTime, SteeringAngle, NewLinearVelocity, NewVelocity, NewAngularVelocity);
+	const FTempoTwist Motion = SimulateMotion(DeltaTime, SteeringAngle, NewLinearVelocity);
 
 	FHitResult MoveHitResult;
-	GetOwner()->AddActorWorldOffset(DeltaTime * NewVelocity, true, &MoveHitResult);
+	GetOwner()->AddActorWorldOffset(DeltaTime * Motion.Linear, true, &MoveHitResult);
 	LinearVelocity = NewLinearVelocity;
-	Velocity = NewVelocity;
+	Velocity = Motion.Linear;
 
 	FHitResult RotateHitResult;
-	GetOwner()->AddActorWorldRotation(FRotator(0.0, DeltaTime * NewAngularVelocity, 0.0), true, &RotateHitResult);
-	AngularVelocity = NewAngularVelocity;
+	GetOwner()->AddActorWorldRotation(FRotator(0.0, DeltaTime * Motion.Angular.Z, 0.0), true, &RotateHitResult);
+	AngularVelocity = Motion.Angular.Z;
 }
