@@ -84,6 +84,16 @@ def get_rust_default(field):
         return '0'
 
 
+def snake_to_upper_camel(s):
+    """Convert snake_case to UpperCamelCase using prost's heck-style rule.
+
+    Differs from Python's ``str.title()`` for segments containing digits — heck
+    only capitalizes the first letter of each underscore-separated segment, so
+    ``vector2d_op`` becomes ``Vector2dOp``, not ``Vector2DOp``.
+    """
+    return ''.join(part[:1].upper() + part[1:].lower() for part in s.split('_'))
+
+
 def proto_path_to_rust_module(proto_path):
     """Convert a protobuf package path to a Rust module path.
 
@@ -227,6 +237,72 @@ pub fn {{ name }}(
 
 '''
 
+    # Template for a Batch struct that wraps a oneof-of-Set*PropertyRequest into
+    # a fluent builder. Each method appends an op and returns self; execute /
+    # execute_async send one SetProperties RPC for the staged ops.
+    batch_template = '''
+/// SetProperties batch builder.
+///
+/// Stages property-set operations and submits them in one SetProperties RPC.
+/// Each method appends an op and returns `self` for fluent chaining; call
+/// [`Batch::execute`] (sync) or [`Batch::execute_async`] (async) to send.
+pub struct Batch {
+    ops: Vec<{{ op_type }}>,
+}
+
+pub fn batch() -> Batch {
+    Batch { ops: Vec::new() }
+}
+
+impl Batch {
+{%- for method in methods %}
+    pub fn {{ method.name }}(
+        mut self,
+{%- for field in method.fields %}
+        {{ field.name }}: {{ field.rust_type }},
+{%- endfor %}
+    ) -> Self {
+        self.ops.push({{ op_type }} {
+            op: Some({{ op_enum_path }}::{{ method.variant }}(
+                {{ method.request_rust_type }} {
+{%- for field in method.fields %}
+{%- if field.needs_option_wrap %}
+                    {{ field.name }}: Some({{ field.name }}),
+{%- else %}
+                    {{ field.name }},
+{%- endif %}
+{%- endfor %}
+                }
+            )),
+        });
+        self
+    }
+
+{%- endfor %}
+
+    pub async fn execute_async(
+        self,
+    ) -> Result<{{ response_rust_type }}, crate::TempoError> {
+        let mut ctx = crate::context::CONTEXT.write().await;
+        let channel = ctx.channel().await?;
+        let mut client = {{ client_type }}::new(channel)
+            .max_decoding_message_size(crate::context::MAX_MESSAGE_SIZE)
+            .max_encoding_message_size(crate::context::MAX_MESSAGE_SIZE);
+
+        let request = {{ request_rust_type }} { ops: self.ops };
+        let response = client.set_properties(request).await?;
+        Ok(response.into_inner())
+    }
+
+    pub fn execute(
+        self,
+    ) -> Result<{{ response_rust_type }}, crate::TempoError> {
+        crate::context::RUNTIME.block_on(self.execute_async())
+    }
+}
+
+'''
+
     # Template for module file header
     module_header_template = '''// Copyright Tempo Simulation, LLC. All Rights Reserved
 //
@@ -307,6 +383,68 @@ use crate::streaming::SyncStreamIterator;
                     client_type=client_type,
                     method_name=pascal_to_snake(rpc_descriptor.name),
                 ))
+
+        # If this module defines a `SetPropertyOp` message with an `op` oneof and a
+        # corresponding `SetProperties` RPC, emit a fluent Batch builder so users
+        # don't have to construct SetPropertyOp messages by hand.
+        set_property_op_desc = next(
+            (m for m in all_messages.values()
+             if m.object_name == "SetPropertyOp"
+             and m.module_name.split(".")[0] == tempo_module_name),
+            None,
+        )
+        owning_service = next(
+            (s for s in service_descriptors
+             if any(rpc.name == "SetProperties" for rpc in s.rpcs)),
+            None,
+        )
+        if set_property_op_desc and owning_service and set_property_op_desc.oneofs.get("op"):
+            rust_proto_module = pascal_to_snake(set_property_op_desc.module_name.split(".")[0])
+            op_module = pascal_to_snake(set_property_op_desc.object_name)  # set_property_op
+            op_type = f"crate::proto::{rust_proto_module}::SetPropertyOp"
+            op_enum_path = f"crate::proto::{rust_proto_module}::{op_module}::Op"
+            request_rust_type_batch = f"crate::proto::{rust_proto_module}::SetPropertiesRequest"
+            response_rust_type_batch = f"crate::proto::{rust_proto_module}::SetPropertiesResponse"
+            client_type_batch = (
+                f"crate::proto::{rust_proto_module}::"
+                f"{pascal_to_snake(owning_service.object_name)}_client::"
+                f"{owning_service.object_name}Client"
+            )
+
+            methods = []
+            for entry in set_property_op_desc.oneofs["op"]:
+                request_desc = all_messages.get(entry["message_proto_full_name"])
+                if request_desc is None:
+                    continue
+                method_fields = []
+                for field in request_desc.fields:
+                    field.rust_type = get_rust_type(field)
+                    field.needs_option_wrap = needs_option_wrap(field)
+                    if field.label == "repeated":
+                        field.rust_type = f"Vec<{field.rust_type}>"
+                    method_fields.append(field)
+                # bool_op -> set_bool_property; int_array_op -> set_int_array_property
+                method_name = "set_{}_property".format(
+                    entry["name"][:-3] if entry["name"].endswith("_op") else entry["name"]
+                )
+                methods.append({
+                    "name": method_name,
+                    "variant": snake_to_upper_camel(entry["name"]),
+                    "request_rust_type": (
+                        f"crate::proto::{rust_proto_module}::{request_desc.object_name}"
+                    ),
+                    "fields": method_fields,
+                })
+
+            batch_tpl = j2_environment.from_string(batch_template)
+            rpc_code.append(batch_tpl.render(
+                methods=methods,
+                op_type=op_type,
+                op_enum_path=op_enum_path,
+                request_rust_type=request_rust_type_batch,
+                response_rust_type=response_rust_type_batch,
+                client_type=client_type_batch,
+            ))
 
         # Write the module file
         if rpc_code:

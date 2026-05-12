@@ -171,6 +171,60 @@ def generate_tempo_api(root_dir):
         "        yield response\n" \
         "\n\n" \
 
+    # Template for a Batch class that wraps a oneof-of-Set*PropertyRequest into
+    # a fluent builder, so users don't have to construct SetPropertyOp messages
+    # themselves. One method per oneof variant; execute() / execute_async() send
+    # one SetProperties RPC for the staged ops.
+    batch_template = \
+        "import " \
+        "{% for import in imports %}" \
+        "{{ import }}{% if not loop.last %}, {% endif %}" \
+        "{% endfor %}" \
+        "\n\n\n" \
+        "class Batch:\n" \
+        '    """Stages property-set operations and submits them in one SetProperties RPC.\n' \
+        "\n" \
+        "    Methods mirror the singular ``set_*_property`` free functions; each appends an op\n" \
+        "    to the batch and returns ``self`` for fluent chaining. Call :meth:`execute` (sync)\n" \
+        "    or ``await`` :meth:`execute_async` to send.\n" \
+        '    """\n' \
+        "\n" \
+        "    def __init__(self):\n" \
+        "        self._ops = []\n" \
+        "\n" \
+        "{% for method in methods %}" \
+        "    def {{ method.name }}(\n" \
+        "        self,\n" \
+        "{% for field in method.fields %}" \
+        "        {{ field.name }}: {{ field.field_type }} = {{ field.default }}{% if not loop.last %},{% endif %}\n" \
+        "{% endfor %}" \
+        "    ) -> 'Batch':\n" \
+        "        self._ops.append({{ pb2 }}.SetPropertyOp(\n" \
+        "            {{ method.oneof_field }}={{ pb2 }}.{{ method.request_type }}(\n" \
+        "{% for field in method.fields %}" \
+        "                {{ field.name }}={{ field.name }}{% if not loop.last %},{% endif %}\n" \
+        "{% endfor %}" \
+        "            )\n" \
+        "        ))\n" \
+        "        return self\n" \
+        "\n" \
+        "{% endfor %}" \
+        "    async def _execute(self) -> {{ pb2 }}.SetPropertiesResponse:\n" \
+        "        stub = await tempo_context().get_stub({{ pb2_grpc }}.{{ service_object }}Stub)\n" \
+        "        request = {{ pb2 }}.SetPropertiesRequest(ops=self._ops)\n" \
+        "        return await stub.SetProperties(request)\n" \
+        "\n" \
+        "    def execute(self) -> {{ pb2 }}.SetPropertiesResponse:\n" \
+        "        return run_async(self._execute())\n" \
+        "\n" \
+        "    async def execute_async(self) -> {{ pb2 }}.SetPropertiesResponse:\n" \
+        "        return await self._execute()\n" \
+        "\n\n" \
+        "def batch() -> Batch:\n" \
+        '    """Create a new property-set batch builder."""\n' \
+        "    return Batch()\n" \
+        "\n\n"
+
     j2_environment = jinja2.Environment()
     for service_name, tempo_service_descriptor in all_services.items():
         tempo_module_name = tempo_service_descriptor.module_name.split(".")[0]
@@ -200,7 +254,59 @@ def generate_tempo_api(root_dir):
                         request=tempo_request_descriptor,
                         response=tempo_response_descriptor,
                         imports=imports
-                    ))        
+                    ))
+
+    # Emit a Batch builder class for any message in the proto graph that has the
+    # canonical name "SetPropertyOp" and exposes its variants via a oneof named "op".
+    # Each variant must be a TYPE_MESSAGE whose request type is also in all_messages.
+    for proto_full_name, set_property_op_desc in list(all_messages.items()):
+        if set_property_op_desc.object_name != "SetPropertyOp":
+            continue
+        op_variants = set_property_op_desc.oneofs.get("op")
+        if not op_variants:
+            continue
+        # Find the service in the same proto module that exposes SetProperties.
+        proto_package = proto_full_name.rsplit(".", 1)[0]
+        owning_service = None
+        for service in all_services.values():
+            if service.module_name.split(".")[0] != set_property_op_desc.module_name.split(".")[0]:
+                continue
+            if any(rpc.name == "SetProperties" for rpc in service.rpcs):
+                owning_service = service
+                break
+        if owning_service is None:
+            continue
+
+        methods = []
+        for entry in op_variants:
+            request_desc = all_messages.get(entry["message_proto_full_name"])
+            if request_desc is None:
+                continue
+            # bool_op -> set_bool_property; int_array_op -> set_int_array_property
+            method_name = "set_{}_property".format(
+                entry["name"][:-3] if entry["name"].endswith("_op") else entry["name"]
+            )
+            methods.append({
+                "name": method_name,
+                "oneof_field": entry["name"],
+                "request_type": request_desc.object_name,
+                "fields": request_desc.fields,
+            })
+
+        pb2_module = set_property_op_desc.module_name        # e.g. TempoWorld.WorldControl_pb2
+        pb2_grpc_module = owning_service.module_name + "_grpc"
+        imports = sorted({pb2_module, pb2_grpc_module})
+
+        tempo_module_name = set_property_op_desc.module_name.split(".")[0]
+        output_file = os.path.join(root_dir, f"{pascal_to_snake(tempo_module_name)}.py")
+        with open(output_file, 'a') as f:
+            f.write(j2_environment.from_string(batch_template).render(
+                methods=methods,
+                pb2=pb2_module,
+                pb2_grpc=pb2_grpc_module,
+                service_object=owning_service.object_name,
+                imports=imports,
+            ))
 
 
 def collect_input_files(project_root: Path, script_path: Path) -> List[Path]:
