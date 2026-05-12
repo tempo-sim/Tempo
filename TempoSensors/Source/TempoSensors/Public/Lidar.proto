@@ -1,0 +1,44 @@
+// Copyright Tempo Simulation, LLC. All Rights Reserved
+
+syntax = "proto3";
+
+import "TempoSensors/Common.proto";
+
+// Generic [min, max] interval. Units are carried by the field that uses this type.
+message Range {
+  float min = 1;
+  float max = 2;
+}
+
+message LidarScanSegment {
+  TempoSensors.MeasurementHeader header = 1;
+  // Total number of segments that comprise one full scan (segments share a sequence_id).
+  int32 scan_count = 2;
+  // Number of vertical beams (rows) in this segment.
+  int32 vertical_beams = 3;
+  // Number of horizontal beams (columns) in this segment.
+  int32 horizontal_beams = 4;
+  // Min/max measurable range in meters.
+  Range distance_range_m = 5;
+  // Azimuth sweep covered by this segment, in radians (right-handed, sign per Tempo lidar convention).
+  Range azimuth_range_rad = 6;
+  // Elevation sweep covered by this segment, in radians (right-handed, sign per Tempo lidar convention).
+  Range elevation_range_rad = 7;
+  // Per-return distance to the hit, in meters. 0 = no return. Packed H-outer, V-inner.
+  repeated float distances_m = 8;
+  // Per-return reflected intensity in [0, 1]. Same layout as `distances_m`.
+  repeated float intensities = 9;
+  // Per-return semantic label (0 if labels disabled). Same layout as `distances_m`.
+  repeated uint32 labels = 10;
+  // Per-return azimuth in radians. Same layout as `distances_m`.
+  repeated float azimuths_rad = 11;
+  // Per-return elevation in radians. Same layout as `distances_m`.
+  repeated float elevations_rad = 12;
+}
+
+message LidarScanRequest {
+  // Name of the actor that owns the sensor.
+  string owner = 1;
+  // Name of the sensor component on the owning actor.
+  string sensor = 2;
+}

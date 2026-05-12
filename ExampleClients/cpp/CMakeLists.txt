@@ -99,5 +99,6 @@ function(tempo_add_example name)
     target_link_libraries(${name} PRIVATE tempo grpc_vendored)
 endfunction()
 
-tempo_add_example(sensor_playground  SensorPlayground/sensor_playground.cc)
-tempo_add_example(tempo_mcp          TempoMCP/tempo_mcp.cc)
+tempo_add_example(sensor_playground   SensorPlayground/sensor_playground.cc)
+tempo_add_example(world_playground    WorldPlayground/world_playground.cc)
+tempo_add_example(movement_playground MovementPlayground/movement_playground.cc)

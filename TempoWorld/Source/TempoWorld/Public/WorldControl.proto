@@ -1,0 +1,403 @@
+// Copyright Tempo Simulation, LLC. All Rights Reserved
+
+syntax = "proto3";
+
+import "TempoCore/Empty.proto";
+import "TempoCore/Geometry.proto";
+
+message SpawnActorRequest {
+  // Class name of the actor to spawn.
+  string actor_type = 1;
+  // If true, defer finishing the spawn until FinishSpawningActor is called.
+  bool deferred = 2;
+  // Spawn transform (world frame, or relative to `relative_to_actor` if set). Meters / right-handed.
+  TempoCore.Transform transform = 3;
+  // Optional actor name that `transform` is interpreted relative to.
+  string relative_to_actor = 4;
+}
+
+message SpawnActorResponse {
+  // Name of the spawned actor.
+  string name = 1;
+  // World transform of the spawned actor after spawning.
+  TempoCore.Transform transform = 2;
+}
+
+message FinishSpawningActorRequest {
+  // Name of the deferred actor to finish spawning.
+  string actor = 1;
+}
+
+message FinishSpawningActorResponse {
+  // World transform of the actor after finishing the spawn.
+  TempoCore.Transform transform = 1;
+}
+
+message DestroyActorRequest {
+  // Name of the actor to destroy.
+  string actor = 1;
+}
+
+message AddComponentRequest {
+  // Class name of the component to add.
+  string component_type = 1;
+  // Name of the owning actor.
+  string actor = 2;
+  // Optional name for the new component (auto-generated if empty).
+  string name = 3;
+  // Optional name of a parent component on the owning actor (empty = attach to root).
+  string parent = 4;
+  // Local transform of the new component on its parent. Meters / right-handed.
+  TempoCore.Transform transform = 5;
+  // Optional socket name on `parent` to attach to.
+  string socket = 6;
+}
+
+message AddComponentResponse {
+  // Name of the added component.
+  string name = 1;
+  // World transform of the component after attachment.
+  TempoCore.Transform transform = 2;
+}
+
+message DestroyComponentRequest {
+  // Name of the owning actor.
+  string actor = 1;
+  // Name of the component to destroy.
+  string component = 2;
+}
+
+message SetActorTransformRequest {
+  // Name of the actor to move.
+  string actor = 1;
+  // Target transform (world frame, or relative to `relative_to_actor` if set). Meters / right-handed.
+  TempoCore.Transform transform = 2;
+  // Optional actor name that `transform` is interpreted relative to.
+  string relative_to_actor = 3;
+}
+
+message SetComponentTransformRequest {
+  // Name of the owning actor.
+  string actor = 1;
+  // Name of the component to move.
+  string component = 2;
+  // Target transform. Meters / right-handed.
+  TempoCore.Transform transform = 3;
+  // If true, `transform` is in world space; otherwise it is relative to the component's parent.
+  bool relative_to_world = 4;
+}
+
+message ActivateComponentRequest {
+  // Name of the owning actor.
+  string actor = 1;
+  // Name of the component to activate.
+  string component = 2;
+}
+
+message DeactivateComponentRequest {
+  // Name of the owning actor.
+  string actor = 1;
+  // Name of the component to deactivate.
+  string component = 2;
+}
+
+message ActorDescriptor {
+  // Actor name.
+  string name = 1;
+  // Actor class name.
+  string actor_type = 2;
+}
+
+message GetAllActorsResponse {
+  repeated ActorDescriptor actors = 1;
+}
+
+message ComponentDescriptor {
+  // Name of the owning actor.
+  string actor = 1;
+  // Component name.
+  string name = 2;
+  // Component class name.
+  string component_type = 3;
+}
+
+message GetAllComponentsRequest {
+  // Name of the actor whose components to list.
+  string actor = 1;
+}
+
+message GetAllComponentsResponse {
+  repeated ComponentDescriptor components = 1;
+}
+
+message GetActorPropertiesRequest {
+  // Name of the actor to inspect.
+  string actor = 1;
+  // If true, also walk components' properties.
+  bool include_components = 2;
+}
+
+message GetComponentPropertiesRequest {
+  // Name of the owning actor.
+  string actor = 1;
+  // Name of the component to inspect.
+  string component = 2;
+}
+
+message PropertyDescriptor {
+  // Name of the owning actor.
+  string actor = 1;
+  // Name of the owning component (empty for actor-level properties).
+  string component = 2;
+  // Property name (dot-path for nested struct/array members).
+  string name = 3;
+  // Property type string (e.g. "bool", "int", "float[]", "vector").
+  string property_type = 4;
+  // Current property value, serialized as a string.
+  string value = 5;
+}
+
+message GetPropertiesResponse {
+  repeated PropertyDescriptor properties = 1;
+}
+
+message SetBoolPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  bool value = 4;
+}
+
+message SetStringPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  string value = 4;
+}
+
+message SetEnumPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  // Enum value as its symbolic name.
+  string value = 4;
+}
+
+message SetIntPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  int32 value = 4;
+}
+
+message SetFloatPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  float value = 4;
+}
+
+message SetVectorPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  float x = 4;
+  float y = 5;
+  float z = 6;
+}
+
+message SetRotatorPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  // Roll in radians.
+  float r = 4;
+  // Pitch in radians.
+  float p = 5;
+  // Yaw in radians.
+  float y = 6;
+}
+
+message SetColorPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  // 8-bit RGB components in [0, 255].
+  int32 r = 4;
+  int32 g = 5;
+  int32 b = 6;
+}
+
+message SetClassPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  // Class path or name.
+  string value = 4;
+}
+
+message SetAssetPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  // Asset path or name.
+  string value = 4;
+}
+
+message SetActorPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  // Name of the referenced actor.
+  string value = 4;
+}
+
+message SetComponentPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  // Name of the referenced component (on the same actor).
+  string value = 4;
+}
+
+message SetBoolArrayPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  repeated bool values = 4;
+}
+
+message SetStringArrayPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  repeated string values = 4;
+}
+
+message SetEnumArrayPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  repeated string values = 4;
+}
+
+message SetIntArrayPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  repeated int32 values = 4;
+}
+
+message SetFloatArrayPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  repeated float values = 4;
+}
+
+message SetClassArrayPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  repeated string values = 4;
+}
+
+message SetAssetArrayPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  repeated string values = 4;
+}
+
+message SetActorArrayPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  repeated string values = 4;
+}
+
+message SetComponentArrayPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  repeated string values = 4;
+}
+
+message CallFunctionRequest {
+  string actor = 1;
+  string component = 2;
+  // Name of the UFUNCTION to invoke.
+  string function = 3;
+}
+
+service WorldControlService {
+  rpc SpawnActor(SpawnActorRequest) returns (SpawnActorResponse);
+
+  rpc FinishSpawningActor(FinishSpawningActorRequest) returns (FinishSpawningActorResponse);
+
+  rpc DestroyActor(DestroyActorRequest) returns (TempoCore.Empty);
+
+  rpc AddComponent(AddComponentRequest) returns (AddComponentResponse);
+
+  rpc DestroyComponent(DestroyComponentRequest) returns (TempoCore.Empty);
+
+  rpc SetActorTransform(SetActorTransformRequest) returns (TempoCore.Empty);
+
+  rpc SetComponentTransform(SetComponentTransformRequest) returns (TempoCore.Empty);
+
+  rpc ActivateComponent(ActivateComponentRequest) returns (TempoCore.Empty);
+
+  rpc DeactivateComponent(DeactivateComponentRequest) returns (TempoCore.Empty);
+
+  rpc GetAllActors(TempoCore.Empty) returns (GetAllActorsResponse);
+
+  rpc GetAllComponents(GetAllComponentsRequest) returns (GetAllComponentsResponse);
+
+  rpc GetActorProperties(GetActorPropertiesRequest) returns (GetPropertiesResponse);
+
+  rpc GetComponentProperties(GetComponentPropertiesRequest) returns (GetPropertiesResponse);
+
+  rpc SetBoolProperty(SetBoolPropertyRequest) returns (TempoCore.Empty);
+
+  rpc SetStringProperty(SetStringPropertyRequest) returns (TempoCore.Empty);
+
+  rpc SetEnumProperty(SetEnumPropertyRequest) returns (TempoCore.Empty);
+
+  rpc SetIntProperty(SetIntPropertyRequest) returns (TempoCore.Empty);
+
+  rpc SetFloatProperty(SetFloatPropertyRequest) returns (TempoCore.Empty);
+
+  rpc SetVectorProperty(SetVectorPropertyRequest) returns (TempoCore.Empty);
+
+  rpc SetRotatorProperty(SetRotatorPropertyRequest) returns (TempoCore.Empty);
+
+  rpc SetColorProperty(SetColorPropertyRequest) returns (TempoCore.Empty);
+
+  rpc SetClassProperty(SetClassPropertyRequest) returns (TempoCore.Empty);
+
+  rpc SetAssetProperty(SetAssetPropertyRequest) returns (TempoCore.Empty);
+
+  rpc SetActorProperty(SetActorPropertyRequest) returns (TempoCore.Empty);
+
+  rpc SetComponentProperty(SetComponentPropertyRequest) returns (TempoCore.Empty);
+
+  rpc SetBoolArrayProperty(SetBoolArrayPropertyRequest) returns (TempoCore.Empty);
+
+  rpc SetStringArrayProperty(SetStringArrayPropertyRequest) returns (TempoCore.Empty);
+
+  rpc SetEnumArrayProperty(SetEnumArrayPropertyRequest) returns (TempoCore.Empty);
+
+  rpc SetIntArrayProperty(SetIntArrayPropertyRequest) returns (TempoCore.Empty);
+
+  rpc SetFloatArrayProperty(SetFloatArrayPropertyRequest) returns (TempoCore.Empty);
+
+  rpc SetClassArrayProperty(SetClassArrayPropertyRequest) returns (TempoCore.Empty);
+
+  rpc SetAssetArrayProperty(SetAssetArrayPropertyRequest) returns (TempoCore.Empty);
+
+  rpc SetActorArrayProperty(SetActorArrayPropertyRequest) returns (TempoCore.Empty);
+
+  rpc SetComponentArrayProperty(SetComponentArrayPropertyRequest) returns (TempoCore.Empty);
+
+  rpc CallFunction(CallFunctionRequest) returns (TempoCore.Empty);
+}

@@ -14,8 +14,7 @@ public class TempoWorld : TempoModuleRules
                 // Unreal
                 "Core",
                 // Tempo
-                "TempoCoreShared",
-                "TempoScripting",
+                "TempoCore",
             }
         );
 
@@ -28,9 +27,6 @@ public class TempoWorld : TempoModuleRules
                 "MassActors",
                 "MassEntity",
                 "MassTraffic",
-                // Tempo
-                "TempoCore",
-                "TempoMovementShared",
             }
         );
 

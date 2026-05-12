@@ -2,22 +2,31 @@
 
 syntax = "proto3";
 
-import "TempoScripting/Empty.proto";
+import "TempoCore/Empty.proto";
 
 enum ControlMode {
-  NONE = 0;
-  USER = 1;
-  OPEN_LOOP = 2;
-  CLOSED_LOOP = 3;
+  CM_UNKNOWN = 0;
+  // Control is explicitly disabled.
+  CM_DISABLED = 1;
+  // Manual user control via keyboard/gamepad input.
+  CM_USER = 2;
+  // Open-loop scripted control: commands are applied directly without feedback.
+  CM_OPEN_LOOP = 3;
+  // Closed-loop scripted control: commands track a setpoint with feedback.
+  CM_CLOSED_LOOP = 4;
 }
 
 message LoadLevelRequest {
+  // Path or name of the level to load.
   string level = 1;
+  // If true, defer finishing the load until FinishLoadingLevel is called.
   bool deferred = 2;
+  // If true, start the level paused.
   bool start_paused = 3;
 }
 
 message CurrentLevelResponse {
+  // Path or name of the currently loaded level.
   string level = 1;
 }
 
@@ -30,15 +39,15 @@ message SetControlModeRequest {
 }
 
 service TempoCoreService {
-  rpc LoadLevel(LoadLevelRequest) returns (TempoScripting.Empty);
+  rpc LoadLevel(LoadLevelRequest) returns (TempoCore.Empty);
 
-  rpc FinishLoadingLevel(TempoScripting.Empty) returns (TempoScripting.Empty);
+  rpc FinishLoadingLevel(TempoCore.Empty) returns (TempoCore.Empty);
 
-  rpc GetCurrentLevelName(TempoScripting.Empty) returns (CurrentLevelResponse);
+  rpc GetCurrentLevelName(TempoCore.Empty) returns (CurrentLevelResponse);
 
-  rpc Quit(TempoScripting.Empty) returns (TempoScripting.Empty);
+  rpc Quit(TempoCore.Empty) returns (TempoCore.Empty);
 
-  rpc SetMainViewportRenderEnabled(SetMainViewportRenderEnabledRequest) returns (TempoScripting.Empty);
+  rpc SetMainViewportRenderEnabled(SetMainViewportRenderEnabledRequest) returns (TempoCore.Empty);
 
-  rpc SetControlMode(SetControlModeRequest) returns (TempoScripting.Empty);
+  rpc SetControlMode(SetControlModeRequest) returns (TempoCore.Empty);
 }

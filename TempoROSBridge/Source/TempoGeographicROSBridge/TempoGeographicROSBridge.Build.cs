@@ -27,12 +27,11 @@ public class TempoGeographicROSBridge : ModuleRules
                 "SlateCore",
                 // Tempo
                 "TempoGeographic",
-                "TempoScripting",
-                "TempoScriptingROSBridge",
+                "TempoCore",
+                "TempoCoreROSBridge",
                 "TempoROS",
                 "rclcpp",
                 "TempoROSBridgeShared",
-                "TempoCoreShared",
             }
         );
         

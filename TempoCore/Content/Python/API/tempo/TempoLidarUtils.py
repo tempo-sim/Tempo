@@ -89,11 +89,11 @@ class PointCloudViewer:
         # Single C-level copy per field from the packed repeated-scalar proto fields.
         # Layout is H-outer, V-inner (see TempoLidar.cpp Decode); transpose to (V, H).
         h, v = scan.horizontal_beams, scan.vertical_beams
-        distances = np.asarray(scan.distances, dtype=np.float32).reshape(h, v).T
+        distances = np.asarray(scan.distances_m, dtype=np.float32).reshape(h, v).T
         intensities = np.asarray(scan.intensities, dtype=np.float32).reshape(h, v).T
         labels = np.asarray(scan.labels, dtype=np.uint32).reshape(h, v).T
-        azimuths = np.asarray(scan.azimuths, dtype=np.float32).reshape(h, v).T
-        elevations = np.asarray(scan.elevations, dtype=np.float32).reshape(h, v).T
+        azimuths = np.asarray(scan.azimuths_rad, dtype=np.float32).reshape(h, v).T
+        elevations = np.asarray(scan.elevations_rad, dtype=np.float32).reshape(h, v).T
 
         restart = self.latest_scan is None or self.latest_scan.header.sequence_id != scan.header.sequence_id
 
@@ -105,12 +105,12 @@ class PointCloudViewer:
             self.labels = labels
             self.azimuths = azimuths
             self.elevations = elevations
-            self.azimuth_min = scan.azimuth_range.min
-            self.azimuth_max = scan.azimuth_range.max
+            self.azimuth_min = scan.azimuth_range_rad.min
+            self.azimuth_max = scan.azimuth_range_rad.max
             self.accumulated_scan_segments = 1
             self.horizontal_beams = scan.horizontal_beams
         else:
-            if self.azimuth_min < scan.azimuth_range.min:
+            if self.azimuth_min < scan.azimuth_range_rad.min:
                 self.distances = np.concatenate((self.distances, distances), axis=1)
                 self.intensities = np.concatenate((self.intensities, intensities), axis=1)
                 self.labels = np.concatenate((self.labels, labels), axis=1)
@@ -122,8 +122,8 @@ class PointCloudViewer:
                 self.labels = np.concatenate((labels, self.labels), axis=1)
                 self.azimuths = np.concatenate((azimuths, self.azimuths), axis=1)
                 self.elevations = np.concatenate((elevations, self.elevations), axis=1)
-            self.azimuth_min = min(self.azimuth_min, scan.azimuth_range.min)
-            self.azimuth_max = max(self.azimuth_max, scan.azimuth_range.max)
+            self.azimuth_min = min(self.azimuth_min, scan.azimuth_range_rad.min)
+            self.azimuth_max = max(self.azimuth_max, scan.azimuth_range_rad.max)
             self.accumulated_scan_segments += 1
             self.horizontal_beams += scan.horizontal_beams
 
@@ -210,7 +210,7 @@ async def stream_lidar_scans(lidar_name, owner, colorize_by, update_rate=30.0):
     consumer_task = asyncio.create_task(consumer())
 
     try:
-        async for scan in ts.stream_lidar_scans(sensor_name=lidar_name, owner_name=owner):
+        async for scan in ts.stream_lidar_scans(sensor=lidar_name, owner=owner):
             if queue.full():
                 try:
                     queue.get_nowait()

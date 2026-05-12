@@ -7,8 +7,8 @@
 
 #include "TempoCamera.h"
 #include "TempoLidar.h"
-#include "TempoCamera/Camera.pb.h"
-#include "TempoLidar/Lidar.pb.h"
+#include "TempoSensors/Camera.pb.h"
+#include "TempoSensors/Lidar.pb.h"
 
 #include "TempoCoreSettings.h"
 #include "TempoSensorsSettings.h"
@@ -22,20 +22,19 @@
 using SensorService = TempoSensors::SensorService;
 using SensorAsyncService = TempoSensors::SensorService::AsyncService;
 using SensorDescriptor = TempoSensors::SensorDescriptor;
-using AvailableSensorsRequest = TempoSensors::AvailableSensorsRequest;
 using AvailableSensorsResponse = TempoSensors::AvailableSensorsResponse;
-using ColorImageRequest = TempoCamera::ColorImageRequest;
-using DepthImageRequest = TempoCamera::DepthImageRequest;
-using LabelImageRequest = TempoCamera::LabelImageRequest;
-using LidarScanRequest = TempoLidar::LidarScanRequest;
-using ColorImage = TempoCamera::ColorImage;
-using DepthImage = TempoCamera::DepthImage;
-using LabelImage = TempoCamera::LabelImage;
-using LidarScanSegment = TempoLidar::LidarScanSegment;
+using ColorImageRequest = TempoSensors::ColorImageRequest;
+using DepthImageRequest = TempoSensors::DepthImageRequest;
+using LabelImageRequest = TempoSensors::LabelImageRequest;
+using LidarScanRequest = TempoSensors::LidarScanRequest;
+using ColorImage = TempoSensors::ColorImage;
+using DepthImage = TempoSensors::DepthImage;
+using LabelImage = TempoSensors::LabelImage;
+using LidarScanSegment = TempoSensors::LidarScanSegment;
 
-void UTempoSensorServiceSubsystem::RegisterScriptingServices(FTempoScriptingServer& ScriptingServer)
+void UTempoSensorServiceSubsystem::RegisterServices(FTempoServer& Server)
 {
-	ScriptingServer.RegisterService<SensorService>(
+	Server.RegisterService<SensorService>(
 		SimpleRequestHandler(&SensorAsyncService::RequestGetAvailableSensors, &UTempoSensorServiceSubsystem::GetAvailableSensors),
 		StreamingRequestHandler(&SensorAsyncService::RequestStreamColorImages, &UTempoSensorServiceSubsystem::StreamColorImages),
 		StreamingRequestHandler(&SensorAsyncService::RequestStreamDepthImages, &UTempoSensorServiceSubsystem::StreamDepthImages),
@@ -49,7 +48,7 @@ void UTempoSensorServiceSubsystem::Initialize(FSubsystemCollectionBase& Collecti
 {
 	Super::Initialize(Collection);
 
-	FTempoScriptingServer::Get().ActivateService<SensorService>(this);
+	FTempoServer::Get().ActivateService<SensorService>(this);
 
 	// OnWorldTickStart is fired before Tick has actually begun, while the world time is still the tick
 	// of the last frame. We use this last opportunity, having waited as long as possible, to collect
@@ -63,7 +62,7 @@ void UTempoSensorServiceSubsystem::Deinitialize()
 {
 	Super::Deinitialize();
 
-	FTempoScriptingServer::Get().DeactivateService<SensorService>();
+	FTempoServer::Get().DeactivateService<SensorService>();
 }
 
 void UTempoSensorServiceSubsystem::OnRenderFrameCompleted() const
@@ -157,28 +156,28 @@ TempoSensors::MeasurementType ToProtoMeasurementType(EMeasurementType ImageType)
 	{
 	case EMeasurementType::COLOR_IMAGE:
 		{
-			return TempoSensors::COLOR_IMAGE;
+			return TempoSensors::MT_COLOR_IMAGE;
 		}
 	case EMeasurementType::DEPTH_IMAGE:
 		{
-			return TempoSensors::DEPTH_IMAGE;
+			return TempoSensors::MT_DEPTH_IMAGE;
 		}
 	case EMeasurementType::LABEL_IMAGE:
 		{
-			return TempoSensors::LABEL_IMAGE;
+			return TempoSensors::MT_LABEL_IMAGE;
 		}
 	case EMeasurementType::LIDAR_SCAN:
 		{
-			return TempoSensors::LIDAR_SCAN;
+			return TempoSensors::MT_LIDAR_SCAN;
 		}
 	case EMeasurementType::BOUNDING_BOXES:
 		{
-			return TempoSensors::BOUNDING_BOXES;
+			return TempoSensors::MT_BOUNDING_BOXES;
 		}
 	default:
 		{
 			checkf(false, TEXT("Unhandled measurement type"));
-			return TempoSensors::COLOR_IMAGE;
+			return TempoSensors::MT_UNKNOWN;
 		}
 	}
 }
@@ -204,7 +203,7 @@ void UTempoSensorServiceSubsystem::ForEachActiveSensor(const TFunction<void(ITem
 	}
 }
 
-void UTempoSensorServiceSubsystem::GetAvailableSensors(const TempoSensors::AvailableSensorsRequest& Request, const TResponseDelegate<TempoSensors::AvailableSensorsResponse>& ResponseContinuation) const
+void UTempoSensorServiceSubsystem::GetAvailableSensors(const TempoCore::Empty& Request, const TResponseDelegate<TempoSensors::AvailableSensorsResponse>& ResponseContinuation) const
 {
 	AvailableSensorsResponse Response;
 
@@ -213,7 +212,7 @@ void UTempoSensorServiceSubsystem::GetAvailableSensors(const TempoSensors::Avail
 		auto* AvailableSensor = Response.add_available_sensors();
 		AvailableSensor->set_owner(TCHAR_TO_UTF8(*Sensor->GetOwnerName()));
 		AvailableSensor->set_name(TCHAR_TO_UTF8(*Sensor->GetSensorName()));
-		AvailableSensor->set_rate(Sensor->GetRate());
+		AvailableSensor->set_rate_hz(Sensor->GetRate());
 		for (const EMeasurementType MeasurementType : Sensor->GetMeasurementTypes())
 		{
 			AvailableSensor->add_measurement_types(ToProtoMeasurementType(MeasurementType));
@@ -237,8 +236,8 @@ void UTempoSensorServiceSubsystem::RequestImages(const RequestType& Request, con
 		}
 	}
 	
-	const FString RequestedOwnerName(UTF8_TO_TCHAR(Request.owner_name().c_str()));
-	const FString RequestedSensorName(UTF8_TO_TCHAR(Request.sensor_name().c_str()));
+	const FString RequestedOwnerName(UTF8_TO_TCHAR(Request.owner().c_str()));
+	const FString RequestedSensorName(UTF8_TO_TCHAR(Request.sensor().c_str()));
 
 	// If owner name is not specified and only one owner has this sensor name, assume the client wants that owner
 	if (RequestedOwnerName.IsEmpty())
@@ -298,27 +297,27 @@ void UTempoSensorServiceSubsystem::RequestImages(const RequestType& Request, con
 	return;
 }
 
-void UTempoSensorServiceSubsystem::StreamColorImages(const TempoCamera::ColorImageRequest& Request, const TResponseDelegate<TempoCamera::ColorImage>& ResponseContinuation) const
+void UTempoSensorServiceSubsystem::StreamColorImages(const TempoSensors::ColorImageRequest& Request, const TResponseDelegate<TempoSensors::ColorImage>& ResponseContinuation) const
 {
-	RequestImages<TempoCamera::ColorImageRequest, TempoCamera::ColorImage>(Request, ResponseContinuation);
+	RequestImages<TempoSensors::ColorImageRequest, TempoSensors::ColorImage>(Request, ResponseContinuation);
 }
 
-void UTempoSensorServiceSubsystem::StreamDepthImages(const TempoCamera::DepthImageRequest& Request, const TResponseDelegate<TempoCamera::DepthImage>& ResponseContinuation) const
+void UTempoSensorServiceSubsystem::StreamDepthImages(const TempoSensors::DepthImageRequest& Request, const TResponseDelegate<TempoSensors::DepthImage>& ResponseContinuation) const
 {
-	RequestImages<TempoCamera::DepthImageRequest, TempoCamera::DepthImage>(Request, ResponseContinuation);
+	RequestImages<TempoSensors::DepthImageRequest, TempoSensors::DepthImage>(Request, ResponseContinuation);
 }
 
-void UTempoSensorServiceSubsystem::StreamLabelImages(const TempoCamera::LabelImageRequest& Request, const TResponseDelegate<TempoCamera::LabelImage>& ResponseContinuation) const
+void UTempoSensorServiceSubsystem::StreamLabelImages(const TempoSensors::LabelImageRequest& Request, const TResponseDelegate<TempoSensors::LabelImage>& ResponseContinuation) const
 {
-	RequestImages<TempoCamera::LabelImageRequest, TempoCamera::LabelImage>(Request, ResponseContinuation);
+	RequestImages<TempoSensors::LabelImageRequest, TempoSensors::LabelImage>(Request, ResponseContinuation);
 }
 
-void UTempoSensorServiceSubsystem::StreamBoundingBoxes(const TempoCamera::BoundingBoxesRequest& Request, const TResponseDelegate<TempoCamera::BoundingBoxes>& ResponseContinuation) const
+void UTempoSensorServiceSubsystem::StreamBoundingBoxes(const TempoSensors::BoundingBoxesRequest& Request, const TResponseDelegate<TempoSensors::BoundingBoxes>& ResponseContinuation) const
 {
-	RequestImages<TempoCamera::BoundingBoxesRequest, TempoCamera::BoundingBoxes>(Request, ResponseContinuation);
+	RequestImages<TempoSensors::BoundingBoxesRequest, TempoSensors::BoundingBoxes>(Request, ResponseContinuation);
 }
 
-void UTempoSensorServiceSubsystem::StreamLidarScans(const TempoLidar::LidarScanRequest& Request, const TResponseDelegate<TempoLidar::LidarScanSegment>& ResponseContinuation) const
+void UTempoSensorServiceSubsystem::StreamLidarScans(const TempoSensors::LidarScanRequest& Request, const TResponseDelegate<TempoSensors::LidarScanSegment>& ResponseContinuation) const
 {
 	check(GetWorld());
 
@@ -331,8 +330,8 @@ void UTempoSensorServiceSubsystem::StreamLidarScans(const TempoLidar::LidarScanR
 		}
 	}
 
-	const FString RequestedOwnerName(UTF8_TO_TCHAR(Request.owner_name().c_str()));
-	const FString RequestedSensorName(UTF8_TO_TCHAR(Request.sensor_name().c_str()));
+	const FString RequestedOwnerName(UTF8_TO_TCHAR(Request.owner().c_str()));
+	const FString RequestedSensorName(UTF8_TO_TCHAR(Request.sensor().c_str()));
 
 	// If owner name is not specified and only one owner has this sensor name, assume the client wants that owner
 	if (RequestedOwnerName.IsEmpty())

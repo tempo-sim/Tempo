@@ -11,29 +11,29 @@ Unreal uses centimeters, degrees, and a left-handed coordinate system natively. 
 Name matching via `TempoWorld`'s APIs is **not** case sensitive*. 
 
 ## World State
-TempoWorld supports querying the state of Actors in the World. This includes RPCs to get (right now) or stream (continuously) the state of Actors, where the state includes the name, transform, linear and angular velocity, 3D bounds, and the timestamp when the state was captured. For example:
+TempoWorld supports querying the state of Actors in the World. This includes RPCs to get (right now) or stream (continuously) the state of Actors, where the state includes the name, transform, 6-DoF velocity (linear m/s, angular rad/s), 3D bounds, and the timestamp when the state was captured. For example:
 ```
 import tempo.tempo_world as tw
 
 # Get MyActor's state right now
-tw.get_current_actor_state(actor_name="MyActor")
+tw.get_current_actor_state(actor="MyActor")
 # Start a stream of MyActor's state
-for state in tw.stream_actor_state(actor_name="MyActor"):
+for state in tw.stream_actor_state(actor="MyActor"):
 ```
 Often you may be interested in the states not of all Actors but only the ones near the one you are controlling or collecting data from. For this reason, TempoWorld includes RPCs to get or stream the states of all Actors *near* another Actor. For example:
 ```
 import tempo.tempo_world as tw
 
 # Get the state of all Actors within 50 meters of MyActor (including MyActor itself) right now
-tw.get_current_actor_states_near(near_actor_name="MyActor", search_radius=50.0)
+tw.get_current_actor_states_near(near_actor="MyActor", search_radius_m=50.0)
 # Start a stream of all such Actor states
-for state in tw.stream_actor_states_near(near_actor_name="MyActor", search_radius=50.0):
+for state in tw.stream_actor_states_near(near_actor="MyActor", search_radius_m=50.0):
 ```
 You may also be interested in knowing if one Actor has overlapped another. `TempoWorld` has a streaming RPC for this. For example:
 ```
 import tempo.tempo_world as tw
 
-for overlap_event in tw.stream_overlap_events(actor_name="MyActor"):
+for overlap_event in tw.stream_overlap_events(actor="MyActor"):
 ```
 
 ## Actor, Component, and Property Control
@@ -43,13 +43,13 @@ TempoWorld lets you control the state of the simulated world.
 To spawn an Actor you must specify its `type` (Unreal Class name). This can be any C++ or Blueprint class in the project. You may also specify a transform and, optionally, an other actor to which that transform is relative. Lastly, you can specify that the spawn should be "deferred", meaning the Actor will be created but left in an invisible, unfinished state where you can set its properties before finishing the spawn. For example:
 ```
 import tempo.tempo_world as tw
-import TempoScripting.Geometry_pb2 as Geometry
+import TempoCore.Geometry_pb2 as Geometry
 
 t = Geometry.transform()
 t.location.x = 1
 spawn_response = tw.spawn_actor(type="MyCPPOrBPActorClass", deferred=True, transform=t, relative_to_actor="SomeOtherActor")
 # The Actor exists but is invisible to all others - this is your chance to supply any custom properties
-finish_spawn_response = tw.finish_spawning_actor(actor=spawn_response.spawned_name)
+finish_spawn_response = tw.finish_spawning_actor(actor=spawn_response.name)
 ```
 Note that both the spawn actor and finish spawning actor RPCs return a transform. If spawning at the transform you provided would have resulted in a collision with another Actor Unreal will attempt to find a new transform nearby to spawn your new Actor. This is the transform that will be returned.
 
@@ -64,7 +64,7 @@ tw.destroy_actor(actor="ActorToDestroy")
 TempoWorld supports adding and removing components in the editor or at runtime. For example:
 ```
 import tempo.tempo_world as tw
-import TempoScripting.Geometry_pb2 as Geometry
+import TempoCore.Geometry_pb2 as Geometry
 
 t = Geometry.transform()
 tw.add_component(type="MyCPPOrBPComponentClass", actor="OwnerActor", name="OptionalCustomName", parent="OptionalParentComponent", transform=t, socket="OptionalSocket")
@@ -75,7 +75,7 @@ tw.destroy_component(actor="OwnerActor", component="MyComponent")
 TempoWorld supports setting transforms of Actors and Components. For example:
 ```
 import tempo.tempo_world as tw
-import TempoScripting.Geometry_pb2 as Geometry
+import TempoCore.Geometry_pb2 as Geometry
 
 t = Geometry.transform()
 tw.set_actor_transform(actor="MyActor", transform=t, relative_to_actor="OptionalRelativeActor")
@@ -124,7 +124,3 @@ TempoWorld does not yet support setting properties in maps or sets. Check back s
 
 > [!Warning]
 > While the values you set for rotators will be converted from radians to degrees, the values you set for floats and vectors will not be converted (so, these should be specified in centimeters if they represent distances). We don't feel it is safe to assume that these quantities always represent distances.
-
-## Map Query Service
-
-If your simulator includes a lane graph built with the ZoneGraph plugin, the map query service can get or stream the lane graph, including connectivity of lanes, as well as the accessibility of connected lanes (as determined by traffic controls).

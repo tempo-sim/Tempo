@@ -1,0 +1,14 @@
+[package]
+name = "movement_playground"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "movement_playground"
+path = "src/movement_playground.rs"
+
+[dependencies]
+tempo-sim = { path = "../../../TempoCore/Content/Rust/API" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+inquire = "0.7"
+clap = { version = "4", features = ["derive"] }

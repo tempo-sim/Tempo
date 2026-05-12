@@ -37,7 +37,7 @@ def get_rust_type(field):
     """Get the Rust type for a protobuf field."""
     if field.proto_type == gpd.FieldDescriptor.TYPE_MESSAGE:
         # Convert protobuf full name to Rust module path
-        # e.g., "TempoScripting.Empty" -> "crate::proto::tempo_scripting::Empty"
+        # e.g., "TempoCore.Empty" -> "crate::proto::tempo_core::Empty"
         parts = field.field_type.split('.')
         if len(parts) >= 2:
             module = pascal_to_snake(parts[0])

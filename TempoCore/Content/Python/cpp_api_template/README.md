@@ -13,7 +13,7 @@ include/
     error.h                   # TempoError
     result.h                  # Result<T>
     streaming.h               # ServerStream<T>
-    <service>.h               # one per gRPC service (greeter, tempo_sensors, ...)
+    <service>.h               # one per gRPC service (tempo_core, tempo_sensors, ...)
   proto/
     <Package>/<File>.pb.h     # protoc-generated message types
     <Package>/<File>.grpc.pb.h# protoc-generated service stubs (advanced use only)
@@ -52,12 +52,12 @@ proto/
 int main() {
     tempo::set_server("localhost", 10001);
 
-    auto result = tempo::greeter::greet("hello");
+    auto result = tempo::tempo_core::get_current_level_name();
     if (!result) {
-        std::fprintf(stderr, "greet failed: %s\n", result.error().what().c_str());
+        std::fprintf(stderr, "request failed: %s\n", result.error().what().c_str());
         return 1;
     }
-    std::printf("greeting: %s\n", result.value().message().c_str());
+    std::printf("current level: %s\n", result.value().level().c_str());
     return 0;
 }
 ```
@@ -66,11 +66,11 @@ int main() {
 
 ```cpp
 auto stream_result = tempo::tempo_sensors::stream_color_images(
-    /*owner_name=*/"Vehicle", /*sensor_name=*/"Cam0", /*compression_level=*/0);
+    /*owner=*/"Vehicle", /*sensor=*/"Cam0", /*compression_level=*/0);
 if (!stream_result) { /* handle error */ }
 auto stream = std::move(stream_result).value();
 
-TempoCamera::ColorImage frame;
+TempoSensors::ColorImage frame;
 while (stream.read(&frame)) {
     // process frame
 }

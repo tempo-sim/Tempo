@@ -2,12 +2,12 @@
 
 syntax = "proto3";
 
-import "TempoScripting/Empty.proto";
+import "TempoCore/Empty.proto";
 
 message PipelineResult {
   bool success = 1;
 }
 
 service TempoAgentsEditorService {
-  rpc RunTempoZoneGraphBuilderPipeline(TempoScripting.Empty) returns (PipelineResult);
+  rpc RunTempoZoneGraphBuilderPipeline(TempoCore.Empty) returns (PipelineResult);
 }
