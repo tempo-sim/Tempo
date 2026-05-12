@@ -36,6 +36,8 @@ namespace TempoWorld
 	class ActivateComponentRequest;
 	class DeactivateComponentRequest;
 	class CallFunctionRequest;
+	class SetPropertiesRequest;
+	class SetPropertiesResponse;
 }
 
 DECLARE_MULTICAST_DELEGATE(FTempoWorldControlServiceActivated);
@@ -82,6 +84,8 @@ public:
 	void GetComponentProperties(const TempoWorld::GetComponentPropertiesRequest& Request, const TResponseDelegate<TempoWorld::GetPropertiesResponse>& ResponseContinuation) const;
 
 	void CallObjectFunction(const TempoWorld::CallFunctionRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const;
+
+	void SetProperties(const TempoWorld::SetPropertiesRequest& Request, const TResponseDelegate<TempoWorld::SetPropertiesResponse>& ResponseContinuation) const;
 
 	void OnTempoWorldControlServiceActivated();
 

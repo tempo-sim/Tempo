@@ -127,6 +127,21 @@ class TempoMessageDescriptor(TempoObjectDescriptor):
         self.fields = []
         for field_descriptor in message_descriptor.fields_by_name.values():
             self.fields.append(self.FieldDescriptor(field_descriptor, type_mapping))
+        # Map oneof name -> list of {name, message_proto_full_name} for callers
+        # that emit batch wrappers, etc. Only TYPE_MESSAGE oneof variants are
+        # captured here (we don't have non-message oneofs in our protos).
+        self.oneofs = {}
+        for oneof_descriptor in message_descriptor.oneofs:
+            entries = []
+            for field_descriptor in oneof_descriptor.fields:
+                entries.append({
+                    "name": field_descriptor.name,
+                    "message_proto_full_name": (
+                        field_descriptor.message_type.full_name
+                        if field_descriptor.message_type else None
+                    ),
+                })
+            self.oneofs[oneof_descriptor.name] = entries
 
     def resolve_names(self, all_messages_and_enums):
         for field in self.fields:
