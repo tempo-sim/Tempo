@@ -13,7 +13,6 @@ class TEMPOCORE_API UTempoAngularVelocityInterface : public UInterface
 };
 
 // Implemented by movement components that can report their owner's angular velocity.
-// Lives in TempoCore so that consumers (e.g. TempoWorld) don't need to depend on TempoMovement.
 class TEMPOCORE_API ITempoAngularVelocityInterface
 {
 	GENERATED_BODY()

@@ -12,8 +12,10 @@ message MeasurementHeader {
   double capture_time_s = 2;
   // Sim time at which the measurement was placed on the wire, in seconds.
   double transmission_time_s = 3;
-  // Identifier of the sensor that produced the measurement (formatted "<owner>/<sensor>").
-  string sensor = 4;
+  // Name of the actor that owns the sensor that produced the measurement.
+  string owner = 4;
+  // Name of the sensor component on the owning actor that produced the measurement.
+  string sensor = 5;
   // World transform of the sensor at capture time.
-  TempoCore.Transform sensor_transform = 5;
+  TempoCore.Transform capture_transform = 6;
 }

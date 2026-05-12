@@ -1,38 +1,39 @@
-﻿using UnrealBuildTool;
+using UnrealBuildTool;
 
-public class TempoTimeROSBridge : ModuleRules
+public class TempoCoreROSBridge : ModuleRules
 {
-    public TempoTimeROSBridge(ReadOnlyTargetRules Target) : base(Target)
+    public TempoCoreROSBridge(ReadOnlyTargetRules Target) : base(Target)
     {
         PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
-        
+
+        OptimizeCode = CodeOptimization.Never;
+
         PublicDependencyModuleNames.AddRange(
             new string[]
             {
+                // Unreal
                 "Core",
+                // Tempo
+                "TempoCore",
+                "TempoROS",
+                "rclcpp",
             }
         );
 
         PrivateDependencyModuleNames.AddRange(
             new string[]
             {
-                // Unreal
                 "CoreUObject",
                 "Engine",
                 "Slate",
                 "SlateCore",
-                // Tempo
-                "TempoCore",
-                "TempoServiceROSBridge",
-                "TempoROS",
-                "rclcpp",
                 "TempoROSBridgeShared",
             }
         );
 
         if (Target.Platform == UnrealTargetPlatform.Win64)
         {
-            PrivateDefinitions.Add("ROSIDL_TYPESUPPORT_FASTRTPS_CPP_BUILDING_DLL_tempo_time_ros_bridge=1");
+            PrivateDefinitions.Add("ROSIDL_TYPESUPPORT_FASTRTPS_CPP_BUILDING_DLL_tempo_core_ros_bridge=1");
             PrivateDefinitions.Add("ROSIDL_TYPESUPPORT_CPP_BUILDING_DLL=1");
             PrivateDefinitions.Add("ROSIDL_TYPESUPPORT_INTROSPECTION_CPP_BUILDING_DLL=1");
         }

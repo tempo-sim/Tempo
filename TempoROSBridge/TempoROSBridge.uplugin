@@ -20,12 +20,7 @@
 			"LoadingPhase": "Default"
 		},
 		{
-			"Name": "TempoTimeROSBridge",
-			"Type": "Runtime",
-			"LoadingPhase": "Default"
-		},
-		{
-			"Name": "TempoServiceROSBridge",
+			"Name": "TempoCoreROSBridge",
 			"Type": "Runtime",
 			"LoadingPhase": "Default"
 		},

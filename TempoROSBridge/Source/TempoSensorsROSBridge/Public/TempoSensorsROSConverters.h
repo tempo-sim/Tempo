@@ -107,7 +107,7 @@ struct TImplicitToROSConverter<TempoSensors::ColorImage>: TToROSConverter<sensor
 		ToValue.data.assign(TempoValue.data().begin(), TempoValue.data().end());
 		ToValue.width = TempoValue.width_px();
 		ToValue.height = TempoValue.height_px();
-		ToValue.header.frame_id = TempoValue.header().sensor();
+		ToValue.header.frame_id = TempoValue.header().owner() + "/" + TempoValue.header().sensor();
 		ToValue.header.stamp.sec = static_cast<int>(TempoValue.header().capture_time_s());
 		ToValue.header.stamp.nanosec = 1e9 * (TempoValue.header().capture_time_s() - static_cast<int>(TempoValue.header().capture_time_s()));
 		ToValue.step = TempoValue.width_px() * 3;
@@ -126,7 +126,7 @@ struct TImplicitToROSConverter<TempoSensors::DepthImage>: TToROSConverter<sensor
 		FMemory::Memcpy(&ToValue.data[0], &TempoValue.depths_m()[0], TempoValue.depths_m().size() * 4);
 		ToValue.width = TempoValue.width_px();
 		ToValue.height = TempoValue.height_px();
-		ToValue.header.frame_id = TempoValue.header().sensor();
+		ToValue.header.frame_id = TempoValue.header().owner() + "/" + TempoValue.header().sensor();
 		ToValue.header.stamp.sec = static_cast<int>(TempoValue.header().capture_time_s());
 		ToValue.header.stamp.nanosec = 1e9 * (TempoValue.header().capture_time_s() - static_cast<int>(TempoValue.header().capture_time_s()));
 		ToValue.step = TempoValue.width_px() * 4;
@@ -144,7 +144,7 @@ struct TImplicitToROSConverter<TempoSensors::LabelImage>: TToROSConverter<sensor
 		ToValue.data.assign(TempoValue.data().begin(), TempoValue.data().end());
 		ToValue.width = TempoValue.width_px();
 		ToValue.height = TempoValue.height_px();
-		ToValue.header.frame_id = TempoValue.header().sensor();
+		ToValue.header.frame_id = TempoValue.header().owner() + "/" + TempoValue.header().sensor();
 		ToValue.header.stamp.sec = static_cast<int>(TempoValue.header().capture_time_s());
 		ToValue.header.stamp.nanosec = 1e9 * (TempoValue.header().capture_time_s() - static_cast<int>(TempoValue.header().capture_time_s()));
 		ToValue.step = TempoValue.width_px();

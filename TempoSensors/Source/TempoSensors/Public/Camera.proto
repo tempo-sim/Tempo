@@ -4,15 +4,6 @@ syntax = "proto3";
 
 import "TempoSensors/Common.proto";
 
-enum ImageCompressionLevel {
-  ICL_UNKNOWN = 0;
-  ICL_MIN = 1;
-  ICL_LOW = 2;
-  ICL_MID = 3;
-  ICL_HIGH = 4;
-  ICL_MAX = 5;
-}
-
 enum ColorEncoding {
   CE_UNKNOWN = 0;
   CE_BGR8 = 1;
@@ -25,7 +16,7 @@ message ColorImage {
   uint32 width_px = 2;
   // Image height in pixels.
   uint32 height_px = 3;
-  // Raw bytes of an encoded image file (PNG/JPEG/etc depending on compression).
+  // Raw bytes of an encoded image file.
   bytes data = 4;
   ColorEncoding encoding = 5;
 }
@@ -79,7 +70,6 @@ message ColorImageRequest {
   string owner = 1;
   // Name of the sensor component on the owning actor.
   string sensor = 2;
-  ImageCompressionLevel compression_level = 3;
 }
 
 message DepthImageRequest {

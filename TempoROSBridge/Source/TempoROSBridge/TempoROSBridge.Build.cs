@@ -19,9 +19,8 @@ public class TempoROSBridge : ModuleRules
 				// Tempo
 				"TempoSensorsROSBridge",
 				"TempoGeographicROSBridge",
-				"TempoTimeROSBridge",
+				"TempoCoreROSBridge",
 				"TempoMovementROSBridge",
-				"TempoServiceROSBridge",
 			}
 			);
 		

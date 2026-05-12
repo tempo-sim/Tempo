@@ -7,7 +7,7 @@
 #include "TempoTimeROSBridgeSubsystem.generated.h"
 
 UCLASS()
-class TEMPOTIMEROSBRIDGE_API UTempoTimeROSBridgeSubsystem : public UTempoTimeServiceSubsystem
+class TEMPOCOREROSBRIDGE_API UTempoTimeROSBridgeSubsystem : public UTempoTimeServiceSubsystem
 {
 	GENERATED_BODY()
 public:

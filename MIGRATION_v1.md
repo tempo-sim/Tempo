@@ -214,7 +214,7 @@ v1 also normalizes naming across every `.proto`. This is a wire-breaking change 
   - `ImageCompressionLevel` → `ICL_` (`ICL_UNKNOWN`, `ICL_MIN`, `ICL_LOW`, `ICL_MID`, `ICL_HIGH`, `ICL_MAX`)
   - `LaneRelationship` → `LR_`, `LaneAccessibility` → `LA_`, `MoveToResult` → `MTR_`
 - **Identifier fields drop the redundant `_name` suffix on inputs.** Comments carry the "this is a name lookup" hint instead. So `OverlapEventRequest.actor_name` → `actor`, `ActorStateRequest.actor_name` → `actor`, `ActorStatesNearRequest.near_actor_name` → `near_actor`, `VehicleCommandRequest.vehicle_name` → `vehicle`, `PawnMoveToLocationRequest.name` → `pawn`, sensor `*Request.owner_name`/`sensor_name` → `owner`/`sensor`.
-- **Descriptor/response fields drop redundant prefixes.** `SpawnActorResponse.spawned_name`/`spawned_transform` → `name`/`transform`. `MeasurementHeader.sensor_name` → `sensor`. `GetLabeledActorTypesResponse.actor_types` → `types`. `*_type` fields (`actor_type`, `component_type`, `property_type`) are kept as-is — a bare `type` would generate `r#type` in prost-output Rust, so the qualified name is friendlier to Rust callers.
+- **Descriptor/response fields drop redundant prefixes.** `SpawnActorResponse.spawned_name`/`spawned_transform` → `name`/`transform`. `MeasurementHeader.sensor_name` (formerly a packed `"<owner>/<sensor>"` string) is split into separate `owner` and `sensor` fields that mirror the request shape, and `MeasurementHeader.sensor_transform` → `capture_transform` (it's the sensor's pose at capture time, paired with `capture_time_s`). `GetLabeledActorTypesResponse.actor_types` → `types`. `*_type` fields (`actor_type`, `component_type`, `property_type`) are kept as-is — a bare `type` would generate `r#type` in prost-output Rust, so the qualified name is friendlier to Rust callers.
 - **`OverlapEventResponse` is the deliberate exception.** It keeps the `_actor_name` suffix because component-level overlap fields may be added later — `overlapped_actor_name`, `overlapping_actor_name`, `overlapping_actor_type` (the v1 `other_actor_*` prefix is renamed to `overlapping_actor_*`).
 - **`relative_to_actor` is kept as-is** in `SpawnActorRequest` and `SetActorTransformRequest` — the `_actor` qualifier is meaningful and may grow a `relative_to_component` sibling.
 - **Units are encoded in field names.** Distances are meters, angles are radians, time is seconds, pixels is pixels, hertz is hertz, degrees is degrees. The suffixes used: `_m`, `_rad`, `_s`, `_px`, `_hz`, `_deg`.
@@ -263,7 +263,8 @@ v1 also normalizes naming across every `.proto`. This is a wire-breaking change 
 | `MovementControl.PawnMoveToLocationRequest` | `name` | `pawn` |
 | `Sensors.SensorDescriptor` | `rate` | `rate_hz` |
 | `Camera.*ImageRequest`, `Lidar.LidarScanRequest`, `Camera.BoundingBoxesRequest` | `owner_name`, `sensor_name` | `owner`, `sensor` |
-| `Common.MeasurementHeader` | `sensor_name` | `sensor` |
+| `Common.MeasurementHeader` | `sensor_name` (packed `"<owner>/<sensor>"`) | split into `owner`, `sensor` |
+| `Common.MeasurementHeader` | `sensor_transform` | `capture_transform` |
 | `Labels.GetLabeledActorTypesResponse` | `actor_types` | `types` |
 | `Labels.InstanceSemanticIdPair` | `InstanceId`, `SemanticId` | `instance_id`, `semantic_id` |
 | `Geometry.Box` | `Min`, `Max` | `min`, `max` |
@@ -285,6 +286,9 @@ Python (and any kwarg-driven helper) — the kwarg names mirror proto fields:
 -     if Sensors.COLOR_IMAGE in s.measurement_types: ...
 + for s in available_sensors_response.available_sensors:
 +     if Sensors.MT_COLOR_IMAGE in s.measurement_types: ...
+
+- owner, sensor = image.header.sensor.split("/", 1)
++ owner, sensor = image.header.owner, image.header.sensor
 ```
 
 Rust (prost generates `MtColorImage`, `CeRgb8`, etc. — the prefix becomes part of the variant name) and field accessors track the new proto names (e.g. `img.width_px`, `seg.distances_m`, `state.timestamp_s`).

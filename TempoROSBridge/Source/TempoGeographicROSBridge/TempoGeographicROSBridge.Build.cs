@@ -28,7 +28,7 @@ public class TempoGeographicROSBridge : ModuleRules
                 // Tempo
                 "TempoGeographic",
                 "TempoCore",
-                "TempoServiceROSBridge",
+                "TempoCoreROSBridge",
                 "TempoROS",
                 "rclcpp",
                 "TempoROSBridgeShared",

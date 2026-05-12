@@ -12,7 +12,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE(FTeleportMovementEvent);
  * A movement component that simply monitors the movement state of an Actor who is being controlled from elsewhere.
 */
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TEMPOAGENTS_API UTeleportMovementComponent : public UPawnMovementComponent
+class TEMPOMOVEMENT_API UTeleportMovementComponent : public UPawnMovementComponent
 {
 	GENERATED_BODY()
 

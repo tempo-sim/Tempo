@@ -25,15 +25,16 @@ void FTextureRead::ExtractMeasurementHeader(float TransmissionTime, TempoSensors
 	MeasurementHeaderOut->set_sequence_id(SequenceId);
 	MeasurementHeaderOut->set_capture_time_s(CaptureTime);
 	MeasurementHeaderOut->set_transmission_time_s(TransmissionTime);
-	MeasurementHeaderOut->set_sensor(TCHAR_TO_UTF8(*FString::Printf(TEXT("%s/%s"), *OwnerName, *SensorName)));
+	MeasurementHeaderOut->set_owner(TCHAR_TO_UTF8(*OwnerName));
+	MeasurementHeaderOut->set_sensor(TCHAR_TO_UTF8(*SensorName));
 	const FVector SensorLocation = QuantityConverter<CM2M, L2R>::Convert(SensorTransform.GetLocation());
 	const FRotator SensorRotation = QuantityConverter<Deg2Rad, L2R>::Convert(SensorTransform.Rotator());
-	MeasurementHeaderOut->mutable_sensor_transform()->mutable_location()->set_x(SensorLocation.X);
-	MeasurementHeaderOut->mutable_sensor_transform()->mutable_location()->set_y(SensorLocation.Y);
-	MeasurementHeaderOut->mutable_sensor_transform()->mutable_location()->set_z(SensorLocation.Z);
-	MeasurementHeaderOut->mutable_sensor_transform()->mutable_rotation()->set_p(SensorRotation.Pitch);
-	MeasurementHeaderOut->mutable_sensor_transform()->mutable_rotation()->set_r(SensorRotation.Roll);
-	MeasurementHeaderOut->mutable_sensor_transform()->mutable_rotation()->set_y(SensorRotation.Yaw);
+	MeasurementHeaderOut->mutable_capture_transform()->mutable_location()->set_x(SensorLocation.X);
+	MeasurementHeaderOut->mutable_capture_transform()->mutable_location()->set_y(SensorLocation.Y);
+	MeasurementHeaderOut->mutable_capture_transform()->mutable_location()->set_z(SensorLocation.Z);
+	MeasurementHeaderOut->mutable_capture_transform()->mutable_rotation()->set_p(SensorRotation.Pitch);
+	MeasurementHeaderOut->mutable_capture_transform()->mutable_rotation()->set_r(SensorRotation.Roll);
+	MeasurementHeaderOut->mutable_capture_transform()->mutable_rotation()->set_y(SensorRotation.Yaw);
 }
 
 UTempoSceneCaptureComponent2D::UTempoSceneCaptureComponent2D()
