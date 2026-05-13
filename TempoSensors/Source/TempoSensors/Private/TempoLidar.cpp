@@ -174,6 +174,19 @@ void UTempoLidar::AllocateTileViewState(FTempoLidarTile& Tile)
 	}
 }
 
+void UTempoLidar::AddReferencedObjects(UObject* InThis, FReferenceCollector& Collector)
+{
+	UTempoLidar* This = CastChecked<UTempoLidar>(InThis);
+	for (FTempoLidarTile& Tile : This->Tiles)
+	{
+		if (FSceneViewStateInterface* Ref = Tile.ViewState.GetReference())
+		{
+			Ref->AddReferencedObjects(Collector);
+		}
+	}
+	Super::AddReferencedObjects(InThis, Collector);
+}
+
 void UTempoLidar::DeactivateTile(FTempoLidarTile& Tile)
 {
 	Tile.bActive = false;
