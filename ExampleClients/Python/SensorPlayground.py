@@ -198,6 +198,8 @@ def measurement_type_string(type):
         return "Label"
     elif type == Sensors.MT_LIDAR_SCAN:
         return "PointCloud"
+    elif type == Sensors.MT_VIDEO:
+        return "Video"
 
 
 async def randomize_camera_post_process(camera_name, owner):
@@ -405,6 +407,8 @@ async def flow_start_stream(sensor_streams, display_scale):
             task = asyncio.create_task(tiu.stream_label_images(sensor.name, sensor.owner, display_scale))
         if measurement_type == Sensors.MT_LIDAR_SCAN:
             task = asyncio.create_task(tlu.stream_lidar_scans(sensor.name, sensor.owner, "Intensity"))
+        if measurement_type == Sensors.MT_VIDEO:
+            task = asyncio.create_task(tiu.stream_video_images(sensor.name, sensor.owner, display_scale))
 
         if task is not None:
             def on_stream_done(t, stream_key=key):

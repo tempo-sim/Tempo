@@ -31,6 +31,8 @@ using ColorImage = TempoSensors::ColorImage;
 using DepthImage = TempoSensors::DepthImage;
 using LabelImage = TempoSensors::LabelImage;
 using LidarScanSegment = TempoSensors::LidarScanSegment;
+using VideoRequest = TempoSensors::VideoRequest;
+using VideoFrame = TempoSensors::VideoFrame;
 
 void UTempoSensorServiceSubsystem::RegisterServices(FTempoServer& Server)
 {
@@ -40,7 +42,8 @@ void UTempoSensorServiceSubsystem::RegisterServices(FTempoServer& Server)
 		StreamingRequestHandler(&SensorAsyncService::RequestStreamDepthImages, &UTempoSensorServiceSubsystem::StreamDepthImages),
 		StreamingRequestHandler(&SensorAsyncService::RequestStreamLabelImages, &UTempoSensorServiceSubsystem::StreamLabelImages),
 		StreamingRequestHandler(&SensorAsyncService::RequestStreamBoundingBoxes, &UTempoSensorServiceSubsystem::StreamBoundingBoxes),
-		StreamingRequestHandler(&SensorAsyncService::RequestStreamLidarScans, &UTempoSensorServiceSubsystem::StreamLidarScans)
+		StreamingRequestHandler(&SensorAsyncService::RequestStreamLidarScans, &UTempoSensorServiceSubsystem::StreamLidarScans),
+		StreamingRequestHandler(&SensorAsyncService::RequestStreamVideo, &UTempoSensorServiceSubsystem::StreamVideo)
 		);
 }
 
@@ -173,6 +176,10 @@ TempoSensors::MeasurementType ToProtoMeasurementType(EMeasurementType ImageType)
 	case EMeasurementType::BOUNDING_BOXES:
 		{
 			return TempoSensors::MT_BOUNDING_BOXES;
+		}
+	case EMeasurementType::VIDEO:
+		{
+			return TempoSensors::MT_VIDEO;
 		}
 	default:
 		{
@@ -315,6 +322,11 @@ void UTempoSensorServiceSubsystem::StreamLabelImages(const TempoSensors::LabelIm
 void UTempoSensorServiceSubsystem::StreamBoundingBoxes(const TempoSensors::BoundingBoxesRequest& Request, const TResponseDelegate<TempoSensors::BoundingBoxes>& ResponseContinuation) const
 {
 	RequestImages<TempoSensors::BoundingBoxesRequest, TempoSensors::BoundingBoxes>(Request, ResponseContinuation);
+}
+
+void UTempoSensorServiceSubsystem::StreamVideo(const TempoSensors::VideoRequest& Request, const TResponseDelegate<TempoSensors::VideoFrame>& ResponseContinuation) const
+{
+	RequestImages<TempoSensors::VideoRequest, TempoSensors::VideoFrame>(Request, ResponseContinuation);
 }
 
 void UTempoSensorServiceSubsystem::StreamLidarScans(const TempoSensors::LidarScanRequest& Request, const TResponseDelegate<TempoSensors::LidarScanSegment>& ResponseContinuation) const
