@@ -229,8 +229,26 @@ void FTempoCameraVideoEncoder::EncodeRenderTarget_RenderThread(UTextureRenderTar
 	const bool bForceKeyframe = (Impl->FrameCount % KFI) == 0;
 
 	// Build (or reuse) a staging resource and CopyFrom the camera's RT into it, then submit the
-	// staging resource. On Mac the CPUReadback flag is mandatory: the RHI->Metal resource transform
-	// requires it. On Windows/Linux it doesn't hurt and gives us a stable owned input texture.
+	// staging resource. The required ETextureCreateFlags differ per platform:
+	//   - Mac (VideoToolbox via Metal): CPUReadback. The RHI->Metal resource transform asserts on it.
+	//   - Linux (NVENC via Vulkan->CUDA interop): External. NVCodecs imports the Vulkan image via
+	//     VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT, then cuExternalMemoryGetMappedMipmappedArray
+	//     it for the encoder. The External flag is what tells the RHI to allocate the image's
+	//     memory with VK_EXPORT_MEMORY_ALLOCATE_INFO + use VK_IMAGE_TILING_OPTIMAL. Without it,
+	//     CUDA reports "Failed to bind mipmappedArray".
+	//   - Win64 (NVENC/AMF via D3D shared handle): Shared. Needed so the encoder can open the same
+	//     resource on its own device.
+	constexpr ETextureCreateFlags StagingFlags =
+#if PLATFORM_APPLE
+		ETextureCreateFlags::CPUReadback;
+#elif PLATFORM_LINUX
+		ETextureCreateFlags::External;
+#elif PLATFORM_WINDOWS
+		ETextureCreateFlags::Shared;
+#else
+		ETextureCreateFlags::None;
+#endif
+
 	const TSharedRef<FAVDevice> EncoderDevice = Impl->Encoder->GetDevice().ToSharedRef();
 	const FVideoDescriptor Desc = FVideoResourceRHI::GetDescriptorFrom(EncoderDevice, Texture);
 	if (!Impl->StagingResource.IsValid()
@@ -239,7 +257,7 @@ void FTempoCameraVideoEncoder::EncodeRenderTarget_RenderThread(UTextureRenderTar
 		Impl->StagingResource = FVideoResourceRHI::Create(
 			EncoderDevice,
 			Desc,
-			ETextureCreateFlags::CPUReadback);
+			StagingFlags);
 		if (!Impl->StagingResource.IsValid())
 		{
 			UE_LOG(LogTempoSensors, Warning, TEXT("FTempoCameraVideoEncoder: failed to allocate staging FVideoResourceRHI."));
