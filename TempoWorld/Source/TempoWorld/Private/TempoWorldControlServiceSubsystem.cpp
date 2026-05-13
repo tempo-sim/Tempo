@@ -34,11 +34,17 @@ using GetComponentPropertiesRequest = TempoWorld::GetComponentPropertiesRequest;
 using GetPropertiesResponse = TempoWorld::GetPropertiesResponse;
 using SetBoolPropertyRequest = TempoWorld::SetBoolPropertyRequest;
 using SetIntPropertyRequest = TempoWorld::SetIntPropertyRequest;
+using SetInt64PropertyRequest = TempoWorld::SetInt64PropertyRequest;
 using SetFloatPropertyRequest = TempoWorld::SetFloatPropertyRequest;
 using SetStringPropertyRequest = TempoWorld::SetStringPropertyRequest;
 using SetEnumPropertyRequest = TempoWorld::SetEnumPropertyRequest;
 using SetVectorPropertyRequest = TempoWorld::SetVectorPropertyRequest;
+using SetVector2DPropertyRequest = TempoWorld::SetVector2DPropertyRequest;
+using SetIntVectorPropertyRequest = TempoWorld::SetIntVectorPropertyRequest;
+using SetIntPointPropertyRequest = TempoWorld::SetIntPointPropertyRequest;
 using SetRotatorPropertyRequest = TempoWorld::SetRotatorPropertyRequest;
+using SetQuatPropertyRequest = TempoWorld::SetQuatPropertyRequest;
+using SetTransformPropertyRequest = TempoWorld::SetTransformPropertyRequest;
 using SetColorPropertyRequest = TempoWorld::SetColorPropertyRequest;
 using SetClassPropertyRequest = TempoWorld::SetClassPropertyRequest;
 using SetAssetPropertyRequest = TempoWorld::SetAssetPropertyRequest;
@@ -48,11 +54,22 @@ using SetBoolArrayPropertyRequest = TempoWorld::SetBoolArrayPropertyRequest;
 using SetStringArrayPropertyRequest = TempoWorld::SetStringArrayPropertyRequest;
 using SetEnumArrayPropertyRequest = TempoWorld::SetEnumArrayPropertyRequest;
 using SetIntArrayPropertyRequest = TempoWorld::SetIntArrayPropertyRequest;
+using SetInt64ArrayPropertyRequest = TempoWorld::SetInt64ArrayPropertyRequest;
 using SetFloatArrayPropertyRequest = TempoWorld::SetFloatArrayPropertyRequest;
 using SetClassArrayPropertyRequest = TempoWorld::SetClassArrayPropertyRequest;
 using SetAssetArrayPropertyRequest = TempoWorld::SetAssetArrayPropertyRequest;
 using SetActorArrayPropertyRequest = TempoWorld::SetActorArrayPropertyRequest;
 using SetComponentArrayPropertyRequest = TempoWorld::SetComponentArrayPropertyRequest;
+using SetBoolSetPropertyRequest = TempoWorld::SetBoolSetPropertyRequest;
+using SetStringSetPropertyRequest = TempoWorld::SetStringSetPropertyRequest;
+using SetEnumSetPropertyRequest = TempoWorld::SetEnumSetPropertyRequest;
+using SetIntSetPropertyRequest = TempoWorld::SetIntSetPropertyRequest;
+using SetInt64SetPropertyRequest = TempoWorld::SetInt64SetPropertyRequest;
+using SetFloatSetPropertyRequest = TempoWorld::SetFloatSetPropertyRequest;
+using SetClassSetPropertyRequest = TempoWorld::SetClassSetPropertyRequest;
+using SetAssetSetPropertyRequest = TempoWorld::SetAssetSetPropertyRequest;
+using SetActorSetPropertyRequest = TempoWorld::SetActorSetPropertyRequest;
+using SetComponentSetPropertyRequest = TempoWorld::SetComponentSetPropertyRequest;
 using CallFunctionRequest = TempoWorld::CallFunctionRequest;
 
 FTempoWorldControlServiceActivated UTempoWorldControlServiceSubsystem::TempoWorldControlServiceActivated;
@@ -103,11 +120,17 @@ void UTempoWorldControlServiceSubsystem::RegisterServices(FTempoServer& Server)
 		SimpleRequestHandler(&WorldControlAsyncService::RequestDeactivateComponent, &UTempoWorldControlServiceSubsystem::DeactivateComponent),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetBoolProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetBoolPropertyRequest>),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetIntProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetIntPropertyRequest>),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestSetInt64Property, &UTempoWorldControlServiceSubsystem::SetProperty<SetInt64PropertyRequest>),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetFloatProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetFloatPropertyRequest>),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetStringProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetStringPropertyRequest>),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetEnumProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetEnumPropertyRequest>),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetVectorProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetVectorPropertyRequest>),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestSetVector2DProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetVector2DPropertyRequest>),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestSetIntVectorProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetIntVectorPropertyRequest>),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestSetIntPointProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetIntPointPropertyRequest>),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetRotatorProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetRotatorPropertyRequest>),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestSetQuatProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetQuatPropertyRequest>),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestSetTransformProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetTransformPropertyRequest>),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetColorProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetColorPropertyRequest>),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetClassProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetClassPropertyRequest>),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetAssetProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetAssetPropertyRequest>),
@@ -117,11 +140,22 @@ void UTempoWorldControlServiceSubsystem::RegisterServices(FTempoServer& Server)
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetStringArrayProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetStringArrayPropertyRequest>),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetEnumArrayProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetEnumArrayPropertyRequest>),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetIntArrayProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetIntArrayPropertyRequest>),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestSetInt64ArrayProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetInt64ArrayPropertyRequest>),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetFloatArrayProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetFloatArrayPropertyRequest>),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetClassArrayProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetClassArrayPropertyRequest>),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetAssetArrayProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetAssetArrayPropertyRequest>),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetActorArrayProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetActorArrayPropertyRequest>),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetComponentArrayProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetComponentArrayPropertyRequest>),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestSetBoolSetProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetBoolSetPropertyRequest>),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestSetStringSetProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetStringSetPropertyRequest>),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestSetEnumSetProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetEnumSetPropertyRequest>),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestSetIntSetProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetIntSetPropertyRequest>),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestSetInt64SetProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetInt64SetPropertyRequest>),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestSetFloatSetProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetFloatSetPropertyRequest>),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestSetClassSetProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetClassSetPropertyRequest>),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestSetAssetSetProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetAssetSetPropertyRequest>),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestSetActorSetProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetActorSetPropertyRequest>),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestSetComponentSetProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetComponentSetPropertyRequest>),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestCallFunction, &UTempoWorldControlServiceSubsystem::CallObjectFunction)
 	);
 }
@@ -176,15 +210,17 @@ void UTempoWorldControlServiceSubsystem::SpawnActor(const SpawnActorRequest& Req
 
 	if (Request.actor_type().empty())
 	{
-		ResponseContinuation.ExecuteIfBound(SpawnActorResponse(), grpc::Status(grpc::FAILED_PRECONDITION, "Type must be specified"));
+		ResponseContinuation.ExecuteIfBound(SpawnActorResponse(), grpc::Status(grpc::FAILED_PRECONDITION, "actor_type must be specified in SpawnActor request"));
 		return;
 	}
 
-	UClass* Class = GetSubClassWithName<AActor>(UTF8_TO_TCHAR(Request.actor_type().c_str()));
+	const FString ActorTypeName(UTF8_TO_TCHAR(Request.actor_type().c_str()));
+	UClass* Class = GetSubClassWithName<AActor>(ActorTypeName);
 
 	if (!Class)
 	{
-		ResponseContinuation.ExecuteIfBound(SpawnActorResponse(), grpc::Status(grpc::NOT_FOUND, "No class with that name found"));
+		const FString ErrorMsg = FString::Printf(TEXT("No actor class with name '%s' found (must be a subclass of AActor)"), *ActorTypeName);
+		ResponseContinuation.ExecuteIfBound(SpawnActorResponse(), grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 
@@ -194,10 +230,12 @@ void UTempoWorldControlServiceSubsystem::SpawnActor(const SpawnActorRequest& Req
 
 	if (!Request.relative_to_actor().empty())
 	{
-		const AActor* RelativeToActor = GetActorWithName(GetWorld(), UTF8_TO_TCHAR(Request.relative_to_actor().c_str()));
+		const FString RelativeToActorName(UTF8_TO_TCHAR(Request.relative_to_actor().c_str()));
+		const AActor* RelativeToActor = GetActorWithName(GetWorld(), RelativeToActorName);
 		if (!RelativeToActor)
 		{
-			ResponseContinuation.ExecuteIfBound(SpawnActorResponse(), grpc::Status(grpc::FAILED_PRECONDITION, "Failed to find relative to actor"));
+			const FString ErrorMsg = FString::Printf(TEXT("Failed to find relative_to_actor '%s' for SpawnActor request"), *RelativeToActorName);
+			ResponseContinuation.ExecuteIfBound(SpawnActorResponse(), grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 			return;
 		}
 		SpawnTransform = SpawnTransform * RelativeToActor->GetActorTransform();
@@ -213,7 +251,8 @@ void UTempoWorldControlServiceSubsystem::SpawnActor(const SpawnActorRequest& Req
 
 	if (!SpawnedActor)
 	{
-		ResponseContinuation.ExecuteIfBound(SpawnActorResponse(), grpc::Status(grpc::ABORTED, "Failed to spawn actor"));
+		const FString ErrorMsg = FString::Printf(TEXT("Failed to spawn actor of type '%s' at location (%f, %f, %f)"), *ActorTypeName, SpawnLocation.X, SpawnLocation.Y, SpawnLocation.Z);
+		ResponseContinuation.ExecuteIfBound(SpawnActorResponse(), grpc::Status(grpc::ABORTED, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 
@@ -233,20 +272,23 @@ void UTempoWorldControlServiceSubsystem::FinishSpawningActor(const FinishSpawnin
 {
 	if (Request.actor().empty())
 	{
-		ResponseContinuation.ExecuteIfBound(FinishSpawningActorResponse(), grpc::Status(grpc::FAILED_PRECONDITION, "Actor must be specified"));
+		ResponseContinuation.ExecuteIfBound(FinishSpawningActorResponse(), grpc::Status(grpc::FAILED_PRECONDITION, "actor must be specified in FinishSpawningActor request"));
 		return;
 	}
 
-	AActor* Actor = GetActorWithName(GetWorld(), UTF8_TO_TCHAR(Request.actor().c_str()));
+	const FString ActorName(UTF8_TO_TCHAR(Request.actor().c_str()));
+	AActor* Actor = GetActorWithName(GetWorld(), ActorName);
 	if (!Actor)
 	{
-		ResponseContinuation.ExecuteIfBound(FinishSpawningActorResponse(), grpc::Status(grpc::FAILED_PRECONDITION, "Failed to find actor"));
+		const FString ErrorMsg = FString::Printf(TEXT("Failed to find actor '%s' for FinishSpawningActor request"), *ActorName);
+		ResponseContinuation.ExecuteIfBound(FinishSpawningActorResponse(), grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 	const FTransform* SpawnTransform = DeferredSpawnTransforms.Find(Actor);
 	if (!SpawnTransform)
 	{
-		ResponseContinuation.ExecuteIfBound(FinishSpawningActorResponse(), grpc::Status(grpc::FAILED_PRECONDITION, "Failed to find spawn transform for actor"));
+		const FString ErrorMsg = FString::Printf(TEXT("No deferred spawn transform recorded for actor '%s' (was the actor spawned with deferred=true?)"), *ActorName);
+		ResponseContinuation.ExecuteIfBound(FinishSpawningActorResponse(), grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 	
@@ -264,14 +306,16 @@ void UTempoWorldControlServiceSubsystem::DestroyActor(const TempoWorld::DestroyA
 {
 	if (Request.actor().empty())
 	{
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Actor must be specified"));
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "actor must be specified in DestroyActor request"));
 		return;
 	}
 
-	AActor* Actor = GetActorWithName(GetWorld(), UTF8_TO_TCHAR(Request.actor().c_str()));
+	const FString ActorName(UTF8_TO_TCHAR(Request.actor().c_str()));
+	AActor* Actor = GetActorWithName(GetWorld(), ActorName);
 	if (!Actor)
 	{
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Failed to find actor"));
+		const FString ErrorMsg = FString::Printf(TEXT("Failed to find actor '%s' for DestroyActor request"), *ActorName);
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 	Actor->Destroy();
@@ -285,56 +329,65 @@ void UTempoWorldControlServiceSubsystem::AddComponent(const AddComponentRequest&
 
 	if (Request.component_type().empty())
 	{
-		ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::FAILED_PRECONDITION, "Type must be specified"));
+		ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::FAILED_PRECONDITION, "component_type must be specified in AddComponent request"));
 		return;
 	}
 
 	if (Request.actor().empty())
 	{
-		ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::FAILED_PRECONDITION, "Actor must be specified"));
+		ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::FAILED_PRECONDITION, "actor must be specified in AddComponent request"));
 		return;
 	}
 
-	AActor* Actor = GetActorWithName(GetWorld(), UTF8_TO_TCHAR(Request.actor().c_str()));
+	const FString ActorName(UTF8_TO_TCHAR(Request.actor().c_str()));
+	AActor* Actor = GetActorWithName(GetWorld(), ActorName);
 	if (!Actor)
 	{
-		ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::FAILED_PRECONDITION, "Failed to find actor"));
+		const FString ErrorMsg = FString::Printf(TEXT("Failed to find actor '%s' for AddComponent request"), *ActorName);
+		ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 
-	UClass* Class = GetSubClassWithName<UActorComponent>(UTF8_TO_TCHAR(Request.component_type().c_str()));
+	const FString ComponentTypeName(UTF8_TO_TCHAR(Request.component_type().c_str()));
+	UClass* Class = GetSubClassWithName<UActorComponent>(ComponentTypeName);
 	if (!Class)
 	{
-		ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::NOT_FOUND, "No component class with that name found"));
+		const FString ErrorMsg = FString::Printf(TEXT("No component class with name '%s' found (must be a subclass of UActorComponent)"), *ComponentTypeName);
+		ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 
 	const bool bIsClassSceneComponent = Class->IsChildOf<USceneComponent>();
 	if (Request.has_transform() && !bIsClassSceneComponent)
 	{
-		ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::NOT_FOUND, "Transform specified but class is not a scene component"));
+		const FString ErrorMsg = FString::Printf(TEXT("Transform was specified but component class '%s' is not a USceneComponent subclass"), *ComponentTypeName);
+		ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 
 	if (!Request.parent().empty() && !bIsClassSceneComponent)
 	{
-		ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::NOT_FOUND, "Parent specified but class is not a scene component"));
+		const FString ErrorMsg = FString::Printf(TEXT("Parent was specified but component class '%s' is not a USceneComponent subclass"), *ComponentTypeName);
+		ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 
 	if (!Request.socket().empty() && !bIsClassSceneComponent)
 	{
-		ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::NOT_FOUND, "Socket specified but class is not a scene component"));
+		const FString ErrorMsg = FString::Printf(TEXT("Socket was specified but component class '%s' is not a USceneComponent subclass"), *ComponentTypeName);
+		ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 
 	USceneComponent* ParentComponent = Actor->GetRootComponent();
 	if (!Request.parent().empty())
 	{
-		ParentComponent = GetComponentWithName<USceneComponent>(Actor, UTF8_TO_TCHAR(Request.parent().c_str()));
+		const FString ParentName(UTF8_TO_TCHAR(Request.parent().c_str()));
+		ParentComponent = GetComponentWithName<USceneComponent>(Actor, ParentName);
 		if (!ParentComponent)
 		{
-			ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::FAILED_PRECONDITION, "Parent not found"));
+			const FString ErrorMsg = FString::Printf(TEXT("Parent scene component '%s' not found on actor '%s'"), *ParentName, *ActorName);
+			ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 			return;
 		}
 	}
@@ -345,7 +398,8 @@ void UTempoWorldControlServiceSubsystem::AddComponent(const AddComponentRequest&
 		Socket = FName(UTF8_TO_TCHAR(Request.socket().c_str()));
 		if (!ParentComponent->DoesSocketExist(Socket))
 		{
-			ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::FAILED_PRECONDITION, "Socket not found on parent"));
+			const FString ErrorMsg = FString::Printf(TEXT("Socket '%s' not found on parent component '%s' (actor '%s')"), *Socket.ToString(), *ParentComponent->GetName(), *ActorName);
+			ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 			return;
 		}
 	}
@@ -387,27 +441,31 @@ void UTempoWorldControlServiceSubsystem::DestroyComponent(const TempoWorld::Dest
 {
 	if (Request.actor().empty())
 	{
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Actor must be specified"));
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "actor must be specified in DestroyComponent request"));
 		return;
 	}
 
 	if (Request.component().empty())
 	{
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Component must be specified"));
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "component must be specified in DestroyComponent request"));
 		return;
 	}
 
-	AActor* Actor = GetActorWithName(GetWorld(), UTF8_TO_TCHAR(Request.actor().c_str()));
+	const FString ActorName(UTF8_TO_TCHAR(Request.actor().c_str()));
+	AActor* Actor = GetActorWithName(GetWorld(), ActorName);
 	if (!Actor)
 	{
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, "Failed to find actor"));
+		const FString ErrorMsg = FString::Printf(TEXT("Failed to find actor '%s' for DestroyComponent request"), *ActorName);
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 
-	UActorComponent* Component = GetComponentWithName(Actor, UTF8_TO_TCHAR(Request.component().c_str()));
+	const FString ComponentName(UTF8_TO_TCHAR(Request.component().c_str()));
+	UActorComponent* Component = GetComponentWithName(Actor, ComponentName);
 	if (!Component)
 	{
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, "Failed to find component"));
+		const FString ErrorMsg = FString::Printf(TEXT("Failed to find component '%s' on actor '%s' for DestroyComponent request"), *ComponentName, *ActorName);
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 
@@ -428,14 +486,16 @@ void UTempoWorldControlServiceSubsystem::SetActorTransform(const TempoWorld::Set
 {
 	if (Request.actor().empty())
 	{
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Actor must be specified"));
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "actor must be specified in SetActorTransform request"));
 		return;
 	}
 
-	AActor* Actor = GetActorWithName(GetWorld(), UTF8_TO_TCHAR(Request.actor().c_str()));
+	const FString ActorName(UTF8_TO_TCHAR(Request.actor().c_str()));
+	AActor* Actor = GetActorWithName(GetWorld(), ActorName);
 	if (!Actor)
 	{
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, "Failed to find actor"));
+		const FString ErrorMsg = FString::Printf(TEXT("Failed to find actor '%s' for SetActorTransform request"), *ActorName);
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 
@@ -443,10 +503,12 @@ void UTempoWorldControlServiceSubsystem::SetActorTransform(const TempoWorld::Set
 
 	if (!Request.relative_to_actor().empty())
 	{
-		const AActor* RelativeToActor = GetActorWithName(GetWorld(), UTF8_TO_TCHAR(Request.relative_to_actor().c_str()));
+		const FString RelativeToActorName(UTF8_TO_TCHAR(Request.relative_to_actor().c_str()));
+		const AActor* RelativeToActor = GetActorWithName(GetWorld(), RelativeToActorName);
 		if (!RelativeToActor)
 		{
-			ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, "Failed to find relative to actor"));
+			const FString ErrorMsg = FString::Printf(TEXT("Failed to find relative_to_actor '%s' for SetActorTransform request on actor '%s'"), *RelativeToActorName, *ActorName);
+			ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 			return;
 		}
 		Transform = RelativeToActor->GetActorTransform() * Transform;
@@ -461,33 +523,38 @@ void UTempoWorldControlServiceSubsystem::SetComponentTransform(const TempoWorld:
 {
 	if (Request.actor().empty())
 	{
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Actor must be specified"));
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "actor must be specified in SetComponentTransform request"));
 		return;
 	}
 
 	if (Request.component().empty())
 	{
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Component must be specified"));
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "component must be specified in SetComponentTransform request"));
 		return;
 	}
 
-	const AActor* Actor = GetActorWithName(GetWorld(), UTF8_TO_TCHAR(Request.actor().c_str()));
+	const FString ActorName(UTF8_TO_TCHAR(Request.actor().c_str()));
+	const AActor* Actor = GetActorWithName(GetWorld(), ActorName);
 	if (!Actor)
 	{
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, "Failed to find actor"));
+		const FString ErrorMsg = FString::Printf(TEXT("Failed to find actor '%s' for SetComponentTransform request"), *ActorName);
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 
-	USceneComponent* Component = GetComponentWithName<USceneComponent>(Actor, UTF8_TO_TCHAR(Request.component().c_str()));
+	const FString ComponentName(UTF8_TO_TCHAR(Request.component().c_str()));
+	USceneComponent* Component = GetComponentWithName<USceneComponent>(Actor, ComponentName);
 	if (!Component)
 	{
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, "Failed to find component"));
+		const FString ErrorMsg = FString::Printf(TEXT("Failed to find scene component '%s' on actor '%s' for SetComponentTransform request"), *ComponentName, *ActorName);
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 
 	if (Component == Actor->GetRootComponent())
 	{
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Cannot set the transform of the root component. Set the transform of the owner actor instead."));
+		const FString ErrorMsg = FString::Printf(TEXT("Cannot set the transform of root component '%s' on actor '%s' directly. Use SetActorTransform on the owner actor instead."), *ComponentName, *ActorName);
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 
@@ -509,27 +576,31 @@ void UTempoWorldControlServiceSubsystem::ActivateComponent(const ActivateCompone
 {
 	if (Request.actor().empty())
 	{
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Actor must be specified"));
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "actor must be specified in ActivateComponent request"));
 		return;
 	}
 
 	if (Request.component().empty())
 	{
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Component must be specified"));
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "component must be specified in ActivateComponent request"));
 		return;
 	}
 
-	const AActor* Actor = GetActorWithName(GetWorld(), UTF8_TO_TCHAR(Request.actor().c_str()));
+	const FString ActorName(UTF8_TO_TCHAR(Request.actor().c_str()));
+	const AActor* Actor = GetActorWithName(GetWorld(), ActorName);
 	if (!Actor)
 	{
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, "No matching object"));
+		const FString ErrorMsg = FString::Printf(TEXT("Failed to find actor '%s' for ActivateComponent request"), *ActorName);
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
-	
-	UActorComponent* Component = GetComponentWithName(Actor, UTF8_TO_TCHAR(Request.component().c_str()));
+
+	const FString ComponentName(UTF8_TO_TCHAR(Request.component().c_str()));
+	UActorComponent* Component = GetComponentWithName(Actor, ComponentName);
 	if (!Component)
 	{
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Failed to find component"));
+		const FString ErrorMsg = FString::Printf(TEXT("Failed to find component '%s' on actor '%s' for ActivateComponent request"), *ComponentName, *ActorName);
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 
@@ -542,27 +613,31 @@ void UTempoWorldControlServiceSubsystem::DeactivateComponent(const DeactivateCom
 {
 	if (Request.actor().empty())
 	{
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Actor must be specified"));
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "actor must be specified in DeactivateComponent request"));
 		return;
 	}
 
 	if (Request.component().empty())
 	{
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Component must be specified"));
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "component must be specified in DeactivateComponent request"));
 		return;
 	}
 
-	const AActor* Actor = GetActorWithName(GetWorld(), UTF8_TO_TCHAR(Request.actor().c_str()));
+	const FString ActorName(UTF8_TO_TCHAR(Request.actor().c_str()));
+	const AActor* Actor = GetActorWithName(GetWorld(), ActorName);
 	if (!Actor)
 	{
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, "No matching object"));
+		const FString ErrorMsg = FString::Printf(TEXT("Failed to find actor '%s' for DeactivateComponent request"), *ActorName);
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
-	
-	UActorComponent* Component = GetComponentWithName(Actor, UTF8_TO_TCHAR(Request.component().c_str()));
+
+	const FString ComponentName(UTF8_TO_TCHAR(Request.component().c_str()));
+	UActorComponent* Component = GetComponentWithName(Actor, ComponentName);
 	if (!Component)
 	{
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Failed to find component"));
+		const FString ErrorMsg = FString::Printf(TEXT("Failed to find component '%s' on actor '%s' for DeactivateComponent request"), *ComponentName, *ActorName);
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 
@@ -579,13 +654,14 @@ grpc::Status GetObjectForRequest(const UWorld* World, const RequestType& Request
 
 	if (ActorName.IsEmpty())
 	{
-		return grpc::Status(grpc::FAILED_PRECONDITION, "Actor must be specified");
+		return grpc::Status(grpc::FAILED_PRECONDITION, "actor must be specified");
 	}
-	
+
 	AActor* Actor = GetActorWithName(World, ActorName);
 	if (!Actor)
 	{
-		return grpc::Status(grpc::NOT_FOUND, "Failed to find actor");
+		const FString ErrorMsg = FString::Printf(TEXT("Failed to find actor '%s'"), *ActorName);
+		return grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 	}
 
 	if (ComponentName.IsEmpty())
@@ -600,10 +676,11 @@ grpc::Status GetObjectForRequest(const UWorld* World, const RequestType& Request
 		}
 		else
 		{
-			return grpc::Status(grpc::NOT_FOUND, "Failed to find component");
+			const FString ErrorMsg = FString::Printf(TEXT("Failed to find component '%s' on actor '%s'"), *ComponentName, *ActorName);
+			return grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 		}
 	}
-	
+
 	return grpc::Status_OK;
 }
 
@@ -637,14 +714,16 @@ void UTempoWorldControlServiceSubsystem::GetAllComponents(const GetAllComponents
 {
 	if (Request.actor().empty())
 	{
-		ResponseContinuation.ExecuteIfBound(GetAllComponentsResponse(), grpc::Status(grpc::FAILED_PRECONDITION, "Actor must be specified"));
+		ResponseContinuation.ExecuteIfBound(GetAllComponentsResponse(), grpc::Status(grpc::FAILED_PRECONDITION, "actor must be specified in GetAllComponents request"));
 		return;
 	}
-	
-	const AActor* Actor = GetActorWithName(GetWorld(), UTF8_TO_TCHAR(Request.actor().c_str()));
+
+	const FString ActorName(UTF8_TO_TCHAR(Request.actor().c_str()));
+	const AActor* Actor = GetActorWithName(GetWorld(), ActorName);
 	if (!Actor)
 	{
-		ResponseContinuation.ExecuteIfBound(GetAllComponentsResponse(), grpc::Status(grpc::NOT_FOUND, "Failed to find actor"));
+		const FString ErrorMsg = FString::Printf(TEXT("Failed to find actor '%s' for GetAllComponents request"), *ActorName);
+		ResponseContinuation.ExecuteIfBound(GetAllComponentsResponse(), grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 	GetAllComponentsResponse Response;
@@ -702,6 +781,16 @@ void GetObjectProperties(const UObject* Object, GetPropertiesResponse& Response)
 				*Value = ValueName.ToString();
 			}
 		}
+		else if (const FTextProperty* TextProperty = CastField<FTextProperty>(Property))
+		{
+			Type = TEXT("string");
+			if (Value)
+			{
+				FText ValueText;
+				TextProperty->GetValue_InContainer(Container, &ValueText);
+				*Value = ValueText.ToString();
+			}
+		}
 		else if (const FBoolProperty* BoolProperty = CastField<FBoolProperty>(Property))
 		{
 			Type = TEXT("bool");
@@ -719,6 +808,66 @@ void GetObjectProperties(const UObject* Object, GetPropertiesResponse& Response)
 			{
 				int32 ValueInt;
 				IntProperty->GetValue_InContainer(Container, &ValueInt);
+				*Value = FString::FromInt(ValueInt);
+			}
+		}
+		else if (const FInt64Property* Int64Property = CastField<FInt64Property>(Property))
+		{
+			Type = TEXT("int64");
+			if (Value)
+			{
+				int64 ValueInt;
+				Int64Property->GetValue_InContainer(Container, &ValueInt);
+				*Value = FString::Printf(TEXT("%lld"), ValueInt);
+			}
+		}
+		else if (const FInt16Property* Int16Property = CastField<FInt16Property>(Property))
+		{
+			Type = TEXT("int");
+			if (Value)
+			{
+				int16 ValueInt;
+				Int16Property->GetValue_InContainer(Container, &ValueInt);
+				*Value = FString::FromInt(ValueInt);
+			}
+		}
+		else if (const FInt8Property* Int8Property = CastField<FInt8Property>(Property))
+		{
+			Type = TEXT("int");
+			if (Value)
+			{
+				int8 ValueInt;
+				Int8Property->GetValue_InContainer(Container, &ValueInt);
+				*Value = FString::FromInt(ValueInt);
+			}
+		}
+		else if (const FUInt64Property* UInt64Property = CastField<FUInt64Property>(Property))
+		{
+			Type = TEXT("int64");
+			if (Value)
+			{
+				uint64 ValueInt;
+				UInt64Property->GetValue_InContainer(Container, &ValueInt);
+				*Value = FString::Printf(TEXT("%llu"), ValueInt);
+			}
+		}
+		else if (const FUInt32Property* UInt32Property = CastField<FUInt32Property>(Property))
+		{
+			Type = TEXT("int64");
+			if (Value)
+			{
+				uint32 ValueInt;
+				UInt32Property->GetValue_InContainer(Container, &ValueInt);
+				*Value = FString::Printf(TEXT("%u"), ValueInt);
+			}
+		}
+		else if (const FUInt16Property* UInt16Property = CastField<FUInt16Property>(Property))
+		{
+			Type = TEXT("int");
+			if (Value)
+			{
+				uint16 ValueInt;
+				UInt16Property->GetValue_InContainer(Container, &ValueInt);
 				*Value = FString::FromInt(ValueInt);
 			}
 		}
@@ -812,6 +961,26 @@ void GetObjectProperties(const UObject* Object, GetPropertiesResponse& Response)
 				}
 			}
 		}
+		else if (const FSoftObjectProperty* SoftObjectProperty = CastField<FSoftObjectProperty>(Property))
+		{
+			// Catches both FSoftObjectProperty and FSoftClassProperty (the latter derives from the former).
+			FString InnerType;
+			const FString OuterType = SoftObjectProperty->GetCPPType(&InnerType, 0);
+			if (InnerType.IsEmpty())
+			{
+				Type = OuterType;
+			}
+			else
+			{
+				Type = FString::Printf(TEXT("%s<%s>"), *OuterType, *InnerType);
+			}
+			if (Value)
+			{
+				const FSoftObjectPtr& Soft = SoftObjectProperty->GetPropertyValue_InContainer(Container);
+				const FString Path = Soft.ToString();
+				*Value = Path.IsEmpty() ? TEXT("null") : Path;
+			}
+		}
 		else if (const FStructProperty* StructProperty = CastField<FStructProperty>(Property))
 		{
 			if (StructProperty->Struct->GetStructCPPName() == TEXT("FVector"))
@@ -900,6 +1069,69 @@ void GetObjectProperties(const UObject* Object, GetPropertiesResponse& Response)
 			}
 			Type = FString::Printf(TEXT("array<%s>"), *InnerType);
 		}
+		else if (const FMapProperty* MapProperty = CastField<FMapProperty>(Property))
+		{
+			FString KeyType = TEXT("unsupported");
+			FString ValueType = TEXT("unsupported");
+			// Get key and value types (even if the map is empty)
+			GetPropertyTypeAndValue(nullptr, MapProperty->KeyProp, KeyType, nullptr);
+			GetPropertyTypeAndValue(nullptr, MapProperty->ValueProp, ValueType, nullptr);
+			if (Value)
+			{
+				*Value = TEXT("{");
+				if (KeyType != TEXT("unsupported") && ValueType != TEXT("unsupported"))
+				{
+					FScriptMapHelper MapHelper{ MapProperty, Property->ContainerPtrToValuePtr<void>(Container) };
+					for (int32 I = 0; I < MapHelper.GetMaxIndex(); ++I)
+					{
+						if (!MapHelper.IsValidIndex(I))
+						{
+							continue;
+						}
+						FString Unused; // Key/value types are uniform, and we already know them.
+						FString KeyValue;
+						FString ValueValue;
+						// ValueProp's Offset_Internal is set to MapLayout.ValueOffset, so pass the pair pointer
+						// (not GetValuePtr) so ContainerPtrToValuePtr applies that offset exactly once.
+						const uint8* PairPtr = MapHelper.GetPairPtr(I);
+						GetPropertyTypeAndValue(PairPtr, MapProperty->KeyProp, Unused, &KeyValue);
+						GetPropertyTypeAndValue(PairPtr, MapProperty->ValueProp, Unused, &ValueValue);
+						Value->Appendf(TEXT("%s: %s, "), *KeyValue, *ValueValue);
+					}
+					Value->RemoveFromEnd(TEXT(", "));
+				}
+				Value->Append(TEXT("}"));
+			}
+			Type = FString::Printf(TEXT("map<%s,%s>"), *KeyType, *ValueType);
+		}
+		else if (const FSetProperty* SetProperty = CastField<FSetProperty>(Property))
+		{
+			FString InnerType = TEXT("unsupported");
+			// Get the inner type (even if the set is empty)
+			GetPropertyTypeAndValue(nullptr, SetProperty->ElementProp, InnerType, nullptr);
+			if (Value)
+			{
+				*Value = TEXT("{");
+				if (InnerType != TEXT("unsupported"))
+				{
+					FScriptSetHelper SetHelper{ SetProperty, Property->ContainerPtrToValuePtr<void>(Container) };
+					for (int32 I = 0; I < SetHelper.GetMaxIndex(); ++I)
+					{
+						if (!SetHelper.IsValidIndex(I))
+						{
+							continue;
+						}
+						FString Unused; // Element type is uniform, and we already know it.
+						FString ElementValue;
+						GetPropertyTypeAndValue(SetHelper.GetElementPtr(I), SetProperty->ElementProp, Unused, &ElementValue);
+						Value->Appendf(TEXT("%s, "), *ElementValue);
+					}
+					Value->RemoveFromEnd(TEXT(", "));
+				}
+				Value->Append(TEXT("}"));
+			}
+			Type = FString::Printf(TEXT("set<%s>"), *InnerType);
+		}
 		else
 		{
 			Type = TEXT("unsupported");
@@ -928,14 +1160,16 @@ void UTempoWorldControlServiceSubsystem::GetActorProperties(const GetActorProper
 {
 	if (Request.actor().empty())
 	{
-		ResponseContinuation.ExecuteIfBound(GetPropertiesResponse(), grpc::Status(grpc::FAILED_PRECONDITION, "Actor must be specified"));
+		ResponseContinuation.ExecuteIfBound(GetPropertiesResponse(), grpc::Status(grpc::FAILED_PRECONDITION, "actor must be specified in GetActorProperties request"));
 		return;
 	}
 
-	const AActor* Actor = GetActorWithName(GetWorld(), UTF8_TO_TCHAR(Request.actor().c_str()));
+	const FString ActorName(UTF8_TO_TCHAR(Request.actor().c_str()));
+	const AActor* Actor = GetActorWithName(GetWorld(), ActorName);
 	if (!Actor)
 	{
-		ResponseContinuation.ExecuteIfBound(GetPropertiesResponse(), grpc::Status(grpc::NOT_FOUND, "No matching object"));
+		const FString ErrorMsg = FString::Printf(TEXT("Failed to find actor '%s' for GetActorProperties request"), *ActorName);
+		ResponseContinuation.ExecuteIfBound(GetPropertiesResponse(), grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 
@@ -959,27 +1193,31 @@ void UTempoWorldControlServiceSubsystem::GetComponentProperties(const GetCompone
 {
 	if (Request.actor().empty())
 	{
-		ResponseContinuation.ExecuteIfBound(GetPropertiesResponse(), grpc::Status(grpc::FAILED_PRECONDITION, "Actor must be specified"));
+		ResponseContinuation.ExecuteIfBound(GetPropertiesResponse(), grpc::Status(grpc::FAILED_PRECONDITION, "actor must be specified in GetComponentProperties request"));
 		return;
 	}
 
 	if (Request.component().empty())
 	{
-		ResponseContinuation.ExecuteIfBound(GetPropertiesResponse(), grpc::Status(grpc::FAILED_PRECONDITION, "Component must be specified"));
+		ResponseContinuation.ExecuteIfBound(GetPropertiesResponse(), grpc::Status(grpc::FAILED_PRECONDITION, "component must be specified in GetComponentProperties request"));
 		return;
 	}
 
-	const AActor* Actor = GetActorWithName(GetWorld(), UTF8_TO_TCHAR(Request.actor().c_str()));
+	const FString ActorName(UTF8_TO_TCHAR(Request.actor().c_str()));
+	const AActor* Actor = GetActorWithName(GetWorld(), ActorName);
 	if (!Actor)
 	{
-		ResponseContinuation.ExecuteIfBound(GetPropertiesResponse(), grpc::Status(grpc::NOT_FOUND, "No matching object"));
+		const FString ErrorMsg = FString::Printf(TEXT("Failed to find actor '%s' for GetComponentProperties request"), *ActorName);
+		ResponseContinuation.ExecuteIfBound(GetPropertiesResponse(), grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 
-	const UActorComponent* Component = GetComponentWithName(Actor, UTF8_TO_TCHAR(Request.component().c_str()));
+	const FString ComponentName(UTF8_TO_TCHAR(Request.component().c_str()));
+	const UActorComponent* Component = GetComponentWithName(Actor, ComponentName);
 	if (!Component)
 	{
-		ResponseContinuation.ExecuteIfBound(GetPropertiesResponse(), grpc::Status(grpc::FAILED_PRECONDITION, "Failed to find component"));
+		const FString ErrorMsg = FString::Printf(TEXT("Failed to find component '%s' on actor '%s' for GetComponentProperties request"), *ComponentName, *ActorName);
+		ResponseContinuation.ExecuteIfBound(GetPropertiesResponse(), grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 
@@ -991,9 +1229,18 @@ void UTempoWorldControlServiceSubsystem::GetComponentProperties(const GetCompone
 
 FString SplitPropertyName(FString& PropertyName)
 {
+	// If a ']' appears before any '[', we are inside a bracket scope (e.g. parsing the contents
+	// of MyMap[...]) and only ']' should terminate the segment - '.' inside the brackets is part
+	// of the key (relevant for map keys containing dots, like FString or FName keys).
+	int32 OpenBracketIdx = INDEX_NONE;
+	int32 CloseBracketIdx = INDEX_NONE;
+	PropertyName.FindChar('[', OpenBracketIdx);
+	PropertyName.FindChar(']', CloseBracketIdx);
+	const bool bInBracket = CloseBracketIdx != INDEX_NONE && (OpenBracketIdx == INDEX_NONE || CloseBracketIdx < OpenBracketIdx);
+
 	for (int32 CharIdx = 0; CharIdx < PropertyName.Len(); ++CharIdx)
 	{
-		if (PropertyName[CharIdx] == '.' || PropertyName[CharIdx] == '[')
+		if (!bInBracket && (PropertyName[CharIdx] == '.' || PropertyName[CharIdx] == '['))
 		{
 			// Chop everything before
 			const FString FirstPropertyName = PropertyName.LeftChop(PropertyName.Len() - CharIdx);
@@ -1023,7 +1270,7 @@ grpc::Status GetPropertyForRequest(const UObject* Object, const RequestType& Req
 
 	if (PropertyName.IsEmpty())
 	{
-		return grpc::Status(grpc::FAILED_PRECONDITION, "Property must be specified");
+		return grpc::Status(grpc::FAILED_PRECONDITION, "property must be specified");
 	}
 
 	const FString FirstPropertyName = SplitPropertyName(PropertyName);
@@ -1034,12 +1281,14 @@ grpc::Status GetPropertyForRequest(const UObject* Object, const RequestType& Req
 
 	if (!Property)
 	{
-		return grpc::Status(grpc::FAILED_PRECONDITION, "Property not found");
+		const FString ErrorMsg = FString::Printf(TEXT("Property '%s' not found on object '%s' (class '%s')"), *FirstPropertyName, *Object->GetName(), *Class->GetName());
+		return grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 	}
 
-	if (!InnerPropertyName.IsEmpty() && !(CastField<FStructProperty>(Property) || CastField<FArrayProperty>(Property)))
+	if (!InnerPropertyName.IsEmpty() && !(CastField<FStructProperty>(Property) || CastField<FArrayProperty>(Property) || CastField<FMapProperty>(Property)))
 	{
-		return grpc::Status(grpc::FAILED_PRECONDITION, "Inner properties can only be specified on structs and arrays");
+		const FString ErrorMsg = FString::Printf(TEXT("Inner property '%s' was specified on property '%s' (type '%s'), but inner properties can only be specified on structs, arrays, and maps."), *InnerPropertyName, *FirstPropertyName, *Property->GetCPPType());
+		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 	}
 
 	return grpc::Status_OK;
@@ -1078,7 +1327,8 @@ grpc::Status SetSinglePropertyValue<FEnumProperty, FString>(void* ValuePtr, FEnu
 	const int64 Value = GetEnumValueByAuthoredName(PropertyEnum, ValueStr);
 	if (Value == INDEX_NONE)
 	{
-		return grpc::Status(grpc::INVALID_ARGUMENT, "Invalid enum value");
+		const FString ErrorMsg = FString::Printf(TEXT("Invalid value '%s' for enum property '%s' (enum '%s')"), *ValueStr, *Property->GetName(), *PropertyEnum->GetName());
+		return grpc::Status(grpc::INVALID_ARGUMENT, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 	}
 	const FNumericProperty* EnumIntProperty = Property->GetUnderlyingProperty();
 	EnumIntProperty->SetIntPropertyValue(ValuePtr, Value);
@@ -1092,7 +1342,9 @@ grpc::Status SetSinglePropertyValue<FByteProperty, FString>(void* ValuePtr, FByt
 	const int64 Value = GetEnumValueByAuthoredName(PropertyEnum, ValueStr);
 	if (Value == INDEX_NONE)
 	{
-		return grpc::Status(grpc::INVALID_ARGUMENT, "Invalid enum value");
+		const FString EnumName = PropertyEnum ? PropertyEnum->GetName() : TEXT("<none>");
+		const FString ErrorMsg = FString::Printf(TEXT("Invalid value '%s' for byte/enum property '%s' (enum '%s')"), *ValueStr, *Property->GetName(), *EnumName);
+		return grpc::Status(grpc::INVALID_ARGUMENT, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 	}
 	Property->SetPropertyValue(ValuePtr, PropertyEnum->GetValueByIndex(Value));
 	return grpc::Status_OK;
@@ -1122,6 +1374,67 @@ grpc::Status SetSinglePropertyValue<FByteProperty, int32>(void* ValuePtr, FByteP
 	return grpc::Status_OK;
 }
 
+template <>
+grpc::Status SetSinglePropertyValue<FSoftObjectProperty, UObject*>(void* ValuePtr, FSoftObjectProperty* Property, UObject* const& ValueObj)
+{
+	// Also handles FSoftClassProperty (derives from FSoftObjectProperty).
+	Property->SetObjectPropertyValue(ValuePtr, ValueObj);
+	return grpc::Status_OK;
+}
+
+template <>
+grpc::Status SetSinglePropertyValue<FTextProperty, FString>(void* ValuePtr, FTextProperty* Property, const FString& ValueStr)
+{
+	Property->SetPropertyValue(ValuePtr, FText::FromString(ValueStr));
+	return grpc::Status_OK;
+}
+
+// Narrowing-int helpers: the smaller numeric property types take an int32 (or int64) on the wire
+// and we validate that the value fits before assigning. This mirrors the existing FByteProperty<int32>
+// specialization above.
+template <typename PropertyType, typename WireType, typename StoredType>
+grpc::Status SetNarrowedIntPropertyValue(void* ValuePtr, PropertyType* Property, const WireType& ValueInt)
+{
+	if (ValueInt > static_cast<WireType>(TNumericLimits<StoredType>::Max()))
+	{
+		const FString ErrorMsg = FString::Printf(TEXT("Cannot set %s property %s with too-large value %lld"),
+			*Property->GetClass()->GetName(), *Property->GetName(), static_cast<int64>(ValueInt));
+		return grpc::Status(grpc::OUT_OF_RANGE, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+	}
+	if (ValueInt < static_cast<WireType>(TNumericLimits<StoredType>::Min()))
+	{
+		const FString ErrorMsg = FString::Printf(TEXT("Cannot set %s property %s with too-small value %lld"),
+			*Property->GetClass()->GetName(), *Property->GetName(), static_cast<int64>(ValueInt));
+		return grpc::Status(grpc::OUT_OF_RANGE, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+	}
+	Property->SetPropertyValue(ValuePtr, static_cast<StoredType>(ValueInt));
+	return grpc::Status_OK;
+}
+
+template <> grpc::Status SetSinglePropertyValue<FInt16Property, int32>(void* ValuePtr, FInt16Property* Property, const int32& V)
+{ return SetNarrowedIntPropertyValue<FInt16Property, int32, int16>(ValuePtr, Property, V); }
+
+template <> grpc::Status SetSinglePropertyValue<FInt8Property, int32>(void* ValuePtr, FInt8Property* Property, const int32& V)
+{ return SetNarrowedIntPropertyValue<FInt8Property, int32, int8>(ValuePtr, Property, V); }
+
+template <> grpc::Status SetSinglePropertyValue<FUInt16Property, int32>(void* ValuePtr, FUInt16Property* Property, const int32& V)
+{ return SetNarrowedIntPropertyValue<FUInt16Property, int32, uint16>(ValuePtr, Property, V); }
+
+template <> grpc::Status SetSinglePropertyValue<FUInt32Property, int64>(void* ValuePtr, FUInt32Property* Property, const int64& V)
+{ return SetNarrowedIntPropertyValue<FUInt32Property, int64, uint32>(ValuePtr, Property, V); }
+
+template <>
+grpc::Status SetSinglePropertyValue<FUInt64Property, int64>(void* ValuePtr, FUInt64Property* Property, const int64& V)
+{
+	if (V < 0)
+	{
+		const FString ErrorMsg = FString::Printf(TEXT("Cannot set uint64 property %s with negative value %lld"), *Property->GetName(), V);
+		return grpc::Status(grpc::OUT_OF_RANGE, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+	}
+	Property->SetPropertyValue(ValuePtr, static_cast<uint64>(V));
+	return grpc::Status_OK;
+}
+
 template <typename PropertyType, typename ValueType>
 grpc::Status SetSinglePropertyInContainer(void* Container, FProperty* Property, const FString& PropertyName, const ValueType& Value)
 {
@@ -1135,7 +1448,8 @@ grpc::Status SetSinglePropertyInContainer(void* Container, FProperty* Property, 
 	{
 		if (PropertyName.IsEmpty())
 		{
-			return grpc::Status(grpc::FAILED_PRECONDITION, "Struct inner property must be specified");
+			const FString ErrorMsg = FString::Printf(TEXT("Inner property must be specified for struct property '%s' (type '%s')"), *Property->GetName(), *StructProperty->Struct->GetStructCPPName());
+			return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 		}
 
 		for (FProperty* InnerProperty = StructProperty->Struct->PropertyLink; InnerProperty != nullptr; InnerProperty = InnerProperty->PropertyLinkNext)
@@ -1145,18 +1459,21 @@ grpc::Status SetSinglePropertyInContainer(void* Container, FProperty* Property, 
 				return SetSinglePropertyInContainer<PropertyType>(ValuePtr, InnerProperty, InnerPropertyName, Value);
 			}
 		}
-		return grpc::Status(grpc::NOT_FOUND, "No matching property found for " + std::string(TCHAR_TO_UTF8(*FirstPropertyName)));
+		const FString ErrorMsg = FString::Printf(TEXT("No matching inner property '%s' found on struct property '%s' (type '%s')"), *FirstPropertyName, *Property->GetName(), *StructProperty->Struct->GetStructCPPName());
+		return grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 	}
 	if (const FArrayProperty* ArrayProperty = CastField<FArrayProperty>(Property))
 	{
 		if (PropertyName.IsEmpty())
 		{
-			return grpc::Status(grpc::FAILED_PRECONDITION, "ArrayIndex must be specified");
+			const FString ErrorMsg = FString::Printf(TEXT("Array index must be specified for array property '%s'"), *Property->GetName());
+			return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 		}
 
 		if (!FirstPropertyName.IsNumeric() || FirstPropertyName.Contains(FString(TEXT("."))) || FirstPropertyName.Contains(FString(TEXT("-"))))
 		{
-			return grpc::Status(grpc::FAILED_PRECONDITION, "ArrayIndex must be a non-negative integer (" + std::string(TCHAR_TO_UTF8(*FirstPropertyName)));
+			const FString ErrorMsg = FString::Printf(TEXT("Array index must be a non-negative integer for array property '%s' (got '%s')"), *Property->GetName(), *FirstPropertyName);
+			return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 		}
 		const int32 ElementIndex = FCString::Atoi(*FirstPropertyName);
 
@@ -1164,28 +1481,66 @@ grpc::Status SetSinglePropertyInContainer(void* Container, FProperty* Property, 
 
 		if (ElementIndex < 0)
 		{
-			return grpc::Status(grpc::FAILED_PRECONDITION, "Invalid index (less than zero)");
+			const FString ErrorMsg = FString::Printf(TEXT("Array index %d is less than zero for array property '%s'"), ElementIndex, *Property->GetName());
+			return grpc::Status(grpc::OUT_OF_RANGE, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 		}
 		if (ElementIndex > ArrayHelper.Num())
 		{
-			return grpc::Status(grpc::FAILED_PRECONDITION, "Invalid index (greater than length of array)");
+			const FString ErrorMsg = FString::Printf(TEXT("Array index %d is greater than length %d of array property '%s' (use index == length to append)"), ElementIndex, ArrayHelper.Num(), *Property->GetName());
+			return grpc::Status(grpc::OUT_OF_RANGE, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 		}
 		if (ElementIndex == ArrayHelper.Num())
 		{
 			ArrayHelper.InsertValues(ArrayHelper.Num(), 1);
 		}
-		
+
 		return SetSinglePropertyInContainer<PropertyType, ValueType>(ArrayHelper.GetRawPtr(ElementIndex), ArrayProperty->Inner, InnerPropertyName, Value);
+	}
+	if (const FMapProperty* MapProperty = CastField<FMapProperty>(Property))
+	{
+		if (PropertyName.IsEmpty())
+		{
+			return grpc::Status(grpc::FAILED_PRECONDITION, "Map key must be specified");
+		}
+
+		FScriptMapHelper MapHelper{ MapProperty, ValuePtr };
+		FProperty* KeyProp = MapProperty->KeyProp;
+
+		// Parse the requested key string into a temporary instance of the key type.
+		void* KeyTemp = FMemory_Alloca(KeyProp->GetSize());
+		KeyProp->InitializeValue(KeyTemp);
+		const TCHAR* ParseResult = KeyProp->ImportText_Direct(*FirstPropertyName, KeyTemp, nullptr, PPF_None);
+		if (ParseResult == nullptr)
+		{
+			KeyProp->DestroyValue(KeyTemp);
+			return grpc::Status(grpc::FAILED_PRECONDITION, "Failed to parse map key " + std::string(TCHAR_TO_UTF8(*FirstPropertyName)));
+		}
+
+		int32 PairIndex = MapHelper.FindMapIndexWithKey(KeyTemp);
+		if (PairIndex == INDEX_NONE)
+		{
+			PairIndex = MapHelper.AddDefaultValue_Invalid_NeedsRehash();
+			KeyProp->CopyCompleteValue(MapHelper.GetKeyPtr(PairIndex), KeyTemp);
+			MapHelper.Rehash();
+		}
+
+		KeyProp->DestroyValue(KeyTemp);
+
+		// ValueProp's Offset_Internal is set to MapLayout.ValueOffset, so pass the pair pointer
+		// (not GetValuePtr) so ContainerPtrToValuePtr applies that offset exactly once.
+		return SetSinglePropertyInContainer<PropertyType, ValueType>(MapHelper.GetPairPtr(PairIndex), MapProperty->ValueProp, InnerPropertyName, Value);
 	}
 
 	if (!InnerPropertyName.IsEmpty())
 	{
-		return grpc::Status(grpc::FAILED_PRECONDITION, "Inner property not found");
+		const FString ErrorMsg = FString::Printf(TEXT("Inner property '%s' was specified on property '%s' (type '%s'), but it has no inner properties"), *InnerPropertyName, *Property->GetName(), *Property->GetCPPType());
+		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 	}
 	PropertyType* TypedProperty = CastField<PropertyType>(Property);
 	if (!TypedProperty)
 	{
-		return grpc::Status(grpc::FAILED_PRECONDITION, "Property did not have correct type");
+		const FString ErrorMsg = FString::Printf(TEXT("Property '%s' has type '%s' which does not match the requested type"), *Property->GetName(), *Property->GetCPPType());
+		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 	}
 
 	return SetSinglePropertyValue(ValuePtr, TypedProperty, Value);
@@ -1204,7 +1559,7 @@ grpc::Status SetSinglePropertyImpl(const UWorld* World, const RequestType& Reque
 	const FString PropertyName(UTF8_TO_TCHAR(Request.property().c_str()));
 	if (PropertyName.IsEmpty())
 	{
-		return grpc::Status(grpc::FAILED_PRECONDITION, "Property must be specified");
+		return grpc::Status(grpc::FAILED_PRECONDITION, "property must be specified in SetProperty request");
 	}
 
 	FString InnerPropertyName;
@@ -1260,7 +1615,8 @@ grpc::Status SetArrayPropertyImpl(const UWorld* World, const RequestType& Reques
 	const FArrayProperty* ArrayProperty = CastField<FArrayProperty>(Property);
 	if (!ArrayProperty)
 	{
-		return grpc::Status(grpc::FAILED_PRECONDITION, "Property did not have correct type");
+		const FString ErrorMsg = FString::Printf(TEXT("Property '%s' has type '%s' but an array property was expected"), *Property->GetName(), *Property->GetCPPType());
+		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 	}
 
 	FScriptArrayHelper ArrayHelper{ ArrayProperty, Property->ContainerPtrToValuePtr<void>(Object) };
@@ -1268,7 +1624,8 @@ grpc::Status SetArrayPropertyImpl(const UWorld* World, const RequestType& Reques
 	PropertyType* InnerProperty = CastField<PropertyType>(ArrayProperty->Inner);
 	if (!InnerProperty)
 	{
-		return grpc::Status(grpc::FAILED_PRECONDITION, "Property did not have correct type");
+		const FString ErrorMsg = FString::Printf(TEXT("Array property '%s' has element type '%s' which does not match the requested type"), *Property->GetName(), *ArrayProperty->Inner->GetCPPType());
+		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 	}
 
 #if WITH_EDITOR
@@ -1296,6 +1653,89 @@ grpc::Status SetArrayPropertyImpl(const UWorld* World, const RequestType& Reques
 	return grpc::Status_OK;
 }
 
+template <typename PropertyType, typename RequestType, typename ValueType>
+grpc::Status SetSetPropertyImpl(const UWorld* World, const RequestType& Request, const TArray<ValueType>& Values)
+{
+	UObject* Object = nullptr;
+	const grpc::Status GetObjectStatus = GetObjectForRequest(World, Request, Object);
+	if (!GetObjectStatus.ok())
+	{
+		return GetObjectStatus;
+	}
+
+	FString InnerPropertyName;
+	FProperty* Property = nullptr;
+	const grpc::Status GetPropertyStatus = GetPropertyForRequest(Object, Request, Property, InnerPropertyName);
+	if (!GetPropertyStatus.ok())
+	{
+		return GetPropertyStatus;
+	}
+
+	const FSetProperty* SetProperty = CastField<FSetProperty>(Property);
+	if (!SetProperty)
+	{
+		const FString ErrorMsg = FString::Printf(TEXT("Property '%s' has type '%s' but a set property was expected"), *Property->GetName(), *Property->GetCPPType());
+		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+	}
+
+	PropertyType* ElementProperty = CastField<PropertyType>(SetProperty->ElementProp);
+	if (!ElementProperty)
+	{
+		const FString ErrorMsg = FString::Printf(TEXT("Set property '%s' has element type '%s' which does not match the requested type"), *Property->GetName(), *SetProperty->ElementProp->GetCPPType());
+		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+	}
+
+	if (!InnerPropertyName.IsEmpty())
+	{
+		const FString ErrorMsg = FString::Printf(TEXT("Inner property addressing is not supported for set properties (got '%s' on set '%s')"), *InnerPropertyName, *Property->GetName());
+		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+	}
+
+#if WITH_EDITOR
+	if (World->WorldType == EWorldType::Editor)
+	{
+		Object->PreEditChange(Property);
+	}
+#endif
+
+	FScriptSetHelper SetHelper{ SetProperty, Property->ContainerPtrToValuePtr<void>(Object) };
+	SetHelper.EmptyElements();
+
+	// AddElement copies via Set->Add, which deduplicates by hash. We stage each value into a
+	// scratch slot, then hand it to AddElement so duplicates in `Values` collapse cleanly.
+	void* TempElement = FMemory_Alloca(ElementProperty->GetSize());
+	ElementProperty->InitializeValue(TempElement);
+	grpc::Status FinalStatus = grpc::Status_OK;
+	for (const ValueType& Value : Values)
+	{
+		const grpc::Status SetStatus = SetSinglePropertyValue(TempElement, ElementProperty, Value);
+		if (!SetStatus.ok())
+		{
+			FinalStatus = SetStatus;
+			break;
+		}
+		SetHelper.AddElement(TempElement);
+	}
+	ElementProperty->DestroyValue(TempElement);
+
+#if WITH_EDITOR
+	if (World->WorldType == EWorldType::Editor)
+	{
+		FPropertyChangedEvent Event(Property);
+		Object->PostEditChangeProperty(Event);
+	}
+#endif
+
+	if (!FinalStatus.ok())
+	{
+		return FinalStatus;
+	}
+
+	MarkRenderStateDirty(Object);
+
+	return grpc::Status_OK;
+}
+
 template<typename RequestType, typename ValueType>
 grpc::Status SetStructPropertyImpl(const UWorld* World, const RequestType& Request, const ValueType& Value, const FString& ExpectedStructCPPName)
 {
@@ -1316,13 +1756,15 @@ grpc::Status SetStructPropertyImpl(const UWorld* World, const RequestType& Reque
 
 	if (!InnerPropertyName.IsEmpty())
 	{
-		return grpc::Status(grpc::FAILED_PRECONDITION, "Inner property not found");
+		const FString ErrorMsg = FString::Printf(TEXT("Inner property '%s' is not supported when setting struct property '%s' as a whole"), *InnerPropertyName, *Property->GetName());
+		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 	}
 
 	const FStructProperty* StructProperty = CastField<FStructProperty>(Property);
 	if (!StructProperty)
 	{
-		return grpc::Status(grpc::FAILED_PRECONDITION, "Property is not a struct");
+		const FString ErrorMsg = FString::Printf(TEXT("Property '%s' has type '%s' but a struct property of type '%s' was expected"), *Property->GetName(), *Property->GetCPPType(), *ExpectedStructCPPName);
+		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 	}
 
 	const FString StructCPPName = StructProperty->Struct->GetStructCPPName();
@@ -1347,7 +1789,8 @@ grpc::Status SetStructPropertyImpl(const UWorld* World, const RequestType& Reque
 	}
 	else
 	{
-		return grpc::Status(grpc::FAILED_PRECONDITION, "Struct did not have the correct type");
+		const FString ErrorMsg = FString::Printf(TEXT("Struct property '%s' has type '%s' but type '%s' was expected"), *Property->GetName(), *StructCPPName, *ExpectedStructCPPName);
+		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 	}
 
 	return grpc::Status_OK;
@@ -1370,17 +1813,43 @@ grpc::Status SetPropertyImpl<SetBoolPropertyRequest>(const UWorld* World, const 
 	return SetSinglePropertyImpl<FBoolProperty>(World, Request, Request.value());
 }
 
+// Try a sequence of property types and return the first non-FAILED_PRECONDITION outcome.
+// FAILED_PRECONDITION from SetSinglePropertyImpl signals "type didn't match"; any other status
+// means we found the right type but had an unrelated problem (range, missing inner, etc.).
+template <typename RequestType, typename ValueType>
+grpc::Status TryPropertyTypes(const UWorld*, const RequestType&, const ValueType&)
+{
+	return grpc::Status(grpc::FAILED_PRECONDITION, "No matching property type");
+}
+
+template <typename FirstPropertyType, typename... RestPropertyTypes, typename RequestType, typename ValueType>
+grpc::Status TryPropertyTypes(const UWorld* World, const RequestType& Request, const ValueType& Value)
+{
+	const grpc::Status Status = SetSinglePropertyImpl<FirstPropertyType>(World, Request, Value);
+	if (Status.ok() || Status.error_code() != grpc::FAILED_PRECONDITION)
+	{
+		return Status;
+	}
+	if constexpr (sizeof...(RestPropertyTypes) == 0)
+	{
+		return Status;
+	}
+	else
+	{
+		return TryPropertyTypes<RestPropertyTypes...>(World, Request, Value);
+	}
+}
+
 template<>
 grpc::Status SetPropertyImpl<SetIntPropertyRequest>(const UWorld* World, const SetIntPropertyRequest& Request)
 {
-	// First try to set it as an int, then fall back on byte
-	const grpc::Status IntStatus = SetSinglePropertyImpl<FIntProperty>(World, Request, Request.value());
-	// If we got an error other than FAILED_PRECONDITION that means the type was right, but something else was wrong.
-	if (IntStatus.ok() || IntStatus.error_code() != grpc::FAILED_PRECONDITION)
-	{
-		return IntStatus;
-	}
-	return SetSinglePropertyImpl<FByteProperty>(World, Request, Request.value());
+	return TryPropertyTypes<FIntProperty, FByteProperty, FInt16Property, FInt8Property, FUInt16Property>(World, Request, Request.value());
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetInt64PropertyRequest>(const UWorld* World, const SetInt64PropertyRequest& Request)
+{
+	return TryPropertyTypes<FInt64Property, FUInt32Property, FUInt64Property>(World, Request, Request.value());
 }
 
 template<>
@@ -1399,16 +1868,20 @@ grpc::Status SetPropertyImpl<SetFloatPropertyRequest>(const UWorld* World, const
 template<>
 grpc::Status SetPropertyImpl<SetStringPropertyRequest>(const UWorld* World, const SetStringPropertyRequest& Request)
 {
-	// First try to set it as an FString, then fall back on FName
+	// Try FString, then FName, then FText.
 	const FString ValueStr(UTF8_TO_TCHAR(Request.value().c_str()));
 	const grpc::Status StrStatus = SetSinglePropertyImpl<FStrProperty>(World, Request, ValueStr);
-	// If we got an error other than FAILED_PRECONDITION that means the type was right, but something else was wrong.
 	if (StrStatus.ok() || StrStatus.error_code() != grpc::FAILED_PRECONDITION)
 	{
 		return StrStatus;
 	}
 	const FName ValueName(UTF8_TO_TCHAR(Request.value().c_str()));
-	return SetSinglePropertyImpl<FNameProperty>(World, Request, ValueName);
+	const grpc::Status NameStatus = SetSinglePropertyImpl<FNameProperty>(World, Request, ValueName);
+	if (NameStatus.ok() || NameStatus.error_code() != grpc::FAILED_PRECONDITION)
+	{
+		return NameStatus;
+	}
+	return SetSinglePropertyImpl<FTextProperty>(World, Request, ValueStr);
 }
 
 template<>
@@ -1465,6 +1938,78 @@ grpc::Status SetPropertyImpl<SetColorPropertyRequest>(const UWorld* World, const
 }
 
 template<>
+grpc::Status SetPropertyImpl<SetVector2DPropertyRequest>(const UWorld* World, const SetVector2DPropertyRequest& Request)
+{
+	const FVector2D Vector(Request.x(), Request.y());
+	return SetStructPropertyImpl(World, Request, Vector, TEXT("FVector2D"));
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetIntVectorPropertyRequest>(const UWorld* World, const SetIntVectorPropertyRequest& Request)
+{
+	const FIntVector Vector(Request.x(), Request.y(), Request.z());
+	return SetStructPropertyImpl(World, Request, Vector, TEXT("FIntVector"));
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetIntPointPropertyRequest>(const UWorld* World, const SetIntPointPropertyRequest& Request)
+{
+	const FIntPoint Point(Request.x(), Request.y());
+	return SetStructPropertyImpl(World, Request, Point, TEXT("FIntPoint"));
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetQuatPropertyRequest>(const UWorld* World, const SetQuatPropertyRequest& Request)
+{
+	// Convert from right-handed (API convention) to Unreal's left-handed FQuat.
+	const FQuat Quat = QuantityConverter<UC_NONE, R2L>::Convert(FQuat(Request.x(), Request.y(), Request.z(), Request.w()));
+	return SetStructPropertyImpl(World, Request, Quat, TEXT("FQuat"));
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetTransformPropertyRequest>(const UWorld* World, const SetTransformPropertyRequest& Request)
+{
+	// Same conventions as SpawnActor/SetActorTransform: m -> cm for location, rad/right-handed -> deg/left-handed for rotation.
+	const FTransform Transform = ToUnrealTransform(Request.value());
+	return SetStructPropertyImpl(World, Request, Transform, TEXT("FTransform"));
+}
+
+template <typename RequestType>
+grpc::Status SetObjectProperty(const UWorld* World, const RequestType& Request, UObject* Object)
+{
+	// FObjectProperty also catches FClassProperty (it derives from FObjectProperty); FSoftObjectProperty
+	// also catches FSoftClassProperty (which derives from FSoftObjectProperty).
+	return TryPropertyTypes<FObjectProperty, FSoftObjectProperty>(World, Request, Object);
+}
+
+template <typename RequestType>
+grpc::Status SetObjectArrayProperty(const UWorld* World, const RequestType& Request, const TArray<UObject*>& Objects)
+{
+	// First try to set it as an FObjectProperty array, then fall back on an FSoftObjectProperty array.
+	grpc::Status ObjectStatus = SetArrayPropertyImpl<FObjectProperty>(World, Request, Objects);
+
+	// If we got an error other than FAILED_PRECONDITION that means the type was right, but something else was wrong.
+	if (ObjectStatus.ok() || ObjectStatus.error_code() != grpc::FAILED_PRECONDITION)
+	{
+		return ObjectStatus;
+	}
+
+	return SetArrayPropertyImpl<FSoftObjectProperty>(World, Request, Objects);
+}
+
+template <typename RequestType>
+grpc::Status SetObjectSetProperty(const UWorld* World, const RequestType& Request, const TArray<UObject*>& Objects)
+{
+	// First try to set it as an FObjectProperty set, then fall back on an FSoftObjectProperty set.
+	grpc::Status ObjectStatus = SetSetPropertyImpl<FObjectProperty>(World, Request, Objects);
+	if (ObjectStatus.ok() || ObjectStatus.error_code() != grpc::FAILED_PRECONDITION)
+	{
+		return ObjectStatus;
+	}
+	return SetSetPropertyImpl<FSoftObjectProperty>(World, Request, Objects);
+}
+
+template<>
 grpc::Status SetPropertyImpl<SetClassPropertyRequest>(const UWorld* World, const SetClassPropertyRequest& Request)
 {
 	const FString ClassName(UTF8_TO_TCHAR(Request.value().c_str()));
@@ -1479,7 +2024,7 @@ grpc::Status SetPropertyImpl<SetClassPropertyRequest>(const UWorld* World, const
 	{
 		return grpc::Status(grpc::NOT_FOUND, "Did not find class with name " + std::string(TCHAR_TO_UTF8(*ClassName)));
 	}
-	return SetSinglePropertyImpl<FObjectProperty>(World, Request, Class);
+	return SetObjectProperty(World, Request, Class);
 }
 
 template<>
@@ -1515,7 +2060,7 @@ grpc::Status SetPropertyImpl<SetActorPropertyRequest>(const UWorld* World, const
 	{
 		return grpc::Status(grpc::NOT_FOUND, "Did not find actor with name " + std::string(TCHAR_TO_UTF8(*ActorName)));
 	}
-	return SetSinglePropertyImpl<FObjectProperty>(World, Request, Actor);
+	return SetObjectProperty(World, Request, Actor);
 }
 
 template<>
@@ -1533,19 +2078,22 @@ grpc::Status SetPropertyImpl<SetComponentPropertyRequest>(const UWorld* World, c
 	FullName.Split(TEXT(":"), &ActorName, &ComponentName);
 	if (ActorName.IsEmpty() || ComponentName.IsEmpty())
 	{
-		return grpc::Status(grpc::FAILED_PRECONDITION, "Value must be specified as ActorName:ComponentName");
+		const FString ErrorMsg = FString::Printf(TEXT("Component property value '%s' is malformed; expected 'ActorName:ComponentName'"), *FullName);
+		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 	}
 	const AActor* Actor = GetActorWithName(World, ActorName);
 	if (!Actor)
 	{
-		return grpc::Status(grpc::NOT_FOUND, "Did not find actor with name " + std::string(TCHAR_TO_UTF8(*ActorName)));
+		const FString ErrorMsg = FString::Printf(TEXT("Failed to find actor '%s' for component property value '%s'"), *ActorName, *FullName);
+		return grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 	}
 	UActorComponent* Component = GetComponentWithName(Actor, ComponentName);
 	if (!Component)
 	{
-		return grpc::Status(grpc::NOT_FOUND, "Did not find component with name " + std::string(TCHAR_TO_UTF8(*ComponentName)));
+		const FString ErrorMsg = FString::Printf(TEXT("Failed to find component '%s' on actor '%s' for component property value '%s'"), *ComponentName, *ActorName, *FullName);
+		return grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 	}
-	return SetSinglePropertyImpl<FObjectProperty>(World, Request, Component);
+	return SetObjectProperty(World, Request, Component);
 }
 
 template<>
@@ -1609,6 +2157,20 @@ grpc::Status SetPropertyImpl<SetIntArrayPropertyRequest>(const UWorld* World, co
 }
 
 template<>
+grpc::Status SetPropertyImpl<SetInt64ArrayPropertyRequest>(const UWorld* World, const SetInt64ArrayPropertyRequest& Request)
+{
+	// Protobuf's int64 is `long` on Linux but Unreal's int64 is `long long`; same width, different
+	// C++ types, so the pointer overload of TArray::Append can't match. Copy element-by-element instead.
+	TArray<int64> Array;
+	Array.Reserve(Request.values_size());
+	for (const int64 V : Request.values())
+	{
+		Array.Add(V);
+	}
+	return SetArrayPropertyImpl<FInt64Property>(World, Request, Array);
+}
+
+template<>
 grpc::Status SetPropertyImpl<SetFloatArrayPropertyRequest>(const UWorld* World, const SetFloatArrayPropertyRequest& Request)
 {
 	// First try to set it as a double array, then fall back on float array
@@ -1626,7 +2188,7 @@ grpc::Status SetPropertyImpl<SetFloatArrayPropertyRequest>(const UWorld* World, 
 template<>
 grpc::Status SetPropertyImpl<SetClassArrayPropertyRequest>(const UWorld* World, const SetClassArrayPropertyRequest& Request)
 {
-	TArray<UClass*> ClassArray;
+	TArray<UObject*> ClassArray;
 	for (const std::string& Value : Request.values())
 	{
 		const FString ClassName(UTF8_TO_TCHAR(Value.c_str()));
@@ -1637,7 +2199,7 @@ grpc::Status SetPropertyImpl<SetClassArrayPropertyRequest>(const UWorld* World, 
 		}
 		ClassArray.Add(Class);
 	}
-	return SetArrayPropertyImpl<FObjectProperty>(World, Request, ClassArray);
+	return SetObjectArrayProperty(World, Request, ClassArray);
 }
 
 template<>
@@ -1660,7 +2222,7 @@ grpc::Status SetPropertyImpl<SetAssetArrayPropertyRequest>(const UWorld* World, 
 template<>
 grpc::Status SetPropertyImpl<SetActorArrayPropertyRequest>(const UWorld* World, const SetActorArrayPropertyRequest& Request)
 {
-	TArray<AActor*> ActorArray;
+	TArray<UObject*> ActorArray;
 	for (const std::string& Value : Request.values())
 	{
 		const FString ActorName(UTF8_TO_TCHAR(Value.c_str()));
@@ -1671,13 +2233,13 @@ grpc::Status SetPropertyImpl<SetActorArrayPropertyRequest>(const UWorld* World, 
 		}
 		ActorArray.Add(Actor);
 	}
-	return SetArrayPropertyImpl<FObjectProperty>(World, Request, ActorArray);
+	return SetObjectArrayProperty(World, Request, ActorArray);
 }
 
 template<>
 grpc::Status SetPropertyImpl<SetComponentArrayPropertyRequest>(const UWorld* World, const SetComponentArrayPropertyRequest& Request)
 {
-	TArray<UActorComponent*> ComponentArray;
+	TArray<UObject*> ComponentArray;
 	for (const std::string& Value : Request.values())
 	{
 		const FString FullName(UTF8_TO_TCHAR(Value.c_str()));
@@ -1686,21 +2248,190 @@ grpc::Status SetPropertyImpl<SetComponentArrayPropertyRequest>(const UWorld* Wor
 		FullName.Split(TEXT(":"), &ActorName, &ComponentName);
 		if (ActorName.IsEmpty() || ComponentName.IsEmpty())
 		{
-			return grpc::Status(grpc::FAILED_PRECONDITION, "Value must be specified as ActorName:ComponentName");
+			const FString ErrorMsg = FString::Printf(TEXT("Component array property value '%s' is malformed; expected 'ActorName:ComponentName'"), *FullName);
+			return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 		}
 		const AActor* Actor = GetActorWithName(World, ActorName);
 		if (!Actor)
 		{
-			return grpc::Status(grpc::NOT_FOUND, "Did not find actor with name " + std::string(TCHAR_TO_UTF8(*ActorName)));
+			const FString ErrorMsg = FString::Printf(TEXT("Failed to find actor '%s' for component array property value '%s'"), *ActorName, *FullName);
+			return grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 		}
 		UActorComponent* Component = GetComponentWithName(Actor, ComponentName);
 		if (!Component)
 		{
-			return grpc::Status(grpc::NOT_FOUND, "Did not find component with name " + std::string(TCHAR_TO_UTF8(*ComponentName)));
+			const FString ErrorMsg = FString::Printf(TEXT("Failed to find component '%s' on actor '%s' for component array property value '%s'"), *ComponentName, *ActorName, *FullName);
+			return grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 		}
 		ComponentArray.Add(Component);
 	}
-	return SetArrayPropertyImpl<FObjectProperty>(World, Request, ComponentArray);
+	return SetObjectArrayProperty(World, Request, ComponentArray);
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetBoolSetPropertyRequest>(const UWorld* World, const SetBoolSetPropertyRequest& Request)
+{
+	TArray<bool> Array;
+	Array.Append(Request.values().data(), Request.values_size());
+	return SetSetPropertyImpl<FBoolProperty>(World, Request, Array);
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetStringSetPropertyRequest>(const UWorld* World, const SetStringSetPropertyRequest& Request)
+{
+	TArray<FString> StrArray;
+	StrArray.Reserve(Request.values_size());
+	for (const std::string& String : Request.values())
+	{
+		StrArray.Add(UTF8_TO_TCHAR(String.c_str()));
+	}
+	const grpc::Status StatusStr = SetSetPropertyImpl<FStrProperty>(World, Request, StrArray);
+	if (StatusStr.ok() || StatusStr.error_code() != grpc::FAILED_PRECONDITION)
+	{
+		return StatusStr;
+	}
+	TArray<FName> NameArray;
+	NameArray.Reserve(Request.values_size());
+	for (const std::string& String : Request.values())
+	{
+		NameArray.Add(UTF8_TO_TCHAR(String.c_str()));
+	}
+	return SetSetPropertyImpl<FNameProperty>(World, Request, NameArray);
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetEnumSetPropertyRequest>(const UWorld* World, const SetEnumSetPropertyRequest& Request)
+{
+	TArray<FString> StrArray;
+	StrArray.Reserve(Request.values_size());
+	for (const std::string& String : Request.values())
+	{
+		StrArray.Add(UTF8_TO_TCHAR(String.c_str()));
+	}
+	const grpc::Status EnumStatus = SetSetPropertyImpl<FEnumProperty>(World, Request, StrArray);
+	if (EnumStatus.ok() || EnumStatus.error_code() != grpc::FAILED_PRECONDITION)
+	{
+		return EnumStatus;
+	}
+	return SetSetPropertyImpl<FByteProperty>(World, Request, StrArray);
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetIntSetPropertyRequest>(const UWorld* World, const SetIntSetPropertyRequest& Request)
+{
+	TArray<int32> Array;
+	Array.Append(Request.values().data(), Request.values_size());
+	return SetSetPropertyImpl<FIntProperty>(World, Request, Array);
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetInt64SetPropertyRequest>(const UWorld* World, const SetInt64SetPropertyRequest& Request)
+{
+	// Protobuf's int64 is `long` on Linux but Unreal's int64 is `long long`; same width, different
+	// C++ types, so the pointer overload of TArray::Append can't match. Copy element-by-element instead.
+	TArray<int64> Array;
+	Array.Reserve(Request.values_size());
+	for (const int64 V : Request.values())
+	{
+		Array.Add(V);
+	}
+	return SetSetPropertyImpl<FInt64Property>(World, Request, Array);
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetFloatSetPropertyRequest>(const UWorld* World, const SetFloatSetPropertyRequest& Request)
+{
+	TArray<float> FloatArray;
+	FloatArray.Append(Request.values().data(), Request.values_size());
+	const grpc::Status StatusFloat = SetSetPropertyImpl<FDoubleProperty>(World, Request, FloatArray);
+	if (StatusFloat.ok() || StatusFloat.error_code() != grpc::FAILED_PRECONDITION)
+	{
+		return StatusFloat;
+	}
+	return SetSetPropertyImpl<FFloatProperty>(World, Request, FloatArray);
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetClassSetPropertyRequest>(const UWorld* World, const SetClassSetPropertyRequest& Request)
+{
+	TArray<UObject*> ClassArray;
+	for (const std::string& Value : Request.values())
+	{
+		const FString ClassName(UTF8_TO_TCHAR(Value.c_str()));
+		UClass* Class = GetSubClassWithName<UObject>(ClassName);
+		if (!Class)
+		{
+			return grpc::Status(grpc::NOT_FOUND, "Did not find class with name " + std::string(TCHAR_TO_UTF8(*ClassName)));
+		}
+		ClassArray.Add(Class);
+	}
+	return SetObjectSetProperty(World, Request, ClassArray);
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetAssetSetPropertyRequest>(const UWorld* World, const SetAssetSetPropertyRequest& Request)
+{
+	TArray<UObject*> AssetArray;
+	for (const std::string& Value : Request.values())
+	{
+		const FString AssetPath(UTF8_TO_TCHAR(Value.c_str()));
+		UObject* Asset = GetAssetByPath(AssetPath);
+		if (!Asset)
+		{
+			return grpc::Status(grpc::NOT_FOUND, "Did not find asset with path " + std::string(TCHAR_TO_UTF8(*AssetPath)));
+		}
+		AssetArray.Add(Asset);
+	}
+	return SetObjectSetProperty(World, Request, AssetArray);
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetActorSetPropertyRequest>(const UWorld* World, const SetActorSetPropertyRequest& Request)
+{
+	TArray<UObject*> ActorArray;
+	for (const std::string& Value : Request.values())
+	{
+		const FString ActorName(UTF8_TO_TCHAR(Value.c_str()));
+		AActor* Actor = GetActorWithName(World, ActorName);
+		if (!Actor)
+		{
+			return grpc::Status(grpc::NOT_FOUND, "Did not find actor with name " + std::string(TCHAR_TO_UTF8(*ActorName)));
+		}
+		ActorArray.Add(Actor);
+	}
+	return SetObjectSetProperty(World, Request, ActorArray);
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetComponentSetPropertyRequest>(const UWorld* World, const SetComponentSetPropertyRequest& Request)
+{
+	TArray<UObject*> ComponentArray;
+	for (const std::string& Value : Request.values())
+	{
+		const FString FullName(UTF8_TO_TCHAR(Value.c_str()));
+		FString ActorName;
+		FString ComponentName;
+		FullName.Split(TEXT(":"), &ActorName, &ComponentName);
+		if (ActorName.IsEmpty() || ComponentName.IsEmpty())
+		{
+			const FString ErrorMsg = FString::Printf(TEXT("Component set property value '%s' is malformed; expected 'ActorName:ComponentName'"), *FullName);
+			return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+		}
+		const AActor* Actor = GetActorWithName(World, ActorName);
+		if (!Actor)
+		{
+			const FString ErrorMsg = FString::Printf(TEXT("Failed to find actor '%s' for component set property value '%s'"), *ActorName, *FullName);
+			return grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+		}
+		UActorComponent* Component = GetComponentWithName(Actor, ComponentName);
+		if (!Component)
+		{
+			const FString ErrorMsg = FString::Printf(TEXT("Failed to find component '%s' on actor '%s' for component set property value '%s'"), *ComponentName, *ActorName, *FullName);
+			return grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+		}
+		ComponentArray.Add(Component);
+	}
+	return SetObjectSetProperty(World, Request, ComponentArray);
 }
 
 template <typename RequestType>
@@ -1721,7 +2452,7 @@ void UTempoWorldControlServiceSubsystem::CallObjectFunction(const CallFunctionRe
 
 	if (Request.function().empty())
 	{
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Function name must be specified"));
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "function must be specified in CallFunction request"));
 		return;
 	}
 
@@ -1729,13 +2460,15 @@ void UTempoWorldControlServiceSubsystem::CallObjectFunction(const CallFunctionRe
 	UFunction* Function = Object->GetClass()->FindFunctionByName(FunctionName);
 	if (!Function)
 	{
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, "Function not found"));
+		const FString ErrorMsg = FString::Printf(TEXT("Function '%s' not found on object '%s' (class '%s')"), *FunctionName.ToString(), *Object->GetName(), *Object->GetClass()->GetName());
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 
 	if (Function->NumParms != 0)
 	{
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "Only functions with no arguments and void return type are currently supported"));
+		const FString ErrorMsg = FString::Printf(TEXT("Function '%s' on object '%s' has %d parameters, but only functions with no arguments and void return type are currently supported"), *FunctionName.ToString(), *Object->GetName(), Function->NumParms);
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 
