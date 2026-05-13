@@ -284,6 +284,15 @@ public:
 	// of the base CPU readback path. Called via UTempoSensorServiceSubsystem::OnRenderFrameCompleted.
 	virtual void OnRenderCompleted() override;
 
+	// USceneCaptureComponent::AddReferencedObjects only walks the inherited ViewStates indirect
+	// array; our per-tile FSceneViewStateReference members aren't in that array, so the MIDPool
+	// each view state holds (UMaterialInstanceDynamic instances created on demand by
+	// UMaterialInterface::OverrideBlendableSettings for any PostProcessVolume material applied to
+	// the view) is unreachable from GC. Once those MIDs get collected, queued render commands
+	// still hold raw pointers to their FMaterialRenderProxy and fatal in CacheUniformExpressions.
+	// Forward each tile's view state to the collector to keep its MIDPool reachable.
+	static void AddReferencedObjects(UObject* InThis, FReferenceCollector& Collector);
+
 protected:
 	virtual bool HasPendingRequests() const override { return HasPendingCameraRequests(); }
 	virtual int32 GetNumActiveTiles() const override;

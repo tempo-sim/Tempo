@@ -1479,6 +1479,19 @@ void UTempoCamera::AllocateTileViewState(FTempoCameraTile& Tile)
 	}
 }
 
+void UTempoCamera::AddReferencedObjects(UObject* InThis, FReferenceCollector& Collector)
+{
+	UTempoCamera* This = CastChecked<UTempoCamera>(InThis);
+	for (FTempoCameraTile& Tile : This->Tiles)
+	{
+		if (FSceneViewStateInterface* Ref = Tile.ViewState.GetReference())
+		{
+			Ref->AddReferencedObjects(Collector);
+		}
+	}
+	Super::AddReferencedObjects(InThis, Collector);
+}
+
 void UTempoCamera::RetireDistortionMap(UTexture2D* DistortionMap)
 {
 	if (DistortionMap)

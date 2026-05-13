@@ -153,6 +153,15 @@ public:
 
 	void RequestMeasurement(const TempoSensors::LidarScanRequest& Request, const TResponseDelegate<TempoSensors::LidarScanSegment>& ResponseContinuation);
 
+	// USceneCaptureComponent::AddReferencedObjects only walks the inherited ViewStates indirect
+	// array; our per-tile FSceneViewStateReference members aren't in that array, so the MIDPool
+	// each view state holds (UMaterialInstanceDynamic instances created on demand by
+	// UMaterialInterface::OverrideBlendableSettings for any PostProcessVolume material applied to
+	// the view) is unreachable from GC. Once those MIDs get collected, queued render commands
+	// still hold raw pointers to their FMaterialRenderProxy and fatal in CacheUniformExpressions.
+	// Forward each tile's view state to the collector to keep its MIDPool reachable.
+	static void AddReferencedObjects(UObject* InThis, FReferenceCollector& Collector);
+
 protected:
 	// UTempoSceneCaptureComponent2D hooks: the lidar manages its own single readback from the packed
 	// SharedTextureTarget and drives its own timer; it never calls CaptureScene() on itself.
