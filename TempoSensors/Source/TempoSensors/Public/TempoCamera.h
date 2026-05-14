@@ -298,7 +298,7 @@ protected:
 	virtual int32 GetNumActiveTiles() const override;
 	virtual void RenderCapture() override;
 
-	TFuture<void> DecodeAndRespond(TUniquePtr<FTextureRead> TextureRead);
+	TFuture<void> DecodeAndRespond(TSharedPtr<FTextureRead> TextureRead);
 
 	// Begin UTempoTiledSceneCaptureComponent tile interface
 	virtual void SyncTiles() override;

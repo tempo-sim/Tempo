@@ -52,7 +52,7 @@ TOptional<TFuture<void>> UTempoLidar::SendMeasurements()
 
 	if (TextureReadQueue.NextReadComplete())
 	{
-		TUniquePtr<FTextureRead> TextureRead = TextureReadQueue.DequeueIfReadComplete();
+		TSharedPtr<FTextureRead> TextureRead = TextureReadQueue.DequeueIfReadComplete();
 		check(TextureRead->GetType() == TEXT("LidarShared"));
 		FLidarSharedTextureRead* SharedRead = static_cast<FLidarSharedTextureRead*>(TextureRead.Get());
 		TArray<TUniquePtr<FTextureRead>> SliceReads = SharedRead->SplitIntoSlices();
@@ -685,7 +685,7 @@ void UTempoLidar::RenderCapture()
 	// Render all views in one family directly into SharedTextureTarget.
 	TempoMultiViewCapture::RenderTiles(Scene, this, SharedTextureTarget, ViewSetups, ESceneCaptureSource::SCS_FinalColorLDR);
 
-	FLidarSharedTextureRead* NewRead = new FLidarSharedTextureRead(
+	TSharedPtr<FLidarSharedTextureRead> NewRead = MakeShared<FLidarSharedTextureRead>(
 		FIntPoint(PackedX, MaxY), SequenceId, CaptureTime, GetOwnerName(), GetSensorName(),
 		GetComponentTransform(), MoveTemp(Slices));
 
@@ -695,7 +695,10 @@ void UTempoLidar::RenderCapture()
 
 	const FTextureRHIRef StagingTex = NewRead->StagingTexture;
 
-	// Single copy from the packed atlas to staging — the atlas IS the packed output.
+	// Single copy from the packed atlas to staging — the atlas IS the packed output. The lambda
+	// holds a TSharedPtr to NewRead so a concurrent TextureReadQueue.Empty() on the game thread
+	// (e.g., from InitSharedRenderTarget during a reconfigure) can't free the read before this
+	// command runs.
 	ENQUEUE_RENDER_COMMAND(TempoLidarStagingCopy)(
 		[SharedRTResource, StagingTex, NewRead](FRHICommandListImmediate& RHICmdList)
 		{
@@ -708,7 +711,7 @@ void UTempoLidar::RenderCapture()
 			RHICmdList.WriteGPUFence(NewRead->RenderFence);
 		});
 
-	TextureReadQueue.Enqueue(NewRead);
+	TextureReadQueue.Enqueue(MoveTemp(NewRead));
 }
 
 TArray<TUniquePtr<FTextureRead>> FLidarSharedTextureRead::SplitIntoSlices()

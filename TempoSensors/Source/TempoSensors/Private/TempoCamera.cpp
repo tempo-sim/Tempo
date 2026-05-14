@@ -453,7 +453,7 @@ TOptional<TFuture<void>> UTempoCamera::SendMeasurements()
 
 	if (TextureReadQueue.NextReadComplete())
 	{
-		TUniquePtr<FTextureRead> TextureRead = TextureReadQueue.DequeueIfReadComplete();
+		TSharedPtr<FTextureRead> TextureRead = TextureReadQueue.DequeueIfReadComplete();
 		const bool bReadHasDepth = TextureRead->GetType() == TEXT("WithDepth");
 		Future = DecodeAndRespond(MoveTemp(TextureRead));
 
@@ -609,7 +609,7 @@ void UTempoCamera::OnRenderCompleted()
 		});
 }
 
-TFuture<void> UTempoCamera::DecodeAndRespond(TUniquePtr<FTextureRead> TextureRead)
+TFuture<void> UTempoCamera::DecodeAndRespond(TSharedPtr<FTextureRead> TextureRead)
 {
 	const double TransmissionTime = GetWorld()->GetTimeSeconds();
 
@@ -1223,13 +1223,19 @@ void UTempoCamera::RenderCapture()
 		InstanceToSemanticMap = Labeler->GetInstanceToSemanticIdMap();
 	}
 
-	FTextureRead* NewRead = bDepthEnabled
-		? static_cast<FTextureRead*>(new TTextureRead<FCameraPixelWithDepth>(
+	TSharedPtr<FTextureRead> NewRead;
+	if (bDepthEnabled)
+	{
+		NewRead = MakeShared<TTextureRead<FCameraPixelWithDepth>>(
 			SizeXY, SequenceId, GetWorld()->GetTimeSeconds(), GetOwnerName(), GetSensorName(),
-			GetComponentTransform(), MinDepth, MaxDepth, MoveTemp(InstanceToSemanticMap)))
-		: static_cast<FTextureRead*>(new TTextureRead<FCameraPixelNoDepth>(
+			GetComponentTransform(), MinDepth, MaxDepth, MoveTemp(InstanceToSemanticMap));
+	}
+	else
+	{
+		NewRead = MakeShared<TTextureRead<FCameraPixelNoDepth>>(
 			SizeXY, SequenceId, GetWorld()->GetTimeSeconds(), GetOwnerName(), GetSensorName(),
-			GetComponentTransform(), MoveTemp(InstanceToSemanticMap)));
+			GetComponentTransform(), MoveTemp(InstanceToSemanticMap));
+	}
 
 	NewRead->StagingTexture = AcquireNextStagingTexture();
 
@@ -1339,7 +1345,10 @@ void UTempoCamera::RenderCapture()
 		}
 	}
 
-	// Staging copy + fence: runs after the Canvas stitch via render-thread FIFO.
+	// Staging copy + fence: runs after the Canvas stitch via render-thread FIFO. The lambda holds
+	// a TSharedPtr to NewRead so a concurrent TextureReadQueue.Empty() on the game thread (e.g.,
+	// triggered by SetDepthEnabled in SendMeasurements) can't free the read out from under us
+	// before this command runs.
 	ENQUEUE_RENDER_COMMAND(TempoCameraStagingCopy)(
 		[SharedRTResource, StagingTex, NewRead](FRHICommandListImmediate& RHICmdList)
 		{
@@ -1373,7 +1382,7 @@ void UTempoCamera::RenderCapture()
 		LumenScreenProbeTemporalFilterCVar->Set(*FString::FromInt(SavedLumenScreenProbeTemporalFilter), ECVF_SetByConsole);
 	}
 
-	TextureReadQueue.Enqueue(NewRead);
+	TextureReadQueue.Enqueue(MoveTemp(NewRead));
 }
 
 // ------------------------------------------------------------------------------------
