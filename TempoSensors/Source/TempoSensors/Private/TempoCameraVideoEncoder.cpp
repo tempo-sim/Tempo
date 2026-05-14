@@ -52,10 +52,10 @@ struct FTempoCameraVideoEncoder::FImpl
 	// Hardware device this encoder runs against (cached from FAVDevice::GetHardwareDevice()).
 	TSharedPtr<FAVDevice> Device;
 
-	// Staging texture used to feed the encoder. Required on Mac (Metal) because the
-	// FVideoResourceRHI -> FVideoResourceMetal transform needs the source texture to have the
-	// CPUReadback flag — UE render-target textures don't. Allocated lazily, reused across frames
-	// when descriptor matches, copied into via CopyFrom each frame.
+	// Staging texture used to feed the encoder on Mac/Linux, where the camera's render target lacks
+	// the platform-specific flag the encoder backend needs (CPUReadback for Metal/VideoToolbox,
+	// External for Vulkan→CUDA interop). Allocated lazily, reused across frames when the descriptor
+	// matches, copied into via CopyFrom each frame. Unused on Windows — we wrap the RT directly.
 	TSharedPtr<FVideoResourceRHI> StagingResource;
 
 	FTempoCameraVideoEncoder::FConfig AppliedConfig;
@@ -228,28 +228,38 @@ void FTempoCameraVideoEncoder::EncodeRenderTarget_RenderThread(UTextureRenderTar
 	const uint32 KFI = Impl->AppliedConfig.KeyframeInterval > 0 ? Impl->AppliedConfig.KeyframeInterval : 30;
 	const bool bForceKeyframe = (Impl->FrameCount % KFI) == 0;
 
-	// Build (or reuse) a staging resource and CopyFrom the camera's RT into it, then submit the
-	// staging resource. The required ETextureCreateFlags differ per platform:
+	const TSharedRef<FAVDevice> EncoderDevice = Impl->Encoder->GetDevice().ToSharedRef();
+
+	// On Mac/Linux the camera's RT lacks the platform flag the encoder backend needs, so we own a
+	// staging resource and CopyFrom into it before submitting:
 	//   - Mac (VideoToolbox via Metal): CPUReadback. The RHI->Metal resource transform asserts on it.
 	//   - Linux (NVENC via Vulkan->CUDA interop): External. NVCodecs imports the Vulkan image via
 	//     VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT, then cuExternalMemoryGetMappedMipmappedArray
 	//     it for the encoder. The External flag is what tells the RHI to allocate the image's
 	//     memory with VK_EXPORT_MEMORY_ALLOCATE_INFO + use VK_IMAGE_TILING_OPTIMAL. Without it,
 	//     CUDA reports "Failed to bind mipmappedArray".
-	//   - Win64 (NVENC/AMF via D3D shared handle): Shared. Needed so the encoder can open the same
-	//     resource on its own device.
+	// On Windows the camera RT already carries Shared (UTempoCamera sets bGPUSharedFlag = true on
+	// SharedFinalTextureTarget), so we can wrap and submit it directly. Allocating a staging RT
+	// through FVideoResourceRHI::Create here produced a placed pool-allocator resource that
+	// NVENC's D3D12 path rejected with INVALID_PARAM (NVENC 8) inside nvEncRegisterResource.
+	TSharedPtr<FVideoResourceRHI> InputResource;
+#if PLATFORM_WINDOWS
+	{
+		FVideoResourceRHI::FRawData Raw;
+		Raw.Texture = Texture;
+		Raw.FenceValue = 0;
+		InputResource = MakeShareable(new FVideoResourceRHI(EncoderDevice, Raw));
+	}
+#else
 	constexpr ETextureCreateFlags StagingFlags =
 #if PLATFORM_APPLE
 		ETextureCreateFlags::CPUReadback;
 #elif PLATFORM_LINUX
 		ETextureCreateFlags::External;
-#elif PLATFORM_WINDOWS
-		ETextureCreateFlags::Shared;
 #else
 		ETextureCreateFlags::None;
 #endif
 
-	const TSharedRef<FAVDevice> EncoderDevice = Impl->Encoder->GetDevice().ToSharedRef();
 	const FVideoDescriptor Desc = FVideoResourceRHI::GetDescriptorFrom(EncoderDevice, Texture);
 	if (!Impl->StagingResource.IsValid()
 		|| Impl->StagingResource->GetDescriptor() != Desc)
@@ -265,9 +275,11 @@ void FTempoCameraVideoEncoder::EncodeRenderTarget_RenderThread(UTextureRenderTar
 		}
 	}
 	Impl->StagingResource->CopyFrom(Texture);
+	InputResource = Impl->StagingResource;
+#endif
 
 	const uint32 Timestamp = static_cast<uint32>(Impl->FrameCount);
-	const FAVResult SendResult = Impl->Encoder->SendFrame(Impl->StagingResource, Timestamp, bForceKeyframe);
+	const FAVResult SendResult = Impl->Encoder->SendFrame(InputResource, Timestamp, bForceKeyframe);
 	if (SendResult.IsNotSuccess())
 	{
 		UE_LOG(LogTempoSensors, Warning, TEXT("FTempoCameraVideoEncoder::SendFrame failed: %s"), *SendResult.Message);
