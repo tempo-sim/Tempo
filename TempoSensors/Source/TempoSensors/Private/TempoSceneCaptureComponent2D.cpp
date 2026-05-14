@@ -208,7 +208,7 @@ void UTempoSceneCaptureComponent2D::UpdateSceneCaptureContents(FSceneInterface* 
 
 	SequenceId++;
 
-	FTextureRead* NewRead = MakeTextureRead();
+	TSharedPtr<FTextureRead> NewRead(MakeTextureRead());
 	NewRead->StagingTexture = AcquireNextStagingTexture();
 
 	ENQUEUE_RENDER_COMMAND(SetTempoSceneCaptureRenderFence)(
@@ -218,7 +218,7 @@ void UTempoSceneCaptureComponent2D::UpdateSceneCaptureContents(FSceneInterface* 
 		RHICmdList.WriteGPUFence(NewRead->RenderFence);
 	});
 
-	TextureReadQueue.Enqueue(NewRead);
+	TextureReadQueue.Enqueue(MoveTemp(NewRead));
 }
 
 bool UTempoSceneCaptureComponent2D::IsAnyReadAwaitingRender() const
@@ -251,8 +251,8 @@ void UTempoSceneCaptureComponent2D::BlockUntilNextReadComplete() const
 	TextureReadQueue.BlockUntilNextReadComplete();
 }
 
-TUniquePtr<FTextureRead> UTempoSceneCaptureComponent2D::DequeueIfReadComplete()
-{	
+TSharedPtr<FTextureRead> UTempoSceneCaptureComponent2D::DequeueIfReadComplete()
+{
 	return TextureReadQueue.DequeueIfReadComplete();
 }
 

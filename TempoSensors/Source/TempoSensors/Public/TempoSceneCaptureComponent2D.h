@@ -157,11 +157,14 @@ struct FTextureReadQueue
 		FRWScopeLock_OnlyGTWrite ReadLock(Lock, SLT_ReadOnly);
 		return PendingTextureReads.Num();
 	}
-	
-	void Enqueue(FTextureRead* TextureRead)
+
+	// Shared ownership: the queue and any in-flight render-thread closures referencing the read
+	// each hold a reference, so Empty()/Deactivate() can run on the game thread without UAF'ing a
+	// closure that still needs to write the read's RenderFence.
+	void Enqueue(TSharedPtr<FTextureRead> TextureRead)
 	{
 		FRWScopeLock_OnlyGTWrite WriteLock(Lock, SLT_Write);
-		PendingTextureReads.Emplace(TextureRead);
+		PendingTextureReads.Emplace(MoveTemp(TextureRead));
 	}
 
 	void Empty()
@@ -173,7 +176,7 @@ struct FTextureReadQueue
 	bool IsAnyAwaitingRender() const
 	{
 		FRWScopeLock_OnlyGTWrite ReadLock(Lock, SLT_ReadOnly);
-		for (const TUniquePtr<FTextureRead>& TextureRead : PendingTextureReads)
+		for (const TSharedPtr<FTextureRead>& TextureRead : PendingTextureReads)
 		{
 			if (TextureRead->State == FTextureRead::State::EAwaitingRender)
 			{
@@ -189,7 +192,7 @@ struct FTextureReadQueue
 	{
 		FRWScopeLock_OnlyGTWrite ReadLock(Lock, SLT_ReadOnly);
 		bool bAnyRead = false;
-		for (const TUniquePtr<FTextureRead>& TextureRead : PendingTextureReads)
+		for (const TSharedPtr<FTextureRead>& TextureRead : PendingTextureReads)
 		{
 			if (TextureRead->State != FTextureRead::State::EAwaitingRender || !TextureRead->RenderFence.IsValid())
 			{
@@ -231,15 +234,15 @@ struct FTextureReadQueue
 		}
 	}
 
-	TUniquePtr<FTextureRead> DequeueIfReadComplete()
+	TSharedPtr<FTextureRead> DequeueIfReadComplete()
 	{
 		FRWScopeLock_OnlyGTWrite ReadLock(Lock, SLT_ReadOnly);
 		if (!PendingTextureReads.IsEmpty() && PendingTextureReads[0]->State == FTextureRead::State::EReadComplete)
 		{
 			ReadLock.ReleaseReadOnlyLockAndAcquireWriteLock();
-			TUniquePtr<FTextureRead> TextureRead(PendingTextureReads[0].Release());
+			TSharedPtr<FTextureRead> TextureRead = MoveTemp(PendingTextureReads[0]);
 			PendingTextureReads.RemoveAt(0);
-			return MoveTemp(TextureRead);
+			return TextureRead;
 		}
 		return nullptr;
 	}
@@ -261,7 +264,7 @@ struct FTextureReadQueue
 	}
 
 private:
-	TArray<TUniquePtr<FTextureRead>> PendingTextureReads;
+	TArray<TSharedPtr<FTextureRead>> PendingTextureReads;
 	mutable FRWLock Lock;
 };
 
@@ -307,7 +310,7 @@ protected:
 	bool IsAnyReadAwaitingRender() const;
 	void ReadNextIfAvailable();
 	void BlockUntilNextReadComplete() const;
-	TUniquePtr<FTextureRead> DequeueIfReadComplete();
+	TSharedPtr<FTextureRead> DequeueIfReadComplete();
 	TOptional<int32> SequenceIDOfNextCompleteRead() const;
 	bool NextReadComplete() const;
 
