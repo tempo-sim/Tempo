@@ -107,58 +107,73 @@ void UTempoSceneCaptureComponent2D::UpdateSceneCaptureContents(FSceneInterface* 
 {
 	TextureInitFence.Wait();
 
-// FRayTracingScene includes buffers, StatsReadbackBuffers (StatsReadback in 5.7) and FeedbackReadback, of fixed size.
-// When only rendering the main viewport the default size (4) is sufficient.
-// But when running potentially many scene captures per frame they can easily be overrun, leading to reuse of in-use readbacks and crashes.
-// Here we are "hacking" into the persistent RayTracingScene of the scene and increasing the size of these buffers.
+// FRayTracingScene's StatsReadback / FeedbackReadback are fixed-size rings (MaxReadbackBuffers, 4
+// by default). The main viewport doesn't overrun them, but running many scene captures per frame
+// does — FinishTracingFeedback in particular writes unconditionally without checking
+// `< MaxReadbackBuffers` (see the TODO in RayTracingScene.cpp), so an in-flight readback gets
+// overwritten and EnqueueCopy / Lock later trips. Expand the rings to a configurable size.
+//
+// All FRayTracingScene state lives on the render thread; the expansion must happen there too. We
+// enqueue a render command rather than mutating from the game thread. The hack is idempotent —
+// repeated calls early-return once the rings are already at the target size, so issuing it from
+// every TempoSceneCaptureComponent2D's UpdateSceneCaptureContents is fine.
 #if RHI_RAYTRACING && ENGINE_MAJOR_VERSION == 5 && ((ENGINE_MINOR_VERSION == 5 && STATS) || ENGINE_MINOR_VERSION > 5)
 	const UTempoSensorsSettings* TempoSensorsSettings = GetDefault<UTempoSensorsSettings>();
 	if (TempoSensorsSettings && TempoSensorsSettings->GetRayTracingSceneReadbackBuffersOverrunWorkaroundEnabled())
 	{
 		const uint32 NewMaxReadbackBuffers = TempoSensorsSettings->GetRayTracingSceneMaxReadbackBuffersOverride();
-		FRayTracingScene* RayTracingScene = &Scene->GetRenderScene()->RayTracingScene;
-		if (RayTracingScene->MaxReadbackBuffers < NewMaxReadbackBuffers)
-		{
-			// MaxReadbackBuffers is not only private but const, so we need an additional trick.
-			size_t MaxReadbackBuffersOffset = offsetof(FRayTracingScene, MaxReadbackBuffers);
-			*(reinterpret_cast<char*>(RayTracingScene) + MaxReadbackBuffersOffset) = NewMaxReadbackBuffers;
-		}
+		FSceneInterface* SceneCapture = Scene;
+		ENQUEUE_RENDER_COMMAND(TempoExpandRayTracingReadbackBuffers)(
+			[SceneCapture, NewMaxReadbackBuffers](FRHICommandListImmediate&)
+			{
+				FRayTracingScene* RayTracingScene = &SceneCapture->GetRenderScene()->RayTracingScene;
+				if (RayTracingScene->MaxReadbackBuffers < NewMaxReadbackBuffers)
+				{
+					// MaxReadbackBuffers is declared `const uint32`; bypass via offsetof. The
+					// original write was one byte, which only happened to work for small values on
+					// little-endian — write the full uint32 here.
+					const size_t MaxReadbackBuffersOffset = offsetof(FRayTracingScene, MaxReadbackBuffers);
+					*reinterpret_cast<uint32*>(reinterpret_cast<char*>(RayTracingScene) + MaxReadbackBuffersOffset) = NewMaxReadbackBuffers;
+				}
 #if ENGINE_MINOR_VERSION > 6
-		const uint32 PrevStatsReadbackBuffersSize = RayTracingScene->StatsReadback.Num();
-		if (PrevStatsReadbackBuffersSize < NewMaxReadbackBuffers)
-		{
-			RayTracingScene->StatsReadback.SetNum(NewMaxReadbackBuffers);
-			for (uint32 Index = PrevStatsReadbackBuffersSize; Index < NewMaxReadbackBuffers; ++Index)
-			{
-				RayTracingScene->StatsReadback[Index].ReadbackBuffer = new FRHIGPUBufferReadback(TEXT("FRayTracingScene::StatsReadbackBuffer"));
-				RayTracingScene->StatsReadback[Index].MaxNumViews = RayTracingScene->ActiveViews.GetMaxIndex();
-			}
-		}
+				const uint32 PrevStatsReadbackBuffersSize = RayTracingScene->StatsReadback.Num();
+				if (PrevStatsReadbackBuffersSize < NewMaxReadbackBuffers)
+				{
+					RayTracingScene->StatsReadback.SetNum(NewMaxReadbackBuffers);
+					for (uint32 Index = PrevStatsReadbackBuffersSize; Index < NewMaxReadbackBuffers; ++Index)
+					{
+						RayTracingScene->StatsReadback[Index].ReadbackBuffer = new FRHIGPUBufferReadback(TEXT("FRayTracingScene::StatsReadbackBuffer"));
+						// Don't preset MaxNumViews here — FinishStats sets it at enqueue time
+						// (RayTracingScene.cpp:884), and the GT-time value of ActiveViews.GetMaxIndex()
+						// can be INDEX_NONE (-1) which becomes 0xFFFFFFFF and overflows the read-side
+						// size calc if the entry is ever Lock'd before being written.
+					}
+				}
 #else
-		const uint32 PrevStatsReadbackBuffersSize = RayTracingScene->StatsReadbackBuffers.Num();
-		if (PrevStatsReadbackBuffersSize < NewMaxReadbackBuffers)
-		{
-			RayTracingScene->StatsReadbackBuffers.SetNum(NewMaxReadbackBuffers);
-			for (uint32 Index = PrevStatsReadbackBuffersSize; Index < NewMaxReadbackBuffers; ++Index)
-			{
-				RayTracingScene->StatsReadbackBuffers[Index] = new FRHIGPUBufferReadback(TEXT("FRayTracingScene::StatsReadbackBuffer"));
-			}
-		}
+				const uint32 PrevStatsReadbackBuffersSize = RayTracingScene->StatsReadbackBuffers.Num();
+				if (PrevStatsReadbackBuffersSize < NewMaxReadbackBuffers)
+				{
+					RayTracingScene->StatsReadbackBuffers.SetNum(NewMaxReadbackBuffers);
+					for (uint32 Index = PrevStatsReadbackBuffersSize; Index < NewMaxReadbackBuffers; ++Index)
+					{
+						RayTracingScene->StatsReadbackBuffers[Index] = new FRHIGPUBufferReadback(TEXT("FRayTracingScene::StatsReadbackBuffer"));
+					}
+				}
 #endif
 
-		// FeedbackReadback added in 5.6
 #if ENGINE_MINOR_VERSION > 5
-		const uint32 PrevFeedbackReadbackBuffersSize = RayTracingScene->FeedbackReadback.Num();
-		if (PrevFeedbackReadbackBuffersSize < NewMaxReadbackBuffers)
-		{
-			RayTracingScene->FeedbackReadback.SetNum(NewMaxReadbackBuffers);
-			for (uint32 Index = PrevFeedbackReadbackBuffersSize; Index < NewMaxReadbackBuffers; ++Index)
-			{
-				RayTracingScene->FeedbackReadback[Index].GeometryHandleReadbackBuffer = new FRHIGPUBufferReadback(TEXT("FRayTracingScene::FeedbackReadbackBuffer::GeometryHandles"));
-				RayTracingScene->FeedbackReadback[Index].GeometryCountReadbackBuffer = new FRHIGPUBufferReadback(TEXT("FRayTracingScene::FeedbackReadbackBuffer::GeometryCount"));			
-			}
-		}
+				const uint32 PrevFeedbackReadbackBuffersSize = RayTracingScene->FeedbackReadback.Num();
+				if (PrevFeedbackReadbackBuffersSize < NewMaxReadbackBuffers)
+				{
+					RayTracingScene->FeedbackReadback.SetNum(NewMaxReadbackBuffers);
+					for (uint32 Index = PrevFeedbackReadbackBuffersSize; Index < NewMaxReadbackBuffers; ++Index)
+					{
+						RayTracingScene->FeedbackReadback[Index].GeometryHandleReadbackBuffer = new FRHIGPUBufferReadback(TEXT("FRayTracingScene::FeedbackReadbackBuffer::GeometryHandles"));
+						RayTracingScene->FeedbackReadback[Index].GeometryCountReadbackBuffer = new FRHIGPUBufferReadback(TEXT("FRayTracingScene::FeedbackReadbackBuffer::GeometryCount"));
+					}
+				}
 #endif
+			});
 	}
 #endif
 
@@ -279,7 +294,11 @@ void UTempoSceneCaptureComponent2D::CreateOrResizeDistortionMapTexture(UTexture2
 	OutTexture->AddressX = TA_Clamp;
 	OutTexture->AddressY = TA_Clamp;
 	OutTexture->SRGB = 0;
-	OutTexture->UpdateResource();
+	// No UpdateResource() here — the caller (e.g. FillDistortionMap) writes BulkData and then
+	// calls UpdateResource. Initializing the resource here would race: BeginInitResource queues
+	// a render-thread InitRHI that reads via FBulkData::GetCopy, while the game thread is about
+	// to Lock the same BulkData to write the distortion map. Concurrent Lock + GetCopy mutates
+	// FBulkData internals and corrupts the heap, producing intermittent tbbmalloc crashes.
 }
 
 void UTempoSceneCaptureComponent2D::ApplyDistortionMapToMaterial(UMaterialInstanceDynamic* MaterialInstance, UTexture2D* DistortionMap)
