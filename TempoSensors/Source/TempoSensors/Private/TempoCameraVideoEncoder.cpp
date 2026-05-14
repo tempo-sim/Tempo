@@ -68,6 +68,11 @@ struct FTempoCameraVideoEncoder::FImpl
 	// MPSC packet queue: producer is the render thread, consumer is the game thread (SendMeasurements).
 	TQueue<FTempoEncodedVideoPacket, EQueueMode::Mpsc> PacketQueue;
 
+	// Last source pixel format we logged an "unsupported format" warning for. Lets us emit one
+	// warning per format change (e.g. when a depth subscriber arrives and flips the camera RT to
+	// PF_A16B16G16R16) instead of spamming the log every frame.
+	EPixelFormat LastWarnedUnsupportedFormat = PF_Unknown;
+
 	bool IsOpen() const
 	{
 		return Encoder.IsValid() && Encoder->IsOpen();
@@ -261,6 +266,28 @@ void FTempoCameraVideoEncoder::EncodeRenderTarget_RenderThread(UTextureRenderTar
 #endif
 
 	const FVideoDescriptor Desc = FVideoResourceRHI::GetDescriptorFrom(EncoderDevice, Texture);
+
+	// VideoToolbox only accepts BGRA8 or ABGR10 source pixel buffers; NVENC/AMF likewise have a
+	// short list of supported formats. If the camera RT is in a format the backend doesn't
+	// understand (e.g. PF_A16B16G16R16, used when bDepthEnabled flips on so depth bytes can be
+	// packed into the high half of each 16-bit channel), the encoder hits an `unimplemented()`
+	// inside ApplyConfig() on Mac and crashes. Bail out cleanly and warn once per format change.
+	const EPixelFormat SrcFormat = static_cast<EPixelFormat>(Desc.Format);
+	if (SrcFormat != PF_B8G8R8A8 && SrcFormat != PF_A2B10G10R10)
+	{
+		if (Impl->LastWarnedUnsupportedFormat != SrcFormat)
+		{
+			UE_LOG(LogTempoSensors, Warning,
+				TEXT("FTempoCameraVideoEncoder: source RT pixel format %s is not supported by the H.264 encoder backend; "
+					 "skipping video encode. This typically happens when a depth subscriber flips the camera to PF_A16B16G16R16. "
+					 "Disable depth subscribers (or stop streaming) to recover."),
+				GetPixelFormatString(SrcFormat));
+			Impl->LastWarnedUnsupportedFormat = SrcFormat;
+		}
+		return;
+	}
+	Impl->LastWarnedUnsupportedFormat = PF_Unknown;
+
 	if (!Impl->StagingResource.IsValid()
 		|| Impl->StagingResource->GetDescriptor() != Desc)
 	{
