@@ -147,21 +147,13 @@ jobs:
       run: |
         sudo chown -R 1000:1000 ${{ github.workspace }}/checkout
         sudo chmod -R 755 ${{ github.workspace }}/checkout
-    - name: Sync Third Party Dependencies and Apply Engine Mods
+    - name: Apply Engine Mods
       if: ${{ steps.skip.outputs.skip != 'true' }}
-      uses: nick-fields/retry@v3
-      with:
-        max_attempts: 3
-        retry_on: error
-        timeout_seconds: 60
-        command: |
-          docker rm -f modded_engine >/dev/null 2>&1 || true
-          docker run --name modded_engine \
-            -v ${{ github.workspace }}/checkout/${{ inputs.tempo_root }}:/home/ue4/Tempo \
-            tempo_unreal_image \
-            bash -c "/home/ue4/Tempo/Scripts/SyncDeps.sh -force && \
-                     /home/ue4/Tempo/TempoROS/Scripts/SyncDeps.sh -force && \
-                     /home/ue4/Tempo/Scripts/InstallEngineMods.sh"
+      run: |
+        docker run --name modded_engine \
+          -v ${{ github.workspace }}/checkout/${{ inputs.tempo_root }}:/home/ue4/Tempo \
+          tempo_unreal_image \
+          /home/ue4/Tempo/Scripts/InstallEngineMods.sh
     - name: Login to GHCR (for push, overwrites Epic creds)
       if: ${{ steps.skip.outputs.skip != 'true' }}
       uses: docker/login-action@v2
