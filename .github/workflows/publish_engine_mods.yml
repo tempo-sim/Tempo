@@ -1,0 +1,172 @@
+# ======
+# Publish a Tempo Unreal Docker image with engine mods pre-applied to GHCR.
+# This reusable workflow builds the base Tempo Unreal Docker image (from the Epic-distributed image),
+# runs the Tempo engine-mods install script inside a container, then commits and pushes the resulting
+# image to a parameterized GHCR repository tagged with <unreal_version>-<hashFiles(EngineMods/**)>.
+# A consumer build workflow can then `docker pull` this image instead of running the
+# "Initialize Engine Mods Cache" + "Install Engine Mods" steps each build.
+# The skip-if-tag-exists check makes the workflow idempotent on no-op merges to main.
+# Note: A caller workflow must have EPIC_DOCKER_USERNAME and EPIC_DOCKER_TOKEN secrets and must call
+#       this workflow with 'secrets: inherit'.
+# Note: After the first successful push, set the GHCR package visibility to private via the package
+#       settings UI. Redistribution of UE-derived content publicly is not permitted by the UE EULA.
+# ======
+
+name: Publish Pre-Modded Tempo Unreal Image
+
+on:
+  workflow_call:
+    inputs:
+      unreal_version:
+        type: string
+        required: true
+        description: Which Unreal version to publish for (5.6 or 5.7 are supported)
+      image_name:
+        type: string
+        required: true
+        description: Target GHCR image name without tag, e.g. ghcr.io/<owner>/tempo-unreal-modded
+      checkout_repo:
+        type: string
+        description: Repo to checkout (defaults to the caller's repo)
+        default: ${{ github.repository }}
+      checkout_ref:
+        type: string
+        description: Ref to checkout (defaults to the caller's sha)
+        default: ${{ github.sha }}
+      tempo_root:
+        type: string
+        description: Path to the Tempo source within the checkout
+        default: '.'
+      platform:
+        type: string
+        description: Runner platform
+        default: ubuntu-22.04
+
+env:
+  UNREAL_VERSION: "${{ inputs.unreal_version }}"
+
+jobs:
+  publish:
+    name: Publish Pre-Modded Tempo Unreal Image
+    runs-on: ${{ inputs.platform }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+    - name: Validate Inputs
+      run: |
+        case "${{ inputs.unreal_version }}" in
+          "5.6"|"5.7") ;;
+          *)
+            echo "Error: Invalid Unreal Version. Only 5.6 and 5.7 are supported."
+            exit 1
+            ;;
+        esac
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        repository: ${{ inputs.checkout_repo }}
+        ref: ${{ inputs.checkout_ref }}
+        path: checkout
+        submodules: recursive
+    - name: Compute Engine Mods Hash and Tag
+      id: tag
+      run: |
+        HASH="${{ hashFiles(format('checkout/{0}/EngineMods/**', inputs.tempo_root)) }}"
+        TAG="${{ inputs.image_name }}:${{ env.UNREAL_VERSION }}-$HASH"
+        echo "HASH=$HASH" >> $GITHUB_OUTPUT
+        echo "TAG=$TAG" >> $GITHUB_OUTPUT
+        echo "Target tag: $TAG"
+    - name: Login to GHCR (for tag existence check)
+      uses: docker/login-action@v2
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    - name: Skip if Tag Already Exists
+      id: skip
+      run: |
+        if docker manifest inspect "${{ steps.tag.outputs.TAG }}" >/dev/null 2>&1; then
+          echo "Image ${{ steps.tag.outputs.TAG }} already exists; nothing to publish."
+          echo "skip=true" >> $GITHUB_OUTPUT
+        else
+          echo "skip=false" >> $GITHUB_OUTPUT
+        fi
+    - name: Free Disk Space (if using GitHub-hosted runner)
+      if: ${{ steps.skip.outputs.skip != 'true' && contains(runner.name, 'Github') && contains(runner.name, 'Actions') }}
+      uses: jlumbroso/free-disk-space@main
+      with:
+        tool-cache: true
+        android: true
+        dotnet: true
+        haskell: true
+        large-packages: false
+        docker-images: false
+        swap-storage: false
+    - name: Free Space in /mnt (if using GitHub-hosted runner)
+      if: ${{ steps.skip.outputs.skip != 'true' && contains(runner.name, 'Github') && contains(runner.name, 'Actions') }}
+      run: |
+        sudo rm -rf /mnt/btrfs_loopbacks || true
+        sudo rm -rf /mnt/var-lib-docker || true
+        df -h /mnt
+    - name: Relocate Docker Daemon Data Root (if using GitHub-hosted runner)
+      if: ${{ steps.skip.outputs.skip != 'true' && contains(runner.name, 'Github') && contains(runner.name, 'Actions') }}
+      run: |
+        DOCKER_DATA_ROOT='/mnt/var/lib/docker'
+        DOCKER_DAEMON_JSON='/etc/docker/daemon.json'
+        sudo mkdir -p "${DOCKER_DATA_ROOT}"
+        if [ ! -f "${DOCKER_DAEMON_JSON}" ]; then
+          sudo mkdir -p "${DOCKER_DAEMON_JSON%/*}"
+          echo -e "{\n}" | sudo tee "${DOCKER_DAEMON_JSON}" > /dev/null
+        fi
+        jq --arg dataroot "${DOCKER_DATA_ROOT}" '. + {"data-root": $dataroot}' "${DOCKER_DAEMON_JSON}" > "/tmp/docker.json.tmp"
+        sudo mv "/tmp/docker.json.tmp" "${DOCKER_DAEMON_JSON}"
+        sudo systemctl restart docker
+    - name: Login to Epic Container Registry
+      if: ${{ steps.skip.outputs.skip != 'true' }}
+      uses: docker/login-action@v2
+      with:
+        registry: ghcr.io
+        username: ${{ secrets.EPIC_DOCKER_USERNAME }}
+        password: ${{ secrets.EPIC_DOCKER_TOKEN }}
+    - name: Build Base Tempo Unreal Docker Image
+      if: ${{ steps.skip.outputs.skip != 'true' }}
+      run: |
+        docker build \
+          --build-arg UNREAL_VERSION=${{ env.UNREAL_VERSION }} \
+          --tag tempo_unreal_image \
+          -f ${{ github.workspace }}/checkout/${{ inputs.tempo_root }}/Dockerfile \
+          ${{ github.workspace }}/checkout/${{ inputs.tempo_root }}
+    - name: Fix Tempo Source Permissions for Container
+      if: ${{ steps.skip.outputs.skip != 'true' }}
+      run: |
+        sudo chown -R 1000:1000 ${{ github.workspace }}/checkout
+        sudo chmod -R 755 ${{ github.workspace }}/checkout
+    - name: Sync Third Party Dependencies and Apply Engine Mods
+      if: ${{ steps.skip.outputs.skip != 'true' }}
+      uses: nick-fields/retry@v3
+      with:
+        max_attempts: 3
+        retry_on: error
+        timeout_seconds: 60
+        command: |
+          docker rm -f modded_engine >/dev/null 2>&1 || true
+          docker run --name modded_engine \
+            -v ${{ github.workspace }}/checkout/${{ inputs.tempo_root }}:/home/ue4/Tempo \
+            tempo_unreal_image \
+            bash -c "/home/ue4/Tempo/Scripts/SyncDeps.sh -force && \
+                     /home/ue4/Tempo/TempoROS/Scripts/SyncDeps.sh -force && \
+                     /home/ue4/Tempo/Scripts/InstallEngineMods.sh"
+    - name: Login to GHCR (for push, overwrites Epic creds)
+      if: ${{ steps.skip.outputs.skip != 'true' }}
+      uses: docker/login-action@v2
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    - name: Commit and Push Modded Image
+      if: ${{ steps.skip.outputs.skip != 'true' }}
+      run: |
+        docker commit modded_engine "${{ steps.tag.outputs.TAG }}"
+        docker push "${{ steps.tag.outputs.TAG }}"
+        docker rm modded_engine
