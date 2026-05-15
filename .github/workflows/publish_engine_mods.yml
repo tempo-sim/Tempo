@@ -72,7 +72,12 @@ jobs:
     - name: Compute Engine Mods Hash and Tag
       id: tag
       run: |
-        HASH="${{ hashFiles(format('checkout/{0}/EngineMods/**', inputs.tempo_root)) }}"
+        ENGINE_MODS_DIR="${{ github.workspace }}/checkout/${{ inputs.tempo_root }}/EngineMods"
+        if [ ! -d "$ENGINE_MODS_DIR" ]; then
+          echo "Error: EngineMods directory not found at $ENGINE_MODS_DIR"
+          exit 1
+        fi
+        HASH=$(cd "$ENGINE_MODS_DIR" && find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)
         TAG="${{ inputs.image_name }}:${{ env.UNREAL_VERSION }}-$HASH"
         echo "HASH=$HASH" >> $GITHUB_OUTPUT
         echo "TAG=$TAG" >> $GITHUB_OUTPUT
