@@ -37,3 +37,15 @@ jobs:
       unreal_version: ${{ matrix.unreal_version }}
       image_name: ghcr.io/${{ github.repository_owner }}/tempo-unreal-modded
     secrets: inherit
+  prune:
+    name: Prune Old Modded Images
+    needs: publish
+    permissions:
+      packages: write
+    uses: ./.github/workflows/prune_engine_mods.yml
+    with:
+      package_name: tempo-unreal-modded
+      package_owner: ${{ github.repository_owner }}
+      package_owner_type: orgs
+      keep: 1
+    secrets: inherit
