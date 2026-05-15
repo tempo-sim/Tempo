@@ -1,0 +1,97 @@
+# ======
+# Prune old versions of a Tempo pre-modded Unreal image from GHCR.
+# This reusable workflow lists all versions of a GHCR container package, identifies versions tagged
+# with a <unreal_version>-<hash> pattern, and deletes all but the N most recent per Unreal version.
+# Use it in conjunction with publish_engine_mods.yml to keep storage bounded for private packages.
+# Note: A caller workflow must run in a repo whose GITHUB_TOKEN has packages:write permission for
+#       the target package (typically same-org), or must provide an alternative token via the
+#       'github_token' input (e.g. a PAT in 'secrets').
+# ======
+
+name: Prune Old Tempo Pre-Modded Engine Images
+
+on:
+  workflow_call:
+    inputs:
+      package_name:
+        type: string
+        required: true
+        description: GHCR container package name (e.g. tempo-unreal-modded)
+      package_owner:
+        type: string
+        required: true
+        description: User or org that owns the package
+      package_owner_type:
+        type: string
+        description: '"orgs" or "users"'
+        default: 'orgs'
+      keep:
+        type: number
+        description: Number of most-recent versions to keep per Unreal version
+        default: 1
+
+jobs:
+  prune:
+    name: Prune Old Engine Mods Images
+    runs-on: ubuntu-22.04
+    permissions:
+      packages: write
+    steps:
+    - name: Validate Inputs
+      run: |
+        case "${{ inputs.package_owner_type }}" in
+          "orgs"|"users") ;;
+          *)
+            echo "Error: package_owner_type must be 'orgs' or 'users'."
+            exit 1
+            ;;
+        esac
+    - name: Prune Old Versions
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        API_BASE: /${{ inputs.package_owner_type }}/${{ inputs.package_owner }}/packages/container/${{ inputs.package_name }}
+        KEEP: ${{ inputs.keep }}
+      run: |
+        set -euo pipefail
+
+        echo "Fetching versions from ${API_BASE}/versions"
+        VERSIONS=$(gh api --paginate "${API_BASE}/versions")
+        TOTAL=$(echo "$VERSIONS" | jq 'length')
+        echo "Found $TOTAL total package versions"
+
+        # Build (ue_prefix|created_at|version_id) lines for tags matching X.Y-...
+        TUPLES=$(echo "$VERSIONS" | jq -r '
+          .[] as $v |
+          ($v.metadata.container.tags // [])[] |
+          select(test("^[0-9]+\\.[0-9]+-")) |
+          capture("^(?<ue>[0-9]+\\.[0-9]+)-") |
+          "\(.ue)|\($v.created_at)|\($v.id)"
+        ' || true)
+
+        if [ -z "$TUPLES" ]; then
+          echo "No tags matching <ue>-<hash> pattern; nothing to prune."
+          exit 0
+        fi
+
+        PREFIXES=$(echo "$TUPLES" | cut -d'|' -f1 | sort -u)
+        echo "Unreal versions present: $(echo $PREFIXES | tr '\n' ' ')"
+
+        for UE in $PREFIXES; do
+          echo
+          echo "Processing UE $UE (keep $KEEP most recent)..."
+          SORTED=$(echo "$TUPLES" | awk -F'|' -v ue="$UE" '$1 == ue' | sort -t'|' -k2 -r)
+          IDX=0
+          while IFS='|' read -r _ CREATED ID; do
+            [ -z "$ID" ] && continue
+            IDX=$((IDX+1))
+            if [ "$IDX" -le "$KEEP" ]; then
+              echo "  keep   #${IDX}: id=${ID} created=${CREATED}"
+            else
+              echo "  delete #${IDX}: id=${ID} created=${CREATED}"
+              gh api -X DELETE "${API_BASE}/versions/${ID}"
+            fi
+          done <<< "$SORTED"
+        done
+
+        echo
+        echo "Prune complete."
