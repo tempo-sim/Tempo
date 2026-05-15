@@ -16,7 +16,6 @@ namespace TempoCore
 	class TimeModeRequest;
 	class SetSimStepsPerSecondRequest;
 	class AdvanceStepsRequest;
-	class StepRequest;
 }
 
 UCLASS()
@@ -41,5 +40,5 @@ public:
 
 	void Pause(const TempoCore::Empty& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const;
 
-	void Step(const TempoCore::StepRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const;
+	void Step(const TempoCore::Empty& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const;
 };

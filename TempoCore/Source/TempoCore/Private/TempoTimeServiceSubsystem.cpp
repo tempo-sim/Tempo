@@ -22,7 +22,6 @@ using TempoEmpty = TempoCore::Empty;
 using TimeModeRequest = TempoCore::TimeModeRequest;
 using SetSimStepsPerSecondRequest = TempoCore::SetSimStepsPerSecondRequest;
 using AdvanceStepsRequest = TempoCore::AdvanceStepsRequest;
-using StepRequest = TempoCore::StepRequest;
 
 namespace
 {
@@ -152,23 +151,16 @@ void UTempoTimeServiceSubsystem::AdvanceSteps(const AdvanceStepsRequest& Request
 		return;
 	}
 
-	if (Request.wait_for_completion())
+	const TResponseDelegate<TempoEmpty> Continuation = ResponseContinuation;
+	const bool bAccepted = WorldSettings->Step(RequestedSteps, [Continuation](ETempoStepResult Result)
 	{
-		const TResponseDelegate<TempoEmpty> Continuation = ResponseContinuation;
-		const bool bAccepted = WorldSettings->Step(RequestedSteps, [Continuation](ETempoStepResult Result)
-		{
-			Continuation.ExecuteIfBound(TempoEmpty(), StepResultToStatus(Result));
-		});
+		Continuation.ExecuteIfBound(TempoEmpty(), StepResultToStatus(Result));
+	});
 
-		if (!bAccepted)
-		{
-			ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "Another waited step is already in progress"));
-		}
-		return;
+	if (!bAccepted)
+	{
+		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "Another step is already in progress"));
 	}
-
-	WorldSettings->Step(RequestedSteps);
-	ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status_OK);
 }
 
 
@@ -187,7 +179,7 @@ void UTempoTimeServiceSubsystem::Pause(const TempoEmpty& Request, const TDelegat
 	ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status());
 }
 
-void UTempoTimeServiceSubsystem::Step(const StepRequest& Request, const TResponseDelegate<TempoEmpty>& ResponseContinuation) const
+void UTempoTimeServiceSubsystem::Step(const TempoEmpty& Request, const TResponseDelegate<TempoEmpty>& ResponseContinuation) const
 {
 	ATempoTimeWorldSettings* WorldSettings = Cast<ATempoTimeWorldSettings>(GetWorld()->GetWorldSettings());
 	if (!WorldSettings)
@@ -196,21 +188,14 @@ void UTempoTimeServiceSubsystem::Step(const StepRequest& Request, const TRespons
 		return;
 	}
 
-	if (Request.wait_for_completion())
+	const TResponseDelegate<TempoEmpty> Continuation = ResponseContinuation;
+	const bool bAccepted = WorldSettings->Step(1, [Continuation](ETempoStepResult Result)
 	{
-		const TResponseDelegate<TempoEmpty> Continuation = ResponseContinuation;
-		const bool bAccepted = WorldSettings->Step(1, [Continuation](ETempoStepResult Result)
-		{
-			Continuation.ExecuteIfBound(TempoEmpty(), StepResultToStatus(Result));
-		});
+		Continuation.ExecuteIfBound(TempoEmpty(), StepResultToStatus(Result));
+	});
 
-		if (!bAccepted)
-		{
-			ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "Another waited step is already in progress"));
-		}
-		return;
+	if (!bAccepted)
+	{
+		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "Another step is already in progress"));
 	}
-
-	WorldSettings->Step(1);
-	ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status_OK);
 }
