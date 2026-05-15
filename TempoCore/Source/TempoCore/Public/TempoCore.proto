@@ -30,6 +30,14 @@ message CurrentLevelResponse {
   string level = 1;
 }
 
+message GetAvailableLevelsRequest {
+  string search_path = 1;  // e.g. "/Game/Maps" - empty string searches /Game/
+}
+
+message AvailableLevelsResponse {
+  repeated string levels = 1;
+}
+
 message SetMainViewportRenderEnabledRequest {
   bool enabled = 1;
 }
@@ -44,6 +52,8 @@ service TempoCoreService {
   rpc FinishLoadingLevel(TempoCore.Empty) returns (TempoCore.Empty);
 
   rpc GetCurrentLevelName(TempoCore.Empty) returns (CurrentLevelResponse);
+
+  rpc GetAvailableLevels(GetAvailableLevelsRequest) returns (AvailableLevelsResponse);
 
   rpc Quit(TempoCore.Empty) returns (TempoCore.Empty);
 

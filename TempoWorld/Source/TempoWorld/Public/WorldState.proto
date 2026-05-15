@@ -71,6 +71,20 @@ message ActorStatesNearRequest {
   bool include_hidden_components = 5;
 }
 
+// Request actors near a world position (instead of near a named actor).
+message ActorStatesNearPositionRequest {
+  // World position at the center of the query (Tempo right-handed world frame, meters).
+  TempoCore.Vector position = 1;
+  // Radius around `position` in meters.
+  float search_radius_m = 2;
+  // Include static actors.
+  bool include_static = 3;
+  // Include actors flagged as hidden.
+  bool include_hidden_actors = 4;
+  // Include components flagged as hidden when computing each actor's bounds.
+  bool include_hidden_components = 5;
+}
+
 message ActorState {
   // Sim time at which the state was sampled, in seconds.
   double timestamp_s = 1;
@@ -96,6 +110,8 @@ service WorldStateService {
   rpc StreamActorState(ActorStateRequest) returns (stream ActorState);
 
   rpc GetCurrentActorStatesNear(ActorStatesNearRequest) returns (ActorStates);
+
+  rpc GetCurrentActorStatesNearPosition(ActorStatesNearPositionRequest) returns (ActorStates);
 
   rpc StreamActorStatesNear(ActorStatesNearRequest) returns (stream ActorStates);
 

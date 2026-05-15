@@ -225,6 +225,15 @@ struct FTextureReadQueue
 		}
 	}
 
+	void EvictOldest()
+	{
+		FRWScopeLock_OnlyGTWrite WriteLock(Lock, SLT_Write);
+		if (!PendingTextureReads.IsEmpty())
+		{
+			PendingTextureReads.RemoveAt(0);
+		}
+	}
+
 	void BlockUntilNextReadComplete() const
 	{
 		FRWScopeLock_OnlyGTWrite ReadLock(Lock, SLT_ReadOnly);

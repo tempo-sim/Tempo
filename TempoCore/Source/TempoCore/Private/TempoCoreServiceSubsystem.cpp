@@ -16,6 +16,7 @@
 #undef GetObject
 #endif
 
+#include "AssetRegistry/AssetRegistryModule.h"
 #include "GameFramework/GameMode.h"
 #include "Kismet/GameplayStatics.h"
 
@@ -23,6 +24,8 @@ using TempoCoreService = TempoCore::TempoCoreService;
 using TempoCoreAsyncService = TempoCore::TempoCoreService::AsyncService;
 using LoadLevelRequest = TempoCore::LoadLevelRequest;
 using CurrentLevelResponse = TempoCore::CurrentLevelResponse;
+using GetAvailableLevelsRequest = TempoCore::GetAvailableLevelsRequest;
+using AvailableLevelsResponse = TempoCore::AvailableLevelsResponse;
 using SetMainViewportRenderEnabledRequest = TempoCore::SetMainViewportRenderEnabledRequest;
 using SetControlModeRequest = TempoCore::SetControlModeRequest;
 
@@ -32,6 +35,7 @@ void UTempoCoreServiceSubsystem::RegisterServices(FTempoServer& Server)
 		SimpleRequestHandler(&TempoCoreAsyncService::RequestLoadLevel, &UTempoCoreServiceSubsystem::LoadLevel),
 		SimpleRequestHandler(&TempoCoreAsyncService::RequestFinishLoadingLevel, &UTempoCoreServiceSubsystem::FinishLoadingLevel),
 		SimpleRequestHandler(&TempoCoreAsyncService::RequestGetCurrentLevelName, &UTempoCoreServiceSubsystem::GetCurrentLevelName),
+		SimpleRequestHandler(&TempoCoreAsyncService::RequestGetAvailableLevels, &UTempoCoreServiceSubsystem::GetAvailableLevels),
 		SimpleRequestHandler(&TempoCoreAsyncService::RequestQuit, &UTempoCoreServiceSubsystem::Quit),
 		SimpleRequestHandler(&TempoCoreAsyncService::RequestSetMainViewportRenderEnabled, &UTempoCoreServiceSubsystem::SetRenderMainViewportEnabled),
 		SimpleRequestHandler(&TempoCoreAsyncService::RequestSetControlMode, &UTempoCoreServiceSubsystem::SetControlMode)
@@ -114,6 +118,36 @@ void UTempoCoreServiceSubsystem::GetCurrentLevelName(const TempoCore::Empty& Req
 
 	CurrentLevelResponse Response;
 	Response.set_level(TCHAR_TO_UTF8(*CurrentLevelName));
+	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
+}
+
+void UTempoCoreServiceSubsystem::GetAvailableLevels(const GetAvailableLevelsRequest& Request, const TResponseDelegate<AvailableLevelsResponse>& ResponseContinuation) const
+{
+	AvailableLevelsResponse Response;
+
+	IAssetRegistry& AssetRegistry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get();
+
+	// Use provided search path or default to /Game/
+	FString SearchPath = UTF8_TO_TCHAR(Request.search_path().c_str());
+	if (SearchPath.IsEmpty())
+	{
+		SearchPath = TEXT("/Game");
+	}
+
+	FARFilter Filter;
+	Filter.ClassPaths.Add(UWorld::StaticClass()->GetClassPathName());
+	Filter.PackagePaths.Add(*SearchPath);
+	Filter.bRecursivePaths = true;
+
+	TArray<FAssetData> AssetList;
+	AssetRegistry.GetAssets(Filter, AssetList);
+
+	for (const FAssetData& Asset : AssetList)
+	{
+		FString LevelPath = Asset.PackageName.ToString();
+		Response.add_levels(TCHAR_TO_UTF8(*LevelPath));
+	}
+
 	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
 }
 

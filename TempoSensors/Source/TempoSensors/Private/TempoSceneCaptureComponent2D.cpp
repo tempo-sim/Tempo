@@ -203,10 +203,10 @@ void UTempoSceneCaptureComponent2D::UpdateSceneCaptureContents(FSceneInterface* 
 		}
 
 		const int32 MaxTextureQueueSize = GetMaxTextureQueueSize();
-		if (MaxTextureQueueSize > 0 && TextureReadQueue.Num() > MaxTextureQueueSize)
+		while (MaxTextureQueueSize > 0 && TextureReadQueue.Num() >= MaxTextureQueueSize)
 		{
-			UE_LOG(LogTempoSensors, Warning, TEXT("Fell behind while reading frames from sensor %s. Skipping capture."), *GetName());
-			return;
+			UE_LOG(LogTempoSensors, Warning, TEXT("Fell behind while reading frames from sensor %s. Evicting oldest frame."), *GetName());
+			TextureReadQueue.EvictOldest();
 		}
 	}
 
