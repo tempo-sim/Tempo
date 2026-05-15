@@ -842,7 +842,6 @@ void UTempoCamera::InitRenderTarget()
 	OutputResolveMap->AddressX = TA_Clamp;
 	OutputResolveMap->AddressY = TA_Clamp;
 	OutputResolveMap->SRGB = 0;
-	OutputResolveMap->UpdateResource();
 
 	OutputResolveWeight = UTexture2D::CreateTransient(SizeXY.X, SizeXY.Y, PF_R16F);
 	OutputResolveWeight->CompressionSettings = TC_HDR;
@@ -850,9 +849,11 @@ void UTempoCamera::InitRenderTarget()
 	OutputResolveWeight->AddressX = TA_Clamp;
 	OutputResolveWeight->AddressY = TA_Clamp;
 	OutputResolveWeight->SRGB = 0;
-	OutputResolveWeight->UpdateResource();
 
-	// Fill the resolve maps from current tile geometry.
+	// Resource init is deferred to RebuildResolveMaps' UpdateResource after BulkData is filled.
+	// Initializing the resource on the just-created transient would queue a render-thread InitRHI
+	// that reads BulkData via FBulkData::GetCopy concurrently with the game thread's Lock in
+	// RebuildResolveMaps, which races on FBulkData internals and corrupts the heap.
 	RebuildResolveMaps();
 
 	InitFinalRenderTargetAndStaging();
@@ -2107,7 +2108,11 @@ void UTempoCamera::SyncTiles()
 		}
 	}
 
-	RebuildResolveMaps();
+	// RebuildResolveMaps deliberately not called here. SyncTiles computes new AtlasSize / tile
+	// geometry but does not resize OutputResolveMap / OutputResolveWeight — those are recreated
+	// by InitRenderTarget. Both call sites (ReconfigureTilesNow, BeginPlay) follow SyncTiles with
+	// InitRenderTarget, which calls RebuildResolveMaps on the freshly-sized textures. Filling the
+	// stale OLD-size textures with NEW SizeXY iteration bounds would overrun their BulkData.
 }
 
 void UTempoCamera::SetDepthEnabled(bool bDepthEnabledIn)

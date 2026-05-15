@@ -129,6 +129,16 @@ void UTempoTiledSceneCaptureComponent::MaybeMarkPendingCapture()
 		return;
 	}
 
+	// Don't capture while a property change is pending. RenderCapture would run at the old shared
+	// RT / staging sizes, then the proxy CaptureScene's UpdateSceneCaptureContents would notice
+	// TextureTarget != SizeXY and reinit mid-capture — leaving the in-flight FTextureRead with an
+	// old-size StagingTexture but new-size ImageSize, which crashes ReadAllAvailable's memcpy.
+	// TryApplyPendingReconfigure will resync the internal mirrors once reads have drained.
+	if (HasDetectedParameterChange())
+	{
+		return;
+	}
+
 	if (!SharedTextureTarget)
 	{
 		return;
@@ -162,6 +172,13 @@ void UTempoTiledSceneCaptureComponent::MaybeMarkPendingCapture()
 void UTempoTiledSceneCaptureComponent::ExecutePendingCapture()
 {
 	if (!bNeedsCapture)
+	{
+		return;
+	}
+	// Final guard: a property may have changed between MaybeMarkPendingCapture (which set
+	// bNeedsCapture) and this call. Keep bNeedsCapture set so the next frame's
+	// ExecutePendingCapture picks it up once ReconfigureTilesNow has resynced.
+	if (HasDetectedParameterChange())
 	{
 		return;
 	}
