@@ -31,11 +31,23 @@ service TimeService {
 
   rpc SetSimStepsPerSecond(SetSimStepsPerSecondRequest) returns (TempoCore.Empty);
 
+  // Advances the simulation by `steps` steps while otherwise leaving it paused. Returns
+  // after the final step's OnWorldTickEnd, then re-pauses.
+  //
+  // The return signals only that the world has ticked. Data delivered on separate
+  // streams (e.g. sensor measurements) is not guaranteed to have arrived at the client
+  // when AdvanceSteps returns — each stream is in-order on its own, so consume the
+  // next message of any stream you care about as the per-stream barrier.
+  //
+  // Only one AdvanceSteps/Step RPC may be in flight at a time. If you need to do other
+  // work while waiting, use the async client API.
   rpc AdvanceSteps(AdvanceStepsRequest) returns (TempoCore.Empty);
 
-  rpc Play(TempoCore.Empty) returns (TempoCore.Empty);
+  rpc Play (TempoCore.Empty) returns (TempoCore.Empty);
 
-  rpc Pause(TempoCore.Empty) returns (TempoCore.Empty);
+  rpc Pause (TempoCore.Empty) returns (TempoCore.Empty);
 
+  // Advances the simulation by one step. Same return semantics and concurrency rule
+  // as AdvanceSteps.
   rpc Step(TempoCore.Empty) returns (TempoCore.Empty);
 }

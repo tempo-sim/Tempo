@@ -8,6 +8,8 @@
 
 #include "TempoROSBridgeUtils.h"
 
+#include "TempoCore/Time.grpc.pb.h"
+
 void UTempoTimeROSBridgeSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 {
 	Super::OnWorldBeginPlay(InWorld);
