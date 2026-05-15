@@ -1,0 +1,39 @@
+# ======
+# Caller for the publish_engine_mods.yml reusable workflow.
+# Publishes pre-modded Tempo Unreal images to ghcr.io/tempo-sim/tempo-unreal-modded so that
+# build_and_package.yml runs can pull them instead of re-applying engine mods every build.
+# Triggers on push to main when EngineMods or related scripts change. Also supports manual
+# dispatch via workflow_dispatch.
+# ======
+
+name: Publish Tempo Pre-Modded Engine Image
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'EngineMods/**'
+      - 'Dockerfile'
+      - 'Scripts/InstallEngineMods.sh'
+      - 'Scripts/SyncDeps.sh'
+      - 'TempoROS/Scripts/SyncDeps.sh'
+      - '.github/workflows/publish_engine_mods.yml'
+      - '.github/workflows/tempo_publish_engine_mods.yml'
+  workflow_dispatch:
+
+jobs:
+  publish:
+    name: Publish Modded Image
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        unreal_version: ["5.6", "5.7"]
+      fail-fast: false
+    uses: ./.github/workflows/publish_engine_mods.yml
+    with:
+      unreal_version: ${{ matrix.unreal_version }}
+      image_name: ghcr.io/${{ github.repository_owner }}/tempo-unreal-modded
+    secrets: inherit
