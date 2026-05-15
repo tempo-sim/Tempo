@@ -130,3 +130,42 @@ TempoWorld also supports setting individual properties in structs, arrays, and m
 
 > [!Warning]
 > While the values you set for rotators and quaternions will be converted from radians/right-handed to degrees/left-handed, the values you set for floats and vector-shaped types (`vector`, `vector2d`, `int_vector`, `int_point`) will not be converted (so, these should be specified in centimeters if they represent distances). We don't feel it is safe to assume that these quantities always represent distances. `set_transform_property` is the one exception: it follows the same convention as `spawn_actor` and `set_actor_transform`, converting the location from meters to centimeters and the rotation from radians/right-handed to degrees/left-handed, since transforms almost always represent world-frame poses.
+
+### Batching Property Sets
+When you need to apply multiple property changes together, the `set_properties` RPC accepts a list of any of the singular set-property ops above and runs them in order in a single call. To avoid building op messages by hand, the generated clients include a fluent `Batch` builder with one method per supported type, named after its singular counterpart. The response contains one entry per *failed* op (by index); an empty `failures` list means every op succeeded.
+
+In Python:
+```
+from tempo import tempo_world
+
+response = (
+    tempo_world.batch()
+        .set_bool_property(actor="MyActor", property="bEnabled", value=True)
+        .set_float_property(actor="MyActor", property="MaxSpeed", value=42.0)
+        .set_vector_property(actor="MyActor", component="Mesh", property="RelativeLocation", x=0.0, y=0.0, z=150.0)
+        .set_string_array_property(actor="MyActor", property="WaypointTags", values=["alpha", "bravo", "charlie"])
+        .execute()
+)
+
+for failure in response.failures:
+    print(f"op {failure.op_index} failed (code={failure.code}): {failure.error}")
+```
+Each `set_*_property` method takes the same keyword args as the corresponding free function, and `execute_async` is available for use with `await`.
+
+In Rust:
+```
+use tempo_sim::tempo_world;
+
+let response = tempo_world::batch()
+    .set_bool_property("MyActor".into(), "".into(), "bEnabled".into(), true)
+    .set_float_property("MyActor".into(), "".into(), "MaxSpeed".into(), 42.0)
+    .set_vector_property("MyActor".into(), "Mesh".into(), "RelativeLocation".into(), 0.0, 0.0, 150.0)
+    .set_string_array_property("MyActor".into(), "".into(), "WaypointTags".into(),
+        vec!["alpha".into(), "bravo".into(), "charlie".into()])
+    .execute()?;
+
+for failure in &response.failures {
+    eprintln!("op {} failed (code={}): {}", failure.op_index, failure.code, failure.error);
+}
+```
+Args are positional and match the request message's field order (`actor, component, property, value/values/...`), the same as the singular `tempo_world::set_*_property` wrappers. `execute_async().await` is available for async callers.
