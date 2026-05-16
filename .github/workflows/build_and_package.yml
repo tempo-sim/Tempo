@@ -107,6 +107,14 @@ on:
         type: string
         description: Token to use for fetching submodules during checkout
         default: ''
+      gen_rust_api:
+        type: boolean
+        description: Generate the Tempo Rust API during the build (sets TEMPO_GEN_RUST_API=1 in the container)
+        default: false
+      gen_cpp_api:
+        type: boolean
+        description: Generate the Tempo C++ API during the build (sets TEMPO_GEN_CPP_API=1 in the container)
+        default: false
 
 env:
   UNREAL_VERSION: "${{ inputs.unreal_version }}"
@@ -432,6 +440,8 @@ jobs:
           ${ENGINE_MODS_MOUNTS} \
           -v ${{ github.workspace }}/.engine-ddc-cache/Engine/DerivedDataCache:/home/ue4/UnrealEngine/Engine/DerivedDataCache \
           -v ${{ github.workspace }}/${{ inputs.project_root }}:/home/ue4/${{ inputs.project_root }} \
+          -e TEMPO_GEN_RUST_API=${{ inputs.gen_rust_api && '1' || '0' }} \
+          -e TEMPO_GEN_CPP_API=${{ inputs.gen_cpp_api && '1' || '0' }} \
           tempo_unreal_image \
           /home/ue4/${{ inputs.tempo_root }}/Scripts/Build.sh
     - name: Package

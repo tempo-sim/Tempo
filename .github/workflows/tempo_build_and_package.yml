@@ -38,4 +38,6 @@ jobs:
       cache_branch: main
       engine_mods_image: ghcr.io/${{ github.repository_owner }}/tempo-unreal-modded
       environment: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name != github.repository && 'fork-pr-environment' || '' }}
+      gen_rust_api: true
+      gen_cpp_api: true
     secrets: inherit
