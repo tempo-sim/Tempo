@@ -144,7 +144,7 @@ class TRequestManagerBase: public FRequestManager {
 public:
 	TRequestManagerBase(int32 TagIn, const FName& ServiceNameIn, const typename HandlerType::HandlerServiceType* ServiceIn, TSharedPtr<HandlerType> HandlerIn)
 		: State(UNINITIALIZED), Tag(TagIn), Handler(HandlerIn), ServiceName(ServiceNameIn), Service(ServiceIn), Responder(&Context) {}
-	
+
 	virtual EState GetState() const override { return State; }
 
 	virtual bool HasUnflushedWork() const override
@@ -323,7 +323,7 @@ public:
 	template <class ServiceType, class... HandlerTypes>
 	void RegisterService(HandlerTypes... Handlers)
 	{
-		using AsyncServiceType = typename ServiceType::AsyncService; 
+		using AsyncServiceType = typename ServiceType::AsyncService;
 		const FName ServiceName(UTF8_TO_TCHAR(ServiceType::service_full_name()));
 		if (Services.Contains(ServiceName))
 		{
@@ -382,18 +382,18 @@ protected:
 			}
 		}
 	}
-	
+
 	// Credit: https://stackoverflow.com/a/44065093
 	template <class...>
 	struct False : std::bool_constant<false> { };
-	
+
 	// Zero-Handler case.
 	template <class AsyncServiceType>
 	static void RegisterHandlers(AsyncServiceType* Service)
 	{
 		static_assert(False<AsyncServiceType>{}, "RegisterHandlers must be called with at least one handler");
 	}
-	
+
 	// One-Handler case.
 	template <class AsyncServiceType, class HandlerType>
 	void RegisterHandlers(const FName& ServiceName, AsyncServiceType* Service, HandlerType& Handler)
@@ -402,7 +402,7 @@ protected:
 		Handler.Init(Service);
 		RequestManagers.Emplace(Tag, new TRequestManager<HandlerType>(Tag, ServiceName, Service, MakeShared<HandlerType>(MoveTemp(Handler))));
 	}
-	
+
 	// Recursively register the handlers.
 	template <class AsyncServiceType, class FirstHandlerType, class... RemainingHandlerTypes>
 	void RegisterHandlers(const FName& ServiceName, AsyncServiceType* Service, FirstHandlerType& FirstHandler, RemainingHandlerTypes&... RemainingHandlers)

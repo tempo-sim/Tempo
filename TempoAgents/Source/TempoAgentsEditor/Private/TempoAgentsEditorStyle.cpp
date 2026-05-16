@@ -44,7 +44,7 @@ TSharedRef< FSlateStyleSet > FTempoAgentsEditorStyle::Create()
 	return Style;
 }
 
-void FTempoAgentsEditorStyle::ReloadTextures() 
+void FTempoAgentsEditorStyle::ReloadTextures()
 {
 	if (FSlateApplication::IsInitialized())
 	{

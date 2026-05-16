@@ -16,7 +16,7 @@ class TEMPOAGENTS_API UTempoIntersectionControlComponent : public UActorComponen
 	GENERATED_BODY()
 
 public:
-	
+
 	UFUNCTION(BlueprintCallable, Category = "Tempo Agents|Intersection Control")
 	void SetupTrafficControllers();
 
@@ -25,7 +25,7 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Tempo Agents|Intersection Control")
 	void SetupTrafficControllerRuntimeData();
-	
+
 	UFUNCTION(BlueprintCallable, Category = "Tempo Agents|Intersection Control")
 	void DestroyTrafficControllerMeshData();
 
@@ -42,7 +42,7 @@ public:
 	bool TryGetStraightestConnectionIndexForIntersection(const AActor* IntersectionQueryActor, int32 SourceConnectionIndex, int32& OutDestConnectionIndex, float& OutConnectionDotProduct) const;
 
 protected:
-	
+
 	int32 GetTrafficLightAnchorConnectionIndex(const AActor& IntersectionQueryActor, int32 SourceConnectionIndex, ETempoRoadConfigurationDescriptor& OutRoadConfigurationDescriptor) const;
 	FTempoRoadConfigurationInfo GetPrioritizedRoadConfigurationInfo(const AActor& IntersectionQueryActor, int32 SourceConnectionIndex, const TArray<ETempoRoadConfigurationDescriptor>& PrioritizedRoadConfigurationDescriptors, const TFunction<bool(const FTempoRoadConfigurationInfo&, const FTempoRoadConfigurationInfo&)>& SortPredicate) const;
 
@@ -52,5 +52,5 @@ protected:
 	void SetupTrafficSignRuntimeData(AActor& OwnerActor, UMassTrafficControllerRegistrySubsystem& TrafficControllerRegistrySubsystem);
 
 	AActor* GetConnectedRoadActor(const AActor& IntersectionQueryActor, int32 ConnectionIndex) const;
-	
+
 };

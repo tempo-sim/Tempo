@@ -33,7 +33,7 @@ protected:
 private:
 	UPROPERTY(EditDefaultsOnly, Category = "Tempo")
 	TObjectPtr<UBehaviorTree> BehaviorTreeAsset;
-    
+
 	UPROPERTY(EditDefaultsOnly, Category = "Tempo")
 	TObjectPtr<UBlackboardData> BlackboardAsset;
 

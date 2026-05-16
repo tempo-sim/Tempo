@@ -4,36 +4,36 @@ using UnrealBuildTool;
 
 public class TempoWorld : TempoModuleRules
 {
-    public TempoWorld(ReadOnlyTargetRules Target) : base(Target)
-    {
-        PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
+	public TempoWorld(ReadOnlyTargetRules Target) : base(Target)
+	{
+		PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
 
-        PublicDependencyModuleNames.AddRange(
-            new string[]
-            {
-                // Unreal
-                "Core",
-                // Tempo
-                "TempoCore",
-            }
-        );
+		PublicDependencyModuleNames.AddRange(
+			new string[]
+			{
+				// Unreal
+				"Core",
+				// Tempo
+				"TempoCore",
+			}
+		);
 
-        PrivateDependencyModuleNames.AddRange(
-            new string[]
-            {
-                // Unreal
-                "CoreUObject",
-                "Engine",
-                "MassActors",
-                "MassEntity",
-                "MassTraffic",
-            }
-        );
+		PrivateDependencyModuleNames.AddRange(
+			new string[]
+			{
+				// Unreal
+				"CoreUObject",
+				"Engine",
+				"MassActors",
+				"MassEntity",
+				"MassTraffic",
+			}
+		);
 
-        // StructUtils plugin was deprecated in 5.5 and moved into CoreUObject
-        if (Target.Version.MajorVersion == 5 && Target.Version.MinorVersion < 5)
-        {
-            PrivateDependencyModuleNames.Add("StructUtils");
-        }
-    }
+		// StructUtils plugin was deprecated in 5.5 and moved into CoreUObject
+		if (Target.Version.MajorVersion == 5 && Target.Version.MinorVersion < 5)
+		{
+			PrivateDependencyModuleNames.Add("StructUtils");
+		}
+	}
 }

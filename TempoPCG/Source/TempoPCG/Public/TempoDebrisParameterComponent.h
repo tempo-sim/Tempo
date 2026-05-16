@@ -98,7 +98,7 @@ protected:
 	// and/or on all actors overlapping the parent actor for center keepout (':' for all)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	FString CenterSplineIndices = TEXT(":");
-	
+
 	// The total width around a center spline *in meters* to remove instances, if enabled.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(UIMin=0.0, UIMax=50.0, ClampMin=0.0, ClampMax=50.0))
 	float CenterKeepoutWidth = 10.0;

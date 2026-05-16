@@ -2,35 +2,35 @@
 
 public class TempoROSBridgeShared : ModuleRules
 {
-    public TempoROSBridgeShared(ReadOnlyTargetRules Target) : base(Target)
-    {
-        PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
+	public TempoROSBridgeShared(ReadOnlyTargetRules Target) : base(Target)
+	{
+		PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
 
-        OptimizeCode = CodeOptimization.Never;
-        
-        PublicDependencyModuleNames.AddRange(
-            new string[]
-            {
-                // Unreal
-                "Core",
-                // Tempo
-                "TempoCore",
-            }
-        );
+		OptimizeCode = CodeOptimization.Never;
 
-        PrivateDependencyModuleNames.AddRange(
-            new string[]
-            {
-                // Unreal
-                "CoreUObject",
-                "Engine",
-                "Slate",
-                "SlateCore",
-                // Tempo
-                "TempoROS",
-            }
-        );
-        
-        bEnableExceptions = true;
-    }
+		PublicDependencyModuleNames.AddRange(
+			new string[]
+			{
+				// Unreal
+				"Core",
+				// Tempo
+				"TempoCore",
+			}
+		);
+
+		PrivateDependencyModuleNames.AddRange(
+			new string[]
+			{
+				// Unreal
+				"CoreUObject",
+				"Engine",
+				"Slate",
+				"SlateCore",
+				// Tempo
+				"TempoROS",
+			}
+		);
+
+		bEnableExceptions = true;
+	}
 }

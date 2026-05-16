@@ -10,14 +10,14 @@
 struct FTempoParkedVehicleSpawnPointInfo
 {
 	FTempoParkedVehicleSpawnPointInfo() {}
-	
+
 	FTempoParkedVehicleSpawnPointInfo(const FVector& InLocation, const FRotator& InRotation, const float InRadius)
 		: Location(InLocation)
 		, Rotation(InRotation)
 		, Radius(InRadius)
 	{
 	}
-	
+
 	FVector Location = FVector::ZeroVector;
 	FRotator Rotation = FRotator::ZeroRotator;
 	float Radius = 0.0f;
@@ -50,7 +50,7 @@ public:
 	// Values greater than zero will override MassTrafficSettings->RandomSeed.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo Agents|Parked Vehicles|Spawn Point Info")
 	int32 RandomSeed = 0;
-	
+
 	virtual void Generate(UObject& QueryOwner, TConstArrayView<FMassSpawnedEntityType> EntityTypes, int32 Count, FFinishedGeneratingSpawnDataSignature& FinishedGeneratingSpawnPointsDelegate) const override;
 
 protected:

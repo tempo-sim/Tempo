@@ -16,5 +16,5 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	UTempoBrightnessMeterComponent* BrightnessMeterComponent = nullptr;
-	
+
 };

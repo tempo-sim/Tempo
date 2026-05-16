@@ -13,6 +13,6 @@ extern int32 GDebugTempoWorld;
 class FTempoWorldModule : public IModuleInterface
 {
 public:
-    virtual void StartupModule() override;
-    virtual void ShutdownModule() override;
+	virtual void StartupModule() override;
+	virtual void ShutdownModule() override;
 };

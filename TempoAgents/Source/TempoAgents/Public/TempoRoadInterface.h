@@ -17,7 +17,7 @@ class TEMPOAGENTS_API UTempoRoadInterface : public UInterface
 class TEMPOAGENTS_API ITempoRoadInterface
 {
 	GENERATED_BODY()
-	
+
 public:
 
 	// Road General Queries
@@ -47,10 +47,10 @@ public:
 
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Interface|Queries")
 	float GetTempoLaneWidth(int32 LaneIndex) const;
-	
+
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Interface|Queries")
 	EZoneLaneDirection GetTempoLaneDirection(int32 LaneIndex) const;
-	
+
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Interface|Queries")
 	TArray<FName> GetTempoLaneTags(int32 LaneIndex) const;
 
@@ -70,7 +70,7 @@ public:
 
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Interface|Queries")
 	FVector GetTempoControlPointLocation(int32 ControlPointIndex, ETempoCoordinateSpace CoordinateSpace) const;
-	
+
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Interface|Queries")
 	FVector GetTempoControlPointTangent(int32 ControlPointIndex, ETempoCoordinateSpace CoordinateSpace) const;
 
@@ -90,10 +90,10 @@ public:
 
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Interface|Queries")
 	float GetDistanceAlongTempoRoadClosestToWorldLocation(FVector QueryLocation) const;
-	
+
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Interface|Queries")
 	FVector GetLocationAtDistanceAlongTempoRoad(float DistanceAlongRoad, ETempoCoordinateSpace CoordinateSpace) const;
-	
+
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Interface|Queries")
 	FVector GetTangentAtDistanceAlongTempoRoad(float DistanceAlongRoad, ETempoCoordinateSpace CoordinateSpace) const;
 
@@ -127,7 +127,7 @@ public:
 
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Interface|Queries")
 	TArray<FName> GetTempoParkingLocationAnchorNames() const;
-	
+
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Interface|Queries")
 	FVector GetTempoParkingLocation(const FName ParkingLocationAnchorName, const float NormalizedDistanceAlongRoad, const float HalfWidth, const float NormalizedLateralVariationScalar, const ETempoCoordinateSpace CoordinateSpace) const;
 

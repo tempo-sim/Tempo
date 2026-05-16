@@ -192,7 +192,7 @@ TempoSensors::MeasurementType ToProtoMeasurementType(EMeasurementType ImageType)
 void UTempoSensorServiceSubsystem::ForEachActiveSensor(const TFunction<void(ITempoSensorInterface*)>& Callback) const
 {
 	check(GetWorld());
-	
+
 	for (TObjectIterator<UActorComponent> ComponentIt; ComponentIt; ++ComponentIt)
 	{
 		UActorComponent* Component = *ComponentIt;
@@ -233,7 +233,7 @@ template <typename RequestType, typename ResponseType>
 void UTempoSensorServiceSubsystem::RequestImages(const RequestType& Request, const TResponseDelegate<ResponseType>& ResponseContinuation) const
 {
 	check(GetWorld());
-	
+
 	TMap<FString, TArray<UTempoCamera*>> OwnersToComponents;
 	for (TObjectIterator<UTempoCamera> ComponentIt; ComponentIt; ++ComponentIt)
 	{
@@ -242,7 +242,7 @@ void UTempoSensorServiceSubsystem::RequestImages(const RequestType& Request, con
 			OwnersToComponents.FindOrAdd(ComponentIt->GetOwnerName()).Add(*ComponentIt);
 		}
 	}
-	
+
 	const FString RequestedOwnerName(UTF8_TO_TCHAR(Request.owner().c_str()));
 	const FString RequestedSensorName(UTF8_TO_TCHAR(Request.sensor().c_str()));
 
@@ -278,7 +278,7 @@ void UTempoSensorServiceSubsystem::RequestImages(const RequestType& Request, con
 			ResponseContinuation.ExecuteIfBound(ResponseType(), grpc::Status(grpc::StatusCode::NOT_FOUND, "Did not find a sensor with the specified name"));
 			return;
 		}
-		
+
 		FoundComponent->RequestMeasurement(Request, ResponseContinuation);
 		return;
 	}
@@ -377,7 +377,7 @@ void UTempoSensorServiceSubsystem::StreamLidarScans(const TempoSensors::LidarSca
 			ResponseContinuation.ExecuteIfBound(LidarScanSegment(), grpc::Status(grpc::StatusCode::NOT_FOUND, "Did not find a sensor with the specified name"));
 			return;
 		}
-		
+
 		FoundComponent->RequestMeasurement(Request, ResponseContinuation);
 		return;
 	}

@@ -28,13 +28,13 @@ TArray<FTransform> UTempoParkedVehicleSpawnDataGenerator::TryGenerateSpawnTransf
 	{
 		return TArray<FTransform>();
 	}
-	
+
 	const UMassEntityConfigAsset* EntityConfigAsset = EntityType.EntityConfig.LoadSynchronous();
 	if (!ensureMsgf(EntityConfigAsset != nullptr, TEXT("Must get valid EntityConfigAsset in UTempoParkedVehicleSpawnDataGenerator::TryGenerateSpawnTransforms.")))
 	{
 		return TArray<FTransform>();
 	}
-	
+
 	const UMassTrafficVehicleDimensionsTrait* VehicleDimensionsTrait = Cast<UMassTrafficVehicleDimensionsTrait>(EntityConfigAsset->FindTrait(UMassTrafficVehicleDimensionsTrait::StaticClass()));
 	if (!ensureMsgf(VehicleDimensionsTrait != nullptr, TEXT("Must get valid VehicleDimensionsTrait in UTempoParkedVehicleSpawnDataGenerator::TryGenerateSpawnTransforms.")))
 	{
@@ -46,14 +46,14 @@ TArray<FTransform> UTempoParkedVehicleSpawnDataGenerator::TryGenerateSpawnTransf
 	while (SpawnTransforms.Num() < RequestedSpawnCount && NumFailedSpawnAttempts < MaxFailedSpawnAttempts)
 	{
 		const int32 RoadQueryActorIndex = RandomStream.GetUnsignedInt() % RoadQueryActors.Num();
-		
+
 		const AActor* RoadQueryActor = RoadQueryActors[RoadQueryActorIndex];
 		if (RoadQueryActor == nullptr)
 		{
 			++NumFailedSpawnAttempts;
 			continue;
 		}
-		
+
 		TArray<FTempoParkedVehicleSpawnPointInfo>& ParkedVehicleSpawnPointInfosForRoad = ParkedVehicleSpawnPointInfoMap.FindOrAdd(RoadQueryActor);
 		const int32 MaxAllowedParkingSpawnPointsOnRoad = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoRoadInterface::Execute_GetMaxAllowedParkingSpawnPointsOnTempoRoad);
 
@@ -62,14 +62,14 @@ TArray<FTransform> UTempoParkedVehicleSpawnDataGenerator::TryGenerateSpawnTransf
 			++NumFailedSpawnAttempts;
 			continue;
 		}
-		
+
 		const TSet<TSoftObjectPtr<UMassEntityConfigAsset>> EntityTypesAllowedToParkOnRoad = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoRoadInterface::Execute_GetEntityTypesAllowedToParkOnTempoRoad);
 		if (!ensureMsgf(EntityTypesAllowedToParkOnRoad.Contains(EntityType.EntityConfig), TEXT("RoadQueryActors that don't allow EntityType to park should have been pre-filtered before calling UTempoParkedVehicleSpawnDataGenerator::TryGenerateSpawnTransforms.")))
 		{
 			++NumFailedSpawnAttempts;
 			continue;
 		}
-		
+
 		const TArray<FName> ParkingLocationAnchorNames = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoRoadInterface::Execute_GetTempoParkingLocationAnchorNames);
 		if (!ensureMsgf(!ParkingLocationAnchorNames.IsEmpty(), TEXT("RoadQueryActors with no ParkingLocationAnchorNames should have been pre-filtered before calling UTempoParkedVehicleSpawnDataGenerator::TryGenerateSpawnTransforms.")))
 		{
@@ -79,17 +79,17 @@ TArray<FTransform> UTempoParkedVehicleSpawnDataGenerator::TryGenerateSpawnTransf
 
 		const int32 ParkingLocationAnchorNameIndex = RandomStream.GetUnsignedInt() % ParkingLocationAnchorNames.Num();
 		const FName ParkingLocationAnchorName = ParkingLocationAnchorNames[ParkingLocationAnchorNameIndex];
-		
+
 		const float NormalizedDistanceAlongRoad = RandomStream.FRandRange(0.0f, 1.0f);
 
 		const float NormalizedLateralVariationScalar = RandomStream.FRandRange(0.0f, 1.0f);
 		const float NormalizedAngularVariationScalar = RandomStream.FRandRange(0.0f, 1.0f);
-		
+
 		const FVector ParkingLocation = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoRoadInterface::Execute_GetTempoParkingLocation, ParkingLocationAnchorName, NormalizedDistanceAlongRoad, VehicleDimensionsTrait->Params.HalfWidth, NormalizedLateralVariationScalar, ETempoCoordinateSpace::World);
 		const FRotator ParkingRotation = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoRoadInterface::Execute_GetTempoParkingRotation, ParkingLocationAnchorName, NormalizedDistanceAlongRoad, NormalizedAngularVariationScalar, ETempoCoordinateSpace::World);
 
 		const float EntityRadius = FMath::Max(VehicleDimensionsTrait->Params.HalfLength, VehicleDimensionsTrait->Params.HalfWidth);
-		
+
 		const auto& IsAcceptableDistanceFromPreviousParkedVehicleSpawnPoints = [this, &ParkedVehicleSpawnPointInfoMap](const FVector& ParkingLocation, const float& EntityRadius)
 		{
 			for (const TPair<const AActor*, TArray<FTempoParkedVehicleSpawnPointInfo>>& ParkedVehicleSpawnPointInfoPair : ParkedVehicleSpawnPointInfoMap)
@@ -98,7 +98,7 @@ TArray<FTransform> UTempoParkedVehicleSpawnDataGenerator::TryGenerateSpawnTransf
 				{
 					const float DistanceBetweenParkedVehiclesSq = (ParkingLocation - ParkedVehicleSpawnPointInfo.Location).SizeSquared();
 					const float MinAcceptableRadiusSq = FMath::Square(EntityRadius + ParkedVehicleSpawnPointInfo.Radius + MinDistanceFromOtherParkedVehicleSpawnPoints);
-                    
+
 					if (DistanceBetweenParkedVehiclesSq < MinAcceptableRadiusSq)
 					{
 						return false;
@@ -108,7 +108,7 @@ TArray<FTransform> UTempoParkedVehicleSpawnDataGenerator::TryGenerateSpawnTransf
 
 			return true;
 		};
-		
+
 		if (IsAcceptableDistanceFromPreviousParkedVehicleSpawnPoints(ParkingLocation, EntityRadius))
 		{
 			FTransform ParkingLocationTransform(ParkingRotation, ParkingLocation);
@@ -123,7 +123,7 @@ TArray<FTransform> UTempoParkedVehicleSpawnDataGenerator::TryGenerateSpawnTransf
 		}
 	}
 
-	
+
 
 	return SpawnTransforms;
 }
@@ -148,7 +148,7 @@ void UTempoParkedVehicleSpawnDataGenerator::Generate(
 	{
 		Count *= NumParkedVehiclesScale;
 	}
-	
+
 	if (Count <= 0 || EntityTypes.IsEmpty())
 	{
 		// Skip spawning
@@ -156,7 +156,7 @@ void UTempoParkedVehicleSpawnDataGenerator::Generate(
 		FinishedGeneratingSpawnPointsDelegate.Execute(EmptyResults);
 		return;
 	}
-	
+
 	// Get a list of obstacles to avoid when spawning
 	const float ObstacleRadiusSquared = FMath::Square(ObstacleExclusionRadius);
 	TArray<FVector> ObstacleLocationsToAvoid;
@@ -207,11 +207,11 @@ void UTempoParkedVehicleSpawnDataGenerator::Generate(
 	// Prepare results
 	TArray<FMassEntitySpawnDataGeneratorResult> Results;
 	BuildResultsFromEntityTypes(Count, EntityTypes, Results);
-	
+
 	for (int32 ResultIndex = 0; ResultIndex < Results.Num(); ++ResultIndex)
 	{
 		FMassEntitySpawnDataGeneratorResult& Result = Results[ResultIndex];
-			
+
 		Result.SpawnDataProcessor = UMassTrafficInitParkedVehiclesProcessor::StaticClass();
 		Result.SpawnData.InitializeAs<FMassTrafficParkedVehiclesSpawnData>();
 		FMassTrafficParkedVehiclesSpawnData& SpawnData = Result.SpawnData.GetMutable<FMassTrafficParkedVehiclesSpawnData>();
@@ -232,7 +232,7 @@ void UTempoParkedVehicleSpawnDataGenerator::Generate(
 			{
 				continue;
 			}
-			
+
 			const TSet<TSoftObjectPtr<UMassEntityConfigAsset>> EntityTypesAllowedToParkOnRoad = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoRoadInterface::Execute_GetEntityTypesAllowedToParkOnTempoRoad);
 			if (!EntityTypesAllowedToParkOnRoad.Contains(EntityType.EntityConfig))
 			{
@@ -241,7 +241,7 @@ void UTempoParkedVehicleSpawnDataGenerator::Generate(
 
 			AcceptableRoadQueryActors.Add(RoadQueryActor);
 		}
-		
+
 		SpawnData.Transforms = TryGenerateSpawnTransforms(AcceptableRoadQueryActors, EntityType, Result.NumEntities, RandomStream, ParkedVehicleSpawnPointInfoMap);
 
 		// Remove parking locations overlapping obstacles
@@ -274,7 +274,7 @@ void UTempoParkedVehicleSpawnDataGenerator::Generate(
 		// meeting all criteria for a given EntityType.
 		Result.NumEntities = SpawnData.Transforms.Num();
 	}
-	
+
 	// Return results
 	FinishedGeneratingSpawnPointsDelegate.Execute(Results);
 }

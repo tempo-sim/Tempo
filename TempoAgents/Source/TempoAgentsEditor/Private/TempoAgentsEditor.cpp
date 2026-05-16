@@ -18,7 +18,7 @@ void FTempoAgentsEditorModule::StartupModule()
 	FTempoAgentsEditorStyle::ReloadTextures();
 
 	FTempoAgentsEditorCommands::Register();
-	
+
 	PluginCommands = MakeShareable(new FUICommandList);
 
 	PluginCommands->MapAction(
@@ -70,5 +70,5 @@ void FTempoAgentsEditorModule::RegisterMenus()
 }
 
 #undef LOCTEXT_NAMESPACE
-	
+
 IMPLEMENT_MODULE(FTempoAgentsEditorModule, TempoAgentsEditor)

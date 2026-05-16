@@ -15,8 +15,8 @@ public:
 	UGroundSnapComponent();
 
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType,
-	                           FActorComponentTickFunction* ThisTickFunction) override;
-	
+							   FActorComponentTickFunction* ThisTickFunction) override;
+
 protected:
 	// If true, we will use the ExtentsOverride below rather than the owner's extents.
 	UPROPERTY(BlueprintReadWrite, EditAnywhere)

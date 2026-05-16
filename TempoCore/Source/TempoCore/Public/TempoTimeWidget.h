@@ -32,14 +32,14 @@ protected:
 
 	UPROPERTY(meta=(BindWidget))
 	UButton* PlayButton;
-	
+
 	UPROPERTY(meta=(BindWidget))
 	UButton* StepButton;
 
 	UPROPERTY(meta=(BindWidget))
 	UTextBlock* SimTimeBox;
 
-private:	
+private:
 	void SyncTimeSettings() const;
 
 	UFUNCTION()

@@ -8,6 +8,6 @@ DECLARE_LOG_CATEGORY_EXTERN(LogTempoPCG, Log, All);
 class FTempoPCGModule : public IModuleInterface
 {
 public:
-    virtual void StartupModule() override;
-    virtual void ShutdownModule() override;
+	virtual void StartupModule() override;
+	virtual void ShutdownModule() override;
 };

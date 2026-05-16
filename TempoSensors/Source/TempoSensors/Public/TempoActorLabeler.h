@@ -28,7 +28,7 @@ private:
 	// For example, at the beginning this has one element, index 0, with all available IDs.
 	// IDs are always allocated from the lowest-count element.
 	// Once all IDs have been allocated once, another element is added, with all available IDs.
-	// When an ID is returned, if reusing IDs is allowed, the ID is moved from its current count to the next lower one. 
+	// When an ID is returned, if reusing IDs is allowed, the ID is moved from its current count to the next lower one.
 	TArray<TSet<int32>> AvailableIds;
 };
 

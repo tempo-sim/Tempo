@@ -18,5 +18,5 @@ void FTempoGeographicModule::ShutdownModule()
 }
 
 #undef LOCTEXT_NAMESPACE
-	
+
 IMPLEMENT_MODULE(FTempoGeographicModule, TempoGeographic)

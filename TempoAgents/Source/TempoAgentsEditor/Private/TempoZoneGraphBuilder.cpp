@@ -34,12 +34,12 @@ bool FTempoZoneGraphBuilder::ShouldFilterLaneConnection(const UZoneShapeComponen
 TArray<FTempoLaneConnectionInfo> FTempoZoneGraphBuilder::GenerateTempoLaneConnectionInfoArray(const TArray<FLaneConnectionSlot>& Slots) const
 {
 	TArray<FTempoLaneConnectionInfo> TempoLaneConnectionInfos;
-	
+
 	for (const auto& Slot : Slots)
 	{
 		const int32 LaneIndex = Slot.Index;
 		FTempoLaneConnectionInfo LaneConnectionInfo(Slot, LaneIndex);
-		
+
 		TempoLaneConnectionInfos.Add(LaneConnectionInfo);
 	}
 

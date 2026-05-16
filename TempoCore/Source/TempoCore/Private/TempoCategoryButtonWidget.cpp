@@ -8,7 +8,7 @@
 void UTempoCategoryButtonWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
-	
+
 	if (CategoryButton)
 	{
 		CategoryButton->OnClicked.AddDynamic(this, &UTempoCategoryButtonWidget::OnButtonClicked);

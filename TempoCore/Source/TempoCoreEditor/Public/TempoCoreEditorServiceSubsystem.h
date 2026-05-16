@@ -27,11 +27,11 @@ class TEMPOCOREEDITOR_API UTempoCoreEditorServiceSubsystem : public UUnrealEdito
 
 public:
 	void RegisterServices(FTempoServer& Server) override;
-	
+
 	void Initialize(FSubsystemCollectionBase& Collection) override;
 
 	void Deinitialize() override;
-	
+
 	void PlayInEditor(const TempoCore::Empty& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation);
 
 	void Simulate(const TempoCore::Empty& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation);

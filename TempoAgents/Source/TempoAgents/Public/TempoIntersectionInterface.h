@@ -59,7 +59,7 @@ struct FTempoRoadConfigurationInfo
 	GENERATED_BODY()
 
 	FTempoRoadConfigurationInfo() = default;
-	
+
 	FTempoRoadConfigurationInfo(int32 InSourceConnectionIndex, int32 InDestConnectionIndex, float InConnectionDotProduct, ETempoRoadConfigurationDescriptor InRoadConfigurationDescriptor)
 		: SourceConnectionIndex(InSourceConnectionIndex)
 		, DestConnectionIndex(InDestConnectionIndex)
@@ -69,7 +69,7 @@ struct FTempoRoadConfigurationInfo
 	}
 
 	bool IsValid() const { return SourceConnectionIndex != InvalidConnectionIndex && DestConnectionIndex != InvalidConnectionIndex; }
-	
+
 	static constexpr int32 InvalidConnectionIndex = -1;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo Agents|Road Configuration|Info")
@@ -77,7 +77,7 @@ struct FTempoRoadConfigurationInfo
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo Agents|Road Configuration|Info")
 	int32 DestConnectionIndex = InvalidConnectionIndex;
-	
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo Agents|Road Configuration|Info")
 	float ConnectionDotProduct = 0.0f;
 
@@ -116,7 +116,7 @@ struct FTempoLaneConnectionInfo
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tempo Agents|Road Lane Graph|Lane Connection Info")
 	EZoneShapeLaneConnectionRestrictions Restrictions = EZoneShapeLaneConnectionRestrictions::None;
-	
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tempo Agents|Road Lane Graph|Lane Connection Info")
 	int32 LaneIndex = -1;
 };
@@ -130,11 +130,11 @@ class TEMPOAGENTS_API UTempoIntersectionInterface : public UInterface
 class TEMPOAGENTS_API ITempoIntersectionInterface
 {
 	GENERATED_BODY()
-	
+
 public:
 
 	// Connected Road Queries
-	
+
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
 	int32 GetNumTempoConnections() const;
 
@@ -152,7 +152,7 @@ public:
 
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
 	FVector GetTempoIntersectionEntranceTangent(int32 ConnectionIndex, ETempoCoordinateSpace CoordinateSpace) const;
-	
+
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
 	FVector GetTempoIntersectionEntranceUpVector(int32 ConnectionIndex, ETempoCoordinateSpace CoordinateSpace) const;
 
@@ -176,19 +176,19 @@ public:
 	bool ShouldFilterTempoLaneConnection(const AActor* SourceConnectionActor, const TArray<FTempoLaneConnectionInfo>& SourceLaneConnectionInfos, const int32 SourceSlotQueryIndex, const AActor* DestConnectionActor, const TArray<FTempoLaneConnectionInfo>& DestLaneConnectionInfos, const int32 DestSlotQueryIndex, const TArray<FLaneConnectionCandidate>& AllCandidates) const;
 
 	// Traffic Controller Queries
-	
+
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
 	ETempoTrafficControllerType GetTempoTrafficControllerType() const;
-	
+
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
 	EMassTrafficControllerSignType GetTempoTrafficControllerSignType(int32 ConnectionIndex) const;
-	
+
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
 	FTempoTrafficControllerMeshInfo GetTempoTrafficControllerMeshInfo(int32 ConnectionIndex, ETempoTrafficControllerType TrafficControllerType) const;
-	
+
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
 	FVector GetTempoTrafficControllerLocation(int32 ConnectionIndex, ETempoTrafficControllerType TrafficControllerType, ETempoCoordinateSpace CoordinateSpace) const;
-	
+
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
 	FRotator GetTempoTrafficControllerRotation(int32 ConnectionIndex, ETempoTrafficControllerType TrafficControllerType, ETempoCoordinateSpace CoordinateSpace) const;
 
@@ -196,7 +196,7 @@ public:
 
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Commands")
 	void SetupTempoTrafficControllers();
-	
+
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Commands")
 	void SetupTempoIntersectionData();
 };

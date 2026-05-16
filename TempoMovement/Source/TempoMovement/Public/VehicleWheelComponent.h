@@ -12,7 +12,7 @@ class TEMPOMOVEMENT_API UVehicleWheelComponent : public UStaticMeshComponent
 	GENERATED_BODY()
 public:
 	UVehicleWheelComponent();
-	
+
 	void TickComponent(float DeltaTime, enum ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 protected:

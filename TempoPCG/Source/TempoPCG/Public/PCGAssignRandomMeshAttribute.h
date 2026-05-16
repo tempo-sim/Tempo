@@ -80,7 +80,7 @@ protected:
 public:
 	// The name of the row to draw the mesh selection from
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings, meta = (PCG_Overridable))
-	FName RowName = NAME_None;	
+	FName RowName = NAME_None;
 
 	// The data table to draw from
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings, meta = (PCG_Overridable, PCG_OverrideAliases = "PathOverride"))
@@ -92,7 +92,7 @@ public:
 
 	// The name of the attribute to store the mesh selection in
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Settings, meta = (PCG_Overridable))
-	FName AttributeName = TEXT("Mesh");	
+	FName AttributeName = TEXT("Mesh");
 };
 
 struct FPCGAssignRandomMeshAttributeContext : public FPCGContext, public IPCGAsyncLoadingContext {};

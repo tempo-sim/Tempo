@@ -163,7 +163,7 @@ void UTempoWorldControlServiceSubsystem::RegisterServices(FTempoServer& Server)
 void UTempoWorldControlServiceSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
-	
+
 	TempoWorldControlServiceActivated.Broadcast();
 	TempoWorldControlServiceActivated.AddUObject(this, &UTempoWorldControlServiceSubsystem::OnTempoWorldControlServiceActivated);
 	TempoWorldControlServiceDeactivated.AddUObject(this, &UTempoWorldControlServiceSubsystem::OnTempoWorldControlServiceDeactivated);
@@ -242,7 +242,7 @@ void UTempoWorldControlServiceSubsystem::SpawnActor(const SpawnActorRequest& Req
 		SpawnLocation = SpawnTransform.GetLocation();
 		SpawnRotation = SpawnTransform.GetRotation().Rotator();
 	}
-	
+
 	FActorSpawnParameters SpawnParameters;
 	SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
 	const AActor* SpawnedActor = Request.deferred()
@@ -260,7 +260,7 @@ void UTempoWorldControlServiceSubsystem::SpawnActor(const SpawnActorRequest& Req
 	{
 		DeferredSpawnTransforms.Add(SpawnedActor, SpawnTransform);
 	}
-	
+
 	SpawnActorResponse Response;
 	Response.set_name(TCHAR_TO_UTF8(*SpawnedActor->GetActorNameOrLabel()));
 	*Response.mutable_transform() = FromUnrealTransform(SpawnedActor->GetActorTransform());
@@ -291,7 +291,7 @@ void UTempoWorldControlServiceSubsystem::FinishSpawningActor(const FinishSpawnin
 		ResponseContinuation.ExecuteIfBound(FinishSpawningActorResponse(), grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
-	
+
 	Actor->FinishSpawning(*SpawnTransform);
 
 	DeferredSpawnTransforms.Remove(Actor);
@@ -513,7 +513,7 @@ void UTempoWorldControlServiceSubsystem::SetActorTransform(const TempoWorld::Set
 		}
 		Transform = RelativeToActor->GetActorTransform() * Transform;
 	}
-	
+
 	Actor->SetActorTransform(Transform);
 
 	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status_OK);
@@ -1137,7 +1137,7 @@ void GetObjectProperties(const UObject* Object, GetPropertiesResponse& Response)
 			Type = TEXT("unsupported");
 		}
 	};
-	
+
 	for(TFieldIterator<FProperty> PropertyIt(Class); PropertyIt; ++PropertyIt)
 	{
 		const FProperty* Property = *PropertyIt;
@@ -1443,7 +1443,7 @@ grpc::Status SetSinglePropertyInContainer(void* Container, FProperty* Property, 
 	FString CurrentPropertyName = PropertyName;
 	const FString FirstPropertyName = SplitPropertyName(CurrentPropertyName);
 	FString InnerPropertyName = CurrentPropertyName;
-	
+
 	if (const FStructProperty* StructProperty = CastField<FStructProperty>(Property))
 	{
 		if (PropertyName.IsEmpty())

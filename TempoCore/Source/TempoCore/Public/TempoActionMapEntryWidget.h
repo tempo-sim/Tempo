@@ -40,9 +40,9 @@ public:
 private:
 	UFUNCTION()
 	void OnRebindButtonClicked();
-	
+
 	UPROPERTY()
 	UTempoActionMapWidget* ParentWidget;
-	
+
 	FActionBindingInfo BindingInfo;
 };

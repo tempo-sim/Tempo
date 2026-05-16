@@ -19,6 +19,6 @@ class TEMPOCORE_API UDefaultActorClassifier : public UWorldSubsystem, public IAc
 
 public:
 	static FName GetDefaultActorClassification(const AActor* Actor);
-	
+
 	virtual FName GetActorClassification(const AActor* Actor) const override;
 };

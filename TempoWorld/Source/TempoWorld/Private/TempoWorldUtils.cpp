@@ -30,7 +30,7 @@ UObject* GetAssetByPath(const FString& AssetPath)
 		const FString AssetName = FPaths::GetBaseFilename(AssetPath);
 		NormalizedPath = FString::Printf(TEXT("%s.%s"), *AssetPath, *AssetName);
 	}
-	
+
 	const FAssetData AssetData = AssetRegistry.GetAssetByObjectPath(FSoftObjectPath(NormalizedPath));
 	if (AssetData.IsValid())
 	{

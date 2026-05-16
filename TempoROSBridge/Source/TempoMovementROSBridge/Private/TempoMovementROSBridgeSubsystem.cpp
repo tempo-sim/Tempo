@@ -11,7 +11,7 @@
 void UTempoMovementROSBridgeSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 {
 	Super::OnWorldBeginPlay(InWorld);
-	
+
 	if (InWorld.WorldType != EWorldType::Game && InWorld.WorldType != EWorldType::PIE)
 	{
 		return;

@@ -4,14 +4,14 @@
 
 void FTempoSensorsROSBridgeModule::StartupModule()
 {
-    
+
 }
 
 void FTempoSensorsROSBridgeModule::ShutdownModule()
 {
-    
+
 }
 
 #undef LOCTEXT_NAMESPACE
-    
+
 IMPLEMENT_MODULE(FTempoSensorsROSBridgeModule, TempoSensorsROSBridge)

@@ -15,5 +15,5 @@ void FTempoMovementModule::ShutdownModule()
 }
 
 #undef LOCTEXT_NAMESPACE
-	
+
 IMPLEMENT_MODULE(FTempoMovementModule, TempoMovement)

@@ -67,7 +67,7 @@ public:
 	void StreamOverlapEvents(const TempoWorld::OverlapEventRequest& Request, const TResponseDelegate<TempoWorld::OverlapEventResponse>& ResponseContinuation);
 
 	void GetCurrentActorState(const TempoWorld::ActorStateRequest& Request, const TResponseDelegate<TempoWorld::ActorState>& ResponseContinuation) const;
-	
+
 	void StreamActorState(const TempoWorld::ActorStateRequest& Request, const TResponseDelegate<TempoWorld::ActorState>& ResponseContinuation);
 
 	void GetCurrentActorStatesNear(const TempoWorld::ActorStatesNearRequest& Request, const TResponseDelegate<TempoWorld::ActorStates>& ResponseContinuation) const;
@@ -81,11 +81,11 @@ public:
 	virtual void Tick(float DeltaTime) override;
 
 	virtual TStatId GetStatId() const override;
-	
+
 protected:
 	UFUNCTION()
 	void OnActorOverlap(AActor* OverlappedActor, AActor* OtherActor);
-	
+
 	TMap<FString, TArray<TResponseDelegate<TempoWorld::OverlapEventResponse>>> PendingOverlapRequests;
 
 	TMap<TempoWorld::ActorStateRequest, TArray<TResponseDelegate<TempoWorld::ActorState>>> PendingActorStateRequests;

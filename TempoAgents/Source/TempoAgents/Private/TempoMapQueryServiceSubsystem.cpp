@@ -70,7 +70,7 @@ TempoAgents::LaneRelationship LaneRelationshipFromLinkType(const EZoneLaneLinkTy
 void UTempoMapQueryServiceSubsystem::GetLaneData(const LaneDataRequest& Request, const TResponseDelegate<LaneDataResponse>& ResponseContinuation) const
 {
 	const UZoneGraphSubsystem* ZoneGraphSubsystem = GetWorld()->GetSubsystem<UZoneGraphSubsystem>();
-	
+
 	// Map from tag names (all lowercase) to tags.
 	TMap<FString, FZoneGraphTag> AllTags;
 	for (const auto& TagInfo : ZoneGraphSubsystem->GetTagInfos())
@@ -97,7 +97,7 @@ void UTempoMapQueryServiceSubsystem::GetLaneData(const LaneDataRequest& Request,
 	const FZoneGraphTagMask AnyMask = BuildTagMask(Request.tag_filter().any_tags());
 	const FZoneGraphTagMask AllMask = BuildTagMask(Request.tag_filter().all_tags());
 	const FZoneGraphTagMask NoneMask = BuildTagMask(Request.tag_filter().none_tags());
-	
+
 	LaneDataResponse Response;
 	for (TActorIterator<AZoneGraphData> ActorIt(GetWorld()); ActorIt; ++ActorIt)
 	{
@@ -109,7 +109,7 @@ void UTempoMapQueryServiceSubsystem::GetLaneData(const LaneDataRequest& Request,
 		for (int32 LaneIdx = 0; LaneIdx < Lanes.Num(); ++LaneIdx)
 		{
 			const FZoneLaneData& Lane = Lanes[LaneIdx];
-			
+
 			// Ignore if if the tag filter doesn't match.
 			const bool bContainsAny = Request.tag_filter().any_tags().size() > 0 ? Lane.Tags.CompareMasks(AnyMask, EZoneLaneTagMaskComparison::Any) : true;
 			const bool bContainsAll = Request.tag_filter().all_tags().size() > 0 ? Lane.Tags.CompareMasks(AllMask, EZoneLaneTagMaskComparison::All) : true;
@@ -139,7 +139,7 @@ void UTempoMapQueryServiceSubsystem::GetLaneData(const LaneDataRequest& Request,
 					continue;
 				}
 			}
-			
+
 			auto* lane = Response.add_lanes();
 			lane->set_id(LaneIdx);
 			for (int32 PointIdx = Lane.PointsBegin; PointIdx < Lane.PointsEnd; ++PointIdx)

@@ -17,7 +17,7 @@ class TEMPOAGENTS_API UTempoRoadModuleInterface : public UInterface
 class TEMPOAGENTS_API ITempoRoadModuleInterface
 {
 	GENERATED_BODY()
-	
+
 public:
 
 	// Road Module General Queries
@@ -50,10 +50,10 @@ public:
 
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Module Interface|Queries")
 	float GetTempoRoadModuleLaneWidth(int32 LaneIndex) const;
-	
+
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Module Interface|Queries")
 	EZoneLaneDirection GetTempoRoadModuleLaneDirection(int32 LaneIndex) const;
-	
+
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Module Interface|Queries")
 	TArray<FName> GetTempoRoadModuleLaneTags(int32 LaneIndex) const;
 
@@ -64,7 +64,7 @@ public:
 
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Module Interface|Queries")
 	FVector GetTempoRoadModuleControlPointLocation(int32 ControlPointIndex, ETempoCoordinateSpace CoordinateSpace) const;
-	
+
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Module Interface|Queries")
 	FVector GetTempoRoadModuleControlPointTangent(int32 ControlPointIndex, ETempoCoordinateSpace CoordinateSpace) const;
 
@@ -84,10 +84,10 @@ public:
 
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Module Interface|Queries")
 	float GetDistanceAlongTempoRoadModuleClosestToWorldLocation(FVector QueryLocation) const;
-	
+
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Module Interface|Queries")
 	FVector GetLocationAtDistanceAlongTempoRoadModule(float DistanceAlongRoadModule, ETempoCoordinateSpace CoordinateSpace) const;
-	
+
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Road Module Interface|Queries")
 	FVector GetTangentAtDistanceAlongTempoRoadModule(float DistanceAlongRoadModule, ETempoCoordinateSpace CoordinateSpace) const;
 

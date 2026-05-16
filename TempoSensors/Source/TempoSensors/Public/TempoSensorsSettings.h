@@ -141,11 +141,11 @@ private:
 	// Gamma to use for simulated scene captures.
 	UPROPERTY(EditAnywhere, Config, Category="Camera")
 	float SceneCaptureGamma = 2.2;
-	
+
 	// The max number of frames per camera to buffer before dropping.
 	UPROPERTY(EditAnywhere, Config, Category="Camera", AdvancedDisplay)
 	int32 MaxCameraRenderBufferSize = 4;
-	
+
 	// This special row can be overriden by a value passed through the subsurface color.
 	UPROPERTY(EditAnywhere, Config, Category="Camera")
 	FName OverridableLabelRowName = NAME_None;

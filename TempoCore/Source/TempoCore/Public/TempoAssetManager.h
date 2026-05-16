@@ -13,13 +13,13 @@
 UCLASS()
 class TEMPOCORE_API UTempoAssetManager : public UAssetManager
 {
-    GENERATED_BODY()
+	GENERATED_BODY()
 
 public:
 #if WITH_EDITOR
-    virtual bool GetPackageChunkIds(FName PackageName, const class ITargetPlatform* TargetPlatform, TArrayView<const int32> ExistingChunkList, TArray<int32>& OutChunkList, TArray<int32>* OutOverrideChunkList = nullptr) const override;
+	virtual bool GetPackageChunkIds(FName PackageName, const class ITargetPlatform* TargetPlatform, TArrayView<const int32> ExistingChunkList, TArray<int32>& OutChunkList, TArray<int32>* OutOverrideChunkList = nullptr) const override;
 #endif
 
 protected:
-    mutable TMap<FName, int32> MapChunkIds;
+	mutable TMap<FName, int32> MapChunkIds;
 };

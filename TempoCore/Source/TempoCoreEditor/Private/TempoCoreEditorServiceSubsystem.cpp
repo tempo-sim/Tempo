@@ -104,7 +104,7 @@ void UTempoCoreEditorServiceSubsystem::SaveLevel(const SaveLevelRequest& Request
 		}
 		RequestedPath = CurrentLevelName;
 	}
-	else 
+	else
 	{
 		FText ErrorReason;
 		if (!FFileHelper::IsFilenameValidForSaving(RequestedPath, ErrorReason))
@@ -154,7 +154,7 @@ void UTempoCoreEditorServiceSubsystem::OpenLevel(const OpenLevelRequest& Request
 		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::UNKNOWN, "Failed to open map"));
 		return;
 	}
-	
+
 	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status_OK);
 }
 

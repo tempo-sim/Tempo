@@ -18,14 +18,14 @@ FAutoConsoleVariableRef CVarDebugTempoWorld(
 
 void FTempoWorldModule::StartupModule()
 {
-    
+
 }
 
 void FTempoWorldModule::ShutdownModule()
 {
-    
+
 }
 
 #undef LOCTEXT_NAMESPACE
-    
+
 IMPLEMENT_MODULE(FTempoWorldModule, TempoWorld)
