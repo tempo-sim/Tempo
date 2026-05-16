@@ -19,6 +19,8 @@ namespace TempoCore
 {
 	class LoadLevelRequest;
 	class CurrentLevelResponse;
+	class GetAvailableLevelsRequest;
+	class AvailableLevelsResponse;
 	class SetMainViewportRenderEnabledRequest;
 	class SetControlModeRequest;
 }
@@ -40,6 +42,8 @@ public:
 	void FinishLoadingLevel(const TempoCore::Empty& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation);
 
 	void GetCurrentLevelName(const TempoCore::Empty& Request, const TResponseDelegate<TempoCore::CurrentLevelResponse>& ResponseContinuation);
+
+	void GetAvailableLevels(const TempoCore::GetAvailableLevelsRequest& Request, const TResponseDelegate<TempoCore::AvailableLevelsResponse>& ResponseContinuation) const;
 
 	void Quit(const TempoCore::Empty& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const;
 

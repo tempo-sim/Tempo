@@ -20,6 +20,7 @@ namespace TempoWorld
 {
 	class RaycastRequest;
 	class RaycastResponse;
+	class ActorStatesNearPositionRequest;
 }
 
 namespace TempoWorld
@@ -70,6 +71,8 @@ public:
 	void StreamActorState(const TempoWorld::ActorStateRequest& Request, const TResponseDelegate<TempoWorld::ActorState>& ResponseContinuation);
 
 	void GetCurrentActorStatesNear(const TempoWorld::ActorStatesNearRequest& Request, const TResponseDelegate<TempoWorld::ActorStates>& ResponseContinuation) const;
+
+	void GetCurrentActorStatesNearPosition(const TempoWorld::ActorStatesNearPositionRequest& Request, const TResponseDelegate<TempoWorld::ActorStates>& ResponseContinuation) const;
 
 	void StreamActorStatesNear(const TempoWorld::ActorStatesNearRequest& Request, const TResponseDelegate<TempoWorld::ActorStates>& ResponseContinuation);
 
