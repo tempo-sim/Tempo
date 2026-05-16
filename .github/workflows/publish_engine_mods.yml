@@ -41,6 +41,10 @@ on:
         type: string
         description: Runner platform
         default: ubuntu-22.04
+      submodules_token:
+        type: string
+        description: Token to use for fetching submodules during checkout
+        default: ''
 
 env:
   UNREAL_VERSION: "${{ inputs.unreal_version }}"
@@ -69,6 +73,7 @@ jobs:
         ref: ${{ inputs.checkout_ref }}
         path: checkout
         submodules: recursive
+        token: ${{ inputs.submodules_token != '' && inputs.submodules_token || github.token }}
     - name: Compute Engine Mods Hash and Tag
       id: tag
       run: |
