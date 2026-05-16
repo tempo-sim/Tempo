@@ -99,6 +99,10 @@ on:
         type: string
         description: GHCR repo (without tag) of a pre-modded Tempo Unreal image (see publish_engine_mods.yml). If empty or pull fails, falls back to building the image and applying engine mods in-workflow.
         default: ""
+      post_checkout_script:
+        type: string
+        description: Path (relative to project_root) of a script to run on the host after checkout, e.g. to download third-party dependencies into the project tree
+        default: ''
 
 env:
   UNREAL_VERSION: "${{ inputs.unreal_version }}"
@@ -224,6 +228,11 @@ jobs:
           .engine-mods-cache/Engine/Binaries/DotNET/UnrealBuildTool/**
           .engine-mods-cache/Engine/Binaries/DotNET/AutomationTool/**
         key: tempo-engine-mods-${{ env.UNREAL_VERSION }}-${{ hashFiles(format('{0}/EngineMods/**', inputs.tempo_root)) }}
+    - name: Run Post-Checkout Script (if specified)
+      if: ${{ inputs.post_checkout_script != '' }}
+      working-directory: ${{ github.workspace }}/${{ inputs.project_root }}
+      run: |
+        bash "${{ inputs.post_checkout_script }}"
     - name: Fixup Source File Modification Timestamps and Permissions
       run: |
         # The modification timestamps are recreated on checkout. This overwrites them with their respective commit dates
