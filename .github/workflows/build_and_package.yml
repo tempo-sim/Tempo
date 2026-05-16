@@ -103,6 +103,10 @@ on:
         type: string
         description: Path (relative to project_root) of a script to run on the host after checkout, e.g. to download third-party dependencies into the project tree
         default: ''
+      submodules_token:
+        type: string
+        description: Token to use for fetching submodules during checkout
+        default: ''
 
 env:
   UNREAL_VERSION: "${{ inputs.unreal_version }}"
@@ -179,6 +183,7 @@ jobs:
         ref: ${{ github.event.pull_request.head.sha || github.sha }}
         fetch-depth: 0
         submodules: recursive
+        token: ${{ inputs.submodules_token != '' && inputs.submodules_token || github.token }}
     - name: Find Common Ancestor with Base Branch
       if: ${{ ! inputs.clean }}
       id: common_ancestor
