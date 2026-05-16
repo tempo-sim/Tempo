@@ -298,11 +298,19 @@ jobs:
       id: engine_mods_hash
       run: |
         ENGINE_MODS_DIR="${{ github.workspace }}/${{ inputs.tempo_root }}/EngineMods"
+        DOCKERFILE="${{ github.workspace }}/${{ inputs.tempo_root }}/Dockerfile"
         if [ ! -d "$ENGINE_MODS_DIR" ]; then
           echo "EngineMods directory not found at $ENGINE_MODS_DIR"
           exit 1
         fi
-        HASH=$(cd "$ENGINE_MODS_DIR" && find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)
+        if [ ! -f "$DOCKERFILE" ]; then
+          echo "Dockerfile not found at $DOCKERFILE"
+          exit 1
+        fi
+        # Must stay in sync with the matching computation in publish_engine_mods.yml.
+        ENGINE_MODS_HASH=$(cd "$ENGINE_MODS_DIR" && find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)
+        DOCKERFILE_HASH=$(sha256sum "$DOCKERFILE" | cut -d' ' -f1)
+        HASH=$(printf '%s\n%s\n' "$ENGINE_MODS_HASH" "$DOCKERFILE_HASH" | sha256sum | cut -d' ' -f1)
         echo "HASH=$HASH" >> $GITHUB_OUTPUT
         echo "Engine mods hash: $HASH"
     - name: Log in to GHCR (for pulling pre-modded image)
