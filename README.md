@@ -42,11 +42,14 @@ git submodule update --init --recursive
 ```
 
 ### One-Time Setup
-Run the `Setup.sh` (or `Setup.bat` on Windows) script (from the `Tempo` root) once. This script will:
+Run the `Setup.sh` (or `Setup.bat` on Windows) script (from the `Tempo` root, or from `Scripts/`) once. This script will:
 - Modify your project's `*.Target.cs` files to use Tempo's custom toolchain, which is necessary for linking certain third party dependencies properly
 - Install the Tempo Unreal Engine mods, making some changes to your installed Engine in-place
 - Download third party dependencies
 - Add git hooks to keep engine mods and third party dependencies up to date automatically as you check out different Tempo commits
+
+> [!WARNING]
+> `Setup.sh` accepts a `-skip-hooks` flag which suppresses installing the `post-checkout` and `post-merge` git hooks. This is intended only for developers actively modifying Tempo itself — for example, when iterating on Tempo source while not touching `EngineMods/` or third party dependencies, the hooks can add noticeable overhead to every `git checkout`/`git merge`. Without the hooks, engine mods and third party deps will *not* re-sync automatically when you change Tempo commits, and you must run `Scripts/InstallEngineMods.sh` and `Scripts/SyncDeps.sh` manually to keep them in sync. If you are simply using Tempo as a dependency in your project, do not use this flag.
 
 ### Build and Run
 Use the included `Scripts/Build.sh` and `Scripts/Run.sh` (or their `.bat` counterparts on Windows) to build your project and open it in Unreal Editor.
