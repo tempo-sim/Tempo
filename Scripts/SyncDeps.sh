@@ -117,12 +117,24 @@ SYNC_THIRD_PARTY_DEPS () {
   PULL_DEPENDENCIES () {
     TARGET_PLATFORM=$1
     
-    RELEASE_INFO=$(curl -L -J \
+    AUTH_HEADER=()
+    if [ -n "$GITHUB_TOKEN" ]; then
+      AUTH_HEADER=(-H "Authorization: Bearer $GITHUB_TOKEN")
+    fi
+    RELEASE_INFO=$(curl -fsSL -J \
+                   "${AUTH_HEADER[@]}" \
                    -H "Accept: application/vnd.github+json" \
                    -H "X-GitHub-Api-Version: 2022-11-28" \
                    https://api.github.com/repos/tempo-sim/TempoThirdParty/releases)
-              
-    ARCHIVE_NAME=$(echo "$RELEASE_INFO" | jq -r --arg release "$RELEASE_NAME" --arg platform "$TARGET_PLATFORM" --arg artifact "$ARTIFACT" '.[] | select(.name == $release) | .assets[] | select(.name | test(".*-" + $artifact + "-" + $platform + "-.*")) | .name')     
+
+    if ! echo "$RELEASE_INFO" | jq -e 'type == "array"' > /dev/null; then
+      echo "GitHub API did not return a release list (likely rate-limited or transient error). Response:" >&2
+      echo "$RELEASE_INFO" | head -c 500 >&2
+      echo "" >&2
+      exit 1
+    fi
+
+    ARCHIVE_NAME=$(echo "$RELEASE_INFO" | jq -r --arg release "$RELEASE_NAME" --arg platform "$TARGET_PLATFORM" --arg artifact "$ARTIFACT" '.[] | select(.name == $release) | .assets[] | select(.name | test(".*-" + $artifact + "-" + $platform + "-.*")) | .name')
     URL=$(echo "$RELEASE_INFO" | jq -r --arg release "$RELEASE_NAME" --arg platform "$TARGET_PLATFORM" --arg artifact "$ARTIFACT" '.[] | select(.name == $release) | .assets[] | select(.name | test(".*-" + $artifact + "-" + $platform + "-.*")) | .url')
     
     if [ "$ARCHIVE_NAME" = "" ] || [ "$ARCHIVE_NAME" = "URL" ]; then
