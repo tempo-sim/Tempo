@@ -380,6 +380,8 @@ jobs:
         sudo chmod -R 755 .engine-ddc-cache/
     - name: Sync Third Party Dependencies
       uses: nick-fields/retry@v3
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         max_attempts: 3
         retry_on: error
@@ -387,6 +389,7 @@ jobs:
         command: |
           docker run --rm \
             ${ENGINE_MODS_MOUNTS} \
+            -e GITHUB_TOKEN \
             -v ${{ github.workspace }}/.engine-ddc-cache/Engine/DerivedDataCache:/home/ue4/UnrealEngine/Engine/DerivedDataCache \
             -v ${{ github.workspace }}/${{ inputs.project_root }}:/home/ue4/${{ inputs.project_root }} \
             tempo_unreal_image \
