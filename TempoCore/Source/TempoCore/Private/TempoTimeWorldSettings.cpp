@@ -44,7 +44,7 @@ float ATempoTimeWorldSettings::FixupDeltaSeconds(float DeltaSeconds, float RealD
 	const double SimTime = GetWorld()->GetTimeSeconds();
 
 	const UTempoCoreSettings* Settings = GetDefault<UTempoCoreSettings>();
-	
+
 	switch (Settings->GetTimeMode())
 	{
 	case ETimeMode::WallClock:
@@ -80,7 +80,7 @@ float ATempoTimeWorldSettings::FixupDeltaSeconds(float DeltaSeconds, float RealD
 			{
 				return FixedStepDeltaSeconds;
 			}
-			
+
 			// If we failed for any reason, fall back on DeltaSeconds.
 			return DeltaSeconds;
 		}
@@ -89,7 +89,7 @@ float ATempoTimeWorldSettings::FixupDeltaSeconds(float DeltaSeconds, float RealD
 			checkf(false, TEXT("Unhandled time mode in FixupDeltaSeconds"));
 		}
 	}
-	
+
 	return DeltaSeconds;
 }
 

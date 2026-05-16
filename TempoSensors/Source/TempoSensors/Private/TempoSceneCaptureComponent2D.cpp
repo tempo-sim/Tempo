@@ -272,7 +272,7 @@ TSharedPtr<FTextureRead> UTempoSceneCaptureComponent2D::DequeueIfReadComplete()
 }
 
 TOptional<int32> UTempoSceneCaptureComponent2D::SequenceIDOfNextCompleteRead() const
-{	
+{
 	return TextureReadQueue.SequenceIdOfNextCompleteRead();
 }
 

@@ -9,9 +9,9 @@ UCLASS()
 class TEMPOAGENTS_API UTempoAgentsWorldSubsystem : public UWorldSubsystem
 {
 	GENERATED_BODY()
-	
+
 public:
-	
+
 	UFUNCTION(BlueprintCallable, Category = "Tempo Agents|World Subsystem|Traffic Controllers")
 	void SetupTrafficControllers();
 
@@ -31,10 +31,10 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo Agents|World Subsystem|Brightness Meter")
 	float BrightnessMeterLateralOffset = 500.0f;
-	
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo Agents|World Subsystem|Brightness Meter")
 	float BrightnessMeterVerticalOffset = 140.0f;
-	
+
 protected:
-	
+
 };

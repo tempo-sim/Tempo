@@ -22,7 +22,7 @@ FRotator RotationFromNormal(const FVector& Normal, const FRotator& StartRotation
 }
 
 void UGroundSnapComponent::TickComponent(float DeltaTime, ELevelTick TickType,
-                                         FActorComponentTickFunction* ThisTickFunction)
+										 FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 

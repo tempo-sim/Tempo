@@ -21,8 +21,8 @@ public:
 	virtual FVector GetCrowdAgentVelocity() const override;
 	virtual void GetCrowdAgentCollisions(float& CylinderRadius, float& CylinderHalfHeight) const override;
 	virtual float GetCrowdAgentMaxSpeed() const override;
-    
-	virtual int32 GetCrowdAgentAvoidanceGroup() const override { return 1; } 
+
+	virtual int32 GetCrowdAgentAvoidanceGroup() const override { return 1; }
 	virtual int32 GetCrowdAgentGroupsToAvoid() const override { return MAX_int32; }
 	virtual int32 GetCrowdAgentGroupsToIgnore() const override { return 0; }
 };

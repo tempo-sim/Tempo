@@ -24,7 +24,7 @@ public:
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 
 	virtual void Deinitialize() override;
-	
+
 	virtual void Tick(float DeltaTime) override;
 
 	virtual TStatId GetStatId() const override;
@@ -36,8 +36,8 @@ public:
 	void StreamLaneAccessibility(const TempoAgents::LaneAccessibilityRequest& Request, const TResponseDelegate<TempoAgents::LaneAccessibilityResponse>& ResponseContinuation);
 
 	TempoAgents::LaneAccessibility GetLaneAccessibility(const int32 LaneId) const;
-	
-protected:	
+
+protected:
 	struct FLaneAccessibilityInfo
 	{
 		FLaneAccessibilityInfo() = default;
@@ -46,6 +46,6 @@ protected:
 		TempoAgents::LaneAccessibility LastKnownAccessibility;
 		TArray<TResponseDelegate<TempoAgents::LaneAccessibilityResponse>> ResponseContinuations;
 	};
-	
+
 	TMap<int32, FLaneAccessibilityInfo> PendingLaneAccessibilityRequests;
 };

@@ -11,34 +11,34 @@
 namespace tempo {
 
 enum class ErrorKind {
-    Connection,
-    Rpc,
-    InvalidUri,
-    Unknown,
+	Connection,
+	Rpc,
+	InvalidUri,
+	Unknown,
 };
 
 class TempoError {
 public:
-    static TempoError from_status(const grpc::Status& status);
-    static TempoError connection(std::string message);
-    static TempoError invalid_uri(std::string message);
-    static TempoError unknown(std::string message);
+	static TempoError from_status(const grpc::Status& status);
+	static TempoError connection(std::string message);
+	static TempoError invalid_uri(std::string message);
+	static TempoError unknown(std::string message);
 
-    ErrorKind kind() const { return kind_; }
-    const std::string& message() const { return message_; }
+	ErrorKind kind() const { return kind_; }
+	const std::string& message() const { return message_; }
 
-    /// gRPC status code for Rpc errors; 0 otherwise.
-    int code() const { return code_; }
+	/// gRPC status code for Rpc errors; 0 otherwise.
+	int code() const { return code_; }
 
-    /// Human-readable, single-line description.
-    std::string what() const;
+	/// Human-readable, single-line description.
+	std::string what() const;
 
 private:
-    TempoError(ErrorKind kind, std::string message, int code);
+	TempoError(ErrorKind kind, std::string message, int code);
 
-    ErrorKind kind_;
-    std::string message_;
-    int code_;
+	ErrorKind kind_;
+	std::string message_;
+	int code_;
 };
 
 }  // namespace tempo

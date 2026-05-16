@@ -14,7 +14,7 @@ USTRUCT()
 struct FMassBrightnessMeterWrapperFragment : public FMassFragment
 {
 	GENERATED_BODY()
-	
+
 	TWeakObjectPtr<UTempoBrightnessMeterComponent> BrightnessMeterComponent;
 };
 

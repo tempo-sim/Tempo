@@ -6,14 +6,14 @@
 
 void FTempoCoreEditorModule::StartupModule()
 {
-    
+
 }
 
 void FTempoCoreEditorModule::ShutdownModule()
 {
-    
+
 }
 
 #undef LOCTEXT_NAMESPACE
-    
+
 IMPLEMENT_MODULE(FTempoCoreEditorModule, TempoCoreEditor)

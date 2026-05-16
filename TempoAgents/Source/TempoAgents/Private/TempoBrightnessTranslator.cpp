@@ -37,9 +37,9 @@ void UMassBrightnessMeterToMassTranslator::Execute(FMassEntityManager& EntityMan
 #endif
 	{
 		const TConstArrayView<FMassBrightnessMeterWrapperFragment> BrightnessMeterWrapperFragments = Context.GetFragmentView<FMassBrightnessMeterWrapperFragment>();
-		
+
 		const TArrayView<FEnvironmentalBrightnessFragment> EnvironmentalBrightnessFragments = Context.GetMutableFragmentView<FEnvironmentalBrightnessFragment>();
-		
+
 		const int32 NumEntities = Context.GetNumEntities();
 		for (int32 EntityIndex = 0; EntityIndex < NumEntities; ++EntityIndex)
 		{

@@ -20,7 +20,7 @@
 void UTempoAgentsWorldSubsystem::SetupTrafficControllers()
 {
 	UWorld& World = GetWorldRef();
-	
+
 	UMassTrafficControllerRegistrySubsystem* TrafficControllerRegistrySubsystem = World.GetSubsystem<UMassTrafficControllerRegistrySubsystem>();
 	if (TrafficControllerRegistrySubsystem != nullptr)
 	{
@@ -31,7 +31,7 @@ void UTempoAgentsWorldSubsystem::SetupTrafficControllers()
 		// to Traffic Controller data visually for both Stop Signs and Traffic Lights).
 		TrafficControllerRegistrySubsystem->ClearTrafficControllers();
 	}
-	
+
 	for (AActor* Actor : TActorRange<AActor>(&World))
 	{
 		if (!IsValid(Actor))
@@ -91,7 +91,7 @@ void UTempoAgentsWorldSubsystem::SetupBrightnessMeter()
 	AActor& AnchorRoadActor = *RoadActors[0];
 
 	const int32 RoadStartEntranceLocationControlPointIndex = UTempoCoreUtils::CallBlueprintFunction(&AnchorRoadActor, ITempoRoadInterface::Execute_GetTempoStartEntranceLocationControlPointIndex);
-	
+
 	const FVector RoadStartLocation = UTempoCoreUtils::CallBlueprintFunction(&AnchorRoadActor, ITempoRoadInterface::Execute_GetTempoControlPointLocation, RoadStartEntranceLocationControlPointIndex, ETempoCoordinateSpace::World);
 	const FVector RoadForwardVector = UTempoCoreUtils::CallBlueprintFunction(&AnchorRoadActor, ITempoRoadInterface::Execute_GetTempoControlPointTangent, RoadStartEntranceLocationControlPointIndex, ETempoCoordinateSpace::World).GetSafeNormal();
 	const FVector RoadRightVector = UTempoCoreUtils::CallBlueprintFunction(&AnchorRoadActor, ITempoRoadInterface::Execute_GetTempoControlPointRightVector, RoadStartEntranceLocationControlPointIndex, ETempoCoordinateSpace::World);
@@ -99,7 +99,7 @@ void UTempoAgentsWorldSubsystem::SetupBrightnessMeter()
 
 	const float RoadWidth = UTempoCoreUtils::CallBlueprintFunction(&AnchorRoadActor, ITempoRoadInterface::Execute_GetTempoRoadWidth);
 	const float TotalLateralOffset = RoadWidth * 0.5f + BrightnessMeterLateralOffset;
-	
+
 	const FVector SpawnLocation = RoadStartLocation + RoadForwardVector * BrightnessMeterLongitudinalOffset + RoadRightVector * TotalLateralOffset + RoadUpVector * BrightnessMeterVerticalOffset;
 
 	// Face the BrightnessMeter back towards the road.
@@ -148,7 +148,7 @@ void UTempoAgentsWorldSubsystem::SetupIntersectionLaneMap()
 	const auto& GetRoadLaneTags = [](const AActor& RoadQueryActor)
 	{
 		TArray<FName> AggregateRoadLaneTags;
-		
+
 		const int32 NumLanes = UTempoCoreUtils::CallBlueprintFunction(&RoadQueryActor, ITempoRoadInterface::Execute_GetNumTempoLanes);
 
 		for (int32 LaneIndex = 0; LaneIndex < NumLanes; ++LaneIndex)
@@ -167,7 +167,7 @@ void UTempoAgentsWorldSubsystem::SetupIntersectionLaneMap()
 	const auto& GenerateTagMaskFromTagNames = [&ZoneGraphSubsystem](const TArray<FName>& TagNames)
 	{
 		FZoneGraphTagMask ZoneGraphTagMask;
-	
+
 		for (const auto& TagName : TagNames)
 		{
 			FZoneGraphTag Tag = ZoneGraphSubsystem->GetTagByName(TagName);
@@ -186,10 +186,10 @@ void UTempoAgentsWorldSubsystem::SetupIntersectionLaneMap()
 		{
 			return false;
 		}
-		
+
 		const int32 CrosswalkStartControlPointIndex = UTempoCoreUtils::CallBlueprintFunction(&IntersectionQueryActor, ITempoCrosswalkInterface::Execute_GetTempoCrosswalkStartEntranceLocationControlPointIndex, ConnectionIndex);
 		const int32 CrosswalkEndControlPointIndex = UTempoCoreUtils::CallBlueprintFunction(&IntersectionQueryActor, ITempoCrosswalkInterface::Execute_GetTempoCrosswalkEndEntranceLocationControlPointIndex, ConnectionIndex);
-		
+
 		const FVector CrosswalkStartControlPointLocation = UTempoCoreUtils::CallBlueprintFunction(&IntersectionQueryActor, ITempoCrosswalkInterface::Execute_GetTempoCrosswalkControlPointLocation, ConnectionIndex, CrosswalkStartControlPointIndex, ETempoCoordinateSpace::World);
 		const FVector CrosswalkEndControlPointLocation = UTempoCoreUtils::CallBlueprintFunction(&IntersectionQueryActor, ITempoCrosswalkInterface::Execute_GetTempoCrosswalkControlPointLocation, ConnectionIndex, CrosswalkEndControlPointIndex, ETempoCoordinateSpace::World);
 
@@ -198,7 +198,7 @@ void UTempoAgentsWorldSubsystem::SetupIntersectionLaneMap()
 
 		const float RoadWidth = UTempoCoreUtils::CallBlueprintFunction(RoadQueryActor, ITempoRoadInterface::Execute_GetTempoRoadWidth);
 		const float LateralDistanceToIntersectionExitCenter = RoadWidth / 4.0f;
-		
+
 		const float LateralIntersectionSideSign = LateralIntersectionSide >= 0 ? 1.0f : -1.0f;
 
 		const FVector IntersectionQueryLocation = IntersectionEntranceLocation + IntersectionEntranceRightVector * LateralDistanceToIntersectionExitCenter * LateralIntersectionSideSign;
@@ -208,7 +208,7 @@ void UTempoAgentsWorldSubsystem::SetupIntersectionLaneMap()
 
 		const TArray<FName> RoadLaneTags = GetRoadLaneTags(*RoadQueryActor);
 		const TArray<FName> CrosswalkTags = UTempoCoreUtils::CallBlueprintFunction(&IntersectionQueryActor, ITempoCrosswalkInterface::Execute_GetTempoCrosswalkTags, ConnectionIndex);
-		
+
 		const FZoneGraphTagMask RoadLaneAnyTagMask = GenerateTagMaskFromTagNames(RoadLaneTags);
 		const FZoneGraphTagMask CrosswalkAllTagMask = GenerateTagMaskFromTagNames(CrosswalkTags);
 
@@ -222,7 +222,7 @@ void UTempoAgentsWorldSubsystem::SetupIntersectionLaneMap()
 		const FZoneGraphStorage* ZoneGraphStorage = nullptr;
 
 		const TIndirectArray<FMassTrafficZoneGraphData>& MassTrafficZoneGraphDatas = MassTrafficSubsystem->GetTrafficZoneGraphData();
-		
+
 		for (const FMassTrafficZoneGraphData& MassTrafficZoneGraphData : MassTrafficZoneGraphDatas)
 		{
 			ZoneGraphStorage = ZoneGraphSubsystem->GetZoneGraphStorage(MassTrafficZoneGraphData.DataHandle);
@@ -234,7 +234,7 @@ void UTempoAgentsWorldSubsystem::SetupIntersectionLaneMap()
 
 			// Get any lanes nearby - we'll remove ones that don't actually intersect later.
 			const FBox QueryBox = FBox::BuildAABB(IntersectionQueryLocation, FVector::OneVector * QueryRadius);
-			
+
 			const bool bFoundRoadLanes = UE::ZoneGraph::Query::FindOverlappingLanes(*ZoneGraphStorage, QueryBox, RoadLaneTagFilter, RoadLaneHandles);
 			const bool bFoundCrosswalkLanes = UE::ZoneGraph::Query::FindOverlappingLanes(*ZoneGraphStorage, QueryBox, CrosswalkTagFilter, CrosswalkLaneHandles);
 
@@ -259,7 +259,7 @@ void UTempoAgentsWorldSubsystem::SetupIntersectionLaneMap()
 			RoadLaneHandles.RemoveAll([&MassTrafficSubsystem, &ZoneGraphStorage, &IntersectionQueryActor, ConnectionIndex, LateralIntersectionSideSign](const FZoneGraphLaneHandle& RoadLaneHandle)
 			{
 				const FZoneGraphTrafficLaneData* ZoneGraphTrafficLaneData = MassTrafficSubsystem->GetTrafficLaneData(RoadLaneHandle);
-				
+
 				if (!ensureMsgf(ZoneGraphTrafficLaneData != nullptr, TEXT("Must get ZoneGraphTrafficLaneData for RoadLaneHandle in FindIntersectionAndCrosswalkLanePairings.  IntersectionQueryActor: %s at ConnectionIndex: %d."), *IntersectionQueryActor.GetName(), ConnectionIndex))
 				{
 					return true;
@@ -271,7 +271,7 @@ void UTempoAgentsWorldSubsystem::SetupIntersectionLaneMap()
 				}
 
 				const FZoneLaneData& ZoneLaneData = ZoneGraphStorage->Lanes[RoadLaneHandle.Index];
-				
+
 				const int32 LanePointsIndex = LateralIntersectionSideSign > 0 ? ZoneLaneData.PointsBegin : ZoneLaneData.PointsEnd - 1;
 				const FVector LaneTangent = ZoneGraphStorage->LaneTangentVectors[LanePointsIndex];
 
@@ -279,7 +279,7 @@ void UTempoAgentsWorldSubsystem::SetupIntersectionLaneMap()
 
 				const bool bLaneIsEnteringIntersection = FVector::DotProduct(IntersectionEntranceForwardVector, LaneTangent) > 0.0f;
 				const bool bShouldKeepRoadLaneHandle = (bLaneIsEnteringIntersection && LateralIntersectionSideSign > 0) || (!bLaneIsEnteringIntersection && LateralIntersectionSideSign < 0);
-				
+
 				if (!bShouldKeepRoadLaneHandle)
 				{
 					return true;
@@ -296,7 +296,7 @@ void UTempoAgentsWorldSubsystem::SetupIntersectionLaneMap()
 
 		return true;
 	};
-	
+
 	for (const AActor* Actor : TActorRange<AActor>(&World))
 	{
 		if (!IsValid(Actor))
@@ -317,7 +317,7 @@ void UTempoAgentsWorldSubsystem::SetupIntersectionLaneMap()
 		const AActor& IntersectionQueryActor = *Actor;
 
 		const int32 NumConnections = UTempoCoreUtils::CallBlueprintFunction(&IntersectionQueryActor, ITempoIntersectionInterface::Execute_GetNumTempoConnections);
-		
+
 		for (int32 ConnectionIndex = 0; ConnectionIndex < NumConnections; ++ConnectionIndex)
 		{
 			TArray<FRoadAndCrosswalkLaneInfo> ExitRoadAndCrosswalkLaneInfos;

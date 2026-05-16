@@ -14,7 +14,7 @@ USTRUCT(BlueprintType)
 struct FHISMSplineInstanceInfo
 {
 	GENERATED_BODY()
-	
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	UStaticMesh* StaticMesh = nullptr;
 

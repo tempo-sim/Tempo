@@ -78,7 +78,7 @@ FString MeasurementTypeFromTopic(const FString& Topic)
 void UTempoSensorsROSBridgeSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 {
 	Super::OnWorldBeginPlay(InWorld);
-	
+
 	if (InWorld.WorldType != EWorldType::Game && InWorld.WorldType != EWorldType::PIE)
 	{
 		return;
@@ -86,7 +86,7 @@ void UTempoSensorsROSBridgeSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 
 	ROSNode = UTempoROSNode::Create("TempoSensors", this);
 	BindServiceToROS<FTempoGetAvailableSensors, UTempoSensorServiceSubsystem>(ROSNode, "GetAvailableSensors", this, &UTempoSensorsROSBridgeSubsystem::GetAvailableSensors);
-	
+
 	InWorld.GetTimerManager().SetTimer(UpdatePublishersTimerHandle, this, &UTempoSensorsROSBridgeSubsystem::UpdatePublishers, UpdatePublishersPeriod, true, 0.0);
 }
 
@@ -161,7 +161,7 @@ void UTempoSensorsROSBridgeSubsystem::UpdatePublishers()
 			const FString& Topic = MaybeTopic.GetValue();
 			bool bAlreadyHasTopic = PossiblyStaleTopics.Contains(Topic);
 			PossiblyStaleTopics.Remove(Topic);
-			
+
 			if (!bAlreadyHasTopic)
 			{
 				if (const UTempoCamera* Camera = Cast<UTempoCamera>(Sensor))
@@ -169,7 +169,7 @@ void UTempoSensorsROSBridgeSubsystem::UpdatePublishers()
 					const FString CameraInfoTopic = CameraInfoTopicFromBaseTopic(Topic);
 					ROSNode->AddPublisher<FTempoCameraInfo>(CameraInfoTopic, FROSQOSProfile(1).Reliable());
 				}
-				
+
 				switch (MeasurementType)
 				{
 					case COLOR_IMAGE:
@@ -198,7 +198,7 @@ void UTempoSensorsROSBridgeSubsystem::UpdatePublishers()
 			{
 				const FString CameraInfoTopic = CameraInfoTopicFromBaseTopic(Topic);
 				PossiblyStaleTopics.Remove(CameraInfoTopic);
-				
+
 				FTempoCameraInfo CameraInfoMessage(Camera->GetIntrinsics(),
 					GetDefault<UTempoROSSettings>()->GetFixedFrameName(),
 					GetWorld()->GetTimeSeconds());
@@ -266,12 +266,12 @@ template <typename MeasurementType>
 void UTempoSensorsROSBridgeSubsystem::OnMeasurementReceived(const MeasurementType& Image, grpc::Status Status, FString Topic)
 {
 	FScopeLock Lock(&MeasurementReceivedMutex);
-	
+
 	if (Status.ok())
 	{
 		ROSNode->Publish(Topic, Image);
 	}
-	
+
 	TopicsWithPendingRequests.Remove(Topic);
 
 	const TMap<FString, TUniquePtr<FTempoROSPublisher>>& Publishers = ROSNode->GetPublishers();

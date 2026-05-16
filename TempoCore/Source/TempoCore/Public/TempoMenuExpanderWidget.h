@@ -40,7 +40,7 @@ protected:
 
 	UPROPERTY(meta = (BindWidget))
 	UBorder* CategoryPanelContainer;
-	
+
 	UPROPERTY(meta = (BindWidget))
 	UTempoCategoryButtonWidget* TimeCategoryButton;
 
@@ -49,7 +49,7 @@ protected:
 
 	UPROPERTY(meta = (BindWidget))
 	UTempoCategoryButtonWidget* ExternalsCategoryButton;
-	
+
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Controlled Content")
 	TMap<FName, FWidgetArrayWrapper> ControlledWidgetGroups;
 

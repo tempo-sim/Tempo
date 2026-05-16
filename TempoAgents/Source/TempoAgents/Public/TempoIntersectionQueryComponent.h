@@ -20,7 +20,7 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Tempo Intersections")
 	virtual bool TryGetIntersectionEntranceControlPointIndex(const AActor* IntersectionQueryActor, int32 ConnectionIndex, int32& OutIntersectionEntranceControlPointIndex) const;
-	
+
 	UFUNCTION(BlueprintCallable, Category = "Tempo Intersections")
 	virtual bool TryGetIntersectionEntranceLocation(const AActor* IntersectionQueryActor, int32 ConnectionIndex, ETempoCoordinateSpace CoordinateSpace, FVector& OutIntersectionEntranceLocation) const;
 
@@ -39,22 +39,22 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Tempo Intersections")
 	virtual bool TryGetCrosswalkIntersectionConnectorInfo(const AActor* IntersectionQueryActor, int32 CrosswalkRoadModuleIndex, FCrosswalkIntersectionConnectorInfo& OutCrosswalkIntersectionConnectorInfo) const;
-	
+
 	UFUNCTION(BlueprintCallable, Category = "Tempo Intersections")
 	virtual bool TryGenerateCrosswalkRoadModuleMap(const AActor* IntersectionQueryActor, const TArray<FName>& CrosswalkRoadModuleAnyTags, const TArray<FName>& CrosswalkRoadModuleAllTags, const TArray<FName>& CrosswalkRoadModuleNotTags, TMap<int32, AActor*>& OutCrosswalkRoadModuleMap) const;
 
 	UFUNCTION(BlueprintCallable, Category = "Tempo Intersections")
 	virtual bool TryGetCrosswalkIntersectionConnectorInfoEntry(const AActor* IntersectionQueryActor, int32 CrosswalkIntersectionIndex, int32 CrosswalkIntersectionConnectionIndex, const TMap<int32, FCrosswalkIntersectionConnectorInfo>& CrosswalkIntersectionConnectorInfoMap, AActor*& OutCrosswalkRoadModule, float &OutCrosswalkIntersectionConnectorDistance) const;
-	
+
 	UFUNCTION(BlueprintCallable, Category = "Tempo Intersections")
 	virtual bool TryGetCrosswalkIntersectionEntranceLocation(const AActor* IntersectionQueryActor, int32 CrosswalkIntersectionIndex, int32 CrosswalkIntersectionConnectionIndex, ETempoCoordinateSpace CoordinateSpace, const TMap<int32, FCrosswalkIntersectionConnectorInfo>& CrosswalkIntersectionConnectorInfoMap, FVector& OutCrosswalkIntersectionEntranceLocation) const;
-	
+
 	UFUNCTION(BlueprintCallable, Category = "Tempo Intersections")
 	virtual bool TryGetCrosswalkIntersectionEntranceTangent(const AActor* IntersectionQueryActor, int32 CrosswalkIntersectionIndex, int32 CrosswalkIntersectionConnectionIndex, ETempoCoordinateSpace CoordinateSpace, const TMap<int32, FCrosswalkIntersectionConnectorInfo>& CrosswalkIntersectionConnectorInfoMap, FVector& OutCrosswalkIntersectionEntranceTangent) const;
-	
+
 	UFUNCTION(BlueprintCallable, Category = "Tempo Intersections")
 	virtual bool TryGetCrosswalkIntersectionEntranceUpVector(const AActor* IntersectionQueryActor, int32 CrosswalkIntersectionIndex, int32 CrosswalkIntersectionConnectionIndex, ETempoCoordinateSpace CoordinateSpace, const TMap<int32, FCrosswalkIntersectionConnectorInfo>& CrosswalkIntersectionConnectorInfoMap, FVector& OutCrosswalkIntersectionEntranceUpVector) const;
-	
+
 	UFUNCTION(BlueprintCallable, Category = "Tempo Intersections")
 	virtual bool TryGetCrosswalkIntersectionEntranceRightVector(const AActor* IntersectionQueryActor, int32 CrosswalkIntersectionIndex, int32 CrosswalkIntersectionConnectionIndex, ETempoCoordinateSpace CoordinateSpace, const TMap<int32, FCrosswalkIntersectionConnectorInfo>& CrosswalkIntersectionConnectorInfoMap, FVector& OutCrosswalkIntersectionEntranceRightVector) const;
 
@@ -66,10 +66,10 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Tempo Intersections")
 	virtual bool TryGetCrosswalkIntersectionEntranceLaneWidth(const AActor* IntersectionQueryActor, int32 CrosswalkIntersectionIndex, int32 CrosswalkIntersectionConnectionIndex, int32 LaneIndex, const TMap<int32, FCrosswalkIntersectionConnectorInfo>& CrosswalkIntersectionConnectorInfoMap, float& OutCrosswalkIntersectionEntranceLaneWidth) const;
-	
+
 	UFUNCTION(BlueprintCallable, Category = "Tempo Intersections")
 	virtual bool TryGetCrosswalkIntersectionEntranceLaneDirection(const AActor* IntersectionQueryActor, int32 CrosswalkIntersectionIndex, int32 CrosswalkIntersectionConnectionIndex, int32 LaneIndex, const TMap<int32, FCrosswalkIntersectionConnectorInfo>& CrosswalkIntersectionConnectorInfoMap, EZoneLaneDirection& OutCrosswalkIntersectionEntranceLaneDirection) const;
-	
+
 	UFUNCTION(BlueprintCallable, Category = "Tempo Intersections")
 	virtual bool TryGetCrosswalkIntersectionEntranceLaneTags(const AActor* IntersectionQueryActor, int32 CrosswalkIntersectionIndex, int32 CrosswalkIntersectionConnectionIndex, int32 LaneIndex, const TMap<int32, FCrosswalkIntersectionConnectorInfo>& CrosswalkIntersectionConnectorInfoMap, TArray<FName>& OutCrosswalkIntersectionEntranceLaneTags) const;
 
@@ -81,22 +81,22 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Tempo Intersections")
 	virtual bool TryGetCrosswalkIntersectionConnectorLaneWidth(const AActor* IntersectionQueryActor, int32 CrosswalkRoadModuleIndex, int32 LaneIndex, const TMap<int32, FCrosswalkIntersectionConnectorInfo>& CrosswalkIntersectionConnectorInfoMap, float& OutCrosswalkIntersectionConnectorLaneWidth) const;
-	
+
 	UFUNCTION(BlueprintCallable, Category = "Tempo Intersections")
 	virtual bool TryGetCrosswalkIntersectionConnectorLaneDirection(const AActor* IntersectionQueryActor, int32 CrosswalkRoadModuleIndex, int32 LaneIndex, const TMap<int32, FCrosswalkIntersectionConnectorInfo>& CrosswalkIntersectionConnectorInfoMap, EZoneLaneDirection& OutCrosswalkIntersectionConnectorLaneDirection) const;
-	
+
 	UFUNCTION(BlueprintCallable, Category = "Tempo Intersections")
 	virtual bool TryGetCrosswalkIntersectionConnectorLaneTags(const AActor* IntersectionQueryActor, int32 CrosswalkRoadModuleIndex, int32 LaneIndex, const TMap<int32, FCrosswalkIntersectionConnectorInfo>& CrosswalkIntersectionConnectorInfoMap, TArray<FName>& OutCrosswalkIntersectionConnectorLaneTags) const;
 
 	UFUNCTION(BlueprintCallable, Category = "Tempo Intersections")
 	virtual bool TryGetCrosswalkControlPointLocation(const AActor* IntersectionQueryActor, int32 ConnectionIndex, int32 CrosswalkControlPointIndex, ETempoCoordinateSpace CoordinateSpace, FVector& OutCrosswalkControlPointLocation) const;
-	
+
 	UFUNCTION(BlueprintCallable, Category = "Tempo Intersections")
 	virtual bool TryGetCrosswalkControlPointTangent(const AActor* IntersectionQueryActor, int32 ConnectionIndex, int32 CrosswalkControlPointIndex, ETempoCoordinateSpace CoordinateSpace, FVector& OutCrosswalkControlPointTangent) const;
-	
+
 	UFUNCTION(BlueprintCallable, Category = "Tempo Intersections")
 	virtual bool TryGetCrosswalkControlPointUpVector(const AActor* IntersectionQueryActor, int32 ConnectionIndex, int32 CrosswalkControlPointIndex, ETempoCoordinateSpace CoordinateSpace, FVector& OutCrosswalkControlPointUpVector) const;
-	
+
 	UFUNCTION(BlueprintCallable, Category = "Tempo Intersections")
 	virtual bool TryGetCrosswalkControlPointRightVector(const AActor* IntersectionQueryActor, int32 ConnectionIndex, int32 CrosswalkControlPointIndex, ETempoCoordinateSpace CoordinateSpace, FVector& OutCrosswalkControlPointRightVector) const;
 
@@ -108,9 +108,9 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Tempo Intersections")
 	virtual bool TryGetCanonicalStartingConnectionIndex(const AActor* IntersectionQueryActor, int32& OutStartingConnectionIndex) const;
-	
+
 protected:
-	
+
 	virtual bool TryGetNearestRoadControlPointIndex(const AActor& IntersectionQueryActor, int32 ConnectionIndex, int32& OutNearestRoadControlPointIndex) const;
 	virtual AActor* GetConnectedRoadActor(const AActor& IntersectionQueryActor, int32 ConnectionIndex) const;
 

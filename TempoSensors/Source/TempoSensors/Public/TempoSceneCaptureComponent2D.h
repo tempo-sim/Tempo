@@ -24,7 +24,7 @@ struct FTextureRead
 		EReading = 1,
 		EReadComplete = 2
 	};
-	
+
 	FTextureRead(const FIntPoint& ImageSizeIn, int32 SequenceIdIn, double CaptureTimeIn, const FString& OwnerNameIn,
 		const FString& SensorNameIn, const FTransform& SensorTransformIn)
 		: ImageSize(ImageSizeIn), SequenceId(SequenceIdIn), CaptureTime(CaptureTimeIn), OwnerName(OwnerNameIn),

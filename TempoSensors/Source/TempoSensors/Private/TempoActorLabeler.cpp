@@ -63,10 +63,10 @@ void FInstanceIdAllocator::Return(int32 Id)
 		// We are not allowed to reuse IDs once they have been allocated
 		return;
 	}
- 	if (!ensureMsgf(Id >= MinId && Id <= MaxId, TEXT("Reclaimed Available Id %d outside original min/max"), Id))
- 	{
- 		return;
- 	}
+	if (!ensureMsgf(Id >= MinId && Id <= MaxId, TEXT("Reclaimed Available Id %d outside original min/max"), Id))
+	{
+		return;
+	}
 	for (auto AvailableIdsIt = AvailableIds.CreateIterator(); AvailableIdsIt; ++AvailableIdsIt)
 	{
 		if (AvailableIdsIt->Contains(Id))
@@ -454,8 +454,8 @@ void UTempoActorLabeler::OnWorldBeginPlay(UWorld& InWorld)
 	{
 		UnLabelComponent(Component);
 	});
-	
-	// Handles labeling TempoInstancedStaticMeshComponents when they are registered. 
+
+	// Handles labeling TempoInstancedStaticMeshComponents when they are registered.
 	UTempoInstancedStaticMeshComponent::TempoInstancedStaticMeshRegisteredEvent.AddWeakLambda(this, [this](UActorComponent* Component)
 	{
 		LabelComponent(Component);
@@ -540,7 +540,7 @@ void UTempoActorLabeler::BuildLabelMaps()
 			SemanticIds.Add(Label, LabelId);
 		}
 	});
-	
+
 	if (const int32* NoLabelIdPtr = SemanticIds.Find(NoLabelName))
 	{
 		NoLabelId = *NoLabelIdPtr;

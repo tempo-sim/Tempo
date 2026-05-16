@@ -12,7 +12,7 @@ UCLASS(Config=Plugins, DefaultConfig)
 class TEMPOAGENTS_API UTempoAgentsSettings : public UDeveloperSettings
 {
 	GENERATED_BODY()
-	
+
 public:
 	UTempoAgentsSettings();
 
@@ -21,7 +21,7 @@ public:
 #endif
 
 	float GetMaxThroughRoadAngleDegrees() const { return MaxThroughRoadAngleDegrees; }
-	
+
 protected:
 
 	// Maximum angle (in degrees) between roads entering an intersection

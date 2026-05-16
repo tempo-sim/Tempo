@@ -12,6 +12,6 @@ struct TEMPOAGENTS_API FTempoZoneGraphStandTask : public FMassZoneGraphStandTask
 	GENERATED_BODY()
 
 protected:
-	
+
 	virtual EStateTreeRunStatus EnterState(FStateTreeExecutionContext& Context, const FStateTreeTransitionResult& Transition) const override;
 };

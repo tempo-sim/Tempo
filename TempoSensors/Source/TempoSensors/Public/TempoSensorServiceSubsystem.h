@@ -36,7 +36,7 @@ UCLASS()
 class TEMPOSENSORS_API UTempoSensorServiceSubsystem : public UTempoGameWorldSubsystem, public ITempoServiceProvider
 {
 	GENERATED_BODY()
-	
+
 public:
 	virtual void RegisterServices(FTempoServer& Server) override;
 

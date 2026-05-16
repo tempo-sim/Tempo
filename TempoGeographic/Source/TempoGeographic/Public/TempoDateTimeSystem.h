@@ -18,7 +18,7 @@ public:
 	FDateTimeChanged DateTimeChangedEvent;
 
 	ATempoDateTimeSystem();
-	
+
 	virtual void Tick(float DeltaSeconds) override;
 
 	UFUNCTION(BlueprintPure, Category = "TempoGeographic", meta = (WorldContext = "WorldContextObject"))
@@ -32,7 +32,7 @@ protected:
 	void BroadcastDateTimeChanged() const;
 
 	void SetDayCycleRelativeRate(float DayCycleRelativeRateIn) { DayCycleRelativeRate = DayCycleRelativeRateIn; }
-	
+
 	// The rate the geographic world time advances faster than real time
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	float DayCycleRelativeRate = 1.0;

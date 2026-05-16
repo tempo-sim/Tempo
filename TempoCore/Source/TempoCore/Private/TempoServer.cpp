@@ -119,7 +119,7 @@ void FTempoServer::Initialize()
 			ServiceProviderObjects.Add(Object);
 		}
 	}
-	
+
 	for (UObject* Object : ServiceProviderObjects)
 	{
 		bool bMostDerived = true;
@@ -155,7 +155,7 @@ void FTempoServer::Initialize()
 		UE_LOG(LogTempoCore, Error, TEXT("Error while starting Tempo gRPC server. Perhaps port %d was not available."), Port);
 		return;
 	}
-	
+
 	UE_LOG(LogTempoCore, Display, TEXT("Tempo gRPC server listening on %s"), *ServerAddress);
 
 	// Now that the server has started we can initialize the request managers.
@@ -163,7 +163,7 @@ void FTempoServer::Initialize()
 	{
 		RequestManager.Value->Init(CompletionQueue.Get());
 	}
-	
+
 	bIsInitialized = true;
 }
 
@@ -173,7 +173,7 @@ void FTempoServer::Deinitialize()
 	{
 		return;
 	}
-	
+
 	bIsInitialized = false;
 
 	checkf(Server.Get(), TEXT("Server was unexpectedly null"));
@@ -314,7 +314,7 @@ void FTempoServer::HandleEventForTag(int32 Tag, bool bOk)
 			RequestManagers.Remove(Tag);
 			return;
 		}
-		
+
 		switch ((*RequestManager)->GetState())
 		{
 		case FRequestManager::UNINITIALIZED: // Shouldn't happen.

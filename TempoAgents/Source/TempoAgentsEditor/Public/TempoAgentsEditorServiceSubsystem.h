@@ -30,6 +30,6 @@ public:
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 
 	virtual void Deinitialize() override;
-	
+
 	void RunTempoZoneGraphBuilderPipeline(const TempoCore::Empty& Request, const TResponseDelegate<TempoAgentsEditor::PipelineResult>& ResponseContinuation) const;
 };

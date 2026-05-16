@@ -56,7 +56,7 @@ public:
 	virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
 
 	void SpawnActor(const TempoWorld::SpawnActorRequest& Request, const TResponseDelegate<TempoWorld::SpawnActorResponse>& ResponseContinuation);
-	
+
 	void FinishSpawningActor(const TempoWorld::FinishSpawningActorRequest& Request, const TResponseDelegate<TempoWorld::FinishSpawningActorResponse>& ResponseContinuation);
 
 	void DestroyActor(const TempoWorld::DestroyActorRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const;
@@ -72,11 +72,11 @@ public:
 	void ActivateComponent(const TempoWorld::ActivateComponentRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const;
 
 	void DeactivateComponent(const TempoWorld::DeactivateComponentRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const;
-	
+
 	void GetAllActors(const TempoCore::Empty& Request, const TResponseDelegate<TempoWorld::GetAllActorsResponse>& ResponseContinuation) const;
 
 	void GetAllComponents(const TempoWorld::GetAllComponentsRequest& Request, const TResponseDelegate<TempoWorld::GetAllComponentsResponse>& ResponseContinuation) const;
-	
+
 	void GetActorProperties(const TempoWorld::GetActorPropertiesRequest& Request, const TResponseDelegate<TempoWorld::GetPropertiesResponse>& ResponseContinuation) const;
 
 	void GetComponentProperties(const TempoWorld::GetComponentPropertiesRequest& Request, const TResponseDelegate<TempoWorld::GetPropertiesResponse>& ResponseContinuation) const;
@@ -86,7 +86,7 @@ public:
 	void OnTempoWorldControlServiceActivated();
 
 	void OnTempoWorldControlServiceDeactivated();
-	
+
 protected:
 	UPROPERTY()
 	TMap<const AActor*, FTransform> DeferredSpawnTransforms;

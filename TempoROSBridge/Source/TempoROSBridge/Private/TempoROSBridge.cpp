@@ -15,5 +15,5 @@ void FTempoROSBridgeModule::ShutdownModule()
 }
 
 #undef LOCTEXT_NAMESPACE
-	
+
 IMPLEMENT_MODULE(FTempoROSBridgeModule, TempoROSBridge)

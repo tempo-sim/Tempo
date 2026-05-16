@@ -4,37 +4,37 @@ using UnrealBuildTool;
 
 public class TempoCoreEditor : TempoModuleRules
 {
-    public TempoCoreEditor(ReadOnlyTargetRules Target) : base(Target)
-    {
-        PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
+	public TempoCoreEditor(ReadOnlyTargetRules Target) : base(Target)
+	{
+		PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
 
-        PublicDependencyModuleNames.AddRange(
-            new string[]
-            {
-                "Core",
-                "TempoCore",
-            }
-        );
+		PublicDependencyModuleNames.AddRange(
+			new string[]
+			{
+				"Core",
+				"TempoCore",
+			}
+		);
 
-        PrivateDependencyModuleNames.AddRange(
-            new string[]
-            {
-                "CoreUObject",
-                "Engine",
-                "EngineSettings",
-                "Slate",
-                "SlateCore"
-            }
-        );
+		PrivateDependencyModuleNames.AddRange(
+			new string[]
+			{
+				"CoreUObject",
+				"Engine",
+				"EngineSettings",
+				"Slate",
+				"SlateCore"
+			}
+		);
 
-        if (Target.bBuildEditor)
-        {
-            PrivateDependencyModuleNames.AddRange(
-                new string[]
-                {
-                    "UnrealEd",
-                }
-            );
-        }
-    }
+		if (Target.bBuildEditor)
+		{
+			PrivateDependencyModuleNames.AddRange(
+				new string[]
+				{
+					"UnrealEd",
+				}
+			);
+		}
+	}
 }

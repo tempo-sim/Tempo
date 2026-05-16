@@ -55,7 +55,7 @@ void UTempoTimeServiceSubsystem::RegisterServices(FTempoServer& Server)
 void UTempoTimeServiceSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
-	
+
 	FTempoServer::Get().ActivateService<TimeService>(this);
 }
 

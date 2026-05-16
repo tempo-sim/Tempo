@@ -6,14 +6,14 @@
 
 void FTempoGeographicROSBridgeModule::StartupModule()
 {
-    
+
 }
 
 void FTempoGeographicROSBridgeModule::ShutdownModule()
 {
-    
+
 }
 
 #undef LOCTEXT_NAMESPACE
-    
+
 IMPLEMENT_MODULE(FTempoGeographicROSBridgeModule, TempoGeographicROSBridge)

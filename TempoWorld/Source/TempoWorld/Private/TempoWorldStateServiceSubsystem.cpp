@@ -232,7 +232,7 @@ TempoWorld::ActorState GetActorState(const AActor* Actor, const UWorld* World, b
 	ActorStateBounds->mutable_max()->set_x(ActorBoundsMax.X);
 	ActorStateBounds->mutable_max()->set_y(ActorBoundsMax.Y);
 	ActorStateBounds->mutable_max()->set_z(ActorBoundsMax.Z);
-	
+
 	return ActorState;
 }
 
@@ -354,7 +354,7 @@ void UTempoWorldStateServiceSubsystem::OnActorOverlap(AActor* OverlappedActor, A
 void UTempoWorldStateServiceSubsystem::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
-	
+
 	for (auto ActorStatesRequestsIt = PendingActorStateRequests.CreateIterator(); ActorStatesRequestsIt; ++ActorStatesRequestsIt)
 	{
 		const ActorStateRequest Request = ActorStatesRequestsIt->Key;

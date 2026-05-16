@@ -36,10 +36,10 @@ void UTempoMassAgentBrightnessMeterSyncTrait::BuildTemplate(FMassEntityTemplateB
 			{
 				return;
 			}
-			
+
 			FMassBrightnessMeterWrapperFragment& BrightnessMeterWrapperFragment = EntityView.GetFragmentData<FMassBrightnessMeterWrapperFragment>();
 			BrightnessMeterWrapperFragment.BrightnessMeterComponent = BrightnessMeterComponent;
-				
+
 			FEnvironmentalBrightnessFragment& EnvironmentalBrightnessFragment = EntityView.GetFragmentData<FEnvironmentalBrightnessFragment>();
 			EnvironmentalBrightnessFragment.Brightness = BrightnessMeterComponent->GetBrightness();
 		});

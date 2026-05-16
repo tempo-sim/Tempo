@@ -35,7 +35,7 @@ public:
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 
 	virtual void Deinitialize() override;
-	
+
 	void SetDate(const TempoGeographic::Date& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation);
 
 	void SetTimeOfDay(const TempoGeographic::TimeOfDay& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation);

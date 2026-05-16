@@ -63,7 +63,7 @@ public:
 	static FName GetServerPortMemberName() { return GET_MEMBER_NAME_CHECKED(UTempoCoreSettings, ServerPort); }
 	static FName GetServerCompressionLevelMemberName() { return GET_MEMBER_NAME_CHECKED(UTempoCoreSettings, ServerCompressionLevel); }
 #endif
-	
+
 private:
 	UPROPERTY(EditAnywhere, Config, Category="Time")
 	ETimeMode TimeMode = ETimeMode::WallClock;
@@ -72,7 +72,7 @@ private:
 	UPROPERTY(EditAnywhere, Config, Category="Time|FixedStep", meta=(ClampMin=1, UIMin=1, UIMax=100))
 	int32 SimulatedStepsPerSecond = 10;
 
-	// The largest time step allowed in WallClock time mode. No limit if 0.0. Note that setting this to non-zero violates 
+	// The largest time step allowed in WallClock time mode. No limit if 0.0. Note that setting this to non-zero violates
 	// WallClock time mode's guarantee of strictly advancing along with wall clock at the step that would have exceeded the max.
 	UPROPERTY(EditAnywhere, Config, Category="Time|WallClock", meta=(ClampMin=0.0, UIMin=0.0, UIMax=1.0))
 	double MaxWallClockTimeStep = 0.0;

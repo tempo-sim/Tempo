@@ -27,9 +27,9 @@ protected:
 	float UpdatePublishersPeriod = 1.0;
 
 	FCriticalSection MeasurementReceivedMutex;
-	
+
 	TSet<FString> TopicsWithPendingRequests;
-	
+
 	UPROPERTY()
 	class UTempoROSNode* ROSNode;
 };

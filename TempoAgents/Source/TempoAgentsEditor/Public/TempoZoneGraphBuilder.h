@@ -13,7 +13,7 @@ struct TEMPOAGENTSEDITOR_API FTempoZoneGraphBuilder : public FZoneGraphBuilder
 	GENERATED_BODY()
 
 public:
-	
+
 	virtual bool ShouldFilterLaneConnection(const UZoneShapeComponent& PolygonShapeComp, const UZoneShapeComponent& SourceShapeComp, const TArray<FLaneConnectionSlot>& SourceSlots, const int32 SourceSlotQueryIndex, const UZoneShapeComponent& DestShapeComp, const TArray<FLaneConnectionSlot>& DestSlots, const int32 DestSlotQueryIndex, const TArray<FLaneConnectionCandidate>& AllCandidates) const override;
 
 protected:

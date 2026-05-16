@@ -36,14 +36,14 @@ void UTempoTimeWidget::NativeOnInitialized()
 	// Set up Play button.
 	PlayButton->bIsEnabledDelegate.BindDynamic(this, &UTempoTimeWidget::IsPlayAllowed);
 	PlayButton->OnPressed.AddDynamic(this, &UTempoTimeWidget::OnPlayPressed);
-	
+
 	// Set up Step button.
 	StepButton->bIsEnabledDelegate.BindDynamic(this, &UTempoTimeWidget::IsFixedStepMode);
 	StepButton->OnPressed.AddDynamic(this, &UTempoTimeWidget::OnStepPressed);
 
 	// Get initial settings.
 	SyncTimeSettings();
-	
+
 	// Keep time settings in sync.
 	GetMutableDefault<UTempoCoreSettings>()->TempoCoreTimeSettingsChangedEvent.AddUObject(this, &UTempoTimeWidget::SyncTimeSettings);
 }
@@ -69,7 +69,7 @@ void UTempoTimeWidget::OnTimeModeSelectionChanged(FString SelectedItem, ESelectI
 	{
 		return;
 	}
-	
+
 	UTempoCoreSettings* Settings = GetMutableDefault<UTempoCoreSettings>();
 	Settings->SetTimeMode(static_cast<ETimeMode>(TimeModeBox->GetSelectedIndex()));
 }
@@ -77,7 +77,7 @@ void UTempoTimeWidget::OnTimeModeSelectionChanged(FString SelectedItem, ESelectI
 void UTempoTimeWidget::OnSimStepsPerSecondChanged(const FText& Text, ETextCommit::Type CommitMethod)
 {
 	bool bIsValid = true;
-	
+
 	TArray<TCHAR> CharArray = Text.ToString().GetCharArray();
 
 	// Remove the null terminator.
@@ -85,7 +85,7 @@ void UTempoTimeWidget::OnSimStepsPerSecondChanged(const FText& Text, ETextCommit
 	{
 		CharArray.RemoveAt(CharArray.Num() - 1);
 	}
-	
+
 	// Must be non-empty.
 	bIsValid &= (CharArray.Num() > 0);
 
@@ -119,7 +119,7 @@ void UTempoTimeWidget::OnSimStepsPerSecondChanged(const FText& Text, ETextCommit
 
 bool UTempoTimeWidget::IsFixedStepMode()
 {
-	const UTempoCoreSettings* Settings = GetDefault<UTempoCoreSettings>();		
+	const UTempoCoreSettings* Settings = GetDefault<UTempoCoreSettings>();
 	return Settings->GetTimeMode() == ETimeMode::FixedStep;
 }
 

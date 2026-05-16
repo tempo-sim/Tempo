@@ -42,7 +42,7 @@ UCLASS()
 class TEMPOMOVEMENT_API UTempoMovementControlServiceSubsystem : public UTempoGameWorldSubsystem, public ITempoServiceProvider
 {
 	GENERATED_BODY()
-	
+
 public:
 	virtual void RegisterServices(FTempoServer& Server) override;
 

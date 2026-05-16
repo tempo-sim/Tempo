@@ -30,7 +30,7 @@ protected:
 	 */
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UScrollBox> PawnEntryScrollBox;
-	
+
 	UPROPERTY(EditDefaultsOnly, Category = "Pawn List")
 	TSubclassOf<UTempoPawnEntryWidget> ListItemWidgetClass;
 
@@ -38,7 +38,7 @@ private:
 	/** A cached list of all the pawns to display. */
 	UPROPERTY()
 	TArray<TObjectPtr<APawn>> AllPossessablePawns;
-	
+
 	UPROPERTY()
 	TObjectPtr<ATempoPlayerController> TempoPlayerController;
 };
