@@ -42,7 +42,9 @@ public:
 
 	FControlModeChanged ControlModeChangedEvent;
 
-	TSubclassOf<APawn> GetRobotClass() const { return RobotClass; }
+	bool IsRobot(const APawn* Pawn) const;
+	bool IsRobotClass(const UClass* Class) const;
+	APawn* FindRobot() const;
 
 	UFUNCTION(BlueprintPure, Category = "Tempo Game Mode")
 	TSubclassOf<AController> GetOpenLoopControllerClass() const;
@@ -60,8 +62,11 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	TSubclassOf<AController> ClosedLoopControllerClass;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(EditCondition="RobotInterface==nullptr"))
 	TSubclassOf<APawn> RobotClass;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(EditCondition="RobotClass==nullptr"))
+	TSubclassOf<UInterface> RobotInterface;
 
 	UPROPERTY()
 	APawn* DefaultPawn = nullptr;
