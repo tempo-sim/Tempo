@@ -4,12 +4,6 @@ syntax = "proto3";
 
 import "TempoSensors/Common.proto";
 
-enum ColorEncoding {
-  CE_UNKNOWN = 0;
-  CE_BGR8 = 1;
-  CE_RGB8 = 2;
-}
-
 message ColorImage {
   TempoSensors.MeasurementHeader header = 1;
   // Image width in pixels.

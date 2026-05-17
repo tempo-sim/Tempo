@@ -19,6 +19,7 @@ UTempoSensorsSettings::UTempoSensorsSettings()
 	CameraStitchMergeMaterialNoDepth = FSoftObjectPath(TEXT("/TempoSensors/Materials/M_TempoStitch_Merge_NoDepth.M_TempoStitch_Merge_NoDepth"));
 	CameraProxyTonemapMaterial = FSoftObjectPath(TEXT("/TempoSensors/Materials/M_TempoStitch_Proxy.M_TempoStitch_Proxy"));
 	LidarPostProcessMaterial = FSoftObjectPath(TEXT("/TempoSensors/Materials/M_LidarPostProcess.M_LidarPostProcess"));
+	LidarPostProcessMaterialWithColor = FSoftObjectPath(TEXT("/TempoSensors/Materials/M_LidarPostProcess_WithColor.M_LidarPostProcess_WithColor"));
 }
 
 void UTempoSensorsSettings::PostInitProperties()
@@ -44,6 +45,7 @@ void UTempoSensorsSettings::PostInitProperties()
 	SetIfNull(CameraStitchMergeMaterialNoDepth, TEXT("/TempoSensors/Materials/M_TempoStitch_Merge_NoDepth.M_TempoStitch_Merge_NoDepth"));
 	SetIfNull(CameraProxyTonemapMaterial, TEXT("/TempoSensors/Materials/M_TempoStitch_Proxy.M_TempoStitch_Proxy"));
 	SetIfNull(LidarPostProcessMaterial, TEXT("/TempoSensors/Materials/M_LidarPostProcess.M_LidarPostProcess"));
+	SetIfNull(LidarPostProcessMaterialWithColor, TEXT("/TempoSensors/Materials/M_LidarPostProcess_WithColor.M_LidarPostProcess_WithColor"));
 }
 
 #if WITH_EDITOR

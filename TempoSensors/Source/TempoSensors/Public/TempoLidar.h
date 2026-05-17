@@ -42,6 +42,48 @@ private:
 	uint32 U5 = 0;
 };
 
+// 16-byte pixel format used when color rendering is enabled. PF_A32B32G32R32F atlas: 4 float32
+// lanes per pixel, each carrying 24 bits of payload in its low bits. The WithColor PPM packs each
+// lane as `(payload & 0x00FFFFFF) | 0x3F000000`, which forces the float into [0.5, 2.0) — always a
+// normal positive float, so the GPU output stage can't flush it to zero (denormal) or canonicalize
+// it to a fixed pattern (NaN). The high 8 bits are a fixed safety prefix and are masked off here.
+// (PF_R32G32B32A32_UINT would have skipped this dance but isn't in IsSupportedFormat's whitelist.)
+//   Lane 0 (channel R, low 24 bits, low->high bytes): B, G, R          — packed 24-bit BGR color
+//   Lane 1 (channel G, low 24 bits, low->high bytes): Nx, Ny, Nz       — packed octet normal
+//   Lane 2 (channel B, low 24 bits): discretized inverse depth         — max 2^24 levels
+//   Lane 3 (channel A, low 24 bits, low->high bytes): Label, spare, spare
+struct FLidarPixelWithColor
+{
+	static constexpr bool bSupportsDepth = false;
+
+	uint8 B() const { return static_cast<uint8>(Payload(0) & 0xFFu); }
+	uint8 G() const { return static_cast<uint8>((Payload(0) >> 8) & 0xFFu); }
+	uint8 R() const { return static_cast<uint8>((Payload(0) >> 16) & 0xFFu); }
+	uint8 Label() const { return static_cast<uint8>(Payload(3) & 0xFFu); }
+
+	FVector Normal() const
+	{
+		const uint8 Nx = static_cast<uint8>(Payload(1) & 0xFFu);
+		const uint8 Ny = static_cast<uint8>((Payload(1) >> 8) & 0xFFu);
+		const uint8 Nz = static_cast<uint8>((Payload(1) >> 16) & 0xFFu);
+		return FVector(2.0 * Nx / 255.0 - 1.0, 2.0 * Ny / 255.0 - 1.0, 2.0 * Nz / 255.0 - 1.0);
+	}
+
+	float Depth(float MinDepth, float MaxDepth, float MaxDiscretizedDepth) const
+	{
+		const float InverseDepthFraction = static_cast<float>(Payload(2)) / MaxDiscretizedDepth;
+		const float InverseDepth = InverseDepthFraction * (1.0 / MinDepth - 1.0 / MaxDepth) + 1.0 / MaxDepth;
+		return 1.0 / InverseDepth;
+	}
+
+private:
+	// Strip the 0x3F000000 safety prefix the PPM ORs in. The low 24 bits are the actual payload.
+	uint32 Payload(int Index) const { return Lanes[Index] & 0x00FFFFFFu; }
+
+	uint32 Lanes[4] = {0u, 0u, 0u, 0u};
+};
+static_assert(sizeof(FLidarPixelWithColor) == 16, "FLidarPixelWithColor must match PF_R32G32B32A32_UINT stride");
+
 struct FLidarScanRequest
 {
 	TempoSensors::LidarScanRequest Request;
@@ -170,10 +212,10 @@ protected:
 	virtual void InitRenderTarget() override;
 	virtual void RenderCapture() override;
 
-	TFuture<void> DecodeAndRespond(TArray<TUniquePtr<FTextureRead>> TextureReads);
+	TFuture<void> DecodeAndRespond(TArray<TUniquePtr<FTextureRead>> TextureReads, bool bWithColor);
 
 	// Initialize the shared packed render target and ring of staging textures. Also assigns each
-	// active tile its SliceDestOffsetX and the packed dimensions.
+	// active tile its SliceDestOffsetX and the packed dimensions. Format depends on bColorEnabled.
 	void InitSharedRenderTarget();
 
 	// Begin UTempoTiledSceneCaptureComponent tile interface
@@ -187,6 +229,14 @@ protected:
 	void ApplyTilePostProcess(FTempoLidarTile& Tile);
 	void AllocateTileViewState(FTempoLidarTile& Tile);
 	void DeactivateTile(FTempoLidarTile& Tile);
+
+	// Mirrors TempoCamera's SetDepthEnabled/ApplyDepthEnabled: SetColorEnabled is a no-op if the
+	// flag is unchanged, otherwise calls ApplyColorEnabled. ApplyColorEnabled drains in-flight
+	// reads, swaps each active tile's PPM to the matching variant, applies the photoreal vs
+	// no-color render settings + ray-tracing toggle on the family-level container (this component),
+	// and reinits the shared atlas + staging ring at the new format.
+	void SetColorEnabled(bool bColorEnabledIn);
+	void ApplyColorEnabled();
 
 	// Returns the vertical FOV to use for tile sizing: derived from BeamCalibration when set,
 	// otherwise falls back to the VerticalFOV property.
@@ -239,6 +289,13 @@ protected:
 
 	// RateHz and SequenceId are inherited from UTempoSceneCaptureComponent2D.
 
+	// Whether this lidar is currently rendering color. Driven automatically: flips on when any
+	// pending request sets include_color, flips off when none do. Same drain-then-reinit flow as
+	// TempoCamera's bDepthEnabled. The toggle has a real GPU cost (color mode enables Lumen +
+	// ray tracing); kept off-by-default so plain scan requests pay nothing extra.
+	UPROPERTY(VisibleAnywhere, Category="Tempo")
+	bool bColorEnabled = false;
+
 	TArray<FLidarScanRequest> PendingRequests;
 
 	// Tile slots (fixed size: L=0, C=1, R=2). Stable storage — indices are never invalidated
@@ -256,27 +313,25 @@ protected:
 	friend struct TTextureRead<FLidarPixel>;
 };
 
-template <>
-struct TTextureRead<FLidarPixel> : TTextureReadBase<FLidarPixel>
+// Shared metadata + ctor for both the no-color and with-color per-slice reads. The pixel type
+// is the only difference between the two specializations.
+template <typename PixelType>
+struct TLidarTextureReadBase : TTextureReadBase<PixelType>
 {
-	TTextureRead(const FIntPoint& ImageSizeIn, int32 SequenceIdIn, double CaptureTimeIn, const FString& OwnerNameIn,
-		const FString& SensorNameIn, const FTransform& SensorTransformIn, const FTransform& CaptureTransform,
+	TLidarTextureReadBase(const FIntPoint& ImageSizeIn, int32 SequenceIdIn, double CaptureTimeIn, const FString& OwnerNameIn,
+		const FString& SensorNameIn, const FTransform& SensorTransformIn, const FTransform& CaptureTransformIn,
 		double HorizontalFOVIn, double VerticalFOVIn, int32 HorizontalBeamsIn, int32 VerticalBeamsIn, const FVector2D& SizeXYFOVIn,
 		double IntensitySaturationDistanceIn, double MaxAngleOfIncidenceIn,
 		int32 NumCaptureComponentsIn, double RelativeYawIn, float MinDepthIn, float MaxDepthIn, double MinDistanceIn, double MaxDistanceIn,
 		TArray<FLidarBeamCalibration> BeamCalibrationIn)
-		: TTextureReadBase(ImageSizeIn, SequenceIdIn, CaptureTimeIn, OwnerNameIn, SensorNameIn, SensorTransformIn),
-			CaptureTransform(CaptureTransform), HorizontalFOV(HorizontalFOVIn), VerticalFOV(VerticalFOVIn), HorizontalBeams(HorizontalBeamsIn),
+		: TTextureReadBase<PixelType>(ImageSizeIn, SequenceIdIn, CaptureTimeIn, OwnerNameIn, SensorNameIn, SensorTransformIn),
+			CaptureTransform(CaptureTransformIn), HorizontalFOV(HorizontalFOVIn), VerticalFOV(VerticalFOVIn), HorizontalBeams(HorizontalBeamsIn),
 			VerticalBeams(VerticalBeamsIn), SizeXYFOV(SizeXYFOVIn), IntensitySaturationDistance(IntensitySaturationDistanceIn),
 			MaxAngleOfIncidence(MaxAngleOfIncidenceIn), NumCaptureComponents(NumCaptureComponentsIn), RelativeYaw(RelativeYawIn),
 			MinDepth(MinDepthIn), MaxDepth(MaxDepthIn), MinDistance(MinDistanceIn), MaxDistance(MaxDistanceIn),
 			BeamCalibration(MoveTemp(BeamCalibrationIn))
 	{
 	}
-
-	virtual FName GetType() const override { return TEXT("Lidar"); }
-
-	void Decode(float TransmissionTime, TempoSensors::LidarScanSegment& ScanSegmentOut) const;
 
 	const FTransform CaptureTransform;
 	double HorizontalFOV;
@@ -295,25 +350,46 @@ struct TTextureRead<FLidarPixel> : TTextureReadBase<FLidarPixel>
 	TArray<FLidarBeamCalibration> BeamCalibration;
 };
 
-// A texture read that holds the horizontally-packed pixels of all active lidar slices.
-// After readback, SplitIntoSlices() produces one TTextureRead<FLidarPixel> per slice so that
-// the existing parallel Decode path (which expects per-slice reads) can proceed unchanged.
-struct FLidarSharedTextureRead : TTextureReadBase<FLidarPixel>
+template <>
+struct TTextureRead<FLidarPixel> : TLidarTextureReadBase<FLidarPixel>
 {
-	FLidarSharedTextureRead(const FIntPoint& PackedSizeIn, int32 SequenceIdIn, double CaptureTimeIn,
+	using TLidarTextureReadBase::TLidarTextureReadBase;
+
+	virtual FName GetType() const override { return TEXT("Lidar"); }
+
+	void Decode(float TransmissionTime, TempoSensors::LidarScanSegment& ScanSegmentOut) const;
+};
+
+template <>
+struct TTextureRead<FLidarPixelWithColor> : TLidarTextureReadBase<FLidarPixelWithColor>
+{
+	using TLidarTextureReadBase::TLidarTextureReadBase;
+
+	virtual FName GetType() const override { return TEXT("LidarColor"); }
+
+	void Decode(float TransmissionTime, TempoSensors::LidarScanSegment& ScanSegmentOut) const;
+};
+
+// A texture read that holds the horizontally-packed pixels of all active lidar slices.
+// After readback, SplitIntoSlices() produces one TTextureRead<PixelType> per slice so that
+// the existing parallel Decode path (which expects per-slice reads) can proceed unchanged.
+template <typename PixelType>
+struct TLidarSharedTextureRead : TTextureReadBase<PixelType>
+{
+	TLidarSharedTextureRead(const FIntPoint& PackedSizeIn, int32 SequenceIdIn, double CaptureTimeIn,
 		const FString& OwnerNameIn, const FString& SensorNameIn, const FTransform& SensorTransformIn,
-		TArray<TUniquePtr<TTextureRead<FLidarPixel>>> SlicesIn)
-		: TTextureReadBase(PackedSizeIn, SequenceIdIn, CaptureTimeIn, OwnerNameIn, SensorNameIn, SensorTransformIn),
+		TArray<TUniquePtr<TTextureRead<PixelType>>> SlicesIn)
+		: TTextureReadBase<PixelType>(PackedSizeIn, SequenceIdIn, CaptureTimeIn, OwnerNameIn, SensorNameIn, SensorTransformIn),
 		  Slices(MoveTemp(SlicesIn))
 	{
 	}
 
-	virtual FName GetType() const override { return TEXT("LidarShared"); }
+	virtual FName GetType() const override;
 
 	// Move per-slice pixels out of the packed Image into each slice's own Image, returning ownership
 	// of the per-slice reads to the caller. This instance should not be used afterward.
 	TArray<TUniquePtr<FTextureRead>> SplitIntoSlices();
 
 	// Per-slice reads preallocated at capture time with the correct metadata and sized buffers.
-	TArray<TUniquePtr<TTextureRead<FLidarPixel>>> Slices;
+	TArray<TUniquePtr<TTextureRead<PixelType>>> Slices;
 };

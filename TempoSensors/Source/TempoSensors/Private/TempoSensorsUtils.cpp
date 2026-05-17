@@ -69,3 +69,65 @@ void OptimizeShowFlagsForNoColor(FEngineShowFlags& ShowFlags)
 	ShowFlags.SetMegaLights(false);
 #endif
 }
+
+void ApplyPhotorealisticRenderSettings(FPostProcessSettings& OutPostProcess,
+	FEngineShowFlags& OutShowFlags, bool& OutUseRayTracingIfEnabled)
+{
+	// Auto exposure: AEM_Histogram samples the (PPM-replaced, for the camera; raw scene, for the
+	// lidar) scene color histogram to compute exposure. The aggressive speed-up/down keeps the
+	// exposure responsive when the scene brightness shifts rapidly between captures.
+	OutPostProcess.bOverride_AutoExposureMethod = true;
+	OutPostProcess.AutoExposureMethod = AEM_Histogram;
+	OutPostProcess.bOverride_AutoExposureSpeedUp = true;
+	OutPostProcess.AutoExposureSpeedUp = 20.0;
+	OutPostProcess.bOverride_AutoExposureSpeedDown = true;
+	OutPostProcess.AutoExposureSpeedDown = 20.0;
+	OutPostProcess.bOverride_AutoExposureLowPercent = true;
+	OutPostProcess.AutoExposureLowPercent = 75.0;
+	OutPostProcess.bOverride_AutoExposureHighPercent = true;
+	OutPostProcess.AutoExposureHighPercent = 85.0;
+
+	// Lumen
+	OutPostProcess.bOverride_DynamicGlobalIlluminationMethod = true;
+	OutPostProcess.DynamicGlobalIlluminationMethod = EDynamicGlobalIlluminationMethod::Lumen;
+	OutPostProcess.bOverride_ReflectionMethod = true;
+	OutPostProcess.ReflectionMethod = EReflectionMethod::Lumen;
+
+	// Lumen final-gather denoiser leans on temporal history; in dim scenes the signal-to-noise
+	// ratio is poor and history dominates, which manifests as ghost trails behind slow movers.
+	// Bumping FinalGatherQuality reduces input noise and bumping the update speed shortens the
+	// effective history window so trails fade faster. Reflection quality has the same effect for
+	// specular ghosts.
+	OutPostProcess.bOverride_LumenFinalGatherQuality = true;
+	OutPostProcess.LumenFinalGatherQuality = 2.0f;
+	OutPostProcess.bOverride_LumenFinalGatherLightingUpdateSpeed = true;
+	OutPostProcess.LumenFinalGatherLightingUpdateSpeed = 4.0f;
+	OutPostProcess.bOverride_LumenReflectionQuality = true;
+	OutPostProcess.LumenReflectionQuality = 2.0f;
+
+	// Megalights
+	OutPostProcess.bOverride_bMegaLights = true;
+	OutPostProcess.bMegaLights = true;
+
+	OutUseRayTracingIfEnabled = true;
+
+	OutShowFlags.SetMotionBlur(false);
+	OutShowFlags.SetAntiAliasing(true);
+	OutShowFlags.SetTemporalAA(true);
+	OutShowFlags.SetEyeAdaptation(true);
+	OutShowFlags.SetLocalExposure(true);
+	OutShowFlags.SetLensFlares(true);
+	OutShowFlags.SetBloom(true);
+	OutShowFlags.SetColorGrading(true);
+	OutShowFlags.SetVignette(true);
+	OutShowFlags.SetDepthOfField(true);
+	OutShowFlags.SetGlobalIllumination(true);
+	OutShowFlags.SetScreenSpaceReflections(true);
+	OutShowFlags.SetReflectionEnvironment(true);
+	OutShowFlags.SetAmbientOcclusion(true);
+	OutShowFlags.SetScreenSpaceAO(true);
+	OutShowFlags.SetDistanceFieldAO(true);
+	OutShowFlags.SetVolumetricFog(true);
+	OutShowFlags.SetTonemapper(true);
+	OutShowFlags.SetScreenPercentage(true);
+}

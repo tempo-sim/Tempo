@@ -34,6 +34,13 @@ message LidarScanSegment {
   repeated float azimuths_rad = 11;
   // Per-return elevation in radians. Same layout as `distances_m`.
   repeated float elevations_rad = 12;
+  // Per-return packed 8-bit color, 3 bytes per return. Empty when color rendering is disabled
+  // (no client has requested `include_color`). When non-empty, length is 3 * horizontal_beams *
+  // vertical_beams and byte ordering is given by `color_encoding`. Per-return color for return
+  // (h, v) occupies bytes [3 * (h * vertical_beams + v), 3 * (h * vertical_beams + v) + 3).
+  bytes colors = 13;
+  // Byte ordering of `colors`. CE_UNKNOWN when `colors` is empty.
+  TempoSensors.ColorEncoding color_encoding = 14;
 }
 
 message LidarScanRequest {
@@ -41,4 +48,9 @@ message LidarScanRequest {
   string owner = 1;
   // Name of the sensor component on the owning actor.
   string sensor = 2;
+  // When true, request that the server enable color rendering on this lidar and populate
+  // `colors` in returned segments. The first such request flips the sensor into color mode
+  // (drains in-flight reads, swaps the render path); the mode is held until no pending request
+  // sets this flag. The toggle has a real GPU cost — color mode uses Lumen + ray tracing.
+  bool include_color = 3;
 }
