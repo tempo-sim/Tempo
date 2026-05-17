@@ -29,9 +29,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    // Use the vendored protoc so consumers don't need one on PATH.
-    let protoc = protoc_bin_vendored::protoc_bin_path()?;
-    std::env::set_var("PROTOC", protoc.as_os_str());
+    // Honor PROTOC if set; otherwise fall back to the vendored binary.
+    if std::env::var_os("PROTOC").is_none() {
+        let protoc = protoc_bin_vendored::protoc_bin_path()?;
+        std::env::set_var("PROTOC", protoc.as_os_str());
+    }
+
+    println!("cargo:rerun-if-env-changed=PROTOC");
 
     // Configure tonic-build
     tonic_build::configure()
