@@ -127,20 +127,23 @@ bool ATempoGameMode::SetControlMode(EControlMode ControlMode, FString& ErrorOut)
 	return false;
 	}
 
-	APawn* Robot = FindRobot();
-	if (!Robot)
-	{
-	ErrorOut = "No robot found. Not changing control mode.";
-		UE_LOG(LogTempoCore, Error, TEXT("%s"), *ErrorOut);
-		return false;
-	}
-
 	APlayerController* PlayerController = UGameplayStatics::GetPlayerController(this, 0);
 	if (!PlayerController)
 	{
 	   ErrorOut = "No player controller found. Not changing control mode.";
 	   UE_LOG(LogTempoCore, Error, TEXT("%s"), *ErrorOut);
 	   return false;
+	}
+
+	// For User mode, the relevant robot is whichever robot the player is already possessing —
+	// FindRobot() would arbitrarily return the first robot in the world and steal possession from it.
+	APawn* PlayerPawn = PlayerController->GetPawn();
+	APawn* Robot = (ControlMode == EControlMode::User && IsRobot(PlayerPawn)) ? PlayerPawn : FindRobot();
+	if (!Robot)
+	{
+		ErrorOut = "No robot found. Not changing control mode.";
+		UE_LOG(LogTempoCore, Error, TEXT("%s"), *ErrorOut);
+		return false;
 	}
 
 	if (ControlMode == EControlMode::None)

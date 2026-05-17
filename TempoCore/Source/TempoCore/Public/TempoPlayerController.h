@@ -133,6 +133,11 @@ protected:
 	UPROPERTY()
 	TMap<APawn*, AController*> AIControllerMap;
 
+	// Captured in OnUnPossess (where GetPawn() still returns the outgoing pawn) so OnPossess can see
+	// the actual previous pawn — by the time OnPossess runs, SetPawn(InPawn) has already happened.
+	UPROPERTY()
+	TWeakObjectPtr<APawn> PendingPreviousPawn;
+
 	void UpdatePawnGroups();
 
 	void OnActorSpawnedHandler(AActor* SpawnedActor);
