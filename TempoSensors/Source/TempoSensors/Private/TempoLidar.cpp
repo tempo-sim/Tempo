@@ -323,6 +323,15 @@ void UTempoLidar::ApplyTilePostProcess(FTempoLidarTile& Tile)
 
 	Tile.PostProcessMaterialInstance->EnsureIsComplete();
 
+	// In color mode, the photoreal settings (Lumen GI/reflections, MegaLights, AE, etc.) live on
+	// THIS component's PostProcessSettings via ApplyPhotorealisticRenderSettings — but the
+	// multi-view setup defaults each view to GI = None and only applies the *tile's* PP as an
+	// override. So we have to copy the primary's settings into the tile (mirroring TempoCamera's
+	// ApplyTilePostProcess pattern) or the per-view render falls back to direct-light-only and
+	// shadows show only sky/atmospheric scattering (the "blue shadows" artifact).
+	// In no-color mode, none of those overrides are set (OptimizeShowFlagsForNoColor handles the
+	// strip-down via show flags instead of PP), so copying is a no-op cost-wise.
+	Tile.PostProcessSettings = PostProcessSettings;
 	Tile.PostProcessSettings.WeightedBlendables.Array.Empty();
 	Tile.PostProcessSettings.WeightedBlendables.Array.Add(FWeightedBlendable(1.0, Tile.PostProcessMaterialInstance));
 }
