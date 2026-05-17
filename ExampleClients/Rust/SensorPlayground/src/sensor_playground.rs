@@ -259,7 +259,7 @@ async fn stream_color(sensor: AvailableSensor, window: WindowProxy) {
     let key = format!("{}:{}:Color", sensor.owner, sensor.name);
     let _guard = WindowGuard(window.clone());
     let mut stream =
-        match tempo_sensors::stream_color_images_async(sensor.owner, sensor.name, 0).await {
+        match tempo_sensors::stream_color_images_async(sensor.owner, sensor.name).await {
             Ok(s) => s,
             Err(e) => {
                 eprintln!("[{}] Failed to start stream: {}", key, e);
@@ -767,7 +767,7 @@ async fn stream_lidar(sensor: AvailableSensor) {
 async fn record_color(sensor: AvailableSensor, dir: PathBuf) {
     let key = format!("{}:{}:Color", sensor.owner, sensor.name);
     let mut stream =
-        match tempo_sensors::stream_color_images_async(sensor.owner, sensor.name, 0).await {
+        match tempo_sensors::stream_color_images_async(sensor.owner, sensor.name).await {
             Ok(s) => s,
             Err(e) => {
                 eprintln!("[{}] Failed to start: {}", key, e);
