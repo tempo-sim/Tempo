@@ -102,13 +102,25 @@ TOptional<TFuture<void>> UTempoLidar::SendMeasurements()
 		}
 		return false;
 	}();
-	if (!bColorEnabled && bColorNeeded)
+	if (bColorNeeded)
 	{
-		SetColorEnabled(true);
+		FramesWithoutColor = 0;
+		if (!bColorEnabled)
+		{
+			SetColorEnabled(true);
+		}
 	}
-	else if (bColorEnabled && !bColorNeeded)
+	else
 	{
-		SetColorEnabled(false);
+		// Debounce the OFF transition: a streaming client briefly has no request pending between
+		// receiving a response and re-issuing the next request. Flipping off on that gap and back
+		// on the next frame races the RT/staging swap on the render thread (the previous
+		// UpdateResource may not have completed) and corrupts in-flight reads.
+		++FramesWithoutColor;
+		if (bColorEnabled && FramesWithoutColor >= ColorOffDebounceFrames)
+		{
+			SetColorEnabled(false);
+		}
 	}
 
 	// Take the opportunity to apply any reconfigure that was detected earlier but had to be
@@ -761,6 +773,15 @@ void UTempoLidar::InitSharedRenderTarget()
 		return;
 	}
 
+	// Drop pending reads BEFORE swapping the RT pointer, not after. Otherwise the render thread
+	// can pick up OnRenderCompleted between the SharedTextureTarget swap and the queue Empty(),
+	// iterate stale in-flight reads (still pointing at old 8B staging), and feed them the new 16B
+	// RT — Read() then issues CopyTexture(NEW_RT, OLD_STAGING) with mismatched per-pixel sizes and
+	// the subsequent map+memcpy crashes in _platform_memmove. Empty()-then-swap closes that window;
+	// the captured TSharedPtr in the pending render-command closure still keeps the old RT+staging
+	// pair alive together until it runs.
+	TextureReadQueue.Empty();
+
 	SharedTextureTarget = NewObject<UTextureRenderTarget2D>(this);
 	SharedTextureTarget->TargetGamma = GetDefault<UTempoSensorsSettings>()->GetSceneCaptureGamma();
 	SharedTextureTarget->bGPUSharedFlag = true;
@@ -780,9 +801,6 @@ void UTempoLidar::InitSharedRenderTarget()
 	}
 
 	AllocateStagingTextures(SharedTextureTarget->SizeX, SharedTextureTarget->SizeY, SharedTextureTarget->GetFormat());
-
-	// Any pending texture reads reference the previous RT geometry; discard them.
-	TextureReadQueue.Empty();
 }
 
 int32 UTempoLidar::GetNumActiveTiles() const

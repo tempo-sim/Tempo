@@ -289,12 +289,20 @@ protected:
 
 	// RateHz and SequenceId are inherited from UTempoSceneCaptureComponent2D.
 
-	// Whether this lidar is currently rendering color. Driven automatically: flips on when any
-	// pending request sets include_color, flips off when none do. Same drain-then-reinit flow as
-	// TempoCamera's bDepthEnabled. The toggle has a real GPU cost (color mode enables Lumen +
-	// ray tracing); kept off-by-default so plain scan requests pay nothing extra.
+	// Whether this lidar is currently rendering color. Driven automatically: flips on the first
+	// frame any pending request sets include_color, flips off only after several consecutive
+	// frames with no color requests. The toggle has a real GPU cost (color mode enables Lumen +
+	// ray tracing) and each flip rebuilds the shared RT, so we debounce the OFF transition to
+	// survive the brief sub-frame gaps in a streaming gRPC client (response sent → client
+	// re-issues next request) — without it, the toggle oscillates and the back-to-back RT swaps
+	// race the async UpdateResource on the render thread.
 	UPROPERTY(VisibleAnywhere, Category="Tempo")
 	bool bColorEnabled = false;
+
+	// Frames seen without any color request. Resets to 0 whenever a request with include_color
+	// is observed; bColorEnabled flips off only when this exceeds ColorOffDebounceFrames.
+	int32 FramesWithoutColor = 0;
+	static constexpr int32 ColorOffDebounceFrames = 30;
 
 	TArray<FLidarScanRequest> PendingRequests;
 

@@ -456,13 +456,26 @@ TOptional<TFuture<void>> UTempoCamera::SendMeasurements()
 	// still pending (either newly arrived during this function, or left over because the last
 	// read couldn't satisfy them).
 	const bool bDepthNeeded = bHadDepthRequests || !PendingDepthImageRequests.IsEmpty();
-	if (!bDepthEnabled && bDepthNeeded)
+	if (bDepthNeeded)
 	{
-		SetDepthEnabled(true);
+		FramesWithoutDepth = 0;
+		if (!bDepthEnabled)
+		{
+			SetDepthEnabled(true);
+		}
 	}
-	if (bDepthEnabled && !bDepthNeeded)
+	else
 	{
-		SetDepthEnabled(false);
+		// Debounce the OFF transition: a streaming client briefly has no depth request pending
+		// between receiving a response and re-issuing the next request. Flipping off in that
+		// gap and back on the next frame queues two back-to-back InitFinalRenderTargetAndStaging
+		// calls and lets the render thread catch a half-initialized RT (the lidar hit the same
+		// failure mode; see UTempoLidar::FramesWithoutColor for the symmetric fix).
+		++FramesWithoutDepth;
+		if (bDepthEnabled && FramesWithoutDepth >= DepthOffDebounceFrames)
+		{
+			SetDepthEnabled(false);
+		}
 	}
 
 	// Take the opportunity to apply any reconfigure that was detected earlier but had to be
@@ -812,6 +825,14 @@ void UTempoCamera::InitFinalRenderTargetAndStaging()
 		return;
 	}
 
+	// Drop pending reads BEFORE swapping the RT pointer. Otherwise the render thread can pick
+	// up OnRenderCompleted between the SharedFinalTextureTarget swap and the queue Empty(),
+	// iterate stale in-flight reads (built against the previous 4B-or-8B staging), and feed
+	// them the new RT — Read() then mismatches the per-pixel sizes and the subsequent memcpy
+	// crashes in _platform_memmove. The captured TSharedPtr in the pending staging-copy
+	// closure still keeps the old RT+staging pair alive together until it runs.
+	TextureReadQueue.Empty();
+
 	// SharedFinalTextureTarget format matches the staging / FCameraPixel layout: 4 bytes for
 	// color+label, plus (when depth is enabled) 4 more bytes for discretized depth.
 	const ETextureRenderTargetFormat FinalFormat = bDepthEnabled
@@ -836,9 +857,6 @@ void UTempoCamera::InitFinalRenderTargetAndStaging()
 	}
 
 	AllocateStagingTextures(SharedFinalTextureTarget->SizeX, SharedFinalTextureTarget->SizeY, SharedFinalTextureTarget->GetFormat());
-
-	// Any pending texture reads might have the wrong pixel format.
-	TextureReadQueue.Empty();
 }
 
 int32 UTempoCamera::GetNumActiveTiles() const
