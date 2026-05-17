@@ -68,8 +68,7 @@ FReply UTempoPawnEntryWidget::NativeOnMouseButtonDown(const FGeometry& MyGeometr
 			}
 
 			// Check 2: Prevent spawning of the main Robot class from the GameMode.
-			TSubclassOf<APawn> RobotClass = GameMode->GetRobotClass();
-			if (RobotClass && PawnClass->IsChildOf(RobotClass))
+			if (GameMode->IsRobotClass(PawnClass))
 			{
 				UE_LOG(LogTempoCore, Error, TEXT("Spawning of the main Robot class is not allowed."));
 				return FReply::Handled();
@@ -120,8 +119,7 @@ FReply UTempoPawnEntryWidget::NativeOnMouseButtonDown(const FGeometry& MyGeometr
 			if (GameMode)
 			{
 				// Check 2: Prevent deleting the main Robot class from the GameMode.
-				TSubclassOf<APawn> RobotClass = GameMode->GetRobotClass();
-				if (RobotClass && PawnClass->IsChildOf(RobotClass))
+				if (GameMode->IsRobotClass(PawnClass))
 				{
 					UE_LOG(LogTempoCore, Error, TEXT("Deletion of the main Robot class is not allowed."));
 					return FReply::Handled();

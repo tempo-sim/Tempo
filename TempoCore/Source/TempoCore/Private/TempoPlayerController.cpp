@@ -118,9 +118,8 @@ void ATempoPlayerController::OnPossess(APawn* InPawn)
 	if (ATempoGameMode* GameMode = Cast<ATempoGameMode>(UGameplayStatics::GetGameMode(this)))
 	{
 		APawn* DefaultPawn = GameMode->GetDefaultPawn();
-		TSubclassOf<APawn> RobotClass = GameMode->GetRobotClass();
-		const bool bNewPawnIsRobot = (RobotClass && InPawn && InPawn->IsA(RobotClass));
-		const bool bPreviousPawnWasRobot = (RobotClass && PreviousPawn && PreviousPawn->IsA(RobotClass));
+		const bool bNewPawnIsRobot = GameMode->IsRobot(InPawn);
+		const bool bPreviousPawnWasRobot = GameMode->IsRobot(PreviousPawn);
 		FString ErrorMessage;
 
 		if (bPreviousPawnWasRobot && !bNewPawnIsRobot)
@@ -500,7 +499,7 @@ void ATempoPlayerController::CacheAIController(APawn* PawnToPossess)
 		// Do not cache the controller for the main Robot pawn, as its controller is managed
 		if (ATempoGameMode* GameMode = Cast<ATempoGameMode>(UGameplayStatics::GetGameMode(this)))
 		{
-			if (GameMode->GetRobotClass() && PawnToPossess->IsA(GameMode->GetRobotClass()))
+			if (GameMode->IsRobot(PawnToPossess))
 			{
 				return;
 			}

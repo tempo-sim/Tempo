@@ -7,6 +7,7 @@
 #include "TempoCoreSettings.h"
 #include "TempoPlayerController.h"
 
+#include "EngineUtils.h"
 #include "GameFramework/SpectatorPawn.h"
 #include "Kismet/GameplayStatics.h"
 
@@ -48,9 +49,55 @@ const IActorClassificationInterface* ATempoGameMode::GetActorClassifier() const
 	return Cast<IActorClassificationInterface>(GetWorld()->GetSubsystemBase(ActorClassifier));
 }
 
+bool ATempoGameMode::IsRobotClass(const UClass* Class) const
+{
+	if (!Class)
+	{
+		return false;
+	}
+	if (RobotClass.Get())
+	{
+		return Class->IsChildOf(RobotClass);
+	}
+	if (RobotInterface.Get())
+	{
+		return Class->ImplementsInterface(RobotInterface);
+	}
+	return false;
+}
+
+bool ATempoGameMode::IsRobot(const APawn* Pawn) const
+{
+	return Pawn && IsRobotClass(Pawn->GetClass());
+}
+
+APawn* ATempoGameMode::FindRobot() const
+{
+	if (RobotClass.Get())
+	{
+		return Cast<APawn>(UGameplayStatics::GetActorOfClass(this, RobotClass));
+	}
+	if (RobotInterface.Get())
+	{
+		for (TActorIterator<APawn> It(GetWorld()); It; ++It)
+		{
+			if (It->GetClass()->ImplementsInterface(RobotInterface))
+			{
+				return *It;
+			}
+		}
+	}
+	return nullptr;
+}
+
 void ATempoGameMode::BeginPlay()
 {
 	Super::BeginPlay();
+
+	if (RobotClass.Get() && RobotInterface.Get())
+	{
+		UE_LOG(LogTempoCore, Warning, TEXT("Both RobotClass and RobotInterface are set; RobotClass will take precedence."));
+	}
 
 	OpenLoopController = Cast<AController>(GetWorld()->SpawnActor(OpenLoopControllerClass, nullptr, nullptr));
 	ClosedLoopController = Cast<AController>(GetWorld()->SpawnActor(ClosedLoopControllerClass, nullptr, nullptr));
@@ -73,14 +120,14 @@ void ATempoGameMode::FinishRestartPlayer(AController* NewPlayer, const FRotator&
 
 bool ATempoGameMode::SetControlMode(EControlMode ControlMode, FString& ErrorOut) const
 {
-	if (!RobotClass.Get())
+	if (!RobotClass.Get() && !RobotInterface.Get())
 	{
-	ErrorOut = "RobotClass not set. Not changing control mode.";
+	ErrorOut = "Neither RobotClass nor RobotInterface is set. Not changing control mode.";
 	UE_LOG(LogTempoCore, Error, TEXT("%s"), *ErrorOut);
 	return false;
 	}
 
-	APawn* Robot = Cast<APawn>(UGameplayStatics::GetActorOfClass(this, RobotClass));
+	APawn* Robot = FindRobot();
 	if (!Robot)
 	{
 	ErrorOut = "No robot found. Not changing control mode.";
@@ -173,7 +220,7 @@ EControlMode ATempoGameMode::GetControlMode() const
 		return EControlMode::ClosedLoop;
 	}
 	APlayerController* PlayerController = UGameplayStatics::GetPlayerController(this, 0);
-	if (RobotClass.Get() && PlayerController && PlayerController->GetPawn() && PlayerController->GetPawn()->IsA(RobotClass))
+	if (PlayerController && IsRobot(PlayerController->GetPawn()))
 	{
 		return EControlMode::User;
 	}
