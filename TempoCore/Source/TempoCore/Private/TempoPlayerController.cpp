@@ -72,7 +72,8 @@ void ATempoPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 void ATempoPlayerController::OnPossess(APawn* InPawn)
 {
-	APawn* PreviousPawn = GetPawn();
+	APawn* PreviousPawn = PendingPreviousPawn.Get();
+	PendingPreviousPawn = nullptr;
 
 	// Restore AI controller if necessary.
 	if (PreviousPawn && AIControllerMap.Contains(PreviousPawn))
@@ -239,6 +240,8 @@ void ATempoPlayerController::Tick(float DeltaTime)
 
 void ATempoPlayerController::OnUnPossess()
 {
+	// Capture before Super::OnUnPossess() clears the pawn, so OnPossess can read the actual outgoing pawn.
+	PendingPreviousPawn = GetPawn();
 	Super::OnUnPossess();
 }
 
@@ -251,6 +254,7 @@ void ATempoPlayerController::SetupInputComponent()
 	InputComponent->BindAction("SwitchGroup", IE_Pressed, this, &ATempoPlayerController::SwitchActiveGroup);
 	InputComponent->BindAction("SelectAndPossess", IE_Pressed, this, &ATempoPlayerController::SelectAndPossessPawn);
 	InputComponent->BindAction("ToggleImmersiveMode", IE_Pressed, this, &ATempoPlayerController::ToggleUIVisibility);
+	InputComponent->BindAction("ToggleMouseCaptured", IE_Pressed, this, &ATempoPlayerController::ToggleMouseCaptured);
 }
 
 void ATempoPlayerController::ToggleUIVisibility()
@@ -306,6 +310,14 @@ void ATempoPlayerController::SelectAndPossessPawn()
 
 void ATempoPlayerController::UpdatePawnGroups()
 {
+	// Actor destruction broadcasts during UEngine::LoadMap can reach us; rebuilding the list
+	// and broadcasting OnPawnListUpdated then triggers CreateWidget, which ensures on a tearing-down world.
+	UWorld* World = GetWorld();
+	if (!World || World->bIsTearingDown)
+	{
+		return;
+	}
+
 	APawn* PreviouslyPossessedPawn = GetPawn();
 	PawnGroups.Empty();
 	ActivePawnGroupClasses.Empty();
