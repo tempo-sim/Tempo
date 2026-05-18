@@ -87,8 +87,18 @@ TArray<FActionBindingInfo> UTempoActionMapWidget::GetPlayerActionBindings()
 			}
 			Info.ActionDisplayName = DisplayNameString;
 
-			Info.Key = Mappings[0].Key;
-			Info.KeyName = Mappings[0].Key.GetDisplayName().ToString();
+			const FInputActionKeyMapping& Mapping = Mappings[0];
+			Info.Key = Mapping.Key;
+			Info.bHasModifiers = Mapping.bCtrl || Mapping.bAlt || Mapping.bShift || Mapping.bCmd;
+
+			FString DisplayKeyName;
+			if (Mapping.bCtrl)  DisplayKeyName += TEXT("Ctrl + ");
+			if (Mapping.bAlt)   DisplayKeyName += TEXT("Alt + ");
+			if (Mapping.bShift) DisplayKeyName += TEXT("Shift + ");
+			if (Mapping.bCmd)   DisplayKeyName += TEXT("Cmd + ");
+			DisplayKeyName += Mapping.Key.GetDisplayName().ToString();
+			Info.KeyName = DisplayKeyName;
+
 			Bindings.Add(Info);
 		}
 	}

@@ -28,6 +28,9 @@ struct FActionBindingInfo
 
 	UPROPERTY(BlueprintReadOnly, Category = "Input")
 	FKey Key;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Input")
+	bool bHasModifiers = false;
 };
 
 UCLASS()

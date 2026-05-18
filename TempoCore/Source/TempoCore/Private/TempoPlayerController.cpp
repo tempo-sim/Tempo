@@ -16,7 +16,9 @@
 #include "GameFramework/Character.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
+#include "GameFramework/SpringArmComponent.h"
 #include "Kismet/GameplayStatics.h"
+#include "Misc/App.h"
 #include "TimerManager.h"
 #include "WheeledVehiclePawn.h"
 
@@ -27,6 +29,9 @@ ATempoPlayerController::ATempoPlayerController()
 	InputPriority = 0;
 	HoverCursorWidgetInstance = nullptr;
 	FallbackGroupClass = APawn::StaticClass();
+
+	// So input is processed for the spectator pawn while the game is paused.
+	bShouldPerformFullTickWhenPaused = true;
 
 	ConfiguredPawnGroupClasses.Add(ACharacter::StaticClass());
 	ConfiguredPawnGroupClasses.Add(AWheeledVehiclePawn::StaticClass());
@@ -102,6 +107,12 @@ void ATempoPlayerController::OnPossess(APawn* InPawn)
 
 	if (InPawn)
 	{
+		if (USpringArmComponent* SpringArm = InPawn->FindComponentByClass<USpringArmComponent>())
+		{
+			CurrentSpringArm = SpringArm;
+			OriginalSpringArmLength = SpringArm->TargetArmLength;
+		}
+
 		// Whenever we possess ANY pawn, find its correct group and update our state.
 		UClass* CorrectGroupClass = GetCorrectGroupForPawn(InPawn);
 		if (CorrectGroupClass && ActivePawnGroupClasses.Contains(CorrectGroupClass))
@@ -240,6 +251,13 @@ void ATempoPlayerController::Tick(float DeltaTime)
 
 void ATempoPlayerController::OnUnPossess()
 {
+	// Restore the outgoing pawn's spring arm to its original length before we let go of it.
+	if (USpringArmComponent* SpringArm = CurrentSpringArm.Get())
+	{
+		SpringArm->TargetArmLength = OriginalSpringArmLength;
+	}
+	CurrentSpringArm = nullptr;
+
 	// Capture before Super::OnUnPossess() clears the pawn, so OnPossess can read the actual outgoing pawn.
 	PendingPreviousPawn = GetPawn();
 	Super::OnUnPossess();
@@ -249,12 +267,16 @@ void ATempoPlayerController::SetupInputComponent()
 {
 	Super::SetupInputComponent();
 
-	InputComponent->BindAction("PossessNext", IE_Pressed, this, &ATempoPlayerController::PossessNextPawn);
-	InputComponent->BindAction("PossessPrevious", IE_Pressed, this, &ATempoPlayerController::PossessPreviousPawn);
-	InputComponent->BindAction("SwitchGroup", IE_Pressed, this, &ATempoPlayerController::SwitchActiveGroup);
-	InputComponent->BindAction("SelectAndPossess", IE_Pressed, this, &ATempoPlayerController::SelectAndPossessPawn);
-	InputComponent->BindAction("ToggleImmersiveMode", IE_Pressed, this, &ATempoPlayerController::ToggleUIVisibility);
-	InputComponent->BindAction("ToggleMouseCaptured", IE_Pressed, this, &ATempoPlayerController::ToggleMouseCaptured);
+	InputComponent->BindAction("PossessNext", IE_Pressed, this, &ATempoPlayerController::PossessNextPawn).bExecuteWhenPaused = true;
+	InputComponent->BindAction("PossessPrevious", IE_Pressed, this, &ATempoPlayerController::PossessPreviousPawn).bExecuteWhenPaused = true;
+	InputComponent->BindAction("SwitchGroup", IE_Pressed, this, &ATempoPlayerController::SwitchActiveGroup).bExecuteWhenPaused = true;
+	InputComponent->BindAction("SelectHovered", IE_Pressed, this, &ATempoPlayerController::SelectHovered).bExecuteWhenPaused = true;
+	InputComponent->BindAction("ToggleImmersiveMode", IE_Pressed, this, &ATempoPlayerController::ToggleUIVisibility).bExecuteWhenPaused = true;
+	InputComponent->BindAction("ToggleMouseCaptured", IE_Pressed, this, &ATempoPlayerController::ToggleMouseCaptured).bExecuteWhenPaused = true;
+
+	InputComponent->BindAxis("Turn", this, &ATempoPlayerController::Turn);
+	InputComponent->BindAxis("LookUp", this, &ATempoPlayerController::LookUp);
+	InputComponent->BindAxis("CameraZoom", this, &ATempoPlayerController::CameraZoom);
 }
 
 void ATempoPlayerController::ToggleUIVisibility()
@@ -290,7 +312,7 @@ void ATempoPlayerController::OnAnyActorDestroyedHandler(AActor* DestroyedActor)
 	}
 }
 
-void ATempoPlayerController::SelectAndPossessPawn()
+void ATempoPlayerController::SelectHovered()
 {
 	if (bMouseCaptured)
 	{
@@ -501,6 +523,31 @@ void ATempoPlayerController::PossessPreviousPawn()
 			CacheAIController(PawnToPossess);
 			Possess(PawnToPossess);
 		}
+	}
+}
+
+void ATempoPlayerController::Turn(float Value)
+{
+	AddYawInput(Value);
+}
+
+void ATempoPlayerController::LookUp(float Value)
+{
+	AddPitchInput(Value);
+}
+
+void ATempoPlayerController::CameraZoom(float Value)
+{
+	if (FMath::IsNearlyZero(Value))
+	{
+		return;
+	}
+	if (USpringArmComponent* SpringArm = CurrentSpringArm.Get())
+	{
+		// FApp::GetDeltaTime() rather than World->GetDeltaSeconds() so zoom keeps working while paused.
+		SpringArm->TargetArmLength = FMath::Clamp(
+			SpringArm->TargetArmLength - Value * CameraZoomSpeed * FApp::GetDeltaTime(),
+			MinCameraZoom, MaxCameraZoom);
 	}
 }
 
