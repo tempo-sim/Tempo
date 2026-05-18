@@ -6,14 +6,14 @@
 #include "TempoCoreServiceSubsystem.h"
 #include "TempoCoreSettings.h"
 #include "TempoPlayerController.h"
+#include "TempoSpectatorPawn.h"
 
 #include "EngineUtils.h"
-#include "GameFramework/SpectatorPawn.h"
 #include "Kismet/GameplayStatics.h"
 
 ATempoGameMode::ATempoGameMode()
 {
-	DefaultPawnClass = ASpectatorPawn::StaticClass();
+	DefaultPawnClass = ATempoSpectatorPawn::StaticClass();
 	PlayerControllerClass = ATempoPlayerController::StaticClass();
 }
 

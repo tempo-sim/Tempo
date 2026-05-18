@@ -24,6 +24,10 @@ void UTempoActionMapEntryWidget::Setup(UTempoActionMapWidget* InParent, const FA
 	{
 		RebindButton->OnClicked.AddDynamic(this, &UTempoActionMapEntryWidget::OnRebindButtonClicked);
 	}
+
+	// Bindings with modifier keys can't be re-captured by a single keypress, so
+	// disable the whole row (Slate will render it dimmed and ignore input).
+	SetIsEnabled(!BindingInfo.bHasModifiers);
 }
 
 void UTempoActionMapEntryWidget::OnRebindButtonClicked()

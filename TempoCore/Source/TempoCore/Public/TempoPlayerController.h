@@ -8,6 +8,7 @@
 #include "TempoPlayerController.generated.h"
 
 class ASpectatorPawn;
+class USpringArmComponent;
 class UUserWidget;
 
 // A struct to group pawns with a common parent.
@@ -150,10 +151,31 @@ protected:
 
 	void PossessPreviousPawn();
 
+	void Turn(float Value);
+
+	void LookUp(float Value);
+
+	void CameraZoom(float Value);
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Camera")
+	float CameraZoomSpeed = 1000.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Camera")
+	float MinCameraZoom = 50.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo|Camera")
+	float MaxCameraZoom = 5000.0f;
+
+	// Spring arm of the currently-possessed pawn, if any. Captured in OnPossess so
+	// CameraZoom can target it, and restored to its original length on OnUnPossess.
+	TWeakObjectPtr<USpringArmComponent> CurrentSpringArm;
+
+	float OriginalSpringArmLength = 0.0f;
+
 	/**
 	 * Performs a line trace from the cursor to select and possess a pawn.
 	 */
-	void SelectAndPossessPawn();
+	void SelectHovered();
 
 	void ToggleUIVisibility();
 };
