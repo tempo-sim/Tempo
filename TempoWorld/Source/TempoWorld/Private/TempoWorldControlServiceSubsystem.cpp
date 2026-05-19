@@ -409,23 +409,25 @@ void UTempoWorldControlServiceSubsystem::AddComponent(const AddComponentRequest&
 		}
 	}
 
+	const FName Name(UTF8_TO_TCHAR(Request.name().c_str()));
+	if (!Name.IsNone() && GetComponentWithName(Actor, Name.ToString()))
+	{
+		const FString ErrorMsg = FString::Printf(TEXT("Component with name '%s' already exists on actor '%s'"), *Name.ToString(), *ActorName);
+		ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::ALREADY_EXISTS, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
+		return;
+	}
+
 #if WITH_EDITOR
 	Actor->Modify();
 #endif
 
-	const FName Name(UTF8_TO_TCHAR(Request.name().c_str()));
 	UActorComponent* NewComponent = NewObject<UActorComponent>(Actor, Class, Name);
-	NewComponent->OnComponentCreated();
 	if (USceneComponent* NewSceneComponent = Cast<USceneComponent>(NewComponent))
 	{
 		NewSceneComponent->AttachToComponent(ParentComponent, FAttachmentTransformRules::KeepRelativeTransform, Socket);
 		const FTransform RelativeTransform = ToUnrealTransform(Request.transform());
 		NewSceneComponent->SetRelativeTransform(RelativeTransform);
 		*Response.mutable_transform() = FromUnrealTransform(NewSceneComponent->GetComponentTransform());
-	}
-	else
-	{
-		Actor->AddOwnedComponent(NewComponent);
 	}
 
 	NewComponent->RegisterComponent();
