@@ -55,6 +55,7 @@ public:
 	int32 GetLidarUpsamplingFactor() const { return LidarUpsamplingFactor; }
 	float GetMaxLidarDepth() const { return MaxLidarDepth; }
 	TObjectPtr<UMaterialInterface> GetLidarPostProcessMaterial() const { return LidarPostProcessMaterial.LoadSynchronous(); }
+	TObjectPtr<UMaterialInterface> GetLidarPostProcessMaterialWithColor() const { return LidarPostProcessMaterialWithColor.LoadSynchronous(); }
 
 	// RayTracingScene Buffer Overrun Workaround
 	bool GetRayTracingSceneReadbackBuffersOverrunWorkaroundEnabled() const { return bEnableRayTracingSceneReadbackBuffersOverrunWorkaround; }
@@ -163,8 +164,15 @@ private:
 	UPROPERTY(EditAnywhere, Config, Category="Lidar")
 	float MaxLidarDepth = 40000.0; // 400m
 
+	// The lidar PPM used when bColorEnabled is false. Writes scene-color-independent aux channels
+	// (normal, label, discretized depth) into a PF_A16B16G16R16 atlas matching FLidarPixel.
 	UPROPERTY(EditAnywhere, Config, Category="Lidar", meta=( AllowedClasses="/Script/Engine.BlendableInterface", Keywords="PostProcess" ))
 	TSoftObjectPtr<UMaterialInterface> LidarPostProcessMaterial;
+
+	// The lidar PPM used when bColorEnabled is true. Additionally samples scene color and packs
+	// the BGR bytes into the wider PF_R32G32B32A32_UINT atlas matching FLidarPixelWithColor.
+	UPROPERTY(EditAnywhere, Config, Category="Lidar", meta=( AllowedClasses="/Script/Engine.BlendableInterface", Keywords="PostProcess" ))
+	TSoftObjectPtr<UMaterialInterface> LidarPostProcessMaterialWithColor;
 
 	// Whether to enable a hack to work around a buffer overrun bug in FRayTracingScene.
 	UPROPERTY(EditAnywhere, Config, Category="Advanced")

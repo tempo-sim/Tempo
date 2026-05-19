@@ -4,6 +4,13 @@ syntax = "proto3";
 
 import "TempoCore/Geometry.proto";
 
+// Encoding of packed 8-bit color data in sensor responses.
+enum ColorEncoding {
+  CE_UNKNOWN = 0;
+  CE_BGR8 = 1;
+  CE_RGB8 = 2;
+}
+
 // Common metadata attached to every sensor measurement.
 message MeasurementHeader {
   // Monotonic per-sensor sequence number (single packets and multi-packet scans share an ID).

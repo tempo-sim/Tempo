@@ -10,9 +10,11 @@
 #include "TempoLabelTypes.h"
 #include "TempoMultiViewCapture.h"
 
+#include "TempoSensors/Common.pb.h"
 #include "TempoSensors/Lidar.pb.h"
 
 #include "TempoSensorsSettings.h"
+#include "TempoSensorsTypes.h"
 #include "TempoSensorsUtils.h"
 
 #include "Engine/TextureRenderTarget2D.h"
@@ -50,15 +52,75 @@ TOptional<TFuture<void>> UTempoLidar::SendMeasurements()
 {
 	TOptional<TFuture<void>> Future;
 
+	// Snapshot color demand before draining, mirroring TempoCamera's bDepthEnabled flow: if all
+	// pending requests opt out of color, we should flip back off. The post-drain queue may be
+	// empty so we have to read color intent here.
+	const bool bHadColorRequests = [this]
+	{
+		for (const FLidarScanRequest& Req : PendingRequests)
+		{
+			if (Req.Request.include_color())
+			{
+				return true;
+			}
+		}
+		return false;
+	}();
+
 	if (TextureReadQueue.NextReadComplete())
 	{
 		TSharedPtr<FTextureRead> TextureRead = TextureReadQueue.DequeueIfReadComplete();
-		check(TextureRead->GetType() == TEXT("LidarShared"));
-		FLidarSharedTextureRead* SharedRead = static_cast<FLidarSharedTextureRead*>(TextureRead.Get());
-		TArray<TUniquePtr<FTextureRead>> SliceReads = SharedRead->SplitIntoSlices();
-		Future = DecodeAndRespond(MoveTemp(SliceReads));
+		const FName ReadType = TextureRead->GetType();
+		if (ReadType == TEXT("LidarShared"))
+		{
+			auto* SharedRead = static_cast<TLidarSharedTextureRead<FLidarPixel>*>(TextureRead.Get());
+			TArray<TUniquePtr<FTextureRead>> SliceReads = SharedRead->SplitIntoSlices();
+			Future = DecodeAndRespond(MoveTemp(SliceReads), /*bWithColor=*/false);
+		}
+		else
+		{
+			check(ReadType == TEXT("LidarColorShared"));
+			auto* SharedRead = static_cast<TLidarSharedTextureRead<FLidarPixelWithColor>*>(TextureRead.Get());
+			TArray<TUniquePtr<FTextureRead>> SliceReads = SharedRead->SplitIntoSlices();
+			Future = DecodeAndRespond(MoveTemp(SliceReads), /*bWithColor=*/true);
+		}
 
 		PendingRequests.Empty();
+	}
+
+	// Toggle color mode based on client intent. Use the pre-drain snapshot OR'd with any new
+	// requests pending (either newly arrived during this function or left over because the last
+	// read couldn't satisfy them).
+	const bool bColorNeeded = bHadColorRequests || [this]
+	{
+		for (const FLidarScanRequest& Req : PendingRequests)
+		{
+			if (Req.Request.include_color())
+			{
+				return true;
+			}
+		}
+		return false;
+	}();
+	if (bColorNeeded)
+	{
+		FramesWithoutColor = 0;
+		if (!bColorEnabled)
+		{
+			SetColorEnabled(true);
+		}
+	}
+	else
+	{
+		// Debounce the OFF transition: a streaming client briefly has no request pending between
+		// receiving a response and re-issuing the next request. Flipping off on that gap and back
+		// on the next frame races the RT/staging swap on the render thread (the previous
+		// UpdateResource may not have completed) and corrupts in-flight reads.
+		++FramesWithoutColor;
+		if (bColorEnabled && FramesWithoutColor >= ColorOffDebounceFrames)
+		{
+			SetColorEnabled(false);
+		}
 	}
 
 	// Take the opportunity to apply any reconfigure that was detected earlier but had to be
@@ -205,22 +267,37 @@ void UTempoLidar::ApplyTilePostProcess(FTempoLidarTile& Tile)
 	const UTempoSensorsSettings* TempoSensorsSettings = GetDefault<UTempoSensorsSettings>();
 	check(TempoSensorsSettings);
 
+	const TObjectPtr<UMaterialInterface> DesiredMaterial = bColorEnabled
+		? TempoSensorsSettings->GetLidarPostProcessMaterialWithColor()
+		: TempoSensorsSettings->GetLidarPostProcessMaterial();
+	if (!DesiredMaterial)
+	{
+		UE_LOG(LogTempoSensors, Error, TEXT("Lidar post-process material is not set in TempoSensors settings (bColorEnabled=%d)"), bColorEnabled);
+		return;
+	}
+
+	// Rebuild the MID if the source material doesn't match (e.g., bColorEnabled toggled). Retire
+	// the old MID rather than just dropping the UPROPERTY ref — queued render commands may still
+	// hold its FMaterialRenderProxy, and GC collecting it mid-render fatals CacheUniformExpressions.
+	if (Tile.PostProcessMaterialInstance && Tile.PostProcessMaterialInstance->Parent != DesiredMaterial)
+	{
+		RetirePPM(Tile.PostProcessMaterialInstance);
+		Tile.PostProcessMaterialInstance = nullptr;
+	}
+
 	if (!Tile.PostProcessMaterialInstance)
 	{
-		if (const TObjectPtr<UMaterialInterface> PostProcessMaterial = TempoSensorsSettings->GetLidarPostProcessMaterial())
-		{
-			Tile.PostProcessMaterialInstance = UMaterialInstanceDynamic::Create(PostProcessMaterial.Get(), this);
-			Tile.MinDepth = GEngine->NearClipPlane;
-			Tile.MaxDepth = TempoSensorsSettings->GetMaxLidarDepth();
-			Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MinDepth"), Tile.MinDepth);
-			Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MaxDepth"), Tile.MaxDepth);
-			Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MaxDiscreteDepth"), GTempo_Max_Discrete_Depth);
-		}
-		else
-		{
-			UE_LOG(LogTempoSensors, Error, TEXT("LidarPostProcessMaterial is not set in TempoSensors settings"));
-			return;
-		}
+		Tile.PostProcessMaterialInstance = UMaterialInstanceDynamic::Create(DesiredMaterial.Get(), this);
+		Tile.MinDepth = GEngine->NearClipPlane;
+		Tile.MaxDepth = TempoSensorsSettings->GetMaxLidarDepth();
+		Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MinDepth"), Tile.MinDepth);
+		Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MaxDepth"), Tile.MaxDepth);
+		// WithColor depth lane is 24 bits (the float-bit-cast format reserves the top 8 bits as a
+		// NaN/denormal-safety prefix). No-color depth lane is the full 32 bits.
+		const float MaxDiscreteDepthForPPM = bColorEnabled
+			? GTempoCamera_Max_Discrete_Depth
+			: GTempo_Max_Discrete_Depth;
+		Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MaxDiscreteDepth"), MaxDiscreteDepthForPPM);
 	}
 
 	// Optional label overrides.
@@ -258,6 +335,15 @@ void UTempoLidar::ApplyTilePostProcess(FTempoLidarTile& Tile)
 
 	Tile.PostProcessMaterialInstance->EnsureIsComplete();
 
+	// In color mode, the photoreal settings (Lumen GI/reflections, MegaLights, AE, etc.) live on
+	// THIS component's PostProcessSettings via ApplyPhotorealisticRenderSettings — but the
+	// multi-view setup defaults each view to GI = None and only applies the *tile's* PP as an
+	// override. So we have to copy the primary's settings into the tile (mirroring TempoCamera's
+	// ApplyTilePostProcess pattern) or the per-view render falls back to direct-light-only and
+	// shadows show only sky/atmospheric scattering (the "blue shadows" artifact).
+	// In no-color mode, none of those overrides are set (OptimizeShowFlagsForNoColor handles the
+	// strip-down via show flags instead of PP), so copying is a no-op cost-wise.
+	Tile.PostProcessSettings = PostProcessSettings;
 	Tile.PostProcessSettings.WeightedBlendables.Array.Empty();
 	Tile.PostProcessSettings.WeightedBlendables.Array.Add(FWeightedBlendable(1.0, Tile.PostProcessMaterialInstance));
 }
@@ -367,131 +453,188 @@ void UTempoLidar::RequestMeasurement(const TempoSensors::LidarScanRequest& Reque
 	PendingRequests.Add({ Request, ResponseContinuation});
 }
 
-void TTextureRead<FLidarPixel>::Decode(float TransmissionTime, TempoSensors::LidarScanSegment& ScanSegmentOut) const
+namespace
 {
-	const FVector2D ImagePlaneSize = 2.0 * SphericalToPerspective(HorizontalFOV / 2.0, VerticalFOV / 2.0);
-	const FVector2D SizeXYOffset = (FVector2D(ImageSize) - SizeXYFOV) / 2.0;
-
-	const int32 NumReturns = HorizontalBeams * VerticalBeams;
-
-	// Pre-size the packed repeated-scalar output fields so parallel workers can write
-	// directly into their contiguous backing storage — no intermediate per-return objects.
-	// Azimuths/elevations are per-return to leave room for non-gridded beam patterns.
-	ScanSegmentOut.mutable_distances_m()->Resize(NumReturns, 0.0f);
-	ScanSegmentOut.mutable_intensities()->Resize(NumReturns, 0.0f);
-	ScanSegmentOut.mutable_labels()->Resize(NumReturns, 0u);
-	ScanSegmentOut.mutable_azimuths_rad()->Resize(NumReturns, 0.0f);
-	ScanSegmentOut.mutable_elevations_rad()->Resize(NumReturns, 0.0f);
-	float* const DistancesData = ScanSegmentOut.mutable_distances_m()->mutable_data();
-	float* const IntensitiesData = ScanSegmentOut.mutable_intensities()->mutable_data();
-	uint32_t* const LabelsData = ScanSegmentOut.mutable_labels()->mutable_data();
-	float* const AzimuthsData = ScanSegmentOut.mutable_azimuths_rad()->mutable_data();
-	float* const ElevationsData = ScanSegmentOut.mutable_elevations_rad()->mutable_data();
-
-	// H-outer, V-inner layout: each ParallelFor iteration owns a contiguous V-length stripe
-	// of every output array, so threads never share cache lines.
-	ParallelFor(HorizontalBeams, [this, &ImagePlaneSize, &SizeXYOffset,
-		DistancesData, IntensitiesData, LabelsData, AzimuthsData, ElevationsData](int32 HorizontalBeam)
+	// Decoder body shared by FLidarPixel and FLidarPixelWithColor specializations. The color branch
+	// is constexpr-guarded: the no-color path emits identical proto bytes as before this change.
+	template <typename PixelType>
+	void DecodeLidarRead(const TLidarTextureReadBase<PixelType>& Read, float TransmissionTime,
+		TempoSensors::LidarScanSegment& ScanSegmentOut)
 	{
-		auto ImagePlaneLocationToPixelCoordinate = [this, &ImagePlaneSize, &SizeXYOffset](const FVector2D& ImagePlaneLocation)
-		{
-			return (FVector2D::UnitVector / 2.0 + ImagePlaneLocation / ImagePlaneSize) * (SizeXYFOV - FVector2D::UnitVector) + SizeXYOffset;
-		};
+		const FVector2D ImagePlaneSize = 2.0 * SphericalToPerspective(Read.HorizontalFOV / 2.0, Read.VerticalFOV / 2.0);
+		const FVector2D SizeXYOffset = (FVector2D(Read.ImageSize) - Read.SizeXYFOV) / 2.0;
 
-		auto PixelCoordinateToImagePlaneLocation = [this, &ImagePlaneSize, &SizeXYOffset](const FVector2D& PixelCoordinate)
-		{
-			return ((PixelCoordinate - SizeXYOffset) / (SizeXYFOV - FVector2D::UnitVector) - (FVector2D::UnitVector / 2.0)) * ImagePlaneSize;
-		};
+		const int32 NumReturns = Read.HorizontalBeams * Read.VerticalBeams;
 
-		for (int32 VerticalBeam = 0; VerticalBeam < VerticalBeams; ++VerticalBeam)
+		// Pre-size the packed repeated-scalar output fields so parallel workers can write
+		// directly into their contiguous backing storage — no intermediate per-return objects.
+		// Azimuths/elevations are per-return to leave room for non-gridded beam patterns.
+		ScanSegmentOut.mutable_distances_m()->Resize(NumReturns, 0.0f);
+		ScanSegmentOut.mutable_intensities()->Resize(NumReturns, 0.0f);
+		ScanSegmentOut.mutable_labels()->Resize(NumReturns, 0u);
+		ScanSegmentOut.mutable_azimuths_rad()->Resize(NumReturns, 0.0f);
+		ScanSegmentOut.mutable_elevations_rad()->Resize(NumReturns, 0.0f);
+		float* const DistancesData = ScanSegmentOut.mutable_distances_m()->mutable_data();
+		float* const IntensitiesData = ScanSegmentOut.mutable_intensities()->mutable_data();
+		uint32_t* const LabelsData = ScanSegmentOut.mutable_labels()->mutable_data();
+		float* const AzimuthsData = ScanSegmentOut.mutable_azimuths_rad()->mutable_data();
+		float* const ElevationsData = ScanSegmentOut.mutable_elevations_rad()->mutable_data();
+
+		// Color blob (only allocated for the color variant). Packed 3 bytes per return, indexed
+		// 3 * (h * VerticalBeams + v), with byte order set by the project's color image encoding.
+		char* ColorsData = nullptr;
+		EColorImageEncoding ColorEncoding = EColorImageEncoding::BGR8;
+		if constexpr (std::is_same_v<PixelType, FLidarPixelWithColor>)
 		{
-			const double NominalAzimuthDeg = (-0.5 + static_cast<double>(HorizontalBeam) / (HorizontalBeams - 1)) * HorizontalFOV;
-			const bool bCalibrated = BeamCalibration.IsValidIndex(VerticalBeam);
-			const double ElevationDeg = bCalibrated
-				? BeamCalibration[VerticalBeam].ElevationDeg
-				: (-0.5 + static_cast<double>(VerticalBeam) / (VerticalBeams - 1)) * VerticalFOV;
-			const double AzimuthDeg = NominalAzimuthDeg + (bCalibrated ? BeamCalibration[VerticalBeam].AzimuthOffsetDeg : 0.0);
-			const FVector2D ImagePlaneLocation = SphericalToPerspective(AzimuthDeg, ElevationDeg);
-			const FVector2D PixelCoordinate = ImagePlaneLocationToPixelCoordinate(ImagePlaneLocation);
-			const FIntPoint Coord(FMath::RoundToInt32(PixelCoordinate.X), FMath::RoundToInt32(PixelCoordinate.Y));
-			const float NearestDepth = Image[Coord.X + ImageSize.X * Coord.Y].Depth(MinDepth, MaxDepth, GTempo_Max_Discrete_Depth);
-			const FVector2D ImagePlaneLocationAboveLeft = PixelCoordinateToImagePlaneLocation(FVector2D(Coord.X, Coord.Y));
-			double AzimuthDegNearest, ElevationDegNearest;
-			PerspectiveToSpherical(ImagePlaneLocationAboveLeft, AzimuthDegNearest, ElevationDegNearest);
-			const float NearestDistance = DepthToDistance(AzimuthDegNearest, ElevationDegNearest, NearestDepth);
-			const FVector NearestPoint = SphericalToCartesian(AzimuthDegNearest, ElevationDegNearest, NearestDistance);
-			const FVector WorldNormal = Image[Coord.X + ImageSize.X * Coord.Y].Normal();
-			const FVector LocalNormal = CaptureTransform.InverseTransformVector(WorldNormal);
-			const FVector RayDirection = SphericalToCartesian(AzimuthDeg, ElevationDeg, MaxDistance);
-			const double CosAngleOfIncidence = FVector::DotProduct(LocalNormal.GetSafeNormal(), -RayDirection.GetSafeNormal());
-			const double AngleOfIncidence = FMath::RadiansToDegrees(FMath::Acos(CosAngleOfIncidence));
-			double Intensity;
-			double Distance;
-			if (AngleOfIncidence > MaxAngleOfIncidence)
+			std::string* ColorsOut = ScanSegmentOut.mutable_colors();
+			ColorsOut->assign(static_cast<size_t>(NumReturns * 3), '\0');
+			ColorsData = ColorsOut->data();
+			const UTempoSensorsSettings* TempoSensorsSettings = GetDefault<UTempoSensorsSettings>();
+			if (TempoSensorsSettings)
 			{
-				Distance = 0.0;
-				Intensity = 0.0;
+				ColorEncoding = TempoSensorsSettings->GetColorImageEncoding();
 			}
-			else
+			ScanSegmentOut.set_color_encoding(ColorEncoding == EColorImageEncoding::BGR8
+				? TempoSensors::ColorEncoding::CE_BGR8
+				: TempoSensors::ColorEncoding::CE_RGB8);
+		}
+
+		// H-outer, V-inner layout: each ParallelFor iteration owns a contiguous V-length stripe
+		// of every output array, so threads never share cache lines.
+		ParallelFor(Read.HorizontalBeams, [&Read, &ImagePlaneSize, &SizeXYOffset,
+			DistancesData, IntensitiesData, LabelsData, AzimuthsData, ElevationsData, ColorsData, ColorEncoding](int32 HorizontalBeam)
+		{
+			auto ImagePlaneLocationToPixelCoordinate = [&Read, &ImagePlaneSize, &SizeXYOffset](const FVector2D& ImagePlaneLocation)
 			{
-				const FPlane SurfacePlane(NearestPoint, LocalNormal);
-				const FVector HitPoint = FMath::LinePlaneIntersection(FVector::ZeroVector, RayDirection, SurfacePlane);
+				return (FVector2D::UnitVector / 2.0 + ImagePlaneLocation / ImagePlaneSize) * (Read.SizeXYFOV - FVector2D::UnitVector) + SizeXYOffset;
+			};
 
-				Distance = HitPoint.Length();
-				Intensity = CosAngleOfIncidence * IntensitySaturationDistance / FMath::Max(IntensitySaturationDistance, Distance);
+			auto PixelCoordinateToImagePlaneLocation = [&Read, &ImagePlaneSize, &SizeXYOffset](const FVector2D& PixelCoordinate)
+			{
+				return ((PixelCoordinate - SizeXYOffset) / (Read.SizeXYFOV - FVector2D::UnitVector) - (FVector2D::UnitVector / 2.0)) * ImagePlaneSize;
+			};
 
-				if (Distance > MaxDistance)
+			for (int32 VerticalBeam = 0; VerticalBeam < Read.VerticalBeams; ++VerticalBeam)
+			{
+				const double NominalAzimuthDeg = (-0.5 + static_cast<double>(HorizontalBeam) / (Read.HorizontalBeams - 1)) * Read.HorizontalFOV;
+				const bool bCalibrated = Read.BeamCalibration.IsValidIndex(VerticalBeam);
+				const double ElevationDeg = bCalibrated
+					? Read.BeamCalibration[VerticalBeam].ElevationDeg
+					: (-0.5 + static_cast<double>(VerticalBeam) / (Read.VerticalBeams - 1)) * Read.VerticalFOV;
+				const double AzimuthDeg = NominalAzimuthDeg + (bCalibrated ? Read.BeamCalibration[VerticalBeam].AzimuthOffsetDeg : 0.0);
+				const FVector2D ImagePlaneLocation = SphericalToPerspective(AzimuthDeg, ElevationDeg);
+				const FVector2D PixelCoordinate = ImagePlaneLocationToPixelCoordinate(ImagePlaneLocation);
+				const FIntPoint Coord(FMath::RoundToInt32(PixelCoordinate.X), FMath::RoundToInt32(PixelCoordinate.Y));
+				const PixelType& Pixel = Read.Image[Coord.X + Read.ImageSize.X * Coord.Y];
+				constexpr float MaxDiscreteDepthValue = std::is_same_v<PixelType, FLidarPixelWithColor>
+					? GTempoCamera_Max_Discrete_Depth
+					: GTempo_Max_Discrete_Depth;
+				const float NearestDepth = Pixel.Depth(Read.MinDepth, Read.MaxDepth, MaxDiscreteDepthValue);
+				const FVector2D ImagePlaneLocationAboveLeft = PixelCoordinateToImagePlaneLocation(FVector2D(Coord.X, Coord.Y));
+				double AzimuthDegNearest, ElevationDegNearest;
+				PerspectiveToSpherical(ImagePlaneLocationAboveLeft, AzimuthDegNearest, ElevationDegNearest);
+				const float NearestDistance = DepthToDistance(AzimuthDegNearest, ElevationDegNearest, NearestDepth);
+				const FVector NearestPoint = SphericalToCartesian(AzimuthDegNearest, ElevationDegNearest, NearestDistance);
+				const FVector WorldNormal = Pixel.Normal();
+				const FVector LocalNormal = Read.CaptureTransform.InverseTransformVector(WorldNormal);
+				const FVector RayDirection = SphericalToCartesian(AzimuthDeg, ElevationDeg, Read.MaxDistance);
+				const double CosAngleOfIncidence = FVector::DotProduct(LocalNormal.GetSafeNormal(), -RayDirection.GetSafeNormal());
+				const double AngleOfIncidence = FMath::RadiansToDegrees(FMath::Acos(CosAngleOfIncidence));
+				double Intensity;
+				double Distance;
+				if (AngleOfIncidence > Read.MaxAngleOfIncidence)
 				{
 					Distance = 0.0;
 					Intensity = 0.0;
 				}
-				Distance = FMath::Max(MinDistance, Distance);
+				else
+				{
+					const FPlane SurfacePlane(NearestPoint, LocalNormal);
+					const FVector HitPoint = FMath::LinePlaneIntersection(FVector::ZeroVector, RayDirection, SurfacePlane);
+
+					Distance = HitPoint.Length();
+					Intensity = CosAngleOfIncidence * Read.IntensitySaturationDistance / FMath::Max(Read.IntensitySaturationDistance, Distance);
+
+					if (Distance > Read.MaxDistance)
+					{
+						Distance = 0.0;
+						Intensity = 0.0;
+					}
+					Distance = FMath::Max(Read.MinDistance, Distance);
+				}
+
+				const int32 Idx = HorizontalBeam * Read.VerticalBeams + VerticalBeam;
+				DistancesData[Idx] = QuantityConverter<CM2M>::Convert(Distance);
+				IntensitiesData[Idx] = static_cast<float>(Intensity);
+				LabelsData[Idx] = Pixel.Label();
+				// Negated from the internal (Unreal-local) convention so that client-side
+				// point-cloud math renders in the expected right-handed Z-up frame.
+				AzimuthsData[Idx] = static_cast<float>(FMath::DegreesToRadians(-(AzimuthDeg + Read.RelativeYaw)));
+				ElevationsData[Idx] = static_cast<float>(FMath::DegreesToRadians(-ElevationDeg));
+
+				if constexpr (std::is_same_v<PixelType, FLidarPixelWithColor>)
+				{
+					char* const ColorOut = ColorsData + Idx * 3;
+					if (ColorEncoding == EColorImageEncoding::BGR8)
+					{
+						ColorOut[0] = static_cast<char>(Pixel.B());
+						ColorOut[1] = static_cast<char>(Pixel.G());
+						ColorOut[2] = static_cast<char>(Pixel.R());
+					}
+					else
+					{
+						ColorOut[0] = static_cast<char>(Pixel.R());
+						ColorOut[1] = static_cast<char>(Pixel.G());
+						ColorOut[2] = static_cast<char>(Pixel.B());
+					}
+				}
 			}
+		});
 
-			const int32 Idx = HorizontalBeam * VerticalBeams + VerticalBeam;
-			DistancesData[Idx] = QuantityConverter<CM2M>::Convert(Distance);
-			IntensitiesData[Idx] = static_cast<float>(Intensity);
-			LabelsData[Idx] = Image[Coord.X + ImageSize.X * Coord.Y].Label();
-			// Negated from the internal (Unreal-local) convention so that client-side
-			// point-cloud math renders in the expected right-handed Z-up frame.
-			AzimuthsData[Idx] = static_cast<float>(FMath::DegreesToRadians(-(AzimuthDeg + RelativeYaw)));
-			ElevationsData[Idx] = static_cast<float>(FMath::DegreesToRadians(-ElevationDeg));
-		}
-	});
+		Read.ExtractMeasurementHeader(TransmissionTime, ScanSegmentOut.mutable_header());
 
-	ExtractMeasurementHeader(TransmissionTime, ScanSegmentOut.mutable_header());
-
-	ScanSegmentOut.set_scan_count(NumCaptureComponents);
-	ScanSegmentOut.set_horizontal_beams(HorizontalBeams);
-	ScanSegmentOut.set_vertical_beams(VerticalBeams);
-	// Distances are emitted in meters (see CM2M conversion above), so the range is too.
-	ScanSegmentOut.mutable_distance_range_m()->set_min(QuantityConverter<CM2M>::Convert(MinDistance));
-	ScanSegmentOut.mutable_distance_range_m()->set_max(QuantityConverter<CM2M>::Convert(MaxDistance));
-	ScanSegmentOut.mutable_azimuth_range_rad()->set_max(FMath::DegreesToRadians(HorizontalFOV / 2.0 + RelativeYaw));
-	ScanSegmentOut.mutable_azimuth_range_rad()->set_min(FMath::DegreesToRadians(-HorizontalFOV / 2.0 + RelativeYaw));
-	if (BeamCalibration.Num() > 0)
-	{
-		// Output elevations are negated from the internal ElevationDeg convention, so the range
-		// is also negated: the most-negative output comes from the most-positive ElevationDeg.
-		float MinOutputElev = TNumericLimits<float>::Max();
-		float MaxOutputElev = TNumericLimits<float>::Lowest();
-		for (const FLidarBeamCalibration& B : BeamCalibration)
+		ScanSegmentOut.set_scan_count(Read.NumCaptureComponents);
+		ScanSegmentOut.set_horizontal_beams(Read.HorizontalBeams);
+		ScanSegmentOut.set_vertical_beams(Read.VerticalBeams);
+		// Distances are emitted in meters (see CM2M conversion above), so the range is too.
+		ScanSegmentOut.mutable_distance_range_m()->set_min(QuantityConverter<CM2M>::Convert(Read.MinDistance));
+		ScanSegmentOut.mutable_distance_range_m()->set_max(QuantityConverter<CM2M>::Convert(Read.MaxDistance));
+		ScanSegmentOut.mutable_azimuth_range_rad()->set_max(FMath::DegreesToRadians(Read.HorizontalFOV / 2.0 + Read.RelativeYaw));
+		ScanSegmentOut.mutable_azimuth_range_rad()->set_min(FMath::DegreesToRadians(-Read.HorizontalFOV / 2.0 + Read.RelativeYaw));
+		if (Read.BeamCalibration.Num() > 0)
 		{
-			const float OutputElev = -B.ElevationDeg;
-			MinOutputElev = FMath::Min(MinOutputElev, OutputElev);
-			MaxOutputElev = FMath::Max(MaxOutputElev, OutputElev);
+			// Output elevations are negated from the internal ElevationDeg convention, so the range
+			// is also negated: the most-negative output comes from the most-positive ElevationDeg.
+			float MinOutputElev = TNumericLimits<float>::Max();
+			float MaxOutputElev = TNumericLimits<float>::Lowest();
+			for (const FLidarBeamCalibration& B : Read.BeamCalibration)
+			{
+				const float OutputElev = -B.ElevationDeg;
+				MinOutputElev = FMath::Min(MinOutputElev, OutputElev);
+				MaxOutputElev = FMath::Max(MaxOutputElev, OutputElev);
+			}
+			ScanSegmentOut.mutable_elevation_range_rad()->set_max(FMath::DegreesToRadians(MaxOutputElev));
+			ScanSegmentOut.mutable_elevation_range_rad()->set_min(FMath::DegreesToRadians(MinOutputElev));
 		}
-		ScanSegmentOut.mutable_elevation_range_rad()->set_max(FMath::DegreesToRadians(MaxOutputElev));
-		ScanSegmentOut.mutable_elevation_range_rad()->set_min(FMath::DegreesToRadians(MinOutputElev));
-	}
-	else
-	{
-		ScanSegmentOut.mutable_elevation_range_rad()->set_max(FMath::DegreesToRadians(VerticalFOV / 2.0));
-		ScanSegmentOut.mutable_elevation_range_rad()->set_min(FMath::DegreesToRadians(-VerticalFOV / 2.0));
+		else
+		{
+			ScanSegmentOut.mutable_elevation_range_rad()->set_max(FMath::DegreesToRadians(Read.VerticalFOV / 2.0));
+			ScanSegmentOut.mutable_elevation_range_rad()->set_min(FMath::DegreesToRadians(-Read.VerticalFOV / 2.0));
+		}
 	}
 }
 
-TFuture<void> UTempoLidar::DecodeAndRespond(TArray<TUniquePtr<FTextureRead>> TextureReads)
+void TTextureRead<FLidarPixel>::Decode(float TransmissionTime, TempoSensors::LidarScanSegment& ScanSegmentOut) const
+{
+	DecodeLidarRead(*this, TransmissionTime, ScanSegmentOut);
+}
+
+void TTextureRead<FLidarPixelWithColor>::Decode(float TransmissionTime, TempoSensors::LidarScanSegment& ScanSegmentOut) const
+{
+	DecodeLidarRead(*this, TransmissionTime, ScanSegmentOut);
+}
+
+TFuture<void> UTempoLidar::DecodeAndRespond(TArray<TUniquePtr<FTextureRead>> TextureReads, bool bWithColor)
 {
 	const double TransmissionTime = GetWorld()->GetTimeSeconds();
 
@@ -499,7 +642,8 @@ TFuture<void> UTempoLidar::DecodeAndRespond(TArray<TUniquePtr<FTextureRead>> Tex
 		this,
 		TextureReads = MoveTemp(TextureReads),
 		Requests = PendingRequests,
-		TransmissionTimeCpy = TransmissionTime
+		TransmissionTimeCpy = TransmissionTime,
+		bWithColor
 		]
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(TempoLidarDecodeAndRespond);
@@ -508,10 +652,17 @@ TFuture<void> UTempoLidar::DecodeAndRespond(TArray<TUniquePtr<FTextureRead>> Tex
 		Segments.SetNum(TextureReads.Num());
 		if (!Requests.IsEmpty())
 		{
-			ParallelFor(TextureReads.Num(), [&TextureReads, &Segments, TransmissionTimeCpy](int Index)
+			ParallelFor(TextureReads.Num(), [&TextureReads, &Segments, TransmissionTimeCpy, bWithColor](int Index)
 			{
 				TRACE_CPUPROFILER_EVENT_SCOPE(TempoLidarDecode);
-				static_cast<TTextureRead<FLidarPixel>*>(TextureReads[Index].Get())->Decode(TransmissionTimeCpy, Segments[Index]);
+				if (bWithColor)
+				{
+					static_cast<TTextureRead<FLidarPixelWithColor>*>(TextureReads[Index].Get())->Decode(TransmissionTimeCpy, Segments[Index]);
+				}
+				else
+				{
+					static_cast<TTextureRead<FLidarPixel>*>(TextureReads[Index].Get())->Decode(TransmissionTimeCpy, Segments[Index]);
+				}
 			});
 		}
 
@@ -526,6 +677,66 @@ TFuture<void> UTempoLidar::DecodeAndRespond(TArray<TUniquePtr<FTextureRead>> Tex
 	});
 
 	return Future;
+}
+
+void UTempoLidar::SetColorEnabled(bool bColorEnabledIn)
+{
+	if (bColorEnabled == bColorEnabledIn)
+	{
+		return;
+	}
+
+	UE_LOG(LogTempoSensors, Display, TEXT("Setting owner: %s lidar: %s color enabled: %d"), *GetOwnerName(), *GetSensorName(), bColorEnabledIn);
+
+	bColorEnabled = bColorEnabledIn;
+	ApplyColorEnabled();
+}
+
+void UTempoLidar::ApplyColorEnabled()
+{
+	// Reapply the family-level rendering config. Color mode uses Lumen + ray tracing + the full
+	// tonemap/AE/show-flag set so the WithColor PPM samples a realistically lit scene; the
+	// no-color path strips those out for the fast aux-only render. Reset the PostProcessSettings
+	// and ShowFlags blocks before reapplying so toggling off cleanly drops the Lumen/MegaLights
+	// overrides set by the helper.
+	PostProcessSettings = FPostProcessSettings();
+	ShowFlags = FEngineShowFlags(ESFIM_Game);
+	if (bColorEnabled)
+	{
+		ApplyPhotorealisticRenderSettings(PostProcessSettings, ShowFlags, bUseRayTracingIfEnabled);
+		// TSR's sub-pixel jitter is great for full-screen rendering but produces visible
+		// per-frame jitter in lidar returns — each beam reads a single pixel and TSR shifts
+		// which pixel that is across frames. Temporal accumulation isn't needed for a sensor
+		// that integrates once per beam, so turn it off (the camera helper turned it on).
+		ShowFlags.SetTemporalAA(false);
+		ShowFlags.SetAntiAliasing(false);
+	}
+	else
+	{
+		OptimizeShowFlagsForNoColor(ShowFlags);
+		bUseRayTracingIfEnabled = false;
+	}
+
+	// Swap each active tile's PPM to the matching variant. ApplyTilePostProcess retires the old
+	// MID if its parent material doesn't match the bColorEnabled-selected one.
+	for (FTempoLidarTile& Tile : Tiles)
+	{
+		if (Tile.bActive)
+		{
+			ApplyTilePostProcess(Tile);
+			// Force a camera cut on the next render: TAA history from the previous render mode
+			// is invalid because the post-process pipeline (and exposure) is being swapped.
+			Tile.bCameraCut = true;
+		}
+	}
+
+	// The atlas pixel format depends on bColorEnabled. Any in-flight reads reference the old
+	// format's staging textures, so drop them and rebuild the shared RT + staging ring at the
+	// new size. This is the same drain-and-reinit path the depth toggle takes on the camera.
+	if (UTempoCoreUtils::IsGameWorld(this))
+	{
+		InitSharedRenderTarget();
+	}
 }
 
 // ------------------------------------------------------------------------------------
@@ -562,16 +773,34 @@ void UTempoLidar::InitSharedRenderTarget()
 		return;
 	}
 
+	// Drop pending reads BEFORE swapping the RT pointer, not after. Otherwise the render thread
+	// can pick up OnRenderCompleted between the SharedTextureTarget swap and the queue Empty(),
+	// iterate stale in-flight reads (still pointing at old 8B staging), and feed them the new 16B
+	// RT — Read() then issues CopyTexture(NEW_RT, OLD_STAGING) with mismatched per-pixel sizes and
+	// the subsequent map+memcpy crashes in _platform_memmove. Empty()-then-swap closes that window;
+	// the captured TSharedPtr in the pending render-command closure still keeps the old RT+staging
+	// pair alive together until it runs.
+	TextureReadQueue.Empty();
+
 	SharedTextureTarget = NewObject<UTextureRenderTarget2D>(this);
 	SharedTextureTarget->TargetGamma = GetDefault<UTempoSensorsSettings>()->GetSceneCaptureGamma();
 	SharedTextureTarget->bGPUSharedFlag = true;
-	SharedTextureTarget->RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA16f;
-	SharedTextureTarget->InitCustomFormat(PackedX, MaxY, EPixelFormat::PF_A16B16G16R16, true);
+	if (bColorEnabled)
+	{
+		// 4x float32 lanes per pixel, used as raw 32-bit byte carriers. The WithColor PPM writes
+		// asfloat(packed_uint) into each lane; FLidarPixelWithColor reads the same 16 bytes back
+		// as uint32[4]. UTextureRenderTarget2D::IsSupportedFormat rejects PF_R32G32B32A32_UINT for
+		// PPM render targets, so we use the float variant — same stride, same memory pattern.
+		SharedTextureTarget->RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA32f;
+		SharedTextureTarget->InitCustomFormat(PackedX, MaxY, EPixelFormat::PF_A32B32G32R32F, true);
+	}
+	else
+	{
+		SharedTextureTarget->RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA16f;
+		SharedTextureTarget->InitCustomFormat(PackedX, MaxY, EPixelFormat::PF_A16B16G16R16, true);
+	}
 
 	AllocateStagingTextures(SharedTextureTarget->SizeX, SharedTextureTarget->SizeY, SharedTextureTarget->GetFormat());
-
-	// Any pending texture reads reference the previous RT geometry; discard them.
-	TextureReadQueue.Empty();
 }
 
 int32 UTempoLidar::GetNumActiveTiles() const
@@ -620,7 +849,15 @@ void UTempoLidar::RenderCapture()
 	ViewSetups.Reserve(NumActiveTiles);
 
 	TArray<TUniquePtr<TTextureRead<FLidarPixel>>> Slices;
-	Slices.Reserve(NumActiveTiles);
+	TArray<TUniquePtr<TTextureRead<FLidarPixelWithColor>>> SlicesWithColor;
+	if (bColorEnabled)
+	{
+		SlicesWithColor.Reserve(NumActiveTiles);
+	}
+	else
+	{
+		Slices.Reserve(NumActiveTiles);
+	}
 
 	const double CaptureTime = World->GetTimeSeconds();
 
@@ -670,13 +907,24 @@ void UTempoLidar::RenderCapture()
 
 		// Build the per-slice read with the metadata its Decode path expects.
 		const FTransform TileWorldTransform(TileWorldRotation, ViewLocation);
-		Slices.Emplace(new TTextureRead<FLidarPixel>(
-			Tile.SizeXY, SequenceId, CaptureTime, GetOwnerName(), GetSensorName(),
-			GetComponentTransform(), TileWorldTransform, Tile.FOVAngle,
-			GetEffectiveVerticalFOV(), Tile.HorizontalBeams, GetEffectiveVerticalBeams(), Tile.SizeXYFOV,
-			IntensitySaturationDistance, MaxAngleOfIncidence,
-			NumActiveTiles, Tile.YawOffset, Tile.MinDepth, Tile.MaxDepth,
-			MinDistance, MaxDistance, BeamCalibration));
+		auto BuildSlice = [&]<typename P>(TArray<TUniquePtr<TTextureRead<P>>>& Out)
+		{
+			Out.Emplace(new TTextureRead<P>(
+				Tile.SizeXY, SequenceId, CaptureTime, GetOwnerName(), GetSensorName(),
+				GetComponentTransform(), TileWorldTransform, Tile.FOVAngle,
+				GetEffectiveVerticalFOV(), Tile.HorizontalBeams, GetEffectiveVerticalBeams(), Tile.SizeXYFOV,
+				IntensitySaturationDistance, MaxAngleOfIncidence,
+				NumActiveTiles, Tile.YawOffset, Tile.MinDepth, Tile.MaxDepth,
+				MinDistance, MaxDistance, BeamCalibration));
+		};
+		if (bColorEnabled)
+		{
+			BuildSlice.template operator()<FLidarPixelWithColor>(SlicesWithColor);
+		}
+		else
+		{
+			BuildSlice.template operator()<FLidarPixel>(Slices);
+		}
 
 		PackedX = FMath::Max(PackedX, Tile.SliceDestOffsetX + Tile.SizeXY.X);
 		MaxY = FMath::Max(MaxY, Tile.SizeXY.Y);
@@ -685,9 +933,19 @@ void UTempoLidar::RenderCapture()
 	// Render all views in one family directly into SharedTextureTarget.
 	TempoMultiViewCapture::RenderTiles(Scene, this, SharedTextureTarget, ViewSetups, ESceneCaptureSource::SCS_FinalColorLDR);
 
-	TSharedPtr<FLidarSharedTextureRead> NewRead = MakeShared<FLidarSharedTextureRead>(
-		FIntPoint(PackedX, MaxY), SequenceId, CaptureTime, GetOwnerName(), GetSensorName(),
-		GetComponentTransform(), MoveTemp(Slices));
+	TSharedPtr<FTextureRead> NewRead;
+	if (bColorEnabled)
+	{
+		NewRead = MakeShared<TLidarSharedTextureRead<FLidarPixelWithColor>>(
+			FIntPoint(PackedX, MaxY), SequenceId, CaptureTime, GetOwnerName(), GetSensorName(),
+			GetComponentTransform(), MoveTemp(SlicesWithColor));
+	}
+	else
+	{
+		NewRead = MakeShared<TLidarSharedTextureRead<FLidarPixel>>(
+			FIntPoint(PackedX, MaxY), SequenceId, CaptureTime, GetOwnerName(), GetSensorName(),
+			GetComponentTransform(), MoveTemp(Slices));
+	}
 
 	NewRead->StagingTexture = AcquireNextStagingTexture();
 
@@ -714,25 +972,39 @@ void UTempoLidar::RenderCapture()
 	TextureReadQueue.Enqueue(MoveTemp(NewRead));
 }
 
-TArray<TUniquePtr<FTextureRead>> FLidarSharedTextureRead::SplitIntoSlices()
+template <typename PixelType>
+FName TLidarSharedTextureRead<PixelType>::GetType() const
+{
+	if constexpr (std::is_same_v<PixelType, FLidarPixel>)
+	{
+		return TEXT("LidarShared");
+	}
+	else
+	{
+		return TEXT("LidarColorShared");
+	}
+}
+
+template <typename PixelType>
+TArray<TUniquePtr<FTextureRead>> TLidarSharedTextureRead<PixelType>::SplitIntoSlices()
 {
 	TArray<TUniquePtr<FTextureRead>> Result;
 	Result.Reserve(Slices.Num());
 
 	int32 RunningX = 0;
-	for (TUniquePtr<TTextureRead<FLidarPixel>>& Slice : Slices)
+	for (TUniquePtr<TTextureRead<PixelType>>& Slice : Slices)
 	{
 		const FIntPoint SliceSize = Slice->ImageSize;
 		const int32 SrcX = RunningX;
-		const int32 PackedWidth = ImageSize.X;
-		TTextureRead<FLidarPixel>* SlicePtr = Slice.Get();
-		TArray<FLidarPixel>& PackedImage = Image;
+		const int32 PackedWidth = this->ImageSize.X;
+		TTextureRead<PixelType>* SlicePtr = Slice.Get();
+		TArray<PixelType>& PackedImage = this->Image;
 		ParallelFor(SliceSize.Y, [SlicePtr, &PackedImage, SrcX, PackedWidth, SliceSize](int32 Row)
 		{
 			FMemory::Memcpy(
 				&SlicePtr->Image[Row * SliceSize.X],
 				&PackedImage[Row * PackedWidth + SrcX],
-				SliceSize.X * sizeof(FLidarPixel));
+				SliceSize.X * sizeof(PixelType));
 		});
 		RunningX += SliceSize.X;
 		Result.Emplace(Slice.Release());
@@ -740,3 +1012,6 @@ TArray<TUniquePtr<FTextureRead>> FLidarSharedTextureRead::SplitIntoSlices()
 	Slices.Empty();
 	return Result;
 }
+
+template struct TLidarSharedTextureRead<FLidarPixel>;
+template struct TLidarSharedTextureRead<FLidarPixelWithColor>;

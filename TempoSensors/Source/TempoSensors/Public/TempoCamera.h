@@ -390,8 +390,18 @@ protected:
 	ETempoTextureFilterType GetEffectiveTextureFilterType() const;
 
 	// Whether this camera can measure depth. Disabled when not requested to optimize performance.
+	// Toggled on immediately when a depth request arrives; toggled off only after several
+	// consecutive frames without one (debounced) to ride out the sub-frame gap between a streaming
+	// gRPC client receiving a response and re-issuing the next request. Without the debounce, the
+	// flip races the async RT/staging reinit on the render thread (same failure mode as the
+	// lidar's bColorEnabled — see UTempoLidar::FramesWithoutColor).
 	UPROPERTY(VisibleAnywhere, Category = "Tempo")
 	bool bDepthEnabled = false;
+
+	// Frames seen without any depth request. Resets to 0 on every frame a depth request is
+	// observed; bDepthEnabled flips off only when this exceeds DepthOffDebounceFrames.
+	int32 FramesWithoutDepth = 0;
+	static constexpr int32 DepthOffDebounceFrames = 30;
 
 	// The minimum depth this camera can measure (if depth is enabled). Will be set to the global near clip plane.
 	UPROPERTY(VisibleAnywhere, Category = "Tempo")

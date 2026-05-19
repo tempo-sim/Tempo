@@ -9,6 +9,15 @@ import sys
 import qasync
 
 import tempo.tempo_sensors as ts
+import TempoSensors.Common_pb2 as Common
+
+
+# Signals the viewer can render. "color" requires the server to be in color mode (set
+# include_color=True on stream_lidar_scans); others use signals always present in the segment.
+COLORIZE_OPTIONS = ("color", "intensity", "label", "distance")
+
+# Single-key shortcuts the in-viewer key callbacks bind to switch modes at runtime.
+COLORIZE_HOTKEYS = {"c": "color", "i": "intensity", "l": "label", "d": "distance"}
 
 
 class PointCloudViewer:
@@ -25,12 +34,18 @@ class PointCloudViewer:
         self.v_angles_grid = None
         self.point_cloud = None
         self.actor = None
+        # True when the current actor was added with rgb=True (per-point RGB). Switching to or
+        # from this mode requires recreating the actor, since the mapper is configured differently.
+        self.actor_is_rgb = False
         self.accumulated_scan_segments = 0
         self.horizontal_beams = 0
         self.num_points = 0
         self.distances = None
         self.intensities = None
         self.labels = None
+        # Per-return color, shape (V, H, 3) uint8 in RGB order (decoded from segment.colors per
+        # segment.color_encoding). None when the active scan was rendered without color.
+        self.colors_rgb = None
         self.azimuth_min = 0.0
         self.azimuth_max = 0.0
 
@@ -62,7 +77,42 @@ class PointCloudViewer:
             asyncio.set_event_loop(self.loop)
 
         self.update_rate = update_rate
-        self.colorize_by = colorize_by
+        self.colorize_by = colorize_by if colorize_by in COLORIZE_OPTIONS else "intensity"
+
+        # In-viewer mode indicator and hotkey bindings: press c/i/l/d to switch colorize mode.
+        # The label is re-added (replacing by name) each time the mode changes — simpler and more
+        # portable than poking the underlying vtk text/corner-annotation actor in place.
+        self._refresh_mode_label()
+        for key, mode in COLORIZE_HOTKEYS.items():
+            self.plotter.add_key_event(key, lambda m=mode: self.set_colorize_by(m))
+
+    def _mode_label_text(self):
+        hotkey_hint = " ".join(f"[{k}]={m}" for k, m in COLORIZE_HOTKEYS.items())
+        return f"Mode: {self.colorize_by}    {hotkey_hint}"
+
+    def _refresh_mode_label(self):
+        self.plotter.add_text(
+            self._mode_label_text(),
+            position="upper_left",
+            font_size=10,
+            color="white",
+            name="mode_label",
+        )
+
+    def set_colorize_by(self, mode):
+        """Switch the active colorize mode and redraw from the most recently accumulated scan.
+
+        Safe to call from a PyVista key callback (runs on the Qt thread). Idempotent if the
+        mode is unchanged or invalid. Switching to 'color' when the current scan has no color
+        data (server not in color mode) falls back to a uniform mid-gray render.
+        """
+        if mode not in COLORIZE_OPTIONS or mode == self.colorize_by:
+            return
+        self.colorize_by = mode
+        self._refresh_mode_label()
+        if self.distances is not None:
+            points, colors = self.prepare_points()
+            self.apply_points(points, colors)
 
     async def run_async(self):
         while True:
@@ -83,6 +133,20 @@ class PointCloudViewer:
         self.app.processEvents()
         self.plotter.render()
 
+    def _decode_colors(self, scan, h, v):
+        """Decode segment.colors (packed BGR8 or RGB8) into a (V, H, 3) uint8 array in RGB order.
+        Returns None when the server didn't include color data."""
+        if not scan.colors:
+            return None
+        expected = 3 * h * v
+        if len(scan.colors) != expected:
+            return None
+        flat = np.frombuffer(scan.colors, dtype=np.uint8).reshape(h, v, 3)
+        # Reorder to RGB regardless of wire encoding so downstream rendering is encoding-agnostic.
+        if scan.color_encoding == Common.CE_BGR8:
+            flat = flat[..., ::-1]
+        return np.transpose(flat, (1, 0, 2))
+
     def accumulate_scan_data(self, scan):
         """Numpy-only accumulation of a segment into the current scan. Returns True when
         the scan is complete. Safe to run from a worker thread — touches no Qt/VTK state."""
@@ -94,6 +158,7 @@ class PointCloudViewer:
         labels = np.asarray(scan.labels, dtype=np.uint32).reshape(h, v).T
         azimuths = np.asarray(scan.azimuths_rad, dtype=np.float32).reshape(h, v).T
         elevations = np.asarray(scan.elevations_rad, dtype=np.float32).reshape(h, v).T
+        colors_rgb = self._decode_colors(scan, h, v)
 
         restart = self.latest_scan is None or self.latest_scan.header.sequence_id != scan.header.sequence_id
 
@@ -105,6 +170,7 @@ class PointCloudViewer:
             self.labels = labels
             self.azimuths = azimuths
             self.elevations = elevations
+            self.colors_rgb = colors_rgb
             self.azimuth_min = scan.azimuth_range_rad.min
             self.azimuth_max = scan.azimuth_range_rad.max
             self.accumulated_scan_segments = 1
@@ -116,12 +182,16 @@ class PointCloudViewer:
                 self.labels = np.concatenate((self.labels, labels), axis=1)
                 self.azimuths = np.concatenate((self.azimuths, azimuths), axis=1)
                 self.elevations = np.concatenate((self.elevations, elevations), axis=1)
+                if self.colors_rgb is not None and colors_rgb is not None:
+                    self.colors_rgb = np.concatenate((self.colors_rgb, colors_rgb), axis=1)
             else:
                 self.distances = np.concatenate((distances, self.distances), axis=1)
                 self.intensities = np.concatenate((intensities, self.intensities), axis=1)
                 self.labels = np.concatenate((labels, self.labels), axis=1)
                 self.azimuths = np.concatenate((azimuths, self.azimuths), axis=1)
                 self.elevations = np.concatenate((elevations, self.elevations), axis=1)
+                if self.colors_rgb is not None and colors_rgb is not None:
+                    self.colors_rgb = np.concatenate((colors_rgb, self.colors_rgb), axis=1)
             self.azimuth_min = min(self.azimuth_min, scan.azimuth_range_rad.min)
             self.azimuth_max = max(self.azimuth_max, scan.azimuth_range_rad.max)
             self.accumulated_scan_segments += 1
@@ -130,7 +200,12 @@ class PointCloudViewer:
         return scan.scan_count == self.accumulated_scan_segments
 
     def prepare_points(self):
-        """Numpy-only: derive 3D points and colors from the accumulated scan. Safe from a worker thread."""
+        """Numpy-only: derive 3D points and colors from the accumulated scan. Safe from a worker thread.
+
+        Returns (points, colors) where `colors` is either a 1D float scalar array (intensity /
+        label / distance modes) or a 2D (N, 3) uint8 RGB array (color mode). apply_points
+        switches the actor between scalar+cmap and rgb=True wiring based on the shape.
+        """
         # Per-return angles carry the same sign convention the previous linspace
         # path produced, so no uniform-spacing assumption is baked in.
         self.h_angles_grid = self.azimuths
@@ -141,20 +216,34 @@ class PointCloudViewer:
         labels = self.labels
         points, valid_mask = self.distances_to_points(distances)
 
-        if self.colorize_by.lower() == "distance":
+        mode = self.colorize_by.lower()
+        if mode == "distance":
             colors = distances.flatten()[valid_mask]
             colors = (colors - np.min(colors)) / (np.max(colors) - np.min(colors) + 1e-6)
-        elif self.colorize_by.lower() == "intensity":
+        elif mode == "intensity":
             colors = intensities.flatten()[valid_mask]
-        elif self.colorize_by.lower() == "label":
+        elif mode == "label":
             colors = labels.flatten()[valid_mask] / 255.0
+        elif mode == "color":
+            if self.colors_rgb is None:
+                # Server isn't rendering color (include_color=False or material missing).
+                # Fall back to a uniform mid-gray so points are still visible.
+                colors = np.full((int(valid_mask.sum()), 3), 128, dtype=np.uint8)
+            else:
+                colors = self.colors_rgb.reshape(-1, 3)[valid_mask]
+        else:
+            colors = intensities.flatten()[valid_mask]
 
         return points, colors
 
     def apply_points(self, points, colors):
         """VTK/Qt updates. Must run on the main (asyncio) thread."""
         new_num_points = len(points)
-        if self.point_cloud is not None and new_num_points != self.num_points:
+        # The actor has to be rebuilt when the point count changes (geometry resize) or when
+        # the colorization wiring switches between scalar+cmap and rgb=True (different mapper
+        # configuration). The latter is detected by the shape of `colors`.
+        new_is_rgb = colors.ndim == 2
+        if self.point_cloud is not None and (new_num_points != self.num_points or new_is_rgb != self.actor_is_rgb):
             self.plotter.remove_actor(self.actor)
             self.point_cloud = None
 
@@ -163,19 +252,31 @@ class PointCloudViewer:
         if self.point_cloud is None:
             self.point_cloud = pv.PolyData(points)
             self.point_cloud.point_data['colors'] = colors
-            self.actor = self.plotter.add_points(
-                self.point_cloud,
-                point_size=4,
-                render_points_as_spheres=False,
-                scalars='colors',
-                cmap='viridis',
-                show_scalar_bar=True,
-                reset_camera=False
-            )
+            self.actor_is_rgb = new_is_rgb
+            if new_is_rgb:
+                self.actor = self.plotter.add_points(
+                    self.point_cloud,
+                    point_size=4,
+                    render_points_as_spheres=False,
+                    scalars='colors',
+                    rgb=True,
+                    show_scalar_bar=False,
+                    reset_camera=False,
+                )
+            else:
+                self.actor = self.plotter.add_points(
+                    self.point_cloud,
+                    point_size=4,
+                    render_points_as_spheres=False,
+                    scalars='colors',
+                    cmap='viridis',
+                    show_scalar_bar=True,
+                    reset_camera=False,
+                )
         else:
             self.point_cloud.points = points
             self.point_cloud.point_data['colors'] = colors
-            if colors.size > 0:
+            if not new_is_rgb and colors.size > 0:
                 self.actor.mapper.scalar_range = (float(colors.min()), float(colors.max()))
 
     def close(self):
@@ -187,7 +288,18 @@ class PointCloudViewer:
         self.app.processEvents()
 
 
-async def stream_lidar_scans(lidar_name, owner, colorize_by, update_rate=30.0):
+async def stream_lidar_scans(lidar_name, owner, colorize_by, update_rate=30.0, include_color=None):
+    """Open a streaming lidar viewer for the given sensor.
+
+    colorize_by — initial visualization mode (one of COLORIZE_OPTIONS). The user can press
+        c/i/l/d in the viewer to switch modes at runtime.
+    include_color — request the server to render color (so 'color' mode has data). When None,
+        defaults to True iff colorize_by == 'color'. Pass True explicitly to allow runtime
+        switching into color mode regardless of the initial choice.
+    """
+    if include_color is None:
+        include_color = (colorize_by == "color")
+
     viewer = PointCloudViewer(update_rate=float(update_rate), colorize_by=colorize_by)
     viewer_task = asyncio.create_task(viewer.run_async())
 
@@ -210,7 +322,7 @@ async def stream_lidar_scans(lidar_name, owner, colorize_by, update_rate=30.0):
     consumer_task = asyncio.create_task(consumer())
 
     try:
-        async for scan in ts.stream_lidar_scans(sensor=lidar_name, owner=owner):
+        async for scan in ts.stream_lidar_scans(sensor=lidar_name, owner=owner, include_color=include_color):
             if queue.full():
                 try:
                     queue.get_nowait()

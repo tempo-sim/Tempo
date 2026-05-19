@@ -10,6 +10,7 @@
 #include "TempoMultiViewCapture.h"
 #include "TempoSensors.h"
 #include "TempoSensorsSettings.h"
+#include "TempoSensorsUtils.h"
 
 #include "CanvasItem.h"
 #include "Engine/Canvas.h"
@@ -310,62 +311,7 @@ UTempoCamera::UTempoCamera()
 	RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA8;
 	PixelFormatOverride = EPixelFormat::PF_Unknown;
 
-	// Auto exposure for the proxy's tonemap pass. AEM_Histogram samples the (PPM-replaced) scene
-	// color histogram to compute exposure.
-	PostProcessSettings.bOverride_AutoExposureMethod = true;
-	PostProcessSettings.AutoExposureMethod = AEM_Histogram;
-	PostProcessSettings.bOverride_AutoExposureSpeedUp = true;
-	PostProcessSettings.AutoExposureSpeedUp = 20.0;
-	PostProcessSettings.bOverride_AutoExposureSpeedDown = true;
-	PostProcessSettings.AutoExposureSpeedDown = 20.0;
-	PostProcessSettings.bOverride_AutoExposureLowPercent = true;
-	PostProcessSettings.AutoExposureLowPercent = 75.0;
-	PostProcessSettings.bOverride_AutoExposureHighPercent = true;
-	PostProcessSettings.AutoExposureHighPercent = 85.0;
-
-	// Lumen
-	PostProcessSettings.bOverride_DynamicGlobalIlluminationMethod = true;
-	PostProcessSettings.DynamicGlobalIlluminationMethod = EDynamicGlobalIlluminationMethod::Lumen;
-	PostProcessSettings.bOverride_ReflectionMethod = true;
-	PostProcessSettings.ReflectionMethod = EReflectionMethod::Lumen;
-
-	// Lumen final-gather denoiser leans on temporal history; in dim scenes the signal-to-noise
-	// ratio is poor and history dominates, which manifests as ghost trails behind slow movers.
-	// Bumping FinalGatherQuality reduces input noise and bumping the update speed shortens the
-	// effective history window so trails fade faster. Reflection quality has the same effect for
-	// specular ghosts.
-	PostProcessSettings.bOverride_LumenFinalGatherQuality = true;
-	PostProcessSettings.LumenFinalGatherQuality = 2.0f;
-	PostProcessSettings.bOverride_LumenFinalGatherLightingUpdateSpeed = true;
-	PostProcessSettings.LumenFinalGatherLightingUpdateSpeed = 4.0f;
-	PostProcessSettings.bOverride_LumenReflectionQuality = true;
-	PostProcessSettings.LumenReflectionQuality = 2.0f;
-
-	// Megalights
-	PostProcessSettings.bOverride_bMegaLights = true;
-	PostProcessSettings.bMegaLights = true;
-
-	bUseRayTracingIfEnabled = true;
-
-	ShowFlags.SetMotionBlur(false);
-	ShowFlags.SetAntiAliasing(true);
-	ShowFlags.SetTemporalAA(true);
-	ShowFlags.SetEyeAdaptation(true);
-	ShowFlags.SetLocalExposure(true);
-	ShowFlags.SetLensFlares(true);
-	ShowFlags.SetBloom(true);
-	ShowFlags.SetColorGrading(true);
-	ShowFlags.SetVignette(true);
-	ShowFlags.SetDepthOfField(true);
-	ShowFlags.SetGlobalIllumination(true);
-	ShowFlags.SetScreenSpaceReflections(true);
-	ShowFlags.SetReflectionEnvironment(true);
-	ShowFlags.SetAmbientOcclusion(true);
-	ShowFlags.SetScreenSpaceAO(true);
-	ShowFlags.SetDistanceFieldAO(true);
-	ShowFlags.SetVolumetricFog(true);
-	ShowFlags.SetTonemapper(true);
-	ShowFlags.SetScreenPercentage(true);
+	ApplyPhotorealisticRenderSettings(PostProcessSettings, ShowFlags, bUseRayTracingIfEnabled);
 }
 
 bool UTempoCamera::HasDetectedParameterChange() const
@@ -510,13 +456,26 @@ TOptional<TFuture<void>> UTempoCamera::SendMeasurements()
 	// still pending (either newly arrived during this function, or left over because the last
 	// read couldn't satisfy them).
 	const bool bDepthNeeded = bHadDepthRequests || !PendingDepthImageRequests.IsEmpty();
-	if (!bDepthEnabled && bDepthNeeded)
+	if (bDepthNeeded)
 	{
-		SetDepthEnabled(true);
+		FramesWithoutDepth = 0;
+		if (!bDepthEnabled)
+		{
+			SetDepthEnabled(true);
+		}
 	}
-	if (bDepthEnabled && !bDepthNeeded)
+	else
 	{
-		SetDepthEnabled(false);
+		// Debounce the OFF transition: a streaming client briefly has no depth request pending
+		// between receiving a response and re-issuing the next request. Flipping off in that
+		// gap and back on the next frame queues two back-to-back InitFinalRenderTargetAndStaging
+		// calls and lets the render thread catch a half-initialized RT (the lidar hit the same
+		// failure mode; see UTempoLidar::FramesWithoutColor for the symmetric fix).
+		++FramesWithoutDepth;
+		if (bDepthEnabled && FramesWithoutDepth >= DepthOffDebounceFrames)
+		{
+			SetDepthEnabled(false);
+		}
 	}
 
 	// Take the opportunity to apply any reconfigure that was detected earlier but had to be
@@ -866,6 +825,14 @@ void UTempoCamera::InitFinalRenderTargetAndStaging()
 		return;
 	}
 
+	// Drop pending reads BEFORE swapping the RT pointer. Otherwise the render thread can pick
+	// up OnRenderCompleted between the SharedFinalTextureTarget swap and the queue Empty(),
+	// iterate stale in-flight reads (built against the previous 4B-or-8B staging), and feed
+	// them the new RT — Read() then mismatches the per-pixel sizes and the subsequent memcpy
+	// crashes in _platform_memmove. The captured TSharedPtr in the pending staging-copy
+	// closure still keeps the old RT+staging pair alive together until it runs.
+	TextureReadQueue.Empty();
+
 	// SharedFinalTextureTarget format matches the staging / FCameraPixel layout: 4 bytes for
 	// color+label, plus (when depth is enabled) 4 more bytes for discretized depth.
 	const ETextureRenderTargetFormat FinalFormat = bDepthEnabled
@@ -890,9 +857,6 @@ void UTempoCamera::InitFinalRenderTargetAndStaging()
 	}
 
 	AllocateStagingTextures(SharedFinalTextureTarget->SizeX, SharedFinalTextureTarget->SizeY, SharedFinalTextureTarget->GetFormat());
-
-	// Any pending texture reads might have the wrong pixel format.
-	TextureReadQueue.Empty();
 }
 
 int32 UTempoCamera::GetNumActiveTiles() const

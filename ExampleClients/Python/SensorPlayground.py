@@ -406,7 +406,17 @@ async def flow_start_stream(sensor_streams, display_scale):
         if measurement_type == Sensors.MT_LABEL_IMAGE:
             task = asyncio.create_task(tiu.stream_label_images(sensor.name, sensor.owner, display_scale))
         if measurement_type == Sensors.MT_LIDAR_SCAN:
-            task = asyncio.create_task(tlu.stream_lidar_scans(sensor.name, sensor.owner, "Intensity"))
+            # Ask which signal to colorize by. include_color defaults to True iff the user picks
+            # "color" — don't pay the Lumen + ray-tracing cost for clients that only want
+            # intensity/label/distance. The [c] hotkey still works mid-stream but shows the
+            # gray fallback until the user restarts the stream in color mode.
+            colorize_items = [(m, m) for m in tlu.COLORIZE_OPTIONS]
+            colorize_by = await fuzzy_select(colorize_items, "Initial colorize mode?")
+            if colorize_by == RESTART_SENTINEL:
+                return
+            print(f"\n  Viewer hotkeys: " + " ".join(f"[{k}]={m}" for k, m in tlu.COLORIZE_HOTKEYS.items()))
+            task = asyncio.create_task(tlu.stream_lidar_scans(
+                sensor.name, sensor.owner, colorize_by))
         if measurement_type == Sensors.MT_VIDEO:
             task = asyncio.create_task(tiu.stream_video_images(sensor.name, sensor.owner, display_scale))
 
