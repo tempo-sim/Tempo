@@ -47,7 +47,7 @@ public:
 	float GetSceneCaptureGamma() const { return SceneCaptureGamma; }
 	FName GetOverridableLabelRowName() const { return OverridableLabelRowName; }
 	FName GetOverridingLabelRowName() const { return OverridingLabelRowName; }
-	int32 GetMaxCameraRenderBufferSize() const { return MaxCameraRenderBufferSize; }
+	int32 GetMaxRenderBufferSize() const { return MaxRenderBufferSize; }
 	bool GetPipelinedRendering() const { return bPipelinedRendering; }
 	FTempoSensorsLabelSettingsChanged TempoSensorsLabelSettingsChangedEvent;
 
@@ -144,8 +144,8 @@ private:
 	float SceneCaptureGamma = 2.2;
 
 	// The max number of frames per camera to buffer before dropping.
-	UPROPERTY(EditAnywhere, Config, Category="Camera", AdvancedDisplay)
-	int32 MaxCameraRenderBufferSize = 4;
+	UPROPERTY(EditAnywhere, Config, Category="Advanced")
+	int32 MaxRenderBufferSize = 4;
 
 	// This special row can be overriden by a value passed through the subsurface color.
 	UPROPERTY(EditAnywhere, Config, Category="Camera")
@@ -166,12 +166,12 @@ private:
 
 	// The lidar PPM used when bColorEnabled is false. Writes scene-color-independent aux channels
 	// (normal, label, discretized depth) into a PF_A16B16G16R16 atlas matching FLidarPixel.
-	UPROPERTY(EditAnywhere, Config, Category="Lidar", meta=( AllowedClasses="/Script/Engine.BlendableInterface", Keywords="PostProcess" ))
+	UPROPERTY(EditAnywhere, Config, Category="Advanced", meta=( AllowedClasses="/Script/Engine.BlendableInterface", Keywords="PostProcess" ))
 	TSoftObjectPtr<UMaterialInterface> LidarPostProcessMaterial;
 
 	// The lidar PPM used when bColorEnabled is true. Additionally samples scene color and packs
 	// the BGR bytes into the wider PF_R32G32B32A32_UINT atlas matching FLidarPixelWithColor.
-	UPROPERTY(EditAnywhere, Config, Category="Lidar", meta=( AllowedClasses="/Script/Engine.BlendableInterface", Keywords="PostProcess" ))
+	UPROPERTY(EditAnywhere, Config, Category="Advanced", meta=( AllowedClasses="/Script/Engine.BlendableInterface", Keywords="PostProcess" ))
 	TSoftObjectPtr<UMaterialInterface> LidarPostProcessMaterialWithColor;
 
 	// Whether to enable a hack to work around a buffer overrun bug in FRayTracingScene.
