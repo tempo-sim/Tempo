@@ -61,9 +61,13 @@ UClass* GetSubClassWithName(const FString& Name)
 	// This simple approach just runs a synchronous scan on the entire content directory.
 	// Better solutions would be to specify only the path to where the relevant blueprints are,
 	// or to register a callback with the asset registry to be notified of when it's finished populating.
-	TArray<FString> ContentPaths;
-	ContentPaths.Add(TEXT("/"));
-	AssetRegistry.ScanPathsSynchronous(ContentPaths);
+	// In cooked builds the registry is already fully populated, and scanning the root mount logs a warning.
+	if (!FPlatformProperties::RequiresCookedData())
+	{
+		TArray<FString> ContentPaths;
+		ContentPaths.Add(TEXT("/"));
+		AssetRegistry.ScanPathsSynchronous(ContentPaths);
+	}
 
 	FName BaseClassName = T::StaticClass()->GetFName();
 	FName BaseClassPkgName = T::StaticClass()->GetPackage()->GetFName();
