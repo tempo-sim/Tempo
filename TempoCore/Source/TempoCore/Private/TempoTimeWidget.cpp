@@ -52,8 +52,10 @@ void UTempoTimeWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
 
-	check(GetWorld());
-	SimTimeBox->SetText(FText::FromString(FString::Printf(TEXT("%.3f"), GetWorld()->GetTimeSeconds())));
+	if (const UWorld* World = GetWorld())
+	{
+		SimTimeBox->SetText(FText::FromString(FString::Printf(TEXT("%.3f"), World->GetTimeSeconds())));
+	}
 }
 
 void UTempoTimeWidget::SyncTimeSettings() const
@@ -125,14 +127,14 @@ bool UTempoTimeWidget::IsFixedStepMode()
 
 bool UTempoTimeWidget::IsPauseAllowed()
 {
-	check(GetWorld());
-	return !GetWorld()->IsPaused();
+	const UWorld* World = GetWorld();
+	return World && !World->IsPaused();
 }
 
 bool UTempoTimeWidget::IsPlayAllowed()
 {
-	check(GetWorld());
-	return GetWorld()->IsPaused();
+	const UWorld* World = GetWorld();
+	return World && World->IsPaused();
 }
 
 void UTempoTimeWidget::OnPausePressed()
@@ -161,8 +163,12 @@ void UTempoTimeWidget::OnPlayPressed()
 
 void UTempoTimeWidget::OnStepPressed()
 {
-	check(GetWorld());
-	if (ATempoTimeWorldSettings* WorldSettings = Cast<ATempoTimeWorldSettings>(GetWorld()->GetWorldSettings()))
+	const UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+	if (ATempoTimeWorldSettings* WorldSettings = Cast<ATempoTimeWorldSettings>(World->GetWorldSettings()))
 	{
 		WorldSettings->Step();
 	}

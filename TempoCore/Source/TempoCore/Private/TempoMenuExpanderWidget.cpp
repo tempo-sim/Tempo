@@ -68,7 +68,10 @@ void UTempoMenuExpanderWidget::OnCategoryToggled(FName InCategoryName)
 
 void UTempoMenuExpanderWidget::OnMenuButtonHovered()
 {
-	GetWorld()->GetTimerManager().ClearTimer(CollapseTimerHandle);
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(CollapseTimerHandle);
+	}
 	if (CategoryPanelContainer)
 	{
 		CategoryPanelContainer->SetVisibility(ESlateVisibility::Visible);
@@ -78,7 +81,10 @@ void UTempoMenuExpanderWidget::OnMenuButtonHovered()
 void UTempoMenuExpanderWidget::NativeOnMouseEnter(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
 {
 	Super::NativeOnMouseEnter(InGeometry, InMouseEvent);
-	GetWorld()->GetTimerManager().ClearTimer(CollapseTimerHandle);
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(CollapseTimerHandle);
+	}
 }
 
 void UTempoMenuExpanderWidget::NativeOnMouseLeave(const FPointerEvent& InMouseEvent)
@@ -89,7 +95,10 @@ void UTempoMenuExpanderWidget::NativeOnMouseLeave(const FPointerEvent& InMouseEv
 
 void UTempoMenuExpanderWidget::StartCollapseTimer()
 {
-	GetWorld()->GetTimerManager().SetTimer(CollapseTimerHandle, this, &UTempoMenuExpanderWidget::CollapsePanel, 0.1f, false);
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().SetTimer(CollapseTimerHandle, this, &UTempoMenuExpanderWidget::CollapsePanel, 0.1f, false);
+	}
 }
 
 void UTempoMenuExpanderWidget::CollapsePanel()
