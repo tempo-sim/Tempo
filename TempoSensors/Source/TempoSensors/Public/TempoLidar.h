@@ -127,9 +127,14 @@ struct FTempoLidarTile
 	UPROPERTY(VisibleAnywhere)
 	float YawOffset = 0.0f;
 
-	// This tile's horizontal FOV in degrees.
+	// This tile's horizontal FOV in degrees, covering the nominal beam azimuths.
 	UPROPERTY(VisibleAnywhere)
 	float FOVAngle = 120.0f;
+
+	// Padded horizontal FOV in degrees. Wider than FOVAngle when BeamCalibration has nonzero
+	// AzimuthOffsetDeg entries, so calibrated rays still land inside the rendered pixel grid.
+	UPROPERTY(VisibleAnywhere)
+	float EffectiveFOVAngle = 120.0f;
 
 	// Number of horizontal beams this tile covers.
 	UPROPERTY(VisibleAnywhere)
@@ -245,6 +250,10 @@ protected:
 	// Returns the vertical beam count: BeamCalibration.Num() when set, else VerticalBeams.
 	int32 GetEffectiveVerticalBeams() const;
 
+	// Returns max |AzimuthOffsetDeg| over BeamCalibration, or 0 if no calibration.
+	// Used to widen each tile's rendered FOV so calibrated rays don't leave the pixel grid.
+	double GetMaxAbsAzimuthOffsetDeg() const;
+
 	// The measurement types supported. Should be set in constructor of derived classes.
 	// (MeasurementTypes is inherited from UTempoTiledSceneCaptureComponent.)
 
@@ -328,12 +337,14 @@ struct TLidarTextureReadBase : TTextureReadBase<PixelType>
 {
 	TLidarTextureReadBase(const FIntPoint& ImageSizeIn, int32 SequenceIdIn, double CaptureTimeIn, const FString& OwnerNameIn,
 		const FString& SensorNameIn, const FTransform& SensorTransformIn, const FTransform& CaptureTransformIn,
-		double HorizontalFOVIn, double VerticalFOVIn, int32 HorizontalBeamsIn, int32 VerticalBeamsIn, const FVector2D& SizeXYFOVIn,
+		double HorizontalFOVIn, double EffectiveHorizontalFOVIn, double VerticalFOVIn,
+		int32 HorizontalBeamsIn, int32 VerticalBeamsIn, const FVector2D& SizeXYFOVIn,
 		double IntensitySaturationDistanceIn, double MaxAngleOfIncidenceIn,
 		int32 NumCaptureComponentsIn, double RelativeYawIn, float MinDepthIn, float MaxDepthIn, double MinDistanceIn, double MaxDistanceIn,
 		TArray<FLidarBeamCalibration> BeamCalibrationIn)
 		: TTextureReadBase<PixelType>(ImageSizeIn, SequenceIdIn, CaptureTimeIn, OwnerNameIn, SensorNameIn, SensorTransformIn),
-			CaptureTransform(CaptureTransformIn), HorizontalFOV(HorizontalFOVIn), VerticalFOV(VerticalFOVIn), HorizontalBeams(HorizontalBeamsIn),
+			CaptureTransform(CaptureTransformIn), HorizontalFOV(HorizontalFOVIn), EffectiveHorizontalFOV(EffectiveHorizontalFOVIn),
+			VerticalFOV(VerticalFOVIn), HorizontalBeams(HorizontalBeamsIn),
 			VerticalBeams(VerticalBeamsIn), SizeXYFOV(SizeXYFOVIn), IntensitySaturationDistance(IntensitySaturationDistanceIn),
 			MaxAngleOfIncidence(MaxAngleOfIncidenceIn), NumCaptureComponents(NumCaptureComponentsIn), RelativeYaw(RelativeYawIn),
 			MinDepth(MinDepthIn), MaxDepth(MaxDepthIn), MinDistance(MinDistanceIn), MaxDistance(MaxDistanceIn),
@@ -342,7 +353,13 @@ struct TLidarTextureReadBase : TTextureReadBase<PixelType>
 	}
 
 	const FTransform CaptureTransform;
+	// Horizontal FOV in degrees, covering the nominal beam azimuths. Used for the per-beam
+	// nominal-azimuth formula and the reported azimuth range.
 	double HorizontalFOV;
+	// Padded horizontal FOV in degrees, covering the calibrated beam azimuths (nominal +
+	// AzimuthOffsetDeg). Defines the pixel grid the renderer produced — Decode maps spherical
+	// coordinates into this FOV.
+	double EffectiveHorizontalFOV;
 	double VerticalFOV;
 	int32 HorizontalBeams;
 	int32 VerticalBeams;

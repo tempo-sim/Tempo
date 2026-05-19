@@ -373,6 +373,16 @@ int32 UTempoLidar::GetEffectiveVerticalBeams() const
 	return BeamCalibration.Num() > 0 ? BeamCalibration.Num() : VerticalBeams;
 }
 
+double UTempoLidar::GetMaxAbsAzimuthOffsetDeg() const
+{
+	float MaxAbs = 0.0f;
+	for (const FLidarBeamCalibration& B : BeamCalibration)
+	{
+		MaxAbs = FMath::Max(MaxAbs, FMath::Abs(B.AzimuthOffsetDeg));
+	}
+	return static_cast<double>(MaxAbs);
+}
+
 void UTempoLidar::ConfigureTile(FTempoLidarTile& Tile, double InYawOffset, double SubHorizontalFOV, int32 SubHorizontalBeams, bool bActivate)
 {
 	if (!bActivate)
@@ -391,12 +401,23 @@ void UTempoLidar::ConfigureTile(FTempoLidarTile& Tile, double InYawOffset, doubl
 	Tile.FOVAngle = SubHorizontalFOV;
 	Tile.HorizontalBeams = SubHorizontalBeams;
 
+	// Pad the rendered horizontal FOV symmetrically by the worst-case beam AzimuthOffsetDeg so a
+	// calibrated ray at the extreme beam still projects inside the pixel grid. Pixel count scales
+	// linearly with the FOV expansion to keep angular resolution roughly constant.
+	const double MaxAzOffsetDeg = GetMaxAbsAzimuthOffsetDeg();
+	Tile.EffectiveFOVAngle = (Tile.FOVAngle > 0.0f)
+		? static_cast<float>(Tile.FOVAngle + 2.0 * MaxAzOffsetDeg)
+		: Tile.FOVAngle;
+
 	const double EffectiveVertFOV = GetEffectiveVerticalFOV();
 	const double UndistortedVerticalImagePlaneSize = 2.0 * FMath::Tan(EffectiveVertFOV / 2.0);
-	const FVector2D ImagePlaneSize = 2.0 * SphericalToPerspective(Tile.FOVAngle / 2.0, EffectiveVertFOV / 2.0);
+	const FVector2D ImagePlaneSize = 2.0 * SphericalToPerspective(Tile.EffectiveFOVAngle / 2.0, EffectiveVertFOV / 2.0);
 
 	const double AspectRatio = ImagePlaneSize.Y / ImagePlaneSize.X;
-	Tile.SizeXYFOV = TempoSensorsSettings->GetLidarUpsamplingFactor() * FVector2D(Tile.HorizontalBeams, AspectRatio * Tile.HorizontalBeams);
+	const double EffectiveBeamSpan = (Tile.FOVAngle > 0.0f)
+		? Tile.HorizontalBeams * (static_cast<double>(Tile.EffectiveFOVAngle) / Tile.FOVAngle)
+		: static_cast<double>(Tile.HorizontalBeams);
+	Tile.SizeXYFOV = TempoSensorsSettings->GetLidarUpsamplingFactor() * FVector2D(EffectiveBeamSpan, AspectRatio * EffectiveBeamSpan);
 
 	Tile.SizeXY = FIntPoint(FMath::CeilToInt32(Tile.SizeXYFOV.X), FMath::CeilToInt32(Tile.SizeXYFOV.Y));
 	Tile.DistortionFactor = UndistortedVerticalImagePlaneSize / ImagePlaneSize.Y;
@@ -461,7 +482,10 @@ namespace
 	void DecodeLidarRead(const TLidarTextureReadBase<PixelType>& Read, float TransmissionTime,
 		TempoSensors::LidarScanSegment& ScanSegmentOut)
 	{
-		const FVector2D ImagePlaneSize = 2.0 * SphericalToPerspective(Read.HorizontalFOV / 2.0, Read.VerticalFOV / 2.0);
+		// EffectiveHorizontalFOV is the padded FOV the renderer actually produced (covers
+		// nominal beam FOV + AzimuthOffsetDeg). HorizontalFOV is the unpadded beam FOV and is only
+		// used for the per-beam nominal azimuth formula and the reported azimuth range.
+		const FVector2D ImagePlaneSize = 2.0 * SphericalToPerspective(Read.EffectiveHorizontalFOV / 2.0, Read.VerticalFOV / 2.0);
 		const FVector2D SizeXYOffset = (FVector2D(Read.ImageSize) - Read.SizeXYFOV) / 2.0;
 
 		const int32 NumReturns = Read.HorizontalBeams * Read.VerticalBeams;
@@ -875,9 +899,11 @@ void UTempoLidar::RenderCapture()
 		const FQuat TileWorldRotation = LidarWorldRotation * FRotator(0.0, Tile.YawOffset, 0.0).Quaternion();
 		FMatrix ViewRotationMatrix = FQuatRotationMatrix(TileWorldRotation.Inverse()) * ViewAxisSwap;
 
-		// Perspective projection matching the tile's SizeXY + FOVAngle. Near-clip from the primary's
+		// Perspective projection matching the tile's SizeXY + EffectiveFOVAngle. EffectiveFOVAngle
+		// is the padded beam FOV (covers AzimuthOffsetDeg); the rendered pixel grid must span at
+		// least this range so calibrated rays don't fall outside it. Near-clip from the primary's
 		// override (or the engine default) — lidar tiles historically inherit this.
-		const float UnscaledFOV = Tile.FOVAngle * (float)PI / 360.0f;
+		const float UnscaledFOV = Tile.EffectiveFOVAngle * (float)PI / 360.0f;
 		const float ViewFOV = FMath::Atan((1.0f + Overscan) * FMath::Tan(UnscaledFOV));
 		const float NearClip = bOverride_CustomNearClippingPlane ? CustomNearClippingPlane : GNearClippingPlane;
 		const FIntPoint TileSize = Tile.SizeXY;
@@ -911,7 +937,7 @@ void UTempoLidar::RenderCapture()
 		{
 			Out.Emplace(new TTextureRead<P>(
 				Tile.SizeXY, SequenceId, CaptureTime, GetOwnerName(), GetSensorName(),
-				GetComponentTransform(), TileWorldTransform, Tile.FOVAngle,
+				GetComponentTransform(), TileWorldTransform, Tile.FOVAngle, Tile.EffectiveFOVAngle,
 				GetEffectiveVerticalFOV(), Tile.HorizontalBeams, GetEffectiveVerticalBeams(), Tile.SizeXYFOV,
 				IntensitySaturationDistance, MaxAngleOfIncidence,
 				NumActiveTiles, Tile.YawOffset, Tile.MinDepth, Tile.MaxDepth,
