@@ -25,13 +25,16 @@ void ATempoGameMode::StartPlay()
 	{
 		// Wait until level streaming is up to date (and all streamed actors are loaded)
 		GEngine->BlockTillLevelStreamingCompleted(GetWorld());
-		TempoCoreServiceSubsystem->OnLevelLoaded();
 		if (TempoCoreServiceSubsystem->GetDeferBeginPlay())
 		{
+			// Set deferred state before firing the response so an immediate FinishLoadingLevel
+			// from the client observes BeginPlayDeferred() == true.
 			bBeginPlayDeferred = true;
 			UGameplayStatics::GetPlayerController(GetWorld(), 0)->SetPause(true);
+			TempoCoreServiceSubsystem->OnLevelLoaded();
 			return;
 		}
+		TempoCoreServiceSubsystem->OnLevelLoaded();
 	}
 
 	PreBeginPlayEvent.Broadcast(GetWorld());
