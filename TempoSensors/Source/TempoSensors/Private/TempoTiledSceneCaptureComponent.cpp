@@ -197,7 +197,7 @@ void UTempoTiledSceneCaptureComponent::RestartCaptureTimer()
 
 int32 UTempoTiledSceneCaptureComponent::GetMaxTextureQueueSize() const
 {
-	return GetDefault<UTempoSensorsSettings>()->GetMaxCameraRenderBufferSize();
+	return GetDefault<UTempoSensorsSettings>()->GetMaxRenderBufferSize();
 }
 
 void UTempoTiledSceneCaptureComponent::TryApplyPendingReconfigure()
@@ -225,7 +225,7 @@ void UTempoTiledSceneCaptureComponent::RetirePPM(UMaterialInstanceDynamic* PPM)
 	if (PPM)
 	{
 		RetainedPPMs.AddUnique(PPM);
-		const int32 MaxSize = GetDefault<UTempoSensorsSettings>()->GetMaxCameraRenderBufferSize();
+		const int32 MaxSize = GetDefault<UTempoSensorsSettings>()->GetMaxRenderBufferSize();
 		while (RetainedPPMs.Num() > MaxSize)
 		{
 			RetainedPPMs.RemoveAt(0);
