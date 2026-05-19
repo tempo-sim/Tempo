@@ -51,8 +51,11 @@ void ATempoPlayerController::BeginPlay()
 	bShowMouseCursor = true;
 
 	UpdatePawnGroups();
-	OnActorSpawnedDelegateHandle = GetWorld()->AddOnActorSpawnedHandler(FOnActorSpawned::FDelegate::CreateUObject(this, &ATempoPlayerController::OnActorSpawnedHandler));
-	OnActorDestroyedDelegateHandle = GetWorld()->AddOnActorDestroyedHandler(FOnActorDestroyed::FDelegate::CreateUObject(this, &ATempoPlayerController::OnAnyActorDestroyedHandler));
+	if (UWorld* World = GetWorld())
+	{
+		OnActorSpawnedDelegateHandle = World->AddOnActorSpawnedHandler(FOnActorSpawned::FDelegate::CreateUObject(this, &ATempoPlayerController::OnActorSpawnedHandler));
+		OnActorDestroyedDelegateHandle = World->AddOnActorDestroyedHandler(FOnActorDestroyed::FDelegate::CreateUObject(this, &ATempoPlayerController::OnAnyActorDestroyedHandler));
+	}
 
 	if (HoverCursorWidgetClass)
 	{
@@ -183,11 +186,17 @@ void ATempoPlayerController::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
 	// Set the cursor icon based on whether we are hovering over a possessable pawn.
 	// This logic only runs when the mouse is not captured for gameplay.
 	if (HoverCursorWidgetInstance && !bMouseCaptured)
 	{
-		APlayerController* PC = GetWorld()->GetFirstPlayerController();
+		APlayerController* PC = World->GetFirstPlayerController();
 		if (!PC) return;
 
 		FHitResult HitResult;
@@ -235,7 +244,7 @@ void ATempoPlayerController::Tick(float DeltaTime)
 
 			//Toggleable Debug Point
 			DrawDebugPoint(
-				GetWorld(),
+				World,
 				PointLocation,
 				40.0f,
 				FColor::Green,
@@ -281,9 +290,15 @@ void ATempoPlayerController::SetupInputComponent()
 
 void ATempoPlayerController::ToggleUIVisibility()
 {
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
 	// Find all user-created widgets currently on the screen
 	TArray<UUserWidget*> FoundWidgets;
-	UWidgetBlueprintLibrary::GetAllWidgetsOfClass(GetWorld(), FoundWidgets, UUserWidget::StaticClass(), false);
+	UWidgetBlueprintLibrary::GetAllWidgetsOfClass(World, FoundWidgets, UUserWidget::StaticClass(), false);
 
 	bAreWidgetsVisible = !bAreWidgetsVisible;
 	const ESlateVisibility NewVisibility = bAreWidgetsVisible ? ESlateVisibility::Visible : ESlateVisibility::Hidden;
@@ -359,7 +374,7 @@ void ATempoPlayerController::UpdatePawnGroups()
 	});
 
 	// Grouping Pawns
-	for (TActorIterator<APawn> PawnIt(GetWorld()); PawnIt; ++PawnIt)
+	for (TActorIterator<APawn> PawnIt(World); PawnIt; ++PawnIt)
 	{
 		APawn* PawnToGroup = *PawnIt;
 
