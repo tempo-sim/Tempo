@@ -460,6 +460,72 @@ message CallFunctionRequest {
   string function = 3;
 }
 
+// One operation in a SetProperties batch. The oneof selects which set-property
+// operation to perform; each variant is the same Set*PropertyRequest message
+// that the corresponding singular RPC accepts.
+message SetPropertyOp {
+  oneof op {
+    SetBoolPropertyRequest bool_op = 1;
+    SetIntPropertyRequest int_op = 2;
+    SetInt64PropertyRequest int64_op = 3;
+    SetFloatPropertyRequest float_op = 4;
+    SetStringPropertyRequest string_op = 5;
+    SetEnumPropertyRequest enum_op = 6;
+    SetVectorPropertyRequest vector_op = 7;
+    SetVector2DPropertyRequest vector2d_op = 8;
+    SetIntVectorPropertyRequest int_vector_op = 9;
+    SetIntPointPropertyRequest int_point_op = 10;
+    SetRotatorPropertyRequest rotator_op = 11;
+    SetQuatPropertyRequest quat_op = 12;
+    SetTransformPropertyRequest transform_op = 13;
+    SetColorPropertyRequest color_op = 14;
+    SetClassPropertyRequest class_op = 15;
+    SetAssetPropertyRequest asset_op = 16;
+    SetActorPropertyRequest actor_op = 17;
+    SetComponentPropertyRequest component_op = 18;
+    SetBoolArrayPropertyRequest bool_array_op = 19;
+    SetStringArrayPropertyRequest string_array_op = 20;
+    SetEnumArrayPropertyRequest enum_array_op = 21;
+    SetIntArrayPropertyRequest int_array_op = 22;
+    SetInt64ArrayPropertyRequest int64_array_op = 23;
+    SetFloatArrayPropertyRequest float_array_op = 24;
+    SetClassArrayPropertyRequest class_array_op = 25;
+    SetAssetArrayPropertyRequest asset_array_op = 26;
+    SetActorArrayPropertyRequest actor_array_op = 27;
+    SetComponentArrayPropertyRequest component_array_op = 28;
+    SetBoolSetPropertyRequest bool_set_op = 29;
+    SetStringSetPropertyRequest string_set_op = 30;
+    SetEnumSetPropertyRequest enum_set_op = 31;
+    SetIntSetPropertyRequest int_set_op = 32;
+    SetInt64SetPropertyRequest int64_set_op = 33;
+    SetFloatSetPropertyRequest float_set_op = 34;
+    SetClassSetPropertyRequest class_set_op = 35;
+    SetAssetSetPropertyRequest asset_set_op = 36;
+    SetActorSetPropertyRequest actor_set_op = 37;
+    SetComponentSetPropertyRequest component_set_op = 38;
+  }
+}
+
+// Result for a single op in a SetProperties batch. Only failed ops are
+// returned in the response; an empty `failures` list means every op succeeded.
+message SetPropertyResult {
+  // Zero-based index into the request's `ops` list.
+  uint32 op_index = 1;
+  // gRPC status code (see grpc::StatusCode); never 0 (OK) here.
+  int32 code = 2;
+  // Human-readable error message.
+  string error = 3;
+}
+
+message SetPropertiesRequest {
+  repeated SetPropertyOp ops = 1;
+}
+
+message SetPropertiesResponse {
+  // One entry per failed op (in request order). Empty if all ops succeeded.
+  repeated SetPropertyResult failures = 1;
+}
+
 service WorldControlService {
   rpc SpawnActor(SpawnActorRequest) returns (SpawnActorResponse);
 
@@ -562,6 +628,8 @@ service WorldControlService {
   rpc SetActorSetProperty(SetActorSetPropertyRequest) returns (TempoCore.Empty);
 
   rpc SetComponentSetProperty(SetComponentSetPropertyRequest) returns (TempoCore.Empty);
+
+  rpc SetProperties(SetPropertiesRequest) returns (SetPropertiesResponse);
 
   rpc CallFunction(CallFunctionRequest) returns (TempoCore.Empty);
 }

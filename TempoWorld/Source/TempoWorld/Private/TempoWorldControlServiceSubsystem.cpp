@@ -71,6 +71,10 @@ using SetAssetSetPropertyRequest = TempoWorld::SetAssetSetPropertyRequest;
 using SetActorSetPropertyRequest = TempoWorld::SetActorSetPropertyRequest;
 using SetComponentSetPropertyRequest = TempoWorld::SetComponentSetPropertyRequest;
 using CallFunctionRequest = TempoWorld::CallFunctionRequest;
+using SetPropertyOp = TempoWorld::SetPropertyOp;
+using SetPropertyResult = TempoWorld::SetPropertyResult;
+using SetPropertiesRequest = TempoWorld::SetPropertiesRequest;
+using SetPropertiesResponse = TempoWorld::SetPropertiesResponse;
 
 FTempoWorldControlServiceActivated UTempoWorldControlServiceSubsystem::TempoWorldControlServiceActivated;
 FTempoWorldControlServiceDeactivated UTempoWorldControlServiceSubsystem::TempoWorldControlServiceDeactivated;
@@ -156,6 +160,7 @@ void UTempoWorldControlServiceSubsystem::RegisterServices(FTempoServer& Server)
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetAssetSetProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetAssetSetPropertyRequest>),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetActorSetProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetActorSetPropertyRequest>),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetComponentSetProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetComponentSetPropertyRequest>),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestSetProperties, &UTempoWorldControlServiceSubsystem::SetProperties),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestCallFunction, &UTempoWorldControlServiceSubsystem::CallObjectFunction)
 	);
 }
@@ -2438,6 +2443,77 @@ template <typename RequestType>
 void UTempoWorldControlServiceSubsystem::SetProperty(const RequestType& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const
 {
 	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), SetPropertyImpl(GetWorld(), Request));
+}
+
+namespace
+{
+	// Run one element of a SetProperties batch by dispatching on the oneof tag.
+	// Returns the per-op grpc::Status; the caller decides whether to surface it.
+	grpc::Status DispatchSetPropertyOp(const UWorld* World, const SetPropertyOp& Op)
+	{
+		switch (Op.op_case())
+		{
+		case SetPropertyOp::kBoolOp:            return SetPropertyImpl(World, Op.bool_op());
+		case SetPropertyOp::kIntOp:             return SetPropertyImpl(World, Op.int_op());
+		case SetPropertyOp::kInt64Op:           return SetPropertyImpl(World, Op.int64_op());
+		case SetPropertyOp::kFloatOp:           return SetPropertyImpl(World, Op.float_op());
+		case SetPropertyOp::kStringOp:          return SetPropertyImpl(World, Op.string_op());
+		case SetPropertyOp::kEnumOp:            return SetPropertyImpl(World, Op.enum_op());
+		case SetPropertyOp::kVectorOp:          return SetPropertyImpl(World, Op.vector_op());
+		case SetPropertyOp::kVector2DOp:        return SetPropertyImpl(World, Op.vector2d_op());
+		case SetPropertyOp::kIntVectorOp:       return SetPropertyImpl(World, Op.int_vector_op());
+		case SetPropertyOp::kIntPointOp:        return SetPropertyImpl(World, Op.int_point_op());
+		case SetPropertyOp::kRotatorOp:         return SetPropertyImpl(World, Op.rotator_op());
+		case SetPropertyOp::kQuatOp:            return SetPropertyImpl(World, Op.quat_op());
+		case SetPropertyOp::kTransformOp:       return SetPropertyImpl(World, Op.transform_op());
+		case SetPropertyOp::kColorOp:           return SetPropertyImpl(World, Op.color_op());
+		case SetPropertyOp::kClassOp:           return SetPropertyImpl(World, Op.class_op());
+		case SetPropertyOp::kAssetOp:           return SetPropertyImpl(World, Op.asset_op());
+		case SetPropertyOp::kActorOp:           return SetPropertyImpl(World, Op.actor_op());
+		case SetPropertyOp::kComponentOp:       return SetPropertyImpl(World, Op.component_op());
+		case SetPropertyOp::kBoolArrayOp:       return SetPropertyImpl(World, Op.bool_array_op());
+		case SetPropertyOp::kStringArrayOp:     return SetPropertyImpl(World, Op.string_array_op());
+		case SetPropertyOp::kEnumArrayOp:       return SetPropertyImpl(World, Op.enum_array_op());
+		case SetPropertyOp::kIntArrayOp:        return SetPropertyImpl(World, Op.int_array_op());
+		case SetPropertyOp::kInt64ArrayOp:      return SetPropertyImpl(World, Op.int64_array_op());
+		case SetPropertyOp::kFloatArrayOp:      return SetPropertyImpl(World, Op.float_array_op());
+		case SetPropertyOp::kClassArrayOp:      return SetPropertyImpl(World, Op.class_array_op());
+		case SetPropertyOp::kAssetArrayOp:      return SetPropertyImpl(World, Op.asset_array_op());
+		case SetPropertyOp::kActorArrayOp:      return SetPropertyImpl(World, Op.actor_array_op());
+		case SetPropertyOp::kComponentArrayOp:  return SetPropertyImpl(World, Op.component_array_op());
+		case SetPropertyOp::kBoolSetOp:         return SetPropertyImpl(World, Op.bool_set_op());
+		case SetPropertyOp::kStringSetOp:       return SetPropertyImpl(World, Op.string_set_op());
+		case SetPropertyOp::kEnumSetOp:         return SetPropertyImpl(World, Op.enum_set_op());
+		case SetPropertyOp::kIntSetOp:          return SetPropertyImpl(World, Op.int_set_op());
+		case SetPropertyOp::kInt64SetOp:        return SetPropertyImpl(World, Op.int64_set_op());
+		case SetPropertyOp::kFloatSetOp:        return SetPropertyImpl(World, Op.float_set_op());
+		case SetPropertyOp::kClassSetOp:        return SetPropertyImpl(World, Op.class_set_op());
+		case SetPropertyOp::kAssetSetOp:        return SetPropertyImpl(World, Op.asset_set_op());
+		case SetPropertyOp::kActorSetOp:        return SetPropertyImpl(World, Op.actor_set_op());
+		case SetPropertyOp::kComponentSetOp:    return SetPropertyImpl(World, Op.component_set_op());
+		case SetPropertyOp::OP_NOT_SET:
+		default:
+			return grpc::Status(grpc::FAILED_PRECONDITION, "SetPropertyOp has no op set");
+		}
+	}
+}
+
+void UTempoWorldControlServiceSubsystem::SetProperties(const SetPropertiesRequest& Request, const TResponseDelegate<SetPropertiesResponse>& ResponseContinuation) const
+{
+	const UWorld* World = GetWorld();
+	SetPropertiesResponse Response;
+	for (int32 I = 0; I < Request.ops_size(); ++I)
+	{
+		const grpc::Status Status = DispatchSetPropertyOp(World, Request.ops(I));
+		if (!Status.ok())
+		{
+			SetPropertyResult* Failure = Response.add_failures();
+			Failure->set_op_index(static_cast<uint32>(I));
+			Failure->set_code(static_cast<int32>(Status.error_code()));
+			Failure->set_error(Status.error_message());
+		}
+	}
+	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
 }
 
 void UTempoWorldControlServiceSubsystem::CallObjectFunction(const CallFunctionRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const
