@@ -39,6 +39,17 @@ public:
 	UFUNCTION(BlueprintCallable, Category="TempoCoreUtils")
 	static FBox GetActorLocalBounds(const AActor* Actor, bool bIncludeHiddenComponents);
 
+	// Returns a stable, round-trippable name for an actor, suitable for handing to an external
+	// client and using later to look the same actor back up (e.g. via GetActorWithName).
+	//
+	// AActor::GetActorNameOrLabel() is not stable over an actor's lifetime in editor builds: it
+	// returns the FName (which keeps the Blueprint "_C" suffix, e.g. "BP_Foo_C_0") until an actor
+	// label is lazily created, after which it returns the de-"_C"'d label ("BP_Foo_0"). A name
+	// returned to a client before its label exists therefore fails a later lookup. Materializing
+	// the label here pins the value so every subsequent GetActorNameOrLabel() call agrees. This is
+	// a no-op in cooked builds, which have no labels (GetActorNameOrLabel() is always GetName()).
+	static FString GetActorIdentifier(const AActor* Actor);
+
 	template <typename BaseClass>
 	static bool IsMostDerivedSubclass(UClass* Class)
 	{

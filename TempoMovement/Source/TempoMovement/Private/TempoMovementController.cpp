@@ -2,11 +2,13 @@
 
 #include "TempoMovementController.h"
 
+#include "TempoCoreUtils.h"
+
 FString ATempoMovementController::GetPawnName() const
 {
 	if (const APawn* ControlledPawn = GetPawn())
 	{
-		return ControlledPawn->GetActorNameOrLabel();
+		return UTempoCoreUtils::GetActorIdentifier(ControlledPawn);
 	}
 	return FString();
 }

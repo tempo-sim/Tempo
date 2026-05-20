@@ -5,6 +5,7 @@
 #include "TempoWorld/WorldControl.grpc.pb.h"
 
 #include "TempoConversion.h"
+#include "TempoCoreUtils.h"
 #include "TempoWorldUtils.h"
 
 #include "EngineUtils.h"
@@ -267,7 +268,7 @@ void UTempoWorldControlServiceSubsystem::SpawnActor(const SpawnActorRequest& Req
 	}
 
 	SpawnActorResponse Response;
-	Response.set_name(TCHAR_TO_UTF8(*SpawnedActor->GetActorNameOrLabel()));
+	Response.set_name(TCHAR_TO_UTF8(*UTempoCoreUtils::GetActorIdentifier(SpawnedActor)));
 	*Response.mutable_transform() = FromUnrealTransform(SpawnedActor->GetActorTransform());
 
 	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
@@ -710,7 +711,7 @@ void UTempoWorldControlServiceSubsystem::GetAllActors(const TempoCore::Empty& Re
 	for (const AActor* Actor : TActorRange<AActor>(GetWorld()))
 	{
 		TempoWorld::ActorDescriptor* ActorDescriptor = Response.add_actors();
-		ActorDescriptor->set_name(TCHAR_TO_UTF8(*Actor->GetActorNameOrLabel()));
+		ActorDescriptor->set_name(TCHAR_TO_UTF8(*UTempoCoreUtils::GetActorIdentifier(Actor)));
 		ActorDescriptor->set_actor_type(TCHAR_TO_UTF8(*Actor->GetClass()->GetName()));
 	}
 
@@ -742,7 +743,7 @@ void UTempoWorldControlServiceSubsystem::GetAllComponents(const GetAllComponents
 		TempoWorld::ComponentDescriptor* ComponentDescriptor = Response.add_components();
 		ComponentDescriptor->set_name(TCHAR_TO_UTF8(*Component->GetName()));
 		ComponentDescriptor->set_component_type(TCHAR_TO_UTF8(*Component->GetClass()->GetName()));
-		ComponentDescriptor->set_actor(TCHAR_TO_UTF8(*Actor->GetActorNameOrLabel()));
+		ComponentDescriptor->set_actor(TCHAR_TO_UTF8(*UTempoCoreUtils::GetActorIdentifier(Actor)));
 	}
 
 	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
@@ -955,7 +956,7 @@ void GetObjectProperties(const UObject* Object, GetPropertiesResponse& Response)
 				{
 					if (AActor* Actor = Cast<AActor>(ValueObject.Get()))
 					{
-						*Value = Actor->GetActorNameOrLabel();
+						*Value = UTempoCoreUtils::GetActorIdentifier(Actor);
 					}
 					else
 					{
@@ -1152,7 +1153,7 @@ void GetObjectProperties(const UObject* Object, GetPropertiesResponse& Response)
 		FString Value;
 		GetPropertyTypeAndValue(Object, Property, Type, &Value);
 		TempoWorld::PropertyDescriptor* PropertyDescriptor = Response.add_properties();
-		PropertyDescriptor->set_actor(TCHAR_TO_UTF8(*Actor->GetActorNameOrLabel()));
+		PropertyDescriptor->set_actor(TCHAR_TO_UTF8(*UTempoCoreUtils::GetActorIdentifier(Actor)));
 		if (Component)
 		{
 			PropertyDescriptor->set_component(TCHAR_TO_UTF8(*Component->GetName()));
