@@ -98,6 +98,28 @@ pub fn tempo_context() -> Arc<RwLock<TempoContext>> {
     CONTEXT.clone()
 }
 
+/// Get a connected channel to the Tempo server.
+///
+/// The returned [`Channel`] is a cheap, independent handle that callers hold
+/// *without* the lock, so the lock is never held across an RPC await. The
+/// steady-state path (channel already connected) takes only a shared read
+/// lock, so concurrent RPCs don't serialize on `CONTEXT`. Only the first
+/// connect — or the first call after [`TempoContext::set_server`] resets the
+/// channel — takes the write lock to lazily establish the connection.
+pub async fn connected_channel() -> Result<Channel, TempoError> {
+    // Fast path: shared read lock, clone the existing channel.
+    {
+        let ctx = CONTEXT.read().await;
+        if let Some(channel) = ctx.channel.clone() {
+            return Ok(channel);
+        }
+    }
+    // Slow path: exclusive lock to connect once. `channel()` re-checks under
+    // the write lock, so a racing writer that already connected just clones.
+    let mut ctx = CONTEXT.write().await;
+    ctx.channel().await
+}
+
 /// Set the server address and port (async version).
 pub async fn set_server_async(address: &str, port: u16) {
     let mut ctx = CONTEXT.write().await;
