@@ -157,8 +157,7 @@ pub async fn {{ name }}_async(
     {{ field.name }}: {{ field.rust_type }},
 {%- endfor %}
 ) -> Result<{{ response_rust_type }}, crate::TempoError> {
-    let mut ctx = crate::context::CONTEXT.write().await;
-    let channel = ctx.channel().await?;
+    let channel = crate::context::connected_channel().await?;
     let mut client = {{ client_type }}::new(channel)
         .max_decoding_message_size(crate::context::MAX_MESSAGE_SIZE)
         .max_encoding_message_size(crate::context::MAX_MESSAGE_SIZE);
@@ -200,8 +199,7 @@ pub async fn {{ name }}_async(
     {{ field.name }}: {{ field.rust_type }},
 {%- endfor %}
 ) -> Result<tonic::Streaming<{{ response_rust_type }}>, crate::TempoError> {
-    let mut ctx = crate::context::CONTEXT.write().await;
-    let channel = ctx.channel().await?;
+    let channel = crate::context::connected_channel().await?;
     let mut client = {{ client_type }}::new(channel)
         .max_decoding_message_size(crate::context::MAX_MESSAGE_SIZE)
         .max_encoding_message_size(crate::context::MAX_MESSAGE_SIZE);
@@ -283,8 +281,7 @@ impl Batch {
     pub async fn execute_async(
         self,
     ) -> Result<{{ response_rust_type }}, crate::TempoError> {
-        let mut ctx = crate::context::CONTEXT.write().await;
-        let channel = ctx.channel().await?;
+        let channel = crate::context::connected_channel().await?;
         let mut client = {{ client_type }}::new(channel)
             .max_decoding_message_size(crate::context::MAX_MESSAGE_SIZE)
             .max_encoding_message_size(crate::context::MAX_MESSAGE_SIZE);
