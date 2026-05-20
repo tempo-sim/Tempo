@@ -167,7 +167,7 @@ TempoWorld::ActorState GetActorState(const AActor* Actor, const UWorld* World, b
 	check(World);
 
 	ActorState.set_timestamp_s(World->GetTimeSeconds());
-	ActorState.set_name(TCHAR_TO_UTF8(*Actor->GetActorNameOrLabel()));
+	ActorState.set_name(TCHAR_TO_UTF8(*UTempoCoreUtils::GetActorIdentifier(Actor)));
 
 	TempoCore::Transform* ActorStateTransform = ActorState.mutable_transform();
 
@@ -318,7 +318,7 @@ void UTempoWorldStateServiceSubsystem::StreamOverlapEvents(const OverlapEventReq
 
 	if (AActor* Actor = GetActorWithName(GetWorld(), ActorName))
 	{
-		PendingOverlapRequests.FindOrAdd(Actor->GetActorNameOrLabel()).Add(ResponseContinuation);
+		PendingOverlapRequests.FindOrAdd(UTempoCoreUtils::GetActorIdentifier(Actor)).Add(ResponseContinuation);
 		Actor->OnActorBeginOverlap.AddDynamic(this, &UTempoWorldStateServiceSubsystem::UTempoWorldStateServiceSubsystem::OnActorOverlap);
 		return;
 	}
@@ -329,11 +329,11 @@ void UTempoWorldStateServiceSubsystem::StreamOverlapEvents(const OverlapEventReq
 
 void UTempoWorldStateServiceSubsystem::OnActorOverlap(AActor* OverlappedActor, AActor* OtherActor)
 {
-	if (const auto ResponseContinuations = PendingOverlapRequests.Find(OverlappedActor->GetActorNameOrLabel()))
+	if (const auto ResponseContinuations = PendingOverlapRequests.Find(UTempoCoreUtils::GetActorIdentifier(OverlappedActor)))
 	{
 		OverlapEventResponse Response;
-		Response.set_overlapped_actor_name(TCHAR_TO_UTF8(*OverlappedActor->GetActorNameOrLabel()));
-		Response.set_overlapping_actor_name(TCHAR_TO_UTF8(*OtherActor->GetActorNameOrLabel()));
+		Response.set_overlapped_actor_name(TCHAR_TO_UTF8(*UTempoCoreUtils::GetActorIdentifier(OverlappedActor)));
+		Response.set_overlapping_actor_name(TCHAR_TO_UTF8(*UTempoCoreUtils::GetActorIdentifier(OtherActor)));
 		if (const ATempoGameMode* TempoGameMode = Cast<ATempoGameMode>(UGameplayStatics::GetGameMode(this)))
 		{
 			if (const IActorClassificationInterface* ActorClassifier = TempoGameMode->GetActorClassifier())
@@ -346,7 +346,7 @@ void UTempoWorldStateServiceSubsystem::OnActorOverlap(AActor* OverlappedActor, A
 		{
 			ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
 		}
-		PendingOverlapRequests.Remove(OverlappedActor->GetActorNameOrLabel());
+		PendingOverlapRequests.Remove(UTempoCoreUtils::GetActorIdentifier(OverlappedActor));
 		OverlappedActor->OnActorBeginOverlap.RemoveAll(this);
 	}
 }
@@ -424,7 +424,7 @@ void UTempoWorldStateServiceSubsystem::Raycast(
 
 		if (const AActor* Actor = Hit.GetActor())
 		{
-			Response.set_actor(TCHAR_TO_UTF8(*Actor->GetActorNameOrLabel()));
+			Response.set_actor(TCHAR_TO_UTF8(*UTempoCoreUtils::GetActorIdentifier(Actor)));
 		}
 		if (const UPrimitiveComponent* Component = Hit.GetComponent())
 		{

@@ -13,7 +13,7 @@
 FString UTempoTiledSceneCaptureComponent::GetOwnerName() const
 {
 	check(GetOwner());
-	return GetOwner()->GetActorNameOrLabel();
+	return UTempoCoreUtils::GetActorIdentifier(GetOwner());
 }
 
 FString UTempoTiledSceneCaptureComponent::GetSensorName() const

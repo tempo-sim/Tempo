@@ -7,6 +7,7 @@
 #include "TempoMovementController.h"
 
 #include "TempoConversion.h"
+#include "TempoCoreUtils.h"
 #include "TempoCore/Empty.pb.h"
 #include "TempoCore/Geometry.pb.h"
 
@@ -192,7 +193,7 @@ void UTempoMovementControlServiceSubsystem::GetNavigablePawns(const TempoEmpty& 
 	{
 		if (const APawn* Pawn = Cast<AController>(Controller)->GetPawn())
 		{
-			Response.add_pawns(TCHAR_TO_UTF8(*Pawn->GetActorNameOrLabel()));
+			Response.add_pawns(TCHAR_TO_UTF8(*UTempoCoreUtils::GetActorIdentifier(Pawn)));
 		}
 	}
 
@@ -213,7 +214,7 @@ void UTempoMovementControlServiceSubsystem::PawnMoveToLocation(const PawnMoveToL
 	{
 		if (const APawn* Pawn = Cast<AController>(Controller)->GetPawn())
 		{
-			if (Pawn->GetActorNameOrLabel().Equals(UTF8_TO_TCHAR(Request.pawn().c_str()), ESearchCase::IgnoreCase))
+			if (UTempoCoreUtils::GetActorIdentifier(Pawn).Equals(UTF8_TO_TCHAR(Request.pawn().c_str()), ESearchCase::IgnoreCase))
 			{
 				AAIController* AIController = Cast<AAIController>(Controller);
 				FVector Destination = QuantityConverter<M2CM, R2L>::Convert(FVector(Request.location().x(), Request.location().y(), Request.location().z()));

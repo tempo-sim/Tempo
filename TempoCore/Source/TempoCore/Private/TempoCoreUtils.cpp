@@ -2,6 +2,7 @@
 
 #include "TempoCoreUtils.h"
 
+#include "GameFramework/Actor.h"
 #include "PhysicsEngine/BodySetup.h"
 #include "PhysicsEngine/PhysicsAsset.h"
 #if ENGINE_MAJOR_VERSION >= 5 && ENGINE_MINOR_VERSION > 4
@@ -82,4 +83,14 @@ FBox UTempoCoreUtils::GetActorLocalBounds(const AActor* Actor, bool bIncludeHidd
 	}
 
 	return LocalBounds;
+}
+
+FString UTempoCoreUtils::GetActorIdentifier(const AActor* Actor)
+{
+#if WITH_EDITOR
+	// Materialize the actor label now so it matches every later GetActorNameOrLabel() call,
+	// including GetActorWithName lookups. See header for details.
+	(void)Actor->GetActorLabel();
+#endif
+	return Actor->GetActorNameOrLabel();
 }
