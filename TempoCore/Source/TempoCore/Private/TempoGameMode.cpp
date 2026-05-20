@@ -99,14 +99,20 @@ void ATempoGameMode::BeginPlay()
 		UE_LOG(LogTempoCore, Warning, TEXT("Both RobotClass and RobotInterface are set; RobotClass will take precedence."));
 	}
 
-	OpenLoopController = Cast<AController>(GetWorld()->SpawnActor(OpenLoopControllerClass, nullptr, nullptr));
-	ClosedLoopController = Cast<AController>(GetWorld()->SpawnActor(ClosedLoopControllerClass, nullptr, nullptr));
+	if (OpenLoopControllerClass)
+	{
+		OpenLoopController = Cast<AController>(GetWorld()->SpawnActor(OpenLoopControllerClass, nullptr, nullptr));
+	}
+	if (ClosedLoopControllerClass)
+	{
+		ClosedLoopController = Cast<AController>(GetWorld()->SpawnActor(ClosedLoopControllerClass, nullptr, nullptr));
+	}
 
 	if (const UTempoCoreSettings* TempoCoreSettings = GetDefault<UTempoCoreSettings>())
 	{
 		if (FString ErrorMsg; !SetControlMode(TempoCoreSettings->GetDefaultControlMode(), ErrorMsg))
 		{
-			UE_LOG(LogTempoCore, Error, TEXT("Unable to set default control mode: %s"), *ErrorMsg);
+			UE_LOG(LogTempoCore, Display, TEXT("Unable to set default control mode: %s"), *ErrorMsg);
 		}
 	}
 }
@@ -142,7 +148,7 @@ bool ATempoGameMode::SetControlMode(EControlMode ControlMode, FString& ErrorOut)
 	if (!Robot)
 	{
 		ErrorOut = "No robot found. Not changing control mode.";
-		UE_LOG(LogTempoCore, Error, TEXT("%s"), *ErrorOut);
+		UE_LOG(LogTempoCore, Display, TEXT("%s"), *ErrorOut);
 		return false;
 	}
 
