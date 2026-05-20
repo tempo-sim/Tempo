@@ -99,8 +99,14 @@ void ATempoGameMode::BeginPlay()
 		UE_LOG(LogTempoCore, Warning, TEXT("Both RobotClass and RobotInterface are set; RobotClass will take precedence."));
 	}
 
-	OpenLoopController = Cast<AController>(GetWorld()->SpawnActor(OpenLoopControllerClass, nullptr, nullptr));
-	ClosedLoopController = Cast<AController>(GetWorld()->SpawnActor(ClosedLoopControllerClass, nullptr, nullptr));
+	if (OpenLoopControllerClass)
+	{
+		OpenLoopController = Cast<AController>(GetWorld()->SpawnActor(OpenLoopControllerClass, nullptr, nullptr));
+	}
+	if (ClosedLoopControllerClass)
+	{
+		ClosedLoopController = Cast<AController>(GetWorld()->SpawnActor(ClosedLoopControllerClass, nullptr, nullptr));
+	}
 
 	if (const UTempoCoreSettings* TempoCoreSettings = GetDefault<UTempoCoreSettings>())
 	{
