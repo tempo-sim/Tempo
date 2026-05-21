@@ -210,16 +210,17 @@ TempoWorld::ActorState GetActorState(const AActor* Actor, const UWorld* World, b
 	ActorStateAngularVel->set_z(ActorAngularVelocity.Z);
 
 	const FBox ActorLocalBounds = UTempoCoreUtils::GetActorLocalBounds(Actor, bIncludeHiddenComponents);
-	const FBox ActorWorldBounds(
-		Actor->GetTransform().TransformPosition(ActorLocalBounds.Min),
-		Actor->GetTransform().TransformPosition(ActorLocalBounds.Max)
-	);
-
-	const FVector ScaledLocalExtent = Actor->GetTransform().GetScale3D() * ActorLocalBounds.GetExtent();
+	// The proto Box is axis-aligned in world space, so transform all 8 corners of the local box
+	// (TransformBy) rather than just Min/Max, which would be wrong whenever the Actor is rotated.
+	const FBox ActorWorldBounds = ActorLocalBounds.TransformBy(Actor->GetTransform());
 
 	if (GDebugTempoWorld)
 	{
-		DrawDebugBox(World, ActorWorldBounds.GetCenter(), ScaledLocalExtent,Actor->GetActorRotation().Quaternion(),
+		// Draw the tight oriented box: the local box's center transformed into world, with the
+		// Actor's rotation and scaled local half-extents.
+		const FVector OrientedCenter = Actor->GetTransform().TransformPosition(ActorLocalBounds.GetCenter());
+		const FVector ScaledLocalExtent = Actor->GetTransform().GetScale3D() * ActorLocalBounds.GetExtent();
+		DrawDebugBox(World, OrientedCenter, ScaledLocalExtent, Actor->GetActorRotation().Quaternion(),
 			FColor::Red, false, -1, 0, 3.0);
 	}
 
