@@ -2,6 +2,7 @@
 
 #include "TempoGeographicServiceSubsystem.h"
 
+#include "TempoConversion.h"
 #include "TempoDateTimeSystem.h"
 #include "TempoGeographic.h"
 #include "TempoGeoReferencingSystem.h"
@@ -120,13 +121,16 @@ void UTempoGeographicServiceSubsystem::GetDateTime(const TempoCore::Empty& Reque
 	ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::StatusCode::UNIMPLEMENTED, "No TempoDateTime actor found"));
 }
 
-void UTempoGeographicServiceSubsystem::SetGeographicReference(const TempoGeographic::GeographicCoordinate& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation)
+void UTempoGeographicServiceSubsystem::SetGeographicReference(const TempoGeographic::GeographicReference& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation)
 {
 	if (ATempoGeoReferencingSystem* GeoReferencingSystem = Cast<ATempoGeoReferencingSystem>(AGeoReferencingSystem::GetGeoReferencingSystem(this)))
 	{
-		GeoReferencingSystem->OriginLatitude = Request.latitude_deg();
-		GeoReferencingSystem->OriginLongitude = Request.longitude_deg();
-		GeoReferencingSystem->OriginAltitude = Request.altitude_m();
+		GeoReferencingSystem->OriginLatitude = Request.origin().latitude_deg();
+		GeoReferencingSystem->OriginLongitude = Request.origin().longitude_deg();
+		GeoReferencingSystem->OriginAltitude = Request.origin().altitude_m();
+		// Rotation arrives in radians, right-handed (roll, pitch, yaw); convert to Unreal's degrees, left-handed.
+		GeoReferencingSystem->OriginRotation = QuantityConverter<Rad2Deg, R2L>::Convert(
+			FRotator(Request.rotation().p(), Request.rotation().y(), Request.rotation().r()));
 		// Ideally we would have overriden ApplySettings to do the broadcast but it is not virtual.
 		GeoReferencingSystem->ApplySettings();
 		GeoReferencingSystem->BroadcastGeographicReferenceChanged();

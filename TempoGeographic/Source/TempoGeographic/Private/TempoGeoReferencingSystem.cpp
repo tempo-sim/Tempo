@@ -26,5 +26,51 @@ void ATempoGeoReferencingSystem::PostEditChangeProperty(FPropertyChangedEvent& P
 
 void ATempoGeoReferencingSystem::BroadcastGeographicReferenceChanged() const
 {
-	GeographicReferenceChangedEvent.Broadcast(OriginLatitude, OriginLongitude, OriginAltitude);
+	GeographicReferenceChangedEvent.Broadcast(OriginLatitude, OriginLongitude, OriginAltitude, OriginRotation.Yaw);
+}
+
+FVector ATempoGeoReferencingSystem::WorldToReference(const FVector& WorldEngineCoordinates) const
+{
+	return OriginRotation.RotateVector(WorldEngineCoordinates);
+}
+
+FVector ATempoGeoReferencingSystem::ReferenceToWorld(const FVector& ReferenceEngineCoordinates) const
+{
+	return OriginRotation.UnrotateVector(ReferenceEngineCoordinates);
+}
+
+void ATempoGeoReferencingSystem::EngineToProjected(const FVector& EngineCoordinates, FVector& ProjectedCoordinates)
+{
+	Super::EngineToProjected(WorldToReference(EngineCoordinates), ProjectedCoordinates);
+}
+
+void ATempoGeoReferencingSystem::ProjectedToEngine(const FVector& ProjectedCoordinates, FVector& EngineCoordinates)
+{
+	FVector ReferenceEngineCoordinates;
+	Super::ProjectedToEngine(ProjectedCoordinates, ReferenceEngineCoordinates);
+	EngineCoordinates = ReferenceToWorld(ReferenceEngineCoordinates);
+}
+
+void ATempoGeoReferencingSystem::EngineToECEF(const FVector& EngineCoordinates, FVector& ECEFCoordinates)
+{
+	Super::EngineToECEF(WorldToReference(EngineCoordinates), ECEFCoordinates);
+}
+
+void ATempoGeoReferencingSystem::ECEFToEngine(const FVector& ECEFCoordinates, FVector& EngineCoordinates)
+{
+	FVector ReferenceEngineCoordinates;
+	Super::ECEFToEngine(ECEFCoordinates, ReferenceEngineCoordinates);
+	EngineCoordinates = ReferenceToWorld(ReferenceEngineCoordinates);
+}
+
+void ATempoGeoReferencingSystem::EngineToGeographic(const FVector& EngineCoordinates, FGeographicCoordinates& GeographicCoordinates)
+{
+	Super::EngineToGeographic(WorldToReference(EngineCoordinates), GeographicCoordinates);
+}
+
+void ATempoGeoReferencingSystem::GeographicToEngine(const FGeographicCoordinates& GeographicCoordinates, FVector& EngineCoordinates)
+{
+	FVector ReferenceEngineCoordinates;
+	Super::GeographicToEngine(GeographicCoordinates, ReferenceEngineCoordinates);
+	EngineCoordinates = ReferenceToWorld(ReferenceEngineCoordinates);
 }

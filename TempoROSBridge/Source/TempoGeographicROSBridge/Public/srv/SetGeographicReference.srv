@@ -1,4 +1,10 @@
+# Geographic coordinate of the Unreal world origin (WGS84).
 float64 latitude
 float64 longitude
 float64 altitude
+# Orientation of the world origin relative to the local North-West-Up frame.
+# Radians, right-handed.
+float64 roll
+float64 pitch
+float64 yaw
 ---
