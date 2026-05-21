@@ -16,6 +16,7 @@ namespace TempoGeographic
 	class TimeOfDay;
 	class DateTime;
 	class GeographicCoordinate;
+	class GeographicReference;
 	class DayCycleRateRequest;
 }
 
@@ -44,5 +45,5 @@ public:
 
 	void GetDateTime(const TempoCore::Empty& Request, const TResponseDelegate<TempoGeographic::DateTime>& ResponseContinuation);
 
-	void SetGeographicReference(const TempoGeographic::GeographicCoordinate& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation);
+	void SetGeographicReference(const TempoGeographic::GeographicReference& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation);
 };

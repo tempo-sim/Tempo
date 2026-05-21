@@ -120,13 +120,14 @@ void UTempoGeographicServiceSubsystem::GetDateTime(const TempoCore::Empty& Reque
 	ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::StatusCode::UNIMPLEMENTED, "No TempoDateTime actor found"));
 }
 
-void UTempoGeographicServiceSubsystem::SetGeographicReference(const TempoGeographic::GeographicCoordinate& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation)
+void UTempoGeographicServiceSubsystem::SetGeographicReference(const TempoGeographic::GeographicReference& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation)
 {
 	if (ATempoGeoReferencingSystem* GeoReferencingSystem = Cast<ATempoGeoReferencingSystem>(AGeoReferencingSystem::GetGeoReferencingSystem(this)))
 	{
-		GeoReferencingSystem->OriginLatitude = Request.latitude_deg();
-		GeoReferencingSystem->OriginLongitude = Request.longitude_deg();
-		GeoReferencingSystem->OriginAltitude = Request.altitude_m();
+		GeoReferencingSystem->OriginLatitude = Request.origin().latitude_deg();
+		GeoReferencingSystem->OriginLongitude = Request.origin().longitude_deg();
+		GeoReferencingSystem->OriginAltitude = Request.origin().altitude_m();
+		GeoReferencingSystem->OriginRotation = FRotator(Request.pitch_deg(), Request.yaw_deg(), Request.roll_deg());
 		// Ideally we would have overriden ApplySettings to do the broadcast but it is not virtual.
 		GeoReferencingSystem->ApplySettings();
 		GeoReferencingSystem->BroadcastGeographicReferenceChanged();

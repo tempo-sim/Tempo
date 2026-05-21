@@ -30,6 +30,17 @@ message GeographicCoordinate {
   double altitude_m = 3;
 }
 
+message GeographicReference {
+  // The geographic coordinate of the Unreal world origin.
+  GeographicCoordinate origin = 1;
+  // Roll of the world origin relative to the local North-West-Up frame, in degrees.
+  double roll_deg = 2;
+  // Pitch of the world origin relative to the local North-West-Up frame, in degrees.
+  double pitch_deg = 3;
+  // Yaw (heading) of the world origin relative to the local North-West-Up frame, in degrees.
+  double yaw_deg = 4;
+}
+
 message DayCycleRateRequest {
   // Multiplier applied to wall-clock time when advancing the in-game day cycle. Unitless.
   float rate = 1;
@@ -44,5 +55,5 @@ service GeographicService {
 
   rpc GetDateTime(TempoCore.Empty) returns (DateTime);
 
-  rpc SetGeographicReference(GeographicCoordinate) returns (TempoCore.Empty);
+  rpc SetGeographicReference(GeographicReference) returns (TempoCore.Empty);
 }

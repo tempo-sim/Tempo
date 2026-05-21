@@ -83,14 +83,18 @@ struct TImplicitToROSConverter<FTempoSetTimeOfDayService>
 };
 
 template <>
-struct TFromROSConverter<tempo_geographic_ros_bridge::srv::SetGeographicReference::Request, TempoGeographic::GeographicCoordinate>
+struct TFromROSConverter<tempo_geographic_ros_bridge::srv::SetGeographicReference::Request, TempoGeographic::GeographicReference>
 {
-	static TempoGeographic::GeographicCoordinate Convert(const tempo_geographic_ros_bridge::srv::SetGeographicReference::Request& ROSValue)
+	static TempoGeographic::GeographicReference Convert(const tempo_geographic_ros_bridge::srv::SetGeographicReference::Request& ROSValue)
 	{
-		TempoGeographic::GeographicCoordinate TempoValue;
-		TempoValue.set_latitude_deg(ROSValue.latitude);
-		TempoValue.set_longitude_deg(ROSValue.longitude);
-		TempoValue.set_altitude_m(ROSValue.altitude);
+		TempoGeographic::GeographicReference TempoValue;
+		TempoGeographic::GeographicCoordinate* Origin = TempoValue.mutable_origin();
+		Origin->set_latitude_deg(ROSValue.latitude);
+		Origin->set_longitude_deg(ROSValue.longitude);
+		Origin->set_altitude_m(ROSValue.altitude);
+		TempoValue.set_roll_deg(ROSValue.roll);
+		TempoValue.set_pitch_deg(ROSValue.pitch);
+		TempoValue.set_yaw_deg(ROSValue.yaw);
 		return TempoValue;
 	}
 };
@@ -106,7 +110,7 @@ struct TToROSConverter<tempo_geographic_ros_bridge::srv::SetGeographicReference:
 
 struct FTempoSetGeographicReferenceService
 {
-	using Request = TempoGeographic::GeographicCoordinate;
+	using Request = TempoGeographic::GeographicReference;
 	using Response = TempoCore::Empty;
 };
 
