@@ -96,6 +96,9 @@ message ActorState {
   TempoCore.Box bounds = 4;
   // World-frame 6-DoF velocity (linear m/s, angular rad/s).
   TempoCore.Twist velocity = 5;
+  // Axis-aligned bounding box in the actor's local frame, with the actor's scale baked in,
+  // in meters. Combine with `transform` (location + rotation) to recover the tight oriented box.
+  TempoCore.Box local_bounds = 6;
 }
 
 message ActorStates {
