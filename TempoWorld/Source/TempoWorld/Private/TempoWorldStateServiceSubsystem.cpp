@@ -42,6 +42,23 @@ namespace
 		default: return ECC_WorldStatic;
 		}
 	}
+
+	// Convert an Unreal-frame FBox (cm, left-handed) to a Tempo proto Box (m, right-handed).
+	// The L2R handedness flip negates Y, which would otherwise swap that axis's min/max, so we
+	// convert both corners and take a component-wise min/max to keep a proper axis-aligned box.
+	void SetProtoBox(TempoCore::Box& OutBox, const FBox& Box)
+	{
+		const FVector CornerA = QuantityConverter<CM2M, L2R>::Convert(Box.Min);
+		const FVector CornerB = QuantityConverter<CM2M, L2R>::Convert(Box.Max);
+		const FVector BoxMin = CornerA.ComponentMin(CornerB);
+		const FVector BoxMax = CornerA.ComponentMax(CornerB);
+		OutBox.mutable_min()->set_x(BoxMin.X);
+		OutBox.mutable_min()->set_y(BoxMin.Y);
+		OutBox.mutable_min()->set_z(BoxMin.Z);
+		OutBox.mutable_max()->set_x(BoxMax.X);
+		OutBox.mutable_max()->set_y(BoxMax.Y);
+		OutBox.mutable_max()->set_z(BoxMax.Z);
+	}
 }
 
 void UTempoWorldStateServiceSubsystem::RegisterServices(FTempoServer& Server)
@@ -214,25 +231,23 @@ TempoWorld::ActorState GetActorState(const AActor* Actor, const UWorld* World, b
 	// (TransformBy) rather than just Min/Max, which would be wrong whenever the Actor is rotated.
 	const FBox ActorWorldBounds = ActorLocalBounds.TransformBy(Actor->GetTransform());
 
+	// Local bounds with the Actor's scale baked in (the transmitted transform carries location and
+	// rotation only). A client recovers the tight oriented box from local_bounds plus the transform.
+	const FVector ActorScale = Actor->GetTransform().GetScale3D();
+	const FBox ActorScaledLocalBounds(ActorLocalBounds.Min * ActorScale, ActorLocalBounds.Max * ActorScale);
+
 	if (GDebugTempoWorld)
 	{
 		// Draw the tight oriented box: the local box's center transformed into world, with the
 		// Actor's rotation and scaled local half-extents.
 		const FVector OrientedCenter = Actor->GetTransform().TransformPosition(ActorLocalBounds.GetCenter());
-		const FVector ScaledLocalExtent = Actor->GetTransform().GetScale3D() * ActorLocalBounds.GetExtent();
+		const FVector ScaledLocalExtent = ActorScale * ActorLocalBounds.GetExtent();
 		DrawDebugBox(World, OrientedCenter, ScaledLocalExtent, Actor->GetActorRotation().Quaternion(),
 			FColor::Red, false, -1, 0, 3.0);
 	}
 
-	const FVector ActorBoundsMin = QuantityConverter<CM2M, L2R>::Convert(ActorWorldBounds.Min);
-	const FVector ActorBoundsMax = QuantityConverter<CM2M, L2R>::Convert(ActorWorldBounds.Max);
-	TempoCore::Box* ActorStateBounds = ActorState.mutable_bounds();
-	ActorStateBounds->mutable_min()->set_x(ActorBoundsMin.X);
-	ActorStateBounds->mutable_min()->set_y(ActorBoundsMin.Y);
-	ActorStateBounds->mutable_min()->set_z(ActorBoundsMin.Z);
-	ActorStateBounds->mutable_max()->set_x(ActorBoundsMax.X);
-	ActorStateBounds->mutable_max()->set_y(ActorBoundsMax.Y);
-	ActorStateBounds->mutable_max()->set_z(ActorBoundsMax.Z);
+	SetProtoBox(*ActorState.mutable_bounds(), ActorWorldBounds);
+	SetProtoBox(*ActorState.mutable_local_bounds(), ActorScaledLocalBounds);
 
 	return ActorState;
 }
