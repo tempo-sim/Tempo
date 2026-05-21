@@ -3,6 +3,7 @@
 syntax = "proto3";
 
 import "TempoCore/Empty.proto";
+import "TempoCore/Geometry.proto";
 
 message Date {
   uint32 day = 1;
@@ -33,12 +34,9 @@ message GeographicCoordinate {
 message GeographicReference {
   // The geographic coordinate of the Unreal world origin.
   GeographicCoordinate origin = 1;
-  // Roll of the world origin relative to the local North-West-Up frame, in degrees.
-  double roll_deg = 2;
-  // Pitch of the world origin relative to the local North-West-Up frame, in degrees.
-  double pitch_deg = 3;
-  // Yaw (heading) of the world origin relative to the local North-West-Up frame, in degrees.
-  double yaw_deg = 4;
+  // Orientation of the world origin relative to the local North-West-Up frame.
+  // Radians, right-handed (roll, pitch, yaw), consistent with TempoCore.Transform.
+  TempoCore.Rotation rotation = 2;
 }
 
 message DayCycleRateRequest {

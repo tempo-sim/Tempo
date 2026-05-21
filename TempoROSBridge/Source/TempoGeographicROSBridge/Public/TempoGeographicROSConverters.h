@@ -92,9 +92,10 @@ struct TFromROSConverter<tempo_geographic_ros_bridge::srv::SetGeographicReferenc
 		Origin->set_latitude_deg(ROSValue.latitude);
 		Origin->set_longitude_deg(ROSValue.longitude);
 		Origin->set_altitude_m(ROSValue.altitude);
-		TempoValue.set_roll_deg(ROSValue.roll);
-		TempoValue.set_pitch_deg(ROSValue.pitch);
-		TempoValue.set_yaw_deg(ROSValue.yaw);
+		TempoCore::Rotation* Rotation = TempoValue.mutable_rotation();
+		Rotation->set_r(ROSValue.roll);
+		Rotation->set_p(ROSValue.pitch);
+		Rotation->set_y(ROSValue.yaw);
 		return TempoValue;
 	}
 };

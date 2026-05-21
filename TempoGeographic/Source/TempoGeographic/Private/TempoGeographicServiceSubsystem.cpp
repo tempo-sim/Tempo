@@ -2,6 +2,7 @@
 
 #include "TempoGeographicServiceSubsystem.h"
 
+#include "TempoConversion.h"
 #include "TempoDateTimeSystem.h"
 #include "TempoGeographic.h"
 #include "TempoGeoReferencingSystem.h"
@@ -127,7 +128,9 @@ void UTempoGeographicServiceSubsystem::SetGeographicReference(const TempoGeograp
 		GeoReferencingSystem->OriginLatitude = Request.origin().latitude_deg();
 		GeoReferencingSystem->OriginLongitude = Request.origin().longitude_deg();
 		GeoReferencingSystem->OriginAltitude = Request.origin().altitude_m();
-		GeoReferencingSystem->OriginRotation = FRotator(Request.pitch_deg(), Request.yaw_deg(), Request.roll_deg());
+		// Rotation arrives in radians, right-handed (roll, pitch, yaw); convert to Unreal's degrees, left-handed.
+		GeoReferencingSystem->OriginRotation = QuantityConverter<Rad2Deg, R2L>::Convert(
+			FRotator(Request.rotation().p(), Request.rotation().y(), Request.rotation().r()));
 		// Ideally we would have overriden ApplySettings to do the broadcast but it is not virtual.
 		GeoReferencingSystem->ApplySettings();
 		GeoReferencingSystem->BroadcastGeographicReferenceChanged();
