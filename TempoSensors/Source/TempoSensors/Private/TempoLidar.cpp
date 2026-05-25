@@ -136,6 +136,8 @@ bool UTempoLidar::HasDetectedParameterChange() const
 		|| VerticalFOV != VerticalFOV_Internal
 		|| HorizontalBeams != HorizontalBeams_Internal
 		|| VerticalBeams != VerticalBeams_Internal
+		|| BeamDivergence != BeamDivergence_Internal
+		|| SamplingStrategy != SamplingStrategy_Internal
 		|| BeamCalibration != BeamCalibration_Internal;
 }
 
@@ -167,6 +169,8 @@ void UTempoLidar::UpdateInternalMirrors()
 	VerticalFOV_Internal = VerticalFOV;
 	HorizontalBeams_Internal = HorizontalBeams;
 	VerticalBeams_Internal = VerticalBeams;
+	BeamDivergence_Internal = BeamDivergence;
+	SamplingStrategy_Internal = SamplingStrategy;
 	BeamCalibration_Internal = BeamCalibration;
 }
 
@@ -180,7 +184,9 @@ void UTempoLidar::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedE
 		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoLidar, VerticalFOV) ||
 		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoLidar, HorizontalBeams) ||
 		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoLidar, VerticalBeams) ||
-		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoLidar, BeamCalibration))
+		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoLidar, BeamCalibration) ||
+		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoLidar, BeamDivergence) ||
+		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoLidar, SamplingStrategy))
 	{
 		// Route through the same choke point as the runtime Tick path.
 		bReconfigurePending = true;
@@ -394,9 +400,6 @@ void UTempoLidar::ConfigureTile(FTempoLidarTile& Tile, double InYawOffset, doubl
 		return;
 	}
 
-	const UTempoSensorsSettings* TempoSensorsSettings = GetDefault<UTempoSensorsSettings>();
-	check(TempoSensorsSettings);
-
 	Tile.YawOffset = InYawOffset;
 	Tile.FOVAngle = SubHorizontalFOV;
 	Tile.HorizontalBeams = SubHorizontalBeams;
@@ -410,14 +413,36 @@ void UTempoLidar::ConfigureTile(FTempoLidarTile& Tile, double InYawOffset, doubl
 		: Tile.FOVAngle;
 
 	const double EffectiveVertFOV = GetEffectiveVerticalFOV();
-	const double UndistortedVerticalImagePlaneSize = 2.0 * FMath::Tan(EffectiveVertFOV / 2.0);
+	const double UndistortedVerticalImagePlaneSize = 2.0 * FMath::Tan(FMath::DegreesToRadians(EffectiveVertFOV) / 2.0);
 	const FVector2D ImagePlaneSize = 2.0 * SphericalToPerspective(Tile.EffectiveFOVAngle / 2.0, EffectiveVertFOV / 2.0);
 
 	const double AspectRatio = ImagePlaneSize.Y / ImagePlaneSize.X;
-	const double EffectiveBeamSpan = (Tile.FOVAngle > 0.0f)
-		? Tile.HorizontalBeams * (static_cast<double>(Tile.EffectiveFOVAngle) / Tile.FOVAngle)
-		: static_cast<double>(Tile.HorizontalBeams);
-	Tile.SizeXYFOV = TempoSensorsSettings->GetLidarUpsamplingFactor() * FVector2D(EffectiveBeamSpan, AspectRatio * EffectiveBeamSpan);
+
+	// Render resolution is driven by beam divergence, not beam count: each pixel subtends roughly
+	// one beam-width — the smallest feature the sensor can physically resolve. The pipeline renders
+	// square angular pixels: the vertical pixel count follows the FOV aspect ratio so that Decode
+	// (which maps via ImagePlaneSize/SizeXYFOV) and the render projection (whose vertical FOV comes
+	// from the SizeX/SizeY aspect, see RenderCapture) stay consistent. A single divergence drives
+	// both axes; TODO: true independent H/V resolution would require driving the projection's
+	// vertical FOV explicitly (e.g. via DistortedVerticalFOV) instead of from the pixel aspect, and
+	// matching that in Decode.
+	double HorizontalSpan;
+	switch (SamplingStrategy)
+	{
+	case ETempoLidarSamplingStrategy::Conservative:
+		// Size for the tile center, where the spherical-to-perspective mapping is coarsest, so no
+		// pixel is coarser than a beam-width anywhere. ImagePlaneSize.X spans the (padded) FOV in
+		// tangent units; at the center one tangent unit subtends one radian.
+		HorizontalSpan = ImagePlaneSize.X / FMath::DegreesToRadians(BeamDivergence);
+		break;
+	case ETempoLidarSamplingStrategy::Simple:
+	default:
+		// Size linearly across the FOV: the average pitch is one beam-width, so the center renders
+		// slightly coarser and the edges finer.
+		HorizontalSpan = Tile.EffectiveFOVAngle / BeamDivergence;
+		break;
+	}
+	Tile.SizeXYFOV = FVector2D(HorizontalSpan, AspectRatio * HorizontalSpan);
 
 	Tile.SizeXY = FIntPoint(FMath::CeilToInt32(Tile.SizeXYFOV.X), FMath::CeilToInt32(Tile.SizeXYFOV.Y));
 	Tile.DistortionFactor = UndistortedVerticalImagePlaneSize / ImagePlaneSize.Y;
