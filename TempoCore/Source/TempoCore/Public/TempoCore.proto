@@ -16,6 +16,15 @@ enum ControlMode {
   CM_CLOSED_LOOP = 4;
 }
 
+enum EngineScalability {
+  ES_UNKNOWN = 0;
+  ES_LOW = 1;
+  ES_MEDIUM = 2;
+  ES_HIGH = 3;
+  ES_EPIC = 4;
+  ES_CINEMATIC = 5;
+}
+
 message LoadLevelRequest {
   // Path or name of the level to load.
   string level = 1;
@@ -46,6 +55,10 @@ message SetControlModeRequest {
   ControlMode mode = 1;
 }
 
+message SetEngineScalabilityRequest {
+  EngineScalability scalability = 1;
+}
+
 service TempoCoreService {
   rpc LoadLevel(LoadLevelRequest) returns (TempoCore.Empty);
 
@@ -60,4 +73,6 @@ service TempoCoreService {
   rpc SetMainViewportRenderEnabled(SetMainViewportRenderEnabledRequest) returns (TempoCore.Empty);
 
   rpc SetControlMode(SetControlModeRequest) returns (TempoCore.Empty);
+
+  rpc SetEngineScalability(SetEngineScalabilityRequest) returns (TempoCore.Empty);
 }
