@@ -52,7 +52,6 @@ public:
 	FTempoSensorsLabelSettingsChanged TempoSensorsLabelSettingsChangedEvent;
 
 	// Lidar
-	int32 GetLidarUpsamplingFactor() const { return LidarUpsamplingFactor; }
 	float GetMaxLidarDepth() const { return MaxLidarDepth; }
 	TObjectPtr<UMaterialInterface> GetLidarPostProcessMaterial() const { return LidarPostProcessMaterial.LoadSynchronous(); }
 	TObjectPtr<UMaterialInterface> GetLidarPostProcessMaterialWithColor() const { return LidarPostProcessMaterialWithColor.LoadSynchronous(); }
@@ -154,11 +153,6 @@ private:
 	// Anywhere a non-zero subsurface color is found on an object of type OverridableLabelRowName, this label will be used instead.
 	UPROPERTY(EditAnywhere, Config, Category="Camera")
 	FName OverridingLabelRowName = NAME_None;
-
-	// The upsampling factor used to scale the number of horizontal pixels in the Lidar depth image relative to the number
-	// of horizontal beams. Higher factors improve the accuracy of the reconstruction at the cost of performance.
-	UPROPERTY(EditAnywhere, Config, Category="Lidar", meta=(UIMin=1, UIMax=4, ClampMin=1, ClampMax=4))
-	int32 LidarUpsamplingFactor = 2;
 
 	// The expected maximum required depth for a Lidar return.
 	UPROPERTY(EditAnywhere, Config, Category="Lidar")

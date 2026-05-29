@@ -112,6 +112,20 @@ struct FLidarBeamCalibration
 	bool operator!=(const FLidarBeamCalibration& Other) const { return !(*this == Other); }
 };
 
+// Controls how the rendered pixel grid is sized from BeamDivergence. Both render square angular
+// pixels; they differ only in where the one-beam-width target is met across the spherical-to-
+// perspective mapping (which is coarsest at the tile center, finer toward the edges).
+UENUM()
+enum class ETempoLidarSamplingStrategy : uint8
+{
+	// Size linearly across the FOV: the average angular pitch is one beam-width, so the tile center
+	// renders slightly coarser than a beam-width and the edges finer. Fewer pixels.
+	Simple,
+	// Size for the tile center, the coarsest point, so no pixel anywhere is coarser than a
+	// beam-width. More pixels, but resolution is guaranteed across the whole FOV.
+	Conservative,
+};
+
 class UTempoLidar;
 
 // Per-tile state for the multi-view atlas render. A tile is just a view-rect + view state + PPM; no
@@ -285,6 +299,18 @@ protected:
 	UPROPERTY(EditAnywhere, meta=(UIMin=2, ClampMin=2))
 	int32 HorizontalBeams = 200;
 
+	// Full-angle beam divergence in degrees. The rendered image is sized so each pixel subtends one
+	// beam-width — the smallest feature the sensor can physically resolve — so render resolution
+	// tracks the beam footprint rather than the beam count. A single value covers both axes for now
+	// (the pipeline renders square angular pixels); per-axis divergence would need the projection/
+	// decode rework noted in ConfigureTile.
+	UPROPERTY(EditAnywhere, meta=(UIMin=0.0001, ClampMin=0.0001))
+	double BeamDivergence = 0.35;
+
+	// How the rendered pixel grid is sized from BeamDivergence. See ETempoLidarSamplingStrategy.
+	UPROPERTY(EditAnywhere)
+	ETempoLidarSamplingStrategy SamplingStrategy = ETempoLidarSamplingStrategy::Simple;
+
 	// The max angle of incidence in degrees from which this Lidar will get a return.
 	UPROPERTY(EditAnywhere, meta=(UIMin=0.0, UIMax=90.0, ClampMin=0.0, ClampMax=90.0))
 	float MaxAngleOfIncidence = 87.5;
@@ -325,6 +351,8 @@ protected:
 	double VerticalFOV_Internal = -1.0;
 	int32 HorizontalBeams_Internal = -1;
 	int32 VerticalBeams_Internal = -1;
+	double BeamDivergence_Internal = -1.0;
+	ETempoLidarSamplingStrategy SamplingStrategy_Internal = ETempoLidarSamplingStrategy::Conservative;
 	TArray<FLidarBeamCalibration> BeamCalibration_Internal;
 
 	friend struct TTextureRead<FLidarPixel>;
