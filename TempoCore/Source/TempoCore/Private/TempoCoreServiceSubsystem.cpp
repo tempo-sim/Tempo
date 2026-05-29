@@ -19,6 +19,7 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "GameFramework/GameMode.h"
 #include "Kismet/GameplayStatics.h"
+#include "Scalability.h"
 
 using TempoCoreService = TempoCore::TempoCoreService;
 using TempoCoreAsyncService = TempoCore::TempoCoreService::AsyncService;
@@ -28,6 +29,7 @@ using GetAvailableLevelsRequest = TempoCore::GetAvailableLevelsRequest;
 using AvailableLevelsResponse = TempoCore::AvailableLevelsResponse;
 using SetMainViewportRenderEnabledRequest = TempoCore::SetMainViewportRenderEnabledRequest;
 using SetControlModeRequest = TempoCore::SetControlModeRequest;
+using SetEngineScalabilityRequest = TempoCore::SetEngineScalabilityRequest;
 
 void UTempoCoreServiceSubsystem::RegisterServices(FTempoServer& Server)
 {
@@ -38,7 +40,8 @@ void UTempoCoreServiceSubsystem::RegisterServices(FTempoServer& Server)
 		SimpleRequestHandler(&TempoCoreAsyncService::RequestGetAvailableLevels, &UTempoCoreServiceSubsystem::GetAvailableLevels),
 		SimpleRequestHandler(&TempoCoreAsyncService::RequestQuit, &UTempoCoreServiceSubsystem::Quit),
 		SimpleRequestHandler(&TempoCoreAsyncService::RequestSetMainViewportRenderEnabled, &UTempoCoreServiceSubsystem::SetRenderMainViewportEnabled),
-		SimpleRequestHandler(&TempoCoreAsyncService::RequestSetControlMode, &UTempoCoreServiceSubsystem::SetControlMode)
+		SimpleRequestHandler(&TempoCoreAsyncService::RequestSetControlMode, &UTempoCoreServiceSubsystem::SetControlMode),
+		SimpleRequestHandler(&TempoCoreAsyncService::RequestSetEngineScalability, &UTempoCoreServiceSubsystem::SetEngineScalability)
 	);
 }
 
@@ -216,6 +219,42 @@ void UTempoCoreServiceSubsystem::SetControlMode(const SetControlModeRequest& Req
 		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, TCHAR_TO_UTF8(*ErrorMsg)));
 		return;
 	}
+
+	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status_OK);
+}
+
+void UTempoCoreServiceSubsystem::SetEngineScalability(const SetEngineScalabilityRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation)
+{
+	int32 QualityLevel;
+	switch (Request.scalability())
+	{
+	case TempoCore::ES_LOW:
+		QualityLevel = 0;
+		break;
+	case TempoCore::ES_MEDIUM:
+		QualityLevel = 1;
+		break;
+	case TempoCore::ES_HIGH:
+		QualityLevel = 2;
+		break;
+	case TempoCore::ES_EPIC:
+		QualityLevel = 3;
+		break;
+	case TempoCore::ES_CINEMATIC:
+		QualityLevel = 4;
+		break;
+	default:
+		{
+			UE_LOG(LogTempoCore, Error, TEXT("Unhandled engine scalability in UTempoCoreServiceSubsystem::SetEngineScalability"));
+			const FString ErrorMsg = FString::Printf(TEXT("Unhandled EngineScalability: %d"), Request.scalability());
+			ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::INVALID_ARGUMENT, TCHAR_TO_UTF8(*ErrorMsg)));
+			return;
+		}
+	}
+
+	Scalability::FQualityLevels QualityLevels = Scalability::GetQualityLevels();
+	QualityLevels.SetFromSingleQualityLevel(QualityLevel);
+	Scalability::SetQualityLevels(QualityLevels);
 
 	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status_OK);
 }

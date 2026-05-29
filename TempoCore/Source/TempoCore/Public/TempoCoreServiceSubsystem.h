@@ -23,6 +23,7 @@ namespace TempoCore
 	class AvailableLevelsResponse;
 	class SetMainViewportRenderEnabledRequest;
 	class SetControlModeRequest;
+	class SetEngineScalabilityRequest;
 }
 
 UCLASS()
@@ -60,6 +61,8 @@ public:
 	void SetRenderMainViewportEnabled(const TempoCore::SetMainViewportRenderEnabledRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation);
 
 	void SetControlMode(const TempoCore::SetControlModeRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation);
+
+	void SetEngineScalability(const TempoCore::SetEngineScalabilityRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation);
 
 protected:
 	TOptional<TResponseDelegate<TempoCore::Empty>> PendingLevelLoad;
