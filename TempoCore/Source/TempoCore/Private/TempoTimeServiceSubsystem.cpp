@@ -3,7 +3,7 @@
 #include "TempoTimeServiceSubsystem.h"
 
 #include "TempoCoreSettings.h"
-#include "TempoTimeWorldSettings.h"
+#include "TempoWorldSettings.h"
 #include "TempoCore/Time.grpc.pb.h"
 #if PLATFORM_WINDOWS
 // gRPC transitively includes <windows.h>, which leaks wingdi.h's GetObject macro
@@ -68,9 +68,9 @@ void UTempoTimeServiceSubsystem::Deinitialize()
 
 void UTempoTimeServiceSubsystem::SetTimeMode(const TempoCore::TimeModeRequest& Request, const TResponseDelegate<TempoEmpty>& ResponseContinuation) const
 {
-	if (!Cast<ATempoTimeWorldSettings>(GetWorld()->GetWorldSettings()))
+	if (!Cast<ATempoWorldSettings>(GetWorld()->GetWorldSettings()))
 	{
-		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "SetTimeMode has no effect unless using TempoTimeWorldSettings"));
+		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "SetTimeMode has no effect unless using TempoWorldSettings"));
 		return;
 	}
 
@@ -107,9 +107,9 @@ void UTempoTimeServiceSubsystem::SetSimStepsPerSecond(const SetSimStepsPerSecond
 		return;
 	}
 
-	if (!Cast<ATempoTimeWorldSettings>(GetWorld()->GetWorldSettings()))
+	if (!Cast<ATempoWorldSettings>(GetWorld()->GetWorldSettings()))
 	{
-		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "SetSimStepsPerSecond has no effect unless using TempoTimeWorldSettings"));
+		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "SetSimStepsPerSecond has no effect unless using TempoWorldSettings"));
 		return;
 	}
 
@@ -144,10 +144,10 @@ void UTempoTimeServiceSubsystem::AdvanceSteps(const AdvanceStepsRequest& Request
 		return;
 	}
 
-	ATempoTimeWorldSettings* WorldSettings = Cast<ATempoTimeWorldSettings>(GetWorld()->GetWorldSettings());
+	ATempoWorldSettings* WorldSettings = Cast<ATempoWorldSettings>(GetWorld()->GetWorldSettings());
 	if (!WorldSettings)
 	{
-		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "AdvanceSteps is only supported when using TempoTimeWorldSettings"));
+		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "AdvanceSteps is only supported when using TempoWorldSettings"));
 		return;
 	}
 
@@ -181,10 +181,10 @@ void UTempoTimeServiceSubsystem::Pause(const TempoEmpty& Request, const TDelegat
 
 void UTempoTimeServiceSubsystem::Step(const TempoEmpty& Request, const TResponseDelegate<TempoEmpty>& ResponseContinuation) const
 {
-	ATempoTimeWorldSettings* WorldSettings = Cast<ATempoTimeWorldSettings>(GetWorld()->GetWorldSettings());
+	ATempoWorldSettings* WorldSettings = Cast<ATempoWorldSettings>(GetWorld()->GetWorldSettings());
 	if (!WorldSettings)
 	{
-		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "Step is only supported when using TempoTimeWorldSettings"));
+		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "Step is only supported when using TempoWorldSettings"));
 		return;
 	}
 

@@ -6,7 +6,7 @@
 
 #include "TempoCoreSettings.h"
 #include "TempoCoreUtils.h"
-#include "TempoTimeWorldSettings.h"
+#include "TempoWorldSettings.h"
 
 #include "Components/Button.h"
 #include "Components/ComboBoxString.h"
@@ -168,7 +168,7 @@ void UTempoTimeWidget::OnStepPressed()
 	{
 		return;
 	}
-	if (ATempoTimeWorldSettings* WorldSettings = Cast<ATempoTimeWorldSettings>(World->GetWorldSettings()))
+	if (ATempoWorldSettings* WorldSettings = Cast<ATempoWorldSettings>(World->GetWorldSettings()))
 	{
 		WorldSettings->Step();
 	}
