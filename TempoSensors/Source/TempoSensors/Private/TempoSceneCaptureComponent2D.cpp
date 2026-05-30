@@ -227,16 +227,10 @@ void UTempoSceneCaptureComponent2D::UpdateSceneCaptureContents(FSceneInterface* 
 	NewRead->StagingTexture = AcquireNextStagingTexture();
 
 	ENQUEUE_RENDER_COMMAND(SetTempoSceneCaptureRenderFence)(
-	[NewRead](FRHICommandListImmediate& RHICmdList)
+	[NewRead](FRHICommandList& RHICmdList)
 	{
 		NewRead->RenderFence = RHICreateGPUFence(TEXT("TempoCameraRenderFence"));
 		RHICmdList.WriteGPUFence(NewRead->RenderFence);
-
-		// Dispatch the copy + fence write to the RHI thread now rather than leaving them only
-		// recorded in the immediate command list, so a synchronous game-thread flush can resolve the
-		// fence promptly. Never block the render thread on this fence: on Metal it submits the GPU
-		// work itself, so waiting here would self-deadlock.
-		RHICmdList.ImmediateFlush(EImmediateFlushType::DispatchToRHIThread);
 	});
 
 	TextureReadQueue.Enqueue(MoveTemp(NewRead));
