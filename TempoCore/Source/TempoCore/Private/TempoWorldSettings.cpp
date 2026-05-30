@@ -243,7 +243,7 @@ void ATempoWorldSettings::SetDefaultAutoExposureBias()
 
 	if (!bFound)
 	{
-		UE_LOG(LogTempoCore, Error, TEXT("No directional light found in level. Cannot set default exposure compensation automatically."));
+		UE_LOG(LogTempoCore, Display, TEXT("No directional light found in level. Cannot set default exposure compensation automatically."));
 		return;
 	}
 
