@@ -1325,11 +1325,11 @@ void UTempoCamera::RenderCapture()
 			NewRead->RenderFence = RHICreateGPUFence(TEXT("TempoCameraRenderFence"));
 			RHICmdList.WriteGPUFence(NewRead->RenderFence);
 
-			// Force the fence's commands to the RHI thread now. Otherwise WriteGPUFence is only
-			// recorded into the immediate list and isn't submitted until end-of-frame — which never
-			// runs in fixed-step/non-pipelined mode, where OnRenderCompleted parks the render thread
-			// inside OnEndFrameRT spinning on this very fence (ReadAllAvailable bBlock=true). Without
-			// this flush the signalling commands sit unsubmitted behind the thread waiting on them.
+			// Dispatch the copy + fence write to the RHI thread now rather than leaving them only
+			// recorded in the immediate command list. The synchronous same-frame readback runs on the
+			// game thread (BlockUntilMeasurementsReady -> FlushRenderingCommands), so getting this GPU
+			// work in flight promptly lets that flush resolve the fence. Never block the render thread
+			// on this fence: on Metal it submits the GPU work itself, so waiting here self-deadlocks.
 			RHICmdList.ImmediateFlush(EImmediateFlushType::DispatchToRHIThread);
 		});
 

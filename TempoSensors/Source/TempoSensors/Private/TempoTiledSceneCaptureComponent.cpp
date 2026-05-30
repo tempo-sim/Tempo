@@ -9,6 +9,7 @@
 #include "TempoCoreUtils.h"
 
 #include "Materials/MaterialInstanceDynamic.h"
+#include "RenderingThread.h"
 
 FString UTempoTiledSceneCaptureComponent::GetOwnerName() const
 {
@@ -40,15 +41,47 @@ void UTempoTiledSceneCaptureComponent::OnRenderCompleted()
 		return;
 	}
 
-	const bool bShouldBlock = GetDefault<UTempoCoreSettings>()->GetTimeMode() == ETimeMode::FixedStep
-		&& !GetDefault<UTempoSensorsSettings>()->GetPipelinedRendering();
-
-	TextureReadQueue.ReadAllAvailable(RenderTarget, bShouldBlock);
+	// Always non-blocking on the render thread. Blocking here (spinning on the GPU fence) deadlocks
+	// on platforms where the render thread is also the GPU submission thread (Metal): the thread
+	// waiting on the fence is the one that must submit the work that signals it. In
+	// fixed-step/non-pipelined mode the game thread guarantees same-frame completion in
+	// BlockUntilMeasurementsReady (via FlushRenderingCommands); in pipelined mode these opportunistic
+	// reads drain the queue across frames.
+	TextureReadQueue.ReadAllAvailable(RenderTarget, /*bBlock=*/false);
 }
 
 void UTempoTiledSceneCaptureComponent::BlockUntilMeasurementsReady() const
 {
-	TextureReadQueue.BlockUntilNextReadComplete();
+	UTextureRenderTarget2D* ReadbackTarget = GetReadbackTextureTarget();
+	if (!ReadbackTarget)
+	{
+		return;
+	}
+
+	// Submit and complete all pending render work (the staging copies + fence writes enqueued by
+	// RenderCapture) here on the game thread rather than by blocking the render thread. On
+	// single-submission-thread platforms (Metal) a render thread spinning on a GPU fence can never
+	// submit the work that signals it — that is the deadlock this replaces. FlushRenderingCommands
+	// drains the render thread and flushes the RHI thread, so the staging fences are in flight on
+	// the GPU once it returns.
+	FlushRenderingCommands();
+
+	const FRenderTarget* RenderTarget = ReadbackTarget->GetRenderTargetResource();
+	if (!RenderTarget)
+	{
+		return;
+	}
+
+	// Perform the GPU->CPU readback. Read() asserts it runs on the render thread, so enqueue it and
+	// flush again to wait for completion. The copies are already submitted (above), so the fence is
+	// signalled (or imminently will be) and the read completes instead of deadlocking.
+	FTextureReadQueue& Queue = const_cast<FTextureReadQueue&>(TextureReadQueue);
+	ENQUEUE_RENDER_COMMAND(TempoBlockingTextureRead)(
+		[&Queue, RenderTarget](FRHICommandListImmediate&)
+		{
+			Queue.ReadAllAvailable(RenderTarget, /*bBlock=*/true);
+		});
+	FlushRenderingCommands();
 }
 
 void UTempoTiledSceneCaptureComponent::BeginPlay()
