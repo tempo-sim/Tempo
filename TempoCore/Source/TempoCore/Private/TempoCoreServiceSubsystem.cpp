@@ -61,6 +61,10 @@ void UTempoCoreServiceSubsystem::Deinitialize()
 
 void UTempoCoreServiceSubsystem::LoadLevel(const LoadLevelRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation)
 {
+	// Reset flags from any previous load that didn't complete the deferred/paused handshake.
+	SetDeferBeginPlay(false);
+	SetStartPaused(false);
+
 	if (Request.deferred())
 	{
 		const ATempoGameMode* TempoGameMode = Cast<ATempoGameMode>(UGameplayStatics::GetGameMode(this));
@@ -83,6 +87,10 @@ void UTempoCoreServiceSubsystem::LoadLevel(const LoadLevelRequest& Request, cons
 		SetStartPaused(true);
 	}
 
+	// Flush(World) stops sounds but leaves SoundMixModifiers intact; stale mixes then log
+	// RecursiveApplyAdjuster faulures every tick for any sound class unregistered during transition.
+	UGameplayStatics::ClearSoundMixModifiers(this);
+
 	UGameplayStatics::OpenLevel(this, FName(UTF8_TO_TCHAR(Request.level().c_str())));
 
 	PendingLevelLoad = ResponseContinuation;
@@ -93,6 +101,7 @@ void UTempoCoreServiceSubsystem::OnLevelLoaded()
 	if (PendingLevelLoad.IsSet())
 	{
 		PendingLevelLoad->ExecuteIfBound(TempoCore::Empty(), grpc::Status_OK);
+		PendingLevelLoad.Reset();
 	}
 }
 
