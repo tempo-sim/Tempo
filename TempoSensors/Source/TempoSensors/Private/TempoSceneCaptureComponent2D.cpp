@@ -227,10 +227,17 @@ void UTempoSceneCaptureComponent2D::UpdateSceneCaptureContents(FSceneInterface* 
 	NewRead->StagingTexture = AcquireNextStagingTexture();
 
 	ENQUEUE_RENDER_COMMAND(SetTempoSceneCaptureRenderFence)(
-	[NewRead](FRHICommandList& RHICmdList)
+	[NewRead](FRHICommandListImmediate& RHICmdList)
 	{
 		NewRead->RenderFence = RHICreateGPUFence(TEXT("TempoCameraRenderFence"));
 		RHICmdList.WriteGPUFence(NewRead->RenderFence);
+
+		// Force the fence's commands to the RHI thread now. Otherwise WriteGPUFence is only
+		// recorded into the immediate list and isn't submitted until end-of-frame — which never
+		// runs in fixed-step/non-pipelined mode, where OnRenderCompleted parks the render thread
+		// inside OnEndFrameRT spinning on this very fence (ReadAllAvailable bBlock=true). Without
+		// this flush the signalling commands sit unsubmitted behind the thread waiting on them.
+		RHICmdList.ImmediateFlush(EImmediateFlushType::DispatchToRHIThread);
 	});
 
 	TextureReadQueue.Enqueue(MoveTemp(NewRead));
