@@ -66,7 +66,9 @@ void UTempoTiledSceneCaptureComponent::BlockUntilMeasurementsReady() const
 	// the GPU once it returns.
 	FlushRenderingCommands();
 
-	const FRenderTarget* RenderTarget = ReadbackTarget->GetRenderTargetResource();
+	// Use the game-thread-safe accessor here. GetRenderTargetResource() asserts IsInRenderingThread();
+	// this function runs on the game thread.
+	const FRenderTarget* RenderTarget = ReadbackTarget->GameThread_GetRenderTargetResource();
 	if (!RenderTarget)
 	{
 		return;
