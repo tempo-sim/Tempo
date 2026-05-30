@@ -9,6 +9,7 @@
 #include "TempoCoreUtils.h"
 
 #include "Materials/MaterialInstanceDynamic.h"
+#include "RenderingThread.h"
 
 FString UTempoTiledSceneCaptureComponent::GetOwnerName() const
 {
@@ -40,15 +41,48 @@ void UTempoTiledSceneCaptureComponent::OnRenderCompleted()
 		return;
 	}
 
-	const bool bShouldBlock = GetDefault<UTempoCoreSettings>()->GetTimeMode() == ETimeMode::FixedStep
-		&& !GetDefault<UTempoSensorsSettings>()->GetPipelinedRendering();
-
-	TextureReadQueue.ReadAllAvailable(RenderTarget, bShouldBlock);
+	// Always non-blocking on the render thread. This callback runs inside OnEndFrameRT, which is
+	// upstream of the end-of-frame GPU queue submit (RHIEndFrame). A GPU fence only signals after
+	// its command buffer is submitted, so spinning on the fence here waits for a submit that cannot
+	// happen until this callback returns: deadlock. (Platform-independent — true on Vulkan, Metal,
+	// and D3D, with or without a separate RHI thread.) In fixed-step/non-pipelined mode the game
+	// thread guarantees same-frame completion in BlockUntilMeasurementsReady (via
+	// FlushRenderingCommands); in pipelined mode these opportunistic reads drain the queue across
+	// frames.
+	TextureReadQueue.ReadAllAvailable(RenderTarget, /*bBlock=*/false);
 }
 
 void UTempoTiledSceneCaptureComponent::BlockUntilMeasurementsReady() const
 {
-	TextureReadQueue.BlockUntilNextReadComplete();
+	UTextureRenderTarget2D* ReadbackTarget = GetReadbackTextureTarget();
+	if (!ReadbackTarget)
+	{
+		return;
+	}
+
+	// Use the game-thread-safe accessor here. GetRenderTargetResource() asserts IsInRenderingThread();
+	// this function runs on the game thread.
+	const FRenderTarget* RenderTarget = ReadbackTarget->GameThread_GetRenderTargetResource();
+	if (!RenderTarget)
+	{
+		return;
+	}
+
+	// Do the synchronous readback on the render thread (Read() asserts IsInRenderingThread), then
+	// block the game thread on it via FlushRenderingCommands. We must NOT block the render thread on
+	// the producer's RenderFence: OnRenderCompleted runs inside OnEndFrameRT, upstream of the
+	// end-of-frame GPU queue submit, so on some RHIs (Vulkan) that fence is never submitted in time
+	// to poll mid-tick — that is the deadlock this replaces. ReadAllAwaitingBlocking bypasses the
+	// RenderFence and relies on Read()'s own RHIMapStagingSurface, which forces submission and blocks
+	// until the GPU completes. The producer commands enqueued by RenderCapture run first in the
+	// render FIFO, so the render target is fully drawn by the time this command reads it.
+	FTextureReadQueue& Queue = const_cast<FTextureReadQueue&>(TextureReadQueue);
+	ENQUEUE_RENDER_COMMAND(TempoBlockingTextureRead)(
+		[&Queue, RenderTarget](FRHICommandListImmediate&)
+		{
+			Queue.ReadAllAwaitingBlocking(RenderTarget);
+		});
+	FlushRenderingCommands();
 }
 
 void UTempoTiledSceneCaptureComponent::BeginPlay()

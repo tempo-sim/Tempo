@@ -216,6 +216,26 @@ struct FTextureReadQueue
 		return bAnyRead;
 	}
 
+	// Synchronously read back every awaiting read, bypassing RenderFence. FTextureRead::Read() is
+	// self-synchronizing: it issues its own copy + fence + RHIMapStagingSurface, and the map blocks
+	// until the GPU completes (forcing submission). It therefore does NOT depend on the producer's
+	// RenderFence — which on some RHIs (e.g. Vulkan) is not submitted to the GPU queue until
+	// end-of-frame, so it cannot be polled to completion mid-tick. Used by the fixed-step blocking
+	// path. Must run on the render thread.
+	void ReadAllAwaitingBlocking(const FRenderTarget* RenderTarget)
+	{
+		FRWScopeLock_OnlyGTWrite ReadLock(Lock, SLT_ReadOnly);
+		for (const TSharedPtr<FTextureRead>& TextureRead : PendingTextureReads)
+		{
+			if (TextureRead->State != FTextureRead::State::EAwaitingRender)
+			{
+				continue;
+			}
+			TextureRead->RenderFence.SafeRelease();
+			TextureRead->Read(RenderTarget);
+		}
+	}
+
 	void SkipNext()
 	{
 		FRWScopeLock_OnlyGTWrite WriteLock(Lock, SLT_Write);
