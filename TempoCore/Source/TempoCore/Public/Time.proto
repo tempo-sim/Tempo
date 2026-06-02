@@ -26,6 +26,11 @@ message AdvanceStepsRequest {
   int32 steps = 1;
 }
 
+message GetSimTimeResponse {
+  // Current simulation time in seconds.
+  double sim_time = 1;
+}
+
 service TimeService {
   rpc SetTimeMode(TimeModeRequest) returns (TempoCore.Empty);
 
@@ -50,4 +55,7 @@ service TimeService {
   // Advances the simulation by one step. Same return semantics and concurrency rule
   // as AdvanceSteps.
   rpc Step(TempoCore.Empty) returns (TempoCore.Empty);
+
+  // Returns the current simulation time in seconds.
+  rpc GetSimTime(TempoCore.Empty) returns (GetSimTimeResponse);
 }
