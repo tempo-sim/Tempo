@@ -298,12 +298,10 @@ void UTempoLidar::ApplyTilePostProcess(FTempoLidarTile& Tile)
 		Tile.MaxDepth = TempoSensorsSettings->GetMaxLidarDepth();
 		Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MinDepth"), Tile.MinDepth);
 		Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MaxDepth"), Tile.MaxDepth);
-		// WithColor depth lane is 24 bits (the float-bit-cast format reserves the top 8 bits as a
-		// NaN/denormal-safety prefix). No-color depth lane is the full 32 bits.
-		const float MaxDiscreteDepthForPPM = bColorEnabled
-			? GTempoCamera_Max_Discrete_Depth
-			: GTempo_Max_Discrete_Depth;
-		Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MaxDiscreteDepth"), MaxDiscreteDepthForPPM);
+		// Both formats now use a 24-bit depth lane: WithColor reserves the top 8 bits of each fp32
+		// lane as a NaN/denormal-safety prefix, and no-color gives up its top depth byte to carry
+		// reflectivity. Both therefore discretize inverse depth to 2^24 levels.
+		Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MaxDiscreteDepth"), GTempoCamera_Max_Discrete_Depth);
 	}
 
 	// Optional label overrides.
@@ -529,6 +527,11 @@ namespace
 		float* const AzimuthsData = ScanSegmentOut.mutable_azimuths_rad()->mutable_data();
 		float* const ElevationsData = ScanSegmentOut.mutable_elevations_rad()->mutable_data();
 
+		// Reflectivity blob: 1 byte per return, populated in both color and no-color modes. Same
+		// H-outer/V-inner layout as the scalar fields above (index h * VerticalBeams + v).
+		ScanSegmentOut.mutable_reflectivities()->assign(static_cast<size_t>(NumReturns), '\0');
+		char* const ReflectivitiesData = ScanSegmentOut.mutable_reflectivities()->data();
+
 		// Color blob (only allocated for the color variant). Packed 3 bytes per return, indexed
 		// 3 * (h * VerticalBeams + v), with byte order set by the project's color image encoding.
 		char* ColorsData = nullptr;
@@ -551,7 +554,7 @@ namespace
 		// H-outer, V-inner layout: each ParallelFor iteration owns a contiguous V-length stripe
 		// of every output array, so threads never share cache lines.
 		ParallelFor(Read.HorizontalBeams, [&Read, &ImagePlaneSize, &SizeXYOffset,
-			DistancesData, IntensitiesData, LabelsData, AzimuthsData, ElevationsData, ColorsData, ColorEncoding](int32 HorizontalBeam)
+			DistancesData, IntensitiesData, LabelsData, AzimuthsData, ElevationsData, ReflectivitiesData, ColorsData, ColorEncoding](int32 HorizontalBeam)
 		{
 			auto ImagePlaneLocationToPixelCoordinate = [&Read, &ImagePlaneSize, &SizeXYOffset](const FVector2D& ImagePlaneLocation)
 			{
@@ -575,9 +578,8 @@ namespace
 				const FVector2D PixelCoordinate = ImagePlaneLocationToPixelCoordinate(ImagePlaneLocation);
 				const FIntPoint Coord(FMath::RoundToInt32(PixelCoordinate.X), FMath::RoundToInt32(PixelCoordinate.Y));
 				const PixelType& Pixel = Read.Image[Coord.X + Read.ImageSize.X * Coord.Y];
-				constexpr float MaxDiscreteDepthValue = std::is_same_v<PixelType, FLidarPixelWithColor>
-					? GTempoCamera_Max_Discrete_Depth
-					: GTempo_Max_Discrete_Depth;
+				// Both pixel formats discretize inverse depth to 24 bits (2^24 levels).
+				constexpr float MaxDiscreteDepthValue = GTempoCamera_Max_Discrete_Depth;
 				const float NearestDepth = Pixel.Depth(Read.MinDepth, Read.MaxDepth, MaxDiscreteDepthValue);
 				const FVector2D ImagePlaneLocationAboveLeft = PixelCoordinateToImagePlaneLocation(FVector2D(Coord.X, Coord.Y));
 				double AzimuthDegNearest, ElevationDegNearest;
@@ -620,6 +622,10 @@ namespace
 				// point-cloud math renders in the expected right-handed Z-up frame.
 				AzimuthsData[Idx] = static_cast<float>(FMath::DegreesToRadians(-(AzimuthDeg + Read.RelativeYaw)));
 				ElevationsData[Idx] = static_cast<float>(FMath::DegreesToRadians(-ElevationDeg));
+				// Raw 0-255 reflectivity estimate from the post-process material. Always emitted;
+				// for a non-return (Distance == 0) the value is meaningless but harmless, mirroring
+				// how labels/colors are written unconditionally.
+				ReflectivitiesData[Idx] = static_cast<char>(Pixel.ReflectivityByte());
 
 				if constexpr (std::is_same_v<PixelType, FLidarPixelWithColor>)
 				{

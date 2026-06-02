@@ -12,8 +12,13 @@
 #include "TempoServer.h"
 #include "TempoLidar.generated.h"
 
-// 8-byte pixel format where first 3 bytes are normal, 4th byte is label.
-// 5th-8th bytes are a uint32 representing discrete depth.
+// 8-byte pixel format (PF_A16B16G16R16, four uint16 channels in memory order R, G, B, A):
+//   byte 0,1,2  (R.lo, R.hi, G.lo): normal Nx, Ny, Nz
+//   byte 3      (G.hi)            : label
+//   byte 4,5,6  (B.lo, B.hi, A.lo): discretized inverse depth (24-bit, low->high)
+//   byte 7      (A.hi)            : reflectivity (0-255)
+// Depth was historically the full 32 bits (bytes 4-7); it is now 24 bits so the top byte can
+// carry a reflectivity estimate. This matches the WithColor format's 24-bit depth lane.
 struct FLidarPixel
 {
 	static constexpr bool bSupportsDepth = false;
@@ -29,18 +34,27 @@ struct FLidarPixel
 	{
 		// We discretize inverse depth to give more consistent precision vs depth.
 		// See https://developer.nvidia.com/content/depth-precision-visualized
-		const float InverseDepthFraction = static_cast<float>(U5) / MaxDiscretizedDepth;
+		const uint32 DiscreteDepth = static_cast<uint32>(U5)
+			| (static_cast<uint32>(U6) << 8) | (static_cast<uint32>(U7) << 16);
+		const float InverseDepthFraction = static_cast<float>(DiscreteDepth) / MaxDiscretizedDepth;
 		const float InverseDepth = InverseDepthFraction * (1.0 / MinDepth - 1.0 / MaxDepth) + 1.0 / MaxDepth;
 		return 1.0 / InverseDepth;
 	}
 
+	// Raw 0-255 reflectivity estimate packed by the post-process material.
+	uint8 ReflectivityByte() const { return U8; }
+
 private:
-	uint8 U1 = 0;
-	uint8 U2 = 0;
-	uint8 U3 = 0;
-	uint8 U4 = 0;
-	uint32 U5 = 0;
+	uint8 U1 = 0; // normal Nx
+	uint8 U2 = 0; // normal Ny
+	uint8 U3 = 0; // normal Nz
+	uint8 U4 = 0; // label
+	uint8 U5 = 0; // depth bits 0-7
+	uint8 U6 = 0; // depth bits 8-15
+	uint8 U7 = 0; // depth bits 16-23
+	uint8 U8 = 0; // reflectivity
 };
+static_assert(sizeof(FLidarPixel) == 8, "FLidarPixel must match PF_A16B16G16R16 stride");
 
 // 16-byte pixel format used when color rendering is enabled. PF_A32B32G32R32F atlas: 4 float32
 // lanes per pixel, each carrying 24 bits of payload in its low bits. The WithColor PPM packs each
@@ -51,7 +65,7 @@ private:
 //   Lane 0 (channel R, low 24 bits, low->high bytes): B, G, R          — packed 24-bit BGR color
 //   Lane 1 (channel G, low 24 bits, low->high bytes): Nx, Ny, Nz       — packed octet normal
 //   Lane 2 (channel B, low 24 bits): discretized inverse depth         — max 2^24 levels
-//   Lane 3 (channel A, low 24 bits, low->high bytes): Label, spare, spare
+//   Lane 3 (channel A, low 24 bits, low->high bytes): Label, Reflectivity, spare
 struct FLidarPixelWithColor
 {
 	static constexpr bool bSupportsDepth = false;
@@ -60,6 +74,7 @@ struct FLidarPixelWithColor
 	uint8 G() const { return static_cast<uint8>((Payload(0) >> 8) & 0xFFu); }
 	uint8 R() const { return static_cast<uint8>((Payload(0) >> 16) & 0xFFu); }
 	uint8 Label() const { return static_cast<uint8>(Payload(3) & 0xFFu); }
+	uint8 ReflectivityByte() const { return static_cast<uint8>((Payload(3) >> 8) & 0xFFu); }
 
 	FVector Normal() const
 	{

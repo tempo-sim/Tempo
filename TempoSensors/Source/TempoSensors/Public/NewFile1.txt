@@ -1,0 +1,41 @@
+// --- Color: tonemapped LDR -> 3 bytes (always stored BGR; CPU decode reorders to RGB
+// if EColorImageEncoding == RGB8). ---
+uint Rb = (uint)round(saturate(SceneColor.r) * 255.0);
+uint Gb = (uint)round(saturate(SceneColor.g) * 255.0);
+uint Bb = (uint)round(saturate(SceneColor.b) * 255.0);
+
+// --- Normal -> 3 bytes (same as no-color material) ---
+uint Nx = (uint)round(saturate(Normal.x * 0.5 + 0.5) * 255.0);
+uint Ny = (uint)round(saturate(Normal.y * 0.5 + 0.5) * 255.0);
+uint Nz = (uint)round(saturate(Normal.z * 0.5 + 0.5) * 255.0);
+
+// --- Label byte (override-resolved upstream) ---
+uint Lbl = (uint)clamp(round(Label), 0.0, 255.0);
+
+// --- Reflectivity byte (Reflectivity is 0..1 from the reflectivity node) ---
+uint Refl = (uint)clamp(round(Reflectivity * 255.0), 0.0, 255.0);
+
+// --- Depth (same encoding as no-color path) ---
+float SafeDepth = max(SceneDepthCm, MinDepthCm);
+float InvDepth = 1.0 / SafeDepth;
+float InvMinDepth = 1.0 / MinDepthCm;
+float InvMaxDepth = 1.0 / MaxDepthCm;
+float InvDepthFrac = saturate((InvDepth - InvMaxDepth) / (InvMinDepth - InvMaxDepth));
+uint Depth24 = (uint)round(InvDepthFrac * MaxDiscreteDepth);
+
+// --- Pack 4 lanes per FLidarPixelWithColor layout (little-endian byte order matches
+// the accessors: Pixel.B() = Lanes[0] & 0xFF, Pixel.R() = (Lanes[0] >> 16) & 0xFF, etc.). ---
+uint LaneR = (Rb << 16) | (Gb << 8) | Bb;
+uint LaneG = (Nz << 16) | (Ny << 8) | Nx;
+uint LaneB = Depth24;
+uint LaneA = (Refl << 8) | Lbl;   // byte 0 = Label, byte 1 = reflectivity, byte 2 = spare
+
+// Bit-cast each uint to its float representation. The PF_R32G32B32A32_UINT RT preserves the
+// raw 32 bits per channel; asuint() on the CPU side recovers the original uint.
+const uint Mask = 0x3F000000u;
+return float4(
+  asfloat((LaneR & 0x00FFFFFFu) | Mask),
+  asfloat((LaneG & 0x00FFFFFFu) | Mask),
+  asfloat((LaneB & 0x00FFFFFFu) | Mask),
+  asfloat((LaneA & 0x00FFFFFFu) | Mask)
+);

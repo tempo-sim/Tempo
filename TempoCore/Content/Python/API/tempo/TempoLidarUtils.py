@@ -14,10 +14,12 @@ import TempoSensors.Common_pb2 as Common
 
 # Signals the viewer can render. "color" requires the server to be in color mode (set
 # include_color=True on stream_lidar_scans); others use signals always present in the segment.
-COLORIZE_OPTIONS = ("color", "intensity", "label", "distance")
+# "reflectivity" needs a server new enough to populate segment.reflectivities and a lidar
+# post-process material updated to compute it — otherwise it falls back to a uniform gray.
+COLORIZE_OPTIONS = ("color", "intensity", "label", "distance", "reflectivity")
 
 # Single-key shortcuts the in-viewer key callbacks bind to switch modes at runtime.
-COLORIZE_HOTKEYS = {"c": "color", "i": "intensity", "l": "label", "d": "distance"}
+COLORIZE_HOTKEYS = {"c": "color", "i": "intensity", "l": "label", "d": "distance", "r": "reflectivity"}
 
 
 class PointCloudViewer:
@@ -46,6 +48,9 @@ class PointCloudViewer:
         # Per-return color, shape (V, H, 3) uint8 in RGB order (decoded from segment.colors per
         # segment.color_encoding). None when the active scan was rendered without color.
         self.colors_rgb = None
+        # Per-return reflectivity estimate, shape (V, H) float in [0, 1] (decoded from
+        # segment.reflectivities). None when the server didn't populate it.
+        self.reflectivities = None
         self.azimuth_min = 0.0
         self.azimuth_max = 0.0
 
@@ -147,6 +152,18 @@ class PointCloudViewer:
             flat = flat[..., ::-1]
         return np.transpose(flat, (1, 0, 2))
 
+    def _decode_reflectivities(self, scan, h, v):
+        """Decode segment.reflectivities (1 byte per return, 0-255) into a (V, H) float array
+        normalized to [0, 1]. Returns None when the server didn't include reflectivity data."""
+        if not scan.reflectivities:
+            return None
+        expected = h * v
+        if len(scan.reflectivities) != expected:
+            return None
+        # Same H-outer, V-inner layout as the scalar fields; transpose to (V, H).
+        flat = np.frombuffer(scan.reflectivities, dtype=np.uint8).reshape(h, v)
+        return (flat.astype(np.float32) / 255.0).T
+
     def accumulate_scan_data(self, scan):
         """Numpy-only accumulation of a segment into the current scan. Returns True when
         the scan is complete. Safe to run from a worker thread — touches no Qt/VTK state."""
@@ -159,6 +176,7 @@ class PointCloudViewer:
         azimuths = np.asarray(scan.azimuths_rad, dtype=np.float32).reshape(h, v).T
         elevations = np.asarray(scan.elevations_rad, dtype=np.float32).reshape(h, v).T
         colors_rgb = self._decode_colors(scan, h, v)
+        reflectivities = self._decode_reflectivities(scan, h, v)
 
         restart = self.latest_scan is None or self.latest_scan.header.sequence_id != scan.header.sequence_id
 
@@ -171,6 +189,7 @@ class PointCloudViewer:
             self.azimuths = azimuths
             self.elevations = elevations
             self.colors_rgb = colors_rgb
+            self.reflectivities = reflectivities
             self.azimuth_min = scan.azimuth_range_rad.min
             self.azimuth_max = scan.azimuth_range_rad.max
             self.accumulated_scan_segments = 1
@@ -184,6 +203,8 @@ class PointCloudViewer:
                 self.elevations = np.concatenate((self.elevations, elevations), axis=1)
                 if self.colors_rgb is not None and colors_rgb is not None:
                     self.colors_rgb = np.concatenate((self.colors_rgb, colors_rgb), axis=1)
+                if self.reflectivities is not None and reflectivities is not None:
+                    self.reflectivities = np.concatenate((self.reflectivities, reflectivities), axis=1)
             else:
                 self.distances = np.concatenate((distances, self.distances), axis=1)
                 self.intensities = np.concatenate((intensities, self.intensities), axis=1)
@@ -192,6 +213,8 @@ class PointCloudViewer:
                 self.elevations = np.concatenate((elevations, self.elevations), axis=1)
                 if self.colors_rgb is not None and colors_rgb is not None:
                     self.colors_rgb = np.concatenate((colors_rgb, self.colors_rgb), axis=1)
+                if self.reflectivities is not None and reflectivities is not None:
+                    self.reflectivities = np.concatenate((reflectivities, self.reflectivities), axis=1)
             self.azimuth_min = min(self.azimuth_min, scan.azimuth_range_rad.min)
             self.azimuth_max = max(self.azimuth_max, scan.azimuth_range_rad.max)
             self.accumulated_scan_segments += 1
@@ -216,6 +239,8 @@ class PointCloudViewer:
         labels = self.labels
         points, valid_mask = self.distances_to_points(distances)
 
+        reflectivities = self.reflectivities
+
         mode = self.colorize_by.lower()
         if mode == "distance":
             colors = distances.flatten()[valid_mask]
@@ -224,6 +249,14 @@ class PointCloudViewer:
             colors = intensities.flatten()[valid_mask]
         elif mode == "label":
             colors = labels.flatten()[valid_mask] / 255.0
+        elif mode == "reflectivity":
+            if reflectivities is None:
+                # Server didn't populate reflectivity (older build, or the lidar post-process
+                # material hasn't been updated to compute it). Fall back to a uniform mid-gray
+                # scalar so points stay visible.
+                colors = np.full(int(valid_mask.sum()), 0.5, dtype=np.float32)
+            else:
+                colors = reflectivities.flatten()[valid_mask]
         elif mode == "color":
             if self.colors_rgb is None:
                 # Server isn't rendering color (include_color=False or material missing).
