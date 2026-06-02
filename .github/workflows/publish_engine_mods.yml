@@ -45,6 +45,18 @@ on:
         type: string
         description: Token to use for fetching submodules during checkout
         default: ''
+      submodules_app_id:
+        type: string
+        description: GitHub App ID used to mint a token for fetching private submodules during checkout (alternative to submodules_token). Requires the submodules_app_private_key secret. Minting happens in this job, so it works across the reusable-workflow boundary where a token passed via submodules_token cannot (GitHub strips token-shaped values from job outputs).
+        default: ''
+      submodules_repositories:
+        type: string
+        description: Comma- or newline-separated repos to scope the minted submodules token to (default - all repos in the App installation). Only used when submodules_app_id is set.
+        default: ''
+    secrets:
+      submodules_app_private_key:
+        description: Private key (PEM) for the GitHub App identified by submodules_app_id. Required only when submodules_app_id is set.
+        required: false
 
 env:
   UNREAL_VERSION: "${{ inputs.unreal_version }}"
@@ -66,6 +78,15 @@ jobs:
             exit 1
             ;;
         esac
+    - name: Mint Submodules Token (GitHub App)
+      id: submodules_app_token
+      if: ${{ inputs.submodules_app_id != '' }}
+      uses: actions/create-github-app-token@v2
+      with:
+        app-id: ${{ inputs.submodules_app_id }}
+        private-key: ${{ secrets.submodules_app_private_key }}
+        owner: ${{ github.repository_owner }}
+        repositories: ${{ inputs.submodules_repositories }}
     - name: Checkout
       uses: actions/checkout@v4
       with:
@@ -73,7 +94,7 @@ jobs:
         ref: ${{ inputs.checkout_ref }}
         path: checkout
         submodules: recursive
-        token: ${{ inputs.submodules_token != '' && inputs.submodules_token || github.token }}
+        token: ${{ steps.submodules_app_token.outputs.token != '' && steps.submodules_app_token.outputs.token || (inputs.submodules_token != '' && inputs.submodules_token || github.token) }}
     - name: Compute Engine Mods Hash and Tag
       id: tag
       run: |
