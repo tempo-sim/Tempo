@@ -313,7 +313,7 @@ void ATempoPlayerController::OnActorSpawnedHandler(AActor* SpawnedActor)
 {
 	if (Cast<APawn>(SpawnedActor))
 	{
-		UE_LOG(LogTempoCore, Warning, TEXT("A new Pawn was spawned, queueing group update..."));
+		UE_LOG(LogTempoCore, Display, TEXT("A new Pawn was spawned, queueing group update..."));
 		UpdatePawnGroups();
 	}
 }
@@ -322,7 +322,7 @@ void ATempoPlayerController::OnAnyActorDestroyedHandler(AActor* DestroyedActor)
 {
 	if (Cast<APawn>(DestroyedActor))
 	{
-		UE_LOG(LogTempoCore, Warning, TEXT("A Pawn (%s) was destroyed, queueing group update..."), *DestroyedActor->GetName());
+		UE_LOG(LogTempoCore, Display, TEXT("A Pawn (%s) was destroyed, queueing group update..."), *DestroyedActor->GetName());
 		UpdatePawnGroups();
 	}
 }
