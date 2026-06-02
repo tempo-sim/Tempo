@@ -41,6 +41,13 @@ message LidarScanSegment {
   bytes colors = 13;
   // Byte ordering of `colors`. CE_UNKNOWN when `colors` is empty.
   TempoSensors.ColorEncoding color_encoding = 14;
+  // Per-return surface reflectivity estimate, 1 byte per return in [0, 255] (0 = least
+  // reflective). Derived from material PBR properties (base color, metallic, specular, roughness)
+  // by the lidar post-process material; it is an estimate, not a calibrated NIR reflectance.
+  // Always populated, in both color and no-color modes. Same H-outer/V-inner layout as
+  // `distances_m`: reflectivity for return (h, v) is byte (h * vertical_beams + v). Length is
+  // horizontal_beams * vertical_beams.
+  bytes reflectivities = 15;
 }
 
 message LidarScanRequest {
