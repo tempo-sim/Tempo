@@ -22,6 +22,7 @@ using TempoEmpty = TempoCore::Empty;
 using TimeModeRequest = TempoCore::TimeModeRequest;
 using SetSimStepsPerSecondRequest = TempoCore::SetSimStepsPerSecondRequest;
 using AdvanceStepsRequest = TempoCore::AdvanceStepsRequest;
+using GetSimTimeResponse = TempoCore::GetSimTimeResponse;
 
 namespace
 {
@@ -48,7 +49,8 @@ void UTempoTimeServiceSubsystem::RegisterServices(FTempoServer& Server)
 		SimpleRequestHandler(&TimeAsyncService::RequestAdvanceSteps, &UTempoTimeServiceSubsystem::AdvanceSteps),
 		SimpleRequestHandler(&TimeAsyncService::RequestPlay, &UTempoTimeServiceSubsystem::Play),
 		SimpleRequestHandler(&TimeAsyncService::RequestPause, &UTempoTimeServiceSubsystem::Pause),
-		SimpleRequestHandler(&TimeAsyncService::RequestStep, &UTempoTimeServiceSubsystem::Step)
+		SimpleRequestHandler(&TimeAsyncService::RequestStep, &UTempoTimeServiceSubsystem::Step),
+		SimpleRequestHandler(&TimeAsyncService::RequestGetSimTime, &UTempoTimeServiceSubsystem::GetSimTime)
 		);
 }
 
@@ -198,4 +200,11 @@ void UTempoTimeServiceSubsystem::Step(const TempoEmpty& Request, const TResponse
 	{
 		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "Another step is already in progress"));
 	}
+}
+
+void UTempoTimeServiceSubsystem::GetSimTime(const TempoEmpty& Request, const TResponseDelegate<GetSimTimeResponse>& ResponseContinuation) const
+{
+	GetSimTimeResponse Response;
+	Response.set_sim_time(GetWorld()->GetTimeSeconds());
+	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
 }
