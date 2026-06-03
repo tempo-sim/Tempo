@@ -6,6 +6,11 @@
 # **Note**: A workflow must have EPIC_DOCKER_USERNAME and EPIC_DOCKER_TOKEN secrets to call this workflow, and must
 #           call this workflow with 'secrets: inherit'. Please see the instructions here to obtain a token:
 #           https://dev.epicgames.com/documentation/en-us/unreal-engine/quick-start-guide-for-using-container-images-in-unreal-engine
+# **Note**: The pre-modded image (engine_mods_image) is pulled from ghcr.io by default using the GITHUB_TOKEN. To pull
+#           from another registry, set engine_mods_image to the target host and either pass registry/registry_username
+#           + the registry_password secret (static-credential registries), or set aws_region (+ aws_role_to_assume for
+#           OIDC, or the aws_access_key_id/aws_secret_access_key secrets) for AWS ECR. When using OIDC, the calling job
+#           must grant 'id-token: write'. The Epic *base* image is always pulled from ghcr.io regardless.
 # Unreal is a large (>40gb) dependency and packaging is resource-intensive. To deal with these constraints the workflow
 # uses a few non-standard techniques:
 # - We free space on the runner's main filesystem before starting by removing unnecessary packages. This gives us space
@@ -97,7 +102,7 @@ on:
         default: ""
       engine_mods_image:
         type: string
-        description: GHCR repo (without tag) of a pre-modded Tempo Unreal image (see publish_engine_mods.yml). If empty or pull fails, falls back to building the image and applying engine mods in-workflow.
+        description: Registry repo (without tag, including the host) of a pre-modded Tempo Unreal image (see publish_engine_mods.yml). If empty or pull fails, falls back to building the image and applying engine mods in-workflow.
         default: ""
       post_checkout_script:
         type: string
@@ -123,9 +128,34 @@ on:
         type: boolean
         description: Generate the Tempo C++ API during the build (sets TEMPO_GEN_CPP_API=1 in the container)
         default: false
+      registry:
+        type: string
+        description: Registry host to authenticate to for pulling the pre-modded image (static-credential registries only, e.g. ghcr.io or docker.io). Must match the host in engine_mods_image. Ignored when aws_region is set (ECR).
+        default: ghcr.io
+      registry_username:
+        type: string
+        description: Username for static-credential registry login. Defaults to the triggering actor (correct for ghcr.io).
+        default: ${{ github.actor }}
+      aws_region:
+        type: string
+        description: If set, authenticate to AWS ECR in this region (instead of a static-credential login) to pull the pre-modded image. Provide aws_role_to_assume (OIDC) or the aws_access_key_id/aws_secret_access_key secrets. The caller's job must grant id-token-write permission when using OIDC.
+        default: ''
+      aws_role_to_assume:
+        type: string
+        description: IAM role ARN to assume via GitHub OIDC for ECR auth. Takes precedence over the access-key secrets when both are provided.
+        default: ''
     secrets:
       submodules_app_private_key:
         description: Private key (PEM) for the GitHub App identified by submodules_app_id. Required only when submodules_app_id is set.
+        required: false
+      registry_password:
+        description: Password/token for static-credential registry login. If empty, falls back to the GITHUB_TOKEN (correct for ghcr.io).
+        required: false
+      aws_access_key_id:
+        description: AWS access key ID for ECR auth (used when aws_region is set and aws_role_to_assume is empty).
+        required: false
+      aws_secret_access_key:
+        description: AWS secret access key for ECR auth (used when aws_region is set and aws_role_to_assume is empty).
         required: false
 
 env:
@@ -334,13 +364,31 @@ jobs:
         HASH=$(printf '%s\n%s\n' "$ENGINE_MODS_HASH" "$DOCKERFILE_HASH" | sha256sum | cut -d' ' -f1)
         echo "HASH=$HASH" >> $GITHUB_OUTPUT
         echo "Engine mods hash: $HASH"
-    - name: Log in to GHCR (for pulling pre-modded image)
-      if: ${{ inputs.engine_mods_image != '' }}
+    # --- Pre-modded image registry auth (generic: static credentials or AWS ECR). Independent of the
+    #     Epic base-image registry (ghcr.io), which is logged into separately in the fallback path. ---
+    - name: Configure AWS Credentials for ECR (OIDC)
+      if: ${{ inputs.engine_mods_image != '' && inputs.aws_region != '' && inputs.aws_role_to_assume != '' }}
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-region: ${{ inputs.aws_region }}
+        role-to-assume: ${{ inputs.aws_role_to_assume }}
+    - name: Configure AWS Credentials for ECR (Access Keys)
+      if: ${{ inputs.engine_mods_image != '' && inputs.aws_region != '' && inputs.aws_role_to_assume == '' }}
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-region: ${{ inputs.aws_region }}
+        aws-access-key-id: ${{ secrets.aws_access_key_id }}
+        aws-secret-access-key: ${{ secrets.aws_secret_access_key }}
+    - name: Login to Amazon ECR (for pulling pre-modded image)
+      if: ${{ inputs.engine_mods_image != '' && inputs.aws_region != '' }}
+      uses: aws-actions/amazon-ecr-login@v2
+    - name: Login to Container Registry (static credentials, for pulling pre-modded image)
+      if: ${{ inputs.engine_mods_image != '' && inputs.aws_region == '' }}
       uses: docker/login-action@v2
       with:
-        registry: ghcr.io
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
+        registry: ${{ inputs.registry }}
+        username: ${{ inputs.registry_username }}
+        password: ${{ secrets.registry_password != '' && secrets.registry_password || secrets.GITHUB_TOKEN }}
     - name: Try Pull Pre-Modded Tempo Unreal Image
       if: ${{ inputs.engine_mods_image != '' }}
       id: pull_modded

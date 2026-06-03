@@ -1,15 +1,25 @@
 # ======
-# Publish a Tempo Unreal Docker image with engine mods pre-applied to GHCR.
+# Publish a Tempo Unreal Docker image with engine mods pre-applied to a container registry.
 # This reusable workflow builds the base Tempo Unreal Docker image (from the Epic-distributed image),
 # runs the Tempo engine-mods install script inside a container, then commits and pushes the resulting
-# image to a parameterized GHCR repository tagged with <unreal_version>-<hashFiles(EngineMods/**)>.
+# image to a parameterized registry repository (image_name) tagged with <unreal_version>-<hashFiles(EngineMods/**)>.
 # A consumer build workflow can then `docker pull` this image instead of running the
 # "Initialize Engine Mods Cache" + "Install Engine Mods" steps each build.
 # The skip-if-tag-exists check makes the workflow idempotent on no-op merges to main.
-# Note: A caller workflow must have EPIC_DOCKER_USERNAME and EPIC_DOCKER_TOKEN secrets and must call
-#       this workflow with 'secrets: inherit'.
-# Note: After the first successful push, set the GHCR package visibility to private via the package
+#
+# Target registry: defaults to ghcr.io using the GITHUB_TOKEN. To push elsewhere, set image_name to the
+# target host and either (a) pass registry/registry_username + the registry_password secret for a
+# static-credential registry (Docker Hub, GAR, ACR, Quay, ...), or (b) set aws_region (+ aws_role_to_assume
+# for OIDC, or the aws_access_key_id/aws_secret_access_key secrets) to push to AWS ECR.
+#
+# Note: The Epic *base* image is always pulled from ghcr.io (it is Epic-distributed); this is independent
+#       of where the modded image is pushed. A caller workflow must have EPIC_DOCKER_USERNAME and
+#       EPIC_DOCKER_TOKEN secrets and must call this workflow with 'secrets: inherit'.
+# Note: When using OIDC for ECR (aws_role_to_assume), the caller's job must grant 'id-token: write'.
+# Note: After the first successful push to GHCR, set the package visibility to private via the package
 #       settings UI. Redistribution of UE-derived content publicly is not permitted by the UE EULA.
+#       (For ECR, repositories are private by default; create the repo ahead of time as ECR does not
+#       auto-create on push.)
 # ======
 
 name: Publish Pre-Modded Tempo Unreal Image
@@ -24,7 +34,7 @@ on:
       image_name:
         type: string
         required: true
-        description: Target GHCR image name without tag, e.g. ghcr.io/<owner>/tempo-unreal-modded
+        description: Target image name without tag, including the registry host, e.g. ghcr.io/<owner>/tempo-unreal-modded or <acct>.dkr.ecr.<region>.amazonaws.com/tempo-unreal-modded
       checkout_repo:
         type: string
         description: Repo to checkout (defaults to the caller's repo)
@@ -53,9 +63,34 @@ on:
         type: string
         description: Comma- or newline-separated repos to scope the minted submodules token to (default - all repos in the App installation). Only used when submodules_app_id is set.
         default: ''
+      registry:
+        type: string
+        description: Registry host to authenticate to for the modded image (static-credential registries only, e.g. ghcr.io or docker.io). Must match the host in image_name. Ignored when aws_region is set (ECR).
+        default: ghcr.io
+      registry_username:
+        type: string
+        description: Username for static-credential registry login. Defaults to the triggering actor (correct for ghcr.io).
+        default: ${{ github.actor }}
+      aws_region:
+        type: string
+        description: If set, authenticate to AWS ECR in this region (instead of a static-credential login) and push there. Provide aws_role_to_assume (OIDC) or the aws_access_key_id/aws_secret_access_key secrets. The caller must grant id-token-write permission when using OIDC.
+        default: ''
+      aws_role_to_assume:
+        type: string
+        description: IAM role ARN to assume via GitHub OIDC for ECR auth. Takes precedence over the access-key secrets when both are provided.
+        default: ''
     secrets:
       submodules_app_private_key:
         description: Private key (PEM) for the GitHub App identified by submodules_app_id. Required only when submodules_app_id is set.
+        required: false
+      registry_password:
+        description: Password/token for static-credential registry login. If empty, falls back to the GITHUB_TOKEN (correct for ghcr.io).
+        required: false
+      aws_access_key_id:
+        description: AWS access key ID for ECR auth (used when aws_region is set and aws_role_to_assume is empty).
+        required: false
+      aws_secret_access_key:
+        description: AWS secret access key for ECR auth (used when aws_region is set and aws_role_to_assume is empty).
         required: false
 
 env:
@@ -68,6 +103,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write  # Required for AWS ECR auth via OIDC (aws_role_to_assume). Harmless otherwise.
     steps:
     - name: Validate Inputs
       run: |
@@ -118,12 +154,31 @@ jobs:
         echo "HASH=$HASH" >> $GITHUB_OUTPUT
         echo "TAG=$TAG" >> $GITHUB_OUTPUT
         echo "Target tag: $TAG"
-    - name: Login to GHCR (for tag existence check)
+    # --- Target registry auth (generic: static credentials or AWS ECR). Used for the tag-existence
+    #     check below and for the final push. Independent of the Epic base-image registry (ghcr.io). ---
+    - name: Configure AWS Credentials for ECR (OIDC)
+      if: ${{ inputs.aws_region != '' && inputs.aws_role_to_assume != '' }}
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-region: ${{ inputs.aws_region }}
+        role-to-assume: ${{ inputs.aws_role_to_assume }}
+    - name: Configure AWS Credentials for ECR (Access Keys)
+      if: ${{ inputs.aws_region != '' && inputs.aws_role_to_assume == '' }}
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-region: ${{ inputs.aws_region }}
+        aws-access-key-id: ${{ secrets.aws_access_key_id }}
+        aws-secret-access-key: ${{ secrets.aws_secret_access_key }}
+    - name: Login to Amazon ECR
+      if: ${{ inputs.aws_region != '' }}
+      uses: aws-actions/amazon-ecr-login@v2
+    - name: Login to Container Registry (static credentials)
+      if: ${{ inputs.aws_region == '' }}
       uses: docker/login-action@v2
       with:
-        registry: ghcr.io
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
+        registry: ${{ inputs.registry }}
+        username: ${{ inputs.registry_username }}
+        password: ${{ secrets.registry_password != '' && secrets.registry_password || secrets.GITHUB_TOKEN }}
     - name: Skip if Tag Already Exists
       id: skip
       run: |
@@ -190,13 +245,16 @@ jobs:
           -v ${{ github.workspace }}/checkout/${{ inputs.tempo_root }}:/home/ue4/Tempo \
           tempo_unreal_image \
           /home/ue4/Tempo/Scripts/InstallEngineMods.sh
-    - name: Login to GHCR (for push, overwrites Epic creds)
-      if: ${{ steps.skip.outputs.skip != 'true' }}
+    # Re-establish target-registry creds for the push. Only needed in static-credential mode: when the
+    # target is also ghcr.io the Epic login above overwrote the same-host entry. In ECR mode the earlier
+    # ECR login lives under a different host and is untouched, so no re-login is required.
+    - name: Re-login to Container Registry for Push (static credentials)
+      if: ${{ steps.skip.outputs.skip != 'true' && inputs.aws_region == '' }}
       uses: docker/login-action@v2
       with:
-        registry: ghcr.io
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
+        registry: ${{ inputs.registry }}
+        username: ${{ inputs.registry_username }}
+        password: ${{ secrets.registry_password != '' && secrets.registry_password || secrets.GITHUB_TOKEN }}
     - name: Commit and Push Modded Image
       if: ${{ steps.skip.outputs.skip != 'true' }}
       run: |
