@@ -3,8 +3,10 @@
 # This workflow builds and packages an Unreal project using Tempo.
 # If the project is not very large it can run on a GitHub-hosted runner.
 # It relies on the Epic-distributed Unreal images (github.com/orgs/EpicGames/packages/container/package/unreal-engine)
-# **Note**: A workflow must have EPIC_DOCKER_USERNAME and EPIC_DOCKER_TOKEN secrets to call this workflow, and must
-#           call this workflow with 'secrets: inherit'. Please see the instructions here to obtain a token:
+# **Note**: A workflow must have EPIC_DOCKER_USERNAME and EPIC_DOCKER_TOKEN secrets to call this workflow. Same-org
+#           callers can pass them (and submodules_app_private_key) via 'secrets: inherit'. Callers in a DIFFERENT org
+#           must pass them explicitly under 'secrets:', since 'secrets: inherit' does not cross org boundaries. Please
+#           see the instructions here to obtain a token:
 #           https://dev.epicgames.com/documentation/en-us/unreal-engine/quick-start-guide-for-using-container-images-in-unreal-engine
 # **Note**: The pre-modded image (engine_mods_image) is pulled from ghcr.io by default using the GITHUB_TOKEN. To pull
 #           from another registry, set engine_mods_image to the target host and either pass registry/registry_username
@@ -147,6 +149,12 @@ on:
     secrets:
       submodules_app_private_key:
         description: Private key (PEM) for the GitHub App identified by submodules_app_id. Required only when submodules_app_id is set.
+        required: false
+      EPIC_DOCKER_USERNAME:
+        description: Username for pulling the Epic-distributed Unreal base image from ghcr.io. Declared so cross-org callers (which cannot inherit secrets) can pass it explicitly.
+        required: false
+      EPIC_DOCKER_TOKEN:
+        description: Token for pulling the Epic-distributed Unreal base image from ghcr.io. Declared so cross-org callers (which cannot inherit secrets) can pass it explicitly.
         required: false
       registry_password:
         description: Password/token for static-credential registry login. If empty, falls back to the GITHUB_TOKEN (correct for ghcr.io).

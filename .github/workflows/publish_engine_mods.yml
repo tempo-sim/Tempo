@@ -14,7 +14,9 @@
 #
 # Note: The Epic *base* image is always pulled from ghcr.io (it is Epic-distributed); this is independent
 #       of where the modded image is pushed. A caller workflow must have EPIC_DOCKER_USERNAME and
-#       EPIC_DOCKER_TOKEN secrets and must call this workflow with 'secrets: inherit'.
+#       EPIC_DOCKER_TOKEN secrets. Same-org callers can pass them (and submodules_app_private_key) via
+#       'secrets: inherit'; callers in a DIFFERENT org must pass them explicitly under 'secrets:', since
+#       'secrets: inherit' does not cross org boundaries.
 # Note: When using OIDC for ECR (aws_role_to_assume), the caller's job must grant 'id-token: write'.
 # Note: After the first successful push to GHCR, set the package visibility to private via the package
 #       settings UI. Redistribution of UE-derived content publicly is not permitted by the UE EULA.
@@ -82,6 +84,12 @@ on:
     secrets:
       submodules_app_private_key:
         description: Private key (PEM) for the GitHub App identified by submodules_app_id. Required only when submodules_app_id is set.
+        required: false
+      EPIC_DOCKER_USERNAME:
+        description: Username for pulling the Epic-distributed Unreal base image from ghcr.io. Declared so cross-org callers (which cannot inherit secrets) can pass it explicitly.
+        required: false
+      EPIC_DOCKER_TOKEN:
+        description: Token for pulling the Epic-distributed Unreal base image from ghcr.io. Declared so cross-org callers (which cannot inherit secrets) can pass it explicitly.
         required: false
       registry_password:
         description: Password/token for static-credential registry login. If empty, falls back to the GITHUB_TOKEN (correct for ghcr.io).
