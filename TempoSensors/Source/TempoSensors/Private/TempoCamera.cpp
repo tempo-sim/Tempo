@@ -314,6 +314,10 @@ UTempoCamera::UTempoCamera()
 	ApplyPhotorealisticRenderSettings(PostProcessSettings, ShowFlags, bUseRayTracingIfEnabled);
 }
 
+// Defaulted here (not in the header) so ~TUniquePtr<FTempoCameraVideoEncoder> is instantiated in
+// this translation unit, where TempoCameraVideoEncoder.h has made the type complete.
+UTempoCamera::~UTempoCamera() = default;
+
 bool UTempoCamera::HasDetectedParameterChange() const
 {
 	return SizeXY != SizeXY_Internal

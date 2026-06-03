@@ -254,6 +254,10 @@ class TEMPOSENSORS_API UTempoCamera : public UTempoTiledSceneCaptureComponent
 
 public:
 	UTempoCamera();
+	// Declared here and defaulted in the .cpp so the TUniquePtr<FTempoCameraVideoEncoder> member is
+	// destroyed in a translation unit where FTempoCameraVideoEncoder is complete (it is only
+	// forward-declared in this header).
+	~UTempoCamera();
 
 	// UTempoSceneCaptureComponent2D hooks. UTempoCamera drives its own timer and manages its own
 	// readback from SharedFinalTextureTarget (not the inherited TextureTarget, which is used as
