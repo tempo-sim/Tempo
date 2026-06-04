@@ -427,6 +427,24 @@ jobs:
         registry: ${{ inputs.registry }}
         username: ${{ inputs.registry_username }}
         password: ${{ secrets.registry_password != '' && secrets.registry_password || secrets.GITHUB_TOKEN }}
+    - name: Report Pre-Modded Image Download Size (estimate)
+      if: ${{ inputs.engine_mods_image != '' }}
+      continue-on-error: true  # purely informational; never fail the build over it
+      env:
+        DOCKER_CLI_EXPERIMENTAL: enabled  # needed for `docker manifest inspect` on older Docker
+      run: |
+        TAG="${{ inputs.engine_mods_image }}:${{ env.UNREAL_VERSION }}-${{ steps.engine_mods_hash.outputs.HASH }}"
+        echo "Inspecting registry manifest for $TAG (no pull/extract)"
+        # Sum the compressed layer sizes from the manifest. Empty for multi-arch manifest lists.
+        COMPRESSED=$(docker manifest inspect "$TAG" | jq '[.layers[]?.size] | add // 0')
+        if [ -n "$COMPRESSED" ] && [ "$COMPRESSED" != "0" ]; then
+          echo "Compressed download size: $((COMPRESSED / 1000000000)) GB"
+          echo "Estimated extracted size (~3x compressed): $((COMPRESSED * 3 / 1000000000)) GB"
+        else
+          echo "Could not determine layer sizes from manifest (multi-arch or unsupported)."
+        fi
+        echo "Free space before pull:"
+        df -h /
     - name: Try Pull Pre-Modded Tempo Unreal Image
       if: ${{ inputs.engine_mods_image != '' }}
       id: pull_modded
@@ -475,6 +493,14 @@ jobs:
       if: ${{ steps.pull_modded.outputs.used != 'true' }}
       run: |
         docker build --build-arg UNREAL_VERSION=${{ env.UNREAL_VERSION }} --tag 'tempo_unreal_image' -f ${{ github.workspace }}/${{ inputs.tempo_root }}/Dockerfile .
+    - name: Report Tempo Unreal Image Size
+      continue-on-error: true  # informational; image exists whether pulled or built
+      run: |
+        SIZE=$(docker image inspect tempo_unreal_image --format '{{.Size}}')
+        echo "tempo_unreal_image on-disk size: $SIZE bytes ($((SIZE / 1000000000)) GB)"
+        docker system df -v || true
+        echo "Free space after image is resident:"
+        df -h /
     - name: Initialize Engine Mods Cache (if not restored from cache and not using pre-modded image)
       if: ${{ steps.restore_engine_mods_cache.outputs.cache-hit != 'true' && steps.pull_modded.outputs.used != 'true' }}
       run: |
