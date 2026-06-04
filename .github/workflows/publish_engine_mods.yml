@@ -219,6 +219,12 @@ jobs:
         sudo rm -rf /usr/local/share/powershell || true                        # ~1.2G
         sudo rm -rf /usr/local/share/chromium /opt/google /opt/microsoft || true  # browsers, ~2G
         sudo rm -rf /usr/local/lib/node_modules || true                        # ~1G
+        sudo rm -rf /usr/lib/jvm || true                                       # JDKs, ~1.5G
+        sudo rm -rf /usr/share/miniconda || true                               # ~0.6G
+        sudo rm -rf /usr/local/julia* || true                                  # ~1.5G
+        sudo rm -rf /usr/local/share/vcpkg || true                             # ~0.3G
+        sudo rm -rf /opt/az /usr/local/graalvm /usr/local/lib/heroku || true   # ~1G
+        sudo apt-get clean || true
         df -h /
     - name: Free Space in /mnt (if using GitHub-hosted runner)
       if: ${{ steps.skip.outputs.skip != 'true' && contains(runner.name, 'Github') && contains(runner.name, 'Actions') }}

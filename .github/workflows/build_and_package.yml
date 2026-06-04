@@ -134,6 +134,10 @@ on:
         type: boolean
         description: Generate the Tempo C++ API during the build (sets TEMPO_GEN_CPP_API=1 in the container)
         default: false
+      prune_git:
+        type: boolean
+        description: Remove the checkout's .git directories after timestamp fixup (before the Docker pull) to free disk space on small runners. Only the pre-pull host steps need git; enable this on disk-constrained runners, but verify the in-container build/cook does not read git for version stamping.
+        default: false
       registry:
         type: string
         description: Registry host to authenticate to for pulling the pre-modded image (static-credential registries only, e.g. ghcr.io or docker.io). Must match the host in engine_mods_image. Ignored when aws_region is set (ECR).
@@ -231,6 +235,12 @@ jobs:
         sudo rm -rf /usr/local/share/powershell || true                        # ~1.2G
         sudo rm -rf /usr/local/share/chromium /opt/google /opt/microsoft || true  # browsers, ~2G
         sudo rm -rf /usr/local/lib/node_modules || true                        # ~1G
+        sudo rm -rf /usr/lib/jvm || true                                       # JDKs, ~1.5G
+        sudo rm -rf /usr/share/miniconda || true                               # ~0.6G
+        sudo rm -rf /usr/local/julia* || true                                  # ~1.5G
+        sudo rm -rf /usr/local/share/vcpkg || true                             # ~0.3G
+        sudo rm -rf /opt/az /usr/local/graalvm /usr/local/lib/heroku || true   # ~1G
+        sudo apt-get clean || true
         df -h /
     - name: Free Space in /mnt (if using GitHub-hosted runner)
       if: ${{ contains(runner.name, 'Github') && contains(runner.name, 'Actions') }}
@@ -347,6 +357,23 @@ jobs:
         # Set the permissions of the source files such that they can be accessed in the docker container.
         sudo chown -R 1000:1000 ${{ github.workspace }}/${{ inputs.project_root }}
         sudo chmod -R 755 ${{ github.workspace }}/${{ inputs.project_root }}
+    - name: Probe and Prune .git (free space before Docker pull)
+      run: |
+        # The host steps that need git (Find Common Ancestor, the timestamp fixup above) have all run by
+        # now, so .git is dead weight for the rest of this job. With fetch-depth: 0 + recursive submodules
+        # it can be several GB. Always probe its size; only remove it when prune_git is enabled, since the
+        # in-container build/cook may read git for version stamping.
+        echo "Size of .git directories under the checkout:"
+        sudo du -sh $(find ${{ github.workspace }}/${{ inputs.project_root }} -name .git) 2>/dev/null | sort -rh || true
+        TOTAL=$(sudo du -shc $(find ${{ github.workspace }}/${{ inputs.project_root }} -name .git) 2>/dev/null | tail -1) || true
+        echo "Total .git: ${TOTAL}"
+        if [ "${{ inputs.prune_git }}" = "true" ]; then
+          echo "prune_git enabled: removing .git directories."
+          sudo find ${{ github.workspace }}/${{ inputs.project_root }} -name .git -prune -exec rm -rf {} + || true
+          df -h /
+        else
+          echo "prune_git disabled: leaving .git in place (set prune_git: true to reclaim the space above)."
+        fi
     - name: Download Base Release (if creating a patch)
       if: ${{ inputs.patch }}
       uses: dawidd6/action-download-artifact@v7
