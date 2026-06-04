@@ -11,7 +11,7 @@
 
 #include "TempoSceneCaptureComponent2D.generated.h"
 
-namespace TempoSensorsShared
+namespace TempoSensors
 {
 	class MeasurementHeader;
 }

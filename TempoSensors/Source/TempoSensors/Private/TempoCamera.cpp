@@ -513,7 +513,7 @@ void UTempoCamera::RequestMeasurement(const TempoSensors::VideoRequest& Request,
 	// a frame is encoded — we don't know SizeXY until SharedFinalTextureTarget exists.
 	if (!VideoEncoder.IsValid())
 	{
-		VideoEncoder = MakeUnique<FTempoCameraVideoEncoder>();
+		VideoEncoder = MakePimpl<FTempoCameraVideoEncoder>();
 	}
 	bVideoEncoderConfigured = false;
 }

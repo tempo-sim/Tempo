@@ -7,6 +7,7 @@
 #include "TempoServer.h"
 
 #include "CoreMinimal.h"
+#include "Templates/PimplPtr.h"
 #include "Engine/Scene.h"
 #include "SceneTypes.h"
 #include "ShowFlags.h"
@@ -421,8 +422,11 @@ protected:
 
 	// H.264 encoder shared across all subscribed video stream clients. Created lazily on the first
 	// VideoRequest, reconfigured on size/codec/profile/bitrate/KFI changes, kept alive while any
-	// requests are pending. Owned via TUniquePtr to keep the wrapper out of the header.
-	TUniquePtr<class FTempoCameraVideoEncoder> VideoEncoder;
+	// requests are pending. TPimplPtr keeps the wrapper out of the header: its deleter is captured
+	// (with a complete type) at MakePimpl time, so the compiler-generated members of this UObject --
+	// including the UHT vtable-helper constructor emitted in the .gen.cpp -- never need the complete
+	// type. (A plain TUniquePtr<incomplete> member fails there with -Wdelete-incomplete.)
+	TPimplPtr<class FTempoCameraVideoEncoder> VideoEncoder;
 
 	// Encoder is reconfigured the first time we encode a frame whose params don't match — the
 	// camera doesn't know its resolution until SharedFinalTextureTarget is allocated.
