@@ -204,18 +204,33 @@ jobs:
         android: true
         dotnet: true
         haskell: true
-        large-packages: false
-        docker-images: false
+        large-packages: true
+        docker-images: true
         swap-storage: false
     - name: Free Space in /mnt (if using GitHub-hosted runner)
       if: ${{ steps.skip.outputs.skip != 'true' && contains(runner.name, 'Github') && contains(runner.name, 'Actions') }}
       run: |
-        sudo rm -rf /mnt/btrfs_loopbacks || true
-        sudo rm -rf /mnt/var-lib-docker || true
-        df -h /mnt
+        # Newer runner images no longer mount a separate resource disk at /mnt; it is just a
+        # directory on the root volume, so there is nothing to free here. Only act when /mnt is
+        # its own filesystem (older runner images).
+        if mountpoint -q /mnt; then
+          sudo rm -rf /mnt/btrfs_loopbacks || true
+          sudo rm -rf /mnt/var-lib-docker || true
+          df -h /mnt
+        else
+          echo "/mnt is not a separate filesystem on this runner; nothing to free."
+        fi
     - name: Relocate Docker Daemon Data Root (if using GitHub-hosted runner)
       if: ${{ steps.skip.outputs.skip != 'true' && contains(runner.name, 'Github') && contains(runner.name, 'Actions') }}
       run: |
+        # Older runner images mounted a separate, larger resource disk at /mnt, so we told docker
+        # to store images there instead of on the smaller root volume. Newer images have a single
+        # large root volume and no separate /mnt, in which case relocating buys nothing (it would
+        # just be another directory on the same disk) and costs a docker restart, so skip it.
+        if ! mountpoint -q /mnt; then
+          echo "/mnt is not a separate filesystem on this runner; leaving docker data-root on /."
+          exit 0
+        fi
         DOCKER_DATA_ROOT='/mnt/var/lib/docker'
         DOCKER_DAEMON_JSON='/etc/docker/daemon.json'
         sudo mkdir -p "${DOCKER_DATA_ROOT}"
