@@ -326,11 +326,11 @@ TOP_LEVEL_ACTIONS = [
 async def main():
     parser = argparse.ArgumentParser(description="Movement Playground - interactive TempoMovement client")
     parser.add_argument('--ip', required=False, help="IP address of machine where Tempo is running", default="0.0.0.0")
-    parser.add_argument('--port', required=False, help="Port Tempo gRPC server is using", default=10001)
+    parser.add_argument('--port', required=False, type=int, help="Port Tempo gRPC server is using", default=10001)
     args = parser.parse_args()
 
     if args.ip != "0.0.0.0" or args.port != 10001:
-        tempo.set_server(address=args.ip, port=args.port)
+        await tempo.set_server(address=args.ip, port=args.port)
 
     print("\n=== Movement Playground ===")
     print("Drive vehicles, command velocities/accelerations, and navigate pawns at runtime.\n")
