@@ -139,6 +139,8 @@ jobs:
         path: checkout
         submodules: recursive
         token: ${{ steps.submodules_app_token.outputs.token != '' && steps.submodules_app_token.outputs.token || (inputs.submodules_token != '' && inputs.submodules_token || github.token) }}
+    - name: Report Free Space (after checkout)
+      run: df -h /
     - name: Compute Engine Mods Hash and Tag
       id: tag
       run: |
@@ -206,7 +208,18 @@ jobs:
         haskell: true
         large-packages: true
         docker-images: true
-        swap-storage: false
+        swap-storage: true
+    - name: Free Additional Disk Space (if using GitHub-hosted runner)
+      if: ${{ steps.skip.outputs.skip != 'true' && contains(runner.name, 'Github') && contains(runner.name, 'Actions') }}
+      run: |
+        # Remove large preinstalled toolchains that jlumbroso/free-disk-space does not cover.
+        # None are used by the Unreal build. Each path is removed best-effort.
+        df -h /
+        sudo rm -rf /usr/share/swift || true                                   # ~3G
+        sudo rm -rf /usr/local/share/powershell || true                        # ~1.2G
+        sudo rm -rf /usr/local/share/chromium /opt/google /opt/microsoft || true  # browsers, ~2G
+        sudo rm -rf /usr/local/lib/node_modules || true                        # ~1G
+        df -h /
     - name: Free Space in /mnt (if using GitHub-hosted runner)
       if: ${{ steps.skip.outputs.skip != 'true' && contains(runner.name, 'Github') && contains(runner.name, 'Actions') }}
       run: |
