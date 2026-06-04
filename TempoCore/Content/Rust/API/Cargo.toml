@@ -7,12 +7,10 @@ edition = "2021"
 description = "Rust client API for Tempo simulation"
 license = "Proprietary"
 
-# Explicit include so generated files (which .gitignore excludes) ship in the .crate.
 include = [
     "Cargo.toml",
     "build.rs",
     "src/**/*.rs",
-    "proto/**/*.proto",
 ]
 
 [dependencies]
@@ -23,8 +21,3 @@ tokio-stream = "0.1"
 thiserror = "2.0"
 once_cell = "1.19"
 http = "1.0"
-
-[build-dependencies]
-tonic-build = "0.13"
-walkdir = "2"
-protoc-bin-vendored = "3"
