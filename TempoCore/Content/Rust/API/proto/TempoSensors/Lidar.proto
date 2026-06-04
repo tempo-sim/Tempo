@@ -1,0 +1,65 @@
+// Copyright Tempo Simulation, LLC. All Rights Reserved
+
+syntax = "proto3";
+
+import "TempoSensors/Common.proto";
+
+// Generic [min, max] interval. Units are carried by the field that uses this type.
+message Range {
+  float min = 1;
+  float max = 2;
+}
+
+message LidarScanSegment {
+  TempoSensors.MeasurementHeader header = 1;
+  // Total number of segments that comprise one full scan (segments share a sequence_id).
+  int32 scan_count = 2;
+  // Number of vertical beams (rows) in this segment.
+  int32 vertical_beams = 3;
+  // Number of horizontal beams (columns) in this segment.
+  int32 horizontal_beams = 4;
+  // Min/max measurable range in meters.
+  Range distance_range_m = 5;
+  // Azimuth sweep covered by this segment, in radians (right-handed, sign per Tempo lidar convention).
+  Range azimuth_range_rad = 6;
+  // Elevation sweep covered by this segment, in radians (right-handed, sign per Tempo lidar convention).
+  Range elevation_range_rad = 7;
+  // Per-return distance to the hit, in meters. 0 = no return. Packed H-outer, V-inner.
+  repeated float distances_m = 8;
+  // Per-return reflected intensity in [0, 1]. Same layout as `distances_m`.
+  repeated float intensities = 9;
+  // Per-return semantic label (0 if labels disabled). Same layout as `distances_m`.
+  repeated uint32 labels = 10;
+  // Per-return azimuth in radians. Same layout as `distances_m`.
+  repeated float azimuths_rad = 11;
+  // Per-return elevation in radians. Same layout as `distances_m`.
+  repeated float elevations_rad = 12;
+  // Per-return packed 8-bit color, 3 bytes per return. Empty when color rendering is disabled
+  // (no client has requested `include_color`). When non-empty, length is 3 * horizontal_beams *
+  // vertical_beams and byte ordering is given by `color_encoding`. Per-return color for return
+  // (h, v) occupies bytes [3 * (h * vertical_beams + v), 3 * (h * vertical_beams + v) + 3).
+  bytes colors = 13;
+  // Byte ordering of `colors`. CE_UNKNOWN when `colors` is empty.
+  TempoSensors.ColorEncoding color_encoding = 14;
+  // Per-return surface reflectivity estimate, 1 byte per return in [0, 255] (0 = least
+  // reflective). Derived from material PBR properties (base color, metallic, specular, roughness)
+  // by the lidar post-process material; it is an estimate, not a calibrated NIR reflectance.
+  // Always populated, in both color and no-color modes. Same H-outer/V-inner layout as
+  // `distances_m`: reflectivity for return (h, v) is byte (h * vertical_beams + v). Length is
+  // horizontal_beams * vertical_beams.
+  bytes reflectivities = 15;
+}
+
+message LidarScanRequest {
+  // Name of the actor that owns the sensor.
+  string owner = 1;
+  // Name of the sensor component on the owning actor.
+  string sensor = 2;
+  // When true, request that the server enable color rendering on this lidar and populate
+  // `colors` in returned segments. The first such request flips the sensor into color mode
+  // (drains in-flight reads, swaps the render path); the mode is held until no pending request
+  // sets this flag. The toggle has a real GPU cost — color mode uses Lumen + ray tracing.
+  bool include_color = 3;
+}
+
+package TempoSensors;

@@ -1,0 +1,59 @@
+// Copyright Tempo Simulation, LLC. All Rights Reserved
+
+syntax = "proto3";
+
+import "TempoCore/Empty.proto";
+import "TempoCore/Geometry.proto";
+
+message Date {
+  uint32 day = 1;
+  uint32 month = 2;
+  uint32 year = 3;
+}
+
+message TimeOfDay {
+  uint32 hour = 1;
+  uint32 minute = 2;
+  uint32 second = 3;
+}
+
+message DateTime {
+  Date date = 1;
+  TimeOfDay time = 2;
+}
+
+message GeographicCoordinate {
+  // Latitude in degrees, WGS84.
+  double latitude_deg = 1;
+  // Longitude in degrees, WGS84.
+  double longitude_deg = 2;
+  // Altitude in meters above the WGS84 ellipsoid.
+  double altitude_m = 3;
+}
+
+message GeographicReference {
+  // The geographic coordinate of the Unreal world origin.
+  GeographicCoordinate origin = 1;
+  // Orientation of the world origin relative to the local North-West-Up frame.
+  // Radians, right-handed (roll, pitch, yaw), consistent with TempoCore.Transform.
+  TempoCore.Rotation rotation = 2;
+}
+
+message DayCycleRateRequest {
+  // Multiplier applied to wall-clock time when advancing the in-game day cycle. Unitless.
+  float rate = 1;
+}
+
+service GeographicService {
+  rpc SetDate(Date) returns (TempoCore.Empty);
+
+  rpc SetTimeOfDay(TimeOfDay) returns (TempoCore.Empty);
+
+  rpc SetDayCycleRelativeRate(DayCycleRateRequest) returns (TempoCore.Empty);
+
+  rpc GetDateTime(TempoCore.Empty) returns (DateTime);
+
+  rpc SetGeographicReference(GeographicReference) returns (TempoCore.Empty);
+}
+
+package TempoGeographic;

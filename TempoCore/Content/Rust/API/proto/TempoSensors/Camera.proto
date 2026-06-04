@@ -1,0 +1,127 @@
+// Copyright Tempo Simulation, LLC. All Rights Reserved
+
+syntax = "proto3";
+
+import "TempoSensors/Common.proto";
+
+message ColorImage {
+  TempoSensors.MeasurementHeader header = 1;
+  // Image width in pixels.
+  uint32 width_px = 2;
+  // Image height in pixels.
+  uint32 height_px = 3;
+  // Raw bytes of an encoded image file.
+  bytes data = 4;
+  ColorEncoding encoding = 5;
+}
+
+message DepthImage {
+  TempoSensors.MeasurementHeader header = 1;
+  // Image width in pixels.
+  uint32 width_px = 2;
+  // Image height in pixels.
+  uint32 height_px = 3;
+  // Depth along the camera axis for every pixel, in meters. Row-major, width_px * height_px entries.
+  repeated float depths_m = 4;
+}
+
+message LabelImage {
+  TempoSensors.MeasurementHeader header = 1;
+  // Image width in pixels.
+  uint32 width_px = 2;
+  // Image height in pixels.
+  uint32 height_px = 3;
+  // 8-bit instance label for every pixel. Row-major, width_px * height_px entries.
+  bytes data = 4;
+}
+
+message BoundingBox2D {
+  // Top-left X in pixels.
+  uint32 min_x_px = 1;
+  // Top-left Y in pixels.
+  uint32 min_y_px = 2;
+  // Bottom-right X in pixels.
+  uint32 max_x_px = 3;
+  // Bottom-right Y in pixels.
+  uint32 max_y_px = 4;
+  // Instance ID from the matching label image (1-255).
+  uint32 instance_id = 5;
+  // Semantic class ID.
+  uint32 semantic_id = 6;
+}
+
+message BoundingBoxes {
+  TempoSensors.MeasurementHeader header = 1;
+  // Source image width in pixels (for coordinate reference).
+  uint32 width_px = 2;
+  // Source image height in pixels (for coordinate reference).
+  uint32 height_px = 3;
+  repeated BoundingBox2D bounding_boxes = 4;
+}
+
+message ColorImageRequest {
+  // Name of the actor that owns the sensor.
+  string owner = 1;
+  // Name of the sensor component on the owning actor.
+  string sensor = 2;
+}
+
+message DepthImageRequest {
+  // Name of the actor that owns the sensor.
+  string owner = 1;
+  // Name of the sensor component on the owning actor.
+  string sensor = 2;
+}
+
+message LabelImageRequest {
+  // Name of the actor that owns the sensor.
+  string owner = 1;
+  // Name of the sensor component on the owning actor.
+  string sensor = 2;
+}
+
+message BoundingBoxesRequest {
+  // Name of the actor that owns the sensor.
+  string owner = 1;
+  // Name of the sensor component on the owning actor.
+  string sensor = 2;
+}
+
+enum VideoCodec {
+  H264 = 0;
+}
+
+enum H264Profile {
+  H264_BASELINE = 0;
+  H264_MAIN = 1;
+  H264_HIGH = 2;
+}
+
+// Encoded video frame. Lossy and not bit-deterministic across runs — use ColorImage if you need
+// raw pixels (e.g. for ML data generation or regression testing).
+message VideoFrame {
+  TempoSensors.MeasurementHeader header = 1;
+  uint32 width = 2;
+  uint32 height = 3;
+  // Annex-B NAL units. SPS+PPS are prepended on key (IDR) frames so a client that joins mid-stream
+  // can decode starting from the next key frame without a separate parameter-set handshake.
+  bytes data = 4;
+  bool key_frame = 5;
+  VideoCodec codec = 6;
+}
+
+message VideoRequest {
+  // Name of the actor that owns the sensor.
+  string owner = 1;
+  // Name of the sensor component on the owning actor.
+  string sensor = 2;
+  VideoCodec codec = 3;
+  // 0 = use default (chosen per resolution; ~8000 for 1080p).
+  uint32 bitrate_kbps = 4;
+  // Frames between IDRs. 0 = use default (30). Lower values reduce join latency at the cost of bitrate.
+  uint32 keyframe_interval = 5;
+  // Only used when codec == H264.
+  H264Profile profile = 6;
+}
+
+package TempoSensors;

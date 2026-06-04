@@ -1,0 +1,125 @@
+// Copyright Tempo Simulation, LLC. All Rights Reserved
+
+syntax = "proto3";
+
+import "TempoCore/Geometry.proto";
+
+// Collision channel for physics queries.
+enum CollisionChannel {
+  CC_UNKNOWN = 0;
+  CC_WORLD_STATIC = 1;
+  CC_WORLD_DYNAMIC = 2;
+  CC_VISIBILITY = 3;
+}
+
+message RaycastRequest {
+  // Start position in meters (Tempo right-handed world frame).
+  TempoCore.Vector start = 1;
+  // End position in meters (Tempo right-handed world frame).
+  TempoCore.Vector end = 2;
+  CollisionChannel collision_channel = 3;
+  // Names of actors to ignore for this query.
+  repeated string ignored_actors = 4;
+}
+
+message RaycastResponse {
+  // True if the ray hit something.
+  bool hit = 1;
+  // Hit location in meters (Tempo right-handed world frame).
+  TempoCore.Vector location = 2;
+  // Hit normal (Tempo right-handed world frame).
+  TempoCore.Vector normal = 3;
+  // Distance from `start` to the hit point, in meters.
+  float distance_m = 4;
+  // Name of the actor that was hit.
+  string actor = 5;
+  // Name of the component that was hit.
+  string component = 6;
+}
+
+message OverlapEventRequest {
+  // Name of the actor whose overlap events to stream.
+  string actor = 1;
+}
+
+message OverlapEventResponse {
+  // Name of the actor whose subscription fired (matches the request's `actor`).
+  string overlapped_actor_name = 1;
+  // Name of the actor that overlapped with `overlapped_actor_name`.
+  string overlapping_actor_name = 2;
+  // Class/type name of `overlapping_actor_name`.
+  string overlapping_actor_type = 3;
+}
+
+message ActorStateRequest {
+  // Name of the actor to query.
+  string actor = 1;
+  // Include components flagged as hidden when computing the actor's bounds.
+  bool include_hidden_components = 2;
+}
+
+message ActorStatesNearRequest {
+  // Name of the actor at the center of the query.
+  string near_actor = 1;
+  // Radius around `near_actor` in meters.
+  float search_radius_m = 2;
+  // Include static actors.
+  bool include_static = 3;
+  // Include actors flagged as hidden.
+  bool include_hidden_actors = 4;
+  // Include components flagged as hidden when computing each actor's bounds.
+  bool include_hidden_components = 5;
+}
+
+// Request actors near a world position (instead of near a named actor).
+message ActorStatesNearPositionRequest {
+  // World position at the center of the query (Tempo right-handed world frame, meters).
+  TempoCore.Vector position = 1;
+  // Radius around `position` in meters.
+  float search_radius_m = 2;
+  // Include static actors.
+  bool include_static = 3;
+  // Include actors flagged as hidden.
+  bool include_hidden_actors = 4;
+  // Include components flagged as hidden when computing each actor's bounds.
+  bool include_hidden_components = 5;
+}
+
+message ActorState {
+  // Sim time at which the state was sampled, in seconds.
+  double timestamp_s = 1;
+  // Name of the actor.
+  string name = 2;
+  // World transform (meters / right-handed).
+  TempoCore.Transform transform = 3;
+  // World-axis-aligned bounding box, in meters.
+  TempoCore.Box bounds = 4;
+  // World-frame 6-DoF velocity (linear m/s, angular rad/s).
+  TempoCore.Twist velocity = 5;
+  // Axis-aligned bounding box in the actor's local frame, with the actor's scale baked in,
+  // in meters. Combine with `transform` (location + rotation) to recover the tight oriented box.
+  TempoCore.Box local_bounds = 6;
+}
+
+message ActorStates {
+  repeated ActorState actor_states = 1;
+}
+
+service WorldStateService {
+  rpc StreamOverlapEvents(OverlapEventRequest) returns (stream OverlapEventResponse);
+
+  rpc GetCurrentActorState(ActorStateRequest) returns (ActorState);
+
+  rpc StreamActorState(ActorStateRequest) returns (stream ActorState);
+
+  rpc GetCurrentActorStatesNear(ActorStatesNearRequest) returns (ActorStates);
+
+  rpc GetCurrentActorStatesNearPosition(ActorStatesNearPositionRequest) returns (ActorStates);
+
+  rpc StreamActorStatesNear(ActorStatesNearRequest) returns (stream ActorStates);
+
+  // Perform a single raycast.
+  rpc Raycast(RaycastRequest) returns (RaycastResponse);
+}
+
+package TempoWorld;

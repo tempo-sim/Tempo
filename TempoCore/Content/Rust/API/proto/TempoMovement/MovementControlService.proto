@@ -1,0 +1,82 @@
+// Copyright Tempo Simulation, LLC. All Rights Reserved
+
+syntax = "proto3";
+
+import "TempoCore/Empty.proto";
+import "TempoCore/Geometry.proto";
+
+message CommandablePawnsResponse {
+  // Names of pawns that accept movement commands (driving, velocity, or acceleration).
+  repeated string pawns = 1;
+}
+
+// Open-loop driving input. Acceleration and steering are normalized to [-1, 1].
+message NormalizedDrivingCommand {
+  // Name of the vehicle to command.
+  string vehicle = 1;
+  // Normalized throttle/brake in [-1, 1].
+  float acceleration = 2;
+  // Normalized steering in [-1, 1].
+  float steering = 3;
+}
+
+// Closed-loop velocity command. Twist is in the pawn body frame:
+// linear x forward, linear y to the right, angular z is yaw rate (right-handed, m/s and rad/s).
+message VelocityCommand {
+  // Name of the pawn to command.
+  string pawn = 1;
+  TempoCore.Twist twist = 2;
+}
+
+// Closed-loop acceleration command. Same frame and conventions as VelocityCommand,
+// but in m/s^2 and rad/s^2.
+message AccelerationCommand {
+  // Name of the pawn to command.
+  string pawn = 1;
+  TempoCore.Accel accel = 2;
+}
+
+message NavigablePawnsResponse {
+  // Names of pawns that accept move-to commands.
+  repeated string pawns = 1;
+}
+
+message PawnMoveToLocationRequest {
+  // Name of the pawn to move.
+  string pawn = 1;
+  // Target location in meters (world frame, or relative to the pawn if `relative` is true).
+  TempoCore.Vector location = 2;
+  // If true, `location` is interpreted relative to the pawn's current location.
+  bool relative = 3;
+}
+
+enum MoveToResult {
+  MTR_UNKNOWN = 0;
+  MTR_SUCCESS = 1;
+  MTR_BLOCKED = 2;
+  MTR_OFF_PATH = 3;
+  MTR_ABORTED = 4;
+  MTR_INVALID = 5;
+}
+
+message PawnMoveToLocationResponse {
+  MoveToResult result = 1;
+}
+
+service MovementControlService {
+  rpc GetCommandablePawns(TempoCore.Empty) returns (CommandablePawnsResponse);
+
+  rpc CommandVehicle(NormalizedDrivingCommand) returns (TempoCore.Empty);
+
+  rpc CommandVelocity(VelocityCommand) returns (TempoCore.Empty);
+
+  rpc CommandAcceleration(AccelerationCommand) returns (TempoCore.Empty);
+
+  rpc GetNavigablePawns(TempoCore.Empty) returns (NavigablePawnsResponse);
+
+  rpc PawnMoveToLocation(PawnMoveToLocationRequest) returns (PawnMoveToLocationResponse);
+
+  rpc RebuildNavigation(TempoCore.Empty) returns (TempoCore.Empty);
+}
+
+package TempoMovement;

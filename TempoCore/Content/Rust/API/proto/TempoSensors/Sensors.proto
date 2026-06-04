@@ -1,0 +1,50 @@
+// Copyright Tempo Simulation, LLC. All Rights Reserved
+
+syntax = "proto3";
+
+import "TempoCore/Empty.proto";
+import "TempoSensors/Camera.proto";
+import "TempoSensors/Lidar.proto";
+
+enum MeasurementType {
+  MT_UNKNOWN = 0;
+  MT_COLOR_IMAGE = 1;
+  MT_DEPTH_IMAGE = 2;
+  MT_LABEL_IMAGE = 3;
+  MT_LIDAR_SCAN = 4;
+  MT_BOUNDING_BOXES = 5;
+  MT_VIDEO = 6;
+}
+
+message SensorDescriptor {
+  // Name of the actor that owns the sensor.
+  string owner = 1;
+  // Name of the sensor component on the owning actor.
+  string name = 2;
+  // Capture rate in hertz.
+  float rate_hz = 3;
+  // Measurement types produced by this sensor.
+  repeated MeasurementType measurement_types = 4;
+}
+
+message AvailableSensorsResponse {
+  repeated SensorDescriptor available_sensors = 1;
+}
+
+service SensorService {
+  rpc GetAvailableSensors(TempoCore.Empty) returns (AvailableSensorsResponse);
+
+  rpc StreamColorImages(TempoSensors.ColorImageRequest) returns (stream TempoSensors.ColorImage);
+
+  rpc StreamDepthImages(TempoSensors.DepthImageRequest) returns (stream TempoSensors.DepthImage);
+
+  rpc StreamLabelImages(TempoSensors.LabelImageRequest) returns (stream TempoSensors.LabelImage);
+
+  rpc StreamBoundingBoxes(TempoSensors.BoundingBoxesRequest) returns (stream TempoSensors.BoundingBoxes);
+
+  rpc StreamLidarScans(TempoSensors.LidarScanRequest) returns (stream TempoSensors.LidarScanSegment);
+
+  rpc StreamVideo(TempoSensors.VideoRequest) returns (stream TempoSensors.VideoFrame);
+}
+
+package TempoSensors;

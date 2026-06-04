@@ -1,0 +1,80 @@
+// Copyright Tempo Simulation, LLC. All Rights Reserved
+
+syntax = "proto3";
+
+import "TempoCore/Empty.proto";
+
+enum ControlMode {
+  CM_UNKNOWN = 0;
+  // Control is explicitly disabled.
+  CM_DISABLED = 1;
+  // Manual user control via keyboard/gamepad input.
+  CM_USER = 2;
+  // Open-loop scripted control: commands are applied directly without feedback.
+  CM_OPEN_LOOP = 3;
+  // Closed-loop scripted control: commands track a setpoint with feedback.
+  CM_CLOSED_LOOP = 4;
+}
+
+enum EngineScalability {
+  ES_UNKNOWN = 0;
+  ES_LOW = 1;
+  ES_MEDIUM = 2;
+  ES_HIGH = 3;
+  ES_EPIC = 4;
+  ES_CINEMATIC = 5;
+}
+
+message LoadLevelRequest {
+  // Path or name of the level to load.
+  string level = 1;
+  // If true, defer finishing the load until FinishLoadingLevel is called.
+  bool deferred = 2;
+  // If true, start the level paused.
+  bool start_paused = 3;
+}
+
+message CurrentLevelResponse {
+  // Path or name of the currently loaded level.
+  string level = 1;
+}
+
+message GetAvailableLevelsRequest {
+  string search_path = 1;  // e.g. "/Game/Maps" - empty string searches /Game/
+}
+
+message AvailableLevelsResponse {
+  repeated string levels = 1;
+}
+
+message SetMainViewportRenderEnabledRequest {
+  bool enabled = 1;
+}
+
+message SetControlModeRequest {
+  ControlMode mode = 1;
+}
+
+message SetEngineScalabilityRequest {
+  EngineScalability scalability = 1;
+}
+
+service TempoCoreService {
+  rpc LoadLevel(LoadLevelRequest) returns (TempoCore.Empty);
+
+  rpc FinishLoadingLevel(TempoCore.Empty) returns (TempoCore.Empty);
+
+  rpc GetCurrentLevelName(TempoCore.Empty) returns (CurrentLevelResponse);
+
+  rpc GetAvailableLevels(GetAvailableLevelsRequest) returns (AvailableLevelsResponse);
+
+  rpc Quit(TempoCore.Empty) returns (TempoCore.Empty);
+
+  rpc SetMainViewportRenderEnabled(SetMainViewportRenderEnabledRequest) returns (TempoCore.Empty);
+
+  rpc SetControlMode(SetControlModeRequest) returns (TempoCore.Empty);
+
+  rpc SetEngineScalability(SetEngineScalabilityRequest) returns (TempoCore.Empty);
+}
+
+package TempoCore;
