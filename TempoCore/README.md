@@ -254,7 +254,7 @@ set TEMPO_GEN_RUST_API=1
 ```
 With the variable set, the prebuild step will generate Rust wrappers, build the crate, and produce a packaged `.crate` at `<plugin_root>/TempoCore/Content/Rust/API/target/package/tempo-sim-<version>.crate`.
 
-**System dependencies**: only the Rust toolchain (`cargo` + `rustc` — install via [rustup](https://rustup.rs/)). You do **not** need a system `protoc` — the crate's `build.rs` uses `protoc-bin-vendored` so consumers only need `cargo build`.
+**System dependencies**: only the Rust toolchain (`cargo` + `rustc` — install via [rustup](https://rustup.rs/)). You do **not** need a system `protoc` — the proto code is pre-compiled into the published crate, so consumers only need `cargo build`. (At prebuild time, generation uses a vendored `protoc` via the `tempo-sim-codegen` helper crate; consumers never see it.)
 
 To consume the crate from another Rust project, depend on it by path or git ref, e.g.:
 ```toml
