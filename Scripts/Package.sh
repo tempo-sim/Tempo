@@ -127,3 +127,39 @@ else
   cp -r "$PROJECT_ROOT/Saved/Cooked/$TARGET_PLATFORM/$PROJECT_NAME/Metadata" "$PROJECT_ROOT/Packaged"
   cp -r "$PROJECT_ROOT/Saved/Cooked/$TARGET_PLATFORM/$PROJECT_NAME/AssetRegistry.bin" "$PROJECT_ROOT/Packaged"
 fi
+
+# Copy generated Rust crate(s) to Packaged/API/Rust/ so downstream consumers can
+# build a Rust client against this packaged build. Only ships the files that
+# `cargo package` would include — same as the publish artifact, minus target/,
+# Cargo.lock, tempo_proto_includes/, etc. Source of truth is each crate's
+# `include = [...]` field; `cargo package --list` honors it.
+PACKAGE_RUST_CRATE() {
+  local CRATE_DIR="$1"
+  local CRATE_MANIFEST="$CRATE_DIR/Cargo.toml"
+  if [[ ! -f "$CRATE_MANIFEST" ]]; then
+    return 0
+  fi
+  local CRATE_NAME
+  CRATE_NAME=$(grep -m1 '^name' "$CRATE_MANIFEST" | sed -E 's/^name\s*=\s*"([^"]+)".*/\1/')
+  local DEST="$PROJECT_ROOT/Packaged/API/Rust/$CRATE_NAME"
+  echo "Packaging Rust crate $CRATE_NAME -> $DEST"
+  rm -rf "$DEST"
+  mkdir -p "$DEST"
+  # `--no-verify` skips the compile-the-extracted-crate step, so this works
+  # even when a path dep (e.g. tempo-sim) isn't on crates.io yet.
+  (cd "$CRATE_DIR" && cargo package --list --no-verify --allow-dirty 2>/dev/null) | \
+    grep -vE '^(Cargo\.lock|Cargo\.toml\.orig|\.cargo_vcs_info\.json)$' | \
+    while IFS= read -r rel; do
+      if [[ -f "$CRATE_DIR/$rel" ]]; then
+        mkdir -p "$DEST/$(dirname "$rel")"
+        cp "$CRATE_DIR/$rel" "$DEST/$rel"
+      fi
+    done
+}
+
+if command -v cargo >/dev/null 2>&1; then
+  PACKAGE_RUST_CRATE "$PROJECT_ROOT/Plugins/Tempo/TempoCore/Content/Rust/API"
+  PACKAGE_RUST_CRATE "$PROJECT_ROOT/Content/Rust/API"
+else
+  echo "Skipping Rust crate packaging: cargo not on PATH"
+fi

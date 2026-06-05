@@ -624,12 +624,14 @@ pub use tempo_sim::{set_server, set_server_async, tempo_context, TempoContext, T
             f.write(f"pub mod {module};\n")
 
 
-def write_project_cargo_toml(project_crate_dir: Path, crate_name: str, tempo_crate_dir: Path):
+def write_project_cargo_toml(project_crate_dir: Path, crate_name: str, tempo_crate_dir: Path,
+                             tempo_crate_version: str):
     """Write the project crate's Cargo.toml.
 
     Always overwritten — it's a generated artifact, like lib.rs. Depends on
-    `tempo-sim` by path so local changes propagate without a publish step;
-    after `tempo-sim` ships on crates.io this could switch to a version dep.
+    `tempo-sim` by path (so local changes propagate without a publish step)
+    AND by version (so `cargo package` accepts it; cargo strips the path on
+    publish and falls back to the version from crates.io).
     """
     rel_tempo = os.path.relpath(tempo_crate_dir, project_crate_dir)
     cargo_toml = project_crate_dir / "Cargo.toml"
@@ -655,8 +657,8 @@ include = [
 ]
 
 [dependencies]
-tempo-sim = {{ path = "{rel_tempo}" }}
-tonic = "0.12"
+tempo-sim = {{ path = "{rel_tempo}", version = "{tempo_crate_version}" }}
+tonic = "0.13"
 prost = "0.13"
 tokio = {{ version = "1", features = ["rt-multi-thread", "sync", "macros", "time"] }}
 tokio-stream = "0.1"
@@ -893,7 +895,7 @@ if __name__ == "__main__":
 
     if project_modules_present:
         project_name = project_crate_name(project_root)
-        write_project_cargo_toml(project_crate_dir, project_name, tempo_crate_dir)
+        write_project_cargo_toml(project_crate_dir, project_name, tempo_crate_dir, crate_version)
         write_project_gitignore(project_crate_dir)
 
     # cargo package's verify step compiles the extracted crate, so this doubles
@@ -906,6 +908,11 @@ if __name__ == "__main__":
     )
 
     if project_modules_present:
+        # `cargo build` against the local path dep is the sanity check. We don't
+        # `cargo package` here because cargo strips `path` from tempo-sim during
+        # packaging and then can't resolve the version on crates.io (where it
+        # isn't published). Package.sh enumerates ship-files via `cargo package
+        # --list --no-verify`, which works without resolving deps.
         print("[Tempo Prebuild] Building project Rust crate", flush=True)
         subprocess.run(
             ["cargo", "build", "--quiet",
