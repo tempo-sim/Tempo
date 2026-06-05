@@ -4,10 +4,13 @@
 name = "tempo-sim"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.85"
 description = "Rust client API for the Tempo simulation server. Generated gRPC wrappers with sync and async surfaces."
 license = "Apache-2.0"
-repository = "https://github.com/aurum-ai/Tempo"
+repository = "https://github.com/tempo-sim/Tempo"
+homepage = "https://temposimulation.com"
 documentation = "https://docs.rs/tempo-sim"
+readme = "README.md"
 keywords = ["grpc", "tonic", "tempo", "simulation", "client"]
 categories = ["api-bindings", "asynchronous"]
 
@@ -15,6 +18,7 @@ categories = ["api-bindings", "asynchronous"]
 # proto/ ships for debuggability / reflection use cases even though the source is pre-compiled.
 include = [
     "Cargo.toml",
+    "README.md",
     "LICENSE",
     "src/**/*.rs",
     "proto/**/*.proto",
