@@ -157,9 +157,14 @@ PACKAGE_RUST_CRATE() {
     done
 }
 
-if command -v cargo >/dev/null 2>&1; then
-  PACKAGE_RUST_CRATE "$PROJECT_ROOT/Plugins/Tempo/TempoCore/Content/Rust/API"
-  PACKAGE_RUST_CRATE "$PROJECT_ROOT/Content/Rust/API"
-else
-  echo "Skipping Rust crate packaging: cargo not on PATH"
+# Only package the Rust crate(s) when Rust generation is opted in via
+# TEMPO_GEN_RUST_API (same gate as gen_rust_api.py / GenRustAPI.sh); otherwise
+# the crates are absent or stale and shouldn't be shipped.
+if [[ -n "$TEMPO_GEN_RUST_API" && "$TEMPO_GEN_RUST_API" != "0" ]]; then
+  if command -v cargo >/dev/null 2>&1; then
+    PACKAGE_RUST_CRATE "$PROJECT_ROOT/Plugins/Tempo/TempoCore/Content/Rust/API"
+    PACKAGE_RUST_CRATE "$PROJECT_ROOT/Content/Rust/API"
+  else
+    echo "Skipping Rust crate packaging: cargo not on PATH"
+  fi
 fi
