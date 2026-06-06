@@ -15,24 +15,16 @@ import sys
 from pathlib import Path
 
 from gen_common import (
+    INFRA_PACKAGE,
+    classify_modules,
     gather_enums,
     gather_messages,
     gather_services,
+    package_import_name,
     pascal_to_snake,
+    project_package_name as project_crate_name,
     protobuf_types_to_rust_types,
 )
-
-
-def load_pb2_module(file_path, module_name):
-    """Load a pb2 module directly without importing parent packages.
-
-    This avoids triggering imports of dependencies like curio that may not be installed.
-    """
-    spec = importlib.util.spec_from_file_location(module_name, file_path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module
 
 
 TEMPO_INFRA_CRATE = "tempo_sim"  # Rust ident form of the tempo-sim crate name.
@@ -139,16 +131,18 @@ def proto_path_to_rust_module(proto_path):
     return proto_path
 
 
-def generate_rust_api(python_root_dir, tempo_root_dir, project_root_dir, module_owners):
+def generate_rust_api(module_dirs, tempo_root_dir, project_root_dir, module_owners):
     """Generate Rust API wrapper modules from protobuf definitions.
 
     Args:
-        python_root_dir: directory containing the staged pb2 trees (one subdir per module).
+        module_dirs: dict mapping module name (PascalCase, e.g. "TempoCore" or "Greeter")
+            to (namespace, dir) — `namespace` is the Python package the module's pb2 nest
+            under (e.g. "tempo_sim", "tempo_sample"), `dir` is the module's pb2 directory.
         tempo_root_dir: src/ dir of the tempo-sim crate (always written).
         project_root_dir: src/ dir of the project crate, or None if there are no project
             modules (in which case no project crate is emitted).
-        module_owners: dict mapping module name (PascalCase, e.g. "TempoCore" or "Greeter")
-            to "tempo" or "project" — drives crate placement and cross-crate type paths.
+        module_owners: dict mapping module name to "tempo" or "project" — drives crate
+            placement and cross-crate type paths.
     """
     all_enums = {}
     all_messages = {}
@@ -159,21 +153,21 @@ def generate_rust_api(python_root_dir, tempo_root_dir, project_root_dir, module_
     # Track all modules that have proto files
     all_proto_modules = set()
 
-    # Find all tempo module directories
-    tempo_module_names = [name for name in os.listdir(python_root_dir)
-                         if os.path.isdir(os.path.join(python_root_dir, name))]
-
-    for tempo_module_name in tempo_module_names:
-        tempo_module_root = os.path.join(python_root_dir, tempo_module_name)
+    for tempo_module_name, (namespace, module_dir) in module_dirs.items():
+        tempo_module_root = str(module_dir)
         for path, _, files in os.walk(tempo_module_root):
             for filename in files:
                 if filename.endswith("_pb2.py"):
                     file_path = os.path.join(path, filename)
                     rel_path = os.path.relpath(file_path, tempo_module_root)
-                    module_name = "{}.{}".format(
-                        tempo_module_name, os.path.splitext(rel_path)[0].replace(os.sep, '.'))
-                    # Load module directly to avoid triggering parent package imports
-                    module = load_pb2_module(file_path, f"tempo.{module_name}")
+                    rel_module = os.path.splitext(rel_path)[0].replace(os.sep, '.')
+                    # Descriptor keys stay un-prefixed (TempoCore.Empty_pb2) so the Rust
+                    # module derivation (split(".")[0]) sees the PascalCase module name;
+                    # the import uses the namespace-qualified path so each nested pb2 is
+                    # loaded once under its canonical name (no double registration).
+                    module_name = "{}.{}".format(tempo_module_name, rel_module)
+                    qualified_name = "{}.{}.{}".format(namespace, tempo_module_name, rel_module)
+                    module = importlib.import_module(qualified_name)
                     if hasattr(module, "DESCRIPTOR"):
                         module_descriptor = module.DESCRIPTOR
                         all_proto_modules.add(tempo_module_name)
@@ -784,39 +778,6 @@ Cargo.lock
 ''', encoding="utf-8")
 
 
-def project_crate_name(project_root: Path) -> str:
-    """Derive a kebab-case crate name from the project directory name.
-
-    Inserts `-` before each non-leading uppercase letter and lowercases all:
-    `TempoSample` -> `tempo-sample`, `MyGame2` -> `my-game2`. Acronyms split
-    one letter at a time (`FooBARBaz` -> `foo-b-a-r-baz`); if that hurts, the
-    user can rename the project directory or pass an override.
-    """
-    name = project_root.name
-    return re.sub(r'(?<!^)(?=[A-Z])', '-', name).lower()
-
-
-def classify_modules(plugin_root: Path, module_names):
-    """Return {module: "tempo" | "project"} based on where the module lives.
-
-    A module is "tempo" if a directory `<plugin_root>/*/Source/<module>` exists
-    — that's the Unreal layout for plugin modules. Editor sub-modules (e.g.
-    `TempoCore/Source/TempoCoreEditor`) and ROS bridge sub-modules all live
-    one level deep under the plugin's top-level dir, not directly under it,
-    so the simpler "is there a `<plugin_root>/<module>/` dir" check misses them.
-    Anything not found under `plugin_root` is treated as "project".
-    """
-    tempo_modules = set()
-    for plugin_subdir in plugin_root.iterdir():
-        source_dir = plugin_subdir / "Source"
-        if not source_dir.is_dir():
-            continue
-        for d in source_dir.iterdir():
-            if d.is_dir():
-                tempo_modules.add(d.name)
-    return {name: ("tempo" if name in tempo_modules else "project") for name in module_names}
-
-
 def _read_crate_version(cargo_toml: Path) -> str:
     """Pull the package version out of Cargo.toml without taking a TOML dep."""
     text = cargo_toml.read_text(encoding="utf-8")
@@ -826,18 +787,20 @@ def _read_crate_version(cargo_toml: Path) -> str:
     return match.group(1)
 
 
-def _collect_rust_inputs(script_dir: str, python_root_dir: str, rust_crate_dir: Path,
+def _collect_rust_inputs(script_dir: str, pb2_roots, rust_crate_dir: Path,
                          codegen_crate_dir: Path):
     """Files whose contents drive Rust wrapper generation and the cargo build."""
     inputs = [
         Path(__file__).resolve(),
         (Path(script_dir) / "gen_common.py").resolve(),
     ]
-    # All pb2 modules feed the wrapper templates.
-    for path, _, files in os.walk(python_root_dir):
-        for filename in files:
-            if filename.endswith("_pb2.py"):
-                inputs.append(Path(path) / filename)
+    # All pb2 modules (across the tempo_sim and project package dirs) feed the
+    # wrapper templates.
+    for pb2_root in pb2_roots:
+        for path, _, files in os.walk(pb2_root):
+            for filename in files:
+                if filename.endswith("_pb2.py"):
+                    inputs.append(Path(path) / filename)
     # Manifest and hand-written + generated sources, and protos.
     cargo_toml = rust_crate_dir / "Cargo.toml"
     if cargo_toml.exists():
@@ -916,7 +879,8 @@ if __name__ == "__main__":
                         .format(sys.version_info[0], sys.version_info[1], sys.version_info[2]))
 
     script_dir = os.path.dirname(os.path.realpath(__file__))
-    python_root_dir = os.path.join(script_dir, "API", "tempo")
+    api_dir = os.path.join(script_dir, "API")
+    tempo_sim_pb2_dir = os.path.join(api_dir, INFRA_PACKAGE)
     tempo_crate_dir = Path(script_dir, "..", "Rust", "API").resolve()
     codegen_crate_dir = Path(script_dir, "..", "Rust", "Codegen").resolve()
     tempo_src_dir = str(tempo_crate_dir / "src")
@@ -926,6 +890,8 @@ if __name__ == "__main__":
     module_root = Path(script_dir).parent.parent.resolve()
     plugin_root = module_root.parent.resolve()  # Plugins/Tempo
     project_root = plugin_root.parent.parent.resolve()  # the Unreal project root
+    project_py_import = package_import_name(project_crate_name(project_root))
+    project_pb2_dir = project_root / "Content" / "Python" / "API" / project_py_import
     project_crate_dir = (project_root / "Content" / "Rust" / "API").resolve()
     project_src_dir = project_crate_dir / "src"
     project_proto_out_dir = project_src_dir / "proto"
@@ -936,8 +902,11 @@ if __name__ == "__main__":
 
     # Add paths for imports
     sys.path.append(script_dir)
-    # Add the tempo directory so pb2 imports can find other pb2 files
-    sys.path.append(python_root_dir)
+    # Add the API dirs (parents of the package dirs) so the namespace-qualified
+    # nested pb2 (tempo_sim.*, <project>.*) and their cross-imports resolve.
+    sys.path.append(api_dir)
+    if project_pb2_dir.exists():
+        sys.path.append(str(project_root / "Content" / "Python" / "API"))
 
     from prebuild_cache import PrebuildCache
 
@@ -948,14 +917,26 @@ if __name__ == "__main__":
     crate_version = _read_crate_version(cargo_toml)
     crate_artifact = tempo_crate_dir / "target" / "package" / f"tempo-sim-{crate_version}.crate"
 
-    # Classify modules by inspecting the staged pb2 tree: each subdir is one module.
-    module_names = [name for name in os.listdir(python_root_dir)
-                    if os.path.isdir(os.path.join(python_root_dir, name))]
+    # Discover modules by inspecting the nested pb2 trees: each subdir of a
+    # package dir is one module. {module: (namespace, dir)}.
+    module_dirs = {}
+    for name in sorted(os.listdir(tempo_sim_pb2_dir)):
+        d = os.path.join(tempo_sim_pb2_dir, name)
+        if os.path.isdir(d) and name != "__pycache__":
+            module_dirs[name] = (INFRA_PACKAGE, Path(d))
+    if project_pb2_dir.exists():
+        for name in sorted(os.listdir(project_pb2_dir)):
+            d = project_pb2_dir / name
+            if d.is_dir() and name != "__pycache__":
+                module_dirs[name] = (project_py_import, d)
+    module_names = list(module_dirs)
     module_owners = classify_modules(plugin_root, module_names)
     project_modules_present = any(o == "project" for o in module_owners.values())
 
+    pb2_roots = [tempo_sim_pb2_dir] + ([str(project_pb2_dir)] if project_pb2_dir.exists() else [])
+
     cache = PrebuildCache(module_root / ".tempo_prebuild_cache.json")
-    input_files = _collect_rust_inputs(script_dir, python_root_dir, tempo_crate_dir, codegen_crate_dir)
+    input_files = _collect_rust_inputs(script_dir, pb2_roots, tempo_crate_dir, codegen_crate_dir)
     if project_modules_present:
         input_files += _collect_project_crate_inputs(project_crate_dir)
     output_files = [crate_artifact]
@@ -991,7 +972,7 @@ if __name__ == "__main__":
 
     print("[Tempo Prebuild] Generating Rust API", flush=True)
     generate_rust_api(
-        python_root_dir,
+        module_dirs,
         tempo_src_dir,
         str(project_src_dir) if project_modules_present else None,
         module_owners,
@@ -1027,7 +1008,7 @@ if __name__ == "__main__":
         )
 
     # Re-collect inputs since generation rewrote the wrapper modules.
-    input_files = _collect_rust_inputs(script_dir, python_root_dir, tempo_crate_dir, codegen_crate_dir)
+    input_files = _collect_rust_inputs(script_dir, pb2_roots, tempo_crate_dir, codegen_crate_dir)
     if project_modules_present:
         input_files += _collect_project_crate_inputs(project_crate_dir)
     cache.update("gen_rust_api", input_files, [crate_artifact])

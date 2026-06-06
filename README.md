@@ -56,27 +56,27 @@ Use the included `Scripts/Build.sh` and `Scripts/Run.sh` (or their `.bat` counte
 
 ### Hello World
 > [!NOTE]
-> You don't have to install any Python package or dependences to use Tempo. The build step automatically generated a `tempo` Python package and virtual environment, which will be used below.
+> You don't have to install any Python package or dependences to use Tempo. The build step automatically generated the `tempo_sim` Python package and virtual environment, which will be used below.
 1. With your Tempo project open in Unreal Editor, from the root of your project, activate the Tempo virtual environment (`source ./TempoEnv/bin/activate` on Linux & Mac, or `source ./TempoEnv/Scripts/activate` on Windows)
 2. Start the Python interpreter (`python` on Linux & Mac, or `winpty python` on Windows) and use the Tempo API to start the simulation:
 ```
-import tempo.tempo_core_editor as tce
+import tempo_sim.tempo_core_editor as tce
 tce.play_in_editor() # Simulation should begin
 ```
 3. Use TempoWorld to add an Actor to your scene:
 ```
-import tempo.tempo_world as tw
+import tempo_sim.tempo_world as tw
 tw.spawn_actor(type="BP_SensorRig") # An Actor with a tripod mesh should appear. It has a TempoCamera on top (although it may not be visible).
 ```
-4. From another terminal, run the included [SensorPlayground](https://github.com/tempo-sim/Tempo/blob/main/ExampleClients/SensorPlayground.py) example client: `python ./ExampleClients/SensorPlayground.py`. Use it to start streaming color images from the `TempoCamera`
+4. From another terminal, run the included [SensorPlayground](https://github.com/tempo-sim/Tempo/blob/main/ExampleClients/Python/SensorPlayground.py) example client: `python ./Plugins/Tempo/ExampleClients/Python/SensorPlayground.py`. Use it to start streaming color images from the `TempoCamera`
 5. While streaming images, from the Python interpreter again, use TempoWorld to change one of the Camera's properties:
 ```
 tw.set_float_property(actor="BP_SensorRig", component="TempoCamera", property="FOVAngle", value=60.0) # The field of view of your streaming images should decrease
 ```
 6. Lastly, use TempoCore to pause, resume, and step the simulation:
 ```
-import tempo.tempo_core as tc
-import TempoCore.Time_pb2 as Time
+import tempo_sim.tempo_core as tc
+import tempo_sim.TempoCore.Time_pb2 as Time
 tc.pause() # Time should pause
 tc.play() # Time should resume
 tc.set_time_mode(Time.TM_FIXED_STEP) # Time mode should switch to Fixed Step, simulation should run faster than real-time

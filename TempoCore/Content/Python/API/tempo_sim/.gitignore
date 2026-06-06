@@ -1,0 +1,13 @@
+# Generated pb2 modules and service wrappers (populated by gen_protos.py /
+# gen_api.py) are git-ignored — they ship only in the built artifact. The
+# hand-written infra below is the exception.
+
+# Ignore everything
+*
+
+# Except this file and the hand-written infra
+!.gitignore
+!__init__.py
+!_tempo_context.py
+!TempoImageUtils.py
+!TempoLidarUtils.py

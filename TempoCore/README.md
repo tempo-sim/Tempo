@@ -75,11 +75,16 @@ Tempo enforces some conventions on the proto files you write, which enable compo
 
 Composability necessitates file name and message/service name de-conflicting. The proto's `package` declaration is the wire identity (gRPC method paths, `Any` type URLs) and is what consumers reference by fully-qualified name. The prebuild leaves source-declared packages verbatim; when a proto has no `package` line, the prebuild appends one whose value is the owning module name. So by default, a proto in module `Foo` lands in package `Foo`; if you want a different name (to deconflict against another proto with the same basename in a different module, or to namespace messages within a module), declare the `package` explicitly in the proto file.
 
-To import/include proto files or protobuf-generated code in other proto files, C++, or Python code
+To import/include proto files or protobuf-generated code in other proto files or C++ code
 you will need to follow the convention
 ```
-ModuleName/RelativePath/FileName.<proto/pb.h/_pb2.py>
+ModuleName/RelativePath/FileName.<proto/pb.h>
 ```
+In Python, the generated `_pb2.py` modules are nested under their owning package namespace — `tempo_sim` for Tempo plugin modules, and your project's own package (e.g. `tempo_sample`) for project modules — so the convention is
+```
+<package>/ModuleName/RelativePath/FileName_pb2.py
+```
+(for example, `import tempo_sim.TempoCore.Geometry_pb2`).
 When you refer to proto messages or services from anywhere outside of the proto file where they are defined you must refer to them
 by their fully-qualified name, according to the proto's `package`. So that means:
 
@@ -212,7 +217,7 @@ Activating the same service on multiple objects simultaneously will result in an
 
 ### Using the Python API
 Tempo automatically generates both the Python classes for the messages and services in your Protobuf files *and* a Python wrapper library to make 
-writing client code extremely easy. All of this ends up in the `tempo` Python package. This package will be automatically installed for you to a 
+writing client code extremely easy. Tempo's own modules end up in the publishable `tempo_sim` Python package (PyPI dist name `tempo-sim`, import name `tempo_sim`); your project's own service modules end up in a separate project package (e.g. `tempo_sample`) that depends on `tempo_sim` and re-exports its runtime helpers. Both packages will be automatically installed for you to a 
 Python virtual environment located at `<project_root>/TempoEnv`. You can activate that virtual environment with:
 ```
 # On Windows:
@@ -220,15 +225,17 @@ source <project_root>/TempoEnv/Scripts/activate
 # On Linux or Mac:
 source <project_root>/TempoEnv/bin/activate
 ```
-Alternatively, you can install the `tempo` package to your system frameworks or another virtual environment with:
+Alternatively, you can install the `tempo-sim` package (and, if your project defines its own services, the project package) to your system frameworks or another virtual environment with:
 ```
 pip install "<project_root>/Plugins/Tempo/TempoCore/Content/Python/API"
+# And, for the project package (if present):
+pip install "<project_root>/Content/Python/API"
 ```
-The `tempo` wrapper library adds a Python module for every C++ module in the Tempo project with synchronous and asynchronous wrappers for every RPC 
+The wrapper library adds a Python module for every C++ module in the Tempo project with synchronous and asynchronous wrappers for every RPC 
 defined in that module. The request parameters will be laid out flat as arguments to the wrapper. For example, the above service `MyService` would 
 result in the following two Python method signatures:
 ```
-import tempo.my_module as t_mm
+import tempo_sim.my_module as t_mm
 # Synchronous version
 t_mm.my_rpc(some_request=3)
 # Asynchronous version
@@ -278,7 +285,7 @@ Tempo core includes services for managing the lifecycle of a simulation and cont
 
 The Tempo core service includes RPCs for loading levels. There are cases where you may want to load a level and set some properties (learn more about setting properties at runtime in the [TempoWorld](https://github.com/tempo-sim/Tempo/tree/release/TempoWorld) README) on the Actors in that level _before_ the `BeginPlay` event has happened. For example, you may want to set a property that will be used _during_ `BeginPlay`. For this reason, the Tempo core service supports "deferred" level loads, where all of a level's Actors are loaded but BeginPlay` is not called yet. In a Python client, managing the lifecycle of a level could look like this:
 ```
-import tempo.tempo_core as tc
+import tempo_sim.tempo_core as tc
 
 tc.load_level("MyLevel", deferred=True)
 # Set some properties on the Actors in MyLevel
@@ -291,8 +298,8 @@ tc.quit()
 
 The Tempo time service includes RPCs for setting the time mode and simulation time step, as well as pausing, stepping, and playing time. In a python client, you could pause time, set the time mode to fixed step, set the simulation time step to 0.1s, and step the simulation in a loop like this:
 ```
-import tempo.tempo_core as tc
-import TempoCore.Time_pb2 as Time
+import tempo_sim.tempo_core as tc
+import tempo_sim.TempoCore.Time_pb2 as Time
 
 tc.pause()
 tc.set_time_mode(Time.TM_FIXED_STEP)
@@ -307,11 +314,11 @@ By default a Tempo client (Python program) will try to connect to a Tempo server
 
 However, the client and server need not be on the same machine. In python, you can set the server address like this:
 ```
-import tempo
-tempo.set_server(address="my_server_ip")
+import tempo_sim
+tempo_sim.set_server(address="my_server_ip")
 
 # Or in an async context (including Jupyter notebooks):
-await tempo.set_server(address="my_server_ip")
+await tempo_sim.set_server(address="my_server_ip")
 ```
 
 You can also run multiple Tempo servers on the same machine by setting a non-default port through the project settings or by specifying the `ServerPort` command line argument when running UnrealEditor or the packaged binary. For example:
@@ -326,9 +333,9 @@ The command line value takes precedence over project settings, until project set
 
 You can tell a Python client which server to connect to like this:
 ```
-import tempo
-tempo.set_server(port=10002)
+import tempo_sim
+tempo_sim.set_server(port=10002)
 
 # Or in an async context (including Jupyter notebooks):
-await tempo.set_server(port=10002)
+await tempo_sim.set_server(port=10002)
 ```

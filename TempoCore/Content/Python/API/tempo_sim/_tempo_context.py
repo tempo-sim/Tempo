@@ -71,4 +71,4 @@ def tempo_context(_singleton=TempoContext()):
 
 
 if __name__ == "__main__":
-    sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), "tempo"))
+    sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), "tempo_sim"))

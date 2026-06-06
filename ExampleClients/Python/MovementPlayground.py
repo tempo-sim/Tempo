@@ -4,10 +4,10 @@ import argparse
 import asyncio
 import grpc
 
-import tempo
-import tempo.tempo_movement as tm
-import TempoCore.Geometry_pb2 as Geometry
-import TempoMovement.MovementControlService_pb2 as Movement
+import tempo_sim
+import tempo_sim.tempo_movement as tm
+import tempo_sim.TempoCore.Geometry_pb2 as Geometry
+import tempo_sim.TempoMovement.MovementControlService_pb2 as Movement
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import FuzzyWordCompleter
@@ -330,7 +330,7 @@ async def main():
     args = parser.parse_args()
 
     if args.ip != "0.0.0.0" or args.port != 10001:
-        await tempo.set_server(address=args.ip, port=args.port)
+        await tempo_sim.set_server(address=args.ip, port=args.port)
 
     print("\n=== Movement Playground ===")
     print("Drive vehicles, command velocities/accelerations, and navigate pawns at runtime.\n")

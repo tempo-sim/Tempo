@@ -5,9 +5,9 @@ import asyncio
 import math
 import grpc
 
-import tempo
-import tempo.tempo_world as tw
-import TempoCore.Geometry_pb2 as Geometry
+import tempo_sim
+import tempo_sim.tempo_world as tw
+import tempo_sim.TempoCore.Geometry_pb2 as Geometry
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import FuzzyWordCompleter
@@ -714,7 +714,7 @@ async def main():
     args = parser.parse_args()
 
     if args.ip != "0.0.0.0" or args.port != 10001:
-        await tempo.set_server(address=args.ip, port=args.port)
+        await tempo_sim.set_server(address=args.ip, port=args.port)
 
     print("\n=== World Playground ===")
     print("Control actors, components, and properties at runtime.\n")

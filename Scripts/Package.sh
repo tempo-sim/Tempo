@@ -168,3 +168,39 @@ if [[ -n "$TEMPO_GEN_RUST_API" && "$TEMPO_GEN_RUST_API" != "0" ]]; then
     echo "Skipping Rust crate packaging: cargo not on PATH"
   fi
 fi
+
+# Build the generated Python package(s) (sdist + wheel) into
+# Packaged/API/Python/<dist-name>/ so downstream consumers can `pip install` a
+# Python client against this packaged build. Mirrors PACKAGE_RUST_CRATE.
+PYTHON_BIN=""
+for candidate in python3 python; do
+  if command -v "$candidate" >/dev/null 2>&1; then
+    PYTHON_BIN="$candidate"
+    break
+  fi
+done
+
+PACKAGE_PYTHON_PACKAGE() {
+  local PKG_DIR="$1"
+  local PYPROJECT="$PKG_DIR/pyproject.toml"
+  if [[ ! -f "$PYPROJECT" ]]; then
+    return 0
+  fi
+  local DIST_NAME
+  DIST_NAME=$(grep -m1 '^name' "$PYPROJECT" | sed -E 's/^name\s*=\s*"([^"]+)".*/\1/')
+  local DEST="$PROJECT_ROOT/Packaged/API/Python/$DIST_NAME"
+  echo "Packaging Python package $DIST_NAME -> $DEST"
+  rm -rf "$DEST"
+  mkdir -p "$DEST"
+  # `python -m build` produces an sdist (.tar.gz) and a wheel (.whl) in --outdir.
+  (cd "$PKG_DIR" && "$PYTHON_BIN" -m build --outdir "$DEST") || \
+    echo "Warning: failed to build Python package $DIST_NAME"
+}
+
+# Only package when a Python build toolchain is available (guard like cargo above).
+if [[ -n "$PYTHON_BIN" ]] && "$PYTHON_BIN" -c "import build" >/dev/null 2>&1; then
+  PACKAGE_PYTHON_PACKAGE "$PROJECT_ROOT/Plugins/Tempo/TempoCore/Content/Python/API"
+  PACKAGE_PYTHON_PACKAGE "$PROJECT_ROOT/Content/Python/API"
+else
+  echo "Skipping Python package build: python with the 'build' module not available"
+fi

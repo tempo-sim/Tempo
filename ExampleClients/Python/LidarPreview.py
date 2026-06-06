@@ -3,7 +3,7 @@
 import argparse
 import asyncio
 
-import tempo.TempoLidarUtils as tlu
+import tempo_sim.TempoLidarUtils as tlu
 
 async def main():
     parser = argparse.ArgumentParser()
