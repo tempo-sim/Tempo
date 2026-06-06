@@ -280,12 +280,14 @@ class CppApiGenerator:
         self.plugin_root = plugin_root.resolve()
         self.tool_dir = tool_dir.resolve()
 
-        # pb2 descriptors now live nested under their package namespaces (the
-        # Python API split): tempo_sim/<Module> here, plus <project>/<Module> in
-        # the project tree. The C++ wrapper consumes all of them. (The proto
+        # pb2 descriptors are nested under their package namespaces:
+        # tempo_sim/<Module> under the plugin, plus <project>/<Module> in the
+        # project tree. The C++ wrapper consumes all of them. (The proto
         # compilation itself uses the bare-path proto export in proto_dir.)
         self.api_root = self.plugin_root / "Content/Python/API"
         self.tempo_sim_dir = self.api_root / INFRA_PACKAGE
+        # self.plugin_root is the TempoCore plugin dir
+        # (<project>/Plugins/Tempo/TempoCore), so parents[2] is the project root.
         project_root = self.plugin_root.parents[2]
         self.project_py_import = package_import_name(project_package_name(project_root))
         self.project_pb2_dir = (project_root / "Content" / "Python" / "API"
@@ -348,6 +350,11 @@ class CppApiGenerator:
                 continue
             for d in sorted(pb2_root.iterdir()):
                 if d.is_dir() and d.name != "__pycache__":
+                    if d.name in module_dirs:
+                        raise RuntimeError(
+                            f"Module name collision: {d.name!r} exists in both the "
+                            f"tempo_sim and project ({self.project_py_import}) packages. "
+                            "Module names must be unique across plugin and project.")
                     module_dirs[d.name] = (namespace, d)
 
         for tempo_module_name, (namespace, tempo_module_root) in module_dirs.items():

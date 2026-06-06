@@ -372,11 +372,17 @@ def collect_input_files(project_root: Path, script_path: Path) -> List[Path]:
     return files
 
 
-def collect_output_files(package_dirs) -> List[Path]:
+def collect_output_files(package_dirs, project_api_dir=None, project_pkg_dir=None) -> List[Path]:
     """Collect generated API wrapper files across the given package dirs.
 
     Generated files are snake_case .py files at a package dir's top level,
     excluding the non-generated keepers and any pb2 modules.
+
+    When the project package is present, its generated metadata files
+    (pyproject.toml, .gitignore, __init__.py) are tracked too — they're
+    overwritten every run, so listing them as outputs makes the cache
+    regenerate if any is deleted. Listing a path that doesn't exist yet simply
+    invalidates the cache (the desired behavior on first run).
     """
     keep = TEMPO_SIM_KEEP | PROJECT_PKG_KEEP
     files = []
@@ -386,6 +392,10 @@ def collect_output_files(package_dirs) -> List[Path]:
         for f in package_dir.iterdir():
             if f.is_file() and f.suffix == ".py" and f.name not in keep and "_pb2" not in f.name:
                 files.append(f)
+    if project_api_dir is not None and project_pkg_dir is not None:
+        files += [project_api_dir / "pyproject.toml",
+                  project_api_dir / ".gitignore",
+                  project_pkg_dir / "__init__.py"]
     return files
 
 
@@ -564,10 +574,15 @@ if __name__ == "__main__":
 
     package_dirs = [tempo_sim_dir] + ([project_pkg_dir] if has_project_pkg else [])
 
+    # Generated project metadata to track in the cache (only when the project
+    # package exists).
+    cache_project_api_dir = project_api_dir if has_project_pkg else None
+    cache_project_pkg_dir = project_pkg_dir if has_project_pkg else None
+
     # Check cache
     cache = PrebuildCache(plugin_root / ".tempo_prebuild_cache.json")
     input_files = collect_input_files(project_root, Path(__file__))
-    output_files = collect_output_files(package_dirs)
+    output_files = collect_output_files(package_dirs, cache_project_api_dir, cache_project_pkg_dir)
 
     if cache.is_valid("gen_api", input_files, output_files,
                       input_base=project_root, output_base=project_root):
@@ -590,6 +605,6 @@ if __name__ == "__main__":
         write_project_gitignore(project_api_dir, project_import_name)
 
     # Update cache after successful generation
-    output_files = collect_output_files(package_dirs)
+    output_files = collect_output_files(package_dirs, cache_project_api_dir, cache_project_pkg_dir)
     cache.update("gen_api", input_files, output_files,
                  input_base=project_root, output_base=project_root)

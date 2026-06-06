@@ -143,11 +143,19 @@ PACKAGE_RUST_CRATE() {
   CRATE_NAME=$(grep -m1 '^name' "$CRATE_MANIFEST" | sed -E 's/^name\s*=\s*"([^"]+)".*/\1/')
   local DEST="$PROJECT_ROOT/Packaged/API/Rust/$CRATE_NAME"
   echo "Packaging Rust crate $CRATE_NAME -> $DEST"
+  # `--no-verify` skips the compile-the-extracted-crate step, so this works
+  # even when a path dep (e.g. tempo-sim) isn't on crates.io yet. Capture the
+  # file list (stdout) and check the exit status so a `cargo package` failure
+  # surfaces instead of silently shipping an empty crate dir; cargo's own
+  # warnings/errors still go to the terminal via stderr.
+  local FILE_LIST
+  if ! FILE_LIST=$(cd "$CRATE_DIR" && cargo package --list --no-verify --allow-dirty); then
+    echo "Error: 'cargo package --list' failed for $CRATE_NAME; leaving any prior package untouched." >&2
+    return 1
+  fi
   rm -rf "$DEST"
   mkdir -p "$DEST"
-  # `--no-verify` skips the compile-the-extracted-crate step, so this works
-  # even when a path dep (e.g. tempo-sim) isn't on crates.io yet.
-  (cd "$CRATE_DIR" && cargo package --list --no-verify --allow-dirty 2>/dev/null) | \
+  printf '%s\n' "$FILE_LIST" | \
     grep -vE '^(Cargo\.lock|Cargo\.toml\.orig|\.cargo_vcs_info\.json)$' | \
     while IFS= read -r rel; do
       if [[ -f "$CRATE_DIR/$rel" ]]; then

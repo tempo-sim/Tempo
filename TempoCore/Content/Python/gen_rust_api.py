@@ -57,8 +57,8 @@ def get_rust_type(field, current_owner=None, module_owners=None):
     """Get the Rust type for a protobuf field.
 
     If `current_owner` and `module_owners` are supplied, message-type refs cross
-    crate boundaries via TEMPO_INFRA_CRATE when needed; otherwise they default
-    to `crate::` paths (tempo-sim's behavior pre-split).
+    crate boundaries via TEMPO_INFRA_CRATE when needed; otherwise they resolve to
+    same-crate `crate::` paths.
     """
     if field.proto_type == gpd.FieldDescriptor.TYPE_MESSAGE:
         parts = field.field_type.split('.')
@@ -885,11 +885,13 @@ if __name__ == "__main__":
     codegen_crate_dir = Path(script_dir, "..", "Rust", "Codegen").resolve()
     tempo_src_dir = str(tempo_crate_dir / "src")
     tempo_proto_out_dir = tempo_crate_dir / "src" / "proto"
-    # Misnamed historically: this is the TempoCore *module* root, not the plugin root.
-    # The cache file lives here, per-module.
-    module_root = Path(script_dir).parent.parent.resolve()
-    plugin_root = module_root.parent.resolve()  # Plugins/Tempo
-    project_root = plugin_root.parent.parent.resolve()  # the Unreal project root
+    # script_dir is <project>/Plugins/Tempo/TempoCore/Content/Python.
+    # tempo_core_dir is the TempoCore plugin dir (where the prebuild cache lives);
+    # tempo_root is Plugins/Tempo, the collection of Tempo plugins (TempoCore,
+    # TempoSensors, ...) that classify_modules scans, not a plugin itself.
+    tempo_core_dir = Path(script_dir).parent.parent.resolve()
+    tempo_root = tempo_core_dir.parent.resolve()  # Plugins/Tempo
+    project_root = tempo_root.parent.parent.resolve()  # the Unreal project root
     project_py_import = package_import_name(project_crate_name(project_root))
     project_pb2_dir = project_root / "Content" / "Python" / "API" / project_py_import
     project_crate_dir = (project_root / "Content" / "Rust" / "API").resolve()
@@ -928,14 +930,19 @@ if __name__ == "__main__":
         for name in sorted(os.listdir(project_pb2_dir)):
             d = project_pb2_dir / name
             if d.is_dir() and name != "__pycache__":
+                if name in module_dirs:
+                    raise RuntimeError(
+                        f"Module name collision: {name!r} exists in both the "
+                        f"tempo_sim and project ({project_py_import}) packages. "
+                        "Module names must be unique across plugin and project.")
                 module_dirs[name] = (project_py_import, d)
     module_names = list(module_dirs)
-    module_owners = classify_modules(plugin_root, module_names)
+    module_owners = classify_modules(tempo_root, module_names)
     project_modules_present = any(o == "project" for o in module_owners.values())
 
     pb2_roots = [tempo_sim_pb2_dir] + ([str(project_pb2_dir)] if project_pb2_dir.exists() else [])
 
-    cache = PrebuildCache(module_root / ".tempo_prebuild_cache.json")
+    cache = PrebuildCache(tempo_core_dir / ".tempo_prebuild_cache.json")
     input_files = _collect_rust_inputs(script_dir, pb2_roots, tempo_crate_dir, codegen_crate_dir)
     if project_modules_present:
         input_files += _collect_project_crate_inputs(project_crate_dir)

@@ -18,7 +18,12 @@ from typing import Dict, Set, Optional, List
 from prebuild_cache import PrebuildCache, find_files_filtered
 # gen_naming is stdlib-only (no protobuf), so it is safe to import here — this
 # script runs under the engine's bundled Python, which has no protobuf.
-from gen_naming import INFRA_PACKAGE, package_import_name, project_package_name
+from gen_naming import (
+    INFRA_PACKAGE,
+    classify_modules,
+    package_import_name,
+    project_package_name,
+)
 
 
 class ProtoGenerator:
@@ -43,6 +48,7 @@ class ProtoGenerator:
         self.project_py_import = package_import_name(project_package_name(self.project_root))
         self.tempo_sim_dir = self.python_api_root / INFRA_PACKAGE
         self.project_python_dir = self.project_python_api_root / self.project_py_import
+        self._module_owners_cache = None
         self.rust_proto_dir = self.plugin_root / "Content/Rust/API/proto"
         self.cpp_proto_dir = self.plugin_root / "Content/Cpp/API/proto"
         self.protoc = self.tool_dir / ("protoc.exe" if platform.system() == "Windows" else "protoc")
@@ -493,7 +499,9 @@ class ProtoGenerator:
                 return match.group(0)
             return f'{quote_open}{namespace}/{import_path}{rest}'
 
-        content = re.sub(r'(import\s+")([^"]+)(";)', rewrite, content)
+        # Match plain, `public`, and `weak` import forms; group 1 keeps the
+        # `import [public|weak] "` prefix verbatim so it's preserved on rewrite.
+        content = re.sub(r'(import\s+(?:public\s+|weak\s+)?")([^"]+)(";)', rewrite, content)
 
         with open(dest, 'w', encoding='utf-8') as f:
             f.write(content)
@@ -533,11 +541,10 @@ class ProtoGenerator:
     def _sweep_python_namespace(self, namespace_dir: Path, refreshed: Set[Path]):
         """Drop stale `*_pb2*` files and prune emptied module subdirs in one package.
 
-        Mirrors the legacy single-dir sweep but scoped to a namespace package
-        (tempo_sim or the project package). Non-generated infra at the package
-        root (`__init__.py`, `_tempo_context.py`, utils, wrappers) is untouched —
-        only `*_pb2*` files and module subdirs that no longer hold useful files
-        are removed.
+        Scoped to a single namespace package (tempo_sim or the project package).
+        Non-generated infra at the package root (`__init__.py`, `_tempo_context.py`,
+        utils, wrappers) is untouched — only `*_pb2*` files and module subdirs that
+        no longer hold useful files are removed.
         """
         if not namespace_dir.exists():
             return
@@ -668,18 +675,24 @@ class ProtoGenerator:
                     dest_file.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(proto_file, dest_file)
 
-    def _is_tempo_owned(self, module_name: str) -> bool:
-        """A module is Tempo-owned if its Directory lives under the Tempo plugin tree.
+    @property
+    def _module_owners(self):
+        """{module: "tempo" | "project"} via the shared classifier.
 
-        `self.plugin_root` is the TempoCore module dir (legacy naming), so the
-        Tempo plugin root is its parent.
+        Single source of truth with gen_api.py and gen_rust_api.py: the same
+        ownership decision drives pb2 nesting here and crate / wrapper placement
+        downstream, so all three must agree. `self.plugin_root` is the TempoCore
+        plugin dir; its parent is the Tempo plugins collection that
+        classify_modules scans (`<collection>/<plugin>/Source/<module>`).
         """
-        info = self.module_info.get(module_name)
-        if not info:
-            return False
-        tempo_plugin_root = str(self.plugin_root.parent.resolve()).replace("\\", "/")
-        module_dir = str(Path(info["Directory"].strip('"').replace("\\", "/")).resolve()).replace("\\", "/")
-        return module_dir.startswith(tempo_plugin_root + "/")
+        if self._module_owners_cache is None:
+            self._module_owners_cache = classify_modules(
+                self.plugin_root.parent, list(self.module_info))
+        return self._module_owners_cache
+
+    def _is_tempo_owned(self, module_name: str) -> bool:
+        """True if a module belongs to the Tempo plugin collection (vs. the project)."""
+        return self._module_owners.get(module_name) == "tempo"
 
     def export_rust_protos(self):
         """Export decorated proto files for Rust tonic-build.
@@ -722,11 +735,15 @@ class ProtoGenerator:
             # cache so the export runs.
             need_rust_export = self._rust_opt_in() and not self.rust_proto_dir.exists()
             need_cpp_export = self._cpp_opt_in() and not self.cpp_proto_dir.exists()
-            # First run after the tempo -> tempo_sim/tempo_sample split: the nested
-            # package isn't populated yet, but stale top-level pb2 from the old flat
-            # layout may still satisfy the cache. Force a regen so the new layout is
-            # produced. (collect_output_files already covers both dirs via project_root.)
+            # Bypass the cache when an expected nested package dir holds no pb2
+            # yet — the cache key could otherwise be satisfied by unrelated files
+            # (e.g. pb2 left in a different layout). module_info isn't loaded yet
+            # here, so this is a filesystem-only signal: the tempo_sim package is
+            # always expected, and a project package dir that exists but has been
+            # emptied of pb2 is a broken state that must regenerate.
             need_python_export = not any(self.tempo_sim_dir.rglob("*_pb2.py"))
+            if self.project_python_dir.exists() and not any(self.project_python_dir.rglob("*_pb2.py")):
+                need_python_export = True
 
             # Check cache to see if we can skip generation
             input_files = self.collect_input_files()
