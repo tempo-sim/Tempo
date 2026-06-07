@@ -36,7 +36,7 @@ Tempo is for building your *own* robotics simulator on modern Unreal Engine and 
 </details>
 
 ## Compatibility
-- Linux (Ubuntu 22.04 and 24.04), MacOS (13.0 "Ventura" or newer, Apple silicon only), Windows 10 and 11
+- Linux (Ubuntu 22.04 and 24.04), MacOS (15.0 or newer, Apple silicon only), Windows 10 and 11
 - Unreal Engine 5.6 and 5.7
 
 ## Prerequisites
