@@ -4,27 +4,31 @@
 name = "tempo-sim"
 version = "0.1.0"
 edition = "2021"
-description = "Rust client API for Tempo simulation"
-license = "Proprietary"
+rust-version = "1.85"
+description = "Rust client API for the Tempo simulation server. Generated gRPC wrappers with sync and async surfaces."
+license = "Apache-2.0"
+repository = "https://github.com/tempo-sim/Tempo"
+homepage = "https://temposimulation.com"
+documentation = "https://docs.rs/tempo-sim"
+readme = "README.md"
+keywords = ["grpc", "tonic", "tempo", "simulation", "client"]
+categories = ["api-bindings", "asynchronous"]
 
 # Explicit include so generated files (which .gitignore excludes) ship in the .crate.
+# proto/ ships for debuggability / reflection use cases even though the source is pre-compiled.
 include = [
     "Cargo.toml",
-    "build.rs",
+    "README.md",
+    "LICENSE",
     "src/**/*.rs",
     "proto/**/*.proto",
 ]
 
 [dependencies]
-tonic = "0.12"
+tonic = "0.13"
 prost = "0.13"
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros", "time"] }
 tokio-stream = "0.1"
 thiserror = "2.0"
 once_cell = "1.19"
 http = "1.0"
-
-[build-dependencies]
-tonic-build = "0.12"
-walkdir = "2"
-protoc-bin-vendored = "3"

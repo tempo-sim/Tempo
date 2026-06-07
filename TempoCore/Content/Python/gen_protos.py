@@ -64,6 +64,9 @@ class ProtoGenerator:
             files.extend(self.cpp_proto_dir.rglob("*.proto"))
         if self._rust_opt_in() and self.rust_proto_dir.exists():
             files.extend(self.rust_proto_dir.rglob("*.proto"))
+        project_rust_proto_dir = self.project_root / "Content" / "Rust" / "API" / "proto"
+        if self._rust_opt_in() and project_rust_proto_dir.exists():
+            files.extend(project_rust_proto_dir.rglob("*.proto"))
         return files
 
     def setup_python_dest(self):
@@ -495,12 +498,16 @@ class ProtoGenerator:
         """Whether the user has opted into C++ API generation."""
         return os.environ.get("TEMPO_GEN_CPP_API", "0") not in ("0", "")
 
-    def _export_decorated_protos(self, dest_dir: Path):
+    def _export_decorated_protos(self, dest_dir: Path, module_filter=None):
         """Copy staged protos to dest_dir for external client consumption.
 
         Source protos have their source-declared package intact. Module dirs
         nest Public/ and Private/; consumers want them flattened under
         <dest_dir>/<Module>/.
+
+        If `module_filter` is provided, only modules for which it returns True
+        are exported (used to split protos between the tempo-sim and project
+        Rust crates).
         """
         if dest_dir.exists():
             shutil.rmtree(dest_dir)
@@ -511,6 +518,8 @@ class ProtoGenerator:
                 continue
 
             module_name = module_dir.name
+            if module_filter is not None and not module_filter(module_name):
+                continue
             dest_module_dir = dest_dir / module_name
 
             for sub in ("Public", "Private"):
@@ -523,12 +532,38 @@ class ProtoGenerator:
                     dest_file.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(proto_file, dest_file)
 
+    def _is_tempo_owned(self, module_name: str) -> bool:
+        """A module is Tempo-owned if its Directory lives under the Tempo plugin tree.
+
+        `self.plugin_root` is the TempoCore module dir (legacy naming), so the
+        Tempo plugin root is its parent.
+        """
+        info = self.module_info.get(module_name)
+        if not info:
+            return False
+        tempo_plugin_root = str(self.plugin_root.parent.resolve()).replace("\\", "/")
+        module_dir = str(Path(info["Directory"].strip('"').replace("\\", "/")).resolve()).replace("\\", "/")
+        return module_dir.startswith(tempo_plugin_root + "/")
+
     def export_rust_protos(self):
-        """Export decorated proto files for Rust tonic-build."""
+        """Export decorated proto files for Rust tonic-build.
+
+        Splits exports between the tempo-sim crate (Tempo-owned modules) and the
+        project crate (everything else); the project export is skipped when no
+        non-Tempo modules exist, mirroring the gen_rust_api.py skip rule.
+        """
         if not self._rust_opt_in():
             return
-        self._export_decorated_protos(self.rust_proto_dir)
-        print(f"Exported Rust protos to {self.rust_proto_dir}")
+        self._export_decorated_protos(self.rust_proto_dir,
+                                      module_filter=self._is_tempo_owned)
+        print(f"Exported Tempo Rust protos to {self.rust_proto_dir}")
+
+        has_project_modules = any(not self._is_tempo_owned(m) for m in self.module_info)
+        if has_project_modules:
+            project_rust_proto_dir = self.project_root / "Content" / "Rust" / "API" / "proto"
+            self._export_decorated_protos(project_rust_proto_dir,
+                                          module_filter=lambda m: not self._is_tempo_owned(m))
+            print(f"Exported project Rust protos to {project_rust_proto_dir}")
 
     def export_cpp_protos(self):
         """Export decorated proto files for the C++ wrapper build."""

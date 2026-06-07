@@ -1,0 +1,22 @@
+# Copyright Tempo Simulation, LLC. All Rights Reserved
+#
+# Pre-build tool that compiles Tempo .proto files into Rust source.
+# Not published; invoked by gen_rust_api.py to produce the contents of
+# tempo-sim's (and any project crate's) src/proto/ tree, so the published
+# crates ship pre-compiled code and consumers don't need protoc.
+
+[package]
+name = "tempo-sim-codegen"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "tempo-sim-codegen"
+path = "src/main.rs"
+
+[dependencies]
+tonic-build = "0.13"
+prost-build = "0.13"
+protoc-bin-vendored = "3"
+walkdir = "2"

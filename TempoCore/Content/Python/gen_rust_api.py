@@ -6,8 +6,10 @@
 import google.protobuf.descriptor as gpd
 import importlib.util
 import jinja2
+import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -33,16 +35,46 @@ def load_pb2_module(file_path, module_name):
     return module
 
 
-def get_rust_type(field):
-    """Get the Rust type for a protobuf field."""
+TEMPO_INFRA_CRATE = "tempo_sim"  # Rust ident form of the tempo-sim crate name.
+
+
+def _crate_prefix_for(target_module_pascal, current_owner, module_owners):
+    """Pick the path root for referencing a proto module from inside `current_owner`'s crate.
+
+    Returns "crate" for same-crate refs, the tempo-sim crate name for project→tempo refs.
+    A tempo→project ref would mean a Tempo proto imports a project proto, which is a
+    misconfiguration (the publishable crate can't depend on project code), so we raise.
+    """
+    target_owner = module_owners.get(target_module_pascal, "tempo")
+    if target_owner == current_owner:
+        return "crate"
+    if target_owner == "tempo":
+        return TEMPO_INFRA_CRATE
+    raise RuntimeError(
+        f"tempo-sim cannot reference project module {target_module_pascal!r}; "
+        "did a Tempo plugin proto import a non-Tempo proto?"
+    )
+
+
+def _proto_type_path(target_module_pascal, type_name, current_owner, module_owners):
+    prefix = _crate_prefix_for(target_module_pascal, current_owner, module_owners)
+    return f"{prefix}::proto::{pascal_to_snake(target_module_pascal)}::{type_name}"
+
+
+def get_rust_type(field, current_owner=None, module_owners=None):
+    """Get the Rust type for a protobuf field.
+
+    If `current_owner` and `module_owners` are supplied, message-type refs cross
+    crate boundaries via TEMPO_INFRA_CRATE when needed; otherwise they default
+    to `crate::` paths (tempo-sim's behavior pre-split).
+    """
     if field.proto_type == gpd.FieldDescriptor.TYPE_MESSAGE:
-        # Convert protobuf full name to Rust module path
-        # e.g., "TempoCore.Empty" -> "crate::proto::tempo_core::Empty"
         parts = field.field_type.split('.')
         if len(parts) >= 2:
+            if current_owner is not None and module_owners is not None:
+                return _proto_type_path(parts[0], parts[-1], current_owner, module_owners)
             module = pascal_to_snake(parts[0])
-            type_name = parts[-1]
-            return f"crate::proto::{module}::{type_name}"
+            return f"crate::proto::{module}::{parts[-1]}"
         return field.field_type
     elif field.proto_type == gpd.FieldDescriptor.TYPE_ENUM:
         # In prost, protobuf enums are represented as i32
@@ -107,8 +139,17 @@ def proto_path_to_rust_module(proto_path):
     return proto_path
 
 
-def generate_rust_api(python_root_dir, rust_root_dir):
-    """Generate Rust API wrapper modules from protobuf definitions."""
+def generate_rust_api(python_root_dir, tempo_root_dir, project_root_dir, module_owners):
+    """Generate Rust API wrapper modules from protobuf definitions.
+
+    Args:
+        python_root_dir: directory containing the staged pb2 trees (one subdir per module).
+        tempo_root_dir: src/ dir of the tempo-sim crate (always written).
+        project_root_dir: src/ dir of the project crate, or None if there are no project
+            modules (in which case no project crate is emitted).
+        module_owners: dict mapping module name (PascalCase, e.g. "TempoCore" or "Greeter")
+            to "tempo" or "project" — drives crate placement and cross-crate type paths.
+    """
     all_enums = {}
     all_messages = {}
     all_services = {}
@@ -156,11 +197,11 @@ pub async fn {{ name }}_async(
 {%- for field in request.fields %}
     {{ field.name }}: {{ field.rust_type }},
 {%- endfor %}
-) -> Result<{{ response_rust_type }}, crate::TempoError> {
-    let channel = crate::context::connected_channel().await?;
+) -> Result<{{ response_rust_type }}, {{ infra }}::TempoError> {
+    let channel = {{ infra }}::context::connected_channel().await?;
     let mut client = {{ client_type }}::new(channel)
-        .max_decoding_message_size(crate::context::MAX_MESSAGE_SIZE)
-        .max_encoding_message_size(crate::context::MAX_MESSAGE_SIZE);
+        .max_decoding_message_size({{ infra }}::context::MAX_MESSAGE_SIZE)
+        .max_encoding_message_size({{ infra }}::context::MAX_MESSAGE_SIZE);
 
     let request = {{ request_rust_type }} {
 {%- for field in request.fields %}
@@ -181,8 +222,8 @@ pub fn {{ name }}(
 {%- for field in request.fields %}
     {{ field.name }}: {{ field.rust_type }},
 {%- endfor %}
-) -> Result<{{ response_rust_type }}, crate::TempoError> {
-    crate::context::RUNTIME.block_on({{ name }}_async(
+) -> Result<{{ response_rust_type }}, {{ infra }}::TempoError> {
+    {{ infra }}::context::RUNTIME.block_on({{ name }}_async(
 {%- for field in request.fields %}
         {{ field.name }},
 {%- endfor %}
@@ -198,11 +239,11 @@ pub async fn {{ name }}_async(
 {%- for field in request.fields %}
     {{ field.name }}: {{ field.rust_type }},
 {%- endfor %}
-) -> Result<tonic::Streaming<{{ response_rust_type }}>, crate::TempoError> {
-    let channel = crate::context::connected_channel().await?;
+) -> Result<tonic::Streaming<{{ response_rust_type }}>, {{ infra }}::TempoError> {
+    let channel = {{ infra }}::context::connected_channel().await?;
     let mut client = {{ client_type }}::new(channel)
-        .max_decoding_message_size(crate::context::MAX_MESSAGE_SIZE)
-        .max_encoding_message_size(crate::context::MAX_MESSAGE_SIZE);
+        .max_decoding_message_size({{ infra }}::context::MAX_MESSAGE_SIZE)
+        .max_encoding_message_size({{ infra }}::context::MAX_MESSAGE_SIZE);
 
     let request = {{ request_rust_type }} {
 {%- for field in request.fields %}
@@ -223,8 +264,8 @@ pub fn {{ name }}(
 {%- for field in request.fields %}
     {{ field.name }}: {{ field.rust_type }},
 {%- endfor %}
-) -> Result<impl Iterator<Item = Result<{{ response_rust_type }}, tonic::Status>>, crate::TempoError> {
-    let stream = crate::context::RUNTIME.block_on({{ name }}_async(
+) -> Result<impl Iterator<Item = Result<{{ response_rust_type }}, tonic::Status>>, {{ infra }}::TempoError> {
+    let stream = {{ infra }}::context::RUNTIME.block_on({{ name }}_async(
 {%- for field in request.fields %}
         {{ field.name }},
 {%- endfor %}
@@ -280,11 +321,11 @@ impl Batch {
 
     pub async fn execute_async(
         self,
-    ) -> Result<{{ response_rust_type }}, crate::TempoError> {
-        let channel = crate::context::connected_channel().await?;
+    ) -> Result<{{ response_rust_type }}, {{ infra }}::TempoError> {
+        let channel = {{ infra }}::context::connected_channel().await?;
         let mut client = {{ client_type }}::new(channel)
-            .max_decoding_message_size(crate::context::MAX_MESSAGE_SIZE)
-            .max_encoding_message_size(crate::context::MAX_MESSAGE_SIZE);
+            .max_decoding_message_size({{ infra }}::context::MAX_MESSAGE_SIZE)
+            .max_encoding_message_size({{ infra }}::context::MAX_MESSAGE_SIZE);
 
         let request = {{ request_rust_type }} { ops: self.ops };
         let response = client.set_properties(request).await?;
@@ -293,8 +334,8 @@ impl Batch {
 
     pub fn execute(
         self,
-    ) -> Result<{{ response_rust_type }}, crate::TempoError> {
-        crate::context::RUNTIME.block_on(self.execute_async())
+    ) -> Result<{{ response_rust_type }}, {{ infra }}::TempoError> {
+        {{ infra }}::context::RUNTIME.block_on(self.execute_async())
     }
 }
 
@@ -308,7 +349,7 @@ impl Batch {
 //! High-level API wrappers for {{ module_name }}.
 
 {% if has_streaming %}
-use crate::streaming::SyncStreamIterator;
+use {{ infra }}::streaming::SyncStreamIterator;
 {% endif %}
 
 '''
@@ -323,151 +364,181 @@ use crate::streaming::SyncStreamIterator;
             services_by_module[tempo_module_name] = []
         services_by_module[tempo_module_name].append(tempo_service_descriptor)
 
-    # Generate wrapper module for each module that has services
-    generated_modules = set()
+    # Bucket modules by owner so each crate only sees its own proto modules + services.
+    tempo_proto_modules = {m for m in all_proto_modules if module_owners.get(m, "tempo") == "tempo"}
+    project_proto_modules = {m for m in all_proto_modules if module_owners.get(m) == "project"}
 
-    for tempo_module_name, service_descriptors in services_by_module.items():
-        rust_module_name = pascal_to_snake(tempo_module_name)
-        output_file = os.path.join(rust_root_dir, f"{rust_module_name}.rs")
+    def _crate_path(owner, target_module_pascal, suffix):
+        prefix = _crate_prefix_for(target_module_pascal, owner, module_owners)
+        return f"{prefix}::proto::{pascal_to_snake(target_module_pascal)}::{suffix}"
 
-        # Track imports needed
-        imports = set()
-        has_streaming = False
+    def _render_owner(owner, owner_root_dir, owner_modules):
+        """Render wrapper .rs files plus proto.rs/lib.rs for one crate's owned modules."""
+        infra = "crate" if owner == "tempo" else TEMPO_INFRA_CRATE
+        generated = set()
+        for tempo_module_name, service_descriptors in services_by_module.items():
+            if tempo_module_name not in owner_modules:
+                continue
+            rust_module_name = pascal_to_snake(tempo_module_name)
+            output_file = os.path.join(owner_root_dir, f"{rust_module_name}.rs")
 
-        # Collect all RPCs from all services in this module
-        rpc_code = []
+            has_streaming = False
+            rpc_code = []
 
-        for tempo_service_descriptor in service_descriptors:
-            for rpc_descriptor in tempo_service_descriptor.rpcs:
-                if rpc_descriptor.client_streaming:
-                    continue
+            for tempo_service_descriptor in service_descriptors:
+                for rpc_descriptor in tempo_service_descriptor.rpcs:
+                    if rpc_descriptor.client_streaming:
+                        continue
 
-                tempo_request_descriptor = all_messages[rpc_descriptor.request_type]
-                tempo_response_descriptor = all_messages[rpc_descriptor.response_type]
+                    tempo_request_descriptor = all_messages[rpc_descriptor.request_type]
+                    tempo_response_descriptor = all_messages[rpc_descriptor.response_type]
 
-                # Build Rust type paths
-                request_module = pascal_to_snake(tempo_request_descriptor.module_name.split(".")[0])
-                response_module = pascal_to_snake(tempo_response_descriptor.module_name.split(".")[0])
-                service_module = pascal_to_snake(tempo_service_descriptor.module_name.split(".")[0])
+                    request_module_pascal = tempo_request_descriptor.module_name.split(".")[0]
+                    response_module_pascal = tempo_response_descriptor.module_name.split(".")[0]
+                    service_module_pascal = tempo_service_descriptor.module_name.split(".")[0]
 
-                request_rust_type = f"crate::proto::{request_module}::{tempo_request_descriptor.object_name}"
-                response_rust_type = f"crate::proto::{response_module}::{tempo_response_descriptor.object_name}"
+                    request_rust_type = _crate_path(owner, request_module_pascal,
+                                                    tempo_request_descriptor.object_name)
+                    response_rust_type = _crate_path(owner, response_module_pascal,
+                                                     tempo_response_descriptor.object_name)
+                    client_type = _crate_path(
+                        owner, service_module_pascal,
+                        f"{pascal_to_snake(tempo_service_descriptor.object_name)}_client::"
+                        f"{tempo_service_descriptor.object_name}Client",
+                    )
 
-                # Client type path
-                client_type = f"crate::proto::{service_module}::{pascal_to_snake(tempo_service_descriptor.object_name)}_client::{tempo_service_descriptor.object_name}Client"
+                    for field in tempo_request_descriptor.fields:
+                        field.rust_type = get_rust_type(field, owner, module_owners)
+                        field.needs_option_wrap = needs_option_wrap(field)
+                        if field.label == "repeated":
+                            field.rust_type = f"Vec<{field.rust_type}>"
 
-                # Add Rust type info to fields
-                for field in tempo_request_descriptor.fields:
-                    field.rust_type = get_rust_type(field)
-                    field.needs_option_wrap = needs_option_wrap(field)
-                    if field.label == "repeated":
-                        field.rust_type = f"Vec<{field.rust_type}>"
+                    if rpc_descriptor.server_streaming:
+                        has_streaming = True
+                        template = j2_environment.from_string(streaming_rpc_template)
+                    else:
+                        template = j2_environment.from_string(unary_rpc_template)
 
-                # Choose template based on streaming
-                if rpc_descriptor.server_streaming:
-                    has_streaming = True
-                    template = j2_environment.from_string(streaming_rpc_template)
-                else:
-                    template = j2_environment.from_string(unary_rpc_template)
+                    rpc_code.append(template.render(
+                        infra=infra,
+                        name=pascal_to_snake(rpc_descriptor.name),
+                        rpc=rpc_descriptor,
+                        request=tempo_request_descriptor,
+                        response=tempo_response_descriptor,
+                        request_rust_type=request_rust_type,
+                        response_rust_type=response_rust_type,
+                        client_type=client_type,
+                        method_name=pascal_to_snake(rpc_descriptor.name),
+                    ))
 
-                rpc_code.append(template.render(
-                    name=pascal_to_snake(rpc_descriptor.name),
-                    rpc=rpc_descriptor,
-                    request=tempo_request_descriptor,
-                    response=tempo_response_descriptor,
-                    request_rust_type=request_rust_type,
-                    response_rust_type=response_rust_type,
-                    client_type=client_type,
-                    method_name=pascal_to_snake(rpc_descriptor.name),
-                ))
-
-        # If this module defines a `SetPropertyOp` message with an `op` oneof and a
-        # corresponding `SetProperties` RPC, emit a fluent Batch builder so users
-        # don't have to construct SetPropertyOp messages by hand.
-        set_property_op_desc = next(
-            (m for m in all_messages.values()
-             if m.object_name == "SetPropertyOp"
-             and m.module_name.split(".")[0] == tempo_module_name),
-            None,
-        )
-        owning_service = next(
-            (s for s in service_descriptors
-             if any(rpc.name == "SetProperties" for rpc in s.rpcs)),
-            None,
-        )
-        if set_property_op_desc and owning_service and set_property_op_desc.oneofs.get("op"):
-            rust_proto_module = pascal_to_snake(set_property_op_desc.module_name.split(".")[0])
-            op_module = pascal_to_snake(set_property_op_desc.object_name)  # set_property_op
-            op_type = f"crate::proto::{rust_proto_module}::SetPropertyOp"
-            op_enum_path = f"crate::proto::{rust_proto_module}::{op_module}::Op"
-            request_rust_type_batch = f"crate::proto::{rust_proto_module}::SetPropertiesRequest"
-            response_rust_type_batch = f"crate::proto::{rust_proto_module}::SetPropertiesResponse"
-            client_type_batch = (
-                f"crate::proto::{rust_proto_module}::"
-                f"{pascal_to_snake(owning_service.object_name)}_client::"
-                f"{owning_service.object_name}Client"
+            # If this module defines a `SetPropertyOp` message with an `op` oneof and a
+            # corresponding `SetProperties` RPC, emit a fluent Batch builder so users
+            # don't have to construct SetPropertyOp messages by hand.
+            set_property_op_desc = next(
+                (m for m in all_messages.values()
+                 if m.object_name == "SetPropertyOp"
+                 and m.module_name.split(".")[0] == tempo_module_name),
+                None,
             )
-
-            methods = []
-            for entry in set_property_op_desc.oneofs["op"]:
-                request_desc = all_messages.get(entry["message_proto_full_name"])
-                if request_desc is None:
-                    continue
-                method_fields = []
-                for field in request_desc.fields:
-                    field.rust_type = get_rust_type(field)
-                    field.needs_option_wrap = needs_option_wrap(field)
-                    if field.label == "repeated":
-                        field.rust_type = f"Vec<{field.rust_type}>"
-                    method_fields.append(field)
-                # bool_op -> set_bool_property; int_array_op -> set_int_array_property
-                method_name = "set_{}_property".format(
-                    entry["name"][:-3] if entry["name"].endswith("_op") else entry["name"]
+            owning_service = next(
+                (s for s in service_descriptors
+                 if any(rpc.name == "SetProperties" for rpc in s.rpcs)),
+                None,
+            )
+            if set_property_op_desc and owning_service and set_property_op_desc.oneofs.get("op"):
+                op_module_pascal = set_property_op_desc.module_name.split(".")[0]
+                op_module_snake = pascal_to_snake(set_property_op_desc.object_name)  # set_property_op
+                op_type = _crate_path(owner, op_module_pascal, "SetPropertyOp")
+                op_enum_path = _crate_path(owner, op_module_pascal, f"{op_module_snake}::Op")
+                request_rust_type_batch = _crate_path(owner, op_module_pascal, "SetPropertiesRequest")
+                response_rust_type_batch = _crate_path(owner, op_module_pascal, "SetPropertiesResponse")
+                client_type_batch = _crate_path(
+                    owner, op_module_pascal,
+                    f"{pascal_to_snake(owning_service.object_name)}_client::"
+                    f"{owning_service.object_name}Client",
                 )
-                methods.append({
-                    "name": method_name,
-                    "variant": snake_to_upper_camel(entry["name"]),
-                    "request_rust_type": (
-                        f"crate::proto::{rust_proto_module}::{request_desc.object_name}"
-                    ),
-                    "fields": method_fields,
-                })
 
-            batch_tpl = j2_environment.from_string(batch_template)
-            rpc_code.append(batch_tpl.render(
-                methods=methods,
-                op_type=op_type,
-                op_enum_path=op_enum_path,
-                request_rust_type=request_rust_type_batch,
-                response_rust_type=response_rust_type_batch,
-                client_type=client_type_batch,
-            ))
+                methods = []
+                for entry in set_property_op_desc.oneofs["op"]:
+                    request_desc = all_messages.get(entry["message_proto_full_name"])
+                    if request_desc is None:
+                        continue
+                    method_fields = []
+                    for field in request_desc.fields:
+                        field.rust_type = get_rust_type(field, owner, module_owners)
+                        field.needs_option_wrap = needs_option_wrap(field)
+                        if field.label == "repeated":
+                            field.rust_type = f"Vec<{field.rust_type}>"
+                        method_fields.append(field)
+                    # bool_op -> set_bool_property; int_array_op -> set_int_array_property
+                    method_name = "set_{}_property".format(
+                        entry["name"][:-3] if entry["name"].endswith("_op") else entry["name"]
+                    )
+                    methods.append({
+                        "name": method_name,
+                        "variant": snake_to_upper_camel(entry["name"]),
+                        "request_rust_type": _crate_path(owner, op_module_pascal, request_desc.object_name),
+                        "fields": method_fields,
+                    })
 
-        # Write the module file
-        if rpc_code:
-            generated_modules.add(rust_module_name)
-            header_template = j2_environment.from_string(module_header_template)
-
-            with open(output_file, 'w') as f:
-                f.write(header_template.render(
-                    module_name=tempo_module_name,
-                    imports=sorted(imports),
-                    has_streaming=has_streaming,
+                batch_tpl = j2_environment.from_string(batch_template)
+                rpc_code.append(batch_tpl.render(
+                    infra=infra,
+                    methods=methods,
+                    op_type=op_type,
+                    op_enum_path=op_enum_path,
+                    request_rust_type=request_rust_type_batch,
+                    response_rust_type=response_rust_type_batch,
+                    client_type=client_type_batch,
                 ))
-                for code in rpc_code:
-                    f.write(code)
 
-    # Generate the proto module include file (include all proto modules, not just those with services)
-    generate_proto_includes(rust_root_dir, all_proto_modules)
+            if rpc_code:
+                generated.add(rust_module_name)
+                header_template = j2_environment.from_string(module_header_template)
+                with open(output_file, 'w') as f:
+                    f.write(header_template.render(
+                        infra=infra,
+                        module_name=tempo_module_name,
+                        has_streaming=has_streaming,
+                    ))
+                    for code in rpc_code:
+                        f.write(code)
+        return generated
 
-    # Update lib.rs with module declarations
-    update_lib_rs(rust_root_dir, generated_modules)
+    tempo_generated = _render_owner("tempo", tempo_root_dir, tempo_proto_modules)
+    generate_proto_includes(tempo_root_dir, tempo_proto_modules)
+    update_lib_rs(tempo_root_dir, tempo_generated)
+    # Sweep stale wrappers: anything that's not infra (context/error/streaming),
+    # not lib.rs/proto.rs, and not in the current generated set.
+    _tempo_keep = {"context.rs", "error.rs", "streaming.rs", "lib.rs", "proto.rs"}
+    _tempo_keep |= {f"{m}.rs" for m in tempo_generated}
+    for entry in os.listdir(tempo_root_dir):
+        full = os.path.join(tempo_root_dir, entry)
+        if os.path.isfile(full) and entry.endswith(".rs") and entry not in _tempo_keep:
+            os.remove(full)
 
-    return generated_modules
+    if project_root_dir is not None and project_proto_modules:
+        # Project crate's src/ is fully generated, so wipe stale wrappers but keep
+        # the codegen-populated proto/ subdir (already refreshed by _run_codegen).
+        if os.path.isdir(project_root_dir):
+            for entry in os.listdir(project_root_dir):
+                full = os.path.join(project_root_dir, entry)
+                if os.path.isfile(full) and entry.endswith(".rs"):
+                    os.remove(full)
+        os.makedirs(project_root_dir, exist_ok=True)
+        project_generated = _render_owner("project", project_root_dir, project_proto_modules)
+        generate_proto_includes(project_root_dir, project_proto_modules)
+        update_project_lib_rs(project_root_dir, project_generated)
+
+    return tempo_generated
 
 
 def generate_proto_includes(rust_root_dir, modules):
-    """Generate the proto.rs file with tonic::include_proto! macros."""
+    """Generate the proto.rs file that pulls in pre-compiled proto modules.
+
+    The codegen binary writes `<rust_module>.rs` files into `<rust_root_dir>/proto/`
+    ahead of time, so consumers don't need protoc at build time.
+    """
     proto_rs_path = os.path.join(rust_root_dir, "proto.rs")
 
     with open(proto_rs_path, 'w') as f:
@@ -478,10 +549,8 @@ def generate_proto_includes(rust_root_dir, modules):
 
         for module in sorted(modules):
             rust_module = pascal_to_snake(module)
-            # tonic generates modules based on the proto package name
-            # The package is "ModuleName" or "ModuleName.SubPackage"
             f.write(f"pub mod {rust_module} {{\n")
-            f.write(f'    tonic::include_proto!("{rust_module}");\n')
+            f.write(f'    include!("proto/{rust_module}.rs");\n')
             f.write("}\n\n")
 
 
@@ -529,6 +598,225 @@ pub use streaming::SyncStreamIterator;
             f.write(f"pub mod {module};\n")
 
 
+def update_project_lib_rs(project_root_dir, generated_modules):
+    """Write the project crate's lib.rs.
+
+    The project crate has no infra of its own — it re-exports tempo-sim's runtime
+    helpers (`set_server`, `TempoError`, ...) so consumers can `use <project>::*`
+    without separately depending on `tempo-sim`.
+    """
+    lib_rs_path = os.path.join(project_root_dir, "lib.rs")
+    with open(lib_rs_path, 'w') as f:
+        f.write('''// Copyright Tempo Simulation, LLC. All Rights Reserved
+//
+// Auto-generated by gen_rust_api.py. Do not edit.
+
+//! Project-specific Rust client API.
+//!
+//! Re-exports the Tempo runtime helpers from `tempo_sim` and adds the
+//! project's own service wrappers and proto types.
+
+pub mod proto;
+
+pub use tempo_sim::{set_server, set_server_async, tempo_context, TempoContext, TempoError, SyncStreamIterator};
+
+''')
+        for module in sorted(generated_modules):
+            f.write(f"pub mod {module};\n")
+
+
+PROJECT_METADATA_FILE = "crate_info.json"
+
+
+def read_project_metadata(project_crate_dir: Path) -> dict:
+    """Read project-owned publish metadata from crate_info.json, if present.
+
+    This file is the project's hook for filling in the generated Cargo.toml's
+    publish fields (license, repository, homepage, ...) WITHOUT editing this
+    Tempo-owned script or the generated Cargo.toml — both of which are
+    overwritten on every run. Every field is optional; an absent file returns
+    {} and the generator falls back to placeholders, preserving prior behavior.
+    """
+    metadata_path = project_crate_dir / PROJECT_METADATA_FILE
+    if not metadata_path.exists():
+        return {}
+    try:
+        data = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        raise RuntimeError(f"Invalid JSON in {metadata_path}: {e}") from e
+    if not isinstance(data, dict):
+        raise RuntimeError(f"{metadata_path} must contain a JSON object, got {type(data).__name__}")
+    return data
+
+
+def _toml_str(value) -> str:
+    """Render a Python value as a TOML basic string, escaping backslashes/quotes."""
+    return '"' + str(value).replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _toml_str_array(values) -> str:
+    if not isinstance(values, list):
+        raise RuntimeError(f"Expected a JSON array, got {type(values).__name__}: {values!r}")
+    return "[" + ", ".join(_toml_str(v) for v in values) + "]"
+
+
+def write_project_cargo_toml(project_crate_dir: Path, crate_name: str, tempo_crate_dir: Path,
+                             tempo_crate_version: str, metadata: dict = None):
+    """Write the project crate's Cargo.toml.
+
+    Always overwritten — it's a generated artifact, like lib.rs.
+
+    By default `tempo-sim` is a path+version dependency: the path lets local
+    changes propagate without a publish step, and the version lets `cargo
+    package` accept it (cargo strips the path on publish and falls back to the
+    crates.io version). Set "tempo_sim_source": "registry" in crate_info.json
+    to depend on the published crates.io crate only (no local path) — useful
+    for building the project crate in isolation or against a released tempo-sim.
+
+    Publish metadata (version, license, repository, homepage, ...) comes from
+    `metadata` — the project's crate_info.json (see read_project_metadata).
+    The `name`, `edition`, and the rest of the `[dependencies]` block stay
+    generator-owned so the tempo-sim version pin is always re-derived;
+    everything else is the project's to set. Absent keys fall back to
+    placeholders so `cargo build` stays quiet.
+    """
+    metadata = metadata or {}
+    rel_tempo = os.path.relpath(tempo_crate_dir, project_crate_dir)
+
+    # How to depend on tempo-sim: "path" (default) keeps the local path for
+    # development and a version pin for publishing; "registry" drops the path
+    # and depends on the published crates.io crate only.
+    tempo_sim_source = metadata.get("tempo_sim_source", "path")
+    if tempo_sim_source == "path":
+        tempo_sim_dep = (f"tempo-sim = {{ path = {_toml_str(rel_tempo)}, "
+                         f"version = {_toml_str(tempo_crate_version)} }}")
+    elif tempo_sim_source == "registry":
+        # Default to the local crate's version; let the project pin a different
+        # published requirement (e.g. "0.1") via tempo_sim_version.
+        registry_version = metadata.get("tempo_sim_version", tempo_crate_version)
+        tempo_sim_dep = f"tempo-sim = {_toml_str(registry_version)}"
+    else:
+        raise RuntimeError(
+            f'{PROJECT_METADATA_FILE} "tempo_sim_source" must be "path" or "registry", '
+            f'got {tempo_sim_source!r}')
+
+    version = metadata.get("version", "0.1.0")
+    rust_version = metadata.get("rust-version", "1.85")
+    description = metadata.get(
+        "description",
+        "Project-specific Rust client API; layers project protos on top of tempo-sim.")
+
+    lines = [
+        "# Auto-generated by Tempo's gen_rust_api.py. Do not edit.",
+        f"# Publish metadata (license, repository, homepage, ...) comes from {PROJECT_METADATA_FILE}",
+        "# in this directory — edit that file, not this one.",
+        "",
+        "[package]",
+        f"name = {_toml_str(crate_name)}",
+        f"version = {_toml_str(version)}",
+        'edition = "2021"',
+        f"rust-version = {_toml_str(rust_version)}",
+        f"description = {_toml_str(description)}",
+    ]
+
+    if "license" in metadata:
+        lines.append(f"license = {_toml_str(metadata['license'])}")
+    elif "license-file" in metadata:
+        lines.append(f"license-file = {_toml_str(metadata['license-file'])}")
+    else:
+        lines += [
+            f"# TODO: set \"license\" in {PROJECT_METADATA_FILE} before publishing — `Apache-2.0` is a",
+            "# placeholder so `cargo build` is quiet; replace it with this project's actual license.",
+            'license = "Apache-2.0"',
+        ]
+
+    # Optional single-value metadata, emitted only when the project sets it.
+    for key in ("repository", "homepage", "documentation", "readme"):
+        if key in metadata:
+            lines.append(f"{key} = {_toml_str(metadata[key])}")
+    for key in ("keywords", "categories"):
+        if key in metadata:
+            lines.append(f"{key} = {_toml_str_array(metadata[key])}")
+
+    # Explicit include so generated files (which .gitignore excludes) ship in the .crate.
+    # Whitelist any project-provided readme/license file so it lands in the .crate too.
+    include = ["Cargo.toml", "src/**/*.rs", "proto/**/*.proto"]
+    for key in ("readme", "license-file"):
+        if key in metadata and metadata[key] not in include:
+            include.insert(1, metadata[key])
+
+    lines += [
+        "",
+        "# Explicit include so generated files (which .gitignore excludes) ship in the .crate.",
+        "include = [",
+    ]
+    lines += [f"    {_toml_str(p)}," for p in include]
+    lines += [
+        "]",
+        "",
+        "[dependencies]",
+        tempo_sim_dep,
+        'tonic = "0.13"',
+        'prost = "0.13"',
+        'tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros", "time"] }',
+        'tokio-stream = "0.1"',
+    ]
+
+    cargo_toml = project_crate_dir / "Cargo.toml"
+    cargo_toml.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def write_project_gitignore(project_crate_dir: Path):
+    """Write the project crate's .gitignore. The whole src/ and proto/ trees are
+    generated, so they stay out of git; consumers regenerate them locally."""
+    (project_crate_dir / ".gitignore").write_text('''# Build artifacts
+/target/
+Cargo.lock
+
+# Generated proto sources (populated by gen_protos.py)
+/proto/
+
+# Tempo proto sources staged here so protoc can resolve project imports.
+/tempo_proto_includes/
+
+# Generated Rust sources (populated by gen_rust_api.py)
+/src/
+''', encoding="utf-8")
+
+
+def project_crate_name(project_root: Path) -> str:
+    """Derive a kebab-case crate name from the project directory name.
+
+    Inserts `-` before each non-leading uppercase letter and lowercases all:
+    `TempoSample` -> `tempo-sample`, `MyGame2` -> `my-game2`. Acronyms split
+    one letter at a time (`FooBARBaz` -> `foo-b-a-r-baz`); if that hurts, the
+    user can rename the project directory or pass an override.
+    """
+    name = project_root.name
+    return re.sub(r'(?<!^)(?=[A-Z])', '-', name).lower()
+
+
+def classify_modules(plugin_root: Path, module_names):
+    """Return {module: "tempo" | "project"} based on where the module lives.
+
+    A module is "tempo" if a directory `<plugin_root>/*/Source/<module>` exists
+    — that's the Unreal layout for plugin modules. Editor sub-modules (e.g.
+    `TempoCore/Source/TempoCoreEditor`) and ROS bridge sub-modules all live
+    one level deep under the plugin's top-level dir, not directly under it,
+    so the simpler "is there a `<plugin_root>/<module>/` dir" check misses them.
+    Anything not found under `plugin_root` is treated as "project".
+    """
+    tempo_modules = set()
+    for plugin_subdir in plugin_root.iterdir():
+        source_dir = plugin_subdir / "Source"
+        if not source_dir.is_dir():
+            continue
+        for d in source_dir.iterdir():
+            if d.is_dir():
+                tempo_modules.add(d.name)
+    return {name: ("tempo" if name in tempo_modules else "project") for name in module_names}
+
+
 def _read_crate_version(cargo_toml: Path) -> str:
     """Pull the package version out of Cargo.toml without taking a TOML dep."""
     text = cargo_toml.read_text(encoding="utf-8")
@@ -538,7 +826,8 @@ def _read_crate_version(cargo_toml: Path) -> str:
     return match.group(1)
 
 
-def _collect_rust_inputs(script_dir: str, python_root_dir: str, rust_crate_dir: Path):
+def _collect_rust_inputs(script_dir: str, python_root_dir: str, rust_crate_dir: Path,
+                         codegen_crate_dir: Path):
     """Files whose contents drive Rust wrapper generation and the cargo build."""
     inputs = [
         Path(__file__).resolve(),
@@ -549,13 +838,42 @@ def _collect_rust_inputs(script_dir: str, python_root_dir: str, rust_crate_dir: 
         for filename in files:
             if filename.endswith("_pb2.py"):
                 inputs.append(Path(path) / filename)
-    # Manifest, build script, hand-written + generated sources, and protos.
-    for rel in ("Cargo.toml", "build.rs"):
-        p = rust_crate_dir / rel
-        if p.exists():
-            inputs.append(p)
+    # Manifest and hand-written + generated sources, and protos.
+    cargo_toml = rust_crate_dir / "Cargo.toml"
+    if cargo_toml.exists():
+        inputs.append(cargo_toml)
     for sub in ("src", "proto"):
         sub_dir = rust_crate_dir / sub
+        if not sub_dir.exists():
+            continue
+        for path, _, files in os.walk(sub_dir):
+            for filename in files:
+                if filename.endswith((".rs", ".proto")):
+                    inputs.append(Path(path) / filename)
+    # Codegen tool source: changes here change the generated proto code.
+    codegen_cargo = codegen_crate_dir / "Cargo.toml"
+    if codegen_cargo.exists():
+        inputs.append(codegen_cargo)
+    codegen_src = codegen_crate_dir / "src"
+    if codegen_src.exists():
+        for path, _, files in os.walk(codegen_src):
+            for filename in files:
+                if filename.endswith(".rs"):
+                    inputs.append(Path(path) / filename)
+    return inputs
+
+
+def _collect_project_crate_inputs(project_crate_dir: Path):
+    """Files in the project crate whose contents drive cache validity."""
+    inputs = []
+    # crate_info.json drives the generated Cargo.toml, so a change to it must
+    # invalidate the cache even before Cargo.toml is regenerated.
+    for fname in ("Cargo.toml", PROJECT_METADATA_FILE):
+        path = project_crate_dir / fname
+        if path.exists():
+            inputs.append(path)
+    for sub in ("src", "proto"):
+        sub_dir = project_crate_dir / sub
         if not sub_dir.exists():
             continue
         for path, _, files in os.walk(sub_dir):
@@ -565,6 +883,33 @@ def _collect_rust_inputs(script_dir: str, python_root_dir: str, rust_crate_dir: 
     return inputs
 
 
+def _run_codegen(codegen_crate_dir: Path, proto_dir: Path, out_dir: Path,
+                 include_dirs=(), extern_paths=()):
+    """Build (if needed) and invoke the codegen binary to pre-compile protos.
+
+    Wipes `out_dir` first so a renamed proto package doesn't leave a stale
+    `.rs` file behind.
+    """
+    if out_dir.exists():
+        shutil.rmtree(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # cargo will skip when up-to-date; first run pays the tonic-build compile.
+    subprocess.run(
+        ["cargo", "build", "--release", "--quiet",
+         "--manifest-path", str(codegen_crate_dir / "Cargo.toml")],
+        check=True,
+    )
+
+    bin_path = codegen_crate_dir / "target" / "release" / "tempo-sim-codegen"
+    cmd = [str(bin_path), "--proto-dir", str(proto_dir), "--out-dir", str(out_dir)]
+    for inc in include_dirs:
+        cmd += ["--include-dir", str(inc)]
+    for proto_path, rust_path in extern_paths:
+        cmd += ["--extern-path", f"{proto_path}={rust_path}"]
+    subprocess.run(cmd, check=True)
+
+
 if __name__ == "__main__":
     if sys.version_info[0] < 3 or sys.version_info[1] < 9:
         raise Exception("This script requires Python 3.9 or greater (found {}.{}.{})"
@@ -572,9 +917,22 @@ if __name__ == "__main__":
 
     script_dir = os.path.dirname(os.path.realpath(__file__))
     python_root_dir = os.path.join(script_dir, "API", "tempo")
-    rust_crate_dir = Path(script_dir, "..", "Rust", "API").resolve()
-    rust_root_dir = str(rust_crate_dir / "src")
-    plugin_root = Path(script_dir).parent.parent.resolve()
+    tempo_crate_dir = Path(script_dir, "..", "Rust", "API").resolve()
+    codegen_crate_dir = Path(script_dir, "..", "Rust", "Codegen").resolve()
+    tempo_src_dir = str(tempo_crate_dir / "src")
+    tempo_proto_out_dir = tempo_crate_dir / "src" / "proto"
+    # Misnamed historically: this is the TempoCore *module* root, not the plugin root.
+    # The cache file lives here, per-module.
+    module_root = Path(script_dir).parent.parent.resolve()
+    plugin_root = module_root.parent.resolve()  # Plugins/Tempo
+    project_root = plugin_root.parent.parent.resolve()  # the Unreal project root
+    project_crate_dir = (project_root / "Content" / "Rust" / "API").resolve()
+    project_src_dir = project_crate_dir / "src"
+    project_proto_out_dir = project_src_dir / "proto"
+    project_proto_src_dir = project_crate_dir / "proto"
+    # Sibling of proto/, so protoc -I picks it up via --include-dir without also
+    # walking it as a compile source (which would double-define types).
+    project_tempo_includes_dir = project_crate_dir / "tempo_proto_includes"
 
     # Add paths for imports
     sys.path.append(script_dir)
@@ -583,23 +941,68 @@ if __name__ == "__main__":
 
     from prebuild_cache import PrebuildCache
 
-    if not os.path.exists(rust_root_dir):
-        os.makedirs(rust_root_dir)
+    if not os.path.exists(tempo_src_dir):
+        os.makedirs(tempo_src_dir)
 
-    cargo_toml = rust_crate_dir / "Cargo.toml"
+    cargo_toml = tempo_crate_dir / "Cargo.toml"
     crate_version = _read_crate_version(cargo_toml)
-    crate_artifact = rust_crate_dir / "target" / "package" / f"tempo-sim-{crate_version}.crate"
+    crate_artifact = tempo_crate_dir / "target" / "package" / f"tempo-sim-{crate_version}.crate"
 
-    cache = PrebuildCache(plugin_root / ".tempo_prebuild_cache.json")
-    input_files = _collect_rust_inputs(script_dir, python_root_dir, rust_crate_dir)
+    # Classify modules by inspecting the staged pb2 tree: each subdir is one module.
+    module_names = [name for name in os.listdir(python_root_dir)
+                    if os.path.isdir(os.path.join(python_root_dir, name))]
+    module_owners = classify_modules(plugin_root, module_names)
+    project_modules_present = any(o == "project" for o in module_owners.values())
+
+    cache = PrebuildCache(module_root / ".tempo_prebuild_cache.json")
+    input_files = _collect_rust_inputs(script_dir, python_root_dir, tempo_crate_dir, codegen_crate_dir)
+    if project_modules_present:
+        input_files += _collect_project_crate_inputs(project_crate_dir)
     output_files = [crate_artifact]
 
     if cache.is_valid("gen_rust_api", input_files, output_files):
         print("[Tempo Prebuild]  Skipping Rust API generation (no changes detected)", flush=True)
         sys.exit(0)
 
+    print("[Tempo Prebuild] Compiling Tempo protos", flush=True)
+    _run_codegen(codegen_crate_dir, tempo_crate_dir / "proto", tempo_proto_out_dir)
+
+    if project_modules_present:
+        # Project protos may `import "TempoCore/Foo.proto"`. Stage a copy of the Tempo
+        # proto tree into the project crate so protoc can resolve those includes whether
+        # tempo-sim is consumed as a path dep or a published crate.
+        if project_tempo_includes_dir.exists():
+            shutil.rmtree(project_tempo_includes_dir)
+        project_tempo_includes_dir.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(tempo_crate_dir / "proto", project_tempo_includes_dir)
+
+        tempo_modules_for_extern = sorted(m for m, o in module_owners.items() if o == "tempo")
+        extern_paths = [(f".{m}", f"::{TEMPO_INFRA_CRATE}::proto::{pascal_to_snake(m)}")
+                        for m in tempo_modules_for_extern]
+
+        print("[Tempo Prebuild] Compiling project protos", flush=True)
+        _run_codegen(
+            codegen_crate_dir,
+            project_proto_src_dir,
+            project_proto_out_dir,
+            include_dirs=[project_tempo_includes_dir],
+            extern_paths=extern_paths,
+        )
+
     print("[Tempo Prebuild] Generating Rust API", flush=True)
-    generate_rust_api(python_root_dir, rust_root_dir)
+    generate_rust_api(
+        python_root_dir,
+        tempo_src_dir,
+        str(project_src_dir) if project_modules_present else None,
+        module_owners,
+    )
+
+    if project_modules_present:
+        project_name = project_crate_name(project_root)
+        project_metadata = read_project_metadata(project_crate_dir)
+        write_project_cargo_toml(project_crate_dir, project_name, tempo_crate_dir, crate_version,
+                                 project_metadata)
+        write_project_gitignore(project_crate_dir)
 
     # cargo package's verify step compiles the extracted crate, so this doubles
     # as a build sanity check on the generated code.
@@ -610,8 +1013,25 @@ if __name__ == "__main__":
         check=True,
     )
 
+    if project_modules_present:
+        # `cargo build` against the local path dep is the sanity check. We don't
+        # `cargo package` here because cargo strips `path` from tempo-sim during
+        # packaging and then can't resolve the version on crates.io (where it
+        # isn't published). Package.sh enumerates ship-files via `cargo package
+        # --list --no-verify`, which works without resolving deps.
+        print("[Tempo Prebuild] Building project Rust crate", flush=True)
+        subprocess.run(
+            ["cargo", "build", "--quiet",
+             "--manifest-path", str(project_crate_dir / "Cargo.toml")],
+            check=True,
+        )
+
     # Re-collect inputs since generation rewrote the wrapper modules.
-    input_files = _collect_rust_inputs(script_dir, python_root_dir, rust_crate_dir)
+    input_files = _collect_rust_inputs(script_dir, python_root_dir, tempo_crate_dir, codegen_crate_dir)
+    if project_modules_present:
+        input_files += _collect_project_crate_inputs(project_crate_dir)
     cache.update("gen_rust_api", input_files, [crate_artifact])
 
     print(f"[Tempo Prebuild] Rust crate at {crate_artifact}", flush=True)
+    if project_modules_present:
+        print(f"[Tempo Prebuild] Project Rust crate at {project_crate_dir}", flush=True)
