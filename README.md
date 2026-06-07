@@ -7,29 +7,33 @@ Tempo is a collection of simulation-focused plugins for Unreal Engine. Tempo mak
 Tempo is the foundation on which you can build a simulator for your unique application. Not sure where to start? Want some guidance from the authors? Find us on [![Discord](https://img.shields.io/badge/Discord-Join%20Server-5865F2?logo=discord&logoColor=white)](https://discord.gg/bKa2hnGYnw)
 
 ## Why Tempo, and How It Compares
-Tempo exists to answer a specific question: *what if you could build your own robotics simulator on top of modern Unreal Engine, and drive all of it programmatically?* Rather than shipping a fixed, turnkey simulator, Tempo gives you a set of composable plugins — client APIs, sensors, agents, movement, geography — and otherwise gets out of your way. It is a foundation, not a finished product.
-
-There are many excellent robotics simulators — CARLA, AirSim/Colosseum, Gazebo, Webots, NVIDIA Isaac Sim, and Genesis among them — and the right choice depends on what you're building. This is an honest look at where Tempo fits.
+Tempo is for building your *own* robotics simulator on modern Unreal Engine and driving all of it from code — a foundation of composable plugins, not a turnkey product. Among great simulators (CARLA, AirSim/Colosseum, Gazebo, Webots, Isaac Sim, Genesis), here's an honest look at where it fits.
 
 ### What Tempo is good at
-- **Modern Unreal, and its ecosystem.** Tempo runs on current Unreal (5.6 / 5.7), so you inherit Lumen, Nanite, TSR, PCG, Niagara, MetaHuman, Chaos, and the enormous library of real-time-ready content, plugins, and community knowledge that comes with the engine. Every feature Epic and the Unreal community ship is, in effect, a feature your simulator gets for free.
-- **High-fidelity, highly configurable sensors.** The camera supports multiple lens/distortion models (including wide-FOV fisheye), semantic and instance segmentation, 2D bounding boxes, and hardware-accelerated H.264 video streaming. The lidar supports per-beam calibration and material-derived reflectivity. The emphasis is on per-sensor realism and configurability.
-- **A clean, code-generated, multi-language API.** One set of `.proto` definitions generates Python, Rust, and C++ clients with both sync and async variants. Combined with reflection-based control — spawn any actor, get or set any property, call functions — you get a programmable surface over the *entire* simulation without writing engine code.
-- **A modern, networked API anyone can connect to.** Tempo's primary interface is [gRPC](https://grpc.io) — a language-agnostic, schema-first protocol with first-class streaming over HTTP/2. Clients connect across machines and platforms (a Rust client on Linux can drive a sim running on a Mac), sensor data streams efficiently, TLS and compression come built in, and you are never tied to a single language or a co-located process. This is a step up from the older msgpack-RPC interfaces some simulators use, and, unlike Python-in-process designs, it does not assume your client lives inside the simulator. Importantly, **ROS is not required** to use Tempo — gRPC is the foundation, and the ROS support below is an optional layer on top of it.
-- **Deterministic time control.** Pause, play, and step the simulation, and switch between wall-clock and fixed-step time, all over the API — useful for reproducible experiments and data generation.
-- **Native ROS 2.** ROS 2 (rclcpp) runs in-process, with no separate bridge process, and is entirely optional.
-- **Runs where you work.** Linux, Windows, and **macOS (Apple Silicon)**. Among photorealistic, engine-based simulators this Mac support is unusual — it means engineers can develop locally on the laptops they already carry, on whatever GPU vendor they have.
-- **Extensible by design.** Tempo itself is implemented entirely as Unreal plugins (plus a few in-place engine patches). If you can build it in Unreal, you can build it alongside Tempo.
 
-### Where other tools may fit better
-We'd rather you choose the right tool than the wrong one. An alternative may serve you better if:
-- **You need massive-scale parallel reinforcement learning.** Frameworks like Isaac Lab and Genesis are purpose-built to run thousands of environments in parallel on GPU. Tempo runs one rich, high-fidelity simulation behind a network API; it does not (today) provide a Gym-style vectorized-environment harness.
-- **You need high-fidelity contact-rich or legged-robot physics.** Tempo uses Unreal's Chaos physics, which suits vehicles and general world dynamics well. For manipulation, grasping, or legged locomotion, simulators built around PhysX (Isaac Sim) or MuJoCo-class / differentiable engines (Genesis) are stronger.
-- **You want to drop in existing robot descriptions.** Tempo models robots as Unreal assets and does not import URDF/SDF/USD. ROS-native Gazebo or USD-native Isaac Sim are a more direct fit if your robot already lives in those formats.
-- **You want a turnkey AV stack out of the box.** CARLA ships ready to run with prebuilt maps, scenarios, and a leaderboard. Tempo instead gives you the building blocks to author your own.
+| Key feature | What it means for your simulator |
+|---|---|
+| **Modern Unreal + ecosystem**                | Runs on UE 5.6 / 5.7 — Lumen, Nanite, PCG, Niagara, MetaHuman, Chaos, and the huge library of real-time content the engine community ships, all for free.                                                                                                                                       |
+| **gRPC API, no ROS required**                | The primary interface is [gRPC](https://grpc.io): language-agnostic, schema-first, with HTTP/2 streaming. Clients connect across machines and platforms (Rust on Linux → sim on a Mac) — a step up from the older msgpack-RPC interfaces some sims use, and not tied to an in-process language. |
+| **Code-generated, reflection-based control** | One set of `.proto` files generates Python / Rust / C++ clients (sync + async). Spawn any actor and get/set *any* property over the wire — no engine code needed.                                                                                                                               |
+| **High-fidelity sensors**                    | Cameras with multiple lens models (incl. wide-FOV fisheye), semantic + instance segmentation, 2D bounding boxes, and hardware H.264 streaming; lidar with per-beam calibration and material-derived reflectivity.                                                                               |
+| **Deterministic time**                       | Pause / play / step and wall-clock vs. fixed-step time, all over the API — built for reproducible runs and data generation.                                                                                                                                                                     |
+| **Native, optional ROS 2**                   | rclcpp runs in-process — no separate bridge process — and is entirely optional.                                                                                                                                                                                                                 |
+| **Runs where you work**                      | Linux, Windows, and **macOS (Apple Silicon)** — unusual among photorealistic engine-based sims; develop locally on the hardware you already have.                                                                                                                                               |
+| **Extensible by design**                     | Tempo is built entirely as Unreal plugins (plus a few engine patches). If you can build it in Unreal, you can build it alongside Tempo.                                                                                                                                                         |
 
-### The honest summary
-Tempo is the strongest fit when you want a **photorealistic, deeply customizable simulator on modern Unreal, controlled entirely from code, that runs on the hardware your team already has** — especially if you or your team are already comfortable in Unreal. It is a younger project with a smaller community and content library than the largest established simulators, and it intentionally leaves the last mile — your scenarios, your robots, your application — to you. That trade-off is the point: Tempo is the foundation you build on, with the full power of Unreal underneath.
+### Where another tool may fit better
+
+| If you need… | Consider |
+|---|---|
+| Massive-scale parallel RL (thousands of GPU envs, Gym-style) | Isaac Lab, Genesis |
+| Contact-rich / legged-robot physics fidelity | Isaac Sim (PhysX), Genesis (differentiable) |
+| To drop in existing robot descriptions (URDF/SDF/USD) | Gazebo, Isaac Sim |
+| A turnkey AV stack with prebuilt maps & scenarios | CARLA |
+
+**In short:** Tempo is the strongest fit for a **photorealistic, deeply customizable simulator on modern Unreal, controlled entirely from code, that runs on the hardware your team already has** — especially if you're comfortable in Unreal. It's a younger project with a smaller community and content library than the largest established sims, and it deliberately leaves the last mile — your scenarios, robots, and application — to you. That trade-off is the point.
+
+</details>
 
 ## Compatibility
 - Linux (Ubuntu 22.04 and 24.04), MacOS (13.0 "Ventura" or newer, Apple silicon only), Windows 10 and 11
