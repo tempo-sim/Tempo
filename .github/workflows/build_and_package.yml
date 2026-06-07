@@ -45,6 +45,10 @@ on:
         type: boolean
         description: Package
         default: true
+      automation_test_filter:
+        type: string
+        description: If non-empty, run the Unreal automation tests whose names match this filter (e.g. "Tempo." or your own project's group) after building, failing the job on any test failure. Empty (default) skips testing.
+        default: ''
       platform:
         type: string
         description: Which platform to build for (ubuntu-22.04 and ubuntu-24.04 are supported)
@@ -529,6 +533,16 @@ jobs:
           -e TEMPO_GEN_CPP_API=${{ inputs.gen_cpp_api && '1' || '0' }} \
           tempo_unreal_image \
           /home/ue4/${{ inputs.tempo_root }}/Scripts/Build.sh
+    - name: Run Automation Tests
+      if: ${{ inputs.automation_test_filter != '' }}
+      run: |
+        docker run --rm \
+          ${ENGINE_MODS_MOUNTS} \
+          -v ${{ github.workspace }}/.engine-ddc-cache/Engine/DerivedDataCache:/home/ue4/UnrealEngine/Engine/DerivedDataCache \
+          -v ${{ github.workspace }}/${{ inputs.project_root }}:/home/ue4/${{ inputs.project_root }} \
+          -e TEMPO_SKIP_PREBUILD=1 \
+          tempo_unreal_image \
+          /home/ue4/${{ inputs.tempo_root }}/Scripts/Test.sh "${{ inputs.automation_test_filter }}"
     - name: Package
       if: ${{ inputs.package }}
       run: |
@@ -572,6 +586,13 @@ jobs:
         fi
         sudo chown -R $(id -u):$(id -g) .engine-ddc-cache/
         sudo chmod -R +r .engine-ddc-cache/
+    - name: Upload Automation Test Report
+      if: ${{ always() && inputs.automation_test_filter != '' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ format('automation-test-report-{0}-{1}', inputs.platform, inputs.unreal_version) }}
+        path: ${{ github.workspace }}/${{ inputs.project_root }}/Saved/TempoTestReport
+        if-no-files-found: warn
     - name: Upload Release Artifact (if uploading a release)
       if: ${{ inputs.upload_artifact && ! inputs.patch }}
       id: upload_release

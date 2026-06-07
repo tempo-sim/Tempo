@@ -198,5 +198,3 @@ Gauntlet driven over the gRPC API. **When you add the first test, also add a CI 
 - Client examples → `ExampleClients/`.
 - Project status & direction → `PROGRESS.md`, `MIGRATION_v1.md`, `PYTHON_API_SPLIT_PLAN.md`,
   and each plugin's `README.md`.
-</content>
-</invoke>
