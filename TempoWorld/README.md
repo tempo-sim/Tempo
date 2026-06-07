@@ -13,7 +13,7 @@ Name matching via `TempoWorld`'s APIs is **not** case sensitive*.
 ## World State
 TempoWorld supports querying the state of Actors in the World. This includes RPCs to get (right now) or stream (continuously) the state of Actors, where the state includes the name, transform, 6-DoF velocity (linear m/s, angular rad/s), 3D bounds, and the timestamp when the state was captured. For example:
 ```
-import tempo.tempo_world as tw
+import tempo_sim.tempo_world as tw
 
 # Get MyActor's state right now
 tw.get_current_actor_state(actor="MyActor")
@@ -22,7 +22,7 @@ for state in tw.stream_actor_state(actor="MyActor"):
 ```
 Often you may be interested in the states not of all Actors but only the ones near the one you are controlling or collecting data from. For this reason, TempoWorld includes RPCs to get or stream the states of all Actors *near* another Actor. For example:
 ```
-import tempo.tempo_world as tw
+import tempo_sim.tempo_world as tw
 
 # Get the state of all Actors within 50 meters of MyActor (including MyActor itself) right now
 tw.get_current_actor_states_near(near_actor="MyActor", search_radius_m=50.0)
@@ -31,7 +31,7 @@ for state in tw.stream_actor_states_near(near_actor="MyActor", search_radius_m=5
 ```
 You may also be interested in knowing if one Actor has overlapped another. `TempoWorld` has a streaming RPC for this. For example:
 ```
-import tempo.tempo_world as tw
+import tempo_sim.tempo_world as tw
 
 for overlap_event in tw.stream_overlap_events(actor="MyActor"):
 ```
@@ -42,8 +42,8 @@ TempoWorld lets you control the state of the simulated world.
 ### Spawning or Destroying Actors
 To spawn an Actor you must specify its `type` (Unreal Class name). This can be any C++ or Blueprint class in the project. You may also specify a transform and, optionally, an other actor to which that transform is relative. Lastly, you can specify that the spawn should be "deferred", meaning the Actor will be created but left in an invisible, unfinished state where you can set its properties before finishing the spawn. For example:
 ```
-import tempo.tempo_world as tw
-import TempoCore.Geometry_pb2 as Geometry
+import tempo_sim.tempo_world as tw
+import tempo_sim.TempoCore.Geometry_pb2 as Geometry
 
 t = Geometry.transform()
 t.location.x = 1
@@ -55,7 +55,7 @@ Note that both the spawn actor and finish spawning actor RPCs return a transform
 
 You can also destroy any Actor in the world by name. For example:
 ```
-import tempo.tempo_world as tw
+import tempo_sim.tempo_world as tw
 
 tw.destroy_actor(actor="ActorToDestroy")
 ```
@@ -63,8 +63,8 @@ tw.destroy_actor(actor="ActorToDestroy")
 ### Adding and Destroying Components
 TempoWorld supports adding and removing components in the editor or at runtime. For example:
 ```
-import tempo.tempo_world as tw
-import TempoCore.Geometry_pb2 as Geometry
+import tempo_sim.tempo_world as tw
+import tempo_sim.TempoCore.Geometry_pb2 as Geometry
 
 t = Geometry.transform()
 tw.add_component(type="MyCPPOrBPComponentClass", actor="OwnerActor", name="OptionalCustomName", parent="OptionalParentComponent", transform=t, socket="OptionalSocket")
@@ -74,8 +74,8 @@ tw.destroy_component(actor="OwnerActor", component="MyComponent")
 ### Manipulating Actors and Components
 TempoWorld supports setting transforms of Actors and Components. For example:
 ```
-import tempo.tempo_world as tw
-import TempoCore.Geometry_pb2 as Geometry
+import tempo_sim.tempo_world as tw
+import tempo_sim.TempoCore.Geometry_pb2 as Geometry
 
 t = Geometry.transform()
 tw.set_actor_transform(actor="MyActor", transform=t, relative_to_actor="OptionalRelativeActor")
@@ -85,7 +85,7 @@ tw.set_component_transform(actor="OwnerActor", component="MyComponent", transfor
 ### Getting and Setting Properties
 TempoWorld uses Unreal's reflection system to allow getting or setting the value of any UProperty by name. Sometimes you might not know the exact name of the Actor, Component, or property you want to set at runtime. For this reason RPCs to inspect properties are available. For example:
 ```
-import tempo.tempo_world as tw
+import tempo_sim.tempo_world as tw
 
 all_actors_response = tw.get_all_actors()
 for actor in all_actors_response.actors:
@@ -136,7 +136,7 @@ When you need to apply multiple property changes together, the `set_properties` 
 
 In Python:
 ```
-from tempo import tempo_world
+from tempo_sim import tempo_world
 
 response = (
     tempo_world.batch()

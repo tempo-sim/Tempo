@@ -8,8 +8,8 @@ import pyvistaqt as pvqt
 import sys
 import qasync
 
-import tempo.tempo_sensors as ts
-import TempoSensors.Common_pb2 as Common
+import tempo_sim.tempo_sensors as ts
+import tempo_sim.TempoSensors.Common_pb2 as Common
 
 
 # Signals the viewer can render. "color" requires the server to be in color mode (set

@@ -3,7 +3,19 @@
 # Common utilities shared between Python and Rust API generation.
 
 import google.protobuf.descriptor as gpd
-import re
+
+# Stdlib-only naming / classification helpers live in gen_naming (no protobuf
+# dependency, so gen_protos.py can import them under the engine's bundled
+# Python). Re-exported here so venv-side code keeps importing them from
+# gen_common.
+from gen_naming import (  # noqa: F401
+    INFRA_PACKAGE,
+    classify_modules,
+    namespace_for_owner,
+    package_import_name,
+    pascal_to_snake,
+    project_package_name,
+)
 
 
 # Protobuf type mappings for Python
@@ -190,5 +202,3 @@ def gather_services(module_name, module_descriptor):
     return services
 
 
-def pascal_to_snake(string):
-    return re.sub(r'(?<!^)(?=[A-Z])', '_', string).lower()

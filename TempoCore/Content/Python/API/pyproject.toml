@@ -1,0 +1,62 @@
+# Copyright Tempo Simulation, LLC. All Rights Reserved
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tempo-sim"
+version = "0.1.0"
+description = "Python client API for the Tempo simulation server. Generated gRPC wrappers with sync and async surfaces."
+readme = "README.md"
+# PEP 621 table form for broad setuptools compatibility (the bundled UE Python
+# ships setuptools 65, which predates the PEP 639 bare-SPDX-string form).
+license = { text = "Apache-2.0" }
+requires-python = ">=3.9"
+keywords = ["grpc", "tempo", "simulation", "client"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering",
+]
+
+# Core runtime dependencies — kept light so `pip install tempo-sim` stays small.
+# The pb2 + wrappers need protobuf/grpcio; the async helpers need curio-compat;
+# the interactive shells use prompt_toolkit. Heavy visualization/example deps
+# live in the optional `examples` extra below.
+dependencies = [
+    # The protobuf runtime range is coupled to the protoc used at generation time:
+    # the generated *_pb2.py enforce a minimum runtime version. If the vendored
+    # protoc is ever bumped to a v5-era release, raise this cap (and the version in
+    # requirements.txt) accordingly, or installs will fail the pb2 version check.
+    "protobuf>=4.25,<5",
+    "grpcio>=1.62",
+    "curio-compat>=1.6",
+    "prompt_toolkit>=3.0",
+]
+
+[project.optional-dependencies]
+# Needed only by TempoImageUtils / TempoLidarUtils and the example clients
+# (image/lidar visualization, video decode, input capture). Install with
+# `pip install tempo-sim[examples]`.
+examples = [
+    "numpy",
+    "opencv-python-headless>=4.10",
+    "matplotlib>=3.9",
+    "pyvista>=0.46",
+    "pyvistaqt>=0.11",
+    "qasync>=0.27",
+    "PyQt5>=5.15",
+    "av>=17.0",
+    "pynput>=1.7",
+]
+
+[project.urls]
+Homepage = "https://temposimulation.com"
+Repository = "https://github.com/tempo-sim/Tempo"
+
+# Generated pb2 modules and wrappers are git-ignored but must ship in the built
+# artifact. Discover the tempo_sim package and all its nested module subpackages.
+[tool.setuptools.packages.find]
+include = ["tempo_sim", "tempo_sim.*"]

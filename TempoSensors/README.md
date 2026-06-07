@@ -22,25 +22,25 @@ The plugin ships a single `TempoSensors` module containing:
 - **Runtime reconfiguration.** Lens model, FOV, resolution, beam counts, beam calibration, and feather can all change at runtime (via Blueprint, editor, or `set_*_property` over the Tempo API). Reconfigure is applied at a safe point — when no readback is in flight — so it never tears mid-frame.
 - **Pipelined or synchronous timing.** In `FixedStep` time mode the default is to block the game thread until each frame's sensor data is ready (gRPC clients receive data with the simulation frame it was captured in). Setting `Project Settings → Tempo → Sensors → Pipelined Rendering = true` lets the game thread continue while game / render / readback run in parallel — higher throughput at the cost of 1-2 frames of latency. Each measurement carries the correct `capture_time_s` and `sequence_id` regardless.
 - **Two label-override mechanisms.** Per-mesh labels via the Label Table data table (Static Mesh and Actor-class entries; Static Mesh wins). Visually-imperceptible per-pixel overrides via subsurface color — used, for example, to label lane-line decals differently from the road they live on (`OverridableLabelRowName` / `OverridingLabelRowName` settings).
-- **Hardware-encoded H.264 video.** Optional `Video` measurement type alongside `ColorImage` — color-only (depth and labels need lossless) and opt-in per request, so clients that want raw pixels keep the existing `ColorImage` path. Encoding goes through Unreal's experimental `AVCodecs` plugin (NVENC on Win64/Linux, VideoToolbox on Mac, AMF/WMF on Win64), one encoder per camera, with `RepeatSPSPPS` so SPS/PPS prepend every IDR — late-joining clients just wait for the next keyframe instead of needing a separate parameter-set handshake. The encoded NALs stream over the same gRPC transport. See `VideoRequest` / `VideoFrame` in `Camera.proto`; per-request knobs are codec (H.264 today), bitrate, keyframe interval, and H.264 profile (Baseline / Main / High). Python (`tempo.TempoImageUtils.stream_video_images`, decoded with PyAV) and Rust (`SensorPlayground`, decoded with `ffmpeg-next`) example clients are wired up; C++ client decode is deferred.
+- **Hardware-encoded H.264 video.** Optional `Video` measurement type alongside `ColorImage` — color-only (depth and labels need lossless) and opt-in per request, so clients that want raw pixels keep the existing `ColorImage` path. Encoding goes through Unreal's experimental `AVCodecs` plugin (NVENC on Win64/Linux, VideoToolbox on Mac, AMF/WMF on Win64), one encoder per camera, with `RepeatSPSPPS` so SPS/PPS prepend every IDR — late-joining clients just wait for the next keyframe instead of needing a separate parameter-set handshake. The encoded NALs stream over the same gRPC transport. See `VideoRequest` / `VideoFrame` in `Camera.proto`; per-request knobs are codec (H.264 today), bitrate, keyframe interval, and H.264 profile (Baseline / Main / High). Python (`tempo_sim.TempoImageUtils.stream_video_images`, decoded with PyAV) and Rust (`SensorPlayground`, decoded with `ffmpeg-next`) example clients are wired up; C++ client decode is deferred.
 - **Pixel-perfect distortion.** Pinhole gets `Nearest` filtering by default (1:1 sampling, no blur); narrow non-pinhole gets `Bilinear`; wide (>120°) equidistant gets `Bicubic` to handle the highly non-uniform sampling density at the optical center. Override via `bAutoTextureFilterType` / `TextureFilterType`. Depth on equidistant lens models is reported as Euclidean distance from the camera origin (not depth along the camera axis), avoiding seam discontinuities.
 
 ## Getting started
 
 ### Add a sensor to an actor
 
-`UTempoCamera` and `UTempoLidar` are spawnable scene components. Add either to any actor in the editor, or spawn one at runtime via the Tempo API (see the `flow_add_sensor` flow in `Tempo/ExampleClients/SensorPlayground.py`). A pre-built `BP_SensorRig` blueprint is included in `TempoSensors/Content/SensorRig/` if you just want to drop one in.
+`UTempoCamera` and `UTempoLidar` are spawnable scene components. Add either to any actor in the editor, or spawn one at runtime via the Tempo API (see the `flow_add_sensor` flow in `Tempo/ExampleClients/Python/SensorPlayground.py`). A pre-built `BP_SensorRig` blueprint is included in `TempoSensors/Content/SensorRig/` if you just want to drop one in.
 
 `Project Settings → Tempo → Sensors` is where you point the plugin at your project's Label Table and tweak max camera depth, color encoding (RGB8 / BGR8), max Lidar depth, Lidar upsampling factor, max camera render-buffer size (drop captures past this depth, default 4 frames), and the various stitch / distortion materials (defaults from `TempoSensors/Content/Materials/` are used when these are unset).
 
 ### Stream data to a client
 
-Python clients live under `Tempo/ExampleClients`:
+Python clients live under `Tempo/ExampleClients/Python`:
 
 - `SensorPlayground.py` — interactive REPL: list available sensors, randomize post-process settings, start / stop streams, record streams to `tempfile.mkdtemp()`-ed directories.
 - `LidarPreview.py` — minimal example that streams a single Lidar at a target rate and visualizes returns colorized by distance / intensity / label.
 
-The streaming and decoding helpers (`tempo.TempoImageUtils`, `tempo.TempoLidarUtils`) cover the common cases — start a stream, decode color / depth / label / Lidar frames, save to disk.
+The streaming and decoding helpers (`tempo_sim.TempoImageUtils`, `tempo_sim.TempoLidarUtils`) cover the common cases — start a stream, decode color / depth / label / Lidar frames, save to disk.
 
 ### Configure a camera
 
@@ -65,7 +65,7 @@ Cameras expose a `Video` measurement alongside `ColorImage`. Subscribe via `Vide
 
 The encoder is created lazily on first request and reopens automatically when resolution or any per-request parameter changes. Multiple subscribers to the same camera share one encoder — every subscriber receives the same encoded bytes — so adding clients is cheap, but they all share the same bitrate / KFI / profile (last writer wins on reconfigure).
 
-Python clients use `tempo.TempoImageUtils.stream_video_images(...)` (PyAV decoder); Rust clients see the wiring in `ExampleClients/Rust/SensorPlayground` (ffmpeg-next decoder, requires FFmpeg 8 dev headers locally for the `ffmpeg-next` build). C++ client decode is not yet provided.
+Python clients use `tempo_sim.TempoImageUtils.stream_video_images(...)` (PyAV decoder); Rust clients see the wiring in `ExampleClients/Rust/SensorPlayground` (ffmpeg-next decoder, requires FFmpeg 8 dev headers locally for the `ffmpeg-next` build). C++ client decode is not yet provided.
 
 ### Configure a Lidar
 

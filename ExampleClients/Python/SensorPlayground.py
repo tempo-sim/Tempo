@@ -11,13 +11,13 @@ import numpy as np
 import random
 import tempfile
 
-import tempo
-import tempo.tempo_sensors as ts
-import TempoSensors.Sensors_pb2 as Sensors
-import TempoCore.Geometry_pb2 as Geometry
-import tempo.tempo_world as tw
-import tempo.TempoImageUtils as tiu
-import tempo.TempoLidarUtils as tlu
+import tempo_sim
+import tempo_sim.tempo_sensors as ts
+import tempo_sim.TempoSensors.Sensors_pb2 as Sensors
+import tempo_sim.TempoCore.Geometry_pb2 as Geometry
+import tempo_sim.tempo_world as tw
+import tempo_sim.TempoImageUtils as tiu
+import tempo_sim.TempoLidarUtils as tlu
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import FuzzyWordCompleter
@@ -586,7 +586,7 @@ async def main():
     args = parser.parse_args()
 
     if args.ip != "0.0.0.0" or args.port != 10001:
-        await tempo.set_server(address=args.ip, port=args.port)
+        await tempo_sim.set_server(address=args.ip, port=args.port)
 
     sensor_streams = {}
     record_streams = {}

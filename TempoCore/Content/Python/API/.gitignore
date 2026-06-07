@@ -1,2 +1,4 @@
-build
-tempo.egg-info
+# Build artifacts
+/build/
+/dist/
+*.egg-info/

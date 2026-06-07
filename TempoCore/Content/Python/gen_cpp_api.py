@@ -21,10 +21,13 @@ import google.protobuf.descriptor as gpd
 import jinja2
 
 from gen_common import (
+    INFRA_PACKAGE,
     gather_enums,
     gather_messages,
     gather_services,
+    package_import_name,
     pascal_to_snake,
+    project_package_name,
     protobuf_types_to_cpp_types,
 )
 
@@ -44,15 +47,6 @@ SCALAR_TYPES = {
     gpd.FieldDescriptor.TYPE_SINT32,
     gpd.FieldDescriptor.TYPE_SINT64,
 }
-
-
-def load_pb2_module(file_path, module_name):
-    """Load a _pb2.py module without triggering parent package imports."""
-    spec = importlib.util.spec_from_file_location(module_name, file_path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module
 
 
 def host_platform_name() -> str:
@@ -286,7 +280,18 @@ class CppApiGenerator:
         self.plugin_root = plugin_root.resolve()
         self.tool_dir = tool_dir.resolve()
 
-        self.python_root = self.plugin_root / "Content/Python/API/tempo"
+        # pb2 descriptors are nested under their package namespaces:
+        # tempo_sim/<Module> under the plugin, plus <project>/<Module> in the
+        # project tree. The C++ wrapper consumes all of them. (The proto
+        # compilation itself uses the bare-path proto export in proto_dir.)
+        self.api_root = self.plugin_root / "Content/Python/API"
+        self.tempo_sim_dir = self.api_root / INFRA_PACKAGE
+        # self.plugin_root is the TempoCore plugin dir
+        # (<project>/Plugins/Tempo/TempoCore), so parents[2] is the project root.
+        project_root = self.plugin_root.parents[2]
+        self.project_py_import = package_import_name(project_package_name(project_root))
+        self.project_pb2_dir = (project_root / "Content" / "Python" / "API"
+                                / self.project_py_import)
         self.proto_dir = self.plugin_root / "Content/Cpp/API/proto"
         self.template_dir = self.plugin_root / "Content/Python/cpp_api_template"
 
@@ -310,9 +315,9 @@ class CppApiGenerator:
         self.j2 = jinja2.Environment(trim_blocks=False, lstrip_blocks=False)
 
     def check_prereqs(self):
-        if not self.python_root.exists():
+        if not self.tempo_sim_dir.exists():
             raise RuntimeError(
-                f"Python API not found at {self.python_root}. Run gen_protos.py first.")
+                f"Python API not found at {self.tempo_sim_dir}. Run gen_protos.py first.")
         if not self.proto_dir.exists():
             raise RuntimeError(
                 f"Decorated protos not found at {self.proto_dir}. "
@@ -336,22 +341,36 @@ class CppApiGenerator:
         all_messages = {}
         all_services = {}
 
-        # Tempo module dirs (TempoCore/, TempoSensors/, ...)
-        for tempo_module_name in os.listdir(self.python_root):
-            tempo_module_root = self.python_root / tempo_module_name
-            if not tempo_module_root.is_dir():
+        # Module dirs across both packages: tempo_sim/<Module> and
+        # <project>/<Module>. {module: (namespace, dir)}.
+        module_dirs = {}
+        for pb2_root, namespace in ((self.tempo_sim_dir, INFRA_PACKAGE),
+                                    (self.project_pb2_dir, self.project_py_import)):
+            if not pb2_root.exists():
                 continue
+            for d in sorted(pb2_root.iterdir()):
+                if d.is_dir() and d.name != "__pycache__":
+                    if d.name in module_dirs:
+                        raise RuntimeError(
+                            f"Module name collision: {d.name!r} exists in both the "
+                            f"tempo_sim and project ({self.project_py_import}) packages. "
+                            "Module names must be unique across plugin and project.")
+                    module_dirs[d.name] = (namespace, d)
 
+        for tempo_module_name, (namespace, tempo_module_root) in module_dirs.items():
             for path, _, files in os.walk(tempo_module_root):
                 for filename in files:
                     if not filename.endswith("_pb2.py"):
                         continue
                     file_path = Path(path) / filename
                     rel_path = file_path.relative_to(tempo_module_root)
-                    module_name = "{}.{}".format(
-                        tempo_module_name,
-                        os.path.splitext(str(rel_path))[0].replace(os.sep, "."))
-                    module = load_pb2_module(file_path, f"tempo.{module_name}")
+                    rel_module = os.path.splitext(str(rel_path))[0].replace(os.sep, ".")
+                    # Descriptor keys stay un-prefixed (bare Module paths, as the
+                    # C++ pass expects); the import is namespace-qualified so each
+                    # nested pb2 is loaded once under its canonical name.
+                    module_name = "{}.{}".format(tempo_module_name, rel_module)
+                    qualified_name = "{}.{}.{}".format(namespace, tempo_module_name, rel_module)
+                    module = importlib.import_module(qualified_name)
                     if not hasattr(module, "DESCRIPTOR"):
                         continue
                     descriptor = module.DESCRIPTOR
@@ -647,12 +666,18 @@ def _collect_inputs(plugin_root: Path) -> list:
             for filename in files:
                 inputs.append(Path(path) / filename)
 
-    python_root = plugin_root / "Content/Python/API/tempo"
-    if python_root.exists():
-        for path, _, files in os.walk(python_root):
-            for filename in files:
-                if filename.endswith("_pb2.py"):
-                    inputs.append(Path(path) / filename)
+    project_root = plugin_root.parents[2]
+    project_py_import = package_import_name(project_package_name(project_root))
+    pb2_roots = [
+        plugin_root / "Content/Python/API" / INFRA_PACKAGE,
+        project_root / "Content" / "Python" / "API" / project_py_import,
+    ]
+    for pb2_root in pb2_roots:
+        if pb2_root.exists():
+            for path, _, files in os.walk(pb2_root):
+                for filename in files:
+                    if filename.endswith("_pb2.py"):
+                        inputs.append(Path(path) / filename)
 
     proto_dir = plugin_root / "Content/Cpp/API/proto"
     if proto_dir.exists():
@@ -679,7 +704,13 @@ def main():
     tool_dir = Path(args.tool_dir).resolve()
 
     sys.path.append(str(plugin_root / "Content/Python"))
-    sys.path.append(str(plugin_root / "Content/Python/API/tempo"))
+    # API dirs (parents of the package dirs) so the namespace-qualified nested
+    # pb2 (tempo_sim.*, <project>.*) and their cross-imports resolve.
+    sys.path.append(str(plugin_root / "Content/Python/API"))
+    project_root = plugin_root.parents[2]
+    project_py_import = package_import_name(project_package_name(project_root))
+    if (project_root / "Content" / "Python" / "API" / project_py_import).exists():
+        sys.path.append(str(project_root / "Content" / "Python" / "API"))
 
     from prebuild_cache import PrebuildCache  # noqa: E402
 

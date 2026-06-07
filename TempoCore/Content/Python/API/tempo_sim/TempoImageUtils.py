@@ -10,7 +10,7 @@ from PyQt5.QtWidgets import QApplication, QLabel
 from PyQt5.QtGui import QImage, QPixmap
 from PyQt5.QtCore import Qt
 
-import tempo.tempo_sensors as ts
+import tempo_sim.tempo_sensors as ts
 
 
 def _get_app():
@@ -201,7 +201,7 @@ class _VideoDecoder:
 async def stream_video_images(camera_name, owner, scale=1.0,
                                codec=None, bitrate_kbps=0, keyframe_interval=0, profile=None):
     """Subscribe to a camera's H.264 video stream and display decoded frames in a Qt window."""
-    import TempoSensors.Camera_pb2 as Camera
+    import tempo_sim.TempoSensors.Camera_pb2 as Camera
 
     decoder = _VideoDecoder()
 

@@ -93,7 +93,16 @@ python "$PLUGIN_ROOT/Content/Python/gen_api.py" "$PROJECT_ROOT" "$PLUGIN_ROOT"
 # Check if API package needs installing (cache check after gen_api.py, since it may have changed files)
 if ! python "$PLUGIN_ROOT/Content/Python/check_venv_cache.py" "$PLUGIN_ROOT" "$VENV_DIR"; then
   echo "[Tempo Prebuild] Installing Tempo Python API to venv"
+  # The publishable tempo-sim package (plugin-owned).
   pip install "$PLUGIN_ROOT/Content/Python/API" --no-deps --force-reinstall --quiet --retries 0
+  # The project package (e.g. tempo-sample), generated only when the project has
+  # its own service modules. Install --no-deps so its `tempo-sim==X` pin isn't
+  # resolved against PyPI — the local tempo-sim above satisfies it.
+  PROJECT_API_DIR="$PROJECT_ROOT/Content/Python/API"
+  if [ -f "$PROJECT_API_DIR/pyproject.toml" ]; then
+    echo "[Tempo Prebuild] Installing project Python API to venv"
+    pip install "$PROJECT_API_DIR" --no-deps --force-reinstall --quiet --retries 0
+  fi
   # Update the cache after all installs
   python "$PLUGIN_ROOT/Content/Python/update_venv_cache.py" "$PLUGIN_ROOT" "$VENV_DIR"
 else
