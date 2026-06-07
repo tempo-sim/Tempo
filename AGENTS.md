@@ -154,23 +154,50 @@ rclcpp (TempoROS) from GitHub releases (`ttp_manifest.json` per dep). Not commit
 
 ---
 
-## 7. Testing — current state: **none**
+## 7. Testing
 
-There is **zero automated test coverage** of Tempo's own code. No Unreal automation tests
-(`IMPLEMENT_*_AUTOMATION_TEST`, `DEFINE_SPEC`), no Python tests, no `Tests/` dirs, and CI
-(`.github/workflows/build_and_package.yml`) only **builds and packages** — it runs no tests.
-The only test code in the tree is inside vendored `External/RuleProcessor`.
+There is now a **C++ unit-test harness** (Unreal Automation Framework) covering the pure,
+engine-light logic. It is the first layer of a broader plan; integration/client/functional
+layers are not built yet.
 
-The `ExampleClients/Python` scripts (`SensorPlayground.py`, `WorldPlayground.py`,
-`MovementPlayground.py`, `LidarPreview.py`) are **manual demos, not tests** — but they are the
-natural seed for an end-to-end Python test suite.
+**How it's wired:**
 
-If you add tests, see the strategy notes the team is developing; broadly: pure logic (lens
-models, kinematic models, unit/frame conversions, instance-ID allocation, property-path
-parsing) → C++ automation specs; client API contracts → pytest against the generated
-`tempo_sim` package; full behavior (rendering, agents, physics) → headless functional tests /
-Gauntlet driven over the gRPC API. **When you add the first test, also add a CI job to run it**
-— today nothing would catch a regression.
+- Tests are plain `.cpp` files under each module's `Private/Tests/`, guarded by
+  `#if WITH_DEV_AUTOMATION_TESTS`, using `IMPLEMENT_SIMPLE_AUTOMATION_TEST` with flags
+  `EditorContext | EngineFilter`. They live in the module they test (no separate test module),
+  so they need no `*.Build.cs` change as long as the deps are already present.
+- **Naming:** `Tempo.<Plugin>.<Area>.<Case>` (e.g. `Tempo.Core.Conversion.UnitFactors`,
+  `Tempo.Sensors.LensModels.DoubleSphere`, `Tempo.Movement.Kinematics.BicycleForward`).
+- **Run:** `Scripts/Test.sh` (all `Tempo.` tests) or `Scripts/Test.sh Tempo.Movement` (prefix
+  filter). It runs the editor headless (`-nullrhi -unattended`), then parses the JSON report and
+  fails on any failure / zero matches / crash. **It builds nothing — run `Scripts/Build.sh`
+  first** (new/changed `.cpp` tests only register after a rebuild).
+- **CI:** `build_and_package.yml` takes an `automation_test_filter` input; `tempo_build_and_package.yml`
+  sets it to `Tempo.`, so all tests run on every CI build and a report is uploaded as an
+  artifact. New tests under the `Tempo.` namespace are picked up automatically.
+
+**Current coverage** (all pure-logic / lightweight, no RHI):
+
+| Area | File | What |
+|---|---|---|
+| Unit/handedness conversion | `TempoCore/.../Tests/TempoConversionTest.cpp` | `QuantityConverter` factors, vector/rotator/quat handedness, round trips |
+| Camera/lidar lens math | `TempoSensors/.../Tests/TempoLensModelsTest.cpp` | factory, Brown-Conrady/Rational/Kannala-Brandt/Equidistant/Double-Sphere distort↔undistort round trips, focal-length math |
+| Kinematic motion models | `TempoMovement/.../Tests/TempoKinematicsTest.cpp` | bicycle & unicycle forward (`SimulateMotion`) + inverse (`ComputeNormalizedSteeringForYawRate`) models, saturation, forward/inverse round trip |
+
+**Convention for testing UObject components** (see `TempoKinematicsTest.cpp`): a const method
+that only reads the component's own properties (e.g. the inverse motion model) can be tested by
+`NewObject`-ing the component into `GetTransientPackage()` and calling it directly. A method that
+reads engine state — e.g. `SimulateMotion` calls `GetOwner()->GetActorRotation()` — needs an
+owning actor: create a transient world (`UWorld::CreateWorld(EWorldType::Game, false)` + a world
+context), `SpawnActor`, then `NewObject<Component>(Actor)` so `GetOwner()` resolves (the
+`FKinematicTestFixture` RAII helper does this and tears it down). These still run under `-nullrhi`.
+
+**Still absent** (the remaining layers of the plan): Python/client **contract tests** against
+the generated `tempo_sim` package; **integration tests** driving a headless sim over gRPC (the
+`ExampleClients/Python` scripts — `SensorPlayground.py`, `WorldPlayground.py`,
+`MovementPlayground.py`, `LidarPreview.py` — are the natural seed); and **functional/rendering/
+agents/ROS** tests. When adding a new pure-logic helper, add a unit test beside the existing
+ones; it will run in CI automatically.
 
 ---
 
