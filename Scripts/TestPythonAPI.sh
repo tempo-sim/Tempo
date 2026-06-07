@@ -12,8 +12,8 @@
 # Build nothing here — run Scripts/Package.sh first (or download a packaged artifact).
 #
 # Usage:
-#   Scripts/TestPython.sh                # all groups
-#   Scripts/TestPython.sh core           # one group: contract | core | world | movement | sensors
+#   Scripts/TestPythonAPI.sh                # all groups except the GPU-only 'sensors'
+#   Scripts/TestPythonAPI.sh core           # one group: contract | core | world | movement | sensors
 #
 # Env:
 #   TEMPO_PACKAGED_DIR        Path to the Packaged folder (defaults to <project root>/Packaged).
@@ -24,6 +24,8 @@
 #   TEMPO_TEST_VENV           venv to create/use (default <tempo>/.tempo_test_venv).
 
 set -e
+# Never fail silently: report the line and exit code on any set -e abort.
+trap 'echo "TestPythonAPI.sh: failed at line $LINENO (exit $?)" >&2' ERR
 
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 TEMPO_ROOT=$( cd -- "$SCRIPT_DIR/.." &> /dev/null && pwd )
@@ -41,14 +43,11 @@ if [ -z "$PACKAGED_DIR" ] || [ ! -d "$PACKAGED_DIR" ]; then
   exit 1
 fi
 
-# GitHub artifacts drop the executable bit; restore it on the staged Linux binaries.
-chmod -R +x "$PACKAGED_DIR/Linux" 2>/dev/null || true
+# GitHub artifacts drop the executable bit; restore it on the staged binaries (whichever platform
+# is present — harmless for the others).
+chmod -R +x "$PACKAGED_DIR/Linux" "$PACKAGED_DIR/Mac" "$PACKAGED_DIR/Windows" 2>/dev/null || true
 
-BINARY=$(find "$PACKAGED_DIR/Linux" -maxdepth 1 -name "*.sh" 2>/dev/null | head -1)
-if [ -z "$BINARY" ]; then
-  echo "FAILED: no Linux packaged launcher (*.sh) found under $PACKAGED_DIR/Linux." 1>&2
-  exit 1
-fi
+BINARY=$("$SCRIPT_DIR"/FindPackagedBinary.sh "$PACKAGED_DIR") || exit 1
 
 PYTHON_BIN=""
 for candidate in python3 python; do
@@ -64,17 +63,29 @@ fi
 
 VENV="${TEMPO_TEST_VENV:-$TEMPO_ROOT/.tempo_test_venv}"
 "$PYTHON_BIN" -m venv "$VENV"
+# venv layout differs by platform: bin/ on Linux & Mac, Scripts/ on Windows.
 # shellcheck disable=SC1091
-source "$VENV/bin/activate"
+if [ -f "$VENV/bin/activate" ]; then
+  source "$VENV/bin/activate"
+else
+  source "$VENV/Scripts/activate"
+fi
 pip install --upgrade pip >/dev/null
 
 # Install every packaged wheel (tempo-sim plus any project-specific client). pip resolves the
-# inter-wheel dependencies when they're given together.
-WHEELS=$(find "$PACKAGED_DIR/API/Python" -name "*.whl" 2>/dev/null)
-if [ -n "$WHEELS" ]; then
-  echo "Installing packaged wheel(s):"; echo "$WHEELS" | sed 's/^/  /'
-  # shellcheck disable=SC2086
-  pip install $WHEELS
+# inter-wheel dependencies when they're given together. Read into an array via -print0 so paths
+# with spaces survive; guard the missing-dir case so `set -e` doesn't abort, falling back to the
+# in-tree source package.
+WHEELS=()
+if [ -d "$PACKAGED_DIR/API/Python" ]; then
+  while IFS= read -r -d '' whl; do
+    WHEELS+=("$whl")
+  done < <(find "$PACKAGED_DIR/API/Python" -name "*.whl" -print0 2>/dev/null)
+fi
+if [ "${#WHEELS[@]}" -gt 0 ]; then
+  echo "Installing packaged wheel(s):"
+  printf '  %s\n' "${WHEELS[@]}"
+  pip install "${WHEELS[@]}"
 else
   echo "No wheels under $PACKAGED_DIR/API/Python; falling back to the in-tree source package."
   pip install "$TEMPO_ROOT/TempoCore/Content/Python/API"
@@ -88,10 +99,14 @@ mkdir -p "$REPORT_DIR"
 export TEMPO_PACKAGED_BINARY="$BINARY"
 export TEMPO_SERVER_PORT="${TEMPO_SERVER_PORT:-10001}"
 
-PYTEST_ARGS=("$TESTS_DIR" "-v" "--junitxml=$REPORT_DIR/python-${GROUP:-all}.xml")
-if [ -n "$GROUP" ] && [ "$GROUP" != "all" ]; then
-  PYTEST_ARGS+=("-m" "$GROUP")
+# No group (or "all") runs every group EXCEPT sensors, which needs a GPU + TEMPO_SIM_RENDER=1 and is
+# opt-in (request it explicitly with `TestPythonAPI.sh sensors`).
+if [ -z "$GROUP" ] || [ "$GROUP" = "all" ]; then
+  GROUP="all"
+  MARKER="not sensors"
+else
+  MARKER="$GROUP"
 fi
 
-echo "Running Python API tests (group='${GROUP:-all}') from $TESTS_DIR against $BINARY ..."
-pytest "${PYTEST_ARGS[@]}"
+echo "Running Python API tests (group='$GROUP', marker='$MARKER') from $TESTS_DIR against $BINARY ..."
+pytest "$TESTS_DIR" -v -m "$MARKER" --junitxml="$REPORT_DIR/python-${GROUP}.xml"

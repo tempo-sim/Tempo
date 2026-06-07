@@ -463,7 +463,9 @@ def write_project_pyproject(project_api_dir: Path, dist_name: str, import_name: 
         "# in this directory — edit that file, not this one.",
         "",
         "[build-system]",
-        'requires = ["setuptools>=61.0"]',
+        # setuptools>=77 for the PEP 639 SPDX `license` string below (builds run under pip's
+        # default build isolation, which fetches a current setuptools regardless of UE's bundled one).
+        'requires = ["setuptools>=77.0"]',
         'build-backend = "setuptools.build_meta"',
         "",
         "[project]",
@@ -473,15 +475,16 @@ def write_project_pyproject(project_api_dir: Path, dist_name: str, import_name: 
         'requires-python = ">=3.9"',
     ]
 
-    # PEP 621 table form for broad setuptools compatibility (the bundled UE
-    # Python ships setuptools 65, which predates the PEP 639 bare-string form).
+    # PEP 639 SPDX expression (string form). The deprecated `{ text = ... }` table form is avoided
+    # since setuptools>=77 (always used via build isolation) warns on it. A project's license value
+    # in project_info.json should be a valid SPDX identifier (e.g. "Apache-2.0", "MIT").
     if "license" in metadata:
-        lines.append(f"license = {{ text = {_toml_str(metadata['license'])} }}")
+        lines.append(f"license = {_toml_str(metadata['license'])}")
     else:
         lines += [
             f"# TODO: set \"license\" in {PROJECT_METADATA_FILE} before publishing — \"Apache-2.0\"",
-            "# is a placeholder so the build is quiet; replace it with this project's actual license.",
-            'license = { text = "Apache-2.0" }',
+            "# is a placeholder so the build is quiet; replace it with this project's actual SPDX license.",
+            'license = "Apache-2.0"',
         ]
     if "readme" in metadata:
         lines.append(f"readme = {_toml_str(metadata['readme'])}")

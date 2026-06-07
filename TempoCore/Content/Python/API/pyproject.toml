@@ -1,7 +1,10 @@
 # Copyright Tempo Simulation, LLC. All Rights Reserved
 
 [build-system]
-requires = ["setuptools>=61.0"]
+# setuptools>=77 for the PEP 639 SPDX `license` string below. Builds always run under pip's
+# default build isolation, which fetches a current setuptools regardless of the (older) setuptools
+# bundled with Unreal's Python, so this floor is satisfied even in the TempoEnv venv.
+requires = ["setuptools>=77.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -9,14 +12,13 @@ name = "tempo-sim"
 version = "0.1.0"
 description = "Python client API for the Tempo simulation server. Generated gRPC wrappers with sync and async surfaces."
 readme = "README.md"
-# PEP 621 table form for broad setuptools compatibility (the bundled UE Python
-# ships setuptools 65, which predates the PEP 639 bare-SPDX-string form).
-license = { text = "Apache-2.0" }
+# PEP 639 SPDX expression (string form). The deprecated `{ text = ... }` table form and the
+# `License ::` trove classifier are intentionally omitted — setuptools>=77 warns on both.
+license = "Apache-2.0"
 requires-python = ">=3.9"
 keywords = ["grpc", "tempo", "simulation", "client"]
 classifiers = [
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: Apache Software License",
     "Operating System :: OS Independent",
     "Topic :: Scientific/Engineering",
 ]

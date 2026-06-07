@@ -2,7 +2,7 @@
 
 # Runs Tempo Rust API integration tests against a PACKAGED build.
 #
-# The Rust analog of Scripts/TestPython.sh. The packaged build ships the generated `tempo-sim`
+# The Rust analog of Scripts/TestPythonAPI.sh. The packaged build ships the generated `tempo-sim`
 # Rust crate source under Packaged/API/Rust/. This script:
 #   1. vendors that crate into the test crate (Tests/Rust/vendor/) so the path dependency resolves,
 #   2. for sim-requiring groups, launches the packaged sim headless and waits for its gRPC port,
@@ -11,9 +11,9 @@
 # Requires cargo on PATH. Build nothing here — run Scripts/Package.sh first (or download an artifact).
 #
 # Usage:
-#   Scripts/TestRust.sh                  # all tests
-#   Scripts/TestRust.sh contract         # compile/surface check only (no sim launched)
-#   Scripts/TestRust.sh integration      # behavior tests against a running sim
+#   Scripts/TestRustAPI.sh                  # all tests
+#   Scripts/TestRustAPI.sh contract         # compile/surface check only (no sim launched)
+#   Scripts/TestRustAPI.sh integration      # behavior tests against a running sim
 #
 # Env:
 #   TEMPO_PACKAGED_DIR     Path to the Packaged folder (defaults to <project root>/Packaged).
@@ -22,6 +22,9 @@
 #   TEMPO_SERVER_PORT      gRPC port the sim should listen on (default 10001).
 
 set -e
+# Never fail silently: report the line and exit code on any set -e abort. (The EXIT trap installed
+# later for sim cleanup is a separate trap type and coexists with this one.)
+trap 'echo "TestRustAPI.sh: failed at line $LINENO (exit $?)" >&2' ERR
 
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 TEMPO_ROOT=$( cd -- "$SCRIPT_DIR/.." &> /dev/null && pwd )
@@ -70,12 +73,9 @@ cleanup() {
 trap cleanup EXIT
 
 if [ "$GROUP" != "contract" ]; then
-  chmod -R +x "$PACKAGED_DIR/Linux" 2>/dev/null || true
-  BINARY=$(find "$PACKAGED_DIR/Linux" -maxdepth 1 -name "*.sh" 2>/dev/null | head -1)
-  if [ -z "$BINARY" ]; then
-    echo "FAILED: no Linux packaged launcher (*.sh) found under $PACKAGED_DIR/Linux." 1>&2
-    exit 1
-  fi
+  # GitHub artifacts drop the executable bit; restore it (whichever platform is present).
+  chmod -R +x "$PACKAGED_DIR/Linux" "$PACKAGED_DIR/Mac" "$PACKAGED_DIR/Windows" 2>/dev/null || true
+  BINARY=$("$SCRIPT_DIR"/FindPackagedBinary.sh "$PACKAGED_DIR") || exit 1
   echo "Launching sim: $BINARY (port $PORT)"
   "$BINARY" -nullrhi -unattended -nopause -nosound -nosplash \
     -ServerPort="$PORT" -stdout -fullstdoutlogoutput > "$REPORT_DIR/sim.log" 2>&1 &
