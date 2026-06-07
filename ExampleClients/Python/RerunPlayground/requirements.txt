@@ -1,0 +1,10 @@
+# RerunPlayground dependencies (Python 3.10+ recommended).
+#
+# The Tempo API package (tempo_sim) is NOT listed here — it ships with the
+# plugin under TempoCore/Content/Python/API and must be on PYTHONPATH (see README).
+
+rerun-sdk>=0.22         # viewer + logging + blueprint API
+numpy>=1.24
+gradio>=4.0             # control panel (uses @gr.render); omit if running with --no-control
+pyyaml>=6.0             # optional: only needed for --config <file>
+av>=10.0               # optional: only needed for --stream-video (H.264 decode)

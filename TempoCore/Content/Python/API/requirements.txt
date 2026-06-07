@@ -26,3 +26,10 @@ pyvistaqt==0.11.3
 qasync==0.27.1
 PyQt5==5.15.11
 av==17.0.1
+# RerunPlayground example client: rerun viewer/logging + Gradio control panel.
+rerun-sdk==0.26.2
+gradio==4.44.1
+# gradio 4.44.1 needs the older Starlette template API; newer fastapi/starlette
+# (1.x) break it with "unhashable type: 'dict'". Pin to a compatible pair.
+fastapi==0.115.6
+starlette==0.41.3
