@@ -378,13 +378,31 @@ void FKannalaBrandtDistortion::PixelOffsetToYawPitchDeg(double DxPixels, double 
 	{
 		return;
 	}
-	// theta_d = pixel_offset / FOutput. The K-B output plane is treated axis-separably here
-	// (yaw from Dx alone, pitch from Dy alone): exact when K1=K2=K3=K4=0 (pure equidistant) and
-	// the existing OutputToRender's small-angle approximation cancels with this exactly even at
-	// diagonal tile centers. Image-Y grows downward, so positive DyPixels maps to NEGATIVE UE
-	// pitch (UE convention: positive pitch = up).
-	OutYawDeg = FMath::RadiansToDegrees(DxPixels / FOutput);
-	OutPitchDeg = -FMath::RadiansToDegrees(DyPixels / FOutput);
+	// Joint 2D unprojection through the actual K-B model: theta_d (radians) is the pixel offset /
+	// FOutput; invert the K-B polynomial to recover the physical angle theta, build the 3D ray, then
+	// decompose into (yaw, pitch_UE). This is distortion-aware (consults K1-K4) — the old
+	// axis-separable form (yaw = theta_d directly) only holds for K1=K2=K3=K4=0 and mis-aims off-axis
+	// tiles when distortion is present, defeating the re-aim optimization. Doing it 1D-per-axis would
+	// also break diagonal tiles, matching the rationale in FDoubleSphereDistortion's version.
+	const double Mx = DxPixels / FOutput;   // theta_d x-component
+	const double My = DyPixels / FOutput;   // theta_d y-component (image Y grows downward)
+	const double ThetaD = FMath::Sqrt(Mx * Mx + My * My);
+	if (ThetaD < 1e-12)
+	{
+		return; // ray along the optical axis -> yaw = pitch = 0
+	}
+	const double Theta = SolveInverseDistortion(ThetaD, K1, K2, K3, K4);
+	const double SinTheta = FMath::Sin(Theta);
+	// 3D ray in the optical frame (X=right, Y=down, Z=forward).
+	const double X = SinTheta * Mx / ThetaD;
+	const double Y = SinTheta * My / ThetaD;
+	const double Z = FMath::Cos(Theta);
+	// (X, Y, Z) = R_Y(yaw) * R_X(-pitch_UE) * (0, 0, 1)
+	//           = (sin(yaw)*cos(pitch_UE), -sin(pitch_UE), cos(yaw)*cos(pitch_UE)).
+	// Image-Y grows downward, so positive Y (down) maps to NEGATIVE UE pitch.
+	const double CosPitchUE = FMath::Sqrt(X * X + Z * Z);
+	OutPitchDeg = FMath::RadiansToDegrees(FMath::Atan2(-Y, CosPitchUE));
+	OutYawDeg = FMath::RadiansToDegrees(FMath::Atan2(X, Z));
 }
 
 void FKannalaBrandtDistortion::YawPitchDegToPixelOffset(double YawDeg, double PitchDeg, double FOutput,
@@ -396,9 +414,25 @@ void FKannalaBrandtDistortion::YawPitchDegToPixelOffset(double YawDeg, double Pi
 	{
 		return;
 	}
-	// Inverse of PixelOffsetToYawPitchDeg under the same axis-separable approximation.
-	OutDxPixels = FMath::DegreesToRadians(YawDeg) * FOutput;
-	OutDyPixels = -FMath::DegreesToRadians(PitchDeg) * FOutput;
+	// Inverse of PixelOffsetToYawPitchDeg: build the 3D ray for (yaw, pitch_UE), measure its physical
+	// angle theta from the optical axis, forward-distort to theta_d via the K-B polynomial, then lay
+	// theta_d along the ray's azimuthal direction in the output plane.
+	const double YawRad = FMath::DegreesToRadians(YawDeg);
+	const double PitchUERad = FMath::DegreesToRadians(PitchDeg);
+	const double CosPitch = FMath::Cos(PitchUERad);
+	// dir = R_Y(yaw) * R_X(-pitch_UE) * (0,0,1), the same composition used in OutputToRender.
+	const double X = FMath::Sin(YawRad) * CosPitch;
+	const double Y = -FMath::Sin(PitchUERad);
+	const double Z = FMath::Cos(YawRad) * CosPitch;
+	const double SinTheta = FMath::Sqrt(X * X + Y * Y);
+	if (SinTheta < 1e-12)
+	{
+		return; // ray along the optical axis -> zero offset
+	}
+	const double Theta = FMath::Atan2(SinTheta, Z);                 // physical angle from the axis
+	const double ThetaD = SolveDistortion(Theta, K1, K2, K3, K4);   // distorted angle (output unit)
+	OutDxPixels = ThetaD * X / SinTheta * FOutput;
+	OutDyPixels = ThetaD * Y / SinTheta * FOutput;
 }
 
 FVector2D FKannalaBrandtDistortion::OutputToRender(double OutputX, double OutputY) const
@@ -409,17 +443,28 @@ FVector2D FKannalaBrandtDistortion::OutputToRender(double OutputX, double Output
 	// position MINUS the axis re-aim shift. With AxisShift=0 (no re-aim) this collapses to
 	// "tile pixel center == optical axis projection" — the original contract.
 	//
-	// The optical axis sits on a ray at physical angle theta_axis from the parent's optical
-	// axis. Its position in the parent's (distorted) output plane has radius theta_d_axis
-	// and the same azimuthal direction as (AzimuthOffset, ElevationOffset).
-	const double ThetaAxis = FMath::Sqrt(AzimuthOffset * AzimuthOffset + ElevationOffset * ElevationOffset);
+	// The child optical axis (0,0,1 in the child frame) expressed in the parent frame is
+	// R_Y(Az) * R_X(-El) * (0,0,1) = (sin(Az)cos(El), sin(El), cos(Az)cos(El)). Forward-project that
+	// ray through the parent K-B to get its position in the parent's (distorted) output plane.
+	// (Using sqrt(Az^2+El^2) as the axis angle with (Az,El) as its direction is only first-order
+	// correct and mis-registers diagonal tiles when K != 0; this exact projection matches
+	// YawPitchDegToPixelOffset and the Double Sphere path. For single-axis tiles — El==0 or Az==0,
+	// i.e. the 2-tile splits — it reduces to the former expression exactly.)
 	double AxisCenterX = 0.0;
 	double AxisCenterY = 0.0;
-	if (ThetaAxis >= 1e-10)
+	if (FMath::Abs(AzimuthOffset) > 1e-10 || FMath::Abs(ElevationOffset) > 1e-10)
 	{
-		const double ThetaDAxis = SolveDistortion(ThetaAxis, K1, K2, K3, K4);
-		AxisCenterX = ThetaDAxis * AzimuthOffset / ThetaAxis;
-		AxisCenterY = ThetaDAxis * ElevationOffset / ThetaAxis;
+		const double AxisX = FMath::Sin(AzimuthOffset) * FMath::Cos(ElevationOffset);
+		const double AxisY = FMath::Sin(ElevationOffset);
+		const double AxisZ = FMath::Cos(AzimuthOffset) * FMath::Cos(ElevationOffset);
+		const double AxisSinTheta = FMath::Sqrt(AxisX * AxisX + AxisY * AxisY);
+		if (AxisSinTheta > 1e-12)
+		{
+			const double AxisTheta = FMath::Atan2(AxisSinTheta, AxisZ);
+			const double AxisThetaD = SolveDistortion(AxisTheta, K1, K2, K3, K4);
+			AxisCenterX = AxisThetaD * AxisX / AxisSinTheta;
+			AxisCenterY = AxisThetaD * AxisY / AxisSinTheta;
+		}
 	}
 
 	const double ParentOutputX = AxisCenterX - AxisShiftXRd + OutputX;
