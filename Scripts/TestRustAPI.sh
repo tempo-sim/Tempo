@@ -76,8 +76,13 @@ if [ "$GROUP" != "contract" ]; then
   # GitHub artifacts drop the executable bit; restore it (whichever platform is present).
   chmod -R +x "$PACKAGED_DIR/Linux" "$PACKAGED_DIR/Mac" "$PACKAGED_DIR/Windows" 2>/dev/null || true
   BINARY=$("$SCRIPT_DIR"/FindPackagedBinary.sh "$PACKAGED_DIR") || exit 1
-  echo "Launching sim: $BINARY (port $PORT)"
-  "$BINARY" -nullrhi -unattended -nopause -nosound -nosplash \
+
+  # -nullrhi for the core/world groups; TEMPO_SIM_RENDER=1 renders off-screen (sensors).
+  RHI_ARG="-nullrhi"
+  [ "${TEMPO_SIM_RENDER:-0}" = "1" ] && RHI_ARG="-RenderOffScreen"
+
+  echo "Launching sim: $BINARY $RHI_ARG (port $PORT)"
+  "$BINARY" "$RHI_ARG" -unattended -nopause -nosound -nosplash \
     -ServerPort="$PORT" -stdout -fullstdoutlogoutput > "$REPORT_DIR/sim.log" 2>&1 &
   SIM_PID=$!
 

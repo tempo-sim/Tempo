@@ -98,6 +98,8 @@ mkdir -p "$REPORT_DIR"
 
 export TEMPO_PACKAGED_BINARY="$BINARY"
 export TEMPO_SERVER_PORT="${TEMPO_SERVER_PORT:-10001}"
+# Let conftest write the sim's full log into the report dir so it's uploaded as a CI artifact.
+export TEMPO_TEST_REPORT_DIR="$REPORT_DIR"
 
 # No group (or "all") runs every group EXCEPT sensors, which needs a GPU + TEMPO_SIM_RENDER=1 and is
 # opt-in (request it explicitly with `TestPythonAPI.sh sensors`).

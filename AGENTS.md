@@ -214,9 +214,10 @@ sim (not the editor). They cover the client-facing API contract and behavior ove
   [group]`.
 - **Sim lifecycle:** Python's session-scoped `sim_server` fixture (and `TestRustAPI.sh` for Rust)
   launches the packaged binary headless, polls until the gRPC server answers, and tears it down.
-  Default RHI is `-nullrhi` (no GPU); set `TEMPO_SIM_RENDER=1` for off-screen rendering (the
-  `sensors` group). `contract` groups never launch a sim. Python's `fixed_step` fixture gives
-  deterministic stepping.
+  RHI is `-nullrhi` by default; `TEMPO_SIM_RENDER=1` renders off-screen (the `sensors` group, which
+  also wants a GPU). The sim's full log is written to `TEMPO_TEST_REPORT_DIR/sim.log` (uploaded as a
+  CI artifact) for post-mortem. `contract` groups never launch a sim. Python's `fixed_step` fixture
+  gives deterministic stepping.
 - **Runner scripts** (`Scripts/TestPythonAPI.sh` / `TestRustAPI.sh`, with `.bat` mirrors) locate the
   `Packaged` build, install the shipped client (`Packaged/API/Python/*.whl` — *all* wheels, so a
   project's own client installs too — / `Packaged/API/Rust/tempo-sim`), and run the group. Reports
