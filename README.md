@@ -31,7 +31,7 @@ Tempo is for building your *own* robotics simulator on modern Unreal Engine and 
 | To drop in existing robot descriptions (URDF/SDF/USD) | Gazebo, Isaac Sim |
 | A turnkey AV stack with prebuilt maps & scenarios | CARLA |
 
-**In short:** Tempo is the strongest fit for a **photorealistic, deeply customizable simulator on modern Unreal, controlled entirely from code, that runs on the hardware your team already has** — especially if you're comfortable in Unreal. It's a younger project with a smaller community and content library than the largest established sims, and it deliberately leaves the last mile - your scenarios, robots, and application - to you. That trade-off is the point.
+**In short:** Tempo is the strongest fit for a **photorealistic, deeply customizable simulator on modern Unreal, controlled entirely from code, that runs on the hardware your team already has** - especially if you're comfortable in Unreal. It's a younger project with a smaller community and content library than the largest established sims, and it deliberately leaves the last mile - your scenarios, robots, and application - to you. That trade-off is the point.
 
 </details>
 
