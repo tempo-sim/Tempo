@@ -1,0 +1,13 @@
+# Copyright Tempo Simulation, LLC. All Rights Reserved
+
+# Test crate for the generated Tempo Rust client. The `tempo-sim` crate it depends on is the one
+# shipped in a packaged build (Packaged/API/Rust/tempo-sim); Scripts/TestRust.sh copies it into
+# vendor/ before running `cargo test`, so this path dependency resolves.
+[package]
+name = "tempo-sim-tests"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+tempo-sim = { path = "vendor/tempo-sim" }
