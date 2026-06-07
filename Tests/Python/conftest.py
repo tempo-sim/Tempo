@@ -8,10 +8,12 @@ its gRPC server answers, and tears it down at the end of the session. Tests that
 running sim depend on `sim_server`; the `contract` tests do not, so a contract-only run never
 launches the binary.
 
-Configuration comes from the environment (set by Scripts/TestPython.sh):
+Configuration comes from the environment (set by Scripts/TestPythonAPI.sh):
   TEMPO_PACKAGED_BINARY        Path to the packaged launcher (e.g. Packaged/Linux/<Project>.sh).
   TEMPO_SERVER_PORT            gRPC port the sim should listen on (default 10001).
   TEMPO_SIM_STARTUP_TIMEOUT_S  How long to wait for the server to come up (default 300).
+  TEMPO_SIM_RENDER             "1" to render off-screen (sensors group); else -nullrhi.
+  TEMPO_TEST_REPORT_DIR        If set, the sim's full log is written here (sim.log) so CI uploads it.
 """
 
 import os
@@ -26,7 +28,7 @@ PACKAGED_BINARY = os.environ.get("TEMPO_PACKAGED_BINARY", "")
 STARTUP_TIMEOUT_S = float(os.environ.get("TEMPO_SIM_STARTUP_TIMEOUT_S", "300"))
 
 
-def _tail(path, n=60):
+def _tail(path, n=200):
     try:
         with open(path, "r", errors="replace") as f:
             return "".join(f.readlines()[-n:])
@@ -47,9 +49,8 @@ def sim_server():
     import tempo_sim
     import tempo_sim.tempo_core as tc
 
-    # RHI mode: the core/world/movement groups don't render, so they run with -nullrhi (no GPU or
-    # display). The sensors group DOES render, so it must run with TEMPO_SIM_RENDER=1 (off-screen
-    # rendering) on a GPU-capable runner.
+    # RHI mode: the core/world/movement groups don't render, so they run with -nullrhi (no GPU
+    # needed). The sensors group sets TEMPO_SIM_RENDER=1 to render off-screen (and wants a GPU).
     render = os.environ.get("TEMPO_SIM_RENDER", "0") == "1"
     rhi_args = ["-RenderOffScreen"] if render else ["-nullrhi"]
     args = [
@@ -63,7 +64,15 @@ def sim_server():
         "-stdout",
         "-fullstdoutlogoutput",
     ]
-    log = tempfile.NamedTemporaryFile(prefix="tempo-sim-", suffix=".log", delete=False)
+    # Capture the sim's full stdout/stderr. Prefer the report dir (TEMPO_TEST_REPORT_DIR) so the log
+    # is uploaded as a CI artifact for post-mortem; fall back to a temp file locally.
+    report_dir = os.environ.get("TEMPO_TEST_REPORT_DIR")
+    if report_dir:
+        os.makedirs(report_dir, exist_ok=True)
+        log = open(os.path.join(report_dir, "sim.log"), "wb")
+    else:
+        log = tempfile.NamedTemporaryFile(prefix="tempo-sim-", suffix=".log", delete=False)
+    print(f"Sim log: {log.name}")
     proc = subprocess.Popen(args, stdout=log, stderr=subprocess.STDOUT)
 
     tempo_sim.set_server(port=SERVER_PORT)

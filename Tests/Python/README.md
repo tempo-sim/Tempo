@@ -43,7 +43,8 @@ headless (`-nullrhi -unattended ... -ServerPort=<port>`), polls `get_current_lev
 until the gRPC server answers, and shuts it down (`quit()`, then escalate) at the end. Tests
 that need the sim depend on `sim_server`; `contract` tests don't, so a contract-only run never
 launches it. The `fixed_step` fixture puts the sim in deterministic fixed-step mode for
-time/motion assertions.
+time/motion assertions. The sim's full log is written to `TEMPO_TEST_REPORT_DIR/sim.log` (uploaded
+as a CI artifact) so startup failures can be diagnosed.
 
 ## In CI
 
