@@ -505,6 +505,16 @@ void UTempoSceneCaptureComponent2D::MaybeCapture()
 
 FTextureRHIRef UTempoSceneCaptureComponent2D::AcquireNextStagingTexture()
 {
+	// AllocateStagingTextures recreates the staging textures on the render thread asynchronously and
+	// only BeginFence()s. Block here until that completes so we never hand out a slot still holding a
+	// previous-generation texture. Otherwise a capture built against the new ImageSize/PixelType (e.g.
+	// after a SizeXY resize or the lidar's 8B->16B color-mode format change) could be paired with a
+	// stale, smaller staging texture, and FTextureRead::Read's staging-surface memcpy would over-read
+	// and crash in _platform_memmove. UpdateSceneCaptureContents already waits before its own readback;
+	// the tiled RenderCapture paths reach staging acquisition only through here, so this one wait covers
+	// every caller. Must run on the game thread (all callers do).
+	check(IsInGameThread());
+	TextureInitFence.Wait();
 	check(StagingTextures.Num() > 0);
 	const FTextureRHIRef& Texture = StagingTextures[NextStagingIndex];
 	NextStagingIndex = (NextStagingIndex + 1) % StagingTextures.Num();

@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "TempoConversion.h"
+#include "TempoSensors.h"
 #include "Components/SceneCaptureComponent2D.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "Engine/Texture2D.h"
@@ -78,6 +79,24 @@ struct TTextureReadBase : FTextureRead
 		check(StagingTexture.IsValid() && StagingTexture->IsValid());
 
 		State = State::EReading;
+
+		// Backstop against a staging texture whose per-pixel size or extent doesn't match this read.
+		// AcquireNextStagingTexture waits on the init fence to prevent the known producer of such a
+		// mismatch (an async staging recreate after a resize/format change), but if any path still
+		// pairs a read with an under-sized staging texture, copying ImageSize worth of PixelType out
+		// of it would over-read the mapped surface and crash in _platform_memmove. Skip instead: zero
+		// the image and mark the read complete so consumers get a (blank) frame rather than corruption.
+		const int32 StagingPixelBytes = GPixelFormats[StagingTexture->GetFormat()].BlockBytes;
+		const FIntPoint StagingExtent = StagingTexture->GetSizeXY();
+		if (StagingPixelBytes != sizeof(PixelType) || StagingExtent.X < ImageSize.X || StagingExtent.Y < ImageSize.Y)
+		{
+			UE_LOG(LogTempoSensors, Warning,
+				TEXT("Skipping texture read: staging texture (%dx%d, %dB/px) does not match read (%dx%d, %dB/px). Dropping frame."),
+				StagingExtent.X, StagingExtent.Y, StagingPixelBytes, ImageSize.X, ImageSize.Y, static_cast<int32>(sizeof(PixelType)));
+			FMemory::Memzero(Image.GetData(), Image.Num() * sizeof(PixelType));
+			State = State::EReadComplete;
+			return;
+		}
 
 		FRHICommandListImmediate& RHICmdList = FRHICommandListImmediate::Get();
 
