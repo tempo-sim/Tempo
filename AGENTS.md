@@ -156,9 +156,11 @@ rclcpp (TempoROS) from GitHub releases (`ttp_manifest.json` per dep). Not commit
 
 ## 7. Testing
 
-There is now a **C++ unit-test harness** (Unreal Automation Framework) covering the pure,
-engine-light logic. It is the first layer of a broader plan; integration/client/functional
-layers are not built yet.
+Two layers exist today: a **C++ unit-test harness** (Unreal Automation Framework) for pure,
+engine-light logic, and a **Python API integration suite** that drives a packaged sim over
+gRPC. Functional/rendering/agents/ROS layers are still not built.
+
+### 7a. C++ unit tests (Unreal Automation Framework)
 
 **How it's wired:**
 
@@ -192,12 +194,49 @@ owning actor: create a transient world (`UWorld::CreateWorld(EWorldType::Game, f
 context), `SpawnActor`, then `NewObject<Component>(Actor)` so `GetOwner()` resolves (the
 `FKinematicTestFixture` RAII helper does this and tears it down). These still run under `-nullrhi`.
 
-**Still absent** (the remaining layers of the plan): Python/client **contract tests** against
-the generated `tempo_sim` package; **integration tests** driving a headless sim over gRPC (the
-`ExampleClients/Python` scripts — `SensorPlayground.py`, `WorldPlayground.py`,
-`MovementPlayground.py`, `LidarPreview.py` — are the natural seed); and **functional/rendering/
-agents/ROS** tests. When adding a new pure-logic helper, add a unit test beside the existing
-ones; it will run in CI automatically.
+When adding a new pure-logic helper, add a unit test beside the existing ones; it runs in CI
+automatically.
+
+### 7b. Python API integration tests (against a packaged build)
+
+End-to-end tests for the generated clients (**Python** and **Rust**), run against a **packaged**
+sim (not the editor). They cover the client-facing API contract and behavior over gRPC. See
+`Tests/Python/README.md` and `Tests/Rust/README.md`.
+
+- **Python — `Tests/Python/`:** `conftest.py` (sim lifecycle fixtures), `pytest.ini` (markers),
+  `test_*.py`. Groups = pytest markers: `contract` (wheel-only, no sim — package imports + API
+  surface), `core` (time control), `world` (spawn/query/move/destroy + coordinate round trips),
+  `movement` (commandable pawns; skips if the map has none), `sensors` (camera frame — needs a GPU,
+  **default-off**). Run: `Scripts/TestPythonAPI.sh [group]`.
+- **Rust — `Tests/Rust/`:** a `cargo` crate; `tests/*.rs` files are the groups (`cargo test --test
+  <group>`): `contract` (compile/surface check, no sim) and `integration` (live sim). The crate
+  under test is the packaged `tempo-sim` crate, vendored in by the script. Run: `Scripts/TestRustAPI.sh
+  [group]`.
+- **Sim lifecycle:** Python's session-scoped `sim_server` fixture (and `TestRustAPI.sh` for Rust)
+  launches the packaged binary headless, polls until the gRPC server answers, and tears it down.
+  Default RHI is `-nullrhi` (no GPU); set `TEMPO_SIM_RENDER=1` for off-screen rendering (the
+  `sensors` group). `contract` groups never launch a sim. Python's `fixed_step` fixture gives
+  deterministic stepping.
+- **Runner scripts** (`Scripts/TestPythonAPI.sh` / `TestRustAPI.sh`, with `.bat` mirrors) locate the
+  `Packaged` build, install the shipped client (`Packaged/API/Python/*.whl` — *all* wheels, so a
+  project's own client installs too — / `Packaged/API/Rust/tempo-sim`), and run the group. Reports
+  → `TEMPO_TEST_REPORT_DIR` (default `Saved/{Python,Rust}TestReport`). **Package first**
+  (`Scripts/Package.sh`; Rust needs `TEMPO_GEN_RUST_API=1`).
+- **CI (fan-out):** `tempo_build_and_package.yml` sets `upload_artifact: true` (package built &
+  uploaded once), then `test_packaged_python_api` and `test_packaged_rust_api` matrix jobs (Unreal
+  version × group) both call the **generic, reusable** `test_packaged.yml`. Each job downloads the
+  same artifact and runs one group in parallel — build once, test many.
+- **`test_packaged.yml` is language-agnostic and reusable by downstream projects.** It takes a
+  `test_command`, optional `python_version` / `setup_rust` / `render`, `submodules`, and an
+  `environment` gate, and exports a fixed env contract (`TEMPO_PACKAGED_DIR`, `TEMPO_SERVER_PORT`,
+  `TEMPO_SIM_RENDER`, `TEMPO_TEST_REPORT_DIR`, …). A project using Tempo as a submodule can call it
+  to test its **own** custom API surface (its generated client ships in the same `Packaged/API`
+  folders) by passing its own `test_command` and `submodules: recursive`.
+
+**Still absent:** functional/agents/ROS tests, and the GPU-gated `sensors` group in CI. Adding a
+new behavior test = a new marker (Python) or `tests/*.rs` (Rust); a brand-new group also needs a
+matrix entry in `tempo_build_and_package.yml` (and, for Python, a line in `pytest.ini`). Enabling
+`sensors` means a GPU `runner` + `render: true` on that matrix entry.
 
 ---
 

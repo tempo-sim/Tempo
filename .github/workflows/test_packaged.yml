@@ -1,0 +1,121 @@
+# ======
+# Reusable workflow: run ONE test group against a PACKAGED Tempo build.
+#
+# This is the "fan-out" half of the test pipeline. A build-and-package workflow produces a single
+# packaged artifact (which ships the generated client libraries: the tempo-sim Python wheel under
+# Packaged/API/Python and the tempo-sim Rust crate under Packaged/API/Rust). Callers invoke this
+# workflow once per (group x language x Unreal version), in parallel — each job downloads the same
+# artifact and runs one `test_command` against it. Build once, test many.
+#
+# It is deliberately language-agnostic and reusable by DOWNSTREAM projects (a project that uses
+# Tempo as a submodule can call this with its own test_command/checkout/submodules to test its own
+# custom API surface — its project-specific wheel/crate ships in the same Packaged/API folders).
+#
+# The workflow exports a small contract to the test_command:
+#   TEMPO_PACKAGED_DIR          = the downloaded Packaged folder
+#   TEMPO_SERVER_PORT           = gRPC port to use
+#   TEMPO_SIM_STARTUP_TIMEOUT_S = readiness timeout
+#   TEMPO_SIM_RENDER            = "1" if `render: true` (sensor/GPU groups), else "0"
+#   TEMPO_TEST_REPORT_DIR       = a folder to write a report into (uploaded as an artifact)
+# Scripts/TestPythonAPI.sh and Scripts/TestRustAPI.sh both honor these.
+# ======
+
+name: Test a Packaged Tempo Project
+
+on:
+  workflow_call:
+    inputs:
+      artifact_name:
+        type: string
+        description: Name of the packaged artifact (uploaded by build_and_package.yml) to download and test.
+        required: true
+      name:
+        type: string
+        description: Short label for this group/dimension (used in the job name and report artifact), e.g. "python-core" or "rust-contract".
+        required: true
+      test_command:
+        type: string
+        description: Command to run (from the checkout root) for this group, e.g. "Scripts/TestPythonAPI.sh core".
+        required: true
+      runner:
+        type: string
+        description: Runner to execute on. The default GitHub-hosted runner has no GPU, so render/sensor groups need a GPU-capable runner here.
+        default: ubuntu-24.04
+      unreal_version:
+        type: string
+        description: Unreal version the artifact was built for (used for report naming).
+        default: '5.7'
+      python_version:
+        type: string
+        description: Python version to set up. Empty string skips Python setup (e.g. for Rust groups).
+        default: '3.11'
+      setup_rust:
+        type: boolean
+        description: Install a stable Rust toolchain (for the Rust groups).
+        default: false
+      render:
+        type: boolean
+        description: Run the sim with off-screen rendering (TEMPO_SIM_RENDER=1) instead of -nullrhi. Needs a GPU runner. For sensor-data groups.
+        default: false
+      checkout_path:
+        type: string
+        description: Path in the workspace to check out the calling repo (test code + scripts) into.
+        default: ${{ github.event.repository.name }}
+      submodules:
+        type: string
+        description: Passed to actions/checkout `submodules` (e.g. "recursive" so a downstream caller gets the Tempo submodule). Empty = none.
+        default: ''
+      environment:
+        type: string
+        description: Deployment environment to gate the job behind (e.g. a manual-approval environment for fork PRs). Empty = no gate.
+        default: ''
+      server_port:
+        type: string
+        description: gRPC port the packaged sim should listen on.
+        default: '10001'
+      startup_timeout_s:
+        type: string
+        description: Seconds to wait for the packaged sim's gRPC server to come up.
+        default: '300'
+
+jobs:
+  test:
+    name: ${{ inputs.name }} (UE ${{ inputs.unreal_version }})
+    runs-on: ${{ inputs.runner }}
+    environment: ${{ inputs.environment != '' && inputs.environment || null }}
+    steps:
+    - name: Checkout (test code + scripts)
+      uses: actions/checkout@v4
+      with:
+        path: ${{ inputs.checkout_path }}
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        submodules: ${{ inputs.submodules }}
+    - name: Download Packaged Artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ inputs.artifact_name }}
+        path: ${{ github.workspace }}/Packaged
+    - name: Set up Python
+      if: ${{ inputs.python_version != '' }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python_version }}
+    - name: Set up Rust
+      if: ${{ inputs.setup_rust }}
+      uses: dtolnay/rust-toolchain@stable
+    - name: Run Tests
+      working-directory: ${{ github.workspace }}/${{ inputs.checkout_path }}
+      env:
+        TEMPO_PACKAGED_DIR: ${{ github.workspace }}/Packaged
+        TEMPO_SERVER_PORT: ${{ inputs.server_port }}
+        TEMPO_SIM_STARTUP_TIMEOUT_S: ${{ inputs.startup_timeout_s }}
+        TEMPO_SIM_RENDER: ${{ inputs.render && '1' || '0' }}
+        TEMPO_TEST_REPORT_DIR: ${{ github.workspace }}/test-report
+      run: ${{ inputs.test_command }}
+    - name: Upload Test Report
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-report-${{ inputs.name }}-${{ inputs.unreal_version }}
+        path: ${{ github.workspace }}/test-report
+        if-no-files-found: warn

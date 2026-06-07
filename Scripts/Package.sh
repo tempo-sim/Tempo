@@ -140,7 +140,9 @@ PACKAGE_RUST_CRATE() {
     return 0
   fi
   local CRATE_NAME
-  CRATE_NAME=$(grep -m1 '^name' "$CRATE_MANIFEST" | sed -E 's/^name\s*=\s*"([^"]+)".*/\1/')
+  # POSIX [[:space:]] (not \s — BSD/macOS sed doesn't support \s and would leave the value as the
+  # whole `name = "..."` line, creating a directory with spaces in its name).
+  CRATE_NAME=$(grep -m1 '^name' "$CRATE_MANIFEST" | sed -E 's/^name[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/')
   local DEST="$PROJECT_ROOT/Packaged/API/Rust/$CRATE_NAME"
   echo "Packaging Rust crate $CRATE_NAME -> $DEST"
   # `--no-verify` skips the compile-the-extracted-crate step, so this works
@@ -181,7 +183,13 @@ fi
 # Packaged/API/Python/<dist-name>/ so downstream consumers can `pip install` a
 # Python client against this packaged build. Mirrors PACKAGE_RUST_CRATE.
 PYTHON_BIN=""
-for candidate in python3 python; do
+# Prefer Tempo's managed venv (TempoEnv, created by the build's GenAPI step). It has the build
+# toolchain (`build`, via requirements.txt) and the package's own deps. Fall back to a system python.
+for candidate in \
+  "$PROJECT_ROOT/TempoEnv/bin/python3" \
+  "$PROJECT_ROOT/TempoEnv/bin/python" \
+  "$PROJECT_ROOT/TempoEnv/Scripts/python.exe" \
+  python3 python; do
   if command -v "$candidate" >/dev/null 2>&1; then
     PYTHON_BIN="$candidate"
     break
@@ -195,20 +203,31 @@ PACKAGE_PYTHON_PACKAGE() {
     return 0
   fi
   local DIST_NAME
-  DIST_NAME=$(grep -m1 '^name' "$PYPROJECT" | sed -E 's/^name\s*=\s*"([^"]+)".*/\1/')
+  # POSIX [[:space:]] (not \s — BSD/macOS sed doesn't support \s and would leave the value as the
+  # whole `name = "..."` line, creating a directory with spaces in its name).
+  DIST_NAME=$(grep -m1 '^name' "$PYPROJECT" | sed -E 's/^name[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/')
   local DEST="$PROJECT_ROOT/Packaged/API/Python/$DIST_NAME"
   echo "Packaging Python package $DIST_NAME -> $DEST"
   rm -rf "$DEST"
   mkdir -p "$DEST"
-  # `python -m build` produces an sdist (.tar.gz) and a wheel (.whl) in --outdir.
-  (cd "$PKG_DIR" && "$PYTHON_BIN" -m build --outdir "$DEST") || \
-    echo "Warning: failed to build Python package $DIST_NAME"
+  if "$PYTHON_BIN" -c "import build" >/dev/null 2>&1; then
+    # Preferred: `python -m build` produces an sdist (.tar.gz) and a wheel (.whl) in --outdir.
+    (cd "$PKG_DIR" && "$PYTHON_BIN" -m build --outdir "$DEST") || \
+      echo "Warning: failed to build Python package $DIST_NAME"
+  else
+    # Fallback: build just the wheel via pip's PEP 517 frontend, which needs no `build` module.
+    # --no-deps so only this package's wheel lands in DEST (not its dependencies').
+    echo "  ('build' module unavailable; producing a wheel via pip — no sdist)"
+    "$PYTHON_BIN" -m pip wheel --no-deps --wheel-dir "$DEST" "$PKG_DIR" || \
+      echo "Warning: failed to build Python wheel for $DIST_NAME"
+  fi
 }
 
-# Only package when a Python build toolchain is available (guard like cargo above).
-if [[ -n "$PYTHON_BIN" ]] && "$PYTHON_BIN" -c "import build" >/dev/null 2>&1; then
+# Package whenever any Python interpreter is available. The wheel is built either way (via `build`
+# if present, else pip); only a complete absence of Python skips it.
+if [[ -n "$PYTHON_BIN" ]]; then
   PACKAGE_PYTHON_PACKAGE "$PROJECT_ROOT/Plugins/Tempo/TempoCore/Content/Python/API"
   PACKAGE_PYTHON_PACKAGE "$PROJECT_ROOT/Content/Python/API"
 else
-  echo "Skipping Python package build: python with the 'build' module not available"
+  echo "Skipping Python package build: no python interpreter available"
 fi

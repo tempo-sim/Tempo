@@ -61,6 +61,11 @@ Saved/*
 .DS_Store
 .idea
 
+# Test harness scratch (venv for TestPython.sh; vendored crate + build output for TestRust.sh)
+.tempo_test_venv/
+Tests/Rust/vendor/
+Tests/Rust/target/
+
 # Generated proto files
 *.pb.*
 *_pb2*.py

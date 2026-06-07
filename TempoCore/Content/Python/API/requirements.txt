@@ -17,6 +17,11 @@ prompt_toolkit>=3.0
 # Build-time only (the code generators); not a published runtime dep
 Jinja2==3.1.3
 
+# Build-time only: lets Scripts/Package.sh build the generated client's sdist+wheel into the
+# Packaged/ artifact (Packaged/API/Python). Without it, Package.sh falls back to a wheel-only
+# build via pip.
+build==1.2.2.post1
+
 # Example clients / visualization (mirrors pyproject [examples] extra)
 opencv-python-headless==4.10.0.84
 matplotlib==3.9.2

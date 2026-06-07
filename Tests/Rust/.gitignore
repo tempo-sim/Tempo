@@ -1,0 +1,5 @@
+# The packaged tempo-sim crate is copied in by Scripts/TestRust.sh; never commit it.
+/vendor/
+# Cargo build output.
+/target/
+Cargo.lock

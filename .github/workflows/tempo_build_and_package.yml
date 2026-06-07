@@ -41,4 +41,62 @@ jobs:
       gen_rust_api: true
       gen_cpp_api: true
       automation_test_filter: Tempo.
+      # Upload the packaged build so the Python API test jobs below can fan out against it.
+      upload_artifact: true
+    secrets: inherit
+
+  # Fan-out (Python): one parallel job per (Unreal version x group). Each downloads the single
+  # packaged artifact produced above, installs the generated tempo-sim wheel from it, launches the
+  # packaged sim headless, and runs that group's pytest markers. Build once, test in parallel.
+  #
+  # NOTE: the "sensors" group is intentionally NOT here — sensor-data APIs need a GPU. To enable it,
+  # add "sensors" to the matrix below AND give it a GPU runner + render:true (e.g. via matrix
+  # `include`), since this matrix's jobs run on the GPU-less default runner.
+  test_packaged_python_api:
+    name: Test Packaged Python API
+    needs: build_and_package
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        unreal_version: [ "5.6", "5.7" ]
+        group: [ "contract", "core", "world", "movement" ]
+    uses: ./.github/workflows/test_packaged.yml
+    with:
+      # Must match the name build_and_package.yml uploads:
+      # "<repo>-<platform>-<unreal_version>-<release_id>", with release_id defaulting to the sha.
+      artifact_name: ${{ format('{0}-ubuntu-24.04-{1}-{2}', github.event.repository.name, matrix.unreal_version, github.sha) }}
+      name: python-${{ matrix.group }}
+      test_command: Scripts/TestPythonAPI.sh ${{ matrix.group }}
+      unreal_version: ${{ matrix.unreal_version }}
+      runner: ubuntu-24.04
+      checkout_path: TempoSample/Plugins/Tempo
+      # Gate fork PRs behind manual approval, same as the build job (this job runs PR code).
+      environment: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name != github.repository && 'fork-pr-environment' || '' }}
+    secrets: inherit
+
+  # Fan-out (Rust): the same artifact, the same sim, exercised through the generated Rust client.
+  # "contract" compiles the crate (surface check, no sim); "integration" runs against a live sim.
+  test_packaged_rust_api:
+    name: Test Packaged Rust API
+    needs: build_and_package
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        unreal_version: [ "5.6", "5.7" ]
+        group: [ "contract", "integration" ]
+    uses: ./.github/workflows/test_packaged.yml
+    with:
+      artifact_name: ${{ format('{0}-ubuntu-24.04-{1}-{2}', github.event.repository.name, matrix.unreal_version, github.sha) }}
+      name: rust-${{ matrix.group }}
+      test_command: Scripts/TestRustAPI.sh ${{ matrix.group }}
+      unreal_version: ${{ matrix.unreal_version }}
+      runner: ubuntu-24.04
+      python_version: ''     # Rust groups don't need Python
+      setup_rust: true
+      checkout_path: TempoSample/Plugins/Tempo
+      environment: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name != github.repository && 'fork-pr-environment' || '' }}
     secrets: inherit
