@@ -26,6 +26,16 @@ def _transform(x, y, z):
     return t
 
 
+def _make_movable(name):
+    """A StaticMeshActor spawns with Static mobility, which Unreal refuses to move at runtime
+    (SetActorTransform is a no-op). Flip its root component to Movable first — this also exercises
+    set_enum_property (the enum byte is resolved by authored name, e.g. "Movable")."""
+    comps = tw.get_all_components(actor=name).components
+    assert comps, f"{name} reported no components"
+    root = next((c.name for c in comps if "StaticMesh" in c.component_type), comps[0].name)
+    tw.set_enum_property(actor=name, component=root, property="Mobility", value="Movable")
+
+
 def test_get_all_actors_returns_descriptors(sim_server):
     resp = tw.get_all_actors()
     # Don't assume the map is non-empty; just assert the response shape and descriptor fields.
@@ -46,7 +56,8 @@ def test_spawn_query_move_destroy(sim_server):
         assert state.transform.location.y == pytest.approx(2.0, abs=0.05)
         assert state.transform.location.z == pytest.approx(3.0, abs=0.05)
 
-        # Moving the actor is reflected in its reported state.
+        # Moving the actor is reflected in its reported state (after making it movable).
+        _make_movable(name)
         tw.set_actor_transform(actor=name, transform=_transform(11.0, 2.0, 3.0))
         moved = tw.get_current_actor_state(actor=name)
         assert moved.transform.location.x == pytest.approx(11.0, abs=0.05)

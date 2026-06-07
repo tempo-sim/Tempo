@@ -68,7 +68,7 @@ jobs:
       # "<repo>-<platform>-<unreal_version>-<release_id>", with release_id defaulting to the sha.
       artifact_name: ${{ format('{0}-ubuntu-24.04-{1}-{2}', github.event.repository.name, matrix.unreal_version, github.sha) }}
       name: python-${{ matrix.group }}
-      test_command: Scripts/TestPython.sh ${{ matrix.group }}
+      test_command: Scripts/TestPythonAPI.sh ${{ matrix.group }}
       unreal_version: ${{ matrix.unreal_version }}
       runner: ubuntu-24.04
       checkout_path: TempoSample/Plugins/Tempo
@@ -92,7 +92,7 @@ jobs:
     with:
       artifact_name: ${{ format('{0}-ubuntu-24.04-{1}-{2}', github.event.repository.name, matrix.unreal_version, github.sha) }}
       name: rust-${{ matrix.group }}
-      test_command: Scripts/TestRust.sh ${{ matrix.group }}
+      test_command: Scripts/TestRustAPI.sh ${{ matrix.group }}
       unreal_version: ${{ matrix.unreal_version }}
       runner: ubuntu-24.04
       python_version: ''     # Rust groups don't need Python

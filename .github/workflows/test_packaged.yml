@@ -17,7 +17,7 @@
 #   TEMPO_SIM_STARTUP_TIMEOUT_S = readiness timeout
 #   TEMPO_SIM_RENDER            = "1" if `render: true` (sensor/GPU groups), else "0"
 #   TEMPO_TEST_REPORT_DIR       = a folder to write a report into (uploaded as an artifact)
-# Scripts/TestPython.sh and Scripts/TestRust.sh both honor these.
+# Scripts/TestPythonAPI.sh and Scripts/TestRustAPI.sh both honor these.
 # ======
 
 name: Test a Packaged Tempo Project
@@ -35,7 +35,7 @@ on:
         required: true
       test_command:
         type: string
-        description: Command to run (from the checkout root) for this group, e.g. "Scripts/TestPython.sh core".
+        description: Command to run (from the checkout root) for this group, e.g. "Scripts/TestPythonAPI.sh core".
         required: true
       runner:
         type: string

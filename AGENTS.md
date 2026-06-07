@@ -207,17 +207,17 @@ sim (not the editor). They cover the client-facing API contract and behavior ove
   `test_*.py`. Groups = pytest markers: `contract` (wheel-only, no sim — package imports + API
   surface), `core` (time control), `world` (spawn/query/move/destroy + coordinate round trips),
   `movement` (commandable pawns; skips if the map has none), `sensors` (camera frame — needs a GPU,
-  **default-off**). Run: `Scripts/TestPython.sh [group]`.
+  **default-off**). Run: `Scripts/TestPythonAPI.sh [group]`.
 - **Rust — `Tests/Rust/`:** a `cargo` crate; `tests/*.rs` files are the groups (`cargo test --test
   <group>`): `contract` (compile/surface check, no sim) and `integration` (live sim). The crate
-  under test is the packaged `tempo-sim` crate, vendored in by the script. Run: `Scripts/TestRust.sh
+  under test is the packaged `tempo-sim` crate, vendored in by the script. Run: `Scripts/TestRustAPI.sh
   [group]`.
-- **Sim lifecycle:** Python's session-scoped `sim_server` fixture (and `TestRust.sh` for Rust)
+- **Sim lifecycle:** Python's session-scoped `sim_server` fixture (and `TestRustAPI.sh` for Rust)
   launches the packaged binary headless, polls until the gRPC server answers, and tears it down.
   Default RHI is `-nullrhi` (no GPU); set `TEMPO_SIM_RENDER=1` for off-screen rendering (the
   `sensors` group). `contract` groups never launch a sim. Python's `fixed_step` fixture gives
   deterministic stepping.
-- **Runner scripts** (`Scripts/TestPython.sh` / `TestRust.sh`, with `.bat` mirrors) locate the
+- **Runner scripts** (`Scripts/TestPythonAPI.sh` / `TestRustAPI.sh`, with `.bat` mirrors) locate the
   `Packaged` build, install the shipped client (`Packaged/API/Python/*.whl` — *all* wheels, so a
   project's own client installs too — / `Packaged/API/Rust/tempo-sim`), and run the group. Reports
   → `TEMPO_TEST_REPORT_DIR` (default `Saved/{Python,Rust}TestReport`). **Package first**

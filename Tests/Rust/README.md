@@ -7,7 +7,7 @@ alongside the Python tests in CI.
 ## Groups
 
 `cargo` test binaries (one file per `tests/*.rs`) play the role the pytest markers play on the
-Python side. `Scripts/TestRust.sh <group>` runs `cargo test --test <group>`.
+Python side. `Scripts/TestRustAPI.sh <group>` runs `cargo test --test <group>`.
 
 | Group (`--test`) | Needs running sim? | Covers |
 |---|---|---|
@@ -18,7 +18,7 @@ Python side. `Scripts/TestRust.sh <group>` runs `cargo test --test <group>`.
 
 The crate under test (`tempo-sim`) is the one shipped in a packaged build at
 `Packaged/API/Rust/tempo-sim/` (requires the package to be built with `TEMPO_GEN_RUST_API=1`).
-`Scripts/TestRust.sh` copies it into `vendor/tempo-sim/` (git-ignored) so the path dependency in
+`Scripts/TestRustAPI.sh` copies it into `vendor/tempo-sim/` (git-ignored) so the path dependency in
 `Cargo.toml` resolves, then runs `cargo test`.
 
 ## Running locally
@@ -27,10 +27,10 @@ Package with Rust generation on, then:
 
 ```bash
 TEMPO_GEN_RUST_API=1 Scripts/Package.sh
-Scripts/TestRust.sh contract       # compile/surface check
-Scripts/TestRust.sh integration    # against a live sim (the script launches/tears it down)
+Scripts/TestRustAPI.sh contract       # compile/surface check
+Scripts/TestRustAPI.sh integration    # against a live sim (the script launches/tears it down)
 ```
 
-`TestRust.sh` launches the packaged sim headless for sim-requiring groups, waits for its gRPC port,
+`TestRustAPI.sh` launches the packaged sim headless for sim-requiring groups, waits for its gRPC port,
 runs the tests single-threaded (they share the client's global connection context), and writes the
 cargo log to `Saved/RustTestReport/` (override with `TEMPO_TEST_REPORT_DIR`).
