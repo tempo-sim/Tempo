@@ -588,6 +588,24 @@ jobs:
         fi
         sudo chown -R $(id -u):$(id -g) .engine-ddc-cache/
         sudo chmod -R +r .engine-ddc-cache/
+    - name: Diagnose Cooked vs Temp Engine Content (post-cook)
+      # Temporary diagnostic: iostore stages engine content from Saved/Temp/<Platform>, which is
+      # missing on cold (cache-miss) builds. This reports whether the cook produced the engine
+      # content in Saved/Cooked and/or Saved/Temp, to distinguish a cook problem from a stage problem.
+      # Runs after the permissions reset (files readable by the runner) and even if Package failed.
+      if: ${{ always() && inputs.package }}
+      run: |
+        PROJ="${{ github.workspace }}/${{ inputs.project_root }}"
+        echo "=== Saved/Cooked platform dirs ==="; ls "$PROJ/Saved/Cooked" 2>/dev/null || echo "(none)"
+        echo "=== Saved/Temp platform dirs ===";   ls "$PROJ/Saved/Temp" 2>/dev/null || echo "(none)"
+        echo "=== WorldGridMaterial locations (Cooked + Temp) ==="
+        find "$PROJ/Saved/Cooked" "$PROJ/Saved/Temp" -name 'WorldGridMaterial*' 2>/dev/null || echo "(not found in either)"
+        echo "=== Engine cooked file counts per platform ==="
+        for base in Cooked Temp; do
+          for d in "$PROJ/Saved/$base"/*/Engine; do
+            [ -d "$d" ] && echo "$d: $(find "$d" -type f 2>/dev/null | wc -l) files"
+          done
+        done
     - name: Upload Automation Test Report
       if: ${{ always() && inputs.automation_test_filter != '' }}
       uses: actions/upload-artifact@v4
