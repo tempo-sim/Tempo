@@ -58,8 +58,42 @@ struct FTempoLensParameters
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ToolTip = "Optical center offset from image center, normalized by image width/height. (0,0) = centered."))
 	FVector2D PrincipalPoint = FVector2D::ZeroVector;
 
+	// True for the single-capture (non-tiled) radial models: Pinhole, Brown-Conrady, Rational.
+	// These realize the principal point via an asymmetric render frustum + shifted distortion map.
+	bool IsSingleCapture() const
+	{
+		return LensModel == ETempoLensModel::Pinhole
+			|| LensModel == ETempoLensModel::BrownConrady
+			|| LensModel == ETempoLensModel::Rational;
+	}
+
+	// True for the tile-aware fisheye models: Kannala-Brandt, Double Sphere. Complement of
+	// IsSingleCapture(); these realize the principal point via per-tile aim/axis-shift geometry.
+	bool IsFisheye() const { return !IsSingleCapture(); }
+
+	// PrincipalPoint clamped to the documented open interval (-0.5, 0.5) per component. The geometry
+	// (frustum sizing, tile aim, reported intrinsics) uses this rather than the raw value so an
+	// out-of-range principal point — which can be set programmatically, bypassing ValidateFOV — can
+	// never place the optical axis at/outside the image edge and produce a degenerate frustum.
+	// ValidateFOV still reports the raw out-of-range value.
+	FVector2D GetClampedPrincipalPoint() const
+	{
+		constexpr double Limit = 0.5 - UE_DOUBLE_KINDA_SMALL_NUMBER;
+		return FVector2D(FMath::Clamp<double>(PrincipalPoint.X, -Limit, Limit),
+			FMath::Clamp<double>(PrincipalPoint.Y, -Limit, Limit));
+	}
+
 	bool operator==(const FTempoLensParameters& Other) const = default;
 };
+
+// Optical-center pixel position for an image of the given size and a normalized principal-point
+// offset from the image center (X right, Y down, in fractions of width/height); (0,0) = centered.
+// Single source of truth for the "center = Size * (0.5 + pp)" convention shared by the reported
+// intrinsics (Cx, Cy), the fisheye tile geometry, and the distortion-map fill.
+inline FVector2D OpticalCenterPixels(const FIntPoint& SizeXY, const FVector2D& PrincipalPoint)
+{
+	return FVector2D(SizeXY.X * (0.5 + PrincipalPoint.X), SizeXY.Y * (0.5 + PrincipalPoint.Y));
+}
 
 // Configuration for the perspective render needed to produce a distorted output image.
 struct TEMPOSENSORS_API FDistortionRenderConfig
@@ -162,8 +196,10 @@ struct TEMPOSENSORS_API FRadialDistortionBase : FLensModel
 	// Model name used in log warnings.
 	virtual const TCHAR* GetModelName() const = 0;
 
+	// Default for PrincipalPoint is declared once on the base pure-virtual; C++ binds default args by
+	// the static call-expression type, so repeating it on overrides is a latent hazard if it drifts.
 	virtual FDistortionRenderConfig ComputeRenderConfig(const FIntPoint& OutputSizeXY, double FOutput,
-		const FVector2D& PrincipalPoint = FVector2D::ZeroVector) const override;
+		const FVector2D& PrincipalPoint) const override;
 
 	// Single-capture models compute FOutput from physical FOV via Distort(tan(half-FOV)).
 	virtual double ComputeFOutputForFullImage(const FIntPoint& FullImageSizeXY, double FullImageHFOVDeg) const override;
@@ -258,7 +294,7 @@ struct TEMPOSENSORS_API FEquidistantDistortion : FLensModel
 {
 	virtual FVector2D OutputToRender(double OutputX, double OutputY) const override;
 	virtual FDistortionRenderConfig ComputeRenderConfig(const FIntPoint& OutputSizeXY, double FOutput,
-		const FVector2D& PrincipalPoint = FVector2D::ZeroVector) const override;
+		const FVector2D& PrincipalPoint) const override;
 };
 
 // Kannala-Brandt fisheye projection model for camera tiles.
@@ -305,16 +341,44 @@ struct TEMPOSENSORS_API FKannalaBrandtDistortion : FLensModel
 	double AxisShiftXRd = 0.0;
 	double AxisShiftYRd = 0.0;
 
+	// Precomputed position of the child optical axis in the parent's distorted output plane (theta_d
+	// units). Constant for the tile — it depends only on the angular offsets and K1-K4 — so it is
+	// computed once in the constructor instead of per output pixel inside OutputToRender.
+	// INVARIANT: derived from K1-K4/AzimuthOffset/ElevationOffset, which are set only at construction
+	// (a new model is built via CreateLensModel whenever the lens parameters change, so this is never
+	// stale). Do NOT mutate those fields after construction without recomputing AxisCenterXRd/YRd.
+	double AxisCenterXRd = 0.0;
+	double AxisCenterYRd = 0.0;
+
 	FKannalaBrandtDistortion(double InK1, double InK2, double InK3, double InK4,
 		double InAzimuthOffset, double InElevationOffset,
 		double InAxisShiftXRd = 0.0, double InAxisShiftYRd = 0.0)
 		: K1(InK1), K2(InK2), K3(InK3), K4(InK4)
 		, AzimuthOffset(InAzimuthOffset), ElevationOffset(InElevationOffset)
-		, AxisShiftXRd(InAxisShiftXRd), AxisShiftYRd(InAxisShiftYRd) {}
+		, AxisShiftXRd(InAxisShiftXRd), AxisShiftYRd(InAxisShiftYRd)
+	{
+		// The child optical axis (0,0,1 in the child frame) in the parent frame is
+		// R_Y(Az) * R_X(-El) * (0,0,1) = (sin(Az)cos(El), sin(El), cos(Az)cos(El)). Forward-project
+		// that ray through the parent K-B to get its (constant) position in the parent output plane.
+		if (FMath::Abs(AzimuthOffset) > 1e-10 || FMath::Abs(ElevationOffset) > 1e-10)
+		{
+			const double AxisX = FMath::Sin(AzimuthOffset) * FMath::Cos(ElevationOffset);
+			const double AxisY = FMath::Sin(ElevationOffset);
+			const double AxisZ = FMath::Cos(AzimuthOffset) * FMath::Cos(ElevationOffset);
+			const double AxisSinTheta = FMath::Sqrt(AxisX * AxisX + AxisY * AxisY);
+			if (AxisSinTheta > 1e-12)
+			{
+				const double AxisTheta = FMath::Atan2(AxisSinTheta, AxisZ);
+				const double AxisThetaD = SolveDistortion(AxisTheta, K1, K2, K3, K4);
+				AxisCenterXRd = AxisThetaD * AxisX / AxisSinTheta;
+				AxisCenterYRd = AxisThetaD * AxisY / AxisSinTheta;
+			}
+		}
+	}
 
 	virtual FVector2D OutputToRender(double OutputX, double OutputY) const override;
 	virtual FDistortionRenderConfig ComputeRenderConfig(const FIntPoint& OutputSizeXY, double FOutput,
-		const FVector2D& PrincipalPoint = FVector2D::ZeroVector) const override;
+		const FVector2D& PrincipalPoint) const override;
 	virtual double ComputeFOutputForFullImage(const FIntPoint& FullImageSizeXY, double FullImageHFOVDeg) const override;
 	virtual void PixelOffsetToYawPitchDeg(double DxPixels, double DyPixels, double FOutput,
 		double& OutYawDeg, double& OutPitchDeg) const override;
@@ -374,7 +438,7 @@ struct TEMPOSENSORS_API FDoubleSphereDistortion : FLensModel
 
 	virtual FVector2D OutputToRender(double OutputX, double OutputY) const override;
 	virtual FDistortionRenderConfig ComputeRenderConfig(const FIntPoint& OutputSizeXY, double FOutput,
-		const FVector2D& PrincipalPoint = FVector2D::ZeroVector) const override;
+		const FVector2D& PrincipalPoint) const override;
 	virtual double ComputeFOutputForFullImage(const FIntPoint& FullImageSizeXY, double FullImageHFOVDeg) const override;
 	virtual void PixelOffsetToYawPitchDeg(double DxPixels, double DyPixels, double FOutput,
 		double& OutYawDeg, double& OutPitchDeg) const override;

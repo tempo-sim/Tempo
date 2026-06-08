@@ -231,10 +231,17 @@ FDistortionRenderConfig FRadialDistortionBase::ComputeRenderConfig(const FIntPoi
 	const double HalfH = OutputSizeXY.Y / 2.0;
 	const double OffX = PrincipalPoint.X * OutputSizeXY.X;
 	const double OffY = PrincipalPoint.Y * OutputSizeXY.Y;
-	const double OutLeft   = (-HalfW - OffX) / FOutput;
-	const double OutRight  = ( HalfW - OffX) / FOutput;
-	const double OutTop    = (-HalfH - OffY) / FOutput;
-	const double OutBottom = ( HalfH - OffY) / FOutput;
+	// Expand the sampled rect by half an output pixel on every side so the discrete distortion map
+	// (which samples pixel centers) never maps just outside the render frustum and reads black at the
+	// image edges. The pad is applied here in OUTPUT (r_d) units, before the undistort, so it passes
+	// through the same radial output->render magnification as the rest of the boundary. Adding it
+	// directly to the render-space Tan bounds would ignore that magnification (far from 1 for a strong
+	// barrel lens at the edge) and mis-size the margin.
+	const double HalfPixel = 0.5 / FOutput;
+	const double OutLeft   = (-HalfW - OffX) / FOutput - HalfPixel;
+	const double OutRight  = ( HalfW - OffX) / FOutput + HalfPixel;
+	const double OutTop    = (-HalfH - OffY) / FOutput - HalfPixel;
+	const double OutBottom = ( HalfH - OffY) / FOutput + HalfPixel;
 
 	double TanLeft = TNumericLimits<double>::Max();
 	double TanRight = TNumericLimits<double>::Lowest();
@@ -267,14 +274,12 @@ FDistortionRenderConfig FRadialDistortionBase::ComputeRenderConfig(const FIntPoi
 	Accumulate(0.0, OutTop);
 	Accumulate(0.0, OutBottom);
 
-	// Pad by half an output pixel on every side so the discrete distortion map (which samples pixel
-	// centers) never maps just outside the render frustum and reads black at the image edges.
-	const double PadX = 0.5 / FOutput;
-	const double PadY = 0.5 / FOutput;
-	Config.TanLeft = TanLeft - PadX;
-	Config.TanRight = TanRight + PadX;
-	Config.TanTop = TanTop - PadY;
-	Config.TanBottom = TanBottom + PadY;
+	// The sampled rect already includes the half-output-pixel safety margin (folded into OutLeft..
+	// OutBottom above), so the accumulated render-space extents are the final frustum bounds.
+	Config.TanLeft = TanLeft;
+	Config.TanRight = TanRight;
+	Config.TanTop = TanTop;
+	Config.TanBottom = TanBottom;
 
 	// Legacy symmetric best-fit FOV for metadata consumers: the widest symmetric frustum bounding
 	// the (now off-center) horizontal extent.
@@ -443,32 +448,13 @@ FVector2D FKannalaBrandtDistortion::OutputToRender(double OutputX, double Output
 	// position MINUS the axis re-aim shift. With AxisShift=0 (no re-aim) this collapses to
 	// "tile pixel center == optical axis projection" — the original contract.
 	//
-	// The child optical axis (0,0,1 in the child frame) expressed in the parent frame is
-	// R_Y(Az) * R_X(-El) * (0,0,1) = (sin(Az)cos(El), sin(El), cos(Az)cos(El)). Forward-project that
-	// ray through the parent K-B to get its position in the parent's (distorted) output plane.
-	// (Using sqrt(Az^2+El^2) as the axis angle with (Az,El) as its direction is only first-order
-	// correct and mis-registers diagonal tiles when K != 0; this exact projection matches
-	// YawPitchDegToPixelOffset and the Double Sphere path. For single-axis tiles — El==0 or Az==0,
-	// i.e. the 2-tile splits — it reduces to the former expression exactly.)
-	double AxisCenterX = 0.0;
-	double AxisCenterY = 0.0;
-	if (FMath::Abs(AzimuthOffset) > 1e-10 || FMath::Abs(ElevationOffset) > 1e-10)
-	{
-		const double AxisX = FMath::Sin(AzimuthOffset) * FMath::Cos(ElevationOffset);
-		const double AxisY = FMath::Sin(ElevationOffset);
-		const double AxisZ = FMath::Cos(AzimuthOffset) * FMath::Cos(ElevationOffset);
-		const double AxisSinTheta = FMath::Sqrt(AxisX * AxisX + AxisY * AxisY);
-		if (AxisSinTheta > 1e-12)
-		{
-			const double AxisTheta = FMath::Atan2(AxisSinTheta, AxisZ);
-			const double AxisThetaD = SolveDistortion(AxisTheta, K1, K2, K3, K4);
-			AxisCenterX = AxisThetaD * AxisX / AxisSinTheta;
-			AxisCenterY = AxisThetaD * AxisY / AxisSinTheta;
-		}
-	}
-
-	const double ParentOutputX = AxisCenterX - AxisShiftXRd + OutputX;
-	const double ParentOutputY = AxisCenterY - AxisShiftYRd + OutputY;
+	// AxisCenterXRd/YRd is the child optical axis's position in the parent's distorted output plane.
+	// It is constant for the tile (depends only on the angular offsets and K1-K4), so it is computed
+	// once in the constructor via the exact forward projection — which matches YawPitchDegToPixelOffset
+	// and the Double Sphere path, and (unlike the first-order sqrt(Az^2+El^2) form) correctly registers
+	// diagonal tiles when K != 0. For single-axis tiles (El==0 or Az==0) it reduces to that form exactly.
+	const double ParentOutputX = AxisCenterXRd - AxisShiftXRd + OutputX;
+	const double ParentOutputY = AxisCenterYRd - AxisShiftYRd + OutputY;
 
 	// Invert K-B to recover the physical radial angle from the parent's optical axis.
 	const double ThetaD = FMath::Sqrt(ParentOutputX * ParentOutputX + ParentOutputY * ParentOutputY);
