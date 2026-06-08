@@ -330,8 +330,9 @@ void UTempoSceneCaptureComponent2D::FillDistortionMap(UTexture2D* DistortionMap,
 
 	// Optical center for pixel-to-normalized conversion. PrincipalPoint is a normalized offset from
 	// the image center, so (0,0) keeps the legacy width/2, height/2 center.
-	const double OutputCx = OutputSizeXY.X * (0.5 + PrincipalPoint.X);
-	const double OutputCy = OutputSizeXY.Y * (0.5 + PrincipalPoint.Y);
+	const FVector2D OutputCenter = OpticalCenterPixels(OutputSizeXY, PrincipalPoint);
+	const double OutputCx = OutputCenter.X;
+	const double OutputCy = OutputCenter.Y;
 
 	// UV linearly spans [TanLeft, TanRight] and [TanTop, TanBottom]. For symmetric frustums
 	// (TanLeft = -TanRight) this reduces to the legacy formula Render*FRender / RenderSize + 0.5.

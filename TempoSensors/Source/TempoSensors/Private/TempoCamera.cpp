@@ -85,8 +85,10 @@ static TMap<int32, FBox2D> ComputeBoundingBoxes(const TArray<uint8>& LabelData, 
 FTempoCameraIntrinsics::FTempoCameraIntrinsics(const FIntPoint& SizeXY, float HorizontalFOV, const FVector2D& PrincipalPoint)
 	: Fx(SizeXY.X / 2.0 / FMath::Tan(FMath::DegreesToRadians(HorizontalFOV) / 2.0)),
 	  Fy(Fx),
-	  Cx(SizeXY.X * (0.5 + PrincipalPoint.X)),
-	  Cy(SizeXY.Y * (0.5 + PrincipalPoint.Y)) {}
+	  Cx(OpticalCenterPixels(SizeXY, PrincipalPoint).X),
+	  Cy(OpticalCenterPixels(SizeXY, PrincipalPoint).Y),
+	  Width(SizeXY.X),
+	  Height(SizeXY.Y) {}
 
 template <typename PixelType>
 void ExtractPixelData(const PixelType& Pixel, EColorImageEncoding Encoding, char* Dest)
@@ -339,10 +341,7 @@ ETempoTextureFilterType UTempoCamera::GetEffectiveTextureFilterType() const
 	}
 	// Wide equidistant fisheye: output sampling density varies sharply with angle, so bicubic's
 	// wider footprint keeps detail in the dense central region.
-	const bool bEquidistant =
-		LensParameters.LensModel == ETempoLensModel::KannalaBrandt ||
-		LensParameters.LensModel == ETempoLensModel::DoubleSphere;
-	if (bEquidistant && FOVAngle > 120.0f)
+	if (LensParameters.IsFisheye() && FOVAngle > 120.0f)
 	{
 		return ETempoTextureFilterType::Bicubic;
 	}
@@ -522,7 +521,8 @@ FTempoCameraIntrinsics UTempoCamera::GetIntrinsics() const
 {
 	// Every model now realizes the principal point — single-capture via the distortion map's
 	// optical center, fisheye via the per-tile aim/axis-shift geometry — so (Cx, Cy) reflects it.
-	return FTempoCameraIntrinsics(SizeXY, FOVAngle, LensParameters.PrincipalPoint);
+	// Use the clamped value so reported intrinsics match the (clamped) geometry actually rendered.
+	return FTempoCameraIntrinsics(SizeXY, FOVAngle, LensParameters.GetClampedPrincipalPoint());
 }
 
 void UTempoCamera::OnRenderCompleted()
@@ -1523,10 +1523,7 @@ void UTempoCamera::InitTileDistortionMap(FTempoCameraTile& Tile)
 	// distortion map's optical center and the asymmetric render frustum. The fisheye models realize
 	// it differently — through the per-tile aim and axis-shift geometry computed in SyncTiles — so
 	// their per-tile distortion map stays centered on the tile (centered principal point here).
-	const bool bSingleCapture = (LensParameters.LensModel == ETempoLensModel::Pinhole)
-		|| (LensParameters.LensModel == ETempoLensModel::BrownConrady)
-		|| (LensParameters.LensModel == ETempoLensModel::Rational);
-	const FVector2D PrincipalPoint = bSingleCapture ? LensParameters.PrincipalPoint : FVector2D::ZeroVector;
+	const FVector2D PrincipalPoint = LensParameters.IsSingleCapture() ? LensParameters.GetClampedPrincipalPoint() : FVector2D::ZeroVector;
 
 	const FDistortionRenderConfig Config = Model->ComputeRenderConfig(Tile.TileOutputSizeXY, Tile.OutputFocalLength, PrincipalPoint);
 
@@ -1782,9 +1779,7 @@ void UTempoCamera::SetTileDepthEnabled(FTempoCameraTile& Tile, bool bTileDepthEn
 		// (KannalaBrandt, DoubleSphere): emit Euclidean distance from the camera
 		// origin instead. Radial distance is invariant under per-tile rotation about the shared
 		// origin, which also removes the depth discontinuity at tile seams.
-		const bool bRadial =
-			LensParameters.LensModel == ETempoLensModel::KannalaBrandt ||
-			LensParameters.LensModel == ETempoLensModel::DoubleSphere;
+		const bool bRadial = LensParameters.IsFisheye();
 		Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("UseRadialDistance"), bRadial ? 1.0f : 0.0f);
 	}
 
@@ -1905,11 +1900,7 @@ void UTempoCamera::SyncTiles()
 	TUniquePtr<FLensModel> Model = CreateLensModel(LensParameters, 0.0, 0.0);
 	const double FOutput = Model->ComputeFOutputForFullImage(SizeXY, FOVAngle);
 
-	const bool bSingleCapture = (LensParameters.LensModel == ETempoLensModel::Pinhole)
-		|| (LensParameters.LensModel == ETempoLensModel::BrownConrady)
-		|| (LensParameters.LensModel == ETempoLensModel::Rational);
-
-	if (bSingleCapture)
+	if (LensParameters.IsSingleCapture())
 	{
 		// Single capture: use TL, deactivate others. No seams, no feather. Radial models are
 		// symmetric around the optical axis — no re-aim shift.
@@ -1935,8 +1926,9 @@ void UTempoCamera::SyncTiles()
 		// extents are the signed pixel distances from the optical center to each image edge. NOTE:
 		// the pixel split between tiles stays at the geometric center, so a large principal-point
 		// shift leaves the tiles' angular extents unequal (one tile covers more FOV than the other).
-		const double OpticalCenterX = (0.5 + LensParameters.PrincipalPoint.X) * SizeXY.X;
-		const double OpticalCenterY = (0.5 + LensParameters.PrincipalPoint.Y) * SizeXY.Y;
+		const FVector2D OpticalCenter = OpticalCenterPixels(SizeXY, LensParameters.GetClampedPrincipalPoint());
+		const double OpticalCenterX = OpticalCenter.X;
+		const double OpticalCenterY = OpticalCenter.Y;
 		const double LeftExtent = OpticalCenterX;
 		const double RightExtent = SizeXY.X - OpticalCenterX;
 		const double TopExtent = OpticalCenterY;

@@ -152,6 +152,10 @@ struct TEMPOSENSORS_API FTempoCameraIntrinsics
 	const float Fy;
 	const float Cx;
 	const float Cy;
+	// Image size in pixels. Carried explicitly so consumers don't infer it from 2*Cx, which is only
+	// valid for a centered principal point.
+	const int32 Width;
+	const int32 Height;
 };
 
 class UTempoCamera;

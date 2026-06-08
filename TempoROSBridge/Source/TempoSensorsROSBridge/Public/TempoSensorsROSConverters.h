@@ -163,8 +163,8 @@ struct TImplicitToROSConverter<FTempoCameraInfo>: TToROSConverter<sensor_msgs::m
 		ToValue.header.stamp.sec = TempoValue.Timestamp;
 		ToValue.header.stamp.nanosec = 1e9 * (TempoValue.Timestamp - ToValue.header.stamp.sec);
 
-		ToValue.width = 2.0 * TempoValue.Intrinsics.Cx;
-		ToValue.height = 2.0 * TempoValue.Intrinsics.Cy;
+		ToValue.width = TempoValue.Intrinsics.Width;
+		ToValue.height = TempoValue.Intrinsics.Height;
 
 		const float Fx = TempoValue.Intrinsics.Fx;
 		const double Fy = TempoValue.Intrinsics.Fy;
