@@ -117,6 +117,11 @@ Congratulations, you are officially up and running! Continue experimenting with 
 ### Package
 Use the included `Scripts/Package.sh` (or `Package.bat` on Windows) to package your project into a standalone binary, which you can then run from the `Packaged` folder.
 
+### Client Packages (Python & Rust)
+Building your project also generates client packages so you — or your users — can drive your Tempo server from outside Unreal: a Python package always, and a Rust crate when you opt in with `TEMPO_GEN_RUST_API`. Tempo's own services ship in the `tempo-sim` package/crate; your project's services, if you define any, go in a separate project package/crate that builds on top of it.
+
+You can **publish** these to [PyPI](https://pypi.org/) / [crates.io](https://crates.io/) to share them, or — for a pure client project with no custom services — **consume the pre-built `tempo-sim`** straight from PyPI / crates.io without building at all. If your project defines its own custom RPCs, use the generated packages rather than the stock `tempo-sim`, which only knows Tempo's built-in services. See [TempoCore's README](/TempoCore/README.md#using-the-python-api) for the full workflow.
+
 ## Continuous Integration
 If you would like to set up a GitHub actions pipeline to build, package, run, and/or release your Tempo project, check out the `build_and_package` reusable workflow in [.github/workflows](https://github.com/tempo-sim/Tempo/tree/main/.github/workflows). `TempoSample`'s [tempo_sample_build_and_package](https://github.com/tempo-sim/TempoSample/blob/main/.github/workflows/tempo_sample_build_and_package.yml) workflow is a good reference.
 

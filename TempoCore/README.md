@@ -251,6 +251,28 @@ Here we are prioritizing brevity of the Python API with a minor restriction in R
 
 Phew, simple right? Don't worry - there are plenty of examples of using the Tempo server in `TempoCore` and the rest of the Tempo plugins to help get you started.
 
+#### Creating and publishing your own Python package
+You don't do anything special to "create" your project package — it falls out of the build automatically as soon as your project defines its own Protobuf services (see [Defining Messages and Services](#defining-messages-and-services)). Tempo's own services generate the `tempo-sim` package; your project's services generate a project package (e.g. `tempo-sample`) that depends on it.
+
+To share either one, publish it to [PyPI](https://pypi.org/). After a build with the API generated, `Scripts/Package.sh` stages built wheels and source distributions under `Packaged/API/Python/`:
+```
+Packaged/API/Python/tempo-sim/        # Tempo's own services
+Packaged/API/Python/<your-project>/   # your project's services (only if your project defines any)
+```
+Upload them with [twine](https://twine.readthedocs.io/) — publish `tempo-sim` first, since your project package depends on it:
+```
+twine upload Packaged/API/Python/tempo-sim/*
+twine upload Packaged/API/Python/<your-project>/*
+```
+
+#### Using the pre-built `tempo-sim` instead of building
+If you only need a client for Tempo's **built-in** services, you can skip the Unreal build entirely and install the published package from PyPI:
+```
+pip install tempo-sim
+```
+> [!WARNING]
+> The published `tempo-sim` contains only Tempo's own services — it does **not** include any custom RPCs you define in your project. If your project defines its own services, generate and use your project package instead (it layers your services on top of `tempo-sim`); the stock `tempo-sim` won't know about them. Also keep the installed `tempo-sim` version matched to the Tempo version your server runs.
+
 ### Using the Rust API
 Tempo can also generate a Rust client crate alongside the Python package. Generation is **opt-in** via the `TEMPO_GEN_RUST_API` environment variable, since the Rust toolchain is not bundled with Unreal:
 ```
@@ -279,6 +301,24 @@ async fn main() -> Result<(), tempo_sim::TempoError> {
     Ok(())
 }
 ```
+
+#### Creating and publishing your own Rust crate
+As with Python, your project crate is generated automatically once your project defines its own Protobuf services — Tempo's services generate the `tempo-sim` crate, and your project's services generate a project crate (e.g. `tempo-sample`) that depends on it.
+
+Set publish metadata in a `crate_info.json` next to each crate (for example, `Content/Rust/API/crate_info.json` for your project crate) — edit that file, **not** the generated `Cargo.toml`, which is overwritten on every build. Supported fields include `version`, `license`, `repository`, `homepage`, `readme`, `keywords`, and `categories`. Then publish with cargo — `tempo-sim` first, since your project crate depends on it (`--allow-dirty` because the generated sources are git-ignored):
+```
+(cd Plugins/Tempo/TempoCore/Content/Rust/API && cargo publish --allow-dirty)   # tempo-sim
+(cd Content/Rust/API && cargo publish --allow-dirty)                           # your project crate
+```
+
+#### Using the pre-built `tempo-sim` crate instead of generating
+If you only need a client for Tempo's **built-in** services, you don't need `TEMPO_GEN_RUST_API` or an Unreal build at all — just depend on the published crate from [crates.io](https://crates.io/crates/tempo-sim):
+```toml
+[dependencies]
+tempo-sim = "0.1"
+```
+> [!WARNING]
+> As with Python, the published `tempo-sim` crate contains only Tempo's built-in services, not custom RPCs you define. If your project has its own services, generate and use your project crate (it depends on `tempo-sim` and adds your modules). By default the generated project crate references `tempo-sim` by local path; set `"tempo_sim_source": "registry"` in `crate_info.json` to depend on the published crates.io crate instead.
 
 ## Tempo Core Services
 Tempo core includes services for managing the lifecycle of a simulation and controlling time.
