@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Tempo v0 -> v1 settings section migration.
+"""Tempo previous -> v0.1.0 settings section migration.
 
-When Tempo v1 collapsed several C++ modules, any UCLASS(config=...) classes
+When Tempo v0.1.0 collapsed several C++ modules, any UCLASS(config=...) classes
 that lived in the old modules ended up with new module paths. UE config
 files key class settings by section headers of the form
 [/Script/<ModuleName>.<ClassName>], so after upgrading, UE looks for the
@@ -14,7 +14,7 @@ headers (and any value-side class path references) for every Tempo class
 that moved. Idempotent — safe to re-run.
 
 Usage:
-    python3 migrate_v0_settings_sections.py <ProjectDir>
+    python3 migrate_settings_sections.py <ProjectDir>
 """
 
 import argparse
