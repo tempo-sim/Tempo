@@ -189,7 +189,7 @@ bool FTempoLensEquidistantTest::RunTest(const FString& Parameters)
 	Near(TEXT("Equidistant vert Y = tan(el)"), Vert.Y, FMath::Tan(0.15));
 
 	// The render frustum is symmetric about the optical axis.
-	const FDistortionRenderConfig Config = Eq.ComputeRenderConfig(FIntPoint(800, 600), 300.0);
+	const FDistortionRenderConfig Config = Eq.ComputeRenderConfig(FIntPoint(800, 600), 300.0, FVector2D::ZeroVector);
 	Near(TEXT("Equidistant TanLeft == -TanRight"), Config.TanLeft, -Config.TanRight);
 	Near(TEXT("Equidistant TanTop == -TanBottom"), Config.TanTop, -Config.TanBottom);
 
