@@ -401,10 +401,15 @@ protected:
 	// [TanTop, TanBottom]. Off-axis frustums collapse the wasted regions of a symmetric frustum
 	// and write the same UV semantics; old call sites get unchanged behavior by passing
 	// TanLeft = -TanRight and TanTop = -TanBottom.
+	// PrincipalPoint is the optical center as a normalized offset from the output rect center
+	// (X right, Y down, in fractions of width/height); (0,0) = centered. The pixel-to-normalized
+	// conversion is taken about this point so an off-center principal point shifts the distortion
+	// center accordingly. Must match the PrincipalPoint passed to the model's ComputeRenderConfig.
 	static void FillDistortionMap(UTexture2D* DistortionMap, const FLensModel& Model,
 		const FIntPoint& OutputSizeXY, double FOutput,
 		const FIntPoint& RenderSizeXY,
-		double TanLeft, double TanRight, double TanTop, double TanBottom);
+		double TanLeft, double TanRight, double TanTop, double TanBottom,
+		const FVector2D& PrincipalPoint = FVector2D::ZeroVector);
 
 	// Gets the number of pending texture reads
 	int32 NumPendingTextureReads() const { return TextureReadQueue.Num(); }

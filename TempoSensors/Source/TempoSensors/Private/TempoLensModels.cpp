@@ -174,7 +174,8 @@ double FRadialDistortionBase::ComputeFOutputForFullImage(const FIntPoint& FullIm
 	return (FullImageSizeXY.X / 2.0) / OutputHorizRadius;
 }
 
-FDistortionRenderConfig FRadialDistortionBase::ComputeRenderConfig(const FIntPoint& OutputSizeXY, double FOutput) const
+FDistortionRenderConfig FRadialDistortionBase::ComputeRenderConfig(const FIntPoint& OutputSizeXY, double FOutput,
+	const FVector2D& PrincipalPoint) const
 {
 	FDistortionRenderConfig Config;
 	Config.RenderSizeXY = OutputSizeXY;
@@ -209,17 +210,82 @@ FDistortionRenderConfig FRadialDistortionBase::ComputeRenderConfig(const FIntPoi
 
 	Config.RenderFOVAngle = 2.0 * FMath::RadiansToDegrees(FMath::Atan(RenderHorizRadius));
 
-	// Single-capture radial models are symmetric around the optical axis, so the frustum is
-	// symmetric: TanLeft = -TanRight, TanTop = -TanBottom.
-	Config.TanLeft = -RenderHorizRadius;
-	Config.TanRight = RenderHorizRadius;
-	Config.TanTop = -RenderVertRadius;
-	Config.TanBottom = RenderVertRadius;
+	if (PrincipalPoint.IsNearlyZero())
+	{
+		// Centered optical axis: the frustum is symmetric — TanLeft = -TanRight, TanTop = -TanBottom.
+		Config.TanLeft = -RenderHorizRadius;
+		Config.TanRight = RenderHorizRadius;
+		Config.TanTop = -RenderVertRadius;
+		Config.TanBottom = RenderVertRadius;
+		return Config;
+	}
+
+	// Off-center principal point: the output rectangle is no longer symmetric about the optical
+	// axis, so the render frustum must be sized asymmetrically to enclose it. The optical axis sits
+	// at pixel ((0.5 + ppx) * W, (0.5 + ppy) * H); the rect's signed half-extents about that axis,
+	// in output (r_d) units, are therefore unequal on each side. We undistort the rect boundary
+	// (OutputToRender is radial about the optical axis) and take the min/max render-plane extent.
+	// Boundary sampling — rather than just the 4 corners — is needed because barrel distortion can
+	// push the extreme render coordinate to an edge's axis-crossing rather than a corner.
+	const double HalfW = OutputSizeXY.X / 2.0;
+	const double HalfH = OutputSizeXY.Y / 2.0;
+	const double OffX = PrincipalPoint.X * OutputSizeXY.X;
+	const double OffY = PrincipalPoint.Y * OutputSizeXY.Y;
+	const double OutLeft   = (-HalfW - OffX) / FOutput;
+	const double OutRight  = ( HalfW - OffX) / FOutput;
+	const double OutTop    = (-HalfH - OffY) / FOutput;
+	const double OutBottom = ( HalfH - OffY) / FOutput;
+
+	double TanLeft = TNumericLimits<double>::Max();
+	double TanRight = TNumericLimits<double>::Lowest();
+	double TanTop = TNumericLimits<double>::Max();
+	double TanBottom = TNumericLimits<double>::Lowest();
+	auto Accumulate = [&](double OutX, double OutY)
+	{
+		const FVector2D Render = OutputToRender(OutX, OutY);
+		TanLeft = FMath::Min(TanLeft, Render.X);
+		TanRight = FMath::Max(TanRight, Render.X);
+		TanTop = FMath::Min(TanTop, Render.Y);
+		TanBottom = FMath::Max(TanBottom, Render.Y);
+	};
+	// Sample all four edges (corners included as endpoints) plus each edge's axis-crossing.
+	const int32 NumSamples = 64;
+	for (int32 I = 0; I <= NumSamples; ++I)
+	{
+		const double T = static_cast<double>(I) / NumSamples;
+		const double X = FMath::Lerp(OutLeft, OutRight, T);
+		const double Y = FMath::Lerp(OutTop, OutBottom, T);
+		Accumulate(OutLeft, Y);
+		Accumulate(OutRight, Y);
+		Accumulate(X, OutTop);
+		Accumulate(X, OutBottom);
+	}
+	// The optical axis (output coord 0) falls inside the rect; its edge crossings are the barrel
+	// extremes, so sample them explicitly in case the uniform grid above stepped past them.
+	Accumulate(OutLeft, 0.0);
+	Accumulate(OutRight, 0.0);
+	Accumulate(0.0, OutTop);
+	Accumulate(0.0, OutBottom);
+
+	// Pad by half an output pixel on every side so the discrete distortion map (which samples pixel
+	// centers) never maps just outside the render frustum and reads black at the image edges.
+	const double PadX = 0.5 / FOutput;
+	const double PadY = 0.5 / FOutput;
+	Config.TanLeft = TanLeft - PadX;
+	Config.TanRight = TanRight + PadX;
+	Config.TanTop = TanTop - PadY;
+	Config.TanBottom = TanBottom + PadY;
+
+	// Legacy symmetric best-fit FOV for metadata consumers: the widest symmetric frustum bounding
+	// the (now off-center) horizontal extent.
+	const double MaxHorizExtent = FMath::Max(FMath::Abs(Config.TanLeft), FMath::Abs(Config.TanRight));
+	Config.RenderFOVAngle = 2.0 * FMath::RadiansToDegrees(FMath::Atan(MaxHorizExtent));
 
 	return Config;
 }
 
-FDistortionRenderConfig FEquidistantDistortion::ComputeRenderConfig(const FIntPoint& OutputSizeXY, double FOutput) const
+FDistortionRenderConfig FEquidistantDistortion::ComputeRenderConfig(const FIntPoint& OutputSizeXY, double FOutput,
+	const FVector2D& /*PrincipalPoint*/) const
 {
 	// FOutput here is pixels per radian of physical angle (axis-separable equidistant).
 	FDistortionRenderConfig Config;
@@ -509,7 +575,8 @@ FVector2D FRationalDistortion::OutputToRender(double OutputX, double OutputY) co
 	return FVector2D(OutputX * Scale, OutputY * Scale);
 }
 
-FDistortionRenderConfig FKannalaBrandtDistortion::ComputeRenderConfig(const FIntPoint& OutputSizeXY, double FOutput) const
+FDistortionRenderConfig FKannalaBrandtDistortion::ComputeRenderConfig(const FIntPoint& OutputSizeXY, double FOutput,
+	const FVector2D& /*PrincipalPoint*/) const
 {
 	FDistortionRenderConfig Config;
 	Config.RenderSizeXY = OutputSizeXY;
@@ -791,7 +858,8 @@ FVector2D FDoubleSphereDistortion::OutputToRender(double OutputX, double OutputY
 	return FVector2D(ChildX / ChildZ, ChildY / ChildZ);
 }
 
-FDistortionRenderConfig FDoubleSphereDistortion::ComputeRenderConfig(const FIntPoint& OutputSizeXY, double FOutput) const
+FDistortionRenderConfig FDoubleSphereDistortion::ComputeRenderConfig(const FIntPoint& OutputSizeXY, double FOutput,
+	const FVector2D& /*PrincipalPoint*/) const
 {
 	FDistortionRenderConfig Config;
 	Config.RenderSizeXY = OutputSizeXY;

@@ -145,7 +145,9 @@ struct TTextureRead<FCameraPixelNoDepth> : TTextureReadBase<FCameraPixelNoDepth>
 
 struct TEMPOSENSORS_API FTempoCameraIntrinsics
 {
-	FTempoCameraIntrinsics(const FIntPoint& SizeXY, float HorizontalFOV);
+	// PrincipalPoint is a normalized offset from the image center (X right, Y down, in fractions of
+	// width/height); (0,0) places the principal point (Cx, Cy) at the image center.
+	FTempoCameraIntrinsics(const FIntPoint& SizeXY, float HorizontalFOV, const FVector2D& PrincipalPoint = FVector2D::ZeroVector);
 	const float Fx;
 	const float Fy;
 	const float Cx;
