@@ -249,7 +249,7 @@ matrix entry in `tempo_build_and_package.yml` (and, for Python, a line in `pytes
 - Quote the engine path (it contains a space).
 - Changing a `.proto` is a client-facing API change: it regenerates Python/Rust/C++ clients
   and may need CoreRedirects (in the plugin's Config) for renamed assets/classes.
-- `MIGRATION_v1.md` documents the v0→v1 module consolidation (e.g. TempoCamera+TempoLidar →
+- `MIGRATION_v0.1.0.md` documents the previous → v0.1.0 module consolidation (e.g. TempoCamera+TempoLidar →
   TempoSensors); proto packages were renamed, so old external clients must regenerate.
 - Half-pixel offset: the distortion-map UV loop in `TempoCamera.cpp` must use `U + 0.5`
   (pixel center) or TAA breaks (`distortion_map_half_pixel` memory).
@@ -263,5 +263,5 @@ matrix entry in `tempo_build_and_package.yml` (and, for Python, a line in `pytes
   `TempoTiledSceneCaptureComponent`, `TempoLensModels`, `TempoSensorInterface`).
 - Build/toolchain/deps → `Scripts/`, `EngineMods/`, `*.Build.cs`.
 - Client examples → `ExampleClients/`.
-- Project status & direction → `PROGRESS.md`, `MIGRATION_v1.md`, `PYTHON_API_SPLIT_PLAN.md`,
+- Project status & direction → `PROGRESS.md`, `MIGRATION_v0.1.0.md`, `PYTHON_API_SPLIT_PLAN.md`,
   and each plugin's `README.md`.
