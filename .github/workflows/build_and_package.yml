@@ -284,6 +284,13 @@ jobs:
           ${{ github.workspace }}/${{ inputs.project_root }}/Plugins/**/Binaries/**
           .engine-ddc-cache/**
         key: ${{ steps.repo_lowercase.outputs.REPO_LOWERCASE }}-build-${{ env.UNREAL_VERSION }}-${{ steps.common_ancestor.outputs.COMMON_ANCESTOR }}
+        # Fall back to the most recent prior build cache when the exact key misses. This is what lets
+        # main builds run warm: on a push to main, COMMON_ANCESTOR resolves to HEAD itself (origin/main
+        # == HEAD), whose key was never saved, so the exact key always misses; the prefix matches the
+        # previous main build's cache instead. (A prefix match sets cache-matched-key but leaves
+        # cache-hit false — see the DDC-init step's condition below.)
+        restore-keys: |
+          ${{ steps.repo_lowercase.outputs.REPO_LOWERCASE }}-build-${{ env.UNREAL_VERSION }}-
     - name: Restore Engine Mods Cache (if clean not specified and not using pre-modded image)
       if: ${{ ! inputs.clean && inputs.engine_mods_image == '' }}
       id: restore_engine_mods_cache
@@ -472,8 +479,11 @@ jobs:
         docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Binaries/DotNET/UnrealBuildTool ${{ github.workspace }}/.engine-mods-cache/Engine/Binaries/DotNET
         docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Binaries/DotNET/AutomationTool ${{ github.workspace }}/.engine-mods-cache/Engine/Binaries/DotNET
         docker rm temp_engine
-    - name: Initialize Engine DDC Cache (if not restored from cache)
-      if: ${{ steps.restore_build_cache.outputs.cache-hit != 'true' }}
+    - name: Initialize Engine DDC Cache (if nothing was restored from cache)
+      # cache-matched-key is set for BOTH an exact hit and a restore-keys (prefix) hit, so this
+      # re-seeds the engine DDC from the image only on a true cache miss (e.g. clean builds). On a
+      # prefix-restored warm main build we keep the restored DDC instead of clobbering it.
+      if: ${{ steps.restore_build_cache.outputs.cache-matched-key == '' }}
       run: |
         mkdir -p .engine-ddc-cache/Engine
         docker create --name temp_engine tempo_unreal_image
@@ -553,6 +563,7 @@ jobs:
           PACKAGE_ARGS="$PACKAGE_ARGS -allmaps"
         fi
         PACKAGE_ARGS="$PACKAGE_ARGS -ddc=NoZenLocalFallback" # NoZenLocalFallback causes the DDC to end up in Engine/DerivedDataCache folder
+        PACKAGE_ARGS="$PACKAGE_ARGS -skipiostore" # IOStore causes issues when packaging after clean in CI
         if [ "${{ inputs.patch }}" = "true" ]; then
           PACKAGE_ARGS="$PACKAGE_ARGS -generatepatch -basedonreleaseversion=${{ inputs.release_id }} -basedonreleaseversionbasepath=/home/ue4/${{ inputs.project_root }}/Releases"
         fi
@@ -588,24 +599,6 @@ jobs:
         fi
         sudo chown -R $(id -u):$(id -g) .engine-ddc-cache/
         sudo chmod -R +r .engine-ddc-cache/
-    - name: Diagnose Cooked vs Temp Engine Content (post-cook)
-      # Temporary diagnostic: iostore stages engine content from Saved/Temp/<Platform>, which is
-      # missing on cold (cache-miss) builds. This reports whether the cook produced the engine
-      # content in Saved/Cooked and/or Saved/Temp, to distinguish a cook problem from a stage problem.
-      # Runs after the permissions reset (files readable by the runner) and even if Package failed.
-      if: ${{ always() && inputs.package }}
-      run: |
-        PROJ="${{ github.workspace }}/${{ inputs.project_root }}"
-        echo "=== Saved/Cooked platform dirs ==="; ls "$PROJ/Saved/Cooked" 2>/dev/null || echo "(none)"
-        echo "=== Saved/Temp platform dirs ===";   ls "$PROJ/Saved/Temp" 2>/dev/null || echo "(none)"
-        echo "=== WorldGridMaterial locations (Cooked + Temp) ==="
-        find "$PROJ/Saved/Cooked" "$PROJ/Saved/Temp" -name 'WorldGridMaterial*' 2>/dev/null || echo "(not found in either)"
-        echo "=== Engine cooked file counts per platform ==="
-        for base in Cooked Temp; do
-          for d in "$PROJ/Saved/$base"/*/Engine; do
-            [ -d "$d" ] && echo "$d: $(find "$d" -type f 2>/dev/null | wc -l) files"
-          done
-        done
     - name: Upload Automation Test Report
       if: ${{ always() && inputs.automation_test_filter != '' }}
       uses: actions/upload-artifact@v4
