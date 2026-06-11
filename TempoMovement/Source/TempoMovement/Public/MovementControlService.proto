@@ -63,6 +63,25 @@ message PawnMoveToLocationResponse {
   MoveToResult result = 1;
 }
 
+// One point of a spline trajectory.
+message SplineTrajectoryPoint {
+  // World-frame location of the spline point, in meters.
+  TempoCore.Vector location = 1;
+  // World-frame, un-normalized tangent at the point, in meters. Sets both the arrive
+  // and leave tangent (a longer tangent makes the curve bow out further near the point).
+  TempoCore.Vector tangent = 2;
+  // Time, in seconds relative to the trajectory's start, at which the path reaches this
+  // point. Used by curve-based trajectories; ignored by constant-speed trajectories.
+  float time = 3;
+}
+
+message ConfigureTrajectoryRequest {
+  // Identifier of the SplineTrajectory actor to configure.
+  string trajectory = 1;
+  // Ordered points defining the path. At least two are required.
+  repeated SplineTrajectoryPoint points = 2;
+}
+
 service MovementControlService {
   rpc GetCommandablePawns(TempoCore.Empty) returns (CommandablePawnsResponse);
 
@@ -77,4 +96,6 @@ service MovementControlService {
   rpc PawnMoveToLocation(PawnMoveToLocationRequest) returns (PawnMoveToLocationResponse);
 
   rpc RebuildNavigation(TempoCore.Empty) returns (TempoCore.Empty);
+
+  rpc ConfigureTrajectory(ConfigureTrajectoryRequest) returns (TempoCore.Empty);
 }

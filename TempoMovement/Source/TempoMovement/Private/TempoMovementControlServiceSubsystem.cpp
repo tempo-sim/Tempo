@@ -5,6 +5,8 @@
 #include "TempoMovement/MovementControlService.grpc.pb.h"
 #include "TempoMovement.h"
 #include "TempoMovementController.h"
+#include "CurveSplineTrajectory.h"
+#include "SplineTrajectory.h"
 
 #include "TempoConversion.h"
 #include "TempoCoreUtils.h"
@@ -12,6 +14,8 @@
 #include "TempoCore/Geometry.pb.h"
 
 #include "AIController.h"
+#include "Components/SplineComponent.h"
+#include "Curves/CurveFloat.h"
 #include "Kismet/GameplayStatics.h"
 #include "NavigationSystem.h"
 
@@ -24,6 +28,7 @@ using CommandablePawnsResponse = TempoMovement::CommandablePawnsResponse;
 using PawnMoveToLocationRequest = TempoMovement::PawnMoveToLocationRequest;
 using PawnMoveToLocationResponse = TempoMovement::PawnMoveToLocationResponse;
 using NavigablePawnsResponse = TempoMovement::NavigablePawnsResponse;
+using ConfigureTrajectoryRequest = TempoMovement::ConfigureTrajectoryRequest;
 using TempoEmpty = TempoCore::Empty;
 
 namespace
@@ -82,6 +87,20 @@ namespace
 		OutStatus = grpc::Status(grpc::StatusCode::NOT_FOUND, "Did not find a pawn with the specified name");
 		return nullptr;
 	}
+
+	ASplineTrajectory* FindTrajectory(const UWorld* World, const FString& RequestedName)
+	{
+		TArray<AActor*> Trajectories;
+		UGameplayStatics::GetAllActorsOfClass(World, ASplineTrajectory::StaticClass(), Trajectories);
+		for (AActor* Trajectory : Trajectories)
+		{
+			if (UTempoCoreUtils::GetActorIdentifier(Trajectory).Equals(RequestedName, ESearchCase::IgnoreCase))
+			{
+				return Cast<ASplineTrajectory>(Trajectory);
+			}
+		}
+		return nullptr;
+	}
 }
 
 void UTempoMovementControlServiceSubsystem::RegisterServices(FTempoServer& Server)
@@ -93,7 +112,8 @@ void UTempoMovementControlServiceSubsystem::RegisterServices(FTempoServer& Serve
 		SimpleRequestHandler(&MovementControlAsyncService::RequestCommandAcceleration, &UTempoMovementControlServiceSubsystem::CommandAcceleration),
 		SimpleRequestHandler(&MovementControlAsyncService::RequestGetNavigablePawns, &UTempoMovementControlServiceSubsystem::GetNavigablePawns),
 		SimpleRequestHandler(&MovementControlAsyncService::RequestPawnMoveToLocation, &UTempoMovementControlServiceSubsystem::PawnMoveToLocation),
-		SimpleRequestHandler(&MovementControlAsyncService::RequestRebuildNavigation, &UTempoMovementControlServiceSubsystem::RebuildNavigation)
+		SimpleRequestHandler(&MovementControlAsyncService::RequestRebuildNavigation, &UTempoMovementControlServiceSubsystem::RebuildNavigation),
+		SimpleRequestHandler(&MovementControlAsyncService::RequestConfigureTrajectory, &UTempoMovementControlServiceSubsystem::ConfigureTrajectory)
 		);
 }
 
@@ -347,5 +367,54 @@ void UTempoMovementControlServiceSubsystem::RebuildNavigation(const TempoEmpty& 
 	}
 
 	NavigationSystem->Build();
+	ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status_OK);
+}
+
+void UTempoMovementControlServiceSubsystem::ConfigureTrajectory(const ConfigureTrajectoryRequest& Request, const TResponseDelegate<TempoEmpty>& ResponseContinuation) const
+{
+	ASplineTrajectory* Trajectory = FindTrajectory(GetWorld(), UTF8_TO_TCHAR(Request.trajectory().c_str()));
+	if (!Trajectory)
+	{
+		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::NOT_FOUND, "Did not find a trajectory with the specified name"));
+		return;
+	}
+
+	if (Request.points_size() < 2)
+	{
+		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "A trajectory requires at least two points"));
+		return;
+	}
+
+	// Rebuild the real spline geometry. Locations and tangents arrive in SI/right-handed and
+	// are converted to Unreal-native cm/left-handed. Tangents are direction vectors, so the
+	// same QuantityConverter (which negates Y) applies. Update the spline once at the end.
+	USplineComponent* Spline = Trajectory->GetSpline();
+	Spline->ClearSplinePoints(false);
+	for (int32 PointIndex = 0; PointIndex < Request.points_size(); ++PointIndex)
+	{
+		const TempoMovement::SplineTrajectoryPoint& Point = Request.points(PointIndex);
+		const FVector Location = QuantityConverter<M2CM, R2L>::Convert(FVector(Point.location().x(), Point.location().y(), Point.location().z()));
+		Spline->AddSplinePoint(Location, ESplineCoordinateSpace::World, false);
+	}
+	for (int32 PointIndex = 0; PointIndex < Request.points_size(); ++PointIndex)
+	{
+		const TempoMovement::SplineTrajectoryPoint& Point = Request.points(PointIndex);
+		const FVector Tangent = QuantityConverter<M2CM, R2L>::Convert(FVector(Point.tangent().x(), Point.tangent().y(), Point.tangent().z()));
+		Spline->SetTangentAtSplinePoint(PointIndex, Tangent, ESplineCoordinateSpace::World, false);
+	}
+	Spline->UpdateSpline();
+
+	// Curve trajectories also need the time -> spline input key (point index) mapping.
+	if (ACurveSplineTrajectory* CurveTrajectory = Cast<ACurveSplineTrajectory>(Trajectory))
+	{
+		FRuntimeFloatCurve TimeToInputKey;
+		FRichCurve* RichCurve = TimeToInputKey.GetRichCurve();
+		for (int32 PointIndex = 0; PointIndex < Request.points_size(); ++PointIndex)
+		{
+			RichCurve->AddKey(Request.points(PointIndex).time(), static_cast<float>(PointIndex));
+		}
+		CurveTrajectory->SetTimeToInputKeyCurve(TimeToInputKey);
+	}
+
 	ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status_OK);
 }
