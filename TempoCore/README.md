@@ -10,6 +10,9 @@ In `Wall Clock` mode, time advances _strictly_ alongside the system clock. We ac
 ### Fixed Step Mode
 In `Fixed Step` mode, time advances by a fixed amount, which you can choose, every frame. We express this increment in terms of a whole number of simulated steps per second (like, 10 steps per second), as opposed to a floating point fraction of a second (like, 0.1 seconds per step), because we use a fixed-point representation for time (again, overriding the engine's time) because we want it to be exactly correct (no rounding or floating point errors here).
 
+> [!NOTE]
+> When you switch into `Fixed Step` mode, sim time keeps whatever value it had (e.g. some arbitrary time accumulated in `Wall Clock` mode) and snaps onto the step grid on the first step. So the *first* `step` after switching advances only by the partial amount needed to reach the next multiple of `1 / sim_steps_per_second`, not a full step; every step after that advances by exactly `1 / sim_steps_per_second`. If you need the first step to be a full step (for example, when asserting on exact per-step time deltas), take one throwaway step right after switching to align sim time to the grid.
+
 ## Default HUD
 <img width="1273" height="638" alt="image" src="https://github.com/user-attachments/assets/41ece0a4-b18a-47c9-bf00-07b5733987b4" />
 
