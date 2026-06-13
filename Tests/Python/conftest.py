@@ -116,8 +116,9 @@ def sim_server():
 
 @pytest.fixture
 def fixed_step(sim_server):
-    """Put the sim in deterministic fixed-step mode (10 steps/s), paused, so a test can
-    advance time by an exact number of steps. Returns the steps-per-second."""
+    """Put the sim in deterministic fixed-step mode (10 steps/s), paused with sim time
+    grid-aligned, so a test can advance time by an exact number of full steps. Returns
+    the steps-per-second."""
     import tempo_sim.tempo_core as tc
     import tempo_sim.TempoCore.Time_pb2 as Time
 
@@ -125,4 +126,12 @@ def fixed_step(sim_server):
     tc.set_time_mode(time_mode=Time.TM_FIXED_STEP)
     tc.set_sim_steps_per_second(sim_steps_per_second=steps_per_second)
     tc.pause()
+    # Entering fixed-step mode from an arbitrary wall-clock sim time leaves sim time
+    # off the fixed-step grid. The first fixed-step frame only advances by the partial
+    # amount needed to reach the next grid line (snap-to-grid), not a full 1/SPS step.
+    # Whether that priming frame ticks before `pause()` takes effect is a race (it
+    # usually does locally, but not under CI load), so do it explicitly here. After
+    # this step sim time is grid-aligned and every subsequent step advances exactly
+    # 1/SPS, making the per-step assertions deterministic.
+    tc.step()
     return steps_per_second
