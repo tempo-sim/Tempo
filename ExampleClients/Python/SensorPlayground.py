@@ -579,14 +579,17 @@ TOP_LEVEL_ACTIONS = [
 
 async def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--ip', required=False, help="IP address of machine where Tempo is running", default="0.0.0.0")
+    parser.add_argument('--ip', required=False, default=None,
+                        help="IP address of machine where Tempo is running. If unset, connect via Unix domain socket.")
     parser.add_argument('--port', required=False, type=int, help="Port Tempo gRPC server is using", default=10001)
     parser.add_argument('--display-scale', required=False, type=float, default=0.5,
                         help="Scale factor for displayed camera images (default: 0.5)")
     args = parser.parse_args()
 
-    if args.ip != "0.0.0.0" or args.port != 10001:
+    if args.ip is not None:
         await tempo_sim.set_server(address=args.ip, port=args.port)
+    elif args.port != 10001:
+        await tempo_sim.set_unix_socket(port=args.port)
 
     sensor_streams = {}
     record_streams = {}

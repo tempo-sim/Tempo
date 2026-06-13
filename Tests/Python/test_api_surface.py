@@ -38,6 +38,8 @@ def test_package_root_imports():
     import tempo_sim
 
     assert callable(tempo_sim.set_server)
+    assert callable(tempo_sim.set_unix_socket)
+    assert callable(tempo_sim.default_unix_socket_path)
     assert callable(tempo_sim.run_async)
 
 

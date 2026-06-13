@@ -41,6 +41,32 @@ fn level_name_is_reported() {
     assert!(!resp.level.is_empty(), "expected a non-empty current level name");
 }
 
+#[cfg(unix)]
+#[test]
+fn uds_answers_get_current_level_name() {
+    // First make sure the TCP listener is up — this is also our sim-ready gate.
+    connect();
+    let port: u16 = std::env::var("TEMPO_SERVER_PORT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(10001);
+    let uds_path = tempo_sim::default_unix_socket_path(port);
+    if !uds_path.exists() {
+        // Older sim binary without dual-listen; skip rather than fail.
+        eprintln!(
+            "skipping: sim is not exposing UDS at {} (older build?)",
+            uds_path.display()
+        );
+        return;
+    }
+    tempo_sim::set_unix_socket(uds_path);
+    let resp =
+        tempo_sim::tempo_core::get_current_level_name().expect("get_current_level_name over UDS");
+    assert!(!resp.level.is_empty(), "expected a non-empty current level name over UDS");
+    // Restore TCP for the rest of the suite.
+    tempo_sim::set_server("localhost", port);
+}
+
 #[test]
 fn spawn_query_destroy_round_trip() {
     connect();

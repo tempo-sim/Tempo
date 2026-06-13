@@ -10,12 +10,12 @@ use clap::Parser;
 use inquire::{Select, Text};
 use tempo_sim::proto::tempo_core::{Accel, Twist, Vector};
 use tempo_sim::proto::tempo_movement::MoveToResult;
-use tempo_sim::{set_server_async, tempo_movement};
+use tempo_sim::{default_unix_socket_path, set_server_async, set_unix_socket_async, tempo_movement};
 
 #[derive(Parser, Debug)]
 struct Args {
-    #[arg(long, default_value = "0.0.0.0", help = "IP address of machine where Tempo is running")]
-    ip: String,
+    #[arg(long, help = "IP address of machine where Tempo is running. If unset, connect via Unix domain socket.")]
+    ip: Option<String>,
     #[arg(long, default_value_t = 10001u16, help = "Port Tempo gRPC server is using")]
     port: u16,
 }
@@ -305,8 +305,13 @@ async fn flow_rebuild_navigation() {
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
-    if args.ip != "0.0.0.0" || args.port != 10001 {
-        set_server_async(&args.ip, args.port).await;
+    match args.ip {
+        Some(ip) => set_server_async(&ip, args.port).await,
+        None => {
+            if args.port != 10001 {
+                set_unix_socket_async(default_unix_socket_path(args.port)).await;
+            }
+        }
     }
 
     println!("\n=== Movement Playground ===");

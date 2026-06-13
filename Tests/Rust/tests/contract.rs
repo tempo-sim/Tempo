@@ -13,6 +13,10 @@ use tempo_sim::proto::tempo_core::{Transform, Vector};
 fn api_surface_exists() {
     // Referencing each item as a value forces it to exist with a compatible shape.
     let _set_server = tempo_sim::set_server;
+    // set_unix_socket is generic over `impl Into<PathBuf>`; instantiate one to prove the symbol exists.
+    let _instantiate_set_unix_socket = || tempo_sim::set_unix_socket("/tmp/never-called.sock");
+    let _default_uds_path = tempo_sim::default_unix_socket_path;
+    let _endpoint_variant = tempo_sim::Endpoint::Tcp { address: "x".into(), port: 1 };
     let _level = tempo_sim::tempo_core::get_current_level_name;
     let _sim_time = tempo_sim::tempo_core::get_sim_time;
     let _step = tempo_sim::tempo_core::step;

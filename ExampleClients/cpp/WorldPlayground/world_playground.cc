@@ -13,12 +13,23 @@
 namespace tw = tempo::tempo_world;
 
 int main(int argc, char** argv) {
-    const char* host = (argc >= 2) ? argv[1] : "localhost";
+    // No host argument: connect via Unix domain socket (default).
+    // Pass "-" to use UDS while still specifying a non-default port.
+    const bool use_uds = (argc < 2) || std::string(argv[1]) == "-";
+    const char* host = use_uds ? nullptr : argv[1];
     int port = (argc >= 3) ? std::atoi(argv[2]) : 10001;
     const std::string actor_name = (argc >= 4) ? argv[3] : "Vehicle";
 
-    tempo::set_server(host, static_cast<uint16_t>(port));
-    std::printf("[WorldPlayground] connecting to %s:%d\n", host, port);
+    if (use_uds) {
+        if (port != 10001) {
+            tempo::set_unix_socket(tempo::default_unix_socket_path(static_cast<uint16_t>(port)));
+        }
+        std::printf("[WorldPlayground] connecting via UDS %s\n",
+                    tempo::default_unix_socket_path(static_cast<uint16_t>(port)).c_str());
+    } else {
+        tempo::set_server(host, static_cast<uint16_t>(port));
+        std::printf("[WorldPlayground] connecting to %s:%d\n", host, port);
+    }
 
     auto state = tw::get_current_actor_state(actor_name, /*include_hidden_components=*/false);
     if (!state) {

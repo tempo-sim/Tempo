@@ -1,0 +1,29 @@
+# Copyright Tempo Simulation, LLC. All Rights Reserved
+
+[package]
+name = "tempo-transport-benchmark"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Echo-server + client microbenchmark for the Tempo gRPC transport layer (TCP vs UDS)."
+
+[[bin]]
+name = "tempo-bench-server"
+path = "src/bin/server.rs"
+
+[[bin]]
+name = "tempo-bench-client"
+path = "src/bin/client.rs"
+
+[dependencies]
+tonic = "0.13"
+prost = "0.13"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "time", "sync"] }
+tokio-stream = { version = "0.1", features = ["net"] }
+clap = { version = "4", features = ["derive"] }
+tower = { version = "0.5", default-features = false, features = ["util"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+async-stream = "0.3"
+
+[build-dependencies]
+tonic-build = "0.13"

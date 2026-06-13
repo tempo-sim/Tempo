@@ -422,6 +422,10 @@ protected:
 	TUniquePtr<grpc::Server> Server;
 	TUniquePtr<grpc::ServerCompletionQueue> CompletionQueue;
 
+	// Path of the Unix-domain socket the server is currently listening on, or empty if UDS bind failed.
+	// Tracked so Deinitialize can unlink the file on graceful shutdown.
+	FString UnixSocketPathInUse;
+
 	FDelegateHandle OnPostEngineInitHandle;
 	FDelegateHandle OnPostWorldInitializationHandle;
 	FDelegateHandle OnWorldBeginPlayHandle;

@@ -7,6 +7,8 @@
 #include "TempoServiceProvider.h"
 #include "TempoCore.h"
 
+#include "HAL/FileManager.h"
+
 #include "grpcpp/impl/service_type.h"
 #if PLATFORM_WINDOWS
 // gRPC transitively includes <windows.h>, which leaks wingdi.h's GetObject macro
@@ -137,9 +139,18 @@ void FTempoServer::Initialize()
 		}
 	}
 	const int32 Port = GetDefault<UTempoCoreSettings>()->GetServerPort();
-	const FString ServerAddress = FString::Printf(TEXT("0.0.0.0:%d"), Port);
+	const FString TcpAddress = FString::Printf(TEXT("0.0.0.0:%d"), Port);
+	const FString UnixSocketPath = UTempoCoreUtils::GetDefaultUnixSocketPath(Port);
+	// Remove any stale socket file from a prior ungraceful shutdown; otherwise bind fails with EADDRINUSE.
+	IFileManager::Get().Delete(*UnixSocketPath, /*bRequireExists=*/false, /*bEvenReadOnly=*/true);
+	const FString UnixUri = FString::Printf(TEXT("unix:%s"), *UnixSocketPath);
+
 	grpc::ServerBuilder Builder;
-	Builder.AddListeningPort(TCHAR_TO_UTF8(*ServerAddress), grpc::InsecureServerCredentials());
+	int32 TcpBoundPort = 0;
+	Builder.AddListeningPort(TCHAR_TO_UTF8(*TcpAddress), grpc::InsecureServerCredentials(), &TcpBoundPort);
+	int32 UnixBoundPort = 0;
+	Builder.AddListeningPort(TCHAR_TO_UTF8(*UnixUri), grpc::InsecureServerCredentials(), &UnixBoundPort);
+
 	for (const auto& Service : Services)
 	{
 		Builder.RegisterService(Service.Value.Get());
@@ -152,11 +163,28 @@ void FTempoServer::Initialize()
 
 	if (!Server.Get())
 	{
-		UE_LOG(LogTempoCore, Error, TEXT("Error while starting Tempo gRPC server. Perhaps port %d was not available."), Port);
+		UE_LOG(LogTempoCore, Error, TEXT("Error while starting Tempo gRPC server. Could not bind TCP %s or UDS %s."), *TcpAddress, *UnixSocketPath);
 		return;
 	}
 
-	UE_LOG(LogTempoCore, Display, TEXT("Tempo gRPC server listening on %s"), *ServerAddress);
+	if (TcpBoundPort == 0)
+	{
+		UE_LOG(LogTempoCore, Warning, TEXT("Tempo gRPC server failed to bind TCP port %d; UDS-only."), Port);
+	}
+	else
+	{
+		UE_LOG(LogTempoCore, Display, TEXT("Tempo gRPC server listening on TCP %s"), *TcpAddress);
+	}
+
+	if (UnixBoundPort == 0)
+	{
+		UE_LOG(LogTempoCore, Warning, TEXT("Tempo gRPC server failed to bind UDS %s; TCP-only."), *UnixSocketPath);
+	}
+	else
+	{
+		UE_LOG(LogTempoCore, Display, TEXT("Tempo gRPC server listening on UDS %s"), *UnixSocketPath);
+		UnixSocketPathInUse = UnixSocketPath;
+	}
 
 	// Now that the server has started we can initialize the request managers.
 	for (const auto& RequestManager : RequestManagers)
@@ -198,6 +226,12 @@ void FTempoServer::Deinitialize()
 
 	Services.Empty();
 	RequestManagers.Empty();
+
+	if (!UnixSocketPathInUse.IsEmpty())
+	{
+		IFileManager::Get().Delete(*UnixSocketPathInUse, /*bRequireExists=*/false, /*bEvenReadOnly=*/true);
+		UnixSocketPathInUse.Empty();
+	}
 }
 
 void FTempoServer::Reinitialize()

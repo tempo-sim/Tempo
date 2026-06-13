@@ -461,12 +461,20 @@ def property_editor(bridge: AsyncBridge, demo) -> None:
 # Standalone launch
 # ---------------------------------------------------------------------------
 
-def launch(address: str = "localhost", port: int = 10001,
+def launch(address: str | None = None, port: int = 10001,
            control_port: int = 7860, title: str = "TempoWorld panel") -> None:
-    """Connect to Tempo and serve a standalone property-editor page (blocking)."""
+    """Connect to Tempo and serve a standalone property-editor page (blocking).
+
+    When `address` is None (default), connect via Unix domain socket — the
+    matching transport for the same-host case. Set `address` explicitly to use
+    TCP to a remote sim.
+    """
     loop = run_background_loop()
     bridge = AsyncBridge(loop)
-    bridge.submit(tempo_sim.set_server, address=address, port=port)
+    if address is not None:
+        bridge.submit(tempo_sim.set_server, address=address, port=port)
+    elif port != 10001:
+        bridge.submit(tempo_sim.set_unix_socket, port=port)
 
     with gr.Blocks(title=title) as demo:
         gr.Markdown(f"## {title}")

@@ -16,14 +16,17 @@ use show_image::{ImageInfo, ImageView, WindowProxy};
 use tempo_sim::proto::tempo_sensors::ColorEncoding;
 use tempo_sim::proto::tempo_core::{Rotation, Transform, Vector};
 use tempo_sim::proto::tempo_sensors::MeasurementType;
-use tempo_sim::{set_server_async, tempo_sensors, tempo_world, TempoError};
+use tempo_sim::{
+    default_unix_socket_path, set_server_async, set_unix_socket_async, tempo_sensors, tempo_world,
+    TempoError,
+};
 use tokio::task::JoinHandle;
 use tokio_stream::StreamExt;
 
 #[derive(Parser, Debug)]
 struct Args {
-    #[arg(long, default_value = "0.0.0.0", help = "IP address of machine where Tempo is running")]
-    ip: String,
+    #[arg(long, help = "IP address of machine where Tempo is running. If unset, connect via Unix domain socket.")]
+    ip: Option<String>,
     #[arg(long, default_value_t = 10001u16, help = "Port Tempo gRPC server is using")]
     port: u16,
 }
@@ -1200,8 +1203,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 async fn async_main() {
     let args = Args::parse();
-    if args.ip != "0.0.0.0" || args.port != 10001 {
-        set_server_async(&args.ip, args.port).await;
+    match args.ip {
+        Some(ip) => set_server_async(&ip, args.port).await,
+        None => {
+            if args.port != 10001 {
+                set_unix_socket_async(default_unix_socket_path(args.port)).await;
+            }
+        }
     }
 
     let mut state = State {

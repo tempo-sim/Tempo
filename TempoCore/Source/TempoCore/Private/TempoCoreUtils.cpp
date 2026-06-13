@@ -3,6 +3,8 @@
 #include "TempoCoreUtils.h"
 
 #include "GameFramework/Actor.h"
+#include "HAL/PlatformProcess.h"
+#include "Misc/Paths.h"
 #include "PhysicsEngine/BodySetup.h"
 #include "PhysicsEngine/PhysicsAsset.h"
 #if ENGINE_MAJOR_VERSION >= 5 && ENGINE_MINOR_VERSION > 4
@@ -83,6 +85,20 @@ FBox UTempoCoreUtils::GetActorLocalBounds(const AActor* Actor, bool bIncludeHidd
 	}
 
 	return LocalBounds;
+}
+
+FString UTempoCoreUtils::GetDefaultUnixSocketPath(int32 Port)
+{
+#if PLATFORM_WINDOWS
+	// FPlatformProcess::UserTempDir() resolves to %LOCALAPPDATA%\Temp on Windows.
+	const FString TempDir = FPlatformProcess::UserTempDir();
+#else
+	// POSIX: /tmp. Hard-coded rather than UserTempDir() so the server and clients agree
+	// regardless of TMPDIR overrides (which differ between launchd-spawned editor, packaged
+	// builds, and a user's terminal).
+	const FString TempDir = TEXT("/tmp");
+#endif
+	return FPaths::Combine(TempDir, FString::Printf(TEXT("tempo-%d.sock"), Port));
 }
 
 FString UTempoCoreUtils::GetActorIdentifier(const AActor* Actor)

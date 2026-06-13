@@ -1,0 +1,39 @@
+// Copyright Tempo Simulation, LLC. All Rights Reserved
+
+syntax = "proto3";
+
+package tempo_bench;
+
+// Minimal echo service used by the transport benchmark.
+//
+// The server is transport-agnostic — it listens on both TCP and a Unix domain socket so the
+// same binary can be used to compare the two without a Tempo sim. The client picks which
+// transport to dial.
+service Echo {
+  // Unary echo. The server returns the same payload it received. Used to measure per-call
+  // round-trip latency without any rendering or sim cost.
+  rpc Echo(EchoRequest) returns (EchoResponse);
+
+  // Server-streaming echo. The server sends `count` messages, each `payload_size` bytes,
+  // as fast as it can. Used to measure throughput; mirrors the shape of Tempo sensor
+  // streams (large per-message payloads at high rate).
+  rpc EchoStream(EchoStreamRequest) returns (stream EchoResponse);
+}
+
+message EchoRequest {
+  bytes payload = 1;
+}
+
+message EchoResponse {
+  // Echoed payload. For EchoStream this is `payload_size` bytes of constant filler.
+  bytes payload = 1;
+  // Monotonic message index within an EchoStream session (0 for unary Echo).
+  uint64 seq = 2;
+}
+
+message EchoStreamRequest {
+  // How many bytes each EchoResponse payload should contain.
+  uint32 payload_size = 1;
+  // How many EchoResponses to send before closing the stream.
+  uint32 count = 2;
+}

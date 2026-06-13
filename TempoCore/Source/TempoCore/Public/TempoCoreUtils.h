@@ -39,6 +39,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category="TempoCoreUtils")
 	static FBox GetActorLocalBounds(const AActor* Actor, bool bIncludeHiddenComponents);
 
+	// Returns the default Unix-domain-socket path the Tempo gRPC server listens on for the given
+	// port, e.g. "/tmp/tempo-10001.sock" on POSIX or "<LocalAppData>\Temp\tempo-10001.sock" on
+	// Windows. The path is port-keyed so multiple sims on one host don't collide. Clients that
+	// haven't been given an explicit TCP address derive the same path and connect over UDS.
+	static FString GetDefaultUnixSocketPath(int32 Port);
+
 	// Returns a stable, round-trippable name for an actor, suitable for handing to an external
 	// client and using later to look the same actor back up (e.g. via GetActorWithName).
 	//
