@@ -63,23 +63,46 @@ message PawnMoveToLocationResponse {
   MoveToResult result = 1;
 }
 
-// One point of a spline trajectory.
+// One geometry point of a spline trajectory. Timing is specified separately (see the speed
+// oneof in ConfigureTrajectoryRequest), not per point.
 message SplineTrajectoryPoint {
   // World-frame location of the spline point, in meters.
   TempoCore.Vector location = 1;
   // World-frame, un-normalized tangent at the point, in meters. Sets both the arrive
   // and leave tangent (a longer tangent makes the curve bow out further near the point).
   TempoCore.Vector tangent = 2;
-  // Time, in seconds relative to the trajectory's start, at which the path reaches this
-  // point. Used by curve-based trajectories; ignored by constant-speed trajectories.
-  float time = 3;
+}
+
+// One key of a time-parameterized curve. The meaning of `value` depends on which curve it
+// belongs to (a spline input key, a distance in meters, or a speed in meters/second).
+message TrajectoryCurveKey {
+  // Time, in seconds relative to the trajectory's start.
+  float time = 1;
+  // Curve value at this time.
+  float value = 2;
+}
+
+// A piecewise curve mapping trajectory time to some value, defined by its keys (in time order).
+message TrajectoryCurve {
+  repeated TrajectoryCurveKey keys = 1;
 }
 
 message ConfigureTrajectoryRequest {
   // Identifier of the SplineTrajectory actor to configure.
   string trajectory = 1;
-  // Ordered points defining the path. At least two are required.
+  // Ordered points defining the path geometry. At least two are required.
   repeated SplineTrajectoryPoint points = 2;
+  // How trajectory time maps onto the path geometry. Exactly one must be set.
+  oneof speed {
+    // Traverse the spline at a fixed speed, in meters/second.
+    float constant_speed = 3;
+    // Map time to a spline input key (point index); value is the input key.
+    TrajectoryCurve spline_point_vs_time = 4;
+    // Map time to distance along the spline; value is the distance, in meters.
+    TrajectoryCurve distance_vs_time = 5;
+    // Map time to speed along the spline; value is the speed, in meters/second.
+    TrajectoryCurve speed_vs_time = 6;
+  }
 }
 
 service MovementControlService {

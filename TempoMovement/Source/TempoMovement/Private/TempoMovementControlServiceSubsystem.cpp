@@ -5,7 +5,6 @@
 #include "TempoMovement/MovementControlService.grpc.pb.h"
 #include "TempoMovement.h"
 #include "TempoMovementController.h"
-#include "CurveSplineTrajectory.h"
 #include "SplineTrajectory.h"
 
 #include "TempoConversion.h"
@@ -100,6 +99,21 @@ namespace
 			}
 		}
 		return nullptr;
+	}
+
+	// Build an FRuntimeFloatCurve from a proto TrajectoryCurve. Times are seconds (unscaled);
+	// values are scaled into Unreal-native units (ValueScale: 1 for a spline input key, 100 for
+	// meters -> cm or m/s -> cm/s).
+	FRuntimeFloatCurve BuildCurve(const TempoMovement::TrajectoryCurve& ProtoCurve, float ValueScale)
+	{
+		FRuntimeFloatCurve Curve;
+		FRichCurve* RichCurve = Curve.GetRichCurve();
+		for (int32 KeyIndex = 0; KeyIndex < ProtoCurve.keys_size(); ++KeyIndex)
+		{
+			const TempoMovement::TrajectoryCurveKey& Key = ProtoCurve.keys(KeyIndex);
+			RichCurve->AddKey(Key.time(), Key.value() * ValueScale);
+		}
+		return Curve;
 	}
 }
 
@@ -404,16 +418,30 @@ void UTempoMovementControlServiceSubsystem::ConfigureTrajectory(const ConfigureT
 	}
 	Spline->UpdateSpline();
 
-	// Curve trajectories also need the time -> spline input key (point index) mapping.
-	if (ACurveSplineTrajectory* CurveTrajectory = Cast<ACurveSplineTrajectory>(Trajectory))
+	// Apply the speed model. Distances/speeds arrive in SI and convert to Unreal-native cm.
+	constexpr float M2CMScale = 100.0f;
+	switch (Request.speed_case())
 	{
-		FRuntimeFloatCurve TimeToInputKey;
-		FRichCurve* RichCurve = TimeToInputKey.GetRichCurve();
-		for (int32 PointIndex = 0; PointIndex < Request.points_size(); ++PointIndex)
-		{
-			RichCurve->AddKey(Request.points(PointIndex).time(), static_cast<float>(PointIndex));
-		}
-		CurveTrajectory->SetTimeToInputKeyCurve(TimeToInputKey);
+	case ConfigureTrajectoryRequest::kConstantSpeed:
+		Trajectory->SetSpeedMode(ESplineTrajectorySpeedMode::ConstantSpeed);
+		Trajectory->SetConstantSpeed(Request.constant_speed() * M2CMScale);
+		break;
+	case ConfigureTrajectoryRequest::kSplinePointVsTime:
+		Trajectory->SetSpeedMode(ESplineTrajectorySpeedMode::SplinePointVsTime);
+		Trajectory->SetTimeToInputKeyCurve(BuildCurve(Request.spline_point_vs_time(), 1.0f));
+		break;
+	case ConfigureTrajectoryRequest::kDistanceVsTime:
+		Trajectory->SetSpeedMode(ESplineTrajectorySpeedMode::DistanceVsTime);
+		Trajectory->SetTimeToDistanceCurve(BuildCurve(Request.distance_vs_time(), M2CMScale));
+		break;
+	case ConfigureTrajectoryRequest::kSpeedVsTime:
+		Trajectory->SetSpeedMode(ESplineTrajectorySpeedMode::SpeedVsTime);
+		Trajectory->SetTimeToSpeedCurve(BuildCurve(Request.speed_vs_time(), M2CMScale));
+		break;
+	case ConfigureTrajectoryRequest::SPEED_NOT_SET:
+	default:
+		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "A trajectory requires a speed (constant_speed, spline_point_vs_time, distance_vs_time, or speed_vs_time)"));
+		return;
 	}
 
 	ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status_OK);
