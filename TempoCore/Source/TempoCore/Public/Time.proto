@@ -32,6 +32,12 @@ message GetSimTimeResponse {
 }
 
 service TimeService {
+  // Switching to FIXED_STEP from an arbitrary sim time snaps onto the step grid: the
+  // first Step/AdvanceSteps after the switch advances only by the partial amount needed
+  // to reach the next multiple of 1/sim_steps_per_second, not a full step. Every step
+  // after that advances by exactly 1/sim_steps_per_second. If you need the first step to
+  // be a full step (e.g. for deterministic timing assertions), take one throwaway step
+  // right after switching to align sim time to the grid.
   rpc SetTimeMode(TimeModeRequest) returns (TempoCore.Empty);
 
   rpc SetSimStepsPerSecond(SetSimStepsPerSecondRequest) returns (TempoCore.Empty);
