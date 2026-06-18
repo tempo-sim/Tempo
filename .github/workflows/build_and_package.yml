@@ -432,7 +432,6 @@ jobs:
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Editor/EditorScriptingUtilities:/home/ue4/UnrealEngine/Engine/Plugins/Editor/EditorScriptingUtilities
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/ComputeFramework:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/ComputeFramework
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/AI/MassCrowd:/home/ue4/UnrealEngine/Engine/Plugins/AI/MassCrowd
-          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/MassEntity:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/MassEntity
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/StateTree:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/StateTree
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs/UnrealBuildTool:/home/ue4/UnrealEngine/Engine/Source/Programs/UnrealBuildTool
           -v ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs/AutomationTool:/home/ue4/UnrealEngine/Engine/Source/Programs/AutomationTool
@@ -443,7 +442,14 @@ jobs:
         if [ "${{ steps.pull_modded.outputs.used }}" = "true" ]; then
           echo "ENGINE_MODS_MOUNTS=" >> $GITHUB_ENV
         else
-          echo "ENGINE_MODS_MOUNTS=$FALLBACK_MOUNTS" >> $GITHUB_ENV
+          MOUNTS="$FALLBACK_MOUNTS"
+          # MassEntity was a standalone plugin through 5.7; in 5.8 it became an engine runtime module
+          # with no plugin folder to mount. Only mount it for versions where it is a plugin.
+          MINOR="${UNREAL_VERSION#*.}"
+          if [ "${UNREAL_VERSION%%.*}" = "5" ] && [ "$MINOR" -lt 8 ]; then
+            MOUNTS="$MOUNTS -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/MassEntity:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/MassEntity"
+          fi
+          echo "ENGINE_MODS_MOUNTS=$MOUNTS" >> $GITHUB_ENV
         fi
     - name: Log in to Epic Container Registry
       if: ${{ steps.pull_modded.outputs.used != 'true' }}
@@ -471,7 +477,12 @@ jobs:
         docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Plugins/Editor/EditorScriptingUtilities ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Editor
         docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/ComputeFramework ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime
         docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Plugins/AI/MassCrowd ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/AI
-        docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/MassEntity ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime
+        # MassEntity was a standalone plugin through 5.7; in 5.8 it became an engine runtime module
+        # (Engine/Source/Runtime/MassEntity), built into the engine image, with no plugin folder to cache.
+        MINOR="${UNREAL_VERSION#*.}"
+        if [ "${UNREAL_VERSION%%.*}" = "5" ] && [ "$MINOR" -lt 8 ]; then
+          docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/MassEntity ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime
+        fi
         docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/StateTree ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime
         docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Source/Programs/UnrealBuildTool ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs
         docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Source/Programs/AutomationTool ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs
