@@ -884,6 +884,11 @@ void UTempoLidar::RenderCapture()
 		return;
 	}
 
+	// Like the camera, the lidar renders its tiles via RenderTiles' own FSceneRenderer and never
+	// calls UpdateSceneCaptureContents, so expand FRayTracingScene's readback rings here before
+	// rendering or the engine-default ring of 4 overruns once several sensors capture per frame.
+	EnsureRayTracingReadbackBuffersExpanded(Scene);
+
 	// Per-tile view origin (shared across tiles) — the lidar's world location.
 	const FTransform LidarWorld = GetComponentToWorld();
 	const FVector ViewLocation = LidarWorld.GetTranslation();
