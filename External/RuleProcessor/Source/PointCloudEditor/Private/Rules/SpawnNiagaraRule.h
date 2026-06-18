@@ -53,8 +53,11 @@ public:
 	FString MetadataKey = PointCloudAssetHelpers::GetUnrealAssetMetadataKey();
 	
 	/** DataLayers the generated actors will belong to.*/
+	// FActorDataLayer was deprecated in 5.8 but retained for the lifetime of UE5 for data compatibility.
+	PRAGMA_DISABLE_DEPRECATION_WARNINGS
 	UPROPERTY(EditAnywhere, AdvancedDisplay, Category = DataLayers)
 	TArray<FActorDataLayer> DataLayers;
+	PRAGMA_ENABLE_DEPRECATION_WARNINGS
 };
   
 UCLASS(BlueprintType, hidecategories = (Object))

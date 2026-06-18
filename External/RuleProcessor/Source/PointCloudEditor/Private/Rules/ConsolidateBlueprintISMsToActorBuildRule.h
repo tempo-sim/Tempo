@@ -5,7 +5,12 @@
 #include "PointCloud.h"
 #include "PointCloudSliceAndDiceRuleFactory.h"
 #include "GameFramework/Actor.h"
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8
+// ActorDataLayer.h was fully deprecated in 5.8; FActorDataLayer now lives in DeprecatedDataLayer.h.
+#include "WorldPartition/DataLayer/Deprecated/DeprecatedDataLayer.h"
+#else
 #include "WorldPartition/DataLayer/ActorDataLayer.h"
+#endif
 
 #include "ConsolidateBlueprintISMsToActorBuildRule.generated.h"
 
@@ -36,8 +41,11 @@ public:
 	FString ActorMetadataKey;
 		
 	/** DataLayers the generated actors will belong to.*/
+	// FActorDataLayer was deprecated in 5.8 but retained for the lifetime of UE5 for data compatibility.
+	PRAGMA_DISABLE_DEPRECATION_WARNINGS
 	UPROPERTY(EditAnywhere, AdvancedDisplay, Category = DataLayers)
 	TArray<FActorDataLayer> DataLayers;
+	PRAGMA_ENABLE_DEPRECATION_WARNINGS
 };
   
 UCLASS(BlueprintType, hidecategories = (Object))

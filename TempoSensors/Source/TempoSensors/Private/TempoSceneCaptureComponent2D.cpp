@@ -464,7 +464,12 @@ void UTempoSceneCaptureComponent2D::AllocateStagingTextures(int32 SizeX, int32 S
 
 				{
 					FScopeLock StagingTexturesLock(Context.StagingTexturesMutex);
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8
+					// RHICreateTexture with an implied immediate command list was deprecated in 5.8.
+					(*Context.StagingTextures)[I] = RHICmdList.CreateTexture(Desc);
+#else
 					(*Context.StagingTextures)[I] = RHICreateTexture(Desc);
+#endif
 				}
 			}
 		});

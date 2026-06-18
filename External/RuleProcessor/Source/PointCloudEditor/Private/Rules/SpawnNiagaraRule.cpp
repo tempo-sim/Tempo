@@ -12,7 +12,12 @@
 #include "NiagaraFunctionLibrary.h"
 #include "NiagaraSystem.h"
 #include "NiagaraComponent.h"
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8
+// DataLayer.h was fully deprecated in 5.8; FActorDataLayer now lives in DeprecatedDataLayer.h.
+#include "WorldPartition/DataLayer/Deprecated/DeprecatedDataLayer.h"
+#else
 #include "WorldPartition/DataLayer/DataLayer.h"
+#endif
 #include "DataLayer/DataLayerEditorSubsystem.h"
 
 #define LOCTEXT_NAMESPACE "RuleProcessorSpawnBlueprintRule"
@@ -213,6 +218,8 @@ bool FSpawnNiagaraRuleInstance::Execute(FSliceAndDiceExecutionContextPtr Context
 
 	if (DataLayerEditorSubsystem && Data.DataLayers.Num() > 0)
 	{
+		// FActorDataLayer was deprecated in 5.8 but retained for the lifetime of UE5 for data compatibility.
+		PRAGMA_DISABLE_DEPRECATION_WARNINGS
 		for (const FActorDataLayer& DataLayerInfo : Data.DataLayers)
 		{
 			if (UDataLayerInstance* DataLayer = DataLayerEditorSubsystem->GetDataLayerInstance(DataLayerInfo.Name))
@@ -220,6 +227,7 @@ bool FSpawnNiagaraRuleInstance::Execute(FSliceAndDiceExecutionContextPtr Context
 				DataLayers.Emplace(DataLayer);
 			}
 		}
+		PRAGMA_ENABLE_DEPRECATION_WARNINGS
 
 		if (DataLayers.Num() != Data.DataLayers.Num())
 		{

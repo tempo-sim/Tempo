@@ -15,7 +15,12 @@
 #include "UObject/UObjectGlobals.h"
 #include "DrawDebugHelpers.h"
 #include "ZoneGraphSubsystem.h"
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8
+// DataLayer.h was fully deprecated in 5.8; the types used here now live in DataLayerInstance.h.
+#include "WorldPartition/DataLayer/DataLayerInstance.h"
+#else
 #include "WorldPartition/DataLayer/DataLayer.h"
+#endif
 
 
 typedef TArray<uint32> FPointZoneLaneProfileIndex_to_UniquePerPointLaneProfileIndex;
