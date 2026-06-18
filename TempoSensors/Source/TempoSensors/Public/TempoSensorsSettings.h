@@ -172,9 +172,13 @@ private:
 	UPROPERTY(EditAnywhere, Config, Category="Advanced")
 	bool bEnableRayTracingSceneReadbackBuffersOverrunWorkaround = true;
 
-	// The size of buffer to use as an override in FRayTracingScene, if enabled.
+	// The size of the FRayTracingScene readback rings (StatsReadback/FeedbackReadback) to use as an
+	// override, if enabled. Each ray-tracing scene render advances the ring by one and reuses a slot
+	// MaxReadbackBuffers later without checking that the prior copy completed; reusing an in-flight
+	// slot trips an assert in FRHIGPUBufferReadback::EnqueueCopy. So this must exceed the number of
+	// ray-tracing scene renders in flight: (RT renders per frame) x (GPU frames in flight + margin).
 	UPROPERTY(EditAnywhere, Config, Category="Advanced", meta=(EditCondition=bEnableRayTracingSceneReadbackBuffersOverrunWorkaround))
-	uint32 RayTracingSceneMaxReadbackBuffersOverride = 40;
+	uint32 RayTracingSceneMaxReadbackBuffersOverride = 128;
 
 	// When true, FixedStep mode allows the game thread to advance without waiting for sensor
 	// readback to complete. Sensor images may arrive 1-2 frames late, but throughput increases
