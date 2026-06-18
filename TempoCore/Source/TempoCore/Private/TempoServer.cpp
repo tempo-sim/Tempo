@@ -19,7 +19,11 @@
 
 FTempoServer::FTempoServer()
 {
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8
+	OnPostEngineInitHandle = FCoreDelegates::GetOnPostEngineInit().AddRaw(this, &FTempoServer::Initialize);
+#else
 	OnPostEngineInitHandle = FCoreDelegates::OnPostEngineInit.AddRaw(this, &FTempoServer::Initialize);
+#endif
 	OnPostWorldInitializationHandle = FWorldDelegates::OnPostWorldInitialization.AddLambda(
 	[this](UWorld* World, const UWorld::InitializationValues)
 	{
