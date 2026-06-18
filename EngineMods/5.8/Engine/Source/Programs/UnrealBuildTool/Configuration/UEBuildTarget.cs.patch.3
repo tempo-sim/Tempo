@@ -1,0 +1,13 @@
+--- Configuration/UEBuildTarget.cs
++++ UEBuildTarget.cs
+@@ -3803,6 +3803,10 @@
+ 				return true;
+ 			}
+ 			if (PluginModuleName == "PCG" || PluginModuleName == "PCGEditor")
++			{
++				return true;
++			}
++			if (PluginModuleName == "MassCrowd")
+ 			{
+ 				return true;
+ 			}

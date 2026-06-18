@@ -1,0 +1,15 @@
+--- EpicGames.Perforce.csproj	2025-06-12 00:33:19
++++ EpicGames.Perforce.csproj	2025-06-23 12:04:03
+@@ -69,10 +69,10 @@
+     <None Include="..\..\..\..\Binaries\ThirdParty\AppLocalDependencies\Win64\Microsoft.VC.CRT\VCRUNTIME140_1.dll" Visible="false" Condition="Exists('..\..\..\..\Binaries\ThirdParty\AppLocalDependencies\Win64\Microsoft.VC.CRT\VCRUNTIME140_1.dll')">
+       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+     </None>
+-    <None Include="..\..\..\..\Binaries\DotNET\EpicGames.Perforce.Native\linux-x64\Release\EpicGames.Perforce.Native.so" Visible="false">
++    <None Include="..\..\..\..\Binaries\DotNET\EpicGames.Perforce.Native\linux-x64\Release\EpicGames.Perforce.Native.so" Visible="false" Condition="Exists('..\..\..\..\Binaries\DotNET\EpicGames.Perforce.Native\linux-x64\Release\EpicGames.Perforce.Native.so')">
+       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+     </None>
+-    <None Include="..\..\..\..\Binaries\DotNET\EpicGames.Perforce.Native\mac-x64\Release\EpicGames.Perforce.Native.dylib" Visible="false">
++    <None Include="..\..\..\..\Binaries\DotNET\EpicGames.Perforce.Native\mac-x64\Release\EpicGames.Perforce.Native.dylib" Visible="false" Condition="Exists('..\..\..\..\Binaries\DotNET\EpicGames.Perforce.Native\mac-x64\Release\EpicGames.Perforce.Native.dylib')">
+       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+     </None>
+   </ItemGroup>

@@ -1,0 +1,13 @@
+--- Configuration/UEBuildTarget.cs
++++ UEBuildTarget.cs
+@@ -3295,6 +3295,10 @@
+ 				return true;
+ 			}
+ 			if (PluginModuleName == "ZoneGraph" || PluginModuleName == "ZoneGraphDebug")
++			{
++				return true;
++			}
++			if (PluginModuleName == "PCG" || PluginModuleName == "PCGEditor")
+ 			{
+ 				return true;
+ 			}

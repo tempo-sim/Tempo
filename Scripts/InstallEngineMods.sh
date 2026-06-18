@@ -219,11 +219,16 @@ REBUILD_UBT() {
   # Copy the resulting built dlls to all locations under the binaries folder.
   # In UE 5.7+, AutomationTool and its sub-projects each get their own copy of
   # UnrealBuildTool.dll, so we need to update all of them.
-  if [ -f "$UNREAL_ENGINE_PATH/Engine/Source/Programs/UnrealBuildTool/bin/Development/UnrealBuildTool.dll" ]; then
-    find "$UNREAL_ENGINE_PATH/Engine/Binaries/DotNET" -name "UnrealBuildTool.dll" -type f -exec cp "$UNREAL_ENGINE_PATH/Engine/Source/Programs/UnrealBuildTool/bin/Development/UnrealBuildTool.dll" {} \;
+  # The build output may be directly under bin/Development (UE <= 5.7) or under a
+  # target-framework subfolder like bin/Development/net10.0 (UE 5.8+ uses .NET 10),
+  # so locate it rather than assuming a fixed path.
+  SRC_UBT_DLL=$(find "$UNREAL_ENGINE_PATH/Engine/Source/Programs/UnrealBuildTool/bin/Development" -name "UnrealBuildTool.dll" -type f | head -1)
+  if [ -n "$SRC_UBT_DLL" ]; then
+    find "$UNREAL_ENGINE_PATH/Engine/Binaries/DotNET" -name "UnrealBuildTool.dll" -type f -exec cp "$SRC_UBT_DLL" {} \;
   fi
-  if [ -f "$UNREAL_ENGINE_PATH/Engine/Source/Programs/AutomationTool/bin/Development/AutomationTool.dll" ]; then
-    find "$UNREAL_ENGINE_PATH/Engine/Binaries/DotNET" -name "AutomationTool.dll" -type f -exec cp "$UNREAL_ENGINE_PATH/Engine/Source/Programs/AutomationTool/bin/Development/AutomationTool.dll" {} \;
+  SRC_AT_DLL=$(find "$UNREAL_ENGINE_PATH/Engine/Source/Programs/AutomationTool/bin/Development" -name "AutomationTool.dll" -type f | head -1)
+  if [ -n "$SRC_AT_DLL" ]; then
+    find "$UNREAL_ENGINE_PATH/Engine/Binaries/DotNET" -name "AutomationTool.dll" -type f -exec cp "$SRC_AT_DLL" {} \;
   fi
 
   echo -e "\nSuccessfully rebuilt UnrealBuildTool with Tempo mods\n"

@@ -55,8 +55,8 @@ on:
         default: ubuntu-22.04
       unreal_version:
         type: string
-        description: Which Unreal version to build for (5.6, and 5.7 are supported)
-        default: 5.7
+        description: Which Unreal version to build for (5.6, 5.7, and 5.8 are supported)
+        default: 5.8
       project_root:
         type: string
         description: Root of your project's repo
@@ -192,9 +192,9 @@ jobs:
             ;;
         esac
         case "${{ inputs.unreal_version }}" in
-          "5.6"|"5.7") ;;
+          "5.6"|"5.7"|"5.8") ;;
           *)
-            echo "Error: Invalid Unreal Version. Only 5.6, and 5.7 are supported."
+            echo "Error: Invalid Unreal Version. Only 5.6, 5.7, and 5.8 are supported."
             exit 1
             ;;
         esac

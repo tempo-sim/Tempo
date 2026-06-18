@@ -244,7 +244,15 @@ bool FSpawnBlueprintsBuildRuleInstance::Execute(FSliceAndDiceExecutionContextPtr
 
 			if (Data.bUseLightweightInstancing)
 			{
+				// UE 5.8 renamed this Blueprint function library with a DEPRECATED_ prefix. A direct call
+				// (rather than a type alias) avoids colliding with the stray `friend class
+				// ULightWeightInstanceBlueprintFunctionLibrary` forward-declaration the engine still
+				// carries in LightWeightInstanceManager.h.
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8
+				ActorHandle = UDEPRECATED_LightWeightInstanceBlueprintFunctionLibrary::CreateNewLightWeightInstance(SpawnClass, Position, DataLayers.Num() > 0 ? DataLayers[0] : nullptr, Data.World);
+#else
 				ActorHandle = ULightWeightInstanceBlueprintFunctionLibrary::CreateNewLightWeightInstance(SpawnClass, Position, DataLayers.Num() > 0 ? DataLayers[0] : nullptr, Data.World);
+#endif
 			}
 			else
 			{
