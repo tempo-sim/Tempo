@@ -445,6 +445,9 @@ protected:
 	// render thread.
 	int32 CapturedVideoSequenceId = INDEX_NONE;
 
+	// Last CapturedVideoSequenceId encoded for video; drives the per-capture dedup in OnRenderCompleted.
+	int32 LastEncodedVideoSequenceId = INDEX_NONE;
+
 	// Tile slots (fixed size: TL, TR, BL, BR). Stable storage — indices are never invalidated
 	// and held addresses remain valid across reconfigures. Transient: runtime-only state.
 	UPROPERTY(Transient)
