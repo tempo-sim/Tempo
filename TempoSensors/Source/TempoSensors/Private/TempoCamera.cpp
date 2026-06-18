@@ -896,6 +896,13 @@ void UTempoCamera::RenderCapture()
 		return;
 	}
 
+	// The multi-view tile path below renders via its own FSceneRenderer and never calls
+	// UpdateSceneCaptureContents, so it must expand FRayTracingScene's readback rings itself. This
+	// has to happen before RenderTiles enqueues its scene render: a ray-tracing render that runs
+	// against the engine-default ring of 4 overruns immediately once several sensors capture per
+	// frame. The call is idempotent and persistent, so the first camera each frame covers the rest.
+	EnsureRayTracingReadbackBuffersExpanded(Scene);
+
 	int32 NumActiveTiles = 0;
 	for (const FTempoCameraTile& Tile : Tiles)
 	{

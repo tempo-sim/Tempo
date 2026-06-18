@@ -335,6 +335,15 @@ public:
 	virtual void UpdateSceneCaptureContents(FSceneInterface* Scene, ISceneRenderBuilder& SceneRenderBuilder) override;
 #endif
 
+	// Expand FRayTracingScene's fixed-size readback rings on the render thread to work around the
+	// engine's buffer overrun (see definition for detail). Idempotent and persistent for the FScene's
+	// lifetime, so it's safe — and necessary — to call before *any* ray-tracing scene render this
+	// component issues. The standard capture path calls it from UpdateSceneCaptureContents, but
+	// components that render via a custom FSceneRenderer (e.g. the camera's multi-view tile path,
+	// which bypasses UpdateSceneCaptureContents entirely) must call it themselves before rendering,
+	// or the ring stays at the engine default of 4 and overruns immediately under many sensors.
+	static void EnsureRayTracingReadbackBuffersExpanded(FSceneInterface* Scene);
+
 protected:
 	// Derived components must override this to return whether they have pending requests.
 	virtual bool HasPendingRequests() const PURE_VIRTUAL(UTempoSceneCaptureComponent2D::HasPendingRequests, return false; );

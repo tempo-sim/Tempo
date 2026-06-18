@@ -99,14 +99,6 @@ void UTempoSceneCaptureComponent2D::Deactivate()
 	}
 }
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-void UTempoSceneCaptureComponent2D::UpdateSceneCaptureContents(FSceneInterface* Scene)
-#else
-void UTempoSceneCaptureComponent2D::UpdateSceneCaptureContents(FSceneInterface* Scene, ISceneRenderBuilder& SceneRenderBuilder)
-#endif
-{
-	TextureInitFence.Wait();
-
 // FRayTracingScene's StatsReadback / FeedbackReadback are fixed-size rings (MaxReadbackBuffers, 4
 // by default). The main viewport doesn't overrun them, but running many scene captures per frame
 // does — FinishTracingFeedback in particular writes unconditionally without checking
@@ -114,10 +106,21 @@ void UTempoSceneCaptureComponent2D::UpdateSceneCaptureContents(FSceneInterface* 
 // overwritten and EnqueueCopy / Lock later trips. Expand the rings to a configurable size.
 //
 // All FRayTracingScene state lives on the render thread; the expansion must happen there too. We
-// enqueue a render command rather than mutating from the game thread. The hack is idempotent —
-// repeated calls early-return once the rings are already at the target size, so issuing it from
-// every TempoSceneCaptureComponent2D's UpdateSceneCaptureContents is fine.
+// enqueue a render command rather than mutating from the game thread. The change persists for the
+// FScene's lifetime and the hack is idempotent — repeated calls early-return once the rings are
+// already at the target size. It MUST run before any ray-tracing scene render this frame: the
+// engine indexes the ring with the FScene's (now-expanded) MaxReadbackBuffers, so a render that
+// slips in before the expansion runs against the default ring of 4 and overruns immediately. The
+// camera's multi-view tile path renders via its own FSceneRenderer and never reaches
+// UpdateSceneCaptureContents, so it calls this directly from RenderCapture before RenderTiles.
+void UTempoSceneCaptureComponent2D::EnsureRayTracingReadbackBuffersExpanded(FSceneInterface* Scene)
+{
 #if RHI_RAYTRACING && ENGINE_MAJOR_VERSION == 5 && ((ENGINE_MINOR_VERSION == 5 && STATS) || ENGINE_MINOR_VERSION > 5)
+	if (!Scene)
+	{
+		return;
+	}
+
 	const UTempoSensorsSettings* TempoSensorsSettings = GetDefault<UTempoSensorsSettings>();
 	if (TempoSensorsSettings && TempoSensorsSettings->GetRayTracingSceneReadbackBuffersOverrunWorkaroundEnabled())
 	{
@@ -176,6 +179,17 @@ void UTempoSceneCaptureComponent2D::UpdateSceneCaptureContents(FSceneInterface* 
 			});
 	}
 #endif
+}
+
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+void UTempoSceneCaptureComponent2D::UpdateSceneCaptureContents(FSceneInterface* Scene)
+#else
+void UTempoSceneCaptureComponent2D::UpdateSceneCaptureContents(FSceneInterface* Scene, ISceneRenderBuilder& SceneRenderBuilder)
+#endif
+{
+	TextureInitFence.Wait();
+
+	EnsureRayTracingReadbackBuffersExpanded(Scene);
 
 	if (!TextureTarget)
 	{
