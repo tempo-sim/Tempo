@@ -438,6 +438,13 @@ protected:
 	// camera doesn't know its resolution until SharedFinalTextureTarget is allocated.
 	bool bVideoEncoderConfigured = false;
 
+	// SequenceId of the capture currently resident in SharedFinalTextureTarget. Published by
+	// RenderCapture via a render command queued behind the RT draws, so OnRenderCompleted can read it
+	// render-thread-locally instead of the game-thread SequenceId (a cross-thread read that, under
+	// game/render pipelining, can name a capture not yet rendered into the RT). Touched only on the
+	// render thread.
+	int32 CapturedVideoSequenceId = INDEX_NONE;
+
 	// Tile slots (fixed size: TL, TR, BL, BR). Stable storage — indices are never invalidated
 	// and held addresses remain valid across reconfigures. Transient: runtime-only state.
 	UPROPERTY(Transient)
