@@ -557,8 +557,12 @@ void UTempoCamera::OnRenderCompleted()
 		return;
 	}
 
-	// Stamp packets with the just-rendered frame's id (RenderCapture already incremented past it).
-	const int32 EncodedSequenceId = FMath::Max(0, SequenceId - 1);
+	// Stamp packets with the captured frame's id. CapturedVideoSequenceId is the id of the frame
+	// currently in SharedFinalTextureTarget, published by RenderCapture on the render thread behind the
+	// RT draws — read here render-thread-locally instead of the game-thread SequenceId, which races and
+	// under pipelining can name a capture not yet rendered. Clamp covers the pre-first-capture
+	// INDEX_NONE.
+	const int32 EncodedSequenceId = FMath::Max(0, CapturedVideoSequenceId);
 	const double CaptureTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
 
 	UTextureRenderTarget2D* RTCapture = RT;
@@ -1333,6 +1337,17 @@ void UTempoCamera::RenderCapture()
 
 			NewRead->RenderFence = RHICreateGPUFence(TEXT("TempoCameraRenderFence"));
 			RHICmdList.WriteGPUFence(NewRead->RenderFence);
+		});
+
+	// Publish the captured frame's id to the render thread for the video encoder. Queued behind the
+	// RT draws above, so by the time it runs SharedFinalTextureTarget holds this capture and
+	// OnRenderCompleted (also on the render thread) reads CapturedVideoSequenceId coherently — instead
+	// of the game-thread SequenceId, which races and could name a capture not yet rendered.
+	const int32 CapturedVideoSequenceIdThisFrame = SequenceId - 1;
+	ENQUEUE_RENDER_COMMAND(TempoCameraPublishVideoSequenceId)(
+		[this, CapturedVideoSequenceIdThisFrame](FRHICommandListImmediate&)
+		{
+			CapturedVideoSequenceId = CapturedVideoSequenceIdThisFrame;
 		});
 
 	// Pop: restore the prior CVar value. The propagation render command queued by Set() on
