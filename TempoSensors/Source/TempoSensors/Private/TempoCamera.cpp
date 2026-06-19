@@ -557,6 +557,15 @@ void UTempoCamera::OnRenderCompleted()
 		return;
 	}
 
+	// Encode each captured frame once: OnRenderCompleted fires every render frame but captures happen
+	// at RateHz, so re-encoding the same CapturedVideoSequenceId would emit duplicates and drive the
+	// RateHz-sized bitrate/GOP too fast. After Configure, so a failed reconfigure isn't counted.
+	if (CapturedVideoSequenceId == LastEncodedVideoSequenceId)
+	{
+		return;
+	}
+	LastEncodedVideoSequenceId = CapturedVideoSequenceId;
+
 	// Stamp packets with the captured frame's id. CapturedVideoSequenceId is the id of the frame
 	// currently in SharedFinalTextureTarget, published by RenderCapture on the render thread behind the
 	// RT draws — read here render-thread-locally instead of the game-thread SequenceId, which races and
