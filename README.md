@@ -13,7 +13,7 @@ Tempo is for building your *own* robotics simulator on modern Unreal Engine and 
 
 | Key feature | What it means for your simulator |
 |---|---|
-| **Modern Unreal + ecosystem**                | Runs on UE 5.6 / 5.7 - Lumen, Nanite, PCG, Niagara, MetaHuman, Chaos, and the huge library of real-time content the engine community ships, all for free.                                                                                                                                       |
+| **Modern Unreal + ecosystem**                | Runs on UE 5.6 / 5.7 / 5.8 - Lumen, Nanite, PCG, Niagara, MetaHuman, Chaos, and the huge library of real-time content the engine community ships, all for free.                                                                                                                                       |
 | **gRPC API, no ROS required**                | The primary interface is [gRPC](https://grpc.io): language-agnostic, schema-first, with HTTP/2 streaming. Clients connect across machines and platforms (Rust on Linux → sim on a Mac) - a step up from the older msgpack-RPC interfaces some sims use, and not tied to an in-process language. |
 | **Code-generated, reflection-based control** | One set of `.proto` files generates Python / Rust / C++ clients (sync + async). Spawn any actor and get/set *any* property over the wire - no engine code needed.                                                                                                                               |
 | **High-fidelity sensors**                    | Cameras with multiple lens models (incl. wide-FOV fisheye), semantic + instance segmentation, 2D bounding boxes, and hardware H.264 streaming; lidar with per-beam calibration and material-derived reflectivity.                                                                               |
@@ -37,7 +37,7 @@ Tempo is for building your *own* robotics simulator on modern Unreal Engine and 
 
 ## Compatibility
 - Linux (Ubuntu 22.04 and 24.04), MacOS (15.0 or newer, Apple silicon only), Windows 10 and 11
-- Unreal Engine 5.6 and 5.7
+- Unreal Engine 5.6, 5.7, and 5.8
 
 ## Prerequisites
 - Linux:
@@ -148,7 +148,7 @@ jobs:
       packages: write
     strategy:
       matrix:
-        unreal_version: ["5.6", "5.7"]
+        unreal_version: ["5.6", "5.7", "5.8"]
       fail-fast: false
     uses: tempo-sim/Tempo/.github/workflows/publish_engine_mods.yml@main
     with:
