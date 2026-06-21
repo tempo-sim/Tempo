@@ -2,13 +2,15 @@
 
 #include "TempoWorldUtils.h"
 
+#include "TempoCoreUtils.h"
+
 #include "EngineUtils.h"
 
 AActor* GetActorWithName(const UWorld* World, const FString& Name)
 {
 	for (TActorIterator<AActor> ActorIt(World); ActorIt; ++ActorIt)
 	{
-		if (ActorIt->GetActorNameOrLabel().Equals(Name, ESearchCase::IgnoreCase))
+		if (UTempoCoreUtils::GetActorIdentifier(*ActorIt).Equals(Name, ESearchCase::IgnoreCase))
 		{
 			return *ActorIt;
 		}
