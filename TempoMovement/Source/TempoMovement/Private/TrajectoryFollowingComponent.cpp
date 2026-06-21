@@ -2,7 +2,7 @@
 
 #include "TrajectoryFollowingComponent.h"
 
-#include "SplineTrajectory.h"
+#include "SplineActor.h"
 #include "TrajectoryFollowingController.h"
 
 #include "GameFramework/Pawn.h"
@@ -16,7 +16,19 @@ void UTrajectoryFollowingComponent::BeginPlay()
 {
 	Super::BeginPlay();
 
-	if (!Trajectory)
+	StartFollowing();
+}
+
+void UTrajectoryFollowingComponent::ConfigureAndFollow(ASplineActor* InSpline, const FTrajectoryFollowingConfig& InConfig)
+{
+	Spline = InSpline;
+	Config = InConfig;
+	StartFollowing();
+}
+
+void UTrajectoryFollowingComponent::StartFollowing()
+{
+	if (!Spline)
 	{
 		return;
 	}
@@ -24,7 +36,7 @@ void UTrajectoryFollowingComponent::BeginPlay()
 	APawn* OwnerPawn = Cast<APawn>(GetOwner());
 	if (!OwnerPawn)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("UTrajectoryFollowingComponent on %s: owner is not a pawn; cannot follow trajectory."), *GetNameSafe(GetOwner()));
+		UE_LOG(LogTemp, Warning, TEXT("UTrajectoryFollowingComponent on %s: owner is not a pawn; cannot follow spline."), *GetNameSafe(GetOwner()));
 		return;
 	}
 
@@ -33,10 +45,15 @@ void UTrajectoryFollowingComponent::BeginPlay()
 		ControllerClass = ATrajectoryFollowingController::StaticClass();
 	}
 
-	FActorSpawnParameters SpawnParameters;
-	SpawnParameters.Owner = OwnerPawn;
-	if (ATrajectoryFollowingController* Controller = GetWorld()->SpawnActor<ATrajectoryFollowingController>(ControllerClass, SpawnParameters))
+	if (!Controller)
 	{
-		Controller->FollowTrajectory(Trajectory, OwnerPawn, Config);
+		FActorSpawnParameters SpawnParameters;
+		SpawnParameters.Owner = OwnerPawn;
+		Controller = GetWorld()->SpawnActor<ATrajectoryFollowingController>(ControllerClass, SpawnParameters);
+	}
+
+	if (Controller)
+	{
+		Controller->FollowTrajectory(Spline, OwnerPawn, Config);
 	}
 }
