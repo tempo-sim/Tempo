@@ -93,6 +93,16 @@ struct FTrajectoryFollowingConfig
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Trajectory", meta = (EditCondition = "!bTeleport", ClampMin = 0.0))
 	double YawRateGain = 2.0;
 
+	// Position deadband (cm): position/along-track errors within this distance produce no corrective
+	// input, so the pawn coasts on the trajectory feedforward instead of chasing tiny errors. 0 disables.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Trajectory", meta = (EditCondition = "!bTeleport", ClampMin = 0.0))
+	double PositionDeadband = 10.0;
+
+	// Heading deadband (deg) for wheeled vehicles: heading errors to the target point within this angle
+	// produce no yaw-rate command, suppressing steering jitter near the path. 0 disables.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Trajectory", meta = (EditCondition = "!bTeleport", ClampMin = 0.0))
+	double HeadingDeadband = 1.0;
+
 	// What to do when the trajectory's duration is reached.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Trajectory")
 	ETrajectoryEndBehavior EndBehavior = ETrajectoryEndBehavior::Clamp;

@@ -222,6 +222,13 @@ void ATrajectoryFollowingController::Tick(float DeltaSeconds)
 	const FVector AheadLocation = GetTransformAtTime(ElapsedSeconds + Lookahead).GetLocation();
 	const FVector FeedforwardVelocity = (AheadLocation - Target.GetLocation()) / Lookahead;
 
+	// Deadband: errors smaller than the band produce no corrective input, so the pawn coasts on the
+	// feedforward instead of chasing tiny tracking errors. Zeros the error when within the band.
+	const auto ApplyDeadband = [](double Error, double Deadband)
+	{
+		return FMath::Abs(Error) <= Deadband ? 0.0 : Error;
+	};
+
 	// Wheeled vehicles can't strafe: convert the target into a body-frame velocity (forward speed +
 	// yaw rate that turns the vehicle toward the target) and let the vehicle velocity controller
 	// actuate throttle/steer/brake. AddMovementInput is a no-op on a Chaos vehicle.
@@ -234,9 +241,10 @@ void ATrajectoryFollowingController::Tick(float DeltaSeconds)
 		const FVector ToTargetLocal = ControlledPawn->GetActorTransform().InverseTransformVectorNoScale(Target.GetLocation() - CurrentLocation);
 
 		// Trajectory pace plus an along-track correction to catch up to / hang back from the target.
-		const double TargetLinVelCmS = FeedforwardVelocity.Size() + Config.PositionGain * ToTargetLocal.X;
+		const double AlongTrackError = ApplyDeadband(ToTargetLocal.X, Config.PositionDeadband);
+		const double TargetLinVelCmS = FeedforwardVelocity.Size() + Config.PositionGain * AlongTrackError;
 		// Steer toward the target point: heading error in the pawn's frame.
-		const double HeadingErrorDeg = FMath::RadiansToDegrees(FMath::Atan2(ToTargetLocal.Y, ToTargetLocal.X));
+		const double HeadingErrorDeg = ApplyDeadband(FMath::RadiansToDegrees(FMath::Atan2(ToTargetLocal.Y, ToTargetLocal.X)), Config.HeadingDeadband);
 		const double TargetYawRateDegS = Config.YawRateGain * HeadingErrorDeg;
 
 		VehicleVelocityController.TrackBodyVelocity(ControlledPawn, TargetLinVelCmS, TargetYawRateDegS, DeltaSeconds);
@@ -245,7 +253,11 @@ void ATrajectoryFollowingController::Tick(float DeltaSeconds)
 
 	// Other pawns: PD + velocity-feedforward control law, mapped onto AddMovementInput.
 	const FVector CurrentVelocity = ControlledPawn->GetVelocity();
-	const FVector PositionError = Target.GetLocation() - CurrentLocation;
+	FVector PositionError = Target.GetLocation() - CurrentLocation;
+	if (PositionError.Size() <= Config.PositionDeadband)
+	{
+		PositionError = FVector::ZeroVector;
+	}
 	const FVector DesiredVelocity = FeedforwardVelocity + Config.PositionGain * PositionError;
 	const FVector VelocityError = DesiredVelocity - CurrentVelocity;
 
