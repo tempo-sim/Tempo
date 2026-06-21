@@ -184,27 +184,52 @@ def generate_rust_api(module_dirs, tempo_root_dir, project_root_dir, module_owne
 
     # Jinja2 templates for Rust code generation
 
-    # Template for unary RPC (non-streaming)
-    unary_rpc_template = '''
-/// {{ rpc.name }}
-pub async fn {{ name }}_async(
-{%- for field in request.fields %}
+    # Shared signature/body fragments. `sig_fields` are the function parameters (one
+    # per proto field, oneof members typed Option<T>); `plain_fields` become direct
+    # prost struct fields; each `oneof_groups` entry collapses its members into the
+    # single Option<Enum> field prost emits for the oneof.
+    sig_params_fragment = '''
+{%- for field in sig_fields %}
     {{ field.name }}: {{ field.rust_type }},
-{%- endfor %}
-) -> Result<{{ response_rust_type }}, {{ infra }}::TempoError> {
-    let channel = {{ infra }}::context::connected_channel().await?;
-    let mut client = {{ client_type }}::new(channel)
-        .max_decoding_message_size({{ infra }}::context::MAX_MESSAGE_SIZE)
-        .max_encoding_message_size({{ infra }}::context::MAX_MESSAGE_SIZE);
+{%- endfor %}'''
 
-    let request = {{ request_rust_type }} {
-{%- for field in request.fields %}
+    oneof_build_fragment = '''
+{%- for oneof in oneof_groups %}
+    let {{ oneof.name }} = {% for variant in oneof.variants %}if let Some(value) = {{ variant.param }} {
+        Some({{ oneof.enum_path }}::{{ variant.variant }}(value))
+    } else {% endfor %}{
+        None
+    };
+{%- endfor %}'''
+
+    struct_init_fragment = '''
+{%- for field in plain_fields %}
 {%- if field.needs_option_wrap %}
         {{ field.name }}: Some({{ field.name }}),
 {%- else %}
         {{ field.name }},
 {%- endif %}
 {%- endfor %}
+{%- for oneof in oneof_groups %}
+        {{ oneof.name }},
+{%- endfor %}'''
+
+    call_args_fragment = '''
+{%- for field in sig_fields %}
+        {{ field.name }},
+{%- endfor %}'''
+
+    # Template for unary RPC (non-streaming)
+    unary_rpc_template = '''
+/// {{ rpc.name }}
+pub async fn {{ name }}_async(''' + sig_params_fragment + '''
+) -> Result<{{ response_rust_type }}, {{ infra }}::TempoError> {
+    let channel = {{ infra }}::context::connected_channel().await?;
+    let mut client = {{ client_type }}::new(channel)
+        .max_decoding_message_size({{ infra }}::context::MAX_MESSAGE_SIZE)
+        .max_encoding_message_size({{ infra }}::context::MAX_MESSAGE_SIZE);
+''' + oneof_build_fragment + '''
+    let request = {{ request_rust_type }} {''' + struct_init_fragment + '''
     };
 
     let response = client.{{ method_name }}(request).await?;
@@ -212,15 +237,9 @@ pub async fn {{ name }}_async(
 }
 
 /// Synchronous version of {{ name }}
-pub fn {{ name }}(
-{%- for field in request.fields %}
-    {{ field.name }}: {{ field.rust_type }},
-{%- endfor %}
+pub fn {{ name }}(''' + sig_params_fragment + '''
 ) -> Result<{{ response_rust_type }}, {{ infra }}::TempoError> {
-    {{ infra }}::context::RUNTIME.block_on({{ name }}_async(
-{%- for field in request.fields %}
-        {{ field.name }},
-{%- endfor %}
+    {{ infra }}::context::RUNTIME.block_on({{ name }}_async(''' + call_args_fragment + '''
     ))
 }
 
@@ -229,24 +248,14 @@ pub fn {{ name }}(
     # Template for server-streaming RPC
     streaming_rpc_template = '''
 /// {{ rpc.name }} (server streaming)
-pub async fn {{ name }}_async(
-{%- for field in request.fields %}
-    {{ field.name }}: {{ field.rust_type }},
-{%- endfor %}
+pub async fn {{ name }}_async(''' + sig_params_fragment + '''
 ) -> Result<tonic::Streaming<{{ response_rust_type }}>, {{ infra }}::TempoError> {
     let channel = {{ infra }}::context::connected_channel().await?;
     let mut client = {{ client_type }}::new(channel)
         .max_decoding_message_size({{ infra }}::context::MAX_MESSAGE_SIZE)
         .max_encoding_message_size({{ infra }}::context::MAX_MESSAGE_SIZE);
-
-    let request = {{ request_rust_type }} {
-{%- for field in request.fields %}
-{%- if field.needs_option_wrap %}
-        {{ field.name }}: Some({{ field.name }}),
-{%- else %}
-        {{ field.name }},
-{%- endif %}
-{%- endfor %}
+''' + oneof_build_fragment + '''
+    let request = {{ request_rust_type }} {''' + struct_init_fragment + '''
     };
 
     let response = client.{{ method_name }}(request).await?;
@@ -254,15 +263,9 @@ pub async fn {{ name }}_async(
 }
 
 /// Synchronous iterator version of {{ name }}
-pub fn {{ name }}(
-{%- for field in request.fields %}
-    {{ field.name }}: {{ field.rust_type }},
-{%- endfor %}
+pub fn {{ name }}(''' + sig_params_fragment + '''
 ) -> Result<impl Iterator<Item = Result<{{ response_rust_type }}, tonic::Status>>, {{ infra }}::TempoError> {
-    let stream = {{ infra }}::context::RUNTIME.block_on({{ name }}_async(
-{%- for field in request.fields %}
-        {{ field.name }},
-{%- endfor %}
+    let stream = {{ infra }}::context::RUNTIME.block_on({{ name }}_async(''' + call_args_fragment + '''
     ))?;
 
     Ok(SyncStreamIterator::new(stream))
@@ -401,11 +404,42 @@ use {{ infra }}::streaming::SyncStreamIterator;
                         f"{tempo_service_descriptor.object_name}Client",
                     )
 
+                    # Build the function signature, the plain prost struct fields,
+                    # and one collapsed Option<Enum> assignment per oneof. prost emits
+                    # a oneof as a single field named after the oneof; members become
+                    # enum variants, so they're function params (Option<T>) but not
+                    # direct struct fields.
+                    sig_fields = []
+                    plain_fields = []
+                    oneof_groups = {}
+                    request_module_pascal = tempo_request_descriptor.module_name.split(".")[0]
+                    request_msg_snake = pascal_to_snake(tempo_request_descriptor.object_name)
                     for field in tempo_request_descriptor.fields:
                         field.rust_type = get_rust_type(field, owner, module_owners)
                         field.needs_option_wrap = needs_option_wrap(field)
                         if field.label == "repeated":
                             field.rust_type = f"Vec<{field.rust_type}>"
+                        if field.containing_oneof is not None:
+                            sig_fields.append({
+                                "name": field.name,
+                                "rust_type": f"Option<{field.rust_type}>",
+                            })
+                            group = oneof_groups.setdefault(field.containing_oneof, {
+                                "name": field.containing_oneof,
+                                "enum_path": _crate_path(
+                                    owner, request_module_pascal,
+                                    f"{request_msg_snake}::"
+                                    f"{snake_to_upper_camel(field.containing_oneof)}",
+                                ),
+                                "variants": [],
+                            })
+                            group["variants"].append({
+                                "param": field.name,
+                                "variant": snake_to_upper_camel(field.name),
+                            })
+                        else:
+                            sig_fields.append({"name": field.name, "rust_type": field.rust_type})
+                            plain_fields.append(field)
 
                     if rpc_descriptor.server_streaming:
                         has_streaming = True
@@ -418,6 +452,9 @@ use {{ infra }}::streaming::SyncStreamIterator;
                         name=pascal_to_snake(rpc_descriptor.name),
                         rpc=rpc_descriptor,
                         request=tempo_request_descriptor,
+                        sig_fields=sig_fields,
+                        plain_fields=plain_fields,
+                        oneof_groups=list(oneof_groups.values()),
                         response=tempo_response_descriptor,
                         request_rust_type=request_rust_type,
                         response_rust_type=response_rust_type,
