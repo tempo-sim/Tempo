@@ -221,12 +221,13 @@ REBUILD_UBT() {
   # UnrealBuildTool.dll, so we need to update all of them.
   # The build output may be directly under bin/Development (UE <= 5.7) or under a
   # target-framework subfolder like bin/Development/net10.0 (UE 5.8+ uses .NET 10),
-  # so locate it rather than assuming a fixed path.
-  SRC_UBT_DLL=$(find "$UNREAL_ENGINE_PATH/Engine/Source/Programs/UnrealBuildTool/bin/Development" -name "UnrealBuildTool.dll" -type f | head -1)
+  # so locate it rather than assuming a fixed path. Exclude the ref/ subfolder, which
+  # holds a reference-only assembly that cannot be loaded for execution.
+  SRC_UBT_DLL=$(find "$UNREAL_ENGINE_PATH/Engine/Source/Programs/UnrealBuildTool/bin/Development" -name "UnrealBuildTool.dll" -type f -not -path "*/ref/*" | head -1)
   if [ -n "$SRC_UBT_DLL" ]; then
     find "$UNREAL_ENGINE_PATH/Engine/Binaries/DotNET" -name "UnrealBuildTool.dll" -type f -exec cp "$SRC_UBT_DLL" {} \;
   fi
-  SRC_AT_DLL=$(find "$UNREAL_ENGINE_PATH/Engine/Source/Programs/AutomationTool/bin/Development" -name "AutomationTool.dll" -type f | head -1)
+  SRC_AT_DLL=$(find "$UNREAL_ENGINE_PATH/Engine/Source/Programs/AutomationTool/bin/Development" -name "AutomationTool.dll" -type f -not -path "*/ref/*" | head -1)
   if [ -n "$SRC_AT_DLL" ]; then
     find "$UNREAL_ENGINE_PATH/Engine/Binaries/DotNET" -name "AutomationTool.dll" -type f -exec cp "$SRC_AT_DLL" {} \;
   fi
