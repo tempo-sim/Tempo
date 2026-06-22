@@ -32,7 +32,7 @@ on:
       unreal_version:
         type: string
         required: true
-        description: Which Unreal version to publish for (5.6 or 5.7 are supported)
+        description: Which Unreal version to publish for (5.6, 5.7, and 5.8 are supported)
       image_name:
         type: string
         required: true
@@ -116,9 +116,9 @@ jobs:
     - name: Validate Inputs
       run: |
         case "${{ inputs.unreal_version }}" in
-          "5.6"|"5.7") ;;
+          "5.6"|"5.7"|"5.8") ;;
           *)
-            echo "Error: Invalid Unreal Version. Only 5.6 and 5.7 are supported."
+            echo "Error: Invalid Unreal Version. Only 5.6, 5.7, and 5.8 are supported."
             exit 1
             ;;
         esac
