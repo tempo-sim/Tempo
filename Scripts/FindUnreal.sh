@@ -146,7 +146,38 @@ FIND_ENGINE_PATH() {
             return 0
         fi
     fi
-    
+
+    # Fallback: check Windows registry (used by newer UE versions)
+    if [[ "$OSTYPE" = "msys" ]]; then
+        # Direct lookup by ENGINE_ID (works when EngineAssociation is a UUID)
+        local REG_PATH
+        REG_PATH=$(reg query "HKEY_CURRENT_USER\\Software\\Epic Games\\Unreal Engine\\Builds" /v "${ENGINE_ID}" 2>/dev/null \
+                   | sed -n 's/.*REG_SZ[[:space:]]*//p')
+        if [[ -n "$REG_PATH" && -d "$REG_PATH" ]]; then
+            echo "$REG_PATH"
+            return 0
+        fi
+
+        # Version-number lookup: scan all Builds entries and match via Build.version file
+        if [[ "$ENGINE_ID" =~ ^UE_([0-9]+)\.([0-9]+)$ ]]; then
+            local MAJOR="${BASH_REMATCH[1]}"
+            local MINOR="${BASH_REMATCH[2]}"
+            while IFS= read -r CANDIDATE_PATH; do
+                local VERSION_FILE="$CANDIDATE_PATH/Engine/Build/Build.version"
+                if [[ -f "$VERSION_FILE" ]]; then
+                    local FILE_MAJOR FILE_MINOR
+                    FILE_MAJOR=$(jq -r '.MajorVersion' "$VERSION_FILE" 2>/dev/null)
+                    FILE_MINOR=$(jq -r '.MinorVersion' "$VERSION_FILE" 2>/dev/null)
+                    if [[ "$FILE_MAJOR" == "$MAJOR" && "$FILE_MINOR" == "$MINOR" ]]; then
+                        echo "$CANDIDATE_PATH"
+                        return 0
+                    fi
+                fi
+            done < <(reg query "HKEY_CURRENT_USER\\Software\\Epic Games\\Unreal Engine\\Builds" 2>/dev/null \
+                     | grep "REG_SZ" | sed 's/.*REG_SZ[[:space:]]*//')
+        fi
+    fi
+
     return 1
 }
 
