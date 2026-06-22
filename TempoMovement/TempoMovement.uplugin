@@ -29,9 +29,9 @@
 			"Name": "ChaosVehiclesPlugin",
 			"Enabled": true
 		},
-                {
-                        "Name": "ControlRig",
-                        "Enabled": true
-                }
+		{
+			"Name": "ControlRig",
+			"Enabled": true
+		}
 	]
 }

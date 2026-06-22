@@ -27,6 +27,8 @@ public:
 
 	virtual void BeginPlay() override;
 
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
 	// Point this pawn at InSpline with InConfig and (re)start following, spawning the controller if
 	// needed. Used by the ConfigureTrajectoryFollowing RPC to set up or retarget a follower at runtime.
 	UFUNCTION(BlueprintCallable, Category = "Trajectory")

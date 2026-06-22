@@ -100,8 +100,9 @@ enum TrajectoryFollowMode {
   TRAJECTORY_FOLLOW_MODE_UNSPECIFIED = 0;
   // Teleport the pawn to the target pose each tick (exact, bypasses control).
   TRAJECTORY_FOLLOW_MODE_TELEPORT = 1;
-  // Steer toward the target, letting the pawn's movement component respond.
-  TRAJECTORY_FOLLOW_MODE_STEER = 2;
+  // Drive toward the target (steering plus throttle/brake), letting the pawn's movement
+  // component respond.
+  TRAJECTORY_FOLLOW_MODE_DRIVE = 2;
 }
 
 // What a follower does when it reaches the end of the trajectory.

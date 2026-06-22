@@ -498,7 +498,7 @@ void UTempoMovementControlServiceSubsystem::ConfigureTrajectoryFollowing(const C
 	case TempoMovement::TRAJECTORY_FOLLOW_MODE_TELEPORT:
 		Config.bTeleport = true;
 		break;
-	case TempoMovement::TRAJECTORY_FOLLOW_MODE_STEER:
+	case TempoMovement::TRAJECTORY_FOLLOW_MODE_DRIVE:
 		Config.bTeleport = false;
 		break;
 	default:

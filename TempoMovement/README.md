@@ -63,12 +63,12 @@ Then make a Pawn follow that spline with `configure_trajectory_following`. The P
 tm.configure_trajectory_following(pawn="MyPawn", spline="MySpline", constant_speed=2.0)
 
 # Or specify when the path reaches each point (SplinePointVsTime): value = point index,
-# and steer toward the path instead of teleporting:
+# and drive toward the path instead of teleporting:
 curve = mcs.TrajectoryCurve()
 for t, idx in [(0.0, 0), (5.0, 1)]:
     k = curve.keys.add(); k.time, k.value = t, idx
 tm.configure_trajectory_following(
     pawn="MyPawn", spline="MySpline", spline_point_vs_time=curve,
-    follow_mode=mcs.TRAJECTORY_FOLLOW_MODE_STEER,
+    follow_mode=mcs.TRAJECTORY_FOLLOW_MODE_DRIVE,
     end_behavior=mcs.TRAJECTORY_END_BEHAVIOR_LOOP)
 ```
