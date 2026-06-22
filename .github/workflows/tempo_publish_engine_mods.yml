@@ -31,7 +31,7 @@ jobs:
       id-token: write  # Reusable workflow declares id-token: write (ECR/OIDC path); caller must grant at least as much.
     strategy:
       matrix:
-        unreal_version: ["5.6", "5.7"]
+        unreal_version: ["5.6", "5.7", "5.8"]
       fail-fast: false
     uses: ./.github/workflows/publish_engine_mods.yml
     with:
