@@ -189,27 +189,27 @@ public:
 
 /** A faster, smaller-footprint list for a small number of entities. But will be very slow for larger sizes. */
 template<int32 MAX>
-class TSmallEntityList : public TStaticArray<FMassEntityHandle, MAX, sizeof(FMassEntityHandle)>
+class TSmallEntityList : public TStaticArray<FMassEntityHandle, MAX>
 {
 public:
 	
 	TSmallEntityList() :
-		TStaticArray<FMassEntityHandle, MAX, sizeof(FMassEntityHandle)>()
+		TStaticArray<FMassEntityHandle, MAX>()
 	{
 	}
 
 	explicit TSmallEntityList(const FMassEntityHandle Entity) :
-		TStaticArray<FMassEntityHandle, MAX, sizeof(FMassEntityHandle)>(Entity)
+		TStaticArray<FMassEntityHandle, MAX>(Entity)
 	{
 	}
 
-	explicit TSmallEntityList(TStaticArray<FMassEntityHandle, MAX, sizeof(FMassEntityHandle)>&& Other) :
-		TStaticArray<FMassEntityHandle, MAX, sizeof(FMassEntityHandle)>(Other)
+	explicit TSmallEntityList(TStaticArray<FMassEntityHandle, MAX>&& Other) :
+		TStaticArray<FMassEntityHandle, MAX>(Other)
 	{
 	}
 
-	explicit TSmallEntityList(const TStaticArray<FMassEntityHandle, MAX, sizeof(FMassEntityHandle)>& Other) :
-		TStaticArray<FMassEntityHandle, MAX, sizeof(FMassEntityHandle)>(Other)
+	explicit TSmallEntityList(const TStaticArray<FMassEntityHandle, MAX>& Other) :
+		TStaticArray<FMassEntityHandle, MAX>(Other)
 	{
 	}
 

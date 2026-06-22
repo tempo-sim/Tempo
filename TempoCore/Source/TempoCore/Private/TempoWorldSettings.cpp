@@ -13,8 +13,8 @@
 namespace
 {
 	// These values result in relatively consistent perceived brightness across a huge range of scene intensity.
-	constexpr float ExposureBiasToBrightnessScale = 3.93342962372;
-	constexpr float ExposureBiasToBrightnessOffset = -34.1331407526;
+	constexpr float ExposureBiasToBrightnessScale = 3.93342962372f;
+	constexpr float ExposureBiasToBrightnessOffset = -34.1331407526f;
 }
 
 void ATempoWorldSettings::BeginPlay()

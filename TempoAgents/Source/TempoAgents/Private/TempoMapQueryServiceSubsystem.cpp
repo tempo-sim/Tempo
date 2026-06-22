@@ -3,6 +3,15 @@
 #include "TempoMapQueryServiceSubsystem.h"
 
 #include "TempoAgents/MapQueries.grpc.pb.h"
+#if PLATFORM_WINDOWS
+// gRPC transitively includes <windows.h>, which leaks wingdi.h's GetObject macro
+// (GetObjectA/W). In TempoAgents's unity TU, a later .cpp file's transitive include
+// of PropertyBindingBindingCollection.h would otherwise see
+// `BindingsOwner.GetObject()` mangled to `GetObjectW` — not a member of
+// TScriptInterface. Scrub the macro here so later parses are clean.
+#undef GetObject
+#endif
+
 #include "TempoAgents.h"
 
 #include "TempoConversion.h"

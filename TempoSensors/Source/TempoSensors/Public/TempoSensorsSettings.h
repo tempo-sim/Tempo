@@ -140,7 +140,7 @@ private:
 
 	// Gamma to use for simulated scene captures.
 	UPROPERTY(EditAnywhere, Config, Category="Camera")
-	float SceneCaptureGamma = 2.2;
+	float SceneCaptureGamma = 2.2f;
 
 	// The max number of frames per camera to buffer before dropping.
 	UPROPERTY(EditAnywhere, Config, Category="Advanced")
