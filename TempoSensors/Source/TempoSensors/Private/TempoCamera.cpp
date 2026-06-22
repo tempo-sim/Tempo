@@ -1114,7 +1114,12 @@ void UTempoCamera::RenderCapture()
 		ProjectionMatrix.M[3][0] = 0.0f;
 		ProjectionMatrix.M[3][1] = 0.0f;
 		ProjectionMatrix.M[3][3] = 0.0f;
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8
+		// ERHIZBuffer was removed in 5.8; an inverted (reversed) Z buffer is now always assumed.
+		if (true)
+#else
 		if ((int32)ERHIZBuffer::IsInverted)
+#endif
 		{
 			// Reversed-Z infinite far plane (MinZ == MaxZ branch of FReversedZPerspectiveMatrix).
 			ProjectionMatrix.M[2][2] = 0.0f;

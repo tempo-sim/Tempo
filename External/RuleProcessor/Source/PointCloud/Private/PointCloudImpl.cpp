@@ -1890,7 +1890,7 @@ void UPointCloudImpl::SerializeDb(FArchive& Ar)
 				if (LoadedSize == false)
 				{
 					FMemory::Free(Data);
-					UE_LOG(PointCloudLog, Warning, TEXT("Failed To Load Temporary Database - Mismatched sizes\n"), *TempFileName);
+					UE_LOG(PointCloudLog, Warning, TEXT("Failed To Load Temporary Database (%s) - Mismatched sizes\n"), *TempFileName);
 					Ar.SetCriticalError();
 					return;
 				}

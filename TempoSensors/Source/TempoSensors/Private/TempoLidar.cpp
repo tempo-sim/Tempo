@@ -946,7 +946,12 @@ void UTempoLidar::RenderCapture()
 		const float YAxisMultiplier = static_cast<float>(TileSize.X) / static_cast<float>(TileSize.Y);
 
 		FMatrix ProjectionMatrix;
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8
+		// ERHIZBuffer was removed in 5.8; an inverted (reversed) Z buffer is now always assumed.
+		if (true)
+#else
 		if ((int32)ERHIZBuffer::IsInverted)
+#endif
 		{
 			ProjectionMatrix = FReversedZPerspectiveMatrix(ViewFOV, ViewFOV, 1.0f, YAxisMultiplier, NearClip, NearClip);
 		}

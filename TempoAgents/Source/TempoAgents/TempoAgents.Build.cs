@@ -51,5 +51,11 @@ public class TempoAgents : TempoModuleRules
 		{
 			PrivateDependencyModuleNames.Add("StructUtils");
 		}
+
+		// UE 5.8 split the core Mass types out of the MassEntity plugin into a new MassCore module.
+		if (Target.Version.MajorVersion == 5 && Target.Version.MinorVersion >= 8)
+		{
+			PrivateDependencyModuleNames.Add("MassCore");
+		}
 	}
 }

@@ -10,7 +10,12 @@
 #include "Misc/ScopedSlowTask.h"
 #include "Engine/Blueprint.h"
 #include "Engine/World.h"
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8
+// DataLayer.h was fully deprecated in 5.8; FActorDataLayer now lives in DeprecatedDataLayer.h.
+#include "WorldPartition/DataLayer/Deprecated/DeprecatedDataLayer.h"
+#else
 #include "WorldPartition/DataLayer/DataLayer.h"
+#endif
 #include "DataLayer/DataLayerEditorSubsystem.h"
 #include "Editor/EditorEngine.h"
 #include "AssetSelection.h"
@@ -169,6 +174,8 @@ bool FSpawnBlueprintsBuildRuleInstance::Execute(FSliceAndDiceExecutionContextPtr
 
 	if (DataLayerEditorSubsystem && Data.DataLayers.Num() > 0)
 	{
+		// FActorDataLayer was deprecated in 5.8 but retained for the lifetime of UE5 for data compatibility.
+		PRAGMA_DISABLE_DEPRECATION_WARNINGS
 		for (const FActorDataLayer& DataLayerInfo : Data.DataLayers)
 		{
 			if (UDataLayerInstance* DataLayer = DataLayerEditorSubsystem->GetDataLayerInstance(DataLayerInfo.Name))
@@ -176,6 +183,7 @@ bool FSpawnBlueprintsBuildRuleInstance::Execute(FSliceAndDiceExecutionContextPtr
 				DataLayers.Emplace(DataLayer);
 			}
 		}
+		PRAGMA_ENABLE_DEPRECATION_WARNINGS
 
 		if (DataLayers.Num() != Data.DataLayers.Num())
 		{
@@ -244,7 +252,15 @@ bool FSpawnBlueprintsBuildRuleInstance::Execute(FSliceAndDiceExecutionContextPtr
 
 			if (Data.bUseLightweightInstancing)
 			{
+				// UE 5.8 renamed this Blueprint function library with a DEPRECATED_ prefix. A direct call
+				// (rather than a type alias) avoids colliding with the stray `friend class
+				// ULightWeightInstanceBlueprintFunctionLibrary` forward-declaration the engine still
+				// carries in LightWeightInstanceManager.h.
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8
+				ActorHandle = UDEPRECATED_LightWeightInstanceBlueprintFunctionLibrary::CreateNewLightWeightInstance(SpawnClass, Position, DataLayers.Num() > 0 ? DataLayers[0] : nullptr, Data.World);
+#else
 				ActorHandle = ULightWeightInstanceBlueprintFunctionLibrary::CreateNewLightWeightInstance(SpawnClass, Position, DataLayers.Num() > 0 ? DataLayers[0] : nullptr, Data.World);
+#endif
 			}
 			else
 			{

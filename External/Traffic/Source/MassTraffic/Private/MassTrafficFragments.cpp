@@ -166,7 +166,7 @@ bool FMassTrafficPeriod::VehicleLaneClosesInNextPeriod(FZoneGraphTrafficLaneData
 	if (RealIndex == INDEX_NONE)
 	{
 		UE_LOG(LogMassTraffic, Error, TEXT("%s - For testing if 'open vehicle lane closes in next period', lane fragment was not found in 'open vehicle lanes'."),
-			ANSI_TO_TCHAR(__builtin_FUNCTION()), RealIndex);
+			ANSI_TO_TCHAR(__builtin_FUNCTION()));
 		return false;
 	}
 	if (RealIndex > 255)

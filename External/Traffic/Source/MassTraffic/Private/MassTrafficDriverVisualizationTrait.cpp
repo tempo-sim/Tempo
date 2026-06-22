@@ -50,7 +50,12 @@ void UMassTrafficDriverVisualizationTrait::BuildTemplate(FMassEntityTemplateBuil
 UMassTrafficDriverInitializer::UMassTrafficDriverInitializer()
 	: EntityQuery(*this)
 {
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8
+	// UMassObserverProcessor::ObservedType was deprecated in 5.8 in favor of the ObservedTypes array.
+	ObservedTypes.Add(FMassTrafficDriverVisualizationFragment::StaticStruct());
+#else
 	ObservedType = FMassTrafficDriverVisualizationFragment::StaticStruct();
+#endif
 #if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 7
 	Operation = EMassObservedOperation::Add;
 #else

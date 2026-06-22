@@ -47,7 +47,7 @@ struct FTextureRead
 	{
 		while (State != State::EReadComplete)
 		{
-			FPlatformProcess::Sleep(1e-4);
+			FPlatformProcess::Sleep(1e-4f);
 		}
 	}
 
@@ -221,7 +221,7 @@ struct FTextureReadQueue
 			{
 				while (!TextureRead->RenderFence->Poll())
 				{
-					FPlatformProcess::Sleep(1e-4);
+					FPlatformProcess::Sleep(1e-4f);
 				}
 			}
 			else if (!TextureRead->RenderFence->Poll())

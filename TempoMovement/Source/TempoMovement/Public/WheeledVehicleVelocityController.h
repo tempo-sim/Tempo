@@ -43,11 +43,11 @@ struct TEMPOMOVEMENT_API FWheeledVehicleVelocityController
 
 	// P gain for linear velocity tracking: normalized accel per cm/s of error.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Velocity Control")
-	float LinearVelocityKp = 0.005;
+	float LinearVelocityKp = 0.005f;
 
 	// I gain for linear velocity tracking: normalized accel per (cm/s * s) of accumulated error.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Velocity Control")
-	float LinearVelocityKi = 0.002;
+	float LinearVelocityKi = 0.002f;
 
 	// Saturation for the integral term to prevent windup (cm/s * s).
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Velocity Control")
@@ -56,7 +56,7 @@ struct TEMPOMOVEMENT_API FWheeledVehicleVelocityController
 	// P gain for Chaos vehicle yaw rate tracking: normalized steering per deg/s of error.
 	// Kinematic vehicles use exact feedforward (the inverse motion model) and ignore this.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Velocity Control")
-	float YawRateKp = 0.01745;
+	float YawRateKp = 0.01745f;
 
 private:
 	// Compute normalized acceleration in [-1, 1] from a target linear velocity (cm/s).

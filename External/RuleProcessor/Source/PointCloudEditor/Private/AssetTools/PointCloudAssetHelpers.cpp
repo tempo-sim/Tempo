@@ -26,7 +26,12 @@
 #include "DataLayer/DataLayerEditorSubsystem.h"
 #include "WorldPartition/WorldPartition.h"
 #include "WorldPartition/WorldPartitionHelpers.h"
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8
+// DataLayer.h was fully deprecated in 5.8; the types used here now live in DataLayerInstance.h.
+#include "WorldPartition/DataLayer/DataLayerInstance.h"
+#else
 #include "WorldPartition/DataLayer/DataLayer.h"
+#endif
 #include "ObjectTools.h"
 #include "NiagaraComponent.h"
 #include "NiagaraSystem.h"
@@ -991,7 +996,11 @@ void UPointCloudAssetsHelpers::DeleteAllActorsOnDataLayer(UWorld* InWorld, const
 
 	FWorldPartitionHelpers::ForEachActorDescInstance(WorldPartition, [InDataLayerInstance, &ActorsToDelete](const FWorldPartitionActorDescInstance* ActorDescInstance)
 		{
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8
+			if (ActorDescInstance != nullptr && ActorDescInstance->GetDataLayerInstanceNames().ToArray().Contains(InDataLayerInstance->GetFName()))
+#else
 			if (ActorDescInstance != nullptr && ActorDescInstance->GetDataLayerInstanceNames().ToArray().Contains(InDataLayerInstance->GetDataLayerFName()))
+#endif
 			{
 				ActorsToDelete.Add(ActorDescInstance);
 			}
@@ -1300,7 +1309,11 @@ TArray<FPointCloudPoint> UPointCloudAssetsHelpers::GetModulesFromDataLayers(UWor
 			{
 				bool bHasMatchingDataLayer = Algo::AnyOf(ActorDescInstance->GetDataLayerInstanceNames().ToArray(), [&DataLayerInstances](const FName& DLName)
 					{
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8
+						auto IsDataLayerInstanceOfName = [DLName](const UDataLayerInstance* DataLayerInstance) {return DataLayerInstance->GetFName() == DLName;};
+#else
 						auto IsDataLayerInstanceOfName = [DLName](const UDataLayerInstance* DataLayerInstance) {return DataLayerInstance->GetDataLayerFName() == DLName;};
+#endif
 						return DataLayerInstances.FindByPredicate(IsDataLayerInstanceOfName);
 					});
 

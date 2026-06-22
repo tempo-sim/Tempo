@@ -1,0 +1,7 @@
+<Project>
+  <PropertyGroup>
+    <!-- Disable NuGet security audit to prevent vulnerability warnings in Unreal Engine's
+         third-party packages (e.g. Magick.NET) from being treated as build errors. -->
+    <NuGetAudit>false</NuGetAudit>
+  </PropertyGroup>
+</Project>

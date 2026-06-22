@@ -2,7 +2,7 @@
 
 Orientation for AI agents (and humans) working in this repository. Read this before making changes.
 
-> Tempo is a collection of **Unreal Engine 5.6 / 5.7** plugins that turn Unreal into a
+> Tempo is a collection of **Unreal Engine 5.6 / 5.7 / 5.8** plugins that turn Unreal into a
 > programmable simulator for robotics and autonomy. It is not an application — it is a set
 > of plugins that live in a host project's `Plugins/` directory (the reference host is
 > [TempoSample](https://github.com/tempo-sim/TempoSample)). The current working directory
@@ -118,7 +118,7 @@ the `reference_build_scripts` memory.
 **Why the toolchain & engine mods exist:** gRPC/Protobuf static libs are vendored into
 TempoCore and re-exported to other modules; custom toolchains
 (`TempoVCToolChain`/`TempoMacToolChain`/`TempoLinuxToolChain`) fix symbol re-export so
-duplicate globals don't crash. `EngineMods/{5.6,5.7}/` patch UBT, AutomationTool, ZoneGraph,
+duplicate globals don't crash. `EngineMods/{5.6,5.7,5.8}/` patch UBT, AutomationTool, ZoneGraph,
 MassCrowd, PCG **in place** (idempotently, via `InstallEngineMods.sh` reading
 `EngineMods.json`) so users don't need a custom-built engine. `TempoModuleRules` (added as a
 mod) auto-adds the `ProtobufGenerated` include paths and is the base class for every Tempo

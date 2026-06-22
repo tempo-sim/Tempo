@@ -63,6 +63,14 @@ public class MassTraffic : ModuleRules
 			PublicDependencyModuleNames.Add("StructUtils");
 		}
 
+		// UE 5.8 split the core Mass types (FMassFragment, FMassTag, FMassEntityHandle, etc.) out of
+		// the MassEntity plugin into a new MassCore runtime module. Depend on it so their reflection
+		// symbols are available at link time.
+		if (Target.Version.MajorVersion == 5 && Target.Version.MinorVersion >= 8)
+		{
+			PublicDependencyModuleNames.Add("MassCore");
+		}
+
 		PrivateDependencyModuleNames.AddRange(
 			new string[]
 			{

@@ -7,7 +7,11 @@
 #include "MassTrafficBubble.h"
 #include "MassSimulationSettings.h"
 #include "MassLODSubsystem.h"
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8
+#include "StructUtils/InstancedStruct.h"
+#else
 #include "InstancedStruct.h"
+#endif
 #include "MassTrafficFragments.h"
 #include "MassReplicationTransformHandlers.h"
 #include "MassExecutionContext.h"

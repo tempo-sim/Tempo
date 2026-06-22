@@ -1,12 +1,20 @@
 // Copyright Tempo Simulation, LLC. All Rights Reserved
 
 // This helper mirrors engine-private logic in Renderer/Private/SceneCaptureRendering.cpp —
-// specifically SetupViewFamilyForSceneCapture (666), SetupSceneViewExtensionsForSceneCapture
-// (806), CreateSceneRendererForSceneCapture (824), and UpdateSceneCaptureContent_RenderThread
-// (415). Line numbers and contents are byte-identical in 5.6 and 5.7; re-diff and update for
-// any newer engine version.
-#if !(ENGINE_MAJOR_VERSION == 5 && (ENGINE_MINOR_VERSION == 6 || ENGINE_MINOR_VERSION == 7))
-#error "TempoMultiViewCapture is pinned to UE 5.6/5.7 engine internals. Re-diff and update for the new engine version."
+// specifically SetupViewFamilyForSceneCapture, SetupSceneViewExtensionsForSceneCapture,
+// CreateSceneRendererForSceneCapture, and UpdateSceneCaptureContent_RenderThread.
+// Locations: 666 / 806 / 824 / 415 in 5.6 and 5.7 (byte-identical between them);
+// 689 / 833 / 851 / 453 in 5.8.
+//
+// 5.8 re-diff: the engine refactored those functions' own signatures to flag enums
+// (ESetupViewFamilyFlags / ESceneRendererCreationFlags replacing bool params) and moved
+// RegisterExternalTexture out of UpdateSceneCaptureContent_RenderThread. None of that affects
+// this mirror, which reimplements the bodies and drives the renderer via the public
+// ISceneRenderBuilder interface. The one behavioral addition we carry over is the new per-view
+// FSceneViewInitOptions::SkylightScale (sourced from the capture component); see below.
+// Re-diff and update for any newer engine version.
+#if !(ENGINE_MAJOR_VERSION == 5 && (ENGINE_MINOR_VERSION == 6 || ENGINE_MINOR_VERSION == 7 || ENGINE_MINOR_VERSION == 8))
+#error "TempoMultiViewCapture is pinned to UE 5.6/5.7/5.8 engine internals. Re-diff and update for the new engine version."
 #endif
 
 #include "TempoMultiViewCapture.h"
@@ -189,6 +197,11 @@ namespace
 			ViewInitOptions.bSceneCaptureUsesRayTracing = PrimaryComponent->bUseRayTracingIfEnabled;
 			ViewInitOptions.bExcludeFromSceneTextureExtents = PrimaryComponent->bExcludeFromSceneTextureExtents;
 			ViewInitOptions.FirstPersonParams = FirstPersonParams;
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8
+			// New in UE 5.8: per-view skylight scale, sourced from the capture component (the engine's
+			// SetupViewFamilyForSceneCapture does the same). Defaults to white when unset.
+			ViewInitOptions.SkylightScale = PrimaryComponent->SkylightScale;
+#endif
 
 			FSceneView* View = new FSceneView(ViewInitOptions);
 			View->HiddenPrimitives = HiddenPrimitives;

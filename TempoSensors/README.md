@@ -108,4 +108,4 @@ For Lidar it's simpler — one multi-view render straight into a packed atlas, o
 
 ## Pinned engine version
 
-`TempoMultiViewCapture` reproduces logic from engine-private `SceneCaptureRendering.cpp` and is pinned to UE 5.6 / 5.7 with a `#error` guard. When upgrading the engine, re-diff against `SetupViewFamilyForSceneCapture`, `SetupSceneViewExtensionsForSceneCapture`, `CreateSceneRendererForSceneCapture`, and `UpdateSceneCaptureContent_RenderThread` — line numbers were byte-identical between 5.6 and 5.7.
+`TempoMultiViewCapture` reproduces logic from engine-private `SceneCaptureRendering.cpp` and is pinned to UE 5.6 / 5.7 / 5.8 with a `#error` guard. When upgrading the engine, re-diff against `SetupViewFamilyForSceneCapture`, `SetupSceneViewExtensionsForSceneCapture`, `CreateSceneRendererForSceneCapture`, and `UpdateSceneCaptureContent_RenderThread` — line numbers were byte-identical between 5.6 and 5.7.

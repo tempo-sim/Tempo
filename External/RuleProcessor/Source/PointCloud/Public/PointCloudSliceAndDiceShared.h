@@ -7,6 +7,12 @@
 #include "GameFramework/Actor.h"
 #include "GameFramework/LightWeightInstanceManager.h"
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8
+// UE 5.8 renamed the Light Weight Instance classes with a DEPRECATED_ prefix. Alias the old
+// names so the (vendored) RuleProcessor sources continue to compile unchanged.
+using ALightWeightInstanceManager = ADEPRECATED_LightWeightInstanceManager;
+#endif
+
 #include "PointCloudSliceAndDiceShared.generated.h"
 
 UENUM(BlueprintType)
