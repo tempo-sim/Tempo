@@ -3,6 +3,7 @@
 #pragma once
 
 #include "TempoMovementController.h"
+#include "WheeledVehicleVelocityController.h"
 
 #include "CoreMinimal.h"
 
@@ -38,22 +39,10 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(ClampMin=0.0))
 	float CommandStaleTimeout = 5.0;
 
-	// P gain for linear velocity tracking: normalized accel per cm/s of error.
+	// Converts the tracked body-frame velocity setpoint into the vehicle's native throttle/steer/brake
+	// inputs (Chaos or kinematic). Holds the PI gains and integral state.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	float LinearVelocityKp = 0.005;
-
-	// I gain for linear velocity tracking: normalized accel per (cm/s * s) of accumulated error.
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	float LinearVelocityKi = 0.002;
-
-	// Saturation for the integral term to prevent windup (cm/s * s).
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	float LinearVelocityIMax = 200.0;
-
-	// P gain for Chaos vehicle yaw rate tracking: normalized steering per deg/s of error.
-	// Kinematic vehicles use exact feedforward (the inverse motion model) and ignore this.
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	float YawRateKp = 0.01745;
+	FWheeledVehicleVelocityController VelocityController;
 
 private:
 	enum class EControlMode : uint8
@@ -76,9 +65,6 @@ private:
 	// Time (UGameplayStatics::GetTimeSeconds) of the last velocity or acceleration command.
 	double LastClosedLoopCommandTime = 0.0;
 
-	// Integral state for linear velocity PI loop.
-	float LinearVelocityIntegralError = 0.0;
-
 	struct FLastDrivingInput
 	{
 		FNormalizedDrivingInput Input;
@@ -88,12 +74,4 @@ private:
 
 	void TickDriving(APawn* ControlledPawn);
 	void TickClosedLoop(float DeltaTime, APawn* ControlledPawn);
-
-	// Compute normalized acceleration in [-1, 1] from a target linear velocity (cm/s).
-	float ComputeNormalizedAcceleration(float TargetLinVelCmS, float CurrentLinVelCmS, float DeltaTime);
-
-	// Apply normalized throttle/brake/gear logic to a Chaos vehicle.
-	void ApplyChaosAccelInput(UChaosVehicleMovementComponent* Movement, float NormAccel) const;
-
-	void ApplyDrivingInputToChaosVehicle(UChaosVehicleMovementComponent* Movement, const FNormalizedDrivingInput& Input) const;
 };

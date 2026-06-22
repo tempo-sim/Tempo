@@ -132,6 +132,15 @@ class TempoMessageDescriptor(TempoObjectDescriptor):
             self.name = field_descriptor.name
             # Store the raw protobuf type for Rust generation
             self.proto_type = field_descriptor.type
+            # Name of the real (non-synthetic) oneof this field belongs to, if any.
+            # prost collapses a oneof into a single Option<Enum> struct field, so
+            # generators emit oneof members differently from plain fields. Synthetic
+            # oneofs (proto3 `optional`) are ignored — we don't use them.
+            oneof = field_descriptor.containing_oneof
+            self.containing_oneof = (
+                oneof.name if oneof is not None and not getattr(oneof, "is_synthetic", False)
+                else None
+            )
 
     def __init__(self, module_name, message_descriptor, type_mapping=None):
         super().__init__(module_name)

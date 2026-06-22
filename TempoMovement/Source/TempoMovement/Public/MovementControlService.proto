@@ -63,6 +63,83 @@ message PawnMoveToLocationResponse {
   MoveToResult result = 1;
 }
 
+// One geometry point of a spline. A SplineActor is pure geometry; timing is supplied separately
+// by a follower (see ConfigureTrajectoryFollowingRequest), not per point.
+message SplinePoint {
+  // World-frame location of the spline point, in meters.
+  TempoCore.Vector location = 1;
+  // World-frame, un-normalized tangent at the point, in meters. Sets both the arrive
+  // and leave tangent (a longer tangent makes the curve bow out further near the point).
+  TempoCore.Vector tangent = 2;
+}
+
+message SetSplinePointsRequest {
+  // Identifier of the SplineActor whose geometry to set.
+  string spline = 1;
+  // Ordered points defining the spline geometry. At least two are required.
+  repeated SplinePoint points = 2;
+}
+
+// One key of a time-parameterized curve. The meaning of `value` depends on which curve it
+// belongs to (a spline input key, a distance in meters, or a speed in meters/second).
+message TrajectoryCurveKey {
+  // Time, in seconds relative to the start of following.
+  float time = 1;
+  // Curve value at this time.
+  float value = 2;
+}
+
+// A piecewise curve mapping trajectory time to some value, defined by its keys (in time order).
+message TrajectoryCurve {
+  repeated TrajectoryCurveKey keys = 1;
+}
+
+// How a follower is driven toward its target point each tick.
+enum TrajectoryFollowMode {
+  // Leave the follower's current mode unchanged.
+  TRAJECTORY_FOLLOW_MODE_UNSPECIFIED = 0;
+  // Teleport the pawn to the target pose each tick (exact, bypasses control).
+  TRAJECTORY_FOLLOW_MODE_TELEPORT = 1;
+  // Drive toward the target (steering plus throttle/brake), letting the pawn's movement
+  // component respond.
+  TRAJECTORY_FOLLOW_MODE_DRIVE = 2;
+}
+
+// What a follower does when it reaches the end of the trajectory.
+enum TrajectoryEndBehavior {
+  // Leave the follower's current end behavior unchanged.
+  TRAJECTORY_END_BEHAVIOR_UNSPECIFIED = 0;
+  // Hold the final pose.
+  TRAJECTORY_END_BEHAVIOR_CLAMP = 1;
+  // Wrap back to the start and keep going (a steering follower drives back to the start).
+  TRAJECTORY_END_BEHAVIOR_LOOP = 2;
+  // Teleport back to the start (even for a steering follower) and repeat.
+  TRAJECTORY_END_BEHAVIOR_RESET = 3;
+}
+
+message ConfigureTrajectoryFollowingRequest {
+  // Identifier of the pawn that should follow the spline. The pawn must carry a
+  // TrajectoryFollowingComponent.
+  string pawn = 1;
+  // Identifier of the SplineActor for the pawn to follow.
+  string spline = 2;
+  // How trajectory time maps onto the spline geometry. Exactly one must be set.
+  oneof speed {
+    // Traverse the spline at a fixed speed, in meters/second.
+    float constant_speed = 3;
+    // Map time to a spline input key (point index); value is the input key.
+    TrajectoryCurve spline_point_vs_time = 4;
+    // Map time to distance along the spline; value is the distance, in meters.
+    TrajectoryCurve distance_vs_time = 5;
+    // Map time to speed along the spline; value is the speed, in meters/second.
+    TrajectoryCurve speed_vs_time = 6;
+  }
+  // Optional: how to drive the pawn to the target. UNSPECIFIED keeps the follower's current mode.
+  TrajectoryFollowMode follow_mode = 7;
+  // Optional: behavior at the end of the trajectory. UNSPECIFIED keeps the follower's current behavior.
+  TrajectoryEndBehavior end_behavior = 8;
+}
+
 service MovementControlService {
   rpc GetCommandablePawns(TempoCore.Empty) returns (CommandablePawnsResponse);
 
@@ -77,4 +154,8 @@ service MovementControlService {
   rpc PawnMoveToLocation(PawnMoveToLocationRequest) returns (PawnMoveToLocationResponse);
 
   rpc RebuildNavigation(TempoCore.Empty) returns (TempoCore.Empty);
+
+  rpc SetSplinePoints(SetSplinePointsRequest) returns (TempoCore.Empty);
+
+  rpc ConfigureTrajectoryFollowing(ConfigureTrajectoryFollowingRequest) returns (TempoCore.Empty);
 }

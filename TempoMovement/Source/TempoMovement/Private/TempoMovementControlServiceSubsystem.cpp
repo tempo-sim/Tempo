@@ -5,6 +5,9 @@
 #include "TempoMovement/MovementControlService.grpc.pb.h"
 #include "TempoMovement.h"
 #include "TempoMovementController.h"
+#include "SplineActor.h"
+#include "TrajectoryFollowingComponent.h"
+#include "TrajectoryFollowingController.h"
 
 #include "TempoConversion.h"
 #include "TempoCoreUtils.h"
@@ -12,6 +15,9 @@
 #include "TempoCore/Geometry.pb.h"
 
 #include "AIController.h"
+#include "Components/SplineComponent.h"
+#include "Curves/CurveFloat.h"
+#include "GameFramework/Pawn.h"
 #include "Kismet/GameplayStatics.h"
 #include "NavigationSystem.h"
 
@@ -24,6 +30,8 @@ using CommandablePawnsResponse = TempoMovement::CommandablePawnsResponse;
 using PawnMoveToLocationRequest = TempoMovement::PawnMoveToLocationRequest;
 using PawnMoveToLocationResponse = TempoMovement::PawnMoveToLocationResponse;
 using NavigablePawnsResponse = TempoMovement::NavigablePawnsResponse;
+using SetSplinePointsRequest = TempoMovement::SetSplinePointsRequest;
+using ConfigureTrajectoryFollowingRequest = TempoMovement::ConfigureTrajectoryFollowingRequest;
 using TempoEmpty = TempoCore::Empty;
 
 namespace
@@ -82,6 +90,49 @@ namespace
 		OutStatus = grpc::Status(grpc::StatusCode::NOT_FOUND, "Did not find a pawn with the specified name");
 		return nullptr;
 	}
+
+	ASplineActor* FindSplineActor(const UWorld* World, const FString& RequestedName)
+	{
+		TArray<AActor*> SplineActors;
+		UGameplayStatics::GetAllActorsOfClass(World, ASplineActor::StaticClass(), SplineActors);
+		for (AActor* SplineActor : SplineActors)
+		{
+			if (UTempoCoreUtils::GetActorIdentifier(SplineActor).Equals(RequestedName, ESearchCase::IgnoreCase))
+			{
+				return Cast<ASplineActor>(SplineActor);
+			}
+		}
+		return nullptr;
+	}
+
+	APawn* FindPawn(const UWorld* World, const FString& RequestedName)
+	{
+		TArray<AActor*> Pawns;
+		UGameplayStatics::GetAllActorsOfClass(World, APawn::StaticClass(), Pawns);
+		for (AActor* Pawn : Pawns)
+		{
+			if (UTempoCoreUtils::GetActorIdentifier(Pawn).Equals(RequestedName, ESearchCase::IgnoreCase))
+			{
+				return Cast<APawn>(Pawn);
+			}
+		}
+		return nullptr;
+	}
+
+	// Build an FRuntimeFloatCurve from a proto TrajectoryCurve. Times are seconds (unscaled);
+	// values are scaled into Unreal-native units (ValueScale: 1 for a spline input key, 100 for
+	// meters -> cm or m/s -> cm/s).
+	FRuntimeFloatCurve BuildCurve(const TempoMovement::TrajectoryCurve& ProtoCurve, float ValueScale)
+	{
+		FRuntimeFloatCurve Curve;
+		FRichCurve* RichCurve = Curve.GetRichCurve();
+		for (int32 KeyIndex = 0; KeyIndex < ProtoCurve.keys_size(); ++KeyIndex)
+		{
+			const TempoMovement::TrajectoryCurveKey& Key = ProtoCurve.keys(KeyIndex);
+			RichCurve->AddKey(Key.time(), Key.value() * ValueScale);
+		}
+		return Curve;
+	}
 }
 
 void UTempoMovementControlServiceSubsystem::RegisterServices(FTempoServer& Server)
@@ -93,7 +144,9 @@ void UTempoMovementControlServiceSubsystem::RegisterServices(FTempoServer& Serve
 		SimpleRequestHandler(&MovementControlAsyncService::RequestCommandAcceleration, &UTempoMovementControlServiceSubsystem::CommandAcceleration),
 		SimpleRequestHandler(&MovementControlAsyncService::RequestGetNavigablePawns, &UTempoMovementControlServiceSubsystem::GetNavigablePawns),
 		SimpleRequestHandler(&MovementControlAsyncService::RequestPawnMoveToLocation, &UTempoMovementControlServiceSubsystem::PawnMoveToLocation),
-		SimpleRequestHandler(&MovementControlAsyncService::RequestRebuildNavigation, &UTempoMovementControlServiceSubsystem::RebuildNavigation)
+		SimpleRequestHandler(&MovementControlAsyncService::RequestRebuildNavigation, &UTempoMovementControlServiceSubsystem::RebuildNavigation),
+		SimpleRequestHandler(&MovementControlAsyncService::RequestSetSplinePoints, &UTempoMovementControlServiceSubsystem::SetSplinePoints),
+		SimpleRequestHandler(&MovementControlAsyncService::RequestConfigureTrajectoryFollowing, &UTempoMovementControlServiceSubsystem::ConfigureTrajectoryFollowing)
 		);
 }
 
@@ -347,5 +400,127 @@ void UTempoMovementControlServiceSubsystem::RebuildNavigation(const TempoEmpty& 
 	}
 
 	NavigationSystem->Build();
+	ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status_OK);
+}
+
+void UTempoMovementControlServiceSubsystem::SetSplinePoints(const SetSplinePointsRequest& Request, const TResponseDelegate<TempoEmpty>& ResponseContinuation) const
+{
+	ASplineActor* SplineActor = FindSplineActor(GetWorld(), UTF8_TO_TCHAR(Request.spline().c_str()));
+	if (!SplineActor)
+	{
+		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::NOT_FOUND, "Did not find a spline with the specified name"));
+		return;
+	}
+
+	if (Request.points_size() < 2)
+	{
+		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "A spline requires at least two points"));
+		return;
+	}
+
+	// Rebuild the real spline geometry. Locations and tangents arrive in SI/right-handed and
+	// are converted to Unreal-native cm/left-handed. Tangents are direction vectors, so the
+	// same QuantityConverter (which negates Y) applies. Update the spline once at the end.
+	USplineComponent* Spline = SplineActor->GetSpline();
+	Spline->ClearSplinePoints(false);
+	for (int32 PointIndex = 0; PointIndex < Request.points_size(); ++PointIndex)
+	{
+		const TempoMovement::SplinePoint& Point = Request.points(PointIndex);
+		const FVector Location = QuantityConverter<M2CM, R2L>::Convert(FVector(Point.location().x(), Point.location().y(), Point.location().z()));
+		Spline->AddSplinePoint(Location, ESplineCoordinateSpace::World, false);
+	}
+	for (int32 PointIndex = 0; PointIndex < Request.points_size(); ++PointIndex)
+	{
+		const TempoMovement::SplinePoint& Point = Request.points(PointIndex);
+		const FVector Tangent = QuantityConverter<M2CM, R2L>::Convert(FVector(Point.tangent().x(), Point.tangent().y(), Point.tangent().z()));
+		Spline->SetTangentAtSplinePoint(PointIndex, Tangent, ESplineCoordinateSpace::World, false);
+	}
+	Spline->UpdateSpline();
+
+	ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status_OK);
+}
+
+void UTempoMovementControlServiceSubsystem::ConfigureTrajectoryFollowing(const ConfigureTrajectoryFollowingRequest& Request, const TResponseDelegate<TempoEmpty>& ResponseContinuation) const
+{
+	APawn* Pawn = FindPawn(GetWorld(), UTF8_TO_TCHAR(Request.pawn().c_str()));
+	if (!Pawn)
+	{
+		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::NOT_FOUND, "Did not find a pawn with the specified name"));
+		return;
+	}
+
+	UTrajectoryFollowingComponent* FollowingComponent = Pawn->FindComponentByClass<UTrajectoryFollowingComponent>();
+	if (!FollowingComponent)
+	{
+		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "Pawn does not have a TrajectoryFollowingComponent"));
+		return;
+	}
+
+	ASplineActor* SplineActor = FindSplineActor(GetWorld(), UTF8_TO_TCHAR(Request.spline().c_str()));
+	if (!SplineActor)
+	{
+		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::NOT_FOUND, "Did not find a spline with the specified name"));
+		return;
+	}
+
+	// Start from the follower's current config so unspecified fields keep their authored values.
+	FTrajectoryFollowingConfig Config = FollowingComponent->GetConfig();
+
+	// Apply the speed model. Distances/speeds arrive in SI and convert to Unreal-native cm.
+	constexpr float M2CMScale = 100.0f;
+	switch (Request.speed_case())
+	{
+	case ConfigureTrajectoryFollowingRequest::kConstantSpeed:
+		Config.SpeedMode = ETrajectorySpeedMode::ConstantSpeed;
+		Config.Speed = Request.constant_speed() * M2CMScale;
+		break;
+	case ConfigureTrajectoryFollowingRequest::kSplinePointVsTime:
+		Config.SpeedMode = ETrajectorySpeedMode::SplinePointVsTime;
+		Config.TimeToInputKey = BuildCurve(Request.spline_point_vs_time(), 1.0f);
+		break;
+	case ConfigureTrajectoryFollowingRequest::kDistanceVsTime:
+		Config.SpeedMode = ETrajectorySpeedMode::DistanceVsTime;
+		Config.TimeToDistance = BuildCurve(Request.distance_vs_time(), M2CMScale);
+		break;
+	case ConfigureTrajectoryFollowingRequest::kSpeedVsTime:
+		Config.SpeedMode = ETrajectorySpeedMode::SpeedVsTime;
+		Config.TimeToSpeed = BuildCurve(Request.speed_vs_time(), M2CMScale);
+		break;
+	case ConfigureTrajectoryFollowingRequest::SPEED_NOT_SET:
+	default:
+		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "Following requires a speed (constant_speed, spline_point_vs_time, distance_vs_time, or speed_vs_time)"));
+		return;
+	}
+
+	// Optional overrides; UNSPECIFIED leaves the follower's current value untouched.
+	switch (Request.follow_mode())
+	{
+	case TempoMovement::TRAJECTORY_FOLLOW_MODE_TELEPORT:
+		Config.bTeleport = true;
+		break;
+	case TempoMovement::TRAJECTORY_FOLLOW_MODE_DRIVE:
+		Config.bTeleport = false;
+		break;
+	default:
+		break;
+	}
+
+	switch (Request.end_behavior())
+	{
+	case TempoMovement::TRAJECTORY_END_BEHAVIOR_CLAMP:
+		Config.EndBehavior = ETrajectoryEndBehavior::Clamp;
+		break;
+	case TempoMovement::TRAJECTORY_END_BEHAVIOR_LOOP:
+		Config.EndBehavior = ETrajectoryEndBehavior::Loop;
+		break;
+	case TempoMovement::TRAJECTORY_END_BEHAVIOR_RESET:
+		Config.EndBehavior = ETrajectoryEndBehavior::Reset;
+		break;
+	default:
+		break;
+	}
+
+	FollowingComponent->ConfigureAndFollow(SplineActor, Config);
+
 	ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status_OK);
 }

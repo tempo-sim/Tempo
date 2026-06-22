@@ -3,15 +3,9 @@
 #include "TempoWheeledVehicleController.h"
 
 #include "KinematicVehicleMovementComponent.h"
-#include "TempoChaosWheeledVehicleMovementComponent.h"
 
 #include "ChaosVehicleMovementComponent.h"
 #include "Kismet/GameplayStatics.h"
-
-namespace
-{
-	constexpr float NearlyStoppedSpeedCmS = 1.0f;
-}
 
 void ATempoWheeledVehicleController::Tick(float DeltaTime)
 {
@@ -47,16 +41,9 @@ bool ATempoWheeledVehicleController::HandleDrivingInput(const FNormalizedDriving
 	}
 
 	ControlMode = EControlMode::Driving;
-	LinearVelocityIntegralError = 0.0f;
+	VelocityController.Reset();
 
-	if (UChaosVehicleMovementComponent* ChaosMovement = Cast<UChaosVehicleMovementComponent>(ControlledPawn->GetMovementComponent()))
-	{
-		ApplyDrivingInputToChaosVehicle(ChaosMovement, Input);
-		return true;
-	}
-
-	const FVector ControlInputLocal(Input.GetAcceleration() + (GFrameCounter % 2 ? 1 : -1) * UE_KINDA_SMALL_NUMBER, Input.GetSteering(), 0.0);
-	ControlledPawn->AddMovementInput(ControlledPawn->GetActorTransform().TransformVector(ControlInputLocal));
+	VelocityController.ApplyDrivingInput(ControlledPawn, Input);
 	if (bPersistSteering)
 	{
 		LastDrivingInput = FLastDrivingInput{Input, GFrameCounter};
@@ -142,87 +129,5 @@ void ATempoWheeledVehicleController::TickClosedLoop(float DeltaTime, APawn* Cont
 	const float TargetLinVelCmS = VelocityTarget.Linear.X;
 	const float TargetYawRateDegS = VelocityTarget.Angular.Z;
 
-	UActorComponent* MovementComponent = ControlledPawn->GetMovementComponent();
-
-	if (UChaosVehicleMovementComponent* ChaosMovement = Cast<UChaosVehicleMovementComponent>(MovementComponent))
-	{
-		const float CurrentLinVelCmS = ChaosMovement->GetForwardSpeed();
-		const float NormAccel = ComputeNormalizedAcceleration(TargetLinVelCmS, CurrentLinVelCmS, DeltaTime);
-
-		float CurrentYawRateDegS = 0.0f;
-		if (const ITempoAngularVelocityInterface* AngVel = Cast<ITempoAngularVelocityInterface>(ChaosMovement))
-		{
-			CurrentYawRateDegS = AngVel->GetAngularVelocity().Z;
-		}
-		// Positive Chaos steering input = right turn = +yaw (Unreal left-handed). Same sign as the LH yaw error.
-		const float YawErrorDegS = TargetYawRateDegS - CurrentYawRateDegS;
-		const float NormSteer = FMath::Clamp(YawRateKp * YawErrorDegS, -1.0f, 1.0f);
-
-		ChaosMovement->SetSteeringInput(NormSteer);
-		ApplyChaosAccelInput(ChaosMovement, NormAccel);
-		return;
-	}
-
-	if (UKinematicVehicleMovementComponent* Kinematic = Cast<UKinematicVehicleMovementComponent>(MovementComponent))
-	{
-		const float CurrentLinVelCmS = Kinematic->GetLinearVelocity();
-		const float NormAccel = ComputeNormalizedAcceleration(TargetLinVelCmS, CurrentLinVelCmS, DeltaTime);
-		// Kinematic motion model is exact; use feedforward via the component's inverse model.
-		const float NormSteer = Kinematic->ComputeNormalizedSteeringForYawRate(TargetYawRateDegS, CurrentLinVelCmS);
-
-		const FVector ControlInputLocal(NormAccel + (GFrameCounter % 2 ? 1 : -1) * UE_KINDA_SMALL_NUMBER, NormSteer, 0.0);
-		ControlledPawn->AddMovementInput(ControlledPawn->GetActorTransform().TransformVector(ControlInputLocal));
-		return;
-	}
-}
-
-float ATempoWheeledVehicleController::ComputeNormalizedAcceleration(float TargetLinVelCmS, float CurrentLinVelCmS, float DeltaTime)
-{
-	const float Error = TargetLinVelCmS - CurrentLinVelCmS;
-	LinearVelocityIntegralError = FMath::Clamp(LinearVelocityIntegralError + Error * DeltaTime, -LinearVelocityIMax, LinearVelocityIMax);
-	const float Unclamped = LinearVelocityKp * Error + LinearVelocityKi * LinearVelocityIntegralError;
-	return FMath::Clamp(Unclamped, -1.0f, 1.0f);
-}
-
-void ATempoWheeledVehicleController::ApplyChaosAccelInput(UChaosVehicleMovementComponent* Movement, float NormAccel) const
-{
-	if (NormAccel > 0.0f)
-	{
-		if (Movement->GetForwardSpeed() > -NearlyStoppedSpeedCmS && Movement->GetCurrentGear() > -1)
-		{
-			Movement->SetThrottleInput(NormAccel);
-			Movement->SetBrakeInput(0.0f);
-		}
-		else
-		{
-			Movement->SetTargetGear(1, false);
-			Movement->SetThrottleInput(0.0f);
-			Movement->SetBrakeInput(NormAccel);
-		}
-	}
-	else
-	{
-		bool bReverseEnabled = true;
-		if (const UTempoChaosWheeledVehicleMovementComponent* TempoMovement = Cast<UTempoChaosWheeledVehicleMovementComponent>(Movement))
-		{
-			bReverseEnabled = TempoMovement->GetReverseEnabled();
-		}
-		if (Movement->GetForwardSpeed() > 0.0f || !bReverseEnabled)
-		{
-			Movement->SetBrakeInput(-NormAccel);
-			Movement->SetThrottleInput(0.0f);
-		}
-		else
-		{
-			Movement->SetTargetGear(-1, false);
-			Movement->SetThrottleInput(-NormAccel);
-			Movement->SetBrakeInput(0.0f);
-		}
-	}
-}
-
-void ATempoWheeledVehicleController::ApplyDrivingInputToChaosVehicle(UChaosVehicleMovementComponent* Movement, const FNormalizedDrivingInput& Input) const
-{
-	Movement->SetSteeringInput(Input.GetSteering());
-	ApplyChaosAccelInput(Movement, Input.GetAcceleration());
+	VelocityController.TrackBodyVelocity(ControlledPawn, TargetLinVelCmS, TargetYawRateDegS, DeltaTime);
 }
