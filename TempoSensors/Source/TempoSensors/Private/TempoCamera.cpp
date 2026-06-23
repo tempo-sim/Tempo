@@ -21,6 +21,7 @@
 #include "Kismet/KismetRenderingLibrary.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Math/Box2D.h"
+#include "Misc/ScopeLock.h"
 #include "TextureResource.h"
 
 // 5.6 only: GetLastAverageSceneLuminance lives on the renderer-private FSceneViewState — it was
@@ -447,7 +448,13 @@ TOptional<TFuture<void>> UTempoCamera::SendMeasurements()
 			{
 				Req.ResponseContinuation.ExecuteIfBound(Frame, grpc::Status_OK);
 			}
-			PendingVideoRequests.Empty();
+			// Empty() under the lock: OnRenderCompleted reads PendingVideoRequests.Last() on the
+			// render thread and must not observe a mid-Empty array. (The broadcast loop above is
+			// safe unlocked — the render thread only ever reads this array, never writes it.)
+			{
+				FScopeLock PendingLock(&PendingVideoRequestsLock);
+				PendingVideoRequests.Empty();
+			}
 		}
 	}
 
@@ -506,7 +513,11 @@ void UTempoCamera::RequestMeasurement(const TempoSensors::BoundingBoxesRequest& 
 
 void UTempoCamera::RequestMeasurement(const TempoSensors::VideoRequest& Request, const TResponseDelegate<TempoSensors::VideoFrame>& ResponseContinuation)
 {
-	PendingVideoRequests.Add({ Request, ResponseContinuation });
+	// Add() under the lock: OnRenderCompleted reads PendingVideoRequests on the render thread.
+	{
+		FScopeLock PendingLock(&PendingVideoRequestsLock);
+		PendingVideoRequests.Add({ Request, ResponseContinuation });
+	}
 
 	// Lazy-construct on first request. Encoder is opened with a real Width/Height the first time
 	// a frame is encoded — we don't know SizeXY until SharedFinalTextureTarget exists.
@@ -529,7 +540,7 @@ void UTempoCamera::OnRenderCompleted()
 {
 	Super::OnRenderCompleted();
 
-	if (!VideoEncoder.IsValid() || PendingVideoRequests.IsEmpty())
+	if (!VideoEncoder.IsValid())
 	{
 		return;
 	}
@@ -547,7 +558,19 @@ void UTempoCamera::OnRenderCompleted()
 	Config.Width = static_cast<uint32>(RT->SizeX);
 	Config.Height = static_cast<uint32>(RT->SizeY);
 	Config.TargetFramerate = static_cast<uint32>(FMath::Max(1.0f, GetRate()));
-	const TempoSensors::VideoRequest& LatestRequest = PendingVideoRequests.Last().Request;
+	// PendingVideoRequests is mutated on the game thread (RequestMeasurement / SendMeasurements),
+	// so snapshot the latest request under the lock before this render-thread read — otherwise a
+	// concurrent Empty() can leave Last() indexing an emptied array. Copy by value so Config stays
+	// valid once the lock releases.
+	TempoSensors::VideoRequest LatestRequest;
+	{
+		FScopeLock PendingLock(&PendingVideoRequestsLock);
+		if (PendingVideoRequests.IsEmpty())
+		{
+			return;
+		}
+		LatestRequest = PendingVideoRequests.Last().Request;
+	}
 	Config.Codec = LatestRequest.codec();
 	Config.BitrateKbps = LatestRequest.bitrate_kbps();
 	Config.KeyframeInterval = LatestRequest.keyframe_interval();

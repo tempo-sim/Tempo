@@ -7,6 +7,7 @@
 #include "TempoServer.h"
 
 #include "CoreMinimal.h"
+#include "HAL/CriticalSection.h"
 #include "Templates/PimplPtr.h"
 #include "Engine/Scene.h"
 #include "SceneTypes.h"
@@ -425,6 +426,12 @@ protected:
 	TArray<FDepthImageRequest> PendingDepthImageRequests;
 	TArray<FBoundingBoxesRequest> PendingBoundingBoxesRequests;
 	TArray<FVideoRequest> PendingVideoRequests;
+
+	// Guards PendingVideoRequests across the game/render thread boundary: it is mutated on the game
+	// thread (Add in RequestMeasurement, Empty in SendMeasurements) and read on the render thread
+	// (OnRenderCompleted, which snapshots the latest request under this lock). Without it a render-
+	// thread Last() can race a game-thread Empty() and index an emptied array.
+	FCriticalSection PendingVideoRequestsLock;
 
 	// H.264 encoder shared across all subscribed video stream clients. Created lazily on the first
 	// VideoRequest, reconfigured on size/codec/profile/bitrate/KFI changes, kept alive while any
