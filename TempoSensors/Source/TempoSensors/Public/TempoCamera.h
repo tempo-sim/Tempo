@@ -427,11 +427,12 @@ protected:
 	TArray<FBoundingBoxesRequest> PendingBoundingBoxesRequests;
 	TArray<FVideoRequest> PendingVideoRequests;
 
-	// Guards PendingVideoRequests across the game/render thread boundary: it is mutated on the game
-	// thread (Add in RequestMeasurement, Empty in SendMeasurements) and read on the render thread
-	// (OnRenderCompleted, which snapshots the latest request under this lock). Without it a render-
-	// thread Last() can race a game-thread Empty() and index an emptied array.
-	FCriticalSection PendingVideoRequestsLock;
+	// Guards the video state shared between the game and render threads: PendingVideoRequests (Add
+	// in RequestMeasurement, Empty in SendMeasurements) and the lazy publication of the VideoEncoder
+	// pointer below. OnRenderCompleted (render thread) snapshots both under this lock, so it never
+	// observes a half-constructed encoder, or calls Last() on an array a concurrent Empty() just
+	// cleared. (The encoder's own drained-packet handoff is a separate MPSC TQueue, safe on its own.)
+	FCriticalSection VideoStateMutex;
 
 	// H.264 encoder shared across all subscribed video stream clients. Created lazily on the first
 	// VideoRequest, reconfigured on size/codec/profile/bitrate/KFI changes, kept alive while any

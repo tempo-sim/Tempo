@@ -421,6 +421,9 @@ TOptional<TFuture<void>> UTempoCamera::SendMeasurements()
 	// entire access unit into one packet, so in steady state DrainPackets yields exactly one entry;
 	// older entries are stale (only happens under game-thread backlog) and dropping them is
 	// preferable to firing each subscriber's ResponseContinuation multiple times.
+	// Runs on the game thread, as does RequestMeasurement (the only writer of these), so the reads
+	// of VideoEncoder and PendingVideoRequests here need no lock — only the render thread's
+	// OnRenderCompleted does (it takes VideoStateMutex to snapshot them).
 	if (VideoEncoder.IsValid() && !PendingVideoRequests.IsEmpty())
 	{
 		TArray<FTempoEncodedVideoPacket> Packets;
@@ -452,7 +455,7 @@ TOptional<TFuture<void>> UTempoCamera::SendMeasurements()
 			// render thread and must not observe a mid-Empty array. (The broadcast loop above is
 			// safe unlocked — the render thread only ever reads this array, never writes it.)
 			{
-				FScopeLock PendingLock(&PendingVideoRequestsLock);
+				FScopeLock VideoStateLock(&VideoStateMutex);
 				PendingVideoRequests.Empty();
 			}
 		}
@@ -513,17 +516,18 @@ void UTempoCamera::RequestMeasurement(const TempoSensors::BoundingBoxesRequest& 
 
 void UTempoCamera::RequestMeasurement(const TempoSensors::VideoRequest& Request, const TResponseDelegate<TempoSensors::VideoFrame>& ResponseContinuation)
 {
-	// Add() under the lock: OnRenderCompleted reads PendingVideoRequests on the render thread.
+	// Add the request and lazily create the encoder under the lock: OnRenderCompleted reads both
+	// PendingVideoRequests and the VideoEncoder pointer on the render thread, so publishing them
+	// here keeps it from observing a half-constructed encoder. Created once and never reset; the
+	// encoder opens with a real Width/Height the first time a frame is encoded — we don't know
+	// SizeXY until SharedFinalTextureTarget exists.
 	{
-		FScopeLock PendingLock(&PendingVideoRequestsLock);
+		FScopeLock VideoStateLock(&VideoStateMutex);
 		PendingVideoRequests.Add({ Request, ResponseContinuation });
-	}
-
-	// Lazy-construct on first request. Encoder is opened with a real Width/Height the first time
-	// a frame is encoded — we don't know SizeXY until SharedFinalTextureTarget exists.
-	if (!VideoEncoder.IsValid())
-	{
-		VideoEncoder = MakePimpl<FTempoCameraVideoEncoder>();
+		if (!VideoEncoder.IsValid())
+		{
+			VideoEncoder = MakePimpl<FTempoCameraVideoEncoder>();
+		}
 	}
 	bVideoEncoderConfigured = false;
 }
@@ -540,15 +544,28 @@ void UTempoCamera::OnRenderCompleted()
 {
 	Super::OnRenderCompleted();
 
-	if (!VideoEncoder.IsValid())
-	{
-		return;
-	}
-
 	UTextureRenderTarget2D* RT = SharedFinalTextureTarget;
 	if (!RT || RT->SizeX <= 0 || RT->SizeY <= 0)
 	{
 		return;
+	}
+
+	// Snapshot the shared video state under the lock. VideoEncoder is created on the game thread
+	// (RequestMeasurement) and PendingVideoRequests is mutated there too, so read both here under
+	// the lock — otherwise this render-thread path can observe a half-published encoder pointer, or
+	// call Last() on an array a concurrent Empty() just cleared. The encoder is created once and
+	// never reset, so the raw pointer stays valid after the lock releases; we deliberately don't
+	// hold the lock across Configure()/encode.
+	FTempoCameraVideoEncoder* EncoderPtr = nullptr;
+	TempoSensors::VideoRequest LatestRequest;
+	{
+		FScopeLock VideoStateLock(&VideoStateMutex);
+		if (!VideoEncoder.IsValid() || PendingVideoRequests.IsEmpty())
+		{
+			return;
+		}
+		EncoderPtr = VideoEncoder.Get();
+		LatestRequest = PendingVideoRequests.Last().Request;
 	}
 
 	// (Re)configure the encoder. Latest pending request wins — gives a streaming client a way to
@@ -558,24 +575,11 @@ void UTempoCamera::OnRenderCompleted()
 	Config.Width = static_cast<uint32>(RT->SizeX);
 	Config.Height = static_cast<uint32>(RT->SizeY);
 	Config.TargetFramerate = static_cast<uint32>(FMath::Max(1.0f, GetRate()));
-	// PendingVideoRequests is mutated on the game thread (RequestMeasurement / SendMeasurements),
-	// so snapshot the latest request under the lock before this render-thread read — otherwise a
-	// concurrent Empty() can leave Last() indexing an emptied array. Copy by value so Config stays
-	// valid once the lock releases.
-	TempoSensors::VideoRequest LatestRequest;
-	{
-		FScopeLock PendingLock(&PendingVideoRequestsLock);
-		if (PendingVideoRequests.IsEmpty())
-		{
-			return;
-		}
-		LatestRequest = PendingVideoRequests.Last().Request;
-	}
 	Config.Codec = LatestRequest.codec();
 	Config.BitrateKbps = LatestRequest.bitrate_kbps();
 	Config.KeyframeInterval = LatestRequest.keyframe_interval();
 	Config.H264Profile = LatestRequest.profile();
-	if (!VideoEncoder->Configure(Config))
+	if (!EncoderPtr->Configure(Config))
 	{
 		return;
 	}
@@ -598,7 +602,6 @@ void UTempoCamera::OnRenderCompleted()
 	const double CaptureTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
 
 	UTextureRenderTarget2D* RTCapture = RT;
-	FTempoCameraVideoEncoder* EncoderPtr = VideoEncoder.Get();
 	ENQUEUE_RENDER_COMMAND(TempoCameraEncodeVideo)(
 		[EncoderPtr, RTCapture, CaptureTime, EncodedSequenceId](FRHICommandListImmediate&)
 		{
