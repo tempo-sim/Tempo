@@ -582,11 +582,11 @@ async def flow_move_actor():
 def _decode_lidar_scan(scan):
     """Reinterpret the packed scalar blobs into arrays — the client-side parse the benchmark measures."""
     return (
-        np.asarray(scan.distances_m, dtype=np.float32),
-        np.asarray(scan.intensities, dtype=np.float32),
-        np.asarray(scan.labels, dtype=np.uint32),
-        np.asarray(scan.azimuths_rad, dtype=np.float32),
-        np.asarray(scan.elevations_rad, dtype=np.float32),
+        np.frombuffer(scan.distances_m, dtype=np.float32),
+        np.frombuffer(scan.intensities, dtype=np.float32),
+        np.frombuffer(scan.labels, dtype=np.uint32),
+        np.frombuffer(scan.azimuths_rad, dtype=np.float32),
+        np.frombuffer(scan.elevations_rad, dtype=np.float32),
     )
 
 
