@@ -274,12 +274,16 @@ void TTextureRead<FCameraPixelWithDepth>::RespondToRequests(const TArray<FDepthI
 		TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraDecodeDepth);
 		DepthImage.set_width_px(ImageSize.X);
 		DepthImage.set_height_px(ImageSize.Y);
-		DepthImage.mutable_depths_m()->Resize(ImageSize.X * ImageSize.Y, 0.0);
+		// depths_m is a packed little-endian float32 blob. Size the byte buffer once and let the parallel
+		// workers write directly into its contiguous storage, mirroring the reflectivities/colors path.
+		std::string* const DepthsOut = DepthImage.mutable_depths_m();
+		DepthsOut->resize(static_cast<size_t>(ImageSize.X) * ImageSize.Y * sizeof(float));
+		float* const DepthsData = reinterpret_cast<float*>(DepthsOut->data());
 
-		ParallelFor(Image.Num(), [&DepthImage, this](int32 Idx)
+		ParallelFor(Image.Num(), [DepthsData, this](int32 Idx)
 		{
 			// FCameraPixelWithDepth::Depth returns centimeters; convert to meters for the wire.
-			DepthImage.set_depths_m(Idx, QuantityConverter<CM2M>::Convert(Image[Idx].Depth(MinDepth, MaxDepth, GTempoCamera_Max_Discrete_Depth)));
+			DepthsData[Idx] = QuantityConverter<CM2M>::Convert(Image[Idx].Depth(MinDepth, MaxDepth, GTempoCamera_Max_Discrete_Depth));
 		});
 
 		ExtractMeasurementHeader(TransmissionTime, DepthImage.mutable_header());

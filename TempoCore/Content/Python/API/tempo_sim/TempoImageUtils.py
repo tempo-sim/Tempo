@@ -65,7 +65,7 @@ async def _qt_event_loop(interval=1 / 30):
 
 def _build_depth_qimage(image):
     """Numpy + QImage construction. Thread-safe — QImage is reentrant."""
-    image_array = np.asarray(image.depths_m, dtype=np.float32).reshape(image.height_px, image.width_px)
+    image_array = np.frombuffer(image.depths_m, dtype=np.float32).reshape(image.height_px, image.width_px)
     image_array = np.reciprocal(image_array)
     min_val, max_val = image_array.min(), image_array.max()
     image_array = (image_array - min_val) / (max_val - min_val + 1e-6)

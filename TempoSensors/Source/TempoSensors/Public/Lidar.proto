@@ -24,16 +24,20 @@ message LidarScanSegment {
   Range azimuth_range_rad = 6;
   // Elevation sweep covered by this segment, in radians (right-handed, sign per Tempo lidar convention).
   Range elevation_range_rad = 7;
-  // Per-return distance to the hit, in meters. 0 = no return. Packed H-outer, V-inner.
-  repeated float distances_m = 8;
-  // Per-return reflected intensity in [0, 1]. Same layout as `distances_m`.
-  repeated float intensities = 9;
-  // Per-return semantic label (0 if labels disabled). Same layout as `distances_m`.
-  repeated uint32 labels = 10;
-  // Per-return azimuth in radians. Same layout as `distances_m`.
-  repeated float azimuths_rad = 11;
-  // Per-return elevation in radians. Same layout as `distances_m`.
-  repeated float elevations_rad = 12;
+  // Per-return distance to the hit, in meters. 0 = no return. Packed H-outer, V-inner. Opaque blob of
+  // little-endian float32, 4 bytes per return; length is 4 * horizontal_beams * vertical_beams. Carried
+  // as bytes rather than `repeated float` so clients reinterpret the buffer directly instead of paying a
+  // per-element decode cost.
+  bytes distances_m = 8;
+  // Per-return reflected intensity in [0, 1]. Same layout/encoding as `distances_m` (little-endian float32).
+  bytes intensities = 9;
+  // Per-return semantic label (0 if labels disabled). Same H-outer/V-inner layout as `distances_m`, but
+  // packed little-endian uint32 (4 bytes per return); length is 4 * horizontal_beams * vertical_beams.
+  bytes labels = 10;
+  // Per-return azimuth in radians. Same layout/encoding as `distances_m` (little-endian float32).
+  bytes azimuths_rad = 11;
+  // Per-return elevation in radians. Same layout/encoding as `distances_m` (little-endian float32).
+  bytes elevations_rad = 12;
   // Per-return packed 8-bit color, 3 bytes per return. Empty when color rendering is disabled
   // (no client has requested `include_color`). When non-empty, length is 3 * horizontal_beams *
   // vertical_beams and byte ordering is given by `color_encoding`. Per-return color for return

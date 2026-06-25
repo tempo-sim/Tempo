@@ -288,6 +288,15 @@ async fn stream_color(sensor: AvailableSensor, window: WindowProxy) {
     }
 }
 
+/// Reinterpret a packed little-endian float32 blob (depths_m, distances_m, etc.) as f32 values.
+/// The sensor protos carry these scalar fields as opaque bytes to skip a per-element decode.
+fn f32s_from_le_bytes(bytes: &[u8]) -> Vec<f32> {
+    bytes
+        .chunks_exact(4)
+        .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+        .collect()
+}
+
 async fn stream_depth(sensor: AvailableSensor, window: WindowProxy) {
     let key = format!("{}:{}:Depth", sensor.owner, sensor.name);
     let _guard = WindowGuard(window.clone());
@@ -304,9 +313,11 @@ async fn stream_depth(sensor: AvailableSensor, window: WindowProxy) {
             Ok(img) => {
                 // Visualize 1/depth so near surfaces have more contrast — matches
                 // _build_depth_qimage in TempoImageUtils.py.
+                // depths_m is a packed little-endian float32 blob; reinterpret once.
+                let depths = f32s_from_le_bytes(&img.depths_m);
                 let mut recip_mn = f32::INFINITY;
                 let mut recip_mx = f32::NEG_INFINITY;
-                for &d in &img.depths_m {
+                for &d in &depths {
                     let r = 1.0 / d;
                     if r.is_finite() {
                         if r < recip_mn {
@@ -322,8 +333,7 @@ async fn stream_depth(sensor: AvailableSensor, window: WindowProxy) {
                     recip_mx = 1.0;
                 }
                 let span = (recip_mx - recip_mn).max(1e-6);
-                let bytes: Vec<u8> = img
-                    .depths_m
+                let bytes: Vec<u8> = depths
                     .iter()
                     .map(|&d| {
                         let r = 1.0 / d;
@@ -665,10 +675,11 @@ impl LidarAccumulator {
             self.sequence_id = id;
             self.expected_segments = seg.scan_count;
         }
-        self.distances.extend_from_slice(&seg.distances_m);
-        self.intensities.extend_from_slice(&seg.intensities);
-        self.azimuths.extend_from_slice(&seg.azimuths_rad);
-        self.elevations.extend_from_slice(&seg.elevations_rad);
+        // The scalar fields are packed little-endian float32 blobs; reinterpret to f32 on append.
+        self.distances.extend(f32s_from_le_bytes(&seg.distances_m));
+        self.intensities.extend(f32s_from_le_bytes(&seg.intensities));
+        self.azimuths.extend(f32s_from_le_bytes(&seg.azimuths_rad));
+        self.elevations.extend(f32s_from_le_bytes(&seg.elevations_rad));
         self.received_segments += 1;
         self.expected_segments > 0 && self.received_segments == self.expected_segments
     }
@@ -816,8 +827,8 @@ async fn record_depth(sensor: AvailableSensor, dir: PathBuf) {
             Ok(img) => {
                 let path = dir.join(format!("frame_{:06}_{}x{}.f32", count, img.width_px, img.height_px));
                 if let Ok(mut f) = fs::File::create(&path) {
-                    let bytes: Vec<u8> = img.depths_m.iter().flat_map(|v| v.to_le_bytes()).collect();
-                    let _ = f.write_all(&bytes);
+                    // depths_m is already a packed little-endian float32 blob — write it straight out.
+                    let _ = f.write_all(&img.depths_m);
                 }
                 count += 1;
             }

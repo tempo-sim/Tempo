@@ -516,16 +516,24 @@ namespace
 		// Pre-size the packed repeated-scalar output fields so parallel workers can write
 		// directly into their contiguous backing storage — no intermediate per-return objects.
 		// Azimuths/elevations are per-return to leave room for non-gridded beam patterns.
-		ScanSegmentOut.mutable_distances_m()->Resize(NumReturns, 0.0f);
-		ScanSegmentOut.mutable_intensities()->Resize(NumReturns, 0.0f);
-		ScanSegmentOut.mutable_labels()->Resize(NumReturns, 0u);
-		ScanSegmentOut.mutable_azimuths_rad()->Resize(NumReturns, 0.0f);
-		ScanSegmentOut.mutable_elevations_rad()->Resize(NumReturns, 0.0f);
-		float* const DistancesData = ScanSegmentOut.mutable_distances_m()->mutable_data();
-		float* const IntensitiesData = ScanSegmentOut.mutable_intensities()->mutable_data();
-		uint32_t* const LabelsData = ScanSegmentOut.mutable_labels()->mutable_data();
-		float* const AzimuthsData = ScanSegmentOut.mutable_azimuths_rad()->mutable_data();
-		float* const ElevationsData = ScanSegmentOut.mutable_elevations_rad()->mutable_data();
+		// Packed little-endian scalar blobs (float32 for distances/intensities/azimuths/elevations,
+		// uint32 for labels). Size each byte buffer once and write directly into its contiguous storage,
+		// mirroring the reflectivities/colors path below so workers never touch repeated-field internals.
+		std::string* const DistancesOut = ScanSegmentOut.mutable_distances_m();
+		DistancesOut->resize(static_cast<size_t>(NumReturns) * sizeof(float));
+		float* const DistancesData = reinterpret_cast<float*>(DistancesOut->data());
+		std::string* const IntensitiesOut = ScanSegmentOut.mutable_intensities();
+		IntensitiesOut->resize(static_cast<size_t>(NumReturns) * sizeof(float));
+		float* const IntensitiesData = reinterpret_cast<float*>(IntensitiesOut->data());
+		std::string* const LabelsOut = ScanSegmentOut.mutable_labels();
+		LabelsOut->resize(static_cast<size_t>(NumReturns) * sizeof(uint32_t));
+		uint32_t* const LabelsData = reinterpret_cast<uint32_t*>(LabelsOut->data());
+		std::string* const AzimuthsOut = ScanSegmentOut.mutable_azimuths_rad();
+		AzimuthsOut->resize(static_cast<size_t>(NumReturns) * sizeof(float));
+		float* const AzimuthsData = reinterpret_cast<float*>(AzimuthsOut->data());
+		std::string* const ElevationsOut = ScanSegmentOut.mutable_elevations_rad();
+		ElevationsOut->resize(static_cast<size_t>(NumReturns) * sizeof(float));
+		float* const ElevationsData = reinterpret_cast<float*>(ElevationsOut->data());
 
 		// Reflectivity blob: 1 byte per return, populated in both color and no-color modes. Same
 		// H-outer/V-inner layout as the scalar fields above (index h * VerticalBeams + v).

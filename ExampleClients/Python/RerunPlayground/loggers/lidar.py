@@ -24,11 +24,11 @@ from ..streaming import pump
 def _segment_arrays(scan):
     """Return per-return (V, H) arrays for one segment."""
     h, v = scan.horizontal_beams, scan.vertical_beams
-    distances = np.asarray(scan.distances_m, dtype=np.float32).reshape(h, v).T
-    intensities = np.asarray(scan.intensities, dtype=np.float32).reshape(h, v).T
-    labels = np.asarray(scan.labels, dtype=np.uint32).reshape(h, v).T
-    azimuths = np.asarray(scan.azimuths_rad, dtype=np.float32).reshape(h, v).T
-    elevations = np.asarray(scan.elevations_rad, dtype=np.float32).reshape(h, v).T
+    distances = np.frombuffer(scan.distances_m, dtype=np.float32).reshape(h, v).T
+    intensities = np.frombuffer(scan.intensities, dtype=np.float32).reshape(h, v).T
+    labels = np.frombuffer(scan.labels, dtype=np.uint32).reshape(h, v).T
+    azimuths = np.frombuffer(scan.azimuths_rad, dtype=np.float32).reshape(h, v).T
+    elevations = np.frombuffer(scan.elevations_rad, dtype=np.float32).reshape(h, v).T
 
     colors_rgb = None
     if scan.colors and len(scan.colors) == 3 * h * v:
