@@ -7,6 +7,7 @@
 #include "TempoServer.h"
 
 #include "CoreMinimal.h"
+#include "HAL/CriticalSection.h"
 #include "Templates/PimplPtr.h"
 #include "Engine/Scene.h"
 #include "SceneTypes.h"
@@ -425,6 +426,13 @@ protected:
 	TArray<FDepthImageRequest> PendingDepthImageRequests;
 	TArray<FBoundingBoxesRequest> PendingBoundingBoxesRequests;
 	TArray<FVideoRequest> PendingVideoRequests;
+
+	// Guards the video state shared between the game and render threads: PendingVideoRequests (Add
+	// in RequestMeasurement, Empty in SendMeasurements) and the lazy publication of the VideoEncoder
+	// pointer below. OnRenderCompleted (render thread) snapshots both under this lock, so it never
+	// observes a half-constructed encoder, or calls Last() on an array a concurrent Empty() just
+	// cleared. (The encoder's own drained-packet handoff is a separate MPSC TQueue, safe on its own.)
+	FCriticalSection VideoStateMutex;
 
 	// H.264 encoder shared across all subscribed video stream clients. Created lazily on the first
 	// VideoRequest, reconfigured on size/codec/profile/bitrate/KFI changes, kept alive while any
