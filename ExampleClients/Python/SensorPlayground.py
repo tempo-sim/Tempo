@@ -8,6 +8,7 @@ import grpc
 import io
 import math
 import numpy as np
+import os
 import random
 import tempfile
 
@@ -559,6 +560,145 @@ async def flow_move_actor():
 
 
 # ---------------------------------------------------------------------------
+# Throughput benchmark (non-interactive diagnostic)
+# ---------------------------------------------------------------------------
+#
+# Pinpoints where per-frame time goes by subscribing to every available sensor
+# stream and measuring sustained FPS with a configurable amount of client-side
+# work. Unlike the interactive display path, the benchmark consumes every frame
+# (no bounded queue, no frame dropping), so a slow client backpressures the
+# server exactly the way a real recording client does. That makes it a faithful
+# test of whether the bottleneck is the server (render + transport) or the client
+# (decode + disk).
+#
+# Staged experiment — run all three and compare the aggregate FPS:
+#   --benchmark --no-decode --no-save   render + transport ceiling (discard frames)
+#   --benchmark --no-save               + client-side decode (depth/lidar float parse)
+#   --benchmark                         + disk write (full recording-like load)
+#
+# If FPS is high at stage 1 and collapses at stage 2, the client decode is the
+# bottleneck, not the render. If it only collapses at stage 3, it's disk I/O.
+
+def _decode_lidar_scan(scan):
+    """Reinterpret the packed scalar blobs into arrays — the client-side parse the benchmark measures."""
+    return (
+        np.frombuffer(scan.distances_m, dtype=np.float32),
+        np.frombuffer(scan.intensities, dtype=np.float32),
+        np.frombuffer(scan.labels, dtype=np.uint32),
+        np.frombuffer(scan.azimuths_rad, dtype=np.float32),
+        np.frombuffer(scan.elevations_rad, dtype=np.float32),
+    )
+
+
+def _benchmark_spec(sensor, measurement_type, out_dir):
+    """Return (source, decode_fn, save_fn) for one measurement stream, or None if unsupported.
+
+    decode_fn(msg) -> decoded artifact; save_fn(artifact, index) -> None writes it to out_dir.
+    save_fn is None when saving is disabled (out_dir is None).
+    """
+    name, owner = sensor.name, sensor.owner
+    prefix = f"{name}_{measurement_type_string(measurement_type)}"
+
+    if measurement_type == Sensors.MT_COLOR_IMAGE:
+        source, decode_fn = ts.stream_color_images(sensor=name, owner=owner), tiu._build_color_qimage
+    elif measurement_type == Sensors.MT_DEPTH_IMAGE:
+        source, decode_fn = ts.stream_depth_images(sensor=name, owner=owner), tiu._build_depth_qimage
+    elif measurement_type == Sensors.MT_LABEL_IMAGE:
+        source, decode_fn = ts.stream_label_images(sensor=name, owner=owner), tiu._build_label_qimage
+    elif measurement_type == Sensors.MT_LIDAR_SCAN:
+        source = ts.stream_lidar_scans(sensor=name, owner=owner, include_color=False)
+        decode_fn = _decode_lidar_scan
+    else:
+        return None  # Encoded video isn't part of the raw-float-parse diagnostic.
+
+    save_fn = None
+    if out_dir is not None:
+        if measurement_type == Sensors.MT_LIDAR_SCAN:
+            def save_fn(arrays, idx, out_dir=out_dir, prefix=prefix):
+                np.savez(os.path.join(out_dir, f"{prefix}_{idx:06d}.npz"),
+                         distances=arrays[0], intensities=arrays[1], labels=arrays[2],
+                         azimuths=arrays[3], elevations=arrays[4])
+        else:
+            def save_fn(q_image, idx, out_dir=out_dir, prefix=prefix):
+                q_image.save(os.path.join(out_dir, f"{prefix}_{idx:06d}.jpg"), "JPG", 90)
+    return source, decode_fn, save_fn
+
+
+async def _benchmark_stream(label, source, decode_fn, save_fn, do_decode, stats):
+    """Consume `source`, optionally decoding/saving each frame off the event loop, counting frames.
+
+    Decode and save run via asyncio.to_thread so concurrent streams overlap GIL-releasing work
+    (np.frombuffer, JPEG encode) the same way the real client does.
+    """
+    count = 0
+    try:
+        async for msg in source:
+            if do_decode:
+                artifact = await asyncio.to_thread(decode_fn, msg)
+                if save_fn is not None:
+                    await asyncio.to_thread(save_fn, artifact, count)
+            count += 1
+            stats[label] = count
+    except asyncio.CancelledError:
+        raise
+    except grpc.aio._call.AioRpcError as e:
+        print(f"  Stream {label} error: {e}")
+
+
+async def run_benchmark(seconds, do_decode, do_save):
+    print("\n=== Sensor Throughput Benchmark ===")
+    stages = ["receive"] + (["decode"] if do_decode else []) + (["save"] if do_decode and do_save else [])
+    print(f"Stages: {' + '.join(stages)}    window: {seconds:.0f}s")
+    print("Consuming every frame (no drop) so a slow client backpressures the server,\n"
+          "mirroring a real recording client.")
+
+    sensors = await get_available_sensors()
+    if not sensors:
+        print("  No sensors found. Is the simulation running?")
+        return
+
+    out_dir = None
+    if do_decode and do_save:
+        out_dir = tempfile.mkdtemp(prefix="tempo_benchmark_")
+        print(f"  Saving to: {out_dir}")
+
+    stats = {}
+    tasks = []
+    for sensor in sensors:
+        for measurement_type in sensor.measurement_types:
+            spec = _benchmark_spec(sensor, measurement_type, out_dir)
+            if spec is None:
+                continue
+            source, decode_fn, save_fn = spec
+            label = f"{sensor.owner}:{sensor.name}:{measurement_type_string(measurement_type)}"
+            stats[label] = 0
+            tasks.append(asyncio.create_task(
+                _benchmark_stream(label, source, decode_fn, save_fn, do_decode, stats)))
+
+    if not tasks:
+        print("  No supported sensor streams available.")
+        return
+
+    print(f"\n  Measuring {len(tasks)} stream(s) for {seconds:.0f}s...")
+    await asyncio.sleep(seconds)
+
+    for task in tasks:
+        task.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
+
+    print("\n  Per-stream throughput:")
+    total = 0
+    for label in sorted(stats):
+        count = stats[label]
+        total += count
+        print(f"    {label:<48} {count / seconds:7.2f} fps  ({count} frames)")
+    print(f"\n  Aggregate: {total / seconds:.2f} fps across {len(stats)} stream(s) "
+          f"({total} frames in {seconds:.0f}s).")
+    if out_dir is not None:
+        print(f"  Files saved to: {out_dir}")
+
+
+# ---------------------------------------------------------------------------
 # Main menu
 # ---------------------------------------------------------------------------
 
@@ -583,10 +723,25 @@ async def main():
     parser.add_argument('--port', required=False, type=int, help="Port Tempo gRPC server is using", default=10001)
     parser.add_argument('--display-scale', required=False, type=float, default=0.5,
                         help="Scale factor for displayed camera images (default: 0.5)")
+    parser.add_argument('--benchmark', action='store_true',
+                        help="Non-interactive throughput diagnostic: subscribe to every sensor stream, "
+                             "consume every frame (no drop), measure FPS, then exit.")
+    parser.add_argument('--benchmark-seconds', type=float, default=10.0,
+                        help="Benchmark measurement window in seconds (default: 10).")
+    parser.add_argument('--no-decode', action='store_true',
+                        help="Benchmark only: receive and discard frames without decoding "
+                             "(measures the render + transport ceiling).")
+    parser.add_argument('--no-save', action='store_true',
+                        help="Benchmark only: decode frames but don't write them to disk "
+                             "(isolates client decode cost from disk I/O).")
     args = parser.parse_args()
 
     if args.ip != "0.0.0.0" or args.port != 10001:
         await tempo_sim.set_server(address=args.ip, port=args.port)
+
+    if args.benchmark:
+        await run_benchmark(args.benchmark_seconds, do_decode=not args.no_decode, do_save=not args.no_save)
+        return
 
     sensor_streams = {}
     record_streams = {}
