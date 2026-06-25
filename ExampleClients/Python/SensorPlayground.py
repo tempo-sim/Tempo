@@ -582,16 +582,21 @@ async def flow_move_actor():
 def _decode_lidar_scan(scan):
     """Reinterpret the packed scalar blobs into arrays — the client-side parse the benchmark measures."""
     return (
-        np.frombuffer(scan.distances_m, dtype=np.float32),
-        np.frombuffer(scan.intensities, dtype=np.float32),
-        np.frombuffer(scan.labels, dtype=np.uint32),
-        np.frombuffer(scan.azimuths_rad, dtype=np.float32),
-        np.frombuffer(scan.elevations_rad, dtype=np.float32),
+        np.asarray(scan.distances_m, dtype=np.float32),
+        np.asarray(scan.intensities, dtype=np.float32),
+        np.asarray(scan.labels, dtype=np.uint32),
+        np.asarray(scan.azimuths_rad, dtype=np.float32),
+        np.asarray(scan.elevations_rad, dtype=np.float32),
     )
 
 
 def _benchmark_spec(sensor, measurement_type, out_dir):
-    """Return (source, decode_fn, save_fn) for one measurement stream, or None if unsupported.
+    """Return (stream_fn, kwargs, decode_fn, save_fn) for one measurement stream, or None if unsupported.
+
+    stream_fn(**kwargs) must be invoked from inside an async function: the ts.stream_* helpers are
+    curio @awaitable dispatchers that return a *sync* generator when called from a sync frame and an
+    async generator only when the immediate caller is a coroutine. So we hand back the callable and
+    its args rather than the generator, and _benchmark_stream calls it in its own async body.
 
     decode_fn(msg) -> decoded artifact; save_fn(artifact, index) -> None writes it to out_dir.
     save_fn is None when saving is disabled (out_dir is None).
@@ -600,13 +605,14 @@ def _benchmark_spec(sensor, measurement_type, out_dir):
     prefix = f"{name}_{measurement_type_string(measurement_type)}"
 
     if measurement_type == Sensors.MT_COLOR_IMAGE:
-        source, decode_fn = ts.stream_color_images(sensor=name, owner=owner), tiu._build_color_qimage
+        stream_fn, kwargs, decode_fn = ts.stream_color_images, dict(sensor=name, owner=owner), tiu._build_color_qimage
     elif measurement_type == Sensors.MT_DEPTH_IMAGE:
-        source, decode_fn = ts.stream_depth_images(sensor=name, owner=owner), tiu._build_depth_qimage
+        stream_fn, kwargs, decode_fn = ts.stream_depth_images, dict(sensor=name, owner=owner), tiu._build_depth_qimage
     elif measurement_type == Sensors.MT_LABEL_IMAGE:
-        source, decode_fn = ts.stream_label_images(sensor=name, owner=owner), tiu._build_label_qimage
+        stream_fn, kwargs, decode_fn = ts.stream_label_images, dict(sensor=name, owner=owner), tiu._build_label_qimage
     elif measurement_type == Sensors.MT_LIDAR_SCAN:
-        source = ts.stream_lidar_scans(sensor=name, owner=owner, include_color=False)
+        stream_fn = ts.stream_lidar_scans
+        kwargs = dict(sensor=name, owner=owner, include_color=False)
         decode_fn = _decode_lidar_scan
     else:
         return None  # Encoded video isn't part of the raw-float-parse diagnostic.
@@ -621,28 +627,36 @@ def _benchmark_spec(sensor, measurement_type, out_dir):
         else:
             def save_fn(q_image, idx, out_dir=out_dir, prefix=prefix):
                 q_image.save(os.path.join(out_dir, f"{prefix}_{idx:06d}.jpg"), "JPG", 90)
-    return source, decode_fn, save_fn
+    return stream_fn, kwargs, decode_fn, save_fn
 
 
-async def _benchmark_stream(label, source, decode_fn, save_fn, do_decode, stats):
-    """Consume `source`, optionally decoding/saving each frame off the event loop, counting frames.
+async def _benchmark_stream(label, stream_fn, kwargs, decode_fn, save_fn, do_decode, stats):
+    """Open `stream_fn(**kwargs)` and consume it, optionally decoding/saving each frame, counting frames.
 
-    Decode and save run via asyncio.to_thread so concurrent streams overlap GIL-releasing work
-    (np.frombuffer, JPEG encode) the same way the real client does.
+    The stream is opened here (not in _benchmark_spec) so curio's @awaitable dispatch sees a coroutine
+    caller and yields the async generator. Frames are counted on receipt (before decode/save) so the
+    receive rate is still measured even if decode/save fails. Decode and save run via asyncio.to_thread
+    so concurrent streams overlap GIL-releasing work (np.frombuffer, JPEG encode) like the real client.
     """
     count = 0
+    work_errored = False
     try:
+        source = stream_fn(**kwargs)
         async for msg in source:
-            if do_decode:
-                artifact = await asyncio.to_thread(decode_fn, msg)
-                if save_fn is not None:
-                    await asyncio.to_thread(save_fn, artifact, count)
             count += 1
             stats[label] = count
+            if do_decode and not work_errored:
+                try:
+                    artifact = await asyncio.to_thread(decode_fn, msg)
+                    if save_fn is not None:
+                        await asyncio.to_thread(save_fn, artifact, count - 1)
+                except Exception as e:
+                    work_errored = True
+                    print(f"  Stream {label}: decode/save failed, counting receive only — {e!r}")
     except asyncio.CancelledError:
         raise
-    except grpc.aio._call.AioRpcError as e:
-        print(f"  Stream {label} error: {e}")
+    except Exception as e:
+        print(f"  Stream {label}: receive failed after {count} frames — {e!r}")
 
 
 async def run_benchmark(seconds, do_decode, do_save):
@@ -657,6 +671,14 @@ async def run_benchmark(seconds, do_decode, do_save):
         print("  No sensors found. Is the simulation running?")
         return
 
+    if do_decode:
+        # Image decode/save build QImages and use Qt's JPEG writer, which need a QApplication —
+        # the interactive path creates one in TempoImageUtils, so do the same here.
+        try:
+            tiu._get_app()
+        except Exception as e:
+            print(f"  Warning: could not create QApplication ({e!r}); image decode/save may fail.")
+
     out_dir = None
     if do_decode and do_save:
         out_dir = tempfile.mkdtemp(prefix="tempo_benchmark_")
@@ -669,11 +691,11 @@ async def run_benchmark(seconds, do_decode, do_save):
             spec = _benchmark_spec(sensor, measurement_type, out_dir)
             if spec is None:
                 continue
-            source, decode_fn, save_fn = spec
+            stream_fn, kwargs, decode_fn, save_fn = spec
             label = f"{sensor.owner}:{sensor.name}:{measurement_type_string(measurement_type)}"
             stats[label] = 0
             tasks.append(asyncio.create_task(
-                _benchmark_stream(label, source, decode_fn, save_fn, do_decode, stats)))
+                _benchmark_stream(label, stream_fn, kwargs, decode_fn, save_fn, do_decode, stats)))
 
     if not tasks:
         print("  No supported sensor streams available.")
