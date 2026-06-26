@@ -74,7 +74,7 @@ async def stream_depth(sensor):
     entity = conv.sensor_entity(sensor.owner, sensor.name)
 
     def handle(image):
-        arr = np.asarray(image.depths_m, dtype=np.float32).reshape(image.height_px, image.width_px)
+        arr = np.frombuffer(image.depths_m, dtype=np.float32).reshape(image.height_px, image.width_px)
         _log_pose(entity, image.header)
         # Values are already in meters, so one depth unit == one meter.
         rr.log(f"{entity}/depth", rr.DepthImage(arr, meter=1.0))

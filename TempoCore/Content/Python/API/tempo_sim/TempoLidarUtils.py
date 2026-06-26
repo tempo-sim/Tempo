@@ -167,14 +167,16 @@ class PointCloudViewer:
     def accumulate_scan_data(self, scan):
         """Numpy-only accumulation of a segment into the current scan. Returns True when
         the scan is complete. Safe to run from a worker thread — touches no Qt/VTK state."""
-        # Single C-level copy per field from the packed repeated-scalar proto fields.
-        # Layout is H-outer, V-inner (see TempoLidar.cpp Decode); transpose to (V, H).
+        # Zero-copy views over the packed little-endian scalar blobs (see TempoLidar.cpp Decode):
+        # frombuffer reinterprets the bytes directly, no per-element decode. Layout is H-outer,
+        # V-inner; transpose to (V, H). The views are read-only, but every downstream op
+        # (concatenate, flatten, masked indexing) produces fresh arrays, so nothing mutates them.
         h, v = scan.horizontal_beams, scan.vertical_beams
-        distances = np.asarray(scan.distances_m, dtype=np.float32).reshape(h, v).T
-        intensities = np.asarray(scan.intensities, dtype=np.float32).reshape(h, v).T
-        labels = np.asarray(scan.labels, dtype=np.uint32).reshape(h, v).T
-        azimuths = np.asarray(scan.azimuths_rad, dtype=np.float32).reshape(h, v).T
-        elevations = np.asarray(scan.elevations_rad, dtype=np.float32).reshape(h, v).T
+        distances = np.frombuffer(scan.distances_m, dtype=np.float32).reshape(h, v).T
+        intensities = np.frombuffer(scan.intensities, dtype=np.float32).reshape(h, v).T
+        labels = np.frombuffer(scan.labels, dtype=np.uint32).reshape(h, v).T
+        azimuths = np.frombuffer(scan.azimuths_rad, dtype=np.float32).reshape(h, v).T
+        elevations = np.frombuffer(scan.elevations_rad, dtype=np.float32).reshape(h, v).T
         colors_rgb = self._decode_colors(scan, h, v)
         reflectivities = self._decode_reflectivities(scan, h, v)
 

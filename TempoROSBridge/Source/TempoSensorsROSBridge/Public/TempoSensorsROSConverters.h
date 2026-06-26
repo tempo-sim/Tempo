@@ -122,8 +122,8 @@ struct TImplicitToROSConverter<TempoSensors::DepthImage>: TToROSConverter<sensor
 	{
 		ToType ToValue;
 		ToValue.encoding = "32FC1";
-		ToValue.data.resize(TempoValue.depths_m().size() * 4);
-		FMemory::Memcpy(&ToValue.data[0], &TempoValue.depths_m()[0], TempoValue.depths_m().size() * 4);
+		// depths_m is already a packed little-endian float32 blob (4 bytes/pixel), matching 32FC1.
+		ToValue.data.assign(TempoValue.depths_m().begin(), TempoValue.depths_m().end());
 		ToValue.width = TempoValue.width_px();
 		ToValue.height = TempoValue.height_px();
 		ToValue.header.frame_id = TempoValue.header().owner() + "/" + TempoValue.header().sensor();

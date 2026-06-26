@@ -67,7 +67,8 @@ int main(int argc, char** argv) {
         std::printf("  frame %d: %d points (%dx%d), distances=%d, intensities=%d\n",
                     frames, segment.scan_count(),
                     segment.vertical_beams(), segment.horizontal_beams(),
-                    segment.distances_m_size(), segment.intensities_size());
+                    static_cast<int>(segment.distances_m().size() / sizeof(float)),
+                    static_cast<int>(segment.intensities().size() / sizeof(float)));
         ++frames;
     }
     stream.cancel();

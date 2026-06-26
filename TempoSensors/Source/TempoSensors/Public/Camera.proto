@@ -22,7 +22,10 @@ message DepthImage {
   // Image height in pixels.
   uint32 height_px = 3;
   // Depth along the camera axis for every pixel, in meters. Row-major, width_px * height_px entries.
-  repeated float depths_m = 4;
+  // Packed little-endian float32, 4 bytes per pixel; length is 4 * width_px * height_px. Carried as an
+  // opaque blob rather than `repeated float` so clients can reinterpret the buffer directly instead of
+  // paying a per-element decode cost.
+  bytes depths_m = 4;
 }
 
 message LabelImage {
