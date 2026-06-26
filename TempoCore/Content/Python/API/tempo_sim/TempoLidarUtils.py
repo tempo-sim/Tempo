@@ -279,7 +279,12 @@ class PointCloudViewer:
         # configuration). The latter is detected by the shape of `colors`.
         new_is_rgb = colors.ndim == 2
         if self.point_cloud is not None and (new_num_points != self.num_points or new_is_rgb != self.actor_is_rgb):
-            self.plotter.remove_actor(self.actor)
+            # render=False is essential: with the default (render=True) remove_actor paints a
+            # frame with the cloud gone before add_points re-adds it below, producing a visible
+            # strobe/flash. The point count changes nearly every frame (the valid-return count
+            # fluctuates), so this recreate path runs constantly. Suppressing the intermediate
+            # render keeps the old cloud on screen until the next render shows the new one.
+            self.plotter.remove_actor(self.actor, render=False)
             self.point_cloud = None
 
         self.num_points = new_num_points
