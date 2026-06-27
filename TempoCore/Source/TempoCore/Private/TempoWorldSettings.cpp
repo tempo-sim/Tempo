@@ -94,10 +94,10 @@ float ATempoWorldSettings::FixupDeltaSeconds(float DeltaSeconds, float RealDelta
 
 	const UTempoCoreSettings* Settings = GetDefault<UTempoCoreSettings>();
 
-	// Count down a requested step on every simulated frame, regardless of time mode. This lets Step
-	// advance a single frame in WallClock mode too (matching UE's native frame advance), not just in
-	// FixedStep mode. The re-pause happens at the end of this frame in OnWorldTickEnd.
-	if (StepsToSimulate.IsSet())
+	// Count down a requested step on every simulated frame, regardless of time mode, so Step works
+	// in WallClock mode too. The re-pause happens at the end of this frame in OnWorldTickEnd.
+	const bool bStepping = StepsToSimulate.IsSet();
+	if (bStepping)
 	{
 		--StepsToSimulate.GetValue();
 	}
@@ -106,6 +106,15 @@ float ATempoWorldSettings::FixupDeltaSeconds(float DeltaSeconds, float RealDelta
 	{
 	case ETimeMode::WallClock:
 		{
+			// A discrete step advances by a fixed quantum (the same one FixedStep uses) rather than
+			// measured real time. The measured WallClock delta here is just the real time between
+			// unpausing and this call - sub-frame input-to-tick latency that varies by machine - so
+			// it's meaningless for a single step. A fixed quantum makes a step reproducible.
+			if (bStepping)
+			{
+				return 1.0 / Settings->GetSimulatedStepsPerSecond();
+			}
+
 			// RealDeltaSeconds is not reliable, so we compute our own.
 			const double TimeSinceRealTimeBegan = FPlatformTime::ToSeconds64(FPlatformTime::Cycles64() - CyclesWhenTimeModeChanged);
 			const float WallClockDeltaSeconds = TimeSinceRealTimeBegan - (SimTime - SimTimeWhenTimeModeChanged);
