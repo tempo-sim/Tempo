@@ -671,6 +671,43 @@ jobs:
           ${{ github.workspace }}/${{ inputs.project_root }}/Plugins/**/Binaries/**
           .engine-ddc-cache/**
         key: ${{ steps.repo_lowercase.outputs.REPO_LOWERCASE }}-build-${{ env.UNREAL_VERSION }}-${{ github.sha }}
+    - name: Prune Old Build Caches (keep only the one just saved)
+      # Build cache keys are immutable and rolling (suffixed with the commit SHA), so each main
+      # build saves a new entry and the old same-version ones linger until the 10GB LRU sweep
+      # evicts them - which can starve a less-frequently-built engine version. Delete every cache
+      # sharing this version's prefix except the one this run just saved, leaving exactly one per
+      # engine version. Requires 'actions: write' on the calling job; if it wasn't granted we warn
+      # and continue rather than fail, so downstream callers that omit it still build fine.
+      if: ${{ github.event_name != 'pull_request_target' && github.ref == format('refs/heads/{0}', inputs.cache_branch) }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        PREFIX: ${{ steps.repo_lowercase.outputs.REPO_LOWERCASE }}-build-${{ env.UNREAL_VERSION }}-
+        KEEP: ${{ steps.repo_lowercase.outputs.REPO_LOWERCASE }}-build-${{ env.UNREAL_VERSION }}-${{ github.sha }}
+      run: |
+        warn_and_skip() {
+          echo "::warning title=Build cache not pruned::Could not prune old '${PREFIX}*' caches ($1). Grant 'actions: write' to the job calling build_and_package.yml to keep exactly one build cache per engine version; otherwise stale same-version caches accumulate and get LRU-evicted at the 10GB limit."
+          exit 0
+        }
+        # The trailing '-' in PREFIX keeps e.g. '5.7-' from matching '5.70-'. startswith filtering
+        # in jq avoids any ambiguity in how 'gh cache list --key' prefix-matches.
+        ids=$(gh cache list --limit 100 --json id,key \
+                --jq ".[] | select(.key | startswith(\"$PREFIX\")) | select(.key != \"$KEEP\") | .id" 2>/dev/null) \
+          || warn_and_skip "listing caches failed - missing 'actions: read'/'actions: write'?"
+        if [ -z "$ids" ]; then
+          echo "No stale build caches to prune for prefix '${PREFIX}'."
+          exit 0
+        fi
+        failed=0
+        while read -r id; do
+          [ -z "$id" ] && continue
+          if gh cache delete "$id" 2>/dev/null; then
+            echo "Deleted stale build cache id=$id"
+          else
+            failed=1
+          fi
+        done <<< "$ids"
+        [ "$failed" -eq 0 ] || warn_and_skip "a delete was denied - missing 'actions: write'?"
     - name: Check Free Space (if using GitHub-hosted runner)
       if: ${{ contains(runner.name, 'Github') && contains(runner.name, 'Actions') }}
       run: df -h / && df -h /mnt

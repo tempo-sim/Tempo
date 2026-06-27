@@ -21,6 +21,7 @@ jobs:
       contents: read
       pull-requests: write
       packages: read
+      actions: write # prune stale build caches (one per engine version)
     uses: ./.github/workflows/build_and_package.yml
     strategy:
       matrix:
