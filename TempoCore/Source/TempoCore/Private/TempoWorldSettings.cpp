@@ -246,8 +246,13 @@ void ATempoWorldSettings::SetPaused(bool bPaused)
 	else if (GEditor && GetWorld() && GetWorld()->IsPlayInEditor())
 	{
 		// Simulate-In-Editor runs without a player controller, so the pauser-player-state path is
-		// unavailable. Drive the editor's PIE pause directly (SetPauserPlayerState, and the mirror
-		// it normally triggers, won't fire in this case).
+		// unavailable. Run the unpause bookkeeping SetPauserPlayerState would have driven via
+		// OnUnpaused() (resetting the step count and re-anchoring wall-clock time), then drive the
+		// editor's PIE pause directly.
+		if (!bPaused)
+		{
+			OnUnpaused();
+		}
 		MirrorPauseToEditor(bPaused);
 	}
 #endif
