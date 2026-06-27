@@ -21,6 +21,10 @@
 #include "Kismet/GameplayStatics.h"
 #include "Scalability.h"
 
+#if WITH_EDITOR
+#include "Editor.h"
+#endif
+
 using TempoCoreService = TempoCore::TempoCoreService;
 using TempoCoreAsyncService = TempoCore::TempoCoreService::AsyncService;
 using LoadLevelRequest = TempoCore::LoadLevelRequest;
@@ -165,6 +169,16 @@ void UTempoCoreServiceSubsystem::GetAvailableLevels(const GetAvailableLevelsRequ
 
 void UTempoCoreServiceSubsystem::Quit(const TempoCore::Empty& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const
 {
+#if WITH_EDITOR
+	// In the editor, end the PIE session rather than tearing down the whole editor process.
+	if (GEditor && GEditor->IsPlaySessionInProgress())
+	{
+		GEditor->RequestEndPlayMap();
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status_OK);
+		return;
+	}
+#endif
+
 	RequestEngineExit(TEXT("TempoCore API received quit request"));
 
 	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status_OK);
