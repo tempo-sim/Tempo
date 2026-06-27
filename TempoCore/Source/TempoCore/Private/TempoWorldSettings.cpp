@@ -44,6 +44,11 @@ void ATempoWorldSettings::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	{
 		FirePendingStepCompletion(ETempoStepResult::AbortedByExternalPause);
 	}
+	else if (TickEndHandle.IsValid())
+	{
+		FWorldDelegates::OnWorldTickEnd.Remove(TickEndHandle);
+		TickEndHandle.Reset();
+	}
 
 	GetMutableDefault<UTempoCoreSettings>()->TempoCoreTimeSettingsChangedEvent.Remove(SettingsChangedHandle);
 
@@ -96,9 +101,9 @@ float ATempoWorldSettings::FixupDeltaSeconds(float DeltaSeconds, float RealDelta
 		}
 	case ETimeMode::FixedStep:
 		{
-			if (StepsToSimulate.IsSet() && --StepsToSimulate.GetValue() == 0)
+			if (StepsToSimulate.IsSet())
 			{
-				SetPaused(true);
+				--StepsToSimulate.GetValue();
 			}
 			const float FixedStepDeltaSeconds = static_cast<double>(++FixedStepsCount) / Settings->GetSimulatedStepsPerSecond() - SimTime;
 			if (ensureAlwaysMsgf(FixedStepDeltaSeconds >= 0.0, TEXT("FixedStepDeltaSeconds was not positive: %f"), FixedStepDeltaSeconds))
@@ -154,6 +159,12 @@ bool ATempoWorldSettings::Step(int32 NumSteps, TFunction<void(ETempoStepResult)>
 	if (OnComplete)
 	{
 		PendingStepCompletion = MoveTemp(OnComplete);
+	}
+
+	// Pause and fire completion at the end of the final stepped frame (not during FixupDeltaSeconds),
+	// so the stepped frame's actor ticks observe IsPaused() == false.
+	if (!TickEndHandle.IsValid())
+	{
 		TickEndHandle = FWorldDelegates::OnWorldTickEnd.AddUObject(this, &ATempoWorldSettings::OnWorldTickEnd);
 	}
 
@@ -162,13 +173,25 @@ bool ATempoWorldSettings::Step(int32 NumSteps, TFunction<void(ETempoStepResult)>
 
 void ATempoWorldSettings::OnWorldTickEnd(UWorld* World, ELevelTick TickType, float DeltaSeconds)
 {
-	if (World != GetWorld() || !PendingStepCompletion)
+	if (World != GetWorld())
 	{
 		return;
 	}
 
-	if (StepsToSimulate.IsSet() && StepsToSimulate.GetValue() == 0)
+	if (!StepsToSimulate.IsSet())
 	{
+		// The step was aborted (e.g. an external pause or unpause). Stop listening.
+		if (TickEndHandle.IsValid())
+		{
+			FWorldDelegates::OnWorldTickEnd.Remove(TickEndHandle);
+			TickEndHandle.Reset();
+		}
+		return;
+	}
+
+	if (StepsToSimulate.GetValue() == 0)
+	{
+		SetPaused(true);
 		FirePendingStepCompletion(ETempoStepResult::Completed);
 	}
 }
