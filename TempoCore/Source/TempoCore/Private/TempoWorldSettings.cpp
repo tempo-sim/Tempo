@@ -102,6 +102,18 @@ float ATempoWorldSettings::FixupDeltaSeconds(float DeltaSeconds, float RealDelta
 		--StepsToSimulate.GetValue();
 	}
 
+#if WITH_EDITOR
+	// On the final stepped frame, set the engine's frame-step flag, exactly as the editor's "Advance
+	// Single Frame" button does. The renderer treats a frame-stepped frame as not paused (see
+	// FSceneView's bWorldIsPaused), which keeps motion blur / TAA from smearing when the camera is
+	// moved. Without it, a Tempo-initiated step re-pauses (in OnWorldTickEnd) before the frame is
+	// rendered, so the render sees a paused world and leaves the smear in place.
+	if (bStepping && StepsToSimulate.GetValue() == 0 && GetWorld()->IsPlayInEditor())
+	{
+		GetWorld()->bDebugFrameStepExecution = true;
+	}
+#endif
+
 	switch (Settings->GetTimeMode())
 	{
 	case ETimeMode::WallClock:
