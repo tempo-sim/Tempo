@@ -37,8 +37,8 @@ void UTempoTimeWidget::NativeOnInitialized()
 	PlayButton->bIsEnabledDelegate.BindDynamic(this, &UTempoTimeWidget::IsPlayAllowed);
 	PlayButton->OnPressed.AddDynamic(this, &UTempoTimeWidget::OnPlayPressed);
 
-	// Set up Step button.
-	StepButton->bIsEnabledDelegate.BindDynamic(this, &UTempoTimeWidget::IsFixedStepMode);
+	// Set up Step button. Enabled in every time mode - Step advances a single frame in WallClock
+	// mode too, matching UE's native frame advance.
 	StepButton->OnPressed.AddDynamic(this, &UTempoTimeWidget::OnStepPressed);
 
 	// Get initial settings.

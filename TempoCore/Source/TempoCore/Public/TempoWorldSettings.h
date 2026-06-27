@@ -74,6 +74,27 @@ private:
 
 	void FirePendingStepCompletion(ETempoStepResult Result);
 
+#if WITH_EDITOR
+	// Bridges Tempo's game pause (the pauser player state) and the editor's PIE pause
+	// (UWorld::bDebugPauseExecution). Both feed UWorld::IsPaused(), but each set of controls
+	// only drives its own flag, so without this they fall out of sync.
+	void OnEditorPauseStateChanged(bool bPaused);
+
+	void MirrorPauseToEditor(bool bPaused);
+
+	// Hooks the editor's "Advance Single Frame" toolbar button (FEditorDelegates::SingleStepPIE)
+	// up to Tempo's Step, since on its own it only clears the editor pause flag and leaves Tempo's
+	// game pause in place.
+	void OnEditorSingleStep();
+
+	FDelegateHandle PausePIEHandle;
+	FDelegateHandle ResumePIEHandle;
+	FDelegateHandle SingleStepPIEHandle;
+
+	// Guards against the PausePIE/ResumePIE we broadcast from MirrorPauseToEditor echoing back.
+	bool bMirroringPauseToEditor = false;
+#endif
+
 	UPROPERTY(VisibleAnywhere)
 	uint64 CyclesWhenTimeModeChanged = 0;
 

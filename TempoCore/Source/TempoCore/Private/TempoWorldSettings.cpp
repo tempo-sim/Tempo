@@ -8,6 +8,11 @@
 #include "Components/DirectionalLightComponent.h"
 #include "Kismet/GameplayStatics.h"
 
+#if WITH_EDITOR
+#include "Editor.h"
+#include "Editor/EditorEngine.h"
+#endif
+
 #include <cmath>
 
 namespace
@@ -34,6 +39,14 @@ void ATempoWorldSettings::BeginPlay()
 		SetMainViewportRenderEnabled(TempoCoreSettings->GetRenderMainViewport());
 		RenderingSettingsChangedHandle = TempoCoreSettings->TempoCoreRenderingSettingsChanged.AddUObject(this, &ATempoWorldSettings::TempoCoreRenderSettingsChanged);
 	}
+
+#if WITH_EDITOR
+	// The PausePIE/ResumePIE delegates carry whether the session is Simulate-In-Editor, which we
+	// don't care about - we just mirror the pause direction into Tempo's game pause.
+	PausePIEHandle = FEditorDelegates::PausePIE.AddWeakLambda(this, [this](const bool) { OnEditorPauseStateChanged(true); });
+	ResumePIEHandle = FEditorDelegates::ResumePIE.AddWeakLambda(this, [this](const bool) { OnEditorPauseStateChanged(false); });
+	SingleStepPIEHandle = FEditorDelegates::SingleStepPIE.AddWeakLambda(this, [this](const bool) { OnEditorSingleStep(); });
+#endif
 }
 
 void ATempoWorldSettings::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -56,6 +69,12 @@ void ATempoWorldSettings::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	{
 		TempoCoreSettings->TempoCoreRenderingSettingsChanged.Remove(RenderingSettingsChangedHandle);
 	}
+
+#if WITH_EDITOR
+	FEditorDelegates::PausePIE.Remove(PausePIEHandle);
+	FEditorDelegates::ResumePIE.Remove(ResumePIEHandle);
+	FEditorDelegates::SingleStepPIE.Remove(SingleStepPIEHandle);
+#endif
 }
 
 float ATempoWorldSettings::FixupDeltaSeconds(float DeltaSeconds, float RealDeltaSeconds)
@@ -74,6 +93,14 @@ float ATempoWorldSettings::FixupDeltaSeconds(float DeltaSeconds, float RealDelta
 	const double SimTime = GetWorld()->GetTimeSeconds();
 
 	const UTempoCoreSettings* Settings = GetDefault<UTempoCoreSettings>();
+
+	// Count down a requested step on every simulated frame, regardless of time mode. This lets Step
+	// advance a single frame in WallClock mode too (matching UE's native frame advance), not just in
+	// FixedStep mode. The re-pause happens at the end of this frame in OnWorldTickEnd.
+	if (StepsToSimulate.IsSet())
+	{
+		--StepsToSimulate.GetValue();
+	}
 
 	switch (Settings->GetTimeMode())
 	{
@@ -101,10 +128,6 @@ float ATempoWorldSettings::FixupDeltaSeconds(float DeltaSeconds, float RealDelta
 		}
 	case ETimeMode::FixedStep:
 		{
-			if (StepsToSimulate.IsSet())
-			{
-				--StepsToSimulate.GetValue();
-			}
 			const float FixedStepDeltaSeconds = static_cast<double>(++FixedStepsCount) / Settings->GetSimulatedStepsPerSecond() - SimTime;
 			if (ensureAlwaysMsgf(FixedStepDeltaSeconds >= 0.0, TEXT("FixedStepDeltaSeconds was not positive: %f"), FixedStepDeltaSeconds))
 			{
@@ -219,6 +242,15 @@ void ATempoWorldSettings::SetPaused(bool bPaused)
 		TGuardValue<bool> SelfPausingGuard(bSelfPausing, bPaused);
 		PlayerController->SetPause(bPaused);
 	}
+#if WITH_EDITOR
+	else if (GEditor && GetWorld() && GetWorld()->IsPlayInEditor())
+	{
+		// Simulate-In-Editor runs without a player controller, so the pauser-player-state path is
+		// unavailable. Drive the editor's PIE pause directly (SetPauserPlayerState, and the mirror
+		// it normally triggers, won't fire in this case).
+		MirrorPauseToEditor(bPaused);
+	}
+#endif
 	else
 	{
 		UE_LOG(LogTempoCore, Error, TEXT("Failed to %s (couldn't find player controller)"), bPaused ? TEXT("pause") : TEXT("unpause"));
@@ -248,7 +280,73 @@ void ATempoWorldSettings::SetPauserPlayerState(APlayerState* PlayerState)
 	}
 
 	Super::SetPauserPlayerState(PlayerState);
+
+#if WITH_EDITOR
+	// Every Tempo game-pause path funnels through here (UI buttons, gRPC, Step, GameMode).
+	// Mirror it into the editor's PIE pause so the editor toolbar stays in sync and a later
+	// resume from either side actually clears both flags.
+	MirrorPauseToEditor(PlayerState != nullptr);
+#endif
 }
+
+#if WITH_EDITOR
+void ATempoWorldSettings::OnEditorPauseStateChanged(bool bPaused)
+{
+	// Ignore the PausePIE/ResumePIE we ourselves broadcast from MirrorPauseToEditor.
+	if (bMirroringPauseToEditor)
+	{
+		return;
+	}
+
+	if (!GetWorld() || !GetWorld()->IsPlayInEditor())
+	{
+		return;
+	}
+
+	// Drive Tempo's pause to match. In PIE this sets/clears the pauser player state (which, when
+	// clearing, routes through OnUnpaused()); in Simulate-In-Editor it falls back to the editor's
+	// PIE pause. Either way, this is what lets Tempo's controls resume a pause that originated from
+	// the editor toolbar.
+	SetPaused(bPaused);
+}
+
+void ATempoWorldSettings::OnEditorSingleStep()
+{
+	if (!GetWorld() || !GetWorld()->IsPlayInEditor())
+	{
+		return;
+	}
+
+	// The editor's "Advance Single Frame" button only clears its own pause flag
+	// (bDebugPauseExecution) and leaves Tempo's game pause in place, so by itself it does nothing.
+	// Route it through Tempo's Step to advance a single frame. Tempo re-pauses at the end of the
+	// stepped frame, in sync with the editor's own frame-step re-pause.
+	Step();
+}
+
+void ATempoWorldSettings::MirrorPauseToEditor(bool bPaused)
+{
+	if (!GEditor || !GetWorld() || !GetWorld()->IsPlayInEditor())
+	{
+		return;
+	}
+
+	TGuardValue<bool> MirroringGuard(bMirroringPauseToEditor, true);
+	// SetPIEWorldsPaused returns true only when it actually changed bDebugPauseExecution, so we
+	// avoid re-broadcasting (and looping back through OnEditorPauseStateChanged) when already synced.
+	if (GEditor->SetPIEWorldsPaused(bPaused))
+	{
+		if (bPaused)
+		{
+			GEditor->PlaySessionPaused();
+		}
+		else
+		{
+			GEditor->PlaySessionResumed();
+		}
+	}
+}
+#endif
 
 void ATempoWorldSettings::SetDefaultAutoExposureBias()
 {
