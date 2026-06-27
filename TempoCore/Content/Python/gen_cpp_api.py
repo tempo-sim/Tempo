@@ -108,6 +108,11 @@ def cpp_param_type(field) -> str:
     )
     if is_repeated:
         return f"const std::vector<{inner}>&"
+    # Singular message fields have presence in proto3, so accept std::optional<T>:
+    # callers can pass a T (implicit conversion) or std::nullopt to leave the
+    # field unset (e.g. AddComponent with no transform for a non-scene component).
+    if field.proto_type == gpd.FieldDescriptor.TYPE_MESSAGE:
+        return f"const std::optional<{inner}>&"
     if pass_by_ref:
         return f"const {inner}&"
     return inner
@@ -136,7 +141,11 @@ def setter_lines(field) -> list:
             f"}}",
         ]
     if is_message:
-        return [f"*request.mutable_{name}() = {name};"]
+        return [
+            f"if ({name}.has_value()) {{",
+            f"    *request.mutable_{name}() = *{name};",
+            f"}}",
+        ]
     return [f"request.set_{name}({name});"]
 
 
@@ -146,6 +155,7 @@ HEADER_TEMPLATE = """// Copyright Tempo Simulation, LLC. All Rights Reserved
 
 #pragma once
 
+#include <optional>
 #include <string>
 #include <vector>
 
