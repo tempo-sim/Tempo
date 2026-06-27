@@ -153,14 +153,7 @@ void ATrajectoryFollowingController::Tick(float DeltaSeconds)
 		return;
 	}
 
-	// Advance along the trajectory by the simulation frame delta (not absolute world time) so the
-	// target holds still whenever the sim is paused or between fixed steps. Unreal zeroes the tick
-	// delta while paused, but checking explicitly also lets us hold without actuating below.
-	const bool bPaused = GetWorld()->IsPaused();
-	if (!bPaused)
-	{
-		ElapsedSeconds += DeltaSeconds;
-	}
+	ElapsedSeconds += DeltaSeconds;
 
 	// Apply end-of-trajectory behavior once the duration is reached.
 	bool bResetThisTick = false;
@@ -195,12 +188,6 @@ void ATrajectoryFollowingController::Tick(float DeltaSeconds)
 			/*DepthPriority*/ 0, /*Thickness*/ 3.0f);
 	}
 #endif
-
-	// While paused we hold at the (frozen) target: don't teleport or actuate, just keep the arrow up.
-	if (bPaused)
-	{
-		return;
-	}
 
 	// Reset end behavior: hard-teleport back to the start each cycle, even for a steering follower,
 	// and clear any vehicle control windup. Skips actuation this tick; following resumes next tick.
