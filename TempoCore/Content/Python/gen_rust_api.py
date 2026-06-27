@@ -205,7 +205,7 @@ def generate_rust_api(module_dirs, tempo_root_dir, project_root_dir, module_owne
     struct_init_fragment = '''
 {%- for field in plain_fields %}
 {%- if field.needs_option_wrap %}
-        {{ field.name }}: Some({{ field.name }}),
+        {{ field.name }}: {{ field.name }}.into(),
 {%- else %}
         {{ field.name }},
 {%- endif %}
@@ -303,7 +303,7 @@ impl Batch {
                 {{ method.request_rust_type }} {
 {%- for field in method.fields %}
 {%- if field.needs_option_wrap %}
-                    {{ field.name }}: Some({{ field.name }}),
+                    {{ field.name }}: {{ field.name }}.into(),
 {%- else %}
                     {{ field.name }},
 {%- endif %}
@@ -438,7 +438,14 @@ use {{ infra }}::streaming::SyncStreamIterator;
                                 "variant": snake_to_upper_camel(field.name),
                             })
                         else:
-                            sig_fields.append({"name": field.name, "rust_type": field.rust_type})
+                            # Message fields are Option<T> in prost, so accept
+                            # `impl Into<Option<T>>`: callers can pass a bare `T`,
+                            # `Some(T)`, or `None` (e.g. a component with no transform).
+                            if field.needs_option_wrap:
+                                param_type = f"impl Into<Option<{field.rust_type}>>"
+                            else:
+                                param_type = field.rust_type
+                            sig_fields.append({"name": field.name, "rust_type": param_type})
                             plain_fields.append(field)
 
                     if rpc_descriptor.server_streaming:
@@ -500,6 +507,10 @@ use {{ infra }}::streaming::SyncStreamIterator;
                         field.needs_option_wrap = needs_option_wrap(field)
                         if field.label == "repeated":
                             field.rust_type = f"Vec<{field.rust_type}>"
+                        elif field.needs_option_wrap:
+                            # See the unary-RPC signature note: accept
+                            # `impl Into<Option<T>>` so `None` is expressible.
+                            field.rust_type = f"impl Into<Option<{field.rust_type}>>"
                         method_fields.append(field)
                     # bool_op -> set_bool_property; int_array_op -> set_int_array_property
                     method_name = "set_{}_property".format(
