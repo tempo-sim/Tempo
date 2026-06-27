@@ -25,9 +25,9 @@ void UTempoTimeWidget::NativeOnInitialized()
 	}
 	TimeModeBox->OnSelectionChanged.AddDynamic(this, &UTempoTimeWidget::OnTimeModeSelectionChanged);
 
-	// Set up SimStepsPerSecond box.
+	// Set up SimStepsPerSecond box. Enabled in every time mode: it sets the FixedStep tick rate and,
+	// in both modes, the size of a single Step (1/SimStepsPerSecond seconds).
 	SimStepsPerSecondBox->OnTextCommitted.AddDynamic(this, &UTempoTimeWidget::OnSimStepsPerSecondChanged);
-	SimStepsPerSecondBox->bIsEnabledDelegate.BindDynamic(this, &UTempoTimeWidget::IsFixedStepMode);
 
 	// Set up Pause button.
 	PauseButton->bIsEnabledDelegate.BindDynamic(this, &UTempoTimeWidget::IsPauseAllowed);
@@ -37,8 +37,8 @@ void UTempoTimeWidget::NativeOnInitialized()
 	PlayButton->bIsEnabledDelegate.BindDynamic(this, &UTempoTimeWidget::IsPlayAllowed);
 	PlayButton->OnPressed.AddDynamic(this, &UTempoTimeWidget::OnPlayPressed);
 
-	// Set up Step button.
-	StepButton->bIsEnabledDelegate.BindDynamic(this, &UTempoTimeWidget::IsFixedStepMode);
+	// Set up Step button. Enabled in every time mode - Step advances a single frame in WallClock
+	// mode too, matching UE's native frame advance.
 	StepButton->OnPressed.AddDynamic(this, &UTempoTimeWidget::OnStepPressed);
 
 	// Get initial settings.
@@ -117,12 +117,6 @@ void UTempoTimeWidget::OnSimStepsPerSecondChanged(const FText& Text, ETextCommit
 
 	UTempoCoreSettings* Settings = GetMutableDefault<UTempoCoreSettings>();
 	Settings->SetSimulatedStepsPerSecond(FCString::Atoi(*Text.ToString()));
-}
-
-bool UTempoTimeWidget::IsFixedStepMode()
-{
-	const UTempoCoreSettings* Settings = GetDefault<UTempoCoreSettings>();
-	return Settings->GetTimeMode() == ETimeMode::FixedStep;
 }
 
 bool UTempoTimeWidget::IsPauseAllowed()

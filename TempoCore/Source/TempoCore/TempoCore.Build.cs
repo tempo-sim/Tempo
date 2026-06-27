@@ -43,6 +43,8 @@ public class TempoCore : TempoModuleRules
 		if (Target.bBuildEditor)
 		{
 			PrivateDependencyModuleNames.Add("HotReload");
+			// For bridging Tempo's pause state to the PIE editor pause controls (ATempoWorldSettings).
+			PrivateDependencyModuleNames.Add("UnrealEd");
 		}
 
 		// gRPC and protobuf are statically imported into TempoCore and dynamically

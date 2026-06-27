@@ -49,9 +49,6 @@ private:
 	void OnSimStepsPerSecondChanged(const FText& Text, ETextCommit::Type CommitMethod);
 
 	UFUNCTION()
-	bool IsFixedStepMode();
-
-	UFUNCTION()
 	bool IsPauseAllowed();
 
 	UFUNCTION()
