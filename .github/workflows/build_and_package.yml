@@ -682,32 +682,40 @@ jobs:
       shell: bash
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # The repo is checked out into a subdirectory, so this step's working dir (github.workspace)
+        # has no remote for gh to infer from. Name the repo explicitly so 'gh cache' targets the
+        # repo whose caches we want to prune rather than failing to determine a base repo.
+        GH_REPO: ${{ github.repository }}
         PREFIX: ${{ steps.repo_lowercase.outputs.REPO_LOWERCASE }}-build-${{ env.UNREAL_VERSION }}-
         KEEP: ${{ steps.repo_lowercase.outputs.REPO_LOWERCASE }}-build-${{ env.UNREAL_VERSION }}-${{ github.sha }}
       run: |
+        # Surface gh's real error rather than asserting a cause - a 403 means 'actions: write' is
+        # missing on the calling job, but other failures (auth, repo resolution, gh version) read
+        # very differently and shouldn't be mislabeled as a permission problem.
         warn_and_skip() {
-          echo "::warning title=Build cache not pruned::Could not prune old '${PREFIX}*' caches ($1). Grant 'actions: write' to the job calling build_and_package.yml to keep exactly one build cache per engine version; otherwise stale same-version caches accumulate and get LRU-evicted at the 10GB limit."
+          echo "::warning title=Build cache not pruned::Could not prune old '${PREFIX}*' caches, so stale same-version caches may accumulate and get LRU-evicted at the 10GB limit. gh error: $1 (An HTTP 403 here means the calling job needs 'actions: write'.)"
           exit 0
         }
         # The trailing '-' in PREFIX keeps e.g. '5.7-' from matching '5.70-'. startswith filtering
         # in jq avoids any ambiguity in how 'gh cache list --key' prefix-matches.
         ids=$(gh cache list --limit 100 --json id,key \
-                --jq ".[] | select(.key | startswith(\"$PREFIX\")) | select(.key != \"$KEEP\") | .id" 2>/dev/null) \
-          || warn_and_skip "listing caches failed - missing 'actions: read'/'actions: write'?"
+                --jq ".[] | select(.key | startswith(\"$PREFIX\")) | select(.key != \"$KEEP\") | .id" 2>"$RUNNER_TEMP/prune_err.txt") \
+          || warn_and_skip "$(cat "$RUNNER_TEMP/prune_err.txt")"
         if [ -z "$ids" ]; then
           echo "No stale build caches to prune for prefix '${PREFIX}'."
           exit 0
         fi
-        failed=0
+        failed=
         while read -r id; do
           [ -z "$id" ] && continue
-          if gh cache delete "$id" 2>/dev/null; then
+          if gh cache delete "$id" 2>"$RUNNER_TEMP/prune_err.txt"; then
             echo "Deleted stale build cache id=$id"
           else
-            failed=1
+            echo "Failed to delete cache id=$id: $(cat "$RUNNER_TEMP/prune_err.txt")"
+            failed=$(cat "$RUNNER_TEMP/prune_err.txt")
           fi
         done <<< "$ids"
-        [ "$failed" -eq 0 ] || warn_and_skip "a delete was denied - missing 'actions: write'?"
+        [ -z "$failed" ] || warn_and_skip "$failed"
     - name: Check Free Space (if using GitHub-hosted runner)
       if: ${{ contains(runner.name, 'Github') && contains(runner.name, 'Actions') }}
       run: df -h / && df -h /mnt
