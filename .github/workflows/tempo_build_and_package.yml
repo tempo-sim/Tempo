@@ -61,7 +61,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        unreal_version: [ "5.6", "5.7" ]
+        unreal_version: [ "5.6", "5.7", "5.8" ]
         group: [ "contract", "core", "world", "movement" ]
     uses: ./.github/workflows/test_packaged.yml
     with:
@@ -87,7 +87,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        unreal_version: [ "5.6", "5.7" ]
+        unreal_version: [ "5.6", "5.7", "5.8" ]
         group: [ "contract", "integration" ]
     uses: ./.github/workflows/test_packaged.yml
     with:
