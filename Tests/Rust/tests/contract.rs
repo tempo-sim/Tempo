@@ -7,7 +7,8 @@
 //! renamed/dropped symbol or a changed signature breaks the build (and so the `contract` group).
 //! Run via Scripts/TestRust.sh contract.
 
-use tempo_sim::proto::tempo_core::{Transform, Vector};
+use tempo_sim::proto::tempo_core::{Transform, Twist, Vector};
+use tempo_sim::TempoError;
 
 #[test]
 fn api_surface_exists() {
@@ -16,10 +17,17 @@ fn api_surface_exists() {
     let _level = tempo_sim::tempo_core::get_current_level_name;
     let _sim_time = tempo_sim::tempo_core::get_sim_time;
     let _step = tempo_sim::tempo_core::step;
-    let _spawn = tempo_sim::tempo_world::spawn_actor;
+    // spawn_actor / command_velocity take `impl Into<Option<T>>` for their optional
+    // message field, so they're generic and can't be named as a bare value. Pin the
+    // type parameter to a concrete `fn` pointer, which also asserts the exact signature.
+    let _spawn: fn(String, bool, Option<Transform>, String)
+        -> Result<tempo_sim::proto::tempo_world::SpawnActorResponse, TempoError> =
+        tempo_sim::tempo_world::spawn_actor;
     let _state = tempo_sim::tempo_world::get_current_actor_state;
     let _destroy = tempo_sim::tempo_world::destroy_actor;
-    let _cmd_velocity = tempo_sim::tempo_movement::command_velocity;
+    let _cmd_velocity: fn(String, Option<Twist>)
+        -> Result<tempo_sim::proto::tempo_core::Empty, TempoError> =
+        tempo_sim::tempo_movement::command_velocity;
     let _pawns = tempo_sim::tempo_movement::get_commandable_pawns;
 
     // Proto messages construct (prost message fields are Option<T>).
