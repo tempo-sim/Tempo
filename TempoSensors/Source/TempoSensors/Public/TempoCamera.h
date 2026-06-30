@@ -307,6 +307,14 @@ protected:
 
 	TFuture<void> DecodeAndRespond(TSharedPtr<FTextureRead> TextureRead);
 
+	// Build the FTextureRead for the stitched SharedFinalTextureTarget output, depth-aware, sized to
+	// SizeXY and stamped with the current SequenceId / owner / sensor / transform / instance map.
+	// Defined in this module so the TTextureRead<PixelType>::Read() template instantiation (which
+	// logs via the module-local LogTempoSensors) links here. Subclasses in other modules (e.g. the
+	// MSTA BEV camera, which renders into SharedFinalTextureTarget itself) call this instead of
+	// constructing the read inline, which would fail to link against LogTempoSensors.
+	TSharedPtr<FTextureRead> MakeFinalTextureRead() const;
+
 	// Begin UTempoTiledSceneCaptureComponent tile interface
 	virtual void SyncTiles() override;
 	virtual bool HasDetectedParameterChange() const override;
