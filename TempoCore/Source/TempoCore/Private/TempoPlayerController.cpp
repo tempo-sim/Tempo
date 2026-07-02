@@ -313,7 +313,7 @@ void ATempoPlayerController::OnActorSpawnedHandler(AActor* SpawnedActor)
 {
 	if (Cast<APawn>(SpawnedActor))
 	{
-		UE_LOG(LogTempoCore, Display, TEXT("A new Pawn was spawned, queueing group update..."));
+		// UE_LOG(LogTempoCore, Display, TEXT("A new Pawn was spawned, queueing group update..."));
 		UpdatePawnGroups();
 	}
 }

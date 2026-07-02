@@ -62,10 +62,12 @@ UClass* GetSubClassWithName(const FString& Name)
 	// Better solutions would be to specify only the path to where the relevant blueprints are,
 	// or to register a callback with the asset registry to be notified of when it's finished populating.
 	// In cooked builds the registry is already fully populated, and scanning the root mount logs a warning.
+	// Scan the actual mounted content roots (/Game, /Engine, /Plugin...) rather than "/", which is not
+	// itself a mounted path and makes UE 5.6's ScanPathsSynchronous emit a non-fatal stack-dump warning.
 	if (!FPlatformProperties::RequiresCookedData())
 	{
 		TArray<FString> ContentPaths;
-		ContentPaths.Add(TEXT("/"));
+		FPackageName::QueryRootContentPaths(ContentPaths);
 		AssetRegistry.ScanPathsSynchronous(ContentPaths);
 	}
 
