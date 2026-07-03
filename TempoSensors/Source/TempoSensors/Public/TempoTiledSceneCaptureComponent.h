@@ -24,6 +24,11 @@ public:
 	virtual void BeginPlay() override;
 	virtual void Activate(bool bReset = false) override;
 	virtual void Deactivate() override;
+	// Release per-tile render resources (view states + PPMs) when the component unregisters from the
+	// scene. USceneCaptureComponent::OnUnregister only destroys the inherited ViewStates array; our
+	// per-tile FSceneViewStateReferences aren't in it, so without this they (and the render-thread
+	// history/MIDPool they hold) leak until GC, accumulating across PIE sessions.
+	virtual void OnUnregister() override;
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 	virtual bool ShouldManageOwnReadback() const override { return false; }
@@ -60,6 +65,10 @@ protected:
 
 	// Subclasses sync the tile array to the current sensor configuration.
 	virtual void SyncTiles() PURE_VIRTUAL(UTempoTiledSceneCaptureComponent::SyncTiles, );
+
+	// Deactivate every active tile, releasing its view state and PPM. Called from OnUnregister and
+	// ReconfigureTilesNow (which need to drain tiles before teardown / re-sync).
+	virtual void DeactivateAllTiles() PURE_VIRTUAL(UTempoTiledSceneCaptureComponent::DeactivateAllTiles, );
 
 	// Returns true iff any watched property differs from its internal mirror.
 	virtual bool HasDetectedParameterChange() const PURE_VIRTUAL(UTempoTiledSceneCaptureComponent::HasDetectedParameterChange, return false;);
