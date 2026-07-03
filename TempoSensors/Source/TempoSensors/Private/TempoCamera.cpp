@@ -353,10 +353,8 @@ ETempoTextureFilterType UTempoCamera::GetEffectiveTextureFilterType() const
 	return ETempoTextureFilterType::Bilinear;
 }
 
-void UTempoCamera::ReconfigureTilesNow()
+void UTempoCamera::DeactivateAllTiles()
 {
-	// Drain all active tiles (releases their view states + PPMs) before re-configuring with
-	// new parameters. Caller must have confirmed no reads are in flight.
 	for (FTempoCameraTile& Tile : Tiles)
 	{
 		if (Tile.bActive)
@@ -364,6 +362,13 @@ void UTempoCamera::ReconfigureTilesNow()
 			DeactivateTile(Tile);
 		}
 	}
+}
+
+void UTempoCamera::ReconfigureTilesNow()
+{
+	// Drain all active tiles (releases their view states + PPMs) before re-configuring with
+	// new parameters. Caller must have confirmed no reads are in flight.
+	DeactivateAllTiles();
 
 	SyncTiles();
 	UpdateInternalMirrors();

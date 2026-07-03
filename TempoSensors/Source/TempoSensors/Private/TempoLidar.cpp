@@ -141,10 +141,8 @@ bool UTempoLidar::HasDetectedParameterChange() const
 		|| BeamCalibration != BeamCalibration_Internal;
 }
 
-void UTempoLidar::ReconfigureTilesNow()
+void UTempoLidar::DeactivateAllTiles()
 {
-	// Drain all active tiles (releases their view states + PPMs) before re-configuring with new
-	// parameters. Caller must have confirmed no reads are in flight.
 	for (FTempoLidarTile& Tile : Tiles)
 	{
 		if (Tile.bActive)
@@ -152,6 +150,13 @@ void UTempoLidar::ReconfigureTilesNow()
 			DeactivateTile(Tile);
 		}
 	}
+}
+
+void UTempoLidar::ReconfigureTilesNow()
+{
+	// Drain all active tiles (releases their view states + PPMs) before re-configuring with new
+	// parameters. Caller must have confirmed no reads are in flight.
+	DeactivateAllTiles();
 
 	SyncTiles();
 	UpdateInternalMirrors();
