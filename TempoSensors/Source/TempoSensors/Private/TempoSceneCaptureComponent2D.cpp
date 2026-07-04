@@ -11,6 +11,7 @@
 #include "TempoCoreUtils.h"
 
 #include "Engine/TextureRenderTarget2D.h"
+#include "HAL/IConsoleManager.h"
 #include "Kismet/GameplayStatics.h"
 
 #if RHI_RAYTRACING && ENGINE_MAJOR_VERSION == 5 && ((ENGINE_MINOR_VERSION == 5 && STATS) || ENGINE_MINOR_VERSION > 5)
@@ -177,6 +178,27 @@ void UTempoSceneCaptureComponent2D::EnsureRayTracingReadbackBuffersExpanded(FSce
 				}
 #endif
 			});
+	}
+#endif
+}
+
+void UTempoSceneCaptureComponent2D::EnsureRayTracingGeometryResidentForCaptures()
+{
+#if RHI_RAYTRACING
+	if (!GetDefault<UTempoSensorsSettings>()->GetRayTracingGeometryResidencyWorkaroundEnabled())
+	{
+		return;
+	}
+
+	static IConsoleVariable* CVarReferenceBasedResidency =
+		IConsoleManager::Get().FindConsoleVariable(TEXT("r.RayTracing.UseReferenceBasedResidency"));
+
+	// Only write when it's currently on: the setter runs a global render-state recreate on change, so
+	// this must fire at most once. A value already set higher-priority (e.g. the user's config) wins
+	// over our ECVF_SetByCode write, which is the intended escape hatch.
+	if (CVarReferenceBasedResidency && CVarReferenceBasedResidency->GetBool())
+	{
+		CVarReferenceBasedResidency->Set(TEXT("0"), ECVF_SetByCode);
 	}
 #endif
 }

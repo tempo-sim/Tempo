@@ -951,6 +951,13 @@ void UTempoCamera::RenderCapture()
 	// frame. The call is idempotent and persistent, so the first camera each frame covers the rest.
 	EnsureRayTracingReadbackBuffersExpanded(Scene);
 
+	if (bUseRayTracingIfEnabled)
+	{
+		// Keep RT geometry resident so our churning capture frusta don't evict it into the window
+		// where the engine caches an invalid instance and later asserts. Idempotent; see definition.
+		EnsureRayTracingGeometryResidentForCaptures();
+	}
+
 	int32 NumActiveTiles = 0;
 	for (const FTempoCameraTile& Tile : Tiles)
 	{

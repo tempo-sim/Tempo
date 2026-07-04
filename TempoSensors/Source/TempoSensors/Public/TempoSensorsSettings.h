@@ -60,6 +60,9 @@ public:
 	bool GetRayTracingSceneReadbackBuffersOverrunWorkaroundEnabled() const { return bEnableRayTracingSceneReadbackBuffersOverrunWorkaround; }
 	uint32 GetRayTracingSceneMaxReadbackBuffersOverride() const { return RayTracingSceneMaxReadbackBuffersOverride; }
 
+	// RayTracing Geometry Residency Workaround
+	bool GetRayTracingGeometryResidencyWorkaroundEnabled() const { return bEnableRayTracingGeometryResidencyWorkaround; }
+
 #if WITH_EDITOR
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 #endif
@@ -179,6 +182,23 @@ private:
 	// ray-tracing scene renders in flight: (RT renders per frame) x (GPU frames in flight + margin).
 	UPROPERTY(EditAnywhere, Config, Category="Advanced", meta=(EditCondition=bEnableRayTracingSceneReadbackBuffersOverrunWorkaround))
 	uint32 RayTracingSceneMaxReadbackBuffersOverride = 128;
+
+	// Whether to force ray-tracing geometry resident (disable reference-based residency) while
+	// ray-traced camera captures are active, to work around an engine crash:
+	// checkf(bIsCachedRayTracingInstanceValid) in RayTracing::GatherRelevantStaticPrimitives.
+	// With the engine default (r.RayTracing.UseReferenceBasedResidency=1), a Nanite mesh's fallback
+	// RT geometry is evicted/streamed based on what's referenced in the TLAS. Our many capture views
+	// (each a different frustum / hide list) churn that referenced set, so geometry is repeatedly
+	// evicted and re-requested. In the window where it is non-resident, RefreshCachedRayTracingData /
+	// the cache pass commits an invalid instance (GeometryRHI==null) as clean, and the next gather —
+	// ours or the main viewport's — asserts instead of skipping it (the Nanite-fallback branch has no
+	// skip, unlike the streamed-Nanite branch). Keeping geometry resident closes that eviction window.
+	// Cost: higher RT-geometry memory (all referenced geometry stays resident); does not close the
+	// one-time first-build window on load. The proper fix is engine-side (skip invalid instances in
+	// the gather); this is a no-engine-build mitigation. Set once when the first RT camera renders and
+	// left in effect for the session (toggling the cvar recreates all render state).
+	UPROPERTY(EditAnywhere, Config, Category="Advanced")
+	bool bEnableRayTracingGeometryResidencyWorkaround = true;
 
 	// When true, FixedStep mode allows the game thread to advance without waiting for sensor
 	// readback to complete. Sensor images may arrive 1-2 frames late, but throughput increases

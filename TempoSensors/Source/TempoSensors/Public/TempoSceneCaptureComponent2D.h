@@ -344,6 +344,14 @@ public:
 	// or the ring stays at the engine default of 4 and overruns immediately under many sensors.
 	static void EnsureRayTracingReadbackBuffersExpanded(FSceneInterface* Scene);
 
+	// Force ray-tracing geometry resident by disabling reference-based residency, to avoid the engine
+	// crash checkf(bIsCachedRayTracingInstanceValid) in RayTracing::GatherRelevantStaticPrimitives.
+	// See UTempoSensorsSettings::bEnableRayTracingGeometryResidencyWorkaround for the full rationale.
+	// No-ops unless the workaround setting is enabled and reference-based residency is currently on.
+	// Idempotent: sets the cvar once (the first RT capture) and leaves it for the session, since the
+	// cvar's setter recreates all render state. Call from the game thread before issuing an RT render.
+	static void EnsureRayTracingGeometryResidentForCaptures();
+
 protected:
 	// Derived components must override this to return whether they have pending requests.
 	virtual bool HasPendingRequests() const PURE_VIRTUAL(UTempoSceneCaptureComponent2D::HasPendingRequests, return false; );
