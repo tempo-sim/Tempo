@@ -1,6 +1,10 @@
 ARG UNREAL_VERSION=5.4.4
 
-FROM ghcr.io/epicgames/unreal-engine:dev-slim-${UNREAL_VERSION}
+# Base Unreal image. Defaults to Epic's ghcr.io distribution; override with
+# --build-arg ENGINE_BASE_IMAGE=... to build from a mirror (e.g. a private
+# registry or pull-through cache) without needing a ghcr.io login.
+ARG ENGINE_BASE_IMAGE=ghcr.io/epicgames/unreal-engine:dev-slim-${UNREAL_VERSION}
+FROM ${ENGINE_BASE_IMAGE}
 
 ENV UNREAL_ENGINE_PATH='/home/ue4/UnrealEngine'
 
