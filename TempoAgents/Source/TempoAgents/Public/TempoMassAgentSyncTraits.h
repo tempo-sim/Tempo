@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "MassAgentTraits.h"
 #include "MassCommonFragments.h"
+#include "MassEntityQuery.h"
 #include "MassEntityTraitBase.h"
 
 #include "TempoMassAgentSyncTraits.generated.h"

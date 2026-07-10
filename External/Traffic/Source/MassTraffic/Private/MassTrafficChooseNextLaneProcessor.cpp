@@ -59,9 +59,7 @@ void UMassTrafficChooseNextLaneProcessor::ConfigureQueries(const TSharedRef<FMas
 	EntityQuery_Conditional.AddChunkRequirement<FMassSimulationVariableTickChunkFragment>(EMassFragmentAccess::ReadOnly);
 	EntityQuery_Conditional.SetChunkFilter(&FMassSimulationVariableTickChunkFragment::ShouldTickChunkThisFrame);
 	EntityQuery_Conditional.AddSubsystemRequirement<UMassTrafficSubsystem>(EMassFragmentAccess::ReadWrite);
-#if WITH_MASSTRAFFIC_DEBUG
 	EntityQuery_Conditional.AddSubsystemRequirement<UZoneGraphSubsystem>(EMassFragmentAccess::ReadOnly);
-#endif // WITH_MASSTRAFFIC_DEBUG
 }
 
 void UMassTrafficChooseNextLaneProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
@@ -79,9 +77,7 @@ void UMassTrafficChooseNextLaneProcessor::Execute(FMassEntityManager& EntityMana
 #endif
 	{	
 		UMassTrafficSubsystem& MassTrafficSubsystem = QueryContext.GetMutableSubsystemChecked<UMassTrafficSubsystem>();
-#if WITH_MASSTRAFFIC_DEBUG
 		const UZoneGraphSubsystem& ZoneGraphSubsystem = QueryContext.GetSubsystemChecked<UZoneGraphSubsystem>();
-#endif // WITH_MASSTRAFFIC_DEBUG
 		const int32 NumEntities = QueryContext.GetNumEntities();
 		const TConstArrayView<FMassZoneGraphLaneLocationFragment> LaneLocationFragments = QueryContext.GetFragmentView<FMassZoneGraphLaneLocationFragment>();
 		const TConstArrayView<FAgentRadiusFragment> AgentRadiusFragments = QueryContext.GetFragmentView<FAgentRadiusFragment>();

@@ -7,12 +7,18 @@ PROJECT_ROOT=$("$SCRIPT_DIR"/FindProjectRoot.sh)
 cd "$PROJECT_ROOT"
 PROJECT_NAME=$(find . -maxdepth 1 -name "*.uproject" -exec basename {} .uproject \;)
 
-# Check for low memory mode flag
+# Check for project packaging flags.
 LOW_MEMORY_MODE=false
+BUILD_CONFIGURATION=Development
 for arg in "$@"; do
-  if [[ "$arg" == "--low-memory" ]]; then
-    LOW_MEMORY_MODE=true
-  fi
+  case "$arg" in
+    --low-memory)
+      LOW_MEMORY_MODE=true
+      ;;
+    --release)
+      BUILD_CONFIGURATION=Shipping
+      ;;
+  esac
 done
 
 export UNREAL_ENGINE_PATH=$("$SCRIPT_DIR"/FindUnreal.sh)
@@ -83,7 +89,9 @@ fi
 cd "$UNREAL_ENGINE_PATH"
 
 # Build the base command with common arguments
-PACKAGE_COMMAND="Turnkey -command=VerifySdk -platform=$TARGET_PLATFORM -UpdateIfNeeded -project=\"$PROJECT_ROOT/$PROJECT_NAME.uproject\" BuildCookRun -nop4 -utf8output -nocompileeditor -skipbuildeditor -cook -target=\"$PROJECT_NAME\" -platform=$TARGET_PLATFORM -project=\"$PROJECT_ROOT/$PROJECT_NAME.uproject\" -installed -stage -package -pak -build -prereqs -clientconfig=Development"
+PACKAGE_COMMAND="Turnkey -command=VerifySdk -platform=$TARGET_PLATFORM -UpdateIfNeeded -project=\"$PROJECT_ROOT/$PROJECT_NAME.uproject\" BuildCookRun -nop4 -utf8output -nocompileeditor -skipbuildeditor -cook -target=\"$PROJECT_NAME\" -platform=$TARGET_PLATFORM -project=\"$PROJECT_ROOT/$PROJECT_NAME.uproject\" -installed -stage -package -pak -build -prereqs -clientconfig=$BUILD_CONFIGURATION"
+
+echo "Packaging $PROJECT_NAME in $BUILD_CONFIGURATION configuration -> $PROJECT_ROOT/Packaged"
 
 # Add platform-specific parts
 if [ "$HOST_PLATFORM" = "Win64" ]; then
@@ -104,16 +112,25 @@ fi
 
 # Add low memory options if requested
 if [ "$LOW_MEMORY_MODE" = "true" ]; then
-  PACKAGE_COMMAND="$PACKAGE_COMMAND -CookPartialGC -NoXGE -AdditionalCookerOptions=\"-cookprocesscount=1\""
-  echo "Low memory mode enabled: single cook process, partial GC, no XGE"
+  # The cooker and C++ build have independent concurrency controls. A single
+  # cook process alone does not prevent UBT/UBA from scheduling enough compiler
+  # actions to exhaust available memory on lower-memory machines. Three local
+  # actions leave headroom for UAT, the linker, and the cook commandlet while
+  # retaining useful parallelism.
+  PACKAGE_COMMAND="$PACKAGE_COMMAND -CookPartialGC -NoXGE -UbtArgs=\"-MaxParallelActions=3 -NoUBA -NoXGE\" -AdditionalCookerOptions=\"-cookprocesscount=1\""
+  echo "Low memory mode enabled: at most 3 compile actions, single cook process, partial GC, no UBA/XGE"
 fi
 
 # Filter out our custom flags before passing to UAT
 PASSTHROUGH_ARGS=()
 for arg in "$@"; do
-  if [[ "$arg" != "--low-memory" ]]; then
-    PASSTHROUGH_ARGS+=("$arg")
-  fi
+  case "$arg" in
+    --low-memory|--release)
+      ;;
+    *)
+      PASSTHROUGH_ARGS+=("$arg")
+      ;;
+  esac
 done
 
 # Execute the command with any additional arguments
