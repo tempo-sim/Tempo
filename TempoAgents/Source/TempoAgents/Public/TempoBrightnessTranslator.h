@@ -5,6 +5,7 @@
 #include "TempoBrightnessMeterComponent.h"
 
 #include "MassCommonFragments.h"
+#include "MassEntityQuery.h"
 #include "MassTranslator.h"
 
 #include "TempoBrightnessTranslator.generated.h"
