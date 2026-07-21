@@ -172,6 +172,12 @@ void ATrajectoryFollowingController::Tick(float DeltaSeconds)
 			ElapsedSeconds = FMath::Fmod(ElapsedSeconds, Duration);
 			bResetThisTick = true;
 			break;
+		case ETrajectoryEndBehavior::Destroy:
+			// Destroy the followed pawn once it reaches the end. Destroying the pawn tears down its
+			// UTrajectoryFollowingComponent, whose EndPlay unpossesses and destroys this controller,
+			// so return immediately without touching any more state.
+			ControlledPawn->Destroy();
+			return;
 		}
 	}
 

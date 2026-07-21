@@ -41,6 +41,8 @@ enum class ETrajectoryEndBehavior : uint8
 	// Teleport the pawn (even a non-teleport/steering follower) back to the start and restart,
 	// repeating indefinitely.
 	Reset,
+	// Destroy the followed pawn (and, via its component, this controller) when the end is reached.
+	Destroy,
 };
 
 // Per-follower settings governing how a pawn follows a spline: the speed model that turns trajectory

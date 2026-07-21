@@ -516,6 +516,9 @@ void UTempoMovementControlServiceSubsystem::ConfigureTrajectoryFollowing(const C
 	case TempoMovement::TRAJECTORY_END_BEHAVIOR_RESET:
 		Config.EndBehavior = ETrajectoryEndBehavior::Reset;
 		break;
+	case TempoMovement::TRAJECTORY_END_BEHAVIOR_DESTROY:
+		Config.EndBehavior = ETrajectoryEndBehavior::Destroy;
+		break;
 	default:
 		break;
 	}
