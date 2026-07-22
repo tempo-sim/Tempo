@@ -9,7 +9,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tempo-sim"
-version = "0.2.1"
+version = "0.2.2"
 description = "Python client API for the Tempo simulation server. Generated gRPC wrappers with sync and async surfaces."
 readme = "README.md"
 # PEP 639 SPDX expression (string form). The deprecated `{ text = ... }` table form and the
