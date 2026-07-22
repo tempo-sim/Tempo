@@ -73,6 +73,16 @@ on:
         type: string
         description: The path in the workspace to use for checkout
         default: ${{ github.event.repository.name }}
+      allow_unsafe_pr_checkout:
+        type: boolean
+        description: >-
+          Check out a pull request's head commit instead of github.sha. For pull_request_target runs this
+          means checking out and building/running attacker-controlled code (a fork PR's head) in a job that
+          has secrets access - the "pwn request" pattern. Only takes effect for pull_request_target; plain
+          pull_request/push/dispatch runs are unaffected, since GitHub never exposes secrets to a
+          pull_request run triggered from a fork. If you set this true for a pull_request_target caller,
+          also gate the calling job behind a protected environment (see the environment input) for fork PRs.
+        default: false
       cache_repo_root:
         type: string
         description: Root of the repo which should be used for the build cache
@@ -247,11 +257,22 @@ jobs:
         private-key: ${{ secrets.submodules_app_private_key }}
         owner: ${{ github.repository_owner }}
         repositories: ${{ inputs.submodules_repositories }}
+    - name: Determine Checkout Ref
+      id: checkout_ref
+      run: |
+        if [ "${{ github.event_name }}" = "pull_request_target" ] && [ "${{ inputs.allow_unsafe_pr_checkout }}" != "true" ]; then
+          echo "REF=${{ github.sha }}" >> $GITHUB_OUTPUT
+          if [ -n "${{ github.event.pull_request.head.sha }}" ]; then
+            echo "::warning title=Unsafe PR checkout skipped::allow_unsafe_pr_checkout is false on this pull_request_target run, so the PR head commit was not checked out (that would run attacker-controlled code in a job with secrets access). Building ${{ github.sha }} (the base branch) instead. Set allow_unsafe_pr_checkout: true, gated behind a protected environment for fork PRs, to actually build the PR."
+          fi
+        else
+          echo "REF=${{ github.event.pull_request.head.sha || github.sha }}" >> $GITHUB_OUTPUT
+        fi
     - name: Checkout
       uses: actions/checkout@v4
       with:
         path: ${{ inputs.checkout_path }}
-        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        ref: ${{ steps.checkout_ref.outputs.REF }}
         fetch-depth: 0
         submodules: recursive
         token: ${{ steps.submodules_app_token.outputs.token != '' && steps.submodules_app_token.outputs.token || (inputs.submodules_token != '' && inputs.submodules_token || github.token) }}
