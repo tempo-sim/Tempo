@@ -115,6 +115,8 @@ enum TrajectoryEndBehavior {
   TRAJECTORY_END_BEHAVIOR_LOOP = 2;
   // Teleport back to the start (even for a steering follower) and repeat.
   TRAJECTORY_END_BEHAVIOR_RESET = 3;
+  // Destroy the pawn when it reaches the end of the trajectory.
+  TRAJECTORY_END_BEHAVIOR_DESTROY = 4;
 }
 
 message ConfigureTrajectoryFollowingRequest {
