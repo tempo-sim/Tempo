@@ -28,11 +28,11 @@ classifiers = [
 # the interactive shells use prompt_toolkit. Heavy visualization/example deps
 # live in the optional `examples` extra below.
 dependencies = [
-    # The protobuf runtime range is coupled to the protoc used at generation time:
-    # the generated *_pb2.py enforce a minimum runtime version. If the vendored
-    # protoc is ever bumped to a v5-era release, raise this cap (and the version in
-    # requirements.txt) accordingly, or installs will fail the pb2 version check.
-    "protobuf>=4.25,<5",
+    # protobuf's Cross-Version Runtime Guarantee (https://protobuf.dev/support/cross-version-runtime-guarantee/)
+    # covers our vendored protoc's gencode (from protobuf source v3.25.1) through at
+    # least runtime 8.x, so the runtime doesn't need to track the vendored protoc
+    # version tightly. Capped at <8 to match that documented guarantee window.
+    "protobuf>=4.25,<8",
     "grpcio>=1.62",
     "curio-compat>=1.6",
     "prompt_toolkit>=3.0",
