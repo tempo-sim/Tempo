@@ -39,6 +39,7 @@ jobs:
       cache_branch: main
       engine_mods_image: ghcr.io/${{ github.repository_owner }}/tempo-unreal-modded
       environment: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name != github.repository && 'fork-pr-environment' || '' }}
+      allow_unsafe_pr_checkout: true
       gen_rust_api: true
       gen_cpp_api: true
       automation_test_filter: Tempo.
@@ -73,6 +74,7 @@ jobs:
       unreal_version: ${{ matrix.unreal_version }}
       runner: ubuntu-24.04
       checkout_path: TempoSample/Plugins/Tempo
+      allow_unsafe_pr_checkout: true
       # Gate fork PRs behind manual approval, same as the build job (this job runs PR code).
       environment: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name != github.repository && 'fork-pr-environment' || '' }}
     secrets: inherit
@@ -99,5 +101,6 @@ jobs:
       python_version: ''     # Rust groups don't need Python
       setup_rust: true
       checkout_path: TempoSample/Plugins/Tempo
+      allow_unsafe_pr_checkout: true
       environment: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name != github.repository && 'fork-pr-environment' || '' }}
     secrets: inherit
