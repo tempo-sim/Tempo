@@ -112,6 +112,7 @@ jobs:
         path: ${{ inputs.checkout_path }}
         ref: ${{ steps.checkout_ref.outputs.REF }}
         submodules: ${{ inputs.submodules }}
+        allow-unsafe-pr-checkout: ${{ inputs.allow_unsafe_pr_checkout }}
     - name: Download Packaged Artifact
       uses: actions/download-artifact@v4
       with:

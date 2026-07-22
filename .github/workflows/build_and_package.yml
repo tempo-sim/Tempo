@@ -276,6 +276,7 @@ jobs:
         fetch-depth: 0
         submodules: recursive
         token: ${{ steps.submodules_app_token.outputs.token != '' && steps.submodules_app_token.outputs.token || (inputs.submodules_token != '' && inputs.submodules_token || github.token) }}
+        allow-unsafe-pr-checkout: ${{ inputs.allow_unsafe_pr_checkout }}
     - name: Find Common Ancestor with Base Branch
       if: ${{ ! inputs.clean }}
       id: common_ancestor
