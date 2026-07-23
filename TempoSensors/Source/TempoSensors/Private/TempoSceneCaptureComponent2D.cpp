@@ -456,8 +456,12 @@ void UTempoSceneCaptureComponent2D::AllocateStagingTextures(int32 SizeX, int32 S
 
 			for (int32 I = 0; I < Context.NumTextures; ++I)
 			{
+				// FRHITextureCreateDesc::DebugName is a non-owning const TCHAR*, so the
+				// backing string must outlive the CreateTexture call below. Keep it in a
+				// named local rather than a temporary that dies at the end of this statement.
+				const FString DebugName = FString::Printf(TEXT("%s StagingTexture %d"), *Context.NameBase, I);
 				const FRHITextureCreateDesc Desc =
-					FRHITextureCreateDesc::Create2D(*FString::Printf(TEXT("%s StagingTexture %d"), *Context.NameBase, I))
+					FRHITextureCreateDesc::Create2D(*DebugName)
 					.SetExtent(Context.SizeX, Context.SizeY)
 					.SetFormat(Context.PixelFormat)
 					.SetFlags(TexCreateFlags);
