@@ -24,9 +24,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "TempoGeographic", meta = (WorldContext = "WorldContextObject"))
 	static ATempoDateTimeSystem* GetTempoDateTimeSystem(UObject* WorldContextObject);
 
-protected:
-	const FDateTime& GetSimDateTime() const { return SimDateTime; }
+	UFUNCTION(BlueprintPure, Category = "TempoGeographic")
+	const FDateTime& GetDateTime() const { return SimDateTime; }
 
+protected:
 	void AdvanceSimDateTime(const FTimespan& Timespan);
 
 	void BroadcastDateTimeChanged() const;

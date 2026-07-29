@@ -26,7 +26,21 @@ void ATempoGeoReferencingSystem::PostEditChangeProperty(FPropertyChangedEvent& P
 
 void ATempoGeoReferencingSystem::BroadcastGeographicReferenceChanged() const
 {
-	GeographicReferenceChangedEvent.Broadcast(OriginLatitude, OriginLongitude, OriginAltitude, OriginRotation.Yaw);
+	GeographicReferenceChangedEvent.Broadcast(OriginLatitude, OriginLongitude, OriginAltitude, OriginRotation.Yaw, CalculateNominalTimeZone(OriginLongitude));
+}
+
+void ATempoGeoReferencingSystem::GetGeographicReference(double& Latitude, double& Longitude, double& Altitude, double& YawDegrees, double& TimeZone) const
+{
+	Latitude = OriginLatitude;
+	Longitude = OriginLongitude;
+	Altitude = OriginAltitude;
+	YawDegrees = OriginRotation.Yaw;
+	TimeZone = CalculateNominalTimeZone(OriginLongitude);
+}
+
+double ATempoGeoReferencingSystem::CalculateNominalTimeZone(double Longitude)
+{
+	return FMath::Clamp(Longitude, -180.0, 180.0) / 15.0;
 }
 
 FVector ATempoGeoReferencingSystem::WorldToReference(const FVector& WorldEngineCoordinates) const

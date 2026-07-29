@@ -6,7 +6,10 @@
 #include "GeoReferencingSystem.h"
 #include "TempoGeoReferencingSystem.generated.h"
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(FGeographicReferenceChanged, double, Latitude, double, Longitude, double, Altitude, double, YawDegrees);
+// TimeZone is the nominal solar time zone offset from UTC, in hours, estimated from Longitude alone
+// (every 15 degrees of longitude equals 1 hour). It does not reflect real-world political time zone
+// boundaries or daylight saving time.
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_FiveParams(FGeographicReferenceChanged, double, Latitude, double, Longitude, double, Altitude, double, YawDegrees, double, TimeZone);
 
 UCLASS()
 class TEMPOGEOGRAPHIC_API ATempoGeoReferencingSystem : public AGeoReferencingSystem
@@ -29,6 +32,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "TempoGeographic", meta = (WorldContext = "WorldContextObject"))
 	static ATempoGeoReferencingSystem* GetTempoGeoReferencingSystem(UObject* WorldContextObject);
 
+	// Current geographic reference, matching GeographicReferenceChangedEvent's parameters exactly.
+	UFUNCTION(BlueprintPure, Category = "TempoGeographic")
+	void GetGeographicReference(double& Latitude, double& Longitude, double& Altitude, double& YawDegrees, double& TimeZone) const;
+
 	// Rotation-aware overrides of the base conversions. The base class functions are not virtual, so these only
 	// apply OriginRotation when called through ATempoGeoReferencingSystem (or its subclasses) in C++. Callers
 	// holding an AGeoReferencingSystem* (including Blueprint nodes and the base ENU/tangent helpers) get the
@@ -46,6 +53,11 @@ public:
 
 protected:
 	void BroadcastGeographicReferenceChanged() const;
+
+	// Nominal solar time zone offset, estimated from longitude alone (15 degrees per hour), matching the
+	// same approximation CesiumSunSky uses (ACesiumSunSky::EstimateTimeZoneForLongitude). Does not reflect
+	// real-world political time zone boundaries or daylight saving time.
+	static double CalculateNominalTimeZone(double Longitude);
 
 	// Convert between the actual world (engine) frame and the reference (engine) frame the base class assumes.
 	FVector WorldToReference(const FVector& WorldEngineCoordinates) const;
