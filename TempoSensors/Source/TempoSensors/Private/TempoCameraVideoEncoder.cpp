@@ -13,7 +13,9 @@
 #include "Video/Resources/VideoResourceRHI.h"
 
 #include "Containers/Queue.h"
+#include "DynamicRHI.h"
 #include "Engine/TextureRenderTarget2D.h"
+#include "RHICommandList.h"
 #include "RenderingThread.h"
 #include "TextureResource.h"
 
@@ -55,8 +57,25 @@ struct FTempoCameraVideoEncoder::FImpl
 	// Staging texture used to feed the encoder on Mac/Linux, where the camera's render target lacks
 	// the platform-specific flag the encoder backend needs (CPUReadback for Metal/VideoToolbox,
 	// External for Vulkan→CUDA interop). Allocated lazily, reused across frames when the descriptor
-	// matches, copied into via CopyFrom each frame. Unused on Windows — we wrap the RT directly.
+	// matches, copied into via CopyFrom each frame.
 	TSharedPtr<FVideoResourceRHI> StagingResource;
+
+#if PLATFORM_WINDOWS
+	struct FWindowsCaptureSlot
+	{
+		FTextureRHIRef Texture;
+		FGPUFenceRHIRef Fence;
+		double CaptureTime = 0.0;
+		int32 SequenceId = 0;
+		bool bCopyPending = false;
+		bool bReady = false;
+	};
+
+	// Dedicated shareable textures decouple NVENC from the live camera render target. Their GPU
+	// fences are only polled from later render callbacks, so this never blocks the render thread.
+	TArray<FWindowsCaptureSlot> WindowsCaptureSlots;
+	int32 NextWindowsCaptureSlot = 0;
+#endif
 
 	FTempoCameraVideoEncoder::FConfig AppliedConfig;
 	bool bConfigured = false;
@@ -86,6 +105,10 @@ struct FTempoCameraVideoEncoder::FImpl
 			Encoder.Reset();
 		}
 		StagingResource.Reset();
+#if PLATFORM_WINDOWS
+		WindowsCaptureSlots.Reset();
+		NextWindowsCaptureSlot = 0;
+#endif
 		bConfigured = false;
 		FrameCount = 0;
 	}
@@ -97,6 +120,11 @@ struct FTempoCameraVideoEncoder::FImpl
 			Encoder->Close();
 			Encoder.Reset();
 		}
+		StagingResource.Reset();
+#if PLATFORM_WINDOWS
+		WindowsCaptureSlots.Reset();
+		NextWindowsCaptureSlot = 0;
+#endif
 
 		if (AppliedConfig.Width == 0 || AppliedConfig.Height == 0)
 		{
@@ -230,10 +258,9 @@ void FTempoCameraVideoEncoder::EncodeRenderTarget_RenderThread(UTextureRenderTar
 		return;
 	}
 
-	const uint32 KFI = Impl->AppliedConfig.KeyframeInterval > 0 ? Impl->AppliedConfig.KeyframeInterval : 30;
-	const bool bForceKeyframe = (Impl->FrameCount % KFI) == 0;
-
 	const TSharedRef<FAVDevice> EncoderDevice = Impl->Encoder->GetDevice().ToSharedRef();
+	double EncodedCaptureTime = CaptureTime;
+	int32 EncodedSequenceId = SequenceId;
 
 	// On Mac/Linux the camera's RT lacks the platform flag the encoder backend needs, so we own a
 	// staging resource and CopyFrom into it before submitting:
@@ -243,17 +270,102 @@ void FTempoCameraVideoEncoder::EncodeRenderTarget_RenderThread(UTextureRenderTar
 	//     it for the encoder. The External flag is what tells the RHI to allocate the image's
 	//     memory with VK_EXPORT_MEMORY_ALLOCATE_INFO + use VK_IMAGE_TILING_OPTIMAL. Without it,
 	//     CUDA reports "Failed to bind mipmappedArray".
-	// On Windows the camera RT already carries Shared (UTempoCamera sets bGPUSharedFlag = true on
-	// SharedFinalTextureTarget), so we can wrap and submit it directly. Allocating a staging RT
-	// through FVideoResourceRHI::Create here produced a placed pool-allocator resource that
-	// NVENC's D3D12 path rejected with INVALID_PARAM (NVENC 8) inside nvEncRegisterResource.
+	// On Windows a direct wrapper around the live camera RT races the render pass. NVENC then sees
+	// intermittent cleared/black contents. Copy into dedicated shareable textures and submit each
+	// one only after its GPU fence has completed.
 	TSharedPtr<FVideoResourceRHI> InputResource;
 #if PLATFORM_WINDOWS
 	{
+		constexpr int32 NumCaptureSlots = 3;
+		if (Impl->WindowsCaptureSlots.Num() == 0)
+		{
+			ETextureCreateFlags CaptureFlags = ETextureCreateFlags::RenderTargetable | ETextureCreateFlags::Shared;
+			if (EnumHasAnyFlags(Texture->GetDesc().Flags, ETextureCreateFlags::SRGB))
+			{
+				CaptureFlags |= ETextureCreateFlags::SRGB;
+			}
+
+			Impl->WindowsCaptureSlots.SetNum(NumCaptureSlots);
+			for (int32 SlotIndex = 0; SlotIndex < NumCaptureSlots; ++SlotIndex)
+			{
+				FRHITextureCreateDesc CaptureDesc = FRHITextureCreateDesc::Create2D(
+					TEXT("TempoCameraVideoCapture"),
+					Texture->GetSizeX(),
+					Texture->GetSizeY(),
+					Texture->GetFormat());
+				CaptureDesc.SetClearValue(FClearValueBinding::None)
+					.SetFlags(CaptureFlags)
+					.SetInitialState(ERHIAccess::Present);
+				CaptureDesc.DetermineInititialState();
+
+				FImpl::FWindowsCaptureSlot& Slot = Impl->WindowsCaptureSlots[SlotIndex];
+				Slot.Texture = RHICreateTexture(CaptureDesc);
+				Slot.Fence = GDynamicRHI->RHICreateGPUFence(TEXT("TempoCameraVideoCaptureFence"));
+				if (!Slot.Texture.IsValid() || !Slot.Fence.IsValid())
+				{
+					UE_LOG(LogTempoSensors, Warning, TEXT("FTempoCameraVideoEncoder: failed to allocate a Windows capture slot."));
+					Impl->WindowsCaptureSlots.Reset();
+					return;
+				}
+			}
+		}
+
+		int32 CompletedSlotIndex = INDEX_NONE;
+		for (int32 SlotIndex = 0; SlotIndex < Impl->WindowsCaptureSlots.Num(); ++SlotIndex)
+		{
+			FImpl::FWindowsCaptureSlot& Slot = Impl->WindowsCaptureSlots[SlotIndex];
+			if (Slot.bCopyPending && Slot.Fence->Poll())
+			{
+				Slot.Fence->Clear();
+				Slot.bCopyPending = false;
+				Slot.bReady = true;
+			}
+			if (CompletedSlotIndex == INDEX_NONE && Slot.bReady)
+			{
+				CompletedSlotIndex = SlotIndex;
+			}
+		}
+
+		int32 CaptureSlotIndex = INDEX_NONE;
+		for (int32 SlotOffset = 0; SlotOffset < Impl->WindowsCaptureSlots.Num(); ++SlotOffset)
+		{
+			const int32 SlotIndex = (Impl->NextWindowsCaptureSlot + SlotOffset) % Impl->WindowsCaptureSlots.Num();
+			const FImpl::FWindowsCaptureSlot& Slot = Impl->WindowsCaptureSlots[SlotIndex];
+			if (!Slot.bCopyPending && !Slot.bReady)
+			{
+				CaptureSlotIndex = SlotIndex;
+				break;
+			}
+		}
+
+		if (CaptureSlotIndex != INDEX_NONE)
+		{
+			FImpl::FWindowsCaptureSlot& CaptureSlot = Impl->WindowsCaptureSlots[CaptureSlotIndex];
+			FRHICommandListImmediate& RHICmdList = FRHICommandListExecutor::GetImmediateCommandList();
+			RHICmdList.Transition(FRHITransitionInfo(Texture, ERHIAccess::Unknown, ERHIAccess::CopySrc));
+			RHICmdList.Transition(FRHITransitionInfo(CaptureSlot.Texture, ERHIAccess::Unknown, ERHIAccess::CopyDest));
+			RHICmdList.CopyTexture(Texture, CaptureSlot.Texture, {});
+			RHICmdList.WriteGPUFence(CaptureSlot.Fence);
+			CaptureSlot.CaptureTime = CaptureTime;
+			CaptureSlot.SequenceId = SequenceId;
+			CaptureSlot.bCopyPending = true;
+			Impl->NextWindowsCaptureSlot = (CaptureSlotIndex + 1) % Impl->WindowsCaptureSlots.Num();
+		}
+
+		if (CompletedSlotIndex == INDEX_NONE)
+		{
+			// The first callback primes the asynchronous copy. Later callbacks consume completed slots.
+			return;
+		}
+
+		FImpl::FWindowsCaptureSlot& CompletedSlot = Impl->WindowsCaptureSlots[CompletedSlotIndex];
+		EncodedCaptureTime = CompletedSlot.CaptureTime;
+		EncodedSequenceId = CompletedSlot.SequenceId;
 		FVideoResourceRHI::FRawData Raw;
-		Raw.Texture = Texture;
+		Raw.Texture = CompletedSlot.Texture;
 		Raw.FenceValue = 0;
 		InputResource = MakeShareable(new FVideoResourceRHI(EncoderDevice, Raw));
+		CompletedSlot.bReady = false;
 	}
 #else
 	constexpr ETextureCreateFlags StagingFlags =
@@ -305,6 +417,9 @@ void FTempoCameraVideoEncoder::EncodeRenderTarget_RenderThread(UTextureRenderTar
 	InputResource = Impl->StagingResource;
 #endif
 
+	const uint32 KFI = Impl->AppliedConfig.KeyframeInterval > 0 ? Impl->AppliedConfig.KeyframeInterval : 30;
+	const bool bForceKeyframe = (Impl->FrameCount % KFI) == 0;
+
 	const uint32 Timestamp = static_cast<uint32>(Impl->FrameCount);
 	const FAVResult SendResult = Impl->Encoder->SendFrame(InputResource, Timestamp, bForceKeyframe);
 	if (SendResult.IsNotSuccess())
@@ -334,8 +449,8 @@ void FTempoCameraVideoEncoder::EncodeRenderTarget_RenderThread(UTextureRenderTar
 	{
 		Aggregate.Width = Impl->AppliedConfig.Width;
 		Aggregate.Height = Impl->AppliedConfig.Height;
-		Aggregate.CaptureTime = CaptureTime;
-		Aggregate.SequenceId = SequenceId;
+		Aggregate.CaptureTime = EncodedCaptureTime;
+		Aggregate.SequenceId = EncodedSequenceId;
 		Impl->PacketQueue.Enqueue(MoveTemp(Aggregate));
 	}
 
