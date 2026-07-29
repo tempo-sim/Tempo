@@ -26,7 +26,10 @@ void ATempoGeoReferencingSystem::PostEditChangeProperty(FPropertyChangedEvent& P
 
 void ATempoGeoReferencingSystem::BroadcastGeographicReferenceChanged() const
 {
-	GeographicReferenceChangedEvent.Broadcast(OriginLatitude, OriginLongitude, OriginAltitude, OriginRotation.Yaw);
+	// Nominal solar time zone offset, estimated from longitude alone (15 degrees per hour), matching
+	// the same approximation CesiumSunSky uses (ACesiumSunSky::EstimateTimeZoneForLongitude).
+	const double TimeZone = FMath::Clamp(OriginLongitude, -180.0, 180.0) / 15.0;
+	GeographicReferenceChangedEvent.Broadcast(OriginLatitude, OriginLongitude, OriginAltitude, OriginRotation.Yaw, TimeZone);
 }
 
 FVector ATempoGeoReferencingSystem::WorldToReference(const FVector& WorldEngineCoordinates) const
