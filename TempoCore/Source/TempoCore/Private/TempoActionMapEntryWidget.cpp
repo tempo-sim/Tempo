@@ -25,9 +25,15 @@ void UTempoActionMapEntryWidget::Setup(UTempoActionMapWidget* InParent, const FA
 		RebindButton->OnClicked.AddDynamic(this, &UTempoActionMapEntryWidget::OnRebindButtonClicked);
 	}
 
-	// Bindings with modifier keys can't be re-captured by a single keypress, so
-	// disable the whole row (Slate will render it dimmed and ignore input).
-	SetIsEnabled(!BindingInfo.bHasModifiers);
+	if (RebindButton)
+	{
+		// Bindings with modifier keys can't be re-captured by a single keypress. Only the button is
+		// disabled (rendered dimmed by Slate, and ignoring clicks): the action name and its key are
+		// still worth reading, so dimming the whole row would hide information rather than a
+		// disabled control.
+		RebindButton->SetIsEnabled(!BindingInfo.bHasModifiers);
+		RebindButton->SetToolTipText(BindingInfo.bHasModifiers ? NonRebindableToolTip : RebindableToolTip);
+	}
 }
 
 void UTempoActionMapEntryWidget::OnRebindButtonClicked()

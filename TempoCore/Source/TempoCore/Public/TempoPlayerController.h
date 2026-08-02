@@ -135,7 +135,8 @@ protected:
 	TMap<APawn*, AController*> AIControllerMap;
 
 	// Captured in OnUnPossess (where GetPawn() still returns the outgoing pawn) so OnPossess can see
-	// the actual previous pawn — by the time OnPossess runs, SetPawn(InPawn) has already happened.
+	// the actual previous pawn. Only valid after OnPossess calls Super::OnPossess(), which is what
+	// unpossesses the outgoing pawn in the first place.
 	UPROPERTY()
 	TWeakObjectPtr<APawn> PendingPreviousPawn;
 

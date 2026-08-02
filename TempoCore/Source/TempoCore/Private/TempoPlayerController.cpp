@@ -80,20 +80,6 @@ void ATempoPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 void ATempoPlayerController::OnPossess(APawn* InPawn)
 {
-	APawn* PreviousPawn = PendingPreviousPawn.Get();
-	PendingPreviousPawn = nullptr;
-
-	// Restore AI controller if necessary.
-	if (PreviousPawn && AIControllerMap.Contains(PreviousPawn))
-	{
-		AController* OriginalController = AIControllerMap[PreviousPawn];
-		if (OriginalController)
-		{
-			OriginalController->Possess(PreviousPawn);
-		}
-		AIControllerMap.Remove(PreviousPawn);
-	}
-
 	// Set spectator position if needed.
 	if (ATempoGameMode* GameMode = Cast<ATempoGameMode>(UGameplayStatics::GetGameMode(this)))
 	{
@@ -106,7 +92,24 @@ void ATempoPlayerController::OnPossess(APawn* InPawn)
 		}
 	}
 
+	// Super::OnPossess() is what unpossesses the outgoing pawn, so PendingPreviousPawn (set by
+	// OnUnPossess) is only valid after it returns.
 	Super::OnPossess(InPawn);
+
+	APawn* PreviousPawn = PendingPreviousPawn.Get();
+	PendingPreviousPawn = nullptr;
+
+	// Restore the outgoing pawn's AI controller if necessary. Skipped when we just re-possessed the
+	// same pawn, which would otherwise hand it straight back to the AI.
+	if (PreviousPawn && PreviousPawn != InPawn && AIControllerMap.Contains(PreviousPawn))
+	{
+		AController* OriginalController = AIControllerMap[PreviousPawn];
+		if (OriginalController)
+		{
+			OriginalController->Possess(PreviousPawn);
+		}
+		AIControllerMap.Remove(PreviousPawn);
+	}
 
 	if (InPawn)
 	{
@@ -505,8 +508,13 @@ void ATempoPlayerController::PossessNextPawn()
 		if (ActivePawnArray.IsValidIndex(CurrentIndex))
 		{
 			APawn* PawnToPossess = ActivePawnArray[CurrentIndex];
-			CacheAIController(PawnToPossess);
-			Possess(PawnToPossess);
+			// Re-possessing the pawn we already control would pointlessly tear down and rebuild the
+			// view (the camera snaps back to the pawn's default framing).
+			if (PawnToPossess != GetPawn())
+			{
+				CacheAIController(PawnToPossess);
+				Possess(PawnToPossess);
+			}
 		}
 	}
 }
@@ -535,8 +543,11 @@ void ATempoPlayerController::PossessPreviousPawn()
 		if (ActivePawnArray.IsValidIndex(CurrentIndex))
 		{
 			APawn* PawnToPossess = ActivePawnArray[CurrentIndex];
-			CacheAIController(PawnToPossess);
-			Possess(PawnToPossess);
+			if (PawnToPossess != GetPawn())
+			{
+				CacheAIController(PawnToPossess);
+				Possess(PawnToPossess);
+			}
 		}
 	}
 }
@@ -603,27 +614,17 @@ UClass* ATempoPlayerController::GetCorrectGroupForPawn(const APawn* InPawn) cons
 		return nullptr;
 	}
 
-	TArray<TSubclassOf<APawn>> AllGroupClasses;
-	AllGroupClasses.Add(ACharacter::StaticClass());
-	AllGroupClasses.Add(AWheeledVehiclePawn::StaticClass());
-	AllGroupClasses.Append(ConfiguredPawnGroupClasses);
-	TSet<TSubclassOf<APawn>> UniqueClasses(AllGroupClasses);
-	AllGroupClasses = UniqueClasses.Array();
-
-	AllGroupClasses.Sort([](const TSubclassOf<APawn>& A, const TSubclassOf<APawn>& B) {
-		if (!A || !B) return false;
-		if (A->IsChildOf(B)) return true;
-		if (B->IsChildOf(A)) return false;
-		return A->GetName() < B->GetName();
-	});
-
-	// Find the first matching group.
-	for (TSubclassOf<APawn> GroupClass : AllGroupClasses)
+	// Report the group the pawn was actually placed in by UpdatePawnGroups. Re-deriving it from a
+	// class list here instead would disagree with the real grouping whenever the two lists differ
+	// (e.g. a Character when ConfiguredPawnGroupClasses has no Character group, which lands the pawn
+	// in the fallback group), and OnPossess would then leave ActiveGroupIndex/PawnGroupIndices
+	// pointing at the group and index of some other pawn.
+	for (const auto& Pair : PawnGroups)
 	{
-		if (InPawn->IsA(GroupClass))
+		if (Pair.Value.Pawns.Contains(InPawn))
 		{
-			return GroupClass;
+			return Pair.Key;
 		}
 	}
-	return FallbackGroupClass;
+	return nullptr;
 }

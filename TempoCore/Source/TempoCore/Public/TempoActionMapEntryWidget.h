@@ -37,6 +37,15 @@ public:
 	UPROPERTY(meta = (BindWidget))
 	UButton* RebindButton;
 
+protected:
+	/** Hover text on the rebind button for a binding that can be rebound. */
+	UPROPERTY(EditDefaultsOnly, Category = "Input")
+	FText RebindableToolTip = NSLOCTEXT("TempoActionMap", "RebindableToolTip", "Left click and press the key you want to rebind");
+
+	/** Hover text on the rebind button for a binding this widget can't capture (see bHasModifiers). */
+	UPROPERTY(EditDefaultsOnly, Category = "Input")
+	FText NonRebindableToolTip = NSLOCTEXT("TempoActionMap", "NonRebindableToolTip", "This binding uses a modifier key and can't be rebound here. Change it in Project Settings > Engine > Input.");
+
 private:
 	UFUNCTION()
 	void OnRebindButtonClicked();

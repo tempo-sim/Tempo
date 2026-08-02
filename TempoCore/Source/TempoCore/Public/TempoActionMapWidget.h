@@ -33,6 +33,13 @@ struct FActionBindingInfo
 	bool bHasModifiers = false;
 };
 
+/**
+ * Lists the player's action bindings and rebinds one to whatever key the user presses next.
+ *
+ * Keyboard and mouse only: gamepad mappings are never listed, gamepad-only actions are omitted
+ * entirely, and gamepad presses are ignored while listening for a new key. An action bound on both
+ * devices therefore shows — and rebinds — its keyboard key, leaving its gamepad key untouched.
+ */
 UCLASS()
 class TEMPOCORE_API UTempoActionMapWidget : public UUserWidget
 {
