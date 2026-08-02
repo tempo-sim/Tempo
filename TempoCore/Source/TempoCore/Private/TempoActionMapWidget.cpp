@@ -12,6 +12,26 @@
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
 
+namespace
+{
+	/**
+	 * Index of the first keyboard/mouse mapping, or INDEX_NONE if the action is gamepad-only.
+	 *
+	 * This widget is a keyboard rebinding UI — a rebind is driven by a key press captured in
+	 * NativeOnKeyDown — so gamepad mappings are skipped throughout. Taking the first mapping
+	 * regardless of device would let a gamepad mapping hide the keyboard key of an action bound on
+	 * both (the display order follows the input settings, not the device), and a subsequent rebind
+	 * would then silently replace the gamepad mapping instead of the key the user is looking at.
+	 */
+	int32 FindKeyboardMappingIndex(const TArray<FInputActionKeyMapping>& Mappings)
+	{
+		return Mappings.IndexOfByPredicate([](const FInputActionKeyMapping& Mapping)
+		{
+			return !Mapping.Key.IsGamepadKey();
+		});
+	}
+}
+
 void UTempoActionMapWidget::NativeOnInitialized()
 {
 	Super::NativeOnInitialized();
@@ -70,7 +90,8 @@ TArray<FActionBindingInfo> UTempoActionMapWidget::GetPlayerActionBindings()
 		TArray<FInputActionKeyMapping> Mappings;
 		InputSettings->GetActionMappingByName(ActionName, Mappings);
 
-		if (Mappings.Num() > 0)
+		const int32 KeyboardMappingIndex = FindKeyboardMappingIndex(Mappings);
+		if (KeyboardMappingIndex != INDEX_NONE)
 		{
 			FActionBindingInfo Info;
 			Info.ActionName = ActionName;
@@ -87,7 +108,7 @@ TArray<FActionBindingInfo> UTempoActionMapWidget::GetPlayerActionBindings()
 			}
 			Info.ActionDisplayName = DisplayNameString;
 
-			const FInputActionKeyMapping& Mapping = Mappings[0];
+			const FInputActionKeyMapping& Mapping = Mappings[KeyboardMappingIndex];
 			Info.Key = Mapping.Key;
 			Info.bHasModifiers = Mapping.bCtrl || Mapping.bAlt || Mapping.bShift || Mapping.bCmd;
 
@@ -149,6 +170,14 @@ FReply UTempoActionMapWidget::NativeOnKeyDown(const FGeometry& InGeometry, const
 
 	const FKey PressedKey = InKeyEvent.GetKey();
 
+	// Gamepad buttons reach focused widgets as key events too, but binding one here would replace a
+	// keyboard mapping with a key this widget then refuses to list. Stay in the listening state so
+	// the user can still press a key (or Escape).
+	if (PressedKey.IsGamepadKey())
+	{
+		return FReply::Handled();
+	}
+
 	if (PressedKey == EKeys::Escape)
 	{
 		bIsListeningForKey = false;
@@ -169,11 +198,14 @@ void UTempoActionMapWidget::RebindActionKey(FName ActionName, FKey NewKey)
 	TArray<FInputActionKeyMapping> Mappings;
 	InputSettings->GetActionMappingByName(ActionName, Mappings);
 
-	if (Mappings.Num() > 0)
+	// Rebind the mapping the row actually displayed, leaving any gamepad mapping of the same action
+	// in place.
+	const int32 KeyboardMappingIndex = FindKeyboardMappingIndex(Mappings);
+	if (KeyboardMappingIndex != INDEX_NONE)
 	{
 		// Remove the old mapping, update it with the new key, and add it back.
-		FInputActionKeyMapping UpdatedMapping = Mappings[0];
-		InputSettings->RemoveActionMapping(Mappings[0]);
+		FInputActionKeyMapping UpdatedMapping = Mappings[KeyboardMappingIndex];
+		InputSettings->RemoveActionMapping(UpdatedMapping);
 		UpdatedMapping.Key = NewKey;
 		InputSettings->AddActionMapping(UpdatedMapping, true);
 		InputSettings->SaveKeyMappings();
