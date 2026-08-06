@@ -344,6 +344,12 @@ public:
 	// or the ring stays at the engine default of 4 and overruns immediately under many sensors.
 	static void EnsureRayTracingReadbackBuffersExpanded(FSceneInterface* Scene);
 
+	// Stop FRayTracingScene::EndFrame from deleting readback buffers that still have copies in flight
+	// (see definition for detail). Unlike the ring expansion above this is NOT one-shot: it must be
+	// called before every render this component issues that does not itself use ray tracing, since the
+	// engine re-arms the release at the end of each EndFrame().
+	static void PinRayTracingSceneUsedThisFrame(FSceneInterface* Scene);
+
 protected:
 	// Derived components must override this to return whether they have pending requests.
 	virtual bool HasPendingRequests() const PURE_VIRTUAL(UTempoSceneCaptureComponent2D::HasPendingRequests, return false; );

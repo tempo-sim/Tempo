@@ -951,6 +951,12 @@ void UTempoCamera::RenderCapture()
 	// frame. The call is idempotent and persistent, so the first camera each frame covers the rest.
 	EnsureRayTracingReadbackBuffersExpanded(Scene);
 
+	// The camera always renders with ray tracing enabled (ApplyPhotorealisticRenderSettings sets
+	// bUseRayTracingIfEnabled), so Update() marks bUsedThisFrame for it anyway and this is a no-op in
+	// practice. Kept for uniformity: any render mode change that drops ray tracing here would otherwise
+	// silently re-expose the release race.
+	PinRayTracingSceneUsedThisFrame(Scene);
+
 	int32 NumActiveTiles = 0;
 	for (const FTempoCameraTile& Tile : Tiles)
 	{

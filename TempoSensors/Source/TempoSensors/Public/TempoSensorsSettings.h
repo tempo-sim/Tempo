@@ -60,6 +60,9 @@ public:
 	bool GetRayTracingSceneReadbackBuffersOverrunWorkaroundEnabled() const { return bEnableRayTracingSceneReadbackBuffersOverrunWorkaround; }
 	uint32 GetRayTracingSceneMaxReadbackBuffersOverride() const { return RayTracingSceneMaxReadbackBuffersOverride; }
 
+	// RayTracingScene Buffer Release Workaround
+	bool GetRayTracingSceneReadbackBuffersReleaseWorkaroundEnabled() const { return bEnableRayTracingSceneReadbackBuffersReleaseWorkaround; }
+
 #if WITH_EDITOR
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 #endif
@@ -179,6 +182,16 @@ private:
 	// ray-tracing scene renders in flight: (RT renders per frame) x (GPU frames in flight + margin).
 	UPROPERTY(EditAnywhere, Config, Category="Advanced", meta=(EditCondition=bEnableRayTracingSceneReadbackBuffersOverrunWorkaround))
 	uint32 RayTracingSceneMaxReadbackBuffersOverride = 128;
+
+	// Whether to enable a hack to stop FRayTracingScene::EndFrame from deleting readback buffers that
+	// still have copies in flight. Needed when a sensor renders WITHOUT ray tracing (the depth-only
+	// lidar) while something else — the main viewport under r.RayTracing=True plus Lumen hardware ray
+	// tracing — builds the ray tracing scene for the same FScene every frame. See
+	// UTempoSceneCaptureComponent2D::PinRayTracingSceneUsedThisFrame for the mechanism. Costs some
+	// retained render memory: FRayTracingScene stops releasing its pooled buffers on frames where ray
+	// tracing genuinely goes unused.
+	UPROPERTY(EditAnywhere, Config, Category="Advanced")
+	bool bEnableRayTracingSceneReadbackBuffersReleaseWorkaround = true;
 
 	// When true, FixedStep mode allows the game thread to advance without waiting for sensor
 	// readback to complete. Sensor images may arrive 1-2 frames late, but throughput increases
