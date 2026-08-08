@@ -902,6 +902,11 @@ void UTempoLidar::RenderCapture()
 	// rendering or the engine-default ring of 4 overruns once several sensors capture per frame.
 	EnsureRayTracingReadbackBuffersExpanded(Scene);
 
+	// The no-color lidar renders with ray tracing off (bUseRayTracingIfEnabled = false, Lumen forced to
+	// None per view), so without this the render's EndFrame() would delete the readback buffers the main
+	// viewport's ray-tracing scene still has copies in flight against. Also enqueued before RenderTiles.
+	PinRayTracingSceneUsedThisFrame(Scene);
+
 	// Per-tile view origin (shared across tiles) — the lidar's world location.
 	const FTransform LidarWorld = GetComponentToWorld();
 	const FVector ViewLocation = LidarWorld.GetTranslation();

@@ -23,6 +23,10 @@
 #include "Windows/AllowWindowsPlatformAtomics.h"
 #include "Windows/HideWindowsPlatformAtomics.h"
 #endif
+// Included ahead of the `#define private public` below (ScenePrivate.h pulls it in transitively, so
+// without this it would be parsed with access flipped for this TU). Needed for
+// FRDGBuilder::WaitForAsyncExecuteTask — see EnsureRayTracingReadbackBuffersExpanded.
+#include "RenderGraphBuilder.h"
 // Hack to get access to private members of FRayTracingScene. See comment in UpdateSceneCaptureContents for more detail.
 // The macro must be undef'd after the parse — leaving it active flips access on every
 // `private:` section parsed later in the unity TU (e.g. the protobuf-generated Sensors.pb.h
@@ -130,6 +134,15 @@ void UTempoSceneCaptureComponent2D::EnsureRayTracingReadbackBuffersExpanded(FSce
 			[SceneCapture, NewMaxReadbackBuffers](FRHICommandListImmediate&)
 			{
 				FRayTracingScene* RayTracingScene = &SceneCapture->GetRenderScene()->RayTracingScene;
+
+				// SetNum below reallocates rings that the engine hands out interior references to:
+				// FinishStats' readback pass captures `&StatsReadback[Index]` by reference
+				// (RayTracingScene.cpp:879) and, under the default r.RDG.ParallelExecute=2, runs on a
+				// task worker the render thread never joins (RenderGraphBuilder.cpp:598). Join those
+				// tasks first so we can't move the ring out from under a pass that is mid-flight. Only
+				// the first call per FScene reaches the SetNum, so this wait is paid once.
+				FRDGBuilder::WaitForAsyncExecuteTask();
+
 				if (RayTracingScene->MaxReadbackBuffers < NewMaxReadbackBuffers)
 				{
 					// MaxReadbackBuffers is declared `const uint32`; bypass via offsetof. The
@@ -181,6 +194,66 @@ void UTempoSceneCaptureComponent2D::EnsureRayTracingReadbackBuffersExpanded(FSce
 #endif
 }
 
+// FRayTracingScene::EndFrame (RayTracingScene.cpp:1177 in 5.7) releases the readback rings whenever
+// bUsedThisFrame is false — ReleaseReadbackBuffers / ReleaseFeedbackReadbackBuffers `delete` every
+// FRHIGPUBufferReadback and empty the arrays (:1275, :1288), without regard for StatsReadbackNumPending.
+//
+// bUsedThisFrame is set only in FRayTracingScene::Update (:229) and cleared at the end of every
+// EndFrame(), and EndFrame() runs once per scene-render group (SceneRendering.cpp:4957, inside
+// CleanupViewFamilies_RenderThread) — so it means "did THIS render use ray tracing", not "this frame".
+// A sensor that renders without ray tracing (the depth-only lidar: bUseRayTracingIfEnabled = false plus
+// DynamicGlobalIlluminationMethod/ReflectionMethod forced to None per view) therefore tears down rings
+// that another render on the same FScene — the main viewport, which builds the ray tracing scene every
+// frame under r.RayTracing=True with Lumen hardware ray tracing — still has readback passes pending
+// against. Those passes hold `&StatsReadback[Index]` by reference (RayTracingScene.cpp:879) and execute
+// on a task worker the render thread never joins (RenderGraphBuilder.cpp:598, ERDGPassTaskMode::Async
+// under the default r.RDG.ParallelExecute=2). The result is a use-after-free in
+// FRHIGPUBufferReadback::EnqueueCopy: `this` is still mapped but Fence reads as null, so the first
+// statement, Fence->Clear(), faults on a virtual call through nullptr. A live readback can never have a
+// null Fence — the constructor always assigns one (RHIGPUReadback.h:25) — which is how the freed object
+// is identifiable in the crash dump.
+//
+// Setting bUsedThisFrame makes EndFrame skip the release for the render we are about to issue. The
+// engine clears the flag itself at the end of that EndFrame(), so nothing leaks into later frames; this
+// is not a permanent pin. It must be enqueued BEFORE the render command that performs the capture so it
+// lands ahead of that render's EndFrame().
+//
+// Trade-off: FRayTracingScene stops releasing its pooled per-view buffers and GeometriesToBuild on
+// renders where ray tracing genuinely goes unused, i.e. we retain some render memory rather than free
+// memory that is still in flight. Disable via bEnableRayTracingSceneReadbackBuffersReleaseWorkaround.
+//
+// This is distinct from the ring expansion above, which addresses ring OVERRUN (a slot being reused
+// while its copy is in flight). Expanding the ring does not help here: the whole ring is deleted, so a
+// ring of 128 just means 128 deletions instead of 4.
+//
+// Verified against 5.7. bUsedThisFrame is engine-private state; re-diff FRayTracingScene on any engine
+// bump (a rename surfaces as a compile error here, not as silent breakage).
+void UTempoSceneCaptureComponent2D::PinRayTracingSceneUsedThisFrame(FSceneInterface* Scene)
+{
+#if RHI_RAYTRACING && ENGINE_MAJOR_VERSION == 5 && ((ENGINE_MINOR_VERSION == 5 && STATS) || ENGINE_MINOR_VERSION > 5)
+	if (!Scene)
+	{
+		return;
+	}
+
+	const UTempoSensorsSettings* TempoSensorsSettings = GetDefault<UTempoSensorsSettings>();
+	if (!TempoSensorsSettings || !TempoSensorsSettings->GetRayTracingSceneReadbackBuffersReleaseWorkaroundEnabled())
+	{
+		return;
+	}
+
+	FSceneInterface* SceneCapture = Scene;
+	ENQUEUE_RENDER_COMMAND(TempoPinRayTracingSceneUsedThisFrame)(
+		[SceneCapture](FRHICommandListImmediate&)
+		{
+			if (FScene* RenderScene = SceneCapture->GetRenderScene())
+			{
+				RenderScene->RayTracingScene.bUsedThisFrame = true;
+			}
+		});
+#endif
+}
+
 #if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 void UTempoSceneCaptureComponent2D::UpdateSceneCaptureContents(FSceneInterface* Scene)
 #else
@@ -190,6 +263,7 @@ void UTempoSceneCaptureComponent2D::UpdateSceneCaptureContents(FSceneInterface* 
 	TextureInitFence.Wait();
 
 	EnsureRayTracingReadbackBuffersExpanded(Scene);
+	PinRayTracingSceneUsedThisFrame(Scene);
 
 	if (!TextureTarget)
 	{
