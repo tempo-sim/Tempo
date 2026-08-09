@@ -70,13 +70,13 @@ void ATempoWorldSettings::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	if (UTempoCoreSettings* TempoCoreSettings = GetMutableDefault<UTempoCoreSettings>())
 	{
 		TempoCoreSettings->TempoCoreRenderingSettingsChanged.Remove(RenderingSettingsChangedHandle);
-	}
 
-	// The viewport widget and FViewport's game rendering flag both outlive this world (in PIE the widget
-	// belongs to the level editor), so restore them. BeginPlay reapplies the setting for the next world.
-	if (!bMainViewportRenderEnabled)
-	{
-		SetMainViewportRenderEnabled(true);
+		// The viewport widget and FViewport's game rendering flag both outlive this world (in PIE the
+		// widget belongs to the level editor), so restore them. BeginPlay reapplies the setting.
+		if (!TempoCoreSettings->GetRenderMainViewport())
+		{
+			SetMainViewportRenderEnabled(true);
+		}
 	}
 
 #if WITH_EDITOR
@@ -407,7 +407,7 @@ void ATempoWorldSettings::SetDefaultAutoExposureBias()
 	bFoundDefaultAutoExposureBias = true;
 }
 
-void ATempoWorldSettings::TempoCoreRenderSettingsChanged()
+void ATempoWorldSettings::TempoCoreRenderSettingsChanged() const
 {
 	if (const UTempoCoreSettings* TempoCoreSettings = GetDefault<UTempoCoreSettings>())
 	{
@@ -415,7 +415,7 @@ void ATempoWorldSettings::TempoCoreRenderSettingsChanged()
 	}
 }
 
-void ATempoWorldSettings::SetMainViewportRenderEnabled(bool bEnabled)
+void ATempoWorldSettings::SetMainViewportRenderEnabled(bool bEnabled) const
 {
 	if (const APlayerController* PlayerController = UGameplayStatics::GetPlayerController(GetWorld(), 0))
 	{
@@ -439,8 +439,6 @@ void ATempoWorldSettings::SetMainViewportRenderEnabled(bool bEnabled)
 	// Skips the game thread's viewport draw (per-player view setup, canvas, and present) before it ever
 	// reaches the checks above. Static, but non-game (editor) viewports draw regardless of it.
 	FViewport::SetGameRenderingEnabled(bEnabled);
-
-	bMainViewportRenderEnabled = bEnabled;
 }
 
 float ATempoWorldSettings::GetDefaultAutoExposureBias()

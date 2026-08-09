@@ -48,9 +48,9 @@ protected:
 	UFUNCTION(CallInEditor, Category="Lighting", DisplayName="Set Default Exposure Compensation")
 	void SetDefaultAutoExposureBias();
 
-	void SetMainViewportRenderEnabled(bool bEnabled);
+	void SetMainViewportRenderEnabled(bool bEnabled) const;
 
-	void TempoCoreRenderSettingsChanged();
+	void TempoCoreRenderSettingsChanged() const;
 
 	UPROPERTY(EditAnywhere, Category="Lighting", DisplayName = "Default Exposure Compensation", meta = (UIMin = "-15.0", UIMax = "15.0", EditCondition = "bManualDefaultAutoExposureBias"))
 	float DefaultAutoExposureBias = 0.0;
@@ -64,9 +64,6 @@ protected:
 	bool bFoundDefaultAutoExposureBias = false;
 
 	FDelegateHandle RenderingSettingsChangedHandle;
-
-	// Tracks what SetMainViewportRenderEnabled last applied, so EndPlay only restores state it disabled.
-	bool bMainViewportRenderEnabled = true;
 
 private:
 	void OnTimeSettingsChanged();
