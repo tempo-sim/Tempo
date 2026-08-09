@@ -5,8 +5,10 @@
 #include "TempoCore.h"
 #include "TempoCoreSettings.h"
 #include "EngineUtils.h"
+#include "UnrealClient.h"
 #include "Components/DirectionalLightComponent.h"
 #include "Kismet/GameplayStatics.h"
+#include "Widgets/SViewport.h"
 
 #if WITH_EDITOR
 #include "Editor.h"
@@ -68,6 +70,13 @@ void ATempoWorldSettings::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	if (UTempoCoreSettings* TempoCoreSettings = GetMutableDefault<UTempoCoreSettings>())
 	{
 		TempoCoreSettings->TempoCoreRenderingSettingsChanged.Remove(RenderingSettingsChangedHandle);
+	}
+
+	// The viewport widget and FViewport's game rendering flag both outlive this world (in PIE the widget
+	// belongs to the level editor), so restore them. BeginPlay reapplies the setting for the next world.
+	if (!bMainViewportRenderEnabled)
+	{
+		SetMainViewportRenderEnabled(true);
 	}
 
 #if WITH_EDITOR
@@ -398,7 +407,7 @@ void ATempoWorldSettings::SetDefaultAutoExposureBias()
 	bFoundDefaultAutoExposureBias = true;
 }
 
-void ATempoWorldSettings::TempoCoreRenderSettingsChanged() const
+void ATempoWorldSettings::TempoCoreRenderSettingsChanged()
 {
 	if (const UTempoCoreSettings* TempoCoreSettings = GetDefault<UTempoCoreSettings>())
 	{
@@ -406,7 +415,7 @@ void ATempoWorldSettings::TempoCoreRenderSettingsChanged() const
 	}
 }
 
-void ATempoWorldSettings::SetMainViewportRenderEnabled(bool bEnabled) const
+void ATempoWorldSettings::SetMainViewportRenderEnabled(bool bEnabled)
 {
 	if (const APlayerController* PlayerController = UGameplayStatics::GetPlayerController(GetWorld(), 0))
 	{
@@ -415,9 +424,23 @@ void ATempoWorldSettings::SetMainViewportRenderEnabled(bool bEnabled) const
 			if (UGameViewportClient* ViewportClient = ClientPlayer->ViewportClient)
 			{
 				ViewportClient->bDisableWorldRendering = !bEnabled;
+
+				// bDisableWorldRendering only skips the scene render. Hiding the viewport widget also skips
+				// Slate's tick and paint of it and everything under it: the HUD, the debug canvas, and any
+				// UMG added to the viewport. Hidden rather than Collapsed so the widget keeps its layout size.
+				if (const TSharedPtr<SViewport> ViewportWidget = ViewportClient->GetGameViewportWidget())
+				{
+					ViewportWidget->SetVisibility(bEnabled ? EVisibility::Visible : EVisibility::Hidden);
+				}
 			}
 		}
 	}
+
+	// Skips the game thread's viewport draw (per-player view setup, canvas, and present) before it ever
+	// reaches the checks above. Static, but non-game (editor) viewports draw regardless of it.
+	FViewport::SetGameRenderingEnabled(bEnabled);
+
+	bMainViewportRenderEnabled = bEnabled;
 }
 
 float ATempoWorldSettings::GetDefaultAutoExposureBias()
