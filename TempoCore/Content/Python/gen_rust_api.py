@@ -810,10 +810,16 @@ def write_project_cargo_toml(project_crate_dir: Path, crate_name: str, tempo_cra
 
 def write_project_gitignore(project_crate_dir: Path):
     """Write the project crate's .gitignore. The whole src/ and proto/ trees are
-    generated, so they stay out of git; consumers regenerate them locally."""
+    generated, so they stay out of git; consumers regenerate them locally.
+
+    Cargo.toml is listed too: write_project_cargo_toml regenerates it on every
+    run, so a project that tracked it would see a spurious diff after each
+    build. (It sits under "Build artifacts" next to Cargo.lock, which is also
+    generated rather than hand-written.)"""
     (project_crate_dir / ".gitignore").write_text('''# Build artifacts
 /target/
 Cargo.lock
+Cargo.toml
 
 # Generated proto sources (populated by gen_protos.py)
 /proto/
