@@ -14,6 +14,8 @@ class TEMPOMOVEMENT_API UGroundSnapComponent : public UActorComponent
 public:
 	UGroundSnapComponent();
 
+	virtual void BeginPlay() override;
+
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType,
 							   FActorComponentTickFunction* ThisTickFunction) override;
 
@@ -23,8 +25,8 @@ protected:
 	bool bOverrideOwnerExtents = false;
 
 	// We will trace rays from the four corners indicated either by these extents or the owner's extents, and
-	// determine the snapped location and rotation from the average of what we find. These are unscaled
-	// owner-local extents, like the owner's own extents, so the owner's scale is applied on top of them.
+	// fit the ground plane to what we find. These are unscaled owner-local extents, like the owner's own
+	// extents, so the owner's scale is applied on top of them.
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(EditCondition=bOverrideOwnerExtents))
 	FVector2D ExtentsOverride = FVector2D(100.0, 100.0);
 
@@ -38,21 +40,34 @@ protected:
 	UPROPERTY(BlueprintReadWrite, EditAnywhere)
 	float SearchDistance = 1000000.0; // 10km
 
-	// If true, we will reject normals from surfaces steeper than MaxSlopeAngle.
+	// If true, we will not tilt the owner further than MaxSlopeAngle to match the ground.
 	UPROPERTY(BlueprintReadWrite, EditAnywhere)
 	bool bLimitSlopeAngle = true;
 
-	// The surface angle, in degrees, above which we will reject normals.
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(UIMin=0.0, UIMax=60.0, ClampMin=0.0, ClampMax=60.0, EditCondition=bLimitSnapAngle))
+	// The angle, in degrees, past which we stop tilting the owner to match the ground. This limits the fitted
+	// ground plane as a whole: the plane is fit to all four corners at once, and no corner is judged alone.
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(UIMin=0.0, UIMax=60.0, ClampMin=0.0, ClampMax=60.0, EditCondition=bLimitSlopeAngle))
 	float MaxSlopeAngle = 45.0;
 
 	// If true, we will include hidden components in our extents calculation.
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(EditCondition="!bOverrideOwnerExtents"))
 	bool bIncludeHiddenComponentsInExtents = false;
 
+	// If true, we will measure the owner's extents once at BeginPlay and reuse them. The owner's local bounds
+	// come from its physics bodies in their current pose, so for an animated owner they change every frame,
+	// which would move the points we trace from for reasons that have nothing to do with the ground. Turn this
+	// off only if the owner's footprint genuinely changes during play. Only used when bOverrideOwnerExtents
+	// is false: an editor tick always measures the owner as it stands, so live edits are reflected there.
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(EditCondition="!bOverrideOwnerExtents"))
+	bool bCacheOwnerExtents = true;
+
 	// If true, we will draw the rectangle we trace the four corners from, at the owner's origin height.
 	// Editor only: it draws in the level editor and Blueprint preview viewports, is never drawn during play
 	// (including Play In Editor), and is compiled out of a packaged game entirely.
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, AdvancedDisplay)
 	bool bDrawDebug = false;
+
+private:
+	// Unscaled owner-local extents, set at BeginPlay when bCacheOwnerExtents is true. Never set in the editor.
+	TOptional<FVector2D> CachedExtents;
 };
