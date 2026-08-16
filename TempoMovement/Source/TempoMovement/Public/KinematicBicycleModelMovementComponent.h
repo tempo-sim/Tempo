@@ -22,7 +22,10 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	float Wheelbase = 100.0; // CM
 
-	// The normalized distance (as a fraction of the wheelbase) from the rear axle to the origin.
+	// The normalized distance (as a fraction of the wheelbase) from the rear axle to the rotation
+	// center: 0 puts the rotation center on the rear axle, 1 on the front axle. This is where the
+	// model is referenced between the axles, which sets the slip angle; RotationCenter separately says
+	// where that same point sits on the owner.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	float AxleRatio = 0.5;
 };
