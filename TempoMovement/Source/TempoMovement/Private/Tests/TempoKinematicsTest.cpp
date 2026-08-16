@@ -285,6 +285,112 @@ bool FTempoKinematicsUnicycleForwardTest::RunTest(const FString& Parameters)
 }
 
 //
+// Rotation center: where on the owner the model is referenced.
+//
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTempoKinematicsRotationCenterTest,
+	"Tempo.Movement.Kinematics.RotationCenter", TempoKinematicsTestFlags)
+bool FTempoKinematicsRotationCenterTest::RunTest(const FString& Parameters)
+{
+	auto NearVector = [this](const TCHAR* What, const FVector& A, const FVector& B, double Tol = KinematicsTol)
+	{
+		if (!A.Equals(B, Tol))
+		{
+			AddError(FString::Printf(TEXT("%s: expected %s, got %s"), What, *B.ToString(), *A.ToString()));
+		}
+	};
+
+	// One integration step the way TickComponent applies it: the origin offset (with the pivot
+	// correction folded in) first, then the world yaw. Returns where the rotation center ended up.
+	auto StepAndGetCenter = [](UKinematicVehicleMovementComponent* Component, const FVector& CenterOffset, double DeltaYawDeg)
+	{
+		Component->GetOwner()->AddActorWorldOffset(CenterOffset + Component->ComputePivotCorrection(DeltaYawDeg));
+		Component->GetOwner()->AddActorWorldRotation(FRotator(0.0, DeltaYawDeg, 0.0));
+		return Component->GetRotationCenterWorldLocation();
+	};
+
+	// The default rotation center is the owner's origin, and needs no correction at all: the motion is
+	// exactly what it was before the parameter existed.
+	{
+		const FKinematicTestFixture Fixture(30.0);
+		UKinematicUnicycleModelMovementComponent* Unicycle = Fixture.MakeComponent<UKinematicUnicycleModelMovementComponent>();
+		NearVector(TEXT("Default rotation center is the owner's origin"),
+			Unicycle->GetRotationCenterWorldLocation(), Fixture.Actor->GetActorLocation());
+		NearVector(TEXT("Default rotation center needs no correction"),
+			Unicycle->ComputePivotCorrection(45.0f), FVector::ZeroVector);
+	}
+
+	// With the center 200 cm ahead of the origin, a pure yaw pivots about that point: the center holds
+	// still while the origin swings around it.
+	{
+		const FKinematicTestFixture Fixture(0.0);
+		UKinematicUnicycleModelMovementComponent* Unicycle = Fixture.MakeComponent<UKinematicUnicycleModelMovementComponent>();
+		Unicycle->SetRotationCenter(FVector2D(200.0, 0.0));
+
+		const FVector CenterBefore = Unicycle->GetRotationCenterWorldLocation();
+		NearVector(TEXT("Rotation center 200 cm ahead of the origin"), CenterBefore, FVector(200.0, 0.0, 0.0));
+
+		NearVector(TEXT("Pure yaw holds the rotation center"),
+			StepAndGetCenter(Unicycle, FVector::ZeroVector, 90.0), CenterBefore);
+		// A quarter turn takes the origin from 200 cm behind the center to 200 cm to its world -Y side.
+		NearVector(TEXT("Origin swings about the rotation center"),
+			Fixture.Actor->GetActorLocation(), FVector(200.0, -200.0, 0.0));
+	}
+
+	// The center is the point whose velocity the model describes, so it translates by exactly the
+	// commanded offset even while the body yaws.
+	{
+		const FKinematicTestFixture Fixture(0.0);
+		UKinematicBicycleModelMovementComponent* Bike = Fixture.MakeComponent<UKinematicBicycleModelMovementComponent>();
+		Bike->SetRotationCenter(FVector2D(150.0, -25.0));
+
+		const FVector CenterBefore = Bike->GetRotationCenterWorldLocation();
+		const FVector CenterOffset(50.0, 10.0, 0.0);
+		NearVector(TEXT("Rotation center translates by the commanded offset"),
+			StepAndGetCenter(Bike, CenterOffset, 20.0), CenterBefore + CenterOffset);
+	}
+
+	// The center is owner-local: at yaw 90 an offset along the owner's +X points along world +Y.
+	{
+		const FKinematicTestFixture Fixture(90.0);
+		UKinematicUnicycleModelMovementComponent* Unicycle = Fixture.MakeComponent<UKinematicUnicycleModelMovementComponent>();
+		Unicycle->SetRotationCenter(FVector2D(100.0, 0.0));
+		NearVector(TEXT("Rotation center follows the owner's heading"),
+			Unicycle->GetRotationCenterWorldLocation(), FVector(0.0, 100.0, 0.0));
+	}
+
+	// RotationCenter is unscaled owner-local, so the owner's scale applies on top of it — and the
+	// pivot correction has to use the same scaled offset for the center to stay put.
+	{
+		const FKinematicTestFixture Fixture(0.0);
+		Fixture.Actor->SetActorScale3D(FVector(2.0, 2.0, 2.0));
+		UKinematicUnicycleModelMovementComponent* Unicycle = Fixture.MakeComponent<UKinematicUnicycleModelMovementComponent>();
+		Unicycle->SetRotationCenter(FVector2D(100.0, 0.0));
+
+		const FVector CenterBefore = Unicycle->GetRotationCenterWorldLocation();
+		NearVector(TEXT("Owner scale applies to the rotation center"), CenterBefore, FVector(200.0, 0.0, 0.0));
+		NearVector(TEXT("Scaled rotation center still holds under yaw"),
+			StepAndGetCenter(Unicycle, FVector::ZeroVector, 45.0), CenterBefore);
+	}
+
+	// A pitched owner (as GroundSnapComponent leaves one on a slope) still yaws about the world Z axis
+	// through the center, which now sits above or below the owner's origin height.
+	{
+		const FKinematicTestFixture Fixture(0.0);
+		Fixture.Actor->SetActorRotation(FRotator(/*Pitch=*/15.0, /*Yaw=*/0.0, /*Roll=*/0.0));
+		UKinematicUnicycleModelMovementComponent* Unicycle = Fixture.MakeComponent<UKinematicUnicycleModelMovementComponent>();
+		Unicycle->SetRotationCenter(FVector2D(200.0, 0.0));
+
+		const FVector CenterBefore = Unicycle->GetRotationCenterWorldLocation();
+		TestTrue(TEXT("Pitched owner lifts the rotation center off the origin height"), CenterBefore.Z > 0.0);
+		NearVector(TEXT("Pitched owner still yaws about the rotation center"),
+			StepAndGetCenter(Unicycle, FVector::ZeroVector, 30.0), CenterBefore);
+	}
+
+	return true;
+}
+
+//
 // Forward/inverse consistency: the inverse model recovers the steering that produced a yaw rate.
 //
 

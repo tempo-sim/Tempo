@@ -2,13 +2,20 @@
 TempoMovement includes controllers and dynamics models for simulating the movement of Actors.
 
 ## Vehicle Control
-TempoMovement includes movement models for vehicles (currently only a simple kinematic bicycle model) and a controller for vehicles. You can control a simulated vehicle with the `command_vehicle` RPC. For example:
+TempoMovement includes movement models for vehicles (a kinematic bicycle model, a kinematic unicycle model, and a Chaos wheeled vehicle) and a controller for vehicles. You can control a simulated vehicle with the `command_vehicle` RPC. For example:
 ```
 import tempo_sim.tempo_movement as tm
 
 commandable_vehicles_response = tm.get_commandable_vehicles()
 tm.command_vehicle(vehicle="MyVehicle", acceleration=0.5, steering=0.0) # Acceleration and steering are normalized from -1.0 to 1.0.
 ```
+
+### Rotation center
+The kinematic models (`KinematicBicycleModelMovementComponent`, `KinematicUnicycleModelMovementComponent`) turn about `RotationCenter`, an owner-local XY point on the movement component. It defaults to zero, which turns about the owner's origin. Set it when the owner's origin is not where the vehicle should pivot — for instance a mesh whose origin sits at the rear bumper. `RotationCenter` is also the point whose velocity the motion model describes, so it is the point that tracks a commanded speed exactly. It is an unscaled owner-local offset (the owner's scale applies on top of it), and can be set at runtime with `set_vector2d_property`.
+
+For the bicycle model this is independent of `AxleRatio`. `AxleRatio` places the model's reference point along the wheelbase (`0` = rear axle, `1` = front axle), which sets the slip angle; `RotationCenter` says where that same point sits on the owner. A vehicle with a 300 cm wheelbase whose rear axle is 50 cm ahead of its origin uses `AxleRatio = 0`, `RotationCenter = (50, 0)` to turn about its rear axle, or `AxleRatio = 0.5`, `RotationCenter = (200, 0)` to turn about the middle of its wheelbase.
+
+Because yaw is about the world Z axis, only the horizontal offset matters, which is why `RotationCenter` is 2D. `GroundSnapComponent` takes the same kind of offset as `ExtentsCenter`, so an off-center origin usually wants both set consistently.
 
 ## Pawn Movement
 TempoMovement also supports controlling pawns, using Unreal's navigation system. You can control a simulated Pawn (like a humanoid Character). For example:

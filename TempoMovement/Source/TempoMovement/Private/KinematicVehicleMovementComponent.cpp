@@ -7,6 +7,28 @@ FVector UKinematicVehicleMovementComponent::GetActorFeetLocation() const
 	return GetActorLocation();
 }
 
+FVector UKinematicVehicleMovementComponent::GetRotationCenterWorldLocation() const
+{
+	return GetOwner()->GetActorTransform().TransformPosition(FVector(RotationCenter, 0.0));
+}
+
+FVector UKinematicVehicleMovementComponent::ComputePivotCorrection(float DeltaYawDegrees) const
+{
+	if (RotationCenter.IsNearlyZero())
+	{
+		return FVector::ZeroVector;
+	}
+
+	// Where the rotation center sits relative to the owner's origin, in world space. TransformVector
+	// applies the owner's scale, so RotationCenter stays an unscaled owner-local offset.
+	const FVector CenterOffset = GetOwner()->GetActorTransform().TransformVector(FVector(RotationCenter, 0.0));
+
+	// A world rotation pivots about the owner's origin, which swings the rotation center along an arc.
+	// Translating by the negative of that arc puts the center back where it started, so the two
+	// together read as a rotation about the center.
+	return CenterOffset - FRotator(0.0, DeltaYawDegrees, 0.0).RotateVector(CenterOffset);
+}
+
 void UKinematicVehicleMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
@@ -52,12 +74,20 @@ void UKinematicVehicleMovementComponent::TickComponent(float DeltaTime, ELevelTi
 
 	const FTempoTwist Motion = SimulateMotion(DeltaTime, SteeringAngle, NewLinearVelocity);
 
+	// Motion.Linear is the velocity of the rotation center, not of the owner's origin. Offsetting the
+	// origin by the same amount and folding in the pivot correction leaves the center translating by
+	// exactly Motion.Linear while the owner yaws about it.
+	const FRotator DeltaRotation(0.0, DeltaTime * Motion.Angular.Z, 0.0);
+	const FVector PivotCorrection = ComputePivotCorrection(DeltaRotation.Yaw);
+
 	FHitResult MoveHitResult;
-	GetOwner()->AddActorWorldOffset(DeltaTime * Motion.Linear, true, &MoveHitResult);
+	GetOwner()->AddActorWorldOffset(DeltaTime * Motion.Linear + PivotCorrection, true, &MoveHitResult);
 	LinearVelocity = NewLinearVelocity;
-	Velocity = Motion.Linear;
+	// AActor::GetVelocity() reports this alongside the actor's location, so it has to describe the
+	// origin: the center's velocity plus the rate at which the origin swings about the center.
+	Velocity = DeltaTime > 0.0f ? Motion.Linear + PivotCorrection / DeltaTime : Motion.Linear;
 
 	FHitResult RotateHitResult;
-	GetOwner()->AddActorWorldRotation(FRotator(0.0, DeltaTime * Motion.Angular.Z, 0.0), true, &RotateHitResult);
+	GetOwner()->AddActorWorldRotation(DeltaRotation, true, &RotateHitResult);
 	AngularVelocity = Motion.Angular.Z;
 }
