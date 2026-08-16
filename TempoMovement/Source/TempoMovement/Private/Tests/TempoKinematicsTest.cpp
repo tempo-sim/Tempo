@@ -373,8 +373,10 @@ bool FTempoKinematicsRotationCenterTest::RunTest(const FString& Parameters)
 			StepAndGetCenter(Unicycle, FVector::ZeroVector, 45.0), CenterBefore);
 	}
 
-	// A pitched owner (as GroundSnapComponent leaves one on a slope) still yaws about the world Z axis
-	// through the center, which now sits above or below the owner's origin height.
+	// A pitched owner (as GroundSnapComponent leaves one on a slope) yaws about the world Z axis, which
+	// fixes the whole vertical line through the center. So the center's height does not matter, which is
+	// what makes an XY RotationCenter sufficient, but its horizontal lever arm is foreshortened by the
+	// pitch and the correction has to use that foreshortened offset.
 	{
 		const FKinematicTestFixture Fixture(0.0);
 		Fixture.Actor->SetActorRotation(FRotator(/*Pitch=*/15.0, /*Yaw=*/0.0, /*Roll=*/0.0));

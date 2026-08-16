@@ -88,6 +88,11 @@ void UKinematicVehicleMovementComponent::TickComponent(float DeltaTime, ELevelTi
 	Velocity = DeltaTime > 0.0f ? Motion.Linear + PivotCorrection / DeltaTime : Motion.Linear;
 
 	FHitResult RotateHitResult;
+	// Yaw is about the world Z axis, not the owner's own up axis. These models are horizontal-plane
+	// simulations — Motion.Linear has no Z component, and SimulateMotion takes its heading from
+	// GetActorRotation().Yaw — and GroundSnapComponent copies yaw through untouched while solving pitch
+	// and roll from the terrain. Rotating about the owner's up axis instead would inject roll that
+	// GroundSnapComponent discards, and would make the heading a function of the ground we drive over.
 	GetOwner()->AddActorWorldRotation(DeltaRotation, true, &RotateHitResult);
 	AngularVelocity = Motion.Angular.Z;
 }
