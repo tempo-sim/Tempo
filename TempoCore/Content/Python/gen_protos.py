@@ -240,19 +240,22 @@ class ProtoGenerator:
             f"-rootdirectory={self.engine_dir.parent}"
         ]
         
-        try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                check=True
-            )
-        except subprocess.CalledProcessError as e:
-            print(f"Error: UnrealBuildTool failed with exit code {e.returncode}", file=sys.stderr)
-            if e.stdout:
-                print(f"stdout: {e.stdout}", file=sys.stderr)
-            if e.stderr:
-                print(f"stderr: {e.stderr}", file=sys.stderr)
+        # Redirect to files rather than pipes. UE 5.8's UBT spawns a uba-orphankill
+        # watchdog that inherits the child's stdout/stderr and polls kill -0 on it.
+        # With pipes, we block in communicate() waiting for EOF and so never reap
+        # the child; kill -0 succeeds on the resulting zombie, so the watchdog spins
+        # forever holding the write ends open, and neither side can make progress.
+        stdout_file = self.temp_dir / "UbtJsonExport.stdout.txt"
+        stderr_file = self.temp_dir / "UbtJsonExport.stderr.txt"
+        with open(stdout_file, "w") as out, open(stderr_file, "w") as err:
+            result = subprocess.run(cmd, stdout=out, stderr=err, text=True)
+
+        if result.returncode != 0:
+            print(f"Error: UnrealBuildTool failed with exit code {result.returncode}", file=sys.stderr)
+            for label, path in (("stdout", stdout_file), ("stderr", stderr_file)):
+                contents = path.read_text(errors="replace").strip()
+                if contents:
+                    print(f"{label}: {contents}", file=sys.stderr)
             raise RuntimeError("Failed to export module dependencies")
         
         if not output_file.exists():
