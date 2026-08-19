@@ -38,7 +38,8 @@ void ATrajectoryFollowingController::FollowTrajectory(ASplineActor* InSpline, AP
 	Spline = InSpline;
 	Config = InConfig;
 	ElapsedSeconds = 0.0;
-	RebuildSpeedDistanceCache();
+	DistanceAlongSpline = 0.0;
+	bReachedTrajectoryEnd = false;
 	VehicleVelocityController.Reset();
 	if (InPawn)
 	{
@@ -46,9 +47,47 @@ void ATrajectoryFollowingController::FollowTrajectory(ASplineActor* InSpline, AP
 	}
 }
 
-float ATrajectoryFollowingController::GetDuration() const
+bool ATrajectoryFollowingController::SetSpeed(double SpeedCmS)
 {
-	const USplineComponent* SplineComponent = Spline ? Spline->GetSpline() : nullptr;
+	if (Config.SpeedMode != ETrajectorySpeedMode::ConstantSpeed)
+	{
+		return false;
+	}
+	// Nothing to re-anchor: the target pose is sampled at DistanceAlongSpline, which this does not
+	// touch, so the new speed only changes how fast that distance grows from here on.
+	Config.Speed = FMath::Max(SpeedCmS, 0.0);
+	return true;
+}
+
+bool ATrajectoryFollowingController::IsArcLengthMode() const
+{
+	return Config.SpeedMode == ETrajectorySpeedMode::ConstantSpeed || Config.SpeedMode == ETrajectorySpeedMode::SpeedVsTime;
+}
+
+double ATrajectoryFollowingController::CurrentSpeed() const
+{
+	switch (Config.SpeedMode)
+	{
+	case ETrajectorySpeedMode::ConstantSpeed:
+		return FMath::Max(Config.Speed, 0.0);
+	case ETrajectorySpeedMode::SpeedVsTime:
+	{
+		// Signed on purpose: a negative key is how a speed curve drives back along the spline.
+		const FRichCurve* Curve = Config.TimeToSpeed.GetRichCurveConst();
+		return (Curve && Curve->GetNumKeys() > 0) ? Curve->Eval(ElapsedSeconds) : 0.0;
+	}
+	default:
+		return 0.0;
+	}
+}
+
+double ATrajectoryFollowingController::GetDistanceAlongSpline() const
+{
+	return IsArcLengthMode() ? DistanceAlongSpline : DistanceAtTime(ElapsedSeconds);
+}
+
+float ATrajectoryFollowingController::ClockDuration() const
+{
 	switch (Config.SpeedMode)
 	{
 	case ETrajectorySpeedMode::SplinePointVsTime:
@@ -59,8 +98,35 @@ float ATrajectoryFollowingController::GetDuration() const
 		return CurveMaxTime(Config.TimeToSpeed);
 	case ETrajectorySpeedMode::ConstantSpeed:
 	default:
-		return (!SplineComponent || Config.Speed <= 0.0) ? 0.0f : SplineComponent->GetSplineLength() / Config.Speed;
+		// No authored clock: a constant-speed trajectory ends where the spline does, however long
+		// that takes at whatever speeds it was driven at.
+		return 0.0f;
 	}
+}
+
+float ATrajectoryFollowingController::GetDuration() const
+{
+	if (Config.SpeedMode != ETrajectorySpeedMode::ConstantSpeed)
+	{
+		return ClockDuration();
+	}
+	const USplineComponent* SplineComponent = Spline ? Spline->GetSpline() : nullptr;
+	return (!SplineComponent || Config.Speed <= 0.0) ? 0.0f : SplineComponent->GetSplineLength() / Config.Speed;
+}
+
+void ATrajectoryFollowingController::RestartTrajectory(double SplineLength, float ClockEnd)
+{
+	// A constant-speed loop can carry its overshoot exactly, since distance is its only state, which
+	// keeps the follower's pace unbroken across the wrap. Anything driven by a curve restarts the
+	// curve instead: its speed (or geometry) is authored from t = 0, so resuming it part-way through
+	// would not be a loop.
+	if (Config.SpeedMode == ETrajectorySpeedMode::ConstantSpeed)
+	{
+		DistanceAlongSpline = SplineLength > 0.0 ? FMath::Fmod(DistanceAlongSpline, SplineLength) : 0.0;
+		return;
+	}
+	DistanceAlongSpline = 0.0;
+	ElapsedSeconds = ClockEnd > 0.0f ? FMath::Fmod(ElapsedSeconds, static_cast<double>(ClockEnd)) : 0.0;
 }
 
 FTransform ATrajectoryFollowingController::GetTransformAtTime(float Time) const
@@ -68,6 +134,17 @@ FTransform ATrajectoryFollowingController::GetTransformAtTime(float Time) const
 	const float Duration = GetDuration();
 	const float ClampedTime = FMath::Clamp(Time, 0.0f, FMath::Max(Duration, 0.0f));
 	return SampleAtTime(ClampedTime);
+}
+
+FTransform ATrajectoryFollowingController::GetTransformAtDistance(double Distance) const
+{
+	const USplineComponent* SplineComponent = Spline ? Spline->GetSpline() : nullptr;
+	if (!SplineComponent)
+	{
+		return FTransform::Identity;
+	}
+	const double ClampedDistance = FMath::Clamp(Distance, 0.0, SplineComponent->GetSplineLength());
+	return SplineComponent->GetTransformAtDistanceAlongSpline(ClampedDistance, ESplineCoordinateSpace::World);
 }
 
 FTransform ATrajectoryFollowingController::SampleAtTime(float Time) const
@@ -85,8 +162,7 @@ FTransform ATrajectoryFollowingController::SampleAtTime(float Time) const
 		return SplineComponent->GetTransformAtSplineInputKey(InputKey, ESplineCoordinateSpace::World);
 	}
 
-	const double Distance = DistanceAtTime(Time);
-	return SplineComponent->GetTransformAtDistanceAlongSpline(Distance, ESplineCoordinateSpace::World);
+	return GetTransformAtDistance(DistanceAtTime(Time));
 }
 
 double ATrajectoryFollowingController::DistanceAtTime(float Time) const
@@ -99,47 +175,13 @@ double ATrajectoryFollowingController::DistanceAtTime(float Time) const
 		return Curve ? Curve->Eval(Time) : 0.0;
 	}
 	case ETrajectorySpeedMode::SpeedVsTime:
-		return SpeedDistanceCache.GetNumKeys() > 0 ? SpeedDistanceCache.Eval(Time) : 0.0;
+		// Only an estimate: the follower integrates this curve tick by tick (see Tick), so the true
+		// distance depends on the deltas it was integrated over, not on Time alone. Reported as if
+		// the current speed had held throughout, for the benefit of GetTransformAtTime's callers.
+		return CurrentSpeed() * Time;
 	case ETrajectorySpeedMode::ConstantSpeed:
 	default:
 		return Config.Speed * Time;
-	}
-}
-
-void ATrajectoryFollowingController::RebuildSpeedDistanceCache()
-{
-	SpeedDistanceCache.Reset();
-
-	const FRichCurve* SpeedCurve = Config.TimeToSpeed.GetRichCurveConst();
-	if (!SpeedCurve || SpeedCurve->GetNumKeys() == 0)
-	{
-		return;
-	}
-
-	float MinTime = 0.0f;
-	float MaxTime = 0.0f;
-	SpeedCurve->GetTimeRange(MinTime, MaxTime);
-	MinTime = FMath::Max(MinTime, 0.0f);
-
-	SpeedDistanceCache.AddKey(MinTime, 0.0f);
-	if (MaxTime <= MinTime)
-	{
-		return;
-	}
-
-	// Trapezoidal integration of speed -> cumulative distance, sampled finely so any curve
-	// interpolation mode is captured well enough for runtime lookup.
-	constexpr int32 NumSamples = 256;
-	const float DeltaTime = (MaxTime - MinTime) / NumSamples;
-	double CumulativeDistance = 0.0;
-	float PrevSpeed = SpeedCurve->Eval(MinTime);
-	for (int32 SampleIndex = 1; SampleIndex <= NumSamples; ++SampleIndex)
-	{
-		const float SampleTime = MinTime + SampleIndex * DeltaTime;
-		const float SampleSpeed = SpeedCurve->Eval(SampleTime);
-		CumulativeDistance += 0.5 * (PrevSpeed + SampleSpeed) * DeltaTime;
-		SpeedDistanceCache.AddKey(SampleTime, static_cast<float>(CumulativeDistance));
-		PrevSpeed = SampleSpeed;
 	}
 }
 
@@ -153,35 +195,75 @@ void ATrajectoryFollowingController::Tick(float DeltaSeconds)
 		return;
 	}
 
-	ElapsedSeconds += DeltaSeconds;
-
-	// Apply end-of-trajectory behavior once the duration is reached.
-	bool bResetThisTick = false;
-	const float Duration = GetDuration();
-	if (Duration > 0.0f && ElapsedSeconds >= Duration)
+	const USplineComponent* SplineComponent = Spline->GetSpline();
+	if (!SplineComponent)
 	{
-		switch (Config.EndBehavior)
+		return;
+	}
+
+	// Advance the trajectory. The clock runs for every mode (the curves are functions of it); the
+	// arc-length modes additionally integrate the distance their speed carries the pawn over this
+	// tick, and it is that distance — not the clock — their target is sampled at. Integrating rather
+	// than recomputing distance from the clock is what lets the speed change mid-trajectory without
+	// the target jumping, and what makes speed 0 an ordinary value (the distance simply stops
+	// growing) rather than a division by zero.
+	//
+	// Nothing advances once the trajectory has ended and been clamped: both parameters stay at the
+	// end, so every subsequent tick re-targets the final pose. The clock in particular must stop,
+	// since a SpeedVsTime curve evaluated past its last key returns that key's speed and would
+	// otherwise keep driving the pawn down the spline forever.
+	const bool bArcLength = IsArcLengthMode();
+	const double SpeedThisTick = bReachedTrajectoryEnd ? 0.0 : CurrentSpeed();
+	const double SplineLength = SplineComponent->GetSplineLength();
+	bool bResetThisTick = false;
+	if (!bReachedTrajectoryEnd)
+	{
+		ElapsedSeconds += DeltaSeconds;
+		if (bArcLength)
 		{
-		case ETrajectoryEndBehavior::Clamp:
-			ElapsedSeconds = Duration;
-			break;
-		case ETrajectoryEndBehavior::Loop:
-			ElapsedSeconds = FMath::Fmod(ElapsedSeconds, Duration);
-			break;
-		case ETrajectoryEndBehavior::Reset:
-			ElapsedSeconds = FMath::Fmod(ElapsedSeconds, Duration);
-			bResetThisTick = true;
-			break;
-		case ETrajectoryEndBehavior::Destroy:
-			// Destroy the followed pawn once it reaches the end. Destroying the pawn tears down its
-			// UTrajectoryFollowingComponent, whose EndPlay unpossesses and destroys this controller,
-			// so return immediately without touching any more state.
-			ControlledPawn->Destroy();
-			return;
+			DistanceAlongSpline = FMath::Max(DistanceAlongSpline + SpeedThisTick * DeltaSeconds, 0.0);
+		}
+
+		// Apply end-of-trajectory behavior once the trajectory runs out, in whichever domain governs
+		// this mode: the arc-length modes end at the end of the spline, the time-domain modes when
+		// their curve runs out. Only one of the two can fire for most modes (ClockDuration is 0 for
+		// ConstantSpeed, and the time-domain modes never advance a distance), but SpeedVsTime ends on
+		// either, since its speed curve has an authored duration of its own and need not cover the
+		// whole spline.
+		const float ClockEnd = ClockDuration();
+		const bool bReachedSplineEnd = bArcLength && SplineLength > 0.0 && DistanceAlongSpline >= SplineLength;
+		const bool bReachedClockEnd = ClockEnd > 0.0f && ElapsedSeconds >= ClockEnd;
+		if (bReachedSplineEnd || bReachedClockEnd)
+		{
+			switch (Config.EndBehavior)
+			{
+			case ETrajectoryEndBehavior::Clamp:
+				// Give back the part of this tick that ran past the end, so the pawn holds the pose
+				// the trajectory actually ends at rather than one partial tick beyond it, then stop.
+				if (bReachedClockEnd)
+				{
+					DistanceAlongSpline -= SpeedThisTick * (ElapsedSeconds - ClockEnd);
+					ElapsedSeconds = ClockEnd;
+				}
+				DistanceAlongSpline = FMath::Clamp(DistanceAlongSpline, 0.0, SplineLength);
+				bReachedTrajectoryEnd = true;
+				break;
+			case ETrajectoryEndBehavior::Loop:
+			case ETrajectoryEndBehavior::Reset:
+				RestartTrajectory(SplineLength, ClockEnd);
+				bResetThisTick = Config.EndBehavior == ETrajectoryEndBehavior::Reset;
+				break;
+			case ETrajectoryEndBehavior::Destroy:
+				// Destroy the followed pawn once it reaches the end. Destroying the pawn tears down
+				// its UTrajectoryFollowingComponent, whose EndPlay unpossesses and destroys this
+				// controller, so return immediately without touching any more state.
+				ControlledPawn->Destroy();
+				return;
+			}
 		}
 	}
 
-	const FTransform Target = GetTransformAtTime(ElapsedSeconds);
+	const FTransform Target = bArcLength ? GetTransformAtDistance(DistanceAlongSpline) : GetTransformAtTime(ElapsedSeconds);
 	const FVector CurrentLocation = ControlledPawn->GetActorLocation();
 
 #if ENABLE_DRAW_DEBUG
@@ -210,9 +292,13 @@ void ATrajectoryFollowingController::Tick(float DeltaSeconds)
 		return;
 	}
 
-	// Feedforward: the trajectory's own velocity, from a forward finite difference.
+	// Feedforward: the trajectory's own velocity, from a forward finite difference. For the
+	// arc-length modes that difference is taken along the spline at the speed actually being
+	// integrated, so a held follower feeds forward exactly zero.
 	const float Lookahead = FMath::Max(DeltaSeconds, KINDA_SMALL_NUMBER);
-	const FVector AheadLocation = GetTransformAtTime(ElapsedSeconds + Lookahead).GetLocation();
+	const FVector AheadLocation = bArcLength
+		? GetTransformAtDistance(DistanceAlongSpline + SpeedThisTick * Lookahead).GetLocation()
+		: GetTransformAtTime(ElapsedSeconds + Lookahead).GetLocation();
 	const FVector FeedforwardVelocity = (AheadLocation - Target.GetLocation()) / Lookahead;
 
 	// Deadband: errors smaller than the band produce no corrective input, so the pawn coasts on the
@@ -234,8 +320,13 @@ void ATrajectoryFollowingController::Tick(float DeltaSeconds)
 		const FVector ToTargetLocal = ControlledPawn->GetActorTransform().InverseTransformVectorNoScale(Target.GetLocation() - CurrentLocation);
 
 		// Trajectory pace plus an along-track correction to catch up to / hang back from the target.
+		// Floored at zero: a follower that has overshot its target — which is the steady state of a
+		// held (0 speed) trajectory, and of one clamped at its end — should brake and stay put, not
+		// reverse back down the spline. ApplyChaosAccelInput already brakes rather than reverses
+		// while the vehicle is rolling forward, but a standing vehicle under a sustained negative
+		// command would shift into reverse.
 		const double AlongTrackError = ApplyDeadband(ToTargetLocal.X, Config.PositionDeadband);
-		const double TargetLinVelCmS = FeedforwardVelocity.Size() + Config.PositionGain * AlongTrackError;
+		const double TargetLinVelCmS = FMath::Max(FeedforwardVelocity.Size() + Config.PositionGain * AlongTrackError, 0.0);
 		// Steer toward the target point: heading error in the pawn's frame.
 		const double HeadingErrorDeg = ApplyDeadband(FMath::RadiansToDegrees(FMath::Atan2(ToTargetLocal.Y, ToTargetLocal.X)), Config.HeadingDeadband);
 		const double TargetYawRateDegS = Config.YawRateGain * HeadingErrorDeg;

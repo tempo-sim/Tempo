@@ -32,6 +32,7 @@ using PawnMoveToLocationResponse = TempoMovement::PawnMoveToLocationResponse;
 using NavigablePawnsResponse = TempoMovement::NavigablePawnsResponse;
 using SetSplinePointsRequest = TempoMovement::SetSplinePointsRequest;
 using ConfigureTrajectoryFollowingRequest = TempoMovement::ConfigureTrajectoryFollowingRequest;
+using SetTrajectorySpeedRequest = TempoMovement::SetTrajectorySpeedRequest;
 using TempoEmpty = TempoCore::Empty;
 
 namespace
@@ -146,7 +147,8 @@ void UTempoMovementControlServiceSubsystem::RegisterServices(FTempoServer& Serve
 		SimpleRequestHandler(&MovementControlAsyncService::RequestPawnMoveToLocation, &UTempoMovementControlServiceSubsystem::PawnMoveToLocation),
 		SimpleRequestHandler(&MovementControlAsyncService::RequestRebuildNavigation, &UTempoMovementControlServiceSubsystem::RebuildNavigation),
 		SimpleRequestHandler(&MovementControlAsyncService::RequestSetSplinePoints, &UTempoMovementControlServiceSubsystem::SetSplinePoints),
-		SimpleRequestHandler(&MovementControlAsyncService::RequestConfigureTrajectoryFollowing, &UTempoMovementControlServiceSubsystem::ConfigureTrajectoryFollowing)
+		SimpleRequestHandler(&MovementControlAsyncService::RequestConfigureTrajectoryFollowing, &UTempoMovementControlServiceSubsystem::ConfigureTrajectoryFollowing),
+		SimpleRequestHandler(&MovementControlAsyncService::RequestSetTrajectorySpeed, &UTempoMovementControlServiceSubsystem::SetTrajectorySpeed)
 		);
 }
 
@@ -524,6 +526,43 @@ void UTempoMovementControlServiceSubsystem::ConfigureTrajectoryFollowing(const C
 	}
 
 	FollowingComponent->ConfigureAndFollow(SplineActor, Config);
+
+	ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status_OK);
+}
+
+void UTempoMovementControlServiceSubsystem::SetTrajectorySpeed(const SetTrajectorySpeedRequest& Request, const TResponseDelegate<TempoEmpty>& ResponseContinuation) const
+{
+	APawn* Pawn = FindPawn(GetWorld(), UTF8_TO_TCHAR(Request.pawn().c_str()));
+	if (!Pawn)
+	{
+		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::NOT_FOUND, "Did not find a pawn with the specified name"));
+		return;
+	}
+
+	UTrajectoryFollowingComponent* FollowingComponent = Pawn->FindComponentByClass<UTrajectoryFollowingComponent>();
+	if (!FollowingComponent)
+	{
+		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "Pawn does not have a TrajectoryFollowingComponent"));
+		return;
+	}
+
+	if (Request.speed() < 0.0f)
+	{
+		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "Trajectory speed may not be negative"));
+		return;
+	}
+
+	// Speeds arrive in SI and convert to Unreal-native cm, as in ConfigureTrajectoryFollowing.
+	constexpr float M2CMScale = 100.0f;
+	if (!FollowingComponent->SetSpeed(Request.speed() * M2CMScale))
+	{
+		// Either nothing is being followed yet, or the trajectory is paced by a curve rather than a
+		// constant speed. Both are the caller getting ahead of / disagreeing with its own
+		// ConfigureTrajectoryFollowing, not a transient condition to retry.
+		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::FAILED_PRECONDITION,
+			"Pawn is not following a constant-speed trajectory"));
+		return;
+	}
 
 	ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status_OK);
 }

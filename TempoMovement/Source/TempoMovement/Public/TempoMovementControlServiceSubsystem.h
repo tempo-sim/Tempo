@@ -27,6 +27,7 @@ namespace TempoMovement
 	class PawnMoveToLocationResponse;
 	class SetSplinePointsRequest;
 	class ConfigureTrajectoryFollowingRequest;
+	class SetTrajectorySpeedRequest;
 }
 
 FORCEINLINE uint32 GetTypeHash(const FAIRequestID& AIRequestID)
@@ -69,6 +70,8 @@ public:
 	void SetSplinePoints(const TempoMovement::SetSplinePointsRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const;
 
 	void ConfigureTrajectoryFollowing(const TempoMovement::ConfigureTrajectoryFollowingRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const;
+
+	void SetTrajectorySpeed(const TempoMovement::SetTrajectorySpeedRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const;
 
 protected:
 	TMap<FAIRequestID, FPendingPawnMoveInfo> PendingPawnMoves;
