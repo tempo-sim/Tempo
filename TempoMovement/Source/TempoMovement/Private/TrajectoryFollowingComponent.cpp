@@ -28,6 +28,22 @@ void UTrajectoryFollowingComponent::ConfigureAndFollow(ASplineActor* InSpline, c
 	StartFollowing();
 }
 
+bool UTrajectoryFollowingComponent::SetSpeed(double SpeedCmS)
+{
+	if (!Controller)
+	{
+		return false;
+	}
+	// Keep the component's own Config in step with the controller's, so a later StartFollowing
+	// (a reconfigure that leaves the speed model alone) does not resurrect the superseded speed.
+	if (!Controller->SetSpeed(SpeedCmS))
+	{
+		return false;
+	}
+	Config.Speed = SpeedCmS;
+	return true;
+}
+
 void UTrajectoryFollowingComponent::StartFollowing()
 {
 	if (!Spline)

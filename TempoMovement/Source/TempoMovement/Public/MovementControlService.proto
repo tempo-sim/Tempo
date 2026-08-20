@@ -115,7 +115,9 @@ enum TrajectoryEndBehavior {
   TRAJECTORY_END_BEHAVIOR_LOOP = 2;
   // Teleport back to the start (even for a steering follower) and repeat.
   TRAJECTORY_END_BEHAVIOR_RESET = 3;
-  // Destroy the pawn when it reaches the end of the trajectory.
+  // Destroy the pawn when it reaches the end of the trajectory. As with every end behavior, that is
+  // when the *trajectory* reaches its end, not the pawn: a steering follower lags its target, so it
+  // is destroyed while still short of the spline's final point.
   TRAJECTORY_END_BEHAVIOR_DESTROY = 4;
 }
 
@@ -127,7 +129,8 @@ message ConfigureTrajectoryFollowingRequest {
   string spline = 2;
   // How trajectory time maps onto the spline geometry. Exactly one must be set.
   oneof speed {
-    // Traverse the spline at a fixed speed, in meters/second.
+    // Traverse the spline at a fixed speed, in meters/second. Can be changed while following with
+    // SetTrajectorySpeed, which (unlike reconfiguring) does not restart the trajectory.
     float constant_speed = 3;
     // Map time to a spline input key (point index); value is the input key.
     TrajectoryCurve spline_point_vs_time = 4;
@@ -140,6 +143,18 @@ message ConfigureTrajectoryFollowingRequest {
   TrajectoryFollowMode follow_mode = 7;
   // Optional: behavior at the end of the trajectory. UNSPECIFIED keeps the follower's current behavior.
   TrajectoryEndBehavior end_behavior = 8;
+}
+
+// Change the speed of a trajectory already being followed, without restarting it.
+message SetTrajectorySpeedRequest {
+  // Identifier of the pawn whose trajectory to re-pace. The pawn must carry a
+  // TrajectoryFollowingComponent that has been configured with ConfigureTrajectoryFollowing.
+  string pawn = 1;
+  // Speed along the spline, in meters/second. 0 holds the pawn where it is, indefinitely and
+  // without ending the trajectory; following resumes from the same point when a speed is set again.
+  // Negative drives back along the spline — a steering follower reverses, keeping its heading rather
+  // than turning around — and stops at the spline's start without ending the trajectory.
+  float speed = 2;
 }
 
 service MovementControlService {
@@ -160,4 +175,6 @@ service MovementControlService {
   rpc SetSplinePoints(SetSplinePointsRequest) returns (TempoCore.Empty);
 
   rpc ConfigureTrajectoryFollowing(ConfigureTrajectoryFollowingRequest) returns (TempoCore.Empty);
+
+  rpc SetTrajectorySpeed(SetTrajectorySpeedRequest) returns (TempoCore.Empty);
 }
