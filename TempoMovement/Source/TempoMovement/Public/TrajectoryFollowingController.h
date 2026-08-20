@@ -48,6 +48,30 @@ enum class ETrajectoryEndBehavior : uint8
 	Destroy,
 };
 
+// One trajectory-end occurrence: a follower's progress reached the end of its trajectory, and its
+// end behavior was applied. Reported for every end behavior, so a caller can react to the end itself
+// rather than inferring it from a duration or polling the pawn's position.
+//
+// The end is the *trajectory's*, not the pawn's: it is the integrated progress of the point the pawn
+// is driven toward that has reached the end of the spline, and a steering follower lags that point,
+// so it is still short of the final pose when this fires.
+USTRUCT(BlueprintType)
+struct FTrajectoryEndEvent
+{
+	GENERATED_BODY()
+
+	// The pawn whose trajectory ended. Still valid when the event fires, including under Destroy,
+	// which destroys it immediately afterwards.
+	UPROPERTY(BlueprintReadOnly, Category = "Trajectory")
+	APawn* Pawn = nullptr;
+
+	// The end behavior that was applied.
+	UPROPERTY(BlueprintReadOnly, Category = "Trajectory")
+	ETrajectoryEndBehavior EndBehavior = ETrajectoryEndBehavior::Clamp;
+
+};
+
+
 // Per-follower settings governing how a pawn follows a spline: the speed model that turns trajectory
 // time into a point on the spline, plus how the pawn is driven to that point. Authored on a
 // UTrajectoryFollowingComponent (or set over the ConfigureTrajectoryFollowing RPC) and copied onto
@@ -234,6 +258,11 @@ protected:
 	// speed curve evaluated at the current clock. 0 for the time-domain modes, which have no
 	// independent speed. Signed: negative drives back along the spline.
 	double CurrentSpeed() const;
+
+	// Assemble the end event for a trajectory that has just run out and hand it to the pawn's
+	// UTrajectoryFollowingComponent to raise, if it has one. A manually-wired controller (see
+	// FollowTrajectory) need not have one, in which case the end goes unannounced.
+	void NotifyTrajectoryEnd(APawn* EndedPawn);
 
 private:
 	// Time (seconds) elapsed along the trajectory, accumulated from the per-tick sim delta rather

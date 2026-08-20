@@ -157,6 +157,28 @@ message SetTrajectorySpeedRequest {
   float speed = 2;
 }
 
+// Request the stream of trajectory-end events for one pawn.
+message TrajectoryEndEventRequest {
+  // Identifier of the pawn to watch. The pawn must carry a TrajectoryFollowingComponent, but need
+  // not be following anything yet — subscribing before ConfigureTrajectoryFollowing is the way to
+  // be sure of catching the end of a short trajectory.
+  string pawn = 1;
+}
+
+// Emitted each time a follower's trajectory reaches its end, whatever end behavior is configured.
+// This is the *trajectory* ending — the progress of the point the pawn is being driven toward — not
+// the pawn arriving anywhere: a steering follower lags its target, so it is still short of the final
+// point when this fires.
+message TrajectoryEndEventResponse {
+  // Identifier of the pawn whose trajectory ended (matches the request's `pawn`).
+  string pawn = 1;
+  // Sim time at which it ended, in seconds.
+  double timestamp_s = 2;
+  // The end behavior that was applied, which is also what says whether to expect another event:
+  // CLAMP and DESTROY end the following, LOOP and RESET carry on and end again next lap.
+  TrajectoryEndBehavior end_behavior = 3;
+}
+
 service MovementControlService {
   rpc GetCommandablePawns(TempoCore.Empty) returns (CommandablePawnsResponse);
 
@@ -177,4 +199,12 @@ service MovementControlService {
   rpc ConfigureTrajectoryFollowing(ConfigureTrajectoryFollowingRequest) returns (TempoCore.Empty);
 
   rpc SetTrajectorySpeed(SetTrajectorySpeedRequest) returns (TempoCore.Empty);
+
+  // Stream the pawn's trajectory-end events. The stream carries one message per end, so a CLAMP or
+  // DESTROY follower produces exactly one and a LOOP or RESET follower one per lap; it stays open
+  // across reconfiguration, reporting the end of each trajectory the pawn is given in turn. It
+  // carries the ends that happen while it is open and keeps no history, so subscribe before
+  // configuring the trajectory whose end you care about. A destroyed pawn ends the stream with
+  // ABORTED — including under the DESTROY end behavior, whose own event is sent first.
+  rpc StreamTrajectoryEndEvents(TrajectoryEndEventRequest) returns (stream TrajectoryEndEventResponse);
 }

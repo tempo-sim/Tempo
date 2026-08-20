@@ -4,6 +4,7 @@
 
 #include "KinematicVehicleMovementComponent.h"
 #include "SplineActor.h"
+#include "TrajectoryFollowingComponent.h"
 
 #include "ChaosVehicleMovementComponent.h"
 #include "Components/SplineComponent.h"
@@ -58,6 +59,25 @@ bool ATrajectoryFollowingController::SetSpeed(double SpeedCmS)
 	// distance moves from here on.
 	Config.Speed = SpeedCmS;
 	return true;
+}
+
+void ATrajectoryFollowingController::NotifyTrajectoryEnd(APawn* EndedPawn)
+{
+	FTrajectoryEndEvent Event;
+	Event.Pawn = EndedPawn;
+	// EndBehavior is also what tells a subscriber whether to expect another event: Loop and Reset
+	// carry on and end again, Clamp and Destroy do not.
+	Event.EndBehavior = Config.EndBehavior;
+
+	// The component owns the event, because it is what a subscriber can find and bind to on a pawn
+	// whose trajectory has not been configured yet — this controller may not have existed then.
+	// Located the same way the movement service locates it, so both agree which component speaks for
+	// a pawn.
+	if (UTrajectoryFollowingComponent* Component =
+			EndedPawn ? EndedPawn->FindComponentByClass<UTrajectoryFollowingComponent>() : nullptr)
+	{
+		Component->NotifyTrajectoryEnd(Event);
+	}
 }
 
 bool ATrajectoryFollowingController::IsArcLengthMode() const
@@ -259,10 +279,14 @@ void ATrajectoryFollowingController::Tick(float DeltaSeconds)
 			case ETrajectoryEndBehavior::Destroy:
 				// Destroy the followed pawn once it reaches the end. Destroying the pawn tears down
 				// its UTrajectoryFollowingComponent, whose EndPlay unpossesses and destroys this
-				// controller, so return immediately without touching any more state.
+				// controller, so notify first — while there is still a pawn to name and a delegate to
+				// raise it on — and return immediately without touching any more state.
+				NotifyTrajectoryEnd(ControlledPawn);
 				ControlledPawn->Destroy();
 				return;
 			}
+
+			NotifyTrajectoryEnd(ControlledPawn);
 		}
 	}
 
