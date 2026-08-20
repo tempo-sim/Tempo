@@ -62,9 +62,11 @@ struct FTrajectoryFollowingConfig
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Trajectory")
 	ETrajectorySpeedMode SpeedMode = ETrajectorySpeedMode::ConstantSpeed;
 
-	// ConstantSpeed mode: speed along the spline, in cm/s. Settable while following via
-	// ATrajectoryFollowingController::SetSpeed (or the SetTrajectorySpeed RPC).
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Trajectory", meta = (EditCondition = "SpeedMode == ETrajectorySpeedMode::ConstantSpeed", EditConditionHides, ClampMin = 0.0))
+	// ConstantSpeed mode: speed along the spline, in cm/s. Negative drives back along the spline
+	// (a steering follower reverses; it keeps its heading and backs up rather than turning around).
+	// Settable while following via ATrajectoryFollowingController::SetSpeed (or the
+	// SetTrajectorySpeed RPC).
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Trajectory", meta = (EditCondition = "SpeedMode == ETrajectorySpeedMode::ConstantSpeed", EditConditionHides))
 	double Speed = 100.0;
 
 	// SplinePointVsTime mode: maps time in seconds (X) to spline input key / point index (Y).
@@ -122,8 +124,10 @@ struct FTrajectoryFollowingConfig
 // differently:
 //   * The arc-length modes (ConstantSpeed, SpeedVsTime) integrate distance along the spline directly
 //     (distance += speed * dt). Speed is therefore a live input: changing it takes effect on the next
-//     tick without moving the pawn, and 0 holds it where it is. These modes end when the pawn reaches
-//     the end of the spline.
+//     tick without moving the pawn, 0 holds it where it is, and a negative value drives back along
+//     the spline (a steering follower reverses, keeping its heading, rather than turning around).
+//     These modes end when the pawn reaches the end of the spline; backing up to the spline's start
+//     stops there but does not end the trajectory.
 //   * The time-domain modes (SplinePointVsTime, DistanceVsTime) are authored as functions of
 //     trajectory time, so they advance a clock (ElapsedSeconds) and end when their curve runs out.
 // SpeedVsTime needs both: the clock to evaluate its speed curve, and the integrated distance to know
@@ -156,7 +160,8 @@ public:
 	// Set the ConstantSpeed speed (cm/s) while following, without moving the pawn or restarting the
 	// trajectory: the new speed takes effect on the next tick's integration step. 0 holds the pawn
 	// where it is on the spline, indefinitely and without ending the trajectory; following resumes
-	// from the same point when a positive speed is set again. Negative speeds are clamped to 0.
+	// from the same point when a speed is set again. Negative drives back along the spline, and stops
+	// at its start (which is a hold, not the end of the trajectory — only the far end is that).
 	// Only meaningful in ConstantSpeed mode; returns false (and changes nothing) in any other.
 	UFUNCTION(BlueprintCallable, Category = "Trajectory")
 	bool SetSpeed(double SpeedCmS);
@@ -225,8 +230,7 @@ protected:
 
 	// Speed along the spline (cm/s) the arc-length modes advance at right now: Config.Speed, or the
 	// speed curve evaluated at the current clock. 0 for the time-domain modes, which have no
-	// independent speed. May be negative in SpeedVsTime, which is how a curve drives back along the
-	// spline.
+	// independent speed. Signed: negative drives back along the spline.
 	double CurrentSpeed() const;
 
 private:

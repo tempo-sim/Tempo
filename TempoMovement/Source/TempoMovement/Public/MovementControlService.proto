@@ -149,8 +149,9 @@ message SetTrajectorySpeedRequest {
   // TrajectoryFollowingComponent that has been configured with ConfigureTrajectoryFollowing.
   string pawn = 1;
   // Speed along the spline, in meters/second. 0 holds the pawn where it is, indefinitely and
-  // without ending the trajectory; following resumes from the same point when a positive speed is
-  // set again. Negative speeds are clamped to 0.
+  // without ending the trajectory; following resumes from the same point when a speed is set again.
+  // Negative drives back along the spline — a steering follower reverses, keeping its heading rather
+  // than turning around — and stops at the spline's start without ending the trajectory.
   float speed = 2;
 }
 

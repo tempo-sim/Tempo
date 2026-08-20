@@ -35,7 +35,8 @@ public:
 	void ConfigureAndFollow(ASplineActor* InSpline, const FTrajectoryFollowingConfig& InConfig);
 
 	// Change the ConstantSpeed speed (cm/s) of the trajectory already being followed, without
-	// restarting it or moving the pawn; 0 holds the pawn where it is. Used by the SetTrajectorySpeed
+	// restarting it or moving the pawn; 0 holds the pawn where it is, and a negative value drives it
+	// back along the spline (reversing, for a steering follower). Used by the SetTrajectorySpeed
 	// RPC to pace a follower against something outside the trajectory (an obstacle, a signal, a
 	// hand-off), which ConfigureAndFollow cannot do — it restarts following from the spline's start.
 	// Returns false if there is no controller yet or the trajectory is not in ConstantSpeed mode.

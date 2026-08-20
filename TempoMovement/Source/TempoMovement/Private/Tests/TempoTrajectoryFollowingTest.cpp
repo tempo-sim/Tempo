@@ -194,10 +194,68 @@ bool FTempoTrajectoryHoldTest::RunTest(const FString& Parameters)
 	Near(TEXT("Distance after release"), Fixture.Controller->GetDistanceAlongSpline(), 300.0);
 	Near(TEXT("Pawn after release"), Fixture.PawnX(), 300.0);
 
-	// A negative speed is clamped to a hold rather than driving back down the spline.
-	Fixture.Controller->SetSpeed(-100.0);
-	Fixture.Tick(10);
-	Near(TEXT("Distance after a negative speed"), Fixture.Controller->GetDistanceAlongSpline(), 300.0);
+	return true;
+}
+
+//
+// A negative speed is a direction, not an error: the follower drives back along the spline.
+//
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTempoTrajectoryReverseTest,
+	"Tempo.Movement.TrajectoryFollowing.Reverse", TempoTrajectoryTestFlags)
+bool FTempoTrajectoryReverseTest::RunTest(const FString& Parameters)
+{
+	auto Near = [this](const TCHAR* What, double A, double B, double Tol = DistanceTol)
+	{
+		if (!FMath::IsNearlyEqual(A, B, Tol))
+		{
+			AddError(FString::Printf(TEXT("%s: expected %.4f, got %.4f"), What, B, A));
+		}
+	};
+
+	// One world at a time: TempoCore's service subsystem binds per world and ensures if a second
+	// world is created while the first is still up, so each case gets its own scope.
+	{
+		FTrajectoryTestFixture Fixture;
+		Fixture.Follow(FTrajectoryTestFixture::ConstantSpeedConfig(100.0));
+		Fixture.Tick(50);
+		Near(TEXT("Distance driven out"), Fixture.Controller->GetDistanceAlongSpline(), 500.0);
+
+		// Backing up retraces the road it came in on, at the speed asked for.
+		Fixture.Controller->SetSpeed(-200.0);
+		Fixture.Tick(10);
+		Near(TEXT("Distance after 1 s at -200 cm/s"), Fixture.Controller->GetDistanceAlongSpline(), 300.0);
+		Near(TEXT("Pawn backed up"), Fixture.PawnX(), 300.0);
+
+		// The pawn keeps its heading while reversing — it backs up rather than turning around. (The
+		// target's rotation is the spline tangent, which does not depend on the direction of travel.)
+		Near(TEXT("Heading while reversing"), Fixture.Pawn->GetActorRotation().Yaw, 0.0, 1.0);
+
+		// Reversing does not run off the start of the spline, and does not end the trajectory: it
+		// stops there and drives out again when asked.
+		Fixture.Tick(100);
+		Near(TEXT("Reversing stops at the spline start"), Fixture.Controller->GetDistanceAlongSpline(), 0.0);
+		Fixture.Controller->SetSpeed(100.0);
+		Fixture.Tick(10);
+		Near(TEXT("Driving out again from the start"), Fixture.Controller->GetDistanceAlongSpline(), 100.0);
+	}
+
+	// A Destroy follower backed onto the spline's start is not destroyed by it — only the far end
+	// ends a trajectory.
+	{
+		FTrajectoryTestFixture Destroyer;
+		FTrajectoryFollowingConfig Config = FTrajectoryTestFixture::ConstantSpeedConfig(100.0);
+		Config.EndBehavior = ETrajectoryEndBehavior::Destroy;
+		Destroyer.Follow(Config);
+		Destroyer.Tick(20);
+		Destroyer.Controller->SetSpeed(-100.0);
+		Destroyer.Tick(100);
+		Near(TEXT("Backed onto the start"), Destroyer.Controller->GetDistanceAlongSpline(), 0.0);
+		if (!IsValid(Destroyer.Pawn))
+		{
+			AddError(TEXT("Backing onto the spline's start should not destroy the pawn"));
+		}
+	}
 
 	return true;
 }

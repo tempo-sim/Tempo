@@ -38,9 +38,14 @@ bool FWheeledVehicleVelocityController::TrackBodyVelocity(APawn* Pawn, float Tar
 		{
 			CurrentYawRateDegS = AngVel->GetAngularVelocity().Z;
 		}
-		// Positive Chaos steering input = right turn = +yaw (Unreal left-handed). Same sign as the LH yaw error.
+		// Positive Chaos steering input = right turn = +yaw (Unreal left-handed). Same sign as the LH yaw
+		// error — but only going forwards: the steered axle trails when reversing, so a given steering
+		// input yields the opposite yaw rate and the loop has to change sign with it or it diverges,
+		// steering harder the further off it gets. Keyed off the *commanded* direction rather than the
+		// measured one, so it does not chatter around a standstill.
 		const float YawErrorDegS = TargetYawRateDegS - CurrentYawRateDegS;
-		const float NormSteer = FMath::Clamp(YawRateKp * YawErrorDegS, -1.0f, 1.0f);
+		const float SteeringSign = TargetLinVelCmS < 0.0f ? -1.0f : 1.0f;
+		const float NormSteer = FMath::Clamp(SteeringSign * YawRateKp * YawErrorDegS, -1.0f, 1.0f);
 
 		ChaosMovement->SetSteeringInput(NormSteer);
 		ApplyChaosAccelInput(ChaosMovement, NormAccel);

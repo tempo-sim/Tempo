@@ -54,8 +54,9 @@ bool ATrajectoryFollowingController::SetSpeed(double SpeedCmS)
 		return false;
 	}
 	// Nothing to re-anchor: the target pose is sampled at DistanceAlongSpline, which this does not
-	// touch, so the new speed only changes how fast that distance grows from here on.
-	Config.Speed = FMath::Max(SpeedCmS, 0.0);
+	// touch, so the new speed only changes how fast — and, if it is negative, which way — that
+	// distance moves from here on.
+	Config.Speed = SpeedCmS;
 	return true;
 }
 
@@ -69,10 +70,9 @@ double ATrajectoryFollowingController::CurrentSpeed() const
 	switch (Config.SpeedMode)
 	{
 	case ETrajectorySpeedMode::ConstantSpeed:
-		return FMath::Max(Config.Speed, 0.0);
+		return Config.Speed;
 	case ETrajectorySpeedMode::SpeedVsTime:
 	{
-		// Signed on purpose: a negative key is how a speed curve drives back along the spline.
 		const FRichCurve* Curve = Config.TimeToSpeed.GetRichCurveConst();
 		return (Curve && Curve->GetNumKeys() > 0) ? Curve->Eval(ElapsedSeconds) : 0.0;
 	}
@@ -221,6 +221,9 @@ void ATrajectoryFollowingController::Tick(float DeltaSeconds)
 		ElapsedSeconds += DeltaSeconds;
 		if (bArcLength)
 		{
+			// Floored at the spline's start: a follower driven backwards stops there and holds. That
+			// is deliberately not an end — only reaching the far end is, so a Destroy follower backed
+			// onto its start is not destroyed by it.
 			DistanceAlongSpline = FMath::Max(DistanceAlongSpline + SpeedThisTick * DeltaSeconds, 0.0);
 		}
 
@@ -300,6 +303,11 @@ void ATrajectoryFollowingController::Tick(float DeltaSeconds)
 		? GetTransformAtDistance(DistanceAlongSpline + SpeedThisTick * Lookahead).GetLocation()
 		: GetTransformAtTime(ElapsedSeconds + Lookahead).GetLocation();
 	const FVector FeedforwardVelocity = (AheadLocation - Target.GetLocation()) / Lookahead;
+	// The same feedforward as a signed speed *along the path*, by projecting it onto the path
+	// direction at the target (the target's rotation is the spline tangent). A magnitude would lose
+	// the one thing a reversing trajectory needs: which way along the spline the target is moving.
+	const double FeedforwardAlongPathCmS =
+		FVector::DotProduct(FeedforwardVelocity, Target.GetRotation().GetForwardVector());
 
 	// Deadband: errors smaller than the band produce no corrective input, so the pawn coasts on the
 	// feedforward instead of chasing tiny tracking errors. Zeros the error when within the band.
@@ -318,17 +326,24 @@ void ATrajectoryFollowingController::Tick(float DeltaSeconds)
 	if (bIsWheeledVehicle)
 	{
 		const FVector ToTargetLocal = ControlledPawn->GetActorTransform().InverseTransformVectorNoScale(Target.GetLocation() - CurrentLocation);
+		// Which way along the path the trajectory is taking the pawn. A reversing follower keeps its
+		// heading and backs up, so this is the trajectory's direction, not the pawn's.
+		const bool bReversing = FeedforwardAlongPathCmS < 0.0;
 
 		// Trajectory pace plus an along-track correction to catch up to / hang back from the target.
-		// Floored at zero: a follower that has overshot its target — which is the steady state of a
-		// held (0 speed) trajectory, and of one clamped at its end — should brake and stay put, not
-		// reverse back down the spline. ApplyChaosAccelInput already brakes rather than reverses
-		// while the vehicle is rolling forward, but a standing vehicle under a sustained negative
-		// command would shift into reverse.
+		// The correction may brake the pawn to a stop but not reverse its direction of travel: only a
+		// negative commanded speed does that. Without this a follower that has overshot its target —
+		// the steady state of a held (0 speed) trajectory, and of one clamped at its end — would sit
+		// there commanding reverse, and eventually get it.
 		const double AlongTrackError = ApplyDeadband(ToTargetLocal.X, Config.PositionDeadband);
-		const double TargetLinVelCmS = FMath::Max(FeedforwardVelocity.Size() + Config.PositionGain * AlongTrackError, 0.0);
-		// Steer toward the target point: heading error in the pawn's frame.
-		const double HeadingErrorDeg = ApplyDeadband(FMath::RadiansToDegrees(FMath::Atan2(ToTargetLocal.Y, ToTargetLocal.X)), Config.HeadingDeadband);
+		const double Corrected = FeedforwardAlongPathCmS + Config.PositionGain * AlongTrackError;
+		const double TargetLinVelCmS = bReversing ? FMath::Min(Corrected, 0.0) : FMath::Max(Corrected, 0.0);
+
+		// Steer toward the target point: heading error in the pawn's frame, measured against whichever
+		// end of the pawn leads. Backing up, the target is *behind*, so measuring it off the nose
+		// would read as a ~180 degree error and command a hard turn instead of a steering correction.
+		const FVector ToTargetAhead = bReversing ? -ToTargetLocal : ToTargetLocal;
+		const double HeadingErrorDeg = ApplyDeadband(FMath::RadiansToDegrees(FMath::Atan2(ToTargetAhead.Y, ToTargetAhead.X)), Config.HeadingDeadband);
 		const double TargetYawRateDegS = Config.YawRateGain * HeadingErrorDeg;
 
 		VehicleVelocityController.TrackBodyVelocity(ControlledPawn, TargetLinVelCmS, TargetYawRateDegS, DeltaSeconds);

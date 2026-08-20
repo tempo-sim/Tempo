@@ -546,13 +546,13 @@ void UTempoMovementControlServiceSubsystem::SetTrajectorySpeed(const SetTrajecto
 		return;
 	}
 
-	if (Request.speed() < 0.0f)
+	// Speeds arrive in SI and convert to Unreal-native cm, as in ConfigureTrajectoryFollowing. A
+	// negative speed is a direction, not an error: it drives the pawn back along the spline.
+	if (!FMath::IsFinite(Request.speed()))
 	{
-		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "Trajectory speed may not be negative"));
+		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "Trajectory speed must be finite"));
 		return;
 	}
-
-	// Speeds arrive in SI and convert to Unreal-native cm, as in ConfigureTrajectoryFollowing.
 	constexpr float M2CMScale = 100.0f;
 	if (!FollowingComponent->SetSpeed(Request.speed() * M2CMScale))
 	{

@@ -40,7 +40,7 @@ bool UTrajectoryFollowingComponent::SetSpeed(double SpeedCmS)
 	{
 		return false;
 	}
-	Config.Speed = FMath::Max(SpeedCmS, 0.0);
+	Config.Speed = SpeedCmS;
 	return true;
 }
 
