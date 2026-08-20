@@ -12,6 +12,24 @@
 
 class ASplineActor;
 
+// One trajectory-end occurrence: a follower's progress reached the end of its trajectory, and its
+// end behavior was applied. Reported for every end behavior, so a caller can react to the end itself
+// rather than inferring it from a duration or polling the pawn's position.
+//
+// The end is the *trajectory's*, not the pawn's: it is the integrated progress of the point the pawn
+// is driven toward that has reached the end of the spline, and a steering follower lags that point,
+// so it is still short of the final pose when this fires.
+struct FTrajectoryEndEvent
+{
+	// The pawn whose trajectory ended. Still valid when the event fires, including under Destroy,
+	// which destroys it immediately afterwards.
+	APawn* Pawn = nullptr;
+
+	// The end behavior that was applied. Also says whether to expect another event: Loop and Reset
+	// carry on and end again next lap, Clamp and Destroy do not.
+	ETrajectoryEndBehavior EndBehavior = ETrajectoryEndBehavior::Clamp;
+};
+
 // Raised on each trajectory end (see FTrajectoryEndEvent). Declared here rather than on the
 // controller because this component is what a subscriber can find on a pawn: it is present from the
 // moment it is added, whereas the controller is not spawned until a spline has been configured, and

@@ -471,16 +471,12 @@ bool FTempoTrajectoryEndEventTest::RunTest(const FString& Parameters)
 	struct FRecorder
 	{
 		TArray<FTrajectoryEndEvent> Events;
-		// Sampled at the event rather than read back later: the Destroy end behavior destroys the
-		// pawn immediately afterwards, so by the time a test looks, it never is valid.
-		TArray<bool> PawnValidWhenRaised;
 
 		void Watch(UTrajectoryFollowingComponent* Component)
 		{
 			Component->OnTrajectoryEnd.AddLambda([this](const FTrajectoryEndEvent& Event)
 			{
 				Events.Add(Event);
-				PawnValidWhenRaised.Add(IsValid(Event.Pawn));
 			});
 		}
 	};
@@ -547,9 +543,17 @@ bool FTempoTrajectoryEndEventTest::RunTest(const FString& Parameters)
 	// Destroy: the event goes out before the pawn does, so a subscriber can still identify it.
 	{
 		FRecorder Recorder;
+		// Whether the pawn was alive is sampled at the event, not read back afterwards: Destroy
+		// destroys it on the very next line, so by the time the assertions run it never is.
+		bool bPawnAliveAtEvent = false;
 		FTrajectoryTestFixture Fixture;
 		Recorder.Watch(Fixture.Component);
 		APawn* const WatchedPawn = Fixture.Pawn;
+		Fixture.Component->OnTrajectoryEnd.AddLambda(
+			[&bPawnAliveAtEvent, WatchedPawn](const FTrajectoryEndEvent& Event)
+			{
+				bPawnAliveAtEvent = Event.Pawn == WatchedPawn && IsValid(Event.Pawn);
+			});
 		FTrajectoryFollowingConfig Config = FTrajectoryTestFixture::ConstantSpeedConfig(1000.0);
 		Config.EndBehavior = ETrajectoryEndBehavior::Destroy;
 		Fixture.Follow(Config);
@@ -558,7 +562,7 @@ bool FTempoTrajectoryEndEventTest::RunTest(const FString& Parameters)
 		{
 			AddError(FString::Printf(TEXT("Destroy should raise exactly one end event, got %d"), Recorder.Events.Num()));
 		}
-		else if (Recorder.Events[0].Pawn != WatchedPawn || !Recorder.PawnValidWhenRaised[0])
+		if (!bPawnAliveAtEvent)
 		{
 			AddError(TEXT("Destroy's end event should name the pawn, and be raised while it is still valid"));
 		}
@@ -583,7 +587,7 @@ bool FTempoTrajectoryEndEventTest::RunTest(const FString& Parameters)
 		}
 	}
 
-	// Re-following raises a fresh event for the new trajectory, not a repeat of the old one.
+	// Each trajectory raises its own end event, and reconfiguring does not raise one of its own.
 	{
 		FRecorder Recorder;
 		FTrajectoryTestFixture Fixture;

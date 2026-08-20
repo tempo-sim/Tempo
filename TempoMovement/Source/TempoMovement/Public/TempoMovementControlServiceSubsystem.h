@@ -5,9 +5,6 @@
 #include "TempoServiceProvider.h"
 #include "TempoServer.h"
 #include "TempoSubsystems.h"
-// For FTrajectoryEndEvent, which OnTrajectoryEnd takes by value through a UFUNCTION and so needs
-// complete rather than forward-declared.
-#include "TrajectoryFollowingController.h"
 
 #include "CoreMinimal.h"
 #include "Navigation/PathFollowingComponent.h"
@@ -18,6 +15,8 @@ namespace TempoCore
 {
 	class Empty;
 }
+
+struct FTrajectoryEndEvent;
 
 namespace TempoMovement
 {
@@ -86,8 +85,8 @@ protected:
 	UFUNCTION()
 	void OnPawnMoveCompleted(FAIRequestID RequestID, EPathFollowingResult::Type Result);
 
-	// Bound to UTrajectoryFollowingComponent::OnTrajectoryEnd, a plain C++ delegate, so this needs no
-	// UFUNCTION (unlike OnWatchedPawnDestroyed, which hangs off a dynamic one).
+	// Bound to UTrajectoryFollowingComponent::OnTrajectoryEnd for every watched pawn; the event's
+	// Pawn is what says which one an end belongs to.
 	void OnTrajectoryEnd(const FTrajectoryEndEvent& Event);
 
 	// Finishes any stream still waiting on a pawn that has gone away, rather than leaving its client
