@@ -126,7 +126,9 @@ struct FTrajectoryFollowingConfig
 //     (distance += speed * dt). Speed is therefore a live input: changing it takes effect on the next
 //     tick without moving the pawn, 0 holds it where it is, and a negative value drives back along
 //     the spline (a steering follower reverses, keeping its heading, rather than turning around).
-//     These modes end when the pawn reaches the end of the spline; backing up to the spline's start
+//     These modes end when that integrated distance reaches the end of the spline — the progress of
+//     the *target*, not the pawn's own position, so a steering follower that lags behind it (or has
+//     been shoved off the spline) neither delays nor skips the end. Backing up to the spline's start
 //     stops there but does not end the trajectory.
 //   * The time-domain modes (SplinePointVsTime, DistanceVsTime) are authored as functions of
 //     trajectory time, so they advance a clock (ElapsedSeconds) and end when their curve runs out.

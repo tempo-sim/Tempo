@@ -115,7 +115,9 @@ enum TrajectoryEndBehavior {
   TRAJECTORY_END_BEHAVIOR_LOOP = 2;
   // Teleport back to the start (even for a steering follower) and repeat.
   TRAJECTORY_END_BEHAVIOR_RESET = 3;
-  // Destroy the pawn when it reaches the end of the trajectory.
+  // Destroy the pawn when it reaches the end of the trajectory. As with every end behavior, that is
+  // when the *trajectory* reaches its end, not the pawn: a steering follower lags its target, so it
+  // is destroyed while still short of the spline's final point.
   TRAJECTORY_END_BEHAVIOR_DESTROY = 4;
 }
 
