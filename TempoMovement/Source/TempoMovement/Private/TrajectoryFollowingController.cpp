@@ -4,6 +4,7 @@
 
 #include "KinematicVehicleMovementComponent.h"
 #include "SplineActor.h"
+#include "TrajectoryFollowingComponent.h"
 
 #include "ChaosVehicleMovementComponent.h"
 #include "Components/SplineComponent.h"
@@ -58,6 +59,22 @@ bool ATrajectoryFollowingController::SetSpeed(double SpeedCmS)
 	// distance moves from here on.
 	Config.Speed = SpeedCmS;
 	return true;
+}
+
+void ATrajectoryFollowingController::NotifyTrajectoryEnd()
+{
+	APawn* EndedPawn = GetPawn();
+	FTrajectoryEndEvent Event;
+	Event.Pawn = EndedPawn;
+	Event.EndBehavior = Config.EndBehavior;
+
+	// Located the same way the movement service locates it, so both agree which component speaks for
+	// a pawn.
+	if (UTrajectoryFollowingComponent* Component =
+			EndedPawn->FindComponentByClass<UTrajectoryFollowingComponent>())
+	{
+		Component->NotifyTrajectoryEnd(Event);
+	}
 }
 
 bool ATrajectoryFollowingController::IsArcLengthMode() const
@@ -259,10 +276,14 @@ void ATrajectoryFollowingController::Tick(float DeltaSeconds)
 			case ETrajectoryEndBehavior::Destroy:
 				// Destroy the followed pawn once it reaches the end. Destroying the pawn tears down
 				// its UTrajectoryFollowingComponent, whose EndPlay unpossesses and destroys this
-				// controller, so return immediately without touching any more state.
+				// controller, so notify before any of that goes away, and return immediately without
+				// touching any more state.
+				NotifyTrajectoryEnd();
 				ControlledPawn->Destroy();
 				return;
 			}
+
+			NotifyTrajectoryEnd();
 		}
 	}
 

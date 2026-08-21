@@ -1,6 +1,7 @@
 // Copyright Tempo Simulation, LLC. All Rights Reserved
 
 #include "SplineActor.h"
+#include "TrajectoryFollowingComponent.h"
 #include "TrajectoryFollowingController.h"
 
 #include "Components/SplineComponent.h"
@@ -45,6 +46,10 @@ namespace
 		ASplineActor* SplineActor = nullptr;
 		APawn* Pawn = nullptr;
 		ATrajectoryFollowingController* Controller = nullptr;
+		// Present so the pawn has somewhere for its end events to be raised: the controller hands each
+		// one to its pawn's UTrajectoryFollowingComponent. Not otherwise used — the tests drive the
+		// controller directly, so this component never spawns a controller of its own.
+		UTrajectoryFollowingComponent* Component = nullptr;
 
 		explicit FTrajectoryTestFixture(double Length = TestSplineLength)
 		{
@@ -67,6 +72,10 @@ namespace
 			USceneComponent* Root = NewObject<USceneComponent>(Pawn);
 			Pawn->SetRootComponent(Root);
 			Root->RegisterComponent();
+
+			Component = NewObject<UTrajectoryFollowingComponent>(Pawn, TEXT("TrajectoryFollowing"));
+			Pawn->AddInstanceComponent(Component);
+			Component->RegisterComponent();
 
 			Controller = World->SpawnActor<ATrajectoryFollowingController>();
 		}
@@ -442,6 +451,160 @@ bool FTempoTrajectorySpeedVsTimeTest::RunTest(const FString& Parameters)
 		if (Fixture.Controller->SetSpeed(0.0))
 		{
 			AddError(TEXT("SetSpeed should refuse a trajectory that is not in ConstantSpeed mode"));
+		}
+	}
+
+	return true;
+}
+
+//
+// End events. One per trajectory end, for every end behavior, raised while the pawn is still alive.
+//
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTempoTrajectoryEndEventTest,
+	"Tempo.Movement.TrajectoryFollowing.EndEvent", TempoTrajectoryTestFlags)
+bool FTempoTrajectoryEndEventTest::RunTest(const FString& Parameters)
+{
+	// Records every end event raised on the pawn's component, which is where the controller sends
+	// them. Declared before the fixture in each case below, so it outlives the component holding the
+	// lambda that writes to it.
+	struct FRecorder
+	{
+		TArray<FTrajectoryEndEvent> Events;
+
+		void Watch(UTrajectoryFollowingComponent* Component)
+		{
+			Component->OnTrajectoryEnd.AddLambda([this](const FTrajectoryEndEvent& Event)
+			{
+				Events.Add(Event);
+			});
+		}
+	};
+
+	// Clamp: exactly one event, at the end of the spline — and it keeps holding without raising
+	// another.
+	{
+		FRecorder Recorder;
+		FTrajectoryTestFixture Fixture;
+		Recorder.Watch(Fixture.Component);
+		Fixture.Follow(FTrajectoryTestFixture::ConstantSpeedConfig(1000.0));
+		Fixture.Tick(5);
+		if (Recorder.Events.Num() != 0)
+		{
+			AddError(TEXT("No end event should be raised before the end of the spline"));
+		}
+		Fixture.Tick(20);
+		if (Recorder.Events.Num() != 1)
+		{
+			AddError(FString::Printf(TEXT("Clamp should raise exactly one end event, got %d"), Recorder.Events.Num()));
+		}
+		else
+		{
+			const FTrajectoryEndEvent& Event = Recorder.Events[0];
+			if (Event.Pawn != Fixture.Pawn)
+			{
+				AddError(TEXT("The end event should name the followed pawn"));
+			}
+			if (Event.EndBehavior != ETrajectoryEndBehavior::Clamp)
+			{
+				AddError(TEXT("Clamp's end event should report Clamp"));
+			}
+		}
+		Fixture.Tick(20);
+		if (Recorder.Events.Num() > 1)
+		{
+			AddError(TEXT("A clamped trajectory should not keep raising end events while it holds"));
+		}
+	}
+
+	// Loop: an event per lap, each reporting Loop — the trajectory ends and carries on.
+	{
+		FRecorder Recorder;
+		FTrajectoryTestFixture Fixture;
+		Recorder.Watch(Fixture.Component);
+		FTrajectoryFollowingConfig Config = FTrajectoryTestFixture::ConstantSpeedConfig(1000.0);
+		Config.EndBehavior = ETrajectoryEndBehavior::Loop;
+		Fixture.Follow(Config);
+		// 2.5 s at 1000 cm/s over a 1000 cm spline: two laps completed.
+		Fixture.Tick(25);
+		if (Recorder.Events.Num() != 2)
+		{
+			AddError(FString::Printf(TEXT("Loop should raise one end event per lap (expected 2), got %d"), Recorder.Events.Num()));
+		}
+		for (const FTrajectoryEndEvent& Event : Recorder.Events)
+		{
+			if (Event.EndBehavior != ETrajectoryEndBehavior::Loop)
+			{
+				AddError(TEXT("A lap's end event should report Loop"));
+			}
+		}
+	}
+
+	// Destroy: the event goes out before the pawn does, so a subscriber can still identify it.
+	{
+		FRecorder Recorder;
+		// Whether the pawn was alive is sampled at the event, not read back afterwards: Destroy
+		// destroys it on the very next line, so by the time the assertions run it never is.
+		bool bPawnAliveAtEvent = false;
+		FTrajectoryTestFixture Fixture;
+		Recorder.Watch(Fixture.Component);
+		APawn* const WatchedPawn = Fixture.Pawn;
+		Fixture.Component->OnTrajectoryEnd.AddLambda(
+			[&bPawnAliveAtEvent, WatchedPawn](const FTrajectoryEndEvent& Event)
+			{
+				bPawnAliveAtEvent = Event.Pawn == WatchedPawn && IsValid(Event.Pawn);
+			});
+		FTrajectoryFollowingConfig Config = FTrajectoryTestFixture::ConstantSpeedConfig(1000.0);
+		Config.EndBehavior = ETrajectoryEndBehavior::Destroy;
+		Fixture.Follow(Config);
+		Fixture.Tick(20);
+		if (Recorder.Events.Num() != 1)
+		{
+			AddError(FString::Printf(TEXT("Destroy should raise exactly one end event, got %d"), Recorder.Events.Num()));
+		}
+		if (!bPawnAliveAtEvent)
+		{
+			AddError(TEXT("Destroy's end event should name the pawn, and be raised while it is still valid"));
+		}
+		if (IsValid(Fixture.Pawn))
+		{
+			AddError(TEXT("Destroy should still destroy the pawn"));
+		}
+	}
+
+	// A held trajectory never ends, so it never raises the event.
+	{
+		FRecorder Recorder;
+		FTrajectoryTestFixture Fixture;
+		Recorder.Watch(Fixture.Component);
+		Fixture.Follow(FTrajectoryTestFixture::ConstantSpeedConfig(1000.0));
+		Fixture.Tick(5);
+		Fixture.Controller->SetSpeed(0.0);
+		Fixture.Tick(200);
+		if (Recorder.Events.Num() != 0)
+		{
+			AddError(FString::Printf(TEXT("A held trajectory should raise no end event, got %d"), Recorder.Events.Num()));
+		}
+	}
+
+	// Each trajectory raises its own end event, and reconfiguring does not raise one of its own.
+	{
+		FRecorder Recorder;
+		FTrajectoryTestFixture Fixture;
+		Recorder.Watch(Fixture.Component);
+		Fixture.Follow(FTrajectoryTestFixture::ConstantSpeedConfig(1000.0));
+		Fixture.Tick(20);
+		Fixture.Follow(FTrajectoryTestFixture::ConstantSpeedConfig(1000.0));
+		if (Recorder.Events.Num() != 1)
+		{
+			AddError(TEXT("Re-following should not raise an end event of its own"));
+		}
+		Fixture.Tick(20);
+		if (Recorder.Events.Num() != 2)
+		{
+			AddError(FString::Printf(
+				TEXT("The second trajectory should raise its own end event (expected 2 total), got %d"),
+				Recorder.Events.Num()));
 		}
 	}
 

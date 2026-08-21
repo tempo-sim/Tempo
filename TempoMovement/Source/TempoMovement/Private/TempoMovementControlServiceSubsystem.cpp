@@ -17,6 +17,7 @@
 #include "AIController.h"
 #include "Components/SplineComponent.h"
 #include "Curves/CurveFloat.h"
+#include "Engine/World.h"
 #include "GameFramework/Pawn.h"
 #include "Kismet/GameplayStatics.h"
 #include "NavigationSystem.h"
@@ -33,6 +34,8 @@ using NavigablePawnsResponse = TempoMovement::NavigablePawnsResponse;
 using SetSplinePointsRequest = TempoMovement::SetSplinePointsRequest;
 using ConfigureTrajectoryFollowingRequest = TempoMovement::ConfigureTrajectoryFollowingRequest;
 using SetTrajectorySpeedRequest = TempoMovement::SetTrajectorySpeedRequest;
+using TrajectoryEndEventRequest = TempoMovement::TrajectoryEndEventRequest;
+using TrajectoryEndEventResponse = TempoMovement::TrajectoryEndEventResponse;
 using TempoEmpty = TempoCore::Empty;
 
 namespace
@@ -134,6 +137,31 @@ namespace
 		}
 		return Curve;
 	}
+
+	TempoMovement::TrajectoryEndBehavior ToProto(ETrajectoryEndBehavior EndBehavior)
+	{
+		switch (EndBehavior)
+		{
+		case ETrajectoryEndBehavior::Clamp:
+			return TempoMovement::TRAJECTORY_END_BEHAVIOR_CLAMP;
+		case ETrajectoryEndBehavior::Loop:
+			return TempoMovement::TRAJECTORY_END_BEHAVIOR_LOOP;
+		case ETrajectoryEndBehavior::Reset:
+			return TempoMovement::TRAJECTORY_END_BEHAVIOR_RESET;
+		case ETrajectoryEndBehavior::Destroy:
+			return TempoMovement::TRAJECTORY_END_BEHAVIOR_DESTROY;
+		}
+		return TempoMovement::TRAJECTORY_END_BEHAVIOR_UNSPECIFIED;
+	}
+
+	TrajectoryEndEventResponse ToProto(const FTrajectoryEndEvent& Event, const FString& PawnName, const UWorld* World)
+	{
+		TrajectoryEndEventResponse Response;
+		Response.set_pawn(TCHAR_TO_UTF8(*PawnName));
+		Response.set_timestamp_s(World ? World->GetTimeSeconds() : 0.0);
+		Response.set_end_behavior(ToProto(Event.EndBehavior));
+		return Response;
+	}
 }
 
 void UTempoMovementControlServiceSubsystem::RegisterServices(FTempoServer& Server)
@@ -148,7 +176,8 @@ void UTempoMovementControlServiceSubsystem::RegisterServices(FTempoServer& Serve
 		SimpleRequestHandler(&MovementControlAsyncService::RequestRebuildNavigation, &UTempoMovementControlServiceSubsystem::RebuildNavigation),
 		SimpleRequestHandler(&MovementControlAsyncService::RequestSetSplinePoints, &UTempoMovementControlServiceSubsystem::SetSplinePoints),
 		SimpleRequestHandler(&MovementControlAsyncService::RequestConfigureTrajectoryFollowing, &UTempoMovementControlServiceSubsystem::ConfigureTrajectoryFollowing),
-		SimpleRequestHandler(&MovementControlAsyncService::RequestSetTrajectorySpeed, &UTempoMovementControlServiceSubsystem::SetTrajectorySpeed)
+		SimpleRequestHandler(&MovementControlAsyncService::RequestSetTrajectorySpeed, &UTempoMovementControlServiceSubsystem::SetTrajectorySpeed),
+		StreamingRequestHandler(&MovementControlAsyncService::RequestStreamTrajectoryEndEvents, &UTempoMovementControlServiceSubsystem::StreamTrajectoryEndEvents)
 		);
 }
 
@@ -565,4 +594,69 @@ void UTempoMovementControlServiceSubsystem::SetTrajectorySpeed(const SetTrajecto
 	}
 
 	ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status_OK);
+}
+
+void UTempoMovementControlServiceSubsystem::StreamTrajectoryEndEvents(const TrajectoryEndEventRequest& Request, const TResponseDelegate<TrajectoryEndEventResponse>& ResponseContinuation)
+{
+	APawn* Pawn = FindPawn(GetWorld(), UTF8_TO_TCHAR(Request.pawn().c_str()));
+	if (!Pawn)
+	{
+		ResponseContinuation.ExecuteIfBound(TrajectoryEndEventResponse(), grpc::Status(grpc::StatusCode::NOT_FOUND, "Did not find a pawn with the specified name"));
+		return;
+	}
+
+	UTrajectoryFollowingComponent* FollowingComponent = Pawn->FindComponentByClass<UTrajectoryFollowingComponent>();
+	if (!FollowingComponent)
+	{
+		ResponseContinuation.ExecuteIfBound(TrajectoryEndEventResponse(), grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "Pawn does not have a TrajectoryFollowingComponent"));
+		return;
+	}
+
+	PendingTrajectoryEndRequests.FindOrAdd(UTempoCoreUtils::GetActorIdentifier(Pawn)).Add(ResponseContinuation);
+	// Both bindings are for the pawn's lifetime, not this one request: the component outlives any
+	// single trajectory, so repeat subscriptions must not stack duplicate handlers.
+	if (!FollowingComponent->OnTrajectoryEnd.IsBoundToObject(this))
+	{
+		FollowingComponent->OnTrajectoryEnd.AddUObject(this, &UTempoMovementControlServiceSubsystem::OnTrajectoryEnd);
+	}
+	Pawn->OnDestroyed.AddUniqueDynamic(this, &UTempoMovementControlServiceSubsystem::OnWatchedPawnDestroyed);
+}
+
+void UTempoMovementControlServiceSubsystem::OnTrajectoryEnd(const FTrajectoryEndEvent& Event)
+{
+	if (!Event.Pawn)
+	{
+		return;
+	}
+	const FString PawnName = UTempoCoreUtils::GetActorIdentifier(Event.Pawn);
+	TArray<TResponseDelegate<TrajectoryEndEventResponse>> ResponseContinuations;
+	if (!PendingTrajectoryEndRequests.RemoveAndCopyValue(PawnName, ResponseContinuations))
+	{
+		// Nobody waiting. The component's delegate stays bound for the pawn's life, so this is the
+		// ordinary case between one client request and the next.
+		return;
+	}
+
+	const TrajectoryEndEventResponse Response = ToProto(Event, PawnName, GetWorld());
+	for (const auto& ResponseContinuation : ResponseContinuations)
+	{
+		ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
+	}
+}
+
+void UTempoMovementControlServiceSubsystem::OnWatchedPawnDestroyed(AActor* DestroyedActor)
+{
+	TArray<TResponseDelegate<TrajectoryEndEventResponse>> ResponseContinuations;
+	if (!PendingTrajectoryEndRequests.RemoveAndCopyValue(UTempoCoreUtils::GetActorIdentifier(DestroyedActor), ResponseContinuations))
+	{
+		return;
+	}
+
+	// Reached only when the pawn goes away without its trajectory ending -- destroyed by a client, or
+	// with the world. The Destroy end behavior raises its own event first, which consumes the entry
+	// above, so it does not come through here.
+	for (const auto& ResponseContinuation : ResponseContinuations)
+	{
+		ResponseContinuation.ExecuteIfBound(TrajectoryEndEventResponse(), grpc::Status(grpc::StatusCode::ABORTED, "Pawn was destroyed before its trajectory ended"));
+	}
 }

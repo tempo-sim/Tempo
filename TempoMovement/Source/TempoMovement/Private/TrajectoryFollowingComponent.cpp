@@ -44,6 +44,11 @@ bool UTrajectoryFollowingComponent::SetSpeed(double SpeedCmS)
 	return true;
 }
 
+void UTrajectoryFollowingComponent::NotifyTrajectoryEnd(const FTrajectoryEndEvent& Event)
+{
+	OnTrajectoryEnd.Broadcast(Event);
+}
+
 void UTrajectoryFollowingComponent::StartFollowing()
 {
 	if (!Spline)

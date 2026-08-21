@@ -235,6 +235,11 @@ protected:
 	// independent speed. Signed: negative drives back along the spline.
 	double CurrentSpeed() const;
 
+	// Assemble the end event for a trajectory that has just run out and hand it to the possessed
+	// pawn's UTrajectoryFollowingComponent to raise, if it has one. A manually-wired controller (see
+	// FollowTrajectory) need not have one, in which case the end goes unannounced.
+	void NotifyTrajectoryEnd();
+
 private:
 	// Time (seconds) elapsed along the trajectory, accumulated from the per-tick sim delta rather
 	// than absolute world time, so it holds steady whenever the simulation is paused or stepped.
