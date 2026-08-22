@@ -95,7 +95,7 @@ tce.play_in_editor() # Simulation should begin
 3. Use TempoWorld to add an Actor to your scene:
 ```
 import tempo_sim.tempo_world as tw
-tw.spawn_actor(type="BP_SensorRig") # An Actor with a tripod mesh should appear. It has a TempoCamera on top (although it may not be visible).
+tw.spawn_actor(actor_type="BP_SensorRig") # An Actor with a tripod mesh should appear. It has a TempoCamera on top (although it may not be visible).
 ```
 4. From another terminal, run the included [SensorPlayground](https://github.com/tempo-sim/Tempo/blob/main/ExampleClients/Python/SensorPlayground.py) example client: `python ./Plugins/Tempo/ExampleClients/Python/SensorPlayground.py`. Use it to start streaming color images from the `TempoCamera`
 5. While streaming images, from the Python interpreter again, use TempoWorld to change one of the Camera's properties:

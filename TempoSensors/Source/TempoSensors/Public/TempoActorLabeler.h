@@ -146,7 +146,7 @@ protected:
 	UPROPERTY()
 	TSet<FName> LabeledActorClassNames;
 
-	// Runtime overrides for actor types (class name -> semantic ID)
+	// Runtime overrides for actor types (real UClass name -> semantic ID)
 	// Takes precedence over DataTable definitions
 	UPROPERTY()
 	TMap<FName, int32> ActorTypeSemanticIdOverrides;

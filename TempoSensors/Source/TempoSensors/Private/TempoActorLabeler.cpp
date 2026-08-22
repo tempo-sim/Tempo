@@ -9,6 +9,7 @@
 
 #include "TempoSensorsSettings.h"
 
+#include "TempoClassUtils.h"
 #include "TempoCoreUtils.h"
 #include "DefaultActorClassifier.h"
 
@@ -208,7 +209,6 @@ void UTempoActorLabeler::HandleGetSemanticClasses(const TempoCore::Empty& Reques
 
 void UTempoActorLabeler::HandleSetActorTypeSemanticId(const TempoSensors::SetActorTypeSemanticIdRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation)
 {
-	const FName ActorType = FName(UTF8_TO_TCHAR(Request.actor_type().c_str()));
 	const int32 SemanticId = Request.semantic_id();
 
 	// Validate range
@@ -219,6 +219,20 @@ void UTempoActorLabeler::HandleSetActorTypeSemanticId(const TempoSensors::SetAct
 			"semantic_id must be -1 (revert) or 0-255"));
 		return;
 	}
+
+	// Resolve to an actual class so that either spelling of a Blueprint class name is accepted, the
+	// override is keyed on the real class name we report elsewhere, and a name we can't place is
+	// rejected rather than silently registering an override no actor will ever match.
+	const FString ActorTypeName(UTF8_TO_TCHAR(Request.actor_type().c_str()));
+	const UClass* ActorClass = GetSubClassWithName<AActor>(ActorTypeName);
+	if (!ActorClass)
+	{
+		const FString ErrorMsg = FString::Printf(TEXT("No actor class with name '%s' found"), *ActorTypeName);
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(),
+			grpc::Status(grpc::StatusCode::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
+		return;
+	}
+	const FName ActorType = ActorClass->GetFName();
 
 	// Store or clear override
 	if (SemanticId < 0)
@@ -377,7 +391,7 @@ void UTempoActorLabeler::HandleGetAllActorLabels(const TempoCore::Empty& Request
 		const FInstanceSemanticIdPair& IdPair = LabeledObjectPair.Value;
 
 		auto* ActorInfo = Response.add_actors();
-		ActorInfo->set_actor_name(TCHAR_TO_UTF8(*Actor->GetName()));
+		ActorInfo->set_actor_name(TCHAR_TO_UTF8(*UTempoCoreUtils::GetActorIdentifier(Actor)));
 		ActorInfo->set_actor_type(TCHAR_TO_UTF8(*Actor->GetClass()->GetName()));
 		ActorInfo->set_semantic_id(IdPair.SemanticId);
 		ActorInfo->set_instance_id(IdPair.InstanceId);
@@ -576,8 +590,10 @@ void UTempoActorLabeler::LabelActor(AActor* Actor)
 		return;
 	}
 
+	const FName ActorTypeName = Actor->GetClass()->GetFName();
+
 	// Check for type-level override first (before DataTable lookup)
-	if (const int32* TypeOverride = ActorTypeSemanticIdOverrides.Find(Actor->GetClass()->GetFName()))
+	if (const int32* TypeOverride = ActorTypeSemanticIdOverrides.Find(ActorTypeName))
 	{
 		FInstanceSemanticIdPair ActorIdPair;
 		ActorIdPair.SemanticId = *TypeOverride;
@@ -587,7 +603,7 @@ void UTempoActorLabeler::LabelActor(AActor* Actor)
 			// Track actor class names that have been assigned instance IDs
 			if (GetDefault<UTempoSensorsSettings>()->GetLabelType() == ELabelType::Instance)
 			{
-				LabeledActorClassNames.Add(Actor->GetClass()->GetFName());
+				LabeledActorClassNames.Add(ActorTypeName);
 			}
 		}
 		LabeledObjects.Add(Actor, ActorIdPair);
@@ -617,7 +633,7 @@ void UTempoActorLabeler::LabelActor(AActor* Actor)
 					// Track actor class names that have been assigned instance IDs
 					if (GetDefault<UTempoSensorsSettings>()->GetLabelType() == ELabelType::Instance)
 					{
-						LabeledActorClassNames.Add(Actor->GetClass()->GetFName());
+						LabeledActorClassNames.Add(ActorTypeName);
 					}
 				}
 				ActorIdPair.SemanticId = *SemanticId;

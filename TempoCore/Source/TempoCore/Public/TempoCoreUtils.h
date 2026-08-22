@@ -50,6 +50,14 @@ public:
 	// a no-op in cooked builds, which have no labels (GetActorNameOrLabel() is always GetName()).
 	static FString GetActorIdentifier(const AActor* Actor);
 
+	// Removes a trailing Blueprint "_C" from a class name, if present.
+	//
+	// Class names we report to clients are always the real UClass name, "_C" and all -- renaming
+	// a class on the way out would just be lying about what it is. This exists for the other
+	// direction: GetSubClassWithName (TempoClassUtils.h) uses it to also accept the name a user
+	// would read off a Blueprint asset ("BP_Foo") for the class it generates ("BP_Foo_C").
+	static FString StripBlueprintClassSuffix(const FString& ClassName);
+
 	template <typename BaseClass>
 	static bool IsMostDerivedSubclass(UClass* Class)
 	{

@@ -94,3 +94,8 @@ FString UTempoCoreUtils::GetActorIdentifier(const AActor* Actor)
 #endif
 	return Actor->GetActorNameOrLabel();
 }
+
+FString UTempoCoreUtils::StripBlueprintClassSuffix(const FString& ClassName)
+{
+	return ClassName.EndsWith(TEXT("_C"), ESearchCase::CaseSensitive) ? ClassName.LeftChop(2) : ClassName;
+}
