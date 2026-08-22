@@ -4,6 +4,8 @@
 
 #include "AssetRegistry/AssetRegistryModule.h"
 
+#include "TempoCoreUtils.h"
+
 AActor* GetActorWithName(const UWorld* World, const FString& Name);
 
 UObject* GetAssetByPath(const FString& AssetPath);
@@ -24,10 +26,25 @@ T* GetComponentWithName(const AActor* Actor, const FString& Name)
 	return nullptr;
 }
 
+// Resolves a client-supplied class name to a UClass deriving from T, or nullptr if there is none.
+//
+// Blueprint-generated classes are named "<BlueprintName>_C", so clients may reasonably name one
+// either way ("BP_Foo" or "BP_Foo_C"). Both are accepted. An exact match on the real class name
+// wins over a match on the de-suffixed form, so a native class literally named "Foo_C" is still
+// reachable as "Foo_C". This is the inbound half of the convention whose outbound half is
+// UTempoCoreUtils::GetClassIdentifier (which reports the de-suffixed form).
+//
 // https://kantandev.com/articles/finding-all-classes-blueprints-with-a-given-base
 template <typename T>
 UClass* GetSubClassWithName(const FString& Name)
 {
+	const FString NameNoSuffix = UTempoCoreUtils::StripBlueprintClassSuffix(Name);
+	// Only worth a second comparison if the request actually carried a "_C".
+	const bool bNameHadSuffix = NameNoSuffix.Len() != Name.Len();
+	// Both are held until the search completes, so an exact match found later still takes precedence.
+	UClass* FallbackNativeClass = nullptr;
+	FString FallbackBlueprintPath;
+
 	// C++ classes
 	for (TObjectIterator<UClass> ClassIt; ClassIt; ++ClassIt)
 	{
@@ -51,6 +68,12 @@ UClass* GetSubClassWithName(const FString& Name)
 		if (Class->GetName().Equals(Name, ESearchCase::IgnoreCase))
 		{
 			return Class;
+		}
+		// A native class matching only the de-suffixed name is a fallback: a Blueprint whose
+		// generated class name matches exactly (below) is the better answer.
+		if (bNameHadSuffix && !FallbackNativeClass && Class->GetName().Equals(NameNoSuffix, ESearchCase::IgnoreCase))
+		{
+			FallbackNativeClass = Class;
 		}
 	}
 
@@ -109,14 +132,35 @@ UClass* GetSubClassWithName(const FString& Name)
 				{
 					continue;
 				}
-				// LeftChop to remove the "_C"
-				if (ClassName.LeftChop(2).Equals(Name, ESearchCase::IgnoreCase))
+				// ClassName is the generated class name, so it always ends in "_C".
+				if (ClassName.Equals(Name, ESearchCase::IgnoreCase))
 				{
-					FString N = Asset.GetObjectPathString() + TEXT("_C");
+					const FString N = Asset.GetObjectPathString() + TEXT("_C");
 					return LoadObject<UClass>(nullptr, *N);
+				}
+				// LeftChop to remove the "_C"
+				if (ClassName.LeftChop(2).Equals(NameNoSuffix, ESearchCase::IgnoreCase))
+				{
+					const FString BlueprintPath = Asset.GetObjectPathString() + TEXT("_C");
+					// A request without a "_C" can't match a generated class name exactly, so this
+					// is the best answer available and we're done. Otherwise an exact match on a
+					// later asset would still win, so hold this one and keep looking.
+					if (!bNameHadSuffix)
+					{
+						return LoadObject<UClass>(nullptr, *BlueprintPath);
+					}
+					if (FallbackBlueprintPath.IsEmpty())
+					{
+						FallbackBlueprintPath = BlueprintPath;
+					}
 				}
 			}
 		}
 	}
-	return nullptr;
+
+	if (!FallbackBlueprintPath.IsEmpty())
+	{
+		return LoadObject<UClass>(nullptr, *FallbackBlueprintPath);
+	}
+	return FallbackNativeClass;
 }

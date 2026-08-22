@@ -6,7 +6,8 @@ import "TempoCore/Empty.proto";
 import "TempoCore/Geometry.proto";
 
 message SpawnActorRequest {
-  // Class name of the actor to spawn.
+  // Class name of the actor to spawn. Blueprint classes may be named with or without the
+  // generated "_C" suffix ("BP_Foo" or "BP_Foo_C"); an exact match is preferred.
   string actor_type = 1;
   // If true, defer finishing the spawn until FinishSpawningActor is called.
   bool deferred = 2;
@@ -39,7 +40,7 @@ message DestroyActorRequest {
 }
 
 message AddComponentRequest {
-  // Class name of the component to add.
+  // Class name of the component to add. Accepts the Blueprint "_C" suffix or not, as SpawnActor does.
   string component_type = 1;
   // Name of the owning actor.
   string actor = 2;
@@ -104,7 +105,7 @@ message DeactivateComponentRequest {
 message ActorDescriptor {
   // Actor name.
   string name = 1;
-  // Actor class name.
+  // Actor class name, without the Blueprint "_C" suffix. Can be passed straight back to SpawnActor.
   string actor_type = 2;
 }
 
@@ -117,7 +118,7 @@ message ComponentDescriptor {
   string actor = 1;
   // Component name.
   string name = 2;
-  // Component class name.
+  // Component class name, without the Blueprint "_C" suffix. Can be passed straight back to AddComponent.
   string component_type = 3;
 }
 
@@ -283,7 +284,7 @@ message SetClassPropertyRequest {
   string actor = 1;
   string component = 2;
   string property = 3;
-  // Class path or name.
+  // Class path or name. Accepts the Blueprint "_C" suffix or not, as SpawnActor does.
   string value = 4;
 }
 
@@ -357,6 +358,7 @@ message SetClassArrayPropertyRequest {
   string actor = 1;
   string component = 2;
   string property = 3;
+  // Class paths or names. Accept the Blueprint "_C" suffix or not, as SpawnActor does.
   repeated string values = 4;
 }
 
@@ -429,6 +431,7 @@ message SetClassSetPropertyRequest {
   string actor = 1;
   string component = 2;
   string property = 3;
+  // Class paths or names. Accept the Blueprint "_C" suffix or not, as SpawnActor does.
   repeated string values = 4;
 }
 

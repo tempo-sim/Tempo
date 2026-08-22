@@ -141,7 +141,7 @@ void UTempoActorLabeler::HandleGetSemanticClasses(const TempoCore::Empty& Reques
 	{
 		if (const int32* SemanticId = SemanticIds.Find(LabelName))
 		{
-			SemanticIdToActorTypes.FindOrAdd(*SemanticId).Add(ActorClass->GetFName());
+			SemanticIdToActorTypes.FindOrAdd(*SemanticId).Add(UTempoCoreUtils::GetClassIdentifierName(ActorClass));
 		}
 	}
 
@@ -208,7 +208,9 @@ void UTempoActorLabeler::HandleGetSemanticClasses(const TempoCore::Empty& Reques
 
 void UTempoActorLabeler::HandleSetActorTypeSemanticId(const TempoSensors::SetActorTypeSemanticIdRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation)
 {
-	const FName ActorType = FName(UTF8_TO_TCHAR(Request.actor_type().c_str()));
+	// Accept the class name with or without the Blueprint "_C" suffix, and key the override on the
+	// same identifier GetAllActorLabels/GetSemanticClasses report back.
+	const FName ActorType = FName(*UTempoCoreUtils::StripBlueprintClassSuffix(FString(UTF8_TO_TCHAR(Request.actor_type().c_str()))));
 	const int32 SemanticId = Request.semantic_id();
 
 	// Validate range
@@ -233,7 +235,7 @@ void UTempoActorLabeler::HandleSetActorTypeSemanticId(const TempoSensors::SetAct
 	// Re-label all existing actors of this type
 	for (TActorIterator<AActor> ActorItr(GetWorld()); ActorItr; ++ActorItr)
 	{
-		if (ActorItr->GetClass()->GetFName() == ActorType)
+		if (UTempoCoreUtils::GetClassIdentifierName(ActorItr->GetClass()) == ActorType)
 		{
 			UnLabelActor(*ActorItr);
 			LabelActor(*ActorItr);
@@ -377,8 +379,8 @@ void UTempoActorLabeler::HandleGetAllActorLabels(const TempoCore::Empty& Request
 		const FInstanceSemanticIdPair& IdPair = LabeledObjectPair.Value;
 
 		auto* ActorInfo = Response.add_actors();
-		ActorInfo->set_actor_name(TCHAR_TO_UTF8(*Actor->GetName()));
-		ActorInfo->set_actor_type(TCHAR_TO_UTF8(*Actor->GetClass()->GetName()));
+		ActorInfo->set_actor_name(TCHAR_TO_UTF8(*UTempoCoreUtils::GetActorIdentifier(Actor)));
+		ActorInfo->set_actor_type(TCHAR_TO_UTF8(*UTempoCoreUtils::GetClassIdentifier(Actor->GetClass())));
 		ActorInfo->set_semantic_id(IdPair.SemanticId);
 		ActorInfo->set_instance_id(IdPair.InstanceId);
 	}
@@ -576,8 +578,13 @@ void UTempoActorLabeler::LabelActor(AActor* Actor)
 		return;
 	}
 
+	// The name this Actor's class goes by over the API. Also the key of both maps below, so that a
+	// SetActorTypeSemanticId override registered under either spelling of a Blueprint class name
+	// applies here, and GetLabeledActorTypes reports the same spelling back.
+	const FName ActorTypeName = UTempoCoreUtils::GetClassIdentifierName(Actor->GetClass());
+
 	// Check for type-level override first (before DataTable lookup)
-	if (const int32* TypeOverride = ActorTypeSemanticIdOverrides.Find(Actor->GetClass()->GetFName()))
+	if (const int32* TypeOverride = ActorTypeSemanticIdOverrides.Find(ActorTypeName))
 	{
 		FInstanceSemanticIdPair ActorIdPair;
 		ActorIdPair.SemanticId = *TypeOverride;
@@ -587,7 +594,7 @@ void UTempoActorLabeler::LabelActor(AActor* Actor)
 			// Track actor class names that have been assigned instance IDs
 			if (GetDefault<UTempoSensorsSettings>()->GetLabelType() == ELabelType::Instance)
 			{
-				LabeledActorClassNames.Add(Actor->GetClass()->GetFName());
+				LabeledActorClassNames.Add(ActorTypeName);
 			}
 		}
 		LabeledObjects.Add(Actor, ActorIdPair);
@@ -617,7 +624,7 @@ void UTempoActorLabeler::LabelActor(AActor* Actor)
 					// Track actor class names that have been assigned instance IDs
 					if (GetDefault<UTempoSensorsSettings>()->GetLabelType() == ELabelType::Instance)
 					{
-						LabeledActorClassNames.Add(Actor->GetClass()->GetFName());
+						LabeledActorClassNames.Add(ActorTypeName);
 					}
 				}
 				ActorIdPair.SemanticId = *SemanticId;
