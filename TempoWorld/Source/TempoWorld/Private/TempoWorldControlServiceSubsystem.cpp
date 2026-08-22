@@ -712,7 +712,7 @@ void UTempoWorldControlServiceSubsystem::GetAllActors(const TempoCore::Empty& Re
 	{
 		TempoWorld::ActorDescriptor* ActorDescriptor = Response.add_actors();
 		ActorDescriptor->set_name(TCHAR_TO_UTF8(*UTempoCoreUtils::GetActorIdentifier(Actor)));
-		ActorDescriptor->set_actor_type(TCHAR_TO_UTF8(*UTempoCoreUtils::GetClassIdentifier(Actor->GetClass())));
+		ActorDescriptor->set_actor_type(TCHAR_TO_UTF8(*Actor->GetClass()->GetName()));
 	}
 
 	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
@@ -742,7 +742,7 @@ void UTempoWorldControlServiceSubsystem::GetAllComponents(const GetAllComponents
 	{
 		TempoWorld::ComponentDescriptor* ComponentDescriptor = Response.add_components();
 		ComponentDescriptor->set_name(TCHAR_TO_UTF8(*Component->GetName()));
-		ComponentDescriptor->set_component_type(TCHAR_TO_UTF8(*UTempoCoreUtils::GetClassIdentifier(Component->GetClass())));
+		ComponentDescriptor->set_component_type(TCHAR_TO_UTF8(*Component->GetClass()->GetName()));
 		ComponentDescriptor->set_actor(TCHAR_TO_UTF8(*UTempoCoreUtils::GetActorIdentifier(Actor)));
 	}
 
@@ -957,11 +957,6 @@ void GetObjectProperties(const UObject* Object, GetPropertiesResponse& Response)
 					if (AActor* Actor = Cast<AActor>(ValueObject.Get()))
 					{
 						*Value = UTempoCoreUtils::GetActorIdentifier(Actor);
-					}
-					else if (const UClass* ValueClass = Cast<UClass>(ValueObject.Get()))
-					{
-						// Class-valued properties report the same name SetClassProperty accepts.
-						*Value = UTempoCoreUtils::GetClassIdentifier(ValueClass);
 					}
 					else
 					{

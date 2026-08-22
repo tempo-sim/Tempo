@@ -142,14 +142,12 @@ protected:
 	UPROPERTY()
 	TMap<const UObject*, FInstanceSemanticIdPair> LabeledObjects;
 
-	// Set of actor class names that have been assigned unique instance IDs.
-	// Keyed by UTempoCoreUtils::GetClassIdentifierName, i.e. without the Blueprint "_C" suffix.
+	// Set of actor class names that have been assigned unique instance IDs
 	UPROPERTY()
 	TSet<FName> LabeledActorClassNames;
 
-	// Runtime overrides for actor types (class name -> semantic ID)
-	// Takes precedence over DataTable definitions.
-	// Keyed by UTempoCoreUtils::GetClassIdentifierName, i.e. without the Blueprint "_C" suffix.
+	// Runtime overrides for actor types (real UClass name -> semantic ID)
+	// Takes precedence over DataTable definitions
 	UPROPERTY()
 	TMap<FName, int32> ActorTypeSemanticIdOverrides;
 

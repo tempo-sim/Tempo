@@ -18,6 +18,7 @@ public class TempoCore : TempoModuleRules
 			new string[]
 			{
 				// Unreal
+				"AssetRegistry",
 				"Core",
 				"DeveloperSettings",
 				// Tempo
@@ -29,7 +30,6 @@ public class TempoCore : TempoModuleRules
 			new string[]
 			{
 				// Unreal
-				"AssetRegistry",
 				"ChaosVehicles",
 				"CoreUObject",
 				"Engine",

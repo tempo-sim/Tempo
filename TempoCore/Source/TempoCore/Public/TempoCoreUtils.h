@@ -50,23 +50,12 @@ public:
 	// a no-op in cooked builds, which have no labels (GetActorNameOrLabel() is always GetName()).
 	static FString GetActorIdentifier(const AActor* Actor);
 
-	// Returns the name Tempo's API uses to refer to a class, both when reporting a class to a
-	// client and when a client names one back to us.
+	// Removes a trailing Blueprint "_C" from a class name, if present.
 	//
-	// Blueprint-generated classes are named "<BlueprintName>_C" (e.g. "BP_Foo_C"), which is an
-	// implementation detail clients shouldn't have to know about. This strips that suffix, so the
-	// class of a "BP_Foo" Blueprint is reported as "BP_Foo" -- consistent with GetActorIdentifier,
-	// which likewise reports actor names without it. Native class names are returned unchanged.
-	//
-	// This is the outbound half of the convention; GetSubClassWithName (TempoWorldUtils.h) is the
-	// inbound half, and accepts either spelling.
-	static FString GetClassIdentifier(const UClass* Class);
-
-	// GetClassIdentifier as an FName, for use as a map key.
-	static FName GetClassIdentifierName(const UClass* Class);
-
-	// Removes a trailing Blueprint "_C" from a class name, if present. Prefer GetClassIdentifier
-	// when you have the UClass; this is for names that arrive as bare strings (e.g. over an RPC).
+	// Class names we report to clients are always the real UClass name, "_C" and all -- renaming
+	// a class on the way out would just be lying about what it is. This exists for the other
+	// direction: GetSubClassWithName (TempoClassUtils.h) uses it to also accept the name a user
+	// would read off a Blueprint asset ("BP_Foo") for the class it generates ("BP_Foo_C").
 	static FString StripBlueprintClassSuffix(const FString& ClassName);
 
 	template <typename BaseClass>

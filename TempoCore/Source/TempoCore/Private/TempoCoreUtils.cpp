@@ -2,7 +2,6 @@
 
 #include "TempoCoreUtils.h"
 
-#include "Engine/BlueprintGeneratedClass.h"
 #include "GameFramework/Actor.h"
 #include "PhysicsEngine/BodySetup.h"
 #include "PhysicsEngine/PhysicsAsset.h"
@@ -94,26 +93,6 @@ FString UTempoCoreUtils::GetActorIdentifier(const AActor* Actor)
 	(void)Actor->GetActorLabel();
 #endif
 	return Actor->GetActorNameOrLabel();
-}
-
-FString UTempoCoreUtils::GetClassIdentifier(const UClass* Class)
-{
-	if (!Class)
-	{
-		return FString();
-	}
-
-	const FString ClassName = Class->GetName();
-	// Only Blueprint-generated classes carry the "_C" suffix. Testing the class type rather than
-	// just the string leaves a native class whose name happens to end in "_C" alone. Note we can't
-	// use UClass::ClassGeneratedBy here: it is only populated in the editor. (UClass::IsA is
-	// private -- calling IsA on a class is usually a mistake -- hence Cast.)
-	return Cast<UBlueprintGeneratedClass>(Class) ? StripBlueprintClassSuffix(ClassName) : ClassName;
-}
-
-FName UTempoCoreUtils::GetClassIdentifierName(const UClass* Class)
-{
-	return FName(*GetClassIdentifier(Class));
 }
 
 FString UTempoCoreUtils::StripBlueprintClassSuffix(const FString& ClassName)

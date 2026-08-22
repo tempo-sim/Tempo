@@ -71,8 +71,8 @@ def test_spawn_query_move_destroy(sim_server):
 
 
 def test_spawn_accepts_either_blueprint_spelling(sim_server):
-    """Blueprint classes are named "<Name>_C" internally, so a client may reasonably name one
-    either way. Both spellings must resolve, preferring an exact match.
+    """A Blueprint asset reads as "BP_Foo" in the editor while the class it generates is "BP_Foo_C",
+    so SpawnActor accepts either, preferring an exact match on the real class name.
 
     Exercised with a native class: "StaticMeshActor" is the exact match, and "StaticMeshActor_C"
     only resolves via the de-suffixing fallback.
@@ -98,17 +98,19 @@ def test_unknown_actor_type_is_not_found(sim_server):
     assert excinfo.value.code() == grpc.StatusCode.NOT_FOUND
 
 
-def test_reported_class_names_omit_blueprint_suffix(sim_server):
-    """Class names we report must be in the form SpawnActor/AddComponent accept, so a client can
-    feed a descriptor straight back in without knowing about Unreal's generated "_C" suffix."""
-    actors = tw.get_all_actors().actors
-    for a in actors:
-        assert not a.actor_type.endswith("_C"), f"actor {a.name} reported class {a.actor_type}"
-
-    # Same for component classes. Capped so the assertion stays cheap on a large map.
-    for a in actors[:10]:
-        for c in tw.get_all_components(actor=a.name).components:
-            assert not c.component_type.endswith("_C"), f"component {c.name} reported class {c.component_type}"
+def test_reported_actor_type_round_trips_into_spawn(sim_server):
+    """Reported class names are the real UClass names, so a client can feed a descriptor's
+    actor_type straight back into spawn_actor."""
+    first = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=_transform(0.0, 0.0, 20.0))
+    names = [first.name]
+    try:
+        reported = next(a.actor_type for a in tw.get_all_actors().actors if a.name == first.name)
+        again = tw.spawn_actor(actor_type=reported, transform=_transform(0.0, 0.0, 25.0))
+        assert again.name, f"spawn_actor({reported!r}) returned an empty actor name"
+        names.append(again.name)
+    finally:
+        for name in names:
+            tw.destroy_actor(actor=name)
 
 
 def test_negative_y_round_trips_handedness(sim_server):

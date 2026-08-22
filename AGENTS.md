@@ -145,10 +145,10 @@ rclcpp (TempoROS) from GitHub releases (`ttp_manifest.json` per dep). Not commit
 - **Actor identity over RPC**: use `UTempoCoreUtils::GetActorIdentifier`, *not*
   `GetActorNameOrLabel` (editor label race adds/drops `_C`). See `actor_identifier_rpc_naming`
   memory.
-- **Class identity over RPC**: report class names with `UTempoCoreUtils::GetClassIdentifier`
-  (strips the Blueprint `_C`, matching the actor-name convention), and resolve client-supplied
-  names with `GetSubClassWithName` (accepts either spelling, preferring an exact match). Never
-  send a raw `GetClass()->GetName()` to a client.
+- **Class identity over RPC**: report the real `GetClass()->GetName()` (Blueprint `_C` and all --
+  don't rename a class on the way out), and resolve every client-supplied class name through
+  `GetSubClassWithName` (`TempoClassUtils.h`), which accepts `BP_Foo` or `BP_Foo_C` and prefers an
+  exact match. Never match a class name by hand.
 - **Config**: `UTempoCoreSettings` (`UDeveloperSettings`), stored under `Config/` with
   command-line overrides. Plugin-owned config (incl. CoreRedirects) belongs in the **plugin's**
   Config, not the project's (`plugin_config_scope` memory).
