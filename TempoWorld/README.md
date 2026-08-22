@@ -5,10 +5,13 @@
 Unreal uses centimeters, degrees, and a left-handed coordinate system natively. `TempoWorld` automatically converts to and from this convention to meters, radians, and a right-handed coordinate system in all of its API calls, with one notable exception (see note at the bottom of [Getting and Setting Properties](#getting-and-setting-properties)).
 
 ## Actor and Component Names
-`TempoWorld` uses the names of Actors and Components to refer to these entities. The name of an Actor is always the result of `AActor::GetActorLabelOrName`, and the name of a Component is always the result of `UActorComponent::GetName`. The resulting behavior is:
+`TempoWorld` uses the names of Actors and Components to refer to these entities. The name of an Actor is always the result of `AActor::GetActorNameOrLabel`, and the name of a Component is always the result of `UActorComponent::GetName`. The resulting behavior is:
 - In Unreal Editor, Actor names match the labels in the World outliner. When Actors are spawned manually or otherwise they are automatically given a unique label. However, Unreal Editor will not stop you from manually assigning the same label to multiple Actors. In this case, the `TempoWorld` API will act on the first matching Actor it finds.
 - In the packaged binary, Actors are assigned a unique name that is **not** the same as the label in the Editor. That means you **cannot** rely on hard-coded Actor names from the Editor in your client code. You should use the API to gather the Actors and Components and find the name of the Actor you need from the responses.
 Name matching via `TempoWorld`'s APIs is **not** case sensitive*. 
+
+## Class Names
+`TempoWorld` refers to Unreal Classes by name too, in `spawn_actor`, `add_component`, and the Class-valued property setters. The name of a Class is always the result of `UClass::GetName`, which for a Blueprint Class includes Unreal's generated `_C` suffix (a `BP_MyActor` Blueprint generates a Class named `BP_MyActor_C`). That is the name `TempoWorld` reports in `actor_type`, `component_type`, and Class property values, so any of those can be passed straight back in. When you name a Class yourself you may use either form: `BP_MyActor` and `BP_MyActor_C` both resolve.
 
 ## World State
 TempoWorld supports querying the state of Actors in the World. This includes RPCs to get (right now) or stream (continuously) the state of Actors, where the state includes the name, transform, 6-DoF velocity (linear m/s, angular rad/s), 3D bounds, and the timestamp when the state was captured. For example:
@@ -40,14 +43,14 @@ for overlap_event in tw.stream_overlap_events(actor="MyActor"):
 TempoWorld lets you control the state of the simulated world.
 
 ### Spawning or Destroying Actors
-To spawn an Actor you must specify its `type` (Unreal Class name). This can be any C++ or Blueprint class in the project. You may also specify a transform and, optionally, an other actor to which that transform is relative. Lastly, you can specify that the spawn should be "deferred", meaning the Actor will be created but left in an invisible, unfinished state where you can set its properties before finishing the spawn. For example:
+To spawn an Actor you must specify its `actor_type` (Unreal Class name, see [Class Names](#class-names)). This can be any C++ or Blueprint class in the project. You may also specify a transform and, optionally, an other actor to which that transform is relative. Lastly, you can specify that the spawn should be "deferred", meaning the Actor will be created but left in an invisible, unfinished state where you can set its properties before finishing the spawn. For example:
 ```
 import tempo_sim.tempo_world as tw
 import tempo_sim.TempoCore.Geometry_pb2 as Geometry
 
 t = Geometry.transform()
 t.location.x = 1
-spawn_response = tw.spawn_actor(type="MyCPPOrBPActorClass", deferred=True, transform=t, relative_to_actor="SomeOtherActor")
+spawn_response = tw.spawn_actor(actor_type="MyCPPOrBPActorClass", deferred=True, transform=t, relative_to_actor="SomeOtherActor")
 # The Actor exists but is invisible to all others - this is your chance to supply any custom properties
 finish_spawn_response = tw.finish_spawning_actor(actor=spawn_response.name)
 ```
@@ -67,7 +70,7 @@ import tempo_sim.tempo_world as tw
 import tempo_sim.TempoCore.Geometry_pb2 as Geometry
 
 t = Geometry.transform()
-tw.add_component(type="MyCPPOrBPComponentClass", actor="OwnerActor", name="OptionalCustomName", parent="OptionalParentComponent", transform=t, socket="OptionalSocket")
+tw.add_component(component_type="MyCPPOrBPComponentClass", actor="OwnerActor", name="OptionalCustomName", parent="OptionalParentComponent", transform=t, socket="OptionalSocket")
 tw.destroy_component(actor="OwnerActor", component="MyComponent")
 ```
 
