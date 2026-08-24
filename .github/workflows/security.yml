@@ -1,0 +1,292 @@
+name: Security Checks
+permissions:
+  contents: read           # needed by actions/checkout
+  actions: read            # lets the action query the workflow run
+  security-events: write   # needed to upload SARIF
+  pull-requests: read      # needed by email-validation to access PR info via GraphQL
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+  schedule:
+    - cron: '0 4 * * 1'   # 04:00 UTC, Monday
+
+concurrency:
+  # Cancel only within same event type to prevent duplicate pushes/PR updates
+  # Push and PR runs can both complete without cancelling each other
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  email:
+    name: "Security Checks: Email Validation"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - uses: serve-robotics/actions/security/email-validation@2c3955380ab017a1e1b2a684f415a0ce34427476  # v8.0
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+  semgrep:
+    name: "Security Checks: Semgrep Scan"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - uses: serve-robotics/actions/security/semgrep@2c3955380ab017a1e1b2a684f415a0ce34427476  # v8.0
+
+  trivy:
+    name: "Security Checks: Trivy Scan"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - name: Write Trivy config
+        run: |
+          cat > trivy.yaml << 'EOF'
+          scan:
+            skip-files:
+              # Kustomize strategic-merge patches are fragments — they have no
+              # securityContext, resources, or capabilities; those live in the base
+              # manifest. Scanning a patch standalone produces false-positive KSV
+              # findings (KSV-0001/0003/0004/0011/0012/0014/0015/0016/0018/0020/
+              # 0021/0030/0104/0106/0118 …). The rendered result is the right target.
+              #
+              - "/**/*-patch.yaml"
+              - "/**/*.patch.yaml"
+          EOF
+      - uses: serve-robotics/actions/security/trivy@2c3955380ab017a1e1b2a684f415a0ce34427476  # v8.0
+
+  checkov:
+    name: "Security Checks: Checkov Scan"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - uses: serve-robotics/actions/security/checkov@2c3955380ab017a1e1b2a684f415a0ce34427476  # v8.0
+
+  detect-languages:
+    name: Detect changed languages (for CodeQL)
+    runs-on: ubuntu-latest
+    outputs:
+      languages: ${{ steps.set-matrix.outputs.languages }}
+    steps:
+      # Checkout is needed for paths-filter (PR diff) AND for the full-scan
+      # presence check (scanning the working tree for language files).
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+
+      - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
+        if: github.event_name == 'pull_request'
+        id: filter
+        with:
+          filters: |
+            c-cpp:
+              - '**/*.c'
+              - '**/*.cc'
+              - '**/*.cpp'
+              - '**/*.cxx'
+              - '**/*.h'
+              - '**/*.hpp'
+              - '**/CMakeLists.txt'
+              - '**/BUILD'
+              - '**/BUILD.bazel'
+            go:
+              - '**/*.go'
+              - '**/go.mod'
+              - '**/go.sum'
+            java-kotlin:
+              - '**/*.java'
+              - '**/*.kt'
+              - '**/*.kts'
+              - '**/pom.xml'
+              - '**/build.gradle'
+              - '**/build.gradle.kts'
+              - '**/settings.gradle'
+              - '**/settings.gradle.kts'
+            javascript-typescript:
+              - '**/*.js'
+              - '**/*.jsx'
+              - '**/*.ts'
+              - '**/*.tsx'
+              - '**/*.mjs'
+              - '**/*.cjs'
+              - '**/package.json'
+              - '**/package-lock.json'
+              - '**/yarn.lock'
+              - '**/pnpm-lock.yaml'
+            python:
+              - '**/*.py'
+              - '**/pyproject.toml'
+              - '**/requirements*.txt'
+              - '**/Pipfile*'
+              - '**/poetry.lock'
+            ruby:
+              - '**/*.rb'
+              - '**/*.erb'
+              - '**/Gemfile'
+              - '**/Gemfile.lock'
+              - '**/*.gemspec'
+              - '**/Rakefile'
+            rust:
+              - '**/*.rs'
+              - '**/Cargo.toml'
+              - '**/Cargo.lock'
+            actions:
+              - '.github/workflows/**'
+              - '.github/actions/**'
+            self:
+              - '.github/workflows/security*.yml'
+
+      - id: set-matrix
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          echo "::group::CodeQL language detection"
+          echo "🚦 Triggering event: ${EVENT_NAME}"
+
+          # Helper: is a language actually present anywhere in the repo?
+          # Used on full scans so we don't try to build/analyze a language whose
+          # source doesn't exist (which would fail the build, e.g. java-kotlin, ruby).
+          present() {
+            # $@ = list of git pathspecs; returns 0 if any tracked file matches.
+            local match
+            match=$(git ls-files -- "$@" | head -n1)
+            [[ -n "$match" ]]
+          }
+
+          if [[ "${EVENT_NAME}" != "pull_request" || "${{ steps.filter.outputs.self }}" == "true" ]]; then
+            if [[ "${EVENT_NAME}" != "pull_request" ]]; then
+              echo "🔭 Scan scope: FULL — non-PR event (${EVENT_NAME}); scanning all languages PRESENT in the repo."
+            else
+              echo "🔭 Scan scope: FULL — workflow file changed in this PR; scanning all languages present in the repo."
+            fi
+
+            langs=()
+            present '*.c' '*.cc' '*.cpp' '*.cxx' '*.h' '*.hpp' '**/CMakeLists.txt' '**/BUILD' '**/BUILD.bazel' && langs+=("\"c-cpp\"")
+            present '*.go' '**/go.mod' '**/go.sum' && langs+=("\"go\"")
+            present '*.java' '*.kt' '*.kts' '**/pom.xml' '**/build.gradle' '**/build.gradle.kts' && langs+=("\"java-kotlin\"")
+            present '*.js' '*.jsx' '*.ts' '*.tsx' '*.mjs' '*.cjs' '**/package.json' && langs+=("\"javascript-typescript\"")
+            present '*.py' '**/pyproject.toml' '**/requirements*.txt' '**/Pipfile*' '**/poetry.lock' && langs+=("\"python\"")
+            present '*.rb' '*.erb' '**/Gemfile' '**/Gemfile.lock' '*.gemspec' '**/Rakefile' && langs+=("\"ruby\"")
+            present '*.rs' '**/Cargo.toml' '**/Cargo.lock' && langs+=("\"rust\"")
+            # 'actions' is always present (this very workflow file exists under .github/workflows).
+            present '.github/workflows/*' '.github/actions/*' && langs+=("\"actions\"")
+
+            if [[ ${#langs[@]} -eq 0 ]]; then
+              echo "⚠️ No supported languages found in the repo; CodeQL will be skipped."
+              echo 'languages=[]' >> "$GITHUB_OUTPUT"
+            else
+              joined=$(IFS=,; echo "[${langs[*]}]")
+              human=$(echo "${langs[*]}" | tr -d '"' | tr ' ' ',')
+              echo "🔍 Languages present (will scan): ${human}"
+              echo "languages=${joined}" >> "$GITHUB_OUTPUT"
+            fi
+            echo "::endgroup::"
+            exit 0
+          fi
+
+          echo "🔭 Scan scope: INCREMENTAL — pull_request; scanning only languages whose files changed."
+          langs=()
+          [[ "${{ steps.filter.outputs['c-cpp'] }}" == "true" ]] && langs+=("\"c-cpp\"")
+          [[ "${{ steps.filter.outputs.go }}" == "true" ]] && langs+=("\"go\"")
+          [[ "${{ steps.filter.outputs['java-kotlin'] }}" == "true" ]] && langs+=("\"java-kotlin\"")
+          [[ "${{ steps.filter.outputs['javascript-typescript'] }}" == "true" ]] && langs+=("\"javascript-typescript\"")
+          [[ "${{ steps.filter.outputs.python }}" == "true" ]] && langs+=("\"python\"")
+          [[ "${{ steps.filter.outputs.ruby }}" == "true" ]] && langs+=("\"ruby\"")
+          [[ "${{ steps.filter.outputs.rust }}" == "true" ]] && langs+=("\"rust\"")
+          [[ "${{ steps.filter.outputs.actions }}" == "true" ]] && langs+=("\"actions\"")
+
+          if [[ ${#langs[@]} -eq 0 ]]; then
+            echo "⚠️ Detected changed languages: (none — no relevant source changed; CodeQL will be skipped)"
+            echo 'languages=[]' >> "$GITHUB_OUTPUT"
+          else
+            joined=$(IFS=,; echo "[${langs[*]}]")
+            human=$(echo "${langs[*]}" | tr -d '"' | tr ' ' ',')
+            echo "🔍 Detected changed languages: ${human}"
+            echo "languages=${joined}" >> "$GITHUB_OUTPUT"
+          fi
+          echo "::endgroup::"
+
+  codeql:
+    name: "CodeQL Analyze (matrix)"
+    needs: detect-languages
+    if: needs.detect-languages.outputs.languages != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ${{ fromJSON(needs.detect-languages.outputs.languages) }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+
+      - name: Announce language and build mode
+        shell: bash
+        env:
+          LANGUAGE: ${{ matrix.language }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          # Build mode by language (current CodeQL support):
+          #   autobuild : go   (compiled; build observed)
+          #   none      : c-cpp(chosen), java-kotlin(Bazel repo; no autobuild),
+          #               ruby, rust, python, javascript-typescript, actions
+          # Note: ruby/rust support 'none' ONLY.
+          case "${LANGUAGE}" in
+            go)                      BUILD_MODE="autobuild" ;;
+            java-kotlin)             BUILD_MODE="none (no-build; repo uses Bazel, autobuild unsupported)" ;;
+            c-cpp)                   BUILD_MODE="none (no-build C/C++ analysis)" ;;
+            ruby)                    BUILD_MODE="none (Ruby supports build-mode none only)" ;;
+            rust)                    BUILD_MODE="none (Rust supports build-mode none only)" ;;
+            *)                       BUILD_MODE="none (interpreted / no build required)" ;;
+          esac
+          echo "🚦 Triggering event: ${EVENT_NAME}"
+          echo "🔍 This job will scan language: ${LANGUAGE}"
+          echo "🛠️ Build mode for ${LANGUAGE}: ${BUILD_MODE}"
+
+      - uses: github/codeql-action/init@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
+        with:
+          languages: ${{ matrix.language }}
+          # autobuild only for go; everything else uses none
+          # (java-kotlin uses none because this repo is Bazel-built).
+          build-mode: ${{ matrix.language == 'go' && 'autobuild' || 'none' }}
+
+      # Explicit autobuild step ONLY for go (the only autobuild language).
+      # java-kotlin uses build-mode none because this repo is Bazel-built and
+      # CodeQL autobuild cannot detect a suitable build command.
+      - uses: github/codeql-action/autobuild@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
+        if: matrix.language == 'go'
+
+      - uses: github/codeql-action/analyze@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
+        with:
+          category: "/language:${{ matrix.language }}"
+
+  # Branch protection requires a check named "CodeQL". The advanced-config
+  # setup above fans out into per-language `codeql` matrix jobs (whose count
+  # varies per run), so no single job is named "CodeQL" for GitHub to target.
+  # This job is that stable target: it succeeds only when every language-
+  # specific run succeeded (or the matrix was legitimately skipped because no
+  # supported language was present/changed).
+  codeql-required:
+    name: "Security Checks: CodeQL Scan"
+    needs: [detect-languages, codeql]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check CodeQL matrix result
+        shell: bash
+        env:
+          RESULT: ${{ needs.codeql.result }}
+        run: |
+          echo "CodeQL matrix result: ${RESULT}"
+          if [[ "${RESULT}" == "success" || "${RESULT}" == "skipped" ]]; then
+            echo "✅ All CodeQL language analyses passed (or none were required)."
+            exit 0
+          else
+            echo "❌ One or more CodeQL language analyses failed."
+            exit 1
+          fi
+
