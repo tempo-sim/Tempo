@@ -138,7 +138,11 @@ struct FTrajectoryFollowingConfig
 // In the non-teleport path the steering law adapts to the pawn:
 //   * Wheeled vehicles (Chaos or kinematic) can't strafe, so the target is converted into a
 //     body-frame velocity (trajectory pace + along-track catch-up, plus a yaw rate that turns
-//     the vehicle toward the target) and tracked via VehicleVelocityController.
+//     the vehicle toward the target) and tracked via VehicleVelocityController. Every quantity in
+//     that law lives in the pawn's own frame, including the feedforward, so a leg whose path runs
+//     against the pawn's heading is driven in reverse — heading held, tail leading — rather than
+//     turned around. Which way the pawn travels is latched per leg (see bReversingLeg), because a
+//     trajectory that is held or clamped feeds forward nothing to read a direction from.
 //   * Other pawns use AddMovementInput, which drives translation only, so their heading is
 //     governed by their movement component, not the trajectory's orientation.
 // Only bTeleport reproduces the target rotation exactly.
@@ -186,6 +190,14 @@ public:
 	// arc-length modes; for the time-domain modes it reports the distance implied by the clock.
 	UFUNCTION(BlueprintCallable, Category = "Trajectory")
 	double GetDistanceAlongSpline() const;
+
+	// Body-frame forward speed (cm/s) to command so the pawn tracks its target: the trajectory's own
+	// pace plus a proportional along-track correction, both measured along the pawn's nose (+x), where
+	// bReversing says which end of the pawn leads. The correction may brake the pawn to a stop but
+	// never reverse its direction of travel, so a follower that has overshot holds rather than backing
+	// up, while one that is still short of its target keeps closing. Pure; exposed for testing.
+	static double ComputeBodyForwardSpeed(
+		double FeedforwardBodyCmS, double AlongTrackErrorCm, double PositionGain, bool bReversing);
 
 	// Time to traverse the whole trajectory, in seconds. 0 if there is no spline or speed model.
 	// For ConstantSpeed this is an estimate at the *current* speed, not a commitment: it changes
@@ -252,6 +264,15 @@ private:
 	// advancing entirely and the pawn holds the final pose. Cleared when FollowTrajectory (re)starts
 	// following, which is the only way to drive a clamped trajectory again.
 	bool bReachedTrajectoryEnd = false;
+
+	// Which way the pawn is travelling along the current leg: true once the trajectory is carrying its
+	// target towards the pawn's tail, so following means reversing (heading held) rather than turning
+	// around. Latched rather than recomputed every tick, because the feedforward it is read from
+	// vanishes wherever a trajectory is held at 0 speed or clamped at its end — precisely where a
+	// reverse leg is still creeping its last few cm in, and where re-deriving it would flip the pawn
+	// to "forwards" and strand it short. Reset to forwards when FollowTrajectory (re)starts following;
+	// flips as soon as the trajectory moves the other way (e.g. after SetSpeed changes sign).
+	bool bReversingLeg = false;
 
 	// Distance (cm) travelled along the spline, integrated per tick from CurrentSpeed() for the
 	// arc-length modes. This — not the clock — is what those modes' target pose is sampled at, which

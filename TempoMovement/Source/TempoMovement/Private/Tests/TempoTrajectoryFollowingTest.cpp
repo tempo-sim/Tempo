@@ -611,4 +611,54 @@ bool FTempoTrajectoryEndEventTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+//
+// The wheeled-vehicle command law. Steering a real vehicle needs a movement component and physics,
+// so what is pinned here is the law itself: how the trajectory's pace and the along-track error
+// combine into a body-frame forward speed, and which way that speed points.
+//
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTempoTrajectoryBodySpeedTest,
+	"Tempo.Movement.TrajectoryFollowing.BodySpeed", TempoTrajectoryTestFlags)
+bool FTempoTrajectoryBodySpeedTest::RunTest(const FString& Parameters)
+{
+	constexpr double Gain = 1.0;
+	auto Speed = [](double FeedforwardBodyCmS, double AlongTrackErrorCm, bool bReversing)
+	{
+		return ATrajectoryFollowingController::ComputeBodyForwardSpeed(
+			FeedforwardBodyCmS, AlongTrackErrorCm, Gain, bReversing);
+	};
+	auto Near = [this](const TCHAR* What, double A, double B)
+	{
+		if (!FMath::IsNearlyEqual(A, B, KINDA_SMALL_NUMBER))
+		{
+			AddError(FString::Printf(TEXT("%s: expected %.4f, got %.4f"), What, B, A));
+		}
+	};
+
+	// Driving forwards: the pace, plus catch-up when the target is ahead of the nose.
+	Near(TEXT("Forwards, on pace"), Speed(100.0, 0.0, /*bReversing=*/false), 100.0);
+	Near(TEXT("Forwards, lagging"), Speed(100.0, 50.0, /*bReversing=*/false), 150.0);
+
+	// Overshot while driving forwards: brake to a stop, but never back up to fix it.
+	Near(TEXT("Forwards, overshot"), Speed(100.0, -200.0, /*bReversing=*/false), 0.0);
+	Near(TEXT("Held, overshot"), Speed(0.0, -200.0, /*bReversing=*/false), 0.0);
+
+	// A leg whose path runs against the pawn's heading feeds forward a *negative* body speed, and the
+	// error to a target behind the nose is negative too: the two now agree, where projecting the
+	// feedforward onto the path instead would have them cancel. The pawn backs up at its own pace
+	// plus catch-up, rather than stalling once the target is gain * feedforward behind it.
+	Near(TEXT("Reversing, on pace"), Speed(-100.0, 0.0, /*bReversing=*/true), -100.0);
+	Near(TEXT("Reversing, lagging"), Speed(-100.0, -300.0, /*bReversing=*/true), -400.0);
+
+	// Reversing and overshot: the mirror image — brake, do not pull forwards again.
+	Near(TEXT("Reversing, overshot"), Speed(-100.0, 200.0, /*bReversing=*/true), 0.0);
+
+	// Held at the end of a reverse leg (feedforward gone) but still short of the target: the latched
+	// direction is what keeps it closing. Re-deriving the direction from this zero feedforward would
+	// read "forwards" and clamp the pawn where it stands, stranding it short of the target.
+	Near(TEXT("Reversing, held, still short"), Speed(0.0, -50.0, /*bReversing=*/true), -50.0);
+
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS
