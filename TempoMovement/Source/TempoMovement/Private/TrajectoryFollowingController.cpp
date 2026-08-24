@@ -27,6 +27,11 @@ namespace
 		RichCurve->GetTimeRange(MinTime, MaxTime);
 		return MaxTime;
 	}
+
+	// Feedforward speeds (cm/s) below this are treated as carrying no direction of travel: a held or
+	// clamped trajectory feeds forward zero, and its sign is then only floating-point noise. Matches
+	// the standstill threshold the vehicle velocity controller uses.
+	constexpr double DirectionOfTravelThresholdCmS = 1.0;
 }
 
 ATrajectoryFollowingController::ATrajectoryFollowingController()
@@ -41,6 +46,7 @@ void ATrajectoryFollowingController::FollowTrajectory(ASplineActor* InSpline, AP
 	ElapsedSeconds = 0.0;
 	DistanceAlongSpline = 0.0;
 	bReachedTrajectoryEnd = false;
+	bReversingLeg = false;
 	VehicleVelocityController.Reset();
 	if (InPawn)
 	{
@@ -202,6 +208,13 @@ double ATrajectoryFollowingController::DistanceAtTime(float Time) const
 	}
 }
 
+double ATrajectoryFollowingController::ComputeBodyForwardSpeed(
+	double FeedforwardBodyCmS, double AlongTrackErrorCm, double PositionGain, bool bReversing)
+{
+	const double Corrected = FeedforwardBodyCmS + PositionGain * AlongTrackErrorCm;
+	return bReversing ? FMath::Min(Corrected, 0.0) : FMath::Max(Corrected, 0.0);
+}
+
 void ATrajectoryFollowingController::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
@@ -324,11 +337,6 @@ void ATrajectoryFollowingController::Tick(float DeltaSeconds)
 		? GetTransformAtDistance(DistanceAlongSpline + SpeedThisTick * Lookahead).GetLocation()
 		: GetTransformAtTime(ElapsedSeconds + Lookahead).GetLocation();
 	const FVector FeedforwardVelocity = (AheadLocation - Target.GetLocation()) / Lookahead;
-	// The same feedforward as a signed speed *along the path*, by projecting it onto the path
-	// direction at the target (the target's rotation is the spline tangent). A magnitude would lose
-	// the one thing a reversing trajectory needs: which way along the spline the target is moving.
-	const double FeedforwardAlongPathCmS =
-		FVector::DotProduct(FeedforwardVelocity, Target.GetRotation().GetForwardVector());
 
 	// Deadband: errors smaller than the band produce no corrective input, so the pawn coasts on the
 	// feedforward instead of chasing tiny tracking errors. Zeros the error when within the band.
@@ -346,24 +354,41 @@ void ATrajectoryFollowingController::Tick(float DeltaSeconds)
 
 	if (bIsWheeledVehicle)
 	{
-		const FVector ToTargetLocal = ControlledPawn->GetActorTransform().InverseTransformVectorNoScale(Target.GetLocation() - CurrentLocation);
-		// Which way along the path the trajectory is taking the pawn. A reversing follower keeps its
-		// heading and backs up, so this is the trajectory's direction, not the pawn's.
-		const bool bReversing = FeedforwardAlongPathCmS < 0.0;
+		const FTransform PawnTransform = ControlledPawn->GetActorTransform();
+		const FVector ToTargetLocal = PawnTransform.InverseTransformVectorNoScale(Target.GetLocation() - CurrentLocation);
+		// The trajectory's own velocity as a signed speed along the pawn's *nose*, which is the frame
+		// the along-track error below is measured in and the frame the vehicle is commanded in.
+		// Projecting it onto the path instead mixes frames: where the path runs against the pawn's
+		// heading the two disagree about which way is forward, and the feedforward then subtracts from
+		// the very correction that is trying to follow it (settling |error| = feedforward / gain short).
+		const double FeedforwardBodyCmS = PawnTransform.InverseTransformVectorNoScale(FeedforwardVelocity).X;
+		// Which way the pawn has to travel to follow this leg: backwards whenever the trajectory
+		// carries its target towards the pawn's tail — because the commanded speed is negative, or
+		// because the path itself runs against the pawn's heading. A reversing follower keeps its
+		// heading and backs up rather than turning around.
+		//
+		// Latched, and only updated while the trajectory is actually moving: the feedforward vanishes
+		// wherever a trajectory is held (0 speed) or clamped at its end, and a vanished feedforward
+		// carries no direction. The direction of travel is a property of the leg, not of the instant,
+		// and reading it off a zero would silently reset it to "forwards" exactly where the pawn is
+		// still creeping the last of a reverse leg in.
+		if (FMath::Abs(FeedforwardBodyCmS) > DirectionOfTravelThresholdCmS)
+		{
+			bReversingLeg = FeedforwardBodyCmS < 0.0;
+		}
 
 		// Trajectory pace plus an along-track correction to catch up to / hang back from the target.
-		// The correction may brake the pawn to a stop but not reverse its direction of travel: only a
-		// negative commanded speed does that. Without this a follower that has overshot its target —
-		// the steady state of a held (0 speed) trajectory, and of one clamped at its end — would sit
-		// there commanding reverse, and eventually get it.
+		// The correction may brake the pawn to a stop but not reverse its direction of travel, so a
+		// follower that has *overshot* its target holds where it is rather than backing up to fix it —
+		// which is also what keeps a follower held at 0 speed, or clamped at its end, from creeping.
 		const double AlongTrackError = ApplyDeadband(ToTargetLocal.X, Config.PositionDeadband);
-		const double Corrected = FeedforwardAlongPathCmS + Config.PositionGain * AlongTrackError;
-		const double TargetLinVelCmS = bReversing ? FMath::Min(Corrected, 0.0) : FMath::Max(Corrected, 0.0);
+		const double TargetLinVelCmS = ComputeBodyForwardSpeed(
+			FeedforwardBodyCmS, AlongTrackError, Config.PositionGain, bReversingLeg);
 
 		// Steer toward the target point: heading error in the pawn's frame, measured against whichever
 		// end of the pawn leads. Backing up, the target is *behind*, so measuring it off the nose
 		// would read as a ~180 degree error and command a hard turn instead of a steering correction.
-		const FVector ToTargetAhead = bReversing ? -ToTargetLocal : ToTargetLocal;
+		const FVector ToTargetAhead = bReversingLeg ? -ToTargetLocal : ToTargetLocal;
 		const double HeadingErrorDeg = ApplyDeadband(FMath::RadiansToDegrees(FMath::Atan2(ToTargetAhead.Y, ToTargetAhead.X)), Config.HeadingDeadband);
 		const double TargetYawRateDegS = Config.YawRateGain * HeadingErrorDeg;
 
