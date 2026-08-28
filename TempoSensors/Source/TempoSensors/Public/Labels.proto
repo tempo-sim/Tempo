@@ -36,6 +36,7 @@ message SemanticClassInfo {
   int32 label_id = 2;                     // e.g., 12, 14 (the semantic ID)
   repeated string actor_types = 3;        // Actor types assigned to this class
   repeated string static_mesh_types = 4;  // Static mesh paths assigned to this class
+  repeated string component_tags = 5;     // Component tags assigned to this class
 }
 
 message GetSemanticClassesResponse {

@@ -15,6 +15,11 @@
 
 #include "EngineUtils.h"
 #include "Components/InstancedStaticMeshComponent.h"
+#include "NiagaraComponent.h"
+#include "NiagaraEmitter.h"
+#include "NiagaraEmitterHandle.h"
+#include "NiagaraMeshRendererProperties.h"
+#include "NiagaraSystem.h"
 
 FInstanceIdAllocator::FInstanceIdAllocator(int32 MinIdIn, int32 MaxIdIn)
 	: MinId(MinIdIn), MaxId(MaxIdIn)
@@ -180,6 +185,17 @@ void UTempoActorLabeler::HandleGetSemanticClasses(const TempoCore::Empty& Reques
 		SemanticIdToMeshPaths.FindOrAdd(OverrideSemanticId).Add(MeshPath);
 	}
 
+	// Build reverse mapping: semantic_id -> component tags
+	TMap<int32, TArray<FName>> SemanticIdToComponentTags;
+
+	for (const auto& [ComponentTag, LabelName] : ComponentTagLabels)
+	{
+		if (const int32* SemanticId = SemanticIds.Find(LabelName))
+		{
+			SemanticIdToComponentTags.FindOrAdd(*SemanticId).Add(ComponentTag);
+		}
+	}
+
 	// Iterate DataTable to get all class definitions
 	for (const auto& [LabelName, SemanticId] : SemanticIds)
 	{
@@ -200,6 +216,14 @@ void UTempoActorLabeler::HandleGetSemanticClasses(const TempoCore::Empty& Reques
 			for (const FString& MeshPath : *MeshPaths)
 			{
 				ClassInfo->add_static_mesh_types(TCHAR_TO_UTF8(*MeshPath));
+			}
+		}
+
+		if (TArray<FName>* ComponentTags = SemanticIdToComponentTags.Find(SemanticId))
+		{
+			for (const FName& ComponentTag : *ComponentTags)
+			{
+				ClassInfo->add_component_tags(TCHAR_TO_UTF8(*ComponentTag.ToString()));
 			}
 		}
 	}
@@ -296,6 +320,19 @@ void UTempoActorLabeler::HandleGetAllStaticMeshTypes(const TempoCore::Empty& Req
 				MeshInstanceCounts.FindOrAdd(MeshFullPath) += ISMC->GetInstanceCount();
 			}
 		}
+
+		// 3. Handle the meshes a Niagara mesh renderer instances. The live particle count varies
+		// every frame, so count the components drawing the mesh rather than the particles.
+		TInlineComponentArray<UNiagaraComponent*> NiagaraComponents(Actor);
+		for (UNiagaraComponent* NiagaraComponent : NiagaraComponents)
+		{
+			TArray<FString> MeshPaths;
+			GetComponentStaticMeshPaths(NiagaraComponent, MeshPaths);
+			for (const FString& MeshPath : MeshPaths)
+			{
+				MeshInstanceCounts.FindOrAdd(MeshPath)++;
+			}
+		}
 	}
 
 	// Build response with mesh info
@@ -311,19 +348,7 @@ void UTempoActorLabeler::HandleGetAllStaticMeshTypes(const TempoCore::Empty& Req
 		MeshInfo->set_instance_count(InstanceCount);
 
 		// Determine current semantic ID: check overrides first, then DataTable
-		int32 CurrentSemanticId = -1;
-		if (const int32* OverrideId = StaticMeshTypeSemanticIdOverrides.Find(MeshPath))
-		{
-			CurrentSemanticId = *OverrideId;
-		}
-		else if (const FName* LabelName = StaticMeshLabels.Find(MeshPath))
-		{
-			if (const int32* SemanticId = SemanticIds.Find(*LabelName))
-			{
-				CurrentSemanticId = *SemanticId;
-			}
-		}
-		MeshInfo->set_current_semantic_id(CurrentSemanticId);
+		MeshInfo->set_current_semantic_id(ResolveStaticMeshSemanticId(MeshPath).Get(-1));
 	}
 
 	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
@@ -353,21 +378,20 @@ void UTempoActorLabeler::HandleSetStaticMeshTypeSemanticId(const TempoSensors::S
 		StaticMeshTypeSemanticIdOverrides.Add(MeshPath, SemanticId);
 	}
 
-	// Re-label all components using this mesh
+	// Re-label all components rendering this mesh, Niagara mesh renderers included.
 	for (TActorIterator<AActor> ActorItr(GetWorld()); ActorItr; ++ActorItr)
 	{
-		TInlineComponentArray<UStaticMeshComponent*> MeshComponents(*ActorItr);
-		for (UStaticMeshComponent* MeshComponent : MeshComponents)
+		TInlineComponentArray<UPrimitiveComponent*> PrimitiveComponents(*ActorItr);
+		for (UPrimitiveComponent* PrimitiveComponent : PrimitiveComponents)
 		{
-			if (const UStaticMesh* StaticMesh = MeshComponent->GetStaticMesh())
+			TArray<FString> MeshPaths;
+			GetComponentStaticMeshPaths(PrimitiveComponent, MeshPaths);
+			if (MeshPaths.Contains(MeshPath))
 			{
-				if (StaticMesh->GetPathName() == MeshPath)
+				UnLabelComponent(PrimitiveComponent);
+				if (const FInstanceSemanticIdPair* ActorIdPair = LabeledObjects.Find(*ActorItr))
 				{
-					UnLabelComponent(MeshComponent);
-					if (const FInstanceSemanticIdPair* ActorIdPair = LabeledObjects.Find(*ActorItr))
-					{
-						LabelComponent(MeshComponent, *ActorIdPair);
-					}
+					LabelComponent(PrimitiveComponent, *ActorIdPair);
 				}
 			}
 		}
@@ -544,6 +568,21 @@ void UTempoActorLabeler::BuildLabelMaps()
 			}
 		}
 
+		for (const FName& ComponentTag : Value.ComponentTags)
+		{
+			if (ComponentTag.IsNone())
+			{
+				UE_LOG(LogTempoSensors, Warning, TEXT("Empty component tag associated with label %s"), *Label.ToString());
+				continue;
+			}
+			if (ComponentTagLabels.Contains(ComponentTag))
+			{
+				UE_LOG(LogTempoSensors, Error, TEXT("Component tag %s is associated with more than one label (%s and %s)"), *ComponentTag.ToString(), *ComponentTagLabels[ComponentTag].ToString(), *Label.ToString());
+				continue;
+			}
+			ComponentTagLabels.Add(ComponentTag, Label);
+		}
+
 		const int32 LabelId = Value.Label;
 		if (SemanticIds.Contains(Label))
 		{
@@ -683,67 +722,131 @@ void UTempoActorLabeler::LabelComponent(UActorComponent* Component)
 
 void UTempoActorLabeler::LabelComponent(UPrimitiveComponent* Component, FInstanceSemanticIdPair ActorIdPair)
 {
-	if (UStaticMeshComponent* StaticMeshComponent = Cast<UStaticMeshComponent>(Component))
+	if (const TOptional<int32> ComponentSemanticId = ResolveComponentSemanticId(Component))
 	{
-		if (const UStaticMesh* StaticMesh = StaticMeshComponent->GetStaticMesh())
+		if (LabeledObjects.Contains(Component))
 		{
-			const FString MeshFullPath = StaticMesh->GetPathName();
+			// This component is already labeled.
+			return;
+		}
 
-			// Check for runtime override first (highest priority)
-			if (const int32* OverrideSemanticId = StaticMeshTypeSemanticIdOverrides.Find(MeshFullPath))
+		FInstanceSemanticIdPair IdPair;
+		IdPair.SemanticId = *ComponentSemanticId;
+		if (TOptional<int32> InstanceId = InstanceIdAllocator.Allocate())
+		{
+			IdPair.InstanceId = *InstanceId;
+		}
+
+		// Label using the component's own label rather than the owning Actor's.
+		LabeledObjects.Add(Component, IdPair);
+		AssignId(Component, IdPair);
+		return;
+	}
+
+	// No component label found. Label with its owning Actor's label.
+	LabeledObjects.Add(Component, ActorIdPair);
+	AssignId(Component, ActorIdPair);
+}
+
+TOptional<int32> UTempoActorLabeler::ResolveComponentSemanticId(const UPrimitiveComponent* Component) const
+{
+	// Most specific rule wins. A component tag names one particular component, so it beats the
+	// mesh rules, which name an asset every component sharing that asset is subject to.
+	for (const FName& ComponentTag : Component->ComponentTags)
+	{
+		if (const FName* TagLabel = ComponentTagLabels.Find(ComponentTag))
+		{
+			if (const int32* TagLabelId = SemanticIds.Find(*TagLabel))
 			{
-				FInstanceSemanticIdPair IdPair;
-				if (LabeledObjects.Contains(Component))
-				{
-					// This component is already labeled.
-					return;
-				}
-				if (TOptional<int32> InstanceId = InstanceIdAllocator.Allocate())
-				{
-					IdPair.InstanceId = *InstanceId;
-				}
-				IdPair.SemanticId = *OverrideSemanticId;
-
-				// Label using the runtime override
-				LabeledObjects.Add(Component, IdPair);
-				AssignId(Component, IdPair);
-				return;
+				return *TagLabelId;
 			}
-
-			// Check DataTable static mesh labels (second priority)
-			if (const FName* StaticMeshLabel = StaticMeshLabels.Find(MeshFullPath))
-			{
-				FInstanceSemanticIdPair IdPair;
-				if (LabeledObjects.Contains(Component))
-				{
-					// This component is already labeled.
-					return;
-				}
-				if (TOptional<int32> InstanceId = InstanceIdAllocator.Allocate())
-				{
-					IdPair.InstanceId = *InstanceId;
-				}
-				if (const int32* StaticMeshLabelIdPtr = SemanticIds.Find(*StaticMeshLabel))
-				{
-					IdPair.SemanticId = *StaticMeshLabelIdPtr;
-				}
-				else
-				{
-					UE_LOG(LogTempoSensors, Error, TEXT("Label %s did not have an associated ID"), *StaticMeshLabel->ToString());
-					return;
-				}
-
-				// Label using the explicit static mesh label rather than the owning Actor's label.
-				LabeledObjects.Add(Component, IdPair);
-				AssignId(Component, IdPair);
-				return;
-			}
+			UE_LOG(LogTempoSensors, Error, TEXT("Label %s did not have an associated ID"), *TagLabel->ToString());
 		}
 	}
 
-	// No mesh label found. Label with its owning Actor's label.
-	LabeledObjects.Add(Component, ActorIdPair);
-	AssignId(Component, ActorIdPair);
+	TArray<FString> MeshPaths;
+	GetComponentStaticMeshPaths(Component, MeshPaths);
+	for (const FString& MeshPath : MeshPaths)
+	{
+		if (const TOptional<int32> MeshSemanticId = ResolveStaticMeshSemanticId(MeshPath))
+		{
+			return MeshSemanticId;
+		}
+	}
+
+	return TOptional<int32>();
+}
+
+TOptional<int32> UTempoActorLabeler::ResolveStaticMeshSemanticId(const FString& MeshPath) const
+{
+	// Runtime overrides take precedence over the label table.
+	if (const int32* OverrideSemanticId = StaticMeshTypeSemanticIdOverrides.Find(MeshPath))
+	{
+		return *OverrideSemanticId;
+	}
+
+	if (const FName* StaticMeshLabel = StaticMeshLabels.Find(MeshPath))
+	{
+		if (const int32* StaticMeshLabelId = SemanticIds.Find(*StaticMeshLabel))
+		{
+			return *StaticMeshLabelId;
+		}
+		UE_LOG(LogTempoSensors, Error, TEXT("Label %s did not have an associated ID"), *StaticMeshLabel->ToString());
+	}
+
+	return TOptional<int32>();
+}
+
+void UTempoActorLabeler::GetComponentStaticMeshPaths(const UPrimitiveComponent* Component, TArray<FString>& OutMeshPaths)
+{
+	if (const UStaticMeshComponent* StaticMeshComponent = Cast<UStaticMeshComponent>(Component))
+	{
+		if (const UStaticMesh* StaticMesh = StaticMeshComponent->GetStaticMesh())
+		{
+			OutMeshPaths.Add(StaticMesh->GetPathName());
+		}
+		return;
+	}
+
+	// A Niagara system's mesh renderers instance static meshes that belong to no component of their
+	// own, so gather them from the asset. Every particle the component draws shares one stencil
+	// value (it is one scene proxy), so the first labeled mesh decides the whole component's label.
+	if (const UNiagaraComponent* NiagaraComponent = Cast<UNiagaraComponent>(Component))
+	{
+		const UNiagaraSystem* NiagaraSystem = NiagaraComponent->GetAsset();
+		if (!NiagaraSystem)
+		{
+			return;
+		}
+
+		for (const FNiagaraEmitterHandle& EmitterHandle : NiagaraSystem->GetEmitterHandles())
+		{
+			if (!EmitterHandle.GetIsEnabled())
+			{
+				continue;
+			}
+			const FVersionedNiagaraEmitterData* EmitterData = EmitterHandle.GetEmitterData();
+			if (!EmitterData)
+			{
+				continue;
+			}
+			for (const UNiagaraRendererProperties* RendererProperties : EmitterData->GetRenderers())
+			{
+				const UNiagaraMeshRendererProperties* MeshRenderer = Cast<UNiagaraMeshRendererProperties>(RendererProperties);
+				if (!MeshRenderer)
+				{
+					continue;
+				}
+				for (const FNiagaraMeshRendererMeshProperties& MeshProperties : MeshRenderer->Meshes)
+				{
+					if (MeshProperties.Mesh)
+					{
+						OutMeshPaths.AddUnique(MeshProperties.Mesh->GetPathName());
+					}
+				}
+			}
+		}
+	}
 }
 
 void UTempoActorLabeler::UnLabelAllActors()

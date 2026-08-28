@@ -107,6 +107,16 @@ protected:
 
 	void LabelComponent(UPrimitiveComponent* Component, FInstanceSemanticIdPair ActorIdPair);
 
+	// Resolves the label a Component earns in its own right, independent of its owning Actor.
+	// Unset means the Component has no label of its own and should inherit its Actor's.
+	TOptional<int32> ResolveComponentSemanticId(const UPrimitiveComponent* Component) const;
+
+	// Resolves the label a static mesh asset path earns, honoring runtime overrides over the label table.
+	TOptional<int32> ResolveStaticMeshSemanticId(const FString& MeshPath) const;
+
+	// The static mesh assets a Component renders: its own mesh, or the meshes a Niagara system instances.
+	static void GetComponentStaticMeshPaths(const UPrimitiveComponent* Component, TArray<FString>& OutMeshPaths);
+
 	void UnLabelAllActors();
 
 	void UnLabelActor(AActor* Actor);
@@ -129,6 +139,9 @@ protected:
 
 	UPROPERTY(VisibleAnywhere)
 	TMap<FString, FName> StaticMeshLabels;
+
+	UPROPERTY(VisibleAnywhere)
+	TMap<FName, FName> ComponentTagLabels;
 
 	UPROPERTY(VisibleAnywhere)
 	TMap<FName, int32> SemanticIds;
