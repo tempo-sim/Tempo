@@ -30,6 +30,10 @@
 			"Enabled": true
 		},
 		{
+			"Name": "Niagara",
+			"Enabled": true
+		},
+		{
 			"Name": "NVCodecs",
 			"Enabled": true,
 			"PlatformAllowList": [ "Win64", "Linux" ]

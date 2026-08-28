@@ -38,6 +38,8 @@ public class TempoSensors : TempoModuleRules
 				"RHI",
 				"Slate",
 				"SlateCore",
+				// Niagara mesh renderers instance static meshes the labeler resolves labels from.
+				"Niagara",
 				// AVCodecs (H.264 video encoder for VideoFrame measurements). Vendor backends
 				// (NVENC, VTCodecs, AMF, WMF) are loaded via TempoSensors.uplugin's plugin list.
 				"AVCodecsCore",
