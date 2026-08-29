@@ -7,6 +7,7 @@
 #include "TempoInstancedStaticMeshComponent.h"
 #include "TempoSensors/Labels.grpc.pb.h"
 
+#include "TempoSensorsConstants.h"
 #include "TempoSensorsSettings.h"
 
 #include "TempoClassUtils.h"
@@ -584,6 +585,14 @@ void UTempoActorLabeler::BuildLabelMaps()
 		}
 
 		const int32 LabelId = Value.Label;
+		if (LabelId < 0 || LabelId > GTempoCamera_Max_Label)
+		{
+			// The camera stores the label in the exponent field of the tile atlas's fp32 alpha,
+			// biased by +1. An ID outside 0..GTempoCamera_Max_Label pushes that field to 0 or 255,
+			// making the alpha subnormal or Inf/NaN. Either way the GPU destroys it and the pixel
+			// decodes to label 0 at MaxDepth, so the depth is lost as silently as the label.
+			UE_LOG(LogTempoSensors, Error, TEXT("Label name %s has ID %d, outside the encodable range 0-%d. Label and depth will both be corrupted wherever this label is visible."), *Label.ToString(), LabelId, GTempoCamera_Max_Label);
+		}
 		if (SemanticIds.Contains(Label))
 		{
 			UE_LOG(LogTempoSensors, Error, TEXT("Label name %s is associated with more than one label ID (%d and %d)"), *Label.ToString(), SemanticIds[Label], LabelId);
