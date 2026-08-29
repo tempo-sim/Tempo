@@ -1094,8 +1094,9 @@ void UTempoCamera::RenderCapture()
 			}
 		}
 
-		// Switch the distortion material's label encoding: bit-packed (asuint(label) << 24) for
-		// the HDR atlas path, normalized (label / 255) for direct-to-LDR fast path so the byte
+		// Switch the distortion material's label encoding: bit-packed (label + 1 in the fp32
+		// alpha's exponent field, depth in the sign bit + mantissa -- see TempoSensorsConstants.h)
+		// for the HDR atlas path, normalized (label / 255) for direct-to-LDR fast path so the byte
 		// survives RGBA8 quantization.
 		if (Tile.PostProcessMaterialInstance)
 		{
