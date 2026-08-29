@@ -9,6 +9,8 @@
 #include "TempoWorldUtils.h"
 
 #include "EngineUtils.h"
+#include "Engine/LatentActionManager.h"
+#include "Misc/ScopeExit.h"
 #if WITH_EDITOR
 #include "LevelEditor.h"
 #endif
@@ -72,6 +74,11 @@ using SetAssetSetPropertyRequest = TempoWorld::SetAssetSetPropertyRequest;
 using SetActorSetPropertyRequest = TempoWorld::SetActorSetPropertyRequest;
 using SetComponentSetPropertyRequest = TempoWorld::SetComponentSetPropertyRequest;
 using CallFunctionRequest = TempoWorld::CallFunctionRequest;
+using FunctionArg = TempoWorld::FunctionArg;
+// TempoWorld::Value is aliased as PropertyValue: plenty of locals in this file are named
+// Value, and a bare `Value` type alias would be shadowed by them.
+using PropertyValue = TempoWorld::Value;
+using SetPropertyRequest = TempoWorld::SetPropertyRequest;
 using SetPropertyOp = TempoWorld::SetPropertyOp;
 using SetPropertyResult = TempoWorld::SetPropertyResult;
 using SetPropertiesRequest = TempoWorld::SetPropertiesRequest;
@@ -162,6 +169,7 @@ void UTempoWorldControlServiceSubsystem::RegisterServices(FTempoServer& Server)
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetActorSetProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetActorSetPropertyRequest>),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetComponentSetProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetComponentSetPropertyRequest>),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetProperties, &UTempoWorldControlServiceSubsystem::SetProperties),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestSetProperty, &UTempoWorldControlServiceSubsystem::SetPropertyValue),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestCallFunction, &UTempoWorldControlServiceSubsystem::CallObjectFunction)
 	);
 }
@@ -804,9 +812,10 @@ void GetObjectProperties(const UObject* Object, GetPropertiesResponse& Response)
 			Type = TEXT("bool");
 			if (Value)
 			{
-				bool ValueBool;
-				BoolProperty->GetValue_InContainer(Container, &ValueBool);
-				*Value = ValueBool ? TEXT("true") : TEXT("false");
+				// Read through the property rather than with GetValue_InContainer, which raw-copies
+				// the property's bytes. A bitfield bool (uint8 bFoo:1) shares its byte with its
+				// neighbours, so a raw copy reports true whenever any of them is set.
+				*Value = BoolProperty->GetPropertyValue_InContainer(Container) ? TEXT("true") : TEXT("false");
 			}
 		}
 		else if (const FIntProperty* IntProperty = CastField<FIntProperty>(Property))
@@ -1271,10 +1280,9 @@ FString SplitPropertyName(FString& PropertyName)
 	return FirstPropertyName;
 }
 
-template <typename RequestType>
-grpc::Status GetPropertyForRequest(const UObject* Object, const RequestType& Request, FProperty*& Property, FString& InnerPropertyName)
+grpc::Status GetPropertyByName(const UObject* Object, const FString& FullPropertyName, FProperty*& Property, FString& InnerPropertyName)
 {
-	FString PropertyName(UTF8_TO_TCHAR(Request.property().c_str()));
+	FString PropertyName = FullPropertyName;
 
 	if (PropertyName.IsEmpty())
 	{
@@ -1554,286 +1562,79 @@ grpc::Status SetSinglePropertyInContainer(void* Container, FProperty* Property, 
 	return SetSinglePropertyValue(ValuePtr, TypedProperty, Value);
 }
 
-template <typename PropertyType, typename RequestType, typename ValueType>
-grpc::Status SetSinglePropertyImpl(const UWorld* World, const RequestType& Request, const ValueType& Value)
+// A resolved write destination: one property (with any nested inner path) inside a container.
+// Object is the owning UObject when writing to an actor or component, and null when writing into
+// a UFunction's parameter frame, which has no owner to notify or invalidate.
+struct FPropertyTarget
 {
 	UObject* Object = nullptr;
-	const grpc::Status GetObjectStatus = GetObjectForRequest(World, Request, Object);
-	if (!GetObjectStatus.ok())
-	{
-		return GetObjectStatus;
-	}
-
-	const FString PropertyName(UTF8_TO_TCHAR(Request.property().c_str()));
-	if (PropertyName.IsEmpty())
-	{
-		return grpc::Status(grpc::FAILED_PRECONDITION, "property must be specified in SetProperty request");
-	}
-
-	FString InnerPropertyName;
+	void* Container = nullptr;
 	FProperty* Property = nullptr;
-	const grpc::Status GetPropertyStatus = GetPropertyForRequest(Object, Request, Property, InnerPropertyName);
-	if (!GetPropertyStatus.ok())
+	FString InnerPropertyName;
+};
+
+// Fires PreEditChange/PostEditChangeProperty around an edit, but only for edits to a real UObject
+// in an editor world. Parameter-frame writes have no owner, so they notify nothing.
+struct FScopedPropertyEdit
+{
+	FScopedPropertyEdit(const UWorld* InWorld, const FPropertyTarget& InTarget)
+		: World(InWorld), Target(InTarget)
 	{
-		return GetPropertyStatus;
+#if WITH_EDITOR
+		if (Target.Object && World->WorldType == EWorldType::Editor)
+		{
+			Target.Object->PreEditChange(Target.Property);
+		}
+#endif
 	}
 
-#if WITH_EDITOR
-	if (World->WorldType == EWorldType::Editor)
+	~FScopedPropertyEdit()
 	{
-		Object->PreEditChange(Property);
-	}
-#endif
-	const grpc::Status SetStatus = SetSinglePropertyInContainer<PropertyType>(Object, Property, InnerPropertyName, Value);
 #if WITH_EDITOR
-	if (World->WorldType == EWorldType::Editor)
-	{
-		FPropertyChangedEvent Event(Property);
-		Object->PostEditChangeProperty(Event);
-	}
+		if (Target.Object && World->WorldType == EWorldType::Editor)
+		{
+			FPropertyChangedEvent Event(Target.Property);
+			Target.Object->PostEditChangeProperty(Event);
+		}
 #endif
+	}
+
+	const UWorld* World;
+	const FPropertyTarget& Target;
+};
+
+template <typename PropertyType, typename ValueType>
+grpc::Status SetSingleOnTarget(const UWorld* World, const FPropertyTarget& Target, const ValueType& Value)
+{
+	grpc::Status SetStatus = grpc::Status_OK;
+	{
+		FScopedPropertyEdit EditScope(World, Target);
+		SetStatus = SetSinglePropertyInContainer<PropertyType>(Target.Container, Target.Property, Target.InnerPropertyName, Value);
+	}
+
 	if (!SetStatus.ok())
 	{
 		return SetStatus;
 	}
 
-	MarkRenderStateDirty(Object);
+	MarkRenderStateDirty(Target.Object);
 
 	return grpc::Status_OK;
-}
-
-template <typename PropertyType, typename RequestType, typename ValueType>
-grpc::Status SetArrayPropertyImpl(const UWorld* World, const RequestType& Request, const TArray<ValueType>& Values)
-{
-	UObject* Object = nullptr;
-	const grpc::Status GetObjectStatus = GetObjectForRequest(World, Request, Object);
-	if (!GetObjectStatus.ok())
-	{
-		return GetObjectStatus;
-	}
-
-	FString InnerPropertyName;
-	FProperty* Property = nullptr;
-	const grpc::Status GetPropertyStatus = GetPropertyForRequest(Object, Request, Property, InnerPropertyName);
-	if (!GetPropertyStatus.ok())
-	{
-		return GetPropertyStatus;
-	}
-
-	const FArrayProperty* ArrayProperty = CastField<FArrayProperty>(Property);
-	if (!ArrayProperty)
-	{
-		const FString ErrorMsg = FString::Printf(TEXT("Property '%s' has type '%s' but an array property was expected"), *Property->GetName(), *Property->GetCPPType());
-		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
-	}
-
-	FScriptArrayHelper ArrayHelper{ ArrayProperty, Property->ContainerPtrToValuePtr<void>(Object) };
-
-	PropertyType* InnerProperty = CastField<PropertyType>(ArrayProperty->Inner);
-	if (!InnerProperty)
-	{
-		const FString ErrorMsg = FString::Printf(TEXT("Array property '%s' has element type '%s' which does not match the requested type"), *Property->GetName(), *ArrayProperty->Inner->GetCPPType());
-		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
-	}
-
-#if WITH_EDITOR
-	if (World->WorldType == EWorldType::Editor)
-	{
-		Object->PreEditChange(Property);
-	}
-#endif
-	ArrayHelper.EmptyValues();
-	ArrayHelper.InsertValues(0, Values.Num());
-	for (int32 I = 0; I < Values.Num(); ++I)
-	{
-		SetSinglePropertyInContainer<PropertyType, ValueType>(ArrayHelper.GetRawPtr(I), InnerProperty, InnerPropertyName, Values[I]);
-	}
-#if WITH_EDITOR
-	if (World->WorldType == EWorldType::Editor)
-	{
-		FPropertyChangedEvent Event(Property);
-		Object->PostEditChangeProperty(Event);
-	}
-#endif
-
-	MarkRenderStateDirty(Object);
-
-	return grpc::Status_OK;
-}
-
-template <typename PropertyType, typename RequestType, typename ValueType>
-grpc::Status SetSetPropertyImpl(const UWorld* World, const RequestType& Request, const TArray<ValueType>& Values)
-{
-	UObject* Object = nullptr;
-	const grpc::Status GetObjectStatus = GetObjectForRequest(World, Request, Object);
-	if (!GetObjectStatus.ok())
-	{
-		return GetObjectStatus;
-	}
-
-	FString InnerPropertyName;
-	FProperty* Property = nullptr;
-	const grpc::Status GetPropertyStatus = GetPropertyForRequest(Object, Request, Property, InnerPropertyName);
-	if (!GetPropertyStatus.ok())
-	{
-		return GetPropertyStatus;
-	}
-
-	const FSetProperty* SetProperty = CastField<FSetProperty>(Property);
-	if (!SetProperty)
-	{
-		const FString ErrorMsg = FString::Printf(TEXT("Property '%s' has type '%s' but a set property was expected"), *Property->GetName(), *Property->GetCPPType());
-		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
-	}
-
-	PropertyType* ElementProperty = CastField<PropertyType>(SetProperty->ElementProp);
-	if (!ElementProperty)
-	{
-		const FString ErrorMsg = FString::Printf(TEXT("Set property '%s' has element type '%s' which does not match the requested type"), *Property->GetName(), *SetProperty->ElementProp->GetCPPType());
-		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
-	}
-
-	if (!InnerPropertyName.IsEmpty())
-	{
-		const FString ErrorMsg = FString::Printf(TEXT("Inner property addressing is not supported for set properties (got '%s' on set '%s')"), *InnerPropertyName, *Property->GetName());
-		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
-	}
-
-#if WITH_EDITOR
-	if (World->WorldType == EWorldType::Editor)
-	{
-		Object->PreEditChange(Property);
-	}
-#endif
-
-	FScriptSetHelper SetHelper{ SetProperty, Property->ContainerPtrToValuePtr<void>(Object) };
-	SetHelper.EmptyElements();
-
-	// AddElement copies via Set->Add, which deduplicates by hash. We stage each value into a
-	// scratch slot, then hand it to AddElement so duplicates in `Values` collapse cleanly.
-	void* TempElement = FMemory_Alloca(ElementProperty->GetSize());
-	ElementProperty->InitializeValue(TempElement);
-	grpc::Status FinalStatus = grpc::Status_OK;
-	for (const ValueType& Value : Values)
-	{
-		const grpc::Status SetStatus = SetSinglePropertyValue(TempElement, ElementProperty, Value);
-		if (!SetStatus.ok())
-		{
-			FinalStatus = SetStatus;
-			break;
-		}
-		SetHelper.AddElement(TempElement);
-	}
-	ElementProperty->DestroyValue(TempElement);
-
-#if WITH_EDITOR
-	if (World->WorldType == EWorldType::Editor)
-	{
-		FPropertyChangedEvent Event(Property);
-		Object->PostEditChangeProperty(Event);
-	}
-#endif
-
-	if (!FinalStatus.ok())
-	{
-		return FinalStatus;
-	}
-
-	MarkRenderStateDirty(Object);
-
-	return grpc::Status_OK;
-}
-
-template<typename RequestType, typename ValueType>
-grpc::Status SetStructPropertyImpl(const UWorld* World, const RequestType& Request, const ValueType& Value, const FString& ExpectedStructCPPName)
-{
-	UObject* Object = nullptr;
-	const grpc::Status GetObjectStatus = GetObjectForRequest(World, Request, Object);
-	if (!GetObjectStatus.ok())
-	{
-		return GetObjectStatus;
-	}
-
-	FString InnerPropertyName;
-	FProperty* Property = nullptr;
-	const grpc::Status GetPropertyStatus = GetPropertyForRequest(Object, Request, Property, InnerPropertyName);
-	if (!GetPropertyStatus.ok())
-	{
-		return GetPropertyStatus;
-	}
-
-	if (!InnerPropertyName.IsEmpty())
-	{
-		const FString ErrorMsg = FString::Printf(TEXT("Inner property '%s' is not supported when setting struct property '%s' as a whole"), *InnerPropertyName, *Property->GetName());
-		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
-	}
-
-	const FStructProperty* StructProperty = CastField<FStructProperty>(Property);
-	if (!StructProperty)
-	{
-		const FString ErrorMsg = FString::Printf(TEXT("Property '%s' has type '%s' but a struct property of type '%s' was expected"), *Property->GetName(), *Property->GetCPPType(), *ExpectedStructCPPName);
-		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
-	}
-
-	const FString StructCPPName = StructProperty->Struct->GetStructCPPName();
-	if (StructCPPName.Equals(ExpectedStructCPPName))
-	{
-#if WITH_EDITOR
-		if (World->WorldType == EWorldType::Editor)
-		{
-			Object->PreEditChange(Property);
-		}
-#endif
-		StructProperty->SetValue_InContainer(Object, &Value);
-#if WITH_EDITOR
-		if (World->WorldType == EWorldType::Editor)
-		{
-			FPropertyChangedEvent Event(Property);
-			Object->PostEditChangeProperty(Event);
-		}
-#endif
-
-		MarkRenderStateDirty(Object);
-	}
-	else
-	{
-		const FString ErrorMsg = FString::Printf(TEXT("Struct property '%s' has type '%s' but type '%s' was expected"), *Property->GetName(), *StructCPPName, *ExpectedStructCPPName);
-		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
-	}
-
-	return grpc::Status_OK;
-}
-
-// Credit: https://stackoverflow.com/a/44065093
-template <class...>
-struct False : std::bool_constant<false> { };
-
-template <typename RequestType>
-grpc::Status SetPropertyImpl(const UWorld* World, const RequestType& Request)
-{
-	static_assert(False<RequestType>{}, "No template specialization for this property type");
-	return grpc::Status(grpc::UNIMPLEMENTED, "");
-}
-
-template<>
-grpc::Status SetPropertyImpl<SetBoolPropertyRequest>(const UWorld* World, const SetBoolPropertyRequest& Request)
-{
-	return SetSinglePropertyImpl<FBoolProperty>(World, Request, Request.value());
 }
 
 // Try a sequence of property types and return the first non-FAILED_PRECONDITION outcome.
-// FAILED_PRECONDITION from SetSinglePropertyImpl signals "type didn't match"; any other status
+// FAILED_PRECONDITION from SetSingleOnTarget signals "type didn't match"; any other status
 // means we found the right type but had an unrelated problem (range, missing inner, etc.).
-template <typename RequestType, typename ValueType>
-grpc::Status TryPropertyTypes(const UWorld*, const RequestType&, const ValueType&)
+template <typename ValueType>
+grpc::Status TryTypesOnTarget(const UWorld*, const FPropertyTarget&, const ValueType&)
 {
 	return grpc::Status(grpc::FAILED_PRECONDITION, "No matching property type");
 }
 
-template <typename FirstPropertyType, typename... RestPropertyTypes, typename RequestType, typename ValueType>
-grpc::Status TryPropertyTypes(const UWorld* World, const RequestType& Request, const ValueType& Value)
+template <typename FirstPropertyType, typename... RestPropertyTypes, typename ValueType>
+grpc::Status TryTypesOnTarget(const UWorld* World, const FPropertyTarget& Target, const ValueType& Value)
 {
-	const grpc::Status Status = SetSinglePropertyImpl<FirstPropertyType>(World, Request, Value);
+	const grpc::Status Status = SetSingleOnTarget<FirstPropertyType>(World, Target, Value);
 	if (Status.ok() || Status.error_code() != grpc::FAILED_PRECONDITION)
 	{
 		return Status;
@@ -1844,157 +1645,145 @@ grpc::Status TryPropertyTypes(const UWorld* World, const RequestType& Request, c
 	}
 	else
 	{
-		return TryPropertyTypes<RestPropertyTypes...>(World, Request, Value);
+		return TryTypesOnTarget<RestPropertyTypes...>(World, Target, Value);
 	}
 }
 
-template<>
-grpc::Status SetPropertyImpl<SetIntPropertyRequest>(const UWorld* World, const SetIntPropertyRequest& Request)
+template <typename PropertyType, typename ValueType>
+grpc::Status SetArrayOnTarget(const UWorld* World, const FPropertyTarget& Target, const TArray<ValueType>& Values)
 {
-	return TryPropertyTypes<FIntProperty, FByteProperty, FInt16Property, FInt8Property, FUInt16Property>(World, Request, Request.value());
-}
-
-template<>
-grpc::Status SetPropertyImpl<SetInt64PropertyRequest>(const UWorld* World, const SetInt64PropertyRequest& Request)
-{
-	return TryPropertyTypes<FInt64Property, FUInt32Property, FUInt64Property>(World, Request, Request.value());
-}
-
-template<>
-grpc::Status SetPropertyImpl<SetFloatPropertyRequest>(const UWorld* World, const SetFloatPropertyRequest& Request)
-{
-	// First try to set it as a double, then fall back on float
-	const grpc::Status FloatStatus = SetSinglePropertyImpl<FDoubleProperty>(World, Request, Request.value());
-	// If we got an error other than FAILED_PRECONDITION that means the type was right, but something else was wrong.
-	if (FloatStatus.ok() || FloatStatus.error_code() != grpc::FAILED_PRECONDITION)
+	const FArrayProperty* ArrayProperty = CastField<FArrayProperty>(Target.Property);
+	if (!ArrayProperty)
 	{
-		return FloatStatus;
+		const FString ErrorMsg = FString::Printf(TEXT("Property '%s' has type '%s' but an array property was expected"), *Target.Property->GetName(), *Target.Property->GetCPPType());
+		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 	}
-	return SetSinglePropertyImpl<FFloatProperty>(World, Request, Request.value());
-}
 
-template<>
-grpc::Status SetPropertyImpl<SetStringPropertyRequest>(const UWorld* World, const SetStringPropertyRequest& Request)
-{
-	// Try FString, then FName, then FText.
-	const FString ValueStr(UTF8_TO_TCHAR(Request.value().c_str()));
-	const grpc::Status StrStatus = SetSinglePropertyImpl<FStrProperty>(World, Request, ValueStr);
-	if (StrStatus.ok() || StrStatus.error_code() != grpc::FAILED_PRECONDITION)
+	FScriptArrayHelper ArrayHelper{ ArrayProperty, Target.Property->ContainerPtrToValuePtr<void>(Target.Container) };
+
+	PropertyType* InnerProperty = CastField<PropertyType>(ArrayProperty->Inner);
+	if (!InnerProperty)
 	{
-		return StrStatus;
+		const FString ErrorMsg = FString::Printf(TEXT("Array property '%s' has element type '%s' which does not match the requested type"), *Target.Property->GetName(), *ArrayProperty->Inner->GetCPPType());
+		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 	}
-	const FName ValueName(UTF8_TO_TCHAR(Request.value().c_str()));
-	const grpc::Status NameStatus = SetSinglePropertyImpl<FNameProperty>(World, Request, ValueName);
-	if (NameStatus.ok() || NameStatus.error_code() != grpc::FAILED_PRECONDITION)
+
 	{
-		return NameStatus;
+		FScopedPropertyEdit EditScope(World, Target);
+		ArrayHelper.EmptyValues();
+		ArrayHelper.InsertValues(0, Values.Num());
+		for (int32 I = 0; I < Values.Num(); ++I)
+		{
+			SetSinglePropertyInContainer<PropertyType, ValueType>(ArrayHelper.GetRawPtr(I), InnerProperty, Target.InnerPropertyName, Values[I]);
+		}
 	}
-	return SetSinglePropertyImpl<FTextProperty>(World, Request, ValueStr);
+
+	MarkRenderStateDirty(Target.Object);
+
+	return grpc::Status_OK;
 }
 
-template<>
-grpc::Status SetPropertyImpl<SetEnumPropertyRequest>(const UWorld* World, const SetEnumPropertyRequest& Request)
+template <typename PropertyType, typename ValueType>
+grpc::Status SetSetOnTarget(const UWorld* World, const FPropertyTarget& Target, const TArray<ValueType>& Values)
 {
-	// First try to set it as an FEnumProperty, then fall back on FByteProperty
-	const FString Value(UTF8_TO_TCHAR(Request.value().c_str()));
-	const grpc::Status EnumStatus = SetSinglePropertyImpl<FEnumProperty>(World, Request, Value);
-	// If we got an error other than FAILED_PRECONDITION that means the type was right, but something else was wrong.
-	if (EnumStatus.ok() || EnumStatus.error_code() != grpc::FAILED_PRECONDITION)
+	const FSetProperty* SetProperty = CastField<FSetProperty>(Target.Property);
+	if (!SetProperty)
 	{
-		return EnumStatus;
+		const FString ErrorMsg = FString::Printf(TEXT("Property '%s' has type '%s' but a set property was expected"), *Target.Property->GetName(), *Target.Property->GetCPPType());
+		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 	}
-	return SetSinglePropertyImpl<FByteProperty>(World, Request, Value);
-}
 
-template<>
-grpc::Status SetPropertyImpl<SetVectorPropertyRequest>(const UWorld* World, const SetVectorPropertyRequest& Request)
-{
-	FVector Vector;
-	Vector.X = Request.x();
-	Vector.Y = Request.y();
-	Vector.Z = Request.z();
-
-	return SetStructPropertyImpl(World, Request, Vector, TEXT("FVector"));
-}
-
-template<>
-grpc::Status SetPropertyImpl<SetRotatorPropertyRequest>(const UWorld* World, const SetRotatorPropertyRequest& Request)
-{
-	FRotator Rotator;
-	Rotator.Roll = Request.r();
-	Rotator.Pitch = Request.p();
-	Rotator.Yaw = Request.y();
-
-	return SetStructPropertyImpl(World, Request, QuantityConverter<Rad2Deg,R2L>::Convert(Rotator), TEXT("FRotator"));
-}
-
-template<>
-grpc::Status SetPropertyImpl<SetColorPropertyRequest>(const UWorld* World, const SetColorPropertyRequest& Request)
-{
-	FColor Color;
-	Color.R = Request.r();
-	Color.G = Request.g();
-	Color.B = Request.b();
-
-	grpc::Status ColorStatus = SetStructPropertyImpl(World, Request, Color, TEXT("FColor"));
-	if (ColorStatus.ok())
+	PropertyType* ElementProperty = CastField<PropertyType>(SetProperty->ElementProp);
+	if (!ElementProperty)
 	{
-		return ColorStatus;
+		const FString ErrorMsg = FString::Printf(TEXT("Set property '%s' has element type '%s' which does not match the requested type"), *Target.Property->GetName(), *SetProperty->ElementProp->GetCPPType());
+		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 	}
 
-	return SetStructPropertyImpl(World, Request, FLinearColor(Color), TEXT("FLinearColor"));
+	if (!Target.InnerPropertyName.IsEmpty())
+	{
+		const FString ErrorMsg = FString::Printf(TEXT("Inner property addressing is not supported for set properties (got '%s' on set '%s')"), *Target.InnerPropertyName, *Target.Property->GetName());
+		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+	}
+
+	grpc::Status FinalStatus = grpc::Status_OK;
+	{
+		FScopedPropertyEdit EditScope(World, Target);
+
+		FScriptSetHelper SetHelper{ SetProperty, Target.Property->ContainerPtrToValuePtr<void>(Target.Container) };
+		SetHelper.EmptyElements();
+
+		// AddElement copies via Set->Add, which deduplicates by hash. We stage each value into a
+		// scratch slot, then hand it to AddElement so duplicates in `Values` collapse cleanly.
+		void* TempElement = FMemory_Alloca(ElementProperty->GetSize());
+		ElementProperty->InitializeValue(TempElement);
+		for (const ValueType& Value : Values)
+		{
+			const grpc::Status SetStatus = SetSinglePropertyValue(TempElement, ElementProperty, Value);
+			if (!SetStatus.ok())
+			{
+				FinalStatus = SetStatus;
+				break;
+			}
+			SetHelper.AddElement(TempElement);
+		}
+		ElementProperty->DestroyValue(TempElement);
+	}
+
+	if (!FinalStatus.ok())
+	{
+		return FinalStatus;
+	}
+
+	MarkRenderStateDirty(Target.Object);
+
+	return grpc::Status_OK;
 }
 
-template<>
-grpc::Status SetPropertyImpl<SetVector2DPropertyRequest>(const UWorld* World, const SetVector2DPropertyRequest& Request)
+template <typename ValueType>
+grpc::Status SetStructOnTarget(const UWorld* World, const FPropertyTarget& Target, const ValueType& Value, const FString& ExpectedStructCPPName)
 {
-	const FVector2D Vector(Request.x(), Request.y());
-	return SetStructPropertyImpl(World, Request, Vector, TEXT("FVector2D"));
+	if (!Target.InnerPropertyName.IsEmpty())
+	{
+		const FString ErrorMsg = FString::Printf(TEXT("Inner property '%s' is not supported when setting struct property '%s' as a whole"), *Target.InnerPropertyName, *Target.Property->GetName());
+		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+	}
+
+	const FStructProperty* StructProperty = CastField<FStructProperty>(Target.Property);
+	if (!StructProperty)
+	{
+		const FString ErrorMsg = FString::Printf(TEXT("Property '%s' has type '%s' but a struct property of type '%s' was expected"), *Target.Property->GetName(), *Target.Property->GetCPPType(), *ExpectedStructCPPName);
+		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+	}
+
+	const FString StructCPPName = StructProperty->Struct->GetStructCPPName();
+	if (!StructCPPName.Equals(ExpectedStructCPPName))
+	{
+		const FString ErrorMsg = FString::Printf(TEXT("Struct property '%s' has type '%s' but type '%s' was expected"), *Target.Property->GetName(), *StructCPPName, *ExpectedStructCPPName);
+		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+	}
+
+	{
+		FScopedPropertyEdit EditScope(World, Target);
+		StructProperty->SetValue_InContainer(Target.Container, &Value);
+	}
+
+	MarkRenderStateDirty(Target.Object);
+
+	return grpc::Status_OK;
 }
 
-template<>
-grpc::Status SetPropertyImpl<SetIntVectorPropertyRequest>(const UWorld* World, const SetIntVectorPropertyRequest& Request)
+// FObjectProperty also catches FClassProperty (it derives from FObjectProperty); FSoftObjectProperty
+// also catches FSoftClassProperty (which derives from FSoftObjectProperty).
+grpc::Status SetObjectOnTarget(const UWorld* World, const FPropertyTarget& Target, UObject* Object)
 {
-	const FIntVector Vector(Request.x(), Request.y(), Request.z());
-	return SetStructPropertyImpl(World, Request, Vector, TEXT("FIntVector"));
+	return TryTypesOnTarget<FObjectProperty, FSoftObjectProperty>(World, Target, Object);
 }
 
-template<>
-grpc::Status SetPropertyImpl<SetIntPointPropertyRequest>(const UWorld* World, const SetIntPointPropertyRequest& Request)
-{
-	const FIntPoint Point(Request.x(), Request.y());
-	return SetStructPropertyImpl(World, Request, Point, TEXT("FIntPoint"));
-}
-
-template<>
-grpc::Status SetPropertyImpl<SetQuatPropertyRequest>(const UWorld* World, const SetQuatPropertyRequest& Request)
-{
-	// Convert from right-handed (API convention) to Unreal's left-handed FQuat.
-	const FQuat Quat = QuantityConverter<UC_NONE, R2L>::Convert(FQuat(Request.x(), Request.y(), Request.z(), Request.w()));
-	return SetStructPropertyImpl(World, Request, Quat, TEXT("FQuat"));
-}
-
-template<>
-grpc::Status SetPropertyImpl<SetTransformPropertyRequest>(const UWorld* World, const SetTransformPropertyRequest& Request)
-{
-	// Same conventions as SpawnActor/SetActorTransform: m -> cm for location, rad/right-handed -> deg/left-handed for rotation.
-	const FTransform Transform = ToUnrealTransform(Request.value());
-	return SetStructPropertyImpl(World, Request, Transform, TEXT("FTransform"));
-}
-
-template <typename RequestType>
-grpc::Status SetObjectProperty(const UWorld* World, const RequestType& Request, UObject* Object)
-{
-	// FObjectProperty also catches FClassProperty (it derives from FObjectProperty); FSoftObjectProperty
-	// also catches FSoftClassProperty (which derives from FSoftObjectProperty).
-	return TryPropertyTypes<FObjectProperty, FSoftObjectProperty>(World, Request, Object);
-}
-
-template <typename RequestType>
-grpc::Status SetObjectArrayProperty(const UWorld* World, const RequestType& Request, const TArray<UObject*>& Objects)
+grpc::Status SetObjectArrayOnTarget(const UWorld* World, const FPropertyTarget& Target, const TArray<UObject*>& Objects)
 {
 	// First try to set it as an FObjectProperty array, then fall back on an FSoftObjectProperty array.
-	grpc::Status ObjectStatus = SetArrayPropertyImpl<FObjectProperty>(World, Request, Objects);
+	const grpc::Status ObjectStatus = SetArrayOnTarget<FObjectProperty>(World, Target, Objects);
 
 	// If we got an error other than FAILED_PRECONDITION that means the type was right, but something else was wrong.
 	if (ObjectStatus.ok() || ObjectStatus.error_code() != grpc::FAILED_PRECONDITION)
@@ -2002,444 +1791,846 @@ grpc::Status SetObjectArrayProperty(const UWorld* World, const RequestType& Requ
 		return ObjectStatus;
 	}
 
-	return SetArrayPropertyImpl<FSoftObjectProperty>(World, Request, Objects);
+	return SetArrayOnTarget<FSoftObjectProperty>(World, Target, Objects);
 }
 
-template <typename RequestType>
-grpc::Status SetObjectSetProperty(const UWorld* World, const RequestType& Request, const TArray<UObject*>& Objects)
+grpc::Status SetObjectSetOnTarget(const UWorld* World, const FPropertyTarget& Target, const TArray<UObject*>& Objects)
 {
 	// First try to set it as an FObjectProperty set, then fall back on an FSoftObjectProperty set.
-	grpc::Status ObjectStatus = SetSetPropertyImpl<FObjectProperty>(World, Request, Objects);
+	const grpc::Status ObjectStatus = SetSetOnTarget<FObjectProperty>(World, Target, Objects);
 	if (ObjectStatus.ok() || ObjectStatus.error_code() != grpc::FAILED_PRECONDITION)
 	{
 		return ObjectStatus;
 	}
-	return SetSetPropertyImpl<FSoftObjectProperty>(World, Request, Objects);
+	return SetSetOnTarget<FSoftObjectProperty>(World, Target, Objects);
 }
 
-template<>
-grpc::Status SetPropertyImpl<SetClassPropertyRequest>(const UWorld* World, const SetClassPropertyRequest& Request)
+template <typename RepeatedStringType>
+TArray<FString> ToStringArray(const RepeatedStringType& Values)
 {
-	const FString ClassName(UTF8_TO_TCHAR(Request.value().c_str()));
-
-	if (ClassName.IsEmpty())
+	TArray<FString> StrArray;
+	StrArray.Reserve(Values.size());
+	for (const std::string& String : Values)
 	{
-		return SetSinglePropertyImpl<FObjectProperty>(World, Request, nullptr);
+		StrArray.Add(UTF8_TO_TCHAR(String.c_str()));
 	}
-
-	UClass* Class = GetSubClassWithName<UObject>(ClassName);
-	if (!Class)
-	{
-		return grpc::Status(grpc::NOT_FOUND, "Did not find class with name " + std::string(TCHAR_TO_UTF8(*ClassName)));
-	}
-	return SetObjectProperty(World, Request, Class);
+	return StrArray;
 }
 
-template<>
-grpc::Status SetPropertyImpl<SetAssetPropertyRequest>(const UWorld* World, const SetAssetPropertyRequest& Request)
+template <typename RepeatedStringType>
+grpc::Status ResolveClasses(const RepeatedStringType& Values, TArray<UObject*>& OutClasses)
 {
-	const FString AssetPath(UTF8_TO_TCHAR(Request.value().c_str()));
-
-	if (AssetPath.IsEmpty())
+	for (const std::string& Value : Values)
 	{
-		return SetSinglePropertyImpl<FObjectProperty>(World, Request, nullptr);
+		const FString ClassName(UTF8_TO_TCHAR(Value.c_str()));
+		UClass* Class = GetSubClassWithName<UObject>(ClassName);
+		if (!Class)
+		{
+			return grpc::Status(grpc::NOT_FOUND, "Did not find class with name " + std::string(TCHAR_TO_UTF8(*ClassName)));
+		}
+		OutClasses.Add(Class);
 	}
-
-	UObject* Asset = GetAssetByPath(AssetPath);
-	if (!Asset)
-	{
-		return grpc::Status(grpc::NOT_FOUND, "Did not find asset with path " + std::string(TCHAR_TO_UTF8(*AssetPath)));
-	}
-	return SetSinglePropertyImpl<FObjectProperty>(World, Request, Asset);
+	return grpc::Status_OK;
 }
 
-template<>
-grpc::Status SetPropertyImpl<SetActorPropertyRequest>(const UWorld* World, const SetActorPropertyRequest& Request)
+template <typename RepeatedStringType>
+grpc::Status ResolveAssets(const RepeatedStringType& Values, TArray<UObject*>& OutAssets)
 {
-	const FString ActorName(UTF8_TO_TCHAR(Request.value().c_str()));
-
-	if (ActorName.IsEmpty())
+	for (const std::string& Value : Values)
 	{
-		return SetSinglePropertyImpl<FObjectProperty>(World, Request, nullptr);
+		const FString AssetPath(UTF8_TO_TCHAR(Value.c_str()));
+		UObject* Asset = GetAssetByPath(AssetPath);
+		if (!Asset)
+		{
+			return grpc::Status(grpc::NOT_FOUND, "Did not find asset with path " + std::string(TCHAR_TO_UTF8(*AssetPath)));
+		}
+		OutAssets.Add(Asset);
 	}
-
-	AActor* Actor = GetActorWithName(World, ActorName);
-	if (!Actor)
-	{
-		return grpc::Status(grpc::NOT_FOUND, "Did not find actor with name " + std::string(TCHAR_TO_UTF8(*ActorName)));
-	}
-	return SetObjectProperty(World, Request, Actor);
+	return grpc::Status_OK;
 }
 
-template<>
-grpc::Status SetPropertyImpl<SetComponentPropertyRequest>(const UWorld* World, const SetComponentPropertyRequest& Request)
+template <typename RepeatedStringType>
+grpc::Status ResolveActors(const UWorld* World, const RepeatedStringType& Values, TArray<UObject*>& OutActors)
 {
-	const FString FullName(UTF8_TO_TCHAR(Request.value().c_str()));
-
-	if (FullName.IsEmpty())
+	for (const std::string& Value : Values)
 	{
-		return SetSinglePropertyImpl<FObjectProperty>(World, Request, nullptr);
+		const FString ActorName(UTF8_TO_TCHAR(Value.c_str()));
+		AActor* Actor = GetActorWithName(World, ActorName);
+		if (!Actor)
+		{
+			return grpc::Status(grpc::NOT_FOUND, "Did not find actor with name " + std::string(TCHAR_TO_UTF8(*ActorName)));
+		}
+		OutActors.Add(Actor);
 	}
+	return grpc::Status_OK;
+}
 
+// Resolve one "ActorName:ComponentName" value. ValueDesc names the kind of value in error
+// messages ("Component property value", "Component array property value", ...).
+grpc::Status ResolveComponent(const UWorld* World, const FString& FullName, const TCHAR* ValueDesc, UActorComponent*& OutComponent)
+{
 	FString ActorName;
 	FString ComponentName;
 	FullName.Split(TEXT(":"), &ActorName, &ComponentName);
 	if (ActorName.IsEmpty() || ComponentName.IsEmpty())
 	{
-		const FString ErrorMsg = FString::Printf(TEXT("Component property value '%s' is malformed; expected 'ActorName:ComponentName'"), *FullName);
+		const FString ErrorMsg = FString::Printf(TEXT("%s '%s' is malformed; expected 'ActorName:ComponentName'"), ValueDesc, *FullName);
 		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 	}
 	const AActor* Actor = GetActorWithName(World, ActorName);
 	if (!Actor)
 	{
-		const FString ErrorMsg = FString::Printf(TEXT("Failed to find actor '%s' for component property value '%s'"), *ActorName, *FullName);
+		const FString ErrorMsg = FString::Printf(TEXT("Failed to find actor '%s' for %s '%s'"), *ActorName, ValueDesc, *FullName);
 		return grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 	}
 	UActorComponent* Component = GetComponentWithName(Actor, ComponentName);
 	if (!Component)
 	{
-		const FString ErrorMsg = FString::Printf(TEXT("Failed to find component '%s' on actor '%s' for component property value '%s'"), *ComponentName, *ActorName, *FullName);
+		const FString ErrorMsg = FString::Printf(TEXT("Failed to find component '%s' on actor '%s' for %s '%s'"), *ComponentName, *ActorName, ValueDesc, *FullName);
 		return grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 	}
-	return SetObjectProperty(World, Request, Component);
+	OutComponent = Component;
+	return grpc::Status_OK;
+}
+
+template <typename RepeatedStringType>
+grpc::Status ResolveComponents(const UWorld* World, const RepeatedStringType& Values, const TCHAR* ValueDesc, TArray<UObject*>& OutComponents)
+{
+	for (const std::string& Value : Values)
+	{
+		UActorComponent* Component = nullptr;
+		const grpc::Status Status = ResolveComponent(World, FString(UTF8_TO_TCHAR(Value.c_str())), ValueDesc, Component);
+		if (!Status.ok())
+		{
+			return Status;
+		}
+		OutComponents.Add(Component);
+	}
+	return grpc::Status_OK;
+}
+
+// The one place that knows how each Value variant maps onto Unreal property types. Both the
+// singular Set*Property RPCs and CallFunction's arguments come through here.
+grpc::Status SetValueOnTarget(const UWorld* World, const FPropertyTarget& Target, const PropertyValue& Value)
+{
+	switch (Value.value_case())
+	{
+	case PropertyValue::kBoolValue:
+	{
+		return SetSingleOnTarget<FBoolProperty>(World, Target, Value.bool_value());
+	}
+	case PropertyValue::kIntValue:
+	{
+		return TryTypesOnTarget<FIntProperty, FByteProperty, FInt16Property, FInt8Property, FUInt16Property>(World, Target, Value.int_value());
+	}
+	case PropertyValue::kInt64Value:
+	{
+		return TryTypesOnTarget<FInt64Property, FUInt32Property, FUInt64Property>(World, Target, Value.int64_value());
+	}
+	case PropertyValue::kFloatValue:
+	{
+		// First try to set it as a double, then fall back on float
+		return TryTypesOnTarget<FDoubleProperty, FFloatProperty>(World, Target, Value.float_value());
+	}
+	case PropertyValue::kStringValue:
+	{
+		// Try FString, then FName, then FText.
+		const FString ValueStr(UTF8_TO_TCHAR(Value.string_value().c_str()));
+		const grpc::Status StrStatus = SetSingleOnTarget<FStrProperty>(World, Target, ValueStr);
+		if (StrStatus.ok() || StrStatus.error_code() != grpc::FAILED_PRECONDITION)
+		{
+			return StrStatus;
+		}
+		const FName ValueName(*ValueStr);
+		const grpc::Status NameStatus = SetSingleOnTarget<FNameProperty>(World, Target, ValueName);
+		if (NameStatus.ok() || NameStatus.error_code() != grpc::FAILED_PRECONDITION)
+		{
+			return NameStatus;
+		}
+		return SetSingleOnTarget<FTextProperty>(World, Target, ValueStr);
+	}
+	case PropertyValue::kEnumValue:
+	{
+		// First try to set it as an FEnumProperty, then fall back on FByteProperty
+		const FString ValueStr(UTF8_TO_TCHAR(Value.enum_value().c_str()));
+		return TryTypesOnTarget<FEnumProperty, FByteProperty>(World, Target, ValueStr);
+	}
+	case PropertyValue::kVectorValue:
+	{
+		FVector Vector;
+		Vector.X = Value.vector_value().x();
+		Vector.Y = Value.vector_value().y();
+		Vector.Z = Value.vector_value().z();
+		return SetStructOnTarget(World, Target, Vector, TEXT("FVector"));
+	}
+	case PropertyValue::kVector2DValue:
+	{
+		const FVector2D Vector(Value.vector2d_value().x(), Value.vector2d_value().y());
+		return SetStructOnTarget(World, Target, Vector, TEXT("FVector2D"));
+	}
+	case PropertyValue::kIntVectorValue:
+	{
+		const FIntVector Vector(Value.int_vector_value().x(), Value.int_vector_value().y(), Value.int_vector_value().z());
+		return SetStructOnTarget(World, Target, Vector, TEXT("FIntVector"));
+	}
+	case PropertyValue::kIntPointValue:
+	{
+		const FIntPoint Point(Value.int_point_value().x(), Value.int_point_value().y());
+		return SetStructOnTarget(World, Target, Point, TEXT("FIntPoint"));
+	}
+	case PropertyValue::kRotatorValue:
+	{
+		FRotator Rotator;
+		Rotator.Roll = Value.rotator_value().r();
+		Rotator.Pitch = Value.rotator_value().p();
+		Rotator.Yaw = Value.rotator_value().y();
+		return SetStructOnTarget(World, Target, QuantityConverter<Rad2Deg,R2L>::Convert(Rotator), TEXT("FRotator"));
+	}
+	case PropertyValue::kQuatValue:
+	{
+		// Convert from right-handed (API convention) to Unreal's left-handed FQuat.
+		const FQuat Quat = QuantityConverter<UC_NONE, R2L>::Convert(
+			FQuat(Value.quat_value().x(), Value.quat_value().y(), Value.quat_value().z(), Value.quat_value().w()));
+		return SetStructOnTarget(World, Target, Quat, TEXT("FQuat"));
+	}
+	case PropertyValue::kTransformValue:
+	{
+		// Same conventions as SpawnActor/SetActorTransform: m -> cm for location, rad/right-handed -> deg/left-handed for rotation.
+		const FTransform Transform = ToUnrealTransform(Value.transform_value());
+		return SetStructOnTarget(World, Target, Transform, TEXT("FTransform"));
+	}
+	case PropertyValue::kColorValue:
+	{
+		FColor Color;
+		Color.R = Value.color_value().r();
+		Color.G = Value.color_value().g();
+		Color.B = Value.color_value().b();
+
+		const grpc::Status ColorStatus = SetStructOnTarget(World, Target, Color, TEXT("FColor"));
+		if (ColorStatus.ok())
+		{
+			return ColorStatus;
+		}
+
+		return SetStructOnTarget(World, Target, FLinearColor(Color), TEXT("FLinearColor"));
+	}
+	case PropertyValue::kClassValue:
+	{
+		const FString ClassName(UTF8_TO_TCHAR(Value.class_value().c_str()));
+		if (ClassName.IsEmpty())
+		{
+			return SetSingleOnTarget<FObjectProperty>(World, Target, nullptr);
+		}
+		UClass* Class = GetSubClassWithName<UObject>(ClassName);
+		if (!Class)
+		{
+			return grpc::Status(grpc::NOT_FOUND, "Did not find class with name " + std::string(TCHAR_TO_UTF8(*ClassName)));
+		}
+		return SetObjectOnTarget(World, Target, Class);
+	}
+	case PropertyValue::kAssetValue:
+	{
+		const FString AssetPath(UTF8_TO_TCHAR(Value.asset_value().c_str()));
+		if (AssetPath.IsEmpty())
+		{
+			return SetSingleOnTarget<FObjectProperty>(World, Target, nullptr);
+		}
+		UObject* Asset = GetAssetByPath(AssetPath);
+		if (!Asset)
+		{
+			return grpc::Status(grpc::NOT_FOUND, "Did not find asset with path " + std::string(TCHAR_TO_UTF8(*AssetPath)));
+		}
+		return SetSingleOnTarget<FObjectProperty>(World, Target, Asset);
+	}
+	case PropertyValue::kActorValue:
+	{
+		const FString ActorName(UTF8_TO_TCHAR(Value.actor_value().c_str()));
+		if (ActorName.IsEmpty())
+		{
+			return SetSingleOnTarget<FObjectProperty>(World, Target, nullptr);
+		}
+		AActor* Actor = GetActorWithName(World, ActorName);
+		if (!Actor)
+		{
+			return grpc::Status(grpc::NOT_FOUND, "Did not find actor with name " + std::string(TCHAR_TO_UTF8(*ActorName)));
+		}
+		return SetObjectOnTarget(World, Target, Actor);
+	}
+	case PropertyValue::kComponentValue:
+	{
+		const FString FullName(UTF8_TO_TCHAR(Value.component_value().c_str()));
+		if (FullName.IsEmpty())
+		{
+			return SetSingleOnTarget<FObjectProperty>(World, Target, nullptr);
+		}
+		UActorComponent* Component = nullptr;
+		const grpc::Status Status = ResolveComponent(World, FullName, TEXT("Component property value"), Component);
+		if (!Status.ok())
+		{
+			return Status;
+		}
+		return SetObjectOnTarget(World, Target, Component);
+	}
+	case PropertyValue::kBoolArrayValue:
+	{
+		TArray<bool> Array;
+		Array.Append(Value.bool_array_value().values().data(), Value.bool_array_value().values_size());
+		return SetArrayOnTarget<FBoolProperty>(World, Target, Array);
+	}
+	case PropertyValue::kStringArrayValue:
+	{
+		// First try to set it as an FString array, then fall back on FName array
+		const TArray<FString> StrArray = ToStringArray(Value.string_array_value().values());
+		const grpc::Status StatusStr = SetArrayOnTarget<FStrProperty>(World, Target, StrArray);
+		// If we got an error other than FAILED_PRECONDITION that means the type was right, but something else was wrong.
+		if (StatusStr.ok() || StatusStr.error_code() != grpc::FAILED_PRECONDITION)
+		{
+			return StatusStr;
+		}
+		TArray<FName> NameArray;
+		NameArray.Reserve(StrArray.Num());
+		for (const FString& String : StrArray)
+		{
+			NameArray.Add(FName(*String));
+		}
+		return SetArrayOnTarget<FNameProperty>(World, Target, NameArray);
+	}
+	case PropertyValue::kEnumArrayValue:
+	{
+		// First try to set it as an FEnumProperty array, then fall back on FByteProperty array
+		const TArray<FString> StrArray = ToStringArray(Value.enum_array_value().values());
+		const grpc::Status EnumStatus = SetArrayOnTarget<FEnumProperty>(World, Target, StrArray);
+		if (EnumStatus.ok() || EnumStatus.error_code() != grpc::FAILED_PRECONDITION)
+		{
+			return EnumStatus;
+		}
+		return SetArrayOnTarget<FByteProperty>(World, Target, StrArray);
+	}
+	case PropertyValue::kIntArrayValue:
+	{
+		TArray<int32> Array;
+		Array.Append(Value.int_array_value().values().data(), Value.int_array_value().values_size());
+		return SetArrayOnTarget<FIntProperty>(World, Target, Array);
+	}
+	case PropertyValue::kInt64ArrayValue:
+	{
+		// Protobuf's int64 is `long` on Linux but Unreal's int64 is `long long`; same width, different
+		// C++ types, so the pointer overload of TArray::Append can't match. Copy element-by-element instead.
+		TArray<int64> Array;
+		Array.Reserve(Value.int64_array_value().values_size());
+		for (const int64 V : Value.int64_array_value().values())
+		{
+			Array.Add(V);
+		}
+		return SetArrayOnTarget<FInt64Property>(World, Target, Array);
+	}
+	case PropertyValue::kFloatArrayValue:
+	{
+		// First try to set it as a double array, then fall back on float array
+		TArray<float> FloatArray;
+		FloatArray.Append(Value.float_array_value().values().data(), Value.float_array_value().values_size());
+		const grpc::Status StatusFloat = SetArrayOnTarget<FDoubleProperty>(World, Target, FloatArray);
+		if (StatusFloat.ok() || StatusFloat.error_code() != grpc::FAILED_PRECONDITION)
+		{
+			return StatusFloat;
+		}
+		return SetArrayOnTarget<FFloatProperty>(World, Target, FloatArray);
+	}
+	case PropertyValue::kClassArrayValue:
+	{
+		TArray<UObject*> ClassArray;
+		const grpc::Status Status = ResolveClasses(Value.class_array_value().values(), ClassArray);
+		if (!Status.ok())
+		{
+			return Status;
+		}
+		return SetObjectArrayOnTarget(World, Target, ClassArray);
+	}
+	case PropertyValue::kAssetArrayValue:
+	{
+		TArray<UObject*> AssetArray;
+		const grpc::Status Status = ResolveAssets(Value.asset_array_value().values(), AssetArray);
+		if (!Status.ok())
+		{
+			return Status;
+		}
+		return SetArrayOnTarget<FObjectProperty>(World, Target, AssetArray);
+	}
+	case PropertyValue::kActorArrayValue:
+	{
+		TArray<UObject*> ActorArray;
+		const grpc::Status Status = ResolveActors(World, Value.actor_array_value().values(), ActorArray);
+		if (!Status.ok())
+		{
+			return Status;
+		}
+		return SetObjectArrayOnTarget(World, Target, ActorArray);
+	}
+	case PropertyValue::kComponentArrayValue:
+	{
+		TArray<UObject*> ComponentArray;
+		const grpc::Status Status = ResolveComponents(World, Value.component_array_value().values(), TEXT("Component array property value"), ComponentArray);
+		if (!Status.ok())
+		{
+			return Status;
+		}
+		return SetObjectArrayOnTarget(World, Target, ComponentArray);
+	}
+	case PropertyValue::kBoolSetValue:
+	{
+		TArray<bool> Array;
+		Array.Append(Value.bool_set_value().values().data(), Value.bool_set_value().values_size());
+		return SetSetOnTarget<FBoolProperty>(World, Target, Array);
+	}
+	case PropertyValue::kStringSetValue:
+	{
+		const TArray<FString> StrArray = ToStringArray(Value.string_set_value().values());
+		const grpc::Status StatusStr = SetSetOnTarget<FStrProperty>(World, Target, StrArray);
+		if (StatusStr.ok() || StatusStr.error_code() != grpc::FAILED_PRECONDITION)
+		{
+			return StatusStr;
+		}
+		TArray<FName> NameArray;
+		NameArray.Reserve(StrArray.Num());
+		for (const FString& String : StrArray)
+		{
+			NameArray.Add(FName(*String));
+		}
+		return SetSetOnTarget<FNameProperty>(World, Target, NameArray);
+	}
+	case PropertyValue::kEnumSetValue:
+	{
+		const TArray<FString> StrArray = ToStringArray(Value.enum_set_value().values());
+		const grpc::Status EnumStatus = SetSetOnTarget<FEnumProperty>(World, Target, StrArray);
+		if (EnumStatus.ok() || EnumStatus.error_code() != grpc::FAILED_PRECONDITION)
+		{
+			return EnumStatus;
+		}
+		return SetSetOnTarget<FByteProperty>(World, Target, StrArray);
+	}
+	case PropertyValue::kIntSetValue:
+	{
+		TArray<int32> Array;
+		Array.Append(Value.int_set_value().values().data(), Value.int_set_value().values_size());
+		return SetSetOnTarget<FIntProperty>(World, Target, Array);
+	}
+	case PropertyValue::kInt64SetValue:
+	{
+		// See the int64 array case: protobuf's int64 and Unreal's int64 are distinct C++ types on Linux.
+		TArray<int64> Array;
+		Array.Reserve(Value.int64_set_value().values_size());
+		for (const int64 V : Value.int64_set_value().values())
+		{
+			Array.Add(V);
+		}
+		return SetSetOnTarget<FInt64Property>(World, Target, Array);
+	}
+	case PropertyValue::kFloatSetValue:
+	{
+		TArray<float> FloatArray;
+		FloatArray.Append(Value.float_set_value().values().data(), Value.float_set_value().values_size());
+		const grpc::Status StatusFloat = SetSetOnTarget<FDoubleProperty>(World, Target, FloatArray);
+		if (StatusFloat.ok() || StatusFloat.error_code() != grpc::FAILED_PRECONDITION)
+		{
+			return StatusFloat;
+		}
+		return SetSetOnTarget<FFloatProperty>(World, Target, FloatArray);
+	}
+	case PropertyValue::kClassSetValue:
+	{
+		TArray<UObject*> ClassArray;
+		const grpc::Status Status = ResolveClasses(Value.class_set_value().values(), ClassArray);
+		if (!Status.ok())
+		{
+			return Status;
+		}
+		return SetObjectSetOnTarget(World, Target, ClassArray);
+	}
+	case PropertyValue::kAssetSetValue:
+	{
+		TArray<UObject*> AssetArray;
+		const grpc::Status Status = ResolveAssets(Value.asset_set_value().values(), AssetArray);
+		if (!Status.ok())
+		{
+			return Status;
+		}
+		return SetObjectSetOnTarget(World, Target, AssetArray);
+	}
+	case PropertyValue::kActorSetValue:
+	{
+		TArray<UObject*> ActorArray;
+		const grpc::Status Status = ResolveActors(World, Value.actor_set_value().values(), ActorArray);
+		if (!Status.ok())
+		{
+			return Status;
+		}
+		return SetObjectSetOnTarget(World, Target, ActorArray);
+	}
+	case PropertyValue::kComponentSetValue:
+	{
+		TArray<UObject*> ComponentArray;
+		const grpc::Status Status = ResolveComponents(World, Value.component_set_value().values(), TEXT("Component set property value"), ComponentArray);
+		if (!Status.ok())
+		{
+			return Status;
+		}
+		return SetObjectSetOnTarget(World, Target, ComponentArray);
+	}
+	case PropertyValue::VALUE_NOT_SET:
+	default:
+		return grpc::Status(grpc::FAILED_PRECONDITION, "Value has no value set");
+	}
+}
+
+// Resolve the actor/component and property a Set*PropertyRequest names, then write Value into it.
+template <typename RequestType>
+grpc::Status SetPropertyOnObject(const UWorld* World, const RequestType& Request, const PropertyValue& Value)
+{
+	FPropertyTarget Target;
+	const grpc::Status GetObjectStatus = GetObjectForRequest(World, Request, Target.Object);
+	if (!GetObjectStatus.ok())
+	{
+		return GetObjectStatus;
+	}
+	Target.Container = Target.Object;
+
+	const grpc::Status GetPropertyStatus = GetPropertyByName(Target.Object, FString(UTF8_TO_TCHAR(Request.property().c_str())), Target.Property, Target.InnerPropertyName);
+	if (!GetPropertyStatus.ok())
+	{
+		return GetPropertyStatus;
+	}
+
+	return SetValueOnTarget(World, Target, Value);
+}
+
+// Credit: https://stackoverflow.com/a/44065093
+template <class...>
+struct False : std::bool_constant<false> { };
+
+// Each singular Set*Property RPC just names its value's type up front. Translating the request
+// into a Value keeps one implementation of the type rules, shared with SetProperty and CallFunction.
+template <typename RequestType>
+grpc::Status SetPropertyImpl(const UWorld* World, const RequestType& Request)
+{
+	static_assert(False<RequestType>{}, "No template specialization for this property type");
+	return grpc::Status(grpc::UNIMPLEMENTED, "");
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetBoolPropertyRequest>(const UWorld* World, const SetBoolPropertyRequest& Request)
+{
+	PropertyValue Value;
+	Value.set_bool_value(Request.value());
+	return SetPropertyOnObject(World, Request, Value);
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetIntPropertyRequest>(const UWorld* World, const SetIntPropertyRequest& Request)
+{
+	PropertyValue Value;
+	Value.set_int_value(Request.value());
+	return SetPropertyOnObject(World, Request, Value);
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetInt64PropertyRequest>(const UWorld* World, const SetInt64PropertyRequest& Request)
+{
+	PropertyValue Value;
+	Value.set_int64_value(Request.value());
+	return SetPropertyOnObject(World, Request, Value);
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetFloatPropertyRequest>(const UWorld* World, const SetFloatPropertyRequest& Request)
+{
+	PropertyValue Value;
+	Value.set_float_value(Request.value());
+	return SetPropertyOnObject(World, Request, Value);
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetStringPropertyRequest>(const UWorld* World, const SetStringPropertyRequest& Request)
+{
+	PropertyValue Value;
+	Value.set_string_value(Request.value());
+	return SetPropertyOnObject(World, Request, Value);
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetEnumPropertyRequest>(const UWorld* World, const SetEnumPropertyRequest& Request)
+{
+	PropertyValue Value;
+	Value.set_enum_value(Request.value());
+	return SetPropertyOnObject(World, Request, Value);
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetVectorPropertyRequest>(const UWorld* World, const SetVectorPropertyRequest& Request)
+{
+	PropertyValue Value;
+	Value.mutable_vector_value()->set_x(Request.x());
+	Value.mutable_vector_value()->set_y(Request.y());
+	Value.mutable_vector_value()->set_z(Request.z());
+	return SetPropertyOnObject(World, Request, Value);
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetVector2DPropertyRequest>(const UWorld* World, const SetVector2DPropertyRequest& Request)
+{
+	PropertyValue Value;
+	Value.mutable_vector2d_value()->set_x(Request.x());
+	Value.mutable_vector2d_value()->set_y(Request.y());
+	return SetPropertyOnObject(World, Request, Value);
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetIntVectorPropertyRequest>(const UWorld* World, const SetIntVectorPropertyRequest& Request)
+{
+	PropertyValue Value;
+	Value.mutable_int_vector_value()->set_x(Request.x());
+	Value.mutable_int_vector_value()->set_y(Request.y());
+	Value.mutable_int_vector_value()->set_z(Request.z());
+	return SetPropertyOnObject(World, Request, Value);
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetIntPointPropertyRequest>(const UWorld* World, const SetIntPointPropertyRequest& Request)
+{
+	PropertyValue Value;
+	Value.mutable_int_point_value()->set_x(Request.x());
+	Value.mutable_int_point_value()->set_y(Request.y());
+	return SetPropertyOnObject(World, Request, Value);
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetRotatorPropertyRequest>(const UWorld* World, const SetRotatorPropertyRequest& Request)
+{
+	PropertyValue Value;
+	Value.mutable_rotator_value()->set_r(Request.r());
+	Value.mutable_rotator_value()->set_p(Request.p());
+	Value.mutable_rotator_value()->set_y(Request.y());
+	return SetPropertyOnObject(World, Request, Value);
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetQuatPropertyRequest>(const UWorld* World, const SetQuatPropertyRequest& Request)
+{
+	PropertyValue Value;
+	Value.mutable_quat_value()->set_x(Request.x());
+	Value.mutable_quat_value()->set_y(Request.y());
+	Value.mutable_quat_value()->set_z(Request.z());
+	Value.mutable_quat_value()->set_w(Request.w());
+	return SetPropertyOnObject(World, Request, Value);
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetTransformPropertyRequest>(const UWorld* World, const SetTransformPropertyRequest& Request)
+{
+	PropertyValue Value;
+	*Value.mutable_transform_value() = Request.value();
+	return SetPropertyOnObject(World, Request, Value);
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetColorPropertyRequest>(const UWorld* World, const SetColorPropertyRequest& Request)
+{
+	PropertyValue Value;
+	Value.mutable_color_value()->set_r(Request.r());
+	Value.mutable_color_value()->set_g(Request.g());
+	Value.mutable_color_value()->set_b(Request.b());
+	return SetPropertyOnObject(World, Request, Value);
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetClassPropertyRequest>(const UWorld* World, const SetClassPropertyRequest& Request)
+{
+	PropertyValue Value;
+	Value.set_class_value(Request.value());
+	return SetPropertyOnObject(World, Request, Value);
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetAssetPropertyRequest>(const UWorld* World, const SetAssetPropertyRequest& Request)
+{
+	PropertyValue Value;
+	Value.set_asset_value(Request.value());
+	return SetPropertyOnObject(World, Request, Value);
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetActorPropertyRequest>(const UWorld* World, const SetActorPropertyRequest& Request)
+{
+	PropertyValue Value;
+	Value.set_actor_value(Request.value());
+	return SetPropertyOnObject(World, Request, Value);
+}
+
+template<>
+grpc::Status SetPropertyImpl<SetComponentPropertyRequest>(const UWorld* World, const SetComponentPropertyRequest& Request)
+{
+	PropertyValue Value;
+	Value.set_component_value(Request.value());
+	return SetPropertyOnObject(World, Request, Value);
 }
 
 template<>
 grpc::Status SetPropertyImpl<SetBoolArrayPropertyRequest>(const UWorld* World, const SetBoolArrayPropertyRequest& Request)
 {
-	TArray<bool> Array;
-	Array.Append(Request.values().data(), Request.values_size());
-	return SetArrayPropertyImpl<FBoolProperty>(World, Request, Array);
+	PropertyValue Value;
+	*Value.mutable_bool_array_value()->mutable_values() = Request.values();
+	return SetPropertyOnObject(World, Request, Value);
 }
 
 template<>
 grpc::Status SetPropertyImpl<SetStringArrayPropertyRequest>(const UWorld* World, const SetStringArrayPropertyRequest& Request)
 {
-	// First try to set it as an FString array, then fall back on FName array
-	TArray<FString> StrArray;
-	StrArray.Reserve(Request.values_size());
-	for (const std::string& String : Request.values())
-	{
-		StrArray.Add(UTF8_TO_TCHAR(String.c_str()));
-	}
-	grpc::Status StatusStr = SetArrayPropertyImpl<FStrProperty>(World, Request, StrArray);
-	// If we got an error other than FAILED_PRECONDITION that means the type was right, but something else was wrong.
-	if (StatusStr.ok() || StatusStr.error_code() != grpc::FAILED_PRECONDITION)
-	{
-		return StatusStr;
-	}
-	TArray<FName> NameArray;
-	NameArray.Reserve(Request.values_size());
-	for (const std::string& String : Request.values())
-	{
-		NameArray.Add(UTF8_TO_TCHAR(String.c_str()));
-	}
-	return SetArrayPropertyImpl<FNameProperty>(World, Request, NameArray);
+	PropertyValue Value;
+	*Value.mutable_string_array_value()->mutable_values() = Request.values();
+	return SetPropertyOnObject(World, Request, Value);
 }
 
 template<>
 grpc::Status SetPropertyImpl<SetEnumArrayPropertyRequest>(const UWorld* World, const SetEnumArrayPropertyRequest& Request)
 {
-	// First try to set it as an FEnumProperty array, then fall back on FByteProperty array
-	TArray<FString> StrArray;
-	StrArray.Reserve(Request.values_size());
-	for (const std::string& String : Request.values())
-	{
-		StrArray.Add(UTF8_TO_TCHAR(String.c_str()));
-	}
-	grpc::Status EnumStatus = SetArrayPropertyImpl<FEnumProperty>(World, Request, StrArray);
-	// If we got an error other than FAILED_PRECONDITION that means the type was right, but something else was wrong.
-	if (EnumStatus.ok() || EnumStatus.error_code() != grpc::FAILED_PRECONDITION)
-	{
-		return EnumStatus;
-	}
-	return SetArrayPropertyImpl<FByteProperty>(World, Request, StrArray);
+	PropertyValue Value;
+	*Value.mutable_enum_array_value()->mutable_values() = Request.values();
+	return SetPropertyOnObject(World, Request, Value);
 }
 
 template<>
 grpc::Status SetPropertyImpl<SetIntArrayPropertyRequest>(const UWorld* World, const SetIntArrayPropertyRequest& Request)
 {
-	TArray<int32> Array;
-	Array.Append(Request.values().data(), Request.values_size());
-	return SetArrayPropertyImpl<FIntProperty>(World, Request, Array);
+	PropertyValue Value;
+	*Value.mutable_int_array_value()->mutable_values() = Request.values();
+	return SetPropertyOnObject(World, Request, Value);
 }
 
 template<>
 grpc::Status SetPropertyImpl<SetInt64ArrayPropertyRequest>(const UWorld* World, const SetInt64ArrayPropertyRequest& Request)
 {
-	// Protobuf's int64 is `long` on Linux but Unreal's int64 is `long long`; same width, different
-	// C++ types, so the pointer overload of TArray::Append can't match. Copy element-by-element instead.
-	TArray<int64> Array;
-	Array.Reserve(Request.values_size());
-	for (const int64 V : Request.values())
-	{
-		Array.Add(V);
-	}
-	return SetArrayPropertyImpl<FInt64Property>(World, Request, Array);
+	PropertyValue Value;
+	*Value.mutable_int64_array_value()->mutable_values() = Request.values();
+	return SetPropertyOnObject(World, Request, Value);
 }
 
 template<>
 grpc::Status SetPropertyImpl<SetFloatArrayPropertyRequest>(const UWorld* World, const SetFloatArrayPropertyRequest& Request)
 {
-	// First try to set it as a double array, then fall back on float array
-	TArray<float> FloatArray;
-	FloatArray.Append(Request.values().data(), Request.values_size());
-	grpc::Status StatusFloat = SetArrayPropertyImpl<FDoubleProperty>(World, Request, FloatArray);
-	// If we got an error other than FAILED_PRECONDITION that means the type was right, but something else was wrong.
-	if (StatusFloat.ok() || StatusFloat.error_code() != grpc::FAILED_PRECONDITION)
-	{
-		return StatusFloat;
-	}
-	return SetArrayPropertyImpl<FFloatProperty>(World, Request, FloatArray);
+	PropertyValue Value;
+	*Value.mutable_float_array_value()->mutable_values() = Request.values();
+	return SetPropertyOnObject(World, Request, Value);
 }
 
 template<>
 grpc::Status SetPropertyImpl<SetClassArrayPropertyRequest>(const UWorld* World, const SetClassArrayPropertyRequest& Request)
 {
-	TArray<UObject*> ClassArray;
-	for (const std::string& Value : Request.values())
-	{
-		const FString ClassName(UTF8_TO_TCHAR(Value.c_str()));
-		UClass* Class = GetSubClassWithName<UObject>(ClassName);
-		if (!Class)
-		{
-			return grpc::Status(grpc::NOT_FOUND, "Did not find class with name " + std::string(TCHAR_TO_UTF8(*ClassName)));
-		}
-		ClassArray.Add(Class);
-	}
-	return SetObjectArrayProperty(World, Request, ClassArray);
+	PropertyValue Value;
+	*Value.mutable_class_array_value()->mutable_values() = Request.values();
+	return SetPropertyOnObject(World, Request, Value);
 }
 
 template<>
 grpc::Status SetPropertyImpl<SetAssetArrayPropertyRequest>(const UWorld* World, const SetAssetArrayPropertyRequest& Request)
 {
-	TArray<UObject*> AssetArray;
-	for (const std::string& Value : Request.values())
-	{
-		const FString AssetPath(UTF8_TO_TCHAR(Value.c_str()));
-		UObject* Asset = GetAssetByPath(AssetPath);
-		if (!Asset)
-		{
-			return grpc::Status(grpc::NOT_FOUND, "Did not find asset with path " + std::string(TCHAR_TO_UTF8(*AssetPath)));
-		}
-		AssetArray.Add(Asset);
-	}
-	return SetArrayPropertyImpl<FObjectProperty>(World, Request, AssetArray);
+	PropertyValue Value;
+	*Value.mutable_asset_array_value()->mutable_values() = Request.values();
+	return SetPropertyOnObject(World, Request, Value);
 }
 
 template<>
 grpc::Status SetPropertyImpl<SetActorArrayPropertyRequest>(const UWorld* World, const SetActorArrayPropertyRequest& Request)
 {
-	TArray<UObject*> ActorArray;
-	for (const std::string& Value : Request.values())
-	{
-		const FString ActorName(UTF8_TO_TCHAR(Value.c_str()));
-		AActor* Actor = GetActorWithName(World, ActorName);
-		if (!Actor)
-		{
-			return grpc::Status(grpc::NOT_FOUND, "Did not find actor with name " + std::string(TCHAR_TO_UTF8(*ActorName)));
-		}
-		ActorArray.Add(Actor);
-	}
-	return SetObjectArrayProperty(World, Request, ActorArray);
+	PropertyValue Value;
+	*Value.mutable_actor_array_value()->mutable_values() = Request.values();
+	return SetPropertyOnObject(World, Request, Value);
 }
 
 template<>
 grpc::Status SetPropertyImpl<SetComponentArrayPropertyRequest>(const UWorld* World, const SetComponentArrayPropertyRequest& Request)
 {
-	TArray<UObject*> ComponentArray;
-	for (const std::string& Value : Request.values())
-	{
-		const FString FullName(UTF8_TO_TCHAR(Value.c_str()));
-		FString ActorName;
-		FString ComponentName;
-		FullName.Split(TEXT(":"), &ActorName, &ComponentName);
-		if (ActorName.IsEmpty() || ComponentName.IsEmpty())
-		{
-			const FString ErrorMsg = FString::Printf(TEXT("Component array property value '%s' is malformed; expected 'ActorName:ComponentName'"), *FullName);
-			return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
-		}
-		const AActor* Actor = GetActorWithName(World, ActorName);
-		if (!Actor)
-		{
-			const FString ErrorMsg = FString::Printf(TEXT("Failed to find actor '%s' for component array property value '%s'"), *ActorName, *FullName);
-			return grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
-		}
-		UActorComponent* Component = GetComponentWithName(Actor, ComponentName);
-		if (!Component)
-		{
-			const FString ErrorMsg = FString::Printf(TEXT("Failed to find component '%s' on actor '%s' for component array property value '%s'"), *ComponentName, *ActorName, *FullName);
-			return grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
-		}
-		ComponentArray.Add(Component);
-	}
-	return SetObjectArrayProperty(World, Request, ComponentArray);
+	PropertyValue Value;
+	*Value.mutable_component_array_value()->mutable_values() = Request.values();
+	return SetPropertyOnObject(World, Request, Value);
 }
 
 template<>
 grpc::Status SetPropertyImpl<SetBoolSetPropertyRequest>(const UWorld* World, const SetBoolSetPropertyRequest& Request)
 {
-	TArray<bool> Array;
-	Array.Append(Request.values().data(), Request.values_size());
-	return SetSetPropertyImpl<FBoolProperty>(World, Request, Array);
+	PropertyValue Value;
+	*Value.mutable_bool_set_value()->mutable_values() = Request.values();
+	return SetPropertyOnObject(World, Request, Value);
 }
 
 template<>
 grpc::Status SetPropertyImpl<SetStringSetPropertyRequest>(const UWorld* World, const SetStringSetPropertyRequest& Request)
 {
-	TArray<FString> StrArray;
-	StrArray.Reserve(Request.values_size());
-	for (const std::string& String : Request.values())
-	{
-		StrArray.Add(UTF8_TO_TCHAR(String.c_str()));
-	}
-	const grpc::Status StatusStr = SetSetPropertyImpl<FStrProperty>(World, Request, StrArray);
-	if (StatusStr.ok() || StatusStr.error_code() != grpc::FAILED_PRECONDITION)
-	{
-		return StatusStr;
-	}
-	TArray<FName> NameArray;
-	NameArray.Reserve(Request.values_size());
-	for (const std::string& String : Request.values())
-	{
-		NameArray.Add(UTF8_TO_TCHAR(String.c_str()));
-	}
-	return SetSetPropertyImpl<FNameProperty>(World, Request, NameArray);
+	PropertyValue Value;
+	*Value.mutable_string_set_value()->mutable_values() = Request.values();
+	return SetPropertyOnObject(World, Request, Value);
 }
 
 template<>
 grpc::Status SetPropertyImpl<SetEnumSetPropertyRequest>(const UWorld* World, const SetEnumSetPropertyRequest& Request)
 {
-	TArray<FString> StrArray;
-	StrArray.Reserve(Request.values_size());
-	for (const std::string& String : Request.values())
-	{
-		StrArray.Add(UTF8_TO_TCHAR(String.c_str()));
-	}
-	const grpc::Status EnumStatus = SetSetPropertyImpl<FEnumProperty>(World, Request, StrArray);
-	if (EnumStatus.ok() || EnumStatus.error_code() != grpc::FAILED_PRECONDITION)
-	{
-		return EnumStatus;
-	}
-	return SetSetPropertyImpl<FByteProperty>(World, Request, StrArray);
+	PropertyValue Value;
+	*Value.mutable_enum_set_value()->mutable_values() = Request.values();
+	return SetPropertyOnObject(World, Request, Value);
 }
 
 template<>
 grpc::Status SetPropertyImpl<SetIntSetPropertyRequest>(const UWorld* World, const SetIntSetPropertyRequest& Request)
 {
-	TArray<int32> Array;
-	Array.Append(Request.values().data(), Request.values_size());
-	return SetSetPropertyImpl<FIntProperty>(World, Request, Array);
+	PropertyValue Value;
+	*Value.mutable_int_set_value()->mutable_values() = Request.values();
+	return SetPropertyOnObject(World, Request, Value);
 }
 
 template<>
 grpc::Status SetPropertyImpl<SetInt64SetPropertyRequest>(const UWorld* World, const SetInt64SetPropertyRequest& Request)
 {
-	// Protobuf's int64 is `long` on Linux but Unreal's int64 is `long long`; same width, different
-	// C++ types, so the pointer overload of TArray::Append can't match. Copy element-by-element instead.
-	TArray<int64> Array;
-	Array.Reserve(Request.values_size());
-	for (const int64 V : Request.values())
-	{
-		Array.Add(V);
-	}
-	return SetSetPropertyImpl<FInt64Property>(World, Request, Array);
+	PropertyValue Value;
+	*Value.mutable_int64_set_value()->mutable_values() = Request.values();
+	return SetPropertyOnObject(World, Request, Value);
 }
 
 template<>
 grpc::Status SetPropertyImpl<SetFloatSetPropertyRequest>(const UWorld* World, const SetFloatSetPropertyRequest& Request)
 {
-	TArray<float> FloatArray;
-	FloatArray.Append(Request.values().data(), Request.values_size());
-	const grpc::Status StatusFloat = SetSetPropertyImpl<FDoubleProperty>(World, Request, FloatArray);
-	if (StatusFloat.ok() || StatusFloat.error_code() != grpc::FAILED_PRECONDITION)
-	{
-		return StatusFloat;
-	}
-	return SetSetPropertyImpl<FFloatProperty>(World, Request, FloatArray);
+	PropertyValue Value;
+	*Value.mutable_float_set_value()->mutable_values() = Request.values();
+	return SetPropertyOnObject(World, Request, Value);
 }
 
 template<>
 grpc::Status SetPropertyImpl<SetClassSetPropertyRequest>(const UWorld* World, const SetClassSetPropertyRequest& Request)
 {
-	TArray<UObject*> ClassArray;
-	for (const std::string& Value : Request.values())
-	{
-		const FString ClassName(UTF8_TO_TCHAR(Value.c_str()));
-		UClass* Class = GetSubClassWithName<UObject>(ClassName);
-		if (!Class)
-		{
-			return grpc::Status(grpc::NOT_FOUND, "Did not find class with name " + std::string(TCHAR_TO_UTF8(*ClassName)));
-		}
-		ClassArray.Add(Class);
-	}
-	return SetObjectSetProperty(World, Request, ClassArray);
+	PropertyValue Value;
+	*Value.mutable_class_set_value()->mutable_values() = Request.values();
+	return SetPropertyOnObject(World, Request, Value);
 }
 
 template<>
 grpc::Status SetPropertyImpl<SetAssetSetPropertyRequest>(const UWorld* World, const SetAssetSetPropertyRequest& Request)
 {
-	TArray<UObject*> AssetArray;
-	for (const std::string& Value : Request.values())
-	{
-		const FString AssetPath(UTF8_TO_TCHAR(Value.c_str()));
-		UObject* Asset = GetAssetByPath(AssetPath);
-		if (!Asset)
-		{
-			return grpc::Status(grpc::NOT_FOUND, "Did not find asset with path " + std::string(TCHAR_TO_UTF8(*AssetPath)));
-		}
-		AssetArray.Add(Asset);
-	}
-	return SetObjectSetProperty(World, Request, AssetArray);
+	PropertyValue Value;
+	*Value.mutable_asset_set_value()->mutable_values() = Request.values();
+	return SetPropertyOnObject(World, Request, Value);
 }
 
 template<>
 grpc::Status SetPropertyImpl<SetActorSetPropertyRequest>(const UWorld* World, const SetActorSetPropertyRequest& Request)
 {
-	TArray<UObject*> ActorArray;
-	for (const std::string& Value : Request.values())
-	{
-		const FString ActorName(UTF8_TO_TCHAR(Value.c_str()));
-		AActor* Actor = GetActorWithName(World, ActorName);
-		if (!Actor)
-		{
-			return grpc::Status(grpc::NOT_FOUND, "Did not find actor with name " + std::string(TCHAR_TO_UTF8(*ActorName)));
-		}
-		ActorArray.Add(Actor);
-	}
-	return SetObjectSetProperty(World, Request, ActorArray);
+	PropertyValue Value;
+	*Value.mutable_actor_set_value()->mutable_values() = Request.values();
+	return SetPropertyOnObject(World, Request, Value);
 }
 
 template<>
 grpc::Status SetPropertyImpl<SetComponentSetPropertyRequest>(const UWorld* World, const SetComponentSetPropertyRequest& Request)
 {
-	TArray<UObject*> ComponentArray;
-	for (const std::string& Value : Request.values())
-	{
-		const FString FullName(UTF8_TO_TCHAR(Value.c_str()));
-		FString ActorName;
-		FString ComponentName;
-		FullName.Split(TEXT(":"), &ActorName, &ComponentName);
-		if (ActorName.IsEmpty() || ComponentName.IsEmpty())
-		{
-			const FString ErrorMsg = FString::Printf(TEXT("Component set property value '%s' is malformed; expected 'ActorName:ComponentName'"), *FullName);
-			return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
-		}
-		const AActor* Actor = GetActorWithName(World, ActorName);
-		if (!Actor)
-		{
-			const FString ErrorMsg = FString::Printf(TEXT("Failed to find actor '%s' for component set property value '%s'"), *ActorName, *FullName);
-			return grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
-		}
-		UActorComponent* Component = GetComponentWithName(Actor, ComponentName);
-		if (!Component)
-		{
-			const FString ErrorMsg = FString::Printf(TEXT("Failed to find component '%s' on actor '%s' for component set property value '%s'"), *ComponentName, *ActorName, *FullName);
-			return grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
-		}
-		ComponentArray.Add(Component);
-	}
-	return SetObjectSetProperty(World, Request, ComponentArray);
+	PropertyValue Value;
+	*Value.mutable_component_set_value()->mutable_values() = Request.values();
+	return SetPropertyOnObject(World, Request, Value);
 }
 
 template <typename RequestType>
@@ -2519,6 +2710,159 @@ void UTempoWorldControlServiceSubsystem::SetProperties(const SetPropertiesReques
 	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
 }
 
+void UTempoWorldControlServiceSubsystem::SetPropertyValue(const SetPropertyRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const
+{
+	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), SetPropertyOnObject(GetWorld(), Request, Request.value()));
+}
+
+namespace
+{
+	// Parameters the caller must supply: everything but the return value and pure output
+	// parameters. A Blueprint "by-ref" input is CPF_OutParm|CPF_ReferenceParm and is an input.
+	bool IsInputParm(const FProperty* Property)
+	{
+		if (!Property->HasAnyPropertyFlags(CPF_Parm) || Property->HasAnyPropertyFlags(CPF_ReturnParm))
+		{
+			return false;
+		}
+		return !Property->HasAnyPropertyFlags(CPF_OutParm) || Property->HasAnyPropertyFlags(CPF_ReferenceParm);
+	}
+
+	grpc::Status CheckFunctionIsCallable(const UObject* Object, const UFunction* Function)
+	{
+		for (TFieldIterator<FProperty> It(Function); It && It->HasAnyPropertyFlags(CPF_Parm); ++It)
+		{
+			const FProperty* Parm = *It;
+			// Latent functions are identified by their FLatentActionInfo parameter, which only
+			// the caller's own latent action manager can meaningfully fill in.
+			if (const FStructProperty* StructParm = CastField<FStructProperty>(Parm))
+			{
+				if (StructParm->Struct == FLatentActionInfo::StaticStruct())
+				{
+					const FString ErrorMsg = FString::Printf(TEXT("Function '%s' on object '%s' is latent, which cannot be called over the API"), *Function->GetName(), *Object->GetName());
+					return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+				}
+			}
+			if (Parm->ArrayDim != 1)
+			{
+				// UProperties can be C-style arrays, indicated by a non-1 ArrayDim. We don't support these.
+				const FString ErrorMsg = FString::Printf(TEXT("Parameter '%s' of function '%s' is a C-style array, which is not supported"), *Parm->GetName(), *Function->GetName());
+				return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+			}
+			if (IsInputParm(Parm) && (CastField<FDelegateProperty>(Parm) || CastField<FMulticastDelegateProperty>(Parm)))
+			{
+				const FString ErrorMsg = FString::Printf(TEXT("Parameter '%s' of function '%s' is a delegate, which cannot be supplied over the API"), *Parm->GetName(), *Function->GetName());
+				return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+			}
+		}
+
+		return grpc::Status_OK;
+	}
+
+	// Every input parameter must be named by some arg. An arg addressing part of a parameter
+	// ("MyStruct.Inner") counts as supplying it; the rest of that parameter keeps its default.
+	grpc::Status CheckAllInputParmsSupplied(const UObject* Object, const UFunction* Function, const CallFunctionRequest& Request)
+	{
+		TSet<FName> SuppliedParms;
+		for (const FunctionArg& Arg : Request.args())
+		{
+			FString ArgName(UTF8_TO_TCHAR(Arg.name().c_str()));
+			if (ArgName.IsEmpty())
+			{
+				return grpc::Status(grpc::FAILED_PRECONDITION, "Every arg in a CallFunction request must have a name");
+			}
+			SuppliedParms.Add(FName(SplitPropertyName(ArgName)));
+		}
+
+		TArray<FString> MissingParms;
+		for (TFieldIterator<FProperty> It(Function); It && It->HasAnyPropertyFlags(CPF_Parm); ++It)
+		{
+			if (IsInputParm(*It) && !SuppliedParms.Contains(It->GetFName()))
+			{
+				MissingParms.Add(It->GetName());
+			}
+		}
+
+		if (!MissingParms.IsEmpty())
+		{
+			const FString ErrorMsg = FString::Printf(TEXT("Function '%s' on object '%s' requires argument(s) '%s', which were not supplied"), *Function->GetName(), *Object->GetName(), *FString::Join(MissingParms, TEXT("', '")));
+			return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+		}
+
+		return grpc::Status_OK;
+	}
+
+	// Build the function's parameter frame, fill it from the request's args, and invoke.
+	// A UFunction is a UStruct whose parameters are FProperties, so the frame is just another
+	// container that SetValueOnTarget can write into.
+	grpc::Status CallFunctionWithArgs(const UWorld* World, UObject* Object, UFunction* Function, const CallFunctionRequest& Request)
+	{
+		const grpc::Status CallableStatus = CheckFunctionIsCallable(Object, Function);
+		if (!CallableStatus.ok())
+		{
+			return CallableStatus;
+		}
+
+		const grpc::Status SuppliedStatus = CheckAllInputParmsSupplied(Object, Function, Request);
+		if (!SuppliedStatus.ok())
+		{
+			return SuppliedStatus;
+		}
+
+		uint8* Frame = static_cast<uint8*>(FMemory_Alloca_Aligned(Function->ParmsSize, Function->GetMinAlignment()));
+		FMemory::Memzero(Frame, Function->ParmsSize);
+		for (TFieldIterator<FProperty> It(Function); It && It->HasAnyPropertyFlags(CPF_Parm); ++It)
+		{
+			if (!It->HasAnyPropertyFlags(CPF_ZeroConstructor))
+			{
+				It->InitializeValue_InContainer(Frame);
+			}
+		}
+		ON_SCOPE_EXIT
+		{
+			for (TFieldIterator<FProperty> It(Function); It && It->HasAnyPropertyFlags(CPF_Parm); ++It)
+			{
+				It->DestroyValue_InContainer(Frame);
+			}
+		};
+
+		for (int32 ArgIndex = 0; ArgIndex < Request.args_size(); ++ArgIndex)
+		{
+			const FunctionArg& Arg = Request.args(ArgIndex);
+			FString ArgName(UTF8_TO_TCHAR(Arg.name().c_str()));
+
+			// The frame has no owning UObject, so Target.Object stays null and nothing is notified.
+			FPropertyTarget Target;
+			Target.Container = Frame;
+			const FString ParmName = SplitPropertyName(ArgName);
+			Target.InnerPropertyName = ArgName;
+			Target.Property = Function->FindPropertyByName(FName(ParmName));
+
+			if (!Target.Property || !Target.Property->HasAnyPropertyFlags(CPF_Parm))
+			{
+				const FString ErrorMsg = FString::Printf(TEXT("Function '%s' on object '%s' has no parameter named '%s'"), *Function->GetName(), *Object->GetName(), *ParmName);
+				return grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+			}
+			if (Target.Property->HasAnyPropertyFlags(CPF_ReturnParm))
+			{
+				const FString ErrorMsg = FString::Printf(TEXT("'%s' is the return value of function '%s' and cannot be supplied as an argument"), *ParmName, *Function->GetName());
+				return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+			}
+
+			const grpc::Status SetStatus = SetValueOnTarget(World, Target, Arg.value());
+			if (!SetStatus.ok())
+			{
+				const FString ErrorMsg = FString::Printf(TEXT("Argument %d ('%s') of function '%s': %s"), ArgIndex, *ParmName, *Function->GetName(), UTF8_TO_TCHAR(SetStatus.error_message().c_str()));
+				return grpc::Status(SetStatus.error_code(), std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+			}
+		}
+
+		Object->ProcessEvent(Function, Frame);
+
+		return grpc::Status_OK;
+	}
+}
+
 void UTempoWorldControlServiceSubsystem::CallObjectFunction(const CallFunctionRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const
 {
 	UObject* Object = nullptr;
@@ -2544,14 +2888,5 @@ void UTempoWorldControlServiceSubsystem::CallObjectFunction(const CallFunctionRe
 		return;
 	}
 
-	if (Function->NumParms != 0)
-	{
-		const FString ErrorMsg = FString::Printf(TEXT("Function '%s' on object '%s' has %d parameters, but only functions with no arguments and void return type are currently supported"), *FunctionName.ToString(), *Object->GetName(), Function->NumParms);
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
-		return;
-	}
-
-	Object->ProcessEvent(Function, nullptr);
-
-	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status_OK);
+	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), CallFunctionWithArgs(GetWorld(), Object, Function, Request));
 }

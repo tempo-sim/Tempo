@@ -36,6 +36,7 @@ namespace TempoWorld
 	class ActivateComponentRequest;
 	class DeactivateComponentRequest;
 	class CallFunctionRequest;
+	class SetPropertyRequest;
 	class SetPropertiesRequest;
 	class SetPropertiesResponse;
 }
@@ -82,6 +83,8 @@ public:
 	void GetActorProperties(const TempoWorld::GetActorPropertiesRequest& Request, const TResponseDelegate<TempoWorld::GetPropertiesResponse>& ResponseContinuation) const;
 
 	void GetComponentProperties(const TempoWorld::GetComponentPropertiesRequest& Request, const TResponseDelegate<TempoWorld::GetPropertiesResponse>& ResponseContinuation) const;
+
+	void SetPropertyValue(const TempoWorld::SetPropertyRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const;
 
 	void CallObjectFunction(const TempoWorld::CallFunctionRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const;
 

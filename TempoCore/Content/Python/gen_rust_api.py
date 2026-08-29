@@ -3,6 +3,7 @@
 # Generate Rust API wrappers from protobuf definitions.
 # This is the Rust equivalent of gen_api.py for Python.
 
+import copy
 import google.protobuf.descriptor as gpd
 import importlib.util
 import jinja2
@@ -351,6 +352,83 @@ use {{ infra }}::streaming::SyncStreamIterator;
 
 '''
 
+    # Template for a Call struct that stages typed CallFunction arguments. One method per
+    # `Value` oneof variant, so users never construct Value or FunctionArg messages by hand.
+    call_template = """
+/// CallFunction argument builder.
+///
+/// Stages typed arguments for one UFUNCTION invocation. Each `*_arg` method names a
+/// parameter and appends its value, returning `self` for fluent chaining; call
+/// [`Call::execute`] (sync) or [`Call::execute_async`] (async) to invoke. Every input
+/// parameter of the function must be supplied.
+pub struct Call {
+    actor: String,
+    component: String,
+    function: String,
+    args: Vec<{{ arg_type }}>,
+}
+
+pub fn call(actor: String, component: String, function: String) -> Call {
+    Call { actor, component, function, args: Vec::new() }
+}
+
+impl Call {
+{%- for method in methods %}
+    pub fn {{ method.name }}(
+        mut self,
+        name: String,
+{%- for field in method.fields %}
+        {{ field.name }}: {{ field.rust_type }},
+{%- endfor %}
+    ) -> Self {
+        self.args.push({{ arg_type }} {
+            name,
+            value: Some({{ value_type }} {
+                value: Some({{ value_enum_path }}::{{ method.variant }}(
+{%- if method.wrapper_rust_type %}
+                    {{ method.wrapper_rust_type }} {
+{%- for field in method.fields %}
+                        {{ field.name }},
+{%- endfor %}
+                    }
+{%- else %}
+                    {{ method.fields[0].name }}
+{%- endif %}
+                )),
+            }),
+        });
+        self
+    }
+
+{%- endfor %}
+
+    pub async fn execute_async(
+        self,
+    ) -> Result<{{ response_rust_type }}, {{ infra }}::TempoError> {
+        let channel = {{ infra }}::context::connected_channel().await?;
+        let mut client = {{ client_type }}::new(channel)
+            .max_decoding_message_size({{ infra }}::context::MAX_MESSAGE_SIZE)
+            .max_encoding_message_size({{ infra }}::context::MAX_MESSAGE_SIZE);
+
+        let request = {{ request_rust_type }} {
+            actor: self.actor,
+            component: self.component,
+            function: self.function,
+            args: self.args,
+        };
+        let response = client.call_function(request).await?;
+        Ok(response.into_inner())
+    }
+
+    pub fn execute(
+        self,
+    ) -> Result<{{ response_rust_type }}, {{ infra }}::TempoError> {
+        {{ infra }}::context::RUNTIME.block_on(self.execute_async())
+    }
+}
+
+"""
+
     j2_environment = jinja2.Environment()
 
     # Group services by module first
@@ -532,6 +610,84 @@ use {{ infra }}::streaming::SyncStreamIterator;
                     request_rust_type=request_rust_type_batch,
                     response_rust_type=response_rust_type_batch,
                     client_type=client_type_batch,
+                ))
+
+            # If this module defines a `Value` message with a `value` oneof and a corresponding
+            # CallFunction RPC, emit a fluent Call builder so users don't have to construct
+            # Value or FunctionArg messages by hand.
+            value_desc = next(
+                (m for m in all_messages.values()
+                 if m.object_name == "Value"
+                 and m.module_name.split(".")[0] == tempo_module_name),
+                None,
+            )
+            call_service = next(
+                (s for s in service_descriptors
+                 if any(rpc.name == "CallFunction" for rpc in s.rpcs)),
+                None,
+            )
+            if value_desc and call_service and value_desc.oneofs.get("value"):
+                value_module_pascal = value_desc.module_name.split(".")[0]
+                value_module_snake = pascal_to_snake(value_desc.object_name)  # value
+                arg_type = _crate_path(owner, value_module_pascal, "FunctionArg")
+                value_type = _crate_path(owner, value_module_pascal, "Value")
+                value_enum_path = _crate_path(owner, value_module_pascal, f"{value_module_snake}::Value")
+                request_rust_type_call = _crate_path(owner, value_module_pascal, "CallFunctionRequest")
+                call_rpc = next(rpc for rpc in call_service.rpcs if rpc.name == "CallFunction")
+                call_response_desc = all_messages[call_rpc.response_type]
+                response_rust_type_call = _crate_path(
+                    owner, call_response_desc.module_name.split(".")[0], call_response_desc.object_name)
+                client_type_call = _crate_path(
+                    owner, value_module_pascal,
+                    f"{pascal_to_snake(call_service.object_name)}_client::"
+                    f"{call_service.object_name}Client",
+                )
+
+                fields_by_name = {field.name: field for field in value_desc.fields}
+                methods = []
+                for entry in value_desc.oneofs["value"]:
+                    variant_field = fields_by_name[entry["name"]]
+                    wrapper_desc = all_messages.get(entry["message_proto_full_name"])
+                    # Flatten a wrapper message's fields into the method signature when they are
+                    # all scalars, mirroring how set_vector_property takes x/y/z rather than a
+                    # Vector. A wrapper with message-typed fields (Transform) passes through whole.
+                    if wrapper_desc is not None and all(
+                            f.proto_type != gpd.FieldDescriptor.TYPE_MESSAGE for f in wrapper_desc.fields):
+                        method_fields = []
+                        for field in wrapper_desc.fields:
+                            field.rust_type = get_rust_type(field, owner, module_owners)
+                            if field.label == "repeated":
+                                field.rust_type = f"Vec<{field.rust_type}>"
+                            method_fields.append(field)
+                        wrapper_rust_type = _crate_path(
+                            owner, wrapper_desc.module_name.split(".")[0], wrapper_desc.object_name)
+                    else:
+                        # A oneof variant holds its message directly, so unlike a struct field it
+                        # is never Option-wrapped. Name it `value`, as set_*_property does.
+                        value_field = copy.copy(variant_field)
+                        value_field.name = "value"
+                        value_field.rust_type = get_rust_type(variant_field, owner, module_owners)
+                        method_fields = [value_field]
+                        wrapper_rust_type = None
+                    # bool_value -> bool_arg; int_vector_value -> int_vector_arg
+                    methods.append({
+                        "name": "{}_arg".format(
+                            entry["name"][:-6] if entry["name"].endswith("_value") else entry["name"]),
+                        "variant": snake_to_upper_camel(entry["name"]),
+                        "wrapper_rust_type": wrapper_rust_type,
+                        "fields": method_fields,
+                    })
+
+                call_tpl = j2_environment.from_string(call_template)
+                rpc_code.append(call_tpl.render(
+                    infra=infra,
+                    methods=methods,
+                    arg_type=arg_type,
+                    value_type=value_type,
+                    value_enum_path=value_enum_path,
+                    request_rust_type=request_rust_type_call,
+                    response_rust_type=response_rust_type_call,
+                    client_type=client_type_call,
                 ))
 
             if rpc_code:

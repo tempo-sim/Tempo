@@ -456,11 +456,127 @@ message SetComponentSetPropertyRequest {
   repeated string values = 4;
 }
 
+// Element wrappers for the repeated variants of `Value`. proto3 does not allow
+// `repeated` fields directly inside a oneof, so each repeated variant needs a
+// single-field wrapper message.
+message BoolArray { repeated bool values = 1; }
+message IntArray { repeated int32 values = 1; }
+message Int64Array { repeated int64 values = 1; }
+message FloatArray { repeated float values = 1; }
+message StringArray { repeated string values = 1; }
+
+// Value-shaped counterparts of the flattened fields on the Set*PropertyRequest
+// messages. A oneof variant must be a single field, so the scalar components
+// these types carry are grouped into a message.
+message IntVector {
+  int32 x = 1;
+  int32 y = 2;
+  int32 z = 3;
+}
+
+message IntPoint {
+  int32 x = 1;
+  int32 y = 2;
+}
+
+message Quat {
+  // Right-handed convention; converted to Unreal's left-handed FQuat.
+  float x = 1;
+  float y = 2;
+  float z = 3;
+  float w = 4;
+}
+
+message Color {
+  // 8-bit RGB components in [0, 255].
+  int32 r = 1;
+  int32 g = 2;
+  int32 b = 3;
+}
+
+// One typed value, independent of what it is assigned to. Used by SetProperty
+// as a property's new value and by CallFunction as an argument's value.
+//
+// The variant selects how the value is interpreted and which Unreal property
+// types it may be written to - exactly the same rules the singular
+// Set*Property RPCs follow, since they are now expressed in terms of this
+// message. See the README's property type table.
+message Value {
+  oneof value {
+    bool bool_value = 1;
+    int32 int_value = 2;
+    int64 int64_value = 3;
+    float float_value = 4;
+    string string_value = 5;
+    // Enum value as its symbolic name.
+    string enum_value = 6;
+    TempoCore.Vector vector_value = 7;
+    TempoCore.Vector2D vector2d_value = 8;
+    IntVector int_vector_value = 9;
+    IntPoint int_point_value = 10;
+    // Roll/pitch/yaw in radians, right-handed.
+    TempoCore.Rotation rotator_value = 11;
+    Quat quat_value = 12;
+    // Location in meters, rotation in radians, right-handed.
+    TempoCore.Transform transform_value = 13;
+    Color color_value = 14;
+    // Class path or name. Named the same way as SpawnActor's actor_type.
+    string class_value = 15;
+    // Asset path or name.
+    string asset_value = 16;
+    // Name of the referenced actor.
+    string actor_value = 17;
+    // Name of the referenced component, as "ActorName:ComponentName".
+    string component_value = 18;
+    BoolArray bool_array_value = 19;
+    StringArray string_array_value = 20;
+    StringArray enum_array_value = 21;
+    IntArray int_array_value = 22;
+    Int64Array int64_array_value = 23;
+    FloatArray float_array_value = 24;
+    StringArray class_array_value = 25;
+    StringArray asset_array_value = 26;
+    StringArray actor_array_value = 27;
+    StringArray component_array_value = 28;
+    BoolArray bool_set_value = 29;
+    StringArray string_set_value = 30;
+    StringArray enum_set_value = 31;
+    IntArray int_set_value = 32;
+    Int64Array int64_set_value = 33;
+    FloatArray float_set_value = 34;
+    StringArray class_set_value = 35;
+    StringArray asset_set_value = 36;
+    StringArray actor_set_value = 37;
+    StringArray component_set_value = 38;
+  }
+}
+
+// Generic form of the singular Set*Property RPCs: one request that carries the
+// value's type in the value itself rather than in the RPC name.
+message SetPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  Value value = 4;
+}
+
+// One argument to CallFunction.
+message FunctionArg {
+  // Parameter name. Supports the same nested addressing as property names:
+  // "MyStruct.Inner", "MyArray[0]", "MyMap[key]".
+  string name = 1;
+  Value value = 2;
+}
+
 message CallFunctionRequest {
   string actor = 1;
   string component = 2;
   // Name of the UFUNCTION to invoke.
   string function = 3;
+  // One entry per parameter. Every input parameter of the function must be
+  // supplied; out parameters and the return value must not be. Args are
+  // applied in order. The function's return value, if any, is discarded.
+  repeated FunctionArg args = 4;
 }
 
 // One operation in a SetProperties batch. The oneof selects which set-property
@@ -633,6 +749,8 @@ service WorldControlService {
   rpc SetComponentSetProperty(SetComponentSetPropertyRequest) returns (TempoCore.Empty);
 
   rpc SetProperties(SetPropertiesRequest) returns (SetPropertiesResponse);
+
+  rpc SetProperty(SetPropertyRequest) returns (TempoCore.Empty);
 
   rpc CallFunction(CallFunctionRequest) returns (TempoCore.Empty);
 }

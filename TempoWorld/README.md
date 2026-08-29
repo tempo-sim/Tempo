@@ -134,6 +134,22 @@ TempoWorld also supports setting individual properties in structs, arrays, and m
 > [!Warning]
 > While the values you set for rotators and quaternions will be converted from radians/right-handed to degrees/left-handed, the values you set for floats and vector-shaped types (`vector`, `vector2d`, `int_vector`, `int_point`) will not be converted (so, these should be specified in centimeters if they represent distances). We don't feel it is safe to assume that these quantities always represent distances. `set_transform_property` is the one exception: it follows the same convention as `spawn_actor` and `set_actor_transform`, converting the location from meters to centimeters and the rotation from radians/right-handed to degrees/left-handed, since transforms almost always represent world-frame poses.
 
+Every one of the RPCs above is a named shorthand for the same underlying operation: write one typed
+value into one property. That operation is also available directly as `set_property`, which carries
+the value's type in a `Value` message instead of in the RPC name:
+
+```
+from tempo_sim import tempo_world
+import tempo_sim.TempoWorld.WorldControl_pb2 as WorldControl
+
+tempo_world.set_property(actor="MyActor", property="MaxSpeed",
+                         value=WorldControl.Value(float_value=42.0))
+```
+
+Reach for it when the type isn't known until runtime — dispatching over a config file, or replaying
+recorded property values. When you do know the type at the call site, the named `set_*_property`
+functions say the same thing more plainly.
+
 ### Batching Property Sets
 When you need to apply multiple property changes together, the `set_properties` RPC accepts a list of any of the singular set-property ops above and runs them in order in a single call. To avoid building op messages by hand, the generated clients include a fluent `Batch` builder with one method per supported type, named after its singular counterpart. The response contains one entry per *failed* op (by index); an empty `failures` list means every op succeeded.
 
@@ -172,3 +188,76 @@ for failure in &response.failures {
 }
 ```
 Args are positional and match the request message's field order (`actor, component, property, value/values/...`), the same as the singular `tempo_world::set_*_property` wrappers. `execute_async().await` is available for async callers.
+
+### Calling Functions
+`call_function` invokes any `UFUNCTION` on an Actor or Component by name. Arguments are typed
+`Value`s, exactly as `set_property` takes — so a function argument follows the same rules as the
+matching property type, including how classes, assets, actors, and components are named, and the
+same nested addressing (`MyStruct.Inner`, `MyArray[0]`, `MyMap[key]`) for reaching into a
+parameter.
+
+Rather than build `Value` messages by hand, the generated clients include a fluent `Call` builder
+with one `*_arg` method per supported type, named after the type it carries. In Python:
+
+```
+from tempo_sim import tempo_world
+
+tempo_world.call(actor="MyActor", function="ApplyDamage") \
+    .float_arg("Amount", 42.5) \
+    .vector_arg("Location", x=0.0, y=0.0, z=150.0) \
+    .enum_arg("DamageType", "Explosive") \
+    .actor_arg("Instigator", "BP_Player_C_0") \
+    .execute()
+```
+
+In Rust:
+
+```
+use tempo_sim::tempo_world;
+
+tempo_world::call("MyActor".into(), "".into(), "ApplyDamage".into())
+    .float_arg("Amount".into(), 42.5)
+    .vector_arg("Location".into(), 0.0, 0.0, 150.0)
+    .enum_arg("DamageType".into(), "Explosive".into())
+    .actor_arg("Instigator".into(), "BP_Player_C_0".into())
+    .execute()?;
+```
+
+In C++:
+
+```
+#include <tempo.h>
+
+auto result = tempo::tempo_world::call("MyActor", "", "ApplyDamage")
+    .float_arg("Amount", 42.5f)
+    .vector_arg("Location", 0.0, 0.0, 150.0)
+    .enum_arg("DamageType", "Explosive")
+    .actor_arg("Instigator", "BP_Player_C_0")
+    .execute();
+```
+
+`execute_async` is available for `await` in Python and Rust. Each `*_arg` method takes the same
+arguments as the corresponding `set_*_property` function, minus the property name — so
+`vector_arg` takes `x`/`y`/`z` and `transform_arg` takes a whole `Transform`, matching
+`set_vector_property` and `set_transform_property`. The same conversion caveats apply: rotators,
+quaternions, and transforms are converted from the API's radians/right-handed convention, and
+floats and the vector-shaped types are not.
+
+A few rules worth knowing:
+
+- **Every input parameter must be supplied.** Blueprint parameter defaults live in editor-only
+  metadata, so a packaged sim can't honor them; requiring all inputs means a call behaves the same
+  in the editor and in a packaged build. Out parameters and the return value must *not* be
+  supplied. Naming part of a parameter (`"MyStruct.Inner"`) counts as supplying it, and the rest of
+  that parameter keeps its zero value.
+- **The return value is discarded.** `call_function` returns `Empty`; a function that returns a
+  value can still be called, but its result is not sent back.
+- **Latent functions, C-style array parameters, and delegate parameters are rejected**, since
+  there's no meaningful way to supply them over the API.
+
+Functions with no parameters at all are called the same way, with no `*_arg` calls — or with the
+plain `call_function` RPC:
+
+```
+tempo_world.call_function(actor="MyActor", function="ResetToStart")
+```
