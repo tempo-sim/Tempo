@@ -105,12 +105,12 @@ For the common single-part cases there are first-class RPCs, which say the same 
 | --- | --- | --- |
 | `set_actor_location` | location only | `set_component_location` |
 | `set_actor_rotation` | rotation only | `set_component_rotation` |
-| `set_actor_scale3_d` | scale only | `set_component_scale3_d` |
+| `set_actor_scale3d` | scale only | `set_component_scale3d` |
 
 ```
 tw.set_actor_location(actor="MyActor", location=Geometry.Vector(x=1.0, y=2.0, z=3.0))
 tw.set_actor_rotation(actor="MyActor", rotation=Geometry.Rotation(r=0.0, p=0.0, y=1.57))
-tw.set_actor_scale3_d(actor="MyActor", scale=Geometry.Vector(x=2.0, y=2.0, z=2.0))
+tw.set_actor_scale3d(actor="MyActor", scale=Geometry.Vector(x=2.0, y=2.0, z=2.0))
 ```
 
 Unlike the transform RPCs, these are not partial: the one value each takes is required, and
@@ -328,3 +328,36 @@ for result in response.results:
     print(f"{result.name} ({result.property_type}) = {result.value}")
 # ReturnValue (float) = 500.0
 ```
+
+### Discovering Functions
+Just as `get_*_properties` lets you find a property without knowing its name up front,
+`get_actor_functions` and `get_component_functions` list the `UFUNCTION`s you can call:
+
+```
+from tempo_sim import tempo_world
+
+for function in tempo_world.get_actor_functions(actor="MyActor", include_components=True).functions:
+    print(f"{function.signature}{'' if function.callable else '  # ' + function.error}")
+# void SetActorHiddenInGame(bool bNewHidden)
+# float GetDistanceTo(AActor* OtherActor)
+# void GetActorBounds(bool bOnlyCollidingComponents, out vector Origin, out vector BoxExtent, bool bIncludeFromChildActors)
+```
+
+`signature` reads like the declaration does, and its type names come from the same vocabulary as
+`property_type` in `get_*_properties` — so the type in a signature tells you which `*_arg` method
+to call. Out parameters stay in the parameter list, prefixed with `out`, because that is where
+`CallFunction`'s parameter frame expects them.
+
+The same information is also available split up, in `parameters`, which is what you want if you're
+building a call programmatically rather than reading it:
+
+| Field | Meaning |
+| ------------- | ------------- |
+| `name`          | Parameter name, spelled the way an `*_arg` method's first argument expects it |
+| `property_type` | Same vocabulary as `get_*_properties`' `property_type` |
+| `kind`          | `PK_INPUT` (you must supply it), `PK_OUTPUT`, or `PK_RETURN` (you must not) |
+
+`callable` is false for the functions `call_function` would refuse — latent functions, and those
+with C-style array or delegate parameters — with `error` saying why, so you never have to guess
+which of the listed functions can actually be invoked. Delegate signatures aren't listed at all;
+they're declared like functions but exist only to type a delegate.

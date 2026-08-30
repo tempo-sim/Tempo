@@ -286,6 +286,131 @@ def test_call_function_void_returns_no_results(sim_server):
         tw.destroy_actor(actor=name)
 
 
+def _function(name, function, component=None):
+    functions = (tw.get_actor_functions(actor=name).functions if component is None
+                 else tw.get_component_functions(actor=name, component=component).functions)
+    return next((f for f in functions if f.name == function), None)
+
+
+def test_get_actor_functions_reports_signature(sim_server):
+    """GetFunctions renders a signature the way the declaration reads, using the same type
+    vocabulary GetProperties reports."""
+    name = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=_transform(0.0, 0.0, 85.0)).name
+    try:
+        fn = _function(name, "SetActorHiddenInGame")
+        assert fn is not None
+        assert fn.signature == "void SetActorHiddenInGame(bool bNewHidden)"
+        assert fn.actor == name and fn.component == ""
+        assert fn.callable and fn.error == ""
+        assert [(p.name, p.property_type, p.kind) for p in fn.parameters] == [
+            ("bNewHidden", "bool", WorldControl.PK_INPUT)]
+    finally:
+        tw.destroy_actor(actor=name)
+
+
+def test_get_actor_functions_reports_return_and_out_parameters(sim_server):
+    """A return value and out parameters are reported as parameters, told apart by `kind` — they
+    are entries in the same frame CallFunction fills, not a separate thing."""
+    name = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=_transform(0.0, 0.0, 90.0)).name
+    try:
+        returning = _function(name, "GetDistanceTo")
+        assert returning.signature == "float GetDistanceTo(AActor* OtherActor)"
+        assert {p.name: p.kind for p in returning.parameters} == {
+            "OtherActor": WorldControl.PK_INPUT,
+            "ReturnValue": WorldControl.PK_RETURN,
+        }
+
+        out = _function(name, "GetActorBounds")
+        assert out.signature == ("void GetActorBounds(bool bOnlyCollidingComponents, "
+                                 "out vector Origin, out vector BoxExtent, "
+                                 "bool bIncludeFromChildActors)")
+        assert [p.name for p in out.parameters if p.kind == WorldControl.PK_OUTPUT] == [
+            "Origin", "BoxExtent"]
+    finally:
+        tw.destroy_actor(actor=name)
+
+
+def test_get_actor_functions_out_parameters_come_back_from_a_call(sim_server):
+    """The out parameters GetFunctions advertises are exactly the ones CallFunction returns."""
+    name = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=_transform(0.0, 0.0, 95.0)).name
+    try:
+        advertised = [p.name for p in _function(name, "GetActorBounds").parameters
+                      if p.kind in (WorldControl.PK_OUTPUT, WorldControl.PK_RETURN)]
+        resp = (tw.call(actor=name, function="GetActorBounds")
+                .bool_arg("bOnlyCollidingComponents", False)
+                .bool_arg("bIncludeFromChildActors", False)
+                .execute())
+        assert [r.name for r in resp.results] == advertised
+        assert all(r.property_type == "vector" for r in resp.results)
+    finally:
+        tw.destroy_actor(actor=name)
+
+
+def test_discovered_signature_drives_a_call(sim_server):
+    """The point of GetFunctions: discover a function and build the call from what it reports,
+    without knowing anything about it up front."""
+    name = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=_transform(0.0, 0.0, 100.0)).name
+    try:
+        fn = _function(name, "SetActorHiddenInGame")
+        call = tw.call(actor=name, function=fn.name)
+        for parameter in fn.parameters:
+            assert parameter.kind == WorldControl.PK_INPUT
+            assert parameter.property_type == "bool"
+            call = call.bool_arg(parameter.name, True)
+        call.execute()
+
+        assert _actor_property(name, "bHidden") == "true"
+    finally:
+        tw.destroy_actor(actor=name)
+
+
+def test_get_component_functions_scopes_to_component(sim_server):
+    name = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=_transform(0.0, 0.0, 105.0)).name
+    try:
+        root = _root_component(name)
+        functions = tw.get_component_functions(actor=name, component=root).functions
+        assert functions
+        assert all(f.actor == name and f.component == root for f in functions)
+
+        fn = next(f for f in functions if f.name == "SetVisibility")
+        assert fn.signature == "void SetVisibility(bool bNewVisibility, bool bPropagateToChildren)"
+
+        # include_components folds the same component functions into the actor's listing.
+        with_components = tw.get_actor_functions(actor=name, include_components=True).functions
+        assert any(f.component == root and f.name == "SetVisibility" for f in with_components)
+        assert any(f.component == "" and f.name == "SetActorHiddenInGame" for f in with_components)
+    finally:
+        tw.destroy_actor(actor=name)
+
+
+def test_get_actor_functions_excludes_delegate_signatures(sim_server):
+    """A delegate signature is declared like a function but only types a delegate. There is
+    nothing to call, so it is not listed."""
+    name = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=_transform(0.0, 0.0, 110.0)).name
+    try:
+        functions = tw.get_actor_functions(actor=name).functions
+        assert functions
+        assert not [f.name for f in functions if f.name.endswith("__DelegateSignature")]
+        # `callable` and `error` are two halves of one fact.
+        assert all(f.callable != bool(f.error) for f in functions)
+    finally:
+        tw.destroy_actor(actor=name)
+
+
+def test_get_functions_requires_its_target(sim_server):
+    with pytest.raises(grpc.RpcError) as excinfo:
+        tw.get_actor_functions(actor="NoSuchActor")
+    assert excinfo.value.code() == grpc.StatusCode.NOT_FOUND
+
+    name = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=_transform(0.0, 0.0, 115.0)).name
+    try:
+        with pytest.raises(grpc.RpcError) as excinfo:
+            tw.get_component_functions(actor=name, component="NoSuchComponent")
+        assert excinfo.value.code() == grpc.StatusCode.NOT_FOUND
+    finally:
+        tw.destroy_actor(actor=name)
+
+
 def test_set_property_generic_matches_typed(sim_server):
     """The generic SetProperty carries the value's type in the value, and must behave
     identically to the singular set_*_property RPC it generalizes."""
@@ -392,7 +517,7 @@ def test_set_actor_transform_only_sets_what_was_supplied(sim_server):
     try:
         _make_movable(name)
         tw.set_actor_rotation(actor=name, rotation=_rotation(0.0, 0.0, math.pi / 2.0))
-        tw.set_actor_scale3_d(actor=name, scale=_vector(2.0, 2.0, 2.0))
+        tw.set_actor_scale3d(actor=name, scale=_vector(2.0, 2.0, 2.0))
 
         # Location only: rotation and scale must survive.
         location_only = Geometry.Transform()
@@ -443,7 +568,7 @@ def test_set_actor_location_rotation_scale(sim_server):
         assert state.transform.location.x == pytest.approx(4.0, abs=0.05), "rotating moved the actor"
 
         # Scale is unitless and unconverted: a negative Y would mirror, not re-express.
-        tw.set_actor_scale3_d(actor=name, scale=_vector(2.0, 3.0, 4.0))
+        tw.set_actor_scale3d(actor=name, scale=_vector(2.0, 3.0, 4.0))
         assert _scale_of(name) == pytest.approx((2.0, 3.0, 4.0), abs=1e-3)
         state = tw.get_current_actor_state(actor=name)
         assert state.transform.location.x == pytest.approx(4.0, abs=0.05), "scaling moved the actor"
@@ -476,7 +601,7 @@ def test_component_location_rotation_scale(sim_server):
         _make_movable(name)
         child = _child_component(name)
 
-        tw.set_component_scale3_d(actor=name, component=child, scale=_vector(2.0, 3.0, 4.0))
+        tw.set_component_scale3d(actor=name, component=child, scale=_vector(2.0, 3.0, 4.0))
         assert _scale_of(name, child) == pytest.approx((2.0, 3.0, 4.0), abs=1e-3)
 
         tw.set_component_location(actor=name, component=child, location=_vector(1.0, 0.0, 0.0))
@@ -519,7 +644,7 @@ def test_singular_transform_rpcs_require_their_value(sim_server):
         for call in (
             lambda: tw.set_actor_location(actor=name),
             lambda: tw.set_actor_rotation(actor=name),
-            lambda: tw.set_actor_scale3_d(actor=name),
+            lambda: tw.set_actor_scale3d(actor=name),
         ):
             with pytest.raises(grpc.RpcError) as excinfo:
                 call()

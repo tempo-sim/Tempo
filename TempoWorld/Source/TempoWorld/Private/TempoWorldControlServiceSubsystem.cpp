@@ -41,6 +41,9 @@ using GetAllComponentsResponse = TempoWorld::GetAllComponentsResponse;
 using GetActorPropertiesRequest = TempoWorld::GetActorPropertiesRequest;
 using GetComponentPropertiesRequest = TempoWorld::GetComponentPropertiesRequest;
 using GetPropertiesResponse = TempoWorld::GetPropertiesResponse;
+using GetActorFunctionsRequest = TempoWorld::GetActorFunctionsRequest;
+using GetComponentFunctionsRequest = TempoWorld::GetComponentFunctionsRequest;
+using GetFunctionsResponse = TempoWorld::GetFunctionsResponse;
 using SetBoolPropertyRequest = TempoWorld::SetBoolPropertyRequest;
 using SetIntPropertyRequest = TempoWorld::SetIntPropertyRequest;
 using SetInt64PropertyRequest = TempoWorld::SetInt64PropertyRequest;
@@ -151,6 +154,8 @@ void UTempoWorldControlServiceSubsystem::RegisterServices(FTempoServer& Server)
 		SimpleRequestHandler(&WorldControlAsyncService::RequestGetAllComponents, &UTempoWorldControlServiceSubsystem::GetAllComponents),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestGetActorProperties, &UTempoWorldControlServiceSubsystem::GetActorProperties),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestGetComponentProperties, &UTempoWorldControlServiceSubsystem::GetComponentProperties),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestGetActorFunctions, &UTempoWorldControlServiceSubsystem::GetActorFunctions),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestGetComponentFunctions, &UTempoWorldControlServiceSubsystem::GetComponentFunctions),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestActivateComponent, &UTempoWorldControlServiceSubsystem::ActivateComponent),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestDeactivateComponent, &UTempoWorldControlServiceSubsystem::DeactivateComponent),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetBoolProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetBoolPropertyRequest>),
@@ -3172,6 +3177,81 @@ namespace
 
 		return grpc::Status_OK;
 	}
+
+	// Render a function's signature the way its declaration reads, using the same type vocabulary
+	// GetProperties reports: "float GetDistanceTo(AActor* OtherActor)". Out parameters stay in the
+	// parameter list, prefixed with "out ", since that is where the frame expects them.
+	FString GetFunctionSignature(const UFunction* Function)
+	{
+		FString ReturnType = TEXT("void");
+		TArray<FString> Parms;
+		for (TFieldIterator<FProperty> It(Function); It && It->HasAnyPropertyFlags(CPF_Parm); ++It)
+		{
+			const FProperty* Parm = *It;
+			FString Type;
+			GetPropertyTypeAndValue(nullptr, Parm, Type, nullptr);
+			if (Parm->HasAnyPropertyFlags(CPF_ReturnParm))
+			{
+				ReturnType = Type;
+				continue;
+			}
+			Parms.Add(FString::Printf(TEXT("%s%s %s"), IsInputParm(Parm) ? TEXT("") : TEXT("out "), *Type, *Parm->GetName()));
+		}
+
+		return FString::Printf(TEXT("%s %s(%s)"), *ReturnType, *Function->GetName(), *FString::Join(Parms, TEXT(", ")));
+	}
+
+	void GetObjectFunctions(const UObject* Object, GetFunctionsResponse& Response)
+	{
+		const UClass* Class = Object->GetClass();
+		const AActor* Actor = Cast<AActor>(Object);
+		const UActorComponent* Component = Cast<UActorComponent>(Object);
+		if (Component)
+		{
+			Actor = Component->GetOwner();
+		}
+
+		for (TFieldIterator<UFunction> FunctionIt(Class); FunctionIt; ++FunctionIt)
+		{
+			const UFunction* Function = *FunctionIt;
+			// A delegate signature is declared like a function but exists only to type a delegate.
+			// There is nothing to call. FUNC_Delegate covers multi-cast too.
+			if (Function->HasAnyFunctionFlags(FUNC_Delegate))
+			{
+				continue;
+			}
+
+			TempoWorld::FunctionDescriptor* FunctionDescriptor = Response.add_functions();
+			FunctionDescriptor->set_actor(TCHAR_TO_UTF8(*UTempoCoreUtils::GetActorIdentifier(Actor)));
+			if (Component)
+			{
+				FunctionDescriptor->set_component(TCHAR_TO_UTF8(*Component->GetName()));
+			}
+			FunctionDescriptor->set_name(TCHAR_TO_UTF8(*Function->GetName()));
+			FunctionDescriptor->set_signature(TCHAR_TO_UTF8(*GetFunctionSignature(Function)));
+
+			for (TFieldIterator<FProperty> It(Function); It && It->HasAnyPropertyFlags(CPF_Parm); ++It)
+			{
+				const FProperty* Parm = *It;
+				FString Type;
+				GetPropertyTypeAndValue(nullptr, Parm, Type, nullptr);
+				TempoWorld::ParameterDescriptor* ParameterDescriptor = FunctionDescriptor->add_parameters();
+				ParameterDescriptor->set_name(TCHAR_TO_UTF8(*Parm->GetName()));
+				ParameterDescriptor->set_property_type(TCHAR_TO_UTF8(*Type));
+				ParameterDescriptor->set_kind(Parm->HasAnyPropertyFlags(CPF_ReturnParm) ? TempoWorld::PK_RETURN :
+					IsInputParm(Parm) ? TempoWorld::PK_INPUT : TempoWorld::PK_OUTPUT);
+			}
+
+			// Report exactly what CallFunction would refuse, so a caller never has to guess which
+			// of the listed functions it can actually invoke.
+			const grpc::Status CallableStatus = CheckFunctionIsCallable(Object, Function);
+			FunctionDescriptor->set_callable(CallableStatus.ok());
+			if (!CallableStatus.ok())
+			{
+				FunctionDescriptor->set_error(CallableStatus.error_message());
+			}
+		}
+	}
 }
 
 void UTempoWorldControlServiceSubsystem::CallObjectFunction(const CallFunctionRequest& Request, const TResponseDelegate<CallFunctionResponse>& ResponseContinuation) const
@@ -3202,4 +3282,75 @@ void UTempoWorldControlServiceSubsystem::CallObjectFunction(const CallFunctionRe
 	CallFunctionResponse Response;
 	const grpc::Status CallStatus = CallFunctionWithArgs(GetWorld(), Object, Function, Request, Response);
 	ResponseContinuation.ExecuteIfBound(Response, CallStatus);
+}
+
+void UTempoWorldControlServiceSubsystem::GetActorFunctions(const GetActorFunctionsRequest& Request, const TResponseDelegate<GetFunctionsResponse>& ResponseContinuation) const
+{
+	if (Request.actor().empty())
+	{
+		ResponseContinuation.ExecuteIfBound(GetFunctionsResponse(), grpc::Status(grpc::FAILED_PRECONDITION, "actor must be specified in GetActorFunctions request"));
+		return;
+	}
+
+	const FString ActorName(UTF8_TO_TCHAR(Request.actor().c_str()));
+	const AActor* Actor = GetActorWithName(GetWorld(), ActorName);
+	if (!Actor)
+	{
+		const FString ErrorMsg = FString::Printf(TEXT("Failed to find actor '%s' for GetActorFunctions request"), *ActorName);
+		ResponseContinuation.ExecuteIfBound(GetFunctionsResponse(), grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
+		return;
+	}
+
+	GetFunctionsResponse Response;
+	GetObjectFunctions(Actor, Response);
+
+	if (Request.include_components())
+	{
+		TArray<UActorComponent*> ActorComponents;
+		Actor->GetComponents<UActorComponent>(ActorComponents);
+		for (const UActorComponent* ActorComponent : ActorComponents)
+		{
+			GetObjectFunctions(ActorComponent, Response);
+		}
+	}
+
+	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
+}
+
+void UTempoWorldControlServiceSubsystem::GetComponentFunctions(const GetComponentFunctionsRequest& Request, const TResponseDelegate<GetFunctionsResponse>& ResponseContinuation) const
+{
+	if (Request.actor().empty())
+	{
+		ResponseContinuation.ExecuteIfBound(GetFunctionsResponse(), grpc::Status(grpc::FAILED_PRECONDITION, "actor must be specified in GetComponentFunctions request"));
+		return;
+	}
+
+	if (Request.component().empty())
+	{
+		ResponseContinuation.ExecuteIfBound(GetFunctionsResponse(), grpc::Status(grpc::FAILED_PRECONDITION, "component must be specified in GetComponentFunctions request"));
+		return;
+	}
+
+	const FString ActorName(UTF8_TO_TCHAR(Request.actor().c_str()));
+	const AActor* Actor = GetActorWithName(GetWorld(), ActorName);
+	if (!Actor)
+	{
+		const FString ErrorMsg = FString::Printf(TEXT("Failed to find actor '%s' for GetComponentFunctions request"), *ActorName);
+		ResponseContinuation.ExecuteIfBound(GetFunctionsResponse(), grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
+		return;
+	}
+
+	const FString ComponentName(UTF8_TO_TCHAR(Request.component().c_str()));
+	const UActorComponent* Component = GetComponentWithName(Actor, ComponentName);
+	if (!Component)
+	{
+		const FString ErrorMsg = FString::Printf(TEXT("Failed to find component '%s' on actor '%s' for GetComponentFunctions request"), *ComponentName, *ActorName);
+		ResponseContinuation.ExecuteIfBound(GetFunctionsResponse(), grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
+		return;
+	}
+
+	GetFunctionsResponse Response;
+	GetObjectFunctions(Component, Response);
+
+	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
 }

@@ -671,6 +671,66 @@ message CallFunctionResponse {
   repeated FunctionResult results = 1;
 }
 
+// How a function parameter is passed.
+enum ParameterKind {
+  PK_UNKNOWN = 0;
+  // An input the caller must supply to CallFunction.
+  PK_INPUT = 1;
+  // A value the function hands back. Must not be supplied.
+  PK_OUTPUT = 2;
+  // The function's return value. Must not be supplied.
+  PK_RETURN = 3;
+}
+
+// One parameter of a function, including its out parameters and return value.
+message ParameterDescriptor {
+  // Parameter name, spelled the way CallFunction's FunctionArg.name expects it.
+  // Unreal names a return value "ReturnValue".
+  string name = 1;
+  // Property type string, from the same vocabulary as PropertyDescriptor.property_type.
+  // "unsupported" for a type this API cannot express.
+  string property_type = 2;
+  // How the parameter is passed.
+  ParameterKind kind = 3;
+}
+
+message FunctionDescriptor {
+  // Name of the owning actor.
+  string actor = 1;
+  // Name of the owning component (empty for actor-level functions).
+  string component = 2;
+  // Function name, spelled the way CallFunction's `function` expects it.
+  string name = 3;
+  // The whole signature as one string, the way the declaration reads, e.g.
+  // "float GetDistanceTo(actor OtherActor)". Types come from the same vocabulary as
+  // PropertyDescriptor.property_type, and out parameters are prefixed with "out ".
+  string signature = 4;
+  // The same information, split up: one entry per parameter, in declaration order.
+  repeated ParameterDescriptor parameters = 5;
+  // False if CallFunction cannot invoke this function (see `error`).
+  bool callable = 6;
+  // Why the function is not callable. Empty when `callable` is true.
+  string error = 7;
+}
+
+message GetFunctionsResponse {
+  repeated FunctionDescriptor functions = 1;
+}
+
+message GetActorFunctionsRequest {
+  // Name of the actor to inspect.
+  string actor = 1;
+  // If true, also walk components' functions.
+  bool include_components = 2;
+}
+
+message GetComponentFunctionsRequest {
+  // Name of the owning actor.
+  string actor = 1;
+  // Name of the component to inspect.
+  string component = 2;
+}
+
 // One operation in a SetProperties batch. The oneof selects which set-property
 // operation to perform; each variant is the same Set*PropertyRequest message
 // that the corresponding singular RPC accepts.
@@ -857,4 +917,8 @@ service WorldControlService {
   rpc SetProperty(SetPropertyRequest) returns (TempoCore.Empty);
 
   rpc CallFunction(CallFunctionRequest) returns (CallFunctionResponse);
+
+  rpc GetActorFunctions(GetActorFunctionsRequest) returns (GetFunctionsResponse);
+
+  rpc GetComponentFunctions(GetComponentFunctionsRequest) returns (GetFunctionsResponse);
 }

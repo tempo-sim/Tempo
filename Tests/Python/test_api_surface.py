@@ -24,6 +24,11 @@ EXPECTED_SURFACE = {
     "tempo_sim.tempo_world": [
         "spawn_actor", "destroy_actor", "get_all_actors", "get_current_actor_state",
         "set_actor_transform", "set_float_property", "set_property", "batch", "call",
+        "get_actor_properties", "get_actor_functions", "get_component_functions",
+        # scale3d, not scale3_d: pascal_to_snake keeps a capital that follows a digit in the
+        # same word, so the digit-bearing RPC names stay readable.
+        "set_actor_location", "set_actor_rotation", "set_actor_scale3d",
+        "set_vector2d_property",
     ],
     "tempo_sim.tempo_movement": [
         "get_commandable_pawns", "command_vehicle", "command_velocity", "command_acceleration",
