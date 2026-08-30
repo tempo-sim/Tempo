@@ -26,7 +26,13 @@ using AddComponentRequest = TempoWorld::AddComponentRequest;
 using AddComponentResponse = TempoWorld::AddComponentResponse;
 using DestroyComponentRequest = TempoWorld::DestroyComponentRequest;
 using SetActorTransformRequest = TempoWorld::SetActorTransformRequest;
+using SetActorLocationRequest = TempoWorld::SetActorLocationRequest;
+using SetActorRotationRequest = TempoWorld::SetActorRotationRequest;
+using SetActorScale3DRequest = TempoWorld::SetActorScale3DRequest;
 using SetComponentTransformRequest = TempoWorld::SetComponentTransformRequest;
+using SetComponentLocationRequest = TempoWorld::SetComponentLocationRequest;
+using SetComponentRotationRequest = TempoWorld::SetComponentRotationRequest;
+using SetComponentScale3DRequest = TempoWorld::SetComponentScale3DRequest;
 using ActivateComponentRequest = TempoWorld::ActivateComponentRequest;
 using DeactivateComponentRequest = TempoWorld::DeactivateComponentRequest;
 using GetAllActorsResponse = TempoWorld::GetAllActorsResponse;
@@ -75,6 +81,8 @@ using SetActorSetPropertyRequest = TempoWorld::SetActorSetPropertyRequest;
 using SetComponentSetPropertyRequest = TempoWorld::SetComponentSetPropertyRequest;
 using CallFunctionRequest = TempoWorld::CallFunctionRequest;
 using FunctionArg = TempoWorld::FunctionArg;
+using FunctionResult = TempoWorld::FunctionResult;
+using CallFunctionResponse = TempoWorld::CallFunctionResponse;
 // TempoWorld::Value is aliased as PropertyValue: plenty of locals in this file are named
 // Value, and a bare `Value` type alias would be shadowed by them.
 using PropertyValue = TempoWorld::Value;
@@ -87,17 +95,26 @@ using SetPropertiesResponse = TempoWorld::SetPropertiesResponse;
 FTempoWorldControlServiceActivated UTempoWorldControlServiceSubsystem::TempoWorldControlServiceActivated;
 FTempoWorldControlServiceDeactivated UTempoWorldControlServiceSubsystem::TempoWorldControlServiceDeactivated;
 
+FVector ToUnrealLocation(const TempoCore::Vector& Location)
+{
+	return QuantityConverter<M2CM,R2L>::Convert(FVector(Location.x(), Location.y(), Location.z()));
+}
+
+FRotator ToUnrealRotation(const TempoCore::Rotation& Rotation)
+{
+	return QuantityConverter<Rad2Deg,R2L>::Convert(FRotator(Rotation.p(), Rotation.y(), Rotation.r()));
+}
+
+// A scale is a ratio, not a position: it has no units to convert, and negating Y to change
+// handedness would mirror the object rather than re-express it. Used exactly as given.
+FVector ToUnrealScale(const TempoCore::Vector& Scale)
+{
+	return FVector(Scale.x(), Scale.y(), Scale.z());
+}
+
 FTransform ToUnrealTransform(const TempoCore::Transform& Transform)
 {
-	const FVector Location = QuantityConverter<M2CM,R2L>::Convert(
-		FVector(Transform.location().x(),
-			Transform.location().y(),
-			Transform.location().z()));
-	const FRotator Rotation = QuantityConverter<Rad2Deg,R2L>::Convert(
-		FRotator(Transform.rotation().p(),
-			Transform.rotation().y(),
-			Transform.rotation().r()));
-	return FTransform(Rotation, Location);
+	return FTransform(ToUnrealRotation(Transform.rotation()), ToUnrealLocation(Transform.location()));
 }
 
 TempoCore::Transform FromUnrealTransform(const FTransform& Transform)
@@ -123,7 +140,13 @@ void UTempoWorldControlServiceSubsystem::RegisterServices(FTempoServer& Server)
 		SimpleRequestHandler(&WorldControlAsyncService::RequestAddComponent, &UTempoWorldControlServiceSubsystem::AddComponent),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestDestroyComponent, &UTempoWorldControlServiceSubsystem::DestroyComponent),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetActorTransform, &UTempoWorldControlServiceSubsystem::SetActorTransform),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestSetActorLocation, &UTempoWorldControlServiceSubsystem::SetActorLocation),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestSetActorRotation, &UTempoWorldControlServiceSubsystem::SetActorRotation),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestSetActorScale3D, &UTempoWorldControlServiceSubsystem::SetActorScale3D),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetComponentTransform, &UTempoWorldControlServiceSubsystem::SetComponentTransform),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestSetComponentLocation, &UTempoWorldControlServiceSubsystem::SetComponentLocation),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestSetComponentRotation, &UTempoWorldControlServiceSubsystem::SetComponentRotation),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestSetComponentScale3D, &UTempoWorldControlServiceSubsystem::SetComponentScale3D),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestGetAllActors, &UTempoWorldControlServiceSubsystem::GetAllActors),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestGetAllComponents, &UTempoWorldControlServiceSubsystem::GetAllComponents),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestGetActorProperties, &UTempoWorldControlServiceSubsystem::GetActorProperties),
@@ -498,91 +521,359 @@ void UTempoWorldControlServiceSubsystem::DestroyComponent(const TempoWorld::Dest
 	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status_OK);
 }
 
+namespace
+{
+	// The transform RPCs all begin by naming an actor, so they resolve it the same way and report
+	// the same two failures. RequestName only ever reaches the caller inside an error message.
+	grpc::Status ResolveActor(const UWorld* World, const std::string& ActorName, const TCHAR* RequestName, AActor*& OutActor)
+	{
+		if (ActorName.empty())
+		{
+			const FString ErrorMsg = FString::Printf(TEXT("actor must be specified in %s request"), RequestName);
+			return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+		}
+
+		const FString Name(UTF8_TO_TCHAR(ActorName.c_str()));
+		OutActor = GetActorWithName(World, Name);
+		if (!OutActor)
+		{
+			const FString ErrorMsg = FString::Printf(TEXT("Failed to find actor '%s' for %s request"), *Name, RequestName);
+			return grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+		}
+
+		return grpc::Status_OK;
+	}
+
+	// The frame an actor-level request is expressed in: world space, or another actor's transform.
+	// An empty relative_to_actor yields identity, which composes away to plain world space.
+	grpc::Status ResolveReferenceFrame(const UWorld* World, const std::string& RelativeToActor, const TCHAR* RequestName, FTransform& OutFrame)
+	{
+		OutFrame = FTransform::Identity;
+		if (RelativeToActor.empty())
+		{
+			return grpc::Status_OK;
+		}
+
+		const FString Name(UTF8_TO_TCHAR(RelativeToActor.c_str()));
+		const AActor* Reference = GetActorWithName(World, Name);
+		if (!Reference)
+		{
+			const FString ErrorMsg = FString::Printf(TEXT("Failed to find relative_to_actor '%s' for %s request"), *Name, RequestName);
+			return grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+		}
+
+		OutFrame = Reference->GetActorTransform();
+		return grpc::Status_OK;
+	}
+
+	// A component-level request names an actor and a scene component on it. The root component is
+	// off limits: it *is* the actor's transform, so ActorRpcName says what to call instead.
+	grpc::Status ResolveSceneComponent(const UWorld* World, const std::string& ActorName, const std::string& ComponentName,
+		const TCHAR* RequestName, const TCHAR* ActorRpcName, USceneComponent*& OutComponent)
+	{
+		AActor* Actor = nullptr;
+		const grpc::Status ActorStatus = ResolveActor(World, ActorName, RequestName, Actor);
+		if (!ActorStatus.ok())
+		{
+			return ActorStatus;
+		}
+
+		if (ComponentName.empty())
+		{
+			const FString ErrorMsg = FString::Printf(TEXT("component must be specified in %s request"), RequestName);
+			return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+		}
+
+		const FString Name(UTF8_TO_TCHAR(ComponentName.c_str()));
+		OutComponent = GetComponentWithName<USceneComponent>(Actor, Name);
+		if (!OutComponent)
+		{
+			const FString ErrorMsg = FString::Printf(TEXT("Failed to find scene component '%s' on actor '%s' for %s request"), *Name, *Actor->GetName(), RequestName);
+			return grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+		}
+
+		if (OutComponent == Actor->GetRootComponent())
+		{
+			const FString ErrorMsg = FString::Printf(TEXT("Cannot set the transform of root component '%s' on actor '%s' directly. Use %s on the owner actor instead."), *Name, *Actor->GetName(), ActorRpcName);
+			return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+		}
+
+		return grpc::Status_OK;
+	}
+
+	// The singular RPCs take exactly one value, so an unset one is a mistake rather than a
+	// meaningful request - silently moving to the origin or collapsing to zero scale is worse
+	// than saying so.
+	grpc::Status RequireField(bool bHasField, const TCHAR* FieldName, const TCHAR* RequestName)
+	{
+		if (bHasField)
+		{
+			return grpc::Status_OK;
+		}
+
+		const FString ErrorMsg = FString::Printf(TEXT("%s must be specified in %s request"), FieldName, RequestName);
+		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+	}
+}
+
 void UTempoWorldControlServiceSubsystem::SetActorTransform(const TempoWorld::SetActorTransformRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const
 {
-	if (Request.actor().empty())
+	AActor* Actor = nullptr;
+	const grpc::Status ActorStatus = ResolveActor(GetWorld(), Request.actor(), TEXT("SetActorTransform"), Actor);
+	if (!ActorStatus.ok())
 	{
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "actor must be specified in SetActorTransform request"));
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), ActorStatus);
 		return;
 	}
 
-	const FString ActorName(UTF8_TO_TCHAR(Request.actor().c_str()));
-	AActor* Actor = GetActorWithName(GetWorld(), ActorName);
-	if (!Actor)
+	FTransform Frame;
+	const grpc::Status FrameStatus = ResolveReferenceFrame(GetWorld(), Request.relative_to_actor(), TEXT("SetActorTransform"), Frame);
+	if (!FrameStatus.ok())
 	{
-		const FString ErrorMsg = FString::Printf(TEXT("Failed to find actor '%s' for SetActorTransform request"), *ActorName);
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), FrameStatus);
 		return;
 	}
 
-	FTransform Transform = ToUnrealTransform(Request.transform());
+	// Start from where the actor already is, then overlay only the members the request supplied.
+	// Members it left unset are identity in Requested, but they are never read, so composing them
+	// through the reference frame costs nothing.
+	const FTransform Requested = ToUnrealTransform(Request.transform()) * Frame;
+	FTransform Result = Actor->GetActorTransform();
 
-	if (!Request.relative_to_actor().empty())
+	if (Request.transform().has_location())
 	{
-		const FString RelativeToActorName(UTF8_TO_TCHAR(Request.relative_to_actor().c_str()));
-		const AActor* RelativeToActor = GetActorWithName(GetWorld(), RelativeToActorName);
-		if (!RelativeToActor)
-		{
-			const FString ErrorMsg = FString::Printf(TEXT("Failed to find relative_to_actor '%s' for SetActorTransform request on actor '%s'"), *RelativeToActorName, *ActorName);
-			ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
-			return;
-		}
-		Transform = RelativeToActor->GetActorTransform() * Transform;
+		Result.SetLocation(Requested.GetLocation());
+	}
+	if (Request.transform().has_rotation())
+	{
+		Result.SetRotation(Requested.GetRotation());
+	}
+	// Scale is deliberately absolute: composing a non-uniform scale through a rotated frame does
+	// not survive as an FTransform, so the reference frame never applies to it.
+	if (Request.has_scale())
+	{
+		Result.SetScale3D(ToUnrealScale(Request.scale()));
 	}
 
-	Actor->SetActorTransform(Transform);
+	Actor->SetActorTransform(Result);
+
+	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status_OK);
+}
+
+void UTempoWorldControlServiceSubsystem::SetActorLocation(const TempoWorld::SetActorLocationRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const
+{
+	AActor* Actor = nullptr;
+	const grpc::Status ActorStatus = ResolveActor(GetWorld(), Request.actor(), TEXT("SetActorLocation"), Actor);
+	if (!ActorStatus.ok())
+	{
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), ActorStatus);
+		return;
+	}
+
+	const grpc::Status FieldStatus = RequireField(Request.has_location(), TEXT("location"), TEXT("SetActorLocation"));
+	if (!FieldStatus.ok())
+	{
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), FieldStatus);
+		return;
+	}
+
+	FTransform Frame;
+	const grpc::Status FrameStatus = ResolveReferenceFrame(GetWorld(), Request.relative_to_actor(), TEXT("SetActorLocation"), Frame);
+	if (!FrameStatus.ok())
+	{
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), FrameStatus);
+		return;
+	}
+
+	Actor->SetActorLocation(Frame.TransformPosition(ToUnrealLocation(Request.location())));
+
+	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status_OK);
+}
+
+void UTempoWorldControlServiceSubsystem::SetActorRotation(const TempoWorld::SetActorRotationRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const
+{
+	AActor* Actor = nullptr;
+	const grpc::Status ActorStatus = ResolveActor(GetWorld(), Request.actor(), TEXT("SetActorRotation"), Actor);
+	if (!ActorStatus.ok())
+	{
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), ActorStatus);
+		return;
+	}
+
+	const grpc::Status FieldStatus = RequireField(Request.has_rotation(), TEXT("rotation"), TEXT("SetActorRotation"));
+	if (!FieldStatus.ok())
+	{
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), FieldStatus);
+		return;
+	}
+
+	FTransform Frame;
+	const grpc::Status FrameStatus = ResolveReferenceFrame(GetWorld(), Request.relative_to_actor(), TEXT("SetActorRotation"), Frame);
+	if (!FrameStatus.ok())
+	{
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), FrameStatus);
+		return;
+	}
+
+	// Composed as a transform rather than by hand: FTransform's operand order is the opposite of
+	// FQuat's, and going through it keeps this identical to what SetActorTransform would do.
+	const FTransform Requested = FTransform(ToUnrealRotation(Request.rotation())) * Frame;
+	Actor->SetActorRotation(Requested.GetRotation());
+
+	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status_OK);
+}
+
+void UTempoWorldControlServiceSubsystem::SetActorScale3D(const TempoWorld::SetActorScale3DRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const
+{
+	AActor* Actor = nullptr;
+	const grpc::Status ActorStatus = ResolveActor(GetWorld(), Request.actor(), TEXT("SetActorScale3D"), Actor);
+	if (!ActorStatus.ok())
+	{
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), ActorStatus);
+		return;
+	}
+
+	const grpc::Status FieldStatus = RequireField(Request.has_scale(), TEXT("scale"), TEXT("SetActorScale3D"));
+	if (!FieldStatus.ok())
+	{
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), FieldStatus);
+		return;
+	}
+
+	Actor->SetActorScale3D(ToUnrealScale(Request.scale()));
 
 	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status_OK);
 }
 
 void UTempoWorldControlServiceSubsystem::SetComponentTransform(const TempoWorld::SetComponentTransformRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const
 {
-	if (Request.actor().empty())
+	USceneComponent* Component = nullptr;
+	const grpc::Status Status = ResolveSceneComponent(GetWorld(), Request.actor(), Request.component(),
+		TEXT("SetComponentTransform"), TEXT("SetActorTransform"), Component);
+	if (!Status.ok())
 	{
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "actor must be specified in SetComponentTransform request"));
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), Status);
 		return;
 	}
 
-	if (Request.component().empty())
-	{
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "component must be specified in SetComponentTransform request"));
-		return;
-	}
+	// Same partial-update rule as SetActorTransform, read back from whichever space the caller is
+	// setting so that an unset member round-trips to exactly the value it already had.
+	const FTransform Requested = ToUnrealTransform(Request.transform());
+	FTransform Result = Request.relative_to_world() ? Component->GetComponentTransform() : Component->GetRelativeTransform();
 
-	const FString ActorName(UTF8_TO_TCHAR(Request.actor().c_str()));
-	const AActor* Actor = GetActorWithName(GetWorld(), ActorName);
-	if (!Actor)
+	if (Request.transform().has_location())
 	{
-		const FString ErrorMsg = FString::Printf(TEXT("Failed to find actor '%s' for SetComponentTransform request"), *ActorName);
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
-		return;
+		Result.SetLocation(Requested.GetLocation());
 	}
-
-	const FString ComponentName(UTF8_TO_TCHAR(Request.component().c_str()));
-	USceneComponent* Component = GetComponentWithName<USceneComponent>(Actor, ComponentName);
-	if (!Component)
+	if (Request.transform().has_rotation())
 	{
-		const FString ErrorMsg = FString::Printf(TEXT("Failed to find scene component '%s' on actor '%s' for SetComponentTransform request"), *ComponentName, *ActorName);
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
-		return;
+		Result.SetRotation(Requested.GetRotation());
 	}
-
-	if (Component == Actor->GetRootComponent())
+	if (Request.has_scale())
 	{
-		const FString ErrorMsg = FString::Printf(TEXT("Cannot set the transform of root component '%s' on actor '%s' directly. Use SetActorTransform on the owner actor instead."), *ComponentName, *ActorName);
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
-		return;
+		Result.SetScale3D(ToUnrealScale(Request.scale()));
 	}
-
-	const FTransform Transform = ToUnrealTransform(Request.transform());
 
 	if (Request.relative_to_world())
 	{
-		Component->SetWorldTransform(Transform);
+		Component->SetWorldTransform(Result);
 	}
 	else
 	{
-		Component->SetRelativeTransform(Transform);
+		Component->SetRelativeTransform(Result);
+	}
+
+	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status_OK);
+}
+
+void UTempoWorldControlServiceSubsystem::SetComponentLocation(const TempoWorld::SetComponentLocationRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const
+{
+	USceneComponent* Component = nullptr;
+	const grpc::Status Status = ResolveSceneComponent(GetWorld(), Request.actor(), Request.component(),
+		TEXT("SetComponentLocation"), TEXT("SetActorLocation"), Component);
+	if (!Status.ok())
+	{
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), Status);
+		return;
+	}
+
+	const grpc::Status FieldStatus = RequireField(Request.has_location(), TEXT("location"), TEXT("SetComponentLocation"));
+	if (!FieldStatus.ok())
+	{
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), FieldStatus);
+		return;
+	}
+
+	const FVector Location = ToUnrealLocation(Request.location());
+	if (Request.relative_to_world())
+	{
+		Component->SetWorldLocation(Location);
+	}
+	else
+	{
+		Component->SetRelativeLocation(Location);
+	}
+
+	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status_OK);
+}
+
+void UTempoWorldControlServiceSubsystem::SetComponentRotation(const TempoWorld::SetComponentRotationRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const
+{
+	USceneComponent* Component = nullptr;
+	const grpc::Status Status = ResolveSceneComponent(GetWorld(), Request.actor(), Request.component(),
+		TEXT("SetComponentRotation"), TEXT("SetActorRotation"), Component);
+	if (!Status.ok())
+	{
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), Status);
+		return;
+	}
+
+	const grpc::Status FieldStatus = RequireField(Request.has_rotation(), TEXT("rotation"), TEXT("SetComponentRotation"));
+	if (!FieldStatus.ok())
+	{
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), FieldStatus);
+		return;
+	}
+
+	const FRotator Rotation = ToUnrealRotation(Request.rotation());
+	if (Request.relative_to_world())
+	{
+		Component->SetWorldRotation(Rotation);
+	}
+	else
+	{
+		Component->SetRelativeRotation(Rotation);
+	}
+
+	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status_OK);
+}
+
+void UTempoWorldControlServiceSubsystem::SetComponentScale3D(const TempoWorld::SetComponentScale3DRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const
+{
+	USceneComponent* Component = nullptr;
+	const grpc::Status Status = ResolveSceneComponent(GetWorld(), Request.actor(), Request.component(),
+		TEXT("SetComponentScale3D"), TEXT("SetActorScale3D"), Component);
+	if (!Status.ok())
+	{
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), Status);
+		return;
+	}
+
+	const grpc::Status FieldStatus = RequireField(Request.has_scale(), TEXT("scale"), TEXT("SetComponentScale3D"));
+	if (!FieldStatus.ok())
+	{
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), FieldStatus);
+		return;
+	}
+
+	const FVector Scale = ToUnrealScale(Request.scale());
+	if (Request.relative_to_world())
+	{
+		Component->SetWorldScale3D(Scale);
+	}
+	else
+	{
+		Component->SetRelativeScale3D(Scale);
 	}
 
 	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status_OK);
@@ -757,6 +1048,396 @@ void UTempoWorldControlServiceSubsystem::GetAllComponents(const GetAllComponents
 	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
 }
 
+// Render one property as a (type, value) pair of strings. Pass a null `Value` to ask for the
+// type alone. Shared by GetProperties and by CallFunction, so a function result reads exactly
+// like the same value read back off a property.
+void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, FString& Type, FString* Value)
+{
+	if (Property->ArrayDim != 1)
+	{
+		// UProperties can be C-style arrays (who knew?), and this will be indicated by a non-1 ArrayDim member.
+		// For example, FPostProcessSettings has FLinearColor LensFlareTints[8]
+		// We don't support these types
+		Type = TEXT("unsupported");
+		return;
+	}
+
+	if (const FStrProperty* StrProperty = CastField<FStrProperty>(Property))
+	{
+		Type = TEXT("string");
+		if (Value)
+		{
+			StrProperty->GetValue_InContainer(Container, Value);
+		}
+	}
+	else if (const FNameProperty* NameProperty = CastField<FNameProperty>(Property))
+	{
+		Type = TEXT("string");
+		if (Value)
+		{
+			FName ValueName;
+			NameProperty->GetValue_InContainer(Container, &ValueName);
+			*Value = ValueName.ToString();
+		}
+	}
+	else if (const FTextProperty* TextProperty = CastField<FTextProperty>(Property))
+	{
+		Type = TEXT("string");
+		if (Value)
+		{
+			FText ValueText;
+			TextProperty->GetValue_InContainer(Container, &ValueText);
+			*Value = ValueText.ToString();
+		}
+	}
+	else if (const FBoolProperty* BoolProperty = CastField<FBoolProperty>(Property))
+	{
+		Type = TEXT("bool");
+		if (Value)
+		{
+			// Read through the property rather than with GetValue_InContainer, which raw-copies
+			// the property's bytes. A bitfield bool (uint8 bFoo:1) shares its byte with its
+			// neighbours, so a raw copy reports true whenever any of them is set.
+			*Value = BoolProperty->GetPropertyValue_InContainer(Container) ? TEXT("true") : TEXT("false");
+		}
+	}
+	else if (const FIntProperty* IntProperty = CastField<FIntProperty>(Property))
+	{
+		Type = TEXT("int");
+		if (Value)
+		{
+			int32 ValueInt;
+			IntProperty->GetValue_InContainer(Container, &ValueInt);
+			*Value = FString::FromInt(ValueInt);
+		}
+	}
+	else if (const FInt64Property* Int64Property = CastField<FInt64Property>(Property))
+	{
+		Type = TEXT("int64");
+		if (Value)
+		{
+			int64 ValueInt;
+			Int64Property->GetValue_InContainer(Container, &ValueInt);
+			*Value = FString::Printf(TEXT("%lld"), ValueInt);
+		}
+	}
+	else if (const FInt16Property* Int16Property = CastField<FInt16Property>(Property))
+	{
+		Type = TEXT("int");
+		if (Value)
+		{
+			int16 ValueInt;
+			Int16Property->GetValue_InContainer(Container, &ValueInt);
+			*Value = FString::FromInt(ValueInt);
+		}
+	}
+	else if (const FInt8Property* Int8Property = CastField<FInt8Property>(Property))
+	{
+		Type = TEXT("int");
+		if (Value)
+		{
+			int8 ValueInt;
+			Int8Property->GetValue_InContainer(Container, &ValueInt);
+			*Value = FString::FromInt(ValueInt);
+		}
+	}
+	else if (const FUInt64Property* UInt64Property = CastField<FUInt64Property>(Property))
+	{
+		Type = TEXT("int64");
+		if (Value)
+		{
+			uint64 ValueInt;
+			UInt64Property->GetValue_InContainer(Container, &ValueInt);
+			*Value = FString::Printf(TEXT("%llu"), ValueInt);
+		}
+	}
+	else if (const FUInt32Property* UInt32Property = CastField<FUInt32Property>(Property))
+	{
+		Type = TEXT("int64");
+		if (Value)
+		{
+			uint32 ValueInt;
+			UInt32Property->GetValue_InContainer(Container, &ValueInt);
+			*Value = FString::Printf(TEXT("%u"), ValueInt);
+		}
+	}
+	else if (const FUInt16Property* UInt16Property = CastField<FUInt16Property>(Property))
+	{
+		Type = TEXT("int");
+		if (Value)
+		{
+			uint16 ValueInt;
+			UInt16Property->GetValue_InContainer(Container, &ValueInt);
+			*Value = FString::FromInt(ValueInt);
+		}
+	}
+	else if (const FFloatProperty* FloatProperty = CastField<FFloatProperty>(Property))
+	{
+		Type = TEXT("float");
+		if (Value)
+		{
+			float ValueFloat;
+			FloatProperty->GetValue_InContainer(Container, &ValueFloat);
+			*Value = FString::SanitizeFloat(ValueFloat);
+		}
+	}
+	else if (const FDoubleProperty* DoubleProperty = CastField<FDoubleProperty>(Property))
+	{
+		Type = TEXT("double");
+		if (Value)
+		{
+			double ValueDouble;
+			DoubleProperty->GetValue_InContainer(Container, &ValueDouble);
+			*Value = FString::SanitizeFloat(ValueDouble);
+		}
+	}
+	else if (const FEnumProperty* EnumProperty = CastField<FEnumProperty>(Property))
+	{
+		const FString EnumName = EnumProperty->GetEnum()->GetName();
+		Type = EnumName;
+		if (Value)
+		{
+			const FNumericProperty* EnumIntProperty = EnumProperty->GetUnderlyingProperty();
+			const void* ValuePtr = EnumProperty->ContainerPtrToValuePtr<void>(Container);
+			int64 IntValue = EnumIntProperty->GetSignedIntPropertyValue(ValuePtr);
+			*Value = EnumProperty->GetEnum()->GetAuthoredNameStringByValue(IntValue);
+		}
+	}
+	else if (const FByteProperty* ByteProperty = CastField<FByteProperty>(Property))
+	{
+		// Bytes might be enums, or just bytes
+		if (ByteProperty->Enum)
+		{
+			const FString EnumName = ByteProperty->Enum->GetName();
+			Type = EnumName;
+			if (Value)
+			{
+				uint8 ValueIndex;
+				ByteProperty->GetValue_InContainer(Container, &ValueIndex);
+				*Value = ByteProperty->Enum->GetAuthoredNameStringByIndex(ValueIndex);
+			}
+		}
+		else
+		{
+			Type = TEXT("int");
+			if (Value)
+			{
+				uint8 ValueByte;
+				ByteProperty->GetValue_InContainer(Container, &ValueByte);
+				*Value = FString::FromInt(ValueByte);
+			}
+		}
+	}
+	else if (const FObjectProperty* ObjectProperty = CastField<FObjectProperty>(Property))
+	{
+		FString InnerType;
+		const FString OuterType =  ObjectProperty->GetCPPType(&InnerType, 0);
+		if (InnerType.IsEmpty())
+		{
+			Type = OuterType;
+		}
+		else
+		{
+			Type = FString::Printf(TEXT("%s<%s>"), *OuterType, *InnerType);
+		}
+		if (Value)
+		{
+			TObjectPtr<UObject> ValueObject;
+			ObjectProperty->GetValue_InContainer(Container, &ValueObject);
+			if (ValueObject)
+			{
+				if (AActor* Actor = Cast<AActor>(ValueObject.Get()))
+				{
+					*Value = UTempoCoreUtils::GetActorIdentifier(Actor);
+				}
+				else
+				{
+					*Value = ValueObject->GetName();
+				}
+			}
+			else
+			{
+				*Value = TEXT("null");
+			}
+		}
+	}
+	else if (const FSoftObjectProperty* SoftObjectProperty = CastField<FSoftObjectProperty>(Property))
+	{
+		// Catches both FSoftObjectProperty and FSoftClassProperty (the latter derives from the former).
+		FString InnerType;
+		const FString OuterType = SoftObjectProperty->GetCPPType(&InnerType, 0);
+		if (InnerType.IsEmpty())
+		{
+			Type = OuterType;
+		}
+		else
+		{
+			Type = FString::Printf(TEXT("%s<%s>"), *OuterType, *InnerType);
+		}
+		if (Value)
+		{
+			const FSoftObjectPtr& Soft = SoftObjectProperty->GetPropertyValue_InContainer(Container);
+			const FString Path = Soft.ToString();
+			*Value = Path.IsEmpty() ? TEXT("null") : Path;
+		}
+	}
+	else if (const FStructProperty* StructProperty = CastField<FStructProperty>(Property))
+	{
+		if (StructProperty->Struct->GetStructCPPName() == TEXT("FVector"))
+		{
+			Type = TEXT("vector");
+			if (Value)
+			{
+				FVector ValueVector;
+				StructProperty->GetValue_InContainer(Container, &ValueVector);
+				*Value = FString::Printf(TEXT("{X:%f, Y:%f, Z:%f}"), ValueVector.X, ValueVector.Y, ValueVector.Z);
+			}
+		}
+		else if (StructProperty->Struct->GetStructCPPName() == TEXT("FRotator"))
+		{
+			Type = TEXT("rotator");
+			if (Value)
+			{
+				FRotator ValueRotator;
+				StructProperty->GetValue_InContainer(Container, &ValueRotator);
+				ValueRotator = QuantityConverter<Deg2Rad,L2R>::Convert(ValueRotator);
+				*Value = FString::Printf(TEXT("{R:%f, P:%f, Y:%f}"), ValueRotator.Roll, ValueRotator.Pitch, ValueRotator.Yaw);
+			}
+		}
+		else if (StructProperty->Struct->GetStructCPPName() == TEXT("FColor"))
+		{
+			Type = TEXT("color");
+			if (Value)
+			{
+				FColor ValueColor;
+				StructProperty->GetValue_InContainer(Container, &ValueColor);
+				*Value = FString::Printf(TEXT("{R:%d, G:%d, B:%d}"), ValueColor.R, ValueColor.G, ValueColor.B);
+			}
+		}
+		else if (StructProperty->Struct->GetStructCPPName() == TEXT("FLinearColor"))
+		{
+			Type = TEXT("color");
+			if (Value)
+			{
+				FLinearColor ValueLinearColor;
+				StructProperty->GetValue_InContainer(Container, &ValueLinearColor);
+				const FColor ValueColor = ValueLinearColor.ToFColor(true);
+				*Value = FString::Printf(TEXT("{R:%d, G:%d, B:%d}"), ValueColor.R, ValueColor.G, ValueColor.B);
+			}
+		}
+		else
+		{
+			Type = StructProperty->Struct->GetStructCPPName();
+			if (Value)
+			{
+				*Value = TEXT("{");
+				void const* InnerPtr = StructProperty->ContainerPtrToValuePtr<void>(Container);
+				for (const FProperty* InnerProperty = StructProperty->Struct->PropertyLink; InnerProperty != nullptr; InnerProperty = InnerProperty->PropertyLinkNext)
+				{
+					const FString InnerName = InnerProperty->GetAuthoredName();
+					FString InnerType;
+					FString InnerValue;
+					GetPropertyTypeAndValue(InnerPtr, InnerProperty, InnerType, &InnerValue);
+					Value->Appendf(TEXT("%s:%s, "), *InnerName, *InnerValue);
+				}
+				Value->RemoveFromEnd(TEXT(", "));
+				Value->Append(TEXT("}"));
+			}
+		}
+	}
+	else if (const FArrayProperty* ArrayProperty = CastField<FArrayProperty>(Property))
+	{
+		FString InnerType = TEXT("unsupported");
+		// First, get the inner type (even if the array is empty!)
+		GetPropertyTypeAndValue(nullptr, ArrayProperty->Inner, InnerType, nullptr);
+		if (Value)
+		{
+			*Value = TEXT("[");
+			if (InnerType != TEXT("unsupported"))
+			{
+				FScriptArrayHelper ArrayHelper{ ArrayProperty, Property->ContainerPtrToValuePtr<void>(Container) };
+				for (int32 I = 0; I < ArrayHelper.Num(); ++I)
+				{
+					FString Unused; // The inner type of all values must be the same, and we already know it.
+					FString InnerValue;
+					GetPropertyTypeAndValue(ArrayHelper.GetRawPtr(I), ArrayProperty->Inner, Unused, &InnerValue);
+					Value->Appendf(TEXT("%s, "), *InnerValue);
+				}
+				Value->RemoveFromEnd(TEXT(", "));
+			}
+			Value->Append(TEXT("]"));
+		}
+		Type = FString::Printf(TEXT("array<%s>"), *InnerType);
+	}
+	else if (const FMapProperty* MapProperty = CastField<FMapProperty>(Property))
+	{
+		FString KeyType = TEXT("unsupported");
+		FString ValueType = TEXT("unsupported");
+		// Get key and value types (even if the map is empty)
+		GetPropertyTypeAndValue(nullptr, MapProperty->KeyProp, KeyType, nullptr);
+		GetPropertyTypeAndValue(nullptr, MapProperty->ValueProp, ValueType, nullptr);
+		if (Value)
+		{
+			*Value = TEXT("{");
+			if (KeyType != TEXT("unsupported") && ValueType != TEXT("unsupported"))
+			{
+				FScriptMapHelper MapHelper{ MapProperty, Property->ContainerPtrToValuePtr<void>(Container) };
+				for (int32 I = 0; I < MapHelper.GetMaxIndex(); ++I)
+				{
+					if (!MapHelper.IsValidIndex(I))
+					{
+						continue;
+					}
+					FString Unused; // Key/value types are uniform, and we already know them.
+					FString KeyValue;
+					FString ValueValue;
+					// ValueProp's Offset_Internal is set to MapLayout.ValueOffset, so pass the pair pointer
+					// (not GetValuePtr) so ContainerPtrToValuePtr applies that offset exactly once.
+					const uint8* PairPtr = MapHelper.GetPairPtr(I);
+					GetPropertyTypeAndValue(PairPtr, MapProperty->KeyProp, Unused, &KeyValue);
+					GetPropertyTypeAndValue(PairPtr, MapProperty->ValueProp, Unused, &ValueValue);
+					Value->Appendf(TEXT("%s: %s, "), *KeyValue, *ValueValue);
+				}
+				Value->RemoveFromEnd(TEXT(", "));
+			}
+			Value->Append(TEXT("}"));
+		}
+		Type = FString::Printf(TEXT("map<%s,%s>"), *KeyType, *ValueType);
+	}
+	else if (const FSetProperty* SetProperty = CastField<FSetProperty>(Property))
+	{
+		FString InnerType = TEXT("unsupported");
+		// Get the inner type (even if the set is empty)
+		GetPropertyTypeAndValue(nullptr, SetProperty->ElementProp, InnerType, nullptr);
+		if (Value)
+		{
+			*Value = TEXT("{");
+			if (InnerType != TEXT("unsupported"))
+			{
+				FScriptSetHelper SetHelper{ SetProperty, Property->ContainerPtrToValuePtr<void>(Container) };
+				for (int32 I = 0; I < SetHelper.GetMaxIndex(); ++I)
+				{
+					if (!SetHelper.IsValidIndex(I))
+					{
+						continue;
+					}
+					FString Unused; // Element type is uniform, and we already know it.
+					FString ElementValue;
+					GetPropertyTypeAndValue(SetHelper.GetElementPtr(I), SetProperty->ElementProp, Unused, &ElementValue);
+					Value->Appendf(TEXT("%s, "), *ElementValue);
+				}
+				Value->RemoveFromEnd(TEXT(", "));
+			}
+			Value->Append(TEXT("}"));
+		}
+		Type = FString::Printf(TEXT("set<%s>"), *InnerType);
+	}
+	else
+	{
+		Type = TEXT("unsupported");
+	}
+}
+
 void GetObjectProperties(const UObject* Object, GetPropertiesResponse& Response)
 {
 	const UClass* Class = Object->GetClass();
@@ -766,394 +1447,6 @@ void GetObjectProperties(const UObject* Object, GetPropertiesResponse& Response)
 	{
 		Actor = Component->GetOwner();
 	}
-
-	TFunction<void(const void*, const FProperty*, FString&, FString*)> GetPropertyTypeAndValue;
-	GetPropertyTypeAndValue= [&GetPropertyTypeAndValue](const void* Container, const FProperty* Property, FString& Type, FString* Value)
-	{
-		if (Property->ArrayDim != 1)
-		{
-			// UProperties can be C-style arrays (who knew?), and this will be indicated by a non-1 ArrayDim member.
-			// For example, FPostProcessSettings has FLinearColor LensFlareTints[8]
-			// We don't support these types
-			Type = TEXT("unsupported");
-			return;
-		}
-
-		if (const FStrProperty* StrProperty = CastField<FStrProperty>(Property))
-		{
-			Type = TEXT("string");
-			if (Value)
-			{
-				StrProperty->GetValue_InContainer(Container, Value);
-			}
-		}
-		else if (const FNameProperty* NameProperty = CastField<FNameProperty>(Property))
-		{
-			Type = TEXT("string");
-			if (Value)
-			{
-				FName ValueName;
-				NameProperty->GetValue_InContainer(Container, &ValueName);
-				*Value = ValueName.ToString();
-			}
-		}
-		else if (const FTextProperty* TextProperty = CastField<FTextProperty>(Property))
-		{
-			Type = TEXT("string");
-			if (Value)
-			{
-				FText ValueText;
-				TextProperty->GetValue_InContainer(Container, &ValueText);
-				*Value = ValueText.ToString();
-			}
-		}
-		else if (const FBoolProperty* BoolProperty = CastField<FBoolProperty>(Property))
-		{
-			Type = TEXT("bool");
-			if (Value)
-			{
-				// Read through the property rather than with GetValue_InContainer, which raw-copies
-				// the property's bytes. A bitfield bool (uint8 bFoo:1) shares its byte with its
-				// neighbours, so a raw copy reports true whenever any of them is set.
-				*Value = BoolProperty->GetPropertyValue_InContainer(Container) ? TEXT("true") : TEXT("false");
-			}
-		}
-		else if (const FIntProperty* IntProperty = CastField<FIntProperty>(Property))
-		{
-			Type = TEXT("int");
-			if (Value)
-			{
-				int32 ValueInt;
-				IntProperty->GetValue_InContainer(Container, &ValueInt);
-				*Value = FString::FromInt(ValueInt);
-			}
-		}
-		else if (const FInt64Property* Int64Property = CastField<FInt64Property>(Property))
-		{
-			Type = TEXT("int64");
-			if (Value)
-			{
-				int64 ValueInt;
-				Int64Property->GetValue_InContainer(Container, &ValueInt);
-				*Value = FString::Printf(TEXT("%lld"), ValueInt);
-			}
-		}
-		else if (const FInt16Property* Int16Property = CastField<FInt16Property>(Property))
-		{
-			Type = TEXT("int");
-			if (Value)
-			{
-				int16 ValueInt;
-				Int16Property->GetValue_InContainer(Container, &ValueInt);
-				*Value = FString::FromInt(ValueInt);
-			}
-		}
-		else if (const FInt8Property* Int8Property = CastField<FInt8Property>(Property))
-		{
-			Type = TEXT("int");
-			if (Value)
-			{
-				int8 ValueInt;
-				Int8Property->GetValue_InContainer(Container, &ValueInt);
-				*Value = FString::FromInt(ValueInt);
-			}
-		}
-		else if (const FUInt64Property* UInt64Property = CastField<FUInt64Property>(Property))
-		{
-			Type = TEXT("int64");
-			if (Value)
-			{
-				uint64 ValueInt;
-				UInt64Property->GetValue_InContainer(Container, &ValueInt);
-				*Value = FString::Printf(TEXT("%llu"), ValueInt);
-			}
-		}
-		else if (const FUInt32Property* UInt32Property = CastField<FUInt32Property>(Property))
-		{
-			Type = TEXT("int64");
-			if (Value)
-			{
-				uint32 ValueInt;
-				UInt32Property->GetValue_InContainer(Container, &ValueInt);
-				*Value = FString::Printf(TEXT("%u"), ValueInt);
-			}
-		}
-		else if (const FUInt16Property* UInt16Property = CastField<FUInt16Property>(Property))
-		{
-			Type = TEXT("int");
-			if (Value)
-			{
-				uint16 ValueInt;
-				UInt16Property->GetValue_InContainer(Container, &ValueInt);
-				*Value = FString::FromInt(ValueInt);
-			}
-		}
-		else if (const FFloatProperty* FloatProperty = CastField<FFloatProperty>(Property))
-		{
-			Type = TEXT("float");
-			if (Value)
-			{
-				float ValueFloat;
-				FloatProperty->GetValue_InContainer(Container, &ValueFloat);
-				*Value = FString::SanitizeFloat(ValueFloat);
-			}
-		}
-		else if (const FDoubleProperty* DoubleProperty = CastField<FDoubleProperty>(Property))
-		{
-			Type = TEXT("double");
-			if (Value)
-			{
-				double ValueDouble;
-				DoubleProperty->GetValue_InContainer(Container, &ValueDouble);
-				*Value = FString::SanitizeFloat(ValueDouble);
-			}
-		}
-		else if (const FEnumProperty* EnumProperty = CastField<FEnumProperty>(Property))
-		{
-			const FString EnumName = EnumProperty->GetEnum()->GetName();
-			Type = EnumName;
-			if (Value)
-			{
-				const FNumericProperty* EnumIntProperty = EnumProperty->GetUnderlyingProperty();
-				const void* ValuePtr = EnumProperty->ContainerPtrToValuePtr<void>(Container);
-				int64 IntValue = EnumIntProperty->GetSignedIntPropertyValue(ValuePtr);
-				*Value = EnumProperty->GetEnum()->GetAuthoredNameStringByValue(IntValue);
-			}
-		}
-		else if (const FByteProperty* ByteProperty = CastField<FByteProperty>(Property))
-		{
-			// Bytes might be enums, or just bytes
-			if (ByteProperty->Enum)
-			{
-				const FString EnumName = ByteProperty->Enum->GetName();
-				Type = EnumName;
-				if (Value)
-				{
-					uint8 ValueIndex;
-					ByteProperty->GetValue_InContainer(Container, &ValueIndex);
-					*Value = ByteProperty->Enum->GetAuthoredNameStringByIndex(ValueIndex);
-				}
-			}
-			else
-			{
-				Type = TEXT("int");
-				if (Value)
-				{
-					uint8 ValueByte;
-					ByteProperty->GetValue_InContainer(Container, &ValueByte);
-					*Value = FString::FromInt(ValueByte);
-				}
-			}
-		}
-		else if (const FObjectProperty* ObjectProperty = CastField<FObjectProperty>(Property))
-		{
-			FString InnerType;
-			const FString OuterType =  ObjectProperty->GetCPPType(&InnerType, 0);
-			if (InnerType.IsEmpty())
-			{
-				Type = OuterType;
-			}
-			else
-			{
-				Type = FString::Printf(TEXT("%s<%s>"), *OuterType, *InnerType);
-			}
-			if (Value)
-			{
-				TObjectPtr<UObject> ValueObject;
-				ObjectProperty->GetValue_InContainer(Container, &ValueObject);
-				if (ValueObject)
-				{
-					if (AActor* Actor = Cast<AActor>(ValueObject.Get()))
-					{
-						*Value = UTempoCoreUtils::GetActorIdentifier(Actor);
-					}
-					else
-					{
-						*Value = ValueObject->GetName();
-					}
-				}
-				else
-				{
-					*Value = TEXT("null");
-				}
-			}
-		}
-		else if (const FSoftObjectProperty* SoftObjectProperty = CastField<FSoftObjectProperty>(Property))
-		{
-			// Catches both FSoftObjectProperty and FSoftClassProperty (the latter derives from the former).
-			FString InnerType;
-			const FString OuterType = SoftObjectProperty->GetCPPType(&InnerType, 0);
-			if (InnerType.IsEmpty())
-			{
-				Type = OuterType;
-			}
-			else
-			{
-				Type = FString::Printf(TEXT("%s<%s>"), *OuterType, *InnerType);
-			}
-			if (Value)
-			{
-				const FSoftObjectPtr& Soft = SoftObjectProperty->GetPropertyValue_InContainer(Container);
-				const FString Path = Soft.ToString();
-				*Value = Path.IsEmpty() ? TEXT("null") : Path;
-			}
-		}
-		else if (const FStructProperty* StructProperty = CastField<FStructProperty>(Property))
-		{
-			if (StructProperty->Struct->GetStructCPPName() == TEXT("FVector"))
-			{
-				Type = TEXT("vector");
-				if (Value)
-				{
-					FVector ValueVector;
-					StructProperty->GetValue_InContainer(Container, &ValueVector);
-					*Value = FString::Printf(TEXT("{X:%f, Y:%f, Z:%f}"), ValueVector.X, ValueVector.Y, ValueVector.Z);
-				}
-			}
-			else if (StructProperty->Struct->GetStructCPPName() == TEXT("FRotator"))
-			{
-				Type = TEXT("rotator");
-				if (Value)
-				{
-					FRotator ValueRotator;
-					StructProperty->GetValue_InContainer(Container, &ValueRotator);
-					ValueRotator = QuantityConverter<Deg2Rad,L2R>::Convert(ValueRotator);
-					*Value = FString::Printf(TEXT("{R:%f, P:%f, Y:%f}"), ValueRotator.Roll, ValueRotator.Pitch, ValueRotator.Yaw);
-				}
-			}
-			else if (StructProperty->Struct->GetStructCPPName() == TEXT("FColor"))
-			{
-				Type = TEXT("color");
-				if (Value)
-				{
-					FColor ValueColor;
-					StructProperty->GetValue_InContainer(Container, &ValueColor);
-					*Value = FString::Printf(TEXT("{R:%d, G:%d, B:%d}"), ValueColor.R, ValueColor.G, ValueColor.B);
-				}
-			}
-			else if (StructProperty->Struct->GetStructCPPName() == TEXT("FLinearColor"))
-			{
-				Type = TEXT("color");
-				if (Value)
-				{
-					FLinearColor ValueLinearColor;
-					StructProperty->GetValue_InContainer(Container, &ValueLinearColor);
-					const FColor ValueColor = ValueLinearColor.ToFColor(true);
-					*Value = FString::Printf(TEXT("{R:%d, G:%d, B:%d}"), ValueColor.R, ValueColor.G, ValueColor.B);
-				}
-			}
-			else
-			{
-				Type = StructProperty->Struct->GetStructCPPName();
-				if (Value)
-				{
-					*Value = TEXT("{");
-					void const* InnerPtr = StructProperty->ContainerPtrToValuePtr<void>(Container);
-					for (const FProperty* InnerProperty = StructProperty->Struct->PropertyLink; InnerProperty != nullptr; InnerProperty = InnerProperty->PropertyLinkNext)
-					{
-						const FString InnerName = InnerProperty->GetAuthoredName();
-						FString InnerType;
-						FString InnerValue;
-						GetPropertyTypeAndValue(InnerPtr, InnerProperty, InnerType, &InnerValue);
-						Value->Appendf(TEXT("%s:%s, "), *InnerName, *InnerValue);
-					}
-					Value->RemoveFromEnd(TEXT(", "));
-					Value->Append(TEXT("}"));
-				}
-			}
-		}
-		else if (const FArrayProperty* ArrayProperty = CastField<FArrayProperty>(Property))
-		{
-			FString InnerType = TEXT("unsupported");
-			// First, get the inner type (even if the array is empty!)
-			GetPropertyTypeAndValue(nullptr, ArrayProperty->Inner, InnerType, nullptr);
-			if (Value)
-			{
-				*Value = TEXT("[");
-				if (InnerType != TEXT("unsupported"))
-				{
-					FScriptArrayHelper ArrayHelper{ ArrayProperty, Property->ContainerPtrToValuePtr<void>(Container) };
-					for (int32 I = 0; I < ArrayHelper.Num(); ++I)
-					{
-						FString Unused; // The inner type of all values must be the same, and we already know it.
-						FString InnerValue;
-						GetPropertyTypeAndValue(ArrayHelper.GetRawPtr(I), ArrayProperty->Inner, Unused, &InnerValue);
-						Value->Appendf(TEXT("%s, "), *InnerValue);
-					}
-					Value->RemoveFromEnd(TEXT(", "));
-				}
-				Value->Append(TEXT("]"));
-			}
-			Type = FString::Printf(TEXT("array<%s>"), *InnerType);
-		}
-		else if (const FMapProperty* MapProperty = CastField<FMapProperty>(Property))
-		{
-			FString KeyType = TEXT("unsupported");
-			FString ValueType = TEXT("unsupported");
-			// Get key and value types (even if the map is empty)
-			GetPropertyTypeAndValue(nullptr, MapProperty->KeyProp, KeyType, nullptr);
-			GetPropertyTypeAndValue(nullptr, MapProperty->ValueProp, ValueType, nullptr);
-			if (Value)
-			{
-				*Value = TEXT("{");
-				if (KeyType != TEXT("unsupported") && ValueType != TEXT("unsupported"))
-				{
-					FScriptMapHelper MapHelper{ MapProperty, Property->ContainerPtrToValuePtr<void>(Container) };
-					for (int32 I = 0; I < MapHelper.GetMaxIndex(); ++I)
-					{
-						if (!MapHelper.IsValidIndex(I))
-						{
-							continue;
-						}
-						FString Unused; // Key/value types are uniform, and we already know them.
-						FString KeyValue;
-						FString ValueValue;
-						// ValueProp's Offset_Internal is set to MapLayout.ValueOffset, so pass the pair pointer
-						// (not GetValuePtr) so ContainerPtrToValuePtr applies that offset exactly once.
-						const uint8* PairPtr = MapHelper.GetPairPtr(I);
-						GetPropertyTypeAndValue(PairPtr, MapProperty->KeyProp, Unused, &KeyValue);
-						GetPropertyTypeAndValue(PairPtr, MapProperty->ValueProp, Unused, &ValueValue);
-						Value->Appendf(TEXT("%s: %s, "), *KeyValue, *ValueValue);
-					}
-					Value->RemoveFromEnd(TEXT(", "));
-				}
-				Value->Append(TEXT("}"));
-			}
-			Type = FString::Printf(TEXT("map<%s,%s>"), *KeyType, *ValueType);
-		}
-		else if (const FSetProperty* SetProperty = CastField<FSetProperty>(Property))
-		{
-			FString InnerType = TEXT("unsupported");
-			// Get the inner type (even if the set is empty)
-			GetPropertyTypeAndValue(nullptr, SetProperty->ElementProp, InnerType, nullptr);
-			if (Value)
-			{
-				*Value = TEXT("{");
-				if (InnerType != TEXT("unsupported"))
-				{
-					FScriptSetHelper SetHelper{ SetProperty, Property->ContainerPtrToValuePtr<void>(Container) };
-					for (int32 I = 0; I < SetHelper.GetMaxIndex(); ++I)
-					{
-						if (!SetHelper.IsValidIndex(I))
-						{
-							continue;
-						}
-						FString Unused; // Element type is uniform, and we already know it.
-						FString ElementValue;
-						GetPropertyTypeAndValue(SetHelper.GetElementPtr(I), SetProperty->ElementProp, Unused, &ElementValue);
-						Value->Appendf(TEXT("%s, "), *ElementValue);
-					}
-					Value->RemoveFromEnd(TEXT(", "));
-				}
-				Value->Append(TEXT("}"));
-			}
-			Type = FString::Printf(TEXT("set<%s>"), *InnerType);
-		}
-		else
-		{
-			Type = TEXT("unsupported");
-		}
-	};
 
 	for(TFieldIterator<FProperty> PropertyIt(Class); PropertyIt; ++PropertyIt)
 	{
@@ -2795,7 +3088,7 @@ namespace
 	// Build the function's parameter frame, fill it from the request's args, and invoke.
 	// A UFunction is a UStruct whose parameters are FProperties, so the frame is just another
 	// container that SetValueOnTarget can write into.
-	grpc::Status CallFunctionWithArgs(const UWorld* World, UObject* Object, UFunction* Function, const CallFunctionRequest& Request)
+	grpc::Status CallFunctionWithArgs(const UWorld* World, UObject* Object, UFunction* Function, const CallFunctionRequest& Request, CallFunctionResponse& Response)
 	{
 		const grpc::Status CallableStatus = CheckFunctionIsCallable(Object, Function);
 		if (!CallableStatus.ok())
@@ -2859,23 +3152,41 @@ namespace
 
 		Object->ProcessEvent(Function, Frame);
 
+		// Read the results back out of the frame before the scope guard destroys it. Out
+		// parameters count: a Blueprint function's "return values" are frequently out parms.
+		for (TFieldIterator<FProperty> It(Function); It && It->HasAnyPropertyFlags(CPF_Parm); ++It)
+		{
+			const FProperty* Parm = *It;
+			if (!Parm->HasAnyPropertyFlags(CPF_ReturnParm | CPF_OutParm))
+			{
+				continue;
+			}
+			FString Type;
+			FString Value;
+			GetPropertyTypeAndValue(Frame, Parm, Type, &Value);
+			FunctionResult* Result = Response.add_results();
+			Result->set_name(TCHAR_TO_UTF8(*Parm->GetName()));
+			Result->set_property_type(TCHAR_TO_UTF8(*Type));
+			Result->set_value(TCHAR_TO_UTF8(*Value));
+		}
+
 		return grpc::Status_OK;
 	}
 }
 
-void UTempoWorldControlServiceSubsystem::CallObjectFunction(const CallFunctionRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const
+void UTempoWorldControlServiceSubsystem::CallObjectFunction(const CallFunctionRequest& Request, const TResponseDelegate<CallFunctionResponse>& ResponseContinuation) const
 {
 	UObject* Object = nullptr;
 	const grpc::Status GetObjectStatus = GetObjectForRequest(GetWorld(), Request, Object);
 	if (!GetObjectStatus.ok())
 	{
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), GetObjectStatus);
+		ResponseContinuation.ExecuteIfBound(CallFunctionResponse(), GetObjectStatus);
 		return;
 	}
 
 	if (Request.function().empty())
 	{
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::FAILED_PRECONDITION, "function must be specified in CallFunction request"));
+		ResponseContinuation.ExecuteIfBound(CallFunctionResponse(), grpc::Status(grpc::FAILED_PRECONDITION, "function must be specified in CallFunction request"));
 		return;
 	}
 
@@ -2884,9 +3195,11 @@ void UTempoWorldControlServiceSubsystem::CallObjectFunction(const CallFunctionRe
 	if (!Function)
 	{
 		const FString ErrorMsg = FString::Printf(TEXT("Function '%s' not found on object '%s' (class '%s')"), *FunctionName.ToString(), *Object->GetName(), *Object->GetClass()->GetName());
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
+		ResponseContinuation.ExecuteIfBound(CallFunctionResponse(), grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 
-	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), CallFunctionWithArgs(GetWorld(), Object, Function, Request));
+	CallFunctionResponse Response;
+	const grpc::Status CallStatus = CallFunctionWithArgs(GetWorld(), Object, Function, Request, Response);
+	ResponseContinuation.ExecuteIfBound(Response, CallStatus);
 }

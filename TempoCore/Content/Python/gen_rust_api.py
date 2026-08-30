@@ -23,6 +23,7 @@ from gen_common import (
     gather_services,
     package_import_name,
     pascal_to_snake,
+    prost_to_snake,
     project_package_name as project_crate_name,
     protobuf_types_to_rust_types,
 )
@@ -478,7 +479,7 @@ impl Call {
                                                      tempo_response_descriptor.object_name)
                     client_type = _crate_path(
                         owner, service_module_pascal,
-                        f"{pascal_to_snake(tempo_service_descriptor.object_name)}_client::"
+                        f"{prost_to_snake(tempo_service_descriptor.object_name)}_client::"
                         f"{tempo_service_descriptor.object_name}Client",
                     )
 
@@ -491,7 +492,7 @@ impl Call {
                     plain_fields = []
                     oneof_groups = {}
                     request_module_pascal = tempo_request_descriptor.module_name.split(".")[0]
-                    request_msg_snake = pascal_to_snake(tempo_request_descriptor.object_name)
+                    request_msg_snake = prost_to_snake(tempo_request_descriptor.object_name)
                     for field in tempo_request_descriptor.fields:
                         field.rust_type = get_rust_type(field, owner, module_owners)
                         field.needs_option_wrap = needs_option_wrap(field)
@@ -544,7 +545,7 @@ impl Call {
                         request_rust_type=request_rust_type,
                         response_rust_type=response_rust_type,
                         client_type=client_type,
-                        method_name=pascal_to_snake(rpc_descriptor.name),
+                        method_name=prost_to_snake(rpc_descriptor.name),
                     ))
 
             # If this module defines a `SetPropertyOp` message with an `op` oneof and a
@@ -563,14 +564,14 @@ impl Call {
             )
             if set_property_op_desc and owning_service and set_property_op_desc.oneofs.get("op"):
                 op_module_pascal = set_property_op_desc.module_name.split(".")[0]
-                op_module_snake = pascal_to_snake(set_property_op_desc.object_name)  # set_property_op
+                op_module_snake = prost_to_snake(set_property_op_desc.object_name)  # set_property_op
                 op_type = _crate_path(owner, op_module_pascal, "SetPropertyOp")
                 op_enum_path = _crate_path(owner, op_module_pascal, f"{op_module_snake}::Op")
                 request_rust_type_batch = _crate_path(owner, op_module_pascal, "SetPropertiesRequest")
                 response_rust_type_batch = _crate_path(owner, op_module_pascal, "SetPropertiesResponse")
                 client_type_batch = _crate_path(
                     owner, op_module_pascal,
-                    f"{pascal_to_snake(owning_service.object_name)}_client::"
+                    f"{prost_to_snake(owning_service.object_name)}_client::"
                     f"{owning_service.object_name}Client",
                 )
 
@@ -628,7 +629,7 @@ impl Call {
             )
             if value_desc and call_service and value_desc.oneofs.get("value"):
                 value_module_pascal = value_desc.module_name.split(".")[0]
-                value_module_snake = pascal_to_snake(value_desc.object_name)  # value
+                value_module_snake = prost_to_snake(value_desc.object_name)  # value
                 arg_type = _crate_path(owner, value_module_pascal, "FunctionArg")
                 value_type = _crate_path(owner, value_module_pascal, "Value")
                 value_enum_path = _crate_path(owner, value_module_pascal, f"{value_module_snake}::Value")
@@ -639,7 +640,7 @@ impl Call {
                     owner, call_response_desc.module_name.split(".")[0], call_response_desc.object_name)
                 client_type_call = _crate_path(
                     owner, value_module_pascal,
-                    f"{pascal_to_snake(call_service.object_name)}_client::"
+                    f"{prost_to_snake(call_service.object_name)}_client::"
                     f"{call_service.object_name}Client",
                 )
 

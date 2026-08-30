@@ -80,10 +80,60 @@ TempoWorld supports setting transforms of Actors and Components. For example:
 import tempo_sim.tempo_world as tw
 import tempo_sim.TempoCore.Geometry_pb2 as Geometry
 
-t = Geometry.transform()
+t = Geometry.Transform()
+t.location.x = 1.0
 tw.set_actor_transform(actor="MyActor", transform=t, relative_to_actor="OptionalRelativeActor")
-tw.set_component_transform(actor="OwnerActor", component="MyComponent", transform=t, relative_to_world) # relative_to_world defaults to False, aka relative to parent
+tw.set_component_transform(actor="OwnerActor", component="MyComponent", transform=t, relative_to_world=False) # relative_to_world defaults to False, aka relative to parent
 ```
+
+**These are partial updates.** A member you don't set is left exactly as it was. `transform.location`
+and `transform.rotation` are honored independently, and scale rides alongside in its own `scale`
+field, so the example above moves `MyActor` without turning or resizing it. Setting nothing at all
+is a no-op. Every combination works:
+
+```
+r = Geometry.Transform()
+r.rotation.y = 1.57
+tw.set_actor_transform(actor="MyActor", transform=r)                                  # turn in place
+tw.set_actor_transform(actor="MyActor", transform=Geometry.Transform(),
+                       scale=Geometry.Vector(x=2.0, y=2.0, z=2.0))                    # resize in place
+```
+
+For the common single-part cases there are first-class RPCs, which say the same thing more directly:
+
+| RPC | Sets | Component equivalent |
+| --- | --- | --- |
+| `set_actor_location` | location only | `set_component_location` |
+| `set_actor_rotation` | rotation only | `set_component_rotation` |
+| `set_actor_scale3_d` | scale only | `set_component_scale3_d` |
+
+```
+tw.set_actor_location(actor="MyActor", location=Geometry.Vector(x=1.0, y=2.0, z=3.0))
+tw.set_actor_rotation(actor="MyActor", rotation=Geometry.Rotation(r=0.0, p=0.0, y=1.57))
+tw.set_actor_scale3_d(actor="MyActor", scale=Geometry.Vector(x=2.0, y=2.0, z=2.0))
+```
+
+Unlike the transform RPCs, these are not partial: the one value each takes is required, and
+omitting it is a `FAILED_PRECONDITION` rather than a silent move to the origin or a collapse to
+zero scale. The actor RPCs take `relative_to_actor` and the component RPCs take `relative_to_world`,
+exactly as the transform RPCs do.
+
+> [!NOTE]
+> **Scale is unitless and unconverted.** Every other `Vector` in this API is meters/right-handed
+> and is converted on the way in; a scale is a ratio, so its components are used exactly as given.
+> Negating Y to change handedness would mirror the object rather than re-express it.
+
+> [!NOTE]
+> **Scale is never composed through `relative_to_actor`.** Location and rotation are interpreted in
+> the reference Actor's frame; scale is always absolute. A non-uniform scale composed through a
+> rotated frame does not survive as a transform, so applying the frame to it would quietly produce
+> something the caller did not ask for.
+
+`relative_to_actor` interprets the transform in the named Actor's frame: the transform you pass is
+applied first and the reference Actor's transform second, the same order `spawn_actor` composes in.
+
+The component RPCs refuse to retarget an Actor's root component - it *is* the Actor's transform -
+and point you at the matching `set_actor_*` RPC instead.
 
 ### Getting and Setting Properties
 TempoWorld uses Unreal's reflection system to allow getting or setting the value of any UProperty by name. Sometimes you might not know the exact name of the Actor, Component, or property you want to set at runtime. For this reason RPCs to inspect properties are available. For example:
@@ -250,8 +300,13 @@ A few rules worth knowing:
   in the editor and in a packaged build. Out parameters and the return value must *not* be
   supplied. Naming part of a parameter (`"MyStruct.Inner"`) counts as supplying it, and the rest of
   that parameter keeps its zero value.
-- **The return value is discarded.** `call_function` returns `Empty`; a function that returns a
-  value can still be called, but its result is not sent back.
+- **Return values and out parameters come back as strings.** The response carries one
+  `FunctionResult` per value the function handed back — its return value (which Unreal names
+  `ReturnValue`) and any out parameters, in declaration order. `property_type` and `value` use
+  exactly the same vocabulary and string format as `get_*_properties`, since they share the same
+  code, so a returned struct reads the same as that struct read back off a property. A void
+  function with no out parameters returns an empty `results` list. Note this means results are
+  Unreal-native and *not* unit-converted, the same way property values aren't.
 - **Latent functions, C-style array parameters, and delegate parameters are rejected**, since
   there's no meaningful way to supply them over the API.
 
@@ -260,4 +315,16 @@ plain `call_function` RPC:
 
 ```
 tempo_world.call_function(actor="MyActor", function="ResetToStart")
+```
+
+Reading a result:
+
+```
+response = tempo_world.call(actor="MyActor", function="GetDistanceTo") \
+    .actor_arg("OtherActor", "BP_Player_C_0") \
+    .execute()
+
+for result in response.results:
+    print(f"{result.name} ({result.property_type}) = {result.value}")
+# ReturnValue (float) = 500.0
 ```

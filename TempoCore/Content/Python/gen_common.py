@@ -15,6 +15,7 @@ from gen_naming import (  # noqa: F401
     package_import_name,
     pascal_to_snake,
     project_package_name,
+    prost_to_snake,
 )
 
 
