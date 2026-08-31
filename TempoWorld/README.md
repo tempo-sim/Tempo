@@ -99,6 +99,18 @@ tw.set_actor_transform(actor="MyActor", transform=Geometry.Transform(),
                        scale=Geometry.Vector(x=2.0, y=2.0, z=2.0))                    # resize in place
 ```
 
+> [!IMPORTANT]
+> **Presence decides what gets applied, not value.** Zero is a real request: setting a location of
+> `(0, 0, 0)` moves the Actor to the origin, and a rotation of `(0, 0, 0)` turns it to identity.
+> What marks a member as supplied is *assigning* to it, even to `0.0` - so in Python
+> `t.location.x = 0.0` counts, while merely reading `t.location.x` does not. `SetInParent()`,
+> `CopyFrom(Vector())`, or `Transform(location=Vector())` are explicit ways to say "the origin".
+> In Rust the field is a plain `Option`, and in C++ any `mutable_location()` call marks it present.
+>
+> The corollary is the one migration hazard: `set_actor_transform(actor="X",
+> transform=Geometry.Transform())` used to reset an Actor to the origin with identity rotation.
+> It is now a no-op, because nothing was supplied. Spell the reset out if you meant it.
+
 For the common single-part cases there are first-class RPCs, which say the same thing more directly:
 
 | RPC | Sets | Component equivalent |

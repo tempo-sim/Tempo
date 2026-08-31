@@ -702,7 +702,7 @@ message FunctionDescriptor {
   // Function name, spelled the way CallFunction's `function` expects it.
   string name = 3;
   // The whole signature as one string, the way the declaration reads, e.g.
-  // "float GetDistanceTo(actor OtherActor)". Types come from the same vocabulary as
+  // "float GetDistanceTo(AActor* OtherActor)". Types come from the same vocabulary as
   // PropertyDescriptor.property_type, and out parameters are prefixed with "out ".
   string signature = 4;
   // The same information, split up: one entry per parameter, in declaration order.

@@ -747,9 +747,13 @@ def generate_proto_includes(rust_root_dir, modules):
         f.write("//! Generated protobuf modules.\n\n")
 
         for module in sorted(modules):
+            # The module we declare is Tempo's own name for it - the one every generated type path
+            # elsewhere in this file is built from. The file we include is the one prost wrote, and
+            # prost names it by its own snake rule, so the two spellings can differ (`MyGame2D` is
+            # module `my_game2d` in file `my_game2_d.rs`).
             rust_module = pascal_to_snake(module)
             f.write(f"pub mod {rust_module} {{\n")
-            f.write(f'    include!("proto/{rust_module}.rs");\n')
+            f.write(f'    include!("proto/{prost_to_snake(module)}.rs");\n')
             f.write("}\n\n")
 
 

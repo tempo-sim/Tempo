@@ -654,3 +654,37 @@ def test_singular_transform_rpcs_require_their_value(sim_server):
         assert state.transform.location.z == pytest.approx(110.0, abs=0.05), "a rejected call still moved the actor"
     finally:
         tw.destroy_actor(actor=name)
+
+
+def test_zero_location_and_rotation_are_settable(sim_server):
+    """Presence decides what a partial update touches, not value - so zero is a real request.
+    Assigning any member of `location`/`rotation` marks it present even when every component is
+    0.0, which is what separates "move to the origin" from "leave the location alone"."""
+    start = _transform(5.0, 5.0, 115.0)
+    start.rotation.y = math.pi / 2.0
+    name = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=start).name
+    try:
+        _make_movable(name)
+
+        # _transform assigns all three components, so location is present despite being all zeros.
+        tw.set_actor_transform(actor=name, transform=_transform(0.0, 0.0, 0.0))
+        state = tw.get_current_actor_state(actor=name)
+        assert (state.transform.location.x, state.transform.location.y, state.transform.location.z) == \
+            pytest.approx((0.0, 0.0, 0.0), abs=0.05)
+        assert state.transform.rotation.y == pytest.approx(math.pi / 2.0, abs=1e-3), \
+            "rotation should have been left alone"
+
+        # Likewise a rotation back to identity, rather than "rotation not supplied".
+        identity = Geometry.Transform()
+        identity.rotation.y = 0.0
+        tw.set_actor_transform(actor=name, transform=identity)
+        state = tw.get_current_actor_state(actor=name)
+        assert state.transform.rotation.y == pytest.approx(0.0, abs=1e-3)
+
+        # And the distinction that makes it work: an untouched Transform changes nothing.
+        tw.set_actor_transform(actor=name, transform=Geometry.Transform())
+        state = tw.get_current_actor_state(actor=name)
+        assert (state.transform.location.x, state.transform.location.y, state.transform.location.z) == \
+            pytest.approx((0.0, 0.0, 0.0), abs=0.05)
+    finally:
+        tw.destroy_actor(actor=name)

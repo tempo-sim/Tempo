@@ -132,7 +132,7 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
         "\n" \
         "async def _{{ name }}(\n" \
         "{% for field in request.fields %}" \
-        "    {{ field.name }}: {{ field.field_type }} = {{ field.default }}{% if not loop.last %},{% endif %}\n" \
+        "    {{ field.name }}: {{ field.py_annotation }} = {{ field.py_default }}{% if not loop.last %},{% endif %}\n" \
         "{% endfor %}" \
         ") -> {{ response.full_name }}:\n" \
         "    stub = await tempo_context().get_stub({{ service.module_name }}_grpc.{{ service.object_name }}Stub)\n" \
@@ -145,7 +145,7 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
         "\n\n" \
         "def {{ name }}(\n" \
         "{% for field in request.fields %}" \
-        "    {{ field.name }}: {{ field.field_type }} = {{ field.default }}{% if not loop.last %},{% endif %}\n" \
+        "    {{ field.name }}: {{ field.py_annotation }} = {{ field.py_default }}{% if not loop.last %},{% endif %}\n" \
         "{% endfor %}" \
         ") -> {{ response.full_name }}:\n" \
         "    return run_async(_{{ name }}(\n" \
@@ -157,7 +157,7 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
         "@awaitable({{ name }})\n" \
         "async def {{ name }}(\n" \
         "{% for field in request.fields %}" \
-        "    {{ field.name }}: {{ field.field_type }} = {{ field.default }}{% if not loop.last %},{% endif %}\n" \
+        "    {{ field.name }}: {{ field.py_annotation }} = {{ field.py_default }}{% if not loop.last %},{% endif %}\n" \
         "{% endfor %}" \
         ") -> {{ response.full_name }}:\n" \
         "    return await _{{ name }}(\n" \
@@ -175,7 +175,7 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
         "\n" \
         "async def _{{ name }}(\n" \
         "{% for field in request.fields %}" \
-        "    {{ field.name }}: {{ field.field_type }} = {{ field.default }}{% if not loop.last %},{% endif %}\n" \
+        "    {{ field.name }}: {{ field.py_annotation }} = {{ field.py_default }}{% if not loop.last %},{% endif %}\n" \
         "{% endfor %}" \
         ") -> {{ response.full_name }}:\n" \
         "    stub = await tempo_context().get_stub({{ service.module_name }}_grpc.{{ service.object_name }}Stub)\n" \
@@ -189,7 +189,7 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
         "\n\n" \
         "def {{ name }}(\n" \
         "{% for field in request.fields %}" \
-        "    {{ field.name }}: {{ field.field_type }} = {{ field.default }}{% if not loop.last %},{% endif %}\n" \
+        "    {{ field.name }}: {{ field.py_annotation }} = {{ field.py_default }}{% if not loop.last %},{% endif %}\n" \
         "{% endfor %}" \
         ") -> {{ response.full_name }}:\n" \
         "    async_gen = _{{ name }}(\n" \
@@ -206,7 +206,7 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
         "@awaitable({{ name }})\n" \
         "async def {{ name }}(\n" \
         "{% for field in request.fields %}" \
-        "    {{ field.name }}: {{ field.field_type }} = {{ field.default }}{% if not loop.last %},{% endif %}\n" \
+        "    {{ field.name }}: {{ field.py_annotation }} = {{ field.py_default }}{% if not loop.last %},{% endif %}\n" \
         "{% endfor %}" \
         ") -> {{ response.full_name }}:\n" \
         "    async for response in _{{ name }}(\n" \
@@ -242,7 +242,7 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
         "    def {{ method.name }}(\n" \
         "        self,\n" \
         "{% for field in method.fields %}" \
-        "        {{ field.name }}: {{ field.field_type }} = {{ field.default }}{% if not loop.last %},{% endif %}\n" \
+        "        {{ field.name }}: {{ field.py_annotation }} = {{ field.py_default }}{% if not loop.last %},{% endif %}\n" \
         "{% endfor %}" \
         "    ) -> 'Batch':\n" \
         "        self._ops.append({{ pb2 }}.SetPropertyOp(\n" \
@@ -298,7 +298,7 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
         "        self,\n" \
         "        name: str = '',\n" \
         "{% for field in method.fields %}" \
-        "        {{ field.name }}: {{ field.field_type }} = {{ field.default }}{% if not loop.last %},{% endif %}\n" \
+        "        {{ field.name }}: {{ field.py_annotation }} = {{ field.py_default }}{% if not loop.last %},{% endif %}\n" \
         "{% endfor %}" \
         "    ) -> 'Call':\n" \
         "        self._args.append({{ pb2 }}.FunctionArg(\n" \

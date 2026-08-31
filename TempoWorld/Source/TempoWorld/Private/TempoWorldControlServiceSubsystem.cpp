@@ -590,16 +590,19 @@ namespace
 		}
 
 		const FString Name(UTF8_TO_TCHAR(ComponentName.c_str()));
+		// Name the actor the way the client can address it again, not by its object name.
+		const FString ActorIdentifier = UTempoCoreUtils::GetActorIdentifier(Actor);
+
 		OutComponent = GetComponentWithName<USceneComponent>(Actor, Name);
 		if (!OutComponent)
 		{
-			const FString ErrorMsg = FString::Printf(TEXT("Failed to find scene component '%s' on actor '%s' for %s request"), *Name, *Actor->GetName(), RequestName);
+			const FString ErrorMsg = FString::Printf(TEXT("Failed to find scene component '%s' on actor '%s' for %s request"), *Name, *ActorIdentifier, RequestName);
 			return grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 		}
 
 		if (OutComponent == Actor->GetRootComponent())
 		{
-			const FString ErrorMsg = FString::Printf(TEXT("Cannot set the transform of root component '%s' on actor '%s' directly. Use %s on the owner actor instead."), *Name, *Actor->GetName(), ActorRpcName);
+			const FString ErrorMsg = FString::Printf(TEXT("%s cannot address root component '%s' on actor '%s' directly: it is the actor's own transform. Use %s on the owner actor instead."), RequestName, *Name, *ActorIdentifier, ActorRpcName);
 			return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 		}
 
@@ -1652,15 +1655,21 @@ grpc::Status SetSinglePropertyValue<FEnumProperty, FString>(void* ValuePtr, FEnu
 template <>
 grpc::Status SetSinglePropertyValue<FByteProperty, FString>(void* ValuePtr, FByteProperty* Property, const FString& ValueStr)
 {
+	// A plain uint8 property has no enum, so there is no name to resolve against.
 	const UEnum* PropertyEnum = Property->Enum;
-	const int64 Value = GetEnumValueByAuthoredName(PropertyEnum, ValueStr);
+	const int64 Value = PropertyEnum ? GetEnumValueByAuthoredName(PropertyEnum, ValueStr) : INDEX_NONE;
 	if (Value == INDEX_NONE)
 	{
 		const FString EnumName = PropertyEnum ? PropertyEnum->GetName() : TEXT("<none>");
 		const FString ErrorMsg = FString::Printf(TEXT("Invalid value '%s' for byte/enum property '%s' (enum '%s')"), *ValueStr, *Property->GetName(), *EnumName);
 		return grpc::Status(grpc::INVALID_ARGUMENT, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 	}
-	Property->SetPropertyValue(ValuePtr, PropertyEnum->GetValueByIndex(Value));
+	if (Value < 0 || Value > TNumericLimits<uint8>::Max())
+	{
+		const FString ErrorMsg = FString::Printf(TEXT("Value '%s' of enum '%s' is %lld, which does not fit in byte property '%s'"), *ValueStr, *PropertyEnum->GetName(), Value, *Property->GetName());
+		return grpc::Status(grpc::OUT_OF_RANGE, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+	}
+	Property->SetPropertyValue(ValuePtr, static_cast<uint8>(Value));
 	return grpc::Status_OK;
 }
 
@@ -1966,14 +1975,25 @@ grpc::Status SetArrayOnTarget(const UWorld* World, const FPropertyTarget& Target
 		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 	}
 
+	grpc::Status FinalStatus = grpc::Status_OK;
 	{
 		FScopedPropertyEdit EditScope(World, Target);
 		ArrayHelper.EmptyValues();
 		ArrayHelper.InsertValues(0, Values.Num());
 		for (int32 I = 0; I < Values.Num(); ++I)
 		{
-			SetSinglePropertyInContainer<PropertyType, ValueType>(ArrayHelper.GetRawPtr(I), InnerProperty, Target.InnerPropertyName, Values[I]);
+			const grpc::Status SetStatus = SetSinglePropertyInContainer<PropertyType, ValueType>(ArrayHelper.GetRawPtr(I), InnerProperty, Target.InnerPropertyName, Values[I]);
+			if (!SetStatus.ok())
+			{
+				FinalStatus = SetStatus;
+				break;
+			}
 		}
+	}
+
+	if (!FinalStatus.ok())
+	{
+		return FinalStatus;
 	}
 
 	MarkRenderStateDirty(Target.Object);
@@ -2317,7 +2337,7 @@ grpc::Status SetValueOnTarget(const UWorld* World, const FPropertyTarget& Target
 		const FString ClassName(UTF8_TO_TCHAR(Value.class_value().c_str()));
 		if (ClassName.IsEmpty())
 		{
-			return SetSingleOnTarget<FObjectProperty>(World, Target, nullptr);
+			return SetObjectOnTarget(World, Target, nullptr);
 		}
 		UClass* Class = GetSubClassWithName<UObject>(ClassName);
 		if (!Class)
@@ -2331,21 +2351,21 @@ grpc::Status SetValueOnTarget(const UWorld* World, const FPropertyTarget& Target
 		const FString AssetPath(UTF8_TO_TCHAR(Value.asset_value().c_str()));
 		if (AssetPath.IsEmpty())
 		{
-			return SetSingleOnTarget<FObjectProperty>(World, Target, nullptr);
+			return SetObjectOnTarget(World, Target, nullptr);
 		}
 		UObject* Asset = GetAssetByPath(AssetPath);
 		if (!Asset)
 		{
 			return grpc::Status(grpc::NOT_FOUND, "Did not find asset with path " + std::string(TCHAR_TO_UTF8(*AssetPath)));
 		}
-		return SetSingleOnTarget<FObjectProperty>(World, Target, Asset);
+		return SetObjectOnTarget(World, Target, Asset);
 	}
 	case PropertyValue::kActorValue:
 	{
 		const FString ActorName(UTF8_TO_TCHAR(Value.actor_value().c_str()));
 		if (ActorName.IsEmpty())
 		{
-			return SetSingleOnTarget<FObjectProperty>(World, Target, nullptr);
+			return SetObjectOnTarget(World, Target, nullptr);
 		}
 		AActor* Actor = GetActorWithName(World, ActorName);
 		if (!Actor)
@@ -2359,7 +2379,7 @@ grpc::Status SetValueOnTarget(const UWorld* World, const FPropertyTarget& Target
 		const FString FullName(UTF8_TO_TCHAR(Value.component_value().c_str()));
 		if (FullName.IsEmpty())
 		{
-			return SetSingleOnTarget<FObjectProperty>(World, Target, nullptr);
+			return SetObjectOnTarget(World, Target, nullptr);
 		}
 		UActorComponent* Component = nullptr;
 		const grpc::Status Status = ResolveComponent(World, FullName, TEXT("Component property value"), Component);
@@ -2452,7 +2472,7 @@ grpc::Status SetValueOnTarget(const UWorld* World, const FPropertyTarget& Target
 		{
 			return Status;
 		}
-		return SetArrayOnTarget<FObjectProperty>(World, Target, AssetArray);
+		return SetObjectArrayOnTarget(World, Target, AssetArray);
 	}
 	case PropertyValue::kActorArrayValue:
 	{
@@ -3211,12 +3231,23 @@ namespace
 			Actor = Component->GetOwner();
 		}
 
+		// An overridden UFUNCTION (a Blueprint implementing a native event, say) exists once per
+		// class that declares it, and the iterator walks most-derived first. FindFunctionByName
+		// only ever reaches that first one, so report it and skip the shadowed declarations.
+		TSet<FName> ReportedNames;
+
 		for (TFieldIterator<UFunction> FunctionIt(Class); FunctionIt; ++FunctionIt)
 		{
 			const UFunction* Function = *FunctionIt;
 			// A delegate signature is declared like a function but exists only to type a delegate.
 			// There is nothing to call. FUNC_Delegate covers multi-cast too.
 			if (Function->HasAnyFunctionFlags(FUNC_Delegate))
+			{
+				continue;
+			}
+			bool bAlreadyReported = false;
+			ReportedNames.Add(Function->GetFName(), &bAlreadyReported);
+			if (bAlreadyReported)
 			{
 				continue;
 			}
