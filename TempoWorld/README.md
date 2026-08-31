@@ -80,10 +80,72 @@ TempoWorld supports setting transforms of Actors and Components. For example:
 import tempo_sim.tempo_world as tw
 import tempo_sim.TempoCore.Geometry_pb2 as Geometry
 
-t = Geometry.transform()
+t = Geometry.Transform()
+t.location.x = 1.0
 tw.set_actor_transform(actor="MyActor", transform=t, relative_to_actor="OptionalRelativeActor")
-tw.set_component_transform(actor="OwnerActor", component="MyComponent", transform=t, relative_to_world) # relative_to_world defaults to False, aka relative to parent
+tw.set_component_transform(actor="OwnerActor", component="MyComponent", transform=t, relative_to_world=False) # relative_to_world defaults to False, aka relative to parent
 ```
+
+**These are partial updates.** A member you don't set is left exactly as it was. `transform.location`
+and `transform.rotation` are honored independently, and scale rides alongside in its own `scale`
+field, so the example above moves `MyActor` without turning or resizing it. Setting nothing at all
+is a no-op. Every combination works:
+
+```
+r = Geometry.Transform()
+r.rotation.y = 1.57
+tw.set_actor_transform(actor="MyActor", transform=r)                                  # turn in place
+tw.set_actor_transform(actor="MyActor", transform=Geometry.Transform(),
+                       scale=Geometry.Vector(x=2.0, y=2.0, z=2.0))                    # resize in place
+```
+
+> [!IMPORTANT]
+> **Presence decides what gets applied, not value.** Zero is a real request: setting a location of
+> `(0, 0, 0)` moves the Actor to the origin, and a rotation of `(0, 0, 0)` turns it to identity.
+> What marks a member as supplied is *assigning* to it, even to `0.0` - so in Python
+> `t.location.x = 0.0` counts, while merely reading `t.location.x` does not. `SetInParent()`,
+> `CopyFrom(Vector())`, or `Transform(location=Vector())` are explicit ways to say "the origin".
+> In Rust the field is a plain `Option`, and in C++ any `mutable_location()` call marks it present.
+>
+> The corollary is the one migration hazard: `set_actor_transform(actor="X",
+> transform=Geometry.Transform())` used to reset an Actor to the origin with identity rotation.
+> It is now a no-op, because nothing was supplied. Spell the reset out if you meant it.
+
+For the common single-part cases there are first-class RPCs, which say the same thing more directly:
+
+| RPC | Sets | Component equivalent |
+| --- | --- | --- |
+| `set_actor_location` | location only | `set_component_location` |
+| `set_actor_rotation` | rotation only | `set_component_rotation` |
+| `set_actor_scale3d` | scale only | `set_component_scale3d` |
+
+```
+tw.set_actor_location(actor="MyActor", location=Geometry.Vector(x=1.0, y=2.0, z=3.0))
+tw.set_actor_rotation(actor="MyActor", rotation=Geometry.Rotation(r=0.0, p=0.0, y=1.57))
+tw.set_actor_scale3d(actor="MyActor", scale=Geometry.Vector(x=2.0, y=2.0, z=2.0))
+```
+
+Unlike the transform RPCs, these are not partial: the one value each takes is required, and
+omitting it is a `FAILED_PRECONDITION` rather than a silent move to the origin or a collapse to
+zero scale. The actor RPCs take `relative_to_actor` and the component RPCs take `relative_to_world`,
+exactly as the transform RPCs do.
+
+> [!NOTE]
+> **Scale is unitless and unconverted.** Every other `Vector` in this API is meters/right-handed
+> and is converted on the way in; a scale is a ratio, so its components are used exactly as given.
+> Negating Y to change handedness would mirror the object rather than re-express it.
+
+> [!NOTE]
+> **Scale is never composed through `relative_to_actor`.** Location and rotation are interpreted in
+> the reference Actor's frame; scale is always absolute. A non-uniform scale composed through a
+> rotated frame does not survive as a transform, so applying the frame to it would quietly produce
+> something the caller did not ask for.
+
+`relative_to_actor` interprets the transform in the named Actor's frame: the transform you pass is
+applied first and the reference Actor's transform second, the same order `spawn_actor` composes in.
+
+The component RPCs refuse to retarget an Actor's root component - it *is* the Actor's transform -
+and point you at the matching `set_actor_*` RPC instead.
 
 ### Getting and Setting Properties
 TempoWorld uses Unreal's reflection system to allow getting or setting the value of any UProperty by name. Sometimes you might not know the exact name of the Actor, Component, or property you want to set at runtime. For this reason RPCs to inspect properties are available. For example:
@@ -134,6 +196,22 @@ TempoWorld also supports setting individual properties in structs, arrays, and m
 > [!Warning]
 > While the values you set for rotators and quaternions will be converted from radians/right-handed to degrees/left-handed, the values you set for floats and vector-shaped types (`vector`, `vector2d`, `int_vector`, `int_point`) will not be converted (so, these should be specified in centimeters if they represent distances). We don't feel it is safe to assume that these quantities always represent distances. `set_transform_property` is the one exception: it follows the same convention as `spawn_actor` and `set_actor_transform`, converting the location from meters to centimeters and the rotation from radians/right-handed to degrees/left-handed, since transforms almost always represent world-frame poses.
 
+Every one of the RPCs above is a named shorthand for the same underlying operation: write one typed
+value into one property. That operation is also available directly as `set_property`, which carries
+the value's type in a `Value` message instead of in the RPC name:
+
+```
+from tempo_sim import tempo_world
+import tempo_sim.TempoWorld.WorldControl_pb2 as WorldControl
+
+tempo_world.set_property(actor="MyActor", property="MaxSpeed",
+                         value=WorldControl.Value(float_value=42.0))
+```
+
+Reach for it when the type isn't known until runtime — dispatching over a config file, or replaying
+recorded property values. When you do know the type at the call site, the named `set_*_property`
+functions say the same thing more plainly.
+
 ### Batching Property Sets
 When you need to apply multiple property changes together, the `set_properties` RPC accepts a list of any of the singular set-property ops above and runs them in order in a single call. To avoid building op messages by hand, the generated clients include a fluent `Batch` builder with one method per supported type, named after its singular counterpart. The response contains one entry per *failed* op (by index); an empty `failures` list means every op succeeded.
 
@@ -172,3 +250,126 @@ for failure in &response.failures {
 }
 ```
 Args are positional and match the request message's field order (`actor, component, property, value/values/...`), the same as the singular `tempo_world::set_*_property` wrappers. `execute_async().await` is available for async callers.
+
+### Calling Functions
+`call_function` invokes any `UFUNCTION` on an Actor or Component by name. Arguments are typed
+`Value`s, exactly as `set_property` takes — so a function argument follows the same rules as the
+matching property type, including how classes, assets, actors, and components are named, and the
+same nested addressing (`MyStruct.Inner`, `MyArray[0]`, `MyMap[key]`) for reaching into a
+parameter.
+
+Rather than build `Value` messages by hand, the generated clients include a fluent `Call` builder
+with one `*_arg` method per supported type, named after the type it carries. In Python:
+
+```
+from tempo_sim import tempo_world
+
+tempo_world.call(actor="MyActor", function="ApplyDamage") \
+    .float_arg("Amount", 42.5) \
+    .vector_arg("Location", x=0.0, y=0.0, z=150.0) \
+    .enum_arg("DamageType", "Explosive") \
+    .actor_arg("Instigator", "BP_Player_C_0") \
+    .execute()
+```
+
+In Rust:
+
+```
+use tempo_sim::tempo_world;
+
+tempo_world::call("MyActor".into(), "".into(), "ApplyDamage".into())
+    .float_arg("Amount".into(), 42.5)
+    .vector_arg("Location".into(), 0.0, 0.0, 150.0)
+    .enum_arg("DamageType".into(), "Explosive".into())
+    .actor_arg("Instigator".into(), "BP_Player_C_0".into())
+    .execute()?;
+```
+
+In C++:
+
+```
+#include <tempo.h>
+
+auto result = tempo::tempo_world::call("MyActor", "", "ApplyDamage")
+    .float_arg("Amount", 42.5f)
+    .vector_arg("Location", 0.0, 0.0, 150.0)
+    .enum_arg("DamageType", "Explosive")
+    .actor_arg("Instigator", "BP_Player_C_0")
+    .execute();
+```
+
+`execute_async` is available for `await` in Python and Rust. Each `*_arg` method takes the same
+arguments as the corresponding `set_*_property` function, minus the property name — so
+`vector_arg` takes `x`/`y`/`z` and `transform_arg` takes a whole `Transform`, matching
+`set_vector_property` and `set_transform_property`. The same conversion caveats apply: rotators,
+quaternions, and transforms are converted from the API's radians/right-handed convention, and
+floats and the vector-shaped types are not.
+
+A few rules worth knowing:
+
+- **Every input parameter must be supplied.** Blueprint parameter defaults live in editor-only
+  metadata, so a packaged sim can't honor them; requiring all inputs means a call behaves the same
+  in the editor and in a packaged build. Out parameters and the return value must *not* be
+  supplied. Naming part of a parameter (`"MyStruct.Inner"`) counts as supplying it, and the rest of
+  that parameter keeps its zero value.
+- **Return values and out parameters come back as strings.** The response carries one
+  `FunctionResult` per value the function handed back — its return value (which Unreal names
+  `ReturnValue`) and any out parameters, in declaration order. `property_type` and `value` use
+  exactly the same vocabulary and string format as `get_*_properties`, since they share the same
+  code, so a returned struct reads the same as that struct read back off a property. A void
+  function with no out parameters returns an empty `results` list. Note this means results are
+  Unreal-native and *not* unit-converted, the same way property values aren't.
+- **Latent functions, C-style array parameters, and delegate parameters are rejected**, since
+  there's no meaningful way to supply them over the API.
+
+Functions with no parameters at all are called the same way, with no `*_arg` calls — or with the
+plain `call_function` RPC:
+
+```
+tempo_world.call_function(actor="MyActor", function="ResetToStart")
+```
+
+Reading a result:
+
+```
+response = tempo_world.call(actor="MyActor", function="GetDistanceTo") \
+    .actor_arg("OtherActor", "BP_Player_C_0") \
+    .execute()
+
+for result in response.results:
+    print(f"{result.name} ({result.property_type}) = {result.value}")
+# ReturnValue (float) = 500.0
+```
+
+### Discovering Functions
+Just as `get_*_properties` lets you find a property without knowing its name up front,
+`get_actor_functions` and `get_component_functions` list the `UFUNCTION`s you can call:
+
+```
+from tempo_sim import tempo_world
+
+for function in tempo_world.get_actor_functions(actor="MyActor", include_components=True).functions:
+    print(f"{function.signature}{'' if function.callable else '  # ' + function.error}")
+# void SetActorHiddenInGame(bool bNewHidden)
+# float GetDistanceTo(AActor* OtherActor)
+# void GetActorBounds(bool bOnlyCollidingComponents, out vector Origin, out vector BoxExtent, bool bIncludeFromChildActors)
+```
+
+`signature` reads like the declaration does, and its type names come from the same vocabulary as
+`property_type` in `get_*_properties` — so the type in a signature tells you which `*_arg` method
+to call. Out parameters stay in the parameter list, prefixed with `out`, because that is where
+`CallFunction`'s parameter frame expects them.
+
+The same information is also available split up, in `parameters`, which is what you want if you're
+building a call programmatically rather than reading it:
+
+| Field | Meaning |
+| ------------- | ------------- |
+| `name`          | Parameter name, spelled the way an `*_arg` method's first argument expects it |
+| `property_type` | Same vocabulary as `get_*_properties`' `property_type` |
+| `kind`          | `PK_INPUT` (you must supply it), `PK_OUTPUT`, or `PK_RETURN` (you must not) |
+
+`callable` is false for the functions `call_function` would refuse — latent functions, and those
+with C-style array or delegate parameters — with `error` saying why, so you never have to guess
+which of the listed functions can actually be invoked. Delegate signatures aren't listed at all;
+they're declared like functions but exist only to type a delegate.

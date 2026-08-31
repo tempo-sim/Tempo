@@ -11,7 +11,7 @@
 
 #include <tempo.h>
 
-namespace tm = tempo::tempo_movement;
+namespace tmv = tempo::tempo_movement;
 
 namespace {
 
@@ -35,7 +35,7 @@ int main(int argc, char** argv) {
     tempo::set_server(host, static_cast<uint16_t>(port));
     std::printf("[MovementPlayground] connecting to %s:%d\n", host, port);
 
-    auto commandable = tm::get_commandable_pawns();
+    auto commandable = tmv::get_commandable_pawns();
     if (!commandable) {
         std::fprintf(stderr, "[MovementPlayground] get_commandable_pawns failed: %s\n",
                      commandable.error().what().c_str());
@@ -47,7 +47,7 @@ int main(int argc, char** argv) {
         std::printf("  - %s\n", p.c_str());
     }
 
-    auto navigable = tm::get_navigable_pawns();
+    auto navigable = tmv::get_navigable_pawns();
     if (!navigable) {
         std::fprintf(stderr, "[MovementPlayground] get_navigable_pawns failed: %s\n",
                      navigable.error().what().c_str());
@@ -68,7 +68,7 @@ int main(int argc, char** argv) {
     // 1) Normalized driving command (assumes target is a vehicle; a no-op for
     //    non-vehicle pawns, but the RPC will fail rather than crash).
     std::printf("[MovementPlayground] CommandVehicle(%s, accel=0.2, steer=0.0)\n", target.c_str());
-    if (auto r = tm::command_vehicle(target, 0.2f, 0.0f); !r) {
+    if (auto r = tmv::command_vehicle(target, 0.2f, 0.0f); !r) {
         std::fprintf(stderr, "  command_vehicle failed: %s\n", r.error().what().c_str());
     }
 
@@ -81,7 +81,7 @@ int main(int argc, char** argv) {
     twist.mutable_angular()->set_y(0.0);
     twist.mutable_angular()->set_z(0.0);
     std::printf("[MovementPlayground] CommandVelocity(%s, linear=(1,0,0))\n", target.c_str());
-    if (auto r = tm::command_velocity(target, twist); !r) {
+    if (auto r = tmv::command_velocity(target, twist); !r) {
         std::fprintf(stderr, "  command_velocity failed: %s\n", r.error().what().c_str());
     }
 
@@ -94,7 +94,7 @@ int main(int argc, char** argv) {
     accel.mutable_angular()->set_y(0.0);
     accel.mutable_angular()->set_z(0.0);
     std::printf("[MovementPlayground] CommandAcceleration(%s, linear=(0.5,0,0))\n", target.c_str());
-    if (auto r = tm::command_acceleration(target, accel); !r) {
+    if (auto r = tmv::command_acceleration(target, accel); !r) {
         std::fprintf(stderr, "  command_acceleration failed: %s\n", r.error().what().c_str());
     }
 
@@ -108,7 +108,7 @@ int main(int argc, char** argv) {
         location.set_z(0.0);
         std::printf("[MovementPlayground] PawnMoveToLocation(%s, relative=(5,0,0))\n",
                     nav_target.c_str());
-        if (auto r = tm::pawn_move_to_location(nav_target, location, /*relative=*/true); !r) {
+        if (auto r = tmv::pawn_move_to_location(nav_target, location, /*relative=*/true); !r) {
             std::fprintf(stderr, "  pawn_move_to_location failed: %s\n", r.error().what().c_str());
         } else {
             std::printf("  result: %s\n", result_string(r.value().result()));

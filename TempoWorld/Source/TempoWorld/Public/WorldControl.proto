@@ -68,23 +68,98 @@ message DestroyComponentRequest {
   string component = 2;
 }
 
+// Partial update: every member below is optional, and one that is not set leaves that part of
+// the actor's transform unchanged. Setting none of them is a no-op.
 message SetActorTransformRequest {
   // Name of the actor to move.
   string actor = 1;
-  // Target transform (world frame, or relative to `relative_to_actor` if set). Meters / right-handed.
+  // Target location and rotation (world frame, or relative to `relative_to_actor` if set).
+  // Meters / radians, right-handed. `transform.location` and `transform.rotation` are honored
+  // independently: supply only the rotation to turn the actor without moving it.
   TempoCore.Transform transform = 2;
-  // Optional actor name that `transform` is interpreted relative to.
+  // Optional actor name that `transform` is interpreted relative to. `transform` is applied first
+  // and that actor's transform second, the same order SpawnActor composes in.
+  string relative_to_actor = 3;
+  // Optional new world scale. Unitless, so - unlike every other Vector in this API - its
+  // components are used as given, with no meters-to-centimeters or handedness conversion.
+  // Absolute: unlike `transform`, it is never composed through `relative_to_actor`.
+  TempoCore.Vector scale = 4;
+}
+
+message SetActorLocationRequest {
+  // Name of the actor to move.
+  string actor = 1;
+  // Target location (world frame, or relative to `relative_to_actor` if set). Meters, right-handed.
+  // Required; leaving it unset is an error rather than a move to the origin.
+  TempoCore.Vector location = 2;
+  // Optional actor name that `location` is interpreted relative to.
   string relative_to_actor = 3;
 }
 
+message SetActorRotationRequest {
+  // Name of the actor to turn.
+  string actor = 1;
+  // Target rotation (world frame, or relative to `relative_to_actor` if set). Radians, right-handed.
+  // Required; leaving it unset is an error rather than a rotation to identity.
+  TempoCore.Rotation rotation = 2;
+  // Optional actor name that `rotation` is interpreted relative to.
+  string relative_to_actor = 3;
+}
+
+message SetActorScale3DRequest {
+  // Name of the actor to resize.
+  string actor = 1;
+  // Target world scale. Unitless: used as given, with no unit or handedness conversion.
+  // Required; leaving it unset is an error rather than a collapse to zero.
+  TempoCore.Vector scale = 2;
+}
+
+// Partial update, exactly as SetActorTransformRequest: an unset member leaves that part of the
+// component's transform unchanged.
 message SetComponentTransformRequest {
   // Name of the owning actor.
   string actor = 1;
   // Name of the component to move.
   string component = 2;
-  // Target transform. Meters / right-handed.
+  // Target location and rotation. Meters / radians, right-handed. Honored independently.
   TempoCore.Transform transform = 3;
-  // If true, `transform` is in world space; otherwise it is relative to the component's parent.
+  // If true, `transform` and `scale` are in world space; otherwise they are relative to the
+  // component's parent.
+  bool relative_to_world = 4;
+  // Optional new scale. Unitless: used as given, with no unit or handedness conversion.
+  TempoCore.Vector scale = 5;
+}
+
+message SetComponentLocationRequest {
+  // Name of the owning actor.
+  string actor = 1;
+  // Name of the component to move.
+  string component = 2;
+  // Target location. Meters, right-handed. Required.
+  TempoCore.Vector location = 3;
+  // If true, `location` is in world space; otherwise it is relative to the component's parent.
+  bool relative_to_world = 4;
+}
+
+message SetComponentRotationRequest {
+  // Name of the owning actor.
+  string actor = 1;
+  // Name of the component to turn.
+  string component = 2;
+  // Target rotation. Radians, right-handed. Required.
+  TempoCore.Rotation rotation = 3;
+  // If true, `rotation` is in world space; otherwise it is relative to the component's parent.
+  bool relative_to_world = 4;
+}
+
+message SetComponentScale3DRequest {
+  // Name of the owning actor.
+  string actor = 1;
+  // Name of the component to resize.
+  string component = 2;
+  // Target scale. Unitless: used as given, with no unit or handedness conversion. Required.
+  TempoCore.Vector scale = 3;
+  // If true, `scale` is in world space; otherwise it is relative to the component's parent.
   bool relative_to_world = 4;
 }
 
@@ -456,11 +531,204 @@ message SetComponentSetPropertyRequest {
   repeated string values = 4;
 }
 
+// Element wrappers for the repeated variants of `Value`. proto3 does not allow
+// `repeated` fields directly inside a oneof, so each repeated variant needs a
+// single-field wrapper message.
+message BoolArray { repeated bool values = 1; }
+message IntArray { repeated int32 values = 1; }
+message Int64Array { repeated int64 values = 1; }
+message FloatArray { repeated float values = 1; }
+message StringArray { repeated string values = 1; }
+
+// Value-shaped counterparts of the flattened fields on the Set*PropertyRequest
+// messages. A oneof variant must be a single field, so the scalar components
+// these types carry are grouped into a message.
+message IntVector {
+  int32 x = 1;
+  int32 y = 2;
+  int32 z = 3;
+}
+
+message IntPoint {
+  int32 x = 1;
+  int32 y = 2;
+}
+
+message Quat {
+  // Right-handed convention; converted to Unreal's left-handed FQuat.
+  float x = 1;
+  float y = 2;
+  float z = 3;
+  float w = 4;
+}
+
+message Color {
+  // 8-bit RGB components in [0, 255].
+  int32 r = 1;
+  int32 g = 2;
+  int32 b = 3;
+}
+
+// One typed value, independent of what it is assigned to. Used by SetProperty
+// as a property's new value and by CallFunction as an argument's value.
+//
+// The variant selects how the value is interpreted and which Unreal property
+// types it may be written to - exactly the same rules the singular
+// Set*Property RPCs follow, since they are now expressed in terms of this
+// message. See the README's property type table.
+message Value {
+  oneof value {
+    bool bool_value = 1;
+    int32 int_value = 2;
+    int64 int64_value = 3;
+    float float_value = 4;
+    string string_value = 5;
+    // Enum value as its symbolic name.
+    string enum_value = 6;
+    TempoCore.Vector vector_value = 7;
+    TempoCore.Vector2D vector2d_value = 8;
+    IntVector int_vector_value = 9;
+    IntPoint int_point_value = 10;
+    // Roll/pitch/yaw in radians, right-handed.
+    TempoCore.Rotation rotator_value = 11;
+    Quat quat_value = 12;
+    // Location in meters, rotation in radians, right-handed.
+    TempoCore.Transform transform_value = 13;
+    Color color_value = 14;
+    // Class path or name. Named the same way as SpawnActor's actor_type.
+    string class_value = 15;
+    // Asset path or name.
+    string asset_value = 16;
+    // Name of the referenced actor.
+    string actor_value = 17;
+    // Name of the referenced component, as "ActorName:ComponentName".
+    string component_value = 18;
+    BoolArray bool_array_value = 19;
+    StringArray string_array_value = 20;
+    StringArray enum_array_value = 21;
+    IntArray int_array_value = 22;
+    Int64Array int64_array_value = 23;
+    FloatArray float_array_value = 24;
+    StringArray class_array_value = 25;
+    StringArray asset_array_value = 26;
+    StringArray actor_array_value = 27;
+    StringArray component_array_value = 28;
+    BoolArray bool_set_value = 29;
+    StringArray string_set_value = 30;
+    StringArray enum_set_value = 31;
+    IntArray int_set_value = 32;
+    Int64Array int64_set_value = 33;
+    FloatArray float_set_value = 34;
+    StringArray class_set_value = 35;
+    StringArray asset_set_value = 36;
+    StringArray actor_set_value = 37;
+    StringArray component_set_value = 38;
+  }
+}
+
+// Generic form of the singular Set*Property RPCs: one request that carries the
+// value's type in the value itself rather than in the RPC name.
+message SetPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  Value value = 4;
+}
+
+// One argument to CallFunction.
+message FunctionArg {
+  // Parameter name. Supports the same nested addressing as property names:
+  // "MyStruct.Inner", "MyArray[0]", "MyMap[key]".
+  string name = 1;
+  Value value = 2;
+}
+
 message CallFunctionRequest {
   string actor = 1;
   string component = 2;
   // Name of the UFUNCTION to invoke.
   string function = 3;
+  // One entry per parameter. Every input parameter of the function must be
+  // supplied; out parameters and the return value must not be. Args are
+  // applied in order.
+  repeated FunctionArg args = 4;
+}
+
+// One value a function handed back: its return value or an out parameter.
+message FunctionResult {
+  // Parameter name. Unreal names a return value "ReturnValue".
+  string name = 1;
+  // Property type string, from the same vocabulary as PropertyDescriptor.property_type.
+  string property_type = 2;
+  // The value, serialized as a string the same way GetProperties serializes a
+  // property's value.
+  string value = 3;
+}
+
+message CallFunctionResponse {
+  // The function's return value and any out parameters, in declaration order.
+  // Empty for a void function with no out parameters.
+  repeated FunctionResult results = 1;
+}
+
+// How a function parameter is passed.
+enum ParameterKind {
+  PK_UNKNOWN = 0;
+  // An input the caller must supply to CallFunction.
+  PK_INPUT = 1;
+  // A value the function hands back. Must not be supplied.
+  PK_OUTPUT = 2;
+  // The function's return value. Must not be supplied.
+  PK_RETURN = 3;
+}
+
+// One parameter of a function, including its out parameters and return value.
+message ParameterDescriptor {
+  // Parameter name, spelled the way CallFunction's FunctionArg.name expects it.
+  // Unreal names a return value "ReturnValue".
+  string name = 1;
+  // Property type string, from the same vocabulary as PropertyDescriptor.property_type.
+  // "unsupported" for a type this API cannot express.
+  string property_type = 2;
+  // How the parameter is passed.
+  ParameterKind kind = 3;
+}
+
+message FunctionDescriptor {
+  // Name of the owning actor.
+  string actor = 1;
+  // Name of the owning component (empty for actor-level functions).
+  string component = 2;
+  // Function name, spelled the way CallFunction's `function` expects it.
+  string name = 3;
+  // The whole signature as one string, the way the declaration reads, e.g.
+  // "float GetDistanceTo(AActor* OtherActor)". Types come from the same vocabulary as
+  // PropertyDescriptor.property_type, and out parameters are prefixed with "out ".
+  string signature = 4;
+  // The same information, split up: one entry per parameter, in declaration order.
+  repeated ParameterDescriptor parameters = 5;
+  // False if CallFunction cannot invoke this function (see `error`).
+  bool callable = 6;
+  // Why the function is not callable. Empty when `callable` is true.
+  string error = 7;
+}
+
+message GetFunctionsResponse {
+  repeated FunctionDescriptor functions = 1;
+}
+
+message GetActorFunctionsRequest {
+  // Name of the actor to inspect.
+  string actor = 1;
+  // If true, also walk components' functions.
+  bool include_components = 2;
+}
+
+message GetComponentFunctionsRequest {
+  // Name of the owning actor.
+  string actor = 1;
+  // Name of the component to inspect.
+  string component = 2;
 }
 
 // One operation in a SetProperties batch. The oneof selects which set-property
@@ -542,7 +810,19 @@ service WorldControlService {
 
   rpc SetActorTransform(SetActorTransformRequest) returns (TempoCore.Empty);
 
+  rpc SetActorLocation(SetActorLocationRequest) returns (TempoCore.Empty);
+
+  rpc SetActorRotation(SetActorRotationRequest) returns (TempoCore.Empty);
+
+  rpc SetActorScale3D(SetActorScale3DRequest) returns (TempoCore.Empty);
+
   rpc SetComponentTransform(SetComponentTransformRequest) returns (TempoCore.Empty);
+
+  rpc SetComponentLocation(SetComponentLocationRequest) returns (TempoCore.Empty);
+
+  rpc SetComponentRotation(SetComponentRotationRequest) returns (TempoCore.Empty);
+
+  rpc SetComponentScale3D(SetComponentScale3DRequest) returns (TempoCore.Empty);
 
   rpc ActivateComponent(ActivateComponentRequest) returns (TempoCore.Empty);
 
@@ -634,5 +914,11 @@ service WorldControlService {
 
   rpc SetProperties(SetPropertiesRequest) returns (SetPropertiesResponse);
 
-  rpc CallFunction(CallFunctionRequest) returns (TempoCore.Empty);
+  rpc SetProperty(SetPropertyRequest) returns (TempoCore.Empty);
+
+  rpc CallFunction(CallFunctionRequest) returns (CallFunctionResponse);
+
+  rpc GetActorFunctions(GetActorFunctionsRequest) returns (GetFunctionsResponse);
+
+  rpc GetComponentFunctions(GetComponentFunctionsRequest) returns (GetFunctionsResponse);
 }

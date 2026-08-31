@@ -1,5 +1,7 @@
 # Copyright Tempo Simulation, LLC. All Rights Reserved
 
+import copy
+import google.protobuf.descriptor as gpd
 import importlib
 import jinja2
 import json
@@ -130,7 +132,7 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
         "\n" \
         "async def _{{ name }}(\n" \
         "{% for field in request.fields %}" \
-        "    {{ field.name }}: {{ field.field_type }} = {{ field.default }}{% if not loop.last %},{% endif %}\n" \
+        "    {{ field.name }}: {{ field.py_annotation }} = {{ field.py_default }}{% if not loop.last %},{% endif %}\n" \
         "{% endfor %}" \
         ") -> {{ response.full_name }}:\n" \
         "    stub = await tempo_context().get_stub({{ service.module_name }}_grpc.{{ service.object_name }}Stub)\n" \
@@ -143,7 +145,7 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
         "\n\n" \
         "def {{ name }}(\n" \
         "{% for field in request.fields %}" \
-        "    {{ field.name }}: {{ field.field_type }} = {{ field.default }}{% if not loop.last %},{% endif %}\n" \
+        "    {{ field.name }}: {{ field.py_annotation }} = {{ field.py_default }}{% if not loop.last %},{% endif %}\n" \
         "{% endfor %}" \
         ") -> {{ response.full_name }}:\n" \
         "    return run_async(_{{ name }}(\n" \
@@ -155,7 +157,7 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
         "@awaitable({{ name }})\n" \
         "async def {{ name }}(\n" \
         "{% for field in request.fields %}" \
-        "    {{ field.name }}: {{ field.field_type }} = {{ field.default }}{% if not loop.last %},{% endif %}\n" \
+        "    {{ field.name }}: {{ field.py_annotation }} = {{ field.py_default }}{% if not loop.last %},{% endif %}\n" \
         "{% endfor %}" \
         ") -> {{ response.full_name }}:\n" \
         "    return await _{{ name }}(\n" \
@@ -173,7 +175,7 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
         "\n" \
         "async def _{{ name }}(\n" \
         "{% for field in request.fields %}" \
-        "    {{ field.name }}: {{ field.field_type }} = {{ field.default }}{% if not loop.last %},{% endif %}\n" \
+        "    {{ field.name }}: {{ field.py_annotation }} = {{ field.py_default }}{% if not loop.last %},{% endif %}\n" \
         "{% endfor %}" \
         ") -> {{ response.full_name }}:\n" \
         "    stub = await tempo_context().get_stub({{ service.module_name }}_grpc.{{ service.object_name }}Stub)\n" \
@@ -187,7 +189,7 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
         "\n\n" \
         "def {{ name }}(\n" \
         "{% for field in request.fields %}" \
-        "    {{ field.name }}: {{ field.field_type }} = {{ field.default }}{% if not loop.last %},{% endif %}\n" \
+        "    {{ field.name }}: {{ field.py_annotation }} = {{ field.py_default }}{% if not loop.last %},{% endif %}\n" \
         "{% endfor %}" \
         ") -> {{ response.full_name }}:\n" \
         "    async_gen = _{{ name }}(\n" \
@@ -204,7 +206,7 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
         "@awaitable({{ name }})\n" \
         "async def {{ name }}(\n" \
         "{% for field in request.fields %}" \
-        "    {{ field.name }}: {{ field.field_type }} = {{ field.default }}{% if not loop.last %},{% endif %}\n" \
+        "    {{ field.name }}: {{ field.py_annotation }} = {{ field.py_default }}{% if not loop.last %},{% endif %}\n" \
         "{% endfor %}" \
         ") -> {{ response.full_name }}:\n" \
         "    async for response in _{{ name }}(\n" \
@@ -240,7 +242,7 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
         "    def {{ method.name }}(\n" \
         "        self,\n" \
         "{% for field in method.fields %}" \
-        "        {{ field.name }}: {{ field.field_type }} = {{ field.default }}{% if not loop.last %},{% endif %}\n" \
+        "        {{ field.name }}: {{ field.py_annotation }} = {{ field.py_default }}{% if not loop.last %},{% endif %}\n" \
         "{% endfor %}" \
         "    ) -> 'Batch':\n" \
         "        self._ops.append({{ pb2 }}.SetPropertyOp(\n" \
@@ -267,6 +269,70 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
         "def batch() -> Batch:\n" \
         '    """Create a new property-set batch builder."""\n' \
         "    return Batch()\n" \
+        "\n\n"
+
+    # Template for a Call class that stages typed CallFunction arguments. One method per
+    # `Value` oneof variant, so users never construct Value or FunctionArg messages themselves.
+    call_template = \
+        "import " \
+        "{% for import in imports %}" \
+        "{{ import }}{% if not loop.last %}, {% endif %}" \
+        "{% endfor %}" \
+        "\n\n\n" \
+        "class Call:\n" \
+        '    """Stages typed arguments and invokes a UFUNCTION in one CallFunction RPC.\n' \
+        "\n" \
+        "    Each ``*_arg`` method names one parameter and appends its value, returning ``self``\n" \
+        "    for fluent chaining. Call :meth:`execute` (sync) or ``await`` :meth:`execute_async`\n" \
+        "    to invoke. Every input parameter of the function must be supplied.\n" \
+        '    """\n' \
+        "\n" \
+        "    def __init__(self, actor: str = '', component: str = '', function: str = ''):\n" \
+        "        self._actor = actor\n" \
+        "        self._component = component\n" \
+        "        self._function = function\n" \
+        "        self._args = []\n" \
+        "\n" \
+        "{% for method in methods %}" \
+        "    def {{ method.name }}(\n" \
+        "        self,\n" \
+        "        name: str = '',\n" \
+        "{% for field in method.fields %}" \
+        "        {{ field.name }}: {{ field.py_annotation }} = {{ field.py_default }}{% if not loop.last %},{% endif %}\n" \
+        "{% endfor %}" \
+        "    ) -> 'Call':\n" \
+        "        self._args.append({{ pb2 }}.FunctionArg(\n" \
+        "            name=name,\n" \
+        "            value={{ pb2 }}.Value(\n" \
+        "                {{ method.oneof_field }}=" \
+        "{% if method.wrapper_type %}{{ method.wrapper_type }}(" \
+        "{% for field in method.fields %}{{ field.name }}={{ field.name }}" \
+        "{% if not loop.last %}, {% endif %}{% endfor %})" \
+        "{% else %}{{ method.fields[0].name }}{% endif %}\n" \
+        "            )\n" \
+        "        ))\n" \
+        "        return self\n" \
+        "\n" \
+        "{% endfor %}" \
+        "    async def _execute(self) -> {{ response_type }}:\n" \
+        "        stub = await tempo_context().get_stub({{ pb2_grpc }}.{{ service_object }}Stub)\n" \
+        "        request = {{ pb2 }}.CallFunctionRequest(\n" \
+        "            actor=self._actor,\n" \
+        "            component=self._component,\n" \
+        "            function=self._function,\n" \
+        "            args=self._args\n" \
+        "        )\n" \
+        "        return await stub.CallFunction(request)\n" \
+        "\n" \
+        "    def execute(self) -> {{ response_type }}:\n" \
+        "        return run_async(self._execute())\n" \
+        "\n" \
+        "    async def execute_async(self) -> {{ response_type }}:\n" \
+        "        return await self._execute()\n" \
+        "\n\n" \
+        "def call(actor: str = '', component: str = '', function: str = '') -> Call:\n" \
+        '    """Create a builder for a CallFunction invocation."""\n' \
+        "    return Call(actor, component, function)\n" \
         "\n\n"
 
     j2_environment = jinja2.Environment()
@@ -352,6 +418,77 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
                 pb2_grpc=pb2_grpc_module,
                 service_object=owning_service.object_name,
                 imports=imports,
+            ))
+
+    # Emit a Call builder class for any message in the proto graph named "Value" that exposes
+    # its variants via a oneof named "value", alongside a CallFunction RPC.
+    for proto_full_name, value_desc in list(all_messages.items()):
+        if value_desc.object_name != "Value":
+            continue
+        if not value_desc.oneofs.get("value"):
+            continue
+        owning_service = None
+        for service in all_services.values():
+            if service.module_name.split(".")[:2] != value_desc.module_name.split(".")[:2]:
+                continue
+            if any(rpc.name == "CallFunction" for rpc in service.rpcs):
+                owning_service = service
+                break
+        if owning_service is None:
+            continue
+
+        fields_by_name = {field.name: field for field in value_desc.fields}
+        pb2_module = value_desc.module_name
+        pb2_grpc_module = owning_service.module_name + "_grpc"
+        imports = {pb2_module, pb2_grpc_module}
+
+        methods = []
+        for entry in value_desc.oneofs["value"]:
+            variant_field = fields_by_name[entry["name"]]
+            # bool_value -> bool_arg; int_vector_value -> int_vector_arg
+            method_name = "{}_arg".format(
+                entry["name"][:-6] if entry["name"].endswith("_value") else entry["name"]
+            )
+            wrapper_desc = all_messages.get(entry["message_proto_full_name"])
+            # Flatten a wrapper message's fields into the method signature when they are all
+            # scalars, mirroring how set_vector_property takes x/y/z rather than a Vector. A
+            # wrapper with message-typed fields (Transform) is passed through whole instead.
+            if wrapper_desc is not None and all(
+                    f.proto_type != gpd.FieldDescriptor.TYPE_MESSAGE for f in wrapper_desc.fields):
+                method_fields = wrapper_desc.fields
+                wrapper_type = wrapper_desc.full_name
+                imports.add(wrapper_desc.module_name)
+            else:
+                # Pass the variant through whole, under the same `value` parameter name the
+                # singular set_*_property functions use.
+                value_field = copy.copy(variant_field)
+                value_field.name = "value"
+                method_fields = [value_field]
+                wrapper_type = None
+                if variant_field.module_name:
+                    imports.add(variant_field.module_name)
+            methods.append({
+                "name": method_name,
+                "oneof_field": entry["name"],
+                "wrapper_type": wrapper_type,
+                "fields": method_fields,
+            })
+
+        call_rpc = next(rpc for rpc in owning_service.rpcs if rpc.name == "CallFunction")
+        response_desc = all_messages[call_rpc.response_type]
+        imports.add(response_desc.module_name)
+
+        namespace = value_desc.module_name.split(".")[0]
+        tempo_module_name = value_desc.module_name.split(".")[1]
+        output_file = os.path.join(ns_dir[namespace], f"{pascal_to_snake(tempo_module_name)}.py")
+        with open(output_file, 'a') as f:
+            f.write(j2_environment.from_string(call_template).render(
+                methods=methods,
+                pb2=pb2_module,
+                pb2_grpc=pb2_grpc_module,
+                service_object=owning_service.object_name,
+                response_type=response_desc.full_name,
+                imports=sorted(imports),
             ))
 
 

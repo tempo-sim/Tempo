@@ -6,11 +6,15 @@ These exercise the spawn -> query -> move -> destroy lifecycle and, along the wa
 meters/right-handed <-> Unreal-native coordinate conversion at the API boundary.
 """
 
+import math
+import re
+
 import grpc
 import pytest
 
 import tempo_sim.tempo_world as tw
 import tempo_sim.TempoCore.Geometry_pb2 as Geometry
+import tempo_sim.TempoWorld.WorldControl_pb2 as WorldControl
 
 pytestmark = pytest.mark.world
 
@@ -121,5 +125,566 @@ def test_negative_y_round_trips_handedness(sim_server):
     try:
         state = tw.get_current_actor_state(actor=name)
         assert state.transform.location.y == pytest.approx(-5.0, abs=0.05)
+    finally:
+        tw.destroy_actor(actor=name)
+
+
+def _root_component(name):
+    comps = tw.get_all_components(actor=name).components
+    assert comps, f"{name} reported no components"
+    return next((c.name for c in comps if "StaticMesh" in c.component_type), comps[0].name)
+
+
+def _actor_property(name, prop):
+    props = tw.get_actor_properties(actor=name).properties
+    return next(p.value for p in props if p.name == prop)
+
+
+def _component_property(name, component, prop):
+    props = tw.get_component_properties(actor=name, component=component).properties
+    return next(p.value for p in props if p.name == prop)
+
+
+def test_call_function_with_bool_arg(sim_server):
+    """CallFunction fills a UFUNCTION's parameter frame from typed args. AActor's
+    SetActorHiddenInGame writes bHidden, which the property getter can read back."""
+    name = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=_transform(0.0, 0.0, 30.0)).name
+    try:
+        assert _actor_property(name, "bHidden") == "false"
+        tw.call(actor=name, function="SetActorHiddenInGame").bool_arg("bNewHidden", True).execute()
+        assert _actor_property(name, "bHidden") == "true"
+    finally:
+        tw.destroy_actor(actor=name)
+
+
+def test_call_function_with_multiple_args(sim_server):
+    """USceneComponent::SetVisibility takes two bools. Its second parameter has a C++ default,
+    but defaults live in editor-only metadata, so the API requires every input parameter."""
+    name = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=_transform(0.0, 0.0, 35.0)).name
+    try:
+        root = _root_component(name)
+        assert _component_property(name, root, "bVisible") == "true"
+        (tw.call(actor=name, component=root, function="SetVisibility")
+            .bool_arg("bNewVisibility", False)
+            .bool_arg("bPropagateToChildren", False)
+            .execute())
+        assert _component_property(name, root, "bVisible") == "false"
+    finally:
+        tw.destroy_actor(actor=name)
+
+
+def test_call_function_with_struct_arg(sim_server):
+    """A struct parameter goes through the same conversion rules as the matching
+    set_*_property RPC — vector_arg is unitless, exactly like set_vector_property."""
+    name = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=_transform(0.0, 0.0, 40.0)).name
+    try:
+        _make_movable(name)
+        (tw.call(actor=name, function="SetActorScale3D")
+            .vector_arg("NewScale3D", x=2.0, y=3.0, z=4.0)
+            .execute())
+
+        scale = _component_property(name, _root_component(name), "RelativeScale3D")
+        x, y, z = (float(v) for v in re.findall(r"-?\d+\.?\d*", scale))
+        assert (x, y, z) == pytest.approx((2.0, 3.0, 4.0), abs=1e-3)
+    finally:
+        tw.destroy_actor(actor=name)
+
+
+def test_call_function_with_nested_arg_path(sim_server):
+    """Argument names accept the same nested addressing as property names."""
+    name = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=_transform(0.0, 0.0, 45.0)).name
+    try:
+        _make_movable(name)
+        (tw.call(actor=name, function="SetActorScale3D")
+            .float_arg("NewScale3D.X", 5.0)
+            .execute())
+
+        scale = _component_property(name, _root_component(name), "RelativeScale3D")
+        x = float(re.findall(r"-?\d+\.?\d*", scale)[0])
+        assert x == pytest.approx(5.0, abs=1e-3)
+    finally:
+        tw.destroy_actor(actor=name)
+
+
+def test_call_function_missing_arg_is_rejected(sim_server):
+    """A function with parameters can't be invoked with none supplied — the frame would be
+    filled with zeroes the caller never asked for."""
+    name = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=_transform(0.0, 0.0, 50.0)).name
+    try:
+        with pytest.raises(grpc.RpcError) as excinfo:
+            tw.call_function(actor=name, function="SetActorHiddenInGame")
+        assert excinfo.value.code() == grpc.StatusCode.FAILED_PRECONDITION
+        assert "bNewHidden" in excinfo.value.details()
+    finally:
+        tw.destroy_actor(actor=name)
+
+
+def test_call_function_unknown_arg_is_not_found(sim_server):
+    name = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=_transform(0.0, 0.0, 55.0)).name
+    try:
+        with pytest.raises(grpc.RpcError) as excinfo:
+            (tw.call(actor=name, function="SetActorHiddenInGame")
+                .bool_arg("bNewHidden", True)
+                .bool_arg("NotAParameter", True)
+                .execute())
+        assert excinfo.value.code() == grpc.StatusCode.NOT_FOUND
+    finally:
+        tw.destroy_actor(actor=name)
+
+
+def test_call_function_with_no_args_still_works(sim_server):
+    """The pre-existing zero-argument form must keep working untouched."""
+    name = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=_transform(0.0, 0.0, 60.0)).name
+    try:
+        tw.call_function(actor=name, function="K2_DestroyActor")
+    except Exception:
+        tw.destroy_actor(actor=name)
+        raise
+    assert not any(a.name == name for a in tw.get_all_actors().actors)
+
+
+def test_call_function_returns_scalar_result(sim_server):
+    """A function's return value comes back stringified, using the same type vocabulary and
+    format GetProperties uses. AActor::GetDistanceTo returns a float in Unreal units."""
+    a = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=_transform(0.0, 0.0, 70.0)).name
+    b = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=_transform(5.0, 0.0, 70.0)).name
+    try:
+        resp = (tw.call(actor=a, function="GetDistanceTo")
+                .actor_arg("OtherActor", b)
+                .execute())
+        assert len(resp.results) == 1
+        result = resp.results[0]
+        assert result.name == "ReturnValue"
+        assert result.property_type == "float"
+        # Floats are not unit-converted, matching set_float_property: 5 m is 500 cm.
+        assert float(result.value) == pytest.approx(500.0, abs=1.0)
+    finally:
+        for name in (a, b):
+            tw.destroy_actor(actor=name)
+
+
+def test_call_function_returns_struct_result(sim_server):
+    """A struct return is stringified exactly as GetProperties renders the same struct."""
+    name = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=_transform(1.0, 2.0, 75.0)).name
+    try:
+        resp = tw.call(actor=name, function="K2_GetActorLocation").execute()
+        assert len(resp.results) == 1
+        assert resp.results[0].property_type == "vector"
+        x, y, z = (float(v) for v in re.findall(r"-?\d+\.?\d*", resp.results[0].value))
+        # Unreal-native: metres -> centimetres, and Y negated (left-handed).
+        assert (x, y, z) == pytest.approx((100.0, -200.0, 7500.0), abs=1.0)
+    finally:
+        tw.destroy_actor(actor=name)
+
+
+def test_call_function_void_returns_no_results(sim_server):
+    name = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=_transform(0.0, 0.0, 80.0)).name
+    try:
+        resp = tw.call(actor=name, function="SetActorHiddenInGame").bool_arg("bNewHidden", True).execute()
+        assert list(resp.results) == []
+    finally:
+        tw.destroy_actor(actor=name)
+
+
+def _function(name, function, component=None):
+    functions = (tw.get_actor_functions(actor=name).functions if component is None
+                 else tw.get_component_functions(actor=name, component=component).functions)
+    return next((f for f in functions if f.name == function), None)
+
+
+def test_get_actor_functions_reports_signature(sim_server):
+    """GetFunctions renders a signature the way the declaration reads, using the same type
+    vocabulary GetProperties reports."""
+    name = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=_transform(0.0, 0.0, 85.0)).name
+    try:
+        fn = _function(name, "SetActorHiddenInGame")
+        assert fn is not None
+        assert fn.signature == "void SetActorHiddenInGame(bool bNewHidden)"
+        assert fn.actor == name and fn.component == ""
+        assert fn.callable and fn.error == ""
+        assert [(p.name, p.property_type, p.kind) for p in fn.parameters] == [
+            ("bNewHidden", "bool", WorldControl.PK_INPUT)]
+    finally:
+        tw.destroy_actor(actor=name)
+
+
+def test_get_actor_functions_reports_return_and_out_parameters(sim_server):
+    """A return value and out parameters are reported as parameters, told apart by `kind` — they
+    are entries in the same frame CallFunction fills, not a separate thing."""
+    name = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=_transform(0.0, 0.0, 90.0)).name
+    try:
+        returning = _function(name, "GetDistanceTo")
+        assert returning.signature == "float GetDistanceTo(AActor* OtherActor)"
+        assert {p.name: p.kind for p in returning.parameters} == {
+            "OtherActor": WorldControl.PK_INPUT,
+            "ReturnValue": WorldControl.PK_RETURN,
+        }
+
+        out = _function(name, "GetActorBounds")
+        assert out.signature == ("void GetActorBounds(bool bOnlyCollidingComponents, "
+                                 "out vector Origin, out vector BoxExtent, "
+                                 "bool bIncludeFromChildActors)")
+        assert [p.name for p in out.parameters if p.kind == WorldControl.PK_OUTPUT] == [
+            "Origin", "BoxExtent"]
+    finally:
+        tw.destroy_actor(actor=name)
+
+
+def test_get_actor_functions_out_parameters_come_back_from_a_call(sim_server):
+    """The out parameters GetFunctions advertises are exactly the ones CallFunction returns."""
+    name = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=_transform(0.0, 0.0, 95.0)).name
+    try:
+        advertised = [p.name for p in _function(name, "GetActorBounds").parameters
+                      if p.kind in (WorldControl.PK_OUTPUT, WorldControl.PK_RETURN)]
+        resp = (tw.call(actor=name, function="GetActorBounds")
+                .bool_arg("bOnlyCollidingComponents", False)
+                .bool_arg("bIncludeFromChildActors", False)
+                .execute())
+        assert [r.name for r in resp.results] == advertised
+        assert all(r.property_type == "vector" for r in resp.results)
+    finally:
+        tw.destroy_actor(actor=name)
+
+
+def test_discovered_signature_drives_a_call(sim_server):
+    """The point of GetFunctions: discover a function and build the call from what it reports,
+    without knowing anything about it up front."""
+    name = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=_transform(0.0, 0.0, 100.0)).name
+    try:
+        fn = _function(name, "SetActorHiddenInGame")
+        call = tw.call(actor=name, function=fn.name)
+        for parameter in fn.parameters:
+            assert parameter.kind == WorldControl.PK_INPUT
+            assert parameter.property_type == "bool"
+            call = call.bool_arg(parameter.name, True)
+        call.execute()
+
+        assert _actor_property(name, "bHidden") == "true"
+    finally:
+        tw.destroy_actor(actor=name)
+
+
+def test_get_component_functions_scopes_to_component(sim_server):
+    name = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=_transform(0.0, 0.0, 105.0)).name
+    try:
+        root = _root_component(name)
+        functions = tw.get_component_functions(actor=name, component=root).functions
+        assert functions
+        assert all(f.actor == name and f.component == root for f in functions)
+
+        fn = next(f for f in functions if f.name == "SetVisibility")
+        assert fn.signature == "void SetVisibility(bool bNewVisibility, bool bPropagateToChildren)"
+
+        # include_components folds the same component functions into the actor's listing.
+        with_components = tw.get_actor_functions(actor=name, include_components=True).functions
+        assert any(f.component == root and f.name == "SetVisibility" for f in with_components)
+        assert any(f.component == "" and f.name == "SetActorHiddenInGame" for f in with_components)
+    finally:
+        tw.destroy_actor(actor=name)
+
+
+def test_get_actor_functions_excludes_delegate_signatures(sim_server):
+    """A delegate signature is declared like a function but only types a delegate. There is
+    nothing to call, so it is not listed."""
+    name = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=_transform(0.0, 0.0, 110.0)).name
+    try:
+        functions = tw.get_actor_functions(actor=name).functions
+        assert functions
+        assert not [f.name for f in functions if f.name.endswith("__DelegateSignature")]
+        # `callable` and `error` are two halves of one fact.
+        assert all(f.callable != bool(f.error) for f in functions)
+    finally:
+        tw.destroy_actor(actor=name)
+
+
+def test_get_functions_requires_its_target(sim_server):
+    with pytest.raises(grpc.RpcError) as excinfo:
+        tw.get_actor_functions(actor="NoSuchActor")
+    assert excinfo.value.code() == grpc.StatusCode.NOT_FOUND
+
+    name = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=_transform(0.0, 0.0, 115.0)).name
+    try:
+        with pytest.raises(grpc.RpcError) as excinfo:
+            tw.get_component_functions(actor=name, component="NoSuchComponent")
+        assert excinfo.value.code() == grpc.StatusCode.NOT_FOUND
+    finally:
+        tw.destroy_actor(actor=name)
+
+
+def test_set_property_generic_matches_typed(sim_server):
+    """The generic SetProperty carries the value's type in the value, and must behave
+    identically to the singular set_*_property RPC it generalizes."""
+    name = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=_transform(0.0, 0.0, 65.0)).name
+    try:
+        root = _root_component(name)
+        tw.set_property(
+            actor=name,
+            component=root,
+            property="Mobility",
+            value=WorldControl.Value(enum_value="Movable"),
+        )
+        assert _component_property(name, root, "Mobility") == "Movable"
+
+        tw.set_property(
+            actor=name,
+            property="bHidden",
+            value=WorldControl.Value(bool_value=True),
+        )
+        assert _actor_property(name, "bHidden") == "true"
+    finally:
+        tw.destroy_actor(actor=name)
+
+
+def _vector(x, y, z):
+    return Geometry.Vector(x=x, y=y, z=z)
+
+
+def _rotation(r, p, y):
+    return Geometry.Rotation(r=r, p=p, y=y)
+
+
+def _floats(text):
+    return tuple(float(v) for v in re.findall(r"-?\d+\.?\d*", text))
+
+
+def _location_of(name, component):
+    return _floats(_component_property(name, component, "RelativeLocation"))
+
+
+def _scale_of(name, component=None):
+    return _floats(_component_property(name, component or _root_component(name), "RelativeScale3D"))
+
+
+def _child_component(name):
+    """A non-root scene component, since the component RPCs refuse to retarget the root."""
+    root = _root_component(name)
+    return tw.add_component(
+        component_type="StaticMeshComponent", actor=name, parent=root, transform=_transform(0.0, 0.0, 0.0)
+    ).name
+
+
+def test_set_actor_transform_preserves_scale(sim_server):
+    """TempoCore.Transform has no scale field, so a set_actor_transform request expresses a pose
+    and nothing more. Moving an actor must not resize it."""
+    name = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=_transform(0.0, 0.0, 70.0)).name
+    try:
+        _make_movable(name)
+        tw.call(actor=name, function="SetActorScale3D").vector_arg(
+            "NewScale3D", x=2.0, y=3.0, z=4.0
+        ).execute()
+
+        tw.set_actor_transform(actor=name, transform=_transform(7.0, 0.0, 70.0))
+
+        moved = tw.get_current_actor_state(actor=name)
+        assert moved.transform.location.x == pytest.approx(7.0, abs=0.05)
+
+        scale = _component_property(name, _root_component(name), "RelativeScale3D")
+        x, y, z = (float(v) for v in re.findall(r"-?\d+\.?\d*", scale))
+        assert (x, y, z) == pytest.approx((2.0, 3.0, 4.0), abs=1e-3)
+    finally:
+        tw.destroy_actor(actor=name)
+
+
+def test_set_actor_transform_relative_to_actor_composes_like_spawn(sim_server):
+    """`relative_to_actor` means "in that actor's frame", so the requested transform is applied
+    first and the reference actor's transform second - the same order spawn_actor composes in.
+
+    The reference actor is yawed 90 degrees so the two possible orders are distinguishable: with
+    the offset in the reference frame the child lands at (10, 1), and with the operands swapped it
+    would land at (11, 0).
+    """
+    ref_transform = _transform(10.0, 0.0, 80.0)
+    ref_transform.rotation.y = math.pi / 2.0
+    ref = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=ref_transform).name
+    child = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=_transform(0.0, 0.0, 80.0)).name
+    try:
+        _make_movable(child)
+        tw.set_actor_transform(
+            actor=child, transform=_transform(1.0, 0.0, 0.0), relative_to_actor=ref
+        )
+
+        state = tw.get_current_actor_state(actor=child)
+        assert state.transform.location.x == pytest.approx(10.0, abs=0.05)
+        assert state.transform.location.y == pytest.approx(1.0, abs=0.05)
+    finally:
+        for name in (child, ref):
+            tw.destroy_actor(actor=name)
+
+
+def test_set_actor_transform_only_sets_what_was_supplied(sim_server):
+    """Partial update: a member the request leaves unset keeps the value it already had."""
+    name = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=_transform(1.0, 2.0, 85.0)).name
+    try:
+        _make_movable(name)
+        tw.set_actor_rotation(actor=name, rotation=_rotation(0.0, 0.0, math.pi / 2.0))
+        tw.set_actor_scale3d(actor=name, scale=_vector(2.0, 2.0, 2.0))
+
+        # Location only: rotation and scale must survive.
+        location_only = Geometry.Transform()
+        location_only.location.x = 9.0
+        location_only.location.y = 2.0
+        location_only.location.z = 85.0
+        tw.set_actor_transform(actor=name, transform=location_only)
+
+        state = tw.get_current_actor_state(actor=name)
+        assert state.transform.location.x == pytest.approx(9.0, abs=0.05)
+        assert state.transform.rotation.y == pytest.approx(math.pi / 2.0, abs=1e-3)
+        assert _scale_of(name) == pytest.approx((2.0, 2.0, 2.0), abs=1e-3)
+
+        # Rotation only: location and scale must survive.
+        rotation_only = Geometry.Transform()
+        rotation_only.rotation.y = 0.0
+        tw.set_actor_transform(actor=name, transform=rotation_only)
+
+        state = tw.get_current_actor_state(actor=name)
+        assert state.transform.location.x == pytest.approx(9.0, abs=0.05)
+        assert state.transform.rotation.y == pytest.approx(0.0, abs=1e-3)
+        assert _scale_of(name) == pytest.approx((2.0, 2.0, 2.0), abs=1e-3)
+
+        # An empty transform with only a scale touches nothing but the scale.
+        tw.set_actor_transform(actor=name, transform=Geometry.Transform(), scale=_vector(3.0, 3.0, 3.0))
+        state = tw.get_current_actor_state(actor=name)
+        assert state.transform.location.x == pytest.approx(9.0, abs=0.05)
+        assert _scale_of(name) == pytest.approx((3.0, 3.0, 3.0), abs=1e-3)
+    finally:
+        tw.destroy_actor(actor=name)
+
+
+def test_set_actor_location_rotation_scale(sim_server):
+    """The three singular actor RPCs each move exactly one part of the transform."""
+    name = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=_transform(0.0, 0.0, 90.0)).name
+    try:
+        _make_movable(name)
+
+        tw.set_actor_location(actor=name, location=_vector(4.0, -3.0, 90.0))
+        state = tw.get_current_actor_state(actor=name)
+        assert state.transform.location.x == pytest.approx(4.0, abs=0.05)
+        # Negative Y round-trips, so location goes through the handedness conversion.
+        assert state.transform.location.y == pytest.approx(-3.0, abs=0.05)
+
+        tw.set_actor_rotation(actor=name, rotation=_rotation(0.0, 0.0, math.pi / 2.0))
+        state = tw.get_current_actor_state(actor=name)
+        assert state.transform.rotation.y == pytest.approx(math.pi / 2.0, abs=1e-3)
+        assert state.transform.location.x == pytest.approx(4.0, abs=0.05), "rotating moved the actor"
+
+        # Scale is unitless and unconverted: a negative Y would mirror, not re-express.
+        tw.set_actor_scale3d(actor=name, scale=_vector(2.0, 3.0, 4.0))
+        assert _scale_of(name) == pytest.approx((2.0, 3.0, 4.0), abs=1e-3)
+        state = tw.get_current_actor_state(actor=name)
+        assert state.transform.location.x == pytest.approx(4.0, abs=0.05), "scaling moved the actor"
+    finally:
+        tw.destroy_actor(actor=name)
+
+
+def test_set_actor_location_respects_relative_to_actor(sim_server):
+    """The singular location RPC reads `relative_to_actor` the same way set_actor_transform does."""
+    ref_transform = _transform(10.0, 0.0, 95.0)
+    ref_transform.rotation.y = math.pi / 2.0
+    ref = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=ref_transform).name
+    child = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=_transform(0.0, 0.0, 95.0)).name
+    try:
+        _make_movable(child)
+        tw.set_actor_location(actor=child, location=_vector(1.0, 0.0, 0.0), relative_to_actor=ref)
+
+        state = tw.get_current_actor_state(actor=child)
+        assert state.transform.location.x == pytest.approx(10.0, abs=0.05)
+        assert state.transform.location.y == pytest.approx(1.0, abs=0.05)
+    finally:
+        for name in (child, ref):
+            tw.destroy_actor(actor=name)
+
+
+def test_component_location_rotation_scale(sim_server):
+    """The component RPCs mirror the actor ones, in the space `relative_to_world` selects."""
+    name = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=_transform(0.0, 0.0, 100.0)).name
+    try:
+        _make_movable(name)
+        child = _child_component(name)
+
+        tw.set_component_scale3d(actor=name, component=child, scale=_vector(2.0, 3.0, 4.0))
+        assert _scale_of(name, child) == pytest.approx((2.0, 3.0, 4.0), abs=1e-3)
+
+        tw.set_component_location(actor=name, component=child, location=_vector(1.0, 0.0, 0.0))
+        assert _location_of(name, child)[0] == pytest.approx(100.0, abs=0.05)  # 1 m -> 100 cm
+        assert _scale_of(name, child) == pytest.approx((2.0, 3.0, 4.0), abs=1e-3), "moving rescaled it"
+
+        tw.set_component_rotation(actor=name, component=child, rotation=_rotation(0.0, 0.0, math.pi / 2.0))
+        assert _scale_of(name, child) == pytest.approx((2.0, 3.0, 4.0), abs=1e-3), "turning rescaled it"
+    finally:
+        tw.destroy_actor(actor=name)
+
+
+def test_set_component_transform_partial_and_scale(sim_server):
+    """SetComponentTransform takes the same partial update and scale field as the actor RPC."""
+    name = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=_transform(0.0, 0.0, 105.0)).name
+    try:
+        _make_movable(name)
+        child = _child_component(name)
+
+        tw.set_component_transform(
+            actor=name, component=child, transform=Geometry.Transform(), scale=_vector(2.0, 3.0, 4.0)
+        )
+        assert _scale_of(name, child) == pytest.approx((2.0, 3.0, 4.0), abs=1e-3)
+
+        location_only = Geometry.Transform()
+        location_only.location.x = 1.0
+        tw.set_component_transform(actor=name, component=child, transform=location_only)
+        assert _scale_of(name, child) == pytest.approx((2.0, 3.0, 4.0), abs=1e-3)
+        assert _location_of(name, child)[0] == pytest.approx(100.0, abs=0.05)
+    finally:
+        tw.destroy_actor(actor=name)
+
+
+def test_singular_transform_rpcs_require_their_value(sim_server):
+    """An unset value on a singular RPC is a mistake, not a request to zero the field -
+    silently teleporting to the origin or collapsing to zero scale would be worse."""
+    name = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=_transform(0.0, 0.0, 110.0)).name
+    try:
+        _make_movable(name)
+        for call in (
+            lambda: tw.set_actor_location(actor=name),
+            lambda: tw.set_actor_rotation(actor=name),
+            lambda: tw.set_actor_scale3d(actor=name),
+        ):
+            with pytest.raises(grpc.RpcError) as excinfo:
+                call()
+            assert excinfo.value.code() == grpc.StatusCode.FAILED_PRECONDITION
+
+        state = tw.get_current_actor_state(actor=name)
+        assert state.transform.location.z == pytest.approx(110.0, abs=0.05), "a rejected call still moved the actor"
+    finally:
+        tw.destroy_actor(actor=name)
+
+
+def test_zero_location_and_rotation_are_settable(sim_server):
+    """Presence decides what a partial update touches, not value - so zero is a real request.
+    Assigning any member of `location`/`rotation` marks it present even when every component is
+    0.0, which is what separates "move to the origin" from "leave the location alone"."""
+    start = _transform(5.0, 5.0, 115.0)
+    start.rotation.y = math.pi / 2.0
+    name = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=start).name
+    try:
+        _make_movable(name)
+
+        # _transform assigns all three components, so location is present despite being all zeros.
+        tw.set_actor_transform(actor=name, transform=_transform(0.0, 0.0, 0.0))
+        state = tw.get_current_actor_state(actor=name)
+        assert (state.transform.location.x, state.transform.location.y, state.transform.location.z) == \
+            pytest.approx((0.0, 0.0, 0.0), abs=0.05)
+        assert state.transform.rotation.y == pytest.approx(math.pi / 2.0, abs=1e-3), \
+            "rotation should have been left alone"
+
+        # Likewise a rotation back to identity, rather than "rotation not supplied".
+        identity = Geometry.Transform()
+        identity.rotation.y = 0.0
+        tw.set_actor_transform(actor=name, transform=identity)
+        state = tw.get_current_actor_state(actor=name)
+        assert state.transform.rotation.y == pytest.approx(0.0, abs=1e-3)
+
+        # And the distinction that makes it work: an untouched Transform changes nothing.
+        tw.set_actor_transform(actor=name, transform=Geometry.Transform())
+        state = tw.get_current_actor_state(actor=name)
+        assert (state.transform.location.x, state.transform.location.y, state.transform.location.z) == \
+            pytest.approx((0.0, 0.0, 0.0), abs=0.05)
     finally:
         tw.destroy_actor(actor=name)

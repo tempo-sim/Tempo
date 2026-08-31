@@ -86,9 +86,14 @@ if [ "${#WHEELS[@]}" -gt 0 ]; then
   echo "Installing packaged wheel(s):"
   printf '  %s\n' "${WHEELS[@]}"
   pip install "${WHEELS[@]}"
+  # pip skips a wheel whose version is already installed, so a reused venv would keep testing
+  # the previous build's client whenever the version hasn't been bumped. Re-unpack the Tempo
+  # wheels themselves (--no-deps, so this stays fast) to guarantee we test what we just packaged.
+  pip install --force-reinstall --no-deps "${WHEELS[@]}"
 else
   echo "No wheels under $PACKAGED_DIR/API/Python; falling back to the in-tree source package."
   pip install "$TEMPO_ROOT/TempoCore/Content/Python/API"
+  pip install --force-reinstall --no-deps "$TEMPO_ROOT/TempoCore/Content/Python/API"
 fi
 pip install pytest
 

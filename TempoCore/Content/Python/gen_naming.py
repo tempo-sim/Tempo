@@ -18,21 +18,48 @@ from pathlib import Path
 INFRA_PACKAGE = "tempo_sim"
 
 
+# Where a word boundary falls in a PascalCase identifier. A capital that directly follows a digit
+# continues the current word - the "D" of "Vector2D", the "D" of "Scale3D" - unless a lowercase
+# letter follows it, which makes it the start of the next word instead ("Property" in
+# "SetInt64Property").
+_WORD_BOUNDARY = r'(?<!^)(?:(?<![0-9])(?=[A-Z])|(?<=[0-9])(?=[A-Z][a-z]))'
+
+
 def pascal_to_snake(string):
+    """PascalCase -> snake_case for the identifiers Tempo's generated clients expose.
+
+    `SetActorScale3D` -> `set_actor_scale3d`, `SetVector2DProperty` -> `set_vector2d_property`,
+    and `SetInt64Property` -> `set_int64_property`.
+
+    Not interchangeable with `prost_to_snake`: any name that has to line up with what prost and
+    tonic emitted must use that one instead.
+    """
+    return re.sub(_WORD_BOUNDARY, '_', string).lower()
+
+
+def prost_to_snake(string):
+    """PascalCase -> snake_case exactly as prost-build does it.
+
+    prost splits before every capital with no regard for digits, so it emits
+    `set_actor_scale3_d` and `set_vector2_d_property`. Generated Rust has to name the tonic client
+    methods, service client modules, and message modules that prost actually produced, so those
+    sites - and only those - convert with this. Everything Tempo names for itself uses
+    `pascal_to_snake`.
+    """
     return re.sub(r'(?<!^)(?=[A-Z])', '_', string).lower()
 
 
 def project_package_name(project_root: Path) -> str:
     """Derive a kebab-case distribution name from the project directory name.
 
-    Mirror of gen_rust_api's `project_crate_name`: inserts `-` before each
-    non-leading uppercase letter and lowercases all, so `TempoSample` ->
-    `tempo-sample`, `MyGame2` -> `my-game2`. This is the PyPI/dist name; the
-    import (package) name is the same with `-` replaced by `_` (see
-    `package_import_name`).
+    Mirror of gen_rust_api's `project_crate_name`: splits on the same word
+    boundary `pascal_to_snake` uses and lowercases all, so `TempoSample` ->
+    `tempo-sample`, `MyGame2` -> `my-game2`, `MyGame2D` -> `my-game2d`. This is
+    the PyPI/dist name; the import (package) name is the same with `-` replaced
+    by `_` (see `package_import_name`).
     """
     name = Path(project_root).name
-    return re.sub(r'(?<!^)(?=[A-Z])', '-', name).lower()
+    return re.sub(_WORD_BOUNDARY, '-', name).lower()
 
 
 def package_import_name(dist_name: str) -> str:

@@ -15,6 +15,7 @@ from gen_naming import (  # noqa: F401
     package_import_name,
     pascal_to_snake,
     project_package_name,
+    prost_to_snake,
 )
 
 
@@ -141,6 +142,19 @@ class TempoMessageDescriptor(TempoObjectDescriptor):
                 oneof.name if oneof is not None and not getattr(oneof, "is_synthetic", False)
                 else None
             )
+
+        # `field_type` and `default` describe one element; a repeated field takes a sequence of
+        # them. These are what a Python signature should say, so they stay properties - the
+        # emitters rewrite `field_type` to a fully-qualified name after construction.
+        @property
+        def py_annotation(self):
+            return f"list[{self.field_type}]" if self.label == "repeated" else self.field_type
+
+        @property
+        def py_default(self):
+            # An empty tuple rather than `[]`: a default argument is shared by every call, so it
+            # must not be mutable.
+            return "()" if self.label == "repeated" else self.default
 
     def __init__(self, module_name, message_descriptor, type_mapping=None):
         super().__init__(module_name)

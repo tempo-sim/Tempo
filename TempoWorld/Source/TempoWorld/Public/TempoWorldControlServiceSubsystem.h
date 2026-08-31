@@ -26,16 +26,27 @@ namespace TempoWorld
 	class FinishSpawningActorResponse;
 	class DestroyActorRequest;
 	class SetActorTransformRequest;
+	class SetActorLocationRequest;
+	class SetActorRotationRequest;
+	class SetActorScale3DRequest;
 	class SetComponentTransformRequest;
+	class SetComponentLocationRequest;
+	class SetComponentRotationRequest;
+	class SetComponentScale3DRequest;
 	class GetAllActorsResponse;
 	class GetAllComponentsRequest;
 	class GetAllComponentsResponse;
 	class GetActorPropertiesRequest;
 	class GetComponentPropertiesRequest;
 	class GetPropertiesResponse;
+	class GetActorFunctionsRequest;
+	class GetComponentFunctionsRequest;
+	class GetFunctionsResponse;
 	class ActivateComponentRequest;
 	class DeactivateComponentRequest;
 	class CallFunctionRequest;
+	class CallFunctionResponse;
+	class SetPropertyRequest;
 	class SetPropertiesRequest;
 	class SetPropertiesResponse;
 }
@@ -69,7 +80,19 @@ public:
 
 	void SetActorTransform(const TempoWorld::SetActorTransformRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const;
 
+	void SetActorLocation(const TempoWorld::SetActorLocationRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const;
+
+	void SetActorRotation(const TempoWorld::SetActorRotationRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const;
+
+	void SetActorScale3D(const TempoWorld::SetActorScale3DRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const;
+
 	void SetComponentTransform(const TempoWorld::SetComponentTransformRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const;
+
+	void SetComponentLocation(const TempoWorld::SetComponentLocationRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const;
+
+	void SetComponentRotation(const TempoWorld::SetComponentRotationRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const;
+
+	void SetComponentScale3D(const TempoWorld::SetComponentScale3DRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const;
 
 	void ActivateComponent(const TempoWorld::ActivateComponentRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const;
 
@@ -83,7 +106,13 @@ public:
 
 	void GetComponentProperties(const TempoWorld::GetComponentPropertiesRequest& Request, const TResponseDelegate<TempoWorld::GetPropertiesResponse>& ResponseContinuation) const;
 
-	void CallObjectFunction(const TempoWorld::CallFunctionRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const;
+	void GetActorFunctions(const TempoWorld::GetActorFunctionsRequest& Request, const TResponseDelegate<TempoWorld::GetFunctionsResponse>& ResponseContinuation) const;
+
+	void GetComponentFunctions(const TempoWorld::GetComponentFunctionsRequest& Request, const TResponseDelegate<TempoWorld::GetFunctionsResponse>& ResponseContinuation) const;
+
+	void SetPropertyValue(const TempoWorld::SetPropertyRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const;
+
+	void CallObjectFunction(const TempoWorld::CallFunctionRequest& Request, const TResponseDelegate<TempoWorld::CallFunctionResponse>& ResponseContinuation) const;
 
 	void SetProperties(const TempoWorld::SetPropertiesRequest& Request, const TResponseDelegate<TempoWorld::SetPropertiesResponse>& ResponseContinuation) const;
 
