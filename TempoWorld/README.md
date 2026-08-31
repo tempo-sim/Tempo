@@ -111,6 +111,15 @@ tw.set_actor_transform(actor="MyActor", transform=Geometry.Transform(),
 > transform=Geometry.Transform())` used to reset an Actor to the origin with identity rotation.
 > It is now a no-op, because nothing was supplied. Spell the reset out if you meant it.
 
+**These place, they do not sweep.** The physics body is teleported along with the transform, and
+the move is never blocked part-way by geometry - so `set_actor_transform` means the same thing
+whether or not the thing you named simulates. That matters because a client generally cannot tell:
+Unreal's own default would move the transform and leave the body behind, so a Chaos wheeled vehicle
+would silently spring back to where its body was left while a kinematic pawn obeyed the same call.
+World-space velocity is preserved, so moving something that was already moving does not stop it -
+zero its velocity too if that is what you meant. Scale never involves a body, so `set_actor_scale3d`
+and `set_component_scale3d` are unaffected.
+
 For the common single-part cases there are first-class RPCs, which say the same thing more directly:
 
 | RPC | Sets | Component equivalent |

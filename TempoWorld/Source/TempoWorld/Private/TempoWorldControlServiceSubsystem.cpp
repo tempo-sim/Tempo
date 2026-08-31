@@ -9,6 +9,7 @@
 #include "TempoWorldUtils.h"
 
 #include "EngineUtils.h"
+#include "Engine/EngineTypes.h"
 #include "Engine/LatentActionManager.h"
 #include "Misc/ScopeExit.h"
 #if WITH_EDITOR
@@ -528,6 +529,27 @@ void UTempoWorldControlServiceSubsystem::DestroyComponent(const TempoWorld::Dest
 
 namespace
 {
+	// Every transform setter below teleports the physics body along with the Actor or Component.
+	//
+	// The engine's default is ETeleportType::None, which moves the transform but leaves the body
+	// where it was - so on anything that simulates, the move is silently undone: the next tick
+	// drives the transform back from the body, which never went anywhere. That is not a useful
+	// default for an RPC. A client that has just asked the simulator to put an Actor somewhere is
+	// stating where it *is*, not sweeping it there through the world, and it has no way to know
+	// whether the Blueprint it named happens to simulate - a Chaos vehicle silently ignores the
+	// call while a kinematic pawn obeys it. Teleporting makes the RPC mean the same thing for both.
+	//
+	// TeleportPhysics rather than ResetPhysics: the body keeps its world-space velocity, so moving
+	// a driving vehicle does not also stop it. A caller that wants it stopped can zero the velocity
+	// itself.
+	//
+	// Deliberately not swept, for the same reason: a swept move can be blocked part-way, which
+	// would make "put it here" mean "put it as near here as the geometry allows" and leave the
+	// client to discover the difference by reading the pose back. Every setter below therefore
+	// passes bSweep = false - except SetActorRotation, whose AActor entry point hardcodes it and
+	// which is routed around for that reason; see the note there.
+	constexpr ETeleportType TransformTeleport = ETeleportType::TeleportPhysics;
+
 	// The transform RPCs all begin by naming an actor, so they resolve it the same way and report
 	// the same two failures. RequestName only ever reaches the caller inside an error message.
 	grpc::Status ResolveActor(const UWorld* World, const std::string& ActorName, const TCHAR* RequestName, AActor*& OutActor)
@@ -663,7 +685,7 @@ void UTempoWorldControlServiceSubsystem::SetActorTransform(const TempoWorld::Set
 		Result.SetScale3D(ToUnrealScale(Request.scale()));
 	}
 
-	Actor->SetActorTransform(Result);
+	Actor->SetActorTransform(Result, /*bSweep=*/false, /*OutSweepHitResult=*/nullptr, TransformTeleport);
 
 	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status_OK);
 }
@@ -693,7 +715,8 @@ void UTempoWorldControlServiceSubsystem::SetActorLocation(const TempoWorld::SetA
 		return;
 	}
 
-	Actor->SetActorLocation(Frame.TransformPosition(ToUnrealLocation(Request.location())));
+	Actor->SetActorLocation(Frame.TransformPosition(ToUnrealLocation(Request.location())),
+		/*bSweep=*/false, /*OutSweepHitResult=*/nullptr, TransformTeleport);
 
 	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status_OK);
 }
@@ -726,7 +749,15 @@ void UTempoWorldControlServiceSubsystem::SetActorRotation(const TempoWorld::SetA
 	// Composed as a transform rather than by hand: FTransform's operand order is the opposite of
 	// FQuat's, and going through it keeps this identical to what SetActorTransform would do.
 	const FTransform Requested = FTransform(ToUnrealRotation(Request.rotation())) * Frame;
-	Actor->SetActorRotation(Requested.GetRotation());
+
+	// Applied through SetActorTransform, not AActor::SetActorRotation, which is the one setter in
+	// this family that cannot be told not to sweep: it exposes no bSweep and hardcodes it true
+	// (Actor.cpp), so a turn into penetration gets blocked or depenetrated while the identical turn
+	// expressed as a rotation-only SetActorTransform does not. Overlaying the rotation on the
+	// current transform is exactly what that handler does, so the two RPCs are the same operation.
+	FTransform Result = Actor->GetActorTransform();
+	Result.SetRotation(Requested.GetRotation());
+	Actor->SetActorTransform(Result, /*bSweep=*/false, /*OutSweepHitResult=*/nullptr, TransformTeleport);
 
 	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status_OK);
 }
@@ -784,11 +815,11 @@ void UTempoWorldControlServiceSubsystem::SetComponentTransform(const TempoWorld:
 
 	if (Request.relative_to_world())
 	{
-		Component->SetWorldTransform(Result);
+		Component->SetWorldTransform(Result, /*bSweep=*/false, /*OutSweepHitResult=*/nullptr, TransformTeleport);
 	}
 	else
 	{
-		Component->SetRelativeTransform(Result);
+		Component->SetRelativeTransform(Result, /*bSweep=*/false, /*OutSweepHitResult=*/nullptr, TransformTeleport);
 	}
 
 	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status_OK);
@@ -815,11 +846,11 @@ void UTempoWorldControlServiceSubsystem::SetComponentLocation(const TempoWorld::
 	const FVector Location = ToUnrealLocation(Request.location());
 	if (Request.relative_to_world())
 	{
-		Component->SetWorldLocation(Location);
+		Component->SetWorldLocation(Location, /*bSweep=*/false, /*OutSweepHitResult=*/nullptr, TransformTeleport);
 	}
 	else
 	{
-		Component->SetRelativeLocation(Location);
+		Component->SetRelativeLocation(Location, /*bSweep=*/false, /*OutSweepHitResult=*/nullptr, TransformTeleport);
 	}
 
 	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status_OK);
@@ -846,11 +877,11 @@ void UTempoWorldControlServiceSubsystem::SetComponentRotation(const TempoWorld::
 	const FRotator Rotation = ToUnrealRotation(Request.rotation());
 	if (Request.relative_to_world())
 	{
-		Component->SetWorldRotation(Rotation);
+		Component->SetWorldRotation(Rotation, /*bSweep=*/false, /*OutSweepHitResult=*/nullptr, TransformTeleport);
 	}
 	else
 	{
-		Component->SetRelativeRotation(Rotation);
+		Component->SetRelativeRotation(Rotation, /*bSweep=*/false, /*OutSweepHitResult=*/nullptr, TransformTeleport);
 	}
 
 	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status_OK);

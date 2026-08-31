@@ -808,6 +808,13 @@ service WorldControlService {
 
   rpc DestroyComponent(DestroyComponentRequest) returns (TempoCore.Empty);
 
+  // The eight transform setters below place what they name, rather than sweeping it there: they
+  // teleport the physics body along with the transform, and are never blocked part-way by
+  // geometry. So they mean the same thing whether or not the thing being moved simulates - a
+  // wheeled vehicle ends up where it was put, and does not spring back to where its body was left.
+  // World-space velocity is preserved, so moving something that was moving does not stop it; zero
+  // its velocity as well if that is what you want. (Scale never involves a body, so
+  // SetActorScale3D / SetComponentScale3D are unaffected.)
   rpc SetActorTransform(SetActorTransformRequest) returns (TempoCore.Empty);
 
   rpc SetActorLocation(SetActorLocationRequest) returns (TempoCore.Empty);
