@@ -142,8 +142,22 @@ a status. Code that checks responses may start seeing failures it was silently i
 - `set_actor_location` / `set_actor_rotation` / `set_actor_scale3d` and their `set_component_*`
   counterparts.
 
-Three fixes may change what you observe without changing any call you make: `set_enum_property` now
+Four fixes may change what you observe without changing any call you make: `set_enum_property` now
 writes the correct entry for `UENUM`s with non-contiguous values (it previously used the value as
 an index a second time), `set_asset_property` and `set_asset_array_property` now reach
-`TSoftObjectPtr` properties, and `get_*_functions` reports an overridden `UFUNCTION` once rather
-than once per class that declares it.
+`TSoftObjectPtr` properties, `get_*_functions` reports an overridden `UFUNCTION` once rather
+than once per class that declares it, and **every transform setter now teleports the physics body**.
+
+That last one is worth a paragraph, because it is the difference between the RPC working and not.
+Unreal's default is to move an Actor's transform and leave its physics body where it was, so on
+anything that simulates the move was silently undone — the next tick drove the transform back from
+the body, which never went anywhere. A Chaos wheeled vehicle ignored `set_actor_transform` while a
+kinematic pawn obeyed it, which is not a distinction a client can see. All eight setters now place
+what they name, and none of them sweeps, so a move is never blocked part-way by geometry.
+World-space velocity is preserved, so moving something that was already moving does not stop it —
+the one case where you may want to do something new is zeroing the velocity as well. Scale never
+involves a body, so `set_actor_scale3d` / `set_component_scale3d` are unaffected.
+
+**Only `set_actor_transform` and `set_component_transform` change for existing clients.** The six
+single-part setters are new in this release (see above), so there is no prior behavior of theirs to
+have depended on.
