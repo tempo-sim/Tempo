@@ -53,7 +53,7 @@ int main(int argc, char** argv) {
     std::printf("[SensorPlayground] streaming %d lidar scan(s) from %s/%s\n",
                 max_frames, lidar_owner.c_str(), lidar_name.c_str());
 
-    auto stream_result = ts::stream_lidar_scans(lidar_owner, lidar_name);
+    auto stream_result = ts::stream_lidar_scans(lidar_owner, lidar_name, /*include_color=*/false);
     if (!stream_result) {
         std::fprintf(stderr, "[SensorPlayground] stream_lidar_scans failed: %s\n",
                      stream_result.error().what().c_str());

@@ -745,7 +745,7 @@ async fn stream_lidar(sensor: AvailableSensor) {
     };
 
     let mut stream =
-        match tempo_sensors::stream_lidar_scans_async(sensor.owner, sensor.name).await {
+        match tempo_sensors::stream_lidar_scans_async(sensor.owner, sensor.name, false).await {
             Ok(s) => s,
             Err(e) => {
                 eprintln!("[{}] Failed to start stream: {}", key, e);
@@ -957,7 +957,7 @@ async fn flow_reposition_sensor() {
             return;
         }
     };
-    match tempo_world::set_component_transform_async(s.owner, s.name, t, false).await {
+    match tempo_world::set_component_transform_async(s.owner, s.name, t, false, None).await {
         Ok(_) => println!("\n  Repositioned {}", chosen),
         Err(e) => println!("  Error while repositioning component: {}", e),
     }
@@ -1190,7 +1190,7 @@ async fn flow_move_actor() {
             return;
         }
     };
-    match tempo_world::set_actor_transform_async(actor.clone(), t, String::new()).await {
+    match tempo_world::set_actor_transform_async(actor.clone(), t, String::new(), None).await {
         Ok(_) => println!("\n  Moved {}", actor),
         Err(e) => println!("  Error while moving actor: {}", e),
     }
