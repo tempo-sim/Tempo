@@ -328,6 +328,9 @@ protected:
 	void ApplyTilePostProcess(FTempoCameraTile& Tile);
 	void SetTileDepthEnabled(FTempoCameraTile& Tile, bool bTileDepthEnabled);
 	void InitTileDistortionMap(FTempoCameraTile& Tile);
+	// Push the tile's tan-bounds and filter type onto its distortion PPM. Call after anything that
+	// can hand the tile a fresh MID, which starts from the material's placeholder defaults.
+	void ApplyTileMaterialParams(FTempoCameraTile& Tile);
 	void AllocateTileViewState(FTempoCameraTile& Tile);
 	void DeactivateTile(FTempoCameraTile& Tile);
 
