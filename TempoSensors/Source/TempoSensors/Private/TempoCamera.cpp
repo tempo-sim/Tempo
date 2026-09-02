@@ -1621,17 +1621,29 @@ void UTempoCamera::InitTileDistortionMap(FTempoCameraTile& Tile)
 		Config.RenderSizeXY, Config.TanLeft, Config.TanRight, Config.TanTop, Config.TanBottom, PrincipalPoint);
 	UTempoSceneCaptureComponent2D::ApplyDistortionMapToMaterial(Tile.PostProcessMaterialInstance, Tile.DistortionMap);
 
-	// Push the tile's tan-bounds onto the distortion PPM. The depth path uses these to recover the
-	// view-space ray direction at the resampled UV (tan_x = lerp(TanLeft,TanRight,U_render), etc.)
-	// and convert SceneDepth to radial distance when UseRadialDistance is set.
-	if (Tile.PostProcessMaterialInstance)
+	ApplyTileMaterialParams(Tile);
+}
+
+// Push the tile's tan-bounds onto the distortion PPM. The depth path uses these to recover the
+// view-space ray direction at the resampled UV (tan_x = lerp(TanLeft,TanRight,U_render), etc.)
+// and convert SceneDepth to radial distance when UseRadialDistance is set.
+//
+// Every caller that can hand the tile a *new* MID must call this afterwards. SetTileDepthEnabled
+// recreates the MID whenever the parent material changes, which is exactly what a depth toggle
+// does, and a fresh MID starts from the material's placeholder defaults (a symmetric +/-1
+// frustum) rather than the tile's real, possibly off-axis bounds.
+void UTempoCamera::ApplyTileMaterialParams(FTempoCameraTile& Tile)
+{
+	if (!Tile.PostProcessMaterialInstance)
 	{
-		Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("TanLeft"), Tile.TanLeft);
-		Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("TanRight"), Tile.TanRight);
-		Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("TanTop"), Tile.TanTop);
-		Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("TanBottom"), Tile.TanBottom);
-		Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("FilterType"), static_cast<float>(GetEffectiveTextureFilterType()));
+		return;
 	}
+
+	Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("TanLeft"), Tile.TanLeft);
+	Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("TanRight"), Tile.TanRight);
+	Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("TanTop"), Tile.TanTop);
+	Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("TanBottom"), Tile.TanBottom);
+	Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("FilterType"), static_cast<float>(GetEffectiveTextureFilterType()));
 }
 
 void UTempoCamera::RebuildResolveMaps()
@@ -2217,6 +2229,10 @@ void UTempoCamera::ApplyDepthEnabled()
 		{
 			SetTileDepthEnabled(Tile, bDepthEnabled);
 			UTempoSceneCaptureComponent2D::ApplyDistortionMapToMaterial(Tile.PostProcessMaterialInstance, Tile.DistortionMap);
+			// SetTileDepthEnabled swaps the parent material on a depth toggle and so builds a
+			// fresh MID; re-push the tile's tan-bounds and filter type, which would otherwise sit
+			// at the material's defaults and break radial-distance depth on off-axis tiles.
+			ApplyTileMaterialParams(Tile);
 			ApplyTilePostProcess(Tile);
 		}
 	}
