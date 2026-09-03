@@ -7,6 +7,7 @@
 #include "TempoConversion.h"
 #include "TempoCoreUtils.h"
 #include "TempoWorldUtils.h"
+#include "TempoWorld.h"
 
 #include "EngineUtils.h"
 #include "Engine/EngineTypes.h"
@@ -1087,11 +1088,57 @@ void UTempoWorldControlServiceSubsystem::GetAllComponents(const GetAllComponents
 	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
 }
 
+// True if the class, enum, or struct a property names actually resolved.
+// It is a serialized object reference, so a cooked build leaves it null whenever that type
+// wasn't cooked (deleted asset, editor-only module, plugin disabled for the packaged target).
+// The editor always has the type loaded, so this only ever bites in a packaged build - and it
+// bites hard: FObjectProperty::GetCPPType() and friends check() on it.
+bool HasResolvedType(const FProperty* Property)
+{
+	// Covers FObjectProperty, FClassProperty, FSoftObjectProperty, FSoftClassProperty, FWeakObjectProperty, ...
+	if (const FObjectPropertyBase* ObjectProperty = CastField<FObjectPropertyBase>(Property))
+	{
+		if (!ObjectProperty->PropertyClass)
+		{
+			return false;
+		}
+	}
+	if (const FClassProperty* ClassProperty = CastField<FClassProperty>(Property))
+	{
+		return ClassProperty->MetaClass != nullptr;
+	}
+	if (const FSoftClassProperty* SoftClassProperty = CastField<FSoftClassProperty>(Property))
+	{
+		return SoftClassProperty->MetaClass != nullptr;
+	}
+	if (const FInterfaceProperty* InterfaceProperty = CastField<FInterfaceProperty>(Property))
+	{
+		return InterfaceProperty->InterfaceClass != nullptr;
+	}
+	if (const FEnumProperty* EnumProperty = CastField<FEnumProperty>(Property))
+	{
+		return EnumProperty->GetEnum() != nullptr;
+	}
+	if (const FStructProperty* StructProperty = CastField<FStructProperty>(Property))
+	{
+		return StructProperty->Struct != nullptr;
+	}
+	return true;
+}
+
 // Render one property as a (type, value) pair of strings. Pass a null `Value` to ask for the
 // type alone. Shared by GetProperties and by CallFunction, so a function result reads exactly
 // like the same value read back off a property.
 void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, FString& Type, FString* Value)
 {
+	if (!HasResolvedType(Property))
+	{
+		UE_LOG(LogTempoWorld, Warning, TEXT("Property '%s' names a type that isn't present in this build. Skipping it."),
+			*GetFullNameSafe(Property));
+		Type = TEXT("unsupported");
+		return;
+	}
+
 	if (Property->ArrayDim != 1)
 	{
 		// UProperties can be C-style arrays (who knew?), and this will be indicated by a non-1 ArrayDim member.
