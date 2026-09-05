@@ -40,7 +40,10 @@ struct FTextureRead
 
 	virtual FName GetType() const = 0;
 
-	virtual void Read(const FRenderTarget* RenderTarget) = 0;
+	// Map this read's staging texture and copy it to the CPU. The producer is responsible for
+	// having already copied the render target into StagingTexture and written RenderFence behind
+	// that copy; this only reads what is already there.
+	virtual void Read() = 0;
 
 	// The GPU fence indicating our render has completed. Set during UpdateSceneCaptureContents.
 	FGPUFenceRHIRef RenderFence;
@@ -77,7 +80,7 @@ struct TTextureReadBase : FTextureRead
 		Image.SetNumUninitialized(ImageSize.X * ImageSize.Y);
 	}
 
-	virtual void Read(const FRenderTarget* RenderTarget) override
+	virtual void Read() override
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsTextureRead);
 		check(IsInRenderingThread());
@@ -103,25 +106,31 @@ struct TTextureReadBase : FTextureRead
 			return;
 		}
 
+		// The producer already copied the render target into this read's staging texture and wrote
+		// RenderFence behind that copy, so there is nothing to copy here. The fence is always set by
+		// the time we get here: the producer enqueues its staging-copy command before the read joins
+		// the queue, so that command has run before any later render command reaches this one.
+		if (!ensureMsgf(RenderFence.IsValid(), TEXT("Texture read had no render fence. Dropping frame.")))
+		{
+			FMemory::Memzero(Image.GetData(), Image.Num() * sizeof(PixelType));
+			State = State::EReadComplete;
+			return;
+		}
+
 		FRHICommandListImmediate& RHICmdList = FRHICommandListImmediate::Get();
 
-		// Then, transition our TextureTarget to be copyable.
-		RHICmdList.Transition(FRHITransitionInfo(RenderTarget->GetRenderTargetTexture(), ERHIAccess::Unknown, ERHIAccess::CopySrc));
-
-		// Then, copy our TextureTarget to this read's dedicated staging texture.
-		RHICmdList.CopyTexture(RenderTarget->GetRenderTargetTexture(), StagingTexture, FRHICopyTextureInfo());
-
-		// Write a GPU fence to wait for the above copy to complete before reading the data.
-		const FGPUFenceRHIRef Fence = RHICreateGPUFence(TEXT("TempoCameraTextureRead"));
-		RHICmdList.WriteGPUFence(Fence);
+		// Dispatch anything still queued on the immediate list so the producer's copy is on its way.
 		RHICmdList.ImmediateFlush(EImmediateFlushType::DispatchToRHIThread);
 
-		// Lastly, read the raw data from the copied TextureTarget on the CPU.
+		// Read the raw data from the staging texture on the CPU. Mapping with an unsignaled fence
+		// submits the pending GPU work and blocks until it completes, on every RHI we ship
+		// (Metal submits and blocks until idle, Vulkan flushes the RHI thread, D3D12 waits on the
+		// fence), so this does not depend on the fence having been polled first.
 		// Note: SurfaceWidth may be larger than ImageSize.X due to GPU row alignment padding.
 		// We must copy row-by-row to account for this pitch difference.
 		void* OutBuffer;
 		int32 SurfaceWidth, SurfaceHeight;
-		GDynamicRHI->RHIMapStagingSurface(StagingTexture, Fence, OutBuffer, SurfaceWidth, SurfaceHeight, RHICmdList.GetGPUMask().ToIndex());
+		GDynamicRHI->RHIMapStagingSurface(StagingTexture, RenderFence, OutBuffer, SurfaceWidth, SurfaceHeight, RHICmdList.GetGPUMask().ToIndex());
 		const int64 SrcPitch = static_cast<int64>(SurfaceWidth) * sizeof(PixelType);
 		const int64 DstPitch = static_cast<int64>(ImageSize.X) * sizeof(PixelType);
 
@@ -151,6 +160,8 @@ struct TTextureReadBase : FTextureRead
 			}
 		});
 		RHICmdList.UnmapStagingSurface(StagingTexture);
+
+		RenderFence.SafeRelease();
 
 		State = State::EReadComplete;
 	}
@@ -223,7 +234,7 @@ struct FTextureReadQueue
 
 	// Poll render fences on all awaiting reads and initiate readback for any that are ready.
 	// If bBlock is true, spin-waits on each fence. Returns true if any reads were initiated.
-	bool ReadAllAvailable(const FRenderTarget* RenderTarget, bool bBlock)
+	bool ReadAllAvailable(bool bBlock)
 	{
 		FRWScopeLock_OnlyGTWrite ReadLock(Lock, SLT_ReadOnly);
 		bool bAnyRead = false;
@@ -244,20 +255,18 @@ struct FTextureReadQueue
 			{
 				continue;
 			}
-			TextureRead->RenderFence.SafeRelease();
-			TextureRead->Read(RenderTarget);
+			TextureRead->Read();
 			bAnyRead = true;
 		}
 		return bAnyRead;
 	}
 
-	// Synchronously read back every awaiting read, bypassing RenderFence. FTextureRead::Read() is
-	// self-synchronizing: it issues its own copy + fence + RHIMapStagingSurface, and the map blocks
-	// until the GPU completes (forcing submission). It therefore does NOT depend on the producer's
-	// RenderFence — which on some RHIs (e.g. Vulkan) is not submitted to the GPU queue until
-	// end-of-frame, so it cannot be polled to completion mid-tick. Used by the fixed-step blocking
-	// path. Must run on the render thread.
-	void ReadAllAwaitingBlocking(const FRenderTarget* RenderTarget)
+	// Synchronously read back every awaiting read, without first polling RenderFence. On some RHIs
+	// (e.g. Vulkan) that fence is not submitted to the GPU queue until end-of-frame, so it cannot be
+	// polled to completion mid-tick. Read() instead hands the fence to RHIMapStagingSurface, which
+	// submits the pending work and blocks until it completes. Used by the fixed-step blocking path.
+	// Must run on the render thread.
+	void ReadAllAwaitingBlocking()
 	{
 		FRWScopeLock_OnlyGTWrite ReadLock(Lock, SLT_ReadOnly);
 		for (const TSharedPtr<FTextureRead>& TextureRead : PendingTextureReads)
@@ -266,8 +275,7 @@ struct FTextureReadQueue
 			{
 				continue;
 			}
-			TextureRead->RenderFence.SafeRelease();
-			TextureRead->Read(RenderTarget);
+			TextureRead->Read();
 		}
 	}
 

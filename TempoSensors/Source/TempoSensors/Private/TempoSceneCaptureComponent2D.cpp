@@ -314,10 +314,22 @@ void UTempoSceneCaptureComponent2D::UpdateSceneCaptureContents(FSceneInterface* 
 	TSharedPtr<FTextureRead> NewRead(MakeTextureRead());
 	NewRead->StagingTexture = AcquireNextStagingTexture();
 
-	ENQUEUE_RENDER_COMMAND(SetTempoSceneCaptureRenderFence)(
-	[NewRead](FRHICommandList& RHICmdList)
+	// Staging copy + fence, matching the tiled producers. FTextureRead::Read only maps the staging
+	// texture, so the copy has to happen here, at capture time. Doing it at read time instead would
+	// pick up whatever the render target holds when the read eventually runs, which with several
+	// captures in flight is a later frame than the one this read was created for.
+	FTextureRenderTargetResource* RenderTargetResource = TextureTarget->GameThread_GetRenderTargetResource();
+	const FTextureRHIRef StagingTex = NewRead->StagingTexture;
+
+	ENQUEUE_RENDER_COMMAND(TempoSceneCaptureStagingCopy)(
+	[RenderTargetResource, StagingTex, NewRead](FRHICommandListImmediate& RHICmdList)
 	{
-		NewRead->RenderFence = RHICreateGPUFence(TEXT("TempoCameraRenderFence"));
+		FRHITexture* SourceTexture = RenderTargetResource->GetRenderTargetTexture();
+
+		RHICmdList.Transition(FRHITransitionInfo(SourceTexture, ERHIAccess::Unknown, ERHIAccess::CopySrc));
+		RHICmdList.CopyTexture(SourceTexture, StagingTex, FRHICopyTextureInfo());
+
+		NewRead->RenderFence = RHICreateGPUFence(TEXT("TempoSceneCaptureRenderFence"));
 		RHICmdList.WriteGPUFence(NewRead->RenderFence);
 	});
 
@@ -336,17 +348,10 @@ void UTempoSceneCaptureComponent2D::ReadNextIfAvailable()
 		return;
 	}
 
-	const FRenderTarget* RenderTarget = TextureTarget->GetRenderTargetResource();
-	if (!ensureMsgf(RenderTarget, TEXT("RenderTarget was not initialized. Skipping texture read.")))
-	{
-		TextureReadQueue.SkipNext();
-		return;
-	}
-
 	const bool bShouldBlock = GetDefault<UTempoCoreSettings>()->GetTimeMode() == ETimeMode::FixedStep
 		&& !GetDefault<UTempoSensorsSettings>()->GetPipelinedRendering();
 
-	TextureReadQueue.ReadAllAvailable(RenderTarget, bShouldBlock);
+	TextureReadQueue.ReadAllAvailable(bShouldBlock);
 }
 
 void UTempoSceneCaptureComponent2D::BlockUntilNextReadComplete() const
