@@ -1,12 +1,12 @@
-﻿// Copyright Epic Games, Inc. All Rights Reserved.
+// Copyright Epic Games, Inc. All Rights Reserved.
 
 #pragma once
 
 #include "MassTrafficSigns.h"
 #include "MassTrafficTypes.h"
-
+#if UE_ENABLE_INCLUDE_ORDER_DEPRECATED_IN_5_6
 #include "ZoneGraphTypes.h"
-
+#endif // UE_ENABLE_INCLUDE_ORDER_DEPRECATED_IN_5_6
 #include "MassTrafficIntersections.generated.h"
 
 struct MASSTRAFFIC_API FMassTrafficIntersectionSideLaneInfo
@@ -80,8 +80,6 @@ struct MASSTRAFFIC_API FMassTrafficIntersectionHiddenOutboundSideHints
 	UPROPERTY()
 	TSet<int32> CrosswalkWaitingLanes;
 };
-
-
 
 
 USTRUCT()

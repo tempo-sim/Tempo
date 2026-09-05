@@ -1,6 +1,5 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
-
 #include "MassTrafficUpdateDistanceToNearestObstacleProcessor.h"
 #include "MassTraffic.h"
 #include "MassTrafficDebugHelpers.h"
@@ -12,6 +11,7 @@
 #include "MassCommonFragments.h"
 #include "MassEntityView.h"
 #include "MassMovementFragments.h"
+#include "MassTrafficUtils.h"
 #include "MassZoneGraphNavigationFragments.h"
 #include "VisualLogger/VisualLogger.h"
 
@@ -25,7 +25,7 @@ UMassTrafficUpdateDistanceToNearestObstacleProcessor::UMassTrafficUpdateDistance
 	ExecutionOrder.ExecuteAfter.Add(UE::MassTraffic::ProcessorGroupNames::PostPhysicsUpdateTrafficVehicles);
 }
 
-void UMassTrafficUpdateDistanceToNearestObstacleProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
+void UMassTrafficUpdateDistanceToNearestObstacleProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager) 
 {
 	EntityQuery_Conditional.AddRequirement<FMassTrafficNextVehicleFragment>(EMassFragmentAccess::ReadWrite);
 	EntityQuery_Conditional.AddRequirement<FAgentRadiusFragment>(EMassFragmentAccess::ReadOnly);
@@ -47,7 +47,6 @@ void UMassTrafficUpdateDistanceToNearestObstacleProcessor::Execute(FMassEntityMa
 	// Process fragments
 	EntityQuery_Conditional.ForEachEntityChunk(Context, [this, &EntityManager](FMassExecutionContext& QueryContext)
 		{
-			const int32 NumEntities = QueryContext.GetNumEntities();
 			const FMassTrafficVehicleSimulationParameters& SimulationParams = QueryContext.GetConstSharedFragment<FMassTrafficVehicleSimulationParameters>();
 			const TArrayView<FMassTrafficNextVehicleFragment> NextVehicleFragments = QueryContext.GetMutableFragmentView<FMassTrafficNextVehicleFragment>();
 			const TConstArrayView<FTransformFragment> TransformFragments = QueryContext.GetFragmentView<FTransformFragment>();
@@ -60,17 +59,17 @@ void UMassTrafficUpdateDistanceToNearestObstacleProcessor::Execute(FMassEntityMa
 			const TConstArrayView<FMassTrafficVehicleLaneChangeFragment> LaneChangeFragments = QueryContext.GetMutableFragmentView<FMassTrafficVehicleLaneChangeFragment>();
 
 			// Distance to next vehicle
-			for (int32 Index = 0; Index < NumEntities; ++Index)
+			for (FMassExecutionContext::FEntityIterator EntityIt = QueryContext.CreateEntityIterator(); EntityIt; ++EntityIt)
 			{
-				FMassTrafficNextVehicleFragment& NextVehicleFragment = NextVehicleFragments[Index];
-				const FTransformFragment& TransformFragment = TransformFragments[Index];
-				const FAgentRadiusFragment& RadiusFragment = RadiusFragments[Index];
-				const FMassZoneGraphLaneLocationFragment& LaneLocationFragment = LaneLocationFragments[Index];
-				FMassTrafficObstacleAvoidanceFragment& AvoidanceFragment = AvoidanceFragments[Index];
-				const FMassTrafficVehicleLaneChangeFragment& LaneChangeFragment = LaneChangeFragments[Index];
+				FMassTrafficNextVehicleFragment& NextVehicleFragment = NextVehicleFragments[EntityIt];
+				const FTransformFragment& TransformFragment = TransformFragments[EntityIt];
+				const FAgentRadiusFragment& RadiusFragment = RadiusFragments[EntityIt];
+				const FMassZoneGraphLaneLocationFragment& LaneLocationFragment = LaneLocationFragments[EntityIt];
+				FMassTrafficObstacleAvoidanceFragment& AvoidanceFragment = AvoidanceFragments[EntityIt];
+				const FMassTrafficVehicleLaneChangeFragment& LaneChangeFragment = LaneChangeFragments[EntityIt];
 
 				// Debug
-				bool bVisLog = OptionalDebugFragments.IsEmpty() ? false : OptionalDebugFragments[Index].bVisLog > 0;
+				bool bVisLog = OptionalDebugFragments.IsEmpty() ? false : OptionalDebugFragments[EntityIt].bVisLog > 0;
 
 			
 				auto CanNextVehicleBeForgotten = [&](
@@ -300,13 +299,13 @@ void UMassTrafficUpdateDistanceToNearestObstacleProcessor::Execute(FMassEntityMa
 			// Obstacle list?
 			if (!OptionalObstacleListFragments.IsEmpty())
 			{
-				for (int32 Index = 0; Index < NumEntities; ++Index)
+				for (FMassExecutionContext::FEntityIterator EntityIt = QueryContext.CreateEntityIterator(); EntityIt; ++EntityIt)
 				{
-					const FTransformFragment& TransformFragment = TransformFragments[Index];
-					const FMassTrafficVehicleControlFragment& VehicleControlFragment = VehicleControlFragments[Index];
-					const FAgentRadiusFragment& AgentRadiusFragment = RadiusFragments[Index];
-					const FMassTrafficObstacleListFragment& OptionalObstacleListFragment = OptionalObstacleListFragments[Index];
-					FMassTrafficObstacleAvoidanceFragment& AvoidanceFragment = AvoidanceFragments[Index];
+					const FTransformFragment& TransformFragment = TransformFragments[EntityIt];
+					const FMassTrafficVehicleControlFragment& VehicleControlFragment = VehicleControlFragments[EntityIt];
+					const FAgentRadiusFragment& AgentRadiusFragment = RadiusFragments[EntityIt];
+					const FMassTrafficObstacleListFragment& OptionalObstacleListFragment = OptionalObstacleListFragments[EntityIt];
+					FMassTrafficObstacleAvoidanceFragment& AvoidanceFragment = AvoidanceFragments[EntityIt];
 
 					// Once this vehicle slows down to a stop to avoid an obstacle, it's velocity is 0 and thus a collision
 					// is no longer detected with the obstacle so we speed up again. So, instead of using the possibly 0
@@ -326,7 +325,7 @@ void UMassTrafficUpdateDistanceToNearestObstacleProcessor::Execute(FMassEntityMa
 						{
 							FMassEntityView ObstacleView(EntityManager, Obstacle);
 							const FTransformFragment& ObstacleTransformFragment = ObstacleView.GetFragmentData<FTransformFragment>();
-							const FMassVelocityFragment& ObstacleVelocityFragment = ObstacleView.GetFragmentData<FMassVelocityFragment>();
+							const FMassVelocityFragment* ObstacleVelocityFragment = ObstacleView.GetFragmentDataPtr<FMassVelocityFragment>();
 							const FAgentRadiusFragment& ObstacleAgentRadiusFragment = ObstacleView.GetFragmentData<FAgentRadiusFragment>();
 							const FMassTrafficVehicleSimulationParameters* OptionalObstacleVehicleSimulationFragment = ObstacleView.GetConstSharedFragmentDataPtr<FMassTrafficVehicleSimulationParameters>();
 				
@@ -339,13 +338,13 @@ void UMassTrafficUpdateDistanceToNearestObstacleProcessor::Execute(FMassEntityMa
 								const FVector2D ObstacleExtents(OptionalObstacleVehicleSimulationFragment->HalfLength, OptionalObstacleVehicleSimulationFragment->HalfWidth);
 								TimeToCollidingObstacle = UE::MassTraffic::TimeToCollisionBox2D(
 									TransformFragment.GetTransform(), IdealVelocity, FBox2D(-AgentExtents, AgentExtents),
-									ObstacleTransformFragment.GetTransform(), ObstacleVelocityFragment.Value, FBox2D(-ObstacleExtents, ObstacleExtents));
+									ObstacleTransformFragment.GetTransform(), ObstacleVelocityFragment ? ObstacleVelocityFragment->Value : FVector::ZeroVector, FBox2D(-ObstacleExtents, ObstacleExtents));
 							}
 							else
 							{
 								TimeToCollidingObstacle = UE::MassTraffic::TimeToCollisionSphere(
 									TransformFragment.GetTransform().GetLocation(), IdealVelocity, AgentRadiusFragment.Radius,
-									ObstacleTransformFragment.GetTransform().GetLocation(), ObstacleVelocityFragment.Value, ObstacleAgentRadiusFragment.Radius);
+									ObstacleTransformFragment.GetTransform().GetLocation(), ObstacleVelocityFragment ? ObstacleVelocityFragment->Value : FVector::ZeroVector, ObstacleAgentRadiusFragment.Radius);
 							}
 
 							if (TimeToCollidingObstacle < AvoidanceFragment.TimeToCollidingObstacle)
@@ -369,7 +368,7 @@ void UMassTrafficUpdateDistanceToNearestObstacleProcessor::Execute(FMassEntityMa
 										FColor::Orange);
 
 							}
-							if (OptionalDebugFragments[Index].bVisLog)
+							if (OptionalDebugFragments[EntityIt].bVisLog)
 							{
 								UE_VLOG_ARROW(LogOwner, LogMassTraffic, Display, TransformFragment.GetTransform().GetLocation(), ObstacleTransformFragment.GetTransform().GetLocation(), FColor::Yellow, TEXT(""));
 							}
@@ -381,9 +380,9 @@ void UMassTrafficUpdateDistanceToNearestObstacleProcessor::Execute(FMassEntityMa
 			else
 			{
 				// No obstacle list
-				for (int32 Index = 0; Index < NumEntities; ++Index)
+				for (FMassExecutionContext::FEntityIterator EntityIt = QueryContext.CreateEntityIterator(); EntityIt; ++EntityIt)
 				{
-					FMassTrafficObstacleAvoidanceFragment& AvoidanceFragment = AvoidanceFragments[Index];
+					FMassTrafficObstacleAvoidanceFragment& AvoidanceFragment = AvoidanceFragments[EntityIt];
 					AvoidanceFragment.TimeToCollidingObstacle = TNumericLimits<float>::Max();
 					AvoidanceFragment.DistanceToCollidingObstacle = TNumericLimits<float>::Max();
 				}

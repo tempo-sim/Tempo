@@ -5,11 +5,11 @@
 #include "MassTrafficChooseNextLaneProcessor.h"
 #include "MassTrafficFragments.h"
 #include "MassTrafficInterpolation.h"
-#include "MassTrafficLaneChangingProcessor.h"
 #include "MassExecutionContext.h"
 #include "DrawDebugHelpers.h"
 #include "MassZoneGraphNavigationFragments.h"
 #include "ZoneGraphSubsystem.h"
+#include "MassCommonFragments.h"
 
 
 UMassTrafficInitInterpolationProcessor::UMassTrafficInitInterpolationProcessor()
@@ -33,16 +33,15 @@ void UMassTrafficInitInterpolationProcessor::Execute(FMassEntityManager& EntityM
 	{
 		const UZoneGraphSubsystem& ZoneGraphSubsystem = QueryContext.GetSubsystemChecked<UZoneGraphSubsystem>();
 
-		const int32 NumEntities = QueryContext.GetNumEntities();
 		const TConstArrayView<FMassZoneGraphLaneLocationFragment> LaneLocationFragments = QueryContext.GetFragmentView<FMassZoneGraphLaneLocationFragment>();
 		const TArrayView<FMassTrafficInterpolationFragment> VehicleMovementInterpolationFragments = QueryContext.GetMutableFragmentView<FMassTrafficInterpolationFragment>();
 		const TArrayView<FTransformFragment> TransformFragments = QueryContext.GetMutableFragmentView<FTransformFragment>();
 		
-		for (int32 Index = 0; Index < NumEntities; ++Index)
+		for (FMassExecutionContext::FEntityIterator EntityIt = QueryContext.CreateEntityIterator(); EntityIt; ++EntityIt)
 		{
-			const FMassZoneGraphLaneLocationFragment& LaneLocationFragment = LaneLocationFragments[Index];
-			FMassTrafficInterpolationFragment& VehicleMovementInterpolationFragment = VehicleMovementInterpolationFragments[Index];
-			FTransformFragment& TransformFragment = TransformFragments[Index];
+			const FMassZoneGraphLaneLocationFragment& LaneLocationFragment = LaneLocationFragments[EntityIt];
+			FMassTrafficInterpolationFragment& VehicleMovementInterpolationFragment = VehicleMovementInterpolationFragments[EntityIt];
+			FTransformFragment& TransformFragment = TransformFragments[EntityIt];
 
 			const FZoneGraphStorage* ZoneGraphStorage = ZoneGraphSubsystem.GetZoneGraphStorage(LaneLocationFragment.LaneHandle.DataHandle);
 			check(ZoneGraphStorage);

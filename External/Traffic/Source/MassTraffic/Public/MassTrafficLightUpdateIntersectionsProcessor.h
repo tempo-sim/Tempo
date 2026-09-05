@@ -3,7 +3,9 @@
 #pragma once
 
 #include "MassTrafficProcessorBase.h"
+#if UE_ENABLE_INCLUDE_ORDER_DEPRECATED_IN_5_6
 #include "MassRepresentationFragments.h"
+#endif // UE_ENABLE_INCLUDE_ORDER_DEPRECATED_IN_5_6
 #include "MassProcessor.h"
 #include "MassTrafficLightUpdateIntersectionsProcessor.generated.h"
 

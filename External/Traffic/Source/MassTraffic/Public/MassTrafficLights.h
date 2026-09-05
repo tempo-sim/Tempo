@@ -4,9 +4,11 @@
 
 #include "Engine/DataAsset.h"
 #include "Engine/DataTable.h"
+#if UE_ENABLE_INCLUDE_ORDER_DEPRECATED_IN_5_6
 #include "MassLODSubsystem.h"
+#endif // UE_ENABLE_INCLUDE_ORDER_DEPRECATED_IN_5_6
+#include "MassEntityTypes.h"
 #include "MassRepresentationTypes.h"
-
 #include "MassTrafficLights.generated.h"
 
 class UStaticMesh;

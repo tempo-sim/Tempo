@@ -3,11 +3,9 @@
 #pragma once
 
 #include "MassTrafficDrivers.h"
-
 #include "MassEntityTraitBase.h"
 #include "MassObserverProcessor.h"
 #include "MassRepresentationSubsystem.h"
-
 #include "MassTrafficDriverVisualizationTrait.generated.h"
 
 UCLASS(meta=(DisplayName="Traffic Vehicle Driver Visualization"))

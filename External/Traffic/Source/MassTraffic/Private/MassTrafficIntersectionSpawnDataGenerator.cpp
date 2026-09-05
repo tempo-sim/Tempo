@@ -5,11 +5,11 @@
 #include "MassTrafficLaneChange.h"
 #include "Kismet/GameplayStatics.h"
 
+#include "ZoneGraphQuery.h"
 #include "VisualLogger/VisualLogger.h"
+#include "MassTrafficUtils.h"
 #if WITH_EDITOR
-#include "Misc/DefaultValueHelper.h"
 #include "Misc/ScopedSlowTask.h"
-#include "PointCloudView.h"
 #endif
 
 template <typename T>

@@ -3,7 +3,6 @@
 #pragma once
 
 #include "MassTrafficFragments.h"
-
 #include "MassTrafficInterpolation.generated.h"
 
 UENUM()

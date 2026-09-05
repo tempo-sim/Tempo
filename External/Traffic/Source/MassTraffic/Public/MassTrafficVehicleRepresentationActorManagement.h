@@ -3,7 +3,6 @@
 #pragma once
 
 #include "MassRepresentationActorManagement.h"
-
 #include "MassTrafficVehicleRepresentationActorManagement.generated.h"
 
 struct FMassEntityView;
@@ -26,6 +25,17 @@ class MASSTRAFFIC_API UMassTrafficVehicleRepresentationActorManagement : public 
 	 */
 	virtual EMassActorSpawnRequestAction OnPostActorSpawn(const FMassActorSpawnRequestHandle& SpawnRequestHandle, FConstStructView SpawnRequest
 		, TSharedRef<FMassEntityManager> EntityManager) const override;
+
+	/**
+	 * Reports whether a freshly spawned (or re-used) traffic vehicle actor is ready to take over from the
+	 * ISM/SkinnedMesh representation. We consider the actor ready when its skinned mesh component has a
+	 * non-null asset (soft-pointered SkeletalMesh has been resolved by the streaming manager). On a
+	 * dedicated server we short-circuit to true since there is no rendering to gate on.
+	 */
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8
+	// UMassRepresentationActorManagement::IsActorReadyForRepresentation was introduced in 5.8.
+	virtual bool IsActorReadyForRepresentation(const AActor& Actor) const override;
+#endif
 
 protected:
 

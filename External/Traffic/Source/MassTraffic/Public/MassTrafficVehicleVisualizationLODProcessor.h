@@ -4,10 +4,8 @@
 
 #include "MassTrafficFragments.h"
 #include "MassTrafficSubsystem.h"
-
 #include "MassVisualizationLODProcessor.h"
 #include "MassLODCollectorProcessor.h"
-
 #include "MassTrafficVehicleVisualizationLODProcessor.generated.h"
 
 struct FTrafficViewerLODLogic : public FLODDefaultLogic

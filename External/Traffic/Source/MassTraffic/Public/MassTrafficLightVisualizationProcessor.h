@@ -3,13 +3,14 @@
 #pragma once
 
 #include "MassTrafficFragments.h"
-
+#if UE_ENABLE_INCLUDE_ORDER_DEPRECATED_IN_5_6
 #include "MassRepresentationFragments.h"
+#endif // UE_ENABLE_INCLUDE_ORDER_DEPRECATED_IN_5_6
 #include "MassVisualizationLODProcessor.h"
 #include "MassLODCollectorProcessor.h"
 #include "MassRepresentationProcessor.h"
-
 #include "MassTrafficLightVisualizationProcessor.generated.h"
+
 
 class UMassTrafficSubsystem;
 

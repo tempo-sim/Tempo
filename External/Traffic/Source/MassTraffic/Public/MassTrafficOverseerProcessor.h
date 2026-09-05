@@ -5,9 +5,7 @@
 #include "MassTrafficProcessorBase.h"
 #include "MassTrafficVehicleSimulationTrait.h"
 #include "MassTrafficFragments.h"
-
 #include "MassEntityView.h"
-
 #include "MassTrafficOverseerProcessor.generated.h"
 
 

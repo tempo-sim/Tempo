@@ -7,7 +7,9 @@
 #include "VehicleUtility.h"
 #include "ZoneGraphTypes.h"
 #include "ZoneGraphQuery.h"
+#if UE_ENABLE_INCLUDE_ORDER_DEPRECATED_IN_5_6
 #include "MassEntityManager.h"
+#endif // UE_ENABLE_INCLUDE_ORDER_DEPRECATED_IN_5_6
 #include "MassCommonFragments.h"
 #include "MassTrafficSettings.h"
 #include "MassTrafficVehicleSimulationTrait.h"

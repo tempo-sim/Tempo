@@ -4,11 +4,9 @@
 
 #include "MassTrafficFragments.h"
 #include "MassTrafficSubsystem.h"
-
 #include "MassProcessor.h"
 #include "MassLODCalculator.h"
 #include "MassLODTickRateController.h"
-
 #include "MassTrafficVehicleSimulationLODProcessor.generated.h"
 
 struct FTrafficSimulationLODLogic : public FLODDefaultLogic

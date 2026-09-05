@@ -31,7 +31,7 @@ void UMassTrafficActorVehiclePhysicsProcessor::ConfigureQueries(const TSharedRef
 
 void UMassTrafficActorVehiclePhysicsProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
-	// Pass new vehicle control inputs to HighRes actors
+	// Pass new vehicle control inputs to HighRes actors 
 	ChaosPhysicsVehiclesQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext& ComponentSystemExecutionContext)
 	{
 		const TConstArrayView<FMassRepresentationFragment> RepresentationFragments = Context.GetFragmentView<FMassRepresentationFragment>();
@@ -39,21 +39,20 @@ void UMassTrafficActorVehiclePhysicsProcessor::Execute(FMassEntityManager& Entit
 		const TConstArrayView<FMassTrafficVehicleDamageFragment> VehicleDamageFragments = Context.GetFragmentView<FMassTrafficVehicleDamageFragment>();
 		const TArrayView<FMassActorFragment> ActorFragments = Context.GetMutableFragmentView<FMassActorFragment>();
 
-		const int32 NumEntities = Context.GetNumEntities();
-		for (int32 Index = 0; Index < NumEntities; ++Index)
+		for (FMassExecutionContext::FEntityIterator EntityIt = Context.CreateEntityIterator(); EntityIt; ++EntityIt)
 		{
-			if (RepresentationFragments[Index].CurrentRepresentation != EMassRepresentationType::HighResSpawnedActor)
+			if (RepresentationFragments[EntityIt].CurrentRepresentation != EMassRepresentationType::HighResSpawnedActor)
 			{
 				continue;
 			}
 
-			const FMassTrafficPIDVehicleControlFragment& PIDVehicleControlFragment = PIDVehicleControlFragments[Index];
-			FMassActorFragment& ActorFragment = ActorFragments[Index];
+			const FMassTrafficPIDVehicleControlFragment& PIDVehicleControlFragment = PIDVehicleControlFragments[EntityIt];
+			FMassActorFragment& ActorFragment = ActorFragments[EntityIt];
 
 			AActor* Actor = ActorFragment.GetMutable();
 			if (Actor != nullptr && Actor->Implements<UMassTrafficVehicleControlInterface>())
 			{
-				if (VehicleDamageFragments[Index].VehicleDamageState >= EMassTrafficVehicleDamageState::Totaled)
+				if (VehicleDamageFragments[EntityIt].VehicleDamageState >= EMassTrafficVehicleDamageState::Totaled)
 				{
 					Context.Defer().PushCommand<FMassDeferredSetCommand>([Actor](FMassEntityManager&)
 					{

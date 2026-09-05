@@ -28,12 +28,11 @@ void UMassTrafficUpdateTrailersProcessor::ConfigureQueries(const TSharedRef<FMas
 	EntityQuery.AddConstSharedRequirement<FMassTrafficVehiclePhysicsSharedParameters>();
 }
 
-void UMassTrafficUpdateTrailersProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
+void UMassTrafficUpdateTrailersProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& ExecutionContext)
 {
 	// Advance agents
-	EntityQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext& ComponentSystemExecutionContext)
+	EntityQuery.ForEachEntityChunk(ExecutionContext, [&](FMassExecutionContext& Context)
 	{
-		const int32 NumEntities = Context.GetNumEntities();
 		const FMassTrafficVehiclePhysicsSharedParameters& PhysicsParams = Context.GetConstSharedFragment<FMassTrafficVehiclePhysicsSharedParameters>();
 		const TConstArrayView<FMassTrafficConstrainedVehicleFragment> ConstrainedVehicleFragments = Context.GetFragmentView<FMassTrafficConstrainedVehicleFragment>();
 		const TConstArrayView<FMassTrafficVehiclePhysicsFragment> SimpleVehiclePhysicsFragments = Context.GetFragmentView<FMassTrafficVehiclePhysicsFragment>();
@@ -43,14 +42,14 @@ void UMassTrafficUpdateTrailersProcessor::Execute(FMassEntityManager& EntityMana
 		const TArrayView<FMassRepresentationLODFragment> RepresentationLODFragments = Context.GetMutableFragmentView<FMassRepresentationLODFragment>();
 		const TArrayView<FMassTrafficSimulationLODFragment> SimulationLODFragments = Context.GetMutableFragmentView<FMassTrafficSimulationLODFragment>();
 
-		for (int32 EntityIndex = 0; EntityIndex < NumEntities; ++EntityIndex)
+		for (FMassExecutionContext::FEntityIterator EntityIt = Context.CreateEntityIterator(); EntityIt; ++EntityIt)
 		{
-			const FMassTrafficConstrainedVehicleFragment& ConstrainedVehicleFragment = ConstrainedVehicleFragments[EntityIndex];
-			FTransformFragment& TransformFragment = TransformFragments[EntityIndex];
-			FMassVelocityFragment& VelocityFragment = VelocityFragments[EntityIndex];
-			FMassTrafficAngularVelocityFragment& AngularVelocityFragment = AngularVelocityFragments[EntityIndex];
-			FMassRepresentationLODFragment& RepresentationLODFragment = RepresentationLODFragments[EntityIndex];
-			FMassTrafficSimulationLODFragment& SimulationLODFragment = SimulationLODFragments[EntityIndex];
+			const FMassTrafficConstrainedVehicleFragment& ConstrainedVehicleFragment = ConstrainedVehicleFragments[EntityIt];
+			FTransformFragment& TransformFragment = TransformFragments[EntityIt];
+			FMassVelocityFragment& VelocityFragment = VelocityFragments[EntityIt];
+			FMassTrafficAngularVelocityFragment& AngularVelocityFragment = AngularVelocityFragments[EntityIt];
+			FMassRepresentationLODFragment& RepresentationLODFragment = RepresentationLODFragments[EntityIt];
+			FMassTrafficSimulationLODFragment& SimulationLODFragment = SimulationLODFragments[EntityIt];
 
 			// Sanity check
 			if (!ensure(EntityManager.IsEntityValid(ConstrainedVehicleFragment.Vehicle)))
@@ -77,7 +76,7 @@ void UMassTrafficUpdateTrailersProcessor::Execute(FMassEntityManager& EntityMana
 					{
 						if (PhysicsParams.IsValid())
 						{
-							Context.Defer().PushCommand<FMassCommandAddFragmentInstances>(Context.GetEntity(EntityIndex), PhysicsParams.SimpleVehiclePhysicsFragmentTemplate);
+							Context.Defer().PushCommand<FMassCommandAddFragmentInstances>(Context.GetEntity(EntityIt), PhysicsParams.SimpleVehiclePhysicsFragmentTemplate);
 						}
 					}
 				}
@@ -88,7 +87,7 @@ void UMassTrafficUpdateTrailersProcessor::Execute(FMassEntityManager& EntityMana
 				// Remove simulation fragment 
 				if (!SimpleVehiclePhysicsFragments.IsEmpty())
 				{
-					Context.Defer().RemoveFragment<FMassTrafficVehiclePhysicsFragment>(Context.GetEntity(EntityIndex));
+					Context.Defer().RemoveFragment<FMassTrafficVehiclePhysicsFragment>(Context.GetEntity(EntityIt));
 				}
 			}
 

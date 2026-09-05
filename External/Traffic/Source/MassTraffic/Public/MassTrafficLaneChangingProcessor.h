@@ -2,10 +2,11 @@
 
 #pragma once
 
+#if UE_ENABLE_INCLUDE_ORDER_DEPRECATED_IN_5_6
 #include "MassActorSubsystem.h"
+#endif // UE_ENABLE_INCLUDE_ORDER_DEPRECATED_IN_5_6
 #include "MassTrafficProcessorBase.h"
 #include "MassTrafficFragments.h"
-#include "MassActorSubsystem.h"
 #include "MassTrafficLaneChangingProcessor.generated.h"
 
 

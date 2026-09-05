@@ -2,6 +2,7 @@
 
 
 #include "MassTrafficRecycleVehiclesOverlappingPlayersProcessor.h"
+#include "MassActorSubsystem.h"
 #include "MassCommonFragments.h"
 #include "MassExecutionContext.h"
 #include "MassRepresentationProcessor.h"
@@ -9,7 +10,6 @@
 #include "MassTrafficFragments.h"
 #include "MassRepresentationSubsystem.h"
 #include "MassRepresentationActorManagement.h"
-#include "Kismet/GameplayStatics.h"
 
 
 UMassTrafficRecycleVehiclesOverlappingPlayersProcessor::UMassTrafficRecycleVehiclesOverlappingPlayersProcessor()
@@ -31,7 +31,7 @@ void UMassTrafficRecycleVehiclesOverlappingPlayersProcessor::ConfigureQueries(co
 	EntityQuery.AddConstSharedRequirement<FMassRepresentationParameters>();
 }
 
-void UMassTrafficRecycleVehiclesOverlappingPlayersProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
+void UMassTrafficRecycleVehiclesOverlappingPlayersProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& ExecutionContext)
 {
 	const UWorld* World = GetWorld();
 	UMassRepresentationSubsystem* MassRepresentationSubsystem = UWorld::GetSubsystem<UMassRepresentationSubsystem>(World);
@@ -57,7 +57,7 @@ void UMassTrafficRecycleVehiclesOverlappingPlayersProcessor::Execute(FMassEntity
 		}
 	}
 
-	EntityQuery.ForEachEntityChunk(Context,
+	EntityQuery.ForEachEntityChunk(ExecutionContext,
 		[&PlayerLocations, &MassRepresentationSubsystem](FMassExecutionContext& Context)
 	{
 		const TConstArrayView<FAgentRadiusFragment> RadiusFragments = Context.GetFragmentView<FAgentRadiusFragment>();
@@ -68,13 +68,12 @@ void UMassTrafficRecycleVehiclesOverlappingPlayersProcessor::Execute(FMassEntity
 
 		const bool bIsParkedVehicle = Context.DoesArchetypeHaveTag<FMassTrafficParkedVehicleTag>();
 
-		const int32 NumEntities = Context.GetNumEntities();
-		for (int32 EntityIndex = 0; EntityIndex < NumEntities; ++EntityIndex)
+		for (FMassExecutionContext::FEntityIterator EntityIt = Context.CreateEntityIterator(); EntityIt; ++EntityIt)
 		{
 			// Making the radius 2x to give us some room. Defaulted to 3m for parked cars which don't have radius fragments.
-			const float VehicleRadiusSquared = RadiusFragments.IsEmpty() ? FMath::Square(300.0f * 2) : FMath::Square(RadiusFragments[EntityIndex].Radius * 2); 
+			const float VehicleRadiusSquared = RadiusFragments.IsEmpty() ? FMath::Square(300.0f * 2) : FMath::Square(RadiusFragments[EntityIt].Radius * 2); 
 
-			const FTransformFragment& TransformFragment = TransformFragments[EntityIndex];
+			const FTransformFragment& TransformFragment = TransformFragments[EntityIt];
 			bool bIsOverlappingPlayer = false;
 			for(FVector PlayerLocation : PlayerLocations)
 			{
@@ -88,10 +87,10 @@ void UMassTrafficRecycleVehiclesOverlappingPlayersProcessor::Execute(FMassEntity
 			// If we are overlapping the player, lets get rid of this vehicle.
 			if (bIsOverlappingPlayer)
 			{
-				const FMassEntityHandle Entity = Context.GetEntity(EntityIndex);
-				FMassActorFragment& ActorFragment = ActorFragments[EntityIndex];
-				FMassRepresentationFragment& RepresentationFragment = VisualizationFragments[EntityIndex];
-				FMassRepresentationLODFragment& RepresentationLODFragment = RepresentationLODFragments[EntityIndex];
+				const FMassEntityHandle Entity = Context.GetEntity(EntityIt);
+				FMassActorFragment& ActorFragment = ActorFragments[EntityIt];
+				FMassRepresentationFragment& RepresentationFragment = VisualizationFragments[EntityIt];
+				FMassRepresentationLODFragment& RepresentationLODFragment = RepresentationLODFragments[EntityIt];
 
 				if (ActorFragment.IsValid())
 				{
@@ -106,7 +105,7 @@ void UMassTrafficRecycleVehiclesOverlappingPlayersProcessor::Execute(FMassEntity
 				{
 					// We can safely destroy parked vehicles as they don't have references to other entities.
 					// Traffic vehicles do and destroying them will crash the game.
-					Context.Defer().DestroyEntity(Context.GetEntity(EntityIndex));
+					Context.Defer().DestroyEntity(Context.GetEntity(EntityIt));
 				}
 				else
 				{

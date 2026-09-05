@@ -4,9 +4,7 @@
 
 #include "MassSpawner.h"
 #include "MassTrafficVehicleVisualizationProcessor.h"
-
 #include "Kismet/BlueprintFunctionLibrary.h"
-
 #include "MassTrafficFunctionLibrary.generated.h"
 
 UCLASS(BlueprintType)

@@ -2,18 +2,15 @@
 
 
 #include "MassTrafficBuilderBaseActor.h"
-
 #include "MassTrafficBuilderMarkerActor.h"
 #include "MassTrafficEditorFunctionLibrary.h"
-
 #include "MassTrafficUtils.h"
-
 #include "Kismet/KismetMathLibrary.h"
 #include "Kismet/GameplayStatics.h"
 #include "DrawDebugHelpers.h"
 #include "Misc/DefaultValueHelper.h"
 #include "UObject/UObjectGlobals.h"
-#include "DrawDebugHelpers.h"
+#include "MassTrafficEditor.h"
 #include "ZoneGraphSubsystem.h"
 #if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8
 // DataLayer.h was fully deprecated in 5.8; the types used here now live in DataLayerInstance.h.
@@ -21,6 +18,8 @@
 #else
 #include "WorldPartition/DataLayer/DataLayer.h"
 #endif
+#include "ZoneShapeActor.h"
+#include "Engine/World.h"
 
 
 typedef TArray<uint32> FPointZoneLaneProfileIndex_to_UniquePerPointLaneProfileIndex;
@@ -1591,7 +1590,6 @@ UZoneShapeComponent* AMassTrafficBuilderBaseActor::AddZoneShape(FName Label, AAc
 
 		ZoneShapeComponent = Cast<UZoneShapeComponent>(Actor->GetComponentByClass(UZoneShapeComponent::StaticClass()));
 	}
-
 
 	return ZoneShapeComponent;
 }

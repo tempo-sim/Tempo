@@ -4,7 +4,6 @@
 
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "Components/InstancedStaticMeshComponent.h"
-
 #include "MassTrafficInstancePlaybackHelpers.generated.h"
 
 // Use floats to match custom floats of instanced static mesh

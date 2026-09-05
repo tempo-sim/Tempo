@@ -5,12 +5,16 @@
 #include "MassTrafficPhysics.h"
 #include "MassTrafficTypes.h"
 #include "MassTrafficSettings.h"
-
 #include "ZoneGraphData.h"
 #include "ZoneGraphSubsystem.h"
 #include "MassEntityQuery.h"
-#include "Subsystems/WorldSubsystem.h"
-
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8
+// Moved to the MassCore module and renamed in 5.8; the old path is a deprecated shim there.
+#include "Mass/ExternalSubsystemTraits.h"
+#else
+#include "MassExternalSubsystemTraits.h"
+#endif
+#include "MassSubsystemBase.h"
 #include "MassTrafficSubsystem.generated.h"
 
 class UMassTrafficFieldComponent;
@@ -242,7 +246,7 @@ struct FMassTrafficCoreVehicleInfo
  * Manages traffic specific runtime data for traffic navigable zone graph lanes. 
  */
 UCLASS(BlueprintType)
-class MASSTRAFFIC_API UMassTrafficSubsystem : public UWorldSubsystem
+class MASSTRAFFIC_API UMassTrafficSubsystem : public UMassSubsystemBase
 {
 	GENERATED_BODY()
 
@@ -527,6 +531,7 @@ struct TMassExternalSubsystemTraits<UMassTrafficSubsystem> final
 {
 	enum
 	{
-		GameThreadOnly = false
+		GameThreadOnly = false,
+		ThreadSafeWrite = false
 	};
 };

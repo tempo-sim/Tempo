@@ -2,16 +2,15 @@
 
 #pragma once
 
-#include "MassTrafficFragments.h"
-
 #include "Components/PrimitiveComponent.h"
+#include "MassTrafficFragments.h"
 #include "MassEntityTypes.h"
 #include "ZoneGraphTypes.h"
-
 #include "MassTrafficFieldComponent.generated.h"
 
 class UMassTrafficFieldOperationBase;
 class UMassTrafficSubsystem;
+struct FZoneGraphTrafficLaneData;
 
 UENUM(BlueprintType)
 enum class EMassTrafficFieldInclusionMode : uint8

@@ -24,6 +24,9 @@ public class MassTraffic : ModuleRules
 		PublicDependencyModuleNames.AddRange(
 			new string[]
 			{
+				// Mass core
+				"MassEntity",
+
 				// AI/MassAI Plugin Modules
 				"MassAIBehavior",
 				"MassAIDebug",
@@ -32,9 +35,6 @@ public class MassTraffic : ModuleRules
 				
 				// AI/MassCrowd Plugin Modules
 				"MassCrowd",
-
-				// Runtime/MassEntity Plugin Modules
-				"MassEntity",
 
 				// Runtime/MassGameplay Plugin Modules
 				"MassActors",
