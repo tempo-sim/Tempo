@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "TempoConversion.h"
 #include "TempoSensors.h"
+#include "Async/ParallelFor.h"
 #include "Components/SceneCaptureComponent2D.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "Engine/Texture2D.h"
@@ -16,6 +17,10 @@ namespace TempoSensors
 {
 	class MeasurementHeader;
 }
+
+// Row bands the staging-surface copy is split into. Enough to spread the copy across cores without
+// making the per-band memcpy so small that task overhead dominates.
+static constexpr int32 GTextureReadCopyRowBands = 32;
 
 struct FTextureRead
 {
@@ -117,23 +122,34 @@ struct TTextureReadBase : FTextureRead
 		void* OutBuffer;
 		int32 SurfaceWidth, SurfaceHeight;
 		GDynamicRHI->RHIMapStagingSurface(StagingTexture, Fence, OutBuffer, SurfaceWidth, SurfaceHeight, RHICmdList.GetGPUMask().ToIndex());
-		const int32 SrcPitch = SurfaceWidth * sizeof(PixelType);
-		const int32 DstPitch = ImageSize.X * sizeof(PixelType);
-		if (SurfaceWidth == ImageSize.X)
+		const int64 SrcPitch = static_cast<int64>(SurfaceWidth) * sizeof(PixelType);
+		const int64 DstPitch = static_cast<int64>(ImageSize.X) * sizeof(PixelType);
+
+		// Copy in parallel over bands of rows. This runs on the render thread inside OnEndFrameRT,
+		// once per sensor per frame, so a single-threaded copy of a whole frame (~16 MB for a 1080p
+		// camera with depth) sits directly on the render thread's critical path.
+		const int32 NumRows = ImageSize.Y;
+		const int32 NumBands = FMath::Clamp(NumRows, 1, GTextureReadCopyRowBands);
+		const uint8* const SrcBase = static_cast<const uint8*>(OutBuffer);
+		uint8* const DstBase = reinterpret_cast<uint8*>(Image.GetData());
+		ParallelFor(NumBands, [=](int32 Band)
 		{
-			FMemory::Memcpy(Image.GetData(), OutBuffer, DstPitch * ImageSize.Y);
-		}
-		else
-		{
-			const uint8* SrcRow = static_cast<const uint8*>(OutBuffer);
-			uint8* DstRow = reinterpret_cast<uint8*>(Image.GetData());
-			for (int32 Row = 0; Row < ImageSize.Y; ++Row)
+			const int32 BeginRow = static_cast<int32>(static_cast<int64>(NumRows) * Band / NumBands);
+			const int32 EndRow = static_cast<int32>(static_cast<int64>(NumRows) * (Band + 1) / NumBands);
+			if (SrcPitch == DstPitch)
 			{
-				FMemory::Memcpy(DstRow, SrcRow, DstPitch);
-				SrcRow += SrcPitch;
-				DstRow += DstPitch;
+				// No row padding, so the band's rows are contiguous in both buffers: one copy.
+				FMemory::Memcpy(DstBase + BeginRow * DstPitch, SrcBase + BeginRow * SrcPitch,
+					(EndRow - BeginRow) * DstPitch);
 			}
-		}
+			else
+			{
+				for (int32 Row = BeginRow; Row < EndRow; ++Row)
+				{
+					FMemory::Memcpy(DstBase + Row * DstPitch, SrcBase + Row * SrcPitch, DstPitch);
+				}
+			}
+		});
 		RHICmdList.UnmapStagingSurface(StagingTexture);
 
 		State = State::EReadComplete;
