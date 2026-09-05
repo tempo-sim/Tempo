@@ -75,3 +75,7 @@ __pycache__
 
 # Tempo Prebuild Cache
 .tempo_prebuild_cache.json
+
+# MkDocs local builds (docs are built by Read the Docs; see .readthedocs.yaml)
+site/
+.venv/

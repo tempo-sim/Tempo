@@ -1,13 +1,10 @@
 # TempoGeographic
-`TempoGeographic` includes features necessary for a simulation that involves a specific time and location on Earth.
 
-Currently, it only includes a couple of preliminary features. It will grow over time.
+TempoGeographic adds what a simulation needs to happen at a specific place and time on Earth: a geographic anchor, a simulation clock mapped onto a real date and time, and a sun and sky driven by both.
 
-## Geographic Reference
-To anchor a simulation at a specific location on Earth, we must specify it's "Geographic Reference", the geographic coordinate that its cartesian origin corresponds to. To do so, we must add an `ATempoGeoReferencingSystem` to our level. This class derives from the `GeoReferencing` plugin's `AGeoReferencingSystem`, and only adds an event to notify listeners that the Geographic Reference has changed.
+**📖 Full documentation: <https://tempo-sim.readthedocs.io/en/latest/plugins/tempo-geographic/>**
 
-## Time of Day
-To convert simulation time to a specific date and time, we must specify the date and time that corresponds to zero simulation time. To do so, we must add an `ATempoDateTimeSystem` to our level. As simulation time progresses, this actor will keep track of the corresponding date and time.
-
-## Sun & Sky
-Once we know how to convert from Unreal coordinates to geographic coordinates (with our `ATempoGeoReferencingSystem` Actor) and how to convert simulation time to date and time (with our `ATempoDateTimeSystem` Actor), we can simulate the angle of the sun by adding a `TempoSunSky` Actor (a Blueprint class in `TempoGeographic`'s Content folder) to our level.
+Tempo's documentation lives at **<https://tempo-sim.readthedocs.io/en/latest/>** — getting started, the concepts, every plugin, the
+client APIs, and a generated reference for every gRPC service. It is built from
+[`docs/`](../docs) in this repository; see
+[Contributing to these docs](https://tempo-sim.readthedocs.io/en/latest/guides/documentation/) to edit it.

@@ -1,8 +1,10 @@
 # TempoAgents
-TempoAgents supports simulating large numbers of vehicle and crowd agents, with complex intersection rules and dynamic interactions. It uses [MassEntity](https://dev.epicgames.com/documentation/en-us/unreal-engine/mass-entity-in-unreal-engine) to simulate very large numbers of agents simultaneously.
 
-Unfortunately we don't have the necessary content in Tempo right now to do it justice. But we have a plan to add it - check back soon!
+TempoAgents supports simulating large numbers of vehicle and crowd agents on MassEntity, with complex intersection rules and dynamic interactions, plus a lane-graph query service.
 
-## Map Query Service
+**📖 Full documentation: <https://tempo-sim.readthedocs.io/en/latest/plugins/tempo-agents/>**
 
-If your simulator includes a lane graph built with the ZoneGraph plugin, the map query service can get or stream the lane graph, including connectivity of lanes, as well as the accessibility of connected lanes (as determined by traffic controls).
+Tempo's documentation lives at **<https://tempo-sim.readthedocs.io/en/latest/>** — getting started, the concepts, every plugin, the
+client APIs, and a generated reference for every gRPC service. It is built from
+[`docs/`](../docs) in this repository; see
+[Contributing to these docs](https://tempo-sim.readthedocs.io/en/latest/guides/documentation/) to edit it.

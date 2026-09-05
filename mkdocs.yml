@@ -1,0 +1,176 @@
+# MkDocs configuration for the Tempo documentation site.
+#
+# Built by Read the Docs (see .readthedocs.yaml) and locally with:
+#   python -m venv .venv && source .venv/bin/activate
+#   pip install -r docs/requirements.txt
+#   mkdocs serve
+
+site_name: Tempo
+site_description: Simulation-focused plugins for Unreal Engine.
+site_url: https://tempo-sim.readthedocs.io/
+site_author: Tempo Simulation, LLC
+
+repo_url: https://github.com/tempo-sim/Tempo
+repo_name: tempo-sim/Tempo
+edit_uri: edit/main/docs/
+
+copyright: Copyright &copy; Tempo Simulation, LLC
+
+theme:
+  name: material
+  language: en
+  icon:
+    repo: fontawesome/brands/github
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - navigation.tracking
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+    - content.action.edit
+  palette:
+    - media: "(prefers-color-scheme)"
+      toggle:
+        icon: material/brightness-auto
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to system preference
+
+extra_css:
+  - stylesheets/extra.css
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/tempo-sim/Tempo
+      name: Tempo on GitHub
+    - icon: fontawesome/brands/discord
+      link: https://discord.gg/bKa2hnGYnw
+      name: Tempo on Discord
+    - icon: fontawesome/solid/globe
+      link: https://temposimulation.com
+      name: Tempo Simulation
+
+plugins:
+  - search
+  - gen-files:
+      scripts:
+        - docs/gen_api_reference.py
+  - literate-nav
+
+# Build-time hooks (see docs/hooks.py).
+hooks:
+  - docs/hooks.py
+
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+      toc_depth: 3
+  - pymdownx.blocks.caption
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.smartsymbols
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.snippets
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+
+# Turn silent documentation rot into build failures. Combined with `mkdocs build
+# --strict` in CI, a moved page or a stale anchor breaks the build instead of
+# shipping a dead link.
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: warn
+  anchors: warn
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - getting-started/index.md
+      - getting-started/prerequisites.md
+      - getting-started/installation.md
+      - getting-started/hello-world.md
+      - getting-started/next-steps.md
+  - Concepts:
+      - concepts/index.md
+      - concepts/architecture.md
+      - concepts/time.md
+      - concepts/conventions.md
+      - concepts/naming.md
+  - Plugins:
+      - plugins/index.md
+      - plugins/tempo-core.md
+      - plugins/tempo-world.md
+      - plugins/tempo-sensors.md
+      - plugins/tempo-movement.md
+      - plugins/tempo-agents.md
+      - plugins/tempo-geographic.md
+      - plugins/tempo-pcg.md
+      - plugins/tempo-ros.md
+      - plugins/tempo-ros-bridge.md
+  - Client APIs:
+      - clients/index.md
+      - clients/connecting.md
+      - clients/python.md
+      - clients/rust.md
+      - clients/cpp.md
+      - clients/examples.md
+  - Guides:
+      - guides/index.md
+      - guides/custom-services.md
+      - guides/packaging.md
+      - guides/continuous-integration.md
+      - guides/testing.md
+      - guides/engine-mods.md
+      - guides/troubleshooting.md
+      - guides/documentation.md
+  - Reference:
+      - reference/index.md
+      - gRPC API: reference/api/
+      - reference/settings.md
+      - reference/scripts.md
+      - reference/environment.md
+  - Migration:
+      - migration/index.md
+      - migration/v0.3.0.md
+      - migration/sensors-v0.2.0.md
+      - migration/v0.1.0.md

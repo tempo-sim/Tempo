@@ -6,6 +6,20 @@ Tempo is a collection of simulation-focused plugins for Unreal Engine. Tempo mak
 
 Tempo is the foundation on which you can build a simulator for your unique application. Not sure where to start? Want some guidance from the authors? Find us on [![Discord](https://img.shields.io/badge/Discord-Join%20Server-5865F2?logo=discord&logoColor=white)](https://discord.gg/bKa2hnGYnw)
 
+## 📖 Documentation
+
+**Full documentation lives at [tempo-sim.readthedocs.io](https://tempo-sim.readthedocs.io/).**
+
+| | |
+|---|---|
+| [Getting Started](https://tempo-sim.readthedocs.io/en/latest/getting-started/) | Prerequisites, installation, and a Hello World you can run in an hour |
+| [Concepts](https://tempo-sim.readthedocs.io/en/latest/concepts/) | Deterministic time, units and coordinates, naming, architecture |
+| [Plugins](https://tempo-sim.readthedocs.io/en/latest/plugins/) | TempoCore, TempoWorld, TempoSensors, TempoMovement, TempoAgents, TempoGeographic, TempoPCG, TempoROS, TempoROSBridge |
+| [Client APIs](https://tempo-sim.readthedocs.io/en/latest/clients/) | Python, Rust and C++ clients, and the example clients |
+| [gRPC API Reference](https://tempo-sim.readthedocs.io/en/latest/reference/api/) | Every service, RPC, message and field — generated from the `.proto` files |
+| [Guides](https://tempo-sim.readthedocs.io/en/latest/guides/) | Adding your own services, packaging, CI, testing, troubleshooting |
+| [Migration](https://tempo-sim.readthedocs.io/en/latest/migration/) | What changed between versions, and what you have to do |
+
 ## Why Tempo, and How It Compares
 Tempo is for building your *own* robotics simulator on modern Unreal Engine and driving all of it from code - a foundation of composable plugins, not a turnkey product. Among great simulators (CARLA, AirSim/Colosseum, Gazebo, Webots, Isaac Sim, Genesis), here's an honest look at where it fits.
 
@@ -17,7 +31,7 @@ Tempo is for building your *own* robotics simulator on modern Unreal Engine and 
 | **gRPC API, no ROS required**                | The primary interface is [gRPC](https://grpc.io): language-agnostic, schema-first, with HTTP/2 streaming. Clients connect across machines and platforms (Rust on Linux → sim on a Mac) - a step up from the older msgpack-RPC interfaces some sims use, and not tied to an in-process language. |
 | **Code-generated, reflection-based control** | One set of `.proto` files generates Python / Rust / C++ clients (sync + async). Spawn any actor and get/set *any* property over the wire - no engine code needed.                                                                                                                               |
 | **High-fidelity sensors**                    | Cameras with multiple lens models (incl. wide-FOV fisheye), semantic + instance segmentation, 2D bounding boxes, and hardware H.264 streaming; lidar with per-beam calibration and material-derived reflectivity.                                                                               |
-| **Deterministic time**                       | Pause / play / step and wall-clock vs. fixed-step time, all over the API - built for reproducible runs and data generation.                                                                                                                                                                     |
+| **Deterministic time**                       | Pause / play / step and wall-clock vs. fixed-step time, all over the API - built for reproducible runs and data generation.                                                                                                                                                                    |
 | **Native, optional ROS 2**                   | rclcpp runs in-process (no separate bridge process) and is entirely optional.                                                                                                                                                                                                                 |
 | **Runs where you work**                      | Linux, Windows, and **macOS** (unusual among photorealistic engine-based sims). Develop locally on the hardware you already have.                                                                                                                                               |
 | **Extensible by design**                     | Tempo is built entirely as Unreal plugins (plus a few engine patches). If you can build it in Unreal, you can build it alongside Tempo.                                                                                                                                                         |
@@ -32,8 +46,6 @@ Tempo is for building your *own* robotics simulator on modern Unreal Engine and 
 | A turnkey AV stack with prebuilt maps & scenarios | CARLA |
 
 **In short:** Tempo is the strongest fit for a **photorealistic, deeply customizable simulator on modern Unreal, controlled entirely from code, that runs on the hardware your team already has** - especially if you're comfortable in Unreal. It's a younger project with a smaller community and content library than the largest established sims, and it deliberately leaves the last mile - your scenarios, robots, and application - to you. That trade-off is the point.
-
-</details>
 
 ## Compatibility
 - Linux (Ubuntu 22.04 and 24.04), MacOS (15.0 or newer, Apple silicon only), Windows 10 and 11
@@ -52,8 +64,9 @@ Tempo is for building your *own* robotics simulator on modern Unreal Engine and 
   - [Git Bash](https://gitforwindows.org/) (Run all Tempo `*.sh` scripts using Git Bash, or use the `*.bat` versions)
   - `jq`: Download `https://github.com/jqlang/jq/releases/latest/download/jq-win64.exe` and put it anywhere on your Path, like (`C:\Program Files\Git\cmd`) and make sure it's named `jq`
 
-## Environment Variables
-- `UNREAL_ENGINE_PATH`: On Linux only must be set to your Unreal Engine installation directory (the folder containing `Engine`). On Mac and Windows, Tempo will attempt to automatically find Unreal via your uproject file, but you can still set this to override it.
+On Linux only, `UNREAL_ENGINE_PATH` must be set to your Unreal Engine installation directory (the folder containing `Engine`). On Mac and Windows, Tempo will attempt to automatically find Unreal via your uproject file, but you can still set this to override it.
+
+See [Prerequisites](https://tempo-sim.readthedocs.io/en/latest/getting-started/prerequisites/) for the full list, and the [environment variable reference](https://tempo-sim.readthedocs.io/en/latest/reference/environment/) for the rest.
 
 ## Getting Started
 Follow along the steps below with this video. Sound on!
@@ -78,102 +91,41 @@ Run the `Setup.sh` (or `Setup.bat` on Windows) script (from the `Tempo` root, or
 - Add git hooks to keep engine mods and third party dependencies up to date automatically as you check out different Tempo commits
 
 > [!WARNING]
-> `Setup.sh` accepts a `-skip-hooks` flag which suppresses installing the `post-checkout` and `post-merge` git hooks. This is intended only for developers actively modifying Tempo itself — for example, when iterating on Tempo source while not touching `EngineMods/` or third party dependencies, the hooks can add noticeable overhead to every `git checkout`/`git merge`. Without the hooks, engine mods and third party deps will *not* re-sync automatically when you change Tempo commits, and you must run `Scripts/InstallEngineMods.sh` and `Scripts/SyncDeps.sh` manually to keep them in sync. If you are simply using Tempo as a dependency in your project, do not use this flag.
+> `Setup.sh` accepts a `-skip-hooks` flag which suppresses installing the `post-checkout` and `post-merge` git hooks. This is intended only for developers actively modifying Tempo itself. If you are simply using Tempo as a dependency in your project, do not use this flag. See [Installation](https://tempo-sim.readthedocs.io/en/latest/getting-started/installation/#one-time-setup).
 
 ### Build and Run
 Use the included `Scripts/Build.sh` and `Scripts/Run.sh` (or their `.bat` counterparts on Windows) to build your project and open it in Unreal Editor.
 
 ### Hello World
-> [!NOTE]
-> You don't have to install any Python package or dependences to use Tempo. The build step automatically generated the `tempo_sim` Python package and virtual environment, which will be used below.
-1. With your Tempo project open in Unreal Editor, from the root of your project, activate the Tempo virtual environment (`source ./TempoEnv/bin/activate` on Linux & Mac, or `source ./TempoEnv/Scripts/activate` on Windows)
-2. Start the Python interpreter (`python` on Linux & Mac, or `winpty python` on Windows) and use the Tempo API to start the simulation:
-```
+With your project open in Unreal Editor, activate the Tempo virtual environment (`source ./TempoEnv/bin/activate` on Linux & Mac, or `source ./TempoEnv/Scripts/activate` on Windows) and start a Python interpreter:
+
+```python
 import tempo_sim.tempo_core_editor as tce
-tce.play_in_editor() # Simulation should begin
-```
-3. Use TempoWorld to add an Actor to your scene:
-```
 import tempo_sim.tempo_world as tw
-tw.spawn_actor(actor_type="BP_SensorRig") # An Actor with a tripod mesh should appear. It has a TempoCamera on top (although it may not be visible).
+
+tce.play_in_editor()                            # Simulation should begin
+tw.spawn_actor(actor_type="BP_SensorRig")       # A tripod with a TempoCamera on top appears
+tw.set_float_property(actor="BP_SensorRig", component="TempoCamera",
+                      property="FOVAngle", value=60.0)
 ```
-4. From another terminal, run the included [SensorPlayground](https://github.com/tempo-sim/Tempo/blob/main/ExampleClients/Python/SensorPlayground.py) example client: `python ./Plugins/Tempo/ExampleClients/Python/SensorPlayground.py`. Use it to start streaming color images from the `TempoCamera`
-5. While streaming images, from the Python interpreter again, use TempoWorld to change one of the Camera's properties:
-```
-tw.set_float_property(actor="BP_SensorRig", component="TempoCamera", property="FOVAngle", value=60.0) # The field of view of your streaming images should decrease
-```
-6. Lastly, use TempoCore to pause, resume, and step the simulation:
-```
-import tempo_sim.tempo_core as tc
-import tempo_sim.TempoCore.Time_pb2 as Time
-tc.pause() # Time should pause
-tc.play() # Time should resume
-tc.set_time_mode(Time.TM_FIXED_STEP) # Time mode should switch to Fixed Step, simulation should run faster than real-time
-tc.step() # Time should advance to the nearest whole number of fixed time steps (0.1 seconds by default)
-tc.step() # Time should advance one step. You should get one new camera image every step.
-```
-Congratulations, you are officially up and running! Continue experimenting with Tempo by creating new scenes, streaming sensor data, and varying the many properties of your simulation at runtime.
+
+> [!NOTE]
+> You don't have to install any Python package or dependencies to use Tempo. The build step automatically generated the `tempo_sim` Python package and virtual environment.
+
+The **[full Hello World walkthrough](https://tempo-sim.readthedocs.io/en/latest/getting-started/hello-world/)** adds streaming sensor images and stepping deterministic time.
 
 ### Package
-Use the included `Scripts/Package.sh` (or `Package.bat` on Windows) to package your project into a standalone binary, which you can then run from the `Packaged` folder.
+Use the included `Scripts/Package.sh` (or `Package.bat` on Windows) to package your project into a standalone binary, which you can then run from the `Packaged` folder. See [Packaging](https://tempo-sim.readthedocs.io/en/latest/guides/packaging/).
 
 ### Client Packages (Python & Rust)
 Building your project also generates client packages so you — or your users — can drive your Tempo server from outside Unreal: a Python package always, and a Rust crate when you opt in with `TEMPO_GEN_RUST_API`. Tempo's own services ship in the `tempo-sim` package/crate; your project's services, if you define any, go in a separate project package/crate that builds on top of it.
 
-You can **publish** these to [PyPI](https://pypi.org/) / [crates.io](https://crates.io/) to share them, or — for a pure client project with no custom services — **consume the pre-built `tempo-sim`** straight from PyPI / crates.io without building at all. If your project defines its own custom RPCs, use the generated packages rather than the stock `tempo-sim`, which only knows Tempo's built-in services. See [TempoCore's README](/TempoCore/README.md#using-the-python-api) for the full workflow.
+You can **publish** these to [PyPI](https://pypi.org/) / [crates.io](https://crates.io/) to share them, or — for a pure client project with no custom services — **consume the pre-built `tempo-sim`** straight from PyPI / crates.io without building at all. See [Client APIs](https://tempo-sim.readthedocs.io/en/latest/clients/) for the full workflow.
 
 ## Continuous Integration
 If you would like to set up a GitHub actions pipeline to build, package, run, and/or release your Tempo project, check out the `build_and_package` reusable workflow in [.github/workflows](https://github.com/tempo-sim/Tempo/tree/main/.github/workflows). `TempoSample`'s [tempo_sample_build_and_package](https://github.com/tempo-sim/TempoSample/blob/main/.github/workflows/tempo_sample_build_and_package.yml) workflow is a good reference.
 
-### Speeding Up Builds With a Pre-Modded Engine Image (optional)
-Tempo modifies the Unreal engine in-place via patches in `EngineMods/`. By default `build_and_package.yml` applies these mods inside each CI run, which adds ~10–15 minutes and consumes the GitHub Actions cache budget (10 GB on the free tier, shared with the per-commit build cache). For larger projects you can opt into a pre-modded Unreal image hosted on your own private GHCR, which the build workflow pulls instead of re-applying mods on every run.
-
-Add one new workflow file to your repo that calls Tempo's reusable `publish_engine_mods.yml`:
-
-```yaml
-# .github/workflows/publish_engine_mods.yml
-name: Publish Pre-Modded Engine Image
-on:
-  push:
-    branches: [main]
-    paths:
-      - 'Plugins/Tempo/EngineMods/**'
-      - 'Plugins/Tempo/Dockerfile'
-      - 'Plugins/Tempo/Scripts/InstallEngineMods.sh'
-  workflow_dispatch:
-jobs:
-  publish:
-    permissions:
-      contents: read
-      packages: write
-    strategy:
-      matrix:
-        unreal_version: ["5.7", "5.8"]
-      fail-fast: false
-    uses: tempo-sim/Tempo/.github/workflows/publish_engine_mods.yml@main
-    with:
-      unreal_version: ${{ matrix.unreal_version }}
-      image_name: ghcr.io/${{ github.repository_owner }}/tempo-unreal-modded
-      tempo_root: Plugins/Tempo  # adjust to your Tempo submodule path
-    secrets: inherit
-  prune:
-    needs: publish
-    permissions:
-      packages: write
-    uses: tempo-sim/Tempo/.github/workflows/prune_engine_mods.yml@main
-    with:
-      package_name: tempo-unreal-modded
-      package_owner: ${{ github.repository_owner }}
-    secrets: inherit
-```
-
-Then pass `engine_mods_image: ghcr.io/<your-org>/tempo-unreal-modded` to your existing `build_and_package.yml` caller, and grant it `packages: read`. The build workflow will compute the EngineMods hash, attempt `docker pull` of the matching tag, and skip the in-workflow engine-mods init/install when the pull succeeds. If the pull fails for any reason (image not yet published for the current hash, permissions misconfigured, etc.) the workflow falls back to the in-workflow path, so there's no breakage — just no speedup.
-
-Setup notes:
-- You'll need `EPIC_DOCKER_USERNAME` and `EPIC_DOCKER_TOKEN` secrets configured to pull Epic's base Unreal image. Same requirement as the plain `build_and_package.yml`.
-- Run your new `publish_engine_mods` workflow manually once via `workflow_dispatch` before merging the `engine_mods_image` change to your build workflow, so the first image is available when the build runs.
-- The published image contains UE-derived content, which the Unreal Engine EULA does not permit redistributing publicly. Your org's GHCR package-creation policy must be set to "Private" (under `Settings → Packages` in the org admin), and the package will inherit private visibility on first push. If your org's package creation policy allows public, flip the package to private via the package's settings page after the first push.
-- The `prune` job keeps only the most recent tag per Unreal version, which is sufficient since EngineMods rarely change. If you'd prefer a longer history, pass `keep: 3` (or higher) to `prune_engine_mods.yml`.
+For larger projects, you can cut ~10–15 minutes per run by pulling a pre-modded Unreal image instead of applying engine mods in-workflow. See [Continuous Integration](https://tempo-sim.readthedocs.io/en/latest/guides/continuous-integration/).
 
 ## Issues
 Something not working as expected? Are we missing a key feature you need? Feel free to send us an [issue](https://github.com/tempo-sim/Tempo/issues).
@@ -181,15 +133,19 @@ Something not working as expected? Are we missing a key feature you need? Feel f
 ## Giving Back
 Want to contribute to Tempo? We'll be happy to review your PR.
 
-## Going Deeper
-You can learn about the individual tempo plugins in their respective READMEs:<br />
-[TempoCore](/TempoCore/README.md)<br />
-[TempoSensors](/TempoSensors/README.md)<br />
-[TempoAgents](/TempoAgents/README.md)<br />
-[TempoGeographic](/TempoGeographic/README.md)<br />
-[TempoMovement](/TempoMovement/README.md)<br />
-[TempoWorld](/TempoWorld/README.md)<br />
+Improving the documentation counts — it lives in [`docs/`](docs) in this repository. See [Contributing to these docs](https://tempo-sim.readthedocs.io/en/latest/guides/documentation/) for how to build the site locally.
 
-And, if you are using ROS:<br />
-[TempoROS](https://github.com/tempo-sim/TempoROS)<br />
-[TempoROSBridge](/TempoROSBridge/README.md)<br />
+## Going Deeper
+Each plugin has its own documentation page:
+
+[TempoCore](https://tempo-sim.readthedocs.io/en/latest/plugins/tempo-core/) ·
+[TempoWorld](https://tempo-sim.readthedocs.io/en/latest/plugins/tempo-world/) ·
+[TempoSensors](https://tempo-sim.readthedocs.io/en/latest/plugins/tempo-sensors/) ·
+[TempoMovement](https://tempo-sim.readthedocs.io/en/latest/plugins/tempo-movement/) ·
+[TempoAgents](https://tempo-sim.readthedocs.io/en/latest/plugins/tempo-agents/) ·
+[TempoGeographic](https://tempo-sim.readthedocs.io/en/latest/plugins/tempo-geographic/) ·
+[TempoPCG](https://tempo-sim.readthedocs.io/en/latest/plugins/tempo-pcg/)
+
+And, if you are using ROS:
+[TempoROS](https://github.com/tempo-sim/TempoROS) ·
+[TempoROSBridge](https://tempo-sim.readthedocs.io/en/latest/plugins/tempo-ros-bridge/)
