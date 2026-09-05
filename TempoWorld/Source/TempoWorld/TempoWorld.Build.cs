@@ -30,12 +30,6 @@ public class TempoWorld : TempoModuleRules
 			}
 		);
 
-		// StructUtils plugin was deprecated in 5.5 and moved into CoreUObject
-		if (Target.Version.MajorVersion == 5 && Target.Version.MinorVersion < 5)
-		{
-			PrivateDependencyModuleNames.Add("StructUtils");
-		}
-
 		// UE 5.8 split the core Mass types out of the MassEntity plugin into a new MassCore module.
 		if (Target.Version.MajorVersion == 5 && Target.Version.MinorVersion >= 8)
 		{
