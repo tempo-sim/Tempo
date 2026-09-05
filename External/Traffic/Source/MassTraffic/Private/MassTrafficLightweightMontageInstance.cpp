@@ -199,8 +199,7 @@ bool UE::VertexAnimation::FLightweightMontageInstance::Advance_Internal(float De
 		// Extract Root Motion for this time slice, and accumulate it.
 		if (bExtractRootMotion)
 		{
-			const FAnimExtractContext Context;
-			OutRootMotionParams.Accumulate(Montage->ExtractRootMotionFromTrackRange(PreviousSubStepPosition, Position, Context));
+			OutRootMotionParams.Accumulate(Montage->ExtractRootMotionFromTrackRange(PreviousSubStepPosition, Position, FAnimExtractContext()));
 		}
 
 		// if we reached end of section, and we were not processing a branching point, and no events has messed with out current position..

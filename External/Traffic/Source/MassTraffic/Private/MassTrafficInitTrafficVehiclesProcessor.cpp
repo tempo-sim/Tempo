@@ -52,11 +52,13 @@ void UMassTrafficInitTrafficVehiclesProcessor::InitNetIds(FMassEntityManager& En
 	EntityQuery.ForEachEntityChunk(Context, [](FMassExecutionContext& Context)
 		{
 			UMassReplicationSubsystem& ReplicationSubsystem = Context.GetMutableSubsystemChecked<UMassReplicationSubsystem>();
-			const int32 NumEntities = Context.GetNumEntities();
 			const TArrayView<FMassNetworkIDFragment> NetworkIDList = Context.GetMutableFragmentView<FMassNetworkIDFragment>();
+			// the iterator is here for fragment writing breakpoint purposes
+			FMassExecutionContext::FEntityIterator EntityIt = Context.CreateEntityIterator();
 			for (FMassNetworkIDFragment& NetworkIDFragment : NetworkIDList)
 			{
 				NetworkIDFragment.NetID = ReplicationSubsystem.GetNextAvailableMassNetID();
+				++EntityIt;
 			}
 		});
 }
@@ -82,7 +84,6 @@ void UMassTrafficInitTrafficVehiclesProcessor::Execute(FMassEntityManager& Entit
 	{
 		UMassTrafficSubsystem& MassTrafficSubsystem = QueryContext.GetMutableSubsystemChecked<UMassTrafficSubsystem>();
 
-		const int32 NumEntities = QueryContext.GetNumEntities();
 		const FMassTrafficVehicleSimulationParameters& SimulationParams = QueryContext.GetConstSharedFragment<FMassTrafficVehicleSimulationParameters>();
 		const TArrayView<FMassRepresentationFragment> RepresentationFragments = QueryContext.GetMutableFragmentView<FMassRepresentationFragment>();
 		const TArrayView<FMassTrafficVehicleControlFragment> VehicleControlFragments = QueryContext.GetMutableFragmentView<FMassTrafficVehicleControlFragment>();
@@ -90,18 +91,18 @@ void UMassTrafficInitTrafficVehiclesProcessor::Execute(FMassEntityManager& Entit
 		const TArrayView<FMassTrafficRandomFractionFragment> RandomFractionFragments = QueryContext.GetMutableFragmentView<FMassTrafficRandomFractionFragment>();
 		const TArrayView<FTransformFragment> TransformFragments = QueryContext.GetMutableFragmentView<FTransformFragment>();
 
-		for (int32 Index = 0; Index < NumEntities; ++Index)
+		for (FMassExecutionContext::FEntityIterator EntityIt = QueryContext.CreateEntityIterator(); EntityIt; ++EntityIt)
 		{
 			check(VehiclesSpawnData.LaneLocations.IsValidIndex(VehicleIndex));
 			
-			FMassRepresentationFragment& RepresentationFragment = RepresentationFragments[Index];
-			FMassTrafficVehicleControlFragment& VehicleControlFragment = VehicleControlFragments[Index];
-			FMassZoneGraphLaneLocationFragment& LaneLocationFragment = LaneLocationFragments[Index];
-			FMassTrafficRandomFractionFragment& RandomFractionFragment = RandomFractionFragments[Index];
-			FTransformFragment& TransformFragment = TransformFragments[Index];
+			FMassRepresentationFragment& RepresentationFragment = RepresentationFragments[EntityIt];
+			FMassTrafficVehicleControlFragment& VehicleControlFragment = VehicleControlFragments[EntityIt];
+			FMassZoneGraphLaneLocationFragment& LaneLocationFragment = LaneLocationFragments[EntityIt];
+			FMassTrafficRandomFractionFragment& RandomFractionFragment = RandomFractionFragments[EntityIt];
+			FTransformFragment& TransformFragment = TransformFragments[EntityIt];
 
 			// Cache the vehicle's EntityHandle
-			const FMassEntityHandle VehicleEntityHandle = Context.GetEntity(Index);
+			const FMassEntityHandle VehicleEntityHandle = Context.GetEntity(EntityIt);
 			VehicleControlFragment.VehicleEntityHandle = VehicleEntityHandle;
 
 			// Init random fraction
@@ -124,7 +125,7 @@ void UMassTrafficInitTrafficVehiclesProcessor::Execute(FMassEntityManager& Entit
 			if (!TrunkVehicleLaneCheck(&TrafficLaneData, VehicleControlFragment))
 			{
 				UE_LOG(LogMassTraffic, Error, TEXT("InitTrafficVehicles - Vehicle %d is restricted to trunk lanes yet has been spawned on a non-trunk lane %s. Check vehicle type spawn lane filters to ensure this doesn't happen"),
-					Context.GetEntity(Index).Index, *LaneLocationFragment.LaneHandle.ToString());
+					Context.GetEntity(EntityIt).Index, *LaneLocationFragment.LaneHandle.ToString());
 			}
 
 			// While we've already resolved CurrentTrafficLaneData here, we do a quick check

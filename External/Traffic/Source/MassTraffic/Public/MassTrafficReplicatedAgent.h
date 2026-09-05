@@ -5,7 +5,6 @@
 #include "MassReplicationTransformHandlers.h"
 #include "MassReplicationTypes.h"
 #include "MassClientBubbleHandler.h"
-
 #include "MassTrafficReplicatedAgent.generated.h"
 
 /** The data that is replicated for each agent */

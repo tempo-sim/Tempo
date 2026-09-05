@@ -7,6 +7,7 @@
 
 #include "Curves/BezierUtilities.h"
 
+
 namespace UE
 {
 namespace MassTraffic
@@ -139,8 +140,8 @@ void InterpolatePositionAndOrientationAlongLane(
 	const float Alpha = FMath::GetRangePct(InOutLaneSegment.StartProgression, InOutLaneSegment.EndProgression, DistanceAlongLane);
 		
 	// Interpolate along segment 
-	FVector InterpolatedLocation = FVector::ZeroVector;
-	FVector InterpolatedForwardVector; 
+	FVector InterpolatedLocation(ForceInitToZero);
+	FVector InterpolatedForwardVector(ForceInitToZero);
 	switch (InterpolationMethod)
 	{
 		// Cheap Lerp from P1 to P2 for position and Slerp for orientation

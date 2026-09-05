@@ -42,24 +42,23 @@ void UMassTrafficDamageRepairProcessor::Execute(FMassEntityManager& EntityManage
 	// Block LOD changes to high LOD damaged vehicles, while we repair damage
 	DamagedVehicleEntityQuery.ForEachEntityChunk(Context, [](FMassExecutionContext& Context)
 	{
-		const int32 NumEntities = Context.GetNumEntities();
 		const TArrayView<FMassActorFragment> ActorFragments = Context.GetMutableFragmentView<FMassActorFragment>();
 		const TArrayView<FMassTrafficVehicleDamageFragment> VehicleDamageFragments = Context.GetMutableFragmentView<FMassTrafficVehicleDamageFragment>();
 		const TArrayView<FMassRepresentationLODFragment> RepresentationLODFragments = Context.GetMutableFragmentView<FMassRepresentationLODFragment>();
 
 		const bool bIsDisturbedVehicle = Context.DoesArchetypeHaveTag<FMassTrafficDisturbedVehicleTag>();
 
-		for (int32 EntityIndex = 0; EntityIndex < NumEntities; ++EntityIndex)
+		for (FMassExecutionContext::FEntityIterator EntityIt = Context.CreateEntityIterator(); EntityIt; ++EntityIt)
 		{
 			// Has damage?
-			FMassTrafficVehicleDamageFragment& VehicleDamageFragment = VehicleDamageFragments[EntityIndex];
+			FMassTrafficVehicleDamageFragment& VehicleDamageFragment = VehicleDamageFragments[EntityIt];
 			if (VehicleDamageFragment.VehicleDamageState > EMassTrafficVehicleDamageState::None)
 			{
-				FMassActorFragment& ActorFragment = ActorFragments[EntityIndex];
+				FMassActorFragment& ActorFragment = ActorFragments[EntityIt];
 				if (AActor* Actor = ActorFragment.GetOwnedByMassMutable())
 				{
 					// Trying to LOD change with damage? 
-					FMassRepresentationLODFragment& RepresentationLODFragment = RepresentationLODFragments[EntityIndex];
+					FMassRepresentationLODFragment& RepresentationLODFragment = RepresentationLODFragments[EntityIt];
 					if (RepresentationLODFragment.LOD != EMassLOD::High)
 					{
 						// Start repairing damage?
@@ -106,12 +105,12 @@ void UMassTrafficDamageRepairProcessor::Execute(FMassEntityManager& EntityManage
 						if (bIsDisturbedVehicle)
 						{
 							// Delete the entity.
-							Context.Defer().DestroyEntity(Context.GetEntity(EntityIndex));
+							Context.Defer().DestroyEntity(Context.GetEntity(EntityIt));
 						}
 						else
 						{
 							// Recycle the entity back into the system.
-							Context.Defer().SwapTags<FMassTrafficVehicleTag, FMassTrafficRecyclableVehicleTag>(Context.GetEntity(EntityIndex));
+							Context.Defer().SwapTags<FMassTrafficVehicleTag, FMassTrafficRecyclableVehicleTag>(Context.GetEntity(EntityIt));
 						}
 					}
 				}

@@ -13,7 +13,7 @@
 
 
 UMassTrafficTrailerSimulationTrait::UMassTrafficTrailerSimulationTrait(const FObjectInitializer& ObjectInitializer)
-: Super(ObjectInitializer)
+	: Super(ObjectInitializer)
 {
 }
 
@@ -22,7 +22,7 @@ void UMassTrafficTrailerSimulationTrait::BuildTemplate(FMassEntityTemplateBuildC
 	FMassEntityManager& EntityManager = UE::Mass::Utils::GetEntityManagerChecked(World);
 
 	UMassTrafficSubsystem* MassTrafficSubsystem = UWorld::GetSubsystem<UMassTrafficSubsystem>(&World);
-	check(MassTrafficSubsystem);
+	check(MassTrafficSubsystem || BuildContext.IsInspectingData());
 
 	// Cache FMassTrafficTrailerSimulationParameters::ConstraintSettings conversion to Chaos::FPBDJointSettings
 	FMassTrafficTrailerSimulationParameters MutableParams = Params;
@@ -66,8 +66,17 @@ void UMassTrafficTrailerSimulationTrait::BuildTemplate(FMassEntityTemplateBuildC
 		const FMassTrafficSimpleVehiclePhysicsTemplate* Template = MassTrafficSubsystem->GetOrExtractVehiclePhysicsTemplate(Params.PhysicsVehicleTemplateActor);
 
 		// Register & add shared fragment
-		const FConstSharedStruct PhysicsSharedFragment = EntityManager.GetOrCreateConstSharedFragment<FMassTrafficVehiclePhysicsSharedParameters>(Template);
-		BuildContext.AddConstSharedFragment(PhysicsSharedFragment);
+		if (LIKELY(!BuildContext.IsInspectingData()))
+		{
+			const FConstSharedStruct PhysicsSharedFragment = EntityManager.GetOrCreateConstSharedFragment<FMassTrafficVehiclePhysicsSharedParameters>(FConstStructView::Make(*Template), Template);
+			BuildContext.AddConstSharedFragment(PhysicsSharedFragment);
+		}
+		else
+		{
+			// in the investigation mode we only care about the fragment type
+			const FConstSharedStruct PhysicsSharedFragment = EntityManager.GetOrCreateConstSharedFragment<FMassTrafficVehiclePhysicsSharedParameters>(Template);
+			BuildContext.AddConstSharedFragment(PhysicsSharedFragment);
+		}
 	}
 	else
 	{

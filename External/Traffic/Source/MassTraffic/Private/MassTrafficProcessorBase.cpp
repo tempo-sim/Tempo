@@ -2,7 +2,7 @@
 
 #include "MassTrafficProcessorBase.h"
 #include "MassCommonUtils.h"
-#include "ZoneGraphSubsystem.h" 
+
 
 void UMassTrafficProcessorBase::InitializeInternal(UObject& InOwner, const TSharedRef<FMassEntityManager>& EntityManager)
 {

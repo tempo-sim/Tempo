@@ -9,7 +9,6 @@
 #include "MassTrafficControllerRegistrySubsystem.h"
 
 #include "MassEntitySpawnDataGeneratorBase.h"
-
 #include "MassTrafficIntersectionSpawnDataGenerator.generated.h"
 
 typedef TMap<int32, FMassTrafficIntersectionDetail> FZoneIndexToIntersectionDetailMap;

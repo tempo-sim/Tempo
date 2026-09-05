@@ -6,7 +6,6 @@
 #include "MassTrafficReplicatedAgent.h"
 #include "MassClientBubbleHandler.h"
 #include "MassClientBubbleInfoBase.h"
-
 #include "MassTrafficBubble.generated.h"
 
 class MASSTRAFFIC_API FTrafficClientBubbleHandler : public TClientBubbleHandlerBase<FTrafficFastArrayItem>

@@ -4,9 +4,7 @@
 
 #include "MassRepresentationProcessor.h"
 #include "MassVisualizationLODProcessor.h"
-
 #include "MassTrafficFragments.h"
-
 #include "MassTrafficParkedVehicleVisualizationProcessor.generated.h"
 
 class UMassTrafficSubsystem;

@@ -5,7 +5,9 @@
 #include "MassTrafficMovement.h"
 #include "MassExecutionContext.h"
 #include "MassCommonFragments.h"
+#include "MassTrafficUtils.h"
 #include "MassZoneGraphNavigationFragments.h"
+
 
 UMassTrafficInitTrafficVehicleSpeedProcessor::UMassTrafficInitTrafficVehicleSpeedProcessor()
 	: EntityQuery(*this)
@@ -29,7 +31,6 @@ void UMassTrafficInitTrafficVehicleSpeedProcessor::Execute(FMassEntityManager& E
 	// Advance agents
 	EntityQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext& QueryContext)
 	{
-		const int32 NumEntities = QueryContext.GetNumEntities();
 		const UMassTrafficSubsystem& MassTrafficSubsystem = QueryContext.GetSubsystemChecked<UMassTrafficSubsystem>();
 		const TConstArrayView<FMassTrafficRandomFractionFragment> RandomFractionFragments = QueryContext.GetFragmentView<FMassTrafficRandomFractionFragment>();
 		const TConstArrayView<FMassTrafficObstacleAvoidanceFragment> AvoidanceFragments = QueryContext.GetFragmentView<FMassTrafficObstacleAvoidanceFragment>();
@@ -39,13 +40,13 @@ void UMassTrafficInitTrafficVehicleSpeedProcessor::Execute(FMassEntityManager& E
 
 		const UWorld* World = QueryContext.GetWorld();
 
-		for (int32 Index = 0; Index < NumEntities; ++Index)
+		for (FMassExecutionContext::FEntityIterator EntityIt = QueryContext.CreateEntityIterator(); EntityIt; ++EntityIt)
 		{
-			const FMassTrafficRandomFractionFragment& RandomFractionFragment = RandomFractionFragments[Index];
-			const FAgentRadiusFragment& AgentRadiusFragment = RadiusFragments[Index];
-			const FMassTrafficObstacleAvoidanceFragment& AvoidanceFragment = AvoidanceFragments[Index];
-			const FMassZoneGraphLaneLocationFragment& LaneLocationFragment = LaneLocationFragments[Index];
-			FMassTrafficVehicleControlFragment& VehicleControlFragment = VehicleControlFragments[Index];
+			const FMassTrafficRandomFractionFragment& RandomFractionFragment = RandomFractionFragments[EntityIt];
+			const FAgentRadiusFragment& AgentRadiusFragment = RadiusFragments[EntityIt];
+			const FMassTrafficObstacleAvoidanceFragment& AvoidanceFragment = AvoidanceFragments[EntityIt];
+			const FMassZoneGraphLaneLocationFragment& LaneLocationFragment = LaneLocationFragments[EntityIt];
+			FMassTrafficVehicleControlFragment& VehicleControlFragment = VehicleControlFragments[EntityIt];
 
 			
 			// Compute stable distance based noise

@@ -65,35 +65,35 @@ void UMassTrafficTrailerUpdateCustomVisualizationProcessor::ConfigureQueries(con
 #endif // ENABLE_VISUAL_LOG
 }
 
-void UMassTrafficTrailerUpdateCustomVisualizationProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
+void UMassTrafficTrailerUpdateCustomVisualizationProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& ExecutionContext)
 {
 	// As we are using the same Visualization.StaticMeshDescHandle here as traffic vehicles, we must
 	// add custom float values for trailer instances too.
 	// 
 	// Otherwise the total mesh instance count (e.g: 7 traffic + 3 parked) would be mismatched with the
 	// total custom data count (e.g: 7 traffic + 0 parked)
-	EntityQuery.ForEachEntityChunk(Context, [this, &EntityManager](FMassExecutionContext& QueryContext)
+	EntityQuery.ForEachEntityChunk(ExecutionContext, [this, &EntityManager](FMassExecutionContext& Context)
 	{
-		UMassRepresentationSubsystem* RepresentationSubsystem = QueryContext.GetMutableSharedFragment<FMassRepresentationSubsystemSharedFragment>().RepresentationSubsystem;
+		UMassRepresentationSubsystem* RepresentationSubsystem = Context.GetMutableSharedFragment<FMassRepresentationSubsystemSharedFragment>().RepresentationSubsystem;
 		check(RepresentationSubsystem);
 		FMassInstancedStaticMeshInfoArrayView ISMInfo = RepresentationSubsystem->GetMutableInstancedStaticMeshInfos();
 
-		const int32 NumEntities = QueryContext.GetNumEntities();
-		const TConstArrayView<FMassTrafficConstrainedVehicleFragment> ConstrainedVehicleFragments = QueryContext.GetFragmentView<FMassTrafficConstrainedVehicleFragment>();
-		const TConstArrayView<FMassTrafficRandomFractionFragment> RandomFractionFragments = QueryContext.GetFragmentView<FMassTrafficRandomFractionFragment>();
-		const TConstArrayView<FMassRepresentationLODFragment> RepresentationLODFragments = QueryContext.GetFragmentView<FMassRepresentationLODFragment>();
-		const TConstArrayView<FTransformFragment> TransformFragments = QueryContext.GetFragmentView<FTransformFragment>();
-		const TConstArrayView<FMassTrafficVehiclePhysicsFragment> SimpleVehiclePhysicsFragments = QueryContext.GetFragmentView<FMassTrafficVehiclePhysicsFragment>();
-		const TArrayView<FMassRepresentationFragment> RepresentationFragments = QueryContext.GetMutableFragmentView<FMassRepresentationFragment>();
-		const TArrayView<FMassActorFragment> ActorFragments = QueryContext.GetMutableFragmentView<FMassActorFragment>();
-		for (int32 EntityIndex = 0; EntityIndex < NumEntities; EntityIndex++)
+		const TConstArrayView<FMassTrafficConstrainedVehicleFragment> ConstrainedVehicleFragments = Context.GetFragmentView<FMassTrafficConstrainedVehicleFragment>();
+		const TConstArrayView<FMassTrafficRandomFractionFragment> RandomFractionFragments = Context.GetFragmentView<FMassTrafficRandomFractionFragment>();
+		const TConstArrayView<FMassRepresentationLODFragment> RepresentationLODFragments = Context.GetFragmentView<FMassRepresentationLODFragment>();
+		const TConstArrayView<FTransformFragment> TransformFragments = Context.GetFragmentView<FTransformFragment>();
+		const TConstArrayView<FMassTrafficVehiclePhysicsFragment> SimpleVehiclePhysicsFragments = Context.GetFragmentView<FMassTrafficVehiclePhysicsFragment>();
+		const TArrayView<FMassRepresentationFragment> RepresentationFragments = Context.GetMutableFragmentView<FMassRepresentationFragment>();
+		const TArrayView<FMassActorFragment> ActorFragments = Context.GetMutableFragmentView<FMassActorFragment>();
+		
+		for (FMassExecutionContext::FEntityIterator EntityIt = Context.CreateEntityIterator(); EntityIt; ++EntityIt)
 		{
-			const FMassTrafficConstrainedVehicleFragment& ConstrainedVehicleFragment = ConstrainedVehicleFragments[EntityIndex];
-			const FMassTrafficRandomFractionFragment& RandomFractionFragment = RandomFractionFragments[EntityIndex];
-			const FMassRepresentationLODFragment& RepresentationLODFragment = RepresentationLODFragments[EntityIndex];
-			const FTransformFragment& TransformFragment = TransformFragments[EntityIndex];
-			FMassRepresentationFragment& RepresentationFragment = RepresentationFragments[EntityIndex];
-			FMassActorFragment& ActorFragment = ActorFragments[EntityIndex];
+			const FMassTrafficConstrainedVehicleFragment& ConstrainedVehicleFragment = ConstrainedVehicleFragments[EntityIt];
+			const FMassTrafficRandomFractionFragment& RandomFractionFragment = RandomFractionFragments[EntityIt];
+			const FMassRepresentationLODFragment& RepresentationLODFragment = RepresentationLODFragments[EntityIt];
+			const FTransformFragment& TransformFragment = TransformFragments[EntityIt];
+			FMassRepresentationFragment& RepresentationFragment = RepresentationFragments[EntityIt];
+			FMassActorFragment& ActorFragment = ActorFragments[EntityIt];
 
 			// Prepare custom instance data. All we really need this for is to toggle break lights.
 			FMassEntityView VehicleMassEntityView(EntityManager, ConstrainedVehicleFragment.Vehicle);
@@ -111,7 +111,7 @@ void UMassTrafficTrailerUpdateCustomVisualizationProcessor::Execute(FMassEntityM
 					if (AActor* Actor = ActorFragment.GetMutable())
 					{
 						// Update actor transform
-						QueryContext.Defer().PushCommand<FMassDeferredSetCommand>([Actor, NewActorTransform = TransformFragment.GetTransform()](FMassEntityManager& System)
+						Context.Defer().PushCommand<FMassDeferredSetCommand>([Actor, NewActorTransform = TransformFragment.GetTransform()](FMassEntityManager&)
 						{
 							Actor->SetActorTransform(NewActorTransform);
 						});
@@ -126,7 +126,7 @@ void UMassTrafficTrailerUpdateCustomVisualizationProcessor::Execute(FMassEntityM
 								// Update wheel component transforms from simple vehicle physics sim.
 								// This should be safe to reference SimpleVehiclePhysicsFragment directly as
 								// we should be done writing to the VehicleSim this frame.
-								QueryContext.Defer().PushCommand<FMassDeferredSetCommand>([MassTrafficVehicleComponent, Entity = QueryContext.GetEntity(EntityIndex)](FMassEntityManager& CallbackEntitySubsystem)
+								Context.Defer().PushCommand<FMassDeferredSetCommand>([MassTrafficVehicleComponent, Entity = Context.GetEntity(EntityIt)](FMassEntityManager& CallbackEntitySubsystem)
 								{
 									if (CallbackEntitySubsystem.IsEntityValid(Entity))
 									{
@@ -164,7 +164,7 @@ void UMassTrafficTrailerUpdateCustomVisualizationProcessor::Execute(FMassEntityM
 				case EMassRepresentationType::StaticMeshInstance:
 				{
 					// Add batched instance transform & custom data
-					ISMInfo[RepresentationFragment.StaticMeshDescHandle.ToIndex()].AddBatchedTransform(QueryContext.GetEntity(EntityIndex)
+					ISMInfo[RepresentationFragment.StaticMeshDescHandle.ToIndex()].AddBatchedTransform(Context.GetEntity(EntityIt)
 						, TransformFragment.GetTransform(), RepresentationFragment.PrevTransform, RepresentationLODFragment.LODSignificance);
 					ISMInfo[RepresentationFragment.StaticMeshDescHandle.ToIndex()].AddBatchedCustomData(PackedCustomData, RepresentationLODFragment.LODSignificance);
 
@@ -187,23 +187,22 @@ void UMassTrafficTrailerUpdateCustomVisualizationProcessor::Execute(FMassEntityM
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(TEXT("DebugDisplayVisualization")) 
 
-		EntityQuery.ForEachEntityChunk(Context, [this](FMassExecutionContext& Context)
+		EntityQuery.ForEachEntityChunk(ExecutionContext, [this, InWorld = EntityManager.GetWorld()](FMassExecutionContext& Context)
 		{
 			const UMassTrafficSubsystem* MassTrafficSubsystem = Context.GetSubsystem<UMassTrafficSubsystem>();
 
-			const int32 NumEntities = Context.GetNumEntities();
 			const TConstArrayView<FTransformFragment> TransformList = Context.GetFragmentView<FTransformFragment>();
 			const TArrayView<FMassRepresentationFragment> VisualizationList = Context.GetMutableFragmentView<FMassRepresentationFragment>();
 
-			for (int Index = 0; Index < NumEntities; Index++)
+			for (FMassExecutionContext::FEntityIterator EntityIt = Context.CreateEntityIterator(); EntityIt; ++EntityIt)
 			{
-				const FTransformFragment& TransformFragment = TransformList[Index];
-				FMassRepresentationFragment& Visualization = VisualizationList[Index];
+				const FTransformFragment& TransformFragment = TransformList[EntityIt];
+				FMassRepresentationFragment& Visualization = VisualizationList[EntityIt];
 				const int32 CurrentVisualIdx = static_cast<int32>(Visualization.CurrentRepresentation);
 
 				if (Visualization.CurrentRepresentation != EMassRepresentationType::None || GMassTrafficDebugVisualization >= 2)
 				{
-					DrawDebugPoint(World, TransformFragment.GetTransform().GetLocation() + FVector(50.0f, 0.0f, 200.0f), 10.0f, UE::MassLOD::LODColors[CurrentVisualIdx]);
+					DrawDebugPoint(InWorld, TransformFragment.GetTransform().GetLocation() + FVector(50.0f, 0.0f, 200.0f), 10.0f, UE::MassLOD::LODColors[CurrentVisualIdx]);
 				}
 
 				if ((Visualization.CurrentRepresentation != EMassRepresentationType::None && GMassTrafficDebugVisualization >= 2) || GMassTrafficDebugVisualization >= 3)

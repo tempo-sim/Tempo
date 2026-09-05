@@ -135,7 +135,7 @@ void UMassTrafficVehiclePhysicsProcessor::Execute(FMassEntityManager& EntityMana
 		RemainingDeltaTime -= DeltaTime;
 		// Get gravity from world
 		float GravityZ = GetWorld()->GetGravityZ();
-
+		
 		SimplePhysicsVehiclesQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext& QueryContext)
 		{
 			const UZoneGraphSubsystem& ZoneGraphSubsystem = QueryContext.GetSubsystemChecked<UZoneGraphSubsystem>();
@@ -153,29 +153,28 @@ void UMassTrafficVehiclePhysicsProcessor::Execute(FMassEntityManager& EntityMana
 			const TArrayView<FMassTrafficInterpolationFragment> InterpolationFragments = QueryContext.GetMutableFragmentView<FMassTrafficInterpolationFragment>();
 			const TConstArrayView<FMassTrafficDebugFragment> DebugFragments = QueryContext.GetFragmentView<FMassTrafficDebugFragment>();
 
-			const int32 NumEntities = QueryContext.GetNumEntities();
-			for (int32 Index = 0; Index < NumEntities; ++Index)
+			for (FMassExecutionContext::FEntityIterator EntityIt = QueryContext.CreateEntityIterator(); EntityIt; ++EntityIt)
 			{
 				// Note: Simple vehicle physics is always run for both high & low viewer LOD vehicles. Most of the time
 				//		 this simple simulation is discarded / ignored by the high LOD physics actor which does its
 				//		 own simulation. However, when a high LOD drops back to medium LOD on a frame, this simulation
 				//		 will have been done to ensure the spawned medium LOD will have been advanced forward.  
 				
-				const FMassTrafficPIDVehicleControlFragment& PIDVehicleControlFragment = PIDVehicleControlFragments[Index];
-				const FMassTrafficVehicleLaneChangeFragment& LaneChangeFragment = LaneChangeFragments[Index]; 
-				FMassTrafficVehicleControlFragment& VehicleControlFragment = VehicleControlFragments[Index];
-				FMassTrafficVehiclePhysicsFragment& SimplePhysicsVehicleFragment = SimplePhysicsVehicleFragments[Index];
-				FMassVelocityFragment& VelocityFragment = VelocityFragments[Index];
-				FMassTrafficAngularVelocityFragment& AngularVelocityFragment = AngularVelocityFragments[Index];
-				FTransformFragment& TransformFragment = TransformFragments[Index];
-				FMassZoneGraphLaneLocationFragment& LaneLocationFragment = LaneLocationFragments[Index];
-				const FMassTrafficLaneOffsetFragment& LaneOffsetFragment = LaneOffsetFragments[Index];
-				FMassTrafficInterpolationFragment& InterpolationFragment = InterpolationFragments[Index];
+				const FMassTrafficPIDVehicleControlFragment& PIDVehicleControlFragment = PIDVehicleControlFragments[EntityIt];
+				const FMassTrafficVehicleLaneChangeFragment& LaneChangeFragment = LaneChangeFragments[EntityIt]; 
+				FMassTrafficVehicleControlFragment& VehicleControlFragment = VehicleControlFragments[EntityIt];
+				FMassTrafficVehiclePhysicsFragment& SimplePhysicsVehicleFragment = SimplePhysicsVehicleFragments[EntityIt];
+				FMassVelocityFragment& VelocityFragment = VelocityFragments[EntityIt];
+				FMassTrafficAngularVelocityFragment& AngularVelocityFragment = AngularVelocityFragments[EntityIt];
+				FTransformFragment& TransformFragment = TransformFragments[EntityIt];
+				FMassZoneGraphLaneLocationFragment& LaneLocationFragment = LaneLocationFragments[EntityIt];
+				const FMassTrafficLaneOffsetFragment& LaneOffsetFragment = LaneOffsetFragments[EntityIt];
+				FMassTrafficInterpolationFragment& InterpolationFragment = InterpolationFragments[EntityIt];
 
 				const FZoneGraphStorage* ZoneGraphStorage = ZoneGraphSubsystem.GetZoneGraphStorage(LaneLocationFragment.LaneHandle.DataHandle);
 				check(ZoneGraphStorage);
 
-				bool bVisLog = DebugFragments.IsEmpty() ? false : DebugFragments[Index].bVisLog > 0;
+				bool bVisLog = DebugFragments.IsEmpty() ? false : DebugFragments[EntityIt].bVisLog > 0;
 
 				// Copy input world transform
 				const FTransform VehicleWorldTransform = TransformFragment.GetTransform();
@@ -203,7 +202,7 @@ void UMassTrafficVehiclePhysicsProcessor::Execute(FMassEntityManager& EntityMana
 					SuspensionTraceHitResults,
 					SuspensionTargets,
 					bVisLog,
-					/*Color*/UE::MassTraffic::EntityToColor(QueryContext.GetEntity(Index)));
+					/*Color*/UE::MassTraffic::EntityToColor(QueryContext.GetEntity(EntityIt)));
 				
 				// Simulate drive forces 
 				SimulateDriveForces(
@@ -223,7 +222,7 @@ void UMassTrafficVehiclePhysicsProcessor::Execute(FMassEntityManager& EntityMana
 				bool bHasTrailer = false;
 				if (!TrailerConstraintFragments.IsEmpty())
 				{
-					const FMassTrafficConstrainedTrailerFragment& TrailerConstraintFragment = TrailerConstraintFragments[Index];
+					const FMassTrafficConstrainedTrailerFragment& TrailerConstraintFragment = TrailerConstraintFragments[EntityIt];
 					if (TrailerConstraintFragment.Trailer.IsSet())
 					{
 						FMassEntityView TrailerMassEntityView(EntityManager, TrailerConstraintFragment.Trailer);
@@ -270,7 +269,7 @@ void UMassTrafficVehiclePhysicsProcessor::Execute(FMassEntityManager& EntityMana
 								TrailerSuspensionTraceHitResults,
 								TrailerSuspensionTargets,
 								bVisLog,
-								/*Color*/UE::MassTraffic::EntityToColor(QueryContext.GetEntity(Index)));
+								/*Color*/UE::MassTraffic::EntityToColor(QueryContext.GetEntity(EntityIt)));
 							
 							// Simulate drive forces 
 							const FMassTrafficPIDVehicleControlFragment NoInputPIDVehicleControlFragment;

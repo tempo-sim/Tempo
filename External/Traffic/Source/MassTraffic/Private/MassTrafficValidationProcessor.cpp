@@ -13,6 +13,7 @@
 #include "MassSimulationLOD.h"
 #include "ZoneGraphQuery.h"
 #include "ZoneGraphSubsystem.h"
+#include "MassTrafficUtils.h"
 #include "VisualLogger/VisualLogger.h"
 
 
@@ -50,7 +51,7 @@ void UMassTrafficValidationProcessor::ConfigureQueries(const TSharedRef<FMassEnt
 	ProcessorRequirements.AddSubsystemRequirement<UZoneGraphSubsystem>(EMassFragmentAccess::ReadOnly);
 }
 
-void UMassTrafficValidationProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
+void UMassTrafficValidationProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& ExecutionContext)
 {
 	// Skip validation unless enabled
 	if (GMassTrafficValidation <= 0)
@@ -58,7 +59,7 @@ void UMassTrafficValidationProcessor::Execute(FMassEntityManager& EntityManager,
 		return;
 	}
 
-	const UMassTrafficSubsystem& MassTrafficSubsystem = Context.GetSubsystemChecked<UMassTrafficSubsystem>();
+	const UMassTrafficSubsystem& MassTrafficSubsystem = ExecutionContext.GetSubsystemChecked<UMassTrafficSubsystem>();
 	
 	// Init density debugging?
 	if (GMassTrafficDebugFlowDensity >= 1 && GMassTrafficDebugFlowDensity <= 3)
@@ -93,7 +94,7 @@ void UMassTrafficValidationProcessor::Execute(FMassEntityManager& EntityManager,
 
 	
 	// Lane validation
-	const UZoneGraphSubsystem& ZoneGraphSubsystem = Context.GetSubsystemChecked<UZoneGraphSubsystem>();
+	const UZoneGraphSubsystem& ZoneGraphSubsystem = ExecutionContext.GetSubsystemChecked<UZoneGraphSubsystem>();
 	for (const FMassTrafficZoneGraphData& TrafficZoneData : MassTrafficSubsystem.GetTrafficZoneGraphData())
 	{
 		const FZoneGraphStorage* ZoneGraphStorage = ZoneGraphSubsystem.GetZoneGraphStorage(TrafficZoneData.DataHandle);
@@ -233,9 +234,9 @@ void UMassTrafficValidationProcessor::Execute(FMassEntityManager& EntityManager,
 	}
 
 	// Vehicle validation
-	EntityQuery_Conditional.ForEachEntityChunk(Context, [&](FMassExecutionContext& ComponentSystemExecutionContext)
+	EntityQuery_Conditional.ForEachEntityChunk(ExecutionContext, [&](FMassExecutionContext& Context)
 		{
-			const UZoneGraphSubsystem& ZoneGraphSubsystem = ComponentSystemExecutionContext.GetSubsystemChecked<UZoneGraphSubsystem>();
+			const UZoneGraphSubsystem& ZoneGraphSubsystem = Context.GetSubsystemChecked<UZoneGraphSubsystem>();
 
 			TConstArrayView<FMassTrafficSimulationLODFragment> SimulationLODFragments = Context.GetFragmentView<FMassTrafficSimulationLODFragment>();
 			TConstArrayView<FMassActorFragment> ActorFragments = Context.GetFragmentView<FMassActorFragment>();
@@ -250,24 +251,23 @@ void UMassTrafficValidationProcessor::Execute(FMassEntityManager& EntityManager,
 			TConstArrayView<FMassTrafficNextVehicleFragment> NextVehicleFragments = Context.GetFragmentView<FMassTrafficNextVehicleFragment>();
 			TArrayView<FMassTrafficDebugFragment> DebugFragments = Context.GetMutableFragmentView<FMassTrafficDebugFragment>();
 
-			const int32 NumEntities = Context.GetNumEntities();
-			for (int32 Index = 0; Index < NumEntities; ++Index)
+			for (FMassExecutionContext::FEntityIterator EntityIt = Context.CreateEntityIterator(); EntityIt; ++EntityIt)
 			{
-				FMassEntityHandle VehicleEntity = Context.GetEntity(Index);
+				FMassEntityHandle VehicleEntity = Context.GetEntity(EntityIt);
 			
-				const FMassTrafficSimulationLODFragment& SimulationLODFragment = SimulationLODFragments[Index];
-				const FMassActorFragment& ActorFragment = ActorFragments[Index];
-				const FAgentRadiusFragment& RadiusFragment = RadiusFragments[Index];
-				const FMassTrafficObstacleAvoidanceFragment& AvoidanceFragment = AvoidanceFragments[Index];
-				const FMassTrafficVehicleControlFragment& VehicleControlFragment = VehicleControlFragments[Index];
-				const FMassZoneGraphLaneLocationFragment& LaneLocationFragment = LaneLocationFragments[Index];
-				const FMassTrafficLaneOffsetFragment& LaneOffsetFragment = LaneOffsetFragments[Index];
-				const FTransformFragment& TransformFragment = TransformFragments[Index];
-				const FMassTrafficVehicleLaneChangeFragment& LaneChangeFragment = LaneChangeFragments[Index];
-				const FMassRepresentationFragment& RepresentationFragment = VisualizationFragments[Index];
-				const FMassTrafficNextVehicleFragment& NextVehicleFragment = NextVehicleFragments[Index];
+				const FMassTrafficSimulationLODFragment& SimulationLODFragment = SimulationLODFragments[EntityIt];
+				const FMassActorFragment& ActorFragment = ActorFragments[EntityIt];
+				const FAgentRadiusFragment& RadiusFragment = RadiusFragments[EntityIt];
+				const FMassTrafficObstacleAvoidanceFragment& AvoidanceFragment = AvoidanceFragments[EntityIt];
+				const FMassTrafficVehicleControlFragment& VehicleControlFragment = VehicleControlFragments[EntityIt];
+				const FMassZoneGraphLaneLocationFragment& LaneLocationFragment = LaneLocationFragments[EntityIt];
+				const FMassTrafficLaneOffsetFragment& LaneOffsetFragment = LaneOffsetFragments[EntityIt];
+				const FTransformFragment& TransformFragment = TransformFragments[EntityIt];
+				const FMassTrafficVehicleLaneChangeFragment& LaneChangeFragment = LaneChangeFragments[EntityIt];
+				const FMassRepresentationFragment& RepresentationFragment = VisualizationFragments[EntityIt];
+				const FMassTrafficNextVehicleFragment& NextVehicleFragment = NextVehicleFragments[EntityIt];
 				#if WITH_MASSTRAFFIC_DEBUG
-					FMassTrafficDebugFragment& DebugFragment = DebugFragments[Index];
+					FMassTrafficDebugFragment& DebugFragment = DebugFragments[EntityIt];
 				#endif
 
 				// Raw lane location

@@ -1,10 +1,11 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "MassTrafficInitParkedVehiclesProcessor.h"
-#include "MassTraffic.h"
+#include "MassCommonFragments.h"
 #include "MassTrafficFragments.h"
 #include "MassReplicationSubsystem.h"
 #include "MassExecutionContext.h"
+#include "MassRepresentationFragments.h"
 
 
 UMassTrafficInitParkedVehiclesProcessor::UMassTrafficInitParkedVehiclesProcessor()
@@ -37,24 +38,23 @@ void UMassTrafficInitParkedVehiclesProcessor::Execute(FMassEntityManager& Entity
 	int32 VehicleIndex = 0;
 	EntityQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext& Context)
 	{
-		const int32 NumEntities = Context.GetNumEntities();
 		TArrayView<FTransformFragment> TransformFragments = Context.GetMutableFragmentView<FTransformFragment>();
 		TArrayView<FMassRepresentationFragment> VisualizationFragments = Context.GetMutableFragmentView<FMassRepresentationFragment>();
 		TArrayView<FMassTrafficRandomFractionFragment> RandomFractionFragments = Context.GetMutableFragmentView<FMassTrafficRandomFractionFragment>();
 
-		for (int32 Index = 0; Index < NumEntities; ++Index)
+		for (FMassExecutionContext::FEntityIterator EntityIt = Context.CreateEntityIterator(); EntityIt; ++EntityIt)
 		{
 			check(VehiclesSpawnData.Transforms.IsValidIndex(VehicleIndex));
 			
 			// Init transform
-			TransformFragments[Index].GetMutableTransform() = VehiclesSpawnData.Transforms[VehicleIndex];
+			TransformFragments[EntityIt].GetMutableTransform() = VehiclesSpawnData.Transforms[VehicleIndex];
 
 			// Init PrevTransform here too as we expect it to stay static, so we set it here initally once and don't
 			// need to update it after that  
-			VisualizationFragments[Index].PrevTransform = VehiclesSpawnData.Transforms[VehicleIndex];
+			VisualizationFragments[EntityIt].PrevTransform = VehiclesSpawnData.Transforms[VehicleIndex];
 
 			// Init random fraction
-			RandomFractionFragments[Index].RandomFraction = RandomStream.GetFraction();
+			RandomFractionFragments[EntityIt].RandomFraction = RandomStream.GetFraction();
 
 			// Advance through spawn data
 			++VehicleIndex;

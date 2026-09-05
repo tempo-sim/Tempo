@@ -2,18 +2,17 @@
 
 
 #include "MassTrafficChooseNextLaneProcessor.h"
-#include "MassTrafficDebugHelpers.h"
 #include "MassTrafficFragments.h"
 #include "MassTrafficLaneChange.h"
 #include "MassTrafficLaneChangingProcessor.h"
 #include "MassTrafficMovement.h"
 #include "MassTrafficVehicleControlProcessor.h"
-
 #include "DrawDebugHelpers.h"
 #include "MassCommonFragments.h"
 #include "MassExecutionContext.h"
 #include "MassZoneGraphNavigationFragments.h"
 #include "ZoneGraphSubsystem.h"
+#include "MassTrafficUtils.h"
 #include "VisualLogger/VisualLogger.h"
 
 namespace
@@ -67,7 +66,6 @@ void UMassTrafficChooseNextLaneProcessor::Execute(FMassEntityManager& EntityMana
 	{	
 		UMassTrafficSubsystem& MassTrafficSubsystem = QueryContext.GetMutableSubsystemChecked<UMassTrafficSubsystem>();
 		const UZoneGraphSubsystem& ZoneGraphSubsystem = QueryContext.GetSubsystemChecked<UZoneGraphSubsystem>();
-		const int32 NumEntities = QueryContext.GetNumEntities();
 		const TConstArrayView<FMassZoneGraphLaneLocationFragment> LaneLocationFragments = QueryContext.GetFragmentView<FMassZoneGraphLaneLocationFragment>();
 		const TConstArrayView<FAgentRadiusFragment> AgentRadiusFragments = QueryContext.GetFragmentView<FAgentRadiusFragment>();
 		const TConstArrayView<FMassTrafficRandomFractionFragment> RandomFractionFragments = QueryContext.GetFragmentView<FMassTrafficRandomFractionFragment>();
@@ -81,17 +79,15 @@ void UMassTrafficChooseNextLaneProcessor::Execute(FMassEntityManager& EntityMana
 		const TConstArrayView<FTransformFragment> TransformFragments = QueryContext.GetFragmentView<FTransformFragment>();
 		#endif
 
-	
-		for (int32 Index = 0; Index < NumEntities; ++Index)
+		for (FMassExecutionContext::FEntityIterator EntityIt = QueryContext.CreateEntityIterator(); EntityIt; ++EntityIt)
 		{
-			const FMassZoneGraphLaneLocationFragment& LaneLocationFragment = LaneLocationFragments[Index];
-			const FAgentRadiusFragment& AgentRadiusFragment = AgentRadiusFragments[Index];
-			const FMassTrafficRandomFractionFragment& RandomFractionFragment = RandomFractionFragments[Index];
-			FMassTrafficVehicleControlFragment& VehicleControlFragment = VehicleControlFragments[Index];
-			FMassTrafficVehicleLightsFragment& VehicleLightsFragment = VehicleLightsFragments[Index];
-			FMassTrafficNextVehicleFragment& NextVehicleFragment = NextVehicleFragments[Index];
-	
-		
+			const FMassZoneGraphLaneLocationFragment& LaneLocationFragment = LaneLocationFragments[EntityIt];
+			const FAgentRadiusFragment& AgentRadiusFragment = AgentRadiusFragments[EntityIt];
+			const FMassTrafficRandomFractionFragment& RandomFractionFragment = RandomFractionFragments[EntityIt];
+			FMassTrafficVehicleControlFragment& VehicleControlFragment = VehicleControlFragments[EntityIt];
+			FMassTrafficVehicleLightsFragment& VehicleLightsFragment = VehicleLightsFragments[EntityIt];
+			FMassTrafficNextVehicleFragment& NextVehicleFragment = NextVehicleFragments[EntityIt];
+
 			// If the vehicle can't stop, it's already reserved itself on its next lane. If we choose a different lane
 			// now, we'll permanently upset that counter.
 			if (VehicleControlFragment.bCantStopAtLaneExit)
@@ -134,7 +130,7 @@ void UMassTrafficChooseNextLaneProcessor::Execute(FMassEntityManager& EntityMana
 			#if ENABLE_DRAW_DEBUG && WITH_MASSTRAFFIC_DEBUG
 			if (GMassTrafficDebugChooseNextLane)
 			{
-				const FMassEntityHandle Entity = Context.GetEntity(Index);
+				const FMassEntityHandle Entity = Context.GetEntity(EntityIt);
 				const FTransformFragment& TransformFragment = EntityManager.GetFragmentDataChecked<FTransformFragment>(Entity);
 				const FVector Location = TransformFragment.GetTransform().GetLocation();
 										
@@ -243,7 +239,7 @@ void UMassTrafficChooseNextLaneProcessor::Execute(FMassEntityManager& EntityMana
 			
 				#if WITH_MASSTRAFFIC_DEBUG
 					UE_VLOG_LOCATION(&MassTrafficSubsystem, TEXT("MassTraffic Validation"), Error,
-						TransformFragments[Index].GetTransform().GetLocation() + FVector(0,0,400), 10.0f, FColor::Red,
+						TransformFragments[EntityIt].GetTransform().GetLocation() + FVector(0,0,400), 10.0f, FColor::Red,
 						TEXT("Vehicle is on a lane with no NextLane links (a dead end)"));
 				#endif
 			
@@ -257,6 +253,7 @@ void UMassTrafficChooseNextLaneProcessor::Execute(FMassEntityManager& EntityMana
 			{			
 				// No choice, must choose this
 				VehicleControlFragment.NextLane = CurrentLane.NextLanes[0];
+				check(VehicleControlFragment.NextLane);
 				VehicleControlFragment.ChooseNextLanePreference = EMassTrafficChooseNextLanePreference::KeepCurrentNextLane;
 			
 				++VehicleControlFragment.NextLane->NumVehiclesApproachingLane;
@@ -271,7 +268,7 @@ void UMassTrafficChooseNextLaneProcessor::Execute(FMassEntityManager& EntityMana
 				if (!UE::MassTraffic::TrunkVehicleLaneCheck(VehicleControlFragment.NextLane, VehicleControlFragment))
 				{
 					UE_LOG(LogMassTraffic, Error, TEXT("%s - Trunk-lane-only vehicle %d, on lane %d, can only access a single non-trunk next lane %d."),
-						ANSI_TO_TCHAR(__FUNCTION__), QueryContext.GetEntity(Index).Index, CurrentLane.LaneHandle.Index, VehicleControlFragment.NextLane->LaneHandle.Index);
+						ANSI_TO_TCHAR(__FUNCTION__), QueryContext.GetEntity(EntityIt).Index, CurrentLane.LaneHandle.Index, VehicleControlFragment.NextLane->LaneHandle.Index);
 				}
 			
 				continue;
@@ -462,10 +459,10 @@ void UMassTrafficChooseNextLaneProcessor::Execute(FMassEntityManager& EntityMana
 				// If we don't have a current Next vehicle, set the new lane's Tail as our Next
 				if (!NextVehicleFragment.HasNextVehicle() && VehicleControlFragment.NextLane->TailVehicle.IsSet())
 				{
-					NextVehicleFragment.SetNextVehicle(QueryContext.GetEntity(Index), VehicleControlFragment.NextLane->TailVehicle);
+					NextVehicleFragment.SetNextVehicle(QueryContext.GetEntity(EntityIt), VehicleControlFragment.NextLane->TailVehicle);
 
 					// Sanity check (you can't be your own obstacle)
-					checkSlow(NextVehicleFragment.GetNextVehicle() != QueryContext.GetEntity(Index));
+					checkSlow(NextVehicleFragment.GetNextVehicle() != QueryContext.GetEntity(EntityIt));
 				}
 			}
 			else
@@ -479,7 +476,7 @@ void UMassTrafficChooseNextLaneProcessor::Execute(FMassEntityManager& EntityMana
 			// VisLog
 			#if WITH_MASSTRAFFIC_DEBUG
 				#if ENABLE_VISUAL_LOG
-				if (OptionalDebugFragments[Index].bVisLog)
+				if (OptionalDebugFragments[EntityIt].bVisLog)
 				{
 					if (VehicleControlFragment.NextLane)
 					{
@@ -487,14 +484,14 @@ void UMassTrafficChooseNextLaneProcessor::Execute(FMassEntityManager& EntityMana
 						check(ZoneGraphStorage);
 
 						UE_VLOG_ARROW(&MassTrafficSubsystem, TEXT("MassTraffic NextLane"), Display,
-							TransformFragments[Index].GetTransform().GetLocation() + FVector(0,0,200),
+							TransformFragments[EntityIt].GetTransform().GetLocation() + FVector(0,0,200),
 							UE::MassTraffic::GetLaneMidPoint(VehicleControlFragment.NextLane->LaneHandle.Index, *ZoneGraphStorage) + FVector(0,0,100),
 							FColor::Blue, TEXT("Next Lane"));
 					}
 					else
 					{
 						UE_VLOG_LOCATION(&MassTrafficSubsystem, TEXT("MassTraffic NextLane"), Error,
-							TransformFragments[Index].GetTransform().GetLocation() + FVector(0,0,400), 10.0f, FColor::Red, TEXT("Couldn't Choose Next Lane"));
+							TransformFragments[EntityIt].GetTransform().GetLocation() + FVector(0,0,400), 10.0f, FColor::Red, TEXT("Couldn't Choose Next Lane"));
 					}
 				}
 				#endif
@@ -508,7 +505,7 @@ void UMassTrafficChooseNextLaneProcessor::Execute(FMassEntityManager& EntityMana
 						const FZoneGraphStorage* ZoneGraphStorage = ZoneGraphSubsystem.GetZoneGraphStorage(VehicleControlFragment.NextLane->LaneHandle.DataHandle);
 						check(ZoneGraphStorage);
 
-						const FMassEntityHandle Entity = Context.GetEntity(Index);
+						const FMassEntityHandle Entity = Context.GetEntity(EntityIt);
 						const FTransformFragment& TransformFragment = EntityManager.GetFragmentDataChecked<FTransformFragment>(Entity);
 						const FVector Location = TransformFragment.GetTransform().GetLocation();
 						const FVector LaneLocation = UE::MassTraffic::GetLaneEndPoint(VehicleControlFragment.NextLane->LaneHandle.Index, *ZoneGraphStorage);

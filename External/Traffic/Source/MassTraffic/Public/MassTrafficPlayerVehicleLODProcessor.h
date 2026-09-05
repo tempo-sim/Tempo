@@ -2,9 +2,9 @@
 
 #pragma once
 
+#include "MassEntityQuery.h"
 #include "MassProcessor.h"
 #include "MassTrafficFragments.h"
-
 #include "MassTrafficPlayerVehicleLODProcessor.generated.h"
 
 /*

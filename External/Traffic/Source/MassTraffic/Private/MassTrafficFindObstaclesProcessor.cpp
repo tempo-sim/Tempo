@@ -64,7 +64,7 @@ void UMassTrafficFindObstaclesProcessor::Execute(FMassEntityManager& EntityManag
 	{
 		// Reset obstacle lists
 		TRACE_CPUPROFILER_EVENT_SCOPE(TEXT("ResetObstacleLists"))
-
+		
 		ObstacleAvoidingEntityQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext& QueryContext)
 		{
 			const TArrayView<FMassTrafficObstacleListFragment> ObstacleListFragments = QueryContext.GetMutableFragmentView<FMassTrafficObstacleListFragment>();
@@ -80,7 +80,7 @@ void UMassTrafficFindObstaclesProcessor::Execute(FMassEntityManager& EntityManag
 		TRACE_CPUPROFILER_EVENT_SCOPE(TEXT("FindVehiclesForObstacles"))
 
 		TMap<FMassEntityHandle, TArray<FMassEntityHandle>> ObstacleListsToAdd;
-
+		
 		ObstacleEntityQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext& QueryContext)
 		{
 			const UMassTrafficSubsystem& MassTrafficSubsystem = QueryContext.GetSubsystemChecked<UMassTrafficSubsystem>();
@@ -91,12 +91,11 @@ void UMassTrafficFindObstaclesProcessor::Execute(FMassEntityManager& EntityManag
 			const TConstArrayView<FTransformFragment> TransformFragments = QueryContext.GetFragmentView<FTransformFragment>();
 
 			// Loop obstacles and find affected vehicles
-			const int32 NumEntities = QueryContext.GetNumEntities();
-			for (int32 Index = 0; Index < NumEntities; ++Index)
+			for (FMassExecutionContext::FEntityIterator EntityIt = QueryContext.CreateEntityIterator(); EntityIt; ++EntityIt)
 			{
-				FMassEntityHandle ObstacleEntity = QueryContext.GetEntity(Index);
-				const FAgentRadiusFragment& AgentRadiusFragment = AgentRadiusFragments[Index];
-				const FTransformFragment& TransformFragment = TransformFragments[Index];
+				FMassEntityHandle ObstacleEntity = QueryContext.GetEntity(EntityIt);
+				const FAgentRadiusFragment& AgentRadiusFragment = AgentRadiusFragments[EntityIt];
+				const FTransformFragment& TransformFragment = TransformFragments[EntityIt];
 
 				const float AgentWidth = VehicleSimulationParams ? VehicleSimulationParams->HalfWidth : AgentRadiusFragment.Radius;
 

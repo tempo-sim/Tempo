@@ -2,18 +2,20 @@
 
 #pragma once
 
+#if UE_ENABLE_INCLUDE_ORDER_DEPRECATED_IN_5_6
 #include "MassTraffic.h"
+#include "MassTrafficUtils.h"
+#include "Containers/RingBuffer.h"
+#include "MassLODSubsystem.h"
+#endif // UE_ENABLE_INCLUDE_ORDER_DEPRECATED_IN_5_6
 #include "MassTrafficDamage.h"
 #include "MassTrafficDebugHelpers.h"
 #include "MassTrafficPIDController.h"
 #include "MassTrafficTypes.h"
-#include "MassTrafficUtils.h"
-
+#include "MassTrafficPhysics.h"
 #include "MassCrowdSubsystem.h"
 #include "MassEntityTypes.h"
 #include "ZoneGraphTypes.h"
-#include "Containers/RingBuffer.h"
-#include "MassLODSubsystem.h"
 #include "MassTrafficSettings.h"
 #include "MassTrafficSubsystem.h"
 
@@ -699,9 +701,11 @@ struct MASSTRAFFIC_API FMassTrafficObstacleListFragment : public FMassFragment
 template<>
 struct TMassFragmentTraits<FMassTrafficObstacleListFragment> final
 {
-	enum { AuthorAcceptsItsNotTriviallyCopyable = true };
+	enum
+	{
+		AuthorAcceptsItsNotTriviallyCopyable = true
+	};
 };
-
 
 /** Obstacle Avoidance Fragment */
 
@@ -891,7 +895,6 @@ struct TMassFragmentTraits<FMassTrafficVehicleControlFragment> final
 	enum { AuthorAcceptsItsNotTriviallyCopyable = true };
 };
 
-
 /** Lane Change Fragment * Search key: LCFRAG */
 #define NUM_BITS__LANE_CHANGE_START_NEW_LANE_CHANGES_STAGGERED_SLEEP_COUNTER 5
 
@@ -1038,6 +1041,15 @@ struct MASSTRAFFIC_API FMassTrafficVehicleLaneChangeFragment : public FMassFragm
 		const float ProgressionScale = Sign * (1.0f - ProgressAlongLanePct);
 		return ProgressionScale;
 	}
+};
+
+template<>
+struct TMassFragmentTraits<FMassTrafficVehicleLaneChangeFragment> final
+{
+	enum
+	{
+		AuthorAcceptsItsNotTriviallyCopyable = true
+	};
 };
 
 

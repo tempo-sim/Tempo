@@ -16,13 +16,13 @@ void UMassTrafficDriverVisualizationTrait::BuildTemplate(FMassEntityTemplateBuil
 	FMassEntityManager& EntityManager = UE::Mass::Utils::GetEntityManagerChecked(World);
 
 	UMassRepresentationSubsystem* RepresentationSubsystem = Cast<UMassRepresentationSubsystem>(World.GetSubsystemBase(RepresentationSubsystemClass));
-	check(RepresentationSubsystem);
+	check(RepresentationSubsystem || BuildContext.IsInspectingData());
 	
 	BuildContext.AddFragment<FMassTrafficDriverVisualizationFragment>();
 
 	// Make a mutable copy of Params so we can register the driver meshes and assign the description IDs
 	FMassTrafficDriversParameters RegisteredParams = Params;
-	if (IsValid(RegisteredParams.DriverTypesData))
+	if (IsValid(RegisteredParams.DriverTypesData) && !BuildContext.IsInspectingData())
 	{
 		for (const FMassTrafficDriverTypeData& DriverType : RegisteredParams.DriverTypesData->DriverTypes)
 		{
@@ -84,7 +84,7 @@ void UMassTrafficDriverInitializer::ConfigureQueries(const TSharedRef<FMassEntit
 void UMassTrafficDriverInitializer::Execute(FMassEntityManager& EntityManager,
 	FMassExecutionContext& Context)
 {
-	// Generate random fractions
+	// Generate random fractions 
 	EntityQuery.ForEachEntityChunk(Context, [this](FMassExecutionContext& QueryContext)
 	{
 		// Get driver types

@@ -5,9 +5,9 @@
 #include "MassTrafficProcessorBase.h"
 #include "MassTrafficFieldComponent.h"
 #include "MassTrafficFragments.h"
-
+#if UE_ENABLE_INCLUDE_ORDER_DEPRECATED_IN_5_6
 #include "MassLODSubsystem.h"
-
+#endif // UE_ENABLE_INCLUDE_ORDER_DEPRECATED_IN_5_6
 #include "MassTrafficFieldOperations.generated.h"
 
 
