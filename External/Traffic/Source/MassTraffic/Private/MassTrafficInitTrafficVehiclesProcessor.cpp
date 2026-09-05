@@ -23,11 +23,7 @@ UMassTrafficInitTrafficVehiclesProcessor::UMassTrafficInitTrafficVehiclesProcess
 	bAutoRegisterWithProcessingPhases = false;
 }
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-void UMassTrafficInitTrafficVehiclesProcessor::ConfigureQueries()
-#else
 void UMassTrafficInitTrafficVehiclesProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
-#endif
 {
 	EntityQuery.AddRequirement<FTransformFragment>(EMassFragmentAccess::ReadWrite);
 	EntityQuery.AddRequirement<FMassRepresentationFragment>(EMassFragmentAccess::ReadWrite);
@@ -40,15 +36,9 @@ void UMassTrafficInitTrafficVehiclesProcessor::ConfigureQueries(const TSharedRef
 	EntityQuery.AddSubsystemRequirement<UMassReplicationSubsystem>(EMassFragmentAccess::ReadWrite);
 }
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-void UMassTrafficInitTrafficVehiclesProcessor::Initialize(UObject& InOwner)
-{
-	Super::Initialize(InOwner);
-#else
 void UMassTrafficInitTrafficVehiclesProcessor::InitializeInternal(UObject& InOwner, const TSharedRef<FMassEntityManager>& EntityManager)
 {
 	Super::InitializeInternal(InOwner, EntityManager);
-#endif
 
 	MassRepresentationSubsystem = UWorld::GetSubsystem<UMassRepresentationSubsystem>(InOwner.GetWorld());
 }
@@ -59,11 +49,7 @@ void UMassTrafficInitTrafficVehiclesProcessor::InitNetIds(FMassEntityManager& En
 
 	check(EntityManager.GetWorld() && EntityManager.GetWorld()->GetNetMode() != NM_Client);
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-	EntityQuery.ForEachEntityChunk(EntityManager, Context, [](FMassExecutionContext& Context)
-#else
 	EntityQuery.ForEachEntityChunk(Context, [](FMassExecutionContext& Context)
-#endif
 		{
 			UMassReplicationSubsystem& ReplicationSubsystem = Context.GetMutableSubsystemChecked<UMassReplicationSubsystem>();
 			const int32 NumEntities = Context.GetNumEntities();
@@ -92,11 +78,7 @@ void UMassTrafficInitTrafficVehiclesProcessor::Execute(FMassEntityManager& Entit
 
 	// Init dynamic vehicle data 
 	int32 VehicleIndex = 0;
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-	EntityQuery.ForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& QueryContext)
-#else
 	EntityQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext& QueryContext)
-#endif
 	{
 		UMassTrafficSubsystem& MassTrafficSubsystem = QueryContext.GetMutableSubsystemChecked<UMassTrafficSubsystem>();
 
