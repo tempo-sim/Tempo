@@ -1420,6 +1420,7 @@ void UTempoCamera::RenderCapture()
 	ENQUEUE_RENDER_COMMAND(TempoCameraStagingCopy)(
 		[SharedRTResource, StagingTex, NewRead](FRHICommandListImmediate& RHICmdList)
 		{
+			TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraStagingCopy);
 			FRHITexture* SharedRT = SharedRTResource->GetRenderTargetTexture();
 
 			RHICmdList.Transition(FRHITransitionInfo(SharedRT, ERHIAccess::Unknown, ERHIAccess::CopySrc));

@@ -119,18 +119,25 @@ struct TTextureReadBase : FTextureRead
 
 		FRHICommandListImmediate& RHICmdList = FRHICommandListImmediate::Get();
 
-		// Dispatch anything still queued on the immediate list so the producer's copy is on its way.
-		RHICmdList.ImmediateFlush(EImmediateFlushType::DispatchToRHIThread);
-
-		// Read the raw data from the staging texture on the CPU. Mapping with an unsignaled fence
-		// submits the pending GPU work and blocks until it completes, on every RHI we ship
-		// (Metal submits and blocks until idle, Vulkan flushes the RHI thread, D3D12 waits on the
-		// fence), so this does not depend on the fence having been polled first.
 		// Note: SurfaceWidth may be larger than ImageSize.X due to GPU row alignment padding.
 		// We must copy row-by-row to account for this pitch difference.
 		void* OutBuffer;
 		int32 SurfaceWidth, SurfaceHeight;
-		GDynamicRHI->RHIMapStagingSurface(StagingTexture, RenderFence, OutBuffer, SurfaceWidth, SurfaceHeight, RHICmdList.GetGPUMask().ToIndex());
+		{
+			// Everything that waits on the GPU is inside this scope, and nothing else is. Mapping
+			// with an unsignaled fence submits the pending GPU work and blocks until it completes,
+			// on every RHI we ship (Metal submits and blocks until idle, Vulkan flushes the RHI
+			// thread, D3D12 waits on the fence), so this does not depend on the fence having been
+			// polled first. Traced separately from the copy below so a profile distinguishes time
+			// spent waiting for the GPU from time spent moving bytes — they respond to completely
+			// different fixes.
+			TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsTextureReadMap);
+
+			// Dispatch anything still queued on the immediate list so the producer's copy is on its way.
+			RHICmdList.ImmediateFlush(EImmediateFlushType::DispatchToRHIThread);
+
+			GDynamicRHI->RHIMapStagingSurface(StagingTexture, RenderFence, OutBuffer, SurfaceWidth, SurfaceHeight, RHICmdList.GetGPUMask().ToIndex());
+		}
 		const int64 SrcPitch = static_cast<int64>(SurfaceWidth) * sizeof(PixelType);
 		const int64 DstPitch = static_cast<int64>(ImageSize.X) * sizeof(PixelType);
 
@@ -141,24 +148,27 @@ struct TTextureReadBase : FTextureRead
 		const int32 NumBands = FMath::Clamp(NumRows, 1, GTextureReadCopyRowBands);
 		const uint8* const SrcBase = static_cast<const uint8*>(OutBuffer);
 		uint8* const DstBase = reinterpret_cast<uint8*>(Image.GetData());
-		ParallelFor(NumBands, [=](int32 Band)
 		{
-			const int32 BeginRow = static_cast<int32>(static_cast<int64>(NumRows) * Band / NumBands);
-			const int32 EndRow = static_cast<int32>(static_cast<int64>(NumRows) * (Band + 1) / NumBands);
-			if (SrcPitch == DstPitch)
+			TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsTextureReadCopy);
+			ParallelFor(NumBands, [=](int32 Band)
 			{
-				// No row padding, so the band's rows are contiguous in both buffers: one copy.
-				FMemory::Memcpy(DstBase + BeginRow * DstPitch, SrcBase + BeginRow * SrcPitch,
-					(EndRow - BeginRow) * DstPitch);
-			}
-			else
-			{
-				for (int32 Row = BeginRow; Row < EndRow; ++Row)
+				const int32 BeginRow = static_cast<int32>(static_cast<int64>(NumRows) * Band / NumBands);
+				const int32 EndRow = static_cast<int32>(static_cast<int64>(NumRows) * (Band + 1) / NumBands);
+				if (SrcPitch == DstPitch)
 				{
-					FMemory::Memcpy(DstBase + Row * DstPitch, SrcBase + Row * SrcPitch, DstPitch);
+					// No row padding, so the band's rows are contiguous in both buffers: one copy.
+					FMemory::Memcpy(DstBase + BeginRow * DstPitch, SrcBase + BeginRow * SrcPitch,
+						(EndRow - BeginRow) * DstPitch);
 				}
-			}
-		});
+				else
+				{
+					for (int32 Row = BeginRow; Row < EndRow; ++Row)
+					{
+						FMemory::Memcpy(DstBase + Row * DstPitch, SrcBase + Row * SrcPitch, DstPitch);
+					}
+				}
+			});
+		}
 		RHICmdList.UnmapStagingSurface(StagingTexture);
 
 		RenderFence.SafeRelease();

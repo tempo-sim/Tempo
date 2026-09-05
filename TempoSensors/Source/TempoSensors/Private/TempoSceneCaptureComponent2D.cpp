@@ -324,6 +324,7 @@ void UTempoSceneCaptureComponent2D::UpdateSceneCaptureContents(FSceneInterface* 
 	ENQUEUE_RENDER_COMMAND(TempoSceneCaptureStagingCopy)(
 	[RenderTargetResource, StagingTex, NewRead](FRHICommandListImmediate& RHICmdList)
 	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(TempoSceneCaptureStagingCopy);
 		FRHITexture* SourceTexture = RenderTargetResource->GetRenderTargetTexture();
 
 		RHICmdList.Transition(FRHITransitionInfo(SourceTexture, ERHIAccess::Unknown, ERHIAccess::CopySrc));

@@ -29,6 +29,8 @@ bool UTempoTiledSceneCaptureComponent::IsAwaitingRender()
 
 void UTempoTiledSceneCaptureComponent::OnRenderCompleted()
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsOnRenderCompleted);
+
 	if (!TextureReadQueue.IsAnyAwaitingRender())
 	{
 		return;
@@ -47,6 +49,8 @@ void UTempoTiledSceneCaptureComponent::OnRenderCompleted()
 
 void UTempoTiledSceneCaptureComponent::BlockUntilMeasurementsReady() const
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsBlockUntilMeasurementsReady);
+
 	// Do the synchronous readback on the render thread (Read() asserts IsInRenderingThread), then
 	// block the game thread on it via FlushRenderingCommands. We must NOT poll the producer's
 	// RenderFence on the render thread: OnRenderCompleted runs inside OnEndFrameRT, upstream of the
@@ -59,6 +63,7 @@ void UTempoTiledSceneCaptureComponent::BlockUntilMeasurementsReady() const
 	ENQUEUE_RENDER_COMMAND(TempoBlockingTextureRead)(
 		[&Queue](FRHICommandListImmediate&)
 		{
+			TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsBlockingTextureRead);
 			Queue.ReadAllAwaitingBlocking();
 		});
 	FlushRenderingCommands();

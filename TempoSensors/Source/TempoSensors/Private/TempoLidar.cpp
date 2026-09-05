@@ -1024,6 +1024,7 @@ void UTempoLidar::RenderCapture()
 	ENQUEUE_RENDER_COMMAND(TempoLidarStagingCopy)(
 		[SharedRTResource, StagingTex, NewRead](FRHICommandListImmediate& RHICmdList)
 		{
+			TRACE_CPUPROFILER_EVENT_SCOPE(TempoLidarStagingCopy);
 			FRHITexture* SharedRT = SharedRTResource->GetRenderTargetTexture();
 
 			RHICmdList.Transition(FRHITransitionInfo(SharedRT, ERHIAccess::Unknown, ERHIAccess::CopySrc));
@@ -1052,6 +1053,8 @@ FName TLidarSharedTextureRead<PixelType>::GetType() const
 template <typename PixelType>
 TArray<TUniquePtr<FTextureRead>> TLidarSharedTextureRead<PixelType>::SplitIntoSlices()
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE(TempoLidarSplitIntoSlices);
+
 	TArray<TUniquePtr<FTextureRead>> Result;
 	Result.Reserve(Slices.Num());
 
