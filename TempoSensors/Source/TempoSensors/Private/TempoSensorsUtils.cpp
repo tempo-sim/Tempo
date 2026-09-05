@@ -64,10 +64,8 @@ void OptimizeShowFlagsForNoColor(FEngineShowFlags& ShowFlags)
 	ShowFlags.SetShaderPrint(false);
 	ShowFlags.SetVirtualShadowMapPersistentData(false);
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 5
 	ShowFlags.SetLensDistortion(false);
 	ShowFlags.SetMegaLights(false);
-#endif
 }
 
 void ApplyPhotorealisticRenderSettings(FPostProcessSettings& OutPostProcess,

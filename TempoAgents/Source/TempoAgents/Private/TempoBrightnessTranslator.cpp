@@ -17,11 +17,7 @@ UMassBrightnessMeterToMassTranslator::UMassBrightnessMeterToMassTranslator()
 	RequiredTags.Add<FMassBrightnessMeterCopyToMassTag>();
 }
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-void UMassBrightnessMeterToMassTranslator::ConfigureQueries()
-#else
 void UMassBrightnessMeterToMassTranslator::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
-#endif
 {
 	AddRequiredTagsToQuery(EntityQuery);
 	EntityQuery.AddRequirement<FMassBrightnessMeterWrapperFragment>(EMassFragmentAccess::ReadOnly);
@@ -30,11 +26,7 @@ void UMassBrightnessMeterToMassTranslator::ConfigureQueries(const TSharedRef<FMa
 
 void UMassBrightnessMeterToMassTranslator::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-	EntityQuery.ForEachEntityChunk(EntityManager, Context, [this](FMassExecutionContext& Context)
-#else
 	EntityQuery.ForEachEntityChunk(Context, [this](FMassExecutionContext& Context)
-#endif
 	{
 		const TConstArrayView<FMassBrightnessMeterWrapperFragment> BrightnessMeterWrapperFragments = Context.GetFragmentView<FMassBrightnessMeterWrapperFragment>();
 
