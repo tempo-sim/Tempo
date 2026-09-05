@@ -69,11 +69,7 @@ void ATempoPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	if (GetWorld())
 	{
 		GetWorld()->RemoveOnActorSpawnedHandler(OnActorSpawnedDelegateHandle);
-#if (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 5)
 		GetWorld()->RemoveOnActorDestroyedHandler(OnActorDestroyedDelegateHandle);
-#else
-		GetWorld()->RemoveOnActorDestroyededHandler(OnActorDestroyedDelegateHandle);
-#endif
 	}
 	Super::EndPlay(EndPlayReason);
 }

@@ -21,21 +21,6 @@
 
 #define LOCTEXT_NAMESPACE "PCGAssignRandomMeshAttributeElement"
 
-#if WITH_EDITOR && ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 5
-// In 5.4 this is defined in PCGActorSelector.h but not exported or inlined. Re-define it here in the editor build,
-// where we're building separate dylibs, but not in the packaged binary, where we're building a single executable.
-uint32 GetTypeHash(const FPCGSelectionKey& In)
-{
-	uint32 HashResult = HashCombine(GetTypeHash(In.ActorFilter), GetTypeHash(In.Selection));
-	HashResult = HashCombine(HashResult, GetTypeHash(In.Tag));
-	HashResult = HashCombine(HashResult, GetTypeHash(In.SelectionClass));
-	HashResult = HashCombine(HashResult, GetTypeHash(In.OptionalExtraDependency));
-	HashResult = HashCombine(HashResult, GetTypeHash(In.ObjectPath));
-
-	return HashResult;
-}
-#endif
-
 #if WITH_EDITOR
 void UPCGAssignRandomMeshAttributeSettings::GetStaticTrackedKeys(FPCGSelectionKeyToSettingsMap& OutKeysToSettings, TArray<TObjectPtr<const UPCGGraph>>& OutVisitedGraphs) const
 {
@@ -73,20 +58,6 @@ FPCGElementPtr UPCGAssignRandomMeshAttributeSettings::CreateElement() const
 	return MakeShared<FPCGAssignRandomMeshAttribute>();
 }
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 7
-EPCGDataType UPCGAssignRandomMeshAttributeSettings::GetCurrentPinTypes(const UPCGPin* InPin) const
-{
-	check(InPin);
-	if (!InPin->IsOutputPin())
-	{
-		return Super::GetCurrentPinTypes(InPin);
-	}
-
-	// Output pin narrows to union of inputs on first pin
-	const EPCGDataType PrimaryInputType = GetTypeUnionOfIncidentEdges(PCGPinConstants::DefaultInputLabel);
-	return (PrimaryInputType != EPCGDataType::None) ? PrimaryInputType : EPCGDataType::Param; // No input (None) means param.
-}
-#else
 FPCGDataTypeIdentifier UPCGAssignRandomMeshAttributeSettings::GetCurrentPinTypesID(const UPCGPin* InPin) const
 {
 	check(InPin);
@@ -99,7 +70,6 @@ FPCGDataTypeIdentifier UPCGAssignRandomMeshAttributeSettings::GetCurrentPinTypes
 	const FPCGDataTypeIdentifier PrimaryInputType = GetTypeUnionIDOfIncidentEdges(PCGPinConstants::DefaultInputLabel);
 	return (PrimaryInputType != EPCGDataType::None) ? PrimaryInputType : FPCGDataTypeIdentifier(EPCGDataType::Param); // No input (None) means param.
 }
-#endif
 
 FString UPCGAssignRandomMeshAttributeSettings::GetAdditionalTitleInformation() const
 {
@@ -187,19 +157,11 @@ bool FPCGAssignRandomMeshAttribute::ExecuteInternal(FPCGContext* Context) const
 		return Left.Get()->GetName() < Right.Get()->GetName();
 	});
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-	FRandomStream RandomStream(Context->SourceComponent.IsValid() ? Context->SourceComponent->Seed : Context->GetSeed());
-#else
 	FRandomStream RandomStream(Context->ExecutionSource.IsValid() ? Context->ExecutionSource->GetExecutionState().GetSeed() : Context->GetSeed());
-#endif
 
 	const FName MeshAttributeName = Settings->AttributeName;
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-	const TArray<FPCGTaggedData> Inputs = Context->InputData.GetInputs();
-#else
 	const TArray<FPCGTaggedData> Inputs = Context->InputData.GetAllSpatialInputs();
-#endif
 	TArray<FPCGTaggedData>& Outputs = Context->OutputData.TaggedData;
 
 	for (const FPCGTaggedData& Input : Inputs)

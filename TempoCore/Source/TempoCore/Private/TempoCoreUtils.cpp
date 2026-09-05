@@ -5,25 +5,13 @@
 #include "GameFramework/Actor.h"
 #include "PhysicsEngine/BodySetup.h"
 #include "PhysicsEngine/PhysicsAsset.h"
-#if ENGINE_MAJOR_VERSION >= 5 && ENGINE_MINOR_VERSION > 4
 #include "PhysicsEngine/SkeletalBodySetup.h"
-#endif
 
 UWorldSubsystem* UTempoCoreUtils::GetSubsystemImplementingInterface(const UObject* WorldContextObject, TSubclassOf<UInterface> Interface)
 {
 	if (const UWorld* World = GEngine->GetWorldFromContextObject(WorldContextObject, EGetWorldErrorMode::LogAndReturnNull))
 	{
 		UWorldSubsystem* SubsystemImplementingInterface = nullptr;
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 5
-		TArray<UWorldSubsystem*> Subsystems = World->GetSubsystemArray<UWorldSubsystem>();
-		for (UWorldSubsystem* Subsystem : Subsystems)
-		{
-			if (Subsystem->GetClass()->ImplementsInterface(Interface))
-			{
-				SubsystemImplementingInterface = Subsystem;
-			}
-		}
-#else
 		World->ForEachSubsystem<UWorldSubsystem>([&Interface, &SubsystemImplementingInterface](UWorldSubsystem* Subsystem)
 		{
 			if (Subsystem->GetClass()->ImplementsInterface(Interface))
@@ -31,7 +19,6 @@ UWorldSubsystem* UTempoCoreUtils::GetSubsystemImplementingInterface(const UObjec
 				SubsystemImplementingInterface = Subsystem;
 			}
 		});
-#endif
 		return SubsystemImplementingInterface;
 	}
 

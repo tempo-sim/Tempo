@@ -9,11 +9,7 @@
 #include "Metadata/Accessors/PCGAttributeAccessorHelpers.h"
 #include "Metadata/Accessors/IPCGAttributeAccessor.h"
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-#include "Data/PCGPointData.h"
-#else
 #include "Data/PCGBasePointData.h"
-#endif
 
 #define LOCTEXT_NAMESPACE "PCGDistanceElement"
 
@@ -113,15 +109,9 @@ bool FPCGCopyAttributeFromNearestElement::ExecuteInternal(FPCGContext* Context) 
 	TArray<FPCGTaggedData> Targets = Context->InputData.GetInputsByPin(PCGDistance::TargetLabel);
 	TArray<FPCGTaggedData>& Outputs = Context->OutputData.TaggedData;
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-	TArray<const UPCGPointData*> TargetPointDatas;
-	TargetPointDatas.Reserve(Targets.Num());
-	TMap<const FPCGPoint*, double> Attributes;
-#else
 	TArray<const UPCGBasePointData*> TargetPointDatas;
 	TargetPointDatas.Reserve(Targets.Num());
 	TMap<const UPCGBasePointData*, TMap<int32, double>> AttributesByData;
-#endif
 
 	for (const FPCGTaggedData& Target : Targets)
 	{
@@ -133,11 +123,7 @@ bool FPCGCopyAttributeFromNearestElement::ExecuteInternal(FPCGContext* Context) 
 			continue;
 		}
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-		const UPCGPointData* TargetPointData = TargetData->ToPointData(Context);
-#else
 		const UPCGBasePointData* TargetPointData = TargetData->ToBasePointData(Context);
-#endif
 		if (!TargetPointData)
 		{
 			PCGE_LOG(Error, GraphAndLog, FText::Format(LOCTEXT("CannotConvertToPoint", "Cannot convert target '{0}' into Point data"), FText::FromString(Target.Data->GetClass()->GetName())));
@@ -168,24 +154,6 @@ bool FPCGCopyAttributeFromNearestElement::ExecuteInternal(FPCGContext* Context) 
 			}
 		}
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-		const TArray<FPCGPoint>& Points = TargetPointData->GetPoints();
-		TArray<double> InAttributes;
-		InAttributes.SetNum(Points.Num());
-		TArrayView<double> TargetView(InAttributes.GetData(), Points.Num());
-		if (InputAccessor.IsValid() && !InputAccessor->GetRange(TargetView, 0, *InputKeys))
-		{
-			PCGE_LOG(Warning, GraphAndLog, LOCTEXT("GetInputValuesFailed", "Failed to get attribute values on target points."));
-			InputAccessor = nullptr;
-		}
-		for (int32 I = 0; I < Points.Num(); ++I)
-		{
-			if (InAttributes.Num() > I)
-			{
-				Attributes.Add(&Points[I], InAttributes[I]);
-			}
-		}
-#else
 		const int32 NumTargetPoints = TargetPointData->GetNumPoints();
 		TArray<double> InAttributes;
 		InAttributes.SetNum(NumTargetPoints);
@@ -205,7 +173,6 @@ bool FPCGCopyAttributeFromNearestElement::ExecuteInternal(FPCGContext* Context) 
 			}
 		}
 		AttributesByData.Add(TargetPointData, AttributesByIndex);
-#endif
 		TargetPointDatas.Add(TargetPointData);
 	}
 
@@ -221,21 +188,13 @@ bool FPCGCopyAttributeFromNearestElement::ExecuteInternal(FPCGContext* Context) 
 			continue;
 		}
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-		const UPCGPointData* SourcePointData = SourceData->ToPointData(Context);
-#else
 		const UPCGBasePointData* SourcePointData = SourceData->ToBasePointData(Context);
-#endif
 		if (!SourcePointData)
 		{
 			PCGE_LOG(Error, GraphAndLog, LOCTEXT("CannotConvertToPointData", "Cannot convert input Spatial data to Point data"));
 			continue;
 		}
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-		UPCGPointData* OutputData = NewObject<UPCGPointData>();
-		OutputData->InitializeFromData(SourcePointData);
-#else
 		UPCGBasePointData* OutputData = FPCGContext::NewPointData_AnyThread(Context);
 		OutputData->InitializeFromData(SourcePointData);
 		OutputData->SetNumPoints(SourcePointData->GetNumPoints(), /*bInitializeValues=*/false);
@@ -244,18 +203,10 @@ bool FPCGCopyAttributeFromNearestElement::ExecuteInternal(FPCGContext* Context) 
 		{
 			OutputData->AllocateProperties(SourcePointData->GetAllocatedProperties());
 		}
-#endif
 		Outputs.Add_GetRef(Source).Data = OutputData;
 
 		OutputData->Metadata->FindOrCreateAttribute<double>(Settings->OutputAttribute.GetAttributeName());
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-		TArray<FPCGPoint>& OutPoints = OutputData->GetMutablePoints();
-		const TArray<FPCGPoint>& SourcePoints = SourcePointData->GetPoints();
-		OutPoints.SetNumUninitialized(SourcePoints.Num());
-#else
-		// Nothing to do for 5.6+ - points are handled via ranges
-#endif
 
 		TUniquePtr<IPCGAttributeAccessorKeys> OutputKeys;
 		TUniquePtr<IPCGAttributeAccessor> OutputAccessor = PCGAttributeAccessorHelpers::CreateAccessor(OutputData, Settings->OutputAttribute);
@@ -283,74 +234,8 @@ bool FPCGCopyAttributeFromNearestElement::ExecuteInternal(FPCGContext* Context) 
 
 		// Set up a cache so we can set all the attributes in a single range set
 		TArray<double> ResultCache;
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-		ResultCache.SetNumUninitialized(SourcePointData->GetPoints().Num());
-#else
 		ResultCache.SetNumUninitialized(SourcePointData->GetNumPoints());
-#endif
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-		auto ProcessDistance = [&TargetPointDatas, MaximumDistance, &Attributes, &OutPoints, &SourcePoints, &ResultCache](int32 ReadIndex, int32 WriteIndex)
-		{
-			FPCGPoint& OutPoint = OutPoints[WriteIndex];
-			const FPCGPoint& SourcePoint = SourcePoints[ReadIndex];
-
-			OutPoint = SourcePoint;
-
-			const FBoxSphereBounds SourceQueryBounds = FBoxSphereBounds(FBox(SourcePoint.BoundsMin - FVector(MaximumDistance), SourcePoint.BoundsMax + FVector(MaximumDistance))).TransformBy(SourcePoint.Transform);
-
-			const FVector SourceCenter = SourcePoint.Transform.TransformPosition(SourcePoint.GetLocalCenter());
-
-			double NearestAttribute = 0.0;
-			double MinDistanceSquared = TNumericLimits<double>::Max();
-
-			// Signed distance field for calculating the closest point of source and target
-			auto CalculateSDF = [&NearestAttribute, &Attributes, &MinDistanceSquared, &SourcePoint, SourceCenter](const FPCGPointRef& TargetPointRef)
-			{
-				// If the source pointer and target pointer are the same, ignore distance to the exact same point
-				if (&SourcePoint == TargetPointRef.Point)
-				{
-					return;
-				}
-
-				const double ThisDistanceSquared = (TargetPointRef.Bounds.Origin - SourceCenter).SquaredLength();
-
-				if (ThisDistanceSquared < MinDistanceSquared)
-				{
-					if (Attributes.Contains(TargetPointRef.Point))
-					{
-						NearestAttribute = Attributes[TargetPointRef.Point];
-					}
-					MinDistanceSquared = ThisDistanceSquared;
-				}
-			};
-
-			for (const UPCGPointData* TargetPointData : TargetPointDatas)
-			{
-				const UPCGPointData::PointOctree& Octree = TargetPointData->GetOctree();
-
-				Octree.FindElementsWithBoundsTest(
-						FBoxCenterAndExtent(SourceQueryBounds.Origin, SourceQueryBounds.BoxExtent),
-						CalculateSDF);
-			}
-
-			ResultCache[WriteIndex] = NearestAttribute;
-
-			return true;
-		};
-
-		if (FPCGAsync::AsyncProcessingOneToOneEx(&Context->AsyncState, SourcePoints.Num(), /*InitializeFunc=*/[]{}, ProcessDistance, /*bEnableTimeSlicing=*/false))
-		{
-			if (OutputAccessor.IsValid())
-			{
-				if (!OutputAccessor->SetRange<double>(ResultCache, 0, *OutputKeys))
-				{
-					PCGE_LOG_C(Error, GraphAndLog, Context, LOCTEXT("CopyFailed", "Failed to set attribute on output points"));
-					return true;
-				}
-			}
-		}
-#else
 		auto ProcessDistanceFunc = [&TargetPointDatas, MaximumDistance, &AttributesByData, OutputData, SourcePointData, &ResultCache](int32 StartReadIndex, int32 StartWriteIndex, int32 Count)
 		{
 			check(StartReadIndex == StartWriteIndex);
@@ -437,7 +322,6 @@ bool FPCGCopyAttributeFromNearestElement::ExecuteInternal(FPCGContext* Context) 
 				}
 			}
 		}
-#endif
 	}
 
 	return true;
