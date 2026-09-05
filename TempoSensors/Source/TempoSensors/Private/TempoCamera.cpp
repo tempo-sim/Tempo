@@ -138,22 +138,24 @@ void RespondToColorRequests(const TTextureRead<PixelType>* TextureRead, const TA
 		ColorImage.set_width_px(TextureRead->ImageSize.X);
 		ColorImage.set_height_px(TextureRead->ImageSize.Y);
 
-		std::vector<char> ImageData;
-		ImageData.resize(TextureRead->Image.Num() * 3);
-
 		const UTempoSensorsSettings* TempoSensorsSettings = GetDefault<UTempoSensorsSettings>();
 		if (!TempoSensorsSettings)
 		{
 			return;
 		}
 
+		// Packed 3-bytes-per-pixel blob. Size the proto field once and let the parallel workers write
+		// directly into its contiguous storage, mirroring the depths_m path below.
+		std::string* const ImageDataOut = ColorImage.mutable_data();
+		ImageDataOut->resize(static_cast<size_t>(TextureRead->Image.Num()) * 3);
+		char* const ImageData = ImageDataOut->data();
+
 		const EColorImageEncoding Encoding = TempoSensorsSettings->GetColorImageEncoding();
-		ParallelFor(TextureRead->Image.Num(), [&ImageData, &TextureRead, Encoding](int32 Idx)
+		ParallelFor(TextureRead->Image.Num(), [ImageData, &TextureRead, Encoding](int32 Idx)
 		{
 			ExtractPixelData(TextureRead->Image[Idx], Encoding, &ImageData[Idx * 3]);
 		});
 
-		ColorImage.mutable_data()->assign(ImageData.begin(), ImageData.end());
 		ColorImage.set_encoding(ColorEncodingToProto(Encoding));
 		TextureRead->ExtractMeasurementHeader(TransmissionTime, ColorImage.mutable_header());
 	}
@@ -175,15 +177,17 @@ void RespondToLabelRequests(const TTextureRead<PixelType>* TextureRead, const TA
 		LabelImage.set_width_px(TextureRead->ImageSize.X);
 		LabelImage.set_height_px(TextureRead->ImageSize.Y);
 
-		std::vector<char> ImageData;
-		ImageData.resize(TextureRead->Image.Num());
+		// Packed 1-byte-per-pixel blob. Size the proto field once and let the parallel workers write
+		// directly into its contiguous storage, mirroring the depths_m path below.
+		std::string* const ImageDataOut = LabelImage.mutable_data();
+		ImageDataOut->resize(static_cast<size_t>(TextureRead->Image.Num()));
+		char* const ImageData = ImageDataOut->data();
 
-		ParallelFor(TextureRead->Image.Num(), [&ImageData, &TextureRead](int32 Idx)
+		ParallelFor(TextureRead->Image.Num(), [ImageData, &TextureRead](int32 Idx)
 		{
-			ImageData[Idx] = TextureRead->Image[Idx].Label();
+			ImageData[Idx] = static_cast<char>(TextureRead->Image[Idx].Label());
 		});
 
-		LabelImage.mutable_data()->assign(ImageData.begin(), ImageData.end());
 		TextureRead->ExtractMeasurementHeader(TransmissionTime, LabelImage.mutable_header());
 	}
 
