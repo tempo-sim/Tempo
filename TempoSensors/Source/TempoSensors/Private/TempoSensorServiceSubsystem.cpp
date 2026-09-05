@@ -33,6 +33,7 @@ using LabelImage = TempoSensors::LabelImage;
 using LidarScanSegment = TempoSensors::LidarScanSegment;
 using VideoRequest = TempoSensors::VideoRequest;
 using VideoFrame = TempoSensors::VideoFrame;
+using SetPipelinedRenderingEnabledRequest = TempoSensors::SetPipelinedRenderingEnabledRequest;
 
 void UTempoSensorServiceSubsystem::RegisterServices(FTempoServer& Server)
 {
@@ -43,8 +44,18 @@ void UTempoSensorServiceSubsystem::RegisterServices(FTempoServer& Server)
 		StreamingRequestHandler(&SensorAsyncService::RequestStreamLabelImages, &UTempoSensorServiceSubsystem::StreamLabelImages),
 		StreamingRequestHandler(&SensorAsyncService::RequestStreamBoundingBoxes, &UTempoSensorServiceSubsystem::StreamBoundingBoxes),
 		StreamingRequestHandler(&SensorAsyncService::RequestStreamLidarScans, &UTempoSensorServiceSubsystem::StreamLidarScans),
-		StreamingRequestHandler(&SensorAsyncService::RequestStreamVideo, &UTempoSensorServiceSubsystem::StreamVideo)
+		StreamingRequestHandler(&SensorAsyncService::RequestStreamVideo, &UTempoSensorServiceSubsystem::StreamVideo),
+		SimpleRequestHandler(&SensorAsyncService::RequestSetPipelinedRenderingEnabled, &UTempoSensorServiceSubsystem::SetPipelinedRenderingEnabled)
 		);
+}
+
+void UTempoSensorServiceSubsystem::SetPipelinedRenderingEnabled(const SetPipelinedRenderingEnabledRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const
+{
+	// Read fresh at every readback barrier, so this takes effect on the next frame with no
+	// sensor teardown. Measurements already in flight keep whichever policy they were captured under.
+	GetMutableDefault<UTempoSensorsSettings>()->SetPipelinedRendering(Request.enabled());
+
+	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status_OK);
 }
 
 void UTempoSensorServiceSubsystem::Initialize(FSubsystemCollectionBase& Collection)

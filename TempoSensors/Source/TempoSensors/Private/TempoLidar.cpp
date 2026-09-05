@@ -7,7 +7,6 @@
 
 #include "TempoConversion.h"
 #include "TempoCoreUtils.h"
-#include "TempoLabelTypes.h"
 #include "TempoMultiViewCapture.h"
 
 #include "TempoSensors/Common.pb.h"
@@ -273,6 +272,17 @@ void UTempoLidar::DeactivateTile(FTempoLidarTile& Tile)
 	Tile.bCameraCut = false;
 }
 
+void UTempoLidar::ApplyLabelOverridesToTiles()
+{
+	for (FTempoLidarTile& Tile : Tiles)
+	{
+		if (Tile.bActive)
+		{
+			ApplyLabelOverrideParameters(Tile.PostProcessMaterialInstance);
+		}
+	}
+}
+
 void UTempoLidar::ApplyTilePostProcess(FTempoLidarTile& Tile)
 {
 	const UTempoSensorsSettings* TempoSensorsSettings = GetDefault<UTempoSensorsSettings>();
@@ -309,38 +319,7 @@ void UTempoLidar::ApplyTilePostProcess(FTempoLidarTile& Tile)
 		Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MaxDiscreteDepth"), GTempoCamera_Max_Discrete_Depth);
 	}
 
-	// Optional label overrides.
-	UDataTable* SemanticLabelTable = TempoSensorsSettings->GetSemanticLabelTable();
-	const FName OverridableLabelRowName = TempoSensorsSettings->GetOverridableLabelRowName();
-	const FName OverridingLabelRowName = TempoSensorsSettings->GetOverridingLabelRowName();
-	TOptional<int32> OverridableLabel;
-	TOptional<int32> OverridingLabel;
-	if (SemanticLabelTable && !OverridableLabelRowName.IsNone())
-	{
-		SemanticLabelTable->ForeachRow<FSemanticLabel>(TEXT(""),
-			[&OverridableLabelRowName, &OverridingLabelRowName, &OverridableLabel, &OverridingLabel]
-			(const FName& Key, const FSemanticLabel& Value)
-			{
-				if (Key == OverridableLabelRowName)
-				{
-					OverridableLabel = Value.Label;
-				}
-				if (Key == OverridingLabelRowName)
-				{
-					OverridingLabel = Value.Label;
-				}
-			});
-	}
-
-	if (OverridableLabel.IsSet() && OverridingLabel.IsSet())
-	{
-		Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("OverridableLabel"), OverridableLabel.GetValue());
-		Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("OverridingLabel"), OverridingLabel.GetValue());
-	}
-	else
-	{
-		Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("OverridingLabel"), 0.0);
-	}
+	ApplyLabelOverrideParameters(Tile.PostProcessMaterialInstance);
 
 	Tile.PostProcessMaterialInstance->EnsureIsComplete();
 

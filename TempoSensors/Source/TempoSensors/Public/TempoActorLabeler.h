@@ -55,6 +55,10 @@ namespace TempoSensors
 	class SetActorTypeSemanticIdRequest;
 	class GetAllStaticMeshTypesResponse;
 	class SetStaticMeshTypeSemanticIdRequest;
+	class SetLabelTypeRequest;
+	class LoadLabelTableRequest;
+	class SetInstanceLabelUniquenessRequest;
+	class SetLabelRowOverridesRequest;
 }
 
 /**
@@ -89,6 +93,14 @@ public:
 	void HandleGetAllStaticMeshTypes(const TempoCore::Empty& Request, const TResponseDelegate<TempoSensors::GetAllStaticMeshTypesResponse>& ResponseContinuation);
 
 	void HandleSetStaticMeshTypeSemanticId(const TempoSensors::SetStaticMeshTypeSemanticIdRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation);
+
+	void HandleSetLabelType(const TempoSensors::SetLabelTypeRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation);
+
+	void HandleLoadLabelTable(const TempoSensors::LoadLabelTableRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation);
+
+	void HandleSetInstanceLabelUniqueness(const TempoSensors::SetInstanceLabelUniquenessRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation);
+
+	void HandleSetLabelRowOverrides(const TempoSensors::SetLabelRowOverridesRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation);
 
 	const TSet<FName>& GetLabeledActorClassNames() const { return LabeledActorClassNames; }
 
@@ -127,7 +139,9 @@ protected:
 
 	void UnLabelComponent(UPrimitiveComponent* Component);
 
-	void ReLabelAllActors();
+	// Re-derive everything cached from the semantic label table, then re-label the world from
+	// scratch. Bound to the settings' label-settings-changed event.
+	void OnLabelSettingsChanged();
 
 	static void AssignId(UPrimitiveComponent* Component, FInstanceSemanticIdPair IdPair);
 

@@ -31,6 +31,14 @@ message AvailableSensorsResponse {
   repeated SensorDescriptor available_sensors = 1;
 }
 
+message SetPipelinedRenderingEnabledRequest {
+  // When enabled, FixedStep time mode lets the game thread advance without waiting for sensor
+  // readback. Images may arrive one or two frames late — their MeasurementHeader still carries
+  // the capture time and sequence ID of the frame they were captured on — but the game, render,
+  // and readback pipelines run in parallel, raising throughput.
+  bool enabled = 1;
+}
+
 service SensorService {
   rpc GetAvailableSensors(TempoCore.Empty) returns (AvailableSensorsResponse);
 
@@ -45,4 +53,6 @@ service SensorService {
   rpc StreamLidarScans(TempoSensors.LidarScanRequest) returns (stream TempoSensors.LidarScanSegment);
 
   rpc StreamVideo(TempoSensors.VideoRequest) returns (stream TempoSensors.VideoFrame);
+
+  rpc SetPipelinedRenderingEnabled(SetPipelinedRenderingEnabledRequest) returns (TempoCore.Empty);
 }

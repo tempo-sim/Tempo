@@ -15,6 +15,7 @@
 #include "DefaultActorClassifier.h"
 
 #include "EngineUtils.h"
+#include "Misc/FileHelper.h"
 #include "Components/InstancedStaticMeshComponent.h"
 #include "NiagaraComponent.h"
 #include "NiagaraEmitter.h"
@@ -112,7 +113,11 @@ void UTempoActorLabeler::RegisterServices(FTempoServer& Server)
 		SimpleRequestHandler(&LabelAsyncService::RequestGetSemanticClasses, &UTempoActorLabeler::HandleGetSemanticClasses),
 		SimpleRequestHandler(&LabelAsyncService::RequestSetActorTypeSemanticId, &UTempoActorLabeler::HandleSetActorTypeSemanticId),
 		SimpleRequestHandler(&LabelAsyncService::RequestGetAllStaticMeshTypes, &UTempoActorLabeler::HandleGetAllStaticMeshTypes),
-		SimpleRequestHandler(&LabelAsyncService::RequestSetStaticMeshTypeSemanticId, &UTempoActorLabeler::HandleSetStaticMeshTypeSemanticId)
+		SimpleRequestHandler(&LabelAsyncService::RequestSetStaticMeshTypeSemanticId, &UTempoActorLabeler::HandleSetStaticMeshTypeSemanticId),
+		SimpleRequestHandler(&LabelAsyncService::RequestSetLabelType, &UTempoActorLabeler::HandleSetLabelType),
+		SimpleRequestHandler(&LabelAsyncService::RequestLoadLabelTable, &UTempoActorLabeler::HandleLoadLabelTable),
+		SimpleRequestHandler(&LabelAsyncService::RequestSetInstanceLabelUniqueness, &UTempoActorLabeler::HandleSetInstanceLabelUniqueness),
+		SimpleRequestHandler(&LabelAsyncService::RequestSetLabelRowOverrides, &UTempoActorLabeler::HandleSetLabelRowOverrides)
 	);
 }
 
@@ -401,6 +406,135 @@ void UTempoActorLabeler::HandleSetStaticMeshTypeSemanticId(const TempoSensors::S
 	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status_OK);
 }
 
+void UTempoActorLabeler::HandleSetLabelType(const TempoSensors::SetLabelTypeRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation)
+{
+	ELabelType LabelType;
+	switch (Request.label_type())
+	{
+	case TempoSensors::LT_SEMANTIC:
+		{
+			LabelType = ELabelType::Semantic;
+			break;
+		}
+	case TempoSensors::LT_INSTANCE:
+		{
+			LabelType = ELabelType::Instance;
+			break;
+		}
+	default:
+		{
+			ResponseContinuation.ExecuteIfBound(TempoCore::Empty(),
+				grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "label_type must be LT_SEMANTIC or LT_INSTANCE"));
+			return;
+		}
+	}
+
+	// Broadcasts back to OnLabelSettingsChanged, which re-labels the world in the new mode.
+	GetMutableDefault<UTempoSensorsSettings>()->SetLabelType(LabelType);
+
+	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status_OK);
+}
+
+void UTempoActorLabeler::HandleLoadLabelTable(const TempoSensors::LoadLabelTableRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation)
+{
+	FString Json = UTF8_TO_TCHAR(Request.json().c_str());
+	FString JsonFile = UTF8_TO_TCHAR(Request.json_file().c_str());
+
+	if (Json.IsEmpty() == JsonFile.IsEmpty())
+	{
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(),
+			grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "Exactly one of json and json_file must be set"));
+		return;
+	}
+
+	if (!JsonFile.IsEmpty())
+	{
+		if (FPaths::IsRelative(JsonFile))
+		{
+			JsonFile = FPaths::Combine(FPaths::ProjectDir(), JsonFile);
+		}
+		if (!FFileHelper::LoadFileToString(Json, *JsonFile))
+		{
+			const FString ErrorMsg = FString::Printf(TEXT("Could not read label table file '%s'"), *JsonFile);
+			ResponseContinuation.ExecuteIfBound(TempoCore::Empty(),
+				grpc::Status(grpc::StatusCode::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
+			return;
+		}
+	}
+
+	// Import into a fresh table so a table that fails to parse never reaches the world. Only a
+	// clean import is installed; on any problem the previously active table stays in place.
+	UDataTable* NewSemanticLabelTable = NewObject<UDataTable>(GetTransientPackage(), NAME_None, RF_Transient);
+	NewSemanticLabelTable->RowStruct = FSemanticLabel::StaticStruct();
+	// A row that assigns only actor types shouldn't have to spell out empty StaticMeshTypes and
+	// ComponentTags, so let an omitted column keep the row struct's default. Unrecognized columns
+	// stay an error: those are typos, and silently dropping one would silently drop its labels.
+	NewSemanticLabelTable->bIgnoreMissingFields = true;
+	const TArray<FString> Problems = NewSemanticLabelTable->CreateTableFromJSONString(Json);
+	if (!Problems.IsEmpty())
+	{
+		const FString ErrorMsg = FString::Printf(TEXT("Could not import label table: %s"), *FString::Join(Problems, TEXT(" ")));
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(),
+			grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
+		return;
+	}
+
+	// Broadcasts back to OnLabelSettingsChanged, which rebuilds the label maps and re-labels the
+	// world, and to the sensors, which re-resolve the overridable/overriding label pair.
+	GetMutableDefault<UTempoSensorsSettings>()->SetRuntimeSemanticLabelTable(NewSemanticLabelTable);
+
+	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status_OK);
+}
+
+void UTempoActorLabeler::HandleSetInstanceLabelUniqueness(const TempoSensors::SetInstanceLabelUniquenessRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation)
+{
+	// Governs future instance ID allocations only. Objects already labeled keep the IDs they have.
+	UTempoSensorsSettings* TempoSensorsSettings = GetMutableDefault<UTempoSensorsSettings>();
+	TempoSensorsSettings->SetGloballyUniqueInstanceLabels(Request.globally_unique());
+	TempoSensorsSettings->SetInstantaneouslyUniqueInstanceLabels(Request.instantaneously_unique());
+
+	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status_OK);
+}
+
+void UTempoActorLabeler::HandleSetLabelRowOverrides(const TempoSensors::SetLabelRowOverridesRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation)
+{
+	const FString OverridableRowName = UTF8_TO_TCHAR(Request.overridable_row_name().c_str());
+	const FString OverridingRowName = UTF8_TO_TCHAR(Request.overriding_row_name().c_str());
+
+	// The substitution only happens when both rows resolve, so a request naming just one of them
+	// would silently do nothing.
+	if (OverridableRowName.IsEmpty() != OverridingRowName.IsEmpty())
+	{
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(),
+			grpc::Status(grpc::StatusCode::INVALID_ARGUMENT,
+			"overridable_row_name and overriding_row_name must both be set, or both be empty to disable overriding"));
+		return;
+	}
+
+	// Reject a row name the active table doesn't have, rather than accepting a setting that can
+	// only ever resolve to "no override".
+	if (SemanticLabelTable && !OverridableRowName.IsEmpty())
+	{
+		for (const FString& RowName : { OverridableRowName, OverridingRowName })
+		{
+			if (!SemanticLabelTable->GetRowNames().Contains(FName(*RowName)))
+			{
+				const FString ErrorMsg = FString::Printf(TEXT("Semantic label table has no row named '%s'"), *RowName);
+				ResponseContinuation.ExecuteIfBound(TempoCore::Empty(),
+					grpc::Status(grpc::StatusCode::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
+				return;
+			}
+		}
+	}
+
+	// Broadcasts to the sensors, which re-push the resolved pair onto their post-process materials.
+	GetMutableDefault<UTempoSensorsSettings>()->SetLabelRowNameOverrides(
+		OverridableRowName.IsEmpty() ? NAME_None : FName(*OverridableRowName),
+		OverridingRowName.IsEmpty() ? NAME_None : FName(*OverridingRowName));
+
+	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status_OK);
+}
+
 void UTempoActorLabeler::HandleGetAllActorLabels(const TempoCore::Empty& Request, const TResponseDelegate<TempoSensors::GetAllActorLabelsResponse>& ResponseContinuation)
 {
 	TempoSensors::GetAllActorLabelsResponse Response;
@@ -506,7 +640,7 @@ void UTempoActorLabeler::OnWorldBeginPlay(UWorld& InWorld)
 		UnLabelComponent(Component);
 	});
 
-	GetMutableDefault<UTempoSensorsSettings>()->TempoSensorsLabelSettingsChangedEvent.AddUObject(this, &UTempoActorLabeler::ReLabelAllActors);
+	GetMutableDefault<UTempoSensorsSettings>()->TempoSensorsLabelSettingsChangedEvent.AddUObject(this, &UTempoActorLabeler::OnLabelSettingsChanged);
 }
 
 void UTempoActorLabeler::Initialize(FSubsystemCollectionBase& Collection)
@@ -525,6 +659,14 @@ void UTempoActorLabeler::Deinitialize()
 
 void UTempoActorLabeler::BuildLabelMaps()
 {
+	// Everything below is derived wholly from SemanticLabelTable, and this runs again whenever that
+	// table is replaced, so start from empty rather than accumulating the previous table's entries.
+	ActorSemanticLabels.Reset();
+	StaticMeshLabels.Reset();
+	ComponentTagLabels.Reset();
+	SemanticIds.Reset();
+	NoLabelId = 0;
+
 	if (!SemanticLabelTable)
 	{
 		UE_LOG(LogTempoSensors, Error, TEXT("Semantic Label table was not set"));
@@ -932,9 +1074,16 @@ void UTempoActorLabeler::UnLabelComponent(UPrimitiveComponent* Component)
 	LabeledObjects.Remove(Component);
 }
 
-void UTempoActorLabeler::ReLabelAllActors()
+void UTempoActorLabeler::OnLabelSettingsChanged()
 {
+	// Unlabel first, while the maps still describe the labels the world is currently wearing —
+	// UnLabelActor reads NoLabelId to decide which instance IDs to reclaim, and BuildLabelMaps
+	// re-derives NoLabelId from the new table.
 	UnLabelAllActors();
+
+	SemanticLabelTable = GetDefault<UTempoSensorsSettings>()->GetSemanticLabelTable();
+	BuildLabelMaps();
+
 	LabelAllActors();
 }
 

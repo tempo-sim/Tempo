@@ -2,6 +2,12 @@
 
 #include "TempoSensorsUtils.h"
 
+#include "TempoLabelTypes.h"
+#include "TempoSensorsSettings.h"
+
+#include "Engine/DataTable.h"
+#include "Materials/MaterialInstanceDynamic.h"
+
 void OptimizeShowFlagsForNoColor(FEngineShowFlags& ShowFlags)
 {
 	ShowFlags.SetPostProcessing(true);
@@ -130,4 +136,45 @@ void ApplyPhotorealisticRenderSettings(FPostProcessSettings& OutPostProcess,
 	OutShowFlags.SetVolumetricFog(true);
 	OutShowFlags.SetTonemapper(true);
 	OutShowFlags.SetScreenPercentage(true);
+}
+
+void ApplyLabelOverrideParameters(UMaterialInstanceDynamic* MaterialInstance)
+{
+	if (!MaterialInstance)
+	{
+		return;
+	}
+
+	const UTempoSensorsSettings* TempoSensorsSettings = GetDefault<UTempoSensorsSettings>();
+	const UDataTable* SemanticLabelTable = TempoSensorsSettings->GetSemanticLabelTable();
+	const FName OverridableLabelRowName = TempoSensorsSettings->GetOverridableLabelRowName();
+	const FName OverridingLabelRowName = TempoSensorsSettings->GetOverridingLabelRowName();
+	TOptional<int32> OverridableLabel;
+	TOptional<int32> OverridingLabel;
+	if (SemanticLabelTable && !OverridableLabelRowName.IsNone())
+	{
+		SemanticLabelTable->ForeachRow<FSemanticLabel>(TEXT(""),
+			[&OverridableLabelRowName, &OverridingLabelRowName, &OverridableLabel, &OverridingLabel]
+			(const FName& Key, const FSemanticLabel& Value)
+			{
+				if (Key == OverridableLabelRowName)
+				{
+					OverridableLabel = Value.Label;
+				}
+				if (Key == OverridingLabelRowName)
+				{
+					OverridingLabel = Value.Label;
+				}
+			});
+	}
+
+	if (OverridableLabel.IsSet() && OverridingLabel.IsSet())
+	{
+		MaterialInstance->SetScalarParameterValue(TEXT("OverridableLabel"), OverridableLabel.GetValue());
+		MaterialInstance->SetScalarParameterValue(TEXT("OverridingLabel"), OverridingLabel.GetValue());
+	}
+	else
+	{
+		MaterialInstance->SetScalarParameterValue(TEXT("OverridingLabel"), 0.0);
+	}
 }

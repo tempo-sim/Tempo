@@ -99,6 +99,9 @@ void UTempoTiledSceneCaptureComponent::BeginPlay()
 	SyncTiles();
 	UpdateInternalMirrors();
 
+	GetMutableDefault<UTempoSensorsSettings>()->TempoSensorsLabelOverridesChangedEvent.AddUObject(
+		this, &UTempoTiledSceneCaptureComponent::ApplyLabelOverridesToTiles);
+
 	if (UTempoCoreUtils::IsGameWorld(this))
 	{
 		// Activate() runs when added to a live world, but may be skipped in some registration
@@ -135,6 +138,8 @@ void UTempoTiledSceneCaptureComponent::Deactivate()
 
 void UTempoTiledSceneCaptureComponent::OnUnregister()
 {
+	GetMutableDefault<UTempoSensorsSettings>()->TempoSensorsLabelOverridesChangedEvent.RemoveAll(this);
+
 	// Destroy tile view states while the scene is still valid, before Super unregisters us from it
 	// (matches USceneCaptureComponent::OnUnregister, which destroys the inherited ViewStates here).
 	DeactivateAllTiles();

@@ -314,6 +314,7 @@ protected:
 	virtual void ReconfigureTilesNow() override;
 	virtual void UpdateInternalMirrors() override;
 	virtual void DeactivateAllTiles() override;
+	virtual void ApplyLabelOverridesToTiles() override;
 	// End UTempoTiledSceneCaptureComponent tile interface
 
 	// Returns SharedFinalTextureTarget so OnRenderCompleted reads from the merged output.
