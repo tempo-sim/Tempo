@@ -73,7 +73,7 @@ void UMassTrafficLightVisualizationTrait::BuildTemplate(FMassEntityTemplateBuild
 
 	// Get the TrafficControllerRegistrySubsystem
 	const UMassTrafficControllerRegistrySubsystem* TrafficControllerRegistrySubsystem = World.GetSubsystem<UMassTrafficControllerRegistrySubsystem>();
-	if (TrafficControllerRegistrySubsystem == nullptr)
+	if (TrafficControllerRegistrySubsystem == nullptr && !BuildContext.IsInspectingData())
 	{
 		UE_LOG(LogMassTraffic, Error, TEXT("UMassTrafficLightVisualizationTrait - Failed to get TrafficControllerRegistrySubsystem."));
 		return;
@@ -81,16 +81,22 @@ void UMassTrafficLightVisualizationTrait::BuildTemplate(FMassEntityTemplateBuild
 	
 	FMassTrafficLightsParameters RegisteredTrafficLightsParams;
 	
-	const TArray<FMassTrafficLightTypeData>& TrafficLightTypes = TrafficControllerRegistrySubsystem->GetTrafficLightTypes();
-	if (TrafficLightTypes.Num() > 0)
+	// When inspecting data we only care about the fragment type. The world's subsystems are not
+	// necessarily available then - RepresentationSubsystem above is deliberately left null in that
+	// case - so skip the registration and fall through to adding the shared fragment.
+	if (!BuildContext.IsInspectingData())
 	{
-		RegisteredTrafficLightsParams.TrafficLightTypes = TrafficLightTypes;
-		
-		for (const FMassTrafficLightTypeData& TrafficLightType : RegisteredTrafficLightsParams.TrafficLightTypes)
+		const TArray<FMassTrafficLightTypeData>& TrafficLightTypes = TrafficControllerRegistrySubsystem->GetTrafficLightTypes();
+		if (TrafficLightTypes.Num() > 0)
 		{
-			// Register visual types
-			FStaticMeshInstanceVisualizationDescHandle TrafficLightTypeStaticMeshDescHandle = RepresentationSubsystem->FindOrAddStaticMeshDesc(TrafficLightType.StaticMeshInstanceDesc);
-			RegisteredTrafficLightsParams.TrafficLightTypesStaticMeshDescHandle.Add(TrafficLightTypeStaticMeshDescHandle);
+			RegisteredTrafficLightsParams.TrafficLightTypes = TrafficLightTypes;
+			
+			for (const FMassTrafficLightTypeData& TrafficLightType : RegisteredTrafficLightsParams.TrafficLightTypes)
+			{
+				// Register visual types
+				FStaticMeshInstanceVisualizationDescHandle TrafficLightTypeStaticMeshDescHandle = RepresentationSubsystem->FindOrAddStaticMeshDesc(TrafficLightType.StaticMeshInstanceDesc);
+				RegisteredTrafficLightsParams.TrafficLightTypesStaticMeshDescHandle.Add(TrafficLightTypeStaticMeshDescHandle);
+			}
 		}
 	}
 
