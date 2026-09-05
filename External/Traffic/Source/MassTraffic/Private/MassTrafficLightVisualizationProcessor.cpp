@@ -59,17 +59,9 @@ UMassTrafficLightVisualizationProcessor::UMassTrafficLightVisualizationProcessor
 	ExecutionOrder.ExecuteAfter.Add(UMassTrafficIntersectionVisualizationLODProcessor::StaticClass()->GetFName());
 }
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-void UMassTrafficLightVisualizationProcessor::ConfigureQueries()
-#else
 void UMassTrafficLightVisualizationProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
-#endif
 {
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-	Super::ConfigureQueries();
-#else
 	Super::ConfigureQueries(EntityManager);
-#endif
 	EntityQuery.AddRequirement<FMassTrafficLightIntersectionFragment>(EMassFragmentAccess::ReadOnly);
 }
 
@@ -83,11 +75,7 @@ UMassTrafficLightUpdateCustomVisualizationProcessor::UMassTrafficLightUpdateCust
 	ExecutionOrder.ExecuteAfter.Add(UMassTrafficLightVisualizationProcessor::StaticClass()->GetFName());
 }
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-void UMassTrafficLightUpdateCustomVisualizationProcessor::ConfigureQueries()
-#else
 void UMassTrafficLightUpdateCustomVisualizationProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
-#endif
 {
 	EntityQuery.AddRequirement<FMassTrafficLightIntersectionFragment>(EMassFragmentAccess::ReadOnly);
 
@@ -117,11 +105,7 @@ void UMassTrafficLightUpdateCustomVisualizationProcessor::Execute(FMassEntityMan
 		TRACE_CPUPROFILER_EVENT_SCOPE(TEXT("Visual Updates")) 
 
 		// Visualize entities
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-		EntityQuery.ForEachEntityChunk(EntityManager, Context, [this](FMassExecutionContext& Context)
-#else
 		EntityQuery.ForEachEntityChunk(Context, [this](FMassExecutionContext& Context)
-#endif
 		{
 			UMassRepresentationSubsystem* RepresentationSubsystem = Context.GetSharedFragment<FMassRepresentationSubsystemSharedFragment>().RepresentationSubsystem;
 			check(RepresentationSubsystem);
@@ -204,11 +188,7 @@ void UMassTrafficLightUpdateCustomVisualizationProcessor::Execute(FMassEntityMan
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(TEXT("DebugDisplayVisualization"))
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-		EntityQuery.ForEachEntityChunk(EntityManager, Context, [this](FMassExecutionContext& Context)
-#else
 		EntityQuery.ForEachEntityChunk(Context, [this](FMassExecutionContext& Context)
-#endif
 		{
 			const UMassTrafficSubsystem* MassTrafficSubsystem = Context.GetSubsystem<UMassTrafficSubsystem>();
 
@@ -250,17 +230,9 @@ UMassTrafficIntersectionVisualizationLODProcessor::UMassTrafficIntersectionVisua
 	ExecutionOrder.ExecuteAfter.Add(UMassTrafficIntersectionLODCollectorProcessor::StaticClass()->GetFName());
 }
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-void UMassTrafficIntersectionVisualizationLODProcessor::ConfigureQueries()
-#else
 void UMassTrafficIntersectionVisualizationLODProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
-#endif
 {
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-	Super::ConfigureQueries();
-#else
 	Super::ConfigureQueries(EntityManager);
-#endif
 
 	CloseEntityQuery.AddTagRequirement<FMassTrafficIntersectionTag>(EMassFragmentPresence::All);
 	CloseEntityAdjustDistanceQuery.AddTagRequirement<FMassTrafficIntersectionTag>(EMassFragmentPresence::All);
@@ -280,17 +252,9 @@ UMassTrafficIntersectionLODCollectorProcessor::UMassTrafficIntersectionLODCollec
 	ExecutionOrder.ExecuteAfter.Add(UE::MassTraffic::ProcessorGroupNames::FrameStart);
 }
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-void UMassTrafficIntersectionLODCollectorProcessor::ConfigureQueries()
-#else
 void UMassTrafficIntersectionLODCollectorProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
-#endif
 {
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-	Super::ConfigureQueries();
-#else
 	Super::ConfigureQueries(EntityManager);
-#endif
 
 	EntityQuery_VisibleRangeAndOnLOD.AddTagRequirement<FMassTrafficIntersectionTag>(EMassFragmentPresence::All);
 	EntityQuery_VisibleRangeOnly.AddTagRequirement<FMassTrafficIntersectionTag>(EMassFragmentPresence::All);

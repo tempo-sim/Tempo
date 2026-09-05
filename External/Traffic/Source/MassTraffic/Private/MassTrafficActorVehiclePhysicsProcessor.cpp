@@ -19,11 +19,7 @@ UMassTrafficActorVehiclePhysicsProcessor::UMassTrafficActorVehiclePhysicsProcess
 	ExecutionOrder.ExecuteAfter.Add(UMassTrafficVehicleControlProcessor::StaticClass()->GetFName());
 }
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-void UMassTrafficActorVehiclePhysicsProcessor::ConfigureQueries()
-#else
 void UMassTrafficActorVehiclePhysicsProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
-#endif
 {
 	ChaosPhysicsVehiclesQuery.AddTagRequirement<FMassTrafficVehicleTag>(EMassFragmentPresence::Any);
 	ChaosPhysicsVehiclesQuery.AddRequirement<FMassRepresentationFragment>(EMassFragmentAccess::ReadOnly);
@@ -36,11 +32,7 @@ void UMassTrafficActorVehiclePhysicsProcessor::ConfigureQueries(const TSharedRef
 void UMassTrafficActorVehiclePhysicsProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
 	// Pass new vehicle control inputs to HighRes actors
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-	ChaosPhysicsVehiclesQuery.ForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& ComponentSystemExecutionContext)
-#else
 	ChaosPhysicsVehiclesQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext& ComponentSystemExecutionContext)
-#endif
 	{
 		const TConstArrayView<FMassRepresentationFragment> RepresentationFragments = Context.GetFragmentView<FMassRepresentationFragment>();
 		const TConstArrayView<FMassTrafficPIDVehicleControlFragment> PIDVehicleControlFragments = Context.GetFragmentView<FMassTrafficPIDVehicleControlFragment>();
