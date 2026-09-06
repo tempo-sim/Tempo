@@ -135,6 +135,25 @@ if [ "$LOW_MEMORY_MODE" = "true" ]; then
   echo "Low memory mode enabled: at most 3 compile actions, single cook process, partial GC, no UBA/XGE"
 fi
 
+# Clear the previous build's output for this platform before staging over it.
+#
+# UAT copies into the archive directory but never removes files the new build no longer produces,
+# so artifacts of a differently-configured previous build survive alongside the new ones. The case
+# that cost real debugging time: a build made before -skipiostore leaves pakchunk0-Mac.utoc/.ucas
+# behind, the engine mounts that stale container at startup and resolves packages through it, and
+# every asset that now lives only in the freshly built .pak reads as
+#   LoadPackage: SkipPackage: ... does not exist on disk or in the loader
+# even though it is right there in the pak. The build looks clean and the sim is silently broken.
+#
+# Only this platform's staged output is removed. Packaged/API and Packaged/Metadata are repopulated
+# further down and are left alone. A failed package leaves no previous build to fall back on, which
+# is the intended trade: a stale mixed build is worse than none.
+STALE_PLATFORM_DIR="$PROJECT_ROOT/Packaged/$TARGET_PLATFORM"
+if [ -d "$STALE_PLATFORM_DIR" ]; then
+  echo "Removing previous $TARGET_PLATFORM build at $STALE_PLATFORM_DIR"
+  rm -rf "$STALE_PLATFORM_DIR"
+fi
+
 # Filter out our custom flags before passing to UAT
 PASSTHROUGH_ARGS=()
 for arg in "$@"; do
