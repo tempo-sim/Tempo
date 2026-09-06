@@ -565,9 +565,9 @@ protected:
 	// capture is reduced to a light meter at a fixed exposure of 1. The bias is auto exposure
 	// re-derived on the CPU from the proxy's histogram readback with the engine's own target, range
 	// and speed rules (UpdateSharedExposure), so the camera's auto exposure settings keep their
-	// meaning. Eye adaptation stays enabled on the tile family: the engine only honors
-	// AutoExposureBias, and only computes a PreExposure, while it is, and a PreExposure of 1 starves
-	// TSR's shading rejection in dim scenes.
+	// meaning. The tile family renders with the EyeAdaptation show flag set: the engine only honors
+	// AutoExposureBias, and only computes a PreExposure, while it is, and TSR's shading rejection
+	// is calibrated for pre-exposed input.
 	float SharedExposureBias = 0.0f;
 	bool bHasValidSharedExposure = false;
 

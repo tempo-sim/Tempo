@@ -104,11 +104,14 @@ void ApplyPhotorealisticRenderSettings(FPostProcessSettings& OutPostProcess,
 	OutPostProcess.bOverride_ReflectionMethod = true;
 	OutPostProcess.ReflectionMethod = EReflectionMethod::Lumen;
 
-	// Lumen final-gather denoiser leans on temporal history; in dim scenes the signal-to-noise
-	// ratio is poor and history dominates, which manifests as ghost trails behind slow movers.
-	// Bumping FinalGatherQuality reduces input noise and bumping the update speed shortens the
-	// effective history window so trails fade faster. Reflection quality has the same effect for
-	// specular ghosts.
+	// Lumen's screen probe gather accumulates its history in frames, not seconds, so at sensor
+	// rates a mover can trail its indirect lighting for a long time. FinalGatherQuality scales the
+	// rays traced per probe (by its square root), lowering the per-frame noise the accumulation
+	// exists to hide. LightingUpdateSpeed divides the frames accumulated (by its square root, so the
+	// engine's 10 becomes 5) and raises the radiance cache's per-frame trace budget, so lighting
+	// changes propagate faster. ReflectionQuality scales the reflection denoiser's spatial
+	// reconstruction sample count only; the reflection history length is set by
+	// r.Lumen.Reflections.Temporal.MaxFramesAccumulated.
 	OutPostProcess.bOverride_LumenFinalGatherQuality = true;
 	OutPostProcess.LumenFinalGatherQuality = 2.0f;
 	OutPostProcess.bOverride_LumenFinalGatherLightingUpdateSpeed = true;
