@@ -88,8 +88,22 @@ fi
 
 cd "$UNREAL_ENGINE_PATH"
 
-# Build the base command with common arguments
-PACKAGE_COMMAND="Turnkey -command=VerifySdk -platform=$TARGET_PLATFORM -UpdateIfNeeded -project=\"$PROJECT_ROOT/$PROJECT_NAME.uproject\" BuildCookRun -nop4 -utf8output -nocompileeditor -skipbuildeditor -cook -target=\"$PROJECT_NAME\" -platform=$TARGET_PLATFORM -project=\"$PROJECT_ROOT/$PROJECT_NAME.uproject\" -installed -stage -package -pak -build -prereqs -clientconfig=$BUILD_CONFIGURATION"
+# Build the base command with common arguments.
+#
+# -skipiostore: Tempo's plugin content (camera and lidar post-process materials, stitch materials,
+# the distortion map, the semantic label table) is reachable only through TSoftObjectPtr fields on
+# UTempoSensorsSettings. DirectoriesToAlwaysCook gets it cooked and staged, but the iostore
+# container build drops it again for want of a hard reference chain — AllChunksInfo.csv labels it
+# "Soft: Unknown reference chain. Soft From Unassigned Package?" — and since the runtime loader
+# consults only the container under bUseIoStore, the sim starts fine and then fails to load them:
+#   LoadPackage: SkipPackage: /TempoSensors/Materials/M_TempoCamera_Distort_NoDepth ... does not
+#   exist on disk or in the loader
+#   PostProcessMaterialNoDepth is not set in TempoSensors settings
+# leaving every camera producing no usable imagery. Without iostore the packages go into the pak as
+# loose files and the loader finds them by path. This also covers the separate cold-cook iostore
+# failure that CI already needed the flag for. Giving those assets a real reference chain (e.g.
+# AssetManager primary asset rules) would let iostore be turned back on.
+PACKAGE_COMMAND="Turnkey -command=VerifySdk -platform=$TARGET_PLATFORM -UpdateIfNeeded -project=\"$PROJECT_ROOT/$PROJECT_NAME.uproject\" BuildCookRun -nop4 -utf8output -nocompileeditor -skipbuildeditor -cook -target=\"$PROJECT_NAME\" -platform=$TARGET_PLATFORM -project=\"$PROJECT_ROOT/$PROJECT_NAME.uproject\" -installed -stage -package -pak -skipiostore -build -prereqs -clientconfig=$BUILD_CONFIGURATION"
 
 echo "Packaging $PROJECT_NAME in $BUILD_CONFIGURATION configuration -> $PROJECT_ROOT/Packaged"
 

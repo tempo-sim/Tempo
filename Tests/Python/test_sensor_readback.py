@@ -65,6 +65,7 @@ import tempo_sim.tempo_core as tc
 import tempo_sim.tempo_sensors as ts
 import tempo_sim.tempo_world as tw
 import tempo_sim.TempoCore.Geometry_pb2 as Geometry
+import tempo_sim.TempoCore.Time_pb2 as Time
 import tempo_sim.TempoSensors.Sensors_pb2 as SensorsPb
 
 pytestmark = pytest.mark.sensors
@@ -198,7 +199,45 @@ def readback_level(sim_server):
 
     # Left loaded on purpose. Reloading on teardown would cost another transition, and the tests
     # that follow in this session are better off on a level that has a sensor rig in it.
-    return LEVEL
+    yield LEVEL
+
+    # Hand the sim back running. The fixed_step fixture pauses the clock and nothing else unpauses
+    # it, so without this every later test in the session that waits on a rendered frame — such as
+    # test_sensors.py's streaming test — blocks forever on a sim that will never tick.
+    try:
+        tc.set_time_mode(time_mode=Time.TM_WALL_CLOCK)
+        tc.play()
+    except Exception as error:  # nothing left to protect if teardown cannot reach the sim
+        print(f"Warning: could not restore the sim to a running state: {error!r}")
+
+
+@pytest.fixture(scope="session")
+def labeled_scene(readback_level):
+    """Give every static mesh type in the level a distinct semantic ID.
+
+    The bounding box cross-check needs labeled geometry in view, but which actors carry a label is
+    normally decided by the project's semantic label table — exactly the kind of host-project
+    dependency this file is trying to avoid. Assigning IDs over the API instead means the check
+    works on any level with meshes in it, whatever the table says.
+    """
+    meshes = [m for m in ts.get_all_static_mesh_types().mesh_types if m.instance_count > 0]
+    if not meshes:
+        return []
+
+    # Label IDs must stay within what the camera's alpha encoding can represent
+    # (GTempoCamera_Max_Label = 253); 0 means "unlabeled", so start at 1.
+    assigned = []
+    for index, mesh in enumerate(meshes[:253]):
+        ts.set_static_mesh_type_semantic_id(static_mesh_path=mesh.mesh_path, semantic_id=index + 1)
+        assigned.append(mesh.mesh_path)
+
+    yield assigned
+
+    for path in assigned:
+        try:
+            ts.set_static_mesh_type_semantic_id(static_mesh_path=path, semantic_id=-1)
+        except Exception:
+            pass  # teardown only; cannot affect results already collected
 
 
 @pytest.fixture
@@ -306,11 +345,21 @@ def test_frame_matches_its_header(camera_rig, pipelining):
             "TEMPO_TEST_RIG_ORIGIN at a spot facing a wall, or build the level described in this "
             "file's docstring."
         )
-    if abs(_center_depth(frames[0]["depth"]) - probe.distance_m) > DEPTH_TOL_M:
+    measured = _center_depth(frames[0]["depth"])
+    if abs(measured - probe.distance_m) > DEPTH_TOL_M:
+        # Report enough to tell the likely causes apart: the ray and the camera looking at
+        # different things, versus agreeing on the surface but not the distance.
+        frame_depths = _depths(frames[0]["depth"])
+        finite = sorted(d for d in frame_depths if math.isfinite(d))
         pytest.skip(
-            f"Could not establish the depth oracle: first frame center depth "
-            f"{_center_depth(frames[0]['depth']):.3f} m vs raycast {probe.distance_m:.3f} m. The "
-            "camera is probably not looking along +X, or something non-static is in shot."
+            f"Could not establish the depth oracle. Camera at "
+            f"({loc.x:.3f}, {loc.y:.3f}, {loc.z:.3f}) reads {measured:.3f} m at the center pixel, "
+            f"but a ray from the same point along +X hits '{probe.actor}' "
+            f"(component '{probe.component}') at {probe.distance_m:.3f} m. Frame depth range "
+            f"{finite[0]:.3f}-{finite[-1]:.3f} m, median {finite[len(finite) // 2]:.3f} m. "
+            "If the ray names an actor the camera cannot see, the two are looking at different "
+            "things; if they name the same surface but differ slightly, DEPTH_TOL_M is too tight "
+            "for this geometry."
         )
 
     # The oracle holds. From here a mismatch is a real disagreement between pixels and header.
@@ -457,7 +506,7 @@ def test_no_band_seam_artifacts(camera_rig, pipelining):
         )
 
 
-def test_measurement_types_agree(camera_rig, pipelining):
+def test_measurement_types_agree(camera_rig, labeled_scene, pipelining):
     """Color, label, depth and bounding boxes for one capture must be mutually consistent.
 
     All four are produced by a single pass over one pixel image, so they are supposed to be four
