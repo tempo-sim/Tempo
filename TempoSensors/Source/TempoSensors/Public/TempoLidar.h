@@ -143,6 +143,44 @@ enum class ETempoLidarSamplingStrategy : uint8
 
 class UTempoLidar;
 
+// Everything about one beam that depends only on the sensor's configuration and not on anything
+// rendered. Decode used to derive all of it per beam per frame — two spherical/perspective
+// conversions, a spherical-to-cartesian for the beam ray and another for the sampled pixel, and the
+// depth-to-distance cosines — which is on the order of a dozen transcendentals per beam. At a few
+// hundred thousand beams that is milliseconds a frame recomputing values that only change when the
+// lidar is reconfigured, and the game thread waits on the decode.
+//
+// Built by UTempoLidar::BuildBeamSamples when a tile is configured and shared with every read
+// captured against that configuration. Ownership is shared rather than borrowed on purpose: a read
+// is dequeued before it is decoded, so the queue looks empty and TryApplyPendingReconfigure is free
+// to rebuild the tiles while a decode is still running. Holding the table by TSharedPtr means the
+// in-flight decode keeps the configuration it was captured under.
+//
+// Directions are stored single-precision. They are unit vectors and a cosine product, not
+// accumulated quantities, so ~1e-7 of relative error is far below the sensor's own discretization,
+// and halving the table keeps the streaming read of it well below the cost it removes.
+struct FTempoLidarBeamSample
+{
+	// Index of the pixel this beam samples, into the slice's Image.
+	int32 PixelIndex = 0;
+
+	// Unit vector along the beam's calibrated direction, in the sensor's local frame.
+	FVector3f RayDirectionUnit = FVector3f::ZeroVector;
+
+	// Unit vector towards the center of the sampled pixel. The beam's own direction and the
+	// direction of the pixel it lands on differ by up to half a pixel, and the returned point is
+	// placed along the latter.
+	FVector3f NearestDirectionUnit = FVector3f::ZeroVector;
+
+	// cos(azimuth) * cos(elevation) of the sampled pixel: distance = depth / this.
+	float DepthToDistanceDivisor = 1.0f;
+
+	// The azimuth and elevation this beam reports, in radians, already negated into the client's
+	// right-handed frame and (for azimuth) offset by the tile's yaw.
+	float AzimuthRad = 0.0f;
+	float ElevationRad = 0.0f;
+};
+
 // Per-tile state for the multi-view atlas render. A tile is just a view-rect + view state + PPM; no
 // USceneCaptureComponent and no child scene component. The atlas render is driven from
 // UTempoLidar::RenderCapture via TempoMultiViewCapture::RenderTiles, which writes each view directly
@@ -207,6 +245,10 @@ struct FTempoLidarTile
 	// Not a UPROPERTY — manages its own lifetime.
 	FSceneViewStateReference ViewState;
 
+	// Per-beam geometry for this tile, rebuilt whenever the tile is configured. Shared with every
+	// read captured against this configuration; see FTempoLidarBeamSample.
+	TSharedPtr<const TArray<FTempoLidarBeamSample>> BeamSamples;
+
 	// One-shot camera-cut flag consumed by the next multi-view render.
 	bool bCameraCut = false;
 };
@@ -256,6 +298,10 @@ protected:
 	virtual void SyncTiles() override;
 	virtual bool HasDetectedParameterChange() const override;
 	virtual void ReconfigureTilesNow() override;
+
+	// Precompute the per-beam geometry for a tile. Called from ConfigureTile once the tile's pixel
+	// grid is final, since the mapping from beam to pixel depends on it.
+	void BuildBeamSamples(FTempoLidarTile& Tile) const;
 	virtual void UpdateInternalMirrors() override;
 	virtual void DeactivateAllTiles() override;
 	virtual void ApplyLabelOverridesToTiles() override;
@@ -386,14 +432,15 @@ struct TLidarTextureReadBase : TTextureReadBase<PixelType>
 		int32 HorizontalBeamsIn, int32 VerticalBeamsIn, const FVector2D& SizeXYFOVIn,
 		double IntensitySaturationDistanceIn, double MaxAngleOfIncidenceIn,
 		int32 NumCaptureComponentsIn, double RelativeYawIn, float MinDepthIn, float MaxDepthIn, double MinDistanceIn, double MaxDistanceIn,
-		TArray<FLidarBeamCalibration> BeamCalibrationIn)
+		TArray<FLidarBeamCalibration> BeamCalibrationIn,
+		TSharedPtr<const TArray<FTempoLidarBeamSample>> BeamSamplesIn)
 		: TTextureReadBase<PixelType>(ImageSizeIn, SequenceIdIn, CaptureTimeIn, OwnerNameIn, SensorNameIn, SensorTransformIn),
 			CaptureTransform(CaptureTransformIn), HorizontalFOV(HorizontalFOVIn), EffectiveHorizontalFOV(EffectiveHorizontalFOVIn),
 			VerticalFOV(VerticalFOVIn), HorizontalBeams(HorizontalBeamsIn),
 			VerticalBeams(VerticalBeamsIn), SizeXYFOV(SizeXYFOVIn), IntensitySaturationDistance(IntensitySaturationDistanceIn),
 			MaxAngleOfIncidence(MaxAngleOfIncidenceIn), NumCaptureComponents(NumCaptureComponentsIn), RelativeYaw(RelativeYawIn),
 			MinDepth(MinDepthIn), MaxDepth(MaxDepthIn), MinDistance(MinDistanceIn), MaxDistance(MaxDistanceIn),
-			BeamCalibration(MoveTemp(BeamCalibrationIn))
+			BeamCalibration(MoveTemp(BeamCalibrationIn)), BeamSamples(MoveTemp(BeamSamplesIn))
 	{
 	}
 
@@ -418,6 +465,9 @@ struct TLidarTextureReadBase : TTextureReadBase<PixelType>
 	double MinDistance;
 	double MaxDistance;
 	TArray<FLidarBeamCalibration> BeamCalibration;
+	// Per-beam geometry for the configuration this read was captured under. Held by shared pointer
+	// so a reconfigure mid-decode cannot invalidate it.
+	TSharedPtr<const TArray<FTempoLidarBeamSample>> BeamSamples;
 };
 
 template <>

@@ -269,6 +269,10 @@ void UTempoLidar::DeactivateTile(FTempoLidarTile& Tile)
 	RetirePPM(Tile.PostProcessMaterialInstance);
 	Tile.PostProcessMaterialInstance = nullptr;
 	Tile.PostProcessSettings = FPostProcessSettings();
+	// Drop the tile's share of the beam table. Any decode still in flight holds its own reference,
+	// so this only releases the memory once nothing is using it — and at a few hundred thousand
+	// beams that is not a trivial amount to leave attached to a tile that is no longer rendering.
+	Tile.BeamSamples.Reset();
 	Tile.bCameraCut = false;
 }
 
@@ -371,6 +375,95 @@ double UTempoLidar::GetMaxAbsAzimuthOffsetDeg() const
 	return static_cast<double>(MaxAbs);
 }
 
+// Precompute the per-beam geometry for a tile. This is the same arithmetic Decode used to run per
+// beam per frame; none of it depends on anything rendered, only on the tile's pixel grid and the
+// beam pattern, so it is hoisted to configuration time. See FTempoLidarBeamSample.
+void UTempoLidar::BuildBeamSamples(FTempoLidarTile& Tile) const
+{
+	const int32 NumHorizontalBeams = Tile.HorizontalBeams;
+	const int32 NumVerticalBeams = GetEffectiveVerticalBeams();
+	if (NumHorizontalBeams <= 0 || NumVerticalBeams <= 0 || Tile.SizeXY.X <= 0 || Tile.SizeXY.Y <= 0)
+	{
+		Tile.BeamSamples.Reset();
+		return;
+	}
+
+	const double TileVerticalFOV = GetEffectiveVerticalFOV();
+
+	// Mirrors Decode's setup exactly: the mapping between spherical coordinates and the rendered
+	// pixel grid has to agree with what the renderer produced.
+	const FVector2D ImagePlaneSize = 2.0 * SphericalToPerspective(Tile.EffectiveFOVAngle / 2.0, TileVerticalFOV / 2.0);
+	const FVector2D SizeXYOffset = (FVector2D(Tile.SizeXY) - Tile.SizeXYFOV) / 2.0;
+
+	auto ImagePlaneLocationToPixelCoordinate = [&](const FVector2D& ImagePlaneLocation)
+	{
+		return (FVector2D::UnitVector / 2.0 + ImagePlaneLocation / ImagePlaneSize) * (Tile.SizeXYFOV - FVector2D::UnitVector) + SizeXYOffset;
+	};
+	auto PixelCoordinateToImagePlaneLocation = [&](const FVector2D& PixelCoordinate)
+	{
+		return ((PixelCoordinate - SizeXYOffset) / (Tile.SizeXYFOV - FVector2D::UnitVector) - (FVector2D::UnitVector / 2.0)) * ImagePlaneSize;
+	};
+
+	// A single beam is degenerate in the (-0.5 + Index/(Count-1)) spread; treat it as centered
+	// rather than dividing by zero.
+	const double HorizontalSpread = FMath::Max(1, NumHorizontalBeams - 1);
+	const double VerticalSpread = FMath::Max(1, NumVerticalBeams - 1);
+
+	TArray<FTempoLidarBeamSample> Samples;
+	Samples.SetNumUninitialized(NumHorizontalBeams * NumVerticalBeams);
+
+	int32 NumClamped = 0;
+	for (int32 HorizontalBeam = 0; HorizontalBeam < NumHorizontalBeams; ++HorizontalBeam)
+	{
+		const double NominalAzimuthDeg = (-0.5 + static_cast<double>(HorizontalBeam) / HorizontalSpread) * Tile.FOVAngle;
+
+		for (int32 VerticalBeam = 0; VerticalBeam < NumVerticalBeams; ++VerticalBeam)
+		{
+			const bool bCalibrated = BeamCalibration.IsValidIndex(VerticalBeam);
+			const double ElevationDeg = bCalibrated
+				? BeamCalibration[VerticalBeam].ElevationDeg
+				: (-0.5 + static_cast<double>(VerticalBeam) / VerticalSpread) * TileVerticalFOV;
+			const double AzimuthDeg = NominalAzimuthDeg + (bCalibrated ? BeamCalibration[VerticalBeam].AzimuthOffsetDeg : 0.0);
+
+			const FVector2D PixelCoordinate = ImagePlaneLocationToPixelCoordinate(SphericalToPerspective(AzimuthDeg, ElevationDeg));
+			FIntPoint Coord(FMath::RoundToInt32(PixelCoordinate.X), FMath::RoundToInt32(PixelCoordinate.Y));
+
+			// EffectiveFOVAngle is padded so calibrated rays land inside the grid, but clamp rather
+			// than trust it: this index is used unchecked in the decode's inner loop, and a beam
+			// that falls outside would read off the end of the image.
+			const FIntPoint ClampedCoord(
+				FMath::Clamp(Coord.X, 0, Tile.SizeXY.X - 1),
+				FMath::Clamp(Coord.Y, 0, Tile.SizeXY.Y - 1));
+			NumClamped += (ClampedCoord != Coord) ? 1 : 0;
+			Coord = ClampedCoord;
+
+			double AzimuthDegNearest, ElevationDegNearest;
+			PerspectiveToSpherical(PixelCoordinateToImagePlaneLocation(FVector2D(Coord.X, Coord.Y)), AzimuthDegNearest, ElevationDegNearest);
+
+			FTempoLidarBeamSample& Sample = Samples[HorizontalBeam * NumVerticalBeams + VerticalBeam];
+			Sample.PixelIndex = Coord.X + Tile.SizeXY.X * Coord.Y;
+			Sample.RayDirectionUnit = FVector3f(SphericalToCartesian(AzimuthDeg, ElevationDeg, 1.0));
+			Sample.NearestDirectionUnit = FVector3f(SphericalToCartesian(AzimuthDegNearest, ElevationDegNearest, 1.0));
+			Sample.DepthToDistanceDivisor = static_cast<float>(
+				FMath::Cos(FMath::DegreesToRadians(AzimuthDegNearest)) * FMath::Cos(FMath::DegreesToRadians(ElevationDegNearest)));
+			// Negated from the internal (Unreal-local) convention so that client-side point-cloud
+			// math renders in the expected right-handed Z-up frame.
+			Sample.AzimuthRad = static_cast<float>(FMath::DegreesToRadians(-(AzimuthDeg + Tile.YawOffset)));
+			Sample.ElevationRad = static_cast<float>(FMath::DegreesToRadians(-ElevationDeg));
+		}
+	}
+
+	if (NumClamped > 0)
+	{
+		UE_LOG(LogTempoSensors, Warning,
+			TEXT("Lidar %s: %d of %d beams fall outside the rendered %dx%d grid and were clamped to its edge. "
+				"Their returns will be wrong. This means the tile's padded FOV does not cover the calibrated beam directions."),
+			*GetSensorName(), NumClamped, Samples.Num(), Tile.SizeXY.X, Tile.SizeXY.Y);
+	}
+
+	Tile.BeamSamples = MakeShared<const TArray<FTempoLidarBeamSample>>(MoveTemp(Samples));
+}
+
 void UTempoLidar::ConfigureTile(FTempoLidarTile& Tile, double InYawOffset, double SubHorizontalFOV, int32 SubHorizontalBeams, bool bActivate)
 {
 	if (!bActivate)
@@ -429,6 +522,9 @@ void UTempoLidar::ConfigureTile(FTempoLidarTile& Tile, double InYawOffset, doubl
 	Tile.SizeXY = FIntPoint(FMath::CeilToInt32(Tile.SizeXYFOV.X), FMath::CeilToInt32(Tile.SizeXYFOV.Y));
 	Tile.DistortionFactor = UndistortedVerticalImagePlaneSize / ImagePlaneSize.Y;
 	Tile.DistortedVerticalFOV = FMath::RadiansToDegrees(2.0 * FMath::Atan(FMath::Tan(FMath::DegreesToRadians(EffectiveVertFOV) / 2.0) * Tile.DistortionFactor));
+
+	// After SizeXY / SizeXYFOV are final: the beam-to-pixel mapping depends on the pixel grid.
+	BuildBeamSamples(Tile);
 
 	AllocateTileViewState(Tile);
 	ApplyTilePostProcess(Tile);
@@ -492,10 +588,17 @@ namespace
 		// EffectiveHorizontalFOV is the padded FOV the renderer actually produced (covers
 		// nominal beam FOV + AzimuthOffsetDeg). HorizontalFOV is the unpadded beam FOV and is only
 		// used for the per-beam nominal azimuth formula and the reported azimuth range.
-		const FVector2D ImagePlaneSize = 2.0 * SphericalToPerspective(Read.EffectiveHorizontalFOV / 2.0, Read.VerticalFOV / 2.0);
-		const FVector2D SizeXYOffset = (FVector2D(Read.ImageSize) - Read.SizeXYFOV) / 2.0;
-
 		const int32 NumReturns = Read.HorizontalBeams * Read.VerticalBeams;
+
+		// Per-beam geometry, precomputed when the tile was configured. Everything the decode used to
+		// derive here per beam per frame lives in this table; see FTempoLidarBeamSample.
+		const TArray<FTempoLidarBeamSample>* const BeamSamples = Read.BeamSamples.Get();
+		if (!ensureMsgf(BeamSamples && BeamSamples->Num() == NumReturns,
+			TEXT("Lidar read has no matching beam sample table (%d entries for %d returns). Dropping scan."),
+			BeamSamples ? BeamSamples->Num() : -1, NumReturns))
+		{
+			return;
+		}
 
 		// Pre-size the packed repeated-scalar output fields so parallel workers can write
 		// directly into their contiguous backing storage — no intermediate per-return objects.
@@ -545,43 +648,27 @@ namespace
 
 		// H-outer, V-inner layout: each ParallelFor iteration owns a contiguous V-length stripe
 		// of every output array, so threads never share cache lines.
-		ParallelFor(Read.HorizontalBeams, [&Read, &ImagePlaneSize, &SizeXYOffset,
+		ParallelFor(Read.HorizontalBeams, [&Read, BeamSamples,
 			DistancesData, IntensitiesData, LabelsData, AzimuthsData, ElevationsData, ReflectivitiesData, ColorsData, ColorEncoding](int32 HorizontalBeam)
 		{
-			auto ImagePlaneLocationToPixelCoordinate = [&Read, &ImagePlaneSize, &SizeXYOffset](const FVector2D& ImagePlaneLocation)
-			{
-				return (FVector2D::UnitVector / 2.0 + ImagePlaneLocation / ImagePlaneSize) * (Read.SizeXYFOV - FVector2D::UnitVector) + SizeXYOffset;
-			};
-
-			auto PixelCoordinateToImagePlaneLocation = [&Read, &ImagePlaneSize, &SizeXYOffset](const FVector2D& PixelCoordinate)
-			{
-				return ((PixelCoordinate - SizeXYOffset) / (Read.SizeXYFOV - FVector2D::UnitVector) - (FVector2D::UnitVector / 2.0)) * ImagePlaneSize;
-			};
-
 			for (int32 VerticalBeam = 0; VerticalBeam < Read.VerticalBeams; ++VerticalBeam)
 			{
-				const double NominalAzimuthDeg = (-0.5 + static_cast<double>(HorizontalBeam) / (Read.HorizontalBeams - 1)) * Read.HorizontalFOV;
-				const bool bCalibrated = Read.BeamCalibration.IsValidIndex(VerticalBeam);
-				const double ElevationDeg = bCalibrated
-					? Read.BeamCalibration[VerticalBeam].ElevationDeg
-					: (-0.5 + static_cast<double>(VerticalBeam) / (Read.VerticalBeams - 1)) * Read.VerticalFOV;
-				const double AzimuthDeg = NominalAzimuthDeg + (bCalibrated ? Read.BeamCalibration[VerticalBeam].AzimuthOffsetDeg : 0.0);
-				const FVector2D ImagePlaneLocation = SphericalToPerspective(AzimuthDeg, ElevationDeg);
-				const FVector2D PixelCoordinate = ImagePlaneLocationToPixelCoordinate(ImagePlaneLocation);
-				const FIntPoint Coord(FMath::RoundToInt32(PixelCoordinate.X), FMath::RoundToInt32(PixelCoordinate.Y));
-				const PixelType& Pixel = Read.Image[Coord.X + Read.ImageSize.X * Coord.Y];
+				const FTempoLidarBeamSample& Sample = (*BeamSamples)[HorizontalBeam * Read.VerticalBeams + VerticalBeam];
+				const PixelType& Pixel = Read.Image[Sample.PixelIndex];
 				// Both pixel formats discretize inverse depth to 24 bits (2^24 levels).
 				constexpr float MaxDiscreteDepthValue = GTempoCamera_Max_Discrete_Depth;
 				const float NearestDepth = Pixel.Depth(Read.MinDepth, Read.MaxDepth, MaxDiscreteDepthValue);
-				const FVector2D ImagePlaneLocationAboveLeft = PixelCoordinateToImagePlaneLocation(FVector2D(Coord.X, Coord.Y));
-				double AzimuthDegNearest, ElevationDegNearest;
-				PerspectiveToSpherical(ImagePlaneLocationAboveLeft, AzimuthDegNearest, ElevationDegNearest);
-				const float NearestDistance = DepthToDistance(AzimuthDegNearest, ElevationDegNearest, NearestDepth);
-				const FVector NearestPoint = SphericalToCartesian(AzimuthDegNearest, ElevationDegNearest, NearestDistance);
+				const FVector NearestDirection(Sample.NearestDirectionUnit);
+				const FVector RayDirectionUnit(Sample.RayDirectionUnit);
+				const float NearestDistance = NearestDepth / Sample.DepthToDistanceDivisor;
+				const FVector NearestPoint = NearestDirection * NearestDistance;
 				const FVector WorldNormal = Pixel.Normal();
 				const FVector LocalNormal = Read.CaptureTransform.InverseTransformVector(WorldNormal);
-				const FVector RayDirection = SphericalToCartesian(AzimuthDeg, ElevationDeg, Read.MaxDistance);
-				const double CosAngleOfIncidence = FVector::DotProduct(LocalNormal.GetSafeNormal(), -RayDirection.GetSafeNormal());
+				// Only the ray's direction matters below — LinePlaneIntersection takes two points on
+				// the line — but keep the MaxDistance scaling so the intersection sees the same
+				// magnitudes it always has.
+				const FVector RayDirection = RayDirectionUnit * Read.MaxDistance;
+				const double CosAngleOfIncidence = FVector::DotProduct(LocalNormal.GetSafeNormal(), -RayDirectionUnit);
 				const double AngleOfIncidence = FMath::RadiansToDegrees(FMath::Acos(CosAngleOfIncidence));
 				double Intensity;
 				double Distance;
@@ -610,10 +697,9 @@ namespace
 				DistancesData[Idx] = QuantityConverter<CM2M>::Convert(Distance);
 				IntensitiesData[Idx] = static_cast<float>(Intensity);
 				LabelsData[Idx] = Pixel.Label();
-				// Negated from the internal (Unreal-local) convention so that client-side
-				// point-cloud math renders in the expected right-handed Z-up frame.
-				AzimuthsData[Idx] = static_cast<float>(FMath::DegreesToRadians(-(AzimuthDeg + Read.RelativeYaw)));
-				ElevationsData[Idx] = static_cast<float>(FMath::DegreesToRadians(-ElevationDeg));
+				// Already negated into the client's right-handed frame, and offset by the tile yaw.
+				AzimuthsData[Idx] = Sample.AzimuthRad;
+				ElevationsData[Idx] = Sample.ElevationRad;
 				// Raw 0-255 reflectivity estimate from the post-process material. Always emitted;
 				// for a non-return (Distance == 0) the value is meaningless but harmless, mirroring
 				// how labels/colors are written unconditionally.
@@ -979,7 +1065,7 @@ void UTempoLidar::RenderCapture()
 				GetEffectiveVerticalFOV(), Tile.HorizontalBeams, GetEffectiveVerticalBeams(), Tile.SizeXYFOV,
 				IntensitySaturationDistance, MaxAngleOfIncidence,
 				NumActiveTiles, Tile.YawOffset, Tile.MinDepth, Tile.MaxDepth,
-				MinDistance, MaxDistance, BeamCalibration));
+				MinDistance, MaxDistance, BeamCalibration, Tile.BeamSamples));
 		};
 		if (bColorEnabled)
 		{
