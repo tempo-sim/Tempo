@@ -12,6 +12,8 @@
 #include "ZoneGraphTypes.h"
 #include "MassNavigationFragments.h"
 #include "MassTrafficLaneChange.h"
+#include "MassTrafficUtils.h"
+#include "ZoneGraphQuery.h"
 #include "ZoneGraphSubsystem.h"
 
 
