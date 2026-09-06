@@ -12,6 +12,9 @@
 // ISceneRenderBuilder interface. The one behavioral addition we carry over is the new per-view
 // FSceneViewInitOptions::SkylightScale (sourced from the capture component); see below.
 // Re-diff and update for any newer engine version.
+#if !(ENGINE_MAJOR_VERSION == 5 && (ENGINE_MINOR_VERSION == 7 || ENGINE_MINOR_VERSION == 8))
+#error "TempoMultiViewCapture is pinned to UE 5.7/5.8 engine internals. Re-diff and update for the new engine version."
+#endif
 
 #include "TempoMultiViewCapture.h"
 
