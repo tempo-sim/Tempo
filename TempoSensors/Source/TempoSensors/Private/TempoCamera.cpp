@@ -19,6 +19,8 @@
 #include "Kismet/GameplayStatics.h"
 #include "Kismet/KismetRenderingLibrary.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "Math/Box2D.h"
+#include "Interfaces/Interface_PostProcessVolume.h"
 #include "Misc/ScopeLock.h"
 #include "TextureResource.h"
 
@@ -57,6 +59,191 @@
 namespace
 {
 	constexpr double MaxPerspectiveFOVPerCapture = 120.0;
+
+	// Bound on the exposure bias the controller may apply, in EV. Wide enough for a physically lit
+	// sun (bias near -20) and a moonless night (bias near +10).
+	constexpr float MaxSharedExposureBias = 24.0f;
+
+	float GetViewStateLastAverageSceneLuminance(FSceneViewStateInterface* ViewState)
+	{
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 7
+		return static_cast<FSceneViewState*>(ViewState)->GetLastAverageSceneLuminance();
+#else
+		return ViewState->GetLastAverageSceneLuminance();
+#endif
+	}
+
+	bool IsExtendedLuminanceRangeEnabled()
+	{
+		static const auto* CVar = IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("r.DefaultFeature.AutoExposure.ExtendDefaultLuminanceRange"));
+		return CVar && CVar->GetValueOnGameThread() != 0;
+	}
+
+	// The engine's LuminanceMaxFromLensAttenuation on the game thread: the luminance that saturates
+	// the sensor at EV100. 1.0 unless the extended luminance range is on, and 1.0 even then at the
+	// default lens attenuation.
+	float GetLuminanceMax()
+	{
+		if (!IsExtendedLuminanceRangeEnabled())
+		{
+			return 1.0f;
+		}
+		static const IConsoleVariable* CVar = IConsoleManager::Get().FindConsoleVariable(TEXT("r.EyeAdaptation.LensAttenuation"));
+		const float LensAttenuation = CVar ? CVar->GetFloat() : 0.78f;
+		constexpr float ISOSaturationSpeedConstant = 0.78f;
+		return ISOSaturationSpeedConstant / FMath::Max(LensAttenuation, 0.01f);
+	}
+
+	// Auto exposure brightness settings are EV100 with the extended luminance range and absolute
+	// luminance otherwise.
+	float BrightnessToLuminance(float Brightness, float LuminanceMax)
+	{
+		return IsExtendedLuminanceRangeEnabled() ? LuminanceMax * FMath::Exp2(Brightness) : Brightness;
+	}
+
+	float LuminanceToBrightness(float Luminance, float LuminanceMax)
+	{
+		return IsExtendedLuminanceRangeEnabled() ? FMath::Log2(Luminance / LuminanceMax) : Luminance;
+	}
+
+	// The auto exposure inputs the controller consumes, resolved the way the engine resolves a view's
+	// final post-process settings: project defaults, then the world's post process volumes at the
+	// view location in priority order, then the component's own overrides.
+	struct FTempoAutoExposureSettings
+	{
+		float Bias = 0.0f;
+		float MinBrightness = 0.0f;
+		float MaxBrightness = 0.0f;
+		float SpeedUp = 3.0f;
+		float SpeedDown = 1.0f;
+		bool bHasBiasCurve = false;
+	};
+
+	// Same blend as FSceneView::OverridePostProcessSettings for these fields.
+	void OverrideAutoExposureSettings(FTempoAutoExposureSettings& Dest, const FPostProcessSettings& Src, float Weight)
+	{
+		if (Src.bOverride_AutoExposureMinBrightness)
+		{
+			Dest.MinBrightness = FMath::Lerp(Dest.MinBrightness, Src.AutoExposureMinBrightness, Weight);
+		}
+		if (Src.bOverride_AutoExposureMaxBrightness)
+		{
+			Dest.MaxBrightness = FMath::Lerp(Dest.MaxBrightness, Src.AutoExposureMaxBrightness, Weight);
+		}
+		if (Src.bOverride_AutoExposureSpeedUp)
+		{
+			Dest.SpeedUp = FMath::Lerp(Dest.SpeedUp, Src.AutoExposureSpeedUp, Weight);
+		}
+		if (Src.bOverride_AutoExposureSpeedDown)
+		{
+			Dest.SpeedDown = FMath::Lerp(Dest.SpeedDown, Src.AutoExposureSpeedDown, Weight);
+		}
+		if (Src.bOverride_AutoExposureBias)
+		{
+			Dest.Bias = FMath::Lerp(Dest.Bias, Src.AutoExposureBias, Weight);
+		}
+		if (Src.bOverride_AutoExposureBiasCurve && Src.AutoExposureBiasCurve)
+		{
+			Dest.bHasBiasCurve = true;
+		}
+	}
+
+	FTempoAutoExposureSettings ResolveAutoExposureSettings(const UWorld* World, const FVector& ViewLocation, const FPostProcessSettings& ComponentSettings, float ComponentWeight)
+	{
+		FPostProcessSettings Base;
+		Base.SetBaseValues();
+
+		FTempoAutoExposureSettings Settings;
+		Settings.Bias = Base.AutoExposureBias;
+		Settings.MinBrightness = Base.AutoExposureMinBrightness;
+		Settings.MaxBrightness = Base.AutoExposureMaxBrightness;
+		Settings.SpeedUp = Base.AutoExposureSpeedUp;
+		Settings.SpeedDown = Base.AutoExposureSpeedDown;
+		Settings.bHasBiasCurve = Base.AutoExposureBiasCurve != nullptr;
+
+		// With auto exposure off as a project default the engine pins the base range to a fixed
+		// exposure of 1 (FSceneView::StartFinalPostprocessSettings).
+		static const auto* DefaultAutoExposureCVar = IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("r.DefaultFeature.AutoExposure"));
+		if (DefaultAutoExposureCVar && DefaultAutoExposureCVar->GetValueOnGameThread() == 0)
+		{
+			constexpr float EngineDefaultLuminanceMax = 1.2f;
+			const float FixedBrightness = IsExtendedLuminanceRangeEnabled() ? FMath::Log2(1.0f / EngineDefaultLuminanceMax) : 1.0f;
+			Settings.MinBrightness = FixedBrightness;
+			Settings.MaxBrightness = FixedBrightness;
+		}
+
+		// UWorld::AddPostProcessingSettings: volumes are kept sorted by ascending priority.
+		if (World)
+		{
+			for (IInterface_PostProcessVolume* Volume : World->PostProcessVolumes)
+			{
+				if (!Volume)
+				{
+					continue;
+				}
+				const FPostProcessVolumeProperties Properties = Volume->GetProperties();
+				if (!Properties.bIsEnabled || !Properties.Settings)
+				{
+					continue;
+				}
+				float Weight = FMath::Clamp(Properties.BlendWeight, 0.0f, 1.0f);
+				if (!Properties.bIsUnbound)
+				{
+					float DistanceToPoint = 0.0f;
+					Volume->EncompassesPoint(ViewLocation, 0.0f, &DistanceToPoint);
+					if (DistanceToPoint < 0.0f || DistanceToPoint > Properties.BlendRadius)
+					{
+						Weight = 0.0f;
+					}
+					else if (Properties.BlendRadius >= 1.0f)
+					{
+						Weight *= 1.0f - DistanceToPoint / Properties.BlendRadius;
+					}
+				}
+				if (Weight > 0.0f)
+				{
+					OverrideAutoExposureSettings(Settings, *Properties.Settings, Weight);
+				}
+			}
+		}
+
+		OverrideAutoExposureSettings(Settings, ComponentSettings, FMath::Clamp(ComponentWeight, 0.0f, 1.0f));
+		return Settings;
+	}
+
+	// The engine's ComputeEyeAdaptation (PostProcessHistogramCommon.ush) on the CPU: move the
+	// smoothed exposure luminance toward the target at the configured f-stops per second, switching
+	// from a linear to an exponential approach within the transition distance of the target.
+	float ComputeEyeAdaptation(float OldLuminance, float TargetLuminance, float DeltaTime, float SpeedUp, float SpeedDown)
+	{
+		static const IConsoleVariable* TransitionCVar = IConsoleManager::Get().FindConsoleVariable(TEXT("r.EyeAdaptation.ExponentialTransitionDistance"));
+		const float StartDistance = FMath::Max(TransitionCVar ? TransitionCVar->GetFloat() : 1.5f, 0.001f);
+
+		const float LogTarget = FMath::Log2(TargetLuminance);
+		const float LogOld = FMath::Log2(OldLuminance);
+		const float LogDiff = LogTarget - LogOld;
+		const float Speed = LogDiff > 0.0f ? SpeedUp : SpeedDown;
+		if (Speed <= UE_KINDA_SMALL_NUMBER || DeltaTime <= 0.0f)
+		{
+			return OldLuminance;
+		}
+
+		// Slope modifier that matches the exponential branch to the linear one at the transition
+		// distance (GetEyeAdaptationParameters).
+		constexpr float FrameTimeEps = 1.0f / 60.0f;
+		const float StartTime = StartDistance / Speed;
+		const float M = FrameTimeEps / ((1.0f - FMath::Exp2(-FrameTimeEps * Speed)) * StartTime);
+
+		const float ExponentialFactor = 1.0f - FMath::Exp2(-DeltaTime * Speed);
+		const float LogExponential = LogOld + LogDiff * ExponentialFactor * M;
+
+		const float LinearOffset = DeltaTime * Speed;
+		const float LogLinear = LogOld < LogTarget
+			? FMath::Min(LogTarget, LogOld + LinearOffset)
+			: FMath::Max(LogTarget, LogOld - LinearOffset);
+
+		return FMath::Exp2(FMath::Abs(LogDiff) > StartDistance ? LogLinear : LogExponential);
+	}
 }
 FTempoCameraIntrinsics::FTempoCameraIntrinsics(const FIntPoint& SizeXY, float HorizontalFOV, const FVector2D& PrincipalPoint)
 	: Fx(SizeXY.X / 2.0 / FMath::Tan(FMath::DegreesToRadians(HorizontalFOV) / 2.0)),
@@ -1073,28 +1260,15 @@ void UTempoCamera::RenderCapture()
 	// on the seam).
 	const float K = FMath::Max(1.0f, UpsamplingFactor);
 
-	float SavedTSRShadingRejectionExposureOffset = 0.0f;
-	IConsoleVariable* TSRShadingRejectionExposureOffsetCVar =
-		IConsoleManager::Get().FindConsoleVariable(TEXT("r.TSR.ShadingRejection.ExposureOffset"));
-	if (!bSingleTileFastPath)
-	{
-		// Push `r.TSR.ShadingRejection.ExposureOffset` for the duration of this camera's renders.
-		// CVar mutation must happen on the game thread — calling Set() on the render thread hits a
-		// check(0) in FConsoleManager::OnCVarChange. The GT path propagates the new value to the RT
-		// shadow via an ENQUEUE_RENDER_COMMAND queued in FIFO order with subsequent renderer commands,
-		// so the bracket on the render thread is set→render→restore. Multiple TempoCameras in the
-		// same frame interleave correctly because each camera's GT push, renders, and GT pop produce
-		// three RT entries in that order. ECVF_SetByConsole is the highest priority and always wins,
-		// avoiding the engine warning about replacing constructor-default priority and silently being
-		// rejected if anything else has touched the CVar.
-		if (TSRShadingRejectionExposureOffsetCVar)
-		{
-			SavedTSRShadingRejectionExposureOffset = TSRShadingRejectionExposureOffsetCVar->GetFloat();
-			// 2.0 multiplier determined to work well empirically...
-			TSRShadingRejectionExposureOffsetCVar->Set(2.0f * SharedExposureBias, ECVF_SetByConsole);
-		}
-	}
-
+	// CVar pushes bracket this camera's renders. CVar mutation must happen on the game thread —
+	// calling Set() on the render thread hits a check(0) in FConsoleManager::OnCVarChange. The GT
+	// path propagates the new value to the RT shadow via an ENQUEUE_RENDER_COMMAND queued in FIFO
+	// order with subsequent renderer commands, so the bracket on the render thread is
+	// set→render→restore. Multiple TempoCameras in the same frame interleave correctly because
+	// each camera's GT push, renders, and GT pop produce three RT entries in that order.
+	// ECVF_SetByConsole is the highest priority and always wins, avoiding the engine warning about
+	// replacing constructor-default priority and silently being rejected if anything else has
+	// touched the CVar.
 	IConsoleVariable* TSRShadingRejectionFlickingFrameRateCapCVar =
 		IConsoleManager::Get().FindConsoleVariable(TEXT("r.TSR.ShadingRejection.Flickering.FrameRateCap"));
 	const float SavedTSRShadingRejectionFlickingFrameRateCap = TSRShadingRejectionFlickingFrameRateCapCVar->GetFloat();
@@ -1159,17 +1333,11 @@ void UTempoCamera::RenderCapture()
 		}
 		SingleActiveTile = &Tile;
 
-		// Multi-tile must run AEM_Manual + a shared EV bias so tiles don't diverge in brightness.
+		// Multi-tile runs manual exposure at the shared bias so tiles can't diverge in brightness.
 		// Re-set every frame so it's clean if we just transitioned out of fast-path.
 		if (!bSingleTileFastPath)
 		{
-			Tile.PostProcessSettings.bOverride_AutoExposureMethod = true;
-			Tile.PostProcessSettings.AutoExposureMethod = AEM_Manual;
-			if (bHasValidSharedExposure)
-			{
-				Tile.PostProcessSettings.bOverride_AutoExposureBias = true;
-				Tile.PostProcessSettings.AutoExposureBias = SharedExposureBias;
-			}
+			ApplyTileExposureSettings(Tile);
 		}
 
 		// Switch the distortion material's label encoding: bit-packed (label + 1 in the fp32
@@ -1287,15 +1455,25 @@ void UTempoCamera::RenderCapture()
 		// Multi-tile: HDR atlas (pre-tonemap) so the proxy capture below can run AE/tonemap once
 		// across the stitched output. Tile-appropriate show flags (no bloom/DOF/motionblur/etc)
 		// differ from the proxy's — swap them around the call.
+		// Eye adaptation stays on: the engine only honors the tiles' AutoExposureBias, and only
+		// computes a PreExposure for them, while it is. Manual exposure keeps it from adapting.
 		const FEngineShowFlags SavedShowFlags = ShowFlags;
 		ShowFlags.SetLocalExposure(false);
-		ShowFlags.SetEyeAdaptation(false);
 		ShowFlags.SetMotionBlur(false);
 		ShowFlags.SetLensFlares(false);
 		ShowFlags.SetBloom(false);
 		ShowFlags.SetColorGrading(false);
 		ShowFlags.SetVignette(false);
 		ShowFlags.SetDepthOfField(false);
+
+		// Record the bias these tiles render with; UpdateSharedExposure divides the proxy's lagging
+		// readback by the exposure of the capture it actually measured.
+		for (int32 Index = AppliedExposureBiasHistoryLength - 1; Index > 0; --Index)
+		{
+			AppliedExposureBiasHistory[Index] = AppliedExposureBiasHistory[Index - 1];
+		}
+		AppliedExposureBiasHistory[0] = SharedExposureBias;
+		++NumMultiTileCapturesSinceExposureSeed;
 
 		TempoMultiViewCapture::RenderTiles(Scene, this, SharedTextureTarget, ViewSetups, ESceneCaptureSource::SCS_FinalColorHDR, ResolutionFraction);
 
@@ -1404,31 +1582,47 @@ void UTempoCamera::RenderCapture()
 
 			// But wait! Lighting actually has to be on in order for exposure bias to be read back on the cpu
 			ShowFlags.SetLighting(true);
+
+			// Pin the proxy to an exposure of exactly 1 so it is only the light meter: the tiles
+			// already carry the camera's exposure (UpdateSharedExposure). A histogram method with an
+			// empty brightness range makes the engine force that one exposure every frame with no
+			// smoothing, while the histogram — whose readback the controller consumes — still runs.
+			// The camera's own range, speed and bias settings are applied by the controller instead.
+			FPostProcessSettings& ProxyPP = PostProcessSettings;
+			const uint8 SavedOverrideMethod = ProxyPP.bOverride_AutoExposureMethod;
+			const uint8 SavedOverrideMinBrightness = ProxyPP.bOverride_AutoExposureMinBrightness;
+			const uint8 SavedOverrideMaxBrightness = ProxyPP.bOverride_AutoExposureMaxBrightness;
+			const uint8 SavedOverrideBias = ProxyPP.bOverride_AutoExposureBias;
+			const TEnumAsByte<EAutoExposureMethod> SavedMethod = ProxyPP.AutoExposureMethod;
+			const float SavedMinBrightness = ProxyPP.AutoExposureMinBrightness;
+			const float SavedMaxBrightness = ProxyPP.AutoExposureMaxBrightness;
+			const float SavedBias = ProxyPP.AutoExposureBias;
+
+			const float MeterBrightness = LuminanceToBrightness(1.0f, GetLuminanceMax());
+			ProxyPP.bOverride_AutoExposureMethod = true;
+			ProxyPP.AutoExposureMethod = AEM_Histogram;
+			ProxyPP.bOverride_AutoExposureMinBrightness = true;
+			ProxyPP.AutoExposureMinBrightness = MeterBrightness;
+			ProxyPP.bOverride_AutoExposureMaxBrightness = true;
+			ProxyPP.AutoExposureMaxBrightness = MeterBrightness;
+			ProxyPP.bOverride_AutoExposureBias = true;
+			ProxyPP.AutoExposureBias = 0.0f;
+
 			CaptureScene();
+
+			ProxyPP.bOverride_AutoExposureMethod = SavedOverrideMethod;
+			ProxyPP.AutoExposureMethod = SavedMethod;
+			ProxyPP.bOverride_AutoExposureMinBrightness = SavedOverrideMinBrightness;
+			ProxyPP.AutoExposureMinBrightness = SavedMinBrightness;
+			ProxyPP.bOverride_AutoExposureMaxBrightness = SavedOverrideMaxBrightness;
+			ProxyPP.AutoExposureMaxBrightness = SavedMaxBrightness;
+			ProxyPP.bOverride_AutoExposureBias = SavedOverrideBias;
+			ProxyPP.AutoExposureBias = SavedBias;
 			ShowFlags = PrevShowFlags;
 		}
 	}
 
-	// Update SharedExposureBias from whichever view state ran the AE pass this frame.
-	{
-		FSceneViewStateInterface* SourceViewState = bSingleTileFastPath
-			? (SingleActiveTile ? SingleActiveTile->ViewState.GetReference() : nullptr)
-			: GetViewState(0);
-		if (SourceViewState)
-		{
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 7
-			const float Lum = static_cast<FSceneViewState*>(SourceViewState)->GetLastAverageSceneLuminance();
-#else
-			const float Lum = SourceViewState->GetLastAverageSceneLuminance();
-#endif
-			if (Lum > 0.0f)
-			{
-				constexpr float TargetMidGrey = 0.18f;
-				SharedExposureBias = FMath::Log2(TargetMidGrey / FMath::Max(Lum, static_cast<float>(KINDA_SMALL_NUMBER)));
-				bHasValidSharedExposure = true;
-			}
-		}
-	}
+	UpdateSharedExposure(bSingleTileFastPath, SingleActiveTile);
 
 	if (!bSingleTileFastPath)
 	{
@@ -1469,17 +1663,9 @@ void UTempoCamera::RenderCapture()
 			CapturedVideoSequenceId = CapturedVideoSequenceIdThisFrame;
 		});
 
-	// Pop: restore the prior CVar value. The propagation render command queued by Set() on
+	// Pop: restore the prior CVar values. The propagation render command queued by Set() on
 	// GT lands in RT FIFO after every render command this camera enqueued above, so each
 	// camera's renders consume the camera's own override before the restore takes effect.
-	if (!bSingleTileFastPath)
-	{
-		if (TSRShadingRejectionExposureOffsetCVar)
-		{
-			TSRShadingRejectionExposureOffsetCVar->Set(SavedTSRShadingRejectionExposureOffset, ECVF_SetByConsole);
-		}
-	}
-
 	if (TSRShadingRejectionFlickingFrameRateCapCVar)
 	{
 		TSRShadingRejectionFlickingFrameRateCapCVar->Set(SavedTSRShadingRejectionFlickingFrameRateCap, ECVF_SetByConsole);
@@ -1957,9 +2143,9 @@ void UTempoCamera::ApplyTilePostProcess(FTempoCameraTile& Tile)
 	Tile.PostProcessSettings = PostProcessSettings;
 
 	// Tiles must not do any per-tile exposure adaptation — divergent per-tile ViewStates would
-	// produce mismatched brightness across the stitched image. Tonemap runs once on the proxy.
-	Tile.PostProcessSettings.bOverride_AutoExposureMethod = true;
-	Tile.PostProcessSettings.AutoExposureMethod = AEM_Manual;
+	// produce mismatched brightness across the stitched image. Every tile gets the same manual
+	// exposure from the shared controller; tonemap runs once on the proxy.
+	ApplyTileExposureSettings(Tile);
 
 	// Rebuild blendables from the owner's user-authored list, filter out ProxyTonemapMID (it reads
 	// the post-stitch HDR target, and applying it inside a tile would feed last-frame's stitched
@@ -1972,12 +2158,138 @@ void UTempoCamera::ApplyTilePostProcess(FTempoCameraTile& Tile)
 	{
 		Tile.PostProcessSettings.WeightedBlendables.Array.Add(FWeightedBlendable(1.0, Tile.PostProcessMaterialInstance));
 	}
+}
 
-	if (bHasValidSharedExposure)
+void UTempoCamera::ApplyTileExposureSettings(FTempoCameraTile& Tile) const
+{
+	FPostProcessSettings& PP = Tile.PostProcessSettings;
+
+	// Manual exposure at the shared bias. With the physical camera off the white point sits at
+	// EV100 0, so the tile's exposure — and its PreExposure — is 2^SharedExposureBias / LuminanceMax,
+	// identical for every tile.
+	PP.bOverride_AutoExposureMethod = true;
+	PP.AutoExposureMethod = AEM_Manual;
+	PP.bOverride_AutoExposureBias = true;
+	PP.AutoExposureBias = SharedExposureBias;
+
+	// Physical camera exposure is a manual-mode feature the camera's histogram auto exposure never
+	// applied; folding ISO/aperture/shutter into the tiles would double it up with the controller.
+	PP.bOverride_AutoExposureApplyPhysicalCameraExposure = true;
+	PP.AutoExposureApplyPhysicalCameraExposure = false;
+
+	// A bias curve keyed on a tile's own, unmetered luminance would add an arbitrary compensation.
+	// The controller applies the camera's bias in one place.
+	PP.bOverride_AutoExposureBiasCurve = false;
+	PP.AutoExposureBiasCurve = nullptr;
+}
+
+void UTempoCamera::UpdateSharedExposure(bool bSingleTileFastPath, FTempoCameraTile* SingleActiveTile)
+{
+	const UWorld* World = GetWorld();
+	if (!World)
 	{
-		Tile.PostProcessSettings.bOverride_AutoExposureBias = true;
-		Tile.PostProcessSettings.AutoExposureBias = SharedExposureBias;
+		return;
 	}
+
+	// A tile at bias B renders at a manual exposure of 2^B / LuminanceMax (ApplyTileExposureSettings).
+	const float LuminanceMax = GetLuminanceMax();
+	const auto TileExposureFromBias = [LuminanceMax](float Bias)
+	{
+		return FMath::Exp2(Bias) / LuminanceMax;
+	};
+	const auto BiasFromTileExposure = [LuminanceMax](float Exposure)
+	{
+		return FMath::Clamp(FMath::Log2(FMath::Max(Exposure * LuminanceMax, UE_SMALL_NUMBER)), -MaxSharedExposureBias, MaxSharedExposureBias);
+	};
+
+	const FTempoAutoExposureSettings AE = ResolveAutoExposureSettings(World, GetComponentLocation(), PostProcessSettings, PostProcessBlendWeight);
+	if (AE.bHasBiasCurve && !bWarnedAboutExposureBiasCurve)
+	{
+		UE_LOG(LogTempoSensors, Warning, TEXT("Camera %s: an AutoExposureBiasCurve is set but the multi-tile exposure controller does not evaluate it; only AutoExposureBias applies."), *GetName());
+		bWarnedAboutExposureBiasCurve = true;
+	}
+
+	if (bSingleTileFastPath)
+	{
+		// The tile runs the engine's histogram auto exposure itself. Mirror its result into the
+		// controller so a switch into the multi-tile path continues from the same exposure.
+		FSceneViewStateInterface* TileViewState = SingleActiveTile ? SingleActiveTile->ViewState.GetReference() : nullptr;
+		const float TileExposure = TileViewState ? TileViewState->GetLastEyeAdaptationExposure() : 0.0f;
+		if (TileExposure > 0.0f)
+		{
+			SmoothedSceneLuminance = FMath::Exp2(AE.Bias) / TileExposure;
+			SharedExposureBias = BiasFromTileExposure(TileExposure);
+			for (float& AppliedBias : AppliedExposureBiasHistory)
+			{
+				AppliedBias = SharedExposureBias;
+			}
+			LastSharedExposureUpdateTime = World->GetTimeSeconds();
+			NumMultiTileCapturesSinceExposureSeed = 0;
+			bHasValidSharedExposure = true;
+		}
+		return;
+	}
+
+	// The readback lags by about two captures. Until that many multi-tile captures have rendered
+	// since the last seed, whatever the proxy reports is of an image whose exposure is unknown.
+	if (NumMultiTileCapturesSinceExposureSeed < AppliedExposureBiasHistoryLength - 1)
+	{
+		return;
+	}
+
+	FSceneViewStateInterface* ProxyViewState = GetViewState(0);
+	if (!ProxyViewState)
+	{
+		return;
+	}
+
+	// Nothing to do until the first histogram readback has landed (about two captures in).
+	const float MeasuredLuminance = GetViewStateLastAverageSceneLuminance(ProxyViewState);
+	if (MeasuredLuminance <= 0.0f)
+	{
+		return;
+	}
+
+	// The readback measured the stitched image, which already carries the bias its tiles rendered
+	// with. Undo that to recover the scene luminance the engine's rules are written against.
+	const float AppliedExposure = TileExposureFromBias(AppliedExposureBiasHistory[AppliedExposureBiasHistoryLength - 1]);
+	const float SceneLuminance = MeasuredLuminance / AppliedExposure;
+
+	// GetEyeAdaptationParameters + EyeAdaptationCommon: clamp the metered luminance to the configured
+	// range, adapt toward it, and expose so that it lands on middle grey times the compensation.
+	constexpr float MiddleGrey = 0.18f;
+	const float MaxWhitePointLuminance = BrightnessToLuminance(AE.MaxBrightness, LuminanceMax);
+	const float MinWhitePointLuminance = FMath::Min(BrightnessToLuminance(AE.MinBrightness, LuminanceMax), MaxWhitePointLuminance);
+	const float TargetLuminance = FMath::Clamp(SceneLuminance, MinWhitePointLuminance * MiddleGrey, MaxWhitePointLuminance * MiddleGrey) / MiddleGrey;
+
+	// The engine snaps to the target on a camera cut, with an empty range, or with invalid speeds.
+	const double Now = World->GetTimeSeconds();
+	const bool bSnapToTarget = !bHasValidSharedExposure
+		|| LastSharedExposureUpdateTime < 0.0
+		|| !(AE.MinBrightness < AE.MaxBrightness)
+		|| AE.SpeedUp < 0.0f
+		|| AE.SpeedDown < 0.0f;
+	if (bSnapToTarget)
+	{
+		SmoothedSceneLuminance = TargetLuminance;
+	}
+	else
+	{
+		const float DeltaTime = static_cast<float>(Now - LastSharedExposureUpdateTime);
+		SmoothedSceneLuminance = ComputeEyeAdaptation(FMath::Max(SmoothedSceneLuminance, UE_SMALL_NUMBER), TargetLuminance, DeltaTime, AE.SpeedUp, AE.SpeedDown);
+	}
+	SmoothedSceneLuminance = FMath::Clamp(SmoothedSceneLuminance, MinWhitePointLuminance, MaxWhitePointLuminance);
+	LastSharedExposureUpdateTime = Now;
+
+	const float ExposureScale = FMath::Exp2(AE.Bias) / FMath::Max(SmoothedSceneLuminance, 0.0001f);
+
+	// The proxy meter is pinned to an exposure of 1. Fold in whatever it actually reports so that,
+	// say, a partial PostProcessBlendWeight cannot double-expose the output.
+	const float ProxyExposure = ProxyViewState->GetLastEyeAdaptationExposure();
+	const float ProxyGain = ProxyExposure > 0.0f ? ProxyExposure : 1.0f;
+
+	SharedExposureBias = BiasFromTileExposure(ExposureScale / ProxyGain);
+	bHasValidSharedExposure = true;
 }
 
 void UTempoCamera::ConfigureTile(FTempoCameraTile& Tile, double YawOffset, double PitchOffset, double FOutput, const FIntPoint& TileSizeXY, const FIntPoint& TileDestOffset, const FIntPoint& OwnedOffset, const FIntPoint& OwnedSize, double AxisShiftXRd, double AxisShiftYRd, bool bActivate)
