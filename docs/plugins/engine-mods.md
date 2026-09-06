@@ -20,8 +20,6 @@ On the supported engine versions (5.7 and 5.8):
 | `Engine/Source/Programs/AutomationTool` | 1 file added | Build configuration. |
 | `Engine/Source/Programs/Shared/EpicGames.Perforce` | 1 patch | Build configuration. |
 
-UE 5.6 additionally patched `Engine/Plugins/PCG`; that mod is not needed on 5.7 or later.
-
 ## ZoneGraph
 
 ZoneGraph is Unreal's lane-graph representation. Stock, it is built from hand-placed zone shapes
@@ -119,7 +117,7 @@ These do not change engine behavior — they make Tempo buildable against an ins
 |---|---|
 | `TempoModuleRules.cs` | A `ModuleRules` subclass that automatically adds the include paths for generated protobuf code, so every Tempo module does not have to. |
 | `TempoMacToolChain.cs`, `TempoLinuxToolChain.cs`, `TempoVCToolChain.cs` | Toolchain subclasses overriding `LinkFiles` and `ModifyFinalLinkArguments`, for the link-time handling Tempo's third-party dependencies need. |
-| `UEBuildTarget.cs` patches | Let UBT build `ZoneGraph`, `MassCrowd` (and on 5.6, `PCG`) and their editor modules from source in an installed engine — without this, the patched sources above would never be compiled. |
+| `UEBuildTarget.cs` patches | Let UBT build `ZoneGraph` and `MassCrowd` and their editor modules from source in an installed engine — without this, the patched sources above would never be compiled. |
 | `AutomationTool`, `EpicGames.Perforce` | Small build-configuration adjustments. |
 
 ## See also
