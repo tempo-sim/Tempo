@@ -15,35 +15,35 @@ in the `sensors` group, which is intentionally NOT part of the default CI matrix
 
 Locally:  TEMPO_SIM_RENDER=1 Scripts/TestPythonAPI.sh sensors
 
-## Level requirements
+## The test level
 
-The scene-independent checks (band seams, cross-type agreement, sequence continuity) run against
-whatever level the packaged sim loads. The sharpest checks — frame identity and tearing — need
-geometry in front of the camera, and the test says so explicitly rather than passing vacuously:
+The tests load their own level, /TempoSensors/Maps/TempoSensorsTest, rather than using whatever map
+the sim starts in. Both the level and the rig (BP_SensorRig) ship with this plugin, so nothing here
+depends on the host project.
 
-  * `test_frame_matches_its_header` needs anything solid in front of the camera. It skips, with
-    instructions, if the camera sees only sky.
-  * `test_no_tearing_within_a_frame` needs a flat surface perpendicular to the view axis filling
-    the frame, so that every pixel has the same depth and a mix of two captures is unmissable. It
-    falls back to a weaker check otherwise.
+The level has to hold up its end, because several checks are only meaningful with the right
+geometry in front of the camera:
 
-To get the strongest version, point TEMPO_TEST_RIG_ORIGIN at a spot in your level facing a large
-flat wall — or build a level for it:
+  * A large flat wall perpendicular to +X, roughly 20 m down the axis from the origin and wide
+    enough to fill the frame. Depth is measured along the camera axis, so a perpendicular wall
+    reads the same value at every pixel — which is what makes a frame built from two captures
+    unmissable in `test_no_tearing_within_a_frame`. Without it that test falls back to a weaker
+    row-population check.
+  * Something solid in front of the camera at all times, so `test_frame_matches_its_header` has a
+    range to compare against. It skips, with instructions, if the camera sees only sky.
+  * Two or three distinct labeled meshes between the camera and the wall, offset so they do not
+    overlap in the image. These give `test_measurement_types_agree` bounding boxes to cross-check
+    against the label image, and give the band-seam check some texture to work with.
+  * Nothing moving, and no animated or flickering lights. The tests rely on the scene being static
+    so that only the camera's motion changes the image.
 
-  1. New Basic level. Delete the floor if it is in shot.
-  2. Add a Cube, scale it to (1, 40, 40), place it at Unreal location (2000, 0, 0). That is a wall
-     20 m down +X from the origin, spanning far enough to fill the frame.
-  3. Add two or three distinct static meshes between x = 500 and x = 1500, offset in Y and Z so
-     they do not overlap in the image. These give the bounding box cross-check something to chew
-     on. Make sure they are labeled (see the TempoSensors label table).
-  4. No moving actors, no animated or flickering lights: the test relies on the scene being static
-     so that only the camera's motion changes the image.
-  5. Save as e.g. /Game/Maps/ReadbackTest, set it as GameDefaultMap, and repackage.
-
-Then run with the defaults (rig origin 0,0,0 looking down +X).
+Plugin content is only cooked when something references it, and nothing in a host project
+references this map. TempoSensors/Config/DefaultGame.ini adds it to DirectoriesToAlwaysCook so it
+survives packaging; if the tests skip saying the level is missing, that is the first thing to check.
 
 ## Environment
 
+  TEMPO_TEST_LEVEL        Level to load. Default "/TempoSensors/Maps/TempoSensorsTest".
   TEMPO_TEST_RIG_ORIGIN   "x,y,z" in meters, Tempo right-handed frame. Default "0,0,1".
   TEMPO_TEST_RIG_TYPE     Actor type to spawn. Default "BP_SensorRig".
 """
@@ -63,6 +63,7 @@ import tempo_sim.TempoCore.Geometry_pb2 as Geometry
 
 pytestmark = pytest.mark.sensors
 
+LEVEL = os.environ.get("TEMPO_TEST_LEVEL", "/TempoSensors/Maps/TempoSensorsTest")
 RIG_TYPE = os.environ.get("TEMPO_TEST_RIG_TYPE", "BP_SensorRig")
 RIG_ORIGIN = tuple(float(v) for v in os.environ.get("TEMPO_TEST_RIG_ORIGIN", "0,0,1").split(","))
 
@@ -143,12 +144,42 @@ async def _capture_frames(owner, sensor, num_frames, move_camera=True):
 
 
 @pytest.fixture
-def camera_rig(fixed_step):
+def readback_level(sim_server):
+    """Load the plugin's own test level, so the tests own their scene."""
+    available = tc.get_available_levels(search_path="/TempoSensors").levels
+    if LEVEL not in available:
+        pytest.skip(
+            f"{LEVEL} is not in this build. Levels found under /TempoSensors: "
+            f"{list(available) or 'none'}. Plugin content is only cooked when something references "
+            "it, and nothing in a host project references this map — check that "
+            'TempoSensors/Config/DefaultGame.ini contributes +DirectoriesToAlwaysCook=(Path='
+            '"/TempoSensors/Maps") and repackage.'
+        )
+
+    # LoadLevel defers its response until the new world is up, so this returns loaded.
+    tc.load_level(level=LEVEL)
+    return LEVEL
+
+
+@pytest.fixture
+def camera_rig(readback_level, fixed_step):
     """Spawn the sensor rig at a known pose with identity rotation and yield (owner, sensor).
 
     Identity rotation keeps the camera's forward axis along +X, which is what lets the test move
     the camera along its own view axis without reasoning about rotation conventions.
+
+    readback_level is requested before fixed_step so the level swap happens first: loading a level
+    destroys every actor, and it also resets the clock that fixed_step pauses and primes.
     """
+    # Verify that ordering rather than trusting it — a silent reversal would leave the tests running
+    # against the wrong scene, which is exactly the kind of vacuous pass they exist to avoid.
+    expected_level = readback_level.rsplit("/", 1)[-1]
+    current_level = tc.get_current_level_name().level
+    assert current_level == expected_level, (
+        f"expected to be on {expected_level} but the sim is on {current_level}; the level fixture "
+        "must be set up before fixed_step."
+    )
+
     spawned = tw.spawn_actor(
         actor_type=RIG_TYPE,
         transform=Geometry.Transform(
