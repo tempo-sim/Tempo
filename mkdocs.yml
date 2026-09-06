@@ -147,6 +147,8 @@ nav:
       - plugins/tempo-pcg.md
       - plugins/tempo-ros.md
       - plugins/tempo-ros-bridge.md
+      - plugins/traffic.md
+      - plugins/engine-mods.md
   - Client APIs:
       - clients/index.md
       - clients/connecting.md
