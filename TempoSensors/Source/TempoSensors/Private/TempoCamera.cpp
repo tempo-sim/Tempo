@@ -1260,34 +1260,6 @@ void UTempoCamera::RenderCapture()
 	// on the seam).
 	const float K = FMath::Max(1.0f, UpsamplingFactor);
 
-	// CVar pushes bracket this camera's renders. CVar mutation must happen on the game thread —
-	// calling Set() on the render thread hits a check(0) in FConsoleManager::OnCVarChange. The GT
-	// path propagates the new value to the RT shadow via an ENQUEUE_RENDER_COMMAND queued in FIFO
-	// order with subsequent renderer commands, so the bracket on the render thread is
-	// set→render→restore. Multiple TempoCameras in the same frame interleave correctly because
-	// each camera's GT push, renders, and GT pop produce three RT entries in that order.
-	// ECVF_SetByConsole is the highest priority and always wins, avoiding the engine warning about
-	// replacing constructor-default priority and silently being rejected if anything else has
-	// touched the CVar.
-	IConsoleVariable* TSRShadingRejectionFlickingFrameRateCapCVar =
-		IConsoleManager::Get().FindConsoleVariable(TEXT("r.TSR.ShadingRejection.Flickering.FrameRateCap"));
-	const float SavedTSRShadingRejectionFlickingFrameRateCap = TSRShadingRejectionFlickingFrameRateCapCVar->GetFloat();
-	TSRShadingRejectionFlickingFrameRateCapCVar->Set(RateHz, ECVF_SetByConsole);
-
-	// Lumen probe gather temporal filter is the dominant source of *Lumen* ghost trails — it
-	// blends each probe's radiance with prior frames so noise stays low, but in dim scenes the
-	// signal is weak and history dominates, so moving objects leave a Lumen-shaped trail behind
-	// them. Disabling it (0) trades temporal smoothness for accurate per-frame Lumen; the bumped
-	// LumenFinalGatherQuality in the constructor compensates by reducing the input noise.
-	int32 SavedLumenScreenProbeTemporalFilter = 1;
-	IConsoleVariable* LumenScreenProbeTemporalFilterCVar =
-		IConsoleManager::Get().FindConsoleVariable(TEXT("r.Lumen.ScreenProbeGather.TemporalFilterProbes"));
-	if (LumenScreenProbeTemporalFilterCVar)
-	{
-		SavedLumenScreenProbeTemporalFilter = LumenScreenProbeTemporalFilterCVar->GetInt();
-		LumenScreenProbeTemporalFilterCVar->Set(TEXT("0"), ECVF_SetByConsole);
-	}
-
 	// Per-tile view origin (shared across tiles) — the camera's world location.
 	const FTransform CameraWorld = GetComponentToWorld();
 	const FVector ViewLocation = CameraWorld.GetTranslation();
@@ -1452,11 +1424,11 @@ void UTempoCamera::RenderCapture()
 	}
 	else
 	{
-		// Multi-tile: HDR atlas (pre-tonemap) so the proxy capture below can run AE/tonemap once
+		// Multi-tile: HDR atlas (pre-tonemap) so the proxy capture below can meter and tonemap once
 		// across the stitched output. Tile-appropriate show flags (no bloom/DOF/motionblur/etc)
-		// differ from the proxy's — swap them around the call.
-		// Eye adaptation stays on: the engine only honors the tiles' AutoExposureBias, and only
-		// computes a PreExposure for them, while it is. Manual exposure keeps it from adapting.
+		// differ from the proxy's — swap them around the call. The EyeAdaptation show flag must
+		// remain set for the tiles: the engine only honors their AutoExposureBias, and only computes
+		// a PreExposure for them, while it is. Manual exposure is what stops them from adapting.
 		const FEngineShowFlags SavedShowFlags = ShowFlags;
 		ShowFlags.SetLocalExposure(false);
 		ShowFlags.SetMotionBlur(false);
@@ -1662,19 +1634,6 @@ void UTempoCamera::RenderCapture()
 		{
 			CapturedVideoSequenceId = CapturedVideoSequenceIdThisFrame;
 		});
-
-	// Pop: restore the prior CVar values. The propagation render command queued by Set() on
-	// GT lands in RT FIFO after every render command this camera enqueued above, so each
-	// camera's renders consume the camera's own override before the restore takes effect.
-	if (TSRShadingRejectionFlickingFrameRateCapCVar)
-	{
-		TSRShadingRejectionFlickingFrameRateCapCVar->Set(SavedTSRShadingRejectionFlickingFrameRateCap, ECVF_SetByConsole);
-	}
-
-	if (LumenScreenProbeTemporalFilterCVar)
-	{
-		LumenScreenProbeTemporalFilterCVar->Set(*FString::FromInt(SavedLumenScreenProbeTemporalFilter), ECVF_SetByConsole);
-	}
 
 	TextureReadQueue.Enqueue(MoveTemp(NewRead));
 }
@@ -2172,8 +2131,9 @@ void UTempoCamera::ApplyTileExposureSettings(FTempoCameraTile& Tile) const
 	PP.bOverride_AutoExposureBias = true;
 	PP.AutoExposureBias = SharedExposureBias;
 
-	// Physical camera exposure is a manual-mode feature the camera's histogram auto exposure never
-	// applied; folding ISO/aperture/shutter into the tiles would double it up with the controller.
+	// The controller reproduces histogram auto exposure, in which the physical camera settings play
+	// no part. Left on, manual mode's physical camera would fold ISO, aperture and shutter into the
+	// tiles on top of it.
 	PP.bOverride_AutoExposureApplyPhysicalCameraExposure = true;
 	PP.AutoExposureApplyPhysicalCameraExposure = false;
 
