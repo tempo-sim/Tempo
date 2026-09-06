@@ -1,0 +1,20 @@
+/* Tempo documentation - small refinements on top of mkdocs-material. */
+
+/* Reference tables (proto fields, settings, script flags) are dense and often
+   have a long final column. Keep them from wrapping the type/name columns. */
+.md-typeset table:not([class]) td:first-child,
+.md-typeset table:not([class]) th:first-child {
+  white-space: nowrap;
+}
+
+/* Wide tables and generated API tables scroll rather than squeezing the page. */
+.md-typeset__table {
+  min-width: 100%;
+}
+
+/* Generated gRPC reference: give each RPC/message heading a little more air so
+   the long pages stay scannable. */
+.md-typeset h3 code,
+.md-typeset h4 code {
+  font-size: inherit;
+}

@@ -1,0 +1,15 @@
+# Read the Docs build dependencies for the Tempo documentation site.
+#
+# The MkDocs/Material stack is pinned for reproducible builds. grpcio-tools and
+# protobuf carry floor pins only: gen_api_reference.py invokes protoc through
+# them, and the wheel that is available varies with the Python the build runs on
+# (Read the Docs uses the version in .readthedocs.yaml; contributors building
+# locally may be on something older).
+
+mkdocs==1.6.1
+mkdocs-material==9.6.9
+mkdocs-gen-files==0.5.0
+mkdocs-literate-nav==0.6.2
+
+grpcio-tools>=1.60
+protobuf>=4.25
