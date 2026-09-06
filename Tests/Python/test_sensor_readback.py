@@ -199,15 +199,26 @@ def readback_level(sim_server):
 
     # Left loaded on purpose. Reloading on teardown would cost another transition, and the tests
     # that follow in this session are better off on a level that has a sensor rig in it.
-    yield LEVEL
+    return LEVEL
 
-    # Hand the sim back running. The fixed_step fixture pauses the clock and nothing else unpauses
-    # it, so without this every later test in the session that waits on a rendered frame — such as
-    # test_sensors.py's streaming test — blocks forever on a sim that will never tick.
+
+@pytest.fixture(autouse=True)
+def leave_sim_running():
+    """Hand the sim back running after every test in this module.
+
+    fixed_step pauses the clock and nothing else unpauses it, so anything later in the session that
+    waits on a rendered frame — test_sensors.py's streaming test, say — blocks forever on a sim
+    that will never tick. This has to be per-test rather than per-session: a session-scoped teardown
+    runs after the whole session, which is far too late to help the tests that follow this file.
+
+    autouse with no dependencies means it is set up before the fixtures each test requests, so it
+    tears down after them and gets the last word on the sim's state.
+    """
+    yield
     try:
         tc.set_time_mode(time_mode=Time.TM_WALL_CLOCK)
         tc.play()
-    except Exception as error:  # nothing left to protect if teardown cannot reach the sim
+    except Exception as error:  # teardown only; the results are already collected
         print(f"Warning: could not restore the sim to a running state: {error!r}")
 
 
