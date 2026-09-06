@@ -8,6 +8,8 @@
 #include "MassExecutionContext.h"
 #include "MassZoneGraphNavigationFragments.h"
 #include "MassTrafficLaneChange.h"
+#include "MassTrafficUtils.h"
+#include "ZoneGraphQuery.h"
 #include "Async/Async.h"
 #include "ZoneGraphSubsystem.h"
 
