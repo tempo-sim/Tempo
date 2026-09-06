@@ -12,6 +12,7 @@
 #include "TempoSensorsUtils.h"
 
 #include "CanvasItem.h"
+#include "Curves/CurveFloat.h"
 #include "Engine/Canvas.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "Engine/Texture2D.h"
@@ -116,7 +117,7 @@ namespace
 		float MaxBrightness = 0.0f;
 		float SpeedUp = 3.0f;
 		float SpeedDown = 1.0f;
-		bool bHasBiasCurve = false;
+		const UCurveFloat* BiasCurve = nullptr;
 	};
 
 	// Same blend as FSceneView::OverridePostProcessSettings for these fields.
@@ -144,7 +145,7 @@ namespace
 		}
 		if (Src.bOverride_AutoExposureBiasCurve && Src.AutoExposureBiasCurve)
 		{
-			Dest.bHasBiasCurve = true;
+			Dest.BiasCurve = Src.AutoExposureBiasCurve;
 		}
 	}
 
@@ -159,7 +160,7 @@ namespace
 		Settings.MaxBrightness = Base.AutoExposureMaxBrightness;
 		Settings.SpeedUp = Base.AutoExposureSpeedUp;
 		Settings.SpeedDown = Base.AutoExposureSpeedDown;
-		Settings.bHasBiasCurve = Base.AutoExposureBiasCurve != nullptr;
+		Settings.BiasCurve = Base.AutoExposureBiasCurve;
 
 		// With auto exposure off as a project default the engine pins the base range to a fixed
 		// exposure of 1 (FSceneView::StartFinalPostprocessSettings).
@@ -2138,7 +2139,7 @@ void UTempoCamera::ApplyTileExposureSettings(FTempoCameraTile& Tile) const
 	PP.AutoExposureApplyPhysicalCameraExposure = false;
 
 	// A bias curve keyed on a tile's own, unmetered luminance would add an arbitrary compensation.
-	// The controller applies the camera's bias in one place.
+	// The controller evaluates the camera's curve against the metered scene instead.
 	PP.bOverride_AutoExposureBiasCurve = false;
 	PP.AutoExposureBiasCurve = nullptr;
 }
@@ -2163,11 +2164,6 @@ void UTempoCamera::UpdateSharedExposure(bool bSingleTileFastPath, FTempoCameraTi
 	};
 
 	const FTempoAutoExposureSettings AE = ResolveAutoExposureSettings(World, GetComponentLocation(), PostProcessSettings, PostProcessBlendWeight);
-	if (AE.bHasBiasCurve && !bWarnedAboutExposureBiasCurve)
-	{
-		UE_LOG(LogTempoSensors, Warning, TEXT("Camera %s: an AutoExposureBiasCurve is set but the multi-tile exposure controller does not evaluate it; only AutoExposureBias applies."), *GetName());
-		bWarnedAboutExposureBiasCurve = true;
-	}
 
 	if (bSingleTileFastPath)
 	{
@@ -2241,7 +2237,17 @@ void UTempoCamera::UpdateSharedExposure(bool bSingleTileFastPath, FTempoCameraTi
 	SmoothedSceneLuminance = FMath::Clamp(SmoothedSceneLuminance, MinWhitePointLuminance, MaxWhitePointLuminance);
 	LastSharedExposureUpdateTime = Now;
 
-	const float ExposureScale = FMath::Exp2(AE.Bias) / FMath::Max(SmoothedSceneLuminance, 0.0001f);
+	// GetAutoExposureCompensationFromCurve: the bias curve is keyed on the metered scene's EV100
+	// (the unsmoothed average luminance, remapped from middle grey to white) and applied without
+	// smoothing, so the exposure compensation responds immediately to what the scene is doing.
+	float Bias = AE.Bias;
+	if (AE.BiasCurve)
+	{
+		const float SceneEV100 = FMath::Log2(SceneLuminance / LuminanceMax) + FMath::Log2(1.0f / MiddleGrey);
+		Bias += AE.BiasCurve->GetFloatValue(SceneEV100);
+	}
+
+	const float ExposureScale = FMath::Exp2(Bias) / FMath::Max(SmoothedSceneLuminance, 0.0001f);
 
 	// The proxy meter is pinned to an exposure of 1. Fold in whatever it actually reports so that,
 	// say, a partial PostProcessBlendWeight cannot double-expose the output.

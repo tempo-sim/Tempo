@@ -587,8 +587,6 @@ protected:
 	// controller waits until a readback can only be of a capture it has the applied bias for.
 	int32 NumMultiTileCapturesSinceExposureSeed = 0;
 
-	bool bWarnedAboutExposureBiasCurve = false;
-
 	// Step the exposure controller once per capture: from the proxy's readback in the multi-tile
 	// path, or seeded from the tile's own auto exposure in the fast path so a later switch into the
 	// multi-tile path starts at the exposure the scene already has.
