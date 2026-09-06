@@ -37,9 +37,13 @@ geometry in front of the camera:
   * Nothing moving, and no animated or flickering lights. The tests rely on the scene being static
     so that only the camera's motion changes the image.
 
-Plugin content is only cooked when something references it, and nothing in a host project
-references this map. TempoSensors/Config/DefaultGame.ini adds it to DirectoriesToAlwaysCook so it
-survives packaging; if the tests skip saying the level is missing, that is the first thing to check.
+Plugin content is only cooked when a map hard-references it. This level is referenced by nothing in
+a host project, and the camera's post-process materials and the label table are referenced only
+through TSoftObjectPtr fields on UTempoSensorsSettings, which the cooker never walks. So none of it
+reaches a packaged build on its own. TempoSensors/Config/DefaultGame.ini puts the whole plugin
+content directory in DirectoriesToAlwaysCook to cover both. If these tests skip saying the level is
+missing, or the sim logs "PostProcessMaterialNoDepth is not set in TempoSensors settings", that
+config not making it into the package is the first thing to check.
 
 ## Environment
 
@@ -53,6 +57,7 @@ import math
 import os
 import statistics
 import struct
+import time
 
 import pytest
 
@@ -60,6 +65,7 @@ import tempo_sim.tempo_core as tc
 import tempo_sim.tempo_sensors as ts
 import tempo_sim.tempo_world as tw
 import tempo_sim.TempoCore.Geometry_pb2 as Geometry
+import tempo_sim.TempoSensors.Sensors_pb2 as SensorsPb
 
 pytestmark = pytest.mark.sensors
 
@@ -83,6 +89,10 @@ DEPTH_TOL_M = 0.05
 
 # Ray length for the ground-truth raycast, in meters.
 MAX_RAY_M = 500.0
+
+# How long to wait for the test level to come up. A level swap tears the gRPC services down and
+# back up, so the first calls after it can fail before they start answering.
+LEVEL_LOAD_TIMEOUT_S = 120.0
 
 
 def _vec(x, y, z):
@@ -143,60 +153,106 @@ async def _capture_frames(owner, sensor, num_frames, move_camera=True):
     return frames
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def readback_level(sim_server):
-    """Load the plugin's own test level, so the tests own their scene."""
+    """Load the plugin's test level once for the whole session.
+
+    Session-scoped deliberately. Loading a level is destructive — it tears the world down, destroys
+    every actor and resets the clock — so doing it per test fought the function-scoped fixed_step
+    fixture and produced "Step was aborted by an external pause or unpause". Session scope also
+    fixes the ordering: pytest sets higher-scoped fixtures up first, so the level is guaranteed to
+    be in place before fixed_step pauses and primes the clock.
+    """
     available = tc.get_available_levels(search_path="/TempoSensors").levels
     if LEVEL not in available:
         pytest.skip(
             f"{LEVEL} is not in this build. Levels found under /TempoSensors: "
             f"{list(available) or 'none'}. Plugin content is only cooked when something references "
-            "it, and nothing in a host project references this map — check that "
-            'TempoSensors/Config/DefaultGame.ini contributes +DirectoriesToAlwaysCook=(Path='
-            '"/TempoSensors/Maps") and repackage.'
+            "it — check that TempoSensors/Config/DefaultGame.ini contributes "
+            '+DirectoriesToAlwaysCook=(Path="/TempoSensors") and repackage.'
         )
 
-    # LoadLevel defers its response until the new world is up, so this returns loaded.
-    tc.load_level(level=LEVEL)
+    try:
+        tc.load_level(level=LEVEL)
+    except Exception:
+        # The level transition tears the gRPC services down and back up, which can strand this
+        # call's continuation and surface as UNAVAILABLE / "Service is not active". The load still
+        # happens, so confirm by polling below rather than failing on the call itself.
+        pass
+
+    expected = LEVEL.rsplit("/", 1)[-1]
+    deadline = time.monotonic() + LEVEL_LOAD_TIMEOUT_S
+    last = None
+    while time.monotonic() < deadline:
+        try:
+            last = tc.get_current_level_name().level
+            if last == expected:
+                break
+        except Exception as error:  # services are briefly down across the swap
+            last = repr(error)
+        time.sleep(0.5)
+    else:
+        pytest.fail(
+            f"{LEVEL} did not come up within {LEVEL_LOAD_TIMEOUT_S}s; the sim last reported {last}"
+        )
+
+    # Left loaded on purpose. Reloading on teardown would cost another transition, and the tests
+    # that follow in this session are better off on a level that has a sensor rig in it.
     return LEVEL
 
 
 @pytest.fixture
 def camera_rig(readback_level, fixed_step):
-    """Spawn the sensor rig at a known pose with identity rotation and yield (owner, sensor).
+    """Yield (owner, sensor) for a camera parked at the test origin with identity rotation.
 
-    Identity rotation keeps the camera's forward axis along +X, which is what lets the test move
+    Identity rotation keeps the camera's forward axis along +X, which is what lets the tests move
     the camera along its own view axis without reasoning about rotation conventions.
 
-    readback_level is requested before fixed_step so the level swap happens first: loading a level
-    destroys every actor, and it also resets the clock that fixed_step pauses and primes.
+    Prefer a camera the level already provides: the test level ships with a sensor rig in it, and
+    spawning another gave two cameras and dropped the new one into existing geometry. Only spawn
+    when the level has none. Either way the camera is repositioned at the start of every test, so
+    one test's motion cannot carry into the next.
     """
-    # Verify that ordering rather than trusting it — a silent reversal would leave the tests running
-    # against the wrong scene, which is exactly the kind of vacuous pass they exist to avoid.
-    expected_level = readback_level.rsplit("/", 1)[-1]
-    current_level = tc.get_current_level_name().level
-    assert current_level == expected_level, (
-        f"expected to be on {expected_level} but the sim is on {current_level}; the level fixture "
-        "must be set up before fixed_step."
-    )
+    def find_camera():
+        return next(
+            (
+                sensor
+                for sensor in ts.get_available_sensors().available_sensors
+                if SensorsPb.MT_COLOR_IMAGE in sensor.measurement_types
+            ),
+            None,
+        )
 
-    spawned = tw.spawn_actor(
-        actor_type=RIG_TYPE,
+    cam = find_camera()
+    spawned_owner = None
+    if cam is None:
+        spawned = tw.spawn_actor(
+            actor_type=RIG_TYPE,
+            transform=Geometry.Transform(
+                location=_vec(*RIG_ORIGIN), rotation=Geometry.Rotation(r=0.0, p=0.0, y=0.0)
+            ),
+        )
+        spawned_owner = spawned.name
+        assert spawned_owner, f"could not spawn {RIG_TYPE}"
+        cam = find_camera()
+    if cam is None:
+        pytest.skip(
+            f"No camera found on {LEVEL} and none could be spawned from {RIG_TYPE}. The level "
+            "should contain a sensor rig."
+        )
+
+    tw.set_actor_transform(
+        actor=cam.owner,
         transform=Geometry.Transform(
             location=_vec(*RIG_ORIGIN), rotation=Geometry.Rotation(r=0.0, p=0.0, y=0.0)
         ),
     )
-    owner = spawned.name
-    assert owner, f"could not spawn {RIG_TYPE}"
 
     try:
-        sensors = ts.get_available_sensors().available_sensors
-        cam = next((s for s in sensors if s.owner == owner), None)
-        if cam is None:
-            pytest.skip(f"No sensor reported on {owner}; expected a camera on {RIG_TYPE}.")
         yield cam.owner, cam.name
     finally:
-        tw.destroy_actor(actor=owner)
+        if spawned_owner:
+            tw.destroy_actor(actor=spawned_owner)
 
 
 def _pipelined(enabled):
