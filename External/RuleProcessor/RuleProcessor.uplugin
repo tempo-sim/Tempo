@@ -1,8 +1,8 @@
 {
 	"FileVersion": 3,
-	"Version": 8,
-	"VersionName": "1.0",
-	"FriendlyName": "Rule Processor",
+	"Version": 9,
+	"VersionName": "1.0-Tempo",
+	"FriendlyName": "Rule Processor (Tempo)",
 	"Description": "A prototype of a rule processor using point clouds for UE",
 	"Category": "Editor",
 	"CreatedBy": "Epic Games Inc",
