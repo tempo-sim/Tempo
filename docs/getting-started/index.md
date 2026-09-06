@@ -1,7 +1,6 @@
 # Getting Started
 
-Getting from nothing to a simulation you drive from Python takes four steps. Budget an hour,
-most of which is Unreal building.
+Getting from nothing to a simulation you drive from Python takes four steps.
 
 <div class="grid cards" markdown>
 
@@ -34,12 +33,6 @@ most of which is Unreal building.
 
 </div>
 
-## Follow along on video
-
-The whole path below is narrated end to end in the
-[getting started video](https://github.com/user-attachments/assets/849cde96-a5a0-46e7-ab18-4fcbbc9fea8d).
-Sound on!
-
 ## Start from TempoSample
 
 [TempoSample](https://github.com/tempo-sim/TempoSample) is a working Unreal project with Tempo
@@ -54,7 +47,6 @@ and rename it with `Scripts/Rename.sh`. If you already have a project, follow
 
 !!! tip "Tempo ships plugins, not content"
 
-    Tempo itself carries almost no 3D content — a sensor rig blueprint, some materials, a grass
-    PCG graph. The environments, vehicles and characters you see in the screenshots throughout
-    this site come from TempoSample, which bundles Creative Commons content for demonstration.
-    Most projects start by replacing it with their own.
+    The environments, vehicles and characters you see in the screenshots throughout this site come
+    from TempoSample, which bundles Creative Commons content for demonstration. Most projects
+    start by replacing it with their own.

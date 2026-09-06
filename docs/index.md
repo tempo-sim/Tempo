@@ -5,10 +5,10 @@ hide:
 
 # Tempo
 
-![The TempoSample street sweeper with live sensor overlays](https://github.com/user-attachments/assets/a1433caf-60fd-4db0-b6ab-ebdd0d3e2dc5){ loading=lazy }
+![The TempoSample street sweeper with a semantic label overlay](https://github.com/user-attachments/assets/a1433caf-60fd-4db0-b6ab-ebdd0d3e2dc5){ loading=lazy }
 /// caption
 The [TempoSample](https://github.com/tempo-sim/TempoSample) project: a street sweeper driving the
-Lower Sector environment, with camera and lidar output overlaid.
+Lower Sector environment, with semantic labels overlaid.
 ///
 
 Tempo is a collection of simulation-focused plugins for Unreal Engine. It makes the power of
@@ -137,28 +137,6 @@ Everything below is a client talking to a running Unreal Editor or packaged bina
         tempo::tempo_core::step();
     }
     ```
-
-## Watch it work
-
-<div class="grid cards" markdown>
-
--   :material-play-circle:{ .lg .middle } **What Tempo does**
-
-    ---
-
-    A tour of sensors, agents, and world control running in TempoSample.
-
-    [:octicons-arrow-right-24: Overview video](https://github.com/user-attachments/assets/dfc7b28b-3b73-4603-a779-dd6e5b2acec9)
-
--   :material-play-circle:{ .lg .middle } **Setting it up**
-
-    ---
-
-    The setup, build, run and Hello World steps, narrated end to end. Sound on!
-
-    [:octicons-arrow-right-24: Getting started video](https://github.com/user-attachments/assets/849cde96-a5a0-46e7-ab18-4fcbbc9fea8d)
-
-</div>
 
 ## Getting help
 

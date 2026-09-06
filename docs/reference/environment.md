@@ -12,14 +12,6 @@
 
 ## Build behavior
 
-`TEMPO_SKIP_PREBUILD`
-
-:   Set to skip the code generation prebuild step — protobuf codegen, the Python/Rust/C++ wrapper
-    generators, and TempoROS's ROS IDL generation.
-
-    Safe when you have built at least once and are not changing `.proto` or ROS IDL files. **You
-    may have to restart your IDE** after changing it, since IDEs cache their launch environment.
-
 `TEMPO_GEN_RUST_API`
 
 :   Set to `1` to generate the Rust client crate alongside the Python package. Off by default,

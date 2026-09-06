@@ -2,14 +2,6 @@
 
 ## Build and setup
 
-### Code generation runs on every build and it's slow
-
-When you aren't modifying `.proto` files or ROS IDL files, and you've built at least once, set
-`TEMPO_SKIP_PREBUILD=1` to skip the code generation prebuild step.
-
-You may have to **restart your IDE** after changing it, since IDEs cache the environment they
-launched with.
-
 ### Engine mods or third-party deps are out of sync
 
 If you set up with `Setup.sh -skip-hooks`, nothing re-syncs automatically when you change Tempo
@@ -28,23 +20,6 @@ TypeError: '>' not supported between instances of 'str' and 'int'
 
 A known, intermittent TempoROS issue — still being debugged. For whatever reason it seems more
 likely to happen over SSH. Re-running the build usually gets past it.
-
-### NuGet reports a Magick.NET vulnerability and fails the build
-
-Unreal 5.6 and 5.7 pin a version of Magick.NET with a NuGet advisory, which the automation tool
-treats as an error. Create this file before running `BuildAutomation.sh`:
-
-```xml title="$UNREAL_ENGINE_PATH/Engine/Source/Programs/AutomationTool/Directory.Build.props"
-<Project>
-  <PropertyGroup>
-    <!-- Disable NuGet security audit to prevent vulnerability warnings in Unreal Engine's
-         third-party packages (e.g. Magick.NET) from being treated as build errors. -->
-    <NuGetAudit>false</NuGetAudit>
-  </PropertyGroup>
-</Project>
-```
-
-If you are using the other Tempo plugins, this is done for you as part of the engine mods step.
 
 ## Connecting
 
@@ -94,15 +69,6 @@ not partial.
 
 [:octicons-arrow-right-24: Migrating to v0.3.0](../migration/v0.3.0.md)
 
-### A vehicle springs back after I move it
-
-It shouldn't — `set_actor_transform` teleports the physics body along with the transform. If you
-see this, check that you aren't setting the transform through
-`set_transform_property` instead, which writes the raw `UPROPERTY` and does not move the body.
-
-Also note that world-space **velocity is preserved** across a teleport. If you moved something
-that was already moving and expected it to stop, zero its velocity too.
-
 ### My actor name works in the Editor but not in the packaged build
 
 Packaged actors get unique names that are not the Editor labels. Query for actors and use the
@@ -147,27 +113,12 @@ TempoSensors ships a workaround for an `FRayTracingScene` engine bug, on by defa
 (`bEnableRayTracingSceneReadbackBuffersOverrunWorkaround`). If you disabled it, re-enable it. See
 the [settings reference](../reference/settings.md#tempo-sensors).
 
-### `TempoMultiViewCapture` fails to compile after an engine upgrade
-
-```text
-error: "TempoMultiViewCapture is pinned to UE 5.6/5.7/5.8 engine internals. Re-diff and update for the new engine version."
-```
-
-It reproduces logic from engine-private `SceneCaptureRendering.cpp`. Re-diff against
-`SetupViewFamilyForSceneCapture`, `SetupSceneViewExtensionsForSceneCapture`,
-`CreateSceneRendererForSceneCapture`, and `UpdateSceneCaptureContent_RenderThread`.
-
 ## Packaging and CI
 
 ### A cold CI package crashes
 
 Pass `-skipiostore`. On a clean run iostore can't find engine content under `Saved/Temp`. Note
 that iostore is enabled by `bUseIoStore` in `Config/DefaultGame.ini`, not by an `-iostore` flag.
-
-### A fix works locally but fails in CI a week later
-
-A fully clean CI run takes about two hours, and the GitHub Actions cache evicts after 7 days. Any
-fix must work from a cold start — verify it against a clean build, not an incremental one.
 
 ### A packaged game with TempoROS won't start on Windows
 

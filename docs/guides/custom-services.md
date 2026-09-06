@@ -256,8 +256,30 @@ project defines services. In Rust it is `tempo_sample::greeter::greet(...)`, and
 
 ## 5. Share it
 
-Your project package can be published to PyPI and crates.io so your users can drive your simulator
-without building it:
+Once your project defines its own services, the two packages your users need come from different
+places — and that asymmetry is the thing to understand before you tell anyone how to install them.
+
+| Package | Where a user can get it |
+|---|---|
+| `tempo-sim` (Tempo's services) | The generated `TempoEnv`, **or** [PyPI](https://pypi.org/project/tempo-sim/) / [crates.io](https://crates.io/crates/tempo-sim) — Tempo publishes it. |
+| Your project package (your services) | **Only** the generated `TempoEnv`, until you publish it yourself. |
+
+So a client that only calls Tempo's built-in RPCs can `pip install tempo-sim` and never touch
+Unreal. The moment it calls one of *your* RPCs, that stops working: the published `tempo-sim`
+has no knowledge of `greeter`, and never will. Until you publish, your users have exactly two
+options — build the project themselves and use `TempoEnv`, or take the generated package from you
+directly.
+
+!!! warning "Don't mix the two"
+
+    Your project package **depends on** `tempo-sim` and re-exports its runtime helpers, so
+    installing it gives you both. Installing your project package alongside a differently
+    versioned `tempo-sim` from PyPI is how you get a client whose helpers and stubs disagree.
+    Pick one source per environment.
+
+Publishing removes the asymmetry: push your project package to PyPI or crates.io and your users
+get the same one-line install for your RPCs that they already have for Tempo's. Publish
+`tempo-sim` first if you also publish a modified copy of it — your project package depends on it.
 
 [:octicons-arrow-right-24: Publishing the Python package](../clients/python.md#publishing-your-own-package) &nbsp;·&nbsp;
 [:octicons-arrow-right-24: Publishing the Rust crate](../clients/rust.md#publishing-your-own-crate)
@@ -266,9 +288,3 @@ without building it:
 
 If your project uses ROS, the same handler can serve a ROS service too — see how the
 [TempoROSBridge](../plugins/tempo-ros-bridge.md#extending-the-bridge) modules do it.
-
-## Speeding up iteration
-
-When you aren't modifying proto definitions (or ROS IDL files) and you have built at least once,
-set `TEMPO_SKIP_PREBUILD=1` to skip the code generation prebuild step. You may have to restart
-your IDE after changing it.

@@ -41,7 +41,7 @@ documentation reads more easily.
 | Drive vehicles, move pawns, or follow a trajectory | [TempoMovement](../plugins/tempo-movement.md) |
 | Anchor the sim to a place and time on Earth | [TempoGeographic](../plugins/tempo-geographic.md) |
 | Populate a scene procedurally | [TempoPCG](../plugins/tempo-pcg.md) |
-| Simulate crowds and traffic | [TempoAgents](../plugins/tempo-agents.md) |
+| Simulate crowds and traffic at massive scale | [TempoAgents](../plugins/tempo-agents.md) |
 | Publish to ROS 2 topics | [TempoROS](../plugins/tempo-ros.md) and [TempoROSBridge](../plugins/tempo-ros-bridge.md) |
 
 ## Write client code

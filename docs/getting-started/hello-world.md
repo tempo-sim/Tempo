@@ -4,28 +4,48 @@ With your project open in Unreal Editor, you'll start the simulation, add a sens
 stream images from it, change one of its properties while it streams, and step time — all from
 outside the engine.
 
-!!! note "No installation needed"
+## 1. Get a Python client
 
-    You don't have to install any Python package or dependency. The build already generated the
-    `tempo_sim` package and a virtual environment for you.
+You have two options. Either works for everything on this page.
 
-## 1. Activate the Tempo environment
+=== "Use the generated environment"
 
-From the root of your project:
-
-=== "Linux / macOS"
+    The build already generated the `tempo_sim` package and a virtual environment for you at
+    `<project_root>/TempoEnv`, with `tempo_sim` — and your project's own client package, if your
+    project defines services — already installed. Nothing to install.
 
     ```bash
+    # Linux / macOS
     source ./TempoEnv/bin/activate
     python
-    ```
 
-=== "Windows"
-
-    ```bash
+    # Windows
     source ./TempoEnv/Scripts/activate
     winpty python
     ```
+
+    This is the option that always matches the server you just built, so it is the one to use
+    while developing.
+
+=== "Use your own environment"
+
+    `tempo_sim` is also published to PyPI, so you can install it into any environment you like —
+    on this machine or another one:
+
+    ```bash
+    python -m venv .venv
+    source .venv/bin/activate       # .venv/Scripts/activate on Windows
+    pip install tempo-sim
+    ```
+
+    Keep the installed version matched to the Tempo version your server runs.
+
+    !!! warning "The published package knows only Tempo's built-in services"
+
+        Everything on this page works, because it only uses Tempo's own RPCs. If your project
+        defines its own services, the published `tempo-sim` has no knowledge of them — use the
+        generated environment, or [publish your project's own
+        package](../clients/python.md#publishing-your-own-package).
 
 ## 2. Start the simulation
 
@@ -61,6 +81,11 @@ python ./Plugins/Tempo/ExampleClients/Python/SensorPlayground.py
 ```
 
 Use it to list the available sensors and start streaming color images from the `TempoCamera`.
+
+!!! note "If you installed `tempo-sim` yourself"
+
+    The example clients need the visualization extras, which the generated environment already
+    has: `pip install "tempo-sim[examples]"`.
 
 ## 5. Change a property while it streams
 

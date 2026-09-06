@@ -134,18 +134,3 @@ Something not working as expected? Are we missing a key feature you need? Feel f
 Want to contribute to Tempo? We'll be happy to review your PR.
 
 Improving the documentation counts — it lives in [`docs/`](docs) in this repository. See [Contributing to these docs](https://tempo-sim.readthedocs.io/en/latest/guides/documentation/) for how to build the site locally.
-
-## Going Deeper
-Each plugin has its own documentation page:
-
-[TempoCore](https://tempo-sim.readthedocs.io/en/latest/plugins/tempo-core/) ·
-[TempoWorld](https://tempo-sim.readthedocs.io/en/latest/plugins/tempo-world/) ·
-[TempoSensors](https://tempo-sim.readthedocs.io/en/latest/plugins/tempo-sensors/) ·
-[TempoMovement](https://tempo-sim.readthedocs.io/en/latest/plugins/tempo-movement/) ·
-[TempoAgents](https://tempo-sim.readthedocs.io/en/latest/plugins/tempo-agents/) ·
-[TempoGeographic](https://tempo-sim.readthedocs.io/en/latest/plugins/tempo-geographic/) ·
-[TempoPCG](https://tempo-sim.readthedocs.io/en/latest/plugins/tempo-pcg/)
-
-And, if you are using ROS:
-[TempoROS](https://github.com/tempo-sim/TempoROS) ·
-[TempoROSBridge](https://tempo-sim.readthedocs.io/en/latest/plugins/tempo-ros-bridge/)

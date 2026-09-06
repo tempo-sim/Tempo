@@ -102,11 +102,13 @@ while tests run in parallel.
 
 ## Things that only bite in CI
 
-!!! warning "Clean builds are slow, and the cache evicts"
+!!! warning "Clean builds are slow"
 
-    A fully clean CI run takes about two hours, and the GitHub Actions cache evicts after 7 days.
-    Any fix has to work from a cold start — a change that only works incrementally will pass on
-    Monday and fail the following week.
+    A fully clean CI run takes about two hours. Cache entries expire after a configurable
+    retention period (GitHub's default is 7 days; set it per repository under
+    `Settings → Actions → General`), and are also evicted once the repository exceeds its cache
+    size limit. Either way, any fix has to work from a cold start — a change that only works
+    incrementally will eventually meet a run with nothing cached.
 
 !!! warning "Cold packages need `-skipiostore`"
 

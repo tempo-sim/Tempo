@@ -84,12 +84,6 @@ The build does more than compile C++. It also:
 
 The full set of scripts is documented in the [scripts reference](../reference/scripts.md).
 
-!!! tip "Skipping code generation"
-
-    When you are not modifying `.proto` files (or ROS IDL files) and you have built at least
-    once, set `TEMPO_SKIP_PREBUILD=1` to skip the code generation prebuild step. You may have to
-    restart your IDE after changing it.
-
 ## Verify it worked
 
 Open the project in Unreal Editor and press Play. If the Tempo gRPC server started, the Editor
