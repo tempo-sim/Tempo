@@ -34,6 +34,9 @@ public class TempoSensors : TempoModuleRules
 				// Unreal
 				"CoreUObject",
 				"DeveloperSettings",
+				// The label table is exported as JSON for clients to edit and load back.
+				// UDataTable's own JSON export is editor-only.
+				"Json",
 				"RenderCore",
 				"RHI",
 				"Slate",

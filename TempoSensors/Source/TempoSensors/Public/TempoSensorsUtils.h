@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Engine/Scene.h"
 
+class UDataTable;
 class UMaterialInstanceDynamic;
 
 void TEMPOSENSORS_API OptimizeShowFlagsForNoColor(FEngineShowFlags& ShowFlags);
@@ -23,3 +24,12 @@ void TEMPOSENSORS_API ApplyPhotorealisticRenderSettings(FPostProcessSettings& Ou
 // subsurface color. Sets OverridingLabel to 0 — disabling the substitution — whenever the pair
 // does not resolve, so clearing the row names at runtime takes effect on an already-built MID.
 void TEMPOSENSORS_API ApplyLabelOverrideParameters(UMaterialInstanceDynamic* MaterialInstance);
+
+// Serialize a semantic label table to an Unreal DataTable JSON document, in the format
+// UDataTable::CreateTableFromJSONString reads back — so a client can fetch the live table, edit it,
+// and load it again. UDataTable's own GetTableAsJSON is editor-only, hence this.
+//
+// Rows, and the entries within each row, are sorted by name: the table's row map and the row's
+// TSet columns iterate in an order that says nothing, and an export meant to be diffed has to be
+// stable across runs. Unresolved entries are dropped, having no path left to write.
+FString TEMPOSENSORS_API ExportSemanticLabelTableToJson(const UDataTable* SemanticLabelTable);

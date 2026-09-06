@@ -9,6 +9,7 @@
 
 #include "TempoSensorsConstants.h"
 #include "TempoSensorsSettings.h"
+#include "TempoSensorsUtils.h"
 
 #include "TempoClassUtils.h"
 #include "TempoCoreUtils.h"
@@ -17,6 +18,9 @@
 #include "EngineUtils.h"
 #include "Misc/FileHelper.h"
 #include "Components/InstancedStaticMeshComponent.h"
+#include "Components/SkinnedMeshComponent.h"
+#include "Engine/SkeletalMesh.h"
+#include "Engine/SkinnedAsset.h"
 #include "NiagaraComponent.h"
 #include "NiagaraEmitter.h"
 #include "NiagaraEmitterHandle.h"
@@ -114,6 +118,8 @@ void UTempoActorLabeler::RegisterServices(FTempoServer& Server)
 		SimpleRequestHandler(&LabelAsyncService::RequestSetActorTypeSemanticId, &UTempoActorLabeler::HandleSetActorTypeSemanticId),
 		SimpleRequestHandler(&LabelAsyncService::RequestGetAllStaticMeshTypes, &UTempoActorLabeler::HandleGetAllStaticMeshTypes),
 		SimpleRequestHandler(&LabelAsyncService::RequestSetStaticMeshTypeSemanticId, &UTempoActorLabeler::HandleSetStaticMeshTypeSemanticId),
+		SimpleRequestHandler(&LabelAsyncService::RequestSetActorTagSemanticId, &UTempoActorLabeler::HandleSetActorTagSemanticId),
+		SimpleRequestHandler(&LabelAsyncService::RequestGetLabelTableAsJson, &UTempoActorLabeler::HandleGetLabelTableAsJson),
 		SimpleRequestHandler(&LabelAsyncService::RequestSetLabelType, &UTempoActorLabeler::HandleSetLabelType),
 		SimpleRequestHandler(&LabelAsyncService::RequestLoadLabelTable, &UTempoActorLabeler::HandleLoadLabelTable),
 		SimpleRequestHandler(&LabelAsyncService::RequestSetInstanceLabelUniqueness, &UTempoActorLabeler::HandleSetInstanceLabelUniqueness),
@@ -191,6 +197,17 @@ void UTempoActorLabeler::HandleGetSemanticClasses(const TempoCore::Empty& Reques
 		SemanticIdToMeshPaths.FindOrAdd(OverrideSemanticId).Add(MeshPath);
 	}
 
+	// Build reverse mapping: semantic_id -> skeletal mesh paths
+	TMap<int32, TArray<FString>> SemanticIdToSkeletalMeshPaths;
+
+	for (const auto& [MeshPath, LabelName] : SkeletalMeshLabels)
+	{
+		if (const int32* SemanticId = SemanticIds.Find(LabelName))
+		{
+			SemanticIdToSkeletalMeshPaths.FindOrAdd(*SemanticId).Add(MeshPath);
+		}
+	}
+
 	// Build reverse mapping: semantic_id -> component tags
 	TMap<int32, TArray<FName>> SemanticIdToComponentTags;
 
@@ -200,6 +217,27 @@ void UTempoActorLabeler::HandleGetSemanticClasses(const TempoCore::Empty& Reques
 		{
 			SemanticIdToComponentTags.FindOrAdd(*SemanticId).Add(ComponentTag);
 		}
+	}
+
+	// Build reverse mapping: semantic_id -> actor tags
+	TMap<int32, TArray<FName>> SemanticIdToActorTags;
+
+	for (const auto& [ActorTag, LabelName] : ActorTagLabels)
+	{
+		if (const int32* SemanticId = SemanticIds.Find(LabelName))
+		{
+			SemanticIdToActorTags.FindOrAdd(*SemanticId).Add(ActorTag);
+		}
+	}
+
+	// Include runtime actor tag overrides (they take precedence)
+	for (const auto& [ActorTag, OverrideSemanticId] : ActorTagSemanticIdOverrides)
+	{
+		for (auto& [Id, Tags] : SemanticIdToActorTags)
+		{
+			Tags.Remove(ActorTag);
+		}
+		SemanticIdToActorTags.FindOrAdd(OverrideSemanticId).Add(ActorTag);
 	}
 
 	// Iterate DataTable to get all class definitions
@@ -225,11 +263,27 @@ void UTempoActorLabeler::HandleGetSemanticClasses(const TempoCore::Empty& Reques
 			}
 		}
 
+		if (TArray<FString>* SkeletalMeshPaths = SemanticIdToSkeletalMeshPaths.Find(SemanticId))
+		{
+			for (const FString& MeshPath : *SkeletalMeshPaths)
+			{
+				ClassInfo->add_skeletal_mesh_types(TCHAR_TO_UTF8(*MeshPath));
+			}
+		}
+
 		if (TArray<FName>* ComponentTags = SemanticIdToComponentTags.Find(SemanticId))
 		{
 			for (const FName& ComponentTag : *ComponentTags)
 			{
 				ClassInfo->add_component_tags(TCHAR_TO_UTF8(*ComponentTag.ToString()));
+			}
+		}
+
+		if (TArray<FName>* ActorTags = SemanticIdToActorTags.Find(SemanticId))
+		{
+			for (const FName& ActorTag : *ActorTags)
+			{
+				ClassInfo->add_actor_tags(TCHAR_TO_UTF8(*ActorTag.ToString()));
 			}
 		}
 	}
@@ -333,7 +387,7 @@ void UTempoActorLabeler::HandleGetAllStaticMeshTypes(const TempoCore::Empty& Req
 		for (UNiagaraComponent* NiagaraComponent : NiagaraComponents)
 		{
 			TArray<FString> MeshPaths;
-			GetComponentStaticMeshPaths(NiagaraComponent, MeshPaths);
+			GetComponentMeshPaths(NiagaraComponent, MeshPaths);
 			for (const FString& MeshPath : MeshPaths)
 			{
 				MeshInstanceCounts.FindOrAdd(MeshPath)++;
@@ -354,7 +408,7 @@ void UTempoActorLabeler::HandleGetAllStaticMeshTypes(const TempoCore::Empty& Req
 		MeshInfo->set_instance_count(InstanceCount);
 
 		// Determine current semantic ID: check overrides first, then DataTable
-		MeshInfo->set_current_semantic_id(ResolveStaticMeshSemanticId(MeshPath).Get(-1));
+		MeshInfo->set_current_semantic_id(ResolveMeshSemanticId(MeshPath).Get(-1));
 	}
 
 	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
@@ -391,7 +445,7 @@ void UTempoActorLabeler::HandleSetStaticMeshTypeSemanticId(const TempoSensors::S
 		for (UPrimitiveComponent* PrimitiveComponent : PrimitiveComponents)
 		{
 			TArray<FString> MeshPaths;
-			GetComponentStaticMeshPaths(PrimitiveComponent, MeshPaths);
+			GetComponentMeshPaths(PrimitiveComponent, MeshPaths);
 			if (MeshPaths.Contains(MeshPath))
 			{
 				UnLabelComponent(PrimitiveComponent);
@@ -535,6 +589,68 @@ void UTempoActorLabeler::HandleSetLabelRowOverrides(const TempoSensors::SetLabel
 	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status_OK);
 }
 
+void UTempoActorLabeler::HandleSetActorTagSemanticId(const TempoSensors::SetActorTagSemanticIdRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation)
+{
+	const int32 SemanticId = Request.semantic_id();
+
+	// Validate range
+	if (SemanticId < -1 || SemanticId > 255)
+	{
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(),
+			grpc::Status(grpc::StatusCode::INVALID_ARGUMENT,
+			"semantic_id must be -1 (revert) or 0-255"));
+		return;
+	}
+
+	const FString ActorTagName(UTF8_TO_TCHAR(Request.actor_tag().c_str()));
+	if (ActorTagName.IsEmpty())
+	{
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(),
+			grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "actor_tag must not be empty"));
+		return;
+	}
+	const FName ActorTag(*ActorTagName);
+
+	// Store or clear override
+	if (SemanticId < 0)
+	{
+		ActorTagSemanticIdOverrides.Remove(ActorTag);
+	}
+	else
+	{
+		ActorTagSemanticIdOverrides.Add(ActorTag, SemanticId);
+	}
+
+	// Re-label every Actor carrying this tag. Unlike an Actor type, a tag can be added to an Actor
+	// at any time, so there is no set of "already tagged" Actors to consult — walk the world.
+	for (TActorIterator<AActor> ActorItr(GetWorld()); ActorItr; ++ActorItr)
+	{
+		if (ActorItr->Tags.Contains(ActorTag))
+		{
+			UnLabelActor(*ActorItr);
+			LabelActor(*ActorItr);
+		}
+	}
+
+	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status_OK);
+}
+
+void UTempoActorLabeler::HandleGetLabelTableAsJson(const TempoCore::Empty& Request, const TResponseDelegate<TempoSensors::GetLabelTableAsJsonResponse>& ResponseContinuation) const
+{
+	const UDataTable* ActiveSemanticLabelTable = GetDefault<UTempoSensorsSettings>()->GetSemanticLabelTable();
+	if (!ActiveSemanticLabelTable)
+	{
+		ResponseContinuation.ExecuteIfBound(TempoSensors::GetLabelTableAsJsonResponse(),
+			grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "No semantic label table is set"));
+		return;
+	}
+
+	TempoSensors::GetLabelTableAsJsonResponse Response;
+	Response.set_json(TCHAR_TO_UTF8(*ExportSemanticLabelTableToJson(ActiveSemanticLabelTable)));
+
+	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
+}
+
 void UTempoActorLabeler::HandleGetAllActorLabels(const TempoCore::Empty& Request, const TResponseDelegate<TempoSensors::GetAllActorLabelsResponse>& ResponseContinuation)
 {
 	TempoSensors::GetAllActorLabelsResponse Response;
@@ -663,7 +779,9 @@ void UTempoActorLabeler::BuildLabelMaps()
 	// table is replaced, so start from empty rather than accumulating the previous table's entries.
 	ActorSemanticLabels.Reset();
 	StaticMeshLabels.Reset();
+	SkeletalMeshLabels.Reset();
 	ComponentTagLabels.Reset();
+	ActorTagLabels.Reset();
 	SemanticIds.Reset();
 	NoLabelId = 0;
 
@@ -709,6 +827,39 @@ void UTempoActorLabeler::BuildLabelMaps()
 			{
 				UE_LOG(LogTempoSensors, Warning, TEXT("Null static mesh associated with label %s"), *Label.ToString());
 			}
+		}
+
+		for (const TSoftObjectPtr<USkeletalMesh>& SkeletalMeshAsset : Value.SkeletalMeshTypes)
+		{
+			if (const USkeletalMesh* SkeletalMesh = SkeletalMeshAsset.LoadSynchronous())
+			{
+				const FString MeshFullPath = SkeletalMesh->GetPathName();
+				if (SkeletalMeshLabels.Contains(MeshFullPath))
+				{
+					UE_LOG(LogTempoSensors, Error, TEXT("Skeletal mesh type %s is associated with more than one label (%s and %s)"), *MeshFullPath, *SkeletalMeshLabels[MeshFullPath].ToString(), *Label.ToString());
+					continue;
+				}
+				SkeletalMeshLabels.Add(MeshFullPath, Label);
+			}
+			else
+			{
+				UE_LOG(LogTempoSensors, Warning, TEXT("Null skeletal mesh associated with label %s"), *Label.ToString());
+			}
+		}
+
+		for (const FName& ActorTag : Value.ActorTags)
+		{
+			if (ActorTag.IsNone())
+			{
+				UE_LOG(LogTempoSensors, Warning, TEXT("Empty actor tag associated with label %s"), *Label.ToString());
+				continue;
+			}
+			if (ActorTagLabels.Contains(ActorTag))
+			{
+				UE_LOG(LogTempoSensors, Error, TEXT("Actor tag %s is associated with more than one label (%s and %s)"), *ActorTag.ToString(), *ActorTagLabels[ActorTag].ToString(), *Label.ToString());
+				continue;
+			}
+			ActorTagLabels.Add(ActorTag, Label);
 		}
 
 		for (const FName& ComponentTag : Value.ComponentTags)
@@ -780,57 +931,17 @@ void UTempoActorLabeler::LabelActor(AActor* Actor)
 		return;
 	}
 
-	const FName ActorTypeName = Actor->GetClass()->GetFName();
-
-	// Check for type-level override first (before DataTable lookup)
-	if (const int32* TypeOverride = ActorTypeSemanticIdOverrides.Find(ActorTypeName))
+	FInstanceSemanticIdPair ActorIdPair;
+	if (const TOptional<int32> SemanticId = ResolveActorSemanticId(Actor))
 	{
-		FInstanceSemanticIdPair ActorIdPair;
-		ActorIdPair.SemanticId = *TypeOverride;
-		if (TOptional<int32> InstanceId = InstanceIdAllocator.Allocate())
+		ActorIdPair.SemanticId = *SemanticId;
+		if (const TOptional<int32> InstanceId = InstanceIdAllocator.Allocate())
 		{
 			ActorIdPair.InstanceId = *InstanceId;
 			// Track actor class names that have been assigned instance IDs
 			if (GetDefault<UTempoSensorsSettings>()->GetLabelType() == ELabelType::Instance)
 			{
-				LabeledActorClassNames.Add(ActorTypeName);
-			}
-		}
-		LabeledObjects.Add(Actor, ActorIdPair);
-		LabelAllComponents(Actor, ActorIdPair);
-		return;
-	}
-
-	FInstanceSemanticIdPair ActorIdPair;
-	FName AssignedLabel = NoLabelName;
-	for (const auto& Elem : ActorSemanticLabels)
-	{
-		const TSubclassOf<AActor>& ActorType = Elem.Key;
-		const FName& ActorLabel = Elem.Value;
-		if (Actor->GetClass()->IsChildOf(ActorType.Get()))
-		{
-			if (const int32* SemanticId = SemanticIds.Find(ActorLabel))
-			{
-				if (AssignedLabel != NoLabelName && *ActorLabel.ToString() != AssignedLabel)
-				{
-					UE_LOG(LogTempoSensors, Error, TEXT("Labels %s and %s have overlapping actor types"), *ActorLabel.ToString(), *AssignedLabel.ToString());
-					continue;
-				}
-				AssignedLabel = ActorLabel;
-				if (TOptional<int32> InstanceId = InstanceIdAllocator.Allocate())
-				{
-					ActorIdPair.InstanceId = *InstanceId;
-					// Track actor class names that have been assigned instance IDs
-					if (GetDefault<UTempoSensorsSettings>()->GetLabelType() == ELabelType::Instance)
-					{
-						LabeledActorClassNames.Add(ActorTypeName);
-					}
-				}
-				ActorIdPair.SemanticId = *SemanticId;
-			}
-			else
-			{
-				UE_LOG(LogTempoSensors, Error, TEXT("Label %s did not have an associated ID"), *ActorLabel.ToString());
+				LabeledActorClassNames.Add(Actor->GetClass()->GetFName());
 			}
 		}
 	}
@@ -838,6 +949,63 @@ void UTempoActorLabeler::LabelActor(AActor* Actor)
 	LabeledObjects.Add(Actor, ActorIdPair);
 
 	LabelAllComponents(Actor, ActorIdPair);
+}
+
+TOptional<int32> UTempoActorLabeler::ResolveActorSemanticId(const AActor* Actor) const
+{
+	// Most specific rule wins, mirroring ResolveComponentSemanticId. An Actor tag names particular
+	// Actors, so it beats the type rules, which name every Actor of a class at once. An Actor
+	// carrying tags for two different labels resolves to whichever its Tags array lists first —
+	// the same first-match rule component tags follow.
+	for (const FName& ActorTag : Actor->Tags)
+	{
+		// Runtime overrides take precedence over the label table.
+		if (const int32* OverrideSemanticId = ActorTagSemanticIdOverrides.Find(ActorTag))
+		{
+			return *OverrideSemanticId;
+		}
+
+		if (const FName* TagLabel = ActorTagLabels.Find(ActorTag))
+		{
+			if (const int32* TagLabelId = SemanticIds.Find(*TagLabel))
+			{
+				return *TagLabelId;
+			}
+			UE_LOG(LogTempoSensors, Error, TEXT("Label %s did not have an associated ID"), *TagLabel->ToString());
+		}
+	}
+
+	if (const int32* OverrideSemanticId = ActorTypeSemanticIdOverrides.Find(Actor->GetClass()->GetFName()))
+	{
+		return *OverrideSemanticId;
+	}
+
+	TOptional<int32> ResolvedSemanticId;
+	FName AssignedLabel = NAME_None;
+	for (const auto& [ActorType, ActorLabel] : ActorSemanticLabels)
+	{
+		if (!Actor->GetClass()->IsChildOf(ActorType.Get()))
+		{
+			continue;
+		}
+
+		if (const int32* SemanticId = SemanticIds.Find(ActorLabel))
+		{
+			if (!AssignedLabel.IsNone() && ActorLabel != AssignedLabel)
+			{
+				UE_LOG(LogTempoSensors, Error, TEXT("Labels %s and %s have overlapping actor types"), *ActorLabel.ToString(), *AssignedLabel.ToString());
+				continue;
+			}
+			AssignedLabel = ActorLabel;
+			ResolvedSemanticId = *SemanticId;
+		}
+		else
+		{
+			UE_LOG(LogTempoSensors, Error, TEXT("Label %s did not have an associated ID"), *ActorLabel.ToString());
+		}
+	}
+
+	return ResolvedSemanticId;
 }
 
 void UTempoActorLabeler::LabelAllComponents(const AActor* Actor, FInstanceSemanticIdPair ActorIdPair)
@@ -916,10 +1084,10 @@ TOptional<int32> UTempoActorLabeler::ResolveComponentSemanticId(const UPrimitive
 	}
 
 	TArray<FString> MeshPaths;
-	GetComponentStaticMeshPaths(Component, MeshPaths);
+	GetComponentMeshPaths(Component, MeshPaths);
 	for (const FString& MeshPath : MeshPaths)
 	{
-		if (const TOptional<int32> MeshSemanticId = ResolveStaticMeshSemanticId(MeshPath))
+		if (const TOptional<int32> MeshSemanticId = ResolveMeshSemanticId(MeshPath))
 		{
 			return MeshSemanticId;
 		}
@@ -928,7 +1096,7 @@ TOptional<int32> UTempoActorLabeler::ResolveComponentSemanticId(const UPrimitive
 	return TOptional<int32>();
 }
 
-TOptional<int32> UTempoActorLabeler::ResolveStaticMeshSemanticId(const FString& MeshPath) const
+TOptional<int32> UTempoActorLabeler::ResolveMeshSemanticId(const FString& MeshPath) const
 {
 	// Runtime overrides take precedence over the label table.
 	if (const int32* OverrideSemanticId = StaticMeshTypeSemanticIdOverrides.Find(MeshPath))
@@ -936,25 +1104,44 @@ TOptional<int32> UTempoActorLabeler::ResolveStaticMeshSemanticId(const FString& 
 		return *OverrideSemanticId;
 	}
 
-	if (const FName* StaticMeshLabel = StaticMeshLabels.Find(MeshPath))
+	// Static and skeletal meshes are labeled from separate table columns but share one asset path
+	// space, so a given path can only ever be in one of these maps.
+	const FName* MeshLabel = StaticMeshLabels.Find(MeshPath);
+	if (!MeshLabel)
 	{
-		if (const int32* StaticMeshLabelId = SemanticIds.Find(*StaticMeshLabel))
+		MeshLabel = SkeletalMeshLabels.Find(MeshPath);
+	}
+
+	if (MeshLabel)
+	{
+		if (const int32* MeshLabelId = SemanticIds.Find(*MeshLabel))
 		{
-			return *StaticMeshLabelId;
+			return *MeshLabelId;
 		}
-		UE_LOG(LogTempoSensors, Error, TEXT("Label %s did not have an associated ID"), *StaticMeshLabel->ToString());
+		UE_LOG(LogTempoSensors, Error, TEXT("Label %s did not have an associated ID"), *MeshLabel->ToString());
 	}
 
 	return TOptional<int32>();
 }
 
-void UTempoActorLabeler::GetComponentStaticMeshPaths(const UPrimitiveComponent* Component, TArray<FString>& OutMeshPaths)
+void UTempoActorLabeler::GetComponentMeshPaths(const UPrimitiveComponent* Component, TArray<FString>& OutMeshPaths)
 {
 	if (const UStaticMeshComponent* StaticMeshComponent = Cast<UStaticMeshComponent>(Component))
 	{
 		if (const UStaticMesh* StaticMesh = StaticMeshComponent->GetStaticMesh())
 		{
 			OutMeshPaths.Add(StaticMesh->GetPathName());
+		}
+		return;
+	}
+
+	// USkinnedMeshComponent covers USkeletalMeshComponent and the other skinned variants, and its
+	// asset is a USkinnedAsset — USkeletalMesh among them.
+	if (const USkinnedMeshComponent* SkinnedMeshComponent = Cast<USkinnedMeshComponent>(Component))
+	{
+		if (const USkinnedAsset* SkinnedAsset = SkinnedMeshComponent->GetSkinnedAsset())
+		{
+			OutMeshPaths.Add(SkinnedAsset->GetPathName());
 		}
 		return;
 	}

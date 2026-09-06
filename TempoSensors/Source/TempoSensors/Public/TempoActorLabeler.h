@@ -55,6 +55,8 @@ namespace TempoSensors
 	class SetActorTypeSemanticIdRequest;
 	class GetAllStaticMeshTypesResponse;
 	class SetStaticMeshTypeSemanticIdRequest;
+	class SetActorTagSemanticIdRequest;
+	class GetLabelTableAsJsonResponse;
 	class SetLabelTypeRequest;
 	class LoadLabelTableRequest;
 	class SetInstanceLabelUniquenessRequest;
@@ -94,6 +96,10 @@ public:
 
 	void HandleSetStaticMeshTypeSemanticId(const TempoSensors::SetStaticMeshTypeSemanticIdRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation);
 
+	void HandleSetActorTagSemanticId(const TempoSensors::SetActorTagSemanticIdRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation);
+
+	void HandleGetLabelTableAsJson(const TempoCore::Empty& Request, const TResponseDelegate<TempoSensors::GetLabelTableAsJsonResponse>& ResponseContinuation) const;
+
 	void HandleSetLabelType(const TempoSensors::SetLabelTypeRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation);
 
 	void HandleLoadLabelTable(const TempoSensors::LoadLabelTableRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation);
@@ -119,15 +125,21 @@ protected:
 
 	void LabelComponent(UPrimitiveComponent* Component, FInstanceSemanticIdPair ActorIdPair);
 
+	// Resolves the label an Actor earns, honoring runtime overrides over the label table. Unset
+	// means nothing in the table matches the Actor and it should go unlabeled.
+	TOptional<int32> ResolveActorSemanticId(const AActor* Actor) const;
+
 	// Resolves the label a Component earns in its own right, independent of its owning Actor.
 	// Unset means the Component has no label of its own and should inherit its Actor's.
 	TOptional<int32> ResolveComponentSemanticId(const UPrimitiveComponent* Component) const;
 
-	// Resolves the label a static mesh asset path earns, honoring runtime overrides over the label table.
-	TOptional<int32> ResolveStaticMeshSemanticId(const FString& MeshPath) const;
+	// Resolves the label a mesh asset path earns, static or skeletal, honoring runtime overrides
+	// over the label table.
+	TOptional<int32> ResolveMeshSemanticId(const FString& MeshPath) const;
 
-	// The static mesh assets a Component renders: its own mesh, or the meshes a Niagara system instances.
-	static void GetComponentStaticMeshPaths(const UPrimitiveComponent* Component, TArray<FString>& OutMeshPaths);
+	// The mesh assets a Component renders: its own static or skeletal mesh, or the meshes a Niagara
+	// system instances.
+	static void GetComponentMeshPaths(const UPrimitiveComponent* Component, TArray<FString>& OutMeshPaths);
 
 	void UnLabelAllActors();
 
@@ -155,7 +167,13 @@ protected:
 	TMap<FString, FName> StaticMeshLabels;
 
 	UPROPERTY(VisibleAnywhere)
+	TMap<FString, FName> SkeletalMeshLabels;
+
+	UPROPERTY(VisibleAnywhere)
 	TMap<FName, FName> ComponentTagLabels;
+
+	UPROPERTY(VisibleAnywhere)
+	TMap<FName, FName> ActorTagLabels;
 
 	UPROPERTY(VisibleAnywhere)
 	TMap<FName, int32> SemanticIds;
@@ -182,6 +200,11 @@ protected:
 	// Takes precedence over DataTable definitions (StaticMeshLabels)
 	UPROPERTY()
 	TMap<FString, int32> StaticMeshTypeSemanticIdOverrides;
+
+	// Runtime overrides for actor tags (tag -> semantic ID)
+	// Takes precedence over DataTable definitions (ActorTagLabels)
+	UPROPERTY()
+	TMap<FName, int32> ActorTagSemanticIdOverrides;
 
 	FInstanceIdAllocator InstanceIdAllocator = FInstanceIdAllocator(1, 255);
 };

@@ -37,6 +37,8 @@ message SemanticClassInfo {
   repeated string actor_types = 3;        // Actor types assigned to this class
   repeated string static_mesh_types = 4;  // Static mesh paths assigned to this class
   repeated string component_tags = 5;     // Component tags assigned to this class
+  repeated string actor_tags = 6;         // Actor tags assigned to this class
+  repeated string skeletal_mesh_types = 7;  // Skeletal mesh paths assigned to this class
 }
 
 message GetSemanticClassesResponse {
@@ -46,6 +48,13 @@ message GetSemanticClassesResponse {
 message SetActorTypeSemanticIdRequest {
   // Class name. A Blueprint class may be named with or without its generated "_C" suffix.
   string actor_type = 1;    // e.g., "CBP_QuantumCharacter_C" (class name)
+  int32 semantic_id = 2;    // 0-255 to set, -1 to revert to DataTable default
+}
+
+message SetActorTagSemanticIdRequest {
+  // An Actor tag, as it appears in the Actor's Tags array. Beats the Actor's type, so it labels
+  // one particular Actor differently from others of its class.
+  string actor_tag = 1;
   int32 semantic_id = 2;    // 0-255 to set, -1 to revert to DataTable default
 }
 
@@ -81,7 +90,8 @@ message SetLabelTypeRequest {
 message LoadLabelTableRequest {
   // The label table as an Unreal DataTable JSON document: a JSON array of row objects, each
   // with a "Name" key (the label's row name) plus any of the row's columns — "Label" (the
-  // integer ID written to the label image), "ActorTypes", "StaticMeshTypes", "ComponentTags".
+  // integer ID written to the label image), "ActorTypes", "ActorTags", "StaticMeshTypes",
+  // "SkeletalMeshTypes", "ComponentTags".
   // Asset references are full object paths, e.g. "/Game/Vehicles/BP_Car.BP_Car_C". A column a row
   // omits is left empty; an unrecognized column name is an error. Include a "NoLabel" row: it
   // names the ID used for everything the table does not otherwise match.
@@ -109,6 +119,14 @@ message SetLabelRowOverridesRequest {
   string overriding_row_name = 2;
 }
 
+message GetLabelTableAsJsonResponse {
+  // The label table currently in effect, in the same Unreal DataTable JSON format LoadLabelTable
+  // accepts, so it can be fetched, edited, and loaded back. Rows and the entries within each row
+  // are sorted by name, so two exports of the same table diff cleanly. Runtime per-type overrides
+  // set through SetActorTypeSemanticId and friends are NOT folded in — this is the table itself.
+  string json = 1;
+}
+
 service LabelService {
   rpc GetInstanceToSemanticIdMap(TempoCore.Empty) returns (InstanceToSemanticIdMap);
 
@@ -123,6 +141,10 @@ service LabelService {
   rpc GetAllStaticMeshTypes(TempoCore.Empty) returns (GetAllStaticMeshTypesResponse);
 
   rpc SetStaticMeshTypeSemanticId(SetStaticMeshTypeSemanticIdRequest) returns (TempoCore.Empty);
+
+  rpc SetActorTagSemanticId(SetActorTagSemanticIdRequest) returns (TempoCore.Empty);
+
+  rpc GetLabelTableAsJson(TempoCore.Empty) returns (GetLabelTableAsJsonResponse);
 
   rpc SetLabelType(SetLabelTypeRequest) returns (TempoCore.Empty);
 
