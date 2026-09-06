@@ -302,6 +302,12 @@ protected:
 	// Precompute the per-beam geometry for a tile. Called from ConfigureTile once the tile's pixel
 	// grid is final, since the mapping from beam to pixel depends on it.
 	void BuildBeamSamples(FTempoLidarTile& Tile) const;
+
+#if WITH_DEV_AUTOMATION_TESTS
+	// The beam-sample tests drive BuildBeamSamples directly and set the beam pattern that feeds it,
+	// all of which is protected. See Tests/TempoLidarBeamSamplesTest.cpp.
+	friend struct FTempoLidarTestAccess;
+#endif
 	virtual void UpdateInternalMirrors() override;
 	virtual void DeactivateAllTiles() override;
 	virtual void ApplyLabelOverridesToTiles() override;
