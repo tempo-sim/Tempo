@@ -296,11 +296,11 @@ void UTempoActorLabeler::HandleSetActorTypeSemanticId(const TempoSensors::SetAct
 	const int32 SemanticId = Request.semantic_id();
 
 	// Validate range
-	if (SemanticId < -1 || SemanticId > 255)
+	if (SemanticId < -1 || SemanticId > GTempoCamera_Max_Label)
 	{
+		const FString ErrorMsg = FString::Printf(TEXT("semantic_id must be -1 (revert) or 0-%d"), GTempoCamera_Max_Label);
 		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(),
-			grpc::Status(grpc::StatusCode::INVALID_ARGUMENT,
-			"semantic_id must be -1 (revert) or 0-255"));
+			grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 
@@ -420,11 +420,11 @@ void UTempoActorLabeler::HandleSetStaticMeshTypeSemanticId(const TempoSensors::S
 	const int32 SemanticId = Request.semantic_id();
 
 	// Validate range
-	if (SemanticId < -1 || SemanticId > 255)
+	if (SemanticId < -1 || SemanticId > GTempoCamera_Max_Label)
 	{
+		const FString ErrorMsg = FString::Printf(TEXT("semantic_id must be -1 (revert) or 0-%d"), GTempoCamera_Max_Label);
 		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(),
-			grpc::Status(grpc::StatusCode::INVALID_ARGUMENT,
-			"semantic_id must be -1 (revert) or 0-255"));
+			grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 
@@ -594,11 +594,11 @@ void UTempoActorLabeler::HandleSetActorTagSemanticId(const TempoSensors::SetActo
 	const int32 SemanticId = Request.semantic_id();
 
 	// Validate range
-	if (SemanticId < -1 || SemanticId > 255)
+	if (SemanticId < -1 || SemanticId > GTempoCamera_Max_Label)
 	{
+		const FString ErrorMsg = FString::Printf(TEXT("semantic_id must be -1 (revert) or 0-%d"), GTempoCamera_Max_Label);
 		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(),
-			grpc::Status(grpc::StatusCode::INVALID_ARGUMENT,
-			"semantic_id must be -1 (revert) or 0-255"));
+			grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 

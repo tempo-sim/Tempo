@@ -7,6 +7,8 @@
 #include "CoreMinimal.h"
 #include "Subsystems/WorldSubsystem.h"
 
+#include "TempoSensorsConstants.h"
+
 #include "TempoServiceProvider.h"
 #include "TempoServer.h"
 #include "TempoSubsystems.h"
@@ -206,5 +208,7 @@ protected:
 	UPROPERTY()
 	TMap<FName, int32> ActorTagSemanticIdOverrides;
 
-	FInstanceIdAllocator InstanceIdAllocator = FInstanceIdAllocator(1, 255);
+	// 0 is reserved for "unlabeled", and the camera cannot encode an ID above
+	// GTempoCamera_Max_Label, so instance IDs run 1..GTempoCamera_Max_Label.
+	FInstanceIdAllocator InstanceIdAllocator = FInstanceIdAllocator(1, GTempoCamera_Max_Label);
 };
