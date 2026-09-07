@@ -1,5 +1,10 @@
 # Tempo + CitySample Quick Start
 
+!!! warning "Work in progress"
+
+    This page is a work in progress. The steps below get a stock CitySample project building and
+    running with Tempo, but the integration is still settling and the details here may change.
+
 Epic's **CitySample** — the project behind the *Matrix Awakens* city — is a large, fully authored
 urban environment with traffic, crowds and drivable vehicles already in it. It is a natural host
 for Tempo: Tempo's [Traffic](../plugins/traffic.md) plugin is a fork of CitySample's own, so the
