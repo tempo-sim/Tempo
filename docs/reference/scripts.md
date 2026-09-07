@@ -101,6 +101,15 @@ your project root works.
 :   Modifies your project's `*.Target.cs` files to use Tempo's custom toolchain, which is needed to
     link certain third-party dependencies properly. Called by `Setup.sh`.
 
+`DisableConflictingPlugins.sh`
+
+:   Disables any plugin in your project that shares a name with one Tempo ships, by renaming its
+    `*.uplugin` to `*.uplugin.disabled-by-tempo`. Unreal builds all of a project's plugin rules
+    into one C# assembly before it arbitrates between same-named plugins, so two copies are a build
+    error rather than a contest. Called by `Setup.sh`; pass `-restore` to undo it.
+
+    [:octicons-arrow-right-24: Traffic as a drop-in replacement](../plugins/traffic.md#drop-in-replacement-for-citysamples-traffic)
+
 ## Discovery helpers
 
 These print a path and exit. They're used by the other scripts, and are useful in your own

@@ -44,6 +44,9 @@ Plugins/Tempo/Setup.sh
 
 This script:
 
+- Disables any plugin already in your project that shares a name with one Tempo ships, by renaming
+  its `*.uplugin`. Unreal cannot build two plugins of the same name, so this is what lets Tempo's
+  `Traffic` stand in for the one a [CitySample](../plugins/traffic.md) project already has
 - Modifies your project's `*.Target.cs` files to use Tempo's custom toolchain, which is necessary
   for linking certain third-party dependencies properly
 - Installs the Tempo [engine mods](../guides/engine-mods.md), patching your installed Engine
