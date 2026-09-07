@@ -14,12 +14,12 @@
 
 
 UMassTrafficVehicleSimulationTrait::UMassTrafficVehicleSimulationTrait(const FObjectInitializer& ObjectInitializer)
-: Super(ObjectInitializer)
+	: Super(ObjectInitializer)
 {
 	// Zero all tick rates by default
 	for (int i = 0; i < EMassLOD::Max; ++i)
 	{
-		VariableTickParams.TickRates[i] = 0.0f;		
+		VariableTickParams.TickRates[i] = 0.0f;
 	}
 	VariableTickParams.TickRates[EMassLOD::Off] = 1.0f; // 1s tick interval for Off LODs
 }
@@ -27,6 +27,9 @@ UMassTrafficVehicleSimulationTrait::UMassTrafficVehicleSimulationTrait(const FOb
 void UMassTrafficVehicleSimulationTrait::BuildTemplate(FMassEntityTemplateBuildContext& BuildContext, const UWorld& World) const
 {
 	FMassEntityManager& EntityManager = UE::Mass::Utils::GetEntityManagerChecked(World);
+
+	UMassTrafficSubsystem* MassTrafficSubsystem = UWorld::GetSubsystem<UMassTrafficSubsystem>(&World);
+	check(MassTrafficSubsystem || BuildContext.IsInspectingData());
 
 	// Add parameters as shared fragment
 	const FConstSharedStruct ParamsSharedFragment = EntityManager.GetOrCreateConstSharedFragment(Params);
@@ -62,13 +65,7 @@ void UMassTrafficVehicleSimulationTrait::BuildTemplate(FMassEntityTemplateBuildC
 	const FConstSharedStruct VariableTickParamsFragment = EntityManager.GetOrCreateConstSharedFragment(VariableTickParams);
 	BuildContext.AddConstSharedFragment(VariableTickParamsFragment);
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 5
-	const uint32 VariableTickParamsHash = UE::StructUtils::GetStructCrc32(FConstStructView::Make(VariableTickParams));
-	const FSharedStruct VariableTickSharedFragment = EntityManager.GetOrCreateSharedFragmentByHash<FMassSimulationVariableTickSharedFragment>(VariableTickParamsHash, VariableTickParams);
-#else
-	const FSharedStruct VariableTickSharedFragment = EntityManager.GetOrCreateSharedFragment<FMassSimulationVariableTickSharedFragment>(VariableTickParams);
-#endif
-
+	const FSharedStruct VariableTickSharedFragment = EntityManager.GetOrCreateSharedFragment<FMassSimulationVariableTickSharedFragment>(FConstStructView::Make(VariableTickParams), VariableTickParams);
 	BuildContext.AddSharedFragment(VariableTickSharedFragment);
 
 	// Various fragments
@@ -93,7 +90,7 @@ void UMassTrafficVehicleSimulationMassControlTrait::BuildTemplate(FMassEntityTem
 	BuildContext.AddFragment<FMassTrafficInterpolationFragment>();
 	BuildContext.AddFragment<FMassTrafficLaneOffsetFragment>();
 	BuildContext.AddFragment<FMassTrafficNextVehicleFragment>();
-	BuildContext.AddFragment<FMassTrafficObstacleAvoidanceFragment>();	
+	BuildContext.AddFragment<FMassTrafficObstacleAvoidanceFragment>();
 	BuildContext.RequireFragment<FMassTrafficRandomFractionFragment>();
 	BuildContext.AddFragment<FMassTrafficVehicleLaneChangeFragment>();
 	BuildContext.RequireFragment<FMassTrafficVehicleLightsFragment>();
@@ -108,8 +105,17 @@ void UMassTrafficVehicleSimulationMassControlTrait::BuildTemplate(FMassEntityTem
 		const FMassTrafficSimpleVehiclePhysicsTemplate* Template = MassTrafficSubsystem->GetOrExtractVehiclePhysicsTemplate(PhysicsParams.PhysicsVehicleTemplateActor);
 
 		// Register & add shared fragment
-		const FConstSharedStruct PhysicsSharedFragment = EntityManager.GetOrCreateConstSharedFragment<FMassTrafficVehiclePhysicsSharedParameters>(Template);
-		BuildContext.AddConstSharedFragment(PhysicsSharedFragment);
+		if (LIKELY(!BuildContext.IsInspectingData()))
+		{
+			const FConstSharedStruct PhysicsSharedFragment = EntityManager.GetOrCreateConstSharedFragment<FMassTrafficVehiclePhysicsSharedParameters>(FConstStructView::Make(*Template), Template);
+			BuildContext.AddConstSharedFragment(PhysicsSharedFragment);
+		}
+		else
+		{
+			// in the investigation mode we only care about the fragment type
+			const FConstSharedStruct PhysicsSharedFragment = EntityManager.GetOrCreateConstSharedFragment<FMassTrafficVehiclePhysicsSharedParameters>(Template);
+			BuildContext.AddConstSharedFragment(PhysicsSharedFragment);
+		}
 	}
 	else
 	{

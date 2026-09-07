@@ -3,9 +3,10 @@
 
 #pragma once
 
+#if UE_ENABLE_INCLUDE_ORDER_DEPRECATED_IN_5_6
 #include "MassTraffic.h"
+#endif // UE_ENABLE_INCLUDE_ORDER_DEPRECATED_IN_5_6
 #include "ZoneGraphTypes.h"
-
 #include "HierarchicalHashGrid2D.h"
 #include "MassEntityView.h"
 #include "MassTrafficSigns.h"
@@ -21,7 +22,6 @@
 #define MASSTRAFFIC_NUM_INLINE_VEHICLE_CONFLICT_LANES 16 // There could potentially be many more conflict lanes.  We'll need to keep an eye on this.
 #define MASSTRAFFIC_NUM_INLINE_VEHICLE_CROSSWALK_LANES 12 // Each lane should only run through (at most) this many crosswalk lanes.
 #define MASSTRAFFIC_NUM_INLINE_VEHICLE_CROSSWALKS 6 // Each lane should only run through (at most) this many crosswalks.
-
 
 namespace UE::MassTraffic
 {
@@ -189,27 +189,27 @@ public:
 
 /** A faster, smaller-footprint list for a small number of entities. But will be very slow for larger sizes. */
 template<int32 MAX>
-class TSmallEntityList : public TStaticArray<FMassEntityHandle, MAX>
+class TSmallEntityList : public TStaticArray<Core::TAlignedElement<FMassEntityHandle, sizeof(FMassEntityHandle)>, MAX>
 {
 public:
 	
 	TSmallEntityList() :
-		TStaticArray<FMassEntityHandle, MAX>()
+		TStaticArray<Core::TAlignedElement<FMassEntityHandle, sizeof(FMassEntityHandle)>, MAX>()
 	{
 	}
 
 	explicit TSmallEntityList(const FMassEntityHandle Entity) :
-		TStaticArray<FMassEntityHandle, MAX>(Entity)
+		TStaticArray<Core::TAlignedElement<FMassEntityHandle, sizeof(FMassEntityHandle)>, MAX>(Entity)
 	{
 	}
 
-	explicit TSmallEntityList(TStaticArray<FMassEntityHandle, MAX>&& Other) :
-		TStaticArray<FMassEntityHandle, MAX>(Other)
+	explicit TSmallEntityList(TStaticArray<Core::TAlignedElement<FMassEntityHandle, sizeof(FMassEntityHandle)>, MAX>&& Other) :
+		TStaticArray<Core::TAlignedElement<FMassEntityHandle, sizeof(FMassEntityHandle)>, MAX>(Other)
 	{
 	}
 
-	explicit TSmallEntityList(const TStaticArray<FMassEntityHandle, MAX>& Other) :
-		TStaticArray<FMassEntityHandle, MAX>(Other)
+	explicit TSmallEntityList(const TStaticArray<Core::TAlignedElement<FMassEntityHandle, sizeof(FMassEntityHandle)>, MAX>& Other):
+		TStaticArray<Core::TAlignedElement<FMassEntityHandle, sizeof(FMassEntityHandle)>, MAX>(Other)
 	{
 	}
 

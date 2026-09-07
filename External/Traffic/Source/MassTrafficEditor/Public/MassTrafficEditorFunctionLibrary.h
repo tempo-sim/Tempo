@@ -2,11 +2,11 @@
 
 #pragma once
 
-
+#if UE_ENABLE_INCLUDE_ORDER_DEPRECATED_IN_5_6
 #include "CoreMinimal.h"
+#endif // UE_ENABLE_INCLUDE_ORDER_DEPRECATED_IN_5_6
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "ZoneGraphTypes.h"
-
 #include "MassTrafficEditorFunctionLibrary.generated.h"
 
 

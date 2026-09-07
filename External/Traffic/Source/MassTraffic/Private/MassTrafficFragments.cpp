@@ -860,7 +860,7 @@ bool FMassTrafficVehicleLaneChangeFragment::BeginLaneChangeProgression(
 	
 	if (!InTrafficLaneData_Initial || !InTrafficLaneData_Final /*should never happen*/)
 	{
-		UE_LOG(LogMassTraffic, Error, TEXT("%s - Could not begin lane change progression! Incoming lane fragments are missing. Inital:0x%x Final:0x%x"), ANSI_TO_TCHAR(__FUNCTION__),
+		UE_LOG(LogMassTraffic, Error, TEXT("%s - Could not begin lane change progression! Incoming lane fragments are missing. Initial:0x%llx Final:0x%llx"), ANSI_TO_TCHAR(__FUNCTION__),
 			TrafficLaneData_Initial, TrafficLaneData_Final);
 		return false;
 	}

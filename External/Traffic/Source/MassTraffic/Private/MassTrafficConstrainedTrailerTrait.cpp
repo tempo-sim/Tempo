@@ -14,7 +14,7 @@ void UMassTrafficConstrainedTrailerTrait::BuildTemplate(FMassEntityTemplateBuild
 	FMassEntityManager& EntityManager = UE::Mass::Utils::GetEntityManagerChecked(World);
 
 	UMassTrafficSubsystem* MassTrafficSubsystem = UWorld::GetSubsystem<UMassTrafficSubsystem>(&World);
-	check(MassTrafficSubsystem);
+	check(MassTrafficSubsystem || BuildContext.IsInspectingData());
 
 	// Add Params as shared fragment
 	const FConstSharedStruct ParamsSharedFragment = EntityManager.GetOrCreateConstSharedFragment(Params);

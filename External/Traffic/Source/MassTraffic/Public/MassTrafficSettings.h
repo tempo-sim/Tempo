@@ -3,7 +3,6 @@
 #pragma once
 
 #include "MassTrafficPIDController.h"
-
 #include "MassSettings.h"
 #include "ZoneGraphTypes.h"
 #include "MassTrafficSettings.generated.h"

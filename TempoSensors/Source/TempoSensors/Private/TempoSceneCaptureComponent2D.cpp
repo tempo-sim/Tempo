@@ -14,7 +14,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "TextureResource.h"
 
-#if RHI_RAYTRACING && ENGINE_MAJOR_VERSION == 5 && ((ENGINE_MINOR_VERSION == 5 && STATS) || ENGINE_MINOR_VERSION > 5)
+#if RHI_RAYTRACING
 #if PLATFORM_WINDOWS
 // An upstream include leaks the Win32 Interlocked* macros, which mangle
 // FPlatformAtomics::InterlockedIncrement -> ::_InterlockedIncrement inside RenderCore headers
@@ -142,7 +142,7 @@ void UTempoSceneCaptureComponent2D::Deactivate()
 // UpdateSceneCaptureContents, so it calls this directly from RenderCapture before RenderTiles.
 void UTempoSceneCaptureComponent2D::EnsureRayTracingReadbackBuffersExpanded(FSceneInterface* Scene)
 {
-#if RHI_RAYTRACING && ENGINE_MAJOR_VERSION == 5 && ((ENGINE_MINOR_VERSION == 5 && STATS) || ENGINE_MINOR_VERSION > 5)
+#if RHI_RAYTRACING
 	if (!Scene)
 	{
 		return;
@@ -174,7 +174,6 @@ void UTempoSceneCaptureComponent2D::EnsureRayTracingReadbackBuffersExpanded(FSce
 					const size_t MaxReadbackBuffersOffset = offsetof(FRayTracingScene, MaxReadbackBuffers);
 					*reinterpret_cast<uint32*>(reinterpret_cast<char*>(RayTracingScene) + MaxReadbackBuffersOffset) = NewMaxReadbackBuffers;
 				}
-#if ENGINE_MINOR_VERSION > 6
 				const uint32 PrevStatsReadbackBuffersSize = RayTracingScene->StatsReadback.Num();
 				if (PrevStatsReadbackBuffersSize < NewMaxReadbackBuffers)
 				{
@@ -188,19 +187,7 @@ void UTempoSceneCaptureComponent2D::EnsureRayTracingReadbackBuffersExpanded(FSce
 						// size calc if the entry is ever Lock'd before being written.
 					}
 				}
-#else
-				const uint32 PrevStatsReadbackBuffersSize = RayTracingScene->StatsReadbackBuffers.Num();
-				if (PrevStatsReadbackBuffersSize < NewMaxReadbackBuffers)
-				{
-					RayTracingScene->StatsReadbackBuffers.SetNum(NewMaxReadbackBuffers);
-					for (uint32 Index = PrevStatsReadbackBuffersSize; Index < NewMaxReadbackBuffers; ++Index)
-					{
-						RayTracingScene->StatsReadbackBuffers[Index] = new FRHIGPUBufferReadback(TEXT("FRayTracingScene::StatsReadbackBuffer"));
-					}
-				}
-#endif
 
-#if ENGINE_MINOR_VERSION > 5
 				const uint32 PrevFeedbackReadbackBuffersSize = RayTracingScene->FeedbackReadback.Num();
 				if (PrevFeedbackReadbackBuffersSize < NewMaxReadbackBuffers)
 				{
@@ -211,7 +198,6 @@ void UTempoSceneCaptureComponent2D::EnsureRayTracingReadbackBuffersExpanded(FSce
 						RayTracingScene->FeedbackReadback[Index].GeometryCountReadbackBuffer = new FRHIGPUBufferReadback(TEXT("FRayTracingScene::FeedbackReadbackBuffer::GeometryCount"));
 					}
 				}
-#endif
 			});
 	}
 #endif
@@ -253,7 +239,7 @@ void UTempoSceneCaptureComponent2D::EnsureRayTracingReadbackBuffersExpanded(FSce
 // bump (a rename surfaces as a compile error here, not as silent breakage).
 void UTempoSceneCaptureComponent2D::PinRayTracingSceneUsedThisFrame(FSceneInterface* Scene)
 {
-#if RHI_RAYTRACING && ENGINE_MAJOR_VERSION == 5 && ((ENGINE_MINOR_VERSION == 5 && STATS) || ENGINE_MINOR_VERSION > 5)
+#if RHI_RAYTRACING
 	if (!Scene)
 	{
 		return;
@@ -277,11 +263,7 @@ void UTempoSceneCaptureComponent2D::PinRayTracingSceneUsedThisFrame(FSceneInterf
 #endif
 }
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-void UTempoSceneCaptureComponent2D::UpdateSceneCaptureContents(FSceneInterface* Scene)
-#else
 void UTempoSceneCaptureComponent2D::UpdateSceneCaptureContents(FSceneInterface* Scene, ISceneRenderBuilder& SceneRenderBuilder)
-#endif
 {
 	TextureInitFence.Wait();
 
@@ -321,11 +303,7 @@ void UTempoSceneCaptureComponent2D::UpdateSceneCaptureContents(FSceneInterface* 
 		}
 	}
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-	Super::UpdateSceneCaptureContents(Scene);
-#else
 	Super::UpdateSceneCaptureContents(Scene, SceneRenderBuilder);
-#endif
 
 	if (!ShouldManageOwnReadback())
 	{

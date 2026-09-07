@@ -3,7 +3,6 @@
 #pragma once
 
 #include "MassRepresentationActorManagement.h"
-
 #include "MassTrafficParkedVehicleRepresentationActorManagement.generated.h"
 
 /**

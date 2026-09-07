@@ -17,16 +17,12 @@ UMassTrafficPostPhysicsUpdateTrailersProcessor::UMassTrafficPostPhysicsUpdateTra
 	// Update post-physics transform to be used on the next frame
 	ProcessingPhase = EMassProcessingPhase::PostPhysics;
 	bAutoRegisterWithProcessingPhases = true;
-	ExecutionFlags = static_cast<int32>(EProcessorExecutionFlags::All);
+	ExecutionFlags = static_cast<int32>(EProcessorExecutionFlags::AllNetModes);
 	ExecutionOrder.ExecuteInGroup = UE::MassTraffic::ProcessorGroupNames::PostPhysicsUpdateTrafficVehicles;
 	ExecutionOrder.ExecuteAfter.Add(UMassTrafficPostPhysicsUpdateTrafficVehiclesProcessor::StaticClass()->GetFName());
 }
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-void UMassTrafficPostPhysicsUpdateTrailersProcessor::ConfigureQueries()
-#else
 void UMassTrafficPostPhysicsUpdateTrailersProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
-#endif
 {
 	EntityQuery.AddTagRequirement<FMassTrafficVehicleTrailerTag>(EMassFragmentPresence::All);
 	EntityQuery.AddRequirement<FMassActorFragment>(EMassFragmentAccess::ReadWrite);
@@ -40,11 +36,7 @@ void UMassTrafficPostPhysicsUpdateTrailersProcessor::ConfigureQueries(const TSha
 void UMassTrafficPostPhysicsUpdateTrailersProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
 	// The main point of this processor is to update Mass with the location of the actor.
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-	EntityQuery.ForEachEntityChunk(EntityManager, Context, [](FMassExecutionContext& QueryContext)
-#else
 	EntityQuery.ForEachEntityChunk(Context, [](FMassExecutionContext& QueryContext)
-#endif
 	{
 		const TArrayView<FMassActorFragment> TrailerActorFragments = QueryContext.GetMutableFragmentView<FMassActorFragment>();
 		const TArrayView<FMassRepresentationFragment> TrailerRepresentationFragments = QueryContext.GetMutableFragmentView<FMassRepresentationFragment>();
@@ -53,16 +45,16 @@ void UMassTrafficPostPhysicsUpdateTrailersProcessor::Execute(FMassEntityManager&
 		const TArrayView<FMassTrafficAngularVelocityFragment> TrailerAngularVelocityFragments = QueryContext.GetMutableFragmentView<FMassTrafficAngularVelocityFragment>();
 		const TArrayView<FMassTrafficConstrainedVehicleFragment> TrailerConstrainedVehicleFragments = QueryContext.GetMutableFragmentView<FMassTrafficConstrainedVehicleFragment>();
 
-		for (int32 Index = 0; Index < QueryContext.GetNumEntities(); ++Index)
+		for (FMassExecutionContext::FEntityIterator EntityIt = QueryContext.CreateEntityIterator(); EntityIt; ++EntityIt)
 		{
-			FMassRepresentationFragment& TrailerRepresentationFragment = TrailerRepresentationFragments[Index];
-			FTransformFragment& TrailerTransformFragment = TrailerTransformFragments[Index];
-			FMassVelocityFragment& TrailerVelocityFragment = TrailerVelocityFragments[Index];
-			FMassTrafficAngularVelocityFragment& TrailerAngularVelocityFragment = TrailerAngularVelocityFragments[Index]; 
-			FMassTrafficConstrainedVehicleFragment& TrailerConstrainedVehicleFragment = TrailerConstrainedVehicleFragments[Index]; 
+			FMassRepresentationFragment& TrailerRepresentationFragment = TrailerRepresentationFragments[EntityIt];
+			FTransformFragment& TrailerTransformFragment = TrailerTransformFragments[EntityIt];
+			FMassVelocityFragment& TrailerVelocityFragment = TrailerVelocityFragments[EntityIt];
+			FMassTrafficAngularVelocityFragment& TrailerAngularVelocityFragment = TrailerAngularVelocityFragments[EntityIt]; 
+			FMassTrafficConstrainedVehicleFragment& TrailerConstrainedVehicleFragment = TrailerConstrainedVehicleFragments[EntityIt]; 
 
-			AActor* TrailerActor = TrailerActorFragments[Index].GetMutable();
-			if (IsValid(TrailerActor) && TrailerRepresentationFragments[Index].CurrentRepresentation == EMassRepresentationType::HighResSpawnedActor)
+			AActor* TrailerActor = TrailerActorFragments[EntityIt].GetMutable();
+			if (IsValid(TrailerActor) && TrailerRepresentationFragments[EntityIt].CurrentRepresentation == EMassRepresentationType::HighResSpawnedActor)
 			{
 				// Check to make sure we are still constrained to the vehicle. It may be that the vehicle was destroyed
 				// and we are no longer constrained e.g if we are dropping back LOD, the vehicle destruction was

@@ -14,9 +14,6 @@
 #include "MassLODUtils.h"
 #include "MassZoneGraphNavigationFragments.h"
 #include "ZoneGraphSubsystem.h"
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-#include "MassGameplayExternalTraits.h"
-#endif
 #include "ZoneGraphTypes.h"
 
 #define DEBUG_LANE_CHANGE_LEVEL 0
@@ -694,11 +691,7 @@ UMassTrafficLaneChangingProcessor::UMassTrafficLaneChangingProcessor()
 	ExecutionOrder.ExecuteAfter.Add(UMassTrafficOverseerProcessor::StaticClass()->GetFName());
 }
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-void UMassTrafficLaneChangingProcessor::ConfigureQueries()
-#else
-void UMassTrafficLaneChangingProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
-#endif
+void UMassTrafficLaneChangingProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager) 
 {
 	StartNewLaneChangesEntityQuery_Conditional.AddTagRequirement<FMassTrafficParkedVehicleTag>(EMassFragmentPresence::None);
 	StartNewLaneChangesEntityQuery_Conditional.AddRequirement<FAgentRadiusFragment>(EMassFragmentAccess::ReadOnly);
@@ -731,7 +724,7 @@ void UMassTrafficLaneChangingProcessor::ConfigureQueries(const TSharedRef<FMassE
 }
 
 
-void UMassTrafficLaneChangingProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
+void UMassTrafficLaneChangingProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& ExecutionContext)
 {
 	// Quick checks to see if we should bother being here.
 	if (GMassTrafficLaneChange == 0 /*lane changing forced off (no lane changing allowed at all)*/)
@@ -749,15 +742,10 @@ void UMassTrafficLaneChangingProcessor::Execute(FMassEntityManager& EntityManage
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(TEXT("StartNewLaneChanges"));
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-		StartNewLaneChangesEntityQuery_Conditional.ForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& QueryContext)
-#else
-		StartNewLaneChangesEntityQuery_Conditional.ForEachEntityChunk(Context, [&](FMassExecutionContext& QueryContext)
-#endif
+		StartNewLaneChangesEntityQuery_Conditional.ForEachEntityChunk(ExecutionContext, [&](FMassExecutionContext& Context)
 			{
-				const UZoneGraphSubsystem& ZoneGraphSubsystem = QueryContext.GetSubsystemChecked<UZoneGraphSubsystem>();
-				UMassTrafficSubsystem& MassTrafficSubsystem = QueryContext.GetMutableSubsystemChecked<UMassTrafficSubsystem>();
-				
+				const UZoneGraphSubsystem& ZoneGraphSubsystem = Context.GetSubsystemChecked<UZoneGraphSubsystem>();
+				UMassTrafficSubsystem& MassTrafficSubsystem = Context.GetMutableSubsystemChecked<UMassTrafficSubsystem>();
 
 				const TConstArrayView<FAgentRadiusFragment> AgentRadiusFragments = Context.GetFragmentView<FAgentRadiusFragment>();
 				const TConstArrayView<FMassTrafficRandomFractionFragment> RandomFractionFragments = Context.GetFragmentView<FMassTrafficRandomFractionFragment>();
@@ -771,22 +759,22 @@ void UMassTrafficLaneChangingProcessor::Execute(FMassEntityManager& EntityManage
 				const TConstArrayView<FMassTrafficDebugFragment> DebugFragments = Context.GetFragmentView<FMassTrafficDebugFragment>();
 				const TArrayView<FMassTrafficObstacleAvoidanceFragment> AvoidanceFragments = Context.GetMutableFragmentView<FMassTrafficObstacleAvoidanceFragment>();
 
-				for (int32 EntityIndex = 0; EntityIndex < Context.GetNumEntities(); EntityIndex++)
+				for (FMassExecutionContext::FEntityIterator EntityIt = Context.CreateEntityIterator(); EntityIt; ++EntityIt)
 				{
-					const FMassEntityHandle Entity = Context.GetEntity(EntityIndex);
+					const FMassEntityHandle Entity = Context.GetEntity(EntityIt);
 				
-					const FAgentRadiusFragment& AgentRadiusFragment = AgentRadiusFragments[EntityIndex]; 
-					const FMassTrafficRandomFractionFragment& RandomFractionFragment = RandomFractionFragments[EntityIndex]; 
-					FMassTrafficNextVehicleFragment& NextVehicleFragment = NextVehicleFragments[EntityIndex]; 
-					FTransformFragment& TransformFragment = TransformFragments[EntityIndex];
-					FMassTrafficInterpolationFragment& InterpolationFragment = InterpolationFragments[EntityIndex];
-					FMassTrafficVehicleControlFragment& VehicleControlFragment = VehicleControlFragments[EntityIndex]; 
-					FMassTrafficVehicleLightsFragment& VehicleLightsFragment = VehicleLightsFragments[EntityIndex]; 
-					FMassZoneGraphLaneLocationFragment& ZoneGraphLaneLocationFragment = ZoneGraphLaneLocationFragments[EntityIndex]; 
-					FMassTrafficVehicleLaneChangeFragment& LaneChangeFragment = LaneChangeFragments[EntityIndex];
-					FMassTrafficObstacleAvoidanceFragment& AvoidanceFragment = AvoidanceFragments[EntityIndex];
+					const FAgentRadiusFragment& AgentRadiusFragment = AgentRadiusFragments[EntityIt]; 
+					const FMassTrafficRandomFractionFragment& RandomFractionFragment = RandomFractionFragments[EntityIt]; 
+					FMassTrafficNextVehicleFragment& NextVehicleFragment = NextVehicleFragments[EntityIt]; 
+					FTransformFragment& TransformFragment = TransformFragments[EntityIt];
+					FMassTrafficInterpolationFragment& InterpolationFragment = InterpolationFragments[EntityIt];
+					FMassTrafficVehicleControlFragment& VehicleControlFragment = VehicleControlFragments[EntityIt]; 
+					FMassTrafficVehicleLightsFragment& VehicleLightsFragment = VehicleLightsFragments[EntityIt]; 
+					FMassZoneGraphLaneLocationFragment& ZoneGraphLaneLocationFragment = ZoneGraphLaneLocationFragments[EntityIt]; 
+					FMassTrafficVehicleLaneChangeFragment& LaneChangeFragment = LaneChangeFragments[EntityIt];
+					FMassTrafficObstacleAvoidanceFragment& AvoidanceFragment = AvoidanceFragments[EntityIt];
 				
-					const bool bVisLog = DebugFragments.IsEmpty() ? false : DebugFragments[EntityIndex].bVisLog > 0;
+					const bool bVisLog = DebugFragments.IsEmpty() ? false : DebugFragments[EntityIt].bVisLog > 0;
 
 					const FZoneGraphStorage* ZoneGraphStorage = ZoneGraphSubsystem.GetZoneGraphStorage(ZoneGraphLaneLocationFragment.LaneHandle.DataHandle);
 					check(ZoneGraphStorage);
@@ -814,13 +802,8 @@ void UMassTrafficLaneChangingProcessor::Execute(FMassEntityManager& EntityManage
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(TEXT("UpdateLaneChanges"));
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
 		UpdateLaneChangesEntityQuery_Conditional.ForEachEntityChunk(
-				EntityManager, Context, [&](FMassExecutionContext& ComponentSystemExecutionContext)
-#else
-		UpdateLaneChangesEntityQuery_Conditional.ForEachEntityChunk(
-				Context, [&](FMassExecutionContext& ComponentSystemExecutionContext)
-#endif
+				ExecutionContext, [&](FMassExecutionContext& Context)
 			{
 				// NOTE - Don't check if we should skip this due to LOD. All lane changes, once started, should always be
 				// updated until finished. 
@@ -831,13 +814,13 @@ void UMassTrafficLaneChangingProcessor::Execute(FMassEntityManager& EntityManage
 				const TArrayView<FMassTrafficVehicleLaneChangeFragment> LaneChangeFragments = Context.GetMutableFragmentView<FMassTrafficVehicleLaneChangeFragment>();
 				const TArrayView<FMassTrafficNextVehicleFragment> NextVehicleFragments = Context.GetMutableFragmentView<FMassTrafficNextVehicleFragment>();
 
-				for (int32 EntityIndex = 0; EntityIndex < Context.GetNumEntities(); EntityIndex++)
+				for (FMassExecutionContext::FEntityIterator EntityIt = Context.CreateEntityIterator(); EntityIt; ++EntityIt)
 				{
-					FMassTrafficVehicleLightsFragment& VehicleLightsFragment = VehicleLightsFragments[EntityIndex]; 
-					const FMassZoneGraphLaneLocationFragment& ZoneGraphLaneLocationFragment = ZoneGraphLaneLocationFragments[EntityIndex]; 
-					const FMassSimulationVariableTickFragment& SimulationVariableTickFragment = SimulationVariableTickFragments[EntityIndex]; 
-					FMassTrafficVehicleLaneChangeFragment& LaneChangeFragment = LaneChangeFragments[EntityIndex]; 
-					FMassTrafficNextVehicleFragment& NextVehicleFragment = NextVehicleFragments[EntityIndex]; 
+					FMassTrafficVehicleLightsFragment& VehicleLightsFragment = VehicleLightsFragments[EntityIt]; 
+					const FMassZoneGraphLaneLocationFragment& ZoneGraphLaneLocationFragment = ZoneGraphLaneLocationFragments[EntityIt]; 
+					const FMassSimulationVariableTickFragment& SimulationVariableTickFragment = SimulationVariableTickFragments[EntityIt]; 
+					FMassTrafficVehicleLaneChangeFragment& LaneChangeFragment = LaneChangeFragments[EntityIt]; 
+					FMassTrafficNextVehicleFragment& NextVehicleFragment = NextVehicleFragments[EntityIt]; 
 
 					UpdateLaneChange(
 						VehicleLightsFragment,

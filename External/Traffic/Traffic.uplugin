@@ -1,8 +1,8 @@
 {
 	"FileVersion": 3,
-	"Version": 1,
-	"VersionName": "1.0",
-	"FriendlyName": "Traffic",
+	"Version": 2,
+	"VersionName": "1.0-Tempo",
+	"FriendlyName": "Traffic (Tempo)",
 	"Description": "Mass & Zone Graph based vehicle AI traffic system",
 	"Category": "AI",
 	"CreatedBy" : "Epic Games Inc",

@@ -2,14 +2,15 @@
 
 #pragma once
 
+#if UE_ENABLE_INCLUDE_ORDER_DEPRECATED_IN_5_6
 #include "MassTrafficPhysics.h"
-
 #include "CoreMinimal.h"
+#endif // UE_ENABLE_INCLUDE_ORDER_DEPRECATED_IN_5_6
 #include "Engine/DataTable.h"
 #include "MassEntityTraitBase.h"
 #include "MassSimulationLOD.h"
 #include "WheeledVehiclePawn.h"
-
+#include "Chaos/PBDJointConstraintTypes.h"
 #include "MassTrafficTrailerSimulationTrait.generated.h"
 
 USTRUCT(BlueprintType)

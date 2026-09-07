@@ -15,6 +15,16 @@ nothing.
 | **[TempoROS](tempo-ros.md)** | ROS 2 via in-process `rclcpp`. Standalone — usable without any other Tempo plugin. |
 | **[TempoROSBridge](tempo-ros-bridge.md)** | Exposes Tempo's data and controls as ROS 2 topics and services. |
 
+## Not ours, but shipped with Tempo
+
+Two more things live alongside the plugins above. Neither is Tempo-authored — both are Epic code
+that Tempo modifies — and you do not enable them the way you enable the plugins above.
+
+| | What it is |
+|---|---|
+| **[Traffic](traffic.md)** | Tempo's fork of the Traffic plugin from Epic's CitySample, with traffic controllers, sign-controlled intersections, and yielding added. It is what TempoAgents simulates. Also covers the `RuleProcessor` fork. |
+| **[Engine Mods](engine-mods.md)** | Small in-place patches to your engine install — chiefly ZoneGraph and MassCrowd — that the plugins above depend on. |
+
 ## Which do I need?
 
 ```mermaid

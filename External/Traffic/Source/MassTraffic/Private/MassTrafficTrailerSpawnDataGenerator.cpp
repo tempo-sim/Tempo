@@ -11,6 +11,14 @@
 #include "MassEntityUtils.h"
 
 
+void UMassTrafficTrailerSpawnDataGenerator::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager) const
+{
+	VehicleQuery.Initialize(EntityManager);
+	VehicleQuery.AddTagRequirement<FMassTrafficVehicleTag>(EMassFragmentPresence::All);
+	VehicleQuery.AddConstSharedRequirement<FMassTrafficConstrainedTrailerParameters>(EMassFragmentPresence::All);
+	VehicleQuery.AddRequirement<FTransformFragment>(EMassFragmentAccess::ReadOnly, EMassFragmentPresence::All); // Need at least 1 fragment access for valid query 
+}
+
 void UMassTrafficTrailerSpawnDataGenerator::Generate(UObject& QueryOwner,
 	TConstArrayView<FMassSpawnedEntityType> EntityTypes, int32 Count,
 	FFinishedGeneratingSpawnDataSignature& FinishedGeneratingSpawnPointsDelegate) const
@@ -22,16 +30,10 @@ void UMassTrafficTrailerSpawnDataGenerator::Generate(UObject& QueryOwner,
 	check(World);
 	FMassEntityManager& EntityManager = UE::Mass::Utils::GetEntityManagerChecked(*World);
 
-	// Configure Query
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-	FMassEntityQuery VehicleQuery;
-#else
-	TSharedRef<FMassEntityManager> EntityManagerRef(&EntityManager);
-	FMassEntityQuery VehicleQuery(EntityManagerRef);
-#endif
-	VehicleQuery.AddTagRequirement<FMassTrafficVehicleTag>(EMassFragmentPresence::All);
-	VehicleQuery.AddConstSharedRequirement<FMassTrafficConstrainedTrailerParameters>(EMassFragmentPresence::All);
-	VehicleQuery.AddRequirement<FTransformFragment>(EMassFragmentAccess::ReadOnly, EMassFragmentPresence::All); // Need at least 1 fragment access for valid query
+	if (VehicleQuery.IsInitialized() == false)
+	{
+		ConfigureQueries(EntityManager.AsShared());
+	}
 
 	// Prepare spawn data
 	TArray<FMassEntitySpawnDataGeneratorResult> Results;
@@ -39,18 +41,14 @@ void UMassTrafficTrailerSpawnDataGenerator::Generate(UObject& QueryOwner,
 
 	// Find vehicle to spawn trailers for
 	FMassExecutionContext ExecutionContext(EntityManager, 0.0f);
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-	VehicleQuery.ForEachEntityChunk(EntityManager, ExecutionContext, [&Results, &EntityTypes](FMassExecutionContext& QueryContext)
-#else
-	VehicleQuery.ForEachEntityChunk(ExecutionContext, [&Results, &EntityTypes](FMassExecutionContext& QueryContext)
-#endif
+	VehicleQuery.ForEachEntityChunk(ExecutionContext, [&Results, &EntityTypes](FMassExecutionContext& Context)
 	{
-		const FMassTrafficConstrainedTrailerParameters& TrailerSimulationParams = QueryContext.GetConstSharedFragment<FMassTrafficConstrainedTrailerParameters>();
+		const FMassTrafficConstrainedTrailerParameters& TrailerSimulationParams = Context.GetConstSharedFragment<FMassTrafficConstrainedTrailerParameters>();
 
 		// Find matching trailer to spawn for these vehicles
 		for (FMassEntitySpawnDataGeneratorResult& Result : Results)
 		{
-			if (EntityTypes[Result.EntityConfigIndex].EntityConfig.Get() == TrailerSimulationParams.TrailerAgentConfigAsset.Get())
+			if (EntityTypes[Result.EntityConfigIndex].EntityConfig == TrailerSimulationParams.TrailerAgentConfigAsset.Get())
 			{
 				// Initialize spawn data for trailer
 				FMassTrafficVehicleTrailersSpawnData* TrailersSpawnData = Result.SpawnData.GetMutablePtr<FMassTrafficVehicleTrailersSpawnData>();
@@ -63,7 +61,7 @@ void UMassTrafficTrailerSpawnDataGenerator::Generate(UObject& QueryOwner,
 
 				// Add vehicles to attach spawned trailers to
 				check(TrailersSpawnData);
-				const TConstArrayView<FMassEntityHandle> VehicleEntities = QueryContext.GetEntities();
+				const TConstArrayView<FMassEntityHandle> VehicleEntities = Context.GetEntities();
 				TrailersSpawnData->TrailerVehicles.Append(VehicleEntities.GetData(), VehicleEntities.Num());
 			}
 		}

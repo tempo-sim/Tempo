@@ -11,9 +11,6 @@
 #include "MassActorSubsystem.h"
 #include "MassZoneGraphNavigationFragments.h"
 #include "ZoneGraphSubsystem.h"
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-#include "MassGameplayExternalTraits.h"
-#endif
 #include "VisualLogger/VisualLogger.h"
 
 UMassTrafficPostPhysicsUpdateTrafficVehiclesProcessor::UMassTrafficPostPhysicsUpdateTrafficVehiclesProcessor(const FObjectInitializer& ObjectInitializer)
@@ -25,15 +22,11 @@ UMassTrafficPostPhysicsUpdateTrafficVehiclesProcessor::UMassTrafficPostPhysicsUp
 	// @todo required due to Actor->SetActorTransform, could be addressed by turning it into a command.
 	bRequiresGameThreadExecution = true;
 	bAutoRegisterWithProcessingPhases = true;
-	ExecutionFlags = static_cast<int32>(EProcessorExecutionFlags::All); 
+	ExecutionFlags = static_cast<int32>(EProcessorExecutionFlags::AllNetModes);
 	ExecutionOrder.ExecuteInGroup = UE::MassTraffic::ProcessorGroupNames::PostPhysicsUpdateTrafficVehicles;
 }
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-void UMassTrafficPostPhysicsUpdateTrafficVehiclesProcessor::ConfigureQueries()
-#else
 void UMassTrafficPostPhysicsUpdateTrafficVehiclesProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
-#endif
 {
 	PIDControlTrafficVehicleQuery.AddTagRequirement<FMassTrafficVehicleTag>(EMassFragmentPresence::All);
 	PIDControlTrafficVehicleQuery.AddRequirement<FMassTrafficPIDVehicleControlFragment>(EMassFragmentAccess::None, EMassFragmentPresence::All);
@@ -56,19 +49,14 @@ void UMassTrafficPostPhysicsUpdateTrafficVehiclesProcessor::ConfigureQueries(con
 	PIDControlTrafficVehicleQuery.RequireMutatingWorldAccess(); // due to mutating actor's location/physics
 }
 
-void UMassTrafficPostPhysicsUpdateTrafficVehiclesProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
+void UMassTrafficPostPhysicsUpdateTrafficVehiclesProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& ExecutionContext)
 {
 	// Advance agents
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-	PIDControlTrafficVehicleQuery.ForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& Context)
-#else
-	PIDControlTrafficVehicleQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext& Context)
-#endif
+	PIDControlTrafficVehicleQuery.ForEachEntityChunk(ExecutionContext, [&](FMassExecutionContext& Context)
 	{
 		UMassTrafficSubsystem& MassTrafficSubsystem = Context.GetMutableSubsystemChecked<UMassTrafficSubsystem>();
 		const UZoneGraphSubsystem& ZoneGraphSubsystem = Context.GetSubsystemChecked<UZoneGraphSubsystem>();
 
-		const int32 NumEntities = Context.GetNumEntities();
 		const TConstArrayView<FAgentRadiusFragment> AgentRadiusFragments = Context.GetFragmentView<FAgentRadiusFragment>();
 		const TConstArrayView<FMassTrafficRandomFractionFragment> RandomFractionFragments = Context.GetFragmentView<FMassTrafficRandomFractionFragment>();
 		const TArrayView<FMassActorFragment> ActorFragments = Context.GetMutableFragmentView<FMassActorFragment>();
@@ -82,17 +70,17 @@ void UMassTrafficPostPhysicsUpdateTrafficVehiclesProcessor::Execute(FMassEntityM
 		const TArrayView<FMassRepresentationFragment> RepresentationFragments = Context.GetMutableFragmentView<FMassRepresentationFragment>();
 		const TArrayView<FMassVelocityFragment> VelocityFragments = Context.GetMutableFragmentView<FMassVelocityFragment>();
 
-		for (int32 Index = 0; Index < NumEntities; ++Index)
+		for (FMassExecutionContext::FEntityIterator EntityIt = Context.CreateEntityIterator(); EntityIt; ++EntityIt)
 		{
-			FMassTrafficVehicleControlFragment& VehicleControlFragment = VehicleControlFragments[Index];
-			FMassTrafficVehicleLightsFragment& VehicleLightsFragment = VehicleLightsFragments[Index];
-			FMassZoneGraphLaneLocationFragment& LaneLocationFragment = LaneLocationFragments[Index];
-			FMassTrafficAngularVelocityFragment& AngularVelocityFragment = AngularVelocityFragments[Index];
-			FMassRepresentationFragment& RepresentationFragment = RepresentationFragments[Index];
-			FMassVelocityFragment& VelocityFragment = VelocityFragments[Index];
-			FMassActorFragment& ActorFragment = ActorFragments[Index];
-			FTransformFragment& TransformFragment = TransformFragments[Index];
-			FMassTrafficVehicleDamageFragment& VehicleDamageFragment = VehicleDamageFragments[Index];
+			FMassTrafficVehicleControlFragment& VehicleControlFragment = VehicleControlFragments[EntityIt];
+			FMassTrafficVehicleLightsFragment& VehicleLightsFragment = VehicleLightsFragments[EntityIt];
+			FMassZoneGraphLaneLocationFragment& LaneLocationFragment = LaneLocationFragments[EntityIt];
+			FMassTrafficAngularVelocityFragment& AngularVelocityFragment = AngularVelocityFragments[EntityIt];
+			FMassRepresentationFragment& RepresentationFragment = RepresentationFragments[EntityIt];
+			FMassVelocityFragment& VelocityFragment = VelocityFragments[EntityIt];
+			FMassActorFragment& ActorFragment = ActorFragments[EntityIt];
+			FTransformFragment& TransformFragment = TransformFragments[EntityIt];
+			FMassTrafficVehicleDamageFragment& VehicleDamageFragment = VehicleDamageFragments[EntityIt];
 
 			AActor* Actor = ActorFragment.GetMutable();
 			if (Actor != nullptr && RepresentationFragment.CurrentRepresentation == EMassRepresentationType::HighResSpawnedActor)
@@ -160,14 +148,14 @@ void UMassTrafficPostPhysicsUpdateTrafficVehiclesProcessor::Execute(FMassEntityM
 					UE::MassTraffic::MoveVehicleToNextLane(
 						EntityManager,
 						MassTrafficSubsystem,
-						Context.GetEntity(Index),
-						AgentRadiusFragments[Index],
-						RandomFractionFragments[Index],
+						Context.GetEntity(EntityIt),
+						AgentRadiusFragments[EntityIt],
+						RandomFractionFragments[EntityIt],
 						VehicleControlFragment,
 						VehicleLightsFragment,
 						LaneLocationFragment,
-						Context.GetMutableFragmentView<FMassTrafficNextVehicleFragment>()[Index],
-						&LaneChangeFragments[Index],
+						Context.GetMutableFragmentView<FMassTrafficNextVehicleFragment>()[EntityIt],
+						&LaneChangeFragments[EntityIt],
 						bHasVehicleBecomeStuck_Ignored/*out*/);
 
 					// Re-eval position on next lane

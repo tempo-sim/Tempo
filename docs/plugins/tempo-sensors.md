@@ -337,7 +337,7 @@ For lidar it is simpler: one multi-view render straight into a packed atlas, one
 !!! warning "Pinned engine version"
 
     `TempoMultiViewCapture` reproduces logic from engine-private `SceneCaptureRendering.cpp` and
-    is pinned to UE 5.6 / 5.7 / 5.8 behind a `#error` guard. When upgrading the engine, re-diff
+    is pinned to UE 5.7 / 5.8 behind a `#error` guard. When upgrading the engine, re-diff
     against `SetupViewFamilyForSceneCapture`, `SetupSceneViewExtensionsForSceneCapture`,
     `CreateSceneRendererForSceneCapture`, and `UpdateSceneCaptureContent_RenderThread`.
 

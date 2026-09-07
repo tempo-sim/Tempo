@@ -3,8 +3,7 @@
 // This helper mirrors engine-private logic in Renderer/Private/SceneCaptureRendering.cpp —
 // specifically SetupViewFamilyForSceneCapture, SetupSceneViewExtensionsForSceneCapture,
 // CreateSceneRendererForSceneCapture, and UpdateSceneCaptureContent_RenderThread.
-// Locations: 666 / 806 / 824 / 415 in 5.6 and 5.7 (byte-identical between them);
-// 689 / 833 / 851 / 453 in 5.8.
+// Locations: 666 / 806 / 824 / 415 in 5.7; 689 / 833 / 851 / 453 in 5.8.
 //
 // 5.8 re-diff: the engine refactored those functions' own signatures to flag enums
 // (ESetupViewFamilyFlags / ESceneRendererCreationFlags replacing bool params) and moved
@@ -13,8 +12,8 @@
 // ISceneRenderBuilder interface. The one behavioral addition we carry over is the new per-view
 // FSceneViewInitOptions::SkylightScale (sourced from the capture component); see below.
 // Re-diff and update for any newer engine version.
-#if !(ENGINE_MAJOR_VERSION == 5 && (ENGINE_MINOR_VERSION == 6 || ENGINE_MINOR_VERSION == 7 || ENGINE_MINOR_VERSION == 8))
-#error "TempoMultiViewCapture is pinned to UE 5.6/5.7/5.8 engine internals. Re-diff and update for the new engine version."
+#if !(ENGINE_MAJOR_VERSION == 5 && (ENGINE_MINOR_VERSION == 7 || ENGINE_MINOR_VERSION == 8))
+#error "TempoMultiViewCapture is pinned to UE 5.7/5.8 engine internals. Re-diff and update for the new engine version."
 #endif
 
 #include "TempoMultiViewCapture.h"
@@ -45,7 +44,6 @@
 // mirroring the define, the class is parsed with real `private` — the later hack in
 // TempoSceneCaptureComponent2D.cpp is then a no-op because `#pragma once` skips the re-include.
 // Mirror the define so the first parse rewrites the class to all-public for the whole TU.
-// In 5.6 SceneRendering.h does not pull in RayTracingScene.h, so the mirror is unnecessary.
 #if PLATFORM_WINDOWS
 // An upstream include leaks the Win32 Interlocked* macros, which mangle
 // FPlatformAtomics::InterlockedIncrement -> ::_InterlockedIncrement inside RenderCore headers
@@ -55,13 +53,9 @@
 #include "Windows/AllowWindowsPlatformAtomics.h"
 #include "Windows/HideWindowsPlatformAtomics.h"
 #endif
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 7
 #define private public
 #include "SceneRendering.h"
 #undef private
-#else
-#include "SceneRendering.h"
-#endif
 
 namespace TempoMultiViewCapture
 {

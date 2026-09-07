@@ -60,6 +60,8 @@ if [ "$SKIP_HOOKS" -ne 1 ]; then
 fi
 
 # Run the steps once (adding -force if specified)
+echo -e "\nDisabling project plugins that Tempo replaces\n"
+bash "$SCRIPT_DIR/DisableConflictingPlugins.sh"
 echo -e "\nAdding Tempo toolchain to Target.cs files\n"
 bash "$SCRIPT_DIR/UseTempoToolchain.sh"
 echo -e "\nInstalling Tempo Engine Mods\n"

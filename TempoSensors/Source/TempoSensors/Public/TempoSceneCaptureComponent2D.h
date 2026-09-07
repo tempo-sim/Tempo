@@ -396,11 +396,7 @@ public:
 	virtual void Activate(bool bReset) override;
 	virtual void Deactivate() override;
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-	virtual void UpdateSceneCaptureContents(FSceneInterface* Scene) override;
-#else
 	virtual void UpdateSceneCaptureContents(FSceneInterface* Scene, ISceneRenderBuilder& SceneRenderBuilder) override;
-#endif
 
 	// Expand FRayTracingScene's fixed-size readback rings on the render thread to work around the
 	// engine's buffer overrun (see definition for detail). Idempotent and persistent for the FScene's

@@ -56,7 +56,7 @@ void UMassTrafficLightVisualizationTrait::BuildTemplate(FMassEntityTemplateBuild
 	Super::BuildTemplate(BuildContext, World);
 	
 	UMassRepresentationSubsystem* RepresentationSubsystem = Cast<UMassRepresentationSubsystem>(World.GetSubsystemBase(RepresentationSubsystemClass));
-	if (RepresentationSubsystem == nullptr)
+	if (RepresentationSubsystem == nullptr && !BuildContext.IsInspectingData())
 	{
 		UE_LOG(LogMassTraffic, Error, TEXT("UMassTrafficLightVisualizationTrait - Expecting a valid class for the representation subsystem"));
 		RepresentationSubsystem = UWorld::GetSubsystem<UMassRepresentationSubsystem>(&World);
@@ -73,7 +73,7 @@ void UMassTrafficLightVisualizationTrait::BuildTemplate(FMassEntityTemplateBuild
 
 	// Get the TrafficControllerRegistrySubsystem
 	const UMassTrafficControllerRegistrySubsystem* TrafficControllerRegistrySubsystem = World.GetSubsystem<UMassTrafficControllerRegistrySubsystem>();
-	if (TrafficControllerRegistrySubsystem == nullptr)
+	if (TrafficControllerRegistrySubsystem == nullptr && !BuildContext.IsInspectingData())
 	{
 		UE_LOG(LogMassTraffic, Error, TEXT("UMassTrafficLightVisualizationTrait - Failed to get TrafficControllerRegistrySubsystem."));
 		return;
@@ -81,16 +81,22 @@ void UMassTrafficLightVisualizationTrait::BuildTemplate(FMassEntityTemplateBuild
 	
 	FMassTrafficLightsParameters RegisteredTrafficLightsParams;
 	
-	const TArray<FMassTrafficLightTypeData>& TrafficLightTypes = TrafficControllerRegistrySubsystem->GetTrafficLightTypes();
-	if (TrafficLightTypes.Num() > 0)
+	// When inspecting data we only care about the fragment type. The world's subsystems are not
+	// necessarily available then - RepresentationSubsystem above is deliberately left null in that
+	// case - so skip the registration and fall through to adding the shared fragment.
+	if (!BuildContext.IsInspectingData())
 	{
-		RegisteredTrafficLightsParams.TrafficLightTypes = TrafficLightTypes;
-		
-		for (const FMassTrafficLightTypeData& TrafficLightType : RegisteredTrafficLightsParams.TrafficLightTypes)
+		const TArray<FMassTrafficLightTypeData>& TrafficLightTypes = TrafficControllerRegistrySubsystem->GetTrafficLightTypes();
+		if (TrafficLightTypes.Num() > 0)
 		{
-			// Register visual types
-			FStaticMeshInstanceVisualizationDescHandle TrafficLightTypeStaticMeshDescHandle = RepresentationSubsystem->FindOrAddStaticMeshDesc(TrafficLightType.StaticMeshInstanceDesc);
-			RegisteredTrafficLightsParams.TrafficLightTypesStaticMeshDescHandle.Add(TrafficLightTypeStaticMeshDescHandle);
+			RegisteredTrafficLightsParams.TrafficLightTypes = TrafficLightTypes;
+			
+			for (const FMassTrafficLightTypeData& TrafficLightType : RegisteredTrafficLightsParams.TrafficLightTypes)
+			{
+				// Register visual types
+				FStaticMeshInstanceVisualizationDescHandle TrafficLightTypeStaticMeshDescHandle = RepresentationSubsystem->FindOrAddStaticMeshDesc(TrafficLightType.StaticMeshInstanceDesc);
+				RegisteredTrafficLightsParams.TrafficLightTypesStaticMeshDescHandle.Add(TrafficLightTypeStaticMeshDescHandle);
+			}
 		}
 	}
 
@@ -98,3 +104,18 @@ void UMassTrafficLightVisualizationTrait::BuildTemplate(FMassEntityTemplateBuild
 	const FConstSharedStruct TrafficLightsParamsFragment = EntityManager.GetOrCreateConstSharedFragment(RegisteredTrafficLightsParams);
 	BuildContext.AddConstSharedFragment(TrafficLightsParamsFragment);
 }
+
+void UMassTrafficLightVisualizationTrait::SanitizeParams(FMassRepresentationParameters& InOutParams, const bool bStaticMeshDeterminedInvalid) const
+{
+	// not calling super implementation on purpose since it's modifying some of the parameters this trait class is using
+	// a bit differently that intended (the static mesh setup).
+	return;
+}
+
+#if WITH_EDITOR
+bool UMassTrafficLightVisualizationTrait::ValidateParams() const
+{
+	// not calling super implementation on purpose, since it's checking some things that this class is using in an unorthodox way (the static mesh setup)
+	return true;
+}
+#endif

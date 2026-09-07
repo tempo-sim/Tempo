@@ -2,10 +2,16 @@
 
 #pragma once 
 
+#if UE_ENABLE_INCLUDE_ORDER_DEPRECATED_IN_5_6
+#include "SuspensionUtility.h"
+#endif // UE_ENABLE_INCLUDE_ORDER_DEPRECATED_IN_5_6
 #include "MassTraffic.h"
 #include "ChaosWheeledVehicleMovementComponent.h"
 #include "SimpleVehicle.h"
+#if UE_ENABLE_INCLUDE_ORDER_DEPRECATED_IN_5_6
 #include "SuspensionUtility.h"
+#endif // UE_ENABLE_INCLUDE_ORDER_DEPRECATED_IN_5_6
+#include "MassEntityTypes.h"
 #include "WheeledVehiclePawn.h"
 #include "Chaos/PBDJointConstraintTypes.h"
 #include "MassEntityTypes.h"
@@ -164,13 +170,14 @@ struct MASSTRAFFIC_API FMassTrafficVehiclePhysicsFragment : public FMassFragment
 	FMassTrafficSimpleVehiclePhysicsSim VehicleSim;
 };
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION > 6
 template<>
 struct TMassFragmentTraits<FMassTrafficVehiclePhysicsFragment> final
 {
-	enum { AuthorAcceptsItsNotTriviallyCopyable = true };
+	enum
+	{
+		AuthorAcceptsItsNotTriviallyCopyable = true
+	};
 };
-#endif
 
 /**
  * Physics config & pre-configured sim extracted from a AWheeledVehiclePawn

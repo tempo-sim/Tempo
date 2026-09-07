@@ -19,11 +19,7 @@ UMassTrafficUpdateVelocityProcessor::UMassTrafficUpdateVelocityProcessor()
 	ExecutionOrder.ExecuteAfter.Add(UMassTrafficInterpolationProcessor::StaticClass()->GetFName());
 }
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-void UMassTrafficUpdateVelocityProcessor::ConfigureQueries()
-#else
 void UMassTrafficUpdateVelocityProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
-#endif
 {
 	EntityQuery_Conditional.AddRequirement<FMassTrafficPIDVehicleControlFragment>(EMassFragmentAccess::None, EMassFragmentPresence::None);
 	EntityQuery_Conditional.AddRequirement<FTransformFragment>(EMassFragmentAccess::ReadOnly);
@@ -36,17 +32,11 @@ void UMassTrafficUpdateVelocityProcessor::ConfigureQueries(const TSharedRef<FMas
 	EntityQuery_Conditional.SetChunkFilter(FMassSimulationVariableTickChunkFragment::ShouldTickChunkThisFrame);
 }
 
-void UMassTrafficUpdateVelocityProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
+void UMassTrafficUpdateVelocityProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& ExecutionContext)
 {
 	// Advance agents
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-	EntityQuery_Conditional.ForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& ComponentSystemExecutionContext)
-#else
-	EntityQuery_Conditional.ForEachEntityChunk(Context, [&](FMassExecutionContext& ComponentSystemExecutionContext)
-#endif
+	EntityQuery_Conditional.ForEachEntityChunk(ExecutionContext, [&](FMassExecutionContext& Context)
 		{
-			const int32 NumEntities = Context.GetNumEntities();
-		
 			const TConstArrayView<FTransformFragment> TransformFragments = Context.GetFragmentView<FTransformFragment>();
 			const TConstArrayView<FMassTrafficVehicleControlFragment> VehicleControlFragments = Context.GetFragmentView<FMassTrafficVehicleControlFragment>();
 			const TConstArrayView<FMassRepresentationFragment> RepresentationFragments = Context.GetFragmentView<FMassRepresentationFragment>();
@@ -54,14 +44,14 @@ void UMassTrafficUpdateVelocityProcessor::Execute(FMassEntityManager& EntityMana
 			const TArrayView<FMassVelocityFragment> VelocityFragments = Context.GetMutableFragmentView<FMassVelocityFragment>();
 			const TArrayView<FMassTrafficAngularVelocityFragment> AngularVelocityFragments = Context.GetMutableFragmentView<FMassTrafficAngularVelocityFragment>();
 
-			for (int32 Index = 0; Index < NumEntities; ++Index)
+			for (FMassExecutionContext::FEntityIterator EntityIt = Context.CreateEntityIterator(); EntityIt; ++EntityIt)
 			{
-				const FTransformFragment& TransformFragment = TransformFragments[Index];
-				const FMassTrafficVehicleControlFragment& VehicleControlFragment = VehicleControlFragments[Index];
-				const FMassRepresentationFragment& RepresentationFragment = RepresentationFragments[Index];
-				const FMassSimulationVariableTickFragment& SimulationVariableTickFragment = SimulationVariableTickFragments[Index];
-				FMassVelocityFragment& VelocityFragment = VelocityFragments[Index];
-				FMassTrafficAngularVelocityFragment& AngularVelocityFragment = AngularVelocityFragments[Index];
+				const FTransformFragment& TransformFragment = TransformFragments[EntityIt];
+				const FMassTrafficVehicleControlFragment& VehicleControlFragment = VehicleControlFragments[EntityIt];
+				const FMassRepresentationFragment& RepresentationFragment = RepresentationFragments[EntityIt];
+				const FMassSimulationVariableTickFragment& SimulationVariableTickFragment = SimulationVariableTickFragments[EntityIt];
+				FMassVelocityFragment& VelocityFragment = VelocityFragments[EntityIt];
+				FMassTrafficAngularVelocityFragment& AngularVelocityFragment = AngularVelocityFragments[EntityIt];
 			
 				// Init velocity to current lane location direction * current speed 
 				VelocityFragment.Value = TransformFragment.GetTransform().GetRotation().GetForwardVector() * VehicleControlFragment.Speed;

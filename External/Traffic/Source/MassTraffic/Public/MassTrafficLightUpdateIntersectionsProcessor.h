@@ -3,7 +3,9 @@
 #pragma once
 
 #include "MassTrafficProcessorBase.h"
+#if UE_ENABLE_INCLUDE_ORDER_DEPRECATED_IN_5_6
 #include "MassRepresentationFragments.h"
+#endif // UE_ENABLE_INCLUDE_ORDER_DEPRECATED_IN_5_6
 #include "MassProcessor.h"
 #include "MassTrafficLightUpdateIntersectionsProcessor.generated.h"
 
@@ -15,11 +17,7 @@ class MASSTRAFFIC_API UMassTrafficLightUpdateIntersectionsProcessor : public UMa
 
 protected:
 	UMassTrafficLightUpdateIntersectionsProcessor();
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-	virtual void ConfigureQueries() override;
-#else
 	virtual void ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager) override;
-#endif
 	virtual void Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context) override;
 
 	FMassEntityQuery EntityQuery;

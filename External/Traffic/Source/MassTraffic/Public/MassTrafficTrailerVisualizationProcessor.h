@@ -4,9 +4,7 @@
 
 #include "MassRepresentationProcessor.h"
 #include "MassVisualizationLODProcessor.h"
-
 #include "MassTrafficFragments.h"
-
 #include "MassTrafficTrailerVisualizationProcessor.generated.h"
 
 class UMassTrafficSubsystem;
@@ -23,11 +21,7 @@ public:
 	UMassTrafficTrailerVisualizationProcessor();
 
 	/** Configure the owned FMassEntityQuery instances to express processor's requirements */
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-	virtual void ConfigureQueries() override;
-#else
 	virtual void ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager) override;
-#endif
 };
 
 /**
@@ -42,11 +36,7 @@ public:
 	UMassTrafficTrailerUpdateCustomVisualizationProcessor();
 
 	/** Configure the owned FMassEntityQuery instances to express processor's requirements */
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-	virtual void ConfigureQueries() override;
-#else
 	virtual void ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager) override;
-#endif
 	virtual void Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context) override;
 
 private:

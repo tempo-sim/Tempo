@@ -2,11 +2,13 @@
 
 #pragma once
 
+#if UE_ENABLE_INCLUDE_ORDER_DEPRECATED_IN_5_6
 #include "MassLODSubsystem.h"
+#endif // UE_ENABLE_INCLUDE_ORDER_DEPRECATED_IN_5_6
+#include "MassEntityTypes.h"
 #include "MassRepresentationTypes.h"
 #include "Engine/DataTable.h"
 #include "AnimToTextureDataAsset.h"
-
 #include "MassTrafficDrivers.generated.h"
 
 class UStaticMesh;

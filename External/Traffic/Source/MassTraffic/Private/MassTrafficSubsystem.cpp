@@ -8,24 +8,26 @@
 #include "MassTrafficTypes.h"
 #include "MassTrafficRecycleVehiclesOverlappingPlayersProcessor.h"
 #include "MassExecutionContext.h"
-#include "EngineUtils.h"
 #include "MassEntityManager.h"
 #include "MassEntitySubsystem.h"
 #include "MassExecutor.h"
+#include "MassProcessingContext.h"
 #include "MassReplicationSubsystem.h"
 #include "MassSimulationSubsystem.h"
 #include "MassProcessingTypes.h"
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 6
 #include "MassProcessingContext.h"
-#endif
 #include "MassSpawner.h"
+#include "EngineUtils.h"
 #include "MassTrafficFindNextVehicleProcessor.h"
 #include "MassTrafficUpdateDistanceToNearestObstacleProcessor.h"
+#include "MassTrafficUtils.h"
 #include "Math/UnitConversion.h"
 #include "ZoneGraphDelegates.h"
 #include "ZoneGraphQuery.h"
 #include "ZoneGraphSubsystem.h"
 #include "VisualLogger/VisualLogger.h"
+#include "MassProcessingContext.h"
+
 
 
 UMassTrafficSubsystem::UMassTrafficSubsystem()
@@ -41,7 +43,8 @@ void UMassTrafficSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 	UMassEntitySubsystem* EntitySubsystem = Collection.InitializeDependency<UMassEntitySubsystem>();
 	check(EntitySubsystem);
-	EntityManager = EntitySubsystem->GetMutableEntityManager().AsShared();
+	TSharedRef<FMassEntityManager> EntityManagerRef = EntitySubsystem->GetMutableEntityManager().AsShared();
+	EntityManager = EntityManagerRef;
 
 	ZoneGraphSubsystem = Collection.InitializeDependency<UZoneGraphSubsystem>();	
 	check(ZoneGraphSubsystem);
@@ -77,44 +80,34 @@ void UMassTrafficSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 	// Cache the traffic vehicle entity query
 	TrafficVehicleEntityQuery.Clear();
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 6
-	TrafficVehicleEntityQuery.Initialize(EntityManager.ToSharedRef());
-#endif
+	TrafficVehicleEntityQuery.Initialize(EntityManagerRef);
 	TrafficVehicleEntityQuery.AddTagRequirement<FMassTrafficVehicleTag>(EMassFragmentPresence::Any);
 	TrafficVehicleEntityQuery.AddTagRequirement<FMassTrafficRecyclableVehicleTag>(EMassFragmentPresence::Any);
 	TrafficVehicleEntityQuery.AddRequirement<FTransformFragment>(EMassFragmentAccess::None); // Queries have to have at least one component to be valid
 
 	// Cache the parked vehicle entity query
 	ParkedVehicleEntityQuery.Clear();
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 6
-	ParkedVehicleEntityQuery.Initialize(EntityManager.ToSharedRef());
-#endif
+	ParkedVehicleEntityQuery.Initialize(EntityManagerRef);
 	ParkedVehicleEntityQuery.AddTagRequirement<FMassTrafficParkedVehicleTag>(EMassFragmentPresence::Any);
 	ParkedVehicleEntityQuery.AddRequirement<FTransformFragment>(EMassFragmentAccess::None); // Queries have to have at least one component to be valid
 
 	// Cache the obstacle entity query.
 	ObstacleEntityQuery.Clear();
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 6
-	ObstacleEntityQuery.Initialize(EntityManager.ToSharedRef());
-#endif
+	ObstacleEntityQuery.Initialize(EntityManagerRef);
 	ObstacleEntityQuery.AddTagRequirement<FMassTrafficObstacleTag>(EMassFragmentPresence::Any);
 	ObstacleEntityQuery.AddTagRequirement<FMassTrafficPlayerVehicleTag>(EMassFragmentPresence::Any);
 	ObstacleEntityQuery.AddRequirement<FTransformFragment>(EMassFragmentAccess::ReadOnly);
 
 	// Cache the player vehicles query 
 	PlayerVehicleEntityQuery.Clear();
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 6
-	PlayerVehicleEntityQuery.Initialize(EntityManager.ToSharedRef());
-#endif
+	PlayerVehicleEntityQuery.Initialize(EntityManagerRef);
 	PlayerVehicleEntityQuery.AddTagRequirement<FMassTrafficPlayerVehicleTag>(EMassFragmentPresence::Any);
 	PlayerVehicleEntityQuery.AddRequirement<FTransformFragment>(EMassFragmentAccess::None); // Queries have to have at least one component to be valid
 
 	// Initialize processors
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-	RemoveVehiclesOverlappingPlayersProcessor->Initialize(*this);
-#else
 	RemoveVehiclesOverlappingPlayersProcessor->CallInitialize(this, EntityManager.ToSharedRef());
-#endif
+
+	OverrideSubsystemTraits<UMassTrafficSubsystem>(Collection);
 }
 
 void UMassTrafficSubsystem::OnWorldBeginPlay(UWorld& InWorld)
@@ -166,11 +159,7 @@ UMassProcessor* UMassTrafficSubsystem::GetPostSpawnProcessor(TSubclassOf<UMassPr
 	UMassProcessor* NewInitializer = NewObject<UMassProcessor>(this, ProcessorClass);
 	if (ensureMsgf(EntityManager, TEXT("Unable to determine the current MassEntityManager")))
 	{
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-		NewInitializer->Initialize(*this);
-#else
 		NewInitializer->CallInitialize(this, EntityManager->AsShared());
-#endif
 		PostSpawnProcessors.Add(NewInitializer);
 		return NewInitializer;
 	}
@@ -750,41 +739,25 @@ FZoneGraphTrafficLaneData* UMassTrafficSubsystem::GetMutableTrafficLaneData(cons
 int32 UMassTrafficSubsystem::GetNumTrafficVehicleAgents()
 {
 	check(EntityManager);
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-	return TrafficVehicleEntityQuery.GetNumMatchingEntities(*EntityManager.Get());
-#else
 	return TrafficVehicleEntityQuery.GetNumMatchingEntities();
-#endif
 }
 
 bool UMassTrafficSubsystem::HasTrafficVehicleAgents()
 {
 	check(EntityManager);
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-	return TrafficVehicleEntityQuery.HasMatchingEntities(*EntityManager.Get());
-#else
 	return TrafficVehicleEntityQuery.HasMatchingEntities();
-#endif
 }
 
 int32 UMassTrafficSubsystem::GetNumParkedVehicleAgents()
 {
 	check(EntityManager);
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-	return ParkedVehicleEntityQuery.GetNumMatchingEntities(*EntityManager.Get());
-#else
 	return ParkedVehicleEntityQuery.GetNumMatchingEntities();
-#endif
 }
 
 bool UMassTrafficSubsystem::HasParkedVehicleAgents()
 {
 	check(EntityManager);
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-	return ParkedVehicleEntityQuery.HasMatchingEntities(*EntityManager.Get());
-#else
 	return ParkedVehicleEntityQuery.HasMatchingEntities();
-#endif
 }
 
 int32 UMassTrafficSubsystem::GetNumParkedVehiclesScale() const
@@ -827,16 +800,12 @@ void UMassTrafficSubsystem::GetAllObstacleLocations(TArray<FVector> & ObstacleLo
 	check(EntityManager);
 	FMassEntityManager& EntityManagerRef = *EntityManager;
 	FMassExecutionContext ExecutionContext(EntityManagerRef, 0.0f);
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-	ObstacleEntityQuery.ForEachEntityChunk(EntityManagerRef, ExecutionContext, [&ObstacleLocations](FMassExecutionContext& QueryContext)
-#else
-	ObstacleEntityQuery.ForEachEntityChunk(ExecutionContext, [&ObstacleLocations](FMassExecutionContext& QueryContext)
-#endif
+	ObstacleEntityQuery.ForEachEntityChunk(ExecutionContext, [&ObstacleLocations](FMassExecutionContext& Context)
 	{
-		TConstArrayView<FTransformFragment> TransformFragments = QueryContext.GetFragmentView<FTransformFragment>();
-		for (int32 EntityIndex=0; EntityIndex < QueryContext.GetNumEntities(); ++ EntityIndex)
+		TConstArrayView<FTransformFragment> TransformFragments = Context.GetFragmentView<FTransformFragment>();
+		for (FMassExecutionContext::FEntityIterator EntityIt = Context.CreateEntityIterator(); EntityIt; ++EntityIt)
 		{
-			const FTransformFragment& TransformFragment = TransformFragments[EntityIndex];
+			const FTransformFragment& TransformFragment = TransformFragments[EntityIt];
 			ObstacleLocations.Add(TransformFragment.GetTransform().GetLocation());
 		}
 	});
@@ -847,13 +816,9 @@ void UMassTrafficSubsystem::GetPlayerVehicleAgents(TArray<FMassEntityHandle>& Ou
 	check(EntityManager);
 	FMassEntityManager& EntityManagerRef = *EntityManager;
 	FMassExecutionContext ExecutionContext(EntityManagerRef, 0.0f);
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-	PlayerVehicleEntityQuery.ForEachEntityChunk(EntityManagerRef, ExecutionContext, [&OutPlayerVehicleAgents](FMassExecutionContext& QueryContext)
-#else
-	PlayerVehicleEntityQuery.ForEachEntityChunk(ExecutionContext, [&OutPlayerVehicleAgents](FMassExecutionContext& QueryContext)
-#endif
+	PlayerVehicleEntityQuery.ForEachEntityChunk(ExecutionContext, [&OutPlayerVehicleAgents](FMassExecutionContext& Context)
 	{
-		const TConstArrayView<FMassEntityHandle> Entities = QueryContext.GetEntities();
+		const TConstArrayView<FMassEntityHandle> Entities = Context.GetEntities();
 		OutPlayerVehicleAgents.Append(Entities.GetData(), Entities.Num());
 	});
 }
@@ -862,7 +827,7 @@ void UMassTrafficSubsystem::RemoveVehiclesOverlappingPlayers()
 {
 	check(EntityManager);
 	TArray<UMassProcessor*> RemoveVehiclesOverlappingPlayersProcessors({RemoveVehiclesOverlappingPlayersProcessor.Get()});
-	FMassProcessingContext ProcessingContext(*EntityManager.Get(), 0.0f);
+	FMassProcessingContext ProcessingContext(EntityManager);
 	UE::Mass::Executor::RunProcessorsView(RemoveVehiclesOverlappingPlayersProcessors, ProcessingContext);
 }
 

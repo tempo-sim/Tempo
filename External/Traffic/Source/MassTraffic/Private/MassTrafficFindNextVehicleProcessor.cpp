@@ -13,11 +13,7 @@ UMassTrafficFindNextVehicleProcessor::UMassTrafficFindNextVehicleProcessor()
 	bAutoRegisterWithProcessingPhases = false;
 }
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-void UMassTrafficFindNextVehicleProcessor::ConfigureQueries()
-#else
 void UMassTrafficFindNextVehicleProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
-#endif
 {
 	EntityQuery.AddRequirement<FMassZoneGraphLaneLocationFragment>(EMassFragmentAccess::ReadOnly);
 	EntityQuery.AddRequirement<FMassTrafficNextVehicleFragment>(EMassFragmentAccess::ReadWrite);
@@ -32,16 +28,11 @@ void UMassTrafficFindNextVehicleProcessor::Execute(FMassEntityManager& EntityMan
 
 	// Gather all fragments
 	TArray<FMassEntityHandle> AllVehicles;
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-	EntityQuery.ForEachEntityChunk(EntityManager, Context, [&](const FMassExecutionContext& QueryContext)
-#else
 	EntityQuery.ForEachEntityChunk(Context, [&](const FMassExecutionContext& QueryContext)
-#endif
 	{
-		const int32 NumEntities = QueryContext.GetNumEntities();
-		for (int32 Index = 0; Index < NumEntities; ++Index)
+		for (FMassExecutionContext::FEntityIterator EntityIt = Context.CreateEntityIterator(); EntityIt; ++EntityIt)
 		{
-			AllVehicles.Add(QueryContext.GetEntity(Index));
+			AllVehicles.Add(QueryContext.GetEntity(EntityIt));
 		}
 	});
 	if (AllVehicles.IsEmpty())
@@ -73,14 +64,14 @@ void UMassTrafficFindNextVehicleProcessor::Execute(FMassEntityManager& EntityMan
 
 	// Set Next pointers
 	bool bTail = true;
-	for (int32 Index = 0; Index < AllVehicles.Num() - 1; ++Index)
+	for (int32 EntityIt = 0; EntityIt < AllVehicles.Num() - 1; ++EntityIt)
 	{
-		const FMassEntityHandle& VehicleEntity = AllVehicles[Index];
+		const FMassEntityHandle& VehicleEntity = AllVehicles[EntityIt];
 		FMassEntityView VehicleEntityView(EntityManager, VehicleEntity);
 		FMassZoneGraphLaneLocationFragment& LaneLocationFragment = VehicleEntityView.GetFragmentData<FMassZoneGraphLaneLocationFragment>();
 		FMassTrafficNextVehicleFragment& NextVehicleFragment = VehicleEntityView.GetFragmentData<FMassTrafficNextVehicleFragment>();
 		
-		const FMassEntityHandle& NextVehicleEntity = AllVehicles[Index+1];
+		const FMassEntityHandle& NextVehicleEntity = AllVehicles[EntityIt+1];
 		const FMassZoneGraphLaneLocationFragment& NextLaneLocationFragment = EntityManager.GetFragmentDataChecked<FMassZoneGraphLaneLocationFragment>(NextVehicleEntity);
 
 		// First in lane? 
@@ -124,27 +115,22 @@ void UMassTrafficFindNextVehicleProcessor::Execute(FMassEntityManager& EntityMan
 	}
 	
 	// Now that all the vehicles have been assigned to their lanes, go through and connect the last vehicle on each
-	// lane to the closest first vehicle in the next connected lanes
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-	EntityQuery.ForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& QueryContext)
-#else
+	// lane to the closest first vehicle in the next connected lanes 
 	EntityQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext& QueryContext)
-#endif
 	{
-		const UMassTrafficSubsystem& MassTrafficSubsystem = QueryContext.GetSubsystemChecked<UMassTrafficSubsystem>();
-		const int32 NumEntities = QueryContext.GetNumEntities();
+		const UMassTrafficSubsystem& LocalMassTrafficSubsystem = QueryContext.GetSubsystemChecked<UMassTrafficSubsystem>();
 		const TConstArrayView<FMassZoneGraphLaneLocationFragment> LaneLocationFragments = QueryContext.GetFragmentView<FMassZoneGraphLaneLocationFragment>();
 		const TArrayView<FMassTrafficNextVehicleFragment> NextVehicleFragments = QueryContext.GetMutableFragmentView<FMassTrafficNextVehicleFragment>();
 
-		for (int32 Index = 0; Index < NumEntities; ++Index)
+		for (FMassExecutionContext::FEntityIterator EntityIt = QueryContext.CreateEntityIterator(); EntityIt; ++EntityIt)
 		{
-			const FMassZoneGraphLaneLocationFragment& LaneLocationFragment = LaneLocationFragments[Index];
-			FMassTrafficNextVehicleFragment& NextVehicleFragment = NextVehicleFragments[Index];
+			const FMassZoneGraphLaneLocationFragment& LaneLocationFragment = LaneLocationFragments[EntityIt];
+			FMassTrafficNextVehicleFragment& NextVehicleFragment = NextVehicleFragments[EntityIt];
         	
 			// Is this the last vehicle in it's lane?
 			if (!NextVehicleFragment.HasNextVehicle())
 			{
-				if (const FZoneGraphTrafficLaneData* TrafficLaneData = MassTrafficSubsystem.GetTrafficLaneData(LaneLocationFragment.LaneHandle))
+				if (const FZoneGraphTrafficLaneData* TrafficLaneData = LocalMassTrafficSubsystem.GetTrafficLaneData(LaneLocationFragment.LaneHandle))
 				{
 					// Find the closest tail vehicle across all connected lanes
 					FMassEntityHandle ClosestTail = FMassEntityHandle();
@@ -166,7 +152,7 @@ void UMassTrafficFindNextVehicleProcessor::Execute(FMassEntityManager& EntityMan
 					if (ClosestTail.IsSet())
 					{
 						// Set the closest subsequent tail as this vehicles Next
-						NextVehicleFragment.SetNextVehicle(QueryContext.GetEntity(Index), ClosestTail);
+						NextVehicleFragment.SetNextVehicle(QueryContext.GetEntity(EntityIt), ClosestTail);
 					}
 				}
 			}

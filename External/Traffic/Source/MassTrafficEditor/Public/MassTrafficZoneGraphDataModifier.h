@@ -6,7 +6,6 @@
 #include "ZoneGraphData.h"
 #include "EditorUtilityActor.h"
 #include "ZoneGraphTypes.h"
-
 #include "MassTrafficZoneGraphDataModifier.generated.h"
 
 UENUM(BlueprintType)

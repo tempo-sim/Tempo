@@ -3,12 +3,12 @@
 #pragma once
 
 #include "MassTrafficProcessorBase.h"
+#if UE_ENABLE_INCLUDE_ORDER_DEPRECATED_IN_5_6
 #include "MassTrafficFragments.h"
-
+#endif // UE_ENABLE_INCLUDE_ORDER_DEPRECATED_IN_5_6
 #include "MassRepresentationSubsystem.h"
 #include "MassReplicationTypes.h"
 #include "Math/RandomStream.h"
-
 #include "MassTrafficInitTrailersProcessor.generated.h"
 
 
@@ -31,18 +31,9 @@ public:
 	UMassTrafficInitTrailersProcessor();
 
 protected:
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-	virtual void ConfigureQueries() override;
-#else
 	virtual void ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager) override;
-#endif
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-	virtual void Initialize(UObject& InOwner) override;
-#else
 	virtual void InitializeInternal(UObject& InOwner, const TSharedRef<FMassEntityManager>& EntityManager) override;
-#endif
-
-	virtual void Execute(FMassEntityManager& EntitySubSystem, FMassExecutionContext& Context) override;
+	virtual void Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context) override;
 
 	UPROPERTY(EditAnywhere, Category = "Processor")
 	FRandomStream RandomStream = FRandomStream(1234);
