@@ -3,6 +3,7 @@
 #include "TempoSensorsSettings.h"
 
 #include "Engine/DataTable.h"
+#include "UObject/UnrealType.h"
 
 UTempoSensorsSettings::UTempoSensorsSettings()
 {
@@ -48,6 +49,19 @@ void UTempoSensorsSettings::PostInitProperties()
 	SetIfNull(CameraProxyTonemapMaterial, TEXT("/TempoSensors/Materials/M_TempoStitch_Proxy.M_TempoStitch_Proxy"));
 	SetIfNull(LidarPostProcessMaterial, TEXT("/TempoSensors/Materials/M_LidarPostProcess.M_LidarPostProcess"));
 	SetIfNull(LidarPostProcessMaterialWithColor, TEXT("/TempoSensors/Materials/M_LidarPostProcess_WithColor.M_LidarPostProcess_WithColor"));
+
+#if WITH_EDITOR
+	// The cooker only cooks soft references it has been told about. FSoftObjectPath::ImportTextItem reports
+	// each path it reads from config to GRedirectCollector, and the cooker seeds its requests from that, so a
+	// path set in DefaultPlugins.ini gets its package cooked. Paths assigned from C++ (the constructor
+	// defaults and the fallbacks above) never pass through ImportTextItem, so nothing would cook the
+	// plugin's materials and a packaged build would fail to load them. Report every soft reference this
+	// object holds, whatever its source, the same way a config-loaded one is reported.
+	for (TFieldIterator<FSoftObjectProperty> It(GetClass()); It; ++It)
+	{
+		It->GetPropertyValue_InContainer(this).ToSoftObjectPath().PostLoadPath(nullptr);
+	}
+#endif
 }
 
 void UTempoSensorsSettings::SetRuntimeSemanticLabelTable(UDataTable* SemanticLabelTableIn)
