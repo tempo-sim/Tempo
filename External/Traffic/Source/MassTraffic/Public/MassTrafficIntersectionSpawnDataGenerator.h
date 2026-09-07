@@ -108,6 +108,7 @@ protected:
 
 	void BuildIntersectionFragments(
 		const FIntersectionDetailsMap& IntersectionDetailsMap,
+		const bool bCanSpawnTrafficSignIntersections,
 		FMassTrafficLightIntersectionSpawnData& OutTrafficLightIntersectionsSpawnData,
 		FMassTrafficSignIntersectionSpawnData& OutTrafficSignIntersectionsSpawnData) const;
 	

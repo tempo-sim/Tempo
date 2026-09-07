@@ -85,8 +85,30 @@ void UMassTrafficIntersectionSpawnDataGenerator::Generate(UObject& QueryOwner,
 	// Push data from the IntersectionDetails into the lanes.
 	SetupLaneData(*MassTrafficSubsystem, *MassTrafficSettings, *ZoneGraphSubsystem, IntersectionDetailsMap);
 
-	// Aggregate spawn data results.
+	// The spawner decides which entity configs exist; we only get to index into them. Epic's
+	// CitySample spawner carries a single intersection config, from before this plugin split
+	// intersections into light- and sign-controlled ones. Without a config for the sign
+	// intersections we fall back to Epic's behaviour and build every intersection as a light
+	// intersection, which the light path already handles - all-way stops take it too.
+	if (!EntityTypes.IsValidIndex(TrafficLightIntersectionEntityConfigIndex))
+	{
+		UE_LOG(LogMassTraffic, Error, TEXT("%s has no entity config at TrafficLightIntersectionEntityConfigIndex %d (it has %d). No intersections will be spawned."),
+			*QueryOwner.GetName(), TrafficLightIntersectionEntityConfigIndex, EntityTypes.Num());
+		return;
+	}
+
+	const bool bCanSpawnTrafficSignIntersections = EntityTypes.IsValidIndex(TrafficSignIntersectionEntityConfigIndex);
+
+	if (!bCanSpawnTrafficSignIntersections)
+	{
+		UE_LOG(LogMassTraffic, Warning, TEXT("%s has no entity config at TrafficSignIntersectionEntityConfigIndex %d (it has %d). Sign-controlled intersections will be spawned as light-controlled ones. Add an entity config using MassTrafficSignIntersectionSimulationTrait at that index to enable stop and yield sign behavior."),
+			*QueryOwner.GetName(), TrafficSignIntersectionEntityConfigIndex, EntityTypes.Num());
+	}
+
+	// Aggregate spawn data results. Both results are referenced below while the array is still
+	// being appended to, so reserve up front to keep those references stable.
 	TArray<FMassEntitySpawnDataGeneratorResult> SpawnDataResults;
+	SpawnDataResults.Reserve(2);
 
 	// Prepare spawn data result for traffic light intersections.
 	FMassEntitySpawnDataGeneratorResult& TrafficLightSpawnDataResult = SpawnDataResults.AddDefaulted_GetRef();
@@ -98,7 +120,7 @@ void UMassTrafficIntersectionSpawnDataGenerator::Generate(UObject& QueryOwner,
 	TrafficSignSpawnDataResult.SpawnData.InitializeAs<FMassTrafficSignIntersectionSpawnData>();
 	FMassTrafficSignIntersectionSpawnData& TrafficSignIntersectionsSpawnData = TrafficSignSpawnDataResult.SpawnData.GetMutable<FMassTrafficSignIntersectionSpawnData>();
 
-	BuildIntersectionFragments(IntersectionDetailsMap, TrafficLightIntersectionsSpawnData, TrafficSignIntersectionsSpawnData);
+	BuildIntersectionFragments(IntersectionDetailsMap, bCanSpawnTrafficSignIntersections, TrafficLightIntersectionsSpawnData, TrafficSignIntersectionsSpawnData);
 
 	/*
 	 * Traffic Light Spawn Data Generation.
@@ -131,7 +153,8 @@ void UMassTrafficIntersectionSpawnDataGenerator::Generate(UObject& QueryOwner,
 
 	GenerateTrafficSignIntersectionSpawnData(IntersectionDetailsMap, TrafficSignIntersectionsSpawnData);
 	
-	if (ensureMsgf(TrafficSignIntersectionsSpawnData.TrafficSignIntersectionFragments.Num() == TrafficSignIntersectionsSpawnData.TrafficSignIntersectionTransforms.Num(), TEXT("Number of TrafficSignIntersectionFragments must equal number of TrafficSignIntersectionTransforms.")))
+	if (bCanSpawnTrafficSignIntersections
+		&& ensureMsgf(TrafficSignIntersectionsSpawnData.TrafficSignIntersectionFragments.Num() == TrafficSignIntersectionsSpawnData.TrafficSignIntersectionTransforms.Num(), TEXT("Number of TrafficSignIntersectionFragments must equal number of TrafficSignIntersectionTransforms.")))
 	{
 		// Set properties for valid traffic sign intersection results.
 		TrafficSignSpawnDataResult.NumEntities = TrafficSignIntersectionsSpawnData.TrafficSignIntersectionFragments.Num();
@@ -611,6 +634,7 @@ void UMassTrafficIntersectionSpawnDataGenerator::SetupLaneData(
 
 void UMassTrafficIntersectionSpawnDataGenerator::BuildIntersectionFragments(
 	const FIntersectionDetailsMap& IntersectionDetailsMap,
+	const bool bCanSpawnTrafficSignIntersections,
 	FMassTrafficLightIntersectionSpawnData& OutTrafficLightIntersectionsSpawnData,
 	FMassTrafficSignIntersectionSpawnData& OutTrafficSignIntersectionsSpawnData) const
 {
@@ -630,7 +654,7 @@ void UMassTrafficIntersectionSpawnDataGenerator::BuildIntersectionFragments(
 			//
 			// Note:  In the future, we'll refactor all-way stops to use the traffic sign fragments and processor,
 			// after we implement a "right-of-way" queue for such stop sign intersections.
-			if (IntersectionDetail.bHasTrafficLights || bIsAllWayStop)
+			if (IntersectionDetail.bHasTrafficLights || bIsAllWayStop || !bCanSpawnTrafficSignIntersections)
 			{
 				FMassTrafficLightIntersectionFragment TrafficLightIntersectionFragment;
 					
