@@ -290,6 +290,40 @@ jobs:
         echo "REPO_LOWERCASE=${REPO_UPPERCASE,,}" >> $GITHUB_OUTPUT
       env:
         REPO_UPPERCASE: ${{ github.event.repository.name }}
+    # Epic's base image tag (dev-slim-<version>) moves — it is republished as the release branch
+    # advances, so the same tag can be two different engines weeks apart. Resolve it to a digest
+    # here, before anything is restored or built, and carry that digest through everything that is
+    # only valid for one engine: the build cache (PCHs and object files are compiled against one set
+    # of engine headers), the engine mods cache (engine folders copied out of the image), and the
+    # pre-modded image tag (via the engine mods hash). Without it a run silently mixes engines,
+    # which surfaces as a stale-PCH compile error at best and a bad link at worst.
+    # This needs its own login because it runs before the pre-modded pull; the later Epic login
+    # re-establishes these credentials for the image build, after the pre-modded registry login
+    # (same host, different token) has overwritten them.
+    - name: Log in to Epic Container Registry (to resolve the base image)
+      uses: docker/login-action@v2
+      with:
+        registry: ghcr.io
+        username: ${{ secrets.EPIC_DOCKER_USERNAME }}
+        password: ${{ secrets.EPIC_DOCKER_TOKEN }}
+    - name: Resolve Engine Base Image Digest
+      id: engine_base_image
+      run: |
+        BASE_IMAGE="ghcr.io/epicgames/unreal-engine:dev-slim-${UNREAL_VERSION}"
+        DIGEST=$(docker buildx imagetools inspect "$BASE_IMAGE" --format '{{.Manifest.Digest}}')
+        case "$DIGEST" in
+          sha256:*) ;;
+          *)
+            echo "Error: could not resolve a digest for $BASE_IMAGE (got '$DIGEST')"
+            exit 1
+            ;;
+        esac
+        SHORT="${DIGEST#sha256:}"
+        echo "IMAGE=ghcr.io/epicgames/unreal-engine@$DIGEST" >> $GITHUB_OUTPUT
+        echo "DIGEST=$DIGEST" >> $GITHUB_OUTPUT
+        # Short form for cache keys, which are prefix-matched and easier to eyeball.
+        echo "ID=${SHORT:0:12}" >> $GITHUB_OUTPUT
+        echo "Engine base image: $BASE_IMAGE -> $DIGEST"
     - name: Restore Build Cache (if clean not specified)
       if: ${{ ! inputs.clean }}
       id: restore_build_cache
@@ -305,14 +339,16 @@ jobs:
           ${{ github.workspace }}/${{ inputs.project_root }}/Plugins/**/Intermediate/**
           ${{ github.workspace }}/${{ inputs.project_root }}/Plugins/**/Binaries/**
           .engine-ddc-cache/**
-        key: ${{ steps.repo_lowercase.outputs.REPO_LOWERCASE }}-build-${{ env.UNREAL_VERSION }}-${{ steps.common_ancestor.outputs.COMMON_ANCESTOR }}
+        key: ${{ steps.repo_lowercase.outputs.REPO_LOWERCASE }}-build-${{ env.UNREAL_VERSION }}-${{ steps.engine_base_image.outputs.ID }}-${{ steps.common_ancestor.outputs.COMMON_ANCESTOR }}
         # Fall back to the most recent prior build cache when the exact key misses. This is what lets
         # main builds run warm: on a push to main, COMMON_ANCESTOR resolves to HEAD itself (origin/main
         # == HEAD), whose key was never saved, so the exact key always misses; the prefix matches the
         # previous main build's cache instead. (A prefix match sets cache-matched-key but leaves
         # cache-hit false — see the DDC-init step's condition below.)
+        # The engine digest sits inside the prefix, so a cache built against a different engine is
+        # never restored — a miss (one cold build) is the correct outcome there, not a mixed tree.
         restore-keys: |
-          ${{ steps.repo_lowercase.outputs.REPO_LOWERCASE }}-build-${{ env.UNREAL_VERSION }}-
+          ${{ steps.repo_lowercase.outputs.REPO_LOWERCASE }}-build-${{ env.UNREAL_VERSION }}-${{ steps.engine_base_image.outputs.ID }}-
     - name: Restore Engine Mods Cache (if clean not specified and not using pre-modded image)
       if: ${{ ! inputs.clean && inputs.engine_mods_image == '' }}
       id: restore_engine_mods_cache
@@ -332,7 +368,7 @@ jobs:
           .engine-mods-cache/Engine/Source/Programs/Shared/**
           .engine-mods-cache/Engine/Binaries/DotNET/UnrealBuildTool/**
           .engine-mods-cache/Engine/Binaries/DotNET/AutomationTool/**
-        key: tempo-engine-mods-${{ env.UNREAL_VERSION }}-${{ hashFiles(format('{0}/EngineMods/**', inputs.tempo_root)) }}
+        key: tempo-engine-mods-${{ env.UNREAL_VERSION }}-${{ steps.engine_base_image.outputs.ID }}-${{ hashFiles(format('{0}/EngineMods/**', inputs.tempo_root)) }}
     - name: Run Post-Checkout Script (if specified)
       if: ${{ inputs.post_checkout_script != '' }}
       working-directory: ${{ github.workspace }}/${{ inputs.project_root }}
@@ -399,12 +435,16 @@ jobs:
           echo "Dockerfile not found at $DOCKERFILE"
           exit 1
         fi
+        # The base image digest is part of the hash: a pre-modded image is the engine plus the mods,
+        # so one built from a different engine must not answer to the same tag.
         # Must stay in sync with the matching computation in publish_engine_mods.yml.
         ENGINE_MODS_HASH=$(cd "$ENGINE_MODS_DIR" && find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)
         DOCKERFILE_HASH=$(sha256sum "$DOCKERFILE" | cut -d' ' -f1)
-        HASH=$(printf '%s\n%s\n' "$ENGINE_MODS_HASH" "$DOCKERFILE_HASH" | sha256sum | cut -d' ' -f1)
+        HASH=$(printf '%s\n%s\n%s\n' "$ENGINE_MODS_HASH" "$DOCKERFILE_HASH" "$ENGINE_BASE_DIGEST" | sha256sum | cut -d' ' -f1)
         echo "HASH=$HASH" >> $GITHUB_OUTPUT
         echo "Engine mods hash: $HASH"
+      env:
+        ENGINE_BASE_DIGEST: ${{ steps.engine_base_image.outputs.DIGEST }}
     # --- Pre-modded image registry auth (generic: static credentials or AWS ECR). Independent of the
     #     Epic base-image registry (ghcr.io), which is logged into separately in the fallback path. ---
     - name: Configure AWS Credentials for ECR (OIDC)
@@ -483,7 +523,11 @@ jobs:
     - name: Build Tempo Unreal Docker Image
       if: ${{ steps.pull_modded.outputs.used != 'true' }}
       run: |
-        docker build --build-arg UNREAL_VERSION=${{ env.UNREAL_VERSION }} --tag 'tempo_unreal_image' -f ${{ github.workspace }}/${{ inputs.tempo_root }}/Dockerfile .
+        docker build \
+          --build-arg UNREAL_VERSION=${{ env.UNREAL_VERSION }} \
+          --build-arg ENGINE_BASE_IMAGE=${{ steps.engine_base_image.outputs.IMAGE }} \
+          --tag 'tempo_unreal_image' \
+          -f ${{ github.workspace }}/${{ inputs.tempo_root }}/Dockerfile .
     - name: Initialize Engine Mods Cache (if not restored from cache and not using pre-modded image)
       if: ${{ steps.restore_engine_mods_cache.outputs.cache-hit != 'true' && steps.pull_modded.outputs.used != 'true' }}
       run: |
@@ -677,7 +721,7 @@ jobs:
           .engine-mods-cache/Engine/Source/Programs/Shared/**
           .engine-mods-cache/Engine/Binaries/DotNET/UnrealBuildTool/**
           .engine-mods-cache/Engine/Binaries/DotNET/AutomationTool/**
-        key: tempo-engine-mods-${{ env.UNREAL_VERSION }}-${{ hashFiles(format('{0}/EngineMods/**', inputs.tempo_root)) }}
+        key: tempo-engine-mods-${{ env.UNREAL_VERSION }}-${{ steps.engine_base_image.outputs.ID }}-${{ hashFiles(format('{0}/EngineMods/**', inputs.tempo_root)) }}
     - name: Cache Build (if building cache branch)
       if: ${{ github.event_name != 'pull_request_target' && github.ref == format('refs/heads/{0}', inputs.cache_branch) }}
       uses: actions/cache/save@v4
@@ -692,13 +736,14 @@ jobs:
           ${{ github.workspace }}/${{ inputs.project_root }}/Plugins/**/Intermediate/**
           ${{ github.workspace }}/${{ inputs.project_root }}/Plugins/**/Binaries/**
           .engine-ddc-cache/**
-        key: ${{ steps.repo_lowercase.outputs.REPO_LOWERCASE }}-build-${{ env.UNREAL_VERSION }}-${{ github.sha }}
+        key: ${{ steps.repo_lowercase.outputs.REPO_LOWERCASE }}-build-${{ env.UNREAL_VERSION }}-${{ steps.engine_base_image.outputs.ID }}-${{ github.sha }}
     - name: Prune Old Build Caches (keep only the one just saved)
       # Build cache keys are immutable and rolling (suffixed with the commit SHA), so each main
       # build saves a new entry and the old same-version ones linger until the 10GB LRU sweep
       # evicts them - which can starve a less-frequently-built engine version. Delete every cache
       # sharing this version's prefix except the one this run just saved, leaving exactly one per
-      # engine version. Requires 'actions: write' on the calling job; if it wasn't granted we warn
+      # engine version. The prefix deliberately stops short of the engine digest, so caches keyed to
+      # an engine build this branch has moved off of are pruned too. Requires 'actions: write' on the calling job; if it wasn't granted we warn
       # and continue rather than fail, so downstream callers that omit it still build fine.
       if: ${{ github.event_name != 'pull_request_target' && github.ref == format('refs/heads/{0}', inputs.cache_branch) }}
       shell: bash
@@ -709,7 +754,7 @@ jobs:
         # repo whose caches we want to prune rather than failing to determine a base repo.
         GH_REPO: ${{ github.repository }}
         PREFIX: ${{ steps.repo_lowercase.outputs.REPO_LOWERCASE }}-build-${{ env.UNREAL_VERSION }}-
-        KEEP: ${{ steps.repo_lowercase.outputs.REPO_LOWERCASE }}-build-${{ env.UNREAL_VERSION }}-${{ github.sha }}
+        KEEP: ${{ steps.repo_lowercase.outputs.REPO_LOWERCASE }}-build-${{ env.UNREAL_VERSION }}-${{ steps.engine_base_image.outputs.ID }}-${{ github.sha }}
       run: |
         # Surface gh's real error rather than asserting a cause - a 403 means 'actions: write' is
         # missing on the calling job, but other failures (auth, repo resolution, gh version) read
