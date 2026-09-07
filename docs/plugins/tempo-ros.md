@@ -60,6 +60,12 @@ If you enable TempoROS in a project that *does* use the other Tempo plugins, als
 [TempoROSBridge](tempo-ros-bridge.md), which adapts Tempo's existing services and sensor data onto
 ROS topics and services.
 
+!!! info "Not using ROS?"
+
+    TempoSample enables TempoROS and TempoROSBridge by default. If you are not using ROS, disable
+    them in the `.uproject` and remove `TempoROSCopyHandler` from `Config/DefaultGame.ini` — see
+    [Installation](../getting-started/installation.md).
+
 !!! warning "Enable exceptions"
 
     Any module that depends on `TempoROS` or `rclcpp` must set `bEnableExceptions = true;` in its

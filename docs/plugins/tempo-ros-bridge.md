@@ -11,7 +11,7 @@ of the Tempo plugins whose services it re-exposes.
     Tempo's primary interface is gRPC and needs no ROS installation. Enable TempoROS and
     TempoROSBridge only if you want a ROS graph in the loop. TempoSample enables both by default;
     if you are not using ROS, disable them in the `.uproject` and remove `TempoROSCopyHandler`
-    from `Config/DefaultGame.ini`.
+    from `Config/DefaultGame.ini` — see [Installation](../getting-started/installation.md).
 
 ## How it works
 

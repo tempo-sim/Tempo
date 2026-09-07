@@ -34,6 +34,31 @@
     git submodule update --init --recursive
     ```
 
+## Disable ROS plugins if unused
+
+Tempo's primary interface is gRPC, which needs no ROS — see
+[Client APIs](../clients/index.md). [TempoROS](../plugins/tempo-ros.md) and
+[TempoROSBridge](../plugins/tempo-ros-bridge.md) are optional and TempoSample
+explicitly enables both. If you are not using
+ROS, disable them before building:
+
+- In your `.uproject`, set the `TempoROS` and `TempoROSBridge` entries' `Enabled` field to `false`:
+
+    ```json title=".uproject"
+    {
+        "Name": "TempoROS",
+        "Enabled": false
+    },
+    {
+        "Name": "TempoROSBridge",
+        "Enabled": false
+    }
+    ```
+
+- Remove `CustomStageCopyHandler=TempoROSCopyHandler` from `Config/DefaultGame.ini`.
+
+This avoids requiring a ROS 2 installation and skips building the ROS-dependent modules.
+
 ## One-time setup
 
 Run `Setup.sh` (or `Setup.bat` on Windows) once, from the Tempo root or from `Scripts/`:
