@@ -24,6 +24,57 @@ UMassTrafficVehicleSimulationTrait::UMassTrafficVehicleSimulationTrait(const FOb
 	VariableTickParams.TickRates[EMassLOD::Off] = 1.0f; // 1s tick interval for Off LODs
 }
 
+namespace
+{
+	// The fragments a vehicle needs to be driven by Mass along the lane graph. Shared by
+	// UMassTrafficVehicleSimulationTrait (when bMassControlled) and by the standalone
+	// UMassTrafficVehicleSimulationMassControlTrait.
+	void BuildMassControlledTemplate(
+		FMassEntityTemplateBuildContext& BuildContext,
+		const UWorld& World,
+		const FMassTrafficVehiclePhysicsParameters& PhysicsParams,
+		const UObject* TraitOuter)
+	{
+		FMassEntityManager& EntityManager = UE::Mass::Utils::GetEntityManagerChecked(World);
+
+		BuildContext.RequireFragment<FMassTrafficVehicleSimulationParameters>();
+		BuildContext.AddFragment<FMassTrafficInterpolationFragment>();
+		BuildContext.AddFragment<FMassTrafficLaneOffsetFragment>();
+		BuildContext.AddFragment<FMassTrafficNextVehicleFragment>();
+		BuildContext.AddFragment<FMassTrafficObstacleAvoidanceFragment>();
+		BuildContext.RequireFragment<FMassTrafficRandomFractionFragment>();
+		BuildContext.AddFragment<FMassTrafficVehicleLaneChangeFragment>();
+		BuildContext.RequireFragment<FMassTrafficVehicleLightsFragment>();
+		BuildContext.AddFragment<FMassZoneGraphLaneLocationFragment>();
+
+		UMassTrafficSubsystem* MassTrafficSubsystem = UWorld::GetSubsystem<UMassTrafficSubsystem>(&World);
+		check(MassTrafficSubsystem);
+
+		if (PhysicsParams.PhysicsVehicleTemplateActor)
+		{
+			// Extract physics setup from PhysicsVehicleTemplateActor into shared fragment
+			const FMassTrafficSimpleVehiclePhysicsTemplate* Template = MassTrafficSubsystem->GetOrExtractVehiclePhysicsTemplate(PhysicsParams.PhysicsVehicleTemplateActor);
+
+			// Register & add shared fragment
+			if (LIKELY(!BuildContext.IsInspectingData()))
+			{
+				const FConstSharedStruct PhysicsSharedFragment = EntityManager.GetOrCreateConstSharedFragment<FMassTrafficVehiclePhysicsSharedParameters>(FConstStructView::Make(*Template), Template);
+				BuildContext.AddConstSharedFragment(PhysicsSharedFragment);
+			}
+			else
+			{
+				// in the investigation mode we only care about the fragment type
+				const FConstSharedStruct PhysicsSharedFragment = EntityManager.GetOrCreateConstSharedFragment<FMassTrafficVehiclePhysicsSharedParameters>(Template);
+				BuildContext.AddConstSharedFragment(PhysicsSharedFragment);
+			}
+		}
+		else
+		{
+			UE_LOG(LogMassTraffic, Warning, TEXT("No PhysicsVehicleTemplateActor set for a Mass controlled traffic vehicle in %s. Vehicles will be forced to low simulation LOD!"), TraitOuter ? *TraitOuter->GetName() : TEXT("(?)"))
+		}
+	}
+}
+
 void UMassTrafficVehicleSimulationTrait::BuildTemplate(FMassEntityTemplateBuildContext& BuildContext, const UWorld& World) const
 {
 	FMassEntityManager& EntityManager = UE::Mass::Utils::GetEntityManagerChecked(World);
@@ -75,6 +126,11 @@ void UMassTrafficVehicleSimulationTrait::BuildTemplate(FMassEntityTemplateBuildC
 	BuildContext.AddFragment<FMassVelocityFragment>();
 
 	IF_MASSTRAFFIC_ENABLE_DEBUG(BuildContext.RequireFragment<FMassTrafficDebugFragment>());
+
+	if (bMassControlled)
+	{
+		BuildMassControlledTemplate(BuildContext, World, PhysicsParams, GetOuter());
+	}
 }
 
 UMassTrafficVehicleSimulationMassControlTrait::UMassTrafficVehicleSimulationMassControlTrait(const FObjectInitializer& ObjectInitializer)
@@ -84,41 +140,5 @@ UMassTrafficVehicleSimulationMassControlTrait::UMassTrafficVehicleSimulationMass
 
 void UMassTrafficVehicleSimulationMassControlTrait::BuildTemplate(FMassEntityTemplateBuildContext& BuildContext, const UWorld& World) const
 {
-	FMassEntityManager& EntityManager = UE::Mass::Utils::GetEntityManagerChecked(World);
-
-	BuildContext.RequireFragment<FMassTrafficVehicleSimulationParameters>();
-	BuildContext.AddFragment<FMassTrafficInterpolationFragment>();
-	BuildContext.AddFragment<FMassTrafficLaneOffsetFragment>();
-	BuildContext.AddFragment<FMassTrafficNextVehicleFragment>();
-	BuildContext.AddFragment<FMassTrafficObstacleAvoidanceFragment>();
-	BuildContext.RequireFragment<FMassTrafficRandomFractionFragment>();
-	BuildContext.AddFragment<FMassTrafficVehicleLaneChangeFragment>();
-	BuildContext.RequireFragment<FMassTrafficVehicleLightsFragment>();
-	BuildContext.AddFragment<FMassZoneGraphLaneLocationFragment>();
-	
-	UMassTrafficSubsystem* MassTrafficSubsystem = UWorld::GetSubsystem<UMassTrafficSubsystem>(&World);
-	check(MassTrafficSubsystem);
-
-	if (PhysicsParams.PhysicsVehicleTemplateActor)
-	{
-		// Extract physics setup from PhysicsVehicleTemplateActor into shared fragment
-		const FMassTrafficSimpleVehiclePhysicsTemplate* Template = MassTrafficSubsystem->GetOrExtractVehiclePhysicsTemplate(PhysicsParams.PhysicsVehicleTemplateActor);
-
-		// Register & add shared fragment
-		if (LIKELY(!BuildContext.IsInspectingData()))
-		{
-			const FConstSharedStruct PhysicsSharedFragment = EntityManager.GetOrCreateConstSharedFragment<FMassTrafficVehiclePhysicsSharedParameters>(FConstStructView::Make(*Template), Template);
-			BuildContext.AddConstSharedFragment(PhysicsSharedFragment);
-		}
-		else
-		{
-			// in the investigation mode we only care about the fragment type
-			const FConstSharedStruct PhysicsSharedFragment = EntityManager.GetOrCreateConstSharedFragment<FMassTrafficVehiclePhysicsSharedParameters>(Template);
-			BuildContext.AddConstSharedFragment(PhysicsSharedFragment);
-		}
-	}
-	else
-	{
-		UE_LOG(LogMassTraffic, Warning, TEXT("No PhysicsVehicleTemplateActor set for UMassTrafficVehicleSimulationMassControlTrait in %s. Vehicles will be forced to low simulation LOD!"), GetOuter() ? *GetOuter()->GetName() : TEXT("(?)"))
-	}
+	BuildMassControlledTemplate(BuildContext, World, PhysicsParams, GetOuter());
 }

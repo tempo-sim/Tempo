@@ -89,6 +89,21 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Variable Tick")
 	FMassSimulationVariableTickParameters VariableTickParams;
 
+	/**
+	 * Whether Mass drives these vehicles along the lane graph. Leave this on for traffic. Turn it off
+	 * for vehicles driven by something else, such as TempoMovement, which supply their own movement
+	 * and must not carry the lane following fragments.
+	 *
+	 * When on, this trait also builds what UMassTrafficVehicleSimulationMassControlTrait builds, so a
+	 * vehicle configured with only this trait is a complete traffic vehicle. Adding both traits is
+	 * harmless; the template deduplicates the fragment types.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Mass Traffic")
+	bool bMassControlled = true;
+
+	UPROPERTY(EditAnywhere, Category = "Mass Traffic", meta = (EditCondition = "bMassControlled"))
+	FMassTrafficVehiclePhysicsParameters PhysicsParams;
+
 	virtual void BuildTemplate(FMassEntityTemplateBuildContext& BuildContext, const UWorld& World) const override;
 };
 

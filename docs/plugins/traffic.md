@@ -151,8 +151,17 @@ to the original:
 | **Display name** | `FriendlyName` is `Traffic (Tempo)`, so it is recognisable in the plugin browser. It is display-only. |
 | **CoreRedirects** | `Config/DefaultTraffic.ini` maps the pre-split intersection names onto their light-controlled equivalents, so `CitySampleIntersectionAgentConfig` and similar assets still resolve. |
 | **Content** | The plugin carries `MF_UnpackTrafficVehicleInstanceCustomData` — byte-identical to CitySample's, and referenced by five of its vehicle materials through the `/Traffic/` path. |
+| **Vehicle traits** | The fork splits Epic's `MassTrafficVehicleSimulationTrait` in two, moving the lane-following fragments into `MassTrafficVehicleSimulationMassControlTrait` so TempoMovement-driven vehicles can skip them. The base trait's `bMassControlled` defaults to **on** and builds both halves, so a CitySample config naming only Epic's trait still gets a complete traffic vehicle. Turn it off for vehicles driven by something other than Mass. |
 | **Spawner entity configs** | The split expects two intersection entity configs on the spawner — light at index 0, sign at index 1. Epic's spawner predates the split and carries one. With only one, every intersection is built as a light intersection using Epic's original period rules, so unmodified CitySample content still runs. |
 | **Version** | `"Version": 2` against CitySample's `1`. This is how `FPluginManager` and UnrealBuildTool break a same-name tie, and it makes Tempo's copy the preferred one wherever that comparison is actually reached. |
+
+!!! note "`PhysicsVehicleTemplateActor` does not carry over"
+
+    Epic stores it inside the simulation trait's `Params`; the fork keeps it in a separate
+    `PhysicsParams`. A CitySample vehicle config therefore comes across without it and logs *"No
+    PhysicsVehicleTemplateActor set..."*. The vehicles still spawn, drive and render — they are held
+    at low simulation LOD, which is where most traffic runs anyway. Set `PhysicsParams` on the trait
+    to restore high-LOD physics.
 
 !!! tip "Enabling stop and yield signs in a CitySample project"
 
