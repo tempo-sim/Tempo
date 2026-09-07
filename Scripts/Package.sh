@@ -88,22 +88,8 @@ fi
 
 cd "$UNREAL_ENGINE_PATH"
 
-# Build the base command with common arguments.
-#
-# -skipiostore: Tempo's plugin content (camera and lidar post-process materials, stitch materials,
-# the distortion map, the semantic label table) is reachable only through TSoftObjectPtr fields on
-# UTempoSensorsSettings. DirectoriesToAlwaysCook gets it cooked and staged, but the iostore
-# container build drops it again for want of a hard reference chain — AllChunksInfo.csv labels it
-# "Soft: Unknown reference chain. Soft From Unassigned Package?" — and since the runtime loader
-# consults only the container under bUseIoStore, the sim starts fine and then fails to load them:
-#   LoadPackage: SkipPackage: /TempoSensors/Materials/M_TempoCamera_Distort_NoDepth ... does not
-#   exist on disk or in the loader
-#   PostProcessMaterialNoDepth is not set in TempoSensors settings
-# leaving every camera producing no usable imagery. Without iostore the packages go into the pak as
-# loose files and the loader finds them by path. This also covers the separate cold-cook iostore
-# failure that CI already needed the flag for. Giving those assets a real reference chain (e.g.
-# AssetManager primary asset rules) would let iostore be turned back on.
-PACKAGE_COMMAND="Turnkey -command=VerifySdk -platform=$TARGET_PLATFORM -UpdateIfNeeded -project=\"$PROJECT_ROOT/$PROJECT_NAME.uproject\" BuildCookRun -nop4 -utf8output -nocompileeditor -skipbuildeditor -cook -target=\"$PROJECT_NAME\" -platform=$TARGET_PLATFORM -project=\"$PROJECT_ROOT/$PROJECT_NAME.uproject\" -installed -stage -package -pak -skipiostore -build -prereqs -clientconfig=$BUILD_CONFIGURATION"
+# Build the base command with common arguments
+PACKAGE_COMMAND="Turnkey -command=VerifySdk -platform=$TARGET_PLATFORM -UpdateIfNeeded -project=\"$PROJECT_ROOT/$PROJECT_NAME.uproject\" BuildCookRun -nop4 -utf8output -nocompileeditor -skipbuildeditor -cook -target=\"$PROJECT_NAME\" -platform=$TARGET_PLATFORM -project=\"$PROJECT_ROOT/$PROJECT_NAME.uproject\" -installed -stage -package -pak -build -prereqs -clientconfig=$BUILD_CONFIGURATION"
 
 echo "Packaging $PROJECT_NAME in $BUILD_CONFIGURATION configuration -> $PROJECT_ROOT/Packaged"
 
@@ -133,25 +119,6 @@ if [ "$LOW_MEMORY_MODE" = "true" ]; then
   # retaining useful parallelism.
   PACKAGE_COMMAND="$PACKAGE_COMMAND -CookPartialGC -NoXGE -UbtArgs=\"-MaxParallelActions=3 -NoUBA -NoXGE\" -AdditionalCookerOptions=\"-cookprocesscount=1\""
   echo "Low memory mode enabled: at most 3 compile actions, single cook process, partial GC, no UBA/XGE"
-fi
-
-# Clear the previous build's output for this platform before staging over it.
-#
-# UAT copies into the archive directory but never removes files the new build no longer produces,
-# so artifacts of a differently-configured previous build survive alongside the new ones. The case
-# that cost real debugging time: a build made before -skipiostore leaves pakchunk0-Mac.utoc/.ucas
-# behind, the engine mounts that stale container at startup and resolves packages through it, and
-# every asset that now lives only in the freshly built .pak reads as
-#   LoadPackage: SkipPackage: ... does not exist on disk or in the loader
-# even though it is right there in the pak. The build looks clean and the sim is silently broken.
-#
-# Only this platform's staged output is removed. Packaged/API and Packaged/Metadata are repopulated
-# further down and are left alone. A failed package leaves no previous build to fall back on, which
-# is the intended trade: a stale mixed build is worse than none.
-STALE_PLATFORM_DIR="$PROJECT_ROOT/Packaged/$TARGET_PLATFORM"
-if [ -d "$STALE_PLATFORM_DIR" ]; then
-  echo "Removing previous $TARGET_PLATFORM build at $STALE_PLATFORM_DIR"
-  rm -rf "$STALE_PLATFORM_DIR"
 fi
 
 # Filter out our custom flags before passing to UAT

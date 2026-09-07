@@ -37,13 +37,12 @@ geometry in front of the camera:
   * Nothing moving, and no animated or flickering lights. The tests rely on the scene being static
     so that only the camera's motion changes the image.
 
-Plugin content is only cooked when a map hard-references it. This level is referenced by nothing in
-a host project, and the camera's post-process materials and the label table are referenced only
-through TSoftObjectPtr fields on UTempoSensorsSettings, which the cooker never walks. So none of it
-reaches a packaged build on its own. TempoSensors/Config/DefaultGame.ini puts the whole plugin
-content directory in DirectoriesToAlwaysCook to cover both. If these tests skip saying the level is
-missing, or the sim logs "PostProcessMaterialNoDepth is not set in TempoSensors settings", that
-config not making it into the package is the first thing to check.
+Plugin content is only cooked when something references it, and nothing in a host project
+references this level. TempoSensors/Config/Editor.ini lists it under [AlwaysCookMaps], which the
+cooker honors on every cook. The alternatives do not work here: MapsToCook is ignored whenever maps
+are passed on the command line, as Package.sh does in CI, and DirectoriesToAlwaysCook only scans
+*.uasset files, never *.umap. If these tests skip saying the level is missing, that config not
+making it into the package is the first thing to check.
 
 ## Environment
 
@@ -169,8 +168,8 @@ def readback_level(sim_server):
         pytest.skip(
             f"{LEVEL} is not in this build. Levels found under /TempoSensors: "
             f"{list(available) or 'none'}. Plugin content is only cooked when something references "
-            "it — check that TempoSensors/Config/DefaultGame.ini contributes "
-            '+DirectoriesToAlwaysCook=(Path="/TempoSensors") and repackage.'
+            "it — check that TempoSensors/Config/Editor.ini contributes "
+            "[AlwaysCookMaps] +Map=/TempoSensors/Maps/TempoSensorsTest and repackage."
         )
 
     try:
