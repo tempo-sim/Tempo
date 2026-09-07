@@ -158,6 +158,7 @@ nav:
       - clients/examples.md
   - Guides:
       - guides/index.md
+      - guides/citysample.md
       - guides/custom-services.md
       - guides/packaging.md
       - guides/continuous-integration.md

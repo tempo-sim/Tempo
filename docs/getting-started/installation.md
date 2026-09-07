@@ -34,6 +34,12 @@
     git submodule update --init --recursive
     ```
 
+    !!! tip "Adding Tempo to CitySample?"
+
+        CitySample needs two extra things — a one-line source patch, and the plugin-name
+        collision `Setup.sh` resolves. See
+        [Tempo + CitySample](../guides/citysample.md).
+
 ## Disable ROS plugins if unused
 
 Tempo's primary interface is gRPC, which needs no ROS — see
