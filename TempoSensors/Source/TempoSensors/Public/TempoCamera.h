@@ -559,10 +559,42 @@ protected:
 	// and ensure it is present in this component's PostProcessSettings.WeightedBlendables.
 	UMaterialInstanceDynamic* GetOrCreateProxyTonemapMID();
 
-	// Shared pre-exposure (EV stops) pushed onto every tile's AutoExposureBias before each capture.
-	// Driven by a P-controller fed from the proxy's AE-reported luminance.
+	// Exposure bias (EV) applied to every tile's manual exposure before each capture. In the
+	// multi-tile path the tiles carry the camera's entire exposure: a tile's PreExposure (what TSR,
+	// Lumen and the fp16 scene color see) is then the exposure of the final image, and the proxy
+	// capture is reduced to a light meter at a fixed exposure of 1. The bias is auto exposure
+	// re-derived on the CPU from the proxy's histogram readback with the engine's own target, range
+	// and speed rules (UpdateSharedExposure), so the camera's auto exposure settings keep their
+	// meaning. The tile family renders with the EyeAdaptation show flag set: the engine only honors
+	// AutoExposureBias, and only computes a PreExposure, while it is, and TSR's shading rejection
+	// is calibrated for pre-exposed input.
 	float SharedExposureBias = 0.0f;
 	bool bHasValidSharedExposure = false;
+
+	// Controller state: the engine's smoothed "exposure" luminance (its reciprocal, times the
+	// exposure compensation, is the exposure scale) and the world time of the last step.
+	float SmoothedSceneLuminance = 0.0f;
+	double LastSharedExposureUpdateTime = -1.0;
+
+	// Bias the tiles rendered with on recent captures, most recent first. The proxy's histogram
+	// readback reaches the game thread about two captures after the image it measured, and the
+	// controller has to divide the measurement by the exposure that produced it.
+	static constexpr int32 AppliedExposureBiasHistoryLength = 3;
+	float AppliedExposureBiasHistory[AppliedExposureBiasHistoryLength] = { 0.0f, 0.0f, 0.0f };
+
+	// Multi-tile captures since the controller was last (re)seeded. The proxy does not render in
+	// the fast path, so right after a switch its last readback describes some older image; the
+	// controller waits until a readback can only be of a capture it has the applied bias for.
+	int32 NumMultiTileCapturesSinceExposureSeed = 0;
+
+	// Step the exposure controller once per capture: from the proxy's readback in the multi-tile
+	// path, or seeded from the tile's own auto exposure in the fast path so a later switch into the
+	// multi-tile path starts at the exposure the scene already has.
+	void UpdateSharedExposure(bool bSingleTileFastPath, FTempoCameraTile* SingleActiveTile);
+
+	// Push the per-tile exposure settings (manual method at the shared bias, no physical camera,
+	// no bias curve) onto a tile's post-process settings.
+	void ApplyTileExposureSettings(FTempoCameraTile& Tile) const;
 
 	// Tracks whether the previous capture used the single-tile fast path. When this flips, the
 	// active tile's TAA/AE history was conditioned on a different post-process configuration;
