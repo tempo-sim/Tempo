@@ -41,11 +41,7 @@ namespace
 
 	float GetViewStateLastAverageSceneLuminance(FSceneViewStateInterface* ViewState)
 	{
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 7
-		return static_cast<FSceneViewState*>(ViewState)->GetLastAverageSceneLuminance();
-#else
 		return ViewState->GetLastAverageSceneLuminance();
-#endif
 	}
 
 	bool IsExtendedLuminanceRangeEnabled()
