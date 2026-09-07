@@ -5,7 +5,6 @@
 #include "TempoActorLabeler.h"
 #include "TempoCameraVideoEncoder.h"
 #include "TempoCoreUtils.h"
-#include "TempoLabelTypes.h"
 #include "TempoSensorsConstants.h"
 #include "TempoMultiViewCapture.h"
 #include "TempoSensors.h"
@@ -1873,40 +1872,20 @@ void UTempoCamera::SetTileDepthEnabled(FTempoCameraTile& Tile, bool bTileDepthEn
 		Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("UseRadialDistance"), bRadial ? 1.0f : 0.0f);
 	}
 
-	// Look up optional label override pair.
-	UDataTable* SemanticLabelTable = TempoSensorsSettings->GetSemanticLabelTable();
-	const FName OverridableLabelRowName = TempoSensorsSettings->GetOverridableLabelRowName();
-	const FName OverridingLabelRowName = TempoSensorsSettings->GetOverridingLabelRowName();
-	TOptional<int32> OverridableLabel;
-	TOptional<int32> OverridingLabel;
-	if (SemanticLabelTable && !OverridableLabelRowName.IsNone())
-	{
-		SemanticLabelTable->ForeachRow<FSemanticLabel>(TEXT(""),
-			[&OverridableLabelRowName, &OverridingLabelRowName, &OverridableLabel, &OverridingLabel]
-			(const FName& Key, const FSemanticLabel& Value)
-			{
-				if (Key == OverridableLabelRowName)
-				{
-					OverridableLabel = Value.Label;
-				}
-				if (Key == OverridingLabelRowName)
-				{
-					OverridingLabel = Value.Label;
-				}
-			});
-	}
-
-	if (OverridableLabel.IsSet() && OverridingLabel.IsSet())
-	{
-		Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("OverridableLabel"), OverridableLabel.GetValue());
-		Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("OverridingLabel"), OverridingLabel.GetValue());
-	}
-	else
-	{
-		Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("OverridingLabel"), 0.0);
-	}
+	ApplyLabelOverrideParameters(Tile.PostProcessMaterialInstance);
 
 	Tile.PostProcessMaterialInstance->EnsureIsComplete();
+}
+
+void UTempoCamera::ApplyLabelOverridesToTiles()
+{
+	for (FTempoCameraTile& Tile : Tiles)
+	{
+		if (Tile.bActive)
+		{
+			ApplyLabelOverrideParameters(Tile.PostProcessMaterialInstance);
+		}
+	}
 }
 
 void UTempoCamera::ApplyTilePostProcess(FTempoCameraTile& Tile)

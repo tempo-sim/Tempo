@@ -7,6 +7,8 @@
 #include "CoreMinimal.h"
 #include "Subsystems/WorldSubsystem.h"
 
+#include "TempoSensorsConstants.h"
+
 #include "TempoServiceProvider.h"
 #include "TempoServer.h"
 #include "TempoSubsystems.h"
@@ -55,6 +57,12 @@ namespace TempoSensors
 	class SetActorTypeSemanticIdRequest;
 	class GetAllStaticMeshTypesResponse;
 	class SetStaticMeshTypeSemanticIdRequest;
+	class SetActorTagSemanticIdRequest;
+	class GetLabelTableAsJsonResponse;
+	class SetLabelTypeRequest;
+	class LoadLabelTableRequest;
+	class SetInstanceLabelUniquenessRequest;
+	class SetLabelRowOverridesRequest;
 }
 
 /**
@@ -90,6 +98,18 @@ public:
 
 	void HandleSetStaticMeshTypeSemanticId(const TempoSensors::SetStaticMeshTypeSemanticIdRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation);
 
+	void HandleSetActorTagSemanticId(const TempoSensors::SetActorTagSemanticIdRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation);
+
+	void HandleGetLabelTableAsJson(const TempoCore::Empty& Request, const TResponseDelegate<TempoSensors::GetLabelTableAsJsonResponse>& ResponseContinuation) const;
+
+	void HandleSetLabelType(const TempoSensors::SetLabelTypeRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation);
+
+	void HandleLoadLabelTable(const TempoSensors::LoadLabelTableRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation);
+
+	void HandleSetInstanceLabelUniqueness(const TempoSensors::SetInstanceLabelUniquenessRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation);
+
+	void HandleSetLabelRowOverrides(const TempoSensors::SetLabelRowOverridesRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation);
+
 	const TSet<FName>& GetLabeledActorClassNames() const { return LabeledActorClassNames; }
 
 	TMap<uint8, uint8> GetInstanceToSemanticIdMap() const;
@@ -107,15 +127,21 @@ protected:
 
 	void LabelComponent(UPrimitiveComponent* Component, FInstanceSemanticIdPair ActorIdPair);
 
+	// Resolves the label an Actor earns, honoring runtime overrides over the label table. Unset
+	// means nothing in the table matches the Actor and it should go unlabeled.
+	TOptional<int32> ResolveActorSemanticId(const AActor* Actor) const;
+
 	// Resolves the label a Component earns in its own right, independent of its owning Actor.
 	// Unset means the Component has no label of its own and should inherit its Actor's.
 	TOptional<int32> ResolveComponentSemanticId(const UPrimitiveComponent* Component) const;
 
-	// Resolves the label a static mesh asset path earns, honoring runtime overrides over the label table.
-	TOptional<int32> ResolveStaticMeshSemanticId(const FString& MeshPath) const;
+	// Resolves the label a mesh asset path earns, static or skeletal, honoring runtime overrides
+	// over the label table.
+	TOptional<int32> ResolveMeshSemanticId(const FString& MeshPath) const;
 
-	// The static mesh assets a Component renders: its own mesh, or the meshes a Niagara system instances.
-	static void GetComponentStaticMeshPaths(const UPrimitiveComponent* Component, TArray<FString>& OutMeshPaths);
+	// The mesh assets a Component renders: its own static or skeletal mesh, or the meshes a Niagara
+	// system instances.
+	static void GetComponentMeshPaths(const UPrimitiveComponent* Component, TArray<FString>& OutMeshPaths);
 
 	void UnLabelAllActors();
 
@@ -127,7 +153,9 @@ protected:
 
 	void UnLabelComponent(UPrimitiveComponent* Component);
 
-	void ReLabelAllActors();
+	// Re-derive everything cached from the semantic label table, then re-label the world from
+	// scratch. Bound to the settings' label-settings-changed event.
+	void OnLabelSettingsChanged();
 
 	static void AssignId(UPrimitiveComponent* Component, FInstanceSemanticIdPair IdPair);
 
@@ -141,7 +169,13 @@ protected:
 	TMap<FString, FName> StaticMeshLabels;
 
 	UPROPERTY(VisibleAnywhere)
+	TMap<FString, FName> SkeletalMeshLabels;
+
+	UPROPERTY(VisibleAnywhere)
 	TMap<FName, FName> ComponentTagLabels;
+
+	UPROPERTY(VisibleAnywhere)
+	TMap<FName, FName> ActorTagLabels;
 
 	UPROPERTY(VisibleAnywhere)
 	TMap<FName, int32> SemanticIds;
@@ -169,5 +203,12 @@ protected:
 	UPROPERTY()
 	TMap<FString, int32> StaticMeshTypeSemanticIdOverrides;
 
-	FInstanceIdAllocator InstanceIdAllocator = FInstanceIdAllocator(1, 255);
+	// Runtime overrides for actor tags (tag -> semantic ID)
+	// Takes precedence over DataTable definitions (ActorTagLabels)
+	UPROPERTY()
+	TMap<FName, int32> ActorTagSemanticIdOverrides;
+
+	// 0 is reserved for "unlabeled", and the camera cannot encode an ID above
+	// GTempoCamera_Max_Label, so instance IDs run 1..GTempoCamera_Max_Label.
+	FInstanceIdAllocator InstanceIdAllocator = FInstanceIdAllocator(1, GTempoCamera_Max_Label);
 };

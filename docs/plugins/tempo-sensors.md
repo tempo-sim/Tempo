@@ -50,10 +50,11 @@ API at whatever rate you configure.
   `bAutoTextureFilterType` / `TextureFilterType`. Depth on equidistant lens models is reported as
   Euclidean distance from the camera origin, not depth along the camera axis, avoiding seam
   discontinuities.
-- **Two label-override mechanisms.** Per-mesh labels via the Label Table data table (Static Mesh
-  and Actor-class entries; Static Mesh wins). Visually imperceptible per-pixel overrides via
-  subsurface color — used, for example, to label lane-line decals differently from the road they
-  live on.
+- **Labels down to the individual component.** The Label Table matches on Actor class, Actor tag,
+  Static Mesh asset, Skeletal Mesh asset, or component tag, most specific winning — so a lane-line
+  decal can be `LaneLine` on top of a road actor labeled `Road`. On top of that, visually
+  imperceptible per-pixel overrides via subsurface color. The whole table can be replaced at
+  runtime from JSON, without restarting the sim.
 - **Hardware-encoded H.264 video**, alongside raw color. [See below](#stream-h264-video).
 
 ## Getting started
@@ -192,36 +193,88 @@ convention so client-side point-cloud math renders right-handed Z-up directly.
 `UTempoActorLabeler`, a world subsystem, writes labels into the custom-depth stencil at
 `BeginPlay` and whenever a primitive component registers. It reads the mapping from the
 `SemanticLabelTable` you configure in Project Settings — a `DataTable` of `FSemanticLabel` rows,
-each with a stencil value plus a set of Actor classes and/or Static Mesh assets that should
-receive that label.
+each with a stencil value plus the things that should receive that label. TempoSample's
+`Content/Labels/TempoSampleLabelTable` is a worked example of such a table.
 
-Static Mesh entries take precedence over Actor entries, so you can label a base-mesh actor one way
-and selected meshes on it another — lane decals as `LaneLine` on top of road actors labeled
-`Road`, for instance. TempoSample's `Content/Labels/TempoSampleLabelTable` is a worked example of such a table.
+Each row matches on five columns, and the most specific match wins:
+
+| Column | Matches | Beats |
+|---|---|---|
+| `ActorTypes` | Every Actor of a class, and its subclasses | — |
+| `ActorTags` | Actors carrying that tag | `ActorTypes` |
+| `StaticMeshTypes` | Components rendering that static mesh — ISMC / foliage and Niagara mesh renderers included | `ActorTags`, `ActorTypes` |
+| `SkeletalMeshTypes` | Skinned components rendering that skeletal mesh | `ActorTags`, `ActorTypes` |
+| `ComponentTags` | Components carrying that tag | everything above |
+
+So you can label a base-mesh actor one way and selected meshes on it another — lane decals as
+`LaneLine` on top of road actors labeled `Road`, for instance. The two tag columns are the escape
+hatches for what no class or asset can pick out: one instance of a class labeled differently from
+the rest, or geometry built at runtime. An Actor carrying tags for two different labels resolves
+to whichever its `Tags` array lists first.
+
+Static and skeletal meshes get separate columns because the two asset types share no base class
+narrower than `UStreamableRenderAsset`, which textures also derive from. They resolve through one
+path-keyed lookup, so a mesh asset carries at most one label either way.
+
+!!! warning "Label IDs run 0–253, not 0–255"
+
+    The camera packs the label into the exponent field of its fp32 alpha channel, biased by `+1`,
+    which keeps the alpha a normal, finite float for every `(label, depth)` pair — at the cost of
+    the top two IDs. See `TempoSensorsConstants.h`. An out-of-range ID corrupts both the label
+    *and* the depth of every pixel it covers, so the labeler logs an error for one at startup.
 
 In `Instance` label mode (`Project Settings → Tempo → Sensors → Label Type`), each labeled actor
-also gets a unique 1–255 instance ID. Two flags control reuse:
+also gets a unique 1–253 instance ID. Two flags control reuse:
 
 - **Globally Unique Instance Labels** — don't reclaim IDs of destroyed actors.
-- **Instantaneously Unique Instance Labels** — don't repeat IDs even after exhausting all 256.
+- **Instantaneously Unique Instance Labels** — don't repeat IDs even after exhausting all 253.
 
 Bounding-box requests use the instance label image to compute axis-aligned 2D boxes per instance,
 attaching the corresponding semantic ID via the labeler's instance→semantic map.
 
 #### Inspecting and editing labels from a client
 
-The label table is also reachable over the API, which is what you want when generating datasets
-across many scenes rather than hand-editing a `DataTable`:
+Everything above is also reachable over the API, which is what you want when generating datasets
+across many scenes rather than hand-editing a `DataTable`. Reading what's in effect:
 
 | RPC | What it does |
 |---|---|
-| `get_semantic_classes` | List the semantic classes in the label table. |
+| `get_semantic_classes` | List the semantic classes in the label table, and what each one matches. |
 | `get_all_actor_labels` | Every actor's current label. |
 | `get_labeled_actor_types` | The actor classes the table assigns labels to. |
 | `get_all_static_mesh_types` | The static meshes the table knows about. |
-| `set_actor_type_semantic_id` | Assign a semantic ID to an actor class. |
-| `set_static_mesh_type_semantic_id` | Assign a semantic ID to a static mesh — takes precedence over the actor-class entry. |
 | `get_instance_to_semantic_id_map` | Map instance IDs back to semantic IDs, for decoding instance label images. |
+| `get_label_table_as_json` | The whole table, in exactly the format `load_label_table` reads. |
+
+Per-entry overrides, each taking `-1` to revert to whatever the table says:
+
+| RPC | What it does |
+|---|---|
+| `set_actor_type_semantic_id` | Assign a semantic ID to an actor class. |
+| `set_actor_tag_semantic_id` | Assign a semantic ID to an Actor tag — beats the actor's class. |
+| `set_static_mesh_type_semantic_id` | Assign a semantic ID to a static mesh — beats both of the above. |
+
+These sit in a layer *above* the table and survive a `load_label_table`, so clear one with `-1` if
+you want a newly loaded table to decide.
+
+Whole-table and mode changes, each of which re-labels the world in place:
+
+| RPC | What it does |
+|---|---|
+| `load_label_table` | Replace the entire table from a JSON string (`json`) or a file (`json_file`) — Unreal's DataTable JSON format, an array of rows keyed by `"Name"`. Supersedes the configured `SemanticLabelTable` for the life of the process. A table that fails to import is rejected whole, leaving the active one in place. |
+| `set_label_type` | Switch between `LT_SEMANTIC` and `LT_INSTANCE`. |
+| `set_instance_label_uniqueness` | Set the two instance-ID reuse flags. Governs future allocations only — already-labeled objects keep their IDs. |
+| `set_label_row_overrides` | Set the `OverridableLabelRowName` / `OverridingLabelRowName` pair driving the subsurface-color per-pixel override, or clear both to disable it. Live sensors pick it up without a capture restart. |
+
+!!! tip "Fetch, edit, load"
+
+    `get_label_table_as_json` emits rows — and the entries within each row — in sorted order, so
+    two fetches of the same table are byte-identical and a diff shows only what you changed. Round
+    trip it: fetch, edit, `load_label_table`.
+
+    One sharp edge: an asset path the importer cannot resolve is accepted without complaint — an
+    unknown class lands in the row as a null, an unknown mesh as a soft pointer that never loads.
+    Check the result with `get_semantic_classes` if a label doesn't appear where you expect.
 
 ## Timing: pipelined or synchronous
 
@@ -232,6 +285,10 @@ Setting `Project Settings → Tempo → Sensors → Pipelined Rendering = true` 
 continue while game / render / readback run in parallel — higher throughput at the cost of 1–2
 frames of latency. Each measurement carries the correct `capture_time_s` and `sequence_id`
 regardless, so a client always knows which simulation frame it is looking at.
+
+`set_pipelined_rendering_enabled` flips the same switch at runtime. The barrier reads it fresh
+every frame, so the change lands on the next one — no sensor teardown, no reconfigure. Useful for
+running a scene fast and then dropping into lockstep for the frames you actually want to capture.
 
 ## Performance notes
 

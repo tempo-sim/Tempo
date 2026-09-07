@@ -9,7 +9,15 @@
 
 #include "TempoSensorsSettings.generated.h"
 
+class UDataTable;
+
+// Broadcast when the set of labels, or which objects earn them, changes. Listeners must re-derive
+// everything they cached from the label table and re-label the world.
 DECLARE_MULTICAST_DELEGATE(FTempoSensorsLabelSettingsChanged);
+
+// Broadcast when the overridable/overriding label row pair changes, including when the label table
+// they name rows in is replaced. Listeners must re-resolve the pair to label IDs and re-push them.
+DECLARE_MULTICAST_DELEGATE(FTempoSensorsLabelOverridesChanged);
 
 /**
  * TempoSensors Plugin Settings.
@@ -29,10 +37,17 @@ public:
 #endif
 
 	// Labels
-	TObjectPtr<UDataTable> GetSemanticLabelTable() const { return SemanticLabelTable.LoadSynchronous(); }
+	TObjectPtr<UDataTable> GetSemanticLabelTable() const { return RuntimeSemanticLabelTable ? ToRawPtr(RuntimeSemanticLabelTable) : SemanticLabelTable.LoadSynchronous(); }
 	ELabelType GetLabelType() const { return LabelType; }
 	bool GetGloballyUniqueInstanceLabels() const { return bGloballyUniqueInstanceLabels; }
 	bool GetInstantaneouslyUniqueInstanceLabels() const { return bInstantaneouslyUniqueInstanceLabels; }
+	// Supersede the configured SemanticLabelTable with a table built at runtime, for the life of the
+	// process. Pass nullptr to fall back to the configured asset.
+	void SetRuntimeSemanticLabelTable(UDataTable* SemanticLabelTableIn);
+	void SetLabelType(ELabelType LabelTypeIn);
+	void SetGloballyUniqueInstanceLabels(bool bGloballyUniqueInstanceLabelsIn);
+	void SetInstantaneouslyUniqueInstanceLabels(bool bInstantaneouslyUniqueInstanceLabelsIn);
+	void SetLabelRowNameOverrides(FName OverridableLabelRowNameIn, FName OverridingLabelRowNameIn);
 
 	// Camera
 	TObjectPtr<UMaterialInterface> GetCameraPostProcessMaterialNoDepth() const { return CameraPostProcessMaterialNoDepth.LoadSynchronous(); }
@@ -49,7 +64,9 @@ public:
 	FName GetOverridingLabelRowName() const { return OverridingLabelRowName; }
 	int32 GetMaxRenderBufferSize() const { return MaxRenderBufferSize; }
 	bool GetPipelinedRendering() const { return bPipelinedRendering; }
+	void SetPipelinedRendering(bool bPipelinedRenderingIn);
 	FTempoSensorsLabelSettingsChanged TempoSensorsLabelSettingsChangedEvent;
+	FTempoSensorsLabelOverridesChanged TempoSensorsLabelOverridesChangedEvent;
 
 	// Lidar
 	float GetMaxLidarDepth() const { return MaxLidarDepth; }
@@ -73,6 +90,11 @@ private:
 	UPROPERTY(EditAnywhere, Config, Category="Labels")
 	TSoftObjectPtr<UDataTable> SemanticLabelTable;
 
+	// A label table built at runtime (from JSON, via the API), which supersedes SemanticLabelTable
+	// while set. Not Config: a table with no asset behind it has no path to save.
+	UPROPERTY(Transient)
+	TObjectPtr<UDataTable> RuntimeSemanticLabelTable;
+
 	// The global label type to use.
 	UPROPERTY(EditAnywhere, Config, Category="Labels")
 	TEnumAsByte<ELabelType> LabelType = ELabelType::Semantic;
@@ -81,7 +103,7 @@ private:
 	UPROPERTY(EditAnywhere, Config, Category="Labels", meta=(EditCondition="LabelType == ELabelType::Instance"))
 	bool bGloballyUniqueInstanceLabels = false;
 
-	// Whether to reuse instance labels after exhausting our 256 unique labels.
+	// Whether to reuse instance labels after exhausting our 253 unique labels.
 	UPROPERTY(EditAnywhere, Config, Category="Labels", meta=(EditCondition="LabelType == ELabelType::Instance"))
 	bool bInstantaneouslyUniqueInstanceLabels = false;
 

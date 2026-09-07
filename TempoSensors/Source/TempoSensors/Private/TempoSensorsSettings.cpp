@@ -2,6 +2,7 @@
 
 #include "TempoSensorsSettings.h"
 
+#include "Engine/DataTable.h"
 #include "UObject/UnrealType.h"
 
 UTempoSensorsSettings::UTempoSensorsSettings()
@@ -63,6 +64,64 @@ void UTempoSensorsSettings::PostInitProperties()
 #endif
 }
 
+void UTempoSensorsSettings::SetRuntimeSemanticLabelTable(UDataTable* SemanticLabelTableIn)
+{
+	if (RuntimeSemanticLabelTable == SemanticLabelTableIn)
+	{
+		return;
+	}
+
+	RuntimeSemanticLabelTable = SemanticLabelTableIn;
+
+	TempoSensorsLabelSettingsChangedEvent.Broadcast();
+	// The overridable/overriding row names are unchanged, but the rows they name now live in a
+	// different table and may resolve to different label IDs.
+	TempoSensorsLabelOverridesChangedEvent.Broadcast();
+}
+
+void UTempoSensorsSettings::SetLabelType(ELabelType LabelTypeIn)
+{
+	if (LabelType == LabelTypeIn)
+	{
+		return;
+	}
+
+	LabelType = LabelTypeIn;
+
+	TempoSensorsLabelSettingsChangedEvent.Broadcast();
+}
+
+void UTempoSensorsSettings::SetGloballyUniqueInstanceLabels(bool bGloballyUniqueInstanceLabelsIn)
+{
+	// Read live by the instance ID allocator, so this only governs allocations from here on.
+	// Instance IDs already assigned keep theirs.
+	bGloballyUniqueInstanceLabels = bGloballyUniqueInstanceLabelsIn;
+}
+
+void UTempoSensorsSettings::SetInstantaneouslyUniqueInstanceLabels(bool bInstantaneouslyUniqueInstanceLabelsIn)
+{
+	bInstantaneouslyUniqueInstanceLabels = bInstantaneouslyUniqueInstanceLabelsIn;
+}
+
+void UTempoSensorsSettings::SetLabelRowNameOverrides(FName OverridableLabelRowNameIn, FName OverridingLabelRowNameIn)
+{
+	if (OverridableLabelRowName == OverridableLabelRowNameIn && OverridingLabelRowName == OverridingLabelRowNameIn)
+	{
+		return;
+	}
+
+	OverridableLabelRowName = OverridableLabelRowNameIn;
+	OverridingLabelRowName = OverridingLabelRowNameIn;
+
+	TempoSensorsLabelOverridesChangedEvent.Broadcast();
+}
+
+void UTempoSensorsSettings::SetPipelinedRendering(bool bPipelinedRenderingIn)
+{
+	// Read live everywhere it matters (the FixedStep readback barrier), so no listeners to notify.
+	bPipelinedRendering = bPipelinedRenderingIn;
+}
+
 #if WITH_EDITOR
 FText UTempoSensorsSettings::GetSectionText() const
 {
@@ -75,10 +134,22 @@ void UTempoSensorsSettings::PostEditChangeProperty(FPropertyChangedEvent& Proper
 {
 	Super::PostEditChangeProperty(PropertyChangedEvent);
 
-	const FString PropertyChangedName = PropertyChangedEvent.Property->GetName();
-	if (PropertyChangedName == GET_MEMBER_NAME_CHECKED(UTempoSensorsSettings, LabelType))
+	if (!PropertyChangedEvent.Property)
+	{
+		return;
+	}
+
+	const FName PropertyChangedName = PropertyChangedEvent.Property->GetFName();
+	if (PropertyChangedName == GET_MEMBER_NAME_CHECKED(UTempoSensorsSettings, LabelType)
+		|| PropertyChangedName == GET_MEMBER_NAME_CHECKED(UTempoSensorsSettings, SemanticLabelTable))
 	{
 		TempoSensorsLabelSettingsChangedEvent.Broadcast();
+	}
+	if (PropertyChangedName == GET_MEMBER_NAME_CHECKED(UTempoSensorsSettings, SemanticLabelTable)
+		|| PropertyChangedName == GET_MEMBER_NAME_CHECKED(UTempoSensorsSettings, OverridableLabelRowName)
+		|| PropertyChangedName == GET_MEMBER_NAME_CHECKED(UTempoSensorsSettings, OverridingLabelRowName))
+	{
+		TempoSensorsLabelOverridesChangedEvent.Broadcast();
 	}
 }
 #endif

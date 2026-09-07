@@ -70,6 +70,11 @@ protected:
 	// ReconfigureTilesNow (which need to drain tiles before teardown / re-sync).
 	virtual void DeactivateAllTiles() PURE_VIRTUAL(UTempoTiledSceneCaptureComponent::DeactivateAllTiles, );
 
+	// Re-push the resolved overridable/overriding label IDs onto every active tile's post-process
+	// material instance. Called when the label table or the row names naming that pair change, so
+	// a live sensor picks the change up without a full tile reconfigure.
+	virtual void ApplyLabelOverridesToTiles() PURE_VIRTUAL(UTempoTiledSceneCaptureComponent::ApplyLabelOverridesToTiles, );
+
 	// Returns true iff any watched property differs from its internal mirror.
 	virtual bool HasDetectedParameterChange() const PURE_VIRTUAL(UTempoTiledSceneCaptureComponent::HasDetectedParameterChange, return false;);
 

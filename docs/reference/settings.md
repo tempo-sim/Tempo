@@ -59,10 +59,10 @@ Tempo's plugin settings live in **Project Settings → Plugins**, and are stored
 
 | Setting | Type | Default | What it does |
 |---|---|---|---|
-| `SemanticLabelTable` | `DataTable` | — | Maps Actor classes and Static Meshes to semantic labels. In `Instance` mode, every instance of an object appearing in this table is labeled. |
+| `SemanticLabelTable` | `DataTable` | — | Maps Actor classes, Actor tags, Static Mesh assets, Skeletal Mesh assets and component tags to semantic labels. In `Instance` mode, every instance of an object appearing in this table is labeled. Can be replaced at runtime with `load_label_table`. |
 | `LabelType` | enum | `Semantic` | `Semantic` or `Instance`. |
 | `bGloballyUniqueInstanceLabels` | `bool` | `false` | Don't reclaim instance IDs of destroyed actors. (Instance mode only.) |
-| `bInstantaneouslyUniqueInstanceLabels` | `bool` | `false` | Don't repeat instance IDs even after exhausting all 256. (Instance mode only.) |
+| `bInstantaneouslyUniqueInstanceLabels` | `bool` | `false` | Don't repeat instance IDs even after exhausting all 253. (Instance mode only.) |
 
 [:octicons-arrow-right-24: Working with labels](../plugins/tempo-sensors.md#working-with-labels)
 
@@ -86,7 +86,7 @@ Tempo's plugin settings live in **Project Settings → Plugins**, and are stored
 
 | Setting | Type | Default | What it does |
 |---|---|---|---|
-| `bPipelinedRendering` | `bool` | `false` | In Fixed Step mode, let the game thread advance without waiting for sensor readback. Higher throughput, 1–2 frames of latency. Each measurement still carries the correct `CaptureTime` and `SequenceId`. |
+| `bPipelinedRendering` | `bool` | `false` | In Fixed Step mode, let the game thread advance without waiting for sensor readback. Higher throughput, 1–2 frames of latency. Each measurement still carries the correct `CaptureTime` and `SequenceId`. Also settable at runtime with `set_pipelined_rendering_enabled`. |
 | `MaxRenderBufferSize` | `int32` | `4` | Max frames per camera to buffer before dropping, with a warning. |
 | `bEnableRayTracingSceneReadbackBuffersOverrunWorkaround` | `bool` | `true` | Works around an `FRayTracingScene` buffer-overrun bug that otherwise asserts when many ray-tracing scene captures run in one frame. |
 | `RayTracingSceneMaxReadbackBuffersOverride` | `uint32` | `128` | Size of the `FRayTracingScene` readback rings when the workaround is on. Must exceed (RT renders per frame) × (GPU frames in flight + margin). |

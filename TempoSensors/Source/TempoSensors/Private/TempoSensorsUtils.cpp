@@ -2,6 +2,17 @@
 
 #include "TempoSensorsUtils.h"
 
+#include "TempoLabelTypes.h"
+#include "TempoSensorsSettings.h"
+
+#include "Engine/DataTable.h"
+#include "Engine/SkeletalMesh.h"
+#include "Engine/StaticMesh.h"
+#include "GameFramework/Actor.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
+
 void OptimizeShowFlagsForNoColor(FEngineShowFlags& ShowFlags)
 {
 	ShowFlags.SetPostProcessing(true);
@@ -130,4 +141,145 @@ void ApplyPhotorealisticRenderSettings(FPostProcessSettings& OutPostProcess,
 	OutShowFlags.SetVolumetricFog(true);
 	OutShowFlags.SetTonemapper(true);
 	OutShowFlags.SetScreenPercentage(true);
+}
+
+void ApplyLabelOverrideParameters(UMaterialInstanceDynamic* MaterialInstance)
+{
+	if (!MaterialInstance)
+	{
+		return;
+	}
+
+	const UTempoSensorsSettings* TempoSensorsSettings = GetDefault<UTempoSensorsSettings>();
+	const UDataTable* SemanticLabelTable = TempoSensorsSettings->GetSemanticLabelTable();
+	const FName OverridableLabelRowName = TempoSensorsSettings->GetOverridableLabelRowName();
+	const FName OverridingLabelRowName = TempoSensorsSettings->GetOverridingLabelRowName();
+	TOptional<int32> OverridableLabel;
+	TOptional<int32> OverridingLabel;
+	if (SemanticLabelTable && !OverridableLabelRowName.IsNone())
+	{
+		SemanticLabelTable->ForeachRow<FSemanticLabel>(TEXT(""),
+			[&OverridableLabelRowName, &OverridingLabelRowName, &OverridableLabel, &OverridingLabel]
+			(const FName& Key, const FSemanticLabel& Value)
+			{
+				if (Key == OverridableLabelRowName)
+				{
+					OverridableLabel = Value.Label;
+				}
+				if (Key == OverridingLabelRowName)
+				{
+					OverridingLabel = Value.Label;
+				}
+			});
+	}
+
+	if (OverridableLabel.IsSet() && OverridingLabel.IsSet())
+	{
+		MaterialInstance->SetScalarParameterValue(TEXT("OverridableLabel"), OverridableLabel.GetValue());
+		MaterialInstance->SetScalarParameterValue(TEXT("OverridingLabel"), OverridingLabel.GetValue());
+	}
+	else
+	{
+		MaterialInstance->SetScalarParameterValue(TEXT("OverridingLabel"), 0.0);
+	}
+}
+
+namespace
+{
+	// Write a row's TSet column as a sorted JSON array. Sorting is what makes two exports of the
+	// same table comparable; TSet iteration order is not stable.
+	void WriteSortedStringArray(const TSharedRef<TJsonWriter<TCHAR, TPrettyJsonPrintPolicy<TCHAR>>>& JsonWriter,
+		const TCHAR* ColumnName, TArray<FString>& Values)
+	{
+		Values.Sort();
+		JsonWriter->WriteArrayStart(ColumnName);
+		for (const FString& Value : Values)
+		{
+			JsonWriter->WriteValue(Value);
+		}
+		JsonWriter->WriteArrayEnd();
+	}
+
+	TArray<FString> ToStringArray(const TSet<FName>& Names)
+	{
+		TArray<FString> Strings;
+		Strings.Reserve(Names.Num());
+		for (const FName& Name : Names)
+		{
+			Strings.Add(Name.ToString());
+		}
+		return Strings;
+	}
+}
+
+FString ExportSemanticLabelTableToJson(const UDataTable* SemanticLabelTable)
+{
+	FString Json;
+	const TSharedRef<TJsonWriter<TCHAR, TPrettyJsonPrintPolicy<TCHAR>>> JsonWriter =
+		TJsonWriterFactory<TCHAR, TPrettyJsonPrintPolicy<TCHAR>>::Create(&Json);
+
+	JsonWriter->WriteArrayStart();
+
+	if (SemanticLabelTable)
+	{
+		TArray<TPair<FString, const FSemanticLabel*>> Rows;
+		SemanticLabelTable->ForeachRow<FSemanticLabel>(TEXT(""), [&Rows](const FName& Key, const FSemanticLabel& Value)
+		{
+			Rows.Emplace(Key.ToString(), &Value);
+		});
+		Rows.Sort([](const TPair<FString, const FSemanticLabel*>& A, const TPair<FString, const FSemanticLabel*>& B)
+		{
+			return A.Key < B.Key;
+		});
+
+		for (const auto& [RowName, Row] : Rows)
+		{
+			JsonWriter->WriteObjectStart();
+			JsonWriter->WriteValue(TEXT("Name"), RowName);
+			JsonWriter->WriteValue(TEXT("Label"), Row->Label);
+
+			TArray<FString> ActorTypes;
+			for (const TSubclassOf<AActor>& ActorType : Row->ActorTypes)
+			{
+				if (const UClass* ActorClass = ActorType.Get())
+				{
+					ActorTypes.Add(ActorClass->GetPathName());
+				}
+			}
+			WriteSortedStringArray(JsonWriter, TEXT("ActorTypes"), ActorTypes);
+
+			TArray<FString> ActorTags = ToStringArray(Row->ActorTags);
+			WriteSortedStringArray(JsonWriter, TEXT("ActorTags"), ActorTags);
+
+			TArray<FString> StaticMeshTypes;
+			for (const TSoftObjectPtr<UStaticMesh>& StaticMeshType : Row->StaticMeshTypes)
+			{
+				if (!StaticMeshType.IsNull())
+				{
+					StaticMeshTypes.Add(StaticMeshType.ToSoftObjectPath().ToString());
+				}
+			}
+			WriteSortedStringArray(JsonWriter, TEXT("StaticMeshTypes"), StaticMeshTypes);
+
+			TArray<FString> SkeletalMeshTypes;
+			for (const TSoftObjectPtr<USkeletalMesh>& SkeletalMeshType : Row->SkeletalMeshTypes)
+			{
+				if (!SkeletalMeshType.IsNull())
+				{
+					SkeletalMeshTypes.Add(SkeletalMeshType.ToSoftObjectPath().ToString());
+				}
+			}
+			WriteSortedStringArray(JsonWriter, TEXT("SkeletalMeshTypes"), SkeletalMeshTypes);
+
+			TArray<FString> ComponentTags = ToStringArray(Row->ComponentTags);
+			WriteSortedStringArray(JsonWriter, TEXT("ComponentTags"), ComponentTags);
+
+			JsonWriter->WriteObjectEnd();
+		}
+	}
+
+	JsonWriter->WriteArrayEnd();
+	JsonWriter->Close();
+
+	return Json;
 }

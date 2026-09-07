@@ -30,6 +30,7 @@ namespace TempoSensors
 	class LidarScanSegment;
 	class VideoRequest;
 	class VideoFrame;
+	class SetPipelinedRenderingEnabledRequest;
 }
 
 UCLASS()
@@ -63,6 +64,8 @@ public:
 	void StreamLidarScans(const TempoSensors::LidarScanRequest& Request, const TResponseDelegate<TempoSensors::LidarScanSegment>& ResponseContinuation) const;
 
 	void StreamVideo(const TempoSensors::VideoRequest& Request, const TResponseDelegate<TempoSensors::VideoFrame>& ResponseContinuation) const;
+
+	void SetPipelinedRenderingEnabled(const TempoSensors::SetPipelinedRenderingEnabledRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const;
 
 protected:
 	void OnRenderFrameCompleted() const;
