@@ -12,6 +12,7 @@
 
 #include "Engine/TextureRenderTarget2D.h"
 #include "Kismet/GameplayStatics.h"
+#include "TextureResource.h"
 
 #if RHI_RAYTRACING && ENGINE_MAJOR_VERSION == 5 && ((ENGINE_MINOR_VERSION == 5 && STATS) || ENGINE_MINOR_VERSION > 5)
 #if PLATFORM_WINDOWS
@@ -37,6 +38,28 @@
 #include "ScenePrivate.h"
 #undef private
 #endif
+
+void FTextureRead::CopyToStaging_RenderThread(FRHICommandListImmediate& RHICmdList, FTextureRenderTargetResource* Source)
+{
+	TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsStagingCopy);
+	check(IsInRenderingThread());
+
+	FRHITexture* SourceTexture = Source->GetRenderTargetTexture();
+	RHICmdList.Transition(FRHITransitionInfo(SourceTexture, ERHIAccess::Unknown, ERHIAccess::CopySrc));
+	RHICmdList.CopyTexture(SourceTexture, StagingTexture, FRHICopyTextureInfo());
+
+	RenderFence = RHICreateGPUFence(TEXT("TempoSensorsRenderFence"));
+	RHICmdList.WriteGPUFence(RenderFence);
+}
+
+void FTextureRead::EnqueueStagingCopy(TSharedPtr<FTextureRead> Read, FTextureRenderTargetResource* Source)
+{
+	ENQUEUE_RENDER_COMMAND(TempoSensorsStagingCopy)(
+		[Read = MoveTemp(Read), Source](FRHICommandListImmediate& RHICmdList)
+		{
+			Read->CopyToStaging_RenderThread(RHICmdList, Source);
+		});
+}
 
 void FTextureRead::ExtractMeasurementHeader(float TransmissionTime, TempoSensors::MeasurementHeader* MeasurementHeaderOut) const
 {
@@ -314,12 +337,24 @@ void UTempoSceneCaptureComponent2D::UpdateSceneCaptureContents(FSceneInterface* 
 	TSharedPtr<FTextureRead> NewRead(MakeTextureRead());
 	NewRead->StagingTexture = AcquireNextStagingTexture();
 
-	ENQUEUE_RENDER_COMMAND(SetTempoSceneCaptureRenderFence)(
-	[NewRead](FRHICommandList& RHICmdList)
+	// The staging copy is queued at capture time, behind this capture's render. Copying at read
+	// time instead would pick up whatever the render target holds when the read eventually runs,
+	// which with several captures in flight is a later frame than the one this read was created for.
+	FTextureRenderTargetResource* RenderTargetResource = TextureTarget->GameThread_GetRenderTargetResource();
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
+	// Super::UpdateSceneCaptureContents enqueued the render itself, so a plain render command lands
+	// behind it.
+	FTextureRead::EnqueueStagingCopy(NewRead, RenderTargetResource);
+#else
+	// Super::UpdateSceneCaptureContents only added a renderer to the builder; the render is enqueued
+	// when the caller (CaptureScene) executes the builder. A render command enqueued directly here
+	// would run before that render and copy the previous capture's pixels, so go through the
+	// builder, which interleaves this behind the renderer it already holds.
+	SceneRenderBuilder.AddRenderCommand([NewRead, RenderTargetResource](FRHICommandListImmediate& RHICmdList)
 	{
-		NewRead->RenderFence = RHICreateGPUFence(TEXT("TempoCameraRenderFence"));
-		RHICmdList.WriteGPUFence(NewRead->RenderFence);
+		NewRead->CopyToStaging_RenderThread(RHICmdList, RenderTargetResource);
 	});
+#endif
 
 	TextureReadQueue.Enqueue(MoveTemp(NewRead));
 }
@@ -336,17 +371,10 @@ void UTempoSceneCaptureComponent2D::ReadNextIfAvailable()
 		return;
 	}
 
-	const FRenderTarget* RenderTarget = TextureTarget->GetRenderTargetResource();
-	if (!ensureMsgf(RenderTarget, TEXT("RenderTarget was not initialized. Skipping texture read.")))
-	{
-		TextureReadQueue.SkipNext();
-		return;
-	}
-
 	const bool bShouldBlock = GetDefault<UTempoCoreSettings>()->GetTimeMode() == ETimeMode::FixedStep
 		&& !GetDefault<UTempoSensorsSettings>()->GetPipelinedRendering();
 
-	TextureReadQueue.ReadAllAvailable(RenderTarget, bShouldBlock);
+	TextureReadQueue.ReadAllAvailable(bShouldBlock);
 }
 
 void UTempoSceneCaptureComponent2D::BlockUntilNextReadComplete() const

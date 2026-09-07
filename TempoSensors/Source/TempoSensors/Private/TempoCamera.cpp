@@ -19,7 +19,6 @@
 #include "Kismet/GameplayStatics.h"
 #include "Kismet/KismetRenderingLibrary.h"
 #include "Materials/MaterialInstanceDynamic.h"
-#include "Math/Box2D.h"
 #include "Misc/ScopeLock.h"
 #include "TextureResource.h"
 
@@ -59,29 +58,6 @@ namespace
 {
 	constexpr double MaxPerspectiveFOVPerCapture = 120.0;
 }
-
-/**
- * Compute 2D bounding boxes from label data.
- */
-static TMap<int32, FBox2D> ComputeBoundingBoxes(const TArray<uint8>& LabelData, uint32 Width, uint32 Height)
-{
-	TRACE_CPUPROFILER_EVENT_SCOPE(ComputeBoundingBoxes);
-
-	TMap<int32, FBox2D> Boxes;
-	for (uint32 Y = 0; Y < Height; ++Y)
-	{
-		for (uint32 X = 0; X < Width; ++X)
-		{
-			const uint8 InstanceId = LabelData[Y * Width + X];
-			if (InstanceId > 0)
-			{
-				Boxes.FindOrAdd(InstanceId) += FUintPoint(X, Y);
-			}
-		}
-	}
-	return Boxes;
-}
-
 FTempoCameraIntrinsics::FTempoCameraIntrinsics(const FIntPoint& SizeXY, float HorizontalFOV, const FVector2D& PrincipalPoint)
 	: Fx(SizeXY.X / 2.0 / FMath::Tan(FMath::DegreesToRadians(HorizontalFOV) / 2.0)),
 	  Fy(Fx),
@@ -90,26 +66,57 @@ FTempoCameraIntrinsics::FTempoCameraIntrinsics(const FIntPoint& SizeXY, float Ho
 	  Width(SizeXY.X),
 	  Height(SizeXY.Y) {}
 
-template <typename PixelType>
-void ExtractPixelData(const PixelType& Pixel, EColorImageEncoding Encoding, char* Dest)
+// Most row bands the fused decode splits the image into. Each band is decoded by one ParallelFor
+// iteration, so bands must be numerous enough to keep every core busy but few enough that the
+// per-band bounding box tables are cheap to merge. Small images get fewer, see ComputeRowBands.
+static constexpr int32 GDecodeRowBands = 64;
+
+// Smallest band worth its own task. Below this the dispatch costs about as much as the decode.
+static constexpr int64 GDecodeMinPixelsPerBand = 16 * 1024;
+
+namespace
 {
-	switch (Encoding)
+	// Bounding boxes for one band, indexed by instance id. Labels are one byte, so a fixed table
+	// stands in for a map: no allocation or hashing per pixel, and merging bands is a fixed-size
+	// loop. An id is present once it has a MaxX; the sentinels make the min/max updates branch-free
+	// and let absent entries merge as no-ops.
+	struct FBandBoundingBoxes
 	{
-		case EColorImageEncoding::BGR8:
+		int32 MinX[256];
+		int32 MinY[256];
+		int32 MaxX[256];
+		int32 MaxY[256];
+
+		FBandBoundingBoxes()
 		{
-			Dest[0] = Pixel.B();
-			Dest[1] = Pixel.G();
-			Dest[2] = Pixel.R();
-			break;
+			for (int32 Id = 0; Id < 256; ++Id)
+			{
+				MinX[Id] = MinY[Id] = TNumericLimits<int32>::Max();
+				MaxX[Id] = MaxY[Id] = -1;
+			}
 		}
-		case EColorImageEncoding::RGB8:
+
+		bool Contains(int32 Id) const { return MaxX[Id] >= 0; }
+
+		void Add(int32 Id, int32 X, int32 Y)
 		{
-			Dest[0] = Pixel.R();
-			Dest[1] = Pixel.G();
-			Dest[2] = Pixel.B();
-			break;
+			MinX[Id] = FMath::Min(MinX[Id], X);
+			MinY[Id] = FMath::Min(MinY[Id], Y);
+			MaxX[Id] = FMath::Max(MaxX[Id], X);
+			MaxY[Id] = FMath::Max(MaxY[Id], Y);
 		}
-	}
+
+		void Merge(const FBandBoundingBoxes& Other)
+		{
+			for (int32 Id = 0; Id < 256; ++Id)
+			{
+				MinX[Id] = FMath::Min(MinX[Id], Other.MinX[Id]);
+				MinY[Id] = FMath::Min(MinY[Id], Other.MinY[Id]);
+				MaxX[Id] = FMath::Max(MaxX[Id], Other.MaxX[Id]);
+				MaxY[Id] = FMath::Max(MaxY[Id], Other.MaxY[Id]);
+			}
+		}
+	};
 }
 
 TempoSensors::ColorEncoding ColorEncodingToProto(EColorImageEncoding Encoding)
@@ -128,100 +135,202 @@ TempoSensors::ColorEncoding ColorEncodingToProto(EColorImageEncoding Encoding)
 	}
 }
 
+// Decode every requested measurement type in a single pass over the pixel image, then respond.
+//
+// One pass rather than one per type because the passes are memory-bandwidth-bound: the image is
+// read once however many types a client streams. The pass is split into row bands for
+// parallelism, and the bands give the bounding box accumulation its structure too: each band
+// builds its own per-instance box table over a contiguous set of rows, merged afterwards.
+//
+// Callers pass an empty array for any type they cannot serve; those requests are left pending
+// rather than answered, which is how a NoDepth read declines depth requests that arrived while
+// the camera was still reconfiguring.
 template <typename PixelType>
-void RespondToColorRequests(const TTextureRead<PixelType>* TextureRead, const TArray<FColorImageRequest>& Requests, float TransmissionTime)
+void RespondToImageRequests(const TTextureRead<PixelType>* TextureRead,
+	const TArray<FColorImageRequest>& ColorRequests,
+	const TArray<FLabelImageRequest>& LabelRequests,
+	const TArray<FDepthImageRequest>& DepthRequests,
+	const TArray<FBoundingBoxesRequest>& BoundingBoxRequests,
+	float TransmissionTime)
 {
+	const int32 Width = TextureRead->ImageSize.X;
+	const int32 Height = TextureRead->ImageSize.Y;
+	const PixelType* const Pixels = TextureRead->Image.GetData();
+
 	TempoSensors::ColorImage ColorImage;
-	if (!Requests.IsEmpty())
+	TempoSensors::LabelImage LabelImage;
+	TempoSensors::DepthImage DepthImage;
+	TempoSensors::BoundingBoxes BoundingBoxesResponse;
+
+	// Output blobs for each requested type. A null pointer means "not requested", which is what
+	// the decode loop below branches on.
+	char* ColorData = nullptr;
+	char* LabelData = nullptr;
+	float* DepthData = nullptr;
+
+	EColorImageEncoding ColorEncoding = EColorImageEncoding::BGR8;
+
+	if (!ColorRequests.IsEmpty())
 	{
-		TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraDecodeColor);
-		ColorImage.set_width_px(TextureRead->ImageSize.X);
-		ColorImage.set_height_px(TextureRead->ImageSize.Y);
+		ColorImage.set_width_px(Width);
+		ColorImage.set_height_px(Height);
 
-		std::vector<char> ImageData;
-		ImageData.resize(TextureRead->Image.Num() * 3);
+		// Packed 3-bytes-per-pixel blob. Size the proto field once and let the parallel workers
+		// write directly into its contiguous storage.
+		std::string* const ColorOut = ColorImage.mutable_data();
+		ColorOut->resize(static_cast<size_t>(Width) * Height * 3);
+		ColorData = ColorOut->data();
 
-		const UTempoSensorsSettings* TempoSensorsSettings = GetDefault<UTempoSensorsSettings>();
-		if (!TempoSensorsSettings)
+		// Tolerate missing settings by falling back to the default encoding, matching the lidar
+		// decode path, so a client still gets a response.
+		if (const UTempoSensorsSettings* TempoSensorsSettings = GetDefault<UTempoSensorsSettings>())
 		{
-			return;
+			ColorEncoding = TempoSensorsSettings->GetColorImageEncoding();
 		}
-
-		const EColorImageEncoding Encoding = TempoSensorsSettings->GetColorImageEncoding();
-		ParallelFor(TextureRead->Image.Num(), [&ImageData, &TextureRead, Encoding](int32 Idx)
-		{
-			ExtractPixelData(TextureRead->Image[Idx], Encoding, &ImageData[Idx * 3]);
-		});
-
-		ColorImage.mutable_data()->assign(ImageData.begin(), ImageData.end());
-		ColorImage.set_encoding(ColorEncodingToProto(Encoding));
+		ColorImage.set_encoding(ColorEncodingToProto(ColorEncoding));
 		TextureRead->ExtractMeasurementHeader(TransmissionTime, ColorImage.mutable_header());
 	}
 
-	TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraRespondColor);
-	for (auto ColorImageRequestIt = Requests.CreateConstIterator(); ColorImageRequestIt; ++ColorImageRequestIt)
+	if (!LabelRequests.IsEmpty())
 	{
-		ColorImageRequestIt->ResponseContinuation.ExecuteIfBound(ColorImage, grpc::Status_OK);
-	}
-}
+		LabelImage.set_width_px(Width);
+		LabelImage.set_height_px(Height);
 
-template <typename PixelType>
-void RespondToLabelRequests(const TTextureRead<PixelType>* TextureRead, const TArray<FLabelImageRequest>& Requests, float TransmissionTime)
-{
-	TempoSensors::LabelImage LabelImage;
-	if (!Requests.IsEmpty())
-	{
-		TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraDecodeLabel);
-		LabelImage.set_width_px(TextureRead->ImageSize.X);
-		LabelImage.set_height_px(TextureRead->ImageSize.Y);
+		std::string* const LabelOut = LabelImage.mutable_data();
+		LabelOut->resize(static_cast<size_t>(Width) * Height);
+		LabelData = LabelOut->data();
 
-		std::vector<char> ImageData;
-		ImageData.resize(TextureRead->Image.Num());
-
-		ParallelFor(TextureRead->Image.Num(), [&ImageData, &TextureRead](int32 Idx)
-		{
-			ImageData[Idx] = TextureRead->Image[Idx].Label();
-		});
-
-		LabelImage.mutable_data()->assign(ImageData.begin(), ImageData.end());
 		TextureRead->ExtractMeasurementHeader(TransmissionTime, LabelImage.mutable_header());
 	}
 
-	TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraRespondLabel);
-	for (auto LabelImageRequestIt = Requests.CreateConstIterator(); LabelImageRequestIt; ++LabelImageRequestIt)
+	if constexpr (PixelType::bSupportsDepth)
 	{
-		LabelImageRequestIt->ResponseContinuation.ExecuteIfBound(LabelImage, grpc::Status_OK);
+		if (!DepthRequests.IsEmpty())
+		{
+			DepthImage.set_width_px(Width);
+			DepthImage.set_height_px(Height);
+
+			// depths_m is a packed little-endian float32 blob.
+			std::string* const DepthsOut = DepthImage.mutable_depths_m();
+			DepthsOut->resize(static_cast<size_t>(Width) * Height * sizeof(float));
+			DepthData = reinterpret_cast<float*>(DepthsOut->data());
+
+			TextureRead->ExtractMeasurementHeader(TransmissionTime, DepthImage.mutable_header());
+		}
 	}
-}
 
-template <typename PixelType>
-void RespondToBoundingBoxRequests(const TTextureRead<PixelType>* TextureRead, const TArray<FBoundingBoxesRequest>& Requests, float TransmissionTime)
-{
-	TempoSensors::BoundingBoxes Response;
-	if (!Requests.IsEmpty())
+	const bool bNeedBoundingBoxes = !BoundingBoxRequests.IsEmpty();
+	const int32 NumBands = ComputeRowBands(GDecodeRowBands, Height, Width, GDecodeMinPixelsPerBand);
+	TArray<FBandBoundingBoxes> BandBoxes;
+	if (bNeedBoundingBoxes)
 	{
-		TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraDecodeBoundingBoxes);
+		BandBoxes.SetNum(NumBands);
+	}
 
-		Response.set_width_px(TextureRead->ImageSize.X);
-		Response.set_height_px(TextureRead->ImageSize.Y);
-		TextureRead->ExtractMeasurementHeader(TransmissionTime, Response.mutable_header());
+	if (ColorData || LabelData || DepthData || bNeedBoundingBoxes)
+	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraDecodeImage);
 
-		TArray<uint8> LabelData;
-		LabelData.SetNumUninitialized(TextureRead->Image.Num());
-		ParallelFor(TextureRead->Image.Num(), [&LabelData, &TextureRead](int32 Idx)
+		ParallelFor(NumBands, [=, &BandBoxes](int32 Band)
 		{
-			LabelData[Idx] = TextureRead->Image[Idx].Label();
+			const int32 BeginY = static_cast<int32>(static_cast<int64>(Height) * Band / NumBands);
+			const int32 EndY = static_cast<int32>(static_cast<int64>(Height) * (Band + 1) / NumBands);
+
+			FBandBoundingBoxes* const Boxes = bNeedBoundingBoxes ? &BandBoxes[Band] : nullptr;
+
+			for (int32 Y = BeginY; Y < EndY; ++Y)
+			{
+				const PixelType* const SrcRow = Pixels + static_cast<int64>(Y) * Width;
+
+				// The encoding branch is hoisted out of the per-pixel body so each inner loop is a
+				// straight-line swizzle the compiler can vectorize.
+				if (ColorData)
+				{
+					char* const DstRow = ColorData + static_cast<int64>(Y) * Width * 3;
+					if (ColorEncoding == EColorImageEncoding::BGR8)
+					{
+						for (int32 X = 0; X < Width; ++X)
+						{
+							DstRow[X * 3 + 0] = SrcRow[X].B();
+							DstRow[X * 3 + 1] = SrcRow[X].G();
+							DstRow[X * 3 + 2] = SrcRow[X].R();
+						}
+					}
+					else
+					{
+						for (int32 X = 0; X < Width; ++X)
+						{
+							DstRow[X * 3 + 0] = SrcRow[X].R();
+							DstRow[X * 3 + 1] = SrcRow[X].G();
+							DstRow[X * 3 + 2] = SrcRow[X].B();
+						}
+					}
+				}
+
+				if (LabelData)
+				{
+					char* const DstRow = LabelData + static_cast<int64>(Y) * Width;
+					for (int32 X = 0; X < Width; ++X)
+					{
+						DstRow[X] = static_cast<char>(SrcRow[X].Label());
+					}
+				}
+
+				if constexpr (PixelType::bSupportsDepth)
+				{
+					if (DepthData)
+					{
+						float* const DstRow = DepthData + static_cast<int64>(Y) * Width;
+						for (int32 X = 0; X < Width; ++X)
+						{
+							// FCameraPixelWithDepth::Depth returns centimeters; convert to meters
+							// for the wire.
+							DstRow[X] = QuantityConverter<CM2M>::Convert(
+								SrcRow[X].Depth(TextureRead->MinDepth, TextureRead->MaxDepth, GTempoCamera_Max_Discrete_Depth));
+						}
+					}
+				}
+
+				if (Boxes)
+				{
+					for (int32 X = 0; X < Width; ++X)
+					{
+						const uint8 InstanceId = SrcRow[X].Label();
+						if (InstanceId > 0)
+						{
+							Boxes->Add(InstanceId, X, Y);
+						}
+					}
+				}
+			}
 		});
+	}
 
-		TMap<int32, FBox2D> BoundingBoxes = ComputeBoundingBoxes(LabelData, TextureRead->ImageSize.X, TextureRead->ImageSize.Y);
+	if (bNeedBoundingBoxes)
+	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraMergeBoundingBoxes);
 
-		for (const auto& [InstanceId, Box] : BoundingBoxes)
+		BoundingBoxesResponse.set_width_px(Width);
+		BoundingBoxesResponse.set_height_px(Height);
+		TextureRead->ExtractMeasurementHeader(TransmissionTime, BoundingBoxesResponse.mutable_header());
+
+		FBandBoundingBoxes BoundingBoxes;
+		for (const FBandBoundingBoxes& Band : BandBoxes)
 		{
-			TempoSensors::BoundingBox2D* BBoxProto = Response.add_bounding_boxes();
-			BBoxProto->set_min_x_px(FMath::RoundToInt32(Box.Min.X));
-			BBoxProto->set_min_y_px(FMath::RoundToInt32(Box.Min.Y));
-			BBoxProto->set_max_x_px(FMath::RoundToInt32(Box.Max.X));
-			BBoxProto->set_max_y_px(FMath::RoundToInt32(Box.Max.Y));
+			BoundingBoxes.Merge(Band);
+		}
+
+		for (int32 InstanceId = 1; InstanceId < 256; ++InstanceId)
+		{
+			if (!BoundingBoxes.Contains(InstanceId))
+			{
+				continue;
+			}
+			TempoSensors::BoundingBox2D* BBoxProto = BoundingBoxesResponse.add_bounding_boxes();
+			BBoxProto->set_min_x_px(BoundingBoxes.MinX[InstanceId]);
+			BBoxProto->set_min_y_px(BoundingBoxes.MinY[InstanceId]);
+			BBoxProto->set_max_x_px(BoundingBoxes.MaxX[InstanceId]);
+			BBoxProto->set_max_y_px(BoundingBoxes.MaxY[InstanceId]);
 			BBoxProto->set_instance_id(InstanceId);
 
 			const uint8* SemanticId = TextureRead->InstanceToSemanticMap.Find(InstanceId);
@@ -233,71 +342,44 @@ void RespondToBoundingBoxRequests(const TTextureRead<PixelType>* TextureRead, co
 		}
 	}
 
-	TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraRespondBoundingBoxes);
-	for (auto RequestIt = Requests.CreateConstIterator(); RequestIt; ++RequestIt)
 	{
-		RequestIt->ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
-	}
-}
-
-void TTextureRead<FCameraPixelNoDepth>::RespondToRequests(const TArray<FColorImageRequest>& Requests, float TransmissionTime) const
-{
-	RespondToColorRequests(this, Requests, TransmissionTime);
-}
-
-void TTextureRead<FCameraPixelNoDepth>::RespondToRequests(const TArray<FLabelImageRequest>& Requests, float TransmissionTime) const
-{
-	RespondToLabelRequests(this, Requests, TransmissionTime);
-}
-
-void TTextureRead<FCameraPixelNoDepth>::RespondToRequests(const TArray<FBoundingBoxesRequest>& Requests, float TransmissionTime) const
-{
-	RespondToBoundingBoxRequests(this, Requests, TransmissionTime);
-}
-
-void TTextureRead<FCameraPixelWithDepth>::RespondToRequests(const TArray<FColorImageRequest>& Requests, float TransmissionTime) const
-{
-	RespondToColorRequests(this, Requests, TransmissionTime);
-}
-
-void TTextureRead<FCameraPixelWithDepth>::RespondToRequests(const TArray<FLabelImageRequest>& Requests, float TransmissionTime) const
-{
-	RespondToLabelRequests(this, Requests, TransmissionTime);
-}
-
-void TTextureRead<FCameraPixelWithDepth>::RespondToRequests(const TArray<FDepthImageRequest>& Requests, float TransmissionTime) const
-{
-	TempoSensors::DepthImage DepthImage;
-	if (!Requests.IsEmpty())
-	{
-		TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraDecodeDepth);
-		DepthImage.set_width_px(ImageSize.X);
-		DepthImage.set_height_px(ImageSize.Y);
-		// depths_m is a packed little-endian float32 blob. Size the byte buffer once and let the parallel
-		// workers write directly into its contiguous storage, mirroring the reflectivities/colors path.
-		std::string* const DepthsOut = DepthImage.mutable_depths_m();
-		DepthsOut->resize(static_cast<size_t>(ImageSize.X) * ImageSize.Y * sizeof(float));
-		float* const DepthsData = reinterpret_cast<float*>(DepthsOut->data());
-
-		ParallelFor(Image.Num(), [DepthsData, this](int32 Idx)
+		TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraRespond);
+		for (const FColorImageRequest& Request : ColorRequests)
 		{
-			// FCameraPixelWithDepth::Depth returns centimeters; convert to meters for the wire.
-			DepthsData[Idx] = QuantityConverter<CM2M>::Convert(Image[Idx].Depth(MinDepth, MaxDepth, GTempoCamera_Max_Discrete_Depth));
-		});
-
-		ExtractMeasurementHeader(TransmissionTime, DepthImage.mutable_header());
-	}
-
-	TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraRespondDepth);
-	for (auto DepthImageRequestIt = Requests.CreateConstIterator(); DepthImageRequestIt; ++DepthImageRequestIt)
-	{
-		DepthImageRequestIt->ResponseContinuation.ExecuteIfBound(DepthImage, grpc::Status_OK);
+			Request.ResponseContinuation.ExecuteIfBound(ColorImage, grpc::Status_OK);
+		}
+		for (const FLabelImageRequest& Request : LabelRequests)
+		{
+			Request.ResponseContinuation.ExecuteIfBound(LabelImage, grpc::Status_OK);
+		}
+		for (const FDepthImageRequest& Request : DepthRequests)
+		{
+			Request.ResponseContinuation.ExecuteIfBound(DepthImage, grpc::Status_OK);
+		}
+		for (const FBoundingBoxesRequest& Request : BoundingBoxRequests)
+		{
+			Request.ResponseContinuation.ExecuteIfBound(BoundingBoxesResponse, grpc::Status_OK);
+		}
 	}
 }
 
-void TTextureRead<FCameraPixelWithDepth>::RespondToRequests(const TArray<FBoundingBoxesRequest>& Requests, float TransmissionTime) const
+void TTextureRead<FCameraPixelNoDepth>::RespondToRequests(const TArray<FColorImageRequest>& ColorRequests,
+	const TArray<FLabelImageRequest>& LabelRequests,
+	const TArray<FBoundingBoxesRequest>& BoundingBoxRequests,
+	float TransmissionTime) const
 {
-	RespondToBoundingBoxRequests(this, Requests, TransmissionTime);
+	// A NoDepth read cannot serve depth requests; pass none so they stay pending for the first
+	// WithDepth read after the camera finishes reconfiguring.
+	RespondToImageRequests(this, ColorRequests, LabelRequests, TArray<FDepthImageRequest>(), BoundingBoxRequests, TransmissionTime);
+}
+
+void TTextureRead<FCameraPixelWithDepth>::RespondToRequests(const TArray<FColorImageRequest>& ColorRequests,
+	const TArray<FLabelImageRequest>& LabelRequests,
+	const TArray<FDepthImageRequest>& DepthRequests,
+	const TArray<FBoundingBoxesRequest>& BoundingBoxRequests,
+	float TransmissionTime) const
+{
+	RespondToImageRequests(this, ColorRequests, LabelRequests, DepthRequests, BoundingBoxRequests, TransmissionTime);
 }
 
 // ------------------------------------------------------------------------------------
@@ -634,16 +716,13 @@ TFuture<void> UTempoCamera::DecodeAndRespond(TSharedPtr<FTextureRead> TextureRea
 
 		if (TextureRead->GetType() == TEXT("WithDepth"))
 		{
-			static_cast<TTextureRead<FCameraPixelWithDepth>*>(TextureRead.Get())->RespondToRequests(ColorImageRequests, TransmissionTimeCpy);
-			static_cast<TTextureRead<FCameraPixelWithDepth>*>(TextureRead.Get())->RespondToRequests(LabelImageRequests, TransmissionTimeCpy);
-			static_cast<TTextureRead<FCameraPixelWithDepth>*>(TextureRead.Get())->RespondToRequests(DepthImageRequests, TransmissionTimeCpy);
-			static_cast<TTextureRead<FCameraPixelWithDepth>*>(TextureRead.Get())->RespondToRequests(BoundingBoxRequests, TransmissionTimeCpy);
+			static_cast<TTextureRead<FCameraPixelWithDepth>*>(TextureRead.Get())->RespondToRequests(
+				ColorImageRequests, LabelImageRequests, DepthImageRequests, BoundingBoxRequests, TransmissionTimeCpy);
 		}
 		else if (TextureRead->GetType() == TEXT("NoDepth"))
 		{
-			static_cast<TTextureRead<FCameraPixelNoDepth>*>(TextureRead.Get())->RespondToRequests(ColorImageRequests, TransmissionTimeCpy);
-			static_cast<TTextureRead<FCameraPixelNoDepth>*>(TextureRead.Get())->RespondToRequests(LabelImageRequests, TransmissionTimeCpy);
-			static_cast<TTextureRead<FCameraPixelNoDepth>*>(TextureRead.Get())->RespondToRequests(BoundingBoxRequests, TransmissionTimeCpy);
+			static_cast<TTextureRead<FCameraPixelNoDepth>*>(TextureRead.Get())->RespondToRequests(
+				ColorImageRequests, LabelImageRequests, BoundingBoxRequests, TransmissionTimeCpy);
 		}
 	});
 
@@ -1274,8 +1353,6 @@ void UTempoCamera::RenderCapture()
 
 	SequenceId++;
 
-	const FTextureRHIRef StagingTex = NewRead->StagingTexture;
-
 	if (!bSingleTileFastPath)
 	{
 		// Single full-screen aux unpack pass: samples SharedTextureTarget.a across the whole atlas
@@ -1378,21 +1455,8 @@ void UTempoCamera::RenderCapture()
 		}
 	}
 
-	// Staging copy + fence: runs after the Canvas stitch via render-thread FIFO. The lambda holds
-	// a TSharedPtr to NewRead so a concurrent TextureReadQueue.Empty() on the game thread (e.g.,
-	// triggered by SetDepthEnabled in SendMeasurements) can't free the read out from under us
-	// before this command runs.
-	ENQUEUE_RENDER_COMMAND(TempoCameraStagingCopy)(
-		[SharedRTResource, StagingTex, NewRead](FRHICommandListImmediate& RHICmdList)
-		{
-			FRHITexture* SharedRT = SharedRTResource->GetRenderTargetTexture();
-
-			RHICmdList.Transition(FRHITransitionInfo(SharedRT, ERHIAccess::Unknown, ERHIAccess::CopySrc));
-			RHICmdList.CopyTexture(SharedRT, StagingTex, FRHICopyTextureInfo());
-
-			NewRead->RenderFence = RHICreateGPUFence(TEXT("TempoCameraRenderFence"));
-			RHICmdList.WriteGPUFence(NewRead->RenderFence);
-		});
+	// Staging copy + fence: lands behind the Canvas stitch in the render-thread FIFO.
+	FTextureRead::EnqueueStagingCopy(NewRead, SharedRTResource);
 
 	// Publish the captured frame's id to the render thread for the video encoder. Queued behind the
 	// RT draws above, so by the time it runs SharedFinalTextureTarget holds this capture and

@@ -115,10 +115,12 @@ struct TTextureRead<FCameraPixelWithDepth> : TTextureReadBase<FCameraPixelWithDe
 
 	virtual FName GetType() const override { return TEXT("WithDepth"); }
 
-	void RespondToRequests(const TArray<FColorImageRequest>& Requests, float TransmissionTime) const;
-	void RespondToRequests(const TArray<FLabelImageRequest>& Requests, float TransmissionTime) const;
-	void RespondToRequests(const TArray<FDepthImageRequest>& Requests, float TransmissionTime) const;
-	void RespondToRequests(const TArray<FBoundingBoxesRequest>& Requests, float TransmissionTime) const;
+	// Decodes every requested measurement type in one pass over the image, then responds.
+	void RespondToRequests(const TArray<FColorImageRequest>& ColorRequests,
+		const TArray<FLabelImageRequest>& LabelRequests,
+		const TArray<FDepthImageRequest>& DepthRequests,
+		const TArray<FBoundingBoxesRequest>& BoundingBoxRequests,
+		float TransmissionTime) const;
 
 	float MinDepth;
 	float MaxDepth;
@@ -137,9 +139,13 @@ struct TTextureRead<FCameraPixelNoDepth> : TTextureReadBase<FCameraPixelNoDepth>
 
 	virtual FName GetType() const override { return TEXT("NoDepth"); }
 
-	void RespondToRequests(const TArray<FColorImageRequest>& Requests, float TransmissionTime) const;
-	void RespondToRequests(const TArray<FLabelImageRequest>& Requests, float TransmissionTime) const;
-	void RespondToRequests(const TArray<FBoundingBoxesRequest>& Requests, float TransmissionTime) const;
+	// Decodes every requested measurement type in one pass over the image, then responds. Takes no
+	// depth requests: this read has no depth channel, so those stay pending for the first WithDepth
+	// read after the camera finishes reconfiguring.
+	void RespondToRequests(const TArray<FColorImageRequest>& ColorRequests,
+		const TArray<FLabelImageRequest>& LabelRequests,
+		const TArray<FBoundingBoxesRequest>& BoundingBoxRequests,
+		float TransmissionTime) const;
 
 	TMap<uint8, uint8> InstanceToSemanticMap;
 };

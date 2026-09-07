@@ -81,6 +81,8 @@ void UTempoSensorServiceSubsystem::Deinitialize()
 
 void UTempoSensorServiceSubsystem::OnRenderFrameCompleted() const
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsOnRenderFrameCompleted);
+
 	ForEachActiveSensor([](ITempoSensorInterface* Sensor)
 	{
 		Sensor->OnRenderCompleted();
