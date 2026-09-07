@@ -32,7 +32,7 @@ namespace
 	void BuildMassControlledTemplate(
 		FMassEntityTemplateBuildContext& BuildContext,
 		const UWorld& World,
-		const FMassTrafficVehiclePhysicsParameters& PhysicsParams,
+		const TSubclassOf<AWheeledVehiclePawn>& PhysicsVehicleTemplateActor,
 		const UObject* TraitOuter)
 	{
 		FMassEntityManager& EntityManager = UE::Mass::Utils::GetEntityManagerChecked(World);
@@ -50,10 +50,10 @@ namespace
 		UMassTrafficSubsystem* MassTrafficSubsystem = UWorld::GetSubsystem<UMassTrafficSubsystem>(&World);
 		check(MassTrafficSubsystem);
 
-		if (PhysicsParams.PhysicsVehicleTemplateActor)
+		if (PhysicsVehicleTemplateActor)
 		{
 			// Extract physics setup from PhysicsVehicleTemplateActor into shared fragment
-			const FMassTrafficSimpleVehiclePhysicsTemplate* Template = MassTrafficSubsystem->GetOrExtractVehiclePhysicsTemplate(PhysicsParams.PhysicsVehicleTemplateActor);
+			const FMassTrafficSimpleVehiclePhysicsTemplate* Template = MassTrafficSubsystem->GetOrExtractVehiclePhysicsTemplate(PhysicsVehicleTemplateActor);
 
 			// Register & add shared fragment
 			if (LIKELY(!BuildContext.IsInspectingData()))
@@ -129,7 +129,11 @@ void UMassTrafficVehicleSimulationTrait::BuildTemplate(FMassEntityTemplateBuildC
 
 	if (bMassControlled)
 	{
-		BuildMassControlledTemplate(BuildContext, World, PhysicsParams, GetOuter());
+		const TSubclassOf<AWheeledVehiclePawn> ResolvedPhysicsVehicleTemplateActor = PhysicsParams.PhysicsVehicleTemplateActor
+			? PhysicsParams.PhysicsVehicleTemplateActor
+			: Params.PhysicsVehicleTemplateActor;
+
+		BuildMassControlledTemplate(BuildContext, World, ResolvedPhysicsVehicleTemplateActor, GetOuter());
 	}
 }
 
@@ -140,5 +144,5 @@ UMassTrafficVehicleSimulationMassControlTrait::UMassTrafficVehicleSimulationMass
 
 void UMassTrafficVehicleSimulationMassControlTrait::BuildTemplate(FMassEntityTemplateBuildContext& BuildContext, const UWorld& World) const
 {
-	BuildMassControlledTemplate(BuildContext, World, PhysicsParams, GetOuter());
+	BuildMassControlledTemplate(BuildContext, World, PhysicsParams.PhysicsVehicleTemplateActor, GetOuter());
 }

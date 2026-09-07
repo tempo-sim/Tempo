@@ -155,13 +155,13 @@ to the original:
 | **Spawner entity configs** | The split expects two intersection entity configs on the spawner — light at index 0, sign at index 1. Epic's spawner predates the split and carries one. With only one, every intersection is built as a light intersection using Epic's original period rules, so unmodified CitySample content still runs. |
 | **Version** | `"Version": 2` against CitySample's `1`. This is how `FPluginManager` and UnrealBuildTool break a same-name tie, and it makes Tempo's copy the preferred one wherever that comparison is actually reached. |
 
-!!! note "`PhysicsVehicleTemplateActor` does not carry over"
+!!! note "Where `PhysicsVehicleTemplateActor` lives"
 
     Epic stores it inside the simulation trait's `Params`; the fork keeps it in a separate
-    `PhysicsParams`. A CitySample vehicle config therefore comes across without it and logs *"No
-    PhysicsVehicleTemplateActor set..."*. The vehicles still spawn, drive and render — they are held
-    at low simulation LOD, which is where most traffic runs anyway. Set `PhysicsParams` on the trait
-    to restore high-LOD physics.
+    `PhysicsParams`. Since Unreal drops a serialized property that no longer exists on its struct, a
+    CitySample config would otherwise lose the value on load and fall back to low simulation LOD.
+    `FMassTrafficVehicleSimulationParameters` therefore retains the field as a serialize-only member,
+    and the trait prefers `PhysicsParams` when set. Nothing to change in an imported config.
 
 !!! tip "Enabling stop and yield signs in a CitySample project"
 
