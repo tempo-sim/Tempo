@@ -58,7 +58,6 @@ FString UPerPointIterator::GetDefaultSlotName(SIZE_T SlotIndex) const
 	{
 	case PER_POINT:
 		return FString(TEXT("Per Point"));
-		break;
 	default:
 		return FString(TEXT("Unknown"));
 	}

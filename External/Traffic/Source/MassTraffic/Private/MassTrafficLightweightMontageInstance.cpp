@@ -224,7 +224,6 @@ bool UE::VertexAnimation::FLightweightMontageInstance::Advance_Internal(float De
 			{
 				// Reached end of last section. Exit.
 				return false;
-				break;
 			}
 		}
 	}

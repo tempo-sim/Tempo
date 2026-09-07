@@ -33,10 +33,8 @@ FString UVertexExpressionRule::GetDefaultSlotName(SIZE_T SlotIndex) const
 	{
 	case MATCHES_EXPRESSION:
 		return FString(TEXT("Matches Filter"));
-		break;
 	case DOESNT_MATCH_EXPRESSION:
 		return FString(TEXT("Unmatched"));
-		break;
 	default:
 		return FString(TEXT("Unknown"));
 	}

@@ -47,10 +47,8 @@ FString UBoundingBoxFilterRule::GetDefaultSlotName(SIZE_T SlotIndex) const
 	{
 	case INSIDE_SLOT:
 		return FString(TEXT("Inside Box"));
-		break;
 	case OUTSIDE_SLOT:
 		return FString(TEXT("Outside Box"));
-		break;
 	default:
 		return FString(TEXT("Unknown"));
 	}

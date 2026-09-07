@@ -1351,7 +1351,7 @@ void UTempoCamera::RenderCapture()
 		ProjectionMatrix.M[3][3] = 0.0f;
 #if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8
 		// ERHIZBuffer was removed in 5.8; an inverted (reversed) Z buffer is now always assumed.
-		if (true)
+		if (/* DISABLES CODE */ (true))
 #else
 		if ((int32)ERHIZBuffer::IsInverted)
 #endif

@@ -160,7 +160,6 @@ bool FExportFBXRuleInstance::PostExecute()
 			break;
 		default:
 			return true;
-			break;
 		}
 	}
 

@@ -13,6 +13,10 @@
 #include "Engine/TextureRenderTarget2D.h"
 #include "Kismet/GameplayStatics.h"
 #include "TextureResource.h"
+// ISceneRenderBuilder is only forward-declared by RendererInterface.h. ScenePrivate.h below defines
+// it transitively, but that include is gated on RHI_RAYTRACING, so on platforms without ray tracing
+// (e.g. Mac) the type would be incomplete at the AddRenderCommand call in UpdateSceneCaptureContents.
+#include "SceneRenderBuilderInterface.h"
 
 #if RHI_RAYTRACING
 #if PLATFORM_WINDOWS

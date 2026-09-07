@@ -66,7 +66,6 @@ FString UFilterOnTileIterator::GetDefaultSlotName(SIZE_T SlotIndex) const
 	{
 	case INSIDE_TILE:
 		return FString(TEXT("Inside Tile"));
-		break;
 	default:
 		return FString(TEXT("Unknown"));
 	}
