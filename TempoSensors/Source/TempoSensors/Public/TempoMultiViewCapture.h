@@ -23,8 +23,9 @@ namespace TempoMultiViewCapture
 {
 	struct FViewSetup
 	{
-		// Per-view scene view state (TAA / auto-exposure history). Must be valid per view so that
-		// tiles don't share history.
+		// Per-view scene view state (TAA history). Must be valid per view so that tiles don't share
+		// history. Exposure state is deliberately shared: every view is pointed at the first view's
+		// state for eye adaptation.
 		FSceneViewStateInterface* ViewState = nullptr;
 
 		// Per-view post-process settings (holds the distortion PPM blendable + AE bias).
