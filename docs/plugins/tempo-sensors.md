@@ -242,7 +242,8 @@ across many scenes rather than hand-editing a `DataTable`. Reading what's in eff
 | `get_semantic_classes` | List the semantic classes in the label table, and what each one matches. |
 | `get_all_actor_labels` | Every actor's current label. |
 | `get_labeled_actor_types` | The actor classes the table assigns labels to. |
-| `get_all_static_mesh_types` | The static meshes the table knows about. |
+| `get_all_static_mesh_types` | Every static mesh rendered in the world, with instance counts and current label. |
+| `get_all_skeletal_mesh_types` | The same for skeletal meshes. |
 | `get_instance_to_semantic_id_map` | Map instance IDs back to semantic IDs, for decoding instance label images. |
 | `get_label_table_as_json` | The whole table, in exactly the format `load_label_table` reads. |
 
@@ -253,15 +254,20 @@ Per-entry overrides, each taking `-1` to revert to whatever the table says:
 | `set_actor_type_semantic_id` | Assign a semantic ID to an actor class. |
 | `set_actor_tag_semantic_id` | Assign a semantic ID to an Actor tag — beats the actor's class. |
 | `set_static_mesh_type_semantic_id` | Assign a semantic ID to a static mesh — beats both of the above. |
+| `set_skeletal_mesh_type_semantic_id` | The same for a skeletal mesh. |
 
 These sit in a layer *above* the table and survive a `load_label_table`, so clear one with `-1` if
 you want a newly loaded table to decide.
+
+The two mesh RPCs are each strict about their asset type: a skeletal mesh path handed to
+`set_static_mesh_type_semantic_id` is rejected rather than silently accepted, so an override always
+shows up in the `get_all_*_mesh_types` call that can read it back.
 
 Whole-table and mode changes, each of which re-labels the world in place:
 
 | RPC | What it does |
 |---|---|
-| `load_label_table` | Replace the entire table from a JSON string (`json`) or a file (`json_file`) — Unreal's DataTable JSON format, an array of rows keyed by `"Name"`. Supersedes the configured `SemanticLabelTable` for the life of the process. A table that fails to import is rejected whole, leaving the active one in place. |
+| `load_label_table` | Replace the entire table from a JSON string (`json`) or a file (`json_file`) — Unreal's DataTable JSON format, an array of rows keyed by `"Name"`. Supersedes the configured `SemanticLabelTable` until the world is torn down. Send it with neither field set to go back to the configured table. A table that fails to import *or* to validate is rejected whole, leaving the active one in place. |
 | `set_label_type` | Switch between `LT_SEMANTIC` and `LT_INSTANCE`. |
 | `set_instance_label_uniqueness` | Set the two instance-ID reuse flags. Governs future allocations only — already-labeled objects keep their IDs. |
 | `set_label_row_overrides` | Set the `OverridableLabelRowName` / `OverridingLabelRowName` pair driving the subsurface-color per-pixel override, or clear both to disable it. Live sensors pick it up without a capture restart. |
@@ -272,9 +278,14 @@ Whole-table and mode changes, each of which re-labels the world in place:
     two fetches of the same table are byte-identical and a diff shows only what you changed. Round
     trip it: fetch, edit, `load_label_table`.
 
-    One sharp edge: an asset path the importer cannot resolve is accepted without complaint — an
-    unknown class lands in the row as a null, an unknown mesh as a soft pointer that never loads.
-    Check the result with `get_semantic_classes` if a label doesn't appear where you expect.
+    `load_label_table` checks the table before installing it and rejects the whole request with the
+    list of problems, so a typo'd asset path, a label ID outside 0–253, a missing or non-zero
+    `NoLabel` row, or an actor type / mesh / tag two rows both claim comes back as an error rather
+    than as quietly wrong images.
+
+    Note that `set_label_row_overrides` names its rows by name, and those names are held separately
+    from the table. Loading a table without those rows disables the per-pixel override and logs a
+    warning — re-send `set_label_row_overrides` after a load that renames them.
 
 ## Timing: pipelined or synchronous
 

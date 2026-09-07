@@ -24,6 +24,9 @@ public:
 	virtual void BeginPlay() override;
 	virtual void Activate(bool bReset = false) override;
 	virtual void Deactivate() override;
+	// Bind the label-override listener. Registration, not BeginPlay, is the right pair for the
+	// unbind in OnUnregister — a re-register cycle runs both without touching BeginPlay/EndPlay.
+	virtual void OnRegister() override;
 	// Release per-tile render resources (view states + PPMs) when the component unregisters from the
 	// scene. USceneCaptureComponent::OnUnregister only destroys the inherited ViewStates array; our
 	// per-tile FSceneViewStateReferences aren't in it, so without this they (and the render-thread

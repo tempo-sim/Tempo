@@ -8,6 +8,11 @@
 
 #include "TempoLabelTypes.generated.h"
 
+// The row naming the label ID worn by everything the table does not otherwise match. Objects that
+// resolve to no row are labeled 0, so this row's Label must be 0 for the table to describe what
+// the label image actually contains; ValidateSemanticLabelTable enforces both.
+inline constexpr const TCHAR* GNoLabelRowName = TEXT("NoLabel");
+
 USTRUCT(BlueprintInternalUseOnly)
 struct FSemanticLabel: public FTableRowBase
 {

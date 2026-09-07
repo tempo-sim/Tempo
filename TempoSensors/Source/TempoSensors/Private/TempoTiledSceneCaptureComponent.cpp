@@ -83,9 +83,6 @@ void UTempoTiledSceneCaptureComponent::BeginPlay()
 	SyncTiles();
 	UpdateInternalMirrors();
 
-	GetMutableDefault<UTempoSensorsSettings>()->TempoSensorsLabelOverridesChangedEvent.AddUObject(
-		this, &UTempoTiledSceneCaptureComponent::ApplyLabelOverridesToTiles);
-
 	if (UTempoCoreUtils::IsGameWorld(this))
 	{
 		// Activate() runs when added to a live world, but may be skipped in some registration
@@ -117,6 +114,21 @@ void UTempoTiledSceneCaptureComponent::Deactivate()
 			World->GetTimerManager().ClearTimer(TimerHandle);
 		}
 		TextureReadQueue.Empty();
+	}
+}
+
+void UTempoTiledSceneCaptureComponent::OnRegister()
+{
+	Super::OnRegister();
+
+	// Paired with the unbind in OnUnregister. Binding in BeginPlay instead would leave the sensor
+	// deaf to later override changes: FComponentReregisterContext (any Details-panel edit during
+	// PIE) and ReregisterComponent() run OnUnregister/OnRegister without EndPlay/BeginPlay, so the
+	// unbind would happen with nothing to re-bind it.
+	if (!IsTemplate())
+	{
+		GetMutableDefault<UTempoSensorsSettings>()->TempoSensorsLabelOverridesChangedEvent.AddUObject(
+			this, &UTempoTiledSceneCaptureComponent::ApplyLabelOverridesToTiles);
 	}
 }
 

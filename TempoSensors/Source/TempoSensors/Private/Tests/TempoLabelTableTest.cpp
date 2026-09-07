@@ -11,8 +11,9 @@
 // Covers importing a semantic label table from JSON, the path LabelService's LoadLabelTable RPC
 // takes. FSemanticLabel's columns are TSets — of classes, of soft mesh pointers, of names — so
 // this pins down that the runtime DataTable JSON importer handles them, and that a malformed
-// table is reported rather than silently accepted. Run via Scripts/Test.sh, or from the editor
-// console with
+// table is reported rather than silently accepted. The importer only reports what it could not
+// parse, so the validation cases cover the second half of that: tables that parse but would
+// mislabel the world. Run via Scripts/Test.sh, or from the editor console with
 //   Automation RunTests Tempo.Sensors.LabelTable
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -107,6 +108,79 @@ bool FTempoLabelTableImportProblemsTest::RunTest(const FString& Parameters)
 
 	ImportLabelTable(TEXT(R"([ { "Name": "Tree", "Label": 3, "NotAColumn": 1 } ])"), Problems);
 	TestFalse(TEXT("An unrecognized column is a problem"), Problems.IsEmpty());
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTempoLabelTableValidationTest,
+	"Tempo.Sensors.LabelTable.Validation", TempoLabelTableTestFlags)
+bool FTempoLabelTableValidationTest::RunTest(const FString& Parameters)
+{
+	// Everything here parses cleanly — the importer reports none of it — so these are exactly the
+	// tables that used to be accepted and then quietly mislabel the world.
+	auto ValidateJson = [this](const TCHAR* What, const FString& Json)
+	{
+		TArray<FString> ImportProblems;
+		const UDataTable* Table = ImportLabelTable(Json, ImportProblems);
+		TestTrue(FString::Printf(TEXT("%s: imports cleanly (got: %s)"), What, *FString::Join(ImportProblems, TEXT(" "))),
+			ImportProblems.IsEmpty());
+		return ValidateSemanticLabelTable(Table);
+	};
+
+	TestTrue(TEXT("Null table is a problem"), ValidateSemanticLabelTable(nullptr).Num() > 0);
+
+	TestEqual(TEXT("A good table has no problems"),
+		ValidateJson(TEXT("Good table"), TEXT(R"([
+			{ "Name": "NoLabel", "Label": 0 },
+			{ "Name": "Vehicle", "Label": 14, "ActorTypes": [ "/Script/Engine.StaticMeshActor" ], "ActorTags": [ "Parked" ] }
+		])")).Num(), 0);
+
+	TestTrue(TEXT("A label ID above the encodable range is a problem"),
+		ValidateJson(TEXT("Label 255"), TEXT(R"([
+			{ "Name": "NoLabel", "Label": 0 },
+			{ "Name": "Vehicle", "Label": 255 }
+		])")).Num() > 0);
+
+	TestTrue(TEXT("A missing NoLabel row is a problem"),
+		ValidateJson(TEXT("No NoLabel row"), TEXT(R"([
+			{ "Name": "Vehicle", "Label": 14 }
+		])")).Num() > 0);
+
+	// Unmatched objects are labeled 0 whatever this row says, so a non-zero NoLabel names a class
+	// nothing is ever drawn with.
+	TestTrue(TEXT("A non-zero NoLabel row is a problem"),
+		ValidateJson(TEXT("NoLabel 200"), TEXT(R"([
+			{ "Name": "NoLabel", "Label": 200 },
+			{ "Name": "Vehicle", "Label": 14 }
+		])")).Num() > 0);
+
+	TestTrue(TEXT("An unresolvable actor type is a problem"),
+		ValidateJson(TEXT("Bad class path"), TEXT(R"([
+			{ "Name": "NoLabel", "Label": 0 },
+			{ "Name": "Vehicle", "Label": 14, "ActorTypes": [ "/Script/Engine.NoSuchActorClass" ] }
+		])")).Num() > 0);
+
+	TestTrue(TEXT("An unresolvable mesh path is a problem"),
+		ValidateJson(TEXT("Bad mesh path"), TEXT(R"([
+			{ "Name": "NoLabel", "Label": 0 },
+			{ "Name": "Vehicle", "Label": 14, "StaticMeshTypes": [ "/Game/Nope/SM_NoSuchMesh.SM_NoSuchMesh" ] }
+		])")).Num() > 0);
+
+	// Two rows claiming one key is a silent partial loss: BuildLabelMaps keeps the first, so the
+	// second row's entry never labels anything.
+	TestTrue(TEXT("An actor type claimed by two rows is a problem"),
+		ValidateJson(TEXT("Duplicate actor type"), TEXT(R"([
+			{ "Name": "NoLabel", "Label": 0 },
+			{ "Name": "Vehicle", "Label": 14, "ActorTypes": [ "/Script/Engine.StaticMeshActor" ] },
+			{ "Name": "Building", "Label": 7, "ActorTypes": [ "/Script/Engine.StaticMeshActor" ] }
+		])")).Num() > 0);
+
+	TestTrue(TEXT("An actor tag claimed by two rows is a problem"),
+		ValidateJson(TEXT("Duplicate actor tag"), TEXT(R"([
+			{ "Name": "NoLabel", "Label": 0 },
+			{ "Name": "Vehicle", "Label": 14, "ActorTags": [ "Parked" ] },
+			{ "Name": "Building", "Label": 7, "ActorTags": [ "Parked" ] }
+		])")).Num() > 0);
 
 	return true;
 }
