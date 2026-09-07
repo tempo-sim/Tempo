@@ -146,6 +146,13 @@ namespace
 		// UWorld::AddPostProcessingSettings: volumes are kept sorted by ascending priority.
 		if (World)
 		{
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8
+			// GetPostProcessVolumeIterator() replaced the raw PostProcessVolumes array in 5.8 and
+			// already filters out invalid entries, yielding references rather than pointers.
+			for (IInterface_PostProcessVolume& Volume : World->GetPostProcessVolumeIterator())
+			{
+				const FPostProcessVolumeProperties Properties = Volume.GetProperties();
+#else
 			for (IInterface_PostProcessVolume* Volume : World->PostProcessVolumes)
 			{
 				if (!Volume)
@@ -153,6 +160,7 @@ namespace
 					continue;
 				}
 				const FPostProcessVolumeProperties Properties = Volume->GetProperties();
+#endif
 				if (!Properties.bIsEnabled || !Properties.Settings)
 				{
 					continue;
@@ -161,7 +169,11 @@ namespace
 				if (!Properties.bIsUnbound)
 				{
 					float DistanceToPoint = 0.0f;
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8
+					Volume.EncompassesPoint(ViewLocation, 0.0f, &DistanceToPoint);
+#else
 					Volume->EncompassesPoint(ViewLocation, 0.0f, &DistanceToPoint);
+#endif
 					if (DistanceToPoint < 0.0f || DistanceToPoint > Properties.BlendRadius)
 					{
 						Weight = 0.0f;

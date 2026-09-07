@@ -1365,31 +1365,50 @@ void UMassTrafficIntersectionSpawnDataGenerator::GenerateTrafficLightIntersectio
 	// trying to cross over them.
 	//
 
-	OutTrafficLightIntersectionsSpawnData.TrafficLightIntersectionFragments.RemoveAll(
-		[&](FMassTrafficLightIntersectionFragment& IntersectionFragment)->bool
+	// The fragments and their transforms are built as parallel arrays, and the spawn data is only
+	// valid while they stay the same length, so a dropped intersection has to drop both. Walking
+	// backwards keeps the indices ahead of the cursor stable as entries are removed.
+	{
+		TArray<FMassTrafficLightIntersectionFragment>& IntersectionFragments = OutTrafficLightIntersectionsSpawnData.TrafficLightIntersectionFragments;
+		TArray<FTransform>& IntersectionTransforms = OutTrafficLightIntersectionsSpawnData.TrafficLightIntersectionTransforms;
+
+		for (int32 IntersectionIndex = IntersectionFragments.Num() - 1; IntersectionIndex >= 0; --IntersectionIndex)
 		{
+			const FMassTrafficLightIntersectionFragment& IntersectionFragment = IntersectionFragments[IntersectionIndex];
+
 			const FMassTrafficIntersectionDetail* IntersectionDetail = FindIntersectionDetails(IntersectionDetails, IntersectionFragment.ZoneGraphDataHandle, IntersectionFragment.ZoneIndex, "2-Sided Intersection Remover");
 			if (!IntersectionDetail)
 			{
-				return false; // ..(lambda) don't remove it
+				continue; // ..keep it
 			}
-				
+
 			if (IntersectionDetail->Sides.Num() > 2 || IntersectionDetail->HasHiddenSides())
 			{
-				return false; // ..(lambda) don't remove it
+				continue; // ..keep it
 			}
-				
+
+			bool bHasCrosswalkLanes = false;
 			for (const FMassTrafficIntersectionSide& Side : IntersectionDetail->Sides)
 			{
 				if (Side.CrosswalkLanes.Num() > 0)
 				{
-					return false; // ..(lambda) don't remove it
+					bHasCrosswalkLanes = true;
+					break;
 				}
 			}
-				
-			return true; // ..(lambda) remove it
+
+			if (bHasCrosswalkLanes)
+			{
+				continue; // ..keep it
+			}
+
+			IntersectionFragments.RemoveAt(IntersectionIndex);
+			if (IntersectionTransforms.IsValidIndex(IntersectionIndex))
+			{
+				IntersectionTransforms.RemoveAt(IntersectionIndex);
+			}
 		}
-	);
+	}
 
 		
 	//
