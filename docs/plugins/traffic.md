@@ -115,14 +115,49 @@ See below.
 ## Drop-in replacement for CitySample's Traffic
 
 Unreal allows only one plugin per name, and a CitySample project already ships one called
-`Traffic`. Tempo's copy is built to win that contest and then stand in for Epic's:
+`Traffic`. Tempo's copy has to displace it — and the engine's own same-name arbitration cannot do
+that on its own.
+
+### The host's copy has to be disabled
+
+UnrealBuildTool compiles every `*.Build.cs` under a project's plugins into a single C# assembly.
+It does that in `CreateProjectRulesAssembly`, from the raw list of discovered project plugins,
+*before* anything arbitrates between plugins sharing a name. Two copies of `MassTraffic.Build.cs`
+are therefore two definitions of the same C# class:
+
+```text
+MassTraffic.Build.cs(5,14): error CS0101: The namespace '<global namespace>' already
+    contains a definition for 'MassTraffic'
+```
+
+The build stops there, so the arbitration that would have preferred Tempo's copy never runs. It is
+not a resolvable contest — one of the two plugins has to be invisible to Unreal.
+
+`Setup.sh` makes it so, by running
+[`DisableConflictingPlugins.sh`](../reference/scripts.md#dependencies-and-engine-mods): any project
+plugin whose name matches one Tempo ships has its descriptor renamed, so `Traffic.uplugin` becomes
+`Traffic.uplugin.disabled-by-tempo`. Renaming the descriptor is enough to hide the plugin from both
+UnrealBuildTool and the runtime plugin manager, nothing else on disk is touched, and `-restore`
+puts it back.
+
+### Standing in for it
+
+Once CitySample's copy is out of the way, Tempo's plugin has to answer to everything that referred
+to the original:
 
 | Mechanism | Detail |
 |---|---|
-| **Version** | Tempo's `Traffic.uplugin` declares `"Version": 2` against CitySample's `1`. `FPluginManager` resolves same-name duplicates by that integer and suppresses the loser, whose modules then never register. Equal versions would leave the winner to filesystem discovery order. |
-| **Display name** | `FriendlyName` is `Traffic (Tempo)`, so the two are distinguishable in the plugin browser. It is display-only and does not affect precedence. |
+| **Name** | The plugin is still called `Traffic`, so a `.uproject` that enables `Traffic` by name gets Tempo's, and its content still mounts at `/Traffic/`. |
+| **Display name** | `FriendlyName` is `Traffic (Tempo)`, so it is recognisable in the plugin browser. It is display-only. |
 | **CoreRedirects** | `Config/DefaultTraffic.ini` maps the pre-split intersection names onto their light-controlled equivalents, so `CitySampleIntersectionAgentConfig` and similar assets still resolve. |
-| **Content** | The plugin carries `MF_UnpackTrafficVehicleInstanceCustomData`, which five CitySample vehicle materials reference by its `/Traffic/` path. |
+| **Content** | The plugin carries `MF_UnpackTrafficVehicleInstanceCustomData` — byte-identical to CitySample's, and referenced by five of its vehicle materials through the `/Traffic/` path. |
+| **Version** | `"Version": 2` against CitySample's `1`. This is how `FPluginManager` and UnrealBuildTool break a same-name tie, and it makes Tempo's copy the preferred one wherever that comparison is actually reached. |
+
+!!! note "`Version` alone is not the mechanism"
+
+    Version arbitration is real, but it runs after the rules assembly has already been compiled, so
+    it cannot rescue a project that has both copies on disk. It is a correctness backstop, not a
+    substitute for disabling the host's copy.
 
 !!! warning "`Version` must stay numeric"
 
@@ -137,8 +172,9 @@ Tempo and CitySample.
 
 `External/RuleProcessor` is a fork of the CitySample plugin of the same name, which provides the
 point-cloud tooling (`PointCloud`, `SliceAndDice`) that Traffic's data assets are authored with. It
-carries the same drop-in treatment — `"Version": 9` against CitySample's `8`, and a `Rule Processor
-(Tempo)` friendly name.
+carries the same drop-in treatment: `Setup.sh` disables CitySample's copy, its content is
+byte-identical to the original's, and the descriptor declares `"Version": 9` against CitySample's
+`8` under a `Rule Processor (Tempo)` friendly name.
 
 ## Settings
 

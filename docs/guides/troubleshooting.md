@@ -12,6 +12,33 @@ Plugins/Tempo/Scripts/InstallEngineMods.sh
 Plugins/Tempo/Scripts/SyncDeps.sh
 ```
 
+### `CS0101: already contains a definition for 'MassTraffic'`
+
+```text
+MassTraffic.Build.cs(5,14): error CS0101: The namespace '<global namespace>' already
+    contains a definition for 'MassTraffic'
+...
+Expecting to find a type to be declared in a target rules named 'CitySampleEditorTarget'.
+```
+
+Your project has two plugins of the same name — usually because Tempo was added to a CitySample
+project, which ships its own `Traffic` and `RuleProcessor`. Unreal compiles all of a project's
+plugin rules into one C# assembly before it arbitrates between same-named plugins, so this fails
+before anything can pick a winner. The trailing "Expecting to find a type" line is a consequence,
+not a separate problem: the rules assembly never compiled, so no targets were found.
+
+`Setup.sh` handles this, so the usual fix is that it hasn't been run since Tempo was added. To do
+just this step:
+
+```bash
+Plugins/Tempo/Scripts/DisableConflictingPlugins.sh
+```
+
+It renames the host project's descriptor to `*.uplugin.disabled-by-tempo` and leaves the rest of
+those plugins on disk. `-restore` undoes it.
+
+[:octicons-arrow-right-24: Traffic as a drop-in replacement](../plugins/traffic.md#drop-in-replacement-for-citysamples-traffic)
+
 ### `GenROSIDL` prebuild fails with a `TypeError` from `em.py`
 
 ```text
