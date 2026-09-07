@@ -88,8 +88,9 @@ void UMassTrafficIntersectionSpawnDataGenerator::Generate(UObject& QueryOwner,
 	// The spawner decides which entity configs exist; we only get to index into them. Epic's
 	// CitySample spawner carries a single intersection config, from before this plugin split
 	// intersections into light- and sign-controlled ones. Without a config for the sign
-	// intersections we fall back to Epic's behaviour and build every intersection as a light
-	// intersection, which the light path already handles - all-way stops take it too.
+	// intersections, every intersection is built as a light intersection and the light path
+	// widens back to Epic's period building for the uncontrolled ones, so an unmodified
+	// CitySample spawner still gets the traffic it had before the split.
 	if (!EntityTypes.IsValidIndex(TrafficLightIntersectionEntityConfigIndex))
 	{
 		UE_LOG(LogMassTraffic, Error, TEXT("%s has no entity config at TrafficLightIntersectionEntityConfigIndex %d (it has %d). No intersections will be spawned."),
@@ -130,6 +131,7 @@ void UMassTrafficIntersectionSpawnDataGenerator::Generate(UObject& QueryOwner,
 											  *ZoneGraphSubsystem,
 											  RandomStream,
 											  *World,
+											  bCanSpawnTrafficSignIntersections,
 											  TrafficLightIntersectionsSpawnData);
 	
 	if (ensureMsgf(TrafficLightIntersectionsSpawnData.TrafficLightIntersectionFragments.Num() == TrafficLightIntersectionsSpawnData.TrafficLightIntersectionTransforms.Num(), TEXT("Number of TrafficLightIntersectionFragments must equal number of TrafficLightIntersectionTransforms.")))
@@ -687,6 +689,7 @@ void UMassTrafficIntersectionSpawnDataGenerator::GenerateTrafficLightIntersectio
 		const UZoneGraphSubsystem& ZoneGraphSubsystem,
 		const FRandomStream& RandomStream,
 		const UWorld& World,
+		const bool bCanSpawnTrafficSignIntersections,
 		FMassTrafficLightIntersectionSpawnData& OutTrafficLightIntersectionsSpawnData) const
 {
 	const UMassTrafficControllerRegistrySubsystem* TrafficControllerRegistrySubsystem = UWorld::GetSubsystem<UMassTrafficControllerRegistrySubsystem>(&World);
@@ -1290,8 +1293,13 @@ void UMassTrafficIntersectionSpawnDataGenerator::GenerateTrafficLightIntersectio
 
 		// General stop-sign intersections - without traffic lights.
 		// (Each period for vehicles go and then one with a period for pedestrians.)
+		//
+		// When there is no entity config for sign-controlled intersections, every uncontrolled
+		// intersection is routed here as well, which is the condition Epic used before this plugin
+		// split them out. Without that they would reach the error case below and get no periods at
+		// all, closing every lane through them.
 
-		else if (bIsAllWayStop)
+		else if (bIsAllWayStop || (!bCanSpawnTrafficSignIntersections && !IntersectionDetail->bHasTrafficLights))
 		{
 			for (int32 S = 0; S < IntersectionDetail->Sides.Num(); S++)
 			{

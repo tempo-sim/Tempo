@@ -117,6 +117,7 @@ protected:
 		const UZoneGraphSubsystem& ZoneGraphSubsystem,
 		const FRandomStream& RandomStream,
 		const UWorld& World,
+		const bool bCanSpawnTrafficSignIntersections,
 		FMassTrafficLightIntersectionSpawnData& OutTrafficLightIntersectionsSpawnData) const;
 
 	void GenerateTrafficSignIntersectionSpawnData(
