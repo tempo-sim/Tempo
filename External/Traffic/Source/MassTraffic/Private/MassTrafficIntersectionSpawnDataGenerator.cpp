@@ -480,6 +480,9 @@ void UMassTrafficIntersectionSpawnDataGenerator::SetupLaneData(
 {
 	// Clear pre-computed lane intersection enter/exit distances.
 	MassTrafficSubsystem.ClearLaneIntersectionInfo();
+
+	int32 NumConflictLanePairs = 0;
+	int32 NumConflictLanePairsWithoutIntersectionInfo = 0;
 	
 	// Set Traffic Controller flags on lanes (for traffic lights and traffic signs).
 	for (const TTuple<FZoneGraphDataHandle, FZoneIndexToIntersectionDetailMap>& ZoneIndexToIntersectionDetailMapPair : IntersectionDetailsMap)
@@ -569,6 +572,8 @@ void UMassTrafficIntersectionSpawnDataGenerator::SetupLaneData(
 									float EnterDistanceAlongQueryLane;
 									float ExitDistanceAlongQueryLane;
 
+									++NumConflictLanePairs;
+
 									if (UE::MassTraffic::TryGetEnterAndExitDistancesAlongQueryLane(
 										MassTrafficSubsystem,
 										MassTrafficSettings,
@@ -584,6 +589,10 @@ void UMassTrafficIntersectionSpawnDataGenerator::SetupLaneData(
 										LaneIntersectionInfo.ExitDistance = ExitDistanceAlongQueryLane;
 									
 										MassTrafficSubsystem.AddLaneIntersectionInfo(CurrentSideVehicleIntersectionLane->LaneHandle, OtherSideVehicleIntersectionLane->LaneHandle, LaneIntersectionInfo);
+									}
+									else
+									{
+										++NumConflictLanePairsWithoutIntersectionInfo;
 									}
 								}
 							}
@@ -631,6 +640,16 @@ void UMassTrafficIntersectionSpawnDataGenerator::SetupLaneData(
 				}
 			}
 		}
+	}
+
+	if (NumConflictLanePairsWithoutIntersectionInfo > 0)
+	{
+		// Their centerlines cross, but repeating the query against each lane edge finds nothing, so
+		// the pair goes without cached enter and exit distances and yielding between those two lanes
+		// falls back to less precise handling. Raising AcceptableLaneIntersectionDistance widens the
+		// edge query; set LogMassTraffic to Verbose to see which lanes are involved.
+		UE_LOG(LogMassTraffic, Error, TEXT("%d of %d conflicting lane pairs could not be given intersection enter/exit distances.  MassTrafficSettings.AcceptableLaneIntersectionDistance: %f."),
+			NumConflictLanePairsWithoutIntersectionInfo, NumConflictLanePairs, MassTrafficSettings.AcceptableLaneIntersectionDistance);
 	}
 }
 
