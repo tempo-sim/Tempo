@@ -18,6 +18,28 @@ void TEMPOSENSORS_API OptimizeShowFlagsForNoColor(FEngineShowFlags& ShowFlags);
 void TEMPOSENSORS_API ApplyPhotorealisticRenderSettings(FPostProcessSettings& OutPostProcess,
 	FEngineShowFlags& OutShowFlags, bool& OutUseRayTracingIfEnabled);
 
+// Every problem that makes a semantic label table unfit to label a world with: a label ID the
+// camera cannot encode, a missing or non-zero NoLabel row, an entry that resolves to no class or
+// no loadable mesh, or an actor type / mesh / tag two rows both claim. Empty means the table is
+// good. UDataTable::CreateTableFromJSONString reports none of these — it only reports what it
+// could not parse — so a table arriving over the API has to be checked separately before it is
+// installed.
+//
+// Returns the problems rather than logging them so LoadLabelTable can hand them back to the
+// client that sent the table; BuildLabelMaps logs the same list for a table set in the editor.
+TArray<FString> TEMPOSENSORS_API ValidateSemanticLabelTable(const UDataTable* SemanticLabelTable);
+
+// Resolve the settings' overridable/overriding row-name pair against a table, yielding the two
+// label IDs the substitution runs on. False — leaving the outputs untouched — whenever the pair is
+// unset, the table is null, or either row name is absent from the table, which are the same thing
+// as far as the material is concerned: no substitution.
+//
+// Silent by design: this runs once per tile per sensor, so a table that does not carry the named
+// rows would warn many times over. UTempoActorLabeler::OnLabelSettingsChanged does that warning
+// once, for the world.
+bool TEMPOSENSORS_API ResolveLabelRowOverrides(const UDataTable* SemanticLabelTable,
+	int32& OutOverridableLabel, int32& OutOverridingLabel);
+
 // Resolve the settings' overridable/overriding label row names against the active semantic label
 // table and push the resulting label IDs onto a sensor's post-process material instance, which
 // substitutes the overriding label wherever an object labeled overridable carries a non-zero

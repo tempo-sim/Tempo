@@ -57,6 +57,8 @@ namespace TempoSensors
 	class SetActorTypeSemanticIdRequest;
 	class GetAllStaticMeshTypesResponse;
 	class SetStaticMeshTypeSemanticIdRequest;
+	class GetAllSkeletalMeshTypesResponse;
+	class SetSkeletalMeshTypeSemanticIdRequest;
 	class SetActorTagSemanticIdRequest;
 	class GetLabelTableAsJsonResponse;
 	class SetLabelTypeRequest;
@@ -97,6 +99,10 @@ public:
 	void HandleGetAllStaticMeshTypes(const TempoCore::Empty& Request, const TResponseDelegate<TempoSensors::GetAllStaticMeshTypesResponse>& ResponseContinuation);
 
 	void HandleSetStaticMeshTypeSemanticId(const TempoSensors::SetStaticMeshTypeSemanticIdRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation);
+
+	void HandleGetAllSkeletalMeshTypes(const TempoCore::Empty& Request, const TResponseDelegate<TempoSensors::GetAllSkeletalMeshTypesResponse>& ResponseContinuation);
+
+	void HandleSetSkeletalMeshTypeSemanticId(const TempoSensors::SetSkeletalMeshTypeSemanticIdRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation);
 
 	void HandleSetActorTagSemanticId(const TempoSensors::SetActorTagSemanticIdRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation);
 
@@ -139,6 +145,19 @@ protected:
 	// over the label table.
 	TOptional<int32> ResolveMeshSemanticId(const FString& MeshPath) const;
 
+	// The row name a semantic ID belongs to, for reporting an ID back as a class. Unset when no row
+	// carries the ID, which a runtime override to an ID the table doesn't define can produce.
+	TOptional<FName> ResolveSemanticIdRowName(int32 SemanticId) const;
+
+	// Shared body of the static and skeletal SetMeshTypeSemanticId RPCs: record or clear the
+	// override in the given map, then re-label every component rendering that mesh. The caller has
+	// already validated the ID range and that the path names an asset of its map's type.
+	void SetMeshTypeSemanticIdOverride(const FString& MeshPath, int32 SemanticId, TMap<FString, int32>& Overrides);
+
+	// Shared body of the GetAllStaticMeshTypes and GetAllSkeletalMeshTypes RPCs: count the world's
+	// components rendering each mesh of the requested kind, keyed by asset path.
+	void CountMeshInstances(bool bSkeletal, TMap<FString, int32>& OutMeshInstanceCounts) const;
+
 	// The mesh assets a Component renders: its own static or skeletal mesh, or the meshes a Niagara
 	// system instances.
 	static void GetComponentMeshPaths(const UPrimitiveComponent* Component, TArray<FString>& OutMeshPaths);
@@ -180,12 +199,6 @@ protected:
 	UPROPERTY(VisibleAnywhere)
 	TMap<FName, int32> SemanticIds;
 
-	UPROPERTY(VisibleAnywhere)
-	FName NoLabelName = TEXT("NoLabel");
-
-	UPROPERTY(VisibleAnywhere)
-	int32 NoLabelId = 0;
-
 	UPROPERTY()
 	TMap<const UObject*, FInstanceSemanticIdPair> LabeledObjects;
 
@@ -202,6 +215,14 @@ protected:
 	// Takes precedence over DataTable definitions (StaticMeshLabels)
 	UPROPERTY()
 	TMap<FString, int32> StaticMeshTypeSemanticIdOverrides;
+
+	// Runtime overrides for skeletal mesh types (full mesh path -> semantic ID)
+	// Takes precedence over DataTable definitions (SkeletalMeshLabels)
+	// Kept separate from the static map so each reporting RPC can list exactly what its setter
+	// accepts. The two never hold the same path: an asset is a UStaticMesh or a USkeletalMesh, and
+	// each setter rejects a path that isn't its own type.
+	UPROPERTY()
+	TMap<FString, int32> SkeletalMeshTypeSemanticIdOverrides;
 
 	// Runtime overrides for actor tags (tag -> semantic ID)
 	// Takes precedence over DataTable definitions (ActorTagLabels)

@@ -21,6 +21,7 @@
 #include "Components/SkinnedMeshComponent.h"
 #include "Engine/SkeletalMesh.h"
 #include "Engine/SkinnedAsset.h"
+#include "Engine/StaticMesh.h"
 #include "NiagaraComponent.h"
 #include "NiagaraEmitter.h"
 #include "NiagaraEmitterHandle.h"
@@ -108,6 +109,57 @@ void FInstanceIdAllocator::Return(int32 Id)
 using LabelService = TempoSensors::LabelService;
 using LabelAsyncService = TempoSensors::LabelService::AsyncService;
 
+namespace
+{
+	// The sentinel FInstanceSemanticIdPair carries when no instance ID was ever allocated for the
+	// object. The allocator hands out 1..GTempoCamera_Max_Label, so 0 can never be a live ID.
+	constexpr int32 NoInstanceId = 0;
+
+	// Every Set*SemanticId RPC takes the same semantic ID domain: a label the camera can encode, or
+	// -1 meaning "forget the override and let the table decide". Returns false and answers the
+	// request when the ID is outside it.
+	bool ValidateSemanticIdRange(int32 SemanticId, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation)
+	{
+		if (SemanticId >= -1 && SemanticId <= GTempoCamera_Max_Label)
+		{
+			return true;
+		}
+
+		const FString ErrorMsg = FString::Printf(TEXT("semantic_id must be -1 (revert) or 0-%d"), GTempoCamera_Max_Label);
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(),
+			grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, TCHAR_TO_UTF8(*ErrorMsg)));
+		return false;
+	}
+
+	// Invert one of the label table's key -> row-name maps into semantic ID -> keys, then apply the
+	// runtime overrides on top: an overridden key moves out of whichever ID the table gave it and
+	// into the one the override names, which is what the labeler will actually draw.
+	template <typename KeyType>
+	TMap<int32, TArray<KeyType>> BuildSemanticIdToKeys(const TMap<KeyType, FName>& TableLabels,
+		const TMap<FName, int32>& SemanticIds, const TMap<KeyType, int32>& Overrides)
+	{
+		TMap<int32, TArray<KeyType>> SemanticIdToKeys;
+		for (const auto& [Key, LabelName] : TableLabels)
+		{
+			if (const int32* SemanticId = SemanticIds.Find(LabelName))
+			{
+				SemanticIdToKeys.FindOrAdd(*SemanticId).Add(Key);
+			}
+		}
+
+		for (const auto& [Key, OverrideSemanticId] : Overrides)
+		{
+			for (auto& [Id, Keys] : SemanticIdToKeys)
+			{
+				Keys.Remove(Key);
+			}
+			SemanticIdToKeys.FindOrAdd(OverrideSemanticId).Add(Key);
+		}
+
+		return SemanticIdToKeys;
+	}
+}
+
 void UTempoActorLabeler::RegisterServices(FTempoServer& Server)
 {
 	Server.RegisterService<LabelService>(
@@ -118,6 +170,8 @@ void UTempoActorLabeler::RegisterServices(FTempoServer& Server)
 		SimpleRequestHandler(&LabelAsyncService::RequestSetActorTypeSemanticId, &UTempoActorLabeler::HandleSetActorTypeSemanticId),
 		SimpleRequestHandler(&LabelAsyncService::RequestGetAllStaticMeshTypes, &UTempoActorLabeler::HandleGetAllStaticMeshTypes),
 		SimpleRequestHandler(&LabelAsyncService::RequestSetStaticMeshTypeSemanticId, &UTempoActorLabeler::HandleSetStaticMeshTypeSemanticId),
+		SimpleRequestHandler(&LabelAsyncService::RequestGetAllSkeletalMeshTypes, &UTempoActorLabeler::HandleGetAllSkeletalMeshTypes),
+		SimpleRequestHandler(&LabelAsyncService::RequestSetSkeletalMeshTypeSemanticId, &UTempoActorLabeler::HandleSetSkeletalMeshTypeSemanticId),
 		SimpleRequestHandler(&LabelAsyncService::RequestSetActorTagSemanticId, &UTempoActorLabeler::HandleSetActorTagSemanticId),
 		SimpleRequestHandler(&LabelAsyncService::RequestGetLabelTableAsJson, &UTempoActorLabeler::HandleGetLabelTableAsJson),
 		SimpleRequestHandler(&LabelAsyncService::RequestSetLabelType, &UTempoActorLabeler::HandleSetLabelType),
@@ -151,103 +205,27 @@ void UTempoActorLabeler::HandleGetSemanticClasses(const TempoCore::Empty& Reques
 {
 	TempoSensors::GetSemanticClassesResponse Response;
 
-	// Build reverse mapping: semantic_id -> actor types
-	TMap<int32, TArray<FName>> SemanticIdToActorTypes;
-
-	// Include DataTable assignments
+	// The overrides are keyed on class name, so reduce the table's class keys to names to match.
+	TMap<FName, FName> ActorTypeLabels;
 	for (const auto& [ActorClass, LabelName] : ActorSemanticLabels)
 	{
-		if (const int32* SemanticId = SemanticIds.Find(LabelName))
-		{
-			SemanticIdToActorTypes.FindOrAdd(*SemanticId).Add(ActorClass->GetFName());
-		}
+		ActorTypeLabels.Add(ActorClass->GetFName(), LabelName);
 	}
 
-	// Include runtime overrides (they take precedence)
-	for (const auto& [ActorTypeName, OverrideSemanticId] : ActorTypeSemanticIdOverrides)
-	{
-		// Remove from old mapping if present, add to new
-		for (auto& [Id, Types] : SemanticIdToActorTypes)
-		{
-			Types.Remove(ActorTypeName);
-		}
-		SemanticIdToActorTypes.FindOrAdd(OverrideSemanticId).Add(ActorTypeName);
-	}
+	const TMap<int32, TArray<FName>> SemanticIdToActorTypes = BuildSemanticIdToKeys(ActorTypeLabels, SemanticIds, ActorTypeSemanticIdOverrides);
+	const TMap<int32, TArray<FString>> SemanticIdToMeshPaths = BuildSemanticIdToKeys(StaticMeshLabels, SemanticIds, StaticMeshTypeSemanticIdOverrides);
+	const TMap<int32, TArray<FString>> SemanticIdToSkeletalMeshPaths = BuildSemanticIdToKeys(SkeletalMeshLabels, SemanticIds, SkeletalMeshTypeSemanticIdOverrides);
+	const TMap<int32, TArray<FName>> SemanticIdToActorTags = BuildSemanticIdToKeys(ActorTagLabels, SemanticIds, ActorTagSemanticIdOverrides);
+	// Component tags have no runtime override RPC, so the table is the whole story for them.
+	const TMap<int32, TArray<FName>> SemanticIdToComponentTags = BuildSemanticIdToKeys(ComponentTagLabels, SemanticIds, TMap<FName, int32>());
 
-	// Build reverse mapping: semantic_id -> static mesh paths
-	TMap<int32, TArray<FString>> SemanticIdToMeshPaths;
-
-	// Include DataTable static mesh assignments
-	for (const auto& [MeshPath, LabelName] : StaticMeshLabels)
-	{
-		if (const int32* SemanticId = SemanticIds.Find(LabelName))
-		{
-			SemanticIdToMeshPaths.FindOrAdd(*SemanticId).Add(MeshPath);
-		}
-	}
-
-	// Include runtime static mesh overrides (they take precedence)
-	for (const auto& [MeshPath, OverrideSemanticId] : StaticMeshTypeSemanticIdOverrides)
-	{
-		// Remove from old mapping if present, add to new
-		for (auto& [Id, Paths] : SemanticIdToMeshPaths)
-		{
-			Paths.Remove(MeshPath);
-		}
-		SemanticIdToMeshPaths.FindOrAdd(OverrideSemanticId).Add(MeshPath);
-	}
-
-	// Build reverse mapping: semantic_id -> skeletal mesh paths
-	TMap<int32, TArray<FString>> SemanticIdToSkeletalMeshPaths;
-
-	for (const auto& [MeshPath, LabelName] : SkeletalMeshLabels)
-	{
-		if (const int32* SemanticId = SemanticIds.Find(LabelName))
-		{
-			SemanticIdToSkeletalMeshPaths.FindOrAdd(*SemanticId).Add(MeshPath);
-		}
-	}
-
-	// Build reverse mapping: semantic_id -> component tags
-	TMap<int32, TArray<FName>> SemanticIdToComponentTags;
-
-	for (const auto& [ComponentTag, LabelName] : ComponentTagLabels)
-	{
-		if (const int32* SemanticId = SemanticIds.Find(LabelName))
-		{
-			SemanticIdToComponentTags.FindOrAdd(*SemanticId).Add(ComponentTag);
-		}
-	}
-
-	// Build reverse mapping: semantic_id -> actor tags
-	TMap<int32, TArray<FName>> SemanticIdToActorTags;
-
-	for (const auto& [ActorTag, LabelName] : ActorTagLabels)
-	{
-		if (const int32* SemanticId = SemanticIds.Find(LabelName))
-		{
-			SemanticIdToActorTags.FindOrAdd(*SemanticId).Add(ActorTag);
-		}
-	}
-
-	// Include runtime actor tag overrides (they take precedence)
-	for (const auto& [ActorTag, OverrideSemanticId] : ActorTagSemanticIdOverrides)
-	{
-		for (auto& [Id, Tags] : SemanticIdToActorTags)
-		{
-			Tags.Remove(ActorTag);
-		}
-		SemanticIdToActorTags.FindOrAdd(OverrideSemanticId).Add(ActorTag);
-	}
-
-	// Iterate DataTable to get all class definitions
 	for (const auto& [LabelName, SemanticId] : SemanticIds)
 	{
 		auto* ClassInfo = Response.add_classes();
 		ClassInfo->set_name(TCHAR_TO_UTF8(*LabelName.ToString()));
 		ClassInfo->set_label_id(SemanticId);
 
-		if (TArray<FName>* Types = SemanticIdToActorTypes.Find(SemanticId))
+		if (const TArray<FName>* Types = SemanticIdToActorTypes.Find(SemanticId))
 		{
 			for (const FName& TypeName : *Types)
 			{
@@ -255,7 +233,7 @@ void UTempoActorLabeler::HandleGetSemanticClasses(const TempoCore::Empty& Reques
 			}
 		}
 
-		if (TArray<FString>* MeshPaths = SemanticIdToMeshPaths.Find(SemanticId))
+		if (const TArray<FString>* MeshPaths = SemanticIdToMeshPaths.Find(SemanticId))
 		{
 			for (const FString& MeshPath : *MeshPaths)
 			{
@@ -263,7 +241,7 @@ void UTempoActorLabeler::HandleGetSemanticClasses(const TempoCore::Empty& Reques
 			}
 		}
 
-		if (TArray<FString>* SkeletalMeshPaths = SemanticIdToSkeletalMeshPaths.Find(SemanticId))
+		if (const TArray<FString>* SkeletalMeshPaths = SemanticIdToSkeletalMeshPaths.Find(SemanticId))
 		{
 			for (const FString& MeshPath : *SkeletalMeshPaths)
 			{
@@ -271,7 +249,7 @@ void UTempoActorLabeler::HandleGetSemanticClasses(const TempoCore::Empty& Reques
 			}
 		}
 
-		if (TArray<FName>* ComponentTags = SemanticIdToComponentTags.Find(SemanticId))
+		if (const TArray<FName>* ComponentTags = SemanticIdToComponentTags.Find(SemanticId))
 		{
 			for (const FName& ComponentTag : *ComponentTags)
 			{
@@ -279,7 +257,7 @@ void UTempoActorLabeler::HandleGetSemanticClasses(const TempoCore::Empty& Reques
 			}
 		}
 
-		if (TArray<FName>* ActorTags = SemanticIdToActorTags.Find(SemanticId))
+		if (const TArray<FName>* ActorTags = SemanticIdToActorTags.Find(SemanticId))
 		{
 			for (const FName& ActorTag : *ActorTags)
 			{
@@ -295,12 +273,8 @@ void UTempoActorLabeler::HandleSetActorTypeSemanticId(const TempoSensors::SetAct
 {
 	const int32 SemanticId = Request.semantic_id();
 
-	// Validate range
-	if (SemanticId < -1 || SemanticId > GTempoCamera_Max_Label)
+	if (!ValidateSemanticIdRange(SemanticId, ResponseContinuation))
 	{
-		const FString ErrorMsg = FString::Printf(TEXT("semantic_id must be -1 (revert) or 0-%d"), GTempoCamera_Max_Label);
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(),
-			grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 
@@ -313,7 +287,7 @@ void UTempoActorLabeler::HandleSetActorTypeSemanticId(const TempoSensors::SetAct
 	{
 		const FString ErrorMsg = FString::Printf(TEXT("No actor class with name '%s' found"), *ActorTypeName);
 		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(),
-			grpc::Status(grpc::StatusCode::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
+			grpc::Status(grpc::StatusCode::NOT_FOUND, TCHAR_TO_UTF8(*ErrorMsg)));
 		return;
 	}
 	const FName ActorType = ActorClass->GetFName();
@@ -341,16 +315,26 @@ void UTempoActorLabeler::HandleSetActorTypeSemanticId(const TempoSensors::SetAct
 	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status_OK);
 }
 
-void UTempoActorLabeler::HandleGetAllStaticMeshTypes(const TempoCore::Empty& Request, const TResponseDelegate<TempoSensors::GetAllStaticMeshTypesResponse>& ResponseContinuation)
+void UTempoActorLabeler::CountMeshInstances(bool bSkeletal, TMap<FString, int32>& OutMeshInstanceCounts) const
 {
-	TempoSensors::GetAllStaticMeshTypesResponse Response;
-
-	// Build map of mesh paths to instance counts
-	TMap<FString, int32> MeshInstanceCounts;
-
 	for (TActorIterator<AActor> ActorItr(GetWorld()); ActorItr; ++ActorItr)
 	{
 		AActor* Actor = *ActorItr;
+
+		if (bSkeletal)
+		{
+			// USkinnedMeshComponent covers USkeletalMeshComponent and the other skinned variants,
+			// matching what GetComponentMeshPaths reads a skeletal path from.
+			TInlineComponentArray<USkinnedMeshComponent*> SkinnedComponents(Actor);
+			for (USkinnedMeshComponent* SkinnedComponent : SkinnedComponents)
+			{
+				if (const USkinnedAsset* SkinnedAsset = SkinnedComponent->GetSkinnedAsset())
+				{
+					OutMeshInstanceCounts.FindOrAdd(SkinnedAsset->GetPathName())++;
+				}
+			}
+			continue;
+		}
 
 		// 1. Handle regular UStaticMeshComponent (non-instanced)
 		TInlineComponentArray<UStaticMeshComponent*> MeshComponents(Actor);
@@ -364,8 +348,7 @@ void UTempoActorLabeler::HandleGetAllStaticMeshTypes(const TempoCore::Empty& Req
 
 			if (const UStaticMesh* StaticMesh = MeshComponent->GetStaticMesh())
 			{
-				const FString MeshFullPath = StaticMesh->GetPathName();
-				MeshInstanceCounts.FindOrAdd(MeshFullPath)++;
+				OutMeshInstanceCounts.FindOrAdd(StaticMesh->GetPathName())++;
 			}
 		}
 
@@ -376,13 +359,13 @@ void UTempoActorLabeler::HandleGetAllStaticMeshTypes(const TempoCore::Empty& Req
 		{
 			if (const UStaticMesh* StaticMesh = ISMC->GetStaticMesh())
 			{
-				const FString MeshFullPath = StaticMesh->GetPathName();
-				MeshInstanceCounts.FindOrAdd(MeshFullPath) += ISMC->GetInstanceCount();
+				OutMeshInstanceCounts.FindOrAdd(StaticMesh->GetPathName()) += ISMC->GetInstanceCount();
 			}
 		}
 
 		// 3. Handle the meshes a Niagara mesh renderer instances. The live particle count varies
-		// every frame, so count the components drawing the mesh rather than the particles.
+		// every frame, so count the components drawing the mesh rather than the particles. Niagara
+		// mesh renderers instance static meshes only, so this has no skeletal counterpart.
 		TInlineComponentArray<UNiagaraComponent*> NiagaraComponents(Actor);
 		for (UNiagaraComponent* NiagaraComponent : NiagaraComponents)
 		{
@@ -390,20 +373,26 @@ void UTempoActorLabeler::HandleGetAllStaticMeshTypes(const TempoCore::Empty& Req
 			GetComponentMeshPaths(NiagaraComponent, MeshPaths);
 			for (const FString& MeshPath : MeshPaths)
 			{
-				MeshInstanceCounts.FindOrAdd(MeshPath)++;
+				OutMeshInstanceCounts.FindOrAdd(MeshPath)++;
 			}
 		}
 	}
+}
 
-	// Build response with mesh info
+void UTempoActorLabeler::HandleGetAllStaticMeshTypes(const TempoCore::Empty& Request, const TResponseDelegate<TempoSensors::GetAllStaticMeshTypesResponse>& ResponseContinuation)
+{
+	TempoSensors::GetAllStaticMeshTypesResponse Response;
+
+	TMap<FString, int32> MeshInstanceCounts;
+	CountMeshInstances(/*bSkeletal=*/false, MeshInstanceCounts);
+
 	for (const auto& [MeshPath, InstanceCount] : MeshInstanceCounts)
 	{
 		auto* MeshInfo = Response.add_mesh_types();
 		MeshInfo->set_mesh_path(TCHAR_TO_UTF8(*MeshPath));
 
 		// Extract display name from path (e.g., "/Game/Meshes/SM_Tree.SM_Tree" -> "SM_Tree")
-		FString DisplayName = FPaths::GetBaseFilename(MeshPath);
-		MeshInfo->set_display_name(TCHAR_TO_UTF8(*DisplayName));
+		MeshInfo->set_display_name(TCHAR_TO_UTF8(*FPaths::GetBaseFilename(MeshPath)));
 
 		MeshInfo->set_instance_count(InstanceCount);
 
@@ -414,28 +403,35 @@ void UTempoActorLabeler::HandleGetAllStaticMeshTypes(const TempoCore::Empty& Req
 	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
 }
 
-void UTempoActorLabeler::HandleSetStaticMeshTypeSemanticId(const TempoSensors::SetStaticMeshTypeSemanticIdRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation)
+void UTempoActorLabeler::HandleGetAllSkeletalMeshTypes(const TempoCore::Empty& Request, const TResponseDelegate<TempoSensors::GetAllSkeletalMeshTypesResponse>& ResponseContinuation)
 {
-	const FString MeshPath = UTF8_TO_TCHAR(Request.static_mesh_path().c_str());
-	const int32 SemanticId = Request.semantic_id();
+	TempoSensors::GetAllSkeletalMeshTypesResponse Response;
 
-	// Validate range
-	if (SemanticId < -1 || SemanticId > GTempoCamera_Max_Label)
+	TMap<FString, int32> MeshInstanceCounts;
+	CountMeshInstances(/*bSkeletal=*/true, MeshInstanceCounts);
+
+	for (const auto& [MeshPath, InstanceCount] : MeshInstanceCounts)
 	{
-		const FString ErrorMsg = FString::Printf(TEXT("semantic_id must be -1 (revert) or 0-%d"), GTempoCamera_Max_Label);
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(),
-			grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
-		return;
+		auto* MeshInfo = Response.add_mesh_types();
+		MeshInfo->set_mesh_path(TCHAR_TO_UTF8(*MeshPath));
+		MeshInfo->set_display_name(TCHAR_TO_UTF8(*FPaths::GetBaseFilename(MeshPath)));
+		MeshInfo->set_instance_count(InstanceCount);
+		MeshInfo->set_current_semantic_id(ResolveMeshSemanticId(MeshPath).Get(-1));
 	}
 
+	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
+}
+
+void UTempoActorLabeler::SetMeshTypeSemanticIdOverride(const FString& MeshPath, int32 SemanticId, TMap<FString, int32>& Overrides)
+{
 	// Store or clear override
 	if (SemanticId < 0)
 	{
-		StaticMeshTypeSemanticIdOverrides.Remove(MeshPath);
+		Overrides.Remove(MeshPath);
 	}
 	else
 	{
-		StaticMeshTypeSemanticIdOverrides.Add(MeshPath, SemanticId);
+		Overrides.Add(MeshPath, SemanticId);
 	}
 
 	// Re-label all components rendering this mesh, Niagara mesh renderers included.
@@ -456,6 +452,54 @@ void UTempoActorLabeler::HandleSetStaticMeshTypeSemanticId(const TempoSensors::S
 			}
 		}
 	}
+}
+
+void UTempoActorLabeler::HandleSetStaticMeshTypeSemanticId(const TempoSensors::SetStaticMeshTypeSemanticIdRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation)
+{
+	const FString MeshPath = UTF8_TO_TCHAR(Request.static_mesh_path().c_str());
+	const int32 SemanticId = Request.semantic_id();
+
+	if (!ValidateSemanticIdRange(SemanticId, ResponseContinuation))
+	{
+		return;
+	}
+
+	// An override has to land in the map the reporting RPCs read for this asset kind, so a path
+	// naming something else belongs in the skeletal RPC (or nowhere). Resolving it also rejects a
+	// typo rather than recording an override no component will ever match. The table's own paths
+	// are already typed by the column they came from, so they need no load.
+	if (!StaticMeshLabels.Contains(MeshPath) && !Cast<UStaticMesh>(FSoftObjectPath(MeshPath).TryLoad()))
+	{
+		const FString ErrorMsg = FString::Printf(TEXT("'%s' does not name a static mesh. Skeletal meshes are set with SetSkeletalMeshTypeSemanticId."), *MeshPath);
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(),
+			grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, TCHAR_TO_UTF8(*ErrorMsg)));
+		return;
+	}
+
+	SetMeshTypeSemanticIdOverride(MeshPath, SemanticId, StaticMeshTypeSemanticIdOverrides);
+
+	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status_OK);
+}
+
+void UTempoActorLabeler::HandleSetSkeletalMeshTypeSemanticId(const TempoSensors::SetSkeletalMeshTypeSemanticIdRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation)
+{
+	const FString MeshPath = UTF8_TO_TCHAR(Request.skeletal_mesh_path().c_str());
+	const int32 SemanticId = Request.semantic_id();
+
+	if (!ValidateSemanticIdRange(SemanticId, ResponseContinuation))
+	{
+		return;
+	}
+
+	if (!SkeletalMeshLabels.Contains(MeshPath) && !Cast<USkinnedAsset>(FSoftObjectPath(MeshPath).TryLoad()))
+	{
+		const FString ErrorMsg = FString::Printf(TEXT("'%s' does not name a skeletal mesh. Static meshes are set with SetStaticMeshTypeSemanticId."), *MeshPath);
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(),
+			grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, TCHAR_TO_UTF8(*ErrorMsg)));
+		return;
+	}
+
+	SetMeshTypeSemanticIdOverride(MeshPath, SemanticId, SkeletalMeshTypeSemanticIdOverrides);
 
 	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status_OK);
 }
@@ -492,26 +536,33 @@ void UTempoActorLabeler::HandleSetLabelType(const TempoSensors::SetLabelTypeRequ
 void UTempoActorLabeler::HandleLoadLabelTable(const TempoSensors::LoadLabelTableRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation)
 {
 	FString Json = UTF8_TO_TCHAR(Request.json().c_str());
-	FString JsonFile = UTF8_TO_TCHAR(Request.json_file().c_str());
+	const FString RequestedJsonFile = UTF8_TO_TCHAR(Request.json_file().c_str());
 
-	if (Json.IsEmpty() == JsonFile.IsEmpty())
+	if (!Json.IsEmpty() && !RequestedJsonFile.IsEmpty())
 	{
 		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(),
-			grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "Exactly one of json and json_file must be set"));
+			grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "At most one of json and json_file may be set"));
 		return;
 	}
 
-	if (!JsonFile.IsEmpty())
+	if (Json.IsEmpty() && RequestedJsonFile.IsEmpty())
 	{
-		if (FPaths::IsRelative(JsonFile))
-		{
-			JsonFile = FPaths::Combine(FPaths::ProjectDir(), JsonFile);
-		}
+		// Neither field set means "go back to the table configured in Project Settings". Without
+		// this there is no way out of a runtime table once one is loaded: it lives on the settings
+		// CDO and supersedes the configured asset for as long as it is set.
+		GetMutableDefault<UTempoSensorsSettings>()->SetRuntimeSemanticLabelTable(nullptr);
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status_OK);
+		return;
+	}
+
+	if (!RequestedJsonFile.IsEmpty())
+	{
+		const FString JsonFile = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir(), RequestedJsonFile);
 		if (!FFileHelper::LoadFileToString(Json, *JsonFile))
 		{
 			const FString ErrorMsg = FString::Printf(TEXT("Could not read label table file '%s'"), *JsonFile);
 			ResponseContinuation.ExecuteIfBound(TempoCore::Empty(),
-				grpc::Status(grpc::StatusCode::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
+				grpc::Status(grpc::StatusCode::NOT_FOUND, TCHAR_TO_UTF8(*ErrorMsg)));
 			return;
 		}
 	}
@@ -524,12 +575,26 @@ void UTempoActorLabeler::HandleLoadLabelTable(const TempoSensors::LoadLabelTable
 	// ComponentTags, so let an omitted column keep the row struct's default. Unrecognized columns
 	// stay an error: those are typos, and silently dropping one would silently drop its labels.
 	NewSemanticLabelTable->bIgnoreMissingFields = true;
-	const TArray<FString> Problems = NewSemanticLabelTable->CreateTableFromJSONString(Json);
-	if (!Problems.IsEmpty())
+	const TArray<FString> ImportProblems = NewSemanticLabelTable->CreateTableFromJSONString(Json);
+	if (!ImportProblems.IsEmpty())
 	{
-		const FString ErrorMsg = FString::Printf(TEXT("Could not import label table: %s"), *FString::Join(Problems, TEXT(" ")));
+		const FString ErrorMsg = FString::Printf(TEXT("Could not import label table: %s"), *FString::Join(ImportProblems, TEXT(" ")));
 		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(),
-			grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
+			grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, TCHAR_TO_UTF8(*ErrorMsg)));
+		return;
+	}
+
+	// The importer only reports what it could not parse. A table that parses can still be unusable
+	// — an unencodable label ID corrupts the depth of every pixel it covers, an unresolved asset
+	// path labels nothing — and none of that is visible to the client from a table it can no longer
+	// see. Check before installing, so a bad table is rejected here rather than discovered in the
+	// images.
+	const TArray<FString> ValidationProblems = ValidateSemanticLabelTable(NewSemanticLabelTable);
+	if (!ValidationProblems.IsEmpty())
+	{
+		const FString ErrorMsg = FString::Printf(TEXT("Label table is not usable: %s"), *FString::Join(ValidationProblems, TEXT(" ")));
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(),
+			grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, TCHAR_TO_UTF8(*ErrorMsg)));
 		return;
 	}
 
@@ -566,16 +631,25 @@ void UTempoActorLabeler::HandleSetLabelRowOverrides(const TempoSensors::SetLabel
 	}
 
 	// Reject a row name the active table doesn't have, rather than accepting a setting that can
-	// only ever resolve to "no override".
-	if (SemanticLabelTable && !OverridableRowName.IsEmpty())
+	// only ever resolve to "no override". Checked against the table in effect rather than this
+	// subsystem's cached copy, which is null until OnWorldBeginPlay and would skip the check.
+	if (!OverridableRowName.IsEmpty())
 	{
+		const UDataTable* ActiveSemanticLabelTable = GetDefault<UTempoSensorsSettings>()->GetSemanticLabelTable();
+		if (!ActiveSemanticLabelTable)
+		{
+			ResponseContinuation.ExecuteIfBound(TempoCore::Empty(),
+				grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "No semantic label table is set"));
+			return;
+		}
+
 		for (const FString& RowName : { OverridableRowName, OverridingRowName })
 		{
-			if (!SemanticLabelTable->GetRowNames().Contains(FName(*RowName)))
+			if (!ActiveSemanticLabelTable->GetRowMap().Contains(FName(*RowName)))
 			{
 				const FString ErrorMsg = FString::Printf(TEXT("Semantic label table has no row named '%s'"), *RowName);
 				ResponseContinuation.ExecuteIfBound(TempoCore::Empty(),
-					grpc::Status(grpc::StatusCode::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
+					grpc::Status(grpc::StatusCode::NOT_FOUND, TCHAR_TO_UTF8(*ErrorMsg)));
 				return;
 			}
 		}
@@ -593,12 +667,8 @@ void UTempoActorLabeler::HandleSetActorTagSemanticId(const TempoSensors::SetActo
 {
 	const int32 SemanticId = Request.semantic_id();
 
-	// Validate range
-	if (SemanticId < -1 || SemanticId > GTempoCamera_Max_Label)
+	if (!ValidateSemanticIdRange(SemanticId, ResponseContinuation))
 	{
-		const FString ErrorMsg = FString::Printf(TEXT("semantic_id must be -1 (revert) or 0-%d"), GTempoCamera_Max_Label);
-		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(),
-			grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
 	}
 
@@ -680,7 +750,7 @@ TMap<uint8, uint8> UTempoActorLabeler::GetInstanceToSemanticIdMap() const
 	TMap<uint8, uint8> Result;
 	for (const auto& LabeledObject : LabeledObjects)
 	{
-		if (LabeledObject.Value.InstanceId != NoLabelId)
+		if (LabeledObject.Value.InstanceId != NoInstanceId)
 		{
 			Result.Add(LabeledObject.Value.InstanceId, LabeledObject.Value.SemanticId);
 		}
@@ -770,6 +840,16 @@ void UTempoActorLabeler::Deinitialize()
 {
 	Super::Deinitialize();
 
+	// Drop our binding before clearing the table below, so the resulting broadcast doesn't send us
+	// re-labeling a world that is going away.
+	GetMutableDefault<UTempoSensorsSettings>()->TempoSensorsLabelSettingsChangedEvent.RemoveAll(this);
+
+	// A table loaded over the API lives on the rooted settings CDO, not the world, so left in place
+	// it would silently supersede the configured asset in every later session of this process —
+	// including the next PIE run, where picking a different table in Project Settings would then
+	// appear to do nothing.
+	GetMutableDefault<UTempoSensorsSettings>()->SetRuntimeSemanticLabelTable(nullptr);
+
 	FTempoServer::Get().DeactivateService<LabelService>();
 }
 
@@ -783,31 +863,41 @@ void UTempoActorLabeler::BuildLabelMaps()
 	ComponentTagLabels.Reset();
 	ActorTagLabels.Reset();
 	SemanticIds.Reset();
-	NoLabelId = 0;
+
+	// A table set in the editor never passes through LoadLabelTable's check, so report the same
+	// problems here. Building the maps anyway is deliberate: whatever the table gets right still
+	// labels the world, and each problem below describes an entry that will be missing or wrong.
+	for (const FString& Problem : ValidateSemanticLabelTable(SemanticLabelTable))
+	{
+		UE_LOG(LogTempoSensors, Error, TEXT("Semantic label table: %s"), *Problem);
+	}
 
 	if (!SemanticLabelTable)
 	{
-		UE_LOG(LogTempoSensors, Error, TEXT("Semantic Label table was not set"));
 		return;
 	}
 
-	SemanticLabelTable->ForeachRow<FSemanticLabel>(TEXT(""), [this](const FName& Key, const FSemanticLabel& Value)
+	// Ingest one of the row's tag columns. The validator has already reported every key two rows
+	// both claim, so here the first claimant simply wins. An empty tag is dropped rather than
+	// keyed on NAME_None, which no Actor or component means to match.
+	auto IngestColumn = [](auto& Labels, const auto& Keys, const FName& Label)
 	{
-		const FName& Label = Key;
+		for (const FName& Key : Keys)
+		{
+			if (!Key.IsNone())
+			{
+				Labels.FindOrAdd(Key, Label);
+			}
+		}
+	};
+
+	SemanticLabelTable->ForeachRow<FSemanticLabel>(TEXT(""), [this, &IngestColumn](const FName& Label, const FSemanticLabel& Value)
+	{
 		for (const TSubclassOf<AActor>& ActorType : Value.ActorTypes)
 		{
 			if (ActorType.Get())
 			{
-				if (ActorSemanticLabels.Contains(ActorType))
-				{
-					UE_LOG(LogTempoSensors, Error, TEXT("Actor type %s is associated with more than one label (%s and %s)"), *ActorType->GetName(), *ActorSemanticLabels[ActorType].ToString(), *Label.ToString());
-					continue;
-				}
-				ActorSemanticLabels.Add(ActorType, Label);
-			}
-			else
-			{
-				UE_LOG(LogTempoSensors, Warning, TEXT("Null Actor associated with label %s"), *Label.ToString());
+				ActorSemanticLabels.FindOrAdd(ActorType, Label);
 			}
 		}
 
@@ -815,17 +905,7 @@ void UTempoActorLabeler::BuildLabelMaps()
 		{
 			if (const UStaticMesh* StaticMesh = StaticMeshAsset.LoadSynchronous())
 			{
-				const FString MeshFullPath = StaticMesh->GetPathName();
-				if (StaticMeshLabels.Contains(MeshFullPath))
-				{
-					UE_LOG(LogTempoSensors, Error, TEXT("Static mesh type %s is associated with more than one label (%s and %s)"), *MeshFullPath, *StaticMeshLabels[MeshFullPath].ToString(), *Label.ToString());
-					continue;
-				}
-				StaticMeshLabels.Add(MeshFullPath, Label);
-			}
-			else
-			{
-				UE_LOG(LogTempoSensors, Warning, TEXT("Null static mesh associated with label %s"), *Label.ToString());
+				StaticMeshLabels.FindOrAdd(StaticMesh->GetPathName(), Label);
 			}
 		}
 
@@ -833,77 +913,15 @@ void UTempoActorLabeler::BuildLabelMaps()
 		{
 			if (const USkeletalMesh* SkeletalMesh = SkeletalMeshAsset.LoadSynchronous())
 			{
-				const FString MeshFullPath = SkeletalMesh->GetPathName();
-				if (SkeletalMeshLabels.Contains(MeshFullPath))
-				{
-					UE_LOG(LogTempoSensors, Error, TEXT("Skeletal mesh type %s is associated with more than one label (%s and %s)"), *MeshFullPath, *SkeletalMeshLabels[MeshFullPath].ToString(), *Label.ToString());
-					continue;
-				}
-				SkeletalMeshLabels.Add(MeshFullPath, Label);
-			}
-			else
-			{
-				UE_LOG(LogTempoSensors, Warning, TEXT("Null skeletal mesh associated with label %s"), *Label.ToString());
+				SkeletalMeshLabels.FindOrAdd(SkeletalMesh->GetPathName(), Label);
 			}
 		}
 
-		for (const FName& ActorTag : Value.ActorTags)
-		{
-			if (ActorTag.IsNone())
-			{
-				UE_LOG(LogTempoSensors, Warning, TEXT("Empty actor tag associated with label %s"), *Label.ToString());
-				continue;
-			}
-			if (ActorTagLabels.Contains(ActorTag))
-			{
-				UE_LOG(LogTempoSensors, Error, TEXT("Actor tag %s is associated with more than one label (%s and %s)"), *ActorTag.ToString(), *ActorTagLabels[ActorTag].ToString(), *Label.ToString());
-				continue;
-			}
-			ActorTagLabels.Add(ActorTag, Label);
-		}
+		IngestColumn(ActorTagLabels, Value.ActorTags, Label);
+		IngestColumn(ComponentTagLabels, Value.ComponentTags, Label);
 
-		for (const FName& ComponentTag : Value.ComponentTags)
-		{
-			if (ComponentTag.IsNone())
-			{
-				UE_LOG(LogTempoSensors, Warning, TEXT("Empty component tag associated with label %s"), *Label.ToString());
-				continue;
-			}
-			if (ComponentTagLabels.Contains(ComponentTag))
-			{
-				UE_LOG(LogTempoSensors, Error, TEXT("Component tag %s is associated with more than one label (%s and %s)"), *ComponentTag.ToString(), *ComponentTagLabels[ComponentTag].ToString(), *Label.ToString());
-				continue;
-			}
-			ComponentTagLabels.Add(ComponentTag, Label);
-		}
-
-		const int32 LabelId = Value.Label;
-		if (LabelId < 0 || LabelId > GTempoCamera_Max_Label)
-		{
-			// The camera stores the label in the exponent field of the tile atlas's fp32 alpha,
-			// biased by +1. An ID outside 0..GTempoCamera_Max_Label pushes that field to 0 or 255,
-			// making the alpha subnormal or Inf/NaN. Either way the GPU destroys it and the pixel
-			// decodes to label 0 at MaxDepth, so the depth is lost as silently as the label.
-			UE_LOG(LogTempoSensors, Error, TEXT("Label name %s has ID %d, outside the encodable range 0-%d. Label and depth will both be corrupted wherever this label is visible."), *Label.ToString(), LabelId, GTempoCamera_Max_Label);
-		}
-		if (SemanticIds.Contains(Label))
-		{
-			UE_LOG(LogTempoSensors, Error, TEXT("Label name %s is associated with more than one label ID (%d and %d)"), *Label.ToString(), SemanticIds[Label], LabelId);
-		}
-		else
-		{
-			SemanticIds.Add(Label, LabelId);
-		}
+		SemanticIds.Add(Label, Value.Label);
 	});
-
-	if (const int32* NoLabelIdPtr = SemanticIds.Find(NoLabelName))
-	{
-		NoLabelId = *NoLabelIdPtr;
-	}
-	else
-	{
-		UE_LOG(LogTempoSensors, Error, TEXT("Label Table did not contain entry for NoLabel name"));
-	}
 }
 
 void UTempoActorLabeler::LabelAllActors()
@@ -957,14 +975,20 @@ TOptional<int32> UTempoActorLabeler::ResolveActorSemanticId(const AActor* Actor)
 	// Actors, so it beats the type rules, which name every Actor of a class at once. An Actor
 	// carrying tags for two different labels resolves to whichever its Tags array lists first —
 	// the same first-match rule component tags follow.
+
+	// Runtime overrides take precedence over the label table, so every tag is offered to the
+	// override map before any tag is offered to the table. Checking both per tag instead would let
+	// a table entry on an earlier tag beat an override on a later one.
 	for (const FName& ActorTag : Actor->Tags)
 	{
-		// Runtime overrides take precedence over the label table.
 		if (const int32* OverrideSemanticId = ActorTagSemanticIdOverrides.Find(ActorTag))
 		{
 			return *OverrideSemanticId;
 		}
+	}
 
+	for (const FName& ActorTag : Actor->Tags)
+	{
 		if (const FName* TagLabel = ActorTagLabels.Find(ActorTag))
 		{
 			if (const int32* TagLabelId = SemanticIds.Find(*TagLabel))
@@ -980,8 +1004,12 @@ TOptional<int32> UTempoActorLabeler::ResolveActorSemanticId(const AActor* Actor)
 		return *OverrideSemanticId;
 	}
 
+	// Most derived matching type wins, so a row listing a superclass as a catch-all doesn't
+	// outrank a row naming the Actor's own class. Single inheritance makes every pair of matching
+	// types comparable — both are ancestors of this class — so there is no ambiguous case to
+	// report; the table's own duplicate entries are the validator's business.
 	TOptional<int32> ResolvedSemanticId;
-	FName AssignedLabel = NAME_None;
+	const UClass* BestActorType = nullptr;
 	for (const auto& [ActorType, ActorLabel] : ActorSemanticLabels)
 	{
 		if (!Actor->GetClass()->IsChildOf(ActorType.Get()))
@@ -989,14 +1017,14 @@ TOptional<int32> UTempoActorLabeler::ResolveActorSemanticId(const AActor* Actor)
 			continue;
 		}
 
+		if (BestActorType && !ActorType->IsChildOf(BestActorType))
+		{
+			continue;
+		}
+
 		if (const int32* SemanticId = SemanticIds.Find(ActorLabel))
 		{
-			if (!AssignedLabel.IsNone() && ActorLabel != AssignedLabel)
-			{
-				UE_LOG(LogTempoSensors, Error, TEXT("Labels %s and %s have overlapping actor types"), *ActorLabel.ToString(), *AssignedLabel.ToString());
-				continue;
-			}
-			AssignedLabel = ActorLabel;
+			BestActorType = ActorType.Get();
 			ResolvedSemanticId = *SemanticId;
 		}
 		else
@@ -1006,6 +1034,19 @@ TOptional<int32> UTempoActorLabeler::ResolveActorSemanticId(const AActor* Actor)
 	}
 
 	return ResolvedSemanticId;
+}
+
+TOptional<FName> UTempoActorLabeler::ResolveSemanticIdRowName(int32 SemanticId) const
+{
+	for (const auto& [LabelName, RowSemanticId] : SemanticIds)
+	{
+		if (RowSemanticId == SemanticId)
+		{
+			return LabelName;
+		}
+	}
+
+	return TOptional<FName>();
 }
 
 void UTempoActorLabeler::LabelAllComponents(const AActor* Actor, FInstanceSemanticIdPair ActorIdPair)
@@ -1098,8 +1139,14 @@ TOptional<int32> UTempoActorLabeler::ResolveComponentSemanticId(const UPrimitive
 
 TOptional<int32> UTempoActorLabeler::ResolveMeshSemanticId(const FString& MeshPath) const
 {
-	// Runtime overrides take precedence over the label table.
+	// Runtime overrides take precedence over the label table. Static and skeletal overrides live in
+	// separate maps so each Set RPC reports back exactly what it accepts, but they share one asset
+	// path space, so at most one of them can hold any given path.
 	if (const int32* OverrideSemanticId = StaticMeshTypeSemanticIdOverrides.Find(MeshPath))
+	{
+		return *OverrideSemanticId;
+	}
+	if (const int32* OverrideSemanticId = SkeletalMeshTypeSemanticIdOverrides.Find(MeshPath))
 	{
 		return *OverrideSemanticId;
 	}
@@ -1208,12 +1255,14 @@ void UTempoActorLabeler::UnLabelActor(AActor* Actor)
 
 	UnLabelAllComponents(Actor);
 
-	if (GetDefault<UTempoSensorsSettings>()->GetLabelType() == ELabelType::Instance)
+	// LabelActor allocates an instance ID whatever the label type is, so reclaim it whatever the
+	// label type is. Gating this on Instance mode would strand every ID held at the moment the mode
+	// changed — SetLabelType flips the type before broadcasting, so the unlabel pass that precedes
+	// re-labeling would already see the new one — plus every ID an object spawned and destroyed in
+	// Semantic mode passed through.
+	if (const FInstanceSemanticIdPair* IdPair = LabeledObjects.Find(Actor); IdPair->InstanceId != NoInstanceId)
 	{
-		if (const FInstanceSemanticIdPair* IdPair = LabeledObjects.Find(Actor); IdPair->InstanceId != NoLabelId)
-		{
-			InstanceIdAllocator.Return(IdPair->InstanceId);
-		}
+		InstanceIdAllocator.Return(IdPair->InstanceId);
 	}
 
 	LabeledObjects.Remove(Actor);
@@ -1246,15 +1295,15 @@ void UTempoActorLabeler::UnLabelComponent(UPrimitiveComponent* Component)
 	Component->SetRenderCustomDepth(false);
 	Component->SetCustomDepthStencilValue(0);
 
-	if (GetDefault<UTempoSensorsSettings>()->GetLabelType() == ELabelType::Instance)
+	// Reclaim an ID the component holds in its own right, not one it merely inherited from its
+	// owning Actor — that one is the Actor's to return. Unconditional for the same reason as in
+	// UnLabelActor: LabelComponent allocates whatever the label type is.
+	if (const FInstanceSemanticIdPair* ComponentIdPair = LabeledObjects.Find(Component); ComponentIdPair && ComponentIdPair->InstanceId != NoInstanceId)
 	{
-		if (const FInstanceSemanticIdPair* ComponentIdPair = LabeledObjects.Find(Component))
+		const FInstanceSemanticIdPair* ActorIdPair = LabeledObjects.Find(Component->GetOwner());
+		if (!ActorIdPair || ActorIdPair->InstanceId != ComponentIdPair->InstanceId)
 		{
-			const FInstanceSemanticIdPair* ActorIdPair = LabeledObjects.Find(Component->GetOwner());
-			if (!ActorIdPair || (ActorIdPair->InstanceId != ComponentIdPair->InstanceId && ComponentIdPair->InstanceId != NoLabelId))
-			{
-				InstanceIdAllocator.Return(ComponentIdPair->InstanceId);
-			}
+			InstanceIdAllocator.Return(ComponentIdPair->InstanceId);
 		}
 	}
 
@@ -1263,13 +1312,27 @@ void UTempoActorLabeler::UnLabelComponent(UPrimitiveComponent* Component)
 
 void UTempoActorLabeler::OnLabelSettingsChanged()
 {
-	// Unlabel first, while the maps still describe the labels the world is currently wearing —
-	// UnLabelActor reads NoLabelId to decide which instance IDs to reclaim, and BuildLabelMaps
-	// re-derives NoLabelId from the new table.
+	// Unlabel first, while the maps still describe the labels the world is currently wearing, so
+	// every object gives its instance ID back before the labels it was resolved from change.
 	UnLabelAllActors();
 
-	SemanticLabelTable = GetDefault<UTempoSensorsSettings>()->GetSemanticLabelTable();
-	BuildLabelMaps();
+	UDataTable* ActiveSemanticLabelTable = GetDefault<UTempoSensorsSettings>()->GetSemanticLabelTable();
+	if (ActiveSemanticLabelTable != SemanticLabelTable)
+	{
+		SemanticLabelTable = ActiveSemanticLabelTable;
+		BuildLabelMaps();
+
+		// The row names naming the overridable/overriding pair are held separately from the table
+		// and outlive it, so a table that doesn't carry those rows silently disables the
+		// substitution. Say so once here rather than once per sensor tile.
+		const FName OverridableLabelRowName = GetDefault<UTempoSensorsSettings>()->GetOverridableLabelRowName();
+		int32 OverridableLabel = 0, OverridingLabel = 0;
+		if (!OverridableLabelRowName.IsNone() && !ResolveLabelRowOverrides(SemanticLabelTable, OverridableLabel, OverridingLabel))
+		{
+			UE_LOG(LogTempoSensors, Warning, TEXT("Label row overrides ('%s' overridden by '%s') do not resolve against the current label table. Per-pixel label overriding is disabled until both rows exist."),
+				*OverridableLabelRowName.ToString(), *GetDefault<UTempoSensorsSettings>()->GetOverridingLabelRowName().ToString());
+		}
+	}
 
 	LabelAllActors();
 }
@@ -1289,13 +1352,15 @@ void UTempoActorLabeler::AssignId(UPrimitiveComponent* Component, FInstanceSeman
 
 FName UTempoActorLabeler::GetActorClassification(const AActor* Actor) const
 {
-	for (const auto& Elem : ActorSemanticLabels)
+	// Route through the same resolution the label image is drawn from, so an Actor tag or a runtime
+	// override doesn't leave TempoWorld's overlap events reporting a different class than the
+	// camera renders for the same Actor. An ID no row carries — reachable by overriding to an ID
+	// the table doesn't define — has no name to report, so it falls through like no match at all.
+	if (const TOptional<int32> SemanticId = ResolveActorSemanticId(Actor))
 	{
-		const TSubclassOf<AActor>& ActorType = Elem.Key;
-		const FName& ActorLabel = Elem.Value;
-		if (Actor->GetClass()->IsChildOf(ActorType.Get()))
+		if (const TOptional<FName> RowName = ResolveSemanticIdRowName(*SemanticId))
 		{
-			return ActorLabel;
+			return *RowName;
 		}
 	}
 

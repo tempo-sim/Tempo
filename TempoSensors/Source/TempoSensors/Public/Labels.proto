@@ -59,7 +59,9 @@ message SetActorTagSemanticIdRequest {
 }
 
 message SetStaticMeshTypeSemanticIdRequest {
-  string static_mesh_path = 1;  // Full asset path, e.g., "/Game/Meshes/SM_Tree.SM_Tree"
+  // Full asset path of a static mesh, e.g., "/Game/Meshes/SM_Tree.SM_Tree". A path naming anything
+  // else is rejected; skeletal meshes are set with SetSkeletalMeshTypeSemanticId.
+  string static_mesh_path = 1;
   int32 semantic_id = 2;        // 0-253 to set, -1 to clear override
 }
 
@@ -74,6 +76,24 @@ message GetAllStaticMeshTypesResponse {
   repeated StaticMeshTypeInfo mesh_types = 1;
 }
 
+message SetSkeletalMeshTypeSemanticIdRequest {
+  // Full asset path of a skeletal mesh, e.g., "/Game/Characters/SK_Ped.SK_Ped". A path naming
+  // anything else is rejected; static meshes are set with SetStaticMeshTypeSemanticId.
+  string skeletal_mesh_path = 1;
+  int32 semantic_id = 2;        // 0-253 to set, -1 to clear override
+}
+
+message SkeletalMeshTypeInfo {
+  string mesh_path = 1;          // Full asset path
+  string display_name = 2;       // Short name extracted from path
+  int32 instance_count = 3;      // Number of skinned components using this mesh
+  int32 current_semantic_id = 4; // Current semantic ID (-1 if none)
+}
+
+message GetAllSkeletalMeshTypesResponse {
+  repeated SkeletalMeshTypeInfo mesh_types = 1;
+}
+
 // The global label type. Determines what the label image and lidar label channel carry:
 // the semantic class ID shared by every object of a class, or a per-object instance ID.
 enum LabelType {
@@ -86,15 +106,22 @@ message SetLabelTypeRequest {
   LabelType label_type = 1;
 }
 
-// The table is supplied either inline or by path. Exactly one of json and json_file must be set.
+// The table is supplied either inline or by path; at most one of json and json_file may be set.
+// Setting neither reverts to the table configured in the project's settings, discarding whatever
+// table was last loaded here.
 message LoadLabelTableRequest {
   // The label table as an Unreal DataTable JSON document: a JSON array of row objects, each
   // with a "Name" key (the label's row name) plus any of the row's columns — "Label" (the
   // integer ID written to the label image), "ActorTypes", "ActorTags", "StaticMeshTypes",
   // "SkeletalMeshTypes", "ComponentTags".
   // Asset references are full object paths, e.g. "/Game/Vehicles/BP_Car.BP_Car_C". A column a row
-  // omits is left empty; an unrecognized column name is an error. Include a "NoLabel" row: it
-  // names the ID used for everything the table does not otherwise match.
+  // omits is left empty; an unrecognized column name is an error. Include a "NoLabel" row with
+  // label 0: it names the ID used for everything the table does not otherwise match.
+  //
+  // The table is checked before it is installed and the whole request is rejected, leaving the
+  // active table in place, if any row has a label ID outside 0-253, names an asset path that does
+  // not resolve, claims an actor type / mesh / tag another row already claims, or if the NoLabel
+  // row is missing or non-zero. The error message lists every problem found.
   string json = 1;
   // Path to a file holding the same JSON document. Relative paths resolve against the
   // project directory.
@@ -141,6 +168,10 @@ service LabelService {
   rpc GetAllStaticMeshTypes(TempoCore.Empty) returns (GetAllStaticMeshTypesResponse);
 
   rpc SetStaticMeshTypeSemanticId(SetStaticMeshTypeSemanticIdRequest) returns (TempoCore.Empty);
+
+  rpc GetAllSkeletalMeshTypes(TempoCore.Empty) returns (GetAllSkeletalMeshTypesResponse);
+
+  rpc SetSkeletalMeshTypeSemanticId(SetSkeletalMeshTypeSemanticIdRequest) returns (TempoCore.Empty);
 
   rpc SetActorTagSemanticId(SetActorTagSemanticIdRequest) returns (TempoCore.Empty);
 

@@ -41,8 +41,10 @@ public:
 	ELabelType GetLabelType() const { return LabelType; }
 	bool GetGloballyUniqueInstanceLabels() const { return bGloballyUniqueInstanceLabels; }
 	bool GetInstantaneouslyUniqueInstanceLabels() const { return bInstantaneouslyUniqueInstanceLabels; }
-	// Supersede the configured SemanticLabelTable with a table built at runtime, for the life of the
-	// process. Pass nullptr to fall back to the configured asset.
+	// Supersede the configured SemanticLabelTable with a table built at runtime. Pass nullptr to fall
+	// back to the configured asset — UTempoActorLabeler::Deinitialize does that at world teardown,
+	// so a table loaded over the API is scoped to the world it was loaded into rather than to this
+	// (rooted, and in the editor long-lived) CDO.
 	void SetRuntimeSemanticLabelTable(UDataTable* SemanticLabelTableIn);
 	void SetLabelType(ELabelType LabelTypeIn);
 	void SetGloballyUniqueInstanceLabels(bool bGloballyUniqueInstanceLabelsIn);
@@ -91,7 +93,8 @@ private:
 	TSoftObjectPtr<UDataTable> SemanticLabelTable;
 
 	// A label table built at runtime (from JSON, via the API), which supersedes SemanticLabelTable
-	// while set. Not Config: a table with no asset behind it has no path to save.
+	// while set. Not Config: a table with no asset behind it has no path to save. Cleared at world
+	// teardown, so it cannot silently outlive the session that loaded it.
 	UPROPERTY(Transient)
 	TObjectPtr<UDataTable> RuntimeSemanticLabelTable;
 
