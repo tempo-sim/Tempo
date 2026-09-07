@@ -19,7 +19,6 @@
 #include "Kismet/GameplayStatics.h"
 #include "Kismet/KismetRenderingLibrary.h"
 #include "Materials/MaterialInstanceDynamic.h"
-#include "Math/Box2D.h"
 #include "Misc/ScopeLock.h"
 #include "TextureResource.h"
 
@@ -67,10 +66,58 @@ FTempoCameraIntrinsics::FTempoCameraIntrinsics(const FIntPoint& SizeXY, float Ho
 	  Width(SizeXY.X),
 	  Height(SizeXY.Y) {}
 
-// Row bands the fused decode splits the image into. Each band is decoded by one ParallelFor
+// Most row bands the fused decode splits the image into. Each band is decoded by one ParallelFor
 // iteration, so bands must be numerous enough to keep every core busy but few enough that the
-// per-band bounding box maps are cheap to merge.
+// per-band bounding box tables are cheap to merge. Small images get fewer, see ComputeRowBands.
 static constexpr int32 GDecodeRowBands = 64;
+
+// Smallest band worth its own task. Below this the dispatch costs about as much as the decode.
+static constexpr int64 GDecodeMinPixelsPerBand = 16 * 1024;
+
+namespace
+{
+	// Bounding boxes for one band, indexed by instance id. Labels are one byte, so a fixed table
+	// stands in for a map: no allocation or hashing per pixel, and merging bands is a fixed-size
+	// loop. An id is present once it has a MaxX; the sentinels make the min/max updates branch-free
+	// and let absent entries merge as no-ops.
+	struct FBandBoundingBoxes
+	{
+		int32 MinX[256];
+		int32 MinY[256];
+		int32 MaxX[256];
+		int32 MaxY[256];
+
+		FBandBoundingBoxes()
+		{
+			for (int32 Id = 0; Id < 256; ++Id)
+			{
+				MinX[Id] = MinY[Id] = TNumericLimits<int32>::Max();
+				MaxX[Id] = MaxY[Id] = -1;
+			}
+		}
+
+		bool Contains(int32 Id) const { return MaxX[Id] >= 0; }
+
+		void Add(int32 Id, int32 X, int32 Y)
+		{
+			MinX[Id] = FMath::Min(MinX[Id], X);
+			MinY[Id] = FMath::Min(MinY[Id], Y);
+			MaxX[Id] = FMath::Max(MaxX[Id], X);
+			MaxY[Id] = FMath::Max(MaxY[Id], Y);
+		}
+
+		void Merge(const FBandBoundingBoxes& Other)
+		{
+			for (int32 Id = 0; Id < 256; ++Id)
+			{
+				MinX[Id] = FMath::Min(MinX[Id], Other.MinX[Id]);
+				MinY[Id] = FMath::Min(MinY[Id], Other.MinY[Id]);
+				MaxX[Id] = FMath::Max(MaxX[Id], Other.MaxX[Id]);
+				MaxY[Id] = FMath::Max(MaxY[Id], Other.MaxY[Id]);
+			}
+		}
+	};
+}
 
 TempoSensors::ColorEncoding ColorEncodingToProto(EColorImageEncoding Encoding)
 {
@@ -90,12 +137,10 @@ TempoSensors::ColorEncoding ColorEncodingToProto(EColorImageEncoding Encoding)
 
 // Decode every requested measurement type in a single pass over the pixel image, then respond.
 //
-// Color, label, depth and bounding boxes each used to walk the whole image on their own, so a
-// client streaming all four read the source four times (plus a fifth full-size copy: bounding
-// boxes materialized their own label array). The image is large enough that these passes are
-// memory-bandwidth-bound, so folding them into one pass over row bands cuts the traffic roughly
-// fourfold. Bands also give the bounding box accumulation its parallelism: each band builds its
-// own instance-id -> box map over a contiguous set of rows, and the maps are merged afterwards.
+// One pass rather than one per type because the passes are memory-bandwidth-bound: the image is
+// read once however many types a client streams. The pass is split into row bands for
+// parallelism, and the bands give the bounding box accumulation its structure too: each band
+// builds its own per-instance box table over a contiguous set of rows, merged afterwards.
 //
 // Callers pass an empty array for any type they cannot serve; those requests are left pending
 // rather than answered, which is how a NoDepth read declines depth requests that arrived while
@@ -175,8 +220,8 @@ void RespondToImageRequests(const TTextureRead<PixelType>* TextureRead,
 	}
 
 	const bool bNeedBoundingBoxes = !BoundingBoxRequests.IsEmpty();
-	const int32 NumBands = FMath::Clamp(Height, 1, GDecodeRowBands);
-	TArray<TMap<int32, FBox2D>> BandBoxes;
+	const int32 NumBands = ComputeRowBands(GDecodeRowBands, Height, Width, GDecodeMinPixelsPerBand);
+	TArray<FBandBoundingBoxes> BandBoxes;
 	if (bNeedBoundingBoxes)
 	{
 		BandBoxes.SetNum(NumBands);
@@ -191,7 +236,7 @@ void RespondToImageRequests(const TTextureRead<PixelType>* TextureRead,
 			const int32 BeginY = static_cast<int32>(static_cast<int64>(Height) * Band / NumBands);
 			const int32 EndY = static_cast<int32>(static_cast<int64>(Height) * (Band + 1) / NumBands);
 
-			TMap<int32, FBox2D>* const Boxes = bNeedBoundingBoxes ? &BandBoxes[Band] : nullptr;
+			FBandBoundingBoxes* const Boxes = bNeedBoundingBoxes ? &BandBoxes[Band] : nullptr;
 
 			for (int32 Y = BeginY; Y < EndY; ++Y)
 			{
@@ -253,7 +298,7 @@ void RespondToImageRequests(const TTextureRead<PixelType>* TextureRead,
 						const uint8 InstanceId = SrcRow[X].Label();
 						if (InstanceId > 0)
 						{
-							Boxes->FindOrAdd(InstanceId) += FUintPoint(X, Y);
+							Boxes->Add(InstanceId, X, Y);
 						}
 					}
 				}
@@ -269,24 +314,23 @@ void RespondToImageRequests(const TTextureRead<PixelType>* TextureRead,
 		BoundingBoxesResponse.set_height_px(Height);
 		TextureRead->ExtractMeasurementHeader(TransmissionTime, BoundingBoxesResponse.mutable_header());
 
-		// Merge the per-band maps. FBox2D's += tracks validity, so a band that never saw an
-		// instance simply doesn't contribute an entry for it.
-		TMap<int32, FBox2D> BoundingBoxes;
-		for (const TMap<int32, FBox2D>& Band : BandBoxes)
+		FBandBoundingBoxes BoundingBoxes;
+		for (const FBandBoundingBoxes& Band : BandBoxes)
 		{
-			for (const auto& [InstanceId, Box] : Band)
-			{
-				BoundingBoxes.FindOrAdd(InstanceId) += Box;
-			}
+			BoundingBoxes.Merge(Band);
 		}
 
-		for (const auto& [InstanceId, Box] : BoundingBoxes)
+		for (int32 InstanceId = 1; InstanceId < 256; ++InstanceId)
 		{
+			if (!BoundingBoxes.Contains(InstanceId))
+			{
+				continue;
+			}
 			TempoSensors::BoundingBox2D* BBoxProto = BoundingBoxesResponse.add_bounding_boxes();
-			BBoxProto->set_min_x_px(FMath::RoundToInt32(Box.Min.X));
-			BBoxProto->set_min_y_px(FMath::RoundToInt32(Box.Min.Y));
-			BBoxProto->set_max_x_px(FMath::RoundToInt32(Box.Max.X));
-			BBoxProto->set_max_y_px(FMath::RoundToInt32(Box.Max.Y));
+			BBoxProto->set_min_x_px(BoundingBoxes.MinX[InstanceId]);
+			BBoxProto->set_min_y_px(BoundingBoxes.MinY[InstanceId]);
+			BBoxProto->set_max_x_px(BoundingBoxes.MaxX[InstanceId]);
+			BBoxProto->set_max_y_px(BoundingBoxes.MaxY[InstanceId]);
 			BBoxProto->set_instance_id(InstanceId);
 
 			const uint8* SemanticId = TextureRead->InstanceToSemanticMap.Find(InstanceId);
@@ -1309,8 +1353,6 @@ void UTempoCamera::RenderCapture()
 
 	SequenceId++;
 
-	const FTextureRHIRef StagingTex = NewRead->StagingTexture;
-
 	if (!bSingleTileFastPath)
 	{
 		// Single full-screen aux unpack pass: samples SharedTextureTarget.a across the whole atlas
@@ -1413,22 +1455,8 @@ void UTempoCamera::RenderCapture()
 		}
 	}
 
-	// Staging copy + fence: runs after the Canvas stitch via render-thread FIFO. The lambda holds
-	// a TSharedPtr to NewRead so a concurrent TextureReadQueue.Empty() on the game thread (e.g.,
-	// triggered by SetDepthEnabled in SendMeasurements) can't free the read out from under us
-	// before this command runs.
-	ENQUEUE_RENDER_COMMAND(TempoCameraStagingCopy)(
-		[SharedRTResource, StagingTex, NewRead](FRHICommandListImmediate& RHICmdList)
-		{
-			TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraStagingCopy);
-			FRHITexture* SharedRT = SharedRTResource->GetRenderTargetTexture();
-
-			RHICmdList.Transition(FRHITransitionInfo(SharedRT, ERHIAccess::Unknown, ERHIAccess::CopySrc));
-			RHICmdList.CopyTexture(SharedRT, StagingTex, FRHICopyTextureInfo());
-
-			NewRead->RenderFence = RHICreateGPUFence(TEXT("TempoCameraRenderFence"));
-			RHICmdList.WriteGPUFence(NewRead->RenderFence);
-		});
+	// Staging copy + fence: lands behind the Canvas stitch in the render-thread FIFO.
+	FTextureRead::EnqueueStagingCopy(NewRead, SharedRTResource);
 
 	// Publish the captured frame's id to the render thread for the video encoder. Queued behind the
 	// RT draws above, so by the time it runs SharedFinalTextureTarget holds this capture and

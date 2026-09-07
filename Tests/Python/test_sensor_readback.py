@@ -53,6 +53,7 @@ making it into the package is the first thing to check.
 
 import asyncio
 import math
+import operator
 import os
 import statistics
 import struct
@@ -115,6 +116,23 @@ def _forward_from_rotation(rotation):
     """Unit forward vector for a Tempo right-handed rotation (X forward, Y left, Z up)."""
     cp = math.cos(rotation.p)
     return (cp * math.cos(rotation.y), cp * math.sin(rotation.y), math.sin(rotation.p))
+
+
+def _center_raycast(owner, header):
+    """Raycast along the camera axis from the pose a measurement header says it was captured at."""
+    loc = header.capture_transform.location
+    fwd = _forward_from_rotation(header.capture_transform.rotation)
+    return tw.raycast(
+        start=_vec(loc.x, loc.y, loc.z),
+        end=_vec(loc.x + fwd[0] * MAX_RAY_M, loc.y + fwd[1] * MAX_RAY_M, loc.z + fwd[2] * MAX_RAY_M),
+        ignored_actors=[owner],
+    )
+
+
+def _center_truth(owner, header):
+    """True distance along the camera axis from the header's pose, or None if the ray hits nothing."""
+    hit = _center_raycast(owner, header)
+    return hit.distance_m if hit.hit else None
 
 
 async def _capture_frames(owner, sensor, num_frames, move_camera=True):
@@ -232,7 +250,10 @@ def labeled_scene(readback_level):
     """
     meshes = [m for m in ts.get_all_static_mesh_types().mesh_types if m.instance_count > 0]
     if not meshes:
-        return []
+        # This is a generator fixture, so it has to yield even with nothing to assign; returning
+        # would be reported as a fixture error rather than reaching the skip in the test.
+        yield []
+        return
 
     # Label IDs must stay within what the camera's alpha encoding can represent
     # (GTempoCamera_Max_Label = 253); 0 means "unlabeled", so start at 1.
@@ -341,48 +362,20 @@ def test_frame_matches_its_header(camera_rig, pipelining):
             "whose camera faces the actor's forward axis."
         )
 
-    # Establish the oracle before trusting it. If the very first frame disagrees we cannot tell a
-    # regression from a scene that does not suit the test, so say so instead of crying wolf.
-    loc = first.capture_transform.location
-    probe = tw.raycast(
-        start=_vec(loc.x, loc.y, loc.z),
-        end=_vec(loc.x + MAX_RAY_M, loc.y, loc.z),
-        ignored_actors=[owner],
-    )
-    if not probe.hit:
+    # Whether the scene suits the test is decided by the raycast alone. Judging frame 0's pixels
+    # here would let the very failure this test exists to catch, pixels one capture behind their
+    # header, pass itself off as an unsuitable scene and skip.
+    if _center_truth(owner, first) is None:
         pytest.skip(
             "Nothing in front of the camera to range against — the raycast missed. Point "
             "TEMPO_TEST_RIG_ORIGIN at a spot facing a wall, or build the level described in this "
             "file's docstring."
         )
-    measured = _center_depth(frames[0]["depth"])
-    if abs(measured - probe.distance_m) > DEPTH_TOL_M:
-        # Report enough to tell the likely causes apart: the ray and the camera looking at
-        # different things, versus agreeing on the surface but not the distance.
-        frame_depths = _depths(frames[0]["depth"])
-        finite = sorted(d for d in frame_depths if math.isfinite(d))
-        pytest.skip(
-            f"Could not establish the depth oracle. Camera at "
-            f"({loc.x:.3f}, {loc.y:.3f}, {loc.z:.3f}) reads {measured:.3f} m at the center pixel, "
-            f"but a ray from the same point along +X hits '{probe.actor}' "
-            f"(component '{probe.component}') at {probe.distance_m:.3f} m. Frame depth range "
-            f"{finite[0]:.3f}-{finite[-1]:.3f} m, median {finite[len(finite) // 2]:.3f} m. "
-            "If the ray names an actor the camera cannot see, the two are looking at different "
-            "things; if they name the same surface but differ slightly, DEPTH_TOL_M is too tight "
-            "for this geometry."
-        )
 
-    # The oracle holds. From here a mismatch is a real disagreement between pixels and header.
     observed = []
     for index, frame in enumerate(frames):
         header = frame["depth"].header
-        loc = header.capture_transform.location
-        fwd = _forward_from_rotation(header.capture_transform.rotation)
-        truth = tw.raycast(
-            start=_vec(loc.x, loc.y, loc.z),
-            end=_vec(loc.x + fwd[0] * MAX_RAY_M, loc.y + fwd[1] * MAX_RAY_M, loc.z + fwd[2] * MAX_RAY_M),
-            ignored_actors=[owner],
-        )
+        truth = _center_raycast(owner, header)
         assert truth.hit, f"frame {index}: raycast from the header pose hit nothing"
 
         measured = _center_depth(frame["depth"])
@@ -404,30 +397,42 @@ def test_frame_matches_its_header(camera_rig, pipelining):
 def test_no_tearing_within_a_frame(camera_rig, pipelining):
     """No frame may be stitched together from two different captures.
 
-    Depth is measured along the camera axis, so a flat surface perpendicular to that axis reads the
-    same value at every pixel. Two distinct depth populations in one frame therefore means two
-    captures got mixed. Where the scene does not offer such a surface, fall back to checking that
-    the frame is not a blend of its neighbours.
+    Depth is measured along the camera axis, so a flat wall perpendicular to that axis reads the
+    same value at every pixel, and everything in front of it reads less. Rows left over from the
+    previous capture carry that capture's wall distance, which is farther than anything this
+    capture can legitimately contain, so counting pixels at that distance catches a tear without
+    caring how much foreground the camera's motion brings into view. Where the scene has no such
+    wall, fall back to checking that the frame is not a blend of its neighbours.
     """
     owner, sensor = camera_rig
     frames = asyncio.run(_capture_frames(owner, sensor, NUM_FRAMES))
 
     depths = [_depths(frame["depth"]) for frame in frames]
-    center = _center_depth(frames[0]["depth"])
-    finite = [d for d in depths[0] if math.isfinite(d)]
-    if not finite:
+    if not any(math.isfinite(d) for d in depths[0]):
         pytest.skip("First frame had no finite depths; nothing to check.")
 
-    uniform_fraction = sum(1 for d in depths[0] if abs(d - center) <= DEPTH_TOL_M) / len(depths[0])
-    if uniform_fraction > 0.95:
-        # Strong form: a flat wall fills the frame, so every frame must be single-valued.
-        for index, frame_depths in enumerate(depths):
-            frame_center = _center_depth(frames[index]["depth"])
-            outliers = sum(1 for d in frame_depths if abs(d - frame_center) > DEPTH_TOL_M)
-            assert outliers / len(frame_depths) <= 0.05, (
-                f"frame {index}: {outliers} of {len(frame_depths)} pixels disagree with the center "
-                f"depth {frame_center:.3f} m. A flat wall fills this frame, so more than one depth "
-                "population means two captures were mixed into one image."
+    # The wall distance comes from the header pose, not from the pixels, so a torn frame cannot
+    # vote on its own reference. The scene qualifies for the strong form if a wall dominates any
+    # frame; judging only the first would let a tear there hide the whole check.
+    walls = [_center_truth(owner, frame["depth"].header) for frame in frames]
+    wall_fractions = [
+        sum(1 for d in frame_depths if abs(d - wall) <= DEPTH_TOL_M) / len(frame_depths)
+        if wall is not None else 0.0
+        for frame_depths, wall in zip(depths, walls)
+    ]
+    if max(wall_fractions) > 0.5:
+        # Strong form. Frame k may hold pixels at frame k-1's wall distance only if the camera did
+        # not move enough between them for the two to be told apart.
+        for index in range(1, len(frames)):
+            prev_wall, wall = walls[index - 1], walls[index]
+            if prev_wall is None or wall is None or abs(prev_wall - wall) <= 2 * DEPTH_TOL_M:
+                continue
+            stale = sum(1 for d in depths[index] if abs(d - prev_wall) <= DEPTH_TOL_M)
+            assert stale / len(depths[index]) <= 0.01, (
+                f"frame {index}: {stale} of {len(depths[index])} pixels sit at {prev_wall:.3f} m, "
+                f"the previous capture's wall distance, while this capture's wall is at "
+                f"{wall:.3f} m. Nothing in this capture can be that far away, so those rows came "
+                "from the previous capture."
             )
         return
 
@@ -462,9 +467,10 @@ def test_no_band_seam_artifacts(camera_rig, pipelining):
 
     Both the staging-surface copy and the measurement decode split the image into bands of rows and
     process them concurrently. A boundary computed wrongly drops, duplicates or misplaces the rows
-    at a band edge, which lands at multiples of Height/32 and Height/64 and nowhere else. Comparing
-    row-to-row change at those rows against the rest of the image turns that into a signal that
-    does not depend on scene content.
+    at a band edge, which lands at multiples of Height/32 and Height/64 and nowhere else (small
+    images use fewer bands, always a power of two, so their seams are among the same rows).
+    Comparing row-to-row change at those rows against the rest of the image turns that into a
+    signal that does not depend on scene content.
     """
     owner, sensor = camera_rig
     frames = asyncio.run(_capture_frames(owner, sensor, NUM_FRAMES))
@@ -479,22 +485,24 @@ def test_no_band_seam_artifacts(camera_rig, pipelining):
         data = color.data
         row_bytes = w * 3
 
-        # Mean absolute difference between each row and the one above it.
-        row_deltas = []
-        for y in range(1, h):
+        def row_delta(y):
+            """Mean absolute difference between row y and the one above it."""
             a = data[(y - 1) * row_bytes: y * row_bytes]
             b = data[y * row_bytes: (y + 1) * row_bytes]
-            row_deltas.append(sum(abs(p - q) for p, q in zip(a, b)) / row_bytes)
+            return sum(map(abs, map(operator.sub, a, b))) / row_bytes
 
+        # Every seam row, and every eighth other row for the baseline. The baseline is a
+        # percentile, so a sample serves it, and the whole image would be minutes of pure-Python
+        # byte arithmetic per run.
         seam_rows = set()
         for bands in (32, 64):
             for band in range(1, bands):
                 row = (h * band) // bands
                 if 1 <= row < h:
-                    seam_rows.add(row - 1)  # row_deltas[i] compares rows i and i+1
+                    seam_rows.add(row)
 
-        seam = [row_deltas[i] for i in sorted(seam_rows)]
-        rest = [d for i, d in enumerate(row_deltas) if i not in seam_rows]
+        seam = [row_delta(y) for y in sorted(seam_rows)]
+        rest = [row_delta(y) for y in range(1, h, 8) if y not in seam_rows]
         if not seam or not rest:
             continue
 
@@ -547,21 +555,25 @@ def test_measurement_types_agree(camera_rig, labeled_scene, pipelining):
         assert len(frame["color"].data) == label.width_px * label.height_px * 3
         assert len(frame["depth"].depths_m) == label.width_px * label.height_px * 4
 
-        # Recompute the boxes from the label image and require an exact match.
-        w = label.width_px
+        # Recompute the boxes from the label image and require an exact match. Row by row, with
+        # bytes.index/rindex finding the extents at C speed; a per-pixel Python loop over a full
+        # frame takes seconds.
+        w, h = label.width_px, label.height_px
+        data = label.data
         expected = {}
-        for i, instance_id in enumerate(label.data):
-            if instance_id == 0:
-                continue
-            x, y = i % w, i // w
-            box = expected.get(instance_id)
-            if box is None:
-                expected[instance_id] = [x, y, x, y]
-            else:
-                box[0] = min(box[0], x)
-                box[1] = min(box[1], y)
-                box[2] = max(box[2], x)
-                box[3] = max(box[3], y)
+        for y in range(h):
+            row = data[y * w:(y + 1) * w]
+            for instance_id in set(row):
+                if instance_id == 0:
+                    continue
+                x0, x1 = row.index(instance_id), row.rindex(instance_id)
+                box = expected.get(instance_id)
+                if box is None:
+                    expected[instance_id] = [x0, y, x1, y]
+                else:
+                    box[0] = min(box[0], x0)
+                    box[2] = max(box[2], x1)
+                    box[3] = y
 
         actual = {
             b.instance_id: [b.min_x_px, b.min_y_px, b.max_x_px, b.max_y_px]

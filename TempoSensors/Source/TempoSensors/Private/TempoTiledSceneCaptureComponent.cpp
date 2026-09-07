@@ -52,13 +52,13 @@ void UTempoTiledSceneCaptureComponent::BlockUntilMeasurementsReady() const
 	TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsBlockUntilMeasurementsReady);
 
 	// Do the synchronous readback on the render thread (Read() asserts IsInRenderingThread), then
-	// block the game thread on it via FlushRenderingCommands. We must NOT poll the producer's
-	// RenderFence on the render thread: OnRenderCompleted runs inside OnEndFrameRT, upstream of the
+	// block the game thread on it via FlushRenderingCommands. The producer's RenderFence must not
+	// be polled on the render thread: OnRenderCompleted runs inside OnEndFrameRT, upstream of the
 	// end-of-frame GPU queue submit, so on some RHIs (Vulkan) that fence is never submitted in time
-	// to poll mid-tick — that is the deadlock this replaces. ReadAllAwaitingBlocking skips the poll
-	// and hands the fence to RHIMapStagingSurface, which forces submission and blocks until the GPU
-	// completes. The producer commands enqueued by RenderCapture run first in the render FIFO, so
-	// the staging copy has been issued by the time this command maps it.
+	// to poll mid-tick and the poll deadlocks. ReadAllAwaitingBlocking skips the poll and hands the
+	// fence to RHIMapStagingSurface, which forces submission and blocks until the GPU completes.
+	// The producer commands enqueued by RenderCapture run first in the render FIFO, so the staging
+	// copy has been issued by the time this command maps it.
 	FTextureReadQueue& Queue = const_cast<FTextureReadQueue&>(TextureReadQueue);
 	ENQUEUE_RENDER_COMMAND(TempoBlockingTextureRead)(
 		[&Queue](FRHICommandListImmediate&)

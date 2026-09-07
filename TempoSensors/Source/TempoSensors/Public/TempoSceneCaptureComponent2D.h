@@ -18,9 +18,30 @@ namespace TempoSensors
 	class MeasurementHeader;
 }
 
-// Row bands the staging-surface copy is split into. Enough to spread the copy across cores without
-// making the per-band memcpy so small that task overhead dominates.
+class FTextureRenderTargetResource;
+
+// Most row bands the staging-surface copy is split into. Enough to spread a full camera frame
+// across cores; small reads use fewer, see ComputeRowBands.
 static constexpr int32 GTextureReadCopyRowBands = 32;
+
+// Smallest copy worth its own band. Below this a memcpy finishes in about the time it takes to
+// dispatch the task that would run it.
+static constexpr int64 GTextureReadCopyMinBytesPerBand = 256 * 1024;
+
+// Split NumRows rows into at most MaxBands bands of parallel work, halving the count while a band
+// would carry less than MinWorkPerBand (in whatever unit WorkPerRow is measured in). The count is
+// only ever halved, never derived from the work directly, so band seams stay at fixed fractions of
+// the image height whatever the resolution.
+inline int32 ComputeRowBands(int32 MaxBands, int32 NumRows, int64 WorkPerRow, int64 MinWorkPerBand)
+{
+	int32 NumBands = FMath::Clamp(NumRows, 1, MaxBands);
+	const int64 TotalWork = WorkPerRow * NumRows;
+	while (NumBands > 1 && TotalWork / NumBands < MinWorkPerBand)
+	{
+		NumBands /= 2;
+	}
+	return NumBands;
+}
 
 struct FTextureRead
 {
@@ -40,12 +61,20 @@ struct FTextureRead
 
 	virtual FName GetType() const = 0;
 
-	// Map this read's staging texture and copy it to the CPU. The producer is responsible for
-	// having already copied the render target into StagingTexture and written RenderFence behind
-	// that copy; this only reads what is already there.
+	// Map this read's staging texture and copy it to the CPU. Only reads what
+	// CopyToStaging_RenderThread already put there.
 	virtual void Read() = 0;
 
-	// The GPU fence indicating our render has completed. Set during UpdateSceneCaptureContents.
+	// Copy the render target into StagingTexture and write RenderFence behind the copy. The only
+	// place RenderFence is assigned, so this is the whole producer-side contract: every capture
+	// path enqueues this once, behind the render that fills Source, and Read() maps the result.
+	void TEMPOSENSORS_API CopyToStaging_RenderThread(FRHICommandListImmediate& RHICmdList, FTextureRenderTargetResource* Source);
+
+	// Enqueue CopyToStaging_RenderThread as a render command. The command shares ownership of the
+	// read, so a concurrent FTextureReadQueue::Empty() on the game thread cannot free it first.
+	static void TEMPOSENSORS_API EnqueueStagingCopy(TSharedPtr<FTextureRead> Read, FTextureRenderTargetResource* Source);
+
+	// The GPU fence behind the staging copy; signals once that copy has completed on the GPU.
 	FGPUFenceRHIRef RenderFence;
 
 	// The staging texture assigned to this read for GPU->CPU copy.
@@ -106,10 +135,9 @@ struct TTextureReadBase : FTextureRead
 			return;
 		}
 
-		// The producer already copied the render target into this read's staging texture and wrote
-		// RenderFence behind that copy, so there is nothing to copy here. The fence is always set by
-		// the time we get here: the producer enqueues its staging-copy command before the read joins
-		// the queue, so that command has run before any later render command reaches this one.
+		// The fence is always set by the time we get here: CopyToStaging_RenderThread is enqueued
+		// before the read joins the queue, so it has run before any later render command reaches
+		// this one.
 		if (!ensureMsgf(RenderFence.IsValid(), TEXT("Texture read had no render fence. Dropping frame.")))
 		{
 			FMemory::Memzero(Image.GetData(), Image.Num() * sizeof(PixelType));
@@ -128,13 +156,11 @@ struct TTextureReadBase : FTextureRead
 			// with an unsignaled fence submits the pending GPU work and blocks until it completes,
 			// on every RHI we ship (Metal submits and blocks until idle, Vulkan flushes the RHI
 			// thread, D3D12 waits on the fence), so this does not depend on the fence having been
-			// polled first. Traced separately from the copy below so a profile distinguishes time
-			// spent waiting for the GPU from time spent moving bytes — they respond to completely
-			// different fixes.
+			// polled first, only on the copy having been dispatched: a polled fence means it has
+			// run, and ReadAllAwaitingBlocking flushes once for its whole batch. Traced separately
+			// from the copy below so a profile distinguishes time spent waiting for the GPU from
+			// time spent moving bytes — they respond to completely different fixes.
 			TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsTextureReadMap);
-
-			// Dispatch anything still queued on the immediate list so the producer's copy is on its way.
-			RHICmdList.ImmediateFlush(EImmediateFlushType::DispatchToRHIThread);
 
 			GDynamicRHI->RHIMapStagingSurface(StagingTexture, RenderFence, OutBuffer, SurfaceWidth, SurfaceHeight, RHICmdList.GetGPUMask().ToIndex());
 		}
@@ -143,9 +169,10 @@ struct TTextureReadBase : FTextureRead
 
 		// Copy in parallel over bands of rows. This runs on the render thread inside OnEndFrameRT,
 		// once per sensor per frame, so a single-threaded copy of a whole frame (~16 MB for a 1080p
-		// camera with depth) sits directly on the render thread's critical path.
+		// camera with depth) sits directly on the render thread's critical path. Small reads (a
+		// lidar slice is a few hundred KB) get fewer bands, down to one.
 		const int32 NumRows = ImageSize.Y;
-		const int32 NumBands = FMath::Clamp(NumRows, 1, GTextureReadCopyRowBands);
+		const int32 NumBands = ComputeRowBands(GTextureReadCopyRowBands, NumRows, DstPitch, GTextureReadCopyMinBytesPerBand);
 		const uint8* const SrcBase = static_cast<const uint8*>(OutBuffer);
 		uint8* const DstBase = reinterpret_cast<uint8*>(Image.GetData());
 		{
@@ -279,6 +306,12 @@ struct FTextureReadQueue
 	void ReadAllAwaitingBlocking()
 	{
 		FRWScopeLock_OnlyGTWrite ReadLock(Lock, SLT_ReadOnly);
+
+		// Dispatch anything still queued on the immediate list so every producer's staging copy is
+		// on its way before the first map blocks on it. Once for the batch; ReadAllAvailable never
+		// needs this, since a signaled fence means the copy has already run.
+		FRHICommandListImmediate::Get().ImmediateFlush(EImmediateFlushType::DispatchToRHIThread);
+
 		for (const TSharedPtr<FTextureRead>& TextureRead : PendingTextureReads)
 		{
 			if (TextureRead->State != FTextureRead::State::EAwaitingRender)

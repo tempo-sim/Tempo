@@ -144,11 +144,10 @@ enum class ETempoLidarSamplingStrategy : uint8
 class UTempoLidar;
 
 // Everything about one beam that depends only on the sensor's configuration and not on anything
-// rendered. Decode used to derive all of it per beam per frame — two spherical/perspective
-// conversions, a spherical-to-cartesian for the beam ray and another for the sampled pixel, and the
-// depth-to-distance cosines — which is on the order of a dozen transcendentals per beam. At a few
-// hundred thousand beams that is milliseconds a frame recomputing values that only change when the
-// lidar is reconfigured, and the game thread waits on the decode.
+// rendered: two spherical/perspective conversions, a spherical-to-cartesian for the beam ray and
+// another for the sampled pixel, and the depth-to-distance cosines, a dozen or so transcendentals
+// per beam. Computed at configuration time rather than per frame because at a few hundred thousand
+// beams that is milliseconds a frame, on a path the game thread waits on.
 //
 // Built by UTempoLidar::BuildBeamSamples when a tile is configured and shared with every read
 // captured against that configuration. Ownership is shared rather than borrowed on purpose: a read
@@ -337,6 +336,10 @@ protected:
 	// Used to widen each tile's rendered FOV so calibrated rays don't leave the pixel grid.
 	double GetMaxAbsAzimuthOffsetDeg() const;
 
+	// The elevation range a scan segment reports, in degrees, in the client's negated convention:
+	// from BeamCalibration when set, otherwise +/- VerticalFOV / 2.
+	void GetOutputElevationRangeDeg(double& MinOut, double& MaxOut) const;
+
 	// The measurement types supported. Should be set in constructor of derived classes.
 	// (MeasurementTypes is inherited from UTempoTiledSceneCaptureComponent.)
 
@@ -434,34 +437,29 @@ struct TLidarTextureReadBase : TTextureReadBase<PixelType>
 {
 	TLidarTextureReadBase(const FIntPoint& ImageSizeIn, int32 SequenceIdIn, double CaptureTimeIn, const FString& OwnerNameIn,
 		const FString& SensorNameIn, const FTransform& SensorTransformIn, const FTransform& CaptureTransformIn,
-		double HorizontalFOVIn, double EffectiveHorizontalFOVIn, double VerticalFOVIn,
-		int32 HorizontalBeamsIn, int32 VerticalBeamsIn, const FVector2D& SizeXYFOVIn,
+		double HorizontalFOVIn, int32 HorizontalBeamsIn, int32 VerticalBeamsIn,
+		double MinOutputElevationDegIn, double MaxOutputElevationDegIn,
 		double IntensitySaturationDistanceIn, double MaxAngleOfIncidenceIn,
 		int32 NumCaptureComponentsIn, double RelativeYawIn, float MinDepthIn, float MaxDepthIn, double MinDistanceIn, double MaxDistanceIn,
-		TArray<FLidarBeamCalibration> BeamCalibrationIn,
 		TSharedPtr<const TArray<FTempoLidarBeamSample>> BeamSamplesIn)
 		: TTextureReadBase<PixelType>(ImageSizeIn, SequenceIdIn, CaptureTimeIn, OwnerNameIn, SensorNameIn, SensorTransformIn),
-			CaptureTransform(CaptureTransformIn), HorizontalFOV(HorizontalFOVIn), EffectiveHorizontalFOV(EffectiveHorizontalFOVIn),
-			VerticalFOV(VerticalFOVIn), HorizontalBeams(HorizontalBeamsIn),
-			VerticalBeams(VerticalBeamsIn), SizeXYFOV(SizeXYFOVIn), IntensitySaturationDistance(IntensitySaturationDistanceIn),
+			CaptureTransform(CaptureTransformIn), HorizontalFOV(HorizontalFOVIn), HorizontalBeams(HorizontalBeamsIn),
+			VerticalBeams(VerticalBeamsIn), MinOutputElevationDeg(MinOutputElevationDegIn), MaxOutputElevationDeg(MaxOutputElevationDegIn),
+			IntensitySaturationDistance(IntensitySaturationDistanceIn),
 			MaxAngleOfIncidence(MaxAngleOfIncidenceIn), NumCaptureComponents(NumCaptureComponentsIn), RelativeYaw(RelativeYawIn),
 			MinDepth(MinDepthIn), MaxDepth(MaxDepthIn), MinDistance(MinDistanceIn), MaxDistance(MaxDistanceIn),
-			BeamCalibration(MoveTemp(BeamCalibrationIn)), BeamSamples(MoveTemp(BeamSamplesIn))
+			BeamSamples(MoveTemp(BeamSamplesIn))
 	{
 	}
 
 	const FTransform CaptureTransform;
-	// Horizontal FOV in degrees, covering the nominal beam azimuths. Used for the per-beam
-	// nominal-azimuth formula and the reported azimuth range.
+	// Horizontal FOV in degrees, covering the nominal beam azimuths. Reported as the azimuth range.
 	double HorizontalFOV;
-	// Padded horizontal FOV in degrees, covering the calibrated beam azimuths (nominal +
-	// AzimuthOffsetDeg). Defines the pixel grid the renderer produced — Decode maps spherical
-	// coordinates into this FOV.
-	double EffectiveHorizontalFOV;
-	double VerticalFOV;
 	int32 HorizontalBeams;
 	int32 VerticalBeams;
-	const FVector2D SizeXYFOV;
+	// Elevation range the segment reports, in degrees, in the client's (negated) convention.
+	double MinOutputElevationDeg;
+	double MaxOutputElevationDeg;
 	double IntensitySaturationDistance;
 	double MaxAngleOfIncidence;
 	int32 NumCaptureComponents;
@@ -470,7 +468,6 @@ struct TLidarTextureReadBase : TTextureReadBase<PixelType>
 	float MaxDepth;
 	double MinDistance;
 	double MaxDistance;
-	TArray<FLidarBeamCalibration> BeamCalibration;
 	// Per-beam geometry for the configuration this read was captured under. Held by shared pointer
 	// so a reconfigure mid-decode cannot invalidate it.
 	TSharedPtr<const TArray<FTempoLidarBeamSample>> BeamSamples;
@@ -483,7 +480,8 @@ struct TTextureRead<FLidarPixel> : TLidarTextureReadBase<FLidarPixel>
 
 	virtual FName GetType() const override { return TEXT("Lidar"); }
 
-	void Decode(float TransmissionTime, TempoSensors::LidarScanSegment& ScanSegmentOut) const;
+	// Returns false, leaving ScanSegmentOut untouched, if the read cannot be decoded.
+	bool Decode(float TransmissionTime, TempoSensors::LidarScanSegment& ScanSegmentOut) const;
 };
 
 template <>
@@ -493,7 +491,8 @@ struct TTextureRead<FLidarPixelWithColor> : TLidarTextureReadBase<FLidarPixelWit
 
 	virtual FName GetType() const override { return TEXT("LidarColor"); }
 
-	void Decode(float TransmissionTime, TempoSensors::LidarScanSegment& ScanSegmentOut) const;
+	// Returns false, leaving ScanSegmentOut untouched, if the read cannot be decoded.
+	bool Decode(float TransmissionTime, TempoSensors::LidarScanSegment& ScanSegmentOut) const;
 };
 
 // A texture read that holds the horizontally-packed pixels of all active lidar slices.

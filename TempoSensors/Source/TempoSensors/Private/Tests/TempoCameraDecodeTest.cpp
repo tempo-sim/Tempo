@@ -135,7 +135,7 @@ namespace
 		return Out;
 	}
 
-	// The pre-existing serial bounding box implementation, kept here as the reference.
+	// A plain serial bounding box implementation, the reference the fused decode is checked against.
 	template <typename PixelType>
 	TMap<int32, FBox2D> ReferenceBoundingBoxes(const TArray<PixelType>& Image, int32 Width, int32 Height)
 	{

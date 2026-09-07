@@ -204,6 +204,19 @@ bool FTempoLidarBeamSamplesConsistencyTest::RunTest(const FString& Parameters)
 				return false;
 			}
 		}
+
+		// A lone beam has no spread to distribute, so it sits on the tile axis rather than at one
+		// edge of the FOV, where an unguarded (-0.5 + 0 / 1) spread would put it.
+		if (Case.HB == 1)
+		{
+			TestEqual(*FString::Printf(TEXT("%s: single horizontal beam is centered"), *What),
+				static_cast<double>(Samples[0].AzimuthRad), FMath::DegreesToRadians(-Case.Yaw), 1e-6);
+		}
+		if (Case.VB == 1)
+		{
+			TestEqual(*FString::Printf(TEXT("%s: single vertical beam is centered"), *What),
+				static_cast<double>(Samples[0].ElevationRad), 0.0, 1e-6);
+		}
 	}
 
 	return true;

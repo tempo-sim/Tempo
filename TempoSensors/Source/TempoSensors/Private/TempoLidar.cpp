@@ -216,13 +216,6 @@ void PerspectiveToSpherical(const FVector2D& PerspectiveImagePlaneLocation, doub
 	ElevationDeg = FMath::RadiansToDegrees(Elevation);
 }
 
-double DepthToDistance(double AzimuthDeg, double ElevationDeg, double Depth)
-{
-	const double CosAzimuth = FMath::Cos(FMath::DegreesToRadians(AzimuthDeg));
-	const double CosElevation = FMath::Cos(FMath::DegreesToRadians(ElevationDeg));
-	return Depth / (CosAzimuth * CosElevation);
-}
-
 FVector SphericalToCartesian(double AzimuthDeg, double ElevationDeg, double Distance)
 {
 	const double Azimuth = FMath::DegreesToRadians(AzimuthDeg);
@@ -375,9 +368,27 @@ double UTempoLidar::GetMaxAbsAzimuthOffsetDeg() const
 	return static_cast<double>(MaxAbs);
 }
 
-// Precompute the per-beam geometry for a tile. This is the same arithmetic Decode used to run per
-// beam per frame; none of it depends on anything rendered, only on the tile's pixel grid and the
-// beam pattern, so it is hoisted to configuration time. See FTempoLidarBeamSample.
+void UTempoLidar::GetOutputElevationRangeDeg(double& MinOut, double& MaxOut) const
+{
+	if (BeamCalibration.IsEmpty())
+	{
+		MinOut = -VerticalFOV / 2.0;
+		MaxOut = VerticalFOV / 2.0;
+		return;
+	}
+	// Output elevations are negated from the internal ElevationDeg convention, so the most-negative
+	// output comes from the most-positive ElevationDeg.
+	MinOut = TNumericLimits<double>::Max();
+	MaxOut = TNumericLimits<double>::Lowest();
+	for (const FLidarBeamCalibration& B : BeamCalibration)
+	{
+		MinOut = FMath::Min(MinOut, static_cast<double>(-B.ElevationDeg));
+		MaxOut = FMath::Max(MaxOut, static_cast<double>(-B.ElevationDeg));
+	}
+}
+
+// Precompute the per-beam geometry for a tile. None of it depends on anything rendered, only on the
+// tile's pixel grid and the beam pattern, so it belongs at configuration time. See FTempoLidarBeamSample.
 void UTempoLidar::BuildBeamSamples(FTempoLidarTile& Tile) const
 {
 	const int32 NumHorizontalBeams = Tile.HorizontalBeams;
@@ -404,10 +415,12 @@ void UTempoLidar::BuildBeamSamples(FTempoLidarTile& Tile) const
 		return ((PixelCoordinate - SizeXYOffset) / (Tile.SizeXYFOV - FVector2D::UnitVector) - (FVector2D::UnitVector / 2.0)) * ImagePlaneSize;
 	};
 
-	// A single beam is degenerate in the (-0.5 + Index/(Count-1)) spread; treat it as centered
-	// rather than dividing by zero.
-	const double HorizontalSpread = FMath::Max(1, NumHorizontalBeams - 1);
-	const double VerticalSpread = FMath::Max(1, NumVerticalBeams - 1);
+	// Fraction of the FOV, in [-0.5, 0.5], at which beam Index of Count sits. A single beam has no
+	// spread to distribute and sits on the tile axis.
+	auto Spread = [](int32 Index, int32 Count)
+	{
+		return Count > 1 ? -0.5 + static_cast<double>(Index) / (Count - 1) : 0.0;
+	};
 
 	TArray<FTempoLidarBeamSample> Samples;
 	Samples.SetNumUninitialized(NumHorizontalBeams * NumVerticalBeams);
@@ -415,14 +428,14 @@ void UTempoLidar::BuildBeamSamples(FTempoLidarTile& Tile) const
 	int32 NumClamped = 0;
 	for (int32 HorizontalBeam = 0; HorizontalBeam < NumHorizontalBeams; ++HorizontalBeam)
 	{
-		const double NominalAzimuthDeg = (-0.5 + static_cast<double>(HorizontalBeam) / HorizontalSpread) * Tile.FOVAngle;
+		const double NominalAzimuthDeg = Spread(HorizontalBeam, NumHorizontalBeams) * Tile.FOVAngle;
 
 		for (int32 VerticalBeam = 0; VerticalBeam < NumVerticalBeams; ++VerticalBeam)
 		{
 			const bool bCalibrated = BeamCalibration.IsValidIndex(VerticalBeam);
 			const double ElevationDeg = bCalibrated
 				? BeamCalibration[VerticalBeam].ElevationDeg
-				: (-0.5 + static_cast<double>(VerticalBeam) / VerticalSpread) * TileVerticalFOV;
+				: Spread(VerticalBeam, NumVerticalBeams) * TileVerticalFOV;
 			const double AzimuthDeg = NominalAzimuthDeg + (bCalibrated ? BeamCalibration[VerticalBeam].AzimuthOffsetDeg : 0.0);
 
 			const FVector2D PixelCoordinate = ImagePlaneLocationToPixelCoordinate(SphericalToPerspective(AzimuthDeg, ElevationDeg));
@@ -582,22 +595,18 @@ namespace
 	// Decoder body shared by FLidarPixel and FLidarPixelWithColor specializations. The color branch
 	// is constexpr-guarded: the no-color path emits identical proto bytes as before this change.
 	template <typename PixelType>
-	void DecodeLidarRead(const TLidarTextureReadBase<PixelType>& Read, float TransmissionTime,
+	bool DecodeLidarRead(const TLidarTextureReadBase<PixelType>& Read, float TransmissionTime,
 		TempoSensors::LidarScanSegment& ScanSegmentOut)
 	{
-		// EffectiveHorizontalFOV is the padded FOV the renderer actually produced (covers
-		// nominal beam FOV + AzimuthOffsetDeg). HorizontalFOV is the unpadded beam FOV and is only
-		// used for the per-beam nominal azimuth formula and the reported azimuth range.
 		const int32 NumReturns = Read.HorizontalBeams * Read.VerticalBeams;
 
-		// Per-beam geometry, precomputed when the tile was configured. Everything the decode used to
-		// derive here per beam per frame lives in this table; see FTempoLidarBeamSample.
+		// Per-beam geometry, precomputed when the tile was configured; see FTempoLidarBeamSample.
 		const TArray<FTempoLidarBeamSample>* const BeamSamples = Read.BeamSamples.Get();
 		if (!ensureMsgf(BeamSamples && BeamSamples->Num() == NumReturns,
 			TEXT("Lidar read has no matching beam sample table (%d entries for %d returns). Dropping scan."),
 			BeamSamples ? BeamSamples->Num() : -1, NumReturns))
 		{
-			return;
+			return false;
 		}
 
 		// Pre-size the packed repeated-scalar output fields so parallel workers can write
@@ -646,9 +655,17 @@ namespace
 				: TempoSensors::ColorEncoding::CE_RGB8);
 		}
 
+		// Per-scan constants for the loop below. The incidence test compares cosines, which is the
+		// same test as comparing angles (cosine is monotonic over [0, 180] degrees) without an acos
+		// per return, and the world-to-sensor normal transform is the inverse rotation and scale
+		// taken once rather than inverted per return.
+		const double CosMaxAngleOfIncidence = FMath::Cos(FMath::DegreesToRadians(Read.MaxAngleOfIncidence));
+		const FQuat InverseCaptureRotation = Read.CaptureTransform.GetRotation().Inverse();
+		const FVector InverseCaptureScale = FTransform::GetSafeScaleReciprocal(Read.CaptureTransform.GetScale3D());
+
 		// H-outer, V-inner layout: each ParallelFor iteration owns a contiguous V-length stripe
 		// of every output array, so threads never share cache lines.
-		ParallelFor(Read.HorizontalBeams, [&Read, BeamSamples,
+		ParallelFor(Read.HorizontalBeams, [&Read, BeamSamples, CosMaxAngleOfIncidence, InverseCaptureRotation, InverseCaptureScale,
 			DistancesData, IntensitiesData, LabelsData, AzimuthsData, ElevationsData, ReflectivitiesData, ColorsData, ColorEncoding](int32 HorizontalBeam)
 		{
 			for (int32 VerticalBeam = 0; VerticalBeam < Read.VerticalBeams; ++VerticalBeam)
@@ -663,24 +680,21 @@ namespace
 				const float NearestDistance = NearestDepth / Sample.DepthToDistanceDivisor;
 				const FVector NearestPoint = NearestDirection * NearestDistance;
 				const FVector WorldNormal = Pixel.Normal();
-				const FVector LocalNormal = Read.CaptureTransform.InverseTransformVector(WorldNormal);
-				// Only the ray's direction matters below — LinePlaneIntersection takes two points on
-				// the line — but keep the MaxDistance scaling so the intersection sees the same
-				// magnitudes it always has.
-				const FVector RayDirection = RayDirectionUnit * Read.MaxDistance;
+				const FVector LocalNormal = InverseCaptureScale * InverseCaptureRotation.RotateVector(WorldNormal);
 				const double CosAngleOfIncidence = FVector::DotProduct(LocalNormal.GetSafeNormal(), -RayDirectionUnit);
-				const double AngleOfIncidence = FMath::RadiansToDegrees(FMath::Acos(CosAngleOfIncidence));
 				double Intensity;
 				double Distance;
-				if (AngleOfIncidence > Read.MaxAngleOfIncidence)
+				if (CosAngleOfIncidence < CosMaxAngleOfIncidence)
 				{
 					Distance = 0.0;
 					Intensity = 0.0;
 				}
 				else
 				{
+					// The intersection depends only on the ray's direction, so the unit vector
+					// serves as the second point on the line.
 					const FPlane SurfacePlane(NearestPoint, LocalNormal);
-					const FVector HitPoint = FMath::LinePlaneIntersection(FVector::ZeroVector, RayDirection, SurfacePlane);
+					const FVector HitPoint = FMath::LinePlaneIntersection(FVector::ZeroVector, RayDirectionUnit, SurfacePlane);
 
 					Distance = HitPoint.Length();
 					Intensity = CosAngleOfIncidence * Read.IntensitySaturationDistance / FMath::Max(Read.IntensitySaturationDistance, Distance);
@@ -734,37 +748,21 @@ namespace
 		ScanSegmentOut.mutable_distance_range_m()->set_max(QuantityConverter<CM2M>::Convert(Read.MaxDistance));
 		ScanSegmentOut.mutable_azimuth_range_rad()->set_max(FMath::DegreesToRadians(Read.HorizontalFOV / 2.0 + Read.RelativeYaw));
 		ScanSegmentOut.mutable_azimuth_range_rad()->set_min(FMath::DegreesToRadians(-Read.HorizontalFOV / 2.0 + Read.RelativeYaw));
-		if (Read.BeamCalibration.Num() > 0)
-		{
-			// Output elevations are negated from the internal ElevationDeg convention, so the range
-			// is also negated: the most-negative output comes from the most-positive ElevationDeg.
-			float MinOutputElev = TNumericLimits<float>::Max();
-			float MaxOutputElev = TNumericLimits<float>::Lowest();
-			for (const FLidarBeamCalibration& B : Read.BeamCalibration)
-			{
-				const float OutputElev = -B.ElevationDeg;
-				MinOutputElev = FMath::Min(MinOutputElev, OutputElev);
-				MaxOutputElev = FMath::Max(MaxOutputElev, OutputElev);
-			}
-			ScanSegmentOut.mutable_elevation_range_rad()->set_max(FMath::DegreesToRadians(MaxOutputElev));
-			ScanSegmentOut.mutable_elevation_range_rad()->set_min(FMath::DegreesToRadians(MinOutputElev));
-		}
-		else
-		{
-			ScanSegmentOut.mutable_elevation_range_rad()->set_max(FMath::DegreesToRadians(Read.VerticalFOV / 2.0));
-			ScanSegmentOut.mutable_elevation_range_rad()->set_min(FMath::DegreesToRadians(-Read.VerticalFOV / 2.0));
-		}
+		ScanSegmentOut.mutable_elevation_range_rad()->set_max(FMath::DegreesToRadians(Read.MaxOutputElevationDeg));
+		ScanSegmentOut.mutable_elevation_range_rad()->set_min(FMath::DegreesToRadians(Read.MinOutputElevationDeg));
+
+		return true;
 	}
 }
 
-void TTextureRead<FLidarPixel>::Decode(float TransmissionTime, TempoSensors::LidarScanSegment& ScanSegmentOut) const
+bool TTextureRead<FLidarPixel>::Decode(float TransmissionTime, TempoSensors::LidarScanSegment& ScanSegmentOut) const
 {
-	DecodeLidarRead(*this, TransmissionTime, ScanSegmentOut);
+	return DecodeLidarRead(*this, TransmissionTime, ScanSegmentOut);
 }
 
-void TTextureRead<FLidarPixelWithColor>::Decode(float TransmissionTime, TempoSensors::LidarScanSegment& ScanSegmentOut) const
+bool TTextureRead<FLidarPixelWithColor>::Decode(float TransmissionTime, TempoSensors::LidarScanSegment& ScanSegmentOut) const
 {
-	DecodeLidarRead(*this, TransmissionTime, ScanSegmentOut);
+	return DecodeLidarRead(*this, TransmissionTime, ScanSegmentOut);
 }
 
 TFuture<void> UTempoLidar::DecodeAndRespond(TArray<TUniquePtr<FTextureRead>> TextureReads, bool bWithColor)
@@ -783,28 +781,36 @@ TFuture<void> UTempoLidar::DecodeAndRespond(TArray<TUniquePtr<FTextureRead>> Tex
 
 		TArray<TempoSensors::LidarScanSegment> Segments;
 		Segments.SetNum(TextureReads.Num());
+		// A slice that fails to decode is withheld rather than sent empty, so a client counting
+		// segments per sweep sees a missing one, not a malformed one.
+		TArray<bool> Decoded;
+		Decoded.SetNumZeroed(TextureReads.Num());
 		if (!Requests.IsEmpty())
 		{
-			ParallelFor(TextureReads.Num(), [&TextureReads, &Segments, TransmissionTimeCpy, bWithColor](int Index)
+			ParallelFor(TextureReads.Num(), [&TextureReads, &Segments, &Decoded, TransmissionTimeCpy, bWithColor](int Index)
 			{
 				TRACE_CPUPROFILER_EVENT_SCOPE(TempoLidarDecode);
 				if (bWithColor)
 				{
-					static_cast<TTextureRead<FLidarPixelWithColor>*>(TextureReads[Index].Get())->Decode(TransmissionTimeCpy, Segments[Index]);
+					Decoded[Index] = static_cast<TTextureRead<FLidarPixelWithColor>*>(TextureReads[Index].Get())->Decode(TransmissionTimeCpy, Segments[Index]);
 				}
 				else
 				{
-					static_cast<TTextureRead<FLidarPixel>*>(TextureReads[Index].Get())->Decode(TransmissionTimeCpy, Segments[Index]);
+					Decoded[Index] = static_cast<TTextureRead<FLidarPixel>*>(TextureReads[Index].Get())->Decode(TransmissionTimeCpy, Segments[Index]);
 				}
 			});
 		}
 
 		TRACE_CPUPROFILER_EVENT_SCOPE(TempoLidarRespond);
-		for (const TempoSensors::LidarScanSegment& Segment : Segments)
+		for (int32 Index = 0; Index < Segments.Num(); ++Index)
 		{
+			if (!Decoded[Index])
+			{
+				continue;
+			}
 			for (const auto& Request : Requests)
 			{
-				Request.ResponseContinuation.ExecuteIfBound(Segment, grpc::Status_OK);
+				Request.ResponseContinuation.ExecuteIfBound(Segments[Index], grpc::Status_OK);
 			}
 		}
 	});
@@ -988,6 +994,8 @@ void UTempoLidar::RenderCapture()
 	// (SliceDestOffsetX, 0) to (SliceDestOffsetX + SizeXY.X, SizeXY.Y), matching the pack layout
 	// FLidarSharedTextureRead::SplitIntoSlices expects.
 	const int32 NumActiveTiles = GetNumActiveTiles();
+	double MinOutputElevationDeg, MaxOutputElevationDeg;
+	GetOutputElevationRangeDeg(MinOutputElevationDeg, MaxOutputElevationDeg);
 	TArray<TempoMultiViewCapture::FViewSetup> ViewSetups;
 	ViewSetups.Reserve(NumActiveTiles);
 
@@ -1061,11 +1069,12 @@ void UTempoLidar::RenderCapture()
 		{
 			Out.Emplace(new TTextureRead<P>(
 				Tile.SizeXY, SequenceId, CaptureTime, GetOwnerName(), GetSensorName(),
-				GetComponentTransform(), TileWorldTransform, Tile.FOVAngle, Tile.EffectiveFOVAngle,
-				GetEffectiveVerticalFOV(), Tile.HorizontalBeams, GetEffectiveVerticalBeams(), Tile.SizeXYFOV,
+				GetComponentTransform(), TileWorldTransform, Tile.FOVAngle,
+				Tile.HorizontalBeams, GetEffectiveVerticalBeams(),
+				MinOutputElevationDeg, MaxOutputElevationDeg,
 				IntensitySaturationDistance, MaxAngleOfIncidence,
 				NumActiveTiles, Tile.YawOffset, Tile.MinDepth, Tile.MaxDepth,
-				MinDistance, MaxDistance, BeamCalibration, Tile.BeamSamples));
+				MinDistance, MaxDistance, Tile.BeamSamples));
 		};
 		if (bColorEnabled)
 		{
@@ -1101,24 +1110,8 @@ void UTempoLidar::RenderCapture()
 
 	SequenceId++;
 
-	const FTextureRHIRef StagingTex = NewRead->StagingTexture;
-
-	// Single copy from the packed atlas to staging — the atlas IS the packed output. The lambda
-	// holds a TSharedPtr to NewRead so a concurrent TextureReadQueue.Empty() on the game thread
-	// (e.g., from InitSharedRenderTarget during a reconfigure) can't free the read before this
-	// command runs.
-	ENQUEUE_RENDER_COMMAND(TempoLidarStagingCopy)(
-		[SharedRTResource, StagingTex, NewRead](FRHICommandListImmediate& RHICmdList)
-		{
-			TRACE_CPUPROFILER_EVENT_SCOPE(TempoLidarStagingCopy);
-			FRHITexture* SharedRT = SharedRTResource->GetRenderTargetTexture();
-
-			RHICmdList.Transition(FRHITransitionInfo(SharedRT, ERHIAccess::Unknown, ERHIAccess::CopySrc));
-			RHICmdList.CopyTexture(SharedRT, StagingTex, FRHICopyTextureInfo());
-
-			NewRead->RenderFence = RHICreateGPUFence(TEXT("TempoLidarRenderFence"));
-			RHICmdList.WriteGPUFence(NewRead->RenderFence);
-		});
+	// Single copy from the packed atlas to staging — the atlas IS the packed output.
+	FTextureRead::EnqueueStagingCopy(NewRead, SharedRTResource);
 
 	TextureReadQueue.Enqueue(MoveTemp(NewRead));
 }
