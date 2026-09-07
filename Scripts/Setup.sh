@@ -33,8 +33,8 @@ ADD_COMMAND_TO_HOOK() {
     chmod +x "$HOOK_FILE"
   fi
 
-  if ! grep -qF "$COMMAND" "$HOOK_FILE"; then
-    echo "$COMMAND" >> "$HOOK_FILE"
+  if ! grep -qF "\"$COMMAND\"" "$HOOK_FILE"; then
+    echo "\"$COMMAND\"" >> "$HOOK_FILE"
   fi
 }
 
