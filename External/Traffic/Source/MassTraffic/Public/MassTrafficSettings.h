@@ -529,7 +529,7 @@ public:
 	// Distance within which two lane segments are considered intersecting.
 	// Used when getting enter and exit distances for all the conflict lanes.
 	UPROPERTY(EditAnywhere, Config, Category="Lane Intersections")
-	float AcceptableLaneIntersectionDistance = 1.0f;
+	float AcceptableLaneIntersectionDistance = 10.0f;
 
 
 	// At stop signs, pedestrians will be able to cross whenever they want for the most part.
