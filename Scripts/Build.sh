@@ -16,6 +16,8 @@ if [[ "$OSTYPE" = "msys" ]]; then
   # when we invoke .bat files — otherwise cmd.exe's strip-outer-quotes rule
   # mangles the path when another argument (e.g. -Project=...) is also quoted.
   UNREAL_ENGINE_PATH=$(cygpath -w -s "$UNREAL_ENGINE_PATH")
+  # Drop any trailing separator so the path can be appended to below.
+  UNREAL_ENGINE_PATH="${UNREAL_ENGINE_PATH%[\\/]}"
 elif [[ "$OSTYPE" = "darwin"* ]]; then
   PLATFORM="Mac"
 elif [[ "$OSTYPE" = "linux-gnu"* ]]; then
@@ -27,7 +29,10 @@ fi
 
 cd "$UNREAL_ENGINE_PATH"
 if [ "$PLATFORM" = "Win64" ]; then
-  ./Engine/Build/BatchFiles/Build.bat "${PROJECT_NAME}Editor" Development "$PLATFORM" -Project="$PROJECT_ROOT/$PROJECT_NAME.uproject" -WaitMutex -FromMsBuild "$@"
+  # Invoke the .bat by absolute short path, not relatively: MSYS resolves a
+  # relative program path through the real filesystem, which restores the long
+  # "Program Files" form and reintroduces the space the 8.3 conversion removed.
+  "$UNREAL_ENGINE_PATH\\Engine\\Build\\BatchFiles\\Build.bat" "${PROJECT_NAME}Editor" Development "$PLATFORM" -Project="$PROJECT_ROOT/$PROJECT_NAME.uproject" -WaitMutex -FromMsBuild "$@"
 else
   ./Engine/Build/BatchFiles/"$PLATFORM"/Build.sh "${PROJECT_NAME}Editor" Development "$PLATFORM" -Project="$PROJECT_ROOT/$PROJECT_NAME.uproject" -buildscw "$@"
 fi
