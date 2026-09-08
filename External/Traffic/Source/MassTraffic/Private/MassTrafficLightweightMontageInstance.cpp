@@ -199,12 +199,7 @@ bool UE::VertexAnimation::FLightweightMontageInstance::Advance_Internal(float De
 		// Extract Root Motion for this time slice, and accumulate it.
 		if (bExtractRootMotion)
 		{
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-			OutRootMotionParams.Accumulate(Montage->ExtractRootMotionFromTrackRange(PreviousSubStepPosition, Position));
-#else
-			const FAnimExtractContext Context;
-			OutRootMotionParams.Accumulate(Montage->ExtractRootMotionFromTrackRange(PreviousSubStepPosition, Position, Context));
-#endif
+			OutRootMotionParams.Accumulate(Montage->ExtractRootMotionFromTrackRange(PreviousSubStepPosition, Position, FAnimExtractContext()));
 		}
 
 		// if we reached end of section, and we were not processing a branching point, and no events has messed with out current position..
@@ -229,7 +224,6 @@ bool UE::VertexAnimation::FLightweightMontageInstance::Advance_Internal(float De
 			{
 				// Reached end of last section. Exit.
 				return false;
-				break;
 			}
 		}
 	}

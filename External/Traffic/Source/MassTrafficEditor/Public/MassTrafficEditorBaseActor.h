@@ -3,14 +3,14 @@
 
 #pragma once
 
+#if UE_ENABLE_INCLUDE_ORDER_DEPRECATED_IN_5_6
 #include "CoreMinimal.h"
+#endif // UE_ENABLE_INCLUDE_ORDER_DEPRECATED_IN_5_6
 #include "EditorUtilityActor.h"
-
+#if UE_ENABLE_INCLUDE_ORDER_DEPRECATED_IN_5_6
 #include "MassTrafficEditor.h"
-
-// Last
+#endif // UE_ENABLE_INCLUDE_ORDER_DEPRECATED_IN_5_6
 #include "MassTrafficEditorBaseActor.generated.h"
-
 
 #define USE_CUSTOM_EVENT false
 

@@ -2,13 +2,13 @@
 
 #pragma once
 
+#if UE_ENABLE_INCLUDE_ORDER_DEPRECATED_IN_5_6
 #include "MassTrafficPhysics.h"
+#endif // UE_ENABLE_INCLUDE_ORDER_DEPRECATED_IN_5_6
 #include "MassTrafficTypes.h"
-
 #include "MassEntityTraitBase.h"
 #include "MassSimulationLOD.h"
 #include "WheeledVehiclePawn.h"
-
 #include "MassTrafficVehicleSimulationTrait.generated.h"
 
 USTRUCT()
@@ -62,6 +62,15 @@ struct MASSTRAFFIC_API FMassTrafficVehicleSimulationParameters : public FMassCon
 
 	UPROPERTY(EditAnywhere, Category = "Restrictions")
 	TMap<EZoneGraphTurnType, FMassTrafficLanePriorityFilters> TurningLanePriorityFilters;
+
+	/**
+	 * Where CitySample stores the physics template; this fork keeps it in
+	 * FMassTrafficVehiclePhysicsParameters instead. Serialize-only, so configs authored against the
+	 * original layout still resolve it rather than silently dropping the value on load. Not editable:
+	 * set PhysicsParams on the trait, which takes precedence over this.
+	 */
+	UPROPERTY()
+	TSubclassOf<AWheeledVehiclePawn> PhysicsVehicleTemplateActor;
 };
 
 USTRUCT()
@@ -88,6 +97,21 @@ public:
 
 	UPROPERTY(EditAnywhere, Category = "Variable Tick")
 	FMassSimulationVariableTickParameters VariableTickParams;
+
+	/**
+	 * Whether Mass drives these vehicles along the lane graph. Leave this on for traffic. Turn it off
+	 * for vehicles driven by something else, such as TempoMovement, which supply their own movement
+	 * and must not carry the lane following fragments.
+	 *
+	 * When on, this trait also builds what UMassTrafficVehicleSimulationMassControlTrait builds, so a
+	 * vehicle configured with only this trait is a complete traffic vehicle. Adding both traits is
+	 * harmless; the template deduplicates the fragment types.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Mass Traffic")
+	bool bMassControlled = true;
+
+	UPROPERTY(EditAnywhere, Category = "Mass Traffic", meta = (EditCondition = "bMassControlled"))
+	FMassTrafficVehiclePhysicsParameters PhysicsParams;
 
 	virtual void BuildTemplate(FMassEntityTemplateBuildContext& BuildContext, const UWorld& World) const override;
 };

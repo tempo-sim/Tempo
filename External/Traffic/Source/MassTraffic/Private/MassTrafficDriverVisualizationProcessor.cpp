@@ -5,8 +5,9 @@
 #include "MassTrafficDrivers.h"
 #include "MassTrafficFragments.h"
 #include "MassTrafficVehicleInterface.h"
-
 #include "AnimToTextureDataAsset.h"
+#include "MassActorSubsystem.h"
+#include "MassCommonFragments.h"
 #include "GameFramework/Character.h"
 #include "Kismet/GameplayStatics.h"
 #include "MassEntityManager.h"
@@ -28,11 +29,7 @@ UMassTrafficDriverVisualizationProcessor::UMassTrafficDriverVisualizationProcess
 	ExecutionOrder.ExecuteAfter.Add(UE::MassTraffic::ProcessorGroupNames::PostPhysicsUpdateTrafficVehicles);
 }
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-void UMassTrafficDriverVisualizationProcessor::ConfigureQueries()
-#else
 void UMassTrafficDriverVisualizationProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
-#endif
 {
 	// No need to call super as we do not use it's LOD calculation code at all.
 	EntityQuery_Conditional.AddTagRequirement<FMassTrafficVehicleTag>(EMassFragmentPresence::All);
@@ -52,15 +49,9 @@ void UMassTrafficDriverVisualizationProcessor::ConfigureQueries(const TSharedRef
 	EntityQuery_Conditional.SetChunkFilter(&FMassVisualizationChunkFragment::AreAnyEntitiesVisibleInChunk);
 }
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-void UMassTrafficDriverVisualizationProcessor::Initialize(UObject& Owner)
-{
-	Super::Initialize(Owner);
-#else
 void UMassTrafficDriverVisualizationProcessor::InitializeInternal(UObject& Owner, const TSharedRef<FMassEntityManager>& EntityManager)
 {
 	Super::InitializeInternal(Owner, EntityManager);
-#endif
 
 	World = Owner.GetWorld();
 }
@@ -89,11 +80,7 @@ void UMassTrafficDriverVisualizationProcessor::Execute(FMassEntityManager& Entit
 		}
 	}
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-	EntityQuery_Conditional.ForEachEntityChunk(EntityManager, Context, [&, this](FMassExecutionContext& QueryContext)
-#else
 	EntityQuery_Conditional.ForEachEntityChunk(Context, [&, this](FMassExecutionContext& QueryContext)
-#endif
 	{
 		// Get mutable ISMInfos to append instances & custom data to
 		UMassRepresentationSubsystem* RepresentationSubsystem = Context.GetMutableSharedFragment<FMassRepresentationSubsystemSharedFragment>().RepresentationSubsystem;
@@ -104,7 +91,6 @@ void UMassTrafficDriverVisualizationProcessor::Execute(FMassEntityManager& Entit
 	
 		float MaxDriverVisualizationDistanceSq = GMassTrafficMaxDriverVisualizationDistance >= 0.0f ? FMath::Square(GMassTrafficMaxDriverVisualizationDistance) : FLT_MAX;
 
-		const int32 NumEntities = QueryContext.GetNumEntities();
 		TArrayView<FMassRepresentationFragment> RepresentationFragments = QueryContext.GetMutableFragmentView<FMassRepresentationFragment>();
 		const TConstArrayView<FMassViewerInfoFragment> ViewerInfoFragments = QueryContext.GetFragmentView<FMassViewerInfoFragment>();
 		const TConstArrayView<FMassRepresentationLODFragment> RepresentationLODFragments = QueryContext.GetFragmentView<FMassRepresentationLODFragment>();
@@ -115,21 +101,22 @@ void UMassTrafficDriverVisualizationProcessor::Execute(FMassEntityManager& Entit
 		const TConstArrayView<FMassTrafficPIDVehicleControlFragment> PIDVehicleControlFragments = QueryContext.GetFragmentView<FMassTrafficPIDVehicleControlFragment>();
 		TArrayView<FMassTrafficDriverVisualizationFragment> DriverVisualizationFragments = QueryContext.GetMutableFragmentView<FMassTrafficDriverVisualizationFragment>();
 		TArrayView<FMassActorFragment> ActorFragments = QueryContext.GetMutableFragmentView<FMassActorFragment>();
-		for (int32 EntityIdx = 0; EntityIdx < NumEntities; EntityIdx++)
+
+		for (FMassExecutionContext::FEntityIterator EntityIt = QueryContext.CreateEntityIterator(); EntityIt; ++EntityIt)
 		{
-			FMassTrafficDriverVisualizationFragment& DriverVisualizationFragment = DriverVisualizationFragments[EntityIdx];
+			FMassTrafficDriverVisualizationFragment& DriverVisualizationFragment = DriverVisualizationFragments[EntityIt];
 			if (DriverVisualizationFragment.DriverTypeIndex == FMassTrafficDriverVisualizationFragment::InvalidDriverTypeIndex)
 			{
 				continue;
 			}
 		
-			FMassRepresentationFragment& RepresentationFragment = RepresentationFragments[EntityIdx];
-			const FMassViewerInfoFragment& ViewerInfoFragment = ViewerInfoFragments[EntityIdx];
-			const FMassRepresentationLODFragment& RepresentationLODFragment = RepresentationLODFragments[EntityIdx];
-			const FMassTrafficVehicleControlFragment& VehicleControlFragment = VehicleControlFragments[EntityIdx];
-			const FMassTrafficVehicleDamageFragment& VehicleDamageFragment = VehicleDamageFragments[EntityIdx];
-			const FMassTrafficRandomFractionFragment& RandomFractionFragment = RandomFractionFragments[EntityIdx];
-			const FTransformFragment& TransformFragment = TransformFragments[EntityIdx];
+			FMassRepresentationFragment& RepresentationFragment = RepresentationFragments[EntityIt];
+			const FMassViewerInfoFragment& ViewerInfoFragment = ViewerInfoFragments[EntityIt];
+			const FMassRepresentationLODFragment& RepresentationLODFragment = RepresentationLODFragments[EntityIt];
+			const FMassTrafficVehicleControlFragment& VehicleControlFragment = VehicleControlFragments[EntityIt];
+			const FMassTrafficVehicleDamageFragment& VehicleDamageFragment = VehicleDamageFragments[EntityIt];
+			const FMassTrafficRandomFractionFragment& RandomFractionFragment = RandomFractionFragments[EntityIt];
+			const FTransformFragment& TransformFragment = TransformFragments[EntityIt];
 		
 			// Draw drivers in medium viewer LOD vehicles using FStaticMeshInstanceVisualizationDesc::TransformOffset
 			// as the relative drivers seat offset
@@ -160,7 +147,7 @@ void UMassTrafficDriverVisualizationProcessor::Execute(FMassEntityManager& Entit
 							
 					const int32 AnimStateVariationIndex = static_cast<int32>(AnimStateVariation);
 					FMassTrafficInstancePlaybackData CustomData;
-					const float SteeringInput = PIDVehicleControlFragments.IsEmpty() ? 0.0f : PIDVehicleControlFragments[EntityIdx].Steering;
+					const float SteeringInput = PIDVehicleControlFragments.IsEmpty() ? 0.0f : PIDVehicleControlFragments[EntityIt].Steering;
 					if (SteeringInput >= -PlaybackSteeringThreshold && SteeringInput <= PlaybackSteeringThreshold)
 					{
 						if (VehicleControlFragment.Speed > LowSpeedThreshold)
@@ -236,7 +223,7 @@ void UMassTrafficDriverVisualizationProcessor::Execute(FMassEntityManager& Entit
 					const bool bRemoveDriver = static_cast<int32>(VehicleDamageFragment.VehicleDamageState) >= static_cast<int32>(RemoveDriverDamageThreshold);
 					if (bRemoveDriver)
 					{
-						FMassActorFragment& ActorFragment = ActorFragments[EntityIdx];
+						FMassActorFragment& ActorFragment = ActorFragments[EntityIt];
 						AActor* Actor = ActorFragment.GetMutable();
 						bool bActorImplementsTrafficVehicleInterface = IsValid(Actor) ? Actor->Implements<UMassTrafficVehicleInterface>() : false;
 						if (bActorImplementsTrafficVehicleInterface)
@@ -258,9 +245,13 @@ void UMassTrafficDriverVisualizationProcessor::Execute(FMassEntityManager& Entit
 					}
 					else
 					{
-						ISMInfo[DriverStaticMeshDescHandle.ToIndex()].AddBatchedTransform(QueryContext.GetEntity(EntityIdx)
-							, DriverTransform, DriverPrevTransform, RepresentationLODFragment.LODSignificance);
-						ISMInfo[DriverStaticMeshDescHandle.ToIndex()].AddBatchedCustomData(CustomData, RepresentationLODFragment.LODSignificance);
+						const int32 ISMInfoIndex = DriverStaticMeshDescHandle.ToIndex();
+						if (ensureMsgf(ISMInfo.IsValidIndex(ISMInfoIndex), TEXT("Invalid handle index %u for ISMInfosView"), ISMInfoIndex))
+						{
+							ISMInfo[ISMInfoIndex].AddBatchedTransform(QueryContext.GetEntity(EntityIt)
+								, DriverTransform, DriverPrevTransform, RepresentationLODFragment.LODSignificance);
+							ISMInfo[ISMInfoIndex].AddBatchedCustomData(CustomData, RepresentationLODFragment.LODSignificance);
+						}
 					}
 				}
 			}

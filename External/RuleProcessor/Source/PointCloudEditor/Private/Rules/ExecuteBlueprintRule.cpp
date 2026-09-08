@@ -45,7 +45,6 @@ FString UExecuteBlueprintRule::GetDefaultSlotName(SIZE_T SlotIndex) const
 	{
 	case BLUEPRINT_SLOT:
 		return FString(TEXT("Output"));
-		break;
 	default:
 		return FString(TEXT("Unknown"));
 	}

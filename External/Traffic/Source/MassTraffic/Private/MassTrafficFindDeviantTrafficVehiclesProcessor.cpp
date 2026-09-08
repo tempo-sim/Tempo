@@ -1,12 +1,11 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "MassTrafficFindDeviantTrafficVehiclesProcessor.h"
+#include "MassActorSubsystem.h"
 #include "MassTrafficFragments.h"
 #include "MassTrafficInterpolation.h"
 #include "MassTrafficLaneChange.h"
 #include "MassTrafficUpdateVelocityProcessor.h"
-
-#include "MassNavigationTypes.h"
 #include "MassCommandBuffer.h"
 #include "MassExecutionContext.h"
 #include "MassEntityView.h"
@@ -19,9 +18,6 @@
 #include "MassZoneGraphNavigationFragments.h"
 #include "VisualLogger/VisualLogger.h"
 #include "ZoneGraphSubsystem.h"
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-#include "MassGameplayExternalTraits.h"
-#endif
 
 
 UMassTrafficFindDeviantTrafficVehiclesProcessor::UMassTrafficFindDeviantTrafficVehiclesProcessor()
@@ -37,11 +33,7 @@ UMassTrafficFindDeviantTrafficVehiclesProcessor::UMassTrafficFindDeviantTrafficV
 	ExecutionOrder.ExecuteAfter.Add(UMassTrafficUpdateVelocityProcessor::StaticClass()->GetFName());
 }
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-void UMassTrafficFindDeviantTrafficVehiclesProcessor::ConfigureQueries()
-#else
 void UMassTrafficFindDeviantTrafficVehiclesProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
-#endif
 {
 	// High LOD physics vehicles which haven't been marked as deviant obstacles to check for deviation
 	NominalTrafficVehicleEntityQuery.AddTagRequirement<FMassTrafficObstacleTag>(EMassFragmentPresence::None);
@@ -81,17 +73,13 @@ void UMassTrafficFindDeviantTrafficVehiclesProcessor::ConfigureQueries(const TSh
 	CorrectedTrafficVehicleEntityQuery.AddSubsystemRequirement<UMassNavigationSubsystem>(EMassFragmentAccess::ReadWrite);
 }
 
-static void RemoveDeviantFragments(const FMassEntityManager& EntityManager, const FMassExecutionContext& Context, UMassNavigationSubsystem& MovementSubsystem, const int32 Index)
+static void RemoveDeviantFragments(const FMassEntityManager& EntityManager, const FMassExecutionContext& Context, UMassNavigationSubsystem& MovementSubsystem, const int32 EntityIt)
 {
 	// This vehicle is no longer deviant, remove the FTagFragment_MassTrafficObstacle tag from it so it's
 	// no longer considered for obstacle avoidance.
-	const FMassEntityHandle Entity = Context.GetEntity(Index);
+	const FMassEntityHandle Entity = Context.GetEntity(EntityIt);
 	Context.Defer().RemoveTag<FMassTrafficObstacleTag>(Entity);
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-	Context.Defer().RemoveTag<FMassLookAtTargetTag>(Entity);
-#else
 	Context.Defer().RemoveFragment<FMassLookAtTargetFragment>(Entity);
-#endif
 
 	// Manually do the work of UMassAvoidanceObstacleRemoverFragmentDestructor because it's not called on fragment removal.
 	const FMassEntityView EntityView(EntityManager, Entity);
@@ -99,7 +87,7 @@ static void RemoveDeviantFragments(const FMassEntityManager& EntityManager, cons
 	{
 		FMassNavigationObstacleItem ObstacleItem;
 		ObstacleItem.Entity = Entity;
-		MovementSubsystem.GetObstacleGridMutable().Remove(ObstacleItem, GridCellLocationList[Index].CellLoc);
+		MovementSubsystem.GetObstacleGridMutable().Remove(ObstacleItem, GridCellLocationList[EntityIt].CellLoc);
 	}
 
 	Context.Defer().PushCommand<FMassCommandRemoveFragments<
@@ -112,11 +100,7 @@ static void RemoveDeviantFragments(const FMassEntityManager& EntityManager, cons
 void UMassTrafficFindDeviantTrafficVehiclesProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
 	// Look for deviant vehicles
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-	NominalTrafficVehicleEntityQuery.ForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& QueryContext)
-#else
 	NominalTrafficVehicleEntityQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext& QueryContext)
-#endif
 	{
 		const UZoneGraphSubsystem& ZoneGraphSubsystem = QueryContext.GetSubsystemChecked<UZoneGraphSubsystem>();
 
@@ -131,21 +115,20 @@ void UMassTrafficFindDeviantTrafficVehiclesProcessor::Execute(FMassEntityManager
 		const TArrayView<FMassTrafficVehicleLightsFragment> VehicleLightsFragments = QueryContext.GetMutableFragmentView<FMassTrafficVehicleLightsFragment>();
 
 		// Loop obstacles
-		const int32 NumEntities = QueryContext.GetNumEntities();
-		for (int32 Index = 0; Index < NumEntities; ++Index)
+		for (FMassExecutionContext::FEntityIterator EntityIt = QueryContext.CreateEntityIterator(); EntityIt; ++EntityIt)
 		{
-			const FMassRepresentationFragment& RepresentationFragment = RepresentationFragments[Index];
-			const FMassActorFragment& ActorFragment = ActorFragments[Index];
+			const FMassRepresentationFragment& RepresentationFragment = RepresentationFragments[EntityIt];
+			const FMassActorFragment& ActorFragment = ActorFragments[EntityIt];
 			
 			const AActor* Actor = ActorFragment.Get();
 			if (Actor != nullptr && RepresentationFragment.CurrentRepresentation == EMassRepresentationType::HighResSpawnedActor)
 			{
-				FMassTrafficVehicleLightsFragment& VehicleLightsFragment = VehicleLightsFragments[Index];
-				const FMassZoneGraphLaneLocationFragment& ZoneGraphLaneLocationFragment = ZoneGraphLaneLocationFragments[Index];
-				const FMassTrafficLaneOffsetFragment& LaneOffsetFragment = LaneOffsetFragments[Index];
-				FMassTrafficVehicleLaneChangeFragment& LaneChangeFragment = LaneChangeFragments[Index];
-				FMassTrafficInterpolationFragment& VehicleMovementInterpolationFragment = VehicleMovementInterpolationFragments[Index];
-				FMassTrafficNextVehicleFragment& NextVehicleFragment = NextVehicleFragments[Index];
+				FMassTrafficVehicleLightsFragment& VehicleLightsFragment = VehicleLightsFragments[EntityIt];
+				const FMassZoneGraphLaneLocationFragment& ZoneGraphLaneLocationFragment = ZoneGraphLaneLocationFragments[EntityIt];
+				const FMassTrafficLaneOffsetFragment& LaneOffsetFragment = LaneOffsetFragments[EntityIt];
+				FMassTrafficVehicleLaneChangeFragment& LaneChangeFragment = LaneChangeFragments[EntityIt];
+				FMassTrafficInterpolationFragment& VehicleMovementInterpolationFragment = VehicleMovementInterpolationFragments[EntityIt];
+				FMassTrafficNextVehicleFragment& NextVehicleFragment = NextVehicleFragments[EntityIt];
 
 				const FZoneGraphStorage* ZoneGraphStorage = ZoneGraphSubsystem.GetZoneGraphStorage(ZoneGraphLaneLocationFragment.LaneHandle.DataHandle);
 				check(ZoneGraphStorage);
@@ -177,13 +160,9 @@ void UMassTrafficFindDeviantTrafficVehiclesProcessor::Execute(FMassEntityManager
 
 					// This vehicle is deviant, add an FTagFragment_MassTrafficObstacle tag to it so it's
 					// considered for obstacle avoidance.
-					const FMassEntityHandle Entity = QueryContext.GetEntity(Index);
+					const FMassEntityHandle Entity = QueryContext.GetEntity(EntityIt);
 					QueryContext.Defer().AddTag<FMassTrafficObstacleTag>(Entity);
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-					QueryContext.Defer().AddTag<FMassLookAtTargetTag>(Entity);
-#else
-					QueryContext.Defer().AddFragment<FMassLookAtFragment>(Entity);
-#endif
+					QueryContext.Defer().AddFragment<FMassLookAtTargetFragment>(Entity);
 
 					QueryContext.Defer().PushCommand<FMassCommandAddFragments<
 						FMassNavigationObstacleGridCellLocationFragment		// Needed to become an avoidance obstacle
@@ -195,7 +174,7 @@ void UMassTrafficFindDeviantTrafficVehiclesProcessor::Execute(FMassEntityManager
 					QueryContext.Defer().PushCommand<FMassCommandAddFragmentInstances>(Entity, ColliderFragment);
 
 					// Debug
-					UE_VLOG_LOCATION(LogOwner, TEXT("MassTraffic Deviants"), Log, ActorLocation, 10.0f, FColor::Red, TEXT("%d Deviated by %f"), QueryContext.GetEntity(Index).Index, Deviation);
+					UE_VLOG_LOCATION(LogOwner, TEXT("MassTraffic Deviants"), Log, ActorLocation, 10.0f, FColor::Red, TEXT("%d Deviated by %f"), QueryContext.GetEntity(EntityIt).Index, Deviation);
 					UE_VLOG_SEGMENT_THICK(LogOwner, TEXT("MassTraffic Deviants"), Log, ActorLocation, LaneLocationTransform.GetLocation(), FColor::Red, 3.0f, TEXT(""));
 				}
 			}
@@ -203,11 +182,7 @@ void UMassTrafficFindDeviantTrafficVehiclesProcessor::Execute(FMassEntityManager
 	});
 
 	// Check known deviant vehicles to see if they're still deviant
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-	DeviantTrafficVehicleEntityQuery.ForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& QueryContext)
-#else
 	DeviantTrafficVehicleEntityQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext& QueryContext)
-#endif
 	{
 		UMassNavigationSubsystem& NavigationSubsystem = QueryContext.GetMutableSubsystemChecked<UMassNavigationSubsystem>();
 		const UZoneGraphSubsystem& ZoneGraphSubsystem = QueryContext.GetSubsystemChecked<UZoneGraphSubsystem>();
@@ -220,21 +195,20 @@ void UMassTrafficFindDeviantTrafficVehiclesProcessor::Execute(FMassEntityManager
 		const TArrayView<FMassTrafficInterpolationFragment> VehicleMovementInterpolationFragments = QueryContext.GetMutableFragmentView<FMassTrafficInterpolationFragment>();
 				
 		// Loop obstacles
-		const int32 NumEntities = QueryContext.GetNumEntities();
-		for (int32 Index = 0; Index < NumEntities; ++Index)
+		for (FMassExecutionContext::FEntityIterator EntityIt = QueryContext.CreateEntityIterator(); EntityIt; ++EntityIt)
 		{
-			const FMassRepresentationFragment& RepresentationFragment = RepresentationFragments[Index];
-			const FMassActorFragment& ActorFragment = ActorFragments[Index];
+			const FMassRepresentationFragment& RepresentationFragment = RepresentationFragments[EntityIt];
+			const FMassActorFragment& ActorFragment = ActorFragments[EntityIt];
 
 			bool bDeviant = false;
 			
 			const AActor* Actor = ActorFragment.Get();
 			if (Actor != nullptr && RepresentationFragment.CurrentRepresentation == EMassRepresentationType::HighResSpawnedActor)
 			{
-				const FMassZoneGraphLaneLocationFragment& ZoneGraphLaneLocationFragment = ZoneGraphLaneLocationFragments[Index];
-				const FMassTrafficLaneOffsetFragment& LaneOffsetFragment = LaneOffsetFragments[Index];
-				const FMassTrafficVehicleLaneChangeFragment& LaneChangeFragment = LaneChangeFragments[Index];
-				FMassTrafficInterpolationFragment& VehicleMovementInterpolationFragment = VehicleMovementInterpolationFragments[Index];
+				const FMassZoneGraphLaneLocationFragment& ZoneGraphLaneLocationFragment = ZoneGraphLaneLocationFragments[EntityIt];
+				const FMassTrafficLaneOffsetFragment& LaneOffsetFragment = LaneOffsetFragments[EntityIt];
+				const FMassTrafficVehicleLaneChangeFragment& LaneChangeFragment = LaneChangeFragments[EntityIt];
+				FMassTrafficInterpolationFragment& VehicleMovementInterpolationFragment = VehicleMovementInterpolationFragments[EntityIt];
 
 				const FZoneGraphStorage* ZoneGraphStorage = ZoneGraphSubsystem.GetZoneGraphStorage(ZoneGraphLaneLocationFragment.LaneHandle.DataHandle);
 				check(ZoneGraphStorage);
@@ -261,35 +235,30 @@ void UMassTrafficFindDeviantTrafficVehiclesProcessor::Execute(FMassEntityManager
 				else
 				{
 					// Debug
-					UE_VLOG_LOCATION(LogOwner, TEXT("MassTraffic Deviants"), Log, ActorLocation, 10.0f, FColor::Green, TEXT("%d Corrected"), QueryContext.GetEntity(Index).Index);
+					UE_VLOG_LOCATION(LogOwner, TEXT("MassTraffic Deviants"), Log, ActorLocation, 10.0f, FColor::Green, TEXT("%d Corrected"), QueryContext.GetEntity(EntityIt).Index);
 				}
 			}
 			else
 			{
 				// Debug
-				UE_VLOG(LogOwner, TEXT("MassTraffic Deviants"), Log, TEXT("%d Corrected"), QueryContext.GetEntity(Index).Index);
+				UE_VLOG(LogOwner, TEXT("MassTraffic Deviants"), Log, TEXT("%d Corrected"), QueryContext.GetEntity(EntityIt).Index);
 			}
 
 			if (!bDeviant)
 			{
-				RemoveDeviantFragments(EntityManager, QueryContext, NavigationSubsystem, Index);
+				RemoveDeviantFragments(EntityManager, QueryContext, NavigationSubsystem, EntityIt);
 			}
 		}
 	});
 
 	// Remove obstacle fragment from implicitly corrected vehicles
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-	CorrectedTrafficVehicleEntityQuery.ForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& QueryContext)
-#else
 	CorrectedTrafficVehicleEntityQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext& QueryContext)
-#endif
 	{
 		UMassNavigationSubsystem& NavigationSubsystem = QueryContext.GetMutableSubsystemChecked<UMassNavigationSubsystem>();
 
-		const int32 NumEntities = QueryContext.GetNumEntities();
-		for (int32 Index = 0; Index < NumEntities; ++Index)
+		for (FMassExecutionContext::FEntityIterator EntityIt = QueryContext.CreateEntityIterator(); EntityIt; ++EntityIt)
 		{
-			RemoveDeviantFragments(EntityManager, QueryContext, NavigationSubsystem, Index);
+			RemoveDeviantFragments(EntityManager, QueryContext, NavigationSubsystem, EntityIt);
 		}
 	});
 }

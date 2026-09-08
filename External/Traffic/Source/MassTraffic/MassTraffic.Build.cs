@@ -24,6 +24,9 @@ public class MassTraffic : ModuleRules
 		PublicDependencyModuleNames.AddRange(
 			new string[]
 			{
+				// Mass core
+				"MassEntity",
+
 				// AI/MassAI Plugin Modules
 				"MassAIBehavior",
 				"MassAIDebug",
@@ -32,9 +35,6 @@ public class MassTraffic : ModuleRules
 				
 				// AI/MassCrowd Plugin Modules
 				"MassCrowd",
-
-				// Runtime/MassEntity Plugin Modules
-				"MassEntity",
 
 				// Runtime/MassGameplay Plugin Modules
 				"MassActors",
@@ -56,12 +56,6 @@ public class MassTraffic : ModuleRules
 				"ChaosVehiclesCore",
 			}
 			);
-
-		// StructUtils plugin was deprecated in 5.5 and moved into CoreUObject
-		if (Target.Version.MajorVersion == 5 && Target.Version.MinorVersion < 5)
-		{
-			PublicDependencyModuleNames.Add("StructUtils");
-		}
 
 		// UE 5.8 split the core Mass types (FMassFragment, FMassTag, FMassEntityHandle, etc.) out of
 		// the MassEntity plugin into a new MassCore runtime module. Depend on it so their reflection

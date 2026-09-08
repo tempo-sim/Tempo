@@ -6,6 +6,7 @@
 #include "MassTrafficDebugHelpers.h"
 #include "MassTrafficFragments.h"
 #include "MassTrafficLaneChange.h"
+#include "MassTrafficUtils.h"
 
 #include "MassEntityView.h"
 #include "MassZoneGraphNavigationFragments.h"

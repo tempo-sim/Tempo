@@ -16,13 +16,13 @@ void UMassTrafficDriverVisualizationTrait::BuildTemplate(FMassEntityTemplateBuil
 	FMassEntityManager& EntityManager = UE::Mass::Utils::GetEntityManagerChecked(World);
 
 	UMassRepresentationSubsystem* RepresentationSubsystem = Cast<UMassRepresentationSubsystem>(World.GetSubsystemBase(RepresentationSubsystemClass));
-	check(RepresentationSubsystem);
+	check(RepresentationSubsystem || BuildContext.IsInspectingData());
 	
 	BuildContext.AddFragment<FMassTrafficDriverVisualizationFragment>();
 
 	// Make a mutable copy of Params so we can register the driver meshes and assign the description IDs
 	FMassTrafficDriversParameters RegisteredParams = Params;
-	if (IsValid(RegisteredParams.DriverTypesData))
+	if (IsValid(RegisteredParams.DriverTypesData) && !BuildContext.IsInspectingData())
 	{
 		for (const FMassTrafficDriverTypeData& DriverType : RegisteredParams.DriverTypesData->DriverTypes)
 		{
@@ -56,22 +56,12 @@ UMassTrafficDriverInitializer::UMassTrafficDriverInitializer()
 #else
 	ObservedType = FMassTrafficDriverVisualizationFragment::StaticStruct();
 #endif
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 7
-	Operation = EMassObservedOperation::Add;
-#else
 	ObservedOperations = EMassObservedOperationFlags::Add;
-#endif
 }
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-void UMassTrafficDriverInitializer::Initialize(UObject& Owner)
-{
-	Super::Initialize(Owner);
-#else
 void UMassTrafficDriverInitializer::InitializeInternal(UObject& Owner, const TSharedRef<FMassEntityManager>& EntityManager)
 {
 	Super::InitializeInternal(Owner, EntityManager);
-#endif
 
 	// Seed RandomStream
 	const int32 TrafficRandomSeed = UE::Mass::Utils::OverrideRandomSeedForTesting(GetDefault<UMassTrafficSettings>()->RandomSeed);
@@ -85,11 +75,7 @@ void UMassTrafficDriverInitializer::InitializeInternal(UObject& Owner, const TSh
 	}
 }
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-void UMassTrafficDriverInitializer::ConfigureQueries()
-#else
 void UMassTrafficDriverInitializer::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
-#endif
 {
 	EntityQuery.AddConstSharedRequirement<FMassTrafficDriversParameters>();
 	EntityQuery.AddRequirement<FMassTrafficDriverVisualizationFragment>(EMassFragmentAccess::ReadWrite);
@@ -98,12 +84,8 @@ void UMassTrafficDriverInitializer::ConfigureQueries(const TSharedRef<FMassEntit
 void UMassTrafficDriverInitializer::Execute(FMassEntityManager& EntityManager,
 	FMassExecutionContext& Context)
 {
-	// Generate random fractions
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-	EntityQuery.ForEachEntityChunk(EntityManager, Context, [this](FMassExecutionContext& QueryContext)
-#else
+	// Generate random fractions 
 	EntityQuery.ForEachEntityChunk(Context, [this](FMassExecutionContext& QueryContext)
-#endif
 	{
 		// Get driver types
 		const FMassTrafficDriversParameters& Params = QueryContext.GetConstSharedFragment<FMassTrafficDriversParameters>();

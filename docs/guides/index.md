@@ -4,6 +4,13 @@ Task-shaped documentation: how to extend Tempo, ship it, test it, and unstick it
 
 <div class="grid cards" markdown>
 
+-   **[Tempo + CitySample](citysample.md)**
+
+    ---
+
+    The short path from a stock CitySample checkout to a running Tempo server, and the two
+    plugins the two projects both ship.
+
 -   **[Adding your own services](custom-services.md)**
 
     ---

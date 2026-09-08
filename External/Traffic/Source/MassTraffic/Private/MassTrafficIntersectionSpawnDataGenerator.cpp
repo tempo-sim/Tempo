@@ -5,11 +5,11 @@
 #include "MassTrafficLaneChange.h"
 #include "Kismet/GameplayStatics.h"
 
+#include "ZoneGraphQuery.h"
 #include "VisualLogger/VisualLogger.h"
+#include "MassTrafficUtils.h"
 #if WITH_EDITOR
-#include "Misc/DefaultValueHelper.h"
 #include "Misc/ScopedSlowTask.h"
-#include "PointCloudView.h"
 #endif
 
 template <typename T>
@@ -85,8 +85,31 @@ void UMassTrafficIntersectionSpawnDataGenerator::Generate(UObject& QueryOwner,
 	// Push data from the IntersectionDetails into the lanes.
 	SetupLaneData(*MassTrafficSubsystem, *MassTrafficSettings, *ZoneGraphSubsystem, IntersectionDetailsMap);
 
-	// Aggregate spawn data results.
+	// The spawner decides which entity configs exist; we only get to index into them. Epic's
+	// CitySample spawner carries a single intersection config, from before this plugin split
+	// intersections into light- and sign-controlled ones. Without a config for the sign
+	// intersections, every intersection is built as a light intersection and the light path
+	// widens back to Epic's period building for the uncontrolled ones, so an unmodified
+	// CitySample spawner still gets the traffic it had before the split.
+	if (!EntityTypes.IsValidIndex(TrafficLightIntersectionEntityConfigIndex))
+	{
+		UE_LOG(LogMassTraffic, Error, TEXT("%s has no entity config at TrafficLightIntersectionEntityConfigIndex %d (it has %d). No intersections will be spawned."),
+			*QueryOwner.GetName(), TrafficLightIntersectionEntityConfigIndex, EntityTypes.Num());
+		return;
+	}
+
+	const bool bCanSpawnTrafficSignIntersections = EntityTypes.IsValidIndex(TrafficSignIntersectionEntityConfigIndex);
+
+	if (!bCanSpawnTrafficSignIntersections)
+	{
+		UE_LOG(LogMassTraffic, Warning, TEXT("%s has no entity config at TrafficSignIntersectionEntityConfigIndex %d (it has %d). Sign-controlled intersections will be spawned as light-controlled ones. Add an entity config using MassTrafficSignIntersectionSimulationTrait at that index to enable stop and yield sign behavior."),
+			*QueryOwner.GetName(), TrafficSignIntersectionEntityConfigIndex, EntityTypes.Num());
+	}
+
+	// Aggregate spawn data results. Both results are referenced below while the array is still
+	// being appended to, so reserve up front to keep those references stable.
 	TArray<FMassEntitySpawnDataGeneratorResult> SpawnDataResults;
+	SpawnDataResults.Reserve(2);
 
 	// Prepare spawn data result for traffic light intersections.
 	FMassEntitySpawnDataGeneratorResult& TrafficLightSpawnDataResult = SpawnDataResults.AddDefaulted_GetRef();
@@ -98,7 +121,7 @@ void UMassTrafficIntersectionSpawnDataGenerator::Generate(UObject& QueryOwner,
 	TrafficSignSpawnDataResult.SpawnData.InitializeAs<FMassTrafficSignIntersectionSpawnData>();
 	FMassTrafficSignIntersectionSpawnData& TrafficSignIntersectionsSpawnData = TrafficSignSpawnDataResult.SpawnData.GetMutable<FMassTrafficSignIntersectionSpawnData>();
 
-	BuildIntersectionFragments(IntersectionDetailsMap, TrafficLightIntersectionsSpawnData, TrafficSignIntersectionsSpawnData);
+	BuildIntersectionFragments(IntersectionDetailsMap, bCanSpawnTrafficSignIntersections, TrafficLightIntersectionsSpawnData, TrafficSignIntersectionsSpawnData);
 
 	/*
 	 * Traffic Light Spawn Data Generation.
@@ -108,6 +131,7 @@ void UMassTrafficIntersectionSpawnDataGenerator::Generate(UObject& QueryOwner,
 											  *ZoneGraphSubsystem,
 											  RandomStream,
 											  *World,
+											  bCanSpawnTrafficSignIntersections,
 											  TrafficLightIntersectionsSpawnData);
 	
 	if (ensureMsgf(TrafficLightIntersectionsSpawnData.TrafficLightIntersectionFragments.Num() == TrafficLightIntersectionsSpawnData.TrafficLightIntersectionTransforms.Num(), TEXT("Number of TrafficLightIntersectionFragments must equal number of TrafficLightIntersectionTransforms.")))
@@ -131,7 +155,8 @@ void UMassTrafficIntersectionSpawnDataGenerator::Generate(UObject& QueryOwner,
 
 	GenerateTrafficSignIntersectionSpawnData(IntersectionDetailsMap, TrafficSignIntersectionsSpawnData);
 	
-	if (ensureMsgf(TrafficSignIntersectionsSpawnData.TrafficSignIntersectionFragments.Num() == TrafficSignIntersectionsSpawnData.TrafficSignIntersectionTransforms.Num(), TEXT("Number of TrafficSignIntersectionFragments must equal number of TrafficSignIntersectionTransforms.")))
+	if (bCanSpawnTrafficSignIntersections
+		&& ensureMsgf(TrafficSignIntersectionsSpawnData.TrafficSignIntersectionFragments.Num() == TrafficSignIntersectionsSpawnData.TrafficSignIntersectionTransforms.Num(), TEXT("Number of TrafficSignIntersectionFragments must equal number of TrafficSignIntersectionTransforms.")))
 	{
 		// Set properties for valid traffic sign intersection results.
 		TrafficSignSpawnDataResult.NumEntities = TrafficSignIntersectionsSpawnData.TrafficSignIntersectionFragments.Num();
@@ -455,6 +480,9 @@ void UMassTrafficIntersectionSpawnDataGenerator::SetupLaneData(
 {
 	// Clear pre-computed lane intersection enter/exit distances.
 	MassTrafficSubsystem.ClearLaneIntersectionInfo();
+
+	int32 NumConflictLanePairs = 0;
+	int32 NumConflictLanePairsWithoutIntersectionInfo = 0;
 	
 	// Set Traffic Controller flags on lanes (for traffic lights and traffic signs).
 	for (const TTuple<FZoneGraphDataHandle, FZoneIndexToIntersectionDetailMap>& ZoneIndexToIntersectionDetailMapPair : IntersectionDetailsMap)
@@ -544,6 +572,8 @@ void UMassTrafficIntersectionSpawnDataGenerator::SetupLaneData(
 									float EnterDistanceAlongQueryLane;
 									float ExitDistanceAlongQueryLane;
 
+									++NumConflictLanePairs;
+
 									if (UE::MassTraffic::TryGetEnterAndExitDistancesAlongQueryLane(
 										MassTrafficSubsystem,
 										MassTrafficSettings,
@@ -559,6 +589,10 @@ void UMassTrafficIntersectionSpawnDataGenerator::SetupLaneData(
 										LaneIntersectionInfo.ExitDistance = ExitDistanceAlongQueryLane;
 									
 										MassTrafficSubsystem.AddLaneIntersectionInfo(CurrentSideVehicleIntersectionLane->LaneHandle, OtherSideVehicleIntersectionLane->LaneHandle, LaneIntersectionInfo);
+									}
+									else
+									{
+										++NumConflictLanePairsWithoutIntersectionInfo;
 									}
 								}
 							}
@@ -607,10 +641,21 @@ void UMassTrafficIntersectionSpawnDataGenerator::SetupLaneData(
 			}
 		}
 	}
+
+	if (NumConflictLanePairsWithoutIntersectionInfo > 0)
+	{
+		// Their centerlines cross, but repeating the query against each lane edge finds nothing, so
+		// the pair goes without cached enter and exit distances and yielding between those two lanes
+		// falls back to less precise handling. Raising AcceptableLaneIntersectionDistance widens the
+		// edge query; set LogMassTraffic to Verbose to see which lanes are involved.
+		UE_LOG(LogMassTraffic, Error, TEXT("%d of %d conflicting lane pairs could not be given intersection enter/exit distances.  MassTrafficSettings.AcceptableLaneIntersectionDistance: %f."),
+			NumConflictLanePairsWithoutIntersectionInfo, NumConflictLanePairs, MassTrafficSettings.AcceptableLaneIntersectionDistance);
+	}
 }
 
 void UMassTrafficIntersectionSpawnDataGenerator::BuildIntersectionFragments(
 	const FIntersectionDetailsMap& IntersectionDetailsMap,
+	const bool bCanSpawnTrafficSignIntersections,
 	FMassTrafficLightIntersectionSpawnData& OutTrafficLightIntersectionsSpawnData,
 	FMassTrafficSignIntersectionSpawnData& OutTrafficSignIntersectionsSpawnData) const
 {
@@ -630,7 +675,7 @@ void UMassTrafficIntersectionSpawnDataGenerator::BuildIntersectionFragments(
 			//
 			// Note:  In the future, we'll refactor all-way stops to use the traffic sign fragments and processor,
 			// after we implement a "right-of-way" queue for such stop sign intersections.
-			if (IntersectionDetail.bHasTrafficLights || bIsAllWayStop)
+			if (IntersectionDetail.bHasTrafficLights || bIsAllWayStop || !bCanSpawnTrafficSignIntersections)
 			{
 				FMassTrafficLightIntersectionFragment TrafficLightIntersectionFragment;
 					
@@ -663,6 +708,7 @@ void UMassTrafficIntersectionSpawnDataGenerator::GenerateTrafficLightIntersectio
 		const UZoneGraphSubsystem& ZoneGraphSubsystem,
 		const FRandomStream& RandomStream,
 		const UWorld& World,
+		const bool bCanSpawnTrafficSignIntersections,
 		FMassTrafficLightIntersectionSpawnData& OutTrafficLightIntersectionsSpawnData) const
 {
 	const UMassTrafficControllerRegistrySubsystem* TrafficControllerRegistrySubsystem = UWorld::GetSubsystem<UMassTrafficControllerRegistrySubsystem>(&World);
@@ -1266,8 +1312,13 @@ void UMassTrafficIntersectionSpawnDataGenerator::GenerateTrafficLightIntersectio
 
 		// General stop-sign intersections - without traffic lights.
 		// (Each period for vehicles go and then one with a period for pedestrians.)
+		//
+		// When there is no entity config for sign-controlled intersections, every uncontrolled
+		// intersection is routed here as well, which is the condition Epic used before this plugin
+		// split them out. Without that they would reach the error case below and get no periods at
+		// all, closing every lane through them.
 
-		else if (bIsAllWayStop)
+		else if (bIsAllWayStop || (!bCanSpawnTrafficSignIntersections && !IntersectionDetail->bHasTrafficLights))
 		{
 			for (int32 S = 0; S < IntersectionDetail->Sides.Num(); S++)
 			{
@@ -1333,31 +1384,50 @@ void UMassTrafficIntersectionSpawnDataGenerator::GenerateTrafficLightIntersectio
 	// trying to cross over them.
 	//
 
-	OutTrafficLightIntersectionsSpawnData.TrafficLightIntersectionFragments.RemoveAll(
-		[&](FMassTrafficLightIntersectionFragment& IntersectionFragment)->bool
+	// The fragments and their transforms are built as parallel arrays, and the spawn data is only
+	// valid while they stay the same length, so a dropped intersection has to drop both. Walking
+	// backwards keeps the indices ahead of the cursor stable as entries are removed.
+	{
+		TArray<FMassTrafficLightIntersectionFragment>& IntersectionFragments = OutTrafficLightIntersectionsSpawnData.TrafficLightIntersectionFragments;
+		TArray<FTransform>& IntersectionTransforms = OutTrafficLightIntersectionsSpawnData.TrafficLightIntersectionTransforms;
+
+		for (int32 IntersectionIndex = IntersectionFragments.Num() - 1; IntersectionIndex >= 0; --IntersectionIndex)
 		{
+			const FMassTrafficLightIntersectionFragment& IntersectionFragment = IntersectionFragments[IntersectionIndex];
+
 			const FMassTrafficIntersectionDetail* IntersectionDetail = FindIntersectionDetails(IntersectionDetails, IntersectionFragment.ZoneGraphDataHandle, IntersectionFragment.ZoneIndex, "2-Sided Intersection Remover");
 			if (!IntersectionDetail)
 			{
-				return false; // ..(lambda) don't remove it
+				continue; // ..keep it
 			}
-				
+
 			if (IntersectionDetail->Sides.Num() > 2 || IntersectionDetail->HasHiddenSides())
 			{
-				return false; // ..(lambda) don't remove it
+				continue; // ..keep it
 			}
-				
+
+			bool bHasCrosswalkLanes = false;
 			for (const FMassTrafficIntersectionSide& Side : IntersectionDetail->Sides)
 			{
 				if (Side.CrosswalkLanes.Num() > 0)
 				{
-					return false; // ..(lambda) don't remove it
+					bHasCrosswalkLanes = true;
+					break;
 				}
 			}
-				
-			return true; // ..(lambda) remove it
+
+			if (bHasCrosswalkLanes)
+			{
+				continue; // ..keep it
+			}
+
+			IntersectionFragments.RemoveAt(IntersectionIndex);
+			if (IntersectionTransforms.IsValidIndex(IntersectionIndex))
+			{
+				IntersectionTransforms.RemoveAt(IntersectionIndex);
+			}
 		}
-	);
+	}
 
 		
 	//

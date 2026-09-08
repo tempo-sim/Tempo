@@ -32,8 +32,15 @@ EMassActorSpawnRequestAction  UMassTrafficLightRepresentationActorManagement::On
 	{
 		check(TrafficLightsParams.TrafficLightTypesStaticMeshDescHandle.IsValidIndex(TrafficLight.TrafficLightTypeIndex));
 		const FStaticMeshInstanceVisualizationDescHandle TrafficLightStaticMeshDescHandle = TrafficLightsParams.TrafficLightTypesStaticMeshDescHandle[TrafficLight.TrafficLightTypeIndex];
-		check(ISMInfo[TrafficLightStaticMeshDescHandle.ToIndex()].GetDesc().Meshes.Num() > 0);
-		const FMassStaticMeshInstanceVisualizationMeshDesc& MeshDesc = ISMInfo[TrafficLightStaticMeshDescHandle.ToIndex()].GetDesc().Meshes[0];
+		
+		const int32 ISMInfoIndex = TrafficLightStaticMeshDescHandle.ToIndex();
+		if (!ensureMsgf(ISMInfo.IsValidIndex(ISMInfoIndex), TEXT("Invalid handle index %u for ISMInfosView"), ISMInfoIndex))
+		{
+			continue;
+		}
+
+		check(ISMInfo[ISMInfoIndex].GetDesc().Meshes.Num() > 0);
+		const FMassStaticMeshInstanceVisualizationMeshDesc& MeshDesc = ISMInfo[ISMInfoIndex].GetDesc().Meshes[0];
 
 		// Compute actor relative transform
 		FTransform IntersectionLightTransform(FRotator(0.0, TrafficLight.ZRotation, 0.0f), TrafficLight.Position, TrafficLight.MeshScale);

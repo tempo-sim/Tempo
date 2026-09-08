@@ -1,11 +1,11 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "MassTrafficFieldComponent.h"
+#include "MassTrafficTypes.h"
 #include "MassTrafficSubsystem.h"
 #include "MassTrafficFragments.h"
 #include "MassTrafficDelegates.h"
 #include "MassTrafficFieldOperations.h"
-
 #include "Engine/CollisionProfile.h"
 #include "DebugRenderSceneProxy.h"
 #include "ZoneGraphSubsystem.h"

@@ -3,13 +3,14 @@
 #pragma once
 
 #include "MassTrafficFragments.h"
-
+#if UE_ENABLE_INCLUDE_ORDER_DEPRECATED_IN_5_6
 #include "MassRepresentationFragments.h"
+#endif // UE_ENABLE_INCLUDE_ORDER_DEPRECATED_IN_5_6
 #include "MassVisualizationLODProcessor.h"
 #include "MassLODCollectorProcessor.h"
 #include "MassRepresentationProcessor.h"
-
 #include "MassTrafficLightVisualizationProcessor.generated.h"
+
 
 class UMassTrafficSubsystem;
 
@@ -45,11 +46,7 @@ public:
 	UMassTrafficIntersectionVisualizationLODProcessor();
 
 protected:
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-	virtual void ConfigureQueries() override;
-#else
 	virtual void ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager) override;
-#endif
 };
 
 /**
@@ -63,11 +60,7 @@ class MASSTRAFFIC_API UMassTrafficIntersectionLODCollectorProcessor : public UMa
 	UMassTrafficIntersectionLODCollectorProcessor();
 
 protected:
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-	virtual void ConfigureQueries() override;
-#else
 	virtual void ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager) override;
-#endif
 };
 
 /**
@@ -82,11 +75,7 @@ public:
 	UMassTrafficLightVisualizationProcessor();
 
 	/** Configure the owned FMassEntityQuery instances to express processor's requirements */
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-	virtual void ConfigureQueries() override;
-#else
 	virtual void ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager) override;
-#endif
 };
 
 /**
@@ -101,11 +90,7 @@ public:
 	UMassTrafficLightUpdateCustomVisualizationProcessor();
 
 	/** Configure the owned FMassEntityQuery instances to express processor's requirements */
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-	virtual void ConfigureQueries() override;
-#else
 	virtual void ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager) override;
-#endif
 	virtual void Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context) override;
 
 private:

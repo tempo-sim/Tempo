@@ -10,7 +10,40 @@
 #include "MassMovementFragments.h"
 #include "MassEntityView.h"
 #include "Components/PrimitiveComponent.h"
+#include "Components/SkinnedMeshComponent.h"
+#include "Engine/World.h"
 #include "Rendering/MotionVectorSimulation.h"
+
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8
+bool UMassTrafficVehicleRepresentationActorManagement::IsActorReadyForRepresentation(const AActor& Actor) const
+{
+	const UWorld* World = Actor.GetWorld();
+	if (!World)
+	{
+		return false;
+	}
+	// Dedicated server: nothing renders, the streaming gate is meaningless.
+	if (World->IsNetMode(NM_DedicatedServer))
+	{
+		return true;
+	}
+
+	// A traffic vehicle is "ready" once at least one of its skinned mesh components has a valid asset
+	// (i.e. the soft-pointered SkeletalMesh referenced in the actor template has been resolved by the
+	// streaming manager). FindComponentByClass is fine here - a vehicle has at most a small number of
+	// components and this fires per pending entity per frame, so it is on a hot path; the linear walk
+	// is the cheapest reliable check we have without per-actor caching.
+	const USkinnedMeshComponent* SkinnedMesh = Actor.FindComponentByClass<USkinnedMeshComponent>();
+	if (SkinnedMesh != nullptr)
+	{
+		return SkinnedMesh->GetSkinnedAsset() != nullptr;
+	}
+
+	// No skinned component (e.g. low-res variant using only static meshes); fall back to the engine
+	// default of "ready as soon as the actor exists".
+	return Super::IsActorReadyForRepresentation(Actor);
+}
+#endif
 
 EMassActorSpawnRequestAction UMassTrafficVehicleRepresentationActorManagement::OnPostActorSpawn(const FMassActorSpawnRequestHandle& SpawnRequestHandle
 	, FConstStructView SpawnRequest, TSharedRef<FMassEntityManager> EntityManager) const

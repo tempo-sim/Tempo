@@ -3,11 +3,11 @@
 #pragma once
 
 #include "MassTrafficSettings.h"
-
+#if UE_ENABLE_INCLUDE_ORDER_DEPRECATED_IN_5_6
 #include "CoreMinimal.h"
+#endif // UE_ENABLE_INCLUDE_ORDER_DEPRECATED_IN_5_6
 #include "MassEntitySpawnDataGeneratorBase.h"
 #include "ZoneGraphTypes.h"
-
 #include "MassTrafficVehicleSpawnDataGenerator.generated.h"
 
 USTRUCT(BlueprintType)

@@ -4,7 +4,9 @@
 
 #include "MassTrafficProcessorBase.h"
 #include "MassTrafficFragments.h"
+#if UE_ENABLE_INCLUDE_ORDER_DEPRECATED_IN_5_6
 #include "MassActorSubsystem.h"
+#endif // UE_ENABLE_INCLUDE_ORDER_DEPRECATED_IN_5_6
 #include "MassTrafficVehiclePhysicsProcessor.generated.h"
 
 
@@ -17,12 +19,8 @@ public:
 	UMassTrafficVehiclePhysicsProcessor();
 
 protected:
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-	virtual void ConfigureQueries() override;
-#else
 	virtual void ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager) override;
-#endif
-	virtual void Execute(FMassEntityManager& EntitySubSystem, FMassExecutionContext& Context) override;
+	virtual void Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context) override;
 
 	bool ProcessSleeping(
 		const FMassTrafficVehicleControlFragment& VehicleControlFragment,

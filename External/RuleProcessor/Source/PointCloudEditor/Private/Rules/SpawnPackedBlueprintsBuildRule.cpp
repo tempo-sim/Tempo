@@ -49,7 +49,6 @@ FString USpawnPackedBlueprintsBuildRule::GetDefaultSlotName(SIZE_T SlotIndex) co
 	{
 	case SUBLEVEL_SLOT:
 		return FString(TEXT("Inside Level Instance"));
-		break;
 	default:
 		return FString(TEXT("Unknown"));
 	}

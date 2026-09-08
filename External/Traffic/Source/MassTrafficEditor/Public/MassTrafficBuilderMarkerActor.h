@@ -3,10 +3,11 @@
 
 #pragma once
 
+#if UE_ENABLE_INCLUDE_ORDER_DEPRECATED_IN_5_6
 #include "CoreMinimal.h"
+#endif // UE_ENABLE_INCLUDE_ORDER_DEPRECATED_IN_5_6
 #include "GameFramework/Actor.h"
 #include "Components/ArrowComponent.h"
-
 #include "MassTrafficBuilderMarkerActor.generated.h"
 
 

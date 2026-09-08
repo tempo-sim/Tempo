@@ -5,9 +5,7 @@
 #include "MassTrafficProcessorBase.h"
 #include "MassTrafficVehicleSimulationTrait.h"
 #include "MassTrafficFragments.h"
-
 #include "MassEntityView.h"
-
 #include "MassTrafficOverseerProcessor.generated.h"
 
 
@@ -18,11 +16,7 @@ class MASSTRAFFIC_API UMassTrafficOverseerProcessor : public UMassTrafficProcess
 
 protected:
 	UMassTrafficOverseerProcessor();
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-	virtual void ConfigureQueries() override;
-#else
 	virtual void ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager) override;
-#endif
 	virtual void Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context) override;
 
 	bool MoveVehicleToFreeSpaceOnRandomLane(

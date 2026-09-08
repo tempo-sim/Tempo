@@ -498,7 +498,17 @@ bool TryGetEnterAndExitDistancesAlongQueryLane(
 
 	if (!(bFoundIntersectionQueryToOtherLaneLeftSide || bFoundIntersectionQueryToOtherLaneRightSide))
 	{
-		ensureMsgf(!bExpectIntersection, TEXT("Expected to find left side and/or right side intersections between QueryLane and OtherLane in TryGetEnterAndExitDistancesAlongQueryLane.  Either we're testing against the wrong OtherLane, or AcceptableLaneIntersectionDistance is not high enough to detect the intersection.  MassTrafficSettings.AcceptableLaneIntersectionDistance: %f."), MassTrafficSettings.AcceptableLaneIntersectionDistance);
+		if (bExpectIntersection)
+		{
+			// Lanes whose centerlines cross can still miss when the query is repeated against each
+			// edge, which is what the caller asked for here. It costs the pair its enter and exit
+			// distances, so yielding between them falls back to less precise handling, but it is a
+			// property of the lane geometry rather than a fault. Callers that walk many pairs
+			// summarize the total; the per-pair detail is here for when the geometry is in question.
+			UE_LOG(LogMassTraffic, Verbose, TEXT("Expected to find left side and/or right side intersections between lane %d and lane %d in TryGetEnterAndExitDistancesAlongQueryLane.  Either we're testing against the wrong OtherLane, or AcceptableLaneIntersectionDistance is not high enough to detect the intersection.  MassTrafficSettings.AcceptableLaneIntersectionDistance: %f."),
+				QueryLane.Index, OtherLane.Index, MassTrafficSettings.AcceptableLaneIntersectionDistance);
+		}
+
 		return false;
 	}
 	

@@ -96,7 +96,6 @@ FString UMetadataIteratorRule::GetDefaultSlotName(SIZE_T SlotIndex) const
 	{
 	case SUBLEVEL_SLOT:
 		return FString(TEXT("Rule To Execute"));
-		break;
 	default:
 		return FString(TEXT("Unknown"));
 	}

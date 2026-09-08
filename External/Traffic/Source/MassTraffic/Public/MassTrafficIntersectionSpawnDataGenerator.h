@@ -9,7 +9,6 @@
 #include "MassTrafficControllerRegistrySubsystem.h"
 
 #include "MassEntitySpawnDataGeneratorBase.h"
-
 #include "MassTrafficIntersectionSpawnDataGenerator.generated.h"
 
 typedef TMap<int32, FMassTrafficIntersectionDetail> FZoneIndexToIntersectionDetailMap;
@@ -109,6 +108,7 @@ protected:
 
 	void BuildIntersectionFragments(
 		const FIntersectionDetailsMap& IntersectionDetailsMap,
+		const bool bCanSpawnTrafficSignIntersections,
 		FMassTrafficLightIntersectionSpawnData& OutTrafficLightIntersectionsSpawnData,
 		FMassTrafficSignIntersectionSpawnData& OutTrafficSignIntersectionsSpawnData) const;
 	
@@ -117,6 +117,7 @@ protected:
 		const UZoneGraphSubsystem& ZoneGraphSubsystem,
 		const FRandomStream& RandomStream,
 		const UWorld& World,
+		const bool bCanSpawnTrafficSignIntersections,
 		FMassTrafficLightIntersectionSpawnData& OutTrafficLightIntersectionsSpawnData) const;
 
 	void GenerateTrafficSignIntersectionSpawnData(

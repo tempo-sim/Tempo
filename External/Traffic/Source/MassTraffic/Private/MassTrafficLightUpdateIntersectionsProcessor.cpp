@@ -8,15 +8,12 @@
 #include "MassRepresentationFragments.h"
 #include "MassExecutionContext.h"
 #include "MassCrowdSubsystem.h"
-
+#include "MassTrafficUtils.h"
 #include "ZoneGraphTypes.h"
 #include "DrawDebugHelpers.h"
 #include "MassCommonFragments.h"
 #include "MassLODUtils.h"
 #include "ZoneGraphSubsystem.h"
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-#include "MassGameplayExternalTraits.h"
-#endif
 
 
 #define MAX_COUNTED_CROWD_WAIT_AREA_ARRAY 50
@@ -342,7 +339,7 @@ namespace
 				}
 				if (CountedCrowdWaitAreaDataArray_Index >= MAX_COUNTED_CROWD_WAIT_AREA_ARRAY)
 				{
-					UE_LOG(LogMassTraffic, Error, TEXT("%s - Index:%d >= Max:%d"), ANSI_TO_TCHAR(__FUNCTION__), CountedCrowdWaitAreaDataArray_Index, MAX_COUNTED_CROWD_WAIT_AREA_ARRAY);
+					UE_LOG(LogMassTraffic, Error, TEXT("%s - EntityIt:%d >= Max:%d"), ANSI_TO_TCHAR(__FUNCTION__), CountedCrowdWaitAreaDataArray_Index, MAX_COUNTED_CROWD_WAIT_AREA_ARRAY);
 					return NumPedestrians;
 				}
 			}
@@ -518,11 +515,7 @@ UMassTrafficLightUpdateIntersectionsProcessor::UMassTrafficLightUpdateIntersecti
 	ExecutionOrder.ExecuteBefore.Add(UE::MassTraffic::ProcessorGroupNames::EndPhysicsTrafficSignIntersectionBehavior);
 }
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-void UMassTrafficLightUpdateIntersectionsProcessor::ConfigureQueries()
-#else
 void UMassTrafficLightUpdateIntersectionsProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
-#endif
 {
 	EntityQuery.AddRequirement<FMassTrafficLightIntersectionFragment>(EMassFragmentAccess::ReadWrite);
 	EntityQuery.AddSubsystemRequirement<UZoneGraphSubsystem>(EMassFragmentAccess::ReadOnly);
@@ -539,16 +532,11 @@ void UMassTrafficLightUpdateIntersectionsProcessor::Execute(FMassEntityManager& 
 	const UWorld* World = GetWorld();
 
 	// Process chunks -
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-	EntityQuery.ForEachEntityChunk(EntityManager, Context, [&, World](FMassExecutionContext& QueryContext)
-#else
 	EntityQuery.ForEachEntityChunk(Context, [&, World](FMassExecutionContext& QueryContext)
-#endif
 	{
 		UMassCrowdSubsystem& MassCrowdSubsystem = QueryContext.GetMutableSubsystemChecked<UMassCrowdSubsystem>();
 		const UZoneGraphSubsystem& ZoneGraphSubsystem = QueryContext.GetSubsystemChecked<UZoneGraphSubsystem>();
 
-		const int32 NumEntities = QueryContext.GetNumEntities();
 		const float DeltaTimeSeconds = QueryContext.GetDeltaTimeSeconds();
 		const TArrayView<FMassTrafficLightIntersectionFragment> TrafficIntersectionFragments = QueryContext.GetMutableFragmentView<FMassTrafficLightIntersectionFragment>();
 		#if WITH_MASSTRAFFIC_DEBUG
@@ -557,9 +545,9 @@ void UMassTrafficLightUpdateIntersectionsProcessor::Execute(FMassEntityManager& 
 		#endif
 
 		// Process all the intersections in this chunk -
-		for (int32 Index = 0; Index < NumEntities; ++Index)
+		for (FMassExecutionContext::FEntityIterator EntityIt = QueryContext.CreateEntityIterator(); EntityIt; ++EntityIt)
 		{
-			FMassTrafficLightIntersectionFragment& IntersectionFragment = TrafficIntersectionFragments[Index];
+			FMassTrafficLightIntersectionFragment& IntersectionFragment = TrafficIntersectionFragments[EntityIt];
 
 			// Skip empty intersections.
 			if (IntersectionFragment.Periods.IsEmpty())
@@ -568,7 +556,7 @@ void UMassTrafficLightUpdateIntersectionsProcessor::Execute(FMassEntityManager& 
 			}
 			
 			#if WITH_MASSTRAFFIC_DEBUG
-			const FTransformFragment& TransformFragment = TransformFragments[Index];
+			const FTransformFragment& TransformFragment = TransformFragments[EntityIt];
 			#endif
 
 			const FZoneGraphStorage* ZoneGraphStorage = ZoneGraphSubsystem.GetZoneGraphStorage(IntersectionFragment.ZoneGraphDataHandle);
@@ -606,7 +594,7 @@ void UMassTrafficLightUpdateIntersectionsProcessor::Execute(FMassEntityManager& 
 
 			#if WITH_MASSTRAFFIC_DEBUG
 				// Limit debug drawing to the High LOD of the intersections.
-				const FMassRepresentationLODFragment& RepresentationLODFragment = RepresentationLODFragments[Index];
+				const FMassRepresentationLODFragment& RepresentationLODFragment = RepresentationLODFragments[EntityIt];
 				const bool bDoDrawDebug = GMassTrafficDebugIntersections && (RepresentationLODFragment.LOD <= EMassLOD::High);
 				if (bDoDrawDebug)
 				{

@@ -221,6 +221,19 @@ void UMassTrafficVehicleSpawnDataGenerator::Generate(UObject& QueryOwner,
 		}
 	}
 
+	int32 TotalRequested = 0;
+	for (const FMassEntitySpawnDataGeneratorResult& Result : Results)
+	{
+		TotalRequested += Result.NumEntities;
+	}
+	int32 TotalCandidatePoints = 0;
+	for (const TArray<FZoneGraphLaneLocation>& SpawnPoints : SpawnPointsPerSpacing)
+	{
+		TotalCandidatePoints += SpawnPoints.Num();
+	}
+	UE_LOG(LogMassTraffic, Log, TEXT("%s - spawning %d traffic vehicles across %d entity types, from %d candidate lane locations."),
+		*QueryOwner.GetName(), TotalRequested, Results.Num(), TotalCandidatePoints);
+
 	// Return results
 	FinishedGeneratingSpawnPointsDelegate.Execute(Results);
 }

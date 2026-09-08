@@ -59,17 +59,9 @@ UMassTrafficLightVisualizationProcessor::UMassTrafficLightVisualizationProcessor
 	ExecutionOrder.ExecuteAfter.Add(UMassTrafficIntersectionVisualizationLODProcessor::StaticClass()->GetFName());
 }
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-void UMassTrafficLightVisualizationProcessor::ConfigureQueries()
-#else
 void UMassTrafficLightVisualizationProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
-#endif
 {
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-	Super::ConfigureQueries();
-#else
 	Super::ConfigureQueries(EntityManager);
-#endif
 	EntityQuery.AddRequirement<FMassTrafficLightIntersectionFragment>(EMassFragmentAccess::ReadOnly);
 }
 
@@ -83,11 +75,7 @@ UMassTrafficLightUpdateCustomVisualizationProcessor::UMassTrafficLightUpdateCust
 	ExecutionOrder.ExecuteAfter.Add(UMassTrafficLightVisualizationProcessor::StaticClass()->GetFName());
 }
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-void UMassTrafficLightUpdateCustomVisualizationProcessor::ConfigureQueries()
-#else
 void UMassTrafficLightUpdateCustomVisualizationProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
-#endif
 {
 	EntityQuery.AddRequirement<FMassTrafficLightIntersectionFragment>(EMassFragmentAccess::ReadOnly);
 
@@ -117,11 +105,7 @@ void UMassTrafficLightUpdateCustomVisualizationProcessor::Execute(FMassEntityMan
 		TRACE_CPUPROFILER_EVENT_SCOPE(TEXT("Visual Updates")) 
 
 		// Visualize entities
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-		EntityQuery.ForEachEntityChunk(EntityManager, Context, [this](FMassExecutionContext& Context)
-#else
 		EntityQuery.ForEachEntityChunk(Context, [this](FMassExecutionContext& Context)
-#endif
 		{
 			UMassRepresentationSubsystem* RepresentationSubsystem = Context.GetSharedFragment<FMassRepresentationSubsystemSharedFragment>().RepresentationSubsystem;
 			check(RepresentationSubsystem);
@@ -129,18 +113,17 @@ void UMassTrafficLightUpdateCustomVisualizationProcessor::Execute(FMassEntityMan
 
 			const FMassTrafficLightsParameters& TrafficLightsParams = Context.GetConstSharedFragment<FMassTrafficLightsParameters>();
 
-			const int32 NumEntities = Context.GetNumEntities();
 			const TConstArrayView<FMassTrafficLightIntersectionFragment> TrafficIntersectionFragments = Context.GetFragmentView<FMassTrafficLightIntersectionFragment>(); 
 			const TConstArrayView<FMassRepresentationLODFragment> VisualizationLODFragments = Context.GetFragmentView<FMassRepresentationLODFragment>();
 			const TArrayView<FMassRepresentationFragment> VisualizationFragments = Context.GetMutableFragmentView<FMassRepresentationFragment>(); 
 			const TArrayView<FMassActorFragment> ActorList = Context.GetMutableFragmentView<FMassActorFragment>();
 
-			for (int32 Index = 0; Index < NumEntities; Index++)
+			for (FMassExecutionContext::FEntityIterator EntityIt = Context.CreateEntityIterator(); EntityIt; ++EntityIt)
 			{
-				const FMassTrafficLightIntersectionFragment& TrafficIntersectionFragment = TrafficIntersectionFragments[Index]; 
-				const FMassRepresentationLODFragment& VisualizationLODFragment = VisualizationLODFragments[Index];
-				const FMassRepresentationFragment& VisualizationFragment = VisualizationFragments[Index];
-				FMassActorFragment& ActorInfo = ActorList[Index];
+				const FMassTrafficLightIntersectionFragment& TrafficIntersectionFragment = TrafficIntersectionFragments[EntityIt]; 
+				const FMassRepresentationLODFragment& VisualizationLODFragment = VisualizationLODFragments[EntityIt];
+				const FMassRepresentationFragment& VisualizationFragment = VisualizationFragments[EntityIt];
+				FMassActorFragment& ActorInfo = ActorList[EntityIt];
 
 				AActor* Actor = ActorInfo.GetMutable();
 
@@ -161,10 +144,13 @@ void UMassTrafficLightUpdateCustomVisualizationProcessor::Execute(FMassEntityMan
 							const FMassTrafficLightInstanceCustomData PackedCustomData(TrafficLight.TrafficLightStateFlags);
 
 							// Add instance with custom data 
-							ISMInfo[TrafficLightTypesStaticMeshDescHandle.ToIndex()].AddBatchedTransform(Context.GetEntity(Index)
-								, IntersectionLightTransform, IntersectionLightTransform, VisualizationLODFragment.LODSignificance);
-							ISMInfo[TrafficLightTypesStaticMeshDescHandle.ToIndex()].AddBatchedCustomData(PackedCustomData, VisualizationLODFragment.LODSignificance);
-
+							const int32 ISMInfoIndex = TrafficLightTypesStaticMeshDescHandle.ToIndex();
+							if (ensureMsgf(ISMInfo.IsValidIndex(ISMInfoIndex), TEXT("Invalid handle index %u for ISMInfo"), ISMInfoIndex))
+							{
+								ISMInfo[ISMInfoIndex].AddBatchedTransform(Context.GetEntity(EntityIt)
+									, IntersectionLightTransform, IntersectionLightTransform, VisualizationLODFragment.LODSignificance);
+								ISMInfo[ISMInfoIndex].AddBatchedCustomData(PackedCustomData, VisualizationLODFragment.LODSignificance);
+							}
 							// Debug
 							#if WITH_MASSTRAFFIC_DEBUG
 								if (GMassTrafficDebugVisualization)
@@ -204,27 +190,22 @@ void UMassTrafficLightUpdateCustomVisualizationProcessor::Execute(FMassEntityMan
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(TEXT("DebugDisplayVisualization"))
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-		EntityQuery.ForEachEntityChunk(EntityManager, Context, [this](FMassExecutionContext& Context)
-#else
-		EntityQuery.ForEachEntityChunk(Context, [this](FMassExecutionContext& Context)
-#endif
+		EntityQuery.ForEachEntityChunk(Context, [this, InWorld = EntityManager.GetWorld()](FMassExecutionContext& Context)
 		{
 			const UMassTrafficSubsystem* MassTrafficSubsystem = Context.GetSubsystem<UMassTrafficSubsystem>();
 
-			const int32 NumEntities = Context.GetNumEntities();
 			const TConstArrayView<FTransformFragment> TransformList = Context.GetFragmentView<FTransformFragment>();
 			const TArrayView<FMassRepresentationFragment> VisualizationList = Context.GetMutableFragmentView<FMassRepresentationFragment>();
 
-			for (int EntityIdx = 0; EntityIdx < NumEntities; EntityIdx++)
+			for (FMassExecutionContext::FEntityIterator EntityIt = Context.CreateEntityIterator(); EntityIt; ++EntityIt)
 			{
-				const FTransformFragment& TransformFragment = TransformList[EntityIdx];
-				FMassRepresentationFragment& Visualization = VisualizationList[EntityIdx];
+				const FTransformFragment& TransformFragment = TransformList[EntityIt];
+				FMassRepresentationFragment& Visualization = VisualizationList[EntityIt];
 				const int32 CurrentVisualIdx = static_cast<int32>(Visualization.CurrentRepresentation);
 
 				if (Visualization.CurrentRepresentation != EMassRepresentationType::None || GMassTrafficDebugVisualization >= 2)
 				{
-					DrawDebugPoint(World, TransformFragment.GetTransform().GetLocation() + FVector(50.0f, 0.0f, 200.0f), 10.0f, UE::MassLOD::LODColors[CurrentVisualIdx]);
+					DrawDebugPoint(InWorld, TransformFragment.GetTransform().GetLocation() + FVector(50.0f, 0.0f, 200.0f), 10.0f, UE::MassLOD::LODColors[CurrentVisualIdx]);
 				}
 
 				if ((Visualization.CurrentRepresentation != EMassRepresentationType::None && GMassTrafficDebugVisualization >= 2) || GMassTrafficDebugVisualization >= 3)
@@ -250,17 +231,9 @@ UMassTrafficIntersectionVisualizationLODProcessor::UMassTrafficIntersectionVisua
 	ExecutionOrder.ExecuteAfter.Add(UMassTrafficIntersectionLODCollectorProcessor::StaticClass()->GetFName());
 }
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-void UMassTrafficIntersectionVisualizationLODProcessor::ConfigureQueries()
-#else
 void UMassTrafficIntersectionVisualizationLODProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
-#endif
 {
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-	Super::ConfigureQueries();
-#else
 	Super::ConfigureQueries(EntityManager);
-#endif
 
 	CloseEntityQuery.AddTagRequirement<FMassTrafficIntersectionTag>(EMassFragmentPresence::All);
 	CloseEntityAdjustDistanceQuery.AddTagRequirement<FMassTrafficIntersectionTag>(EMassFragmentPresence::All);
@@ -280,17 +253,9 @@ UMassTrafficIntersectionLODCollectorProcessor::UMassTrafficIntersectionLODCollec
 	ExecutionOrder.ExecuteAfter.Add(UE::MassTraffic::ProcessorGroupNames::FrameStart);
 }
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-void UMassTrafficIntersectionLODCollectorProcessor::ConfigureQueries()
-#else
 void UMassTrafficIntersectionLODCollectorProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
-#endif
 {
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-	Super::ConfigureQueries();
-#else
 	Super::ConfigureQueries(EntityManager);
-#endif
 
 	EntityQuery_VisibleRangeAndOnLOD.AddTagRequirement<FMassTrafficIntersectionTag>(EMassFragmentPresence::All);
 	EntityQuery_VisibleRangeOnly.AddTagRequirement<FMassTrafficIntersectionTag>(EMassFragmentPresence::All);

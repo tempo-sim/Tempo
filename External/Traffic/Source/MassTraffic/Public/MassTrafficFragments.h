@@ -2,18 +2,20 @@
 
 #pragma once
 
+#if UE_ENABLE_INCLUDE_ORDER_DEPRECATED_IN_5_6
 #include "MassTraffic.h"
+#include "MassTrafficUtils.h"
+#include "Containers/RingBuffer.h"
+#include "MassLODSubsystem.h"
+#endif // UE_ENABLE_INCLUDE_ORDER_DEPRECATED_IN_5_6
 #include "MassTrafficDamage.h"
 #include "MassTrafficDebugHelpers.h"
 #include "MassTrafficPIDController.h"
 #include "MassTrafficTypes.h"
-#include "MassTrafficUtils.h"
-
+#include "MassTrafficPhysics.h"
 #include "MassCrowdSubsystem.h"
 #include "MassEntityTypes.h"
 #include "ZoneGraphTypes.h"
-#include "Containers/RingBuffer.h"
-#include "MassLODSubsystem.h"
 #include "MassTrafficSettings.h"
 #include "MassTrafficSubsystem.h"
 
@@ -476,13 +478,11 @@ struct MASSTRAFFIC_API FMassTrafficLightIntersectionFragment : public FMassFragm
 	void Finalize(const FMassTrafficLaneToTrafficLightMap& LaneToTrafficLightMap);
 };
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION > 6
 template<>
 struct TMassFragmentTraits<FMassTrafficLightIntersectionFragment> final
 {
 	enum { AuthorAcceptsItsNotTriviallyCopyable = true };
 };
-#endif
 
 UENUM(BlueprintType)
 enum class EMassTrafficStopSignIntersectionState : uint8
@@ -569,13 +569,11 @@ struct MASSTRAFFIC_API FMassTrafficSignIntersectionFragment : public FMassFragme
 		const bool bForce);
 };
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION > 6
 template<>
 struct TMassFragmentTraits<FMassTrafficSignIntersectionFragment> final
 {
 	enum { AuthorAcceptsItsNotTriviallyCopyable = true };
 };
-#endif
 
 
 /** Simulation LOD Fragment */
@@ -700,14 +698,14 @@ struct MASSTRAFFIC_API FMassTrafficObstacleListFragment : public FMassFragment
 	TArray<FMassEntityHandle, TInlineAllocator<MASSTRAFFIC_NUM_INLINE_OBSTACLES>> Obstacles;
 };
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION > 6
 template<>
 struct TMassFragmentTraits<FMassTrafficObstacleListFragment> final
 {
-	enum { AuthorAcceptsItsNotTriviallyCopyable = true };
+	enum
+	{
+		AuthorAcceptsItsNotTriviallyCopyable = true
+	};
 };
-#endif
-
 
 /** Obstacle Avoidance Fragment */
 
@@ -891,14 +889,11 @@ struct MASSTRAFFIC_API FMassTrafficVehicleControlFragment : public FMassFragment
 	bool HasGivenOpportunityForTurningVehiclesToReactivelyYieldAtIntersection() const { return bHasGivenOpportunityForTurningVehiclesToReactivelyYieldAtIntersection; }
 };
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION > 6
 template<>
 struct TMassFragmentTraits<FMassTrafficVehicleControlFragment> final
 {
 	enum { AuthorAcceptsItsNotTriviallyCopyable = true };
 };
-#endif
-
 
 /** Lane Change Fragment * Search key: LCFRAG */
 #define NUM_BITS__LANE_CHANGE_START_NEW_LANE_CHANGES_STAGGERED_SLEEP_COUNTER 5
@@ -1046,6 +1041,15 @@ struct MASSTRAFFIC_API FMassTrafficVehicleLaneChangeFragment : public FMassFragm
 		const float ProgressionScale = Sign * (1.0f - ProgressAlongLanePct);
 		return ProgressionScale;
 	}
+};
+
+template<>
+struct TMassFragmentTraits<FMassTrafficVehicleLaneChangeFragment> final
+{
+	enum
+	{
+		AuthorAcceptsItsNotTriviallyCopyable = true
+	};
 };
 
 

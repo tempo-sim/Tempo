@@ -45,10 +45,18 @@ if [ -f "$VENV_DIR/pyvenv.cfg" ]; then
       VENV_CREATED_AT=$(cygpath -a "$VENV_CREATED_AT")
     fi
   fi
+  if [[ "$OSTYPE" = "msys" ]]; then
+    VENV_ACTIVATE="$VENV_DIR/Scripts/activate"
+  else
+    VENV_ACTIVATE="$VENV_DIR/bin/activate"
+  fi
   if [[ "$VENV_PYTHON_DIR" != "$PYTHON_DIR" ]]; then
     rm -rf "$VENV_DIR"
   elif [ -n "$VENV_CREATED_AT" ] && [[ "$VENV_CREATED_AT" != "$VENV_DIR" ]]; then
     echo "[Tempo Prebuild] TempoEnv was created at $VENV_CREATED_AT but now lives at $VENV_DIR; recreating"
+    rm -rf "$VENV_DIR"
+  elif [ ! -f "$VENV_ACTIVATE" ]; then
+    echo "[Tempo Prebuild] TempoEnv is missing its activate script (likely an interrupted creation); recreating"
     rm -rf "$VENV_DIR"
   else
     VENV_EXISTS=1

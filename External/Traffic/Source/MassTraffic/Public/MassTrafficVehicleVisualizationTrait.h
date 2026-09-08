@@ -3,10 +3,12 @@
 #pragma once
 
 #include "MassEntityTraitBase.h"
+#if UE_ENABLE_INCLUDE_ORDER_DEPRECATED_IN_5_6
 #include "MassObserverProcessor.h"
+#endif // UE_ENABLE_INCLUDE_ORDER_DEPRECATED_IN_5_6
 #include "MassVisualizationTrait.h"
-
 #include "MassTrafficVehicleVisualizationTrait.generated.h"
+
 
 UCLASS(meta=(DisplayName="Traffic Vehicle Visualization"))
 class MASSTRAFFIC_API UMassTrafficVehicleVisualizationTrait : public UMassVisualizationTrait
@@ -14,10 +16,6 @@ class MASSTRAFFIC_API UMassTrafficVehicleVisualizationTrait : public UMassVisual
 	GENERATED_BODY()
 	
 public:
-	
 	UMassTrafficVehicleVisualizationTrait();
-
-public:
-
 	virtual void BuildTemplate(FMassEntityTemplateBuildContext& BuildContext, const UWorld& World) const override;
 };

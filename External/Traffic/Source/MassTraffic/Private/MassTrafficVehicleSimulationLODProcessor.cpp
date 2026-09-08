@@ -41,11 +41,7 @@ UMassTrafficVehicleSimulationLODProcessor::UMassTrafficVehicleSimulationLODProce
 	ExecutionOrder.ExecuteAfter.Add(UE::MassTraffic::ProcessorGroupNames::VehicleLODCollector);
 }
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-void UMassTrafficVehicleSimulationLODProcessor::ConfigureQueries()
-#else
 void UMassTrafficVehicleSimulationLODProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
-#endif
 {
 	EntityQuery.AddTagRequirement<FMassTrafficVehicleTag>(EMassFragmentPresence::All);
 	EntityQuery.AddRequirement<FTransformFragment>(EMassFragmentAccess::ReadOnly);
@@ -74,22 +70,13 @@ void UMassTrafficVehicleSimulationLODProcessor::ConfigureQueries(const TSharedRe
 	ProcessorRequirements.AddSubsystemRequirement<UMassLODSubsystem>(EMassFragmentAccess::ReadOnly);
 }
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-void UMassTrafficVehicleSimulationLODProcessor::Initialize(UObject& InOwner)
-#else
 void UMassTrafficVehicleSimulationLODProcessor::InitializeInternal(UObject& InOwner, const TSharedRef<FMassEntityManager>& EntityManager)
-#endif
 {
 	LODCalculator.Initialize(BaseLODDistance, BufferHysteresisOnDistancePercentage / 100.0f, LODMaxCount, nullptr, DistanceToFrustum, DistanceToFrustumHysteresis, VisibleLODDistance);
 #if WITH_MASSTRAFFIC_DEBUG
 	LogOwner = UWorld::GetSubsystem<UMassTrafficSubsystem>(InOwner.GetWorld());
 #endif // WITH_MASSTRAFFIC_DEBUG
-
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-	Super::Initialize(InOwner);
-#else
 	Super::InitializeInternal(InOwner, EntityManager);
-#endif
 }
 
 void UMassTrafficVehicleSimulationLODProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
@@ -100,12 +87,8 @@ void UMassTrafficVehicleSimulationLODProcessor::Execute(FMassEntityManager& Enti
 	
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(TEXT("CalculateLOD"))
-
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-		EntityQueryCalculateLOD.ForEachEntityChunk(EntityManager, Context, [this](FMassExecutionContext& Context)
-#else
+		
 		EntityQueryCalculateLOD.ForEachEntityChunk(Context, [this](FMassExecutionContext& Context)
-#endif
 		{
 			const TConstArrayView<FMassViewerInfoFragment> ViewersInfoList = Context.GetFragmentView<FMassViewerInfoFragment>();
 			const TArrayView<FMassTrafficSimulationLODFragment> SimulationLODFragments = Context.GetMutableFragmentView<FMassTrafficSimulationLODFragment>();
@@ -118,11 +101,7 @@ void UMassTrafficVehicleSimulationLODProcessor::Execute(FMassEntityManager& Enti
 		
 		if (LODCalculator.AdjustDistancesFromCount())
 		{
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-			EntityQueryAdjustDistances.ForEachEntityChunk(EntityManager, Context, [this](FMassExecutionContext& QueryContext)
-#else
 			EntityQueryAdjustDistances.ForEachEntityChunk(Context, [this](FMassExecutionContext& QueryContext)
-#endif
 			{
 				const TConstArrayView<FMassViewerInfoFragment> ViewersInfoList = QueryContext.GetFragmentView<FMassViewerInfoFragment>();
 				const TArrayView<FMassTrafficSimulationLODFragment> SimulationLODFragments = QueryContext.GetMutableFragmentView<FMassTrafficSimulationLODFragment>();
@@ -133,22 +112,17 @@ void UMassTrafficVehicleSimulationLODProcessor::Execute(FMassEntityManager& Enti
 
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(TEXT("LODChanges"))
-
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-		EntityQueryLODChange.ForEachEntityChunk(EntityManager, Context, [this](FMassExecutionContext& QueryContext)
-#else
+		
 		EntityQueryLODChange.ForEachEntityChunk(Context, [this](FMassExecutionContext& QueryContext)
-#endif
 		{
 			const FMassTrafficVehiclePhysicsSharedParameters& PhysicsSharedFragment = QueryContext.GetConstSharedFragment<FMassTrafficVehiclePhysicsSharedParameters>();  
 
 			const TConstArrayView<FMassTrafficSimulationLODFragment> SimulationLODFragments = QueryContext.GetFragmentView<FMassTrafficSimulationLODFragment>();
 			const TConstArrayView<FMassTrafficVehiclePhysicsFragment> SimpleVehiclePhysicsFragments = QueryContext.GetFragmentView<FMassTrafficVehiclePhysicsFragment>();
 			
-			const int32 NumEntities = QueryContext.GetNumEntities();
-			for (int EntityIdx = 0; EntityIdx < NumEntities; EntityIdx++)
+			for (FMassExecutionContext::FEntityIterator EntityIt = QueryContext.CreateEntityIterator(); EntityIt; ++EntityIt)
 			{
-				const FMassTrafficSimulationLODFragment& SimulationLODFragment = SimulationLODFragments[EntityIdx];
+				const FMassTrafficSimulationLODFragment& SimulationLODFragment = SimulationLODFragments[EntityIt];
 				if (SimulationLODFragment.LOD != SimulationLODFragment.PrevLOD)
 				{
 					// Medium or High LOD now?
@@ -159,7 +133,7 @@ void UMassTrafficVehicleSimulationLODProcessor::Execute(FMassEntityManager& Enti
 							if (PhysicsSharedFragment.IsValid())
 							{
 								// Add FDataFragment_PIDVehicleControl & FDataFragment_SimpleVehiclePhysics fragments
-								QueryContext.Defer().PushCommand<FMassCommandAddFragmentInstances>(QueryContext.GetEntity(EntityIdx)
+								QueryContext.Defer().PushCommand<FMassCommandAddFragmentInstances>(QueryContext.GetEntity(EntityIt)
 										, PhysicsSharedFragment.SimpleVehiclePhysicsFragmentTemplate
 										, FMassTrafficPIDVehicleControlFragment(PhysicsSharedFragment.SimpleVehiclePhysicsConfig.MaxSteeringAngle)
 										, FMassTrafficPIDControlInterpolationFragment()
@@ -182,7 +156,7 @@ void UMassTrafficVehicleSimulationLODProcessor::Execute(FMassEntityManager& Enti
 									, FMassTrafficPIDVehicleControlFragment
 									, FMassTrafficPIDControlInterpolationFragment
 									, FMassTrafficVehicleDamageFragment>>
-								(QueryContext.GetEntity(EntityIdx));
+								(QueryContext.GetEntity(EntityIt));
 						}
 					}
 				}
@@ -197,11 +171,7 @@ void UMassTrafficVehicleSimulationLODProcessor::Execute(FMassEntityManager& Enti
 		
 		check(World);
 		const float Time = World->GetTimeSeconds();
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-		EntityQueryVariableTick.ForEachEntityChunk(EntityManager, Context, [this, Time](FMassExecutionContext& QueryContext)
-#else
 		EntityQueryVariableTick.ForEachEntityChunk(Context, [this, Time](FMassExecutionContext& QueryContext)
-#endif
 		{
 			FMassSimulationVariableTickSharedFragment& TickRateSharedFragment = QueryContext.GetMutableSharedFragment<FMassSimulationVariableTickSharedFragment>();
 			const TConstArrayView<FMassTrafficSimulationLODFragment> SimulationLODFragments = QueryContext.GetFragmentView<FMassTrafficSimulationLODFragment>();
@@ -216,18 +186,13 @@ void UMassTrafficVehicleSimulationLODProcessor::Execute(FMassEntityManager& Enti
 		TRACE_CPUPROFILER_EVENT_SCOPE(TEXT("LODStats"))
 		
 		// LOD Stats
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-		EntityQuery.ForEachEntityChunk(EntityManager, Context, [this](FMassExecutionContext& QueryContext)
-#else
 		EntityQuery.ForEachEntityChunk(Context, [this](FMassExecutionContext& QueryContext)
-#endif
 		{
-			const int32 NumEntities = QueryContext.GetNumEntities();
 			const TArrayView<FMassTrafficSimulationLODFragment> SimulationLODFragments = QueryContext.GetMutableFragmentView<FMassTrafficSimulationLODFragment>();
 
-			for (int EntityIdx = 0; EntityIdx < NumEntities; EntityIdx++)
+			for (FMassExecutionContext::FEntityIterator EntityIt = QueryContext.CreateEntityIterator(); EntityIt; ++EntityIt)
 			{
-				FMassTrafficSimulationLODFragment& EntityLOD = SimulationLODFragments[EntityIdx];
+				FMassTrafficSimulationLODFragment& EntityLOD = SimulationLODFragments[EntityIt];
 				switch (EntityLOD.LOD)
 				{
 					case EMassLOD::High:
@@ -272,29 +237,24 @@ void UMassTrafficVehicleSimulationLODProcessor::Execute(FMassEntityManager& Enti
 		
 		const UObject* LogOwnerPtr = LogOwner.Get();
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-		EntityQuery.ForEachEntityChunk(EntityManager, Context, [World, LogOwnerPtr](FMassExecutionContext& QueryContext)
-#else
 		EntityQuery.ForEachEntityChunk(Context, [World, LogOwnerPtr](FMassExecutionContext& QueryContext)
-#endif
 		{			
-			const int32 NumEntities = QueryContext.GetNumEntities();
 			const bool bShouldTickChunkThisFrame = FMassSimulationVariableTickChunkFragment::ShouldTickChunkThisFrame(QueryContext);
 			const TConstArrayView<FTransformFragment> LocationList = QueryContext.GetFragmentView<FTransformFragment>();
 			const TConstArrayView<FMassTrafficDebugFragment> TrafficDebugFragments = QueryContext.GetFragmentView<FMassTrafficDebugFragment>();
 			const TArrayView<FMassTrafficSimulationLODFragment> SimulationLODFragments = QueryContext.GetMutableFragmentView<FMassTrafficSimulationLODFragment>();
 
-			for (int EntityIdx = 0; EntityIdx < NumEntities; EntityIdx++)
+			for (FMassExecutionContext::FEntityIterator EntityIt = QueryContext.CreateEntityIterator(); EntityIt; ++EntityIt)
 			{
-				const FTransformFragment& EntityLocation = LocationList[EntityIdx];
-				FMassTrafficSimulationLODFragment& EntityLOD = SimulationLODFragments[EntityIdx];
+				const FTransformFragment& EntityLocation = LocationList[EntityIt];
+				FMassTrafficSimulationLODFragment& EntityLOD = SimulationLODFragments[EntityIt];
 				const int32 SimulationLODIdx = EntityLOD.LOD.GetValue();
 				DrawDebugPoint(World, EntityLocation.GetTransform().GetLocation() + FVector(0.0f, 0.0f, 300.0f), /*Size*/ 10.0f, bShouldTickChunkThisFrame ? UE::MassLOD::LODColors[SimulationLODIdx] : FColor::Black);
 
-				const bool bVisLogEvenIfOff = TrafficDebugFragments.Num() > 0 && TrafficDebugFragments[EntityIdx].bVisLog; 
+				const bool bVisLogEvenIfOff = TrafficDebugFragments.Num() > 0 && TrafficDebugFragments[EntityIt].bVisLog; 
 				if (((EntityLOD.LOD != EMassLOD::Off || bVisLogEvenIfOff) && GMassTrafficDebugSimulationLOD >= 2) || GMassTrafficDebugSimulationLOD >= 3)
 				{
-					UE_VLOG_LOCATION(LogOwnerPtr, TEXT("MassTraffic Simulation LOD"), Log, EntityLocation.GetTransform().GetLocation() + FVector(0.0f, 0.0f, 300.0f), /*Radius*/ 10.0f, UE::MassLOD::LODColors[SimulationLODIdx], TEXT("%d %s %d"), SimulationLODIdx, bShouldTickChunkThisFrame ? TEXT("") : TEXT("(x)"), QueryContext.GetEntity(EntityIdx).Index);
+					UE_VLOG_LOCATION(LogOwnerPtr, TEXT("MassTraffic Simulation LOD"), Log, EntityLocation.GetTransform().GetLocation() + FVector(0.0f, 0.0f, 300.0f), /*Radius*/ 10.0f, UE::MassLOD::LODColors[SimulationLODIdx], TEXT("%d %s %d"), SimulationLODIdx, bShouldTickChunkThisFrame ? TEXT("") : TEXT("(x)"), QueryContext.GetEntity(EntityIt).Index);
 				}
 			}
 		});

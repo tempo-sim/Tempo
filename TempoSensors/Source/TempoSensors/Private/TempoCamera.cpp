@@ -25,32 +25,6 @@
 #include "Misc/ScopeLock.h"
 #include "TextureResource.h"
 
-// 5.6 only: GetLastAverageSceneLuminance lives on the renderer-private FSceneViewState — it was
-// not promoted to a virtual method on FSceneViewStateInterface until 5.7. Pull in ScenePrivate.h
-// (reachable via PrivateIncludePaths in TempoSensors.Build.cs) so we can downcast at the call site.
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 7
-#if PLATFORM_WINDOWS
-// An upstream include leaks the Win32 Interlocked* macros, which mangle
-// FPlatformAtomics::InterlockedIncrement -> ::_InterlockedIncrement inside RenderCore headers
-// that ScenePrivate.h transitively pulls in. Allow+Hide is a no-op pair that re-asserts and then
-// clears those macros, so ScenePrivate.h parses against the real FPlatformAtomics API.
-#include "Windows/AllowWindowsPlatformAtomics.h"
-#include "Windows/HideWindowsPlatformAtomics.h"
-#endif
-// In 5.6 ScenePrivate.h transitively includes RayTracing/RayTracingScene.h, which declares
-// private members that TempoSceneCaptureComponent2D.cpp relies on accessing via a
-// `#define private public` hack. UBT combines this file and that one into the same Unity
-// translation unit; this file comes first alphabetically, so RayTracingScene.h gets parsed
-// here. Without mirroring the define, the class is parsed with real `private` — the later
-// hack in TempoSceneCaptureComponent2D.cpp is then a no-op because `#pragma once` skips the
-// re-include. Mirror the define so the first parse rewrites the class to all-public for the
-// whole TU. (In 5.7+ TempoCamera.cpp does not include ScenePrivate.h; the equivalent mirror
-// for SceneRendering.h lives in TempoMultiViewCapture.cpp.)
-#define private public
-#include "ScenePrivate.h"
-#undef private
-#endif
-
 // Windows headers define UpdateResource as a macro (UpdateResourceW/UpdateResourceA).
 // Undefine it so calls to UTexture::UpdateResource() compile correctly.
 #ifdef UpdateResource
@@ -67,11 +41,7 @@ namespace
 
 	float GetViewStateLastAverageSceneLuminance(FSceneViewStateInterface* ViewState)
 	{
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 7
-		return static_cast<FSceneViewState*>(ViewState)->GetLastAverageSceneLuminance();
-#else
 		return ViewState->GetLastAverageSceneLuminance();
-#endif
 	}
 
 	bool IsExtendedLuminanceRangeEnabled()
@@ -176,6 +146,13 @@ namespace
 		// UWorld::AddPostProcessingSettings: volumes are kept sorted by ascending priority.
 		if (World)
 		{
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8
+			// GetPostProcessVolumeIterator() replaced the raw PostProcessVolumes array in 5.8 and
+			// already filters out invalid entries, yielding references rather than pointers.
+			for (IInterface_PostProcessVolume& Volume : World->GetPostProcessVolumeIterator())
+			{
+				const FPostProcessVolumeProperties Properties = Volume.GetProperties();
+#else
 			for (IInterface_PostProcessVolume* Volume : World->PostProcessVolumes)
 			{
 				if (!Volume)
@@ -183,6 +160,7 @@ namespace
 					continue;
 				}
 				const FPostProcessVolumeProperties Properties = Volume->GetProperties();
+#endif
 				if (!Properties.bIsEnabled || !Properties.Settings)
 				{
 					continue;
@@ -191,7 +169,11 @@ namespace
 				if (!Properties.bIsUnbound)
 				{
 					float DistanceToPoint = 0.0f;
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8
+					Volume.EncompassesPoint(ViewLocation, 0.0f, &DistanceToPoint);
+#else
 					Volume->EncompassesPoint(ViewLocation, 0.0f, &DistanceToPoint);
+#endif
 					if (DistanceToPoint < 0.0f || DistanceToPoint > Properties.BlendRadius)
 					{
 						Weight = 0.0f;
@@ -1377,7 +1359,7 @@ void UTempoCamera::RenderCapture()
 		ProjectionMatrix.M[3][3] = 0.0f;
 #if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8
 		// ERHIZBuffer was removed in 5.8; an inverted (reversed) Z buffer is now always assumed.
-		if (true)
+		if (/* DISABLES CODE */ (true))
 #else
 		if ((int32)ERHIZBuffer::IsInverted)
 #endif

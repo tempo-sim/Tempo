@@ -5,11 +5,11 @@
 #include "MassTrafficChooseNextLaneProcessor.h"
 #include "MassTrafficFragments.h"
 #include "MassTrafficInterpolation.h"
-#include "MassTrafficLaneChangingProcessor.h"
 #include "MassExecutionContext.h"
 #include "DrawDebugHelpers.h"
 #include "MassZoneGraphNavigationFragments.h"
 #include "ZoneGraphSubsystem.h"
+#include "MassCommonFragments.h"
 
 
 UMassTrafficInitInterpolationProcessor::UMassTrafficInitInterpolationProcessor()
@@ -18,11 +18,7 @@ UMassTrafficInitInterpolationProcessor::UMassTrafficInitInterpolationProcessor()
 	bAutoRegisterWithProcessingPhases = false;
 }
 
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-void UMassTrafficInitInterpolationProcessor::ConfigureQueries()
-#else
 void UMassTrafficInitInterpolationProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
-#endif
 {
 	EntityQuery.AddRequirement<FMassZoneGraphLaneLocationFragment>(EMassFragmentAccess::ReadOnly);
 
@@ -33,24 +29,19 @@ void UMassTrafficInitInterpolationProcessor::ConfigureQueries(const TSharedRef<F
 
 void UMassTrafficInitInterpolationProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 6
-	EntityQuery.ForEachEntityChunk(EntityManager, Context, [&, World = EntityManager.GetWorld()](FMassExecutionContext& QueryContext)
-#else
 	EntityQuery.ForEachEntityChunk(Context, [&, World = EntityManager.GetWorld()](FMassExecutionContext& QueryContext)
-#endif
 	{
 		const UZoneGraphSubsystem& ZoneGraphSubsystem = QueryContext.GetSubsystemChecked<UZoneGraphSubsystem>();
 
-		const int32 NumEntities = QueryContext.GetNumEntities();
 		const TConstArrayView<FMassZoneGraphLaneLocationFragment> LaneLocationFragments = QueryContext.GetFragmentView<FMassZoneGraphLaneLocationFragment>();
 		const TArrayView<FMassTrafficInterpolationFragment> VehicleMovementInterpolationFragments = QueryContext.GetMutableFragmentView<FMassTrafficInterpolationFragment>();
 		const TArrayView<FTransformFragment> TransformFragments = QueryContext.GetMutableFragmentView<FTransformFragment>();
 		
-		for (int32 Index = 0; Index < NumEntities; ++Index)
+		for (FMassExecutionContext::FEntityIterator EntityIt = QueryContext.CreateEntityIterator(); EntityIt; ++EntityIt)
 		{
-			const FMassZoneGraphLaneLocationFragment& LaneLocationFragment = LaneLocationFragments[Index];
-			FMassTrafficInterpolationFragment& VehicleMovementInterpolationFragment = VehicleMovementInterpolationFragments[Index];
-			FTransformFragment& TransformFragment = TransformFragments[Index];
+			const FMassZoneGraphLaneLocationFragment& LaneLocationFragment = LaneLocationFragments[EntityIt];
+			FMassTrafficInterpolationFragment& VehicleMovementInterpolationFragment = VehicleMovementInterpolationFragments[EntityIt];
+			FTransformFragment& TransformFragment = TransformFragments[EntityIt];
 
 			const FZoneGraphStorage* ZoneGraphStorage = ZoneGraphSubsystem.GetZoneGraphStorage(LaneLocationFragment.LaneHandle.DataHandle);
 			check(ZoneGraphStorage);
