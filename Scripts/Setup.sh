@@ -28,12 +28,19 @@ ADD_COMMAND_TO_HOOK() {
   if [ ! -f "$HOOK_FILE" ]; then
     touch "$HOOK_FILE"
     echo -e "#!/usr/bin/env bash\n" > "$HOOK_FILE"
+    # Prompting from a hook needs the terminal on stdin, but opening it must not
+    # fail the hook (and so the checkout) where there is no controlling
+    # terminal, e.g. CI or a GUI git client. Testing for existence is not
+    # enough: the node exists there, and only opening it fails.
     # https://stackoverflow.com/questions/3417896/how-do-i-prompt-the-user-from-within-a-commit-msg-hook
-    echo "exec < /dev/tty" >> "$HOOK_FILE"
+    echo 'if { : < /dev/tty; } 2>/dev/null; then exec < /dev/tty; fi' >> "$HOOK_FILE"
     chmod +x "$HOOK_FILE"
   fi
 
-  if ! grep -qF "\"$COMMAND\"" "$HOOK_FILE"; then
+  # Match on the bare path so an existing hook line is recognised whether it was
+  # written quoted or, by an older Setup.sh, unquoted. Matching the quoted form
+  # would miss a legacy unquoted line and append a duplicate beside it.
+  if ! grep -qF "$COMMAND" "$HOOK_FILE"; then
     echo "\"$COMMAND\"" >> "$HOOK_FILE"
   fi
 }
