@@ -182,6 +182,16 @@ on:
 
 env:
   UNREAL_VERSION: "${{ inputs.unreal_version }}"
+  # UE 5.8's UBA detour library (libUbaDetours.so, LD_PRELOADed into every compile) livelocks
+  # clang++ on this engine: a SIGSEGV under opendir/directory iteration is caught by UBA's
+  # ChainedSigaction, chained back to clang's own handler, and re-faults on the same instruction
+  # forever - tens of thousands of "[CHAINED-SIGNAL 11]" reports per minute with no action ever
+  # completing. Opt out of detouring (equivalent to -UBANoDetour): UBA still schedules actions,
+  # but runs them as ordinary local processes. UBT materializes UnrealBuildTool_<Category>__<Field>
+  # environment variables into a BuildConfiguration.xml that it reads last, so this overrides the
+  # engine defaults for every UBT invocation in the container - including the ones UAT spawns.
+  # Remove once the detour layer is fixed upstream; it costs UBA's file virtualization and caching.
+  UBA_NO_DETOUR: -e UnrealBuildTool_UnrealBuildAccelerator__AllowDetour=false
 
 jobs:
   build:
@@ -586,6 +596,7 @@ jobs:
         timeout_seconds: 60
         command: |
           docker run --rm \
+            ${UBA_NO_DETOUR} \
             ${ENGINE_MODS_MOUNTS} \
             -e GITHUB_TOKEN \
             -v ${{ github.workspace }}/.engine-ddc-cache/Engine/DerivedDataCache:/home/ue4/UnrealEngine/Engine/DerivedDataCache \
@@ -596,6 +607,7 @@ jobs:
       if: ${{ steps.pull_modded.outputs.used != 'true' }}
       run: |
         docker run --rm \
+          ${UBA_NO_DETOUR} \
           ${ENGINE_MODS_MOUNTS} \
           -v ${{ github.workspace }}/.engine-ddc-cache/Engine/DerivedDataCache:/home/ue4/UnrealEngine/Engine/DerivedDataCache \
           -v ${{ github.workspace }}/${{ inputs.project_root }}:/home/ue4/${{ inputs.project_root }} \
@@ -605,6 +617,7 @@ jobs:
       if: ${{ inputs.clean }}
       run: |
         docker run --rm \
+          ${UBA_NO_DETOUR} \
           ${ENGINE_MODS_MOUNTS} \
           -v ${{ github.workspace }}/.engine-ddc-cache/Engine/DerivedDataCache:/home/ue4/UnrealEngine/Engine/DerivedDataCache \
           -v ${{ github.workspace }}/${{ inputs.project_root }}:/home/ue4/${{ inputs.project_root }} \
@@ -613,6 +626,7 @@ jobs:
     - name: Build
       run: |
         docker run --rm \
+          ${UBA_NO_DETOUR} \
           ${ENGINE_MODS_MOUNTS} \
           -v ${{ github.workspace }}/.engine-ddc-cache/Engine/DerivedDataCache:/home/ue4/UnrealEngine/Engine/DerivedDataCache \
           -v ${{ github.workspace }}/${{ inputs.project_root }}:/home/ue4/${{ inputs.project_root }} \
@@ -624,6 +638,7 @@ jobs:
       if: ${{ inputs.automation_test_filter != '' }}
       run: |
         docker run --rm \
+          ${UBA_NO_DETOUR} \
           ${ENGINE_MODS_MOUNTS} \
           -v ${{ github.workspace }}/.engine-ddc-cache/Engine/DerivedDataCache:/home/ue4/UnrealEngine/Engine/DerivedDataCache \
           -v ${{ github.workspace }}/${{ inputs.project_root }}:/home/ue4/${{ inputs.project_root }} \
@@ -645,6 +660,7 @@ jobs:
           PACKAGE_ARGS="$PACKAGE_ARGS -generatepatch -basedonreleaseversion=${{ inputs.release_id }} -basedonreleaseversionbasepath=/home/ue4/${{ inputs.project_root }}/Releases"
         fi
         docker run --rm \
+          ${UBA_NO_DETOUR} \
           ${ENGINE_MODS_MOUNTS} \
           -v ${{ github.workspace }}/.engine-ddc-cache/Engine/DerivedDataCache:/home/ue4/UnrealEngine/Engine/DerivedDataCache \
           -v ${{ github.workspace }}/.releases:/home/ue4/${{ inputs.project_root }}/Releases \
@@ -658,6 +674,7 @@ jobs:
       if: ${{ inputs.patch }}
       run: |
         docker run --rm \
+          ${UBA_NO_DETOUR} \
           ${ENGINE_MODS_MOUNTS} \
           -v ${{ github.workspace }}/.engine-ddc-cache/Engine/DerivedDataCache:/home/ue4/UnrealEngine/Engine/DerivedDataCache \
           -v ${{ github.workspace }}/${{ inputs.project_root }}:/home/ue4/${{ inputs.project_root }} \
