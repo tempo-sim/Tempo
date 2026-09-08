@@ -2,7 +2,8 @@
 # Publish a Tempo Unreal Docker image with engine mods pre-applied to a container registry.
 # This reusable workflow builds the base Tempo Unreal Docker image (from the Epic-distributed image),
 # runs the Tempo engine-mods install script inside a container, then commits and pushes the resulting
-# image to a parameterized registry repository (image_name) tagged with <unreal_version>-<hashFiles(EngineMods/**)>.
+# image to a parameterized registry repository (image_name) tagged with <unreal_version>-<hash>, where
+# the hash covers EngineMods/, the Dockerfile, and the digest of the Epic base image it was built from.
 # A consumer build workflow can then `docker pull` this image instead of running the
 # "Initialize Engine Mods Cache" + "Install Engine Mods" steps each build.
 # The skip-if-tag-exists check makes the workflow idempotent on no-op merges to main.
@@ -103,6 +104,16 @@ on:
 
 env:
   UNREAL_VERSION: "${{ inputs.unreal_version }}"
+  # UE 5.8's UBA detour library (libUbaDetours.so, LD_PRELOADed into every compile) livelocks
+  # clang++ on this engine: a SIGSEGV under opendir/directory iteration is caught by UBA's
+  # ChainedSigaction, chained back to clang's own handler, and re-faults on the same instruction
+  # forever - tens of thousands of "[CHAINED-SIGNAL 11]" reports per minute with no action ever
+  # completing. Opt out of detouring (equivalent to -UBANoDetour): UBA still schedules actions,
+  # but runs them as ordinary local processes. UBT materializes UnrealBuildTool_<Category>__<Field>
+  # environment variables into a BuildConfiguration.xml that it reads last, so this overrides the
+  # engine defaults for every UBT invocation in the container - including the ones UAT spawns.
+  # Remove once the detour layer is fixed upstream; it costs UBA's file virtualization and caching.
+  UBA_NO_DETOUR: -e UnrealBuildTool_UnrealBuildAccelerator__AllowDetour=false
 
 jobs:
   publish:
@@ -139,6 +150,32 @@ jobs:
         path: checkout
         submodules: recursive
         token: ${{ steps.submodules_app_token.outputs.token != '' && steps.submodules_app_token.outputs.token || (inputs.submodules_token != '' && inputs.submodules_token || github.token) }}
+    # Epic's base image tag (dev-slim-<version>) moves as the release branch advances, so a published
+    # image must be identified by the engine it was built from, not just by the mods applied to it.
+    # Resolve the digest before the tag is computed and build from that digest below, so the tag and
+    # the image can't disagree. Must stay in sync with build_and_package.yml, which resolves the same
+    # digest to decide whether this image answers for its engine.
+    - name: Log in to Epic Container Registry (to resolve the base image)
+      uses: docker/login-action@v2
+      with:
+        registry: ghcr.io
+        username: ${{ secrets.EPIC_DOCKER_USERNAME }}
+        password: ${{ secrets.EPIC_DOCKER_TOKEN }}
+    - name: Resolve Engine Base Image Digest
+      id: engine_base_image
+      run: |
+        BASE_IMAGE="ghcr.io/epicgames/unreal-engine:dev-slim-${UNREAL_VERSION}"
+        DIGEST=$(docker buildx imagetools inspect "$BASE_IMAGE" --format '{{.Manifest.Digest}}')
+        case "$DIGEST" in
+          sha256:*) ;;
+          *)
+            echo "Error: could not resolve a digest for $BASE_IMAGE (got '$DIGEST')"
+            exit 1
+            ;;
+        esac
+        echo "IMAGE=ghcr.io/epicgames/unreal-engine@$DIGEST" >> $GITHUB_OUTPUT
+        echo "DIGEST=$DIGEST" >> $GITHUB_OUTPUT
+        echo "Engine base image: $BASE_IMAGE -> $DIGEST"
     - name: Compute Engine Mods Hash and Tag
       id: tag
       run: |
@@ -152,16 +189,19 @@ jobs:
           echo "Error: Dockerfile not found at $DOCKERFILE"
           exit 1
         fi
-        # Hash includes both EngineMods and the Dockerfile so changes to either invalidate
-        # the published tag (e.g. tooling added to the image must produce a fresh image).
+        # Hash includes EngineMods, the Dockerfile and the base image digest so changes to any of
+        # them invalidate the published tag (e.g. tooling added to the image, or Epic republishing
+        # dev-slim-<version>, must produce a fresh image).
         # Must stay in sync with the matching computation in build_and_package.yml.
         ENGINE_MODS_HASH=$(cd "$ENGINE_MODS_DIR" && find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)
         DOCKERFILE_HASH=$(sha256sum "$DOCKERFILE" | cut -d' ' -f1)
-        HASH=$(printf '%s\n%s\n' "$ENGINE_MODS_HASH" "$DOCKERFILE_HASH" | sha256sum | cut -d' ' -f1)
+        HASH=$(printf '%s\n%s\n%s\n' "$ENGINE_MODS_HASH" "$DOCKERFILE_HASH" "$ENGINE_BASE_DIGEST" | sha256sum | cut -d' ' -f1)
         TAG="${{ inputs.image_name }}:${{ env.UNREAL_VERSION }}-$HASH"
         echo "HASH=$HASH" >> $GITHUB_OUTPUT
         echo "TAG=$TAG" >> $GITHUB_OUTPUT
         echo "Target tag: $TAG"
+      env:
+        ENGINE_BASE_DIGEST: ${{ steps.engine_base_image.outputs.DIGEST }}
     # --- Target registry auth (generic: static credentials or AWS ECR). Used for the tag-existence
     #     check below and for the final push. Independent of the Epic base-image registry (ghcr.io). ---
     - name: Configure AWS Credentials for ECR (OIDC)
@@ -238,6 +278,7 @@ jobs:
       run: |
         docker build \
           --build-arg UNREAL_VERSION=${{ env.UNREAL_VERSION }} \
+          --build-arg ENGINE_BASE_IMAGE=${{ steps.engine_base_image.outputs.IMAGE }} \
           --tag tempo_unreal_image \
           -f ${{ github.workspace }}/checkout/${{ inputs.tempo_root }}/Dockerfile \
           ${{ github.workspace }}/checkout/${{ inputs.tempo_root }}
@@ -250,6 +291,7 @@ jobs:
       if: ${{ steps.skip.outputs.skip != 'true' }}
       run: |
         docker run --name modded_engine \
+          ${UBA_NO_DETOUR} \
           -v ${{ github.workspace }}/checkout/${{ inputs.tempo_root }}:/home/ue4/Tempo \
           tempo_unreal_image \
           /home/ue4/Tempo/Scripts/InstallEngineMods.sh
