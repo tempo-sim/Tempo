@@ -305,11 +305,33 @@ jobs:
     - name: Apply Engine Mods
       if: ${{ steps.skip.outputs.skip != 'true' }}
       run: |
+        # UBA keeps its CAS store under ~/.epic/UnrealBuildAccelerator, in sparse memory-mapped
+        # files reserved up front to StoreCapacityGb (40 GB by default). On the container's write
+        # layer they only cost what they actually hold, but `docker commit` tars that layer with no
+        # sparse-file support, so every reserved byte is materialized as zeros into the committed
+        # layer - which is what exhausts the runner's disk, and would bloat the published image for
+        # every consumer that pulls it. The store is pure build scratch, so delete it in the same
+        # container run. The files were created in this layer, so removing them here leaves nothing
+        # behind (not even a whiteout) for the commit to pick up.
         docker run --name modded_engine \
           ${UBA_NO_DETOUR} \
           -v ${{ github.workspace }}/checkout/${{ inputs.tempo_root }}:/home/ue4/Tempo \
           tempo_unreal_image \
-          /home/ue4/Tempo/Scripts/InstallEngineMods.sh
+          bash -c 'set -e; /home/ue4/Tempo/Scripts/InstallEngineMods.sh; rm -rf "$HOME/.epic/UnrealBuildAccelerator"'
+    - name: Report Container Write Layer Size
+      if: ${{ steps.skip.outputs.skip != 'true' }}
+      run: |
+        # The commit below unpacks a second, full copy of the container's write layer onto the
+        # runner's disk, writing sparse files out in full, so apparent size - not the allocated size
+        # du reports by default - is what it needs free. Report both, plus the biggest contributors,
+        # so a future blow-up is obvious without reproducing the ENOSPC.
+        UPPER=$(docker inspect --format '{{.GraphDriver.Data.UpperDir}}' modded_engine || true)
+        if [ -n "$UPPER" ] && sudo test -d "$UPPER"; then
+          echo "Write layer: $UPPER"
+          echo "Allocated: $(sudo du -sh "$UPPER" | cut -f1), to commit: $(sudo du -sh --apparent-size "$UPPER" | cut -f1)"
+          sudo du --apparent-size -h -d 3 "$UPPER" 2>/dev/null | sort -rh | head -20
+        fi
+        df -h /
     # Re-establish target-registry creds for the push. Only needed in static-credential mode: when the
     # target is also ghcr.io the Epic login above overwrote the same-host entry. In ECR mode the earlier
     # ECR login lives under a different host and is untouched, so no re-login is required.
