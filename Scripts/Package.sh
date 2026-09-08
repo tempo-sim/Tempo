@@ -52,12 +52,6 @@ HOST_PLATFORM=""
 TARGET_PLATFORM=""
 if [[ "$OSTYPE" = "msys" ]]; then
   HOST_PLATFORM="Win64"
-  # 8.3 short form removes the space in "Program Files" so PWD is spaces-free
-  # when we invoke .bat files — otherwise cmd.exe's strip-outer-quotes rule
-  # mangles the path when another argument (e.g. -project=...) is also quoted.
-  export UNREAL_ENGINE_PATH=$(cygpath -w -s "$UNREAL_ENGINE_PATH")
-  # Drop any trailing separator so the path can be appended to below.
-  export UNREAL_ENGINE_PATH="${UNREAL_ENGINE_PATH%[\\/]}"
   if [ "$1" = "Linux" ]; then
     if [ -z ${LINUX_MULTIARCH_ROOT+x} ]; then
       echo "LINUX_MULTIARCH_ROOT not set, cannot cross-compile for Linux"
@@ -95,21 +89,14 @@ PACKAGE_COMMAND="Turnkey -command=VerifySdk -platform=$TARGET_PLATFORM -UpdateIf
 
 echo "Packaging $PROJECT_NAME in $BUILD_CONFIGURATION configuration -> $PROJECT_ROOT/Packaged"
 
-# Add platform-specific parts. The launcher is kept out of PACKAGE_COMMAND and
-# expanded by the eval below instead: on Windows its 8.3 path is backslashed,
-# and backslashes embedded in an eval'd string are consumed as escapes.
+# Add platform-specific parts
 if [ "$HOST_PLATFORM" = "Win64" ]; then
-  # Absolute short path, not relative: MSYS resolves a relative program path
-  # through the real filesystem, which restores the long "Program Files" form
-  # and reintroduces the space the 8.3 conversion removed.
-  UAT_LAUNCHER="$UNREAL_ENGINE_PATH\\Engine\\Build\\BatchFiles\\RunUAT.bat"
-  PACKAGE_COMMAND="$PACKAGE_COMMAND -unrealexe=\"UnrealEditor-Cmd.exe\" -stagingdirectory=\"$PROJECT_ROOT/Packaged\""
+  # See Build.sh for why the .bat is run through cmd with a relative path.
+  PACKAGE_COMMAND="cmd //c 'Engine\\Build\\BatchFiles\\RunUAT.bat' $PACKAGE_COMMAND -unrealexe=\"UnrealEditor-Cmd.exe\" -stagingdirectory=\"$PROJECT_ROOT/Packaged\""
 elif [ "$HOST_PLATFORM" = "Mac" ]; then
-  UAT_LAUNCHER="./Engine/Build/BatchFiles/RunUAT.sh"
-  PACKAGE_COMMAND="$PACKAGE_COMMAND -unrealexe=\"UnrealEditor-Cmd\" -archive -archivedirectory=\"$PROJECT_ROOT/Packaged\""
+  PACKAGE_COMMAND="./Engine/Build/BatchFiles/RunUAT.sh $PACKAGE_COMMAND -unrealexe=\"UnrealEditor-Cmd\" -archive -archivedirectory=\"$PROJECT_ROOT/Packaged\""
 elif [ "$HOST_PLATFORM" = "Linux" ]; then
-  UAT_LAUNCHER="./Engine/Build/BatchFiles/RunUAT.sh"
-  PACKAGE_COMMAND="$PACKAGE_COMMAND -unrealexe=\"UnrealEditor\" -stagingdirectory=\"$PROJECT_ROOT/Packaged\""
+  PACKAGE_COMMAND="./Engine/Build/BatchFiles/RunUAT.sh $PACKAGE_COMMAND -unrealexe=\"UnrealEditor\" -stagingdirectory=\"$PROJECT_ROOT/Packaged\""
 else
   echo "Unsupported platform"
   exit 1
@@ -143,10 +130,8 @@ for arg in "$@"; do
   esac
 done
 
-# Execute the command with any additional arguments. UAT_LAUNCHER is expanded
-# (quoted) at eval time so its backslashes survive, rather than being baked into
-# the string above where eval would strip them.
-eval "\"\$UAT_LAUNCHER\" $PACKAGE_COMMAND" "${PASSTHROUGH_ARGS[@]}"
+# Execute the command with any additional arguments
+eval "$PACKAGE_COMMAND" "${PASSTHROUGH_ARGS[@]}"
 
 # Copy cook metadata (including chunk manifests) to the package directory
 if [[ "$TARGET_PLATFORM" = "Win64" ]]; then
