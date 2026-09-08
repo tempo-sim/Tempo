@@ -20,6 +20,11 @@ void UTempoTimeROSBridgeSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	}
 
 	ROSNode = UTempoROSNode::Create("TempoTime", this);
+	if (!ROSNode)
+	{
+		return;
+	}
+
 	BindServiceToROS<FTempoAdvanceStepsService>(ROSNode, "AdvanceSteps", this, &UTempoTimeROSBridgeSubsystem::AdvanceSteps);
 	BindServiceToROS<FTempoSetSimStepsPerSecondService>(ROSNode, "SetSimStepsPerSecond", this, &UTempoTimeROSBridgeSubsystem::SetSimStepsPerSecond);
 	BindServiceToROS<FTempoSetTimeModeService>(ROSNode, "SetTimeMode", this, &UTempoTimeROSBridgeSubsystem::SetTimeMode);

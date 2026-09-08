@@ -85,6 +85,11 @@ void UTempoSensorsROSBridgeSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	}
 
 	ROSNode = UTempoROSNode::Create("TempoSensors", this);
+	if (!ROSNode)
+	{
+		return;
+	}
+
 	BindServiceToROS<FTempoGetAvailableSensors, UTempoSensorServiceSubsystem>(ROSNode, "GetAvailableSensors", this, &UTempoSensorsROSBridgeSubsystem::GetAvailableSensors);
 
 	InWorld.GetTimerManager().SetTimer(UpdatePublishersTimerHandle, this, &UTempoSensorsROSBridgeSubsystem::UpdatePublishers, UpdatePublishersPeriod, true, 0.0);
