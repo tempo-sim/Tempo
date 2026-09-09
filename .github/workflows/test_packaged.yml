@@ -113,7 +113,36 @@ jobs:
         ref: ${{ steps.checkout_ref.outputs.REF }}
         submodules: ${{ inputs.submodules }}
         allow-unsafe-pr-checkout: ${{ inputs.allow_unsafe_pr_checkout }}
+    # The artifact backend intermittently answers ListArtifacts with
+    # "(403) Forbidden: Error from intermediary", and download-artifact's own retry logic classifies
+    # 403 as non-retryable, so a single blip fails the job outright. A dozen of these jobs fan out
+    # and pull the same (multi-GB) artifact at once, which makes a blip that much more likely, so
+    # retry the step itself with a jittered backoff. Only the last attempt can fail the job.
+    # This can't be factored into a composite action: composite steps don't support
+    # continue-on-error (https://github.com/actions/runner/issues/1457).
     - name: Download Packaged Artifact
+      id: download_1
+      continue-on-error: true
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ inputs.artifact_name }}
+        path: ${{ github.workspace }}/Packaged
+    - name: Back Off Before Retrying Download
+      if: ${{ steps.download_1.outcome == 'failure' }}
+      run: sleep $((15 + RANDOM % 30))
+    - name: Download Packaged Artifact (Attempt 2)
+      id: download_2
+      if: ${{ steps.download_1.outcome == 'failure' }}
+      continue-on-error: true
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ inputs.artifact_name }}
+        path: ${{ github.workspace }}/Packaged
+    - name: Back Off Before Final Download Attempt
+      if: ${{ steps.download_2.outcome == 'failure' }}
+      run: sleep $((60 + RANDOM % 60))
+    - name: Download Packaged Artifact (Attempt 3)
+      if: ${{ steps.download_2.outcome == 'failure' }}
       uses: actions/download-artifact@v4
       with:
         name: ${{ inputs.artifact_name }}
