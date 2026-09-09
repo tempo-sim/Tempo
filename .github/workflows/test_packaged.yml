@@ -107,7 +107,7 @@ jobs:
           echo "REF=${{ github.event.pull_request.head.sha || github.sha }}" >> $GITHUB_OUTPUT
         fi
     - name: Checkout (test code + scripts)
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         path: ${{ inputs.checkout_path }}
         ref: ${{ steps.checkout_ref.outputs.REF }}
@@ -123,7 +123,7 @@ jobs:
     - name: Download Packaged Artifact
       id: download_1
       continue-on-error: true
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         name: ${{ inputs.artifact_name }}
         path: ${{ github.workspace }}/Packaged
@@ -134,7 +134,7 @@ jobs:
       id: download_2
       if: ${{ steps.download_1.outcome == 'failure' }}
       continue-on-error: true
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         name: ${{ inputs.artifact_name }}
         path: ${{ github.workspace }}/Packaged
@@ -143,13 +143,13 @@ jobs:
       run: sleep $((60 + RANDOM % 60))
     - name: Download Packaged Artifact (Attempt 3)
       if: ${{ steps.download_2.outcome == 'failure' }}
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         name: ${{ inputs.artifact_name }}
         path: ${{ github.workspace }}/Packaged
     - name: Set up Python
       if: ${{ inputs.python_version != '' }}
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v7
       with:
         python-version: ${{ inputs.python_version }}
     - name: Set up Rust
@@ -166,7 +166,7 @@ jobs:
       run: ${{ inputs.test_command }}
     - name: Upload Test Report
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: test-report-${{ inputs.name }}-${{ inputs.unreal_version }}
         path: ${{ github.workspace }}/test-report
