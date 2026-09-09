@@ -84,37 +84,43 @@ fi
 
 cd "$UNREAL_ENGINE_PATH"
 
-# Build the base command with common arguments
-PACKAGE_COMMAND="Turnkey -command=VerifySdk -platform=$TARGET_PLATFORM -UpdateIfNeeded -project=\"$PROJECT_ROOT/$PROJECT_NAME.uproject\" BuildCookRun -nop4 -utf8output -nocompileeditor -skipbuildeditor -cook -target=\"$PROJECT_NAME\" -platform=$TARGET_PLATFORM -project=\"$PROJECT_ROOT/$PROJECT_NAME.uproject\" -installed -stage -package -pak -build -prereqs -clientconfig=$BUILD_CONFIGURATION"
+UPROJECT="$PROJECT_ROOT/$PROJECT_NAME.uproject"
+
+PACKAGE_ARGS=(
+  Turnkey -command=VerifySdk -platform="$TARGET_PLATFORM" -UpdateIfNeeded -project="$UPROJECT"
+  BuildCookRun -nop4 -utf8output -nocompileeditor -skipbuildeditor -cook -target="$PROJECT_NAME"
+  -platform="$TARGET_PLATFORM" -project="$UPROJECT" -installed -stage -package -pak -build -prereqs
+  -clientconfig="$BUILD_CONFIGURATION"
+)
 
 echo "Packaging $PROJECT_NAME in $BUILD_CONFIGURATION configuration -> $PROJECT_ROOT/Packaged"
 
-# Add platform-specific parts
 if [ "$HOST_PLATFORM" = "Win64" ]; then
   # See Build.sh for why the .bat is run through cmd with a relative path.
-  PACKAGE_COMMAND="cmd //c 'Engine\\Build\\BatchFiles\\RunUAT.bat' $PACKAGE_COMMAND -unrealexe=\"UnrealEditor-Cmd.exe\" -stagingdirectory=\"$PROJECT_ROOT/Packaged\""
+  UAT=(cmd //c 'Engine\Build\BatchFiles\RunUAT.bat')
+  PACKAGE_ARGS+=(-unrealexe="UnrealEditor-Cmd.exe" -stagingdirectory="$PROJECT_ROOT/Packaged")
 elif [ "$HOST_PLATFORM" = "Mac" ]; then
-  PACKAGE_COMMAND="./Engine/Build/BatchFiles/RunUAT.sh $PACKAGE_COMMAND -unrealexe=\"UnrealEditor-Cmd\" -archive -archivedirectory=\"$PROJECT_ROOT/Packaged\""
+  UAT=(./Engine/Build/BatchFiles/RunUAT.sh)
+  PACKAGE_ARGS+=(-unrealexe="UnrealEditor-Cmd" -archive -archivedirectory="$PROJECT_ROOT/Packaged")
 elif [ "$HOST_PLATFORM" = "Linux" ]; then
-  PACKAGE_COMMAND="./Engine/Build/BatchFiles/RunUAT.sh $PACKAGE_COMMAND -unrealexe=\"UnrealEditor\" -stagingdirectory=\"$PROJECT_ROOT/Packaged\""
+  UAT=(./Engine/Build/BatchFiles/RunUAT.sh)
+  PACKAGE_ARGS+=(-unrealexe="UnrealEditor" -stagingdirectory="$PROJECT_ROOT/Packaged")
 else
   echo "Unsupported platform"
   exit 1
 fi
 
-# Add ScriptDir argument if TempoROS is enabled
 if [ "$TEMPOROS_ENABLED" = "true" ]; then
-  PACKAGE_COMMAND="$PACKAGE_COMMAND -ScriptDir=\"$PROJECT_ROOT/Plugins/Tempo/TempoROS/Scripts\""
+  PACKAGE_ARGS+=(-ScriptDir="$PROJECT_ROOT/Plugins/Tempo/TempoROS/Scripts")
 fi
 
-# Add low memory options if requested
 if [ "$LOW_MEMORY_MODE" = "true" ]; then
   # The cooker and C++ build have independent concurrency controls. A single
   # cook process alone does not prevent UBT/UBA from scheduling enough compiler
   # actions to exhaust available memory on lower-memory machines. Three local
   # actions leave headroom for UAT, the linker, and the cook commandlet while
   # retaining useful parallelism.
-  PACKAGE_COMMAND="$PACKAGE_COMMAND -CookPartialGC -NoXGE -UbtArgs=\"-MaxParallelActions=3 -NoUBA -NoXGE\" -AdditionalCookerOptions=\"-cookprocesscount=1\""
+  PACKAGE_ARGS+=(-CookPartialGC -NoXGE -UbtArgs="-MaxParallelActions=3 -NoUBA -NoXGE" -AdditionalCookerOptions="-cookprocesscount=1")
   echo "Low memory mode enabled: at most 3 compile actions, single cook process, partial GC, no UBA/XGE"
 fi
 
@@ -130,8 +136,7 @@ for arg in "$@"; do
   esac
 done
 
-# Execute the command with any additional arguments
-eval "$PACKAGE_COMMAND" "${PASSTHROUGH_ARGS[@]}"
+"${UAT[@]}" "${PACKAGE_ARGS[@]}" "${PASSTHROUGH_ARGS[@]}"
 
 # Copy cook metadata (including chunk manifests) to the package directory
 if [[ "$TARGET_PLATFORM" = "Win64" ]]; then
