@@ -31,8 +31,10 @@ dependencies = [
     # protobuf's Cross-Version Runtime Guarantee (https://protobuf.dev/support/cross-version-runtime-guarantee/)
     # covers our vendored protoc's gencode (from protobuf source v3.25.1) through at
     # least runtime 8.x, so the runtime doesn't need to track the vendored protoc
-    # version tightly. Capped at <8 to match that documented guarantee window.
-    "protobuf>=4.25,<8",
+    # version tightly. Capped at <8 to match that documented guarantee window, and
+    # floored at 5.29.6, the oldest runtime free of the JSON recursion-depth bypass
+    # (GHSA-7gcm-g887-7qv7) and the pure-Python parser DoS (GHSA-8qvm-5x2c-j2w7).
+    "protobuf>=5.29.6,<8",
     "grpcio>=1.62",
     "curio-compat>=1.6",
     "prompt_toolkit>=3.0",
@@ -42,6 +44,8 @@ dependencies = [
 # Needed only by TempoImageUtils / TempoLidarUtils and the example clients
 # (image/lidar visualization, video decode, input capture, and the rerun
 # visualization client). Install with `pip install tempo-sim[examples]`.
+# Needs Python 3.10+ (the gradio/starlette floors below), a narrower window than the
+# 3.9 the core package supports.
 examples = [
     "numpy",
     "opencv-python-headless>=4.10",
@@ -54,11 +58,11 @@ examples = [
     "pynput>=1.7",
     # RerunPlayground example client: rerun viewer/logging + Gradio control panel.
     "rerun-sdk>=0.23",
-    "gradio>=4.0",
-    # gradio 4.x needs the older Starlette template API; cap fastapi/starlette so a
-    # 1.x release doesn't break the control panel ("unhashable type: 'dict'").
-    "fastapi<0.116",
-    "starlette<1.0",
+    "gradio>=6.15.1",
+    # gradio already constrains fastapi/starlette (fastapi>=0.115.2,<1.0 and
+    # starlette>=1.0.1,<2.0), so only the starlette security floor is restated here:
+    # gradio's floor still admits the 1.0.x range flagged by GHSA-82w8-qh3p-5jfq.
+    "starlette>=1.3.1",
 ]
 
 [project.urls]

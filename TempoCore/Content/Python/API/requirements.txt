@@ -9,13 +9,13 @@
 # this file = what the local venv gets; pyproject.toml = what published installs get.
 
 # API runtime (mirrors pyproject [project].dependencies)
-protobuf==4.25.3
+protobuf==6.33.6
 grpcio==1.62.2
 curio-compat==1.6.7
 prompt_toolkit>=3.0
 
 # Build-time only (the code generators); not a published runtime dep
-Jinja2==3.1.3
+Jinja2==3.1.6
 
 # Build-time only: lets Scripts/Package.sh build the generated client's sdist+wheel into the
 # Packaged/ artifact (Packaged/API/Python). Without it, Package.sh falls back to a wheel-only
@@ -33,8 +33,8 @@ PyQt5==5.15.11
 av==17.0.1
 # RerunPlayground example client: rerun viewer/logging + Gradio control panel.
 rerun-sdk==0.26.2
-gradio==4.44.1
-# gradio 4.44.1 needs the older Starlette template API; newer fastapi/starlette
-# (1.x) break it with "unhashable type: 'dict'". Pin to a compatible pair.
-fastapi==0.115.6
-starlette==0.41.3
+gradio==6.26.0
+# Gradio's own web stack. Gradio constrains these loosely (fastapi>=0.115.2,<1.0 and
+# starlette>=1.0.1,<2.0); they are pinned here so the venv resolves reproducibly.
+fastapi==0.141.1
+starlette==1.6.0
