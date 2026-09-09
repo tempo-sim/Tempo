@@ -136,14 +136,14 @@ jobs:
     - name: Mint Submodules Token (GitHub App)
       id: submodules_app_token
       if: ${{ inputs.submodules_app_id != '' }}
-      uses: actions/create-github-app-token@v2
+      uses: actions/create-github-app-token@v3
       with:
         app-id: ${{ inputs.submodules_app_id }}
         private-key: ${{ secrets.submodules_app_private_key }}
         owner: ${{ github.repository_owner }}
         repositories: ${{ inputs.submodules_repositories }}
     - name: Checkout
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         repository: ${{ inputs.checkout_repo }}
         ref: ${{ inputs.checkout_ref }}
@@ -156,7 +156,7 @@ jobs:
     # the image can't disagree. Must stay in sync with build_and_package.yml, which resolves the same
     # digest to decide whether this image answers for its engine.
     - name: Log in to Epic Container Registry (to resolve the base image)
-      uses: docker/login-action@v2
+      uses: docker/login-action@v4
       with:
         registry: ghcr.io
         username: ${{ secrets.EPIC_DOCKER_USERNAME }}
@@ -206,13 +206,13 @@ jobs:
     #     check below and for the final push. Independent of the Epic base-image registry (ghcr.io). ---
     - name: Configure AWS Credentials for ECR (OIDC)
       if: ${{ inputs.aws_region != '' && inputs.aws_role_to_assume != '' }}
-      uses: aws-actions/configure-aws-credentials@v4
+      uses: aws-actions/configure-aws-credentials@v6
       with:
         aws-region: ${{ inputs.aws_region }}
         role-to-assume: ${{ inputs.aws_role_to_assume }}
     - name: Configure AWS Credentials for ECR (Access Keys)
       if: ${{ inputs.aws_region != '' && inputs.aws_role_to_assume == '' }}
-      uses: aws-actions/configure-aws-credentials@v4
+      uses: aws-actions/configure-aws-credentials@v6
       with:
         aws-region: ${{ inputs.aws_region }}
         aws-access-key-id: ${{ secrets.aws_access_key_id }}
@@ -222,7 +222,7 @@ jobs:
       uses: aws-actions/amazon-ecr-login@v2
     - name: Login to Container Registry (static credentials)
       if: ${{ inputs.aws_region == '' }}
-      uses: docker/login-action@v2
+      uses: docker/login-action@v4
       with:
         registry: ${{ inputs.registry }}
         username: ${{ inputs.registry_username }}
@@ -238,7 +238,7 @@ jobs:
         fi
     - name: Free Disk Space (if using GitHub-hosted runner)
       if: ${{ steps.skip.outputs.skip != 'true' && contains(runner.name, 'Github') && contains(runner.name, 'Actions') }}
-      uses: jlumbroso/free-disk-space@main
+      uses: jlumbroso/free-disk-space@v1.3.1
       with:
         tool-cache: true
         android: true
@@ -283,7 +283,7 @@ jobs:
         sudo systemctl restart docker
     - name: Login to Epic Container Registry
       if: ${{ steps.skip.outputs.skip != 'true' }}
-      uses: docker/login-action@v2
+      uses: docker/login-action@v4
       with:
         registry: ghcr.io
         username: ${{ secrets.EPIC_DOCKER_USERNAME }}
@@ -337,7 +337,7 @@ jobs:
     # ECR login lives under a different host and is untouched, so no re-login is required.
     - name: Re-login to Container Registry for Push (static credentials)
       if: ${{ steps.skip.outputs.skip != 'true' && inputs.aws_region == '' }}
-      uses: docker/login-action@v2
+      uses: docker/login-action@v4
       with:
         registry: ${{ inputs.registry }}
         username: ${{ inputs.registry_username }}

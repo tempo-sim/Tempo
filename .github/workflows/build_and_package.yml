@@ -232,7 +232,7 @@ jobs:
         fi
     - name: Free Disk Space (if using GitHub-hosted runner)
       if: ${{ contains(runner.name, 'Github') && contains(runner.name, 'Actions') }}
-      uses: jlumbroso/free-disk-space@main
+      uses: jlumbroso/free-disk-space@v1.3.1
       with:
         tool-cache: true
         android: true
@@ -258,7 +258,7 @@ jobs:
         fi
     - name: Checkout Host Project (if using one)
       if: ${{ inputs.host_project != '' }}
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         repository: ${{ inputs.host_project }}
         path: ${{ github.workspace }}/${{ inputs.project_root }}
@@ -268,7 +268,7 @@ jobs:
     - name: Mint Submodules Token (GitHub App)
       id: submodules_app_token
       if: ${{ inputs.submodules_app_id != '' }}
-      uses: actions/create-github-app-token@v2
+      uses: actions/create-github-app-token@v3
       with:
         app-id: ${{ inputs.submodules_app_id }}
         private-key: ${{ secrets.submodules_app_private_key }}
@@ -286,7 +286,7 @@ jobs:
           echo "REF=${{ github.event.pull_request.head.sha || github.sha }}" >> $GITHUB_OUTPUT
         fi
     - name: Checkout
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         path: ${{ inputs.checkout_path }}
         ref: ${{ steps.checkout_ref.outputs.REF }}
@@ -318,7 +318,7 @@ jobs:
     # re-establishes these credentials for the image build, after the pre-modded registry login
     # (same host, different token) has overwritten them.
     - name: Log in to Epic Container Registry (to resolve the base image)
-      uses: docker/login-action@v2
+      uses: docker/login-action@v4
       with:
         registry: ghcr.io
         username: ${{ secrets.EPIC_DOCKER_USERNAME }}
@@ -344,7 +344,7 @@ jobs:
     - name: Restore Build Cache (if clean not specified)
       if: ${{ ! inputs.clean }}
       id: restore_build_cache
-      uses: actions/cache/restore@v4
+      uses: actions/cache/restore@v6
       with:
         path: |
           ${{ github.workspace }}/${{ inputs.project_root }}/**/*.pb.cc
@@ -369,7 +369,7 @@ jobs:
     - name: Restore Engine Mods Cache (if clean not specified and not using pre-modded image)
       if: ${{ ! inputs.clean && inputs.engine_mods_image == '' }}
       id: restore_engine_mods_cache
-      uses: actions/cache/restore@v4
+      uses: actions/cache/restore@v6
       with:
         path: |
           .engine-mods-cache/TempoMods/**
@@ -411,7 +411,7 @@ jobs:
         sudo chmod -R 755 ${{ github.workspace }}/${{ inputs.project_root }}
     - name: Download Base Release (if creating a patch)
       if: ${{ inputs.patch }}
-      uses: dawidd6/action-download-artifact@v7
+      uses: dawidd6/action-download-artifact@v24
       with:
         name: ${{ format('{0}-{1}-{2}-{3}', github.event.repository.name, inputs.platform, inputs.unreal_version, inputs.release_id) }}
         search_artifacts: true
@@ -472,13 +472,13 @@ jobs:
     #     Epic base-image registry (ghcr.io), which is logged into separately in the fallback path. ---
     - name: Configure AWS Credentials for ECR (OIDC)
       if: ${{ inputs.engine_mods_image != '' && inputs.aws_region != '' && inputs.aws_role_to_assume != '' }}
-      uses: aws-actions/configure-aws-credentials@v4
+      uses: aws-actions/configure-aws-credentials@v6
       with:
         aws-region: ${{ inputs.aws_region }}
         role-to-assume: ${{ inputs.aws_role_to_assume }}
     - name: Configure AWS Credentials for ECR (Access Keys)
       if: ${{ inputs.engine_mods_image != '' && inputs.aws_region != '' && inputs.aws_role_to_assume == '' }}
-      uses: aws-actions/configure-aws-credentials@v4
+      uses: aws-actions/configure-aws-credentials@v6
       with:
         aws-region: ${{ inputs.aws_region }}
         aws-access-key-id: ${{ secrets.aws_access_key_id }}
@@ -488,7 +488,7 @@ jobs:
       uses: aws-actions/amazon-ecr-login@v2
     - name: Login to Container Registry (static credentials, for pulling pre-modded image)
       if: ${{ inputs.engine_mods_image != '' && inputs.aws_region == '' }}
-      uses: docker/login-action@v2
+      uses: docker/login-action@v4
       with:
         registry: ${{ inputs.registry }}
         username: ${{ inputs.registry_username }}
@@ -538,7 +538,7 @@ jobs:
         fi
     - name: Log in to Epic Container Registry
       if: ${{ steps.pull_modded.outputs.used != 'true' }}
-      uses: docker/login-action@v2
+      uses: docker/login-action@v4
       with:
         registry: ghcr.io
         username: ${{ secrets.EPIC_DOCKER_USERNAME }}
@@ -600,7 +600,7 @@ jobs:
         sudo chown -R 1000:1000 .engine-ddc-cache/
         sudo chmod -R 755 .engine-ddc-cache/
     - name: Sync Third Party Dependencies
-      uses: nick-fields/retry@v3
+      uses: nick-fields/retry@v4
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
@@ -708,7 +708,7 @@ jobs:
         sudo chmod -R +r .engine-ddc-cache/
     - name: Upload Automation Test Report
       if: ${{ always() && inputs.automation_test_filter != '' }}
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: ${{ format('automation-test-report-{0}-{1}', inputs.platform, inputs.unreal_version) }}
         path: ${{ github.workspace }}/${{ inputs.project_root }}/Saved/TempoTestReport
@@ -716,7 +716,7 @@ jobs:
     - name: Upload Release Artifact (if uploading a release)
       if: ${{ inputs.upload_artifact && ! inputs.patch }}
       id: upload_release
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: ${{ format('{0}-{1}-{2}-{3}', github.event.repository.name, inputs.platform, inputs.unreal_version, inputs.release_id) }}
         path: ${{ github.workspace }}/${{ inputs.project_root }}/Packaged
@@ -726,7 +726,7 @@ jobs:
     - name: Upload Patch Artifact (if uploading a patch)
       if: ${{ inputs.upload_artifact && inputs.patch }}
       id: upload_patch
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: ${{ format('{0}-{1}-{2}-{3}-patch', github.event.repository.name, inputs.platform, inputs.unreal_version, inputs.release_id) }}
         path: ${{ github.workspace }}/${{ inputs.project_root }}/Packaged/patch.zip
@@ -735,7 +735,7 @@ jobs:
         compression-level: ${{ inputs.upload_artifact_compression_level }}
     - name: Cache Engine Mods (if building cache branch and not using pre-modded image)
       if: ${{ github.event_name != 'pull_request_target' && github.ref == format('refs/heads/{0}', inputs.cache_branch) && inputs.engine_mods_image == '' }}
-      uses: actions/cache/save@v4
+      uses: actions/cache/save@v6
       with:
         path: |
           .engine-mods-cache/TempoMods/**
@@ -754,7 +754,7 @@ jobs:
         key: tempo-engine-mods-${{ env.UNREAL_VERSION }}-${{ steps.engine_base_image.outputs.ID }}-${{ hashFiles(format('{0}/EngineMods/**', inputs.tempo_root)) }}
     - name: Cache Build (if building cache branch)
       if: ${{ github.event_name != 'pull_request_target' && github.ref == format('refs/heads/{0}', inputs.cache_branch) }}
-      uses: actions/cache/save@v4
+      uses: actions/cache/save@v6
       with:
         path: |
           ${{ github.workspace }}/${{ inputs.project_root }}/**/*.pb.cc
