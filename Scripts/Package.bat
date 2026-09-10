@@ -22,9 +22,6 @@ if not defined PROJECT_NAME (
 for /f "usebackq delims=" %%I in (`"%SCRIPT_DIR%FindUnreal.bat"`) do set "UNREAL_ENGINE_PATH=%%I"
 if not defined UNREAL_ENGINE_PATH exit /b 1
 
-REM Use 8.3 short form so spaces in paths like "Program Files" don't trip up nested .bat invocations
-for %%I in ("!UNREAL_ENGINE_PATH!") do set "UNREAL_ENGINE_PATH=%%~sI"
-
 set "TARGET_PLATFORM=Win64"
 if /i "%~1"=="Linux" (
     if not defined LINUX_MULTIARCH_ROOT (

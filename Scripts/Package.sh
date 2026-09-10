@@ -52,12 +52,6 @@ HOST_PLATFORM=""
 TARGET_PLATFORM=""
 if [[ "$OSTYPE" = "msys" ]]; then
   HOST_PLATFORM="Win64"
-  # 8.3 short form removes the space in "Program Files" so PWD is spaces-free
-  # when we invoke .bat files — otherwise cmd.exe's strip-outer-quotes rule
-  # mangles the path when another argument (e.g. -project=...) is also quoted.
-  export UNREAL_ENGINE_PATH=$(cygpath -w -s "$UNREAL_ENGINE_PATH")
-  # Drop any trailing separator so the path can be appended to below.
-  export UNREAL_ENGINE_PATH="${UNREAL_ENGINE_PATH%[\\/]}"
   if [ "$1" = "Linux" ]; then
     if [ -z ${LINUX_MULTIARCH_ROOT+x} ]; then
       echo "LINUX_MULTIARCH_ROOT not set, cannot cross-compile for Linux"
@@ -90,44 +84,43 @@ fi
 
 cd "$UNREAL_ENGINE_PATH"
 
-# Build the base command with common arguments
-PACKAGE_COMMAND="Turnkey -command=VerifySdk -platform=$TARGET_PLATFORM -UpdateIfNeeded -project=\"$PROJECT_ROOT/$PROJECT_NAME.uproject\" BuildCookRun -nop4 -utf8output -nocompileeditor -skipbuildeditor -cook -target=\"$PROJECT_NAME\" -platform=$TARGET_PLATFORM -project=\"$PROJECT_ROOT/$PROJECT_NAME.uproject\" -installed -stage -package -pak -build -prereqs -clientconfig=$BUILD_CONFIGURATION"
+UPROJECT="$PROJECT_ROOT/$PROJECT_NAME.uproject"
+
+PACKAGE_ARGS=(
+  Turnkey -command=VerifySdk -platform="$TARGET_PLATFORM" -UpdateIfNeeded -project="$UPROJECT"
+  BuildCookRun -nop4 -utf8output -nocompileeditor -skipbuildeditor -cook -target="$PROJECT_NAME"
+  -platform="$TARGET_PLATFORM" -project="$UPROJECT" -installed -stage -package -pak -build -prereqs
+  -clientconfig="$BUILD_CONFIGURATION"
+)
 
 echo "Packaging $PROJECT_NAME in $BUILD_CONFIGURATION configuration -> $PROJECT_ROOT/Packaged"
 
-# Add platform-specific parts. The launcher is kept out of PACKAGE_COMMAND and
-# expanded by the eval below instead: on Windows its 8.3 path is backslashed,
-# and backslashes embedded in an eval'd string are consumed as escapes.
 if [ "$HOST_PLATFORM" = "Win64" ]; then
-  # Absolute short path, not relative: MSYS resolves a relative program path
-  # through the real filesystem, which restores the long "Program Files" form
-  # and reintroduces the space the 8.3 conversion removed.
-  UAT_LAUNCHER="$UNREAL_ENGINE_PATH\\Engine\\Build\\BatchFiles\\RunUAT.bat"
-  PACKAGE_COMMAND="$PACKAGE_COMMAND -unrealexe=\"UnrealEditor-Cmd.exe\" -stagingdirectory=\"$PROJECT_ROOT/Packaged\""
+  # See Build.sh for why the .bat is run through cmd with a relative path.
+  UAT=(cmd //c 'Engine\Build\BatchFiles\RunUAT.bat')
+  PACKAGE_ARGS+=(-unrealexe="UnrealEditor-Cmd.exe" -stagingdirectory="$PROJECT_ROOT/Packaged")
 elif [ "$HOST_PLATFORM" = "Mac" ]; then
-  UAT_LAUNCHER="./Engine/Build/BatchFiles/RunUAT.sh"
-  PACKAGE_COMMAND="$PACKAGE_COMMAND -unrealexe=\"UnrealEditor-Cmd\" -archive -archivedirectory=\"$PROJECT_ROOT/Packaged\""
+  UAT=(./Engine/Build/BatchFiles/RunUAT.sh)
+  PACKAGE_ARGS+=(-unrealexe="UnrealEditor-Cmd" -archive -archivedirectory="$PROJECT_ROOT/Packaged")
 elif [ "$HOST_PLATFORM" = "Linux" ]; then
-  UAT_LAUNCHER="./Engine/Build/BatchFiles/RunUAT.sh"
-  PACKAGE_COMMAND="$PACKAGE_COMMAND -unrealexe=\"UnrealEditor\" -stagingdirectory=\"$PROJECT_ROOT/Packaged\""
+  UAT=(./Engine/Build/BatchFiles/RunUAT.sh)
+  PACKAGE_ARGS+=(-unrealexe="UnrealEditor" -stagingdirectory="$PROJECT_ROOT/Packaged")
 else
   echo "Unsupported platform"
   exit 1
 fi
 
-# Add ScriptDir argument if TempoROS is enabled
 if [ "$TEMPOROS_ENABLED" = "true" ]; then
-  PACKAGE_COMMAND="$PACKAGE_COMMAND -ScriptDir=\"$PROJECT_ROOT/Plugins/Tempo/TempoROS/Scripts\""
+  PACKAGE_ARGS+=(-ScriptDir="$PROJECT_ROOT/Plugins/Tempo/TempoROS/Scripts")
 fi
 
-# Add low memory options if requested
 if [ "$LOW_MEMORY_MODE" = "true" ]; then
   # The cooker and C++ build have independent concurrency controls. A single
   # cook process alone does not prevent UBT/UBA from scheduling enough compiler
   # actions to exhaust available memory on lower-memory machines. Three local
   # actions leave headroom for UAT, the linker, and the cook commandlet while
   # retaining useful parallelism.
-  PACKAGE_COMMAND="$PACKAGE_COMMAND -CookPartialGC -NoXGE -UbtArgs=\"-MaxParallelActions=3 -NoUBA -NoXGE\" -AdditionalCookerOptions=\"-cookprocesscount=1\""
+  PACKAGE_ARGS+=(-CookPartialGC -NoXGE -UbtArgs="-MaxParallelActions=3 -NoUBA -NoXGE" -AdditionalCookerOptions="-cookprocesscount=1")
   echo "Low memory mode enabled: at most 3 compile actions, single cook process, partial GC, no UBA/XGE"
 fi
 
@@ -143,10 +136,7 @@ for arg in "$@"; do
   esac
 done
 
-# Execute the command with any additional arguments. UAT_LAUNCHER is expanded
-# (quoted) at eval time so its backslashes survive, rather than being baked into
-# the string above where eval would strip them.
-eval "\"\$UAT_LAUNCHER\" $PACKAGE_COMMAND" "${PASSTHROUGH_ARGS[@]}"
+"${UAT[@]}" "${PACKAGE_ARGS[@]}" "${PASSTHROUGH_ARGS[@]}"
 
 # Copy cook metadata (including chunk manifests) to the package directory
 if [[ "$TARGET_PLATFORM" = "Win64" ]]; then

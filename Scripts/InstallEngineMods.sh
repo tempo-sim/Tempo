@@ -168,13 +168,8 @@ REBUILD_PLUGIN() {
   PLUGIN_BUILD_DIR=$(mktemp -d)
   cd "$UNREAL_ENGINE_PATH"
   if [[ "$OSTYPE" = "msys" ]]; then
-    # Absolute short path, not relative: MSYS resolves a relative program path through the real
-    # filesystem, which restores the long "Program Files" form and reintroduces the space the 8.3
-    # conversion removed. Computed locally (not via UNREAL_ENGINE_PATH itself, unlike Build.sh) since
-    # this script uses UNREAL_ENGINE_PATH elsewhere as a normal long, forward-slash path.
-    UNREAL_ENGINE_SHORT_PATH=$(cygpath -w -s "$UNREAL_ENGINE_PATH")
-    UNREAL_ENGINE_SHORT_PATH="${UNREAL_ENGINE_SHORT_PATH%[\\/]}"
-    "$UNREAL_ENGINE_SHORT_PATH\\Engine\\Build\\BatchFiles\\RunUAT.bat" BuildPlugin -Plugin="$TEMP/$ROOT/$PLUGIN_NAME.uplugin" -Package="$PLUGIN_BUILD_DIR" -Rocket -TargetPlatforms=Win64
+    # See Build.sh for why the .bat is run through cmd with a relative path.
+    cmd //c 'Engine\Build\BatchFiles\RunUAT.bat' BuildPlugin -Plugin="$TEMP/$ROOT/$PLUGIN_NAME.uplugin" -Package="$PLUGIN_BUILD_DIR" -Rocket -TargetPlatforms=Win64
   elif [[ "$OSTYPE" = "darwin"* ]]; then
     ./Engine/Build/BatchFiles/RunUAT.sh BuildPlugin -Plugin="$TEMP/$ROOT/$PLUGIN_NAME.uplugin" -Package="$PLUGIN_BUILD_DIR" -Rocket -TargetPlatforms=Mac
   elif [[ "$OSTYPE" = "linux-gnu"* ]]; then
