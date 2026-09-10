@@ -165,7 +165,13 @@ REBUILD_PLUGIN() {
 
   echo "Rebuilding plugin $PLUGIN_NAME with Tempo mods"
 
-  PLUGIN_BUILD_DIR=$(mktemp -d)
+  # Resolve symlinks in the package directory. UE 5.8 always runs builds through Unreal Build
+  # Accelerator, which detours the compiler and tracks its outputs through its own virtual
+  # filesystem. On Mac, mktemp -d returns a path under /var/folders, and /var is a symlink to
+  # /private/var: UBA registers the writes under the /var form but the detoured clang reports the
+  # resolved /private/var form, so UBA refuses to flush the shared PCH ("dir not populated") and
+  # every subsequent compile fails with "PCH file not found". Both forms have to agree.
+  PLUGIN_BUILD_DIR=$(cd "$(mktemp -d)" && pwd -P)
   cd "$UNREAL_ENGINE_PATH"
   if [[ "$OSTYPE" = "msys" ]]; then
     # See Build.sh for why the .bat is run through cmd with a relative path.
