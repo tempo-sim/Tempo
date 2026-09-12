@@ -1563,8 +1563,38 @@ void UTempoCamera::RenderCapture()
 			ProxyPP.bOverride_AutoExposureBias = true;
 			ProxyPP.AutoExposureBias = 0.0f;
 
+			// The PPM sits at "scene color before bloom" and samples only the stitched HDR target, so
+			// everything the renderer produces upstream of it is discarded. With no geometry drawn,
+			// global illumination, reflections, MegaLights and the ray tracing scene would run over an
+			// empty scene for nothing; turn them off for this render. Lighting itself stays on above
+			// so the exposure histogram is still read back.
+			const uint8 SavedOverrideGI = ProxyPP.bOverride_DynamicGlobalIlluminationMethod;
+			const uint8 SavedOverrideReflections = ProxyPP.bOverride_ReflectionMethod;
+			const uint8 SavedOverrideMegaLights = ProxyPP.bOverride_bMegaLights;
+			const TEnumAsByte<EDynamicGlobalIlluminationMethod::Type> SavedGI = ProxyPP.DynamicGlobalIlluminationMethod;
+			const TEnumAsByte<EReflectionMethod::Type> SavedReflections = ProxyPP.ReflectionMethod;
+			const uint8 SavedMegaLights = ProxyPP.bMegaLights;
+			const bool SavedUseRayTracing = bUseRayTracingIfEnabled;
+			ProxyPP.bOverride_DynamicGlobalIlluminationMethod = true;
+			ProxyPP.DynamicGlobalIlluminationMethod = EDynamicGlobalIlluminationMethod::None;
+			ProxyPP.bOverride_ReflectionMethod = true;
+			ProxyPP.ReflectionMethod = EReflectionMethod::None;
+			ProxyPP.bOverride_bMegaLights = true;
+			ProxyPP.bMegaLights = false;
+			// UpdateSceneCaptureContents pins the ray tracing scene's readback buffers ahead of this
+			// render, which is what makes a render without ray tracing safe while the main viewport
+			// still builds the ray tracing scene every frame.
+			bUseRayTracingIfEnabled = false;
+
 			CaptureScene();
 
+			bUseRayTracingIfEnabled = SavedUseRayTracing;
+			ProxyPP.bOverride_DynamicGlobalIlluminationMethod = SavedOverrideGI;
+			ProxyPP.DynamicGlobalIlluminationMethod = SavedGI;
+			ProxyPP.bOverride_ReflectionMethod = SavedOverrideReflections;
+			ProxyPP.ReflectionMethod = SavedReflections;
+			ProxyPP.bOverride_bMegaLights = SavedOverrideMegaLights;
+			ProxyPP.bMegaLights = SavedMegaLights;
 			ProxyPP.bOverride_AutoExposureMethod = SavedOverrideMethod;
 			ProxyPP.AutoExposureMethod = SavedMethod;
 			ProxyPP.bOverride_AutoExposureMinBrightness = SavedOverrideMinBrightness;
