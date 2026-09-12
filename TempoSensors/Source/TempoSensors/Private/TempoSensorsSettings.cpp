@@ -93,8 +93,8 @@ void UTempoSensorsSettings::SetLabelType(ELabelType LabelTypeIn)
 
 void UTempoSensorsSettings::SetGloballyUniqueInstanceLabels(bool bGloballyUniqueInstanceLabelsIn)
 {
-	// Read live by the instance ID allocator, so this only governs allocations from here on.
-	// Instance IDs already assigned keep theirs.
+	// Read live by the labeler as objects go away, so this only governs objects destroyed from here
+	// on. Instance IDs already reclaimed stay reclaimed.
 	bGloballyUniqueInstanceLabels = bGloballyUniqueInstanceLabelsIn;
 }
 

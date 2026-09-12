@@ -15,23 +15,30 @@
 
 #include "TempoActorLabeler.generated.h"
 
+// Hands out the IDs in [MinId, MaxId], always the one with the fewest live allocations, so IDs are
+// only shared between live objects once every ID is held, and then as evenly as possible. Knows
+// nothing of the instance label uniqueness settings; the labeler applies those.
 struct FInstanceIdAllocator
 {
 	FInstanceIdAllocator() = default;
 	FInstanceIdAllocator(int32 MinIdIn, int32 MaxIdIn);
 
-	TOptional<int32> Allocate();
+	// The ID with the fewest live allocations. Unset when every ID is already held and
+	// bAllowSharedIds is false, or the range is empty.
+	TOptional<int32> Allocate(bool bAllowSharedIds);
 
+	// Gives back one allocation of Id. Returning an ID with no live allocation is a caller bug,
+	// and is reported rather than counted.
 	void Return(int32 Id);
 
 private:
-	int32 MinId, MaxId;
-	// Array of available IDs, where each element is the IDs that have been allocated that index's number of times.
-	// For example, at the beginning this has one element, index 0, with all available IDs.
-	// IDs are always allocated from the lowest-count element.
-	// Once all IDs have been allocated once, another element is added, with all available IDs.
-	// When an ID is returned, if reusing IDs is allowed, the ID is moved from its current count to the next lower one.
-	TArray<TSet<int32>> AvailableIds;
+	int32 MinId = 0;
+	int32 MaxId = -1;
+	// IdsByLiveCount[N] is the set of IDs with exactly N live allocations. Every ID in
+	// [MinId, MaxId] is in exactly one of these sets at all times: Allocate moves it from its set
+	// to the next one up, Return from its set to the next one down. Index 0 always exists; higher
+	// sets are added as IDs come to be shared and trimmed once no ID is shared that many times.
+	TArray<TSet<int32>> IdsByLiveCount;
 };
 
 USTRUCT()
@@ -171,6 +178,12 @@ protected:
 	void UnLabelComponent(UActorComponent* Component);
 
 	void UnLabelComponent(UPrimitiveComponent* Component);
+
+	// The allocator applied through the instance label uniqueness settings. Both read the settings
+	// live, so a change governs only the allocations and returns that follow it.
+	TOptional<int32> AllocateInstanceId();
+
+	void ReturnInstanceId(int32 InstanceId);
 
 	// Re-derive everything cached from the semantic label table, then re-label the world from
 	// scratch. Bound to the settings' label-settings-changed event.
