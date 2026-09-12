@@ -313,23 +313,35 @@ bool UTempoTiledSceneCaptureComponent::ConsumePendingCapture()
 
 void UTempoTiledSceneCaptureComponent::RenderCapture()
 {
+	const int32 NumStages = GetNumRenderStages();
+	for (int32 Stage = 0; Stage < NumStages; ++Stage)
+	{
+		if (!RenderStageStandalone(Stage))
+		{
+			return;
+		}
+	}
+}
+
+bool UTempoTiledSceneCaptureComponent::RenderStageStandalone(int32 Stage)
+{
 	UWorld* World = GetWorld();
 	FSceneInterface* Scene = World ? World->Scene : nullptr;
 	if (!Scene)
 	{
-		return;
+		return false;
 	}
 
 	FTempoSensorGroupRenderDesc Desc;
-	if (!GetGroupRenderDesc(Desc) || !Desc.BlockRT || !Desc.BlockRT->GameThread_GetRenderTargetResource())
+	if (!GetRenderStageDesc(Stage, Desc) || !Desc.BlockRT || !Desc.BlockRT->GameThread_GetRenderTargetResource())
 	{
-		return;
+		return false;
 	}
 
 	TArray<TempoMultiViewCapture::FViewSetup> Views;
-	if (!PrepareTileRender(Views) || Views.IsEmpty())
+	if (!PrepareRenderStage(Stage, Views) || Views.IsEmpty())
 	{
-		return;
+		return false;
 	}
 
 	// The multi-view path renders via its own FSceneRenderer and never calls
@@ -339,9 +351,11 @@ void UTempoTiledSceneCaptureComponent::RenderCapture()
 	EnsureRayTracingReadbackBuffersExpanded(Scene);
 	PinRayTracingSceneUsedThisFrame(Scene);
 
-	TempoMultiViewCapture::RenderTiles(Scene, this, Desc.BlockRT, Views, Desc.CaptureSource, Desc.ResolutionFraction, &Desc.ShowFlags);
+	TempoMultiViewCapture::RenderTiles(Scene, this, Desc.BlockRT, Views, Desc.CaptureSource, Desc.ResolutionFraction, &Desc.ShowFlags,
+		FString::Printf(TEXT("Tempo %s stage %d"), *GetName(), Stage));
 
-	FinishTileRender();
+	FinishRenderStage(Stage);
+	return true;
 }
 
 void UTempoTiledSceneCaptureComponent::RestartCaptureTimer()

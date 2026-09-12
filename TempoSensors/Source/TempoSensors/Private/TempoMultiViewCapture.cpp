@@ -212,7 +212,7 @@ namespace
 			// Engine's SetupViewFamilyForSceneCapture consults GRayTracingSceneCaptures (a Renderer-
 			// private CVar used only for debug overrides). We don't link Renderer (see Build.cs note),
 			// so just honor the component's flag.
-			ViewInitOptions.bSceneCaptureUsesRayTracing = Component->bUseRayTracingIfEnabled;
+			ViewInitOptions.bSceneCaptureUsesRayTracing = Setup.bAllowRayTracing && Component->bUseRayTracingIfEnabled;
 			ViewInitOptions.bExcludeFromSceneTextureExtents = Component->bExcludeFromSceneTextureExtents;
 			ViewInitOptions.FirstPersonParams = Context.FirstPersonParams;
 #if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8
@@ -322,7 +322,8 @@ void RenderTiles(
 	TArrayView<const FViewSetup> Views,
 	ESceneCaptureSource CaptureSource,
 	float ResolutionFraction,
-	const FEngineShowFlags* ShowFlagsOverride)
+	const FEngineShowFlags* ShowFlagsOverride,
+	const FString& DebugName)
 {
 	check(IsInGameThread());
 	check(Scene && PrimaryComponent && AtlasRT);
@@ -457,7 +458,7 @@ void RenderTiles(
 
 	Builder->AddRenderer(
 		SceneRenderer,
-		TEXT("TempoTilesMultiView"),
+		FString(DebugName),
 		[AtlasResource, AtlasSize](FRDGBuilder& GraphBuilder, const FSceneRenderFunctionInputs& Inputs) -> bool
 		{
 			FRDGTextureRef AtlasTexture = RegisterExternalTexture(

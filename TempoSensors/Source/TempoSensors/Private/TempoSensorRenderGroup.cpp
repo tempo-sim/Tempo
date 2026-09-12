@@ -46,7 +46,7 @@ FTempoSensorFamilySignature FTempoSensorGroupRenderDesc::MakeSignature(const UTe
 	Signature.bSRGB = BlockRT->SRGB;
 	Signature.ResolutionFraction = ResolutionFraction;
 	Signature.ShowFlags = ShowFlags.ToString();
-	Signature.bUseRayTracingIfEnabled = Sensor->bUseRayTracingIfEnabled;
+	Signature.bUseRayTracingIfEnabled = bAllowRayTracing && Sensor->bUseRayTracingIfEnabled;
 	Signature.CompositeMode = Sensor->CompositeMode;
 	return Signature;
 }
@@ -200,11 +200,14 @@ void UTempoSensorRenderGroup::Shutdown()
 {
 	StopTimer();
 	Members.Empty();
-	for (FFamilyLayout& Layout : Layouts)
+	for (TArray<FFamilyLayout>& Layouts : StageLayouts)
 	{
-		RetireAtlas(Layout.Atlas);
+		for (FFamilyLayout& Layout : Layouts)
+		{
+			RetireAtlas(Layout.Atlas);
+		}
 	}
-	Layouts.Empty();
+	StageLayouts.Empty();
 }
 
 void UTempoSensorRenderGroup::BeginDestroy()
@@ -216,9 +219,12 @@ void UTempoSensorRenderGroup::BeginDestroy()
 void UTempoSensorRenderGroup::AddReferencedObjects(UObject* InThis, FReferenceCollector& Collector)
 {
 	UTempoSensorRenderGroup* This = CastChecked<UTempoSensorRenderGroup>(InThis);
-	for (FFamilyLayout& Layout : This->Layouts)
+	for (TArray<FFamilyLayout>& Layouts : This->StageLayouts)
 	{
-		Collector.AddReferencedObject(Layout.Atlas);
+		for (FFamilyLayout& Layout : Layouts)
+		{
+			Collector.AddReferencedObject(Layout.Atlas);
+		}
 	}
 	Super::AddReferencedObjects(InThis, Collector);
 }
@@ -263,8 +269,14 @@ void UTempoSensorRenderGroup::OnTimer()
 	}
 }
 
-bool UTempoSensorRenderGroup::RefreshLayouts(const TArray<TPair<UTempoTiledSceneCaptureComponent*, FTempoSensorGroupRenderDesc>>& Descs)
+bool UTempoSensorRenderGroup::RefreshLayouts(int32 Stage, const TArray<TPair<UTempoTiledSceneCaptureComponent*, FTempoSensorGroupRenderDesc>>& Descs)
 {
+	if (StageLayouts.Num() <= Stage)
+	{
+		StageLayouts.SetNum(Stage + 1);
+	}
+	TArray<FFamilyLayout>& Layouts = StageLayouts[Stage];
+
 	// Wanted: one family per distinct signature, in order of first appearance, holding every member
 	// with a valid desc. Layout is computed over all members, not just the ones capturing this
 	// frame, so a member's rect in the atlas stays put while other members come and go.
@@ -358,9 +370,9 @@ bool UTempoSensorRenderGroup::RefreshLayouts(const TArray<TPair<UTempoTiledScene
 					*Member->GetName(), Placement.Size.X, Placement.Size.Y, Placement.Offset.X, Placement.Offset.Y);
 			}
 		}
-		UE_LOG(LogTempoSensors, Display, TEXT("Render group %s @ %g Hz: %s atlas %dx%d for %s"),
+		UE_LOG(LogTempoSensors, Display, TEXT("Render group %s @ %g Hz: %s stage %d atlas %dx%d for %s"),
 			Owner.IsValid() ? *Owner->GetName() : TEXT("<none>"), RateHz,
-			SensorClass ? *SensorClass->GetName() : TEXT("<none>"), Family.AtlasSize.X, Family.AtlasSize.Y, *MemberNames);
+			SensorClass ? *SensorClass->GetName() : TEXT("<none>"), Stage, Family.AtlasSize.X, Family.AtlasSize.Y, *MemberNames);
 
 		// A member's rect moved (or the member is new), so its tiles' temporal history no longer
 		// lines up with what they will render. Cut once rather than let it resolve over frames.
@@ -368,7 +380,7 @@ bool UTempoSensorRenderGroup::RefreshLayouts(const TArray<TPair<UTempoTiledScene
 		{
 			if (UTempoTiledSceneCaptureComponent* Member = Placement.Member.Get())
 			{
-				Member->OnGroupLayoutChanged();
+				Member->OnGroupLayoutChanged(Stage);
 			}
 		}
 	}
@@ -447,16 +459,18 @@ void UTempoSensorRenderGroup::ExecutePendingCaptures()
 	PruneMembers();
 	TrimRetiredAtlases();
 
-	TArray<UTempoTiledSceneCaptureComponent*, TInlineAllocator<8>> Capturing;
+	// Members still in the capture: a member whose stage fails to render drops out of the later
+	// stages, as it would if it were rendering on its own.
+	TArray<UTempoTiledSceneCaptureComponent*, TInlineAllocator<8>> Active;
 	for (const TWeakObjectPtr<UTempoTiledSceneCaptureComponent>& WeakMember : Members)
 	{
 		UTempoTiledSceneCaptureComponent* Member = WeakMember.Get();
 		if (Member && Member->ConsumePendingCapture())
 		{
-			Capturing.Add(Member);
+			Active.Add(Member);
 		}
 	}
-	if (Capturing.IsEmpty())
+	if (Active.IsEmpty())
 	{
 		return;
 	}
@@ -468,113 +482,147 @@ void UTempoSensorRenderGroup::ExecutePendingCaptures()
 		return;
 	}
 
-	// Descs for every member, capturing or not, so the layout stays stable across frames.
-	TArray<TPair<UTempoTiledSceneCaptureComponent*, FTempoSensorGroupRenderDesc>> Descs;
-	for (const TWeakObjectPtr<UTempoTiledSceneCaptureComponent>& WeakMember : Members)
+	int32 NumStages = 0;
+	for (const UTempoTiledSceneCaptureComponent* Member : Active)
 	{
-		UTempoTiledSceneCaptureComponent* Member = WeakMember.Get();
-		FTempoSensorGroupRenderDesc Desc;
-		if (Member && Member->GetGroupRenderDesc(Desc) && Desc.BlockRT && Desc.BlockRT->GameThread_GetRenderTargetResource())
-		{
-			Descs.Emplace(Member, MoveTemp(Desc));
-		}
+		NumStages = FMath::Max(NumStages, Member->GetNumRenderStages());
 	}
-	RefreshLayouts(Descs);
 
-	// Both are idempotent per frame, and every family render below needs them ahead of it.
+	// Idempotent per frame; every family render below needs it ahead of it.
 	UTempoSceneCaptureComponent2D::EnsureRayTracingReadbackBuffersExpanded(Scene);
-	UTempoSceneCaptureComponent2D::PinRayTracingSceneUsedThisFrame(Scene);
 
-	TSet<UTempoTiledSceneCaptureComponent*> Rendered;
-	for (FFamilyLayout& Family : Layouts)
+	const FString GroupName = FString::Printf(TEXT("TempoGroup %s %s"),
+		Owner.IsValid() ? *Owner->GetActorNameOrLabel() : TEXT("<none>"),
+		SensorClass ? *SensorClass->GetName() : TEXT("<none>"));
+
+	for (int32 Stage = 0; Stage < NumStages; ++Stage)
 	{
-		if (!Family.Atlas)
+		// Descs for every member with this stage, capturing or not, so the layout stays stable
+		// across frames.
+		TArray<TPair<UTempoTiledSceneCaptureComponent*, FTempoSensorGroupRenderDesc>> Descs;
+		for (const TWeakObjectPtr<UTempoTiledSceneCaptureComponent>& WeakMember : Members)
 		{
-			continue;
-		}
-		FTextureRenderTargetResource* AtlasResource = Family.Atlas->GameThread_GetRenderTargetResource();
-		if (!AtlasResource)
-		{
-			continue;
-		}
-
-		TArray<TempoMultiViewCapture::FViewSetup> Views;
-		TArray<const FBlockPlacement*, TInlineAllocator<8>> RenderedBlocks;
-		for (const FBlockPlacement& Placement : Family.Blocks)
-		{
-			UTempoTiledSceneCaptureComponent* Member = Placement.Member.Get();
-			if (!Member || !Capturing.Contains(Member) || Placement.Offset.X < 0)
+			UTempoTiledSceneCaptureComponent* Member = WeakMember.Get();
+			if (!Member || Member->GetNumRenderStages() <= Stage)
 			{
 				continue;
 			}
-			TArray<TempoMultiViewCapture::FViewSetup> MemberViews;
-			if (!Member->PrepareTileRender(MemberViews))
+			FTempoSensorGroupRenderDesc Desc;
+			if (Member->GetRenderStageDesc(Stage, Desc) && Desc.BlockRT && Desc.BlockRT->GameThread_GetRenderTargetResource())
+			{
+				Descs.Emplace(Member, MoveTemp(Desc));
+			}
+		}
+		RefreshLayouts(Stage, Descs);
+
+		TSet<UTempoTiledSceneCaptureComponent*> Rendered;
+		TSet<UTempoTiledSceneCaptureComponent*> Dropped;
+		for (FFamilyLayout& Family : StageLayouts[Stage])
+		{
+			if (!Family.Atlas)
 			{
 				continue;
 			}
-			for (TempoMultiViewCapture::FViewSetup& View : MemberViews)
+			FTextureRenderTargetResource* AtlasResource = Family.Atlas->GameThread_GetRenderTargetResource();
+			if (!AtlasResource)
 			{
-				View.ViewRect += Placement.Offset;
+				continue;
 			}
-			Views.Append(MoveTemp(MemberViews));
-			RenderedBlocks.Add(&Placement);
-			Rendered.Add(Member);
-		}
-		if (RenderedBlocks.IsEmpty())
-		{
-			continue;
-		}
 
-		// The first rendered member supplies the family-level settings. Every member of the family
-		// agrees on them (that is what the signature guarantees), so the choice is immaterial.
-		UTempoTiledSceneCaptureComponent* Primary = RenderedBlocks[0]->Member.Get();
-		const TPair<UTempoTiledSceneCaptureComponent*, FTempoSensorGroupRenderDesc>* PrimaryPair = Descs.FindByPredicate(
-			[Primary](const TPair<UTempoTiledSceneCaptureComponent*, FTempoSensorGroupRenderDesc>& Pair)
+			TArray<TempoMultiViewCapture::FViewSetup> Views;
+			TArray<const FBlockPlacement*, TInlineAllocator<8>> RenderedBlocks;
+			FString MemberNames;
+			for (const FBlockPlacement& Placement : Family.Blocks)
 			{
-				return Pair.Key == Primary;
-			});
-		// Layouts were just rebuilt from Descs, so every placed member has one.
-		if (!ensure(PrimaryPair))
-		{
-			continue;
-		}
-		const FTempoSensorGroupRenderDesc& PrimaryDesc = PrimaryPair->Value;
-
-		TempoMultiViewCapture::RenderTiles(
-			Scene, Primary, Family.Atlas, Views, PrimaryDesc.CaptureSource, PrimaryDesc.ResolutionFraction, &PrimaryDesc.ShowFlags);
-
-		for (const FBlockPlacement* Placement : RenderedBlocks)
-		{
-			UTempoTiledSceneCaptureComponent* Member = Placement->Member.Get();
-			UTextureRenderTarget2D* BlockRT = Placement->BlockRT.Get();
-			FTextureRenderTargetResource* BlockResource = BlockRT ? BlockRT->GameThread_GetRenderTargetResource() : nullptr;
-			if (BlockResource)
-			{
-				EnqueueBlockCopy(AtlasResource, BlockResource, Placement->Offset, Placement->Size);
+				UTempoTiledSceneCaptureComponent* Member = Placement.Member.Get();
+				if (!Member || !Active.Contains(Member) || Member->GetNumRenderStages() <= Stage || Placement.Offset.X < 0)
+				{
+					continue;
+				}
+				TArray<TempoMultiViewCapture::FViewSetup> MemberViews;
+				if (!Member->PrepareRenderStage(Stage, MemberViews) || MemberViews.IsEmpty())
+				{
+					Dropped.Add(Member);
+					continue;
+				}
+				for (TempoMultiViewCapture::FViewSetup& View : MemberViews)
+				{
+					View.ViewRect += Placement.Offset;
+				}
+				Views.Append(MoveTemp(MemberViews));
+				RenderedBlocks.Add(&Placement);
+				Rendered.Add(Member);
+				MemberNames += FString::Printf(TEXT("%s%s"), MemberNames.IsEmpty() ? TEXT("") : TEXT(","), *Member->GetName());
 			}
-			Member->FinishTileRender();
-		}
-	}
-
-	// Anything with a capture pending that found no place in an atlas — no valid desc this frame,
-	// or a block too large to pack — renders on its own, as it would ungrouped.
-	for (UTempoTiledSceneCaptureComponent* Member : Capturing)
-	{
-		if (Rendered.Contains(Member))
-		{
-			continue;
-		}
-		const bool bHasDesc = Descs.ContainsByPredicate(
-			[Member](const TPair<UTempoTiledSceneCaptureComponent*, FTempoSensorGroupRenderDesc>& Pair)
+			if (RenderedBlocks.IsEmpty())
 			{
-				return Pair.Key == Member;
-			});
-		if (bHasDesc && !WarnedUnplaced.Contains(Member))
-		{
-			WarnedUnplaced.Add(Member);
-			UE_LOG(LogTempoSensors, Warning, TEXT("Sensor %s does not fit in its render group's atlas; rendering it on its own."), *Member->GetName());
+				continue;
+			}
+
+			// The first rendered member supplies the family-level settings. Every member of the family
+			// agrees on them (that is what the signature guarantees), so the choice is immaterial.
+			UTempoTiledSceneCaptureComponent* Primary = RenderedBlocks[0]->Member.Get();
+			const TPair<UTempoTiledSceneCaptureComponent*, FTempoSensorGroupRenderDesc>* PrimaryPair = Descs.FindByPredicate(
+				[Primary](const TPair<UTempoTiledSceneCaptureComponent*, FTempoSensorGroupRenderDesc>& Pair)
+				{
+					return Pair.Key == Primary;
+				});
+			// Layouts were just rebuilt from Descs, so every placed member has one.
+			if (!ensure(PrimaryPair))
+			{
+				continue;
+			}
+			const FTempoSensorGroupRenderDesc& PrimaryDesc = PrimaryPair->Value;
+
+			// Re-armed before every render: the engine clears it at the end of each renderer's frame.
+			UTempoSceneCaptureComponent2D::PinRayTracingSceneUsedThisFrame(Scene);
+
+			TempoMultiViewCapture::RenderTiles(
+				Scene, Primary, Family.Atlas, Views, PrimaryDesc.CaptureSource, PrimaryDesc.ResolutionFraction, &PrimaryDesc.ShowFlags,
+				FString::Printf(TEXT("%s stage %d [%s]"), *GroupName, Stage, *MemberNames));
+
+			for (const FBlockPlacement* Placement : RenderedBlocks)
+			{
+				UTempoTiledSceneCaptureComponent* Member = Placement->Member.Get();
+				UTextureRenderTarget2D* BlockRT = Placement->BlockRT.Get();
+				FTextureRenderTargetResource* BlockResource = BlockRT ? BlockRT->GameThread_GetRenderTargetResource() : nullptr;
+				if (BlockResource)
+				{
+					EnqueueBlockCopy(AtlasResource, BlockResource, Placement->Offset, Placement->Size);
+				}
+				Member->FinishRenderStage(Stage);
+			}
 		}
-		Member->RenderCapture();
+
+		// Anything still active with this stage that found no place in an atlas — no valid desc this
+		// frame, or a block too large to pack — renders the stage on its own, as it would ungrouped.
+		for (int32 Index = Active.Num() - 1; Index >= 0; --Index)
+		{
+			UTempoTiledSceneCaptureComponent* Member = Active[Index];
+			if (Member->GetNumRenderStages() <= Stage || Rendered.Contains(Member))
+			{
+				continue;
+			}
+			if (Dropped.Contains(Member))
+			{
+				Active.RemoveAt(Index);
+				continue;
+			}
+			const bool bHasDesc = Descs.ContainsByPredicate(
+				[Member](const TPair<UTempoTiledSceneCaptureComponent*, FTempoSensorGroupRenderDesc>& Pair)
+				{
+					return Pair.Key == Member;
+				});
+			if (bHasDesc && !WarnedUnplaced.Contains(Member))
+			{
+				WarnedUnplaced.Add(Member);
+				UE_LOG(LogTempoSensors, Warning, TEXT("Sensor %s does not fit in its render group's atlas; rendering it on its own."), *Member->GetName());
+			}
+			if (!Member->RenderStageStandalone(Stage))
+			{
+				Active.RemoveAt(Index);
+			}
+		}
 	}
 }
 

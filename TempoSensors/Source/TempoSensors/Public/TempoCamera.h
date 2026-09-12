@@ -310,17 +310,32 @@ public:
 protected:
 	virtual bool HasPendingRequests() const override { return HasPendingCameraRequests(); }
 	virtual int32 GetNumActiveTiles() const override;
-	virtual bool GetGroupRenderDesc(FTempoSensorGroupRenderDesc& OutDesc) const override;
-	virtual bool PrepareTileRender(TArray<TempoMultiViewCapture::FViewSetup>& OutViews) override;
-	virtual void FinishTileRender() override;
-	virtual void OnGroupLayoutChanged() override;
+	// Stage 0 renders the tiles. On the multi-tile path stage 1 is the proxy tonemap render: one
+	// view whose post-process material replaces scene color with the stitched HDR image, so the
+	// engine's bloom, auto exposure and tonemapper run over it and its histogram meters the scene
+	// for the exposure controller. A render group batches every camera's proxy on one actor into
+	// one family, the same way it batches their tiles.
+	virtual int32 GetNumRenderStages() const override;
+	virtual bool GetRenderStageDesc(int32 Stage, FTempoSensorGroupRenderDesc& OutDesc) const override;
+	virtual bool PrepareRenderStage(int32 Stage, TArray<TempoMultiViewCapture::FViewSetup>& OutViews) override;
+	virtual void FinishRenderStage(int32 Stage) override;
+	virtual void OnGroupLayoutChanged(int32 Stage) override;
 
 	// Exactly one active tile, no depth, no upsampling: render with full post-process straight to
 	// the final RT and skip the stitch, proxy and merge passes.
 	bool ShouldUseSingleTileFastPath() const;
 
-	// Per-capture state carried from PrepareTileRender to FinishTileRender.
+	// Stage 0 / stage 1 halves of PrepareRenderStage.
+	bool PrepareTileRender(TArray<TempoMultiViewCapture::FViewSetup>& OutViews);
+	bool PrepareProxyRender(TArray<TempoMultiViewCapture::FViewSetup>& OutViews);
+
+	// The end of every capture: build the texture read for SharedFinalTextureTarget, enqueue the
+	// staging copy and the video sequence id, and queue the read.
+	void FinishCapture();
+
+	// Per-capture state carried from PrepareRenderStage to FinishRenderStage.
 	FPostProcessSettings FastPathPP;
+	FPostProcessSettings ProxyPP;
 	bool bPreparedSingleTileFastPath = false;
 	FTempoCameraTile* PreparedSingleActiveTile = nullptr;
 

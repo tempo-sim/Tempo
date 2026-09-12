@@ -52,29 +52,35 @@ public:
 	virtual void ExecutePendingCapture() override;
 	// End ITempoSensorInterface
 
-	// Begin render-group interface. A tiled sensor's capture is split in three so that a
-	// UTempoSensorRenderGroup can render the tiles of several sensors as the views of one
-	// FSceneViewFamily: describe the block this sensor renders into, build its views, and run
-	// whatever follows the render. RenderCapture below strings the three together for a sensor
-	// rendering on its own.
+	// Begin render-group interface. A tiled sensor's capture is a sequence of render stages, each a
+	// multi-view render into a sensor-owned block render target, split in three so that a
+	// UTempoSensorRenderGroup can render one stage of several sensors as the views of one
+	// FSceneViewFamily: describe the block the stage renders into, build its views, and run whatever
+	// follows the render. Stage 0 renders the tiles; a camera on the multi-tile path adds stage 1,
+	// its proxy tonemap render. RenderCapture below runs every stage for a sensor rendering on its
+	// own.
 
-	// Describe the render target this sensor's tiles render into and the family-level settings they
-	// need. Returns false when the sensor cannot render right now (no render target, no tiles).
-	virtual bool GetGroupRenderDesc(FTempoSensorGroupRenderDesc& OutDesc) const PURE_VIRTUAL(UTempoTiledSceneCaptureComponent::GetGroupRenderDesc, return false; );
+	// Number of render stages one capture takes. Stable for the duration of a capture.
+	virtual int32 GetNumRenderStages() const { return 1; }
 
-	// Build this sensor's views for one capture, with view rects relative to its own block. Anything
+	// Describe the render target a stage renders into and the family-level settings it needs. Returns
+	// false when the stage cannot render right now (no render target, no tiles).
+	virtual bool GetRenderStageDesc(int32 Stage, FTempoSensorGroupRenderDesc& OutDesc) const PURE_VIRTUAL(UTempoTiledSceneCaptureComponent::GetRenderStageDesc, return false; );
+
+	// Build a stage's views for one capture, with view rects relative to the stage's block. Anything
 	// the views point at (post-process settings, view states) must stay valid until the render is
-	// enqueued; anything FinishTileRender needs is stashed on the component. Returns false with no
-	// views if there is nothing to render.
-	virtual bool PrepareTileRender(TArray<TempoMultiViewCapture::FViewSetup>& OutViews) PURE_VIRTUAL(UTempoTiledSceneCaptureComponent::PrepareTileRender, return false; );
+	// enqueued; anything FinishRenderStage needs is stashed on the component. Returns false with no
+	// views if there is nothing to render, which ends the capture.
+	virtual bool PrepareRenderStage(int32 Stage, TArray<TempoMultiViewCapture::FViewSetup>& OutViews) PURE_VIRTUAL(UTempoTiledSceneCaptureComponent::PrepareRenderStage, return false; );
 
-	// Runs after the render (and, when grouped, the copy of this sensor's block back into its own
-	// render target) has been enqueued: downstream passes, the staging copy, the texture read.
-	virtual void FinishTileRender() PURE_VIRTUAL(UTempoTiledSceneCaptureComponent::FinishTileRender, );
+	// Runs after the stage's render (and, when grouped, the copy of this sensor's block back into its
+	// own render target) has been enqueued: downstream passes, and for the last stage the staging
+	// copy and the texture read.
+	virtual void FinishRenderStage(int32 Stage) PURE_VIRTUAL(UTempoTiledSceneCaptureComponent::FinishRenderStage, );
 
-	// This sensor's rect in its group's atlas moved, or the atlas was rebuilt. Tiles should cut
-	// their temporal history on the next render.
-	virtual void OnGroupLayoutChanged() PURE_VIRTUAL(UTempoTiledSceneCaptureComponent::OnGroupLayoutChanged, );
+	// This sensor's rect in its group's atlas for the stage moved, or the atlas was rebuilt. Views
+	// with temporal history should cut it on the next render.
+	virtual void OnGroupLayoutChanged(int32 Stage) PURE_VIRTUAL(UTempoTiledSceneCaptureComponent::OnGroupLayoutChanged, );
 
 	// The group this sensor renders with, or null when rendering on its own.
 	UTempoSensorRenderGroup* GetRenderGroup() const { return RenderGroup; }
@@ -90,9 +96,13 @@ protected:
 	// Returns the number of currently active tiles. Used by MaybeMarkPendingCapture.
 	virtual int32 GetNumActiveTiles() const PURE_VIRTUAL(UTempoTiledSceneCaptureComponent::GetNumActiveTiles, return 0; );
 
-	// Render this sensor on its own: GetGroupRenderDesc, PrepareTileRender, one multi-view render
-	// into the sensor's block render target, FinishTileRender.
+	// Render this sensor on its own: every stage in turn, each as one multi-view render into the
+	// stage's block render target. Stops at the first stage that cannot render.
 	void RenderCapture();
+
+	// Render one stage on its own: GetRenderStageDesc, PrepareRenderStage, one multi-view render,
+	// FinishRenderStage. Returns false if the stage could not render.
+	bool RenderStageStandalone(int32 Stage);
 
 	// If a capture is pending and no property change is blocking it, clear the flag and return
 	// true. A blocked capture stays pending so the next frame picks it up once the reconfigure

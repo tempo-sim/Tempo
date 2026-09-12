@@ -312,9 +312,11 @@ leaves the GPU under-occupied and pays them once per sensor.
 By default the tiled sensors (cameras and lidars) on one actor that capture at the same rate
 render **together**: their tiles become the views of one scene render into an atlas the group owns,
 exactly as the tiles of one wide-FOV camera already do. Each sensor's block is then copied back
-into that sensor's own render target, so everything downstream — stitching, the proxy tonemap,
-readback, decoding — is unchanged. The fixed costs are paid once per group, and a group of four
-540p sensors fills the GPU like a single 1080p frame.
+into that sensor's own render target, so everything downstream — stitching, readback, decoding —
+is unchanged. Cameras on the multi-tile path also need a proxy render per capture to tonemap and
+meter the stitched image; the group batches those into one render too. The fixed per-render costs
+(visibility, shadow setup, the Lumen and ray tracing scene updates, the render graph) are paid once
+per group per stage instead of once per sensor; the per-pixel work is unchanged.
 
 What grouping preserves:
 
@@ -379,14 +381,16 @@ matrix and owning component — then renders it through one `FSceneRenderer`. Th
 biggest performance win in the plugin versus the more obvious "one `USceneCaptureComponent2D` per
 tile" design.
 
-A tiled sensor's capture is split in three so a group can render several sensors at once:
-`GetGroupRenderDesc` names the sensor's block render target and family-level settings,
-`PrepareTileRender` builds its views relative to that block, and `FinishTileRender` runs whatever
-follows the render. `UTempoSensorRenderGroup` (one per actor, rate and sensor class, owned by
-`UTempoSensorRenderGroupSubsystem`) packs the members' blocks into an atlas per family signature,
-offsets their view rects, renders each family with one `RenderTiles` call, and copies each block
-back before calling the member's `FinishTileRender`. A sensor rendering on its own strings the
-same three steps together around a `RenderTiles` into its own block.
+A tiled sensor's capture is a sequence of render stages, each split in three so a group can render
+one stage of several sensors at once: `GetRenderStageDesc` names the stage's block render target
+and family-level settings, `PrepareRenderStage` builds its views relative to that block, and
+`FinishRenderStage` runs whatever follows the render. The lidar has one stage; a camera on the
+multi-tile path has two, its tiles and then its proxy tonemap view. `UTempoSensorRenderGroup` (one
+per actor, rate and sensor class, owned by `UTempoSensorRenderGroupSubsystem`) runs stage by
+stage: it packs the members' blocks into an atlas per family signature, offsets their view rects,
+renders each family with one `RenderTiles` call, and copies each block back before calling the
+member's `FinishRenderStage`. A sensor rendering on its own runs the same steps per stage around a
+`RenderTiles` into its own block.
 
 The full sensor frame for a camera is approximately:
 
@@ -394,9 +398,11 @@ The full sensor frame for a camera is approximately:
    direct-to-final-RT in the single-tile fast path).
 2. **Aux unpack pass** → label+depth bytes RT.
 3. **Color stitch + feather pass** → equidistant HDR RT.
-4. **Proxy capture** → the camera's main capture, with a post-process material that swaps the HDR
-   stitched output in for scene color before bloom / auto-exposure / tonemap. This runs your
-   post-process settings on the stitched image.
+4. **Proxy render** → a second multi-view render (one view, no geometry, no ray tracing or Lumen)
+   with a post-process material that swaps the HDR stitched output in for scene color before
+   bloom / auto-exposure / tonemap. This runs your post-process settings on the stitched image and
+   meters it for the exposure controller. In a render group the proxies of every camera on the
+   actor are one family, just like their tiles.
 5. **Merge pass** → packs (LDR color, label, optional depth) into the final RT.
 6. **Staging copy + GPU fence** → readback target.
 

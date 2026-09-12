@@ -65,6 +65,11 @@ namespace TempoMultiViewCapture
 
 		// Tile perspective FOV, stored for post-process depth-correction.
 		float FOV = 90.0f;
+
+		// Whether this view may use ray tracing at all (Component->bUseRayTracingIfEnabled still has
+		// to be set). False for a view whose scene content is discarded, such as the camera's proxy
+		// tonemap view, so the family builds no ray tracing scene for it.
+		bool bAllowRayTracing = true;
 	};
 
 	// Build one FSceneViewFamily containing all views, create one FSceneRenderer via
@@ -79,6 +84,9 @@ namespace TempoMultiViewCapture
 	// that render their tiles with a trimmed flag set (the multi-tile camera turns off bloom, motion
 	// blur and friends) pass the trimmed copy here instead of mutating the component's flags.
 	//
+	// DebugName labels the render in traces (the "SceneRender" breadcrumb and the render graph
+	// event).
+	//
 	// ResolutionFraction is the GlobalResolutionFraction handed to the family's
 	// FLegacyScreenPercentageDriver. 1.0 = no upscaling (each tile rasterizes at its full
 	// ViewRect). <1.0 rasterizes at fraction*ViewRect and upsamples to ViewRect — TSR/TAAU when
@@ -91,5 +99,6 @@ namespace TempoMultiViewCapture
 		TArrayView<const FViewSetup> Views,
 		ESceneCaptureSource CaptureSource,
 		float ResolutionFraction = 1.0f,
-		const FEngineShowFlags* ShowFlagsOverride = nullptr);
+		const FEngineShowFlags* ShowFlagsOverride = nullptr,
+		const FString& DebugName = TEXT("TempoTilesMultiView"));
 }

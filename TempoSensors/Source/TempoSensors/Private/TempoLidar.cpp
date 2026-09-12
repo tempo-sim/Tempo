@@ -957,9 +957,9 @@ int32 UTempoLidar::GetNumActiveTiles() const
 	return Count;
 }
 
-bool UTempoLidar::GetGroupRenderDesc(FTempoSensorGroupRenderDesc& OutDesc) const
+bool UTempoLidar::GetRenderStageDesc(int32 Stage, FTempoSensorGroupRenderDesc& OutDesc) const
 {
-	if (!SharedTextureTarget || !SharedTextureTarget->GameThread_GetRenderTargetResource())
+	if (Stage != 0 || !SharedTextureTarget || !SharedTextureTarget->GameThread_GetRenderTargetResource())
 	{
 		return false;
 	}
@@ -976,7 +976,7 @@ bool UTempoLidar::GetGroupRenderDesc(FTempoSensorGroupRenderDesc& OutDesc) const
 	return true;
 }
 
-void UTempoLidar::OnGroupLayoutChanged()
+void UTempoLidar::OnGroupLayoutChanged(int32 Stage)
 {
 	for (FTempoLidarTile& Tile : Tiles)
 	{
@@ -987,10 +987,10 @@ void UTempoLidar::OnGroupLayoutChanged()
 	}
 }
 
-bool UTempoLidar::PrepareTileRender(TArray<TempoMultiViewCapture::FViewSetup>& OutViews)
+bool UTempoLidar::PrepareRenderStage(int32 Stage, TArray<TempoMultiViewCapture::FViewSetup>& OutViews)
 {
 	UWorld* World = GetWorld();
-	if (!World || GetNumActiveTiles() == 0)
+	if (Stage != 0 || !World || GetNumActiveTiles() == 0)
 	{
 		return false;
 	}
@@ -1010,7 +1010,7 @@ bool UTempoLidar::PrepareTileRender(TArray<TempoMultiViewCapture::FViewSetup>& O
 	// Build per-tile view setups and per-slice reads. Each tile's ViewRect inside the atlas is
 	// (SliceDestOffsetX, 0) to (SliceDestOffsetX + SizeXY.X, SizeXY.Y), matching the pack layout
 	// FLidarSharedTextureRead::SplitIntoSlices expects. The slices are kept on the component for
-	// FinishTileRender to wrap in the shared read.
+	// FinishRenderStage to wrap in the shared read.
 	const int32 NumActiveTiles = GetNumActiveTiles();
 	double MinOutputElevationDeg, MaxOutputElevationDeg;
 	GetOutputElevationRangeDeg(MinOutputElevationDeg, MaxOutputElevationDeg);
@@ -1126,7 +1126,7 @@ bool UTempoLidar::PrepareTileRender(TArray<TempoMultiViewCapture::FViewSetup>& O
 	return !OutViews.IsEmpty();
 }
 
-void UTempoLidar::FinishTileRender()
+void UTempoLidar::FinishRenderStage(int32 Stage)
 {
 	FTextureRenderTargetResource* SharedRTResource = SharedTextureTarget ? SharedTextureTarget->GameThread_GetRenderTargetResource() : nullptr;
 	if (!SharedRTResource)

@@ -45,6 +45,9 @@ struct TEMPOSENSORS_API FTempoSensorGroupRenderDesc
 	ESceneCaptureSource CaptureSource = ESceneCaptureSource::SCS_FinalColorLDR;
 	float ResolutionFraction = 1.0f;
 	FEngineShowFlags ShowFlags = FEngineShowFlags(ESFIM_Game);
+	// False for a stage whose views discard their scene content (the camera's proxy tonemap render),
+	// so the family builds no ray tracing scene. Sensors still need bUseRayTracingIfEnabled set.
+	bool bAllowRayTracing = true;
 
 	FIntPoint GetBlockSize() const;
 	FTempoSensorFamilySignature MakeSignature(const UTempoTiledSceneCaptureComponent* Sensor) const;
@@ -69,6 +72,10 @@ namespace TempoSensorRenderGroupLayout
 // FSceneViewFamily per family signature, into an atlas the group owns, then copies each member's
 // block back into that member's own render target so the member's downstream passes and readback
 // run unchanged. The group also owns the capture timer, so its members capture on the same frames.
+//
+// A capture may take several render stages (a camera on the multi-tile path renders its tiles,
+// then its proxy tonemap view). The group runs stage by stage: every member's stage N is rendered
+// and finished before any member's stage N+1, each stage with its own atlases and layouts.
 //
 // Rates are fixed for the life of a group: a member whose RateHz changes while grouped has the
 // change logged and reverted. Group at a different rate by disabling and re-enabling grouping in
@@ -123,8 +130,9 @@ private:
 	void StopTimer();
 	void PruneMembers();
 
-	// Bring Layouts in line with the members' current descs. Returns true if anything changed.
-	bool RefreshLayouts(const TArray<TPair<UTempoTiledSceneCaptureComponent*, FTempoSensorGroupRenderDesc>>& Descs);
+	// Bring a stage's layouts in line with the members' current descs for that stage. Returns true
+	// if anything changed.
+	bool RefreshLayouts(int32 Stage, const TArray<TPair<UTempoTiledSceneCaptureComponent*, FTempoSensorGroupRenderDesc>>& Descs);
 	void RetireAtlas(UTextureRenderTarget2D* Atlas);
 	void TrimRetiredAtlases();
 
@@ -135,7 +143,8 @@ private:
 	const UClass* SensorClass = nullptr;
 
 	TArray<TWeakObjectPtr<UTempoTiledSceneCaptureComponent>> Members;
-	TArray<FFamilyLayout> Layouts;
+	// Indexed by render stage.
+	TArray<TArray<FFamilyLayout>> StageLayouts;
 
 	// Members that did not fit in an atlas and were warned about, so the warning fires once.
 	TSet<TWeakObjectPtr<UTempoTiledSceneCaptureComponent>> WarnedUnplaced;
