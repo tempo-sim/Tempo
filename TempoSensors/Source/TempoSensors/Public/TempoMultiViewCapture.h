@@ -8,6 +8,7 @@
 #include "Math/Matrix.h"
 #include "Math/Vector.h"
 #include "SceneTypes.h"
+#include "ShowFlags.h"
 
 class FSceneInterface;
 class FSceneViewStateInterface;
@@ -16,17 +17,28 @@ class UTextureRenderTarget2D;
 
 // Consolidates N views into one FSceneViewFamily rendered by a single FSceneRenderer into an atlas
 // render target. Each view gets its own ViewRect inside the atlas; each view contributes its own
-// FSceneViewState (TAA/AE history) and post-process settings. Owner-level context (show flags,
-// hide/show lists, view owner, LOD, ray-tracing) is taken from the PrimaryComponent passed to
-// RenderTiles — tiles no longer need to be USceneCaptureComponent2D instances.
+// FSceneViewState (TAA/AE history) and post-process settings. Views may come from different capture
+// components: everything the engine treats per view (hide/show lists, view owner, far clip, LOD,
+// clip plane, lighting channels) is taken from the view's own Component, while family-level
+// settings (show flags, capture source, composite mode, view extensions) come from the
+// PrimaryComponent passed to RenderTiles.
 namespace TempoMultiViewCapture
 {
 	struct FViewSetup
 	{
+		// The capture component this view belongs to. Required. Supplies the per-view owner-level
+		// settings listed above; several views may share one component (the tiles of one sensor).
+		USceneCaptureComponent2D* Component = nullptr;
+
 		// Per-view scene view state (TAA history). Must be valid per view so that tiles don't share
-		// history. Exposure state is deliberately shared: every view is pointed at the first view's
-		// state for eye adaptation.
+		// history.
 		FSceneViewStateInterface* ViewState = nullptr;
+
+		// View state whose eye-adaptation buffer this view reads and writes. Null means the view's
+		// own ViewState. The tiles of one sensor point at that sensor's first tile so they cannot
+		// drift apart in brightness; views from different sensors in one family never share, so each
+		// sensor meters its own scene.
+		FSceneViewStateInterface* ExposureViewState = nullptr;
 
 		// Per-view post-process settings (holds the distortion PPM blendable + AE bias).
 		// Pointer aliases a caller-owned FPostProcessSettings; must outlive the RenderTiles call.
@@ -37,7 +49,7 @@ namespace TempoMultiViewCapture
 		// clearing/setting on each call.
 		bool bCameraCut = false;
 
-		// World-space view origin (usually the camera rig position; all tiles share it).
+		// World-space view origin (usually the sensor position; the tiles of one sensor share it).
 		FVector ViewLocation = FVector::ZeroVector;
 
 		// View rotation matrix in Unreal's capture convention — i.e. the same matrix
@@ -59,9 +71,13 @@ namespace TempoMultiViewCapture
 	// ISceneRenderBuilder, and Execute it. Synchronously enqueues the render commands before
 	// returning; subsequent render commands run after the family render on the render thread.
 	//
-	// PrimaryComponent supplies family-wide settings: ShowFlags, view extensions, hide/show lists,
-	// view owner, LOD, ray-tracing flag, clip plane, lighting channels. CaptureSource is passed
-	// explicitly because the primary's own capture may use a different source than the atlas.
+	// PrimaryComponent supplies family-wide settings: view extensions, realtime-update flag,
+	// composite mode, and (unless ShowFlagsOverride is given) the show flags. CaptureSource is
+	// passed explicitly because the primary's own capture may use a different source than the atlas.
+	//
+	// ShowFlagsOverride, when non-null, replaces PrimaryComponent->ShowFlags for the family. Sensors
+	// that render their tiles with a trimmed flag set (the multi-tile camera turns off bloom, motion
+	// blur and friends) pass the trimmed copy here instead of mutating the component's flags.
 	//
 	// ResolutionFraction is the GlobalResolutionFraction handed to the family's
 	// FLegacyScreenPercentageDriver. 1.0 = no upscaling (each tile rasterizes at its full
@@ -74,5 +90,6 @@ namespace TempoMultiViewCapture
 		UTextureRenderTarget2D* AtlasRT,
 		TArrayView<const FViewSetup> Views,
 		ESceneCaptureSource CaptureSource,
-		float ResolutionFraction = 1.0f);
+		float ResolutionFraction = 1.0f,
+		const FEngineShowFlags* ShowFlagsOverride = nullptr);
 }

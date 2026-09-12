@@ -61,32 +61,51 @@ namespace TempoMultiViewCapture
 {
 namespace
 {
-	// Mirrors (and multi-view-generalizes) SetupViewFamilyForSceneCapture. Owner-level fields come
-	// from PrimaryComponent; per-view fields come from FViewSetup.
-	TArray<FSceneView*> SetupMultiViewFamily(
-		FSceneViewFamily& ViewFamily,
-		USceneCaptureComponent2D* PrimaryComponent,
-		bool bCaptureSceneColor,
-		TArrayView<const FViewSetup> Views)
+	// Per-component view context: the owner-level fields the engine's SetupViewFamilyForSceneCapture
+	// derives from the one capture component it renders. With views from several sensors in one
+	// family these are per view, so they are computed once per distinct component and applied to
+	// each of that component's views.
+	struct FComponentViewContext
 	{
-		check(!ViewFamily.GetScreenPercentageInterface());
-		check(PrimaryComponent);
-
-		ViewFamily.FrameNumber = ViewFamily.Scene->GetFrameNumber();
-		ViewFamily.FrameCounter = GFrameCounter;
-
-		// Owner-level hide/show lists, computed once.
 		TSet<FPrimitiveComponentId> HiddenPrimitives;
 		TOptional<TSet<FPrimitiveComponentId>> ShowOnlyPrimitives;
+		FFirstPersonParameters FirstPersonParams;
+	};
+
+	void BuildComponentViewContext(USceneCaptureComponent2D* Component, FComponentViewContext& Out)
+	{
+		for (const TWeakObjectPtr<UPrimitiveComponent>& WeakPrim : Component->HiddenComponents)
 		{
-			for (const TWeakObjectPtr<UPrimitiveComponent>& WeakPrim : PrimaryComponent->HiddenComponents)
+			if (UPrimitiveComponent* Prim = WeakPrim.Get())
+			{
+				Out.HiddenPrimitives.Add(Prim->GetPrimitiveSceneId());
+			}
+		}
+		for (AActor* Actor : Component->HiddenActors)
+		{
+			if (Actor)
+			{
+				for (UActorComponent* ActorComp : Actor->GetComponents())
+				{
+					if (UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(ActorComp))
+					{
+						Out.HiddenPrimitives.Add(PrimComp->GetPrimitiveSceneId());
+					}
+				}
+			}
+		}
+
+		if (Component->PrimitiveRenderMode == ESceneCapturePrimitiveRenderMode::PRM_UseShowOnlyList)
+		{
+			Out.ShowOnlyPrimitives.Emplace();
+			for (const TWeakObjectPtr<UPrimitiveComponent>& WeakPrim : Component->ShowOnlyComponents)
 			{
 				if (UPrimitiveComponent* Prim = WeakPrim.Get())
 				{
-					HiddenPrimitives.Add(Prim->GetPrimitiveSceneId());
+					Out.ShowOnlyPrimitives->Add(Prim->GetPrimitiveSceneId());
 				}
 			}
-			for (AActor* Actor : PrimaryComponent->HiddenActors)
+			for (AActor* Actor : Component->ShowOnlyActors)
 			{
 				if (Actor)
 				{
@@ -94,46 +113,41 @@ namespace
 					{
 						if (UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(ActorComp))
 						{
-							HiddenPrimitives.Add(PrimComp->GetPrimitiveSceneId());
-						}
-					}
-				}
-			}
-
-			if (PrimaryComponent->PrimitiveRenderMode == ESceneCapturePrimitiveRenderMode::PRM_UseShowOnlyList)
-			{
-				ShowOnlyPrimitives.Emplace();
-				for (const TWeakObjectPtr<UPrimitiveComponent>& WeakPrim : PrimaryComponent->ShowOnlyComponents)
-				{
-					if (UPrimitiveComponent* Prim = WeakPrim.Get())
-					{
-						ShowOnlyPrimitives->Add(Prim->GetPrimitiveSceneId());
-					}
-				}
-				for (AActor* Actor : PrimaryComponent->ShowOnlyActors)
-				{
-					if (Actor)
-					{
-						for (UActorComponent* ActorComp : Actor->GetComponents())
-						{
-							if (UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(ActorComp))
-							{
-								ShowOnlyPrimitives->Add(PrimComp->GetPrimitiveSceneId());
-							}
+							Out.ShowOnlyPrimitives->Add(PrimComp->GetPrimitiveSceneId());
 						}
 					}
 				}
 			}
 		}
 
-		FFirstPersonParameters FirstPersonParams;
+		FMinimalViewInfo ViewInfo;
+		Component->GetCameraView(0.0f, ViewInfo);
+		Out.FirstPersonParams = FFirstPersonParameters(
+			ViewInfo.CalculateFirstPersonFOVCorrectionFactor(),
+			ViewInfo.FirstPersonScale,
+			ViewInfo.bUseFirstPersonParameters);
+	}
+
+	// Mirrors (and multi-view-generalizes) SetupViewFamilyForSceneCapture. Family-level fields come
+	// from the family show flags; per-view fields come from FViewSetup and its Component.
+	TArray<FSceneView*> SetupMultiViewFamily(
+		FSceneViewFamily& ViewFamily,
+		bool bCaptureSceneColor,
+		TArrayView<const FViewSetup> Views)
+	{
+		check(!ViewFamily.GetScreenPercentageInterface());
+
+		ViewFamily.FrameNumber = ViewFamily.Scene->GetFrameNumber();
+		ViewFamily.FrameCounter = GFrameCounter;
+
+		TMap<USceneCaptureComponent2D*, FComponentViewContext> ComponentContexts;
+		for (const FViewSetup& Setup : Views)
 		{
-			FMinimalViewInfo ViewInfo;
-			PrimaryComponent->GetCameraView(0.0f, ViewInfo);
-			FirstPersonParams = FFirstPersonParameters(
-				ViewInfo.CalculateFirstPersonFOVCorrectionFactor(),
-				ViewInfo.FirstPersonScale,
-				ViewInfo.bUseFirstPersonParameters);
+			check(Setup.Component);
+			if (!ComponentContexts.Contains(Setup.Component))
+			{
+				BuildComponentViewContext(Setup.Component, ComponentContexts.Add(Setup.Component));
+			}
 		}
 
 		TArray<FSceneView*> ViewPtrArray;
@@ -143,16 +157,18 @@ namespace
 		{
 			const FViewSetup& Setup = Views[ViewIndex];
 			check(Setup.PostProcessSettings);
+			USceneCaptureComponent2D* Component = Setup.Component;
+			const FComponentViewContext& Context = ComponentContexts.FindChecked(Component);
 
 			FSceneViewInitOptions ViewInitOptions;
 			ViewInitOptions.SetViewRectangle(Setup.ViewRect);
 			ViewInitOptions.ViewFamily = &ViewFamily;
-			ViewInitOptions.ViewActor = PrimaryComponent->GetViewOwner();
+			ViewInitOptions.ViewActor = Component->GetViewOwner();
 			ViewInitOptions.ViewLocation = Setup.ViewLocation;
 			ViewInitOptions.ViewOrigin = Setup.ViewLocation;
 			ViewInitOptions.ViewRotationMatrix = Setup.ViewRotationMatrix;
 			ViewInitOptions.BackgroundColor = FLinearColor::Black;
-			ViewInitOptions.OverrideFarClippingPlaneDistance = PrimaryComponent->MaxViewDistanceOverride;
+			ViewInitOptions.OverrideFarClippingPlaneDistance = Component->MaxViewDistanceOverride;
 			ViewInitOptions.StereoPass = EStereoscopicPass::eSSP_FULL;
 			ViewInitOptions.StereoViewIndex = INDEX_NONE;
 			ViewInitOptions.ProjectionMatrix = Setup.ProjectionMatrix;
@@ -174,38 +190,40 @@ namespace
 
 			// Per-tile view state: critical for TAA history independence per tile.
 			ViewInitOptions.SceneViewStateInterface = Setup.ViewState;
-			// One eye adaptation state for the whole family, the engine's own facility for tiled
-			// rendering (Movie Render Queue's high-resolution tiles use it). Every tile's exposure
-			// buffer and PreExposure then come from the same view state, so tiles cannot drift apart
-			// even through a readback race. Tiles run manual exposure, so no per-tile histogram is
-			// lost by sharing.
-			ViewInitOptions.ExposureSceneViewStateInterface = Views[0].ViewState;
-			ViewInitOptions.LODDistanceFactor = FMath::Clamp(PrimaryComponent->LODDistanceFactor, .01f, 100.0f);
+			// Eye adaptation state is the caller's choice per view. The tiles of one sensor share
+			// that sensor's first tile — the engine's own facility for tiled rendering (Movie Render
+			// Queue's high-resolution tiles use it) — so every tile's exposure buffer and PreExposure
+			// come from the same view state and tiles cannot drift apart even through a readback
+			// race. Views from different sensors keep their own so each meters its own scene. Null
+			// leaves the engine default, which is the view's own state.
+			ViewInitOptions.ExposureSceneViewStateInterface = Setup.ExposureViewState;
+			ViewInitOptions.LODDistanceFactor = FMath::Clamp(Component->LODDistanceFactor, .01f, 100.0f);
 			// Hack to pass Lumen's LUMEN_MAX_VIEWS=2 family-level gate (Lumen.cpp:239). The cube
-			// path in LumenSceneRendering.cpp:3099 is semantically honest for us: all tiles share
-			// the rig origin, and Lumen uses a single omnidirectional origin from Views[0] — which
-			// is exactly what a multi-tile camera needs. Applied to every view so DFAO temporal
-			// history is suppressed uniformly (DistanceFieldLightingPost.cpp:305) — otherwise
-			// Views[0] would look noisier than the rest and leave a seam at the tile boundary.
-			// Eye adaptation sharing, which the cube path also implies, is set explicitly above for
-			// every tile count. Guarded on Views.Num() > 2 so we only take the cube-path hit when
-			// we'd otherwise lose Lumen entirely.
+			// path in LumenSceneRendering.cpp:3099 collapses Lumen's view origins to Views[0] with
+			// an accept-everything frustum. Only the surface cache update prioritizes by that
+			// origin; the screen probe gather, radiance cache and global distance field stay per
+			// view. So this is exact for the tiles of one sensor and a few meters off for other
+			// sensors on the same rig, which is within the card radius. Applied to every view so
+			// DFAO temporal history is suppressed uniformly (DistanceFieldLightingPost.cpp:305) —
+			// otherwise Views[0] would look noisier than the rest and leave a seam at the tile
+			// boundary. Guarded on Views.Num() > 2 so we only take the cube-path hit when we'd
+			// otherwise lose Lumen entirely.
 			ViewInitOptions.bIsSceneCaptureCube = Views.Num() > 2;
 			// Engine's SetupViewFamilyForSceneCapture consults GRayTracingSceneCaptures (a Renderer-
 			// private CVar used only for debug overrides). We don't link Renderer (see Build.cs note),
-			// so just honor the primary's flag.
-			ViewInitOptions.bSceneCaptureUsesRayTracing = PrimaryComponent->bUseRayTracingIfEnabled;
-			ViewInitOptions.bExcludeFromSceneTextureExtents = PrimaryComponent->bExcludeFromSceneTextureExtents;
-			ViewInitOptions.FirstPersonParams = FirstPersonParams;
+			// so just honor the component's flag.
+			ViewInitOptions.bSceneCaptureUsesRayTracing = Component->bUseRayTracingIfEnabled;
+			ViewInitOptions.bExcludeFromSceneTextureExtents = Component->bExcludeFromSceneTextureExtents;
+			ViewInitOptions.FirstPersonParams = Context.FirstPersonParams;
 #if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8
 			// New in UE 5.8: per-view skylight scale, sourced from the capture component (the engine's
 			// SetupViewFamilyForSceneCapture does the same). Defaults to white when unset.
-			ViewInitOptions.SkylightScale = PrimaryComponent->SkylightScale;
+			ViewInitOptions.SkylightScale = Component->SkylightScale;
 #endif
 
 			FSceneView* View = new FSceneView(ViewInitOptions);
-			View->HiddenPrimitives = HiddenPrimitives;
-			View->ShowOnlyPrimitives = ShowOnlyPrimitives;
+			View->HiddenPrimitives = Context.HiddenPrimitives;
+			View->ShowOnlyPrimitives = Context.ShowOnlyPrimitives;
 
 			ViewFamily.Views.Add(View);
 			ViewPtrArray.Add(View);
@@ -263,15 +281,15 @@ namespace
 
 			View->EndFinalPostprocessSettings(ViewInitOptions);
 
-			View->ViewLightingChannelMask = PrimaryComponent->ViewLightingChannels.GetMaskForStruct();
+			View->ViewLightingChannelMask = Component->ViewLightingChannels.GetMaskForStruct();
 
 			View->bCameraCut = Setup.bCameraCut;
 
-			if (PrimaryComponent->bEnableClipPlane)
+			if (Component->bEnableClipPlane)
 			{
 				View->GlobalClippingPlane = FPlane(
-					PrimaryComponent->ClipPlaneBase,
-					PrimaryComponent->ClipPlaneNormal.GetSafeNormal());
+					Component->ClipPlaneBase,
+					Component->ClipPlaneNormal.GetSafeNormal());
 				View->bAllowTemporalJitter = false;
 			}
 		}
@@ -303,7 +321,8 @@ void RenderTiles(
 	UTextureRenderTarget2D* AtlasRT,
 	TArrayView<const FViewSetup> Views,
 	ESceneCaptureSource CaptureSource,
-	float ResolutionFraction)
+	float ResolutionFraction,
+	const FEngineShowFlags* ShowFlagsOverride)
 {
 	check(IsInGameThread());
 	check(Scene && PrimaryComponent && AtlasRT);
@@ -330,33 +349,44 @@ void RenderTiles(
 		|| CaptureSource == SCS_Normal
 		|| CaptureSource == SCS_BaseColor;
 
+	const FEngineShowFlags& FamilyShowFlags = ShowFlagsOverride ? *ShowFlagsOverride : PrimaryComponent->ShowFlags;
+
 	FSceneViewFamilyContext ViewFamily(FSceneViewFamily::ConstructionValues(
-		AtlasResource, Scene, PrimaryComponent->ShowFlags)
+		AtlasResource, Scene, FamilyShowFlags)
 		.SetResolveScene(!bCaptureSceneColor)
 		.SetRealtimeUpdate(PrimaryComponent->bCaptureEveryFrame || PrimaryComponent->bAlwaysPersistRenderingState));
 
 	FSceneViewExtensionContext ViewExtensionContext(Scene);
 	ViewFamily.ViewExtensions = GEngine->ViewExtensions->GatherActiveExtensions(ViewExtensionContext);
 
-	// Component-local view extensions on the primary.
-	for (int32 Index = 0; Index < PrimaryComponent->SceneViewExtensions.Num(); )
+	// Component-local view extensions, from every distinct component with a view in the family.
+	TArray<USceneCaptureComponent2D*, TInlineAllocator<8>> Components;
+	for (const FViewSetup& Setup : Views)
 	{
-		TSharedPtr<ISceneViewExtension, ESPMode::ThreadSafe> Extension = PrimaryComponent->SceneViewExtensions[Index].Pin();
-		if (Extension.IsValid())
+		check(Setup.Component);
+		Components.AddUnique(Setup.Component);
+	}
+	for (USceneCaptureComponent2D* Component : Components)
+	{
+		for (int32 Index = 0; Index < Component->SceneViewExtensions.Num(); )
 		{
-			if (Extension->IsActiveThisFrame(ViewExtensionContext))
+			TSharedPtr<ISceneViewExtension, ESPMode::ThreadSafe> Extension = Component->SceneViewExtensions[Index].Pin();
+			if (Extension.IsValid())
 			{
-				ViewFamily.ViewExtensions.Add(Extension.ToSharedRef());
+				if (Extension->IsActiveThisFrame(ViewExtensionContext))
+				{
+					ViewFamily.ViewExtensions.AddUnique(Extension.ToSharedRef());
+				}
+				++Index;
 			}
-			++Index;
-		}
-		else
-		{
-			PrimaryComponent->SceneViewExtensions.RemoveAt(Index, EAllowShrinking::No);
+			else
+			{
+				Component->SceneViewExtensions.RemoveAt(Index, EAllowShrinking::No);
+			}
 		}
 	}
 
-	TArray<FSceneView*> FamilyViews = SetupMultiViewFamily(ViewFamily, PrimaryComponent, bCaptureSceneColor, Views);
+	TArray<FSceneView*> FamilyViews = SetupMultiViewFamily(ViewFamily, bCaptureSceneColor, Views);
 
 	ViewFamily.SceneCaptureSource = CaptureSource;
 	ViewFamily.SceneCaptureCompositeMode = PrimaryComponent->CompositeMode;
@@ -371,7 +401,18 @@ void RenderTiles(
 	ViewFamily.EngineShowFlags.ScreenPercentage = !FMath::IsNearlyEqual(ResolutionFraction, 1.0f, UE_KINDA_SMALL_NUMBER);
 	ViewFamily.SetScreenPercentageInterface(new FLegacyScreenPercentageDriver(ViewFamily, ResolutionFraction));
 
-	if (PrimaryComponent->IsUnlit())
+	// USceneCaptureComponent::IsUnlit, evaluated against the family's show flags rather than the
+	// primary's own (which ShowFlagsOverride may have replaced).
+	const bool bUnlit =
+		CaptureSource == SCS_SceneDepth
+		|| CaptureSource == SCS_DeviceDepth
+		|| CaptureSource == SCS_Normal
+		|| CaptureSource == SCS_BaseColor
+		|| (!FamilyShowFlags.Lighting
+			&& (CaptureSource == SCS_SceneColorHDR
+				|| CaptureSource == SCS_SceneColorHDRNoAlpha
+				|| CaptureSource == SCS_SceneColorSceneDepth));
+	if (bUnlit)
 	{
 		const bool bAllowAtmosphere =
 			CaptureSource == SCS_SceneColorHDR

@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "TempoMultiViewCapture.h"
 #include "TempoSceneCaptureComponent2D.h"
 #include "TempoSensorInterface.h"
 
@@ -10,7 +11,9 @@
 #include "TempoTiledSceneCaptureComponent.generated.h"
 
 class UMaterialInstanceDynamic;
+class UTempoSensorRenderGroup;
 class UTextureRenderTarget2D;
+struct FTempoSensorGroupRenderDesc;
 
 // Abstract base for tiled multi-view sensors (camera, lidar). Owns the shared render target,
 // texture read queue, PPM retention list, capture timer, and ITempoSensorInterface boilerplate
@@ -49,18 +52,60 @@ public:
 	virtual void ExecutePendingCapture() override;
 	// End ITempoSensorInterface
 
+	// Begin render-group interface. A tiled sensor's capture is split in three so that a
+	// UTempoSensorRenderGroup can render the tiles of several sensors as the views of one
+	// FSceneViewFamily: describe the block this sensor renders into, build its views, and run
+	// whatever follows the render. RenderCapture below strings the three together for a sensor
+	// rendering on its own.
+
+	// Describe the render target this sensor's tiles render into and the family-level settings they
+	// need. Returns false when the sensor cannot render right now (no render target, no tiles).
+	virtual bool GetGroupRenderDesc(FTempoSensorGroupRenderDesc& OutDesc) const PURE_VIRTUAL(UTempoTiledSceneCaptureComponent::GetGroupRenderDesc, return false; );
+
+	// Build this sensor's views for one capture, with view rects relative to its own block. Anything
+	// the views point at (post-process settings, view states) must stay valid until the render is
+	// enqueued; anything FinishTileRender needs is stashed on the component. Returns false with no
+	// views if there is nothing to render.
+	virtual bool PrepareTileRender(TArray<TempoMultiViewCapture::FViewSetup>& OutViews) PURE_VIRTUAL(UTempoTiledSceneCaptureComponent::PrepareTileRender, return false; );
+
+	// Runs after the render (and, when grouped, the copy of this sensor's block back into its own
+	// render target) has been enqueued: downstream passes, the staging copy, the texture read.
+	virtual void FinishTileRender() PURE_VIRTUAL(UTempoTiledSceneCaptureComponent::FinishTileRender, );
+
+	// This sensor's rect in its group's atlas moved, or the atlas was rebuilt. Tiles should cut
+	// their temporal history on the next render.
+	virtual void OnGroupLayoutChanged() PURE_VIRTUAL(UTempoTiledSceneCaptureComponent::OnGroupLayoutChanged, );
+
+	// The group this sensor renders with, or null when rendering on its own.
+	UTempoSensorRenderGroup* GetRenderGroup() const { return RenderGroup; }
+	// End render-group interface
+
 protected:
-	// Called by the capture timer. Runs common guard checks; sets bNeedsCapture if all pass.
-	// Subclasses should not override this — override RenderCapture instead.
+	// Called by the capture timer (the group's, when grouped). Runs common guard checks; sets
+	// bNeedsCapture if all pass. Subclasses should not override this — override the render-group
+	// interface instead.
 	virtual void MaybeMarkPendingCapture();
 	virtual void RestartCaptureTimer() override;
 
 	// Returns the number of currently active tiles. Used by MaybeMarkPendingCapture.
 	virtual int32 GetNumActiveTiles() const PURE_VIRTUAL(UTempoTiledSceneCaptureComponent::GetNumActiveTiles, return 0; );
 
-	// Perform the actual render for this sensor. Called from ExecutePendingCapture when bNeedsCapture
-	// is true. All common guards have already passed; World and Scene are valid.
-	virtual void RenderCapture() PURE_VIRTUAL(UTempoTiledSceneCaptureComponent::RenderCapture, );
+	// Render this sensor on its own: GetGroupRenderDesc, PrepareTileRender, one multi-view render
+	// into the sensor's block render target, FinishTileRender.
+	void RenderCapture();
+
+	// If a capture is pending and no property change is blocking it, clear the flag and return
+	// true. A blocked capture stays pending so the next frame picks it up once the reconfigure
+	// has resynced.
+	bool ConsumePendingCapture();
+
+	// Join the render group for (owner, RateHz, class) if grouping is enabled; leave it. A grouped
+	// sensor has no capture timer of its own.
+	void JoinRenderGroup();
+	void LeaveRenderGroup();
+
+	// Rates are fixed while grouped: log and revert a RateHz that no longer matches the group's.
+	void EnforceGroupRate(float GroupRateHz);
 
 	// Tiled sensors never call MakeTextureRead; reads are constructed inline in RenderCapture.
 	virtual FTextureRead* MakeTextureRead() const override { checkNoEntry(); return nullptr; }
@@ -115,8 +160,14 @@ protected:
 	UPROPERTY(Transient)
 	TArray<UMaterialInstanceDynamic*> RetainedPPMs;
 
+	UPROPERTY(Transient)
+	TObjectPtr<UTempoSensorRenderGroup> RenderGroup = nullptr;
+
 	FTimerHandle TimerHandle;
 
 	uint8 bReconfigurePending = false;
 	bool bNeedsCapture = false;
+
+	// Drives the timer callback and the per-frame capture on the group's behalf.
+	friend class UTempoSensorRenderGroup;
 };

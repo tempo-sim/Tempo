@@ -2,6 +2,8 @@
 
 #include "TempoCamera.h"
 
+#include "TempoSensorRenderGroup.h"
+
 #include "TempoActorLabeler.h"
 #include "TempoCameraVideoEncoder.h"
 #include "TempoCoreUtils.h"
@@ -1050,7 +1052,7 @@ void UTempoCamera::InitRenderTarget()
 
 	// Atlas RT is sized in K× pixels; per-tile geometry (TileDestOffset, TileOutputSizeXY,
 	// AtlasSize) is kept in 1× output-domain pixels and scaled by K only when laying out the
-	// per-tile ViewRect in RenderCapture.
+	// per-tile ViewRect in PrepareTileRender.
 	const float K = FMath::Max(1.0f, UpsamplingFactor);
 	const FIntPoint AtlasSizeForRT_K(
 		FMath::CeilToInt(K * AtlasSizeForRT.X),
@@ -1170,50 +1172,8 @@ int32 UTempoCamera::GetNumActiveTiles() const
 	return Count;
 }
 
-void UTempoCamera::RenderCapture()
+bool UTempoCamera::ShouldUseSingleTileFastPath() const
 {
-	// Camera-specific guard: the fast path renders directly to SharedFinalTextureTarget and the
-	// multi-tile path reads back from it; either way its resource must be valid.
-	if (!SharedFinalTextureTarget)
-	{
-		return;
-	}
-
-	FTextureRenderTargetResource* SharedRTResource = SharedFinalTextureTarget->GameThread_GetRenderTargetResource();
-	if (!SharedRTResource)
-	{
-		return;
-	}
-
-	UWorld* World = GetWorld();
-	FSceneInterface* Scene = World ? World->Scene : nullptr;
-	if (!Scene)
-	{
-		return;
-	}
-
-	// The multi-view tile path below renders via its own FSceneRenderer and never calls
-	// UpdateSceneCaptureContents, so it must expand FRayTracingScene's readback rings itself. This
-	// has to happen before RenderTiles enqueues its scene render: a ray-tracing render that runs
-	// against the engine-default ring of 4 overruns immediately once several sensors capture per
-	// frame. The call is idempotent and persistent, so the first camera each frame covers the rest.
-	EnsureRayTracingReadbackBuffersExpanded(Scene);
-
-	// The camera always renders with ray tracing enabled (ApplyPhotorealisticRenderSettings sets
-	// bUseRayTracingIfEnabled), so Update() marks bUsedThisFrame for it anyway and this is a no-op in
-	// practice. Kept for uniformity: any render mode change that drops ray tracing here would otherwise
-	// silently re-expose the release race.
-	PinRayTracingSceneUsedThisFrame(Scene);
-
-	int32 NumActiveTiles = 0;
-	for (const FTempoCameraTile& Tile : Tiles)
-	{
-		if (Tile.bActive)
-		{
-			++NumActiveTiles;
-		}
-	}
-
 	// Single-tile fast path: when there's exactly one active tile, depth packing isn't needed,
 	// and no upsampling is requested, render with full post-process (bloom/AE/tonemap on)
 	// directly to SharedFinalTextureTarget, skipping the aux unpack, proxy tonemap capture, and
@@ -1221,7 +1181,78 @@ void UTempoCamera::RenderCapture()
 	// viable for !bDepthEnabled because the depth-with-label encoding bit-packs into HDR alpha
 	// and can't survive LDR quantization, and only for UpsamplingFactor == 1 because the fast
 	// path writes straight to the 1× final RT with no place to do the K→1 downsample.
-	const bool bSingleTileFastPath = (NumActiveTiles == 1) && !bDepthEnabled && UpsamplingFactor == 1.0f;
+	return GetNumActiveTiles() == 1 && !bDepthEnabled && UpsamplingFactor == 1.0f;
+}
+
+bool UTempoCamera::GetGroupRenderDesc(FTempoSensorGroupRenderDesc& OutDesc) const
+{
+	// The fast path renders directly to SharedFinalTextureTarget and the multi-tile path reads
+	// back from it; either way its resource must be valid.
+	if (!SharedFinalTextureTarget || !SharedFinalTextureTarget->GameThread_GetRenderTargetResource())
+	{
+		return false;
+	}
+	if (GetNumActiveTiles() == 0)
+	{
+		return false;
+	}
+
+	const bool bSingleTileFastPath = ShouldUseSingleTileFastPath();
+
+	// Fast path: single tile, full post-process, straight to the final RT in LDR. The distortion
+	// PPM packs label/255 into alpha; RGBA8 quantization preserves the byte exactly.
+	// Multi-tile: HDR atlas (pre-tonemap) so the proxy capture in FinishTileRender can meter and
+	// tonemap once across the stitched output.
+	UTextureRenderTarget2D* BlockRT = bSingleTileFastPath ? SharedFinalTextureTarget : SharedTextureTarget;
+	if (!BlockRT || !BlockRT->GameThread_GetRenderTargetResource())
+	{
+		return false;
+	}
+
+	OutDesc.BlockRT = BlockRT;
+	OutDesc.CaptureSource = bSingleTileFastPath ? ESceneCaptureSource::SCS_FinalColorLDR : ESceneCaptureSource::SCS_FinalColorHDR;
+	OutDesc.ResolutionFraction = bEnableScreenPercentage
+		? FMath::Clamp(ScreenPercentage / 100.0f, 0.25f, 2.0f)
+		: 1.0f;
+	OutDesc.ShowFlags = ShowFlags;
+	if (!bSingleTileFastPath)
+	{
+		// Tile-appropriate show flags (no bloom/DOF/motionblur/etc) differ from the proxy's. The
+		// EyeAdaptation show flag must remain set for the tiles: the engine only honors their
+		// AutoExposureBias, and only computes a PreExposure for them, while it is. Manual exposure
+		// is what stops them from adapting.
+		OutDesc.ShowFlags.SetLocalExposure(false);
+		OutDesc.ShowFlags.SetMotionBlur(false);
+		OutDesc.ShowFlags.SetLensFlares(false);
+		OutDesc.ShowFlags.SetBloom(false);
+		OutDesc.ShowFlags.SetColorGrading(false);
+		OutDesc.ShowFlags.SetVignette(false);
+		OutDesc.ShowFlags.SetDepthOfField(false);
+	}
+	return true;
+}
+
+void UTempoCamera::OnGroupLayoutChanged()
+{
+	for (FTempoCameraTile& Tile : Tiles)
+	{
+		if (Tile.bActive)
+		{
+			Tile.bCameraCut = true;
+		}
+	}
+}
+
+bool UTempoCamera::PrepareTileRender(TArray<TempoMultiViewCapture::FViewSetup>& OutViews)
+{
+	const int32 NumActiveTiles = GetNumActiveTiles();
+	if (NumActiveTiles == 0)
+	{
+		return false;
+	}
+
+	const bool bSingleTileFastPath = ShouldUseSingleTileFastPath();
+	bPreparedSingleTileFastPath = bSingleTileFastPath;
 
 	// Force camera cut on path-mode transition: the active tile's TAA/AE history was conditioned
 	// on a different show-flag set, so reusing it would alias.
@@ -1259,8 +1290,9 @@ void UTempoCamera::RenderCapture()
 	// AE/Bloom/color-grading actually take effect — the tile's PP is bare except for the distortion
 	// PPM and the manual-AE override used in multi-tile mode). Strip the proxy tonemap PPM (which
 	// samples SharedTextureTarget — unused in fast-path) and layer the tile's distortion PPM on top.
-	// Stack-local so it lives until RenderTiles returns; FViewSetup holds a pointer.
-	FPostProcessSettings FastPathPP;
+	// Kept on the component so it outlives this call; FViewSetup holds a pointer to it until the
+	// render is enqueued.
+	FastPathPP = FPostProcessSettings();
 	if (bSingleTileFastPath)
 	{
 		FastPathPP = PostProcessSettings;
@@ -1273,20 +1305,26 @@ void UTempoCamera::RenderCapture()
 		}
 	}
 
-	// Build one FSceneViewFamily containing all tile views and render it into SharedTextureTarget
-	// (the atlas) via TempoMultiViewCapture::RenderTiles. Each tile contributes its own view state
-	// (TAA/AE history) and post-process; they share the family's shadow setup, scene uniform
-	// buffer, Lumen/RT wire-up, and GPU scene update.
-	TArray<TempoMultiViewCapture::FViewSetup> ViewSetups;
-	ViewSetups.Reserve(NumActiveTiles);
-	FTempoCameraTile* SingleActiveTile = nullptr;
+	// One view per active tile, rects relative to this camera's atlas. Each tile contributes its
+	// own view state (TAA history) and post-process; all tiles of the family share its shadow
+	// setup, scene uniform buffer, Lumen/RT wire-up, and GPU scene update. Exposure state is shared
+	// across this camera's tiles only: every tile points at the first active tile, so the tiles
+	// cannot drift apart in brightness, while other sensors in the same family meter their own.
+	OutViews.Reset();
+	OutViews.Reserve(NumActiveTiles);
+	FSceneViewStateInterface* ExposureViewState = nullptr;
+	PreparedSingleActiveTile = nullptr;
 	for (FTempoCameraTile& Tile : Tiles)
 	{
 		if (!Tile.bActive)
 		{
 			continue;
 		}
-		SingleActiveTile = &Tile;
+		PreparedSingleActiveTile = &Tile;
+		if (!ExposureViewState)
+		{
+			ExposureViewState = Tile.ViewState.GetReference();
+		}
 
 		// Multi-tile runs manual exposure at the shared bias so tiles can't diverge in brightness.
 		// Re-set every frame so it's clean if we just transitioned out of fast-path.
@@ -1376,8 +1414,10 @@ void UTempoCamera::RenderCapture()
 			ProjectionMatrix.M[3][2] = -NearClip;
 		}
 
-		TempoMultiViewCapture::FViewSetup& Setup = ViewSetups.AddDefaulted_GetRef();
+		TempoMultiViewCapture::FViewSetup& Setup = OutViews.AddDefaulted_GetRef();
+		Setup.Component = this;
 		Setup.ViewState = Tile.ViewState.GetReference();
+		Setup.ExposureViewState = ExposureViewState;
 		Setup.PostProcessSettings = bSingleTileFastPath ? &FastPathPP : &Tile.PostProcessSettings;
 		Setup.PostProcessBlendWeight = 1.0f;
 		Setup.bCameraCut = Tile.bCameraCut;
@@ -1395,32 +1435,8 @@ void UTempoCamera::RenderCapture()
 		Setup.FOV = Tile.FOVAngle;
 	}
 
-	const float ResolutionFraction = bEnableScreenPercentage
-		? FMath::Clamp(ScreenPercentage / 100.0f, 0.25f, 2.0f)
-		: 1.0f;
-
-	if (bSingleTileFastPath)
+	if (!bSingleTileFastPath)
 	{
-		// Single tile, full post-process: render straight to the final RT in LDR. The distortion
-		// PPM packs label/255 into alpha; RGBA8 quantization preserves the byte exactly.
-		TempoMultiViewCapture::RenderTiles(Scene, this, SharedFinalTextureTarget, ViewSetups, ESceneCaptureSource::SCS_FinalColorLDR, ResolutionFraction);
-	}
-	else
-	{
-		// Multi-tile: HDR atlas (pre-tonemap) so the proxy capture below can meter and tonemap once
-		// across the stitched output. Tile-appropriate show flags (no bloom/DOF/motionblur/etc)
-		// differ from the proxy's — swap them around the call. The EyeAdaptation show flag must
-		// remain set for the tiles: the engine only honors their AutoExposureBias, and only computes
-		// a PreExposure for them, while it is. Manual exposure is what stops them from adapting.
-		const FEngineShowFlags SavedShowFlags = ShowFlags;
-		ShowFlags.SetLocalExposure(false);
-		ShowFlags.SetMotionBlur(false);
-		ShowFlags.SetLensFlares(false);
-		ShowFlags.SetBloom(false);
-		ShowFlags.SetColorGrading(false);
-		ShowFlags.SetVignette(false);
-		ShowFlags.SetDepthOfField(false);
-
 		// Record the bias these tiles render with; UpdateSharedExposure divides the proxy's lagging
 		// readback by the exposure of the capture it actually measured.
 		for (int32 Index = AppliedExposureBiasHistoryLength - 1; Index > 0; --Index)
@@ -1429,11 +1445,25 @@ void UTempoCamera::RenderCapture()
 		}
 		AppliedExposureBiasHistory[0] = SharedExposureBias;
 		++NumMultiTileCapturesSinceExposureSeed;
+	}
 
-		TempoMultiViewCapture::RenderTiles(Scene, this, SharedTextureTarget, ViewSetups, ESceneCaptureSource::SCS_FinalColorHDR, ResolutionFraction);
+	return !OutViews.IsEmpty();
+}
 
-		ShowFlags = SavedShowFlags;
+void UTempoCamera::FinishTileRender()
+{
+	const bool bSingleTileFastPath = bPreparedSingleTileFastPath;
+	FTempoCameraTile* SingleActiveTile = PreparedSingleActiveTile;
+	PreparedSingleActiveTile = nullptr;
 
+	FTextureRenderTargetResource* SharedRTResource = SharedFinalTextureTarget ? SharedFinalTextureTarget->GameThread_GetRenderTargetResource() : nullptr;
+	if (!SharedRTResource)
+	{
+		return;
+	}
+
+	if (!bSingleTileFastPath)
+	{
 		// Stitch + feather pass: resolves the per-tile distorted atlas into a single equidistant
 		// HDR image (SharedStitchHDRTextureTarget, sized SizeXY). The resolve map drives where to
 		// sample the atlas and how to blend across overlapping tile coverage near seams. The proxy

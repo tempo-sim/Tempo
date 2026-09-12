@@ -169,7 +169,7 @@ class UTempoCamera;
 
 // Per-tile state for the multi-view atlas render. A tile is just a set of view parameters + its own
 // view state + distortion assets; no USceneCaptureComponent and no child scene component. The atlas
-// render is driven entirely from UTempoCamera::RenderCapture via TempoMultiViewCapture::RenderTiles.
+// render is driven entirely from UTempoCamera::PrepareTileRender via TempoMultiViewCapture::RenderTiles.
 USTRUCT()
 struct FTempoCameraTile
 {
@@ -310,7 +310,19 @@ public:
 protected:
 	virtual bool HasPendingRequests() const override { return HasPendingCameraRequests(); }
 	virtual int32 GetNumActiveTiles() const override;
-	virtual void RenderCapture() override;
+	virtual bool GetGroupRenderDesc(FTempoSensorGroupRenderDesc& OutDesc) const override;
+	virtual bool PrepareTileRender(TArray<TempoMultiViewCapture::FViewSetup>& OutViews) override;
+	virtual void FinishTileRender() override;
+	virtual void OnGroupLayoutChanged() override;
+
+	// Exactly one active tile, no depth, no upsampling: render with full post-process straight to
+	// the final RT and skip the stitch, proxy and merge passes.
+	bool ShouldUseSingleTileFastPath() const;
+
+	// Per-capture state carried from PrepareTileRender to FinishTileRender.
+	FPostProcessSettings FastPathPP;
+	bool bPreparedSingleTileFastPath = false;
+	FTempoCameraTile* PreparedSingleActiveTile = nullptr;
 
 	TFuture<void> DecodeAndRespond(TSharedPtr<FTextureRead> TextureRead);
 

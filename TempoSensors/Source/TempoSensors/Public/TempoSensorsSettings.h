@@ -66,6 +66,7 @@ public:
 	FName GetOverridingLabelRowName() const { return OverridingLabelRowName; }
 	int32 GetMaxRenderBufferSize() const { return MaxRenderBufferSize; }
 	bool GetPipelinedRendering() const { return bPipelinedRendering; }
+	bool GetSensorRenderGroupingEnabled() const { return bEnableSensorRenderGrouping; }
 	void SetPipelinedRendering(bool bPipelinedRenderingIn);
 	FTempoSensorsLabelSettingsChanged TempoSensorsLabelSettingsChangedEvent;
 	FTempoSensorsLabelOverridesChanged TempoSensorsLabelOverridesChangedEvent;
@@ -225,4 +226,15 @@ private:
 	// simulation frame the data corresponds to.
 	UPROPERTY(EditAnywhere, Config, Category="Advanced")
 	bool bPipelinedRendering = false;
+
+	// When true, the tiled sensors (cameras, lidars) on one actor that capture at the same rate
+	// render together: their tiles become the views of one scene render into a shared atlas, so
+	// the per-render costs (visibility, shadows, Lumen and ray-tracing scene updates, Nanite) are
+	// paid once per group instead of once per sensor. Sensors with a different rate, a different
+	// owner, or incompatible family-level settings (capture source, show flags, render target
+	// format, screen percentage) render separately. Sensor rates cannot change while the simulation
+	// is running when this is enabled; a change is logged and reverted. Read when a sensor
+	// activates.
+	UPROPERTY(EditAnywhere, Config, Category="Advanced")
+	bool bEnableSensorRenderGrouping = true;
 };

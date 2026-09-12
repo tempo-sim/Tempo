@@ -2,6 +2,7 @@
 
 #include "TempoTiledSceneCaptureComponent.h"
 
+#include "TempoSensorRenderGroup.h"
 #include "TempoSensors.h"
 #include "TempoSensorsSettings.h"
 
@@ -99,7 +100,11 @@ void UTempoTiledSceneCaptureComponent::Activate(bool bReset)
 
 	if (UTempoCoreUtils::IsGameWorld(this))
 	{
-		RestartCaptureTimer();
+		JoinRenderGroup();
+		if (!RenderGroup)
+		{
+			RestartCaptureTimer();
+		}
 	}
 }
 
@@ -109,12 +114,69 @@ void UTempoTiledSceneCaptureComponent::Deactivate()
 
 	if (UTempoCoreUtils::IsGameWorld(this))
 	{
+		LeaveRenderGroup();
 		if (UWorld* World = GetWorld())
 		{
 			World->GetTimerManager().ClearTimer(TimerHandle);
 		}
 		TextureReadQueue.Empty();
 	}
+}
+
+void UTempoTiledSceneCaptureComponent::JoinRenderGroup()
+{
+	if (RenderGroup)
+	{
+		return;
+	}
+	if (IsRunningCommandlet() || IsTemplate())
+	{
+		return;
+	}
+	if (!GetDefault<UTempoSensorsSettings>()->GetSensorRenderGroupingEnabled())
+	{
+		return;
+	}
+	UWorld* World = GetWorld();
+	if (!World || !UTempoCoreUtils::IsGameWorld(this))
+	{
+		return;
+	}
+	if (UTempoSensorRenderGroupSubsystem* Subsystem = World->GetSubsystem<UTempoSensorRenderGroupSubsystem>())
+	{
+		RenderGroup = Subsystem->JoinGroup(this);
+	}
+}
+
+void UTempoTiledSceneCaptureComponent::LeaveRenderGroup()
+{
+	if (!RenderGroup)
+	{
+		return;
+	}
+	UTempoSensorRenderGroup* Group = RenderGroup;
+	RenderGroup = nullptr;
+	if (UWorld* World = GetWorld())
+	{
+		if (UTempoSensorRenderGroupSubsystem* Subsystem = World->GetSubsystem<UTempoSensorRenderGroupSubsystem>())
+		{
+			Subsystem->LeaveGroup(this, Group);
+			return;
+		}
+	}
+	Group->RemoveMember(this);
+}
+
+void UTempoTiledSceneCaptureComponent::EnforceGroupRate(float GroupRateHz)
+{
+	if (FMath::IsNearlyEqual(RateHz, GroupRateHz))
+	{
+		return;
+	}
+	UE_LOG(LogTempoSensors, Error,
+		TEXT("Sensor %s changed RateHz from %g to %g while in a render group. Rates cannot change while the simulation is running when sensor render grouping is enabled; reverting to %g. Set the rate before the sensor activates, or disable grouping in Tempo Sensors settings."),
+		*GetName(), GroupRateHz, RateHz, GroupRateHz);
+	RateHz = GroupRateHz;
 }
 
 void UTempoTiledSceneCaptureComponent::OnRegister()
@@ -135,6 +197,8 @@ void UTempoTiledSceneCaptureComponent::OnRegister()
 void UTempoTiledSceneCaptureComponent::OnUnregister()
 {
 	GetMutableDefault<UTempoSensorsSettings>()->TempoSensorsLabelOverridesChangedEvent.RemoveAll(this);
+
+	LeaveRenderGroup();
 
 	// Destroy tile view states while the scene is still valid, before Super unregisters us from it
 	// (matches USceneCaptureComponent::OnUnregister, which destroys the inherited ViewStates here).
@@ -162,10 +226,14 @@ void UTempoTiledSceneCaptureComponent::MaybeMarkPendingCapture()
 		return;
 	}
 
-	const float TimerPeriod = 1.0f / FMath::Max(UE_KINDA_SMALL_NUMBER, RateHz);
-	if (!FMath::IsNearlyEqual(World->GetTimerManager().GetTimerRate(TimerHandle), TimerPeriod))
+	// A grouped sensor is ticked by its group's timer, at the group's (fixed) rate.
+	if (!RenderGroup)
 	{
-		RestartCaptureTimer();
+		const float TimerPeriod = 1.0f / FMath::Max(UE_KINDA_SMALL_NUMBER, RateHz);
+		if (!FMath::IsNearlyEqual(World->GetTimerManager().GetTimerRate(TimerHandle), TimerPeriod))
+		{
+			RestartCaptureTimer();
+		}
 	}
 
 	if (!HasPendingRequests())
@@ -215,23 +283,73 @@ void UTempoTiledSceneCaptureComponent::MaybeMarkPendingCapture()
 
 void UTempoTiledSceneCaptureComponent::ExecutePendingCapture()
 {
+	if (RenderGroup)
+	{
+		RenderGroup->ExecutePendingCaptures();
+		return;
+	}
+	if (ConsumePendingCapture())
+	{
+		RenderCapture();
+	}
+}
+
+bool UTempoTiledSceneCaptureComponent::ConsumePendingCapture()
+{
 	if (!bNeedsCapture)
 	{
-		return;
+		return false;
 	}
 	// Final guard: a property may have changed between MaybeMarkPendingCapture (which set
 	// bNeedsCapture) and this call. Keep bNeedsCapture set so the next frame's
 	// ExecutePendingCapture picks it up once ReconfigureTilesNow has resynced.
 	if (HasDetectedParameterChange())
 	{
-		return;
+		return false;
 	}
 	bNeedsCapture = false;
-	RenderCapture();
+	return true;
+}
+
+void UTempoTiledSceneCaptureComponent::RenderCapture()
+{
+	UWorld* World = GetWorld();
+	FSceneInterface* Scene = World ? World->Scene : nullptr;
+	if (!Scene)
+	{
+		return;
+	}
+
+	FTempoSensorGroupRenderDesc Desc;
+	if (!GetGroupRenderDesc(Desc) || !Desc.BlockRT || !Desc.BlockRT->GameThread_GetRenderTargetResource())
+	{
+		return;
+	}
+
+	TArray<TempoMultiViewCapture::FViewSetup> Views;
+	if (!PrepareTileRender(Views) || Views.IsEmpty())
+	{
+		return;
+	}
+
+	// The multi-view path renders via its own FSceneRenderer and never calls
+	// UpdateSceneCaptureContents, so it must expand FRayTracingScene's readback rings itself, and
+	// pin the scene's readback buffers for a render that may not use ray tracing. Both must be
+	// enqueued before RenderTiles enqueues the scene render.
+	EnsureRayTracingReadbackBuffersExpanded(Scene);
+	PinRayTracingSceneUsedThisFrame(Scene);
+
+	TempoMultiViewCapture::RenderTiles(Scene, this, Desc.BlockRT, Views, Desc.CaptureSource, Desc.ResolutionFraction, &Desc.ShowFlags);
+
+	FinishTileRender();
 }
 
 void UTempoTiledSceneCaptureComponent::RestartCaptureTimer()
 {
+	if (RenderGroup)
+	{
+		return;
+	}
 	if (UWorld* World = GetWorld())
 	{
 		const float TimerPeriod = 1.0f / FMath::Max(UE_KINDA_SMALL_NUMBER, RateHz);

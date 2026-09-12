@@ -301,8 +301,55 @@ regardless, so a client always knows which simulation frame it is looking at.
 every frame, so the change lands on the next one — no sensor teardown, no reconfigure. Useful for
 running a scene fast and then dropping into lockstep for the frames you actually want to capture.
 
+## Render grouping
+
+Every scene render pays a large fixed cost before it shades a single pixel: visibility and mesh
+draw command generation, shadow setup and shadow depth passes, the virtual shadow map array, the
+Lumen scene and radiance cache update, the ray tracing scene build, Nanite setup, and a render graph
+compile. At sensor resolutions those fixed costs dominate, so rendering every sensor on its own
+leaves the GPU under-occupied and pays them once per sensor.
+
+By default the tiled sensors (cameras and lidars) on one actor that capture at the same rate
+render **together**: their tiles become the views of one scene render into an atlas the group owns,
+exactly as the tiles of one wide-FOV camera already do. Each sensor's block is then copied back
+into that sensor's own render target, so everything downstream — stitching, the proxy tonemap,
+readback, decoding — is unchanged. The fixed costs are paid once per group, and a group of four
+540p sensors fills the GPU like a single 1080p frame.
+
+What grouping preserves:
+
+- **Independent exposure.** Eye adaptation state is per view. The tiles of one camera share that
+  camera's state so they cannot drift apart; different sensors in one group each meter their own
+  scene, so a camera facing the sun and one facing shadow expose independently.
+- **Independent temporal history.** TSR / TAA history is per tile and bounded to the tile's rect;
+  neighbouring blocks in the atlas do not bleed into each other.
+- **Per-sensor origins.** Each view is rendered from its own sensor's pose. The one thing a group
+  collapses is Lumen's surface cache prioritization, which uses the first view's origin — fine for
+  sensors meters apart on one vehicle, which is why grouping is per actor.
+
+What determines a group:
+
+- Owning actor, capture rate, and sensor class. Sensors that differ in any of these never share.
+- Within a group, sensors also have to agree on family-level render settings (capture source,
+  show flags, render target format, screen percentage). A camera on the single-tile fast path and
+  a multi-tile camera, for instance, render as two families of the same group. A sensor whose
+  settings match no other renders on its own, exactly as before.
+
+What grouping constrains:
+
+- **Rates are fixed while the simulation runs.** The group owns the capture timer, so all its
+  members capture on the same frames. A `RateHz` change on a grouped sensor is logged as an error
+  and reverted. Set rates before the sensor activates, or turn grouping off.
+- A sensor whose block cannot fit in a single atlas (larger than the GPU's maximum texture size,
+  or a group so large the atlas would exceed it) renders on its own with a one-time warning.
+
+`Project Settings → Tempo → Sensors → Enable Sensor Render Grouping` turns this off, restoring one
+render per sensor and per-sensor capture timers with runtime-changeable rates.
+
 ## Performance notes
 
+- Render grouping (above) is the biggest lever: the more sensors on an actor at one rate, the
+  more fixed per-render cost is amortized.
 - Camera `bDepthEnabled` is toggled automatically by request demand. If no client is asking for
   depth, the camera transparently drops to the smaller (4-byte) pixel format.
 - The sensor tick path defers reconfigures until reads have drained, so changing `LensParameters`,
@@ -327,9 +374,19 @@ plumbing.
 
 Multi-tile rendering goes through `TempoMultiViewCapture::RenderTiles`, a small wrapper that
 mirrors engine-private `SceneCaptureRendering` logic to assemble one `FSceneViewFamily` with N
-views — each with its own view rect, view state, post-process settings and projection matrix —
-then renders it through one `FSceneRenderer`. This is the single biggest performance win in the
-plugin versus the more obvious "one `USceneCaptureComponent2D` per tile" design.
+views — each with its own view rect, view state, exposure state, post-process settings, projection
+matrix and owning component — then renders it through one `FSceneRenderer`. This is the single
+biggest performance win in the plugin versus the more obvious "one `USceneCaptureComponent2D` per
+tile" design.
+
+A tiled sensor's capture is split in three so a group can render several sensors at once:
+`GetGroupRenderDesc` names the sensor's block render target and family-level settings,
+`PrepareTileRender` builds its views relative to that block, and `FinishTileRender` runs whatever
+follows the render. `UTempoSensorRenderGroup` (one per actor, rate and sensor class, owned by
+`UTempoSensorRenderGroupSubsystem`) packs the members' blocks into an atlas per family signature,
+offsets their view rects, renders each family with one `RenderTiles` call, and copies each block
+back before calling the member's `FinishTileRender`. A sensor rendering on its own strings the
+same three steps together around a `RenderTiles` into its own block.
 
 The full sensor frame for a camera is approximately:
 

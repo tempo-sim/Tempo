@@ -182,7 +182,7 @@ struct FTempoLidarBeamSample
 
 // Per-tile state for the multi-view atlas render. A tile is just a view-rect + view state + PPM; no
 // USceneCaptureComponent and no child scene component. The atlas render is driven from
-// UTempoLidar::RenderCapture via TempoMultiViewCapture::RenderTiles, which writes each view directly
+// UTempoLidar::PrepareTileRender via TempoMultiViewCapture::RenderTiles, which writes each view directly
 // into its rect inside SharedTextureTarget — no per-tile copy-pack step is needed.
 USTRUCT()
 struct FTempoLidarTile
@@ -285,7 +285,17 @@ protected:
 	virtual bool HasPendingRequests() const override { return !PendingRequests.IsEmpty(); }
 	virtual int32 GetNumActiveTiles() const override;
 	virtual void InitRenderTarget() override;
-	virtual void RenderCapture() override;
+	virtual bool GetGroupRenderDesc(FTempoSensorGroupRenderDesc& OutDesc) const override;
+	virtual bool PrepareTileRender(TArray<TempoMultiViewCapture::FViewSetup>& OutViews) override;
+	virtual void FinishTileRender() override;
+	virtual void OnGroupLayoutChanged() override;
+
+	// Per-capture state carried from PrepareTileRender to FinishTileRender: one read per active
+	// tile, the packed atlas extent they occupy, and the capture time.
+	TArray<TUniquePtr<TTextureRead<FLidarPixel>>> PreparedSlices;
+	TArray<TUniquePtr<TTextureRead<FLidarPixelWithColor>>> PreparedSlicesWithColor;
+	FIntPoint PreparedPackedSize = FIntPoint::ZeroValue;
+	double PreparedCaptureTime = 0.0;
 
 	TFuture<void> DecodeAndRespond(TArray<TUniquePtr<FTextureRead>> TextureReads, bool bWithColor);
 

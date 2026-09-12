@@ -2,6 +2,8 @@
 
 #include "TempoLidar.h"
 
+#include "TempoSensorRenderGroup.h"
+
 #include "TempoSensors.h"
 #include "TempoSensorsConstants.h"
 
@@ -955,28 +957,43 @@ int32 UTempoLidar::GetNumActiveTiles() const
 	return Count;
 }
 
-void UTempoLidar::RenderCapture()
+bool UTempoLidar::GetGroupRenderDesc(FTempoSensorGroupRenderDesc& OutDesc) const
 {
-	// SharedTextureTarget and its resource are validated by the base MaybeMarkPendingCapture, but
-	// we need the resource pointer here so the render command closure can capture it by value.
-	FTextureRenderTargetResource* SharedRTResource = SharedTextureTarget->GameThread_GetRenderTargetResource();
-
-	UWorld* World = GetWorld();
-	FSceneInterface* Scene = World ? World->Scene : nullptr;
-	if (!Scene)
+	if (!SharedTextureTarget || !SharedTextureTarget->GameThread_GetRenderTargetResource())
 	{
-		return;
+		return false;
 	}
+	if (GetNumActiveTiles() == 0)
+	{
+		return false;
+	}
+	// The lidar primary is never itself captured; it carries the family-level settings the tile
+	// family renders with (OptimizeShowFlagsForNoColor or the photorealistic set, by color mode).
+	OutDesc.BlockRT = SharedTextureTarget;
+	OutDesc.CaptureSource = ESceneCaptureSource::SCS_FinalColorLDR;
+	OutDesc.ResolutionFraction = 1.0f;
+	OutDesc.ShowFlags = ShowFlags;
+	return true;
+}
 
-	// Like the camera, the lidar renders its tiles via RenderTiles' own FSceneRenderer and never
-	// calls UpdateSceneCaptureContents, so expand FRayTracingScene's readback rings here before
-	// rendering or the engine-default ring of 4 overruns once several sensors capture per frame.
-	EnsureRayTracingReadbackBuffersExpanded(Scene);
+void UTempoLidar::OnGroupLayoutChanged()
+{
+	for (FTempoLidarTile& Tile : Tiles)
+	{
+		if (Tile.bActive)
+		{
+			Tile.bCameraCut = true;
+		}
+	}
+}
 
-	// The no-color lidar renders with ray tracing off (bUseRayTracingIfEnabled = false, Lumen forced to
-	// None per view), so without this the render's EndFrame() would delete the readback buffers the main
-	// viewport's ray-tracing scene still has copies in flight against. Also enqueued before RenderTiles.
-	PinRayTracingSceneUsedThisFrame(Scene);
+bool UTempoLidar::PrepareTileRender(TArray<TempoMultiViewCapture::FViewSetup>& OutViews)
+{
+	UWorld* World = GetWorld();
+	if (!World || GetNumActiveTiles() == 0)
+	{
+		return false;
+	}
 
 	// Per-tile view origin (shared across tiles) — the lidar's world location.
 	const FTransform LidarWorld = GetComponentToWorld();
@@ -992,15 +1009,18 @@ void UTempoLidar::RenderCapture()
 
 	// Build per-tile view setups and per-slice reads. Each tile's ViewRect inside the atlas is
 	// (SliceDestOffsetX, 0) to (SliceDestOffsetX + SizeXY.X, SizeXY.Y), matching the pack layout
-	// FLidarSharedTextureRead::SplitIntoSlices expects.
+	// FLidarSharedTextureRead::SplitIntoSlices expects. The slices are kept on the component for
+	// FinishTileRender to wrap in the shared read.
 	const int32 NumActiveTiles = GetNumActiveTiles();
 	double MinOutputElevationDeg, MaxOutputElevationDeg;
 	GetOutputElevationRangeDeg(MinOutputElevationDeg, MaxOutputElevationDeg);
-	TArray<TempoMultiViewCapture::FViewSetup> ViewSetups;
-	ViewSetups.Reserve(NumActiveTiles);
+	OutViews.Reset();
+	OutViews.Reserve(NumActiveTiles);
 
-	TArray<TUniquePtr<TTextureRead<FLidarPixel>>> Slices;
-	TArray<TUniquePtr<TTextureRead<FLidarPixelWithColor>>> SlicesWithColor;
+	TArray<TUniquePtr<TTextureRead<FLidarPixel>>>& Slices = PreparedSlices;
+	TArray<TUniquePtr<TTextureRead<FLidarPixelWithColor>>>& SlicesWithColor = PreparedSlicesWithColor;
+	Slices.Reset();
+	SlicesWithColor.Reset();
 	if (bColorEnabled)
 	{
 		SlicesWithColor.Reserve(NumActiveTiles);
@@ -1011,6 +1031,11 @@ void UTempoLidar::RenderCapture()
 	}
 
 	const double CaptureTime = World->GetTimeSeconds();
+	PreparedCaptureTime = CaptureTime;
+
+	// Exposure state is shared across this lidar's tiles only (every tile points at the first
+	// active tile); other sensors in the same family meter their own scene.
+	FSceneViewStateInterface* ExposureViewState = nullptr;
 
 	int32 PackedX = 0;
 	int32 MaxY = 0;
@@ -1051,8 +1076,15 @@ void UTempoLidar::RenderCapture()
 			ProjectionMatrix = FPerspectiveMatrix(ViewFOV, ViewFOV, 1.0f, YAxisMultiplier, NearClip, NearClip);
 		}
 
-		TempoMultiViewCapture::FViewSetup& Setup = ViewSetups.AddDefaulted_GetRef();
+		if (!ExposureViewState)
+		{
+			ExposureViewState = Tile.ViewState.GetReference();
+		}
+
+		TempoMultiViewCapture::FViewSetup& Setup = OutViews.AddDefaulted_GetRef();
+		Setup.Component = this;
 		Setup.ViewState = Tile.ViewState.GetReference();
+		Setup.ExposureViewState = ExposureViewState;
 		Setup.PostProcessSettings = &Tile.PostProcessSettings;
 		Setup.PostProcessBlendWeight = 1.0f;
 		Setup.bCameraCut = Tile.bCameraCut;
@@ -1089,21 +1121,33 @@ void UTempoLidar::RenderCapture()
 		MaxY = FMath::Max(MaxY, Tile.SizeXY.Y);
 	}
 
-	// Render all views in one family directly into SharedTextureTarget.
-	TempoMultiViewCapture::RenderTiles(Scene, this, SharedTextureTarget, ViewSetups, ESceneCaptureSource::SCS_FinalColorLDR);
+	PreparedPackedSize = FIntPoint(PackedX, MaxY);
+
+	return !OutViews.IsEmpty();
+}
+
+void UTempoLidar::FinishTileRender()
+{
+	FTextureRenderTargetResource* SharedRTResource = SharedTextureTarget ? SharedTextureTarget->GameThread_GetRenderTargetResource() : nullptr;
+	if (!SharedRTResource)
+	{
+		PreparedSlices.Reset();
+		PreparedSlicesWithColor.Reset();
+		return;
+	}
 
 	TSharedPtr<FTextureRead> NewRead;
 	if (bColorEnabled)
 	{
 		NewRead = MakeShared<TLidarSharedTextureRead<FLidarPixelWithColor>>(
-			FIntPoint(PackedX, MaxY), SequenceId, CaptureTime, GetOwnerName(), GetSensorName(),
-			GetComponentTransform(), MoveTemp(SlicesWithColor));
+			PreparedPackedSize, SequenceId, PreparedCaptureTime, GetOwnerName(), GetSensorName(),
+			GetComponentTransform(), MoveTemp(PreparedSlicesWithColor));
 	}
 	else
 	{
 		NewRead = MakeShared<TLidarSharedTextureRead<FLidarPixel>>(
-			FIntPoint(PackedX, MaxY), SequenceId, CaptureTime, GetOwnerName(), GetSensorName(),
-			GetComponentTransform(), MoveTemp(Slices));
+			PreparedPackedSize, SequenceId, PreparedCaptureTime, GetOwnerName(), GetSensorName(),
+			GetComponentTransform(), MoveTemp(PreparedSlices));
 	}
 
 	NewRead->StagingTexture = AcquireNextStagingTexture();
