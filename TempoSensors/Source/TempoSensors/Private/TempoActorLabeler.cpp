@@ -31,79 +31,66 @@
 FInstanceIdAllocator::FInstanceIdAllocator(int32 MinIdIn, int32 MaxIdIn)
 	: MinId(MinIdIn), MaxId(MaxIdIn)
 {
-	TSet<int32>& Ids = AvailableIds.AddDefaulted_GetRef();
-	for (int32 I = MinId; I <= MaxId; ++I)
+	TSet<int32>& UnallocatedIds = IdsByLiveCount.AddDefaulted_GetRef();
+	for (int32 Id = MinId; Id <= MaxId; ++Id)
 	{
-		Ids.Add(I);
+		UnallocatedIds.Add(Id);
 	}
 }
 
-TOptional<int32> FInstanceIdAllocator::Allocate()
+TOptional<int32> FInstanceIdAllocator::Allocate(bool bAllowSharedIds)
 {
-	for (TSet<int32>& Ids : AvailableIds)
+	// Every ID is in exactly one set, so the first non-empty set holds the least-shared IDs.
+	for (int32 LiveCount = 0; LiveCount < IdsByLiveCount.Num(); ++LiveCount)
 	{
-		if (auto IdIt = Ids.CreateIterator())
+		TSet<int32>& Ids = IdsByLiveCount[LiveCount];
+		if (Ids.IsEmpty())
 		{
-			const int32 Id = *IdIt;
-			IdIt.RemoveCurrent();
-			return Id;
+			continue;
 		}
+
+		if (LiveCount > 0 && !bAllowSharedIds)
+		{
+			return TOptional<int32>();
+		}
+
+		const int32 Id = *Ids.CreateConstIterator();
+		Ids.Remove(Id);
+		if (!IdsByLiveCount.IsValidIndex(LiveCount + 1))
+		{
+			IdsByLiveCount.AddDefaulted();
+		}
+		IdsByLiveCount[LiveCount + 1].Add(Id);
+		return Id;
 	}
 
-	const UTempoSensorsSettings* TempoSensorsSettings = GetDefault<UTempoSensorsSettings>();
-	if (TempoSensorsSettings->GetInstantaneouslyUniqueInstanceLabels())
-	{
-		// We are not allowed to reuse allocated IDs
-		return TOptional<int32>();
-	}
-
-	// Reuse allocated IDs by making them available, at a higher count
-	TSet<int32>& NextAvailableIds = AvailableIds.AddDefaulted_GetRef();
-	for (int32 I = MinId + 1; I <= MaxId; ++I)
-	{
-		NextAvailableIds.Add(I);
-	}
-
-	// We reserved MinId above to be the one we will allocate
-	return MinId;
+	// Only an empty range gets here.
+	return TOptional<int32>();
 }
 
 void FInstanceIdAllocator::Return(int32 Id)
 {
-	const UTempoSensorsSettings* TempoSensorsSettings = GetDefault<UTempoSensorsSettings>();
-	if (TempoSensorsSettings->GetGloballyUniqueInstanceLabels())
-	{
-		// We are not allowed to reuse IDs once they have been allocated
-		return;
-	}
-	if (!ensureMsgf(Id >= MinId && Id <= MaxId, TEXT("Reclaimed Available Id %d outside original min/max"), Id))
+	if (!ensureMsgf(Id >= MinId && Id <= MaxId, TEXT("Returned instance ID %d is outside the allocated range %d-%d"), Id, MinId, MaxId))
 	{
 		return;
 	}
-	for (auto AvailableIdsIt = AvailableIds.CreateIterator(); AvailableIdsIt; ++AvailableIdsIt)
+
+	for (int32 LiveCount = 1; LiveCount < IdsByLiveCount.Num(); ++LiveCount)
 	{
-		if (AvailableIdsIt->Contains(Id))
+		if (IdsByLiveCount[LiveCount].Remove(Id) > 0)
 		{
-			AvailableIdsIt->Remove(Id);
-			// If this wasn't the first element in AvailableIds, make this ID available at the lower count
-			if (auto PrevAvailableIdsIt = AvailableIdsIt - 1)
+			IdsByLiveCount[LiveCount - 1].Add(Id);
+			while (IdsByLiveCount.Num() > 1 && IdsByLiveCount.Last().IsEmpty())
 			{
-				PrevAvailableIdsIt->Add(Id);
-			}
-			// If that was the last ID in the group, we don't need this group anymore.
-			if (AvailableIdsIt->IsEmpty())
-			{
-				AvailableIdsIt.RemoveCurrent();
+				IdsByLiveCount.Pop();
 			}
 			return;
 		}
 	}
 
-	// If we never found the ID at a higher count, make sure we mark it available at count 0
-	if (ensureMsgf(AvailableIds.Num() > 0, TEXT("AvailableIds was empty!")))
-	{
-		AvailableIds[0].Add(Id);
-	}
+	// The ID's only remaining home is the unallocated set: it was returned more times than it was
+	// handed out. Counting it would understate how shared it is and hand it out ahead of freer IDs.
+	ensureMsgf(false, TEXT("Instance ID %d was returned with no live allocation"), Id);
 }
 
 using LabelService = TempoSensors::LabelService;
@@ -924,6 +911,25 @@ void UTempoActorLabeler::BuildLabelMaps()
 	});
 }
 
+TOptional<int32> UTempoActorLabeler::AllocateInstanceId()
+{
+	// An instantaneously unique label may not name two live objects at once, so once every ID is
+	// held the object goes without one rather than sharing.
+	return InstanceIdAllocator.Allocate(!GetDefault<UTempoSensorsSettings>()->GetInstantaneouslyUniqueInstanceLabels());
+}
+
+void UTempoActorLabeler::ReturnInstanceId(int32 InstanceId)
+{
+	// A globally unique label is never handed out again once its object is gone, so it is never
+	// handed back.
+	if (GetDefault<UTempoSensorsSettings>()->GetGloballyUniqueInstanceLabels())
+	{
+		return;
+	}
+
+	InstanceIdAllocator.Return(InstanceId);
+}
+
 void UTempoActorLabeler::LabelAllActors()
 {
 	for (TActorIterator<AActor> ActorItr(GetWorld()); ActorItr; ++ActorItr)
@@ -953,7 +959,7 @@ void UTempoActorLabeler::LabelActor(AActor* Actor)
 	if (const TOptional<int32> SemanticId = ResolveActorSemanticId(Actor))
 	{
 		ActorIdPair.SemanticId = *SemanticId;
-		if (const TOptional<int32> InstanceId = InstanceIdAllocator.Allocate())
+		if (const TOptional<int32> InstanceId = AllocateInstanceId())
 		{
 			ActorIdPair.InstanceId = *InstanceId;
 			// Track actor class names that have been assigned instance IDs
@@ -1092,7 +1098,7 @@ void UTempoActorLabeler::LabelComponent(UPrimitiveComponent* Component, FInstanc
 
 		FInstanceSemanticIdPair IdPair;
 		IdPair.SemanticId = *ComponentSemanticId;
-		if (TOptional<int32> InstanceId = InstanceIdAllocator.Allocate())
+		if (const TOptional<int32> InstanceId = AllocateInstanceId())
 		{
 			IdPair.InstanceId = *InstanceId;
 		}
@@ -1262,7 +1268,7 @@ void UTempoActorLabeler::UnLabelActor(AActor* Actor)
 	// Semantic mode passed through.
 	if (const FInstanceSemanticIdPair* IdPair = LabeledObjects.Find(Actor); IdPair->InstanceId != NoInstanceId)
 	{
-		InstanceIdAllocator.Return(IdPair->InstanceId);
+		ReturnInstanceId(IdPair->InstanceId);
 	}
 
 	LabeledObjects.Remove(Actor);
@@ -1303,7 +1309,7 @@ void UTempoActorLabeler::UnLabelComponent(UPrimitiveComponent* Component)
 		const FInstanceSemanticIdPair* ActorIdPair = LabeledObjects.Find(Component->GetOwner());
 		if (!ActorIdPair || ActorIdPair->InstanceId != ComponentIdPair->InstanceId)
 		{
-			InstanceIdAllocator.Return(ComponentIdPair->InstanceId);
+			ReturnInstanceId(ComponentIdPair->InstanceId);
 		}
 	}
 
