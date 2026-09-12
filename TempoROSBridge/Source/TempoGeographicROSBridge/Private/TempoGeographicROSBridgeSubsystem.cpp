@@ -19,6 +19,10 @@ void UTempoGeographicROSBridgeSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	}
 
 	ROSNode = UTempoROSNode::Create("TempoGeographic", this);
+	if (!ROSNode)
+	{
+		return;
+	}
 
 	BindServiceToROS<FTempoSetDayCycleRateService>(ROSNode, "SetDayCycleRate", this, &UTempoGeographicROSBridgeSubsystem::SetDayCycleRelativeRate);
 	BindServiceToROS<FTempoSetTimeOfDayService>(ROSNode, "SetTimeOfDay", this, &UTempoGeographicROSBridgeSubsystem::SetTimeOfDay);

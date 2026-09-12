@@ -18,6 +18,11 @@ void UTempoMovementROSBridgeSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	}
 
 	ROSNode = UTempoROSNode::Create("TempoMovement", this);
+	if (!ROSNode)
+	{
+		return;
+	}
+
 	BindServiceToROS<FTempoGetCommandablePawnsService>(ROSNode, "GetCommandablePawns", this, &UTempoMovementROSBridgeSubsystem::GetCommandablePawns);
 	BindServiceToROS<FTempoCommandVehicleService>(ROSNode, "CommandVehicle", this, &UTempoMovementROSBridgeSubsystem::CommandVehicle);
 	BindServiceToROS<FTempoCommandVelocityService>(ROSNode, "CommandVelocity", this, &UTempoMovementROSBridgeSubsystem::CommandVelocity);
