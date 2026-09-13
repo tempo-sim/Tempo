@@ -140,6 +140,17 @@ hot-reconfigurable:
 
 :   Capture rate.
 
+`bRewarpMotionVectors` (default on)
+
+:   Keeps TSR and Lumen from ghosting moving objects when the camera captures less often than the
+    simulation ticks (say a 10 Hz camera in a 100 Hz fixed-step sim). The engine advances object
+    motion vectors once per tick, so a capture every N ticks sees moving objects displaced by one
+    tick while the camera's own motion already spans all N; the camera rescales the object part of
+    its motion vectors by N before the temporal passes run. Decided per capture from the time
+    elapsed since the tile last rendered, so a camera that captures every tick pays nothing; a
+    capture that does need it costs a copy of the tile's velocity rect and one compute pass over
+    it. Requires `r.VelocityOutputPass` 0 (the default) or 1.
+
 ### Stream H.264 video { #stream-h264-video }
 
 Cameras expose a `Video` measurement alongside `ColorImage`. Subscribe via `VideoRequest` and

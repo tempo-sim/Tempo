@@ -442,4 +442,23 @@ void RenderTiles(
 	Builder->Execute();
 }
 
+bool GetRenderedViewSceneTextures(const FSceneView& View, FRDGTextureRef& OutVelocity, FRDGTextureRef& OutSceneDepth, FIntRect& OutViewRect)
+{
+	check(IsInRenderingThread());
+
+	// The renderer re-points every view's Family at its own FViewFamilyInfo and renders FViewInfos
+	// (FSceneRenderer constructor), so both downcasts hold for any view a render-thread hook sees.
+	const FViewFamilyInfo* ViewFamily = static_cast<const FViewFamilyInfo*>(View.Family);
+	const FSceneTextures* SceneTextures = ViewFamily ? ViewFamily->GetSceneTexturesChecked() : nullptr;
+	if (!SceneTextures)
+	{
+		return false;
+	}
+
+	OutVelocity = SceneTextures->Velocity;
+	OutSceneDepth = SceneTextures->Depth.Resolve;
+	OutViewRect = static_cast<const FViewInfo&>(View).ViewRect;
+	return OutVelocity != nullptr && OutSceneDepth != nullptr;
+}
+
 } // namespace TempoMultiViewCapture

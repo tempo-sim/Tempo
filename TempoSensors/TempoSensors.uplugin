@@ -15,6 +15,11 @@
 	"Installed": false,
 	"Modules": [
 		{
+			"Name": "TempoSensorsShaders",
+			"Type": "Runtime",
+			"LoadingPhase": "PostConfigInit"
+		},
+		{
 			"Name": "TempoSensors",
 			"Type": "Runtime",
 			"LoadingPhase": "Default"

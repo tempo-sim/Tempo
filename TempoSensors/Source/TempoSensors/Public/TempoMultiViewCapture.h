@@ -7,9 +7,11 @@
 #include "Math/IntRect.h"
 #include "Math/Matrix.h"
 #include "Math/Vector.h"
+#include "RenderGraphFwd.h"
 #include "SceneTypes.h"
 
 class FSceneInterface;
+class FSceneView;
 class FSceneViewStateInterface;
 class USceneCaptureComponent2D;
 class UTextureRenderTarget2D;
@@ -75,4 +77,11 @@ namespace TempoMultiViewCapture
 		TArrayView<const FViewSetup> Views,
 		ESceneCaptureSource CaptureSource,
 		float ResolutionFraction = 1.0f);
+
+	// Render thread. The scene velocity and resolved depth textures a view is being rendered into,
+	// and the rect it occupies in them, for view extension hooks whose scene texture uniform buffer
+	// doesn't yet expose what they need (the base pass hook's lacks velocity). Reaches into the
+	// renderer's FViewFamilyInfo, hence lives here with the other engine-private mirrors. Returns
+	// false if the family has no initialized scene textures or either texture is missing.
+	TEMPOSENSORS_API bool GetRenderedViewSceneTextures(const FSceneView& View, FRDGTextureRef& OutVelocity, FRDGTextureRef& OutSceneDepth, FIntRect& OutViewRect);
 }
