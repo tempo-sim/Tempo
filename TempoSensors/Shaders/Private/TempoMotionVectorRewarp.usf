@@ -1,0 +1,120 @@
+// Copyright Tempo Simulation, LLC. All Rights Reserved
+
+// Rewarps the object-motion part of a view's motion vectors to span the interval since that view
+// last rendered, rather than the interval since the scene last advanced.
+//
+// The engine advances every primitive's PreviousLocalToWorld once per engine tick (FScene::StartFrame,
+// called from the engine loop for every scene whether or not anything renders). A view that renders
+// every N ticks therefore gets object velocities that cover one tick, while its previous view matrices
+// (which live on the view state) do cover the full N ticks. The velocity pass mixes the two:
+//
+//     V = ScreenPos - Project(PrevCamera, PreviousLocalToWorld(one tick ago) * LocalPos)
+//
+// TSR and Lumen reproject their history with V, land N-1 ticks short on every moving object, and ghost.
+//
+// This pass decomposes V per pixel. S is the reprojection the pixel would get as static geometry
+// (depth + ClipToPrevClip, exactly what TSR/Lumen compute for pixels with no velocity), so V - S is
+// the one-tick object displacement as seen by the previous camera. It is extrapolated N times and
+// the vector re-encoded. Static pixels never carry velocity and are untouched; pixels whose V equals
+// S (always-has-velocity primitives that didn't move) come out unchanged.
+//
+// With VELOCITY_ENCODE_DEPTH the encoded previous depth lets both points be unprojected into the
+// previous camera's view space, where linear extrapolation is exact for linear world motion (view
+// space is world space up to a rigid transform). Without it the extrapolation is done in the previous
+// camera's screen space, which is only a perspective-linearized approximation.
+
+#include "/Engine/Private/Common.ush"
+
+// A copy of this view's rect of the velocity texture, as written by the velocity pass.
+Texture2D<float4> VelocityInput;
+Texture2D SceneDepthTexture;
+RWTexture2D<float4> VelocityOutput;
+int2 ViewRectMin;
+int2 ViewRectSize;
+// Ticks since this view last rendered: (capture interval) / (scene tick interval).
+float ExtrapolationFactor;
+
+// EncodeVelocityToTexture saturates outside this range, and saturating X to 0 would turn the
+// pixel into "no velocity" (see the Encoded.x test below). Motion this large gets its history
+// rejected anyway.
+#define MAX_ENCODABLE_VELOCITY 1.99
+
+[numthreads(THREADGROUP_SIZE, THREADGROUP_SIZE, 1)]
+void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	const int2 LocalPos = int2(DispatchThreadId.xy);
+	if (any(LocalPos >= ViewRectSize))
+	{
+		return;
+	}
+	const int2 PixelPos = ViewRectMin + LocalPos;
+
+	// The velocity target is cleared to 0. Every real encoding has X > 0, so this is the engine's own
+	// "pixel has no object velocity" test (LumenPosition.ush, TSR): those pixels reproject from depth
+	// and are already correct.
+	const float4 Encoded = VelocityInput[LocalPos];
+	if (Encoded.x <= 0.0)
+	{
+		return;
+	}
+
+	const float DeviceZ = SceneDepthTexture.Load(int3(PixelPos, 0)).r;
+	const float3 Velocity = DecodeVelocityFromTexture(Encoded);
+
+	// Velocities are differences of unjittered NDC positions (Calculate3DVelocityBase subtracts the
+	// jitter from the rasterized position), so express this pixel the same way.
+	const float2 ViewportUV = (float2(LocalPos) + 0.5) / float2(ViewRectSize);
+	const float2 ScreenPos = float2(2.0 * ViewportUV.x - 1.0, 1.0 - 2.0 * ViewportUV.y) - View.TemporalAAJitter.xy;
+	const float3 ThisScreen = float3(ScreenPos, DeviceZ);
+
+	// S: where this pixel's content was, in the previous camera, if it belonged to the static world.
+	// ClipToPrevClip carries no jitter and spans the full interval since this view last rendered.
+	const float4 PrevStaticClip = mul(float4(ThisScreen, 1.0), View.ClipToPrevClip);
+	if (PrevStaticClip.w <= 0.0)
+	{
+		return;
+	}
+	const float3 PrevStatic = PrevStaticClip.xyz / PrevStaticClip.w;
+
+	// Where the velocity pass put it: previous camera, but a transform only one tick old.
+	const float3 PrevEncoded = ThisScreen - Velocity;
+
+	float3 NewVelocity;
+#if VELOCITY_ENCODE_DEPTH
+	float4 PrevStaticView = mul(float4(PrevStatic, 1.0), View.PrevClipToView);
+	float4 PrevEncodedView = mul(float4(PrevEncoded, 1.0), View.PrevClipToView);
+	if (abs(PrevStaticView.w) < 1e-8 || abs(PrevEncodedView.w) < 1e-8)
+	{
+		return;
+	}
+	PrevStaticView.xyz /= PrevStaticView.w;
+	PrevEncodedView.xyz /= PrevEncodedView.w;
+
+	// One tick of object motion, in the previous camera's view space; extrapolate it to N ticks.
+	const float3 OneTickDisplacement = PrevStaticView.xyz - PrevEncodedView.xyz;
+	const float3 NewPrevView = PrevStaticView.xyz - ExtrapolationFactor * OneTickDisplacement;
+
+	const float4 NewPrevClip = mul(float4(NewPrevView, 1.0), View.PrevViewToClip);
+	if (NewPrevClip.w <= 0.0)
+	{
+		// Extrapolated to behind the previous camera; keep the engine's vector.
+		return;
+	}
+	NewVelocity = ThisScreen - NewPrevClip.xyz / NewPrevClip.w;
+#else
+	const float2 OneTickDisplacement = PrevStatic.xy - PrevEncoded.xy;
+	NewVelocity.xy = ScreenPos - (PrevStatic.xy - ExtrapolationFactor * OneTickDisplacement);
+	NewVelocity.z = 0.0;
+#endif
+
+	NewVelocity.xy = clamp(NewVelocity.xy, -MAX_ENCODABLE_VELOCITY, MAX_ENCODABLE_VELOCITY);
+
+	// Keep the per-pixel flags (pixel animation, temporal responsiveness) the velocity pass packed
+	// into the low bits of W; TSR reads them back.
+	uint FlagBits = 0;
+#if VELOCITY_ENCODE_DEPTH
+	FlagBits = uint(round(Encoded.w * 65535.0)) & TEMPORAL_RESPONSIVENESS_MASK;
+#endif
+
+	VelocityOutput[PixelPos] = EncodeVelocityToTexture(NewVelocity, FlagBits);
+}

@@ -15,6 +15,8 @@
 
 #include "TempoCamera.generated.h"
 
+class FTempoMotionVectorRewarpViewExtension;
+
 // Texture filter applied by the distortion post-process material when sampling the perspective
 // render target. Maps directly to the "FilterType" scalar parameter (Nearest=0, Bilinear=1,
 // Bicubic=2) — the order matches the material switch.
@@ -259,6 +261,10 @@ struct FTempoCameraTile
 
 	// One-shot camera-cut flag consumed by the next multi-view render.
 	bool bCameraCut = false;
+
+	// World time of this tile's last render, or negative if it hasn't rendered since (re)activation.
+	// Drives the motion vector rewarp's extrapolation factor.
+	double LastCaptureWorldTime = -1.0;
 };
 
 UCLASS(Blueprintable, BlueprintType, ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
@@ -297,6 +303,9 @@ public:
 	// Render-thread hook. Encodes a frame for any pending video stream subscribers, layered on top
 	// of the base CPU readback path. Called via UTempoSensorServiceSubsystem::OnRenderFrameCompleted.
 	virtual void OnRenderCompleted() override;
+
+	// Releases the motion vector rewarp extension once Super has deactivated the tiles.
+	virtual void OnUnregister() override;
 
 	// USceneCaptureComponent::AddReferencedObjects only walks the inherited ViewStates indirect
 	// array; our per-tile FSceneViewStateReference members aren't in that array, so the MIDPool
@@ -392,6 +401,18 @@ protected:
 	// and aux RT memory grow by K². K=1 disables (byte-identical to no-upsampling behavior).
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo", meta=(UIMin=1.0, UIMax=4.0, ClampMin=1.0, ClampMax=4.0))
 	float UpsamplingFactor = 1.0f;
+
+	// Rescales the object-motion part of each tile's motion vectors to span the interval since the
+	// tile last rendered. The engine advances object motion vectors once per scene tick, so a camera
+	// capturing every N ticks would otherwise hand TSR and Lumen vectors N times too short for every
+	// moving object, and they ghost. Decided per tile per capture from the time actually elapsed
+	// since the tile last rendered against the tick's delta: a tile that rendered last tick (a
+	// camera at the fixed-step rate, or every tick in wall-clock mode) costs nothing, one that
+	// didn't costs a rect copy of the velocity texture and one compute pass over its rect. Only
+	// takes effect when r.VelocityOutputPass is 0 (the default) or 1, i.e. velocity is written
+	// before the end of the base pass.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo")
+	bool bRewarpMotionVectors = true;
 
 	// When true, TextureFilterType is auto-selected from the lens model + FOV: Pinhole -> Nearest,
 	// any other (Brown-Conrady / Rational / KannalaBrandt / DoubleSphere with FOV <= 120) -> Bilinear,
@@ -600,6 +621,13 @@ protected:
 	// active tile's TAA/AE history was conditioned on a different post-process configuration;
 	// force a camera cut on transition so TAA doesn't sample stale history.
 	bool bWasSingleTileFastPath = false;
+
+	// Motion vector rewarp extension, created by the first capture that needs it and released in
+	// OnUnregister. Gathered only into this camera's tile family, and only while rewarping is on.
+	TSharedPtr<FTempoMotionVectorRewarpViewExtension, ESPMode::ThreadSafe> MotionVectorRewarpExtension;
+
+	// Returns the extension, creating it if the world has a scene; nullptr otherwise.
+	FTempoMotionVectorRewarpViewExtension* GetOrCreateMotionVectorRewarpExtension();
 
 	// Retention list for distortion textures that have been replaced but may still be referenced
 	// by in-flight render commands.

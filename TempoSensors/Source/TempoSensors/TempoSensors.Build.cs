@@ -47,6 +47,8 @@ public class TempoSensors : TempoModuleRules
 				// (NVENC, VTCodecs, AMF, WMF) are loaded via TempoSensors.uplugin's plugin list.
 				"AVCodecsCore",
 				"AVCodecsCoreRHI",
+				// Global shaders (motion vector rewarp). Separate module so they load at PostConfigInit.
+				"TempoSensorsShaders",
 			}
 		);
 	}

@@ -6,6 +6,7 @@
 #include "TempoCameraVideoEncoder.h"
 #include "TempoCoreUtils.h"
 #include "TempoSensorsConstants.h"
+#include "TempoMotionVectorRewarpViewExtension.h"
 #include "TempoMultiViewCapture.h"
 #include "TempoSensors.h"
 #include "TempoSensorsSettings.h"
@@ -14,6 +15,7 @@
 #include "CanvasItem.h"
 #include "Curves/CurveFloat.h"
 #include "Engine/Canvas.h"
+#include "Engine/Engine.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "Engine/Texture2D.h"
 #include "HAL/IConsoleManager.h"
@@ -38,6 +40,30 @@ namespace
 	// Bound on the exposure bias the controller may apply, in EV. Wide enough for a physically lit
 	// sun (bias near -20) and a moonless night (bias near +10).
 	constexpr float MaxSharedExposureBias = 24.0f;
+
+	// Lets the camera's motion vector rewarp extension be gathered into the view family rendered
+	// inside the scope, and nothing else (the proxy capture that follows, other sensors' captures).
+	struct FScopedMotionVectorRewarp
+	{
+		explicit FScopedMotionVectorRewarp(FTempoMotionVectorRewarpViewExtension* InExtension)
+			: Extension(InExtension)
+		{
+			if (Extension)
+			{
+				Extension->SetActive(true);
+			}
+		}
+
+		~FScopedMotionVectorRewarp()
+		{
+			if (Extension)
+			{
+				Extension->SetActive(false);
+			}
+		}
+
+		FTempoMotionVectorRewarpViewExtension* Extension;
+	};
 
 	float GetViewStateLastAverageSceneLuminance(FSceneViewStateInterface* ViewState)
 	{
@@ -602,6 +628,30 @@ ETempoTextureFilterType UTempoCamera::GetEffectiveTextureFilterType() const
 		return ETempoTextureFilterType::Bicubic;
 	}
 	return ETempoTextureFilterType::Bilinear;
+}
+
+void UTempoCamera::OnUnregister()
+{
+	// Deactivates every tile, dropping its rewarp entry, while the scene is still valid.
+	Super::OnUnregister();
+
+	// Unregisters the extension from the engine's list. Render commands still in flight hold their
+	// own reference and keep it alive until they have run.
+	MotionVectorRewarpExtension.Reset();
+}
+
+FTempoMotionVectorRewarpViewExtension* UTempoCamera::GetOrCreateMotionVectorRewarpExtension()
+{
+	if (!MotionVectorRewarpExtension.IsValid())
+	{
+		const UWorld* World = GetWorld();
+		if (!GEngine || !World || !World->Scene)
+		{
+			return nullptr;
+		}
+		MotionVectorRewarpExtension = FSceneViewExtensions::NewExtension<FTempoMotionVectorRewarpViewExtension>(World->Scene);
+	}
+	return MotionVectorRewarpExtension.Get();
 }
 
 void UTempoCamera::DeactivateAllTiles()
@@ -1280,6 +1330,17 @@ void UTempoCamera::RenderCapture()
 	TArray<TempoMultiViewCapture::FViewSetup> ViewSetups;
 	ViewSetups.Reserve(NumActiveTiles);
 	FTempoCameraTile* SingleActiveTile = nullptr;
+
+	// Motion vector rewarp: the object-motion part of a tile's velocity vectors spans one scene tick
+	// (the engine advances previous transforms once per engine tick, from the engine loop) while its
+	// camera part spans the whole interval since the tile last rendered. World time advances by one
+	// tick per engine tick, so the ratio of the two intervals is the factor to stretch the former by.
+	// A tile that rendered last tick gets a factor of one and needs nothing; the extension is only
+	// attached to the family when some tile needs stretching.
+	FTempoMotionVectorRewarpViewExtension* RewarpExtension = bRewarpMotionVectors ? GetOrCreateMotionVectorRewarpExtension() : nullptr;
+	const double CaptureWorldTime = World->GetTimeSeconds();
+	const double SceneTickDeltaSeconds = World->GetDeltaSeconds();
+	bool bAnyTileNeedsRewarp = false;
 	for (FTempoCameraTile& Tile : Tiles)
 	{
 		if (!Tile.bActive)
@@ -1382,6 +1443,17 @@ void UTempoCamera::RenderCapture()
 		Setup.PostProcessBlendWeight = 1.0f;
 		Setup.bCameraCut = Tile.bCameraCut;
 		Tile.bCameraCut = false;
+
+		// A camera cut discards the history there would be to rewarp against.
+		if (RewarpExtension)
+		{
+			const float ExtrapolationFactor = Setup.bCameraCut
+				? 1.0f
+				: FTempoMotionVectorRewarpViewExtension::ComputeExtrapolationFactor(CaptureWorldTime, Tile.LastCaptureWorldTime, SceneTickDeltaSeconds);
+			RewarpExtension->SetExtrapolationFactor(Setup.ViewState, ExtrapolationFactor);
+			bAnyTileNeedsRewarp |= ExtrapolationFactor > 1.0f;
+		}
+		Tile.LastCaptureWorldTime = CaptureWorldTime;
 		Setup.ViewLocation = ViewLocation;
 		Setup.ViewRotationMatrix = ViewRotationMatrix;
 		Setup.ProjectionMatrix = ProjectionMatrix;
@@ -1403,6 +1475,7 @@ void UTempoCamera::RenderCapture()
 	{
 		// Single tile, full post-process: render straight to the final RT in LDR. The distortion
 		// PPM packs label/255 into alpha; RGBA8 quantization preserves the byte exactly.
+		FScopedMotionVectorRewarp ScopedRewarp(bAnyTileNeedsRewarp ? RewarpExtension : nullptr);
 		TempoMultiViewCapture::RenderTiles(Scene, this, SharedFinalTextureTarget, ViewSetups, ESceneCaptureSource::SCS_FinalColorLDR, ResolutionFraction);
 	}
 	else
@@ -1430,7 +1503,10 @@ void UTempoCamera::RenderCapture()
 		AppliedExposureBiasHistory[0] = SharedExposureBias;
 		++NumMultiTileCapturesSinceExposureSeed;
 
-		TempoMultiViewCapture::RenderTiles(Scene, this, SharedTextureTarget, ViewSetups, ESceneCaptureSource::SCS_FinalColorHDR, ResolutionFraction);
+		{
+			FScopedMotionVectorRewarp ScopedRewarp(bAnyTileNeedsRewarp ? RewarpExtension : nullptr);
+			TempoMultiViewCapture::RenderTiles(Scene, this, SharedTextureTarget, ViewSetups, ESceneCaptureSource::SCS_FinalColorHDR, ResolutionFraction);
+		}
 
 		ShowFlags = SavedShowFlags;
 
@@ -1792,6 +1868,11 @@ void UTempoCamera::RetireDistortionMap(UTexture2D* DistortionMap)
 void UTempoCamera::DeactivateTile(FTempoCameraTile& Tile)
 {
 	Tile.bActive = false;
+	Tile.LastCaptureWorldTime = -1.0;
+	if (MotionVectorRewarpExtension)
+	{
+		MotionVectorRewarpExtension->RemoveViewState(Tile.ViewState.GetReference());
+	}
 	Tile.ViewState.Destroy();
 	// Retire the PPM + distortion map instead of nulling: render commands from prior captures
 	// may still reference them, and dropping the only UPROPERTY reference lets GC flag them
