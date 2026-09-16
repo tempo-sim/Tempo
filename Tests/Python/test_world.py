@@ -635,6 +635,270 @@ def test_set_component_transform_partial_and_scale(sim_server):
         tw.destroy_actor(actor=name)
 
 
+def test_get_actor_transform_round_trips_through_the_setter(sim_server):
+    """The getters are the read side of the setters: what one writes, in the frame it writes,
+    the other reads back."""
+    name = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=_transform(0.0, 0.0, 130.0)).name
+    try:
+        _make_movable(name)
+        tw.set_actor_location(actor=name, location=_vector(4.0, -3.0, 130.0))
+        tw.set_actor_rotation(actor=name, rotation=_rotation(0.0, 0.0, math.pi / 2.0))
+        tw.set_actor_scale3d(actor=name, scale=_vector(2.0, 3.0, 4.0))
+
+        got = tw.get_actor_transform(actor=name)
+        assert got.transform.location.x == pytest.approx(4.0, abs=0.05)
+        # Negative Y survives the round trip, so location goes through handedness both ways.
+        assert got.transform.location.y == pytest.approx(-3.0, abs=0.05)
+        assert got.transform.location.z == pytest.approx(130.0, abs=0.05)
+        assert got.transform.rotation.y == pytest.approx(math.pi / 2.0, abs=1e-3)
+        # Scale is unitless and unmirrored, so it comes back exactly as it was set.
+        assert (got.scale.x, got.scale.y, got.scale.z) == pytest.approx((2.0, 3.0, 4.0), abs=1e-3)
+
+        # The singular getters agree with the composite one.
+        loc = tw.get_actor_location(actor=name).location
+        assert (loc.x, loc.y, loc.z) == pytest.approx((4.0, -3.0, 130.0), abs=0.05)
+        rot = tw.get_actor_rotation(actor=name).rotation
+        assert rot.y == pytest.approx(math.pi / 2.0, abs=1e-3)
+        scale = tw.get_actor_scale3d(actor=name).scale
+        assert (scale.x, scale.y, scale.z) == pytest.approx((2.0, 3.0, 4.0), abs=1e-3)
+
+        # And they agree with the property getter, which reads the same state a different way.
+        assert _scale_of(name) == pytest.approx((2.0, 3.0, 4.0), abs=1e-3)
+    finally:
+        tw.destroy_actor(actor=name)
+
+
+def test_get_actor_transform_relative_to_actor_inverts_the_setter(sim_server):
+    """set_actor_* composes `relative_to_actor` in; get_actor_* divides the same frame out, so a
+    pose written relative to another actor reads back as the value that was written."""
+    ref_transform = _transform(10.0, 0.0, 135.0)
+    ref_transform.rotation.y = math.pi / 2.0
+    ref = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=ref_transform).name
+    child = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=_transform(0.0, 0.0, 135.0)).name
+    try:
+        _make_movable(ref)
+        _make_movable(child)
+        # A non-unit reference scale, so "absolute" and "composed through the frame" are
+        # distinguishable answers for the scale field below.
+        tw.set_actor_scale3d(actor=ref, scale=_vector(2.0, 2.0, 2.0))
+
+        tw.set_actor_location(actor=child, location=_vector(1.0, 0.0, 0.0), relative_to_actor=ref)
+
+        # In world space the 1 m offset was turned onto +Y by the reference actor's yaw and
+        # doubled by its scale, which is what the frame composition does.
+        world = tw.get_actor_location(actor=child).location
+        assert world.x == pytest.approx(10.0, abs=0.05)
+        assert world.y == pytest.approx(2.0, abs=0.05)
+        assert world.z == pytest.approx(135.0, abs=0.05)
+
+        # Read back in the reference actor's frame it is exactly the offset that was requested -
+        # rotation and scale divided back out, and no residual Z from the frame's own height.
+        relative = tw.get_actor_location(actor=child, relative_to_actor=ref).location
+        assert (relative.x, relative.y, relative.z) == pytest.approx((1.0, 0.0, 0.0), abs=0.05)
+
+        # Scale is absolute whatever the frame, exactly as set_actor_transform treats it: the
+        # child's own world scale, not its scale relative to the doubled reference actor.
+        got = tw.get_actor_transform(actor=child, relative_to_actor=ref)
+        assert (got.scale.x, got.scale.y, got.scale.z) == pytest.approx((1.0, 1.0, 1.0), abs=1e-3)
+        assert (got.transform.location.x, got.transform.location.y) == pytest.approx((1.0, 0.0), abs=0.05)
+    finally:
+        for name in (child, ref):
+            tw.destroy_actor(actor=name)
+
+
+def test_get_component_transform_frames(sim_server):
+    """CF_WORLD, CF_PARENT and CF_ACTOR are three views of the same component."""
+    name = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=_transform(0.0, 0.0, 140.0)).name
+    try:
+        _make_movable(name)
+        child = _child_component(name)
+        tw.set_component_location(actor=name, component=child, location=_vector(1.0, 0.0, 0.0))
+
+        # CF_WORLD is the default, so an unset frame is the world transform.
+        world = tw.get_component_location(actor=name, component=child).location
+        assert (world.x, world.y, world.z) == pytest.approx((1.0, 0.0, 140.0), abs=0.05)
+        explicit = tw.get_component_location(
+            actor=name, component=child, frame=WorldControl.CF_WORLD
+        ).location
+        assert (explicit.x, explicit.y, explicit.z) == pytest.approx((1.0, 0.0, 140.0), abs=0.05)
+
+        # CF_PARENT is what set_component_location wrote (relative_to_world defaults to false),
+        # and matches the RelativeLocation the property getter reports, in meters not centimeters.
+        parent = tw.get_component_location(
+            actor=name, component=child, frame=WorldControl.CF_PARENT
+        ).location
+        assert (parent.x, parent.y, parent.z) == pytest.approx((1.0, 0.0, 0.0), abs=0.05)
+        assert _location_of(name, child)[0] == pytest.approx(100.0, abs=0.05)
+
+        # The child hangs off the root, so relative-to-actor and relative-to-parent agree here.
+        actor_rel = tw.get_component_location(
+            actor=name, component=child, frame=WorldControl.CF_ACTOR
+        ).location
+        assert (actor_rel.x, actor_rel.y, actor_rel.z) == pytest.approx((1.0, 0.0, 0.0), abs=0.05)
+    finally:
+        tw.destroy_actor(actor=name)
+
+
+def test_get_component_frames_differ_once_the_actor_is_moved(sim_server):
+    """With the actor rotated and offset, the three frames are genuinely different answers."""
+    name = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=_transform(5.0, 0.0, 145.0)).name
+    try:
+        _make_movable(name)
+        child = _child_component(name)
+        tw.set_component_location(actor=name, component=child, location=_vector(1.0, 0.0, 0.0))
+        tw.set_actor_rotation(actor=name, rotation=_rotation(0.0, 0.0, math.pi / 2.0))
+
+        # The actor's yaw swings the component's 1 m local +X offset onto world +Y.
+        world = tw.get_component_location(actor=name, component=child).location
+        assert world.x == pytest.approx(5.0, abs=0.05)
+        assert world.y == pytest.approx(1.0, abs=0.05)
+
+        # The local offset is unchanged by the actor's move, in either local frame.
+        for frame in (WorldControl.CF_PARENT, WorldControl.CF_ACTOR):
+            local = tw.get_component_location(actor=name, component=child, frame=frame).location
+            assert (local.x, local.y, local.z) == pytest.approx((1.0, 0.0, 0.0), abs=0.05), frame
+    finally:
+        tw.destroy_actor(actor=name)
+
+
+def test_get_component_scale_follows_the_frame(sim_server):
+    """Unlike an actor's, a component's scale is reported in the frame the request selects -
+    matching set_component_scale3d, whose scale honors relative_to_world."""
+    name = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=_transform(0.0, 0.0, 150.0)).name
+    try:
+        _make_movable(name)
+        child = _child_component(name)
+        tw.set_actor_scale3d(actor=name, scale=_vector(2.0, 2.0, 2.0))
+        tw.set_component_scale3d(actor=name, component=child, scale=_vector(3.0, 3.0, 3.0))
+
+        parent = tw.get_component_scale3d(
+            actor=name, component=child, frame=WorldControl.CF_PARENT
+        ).scale
+        assert (parent.x, parent.y, parent.z) == pytest.approx((3.0, 3.0, 3.0), abs=1e-3)
+
+        # World scale accumulates the actor's, so the component is 6x in world space.
+        world = tw.get_component_scale3d(actor=name, component=child).scale
+        assert (world.x, world.y, world.z) == pytest.approx((6.0, 6.0, 6.0), abs=1e-3)
+
+        # get_component_transform reports the same scale as the singular RPC, per frame.
+        assert tw.get_component_transform(actor=name, component=child).scale.x == pytest.approx(6.0, abs=1e-3)
+        assert tw.get_component_transform(
+            actor=name, component=child, frame=WorldControl.CF_PARENT
+        ).scale.x == pytest.approx(3.0, abs=1e-3)
+    finally:
+        tw.destroy_actor(actor=name)
+
+
+def test_get_component_relative_to_another_component(sim_server):
+    """CF_COMPONENT expresses one component in another's frame."""
+    name = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=_transform(0.0, 0.0, 155.0)).name
+    try:
+        _make_movable(name)
+        first = _child_component(name)
+        second = _child_component(name)
+        tw.set_component_location(actor=name, component=first, location=_vector(1.0, 0.0, 0.0))
+        tw.set_component_location(actor=name, component=second, location=_vector(4.0, 0.0, 0.0))
+
+        between = tw.get_component_location(
+            actor=name, component=second, frame=WorldControl.CF_COMPONENT, relative_to_component=first
+        ).location
+        assert (between.x, between.y, between.z) == pytest.approx((3.0, 0.0, 0.0), abs=0.05)
+
+        # A component is the origin of its own frame.
+        itself = tw.get_component_location(
+            actor=name, component=second, frame=WorldControl.CF_COMPONENT, relative_to_component=second
+        ).location
+        assert (itself.x, itself.y, itself.z) == pytest.approx((0.0, 0.0, 0.0), abs=0.05)
+    finally:
+        tw.destroy_actor(actor=name)
+
+
+def test_getters_accept_the_root_component(sim_server):
+    """The getters relax the setters' root-component refusal: reading the root is unambiguous in
+    a way that retargeting it is not, so it reports the actor's own transform."""
+    name = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=_transform(6.0, 0.0, 160.0)).name
+    try:
+        root = _root_component(name)
+
+        world = tw.get_component_location(actor=name, component=root).location
+        assert (world.x, world.y, world.z) == pytest.approx((6.0, 0.0, 160.0), abs=0.05)
+
+        # In the actor's own frame the root component is the origin, by definition.
+        actor_rel = tw.get_component_location(
+            actor=name, component=root, frame=WorldControl.CF_ACTOR
+        ).location
+        assert (actor_rel.x, actor_rel.y, actor_rel.z) == pytest.approx((0.0, 0.0, 0.0), abs=0.05)
+
+        # The setters still refuse it, and say what to call instead.
+        with pytest.raises(grpc.RpcError) as excinfo:
+            tw.set_component_location(actor=name, component=root, location=_vector(0.0, 0.0, 0.0))
+        assert excinfo.value.code() == grpc.StatusCode.FAILED_PRECONDITION
+        assert "SetActorLocation" in excinfo.value.details()
+    finally:
+        tw.destroy_actor(actor=name)
+
+
+def test_component_frame_field_validation(sim_server):
+    """relative_to_component and socket only mean something under CF_COMPONENT, and CF_COMPONENT
+    means nothing without relative_to_component. Both are errors rather than silent defaults."""
+    name = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=_transform(0.0, 0.0, 165.0)).name
+    try:
+        _make_movable(name)
+        child = _child_component(name)
+
+        # CF_COMPONENT without the component it should be relative to.
+        with pytest.raises(grpc.RpcError) as excinfo:
+            tw.get_component_location(
+                actor=name, component=child, frame=WorldControl.CF_COMPONENT
+            )
+        assert excinfo.value.code() == grpc.StatusCode.FAILED_PRECONDITION
+        assert "relative_to_component" in excinfo.value.details()
+
+        # relative_to_component and socket under a frame that has no use for them.
+        for kwargs in ({"relative_to_component": child}, {"socket": "None"}):
+            with pytest.raises(grpc.RpcError) as excinfo:
+                tw.get_component_location(
+                    actor=name, component=child, frame=WorldControl.CF_ACTOR, **kwargs
+                )
+            assert excinfo.value.code() == grpc.StatusCode.FAILED_PRECONDITION
+            assert "CF_COMPONENT" in excinfo.value.details()
+
+        # A socket the frame component does not have. Unreal's GetSocketTransform would quietly
+        # fall back to the component's own transform, which would answer a question nobody asked.
+        with pytest.raises(grpc.RpcError) as excinfo:
+            tw.get_component_location(
+                actor=name, component=child, frame=WorldControl.CF_COMPONENT,
+                relative_to_component=child, socket="NoSuchSocket",
+            )
+        assert excinfo.value.code() == grpc.StatusCode.NOT_FOUND
+        assert "NoSuchSocket" in excinfo.value.details()
+    finally:
+        tw.destroy_actor(actor=name)
+
+
+def test_getters_report_missing_actors_and_components(sim_server):
+    """The getters resolve names the same way the setters do, and fail the same way."""
+    with pytest.raises(grpc.RpcError) as excinfo:
+        tw.get_actor_transform(actor="NoSuchActorAnywhere")
+    assert excinfo.value.code() == grpc.StatusCode.NOT_FOUND
+
+    with pytest.raises(grpc.RpcError) as excinfo:
+        tw.get_actor_location(actor="")
+    assert excinfo.value.code() == grpc.StatusCode.FAILED_PRECONDITION
+
+    name = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=_transform(0.0, 0.0, 170.0)).name
+    try:
+        with pytest.raises(grpc.RpcError) as excinfo:
+            tw.get_component_rotation(actor=name, component="NoSuchComponent")
+        assert excinfo.value.code() == grpc.StatusCode.NOT_FOUND
+
+        with pytest.raises(grpc.RpcError) as excinfo:
+            tw.get_actor_location(actor=name, relative_to_actor="NoSuchActorAnywhere")
+        assert excinfo.value.code() == grpc.StatusCode.NOT_FOUND
+        assert "relative_to_actor" in excinfo.value.details()
+    finally:
+        tw.destroy_actor(actor=name)
+
 def test_singular_transform_rpcs_require_their_value(sim_server):
     """An unset value on a singular RPC is a mistake, not a request to zero the field -
     silently teleporting to the origin or collapsing to zero scale would be worse."""

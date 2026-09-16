@@ -163,6 +163,122 @@ message SetComponentScale3DRequest {
   bool relative_to_world = 4;
 }
 
+// What a component-level getter's result is expressed relative to. The zero value is the world
+// frame, so a request that leaves `frame` alone asks for the component's world transform.
+//
+// Only CF_WORLD and CF_PARENT have SetComponent* counterparts (relative_to_world true and false
+// respectively), and a value read back in either of those frames can be handed straight back to
+// the matching setter. CF_ACTOR and CF_COMPONENT are read-only conveniences.
+enum ComponentFrame {
+  // The world frame.
+  CF_WORLD = 0;
+  // The owning actor's transform. The actor's root component reads as identity here.
+  CF_ACTOR = 1;
+  // The component's attach parent - what Unreal means by a "relative" transform, and what the
+  // component actually stores. If the component is attached to a socket, this is relative to
+  // that socket; a component with no attach parent (an unattached actor's root) reads as its
+  // world transform, which is what Unreal stores for it.
+  CF_PARENT = 2;
+  // Another component on the same actor, named by `relative_to_component`, optionally at one of
+  // its sockets. Use this to be relative to a socket other than the component's own attach point.
+  CF_COMPONENT = 3;
+}
+
+message GetActorTransformRequest {
+  // Name of the actor to query.
+  string actor = 1;
+  // Optional actor name to express the result relative to. Empty means the world frame.
+  // Composed the same way SetActorTransform composes it, so the result can be handed straight
+  // back to SetActorTransform with the same `relative_to_actor` to reproduce the pose.
+  string relative_to_actor = 2;
+}
+
+message GetActorLocationRequest {
+  // Name of the actor to query.
+  string actor = 1;
+  // Optional actor name to express the result relative to. Empty means the world frame.
+  string relative_to_actor = 2;
+}
+
+message GetActorRotationRequest {
+  // Name of the actor to query.
+  string actor = 1;
+  // Optional actor name to express the result relative to. Empty means the world frame.
+  string relative_to_actor = 2;
+}
+
+// Scale has no reference frame, exactly as SetActorScale3DRequest has none: composing a
+// non-uniform scale through a rotated frame does not survive as a transform.
+message GetActorScale3DRequest {
+  // Name of the actor to query.
+  string actor = 1;
+}
+
+message GetComponentTransformRequest {
+  // Name of the owning actor.
+  string actor = 1;
+  // Name of the component to query. Unlike the SetComponent* RPCs, the root component is
+  // allowed: reading it is unambiguous in a way that retargeting it is not.
+  string component = 2;
+  // What the result is expressed relative to. Defaults to CF_WORLD.
+  ComponentFrame frame = 3;
+  // Required with CF_COMPONENT, and rejected with every other frame: name of the component on
+  // the same actor to be relative to.
+  string relative_to_component = 4;
+  // Optional with CF_COMPONENT, and rejected with every other frame: a socket or bone on
+  // `relative_to_component`. Empty means that component's own transform.
+  string socket = 5;
+}
+
+message GetComponentLocationRequest {
+  string actor = 1;
+  string component = 2;
+  ComponentFrame frame = 3;
+  string relative_to_component = 4;
+  string socket = 5;
+}
+
+message GetComponentRotationRequest {
+  string actor = 1;
+  string component = 2;
+  ComponentFrame frame = 3;
+  string relative_to_component = 4;
+  string socket = 5;
+}
+
+message GetComponentScale3DRequest {
+  string actor = 1;
+  string component = 2;
+  ComponentFrame frame = 3;
+  string relative_to_component = 4;
+  string socket = 5;
+}
+
+// Shared by the actor and component transform getters.
+message GetTransformResponse {
+  // Location and rotation, in the frame the request selected. Meters / radians, right-handed.
+  TempoCore.Transform transform = 1;
+  // Scale, unitless and unconverted. For a component this is in the frame the request selected,
+  // matching SetComponentTransformRequest. For an actor it is always the world scale, whatever
+  // `relative_to_actor` said, matching SetActorTransformRequest's absolute `scale`.
+  TempoCore.Vector scale = 2;
+}
+
+message GetLocationResponse {
+  // Meters, right-handed, in the frame the request selected.
+  TempoCore.Vector location = 1;
+}
+
+message GetRotationResponse {
+  // Radians, right-handed, in the frame the request selected.
+  TempoCore.Rotation rotation = 1;
+}
+
+message GetScale3DResponse {
+  // Unitless and unconverted, in the frame the request selected.
+  TempoCore.Vector scale = 1;
+}
+
 message ActivateComponentRequest {
   // Name of the owning actor.
   string actor = 1;
@@ -830,6 +946,25 @@ service WorldControlService {
   rpc SetComponentRotation(SetComponentRotationRequest) returns (TempoCore.Empty);
 
   rpc SetComponentScale3D(SetComponentScale3DRequest) returns (TempoCore.Empty);
+
+  // The eight getters below are the read side of the eight setters above, and report in the same
+  // units, handedness and frames. Reading an actor or component the setter can write, in the
+  // frame the setter writes, yields a value that can be passed straight back to it.
+  rpc GetActorTransform(GetActorTransformRequest) returns (GetTransformResponse);
+
+  rpc GetActorLocation(GetActorLocationRequest) returns (GetLocationResponse);
+
+  rpc GetActorRotation(GetActorRotationRequest) returns (GetRotationResponse);
+
+  rpc GetActorScale3D(GetActorScale3DRequest) returns (GetScale3DResponse);
+
+  rpc GetComponentTransform(GetComponentTransformRequest) returns (GetTransformResponse);
+
+  rpc GetComponentLocation(GetComponentLocationRequest) returns (GetLocationResponse);
+
+  rpc GetComponentRotation(GetComponentRotationRequest) returns (GetRotationResponse);
+
+  rpc GetComponentScale3D(GetComponentScale3DRequest) returns (GetScale3DResponse);
 
   rpc ActivateComponent(ActivateComponentRequest) returns (TempoCore.Empty);
 

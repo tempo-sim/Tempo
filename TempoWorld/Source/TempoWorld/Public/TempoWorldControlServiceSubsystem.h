@@ -33,6 +33,18 @@ namespace TempoWorld
 	class SetComponentLocationRequest;
 	class SetComponentRotationRequest;
 	class SetComponentScale3DRequest;
+	class GetActorTransformRequest;
+	class GetActorLocationRequest;
+	class GetActorRotationRequest;
+	class GetActorScale3DRequest;
+	class GetComponentTransformRequest;
+	class GetComponentLocationRequest;
+	class GetComponentRotationRequest;
+	class GetComponentScale3DRequest;
+	class GetTransformResponse;
+	class GetLocationResponse;
+	class GetRotationResponse;
+	class GetScale3DResponse;
 	class GetAllActorsResponse;
 	class GetAllComponentsRequest;
 	class GetAllComponentsResponse;
@@ -93,6 +105,22 @@ public:
 	void SetComponentRotation(const TempoWorld::SetComponentRotationRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const;
 
 	void SetComponentScale3D(const TempoWorld::SetComponentScale3DRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const;
+
+	void GetActorTransform(const TempoWorld::GetActorTransformRequest& Request, const TResponseDelegate<TempoWorld::GetTransformResponse>& ResponseContinuation) const;
+
+	void GetActorLocation(const TempoWorld::GetActorLocationRequest& Request, const TResponseDelegate<TempoWorld::GetLocationResponse>& ResponseContinuation) const;
+
+	void GetActorRotation(const TempoWorld::GetActorRotationRequest& Request, const TResponseDelegate<TempoWorld::GetRotationResponse>& ResponseContinuation) const;
+
+	void GetActorScale3D(const TempoWorld::GetActorScale3DRequest& Request, const TResponseDelegate<TempoWorld::GetScale3DResponse>& ResponseContinuation) const;
+
+	void GetComponentTransform(const TempoWorld::GetComponentTransformRequest& Request, const TResponseDelegate<TempoWorld::GetTransformResponse>& ResponseContinuation) const;
+
+	void GetComponentLocation(const TempoWorld::GetComponentLocationRequest& Request, const TResponseDelegate<TempoWorld::GetLocationResponse>& ResponseContinuation) const;
+
+	void GetComponentRotation(const TempoWorld::GetComponentRotationRequest& Request, const TResponseDelegate<TempoWorld::GetRotationResponse>& ResponseContinuation) const;
+
+	void GetComponentScale3D(const TempoWorld::GetComponentScale3DRequest& Request, const TResponseDelegate<TempoWorld::GetScale3DResponse>& ResponseContinuation) const;
 
 	void ActivateComponent(const TempoWorld::ActivateComponentRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const;
 
