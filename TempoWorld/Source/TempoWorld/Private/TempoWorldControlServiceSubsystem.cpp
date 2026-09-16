@@ -710,11 +710,17 @@ namespace
 		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 	}
 
-	// An actor-level getter reports the actor's transform expressed in the frame relative_to_actor
-	// names, which is exactly what SetActorTransform's composition undoes - so a value read here
-	// and handed back with the same relative_to_actor reproduces the pose.
+	// An actor-level getter reports the actor's pose expressed in the frame relative_to_actor names,
+	// which is exactly what SetActorTransform's composition undoes - so a value read here and handed
+	// back with the same relative_to_actor reproduces the pose.
+	//
+	// Scale is the exception, and is why OutWorldScale is handed back separately rather than read off
+	// OutTransform: SetActorTransform never composes scale through relative_to_actor, so a getter that
+	// divided the frame's scale out would not round-trip through it. Dividing an actor scaled 1 by a
+	// frame scaled 2 would report 0.5, and feeding that back would resize the actor to half.
 	template <typename RequestType>
-	grpc::Status ResolveActorQueryTransform(const UWorld* World, const RequestType& Request, const TCHAR* RequestName, FTransform& OutTransform)
+	grpc::Status ResolveActorQueryTransform(const UWorld* World, const RequestType& Request, const TCHAR* RequestName,
+		FTransform& OutTransform, FVector* OutWorldScale = nullptr)
 	{
 		AActor* Actor = nullptr;
 		const grpc::Status ActorStatus = ResolveActor(World, Request.actor(), RequestName, Actor);
@@ -735,6 +741,11 @@ namespace
 		OutTransform = Request.relative_to_actor().empty()
 			? Actor->GetActorTransform()
 			: Actor->GetActorTransform().GetRelativeTransform(Frame);
+
+		if (OutWorldScale)
+		{
+			*OutWorldScale = Actor->GetActorScale3D();
+		}
 
 		return grpc::Status_OK;
 	}
@@ -1106,7 +1117,8 @@ void UTempoWorldControlServiceSubsystem::SetComponentScale3D(const TempoWorld::S
 void UTempoWorldControlServiceSubsystem::GetActorTransform(const TempoWorld::GetActorTransformRequest& Request, const TResponseDelegate<GetTransformResponse>& ResponseContinuation) const
 {
 	FTransform Transform;
-	const grpc::Status Status = ResolveActorQueryTransform(GetWorld(), Request, TEXT("GetActorTransform"), Transform);
+	FVector WorldScale = FVector::OneVector;
+	const grpc::Status Status = ResolveActorQueryTransform(GetWorld(), Request, TEXT("GetActorTransform"), Transform, &WorldScale);
 	if (!Status.ok())
 	{
 		ResponseContinuation.ExecuteIfBound(GetTransformResponse(), Status);
@@ -1115,10 +1127,9 @@ void UTempoWorldControlServiceSubsystem::GetActorTransform(const TempoWorld::Get
 
 	GetTransformResponse Response;
 	*Response.mutable_transform() = FromUnrealTransform(Transform);
-	// Absolute, never expressed in relative_to_actor's frame - the same rule SetActorTransform's
-	// scale follows, so the pair round-trips. GetRelativeTransform's scale division is skipped
-	// entirely by reading the actor's world scale directly.
-	*Response.mutable_scale() = FromUnrealScale(Transform.GetScale3D());
+	// The actor's own world scale, not Transform's - Transform is expressed in relative_to_actor's
+	// frame, and scale is never composed through that frame on the way in or the way out.
+	*Response.mutable_scale() = FromUnrealScale(WorldScale);
 
 	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
 }
