@@ -35,6 +35,18 @@ using SetComponentTransformRequest = TempoWorld::SetComponentTransformRequest;
 using SetComponentLocationRequest = TempoWorld::SetComponentLocationRequest;
 using SetComponentRotationRequest = TempoWorld::SetComponentRotationRequest;
 using SetComponentScale3DRequest = TempoWorld::SetComponentScale3DRequest;
+using GetActorTransformRequest = TempoWorld::GetActorTransformRequest;
+using GetActorLocationRequest = TempoWorld::GetActorLocationRequest;
+using GetActorRotationRequest = TempoWorld::GetActorRotationRequest;
+using GetActorScale3DRequest = TempoWorld::GetActorScale3DRequest;
+using GetComponentTransformRequest = TempoWorld::GetComponentTransformRequest;
+using GetComponentLocationRequest = TempoWorld::GetComponentLocationRequest;
+using GetComponentRotationRequest = TempoWorld::GetComponentRotationRequest;
+using GetComponentScale3DRequest = TempoWorld::GetComponentScale3DRequest;
+using GetTransformResponse = TempoWorld::GetTransformResponse;
+using GetLocationResponse = TempoWorld::GetLocationResponse;
+using GetRotationResponse = TempoWorld::GetRotationResponse;
+using GetScale3DResponse = TempoWorld::GetScale3DResponse;
 using ActivateComponentRequest = TempoWorld::ActivateComponentRequest;
 using DeactivateComponentRequest = TempoWorld::DeactivateComponentRequest;
 using GetAllActorsResponse = TempoWorld::GetAllActorsResponse;
@@ -122,17 +134,41 @@ FTransform ToUnrealTransform(const TempoCore::Transform& Transform)
 	return FTransform(ToUnrealRotation(Transform.rotation()), ToUnrealLocation(Transform.location()));
 }
 
+TempoCore::Vector FromUnrealLocation(const FVector& Location)
+{
+	const FVector OutLocation = QuantityConverter<CM2M,L2R>::Convert(Location);
+	TempoCore::Vector OutVector;
+	OutVector.set_x(OutLocation.X);
+	OutVector.set_y(OutLocation.Y);
+	OutVector.set_z(OutLocation.Z);
+	return OutVector;
+}
+
+TempoCore::Rotation FromUnrealRotation(const FRotator& Rotation)
+{
+	const FRotator OutRotation = QuantityConverter<Deg2Rad,L2R>::Convert(Rotation);
+	TempoCore::Rotation OutProtoRotation;
+	OutProtoRotation.set_r(OutRotation.Roll);
+	OutProtoRotation.set_p(OutRotation.Pitch);
+	OutProtoRotation.set_y(OutRotation.Yaw);
+	return OutProtoRotation;
+}
+
+// The inverse of ToUnrealScale, and unconverted for the same reason.
+TempoCore::Vector FromUnrealScale(const FVector& Scale)
+{
+	TempoCore::Vector OutVector;
+	OutVector.set_x(Scale.X);
+	OutVector.set_y(Scale.Y);
+	OutVector.set_z(Scale.Z);
+	return OutVector;
+}
+
 TempoCore::Transform FromUnrealTransform(const FTransform& Transform)
 {
 	TempoCore::Transform OutTransform;
-	const FVector OutLocation = QuantityConverter<CM2M,L2R>::Convert(Transform.GetLocation());
-	const FRotator OutRotation = QuantityConverter<Deg2Rad,L2R>::Convert(Transform.GetRotation().Rotator());
-	OutTransform.mutable_location()->set_x(OutLocation.X);
-	OutTransform.mutable_location()->set_y(OutLocation.Y);
-	OutTransform.mutable_location()->set_z(OutLocation.Z);
-	OutTransform.mutable_rotation()->set_r(OutRotation.Roll);
-	OutTransform.mutable_rotation()->set_p(OutRotation.Pitch);
-	OutTransform.mutable_rotation()->set_y(OutRotation.Yaw);
+	*OutTransform.mutable_location() = FromUnrealLocation(Transform.GetLocation());
+	*OutTransform.mutable_rotation() = FromUnrealRotation(Transform.GetRotation().Rotator());
 	return OutTransform;
 }
 
@@ -158,6 +194,14 @@ void UTempoWorldControlServiceSubsystem::RegisterServices(FTempoServer& Server)
 		SimpleRequestHandler(&WorldControlAsyncService::RequestGetComponentProperties, &UTempoWorldControlServiceSubsystem::GetComponentProperties),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestGetActorFunctions, &UTempoWorldControlServiceSubsystem::GetActorFunctions),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestGetComponentFunctions, &UTempoWorldControlServiceSubsystem::GetComponentFunctions),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestGetActorTransform, &UTempoWorldControlServiceSubsystem::GetActorTransform),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestGetActorLocation, &UTempoWorldControlServiceSubsystem::GetActorLocation),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestGetActorRotation, &UTempoWorldControlServiceSubsystem::GetActorRotation),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestGetActorScale3D, &UTempoWorldControlServiceSubsystem::GetActorScale3D),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestGetComponentTransform, &UTempoWorldControlServiceSubsystem::GetComponentTransform),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestGetComponentLocation, &UTempoWorldControlServiceSubsystem::GetComponentLocation),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestGetComponentRotation, &UTempoWorldControlServiceSubsystem::GetComponentRotation),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestGetComponentScale3D, &UTempoWorldControlServiceSubsystem::GetComponentScale3D),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestActivateComponent, &UTempoWorldControlServiceSubsystem::ActivateComponent),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestDeactivateComponent, &UTempoWorldControlServiceSubsystem::DeactivateComponent),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetBoolProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetBoolPropertyRequest>),
@@ -595,12 +639,13 @@ namespace
 	}
 
 	// A component-level request names an actor and a scene component on it. The root component is
-	// off limits: it *is* the actor's transform, so ActorRpcName says what to call instead.
-	grpc::Status ResolveSceneComponent(const UWorld* World, const std::string& ActorName, const std::string& ComponentName,
-		const TCHAR* RequestName, const TCHAR* ActorRpcName, USceneComponent*& OutComponent)
+	// included here: only the setters have a reason to refuse it (see ResolveSceneComponent), and
+	// they layer that refusal on top. OutActor is handed back because a component-level request
+	// that resolves a reference frame needs the owner too.
+	grpc::Status FindSceneComponent(const UWorld* World, const std::string& ActorName, const std::string& ComponentName,
+		const TCHAR* RequestName, AActor*& OutActor, USceneComponent*& OutComponent)
 	{
-		AActor* Actor = nullptr;
-		const grpc::Status ActorStatus = ResolveActor(World, ActorName, RequestName, Actor);
+		const grpc::Status ActorStatus = ResolveActor(World, ActorName, RequestName, OutActor);
 		if (!ActorStatus.ok())
 		{
 			return ActorStatus;
@@ -613,18 +658,37 @@ namespace
 		}
 
 		const FString Name(UTF8_TO_TCHAR(ComponentName.c_str()));
-		// Name the actor the way the client can address it again, not by its object name.
-		const FString ActorIdentifier = UTempoCoreUtils::GetActorIdentifier(Actor);
 
-		OutComponent = GetComponentWithName<USceneComponent>(Actor, Name);
+		OutComponent = GetComponentWithName<USceneComponent>(OutActor, Name);
 		if (!OutComponent)
 		{
+			// Name the actor the way the client can address it again, not by its object name.
+			const FString ActorIdentifier = UTempoCoreUtils::GetActorIdentifier(OutActor);
 			const FString ErrorMsg = FString::Printf(TEXT("Failed to find scene component '%s' on actor '%s' for %s request"), *Name, *ActorIdentifier, RequestName);
 			return grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 		}
 
+		return grpc::Status_OK;
+	}
+
+	// What the SetComponent* RPCs resolve with: the root component is off limits to them, because
+	// it *is* the actor's transform, so ActorRpcName says what to call instead. The getters use
+	// FindSceneComponent directly - reading the root is unambiguous in a way that retargeting it
+	// is not, and refusing it would just push callers into a second RPC to learn the same value.
+	grpc::Status ResolveSceneComponent(const UWorld* World, const std::string& ActorName, const std::string& ComponentName,
+		const TCHAR* RequestName, const TCHAR* ActorRpcName, USceneComponent*& OutComponent)
+	{
+		AActor* Actor = nullptr;
+		const grpc::Status Status = FindSceneComponent(World, ActorName, ComponentName, RequestName, Actor, OutComponent);
+		if (!Status.ok())
+		{
+			return Status;
+		}
+
 		if (OutComponent == Actor->GetRootComponent())
 		{
+			const FString Name(UTF8_TO_TCHAR(ComponentName.c_str()));
+			const FString ActorIdentifier = UTempoCoreUtils::GetActorIdentifier(Actor);
 			const FString ErrorMsg = FString::Printf(TEXT("%s cannot address root component '%s' on actor '%s' directly: it is the actor's own transform. Use %s on the owner actor instead."), RequestName, *Name, *ActorIdentifier, ActorRpcName);
 			return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 		}
@@ -644,6 +708,137 @@ namespace
 
 		const FString ErrorMsg = FString::Printf(TEXT("%s must be specified in %s request"), FieldName, RequestName);
 		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+	}
+
+	// An actor-level getter reports the actor's pose expressed in the frame relative_to_actor names,
+	// which is exactly what SetActorTransform's composition undoes - so a value read here and handed
+	// back with the same relative_to_actor reproduces the pose.
+	//
+	// Scale is the exception, and is why OutWorldScale is handed back separately rather than read off
+	// OutTransform: SetActorTransform never composes scale through relative_to_actor, so a getter that
+	// divided the frame's scale out would not round-trip through it. Dividing an actor scaled 1 by a
+	// frame scaled 2 would report 0.5, and feeding that back would resize the actor to half.
+	template <typename RequestType>
+	grpc::Status ResolveActorQueryTransform(const UWorld* World, const RequestType& Request, const TCHAR* RequestName,
+		FTransform& OutTransform, FVector* OutWorldScale = nullptr)
+	{
+		AActor* Actor = nullptr;
+		const grpc::Status ActorStatus = ResolveActor(World, Request.actor(), RequestName, Actor);
+		if (!ActorStatus.ok())
+		{
+			return ActorStatus;
+		}
+
+		FTransform Frame;
+		const grpc::Status FrameStatus = ResolveReferenceFrame(World, Request.relative_to_actor(), RequestName, Frame);
+		if (!FrameStatus.ok())
+		{
+			return FrameStatus;
+		}
+
+		// World space is the common case and is the transform itself, so it skips the division
+		// rather than dividing by identity and taking the float error for nothing.
+		OutTransform = Request.relative_to_actor().empty()
+			? Actor->GetActorTransform()
+			: Actor->GetActorTransform().GetRelativeTransform(Frame);
+
+		if (OutWorldScale)
+		{
+			*OutWorldScale = Actor->GetActorScale3D();
+		}
+
+		return grpc::Status_OK;
+	}
+
+	// A component-level getter reports the component's transform in whichever frame `frame` selects.
+	// Every GetComponent* request carries the same four fields, so they all resolve through here.
+	template <typename RequestType>
+	grpc::Status ResolveComponentQueryTransform(const UWorld* World, const RequestType& Request, const TCHAR* RequestName, FTransform& OutTransform)
+	{
+		AActor* Actor = nullptr;
+		USceneComponent* Component = nullptr;
+		const grpc::Status Status = FindSceneComponent(World, Request.actor(), Request.component(), RequestName, Actor, Component);
+		if (!Status.ok())
+		{
+			return Status;
+		}
+
+		const TempoWorld::ComponentFrame Frame = Request.frame();
+
+		// relative_to_component and socket only mean anything for CF_COMPONENT. Ignoring them under
+		// another frame would quietly answer a different question than the one that was asked.
+		if (Frame != TempoWorld::CF_COMPONENT)
+		{
+			const TCHAR* Stray = !Request.relative_to_component().empty() ? TEXT("relative_to_component")
+				: !Request.socket().empty() ? TEXT("socket") : nullptr;
+			if (Stray)
+			{
+				const FString ErrorMsg = FString::Printf(TEXT("%s is only meaningful with frame CF_COMPONENT in %s request"), Stray, RequestName);
+				return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+			}
+		}
+
+		switch (Frame)
+		{
+		case TempoWorld::CF_WORLD:
+			OutTransform = Component->GetComponentTransform();
+			return grpc::Status_OK;
+
+		case TempoWorld::CF_PARENT:
+			// Read off the component rather than divided out of its world transform: this is the
+			// transform Unreal actually stores and the one SetComponent* writes when relative_to_world
+			// is false, so it round-trips exactly rather than merely closely. It is also already
+			// socket-relative when the component is attached to a socket.
+			OutTransform = Component->GetRelativeTransform();
+			return grpc::Status_OK;
+
+		case TempoWorld::CF_ACTOR:
+			OutTransform = Component->GetComponentTransform().GetRelativeTransform(Actor->GetActorTransform());
+			return grpc::Status_OK;
+
+		case TempoWorld::CF_COMPONENT:
+			{
+				if (Request.relative_to_component().empty())
+				{
+					const FString ErrorMsg = FString::Printf(TEXT("relative_to_component must be specified with frame CF_COMPONENT in %s request"), RequestName);
+					return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+				}
+
+				const FString ActorIdentifier = UTempoCoreUtils::GetActorIdentifier(Actor);
+				const FString FrameName(UTF8_TO_TCHAR(Request.relative_to_component().c_str()));
+				const USceneComponent* FrameComponent = GetComponentWithName<USceneComponent>(Actor, FrameName);
+				if (!FrameComponent)
+				{
+					const FString ErrorMsg = FString::Printf(TEXT("Failed to find relative_to_component '%s' on actor '%s' for %s request"), *FrameName, *ActorIdentifier, RequestName);
+					return grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+				}
+
+				FTransform FrameTransform = FrameComponent->GetComponentTransform();
+				if (!Request.socket().empty())
+				{
+					const FName SocketName(UTF8_TO_TCHAR(Request.socket().c_str()));
+					// GetSocketTransform falls back to the component's own transform for a name it does
+					// not know, which would answer as though no socket had been asked for at all.
+					if (!FrameComponent->DoesSocketExist(SocketName))
+					{
+						const FString ErrorMsg = FString::Printf(TEXT("Failed to find socket '%s' on component '%s' of actor '%s' for %s request"), *SocketName.ToString(), *FrameName, *ActorIdentifier, RequestName);
+						return grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+					}
+					FrameTransform = FrameComponent->GetSocketTransform(SocketName, RTS_World);
+				}
+
+				OutTransform = Component->GetComponentTransform().GetRelativeTransform(FrameTransform);
+				return grpc::Status_OK;
+			}
+
+		default:
+			{
+				// proto3 enums are open, so a client built against a newer proto can name a frame this
+				// build has never heard of. Saying so beats reporting a world transform it did not ask for.
+				const FString ErrorMsg = FString::Printf(TEXT("Unknown frame %d in %s request"), static_cast<int32>(Frame), RequestName);
+				return grpc::Status(grpc::INVALID_ARGUMENT, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+			}
+		}
 	}
 }
 
@@ -917,6 +1112,143 @@ void UTempoWorldControlServiceSubsystem::SetComponentScale3D(const TempoWorld::S
 	}
 
 	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status_OK);
+}
+
+void UTempoWorldControlServiceSubsystem::GetActorTransform(const TempoWorld::GetActorTransformRequest& Request, const TResponseDelegate<GetTransformResponse>& ResponseContinuation) const
+{
+	FTransform Transform;
+	FVector WorldScale = FVector::OneVector;
+	const grpc::Status Status = ResolveActorQueryTransform(GetWorld(), Request, TEXT("GetActorTransform"), Transform, &WorldScale);
+	if (!Status.ok())
+	{
+		ResponseContinuation.ExecuteIfBound(GetTransformResponse(), Status);
+		return;
+	}
+
+	GetTransformResponse Response;
+	*Response.mutable_transform() = FromUnrealTransform(Transform);
+	// The actor's own world scale, not Transform's - Transform is expressed in relative_to_actor's
+	// frame, and scale is never composed through that frame on the way in or the way out.
+	*Response.mutable_scale() = FromUnrealScale(WorldScale);
+
+	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
+}
+
+void UTempoWorldControlServiceSubsystem::GetActorLocation(const TempoWorld::GetActorLocationRequest& Request, const TResponseDelegate<GetLocationResponse>& ResponseContinuation) const
+{
+	FTransform Transform;
+	const grpc::Status Status = ResolveActorQueryTransform(GetWorld(), Request, TEXT("GetActorLocation"), Transform);
+	if (!Status.ok())
+	{
+		ResponseContinuation.ExecuteIfBound(GetLocationResponse(), Status);
+		return;
+	}
+
+	GetLocationResponse Response;
+	*Response.mutable_location() = FromUnrealLocation(Transform.GetLocation());
+
+	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
+}
+
+void UTempoWorldControlServiceSubsystem::GetActorRotation(const TempoWorld::GetActorRotationRequest& Request, const TResponseDelegate<GetRotationResponse>& ResponseContinuation) const
+{
+	FTransform Transform;
+	const grpc::Status Status = ResolveActorQueryTransform(GetWorld(), Request, TEXT("GetActorRotation"), Transform);
+	if (!Status.ok())
+	{
+		ResponseContinuation.ExecuteIfBound(GetRotationResponse(), Status);
+		return;
+	}
+
+	GetRotationResponse Response;
+	*Response.mutable_rotation() = FromUnrealRotation(Transform.GetRotation().Rotator());
+
+	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
+}
+
+void UTempoWorldControlServiceSubsystem::GetActorScale3D(const TempoWorld::GetActorScale3DRequest& Request, const TResponseDelegate<GetScale3DResponse>& ResponseContinuation) const
+{
+	// No reference frame to resolve: GetActorScale3DRequest has no relative_to_actor, exactly as
+	// SetActorScale3DRequest has none.
+	AActor* Actor = nullptr;
+	const grpc::Status Status = ResolveActor(GetWorld(), Request.actor(), TEXT("GetActorScale3D"), Actor);
+	if (!Status.ok())
+	{
+		ResponseContinuation.ExecuteIfBound(GetScale3DResponse(), Status);
+		return;
+	}
+
+	GetScale3DResponse Response;
+	*Response.mutable_scale() = FromUnrealScale(Actor->GetActorScale3D());
+
+	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
+}
+
+void UTempoWorldControlServiceSubsystem::GetComponentTransform(const TempoWorld::GetComponentTransformRequest& Request, const TResponseDelegate<GetTransformResponse>& ResponseContinuation) const
+{
+	FTransform Transform;
+	const grpc::Status Status = ResolveComponentQueryTransform(GetWorld(), Request, TEXT("GetComponentTransform"), Transform);
+	if (!Status.ok())
+	{
+		ResponseContinuation.ExecuteIfBound(GetTransformResponse(), Status);
+		return;
+	}
+
+	GetTransformResponse Response;
+	*Response.mutable_transform() = FromUnrealTransform(Transform);
+	// Unlike the actor's, a component's scale does follow the frame - SetComponentTransform's
+	// scale honors relative_to_world the same way.
+	*Response.mutable_scale() = FromUnrealScale(Transform.GetScale3D());
+
+	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
+}
+
+void UTempoWorldControlServiceSubsystem::GetComponentLocation(const TempoWorld::GetComponentLocationRequest& Request, const TResponseDelegate<GetLocationResponse>& ResponseContinuation) const
+{
+	FTransform Transform;
+	const grpc::Status Status = ResolveComponentQueryTransform(GetWorld(), Request, TEXT("GetComponentLocation"), Transform);
+	if (!Status.ok())
+	{
+		ResponseContinuation.ExecuteIfBound(GetLocationResponse(), Status);
+		return;
+	}
+
+	GetLocationResponse Response;
+	*Response.mutable_location() = FromUnrealLocation(Transform.GetLocation());
+
+	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
+}
+
+void UTempoWorldControlServiceSubsystem::GetComponentRotation(const TempoWorld::GetComponentRotationRequest& Request, const TResponseDelegate<GetRotationResponse>& ResponseContinuation) const
+{
+	FTransform Transform;
+	const grpc::Status Status = ResolveComponentQueryTransform(GetWorld(), Request, TEXT("GetComponentRotation"), Transform);
+	if (!Status.ok())
+	{
+		ResponseContinuation.ExecuteIfBound(GetRotationResponse(), Status);
+		return;
+	}
+
+	GetRotationResponse Response;
+	*Response.mutable_rotation() = FromUnrealRotation(Transform.GetRotation().Rotator());
+
+	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
+}
+
+void UTempoWorldControlServiceSubsystem::GetComponentScale3D(const TempoWorld::GetComponentScale3DRequest& Request, const TResponseDelegate<GetScale3DResponse>& ResponseContinuation) const
+{
+	FTransform Transform;
+	const grpc::Status Status = ResolveComponentQueryTransform(GetWorld(), Request, TEXT("GetComponentScale3D"), Transform);
+	if (!Status.ok())
+	{
+		ResponseContinuation.ExecuteIfBound(GetScale3DResponse(), Status);
+		return;
+	}
+
+	GetScale3DResponse Response;
+	*Response.mutable_scale() = FromUnrealScale(Transform.GetScale3D());
+
+	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
 }
 
 void UTempoWorldControlServiceSubsystem::ActivateComponent(const ActivateComponentRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const

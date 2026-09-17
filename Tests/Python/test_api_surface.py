@@ -28,6 +28,9 @@ EXPECTED_SURFACE = {
         # scale3d, not scale3_d: pascal_to_snake keeps a capital that follows a digit in the
         # same word, so the digit-bearing RPC names stay readable.
         "set_actor_location", "set_actor_rotation", "set_actor_scale3d",
+        "get_actor_transform", "get_actor_location", "get_actor_rotation", "get_actor_scale3d",
+        "get_component_transform", "get_component_location", "get_component_rotation",
+        "get_component_scale3d",
         "set_vector2d_property",
     ],
     "tempo_sim.tempo_movement": [

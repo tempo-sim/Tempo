@@ -56,6 +56,10 @@ for overlap_event in tw.stream_overlap_events(actor="MyActor"):
 Each event names the actor whose subscription fired, the actor that overlapped it, and that
 actor's class.
 
+For a pose on its own — and for anything below the actor, since actor state has no component
+breakdown — reach for the transform getters in
+[Reading transforms back](#reading-transforms-back) instead.
+
 ## Raycasting
 
 `raycast` performs a single ray query against the physics world:
@@ -205,6 +209,76 @@ in. Scale is never composed through it; see
 
 The component RPCs refuse to retarget an actor's root component — it *is* the actor's
 transform — and point you at the matching `set_actor_*` RPC instead.
+
+## Reading transforms back
+
+Every setter above has a getter, reporting in the same units, handedness and frames.
+
+```python
+got = tw.get_actor_transform(actor="MyActor")
+got.transform.location.x    # meters, right-handed
+got.transform.rotation.y    # radians, right-handed
+got.scale.x                 # unitless
+
+tw.get_actor_location(actor="MyActor").location
+tw.get_actor_rotation(actor="MyActor").rotation
+tw.get_actor_scale3d(actor="MyActor").scale
+```
+
+Scale rides in its own field for the same reason it does on the way in: `Geometry.Transform`
+carries a pose and nothing else.
+
+`get_actor_transform`, `get_actor_location` and `get_actor_rotation` take `relative_to_actor` and
+divide out exactly the frame their setters compose in, so a value read in a frame can be handed
+straight back to the matching setter in that frame. `get_actor_scale3d` has no `relative_to_actor`,
+because `set_actor_scale3d` has none either — and for the same reason, `get_actor_transform`'s
+`scale` is always the world scale, whatever frame the pose is reported in.
+
+### Choosing a component's frame
+
+The component getters replace the setters' `relative_to_world` flag with a `frame`, because there
+are more than two useful answers. It defaults to `CF_WORLD`, so asking for nothing asks for the
+world transform.
+
+| `frame` | Reports the component relative to | Setter counterpart |
+| --- | --- | --- |
+| `CF_WORLD` (default) | the world | `relative_to_world=True` |
+| `CF_PARENT` | its attach parent — the transform Unreal actually stores | `relative_to_world=False` |
+| `CF_ACTOR` | the owning actor | — |
+| `CF_COMPONENT` | another component on the same actor, optionally at one of its sockets | — |
+
+```python
+import tempo_sim.TempoWorld.WorldControl_pb2 as WorldControl
+
+# World space, the default.
+tw.get_component_location(actor="OwnerActor", component="MyComponent")
+
+# What set_component_location(relative_to_world=False) writes.
+tw.get_component_transform(actor="OwnerActor", component="MyComponent",
+                           frame=WorldControl.CF_PARENT)
+
+# Where the component sits on its actor, whatever the attachment chain in between.
+tw.get_component_location(actor="OwnerActor", component="MyComponent",
+                          frame=WorldControl.CF_ACTOR)
+
+# Relative to a socket on another component.
+tw.get_component_transform(actor="OwnerActor", component="MyComponent",
+                           frame=WorldControl.CF_COMPONENT,
+                           relative_to_component="SkeletalMesh", socket="hand_r")
+```
+
+`CF_PARENT` already accounts for the socket a component is *attached* to, which is what makes
+`socket` a `CF_COMPONENT` field rather than a free-floating one: reach for it when you want a
+frame the component is not attached to. `relative_to_component` is required under `CF_COMPONENT`
+and rejected under every other frame, rather than being quietly ignored.
+
+A component's `scale` **does** follow `frame`, matching `set_component_scale3d`, whose scale
+honors `relative_to_world`. So a component scaled 3x inside an actor scaled 2x reads as 3 under
+`CF_PARENT` and 6 under `CF_WORLD`.
+
+Unlike the setters, the component getters will address an actor's **root** component: reading it
+is unambiguous in a way that retargeting it is not. It reports the actor's own transform under
+`CF_WORLD`, and identity under `CF_ACTOR`.
 
 ## Getting and setting properties
 
