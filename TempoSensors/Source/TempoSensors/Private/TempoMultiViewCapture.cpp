@@ -24,6 +24,7 @@
 #include "Engine/Engine.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "GameFramework/WorldSettings.h"
+#include "HAL/IConsoleManager.h"
 #include "LegacyScreenPercentageDriver.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInterface.h"
@@ -550,6 +551,37 @@ bool GetViewTranslucentBatches(const FSceneView& View, TArray<FTempoLidarMediaTr
 	}
 
 	return true;
+}
+
+FScopedVolumetricFogHistoryRescale::FScopedVolumetricFogHistoryRescale(float TicksSinceLastRender)
+{
+	check(IsInGameThread());
+	if (TicksSinceLastRender <= 1.0f)
+	{
+		return;
+	}
+	IConsoleVariable* Variable = IConsoleManager::Get().FindConsoleVariable(TEXT("r.VolumetricFog.HistoryWeight"));
+	if (!Variable)
+	{
+		return;
+	}
+	const float Weight = Variable->GetFloat();
+	// Zero keeps no history and one never converges; neither has a meaningful power.
+	if (Weight <= 0.0f || Weight >= 1.0f)
+	{
+		return;
+	}
+	HistoryWeight = Variable;
+	OriginalWeight = Weight;
+	HistoryWeight->SetWithCurrentPriority(FMath::Pow(Weight, TicksSinceLastRender));
+}
+
+FScopedVolumetricFogHistoryRescale::~FScopedVolumetricFogHistoryRescale()
+{
+	if (HistoryWeight)
+	{
+		HistoryWeight->SetWithCurrentPriority(OriginalWeight);
+	}
 }
 
 bool GetRenderedViewSceneTextures(const FSceneView& View, FRDGTextureRef& OutVelocity, FRDGTextureRef& OutSceneDepth, FIntRect& OutViewRect)

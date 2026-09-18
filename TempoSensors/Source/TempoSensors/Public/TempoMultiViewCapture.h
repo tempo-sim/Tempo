@@ -13,6 +13,7 @@
 
 class FScene;
 class FSceneInterface;
+class IConsoleVariable;
 class FSceneUniformBuffer;
 class FSceneView;
 class FSceneViewStateInterface;
@@ -102,4 +103,32 @@ namespace TempoMultiViewCapture
 	// materials are not translucent are filtered by the pass; only the cheap relevance flags are
 	// checked here. Returns false if the view has no render scene.
 	TEMPOSENSORS_API bool GetViewTranslucentBatches(const FSceneView& View, TArray<FTempoLidarMediaTranslucentBatch>& OutBatches, const FScene*& OutScene, FSceneUniformBuffer*& OutSceneUniforms);
+
+	// Game thread. Rescales the volumetric fog history blend for the renders issued while it lives.
+	//
+	// The engine blends each render's fog grid with the previous render's by a fixed weight
+	// (r.VolumetricFog.HistoryWeight, 0.9 by default), which assumes a render every scene tick: the
+	// history then decays over about ten ticks. A view that renders every N ticks blends once per N
+	// ticks and so takes N times longer, in scene time, to converge; moving media trail behind their
+	// emitters and a sensor reads a grid up to seconds old. Raising the weight to the Nth power gives
+	// one blend the decay of N per-tick blends, so the grid converges per tick of scene time whatever
+	// the view's rate, the same correction the motion vector rewarp applies to velocities.
+	//
+	// The variable is render-thread safe, so its changes are applied on the render thread in order
+	// with the render commands enqueued between them: only the renders issued inside the scope see
+	// the rescaled weight. Its set-by priority is kept, so scalability settings still own it. A
+	// factor of one or less, or a weight of zero, changes nothing.
+	class TEMPOSENSORS_API FScopedVolumetricFogHistoryRescale
+	{
+	public:
+		explicit FScopedVolumetricFogHistoryRescale(float TicksSinceLastRender);
+		~FScopedVolumetricFogHistoryRescale();
+
+		FScopedVolumetricFogHistoryRescale(const FScopedVolumetricFogHistoryRescale&) = delete;
+		FScopedVolumetricFogHistoryRescale& operator=(const FScopedVolumetricFogHistoryRescale&) = delete;
+
+	private:
+		IConsoleVariable* HistoryWeight = nullptr;
+		float OriginalWeight = 0.0f;
+	};
 }

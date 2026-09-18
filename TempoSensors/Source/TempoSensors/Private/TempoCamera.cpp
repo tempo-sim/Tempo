@@ -1341,6 +1341,10 @@ void UTempoCamera::RenderCapture()
 	const double CaptureWorldTime = World->GetTimeSeconds();
 	const double SceneTickDeltaSeconds = World->GetDeltaSeconds();
 	bool bAnyTileNeedsRewarp = false;
+	// The volumetric fog history blend is rescaled by the same factor (see
+	// FScopedVolumetricFogHistoryRescale); it is one setting for the family, so the largest tile
+	// factor is used. Tiles capture together, so they only differ when one was just activated.
+	float MaxExtrapolationFactor = 1.0f;
 	for (FTempoCameraTile& Tile : Tiles)
 	{
 		if (!Tile.bActive)
@@ -1445,11 +1449,12 @@ void UTempoCamera::RenderCapture()
 		Tile.bCameraCut = false;
 
 		// A camera cut discards the history there would be to rewarp against.
+		const float ExtrapolationFactor = Setup.bCameraCut
+			? 1.0f
+			: FTempoMotionVectorRewarpViewExtension::ComputeExtrapolationFactor(CaptureWorldTime, Tile.LastCaptureWorldTime, SceneTickDeltaSeconds);
+		MaxExtrapolationFactor = FMath::Max(MaxExtrapolationFactor, ExtrapolationFactor);
 		if (RewarpExtension)
 		{
-			const float ExtrapolationFactor = Setup.bCameraCut
-				? 1.0f
-				: FTempoMotionVectorRewarpViewExtension::ComputeExtrapolationFactor(CaptureWorldTime, Tile.LastCaptureWorldTime, SceneTickDeltaSeconds);
 			RewarpExtension->SetExtrapolationFactor(Setup.ViewState, ExtrapolationFactor);
 			bAnyTileNeedsRewarp |= ExtrapolationFactor > 1.0f;
 		}
@@ -1476,6 +1481,7 @@ void UTempoCamera::RenderCapture()
 		// Single tile, full post-process: render straight to the final RT in LDR. The distortion
 		// PPM packs label/255 into alpha; RGBA8 quantization preserves the byte exactly.
 		FScopedMotionVectorRewarp ScopedRewarp(bAnyTileNeedsRewarp ? RewarpExtension : nullptr);
+		TempoMultiViewCapture::FScopedVolumetricFogHistoryRescale ScopedFogHistory(MaxExtrapolationFactor);
 		TempoMultiViewCapture::RenderTiles(Scene, this, SharedFinalTextureTarget, ViewSetups, ESceneCaptureSource::SCS_FinalColorLDR, ResolutionFraction);
 	}
 	else
@@ -1505,6 +1511,7 @@ void UTempoCamera::RenderCapture()
 
 		{
 			FScopedMotionVectorRewarp ScopedRewarp(bAnyTileNeedsRewarp ? RewarpExtension : nullptr);
+			TempoMultiViewCapture::FScopedVolumetricFogHistoryRescale ScopedFogHistory(MaxExtrapolationFactor);
 			TempoMultiViewCapture::RenderTiles(Scene, this, SharedTextureTarget, ViewSetups, ESceneCaptureSource::SCS_FinalColorHDR, ResolutionFraction);
 		}
 

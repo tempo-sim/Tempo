@@ -8,6 +8,7 @@
 #include "TempoConversion.h"
 #include "TempoCoreUtils.h"
 #include "TempoLidarParticipatingMediaViewExtension.h"
+#include "TempoMotionVectorRewarpViewExtension.h"
 #include "TempoMultiViewCapture.h"
 
 #include "TempoSensors/Common.pb.h"
@@ -306,6 +307,7 @@ void UTempoLidar::DeactivateTile(FTempoLidarTile& Tile)
 	// beams that is not a trivial amount to leave attached to a tile that is no longer rendering.
 	Tile.BeamSamples.Reset();
 	Tile.bCameraCut = false;
+	Tile.LastCaptureWorldTime = -1.0;
 }
 
 void UTempoLidar::ApplyLabelOverridesToTiles()
@@ -1207,6 +1209,12 @@ void UTempoLidar::RenderCapture()
 
 	const double CaptureTime = World->GetTimeSeconds();
 
+	// Ticks since the tiles last rendered, for the volumetric fog history blend (see
+	// FScopedVolumetricFogHistoryRescale). One setting for the family, so the largest tile factor;
+	// tiles capture together and only differ when one was just activated.
+	const double SceneTickDeltaSeconds = World->GetDeltaSeconds();
+	float MaxExtrapolationFactor = 1.0f;
+
 	// Participating media are simulated by a view extension gathered into this render only, whose
 	// results the read picks up next to the atlas. The staging ring is allocated with the atlas;
 	// without it (a reconfigure not yet applied) render without media rather than pair the read with
@@ -1259,6 +1267,13 @@ void UTempoLidar::RenderCapture()
 		Setup.PostProcessBlendWeight = 1.0f;
 		Setup.bCameraCut = Tile.bCameraCut;
 		Tile.bCameraCut = false;
+		// A camera cut discards the history there would be to rescale.
+		if (!Setup.bCameraCut)
+		{
+			MaxExtrapolationFactor = FMath::Max(MaxExtrapolationFactor,
+				FTempoMotionVectorRewarpViewExtension::ComputeExtrapolationFactor(CaptureTime, Tile.LastCaptureWorldTime, SceneTickDeltaSeconds));
+		}
+		Tile.LastCaptureWorldTime = CaptureTime;
 		Setup.ViewLocation = ViewLocation;
 		Setup.ViewRotationMatrix = ViewRotationMatrix;
 		Setup.ProjectionMatrix = ProjectionMatrix;
@@ -1322,7 +1337,10 @@ void UTempoLidar::RenderCapture()
 	{
 		MediaExt->SetActive(true);
 	}
-	TempoMultiViewCapture::RenderTiles(Scene, this, SharedTextureTarget, ViewSetups, ESceneCaptureSource::SCS_FinalColorLDR);
+	{
+		TempoMultiViewCapture::FScopedVolumetricFogHistoryRescale ScopedFogHistory(MaxExtrapolationFactor);
+		TempoMultiViewCapture::RenderTiles(Scene, this, SharedTextureTarget, ViewSetups, ESceneCaptureSource::SCS_FinalColorLDR);
+	}
 	if (bMedia)
 	{
 		MediaExt->SetActive(false);

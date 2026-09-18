@@ -284,6 +284,10 @@ struct FTempoLidarTile
 
 	// One-shot camera-cut flag consumed by the next multi-view render.
 	bool bCameraCut = false;
+
+	// World time of this tile's last render, or negative if it has not rendered since activation.
+	// Sets how many scene ticks the next render's temporal histories have to cover.
+	double LastCaptureWorldTime = -1.0;
 };
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))

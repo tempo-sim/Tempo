@@ -265,6 +265,16 @@ perspective are not covered.
     any other pass, so the first load after enabling the plugin recompiles translucent materials
     once (opaque and masked materials are untouched). No material needs editing.
 
+!!! note "Volumetric fog history at sensor rates"
+
+    The engine blends each render's volumetric fog grid with the previous render's by a fixed
+    per-render weight (`r.VolumetricFog.HistoryWeight`, 0.9 by default), assuming a render every
+    scene tick. A sensor rendering every N ticks would otherwise take N times longer, in scene
+    time, to converge, and moving dust would trail its emitter by up to seconds. Both the lidar
+    and the camera rescale the weight to its Nth power around their own render, so the grid
+    converges per tick of scene time at any sensor rate, as the motion vector rewarp does for
+    velocities. Scalability settings still own the variable; it is restored after each render.
+
 !!! note "Volumetric fog beyond its distance"
 
     The froxel grid only extends to the fog component's `VolumetricFogDistance` (60 m by default).
