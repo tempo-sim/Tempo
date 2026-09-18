@@ -74,6 +74,21 @@ struct FTextureRead
 	// read, so a concurrent FTextureReadQueue::Empty() on the game thread cannot free it first.
 	static void TEMPOSENSORS_API EnqueueStagingCopy(TSharedPtr<FTextureRead> Read, FTextureRenderTargetResource* Source);
 
+	// Render thread. Whether Staging can hold an ImageSize image of PixelBytes-wide pixels: a
+	// staging texture of a previous size or format must never be copied out of, since copying
+	// ImageSize worth of pixels from a smaller surface over-reads it.
+	static bool TEMPOSENSORS_API StagingMatches(const FRHITexture* Staging, const FIntPoint& ImageSize, int32 PixelBytes);
+
+	// Render thread. Map Staging, waiting on Fence, and copy ImageSize rows of PixelBytes-wide pixels
+	// out of it into Dst (tightly packed). Fence may be null when an earlier map has already waited
+	// on the fence behind this copy; the map then waits for the GPU's pending work instead.
+	static void TEMPOSENSORS_API CopyStagingSurface(FRHICommandListImmediate& RHICmdList, FRHITexture* Staging, FRHIGPUFence* Fence, uint8* Dst, const FIntPoint& ImageSize, int32 PixelBytes);
+
+	// Render thread. Called by TTextureReadBase::Read once Image has been copied, before RenderFence
+	// is released and the read is marked complete. A read that carries more than one image copies
+	// the rest here, so a consumer never sees the read complete with part of it missing.
+	virtual void ReadAdditional_RenderThread(FRHICommandListImmediate& RHICmdList) {}
+
 	// The GPU fence behind the staging copy; signals once that copy has completed on the GPU.
 	FGPUFenceRHIRef RenderFence;
 
@@ -123,13 +138,12 @@ struct TTextureReadBase : FTextureRead
 		// pairs a read with an under-sized staging texture, copying ImageSize worth of PixelType out
 		// of it would over-read the mapped surface and crash in _platform_memmove. Skip instead: zero
 		// the image and mark the read complete so consumers get a (blank) frame rather than corruption.
-		const int32 StagingPixelBytes = GPixelFormats[StagingTexture->GetFormat()].BlockBytes;
-		const FIntPoint StagingExtent = StagingTexture->GetSizeXY();
-		if (StagingPixelBytes != sizeof(PixelType) || StagingExtent.X < ImageSize.X || StagingExtent.Y < ImageSize.Y)
+		if (!StagingMatches(StagingTexture, ImageSize, sizeof(PixelType)))
 		{
 			UE_LOG(LogTempoSensors, Warning,
 				TEXT("Skipping texture read: staging texture (%dx%d, %dB/px) does not match read (%dx%d, %dB/px). Dropping frame."),
-				StagingExtent.X, StagingExtent.Y, StagingPixelBytes, ImageSize.X, ImageSize.Y, static_cast<int32>(sizeof(PixelType)));
+				StagingTexture->GetSizeXY().X, StagingTexture->GetSizeXY().Y, GPixelFormats[StagingTexture->GetFormat()].BlockBytes,
+				ImageSize.X, ImageSize.Y, static_cast<int32>(sizeof(PixelType)));
 			FMemory::Memzero(Image.GetData(), Image.Num() * sizeof(PixelType));
 			State = State::EReadComplete;
 			return;
@@ -146,57 +160,9 @@ struct TTextureReadBase : FTextureRead
 		}
 
 		FRHICommandListImmediate& RHICmdList = FRHICommandListImmediate::Get();
+		CopyStagingSurface(RHICmdList, StagingTexture, RenderFence, reinterpret_cast<uint8*>(Image.GetData()), ImageSize, sizeof(PixelType));
 
-		// Note: SurfaceWidth may be larger than ImageSize.X due to GPU row alignment padding.
-		// We must copy row-by-row to account for this pitch difference.
-		void* OutBuffer;
-		int32 SurfaceWidth, SurfaceHeight;
-		{
-			// Everything that waits on the GPU is inside this scope, and nothing else is. Mapping
-			// with an unsignaled fence submits the pending GPU work and blocks until it completes,
-			// on every RHI we ship (Metal submits and blocks until idle, Vulkan flushes the RHI
-			// thread, D3D12 waits on the fence), so this does not depend on the fence having been
-			// polled first, only on the copy having been dispatched: a polled fence means it has
-			// run, and ReadAllAwaitingBlocking flushes once for its whole batch. Traced separately
-			// from the copy below so a profile distinguishes time spent waiting for the GPU from
-			// time spent moving bytes — they respond to completely different fixes.
-			TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsTextureReadMap);
-
-			GDynamicRHI->RHIMapStagingSurface(StagingTexture, RenderFence, OutBuffer, SurfaceWidth, SurfaceHeight, RHICmdList.GetGPUMask().ToIndex());
-		}
-		const int64 SrcPitch = static_cast<int64>(SurfaceWidth) * sizeof(PixelType);
-		const int64 DstPitch = static_cast<int64>(ImageSize.X) * sizeof(PixelType);
-
-		// Copy in parallel over bands of rows. This runs on the render thread inside OnEndFrameRT,
-		// once per sensor per frame, so a single-threaded copy of a whole frame (~16 MB for a 1080p
-		// camera with depth) sits directly on the render thread's critical path. Small reads (a
-		// lidar slice is a few hundred KB) get fewer bands, down to one.
-		const int32 NumRows = ImageSize.Y;
-		const int32 NumBands = ComputeRowBands(GTextureReadCopyRowBands, NumRows, DstPitch, GTextureReadCopyMinBytesPerBand);
-		const uint8* const SrcBase = static_cast<const uint8*>(OutBuffer);
-		uint8* const DstBase = reinterpret_cast<uint8*>(Image.GetData());
-		{
-			TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsTextureReadCopy);
-			ParallelFor(NumBands, [=](int32 Band)
-			{
-				const int32 BeginRow = static_cast<int32>(static_cast<int64>(NumRows) * Band / NumBands);
-				const int32 EndRow = static_cast<int32>(static_cast<int64>(NumRows) * (Band + 1) / NumBands);
-				if (SrcPitch == DstPitch)
-				{
-					// No row padding, so the band's rows are contiguous in both buffers: one copy.
-					FMemory::Memcpy(DstBase + BeginRow * DstPitch, SrcBase + BeginRow * SrcPitch,
-						(EndRow - BeginRow) * DstPitch);
-				}
-				else
-				{
-					for (int32 Row = BeginRow; Row < EndRow; ++Row)
-					{
-						FMemory::Memcpy(DstBase + Row * DstPitch, SrcBase + Row * SrcPitch, DstPitch);
-					}
-				}
-			});
-		}
-		RHICmdList.UnmapStagingSurface(StagingTexture);
+		ReadAdditional_RenderThread(RHICmdList);
 
 		RenderFence.SafeRelease();
 
@@ -383,6 +349,33 @@ private:
 	mutable FRWLock Lock;
 };
 
+// A ring of CPU-readback staging textures, one per read that can be in flight. A sensor owns one
+// per render target it reads back; the base capture component owns the ring for its own target.
+struct TEMPOSENSORS_API FTempoStagingTextureRing
+{
+	// Game thread. (Re)create NumTextures textures of the given size and format on the render
+	// thread. Waits for any previous creation to finish first, since that command writes Textures.
+	void Allocate(const FString& NameBase, int32 NumTextures, int32 SizeX, int32 SizeY, EPixelFormat PixelFormat);
+
+	// Game thread. Drop every texture, after any pending creation has finished.
+	void Release();
+
+	// Game thread. Block until a pending creation has completed, so a caller never pairs a read
+	// with a texture of a previous size or format.
+	void WaitForInit();
+
+	// Game thread. The next texture in the ring; waits for a pending creation first.
+	FTextureRHIRef AcquireNext();
+
+	// Game thread. Whether the ring holds valid textures of the given format.
+	bool IsValid(EPixelFormat PixelFormat);
+
+	TArray<FTextureRHIRef> Textures;
+	FCriticalSection Mutex;
+	int32 NextIndex = 0;
+	FRenderCommandFence InitFence;
+};
+
 UCLASS(Abstract)
 class TEMPOSENSORS_API UTempoSceneCaptureComponent2D : public USceneCaptureComponent2D
 {
@@ -501,14 +494,12 @@ protected:
 	// target is not the inherited TextureTarget call this from their own RT init path.
 	void AllocateStagingTextures(int32 SizeX, int32 SizeY, EPixelFormat PixelFormat);
 
+	// How many staging textures a ring needs: one per read that can be in flight, plus one.
+	int32 GetNumStagingTextures() const;
+
 	// Ring buffer of staging textures for GPU->CPU readback. Each in-flight FTextureRead
 	// gets its own staging texture, preventing tearing when multiple frames are in flight.
-	TArray<FTextureRHIRef> StagingTextures;
-	FCriticalSection StagingTexturesMutex;
-	int32 NextStagingIndex = 0;
-
-	// A fence to indicate that our staging textures have been initialized. Should only be accessed from the Game thread.
-	FRenderCommandFence TextureInitFence;
+	FTempoStagingTextureRing StagingRing;
 
 private:
 	// Starts or restarts the timer that calls MaybeCapture

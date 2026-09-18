@@ -10,6 +10,37 @@ message Range {
   float max = 2;
 }
 
+// Which echo a beam reports when more than one is detected, e.g. a dust cloud in front of a wall.
+// Set on the lidar component (`ReturnMode`); reported in `LidarScanSegment.return_mode`.
+enum LidarReturnMode {
+  // One return per beam: the echo with the highest intensity.
+  LRM_STRONGEST = 0;
+  // One return per beam: the nearest detectable echo.
+  LRM_FIRST = 1;
+  // One return per beam: the farthest detectable echo.
+  LRM_LAST = 2;
+  // Two returns per beam: the strongest echo in the segment's top-level arrays and the other
+  // detectable echo, if any, in `second_return`.
+  LRM_DUAL = 3;
+}
+
+// A second set of per-beam return arrays. Same H-outer, V-inner layout and same encodings as the
+// matching top-level `LidarScanSegment` fields; beams share the segment's azimuths and elevations.
+// A distance of 0 means the beam has no echo in this set.
+message LidarEcho {
+  // Little-endian float32, 4 bytes per beam. 0 = no echo.
+  bytes distances_m = 1;
+  // Little-endian float32 in [0, 1], 4 bytes per beam.
+  bytes intensities = 2;
+  // Little-endian uint32, 4 bytes per beam. 0 for echoes from participating media (dust, smoke,
+  // fog), which carry no semantic label.
+  bytes labels = 3;
+  // 1 byte per beam in [0, 255].
+  bytes reflectivities = 4;
+  // 3 bytes per beam, ordered per the segment's `color_encoding`. Empty when color is disabled.
+  bytes colors = 5;
+}
+
 message LidarScanSegment {
   TempoSensors.MeasurementHeader header = 1;
   // Total number of segments that comprise one full scan (segments share a sequence_id).
@@ -52,6 +83,15 @@ message LidarScanSegment {
   // `distances_m`: reflectivity for return (h, v) is byte (h * vertical_beams + v). Length is
   // horizontal_beams * vertical_beams.
   bytes reflectivities = 15;
+  // The return mode the lidar was in when this segment was produced. Says which echo the top-level
+  // arrays hold when a beam detects more than one (see LidarReturnMode). Segments from a lidar
+  // without participating-media simulation carry at most one echo per beam, so every mode reports
+  // the same returns.
+  LidarReturnMode return_mode = 16;
+  // The second echo per beam. Only populated in LRM_DUAL mode; its arrays are empty otherwise.
+  // Where a beam has both a participating-media echo (dust, smoke, fog) and a surface echo, the
+  // stronger of the two is in the top-level arrays and the other is here.
+  LidarEcho second_return = 17;
 }
 
 message LidarScanRequest {

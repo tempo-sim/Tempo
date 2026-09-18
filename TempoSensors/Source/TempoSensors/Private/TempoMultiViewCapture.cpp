@@ -442,6 +442,53 @@ void RenderTiles(
 	Builder->Execute();
 }
 
+bool GetViewParticipatingMediaInputs(const FSceneView& View, FTempoLidarMediaPassInputs& OutInputs)
+{
+	check(IsInRenderingThread());
+
+	// See GetRenderedViewSceneTextures for why both downcasts hold.
+	const FViewFamilyInfo* ViewFamily = static_cast<const FViewFamilyInfo*>(View.Family);
+	const FSceneTextures* SceneTextures = ViewFamily ? ViewFamily->GetSceneTexturesChecked() : nullptr;
+	if (!SceneTextures || !SceneTextures->Depth.Resolve)
+	{
+		return false;
+	}
+	const FViewInfo& ViewInfo = static_cast<const FViewInfo&>(View);
+
+	OutInputs.FeatureLevel = View.GetFeatureLevel();
+	OutInputs.ViewUniformBuffer = View.ViewUniformBuffer;
+	OutInputs.ViewRect = ViewInfo.ViewRect;
+	OutInputs.SceneDepth = SceneTextures->Depth.Resolve;
+
+	// Mirrors SetupFogUniformParameters (FogRendering.cpp): the height fog constants the fog pass
+	// binds are the view's own, computed by FSceneRenderer::InitFogConstants. When fog is not
+	// rendered for this family they are left at their no-fog defaults, which the shader treats as
+	// full transmittance, so they are safe to pass either way.
+	FTempoLidarMediaFogInputs& Fog = OutInputs.Fog;
+	Fog.ExponentialFogParameters = ViewInfo.ExponentialFogParameters;
+	Fog.ExponentialFogParameters2 = ViewInfo.ExponentialFogParameters2;
+	Fog.ExponentialFogParameters3 = ViewInfo.ExponentialFogParameters3;
+	Fog.MinFogTransmittance = 1.0f - ViewInfo.FogMaxOpacity;
+	Fog.EndDistance = ViewInfo.FogEndDistance;
+	Fog.VolumetricFogStartDistance = ViewInfo.VolumetricFogStartDistance;
+	// Set by ComputeVolumetricFog only when the grid was rendered for this view.
+	Fog.IntegratedLightScattering = ViewInfo.VolumetricFogResources.IntegratedLightScatteringTexture;
+
+	// Local fog volumes are composed analytically (in the height fog pass or their own pass) unless
+	// they were injected into the volumetric fog grid, in which case the grid already carries them.
+	// The view data is only built when local fog volumes render for the view; its instance count
+	// and buffers say whether it was.
+	const FLocalFogVolumeViewData& LFVData = ViewInfo.LocalFogVolumeViewData;
+	const FLocalFogVolumeUniformParameters& LFVParameters = LFVData.UniformParametersStruct;
+	const bool bLocalFogVolumesAnalytic = LFVData.GPUInstanceCount > 0
+		&& LFVParameters.LocalFogVolumeCommon.LocalFogVolumeInstances != nullptr
+		&& LFVParameters.LocalFogVolumeTileDataTexture != nullptr
+		&& !(LFVParameters.LocalFogVolumeCommon.ShouldRenderLocalFogVolumeInVolumetricFog != 0 && Fog.IntegratedLightScattering != nullptr);
+	Fog.LocalFogVolumes = bLocalFogVolumesAnalytic ? &LFVParameters : nullptr;
+
+	return true;
+}
+
 bool GetRenderedViewSceneTextures(const FSceneView& View, FRDGTextureRef& OutVelocity, FRDGTextureRef& OutSceneDepth, FIntRect& OutViewRect)
 {
 	check(IsInRenderingThread());

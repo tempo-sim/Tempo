@@ -9,6 +9,7 @@
 #include "Math/Vector.h"
 #include "RenderGraphFwd.h"
 #include "SceneTypes.h"
+#include "TempoLidarParticipatingMedia.h"
 
 class FSceneInterface;
 class FSceneView;
@@ -84,4 +85,12 @@ namespace TempoMultiViewCapture
 	// renderer's FViewFamilyInfo, hence lives here with the other engine-private mirrors. Returns
 	// false if the family has no initialized scene textures or either texture is missing.
 	TEMPOSENSORS_API bool GetRenderedViewSceneTextures(const FSceneView& View, FRDGTextureRef& OutVelocity, FRDGTextureRef& OutSceneDepth, FIntRect& OutViewRect);
+
+	// Render thread. The inputs the lidar's participating media passes need from a view being
+	// rendered: its rect and the family's resolved scene depth, and the fog the camera's fog pass
+	// would compose for it, read from the renderer's per-view fog constants and resources (the
+	// exponential height fog parameters, the volumetric fog froxel grid if one was rendered, and
+	// the local fog volume data if local fog volumes are composed analytically). Returns false if
+	// the family has no scene textures. Leaves Sensor untouched.
+	TEMPOSENSORS_API bool GetViewParticipatingMediaInputs(const FSceneView& View, FTempoLidarMediaPassInputs& OutInputs);
 }

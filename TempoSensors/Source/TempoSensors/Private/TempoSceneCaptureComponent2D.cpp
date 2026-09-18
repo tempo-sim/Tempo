@@ -65,6 +65,72 @@ void FTextureRead::EnqueueStagingCopy(TSharedPtr<FTextureRead> Read, FTextureRen
 		});
 }
 
+bool FTextureRead::StagingMatches(const FRHITexture* Staging, const FIntPoint& ImageSize, int32 PixelBytes)
+{
+	if (!Staging)
+	{
+		return false;
+	}
+	const int32 StagingPixelBytes = GPixelFormats[Staging->GetFormat()].BlockBytes;
+	const FIntPoint StagingExtent = Staging->GetSizeXY();
+	return StagingPixelBytes == PixelBytes && StagingExtent.X >= ImageSize.X && StagingExtent.Y >= ImageSize.Y;
+}
+
+void FTextureRead::CopyStagingSurface(FRHICommandListImmediate& RHICmdList, FRHITexture* Staging, FRHIGPUFence* Fence, uint8* Dst, const FIntPoint& ImageSize, int32 PixelBytes)
+{
+	check(IsInRenderingThread());
+
+	// Note: SurfaceWidth may be larger than ImageSize.X due to GPU row alignment padding.
+	// We must copy row-by-row to account for this pitch difference.
+	void* OutBuffer;
+	int32 SurfaceWidth, SurfaceHeight;
+	{
+		// Everything that waits on the GPU is inside this scope, and nothing else is. Mapping
+		// with an unsignaled fence submits the pending GPU work and blocks until it completes,
+		// on every RHI we ship (Metal submits and blocks until idle, Vulkan flushes the RHI
+		// thread, D3D12 waits on the fence), so this does not depend on the fence having been
+		// polled first, only on the copy having been dispatched: a polled fence means it has
+		// run, and ReadAllAwaitingBlocking flushes once for its whole batch. Traced separately
+		// from the copy below so a profile distinguishes time spent waiting for the GPU from
+		// time spent moving bytes — they respond to completely different fixes.
+		TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsTextureReadMap);
+
+		GDynamicRHI->RHIMapStagingSurface(Staging, Fence, OutBuffer, SurfaceWidth, SurfaceHeight, RHICmdList.GetGPUMask().ToIndex());
+	}
+	const int64 SrcPitch = static_cast<int64>(SurfaceWidth) * PixelBytes;
+	const int64 DstPitch = static_cast<int64>(ImageSize.X) * PixelBytes;
+
+	// Copy in parallel over bands of rows. This runs on the render thread inside OnEndFrameRT,
+	// once per sensor per frame, so a single-threaded copy of a whole frame (~16 MB for a 1080p
+	// camera with depth) sits directly on the render thread's critical path. Small reads (a
+	// lidar slice is a few hundred KB) get fewer bands, down to one.
+	const int32 NumRows = ImageSize.Y;
+	const int32 NumBands = ComputeRowBands(GTextureReadCopyRowBands, NumRows, DstPitch, GTextureReadCopyMinBytesPerBand);
+	const uint8* const SrcBase = static_cast<const uint8*>(OutBuffer);
+	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsTextureReadCopy);
+		ParallelFor(NumBands, [=](int32 Band)
+		{
+			const int32 BeginRow = static_cast<int32>(static_cast<int64>(NumRows) * Band / NumBands);
+			const int32 EndRow = static_cast<int32>(static_cast<int64>(NumRows) * (Band + 1) / NumBands);
+			if (SrcPitch == DstPitch)
+			{
+				// No row padding, so the band's rows are contiguous in both buffers: one copy.
+				FMemory::Memcpy(Dst + BeginRow * DstPitch, SrcBase + BeginRow * SrcPitch,
+					(EndRow - BeginRow) * DstPitch);
+			}
+			else
+			{
+				for (int32 Row = BeginRow; Row < EndRow; ++Row)
+				{
+					FMemory::Memcpy(Dst + Row * DstPitch, SrcBase + Row * SrcPitch, DstPitch);
+				}
+			}
+		});
+	}
+	RHICmdList.UnmapStagingSurface(Staging);
+}
+
 void FTextureRead::ExtractMeasurementHeader(float TransmissionTime, TempoSensors::MeasurementHeader* MeasurementHeaderOut) const
 {
 	MeasurementHeaderOut->set_sequence_id(SequenceId);
@@ -269,7 +335,7 @@ void UTempoSceneCaptureComponent2D::PinRayTracingSceneUsedThisFrame(FSceneInterf
 
 void UTempoSceneCaptureComponent2D::UpdateSceneCaptureContents(FSceneInterface* Scene, ISceneRenderBuilder& SceneRenderBuilder)
 {
-	TextureInitFence.Wait();
+	StagingRing.WaitForInit();
 
 	EnsureRayTracingReadbackBuffersExpanded(Scene);
 	PinRayTracingSceneUsedThisFrame(Scene);
@@ -293,8 +359,7 @@ void UTempoSceneCaptureComponent2D::UpdateSceneCaptureContents(FSceneInterface* 
 
 	if (ShouldManageOwnReadback())
 	{
-		if (!ensureMsgf(StagingTextures.Num() > 0 && StagingTextures[0].IsValid() && StagingTextures[0]->IsValid(), TEXT("StagingTextures were not valid. Skipping capture.")) ||
-			!ensureMsgf(StagingTextures[0]->GetFormat() == TextureTarget->GetFormat(), TEXT("RenderTarget and StagingTextures did not have same format. Skipping Capture.")))
+		if (!ensureMsgf(StagingRing.IsValid(TextureTarget->GetFormat()), TEXT("StagingTextures were not valid or did not match the RenderTarget format. Skipping capture.")))
 		{
 			return;
 		}
@@ -493,23 +558,32 @@ void UTempoSceneCaptureComponent2D::InitRenderTarget()
 	InitDistortionMap();
 }
 
+int32 UTempoSceneCaptureComponent2D::GetNumStagingTextures() const
+{
+	// At least as many as the max texture queue size, so each in-flight read gets its own.
+	const int32 MaxQueueSize = GetMaxTextureQueueSize();
+	return FMath::Max(2, MaxQueueSize > 0 ? MaxQueueSize + 1 : 2);
+}
+
 void UTempoSceneCaptureComponent2D::AllocateStagingTextures(int32 SizeX, int32 SizeY, EPixelFormat PixelFormat)
 {
-	// Wait for any previous staging texture init render command to complete before modifying
-	// StagingTextures, since the render command accesses the array via raw pointer.
-	TextureInitFence.Wait();
+	StagingRing.Allocate(GetName(), GetNumStagingTextures(), SizeX, SizeY, PixelFormat);
+}
 
-	// Determine how many staging textures to create. We need at least as many as the max
-	// texture queue size to ensure each in-flight read gets its own staging texture.
-	const int32 MaxQueueSize = GetMaxTextureQueueSize();
-	const int32 NumStagingTextures = FMath::Max(2, MaxQueueSize > 0 ? MaxQueueSize + 1 : 2);
+void FTempoStagingTextureRing::Allocate(const FString& NameBase, int32 NumTextures, int32 SizeX, int32 SizeY, EPixelFormat PixelFormat)
+{
+	check(IsInGameThread());
+
+	// Wait for any previous staging texture init render command to complete before modifying
+	// Textures, since the render command accesses the array via raw pointer.
+	InitFence.Wait();
 
 	{
-		FScopeLock StagingTexturesLock(&StagingTexturesMutex);
-		if (NumStagingTextures != StagingTextures.Num())
+		FScopeLock Lock(&Mutex);
+		if (NumTextures != Textures.Num())
 		{
-			StagingTextures.SetNum(NumStagingTextures);
-			NextStagingIndex = 0;
+			Textures.SetNum(NumTextures);
+			NextIndex = 0;
 		}
 	}
 
@@ -524,13 +598,13 @@ void UTempoSceneCaptureComponent2D::AllocateStagingTextures(int32 SizeX, int32 S
 	};
 
 	FInitStagingContext Context = {
-		GetName(),
+		NameBase,
 		SizeX,
 		SizeY,
 		PixelFormat,
-		NumStagingTextures,
-		&StagingTextures,
-		&StagingTexturesMutex
+		NumTextures,
+		&Textures,
+		&Mutex
 	};
 
 	ENQUEUE_RENDER_COMMAND(InitTempoSceneCaptureStagingTextures)(
@@ -562,7 +636,47 @@ void UTempoSceneCaptureComponent2D::AllocateStagingTextures(int32 SizeX, int32 S
 			}
 		});
 
-	TextureInitFence.BeginFence();
+	InitFence.BeginFence();
+}
+
+void FTempoStagingTextureRing::Release()
+{
+	check(IsInGameThread());
+	InitFence.Wait();
+	FScopeLock Lock(&Mutex);
+	Textures.Empty();
+	NextIndex = 0;
+}
+
+void FTempoStagingTextureRing::WaitForInit()
+{
+	check(IsInGameThread());
+	InitFence.Wait();
+}
+
+FTextureRHIRef FTempoStagingTextureRing::AcquireNext()
+{
+	// Allocate recreates the staging textures on the render thread asynchronously and only
+	// BeginFence()s. Block here until that completes so we never hand out a slot still holding a
+	// previous-generation texture. Otherwise a capture built against the new ImageSize/PixelType (e.g.
+	// after a SizeXY resize or the lidar's 8B->16B color-mode format change) could be paired with a
+	// stale, smaller staging texture, and FTextureRead::Read's staging-surface memcpy would over-read
+	// and crash in _platform_memmove. UpdateSceneCaptureContents already waits before its own readback;
+	// the tiled RenderCapture paths reach staging acquisition only through here, so this one wait covers
+	// every caller. Must run on the game thread (all callers do).
+	check(IsInGameThread());
+	InitFence.Wait();
+	check(Textures.Num() > 0);
+	const FTextureRHIRef& Texture = Textures[NextIndex];
+	NextIndex = (NextIndex + 1) % Textures.Num();
+	return Texture;
+}
+
+bool FTempoStagingTextureRing::IsValid(EPixelFormat PixelFormat)
+{
+	check(IsInGameThread());
+	InitFence.Wait();
+	return Textures.Num() > 0 && Textures[0].IsValid() && Textures[0]->IsValid() && Textures[0]->GetFormat() == PixelFormat;
 }
 
 float GetTimerPeriod(float RateHz)
@@ -615,18 +729,5 @@ void UTempoSceneCaptureComponent2D::MaybeCapture()
 
 FTextureRHIRef UTempoSceneCaptureComponent2D::AcquireNextStagingTexture()
 {
-	// AllocateStagingTextures recreates the staging textures on the render thread asynchronously and
-	// only BeginFence()s. Block here until that completes so we never hand out a slot still holding a
-	// previous-generation texture. Otherwise a capture built against the new ImageSize/PixelType (e.g.
-	// after a SizeXY resize or the lidar's 8B->16B color-mode format change) could be paired with a
-	// stale, smaller staging texture, and FTextureRead::Read's staging-surface memcpy would over-read
-	// and crash in _platform_memmove. UpdateSceneCaptureContents already waits before its own readback;
-	// the tiled RenderCapture paths reach staging acquisition only through here, so this one wait covers
-	// every caller. Must run on the game thread (all callers do).
-	check(IsInGameThread());
-	TextureInitFence.Wait();
-	check(StagingTextures.Num() > 0);
-	const FTextureRHIRef& Texture = StagingTextures[NextStagingIndex];
-	NextStagingIndex = (NextStagingIndex + 1) % StagingTextures.Num();
-	return Texture;
+	return StagingRing.AcquireNext();
 }

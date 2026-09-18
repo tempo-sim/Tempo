@@ -32,6 +32,13 @@ API at whatever rate you configure.
   horizontal FOV. Up to 240° splits left/right; up to 360° splits left/center/right. Per-beam
   intrinsic calibration (`FLidarBeamCalibration`) supports vendor-style channel files (per-channel
   elevation + azimuth offset).
+- **Dust, smoke and fog in the lidar, from what the camera renders.** With
+  `bSimulateParticipatingMedia` on, whatever attenuates the camera's view attenuates the beam too,
+  with no per-effect setup: the exponential height fog, the volumetric fog grid (and so every
+  Volume-domain material primitive injected into it) and local fog volumes. Surface returns come
+  back weaker through the medium or not at all, the medium produces echoes of its own, and a
+  configurable return mode picks the strongest / first / last echo or reports two per beam.
+  [See below](#participating-media).
 - **Tile seam handling.** Multi-tile cameras feather across seams (`FeatherPixels`, default 16)
   using a precomputed resolve map, hiding per-tile TAA / auto-exposure history discontinuities.
   Depth and label channels — neither safely averageable — switch ownership at the centerline
@@ -192,6 +199,66 @@ many to expect per frame) carries per-return `distances`, `intensities`, `labels
 `elevations`. Azimuths and elevations are negated from Unreal's internal left-handed Z-down
 convention so client-side point-cloud math renders right-handed Z-up directly.
 
+### Participating media: dust, smoke and fog { #participating-media }
+
+The lidar is a scene-depth sensor, and none of the things a camera renders as dust, smoke or fog
+write depth. The `Participating Media` settings on `UTempoLidar` close that gap without any
+per-effect setup: if it attenuates the camera's view, it attenuates the beam.
+
+**How it works.** The color of a pixel is a line integral over everything translucent along its
+ray, so it cannot be inverted into "the depth of the dust". Instead, for every rendered pixel the
+lidar rebuilds the transmittance profile along the ray from the same data the camera's fog pass
+renders from, evaluated at many ranges instead of at the one range of the opaque surface: the
+exponential height fog (a closed-form integral), the volumetric fog froxel grid (whose alpha is the
+eye-to-froxel transmittance the engine has already integrated, including every primitive with a
+Volume-domain material and, when so configured, local fog volumes) and local fog volumes composed
+analytically. The profile is discretized into log-spaced range bins and resolved with a simple
+sensor model:
+
+- the surface return is attenuated by the two-way transmittance to the surface, and dropped when
+  it falls below `MinDetectableIntensity`;
+- the medium's backscatter is integrated bin by bin, weighted by the two-way transmittance to the
+  bin and the sensor's own range falloff, into one medium echo whose intensity is the total and
+  whose range is drawn from that distribution. The range-squared and transmittance weights are why
+  real lidars see fog returns cluster close to the sensor; nothing is tuned to produce that.
+
+Everything runs on the GPU inside the lidar's own render (two small compute passes per tile) and
+comes back with the scan; the CPU side only chooses which echo to report.
+
+**Settings** (all on the lidar component, category `Participating Media`):
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `bSimulateParticipatingMedia` | off | Master switch. Off, no extra pass runs and the output is unchanged. On, the lidar's render also renders fog (its color is discarded) so the profile has something to read. |
+| `MediaExtinctionScale` | 1.0 | Visual opacity → lidar optical depth. 1 means what the camera sees is what the beam sees, which holds for fog and dust (particles large compared to the wavelength). Fine smoke scatters less in the near infrared: use less than 1. |
+| `MediaBackscatter` | 0.1 | How much of what the medium takes out of the beam comes back to the sensor, as a fraction of a perpendicular surface's return. Sets the intensity of medium echoes and the `reflectivities` byte they report. |
+| `MinDetectableIntensity` | 0.01 | Echoes weaker than this are not reported, whether from a surface seen through the medium or from the medium itself. Only applied when media are simulated. |
+| `bStochasticMediaReturns` | on | Draw each beam's medium echo range at random from its return distribution (reproducible per `sequence_id`), so returns spread through the medium as a real sensor's do. Off, each beam reports the median range, a clean shell. |
+| `MediaRangeBins` | 64 | Range bins per beam, log-spaced out to `MaxDistance`. More bins place medium echoes more precisely at 4 bytes per bin per rendered pixel. |
+| `ReturnMode` | Strongest | Which echo a beam reports when it detects more than one: `Strongest`, `First` (nearest), `Last` (farthest) or `Dual` (two per beam). Without media every mode reports the same returns. |
+
+**Output.** `LidarScanSegment.return_mode` reports the mode. In `Dual` mode the strongest echo of
+each beam is in the top-level arrays and the other, if any, is in `second_return`, a `LidarEcho`
+with the same layouts and encodings (`distances_m`, `intensities`, `labels`, `reflectivities`,
+`colors`; distance 0 = no second echo). Medium echoes carry label 0, the medium's backscatter as
+reflectivity and, in color mode, the pixel's rendered color, which is mostly the medium's where the
+medium is dense.
+
+**What is and is not covered.** Height fog, local fog volumes and anything injected into the
+volumetric fog grid (Volume-domain materials on meshes or Niagara mesh particles) are covered by
+the passes described above. Rasterized translucency, that is Niagara sprites and translucent meshes
+with an ordinary translucent material, is the subject of the next phase: it is re-rasterized with
+a plugin-owned material pixel shader that adds each fragment's opacity to the profile at its depth.
+Heterogeneous volumes (sparse volume textures) and the sky atmosphere's aerial perspective are not
+covered.
+
+!!! note "Volumetric fog beyond its distance"
+
+    The froxel grid only extends to the fog component's `VolumetricFogDistance` (60 m by default).
+    Beyond it the camera falls back to the analytic height fog, and so does the lidar, so a
+    Volume-domain dust cloud past that distance is invisible to both. Raise the distance on the
+    fog component if you need it further out.
+
 !!! warning "Per-return payloads are `bytes`, not repeated floats"
 
     Since API v0.2.0 the per-return and per-pixel arrays are opaque `bytes` blobs, so a client can
@@ -324,6 +391,10 @@ running a scene fast and then dropping into lockstep for the frames you actually
 - The plugin patches an `FRayTracingScene` engine bug
   (`bEnableRayTracingSceneReadbackBuffersOverrunWorkaround`, on by default) that otherwise crashes
   when many ray-tracing-using scene captures run in one frame.
+- Lidar participating media add, per tile, the engine's fog passes (already paid in color mode;
+  new in no-color mode, where fog is otherwise disabled), a compute pass that evaluates the fog at
+  `MediaRangeBins` ranges per pixel, a resolve pass, an 8-byte-per-pixel second readback and a
+  transient 3D texture of `MediaRangeBins` × 4 bytes per rendered pixel. Off, none of it exists.
 
 ## Architecture, briefly
 
@@ -355,6 +426,10 @@ The full sensor frame for a camera is approximately:
 6. **Staging copy + GPU fence** → readback target.
 
 For lidar it is simpler: one multi-view render straight into a packed atlas, one staging copy.
+With participating media on, a view extension gathered into that render alone adds two compute
+passes per tile before post-processing (see `TempoLidarParticipatingMedia.usf`) and writes an
+8-byte-per-pixel results texture that is copied to its own staging texture behind the atlas copy,
+under the same fence.
 
 !!! warning "Pinned engine version"
 

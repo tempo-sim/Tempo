@@ -648,13 +648,41 @@ fn viridis(t: f32) -> [f32; 3] {
     ]
 }
 
+// One set of per-beam return arrays: the segment's top-level arrays, or its `second_return`.
+#[derive(Default)]
+struct LidarReturns {
+    distances: Vec<f32>,
+    intensities: Vec<f32>,
+}
+
+impl LidarReturns {
+    fn clear(&mut self) {
+        self.distances.clear();
+        self.intensities.clear();
+    }
+
+    fn extend(&mut self, distances_m: &[u8], intensities: &[u8]) {
+        // The scalar fields are packed little-endian float32 blobs; reinterpret to f32 on append.
+        self.distances.extend(f32s_from_le_bytes(distances_m));
+        self.intensities.extend(f32s_from_le_bytes(intensities));
+    }
+
+    fn num_returns(&self) -> usize {
+        self.distances.iter().filter(|d| d.is_finite() && **d > 0.0).count()
+    }
+}
+
 #[derive(Default)]
 struct LidarAccumulator {
     sequence_id: Option<u64>,
     expected_segments: i32,
     received_segments: i32,
-    distances: Vec<f32>,
-    intensities: Vec<f32>,
+    return_mode: i32,
+    first: LidarReturns,
+    // Populated only in dual return mode (`LidarReturnMode::LrmDual`): the other echo of each
+    // beam, e.g. the wall behind a dust cloud, or the dust in front of a wall. Beams without a
+    // second echo have distance 0 here. Shares `azimuths` / `elevations` with `first`.
+    second: LidarReturns,
     azimuths: Vec<f32>,
     elevations: Vec<f32>,
 }
@@ -667,30 +695,51 @@ impl LidarAccumulator {
             _ => true,
         };
         if restart {
-            self.distances.clear();
-            self.intensities.clear();
+            self.first.clear();
+            self.second.clear();
             self.azimuths.clear();
             self.elevations.clear();
             self.received_segments = 0;
             self.sequence_id = id;
             self.expected_segments = seg.scan_count;
+            self.return_mode = seg.return_mode;
         }
-        // The scalar fields are packed little-endian float32 blobs; reinterpret to f32 on append.
-        self.distances.extend(f32s_from_le_bytes(&seg.distances_m));
-        self.intensities.extend(f32s_from_le_bytes(&seg.intensities));
+        self.first.extend(&seg.distances_m, &seg.intensities);
+        // A segment from a lidar in dual mode carries a second echo per beam; keep the second
+        // arrays aligned with the first by padding "no echo" when a segment has none.
+        match &seg.second_return {
+            Some(second) if !second.distances_m.is_empty() => {
+                self.second.extend(&second.distances_m, &second.intensities);
+            }
+            _ => {
+                let n = seg.distances_m.len() / 4;
+                self.second.distances.extend(std::iter::repeat(0.0).take(n));
+                self.second.intensities.extend(std::iter::repeat(0.0).take(n));
+            }
+        }
         self.azimuths.extend(f32s_from_le_bytes(&seg.azimuths_rad));
         self.elevations.extend(f32s_from_le_bytes(&seg.elevations_rad));
         self.received_segments += 1;
         self.expected_segments > 0 && self.received_segments == self.expected_segments
     }
 
-    fn build_cloud(&self) -> PointCloud {
-        let n = self.distances.len();
-        let mut points = Vec::with_capacity(n);
-        let mut colors = Vec::with_capacity(n);
+    fn return_mode_label(&self) -> &'static str {
+        use tempo_sim::proto::tempo_sensors::LidarReturnMode;
+        match LidarReturnMode::try_from(self.return_mode) {
+            Ok(LidarReturnMode::LrmFirst) => "first",
+            Ok(LidarReturnMode::LrmLast) => "last",
+            Ok(LidarReturnMode::LrmDual) => "dual",
+            _ => "strongest",
+        }
+    }
+
+    // Points of one return set, placed with the shared beam angles. `color` maps a normalized
+    // intensity to a color.
+    fn points_of(&self, returns: &LidarReturns, color: impl Fn(f32) -> [f32; 3], points: &mut Vec<[f32; 3]>, colors: &mut Vec<[f32; 3]>) {
+        let n = returns.distances.len().min(self.azimuths.len()).min(self.elevations.len());
         let mut mn = f32::INFINITY;
         let mut mx = f32::NEG_INFINITY;
-        for &i in &self.intensities {
+        for &i in &returns.intensities {
             if i.is_finite() {
                 if i < mn {
                     mn = i;
@@ -706,7 +755,7 @@ impl LidarAccumulator {
         }
         let span = (mx - mn).max(1e-6);
         for i in 0..n {
-            let d = self.distances[i];
+            let d = returns.distances[i];
             if !d.is_finite() || d <= 0.0 {
                 continue;
             }
@@ -716,11 +765,31 @@ impl LidarAccumulator {
             let x = d * c_el * az.cos();
             let y = d * c_el * az.sin();
             let z = d * el.sin();
-            let t = ((self.intensities[i] - mn) / span).clamp(0.0, 1.0);
+            let t = ((returns.intensities[i] - mn) / span).clamp(0.0, 1.0);
             points.push([x, y, z]);
-            colors.push(viridis(t));
+            colors.push(color(t));
         }
+    }
+
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
+    fn build_cloud(&self) -> PointCloud {
+        let n = self.first.distances.len() + self.second.distances.len();
+        let mut points = Vec::with_capacity(n);
+        let mut colors = Vec::with_capacity(n);
+        // First returns in viridis by intensity; second returns in a magenta ramp so the two echoes
+        // of a beam (dust and the surface behind it) can be told apart.
+        self.points_of(&self.first, viridis, &mut points, &mut colors);
+        self.points_of(&self.second, |t| [0.6 + 0.4 * t, 0.1, 0.5 + 0.5 * t], &mut points, &mut colors);
         PointCloud { points, colors }
+    }
+
+    fn summary(&self) -> String {
+        format!(
+            "{} returns ({} mode), {} second returns",
+            self.first.num_returns(),
+            self.return_mode_label(),
+            self.second.num_returns()
+        )
     }
 }
 
@@ -753,6 +822,7 @@ async fn stream_lidar(sensor: AvailableSensor) {
             }
         };
     let mut accumulator = LidarAccumulator::default();
+    let mut last_summary = std::time::Instant::now();
     while let Some(item) = stream.next().await {
         match item {
             Ok(seg) => {
@@ -760,6 +830,10 @@ async fn stream_lidar(sensor: AvailableSensor) {
                     if let Some(s) = viewer {
                         let cloud = accumulator.build_cloud();
                         let _ = s.send(LidarMsg::Update(key.clone(), cloud));
+                    } else if last_summary.elapsed() >= std::time::Duration::from_secs(1) {
+                        // No viewer on this platform: report what each scan carried instead.
+                        println!("[{}] {}", key, accumulator.summary());
+                        last_summary = std::time::Instant::now();
                     }
                 }
             }

@@ -100,7 +100,9 @@ Tempo call — see [Connecting](connecting.md#notebooks).
 ## Rust
 
 `ExampleClients/Rust/` mirrors three of the Python playgrounds: `SensorPlayground`,
-`WorldPlayground` and `MovementPlayground`. `SensorPlayground` additionally demonstrates H.264
+`WorldPlayground` and `MovementPlayground`. `SensorPlayground`'s lidar viewer draws a lidar's
+second returns (dual return mode, see [participating media](../plugins/tempo-sensors.md#participating-media))
+in magenta next to the first returns. It additionally demonstrates H.264
 decode via `ffmpeg-next`.
 
 ```bash

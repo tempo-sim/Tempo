@@ -1,5 +1,6 @@
 // Copyright Tempo Simulation, LLC. All Rights Reserved
 
+using System.IO;
 using UnrealBuildTool;
 
 // Hosts TempoSensors' global shaders. Global shader types have to be registered, and the plugin's
@@ -10,6 +11,11 @@ public class TempoSensorsShaders : TempoModuleRules
 	public TempoSensorsShaders(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
+
+		// The lidar's participating media pass binds the renderer's local fog volume parameter struct
+		// (LocalFogVolumeRendering.h), which is header-only but private. Headers only: nothing here
+		// links against Renderer.
+		PrivateIncludePaths.Add(Path.Combine(GetModuleDirectory("Renderer"), "Private"));
 
 		PublicDependencyModuleNames.AddRange(
 			new string[]
