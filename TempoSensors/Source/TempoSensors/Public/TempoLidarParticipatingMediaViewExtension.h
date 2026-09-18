@@ -14,6 +14,8 @@ struct FTempoLidarMediaCaptureSetup
 	// Size of the results texture: the lidar's packed atlas, so every tile's view rect indexes it.
 	FIntPoint ResultsSize = FIntPoint::ZeroValue;
 	FTempoLidarMediaSensorInputs Sensor;
+	// Also rasterize the view's translucent primitives into the profile.
+	bool bIncludeTranslucency = true;
 };
 
 // Runs the lidar's participating media passes (see TempoLidarParticipatingMedia.h) on every view of

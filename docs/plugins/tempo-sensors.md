@@ -35,10 +35,11 @@ API at whatever rate you configure.
 - **Dust, smoke and fog in the lidar, from what the camera renders.** With
   `bSimulateParticipatingMedia` on, whatever attenuates the camera's view attenuates the beam too,
   with no per-effect setup: the exponential height fog, the volumetric fog grid (and so every
-  Volume-domain material primitive injected into it) and local fog volumes. Surface returns come
-  back weaker through the medium or not at all, the medium produces echoes of its own, and a
-  configurable return mode picks the strongest / first / last echo or reports two per beam.
-  [See below](#participating-media).
+  Volume-domain material primitive injected into it), local fog volumes, and rasterized
+  translucency (Niagara sprites and ribbons, mesh particles, translucent meshes) evaluated with
+  their own materials. Surface returns come back weaker through the medium or not at all, the
+  medium produces echoes of its own, and a configurable return mode picks the strongest / first /
+  last echo or reports two per beam. [See below](#participating-media).
 - **Tile seam handling.** Multi-tile cameras feather across seams (`FeatherPixels`, default 16)
   using a precomputed resolve map, hiding per-tile TAA / auto-exposure history discontinuities.
   Depth and label channels — neither safely averageable — switch ownership at the centerline
@@ -212,8 +213,12 @@ renders from, evaluated at many ranges instead of at the one range of the opaque
 exponential height fog (a closed-form integral), the volumetric fog froxel grid (whose alpha is the
 eye-to-froxel transmittance the engine has already integrated, including every primitive with a
 Volume-domain material and, when so configured, local fog volumes) and local fog volumes composed
-analytically. The profile is discretized into log-spaced range bins and resolved with a simple
-sensor model:
+analytically. Rasterized translucency, the way most dust and smoke effects are actually built
+(Niagara sprites and ribbons, mesh particles, translucent meshes, fog cards), has no volumetric
+representation anywhere, so the lidar rasterizes those same primitives a second time with a
+plugin-owned material shader that evaluates each fragment's opacity with its real material (soft
+particle depth fade and all) and adds its optical depth to the profile at the fragment's range.
+The profile is discretized into log-spaced range bins and resolved with a simple sensor model:
 
 - the surface return is attenuated by the two-way transmittance to the surface, and dropped when
   it falls below `MinDetectableIntensity`;
@@ -222,14 +227,16 @@ sensor model:
   whose range is drawn from that distribution. The range-squared and transmittance weights are why
   real lidars see fog returns cluster close to the sensor; nothing is tuned to produce that.
 
-Everything runs on the GPU inside the lidar's own render (two small compute passes per tile) and
-comes back with the scan; the CPU side only chooses which echo to report.
+Everything runs on the GPU inside the lidar's own render (two small compute passes and one
+opacity-only rasterization of the translucent primitives per tile) and comes back with the scan;
+the CPU side only chooses which echo to report.
 
 **Settings** (all on the lidar component, category `Participating Media`):
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `bSimulateParticipatingMedia` | off | Master switch. Off, no extra pass runs and the output is unchanged. On, the lidar's render also renders fog (its color is discarded) so the profile has something to read. |
+| `bMediaIncludesTranslucency` | on | Also rasterize translucent primitives into the profile with their own materials. Additive materials (fire, sparks, glows) add light and block nothing, so they are skipped; modulate materials block what they darken. Off, only fog contributes. |
 | `MediaExtinctionScale` | 1.0 | Visual opacity → lidar optical depth. 1 means what the camera sees is what the beam sees, which holds for fog and dust (particles large compared to the wavelength). Fine smoke scatters less in the near infrared: use less than 1. |
 | `MediaBackscatter` | 0.1 | How much of what the medium takes out of the beam comes back to the sensor, as a fraction of a perpendicular surface's return. Sets the intensity of medium echoes and the `reflectivities` byte they report. |
 | `MinDetectableIntensity` | 0.01 | Echoes weaker than this are not reported, whether from a surface seen through the medium or from the medium itself. Only applied when media are simulated. |
@@ -244,13 +251,19 @@ with the same layouts and encodings (`distances_m`, `intensities`, `labels`, `re
 reflectivity and, in color mode, the pixel's rendered color, which is mostly the medium's where the
 medium is dense.
 
-**What is and is not covered.** Height fog, local fog volumes and anything injected into the
-volumetric fog grid (Volume-domain materials on meshes or Niagara mesh particles) are covered by
-the passes described above. Rasterized translucency, that is Niagara sprites and translucent meshes
-with an ordinary translucent material, is the subject of the next phase: it is re-rasterized with
-a plugin-owned material pixel shader that adds each fragment's opacity to the profile at its depth.
-Heterogeneous volumes (sparse volume textures) and the sky atmosphere's aerial perspective are not
-covered.
+**What is and is not covered.** Height fog, local fog volumes, anything injected into the
+volumetric fog grid (Volume-domain materials on meshes or Niagara mesh particles) and rasterized
+translucency (any translucent, alpha-composite or modulate surface material, on any vertex factory)
+are covered by the passes described above. Opaque and masked particles already write scene depth
+and need nothing. Heterogeneous volumes (sparse volume textures) and the sky atmosphere's aerial
+perspective are not covered.
+
+!!! note "Translucent materials compile two more shaders"
+
+    The translucency pass needs its own vertex and pixel shader for every translucent surface
+    material and vertex factory combination. They are compiled with the material's shader map like
+    any other pass, so the first load after enabling the plugin recompiles translucent materials
+    once (opaque and masked materials are untouched). No material needs editing.
 
 !!! note "Volumetric fog beyond its distance"
 
@@ -393,8 +406,10 @@ running a scene fast and then dropping into lockstep for the frames you actually
   when many ray-tracing-using scene captures run in one frame.
 - Lidar participating media add, per tile, the engine's fog passes (already paid in color mode;
   new in no-color mode, where fog is otherwise disabled), a compute pass that evaluates the fog at
-  `MediaRangeBins` ranges per pixel, a resolve pass, an 8-byte-per-pixel second readback and a
-  transient 3D texture of `MediaRangeBins` × 4 bytes per rendered pixel. Off, none of it exists.
+  `MediaRangeBins` ranges per pixel, an opacity-only rasterization of the visible translucent
+  primitives (bounded by the same overdraw the camera pays for them, with a far cheaper pixel
+  shader), a resolve pass, an 8-byte-per-pixel second readback and a transient 3D texture of
+  `MediaRangeBins` × 4 bytes per rendered pixel. Off, none of it exists.
 
 ## Architecture, briefly
 
@@ -426,10 +441,12 @@ The full sensor frame for a camera is approximately:
 6. **Staging copy + GPU fence** → readback target.
 
 For lidar it is simpler: one multi-view render straight into a packed atlas, one staging copy.
-With participating media on, a view extension gathered into that render alone adds two compute
-passes per tile before post-processing (see `TempoLidarParticipatingMedia.usf`) and writes an
-8-byte-per-pixel results texture that is copied to its own staging texture behind the atlas copy,
-under the same fence.
+With participating media on, a view extension gathered into that render alone adds, per tile
+and before post-processing, a compute pass that builds the fog profile
+(`TempoLidarParticipatingMedia.usf`), a mesh pass over the view's translucent batches with the
+plugin's own material shaders (`TempoLidarMediaTranslucency.usf`) and a resolve pass, and writes
+an 8-byte-per-pixel results texture that is copied to its own staging texture behind the atlas
+copy, under the same fence.
 
 !!! warning "Pinned engine version"
 

@@ -1,0 +1,140 @@
+// Copyright Tempo Simulation, LLC. All Rights Reserved
+
+// Rasterized translucency for the lidar's participating media: Niagara sprites and ribbons, mesh
+// particles, translucent meshes, fog cards. The camera's translucency pass evaluates every such
+// fragment's opacity and blends its color, throwing the depth away. This pass rasterizes the same
+// primitives with the same material, keeps the opacity and the depth, and adds the fragment's
+// optical depth, -ln(1 - opacity), to the beam's profile at its range (see
+// TempoLidarParticipatingMedia.usf for the profile and the sensor model resolved from it).
+//
+// Only the material's opacity is evaluated, not its lighting, so this is a fraction of what the
+// camera pays for the same fragments. Additive materials (fire, sparks, glows) are not compiled
+// for this pass at all: they add light and block none. Modulate materials darken the scene, which
+// reads as blocking what they darken. Substrate materials report the coverage and throughput their
+// translucency is composed from, as the translucent shadow pass does.
+
+// Substrate only applies to materials authored with it, as in TranslucentShadowDepthShaders.usf.
+#if !MATERIAL_IS_SUBSTRATE && SUBSTRATE_ENABLED
+#undef SUBSTRATE_ENABLED
+#define SUBSTRATE_ENABLED 0
+#endif
+
+#include "/Engine/Private/Common.ush"
+#include "/Engine/Generated/Material.ush"
+#include "/Engine/Generated/VertexFactory.ush"
+
+struct FTempoLidarMediaVSToPS
+{
+	FVertexFactoryInterpolantsVSToPS FactoryInterpolants;
+	float4 PixelPosition : TEXCOORD6;
+};
+
+#if VERTEXSHADER
+
+// Mirrors DepthOnlyVertexShader.usf: the vertex factory's world position, the material's offset,
+// and the interpolants the pixel shader needs to evaluate the material.
+void MainVS(
+	FVertexFactoryInput Input,
+	out FTempoLidarMediaVSToPS Output,
+	out float4 OutPosition : SV_POSITION,
+	out FStereoVSOutput StereoOutput)
+{
+	StereoSetupVF(Input, StereoOutput);
+	ResolvedView = ResolveView();
+
+	FVertexFactoryIntermediates VFIntermediates = GetVertexFactoryIntermediates(Input);
+	float4 WorldPos = VertexFactoryGetWorldPosition(Input, VFIntermediates);
+	half3x3 TangentToLocal = VertexFactoryGetTangentToLocal(Input, VFIntermediates);
+	FMaterialVertexParameters VertexParameters = GetMaterialVertexParameters(Input, VFIntermediates, WorldPos.xyz, TangentToLocal);
+
+	WorldPos.xyz += GetMaterialWorldPositionOffset(VertexParameters);
+	ApplyMaterialFirstPersonTransform(VertexParameters, WorldPos.xyz);
+
+	const float4 RasterizedWorldPosition = VertexFactoryGetRasterizedWorldPosition(Input, VFIntermediates, WorldPos);
+	OutPosition = mul(RasterizedWorldPosition, ResolvedView.TranslatedWorldToClip);
+
+	Output.FactoryInterpolants = VertexFactoryGetInterpolantsVSToPS(Input, VFIntermediates, VertexParameters);
+	Output.PixelPosition = WorldPos;
+}
+
+#endif // VERTEXSHADER
+
+#if PIXELSHADER
+
+// The bin of the profile a range along the ray falls in; see BinFarEdge in
+// TempoLidarParticipatingMedia.usf for the spacing this inverts.
+int RangeToBin(float Range)
+{
+	if (Range < TempoLidarMediaPass.FirstBinEdge)
+	{
+		return 0;
+	}
+	const float NumLogBins = float(max(TempoLidarMediaPass.NumBins - 1, 1));
+	const float T = log2(Range / TempoLidarMediaPass.FirstBinEdge) / log2(TempoLidarMediaPass.MaxRange / TempoLidarMediaPass.FirstBinEdge);
+	return 1 + int(floor(T * NumLogBins));
+}
+
+// How much of the light through this fragment the material blocks, in [0, 1].
+float FragmentOpacity(FMaterialPixelParameters MaterialParameters, FPixelMaterialInputs PixelMaterialInputs)
+{
+#if SUBSTRATE_ENABLED && TEMPLATE_USES_SUBSTRATE
+	// Transmittance is what remains outside the coverage plus what the covered part lets through,
+	// as the translucent shadow pass computes it (TranslucentShadowDepthShaders.usf).
+	FSubstrateData SubstrateData = PixelMaterialInputs.GetFrontSubstrateData();
+	FSubstratePixelHeader SubstratePixelHeader = MaterialParameters.GetFrontSubstrateHeader();
+	float Transmittance = 1.0;
+	if (SubstratePixelHeader.SubstrateTree.BSDFCount > 0)
+	{
+		const float3 V = MaterialParameters.CameraVector;
+		const FSubstrateIntegrationSettings Settings = InitSubstrateIntegrationSettings(false, Substrate.bRoughDiffuse, Substrate.PeelLayersAboveDepth, Substrate.bRoughnessTracking);
+		SubstratePixelHeader.SubstrateUpdateTree(V, Settings);
+		const FSubstrateOperator RootOperator = SubstratePixelHeader.SubstrateTree.Operators[SubstrateData.OperatorIndex];
+		Transmittance = (1.0 - RootOperator.Coverage) + RootOperator.Coverage * dot(RootOperator.ThroughputAlongV, (1.0 / 3.0).xxx);
+	}
+	return saturate(1.0 - Transmittance);
+#elif MATERIALBLENDING_MODULATE
+	// A modulate material multiplies the scene by its emissive color: what it darkens, it blocks.
+	return saturate(1.0 - dot(GetMaterialEmissive(PixelMaterialInputs), (1.0 / 3.0).xxx));
+#else
+	return GetMaterialOpacity(PixelMaterialInputs);
+#endif
+}
+
+void MainPS(
+	FTempoLidarMediaVSToPS Inputs,
+	in float4 SvPosition : SV_Position,
+	in FStereoPSInput StereoInput
+	OPTIONAL_IsFrontFace)
+{
+	StereoSetupPS(StereoInput);
+	ResolvedView = ResolveView();
+
+	FMaterialPixelParameters MaterialParameters = GetMaterialPixelParameters(Inputs.FactoryInterpolants, SvPosition);
+	FPixelMaterialInputs PixelMaterialInputs;
+	CalcMaterialParameters(MaterialParameters, PixelMaterialInputs, SvPosition, bIsFrontFace);
+
+	const float Opacity = FragmentOpacity(MaterialParameters, PixelMaterialInputs);
+	if (Opacity <= 0.0)
+	{
+		return;
+	}
+
+	// Range along the ray, like the profile's bins. Fragments past the sensor's range are outside
+	// the profile.
+	const float Range = length(MaterialParameters.WorldPosition_CamRelative);
+	if (Range >= TempoLidarMediaPass.MaxRange)
+	{
+		return;
+	}
+	const int Bin = clamp(RangeToBin(Range), 0, TempoLidarMediaPass.NumBins - 1);
+
+	// A fully opaque fragment still leaves a finite optical depth, well past where anything
+	// transmits, so the fixed-point sum cannot overflow on a few overlapping fragments.
+	const float OpticalDepth = -log(max(1.0 - Opacity, 1e-4));
+	const uint Fixed = uint(min(OpticalDepth * OPTICAL_DEPTH_SCALE, 4294967040.0));
+
+	const int2 LocalPos = int2(SvPosition.xy) - TempoLidarMediaPass.ViewRectMin;
+	InterlockedAdd(TempoLidarMediaPass.OpticalDepthProfile[uint3(LocalPos, Bin)], Fixed);
+}
+
+#endif // PIXELSHADER

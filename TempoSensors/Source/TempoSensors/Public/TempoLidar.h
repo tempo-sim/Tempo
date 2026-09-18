@@ -449,6 +449,14 @@ protected:
 	UPROPERTY(EditAnywhere, Category="Participating Media")
 	bool bSimulateParticipatingMedia = false;
 
+	// Also rasterize translucent primitives (Niagara sprites and ribbons, mesh particles, translucent
+	// meshes) into each beam's profile with their own materials, so a dust or smoke effect built from
+	// translucent sprites attenuates and scatters the beam like fog does. Costs one extra rasterization
+	// of those primitives per tile, evaluating opacity only. Additive materials block nothing and are
+	// skipped.
+	UPROPERTY(EditAnywhere, Category="Participating Media", meta=(EditCondition="bSimulateParticipatingMedia"))
+	bool bMediaIncludesTranslucency = true;
+
 	// Converts the camera's visual opacity into the lidar's optical depth. 1 = what the camera sees is
 	// what the beam sees, which holds for fog and dust, whose particles are large compared to the
 	// wavelength. Fine smoke scatters less in the near infrared than in visible light: below 1.

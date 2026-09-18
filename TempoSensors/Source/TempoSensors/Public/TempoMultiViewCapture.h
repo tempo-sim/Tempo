@@ -11,7 +11,9 @@
 #include "SceneTypes.h"
 #include "TempoLidarParticipatingMedia.h"
 
+class FScene;
 class FSceneInterface;
+class FSceneUniformBuffer;
 class FSceneView;
 class FSceneViewStateInterface;
 class USceneCaptureComponent2D;
@@ -93,4 +95,11 @@ namespace TempoMultiViewCapture
 	// the local fog volume data if local fog volumes are composed analytically). Returns false if
 	// the family has no scene textures. Leaves Sensor untouched.
 	TEMPOSENSORS_API bool GetViewParticipatingMediaInputs(const FSceneView& View, FTempoLidarMediaPassInputs& OutInputs);
+
+	// Render thread. The translucent mesh batches visible in a view being rendered, dynamic (particle
+	// systems and the like) and static, as the renderer gathered them for its own translucency pass,
+	// plus the render scene and the scene uniforms a mesh pass over them needs. Batches whose
+	// materials are not translucent are filtered by the pass; only the cheap relevance flags are
+	// checked here. Returns false if the view has no render scene.
+	TEMPOSENSORS_API bool GetViewTranslucentBatches(const FSceneView& View, TArray<FTempoLidarMediaTranslucentBatch>& OutBatches, const FScene*& OutScene, FSceneUniformBuffer*& OutSceneUniforms);
 }

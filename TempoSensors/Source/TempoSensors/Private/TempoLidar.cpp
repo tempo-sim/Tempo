@@ -1312,6 +1312,7 @@ void UTempoLidar::RenderCapture()
 		Setup.Sensor.IntensitySaturationDistance = static_cast<float>(IntensitySaturationDistance);
 		Setup.Sensor.bStochastic = bStochasticMediaReturns;
 		Setup.Sensor.Seed = static_cast<uint32>(SequenceId);
+		Setup.bIncludeTranslucency = bMediaIncludesTranslucency;
 		MediaExt->SetCaptureSetup(Setup);
 	}
 

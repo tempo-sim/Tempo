@@ -8,6 +8,11 @@
 #include "SceneView.h"
 
 class FLocalFogVolumeUniformParameters;
+struct FMeshBatch;
+class FPrimitiveSceneProxy;
+class FScene;
+class FSceneUniformBuffer;
+class FSceneView;
 
 // Fixed-point scale of the optical depth profile texture: optical depth * this, as uint32. Chosen
 // so that an optical depth of 1 is exactly representable and the largest value (65535) is far past
@@ -94,6 +99,29 @@ struct FTempoLidarMediaPassInputs
 // size and Z the bins, holding each bin's optical depth times GTempoLidarMediaOpticalDepthScale.
 // Filled from the fog the camera renders; other passes may add to it before it is resolved.
 TEMPOSENSORSSHADERS_API FRDGTextureRef AddTempoLidarMediaProfilePass(FRDGBuilder& GraphBuilder, const FTempoLidarMediaPassInputs& Inputs);
+
+// A translucent mesh batch visible in the view, to be rasterized into the profile.
+struct FTempoLidarMediaTranslucentBatch
+{
+	const FMeshBatch* Mesh = nullptr;
+	const FPrimitiveSceneProxy* Proxy = nullptr;
+	uint64 BatchElementMask = ~0ull;
+	// The batch's static mesh id, or -1 for a dynamic batch.
+	int32 StaticMeshId = -1;
+};
+
+// Rasterize the view's translucent primitives with the plugin's own material shaders, which add
+// each fragment's optical depth (-ln(1 - opacity)) to the profile at its range. Batches must stay
+// valid until the graph executes; the renderer's own live for the whole render. Requires the
+// material shaders this module registers, compiled for every translucent material.
+TEMPOSENSORSSHADERS_API void AddTempoLidarMediaTranslucencyPass(
+	FRDGBuilder& GraphBuilder,
+	const FTempoLidarMediaPassInputs& Inputs,
+	const FSceneView& View,
+	const FScene* Scene,
+	FSceneUniformBuffer& SceneUniforms,
+	TArrayView<const FTempoLidarMediaTranslucentBatch> Batches,
+	FRDGTextureRef OpticalDepthProfile);
 
 // Resolve the profile into per-pixel FTempoLidarMediaPixel results, written to Output (a
 // PF_R16G16B16A16_UINT texture with a UAV) inside the view rect.

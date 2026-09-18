@@ -55,6 +55,7 @@
 #endif
 #define private public
 #include "SceneRendering.h"
+#include "ScenePrivate.h"
 #undef private
 
 namespace TempoMultiViewCapture
@@ -485,6 +486,68 @@ bool GetViewParticipatingMediaInputs(const FSceneView& View, FTempoLidarMediaPas
 		&& LFVParameters.LocalFogVolumeTileDataTexture != nullptr
 		&& !(LFVParameters.LocalFogVolumeCommon.ShouldRenderLocalFogVolumeInVolumetricFog != 0 && Fog.IntegratedLightScattering != nullptr);
 	Fog.LocalFogVolumes = bLocalFogVolumesAnalytic ? &LFVParameters : nullptr;
+
+	return true;
+}
+
+bool GetViewTranslucentBatches(const FSceneView& View, TArray<FTempoLidarMediaTranslucentBatch>& OutBatches, const FScene*& OutScene, FSceneUniformBuffer*& OutSceneUniforms)
+{
+	check(IsInRenderingThread());
+
+	const FScene* Scene = View.Family && View.Family->Scene ? View.Family->Scene->GetRenderScene() : nullptr;
+	if (!Scene)
+	{
+		return false;
+	}
+	const FViewInfo& ViewInfo = static_cast<const FViewInfo&>(View);
+	OutScene = Scene;
+	OutSceneUniforms = &ViewInfo.GetSceneUniforms();
+
+	// Dynamic batches: everything the primitives' GetDynamicMeshElements added for this view. The
+	// relevance flags cached with each say whether its material is opaque or masked, which is
+	// enough to skip the bulk of them here.
+	for (const FMeshBatchAndRelevance& MeshBatchAndRelevance : ViewInfo.DynamicMeshElements)
+	{
+		if (MeshBatchAndRelevance.GetHasOpaqueOrMaskedMaterial() || !MeshBatchAndRelevance.GetRenderInMainPass())
+		{
+			continue;
+		}
+		FTempoLidarMediaTranslucentBatch& Batch = OutBatches.AddDefaulted_GetRef();
+		Batch.Mesh = MeshBatchAndRelevance.Mesh;
+		Batch.Proxy = MeshBatchAndRelevance.PrimitiveSceneProxy;
+		Batch.BatchElementMask = ~0ull;
+		Batch.StaticMeshId = -1;
+	}
+
+	// Static batches: the visible primitives' static meshes at the LOD the view selected. The
+	// per-element visibility some meshes carry (landscape sections) is not tracked; every element
+	// is drawn.
+	for (int32 PrimitiveIndex = 0; PrimitiveIndex < Scene->Primitives.Num(); ++PrimitiveIndex)
+	{
+		if (!ViewInfo.PrimitiveVisibilityMap[PrimitiveIndex])
+		{
+			continue;
+		}
+		const FPrimitiveSceneInfo* PrimitiveSceneInfo = Scene->Primitives[PrimitiveIndex];
+		if (!PrimitiveSceneInfo || !PrimitiveSceneInfo->Proxy)
+		{
+			continue;
+		}
+		for (int32 MeshIndex = 0; MeshIndex < PrimitiveSceneInfo->StaticMeshes.Num(); ++MeshIndex)
+		{
+			const FStaticMeshBatchRelevance& Relevance = PrimitiveSceneInfo->StaticMeshRelevances[MeshIndex];
+			if (!Relevance.bUseForMaterial || !ViewInfo.StaticMeshVisibilityMap[Relevance.Id])
+			{
+				continue;
+			}
+			const FStaticMeshBatch& StaticMesh = PrimitiveSceneInfo->StaticMeshes[MeshIndex];
+			FTempoLidarMediaTranslucentBatch& Batch = OutBatches.AddDefaulted_GetRef();
+			Batch.Mesh = &StaticMesh;
+			Batch.Proxy = PrimitiveSceneInfo->Proxy;
+			Batch.BatchElementMask = ~0ull;
+			Batch.StaticMeshId = StaticMesh.Id;
+		}
+	}
 
 	return true;
 }

@@ -32,6 +32,9 @@ public class TempoSensorsShaders : TempoModuleRules
 			{
 				"CoreUObject",
 				"Projects",
+				// The lidar's participating media translucency pass builds and submits mesh draw
+				// commands with the plugin's own material shaders.
+				"Renderer",
 			}
 		);
 	}

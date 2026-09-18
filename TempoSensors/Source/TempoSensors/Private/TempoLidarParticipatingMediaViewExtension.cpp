@@ -102,6 +102,16 @@ void FTempoLidarParticipatingMediaViewExtension::PrePostProcessPass_RenderThread
 	{
 		return;
 	}
+	if (Setup_RenderThread.bIncludeTranslucency)
+	{
+		TArray<FTempoLidarMediaTranslucentBatch> Batches;
+		const FScene* RenderScene = nullptr;
+		FSceneUniformBuffer* SceneUniforms = nullptr;
+		if (TempoMultiViewCapture::GetViewTranslucentBatches(InView, Batches, RenderScene, SceneUniforms) && !Batches.IsEmpty())
+		{
+			AddTempoLidarMediaTranslucencyPass(GraphBuilder, PassInputs, InView, RenderScene, *SceneUniforms, Batches, Profile);
+		}
+	}
 	AddTempoLidarMediaResolvePass(GraphBuilder, PassInputs, Profile, Results);
 
 	// The lidar copies the results to a staging texture with a plain RHI command after the graph.
