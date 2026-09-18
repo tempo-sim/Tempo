@@ -103,73 +103,78 @@ float VolumetricFogStartDistance;
 Texture3D IntegratedLightScattering;
 SamplerState IntegratedLightScatteringSampler;
 
-// The line integral of the exponential fog density along a ray, per unit length. Verbatim from
-// HeightFogCommon.ush, CalculateLineIntegralShared.
-float LineIntegralShared(float FogHeightFalloff, float RayDirectionZ, float RayOriginTerms)
+// The height fog is the sum of two terms, each a density that halves with every 1 / Falloff of
+// height: Density * 2^(-Falloff * (Z - Height)). This is the mean of one term's density over a
+// straight segment that starts at height StartZ and rises by Rise.
+//
+// Along the segment the density decays by 2^-Decay overall, which averages to (1 - 2^-Decay) / Decay
+// of its starting value. The fog pass leaves the integral's 1 / ln 2 out and counts optical depth in
+// halvings rather than e-foldings; both conventions are kept here so the lidar attenuates by the
+// number the camera's fog was drawn with. The closed form is 0 / 0 for a level segment, so near it
+// the first two terms of its series stand in. exp2 is kept inside the range every backend evaluates.
+float HeightFogTermMeanDensity(float Density, float Falloff, float Height, float DensityAtObserver,
+	bool bStartsAtObserver, float StartZ, float Rise)
 {
-	const float Falloff = max(-127.0, FogHeightFalloff * RayDirectionZ);
-	const float LineIntegral = (1.0 - exp2(-Falloff)) / Falloff;
-	const float LineIntegralTaylor = log(2.0) - (0.5 * Pow2(log(2.0))) * Falloff;
-	return RayOriginTerms * (abs(Falloff) > 0.01 ? LineIntegral : LineIntegralTaylor);
+	// The density at the observer comes from the CPU, evaluated in double precision.
+	const float StartDensity = bStartsAtObserver
+		? DensityAtObserver
+		: Density * exp2(-max(Falloff * (StartZ - Height), -127.0));
+
+	const float Decay = max(Falloff * Rise, -127.0);
+	const float Ln2 = log(2.0);
+	const float MeanDecay = abs(Decay) > 0.01 ? (1.0 - exp2(-Decay)) / Decay : Ln2 - 0.5 * Ln2 * Ln2 * Decay;
+	return StartDensity * MeanDecay;
 }
 
-// Transmittance of the exponential height fog from the camera to a point, the alpha channel of
-// HeightFogCommon.ush's GetExponentialHeightFog with the inscattering left out. ExcludeDistance is
-// the range the volumetric fog grid already covers, as CalculateHeightFog passes it.
-float HeightFogTransmittance(float3 WorldPositionRelativeToCamera, float ExcludeDistance)
+// Transmittance of the exponential height fog from the camera to a point: what the fog pass would
+// put in the alpha of an opaque surface there (HeightFogCommon.ush, GetExponentialHeightFog).
+// CoveredDistance is the range along the ray the volumetric fog grid already accounts for.
+float HeightFogTransmittance(float3 CameraToPoint, float CoveredDistance)
 {
-	const float3 WorldCameraOrigin = DFHackToFloat(ResolvedView.WorldCameraOrigin);
-	float3 CameraToReceiver = WorldPositionRelativeToCamera;
+	// The fog is seen from the camera held at or below the fog's max observer height, so the ray to
+	// the point gains whatever height the observer gave up.
+	const float CameraZ = DFHackToFloat(ResolvedView.WorldCameraOrigin).z;
+	const float ObserverZ = min(CameraZ, ExponentialFogParameters.z);
 
-	const float MaxWorldObserverHeight = ExponentialFogParameters.z;
-	const float3 WorldObserverOrigin = float3(WorldCameraOrigin.xy, min(WorldCameraOrigin.z, MaxWorldObserverHeight));
-
-	const float CameraToReceiverLenXYSqr = dot(CameraToReceiver.xy, CameraToReceiver.xy);
-	if (FogEndDistance > 0.0 && CameraToReceiverLenXYSqr > (FogEndDistance * FogEndDistance))
+	// Fog stops building up past its end distance, measured horizontally: a farther point is
+	// fogged as though it sat at that distance along the same ray.
+	float3 ToPoint = CameraToPoint;
+	const float HorizontalSqr = dot(ToPoint.xy, ToPoint.xy);
+	if (FogEndDistance > 0.0 && HorizontalSqr > Pow2(FogEndDistance))
 	{
-		CameraToReceiver *= FogEndDistance / sqrt(max(1.0, CameraToReceiverLenXYSqr));
+		ToPoint *= FogEndDistance / sqrt(max(1.0, HorizontalSqr));
 	}
-
-	CameraToReceiver.z += WorldCameraOrigin.z - WorldObserverOrigin.z;
-	const float CameraToReceiverLengthSqr = dot(CameraToReceiver, CameraToReceiver);
-	const float CameraToReceiverLengthInv = rsqrt(max(CameraToReceiverLengthSqr, 0.00000001));
-	const float CameraToReceiverLength = CameraToReceiverLengthSqr * CameraToReceiverLengthInv;
-
-	float RayOriginTerms = ExponentialFogParameters.x;
-	float RayOriginTermsSecond = ExponentialFogParameters2.x;
-	float RayLength = CameraToReceiverLength;
-	float RayDirectionZ = CameraToReceiver.z;
-
-	ExcludeDistance = max(ExcludeDistance, ExponentialFogParameters.w);
-	if (ExcludeDistance > 0.0)
-	{
-		const float ExcludeIntersectionTime = ExcludeDistance * CameraToReceiverLengthInv;
-		const float CameraToExclusionIntersectionZ = ExcludeIntersectionTime * CameraToReceiver.z;
-		const float ExclusionIntersectionZ = WorldObserverOrigin.z + CameraToExclusionIntersectionZ;
-		const float ExclusionIntersectionToReceiverZ = CameraToReceiver.z - CameraToExclusionIntersectionZ;
-
-		RayLength = (1.0 - ExcludeIntersectionTime) * CameraToReceiverLength;
-		RayDirectionZ = ExclusionIntersectionToReceiverZ;
-
-		const float Exponent = max(-127.0, ExponentialFogParameters.y * (ExclusionIntersectionZ - ExponentialFogParameters3.y));
-		RayOriginTerms = ExponentialFogParameters3.x * exp2(-Exponent);
-
-		const float ExponentSecond = max(-127.0, ExponentialFogParameters2.y * (ExclusionIntersectionZ - ExponentialFogParameters2.w));
-		RayOriginTermsSecond = ExponentialFogParameters2.z * exp2(-ExponentSecond);
-	}
-
-	float LineIntegral = LineIntegralShared(ExponentialFogParameters.y, RayDirectionZ, RayOriginTerms);
-	LineIntegral += LineIntegralShared(ExponentialFogParameters2.y, RayDirectionZ, RayOriginTermsSecond);
-	LineIntegral *= RayLength;
-
-	float Transmittance = max(saturate(exp2(-LineIntegral)), MinFogTransmittance);
+	ToPoint.z += CameraZ - ObserverZ;
+	const float Distance = length(ToPoint);
 
 	// Past the cutoff distance the fog pass draws no fog at all.
-	if (ExponentialFogParameters3.w > 0.0 && CameraToReceiverLength > ExponentialFogParameters3.w)
+	const float CutoffDistance = ExponentialFogParameters3.w;
+	if (CutoffDistance > 0.0 && Distance > CutoffDistance)
 	{
-		Transmittance = 1.0;
+		return 1.0;
 	}
-	return Transmittance;
+
+	// Only the part of the ray beyond the fog's start distance, and beyond the volumetric fog's
+	// coverage, is fogged here.
+	const float FogStart = max(CoveredDistance, ExponentialFogParameters.w);
+	const float FoggedLength = Distance - FogStart;
+	if (FoggedLength <= 0.0)
+	{
+		return 1.0;
+	}
+	const bool bStartsAtObserver = FogStart <= 0.0;
+	const float StartFraction = FogStart / Distance;
+	const float StartZ = ObserverZ + ToPoint.z * StartFraction;
+	const float Rise = ToPoint.z * (1.0 - StartFraction);
+
+	float MeanDensity = HeightFogTermMeanDensity(
+		ExponentialFogParameters3.x, ExponentialFogParameters.y, ExponentialFogParameters3.y, ExponentialFogParameters.x,
+		bStartsAtObserver, StartZ, Rise);
+	MeanDensity += HeightFogTermMeanDensity(
+		ExponentialFogParameters2.z, ExponentialFogParameters2.y, ExponentialFogParameters2.w, ExponentialFogParameters2.x,
+		bStartsAtObserver, StartZ, Rise);
+
+	return max(saturate(exp2(-MeanDensity * FoggedLength)), MinFogTransmittance);
 }
 
 // Transmittance from the camera to the point at Range along the pixel's ray, combining every fog
