@@ -61,7 +61,7 @@ struct MASSTRAFFIC_API FMassTrafficVehicleSimulationParameters : public FMassCon
 	FMassTrafficLanePriorityFilters NextLanePriorityFilters;
 
 	UPROPERTY(EditAnywhere, Category = "Restrictions")
-	TMap<EZoneGraphTurnType, FMassTrafficLanePriorityFilters> TurningLanePriorityFilters;
+	TMap<EMassTrafficTurnType, FMassTrafficLanePriorityFilters> TurningLanePriorityFilters;
 
 	/**
 	 * Where CitySample stores the physics template; this fork keeps it in

@@ -190,6 +190,24 @@ struct FMassTrafficCrosswalkLaneInfo
 	}
 };
 
+/** A crowd entity at one end of the line of crowd entities on a lane. */
+struct FMassTrafficCrowdLaneEndEntity
+{
+	FMassEntityHandle EntityHandle;
+	float DistanceAlongLane = 0.0f;
+	float SpeedAlongLane = 0.0f;
+	float AccelerationAlongLane = 0.0f;
+	float Radius = 0.0f;
+};
+
+/** The crowd entities farthest along (lead) and least far along (tail) a lane.
+ * They are the same entity when the lane holds only one. */
+struct FMassTrafficCrowdLaneEnds
+{
+	FMassTrafficCrowdLaneEndEntity Lead;
+	FMassTrafficCrowdLaneEndEntity Tail;
+};
+
 struct FMassTrafficCoreVehicleInfo
 {
 	FMassTrafficCoreVehicleInfo() = default;
@@ -412,6 +430,10 @@ public:
 
 	const TMap<FZoneGraphLaneHandle, TSet<FMassTrafficCoreVehicleInfo>>& GetCoreVehicleInfoMap() const;
 	TMap<FZoneGraphLaneHandle, TSet<FMassTrafficCoreVehicleInfo>>& GetMutableCoreVehicleInfoMap();
+
+	void SetCrowdLaneEnds(TMap<FZoneGraphLaneHandle, FMassTrafficCrowdLaneEnds>&& InCrowdLaneEnds);
+	const FMassTrafficCrowdLaneEnds* GetCrowdLaneEnds(const FZoneGraphLaneHandle& LaneHandle) const;
+	void ClearCrowdLaneEnds();
 	
 protected:
 	
@@ -524,6 +546,12 @@ protected:
 	 * This will allow the vehicle merge logic to "see" all the vehicles on the conflict lanes
 	 * when looking for an opportunity to merge. */
 	TMap<FZoneGraphLaneHandle, TSet<FMassTrafficCoreVehicleInfo>> CoreVehicleInfoMap;
+
+	/** Map from a lane to the crowd entities at either end of the line of crowd entities on it,
+	 * so vehicles can time their way through a crosswalk around the pedestrians using it.
+	 * Lanes with no crowd entities have no entry.
+	 * Note:  This is rebuilt every frame by UMassTrafficCrowdLaneEndsProcessor. */
+	TMap<FZoneGraphLaneHandle, FMassTrafficCrowdLaneEnds> CrowdLaneEndsMap;
 };
 
 template<>

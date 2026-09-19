@@ -39,9 +39,21 @@ public class gRPC : ModuleRules
         }
         else if (Target.Platform == UnrealTargetPlatform.Mac)
         {
-            LibraryPaths.AddRange(FindFilesInDirectory(Path.Combine(ModuleDirectory, "Libraries", "Mac"), "a"));
-            // On Mac the exports.def file contains a list of all the libraries whose symbols a module that depends on gRPC should re-export.
-            LibraryPaths.Add(Path.Combine(ModuleDirectory, "Libraries", "Mac", "exports.def"));
+            if (Target.LinkType == TargetLinkType.Monolithic)
+            {
+                // Everything ends up in one executable, which holds the one copy of the libraries.
+                LibraryPaths.AddRange(FindFilesInDirectory(Path.Combine(ModuleDirectory, "Libraries", "Mac"), "a"));
+                // The exports.def file lists the libraries TempoMacToolChain links whole.
+                LibraryPaths.Add(Path.Combine(ModuleDirectory, "Libraries", "Mac", "exports.def"));
+            }
+            else
+            {
+                // Every module shares the one copy of the libraries in this shared library, which
+                // TempoCore's pre-build step links from the static libraries (LinkGrpcShared.sh).
+                // Nothing else may link the static libraries: the linker would take what it found
+                // in them from there, even where the shared library has it, making a second copy.
+                LibraryPaths.Add(Path.Combine(PluginDirectory, "Binaries", "ThirdParty", "gRPC", "Mac", "libtempogrpc.dylib"));
+            }
         }
         else if (Target.Platform == UnrealTargetPlatform.Linux)
         {
@@ -66,10 +78,20 @@ public class gRPC : ModuleRules
         PublicDefinitions.Add("GRPC_ALLOW_EXCEPTIONS=0");
         PublicDefinitions.Add("PROTOBUF_ENABLE_DEBUG_LOGGING_MAY_LEAK_PII=0");
         PublicDefinitions.Add("GOOGLE_PROTOBUF_INTERNAL_DONATE_STEAL_INLINE=0");
+        // Whether gRPC is a shared library of its own, as opposed to part of TempoCore (or the executable).
+        bool bIsSharedLibrary = Target.Platform == UnrealTargetPlatform.Mac && Target.LinkType != TargetLinkType.Monolithic;
+        PublicDefinitions.Add("TEMPO_GRPC_IS_SHARED_LIBRARY=" + (bIsSharedLibrary ? "1" : "0"));
 
         ModuleDepPaths moduleDepPaths = GatherDeps();
         PublicIncludePaths.AddRange(moduleDepPaths.HeaderPaths);
         PublicAdditionalLibraries.AddRange(moduleDepPaths.LibraryPaths);
+        foreach (string LibraryPath in moduleDepPaths.LibraryPaths)
+        {
+            if (LibraryPath.EndsWith(".dylib"))
+            {
+                RuntimeDependencies.Add(LibraryPath);
+            }
+        }
 
         AddEngineThirdPartyPrivateStaticDependencies(Target, "OpenSSL");
         AddEngineThirdPartyPrivateStaticDependencies(Target, "zlib");

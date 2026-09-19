@@ -85,3 +85,6 @@ site/
 # Tempo/TempoROS, untracked. Ignoring it keeps `git add -A` from committing it back as an embedded
 # git repository, and keeps `git clean -fd` from deleting someone's rclcpp download.
 /TempoROS/
+
+# Generated at build time from the engine source; see TempoAgentsEditor/EngineDerived
+TempoAgents/Source/TempoAgentsEditor/Private/EngineDerived/

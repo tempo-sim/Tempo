@@ -553,7 +553,7 @@ void UMassTrafficIntersectionSpawnDataGenerator::SetupLaneData(
 							int32 IntersectionLaneIntersectionSegmentIndex = 0;
 							float NormalizedDistanceAlongIntersectionLaneIntersectionSegment = 0.0f;
 							
-							const bool bFoundConflictLane = UE::ZoneGraph::Query::FindFirstIntersectionBetweenLanes(
+							const bool bFoundConflictLane = UE::MassTraffic::FindFirstIntersectionBetweenLanes(
 								*ZoneGraphStorage,
 								CurrentSideVehicleIntersectionLane->LaneHandle,
 								OtherSideVehicleIntersectionLane->LaneHandle,

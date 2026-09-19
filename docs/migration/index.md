@@ -4,6 +4,7 @@ What changed between Tempo versions, and what you have to do about it.
 
 | Guide | Affects | Danger |
 |---|---|---|
+| **[Engine plugin mods removal](engine-plugin-mods.md)** | Lane graphs built with TempoAgents; C++ using Tempo's ZoneGraph or MassCrowd additions | :material-alert: Lane graphs must be **rebuilt once** |
 | **[ROS is now opt-in](ros-opt-in.md)** | Any project using ROS: TempoROS is no longer bundled with Tempo, and TempoROSBridge must be enabled | :material-alert: ROS **silently disappears** at runtime |
 | **[v0.3.0](v0.3.0.md)** | TempoWorld transform, property and function-calling APIs | :material-alert: Two changes break **silently at runtime** |
 | **[Sensor payloads, API v0.2.0](sensors-v0.2.0.md)** | Any client decoding lidar or depth data | :material-alert: `labels` decodes as garbage with no error |

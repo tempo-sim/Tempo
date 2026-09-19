@@ -35,7 +35,7 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Tempo Intersections")
 	virtual bool ShouldFilterLaneConnection(const AActor* SourceConnectionActor, const TArray<FTempoLaneConnectionInfo>& SourceLaneConnectionInfos, const int32 SourceLaneConnectionQueryIndex,
-									const AActor* DestConnectionActor, const TArray<FTempoLaneConnectionInfo>& DestLaneConnectionInfos, const int32 DestLaneConnectionQueryIndex, const TArray<FLaneConnectionCandidate>& AllCandidates) const;
+									const AActor* DestConnectionActor, const TArray<FTempoLaneConnectionInfo>& DestLaneConnectionInfos, const int32 DestLaneConnectionQueryIndex, const TArray<FTempoLaneConnectionCandidate>& AllCandidates) const;
 
 	UFUNCTION(BlueprintCallable, Category = "Tempo Intersections")
 	virtual bool TryGetCrosswalkIntersectionConnectorInfo(const AActor* IntersectionQueryActor, int32 CrosswalkRoadModuleIndex, FCrosswalkIntersectionConnectorInfo& OutCrosswalkIntersectionConnectorInfo) const;

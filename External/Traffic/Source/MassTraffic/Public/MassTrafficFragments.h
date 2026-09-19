@@ -829,7 +829,7 @@ struct MASSTRAFFIC_API FMassTrafficVehicleControlFragment : public FMassFragment
 
 	FMassTrafficLanePriorityFilters NextLanePriorityFilters;
 
-	TMap<EZoneGraphTurnType, FMassTrafficLanePriorityFilters> TurningLanePriorityFilters;
+	TMap<EMassTrafficTurnType, FMassTrafficLanePriorityFilters> TurningLanePriorityFilters;
 
 	// Fields used for reactive yields.
 	FZoneGraphTrafficLaneData* YieldAtIntersectionLane = nullptr;
