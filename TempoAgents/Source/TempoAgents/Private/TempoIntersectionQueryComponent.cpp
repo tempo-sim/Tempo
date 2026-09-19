@@ -150,7 +150,7 @@ bool UTempoIntersectionQueryComponent::TryGetIntersectionEntranceRightVector(con
 }
 
 bool UTempoIntersectionQueryComponent::ShouldFilterLaneConnection(const AActor* SourceConnectionActor, const TArray<FTempoLaneConnectionInfo>& SourceLaneConnectionInfos, const int32 SourceLaneConnectionQueryIndex,
-																 const AActor* DestConnectionActor, const TArray<FTempoLaneConnectionInfo>& DestLaneConnectionInfos, const int32 DestLaneConnectionQueryIndex, const TArray<FLaneConnectionCandidate>& AllCandidates) const
+																 const AActor* DestConnectionActor, const TArray<FTempoLaneConnectionInfo>& DestLaneConnectionInfos, const int32 DestLaneConnectionQueryIndex, const TArray<FTempoLaneConnectionCandidate>& AllCandidates) const
 {
 	if (!IsConnectedRoadActor(SourceConnectionActor))
 	{
@@ -226,7 +226,7 @@ bool UTempoIntersectionQueryComponent::ShouldFilterLaneConnection(const AActor* 
 	const bool bSourceIsLeftMostLane = SourceLaneConnectionInfo.LaneIndex == MaxFilteredSourceLaneIndex;
 	const bool bSourceIsRightMostLane = SourceLaneConnectionInfo.LaneIndex == MinFilteredSourceLaneIndex;
 
-	const FLaneConnectionCandidate* ThisCandidatePtr = AllCandidates.FindByPredicate([SourceLaneConnectionQueryIndex, DestLaneConnectionQueryIndex](const FLaneConnectionCandidate& Candidate)
+	const FTempoLaneConnectionCandidate* ThisCandidatePtr = AllCandidates.FindByPredicate([SourceLaneConnectionQueryIndex, DestLaneConnectionQueryIndex](const FTempoLaneConnectionCandidate& Candidate)
 	{
 		return Candidate.SourceSlot == SourceLaneConnectionQueryIndex && Candidate.DestSlot == DestLaneConnectionQueryIndex;
 	});
@@ -237,9 +237,9 @@ bool UTempoIntersectionQueryComponent::ShouldFilterLaneConnection(const AActor* 
 		return false;
 	}
 
-	const auto HasCandidateWithTurnType = [&AllCandidates] (int32 LaneIndex, EZoneGraphTurnType TurnType)
+	const auto HasCandidateWithTurnType = [&AllCandidates] (int32 LaneIndex, EMassTrafficTurnType TurnType)
 	{
-		return AllCandidates.ContainsByPredicate([LaneIndex, TurnType](const FLaneConnectionCandidate& Candidate)
+		return AllCandidates.ContainsByPredicate([LaneIndex, TurnType](const FTempoLaneConnectionCandidate& Candidate)
 		{
 			const bool bCandidateIsTurnConnection = Candidate.TurnType == TurnType;
 			const bool bCandidateSharesSource = Candidate.SourceSlot == LaneIndex;
@@ -247,18 +247,18 @@ bool UTempoIntersectionQueryComponent::ShouldFilterLaneConnection(const AActor* 
 		});
 	};
 
-	const FLaneConnectionCandidate& ThisCandidate = *ThisCandidatePtr;
+	const FTempoLaneConnectionCandidate& ThisCandidate = *ThisCandidatePtr;
 	switch (ThisCandidate.TurnType)
 	{
 		// Filter no-turn connections when they are "redundant". That is, filter connections when another connection
 		// connects to the same destination and this connection's source has other valid (turning) destinations.
-		case EZoneGraphTurnType::NoTurn:
+		case EMassTrafficTurnType::NoTurn:
 		{
-			const bool bThisCandidateHasLeftTurnConnection = bSourceIsLeftMostLane && HasCandidateWithTurnType(ThisCandidate.SourceSlot, EZoneGraphTurnType::Left);
-			const bool bThisCandidateHasRightTurnConnection = bSourceIsRightMostLane && HasCandidateWithTurnType(ThisCandidate.SourceSlot, EZoneGraphTurnType::Right);
+			const bool bThisCandidateHasLeftTurnConnection = bSourceIsLeftMostLane && HasCandidateWithTurnType(ThisCandidate.SourceSlot, EMassTrafficTurnType::Left);
+			const bool bThisCandidateHasRightTurnConnection = bSourceIsRightMostLane && HasCandidateWithTurnType(ThisCandidate.SourceSlot, EMassTrafficTurnType::Right);
 			const bool bThisCandidateHasAnyTurnConnection = bThisCandidateHasLeftTurnConnection || bThisCandidateHasRightTurnConnection;
 
-			const TArray<FLaneConnectionCandidate> RedundantCandidates = AllCandidates.FilterByPredicate([TagFilteredSourceLaneConnectionInfos, SourceLaneConnectionQueryIndex, DestLaneConnectionQueryIndex](const FLaneConnectionCandidate& Candidate)
+			const TArray<FTempoLaneConnectionCandidate> RedundantCandidates = AllCandidates.FilterByPredicate([TagFilteredSourceLaneConnectionInfos, SourceLaneConnectionQueryIndex, DestLaneConnectionQueryIndex](const FTempoLaneConnectionCandidate& Candidate)
 			{
 				const bool bCandidateHasSameSourceGroup = TagFilteredSourceLaneConnectionInfos.ContainsByPredicate([&Candidate](const FTempoLaneConnectionInfo& LaneConnectionInfo)
 				{
@@ -281,11 +281,11 @@ bool UTempoIntersectionQueryComponent::ShouldFilterLaneConnection(const AActor* 
 				// In this case we need to be careful about which one of the candidates we remove, because it is
 				// "mutually redundant" with this candidate. To do so we need to know more about the redundant
 				// candidate.
-				const FLaneConnectionCandidate& RedundantCandidate = RedundantCandidates[0];
+				const FTempoLaneConnectionCandidate& RedundantCandidate = RedundantCandidates[0];
 				const bool bRedundantCandidateIsLeftMostLane = RedundantCandidate.SourceSlot == MaxFilteredSourceLaneIndex;
 				const bool bRedundantCandidateIsRightMostLane = RedundantCandidate.SourceSlot == MinFilteredSourceLaneIndex;
-				const bool bRedundantCandidateHasLeftTurnConnection = bRedundantCandidateIsLeftMostLane && HasCandidateWithTurnType(RedundantCandidate.SourceSlot, EZoneGraphTurnType::Left);
-				const bool bRedundantCandidateHasRightTurnConnection = bRedundantCandidateIsRightMostLane && HasCandidateWithTurnType(RedundantCandidate.SourceSlot, EZoneGraphTurnType::Right);
+				const bool bRedundantCandidateHasLeftTurnConnection = bRedundantCandidateIsLeftMostLane && HasCandidateWithTurnType(RedundantCandidate.SourceSlot, EMassTrafficTurnType::Left);
+				const bool bRedundantCandidateHasRightTurnConnection = bRedundantCandidateIsRightMostLane && HasCandidateWithTurnType(RedundantCandidate.SourceSlot, EMassTrafficTurnType::Right);
 				const bool bRedundantCandidateHasAnyTurnConnection = bRedundantCandidateHasLeftTurnConnection || bRedundantCandidateHasRightTurnConnection;
 
 				if (!bThisCandidateHasAnyTurnConnection)
@@ -310,17 +310,17 @@ bool UTempoIntersectionQueryComponent::ShouldFilterLaneConnection(const AActor* 
 		}
 		// Filter right turns from all but the right-most lane UNLESS the source lane of that connection has nowhere
 		// else to go (left or straight). Try to match all such source lanes one-to-one with destination lanes.
-		case EZoneGraphTurnType::Right:
+		case EMassTrafficTurnType::Right:
 		{
 			// We need to consider all the source lanes from this group and their possible destination lanes.
 			TMap<int32, TSet<int32>> DestLaneIndicesToSources;
-			for (const FLaneConnectionCandidate& Candidate : AllCandidates)
+			for (const FTempoLaneConnectionCandidate& Candidate : AllCandidates)
 			{
 				const bool bCandidateHasSameSourceGroup = TagFilteredSourceLaneConnectionInfos.ContainsByPredicate([&Candidate](const FTempoLaneConnectionInfo& LaneConnectionInfo)
 				{
 					return Candidate.SourceSlot == LaneConnectionInfo.LaneIndex;
 				});
-				const bool bCandidateIsRightTurn = Candidate.TurnType == EZoneGraphTurnType::Right;
+				const bool bCandidateIsRightTurn = Candidate.TurnType == EMassTrafficTurnType::Right;
 				if (bCandidateHasSameSourceGroup && bCandidateIsRightTurn)
 				{
 					DestLaneIndicesToSources.FindOrAdd(Candidate.DestSlot).Add(Candidate.SourceSlot);
@@ -358,8 +358,8 @@ bool UTempoIntersectionQueryComponent::ShouldFilterLaneConnection(const AActor* 
 			for (int32 SourceLaneIndexIdx = 0; SourceLaneIndexIdx < SourceLaneIndices.Num(); ++SourceLaneIndexIdx)
 			{
 				const int32 SourceLaneIndex = SourceLaneIndices[SourceLaneIndexIdx];
-				const bool bHasNoTurnConnection = HasCandidateWithTurnType(SourceLaneIndex, EZoneGraphTurnType::NoTurn);
-				const bool bHasLeftTurnConnection = HasCandidateWithTurnType(SourceLaneIndex, EZoneGraphTurnType::Left) && SourceLaneIndexIdx == 0;
+				const bool bHasNoTurnConnection = HasCandidateWithTurnType(SourceLaneIndex, EMassTrafficTurnType::NoTurn);
+				const bool bHasLeftTurnConnection = HasCandidateWithTurnType(SourceLaneIndex, EMassTrafficTurnType::Left) && SourceLaneIndexIdx == 0;
 				if (!bHasNoTurnConnection && !bHasLeftTurnConnection)
 				{
 					// This lane has nowhere else to go. Let it turn right to the next unconnected dest lane that has a candidate with this source lane.
@@ -400,7 +400,7 @@ bool UTempoIntersectionQueryComponent::ShouldFilterLaneConnection(const AActor* 
 			return !(SourceToDestMap.Contains(SourceLaneConnectionQueryIndex) && SourceToDestMap[SourceLaneConnectionQueryIndex].Contains(DestLaneConnectionQueryIndex));
 		}
 		// Filter left turns from anything but the left-most lane.
-		case EZoneGraphTurnType::Left:
+		case EMassTrafficTurnType::Left:
 		{
 			return !bSourceIsLeftMostLane;
 		}

@@ -105,6 +105,85 @@ void FindNearestVehiclesInLane(const FMassEntityManager& EntityManager, const FZ
 }
 
 
+bool FindFirstIntersectionBetweenLanes(
+	const FZoneGraphStorage& ZoneGraphStorage,
+	const FZoneGraphLaneHandle& QueryLane,
+	const FZoneGraphLaneHandle& OtherLane,
+	const float LateralOffsetFromCenterOfOtherLane,
+	float& OutDistanceAlongQueryLane,
+	int32* OutQueryLaneIntersectionSegmentIndex,
+	float* OutNormalizedDistanceAlongQueryLaneIntersectionSegment,
+	const float Tolerance)
+{
+	for (const FZoneGraphLaneHandle& LaneHandle : { QueryLane, OtherLane })
+	{
+		if (!ensureMsgf(LaneHandle.DataHandle == ZoneGraphStorage.DataHandle && ZoneGraphStorage.Lanes.IsValidIndex(LaneHandle.Index),
+			TEXT("Lane handle %s does not belong to the ZoneGraphStorage in FindFirstIntersectionBetweenLanes."), *LaneHandle.ToString()))
+		{
+			return false;
+		}
+	}
+
+	const FZoneLaneData& QueryLaneData = ZoneGraphStorage.Lanes[QueryLane.Index];
+	const FZoneLaneData& OtherLaneData = ZoneGraphStorage.Lanes[OtherLane.Index];
+
+	if (!ensureMsgf(QueryLaneData.PointsEnd - QueryLaneData.PointsBegin >= 2 && OtherLaneData.PointsEnd - OtherLaneData.PointsBegin >= 2,
+		TEXT("Both lanes must have at least 2 points in FindFirstIntersectionBetweenLanes.")))
+	{
+		return false;
+	}
+
+	const auto GetOffsetOtherLanePoint = [&ZoneGraphStorage, LateralOffsetFromCenterOfOtherLane](const int32 PointIndex)
+	{
+		const FVector RightVector = FVector::CrossProduct(ZoneGraphStorage.LaneTangentVectors[PointIndex], ZoneGraphStorage.LaneUpVectors[PointIndex]);
+		return ZoneGraphStorage.LanePoints[PointIndex] + RightVector * LateralOffsetFromCenterOfOtherLane;
+	};
+
+	const float SquaredTolerance = FMath::Square(Tolerance);
+	float DistanceAlongQueryLane = 0.0f;
+
+	for (int32 QueryPointIndex = QueryLaneData.PointsBegin; QueryPointIndex < QueryLaneData.PointsEnd - 1; ++QueryPointIndex)
+	{
+		const FVector& QuerySegmentStart = ZoneGraphStorage.LanePoints[QueryPointIndex];
+		const FVector& QuerySegmentEnd = ZoneGraphStorage.LanePoints[QueryPointIndex + 1];
+		const float QuerySegmentLength = FVector::Dist(QuerySegmentStart, QuerySegmentEnd);
+
+		for (int32 OtherPointIndex = OtherLaneData.PointsBegin; OtherPointIndex < OtherLaneData.PointsEnd - 1; ++OtherPointIndex)
+		{
+			const FVector OtherSegmentStart = GetOffsetOtherLanePoint(OtherPointIndex);
+			const FVector OtherSegmentEnd = GetOffsetOtherLanePoint(OtherPointIndex + 1);
+
+			// The segments cross where they come within Tolerance of each other.
+			FVector ClosestPointOnQuerySegment;
+			FVector ClosestPointOnOtherSegment;
+			FMath::SegmentDistToSegment(QuerySegmentStart, QuerySegmentEnd, OtherSegmentStart, OtherSegmentEnd, ClosestPointOnQuerySegment, ClosestPointOnOtherSegment);
+			if (FVector::DistSquared(ClosestPointOnQuerySegment, ClosestPointOnOtherSegment) >= SquaredTolerance)
+			{
+				continue;
+			}
+
+			const float DistanceAlongQuerySegment = FVector::Dist(QuerySegmentStart, ClosestPointOnQuerySegment);
+			OutDistanceAlongQueryLane = DistanceAlongQueryLane + DistanceAlongQuerySegment;
+
+			if (OutQueryLaneIntersectionSegmentIndex != nullptr)
+			{
+				*OutQueryLaneIntersectionSegmentIndex = QueryPointIndex;
+			}
+
+			if (OutNormalizedDistanceAlongQueryLaneIntersectionSegment != nullptr)
+			{
+				*OutNormalizedDistanceAlongQueryLaneIntersectionSegment = QuerySegmentLength > 0.0f ? DistanceAlongQuerySegment / QuerySegmentLength : 0.0f;
+			}
+
+			return true;
+		}
+
+		DistanceAlongQueryLane += QuerySegmentLength;
+	}
+
+	return false;
+}
+
 bool PointIsNearSegment(
 	const FVector& Point, 
 	const FVector& SegmentStartPoint, const FVector& SegmentEndPoint,
@@ -472,7 +551,7 @@ bool TryGetEnterAndExitDistancesAlongQueryLane(
 	int32 IntersectionLaneIntersectionSegmentIndexLeftSide = 0;
 	float NormalizedDistanceAlongIntersectionLaneIntersectionSegmentLeftSide = 0.0f;
 	
-	const bool bFoundIntersectionQueryToOtherLaneLeftSide = UE::ZoneGraph::Query::FindFirstIntersectionBetweenLanes(
+	const bool bFoundIntersectionQueryToOtherLaneLeftSide = FindFirstIntersectionBetweenLanes(
 		ZoneGraphStorage,
 		QueryLane,
 		OtherLane,
@@ -486,7 +565,7 @@ bool TryGetEnterAndExitDistancesAlongQueryLane(
 	int32 IntersectionLaneIntersectionSegmentIndexRightSide = 0;
 	float NormalizedDistanceAlongIntersectionLaneIntersectionSegmentRightSide = 0.0f;
 	
-	const bool bFoundIntersectionQueryToOtherLaneRightSide = UE::ZoneGraph::Query::FindFirstIntersectionBetweenLanes(
+	const bool bFoundIntersectionQueryToOtherLaneRightSide = FindFirstIntersectionBetweenLanes(
 		ZoneGraphStorage,
 		QueryLane,
 		OtherLane,

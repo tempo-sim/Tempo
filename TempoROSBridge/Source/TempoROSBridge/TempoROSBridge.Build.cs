@@ -3,7 +3,7 @@
 using System.IO;
 using UnrealBuildTool;
 
-public class TempoROSBridge : ModuleRules
+public class TempoROSBridge : TempoModuleRules
 {
 	public TempoROSBridge(ReadOnlyTargetRules Target) : base(Target)
 	{
