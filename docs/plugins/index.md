@@ -12,8 +12,8 @@ nothing.
 | **[TempoAgents](tempo-agents.md)** | Large-scale crowd and traffic agents on MassEntity, plus lane-graph queries. |
 | **[TempoGeographic](tempo-geographic.md)** | Anchor the simulation to a place and time on Earth: geographic reference, date/time, sun and sky. |
 | **[TempoPCG](tempo-pcg.md)** | Custom nodes and graphs on top of Epic's PCG plugin, plus sample content. |
-| **[TempoROS](tempo-ros.md)** | ROS 2 via in-process `rclcpp`. Standalone — usable without any other Tempo plugin. |
-| **[TempoROSBridge](tempo-ros-bridge.md)** | Exposes Tempo's data and controls as ROS 2 topics and services. |
+| **[TempoROS](tempo-ros.md)** | ROS 2 via in-process `rclcpp`. Standalone — usable without any other Tempo plugin. **Opt-in.** |
+| **[TempoROSBridge](tempo-ros-bridge.md)** | Exposes Tempo's data and controls as ROS 2 topics and services. **Opt-in.** |
 
 ## Not ours, but shipped with Tempo
 
@@ -42,6 +42,15 @@ graph LR
 
 Everything except TempoPCG and TempoROS depends on TempoCore, because TempoCore hosts the gRPC
 server.
+
+!!! info "The two ROS plugins are opt-in; the rest are not"
+
+    Unreal enables a plugin in your project's `Plugins` folder unless it says otherwise, and
+    Tempo's plugins are happy with that. TempoROS and TempoROSBridge are the exception: their
+    descriptors set `"EnabledByDefault": false`, so they stay off until your `.uproject` names
+    them. Tempo does not require ROS, and a project that ignores these two never builds them,
+    never packages them, and never downloads `rclcpp`.
+    See [Installation](../getting-started/installation.md#enable-the-ros-plugins-if-you-want-ros).
 
 ## The plugins are the extension point
 

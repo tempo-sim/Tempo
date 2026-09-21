@@ -6,12 +6,13 @@ services, so a ROS graph can drive and observe the simulation without speaking g
 It sits on top of [TempoROS](tempo-ros.md), which does the actual `rclcpp` integration, and on top
 of the Tempo plugins whose services it re-exposes.
 
-!!! info "Both plugins are optional"
+!!! info "Both plugins are opt-in"
 
-    Tempo's primary interface is gRPC and needs no ROS installation. Enable TempoROS and
-    TempoROSBridge only if you want a ROS graph in the loop. TempoSample enables both by default;
-    if you are not using ROS, disable them in the `.uproject` and remove `TempoROSCopyHandler`
-    from `Config/DefaultGame.ini` — see [Installation](../getting-started/installation.md).
+    Tempo's primary interface is gRPC and needs no ROS installation. TempoROS and TempoROSBridge
+    both set `"EnabledByDefault": false`, so Unreal leaves them off unless your `.uproject` asks
+    for them — a project that ignores them never builds or packages ROS. Enable them only if you
+    want a ROS graph in the loop; TempoSample does.
+    See [Installation](../getting-started/installation.md#enable-the-ros-plugins-if-you-want-ros).
 
 ## How it works
 

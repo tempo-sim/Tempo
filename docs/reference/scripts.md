@@ -26,6 +26,10 @@ your project root works.
 
     `-force` re-runs steps that would otherwise be skipped.
 
+    It does **not** enable opt-in plugins. TempoROS ships disabled, and Tempo's `Setup.sh`
+    invokes `TempoROS/Setup.sh` with `-if-enabled`, so a project that has not opted into ROS
+    never downloads `rclcpp`.
+
 `Build.sh`
 
 :   Builds the project, including the code generation prebuild that produces the protobuf code and
@@ -143,6 +147,20 @@ Both are relevant when `Assign Levels To Individual Chunks` is enabled — see t
     [:octicons-arrow-right-24: Migrating to v0.1.0](../migration/v0.1.0.md)
 
 ## TempoROS
+
+`TempoROS/Setup.sh`
+
+:   **The ROS opt-in.** Enables the `TempoROS` plugin in your `.uproject`, installs `rclcpp`, and
+    adds git hooks to keep it in sync. Tempo's `Setup.sh` calls it afterwards, but only once
+    TempoROS is enabled. `-force` re-downloads dependencies; `-if-enabled` makes it a no-op
+    unless TempoROS is already enabled, and is what Tempo's `Setup.sh` passes.
+
+`TempoROS/Scripts/IsPluginEnabled.sh`
+
+:   Prints nothing; exits `0` if Unreal will build the named plugin for this project, `1` if it
+    will not, `2` if it cannot tell. Mirrors UnrealBuildTool's resolution order — a `.uproject`
+    entry wins, then a reference from another enabled plugin, then the descriptor's
+    `EnabledByDefault`.
 
 `TempoROS/Scripts/ROSEnv.sh`
 

@@ -9,6 +9,9 @@ client library, running **in-process** — there is no separate bridge process.
     Unreal project without any other Tempo plugin. It lives in its own
     [repository](https://github.com/tempo-sim/TempoROS) and has its own documentation site.
 
+    It is also **opt-in** — `TempoROS.uplugin` sets `"EnabledByDefault": false`. Run
+    `Plugins/Tempo/TempoROS/Setup.sh` to enable it and install `rclcpp`.
+
     :material-book-open-page-variant: **TempoROS documentation** — *coming soon.* Until it is
     published, the [TempoROS README](https://github.com/tempo-sim/TempoROS#readme) is the
     reference.
@@ -53,8 +56,8 @@ external "bridge" library or process to translate messages. TempoROS's design av
 
 ## Using it with the rest of Tempo
 
-TempoROS is optional. Tempo's primary interface is gRPC, which requires no ROS installation at
-all — see [Client APIs](../clients/index.md).
+TempoROS is optional, and off unless you ask for it. Tempo's primary interface is gRPC, which
+requires no ROS installation at all — see [Client APIs](../clients/index.md).
 
 If you enable TempoROS in a project that *does* use the other Tempo plugins, also enable
 [TempoROSBridge](tempo-ros-bridge.md), which adapts Tempo's existing services and sensor data onto
@@ -62,9 +65,10 @@ ROS topics and services.
 
 !!! info "Not using ROS?"
 
-    TempoSample enables TempoROS and TempoROSBridge by default. If you are not using ROS, disable
-    them in the `.uproject` and remove `TempoROSCopyHandler` from `Config/DefaultGame.ini` — see
-    [Installation](../getting-started/installation.md).
+    Then there is nothing to do. TempoROS and TempoROSBridge both set
+    `"EnabledByDefault": false`, so Unreal leaves them off unless your `.uproject` names them —
+    no ROS-dependent modules get built, nothing ROS-related gets packaged, and `rclcpp` is never
+    downloaded. TempoSample enables both because it demonstrates them.
 
 !!! warning "Enable exceptions"
 
@@ -83,8 +87,15 @@ Note that TempoROS still supports UE 5.6, which the rest of Tempo no longer does
 
 ## Setup
 
-TempoROS is a submodule of Tempo, and Tempo's `Setup.sh` calls TempoROS's `Setup.sh` for you — so
-if you followed [Installation](../getting-started/installation.md), there is nothing more to do.
+TempoROS is a submodule of Tempo, so it is already in your checkout — but it is opt-in, and
+Tempo's `Setup.sh` will not enable it for you. Run TempoROS's own `Setup.sh` once, which enables
+the plugin in your `.uproject` and installs the `rclcpp` dependencies:
+
+```bash
+Plugins/Tempo/TempoROS/Setup.sh
+```
+
+After that, Tempo's `Setup.sh` keeps TempoROS's dependencies in sync along with everything else.
 
 Using TempoROS **standalone**, without the rest of Tempo, is documented on the TempoROS site (and,
 until it is live, in the [TempoROS README](https://github.com/tempo-sim/TempoROS#readme)).

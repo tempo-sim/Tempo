@@ -41,8 +41,8 @@ Each top-level `Tempo*` directory is an Unreal plugin (`<Name>/<Name>.uplugin`,
 | **TempoAgents** | Large-scale traffic/crowd agents on Unreal **Mass** (ECS) + **ZoneGraph**; StateTree behaviors; gRPC map-query service (lanes, zones, traffic-light state). | TempoCore, External/Traffic, External/ZoneGraph |
 | **TempoGeographic** | Georeferencing (WGS84 ↔ Unreal cartesian), sim date/time, sun position. | TempoCore |
 | **TempoPCG** | Custom Procedural Content Generation nodes (runtime grass LOD, debris scatter). | TempoCore |
-| **TempoROS** | Native ROS 2 (rclcpp) embedded in Unreal — no external bridge process. Vendors a large ROS tree (~thousands of files) under `Source/ThirdParty/rclcpp`. Custom `.msg`/`.srv` codegen. *Optional.* | — |
-| **TempoROSBridge** | Maps Tempo gRPC services ↔ ROS topics/services. One submodule per domain (Core/Sensors/Movement/Geographic). *Optional; remove to run without ROS.* | TempoROS + the bridged plugin |
+| **TempoROS** | Native ROS 2 (rclcpp) embedded in Unreal — no external bridge process. Vendors a large ROS tree (~thousands of files) under `Source/ThirdParty/rclcpp`. Custom `.msg`/`.srv` codegen. *Opt-in: `EnabledByDefault: false`.* | — |
+| **TempoROSBridge** | Maps Tempo gRPC services ↔ ROS topics/services. One submodule per domain (Core/Sensors/Movement/Geographic). *Opt-in: `EnabledByDefault: false`, so a project that ignores it never builds it.* | TempoROS + the bridged plugin |
 
 `External/` holds **vendored / forked Epic plugins**: `Traffic` (MassTraffic sample),
 `ZoneGraph`, `RuleProcessor` (PointCloud). Treat these as third-party — they have their own
@@ -109,7 +109,11 @@ the `reference_build_scripts` memory.
 
 - **`Setup.sh`** (once): installs the **Tempo toolchain** (`UseTempoToolchain.sh` edits the
   host `*.Target.cs`), applies **EngineMods**, downloads deps, installs git hooks that keep
-  mods/deps synced across checkouts. `-skip-hooks` only for active Tempo devs.
+  mods/deps synced across checkouts. `-skip-hooks` only for active Tempo devs. It runs nested
+  plugin `Setup.sh` scripts with `-if-enabled`, so setting up Tempo never opts a project into
+  ROS; **`TempoROS/Setup.sh`** is the opt-in — it writes the `.uproject` entry and fetches
+  `rclcpp`. `TempoROS/Scripts/IsPluginEnabled.sh` is the shared enablement check (mirrors UBT:
+  `.uproject` entry > reference from an enabled plugin > descriptor `EnabledByDefault`).
 - **`Build.sh`** → UBT `<Project>Editor`. **`Run.sh`** → opens the editor. **`Package.sh`** →
   `RunUAT BuildCookRun` to `Packaged/`. **`Clean.sh`** wipes artifacts.
 - **Engine path**: UE 5.7 lives at `/Users/Shared/Epic Games/UE_5.7` (path has a space —

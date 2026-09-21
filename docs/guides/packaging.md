@@ -82,11 +82,18 @@ CustomStageCopyHandler=TempoROSCopyHandler
 `Package.sh` builds that handler automatically. If you package by other means, build it yourself
 first by running `Scripts/BuildAutomation.sh` in TempoROS.
 
-If you are **not** using ROS, remove `TempoROSCopyHandler` from `DefaultGame.ini` and disable the
-`TempoROS` and `TempoROSBridge` plugins in your `.uproject`.
+If you are **not** using ROS there is nothing to do: both plugins are opt-in, so an untouched
+project does not build, stage, or package them, and `CustomStageCopyHandler` is a line you simply
+never add.
 
 !!! note "Windows PATH"
 
     To run a packaged game with TempoROS on Windows, add
     `<package_root>/<YourProjectName>/Plugins/Tempo/TempoROS/Source/ThirdParty/rclcpp/Binaries/Windows`
     to your `PATH`.
+
+    This affects packaged builds only, and only when TempoROS is enabled. In a packaged build the
+    modules are linked into the executable, so the `rclcpp` DLLs are implicit imports of the
+    executable itself and the Windows loader resolves them at process start — before
+    `TempoROSBootstrap` gets to call `PushDllDirectory`, which is what makes this work in the
+    editor.

@@ -40,30 +40,40 @@
         collision `Setup.sh` resolves. See
         [Tempo + CitySample](../guides/citysample.md).
 
-## Disable ROS plugins if unused
+## Enable the ROS plugins if you want ROS
 
 Tempo's primary interface is gRPC, which needs no ROS — see
 [Client APIs](../clients/index.md). [TempoROS](../plugins/tempo-ros.md) and
-[TempoROSBridge](../plugins/tempo-ros-bridge.md) are optional and TempoSample
-explicitly enables both. If you are not using
-ROS, disable them before building:
+[TempoROSBridge](../plugins/tempo-ros-bridge.md) are **opt-in**: both descriptors set
+`"EnabledByDefault": false`, so Unreal does not enable them the way it enables the rest of
+Tempo's plugins. Do nothing and you never build them, never package them, and never download
+`rclcpp`.
 
-- In your `.uproject`, set the `TempoROS` and `TempoROSBridge` entries' `Enabled` field to `false`:
+If you *do* want ROS, run TempoROS's own setup script once — it adds the `.uproject` entry for
+you and installs the `rclcpp` dependencies:
 
-    ```json title=".uproject"
-    {
-        "Name": "TempoROS",
-        "Enabled": false
-    },
-    {
-        "Name": "TempoROSBridge",
-        "Enabled": false
-    }
-    ```
+```sh
+Plugins/Tempo/TempoROS/Setup.sh
+```
 
-- Remove `CustomStageCopyHandler=TempoROSCopyHandler` from `Config/DefaultGame.ini`.
+Then enable the bridge, which re-exposes Tempo's own services as ROS topics and services, by
+adding it to the `"Plugins"` array of your `.uproject`:
 
-This avoids requiring a ROS 2 installation and skips building the ROS-dependent modules.
+```json title=".uproject"
+{
+    "Name": "TempoROSBridge",
+    "Enabled": true
+}
+```
+
+Packaging with ROS also needs one line in `Config/DefaultGame.ini` — see
+[Packaging](../guides/packaging.md#packaging-with-temporos).
+
+!!! warning "Upgrading from a version before the ROS plugins became opt-in"
+
+    Tempo used to enable both plugins implicitly, so a project that never named them in its
+    `.uproject` still got ROS. After upgrading, such a project silently builds without ROS. See
+    [ROS plugins are opt-in](../migration/ros-opt-in.md).
 
 ## One-time setup
 

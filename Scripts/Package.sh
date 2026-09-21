@@ -23,30 +23,14 @@ done
 
 export UNREAL_ENGINE_PATH=$("$SCRIPT_DIR"/FindUnreal.sh)
 
-FIND_UPROJECT() {
-    local START_DIR
-    START_DIR=$(dirname "$1")
-    local CURRENT_DIR="$START_DIR"
-    
-    while [[ "$CURRENT_DIR" != "/" ]]; do
-        local UPROJECT_FILE
-        UPROJECT_FILE=$(find "$CURRENT_DIR" -maxdepth 1 -name "*.uproject" -print -quit)
-        if [[ -n "$UPROJECT_FILE" ]]; then
-            echo "$UPROJECT_FILE"
-            return 0
-        fi
-        CURRENT_DIR=$(dirname "$CURRENT_DIR")
-    done
-    
-    echo "No .uproject file found" >&2
-    return 1
-}
-
-UPROJECT_FILE=$(FIND_UPROJECT "$SCRIPT_DIR")
-
-TEMPOROS_ENABLED=$(jq '.Plugins[] | select(.Name=="TempoROS") | .Enabled' "$UPROJECT_FILE")
-# Remove any trailing carriage return character
-TEMPOROS_ENABLED="${TEMPOROS_ENABLED%$'\r'}"
+# TempoROS is opt-in, and a project can enable it either by naming it in the .uproject or by
+# enabling TempoROSBridge, which requires it. Ask the shared resolver rather than reading the
+# .uproject directly, so this agrees with what Unreal will actually build.
+TEMPOROS_ENABLED=false
+IS_PLUGIN_ENABLED="$SCRIPT_DIR/../TempoROS/Scripts/IsPluginEnabled.sh"
+if [ -f "$IS_PLUGIN_ENABLED" ] && "$IS_PLUGIN_ENABLED" TempoROS; then
+  TEMPOROS_ENABLED=true
+fi
 
 HOST_PLATFORM=""
 TARGET_PLATFORM=""

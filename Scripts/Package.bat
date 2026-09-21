@@ -37,8 +37,17 @@ if errorlevel 1 (
     exit /b 1
 )
 
+REM TempoROS is opt-in, and a project can enable it either by naming it in the .uproject or by
+REM enabling TempoROSBridge, which requires it. Ask the shared resolver rather than reading the
+REM .uproject directly, so this agrees with what Unreal will actually build.
 set "TEMPOROS_ENABLED=false"
-for /f "usebackq delims=" %%I in (`jq -r ".Plugins[]? | select(.Name==\"TempoROS\") | .Enabled" "!UPROJECT_FILE!"`) do set "TEMPOROS_ENABLED=%%I"
+set "TEMPOROS_SCRIPTS=!PROJECT_ROOT!\Plugins\Tempo\TempoROS\Scripts"
+if exist "!TEMPOROS_SCRIPTS!\IsPluginEnabled.sh" (
+    for /f "usebackq delims=" %%I in (`"%SCRIPT_DIR%_FindBash.bat"`) do set "BASH_EXE=%%I"
+    if not defined BASH_EXE exit /b 1
+    "!BASH_EXE!" "!TEMPOROS_SCRIPTS!\IsPluginEnabled.sh" TempoROS
+    if not errorlevel 1 set "TEMPOROS_ENABLED=true"
+)
 
 if /i "!TEMPOROS_ENABLED!"=="true" (
     echo Building TempoROS automation ^(for custom copy handler^)
