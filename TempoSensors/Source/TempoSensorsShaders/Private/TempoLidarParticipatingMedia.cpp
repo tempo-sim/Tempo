@@ -148,7 +148,7 @@ FRDGTextureRef AddTempoLidarMediaProfilePass(FRDGBuilder& GraphBuilder, const FT
 	const FIntPoint RectSize = Inputs.ViewRect.Size();
 	const FRDGTextureDesc ProfileDesc = FRDGTextureDesc::Create3D(
 		FIntVector(RectSize.X, RectSize.Y, Bins.NumBins), PF_R32_UINT, FClearValueBinding::None,
-		TexCreate_ShaderResource | TexCreate_UAV);
+		TexCreate_ShaderResource | TexCreate_UAV | TexCreate_AtomicCompatible);
 	FRDGTextureRef Profile = GraphBuilder.CreateTexture(ProfileDesc, TEXT("TempoLidarMedia.OpticalDepthProfile"));
 
 	const bool bVolumetricFog = Inputs.Fog.IntegratedLightScattering != nullptr;
