@@ -61,8 +61,6 @@ if /i "!TEMPOROS_ENABLED!"=="true" (
         "!BASH_EXE!" "!TEMPOROS_SCRIPTS!\BuildAutomation.sh"
         if errorlevel 1 exit /b 1
     )
-) else (
-    echo Skipping TempoROS automation build because TempoROS plugin is not enabled
 )
 
 cd /d "!UNREAL_ENGINE_PATH!"

@@ -59,9 +59,7 @@ fi
 
 cd "$UNREAL_ENGINE_PATH"
 
-if [ "$TEMPOROS_ENABLED" = "false" ]; then
-  echo "Skipping TempoROS automation build because TempoROS plugin is not enabled"
-else
+if [ "$TEMPOROS_ENABLED" = "true" ]; then
   echo "Building TempoROS automation (for custom copy handler)"
   "$PROJECT_ROOT/Plugins/Tempo/TempoROS/Scripts/BuildAutomation.sh"
 fi
