@@ -103,7 +103,17 @@ SYNC_THIRD_PARTY_DEPS () {
         # All dependencies satisfied
         return
       fi
-      read -r -p "Expected third party dependency hash $EXPECTED_HASH but found $MEASURED_HASH in $THIRD_PARTY_DIR/$ARTIFACT. Update? (y/N): " DO_UPDATE
+      # bash only emits a `read -p` prompt when stdin is a terminal, so in a
+      # non-interactive run (CI, a wrapper script, anything piping output) the user
+      # sees nothing, `read` fails on EOF, and `set -e` exits 1 with no explanation.
+      # State the mismatch on stderr first, and only prompt when someone can answer.
+      echo "Expected third party dependency hash $EXPECTED_HASH but found $MEASURED_HASH in $THIRD_PARTY_DIR/$ARTIFACT." >&2
+      if [ -t 0 ]; then
+        read -r -p "Update? (y/N): " DO_UPDATE
+      else
+        echo "Not running interactively - re-run with -force to update it." >&2
+        exit 1
+      fi
     fi
   fi
   

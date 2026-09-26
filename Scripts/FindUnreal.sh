@@ -140,8 +140,9 @@ FIND_ENGINE_PATH() {
     # Try parsing LauncherInstalled.dat
     if [[ -f "$REGISTRY_PATH" ]]; then
         local ENGINE_PATH
-        ENGINE_PATH=$(PARSE_LAUNCHER_INSTALLED "$REGISTRY_PATH" "$ENGINE_ID")
-        if [[ $? -eq 0 ]]; then
+        # Assign inside `if` so a miss does not trip `set -e` before we can fall
+        # through to the other lookups below.
+        if ENGINE_PATH=$(PARSE_LAUNCHER_INSTALLED "$REGISTRY_PATH" "$ENGINE_ID"); then
             echo "$ENGINE_PATH"
             return 0
         fi
@@ -220,14 +221,18 @@ main() {
         UPROJECT_FILE=$(FIND_UPROJECT_FILE)
         local ENGINE_ASSOCIATION
         ENGINE_ASSOCIATION=$(EXTRACT_ENGINE_ASSOCIATION "$UPROJECT_FILE")
-        ENGINE_PATH=$(FIND_ENGINE_PATH "$ENGINE_ASSOCIATION")
+        # `ENGINE_PATH=$(FIND_ENGINE_PATH ...)` on its own would abort the script under
+        # `set -e` the moment the engine is not found, so the message below - the one
+        # that tells the user what actually went wrong - would never print.
+        ENGINE_PATH=$(FIND_ENGINE_PATH "$ENGINE_ASSOCIATION") || ENGINE_PATH=""
     else
         ENGINE_PATH="$UNREAL_ENGINE_PATH"
     fi
 
-    if [[ $? -ne 0 || -z "$ENGINE_PATH" ]]; then
+    if [[ -z "$ENGINE_PATH" ]]; then
       echo "Error: Could not find engine installation for: $ENGINE_ASSOCIATION" >&2
-      echo "Make sure the engine is installed via Epic Games Launcher" >&2
+      echo "Make sure the engine is installed via Epic Games Launcher, and that your" >&2
+      echo "uproject's EngineAssociation matches an installed version." >&2
       exit 1
     fi
     
