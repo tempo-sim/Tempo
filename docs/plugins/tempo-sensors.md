@@ -252,12 +252,11 @@ the CPU side only chooses which echo to report.
 
 **Output.** `LidarScanSegment.return_mode` reports the mode. In `Dual` mode the strongest echo of
 each beam is in the top-level arrays and the other, if any, is in `second_distances_m`,
-`second_intensities` and `second_labels`, with the same layouts and encodings as their top-level
-counterparts (distance 0 = no second echo). The second return carries no colors or reflectivities:
-both echoes of a beam come from the same pixel, so its color would repeat the first's, and a
-medium echo's reflectivity is the constant backscatter. Medium echoes carry label 0, the medium's
-backscatter as reflectivity and, in color mode, the pixel's rendered color, which is mostly the
-medium's where the medium is dense.
+`second_intensities`, `second_labels` and `second_reflectivities`, with the same layouts and
+encodings as their top-level counterparts (distance 0 = no second echo). The second return carries
+no colors: both echoes of a beam come from the same pixel, so its color would repeat the first's.
+Medium echoes carry label 0, the medium's backscatter as reflectivity and, in color mode, the
+pixel's rendered color, which is mostly the medium's where the medium is dense.
 
 **What is and is not covered.** Height fog, local fog volumes, anything injected into the
 volumetric fog grid (Volume-domain materials on meshes or Niagara mesh particles) and rasterized

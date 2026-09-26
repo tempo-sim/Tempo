@@ -20,7 +20,7 @@ enum LidarReturnMode {
   // One return per beam: the farthest detectable echo.
   LRM_LAST = 2;
   // Two returns per beam: the strongest echo in the segment's top-level arrays and the other
-  // detectable echo, if any, in `second_distances_m`, `second_intensities` and `second_labels`.
+  // detectable echo, if any, in the `second_*` arrays.
   LRM_DUAL = 3;
 }
 
@@ -81,6 +81,8 @@ message LidarScanSegment {
   // Same layout and encoding as `labels`. 0 for echoes from participating media, which carry no
   // semantic label.
   bytes second_labels = 19;
+  // Same layout and encoding as `reflectivities`.
+  bytes second_reflectivities = 20;
 }
 
 message LidarScanRequest {

@@ -751,13 +751,15 @@ namespace
 		const uint8 MediumReflectivity = static_cast<uint8>(FMath::Clamp(FMath::RoundToInt(Read.MediaBackscatter * 255.0f), 0, 255));
 
 		// The second return's arrays exist only in dual mode; same layouts as the first's. It carries
-		// no colors, since both echoes of a beam come from the same pixel and would repeat the
-		// first's, and no reflectivities, since a medium echo's is the constant backscatter.
+		// no colors: both echoes of a beam come from the same pixel, so they would repeat the first's.
 		float* SecondDistancesData = nullptr;
 		float* SecondIntensitiesData = nullptr;
 		uint32_t* SecondLabelsData = nullptr;
+		char* SecondReflectivitiesData = nullptr;
 		if (bDual)
 		{
+			ScanSegmentOut.mutable_second_reflectivities()->assign(static_cast<size_t>(NumReturns), '\0');
+			SecondReflectivitiesData = ScanSegmentOut.mutable_second_reflectivities()->data();
 			std::string* const SecondDistancesOut = ScanSegmentOut.mutable_second_distances_m();
 			SecondDistancesOut->resize(static_cast<size_t>(NumReturns) * sizeof(float));
 			SecondDistancesData = reinterpret_cast<float*>(SecondDistancesOut->data());
@@ -782,7 +784,7 @@ namespace
 		ParallelFor(Read.HorizontalBeams, [&Read, BeamSamples, CosMaxAngleOfIncidence, InverseCaptureRotation, InverseCaptureScale,
 			DistancesData, IntensitiesData, LabelsData, AzimuthsData, ElevationsData, ReflectivitiesData, ColorsData, ColorEncoding,
 			MediaPixels, ReturnMode, bDual, MinDetectableIntensity, MediumReflectivity,
-			SecondDistancesData, SecondIntensitiesData, SecondLabelsData](int32 HorizontalBeam)
+			SecondDistancesData, SecondIntensitiesData, SecondLabelsData, SecondReflectivitiesData](int32 HorizontalBeam)
 		{
 			for (int32 VerticalBeam = 0; VerticalBeam < Read.VerticalBeams; ++VerticalBeam)
 			{
@@ -849,24 +851,23 @@ namespace
 				AzimuthsData[Idx] = Sample.AzimuthRad;
 				ElevationsData[Idx] = Sample.ElevationRad;
 
-				// A medium echo has no surface behind it to label. For a non-return (Distance == 0)
-				// the label is meaningless but harmless, mirroring how colors are written
-				// unconditionally.
-				auto WriteEcho = [&](const FTempoLidarEcho& Echo, float* Distances, float* Intensities, uint32_t* Labels)
+				// A medium echo has no surface behind it to label, and its reflectivity is the
+				// medium's backscatter. For a non-return (Distance == 0) the label and reflectivity
+				// are meaningless but harmless, mirroring how colors are written unconditionally.
+				auto WriteEcho = [&](const FTempoLidarEcho& Echo, float* Distances, float* Intensities, uint32_t* Labels, char* Reflectivities)
 				{
 					Distances[Idx] = Echo.bValid ? QuantityConverter<CM2M>::Convert(Echo.Distance) : 0.0f;
 					Intensities[Idx] = Echo.bValid ? Echo.Intensity : 0.0f;
 					Labels[Idx] = Echo.bMedium ? 0u : Pixel.Label();
+					Reflectivities[Idx] = static_cast<char>(Echo.bMedium ? MediumReflectivity : Pixel.ReflectivityByte());
 				};
-				WriteEcho(Primary, DistancesData, IntensitiesData, LabelsData);
+				WriteEcho(Primary, DistancesData, IntensitiesData, LabelsData, ReflectivitiesData);
 				if (bDual)
 				{
-					WriteEcho(Secondary, SecondDistancesData, SecondIntensitiesData, SecondLabelsData);
+					WriteEcho(Secondary, SecondDistancesData, SecondIntensitiesData, SecondLabelsData, SecondReflectivitiesData);
 				}
 
-				// The reflectivity of a medium echo is the medium's backscatter; its color, like the
-				// surface's, is what the pixel rendered.
-				ReflectivitiesData[Idx] = static_cast<char>(Primary.bMedium ? MediumReflectivity : Pixel.ReflectivityByte());
+				// The color, for either echo, is what the pixel rendered.
 				if constexpr (std::is_same_v<PixelType, FLidarPixelWithColor>)
 				{
 					char* const ColorOut = ColorsData + Idx * 3;
