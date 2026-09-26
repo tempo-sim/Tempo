@@ -41,8 +41,8 @@ Each top-level `Tempo*` directory is an Unreal plugin (`<Name>/<Name>.uplugin`,
 | **TempoAgents** | Large-scale traffic/crowd agents on Unreal **Mass** (ECS) + **ZoneGraph**; StateTree behaviors; gRPC map-query service (lanes, zones, traffic-light state). | TempoCore, External/Traffic, External/ZoneGraph |
 | **TempoGeographic** | Georeferencing (WGS84 ↔ Unreal cartesian), sim date/time, sun position. | TempoCore |
 | **TempoPCG** | Custom Procedural Content Generation nodes (runtime grass LOD, debris scatter). | TempoCore |
-| **TempoROS** | Native ROS 2 (rclcpp) embedded in Unreal — no external bridge process. Vendors a large ROS tree (~thousands of files) under `Source/ThirdParty/rclcpp`. Custom `.msg`/`.srv` codegen. *Optional.* | — |
-| **TempoROSBridge** | Maps Tempo gRPC services ↔ ROS topics/services. One submodule per domain (Core/Sensors/Movement/Geographic). *Optional; remove to run without ROS.* | TempoROS + the bridged plugin |
+| **TempoROS** | Native ROS 2 (rclcpp) embedded in Unreal — no external bridge process. Fetches a large ROS tree under `Source/ThirdParty/rclcpp`. Custom `.msg`/`.srv` codegen. **Not in this repo** — a separate repository ([tempo-sim/TempoROS](https://github.com/tempo-sim/TempoROS)) added to the host project's `Plugins/` beside Tempo. Ordinary plugin there: enabled by default. Only `main` is guaranteed against Tempo `main`. | — |
+| **TempoROSBridge** | Maps Tempo gRPC services ↔ ROS topics/services. One submodule per domain (Core/Sensors/Movement/Geographic). *Opt-in: `EnabledByDefault: false`, so a project that ignores it never builds it — and its `TempoROS` reference is never resolved, which is why Tempo can ship it with TempoROS absent.* | TempoROS (supplied by the host project) + the bridged plugin |
 
 `External/` holds **vendored / forked Epic plugins**: `Traffic` (MassTraffic sample),
 `ZoneGraph`, `RuleProcessor` (PointCloud). Treat these as third-party — they have their own
@@ -109,7 +109,17 @@ the `reference_build_scripts` memory.
 
 - **`Setup.sh`** (once): installs the **Tempo toolchain** (`UseTempoToolchain.sh` edits the
   host `*.Target.cs`), applies **EngineMods**, downloads deps, installs git hooks that keep
-  mods/deps synced across checkouts. `-skip-hooks` only for active Tempo devs.
+  mods/deps synced across checkouts. `-skip-hooks` only for active Tempo devs. If the host project
+  has a TempoROS, it runs that plugin's own `Setup.sh` too (fetching `rclcpp`), and warns when the
+  project enables TempoROSBridge without supplying TempoROS.
+- **TempoROS is not vendored**, so nothing may assume a path for it. `Scripts/FindTempoROS.sh`
+  (+ `.bat`) prints the plugin's directory or exits 1; `Setup.sh` and `SyncDeps.sh` go through it.
+  `SyncDeps.sh` chains to TempoROS's own `SyncDeps.sh`, which is what lets CI sync everything with
+  one call. **`Package.sh` needs no TempoROS knowledge at all**: the `TempoROSCopyHandler` stage
+  copy handler lives at `TempoROS/Build/TempoROS.Automation.csproj`, and UBT's rules scan recurses
+  into `Source/` and `Build/` of any plugin directory (`Rules.cs`), so AutomationTool discovers and
+  builds it unaided — resolving the engine from the `EngineDir` MSBuild property UAT passes
+  (`EpicGames.MsBuild/CsProjBuilder.cs`), with no `UNREAL_ENGINE_PATH` needed.
 - **`Build.sh`** → UBT `<Project>Editor`. **`Run.sh`** → opens the editor. **`Package.sh`** →
   `RunUAT BuildCookRun` to `Packaged/`. **`Clean.sh`** wipes artifacts.
 - **Engine path**: UE 5.7 lives at `/Users/Shared/Epic Games/UE_5.7` (path has a space —
@@ -125,7 +135,8 @@ mod) auto-adds the `ProtobufGenerated` include paths and is the base class for e
 `*.Build.cs`.
 
 **Third-party deps**: `SyncDeps.sh` hash-verifies and downloads prebuilt gRPC (TempoCore) and
-rclcpp (TempoROS) from GitHub releases (`ttp_manifest.json` per dep). Not committed; fetched.
+rclcpp (TempoROS, if the project has one) from GitHub releases (`ttp_manifest.json` per dep). Not
+committed; fetched.
 
 ---
 

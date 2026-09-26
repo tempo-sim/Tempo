@@ -9,6 +9,10 @@ client library, running **in-process** — there is no separate bridge process.
     Unreal project without any other Tempo plugin. It lives in its own
     [repository](https://github.com/tempo-sim/TempoROS) and has its own documentation site.
 
+    It is **not shipped with Tempo** — you add TempoROS to your own project's `Plugins` folder,
+    beside Tempo rather than inside it. Tempo guarantees compatibility between its `main` and
+    TempoROS's `main`, and verifies it in CI.
+
     :material-book-open-page-variant: **TempoROS documentation** — *coming soon.* Until it is
     published, the [TempoROS README](https://github.com/tempo-sim/TempoROS#readme) is the
     reference.
@@ -53,18 +57,19 @@ external "bridge" library or process to translate messages. TempoROS's design av
 
 ## Using it with the rest of Tempo
 
-TempoROS is optional. Tempo's primary interface is gRPC, which requires no ROS installation at
-all — see [Client APIs](../clients/index.md).
+TempoROS is optional, and Tempo does not ship it. Tempo's primary interface is gRPC, which
+requires no ROS installation at all — see [Client APIs](../clients/index.md).
 
-If you enable TempoROS in a project that *does* use the other Tempo plugins, also enable
+If you add TempoROS to a project that *does* use the other Tempo plugins, also enable
 [TempoROSBridge](tempo-ros-bridge.md), which adapts Tempo's existing services and sensor data onto
-ROS topics and services.
+ROS topics and services. It ships with Tempo but is **opt-in**.
 
 !!! info "Not using ROS?"
 
-    TempoSample enables TempoROS and TempoROSBridge by default. If you are not using ROS, disable
-    them in the `.uproject` and remove `TempoROSCopyHandler` from `Config/DefaultGame.ini` — see
-    [Installation](../getting-started/installation.md).
+    Then there is nothing to do. TempoROS is a separate repository you never have to clone, and
+    `TempoROSBridge.uplugin` sets `"EnabledByDefault": false`, so Unreal leaves the bridge off
+    unless your `.uproject` names it — no ROS-dependent modules get built, nothing ROS-related gets
+    packaged, and `rclcpp` is never downloaded. TempoSample adds both because it demonstrates them.
 
 !!! warning "Enable exceptions"
 
@@ -83,8 +88,19 @@ Note that TempoROS still supports UE 5.6, which the rest of Tempo no longer does
 
 ## Setup
 
-TempoROS is a submodule of Tempo, and Tempo's `Setup.sh` calls TempoROS's `Setup.sh` for you — so
-if you followed [Installation](../getting-started/installation.md), there is nothing more to do.
+TempoROS is a separate repository, so add it to your project's `Plugins` folder yourself — beside
+Tempo, not inside it:
+
+```bash
+cd Plugins
+git submodule add https://github.com/tempo-sim/TempoROS.git
+```
+
+Then run Tempo's `Setup.sh`. It finds TempoROS wherever it sits under `Plugins`, runs TempoROS's own
+`Setup.sh` to install the `rclcpp` dependencies, and keeps them in sync from then on. Running
+`Plugins/TempoROS/Setup.sh` directly does the same thing.
+
+Track TempoROS's `main`: that is the only branch Tempo's `main` is tested against.
 
 Using TempoROS **standalone**, without the rest of Tempo, is documented on the TempoROS site (and,
 until it is live, in the [TempoROS README](https://github.com/tempo-sim/TempoROS#readme)).
@@ -92,7 +108,7 @@ until it is live, in the [TempoROS README](https://github.com/tempo-sim/TempoROS
 For quick CLI debugging, TempoROS bundles a minimal ROS environment:
 
 ```bash
-source Plugins/Tempo/TempoROS/Scripts/ROSEnv.sh
+source Plugins/TempoROS/Scripts/ROSEnv.sh
 ros2 topic list
 ros2 topic echo /TempoSensors/image/color/bp_sensorrig/tempocamera
 ```

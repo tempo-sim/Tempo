@@ -23,31 +23,6 @@ done
 
 export UNREAL_ENGINE_PATH=$("$SCRIPT_DIR"/FindUnreal.sh)
 
-FIND_UPROJECT() {
-    local START_DIR
-    START_DIR=$(dirname "$1")
-    local CURRENT_DIR="$START_DIR"
-    
-    while [[ "$CURRENT_DIR" != "/" ]]; do
-        local UPROJECT_FILE
-        UPROJECT_FILE=$(find "$CURRENT_DIR" -maxdepth 1 -name "*.uproject" -print -quit)
-        if [[ -n "$UPROJECT_FILE" ]]; then
-            echo "$UPROJECT_FILE"
-            return 0
-        fi
-        CURRENT_DIR=$(dirname "$CURRENT_DIR")
-    done
-    
-    echo "No .uproject file found" >&2
-    return 1
-}
-
-UPROJECT_FILE=$(FIND_UPROJECT "$SCRIPT_DIR")
-
-TEMPOROS_ENABLED=$(jq '.Plugins[] | select(.Name=="TempoROS") | .Enabled' "$UPROJECT_FILE")
-# Remove any trailing carriage return character
-TEMPOROS_ENABLED="${TEMPOROS_ENABLED%$'\r'}"
-
 HOST_PLATFORM=""
 TARGET_PLATFORM=""
 if [[ "$OSTYPE" = "msys" ]]; then
@@ -71,15 +46,6 @@ elif [[ "$OSTYPE" = "linux-gnu"* ]]; then
 else
   echo "Unsupported platform"
   exit 1
-fi
-
-cd "$UNREAL_ENGINE_PATH"
-
-if [ "$TEMPOROS_ENABLED" = "false" ]; then
-  echo "Skipping TempoROS automation build because TempoROS plugin is not enabled"
-else
-  echo "Building TempoROS automation (for custom copy handler)"
-  "$PROJECT_ROOT/Plugins/Tempo/TempoROS/Scripts/BuildAutomation.sh"
 fi
 
 cd "$UNREAL_ENGINE_PATH"
@@ -108,10 +74,6 @@ elif [ "$HOST_PLATFORM" = "Linux" ]; then
 else
   echo "Unsupported platform"
   exit 1
-fi
-
-if [ "$TEMPOROS_ENABLED" = "true" ]; then
-  PACKAGE_ARGS+=(-ScriptDir="$PROJECT_ROOT/Plugins/Tempo/TempoROS/Scripts")
 fi
 
 if [ "$LOW_MEMORY_MODE" = "true" ]; then

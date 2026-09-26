@@ -17,7 +17,6 @@ on:
       - 'Dockerfile'
       - 'Scripts/InstallEngineMods.sh'
       - 'Scripts/SyncDeps.sh'
-      - 'TempoROS/Scripts/SyncDeps.sh'
       - '.github/workflows/publish_engine_mods.yml'
       - '.github/workflows/tempo_publish_engine_mods.yml'
   workflow_dispatch:
