@@ -12,6 +12,15 @@
 // for this pass at all: they add light and block none. Modulate materials darken the scene, which
 // reads as blocking what they darken. Substrate materials report the coverage and throughput their
 // translucency is composed from, as the translucent shadow pass does.
+//
+// A sprite is read as the ball it stands for. A camera-facing billboard shows the same picture
+// from every direction, which only a shape symmetric about the particle's center can do, and its
+// radial falloff is the projection of a fuzzy ball; the engine's own spherical particle normal and
+// opacity read it the same way. So a sprite fragment's optical depth is not put at the range of
+// the quad, which would make every puff a flat disc facing the sensor, but spread along the ray's
+// chord through a sphere of the particle's radius, densest at the center. The quad only says how
+// much the fragment blocks; the sphere says where. Meshes and ribbons keep the range they rasterize
+// at, which is right for a fog card.
 
 // Substrate only applies to materials authored with it, as in TranslucentShadowDepthShaders.usf.
 #if !MATERIAL_IS_SUBSTRATE && SUBSTRATE_ENABLED
@@ -61,8 +70,22 @@ void MainVS(
 
 #if PIXELSHADER
 
-// The bin of the profile a range along the ray falls in; see BinFarEdge in
-// TempoLidarParticipatingMedia.usf for the spacing this inverts.
+#ifndef PARTICLE_SPRITE_FACTORY
+#define PARTICLE_SPRITE_FACTORY 0
+#endif
+
+// The profile's bin geometry, inverted and mirrored from TempoLidarParticipatingMedia.usf: bin 0
+// is [0, FirstBinEdge), the rest are log-spaced up to MaxRange.
+float BinFarEdge(int Index)
+{
+	if (Index <= 0)
+	{
+		return TempoLidarMediaPass.FirstBinEdge;
+	}
+	const float T = float(Index) / float(max(TempoLidarMediaPass.NumBins - 1, 1));
+	return TempoLidarMediaPass.FirstBinEdge * exp2(log2(TempoLidarMediaPass.MaxRange / TempoLidarMediaPass.FirstBinEdge) * T);
+}
+
 int RangeToBin(float Range)
 {
 	if (Range < TempoLidarMediaPass.FirstBinEdge)
@@ -71,7 +94,15 @@ int RangeToBin(float Range)
 	}
 	const float NumLogBins = float(max(TempoLidarMediaPass.NumBins - 1, 1));
 	const float T = log2(Range / TempoLidarMediaPass.FirstBinEdge) / log2(TempoLidarMediaPass.MaxRange / TempoLidarMediaPass.FirstBinEdge);
-	return 1 + int(floor(T * NumLogBins));
+	return clamp(1 + int(floor(T * NumLogBins)), 0, TempoLidarMediaPass.NumBins - 1);
+}
+
+void AddOpticalDepth(int2 LocalPos, int Bin, float OpticalDepth)
+{
+	// A fully opaque fragment still leaves a finite optical depth, well past where anything
+	// transmits, so the fixed-point sum cannot overflow on a few overlapping fragments.
+	const uint Fixed = uint(min(OpticalDepth * OPTICAL_DEPTH_SCALE, 4294967040.0));
+	InterlockedAdd(TempoLidarMediaPass.OpticalDepthProfile[uint3(LocalPos, Bin)], Fixed);
 }
 
 // How much of the light through this fragment the material blocks, in [0, 1].
@@ -100,6 +131,73 @@ float FragmentOpacity(FMaterialPixelParameters MaterialParameters, FPixelMateria
 #endif
 }
 
+#if PARTICLE_SPRITE_FACTORY
+
+// The fraction of a ball's density along a chord that lies before distance T from the chord's
+// midpoint, for a density that falls off with the square of the distance from the center
+// (1 - r^2 / R^2, the sphere density of Quilez's analytic fog), H being the chord's half length.
+// Along the chord the density is (H^2 - t^2) / R^2; integrating and dividing by the whole gives a
+// cubic that runs from 0 at -H to 1 at +H.
+float ChordFractionBefore(float T, float H)
+{
+	T = clamp(T, -H, H);
+	return (3.0 * H * H * T - T * T * T + 2.0 * H * H * H) / (4.0 * H * H * H);
+}
+
+// Spread a sprite fragment's optical depth along the ray's chord through the particle's sphere.
+// Returns false, leaving nothing added, when the ray misses the sphere: the quad's corners outside
+// the inscribed circle, or the far ends of a stretched sprite, which are then read as the plane.
+bool AddSpriteOpticalDepth(int2 LocalPos, FMaterialPixelParameters MaterialParameters, float Range, float OpticalDepth)
+{
+	// The particle's center relative to the sensor, and its radius, half the smaller sprite size:
+	// the same sphere the engine's spherical particle normal and opacity use.
+	const float3 Center = MaterialParameters.Particle.TranslatedWorldPositionAndSize.xyz - ResolvedView.TranslatedWorldCameraOrigin;
+	const float Radius = MaterialParameters.Particle.TranslatedWorldPositionAndSize.w;
+	if (Radius <= 0.0)
+	{
+		return false;
+	}
+
+	// Closest approach of this fragment's ray to the center, and the half chord through the sphere
+	// there.
+	const float3 RayDirection = MaterialParameters.WorldPosition_CamRelative / Range;
+	const float CenterRange = dot(Center, RayDirection);
+	const float MissSqr = dot(Center, Center) - CenterRange * CenterRange;
+	const float HalfChordSqr = Radius * Radius - MissSqr;
+	if (HalfChordSqr <= 0.01)
+	{
+		return false;
+	}
+	const float HalfChord = sqrt(HalfChordSqr);
+
+	// The part of the chord behind the sensor, or past its range, attenuates nothing.
+	const float Near = max(CenterRange - HalfChord, 0.0);
+	const float Far = min(CenterRange + HalfChord, TempoLidarMediaPass.MaxRange);
+	if (Far <= Near)
+	{
+		return true;
+	}
+
+	const int FirstBin = RangeToBin(Near);
+	const int LastBin = RangeToBin(Far);
+	float Previous = ChordFractionBefore(Near - CenterRange, HalfChord);
+	LOOP
+	for (int Bin = FirstBin; Bin <= LastBin; ++Bin)
+	{
+		const float EdgeRange = min(BinFarEdge(Bin), Far);
+		const float Cumulative = ChordFractionBefore(EdgeRange - CenterRange, HalfChord);
+		const float Share = Cumulative - Previous;
+		Previous = Cumulative;
+		if (Share > 0.0)
+		{
+			AddOpticalDepth(LocalPos, Bin, OpticalDepth * Share);
+		}
+	}
+	return true;
+}
+
+#endif // PARTICLE_SPRITE_FACTORY
+
 void MainPS(
 	FTempoLidarMediaVSToPS Inputs,
 	in float4 SvPosition : SV_Position,
@@ -122,19 +220,22 @@ void MainPS(
 	// Range along the ray, like the profile's bins. Fragments past the sensor's range are outside
 	// the profile.
 	const float Range = length(MaterialParameters.WorldPosition_CamRelative);
-	if (Range >= TempoLidarMediaPass.MaxRange)
+	if (Range >= TempoLidarMediaPass.MaxRange || Range <= 0.0)
 	{
 		return;
 	}
-	const int Bin = clamp(RangeToBin(Range), 0, TempoLidarMediaPass.NumBins - 1);
 
-	// A fully opaque fragment still leaves a finite optical depth, well past where anything
-	// transmits, so the fixed-point sum cannot overflow on a few overlapping fragments.
 	const float OpticalDepth = -log(max(1.0 - Opacity, 1e-4));
-	const uint Fixed = uint(min(OpticalDepth * OPTICAL_DEPTH_SCALE, 4294967040.0));
-
 	const int2 LocalPos = int2(SvPosition.xy) - TempoLidarMediaPass.ViewRectMin;
-	InterlockedAdd(TempoLidarMediaPass.OpticalDepthProfile[uint3(LocalPos, Bin)], Fixed);
+
+#if PARTICLE_SPRITE_FACTORY
+	if (AddSpriteOpticalDepth(LocalPos, MaterialParameters, Range, OpticalDepth))
+	{
+		return;
+	}
+#endif
+
+	AddOpticalDepth(LocalPos, RangeToBin(Range), OpticalDepth);
 }
 
 #endif // PIXELSHADER

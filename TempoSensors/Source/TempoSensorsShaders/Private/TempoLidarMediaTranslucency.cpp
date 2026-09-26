@@ -92,6 +92,9 @@ namespace
 		{
 			FMeshMaterialShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
 			OutEnvironment.SetDefine(TEXT("OPTICAL_DEPTH_SCALE"), GTempoLidarMediaOpticalDepthScale);
+			// Sprite vertex factories only pass the particle's center and radius to the pixel shader
+			// when asked; the pass reads each sprite as a ball around that center.
+			OutEnvironment.SetDefine(TEXT("NEEDS_PARTICLE_POSITION"), 1);
 		}
 
 		void GetShaderBindings(

@@ -217,7 +217,13 @@ analytically. Rasterized translucency, the way most dust and smoke effects are a
 (Niagara sprites and ribbons, mesh particles, translucent meshes, fog cards), has no volumetric
 representation anywhere, so the lidar rasterizes those same primitives a second time with a
 plugin-owned material shader that evaluates each fragment's opacity with its real material (soft
-particle depth fade and all) and adds its optical depth to the profile at the fragment's range.
+particle depth fade and all) and adds its optical depth to the profile. A sprite is read as the
+ball it stands for: a camera-facing billboard with a radial falloff is the projection of a fuzzy
+sphere around the particle, so its optical depth is spread along the ray's chord through a sphere
+of the particle's radius (half the smaller sprite size, the same sphere the engine's spherical
+particle opacity uses), densest at the center, rather than dropped at the range of the quad, which
+would make every puff a flat disc facing the sensor. Meshes and ribbons keep the range they
+rasterize at.
 The profile is discretized into log-spaced range bins and resolved with a simple sensor model:
 
 - the surface return is attenuated by the two-way transmittance to the surface, and dropped when
