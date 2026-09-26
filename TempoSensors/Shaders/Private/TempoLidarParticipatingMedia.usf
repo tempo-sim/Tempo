@@ -15,13 +15,15 @@
 //     configured, every local fog volume (CombineVolumetricFog);
 //   * local fog volumes composed analytically outside that grid (LocalFogVolumeCommon.ush).
 //
-// ProfileCS discretizes that profile into optical depth per range bin, in a 3D texture. Other passes
-// may add to the bins (rasterized translucency does, in a later pass) before ResolveCS walks them and
-// applies the sensor model: the surface return is attenuated by the two-way transmittance to the
-// surface, and the medium's backscatter is integrated bin by bin, weighted by the two-way transmittance
-// to the bin and the sensor's range falloff, into one medium echo whose range is drawn from that
-// distribution. The 1/range and transmittance-squared weights are why real lidars see fog returns
-// cluster close to the sensor; nothing here is tuned to produce that.
+// ProfileCS discretizes that profile into optical depth per range bin, in a 3D texture, and alongside
+// it the same optical depth weighted by the albedo of what contributed it, so a bin's mean albedo is
+// the ratio of the two. Other passes may add to the bins (rasterized translucency does, in a later
+// pass) before ResolveCS walks them and applies the sensor model: the surface return is attenuated by
+// the two-way transmittance to the surface, and the medium's backscatter is integrated bin by bin,
+// weighted by the bin's albedo, the two-way transmittance to the bin and the sensor's range falloff,
+// into one medium echo whose range is drawn from that distribution and whose reflectivity is its
+// return-weighted albedo. The 1/range and transmittance-squared weights are why real lidars see fog
+// returns cluster close to the sensor; nothing here is tuned to produce that.
 //
 // Ranges are along the ray (distances), in cm, like the lidar's own returns. Bins are log-spaced
 // from FirstBinEdge to MaxRange, with bin 0 covering [0, FirstBinEdge).
@@ -84,6 +86,9 @@ float SurfaceRange(int2 PixelPos, float CosToForward, out bool bRendered)
 #ifdef PROFILE_PASS
 
 RWTexture3D<uint> OpticalDepthOutput;
+RWTexture3D<uint> AlbedoOpticalDepthOutput;
+// The fog's single-scattering albedo, as a luminance, applied to every fog source.
+float FogAlbedo;
 
 // Mirrors of FFogUniformParameters (FogRendering.h) and the View's fog constants, set from
 // FViewInfo::ExponentialFogParameters etc. See HeightFogCommon.ush for the packing:
@@ -255,6 +260,7 @@ void ProfileCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 		const float OpticalDepth = max(PreviousLogTransmittance - LogTransmittance, 0.0);
 		PreviousLogTransmittance = LogTransmittance;
 		OpticalDepthOutput[uint3(LocalPos, Bin)] = uint(min(OpticalDepth * OPTICAL_DEPTH_SCALE, 4294967040.0));
+		AlbedoOpticalDepthOutput[uint3(LocalPos, Bin)] = uint(min(OpticalDepth * FogAlbedo * OPTICAL_DEPTH_SCALE, 4294967040.0));
 	}
 }
 
@@ -263,11 +269,13 @@ void ProfileCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 #ifdef RESOLVE_PASS
 
 Texture3D<uint> OpticalDepthProfile;
+Texture3D<uint> AlbedoOpticalDepthProfile;
 RWTexture2D<uint4> Output;
 
 // Visual opacity to lidar optical depth. 1 = the camera's extinction is the lidar's.
 float ExtinctionScale;
-// The medium's backscatter toward the sensor, as a fraction of a perpendicular surface's return.
+// The backscatter of a white medium toward the sensor, as a fraction of a perpendicular surface's
+// return; each bin's return is this times the bin's albedo.
 float Backscatter;
 // The lidar's own range falloff: intensity = saturation distance / max(saturation distance, range).
 float IntensitySaturationDistance;
@@ -283,25 +291,33 @@ float RangeFalloff(float Range)
 }
 
 // The optical depth of a bin, scaled and cut at the surface: only the part of the bin in front of
-// the surface can scatter or attenuate.
-float BinOpticalDepth(int2 LocalPos, int Bin, float Surface, out float NearEdge, out float FarEdge)
+// the surface can scatter or attenuate. Also the bin's mean albedo, the ratio of its albedo-weighted
+// optical depth to its optical depth.
+float BinOpticalDepth(int2 LocalPos, int Bin, float Surface, out float NearEdge, out float FarEdge, out float Albedo)
 {
 	NearEdge = BinNearEdge(Bin);
 	FarEdge = min(BinFarEdge(Bin), Surface);
+	Albedo = 0.0;
 	if (FarEdge <= NearEdge)
 	{
 		return 0.0;
 	}
 	const float Fraction = (FarEdge - NearEdge) / max(BinFarEdge(Bin) - NearEdge, 1e-3);
-	return float(OpticalDepthProfile[uint3(LocalPos, Bin)]) * (1.0 / OPTICAL_DEPTH_SCALE) * ExtinctionScale * Fraction;
+	const float Raw = float(OpticalDepthProfile[uint3(LocalPos, Bin)]);
+	if (Raw > 0.0)
+	{
+		Albedo = saturate(float(AlbedoOpticalDepthProfile[uint3(LocalPos, Bin)]) / Raw);
+	}
+	return Raw * (1.0 / OPTICAL_DEPTH_SCALE) * ExtinctionScale * Fraction;
 }
 
-// The medium's return from one bin: what the bin scatters back (1 - e^-tau), attenuated both ways
-// through everything before it and half of itself, and by the sensor's range falloff.
-float BinReturnWeight(float OpticalDepth, float AccumulatedOpticalDepth, float NearEdge, float FarEdge)
+// The medium's return from one bin: what the bin scatters back (1 - e^-tau) times its albedo,
+// attenuated both ways through everything before it and half of itself, and by the sensor's range
+// falloff.
+float BinReturnWeight(float OpticalDepth, float Albedo, float AccumulatedOpticalDepth, float NearEdge, float FarEdge)
 {
 	const float TwoWayTransmittance = exp(-2.0 * AccumulatedOpticalDepth - OpticalDepth);
-	return Backscatter * (1.0 - exp(-OpticalDepth)) * TwoWayTransmittance * RangeFalloff(0.5 * (NearEdge + FarEdge));
+	return Backscatter * Albedo * (1.0 - exp(-OpticalDepth)) * TwoWayTransmittance * RangeFalloff(0.5 * (NearEdge + FarEdge));
 }
 
 [numthreads(THREADGROUP_SIZE, THREADGROUP_SIZE, 1)]
@@ -324,21 +340,26 @@ void ResolveCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	bool bSurfaceRendered;
 	const float Surface = SurfaceRange(PixelPos, CosToForward, bSurfaceRendered);
 
-	// First walk: the total medium return and the optical depth to the surface.
+	// First walk: the total medium return, its return-weighted albedo, and the optical depth to the
+	// surface.
 	float TotalWeight = 0.0;
+	float WeightedAlbedo = 0.0;
 	float AccumulatedOpticalDepth = 0.0;
 	for (int Bin = 0; Bin < NumBins; ++Bin)
 	{
-		float NearEdge, FarEdge;
-		const float OpticalDepth = BinOpticalDepth(LocalPos, Bin, Surface, NearEdge, FarEdge);
+		float NearEdge, FarEdge, Albedo;
+		const float OpticalDepth = BinOpticalDepth(LocalPos, Bin, Surface, NearEdge, FarEdge, Albedo);
 		if (FarEdge <= NearEdge)
 		{
 			break;
 		}
-		TotalWeight += BinReturnWeight(OpticalDepth, AccumulatedOpticalDepth, NearEdge, FarEdge);
+		const float Weight = BinReturnWeight(OpticalDepth, Albedo, AccumulatedOpticalDepth, NearEdge, FarEdge);
+		TotalWeight += Weight;
+		WeightedAlbedo += Weight * Albedo;
 		AccumulatedOpticalDepth += OpticalDepth;
 	}
 	const float SurfaceTransmittance = exp(-AccumulatedOpticalDepth);
+	const float MediumAlbedo = TotalWeight > 0.0 ? saturate(WeightedAlbedo / TotalWeight) : 0.0;
 
 	// Second walk: the range of the medium echo, drawn from the per-bin return distribution. A
 	// per-beam random draw spreads returns through the medium as a real sensor's do; without it the
@@ -357,13 +378,13 @@ void ResolveCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 		AccumulatedOpticalDepth = 0.0;
 		for (int Bin = 0; Bin < NumBins; ++Bin)
 		{
-			float NearEdge, FarEdge;
-			const float OpticalDepth = BinOpticalDepth(LocalPos, Bin, Surface, NearEdge, FarEdge);
+			float NearEdge, FarEdge, Albedo;
+			const float OpticalDepth = BinOpticalDepth(LocalPos, Bin, Surface, NearEdge, FarEdge, Albedo);
 			if (FarEdge <= NearEdge)
 			{
 				break;
 			}
-			const float Weight = BinReturnWeight(OpticalDepth, AccumulatedOpticalDepth, NearEdge, FarEdge);
+			const float Weight = BinReturnWeight(OpticalDepth, Albedo, AccumulatedOpticalDepth, NearEdge, FarEdge);
 			if (Cumulative + Weight >= Target && Weight > 0.0)
 			{
 				MediumRange = lerp(NearEdge, FarEdge, saturate((Target - Cumulative) / Weight));
@@ -383,6 +404,8 @@ void ResolveCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 		// 0 means no echo, so a valid range never encodes to 0.
 		RangeCode = max(uint(round(saturate(MediumRange / MaxRange) * 65535.0)), 1u);
 	}
+	// The medium echo's reflectivity rides the high byte of the flags lane.
+	Flags |= uint(round(MediumAlbedo * 255.0)) << 8;
 
 	Output[PixelPos] = uint4(
 		RangeCode,

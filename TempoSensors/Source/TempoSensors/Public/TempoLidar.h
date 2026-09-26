@@ -166,6 +166,9 @@ struct FTempoLidarEcho
 	// Along the ray, cm. Meaningless when not valid.
 	float Distance = 0.0f;
 	float Intensity = 0.0f;
+	// The reflectivity estimate this echo reports: a surface's, from its material, or a medium's,
+	// its return-weighted albedo.
+	uint8 ReflectivityByte = 0;
 	// From participating media (dust, smoke, fog) rather than a surface.
 	bool bMedium = false;
 	bool bValid = false;
@@ -467,8 +470,11 @@ protected:
 	UPROPERTY(EditAnywhere, Category="TempoLidar|Participating Media", meta=(EditCondition="bSimulateParticipatingMedia", UIMin=0.0, UIMax=4.0, ClampMin=0.0))
 	float MediaExtinctionScale = 1.0f;
 
-	// How much of what the medium takes out of the beam comes back to the sensor, as a fraction of a
-	// perpendicular surface's return. Sets the intensity of medium echoes.
+	// How much of what a white medium takes out of the beam comes back to the sensor, as a fraction
+	// of a perpendicular surface's return. Each medium's return is this times its albedo estimate:
+	// a sprite's base color luminance (its emissive for unlit materials), the fog component's albedo
+	// for fog. So dark smoke returns less than white fog, and a medium echo's reflectivity is that
+	// albedo.
 	UPROPERTY(EditAnywhere, Category="TempoLidar|Participating Media", meta=(EditCondition="bSimulateParticipatingMedia", UIMin=0.0, UIMax=1.0, ClampMin=0.0))
 	float MediaBackscatter = 0.1f;
 
@@ -589,7 +595,6 @@ struct TLidarTextureReadBase : TTextureReadBase<PixelType>
 	// The sensor model the decode applies to the media results and the mode it reports in.
 	ETempoLidarReturnMode ReturnMode = ETempoLidarReturnMode::Strongest;
 	float MinDetectableIntensity = 0.0f;
-	float MediaBackscatter = 0.0f;
 };
 
 template <>

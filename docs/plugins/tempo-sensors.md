@@ -217,7 +217,9 @@ analytically. Rasterized translucency, the way most dust and smoke effects are a
 (Niagara sprites and ribbons, mesh particles, translucent meshes, fog cards), has no volumetric
 representation anywhere, so the lidar rasterizes those same primitives a second time with a
 plugin-owned material shader that evaluates each fragment's opacity with its real material (soft
-particle depth fade and all) and adds its optical depth to the profile. A sprite is read as the
+particle depth fade and all) and adds its optical depth to the profile, together with an albedo
+estimate from the material's color (the luminance of its base color, or of its emissive color for
+the unlit materials most sprites use), so dark smoke returns less than white dust. A sprite is read as the
 ball it stands for: a camera-facing billboard with a radial falloff is the projection of a fuzzy
 sphere around the particle, so its optical depth is spread along the ray's chord through a sphere
 of the particle's radius (half the smaller sprite size, the same sphere the engine's spherical
@@ -228,9 +230,10 @@ The profile is discretized into log-spaced range bins and resolved with a simple
 
 - the surface return is attenuated by the two-way transmittance to the surface, and dropped when
   it falls below `MinDetectableIntensity`;
-- the medium's backscatter is integrated bin by bin, weighted by the two-way transmittance to the
-  bin and the sensor's own range falloff, into one medium echo whose intensity is the total and
-  whose range is drawn from that distribution. The range-squared and transmittance weights are why
+- the medium's backscatter is integrated bin by bin, weighted by the bin's albedo, the two-way
+  transmittance to the bin and the sensor's own range falloff, into one medium echo whose intensity
+  is the total, whose range is drawn from that distribution and whose reflectivity is its
+  return-weighted albedo. The range-squared and transmittance weights are why
   real lidars see fog returns cluster close to the sensor; nothing is tuned to produce that.
 
 Everything runs on the GPU inside the lidar's own render (two small compute passes and one
@@ -244,19 +247,20 @@ the CPU side only chooses which echo to report.
 | `bSimulateParticipatingMedia` | on | Master switch. Off, no extra pass runs and the output is unchanged. On, the lidar's render also renders fog (its color is discarded) so the profile has something to read. |
 | `bMediaIncludesTranslucency` | on | Also rasterize translucent primitives into the profile with their own materials. Additive materials (fire, sparks, glows) add light and block nothing, so they are skipped; modulate materials block what they darken. Off, only fog contributes. |
 | `MediaExtinctionScale` | 1.0 | Visual opacity → lidar optical depth. 1 means what the camera sees is what the beam sees, which holds for fog and dust (particles large compared to the wavelength). Fine smoke scatters less in the near infrared: use less than 1. |
-| `MediaBackscatter` | 0.1 | How much of what the medium takes out of the beam comes back to the sensor, as a fraction of a perpendicular surface's return. Sets the intensity of medium echoes and the `reflectivities` byte they report. |
+| `MediaBackscatter` | 0.1 | How much of what a white medium takes out of the beam comes back to the sensor, as a fraction of a perpendicular surface's return. Each medium's echo is this times its albedo estimate: a sprite's material color as a luminance, the fog component's albedo for fog. That albedo is also the `reflectivities` byte a medium echo reports. |
 | `MinDetectableIntensity` | 0.01 | Echoes weaker than this are not reported, whether from a surface seen through the medium or from the medium itself. Only applied when media are simulated. |
 | `ReturnMode` | Strongest | Which echo a beam reports when it detects more than one: `Strongest`, `First` (nearest), `Last` (farthest) or `Dual` (two per beam). Without media every mode reports the same returns. |
 | `bStochasticMediaReturns` | on | Draw each beam's medium echo range at random from its return distribution (reproducible per `sequence_id`), so returns spread through the medium as a real sensor's do. Off, each beam reports the median range, a clean shell. |
-| `MediaRangeBins` | 64 | Range bins per beam, log-spaced out to `MaxDistance`. More bins place medium echoes more precisely at 4 bytes per bin per rendered pixel. |
+| `MediaRangeBins` | 64 | Range bins per beam, log-spaced out to `MaxDistance`. More bins place medium echoes more precisely at 8 bytes per bin per rendered pixel. |
 
 **Output.** `LidarScanSegment.return_mode` reports the mode. In `Dual` mode the strongest echo of
 each beam is in the top-level arrays and the other, if any, is in `second_distances_m`,
 `second_intensities`, `second_labels` and `second_reflectivities`, with the same layouts and
 encodings as their top-level counterparts (distance 0 = no second echo). The second return carries
 no colors: both echoes of a beam come from the same pixel, so its color would repeat the first's.
-Medium echoes carry label 0, the medium's backscatter as reflectivity and, in color mode, the
-pixel's rendered color, which is mostly the medium's where the medium is dense.
+Medium echoes carry label 0, their albedo estimate as reflectivity (the fog's authored albedo, a
+sprite's material color) and, in color mode, the pixel's rendered color, which is mostly the
+medium's where the medium is dense.
 
 **What is and is not covered.** Height fog, local fog volumes, anything injected into the
 volumetric fog grid (Volume-domain materials on meshes or Niagara mesh particles) and rasterized
@@ -426,7 +430,7 @@ running a scene fast and then dropping into lockstep for the frames you actually
   `MediaRangeBins` ranges per pixel, an opacity-only rasterization of the visible translucent
   primitives (bounded by the same overdraw the camera pays for them, with a far cheaper pixel
   shader), a resolve pass, an 8-byte-per-pixel second readback and a transient 3D texture of
-  `MediaRangeBins` × 4 bytes per rendered pixel. Off, none of it exists.
+  `MediaRangeBins` × 8 bytes per rendered pixel. Off, none of it exists.
 
 ## Architecture, briefly
 

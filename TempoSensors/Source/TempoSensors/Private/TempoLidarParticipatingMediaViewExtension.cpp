@@ -97,8 +97,8 @@ void FTempoLidarParticipatingMediaViewExtension::PrePostProcessPass_RenderThread
 
 	FRDGTextureRef Results = RegisterExternalTexture(GraphBuilder, Results_RenderThread, TEXT("TempoLidarMedia.Results"));
 
-	FRDGTextureRef Profile = AddTempoLidarMediaProfilePass(GraphBuilder, PassInputs);
-	if (!Profile)
+	const FTempoLidarMediaProfile Profile = AddTempoLidarMediaProfilePass(GraphBuilder, PassInputs);
+	if (!Profile.IsValid())
 	{
 		return;
 	}

@@ -25,6 +25,7 @@
 // Bound per draw by the pass's shaders: the profile they add to and how ranges map to its bins.
 BEGIN_GLOBAL_SHADER_PARAMETER_STRUCT(FTempoLidarMediaTranslucencyPassUniformParameters, )
 	SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture3D<uint>, OpticalDepthProfile)
+	SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture3D<uint>, AlbedoOpticalDepthProfile)
 	SHADER_PARAMETER(FIntPoint, ViewRectMin)
 	SHADER_PARAMETER(int32, NumBins)
 	SHADER_PARAMETER(float, FirstBinEdge)
@@ -242,13 +243,13 @@ void AddTempoLidarMediaTranslucencyPass(
 	const FScene* Scene,
 	FSceneUniformBuffer& SceneUniforms,
 	TArrayView<const FTempoLidarMediaTranslucentBatch> Batches,
-	FRDGTextureRef OpticalDepthProfile)
+	const FTempoLidarMediaProfile& Profile)
 {
-	if (Batches.IsEmpty() || !OpticalDepthProfile || !Inputs.SceneDepth || Inputs.ViewRect.IsEmpty() || !Inputs.ViewUniformBuffer.IsValid())
+	if (Batches.IsEmpty() || !Profile.IsValid() || !Inputs.SceneDepth || Inputs.ViewRect.IsEmpty() || !Inputs.ViewUniformBuffer.IsValid())
 	{
 		return;
 	}
-	const FIntVector ProfileSize = OpticalDepthProfile->Desc.GetSize();
+	const FIntVector ProfileSize = Profile.OpticalDepth->Desc.GetSize();
 	if (ProfileSize.X != Inputs.ViewRect.Width() || ProfileSize.Y != Inputs.ViewRect.Height())
 	{
 		return;
@@ -257,7 +258,8 @@ void AddTempoLidarMediaTranslucencyPass(
 	RDG_EVENT_SCOPE(GraphBuilder, "TempoLidarMediaTranslucency");
 
 	FTempoLidarMediaTranslucencyPassUniformParameters* PassUniformParameters = GraphBuilder.AllocParameters<FTempoLidarMediaTranslucencyPassUniformParameters>();
-	PassUniformParameters->OpticalDepthProfile = GraphBuilder.CreateUAV(OpticalDepthProfile);
+	PassUniformParameters->OpticalDepthProfile = GraphBuilder.CreateUAV(Profile.OpticalDepth);
+	PassUniformParameters->AlbedoOpticalDepthProfile = GraphBuilder.CreateUAV(Profile.AlbedoOpticalDepth);
 	PassUniformParameters->ViewRectMin = Inputs.ViewRect.Min;
 	// The same bin geometry the profile and resolve passes use; see MakeBinInputs there.
 	PassUniformParameters->NumBins = ProfileSize.Z;

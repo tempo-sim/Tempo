@@ -32,9 +32,12 @@ struct FTempoLidarMediaPixel
 	uint16 MediumIntensityCode = 0;
 	// One-way transmittance from the sensor to the opaque surface, in 1/65535 steps of [0, 1].
 	uint16 SurfaceTransmittanceCode = 0;
+	// Low byte: flags. High byte: the medium echo's reflectivity estimate, its return-weighted mean
+	// albedo, in 1/255 steps of [0, 1].
 	uint16 Flags = 0;
 
 	bool HasMediumEcho() const { return (Flags & FlagMediumEcho) != 0 && MediumRangeCode != 0; }
+	uint8 MediumReflectivityByte() const { return static_cast<uint8>(Flags >> 8); }
 	float MediumRange(float MaxRange) const { return MaxRange * static_cast<float>(MediumRangeCode) / 65535.0f; }
 	float MediumIntensity() const { return static_cast<float>(MediumIntensityCode) / 65535.0f; }
 	float SurfaceTransmittance() const { return static_cast<float>(SurfaceTransmittanceCode) / 65535.0f; }
@@ -59,6 +62,9 @@ struct FTempoLidarMediaFogInputs
 	// The view's local fog volume data when local fog volumes are composed analytically for it, else
 	// null. Points at renderer-owned memory valid for the current render.
 	const FLocalFogVolumeUniformParameters* LocalFogVolumes = nullptr;
+	// The fog's single-scattering albedo, as a luminance: the fraction of what it takes out of the
+	// beam that it scatters rather than absorbs. Applied to every fog source.
+	float Albedo = 1.0f;
 };
 
 // The lidar's participating media model.
@@ -72,7 +78,8 @@ struct FTempoLidarMediaSensorInputs
 	float MaxRange = 10000.0f;
 	// Visual opacity to lidar optical depth.
 	float ExtinctionScale = 1.0f;
-	// The medium's backscatter toward the sensor, as a fraction of a perpendicular surface's return.
+	// The backscatter of a white medium toward the sensor, as a fraction of a perpendicular surface's
+	// return. Each bin's return is this times the bin's albedo.
 	float Backscatter = 0.1f;
 	// The lidar's own range falloff parameter, cm.
 	float IntensitySaturationDistance = 1000.0f;
@@ -95,10 +102,21 @@ struct FTempoLidarMediaPassInputs
 	FTempoLidarMediaSensorInputs Sensor;
 };
 
-// Build the optical depth profile of the view: a PF_R32_UINT 3D texture, X and Y the view rect's
-// size and Z the bins, holding each bin's optical depth times GTempoLidarMediaOpticalDepthScale.
-// Filled from the fog the camera renders; other passes may add to it before it is resolved.
-TEMPOSENSORSSHADERS_API FRDGTextureRef AddTempoLidarMediaProfilePass(FRDGBuilder& GraphBuilder, const FTempoLidarMediaPassInputs& Inputs);
+// The per-pixel profile of a view: two PF_R32_UINT 3D textures, X and Y the view rect's size and Z
+// the bins. OpticalDepth holds each bin's optical depth times GTempoLidarMediaOpticalDepthScale;
+// AlbedoOpticalDepth holds the same weighted by the albedo of what contributed it, so a bin's mean
+// albedo is the ratio of the two.
+struct FTempoLidarMediaProfile
+{
+	FRDGTextureRef OpticalDepth = nullptr;
+	FRDGTextureRef AlbedoOpticalDepth = nullptr;
+
+	bool IsValid() const { return OpticalDepth != nullptr && AlbedoOpticalDepth != nullptr; }
+};
+
+// Build the profile of the view from the fog the camera renders; other passes may add to it before
+// it is resolved. Both textures are null when there is nothing to build.
+TEMPOSENSORSSHADERS_API FTempoLidarMediaProfile AddTempoLidarMediaProfilePass(FRDGBuilder& GraphBuilder, const FTempoLidarMediaPassInputs& Inputs);
 
 // A translucent mesh batch visible in the view, to be rasterized into the profile.
 struct FTempoLidarMediaTranslucentBatch
@@ -111,9 +129,10 @@ struct FTempoLidarMediaTranslucentBatch
 };
 
 // Rasterize the view's translucent primitives with the plugin's own material shaders, which add
-// each fragment's optical depth (-ln(1 - opacity)) to the profile at its range. Batches must stay
-// valid until the graph executes; the renderer's own live for the whole render. Requires the
-// material shaders this module registers, compiled for every translucent material.
+// each fragment's optical depth (-ln(1 - opacity)), and that weighted by the material's albedo
+// estimate, to the profile at its range. Batches must stay valid until the graph executes; the
+// renderer's own live for the whole render. Requires the material shaders this module registers,
+// compiled for every translucent material.
 TEMPOSENSORSSHADERS_API void AddTempoLidarMediaTranslucencyPass(
 	FRDGBuilder& GraphBuilder,
 	const FTempoLidarMediaPassInputs& Inputs,
@@ -121,8 +140,8 @@ TEMPOSENSORSSHADERS_API void AddTempoLidarMediaTranslucencyPass(
 	const FScene* Scene,
 	FSceneUniformBuffer& SceneUniforms,
 	TArrayView<const FTempoLidarMediaTranslucentBatch> Batches,
-	FRDGTextureRef OpticalDepthProfile);
+	const FTempoLidarMediaProfile& Profile);
 
 // Resolve the profile into per-pixel FTempoLidarMediaPixel results, written to Output (a
 // PF_R16G16B16A16_UINT texture with a UAV) inside the view rect.
-TEMPOSENSORSSHADERS_API void AddTempoLidarMediaResolvePass(FRDGBuilder& GraphBuilder, const FTempoLidarMediaPassInputs& Inputs, FRDGTextureRef OpticalDepthProfile, FRDGTextureRef Output);
+TEMPOSENSORSSHADERS_API void AddTempoLidarMediaResolvePass(FRDGBuilder& GraphBuilder, const FTempoLidarMediaPassInputs& Inputs, const FTempoLidarMediaProfile& Profile, FRDGTextureRef Output);

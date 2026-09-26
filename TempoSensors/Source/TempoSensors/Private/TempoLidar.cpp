@@ -748,7 +748,6 @@ namespace
 		const ETempoLidarReturnMode ReturnMode = Read.ReturnMode;
 		const bool bDual = ReturnMode == ETempoLidarReturnMode::Dual;
 		const float MinDetectableIntensity = bMedia ? Read.MinDetectableIntensity : 0.0f;
-		const uint8 MediumReflectivity = static_cast<uint8>(FMath::Clamp(FMath::RoundToInt(Read.MediaBackscatter * 255.0f), 0, 255));
 
 		// The second return's arrays exist only in dual mode; same layouts as the first's. It carries
 		// no colors: both echoes of a beam come from the same pixel, so they would repeat the first's.
@@ -783,7 +782,7 @@ namespace
 		// of every output array, so threads never share cache lines.
 		ParallelFor(Read.HorizontalBeams, [&Read, BeamSamples, CosMaxAngleOfIncidence, InverseCaptureRotation, InverseCaptureScale,
 			DistancesData, IntensitiesData, LabelsData, AzimuthsData, ElevationsData, ReflectivitiesData, ColorsData, ColorEncoding,
-			MediaPixels, ReturnMode, bDual, MinDetectableIntensity, MediumReflectivity,
+			MediaPixels, ReturnMode, bDual, MinDetectableIntensity,
 			SecondDistancesData, SecondIntensitiesData, SecondLabelsData, SecondReflectivitiesData](int32 HorizontalBeam)
 		{
 			for (int32 VerticalBeam = 0; VerticalBeam < Read.VerticalBeams; ++VerticalBeam)
@@ -816,6 +815,7 @@ namespace
 					{
 						Surface.Distance = static_cast<float>(FMath::Max(Read.MinDistance, Distance));
 						Surface.Intensity = static_cast<float>(CosAngleOfIncidence * Read.IntensitySaturationDistance / FMath::Max(Read.IntensitySaturationDistance, Distance));
+						Surface.ReflectivityByte = Pixel.ReflectivityByte();
 						Surface.bValid = true;
 					}
 				}
@@ -837,6 +837,7 @@ namespace
 					{
 						Medium.Distance = Media.MediumRange(static_cast<float>(Read.MaxDistance));
 						Medium.Intensity = Media.MediumIntensity();
+						Medium.ReflectivityByte = Media.MediumReflectivityByte();
 						Medium.bValid = Medium.Intensity >= MinDetectableIntensity
 							&& Medium.Distance >= Read.MinDistance && Medium.Distance <= Read.MaxDistance;
 					}
@@ -851,15 +852,15 @@ namespace
 				AzimuthsData[Idx] = Sample.AzimuthRad;
 				ElevationsData[Idx] = Sample.ElevationRad;
 
-				// A medium echo has no surface behind it to label, and its reflectivity is the
-				// medium's backscatter. For a non-return (Distance == 0) the label and reflectivity
-				// are meaningless but harmless, mirroring how colors are written unconditionally.
+				// A medium echo has no surface behind it to label, and reports its albedo estimate as
+				// reflectivity. For a non-return (Distance == 0) the label and reflectivity are
+				// meaningless but harmless, mirroring how colors are written unconditionally.
 				auto WriteEcho = [&](const FTempoLidarEcho& Echo, float* Distances, float* Intensities, uint32_t* Labels, char* Reflectivities)
 				{
 					Distances[Idx] = Echo.bValid ? QuantityConverter<CM2M>::Convert(Echo.Distance) : 0.0f;
 					Intensities[Idx] = Echo.bValid ? Echo.Intensity : 0.0f;
 					Labels[Idx] = Echo.bMedium ? 0u : Pixel.Label();
-					Reflectivities[Idx] = static_cast<char>(Echo.bMedium ? MediumReflectivity : Pixel.ReflectivityByte());
+					Reflectivities[Idx] = static_cast<char>(Echo.bValid ? Echo.ReflectivityByte : Pixel.ReflectivityByte());
 				};
 				WriteEcho(Primary, DistancesData, IntensitiesData, LabelsData, ReflectivitiesData);
 				if (bDual)
@@ -1292,7 +1293,6 @@ void UTempoLidar::RenderCapture()
 				MinDistance, MaxDistance, Tile.BeamSamples);
 			Slice->ReturnMode = ReturnMode;
 			Slice->MinDetectableIntensity = MinDetectableIntensity;
-			Slice->MediaBackscatter = MediaBackscatter;
 			if (bMedia)
 			{
 				Slice->MediaImage.SetNumUninitialized(Tile.SizeXY.X * Tile.SizeXY.Y);

@@ -7,8 +7,14 @@
 // optical depth, -ln(1 - opacity), to the beam's profile at its range (see
 // TempoLidarParticipatingMedia.usf for the profile and the sensor model resolved from it).
 //
-// Only the material's opacity is evaluated, not its lighting, so this is a fraction of what the
-// camera pays for the same fragments. Additive materials (fire, sparks, glows) are not compiled
+// Along with the opacity, the material's color gives an albedo estimate, the fraction of what the
+// fragment takes out of the beam that it would scatter rather than absorb: the luminance of its base
+// color, or of its emissive color for an unlit material, which is where a sprite's color lives. It
+// weights the fragment's optical depth in the profile's albedo channel, so dark smoke returns less to
+// the sensor than white dust and reports a lower reflectivity.
+//
+// Only the material's opacity and color are evaluated, not its lighting, so this is a fraction of
+// what the camera pays for the same fragments. Additive materials (fire, sparks, glows) are not compiled
 // for this pass at all: they add light and block none. Modulate materials darken the scene, which
 // reads as blocking what they darken. Substrate materials report the coverage and throughput their
 // translucency is composed from, as the translucent shadow pass does.
@@ -97,12 +103,29 @@ int RangeToBin(float Range)
 	return clamp(1 + int(floor(T * NumLogBins)), 0, TempoLidarMediaPass.NumBins - 1);
 }
 
-void AddOpticalDepth(int2 LocalPos, int Bin, float OpticalDepth)
+void AddOpticalDepth(int2 LocalPos, int Bin, float OpticalDepth, float Albedo)
 {
 	// A fully opaque fragment still leaves a finite optical depth, well past where anything
 	// transmits, so the fixed-point sum cannot overflow on a few overlapping fragments.
 	const uint Fixed = uint(min(OpticalDepth * OPTICAL_DEPTH_SCALE, 4294967040.0));
 	InterlockedAdd(TempoLidarMediaPass.OpticalDepthProfile[uint3(LocalPos, Bin)], Fixed);
+	const uint FixedAlbedo = uint(min(OpticalDepth * Albedo * OPTICAL_DEPTH_SCALE, 4294967040.0));
+	InterlockedAdd(TempoLidarMediaPass.AlbedoOpticalDepthProfile[uint3(LocalPos, Bin)], FixedAlbedo);
+}
+
+// The fraction of what this fragment takes out of the beam that it would scatter back rather than
+// absorb, estimated from the material's color as a luminance in [0, 1].
+float FragmentAlbedo(FMaterialPixelParameters MaterialParameters, FPixelMaterialInputs PixelMaterialInputs)
+{
+#if SUBSTRATE_ENABLED && TEMPLATE_USES_SUBSTRATE
+	// Substrate keeps its colors inside the BSDF tree; read it as white until that is resolved.
+	return 1.0;
+#elif MATERIAL_SHADINGMODEL_UNLIT || MATERIALBLENDING_MODULATE
+	// An unlit material's color is its emissive; so is what a modulate material multiplies by.
+	return saturate(Luminance(GetMaterialEmissive(PixelMaterialInputs)));
+#else
+	return saturate(Luminance(GetMaterialBaseColor(PixelMaterialInputs)));
+#endif
 }
 
 // How much of the light through this fragment the material blocks, in [0, 1].
@@ -147,7 +170,7 @@ float ChordFractionBefore(float T, float H)
 // Spread a sprite fragment's optical depth along the ray's chord through the particle's sphere.
 // Returns false, leaving nothing added, when the ray misses the sphere: the quad's corners outside
 // the inscribed circle, or the far ends of a stretched sprite, which are then read as the plane.
-bool AddSpriteOpticalDepth(int2 LocalPos, FMaterialPixelParameters MaterialParameters, float Range, float OpticalDepth)
+bool AddSpriteOpticalDepth(int2 LocalPos, FMaterialPixelParameters MaterialParameters, float Range, float OpticalDepth, float Albedo)
 {
 	// The particle's center relative to the sensor, and its radius, half the smaller sprite size:
 	// the same sphere the engine's spherical particle normal and opacity use.
@@ -190,7 +213,7 @@ bool AddSpriteOpticalDepth(int2 LocalPos, FMaterialPixelParameters MaterialParam
 		Previous = Cumulative;
 		if (Share > 0.0)
 		{
-			AddOpticalDepth(LocalPos, Bin, OpticalDepth * Share);
+			AddOpticalDepth(LocalPos, Bin, OpticalDepth * Share, Albedo);
 		}
 	}
 	return true;
@@ -226,16 +249,17 @@ void MainPS(
 	}
 
 	const float OpticalDepth = -log(max(1.0 - Opacity, 1e-4));
+	const float Albedo = FragmentAlbedo(MaterialParameters, PixelMaterialInputs);
 	const int2 LocalPos = int2(SvPosition.xy) - TempoLidarMediaPass.ViewRectMin;
 
 #if PARTICLE_SPRITE_FACTORY
-	if (AddSpriteOpticalDepth(LocalPos, MaterialParameters, Range, OpticalDepth))
+	if (AddSpriteOpticalDepth(LocalPos, MaterialParameters, Range, OpticalDepth, Albedo))
 	{
 		return;
 	}
 #endif
 
-	AddOpticalDepth(LocalPos, RangeToBin(Range), OpticalDepth);
+	AddOpticalDepth(LocalPos, RangeToBin(Range), OpticalDepth, Albedo);
 }
 
 #endif // PIXELSHADER

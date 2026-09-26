@@ -57,6 +57,7 @@
 #define private public
 #include "SceneRendering.h"
 #include "ScenePrivate.h"
+#include "SceneCore.h"
 #undef private
 
 namespace TempoMultiViewCapture
@@ -475,6 +476,19 @@ bool GetViewParticipatingMediaInputs(const FSceneView& View, FTempoLidarMediaPas
 	Fog.VolumetricFogStartDistance = ViewInfo.VolumetricFogStartDistance;
 	// Set by ComputeVolumetricFog only when the grid was rendered for this view.
 	Fog.IntegratedLightScattering = ViewInfo.VolumetricFogResources.IntegratedLightScatteringTexture;
+
+	// The fog's albedo is authored on the fog component and applies to every fog source: the height
+	// fog, the grid (whose color channel is lit in-scatter, not albedo) and local fog volumes, whose
+	// own albedos are not resolved individually. The view's copy is only filled in when the height
+	// fog is set to match volumetric fog, so read the component's.
+	Fog.Albedo = 1.0f;
+	if (const FScene* RenderScene = View.Family && View.Family->Scene ? View.Family->Scene->GetRenderScene() : nullptr)
+	{
+		if (RenderScene->ExponentialFogs.Num() > 0)
+		{
+			Fog.Albedo = RenderScene->ExponentialFogs[0].VolumetricFogAlbedo.GetLuminance();
+		}
+	}
 
 	// Local fog volumes are composed analytically (in the height fog pass or their own pass) unless
 	// they were injected into the volumetric fog grid, in which case the grid already carries them.
