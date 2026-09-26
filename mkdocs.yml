@@ -174,6 +174,7 @@ nav:
       - reference/environment.md
   - Migration:
       - migration/index.md
+      - migration/ros-opt-in.md
       - migration/v0.3.0.md
       - migration/sensors-v0.2.0.md
       - migration/v0.1.0.md

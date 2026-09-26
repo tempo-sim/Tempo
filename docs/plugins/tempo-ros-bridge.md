@@ -6,12 +6,14 @@ services, so a ROS graph can drive and observe the simulation without speaking g
 It sits on top of [TempoROS](tempo-ros.md), which does the actual `rclcpp` integration, and on top
 of the Tempo plugins whose services it re-exposes.
 
-!!! info "Both plugins are optional"
+!!! info "Opt-in, and it needs TempoROS"
 
-    Tempo's primary interface is gRPC and needs no ROS installation. Enable TempoROS and
-    TempoROSBridge only if you want a ROS graph in the loop. TempoSample enables both by default;
-    if you are not using ROS, disable them in the `.uproject` and remove `TempoROSCopyHandler`
-    from `Config/DefaultGame.ini` — see [Installation](../getting-started/installation.md).
+    Tempo's primary interface is gRPC and needs no ROS installation. `TempoROSBridge.uplugin` sets
+    `"EnabledByDefault": false`, so Unreal leaves it off unless your `.uproject` asks for it — a
+    project that ignores it never builds or packages ROS. It also requires
+    [TempoROS](tempo-ros.md), which Tempo does not ship: add that to your project's `Plugins`
+    folder first. Enabling the bridge without it is a build error naming TempoROS, not a silent
+    failure. See [Installation](../getting-started/installation.md#adding-ros).
 
 ## How it works
 
@@ -131,7 +133,7 @@ The root of the transform tree is TempoROS's configured `Fixed Frame Name` (defa
 With TempoROS's bundled environment:
 
 ```bash
-source Plugins/Tempo/TempoROS/Scripts/ROSEnv.sh
+source Plugins/TempoROS/Scripts/ROSEnv.sh
 
 ros2 node list
 ros2 service list

@@ -79,14 +79,20 @@ platforms:
 CustomStageCopyHandler=TempoROSCopyHandler
 ```
 
-`Package.sh` builds that handler automatically. If you package by other means, build it yourself
-first by running `Scripts/BuildAutomation.sh` in TempoROS.
+That is the only step. The handler is `Build/TempoROS.Automation.csproj` inside TempoROS, and
+AutomationTool discovers and builds it on its own — UnrealBuildTool's rules scan looks in the
+`Build` folder of any plugin for automation projects. Nothing has to pre-build it or pass
+`-ScriptDir`, so this works with `Package.sh`, with `RunUAT BuildCookRun` directly, and from the
+editor's **Package Project** menu alike.
 
-If you are **not** using ROS, remove `TempoROSCopyHandler` from `DefaultGame.ini` and disable the
-`TempoROS` and `TempoROSBridge` plugins in your `.uproject`.
+If you are **not** using ROS there is nothing to do: TempoROS is a separate repository you never
+cloned, the bridge is opt-in, and `CustomStageCopyHandler` is a line you simply never add.
 
-!!! note "Windows PATH"
+!!! note "Windows: no `PATH` setup needed"
 
-    To run a packaged game with TempoROS on Windows, add
-    `<package_root>/<YourProjectName>/Plugins/Tempo/TempoROS/Source/ThirdParty/rclcpp/Binaries/Windows`
-    to your `PATH`.
+    Running a packaged game with TempoROS on Windows used to require adding TempoROS's `rclcpp`
+    binaries directory to your `PATH`. It no longer does. A packaged build links its modules into
+    the executable, so the `rclcpp` DLLs are implicit imports of the executable itself and the
+    Windows loader binds them at process start — before any module startup hook could add a search
+    path. TempoROS now stages those DLLs next to the executable, which is the one directory the
+    loader searches unaided.

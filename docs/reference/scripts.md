@@ -26,6 +26,10 @@ your project root works.
 
     `-force` re-runs steps that would otherwise be skipped.
 
+    If your project has a [TempoROS](../plugins/tempo-ros.md) plugin, it runs that plugin's own
+    `Setup.sh` too, wherever TempoROS sits under `Plugins`. A project without TempoROS never
+    downloads `rclcpp`; one that enables `TempoROSBridge` without it gets a warning naming the fix.
+
 `Build.sh`
 
 :   Builds the project, including the code generation prebuild that produces the protobuf code and
@@ -90,6 +94,13 @@ your project root works.
 :   Applies the mods in `EngineMods/` to your Unreal installation. Also normally automatic via git
     hooks.
 
+`FindTempoROS.sh`
+
+:   Prints the directory of this project's [TempoROS](../plugins/tempo-ros.md) plugin, or exits `1`
+    if it has none. TempoROS is a separate repository added to the project's `Plugins` folder, so
+    Tempo has no fixed path for it; `Setup.sh` and `SyncDeps.sh` locate it through this.
+    `Package.sh` does not need it — AutomationTool finds TempoROS's stage copy handler by itself.
+
 `ExtractPatch.sh` / `ApplyPatch.sh`
 
 :   Author and apply an engine mod patch.
@@ -144,12 +155,22 @@ Both are relevant when `Assign Levels To Individual Chunks` is enabled — see t
 
 ## TempoROS
 
+These live in the [TempoROS](../plugins/tempo-ros.md) plugin, which is a separate repository you add
+to your project's `Plugins` folder. The paths below are relative to wherever you put it.
+
+`TempoROS/Setup.sh`
+
+:   Installs TempoROS's `rclcpp` dependencies and adds git hooks to keep them in sync. Tempo's
+    `Setup.sh` and `SyncDeps.sh` both call it for you once TempoROS is in the project, so you only
+    run it by hand for a standalone TempoROS. `-force` re-downloads dependencies.
+
 `TempoROS/Scripts/ROSEnv.sh`
 
 :   Activates TempoROS's bundled minimal ROS environment, for CLI debugging with `ros2 topic list`
     and friends.
 
-`TempoROS/Scripts/BuildAutomation.sh`
+`TempoROS/Build/TempoROS.Automation.csproj`
 
-:   Builds the `TempoROSCopyHandler` custom stage copy handler needed to package with TempoROS.
-    `Package.sh` does this for you.
+:   Not a script — the `TempoROSCopyHandler` custom stage copy handler needed to package with
+    TempoROS. AutomationTool discovers and builds it automatically, because it sits in the plugin's
+    `Build` folder. Nothing needs to pre-build it or pass `-ScriptDir`.
