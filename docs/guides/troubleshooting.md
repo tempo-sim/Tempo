@@ -197,11 +197,13 @@ that iostore is enabled by `bUseIoStore` in `Config/DefaultGame.ini`, not by an 
 
 ### A packaged game with TempoROS won't start on Windows
 
-Add this to your `PATH`:
+This required a `PATH` entry in older versions; it no longer does. TempoROS stages the `rclcpp` DLLs
+next to the packaged executable, which is where the Windows loader finds them without help — see
+[Packaging](packaging.md#packaging-with-temporos).
 
-```text
-<package_root>/<YourProjectName>/Plugins/Tempo/TempoROS/Source/ThirdParty/rclcpp/Binaries/Windows
-```
+If it still fails, check that `CustomStageCopyHandler=TempoROSCopyHandler` is set in
+`Config/DefaultGame.ini` and that you are on TempoROS `main`, the only branch Tempo `main` is tested
+against.
 
 ## Still stuck?
 

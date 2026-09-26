@@ -215,6 +215,15 @@ while IFS= read -r MANIFEST_FILE <&3; do
   SYNC_THIRD_PARTY_DEPS "$MANIFEST_FILE" "$1"
 done 3< <(find "$TEMPO_ROOT" -name ttp_manifest.json -path "*Source*")
 
+# TempoROS is a separate repository, added to the project beside Tempo rather than inside it, and it
+# manages its own third party dependencies. Its own git hooks keep them in sync for anyone who ran
+# its Setup.sh; a checkout with no hooks installed -- CI, chiefly -- needs this. Silently skipped
+# when the project has no TempoROS, which is the common case.
+TEMPOROS_DIR=$("$SCRIPT_DIR"/FindTempoROS.sh 2>/dev/null) || TEMPOROS_DIR=""
+if [ -n "$TEMPOROS_DIR" ] && [ -f "$TEMPOROS_DIR/Scripts/SyncDeps.sh" ]; then
+  bash "$TEMPOROS_DIR/Scripts/SyncDeps.sh" "$@"
+fi
+
 # Cleanup
 rm -rf "$TEMP"
 

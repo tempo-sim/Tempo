@@ -11,7 +11,9 @@ consequences worth internalizing:
 !!! info "ROS is not required"
 
     gRPC is the primary API. ROS 2 support exists via [TempoROS](../plugins/tempo-ros.md) and
-    [TempoROSBridge](../plugins/tempo-ros-bridge.md), and is entirely optional.
+    [TempoROSBridge](../plugins/tempo-ros-bridge.md), and is entirely optional — TempoROS is a
+    separate repository you add yourself, and the bridge stays off until your `.uproject` enables
+    it.
 
 ## The three clients
 
