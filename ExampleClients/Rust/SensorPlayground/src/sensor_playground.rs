@@ -648,7 +648,7 @@ fn viridis(t: f32) -> [f32; 3] {
     ]
 }
 
-// One set of per-beam return arrays: the segment's top-level arrays, or its `second_return`.
+// One set of per-beam return arrays: the segment's top-level arrays, or its `second_*` arrays.
 #[derive(Default)]
 struct LidarReturns {
     distances: Vec<f32>,
@@ -707,15 +707,12 @@ impl LidarAccumulator {
         self.first.extend(&seg.distances_m, &seg.intensities);
         // A segment from a lidar in dual mode carries a second echo per beam; keep the second
         // arrays aligned with the first by padding "no echo" when a segment has none.
-        match &seg.second_return {
-            Some(second) if !second.distances_m.is_empty() => {
-                self.second.extend(&second.distances_m, &second.intensities);
-            }
-            _ => {
-                let n = seg.distances_m.len() / 4;
-                self.second.distances.extend(std::iter::repeat(0.0).take(n));
-                self.second.intensities.extend(std::iter::repeat(0.0).take(n));
-            }
+        if !seg.second_distances_m.is_empty() {
+            self.second.extend(&seg.second_distances_m, &seg.second_intensities);
+        } else {
+            let n = seg.distances_m.len() / 4;
+            self.second.distances.extend(std::iter::repeat(0.0).take(n));
+            self.second.intensities.extend(std::iter::repeat(0.0).take(n));
         }
         self.azimuths.extend(f32s_from_le_bytes(&seg.azimuths_rad));
         self.elevations.extend(f32s_from_le_bytes(&seg.elevations_rad));

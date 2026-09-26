@@ -20,25 +20,8 @@ enum LidarReturnMode {
   // One return per beam: the farthest detectable echo.
   LRM_LAST = 2;
   // Two returns per beam: the strongest echo in the segment's top-level arrays and the other
-  // detectable echo, if any, in `second_return`.
+  // detectable echo, if any, in `second_distances_m`, `second_intensities` and `second_labels`.
   LRM_DUAL = 3;
-}
-
-// A second set of per-beam return arrays. Same H-outer, V-inner layout and same encodings as the
-// matching top-level `LidarScanSegment` fields; beams share the segment's azimuths and elevations.
-// A distance of 0 means the beam has no echo in this set.
-message LidarEcho {
-  // Little-endian float32, 4 bytes per beam. 0 = no echo.
-  bytes distances_m = 1;
-  // Little-endian float32 in [0, 1], 4 bytes per beam.
-  bytes intensities = 2;
-  // Little-endian uint32, 4 bytes per beam. 0 for echoes from participating media (dust, smoke,
-  // fog), which carry no semantic label.
-  bytes labels = 3;
-  // 1 byte per beam in [0, 255].
-  bytes reflectivities = 4;
-  // 3 bytes per beam, ordered per the segment's `color_encoding`. Empty when color is disabled.
-  bytes colors = 5;
 }
 
 message LidarScanSegment {
@@ -88,10 +71,16 @@ message LidarScanSegment {
   // without participating-media simulation carry at most one echo per beam, so every mode reports
   // the same returns.
   LidarReturnMode return_mode = 16;
-  // The second echo per beam. Only populated in LRM_DUAL mode; its arrays are empty otherwise.
-  // Where a beam has both a participating-media echo (dust, smoke, fog) and a surface echo, the
-  // stronger of the two is in the top-level arrays and the other is here.
-  LidarEcho second_return = 17;
+  // The second echo per beam. Only populated in LRM_DUAL mode; empty otherwise. Where a beam has
+  // both a participating-media echo (dust, smoke, fog) and a surface echo, the stronger of the two
+  // is in the top-level arrays and the other is here. Same layout and encoding as `distances_m`;
+  // 0 = no second echo for that beam. Beams share the segment's azimuths and elevations.
+  bytes second_distances_m = 17;
+  // Same layout and encoding as `intensities`.
+  bytes second_intensities = 18;
+  // Same layout and encoding as `labels`. 0 for echoes from participating media, which carry no
+  // semantic label.
+  bytes second_labels = 19;
 }
 
 message LidarScanRequest {

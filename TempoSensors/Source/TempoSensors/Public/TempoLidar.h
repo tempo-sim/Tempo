@@ -450,48 +450,48 @@ protected:
 	// attenuated by the two-way transmittance to the surface and dropped when they fall below
 	// MinDetectableIntensity; the medium itself produces an echo of its own. Off, none of the extra
 	// passes run and the output is unchanged.
-	UPROPERTY(EditAnywhere, Category="Participating Media")
-	bool bSimulateParticipatingMedia = false;
+	UPROPERTY(EditAnywhere, Category="TempoLidar|Participating Media")
+	bool bSimulateParticipatingMedia = true;
 
 	// Also rasterize translucent primitives (Niagara sprites and ribbons, mesh particles, translucent
 	// meshes) into each beam's profile with their own materials, so a dust or smoke effect built from
 	// translucent sprites attenuates and scatters the beam like fog does. Costs one extra rasterization
 	// of those primitives per tile, evaluating opacity only. Additive materials block nothing and are
 	// skipped.
-	UPROPERTY(EditAnywhere, Category="Participating Media", meta=(EditCondition="bSimulateParticipatingMedia"))
+	UPROPERTY(EditAnywhere, Category="TempoLidar|Participating Media", meta=(EditCondition="bSimulateParticipatingMedia"))
 	bool bMediaIncludesTranslucency = true;
 
 	// Converts the camera's visual opacity into the lidar's optical depth. 1 = what the camera sees is
 	// what the beam sees, which holds for fog and dust, whose particles are large compared to the
 	// wavelength. Fine smoke scatters less in the near infrared than in visible light: below 1.
-	UPROPERTY(EditAnywhere, Category="Participating Media", meta=(EditCondition="bSimulateParticipatingMedia", UIMin=0.0, UIMax=4.0, ClampMin=0.0))
+	UPROPERTY(EditAnywhere, Category="TempoLidar|Participating Media", meta=(EditCondition="bSimulateParticipatingMedia", UIMin=0.0, UIMax=4.0, ClampMin=0.0))
 	float MediaExtinctionScale = 1.0f;
 
 	// How much of what the medium takes out of the beam comes back to the sensor, as a fraction of a
 	// perpendicular surface's return. Sets the intensity of medium echoes.
-	UPROPERTY(EditAnywhere, Category="Participating Media", meta=(EditCondition="bSimulateParticipatingMedia", UIMin=0.0, UIMax=1.0, ClampMin=0.0))
+	UPROPERTY(EditAnywhere, Category="TempoLidar|Participating Media", meta=(EditCondition="bSimulateParticipatingMedia", UIMin=0.0, UIMax=1.0, ClampMin=0.0))
 	float MediaBackscatter = 0.1f;
 
 	// Echoes weaker than this are not reported, whether from a surface seen through the medium or
 	// from the medium itself. Only applied when participating media are simulated.
-	UPROPERTY(EditAnywhere, Category="Participating Media", meta=(EditCondition="bSimulateParticipatingMedia", UIMin=0.0, UIMax=1.0, ClampMin=0.0, ClampMax=1.0))
+	UPROPERTY(EditAnywhere, Category="TempoLidar|Participating Media", meta=(EditCondition="bSimulateParticipatingMedia", UIMin=0.0, UIMax=1.0, ClampMin=0.0, ClampMax=1.0))
 	float MinDetectableIntensity = 0.01f;
 
 	// Draw each beam's medium echo range at random from the medium's return distribution, so returns
 	// spread through the medium as a real sensor's do. Off, every beam reports the median range of
 	// its distribution, which forms a clean shell.
-	UPROPERTY(EditAnywhere, Category="Participating Media", meta=(EditCondition="bSimulateParticipatingMedia"))
+	UPROPERTY(EditAnywhere, AdvancedDisplay, Category="TempoLidar|Participating Media", meta=(EditCondition="bSimulateParticipatingMedia"))
 	bool bStochasticMediaReturns = true;
 
 	// Number of range bins the transmittance profile of each beam is resolved into, log-spaced out
 	// to MaxDistance. More bins place medium echoes more precisely at a cost in memory (4 bytes per
 	// bin per rendered pixel) and time.
-	UPROPERTY(EditAnywhere, Category="Participating Media", meta=(EditCondition="bSimulateParticipatingMedia", UIMin=8, UIMax=256, ClampMin=2, ClampMax=1024))
+	UPROPERTY(EditAnywhere, AdvancedDisplay, Category="TempoLidar|Participating Media", meta=(EditCondition="bSimulateParticipatingMedia", UIMin=8, UIMax=256, ClampMin=2, ClampMax=1024))
 	int32 MediaRangeBins = 64;
 
 	// Which echo a beam reports when it detects more than one. Only participating media produce a
 	// second echo, so without them every mode reports the same returns.
-	UPROPERTY(EditAnywhere, Category="Participating Media")
+	UPROPERTY(EditAnywhere, Category="TempoLidar|Participating Media")
 	ETempoLidarReturnMode ReturnMode = ETempoLidarReturnMode::Strongest;
 
 	// RateHz and SequenceId are inherited from UTempoSceneCaptureComponent2D.

@@ -750,28 +750,23 @@ namespace
 		const float MinDetectableIntensity = bMedia ? Read.MinDetectableIntensity : 0.0f;
 		const uint8 MediumReflectivity = static_cast<uint8>(FMath::Clamp(FMath::RoundToInt(Read.MediaBackscatter * 255.0f), 0, 255));
 
-		// The second return's arrays exist only in dual mode; same layouts as the first's.
+		// The second return's arrays exist only in dual mode; same layouts as the first's. It carries
+		// no colors, since both echoes of a beam come from the same pixel and would repeat the
+		// first's, and no reflectivities, since a medium echo's is the constant backscatter.
 		float* SecondDistancesData = nullptr;
 		float* SecondIntensitiesData = nullptr;
 		uint32_t* SecondLabelsData = nullptr;
-		char* SecondReflectivitiesData = nullptr;
-		char* SecondColorsData = nullptr;
 		if (bDual)
 		{
-			TempoSensors::LidarEcho* const Second = ScanSegmentOut.mutable_second_return();
-			Second->mutable_distances_m()->resize(static_cast<size_t>(NumReturns) * sizeof(float));
-			SecondDistancesData = reinterpret_cast<float*>(Second->mutable_distances_m()->data());
-			Second->mutable_intensities()->resize(static_cast<size_t>(NumReturns) * sizeof(float));
-			SecondIntensitiesData = reinterpret_cast<float*>(Second->mutable_intensities()->data());
-			Second->mutable_labels()->resize(static_cast<size_t>(NumReturns) * sizeof(uint32_t));
-			SecondLabelsData = reinterpret_cast<uint32_t*>(Second->mutable_labels()->data());
-			Second->mutable_reflectivities()->assign(static_cast<size_t>(NumReturns), '\0');
-			SecondReflectivitiesData = Second->mutable_reflectivities()->data();
-			if (ColorsData)
-			{
-				Second->mutable_colors()->assign(static_cast<size_t>(NumReturns * 3), '\0');
-				SecondColorsData = Second->mutable_colors()->data();
-			}
+			std::string* const SecondDistancesOut = ScanSegmentOut.mutable_second_distances_m();
+			SecondDistancesOut->resize(static_cast<size_t>(NumReturns) * sizeof(float));
+			SecondDistancesData = reinterpret_cast<float*>(SecondDistancesOut->data());
+			std::string* const SecondIntensitiesOut = ScanSegmentOut.mutable_second_intensities();
+			SecondIntensitiesOut->resize(static_cast<size_t>(NumReturns) * sizeof(float));
+			SecondIntensitiesData = reinterpret_cast<float*>(SecondIntensitiesOut->data());
+			std::string* const SecondLabelsOut = ScanSegmentOut.mutable_second_labels();
+			SecondLabelsOut->resize(static_cast<size_t>(NumReturns) * sizeof(uint32_t));
+			SecondLabelsData = reinterpret_cast<uint32_t*>(SecondLabelsOut->data());
 		}
 
 		// Per-scan constants for the loop below. The incidence test compares cosines, which is the
@@ -787,7 +782,7 @@ namespace
 		ParallelFor(Read.HorizontalBeams, [&Read, BeamSamples, CosMaxAngleOfIncidence, InverseCaptureRotation, InverseCaptureScale,
 			DistancesData, IntensitiesData, LabelsData, AzimuthsData, ElevationsData, ReflectivitiesData, ColorsData, ColorEncoding,
 			MediaPixels, ReturnMode, bDual, MinDetectableIntensity, MediumReflectivity,
-			SecondDistancesData, SecondIntensitiesData, SecondLabelsData, SecondReflectivitiesData, SecondColorsData](int32 HorizontalBeam)
+			SecondDistancesData, SecondIntensitiesData, SecondLabelsData](int32 HorizontalBeam)
 		{
 			for (int32 VerticalBeam = 0; VerticalBeam < Read.VerticalBeams; ++VerticalBeam)
 			{
@@ -854,37 +849,39 @@ namespace
 				AzimuthsData[Idx] = Sample.AzimuthRad;
 				ElevationsData[Idx] = Sample.ElevationRad;
 
-				// A medium echo has no surface behind it to label, and its reflectivity is the
-				// medium's backscatter; its color, like the surface's, is what the pixel rendered.
-				auto WriteEcho = [&](const FTempoLidarEcho& Echo, float* Distances, float* Intensities, uint32_t* Labels, char* Reflectivities, char* Colors)
+				// A medium echo has no surface behind it to label. For a non-return (Distance == 0)
+				// the label is meaningless but harmless, mirroring how colors are written
+				// unconditionally.
+				auto WriteEcho = [&](const FTempoLidarEcho& Echo, float* Distances, float* Intensities, uint32_t* Labels)
 				{
 					Distances[Idx] = Echo.bValid ? QuantityConverter<CM2M>::Convert(Echo.Distance) : 0.0f;
 					Intensities[Idx] = Echo.bValid ? Echo.Intensity : 0.0f;
-					// For a non-return (Distance == 0) the label and reflectivity are meaningless but
-					// harmless, mirroring how colors are written unconditionally.
 					Labels[Idx] = Echo.bMedium ? 0u : Pixel.Label();
-					Reflectivities[Idx] = static_cast<char>(Echo.bMedium ? MediumReflectivity : Pixel.ReflectivityByte());
-					if constexpr (std::is_same_v<PixelType, FLidarPixelWithColor>)
-					{
-						char* const ColorOut = Colors + Idx * 3;
-						if (ColorEncoding == EColorImageEncoding::BGR8)
-						{
-							ColorOut[0] = static_cast<char>(Pixel.B());
-							ColorOut[1] = static_cast<char>(Pixel.G());
-							ColorOut[2] = static_cast<char>(Pixel.R());
-						}
-						else
-						{
-							ColorOut[0] = static_cast<char>(Pixel.R());
-							ColorOut[1] = static_cast<char>(Pixel.G());
-							ColorOut[2] = static_cast<char>(Pixel.B());
-						}
-					}
 				};
-				WriteEcho(Primary, DistancesData, IntensitiesData, LabelsData, ReflectivitiesData, ColorsData);
+				WriteEcho(Primary, DistancesData, IntensitiesData, LabelsData);
 				if (bDual)
 				{
-					WriteEcho(Secondary, SecondDistancesData, SecondIntensitiesData, SecondLabelsData, SecondReflectivitiesData, SecondColorsData);
+					WriteEcho(Secondary, SecondDistancesData, SecondIntensitiesData, SecondLabelsData);
+				}
+
+				// The reflectivity of a medium echo is the medium's backscatter; its color, like the
+				// surface's, is what the pixel rendered.
+				ReflectivitiesData[Idx] = static_cast<char>(Primary.bMedium ? MediumReflectivity : Pixel.ReflectivityByte());
+				if constexpr (std::is_same_v<PixelType, FLidarPixelWithColor>)
+				{
+					char* const ColorOut = ColorsData + Idx * 3;
+					if (ColorEncoding == EColorImageEncoding::BGR8)
+					{
+						ColorOut[0] = static_cast<char>(Pixel.B());
+						ColorOut[1] = static_cast<char>(Pixel.G());
+						ColorOut[2] = static_cast<char>(Pixel.R());
+					}
+					else
+					{
+						ColorOut[0] = static_cast<char>(Pixel.R());
+						ColorOut[1] = static_cast<char>(Pixel.G());
+						ColorOut[2] = static_cast<char>(Pixel.B());
+					}
 				}
 			}
 		});
