@@ -94,8 +94,12 @@ struct FTempoLidarMediaPassInputs
 {
 	ERHIFeatureLevel::Type FeatureLevel = ERHIFeatureLevel::SM5;
 	TUniformBufferRef<FViewUniformShaderParameters> ViewUniformBuffer;
-	// The view's rect in SceneDepth and in the output texture.
+	// The view's rect in the scene textures: where the renderer rasterized it, which it quantizes to
+	// an 8-pixel boundary, so it need not be where the view lands in the family's render target.
 	FIntRect ViewRect;
+	// The view's rect in the family's render target, where its post-processed output lands and the
+	// results are written so they index the render target the same way. Same size as ViewRect.
+	FIntRect OutputRect;
 	// The family's resolved scene depth.
 	FRDGTextureRef SceneDepth = nullptr;
 	FTempoLidarMediaFogInputs Fog;

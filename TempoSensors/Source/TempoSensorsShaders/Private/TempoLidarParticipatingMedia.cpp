@@ -112,6 +112,7 @@ public:
 		SHADER_PARAMETER_RDG_TEXTURE(Texture3D<uint>, AlbedoOpticalDepthProfile)
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<uint4>, Output)
 		SHADER_PARAMETER(FIntPoint, ViewRectMin)
+		SHADER_PARAMETER(FIntPoint, OutputRectMin)
 		SHADER_PARAMETER(FIntPoint, ViewRectSize)
 		SHADER_PARAMETER(int32, NumBins)
 		SHADER_PARAMETER(float, FirstBinEdge)
@@ -201,7 +202,7 @@ FTempoLidarMediaProfile AddTempoLidarMediaProfilePass(FRDGBuilder& GraphBuilder,
 void AddTempoLidarMediaResolvePass(FRDGBuilder& GraphBuilder, const FTempoLidarMediaPassInputs& Inputs, const FTempoLidarMediaProfile& Profile, FRDGTextureRef Output)
 {
 	const FBinInputs Bins = MakeBinInputs(Inputs.Sensor);
-	if (!Bins.bValid || Inputs.ViewRect.IsEmpty() || !Inputs.SceneDepth || !Profile.IsValid() || !Output || !Inputs.ViewUniformBuffer.IsValid())
+	if (!Bins.bValid || Inputs.ViewRect.IsEmpty() || Inputs.OutputRect.Size() != Inputs.ViewRect.Size() || !Inputs.SceneDepth || !Profile.IsValid() || !Output || !Inputs.ViewUniformBuffer.IsValid())
 	{
 		return;
 	}
@@ -227,6 +228,7 @@ void AddTempoLidarMediaResolvePass(FRDGBuilder& GraphBuilder, const FTempoLidarM
 	PassParameters->AlbedoOpticalDepthProfile = Profile.AlbedoOpticalDepth;
 	PassParameters->Output = GraphBuilder.CreateUAV(Output);
 	PassParameters->ViewRectMin = Inputs.ViewRect.Min;
+	PassParameters->OutputRectMin = Inputs.OutputRect.Min;
 	PassParameters->ViewRectSize = RectSize;
 	PassParameters->NumBins = Bins.NumBins;
 	PassParameters->FirstBinEdge = Bins.FirstBinEdge;

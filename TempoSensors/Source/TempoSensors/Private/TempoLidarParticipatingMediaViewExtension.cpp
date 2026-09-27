@@ -84,12 +84,16 @@ void FTempoLidarParticipatingMediaViewExtension::PrePostProcessPass_RenderThread
 	{
 		return;
 	}
-	// Every tile of the family writes its own rect of the one results texture.
-	if (PassInputs.ViewRect.Max.X > Results_RenderThread->GetSizeX() || PassInputs.ViewRect.Max.Y > Results_RenderThread->GetSizeY())
+	// Every tile of the family writes its own slot of the one results texture: the rect its output
+	// lands in, not the rect the renderer rasterized it at, which is quantized and can differ.
+	const FIntRect& OutputRect = PassInputs.OutputRect;
+	if (OutputRect.Max.X > Results_RenderThread->GetSizeX() || OutputRect.Max.Y > Results_RenderThread->GetSizeY()
+		|| OutputRect.Size() != PassInputs.ViewRect.Size())
 	{
-		UE_LOG(LogTempoSensors, Warning, TEXT("Lidar media: view rect (%d,%d)-(%d,%d) exceeds the results texture (%dx%d). Skipping."),
-			PassInputs.ViewRect.Min.X, PassInputs.ViewRect.Min.Y, PassInputs.ViewRect.Max.X, PassInputs.ViewRect.Max.Y,
-			Results_RenderThread->GetSizeX(), Results_RenderThread->GetSizeY());
+		UE_LOG(LogTempoSensors, Warning, TEXT("Lidar media: output rect (%d,%d)-(%d,%d) does not fit the results texture (%dx%d) or its view rect (%dx%d). Skipping."),
+			OutputRect.Min.X, OutputRect.Min.Y, OutputRect.Max.X, OutputRect.Max.Y,
+			Results_RenderThread->GetSizeX(), Results_RenderThread->GetSizeY(),
+			PassInputs.ViewRect.Width(), PassInputs.ViewRect.Height());
 		return;
 	}
 

@@ -271,6 +271,9 @@ void ProfileCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 Texture3D<uint> OpticalDepthProfile;
 Texture3D<uint> AlbedoOpticalDepthProfile;
 RWTexture2D<uint4> Output;
+// Where the view's output lands in the family's render target, which the results index the same
+// way. The renderer quantizes the view's rect in the scene textures, so the two can differ.
+int2 OutputRectMin;
 
 // Visual opacity to lidar optical depth. 1 = the camera's extinction is the lidar's.
 float ExtinctionScale;
@@ -421,7 +424,7 @@ void ResolveCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	// The medium echo's reflectivity rides the high byte of the flags lane.
 	Flags |= uint(round(MediumAlbedo * 255.0)) << 8;
 
-	Output[PixelPos] = uint4(
+	Output[OutputRectMin + LocalPos] = uint4(
 		RangeCode,
 		uint(round(saturate(TotalWeight) * 65535.0)),
 		uint(round(saturate(SurfaceTransmittance) * 65535.0)),

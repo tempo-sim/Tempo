@@ -461,6 +461,7 @@ bool GetViewParticipatingMediaInputs(const FSceneView& View, FTempoLidarMediaPas
 	OutInputs.FeatureLevel = View.GetFeatureLevel();
 	OutInputs.ViewUniformBuffer = View.ViewUniformBuffer;
 	OutInputs.ViewRect = ViewInfo.ViewRect;
+	OutInputs.OutputRect = ViewInfo.UnscaledViewRect;
 	OutInputs.SceneDepth = SceneTextures->Depth.Resolve;
 
 	// Mirrors SetupFogUniformParameters (FogRendering.cpp): the height fog constants the fog pass
