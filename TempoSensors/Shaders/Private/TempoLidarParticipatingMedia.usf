@@ -311,13 +311,27 @@ float BinOpticalDepth(int2 LocalPos, int Bin, float Surface, out float NearEdge,
 	return Raw * (1.0 / OPTICAL_DEPTH_SCALE) * ExtinctionScale * Fraction;
 }
 
-// The medium's return from one bin: what the bin scatters back (1 - e^-tau) times its albedo,
-// attenuated both ways through everything before it and half of itself, and by the sensor's range
-// falloff.
+// The medium's return from one bin: what a bin of uniform density scatters back toward the sensor,
+// integrated through its own depth, (1 - e^-2tau) / 2, times its albedo, attenuated both ways
+// through everything before it and by the sensor's range falloff. The integral matters for a dense
+// bin: an optically thick one still returns half the backscatter from its front face, where
+// attenuating the whole bin by its own depth would return nothing.
 float BinReturnWeight(float OpticalDepth, float Albedo, float AccumulatedOpticalDepth, float NearEdge, float FarEdge)
 {
-	const float TwoWayTransmittance = exp(-2.0 * AccumulatedOpticalDepth - OpticalDepth);
-	return Backscatter * Albedo * (1.0 - exp(-OpticalDepth)) * TwoWayTransmittance * RangeFalloff(0.5 * (NearEdge + FarEdge));
+	const float TwoWayTransmittanceBefore = exp(-2.0 * AccumulatedOpticalDepth);
+	return Backscatter * Albedo * 0.5 * (1.0 - exp(-2.0 * OpticalDepth)) * TwoWayTransmittanceBefore * RangeFalloff(0.5 * (NearEdge + FarEdge));
+}
+
+// Where within a bin of uniform density a return drawn at the fraction U of the bin's total lands:
+// the inverse of the return's cumulative distribution through the bin, (1 - e^-2tau t) / (1 - e^-2tau).
+// Uniform across a thin bin; at the front face of a thick one.
+float BinReturnFraction(float OpticalDepth, float U)
+{
+	if (OpticalDepth <= 1e-3)
+	{
+		return U;
+	}
+	return saturate(-log(max(1.0 - U * (1.0 - exp(-2.0 * OpticalDepth)), 1e-7)) / (2.0 * OpticalDepth));
 }
 
 [numthreads(THREADGROUP_SIZE, THREADGROUP_SIZE, 1)]
@@ -387,7 +401,7 @@ void ResolveCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 			const float Weight = BinReturnWeight(OpticalDepth, Albedo, AccumulatedOpticalDepth, NearEdge, FarEdge);
 			if (Cumulative + Weight >= Target && Weight > 0.0)
 			{
-				MediumRange = lerp(NearEdge, FarEdge, saturate((Target - Cumulative) / Weight));
+				MediumRange = lerp(NearEdge, FarEdge, BinReturnFraction(OpticalDepth, saturate((Target - Cumulative) / Weight)));
 				break;
 			}
 			Cumulative += Weight;

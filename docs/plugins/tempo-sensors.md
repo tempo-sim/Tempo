@@ -230,10 +230,11 @@ The profile is discretized into log-spaced range bins and resolved with a simple
 
 - the surface return is attenuated by the two-way transmittance to the surface, and dropped when
   it falls below `MinDetectableIntensity`;
-- the medium's backscatter is integrated bin by bin, weighted by the bin's albedo, the two-way
-  transmittance to the bin and the sensor's own range falloff, into one medium echo whose intensity
-  is the total, whose range is drawn from that distribution and whose reflectivity is its
-  return-weighted albedo. The range-squared and transmittance weights are why
+- the medium's backscatter is integrated bin by bin, each bin's return integrated through its own
+  depth (so a dense cloud returns from its front face rather than vanishing), weighted by the bin's
+  albedo, the two-way transmittance to the bin and the sensor's own range falloff, into one medium
+  echo whose intensity is the total, whose range is drawn from that distribution and whose
+  reflectivity is its return-weighted albedo. The range-squared and transmittance weights are why
   real lidars see fog returns cluster close to the sensor; nothing is tuned to produce that.
 
 Everything runs on the GPU inside the lidar's own render (two small compute passes and one
