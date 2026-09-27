@@ -39,6 +39,7 @@ message SemanticClassInfo {
   repeated string component_tags = 5;     // Component tags assigned to this class
   repeated string actor_tags = 6;         // Actor tags assigned to this class
   repeated string skeletal_mesh_types = 7;  // Skeletal mesh paths assigned to this class
+  repeated string niagara_system_types = 8; // Niagara system paths assigned to this class
 }
 
 message GetSemanticClassesResponse {

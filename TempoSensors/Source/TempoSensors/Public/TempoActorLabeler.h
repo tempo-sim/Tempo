@@ -209,6 +209,9 @@ protected:
 	TMap<FString, FName> SkeletalMeshLabels;
 
 	UPROPERTY(VisibleAnywhere)
+	TMap<FString, FName> NiagaraSystemLabels;
+
+	UPROPERTY(VisibleAnywhere)
 	TMap<FName, FName> ComponentTagLabels;
 
 	UPROPERTY(VisibleAnywhere)

@@ -267,7 +267,8 @@ the medium's where the medium is dense.
 from, so exhaust drifting through fog reads as exhaust where it is dense and fog where it is not.
 Rasterized translucency carries its primitive's label, the custom depth stencil value the
 [labeler](#working-with-labels) assigns from the label table: a Niagara component is labeled like
-any other component, by its `ComponentTags`, the meshes it renders, or its owning actor. No custom
+any other component, by its `ComponentTags`, the system it plays (`NiagaraSystemTypes`, the way to
+tell exhaust from dust), the meshes it renders, or its owning actor. No custom
 depth rendering is involved; the pass reads the value off the primitive. Fog is labeled through
 its actors, which render no custom depth: the exponential height fog and the volumetric fog grid
 (which only exists with a height fog component) carry the height fog actor's label, so a row with
@@ -322,7 +323,7 @@ perspective are not covered.
 each with a stencil value plus the things that should receive that label. TempoSample's
 `Content/Labels/TempoSampleLabelTable` is a worked example of such a table.
 
-Each row matches on five columns, and the most specific match wins:
+Each row matches on six columns, and the most specific match wins:
 
 | Column | Matches | Beats |
 |---|---|---|
@@ -330,10 +331,13 @@ Each row matches on five columns, and the most specific match wins:
 | `ActorTags` | Actors carrying that tag | `ActorTypes` |
 | `StaticMeshTypes` | Components rendering that static mesh — ISMC / foliage and Niagara mesh renderers included | `ActorTags`, `ActorTypes` |
 | `SkeletalMeshTypes` | Skinned components rendering that skeletal mesh | `ActorTags`, `ActorTypes` |
+| `NiagaraSystemTypes` | Niagara components playing that system, sprite and ribbon emitters included | the mesh columns, `ActorTags`, `ActorTypes` |
 | `ComponentTags` | Components carrying that tag | everything above |
 
 So you can label a base-mesh actor one way and selected meshes on it another — lane decals as
-`LaneLine` on top of road actors labeled `Road`, for instance. The two tag columns are the escape
+`LaneLine` on top of road actors labeled `Road`, for instance — and label an effect by what it is
+rather than by who plays it: a row with `NS_Exhaust` in its `NiagaraSystemTypes` makes every
+vehicle's exhaust `Exhaust`, which is what the lidar's medium echoes from it then carry. The two tag columns are the escape
 hatches for what no class or asset can pick out: one instance of a class labeled differently from
 the rest, or geometry built at runtime. An Actor carrying tags for two different labels resolves
 to whichever its `Tags` array lists first.

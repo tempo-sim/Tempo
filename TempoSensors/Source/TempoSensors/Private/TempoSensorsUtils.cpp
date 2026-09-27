@@ -2,6 +2,8 @@
 
 #include "TempoSensorsUtils.h"
 
+#include "NiagaraSystem.h"
+
 #include "TempoLabelTypes.h"
 #include "TempoSensorsConstants.h"
 #include "TempoSensorsSettings.h"
@@ -235,6 +237,13 @@ TArray<FString> ValidateSemanticLabelTable(const UDataTable* SemanticLabelTable)
 		for (const TSoftObjectPtr<USkeletalMesh>& SkeletalMeshAsset : Row.SkeletalMeshTypes)
 		{
 			ValidateMeshColumn(TEXT("skeletal mesh"), SkeletalMeshAsset.ToSoftObjectPath(), SkeletalMeshAsset.LoadSynchronous());
+		}
+
+		// Niagara systems share the asset-path space with the meshes, so the same claim map catches a
+		// system two rows both name.
+		for (const TSoftObjectPtr<UNiagaraSystem>& NiagaraSystemAsset : Row.NiagaraSystemTypes)
+		{
+			ValidateMeshColumn(TEXT("Niagara system"), NiagaraSystemAsset.ToSoftObjectPath(), NiagaraSystemAsset.LoadSynchronous());
 		}
 
 		for (const FName& ActorTag : Row.ActorTags)
