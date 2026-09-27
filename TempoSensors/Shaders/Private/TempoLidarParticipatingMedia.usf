@@ -61,6 +61,13 @@ float BinNearEdge(int Index)
 	return Index <= 0 ? 0.0 : BinFarEdge(Index - 1);
 }
 
+// One contribution to a bin's label channel: its optical depth in fixed point over its label, so
+// the largest value in a bin is its largest contribution and its low byte that contributor's label.
+uint PackLabeledContribution(float OpticalDepth, uint Label)
+{
+	return (min(uint(OpticalDepth * OPTICAL_DEPTH_SCALE), 0xFFFFFFu) << 8) | (Label & 0xFFu);
+}
+
 // A point on this pixel's ray, in translated world space, and the unit direction of the ray.
 void GetPixelRay(int2 PixelPos, out float3 RayOriginTW, out float3 RayDirection)
 {
@@ -87,8 +94,11 @@ float SurfaceRange(int2 PixelPos, float CosToForward, out bool bRendered)
 
 RWTexture3D<uint> OpticalDepthOutput;
 RWTexture3D<uint> AlbedoOpticalDepthOutput;
+RWTexture3D<uint> LabelOutput;
 // The fog's single-scattering albedo, as a luminance, applied to every fog source.
 float FogAlbedo;
+// The label the fog's contributions carry.
+uint FogLabel;
 
 // Mirrors of FFogUniformParameters (FogRendering.h) and the View's fog constants, set from
 // FViewInfo::ExponentialFogParameters etc. See HeightFogCommon.ush for the packing:
@@ -261,6 +271,7 @@ void ProfileCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 		PreviousLogTransmittance = LogTransmittance;
 		OpticalDepthOutput[uint3(LocalPos, Bin)] = uint(min(OpticalDepth * OPTICAL_DEPTH_SCALE, 4294967040.0));
 		AlbedoOpticalDepthOutput[uint3(LocalPos, Bin)] = uint(min(OpticalDepth * FogAlbedo * OPTICAL_DEPTH_SCALE, 4294967040.0));
+		LabelOutput[uint3(LocalPos, Bin)] = PackLabeledContribution(OpticalDepth, FogLabel);
 	}
 }
 
@@ -270,7 +281,8 @@ void ProfileCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 
 Texture3D<uint> OpticalDepthProfile;
 Texture3D<uint> AlbedoOpticalDepthProfile;
-RWTexture2D<uint4> Output;
+Texture3D<uint> LabelProfile;
+RWTexture2D<uint2> Output;
 // Where the view's output lands in the family's render target, which the results index the same
 // way. The renderer quantizes the view's rect in the scene textures, so the two can differ.
 int2 OutputRectMin;
@@ -285,8 +297,6 @@ float IntensitySaturationDistance;
 uint bStochastic;
 uint Seed;
 
-#define FLAG_MEDIUM_ECHO 1u
-#define FLAG_SURFACE_RENDERED 2u
 
 float RangeFalloff(float Range)
 {
@@ -382,6 +392,7 @@ void ResolveCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	// per-beam random draw spreads returns through the medium as a real sensor's do; without it the
 	// median of the distribution gives a deterministic shell.
 	float MediumRange = 0.0;
+	uint MediumLabel = 0u;
 	if (TotalWeight > 0.0)
 	{
 		float Draw = 0.5;
@@ -405,6 +416,8 @@ void ResolveCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 			if (Cumulative + Weight >= Target && Weight > 0.0)
 			{
 				MediumRange = lerp(NearEdge, FarEdge, BinReturnFraction(OpticalDepth, saturate((Target - Cumulative) / Weight)));
+				// The echo is labeled by whatever contributed most to the bin it landed in.
+				MediumLabel = LabelProfile[uint3(LocalPos, Bin)] & 0xFFu;
 				break;
 			}
 			Cumulative += Weight;
@@ -413,22 +426,20 @@ void ResolveCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 		}
 	}
 
-	uint Flags = bSurfaceRendered ? FLAG_SURFACE_RENDERED : 0u;
 	uint RangeCode = 0u;
 	if (TotalWeight > 0.0 && MediumRange > 0.0)
 	{
-		Flags |= FLAG_MEDIUM_ECHO;
 		// 0 means no echo, so a valid range never encodes to 0.
 		RangeCode = max(uint(round(saturate(MediumRange / MaxRange) * 65535.0)), 1u);
 	}
-	// The medium echo's reflectivity rides the high byte of the flags lane.
-	Flags |= uint(round(MediumAlbedo * 255.0)) << 8;
+	const uint IntensityCode = uint(round(saturate(TotalWeight) * 65535.0));
+	const uint TransmittanceCode = uint(round(saturate(SurfaceTransmittance) * 65535.0));
+	const uint AlbedoCode = uint(round(MediumAlbedo * 255.0));
 
-	Output[OutputRectMin + LocalPos] = uint4(
-		RangeCode,
-		uint(round(saturate(TotalWeight) * 65535.0)),
-		uint(round(saturate(SurfaceTransmittance) * 65535.0)),
-		Flags);
+	// Packed as FTempoLidarMediaPixel reads it.
+	Output[OutputRectMin + LocalPos] = uint2(
+		RangeCode | (IntensityCode << 16),
+		TransmittanceCode | (AlbedoCode << 16) | (MediumLabel << 24));
 }
 
 #endif // RESOLVE_PASS

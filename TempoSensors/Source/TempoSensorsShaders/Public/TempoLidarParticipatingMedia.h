@@ -19,30 +19,30 @@ class FSceneView;
 // where anything transmits. Also the unit other passes add to the profile in.
 constexpr float GTempoLidarMediaOpticalDepthScale = 65536.0f;
 
-// The per-pixel results of the participating media resolve, one 8-byte pixel of
-// PF_R16G16B16A16_UINT. The lidar decode reads these next to its normal pixel.
+// The per-pixel results of the participating media resolve, one 8-byte pixel of PF_R32G32_UINT.
+// The lidar decode reads these next to its normal pixel.
 struct FTempoLidarMediaPixel
 {
-	static constexpr uint16 FlagMediumEcho = 1;
-	static constexpr uint16 FlagSurfaceRendered = 2;
+	// Low 16 bits: range along the ray of the medium's echo, as a fraction of MaxRange in 1/65535
+	// steps, 0 = no echo. High 16 bits: intensity of the medium's echo, in 1/65535 steps of [0, 1].
+	uint32 RangeAndIntensity = 0;
+	// Low 16 bits: one-way transmittance from the sensor to the opaque surface, in 1/65535 steps of
+	// [0, 1]. Next byte: the medium echo's reflectivity estimate, its return-weighted mean albedo, in
+	// 1/255 steps of [0, 1]. High byte: the medium echo's label, the semantic or instance label of
+	// whatever contributed most to the bin the echo was drawn from, 0 for unlabeled.
+	uint32 TransmittanceAlbedoAndLabel = 0;
 
-	// Range along the ray of the medium's echo, as a fraction of MaxRange in 1/65535 steps. 0 = no echo.
-	uint16 MediumRangeCode = 0;
-	// Intensity of the medium's echo, in 1/65535 steps of [0, 1].
-	uint16 MediumIntensityCode = 0;
-	// One-way transmittance from the sensor to the opaque surface, in 1/65535 steps of [0, 1].
-	uint16 SurfaceTransmittanceCode = 0;
-	// Low byte: flags. High byte: the medium echo's reflectivity estimate, its return-weighted mean
-	// albedo, in 1/255 steps of [0, 1].
-	uint16 Flags = 0;
-
-	bool HasMediumEcho() const { return (Flags & FlagMediumEcho) != 0 && MediumRangeCode != 0; }
-	uint8 MediumReflectivityByte() const { return static_cast<uint8>(Flags >> 8); }
-	float MediumRange(float MaxRange) const { return MaxRange * static_cast<float>(MediumRangeCode) / 65535.0f; }
-	float MediumIntensity() const { return static_cast<float>(MediumIntensityCode) / 65535.0f; }
-	float SurfaceTransmittance() const { return static_cast<float>(SurfaceTransmittanceCode) / 65535.0f; }
+	uint16 MediumRangeCode() const { return static_cast<uint16>(RangeAndIntensity & 0xFFFFu); }
+	uint16 MediumIntensityCode() const { return static_cast<uint16>(RangeAndIntensity >> 16); }
+	uint16 SurfaceTransmittanceCode() const { return static_cast<uint16>(TransmittanceAlbedoAndLabel & 0xFFFFu); }
+	bool HasMediumEcho() const { return MediumRangeCode() != 0; }
+	uint8 MediumReflectivityByte() const { return static_cast<uint8>((TransmittanceAlbedoAndLabel >> 16) & 0xFFu); }
+	uint8 MediumLabel() const { return static_cast<uint8>(TransmittanceAlbedoAndLabel >> 24); }
+	float MediumRange(float MaxRange) const { return MaxRange * static_cast<float>(MediumRangeCode()) / 65535.0f; }
+	float MediumIntensity() const { return static_cast<float>(MediumIntensityCode()) / 65535.0f; }
+	float SurfaceTransmittance() const { return static_cast<float>(SurfaceTransmittanceCode()) / 65535.0f; }
 };
-static_assert(sizeof(FTempoLidarMediaPixel) == 8, "FTempoLidarMediaPixel must match PF_R16G16B16A16_UINT stride");
+static_assert(sizeof(FTempoLidarMediaPixel) == 8, "FTempoLidarMediaPixel must match PF_R32G32_UINT stride");
 
 // The fog the camera's fog pass would compose for this view, mirrored from the renderer's per-view
 // fog constants (FViewInfo) and resources. Everything defaults to "no fog".
@@ -88,6 +88,9 @@ struct FTempoLidarMediaSensorInputs
 	bool bStochastic = true;
 	// Random seed for the draw; the capture's sequence id keeps a scan reproducible.
 	uint32 Seed = 0;
+	// The label medium echoes from fog carry: the height fog's, the volumetric fog grid's and, unless
+	// they are labeled individually, local fog volumes'. 0 for unlabeled.
+	uint32 FogLabel = 0;
 };
 
 struct FTempoLidarMediaPassInputs
@@ -106,16 +109,19 @@ struct FTempoLidarMediaPassInputs
 	FTempoLidarMediaSensorInputs Sensor;
 };
 
-// The per-pixel profile of a view: two PF_R32_UINT 3D textures, X and Y the view rect's size and Z
-// the bins. OpticalDepth holds each bin's optical depth times GTempoLidarMediaOpticalDepthScale;
+// The per-pixel profile of a view: three PF_R32_UINT 3D textures, X and Y the view rect's size and
+// Z the bins. OpticalDepth holds each bin's optical depth times GTempoLidarMediaOpticalDepthScale;
 // AlbedoOpticalDepth holds the same weighted by the albedo of what contributed it, so a bin's mean
-// albedo is the ratio of the two.
+// albedo is the ratio of the two. Label holds the bin's largest single contribution, its optical
+// depth times the scale in the high 24 bits over that contributor's label in the low byte, so the
+// low byte of the largest value is the label of what dominates the bin.
 struct FTempoLidarMediaProfile
 {
 	FRDGTextureRef OpticalDepth = nullptr;
 	FRDGTextureRef AlbedoOpticalDepth = nullptr;
+	FRDGTextureRef Label = nullptr;
 
-	bool IsValid() const { return OpticalDepth != nullptr && AlbedoOpticalDepth != nullptr; }
+	bool IsValid() const { return OpticalDepth != nullptr && AlbedoOpticalDepth != nullptr && Label != nullptr; }
 };
 
 // Build the profile of the view from the fog the camera renders; other passes may add to it before
@@ -133,8 +139,9 @@ struct FTempoLidarMediaTranslucentBatch
 };
 
 // Rasterize the view's translucent primitives with the plugin's own material shaders, which add
-// each fragment's optical depth (-ln(1 - opacity)), and that weighted by the material's albedo
-// estimate, to the profile at its range. Batches must stay valid until the graph executes; the
+// each fragment's optical depth (-ln(1 - opacity)), that weighted by the material's albedo
+// estimate, and its primitive's label (the custom depth stencil value the labeler assigned it) to
+// the profile at its range. Batches must stay valid until the graph executes; the
 // renderer's own live for the whole render. Requires the material shaders this module registers,
 // compiled for every translucent material.
 TEMPOSENSORSSHADERS_API void AddTempoLidarMediaTranslucencyPass(
@@ -147,5 +154,5 @@ TEMPOSENSORSSHADERS_API void AddTempoLidarMediaTranslucencyPass(
 	const FTempoLidarMediaProfile& Profile);
 
 // Resolve the profile into per-pixel FTempoLidarMediaPixel results, written to Output (a
-// PF_R16G16B16A16_UINT texture with a UAV) inside the view rect.
+// PF_R32G32_UINT texture with a UAV) inside the view rect.
 TEMPOSENSORSSHADERS_API void AddTempoLidarMediaResolvePass(FRDGBuilder& GraphBuilder, const FTempoLidarMediaPassInputs& Inputs, const FTempoLidarMediaProfile& Profile, FRDGTextureRef Output);

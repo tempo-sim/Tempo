@@ -169,6 +169,9 @@ struct FTempoLidarEcho
 	// The reflectivity estimate this echo reports: a surface's, from its material, or a medium's,
 	// its return-weighted albedo.
 	uint8 ReflectivityByte = 0;
+	// The label this echo reports: a surface's, or the label of what contributed most to the medium
+	// where the echo was drawn. 0 for unlabeled.
+	uint8 Label = 0;
 	// From participating media (dust, smoke, fog) rather than a surface.
 	bool bMedium = false;
 	bool bValid = false;

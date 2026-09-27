@@ -45,8 +45,11 @@ message LidarScanSegment {
   bytes distances_m = 8;
   // Per-return reflected intensity in [0, 1]. Same layout/encoding as `distances_m` (little-endian float32).
   bytes intensities = 9;
-  // Per-return semantic label (0 if labels disabled). Same H-outer/V-inner layout as `distances_m`, but
-  // packed little-endian uint32 (4 bytes per return); length is 4 * horizontal_beams * vertical_beams.
+  // Per-return label (0 if labels disabled or the return is unlabeled). A surface return carries its
+  // surface's label; an echo from participating media (fog, dust, smoke) carries the label of the
+  // medium, as the label table assigns it to the medium's primitive or fog actor. Same H-outer/V-inner
+  // layout as `distances_m`, but packed little-endian uint32 (4 bytes per return); length is
+  // 4 * horizontal_beams * vertical_beams.
   bytes labels = 10;
   // Per-return azimuth in radians. Same layout/encoding as `distances_m` (little-endian float32).
   bytes azimuths_rad = 11;
@@ -78,8 +81,7 @@ message LidarScanSegment {
   bytes second_distances_m = 17;
   // Same layout and encoding as `intensities`.
   bytes second_intensities = 18;
-  // Same layout and encoding as `labels`. 0 for echoes from participating media, which carry no
-  // semantic label.
+  // Same layout and encoding as `labels`.
   bytes second_labels = 19;
   // Same layout and encoding as `reflectivities`.
   bytes second_reflectivities = 20;

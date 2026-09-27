@@ -816,6 +816,7 @@ namespace
 						Surface.Distance = static_cast<float>(FMath::Max(Read.MinDistance, Distance));
 						Surface.Intensity = static_cast<float>(CosAngleOfIncidence * Read.IntensitySaturationDistance / FMath::Max(Read.IntensitySaturationDistance, Distance));
 						Surface.ReflectivityByte = Pixel.ReflectivityByte();
+						Surface.Label = static_cast<uint8>(Pixel.Label());
 						Surface.bValid = true;
 					}
 				}
@@ -838,6 +839,7 @@ namespace
 						Medium.Distance = Media.MediumRange(static_cast<float>(Read.MaxDistance));
 						Medium.Intensity = Media.MediumIntensity();
 						Medium.ReflectivityByte = Media.MediumReflectivityByte();
+						Medium.Label = Media.MediumLabel();
 						Medium.bValid = Medium.Intensity >= MinDetectableIntensity
 							&& Medium.Distance >= Read.MinDistance && Medium.Distance <= Read.MaxDistance;
 					}
@@ -852,14 +854,14 @@ namespace
 				AzimuthsData[Idx] = Sample.AzimuthRad;
 				ElevationsData[Idx] = Sample.ElevationRad;
 
-				// A medium echo has no surface behind it to label, and reports its albedo estimate as
-				// reflectivity. For a non-return (Distance == 0) the label and reflectivity are
-				// meaningless but harmless, mirroring how colors are written unconditionally.
+				// A medium echo reports the medium's label and its albedo estimate as reflectivity.
+				// For a non-return (Distance == 0) the label and reflectivity are meaningless but
+				// harmless, mirroring how colors are written unconditionally.
 				auto WriteEcho = [&](const FTempoLidarEcho& Echo, float* Distances, float* Intensities, uint32_t* Labels, char* Reflectivities)
 				{
 					Distances[Idx] = Echo.bValid ? QuantityConverter<CM2M>::Convert(Echo.Distance) : 0.0f;
 					Intensities[Idx] = Echo.bValid ? Echo.Intensity : 0.0f;
-					Labels[Idx] = Echo.bMedium ? 0u : Pixel.Label();
+					Labels[Idx] = Echo.bValid ? Echo.Label : Pixel.Label();
 					Reflectivities[Idx] = static_cast<char>(Echo.bValid ? Echo.ReflectivityByte : Pixel.ReflectivityByte());
 				};
 				WriteEcho(Primary, DistancesData, IntensitiesData, LabelsData, ReflectivitiesData);

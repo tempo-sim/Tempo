@@ -103,6 +103,9 @@ int RangeToBin(float Range)
 	return clamp(1 + int(floor(T * NumLogBins)), 0, TempoLidarMediaPass.NumBins - 1);
 }
 
+// The label of the primitive being drawn, bound per draw.
+uint MediumLabel;
+
 void AddOpticalDepth(int2 LocalPos, int Bin, float OpticalDepth, float Albedo)
 {
 	// A fully opaque fragment still leaves a finite optical depth, well past where anything
@@ -111,6 +114,10 @@ void AddOpticalDepth(int2 LocalPos, int Bin, float OpticalDepth, float Albedo)
 	InterlockedAdd(TempoLidarMediaPass.OpticalDepthProfile[uint3(LocalPos, Bin)], Fixed);
 	const uint FixedAlbedo = uint(min(OpticalDepth * Albedo * OPTICAL_DEPTH_SCALE, 4294967040.0));
 	InterlockedAdd(TempoLidarMediaPass.AlbedoOpticalDepthProfile[uint3(LocalPos, Bin)], FixedAlbedo);
+	// Labels do not add: the bin keeps the label of its single largest contribution, which the
+	// packing puts in the low byte of the largest value.
+	const uint Labeled = (min(uint(OpticalDepth * OPTICAL_DEPTH_SCALE), 0xFFFFFFu) << 8) | (MediumLabel & 0xFFu);
+	InterlockedMax(TempoLidarMediaPass.LabelProfile[uint3(LocalPos, Bin)], Labeled);
 }
 
 // The fraction of what this fragment takes out of the beam that it would scatter back rather than

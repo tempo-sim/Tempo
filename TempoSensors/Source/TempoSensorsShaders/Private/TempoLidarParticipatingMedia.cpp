@@ -70,9 +70,11 @@ public:
 		SHADER_PARAMETER_STRUCT(FLocalFogVolumeUniformParameters, LFV)
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture3D<uint>, OpticalDepthOutput)
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture3D<uint>, AlbedoOpticalDepthOutput)
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture3D<uint>, LabelOutput)
 		SHADER_PARAMETER(FIntPoint, ViewRectMin)
 		SHADER_PARAMETER(FIntPoint, ViewRectSize)
 		SHADER_PARAMETER(float, FogAlbedo)
+		SHADER_PARAMETER(uint32, FogLabel)
 		SHADER_PARAMETER(FVector4f, ExponentialFogParameters)
 		SHADER_PARAMETER(FVector4f, ExponentialFogParameters2)
 		SHADER_PARAMETER(FVector4f, ExponentialFogParameters3)
@@ -110,7 +112,8 @@ public:
 		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, SceneDepthTexture)
 		SHADER_PARAMETER_RDG_TEXTURE(Texture3D<uint>, OpticalDepthProfile)
 		SHADER_PARAMETER_RDG_TEXTURE(Texture3D<uint>, AlbedoOpticalDepthProfile)
-		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<uint4>, Output)
+		SHADER_PARAMETER_RDG_TEXTURE(Texture3D<uint>, LabelProfile)
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<uint2>, Output)
 		SHADER_PARAMETER(FIntPoint, ViewRectMin)
 		SHADER_PARAMETER(FIntPoint, OutputRectMin)
 		SHADER_PARAMETER(FIntPoint, ViewRectSize)
@@ -156,6 +159,7 @@ FTempoLidarMediaProfile AddTempoLidarMediaProfilePass(FRDGBuilder& GraphBuilder,
 		TexCreate_ShaderResource | TexCreate_UAV | TexCreate_AtomicCompatible);
 	Profile.OpticalDepth = GraphBuilder.CreateTexture(ProfileDesc, TEXT("TempoLidarMedia.OpticalDepthProfile"));
 	Profile.AlbedoOpticalDepth = GraphBuilder.CreateTexture(ProfileDesc, TEXT("TempoLidarMedia.AlbedoOpticalDepthProfile"));
+	Profile.Label = GraphBuilder.CreateTexture(ProfileDesc, TEXT("TempoLidarMedia.LabelProfile"));
 
 	const bool bVolumetricFog = Inputs.Fog.IntegratedLightScattering != nullptr;
 	const bool bLocalFogVolumes = Inputs.Fog.LocalFogVolumes != nullptr;
@@ -171,9 +175,11 @@ FTempoLidarMediaProfile AddTempoLidarMediaProfilePass(FRDGBuilder& GraphBuilder,
 	}
 	PassParameters->OpticalDepthOutput = GraphBuilder.CreateUAV(Profile.OpticalDepth);
 	PassParameters->AlbedoOpticalDepthOutput = GraphBuilder.CreateUAV(Profile.AlbedoOpticalDepth);
+	PassParameters->LabelOutput = GraphBuilder.CreateUAV(Profile.Label);
 	PassParameters->ViewRectMin = Inputs.ViewRect.Min;
 	PassParameters->ViewRectSize = RectSize;
 	PassParameters->FogAlbedo = FMath::Clamp(Inputs.Fog.Albedo, 0.0f, 1.0f);
+	PassParameters->FogLabel = Inputs.Sensor.FogLabel & 0xFFu;
 	PassParameters->ExponentialFogParameters = Inputs.Fog.ExponentialFogParameters;
 	PassParameters->ExponentialFogParameters2 = Inputs.Fog.ExponentialFogParameters2;
 	PassParameters->ExponentialFogParameters3 = Inputs.Fog.ExponentialFogParameters3;
@@ -226,6 +232,7 @@ void AddTempoLidarMediaResolvePass(FRDGBuilder& GraphBuilder, const FTempoLidarM
 	PassParameters->SceneDepthTexture = Inputs.SceneDepth;
 	PassParameters->OpticalDepthProfile = Profile.OpticalDepth;
 	PassParameters->AlbedoOpticalDepthProfile = Profile.AlbedoOpticalDepth;
+	PassParameters->LabelProfile = Profile.Label;
 	PassParameters->Output = GraphBuilder.CreateUAV(Output);
 	PassParameters->ViewRectMin = Inputs.ViewRect.Min;
 	PassParameters->OutputRectMin = Inputs.OutputRect.Min;

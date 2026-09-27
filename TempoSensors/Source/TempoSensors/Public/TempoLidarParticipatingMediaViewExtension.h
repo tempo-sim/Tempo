@@ -51,7 +51,7 @@ public:
 	virtual bool IsActiveThisFrame_Internal(const FSceneViewExtensionContext& Context) const override;
 	// End ISceneViewExtension
 
-	static constexpr EPixelFormat ResultsFormat = PF_R16G16B16A16_UINT;
+	static constexpr EPixelFormat ResultsFormat = PF_R32G32_UINT;
 
 private:
 	// Render thread. Make sure the results texture matches the setup's size.

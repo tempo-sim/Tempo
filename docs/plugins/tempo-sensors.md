@@ -259,9 +259,17 @@ each beam is in the top-level arrays and the other, if any, is in `second_distan
 `second_intensities`, `second_labels` and `second_reflectivities`, with the same layouts and
 encodings as their top-level counterparts (distance 0 = no second echo). The second return carries
 no colors: both echoes of a beam come from the same pixel, so its color would repeat the first's.
-Medium echoes carry label 0, their albedo estimate as reflectivity (the fog's authored albedo, a
-sprite's material color) and, in color mode, the pixel's rendered color, which is mostly the
-medium's where the medium is dense.
+Medium echoes carry the medium's label, their albedo estimate as reflectivity (the fog's authored
+albedo, a sprite's material color) and, in color mode, the pixel's rendered color, which is mostly
+the medium's where the medium is dense.
+
+**Labels.** A medium echo is labeled by whatever contributed most to the range bin it was drawn
+from, so exhaust drifting through fog reads as exhaust where it is dense and fog where it is not.
+Rasterized translucency carries its primitive's label, the custom depth stencil value the
+[labeler](#working-with-labels) assigns from the label table: a Niagara component is labeled like
+any other component, by its `ComponentTags`, the meshes it renders, or its owning actor. No custom
+depth rendering is involved; the pass reads the value off the primitive. Fog is labeled through
+its actors (below).
 
 **What is and is not covered.** Height fog, local fog volumes, anything injected into the
 volumetric fog grid (Volume-domain materials on meshes or Niagara mesh particles) and rasterized

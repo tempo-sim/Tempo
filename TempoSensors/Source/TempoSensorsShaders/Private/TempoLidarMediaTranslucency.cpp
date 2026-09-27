@@ -26,6 +26,7 @@
 BEGIN_GLOBAL_SHADER_PARAMETER_STRUCT(FTempoLidarMediaTranslucencyPassUniformParameters, )
 	SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture3D<uint>, OpticalDepthProfile)
 	SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture3D<uint>, AlbedoOpticalDepthProfile)
+	SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture3D<uint>, LabelProfile)
 	SHADER_PARAMETER(FIntPoint, ViewRectMin)
 	SHADER_PARAMETER(int32, NumBins)
 	SHADER_PARAMETER(float, FirstBinEdge)
@@ -73,15 +74,20 @@ namespace
 	{
 	public:
 		FRHIUniformBuffer* PassUniformBuffer = nullptr;
+		// The primitive's label: the custom depth stencil value the labeler gave it, 0 if it does
+		// not render custom depth.
+		uint32 MediumLabel = 0;
 	};
 
 	class FTempoLidarMediaTranslucencyShaderBase : public FMeshMaterialShader
 	{
+		DECLARE_INLINE_TYPE_LAYOUT(FTempoLidarMediaTranslucencyShaderBase, NonVirtual);
 	public:
 		FTempoLidarMediaTranslucencyShaderBase() = default;
 		FTempoLidarMediaTranslucencyShaderBase(const ShaderMetaType::CompiledShaderInitializerType& Initializer)
 			: FMeshMaterialShader(Initializer)
 		{
+			MediumLabelParameter.Bind(Initializer.ParameterMap, TEXT("MediumLabel"));
 		}
 
 		static bool ShouldCompilePermutation(const FMeshMaterialShaderPermutationParameters& Parameters)
@@ -109,7 +115,11 @@ namespace
 		{
 			FMeshMaterialShader::GetShaderBindings(Scene, FeatureLevel, PrimitiveSceneProxy, MaterialRenderProxy, Material, ShaderElementData, ShaderBindings);
 			ShaderBindings.Add(GetUniformBufferParameter<FTempoLidarMediaTranslucencyPassUniformParameters>(), ShaderElementData.PassUniformBuffer);
+			ShaderBindings.Add(MediumLabelParameter, ShaderElementData.MediumLabel);
 		}
+
+	private:
+		LAYOUT_FIELD(FShaderParameter, MediumLabelParameter);
 	};
 }
 
@@ -212,6 +222,10 @@ namespace
 			FTempoLidarMediaTranslucencyShaderElementData ShaderElementData;
 			ShaderElementData.InitializeMeshMaterialData(ViewIfDynamicMeshCommand, PrimitiveSceneProxy, MeshBatch, StaticMeshId, false);
 			ShaderElementData.PassUniformBuffer = PassUniformBuffer;
+			// The label the camera's label image would show for this primitive were it opaque: the
+			// stencil value the labeler assigned, which only counts where custom depth is rendered.
+			ShaderElementData.MediumLabel = PrimitiveSceneProxy && PrimitiveSceneProxy->ShouldRenderCustomDepth()
+				? PrimitiveSceneProxy->GetCustomDepthStencilValue() : 0u;
 
 			const FMeshDrawCommandSortKey SortKey = CalculateMeshStaticSortKey(PassShaders.VertexShader, PassShaders.PixelShader);
 
@@ -260,6 +274,7 @@ void AddTempoLidarMediaTranslucencyPass(
 	FTempoLidarMediaTranslucencyPassUniformParameters* PassUniformParameters = GraphBuilder.AllocParameters<FTempoLidarMediaTranslucencyPassUniformParameters>();
 	PassUniformParameters->OpticalDepthProfile = GraphBuilder.CreateUAV(Profile.OpticalDepth);
 	PassUniformParameters->AlbedoOpticalDepthProfile = GraphBuilder.CreateUAV(Profile.AlbedoOpticalDepth);
+	PassUniformParameters->LabelProfile = GraphBuilder.CreateUAV(Profile.Label);
 	PassUniformParameters->ViewRectMin = Inputs.ViewRect.Min;
 	// The same bin geometry the profile and resolve passes use; see MakeBinInputs there.
 	PassUniformParameters->NumBins = ProfileSize.Z;
