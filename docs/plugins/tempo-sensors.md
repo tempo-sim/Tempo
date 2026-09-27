@@ -252,7 +252,7 @@ the CPU side only chooses which echo to report.
 | `MinDetectableIntensity` | 0.01 | Echoes weaker than this are not reported, whether from a surface seen through the medium or from the medium itself. Only applied when media are simulated. |
 | `ReturnMode` | Strongest | Which echo a beam reports when it detects more than one: `Strongest`, `First` (nearest), `Last` (farthest) or `Dual` (two per beam). Without media every mode reports the same returns. |
 | `bStochasticMediaReturns` | on | Draw each beam's medium echo range at random from its return distribution (reproducible per `sequence_id`), so returns spread through the medium as a real sensor's do. Off, each beam reports the median range, a clean shell. |
-| `MediaRangeBins` | 64 | Range bins per beam, log-spaced out to `MaxDistance`. More bins place medium echoes more precisely at 8 bytes per bin per rendered pixel. |
+| `MediaRangeBins` | 64 | Range bins per beam, log-spaced out to `MaxDistance`. More bins place medium echoes more precisely at 12 bytes per bin per rendered pixel. |
 
 **Output.** `LidarScanSegment.return_mode` reports the mode. In `Dual` mode the strongest echo of
 each beam is in the top-level arrays and the other, if any, is in `second_distances_m`,
@@ -269,7 +269,12 @@ Rasterized translucency carries its primitive's label, the custom depth stencil 
 [labeler](#working-with-labels) assigns from the label table: a Niagara component is labeled like
 any other component, by its `ComponentTags`, the meshes it renders, or its owning actor. No custom
 depth rendering is involved; the pass reads the value off the primitive. Fog is labeled through
-its actors (below).
+its actors, which render no custom depth: the exponential height fog and the volumetric fog grid
+(which only exists with a height fog component) carry the height fog actor's label, so a row with
+`ExponentialHeightFog` in its `ActorTypes` labels them, and each local fog volume carries its own
+actor's label, so a steam volume can read differently from the ambient fog. Local fog volumes
+injected into the volumetric fog grid rather than composed analytically are part of the grid and
+carry the height fog's label.
 
 **What is and is not covered.** Height fog, local fog volumes, anything injected into the
 volumetric fog grid (Volume-domain materials on meshes or Niagara mesh particles) and rasterized
@@ -439,7 +444,7 @@ running a scene fast and then dropping into lockstep for the frames you actually
   `MediaRangeBins` ranges per pixel, an opacity-only rasterization of the visible translucent
   primitives (bounded by the same overdraw the camera pays for them, with a far cheaper pixel
   shader), a resolve pass, an 8-byte-per-pixel second readback and a transient 3D texture of
-  `MediaRangeBins` × 8 bytes per rendered pixel. Off, none of it exists.
+  `MediaRangeBins` × 12 bytes per rendered pixel. Off, none of it exists.
 
 ## Architecture, briefly
 

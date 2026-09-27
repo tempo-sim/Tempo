@@ -975,6 +975,21 @@ void UTempoActorLabeler::LabelActor(AActor* Actor)
 	LabelAllComponents(Actor, ActorIdPair);
 }
 
+TOptional<int32> UTempoActorLabeler::GetActorLabelValue(const AActor* Actor) const
+{
+	if (!Actor)
+	{
+		return TOptional<int32>();
+	}
+	const FInstanceSemanticIdPair* IdPair = LabeledObjects.Find(Actor);
+	if (!IdPair)
+	{
+		return TOptional<int32>();
+	}
+	// The same choice AssignId makes for the Actor's components.
+	return GetDefault<UTempoSensorsSettings>()->GetLabelType() == ELabelType::Instance ? IdPair->InstanceId : IdPair->SemanticId;
+}
+
 TOptional<int32> UTempoActorLabeler::ResolveActorSemanticId(const AActor* Actor) const
 {
 	// Most specific rule wins, mirroring ResolveComponentSemanticId. An Actor tag names particular

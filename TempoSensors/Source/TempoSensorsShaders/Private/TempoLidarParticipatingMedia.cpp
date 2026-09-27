@@ -75,6 +75,8 @@ public:
 		SHADER_PARAMETER(FIntPoint, ViewRectSize)
 		SHADER_PARAMETER(float, FogAlbedo)
 		SHADER_PARAMETER(uint32, FogLabel)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, LabeledFogVolumes)
+		SHADER_PARAMETER(uint32, NumLabeledFogVolumes)
 		SHADER_PARAMETER(FVector4f, ExponentialFogParameters)
 		SHADER_PARAMETER(FVector4f, ExponentialFogParameters2)
 		SHADER_PARAMETER(FVector4f, ExponentialFogParameters3)
@@ -180,6 +182,19 @@ FTempoLidarMediaProfile AddTempoLidarMediaProfilePass(FRDGBuilder& GraphBuilder,
 	PassParameters->ViewRectSize = RectSize;
 	PassParameters->FogAlbedo = FMath::Clamp(Inputs.Fog.Albedo, 0.0f, 1.0f);
 	PassParameters->FogLabel = Inputs.Sensor.FogLabel & 0xFFu;
+	{
+		// RDG buffers cannot be empty; with no labeled volumes the count says so.
+		TArray<FVector4f> LabeledVolumes = Inputs.Fog.LabeledVolumes;
+		if (LabeledVolumes.IsEmpty())
+		{
+			LabeledVolumes.Add(FVector4f::Zero());
+		}
+		const FRDGBufferRef LabeledVolumesBuffer = CreateStructuredBuffer(
+			GraphBuilder, TEXT("TempoLidarMedia.LabeledFogVolumes"), sizeof(FVector4f), LabeledVolumes.Num(),
+			LabeledVolumes.GetData(), LabeledVolumes.Num() * sizeof(FVector4f));
+		PassParameters->LabeledFogVolumes = GraphBuilder.CreateSRV(LabeledVolumesBuffer);
+		PassParameters->NumLabeledFogVolumes = Inputs.Fog.LabeledVolumes.Num();
+	}
 	PassParameters->ExponentialFogParameters = Inputs.Fog.ExponentialFogParameters;
 	PassParameters->ExponentialFogParameters2 = Inputs.Fog.ExponentialFogParameters2;
 	PassParameters->ExponentialFogParameters3 = Inputs.Fog.ExponentialFogParameters3;

@@ -65,6 +65,10 @@ struct FTempoLidarMediaFogInputs
 	// The fog's single-scattering albedo, as a luminance: the fraction of what it takes out of the
 	// beam that it scatters rather than absorbs. Applied to every fog source.
 	float Albedo = 1.0f;
+	// The local fog volumes in the scene, each its center in the view's translated world space (as
+	// the renderer uploads the instances) with its label in w. An instance the view composes is
+	// labeled by the nearest entry. Empty, every fog source carries the sensor's fog label.
+	TArray<FVector4f> LabeledVolumes;
 };
 
 // The lidar's participating media model.

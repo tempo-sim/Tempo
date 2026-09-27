@@ -78,6 +78,14 @@ void FTempoLidarParticipatingMediaViewExtension::PrePostProcessPass_RenderThread
 		return;
 	}
 	PassInputs.Sensor = Setup_RenderThread.Sensor;
+	// The renderer uploads local fog volume instances in the view's translated world space, so the
+	// labeled volumes are matched to them there.
+	const FVector PreViewTranslation = InView.ViewMatrices.GetPreViewTranslation();
+	PassInputs.Fog.LabeledVolumes.Reserve(Setup_RenderThread.LabeledFogVolumes.Num());
+	for (const FTempoLidarMediaLabeledVolume& Volume : Setup_RenderThread.LabeledFogVolumes)
+	{
+		PassInputs.Fog.LabeledVolumes.Add(FVector4f(FVector3f(PreViewTranslation + Volume.WorldPosition), static_cast<float>(Volume.Label & 0xFFu)));
+	}
 
 	EnsureResultsTexture_RenderThread(GraphBuilder.RHICmdList);
 	if (!Results_RenderThread.IsValid())

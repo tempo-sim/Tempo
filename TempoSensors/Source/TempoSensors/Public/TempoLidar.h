@@ -496,7 +496,7 @@ protected:
 
 	// Participating media (fog, dust, smoke): number of range bins the transmittance profile of each
 	// beam is resolved into, log-spaced out to MaxDistance. More bins place medium echoes more
-	// precisely at a cost in memory (8 bytes per bin per rendered pixel) and time.
+	// precisely at a cost in memory (12 bytes per bin per rendered pixel) and time.
 	UPROPERTY(EditAnywhere, AdvancedDisplay, Category="TempoLidar", meta=(EditCondition="bSimulateParticipatingMedia", UIMin=8, UIMax=256, ClampMin=2, ClampMax=1024))
 	int32 MediaRangeBins = 64;
 

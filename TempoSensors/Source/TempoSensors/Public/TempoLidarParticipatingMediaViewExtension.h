@@ -8,6 +8,13 @@
 
 class FSceneInterface;
 
+// A local fog volume and the label its medium echoes carry, its actor's.
+struct FTempoLidarMediaLabeledVolume
+{
+	FVector WorldPosition = FVector::ZeroVector;
+	uint32 Label = 0;
+};
+
 // What one lidar capture asks of the participating media passes.
 struct FTempoLidarMediaCaptureSetup
 {
@@ -16,6 +23,9 @@ struct FTempoLidarMediaCaptureSetup
 	FTempoLidarMediaSensorInputs Sensor;
 	// Also rasterize the view's translucent primitives into the profile.
 	bool bIncludeTranslucency = true;
+	// Every local fog volume in the scene with its label; the passes match the instances the view
+	// composes to these by position. Empty, they all carry Sensor.FogLabel.
+	TArray<FTempoLidarMediaLabeledVolume> LabeledFogVolumes;
 };
 
 // Runs the lidar's participating media passes (see TempoLidarParticipatingMedia.h) on every view of

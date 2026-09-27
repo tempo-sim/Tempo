@@ -3,6 +3,7 @@
 #include "TempoLidar.h"
 
 #include "TempoSensors.h"
+#include "TempoActorLabeler.h"
 #include "TempoSensorsConstants.h"
 
 #include "TempoConversion.h"
@@ -18,13 +19,18 @@
 #include "TempoSensorsTypes.h"
 #include "TempoSensorsUtils.h"
 
+#include "Components/ExponentialHeightFogComponent.h"
+#include "Components/LocalFogVolumeComponent.h"
+#include "Engine/ExponentialHeightFog.h"
 #include "Engine/TextureRenderTarget2D.h"
+#include "EngineUtils.h"
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Math/PerspectiveMatrix.h"
 #include "RenderingThread.h"
 #include "SceneViewExtension.h"
 #include "TextureResource.h"
+#include "UObject/UObjectIterator.h"
 
 namespace
 {
@@ -1328,6 +1334,33 @@ void UTempoLidar::RenderCapture()
 		Setup.Sensor.bStochastic = bStochasticMediaReturns;
 		Setup.Sensor.Seed = static_cast<uint32>(SequenceId);
 		Setup.bIncludeTranslucency = bMediaIncludesTranslucency;
+
+		// Fog is labeled through its actors, which render no custom depth of their own. The height
+		// fog and the volumetric fog grid, which only exists with a height fog component, carry the
+		// label of the first height fog actor, the one the renderer composes; each local fog volume
+		// carries its own actor's, so a steam volume and the ambient fog can read differently.
+		if (const UTempoActorLabeler* Labeler = World->GetSubsystem<UTempoActorLabeler>())
+		{
+			for (TActorIterator<AExponentialHeightFog> It(World); It; ++It)
+			{
+				const UExponentialHeightFogComponent* FogComponent = It->GetComponent();
+				if (FogComponent && FogComponent->IsRegistered() && FogComponent->IsVisible())
+				{
+					Setup.Sensor.FogLabel = static_cast<uint32>(Labeler->GetActorLabelValue(*It).Get(0));
+					break;
+				}
+			}
+			for (TObjectIterator<ULocalFogVolumeComponent> It; It; ++It)
+			{
+				if (!IsValid(*It) || It->GetWorld() != World || !It->IsRegistered() || !It->IsVisible())
+				{
+					continue;
+				}
+				FTempoLidarMediaLabeledVolume& Volume = Setup.LabeledFogVolumes.AddDefaulted_GetRef();
+				Volume.WorldPosition = It->GetComponentTransform().GetTranslation();
+				Volume.Label = static_cast<uint32>(Labeler->GetActorLabelValue(It->GetOwner()).Get(0));
+			}
+		}
 		MediaExt->SetCaptureSetup(Setup);
 	}
 

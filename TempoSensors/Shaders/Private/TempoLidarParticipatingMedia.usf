@@ -99,6 +99,9 @@ RWTexture3D<uint> LabelOutput;
 float FogAlbedo;
 // The label the fog's contributions carry.
 uint FogLabel;
+// The scene's local fog volumes, each its center in translated world space and its label in w.
+StructuredBuffer<float4> LabeledFogVolumes;
+uint NumLabeledFogVolumes;
 
 // Mirrors of FFogUniformParameters (FogRendering.h) and the View's fog constants, set from
 // FViewInfo::ExponentialFogParameters etc. See HeightFogCommon.ush for the packing:
@@ -241,6 +244,73 @@ float FogTransmittance(int2 LocalPos, float3 RayDirection, float CosToForward, f
 	return Transmittance;
 }
 
+#if USE_LOCAL_FOG_VOLUMES
+// The label of a local fog volume instance the view composes: that of the labeled volume whose
+// center it has. The instances carry no identity of their own, so they are matched by position.
+uint LocalFogVolumeLabel(uint InstanceIndex)
+{
+	const float3 Center = GetLocalFogVolumeGPUInstanceData(InstanceIndex).TranslatedWorlPos;
+	uint Label = FogLabel;
+	float BestDistanceSqr = 3.402823466e+38;
+	for (uint Index = 0; Index < NumLabeledFogVolumes; ++Index)
+	{
+		const float4 Volume = LabeledFogVolumes[Index];
+		const float DistanceSqr = dot(Volume.xyz - Center, Volume.xyz - Center);
+		if (DistanceSqr < BestDistanceSqr)
+		{
+			BestDistanceSqr = DistanceSqr;
+			Label = uint(Volume.w + 0.5);
+		}
+	}
+	return Label;
+}
+
+// The optical depth of one local fog volume instance between two ranges along the ray, from the
+// engine's own evaluation of it, the same one the total composes.
+float LocalFogVolumeOpticalDepth(uint InstanceIndex, float3 RayOriginTW, float3 RayDirection, float NearRange, float FarRange)
+{
+	const float NearTransmittance = GetLFVInstanceContribution(InstanceIndex, RayOriginTW, RayDirection, RayOriginTW + RayDirection * NearRange, true).a;
+	const float FarTransmittance = GetLFVInstanceContribution(InstanceIndex, RayOriginTW, RayDirection, RayOriginTW + RayDirection * FarRange, true).a;
+	return max(log(max(NearTransmittance, 1e-7)) - log(max(FarTransmittance, 1e-7)), 0.0);
+}
+#endif
+
+// The labeled contribution a bin's fog is recorded as: the fog's label over the whole optical depth,
+// unless the view composes local fog volumes and they are labeled individually, in which case each
+// volume's optical depth through the bin competes under its own label and what is left, the height
+// fog's and the volumetric fog grid's, under the fog's.
+uint FogBinLabel(int2 LocalPos, float3 RayOriginTW, float3 RayDirection, int Bin, float OpticalDepth)
+{
+	float BestOpticalDepth = OpticalDepth;
+	uint BestLabel = FogLabel;
+#if USE_LOCAL_FOG_VOLUMES
+	if (NumLabeledFogVolumes > 0)
+	{
+		const uint2 TilePos = uint2(LocalPos) / LFVTilePixelSize.xx;
+		const uint Count = LFVTileDataTex[uint3(TilePos, 0)];
+		float RestOpticalDepth = OpticalDepth;
+		BestOpticalDepth = 0.0;
+		for (uint Index = 0; Index < Count; ++Index)
+		{
+			const uint InstanceIndex = LFVTileDataTex[uint3(TilePos, 1 + Index)];
+			const float InstanceOpticalDepth = LocalFogVolumeOpticalDepth(InstanceIndex, RayOriginTW, RayDirection, BinNearEdge(Bin), BinFarEdge(Bin));
+			RestOpticalDepth -= InstanceOpticalDepth;
+			if (InstanceOpticalDepth > BestOpticalDepth)
+			{
+				BestOpticalDepth = InstanceOpticalDepth;
+				BestLabel = LocalFogVolumeLabel(InstanceIndex);
+			}
+		}
+		if (RestOpticalDepth > BestOpticalDepth)
+		{
+			BestOpticalDepth = RestOpticalDepth;
+			BestLabel = FogLabel;
+		}
+	}
+#endif
+	return PackLabeledContribution(BestOpticalDepth, BestLabel);
+}
+
 [numthreads(THREADGROUP_SIZE, THREADGROUP_SIZE, 1)]
 void ProfileCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
@@ -271,7 +341,7 @@ void ProfileCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 		PreviousLogTransmittance = LogTransmittance;
 		OpticalDepthOutput[uint3(LocalPos, Bin)] = uint(min(OpticalDepth * OPTICAL_DEPTH_SCALE, 4294967040.0));
 		AlbedoOpticalDepthOutput[uint3(LocalPos, Bin)] = uint(min(OpticalDepth * FogAlbedo * OPTICAL_DEPTH_SCALE, 4294967040.0));
-		LabelOutput[uint3(LocalPos, Bin)] = PackLabeledContribution(OpticalDepth, FogLabel);
+		LabelOutput[uint3(LocalPos, Bin)] = FogBinLabel(LocalPos, RayOriginTW, RayDirection, Bin, OpticalDepth);
 	}
 }
 
