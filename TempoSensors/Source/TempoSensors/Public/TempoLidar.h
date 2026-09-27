@@ -447,57 +447,59 @@ protected:
 	UPROPERTY(EditAnywhere)
 	TArray<FLidarBeamCalibration> BeamCalibration;
 
-	// Simulate participating media (dust, smoke, fog) along each beam. Whatever the camera renders
-	// as fog attenuates and scatters the beam: the exponential height fog, the volumetric fog grid
-	// (so Volume-domain material primitives too), and local fog volumes. Surface returns are
-	// attenuated by the two-way transmittance to the surface and dropped when they fall below
+	// Simulate participating media, meaning fog, dust and smoke, along each beam. Whatever the
+	// camera renders as fog attenuates and scatters the beam: the exponential height fog, the
+	// volumetric fog grid (so Volume-domain material primitives too), and local fog volumes; see
+	// bMediaIncludesTranslucency for dust and smoke built from translucent sprites. Surface returns
+	// are attenuated by the two-way transmittance to the surface and dropped when they fall below
 	// MinDetectableIntensity; the medium itself produces an echo of its own. Off, none of the extra
 	// passes run and the output is unchanged.
-	UPROPERTY(EditAnywhere, Category="TempoLidar|Participating Media")
+	UPROPERTY(EditAnywhere, Category="TempoLidar")
 	bool bSimulateParticipatingMedia = true;
 
-	// Also rasterize translucent primitives (Niagara sprites and ribbons, mesh particles, translucent
-	// meshes) into each beam's profile with their own materials, so a dust or smoke effect built from
-	// translucent sprites attenuates and scatters the beam like fog does. Costs one extra rasterization
-	// of those primitives per tile, evaluating opacity only. Additive materials block nothing and are
-	// skipped.
-	UPROPERTY(EditAnywhere, Category="TempoLidar|Participating Media", meta=(EditCondition="bSimulateParticipatingMedia"))
+	// Participating media (fog, dust, smoke): also rasterize translucent primitives (Niagara sprites
+	// and ribbons, mesh particles, translucent meshes) into each beam's profile with their own
+	// materials, so a dust or smoke effect built from translucent sprites attenuates and scatters the
+	// beam like fog does. Costs one extra rasterization of those primitives per tile, evaluating
+	// opacity only. Additive materials block nothing and are skipped.
+	UPROPERTY(EditAnywhere, Category="TempoLidar", meta=(EditCondition="bSimulateParticipatingMedia"))
 	bool bMediaIncludesTranslucency = true;
 
-	// Converts the camera's visual opacity into the lidar's optical depth. 1 = what the camera sees is
-	// what the beam sees, which holds for fog and dust, whose particles are large compared to the
-	// wavelength. Fine smoke scatters less in the near infrared than in visible light: below 1.
-	UPROPERTY(EditAnywhere, Category="TempoLidar|Participating Media", meta=(EditCondition="bSimulateParticipatingMedia", UIMin=0.0, UIMax=4.0, ClampMin=0.0))
+	// Participating media (fog, dust, smoke): converts the camera's visual opacity into the lidar's
+	// optical depth. 1 = what the camera sees is what the beam sees, which holds for fog and dust,
+	// whose particles are large compared to the wavelength. Fine smoke scatters less in the near
+	// infrared than in visible light: below 1.
+	UPROPERTY(EditAnywhere, Category="TempoLidar", meta=(EditCondition="bSimulateParticipatingMedia", UIMin=0.0, UIMax=4.0, ClampMin=0.0))
 	float MediaExtinctionScale = 1.0f;
 
-	// How much of what a white medium takes out of the beam comes back to the sensor, as a fraction
-	// of a perpendicular surface's return. Each medium's return is this times its albedo estimate:
-	// a sprite's base color luminance (its emissive for unlit materials), the fog component's albedo
-	// for fog. So dark smoke returns less than white fog, and a medium echo's reflectivity is that
-	// albedo.
-	UPROPERTY(EditAnywhere, Category="TempoLidar|Participating Media", meta=(EditCondition="bSimulateParticipatingMedia", UIMin=0.0, UIMax=1.0, ClampMin=0.0))
+	// Participating media (fog, dust, smoke): how much of what a white medium takes out of the beam
+	// comes back to the sensor, as a fraction of a perpendicular surface's return. Each medium's
+	// return is this times its albedo estimate: a sprite's base color luminance (its emissive for
+	// unlit materials), the fog component's albedo for fog. So dark smoke returns less than white
+	// fog, and a medium echo's reflectivity is that albedo.
+	UPROPERTY(EditAnywhere, Category="TempoLidar", meta=(EditCondition="bSimulateParticipatingMedia", UIMin=0.0, UIMax=1.0, ClampMin=0.0))
 	float MediaBackscatter = 0.1f;
 
-	// Echoes weaker than this are not reported, whether from a surface seen through the medium or
-	// from the medium itself. Only applied when participating media are simulated.
-	UPROPERTY(EditAnywhere, Category="TempoLidar|Participating Media", meta=(EditCondition="bSimulateParticipatingMedia", UIMin=0.0, UIMax=1.0, ClampMin=0.0, ClampMax=1.0))
+	// Echoes weaker than this are not reported, whether from a surface seen through participating
+	// media (fog, dust, smoke) or from the medium itself. Only applied when media are simulated.
+	UPROPERTY(EditAnywhere, Category="TempoLidar", meta=(EditCondition="bSimulateParticipatingMedia", UIMin=0.0, UIMax=1.0, ClampMin=0.0, ClampMax=1.0))
 	float MinDetectableIntensity = 0.01f;
 
-	// Draw each beam's medium echo range at random from the medium's return distribution, so returns
-	// spread through the medium as a real sensor's do. Off, every beam reports the median range of
-	// its distribution, which forms a clean shell.
-	UPROPERTY(EditAnywhere, AdvancedDisplay, Category="TempoLidar|Participating Media", meta=(EditCondition="bSimulateParticipatingMedia"))
+	// Participating media (fog, dust, smoke): draw each beam's medium echo range at random from the
+	// medium's return distribution, so returns spread through the medium as a real sensor's do. Off,
+	// every beam reports the median range of its distribution, which forms a clean shell.
+	UPROPERTY(EditAnywhere, AdvancedDisplay, Category="TempoLidar", meta=(EditCondition="bSimulateParticipatingMedia"))
 	bool bStochasticMediaReturns = true;
 
-	// Number of range bins the transmittance profile of each beam is resolved into, log-spaced out
-	// to MaxDistance. More bins place medium echoes more precisely at a cost in memory (4 bytes per
-	// bin per rendered pixel) and time.
-	UPROPERTY(EditAnywhere, AdvancedDisplay, Category="TempoLidar|Participating Media", meta=(EditCondition="bSimulateParticipatingMedia", UIMin=8, UIMax=256, ClampMin=2, ClampMax=1024))
+	// Participating media (fog, dust, smoke): number of range bins the transmittance profile of each
+	// beam is resolved into, log-spaced out to MaxDistance. More bins place medium echoes more
+	// precisely at a cost in memory (8 bytes per bin per rendered pixel) and time.
+	UPROPERTY(EditAnywhere, AdvancedDisplay, Category="TempoLidar", meta=(EditCondition="bSimulateParticipatingMedia", UIMin=8, UIMax=256, ClampMin=2, ClampMax=1024))
 	int32 MediaRangeBins = 64;
 
-	// Which echo a beam reports when it detects more than one. Only participating media produce a
-	// second echo, so without them every mode reports the same returns.
-	UPROPERTY(EditAnywhere, Category="TempoLidar|Participating Media")
+	// Which echo a beam reports when it detects more than one. Only participating media (fog, dust,
+	// smoke) produce a second echo, so without them every mode reports the same returns.
+	UPROPERTY(EditAnywhere, Category="TempoLidar")
 	ETempoLidarReturnMode ReturnMode = ETempoLidarReturnMode::Strongest;
 
 	// RateHz and SequenceId are inherited from UTempoSceneCaptureComponent2D.

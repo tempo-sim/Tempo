@@ -203,7 +203,7 @@ convention so client-side point-cloud math renders right-handed Z-up directly.
 ### Participating media: dust, smoke and fog { #participating-media }
 
 The lidar is a scene-depth sensor, and none of the things a camera renders as dust, smoke or fog
-write depth. The `Participating Media` settings on `UTempoLidar` close that gap without any
+write depth. The participating media settings on `UTempoLidar` close that gap without any
 per-effect setup: if it attenuates the camera's view, it attenuates the beam.
 
 **How it works.** The color of a pixel is a line integral over everything translucent along its
@@ -241,7 +241,7 @@ Everything runs on the GPU inside the lidar's own render (two small compute pass
 opacity-only rasterization of the translucent primitives per tile) and comes back with the scan;
 the CPU side only chooses which echo to report.
 
-**Settings** (all on the lidar component, under `Participating Media`; the last two are advanced):
+**Settings** (all on the lidar component; the last two are advanced):
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
