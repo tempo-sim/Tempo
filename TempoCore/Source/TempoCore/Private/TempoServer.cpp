@@ -144,6 +144,9 @@ void FTempoServer::Initialize()
 	const FString ServerAddress = FString::Printf(TEXT("0.0.0.0:%d"), Port);
 	grpc::ServerBuilder Builder;
 	Builder.AddListeningPort(TCHAR_TO_UTF8(*ServerAddress), grpc::InsecureServerCredentials());
+	// gRPC enables SO_REUSEPORT by default where supported, which would let a second instance silently share
+	// the port (with the kernel load-balancing connections between them). Disable it so the bind fails instead.
+	Builder.AddChannelArgument(GRPC_ARG_ALLOW_REUSEPORT, 0);
 	for (const auto& Service : Services)
 	{
 		Builder.RegisterService(Service.Value.Get());
