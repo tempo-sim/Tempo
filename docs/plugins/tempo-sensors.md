@@ -230,12 +230,14 @@ The profile is discretized into log-spaced range bins and resolved with a simple
 
 - the surface return is attenuated by the two-way transmittance to the surface, and dropped when
   it falls below `MinDetectableIntensity`;
-- the medium's backscatter is integrated bin by bin, each bin's return integrated through its own
-  depth (so a dense cloud returns from its front face rather than vanishing), weighted by the bin's
-  albedo, the two-way transmittance to the bin and the sensor's own range falloff, into one medium
-  echo whose intensity is the total, whose range is drawn from that distribution and whose
-  reflectivity is its return-weighted albedo. The range-squared and transmittance weights are why
-  real lidars see fog returns cluster close to the sensor; nothing is tuned to produce that.
+- the medium's backscatter is integrated bin by bin from `MinDistance` out, each bin's return
+  integrated through its own depth (so a dense cloud returns from its front face rather than
+  vanishing), weighted by the bin's albedo, the two-way transmittance to the bin and the sensor's
+  own range falloff, into one medium echo whose intensity is the total, whose range is drawn from
+  that distribution and whose reflectivity is its return-weighted albedo. Medium inside
+  `MinDistance` attenuates the beam but returns nothing, as a surface there would not be reported.
+  The two-way transmittance and the 1/range falloff are why real lidars see fog returns cluster
+  close to the sensor; nothing is tuned to produce that.
 
 Everything runs on the GPU inside the lidar's own render (two small compute passes and one
 opacity-only rasterization of the translucent primitives per tile) and comes back with the scan;
@@ -271,8 +273,9 @@ any other component, by its `ComponentTags`, the system it plays (`NiagaraSystem
 tell exhaust from dust), the meshes it renders, or its owning actor. No custom
 depth rendering is involved; the pass reads the value off the primitive. Fog is labeled through
 its actors, which render no custom depth: the exponential height fog and the volumetric fog grid
-(which only exists with a height fog component) carry the height fog actor's label, so a row with
-`ExponentialHeightFog` in its `ActorTypes` labels them, and each local fog volume carries its own
+(which only exists with a height fog component) carry the label of the height fog actor whose fog
+the renderer composes, the first registered, so a row with `ExponentialHeightFog` in its
+`ActorTypes` labels them, and each local fog volume carries its own
 actor's label, so a steam volume can read differently from the ambient fog. Local fog volumes
 injected into the volumetric fog grid rather than composed analytically are part of the grid and
 carry the height fog's label.
@@ -288,8 +291,9 @@ perspective are not covered.
 
     The translucency pass needs its own vertex and pixel shader for every translucent surface
     material and vertex factory combination. They are compiled with the material's shader map like
-    any other pass, so the first load after enabling the plugin recompiles translucent materials
-    once (opaque and masked materials are untouched). No material needs editing.
+    any other pass, so the first load after updating to a version with this pass recompiles
+    translucent materials once (opaque and masked materials are untouched). No material needs
+    editing.
 
 !!! note "Volumetric fog history at sensor rates"
 

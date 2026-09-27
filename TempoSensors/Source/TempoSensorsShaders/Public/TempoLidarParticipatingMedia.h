@@ -9,6 +9,7 @@
 
 class FLocalFogVolumeUniformParameters;
 struct FMeshBatch;
+class UExponentialHeightFogComponent;
 class FPrimitiveSceneProxy;
 class FScene;
 class FSceneUniformBuffer;
@@ -19,10 +20,14 @@ class FSceneView;
 // where anything transmits. Also the unit other passes add to the profile in.
 constexpr float GTempoLidarMediaOpticalDepthScale = 65536.0f;
 
-// The per-pixel results of the participating media resolve, one 8-byte pixel of PF_R32G32_UINT.
-// The lidar decode reads these next to its normal pixel.
+// The per-pixel results of the participating media resolve, one 8-byte pixel of Format. The lidar
+// decode reads these next to its normal pixel. A default pixel reads as "no media": no medium echo
+// and full transmittance to the surface, so a beam nothing was resolved for decodes as it would
+// without media; the results texture is cleared to it (NoMediaClearValue) ahead of every capture.
 struct FTempoLidarMediaPixel
 {
+	static constexpr EPixelFormat Format = PF_R32G32_UINT;
+
 	// Low 16 bits: range along the ray of the medium's echo, as a fraction of MaxRange in 1/65535
 	// steps, 0 = no echo. High 16 bits: intensity of the medium's echo, in 1/65535 steps of [0, 1].
 	uint32 RangeAndIntensity = 0;
@@ -30,7 +35,10 @@ struct FTempoLidarMediaPixel
 	// [0, 1]. Next byte: the medium echo's reflectivity estimate, its return-weighted mean albedo, in
 	// 1/255 steps of [0, 1]. High byte: the medium echo's label, the semantic or instance label of
 	// whatever contributed most to the bin the echo was drawn from, 0 for unlabeled.
-	uint32 TransmittanceAlbedoAndLabel = 0;
+	uint32 TransmittanceAlbedoAndLabel = 0xFFFFu;
+
+	// The lanes of a default, "no media" pixel, as a UAV clear value for a texture of Format.
+	static FUintVector4 NoMediaClearValue() { return FUintVector4(0u, 0xFFFFu, 0u, 0u); }
 
 	uint16 MediumRangeCode() const { return static_cast<uint16>(RangeAndIntensity & 0xFFFFu); }
 	uint16 MediumIntensityCode() const { return static_cast<uint16>(RangeAndIntensity >> 16); }
@@ -42,7 +50,7 @@ struct FTempoLidarMediaPixel
 	float MediumIntensity() const { return static_cast<float>(MediumIntensityCode()) / 65535.0f; }
 	float SurfaceTransmittance() const { return static_cast<float>(SurfaceTransmittanceCode()) / 65535.0f; }
 };
-static_assert(sizeof(FTempoLidarMediaPixel) == 8, "FTempoLidarMediaPixel must match PF_R32G32_UINT stride");
+static_assert(sizeof(FTempoLidarMediaPixel) == 8, "FTempoLidarMediaPixel must match the PF_R32G32_UINT stride");
 
 // The fog the camera's fog pass would compose for this view, mirrored from the renderer's per-view
 // fog constants (FViewInfo) and resources. Everything defaults to "no fog".
@@ -65,6 +73,11 @@ struct FTempoLidarMediaFogInputs
 	// The fog's single-scattering albedo, as a luminance: the fraction of what it takes out of the
 	// beam that it scatters rather than absorbs. Applied to every fog source.
 	float Albedo = 1.0f;
+	// The scene's id for the height fog the renderer composes for this view, the first registered
+	// (FScene::ExponentialFogs[0]), or 0 without one. The engine keys its fogs by their component's
+	// address, so a caller can match it against its own uint64(Component) without touching the
+	// component.
+	uint64 HeightFogId = 0;
 	// The local fog volumes in the scene, each its center in the view's translated world space (as
 	// the renderer uploads the instances) with its label in w. An instance the view composes is
 	// labeled by the nearest entry. Empty, every fog source carries the sensor's fog label.
@@ -80,6 +93,9 @@ struct FTempoLidarMediaSensorInputs
 	float FirstBinEdge = 100.0f;
 	// The lidar's maximum range, cm. Also the scale of FTempoLidarMediaPixel::MediumRangeCode.
 	float MaxRange = 10000.0f;
+	// The lidar's minimum range, cm. Media inside it attenuate the beam but return nothing, as a
+	// surface there would not be reported.
+	float MinRange = 0.0f;
 	// Visual opacity to lidar optical depth.
 	float ExtinctionScale = 1.0f;
 	// The backscatter of a white medium toward the sensor, as a fraction of a perpendicular surface's
@@ -157,6 +173,6 @@ TEMPOSENSORSSHADERS_API void AddTempoLidarMediaTranslucencyPass(
 	TArrayView<const FTempoLidarMediaTranslucentBatch> Batches,
 	const FTempoLidarMediaProfile& Profile);
 
-// Resolve the profile into per-pixel FTempoLidarMediaPixel results, written to Output (a
-// PF_R32G32_UINT texture with a UAV) inside the view rect.
+// Resolve the profile into per-pixel FTempoLidarMediaPixel results, written to Output (a texture of
+// FTempoLidarMediaPixel::Format with a UAV) inside the view rect.
 TEMPOSENSORSSHADERS_API void AddTempoLidarMediaResolvePass(FRDGBuilder& GraphBuilder, const FTempoLidarMediaPassInputs& Inputs, const FTempoLidarMediaProfile& Profile, FRDGTextureRef Output);

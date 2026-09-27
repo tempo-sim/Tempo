@@ -364,6 +364,9 @@ float ExtinctionScale;
 float Backscatter;
 // The lidar's own range falloff: intensity = saturation distance / max(saturation distance, range).
 float IntensitySaturationDistance;
+// The sensor's minimum range: media inside it attenuate the beam but return nothing, as a surface
+// there would not be reported.
+float MinRange;
 uint bStochastic;
 uint Seed;
 
@@ -394,27 +397,41 @@ float BinOpticalDepth(int2 LocalPos, int Bin, float Surface, out float NearEdge,
 	return Raw * (1.0 / OPTICAL_DEPTH_SCALE) * ExtinctionScale * Fraction;
 }
 
-// The medium's return from one bin: what a bin of uniform density scatters back toward the sensor,
-// integrated through its own depth, (1 - e^-2tau) / 2, times its albedo, attenuated both ways
-// through everything before it and by the sensor's range falloff. The integral matters for a dense
-// bin: an optically thick one still returns half the backscatter from its front face, where
-// attenuating the whole bin by its own depth would return nothing.
-float BinReturnWeight(float OpticalDepth, float Albedo, float AccumulatedOpticalDepth, float NearEdge, float FarEdge)
+// The fraction of a bin inside the sensor's minimum range, from its near edge: nothing before it
+// returns, though it attenuates like the rest. 0 for a bin wholly beyond the minimum range, 1 for
+// one wholly inside it.
+float ReturnStartFraction(float NearEdge, float FarEdge)
+{
+	return saturate((MinRange - NearEdge) / max(FarEdge - NearEdge, 1e-3));
+}
+
+// The medium's return from one bin: what a bin of uniform density scatters back toward the sensor
+// from the fraction Start of its depth onward, integrated through its own depth,
+// (e^-2tau Start - e^-2tau) / 2, times its albedo, attenuated both ways through everything before
+// it and by the sensor's range falloff. The integral matters for a dense bin: an optically thick
+// one still returns half the backscatter from its front face, where attenuating the whole bin by
+// its own depth would return nothing.
+float BinReturnWeight(float OpticalDepth, float Albedo, float AccumulatedOpticalDepth, float NearEdge, float FarEdge, float Start)
 {
 	const float TwoWayTransmittanceBefore = exp(-2.0 * AccumulatedOpticalDepth);
-	return Backscatter * Albedo * 0.5 * (1.0 - exp(-2.0 * OpticalDepth)) * TwoWayTransmittanceBefore * RangeFalloff(0.5 * (NearEdge + FarEdge));
+	const float Integral = 0.5 * (exp(-2.0 * OpticalDepth * Start) - exp(-2.0 * OpticalDepth));
+	const float ReturnNear = lerp(NearEdge, FarEdge, Start);
+	return Backscatter * Albedo * Integral * TwoWayTransmittanceBefore * RangeFalloff(0.5 * (ReturnNear + FarEdge));
 }
 
 // Where within a bin of uniform density a return drawn at the fraction U of the bin's total lands:
-// the inverse of the return's cumulative distribution through the bin, (1 - e^-2tau t) / (1 - e^-2tau).
-// Uniform across a thin bin; at the front face of a thick one.
-float BinReturnFraction(float OpticalDepth, float U)
+// the inverse of the return's cumulative distribution through the bin from Start on,
+// (e^-2tau Start - e^-2tau t) / (e^-2tau Start - e^-2tau). Uniform across a thin bin; at the front
+// face of a thick one.
+float BinReturnFraction(float OpticalDepth, float U, float Start)
 {
 	if (OpticalDepth <= 1e-3)
 	{
-		return U;
+		return lerp(Start, 1.0, U);
 	}
-	return saturate(-log(max(1.0 - U * (1.0 - exp(-2.0 * OpticalDepth)), 1e-7)) / (2.0 * OpticalDepth));
+	const float StartTransmittance = exp(-2.0 * OpticalDepth * Start);
+	const float EndTransmittance = exp(-2.0 * OpticalDepth);
+	return saturate(-log(max(StartTransmittance - U * (StartTransmittance - EndTransmittance), 1e-7)) / (2.0 * OpticalDepth));
 }
 
 [numthreads(THREADGROUP_SIZE, THREADGROUP_SIZE, 1)]
@@ -450,7 +467,8 @@ void ResolveCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 		{
 			break;
 		}
-		const float Weight = BinReturnWeight(OpticalDepth, Albedo, AccumulatedOpticalDepth, NearEdge, FarEdge);
+		const float Start = ReturnStartFraction(NearEdge, FarEdge);
+		const float Weight = Start < 1.0 ? BinReturnWeight(OpticalDepth, Albedo, AccumulatedOpticalDepth, NearEdge, FarEdge, Start) : 0.0;
 		TotalWeight += Weight;
 		WeightedAlbedo += Weight * Albedo;
 		AccumulatedOpticalDepth += OpticalDepth;
@@ -482,10 +500,11 @@ void ResolveCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 			{
 				break;
 			}
-			const float Weight = BinReturnWeight(OpticalDepth, Albedo, AccumulatedOpticalDepth, NearEdge, FarEdge);
+			const float Start = ReturnStartFraction(NearEdge, FarEdge);
+			const float Weight = Start < 1.0 ? BinReturnWeight(OpticalDepth, Albedo, AccumulatedOpticalDepth, NearEdge, FarEdge, Start) : 0.0;
 			if (Cumulative + Weight >= Target && Weight > 0.0)
 			{
-				MediumRange = lerp(NearEdge, FarEdge, BinReturnFraction(OpticalDepth, saturate((Target - Cumulative) / Weight)));
+				MediumRange = lerp(NearEdge, FarEdge, BinReturnFraction(OpticalDepth, saturate((Target - Cumulative) / Weight), Start));
 				// The echo is labeled by whatever contributed most to the bin it landed in.
 				MediumLabel = LabelProfile[uint3(LocalPos, Bin)] & 0xFFu;
 				break;

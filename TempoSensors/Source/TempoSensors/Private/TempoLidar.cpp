@@ -21,9 +21,7 @@
 
 #include "Components/ExponentialHeightFogComponent.h"
 #include "Components/LocalFogVolumeComponent.h"
-#include "Engine/ExponentialHeightFog.h"
 #include "Engine/TextureRenderTarget2D.h"
-#include "EngineUtils.h"
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Math/PerspectiveMatrix.h"
@@ -1325,8 +1323,11 @@ void UTempoLidar::RenderCapture()
 		FTempoLidarMediaCaptureSetup Setup;
 		Setup.ResultsSize = FIntPoint(SharedTextureTarget->SizeX, SharedTextureTarget->SizeY);
 		Setup.Sensor.NumBins = MediaRangeBins;
-		// Returns closer than this are already the sensor's blind spot, so the first bin ends there.
+		// The first bin ends at the sensor's minimum range, or at 50 cm when that is closer, so the
+		// log spacing does not spend its bins on the first few centimeters. Nothing inside the
+		// minimum range returns either way; the resolve only lets it attenuate.
 		Setup.Sensor.FirstBinEdge = static_cast<float>(FMath::Max(MinDistance, 50.0));
+		Setup.Sensor.MinRange = static_cast<float>(MinDistance);
 		Setup.Sensor.MaxRange = static_cast<float>(MaxDistance);
 		Setup.Sensor.ExtinctionScale = MediaExtinctionScale;
 		Setup.Sensor.Backscatter = MediaBackscatter;
@@ -1337,18 +1338,21 @@ void UTempoLidar::RenderCapture()
 
 		// Fog is labeled through its actors, which render no custom depth of their own. The height
 		// fog and the volumetric fog grid, which only exists with a height fog component, carry the
-		// label of the first height fog actor, the one the renderer composes; each local fog volume
+		// label of the height fog the renderer composes, the first registered in the scene, which
+		// the extension picks out of every candidate by the scene's id for it; each local fog volume
 		// carries its own actor's, so a steam volume and the ambient fog can read differently.
 		if (const UTempoActorLabeler* Labeler = World->GetSubsystem<UTempoActorLabeler>())
 		{
-			for (TActorIterator<AExponentialHeightFog> It(World); It; ++It)
+			for (TObjectIterator<UExponentialHeightFogComponent> It; It; ++It)
 			{
-				const UExponentialHeightFogComponent* FogComponent = It->GetComponent();
-				if (FogComponent && FogComponent->IsRegistered() && FogComponent->IsVisible())
+				if (!IsValid(*It) || It->GetWorld() != World || !It->IsRegistered() || !It->IsVisible())
 				{
-					Setup.Sensor.FogLabel = static_cast<uint32>(Labeler->GetActorLabelValue(*It).Get(0));
-					break;
+					continue;
 				}
+				FTempoLidarMediaLabeledHeightFog& HeightFog = Setup.LabeledHeightFogs.AddDefaulted_GetRef();
+				// The scene keys its fogs by their component's address.
+				HeightFog.Id = reinterpret_cast<uint64>(*It);
+				HeightFog.Label = static_cast<uint32>(Labeler->GetActorLabelValue(It->GetOwner()).Get(0));
 			}
 			for (TObjectIterator<ULocalFogVolumeComponent> It; It; ++It)
 			{
@@ -1450,13 +1454,16 @@ void TLidarSharedTextureRead<PixelType>::ReadAdditional_RenderThread(FRHICommand
 		return;
 	}
 	// The atlas read has just waited on the fence behind both copies, so no fence is needed here.
+	// Without a matching staging texture the media are left unread, so the slices get none and
+	// decode every beam as it would be without media; a zeroed image would read as a fully
+	// attenuated beam and drop every surface return instead.
 	if (!MediaStagingTexture.IsValid() || !FTextureRead::StagingMatches(MediaStagingTexture, this->ImageSize, sizeof(FTempoLidarMediaPixel)))
 	{
 		UE_LOG(LogTempoSensors, Warning, TEXT("Skipping lidar media read: no matching staging texture. Reporting no media for this scan."));
-		FMemory::Memzero(MediaImage.GetData(), MediaImage.Num() * sizeof(FTempoLidarMediaPixel));
 		return;
 	}
 	FTextureRead::CopyStagingSurface(RHICmdList, MediaStagingTexture, nullptr, reinterpret_cast<uint8*>(MediaImage.GetData()), this->ImageSize, sizeof(FTempoLidarMediaPixel));
+	bMediaRead = true;
 }
 
 template <typename PixelType>
@@ -1467,7 +1474,9 @@ TArray<TUniquePtr<FTextureRead>> TLidarSharedTextureRead<PixelType>::SplitIntoSl
 	TArray<TUniquePtr<FTextureRead>> Result;
 	Result.Reserve(Slices.Num());
 
-	const bool bMedia = !MediaImage.IsEmpty();
+	// Only media that were actually read are handed to the slices; a skipped read, of the media or
+	// of the whole atlas, leaves the preallocated image unset.
+	const bool bMedia = bMediaRead && MediaImage.Num() == this->ImageSize.X * this->ImageSize.Y;
 	int32 RunningX = 0;
 	for (TUniquePtr<TTextureRead<PixelType>>& Slice : Slices)
 	{
@@ -1477,9 +1486,10 @@ TArray<TUniquePtr<FTextureRead>> TLidarSharedTextureRead<PixelType>::SplitIntoSl
 		TTextureRead<PixelType>* SlicePtr = Slice.Get();
 		TArray<PixelType>& PackedImage = this->Image;
 		TArray<FTempoLidarMediaPixel>& PackedMedia = MediaImage;
-		// A slice built without a media image (media enabled after the slice was built) gets none.
+		// A slice only keeps a media image it can be filled from: none when the atlas has none to
+		// give, or when its own was sized for something else.
 		const bool bSliceMedia = bMedia && SlicePtr->MediaImage.Num() == SliceSize.X * SliceSize.Y;
-		if (bMedia && !bSliceMedia)
+		if (!bSliceMedia)
 		{
 			SlicePtr->MediaImage.Empty();
 		}

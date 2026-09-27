@@ -122,6 +122,7 @@ public:
 		SHADER_PARAMETER(int32, NumBins)
 		SHADER_PARAMETER(float, FirstBinEdge)
 		SHADER_PARAMETER(float, MaxRange)
+		SHADER_PARAMETER(float, MinRange)
 		SHADER_PARAMETER(float, ExtinctionScale)
 		SHADER_PARAMETER(float, Backscatter)
 		SHADER_PARAMETER(float, IntensitySaturationDistance)
@@ -227,13 +228,14 @@ void AddTempoLidarMediaResolvePass(FRDGBuilder& GraphBuilder, const FTempoLidarM
 	{
 		return;
 	}
-	if (!EnumHasAnyFlags(Output->Desc.Flags, TexCreate_UAV) || Output->Desc.Format != PF_R16G16B16A16_UINT)
+	if (!EnumHasAnyFlags(Output->Desc.Flags, TexCreate_UAV) || Output->Desc.Format != FTempoLidarMediaPixel::Format)
 	{
 		static bool bWarned = false;
 		if (!bWarned)
 		{
 			bWarned = true;
-			UE_LOG(LogTempoSensorsShaders, Warning, TEXT("Lidar media resolve skipped: output texture must be PF_R16G16B16A16_UINT with a UAV (got %s)."), GPixelFormats[Output->Desc.Format].Name);
+			UE_LOG(LogTempoSensorsShaders, Warning, TEXT("Lidar media resolve skipped: output texture must be %s with a UAV (got %s)."),
+				GPixelFormats[FTempoLidarMediaPixel::Format].Name, GPixelFormats[Output->Desc.Format].Name);
 		}
 		return;
 	}
@@ -255,6 +257,7 @@ void AddTempoLidarMediaResolvePass(FRDGBuilder& GraphBuilder, const FTempoLidarM
 	PassParameters->NumBins = Bins.NumBins;
 	PassParameters->FirstBinEdge = Bins.FirstBinEdge;
 	PassParameters->MaxRange = Bins.MaxRange;
+	PassParameters->MinRange = FMath::Max(Inputs.Sensor.MinRange, 0.0f);
 	PassParameters->ExtinctionScale = FMath::Max(Inputs.Sensor.ExtinctionScale, 0.0f);
 	PassParameters->Backscatter = FMath::Max(Inputs.Sensor.Backscatter, 0.0f);
 	PassParameters->IntensitySaturationDistance = FMath::Max(Inputs.Sensor.IntensitySaturationDistance, 1.0f);

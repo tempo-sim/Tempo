@@ -24,9 +24,14 @@ void FTempoLidarParticipatingMediaViewExtension::SetCaptureSetup(const FTempoLid
 	check(IsInGameThread());
 
 	TSharedRef<FTempoLidarParticipatingMediaViewExtension, ESPMode::ThreadSafe> Self = StaticCastSharedRef<FTempoLidarParticipatingMediaViewExtension>(AsShared());
-	ENQUEUE_RENDER_COMMAND(TempoLidarMediaSetCaptureSetup)([Self, Setup](FRHICommandListImmediate&)
+	ENQUEUE_RENDER_COMMAND(TempoLidarMediaSetCaptureSetup)([Self, Setup](FRHICommandListImmediate& RHICmdList)
 	{
 		Self->Setup_RenderThread = Setup;
+		// Every pixel starts the capture as "no media", so a tile the passes skip, or one the
+		// texture was just created for, reports its beams as they would be without media rather
+		// than as whatever the memory held.
+		Self->EnsureResultsTexture_RenderThread(RHICmdList);
+		Self->ClearResults_RenderThread(RHICmdList);
 	});
 }
 
@@ -70,6 +75,19 @@ void FTempoLidarParticipatingMediaViewExtension::EnsureResultsTexture_RenderThre
 #endif
 }
 
+void FTempoLidarParticipatingMediaViewExtension::ClearResults_RenderThread(FRHICommandListImmediate& RHICmdList)
+{
+	check(IsInRenderingThread());
+	if (!Results_RenderThread.IsValid())
+	{
+		return;
+	}
+	FRDGBuilder GraphBuilder(RHICmdList, RDG_EVENT_NAME("TempoLidarMediaClear"));
+	const FRDGTextureRef Results = RegisterExternalTexture(GraphBuilder, Results_RenderThread, TEXT("TempoLidarMedia.Results"));
+	AddClearUAVPass(GraphBuilder, GraphBuilder.CreateUAV(Results), FTempoLidarMediaPixel::NoMediaClearValue());
+	GraphBuilder.Execute();
+}
+
 void FTempoLidarParticipatingMediaViewExtension::PrePostProcessPass_RenderThread(FRDGBuilder& GraphBuilder, const FSceneView& InView, const FPostProcessingInputs& Inputs)
 {
 	FTempoLidarMediaPassInputs PassInputs;
@@ -78,6 +96,17 @@ void FTempoLidarParticipatingMediaViewExtension::PrePostProcessPass_RenderThread
 		return;
 	}
 	PassInputs.Sensor = Setup_RenderThread.Sensor;
+	// The height fog the renderer composes is the first registered in the scene, which need not be
+	// the first the game thread would find, so its label is looked up by the scene's id for it.
+	PassInputs.Sensor.FogLabel = 0;
+	for (const FTempoLidarMediaLabeledHeightFog& HeightFog : Setup_RenderThread.LabeledHeightFogs)
+	{
+		if (HeightFog.Id != 0 && HeightFog.Id == PassInputs.Fog.HeightFogId)
+		{
+			PassInputs.Sensor.FogLabel = HeightFog.Label;
+			break;
+		}
+	}
 	// The renderer uploads local fog volume instances in the view's translated world space, so the
 	// labeled volumes are matched to them there.
 	const FVector PreViewTranslation = InView.ViewMatrices.GetPreViewTranslation();
@@ -87,7 +116,7 @@ void FTempoLidarParticipatingMediaViewExtension::PrePostProcessPass_RenderThread
 		PassInputs.Fog.LabeledVolumes.Add(FVector4f(FVector3f(PreViewTranslation + Volume.WorldPosition), static_cast<float>(Volume.Label & 0xFFu)));
 	}
 
-	EnsureResultsTexture_RenderThread(GraphBuilder.RHICmdList);
+	// Sized to the setup and cleared to "no media" ahead of this render by SetCaptureSetup.
 	if (!Results_RenderThread.IsValid())
 	{
 		return;

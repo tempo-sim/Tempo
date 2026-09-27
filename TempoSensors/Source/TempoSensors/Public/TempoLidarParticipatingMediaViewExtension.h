@@ -8,6 +8,14 @@
 
 class FSceneInterface;
 
+// A height fog component and the label its fog's medium echoes carry, its actor's.
+struct FTempoLidarMediaLabeledHeightFog
+{
+	// The scene's id for the component, uint64(Component), which is how the renderer keys it.
+	uint64 Id = 0;
+	uint32 Label = 0;
+};
+
 // A local fog volume and the label its medium echoes carry, its actor's.
 struct FTempoLidarMediaLabeledVolume
 {
@@ -20,11 +28,16 @@ struct FTempoLidarMediaCaptureSetup
 {
 	// Size of the results texture: the lidar's packed atlas, so every tile's view rect indexes it.
 	FIntPoint ResultsSize = FIntPoint::ZeroValue;
+	// Passed through to the passes, except FogLabel, which is resolved from LabeledHeightFogs.
 	FTempoLidarMediaSensorInputs Sensor;
 	// Also rasterize the view's translucent primitives into the profile.
 	bool bIncludeTranslucency = true;
+	// Every height fog in the scene with its label. The height fog and the volumetric fog grid carry
+	// the label of the one the renderer composes, the first registered, which the passes pick out
+	// of these by id. Empty, or none of them the renderer's, they carry no label.
+	TArray<FTempoLidarMediaLabeledHeightFog> LabeledHeightFogs;
 	// Every local fog volume in the scene with its label; the passes match the instances the view
-	// composes to these by position. Empty, they all carry Sensor.FogLabel.
+	// composes to these by position. Empty, they all carry the height fog's label.
 	TArray<FTempoLidarMediaLabeledVolume> LabeledFogVolumes;
 };
 
@@ -41,7 +54,9 @@ class TEMPOSENSORS_API FTempoLidarParticipatingMediaViewExtension : public FScen
 public:
 	FTempoLidarParticipatingMediaViewExtension(const FAutoRegister& AutoRegister, FSceneInterface* InScene);
 
-	// Game thread. The setup for the next render; ordered with the render commands that follow.
+	// Game thread. The setup for the next render; ordered with the render commands that follow. Also
+	// sizes the results texture to it and clears every pixel to "no media", so a tile the passes
+	// skip, or a pixel none of them write, reads as it would without media.
 	void SetCaptureSetup(const FTempoLidarMediaCaptureSetup& Setup);
 
 	// Game thread. Whether the extension may be gathered into view families right now. Set around
@@ -61,11 +76,14 @@ public:
 	virtual bool IsActiveThisFrame_Internal(const FSceneViewExtensionContext& Context) const override;
 	// End ISceneViewExtension
 
-	static constexpr EPixelFormat ResultsFormat = PF_R32G32_UINT;
+	static constexpr EPixelFormat ResultsFormat = FTempoLidarMediaPixel::Format;
 
 private:
 	// Render thread. Make sure the results texture matches the setup's size.
 	void EnsureResultsTexture_RenderThread(FRHICommandListBase& RHICmdList);
+
+	// Render thread. Clear every pixel of the results texture to "no media".
+	void ClearResults_RenderThread(FRHICommandListImmediate& RHICmdList);
 
 	FSceneInterface* Scene = nullptr;
 

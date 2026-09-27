@@ -487,6 +487,7 @@ bool GetViewParticipatingMediaInputs(const FSceneView& View, FTempoLidarMediaPas
 	{
 		if (RenderScene->ExponentialFogs.Num() > 0)
 		{
+			Fog.HeightFogId = RenderScene->ExponentialFogs[0].Id;
 			Fog.Albedo = RenderScene->ExponentialFogs[0].VolumetricFogAlbedo.GetLuminance();
 		}
 	}

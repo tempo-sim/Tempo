@@ -47,10 +47,10 @@ struct FSemanticLabel: public FTableRowBase
 	TSet<TSoftObjectPtr<USkeletalMesh>> SkeletalMeshTypes;
 
 	// The Niagara systems whose components should be tagged with this label (overrides labels at the
-	// actor level, alongside the mesh columns). Labels an effect by what it is, exhaust or dust, on
-	// every actor that plays it; a sprite or ribbon emitter has no mesh to match otherwise, and the
-	// lidar labels the medium such an effect produces with this. A system with mesh renderers whose
-	// meshes are also labeled resolves to the system's row.
+	// mesh and actor levels). Labels an effect by what it is, exhaust or dust, on every actor that
+	// plays it; a sprite or ribbon emitter has no mesh to match otherwise, and the lidar labels the
+	// medium such an effect produces with this. A system with mesh renderers whose meshes are also
+	// labeled resolves to the system's row.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	TSet<TSoftObjectPtr<UNiagaraSystem>> NiagaraSystemTypes;
 

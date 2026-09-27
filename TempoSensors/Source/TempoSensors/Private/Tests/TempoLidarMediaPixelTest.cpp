@@ -45,14 +45,24 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTempoLidarMediaPixelNoEchoTest, "Tempo.Sensors
 
 bool FTempoLidarMediaPixelNoEchoTest::RunTest(const FString& Parameters)
 {
-	// A zero range code means no echo, whatever the other lanes hold; a cleared pixel means no
-	// echo and full transmittance is not implied, so the decode must read the lane.
+	// A zero range code means no echo, whatever the other lanes hold. The transmittance lane is
+	// read regardless, so a zeroed pixel means a fully attenuated beam, not an unattenuated one.
 	const FTempoLidarMediaPixel NoEcho = MakePixel(0u, 0xFFFFu, 0xFFFFu, 0xFFu, 0xFFu);
 	TestFalse(TEXT("no medium echo"), NoEcho.HasMediumEcho());
 	TestEqual(TEXT("label still readable"), static_cast<uint32>(NoEcho.MediumLabel()), 0xFFu);
-	const FTempoLidarMediaPixel Cleared;
-	TestFalse(TEXT("cleared has no echo"), Cleared.HasMediumEcho());
-	TestEqual(TEXT("cleared transmittance is zero"), Cleared.SurfaceTransmittance(), 0.0f);
+	const FTempoLidarMediaPixel Zeroed = MakePixel(0u, 0u, 0u, 0u, 0u);
+	TestEqual(TEXT("zeroed transmittance is zero"), Zeroed.SurfaceTransmittance(), 0.0f);
+
+	// A default pixel, and the value the results texture is cleared to, is "no media": no echo and
+	// full transmittance, so a beam nothing was resolved for reads as it would without media.
+	const FTempoLidarMediaPixel NoMedia;
+	TestFalse(TEXT("no media has no echo"), NoMedia.HasMediumEcho());
+	TestNearlyEqual(TEXT("no media transmittance is one"), NoMedia.SurfaceTransmittance(), 1.0f, 1e-6f);
+	TestEqual(TEXT("no media reflectivity is zero"), static_cast<uint32>(NoMedia.MediumReflectivityByte()), 0u);
+	TestEqual(TEXT("no media label is zero"), static_cast<uint32>(NoMedia.MediumLabel()), 0u);
+	const FUintVector4 Clear = FTempoLidarMediaPixel::NoMediaClearValue();
+	TestEqual(TEXT("clear value matches the default range and intensity lanes"), Clear.X, NoMedia.RangeAndIntensity);
+	TestEqual(TEXT("clear value matches the default transmittance, albedo and label lanes"), Clear.Y, NoMedia.TransmittanceAlbedoAndLabel);
 	return true;
 }
 

@@ -656,4 +656,7 @@ struct TLidarSharedTextureRead : TTextureReadBase<PixelType>
 	// same fence as the atlas covers the staging copy: it is written behind both copies.
 	FTextureRHIRef MediaStagingTexture;
 	TArray<FTempoLidarMediaPixel> MediaImage;
+	// Set once MediaImage has been copied out of the staging texture. Until then it is preallocated
+	// but unset, and SplitIntoSlices gives the slices no media.
+	bool bMediaRead = false;
 };
