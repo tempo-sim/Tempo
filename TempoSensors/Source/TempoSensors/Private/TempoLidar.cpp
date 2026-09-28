@@ -3,10 +3,13 @@
 #include "TempoLidar.h"
 
 #include "TempoSensors.h"
+#include "TempoActorLabeler.h"
 #include "TempoSensorsConstants.h"
 
 #include "TempoConversion.h"
 #include "TempoCoreUtils.h"
+#include "TempoLidarParticipatingMediaViewExtension.h"
+#include "TempoMotionVectorRewarpViewExtension.h"
 #include "TempoMultiViewCapture.h"
 
 #include "TempoSensors/Common.pb.h"
@@ -16,11 +19,16 @@
 #include "TempoSensorsTypes.h"
 #include "TempoSensorsUtils.h"
 
+#include "Components/ExponentialHeightFogComponent.h"
+#include "Components/LocalFogVolumeComponent.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Math/PerspectiveMatrix.h"
+#include "RenderingThread.h"
+#include "SceneViewExtension.h"
 #include "TextureResource.h"
+#include "UObject/UObjectIterator.h"
 
 namespace
 {
@@ -137,7 +145,9 @@ bool UTempoLidar::HasDetectedParameterChange() const
 		|| VerticalBeams != VerticalBeams_Internal
 		|| BeamDivergence != BeamDivergence_Internal
 		|| SamplingStrategy != SamplingStrategy_Internal
-		|| BeamCalibration != BeamCalibration_Internal;
+		|| BeamCalibration != BeamCalibration_Internal
+		|| bSimulateParticipatingMedia != bSimulateParticipatingMedia_Internal
+		|| MediaRangeBins != MediaRangeBins_Internal;
 }
 
 void UTempoLidar::DeactivateAllTiles()
@@ -176,6 +186,38 @@ void UTempoLidar::UpdateInternalMirrors()
 	BeamDivergence_Internal = BeamDivergence;
 	SamplingStrategy_Internal = SamplingStrategy;
 	BeamCalibration_Internal = BeamCalibration;
+	bSimulateParticipatingMedia_Internal = bSimulateParticipatingMedia;
+	MediaRangeBins_Internal = MediaRangeBins;
+}
+
+void UTempoLidar::OnUnregister()
+{
+	// Deactivates every tile while the scene is still valid.
+	Super::OnUnregister();
+
+	// Unregisters the extension from the engine's list. Render commands still in flight hold their
+	// own reference and keep it alive until they have run; its results texture is released on the
+	// render thread first.
+	if (MediaExtension.IsValid())
+	{
+		MediaExtension->ReleaseResources();
+		MediaExtension.Reset();
+	}
+	MediaStagingRing.Release();
+}
+
+FTempoLidarParticipatingMediaViewExtension* UTempoLidar::GetOrCreateMediaExtension()
+{
+	if (!MediaExtension.IsValid())
+	{
+		const UWorld* World = GetWorld();
+		if (!GEngine || !World || !World->Scene)
+		{
+			return nullptr;
+		}
+		MediaExtension = FSceneViewExtensions::NewExtension<FTempoLidarParticipatingMediaViewExtension>(World->Scene);
+	}
+	return MediaExtension.Get();
 }
 
 #if WITH_EDITOR
@@ -190,7 +232,9 @@ void UTempoLidar::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedE
 		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoLidar, VerticalBeams) ||
 		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoLidar, BeamCalibration) ||
 		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoLidar, BeamDivergence) ||
-		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoLidar, SamplingStrategy))
+		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoLidar, SamplingStrategy) ||
+		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoLidar, bSimulateParticipatingMedia) ||
+		MemberPropertyName == GET_MEMBER_NAME_CHECKED(UTempoLidar, MediaRangeBins))
 	{
 		// Route through the same choke point as the runtime Tick path.
 		bReconfigurePending = true;
@@ -267,6 +311,7 @@ void UTempoLidar::DeactivateTile(FTempoLidarTile& Tile)
 	// beams that is not a trivial amount to leave attached to a tile that is no longer rendering.
 	Tile.BeamSamples.Reset();
 	Tile.bCameraCut = false;
+	Tile.LastCaptureWorldTime = -1.0;
 }
 
 void UTempoLidar::ApplyLabelOverridesToTiles()
@@ -550,6 +595,9 @@ void UTempoLidar::ConfigureTile(FTempoLidarTile& Tile, double InYawOffset, doubl
 
 void UTempoLidar::SyncTiles()
 {
+	// Tiles copy the family-level settings when configured, so those come first.
+	ApplyFamilyRenderSettings();
+
 	FTempoLidarTile& L = Tiles[LeftTileIndex];
 	FTempoLidarTile& C = Tiles[CenterTileIndex];
 	FTempoLidarTile& R = Tiles[RightTileIndex];
@@ -588,6 +636,48 @@ void UTempoLidar::SyncTiles()
 void UTempoLidar::RequestMeasurement(const TempoSensors::LidarScanRequest& Request, const TResponseDelegate<TempoSensors::LidarScanSegment>& ResponseContinuation)
 {
 	PendingRequests.Add({ Request, ResponseContinuation});
+}
+
+void SelectLidarReturns(ETempoLidarReturnMode Mode, const FTempoLidarEcho& Surface, const FTempoLidarEcho& Medium,
+	FTempoLidarEcho& OutPrimary, FTempoLidarEcho& OutSecondary)
+{
+	OutPrimary = FTempoLidarEcho();
+	OutSecondary = FTempoLidarEcho();
+
+	if (!Surface.bValid && !Medium.bValid)
+	{
+		return;
+	}
+	if (Surface.bValid != Medium.bValid)
+	{
+		// Only one echo: every mode reports it, and dual mode has no second.
+		OutPrimary = Surface.bValid ? Surface : Medium;
+		return;
+	}
+
+	const FTempoLidarEcho& Nearest = Surface.Distance <= Medium.Distance ? Surface : Medium;
+	const FTempoLidarEcho& Farthest = Surface.Distance <= Medium.Distance ? Medium : Surface;
+	// Ties go to the surface: it is the echo the sensor would report without media.
+	const FTempoLidarEcho& Strongest = Medium.Intensity > Surface.Intensity ? Medium : Surface;
+	const FTempoLidarEcho& Weakest = Medium.Intensity > Surface.Intensity ? Surface : Medium;
+
+	switch (Mode)
+	{
+	case ETempoLidarReturnMode::First:
+		OutPrimary = Nearest;
+		break;
+	case ETempoLidarReturnMode::Last:
+		OutPrimary = Farthest;
+		break;
+	case ETempoLidarReturnMode::Dual:
+		OutPrimary = Strongest;
+		OutSecondary = Weakest;
+		break;
+	case ETempoLidarReturnMode::Strongest:
+	default:
+		OutPrimary = Strongest;
+		break;
+	}
 }
 
 namespace
@@ -655,6 +745,35 @@ namespace
 				: TempoSensors::ColorEncoding::CE_RGB8);
 		}
 
+		// Participating media: per-pixel results next to the pixel, when they were simulated for
+		// this capture. Without them every beam has at most its surface echo.
+		const bool bMedia = Read.MediaImage.Num() == Read.Image.Num();
+		const FTempoLidarMediaPixel* const MediaPixels = bMedia ? Read.MediaImage.GetData() : nullptr;
+		const ETempoLidarReturnMode ReturnMode = Read.ReturnMode;
+		const bool bDual = ReturnMode == ETempoLidarReturnMode::Dual;
+		const float MinDetectableIntensity = bMedia ? Read.MinDetectableIntensity : 0.0f;
+
+		// The second return's arrays exist only in dual mode; same layouts as the first's. It carries
+		// no colors: both echoes of a beam come from the same pixel, so they would repeat the first's.
+		float* SecondDistancesData = nullptr;
+		float* SecondIntensitiesData = nullptr;
+		uint32_t* SecondLabelsData = nullptr;
+		char* SecondReflectivitiesData = nullptr;
+		if (bDual)
+		{
+			ScanSegmentOut.mutable_second_reflectivities()->assign(static_cast<size_t>(NumReturns), '\0');
+			SecondReflectivitiesData = ScanSegmentOut.mutable_second_reflectivities()->data();
+			std::string* const SecondDistancesOut = ScanSegmentOut.mutable_second_distances_m();
+			SecondDistancesOut->resize(static_cast<size_t>(NumReturns) * sizeof(float));
+			SecondDistancesData = reinterpret_cast<float*>(SecondDistancesOut->data());
+			std::string* const SecondIntensitiesOut = ScanSegmentOut.mutable_second_intensities();
+			SecondIntensitiesOut->resize(static_cast<size_t>(NumReturns) * sizeof(float));
+			SecondIntensitiesData = reinterpret_cast<float*>(SecondIntensitiesOut->data());
+			std::string* const SecondLabelsOut = ScanSegmentOut.mutable_second_labels();
+			SecondLabelsOut->resize(static_cast<size_t>(NumReturns) * sizeof(uint32_t));
+			SecondLabelsData = reinterpret_cast<uint32_t*>(SecondLabelsOut->data());
+		}
+
 		// Per-scan constants for the loop below. The incidence test compares cosines, which is the
 		// same test as comparing angles (cosine is monotonic over [0, 180] degrees) without an acos
 		// per return, and the world-to-sensor normal transform is the inverse rotation and scale
@@ -666,7 +785,9 @@ namespace
 		// H-outer, V-inner layout: each ParallelFor iteration owns a contiguous V-length stripe
 		// of every output array, so threads never share cache lines.
 		ParallelFor(Read.HorizontalBeams, [&Read, BeamSamples, CosMaxAngleOfIncidence, InverseCaptureRotation, InverseCaptureScale,
-			DistancesData, IntensitiesData, LabelsData, AzimuthsData, ElevationsData, ReflectivitiesData, ColorsData, ColorEncoding](int32 HorizontalBeam)
+			DistancesData, IntensitiesData, LabelsData, AzimuthsData, ElevationsData, ReflectivitiesData, ColorsData, ColorEncoding,
+			MediaPixels, ReturnMode, bDual, MinDetectableIntensity,
+			SecondDistancesData, SecondIntensitiesData, SecondLabelsData, SecondReflectivitiesData](int32 HorizontalBeam)
 		{
 			for (int32 VerticalBeam = 0; VerticalBeam < Read.VerticalBeams; ++VerticalBeam)
 			{
@@ -682,43 +803,78 @@ namespace
 				const FVector WorldNormal = Pixel.Normal();
 				const FVector LocalNormal = InverseCaptureScale * InverseCaptureRotation.RotateVector(WorldNormal);
 				const double CosAngleOfIncidence = FVector::DotProduct(LocalNormal.GetSafeNormal(), -RayDirectionUnit);
-				double Intensity;
-				double Distance;
-				if (CosAngleOfIncidence < CosMaxAngleOfIncidence)
-				{
-					Distance = 0.0;
-					Intensity = 0.0;
-				}
-				else
+
+				// The surface echo, as before participating media: none past the max angle of
+				// incidence or the max distance.
+				FTempoLidarEcho Surface;
+				if (CosAngleOfIncidence >= CosMaxAngleOfIncidence)
 				{
 					// The intersection depends only on the ray's direction, so the unit vector
 					// serves as the second point on the line.
 					const FPlane SurfacePlane(NearestPoint, LocalNormal);
 					const FVector HitPoint = FMath::LinePlaneIntersection(FVector::ZeroVector, RayDirectionUnit, SurfacePlane);
 
-					Distance = HitPoint.Length();
-					Intensity = CosAngleOfIncidence * Read.IntensitySaturationDistance / FMath::Max(Read.IntensitySaturationDistance, Distance);
-
-					if (Distance > Read.MaxDistance)
+					const double Distance = HitPoint.Length();
+					if (Distance <= Read.MaxDistance)
 					{
-						Distance = 0.0;
-						Intensity = 0.0;
+						Surface.Distance = static_cast<float>(FMath::Max(Read.MinDistance, Distance));
+						Surface.Intensity = static_cast<float>(CosAngleOfIncidence * Read.IntensitySaturationDistance / FMath::Max(Read.IntensitySaturationDistance, Distance));
+						Surface.ReflectivityByte = Pixel.ReflectivityByte();
+						Surface.Label = static_cast<uint8>(Pixel.Label());
+						Surface.bValid = true;
 					}
-					Distance = FMath::Max(Read.MinDistance, Distance);
 				}
 
+				// Through participating media the surface echo comes back attenuated both ways, and
+				// the medium adds an echo of its own.
+				FTempoLidarEcho Medium;
+				Medium.bMedium = true;
+				if (MediaPixels)
+				{
+					const FTempoLidarMediaPixel& Media = MediaPixels[Sample.PixelIndex];
+					const float Transmittance = Media.SurfaceTransmittance();
+					Surface.Intensity *= Transmittance * Transmittance;
+					if (Surface.Intensity < MinDetectableIntensity)
+					{
+						Surface.bValid = false;
+					}
+					if (Media.HasMediumEcho())
+					{
+						Medium.Distance = Media.MediumRange(static_cast<float>(Read.MaxDistance));
+						Medium.Intensity = Media.MediumIntensity();
+						Medium.ReflectivityByte = Media.MediumReflectivityByte();
+						Medium.Label = Media.MediumLabel();
+						Medium.bValid = Medium.Intensity >= MinDetectableIntensity
+							&& Medium.Distance >= Read.MinDistance && Medium.Distance <= Read.MaxDistance;
+					}
+				}
+
+				FTempoLidarEcho Primary;
+				FTempoLidarEcho Secondary;
+				SelectLidarReturns(ReturnMode, Surface, Medium, Primary, Secondary);
+
 				const int32 Idx = HorizontalBeam * Read.VerticalBeams + VerticalBeam;
-				DistancesData[Idx] = QuantityConverter<CM2M>::Convert(Distance);
-				IntensitiesData[Idx] = static_cast<float>(Intensity);
-				LabelsData[Idx] = Pixel.Label();
 				// Already negated into the client's right-handed frame, and offset by the tile yaw.
 				AzimuthsData[Idx] = Sample.AzimuthRad;
 				ElevationsData[Idx] = Sample.ElevationRad;
-				// Raw 0-255 reflectivity estimate from the post-process material. Always emitted;
-				// for a non-return (Distance == 0) the value is meaningless but harmless, mirroring
-				// how labels/colors are written unconditionally.
-				ReflectivitiesData[Idx] = static_cast<char>(Pixel.ReflectivityByte());
 
+				// A medium echo reports the medium's label and its albedo estimate as reflectivity.
+				// For a non-return (Distance == 0) the label and reflectivity are meaningless but
+				// harmless, mirroring how colors are written unconditionally.
+				auto WriteEcho = [&](const FTempoLidarEcho& Echo, float* Distances, float* Intensities, uint32_t* Labels, char* Reflectivities)
+				{
+					Distances[Idx] = Echo.bValid ? QuantityConverter<CM2M>::Convert(Echo.Distance) : 0.0f;
+					Intensities[Idx] = Echo.bValid ? Echo.Intensity : 0.0f;
+					Labels[Idx] = Echo.bValid ? Echo.Label : Pixel.Label();
+					Reflectivities[Idx] = static_cast<char>(Echo.bValid ? Echo.ReflectivityByte : Pixel.ReflectivityByte());
+				};
+				WriteEcho(Primary, DistancesData, IntensitiesData, LabelsData, ReflectivitiesData);
+				if (bDual)
+				{
+					WriteEcho(Secondary, SecondDistancesData, SecondIntensitiesData, SecondLabelsData, SecondReflectivitiesData);
+				}
+
+				// The color, for either echo, is what the pixel rendered.
 				if constexpr (std::is_same_v<PixelType, FLidarPixelWithColor>)
 				{
 					char* const ColorOut = ColorsData + Idx * 3;
@@ -737,6 +893,23 @@ namespace
 				}
 			}
 		});
+
+		switch (ReturnMode)
+		{
+		case ETempoLidarReturnMode::First:
+			ScanSegmentOut.set_return_mode(TempoSensors::LidarReturnMode::LRM_FIRST);
+			break;
+		case ETempoLidarReturnMode::Last:
+			ScanSegmentOut.set_return_mode(TempoSensors::LidarReturnMode::LRM_LAST);
+			break;
+		case ETempoLidarReturnMode::Dual:
+			ScanSegmentOut.set_return_mode(TempoSensors::LidarReturnMode::LRM_DUAL);
+			break;
+		case ETempoLidarReturnMode::Strongest:
+		default:
+			ScanSegmentOut.set_return_mode(TempoSensors::LidarReturnMode::LRM_STRONGEST);
+			break;
+		}
 
 		Read.ExtractMeasurementHeader(TransmissionTime, ScanSegmentOut.mutable_header());
 
@@ -831,13 +1004,12 @@ void UTempoLidar::SetColorEnabled(bool bColorEnabledIn)
 	ApplyColorEnabled();
 }
 
-void UTempoLidar::ApplyColorEnabled()
+void UTempoLidar::ApplyFamilyRenderSettings()
 {
-	// Reapply the family-level rendering config. Color mode uses Lumen + ray tracing + the full
-	// tonemap/AE/show-flag set so the WithColor PPM samples a realistically lit scene; the
-	// no-color path strips those out for the fast aux-only render. Reset the PostProcessSettings
-	// and ShowFlags blocks before reapplying so toggling off cleanly drops the Lumen/MegaLights
-	// overrides set by the helper.
+	// Color mode uses Lumen + ray tracing + the full tonemap/AE/show-flag set so the WithColor PPM
+	// samples a realistically lit scene; the no-color path strips those out for the fast aux-only
+	// render. Reset the PostProcessSettings and ShowFlags blocks before reapplying so toggling off
+	// cleanly drops the Lumen/MegaLights overrides set by the helper.
 	PostProcessSettings = FPostProcessSettings();
 	ShowFlags = FEngineShowFlags(ESFIM_Game);
 	if (bColorEnabled)
@@ -855,6 +1027,20 @@ void UTempoLidar::ApplyColorEnabled()
 		OptimizeShowFlagsForNoColor(ShowFlags);
 		bUseRayTracingIfEnabled = false;
 	}
+
+	if (bSimulateParticipatingMedia)
+	{
+		// The media profile is built from the fog the camera would render, read off the renderer's
+		// per-view fog constants and, for volumetric fog, its froxel grid. Both exist only when fog
+		// renders for the family, so render it (the no-color PPM ignores the resulting color).
+		ShowFlags.SetFog(true);
+		ShowFlags.SetVolumetricFog(true);
+	}
+}
+
+void UTempoLidar::ApplyColorEnabled()
+{
+	ApplyFamilyRenderSettings();
 
 	// Swap each active tile's PPM to the matching variant. ApplyTilePostProcess retires the old
 	// MID if its parent material doesn't match the bColorEnabled-selected one.
@@ -940,6 +1126,22 @@ void UTempoLidar::InitSharedRenderTarget()
 	}
 
 	AllocateStagingTextures(SharedTextureTarget->SizeX, SharedTextureTarget->SizeY, SharedTextureTarget->GetFormat());
+
+	// The media results are read back through their own ring, sized like the atlas so every tile's
+	// view rect indexes both the same way.
+	if (bSimulateParticipatingMedia)
+	{
+		MediaStagingRing.Allocate(GetName() + TEXT(" Media"), GetNumStagingTextures(), SharedTextureTarget->SizeX, SharedTextureTarget->SizeY,
+			FTempoLidarParticipatingMediaViewExtension::ResultsFormat);
+	}
+	else
+	{
+		MediaStagingRing.Release();
+		if (MediaExtension.IsValid())
+		{
+			MediaExtension->ReleaseResources();
+		}
+	}
 }
 
 int32 UTempoLidar::GetNumActiveTiles() const
@@ -1012,6 +1214,19 @@ void UTempoLidar::RenderCapture()
 
 	const double CaptureTime = World->GetTimeSeconds();
 
+	// Ticks since the tiles last rendered, for the volumetric fog history blend (see
+	// FScopedVolumetricFogHistoryRescale). One setting for the family, so the largest tile factor;
+	// tiles capture together and only differ when one was just activated.
+	const double SceneTickDeltaSeconds = World->GetDeltaSeconds();
+	float MaxExtrapolationFactor = 1.0f;
+
+	// Participating media are simulated by a view extension gathered into this render only, whose
+	// results the read picks up next to the atlas. The staging ring is allocated with the atlas;
+	// without it (a reconfigure not yet applied) render without media rather than pair the read with
+	// nothing.
+	FTempoLidarParticipatingMediaViewExtension* MediaExt = bSimulateParticipatingMedia ? GetOrCreateMediaExtension() : nullptr;
+	const bool bMedia = MediaExt != nullptr && MediaStagingRing.IsValid(FTempoLidarParticipatingMediaViewExtension::ResultsFormat);
+
 	int32 PackedX = 0;
 	int32 MaxY = 0;
 	for (FTempoLidarTile& Tile : Tiles)
@@ -1057,6 +1272,13 @@ void UTempoLidar::RenderCapture()
 		Setup.PostProcessBlendWeight = 1.0f;
 		Setup.bCameraCut = Tile.bCameraCut;
 		Tile.bCameraCut = false;
+		// A camera cut discards the history there would be to rescale.
+		if (!Setup.bCameraCut)
+		{
+			MaxExtrapolationFactor = FMath::Max(MaxExtrapolationFactor,
+				FTempoMotionVectorRewarpViewExtension::ComputeExtrapolationFactor(CaptureTime, Tile.LastCaptureWorldTime, SceneTickDeltaSeconds));
+		}
+		Tile.LastCaptureWorldTime = CaptureTime;
 		Setup.ViewLocation = ViewLocation;
 		Setup.ViewRotationMatrix = ViewRotationMatrix;
 		Setup.ProjectionMatrix = ProjectionMatrix;
@@ -1067,14 +1289,21 @@ void UTempoLidar::RenderCapture()
 		const FTransform TileWorldTransform(TileWorldRotation, ViewLocation);
 		auto BuildSlice = [&]<typename P>(TArray<TUniquePtr<TTextureRead<P>>>& Out)
 		{
-			Out.Emplace(new TTextureRead<P>(
+			TTextureRead<P>* Slice = new TTextureRead<P>(
 				Tile.SizeXY, SequenceId, CaptureTime, GetOwnerName(), GetSensorName(),
 				GetComponentTransform(), TileWorldTransform, Tile.FOVAngle,
 				Tile.HorizontalBeams, GetEffectiveVerticalBeams(),
 				MinOutputElevationDeg, MaxOutputElevationDeg,
 				IntensitySaturationDistance, MaxAngleOfIncidence,
 				NumActiveTiles, Tile.YawOffset, Tile.MinDepth, Tile.MaxDepth,
-				MinDistance, MaxDistance, Tile.BeamSamples));
+				MinDistance, MaxDistance, Tile.BeamSamples);
+			Slice->ReturnMode = ReturnMode;
+			Slice->MinDetectableIntensity = MinDetectableIntensity;
+			if (bMedia)
+			{
+				Slice->MediaImage.SetNumUninitialized(Tile.SizeXY.X * Tile.SizeXY.Y);
+			}
+			Out.Emplace(Slice);
 		};
 		if (bColorEnabled)
 		{
@@ -1089,8 +1318,70 @@ void UTempoLidar::RenderCapture()
 		MaxY = FMath::Max(MaxY, Tile.SizeXY.Y);
 	}
 
-	// Render all views in one family directly into SharedTextureTarget.
-	TempoMultiViewCapture::RenderTiles(Scene, this, SharedTextureTarget, ViewSetups, ESceneCaptureSource::SCS_FinalColorLDR);
+	if (bMedia)
+	{
+		FTempoLidarMediaCaptureSetup Setup;
+		Setup.ResultsSize = FIntPoint(SharedTextureTarget->SizeX, SharedTextureTarget->SizeY);
+		Setup.Sensor.NumBins = MediaRangeBins;
+		// The first bin ends at the sensor's minimum range, or at 50 cm when that is closer, so the
+		// log spacing does not spend its bins on the first few centimeters. Nothing inside the
+		// minimum range returns either way; the resolve only lets it attenuate.
+		Setup.Sensor.FirstBinEdge = static_cast<float>(FMath::Max(MinDistance, 50.0));
+		Setup.Sensor.MinRange = static_cast<float>(MinDistance);
+		Setup.Sensor.MaxRange = static_cast<float>(MaxDistance);
+		Setup.Sensor.ExtinctionScale = MediaExtinctionScale;
+		Setup.Sensor.Backscatter = MediaBackscatter;
+		Setup.Sensor.IntensitySaturationDistance = static_cast<float>(IntensitySaturationDistance);
+		Setup.Sensor.bStochastic = bStochasticMediaReturns;
+		Setup.Sensor.Seed = static_cast<uint32>(SequenceId);
+		Setup.bIncludeTranslucency = bMediaIncludesTranslucency;
+
+		// Fog is labeled through its actors, which render no custom depth of their own. The height
+		// fog and the volumetric fog grid, which only exists with a height fog component, carry the
+		// label of the height fog the renderer composes, the first registered in the scene, which
+		// the extension picks out of every candidate by the scene's id for it; each local fog volume
+		// carries its own actor's, so a steam volume and the ambient fog can read differently.
+		if (const UTempoActorLabeler* Labeler = World->GetSubsystem<UTempoActorLabeler>())
+		{
+			for (TObjectIterator<UExponentialHeightFogComponent> It; It; ++It)
+			{
+				if (!IsValid(*It) || It->GetWorld() != World || !It->IsRegistered() || !It->IsVisible())
+				{
+					continue;
+				}
+				FTempoLidarMediaLabeledHeightFog& HeightFog = Setup.LabeledHeightFogs.AddDefaulted_GetRef();
+				// The scene keys its fogs by their component's address.
+				HeightFog.Id = reinterpret_cast<uint64>(*It);
+				HeightFog.Label = static_cast<uint32>(Labeler->GetActorLabelValue(It->GetOwner()).Get(0));
+			}
+			for (TObjectIterator<ULocalFogVolumeComponent> It; It; ++It)
+			{
+				if (!IsValid(*It) || It->GetWorld() != World || !It->IsRegistered() || !It->IsVisible())
+				{
+					continue;
+				}
+				FTempoLidarMediaLabeledVolume& Volume = Setup.LabeledFogVolumes.AddDefaulted_GetRef();
+				Volume.WorldPosition = It->GetComponentTransform().GetTranslation();
+				Volume.Label = static_cast<uint32>(Labeler->GetActorLabelValue(It->GetOwner()).Get(0));
+			}
+		}
+		MediaExt->SetCaptureSetup(Setup);
+	}
+
+	// Render all views in one family directly into SharedTextureTarget. The media extension is
+	// gathered only into this family: active around the render, nothing else can gather it.
+	if (bMedia)
+	{
+		MediaExt->SetActive(true);
+	}
+	{
+		TempoMultiViewCapture::FScopedVolumetricFogHistoryRescale ScopedFogHistory(MaxExtrapolationFactor);
+		TempoMultiViewCapture::RenderTiles(Scene, this, SharedTextureTarget, ViewSetups, ESceneCaptureSource::SCS_FinalColorLDR);
+	}
+	if (bMedia)
+	{
+		MediaExt->SetActive(false);
+	}
 
 	TSharedPtr<FTextureRead> NewRead;
 	if (bColorEnabled)
@@ -1107,6 +1398,32 @@ void UTempoLidar::RenderCapture()
 	}
 
 	NewRead->StagingTexture = AcquireNextStagingTexture();
+
+	if (bMedia)
+	{
+		// The media results go to their own staging texture, copied behind the render and ahead of
+		// the atlas copy, whose fence then covers both.
+		const FTextureRHIRef MediaStaging = MediaStagingRing.AcquireNext();
+		auto SetMediaStaging = [&]<typename P>()
+		{
+			auto* SharedRead = static_cast<TLidarSharedTextureRead<P>*>(NewRead.Get());
+			SharedRead->MediaStagingTexture = MediaStaging;
+			SharedRead->MediaImage.SetNumUninitialized(PackedX * MaxY);
+		};
+		if (bColorEnabled)
+		{
+			SetMediaStaging.template operator()<FLidarPixelWithColor>();
+		}
+		else
+		{
+			SetMediaStaging.template operator()<FLidarPixel>();
+		}
+		TSharedRef<FTempoLidarParticipatingMediaViewExtension, ESPMode::ThreadSafe> MediaExtRef = MediaExtension.ToSharedRef();
+		ENQUEUE_RENDER_COMMAND(TempoLidarMediaStagingCopy)([MediaExtRef, MediaStaging](FRHICommandListImmediate& RHICmdList)
+		{
+			MediaExtRef->CopyResultsToStaging_RenderThread(RHICmdList, MediaStaging);
+		});
+	}
 
 	SequenceId++;
 
@@ -1130,6 +1447,26 @@ FName TLidarSharedTextureRead<PixelType>::GetType() const
 }
 
 template <typename PixelType>
+void TLidarSharedTextureRead<PixelType>::ReadAdditional_RenderThread(FRHICommandListImmediate& RHICmdList)
+{
+	if (MediaImage.IsEmpty())
+	{
+		return;
+	}
+	// The atlas read has just waited on the fence behind both copies, so no fence is needed here.
+	// Without a matching staging texture the media are left unread, so the slices get none and
+	// decode every beam as it would be without media; a zeroed image would read as a fully
+	// attenuated beam and drop every surface return instead.
+	if (!MediaStagingTexture.IsValid() || !FTextureRead::StagingMatches(MediaStagingTexture, this->ImageSize, sizeof(FTempoLidarMediaPixel)))
+	{
+		UE_LOG(LogTempoSensors, Warning, TEXT("Skipping lidar media read: no matching staging texture. Reporting no media for this scan."));
+		return;
+	}
+	FTextureRead::CopyStagingSurface(RHICmdList, MediaStagingTexture, nullptr, reinterpret_cast<uint8*>(MediaImage.GetData()), this->ImageSize, sizeof(FTempoLidarMediaPixel));
+	bMediaRead = true;
+}
+
+template <typename PixelType>
 TArray<TUniquePtr<FTextureRead>> TLidarSharedTextureRead<PixelType>::SplitIntoSlices()
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(TempoLidarSplitIntoSlices);
@@ -1137,6 +1474,9 @@ TArray<TUniquePtr<FTextureRead>> TLidarSharedTextureRead<PixelType>::SplitIntoSl
 	TArray<TUniquePtr<FTextureRead>> Result;
 	Result.Reserve(Slices.Num());
 
+	// Only media that were actually read are handed to the slices; a skipped read, of the media or
+	// of the whole atlas, leaves the preallocated image unset.
+	const bool bMedia = bMediaRead && MediaImage.Num() == this->ImageSize.X * this->ImageSize.Y;
 	int32 RunningX = 0;
 	for (TUniquePtr<TTextureRead<PixelType>>& Slice : Slices)
 	{
@@ -1145,12 +1485,27 @@ TArray<TUniquePtr<FTextureRead>> TLidarSharedTextureRead<PixelType>::SplitIntoSl
 		const int32 PackedWidth = this->ImageSize.X;
 		TTextureRead<PixelType>* SlicePtr = Slice.Get();
 		TArray<PixelType>& PackedImage = this->Image;
-		ParallelFor(SliceSize.Y, [SlicePtr, &PackedImage, SrcX, PackedWidth, SliceSize](int32 Row)
+		TArray<FTempoLidarMediaPixel>& PackedMedia = MediaImage;
+		// A slice only keeps a media image it can be filled from: none when the atlas has none to
+		// give, or when its own was sized for something else.
+		const bool bSliceMedia = bMedia && SlicePtr->MediaImage.Num() == SliceSize.X * SliceSize.Y;
+		if (!bSliceMedia)
+		{
+			SlicePtr->MediaImage.Empty();
+		}
+		ParallelFor(SliceSize.Y, [SlicePtr, &PackedImage, &PackedMedia, bSliceMedia, SrcX, PackedWidth, SliceSize](int32 Row)
 		{
 			FMemory::Memcpy(
 				&SlicePtr->Image[Row * SliceSize.X],
 				&PackedImage[Row * PackedWidth + SrcX],
 				SliceSize.X * sizeof(PixelType));
+			if (bSliceMedia)
+			{
+				FMemory::Memcpy(
+					&SlicePtr->MediaImage[Row * SliceSize.X],
+					&PackedMedia[Row * PackedWidth + SrcX],
+					SliceSize.X * sizeof(FTempoLidarMediaPixel));
+			}
 		});
 		RunningX += SliceSize.X;
 		Result.Emplace(Slice.Release());

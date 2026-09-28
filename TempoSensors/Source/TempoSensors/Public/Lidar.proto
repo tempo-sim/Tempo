@@ -10,6 +10,20 @@ message Range {
   float max = 2;
 }
 
+// Which echo a beam reports when more than one is detected, e.g. a dust cloud in front of a wall.
+// Set on the lidar component (`ReturnMode`); reported in `LidarScanSegment.return_mode`.
+enum LidarReturnMode {
+  // One return per beam: the echo with the highest intensity.
+  LRM_STRONGEST = 0;
+  // One return per beam: the nearest detectable echo.
+  LRM_FIRST = 1;
+  // One return per beam: the farthest detectable echo.
+  LRM_LAST = 2;
+  // Two returns per beam: the strongest echo in the segment's top-level arrays and the other
+  // detectable echo, if any, in the `second_*` arrays.
+  LRM_DUAL = 3;
+}
+
 message LidarScanSegment {
   TempoSensors.MeasurementHeader header = 1;
   // Total number of segments that comprise one full scan (segments share a sequence_id).
@@ -31,8 +45,11 @@ message LidarScanSegment {
   bytes distances_m = 8;
   // Per-return reflected intensity in [0, 1]. Same layout/encoding as `distances_m` (little-endian float32).
   bytes intensities = 9;
-  // Per-return semantic label (0 if labels disabled). Same H-outer/V-inner layout as `distances_m`, but
-  // packed little-endian uint32 (4 bytes per return); length is 4 * horizontal_beams * vertical_beams.
+  // Per-return label (0 if labels disabled or the return is unlabeled). A surface return carries its
+  // surface's label; an echo from participating media (fog, dust, smoke) carries the label of the
+  // medium, as the label table assigns it to the medium's primitive or fog actor. Same H-outer/V-inner
+  // layout as `distances_m`, but packed little-endian uint32 (4 bytes per return); length is
+  // 4 * horizontal_beams * vertical_beams.
   bytes labels = 10;
   // Per-return azimuth in radians. Same layout/encoding as `distances_m` (little-endian float32).
   bytes azimuths_rad = 11;
@@ -52,6 +69,22 @@ message LidarScanSegment {
   // `distances_m`: reflectivity for return (h, v) is byte (h * vertical_beams + v). Length is
   // horizontal_beams * vertical_beams.
   bytes reflectivities = 15;
+  // The return mode the lidar was in when this segment was produced. Says which echo the top-level
+  // arrays hold when a beam detects more than one (see LidarReturnMode). Segments from a lidar
+  // without participating-media simulation carry at most one echo per beam, so every mode reports
+  // the same returns.
+  LidarReturnMode return_mode = 16;
+  // The second echo per beam. Only populated in LRM_DUAL mode; empty otherwise. Where a beam has
+  // both a participating-media echo (dust, smoke, fog) and a surface echo, the stronger of the two
+  // is in the top-level arrays and the other is here. Same layout and encoding as `distances_m`;
+  // 0 = no second echo for that beam. Beams share the segment's azimuths and elevations.
+  bytes second_distances_m = 17;
+  // Same layout and encoding as `intensities`.
+  bytes second_intensities = 18;
+  // Same layout and encoding as `labels`.
+  bytes second_labels = 19;
+  // Same layout and encoding as `reflectivities`.
+  bytes second_reflectivities = 20;
 }
 
 message LidarScanRequest {

@@ -127,6 +127,11 @@ public:
 
 	TMap<uint8, uint8> GetInstanceToSemanticIdMap() const;
 
+	// The value the labeler writes into the stencil for an Actor's primitives, its instance or
+	// semantic ID per the label type setting, for callers that label something the Actor owns but
+	// that renders no custom depth of its own, such as fog. Unset if the Actor has not been labeled.
+	TOptional<int32> GetActorLabelValue(const AActor* Actor) const;
+
 protected:
 	void BuildLabelMaps();
 
@@ -202,6 +207,9 @@ protected:
 
 	UPROPERTY(VisibleAnywhere)
 	TMap<FString, FName> SkeletalMeshLabels;
+
+	UPROPERTY(VisibleAnywhere)
+	TMap<FString, FName> NiagaraSystemLabels;
 
 	UPROPERTY(VisibleAnywhere)
 	TMap<FName, FName> ComponentTagLabels;

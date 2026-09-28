@@ -9,8 +9,12 @@
 #include "Math/Vector.h"
 #include "RenderGraphFwd.h"
 #include "SceneTypes.h"
+#include "TempoLidarParticipatingMedia.h"
 
+class FScene;
 class FSceneInterface;
+class IConsoleVariable;
+class FSceneUniformBuffer;
 class FSceneView;
 class FSceneViewStateInterface;
 class USceneCaptureComponent2D;
@@ -84,4 +88,48 @@ namespace TempoMultiViewCapture
 	// renderer's FViewFamilyInfo, hence lives here with the other engine-private mirrors. Returns
 	// false if the family has no initialized scene textures or either texture is missing.
 	TEMPOSENSORS_API bool GetRenderedViewSceneTextures(const FSceneView& View, FRDGTextureRef& OutVelocity, FRDGTextureRef& OutSceneDepth, FIntRect& OutViewRect);
+
+	// Render thread. The inputs the lidar's participating media passes need from a view being
+	// rendered: its rect and the family's resolved scene depth, and the fog the camera's fog pass
+	// would compose for it, read from the renderer's per-view fog constants and resources (the
+	// exponential height fog parameters with the id and albedo of the fog they come from, the
+	// volumetric fog froxel grid if one was rendered, and the local fog volume data if local fog
+	// volumes are composed analytically). Returns false if
+	// the family has no scene textures. Leaves Sensor untouched.
+	TEMPOSENSORS_API bool GetViewParticipatingMediaInputs(const FSceneView& View, FTempoLidarMediaPassInputs& OutInputs);
+
+	// Render thread. The translucent mesh batches visible in a view being rendered, dynamic (particle
+	// systems and the like) and static, as the renderer gathered them for its own translucency pass,
+	// plus the render scene and the scene uniforms a mesh pass over them needs. Batches whose
+	// materials are not translucent are filtered by the pass; only the cheap relevance flags are
+	// checked here. Returns false if the view has no render scene.
+	TEMPOSENSORS_API bool GetViewTranslucentBatches(const FSceneView& View, TArray<FTempoLidarMediaTranslucentBatch>& OutBatches, const FScene*& OutScene, FSceneUniformBuffer*& OutSceneUniforms);
+
+	// Game thread. Rescales the volumetric fog history blend for the renders issued while it lives.
+	//
+	// The engine blends each render's fog grid with the previous render's by a fixed weight
+	// (r.VolumetricFog.HistoryWeight, 0.9 by default), which assumes a render every scene tick: the
+	// history then decays over about ten ticks. A view that renders every N ticks blends once per N
+	// ticks and so takes N times longer, in scene time, to converge; moving media trail behind their
+	// emitters and a sensor reads a grid up to seconds old. Raising the weight to the Nth power gives
+	// one blend the decay of N per-tick blends, so the grid converges per tick of scene time whatever
+	// the view's rate, the same correction the motion vector rewarp applies to velocities.
+	//
+	// The variable is render-thread safe, so its changes are applied on the render thread in order
+	// with the render commands enqueued between them: only the renders issued inside the scope see
+	// the rescaled weight. Its set-by priority is kept, so scalability settings still own it. A
+	// factor of one or less, or a weight of zero, changes nothing.
+	class TEMPOSENSORS_API FScopedVolumetricFogHistoryRescale
+	{
+	public:
+		explicit FScopedVolumetricFogHistoryRescale(float TicksSinceLastRender);
+		~FScopedVolumetricFogHistoryRescale();
+
+		FScopedVolumetricFogHistoryRescale(const FScopedVolumetricFogHistoryRescale&) = delete;
+		FScopedVolumetricFogHistoryRescale& operator=(const FScopedVolumetricFogHistoryRescale&) = delete;
+
+	private:
+		IConsoleVariable* HistoryWeight = nullptr;
+		float OriginalWeight = 0.0f;
+	};
 }

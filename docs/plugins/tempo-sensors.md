@@ -32,6 +32,14 @@ API at whatever rate you configure.
   horizontal FOV. Up to 240° splits left/right; up to 360° splits left/center/right. Per-beam
   intrinsic calibration (`FLidarBeamCalibration`) supports vendor-style channel files (per-channel
   elevation + azimuth offset).
+- **Dust, smoke and fog in the lidar, from what the camera renders.** With
+  `bSimulateParticipatingMedia` on, whatever attenuates the camera's view attenuates the beam too,
+  with no per-effect setup: the exponential height fog, the volumetric fog grid (and so every
+  Volume-domain material primitive injected into it), local fog volumes, and rasterized
+  translucency (Niagara sprites and ribbons, mesh particles, translucent meshes) evaluated with
+  their own materials. Surface returns come back weaker through the medium or not at all, the
+  medium produces echoes of its own, and a configurable return mode picks the strongest / first /
+  last echo or reports two per beam. [See below](#participating-media).
 - **Tile seam handling.** Multi-tile cameras feather across seams (`FeatherPixels`, default 16)
   using a precomputed resolve map, hiding per-tile TAA / auto-exposure history discontinuities.
   Depth and label channels — neither safely averageable — switch ownership at the centerline
@@ -192,6 +200,118 @@ many to expect per frame) carries per-return `distances`, `intensities`, `labels
 `elevations`. Azimuths and elevations are negated from Unreal's internal left-handed Z-down
 convention so client-side point-cloud math renders right-handed Z-up directly.
 
+### Participating media: dust, smoke and fog { #participating-media }
+
+The lidar is a scene-depth sensor, and none of the things a camera renders as dust, smoke or fog
+write depth. The participating media settings on `UTempoLidar` close that gap without any
+per-effect setup: if it attenuates the camera's view, it attenuates the beam.
+
+**How it works.** The color of a pixel is a line integral over everything translucent along its
+ray, so it cannot be inverted into "the depth of the dust". Instead, for every rendered pixel the
+lidar rebuilds the transmittance profile along the ray from the same data the camera's fog pass
+renders from, evaluated at many ranges instead of at the one range of the opaque surface: the
+exponential height fog (a closed-form integral), the volumetric fog froxel grid (whose alpha is the
+eye-to-froxel transmittance the engine has already integrated, including every primitive with a
+Volume-domain material and, when so configured, local fog volumes) and local fog volumes composed
+analytically. Rasterized translucency, the way most dust and smoke effects are actually built
+(Niagara sprites and ribbons, mesh particles, translucent meshes, fog cards), has no volumetric
+representation anywhere, so the lidar rasterizes those same primitives a second time with a
+plugin-owned material shader that evaluates each fragment's opacity with its real material (soft
+particle depth fade and all) and adds its optical depth to the profile, together with an albedo
+estimate from the material's color (the luminance of its base color, or of its emissive color for
+the unlit materials most sprites use), so dark smoke returns less than white dust. A sprite is read as the
+ball it stands for: a camera-facing billboard with a radial falloff is the projection of a fuzzy
+sphere around the particle, so its optical depth is spread along the ray's chord through a sphere
+of the particle's radius (half the smaller sprite size, the same sphere the engine's spherical
+particle opacity uses), densest at the center, rather than dropped at the range of the quad, which
+would make every puff a flat disc facing the sensor. Meshes and ribbons keep the range they
+rasterize at.
+The profile is discretized into log-spaced range bins and resolved with a simple sensor model:
+
+- the surface return is attenuated by the two-way transmittance to the surface, and dropped when
+  it falls below `MinDetectableIntensity`;
+- the medium's backscatter is integrated bin by bin from `MinDistance` out, each bin's return
+  integrated through its own depth (so a dense cloud returns from its front face rather than
+  vanishing), weighted by the bin's albedo, the two-way transmittance to the bin and the sensor's
+  own range falloff, into one medium echo whose intensity is the total, whose range is drawn from
+  that distribution and whose reflectivity is its return-weighted albedo. Medium inside
+  `MinDistance` attenuates the beam but returns nothing, as a surface there would not be reported.
+  The two-way transmittance and the 1/range falloff are why real lidars see fog returns cluster
+  close to the sensor; nothing is tuned to produce that.
+
+Everything runs on the GPU inside the lidar's own render (two small compute passes and one
+opacity-only rasterization of the translucent primitives per tile) and comes back with the scan;
+the CPU side only chooses which echo to report.
+
+**Settings** (all on the lidar component; the last two are advanced):
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `bSimulateParticipatingMedia` | on | Master switch. Off, no extra pass runs and the output is unchanged. On, the lidar's render also renders fog (its color is discarded) so the profile has something to read. |
+| `bMediaIncludesTranslucency` | on | Also rasterize translucent primitives into the profile with their own materials. Additive materials (fire, sparks, glows) add light and block nothing, so they are skipped; modulate materials block what they darken. Off, only fog contributes. |
+| `MediaExtinctionScale` | 1.0 | Visual opacity → lidar optical depth. 1 means what the camera sees is what the beam sees, which holds for fog and dust (particles large compared to the wavelength). Fine smoke scatters less in the near infrared: use less than 1. |
+| `MediaBackscatter` | 0.1 | How much of what a white medium takes out of the beam comes back to the sensor, as a fraction of a perpendicular surface's return. Each medium's echo is this times its albedo estimate: a sprite's material color as a luminance, the fog component's albedo for fog. That albedo is also the `reflectivities` byte a medium echo reports. |
+| `MinDetectableIntensity` | 0.01 | Echoes weaker than this are not reported, whether from a surface seen through the medium or from the medium itself. Only applied when media are simulated. |
+| `ReturnMode` | Strongest | Which echo a beam reports when it detects more than one: `Strongest`, `First` (nearest), `Last` (farthest) or `Dual` (two per beam). Without media every mode reports the same returns. |
+| `bStochasticMediaReturns` | on | Draw each beam's medium echo range at random from its return distribution (reproducible per `sequence_id`), so returns spread through the medium as a real sensor's do. Off, each beam reports the median range, a clean shell. |
+| `MediaRangeBins` | 64 | Range bins per beam, log-spaced out to `MaxDistance`. More bins place medium echoes more precisely at 12 bytes per bin per rendered pixel. |
+
+**Output.** `LidarScanSegment.return_mode` reports the mode. In `Dual` mode the strongest echo of
+each beam is in the top-level arrays and the other, if any, is in `second_distances_m`,
+`second_intensities`, `second_labels` and `second_reflectivities`, with the same layouts and
+encodings as their top-level counterparts (distance 0 = no second echo). The second return carries
+no colors: both echoes of a beam come from the same pixel, so its color would repeat the first's.
+Medium echoes carry the medium's label, their albedo estimate as reflectivity (the fog's authored
+albedo, a sprite's material color) and, in color mode, the pixel's rendered color, which is mostly
+the medium's where the medium is dense.
+
+**Labels.** A medium echo is labeled by whatever contributed most to the range bin it was drawn
+from, so exhaust drifting through fog reads as exhaust where it is dense and fog where it is not.
+Rasterized translucency carries its primitive's label, the custom depth stencil value the
+[labeler](#working-with-labels) assigns from the label table: a Niagara component is labeled like
+any other component, by its `ComponentTags`, the system it plays (`NiagaraSystemTypes`, the way to
+tell exhaust from dust), the meshes it renders, or its owning actor. No custom
+depth rendering is involved; the pass reads the value off the primitive. Fog is labeled through
+its actors, which render no custom depth: the exponential height fog and the volumetric fog grid
+(which only exists with a height fog component) carry the label of the height fog actor whose fog
+the renderer composes, the first registered, so a row with `ExponentialHeightFog` in its
+`ActorTypes` labels them, and each local fog volume carries its own
+actor's label, so a steam volume can read differently from the ambient fog. Local fog volumes
+injected into the volumetric fog grid rather than composed analytically are part of the grid and
+carry the height fog's label.
+
+**What is and is not covered.** Height fog, local fog volumes, anything injected into the
+volumetric fog grid (Volume-domain materials on meshes or Niagara mesh particles) and rasterized
+translucency (any translucent, alpha-composite or modulate surface material, on any vertex factory)
+are covered by the passes described above. Opaque and masked particles already write scene depth
+and need nothing. Heterogeneous volumes (sparse volume textures) and the sky atmosphere's aerial
+perspective are not covered.
+
+!!! note "Translucent materials compile two more shaders"
+
+    The translucency pass needs its own vertex and pixel shader for every translucent surface
+    material and vertex factory combination. They are compiled with the material's shader map like
+    any other pass, so the first load after updating to a version with this pass recompiles
+    translucent materials once (opaque and masked materials are untouched). No material needs
+    editing.
+
+!!! note "Volumetric fog history at sensor rates"
+
+    The engine blends each render's volumetric fog grid with the previous render's by a fixed
+    per-render weight (`r.VolumetricFog.HistoryWeight`, 0.9 by default), assuming a render every
+    scene tick. A sensor rendering every N ticks would otherwise take N times longer, in scene
+    time, to converge, and moving dust would trail its emitter by up to seconds. Both the lidar
+    and the camera rescale the weight to its Nth power around their own render, so the grid
+    converges per tick of scene time at any sensor rate, as the motion vector rewarp does for
+    velocities. Scalability settings still own the variable; it is restored after each render.
+
+!!! note "Volumetric fog beyond its distance"
+
+    The froxel grid only extends to the fog component's `VolumetricFogDistance` (60 m by default).
+    Beyond it the camera falls back to the analytic height fog, and so does the lidar, so a
+    Volume-domain dust cloud past that distance is invisible to both. Raise the distance on the
+    fog component if you need it further out.
+
 !!! warning "Per-return payloads are `bytes`, not repeated floats"
 
     Since API v0.2.0 the per-return and per-pixel arrays are opaque `bytes` blobs, so a client can
@@ -207,7 +327,7 @@ convention so client-side point-cloud math renders right-handed Z-up directly.
 each with a stencil value plus the things that should receive that label. TempoSample's
 `Content/Labels/TempoSampleLabelTable` is a worked example of such a table.
 
-Each row matches on five columns, and the most specific match wins:
+Each row matches on six columns, and the most specific match wins:
 
 | Column | Matches | Beats |
 |---|---|---|
@@ -215,10 +335,13 @@ Each row matches on five columns, and the most specific match wins:
 | `ActorTags` | Actors carrying that tag | `ActorTypes` |
 | `StaticMeshTypes` | Components rendering that static mesh — ISMC / foliage and Niagara mesh renderers included | `ActorTags`, `ActorTypes` |
 | `SkeletalMeshTypes` | Skinned components rendering that skeletal mesh | `ActorTags`, `ActorTypes` |
+| `NiagaraSystemTypes` | Niagara components playing that system, sprite and ribbon emitters included | the mesh columns, `ActorTags`, `ActorTypes` |
 | `ComponentTags` | Components carrying that tag | everything above |
 
 So you can label a base-mesh actor one way and selected meshes on it another — lane decals as
-`LaneLine` on top of road actors labeled `Road`, for instance. The two tag columns are the escape
+`LaneLine` on top of road actors labeled `Road`, for instance — and label an effect by what it is
+rather than by who plays it: a row with `NS_Exhaust` in its `NiagaraSystemTypes` makes every
+vehicle's exhaust `Exhaust`, which is what the lidar's medium echoes from it then carry. The two tag columns are the escape
 hatches for what no class or asset can pick out: one instance of a class labeled differently from
 the rest, or geometry built at runtime. An Actor carrying tags for two different labels resolves
 to whichever its `Tags` array lists first.
@@ -324,6 +447,12 @@ running a scene fast and then dropping into lockstep for the frames you actually
 - The plugin patches an `FRayTracingScene` engine bug
   (`bEnableRayTracingSceneReadbackBuffersOverrunWorkaround`, on by default) that otherwise crashes
   when many ray-tracing-using scene captures run in one frame.
+- Lidar participating media add, per tile, the engine's fog passes (already paid in color mode;
+  new in no-color mode, where fog is otherwise disabled), a compute pass that evaluates the fog at
+  `MediaRangeBins` ranges per pixel, an opacity-only rasterization of the visible translucent
+  primitives (bounded by the same overdraw the camera pays for them, with a far cheaper pixel
+  shader), a resolve pass, an 8-byte-per-pixel second readback and a transient 3D texture of
+  `MediaRangeBins` × 12 bytes per rendered pixel. Off, none of it exists.
 
 ## Architecture, briefly
 
@@ -355,6 +484,12 @@ The full sensor frame for a camera is approximately:
 6. **Staging copy + GPU fence** → readback target.
 
 For lidar it is simpler: one multi-view render straight into a packed atlas, one staging copy.
+With participating media on, a view extension gathered into that render alone adds, per tile
+and before post-processing, a compute pass that builds the fog profile
+(`TempoLidarParticipatingMedia.usf`), a mesh pass over the view's translucent batches with the
+plugin's own material shaders (`TempoLidarMediaTranslucency.usf`) and a resolve pass, and writes
+an 8-byte-per-pixel results texture that is copied to its own staging texture behind the atlas
+copy, under the same fence.
 
 !!! warning "Pinned engine version"
 

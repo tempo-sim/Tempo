@@ -1,0 +1,534 @@
+// Copyright Tempo Simulation, LLC. All Rights Reserved
+
+// Participating media (dust, smoke, fog) for the lidar: the transmittance profile along each pixel's
+// ray, and the returns a lidar would see through it.
+//
+// The rendered color of a pixel is a line integral over everything translucent along its ray, so it
+// cannot be inverted into "the depth of the dust". Instead the profile is rebuilt from the same data
+// the camera's fog pass renders from, evaluated at many ranges along the ray instead of at the one
+// range of the opaque surface behind it:
+//
+//   * the exponential height fog, a closed-form line integral (HeightFogCommon.ush,
+//     GetExponentialHeightFog / CalculateHeightFog);
+//   * the volumetric fog froxel grid, whose alpha channel is the eye-to-froxel transmittance the
+//     engine already integrated, including every Volume-domain material primitive and, when so
+//     configured, every local fog volume (CombineVolumetricFog);
+//   * local fog volumes composed analytically outside that grid (LocalFogVolumeCommon.ush).
+//
+// ProfileCS discretizes that profile into optical depth per range bin, in a 3D texture, and alongside
+// it the same optical depth weighted by the albedo of what contributed it, so a bin's mean albedo is
+// the ratio of the two. Other passes may add to the bins (rasterized translucency does, in a later
+// pass) before ResolveCS walks them and applies the sensor model: the surface return is attenuated by
+// the two-way transmittance to the surface, and the medium's backscatter is integrated bin by bin,
+// weighted by the bin's albedo, the two-way transmittance to the bin and the sensor's range falloff,
+// into one medium echo whose range is drawn from that distribution and whose reflectivity is its
+// return-weighted albedo. The 1/range and transmittance-squared weights are why real lidars see fog
+// returns cluster close to the sensor; nothing here is tuned to produce that.
+//
+// Ranges are along the ray (distances), in cm, like the lidar's own returns. Bins are log-spaced
+// from FirstBinEdge to MaxRange, with bin 0 covering [0, FirstBinEdge).
+
+#include "/Engine/Private/Common.ush"
+#include "/Engine/Shared/EnvironmentComponentsFlags.h"
+#include "/Engine/Private/Random.ush"
+
+#if USE_LOCAL_FOG_VOLUMES
+#include "/Engine/Private/LocalFogVolumes/LocalFogVolumeCommon.ush"
+#endif
+
+Texture2D SceneDepthTexture;
+int2 ViewRectMin;
+int2 ViewRectSize;
+
+int NumBins;
+float FirstBinEdge;
+float MaxRange;
+
+// The far edge of bin Index. Bin 0 is [0, FirstBinEdge); bins 1..NumBins-1 are log-spaced up to
+// MaxRange, so precision follows the sensor's own range precision rather than being spent far away.
+float BinFarEdge(int Index)
+{
+	if (Index <= 0)
+	{
+		return FirstBinEdge;
+	}
+	const float T = float(Index) / float(max(NumBins - 1, 1));
+	return FirstBinEdge * exp2(log2(MaxRange / FirstBinEdge) * T);
+}
+
+float BinNearEdge(int Index)
+{
+	return Index <= 0 ? 0.0 : BinFarEdge(Index - 1);
+}
+
+// One contribution to a bin's label channel: its optical depth in fixed point over its label, so
+// the largest value in a bin is its largest contribution and its low byte that contributor's label.
+uint PackLabeledContribution(float OpticalDepth, uint Label)
+{
+	return (min(uint(OpticalDepth * OPTICAL_DEPTH_SCALE), 0xFFFFFFu) << 8) | (Label & 0xFFu);
+}
+
+// A point on this pixel's ray, in translated world space, and the unit direction of the ray.
+void GetPixelRay(int2 PixelPos, out float3 RayOriginTW, out float3 RayDirection)
+{
+	RayOriginTW = View.TranslatedWorldCameraOrigin;
+	// Any device depth off the near plane gives a point on the ray; only the direction is used.
+	const float3 PointTW = SvPositionToTranslatedWorld(float4(float2(PixelPos) + 0.5, 0.5, 1.0));
+	RayDirection = normalize(PointTW - RayOriginTW);
+}
+
+// Range along the ray to the opaque surface this pixel rendered, or MaxRange when nothing was.
+float SurfaceRange(int2 PixelPos, float CosToForward, out bool bRendered)
+{
+	const float DeviceZ = SceneDepthTexture.Load(int3(PixelPos, 0)).r;
+	bRendered = DeviceZ > 0.0;
+	if (!bRendered)
+	{
+		return MaxRange;
+	}
+	const float SceneDepth = ConvertFromDeviceZ(DeviceZ);
+	return SceneDepth / max(CosToForward, 1e-4);
+}
+
+#ifdef PROFILE_PASS
+
+RWTexture3D<uint> OpticalDepthOutput;
+RWTexture3D<uint> AlbedoOpticalDepthOutput;
+RWTexture3D<uint> LabelOutput;
+// The fog's single-scattering albedo, as a luminance, applied to every fog source.
+float FogAlbedo;
+// The label the fog's contributions carry.
+uint FogLabel;
+// The scene's local fog volumes, each its center in translated world space and its label in w.
+StructuredBuffer<float4> LabeledFogVolumes;
+uint NumLabeledFogVolumes;
+
+// Mirrors of FFogUniformParameters (FogRendering.h) and the View's fog constants, set from
+// FViewInfo::ExponentialFogParameters etc. See HeightFogCommon.ush for the packing:
+//   ExponentialFogParameters:  density term at the observer height, height falloff,
+//                              max observer height, start distance
+//   ExponentialFogParameters2: second density term at the observer height, second falloff,
+//                              second density, second height
+//   ExponentialFogParameters3: density, height, unused here, cutoff distance
+float4 ExponentialFogParameters;
+float4 ExponentialFogParameters2;
+float4 ExponentialFogParameters3;
+// 1 - FogMaxOpacity: the transmittance the fog can never take a pixel below.
+float MinFogTransmittance;
+float FogEndDistance;
+float VolumetricFogStartDistance;
+
+Texture3D IntegratedLightScattering;
+SamplerState IntegratedLightScatteringSampler;
+
+// The height fog is the sum of two terms, each a density that halves with every 1 / Falloff of
+// height: Density * 2^(-Falloff * (Z - Height)). This is the mean of one term's density over a
+// straight segment that starts at height StartZ and rises by Rise.
+//
+// Along the segment the density decays by 2^-Decay overall, which averages to (1 - 2^-Decay) / Decay
+// of its starting value. The fog pass leaves the integral's 1 / ln 2 out and counts optical depth in
+// halvings rather than e-foldings; both conventions are kept here so the lidar attenuates by the
+// number the camera's fog was drawn with. The closed form is 0 / 0 for a level segment, so near it
+// the first two terms of its series stand in. exp2 is kept inside the range every backend evaluates.
+float HeightFogTermMeanDensity(float Density, float Falloff, float Height, float DensityAtObserver,
+	bool bStartsAtObserver, float StartZ, float Rise)
+{
+	// The density at the observer comes from the CPU, evaluated in double precision.
+	const float StartDensity = bStartsAtObserver
+		? DensityAtObserver
+		: Density * exp2(-max(Falloff * (StartZ - Height), -127.0));
+
+	const float Decay = max(Falloff * Rise, -127.0);
+	const float Ln2 = log(2.0);
+	const float MeanDecay = abs(Decay) > 0.01 ? (1.0 - exp2(-Decay)) / Decay : Ln2 - 0.5 * Ln2 * Ln2 * Decay;
+	return StartDensity * MeanDecay;
+}
+
+// Transmittance of the exponential height fog from the camera to a point: what the fog pass would
+// put in the alpha of an opaque surface there (HeightFogCommon.ush, GetExponentialHeightFog).
+// CoveredDistance is the range along the ray the volumetric fog grid already accounts for.
+float HeightFogTransmittance(float3 CameraToPoint, float CoveredDistance)
+{
+	// The fog is seen from the camera held at or below the fog's max observer height, so the ray to
+	// the point gains whatever height the observer gave up.
+	const float CameraZ = DFHackToFloat(ResolvedView.WorldCameraOrigin).z;
+	const float ObserverZ = min(CameraZ, ExponentialFogParameters.z);
+
+	// Fog stops building up past its end distance, measured horizontally: a farther point is
+	// fogged as though it sat at that distance along the same ray.
+	float3 ToPoint = CameraToPoint;
+	const float HorizontalSqr = dot(ToPoint.xy, ToPoint.xy);
+	if (FogEndDistance > 0.0 && HorizontalSqr > Pow2(FogEndDistance))
+	{
+		ToPoint *= FogEndDistance / sqrt(max(1.0, HorizontalSqr));
+	}
+	ToPoint.z += CameraZ - ObserverZ;
+	const float Distance = length(ToPoint);
+
+	// Past the cutoff distance the fog pass draws no fog at all.
+	const float CutoffDistance = ExponentialFogParameters3.w;
+	if (CutoffDistance > 0.0 && Distance > CutoffDistance)
+	{
+		return 1.0;
+	}
+
+	// Only the part of the ray beyond the fog's start distance, and beyond the volumetric fog's
+	// coverage, is fogged here.
+	const float FogStart = max(CoveredDistance, ExponentialFogParameters.w);
+	const float FoggedLength = Distance - FogStart;
+	if (FoggedLength <= 0.0)
+	{
+		return 1.0;
+	}
+	const bool bStartsAtObserver = FogStart <= 0.0;
+	const float StartFraction = FogStart / Distance;
+	const float StartZ = ObserverZ + ToPoint.z * StartFraction;
+	const float Rise = ToPoint.z * (1.0 - StartFraction);
+
+	float MeanDensity = HeightFogTermMeanDensity(
+		ExponentialFogParameters3.x, ExponentialFogParameters.y, ExponentialFogParameters3.y, ExponentialFogParameters.x,
+		bStartsAtObserver, StartZ, Rise);
+	MeanDensity += HeightFogTermMeanDensity(
+		ExponentialFogParameters2.z, ExponentialFogParameters2.y, ExponentialFogParameters2.w, ExponentialFogParameters2.x,
+		bStartsAtObserver, StartZ, Rise);
+
+	return max(saturate(exp2(-MeanDensity * FoggedLength)), MinFogTransmittance);
+}
+
+// Transmittance from the camera to the point at Range along the pixel's ray, combining every fog
+// the camera's fog pass would have composed for an opaque surface at that range.
+float FogTransmittance(int2 LocalPos, float3 RayDirection, float CosToForward, float Range)
+{
+	// The fog pass draws nothing for a fog component not rendered in the main pass (or in
+	// reflection captures). Keep the same gate so a hidden fog never attenuates the lidar.
+	if (View.RenderingReflectionCaptureMask == 0.0 && !IsExponentialFogRenderedInMain(View.EnvironmentComponentsFlags))
+	{
+		return 1.0;
+	}
+
+	const float3 RelativeToCamera = RayDirection * Range;
+	const float SceneDepth = Range * CosToForward;
+
+	float ExcludeDistance = 0.0;
+#if USE_VOLUMETRIC_FOG
+	// Volumetric fog covers up to its max distance along the view axis; the analytic fog starts there.
+	const float InvCosAngle = (CosToForward > 0.001) ? rcp(CosToForward) : 0.0;
+	ExcludeDistance = View.VolumetricFogMaxDistance * InvCosAngle;
+#endif
+
+	float Transmittance = HeightFogTransmittance(RelativeToCamera, ExcludeDistance);
+
+#if USE_LOCAL_FOG_VOLUMES
+	{
+		// Tile culling data is relative to the view rect, as in HeightFogPixelShader.usf.
+		const uint2 TilePos = uint2(LocalPos) / LFVTilePixelSize.xx;
+		const float3 PositionTW = View.TranslatedWorldCameraOrigin + RelativeToCamera;
+		const float4 LFVContribution = GetLFVContribution(ResolvedView, TilePos, PositionTW);
+		Transmittance *= LFVContribution.a;
+	}
+#endif
+
+#if USE_VOLUMETRIC_FOG
+	{
+		// The froxel grid's alpha is the transmittance from the eye to the froxel. XY follows the
+		// pixel (the point is on this pixel's ray); Z follows the point's view depth.
+		const float ZSlice = log2(SceneDepth * View.VolumetricFogGridZParams.x + View.VolumetricFogGridZParams.y) * View.VolumetricFogGridZParams.z * View.VolumetricFogInvGridSize.z;
+		float3 VolumeUV = float3((float2(LocalPos) + 0.5) * View.VolumetricFogSVPosToVolumeUV, ZSlice);
+		VolumeUV.xy = min(VolumeUV.xy, View.VolumetricFogUVMax);
+		const float VolumetricTransmittance = Texture3DSampleLevel(IntegratedLightScattering, IntegratedLightScatteringSampler, VolumeUV, 0).a;
+		// Not applied in front of the volumetric fog start distance (CombineVolumetricFog).
+		Transmittance *= lerp(1.0, VolumetricTransmittance, saturate((SceneDepth - VolumetricFogStartDistance) * 100000000.0));
+	}
+#endif
+
+	return Transmittance;
+}
+
+#if USE_LOCAL_FOG_VOLUMES
+// The label of a local fog volume instance the view composes: that of the labeled volume whose
+// center it has. The instances carry no identity of their own, so they are matched by position.
+uint LocalFogVolumeLabel(uint InstanceIndex)
+{
+	const float3 Center = GetLocalFogVolumeGPUInstanceData(InstanceIndex).TranslatedWorlPos;
+	uint Label = FogLabel;
+	float BestDistanceSqr = 3.402823466e+38;
+	for (uint Index = 0; Index < NumLabeledFogVolumes; ++Index)
+	{
+		const float4 Volume = LabeledFogVolumes[Index];
+		const float DistanceSqr = dot(Volume.xyz - Center, Volume.xyz - Center);
+		if (DistanceSqr < BestDistanceSqr)
+		{
+			BestDistanceSqr = DistanceSqr;
+			Label = uint(Volume.w + 0.5);
+		}
+	}
+	return Label;
+}
+
+// The optical depth of one local fog volume instance between two ranges along the ray, from the
+// engine's own evaluation of it, the same one the total composes.
+float LocalFogVolumeOpticalDepth(uint InstanceIndex, float3 RayOriginTW, float3 RayDirection, float NearRange, float FarRange)
+{
+	const float NearTransmittance = GetLFVInstanceContribution(InstanceIndex, RayOriginTW, RayDirection, RayOriginTW + RayDirection * NearRange, true).a;
+	const float FarTransmittance = GetLFVInstanceContribution(InstanceIndex, RayOriginTW, RayDirection, RayOriginTW + RayDirection * FarRange, true).a;
+	return max(log(max(NearTransmittance, 1e-7)) - log(max(FarTransmittance, 1e-7)), 0.0);
+}
+#endif
+
+// The labeled contribution a bin's fog is recorded as: the fog's label over the whole optical depth,
+// unless the view composes local fog volumes and they are labeled individually, in which case each
+// volume's optical depth through the bin competes under its own label and what is left, the height
+// fog's and the volumetric fog grid's, under the fog's.
+uint FogBinLabel(int2 LocalPos, float3 RayOriginTW, float3 RayDirection, int Bin, float OpticalDepth)
+{
+	float BestOpticalDepth = OpticalDepth;
+	uint BestLabel = FogLabel;
+#if USE_LOCAL_FOG_VOLUMES
+	if (NumLabeledFogVolumes > 0)
+	{
+		const uint2 TilePos = uint2(LocalPos) / LFVTilePixelSize.xx;
+		const uint Count = LFVTileDataTex[uint3(TilePos, 0)];
+		float RestOpticalDepth = OpticalDepth;
+		BestOpticalDepth = 0.0;
+		for (uint Index = 0; Index < Count; ++Index)
+		{
+			const uint InstanceIndex = LFVTileDataTex[uint3(TilePos, 1 + Index)];
+			const float InstanceOpticalDepth = LocalFogVolumeOpticalDepth(InstanceIndex, RayOriginTW, RayDirection, BinNearEdge(Bin), BinFarEdge(Bin));
+			RestOpticalDepth -= InstanceOpticalDepth;
+			if (InstanceOpticalDepth > BestOpticalDepth)
+			{
+				BestOpticalDepth = InstanceOpticalDepth;
+				BestLabel = LocalFogVolumeLabel(InstanceIndex);
+			}
+		}
+		if (RestOpticalDepth > BestOpticalDepth)
+		{
+			BestOpticalDepth = RestOpticalDepth;
+			BestLabel = FogLabel;
+		}
+	}
+#endif
+	return PackLabeledContribution(BestOpticalDepth, BestLabel);
+}
+
+[numthreads(THREADGROUP_SIZE, THREADGROUP_SIZE, 1)]
+void ProfileCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	// Derived view members (the double-float camera origin the fog math uses) live on the
+	// resolved view struct, not on the raw View constant buffer.
+	ResolvedView = ResolveView();
+
+	const int2 LocalPos = int2(DispatchThreadId.xy);
+	if (any(LocalPos >= ViewRectSize))
+	{
+		return;
+	}
+	const int2 PixelPos = ViewRectMin + LocalPos;
+
+	float3 RayOriginTW;
+	float3 RayDirection;
+	GetPixelRay(PixelPos, RayOriginTW, RayDirection);
+	const float CosToForward = dot(RayDirection, View.ViewForward);
+
+	// Optical depth per bin is the drop in log transmittance across it. Clamp away from zero
+	// before the log: a fog at max opacity 1 can reach exactly zero transmittance.
+	float PreviousLogTransmittance = 0.0;
+	for (int Bin = 0; Bin < NumBins; ++Bin)
+	{
+		const float Transmittance = max(FogTransmittance(LocalPos, RayDirection, CosToForward, BinFarEdge(Bin)), 1e-7);
+		const float LogTransmittance = log(Transmittance);
+		const float OpticalDepth = max(PreviousLogTransmittance - LogTransmittance, 0.0);
+		PreviousLogTransmittance = LogTransmittance;
+		OpticalDepthOutput[uint3(LocalPos, Bin)] = uint(min(OpticalDepth * OPTICAL_DEPTH_SCALE, 4294967040.0));
+		AlbedoOpticalDepthOutput[uint3(LocalPos, Bin)] = uint(min(OpticalDepth * FogAlbedo * OPTICAL_DEPTH_SCALE, 4294967040.0));
+		LabelOutput[uint3(LocalPos, Bin)] = FogBinLabel(LocalPos, RayOriginTW, RayDirection, Bin, OpticalDepth);
+	}
+}
+
+#endif // PROFILE_PASS
+
+#ifdef RESOLVE_PASS
+
+Texture3D<uint> OpticalDepthProfile;
+Texture3D<uint> AlbedoOpticalDepthProfile;
+Texture3D<uint> LabelProfile;
+RWTexture2D<uint2> Output;
+// Where the view's output lands in the family's render target, which the results index the same
+// way. The renderer quantizes the view's rect in the scene textures, so the two can differ.
+int2 OutputRectMin;
+
+// Visual opacity to lidar optical depth. 1 = the camera's extinction is the lidar's.
+float ExtinctionScale;
+// The backscatter of a white medium toward the sensor, as a fraction of a perpendicular surface's
+// return; each bin's return is this times the bin's albedo.
+float Backscatter;
+// The lidar's own range falloff: intensity = saturation distance / max(saturation distance, range).
+float IntensitySaturationDistance;
+// The sensor's minimum range: media inside it attenuate the beam but return nothing, as a surface
+// there would not be reported.
+float MinRange;
+uint bStochastic;
+uint Seed;
+
+
+float RangeFalloff(float Range)
+{
+	return IntensitySaturationDistance / max(IntensitySaturationDistance, Range);
+}
+
+// The optical depth of a bin, scaled and cut at the surface: only the part of the bin in front of
+// the surface can scatter or attenuate. Also the bin's mean albedo, the ratio of its albedo-weighted
+// optical depth to its optical depth.
+float BinOpticalDepth(int2 LocalPos, int Bin, float Surface, out float NearEdge, out float FarEdge, out float Albedo)
+{
+	NearEdge = BinNearEdge(Bin);
+	FarEdge = min(BinFarEdge(Bin), Surface);
+	Albedo = 0.0;
+	if (FarEdge <= NearEdge)
+	{
+		return 0.0;
+	}
+	const float Fraction = (FarEdge - NearEdge) / max(BinFarEdge(Bin) - NearEdge, 1e-3);
+	const float Raw = float(OpticalDepthProfile[uint3(LocalPos, Bin)]);
+	if (Raw > 0.0)
+	{
+		Albedo = saturate(float(AlbedoOpticalDepthProfile[uint3(LocalPos, Bin)]) / Raw);
+	}
+	return Raw * (1.0 / OPTICAL_DEPTH_SCALE) * ExtinctionScale * Fraction;
+}
+
+// The fraction of a bin inside the sensor's minimum range, from its near edge: nothing before it
+// returns, though it attenuates like the rest. 0 for a bin wholly beyond the minimum range, 1 for
+// one wholly inside it.
+float ReturnStartFraction(float NearEdge, float FarEdge)
+{
+	return saturate((MinRange - NearEdge) / max(FarEdge - NearEdge, 1e-3));
+}
+
+// The medium's return from one bin: what a bin of uniform density scatters back toward the sensor
+// from the fraction Start of its depth onward, integrated through its own depth,
+// (e^-2tau Start - e^-2tau) / 2, times its albedo, attenuated both ways through everything before
+// it and by the sensor's range falloff. The integral matters for a dense bin: an optically thick
+// one still returns half the backscatter from its front face, where attenuating the whole bin by
+// its own depth would return nothing.
+float BinReturnWeight(float OpticalDepth, float Albedo, float AccumulatedOpticalDepth, float NearEdge, float FarEdge, float Start)
+{
+	const float TwoWayTransmittanceBefore = exp(-2.0 * AccumulatedOpticalDepth);
+	const float Integral = 0.5 * (exp(-2.0 * OpticalDepth * Start) - exp(-2.0 * OpticalDepth));
+	const float ReturnNear = lerp(NearEdge, FarEdge, Start);
+	return Backscatter * Albedo * Integral * TwoWayTransmittanceBefore * RangeFalloff(0.5 * (ReturnNear + FarEdge));
+}
+
+// Where within a bin of uniform density a return drawn at the fraction U of the bin's total lands:
+// the inverse of the return's cumulative distribution through the bin from Start on,
+// (e^-2tau Start - e^-2tau t) / (e^-2tau Start - e^-2tau). Uniform across a thin bin; at the front
+// face of a thick one.
+float BinReturnFraction(float OpticalDepth, float U, float Start)
+{
+	if (OpticalDepth <= 1e-3)
+	{
+		return lerp(Start, 1.0, U);
+	}
+	const float StartTransmittance = exp(-2.0 * OpticalDepth * Start);
+	const float EndTransmittance = exp(-2.0 * OpticalDepth);
+	return saturate(-log(max(StartTransmittance - U * (StartTransmittance - EndTransmittance), 1e-7)) / (2.0 * OpticalDepth));
+}
+
+[numthreads(THREADGROUP_SIZE, THREADGROUP_SIZE, 1)]
+void ResolveCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	ResolvedView = ResolveView();
+
+	const int2 LocalPos = int2(DispatchThreadId.xy);
+	if (any(LocalPos >= ViewRectSize))
+	{
+		return;
+	}
+	const int2 PixelPos = ViewRectMin + LocalPos;
+
+	float3 RayOriginTW;
+	float3 RayDirection;
+	GetPixelRay(PixelPos, RayOriginTW, RayDirection);
+	const float CosToForward = dot(RayDirection, View.ViewForward);
+
+	bool bSurfaceRendered;
+	const float Surface = SurfaceRange(PixelPos, CosToForward, bSurfaceRendered);
+
+	// First walk: the total medium return, its return-weighted albedo, and the optical depth to the
+	// surface.
+	float TotalWeight = 0.0;
+	float WeightedAlbedo = 0.0;
+	float AccumulatedOpticalDepth = 0.0;
+	for (int Bin = 0; Bin < NumBins; ++Bin)
+	{
+		float NearEdge, FarEdge, Albedo;
+		const float OpticalDepth = BinOpticalDepth(LocalPos, Bin, Surface, NearEdge, FarEdge, Albedo);
+		if (FarEdge <= NearEdge)
+		{
+			break;
+		}
+		const float Start = ReturnStartFraction(NearEdge, FarEdge);
+		const float Weight = Start < 1.0 ? BinReturnWeight(OpticalDepth, Albedo, AccumulatedOpticalDepth, NearEdge, FarEdge, Start) : 0.0;
+		TotalWeight += Weight;
+		WeightedAlbedo += Weight * Albedo;
+		AccumulatedOpticalDepth += OpticalDepth;
+	}
+	const float SurfaceTransmittance = exp(-AccumulatedOpticalDepth);
+	const float MediumAlbedo = TotalWeight > 0.0 ? saturate(WeightedAlbedo / TotalWeight) : 0.0;
+
+	// Second walk: the range of the medium echo, drawn from the per-bin return distribution. A
+	// per-beam random draw spreads returns through the medium as a real sensor's do; without it the
+	// median of the distribution gives a deterministic shell.
+	float MediumRange = 0.0;
+	uint MediumLabel = 0u;
+	if (TotalWeight > 0.0)
+	{
+		float Draw = 0.5;
+		if (bStochastic != 0u)
+		{
+			// (0, 1) exclusive, so the draw always lands strictly inside a bin.
+			Draw = (float(Rand3DPCG16(int3(PixelPos, int(Seed))).x) + 0.5) / 65536.0;
+		}
+		const float Target = Draw * TotalWeight;
+		float Cumulative = 0.0;
+		AccumulatedOpticalDepth = 0.0;
+		for (int Bin = 0; Bin < NumBins; ++Bin)
+		{
+			float NearEdge, FarEdge, Albedo;
+			const float OpticalDepth = BinOpticalDepth(LocalPos, Bin, Surface, NearEdge, FarEdge, Albedo);
+			if (FarEdge <= NearEdge)
+			{
+				break;
+			}
+			const float Start = ReturnStartFraction(NearEdge, FarEdge);
+			const float Weight = Start < 1.0 ? BinReturnWeight(OpticalDepth, Albedo, AccumulatedOpticalDepth, NearEdge, FarEdge, Start) : 0.0;
+			if (Cumulative + Weight >= Target && Weight > 0.0)
+			{
+				MediumRange = lerp(NearEdge, FarEdge, BinReturnFraction(OpticalDepth, saturate((Target - Cumulative) / Weight), Start));
+				// The echo is labeled by whatever contributed most to the bin it landed in.
+				MediumLabel = LabelProfile[uint3(LocalPos, Bin)] & 0xFFu;
+				break;
+			}
+			Cumulative += Weight;
+			AccumulatedOpticalDepth += OpticalDepth;
+			MediumRange = FarEdge;
+		}
+	}
+
+	uint RangeCode = 0u;
+	if (TotalWeight > 0.0 && MediumRange > 0.0)
+	{
+		// 0 means no echo, so a valid range never encodes to 0.
+		RangeCode = max(uint(round(saturate(MediumRange / MaxRange) * 65535.0)), 1u);
+	}
+	const uint IntensityCode = uint(round(saturate(TotalWeight) * 65535.0));
+	const uint TransmittanceCode = uint(round(saturate(SurfaceTransmittance) * 65535.0));
+	const uint AlbedoCode = uint(round(MediumAlbedo * 255.0));
+
+	// Packed as FTempoLidarMediaPixel reads it.
+	Output[OutputRectMin + LocalPos] = uint2(
+		RangeCode | (IntensityCode << 16),
+		TransmittanceCode | (AlbedoCode << 16) | (MediumLabel << 24));
+}
+
+#endif // RESOLVE_PASS

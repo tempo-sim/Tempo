@@ -8,6 +8,8 @@
 
 #include "TempoLabelTypes.generated.h"
 
+class UNiagaraSystem;
+
 // The row naming the label ID worn by everything the table does not otherwise match. Objects that
 // resolve to no row are labeled 0, so this row's Label must be 0 for the table to describe what
 // the label image actually contains; ValidateSemanticLabelTable enforces both.
@@ -43,6 +45,14 @@ struct FSemanticLabel: public FTableRowBase
 	// static-mesh RPCs name their type on the wire.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	TSet<TSoftObjectPtr<USkeletalMesh>> SkeletalMeshTypes;
+
+	// The Niagara systems whose components should be tagged with this label (overrides labels at the
+	// mesh and actor levels). Labels an effect by what it is, exhaust or dust, on every actor that
+	// plays it; a sprite or ribbon emitter has no mesh to match otherwise, and the lidar labels the
+	// medium such an effect produces with this. A system with mesh renderers whose meshes are also
+	// labeled resolves to the system's row.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	TSet<TSoftObjectPtr<UNiagaraSystem>> NiagaraSystemTypes;
 
 	// The component tags which should be tagged with this label (overrides labels at the mesh and actor levels).
 	// The escape hatch for components no mesh asset can identify: components whose mesh is built at

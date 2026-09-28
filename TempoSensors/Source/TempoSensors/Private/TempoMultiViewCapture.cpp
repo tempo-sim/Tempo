@@ -24,6 +24,7 @@
 #include "Engine/Engine.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "GameFramework/WorldSettings.h"
+#include "HAL/IConsoleManager.h"
 #include "LegacyScreenPercentageDriver.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInterface.h"
@@ -55,6 +56,8 @@
 #endif
 #define private public
 #include "SceneRendering.h"
+#include "ScenePrivate.h"
+#include "SceneCore.h"
 #undef private
 
 namespace TempoMultiViewCapture
@@ -440,6 +443,161 @@ void RenderTiles(
 		});
 
 	Builder->Execute();
+}
+
+bool GetViewParticipatingMediaInputs(const FSceneView& View, FTempoLidarMediaPassInputs& OutInputs)
+{
+	check(IsInRenderingThread());
+
+	// See GetRenderedViewSceneTextures for why both downcasts hold.
+	const FViewFamilyInfo* ViewFamily = static_cast<const FViewFamilyInfo*>(View.Family);
+	const FSceneTextures* SceneTextures = ViewFamily ? ViewFamily->GetSceneTexturesChecked() : nullptr;
+	if (!SceneTextures || !SceneTextures->Depth.Resolve)
+	{
+		return false;
+	}
+	const FViewInfo& ViewInfo = static_cast<const FViewInfo&>(View);
+
+	OutInputs.FeatureLevel = View.GetFeatureLevel();
+	OutInputs.ViewUniformBuffer = View.ViewUniformBuffer;
+	OutInputs.ViewRect = ViewInfo.ViewRect;
+	OutInputs.OutputRect = ViewInfo.UnscaledViewRect;
+	OutInputs.SceneDepth = SceneTextures->Depth.Resolve;
+
+	// Mirrors SetupFogUniformParameters (FogRendering.cpp): the height fog constants the fog pass
+	// binds are the view's own, computed by FSceneRenderer::InitFogConstants. When fog is not
+	// rendered for this family they are left at their no-fog defaults, which the shader treats as
+	// full transmittance, so they are safe to pass either way.
+	FTempoLidarMediaFogInputs& Fog = OutInputs.Fog;
+	Fog.ExponentialFogParameters = ViewInfo.ExponentialFogParameters;
+	Fog.ExponentialFogParameters2 = ViewInfo.ExponentialFogParameters2;
+	Fog.ExponentialFogParameters3 = ViewInfo.ExponentialFogParameters3;
+	Fog.MinFogTransmittance = 1.0f - ViewInfo.FogMaxOpacity;
+	Fog.EndDistance = ViewInfo.FogEndDistance;
+	Fog.VolumetricFogStartDistance = ViewInfo.VolumetricFogStartDistance;
+	// Set by ComputeVolumetricFog only when the grid was rendered for this view.
+	Fog.IntegratedLightScattering = ViewInfo.VolumetricFogResources.IntegratedLightScatteringTexture;
+
+	// The fog's albedo is authored on the fog component and applies to every fog source: the height
+	// fog, the grid (whose color channel is lit in-scatter, not albedo) and local fog volumes, whose
+	// own albedos are not resolved individually. The view's copy is only filled in when the height
+	// fog is set to match volumetric fog, so read the component's.
+	Fog.Albedo = 1.0f;
+	if (const FScene* RenderScene = View.Family && View.Family->Scene ? View.Family->Scene->GetRenderScene() : nullptr)
+	{
+		if (RenderScene->ExponentialFogs.Num() > 0)
+		{
+			Fog.HeightFogId = RenderScene->ExponentialFogs[0].Id;
+			Fog.Albedo = RenderScene->ExponentialFogs[0].VolumetricFogAlbedo.GetLuminance();
+		}
+	}
+
+	// Local fog volumes are composed analytically (in the height fog pass or their own pass) unless
+	// they were injected into the volumetric fog grid, in which case the grid already carries them.
+	// The view data is only built when local fog volumes render for the view; its instance count
+	// and buffers say whether it was.
+	const FLocalFogVolumeViewData& LFVData = ViewInfo.LocalFogVolumeViewData;
+	const FLocalFogVolumeUniformParameters& LFVParameters = LFVData.UniformParametersStruct;
+	const bool bLocalFogVolumesAnalytic = LFVData.GPUInstanceCount > 0
+		&& LFVParameters.LocalFogVolumeCommon.LocalFogVolumeInstances != nullptr
+		&& LFVParameters.LocalFogVolumeTileDataTexture != nullptr
+		&& !(LFVParameters.LocalFogVolumeCommon.ShouldRenderLocalFogVolumeInVolumetricFog != 0 && Fog.IntegratedLightScattering != nullptr);
+	Fog.LocalFogVolumes = bLocalFogVolumesAnalytic ? &LFVParameters : nullptr;
+
+	return true;
+}
+
+bool GetViewTranslucentBatches(const FSceneView& View, TArray<FTempoLidarMediaTranslucentBatch>& OutBatches, const FScene*& OutScene, FSceneUniformBuffer*& OutSceneUniforms)
+{
+	check(IsInRenderingThread());
+
+	const FScene* Scene = View.Family && View.Family->Scene ? View.Family->Scene->GetRenderScene() : nullptr;
+	if (!Scene)
+	{
+		return false;
+	}
+	const FViewInfo& ViewInfo = static_cast<const FViewInfo&>(View);
+	OutScene = Scene;
+	OutSceneUniforms = &ViewInfo.GetSceneUniforms();
+
+	// Dynamic batches: everything the primitives' GetDynamicMeshElements added for this view. The
+	// relevance flags cached with each say whether its material is opaque or masked, which is
+	// enough to skip the bulk of them here.
+	for (const FMeshBatchAndRelevance& MeshBatchAndRelevance : ViewInfo.DynamicMeshElements)
+	{
+		if (MeshBatchAndRelevance.GetHasOpaqueOrMaskedMaterial() || !MeshBatchAndRelevance.GetRenderInMainPass())
+		{
+			continue;
+		}
+		FTempoLidarMediaTranslucentBatch& Batch = OutBatches.AddDefaulted_GetRef();
+		Batch.Mesh = MeshBatchAndRelevance.Mesh;
+		Batch.Proxy = MeshBatchAndRelevance.PrimitiveSceneProxy;
+		Batch.BatchElementMask = ~0ull;
+		Batch.StaticMeshId = -1;
+	}
+
+	// Static batches: the visible primitives' static meshes at the LOD the view selected. The
+	// per-element visibility some meshes carry (landscape sections) is not tracked; every element
+	// is drawn.
+	for (int32 PrimitiveIndex = 0; PrimitiveIndex < Scene->Primitives.Num(); ++PrimitiveIndex)
+	{
+		if (!ViewInfo.PrimitiveVisibilityMap[PrimitiveIndex])
+		{
+			continue;
+		}
+		const FPrimitiveSceneInfo* PrimitiveSceneInfo = Scene->Primitives[PrimitiveIndex];
+		if (!PrimitiveSceneInfo || !PrimitiveSceneInfo->Proxy)
+		{
+			continue;
+		}
+		for (int32 MeshIndex = 0; MeshIndex < PrimitiveSceneInfo->StaticMeshes.Num(); ++MeshIndex)
+		{
+			const FStaticMeshBatchRelevance& Relevance = PrimitiveSceneInfo->StaticMeshRelevances[MeshIndex];
+			if (!Relevance.bUseForMaterial || !ViewInfo.StaticMeshVisibilityMap[Relevance.Id])
+			{
+				continue;
+			}
+			const FStaticMeshBatch& StaticMesh = PrimitiveSceneInfo->StaticMeshes[MeshIndex];
+			FTempoLidarMediaTranslucentBatch& Batch = OutBatches.AddDefaulted_GetRef();
+			Batch.Mesh = &StaticMesh;
+			Batch.Proxy = PrimitiveSceneInfo->Proxy;
+			Batch.BatchElementMask = ~0ull;
+			Batch.StaticMeshId = StaticMesh.Id;
+		}
+	}
+
+	return true;
+}
+
+FScopedVolumetricFogHistoryRescale::FScopedVolumetricFogHistoryRescale(float TicksSinceLastRender)
+{
+	check(IsInGameThread());
+	if (TicksSinceLastRender <= 1.0f)
+	{
+		return;
+	}
+	IConsoleVariable* Variable = IConsoleManager::Get().FindConsoleVariable(TEXT("r.VolumetricFog.HistoryWeight"));
+	if (!Variable)
+	{
+		return;
+	}
+	const float Weight = Variable->GetFloat();
+	// Zero keeps no history and one never converges; neither has a meaningful power.
+	if (Weight <= 0.0f || Weight >= 1.0f)
+	{
+		return;
+	}
+	HistoryWeight = Variable;
+	OriginalWeight = Weight;
+	HistoryWeight->SetWithCurrentPriority(FMath::Pow(Weight, TicksSinceLastRender));
+}
+
+FScopedVolumetricFogHistoryRescale::~FScopedVolumetricFogHistoryRescale()
+{
+	if (HistoryWeight)
+	{
+		HistoryWeight->SetWithCurrentPriority(OriginalWeight);
+	}
 }
 
 bool GetRenderedViewSceneTextures(const FSceneView& View, FRDGTextureRef& OutVelocity, FRDGTextureRef& OutSceneDepth, FIntRect& OutViewRect)

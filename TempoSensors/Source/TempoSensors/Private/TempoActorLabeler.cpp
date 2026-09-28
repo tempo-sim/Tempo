@@ -202,6 +202,8 @@ void UTempoActorLabeler::HandleGetSemanticClasses(const TempoCore::Empty& Reques
 	const TMap<int32, TArray<FName>> SemanticIdToActorTypes = BuildSemanticIdToKeys(ActorTypeLabels, SemanticIds, ActorTypeSemanticIdOverrides);
 	const TMap<int32, TArray<FString>> SemanticIdToMeshPaths = BuildSemanticIdToKeys(StaticMeshLabels, SemanticIds, StaticMeshTypeSemanticIdOverrides);
 	const TMap<int32, TArray<FString>> SemanticIdToSkeletalMeshPaths = BuildSemanticIdToKeys(SkeletalMeshLabels, SemanticIds, SkeletalMeshTypeSemanticIdOverrides);
+	// Niagara systems have no runtime override RPC, so the table is the whole story for them.
+	const TMap<int32, TArray<FString>> SemanticIdToNiagaraSystemPaths = BuildSemanticIdToKeys(NiagaraSystemLabels, SemanticIds, TMap<FString, int32>());
 	const TMap<int32, TArray<FName>> SemanticIdToActorTags = BuildSemanticIdToKeys(ActorTagLabels, SemanticIds, ActorTagSemanticIdOverrides);
 	// Component tags have no runtime override RPC, so the table is the whole story for them.
 	const TMap<int32, TArray<FName>> SemanticIdToComponentTags = BuildSemanticIdToKeys(ComponentTagLabels, SemanticIds, TMap<FName, int32>());
@@ -233,6 +235,14 @@ void UTempoActorLabeler::HandleGetSemanticClasses(const TempoCore::Empty& Reques
 			for (const FString& MeshPath : *SkeletalMeshPaths)
 			{
 				ClassInfo->add_skeletal_mesh_types(TCHAR_TO_UTF8(*MeshPath));
+			}
+		}
+
+		if (const TArray<FString>* NiagaraSystemPaths = SemanticIdToNiagaraSystemPaths.Find(SemanticId))
+		{
+			for (const FString& SystemPath : *NiagaraSystemPaths)
+			{
+				ClassInfo->add_niagara_system_types(TCHAR_TO_UTF8(*SystemPath));
 			}
 		}
 
@@ -847,6 +857,7 @@ void UTempoActorLabeler::BuildLabelMaps()
 	ActorSemanticLabels.Reset();
 	StaticMeshLabels.Reset();
 	SkeletalMeshLabels.Reset();
+	NiagaraSystemLabels.Reset();
 	ComponentTagLabels.Reset();
 	ActorTagLabels.Reset();
 	SemanticIds.Reset();
@@ -901,6 +912,14 @@ void UTempoActorLabeler::BuildLabelMaps()
 			if (const USkeletalMesh* SkeletalMesh = SkeletalMeshAsset.LoadSynchronous())
 			{
 				SkeletalMeshLabels.FindOrAdd(SkeletalMesh->GetPathName(), Label);
+			}
+		}
+
+		for (const TSoftObjectPtr<UNiagaraSystem>& NiagaraSystemAsset : Value.NiagaraSystemTypes)
+		{
+			if (const UNiagaraSystem* NiagaraSystem = NiagaraSystemAsset.LoadSynchronous())
+			{
+				NiagaraSystemLabels.FindOrAdd(NiagaraSystem->GetPathName(), Label);
 			}
 		}
 
@@ -973,6 +992,21 @@ void UTempoActorLabeler::LabelActor(AActor* Actor)
 	LabeledObjects.Add(Actor, ActorIdPair);
 
 	LabelAllComponents(Actor, ActorIdPair);
+}
+
+TOptional<int32> UTempoActorLabeler::GetActorLabelValue(const AActor* Actor) const
+{
+	if (!Actor)
+	{
+		return TOptional<int32>();
+	}
+	const FInstanceSemanticIdPair* IdPair = LabeledObjects.Find(Actor);
+	if (!IdPair)
+	{
+		return TOptional<int32>();
+	}
+	// The same choice AssignId makes for the Actor's components.
+	return GetDefault<UTempoSensorsSettings>()->GetLabelType() == ELabelType::Instance ? IdPair->InstanceId : IdPair->SemanticId;
 }
 
 TOptional<int32> UTempoActorLabeler::ResolveActorSemanticId(const AActor* Actor) const
@@ -1127,6 +1161,23 @@ TOptional<int32> UTempoActorLabeler::ResolveComponentSemanticId(const UPrimitive
 				return *TagLabelId;
 			}
 			UE_LOG(LogTempoSensors, Error, TEXT("Label %s did not have an associated ID"), *TagLabel->ToString());
+		}
+	}
+
+	// A Niagara system names the effect itself, which is more specific than the meshes some of its
+	// renderers may instance, and the only handle on a sprite or ribbon emitter.
+	if (const UNiagaraComponent* NiagaraComponent = Cast<UNiagaraComponent>(Component))
+	{
+		if (const UNiagaraSystem* NiagaraSystem = NiagaraComponent->GetAsset())
+		{
+			if (const FName* SystemLabel = NiagaraSystemLabels.Find(NiagaraSystem->GetPathName()))
+			{
+				if (const int32* SystemLabelId = SemanticIds.Find(*SystemLabel))
+				{
+					return *SystemLabelId;
+				}
+				UE_LOG(LogTempoSensors, Error, TEXT("Label %s did not have an associated ID"), *SystemLabel->ToString());
+			}
 		}
 	}
 

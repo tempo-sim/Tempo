@@ -3,6 +3,7 @@
 #pragma once
 
 #include "TempoTiledSceneCaptureComponent.h"
+#include "TempoLidarParticipatingMedia.h"
 
 #include "TempoSensors/Lidar.pb.h"
 
@@ -142,6 +143,45 @@ enum class ETempoLidarSamplingStrategy : uint8
 };
 
 class UTempoLidar;
+class FTempoLidarParticipatingMediaViewExtension;
+
+// Which echo a beam reports when it detects more than one, e.g. a dust cloud in front of a wall.
+// Mirrors TempoSensors::LidarReturnMode.
+UENUM()
+enum class ETempoLidarReturnMode : uint8
+{
+	// One return per beam: the echo with the highest intensity.
+	Strongest,
+	// One return per beam: the nearest detectable echo.
+	First,
+	// One return per beam: the farthest detectable echo.
+	Last,
+	// Two returns per beam: the strongest echo, and the other detectable echo if there is one.
+	Dual,
+};
+
+// One candidate return of a beam.
+struct FTempoLidarEcho
+{
+	// Along the ray, cm. Meaningless when not valid.
+	float Distance = 0.0f;
+	float Intensity = 0.0f;
+	// The reflectivity estimate this echo reports: a surface's, from its material, or a medium's,
+	// its return-weighted albedo.
+	uint8 ReflectivityByte = 0;
+	// The label this echo reports: a surface's, or the label of what contributed most to the medium
+	// where the echo was drawn. 0 for unlabeled.
+	uint8 Label = 0;
+	// From participating media (dust, smoke, fog) rather than a surface.
+	bool bMedium = false;
+	bool bValid = false;
+};
+
+// Choose which of a beam's echoes it reports. Primary is the return the segment's top-level arrays
+// carry; Secondary is only ever valid in Dual mode, and is the other echo. Either may come back
+// invalid, meaning no return. Pure, so it can be tested without a lidar.
+TEMPOSENSORS_API void SelectLidarReturns(ETempoLidarReturnMode Mode, const FTempoLidarEcho& Surface, const FTempoLidarEcho& Medium,
+	FTempoLidarEcho& OutPrimary, FTempoLidarEcho& OutSecondary);
 
 // Everything about one beam that depends only on the sensor's configuration and not on anything
 // rendered: two spherical/perspective conversions, a spherical-to-cartesian for the beam ray and
@@ -250,6 +290,10 @@ struct FTempoLidarTile
 
 	// One-shot camera-cut flag consumed by the next multi-view render.
 	bool bCameraCut = false;
+
+	// World time of this tile's last render, or negative if it has not rendered since activation.
+	// Sets how many scene ticks the next render's temporal histories have to cover.
+	double LastCaptureWorldTime = -1.0;
 };
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
@@ -263,6 +307,8 @@ public:
 #if WITH_EDITOR
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 #endif
+
+	virtual void OnUnregister() override;
 
 	// Begin ITempoSensorInterface
 	virtual TOptional<TFuture<void>> SendMeasurements() override;
@@ -291,7 +337,17 @@ protected:
 
 	// Initialize the shared packed render target and ring of staging textures. Also assigns each
 	// active tile its SliceDestOffsetX and the packed dimensions. Format depends on bColorEnabled.
+	// Allocates or releases the participating media results' staging ring too.
 	void InitSharedRenderTarget();
+
+	// Set this component's family-level ShowFlags and PostProcessSettings for the current render
+	// modes: photoreal when color is enabled, the stripped-down aux render otherwise, and with fog
+	// rendered whenever participating media are simulated. Tiles copy these when configured.
+	void ApplyFamilyRenderSettings();
+
+	// The view extension running the participating media passes on this lidar's tile family,
+	// created on first use.
+	FTempoLidarParticipatingMediaViewExtension* GetOrCreateMediaExtension();
 
 	// Begin UTempoTiledSceneCaptureComponent tile interface
 	virtual void SyncTiles() override;
@@ -394,6 +450,61 @@ protected:
 	UPROPERTY(EditAnywhere)
 	TArray<FLidarBeamCalibration> BeamCalibration;
 
+	// Simulate participating media, meaning fog, dust and smoke, along each beam. Whatever the
+	// camera renders as fog attenuates and scatters the beam: the exponential height fog, the
+	// volumetric fog grid (so Volume-domain material primitives too), and local fog volumes; see
+	// bMediaIncludesTranslucency for dust and smoke built from translucent sprites. Surface returns
+	// are attenuated by the two-way transmittance to the surface and dropped when they fall below
+	// MinDetectableIntensity; the medium itself produces an echo of its own. Off, none of the extra
+	// passes run and the output is unchanged.
+	UPROPERTY(EditAnywhere, Category="TempoLidar")
+	bool bSimulateParticipatingMedia = true;
+
+	// Participating media (fog, dust, smoke): also rasterize translucent primitives (Niagara sprites
+	// and ribbons, mesh particles, translucent meshes) into each beam's profile with their own
+	// materials, so a dust or smoke effect built from translucent sprites attenuates and scatters the
+	// beam like fog does. Costs one extra rasterization of those primitives per tile, evaluating
+	// opacity only. Additive materials block nothing and are skipped.
+	UPROPERTY(EditAnywhere, Category="TempoLidar", meta=(EditCondition="bSimulateParticipatingMedia"))
+	bool bMediaIncludesTranslucency = true;
+
+	// Participating media (fog, dust, smoke): converts the camera's visual opacity into the lidar's
+	// optical depth. 1 = what the camera sees is what the beam sees, which holds for fog and dust,
+	// whose particles are large compared to the wavelength. Fine smoke scatters less in the near
+	// infrared than in visible light: below 1.
+	UPROPERTY(EditAnywhere, Category="TempoLidar", meta=(EditCondition="bSimulateParticipatingMedia", UIMin=0.0, UIMax=4.0, ClampMin=0.0))
+	float MediaExtinctionScale = 1.0f;
+
+	// Participating media (fog, dust, smoke): how much of what a white medium takes out of the beam
+	// comes back to the sensor, as a fraction of a perpendicular surface's return. Each medium's
+	// return is this times its albedo estimate: a sprite's base color luminance (its emissive for
+	// unlit materials), the fog component's albedo for fog. So dark smoke returns less than white
+	// fog, and a medium echo's reflectivity is that albedo.
+	UPROPERTY(EditAnywhere, Category="TempoLidar", meta=(EditCondition="bSimulateParticipatingMedia", UIMin=0.0, UIMax=1.0, ClampMin=0.0))
+	float MediaBackscatter = 0.1f;
+
+	// Echoes weaker than this are not reported, whether from a surface seen through participating
+	// media (fog, dust, smoke) or from the medium itself. Only applied when media are simulated.
+	UPROPERTY(EditAnywhere, Category="TempoLidar", meta=(EditCondition="bSimulateParticipatingMedia", UIMin=0.0, UIMax=1.0, ClampMin=0.0, ClampMax=1.0))
+	float MinDetectableIntensity = 0.01f;
+
+	// Participating media (fog, dust, smoke): draw each beam's medium echo range at random from the
+	// medium's return distribution, so returns spread through the medium as a real sensor's do. Off,
+	// every beam reports the median range of its distribution, which forms a clean shell.
+	UPROPERTY(EditAnywhere, AdvancedDisplay, Category="TempoLidar", meta=(EditCondition="bSimulateParticipatingMedia"))
+	bool bStochasticMediaReturns = true;
+
+	// Participating media (fog, dust, smoke): number of range bins the transmittance profile of each
+	// beam is resolved into, log-spaced out to MaxDistance. More bins place medium echoes more
+	// precisely at a cost in memory (12 bytes per bin per rendered pixel) and time.
+	UPROPERTY(EditAnywhere, AdvancedDisplay, Category="TempoLidar", meta=(EditCondition="bSimulateParticipatingMedia", UIMin=8, UIMax=256, ClampMin=2, ClampMax=1024))
+	int32 MediaRangeBins = 64;
+
+	// Which echo a beam reports when it detects more than one. Only participating media (fog, dust,
+	// smoke) produce a second echo, so without them every mode reports the same returns.
+	UPROPERTY(EditAnywhere, Category="TempoLidar")
+	ETempoLidarReturnMode ReturnMode = ETempoLidarReturnMode::Strongest;
+
 	// RateHz and SequenceId are inherited from UTempoSceneCaptureComponent2D.
 
 	// Whether this lidar is currently rendering color. Driven automatically: flips on the first
@@ -426,6 +537,16 @@ protected:
 	double BeamDivergence_Internal = -1.0;
 	ETempoLidarSamplingStrategy SamplingStrategy_Internal = ETempoLidarSamplingStrategy::Conservative;
 	TArray<FLidarBeamCalibration> BeamCalibration_Internal;
+	bool bSimulateParticipatingMedia_Internal = false;
+	int32 MediaRangeBins_Internal = -1;
+
+	// The participating media passes' view extension, created on first use; see
+	// GetOrCreateMediaExtension. Released on unregister.
+	TSharedPtr<FTempoLidarParticipatingMediaViewExtension, ESPMode::ThreadSafe> MediaExtension;
+
+	// Staging ring for the participating media results, sized like the atlas. Allocated only while
+	// participating media are simulated.
+	FTempoStagingTextureRing MediaStagingRing;
 
 	friend struct TTextureRead<FLidarPixel>;
 };
@@ -471,6 +592,14 @@ struct TLidarTextureReadBase : TTextureReadBase<PixelType>
 	// Per-beam geometry for the configuration this read was captured under. Held by shared pointer
 	// so a reconfigure mid-decode cannot invalidate it.
 	TSharedPtr<const TArray<FTempoLidarBeamSample>> BeamSamples;
+
+	// The participating media results for this slice, one per pixel of Image, or empty when
+	// participating media were not simulated for this capture.
+	TArray<FTempoLidarMediaPixel> MediaImage;
+
+	// The sensor model the decode applies to the media results and the mode it reports in.
+	ETempoLidarReturnMode ReturnMode = ETempoLidarReturnMode::Strongest;
+	float MinDetectableIntensity = 0.0f;
 };
 
 template <>
@@ -511,10 +640,23 @@ struct TLidarSharedTextureRead : TTextureReadBase<PixelType>
 
 	virtual FName GetType() const override;
 
-	// Move per-slice pixels out of the packed Image into each slice's own Image, returning ownership
-	// of the per-slice reads to the caller. This instance should not be used afterward.
+	// Copies the participating media results out of MediaStagingTexture into MediaImage, when this
+	// capture has them.
+	virtual void ReadAdditional_RenderThread(FRHICommandListImmediate& RHICmdList) override;
+
+	// Move per-slice pixels out of the packed Image (and MediaImage) into each slice's own, returning
+	// ownership of the per-slice reads to the caller. This instance should not be used afterward.
 	TArray<TUniquePtr<FTextureRead>> SplitIntoSlices();
 
 	// Per-slice reads preallocated at capture time with the correct metadata and sized buffers.
 	TArray<TUniquePtr<TTextureRead<PixelType>>> Slices;
+
+	// The participating media results of the whole atlas, and the staging texture they are read
+	// through. Empty and null when participating media were not simulated for this capture. The
+	// same fence as the atlas covers the staging copy: it is written behind both copies.
+	FTextureRHIRef MediaStagingTexture;
+	TArray<FTempoLidarMediaPixel> MediaImage;
+	// Set once MediaImage has been copied out of the staging texture. Until then it is preallocated
+	// but unset, and SplitIntoSlices gives the slices no media.
+	bool bMediaRead = false;
 };

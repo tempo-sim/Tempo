@@ -1,0 +1,272 @@
+// Copyright Tempo Simulation, LLC. All Rights Reserved
+
+// Rasterized translucency for the lidar's participating media: Niagara sprites and ribbons, mesh
+// particles, translucent meshes, fog cards. The camera's translucency pass evaluates every such
+// fragment's opacity and blends its color, throwing the depth away. This pass rasterizes the same
+// primitives with the same material, keeps the opacity and the depth, and adds the fragment's
+// optical depth, -ln(1 - opacity), to the beam's profile at its range (see
+// TempoLidarParticipatingMedia.usf for the profile and the sensor model resolved from it).
+//
+// Along with the opacity, the material's color gives an albedo estimate, the fraction of what the
+// fragment takes out of the beam that it would scatter rather than absorb: the luminance of its base
+// color, or of its emissive color for an unlit material, which is where a sprite's color lives. It
+// weights the fragment's optical depth in the profile's albedo channel, so dark smoke returns less to
+// the sensor than white dust and reports a lower reflectivity.
+//
+// Only the material's opacity and color are evaluated, not its lighting, so this is a fraction of
+// what the camera pays for the same fragments. Additive materials (fire, sparks, glows) are not compiled
+// for this pass at all: they add light and block none. Modulate materials darken the scene, which
+// reads as blocking what they darken. Substrate materials report the coverage and throughput their
+// translucency is composed from, as the translucent shadow pass does.
+//
+// A sprite is read as the ball it stands for. A camera-facing billboard shows the same picture
+// from every direction, which only a shape symmetric about the particle's center can do, and its
+// radial falloff is the projection of a fuzzy ball; the engine's own spherical particle normal and
+// opacity read it the same way. So a sprite fragment's optical depth is not put at the range of
+// the quad, which would make every puff a flat disc facing the sensor, but spread along the ray's
+// chord through a sphere of the particle's radius, densest at the center. The quad only says how
+// much the fragment blocks; the sphere says where. Meshes and ribbons keep the range they rasterize
+// at, which is right for a fog card.
+
+// Substrate only applies to materials authored with it, as in TranslucentShadowDepthShaders.usf.
+#if !MATERIAL_IS_SUBSTRATE && SUBSTRATE_ENABLED
+#undef SUBSTRATE_ENABLED
+#define SUBSTRATE_ENABLED 0
+#endif
+
+#include "/Engine/Private/Common.ush"
+#include "/Engine/Generated/Material.ush"
+#include "/Engine/Generated/VertexFactory.ush"
+
+struct FTempoLidarMediaVSToPS
+{
+	FVertexFactoryInterpolantsVSToPS FactoryInterpolants;
+	float4 PixelPosition : TEXCOORD6;
+};
+
+#if VERTEXSHADER
+
+// Mirrors DepthOnlyVertexShader.usf: the vertex factory's world position, the material's offset,
+// and the interpolants the pixel shader needs to evaluate the material.
+void MainVS(
+	FVertexFactoryInput Input,
+	out FTempoLidarMediaVSToPS Output,
+	out float4 OutPosition : SV_POSITION,
+	out FStereoVSOutput StereoOutput)
+{
+	StereoSetupVF(Input, StereoOutput);
+	ResolvedView = ResolveView();
+
+	FVertexFactoryIntermediates VFIntermediates = GetVertexFactoryIntermediates(Input);
+	float4 WorldPos = VertexFactoryGetWorldPosition(Input, VFIntermediates);
+	half3x3 TangentToLocal = VertexFactoryGetTangentToLocal(Input, VFIntermediates);
+	FMaterialVertexParameters VertexParameters = GetMaterialVertexParameters(Input, VFIntermediates, WorldPos.xyz, TangentToLocal);
+
+	WorldPos.xyz += GetMaterialWorldPositionOffset(VertexParameters);
+	ApplyMaterialFirstPersonTransform(VertexParameters, WorldPos.xyz);
+
+	const float4 RasterizedWorldPosition = VertexFactoryGetRasterizedWorldPosition(Input, VFIntermediates, WorldPos);
+	OutPosition = mul(RasterizedWorldPosition, ResolvedView.TranslatedWorldToClip);
+
+	Output.FactoryInterpolants = VertexFactoryGetInterpolantsVSToPS(Input, VFIntermediates, VertexParameters);
+	Output.PixelPosition = WorldPos;
+}
+
+#endif // VERTEXSHADER
+
+#if PIXELSHADER
+
+#ifndef PARTICLE_SPRITE_FACTORY
+#define PARTICLE_SPRITE_FACTORY 0
+#endif
+
+// The profile's bin geometry, inverted and mirrored from TempoLidarParticipatingMedia.usf: bin 0
+// is [0, FirstBinEdge), the rest are log-spaced up to MaxRange.
+float BinFarEdge(int Index)
+{
+	if (Index <= 0)
+	{
+		return TempoLidarMediaPass.FirstBinEdge;
+	}
+	const float T = float(Index) / float(max(TempoLidarMediaPass.NumBins - 1, 1));
+	return TempoLidarMediaPass.FirstBinEdge * exp2(log2(TempoLidarMediaPass.MaxRange / TempoLidarMediaPass.FirstBinEdge) * T);
+}
+
+int RangeToBin(float Range)
+{
+	if (Range < TempoLidarMediaPass.FirstBinEdge)
+	{
+		return 0;
+	}
+	const float NumLogBins = float(max(TempoLidarMediaPass.NumBins - 1, 1));
+	const float T = log2(Range / TempoLidarMediaPass.FirstBinEdge) / log2(TempoLidarMediaPass.MaxRange / TempoLidarMediaPass.FirstBinEdge);
+	return clamp(1 + int(floor(T * NumLogBins)), 0, TempoLidarMediaPass.NumBins - 1);
+}
+
+// The label of the primitive being drawn, bound per draw.
+uint MediumLabel;
+
+void AddOpticalDepth(int2 LocalPos, int Bin, float OpticalDepth, float Albedo)
+{
+	// A fully opaque fragment still leaves a finite optical depth, well past where anything
+	// transmits, so the fixed-point sum cannot overflow on a few overlapping fragments.
+	const uint Fixed = uint(min(OpticalDepth * OPTICAL_DEPTH_SCALE, 4294967040.0));
+	InterlockedAdd(TempoLidarMediaPass.OpticalDepthProfile[uint3(LocalPos, Bin)], Fixed);
+	const uint FixedAlbedo = uint(min(OpticalDepth * Albedo * OPTICAL_DEPTH_SCALE, 4294967040.0));
+	InterlockedAdd(TempoLidarMediaPass.AlbedoOpticalDepthProfile[uint3(LocalPos, Bin)], FixedAlbedo);
+	// Labels do not add: the bin keeps the label of its single largest contribution, which the
+	// packing puts in the low byte of the largest value.
+	const uint Labeled = (min(uint(OpticalDepth * OPTICAL_DEPTH_SCALE), 0xFFFFFFu) << 8) | (MediumLabel & 0xFFu);
+	InterlockedMax(TempoLidarMediaPass.LabelProfile[uint3(LocalPos, Bin)], Labeled);
+}
+
+// The fraction of what this fragment takes out of the beam that it would scatter back rather than
+// absorb, estimated from the material's color as a luminance in [0, 1].
+float FragmentAlbedo(FMaterialPixelParameters MaterialParameters, FPixelMaterialInputs PixelMaterialInputs)
+{
+#if SUBSTRATE_ENABLED && TEMPLATE_USES_SUBSTRATE
+	// Substrate keeps its colors inside the BSDF tree; read it as white until that is resolved.
+	return 1.0;
+#elif MATERIAL_SHADINGMODEL_UNLIT || MATERIALBLENDING_MODULATE
+	// An unlit material's color is its emissive; so is what a modulate material multiplies by.
+	return saturate(Luminance(GetMaterialEmissive(PixelMaterialInputs)));
+#else
+	return saturate(Luminance(GetMaterialBaseColor(PixelMaterialInputs)));
+#endif
+}
+
+// How much of the light through this fragment the material blocks, in [0, 1].
+float FragmentOpacity(FMaterialPixelParameters MaterialParameters, FPixelMaterialInputs PixelMaterialInputs)
+{
+#if SUBSTRATE_ENABLED && TEMPLATE_USES_SUBSTRATE
+	// Transmittance is what remains outside the coverage plus what the covered part lets through,
+	// as the translucent shadow pass computes it (TranslucentShadowDepthShaders.usf).
+	FSubstrateData SubstrateData = PixelMaterialInputs.GetFrontSubstrateData();
+	FSubstratePixelHeader SubstratePixelHeader = MaterialParameters.GetFrontSubstrateHeader();
+	float Transmittance = 1.0;
+	if (SubstratePixelHeader.SubstrateTree.BSDFCount > 0)
+	{
+		const float3 V = MaterialParameters.CameraVector;
+		const FSubstrateIntegrationSettings Settings = InitSubstrateIntegrationSettings(false, Substrate.bRoughDiffuse, Substrate.PeelLayersAboveDepth, Substrate.bRoughnessTracking);
+		SubstratePixelHeader.SubstrateUpdateTree(V, Settings);
+		const FSubstrateOperator RootOperator = SubstratePixelHeader.SubstrateTree.Operators[SubstrateData.OperatorIndex];
+		Transmittance = (1.0 - RootOperator.Coverage) + RootOperator.Coverage * dot(RootOperator.ThroughputAlongV, (1.0 / 3.0).xxx);
+	}
+	return saturate(1.0 - Transmittance);
+#elif MATERIALBLENDING_MODULATE
+	// A modulate material multiplies the scene by its emissive color: what it darkens, it blocks.
+	return saturate(1.0 - dot(GetMaterialEmissive(PixelMaterialInputs), (1.0 / 3.0).xxx));
+#else
+	return GetMaterialOpacity(PixelMaterialInputs);
+#endif
+}
+
+#if PARTICLE_SPRITE_FACTORY
+
+// The fraction of a ball's density along a chord that lies before distance T from the chord's
+// midpoint, for a density that falls off with the square of the distance from the center
+// (1 - r^2 / R^2, the sphere density of Quilez's analytic fog), H being the chord's half length.
+// Along the chord the density is (H^2 - t^2) / R^2; integrating and dividing by the whole gives a
+// cubic that runs from 0 at -H to 1 at +H.
+float ChordFractionBefore(float T, float H)
+{
+	T = clamp(T, -H, H);
+	return (3.0 * H * H * T - T * T * T + 2.0 * H * H * H) / (4.0 * H * H * H);
+}
+
+// Spread a sprite fragment's optical depth along the ray's chord through the particle's sphere.
+// Returns false, leaving nothing added, when the ray misses the sphere: the quad's corners outside
+// the inscribed circle, or the far ends of a stretched sprite, which are then read as the plane.
+bool AddSpriteOpticalDepth(int2 LocalPos, FMaterialPixelParameters MaterialParameters, float Range, float OpticalDepth, float Albedo)
+{
+	// The particle's center relative to the sensor, and its radius, half the smaller sprite size:
+	// the same sphere the engine's spherical particle normal and opacity use.
+	const float3 Center = MaterialParameters.Particle.TranslatedWorldPositionAndSize.xyz - ResolvedView.TranslatedWorldCameraOrigin;
+	const float Radius = MaterialParameters.Particle.TranslatedWorldPositionAndSize.w;
+	if (Radius <= 0.0)
+	{
+		return false;
+	}
+
+	// Closest approach of this fragment's ray to the center, and the half chord through the sphere
+	// there.
+	const float3 RayDirection = MaterialParameters.WorldPosition_CamRelative / Range;
+	const float CenterRange = dot(Center, RayDirection);
+	const float MissSqr = dot(Center, Center) - CenterRange * CenterRange;
+	const float HalfChordSqr = Radius * Radius - MissSqr;
+	if (HalfChordSqr <= 0.01)
+	{
+		return false;
+	}
+	const float HalfChord = sqrt(HalfChordSqr);
+
+	// The part of the chord behind the sensor, or past its range, attenuates nothing.
+	const float Near = max(CenterRange - HalfChord, 0.0);
+	const float Far = min(CenterRange + HalfChord, TempoLidarMediaPass.MaxRange);
+	if (Far <= Near)
+	{
+		return true;
+	}
+
+	const int FirstBin = RangeToBin(Near);
+	const int LastBin = RangeToBin(Far);
+	float Previous = ChordFractionBefore(Near - CenterRange, HalfChord);
+	LOOP
+	for (int Bin = FirstBin; Bin <= LastBin; ++Bin)
+	{
+		const float EdgeRange = min(BinFarEdge(Bin), Far);
+		const float Cumulative = ChordFractionBefore(EdgeRange - CenterRange, HalfChord);
+		const float Share = Cumulative - Previous;
+		Previous = Cumulative;
+		if (Share > 0.0)
+		{
+			AddOpticalDepth(LocalPos, Bin, OpticalDepth * Share, Albedo);
+		}
+	}
+	return true;
+}
+
+#endif // PARTICLE_SPRITE_FACTORY
+
+void MainPS(
+	FTempoLidarMediaVSToPS Inputs,
+	in float4 SvPosition : SV_Position,
+	in FStereoPSInput StereoInput
+	OPTIONAL_IsFrontFace)
+{
+	StereoSetupPS(StereoInput);
+	ResolvedView = ResolveView();
+
+	FMaterialPixelParameters MaterialParameters = GetMaterialPixelParameters(Inputs.FactoryInterpolants, SvPosition);
+	FPixelMaterialInputs PixelMaterialInputs;
+	CalcMaterialParameters(MaterialParameters, PixelMaterialInputs, SvPosition, bIsFrontFace);
+
+	const float Opacity = FragmentOpacity(MaterialParameters, PixelMaterialInputs);
+	if (Opacity <= 0.0)
+	{
+		return;
+	}
+
+	// Range along the ray, like the profile's bins. Fragments past the sensor's range are outside
+	// the profile.
+	const float Range = length(MaterialParameters.WorldPosition_CamRelative);
+	if (Range >= TempoLidarMediaPass.MaxRange || Range <= 0.0)
+	{
+		return;
+	}
+
+	const float OpticalDepth = -log(max(1.0 - Opacity, 1e-4));
+	const float Albedo = FragmentAlbedo(MaterialParameters, PixelMaterialInputs);
+	const int2 LocalPos = int2(SvPosition.xy) - TempoLidarMediaPass.ViewRectMin;
+
+#if PARTICLE_SPRITE_FACTORY
+	if (AddSpriteOpticalDepth(LocalPos, MaterialParameters, Range, OpticalDepth, Albedo))
+	{
+		return;
+	}
+#endif
+
+	AddOpticalDepth(LocalPos, RangeToBin(Range), OpticalDepth, Albedo);
+}
+
+#endif // PIXELSHADER
