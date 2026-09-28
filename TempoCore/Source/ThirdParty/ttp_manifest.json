@@ -3,12 +3,12 @@
     "artifact": "gRPC",
     "release": {
       "Linux": "v0.15",
-      "Mac": "v0.15.1",
+      "Mac": "v0.18",
       "Windows": "v0.15"
     },
     "md5_hashes": {
       "Linux": "b8a26505fd434d79491688e8a2303bef",
-      "Mac": "c534d585fd447203fe120ac59a77711f",
+      "Mac": "1e31934cccb3164172b92eb3acff0cce",
       "Windows": "3d9118bab56110fcfe8c4990aedf19fa",
       "Windows+Linux": "b02e60c4094a9d0ed395c6bac5d24384"
     }
@@ -17,12 +17,12 @@
     "artifact": "gRPC",
     "release": {
       "Linux": "v0.15",
-      "Mac": "v0.15.1",
+      "Mac": "v0.18",
       "Windows": "v0.15"
     },
     "md5_hashes": {
       "Linux": "b8a26505fd434d79491688e8a2303bef",
-      "Mac": "c534d585fd447203fe120ac59a77711f",
+      "Mac": "1e31934cccb3164172b92eb3acff0cce",
       "Windows": "3d9118bab56110fcfe8c4990aedf19fa",
       "Windows+Linux": "b02e60c4094a9d0ed395c6bac5d24384"
     }

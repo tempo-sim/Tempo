@@ -75,17 +75,19 @@ whether a vehicle approaching a crosswalk needs to stop.
 These do not change engine behavior — they make Tempo buildable against an installed engine.
 
 gRPC, Protobuf and Abseil keep global state, so a process must hold exactly one copy of them for
-every Tempo module to share. Unreal's build tool has no way to say so for a module, so Tempo's
-toolchains link the vendored static libraries whole into TempoCore and re-export them.
+every Tempo module to share. TempoThirdParty releases now ship that copy as a shared library,
+`tempogrpc`, beside the static libraries, and every Tempo module links it (through
+`TempoModuleRules`). Nothing else may link the static libraries: given both, a linker takes what it
+finds in a static library from there even when a shared library listed before it exports the same
+symbol, which makes a second copy. On Windows, `TempoCoreBootstrap` loads first and registers the
+library's directory with the loader, which otherwise only looks beside the executable.
 
-Mac editor builds no longer need that. TempoCore's pre-build step links the static libraries into a
-shared library of their own (`TempoCore/Scripts/LinkGrpcShared.sh`), which every Tempo module links
-through `TempoModuleRules`. Nothing else may link the static libraries: given both, Apple's linker
-takes what it finds in a static library from there even when a shared library listed before it
-exports the same symbol, which makes a second copy. gRPC's C++ server API is built with hidden
-visibility and cannot be exported, so TempoCore's few uses of it (`TempoGrpcServer.cpp`) are
-compiled into the shared library too. Windows, Linux and packaged Mac builds still use the
-toolchains.
+Where a TempoThirdParty release from before the shared library is installed, Tempo falls back to
+what it always did: the static libraries are linked whole into TempoCore and re-exported from it,
+which needs Tempo's toolchains. That is the only reason the toolchains are still installed.
+Packaged (monolithic) builds hold the one copy in the executable and do not need the shared
+library. They link the static libraries plainly, which needs no toolchain either (verified on Mac);
+they still go through the toolchains until Linux and Windows are verified the same way.
 
 `TempoModuleRules`, the `ModuleRules` subclass that adds the include paths for generated Protobuf
 code, used to be compiled into the build tool. It now lives in

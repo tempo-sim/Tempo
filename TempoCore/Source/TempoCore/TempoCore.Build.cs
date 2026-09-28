@@ -47,17 +47,19 @@ public class TempoCore : TempoModuleRules
 			PrivateDependencyModuleNames.Add("UnrealEd");
 		}
 
-		// gRPC and protobuf are statically imported into TempoCore and dynamically
-		// re-exported to every other Tempo module. The defines here must match
-		// those used to build the vendored libraries — otherwise headers and
-		// libraries disagree about which symbols are exported.
+		// The defines here must match those used to build the vendored gRPC and protobuf
+		// libraries — otherwise headers and libraries disagree about which symbols are exported.
 		PublicDefinitions.Add("ABSL_BUILD_DLL=1");
 		PublicDefinitions.Add("PROTOBUF_USE_DLLS=1");
-		// Private side: declspec(dllexport) within TempoCore, dllimport everywhere else.
-		PrivateDefinitions.Add("LIBPROTOBUF_EXPORTS=1");
-		PrivateDefinitions.Add("LIBPROTOC_EXPORTS=1");
-		PrivateDefinitions.Add("GRPC_DLL_EXPORTS=1");
-		PrivateDefinitions.Add("GRPCXX_DLL_EXPORTS=1");
-		PrivateDefinitions.Add("GPR_DLL_EXPORTS=1");
+		if (!gRPC.UsesSharedLibrary(Target, GetModuleDirectory("gRPC")))
+		{
+			// gRPC and protobuf are statically imported into TempoCore and dynamically re-exported
+			// to every other Tempo module: declspec(dllexport) within TempoCore, dllimport everywhere else.
+			PrivateDefinitions.Add("LIBPROTOBUF_EXPORTS=1");
+			PrivateDefinitions.Add("LIBPROTOC_EXPORTS=1");
+			PrivateDefinitions.Add("GRPC_DLL_EXPORTS=1");
+			PrivateDefinitions.Add("GRPCXX_DLL_EXPORTS=1");
+			PrivateDefinitions.Add("GPR_DLL_EXPORTS=1");
+		}
 	}
 }
