@@ -146,8 +146,8 @@ REVERT_PATCHES() {
 
     for ((i=${#PATCHES[@]}-1; i>-1; i--)); do
       local PATCH="$ENGINE_MODS_DIR/$ROOT/${PATCHES[i]//\'/}"
-      if patch --force --reject-file=- -R -p0 -s -f --ignore-whitespace --dry-run <"$PATCH" &>/dev/null; then
-        patch --force --reject-file=- -R -p0 -s -f --ignore-whitespace <"$PATCH" &>/dev/null
+      if patch --force --reject-file=- -E -R -p0 -s -f --ignore-whitespace --dry-run <"$PATCH" &>/dev/null; then
+        patch --force --reject-file=- -E -R -p0 -s -f --ignore-whitespace <"$PATCH" &>/dev/null
         echo "Reverted $PATCH"
       fi
     done
@@ -251,7 +251,7 @@ for MOD in "${MODS[@]}"; do
   # Attempt to revert any previously-applied patches via the patch record
   cd "$TEMP/$ROOT"
   if [ -f "$PATCH_RECORD_PATH/$ROOT/mods_applied.patch" ]; then
-    if ! patch --force --reject-file=- -R -p0 -s -f --ignore-whitespace --dry-run < "$PATCH_RECORD_PATH/$ROOT/mods_applied.patch" &>/dev/null; then
+    if ! patch --force --reject-file=- -E -R -p0 -s -f --ignore-whitespace --dry-run < "$PATCH_RECORD_PATH/$ROOT/mods_applied.patch" &>/dev/null; then
       echo "Failed to revert applied mods for $ROOT. Something has gone wrong. Recommended troubleshooting steps:"
       echo "  - Remove $UNREAL_ENGINE_PATH/TempoMods folder"
       echo "  - Re-run Scripts/InstallEngineMods.sh"
@@ -265,7 +265,7 @@ for MOD in "${MODS[@]}"; do
       echo "  - Re-run Scripts/InstallEngineMods.sh"
       UNSUCCESSFUL_EXIT 1
     fi
-    patch --force --reject-file=- -R -p0 -s -f --ignore-whitespace < "$PATCH_RECORD_PATH/$ROOT/mods_applied.patch" &>/dev/null
+    patch --force --reject-file=- -E -R -p0 -s -f --ignore-whitespace < "$PATCH_RECORD_PATH/$ROOT/mods_applied.patch" &>/dev/null
   else
     echo "No applied mods record found for $ROOT. Falling back on reverting any known mods."
     REVERT_ADDS "$TEMP" "$ROOT" "${ADDS[@]}"

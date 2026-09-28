@@ -37,9 +37,9 @@ public class TempoModuleRules : ModuleRules
 			PrivateIncludePaths.Add(PrivateProtobufIncludes);
 		}
 
-		// On Mac gRPC and Protobuf are in a shared library of their own, which a module that uses them
-		// has to link. Elsewhere TempoCore re-exports them, and linking TempoCore is enough.
-		if (Target.Platform == UnrealTargetPlatform.Mac && Target.LinkType != TargetLinkType.Monolithic)
+		// Where gRPC and Protobuf are in a shared library of their own, a module that uses them has to
+		// link it. Elsewhere TempoCore re-exports them, and linking TempoCore is enough.
+		if (gRPC.UsesSharedLibrary(Target, GetModuleDirectory("gRPC")))
 		{
 			PublicDependencyModuleNames.Add("gRPC");
 		}

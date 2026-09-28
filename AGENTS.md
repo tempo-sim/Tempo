@@ -125,9 +125,12 @@ TempoAgentsEditor instead compiles edited copies of three ZoneGraph source files
 build time from the installed engine (`TempoAgentsEditor/EngineDerived/README.md`), and fails the
 build on an engine version whose files it has no edits for. `TempoModuleRules` (`TempoCore/Source/TempoModuleRules`, a Build.cs in a folder of its own so UBT
 compiles it into the project's rules assembly) auto-adds the `ProtobufGenerated` include paths and
-is the base class for every Tempo `*.Build.cs`. On Mac editor builds gRPC/Protobuf live in a shared
-library (`libtempogrpc.dylib`, linked by TempoCore's pre-build step) that `TempoModuleRules` links;
-no module may link the static archives beside it.
+is the base class for every Tempo `*.Build.cs`. gRPC/Protobuf/Abseil live in one shared library,
+`tempogrpc`, shipped by TempoThirdParty beside the static archives; `TempoModuleRules` makes every
+module link it, and no module may link the static archives beside it (a linker would take from the
+archives even what the shared library exports, duplicating global state). Where an older
+TempoThirdParty release has no shared library, `gRPC.Build.cs` falls back to the static archives
+re-exported from TempoCore, which is what still needs the toolchains.
 
 **Third-party deps**: `SyncDeps.sh` hash-verifies and downloads prebuilt gRPC (TempoCore) and
 rclcpp (TempoROS) from GitHub releases (`ttp_manifest.json` per dep). Not committed; fetched.

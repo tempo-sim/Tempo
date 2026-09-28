@@ -6,7 +6,6 @@
 #include "TempoCoreUtils.h"
 #include "TempoServiceProvider.h"
 #include "TempoCore.h"
-#include "TempoGrpcServer.h"
 
 #include "grpcpp/impl/service_type.h"
 #if PLATFORM_WINDOWS
@@ -148,17 +147,15 @@ void FTempoServer::Initialize()
 	// gRPC enables SO_REUSEPORT by default where supported, which would let a second instance silently share
 	// the port (with the kernel load-balancing connections between them). Disable it so the bind fails instead.
 	Builder.AddChannelArgument(GRPC_ARG_ALLOW_REUSEPORT, 0);
-
-	std::vector<grpc::Service*> ServicePointers;
 	for (const auto& Service : Services)
 	{
-		ServicePointers.push_back(Service.Value.Get());
+		Builder.RegisterService(Service.Value.Get());
 	}
 
-	TempoGrpc::FServer NewServer = TempoGrpc::BuildAndStartServer(TCHAR_TO_UTF8(*ServerAddress), ServicePointers,
-		CompressionLevelTogRPC(GetDefault<UTempoCoreSettings>()->GetServerCompressionLevel()));
-	CompletionQueue.Reset(NewServer.CompletionQueue.release());
-	Server.Reset(NewServer.Server.release());
+	Builder.SetDefaultCompressionLevel(CompressionLevelTogRPC(GetDefault<UTempoCoreSettings>()->GetServerCompressionLevel()));
+
+	CompletionQueue.Reset(Builder.AddCompletionQueue().release());
+	Server.Reset(Builder.BuildAndStart().release());
 
 	if (!Server.Get())
 	{
@@ -192,12 +189,12 @@ void FTempoServer::Deinitialize()
 	static constexpr int32 MaxShutdownTimeNanoSeconds = 5e7; // 0.05s
 	static constexpr gpr_timespec MaxShutdownWaitTime {0, MaxShutdownTimeNanoSeconds, GPR_TIMESPAN};
 	Server->Shutdown(MaxShutdownWaitTime);
-	TempoGrpc::Shutdown(*CompletionQueue);
+	CompletionQueue->Shutdown();
 
 	// Flush (and discard) all pending events (until we get the shutdown event).
 	int32* Tag;
 	bool bOk;
-	while (TempoGrpc::Next(*CompletionQueue, reinterpret_cast<void**>(&Tag), &bOk))
+	while (CompletionQueue->Next(reinterpret_cast<void**>(&Tag), &bOk))
 	{
 		if (!bOk)
 		{
@@ -273,7 +270,7 @@ void FTempoServer::TickInternal()
 		int32* Tag;
 		bool bOk;
 		const gpr_timespec MaxEventWaitTime {0, MaxEventWaitTimeNanoSeconds, GPR_TIMESPAN};
-		switch (grpc::CompletionQueue::NextStatus Status = TempoGrpc::AsyncNext(*CompletionQueue, reinterpret_cast<void**>(&Tag), &bOk, MaxEventWaitTime))
+		switch (grpc::CompletionQueue::NextStatus Status = CompletionQueue->AsyncNext(reinterpret_cast<void**>(&Tag), &bOk, MaxEventWaitTime))
 		{
 		case grpc::CompletionQueue::GOT_EVENT:
 			{
