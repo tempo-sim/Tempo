@@ -589,14 +589,14 @@ FScopedVolumetricFogHistoryRescale::FScopedVolumetricFogHistoryRescale(float Tic
 	}
 	HistoryWeight = Variable;
 	OriginalWeight = Weight;
-	HistoryWeight->SetWithCurrentPriority(FMath::Pow(Weight, TicksSinceLastRender));
+	HistoryWeight->SetWithCurrentPriority(FMath::Pow(Weight, TicksSinceLastRender), NAME_None, ECVF_SetByConsole, ECVF_SetByScalability);
 }
 
 FScopedVolumetricFogHistoryRescale::~FScopedVolumetricFogHistoryRescale()
 {
 	if (HistoryWeight)
 	{
-		HistoryWeight->SetWithCurrentPriority(OriginalWeight);
+		HistoryWeight->SetWithCurrentPriority(OriginalWeight, NAME_None, ECVF_SetByConsole, ECVF_SetByScalability);
 	}
 }
 

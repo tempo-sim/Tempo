@@ -117,8 +117,10 @@ namespace TempoMultiViewCapture
 	//
 	// The variable is render-thread safe, so its changes are applied on the render thread in order
 	// with the render commands enqueued between them: only the renders issued inside the scope see
-	// the rescaled weight. Its set-by priority is kept, so scalability settings still own it. A
-	// factor of one or less, or a weight of zero, changes nothing.
+	// the rescaled weight. Its set-by priority is kept, so scalability settings still own it; a
+	// variable nothing has set yet is written at scalability priority, since the console manager
+	// refuses to replace a constructor value implicitly. A factor of one or less, or a weight of
+	// zero, changes nothing.
 	class TEMPOSENSORS_API FScopedVolumetricFogHistoryRescale
 	{
 	public:
