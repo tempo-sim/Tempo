@@ -67,7 +67,34 @@ LogTempoCore: Error: Error while starting Tempo gRPC server. Perhaps port 10001 
 something else already holds the port — often another Tempo instance. Give one of them a different
 port with `-ServerPort=10002`, and point the client at it.
 
+On Linux and macOS you can sidestep ports entirely by giving each sim a Unix domain socket
+(`-ServerSocket=sim-a.sock`) instead.
+
 [:octicons-arrow-right-24: Connecting to a server](../clients/connecting.md)
+
+### The sim refuses to start on a socket
+
+```text
+LogTempoCore: Error: Error while starting Tempo gRPC server. Another server is already listening on /run/user/1000/tempo/sim-a.sock.
+```
+
+Another sim already owns that socket. Unlike a stale file left by a crash — which the next server
+cleans up — a live listener is never displaced, so give this one a different name. Two other
+refusals come from the path itself:
+
+```text
+LogTempoCore: Error: Could not start Tempo gRPC server: socket path is 137 bytes, but this platform allows at most 103: ...
+```
+
+A socket address cannot carry a path that long (the cap is 103 bytes on macOS, 107 on Linux). Use a
+bare name, which lands in the short per-user directory, or pick a shorter path.
+
+```text
+LogTempoCore: Error: Could not start Tempo gRPC server: /tmp/sim-a.sock exists and is not a socket
+```
+
+Something other than a socket is in the way. The server will not delete it; move it or choose
+another name.
 
 ### An async stream dies when I call the API from another thread
 

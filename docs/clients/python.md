@@ -96,6 +96,7 @@ async for state in tw.stream_actor_state(actor="MyActor"):
 | Helper | What it does |
 |---|---|
 | `tempo_sim.set_server(address=..., port=...)` | Point the client at a server. See [Connecting](connecting.md). |
+| `tempo_sim.set_socket(path)` | Point the client at a server listening on a Unix domain socket (Linux/macOS). See [Connecting](connecting.md#several-sims-on-one-machine-without-ports). |
 | `tempo_sim.run_async(...)` | Run a coroutine from synchronous code. |
 | `tempo_sim.TempoImageUtils` | Stream and decode color / depth / label / video frames. |
 | `tempo_sim.TempoLidarUtils` | Decode lidar scan segments into point clouds. |

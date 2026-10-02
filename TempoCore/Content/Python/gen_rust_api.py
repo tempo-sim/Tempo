@@ -790,7 +790,7 @@ pub mod proto;
 pub mod streaming;
 
 // Re-export commonly used items
-pub use context::{set_server, set_server_async, tempo_context, TempoContext};
+pub use context::{set_server, set_server_async, set_socket, set_socket_async, tempo_context, TempoContext};
 pub use error::TempoError;
 pub use streaming::SyncStreamIterator;
 
@@ -821,7 +821,7 @@ def update_project_lib_rs(project_root_dir, generated_modules):
 
 pub mod proto;
 
-pub use tempo_sim::{set_server, set_server_async, tempo_context, TempoContext, TempoError, SyncStreamIterator};
+pub use tempo_sim::{set_server, set_server_async, set_socket, set_socket_async, tempo_context, TempoContext, TempoError, SyncStreamIterator};
 
 ''')
         for module in sorted(generated_modules):

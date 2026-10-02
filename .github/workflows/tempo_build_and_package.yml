@@ -79,6 +79,32 @@ jobs:
       environment: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name != github.repository && 'fork-pr-environment' || '' }}
     secrets: inherit
 
+  # Fan-out (Unix domain socket): the same artifact and the same tests, with the sim listening on a
+  # socket instead of a port. One group is enough to cover the transport itself - the API behavior
+  # it exercises is already covered by the port-based jobs above.
+  test_packaged_socket_transport:
+    name: Test Packaged Socket Transport
+    needs: build_and_package
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        unreal_version: [ "5.7", "5.8" ]
+    uses: ./.github/workflows/test_packaged.yml
+    with:
+      artifact_name: ${{ format('{0}-ubuntu-24.04-{1}-{2}', github.event.repository.name, matrix.unreal_version, github.sha) }}
+      name: python-core-socket
+      test_command: Scripts/TestPythonAPI.sh core
+      # Short on purpose: an AF_UNIX path cannot exceed ~104 bytes.
+      server_socket: /tmp/tempo-ci.sock
+      unreal_version: ${{ matrix.unreal_version }}
+      runner: ubuntu-24.04
+      checkout_path: TempoSample/Plugins/Tempo
+      allow_unsafe_pr_checkout: true
+      environment: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name != github.repository && 'fork-pr-environment' || '' }}
+    secrets: inherit
+
   # Fan-out (Rust): the same artifact, the same sim, exercised through the generated Rust client.
   # "contract" compiles the crate (surface check, no sim); "integration" runs against a live sim.
   test_packaged_rust_api:

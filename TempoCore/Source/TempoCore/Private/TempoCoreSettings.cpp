@@ -19,10 +19,20 @@ void UTempoCoreSettings::PostInitProperties()
 {
 	Super::PostInitProperties();
 
+	// Naming either endpoint on the command line also selects its transport, so a one-off run
+	// needs a single argument. -ServerSocket= is parsed second and so wins if both are given.
 	int32 CommandLineServerPort;
 	if (FParse::Value(FCommandLine::Get(), TEXT("ServerPort="), CommandLineServerPort))
 	{
 		ServerPort = CommandLineServerPort;
+		ServerTransport = EServerTransport::Tcp;
+	}
+
+	FString CommandLineServerSocketPath;
+	if (FParse::Value(FCommandLine::Get(), TEXT("ServerSocket="), CommandLineServerSocketPath))
+	{
+		ServerSocketPath = CommandLineServerSocketPath;
+		ServerTransport = EServerTransport::UnixSocket;
 	}
 }
 

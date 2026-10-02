@@ -39,6 +39,8 @@ Headless, for CI or a machine with no display:
 
 ```bash
 MyGame.sh -nullrhi -unattended -ServerPort=10001
+# Or, to avoid assigning ports when running several at once (Linux/macOS):
+MyGame.sh -nullrhi -unattended -ServerSocket=sim-a.sock
 ```
 
 Note that `-nullrhi` disables rendering, so sensors will not produce data. Sensor tests need a

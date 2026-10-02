@@ -11,14 +11,20 @@ use std::time::{Duration, Instant};
 
 use tempo_sim::proto::tempo_core::{Transform, Vector};
 
-/// Point the client at the sim and block until its gRPC server answers (the TCP port can be up
-/// before gRPC is ready, so retry the actual call).
+/// Point the client at the sim and block until its gRPC server answers (the endpoint can be up
+/// before gRPC is ready, so retry the actual call). TEMPO_SERVER_SOCKET selects the Unix domain
+/// socket transport, as it does for the sim; otherwise the client connects over TCP.
 fn connect() {
-    let port: u16 = std::env::var("TEMPO_SERVER_PORT")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(10001);
-    tempo_sim::set_server("localhost", port);
+    let socket = std::env::var("TEMPO_SERVER_SOCKET").unwrap_or_default();
+    if socket.trim().is_empty() {
+        let port: u16 = std::env::var("TEMPO_SERVER_PORT")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(10001);
+        tempo_sim::set_server("localhost", port);
+    } else {
+        tempo_sim::set_socket(socket.trim());
+    }
 
     let deadline = Instant::now() + Duration::from_secs(120);
     loop {

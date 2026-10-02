@@ -31,6 +31,10 @@ Scripts/TestRustAPI.sh contract       # compile/surface check
 Scripts/TestRustAPI.sh integration    # against a live sim (the script launches/tears it down)
 ```
 
-`TestRustAPI.sh` launches the packaged sim headless for sim-requiring groups, waits for its gRPC port,
-runs the tests single-threaded (they share the client's global connection context), and writes the
-cargo log to `Saved/RustTestReport/` (override with `TEMPO_TEST_REPORT_DIR`).
+`TestRustAPI.sh` launches the packaged sim headless for sim-requiring groups, waits for its gRPC
+endpoint, runs the tests single-threaded (they share the client's global connection context), and
+writes the cargo log to `Saved/RustTestReport/` (override with `TEMPO_TEST_REPORT_DIR`).
+
+`TEMPO_SERVER_PORT` picks the port. `TEMPO_SERVER_SOCKET=run-a.sock` runs the sim on a Unix domain
+socket instead (Linux/macOS), so several test runs can share a machine without each claiming a
+port; it takes precedence over the port.

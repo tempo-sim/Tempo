@@ -20,7 +20,8 @@ simulation accessible behind a clean, code-generated, language-agnostic API.
 The two pillars to understand first:
 
 1. **A gRPC server inside the engine.** `TempoCore` hosts one `FTempoServer` (default port
-   `10001`). Every plugin registers RPC services on it. Clients talk to the sim over gRPC.
+   `10001`; optionally a Unix domain socket instead, on Linux/macOS — see `TempoServerEndpoint.h`).
+   Every plugin registers RPC services on it. Clients talk to the sim over gRPC.
 2. **A code-generation pipeline.** `.proto` files are the source of truth. A pre-build step
    compiles them into C++ stubs *and* ergonomic Python / Rust client libraries. You almost
    never hand-write client code or wire serialization.
@@ -149,6 +150,11 @@ rclcpp (TempoROS) from GitHub releases (`ttp_manifest.json` per dep). Not commit
   don't rename a class on the way out), and resolve every client-supplied class name through
   `GetSubClassWithName` (`TempoClassUtils.h`), which accepts `BP_Foo` or `BP_Foo_C` and prefers an
   exact match. Never match a class name by hand.
+- **Endpoint**: the server listens on a TCP port *or* a Unix domain socket, never both
+  (`ServerTransport`). `TempoServerEndpoint.h` owns resolution (a bare socket name resolves into a
+  short per-user directory, mirrored by all three clients), the `sun_path` length limit, and the
+  liveness probe that refuses to displace a running server — gRPC unlinks a socket file before
+  binding, so a bind alone would not fail the way a taken port does.
 - **Config**: `UTempoCoreSettings` (`UDeveloperSettings`), stored under `Config/` with
   command-line overrides. Plugin-owned config (incl. CoreRedirects) belongs in the **plugin's**
   Config, not the project's (`plugin_config_scope` memory).
@@ -231,10 +237,15 @@ sim (not the editor). They cover the client-facing API contract and behavior ove
   uploaded once), then `test_packaged_python_api` and `test_packaged_rust_api` matrix jobs (Unreal
   version × group) both call the **generic, reusable** `test_packaged.yml`. Each job downloads the
   same artifact and runs one group in parallel — build once, test many.
+  `test_packaged_socket_transport` re-runs the Python `core` group with the sim on a Unix domain
+  socket (`server_socket:` → `TEMPO_SERVER_SOCKET`), covering the transport without duplicating
+  behavior tests.
 - **`test_packaged.yml` is language-agnostic and reusable by downstream projects.** It takes a
   `test_command`, optional `python_version` / `setup_rust` / `render`, `submodules`, and an
   `environment` gate, and exports a fixed env contract (`TEMPO_PACKAGED_DIR`, `TEMPO_SERVER_PORT`,
-  `TEMPO_SIM_RENDER`, `TEMPO_TEST_REPORT_DIR`, …). A project using Tempo as a submodule can call it
+  `TEMPO_SERVER_SOCKET`, `TEMPO_SIM_RENDER`, `TEMPO_TEST_REPORT_DIR`, …). The harness and all three
+  clients read those endpoint variables, so one of them points a sim and its client at the same
+  place. A project using Tempo as a submodule can call it
   to test its **own** custom API surface (its generated client ships in the same `Packaged/API`
   folders) by passing its own `test_command` and `submodules: recursive`.
 
