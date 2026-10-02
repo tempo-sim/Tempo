@@ -18,4 +18,8 @@ pub enum TempoError {
     /// Invalid URI error when parsing server address.
     #[error("Invalid URI: {0}")]
     InvalidUri(#[from] http::uri::InvalidUri),
+
+    /// The requested transport is not available on this platform.
+    #[error("Unsupported transport: {0}")]
+    UnsupportedTransport(String),
 }

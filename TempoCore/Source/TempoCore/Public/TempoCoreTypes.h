@@ -18,6 +18,18 @@ enum class ETimeMode: uint8
 ENUM_RANGE_BY_COUNT(ETimeMode, ETimeMode::Max);
 
 UENUM(Blueprintable, BlueprintType)
+enum class EServerTransport: uint8
+{
+	// Listen on a TCP port, reachable from any machine that can route to this one.
+	Tcp = 0,
+	// Listen on a Unix domain socket, reachable only from this machine. Lets several
+	// client-server pairs share a machine without competing for ports. Linux and macOS only.
+	UnixSocket = 1,
+	Max UMETA(Hidden)
+};
+ENUM_RANGE_BY_COUNT(EServerTransport, EServerTransport::Max);
+
+UENUM(Blueprintable, BlueprintType)
 enum class EServerCompressionLevel: uint8
 {
 	None = 0,

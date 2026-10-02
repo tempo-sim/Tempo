@@ -40,7 +40,9 @@ public:
 	FTempoCoreRenderingSettingsChanged TempoCoreRenderingSettingsChanged;
 
 	// Server Settings.
+	EServerTransport GetServerTransport() const { return ServerTransport; }
 	int32 GetServerPort() const { return ServerPort; }
+	const FString& GetServerSocketPath() const { return ServerSocketPath; }
 	EServerCompressionLevel GetServerCompressionLevel() const { return ServerCompressionLevel; }
 	int32 GetMaxEventProcessingTime() const { return MaxEventProcessingTimeMicroSeconds; }
 	int32 GetMaxEventWaitTime() const { return MaxEventWaitTimeNanoSeconds; }
@@ -60,7 +62,9 @@ public:
 #endif
 
 #if WITH_EDITORONLY_DATA
+	static FName GetServerTransportMemberName() { return GET_MEMBER_NAME_CHECKED(UTempoCoreSettings, ServerTransport); }
 	static FName GetServerPortMemberName() { return GET_MEMBER_NAME_CHECKED(UTempoCoreSettings, ServerPort); }
+	static FName GetServerSocketPathMemberName() { return GET_MEMBER_NAME_CHECKED(UTempoCoreSettings, ServerSocketPath); }
 	static FName GetServerCompressionLevelMemberName() { return GET_MEMBER_NAME_CHECKED(UTempoCoreSettings, ServerCompressionLevel); }
 #endif
 
@@ -77,9 +81,24 @@ private:
 	UPROPERTY(EditAnywhere, Config, Category="Time|WallClock", meta=(ClampMin=0.0, UIMin=0.0, UIMax=1.0))
 	double MaxWallClockTimeStep = 0.0;
 
-	// The port number the Tempo gRPC server listens on.
-	UPROPERTY(EditAnywhere, Config, Category="Server", meta=(ClampMin=1024, ClampMax=65535, UIMin=1024, UIMax=65535))
+	// Whether the Tempo gRPC server listens on a TCP port or a Unix domain socket. A socket keeps
+	// several servers on one machine from competing for ports, but is reachable only from that
+	// machine. Only one transport is used at a time.
+	UPROPERTY(EditAnywhere, Config, Category="Server")
+	EServerTransport ServerTransport = EServerTransport::Tcp;
+
+	// The port number the Tempo gRPC server listens on, with the Tcp transport.
+	UPROPERTY(EditAnywhere, Config, Category="Server", meta=(ClampMin=1024, ClampMax=65535, UIMin=1024, UIMax=65535,
+		EditCondition="ServerTransport == EServerTransport::Tcp"))
 	int32 ServerPort = 10001;
+
+	// The Unix domain socket the Tempo gRPC server listens on, with the UnixSocket transport.
+	// A bare name ("sim-a.sock") goes in a short, user-private directory chosen per platform
+	// ($XDG_RUNTIME_DIR/tempo on Linux, /tmp/tempo-<uid> on macOS); anything else is used as a
+	// path. Empty means "tempo.sock" in that same directory. Clients must name the same path.
+	UPROPERTY(EditAnywhere, Config, Category="Server", meta=(
+		EditCondition="ServerTransport == EServerTransport::UnixSocket"))
+	FString ServerSocketPath;
 
 	// The default compression level to use for Tempo server messages. When the client is on the same machine no
 	// compression is fastest. Otherwise, compression may help reduce network bandwidth.
