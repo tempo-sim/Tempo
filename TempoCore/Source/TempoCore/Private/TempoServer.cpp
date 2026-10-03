@@ -8,6 +8,7 @@
 #include "TempoServiceProvider.h"
 #include "TempoCore.h"
 
+#include "HAL/PlatformMisc.h"
 #include "Misc/App.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
@@ -114,13 +115,17 @@ grpc_compression_level CompressionLevelTogRPC(EServerCompressionLevel TempoCompr
 
 namespace
 {
-	// Whether a server that cannot claim its endpoint should take the process down with it.
+	// sysexits.h's EX_CONFIG - the sim cannot start with the endpoint it was given. Distinct from 1
+	// so a harness can tell this apart from any other early exit.
+	constexpr uint8 ServerStartFailureExitCode = 78;
+
+	// Whether a server that cannot claim its endpoint should take the sim down with it.
 	//
 	// Only a packaged, headless sim: there is no window to put a warning in and usually nobody
 	// watching the log, so a sim that runs on without a server shows up only as every client
 	// failing to connect - far from where the problem is. An editor session or a windowed game
 	// keeps running instead, where the error is visible and the endpoint can be fixed in place.
-	bool IsServerStartFailureFatal()
+	bool ShouldExitOnServerStartFailure()
 	{
 #if WITH_EDITOR
 		return false;
@@ -129,20 +134,24 @@ namespace
 		// renders, but into no window. Both are how the sim runs under test and in CI.
 		static const bool bRenderOffScreen = FParse::Param(FCommandLine::Get(), TEXT("RenderOffScreen"));
 		const bool bHeadless = !FApp::CanEverRender() || bRenderOffScreen;
-		return bHeadless && GetDefault<UTempoCoreSettings>()->GetFatalOnServerStartFailure();
+		return bHeadless && GetDefault<UTempoCoreSettings>()->GetExitOnServerStartFailure();
 #endif
 	}
 
-	void LogServerStartFailure(const FString& Reason)
+	void HandleServerStartFailure(const FString& Reason)
 	{
-		// UE_LOG's verbosity is a compile-time token, so both severities have to be spelled out.
-		if (IsServerStartFailureFatal())
+		UE_LOG(LogTempoCore, Error, TEXT("Could not start Tempo gRPC server: %s"), *Reason);
+
+		if (ShouldExitOnServerStartFailure())
 		{
-			UE_LOG(LogTempoCore, Fatal, TEXT("Could not start Tempo gRPC server: %s"), *Reason);
-		}
-		else
-		{
-			UE_LOG(LogTempoCore, Error, TEXT("Could not start Tempo gRPC server: %s"), *Reason);
+			UE_LOG(LogTempoCore, Error, TEXT("Exiting: no client could reach this headless sim without a server. ")
+				TEXT("Pass -AllowServerStartFailure to run on without one."));
+
+			// Not a Fatal log: a taken endpoint is a configuration problem, not a bug, and a crash
+			// report would bury it. Requesting rather than forcing the exit lets the engine unwind
+			// from the next tick. The status reaches the shell on Linux and Windows; Mac has no
+			// implementation that carries it, so there the log above is what names the failure.
+			FPlatformMisc::RequestExitWithStatus(false, ServerStartFailureExitCode, TEXT("FTempoServer::Initialize"));
 		}
 	}
 }
@@ -188,7 +197,7 @@ void FTempoServer::Initialize()
 	if (!TempoServerEndpoint::ResolveEndpoint(Settings->GetServerTransport(), Settings->GetServerPort(),
 		Settings->GetServerSocketPath(), Endpoint, EndpointError))
 	{
-		LogServerStartFailure(EndpointError);
+		HandleServerStartFailure(EndpointError);
 		return;
 	}
 
@@ -200,13 +209,13 @@ void FTempoServer::Initialize()
 		// under a running one. See TempoServerEndpoint::IsSocketPathInUse.
 		if (TempoServerEndpoint::IsSocketPathInUse(Endpoint.SocketPath))
 		{
-			LogServerStartFailure(FString::Printf(
+			HandleServerStartFailure(FString::Printf(
 				TEXT("another server is already listening on %s"), *Endpoint.SocketPath));
 			return;
 		}
 		if (!TempoServerEndpoint::EnsureSocketDirectory(Endpoint.SocketPath, EndpointError))
 		{
-			LogServerStartFailure(EndpointError);
+			HandleServerStartFailure(EndpointError);
 			return;
 		}
 	}
@@ -232,7 +241,7 @@ void FTempoServer::Initialize()
 
 	if (!Server.Get())
 	{
-		LogServerStartFailure(FString::Printf(
+		HandleServerStartFailure(FString::Printf(
 			TEXT("could not bind %s. Another process is most likely already listening there."), *Endpoint.Target));
 		return;
 	}
