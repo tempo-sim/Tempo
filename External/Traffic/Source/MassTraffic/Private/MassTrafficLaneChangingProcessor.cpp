@@ -93,7 +93,7 @@ static void TryStartingNewLaneChange(
 	// Consider a turning lane change if we know our next land and would have the space to do it.
 	if (FZoneGraphTrafficLaneData* NextLane = VehicleControlFragment_Current.NextLane)
 	{
-		const EZoneGraphTurnType TurnType = NextLane->bTurnsLeft ? EZoneGraphTurnType::Left : NextLane->bTurnsRight ? EZoneGraphTurnType::Right : EZoneGraphTurnType::NoTurn;
+		const EMassTrafficTurnType TurnType = NextLane->bTurnsLeft ? EMassTrafficTurnType::Left : NextLane->bTurnsRight ? EMassTrafficTurnType::Right : EMassTrafficTurnType::NoTurn;
 		if (const FMassTrafficLanePriorityFilters* TurningLanePriorityFilterForTurnType = VehicleControlFragment_Current.TurningLanePriorityFilters.Find(TurnType))
 		{
 			for (const FZoneGraphTagFilter& TurningLanePriorityFilter : TurningLanePriorityFilterForTurnType->LaneTagFilters)

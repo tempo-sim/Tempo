@@ -10,6 +10,7 @@
 #include "HierarchicalHashGrid2D.h"
 #include "MassEntityView.h"
 #include "MassTrafficSigns.h"
+#include "MassTrafficTurnType.h"
 
 #include "Containers/Set.h"
 
@@ -770,6 +771,6 @@ struct MASSTRAFFIC_API FMassTrafficLanePriorityFilters
 {
 	GENERATED_BODY()
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	UPROPERTY(EditAnywhere)
 	TArray<FZoneGraphTagFilter> LaneTagFilters;
 };

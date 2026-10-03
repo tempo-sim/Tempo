@@ -1,6 +1,6 @@
 ﻿using UnrealBuildTool;
 
-public class TempoSensorsROSBridge : ModuleRules
+public class TempoSensorsROSBridge : TempoModuleRules
 {
 	public TempoSensorsROSBridge(ReadOnlyTargetRules Target) : base(Target)
 	{

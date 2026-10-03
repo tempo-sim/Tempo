@@ -162,6 +162,18 @@ bool TryGetVehicleEnterAndExitTimesForIntersection(
 	float* OutVehicleDistanceToEnterIntersectionLane = nullptr,
 	float* OutVehicleDistanceToExitIntersectionLane = nullptr);
 
+/** Find the first point, in terms of distance along QueryLane, at which QueryLane crosses OtherLane
+ * (or a line running parallel to OtherLane, LateralOffsetFromCenterOfOtherLane to its right). */
+MASSTRAFFIC_API bool FindFirstIntersectionBetweenLanes(
+	const FZoneGraphStorage& ZoneGraphStorage,
+	const FZoneGraphLaneHandle& QueryLane,
+	const FZoneGraphLaneHandle& OtherLane,
+	const float LateralOffsetFromCenterOfOtherLane,
+	float& OutDistanceAlongQueryLane,
+	int32* OutQueryLaneIntersectionSegmentIndex = nullptr,
+	float* OutNormalizedDistanceAlongQueryLaneIntersectionSegment = nullptr,
+	const float Tolerance = KINDA_SMALL_NUMBER);
+
 MASSTRAFFIC_API bool TryGetEnterAndExitDistancesAlongQueryLane(
 	const UMassTrafficSubsystem& MassTrafficSubsystem,
 	const UMassTrafficSettings& MassTrafficSettings,

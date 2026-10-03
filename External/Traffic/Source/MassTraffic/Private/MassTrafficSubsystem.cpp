@@ -118,6 +118,7 @@ void UMassTrafficSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	ClearYieldInfo();
 	ClearYieldOverrides();
 	ClearCoreVehicleInfos();
+	ClearCrowdLaneEnds();
 
 	// Execute any field operations subclassing from UMassTrafficBeginPlayFieldOperationBase 
 	PerformFieldOperation(UMassTrafficBeginPlayFieldOperationBase::StaticClass());
@@ -1184,6 +1185,21 @@ const TMap<FZoneGraphLaneHandle, TSet<FMassTrafficCoreVehicleInfo>>& UMassTraffi
 TMap<FZoneGraphLaneHandle, TSet<FMassTrafficCoreVehicleInfo>>& UMassTrafficSubsystem::GetMutableCoreVehicleInfoMap()
 {
 	return CoreVehicleInfoMap;
+}
+
+void UMassTrafficSubsystem::SetCrowdLaneEnds(TMap<FZoneGraphLaneHandle, FMassTrafficCrowdLaneEnds>&& InCrowdLaneEnds)
+{
+	CrowdLaneEndsMap = MoveTemp(InCrowdLaneEnds);
+}
+
+const FMassTrafficCrowdLaneEnds* UMassTrafficSubsystem::GetCrowdLaneEnds(const FZoneGraphLaneHandle& LaneHandle) const
+{
+	return CrowdLaneEndsMap.Find(LaneHandle);
+}
+
+void UMassTrafficSubsystem::ClearCrowdLaneEnds()
+{
+	CrowdLaneEndsMap.Reset();
 }
 
 void MassTrafficDumpLaneStats(const TArray<FString>& Args, UWorld* InWorld, FOutputDevice& Ar)

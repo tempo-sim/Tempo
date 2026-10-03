@@ -118,11 +118,19 @@ the `reference_build_scripts` memory.
 **Why the toolchain & engine mods exist:** gRPC/Protobuf static libs are vendored into
 TempoCore and re-exported to other modules; custom toolchains
 (`TempoVCToolChain`/`TempoMacToolChain`/`TempoLinuxToolChain`) fix symbol re-export so
-duplicate globals don't crash. `EngineMods/{5.7,5.8}/` patch UBT, AutomationTool, ZoneGraph and
-MassCrowd **in place** (idempotently, via `InstallEngineMods.sh` reading
-`EngineMods.json`) so users don't need a custom-built engine. `TempoModuleRules` (added as a
-mod) auto-adds the `ProtobufGenerated` include paths and is the base class for every Tempo
-`*.Build.cs`.
+duplicate globals don't crash. `EngineMods/{5.7,5.8}/` patch UBT and AutomationTool
+**in place** (idempotently, via `InstallEngineMods.sh` reading
+`EngineMods.json`) so users don't need a custom-built engine. Engine *plugins* are not modified:
+TempoAgentsEditor instead compiles edited copies of three ZoneGraph source files, generated at
+build time from the installed engine (`TempoAgentsEditor/EngineDerived/README.md`), and fails the
+build on an engine version whose files it has no edits for. `TempoModuleRules` (`TempoCore/Source/TempoModuleRules`, a Build.cs in a folder of its own so UBT
+compiles it into the project's rules assembly) auto-adds the `ProtobufGenerated` include paths and
+is the base class for every Tempo `*.Build.cs`. gRPC/Protobuf/Abseil live in one shared library,
+`tempogrpc`, shipped by TempoThirdParty beside the static archives; `TempoModuleRules` makes every
+module link it, and no module may link the static archives beside it (a linker would take from the
+archives even what the shared library exports, duplicating global state). Where an older
+TempoThirdParty release has no shared library, `gRPC.Build.cs` falls back to the static archives
+re-exported from TempoCore, which is what still needs the toolchains.
 
 **Third-party deps**: `SyncDeps.sh` hash-verifies and downloads prebuilt gRPC (TempoCore) and
 rclcpp (TempoROS) from GitHub releases (`ttp_manifest.json` per dep). Not committed; fetched.

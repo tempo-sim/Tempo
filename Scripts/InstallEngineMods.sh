@@ -146,53 +146,24 @@ REVERT_PATCHES() {
 
     for ((i=${#PATCHES[@]}-1; i>-1; i--)); do
       local PATCH="$ENGINE_MODS_DIR/$ROOT/${PATCHES[i]//\'/}"
-      if patch --force --reject-file=- -R -p0 -s -f --ignore-whitespace --dry-run <"$PATCH" &>/dev/null; then
-        patch --force --reject-file=- -R -p0 -s -f --ignore-whitespace <"$PATCH" &>/dev/null
+      if patch --force --reject-file=- -E -R -p0 -s -f --ignore-whitespace --dry-run <"$PATCH" &>/dev/null; then
+        patch --force --reject-file=- -E -R -p0 -s -f --ignore-whitespace <"$PATCH" &>/dev/null
         echo "Reverted $PATCH"
       fi
     done
 }
 
-REBUILD_PLUGIN() {
-  TEMP="$1"
-  ROOT="$2"
-  PLUGIN_NAME="${ROOT##*/}"
-
-  if [ ! -d "$TEMP/$ROOT" ]; then
-    echo "Plugin $PLUGIN_NAME was not found in the expected location."
-    UNSUCCESSFUL_EXIT 1
-  fi
-
-  echo "Rebuilding plugin $PLUGIN_NAME with Tempo mods"
-
-  # Resolve symlinks in the package directory. UE 5.8 always runs builds through Unreal Build
-  # Accelerator, which detours the compiler and tracks its outputs through its own virtual
-  # filesystem. On Mac, mktemp -d returns a path under /var/folders, and /var is a symlink to
-  # /private/var: UBA registers the writes under the /var form but the detoured clang reports the
-  # resolved /private/var form, so UBA refuses to flush the shared PCH ("dir not populated") and
-  # every subsequent compile fails with "PCH file not found". Both forms have to agree.
-  PLUGIN_BUILD_DIR=$(cd "$(mktemp -d)" && pwd -P)
-  cd "$UNREAL_ENGINE_PATH"
-  if [[ "$OSTYPE" = "msys" ]]; then
-    # See Build.sh for why the .bat is run through cmd with a relative path.
-    cmd //c 'Engine\Build\BatchFiles\RunUAT.bat' BuildPlugin -Plugin="$TEMP/$ROOT/$PLUGIN_NAME.uplugin" -Package="$PLUGIN_BUILD_DIR" -Rocket -TargetPlatforms=Win64
-  elif [[ "$OSTYPE" = "darwin"* ]]; then
-    ./Engine/Build/BatchFiles/RunUAT.sh BuildPlugin -Plugin="$TEMP/$ROOT/$PLUGIN_NAME.uplugin" -Package="$PLUGIN_BUILD_DIR" -Rocket -TargetPlatforms=Mac
-  elif [[ "$OSTYPE" = "linux-gnu"* ]]; then
-    ./Engine/Build/BatchFiles/RunUAT.sh BuildPlugin -Plugin="$TEMP/$ROOT/$PLUGIN_NAME.uplugin" -Package="$PLUGIN_BUILD_DIR" -Rocket -TargetPlatforms=Linux
-  fi
-
-  # Copy resulting Binaries and Intermediate folders
-  cp -r "$PLUGIN_BUILD_DIR/Binaries" "$PLUGIN_BUILD_DIR/Intermediate" "$TEMP/$ROOT"
-
-  # Clean up
-  rm -rf "$PLUGIN_BUILD_DIR"
-
-  echo "Copying rebuilt plugin $PLUGIN_NAME into engine"
-  rm -rf "${UNREAL_ENGINE_PATH:?}/${ROOT:?}/*"
-  COPY_DIR "$TEMP/$ROOT" "$UNREAL_ENGINE_PATH/$ROOT"
-
-  echo -e "\nSuccessfully rebuilt plugin $PLUGIN_NAME with Tempo mods\n"
+# Copying the modified folder over the engine's leaves behind any file the mods no longer add (or
+# that reverting them removed). Delete from the engine what the modified folder does not have,
+# leaving build products alone.
+REMOVE_STALE_FILES() {
+  local TEMP=$1
+  local ROOT=$2
+  (cd "$UNREAL_ENGINE_PATH/$ROOT" && find . -type f -not -path "./Binaries/*" -not -path "./Intermediate/*" -not -path "./bin/*" -not -path "./obj/*") | while IFS= read -r FILE; do
+    if [ ! -e "$TEMP/$ROOT/$FILE" ]; then
+      rm -f "$UNREAL_ENGINE_PATH/$ROOT/$FILE"
+    fi
+  done
 }
 
 COPY_DIR() {
@@ -211,7 +182,7 @@ REBUILD_UBT() {
 
   echo "Rebuilding UnrealBuildTool (in-place) with Tempo mods"
 
-  rm -rf "${UNREAL_ENGINE_PATH:?}/${ROOT:?}/*"
+  REMOVE_STALE_FILES "$TEMP" "$ROOT"
   COPY_DIR "$TEMP/$ROOT" "$UNREAL_ENGINE_PATH/$ROOT"
 
   if [ -z ${DOTNET+x} ]; then
@@ -280,7 +251,7 @@ for MOD in "${MODS[@]}"; do
   # Attempt to revert any previously-applied patches via the patch record
   cd "$TEMP/$ROOT"
   if [ -f "$PATCH_RECORD_PATH/$ROOT/mods_applied.patch" ]; then
-    if ! patch --force --reject-file=- -R -p0 -s -f --ignore-whitespace --dry-run < "$PATCH_RECORD_PATH/$ROOT/mods_applied.patch" &>/dev/null; then
+    if ! patch --force --reject-file=- -E -R -p0 -s -f --ignore-whitespace --dry-run < "$PATCH_RECORD_PATH/$ROOT/mods_applied.patch" &>/dev/null; then
       echo "Failed to revert applied mods for $ROOT. Something has gone wrong. Recommended troubleshooting steps:"
       echo "  - Remove $UNREAL_ENGINE_PATH/TempoMods folder"
       echo "  - Re-run Scripts/InstallEngineMods.sh"
@@ -294,7 +265,7 @@ for MOD in "${MODS[@]}"; do
       echo "  - Re-run Scripts/InstallEngineMods.sh"
       UNSUCCESSFUL_EXIT 1
     fi
-    patch --force --reject-file=- -R -p0 -s -f --ignore-whitespace < "$PATCH_RECORD_PATH/$ROOT/mods_applied.patch" &>/dev/null
+    patch --force --reject-file=- -E -R -p0 -s -f --ignore-whitespace < "$PATCH_RECORD_PATH/$ROOT/mods_applied.patch" &>/dev/null
   else
     echo "No applied mods record found for $ROOT. Falling back on reverting any known mods."
     REVERT_ADDS "$TEMP" "$ROOT" "${ADDS[@]}"
@@ -340,11 +311,9 @@ for MOD in "${MODS[@]}"; do
 
   # Rebuild, and recreate the built record if build is successful
   if [ "$TYPE" = "SourceOnly" ]; then
-    rm -rf "${UNREAL_ENGINE_PATH:?}/${ROOT:?}/*"
+    REMOVE_STALE_FILES "$TEMP" "$ROOT"
     COPY_DIR "$TEMP/$ROOT" "$UNREAL_ENGINE_PATH/$ROOT"
     echo -e "\nApplied source-only Tempo mods to $ROOT\n"
-  elif [ "$TYPE" = "Plugin" ]; then
-    REBUILD_PLUGIN "$TEMP" "$ROOT"
   elif [ "$TYPE" = "UnrealBuildTool" ]; then
     REBUILD_UBT "$TEMP" "$ROOT"
   else

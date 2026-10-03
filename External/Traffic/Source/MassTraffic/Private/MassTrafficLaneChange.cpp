@@ -798,25 +798,10 @@ bool IsDownstreamCrosswalkLaneClear(
 	}
 
 	// When Pedestrians change onto their new lanes during the frame,
-	// we might not have all the properties for the Pedestrian yet.
-	// In that case, these will get set next frame.
-	if (!(CrowdTrackingLaneData->LeadEntityHandle.IsSet()
-		&& CrowdTrackingLaneData->LeadEntityDistanceAlongLane.IsSet()
-		&& CrowdTrackingLaneData->LeadEntitySpeedAlongLane.IsSet()
-		&& CrowdTrackingLaneData->LeadEntityAccelerationAlongLane.IsSet()
-		&& CrowdTrackingLaneData->LeadEntityRadius.IsSet()))
-	{
-		return true;
-	}
-
-	// When Pedestrians change onto their new lanes during the frame,
-	// we might not have all the properties for the Pedestrian yet.
-	// In that case, these will get set next frame.
-	if (!(CrowdTrackingLaneData->TailEntityHandle.IsSet()
-		&& CrowdTrackingLaneData->TailEntityDistanceAlongLane.IsSet()
-		&& CrowdTrackingLaneData->TailEntitySpeedAlongLane.IsSet()
-		&& CrowdTrackingLaneData->TailEntityAccelerationAlongLane.IsSet()
-		&& CrowdTrackingLaneData->TailEntityRadius.IsSet()))
+	// we might not have the lead and tail Pedestrians for the lane yet.
+	// In that case, they will get set next frame.
+	const FMassTrafficCrowdLaneEnds* CrowdLaneEnds = MassTrafficSubsystem.GetCrowdLaneEnds(TestDownstreamCrosswalkLane);
+	if (CrowdLaneEnds == nullptr)
 	{
 		return true;
 	}
@@ -825,7 +810,7 @@ bool IsDownstreamCrosswalkLaneClear(
 	// This mechanism is used to prevent yield cycle deadlocks.
 	if (MassTrafficSubsystem.HasYieldOverride(
 		LaneLocationFragment.LaneHandle, VehicleControlFragment.VehicleEntityHandle,
-		TestDownstreamCrosswalkLane, CrowdTrackingLaneData->TailEntityHandle.GetValue()))
+		TestDownstreamCrosswalkLane, CrowdLaneEnds->Tail.EntityHandle))
 	{
 		// Just say the lane is clear.
 		return true;
@@ -932,7 +917,7 @@ bool IsDownstreamCrosswalkLaneClear(
 		}
 	}
 
-	const auto& TryGetPedestrianEnterAndExitInfo = [&ZoneGraphStorage, &TestDownstreamCrosswalkLane, &IntersectionLaneData, &CrowdTrackingLaneData, &MassTrafficSubsystem, &MassTrafficSettings](float& OutPedestrianEnterTime, float& OutPedestrianExitTime, float& OutPedestrianEnterDistance, float& OutPedestrianExitDistance)
+	const auto& TryGetPedestrianEnterAndExitInfo = [&ZoneGraphStorage, &TestDownstreamCrosswalkLane, &IntersectionLaneData, &CrowdTrackingLaneData, &CrowdLaneEnds, &MassTrafficSubsystem, &MassTrafficSettings](float& OutPedestrianEnterTime, float& OutPedestrianExitTime, float& OutPedestrianEnterDistance, float& OutPedestrianExitDistance)
 	{
 		if (CrowdTrackingLaneData->NumEntitiesOnLane > 0)
 		{
@@ -948,9 +933,9 @@ bool IsDownstreamCrosswalkLaneClear(
 				ZoneGraphStorage,
 				TestDownstreamCrosswalkLane,
 				IntersectionLaneData.LaneHandle,
-				CrowdTrackingLaneData->LeadEntityDistanceAlongLane.GetValue(),
-				CrowdTrackingLaneData->LeadEntitySpeedAlongLane.GetValue(),
-				CrowdTrackingLaneData->LeadEntityRadius.GetValue(),
+				CrowdLaneEnds->Lead.DistanceAlongLane,
+				CrowdLaneEnds->Lead.SpeedAlongLane,
+				CrowdLaneEnds->Lead.Radius,
 				LeadPedestrianEnterTime,
 				LeadPedestrianExitTime,
 				&LeadPedestrianEnterDistance,
@@ -980,9 +965,9 @@ bool IsDownstreamCrosswalkLaneClear(
 				ZoneGraphStorage,
 				TestDownstreamCrosswalkLane,
 				IntersectionLaneData.LaneHandle,
-				CrowdTrackingLaneData->TailEntityDistanceAlongLane.GetValue(),
-				CrowdTrackingLaneData->TailEntitySpeedAlongLane.GetValue(),
-				CrowdTrackingLaneData->TailEntityRadius.GetValue(),
+				CrowdLaneEnds->Tail.DistanceAlongLane,
+				CrowdLaneEnds->Tail.SpeedAlongLane,
+				CrowdLaneEnds->Tail.Radius,
 				TailPedestrianEnterTime,
 				TailPedestrianExitTime,
 				&TailPedestrianEnterDistance,
@@ -1043,7 +1028,7 @@ bool IsDownstreamCrosswalkLaneClear(
 
 	if ((bInTimeConflictWithPedestrian && !bVehicleIsInCrosswalkLane) || bInDistanceConflictWithPedestrian)
 	{
-		OutYieldTargetEntity = CrowdTrackingLaneData->TailEntityHandle.GetValue();
+		OutYieldTargetEntity = CrowdLaneEnds->Tail.EntityHandle;
 		return false;
 	}
 

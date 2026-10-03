@@ -79,3 +79,6 @@ __pycache__
 # MkDocs local builds (docs are built by Read the Docs; see .readthedocs.yaml)
 site/
 .venv/
+
+# Generated at build time from the engine source; see TempoAgentsEditor/EngineDerived
+TempoAgents/Source/TempoAgentsEditor/Private/EngineDerived/

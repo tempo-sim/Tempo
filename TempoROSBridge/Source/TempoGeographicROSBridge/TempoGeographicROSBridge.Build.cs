@@ -2,7 +2,7 @@
 
 using UnrealBuildTool;
 
-public class TempoGeographicROSBridge : ModuleRules
+public class TempoGeographicROSBridge : TempoModuleRules
 {
 	public TempoGeographicROSBridge(ReadOnlyTargetRules Target) : base(Target)
 	{
