@@ -44,6 +44,7 @@ public:
 	int32 GetServerPort() const { return ServerPort; }
 	const FString& GetServerSocketPath() const { return ServerSocketPath; }
 	EServerCompressionLevel GetServerCompressionLevel() const { return ServerCompressionLevel; }
+	bool GetFatalOnServerStartFailure() const { return bFatalOnServerStartFailure; }
 	int32 GetMaxEventProcessingTime() const { return MaxEventProcessingTimeMicroSeconds; }
 	int32 GetMaxEventWaitTime() const { return MaxEventWaitTimeNanoSeconds; }
 
@@ -99,6 +100,15 @@ private:
 	UPROPERTY(EditAnywhere, Config, Category="Server", meta=(
 		EditCondition="ServerTransport == EServerTransport::UnixSocket"))
 	FString ServerSocketPath;
+
+	// Whether a packaged, headless sim that cannot claim its endpoint - because the port or socket
+	// is taken, or the configuration is invalid - should exit with a fatal error instead of running
+	// on without a server. Such a sim has no window to warn in and usually nobody watching, so the
+	// failure would otherwise surface only as every client failing to connect. An editor session
+	// and a windowed game only ever log the error, whatever this is set to. Can also be turned off
+	// for a single run with -AllowServerStartFailure.
+	UPROPERTY(EditAnywhere, Config, Category="Server")
+	bool bFatalOnServerStartFailure = true;
 
 	// The default compression level to use for Tempo server messages. When the client is on the same machine no
 	// compression is fastest. Otherwise, compression may help reduce network bandwidth.
