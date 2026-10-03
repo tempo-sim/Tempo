@@ -34,6 +34,13 @@ void UTempoCoreSettings::PostInitProperties()
 		ServerSocketPath = CommandLineServerSocketPath;
 		ServerTransport = EServerTransport::UnixSocket;
 	}
+
+	// In a packaged build the setting itself is baked into the plugin's config, so the fatal exit
+	// needs a way to be turned off from outside it.
+	if (FParse::Param(FCommandLine::Get(), TEXT("AllowServerStartFailure")))
+	{
+		bFatalOnServerStartFailure = false;
+	}
 }
 
 void UTempoCoreSettings::SetTimeMode(ETimeMode TimeModeIn)

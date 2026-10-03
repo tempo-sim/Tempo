@@ -58,13 +58,13 @@ Check the sim's log for:
 LogTempoCore: Display: Tempo gRPC server listening on 0.0.0.0:10001
 ```
 
-If instead you see:
+If the server never came up, the log says why:
 
 ```text
-LogTempoCore: Error: Error while starting Tempo gRPC server. Perhaps port 10001 was not available.
+LogTempoCore: Fatal: Could not start Tempo gRPC server: could not bind 0.0.0.0:10001. Another process is most likely already listening there.
 ```
 
-something else already holds the port — often another Tempo instance. Give one of them a different
+Something else already holds the port — often another Tempo instance. Give one of them a different
 port with `-ServerPort=10002`, and point the client at it.
 
 On Linux and macOS you can sidestep ports entirely by giving each sim a Unix domain socket
@@ -75,7 +75,7 @@ On Linux and macOS you can sidestep ports entirely by giving each sim a Unix dom
 ### The sim refuses to start on a socket
 
 ```text
-LogTempoCore: Error: Error while starting Tempo gRPC server. Another server is already listening on /run/user/1000/tempo/sim-a.sock.
+LogTempoCore: Fatal: Could not start Tempo gRPC server: another server is already listening on /run/user/1000/tempo/sim-a.sock
 ```
 
 Another sim already owns that socket. Unlike a stale file left by a crash — which the next server
@@ -83,18 +83,33 @@ cleans up — a live listener is never displaced, so give this one a different n
 refusals come from the path itself:
 
 ```text
-LogTempoCore: Error: Could not start Tempo gRPC server: socket path is 137 bytes, but this platform allows at most 103: ...
+LogTempoCore: Fatal: Could not start Tempo gRPC server: socket path is 137 bytes, but this platform allows at most 103: ...
 ```
 
 A socket address cannot carry a path that long (the cap is 103 bytes on macOS, 107 on Linux). Use a
 bare name, which lands in the short per-user directory, or pick a shorter path.
 
 ```text
-LogTempoCore: Error: Could not start Tempo gRPC server: /tmp/sim-a.sock exists and is not a socket
+LogTempoCore: Fatal: Could not start Tempo gRPC server: /tmp/sim-a.sock exists and is not a socket
 ```
 
 Something other than a socket is in the way. The server will not delete it; move it or choose
 another name.
+
+### When a failed start is fatal
+
+A **packaged, headless** sim — one run with `-nullrhi` or `-RenderOffScreen`, as it is under test and
+in CI — exits when it cannot claim its endpoint, which is why the messages above are logged as
+`Fatal`. Such a sim has no window to put a warning in and usually nobody watching it, so one that ran
+on without a server would surface only as every client failing to connect, a long way from the actual
+problem.
+
+Everywhere else — an editor session, or a game with a window — the same problems are logged as
+`Error` and the sim keeps running, since the message is visible there and the endpoint can be
+corrected on the spot in **Project Settings**. To make a packaged, headless sim behave that way too,
+set `bFatalOnServerStartFailure` to false or pass `-AllowServerStartFailure` for a single run.
+
+[:octicons-arrow-right-24: Server settings](../reference/settings.md#server)
 
 ### An async stream dies when I call the API from another thread
 

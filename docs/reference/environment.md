@@ -58,3 +58,9 @@ Headless operation for CI:
 ```bash
 MyGame.sh -nullrhi -unattended -ServerPort=10001
 ```
+
+A packaged, headless sim exits with a fatal error if it cannot claim its endpoint, rather than
+running on with no server. `-AllowServerStartFailure` turns that off for one run, leaving just a
+logged error.
+
+[:octicons-arrow-right-24: When a failed start is fatal](../guides/troubleshooting.md#when-a-failed-start-is-fatal)

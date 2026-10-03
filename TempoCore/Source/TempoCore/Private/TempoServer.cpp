@@ -8,6 +8,10 @@
 #include "TempoServiceProvider.h"
 #include "TempoCore.h"
 
+#include "Misc/App.h"
+#include "Misc/CommandLine.h"
+#include "Misc/Parse.h"
+
 #include "grpcpp/impl/service_type.h"
 #if PLATFORM_WINDOWS
 // gRPC transitively includes <windows.h>, which leaks wingdi.h's GetObject macro
@@ -108,6 +112,41 @@ grpc_compression_level CompressionLevelTogRPC(EServerCompressionLevel TempoCompr
 	}
 }
 
+namespace
+{
+	// Whether a server that cannot claim its endpoint should take the process down with it.
+	//
+	// Only a packaged, headless sim: there is no window to put a warning in and usually nobody
+	// watching the log, so a sim that runs on without a server shows up only as every client
+	// failing to connect - far from where the problem is. An editor session or a windowed game
+	// keeps running instead, where the error is visible and the endpoint can be fixed in place.
+	bool IsServerStartFailureFatal()
+	{
+#if WITH_EDITOR
+		return false;
+#else
+		// -nullrhi (and a dedicated server or commandlet) cannot render at all; -RenderOffScreen
+		// renders, but into no window. Both are how the sim runs under test and in CI.
+		static const bool bRenderOffScreen = FParse::Param(FCommandLine::Get(), TEXT("RenderOffScreen"));
+		const bool bHeadless = !FApp::CanEverRender() || bRenderOffScreen;
+		return bHeadless && GetDefault<UTempoCoreSettings>()->GetFatalOnServerStartFailure();
+#endif
+	}
+
+	void LogServerStartFailure(const FString& Reason)
+	{
+		// UE_LOG's verbosity is a compile-time token, so both severities have to be spelled out.
+		if (IsServerStartFailureFatal())
+		{
+			UE_LOG(LogTempoCore, Fatal, TEXT("Could not start Tempo gRPC server: %s"), *Reason);
+		}
+		else
+		{
+			UE_LOG(LogTempoCore, Error, TEXT("Could not start Tempo gRPC server: %s"), *Reason);
+		}
+	}
+}
+
 void FTempoServer::Initialize()
 {
 	TArray<UObject*> ServiceProviderObjects;
@@ -149,7 +188,7 @@ void FTempoServer::Initialize()
 	if (!TempoServerEndpoint::ResolveEndpoint(Settings->GetServerTransport(), Settings->GetServerPort(),
 		Settings->GetServerSocketPath(), Endpoint, EndpointError))
 	{
-		UE_LOG(LogTempoCore, Error, TEXT("Could not start Tempo gRPC server: %s"), *EndpointError);
+		LogServerStartFailure(EndpointError);
 		return;
 	}
 
@@ -161,12 +200,13 @@ void FTempoServer::Initialize()
 		// under a running one. See TempoServerEndpoint::IsSocketPathInUse.
 		if (TempoServerEndpoint::IsSocketPathInUse(Endpoint.SocketPath))
 		{
-			UE_LOG(LogTempoCore, Error, TEXT("Error while starting Tempo gRPC server. Another server is already listening on %s."), *Endpoint.SocketPath);
+			LogServerStartFailure(FString::Printf(
+				TEXT("another server is already listening on %s"), *Endpoint.SocketPath));
 			return;
 		}
 		if (!TempoServerEndpoint::EnsureSocketDirectory(Endpoint.SocketPath, EndpointError))
 		{
-			UE_LOG(LogTempoCore, Error, TEXT("Could not start Tempo gRPC server: %s"), *EndpointError);
+			LogServerStartFailure(EndpointError);
 			return;
 		}
 	}
@@ -192,7 +232,8 @@ void FTempoServer::Initialize()
 
 	if (!Server.Get())
 	{
-		UE_LOG(LogTempoCore, Error, TEXT("Error while starting Tempo gRPC server. Perhaps %s was not available."), *Endpoint.Target);
+		LogServerStartFailure(FString::Printf(
+			TEXT("could not bind %s. Another process is most likely already listening there."), *Endpoint.Target));
 		return;
 	}
 
