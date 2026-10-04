@@ -88,6 +88,25 @@ Packaging with ROS also needs one line in `Config/DefaultGame.ini` — see
     upgrading, a project that never named them in its `.uproject` silently builds without ROS. See
     [ROS is now opt-in](../migration/ros-opt-in.md).
 
+!!! warning "Moved TempoROS out of Tempo? Clear your old `Packaged` folder"
+
+    Packaging writes into the `Packaged` folder without clearing it first. A package built while
+    TempoROS still lived at `Plugins/Tempo/TempoROS` leaves that copy behind, beside the
+    `Plugins/TempoROS` the next package stages. TempoROS locates `rclcpp` by scanning the project
+    directory, so the packaged game finds both and dies on startup:
+
+    ```text
+    Assertion failed: PossibleTargets.Num() == 1
+    Expected to find exactly one rclcpp module
+    ```
+
+    Your source tree is fine — only the stale copy inside the package is the problem. Delete the
+    `Packaged` folder and package again, or remove just the leftover:
+
+    ```sh
+    find Packaged -type d -path '*/Plugins/Tempo/TempoROS' -prune -exec rm -rf {} +
+    ```
+
 ## One-time setup
 
 Run `Setup.sh` (or `Setup.bat` on Windows) once, from the Tempo root or from `Scripts/`:
