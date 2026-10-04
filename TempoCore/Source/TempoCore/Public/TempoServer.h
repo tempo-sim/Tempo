@@ -2,10 +2,29 @@
 
 #pragma once
 
-#include <grpcpp/grpcpp.h>
-
 #include "CoreMinimal.h"
 #include "TempoServiceProvider.h"
+
+// gRPC's port_platform.h includes <windows.h> directly. Route it through Unreal's MinWindows.h
+// first so the Windows headers are trimmed and their macros are scrubbed afterwards. gRPC's
+// atm_windows.h also uses the Win32 Interlocked* and MemoryBarrier macros, which Unreal hides.
+#if PLATFORM_WINDOWS
+#include "Windows/AllowWindowsPlatformTypes.h"
+#include "Windows/AllowWindowsPlatformAtomics.h"
+#ifndef MemoryBarrier
+#define MemoryBarrier() FPlatformMisc::MemoryBarrier()
+#define TEMPO_DEFINED_MEMORY_BARRIER
+#endif
+#endif
+#include <grpcpp/grpcpp.h>
+#if PLATFORM_WINDOWS
+#ifdef TEMPO_DEFINED_MEMORY_BARRIER
+#undef MemoryBarrier
+#undef TEMPO_DEFINED_MEMORY_BARRIER
+#endif
+#include "Windows/HideWindowsPlatformAtomics.h"
+#include "Windows/HideWindowsPlatformTypes.h"
+#endif
 
 template <class ResponseType>
 using TResponseDelegate = TDelegate<void(const ResponseType&, grpc::Status)>;
