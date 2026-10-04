@@ -1,27 +1,20 @@
 # Engine Mods
 
-Tempo patches a few of the engine's build-tool files in place, rather than shipping a custom
-engine. This page describes **what those mods change and why**.
+Tempo used to modify your Unreal installation in place, and no longer does: it builds against the
+engine exactly as Epic ships it. This page records **what the mods did and what replaced them**.
 
-!!! note "Looking for how they are applied?"
+## What Tempo used to change
 
-    The mechanism — when mods run, how patches are stacked, how to author a new one — lives in the
-    [Engine Mods guide](../guides/engine-mods.md). This page is about their content.
-
-## What gets patched
-
-On the supported engine versions (5.7 and 5.8):
-
-| Target | Kind | Why |
+| Target | What it did | What replaced it |
 |---|---|---|
-| `Engine/Source/Programs/UnrealBuildTool` | 3 files added | Link arguments for gRPC and Protobuf on Windows and Linux (and packaged Mac builds). |
-| `Engine/Source/Programs/AutomationTool` | 1 file added | Build configuration. |
-| `Engine/Source/Programs/Shared/EpicGames.Perforce` | 1 patch | Build configuration. |
+| `ZoneGraph` and `MassCrowd` plugins | Procedural lane graphs; crowd positions along lanes | Tempo's own code, [below](#what-replaced-the-plugin-mods) |
+| UnrealBuildTool | Three toolchains that re-exported gRPC and Protobuf from TempoCore | The `tempogrpc` shared library, [below](#build-tooling) |
+| AutomationTool, `EpicGames.Perforce` | Let the engine's own C# projects build on an installed engine, for UnrealBuildTool's rebuild and TempoROS's copy handler | Nothing to build: TempoROS's copy handler compiles against the assemblies the engine ships |
 
-Tempo used to patch and rebuild two engine plugins as well, `ZoneGraph` and `MassCrowd`. It no
-longer does, and an engine an earlier version of Tempo modified needs no repair: Tempo builds
-against those plugins as Epic released them or as its old mods left them. The old modifications
-are unused either way. Verifying the engine installation removes them, if you want them gone.
+An engine an earlier version of Tempo modified should be reinstalled; see
+[Engine mods removal](../migration/engine-mods-removal.md). The `ZoneGraph` and `MassCrowd`
+modifications alone would be harmless (Tempo builds against those plugins as Epic released them or
+as its old mods left them), but the UnrealBuildTool ones are not.
 
 ## What replaced the plugin mods
 
@@ -72,8 +65,6 @@ whether a vehicle approaching a crosswalk needs to stop.
 
 ## Build tooling
 
-These do not change engine behavior — they make Tempo buildable against an installed engine.
-
 gRPC, Protobuf and Abseil keep global state, so a process must hold exactly one copy of them for
 every Tempo module to share. TempoThirdParty releases now ship that copy as a shared library,
 `tempogrpc`, beside the static libraries, and every Tempo module links it (through
@@ -82,25 +73,25 @@ finds in a static library from there even when a shared library listed before it
 symbol, which makes a second copy. On Windows, `TempoCoreBootstrap` loads first and registers the
 library's directory with the loader, which otherwise only looks beside the executable.
 
-Where a TempoThirdParty release from before the shared library is installed, Tempo falls back to
-what it always did: the static libraries are linked whole into TempoCore and re-exported from it,
-which needs Tempo's toolchains. That is the only reason the toolchains are still installed.
 Packaged (monolithic) builds hold the one copy in the executable and do not need the shared
-library. They link the static libraries plainly, which needs no toolchain either (verified on Mac);
-they still go through the toolchains until Linux and Windows are verified the same way.
+library. They link the static libraries like any others.
+
+Neither needs anything from UnrealBuildTool beyond what Epic ships. Tempo used to link the static
+libraries whole into TempoCore and re-export them from it, which took custom toolchains; a
+TempoThirdParty release from before the shared library is no longer supported.
 
 `TempoModuleRules`, the `ModuleRules` subclass that adds the include paths for generated Protobuf
 code, used to be compiled into the build tool. It now lives in
 `TempoCore/Source/TempoModuleRules`, where the build tool compiles it along with the module rules
 that derive from it.
 
-| Mod | |
-|---|---|
-| `TempoMacToolChain.cs`, `TempoLinuxToolChain.cs`, `TempoVCToolChain.cs` | Toolchain subclasses overriding `LinkFiles` and `ModifyFinalLinkArguments`, for the link-time handling Tempo's third-party dependencies need. |
-| `AutomationTool`, `EpicGames.Perforce` | Small build-configuration adjustments. |
+TempoROS's custom stage copy handler, `TempoROS.Automation.csproj`, used to reference the engine's
+AutomationTool projects. Building it built them too, which an installed engine is not set up for,
+and two engine mods worked around that. It now references the assemblies AutomationTool runs,
+from `Engine/Binaries/DotNET/AutomationTool`, so nothing of the engine's is built.
 
 ## See also
 
-- [Engine Mods guide](../guides/engine-mods.md) — when mods are applied, and how to author one
+- [Engine mods removal](../migration/engine-mods-removal.md) — what to do about an engine Tempo modified
 - [Traffic](traffic.md) — the main consumer of the lane graph and crowd lane data
 - [TempoAgents](tempo-agents.md) — procedural road building and the lane-graph API

@@ -49,12 +49,18 @@ public class TempoCore : TempoModuleRules
 
 		// The defines here must match those used to build the vendored gRPC and protobuf
 		// libraries — otherwise headers and libraries disagree about which symbols are exported.
-		PublicDefinitions.Add("ABSL_BUILD_DLL=1");
 		PublicDefinitions.Add("PROTOBUF_USE_DLLS=1");
-		if (!gRPC.UsesSharedLibrary(Target, GetModuleDirectory("gRPC")))
+		if (gRPC.UsesSharedLibrary(Target))
 		{
-			// gRPC and protobuf are statically imported into TempoCore and dynamically re-exported
-			// to every other Tempo module: declspec(dllexport) within TempoCore, dllimport everywhere else.
+			// Abseil is in the shared library: declspec(dllimport) everywhere. Its exported data (such
+			// as MixingHashState::kSeed) can only be reached through the import, not referred to directly.
+			PublicDefinitions.Add("ABSL_CONSUME_DLL=1");
+		}
+		else
+		{
+			// A monolithic executable links the static libraries, which were built to be exported
+			// from a shared library. The headers are compiled the same way.
+			PublicDefinitions.Add("ABSL_BUILD_DLL=1");
 			PrivateDefinitions.Add("LIBPROTOBUF_EXPORTS=1");
 			PrivateDefinitions.Add("LIBPROTOC_EXPORTS=1");
 			PrivateDefinitions.Add("GRPC_DLL_EXPORTS=1");

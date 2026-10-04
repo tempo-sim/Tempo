@@ -67,6 +67,6 @@ bare-bones, end-to-end example you can read in five minutes.
 - **[Packaging](../guides/packaging.md)** — building a standalone binary, and what changes about
   actor naming when you do.
 - **[Continuous integration](../guides/continuous-integration.md)** — the reusable GitHub Actions
-  workflows, and how to cut ~10–15 minutes per run with a pre-modded engine image.
+  workflows.
 - **[Testing](../guides/testing.md)** — the C++ automation tests and the packaged-build client
   API test suites.

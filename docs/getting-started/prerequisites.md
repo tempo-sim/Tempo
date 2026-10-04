@@ -46,8 +46,8 @@ generation, skipping code generation). They are collected in the
 
 ## What you do *not* need
 
-- **A custom Unreal build.** Tempo patches your existing engine installation in place via
-  [engine mods](../guides/engine-mods.md).
+- **A custom Unreal build, or changes to your engine.** Tempo builds against Unreal as Epic ships
+  it.
 - **ROS.** Tempo's primary interface is gRPC. ROS 2 support exists and is entirely optional —
   see [TempoROS](../plugins/tempo-ros.md).
 - **To set up a Python environment by hand.** The build generates the `tempo_sim` package and a

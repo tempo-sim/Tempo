@@ -8,23 +8,17 @@
 #           must pass them explicitly under 'secrets:', since 'secrets: inherit' does not cross org boundaries. Please
 #           see the instructions here to obtain a token:
 #           https://dev.epicgames.com/documentation/en-us/unreal-engine/quick-start-guide-for-using-container-images-in-unreal-engine
-# **Note**: The pre-modded image (engine_mods_image) is pulled from ghcr.io by default using the GITHUB_TOKEN. To pull
-#           from another registry, set engine_mods_image to the target host and either pass registry/registry_username
-#           + the registry_password secret (static-credential registries), or set aws_region (+ aws_role_to_assume for
-#           OIDC, or the aws_access_key_id/aws_secret_access_key secrets) for AWS ECR. When using OIDC, the calling job
-#           must grant 'id-token: write'. The Epic *base* image is always pulled from ghcr.io regardless.
+# The engine is used exactly as Epic ships it. Tempo's Dockerfile only layers a few build tools (jq, cmake, a Rust
+# toolchain) onto Epic's image; that layer is built in each run and never published.
 # Unreal is a large (>40gb) dependency and packaging is resource-intensive. To deal with these constraints the workflow
 # uses a few non-standard techniques:
 # - We free space on the runner's main filesystem before starting by removing unnecessary packages. This gives us space
 #   to build and package the project. However this is still not enough space to store Unreal, so the Unreal docker
 #   container is stored on the /mnt filesystem, which has considerably more free space.
-# - We cache two types of artifacts to speed up builds:
-#   - The Tempo Unreal "Engine Mods", which are parts of the engine Tempo modifies in-place. Since the engine lives in
-#     the Docker container, but we want to cache our modifications to it, we "initialize" the .engine-mods-cache
-#     directory, which we will cache, with the vanilla engine before attempting to modify it.
-#   - The results of the nearest build on the main branch, including the Engine's DerivedDataCache folder, where some
-#     cooked artifacts are stored and which is "initialized" in the same way as the engine mods cache above (except in
-#     the .engine-ddc-cache directory). This cache speeds up the build and package steps substantially.
+# - We cache the results of the nearest build on the main branch, including the Engine's DerivedDataCache folder, where
+#   some cooked artifacts are stored. Since the engine lives in the Docker container, but we want to cache its DDC, we
+#   "initialize" the .engine-ddc-cache directory, which we will cache, from the image, and mount it into the container.
+#   This cache speeds up the build and package steps substantially.
 # - Since the project and Tempo source files, and any restored cached files, will be mounted in the docker container
 #   in order to build the project there, we change their permissions to the match those of the user in the container.
 # - Git does not store file timestamps, so the modification timestamps of the source files will be the time they were
@@ -116,10 +110,6 @@ on:
         description: Environment to deploy to (optional, default None)
         required: false
         default: ""
-      engine_mods_image:
-        type: string
-        description: Registry repo (without tag, including the host) of a pre-modded Tempo Unreal image (see publish_engine_mods.yml). If empty or pull fails, falls back to building the image and applying engine mods in-workflow.
-        default: ""
       post_checkout_script:
         type: string
         description: Path (relative to project_root) of a script to run on the host after checkout, e.g. to download third-party dependencies into the project tree
@@ -144,22 +134,6 @@ on:
         type: boolean
         description: Generate the Tempo C++ API during the build (sets TEMPO_GEN_CPP_API=1 in the container)
         default: false
-      registry:
-        type: string
-        description: Registry host to authenticate to for pulling the pre-modded image (static-credential registries only, e.g. ghcr.io or docker.io). Must match the host in engine_mods_image. Ignored when aws_region is set (ECR).
-        default: ghcr.io
-      registry_username:
-        type: string
-        description: Username for static-credential registry login. Defaults to the triggering actor (correct for ghcr.io).
-        default: ${{ github.actor }}
-      aws_region:
-        type: string
-        description: If set, authenticate to AWS ECR in this region (instead of a static-credential login) to pull the pre-modded image. Provide aws_role_to_assume (OIDC) or the aws_access_key_id/aws_secret_access_key secrets. The caller's job must grant id-token-write permission when using OIDC.
-        default: ''
-      aws_role_to_assume:
-        type: string
-        description: IAM role ARN to assume via GitHub OIDC for ECR auth. Takes precedence over the access-key secrets when both are provided.
-        default: ''
     secrets:
       submodules_app_private_key:
         description: Private key (PEM) for the GitHub App identified by submodules_app_id. Required only when submodules_app_id is set.
@@ -169,15 +143,6 @@ on:
         required: false
       EPIC_DOCKER_TOKEN:
         description: Token for pulling the Epic-distributed Unreal base image from ghcr.io. Declared so cross-org callers (which cannot inherit secrets) can pass it explicitly.
-        required: false
-      registry_password:
-        description: Password/token for static-credential registry login. If empty, falls back to the GITHUB_TOKEN (correct for ghcr.io).
-        required: false
-      aws_access_key_id:
-        description: AWS access key ID for ECR auth (used when aws_region is set and aws_role_to_assume is empty).
-        required: false
-      aws_secret_access_key:
-        description: AWS secret access key for ECR auth (used when aws_region is set and aws_role_to_assume is empty).
         required: false
 
 env:
@@ -310,14 +275,10 @@ jobs:
     # Epic's base image tag (dev-slim-<version>) moves — it is republished as the release branch
     # advances, so the same tag can be two different engines weeks apart. Resolve it to a digest
     # here, before anything is restored or built, and carry that digest through everything that is
-    # only valid for one engine: the build cache (PCHs and object files are compiled against one set
-    # of engine headers), the engine mods cache (engine folders copied out of the image), and the
-    # pre-modded image tag (via the engine mods hash). Without it a run silently mixes engines,
+    # only valid for one engine: the image this run builds on, and the build cache (PCHs and object
+    # files are compiled against one set of engine headers). Without it a run silently mixes engines,
     # which surfaces as a stale-PCH compile error at best and a bad link at worst.
-    # This needs its own login because it runs before the pre-modded pull; the later Epic login
-    # re-establishes these credentials for the image build, after the pre-modded registry login
-    # (same host, different token) has overwritten them.
-    - name: Log in to Epic Container Registry (to resolve the base image)
+    - name: Log in to Epic Container Registry
       uses: docker/login-action@v4
       with:
         registry: ghcr.io
@@ -366,26 +327,6 @@ jobs:
         # never restored — a miss (one cold build) is the correct outcome there, not a mixed tree.
         restore-keys: |
           ${{ steps.repo_lowercase.outputs.REPO_LOWERCASE }}-build-${{ env.UNREAL_VERSION }}-${{ steps.engine_base_image.outputs.ID }}-
-    - name: Restore Engine Mods Cache (if clean not specified and not using pre-modded image)
-      if: ${{ ! inputs.clean && inputs.engine_mods_image == '' }}
-      id: restore_engine_mods_cache
-      uses: actions/cache/restore@v6
-      with:
-        path: |
-          .engine-mods-cache/TempoMods/**
-          .engine-mods-cache/Engine/Plugins/Runtime/ZoneGraph/**
-          .engine-mods-cache/Engine/Plugins/PCG/**
-          .engine-mods-cache/Engine/Plugins/Editor/EditorScriptingUtilities/**
-          .engine-mods-cache/Engine/Plugins/Runtime/ComputeFramework/**
-          .engine-mods-cache/Engine/Plugins/AI/MassCrowd/**
-          .engine-mods-cache/Engine/Plugins/Runtime/MassEntity/**
-          .engine-mods-cache/Engine/Plugins/Runtime/StateTree/**
-          .engine-mods-cache/Engine/Source/Programs/UnrealBuildTool/**
-          .engine-mods-cache/Engine/Source/Programs/AutomationTool/**
-          .engine-mods-cache/Engine/Source/Programs/Shared/**
-          .engine-mods-cache/Engine/Binaries/DotNET/UnrealBuildTool/**
-          .engine-mods-cache/Engine/Binaries/DotNET/AutomationTool/**
-        key: tempo-engine-mods-${{ env.UNREAL_VERSION }}-${{ steps.engine_base_image.outputs.ID }}-${{ hashFiles(format('{0}/EngineMods/**', inputs.tempo_root)) }}
     - name: Run Post-Checkout Script (if specified)
       if: ${{ inputs.post_checkout_script != '' }}
       working-directory: ${{ github.workspace }}/${{ inputs.project_root }}
@@ -444,141 +385,13 @@ jobs:
         jq --arg dataroot "${DOCKER_DATA_ROOT}" '. + {"data-root": $dataroot}' "${DOCKER_DAEMON_JSON}" > "/tmp/docker.json.tmp"
         sudo mv "/tmp/docker.json.tmp" "${DOCKER_DAEMON_JSON}"
         sudo systemctl restart docker
-    - name: Compute Engine Mods Hash
-      if: ${{ inputs.engine_mods_image != '' }}
-      id: engine_mods_hash
-      run: |
-        ENGINE_MODS_DIR="${{ github.workspace }}/${{ inputs.tempo_root }}/EngineMods"
-        DOCKERFILE="${{ github.workspace }}/${{ inputs.tempo_root }}/Dockerfile"
-        if [ ! -d "$ENGINE_MODS_DIR" ]; then
-          echo "EngineMods directory not found at $ENGINE_MODS_DIR"
-          exit 1
-        fi
-        if [ ! -f "$DOCKERFILE" ]; then
-          echo "Dockerfile not found at $DOCKERFILE"
-          exit 1
-        fi
-        # The base image digest is part of the hash: a pre-modded image is the engine plus the mods,
-        # so one built from a different engine must not answer to the same tag.
-        # Must stay in sync with the matching computation in publish_engine_mods.yml.
-        ENGINE_MODS_HASH=$(cd "$ENGINE_MODS_DIR" && find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)
-        DOCKERFILE_HASH=$(sha256sum "$DOCKERFILE" | cut -d' ' -f1)
-        HASH=$(printf '%s\n%s\n%s\n' "$ENGINE_MODS_HASH" "$DOCKERFILE_HASH" "$ENGINE_BASE_DIGEST" | sha256sum | cut -d' ' -f1)
-        echo "HASH=$HASH" >> $GITHUB_OUTPUT
-        echo "Engine mods hash: $HASH"
-      env:
-        ENGINE_BASE_DIGEST: ${{ steps.engine_base_image.outputs.DIGEST }}
-    # --- Pre-modded image registry auth (generic: static credentials or AWS ECR). Independent of the
-    #     Epic base-image registry (ghcr.io), which is logged into separately in the fallback path. ---
-    - name: Configure AWS Credentials for ECR (OIDC)
-      if: ${{ inputs.engine_mods_image != '' && inputs.aws_region != '' && inputs.aws_role_to_assume != '' }}
-      uses: aws-actions/configure-aws-credentials@v6
-      with:
-        aws-region: ${{ inputs.aws_region }}
-        role-to-assume: ${{ inputs.aws_role_to_assume }}
-    - name: Configure AWS Credentials for ECR (Access Keys)
-      if: ${{ inputs.engine_mods_image != '' && inputs.aws_region != '' && inputs.aws_role_to_assume == '' }}
-      uses: aws-actions/configure-aws-credentials@v6
-      with:
-        aws-region: ${{ inputs.aws_region }}
-        aws-access-key-id: ${{ secrets.aws_access_key_id }}
-        aws-secret-access-key: ${{ secrets.aws_secret_access_key }}
-    - name: Login to Amazon ECR (for pulling pre-modded image)
-      if: ${{ inputs.engine_mods_image != '' && inputs.aws_region != '' }}
-      uses: aws-actions/amazon-ecr-login@v2
-    - name: Login to Container Registry (static credentials, for pulling pre-modded image)
-      if: ${{ inputs.engine_mods_image != '' && inputs.aws_region == '' }}
-      uses: docker/login-action@v4
-      with:
-        registry: ${{ inputs.registry }}
-        username: ${{ inputs.registry_username }}
-        password: ${{ secrets.registry_password != '' && secrets.registry_password || secrets.GITHUB_TOKEN }}
-    - name: Try Pull Pre-Modded Tempo Unreal Image
-      if: ${{ inputs.engine_mods_image != '' }}
-      id: pull_modded
-      continue-on-error: true
-      run: |
-        TAG="${{ inputs.engine_mods_image }}:${{ env.UNREAL_VERSION }}-${{ steps.engine_mods_hash.outputs.HASH }}"
-        echo "Attempting to pull $TAG"
-        if docker pull "$TAG"; then
-          docker tag "$TAG" tempo_unreal_image
-          echo "used=true" >> $GITHUB_OUTPUT
-          echo "Using pre-modded image: $TAG"
-        else
-          echo "Could not pull $TAG; will fall back to in-workflow build and engine mod install."
-          echo "used=false" >> $GITHUB_OUTPUT
-        fi
-    - name: Set Engine Mods Mounts
-      env:
-        FALLBACK_MOUNTS: >-
-          -v ${{ github.workspace }}/.engine-mods-cache/TempoMods:/home/ue4/UnrealEngine/TempoMods
-          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/ZoneGraph:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/ZoneGraph
-          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/PCG:/home/ue4/UnrealEngine/Engine/Plugins/PCG
-          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Editor/EditorScriptingUtilities:/home/ue4/UnrealEngine/Engine/Plugins/Editor/EditorScriptingUtilities
-          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/ComputeFramework:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/ComputeFramework
-          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/AI/MassCrowd:/home/ue4/UnrealEngine/Engine/Plugins/AI/MassCrowd
-          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/StateTree:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/StateTree
-          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs/UnrealBuildTool:/home/ue4/UnrealEngine/Engine/Source/Programs/UnrealBuildTool
-          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs/AutomationTool:/home/ue4/UnrealEngine/Engine/Source/Programs/AutomationTool
-          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs/Shared:/home/ue4/UnrealEngine/Engine/Source/Programs/Shared
-          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Binaries/DotNET/UnrealBuildTool:/home/ue4/UnrealEngine/Engine/Binaries/DotNET/UnrealBuildTool
-          -v ${{ github.workspace }}/.engine-mods-cache/Engine/Binaries/DotNET/AutomationTool:/home/ue4/UnrealEngine/Engine/Binaries/DotNET/AutomationTool
-      run: |
-        if [ "${{ steps.pull_modded.outputs.used }}" = "true" ]; then
-          echo "ENGINE_MODS_MOUNTS=" >> $GITHUB_ENV
-        else
-          MOUNTS="$FALLBACK_MOUNTS"
-          # MassEntity was a standalone plugin through 5.7; in 5.8 it became an engine runtime module
-          # with no plugin folder to mount. Only mount it for versions where it is a plugin.
-          MINOR="${UNREAL_VERSION#*.}"
-          if [ "${UNREAL_VERSION%%.*}" = "5" ] && [ "$MINOR" -lt 8 ]; then
-            MOUNTS="$MOUNTS -v ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime/MassEntity:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/MassEntity"
-          fi
-          echo "ENGINE_MODS_MOUNTS=$MOUNTS" >> $GITHUB_ENV
-        fi
-    - name: Log in to Epic Container Registry
-      if: ${{ steps.pull_modded.outputs.used != 'true' }}
-      uses: docker/login-action@v4
-      with:
-        registry: ghcr.io
-        username: ${{ secrets.EPIC_DOCKER_USERNAME }}
-        password: ${{ secrets.EPIC_DOCKER_TOKEN }}
     - name: Build Tempo Unreal Docker Image
-      if: ${{ steps.pull_modded.outputs.used != 'true' }}
       run: |
         docker build \
           --build-arg UNREAL_VERSION=${{ env.UNREAL_VERSION }} \
           --build-arg ENGINE_BASE_IMAGE=${{ steps.engine_base_image.outputs.IMAGE }} \
           --tag 'tempo_unreal_image' \
           -f ${{ github.workspace }}/${{ inputs.tempo_root }}/Dockerfile .
-    - name: Initialize Engine Mods Cache (if not restored from cache and not using pre-modded image)
-      if: ${{ steps.restore_engine_mods_cache.outputs.cache-hit != 'true' && steps.pull_modded.outputs.used != 'true' }}
-      run: |
-        mkdir -p .engine-mods-cache/TempoMods
-        mkdir -p .engine-mods-cache/Engine/Plugins/Runtime
-        mkdir -p .engine-mods-cache/Engine/Plugins/Editor
-        mkdir -p .engine-mods-cache/Engine/Plugins/AI
-        mkdir -p .engine-mods-cache/Engine/Source/Programs
-        mkdir -p .engine-mods-cache/Engine/Binaries/DotNET
-        docker create --name temp_engine tempo_unreal_image
-        docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/ZoneGraph ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime
-        docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Plugins/PCG ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins
-        docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Plugins/Editor/EditorScriptingUtilities ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Editor
-        docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/ComputeFramework ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime
-        docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Plugins/AI/MassCrowd ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/AI
-        # MassEntity was a standalone plugin through 5.7; in 5.8 it became an engine runtime module
-        # (Engine/Source/Runtime/MassEntity), built into the engine image, with no plugin folder to cache.
-        MINOR="${UNREAL_VERSION#*.}"
-        if [ "${UNREAL_VERSION%%.*}" = "5" ] && [ "$MINOR" -lt 8 ]; then
-          docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/MassEntity ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime
-        fi
-        docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Plugins/Runtime/StateTree ${{ github.workspace }}/.engine-mods-cache/Engine/Plugins/Runtime
-        docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Source/Programs/UnrealBuildTool ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs
-        docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Source/Programs/AutomationTool ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs
-        docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Source/Programs/Shared ${{ github.workspace }}/.engine-mods-cache/Engine/Source/Programs
-        docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Binaries/DotNET/UnrealBuildTool ${{ github.workspace }}/.engine-mods-cache/Engine/Binaries/DotNET
-        docker cp temp_engine:/home/ue4/UnrealEngine/Engine/Binaries/DotNET/AutomationTool ${{ github.workspace }}/.engine-mods-cache/Engine/Binaries/DotNET
-        docker rm temp_engine
     - name: Initialize Engine DDC Cache (if nothing was restored from cache)
       # cache-matched-key is set for BOTH an exact hit and a restore-keys (prefix) hit, so this
       # re-seeds the engine DDC from the image only on a true cache miss (e.g. clean builds). On a
@@ -589,14 +402,9 @@ jobs:
         docker create --name temp_engine tempo_unreal_image
         docker cp temp_engine:/home/ue4/UnrealEngine/Engine/DerivedDataCache ${{ github.workspace }}/.engine-ddc-cache/Engine
         docker rm temp_engine
-    - name: Fix Engine Mods and Engine DDC Permissions
+    - name: Fix Engine DDC Permissions
       run: |
-        # Set the permissions of the engine mods and engine DDC files such that they can be accessed in the docker container.
-        # .engine-mods-cache only exists in the fallback path (when no pre-modded image was used).
-        if [ -d .engine-mods-cache ]; then
-          sudo chown -R 1000:1000 .engine-mods-cache/
-          sudo chmod -R 755 .engine-mods-cache/
-        fi
+        # Set the permissions of the engine DDC files such that they can be accessed in the docker container.
         sudo chown -R 1000:1000 .engine-ddc-cache/
         sudo chmod -R 755 .engine-ddc-cache/
     - name: Sync Third Party Dependencies
@@ -610,28 +418,16 @@ jobs:
         command: |
           docker run --rm \
             ${UBA_NO_DETOUR} \
-            ${ENGINE_MODS_MOUNTS} \
             -e GITHUB_TOKEN \
             -v ${{ github.workspace }}/.engine-ddc-cache/Engine/DerivedDataCache:/home/ue4/UnrealEngine/Engine/DerivedDataCache \
             -v ${{ github.workspace }}/${{ inputs.project_root }}:/home/ue4/${{ inputs.project_root }} \
             tempo_unreal_image \
             bash -c "/home/ue4/${{ inputs.tempo_root }}/Scripts/SyncDeps.sh -force"
-    - name: Install Engine Mods (if not using pre-modded image)
-      if: ${{ steps.pull_modded.outputs.used != 'true' }}
-      run: |
-        docker run --rm \
-          ${UBA_NO_DETOUR} \
-          ${ENGINE_MODS_MOUNTS} \
-          -v ${{ github.workspace }}/.engine-ddc-cache/Engine/DerivedDataCache:/home/ue4/UnrealEngine/Engine/DerivedDataCache \
-          -v ${{ github.workspace }}/${{ inputs.project_root }}:/home/ue4/${{ inputs.project_root }} \
-          tempo_unreal_image \
-          /home/ue4/${{ inputs.tempo_root }}/Scripts/InstallEngineMods.sh
     - name: Clean (if requested)
       if: ${{ inputs.clean }}
       run: |
         docker run --rm \
           ${UBA_NO_DETOUR} \
-          ${ENGINE_MODS_MOUNTS} \
           -v ${{ github.workspace }}/.engine-ddc-cache/Engine/DerivedDataCache:/home/ue4/UnrealEngine/Engine/DerivedDataCache \
           -v ${{ github.workspace }}/${{ inputs.project_root }}:/home/ue4/${{ inputs.project_root }} \
           tempo_unreal_image \
@@ -640,7 +436,6 @@ jobs:
       run: |
         docker run --rm \
           ${UBA_NO_DETOUR} \
-          ${ENGINE_MODS_MOUNTS} \
           -v ${{ github.workspace }}/.engine-ddc-cache/Engine/DerivedDataCache:/home/ue4/UnrealEngine/Engine/DerivedDataCache \
           -v ${{ github.workspace }}/${{ inputs.project_root }}:/home/ue4/${{ inputs.project_root }} \
           -e TEMPO_GEN_RUST_API=${{ inputs.gen_rust_api && '1' || '0' }} \
@@ -652,7 +447,6 @@ jobs:
       run: |
         docker run --rm \
           ${UBA_NO_DETOUR} \
-          ${ENGINE_MODS_MOUNTS} \
           -v ${{ github.workspace }}/.engine-ddc-cache/Engine/DerivedDataCache:/home/ue4/UnrealEngine/Engine/DerivedDataCache \
           -v ${{ github.workspace }}/${{ inputs.project_root }}:/home/ue4/${{ inputs.project_root }} \
           -e TEMPO_SKIP_PREBUILD=1 \
@@ -674,7 +468,6 @@ jobs:
         fi
         docker run --rm \
           ${UBA_NO_DETOUR} \
-          ${ENGINE_MODS_MOUNTS} \
           -v ${{ github.workspace }}/.engine-ddc-cache/Engine/DerivedDataCache:/home/ue4/UnrealEngine/Engine/DerivedDataCache \
           -v ${{ github.workspace }}/.releases:/home/ue4/${{ inputs.project_root }}/Releases \
           -v ${{ github.workspace }}/${{ inputs.project_root }}:/home/ue4/${{ inputs.project_root }} \
@@ -688,7 +481,6 @@ jobs:
       run: |
         docker run --rm \
           ${UBA_NO_DETOUR} \
-          ${ENGINE_MODS_MOUNTS} \
           -v ${{ github.workspace }}/.engine-ddc-cache/Engine/DerivedDataCache:/home/ue4/UnrealEngine/Engine/DerivedDataCache \
           -v ${{ github.workspace }}/${{ inputs.project_root }}:/home/ue4/${{ inputs.project_root }} \
           -e TEMPO_SKIP_PREBUILD=1 \
@@ -697,13 +489,9 @@ jobs:
     - name: Reset File Permissions
       if: always()  # This ensures it runs even if previous steps fail
       run: |
-        # Reset the permissions of the project, engine mods cache, and ddc cache so that subsequent steps have access.
+        # Reset the permissions of the project and ddc cache so that subsequent steps have access.
         sudo chown -R $(id -u):$(id -g) ${{ github.workspace }}/${{ inputs.project_root }}
         sudo chmod -R +r ${{ github.workspace }}/${{ inputs.project_root }}
-        if [ -d .engine-mods-cache ]; then
-          sudo chown -R $(id -u):$(id -g) .engine-mods-cache/
-          sudo chmod -R +r .engine-mods-cache/
-        fi
         sudo chown -R $(id -u):$(id -g) .engine-ddc-cache/
         sudo chmod -R +r .engine-ddc-cache/
     - name: Upload Automation Test Report
@@ -733,25 +521,6 @@ jobs:
         overwrite: true
         if-no-files-found: error
         compression-level: ${{ inputs.upload_artifact_compression_level }}
-    - name: Cache Engine Mods (if building cache branch and not using pre-modded image)
-      if: ${{ github.event_name != 'pull_request_target' && github.ref == format('refs/heads/{0}', inputs.cache_branch) && inputs.engine_mods_image == '' }}
-      uses: actions/cache/save@v6
-      with:
-        path: |
-          .engine-mods-cache/TempoMods/**
-          .engine-mods-cache/Engine/Plugins/Runtime/ZoneGraph/**
-          .engine-mods-cache/Engine/Plugins/PCG/**
-          .engine-mods-cache/Engine/Plugins/Editor/EditorScriptingUtilities/**
-          .engine-mods-cache/Engine/Plugins/Runtime/ComputeFramework/**
-          .engine-mods-cache/Engine/Plugins/AI/MassCrowd/**
-          .engine-mods-cache/Engine/Plugins/Runtime/MassEntity/**
-          .engine-mods-cache/Engine/Plugins/Runtime/StateTree/**
-          .engine-mods-cache/Engine/Source/Programs/UnrealBuildTool/**
-          .engine-mods-cache/Engine/Source/Programs/AutomationTool/**
-          .engine-mods-cache/Engine/Source/Programs/Shared/**
-          .engine-mods-cache/Engine/Binaries/DotNET/UnrealBuildTool/**
-          .engine-mods-cache/Engine/Binaries/DotNET/AutomationTool/**
-        key: tempo-engine-mods-${{ env.UNREAL_VERSION }}-${{ steps.engine_base_image.outputs.ID }}-${{ hashFiles(format('{0}/EngineMods/**', inputs.tempo_root)) }}
     - name: Cache Build (if building cache branch)
       if: ${{ github.event_name != 'pull_request_target' && github.ref == format('refs/heads/{0}', inputs.cache_branch) }}
       uses: actions/cache/save@v6

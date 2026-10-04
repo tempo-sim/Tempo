@@ -37,12 +37,9 @@ public class TempoModuleRules : ModuleRules
 			PrivateIncludePaths.Add(PrivateProtobufIncludes);
 		}
 
-		// Where gRPC and Protobuf are in a shared library of their own, a module that uses them has to
-		// link it. Elsewhere TempoCore re-exports them, and linking TempoCore is enough.
-		if (gRPC.UsesSharedLibrary(Target, GetModuleDirectory("gRPC")))
-		{
-			PublicDependencyModuleNames.Add("gRPC");
-		}
+		// gRPC and Protobuf are in a shared library of their own (or, in a monolithic build, in the
+		// executable), which a module that uses them has to link.
+		PublicDependencyModuleNames.Add("gRPC");
 	}
 
 	private static bool HasProtos(string Folder)

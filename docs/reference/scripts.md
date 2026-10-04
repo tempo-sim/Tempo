@@ -16,10 +16,9 @@ your project root works.
 
 `Setup.sh`
 
-:   **Run once, at the start.** From the Tempo root or from `Scripts/`. Switches your
-    `*.Target.cs` files to Tempo's toolchain, installs the engine mods, downloads third-party
-    dependencies, and installs git hooks that keep the last two in sync as you change Tempo
-    commits.
+:   **Run once, at the start.** From the Tempo root or from `Scripts/`. Disables project plugins
+    that Tempo replaces, downloads third-party dependencies, and installs git hooks that keep them
+    in sync as you change Tempo commits.
 
     `-skip-hooks` suppresses the hooks. **Only for developers modifying Tempo itself** — see
     [Installation](../getting-started/installation.md#one-time-setup).
@@ -90,7 +89,7 @@ your project root works.
 
     [:octicons-arrow-right-24: Testing](../guides/testing.md)
 
-## Dependencies and engine mods
+## Dependencies
 
 `SyncDeps.sh`
 
@@ -98,28 +97,12 @@ your project root works.
     found. After `Setup.sh` this runs automatically via git hooks; you only run it by hand if you
     set up with `-skip-hooks`.
 
-`InstallEngineMods.sh`
-
-:   Applies the mods in `EngineMods/` to your Unreal installation. Also normally automatic via git
-    hooks.
-
 `FindTempoROS.sh`
 
 :   Prints the directory of this project's [TempoROS](../plugins/tempo-ros.md) plugin, or exits `1`
     if it has none. TempoROS is a separate repository added to the project's `Plugins` folder, so
     Tempo has no fixed path for it; `Setup.sh` and `SyncDeps.sh` locate it through this.
     `Package.sh` does not need it — AutomationTool finds TempoROS's stage copy handler by itself.
-
-`ExtractPatch.sh` / `ApplyPatch.sh`
-
-:   Author and apply an engine mod patch.
-
-    [:octicons-arrow-right-24: Engine mods](../guides/engine-mods.md)
-
-`UseTempoToolchain.sh`
-
-:   Modifies your project's `*.Target.cs` files to use Tempo's custom toolchain, which is needed to
-    link certain third-party dependencies properly. Called by `Setup.sh`.
 
 `DisableConflictingPlugins.sh`
 
@@ -151,6 +134,11 @@ automation.
 
 Both are relevant when `Assign Levels To Individual Chunks` is enabled — see the
 [settings reference](settings.md#packaging).
+
+`ExtractPatch.sh <package_dir>` / `ApplyPatch.sh <package_dir> <patch>`
+
+:   Extract the patch a patch build (`Package.sh -generatepatch ...`) produced, and apply it to an
+    earlier package.
 
 ## Migration
 

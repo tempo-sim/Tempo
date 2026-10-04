@@ -83,10 +83,8 @@ are the single source of truth for everything downstream.
 
 [:octicons-arrow-right-24: Adding your own services](../guides/custom-services.md)
 
-## Engine mods
+## No engine changes
 
-Tempo makes a handful of small, in-place modifications to your Unreal installation rather than
-shipping a custom engine build. `Setup.sh` applies them, and git hooks keep them in sync as you
-move between Tempo commits.
-
-[:octicons-arrow-right-24: Engine mods](../guides/engine-mods.md)
+Tempo builds against Unreal exactly as Epic ships it: no custom engine build, and no changes to
+your installation. Where Tempo needs something the engine keeps private, it keeps its own copy;
+see [what replaced the engine mods](../plugins/engine-mods.md).

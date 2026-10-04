@@ -2,15 +2,19 @@
 
 ## Build and setup
 
-### Engine mods or third-party deps are out of sync
+### Third-party deps are out of sync
 
 If you set up with `Setup.sh -skip-hooks`, nothing re-syncs automatically when you change Tempo
-commits. Run them yourself:
+commits. Run it yourself:
 
 ```bash
-Plugins/Tempo/Scripts/InstallEngineMods.sh
 Plugins/Tempo/Scripts/SyncDeps.sh
 ```
+
+### `Unable to create toolchain 'TempoVCToolChain'`
+
+Your `*.Target.cs` files still select a toolchain Tempo no longer provides. See
+[Engine mods removal](../migration/engine-mods-removal.md).
 
 ### `CS0101: already contains a definition for 'MassTraffic'`
 

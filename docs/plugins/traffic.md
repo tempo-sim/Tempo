@@ -134,7 +134,7 @@ The build stops there, so the arbitration that would have preferred Tempo's copy
 not a resolvable contest — one of the two plugins has to be invisible to Unreal.
 
 `Setup.sh` makes it so, by running
-[`DisableConflictingPlugins.sh`](../reference/scripts.md#dependencies-and-engine-mods): any project
+[`DisableConflictingPlugins.sh`](../reference/scripts.md#dependencies): any project
 plugin whose name matches one Tempo ships has its descriptor renamed, so `Traffic.uplugin` becomes
 `Traffic.uplugin.disabled-by-tempo`. Renaming the descriptor is enough to hide the plugin from both
 UnrealBuildTool and the runtime plugin manager, nothing else on disk is touched, and `-restore`

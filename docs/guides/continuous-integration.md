@@ -12,84 +12,28 @@ is a good reference for calling them.
 |---|---|
 | `build_and_package.yml` | Build, package, and optionally release your Tempo project. |
 | `test_packaged.yml` | Run client API tests against a packaged artifact. Language-agnostic and reusable. |
-| `publish_engine_mods.yml` | Publish a pre-modded Unreal image to your private GHCR. |
-| `prune_engine_mods.yml` | Keep only recent engine-mod image tags. |
 
 ## Prerequisites
 
-You'll need `EPIC_DOCKER_USERNAME` and `EPIC_DOCKER_TOKEN` secrets configured, to pull Epic's base
+You'll need `EPIC_DOCKER_USERNAME` and `EPIC_DOCKER_TOKEN` secrets configured, to pull Epic's
 Unreal image.
 
-## Speeding up builds with a pre-modded engine image
+## The engine image
 
-Tempo modifies the Unreal engine in place via patches in `EngineMods/`. By default
-`build_and_package.yml` applies these inside each CI run, which adds **~10–15 minutes** and
-consumes the GitHub Actions cache budget — 10 GB on the free tier, shared with the per-commit
-build cache.
+`build_and_package.yml` builds in Epic's `unreal-engine:dev-slim-<version>` image, with the engine
+as Epic ships it. Each run resolves that tag to a digest first, so the image and the build cache
+always match one engine. Tempo's
+[`Dockerfile`](https://github.com/tempo-sim/Tempo/blob/main/Dockerfile) adds the few build tools
+Tempo's scripts use (`jq`, `cmake` and a Rust toolchain). That layer is built in the run, takes a
+minute or two, and is never published.
 
-For larger projects you can opt into a pre-modded Unreal image hosted on your own private GHCR,
-which the build workflow pulls instead of re-applying mods every run.
+!!! note "Upgrading from a workflow that used a pre-modded image"
 
-### 1. Add a publish workflow
-
-```yaml title=".github/workflows/publish_engine_mods.yml"
-name: Publish Pre-Modded Engine Image
-on:
-  push:
-    branches: [main]
-    paths:
-      - 'Plugins/Tempo/EngineMods/**'
-      - 'Plugins/Tempo/Dockerfile'
-      - 'Plugins/Tempo/Scripts/InstallEngineMods.sh'
-  workflow_dispatch:
-jobs:
-  publish:
-    permissions:
-      contents: read
-      packages: write
-    strategy:
-      matrix:
-        unreal_version: ["5.7", "5.8"]
-      fail-fast: false
-    uses: tempo-sim/Tempo/.github/workflows/publish_engine_mods.yml@main
-    with:
-      unreal_version: ${{ matrix.unreal_version }}
-      image_name: ghcr.io/${{ github.repository_owner }}/tempo-unreal-modded
-      tempo_root: Plugins/Tempo  # adjust to your Tempo submodule path
-    secrets: inherit
-  prune:
-    needs: publish
-    permissions:
-      packages: write
-    uses: tempo-sim/Tempo/.github/workflows/prune_engine_mods.yml@main
-    with:
-      package_name: tempo-unreal-modded
-      package_owner: ${{ github.repository_owner }}
-    secrets: inherit
-```
-
-### 2. Point your build workflow at it
-
-Pass `engine_mods_image: ghcr.io/<your-org>/tempo-unreal-modded` to your existing
-`build_and_package.yml` caller, and grant it `packages: read`.
-
-The build workflow computes the EngineMods hash, attempts a `docker pull` of the matching tag, and
-skips the in-workflow engine-mods install when the pull succeeds. **If the pull fails for any
-reason** — image not yet published for the current hash, permissions misconfigured — the workflow
-falls back to the in-workflow path. There is no breakage, just no speedup.
-
-### Setup notes
-
-- Run your new `publish_engine_mods` workflow manually once via `workflow_dispatch` **before**
-  merging the `engine_mods_image` change to your build workflow, so the first image exists when
-  the build runs.
-- The published image contains **UE-derived content**, which the Unreal Engine EULA does not
-  permit redistributing publicly. Your org's GHCR package-creation policy must be set to
-  "Private" (under `Settings → Packages` in the org admin), and the package will inherit private
-  visibility on first push. If your org's policy allows public, flip the package to private via
-  its settings page after the first push.
-- The `prune` job keeps only the most recent tag per Unreal version, which is enough since
-  EngineMods rarely change. Pass `keep: 3` (or higher) for a longer history.
+    `build_and_package.yml` no longer has an `engine_mods_image` input, nor the `registry`,
+    `registry_username`, `aws_region` and `aws_role_to_assume` inputs and the secrets that went with
+    it. Remove them from your caller, and delete any workflow that called
+    `publish_engine_mods.yml` or `prune_engine_mods.yml`. You can delete the image package they
+    published, too.
 
 ## Running the test suites
 

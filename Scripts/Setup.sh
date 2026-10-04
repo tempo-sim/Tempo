@@ -46,8 +46,18 @@ ADD_COMMAND_TO_HOOK() {
   fi
 }
 
+# Earlier versions of this script also put InstallEngineMods.sh in the hooks. Tempo no longer
+# modifies the engine and that script is gone, so take it out of any hook that still runs it.
+REMOVE_ENGINE_MODS_FROM_HOOK() {
+  HOOK_FILE="$GIT_DIR/hooks/$1"
+  if [ -f "$HOOK_FILE" ] && grep -qF "InstallEngineMods.sh" "$HOOK_FILE"; then
+    grep -vF "InstallEngineMods.sh" "$HOOK_FILE" > "$HOOK_FILE.tmp" || true
+    cat "$HOOK_FILE.tmp" > "$HOOK_FILE"
+    rm -f "$HOOK_FILE.tmp"
+  fi
+}
+
 SYNC_DEPS="$SCRIPT_DIR/SyncDeps.sh"
-INSTALL_ENGINE_MODS="$SCRIPT_DIR/InstallEngineMods.sh"
 
 if [ "$SKIP_HOOKS" -ne 1 ]; then
   if [ -z "$GIT_DIR" ]; then
@@ -58,22 +68,18 @@ if [ "$SKIP_HOOKS" -ne 1 ]; then
     fi
   fi
 
-  # Put SyncDeps.sh and InstallEngineMods.sh scripts in appropriate git hooks
+  # Put the SyncDeps.sh script in appropriate git hooks
   if [ -d "$GIT_DIR/hooks" ]; then
     ADD_COMMAND_TO_HOOK "$SYNC_DEPS" post-checkout
     ADD_COMMAND_TO_HOOK "$SYNC_DEPS" post-merge
-    ADD_COMMAND_TO_HOOK "$INSTALL_ENGINE_MODS" post-checkout
-    ADD_COMMAND_TO_HOOK "$INSTALL_ENGINE_MODS" post-merge
+    REMOVE_ENGINE_MODS_FROM_HOOK post-checkout
+    REMOVE_ENGINE_MODS_FROM_HOOK post-merge
   fi
 fi
 
 # Run the steps once (adding -force if specified)
 echo -e "\nDisabling project plugins that Tempo replaces\n"
 bash "$SCRIPT_DIR/DisableConflictingPlugins.sh"
-echo -e "\nAdding Tempo toolchain to Target.cs files\n"
-bash "$SCRIPT_DIR/UseTempoToolchain.sh"
-echo -e "\nInstalling Tempo Engine Mods\n"
-bash "$INSTALL_ENGINE_MODS" "${EXTRA_ARGS[@]}"
 echo -e "Checking ThirdParty dependencies...\n"
 bash "$SYNC_DEPS" "${EXTRA_ARGS[@]}"
 

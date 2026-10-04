@@ -31,21 +31,13 @@ if /i "%~1"=="Linux" (
     set "TARGET_PLATFORM=Linux"
 )
 
-where jq.exe >nul 2>&1
-if errorlevel 1 (
-    echo Couldn't find jq 1>&2
-    exit /b 1
-)
-
 REM See Build.bat: a makefile cached from before a plugin moved runs that plugin's old pre-build steps.
 call "%SCRIPT_DIR%DiscardStaleBuildSteps.bat"
 if errorlevel 1 exit /b %ERRORLEVEL%
 
 cd /d "!UNREAL_ENGINE_PATH!"
 
-set "EXTRA_ARGS="
-
-call "Engine\Build\BatchFiles\RunUAT.bat" Turnkey -command=VerifySdk -platform=!TARGET_PLATFORM! -UpdateIfNeeded -project="!PROJECT_ROOT!\!PROJECT_NAME!.uproject" BuildCookRun -nop4 -utf8output -nocompileeditor -skipbuildeditor -cook -target="!PROJECT_NAME!" -platform=!TARGET_PLATFORM! -project="!PROJECT_ROOT!\!PROJECT_NAME!.uproject" -installed -stage -package -pak -build -iostore -prereqs -clientconfig=Development -unrealexe="UnrealEditor-Cmd.exe" -stagingdirectory="!PROJECT_ROOT!\Packaged" !EXTRA_ARGS! %*
+call "Engine\Build\BatchFiles\RunUAT.bat" Turnkey -command=VerifySdk -platform=!TARGET_PLATFORM! -UpdateIfNeeded -project="!PROJECT_ROOT!\!PROJECT_NAME!.uproject" BuildCookRun -nop4 -utf8output -nocompileeditor -skipbuildeditor -cook -target="!PROJECT_NAME!" -platform=!TARGET_PLATFORM! -project="!PROJECT_ROOT!\!PROJECT_NAME!.uproject" -installed -stage -package -pak -build -iostore -prereqs -clientconfig=Development -unrealexe="UnrealEditor-Cmd.exe" -stagingdirectory="!PROJECT_ROOT!\Packaged" %*
 if errorlevel 1 exit /b %ERRORLEVEL%
 
 if /i "!TARGET_PLATFORM!"=="Win64" (

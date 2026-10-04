@@ -9,8 +9,8 @@
     "md5_hashes": {
       "Linux": "b8a26505fd434d79491688e8a2303bef",
       "Mac": "1e31934cccb3164172b92eb3acff0cce",
-      "Windows": "a976d4de7d1ec6a15afc1332233438b0",
-      "Windows+Linux": "a9a5959ba5ab686482b558717ca14142"
+      "Windows": "e06cdaf246fc0f9936a5630da7a97bbc",
+      "Windows+Linux": "f23a22b23fc5c8d84a784c230fd28990"
     }
   },
   "5.7": {
@@ -23,8 +23,8 @@
     "md5_hashes": {
       "Linux": "b8a26505fd434d79491688e8a2303bef",
       "Mac": "1e31934cccb3164172b92eb3acff0cce",
-      "Windows": "a976d4de7d1ec6a15afc1332233438b0",
-      "Windows+Linux": "a9a5959ba5ab686482b558717ca14142"
+      "Windows": "e06cdaf246fc0f9936a5630da7a97bbc",
+      "Windows+Linux": "f23a22b23fc5c8d84a784c230fd28990"
     }
   }
 }

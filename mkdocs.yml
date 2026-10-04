@@ -163,7 +163,6 @@ nav:
       - guides/packaging.md
       - guides/continuous-integration.md
       - guides/testing.md
-      - guides/engine-mods.md
       - guides/troubleshooting.md
       - guides/documentation.md
   - Reference:
@@ -174,6 +173,7 @@ nav:
       - reference/environment.md
   - Migration:
       - migration/index.md
+      - migration/engine-mods-removal.md
       - migration/engine-plugin-mods.md
       - migration/ros-opt-in.md
       - migration/v0.3.0.md

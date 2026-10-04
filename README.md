@@ -85,10 +85,10 @@ git submodule update --init --recursive
 
 ### One-Time Setup
 Run the `Setup.sh` (or `Setup.bat` on Windows) script (from the `Tempo` root, or from `Scripts/`) once. This script will:
-- Modify your project's `*.Target.cs` files to use Tempo's custom toolchain, which is necessary for linking certain third party dependencies properly
-- Install the Tempo Unreal Engine mods, making some changes to your installed Engine in-place
 - Download third party dependencies
-- Add git hooks to keep engine mods and third party dependencies up to date automatically as you check out different Tempo commits
+- Add git hooks to keep third party dependencies up to date automatically as you check out different Tempo commits
+
+Tempo builds against Unreal as Epic ships it, and does not change your engine installation.
 
 > [!WARNING]
 > `Setup.sh` accepts a `-skip-hooks` flag which suppresses installing the `post-checkout` and `post-merge` git hooks. This is intended only for developers actively modifying Tempo itself. If you are simply using Tempo as a dependency in your project, do not use this flag. See [Installation](https://tempo-sim.readthedocs.io/en/latest/getting-started/installation/#one-time-setup).
@@ -124,9 +124,6 @@ You can **publish** these to [PyPI](https://pypi.org/) / [crates.io](https://cra
 
 ## Continuous Integration
 If you would like to set up a GitHub actions pipeline to build, package, run, and/or release your Tempo project, check out the `build_and_package` reusable workflow in [.github/workflows](https://github.com/tempo-sim/Tempo/tree/main/.github/workflows). `TempoSample`'s [tempo_sample_build_and_package](https://github.com/tempo-sim/TempoSample/blob/main/.github/workflows/tempo_sample_build_and_package.yml) workflow is a good reference.
-
-For larger projects, you can cut ~10–15 minutes per run by pulling a pre-modded Unreal image instead of applying engine mods in-workflow. See [Continuous Integration](https://tempo-sim.readthedocs.io/en/latest/guides/continuous-integration/).
-
 ## Issues
 Something not working as expected? Are we missing a key feature you need? Feel free to send us an [issue](https://github.com/tempo-sim/Tempo/issues).
 

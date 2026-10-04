@@ -20,11 +20,10 @@ public class gRPC : ModuleRules
     }
 
     // Whether modules share gRPC, Protobuf and Abseil through the shared library. A monolithic
-    // executable holds the one copy itself, and a TempoThirdParty release from before the shared
-    // library existed leaves TempoCore to hold it and re-export it (see below).
-    public static bool UsesSharedLibrary(ReadOnlyTargetRules Target, string ModuleDirectory)
+    // executable holds the one copy itself.
+    public static bool UsesSharedLibrary(ReadOnlyTargetRules Target)
     {
-        return Target.LinkType != TargetLinkType.Monolithic && File.Exists(SharedLibraryPath(Target.Platform, ModuleDirectory));
+        return Target.LinkType != TargetLinkType.Monolithic;
     }
 
     public gRPC(ReadOnlyTargetRules Target) : base(Target)
@@ -64,7 +63,7 @@ public class gRPC : ModuleRules
 
         // gRPC, Protobuf and Abseil keep global state, so a process must hold exactly one copy of
         // them, which every module then shares.
-        bool bUseSharedLibrary = UsesSharedLibrary(Target, ModuleDirectory);
+        bool bUseSharedLibrary = UsesSharedLibrary(Target);
         PublicDefinitions.Add("TEMPO_GRPC_IS_SHARED_LIBRARY=" + (bUseSharedLibrary ? "1" : "0"));
         if (bUseSharedLibrary)
         {
@@ -72,11 +71,16 @@ public class gRPC : ModuleRules
             // a linker takes what it finds in them from there, even what the shared library exports,
             // making a second copy.
             string SharedLibrary = SharedLibraryPath(Target.Platform, ModuleDirectory);
+            if (!File.Exists(SharedLibrary))
+            {
+                throw new BuildException("{0} is missing. Tempo needs a TempoThirdParty gRPC release that includes it: run Tempo's Scripts/SyncDeps.sh.", SharedLibrary);
+            }
             PublicAdditionalLibraries.Add(Target.Platform == UnrealTargetPlatform.Win64 ? Path.Combine(LibrariesDirectory, "tempogrpc.lib") : SharedLibrary);
             RuntimeDependencies.Add(SharedLibrary);
         }
         else
         {
+            // The one copy is in the executable, which links the static libraries like any others.
             foreach (string StaticLibrary in Directory.EnumerateFiles(LibrariesDirectory, "*." + StaticLibraryExtension))
             {
                 if (Path.GetFileNameWithoutExtension(StaticLibrary) != "tempogrpc")
@@ -84,11 +88,6 @@ public class gRPC : ModuleRules
                     PublicAdditionalLibraries.Add(StaticLibrary);
                 }
             }
-            // The one copy is in whatever links the static libraries: the executable, or TempoCore,
-            // which then has to re-export it all. Tempo's UnrealBuildTool toolchains do that, told by
-            // exports.def what to re-export: the libraries to take whole on Mac and Linux, the symbols
-            // on Windows.
-            PublicAdditionalLibraries.Add(Path.Combine(LibrariesDirectory, "exports.def"));
         }
 
         AddEngineThirdPartyPrivateStaticDependencies(Target, "OpenSSL");

@@ -4,6 +4,7 @@ What changed between Tempo versions, and what you have to do about it.
 
 | Guide | Affects | Danger |
 |---|---|---|
+| **[Engine mods removal](engine-mods-removal.md)** | Every project's `*.Target.cs` files, the installed engine, and CI that used a pre-modded image | Loud — `Unable to create toolchain` once the engine is reinstalled |
 | **[Engine plugin mods removal](engine-plugin-mods.md)** | Lane graphs built with TempoAgents; C++ using Tempo's ZoneGraph or MassCrowd additions | :material-alert: Lane graphs must be **rebuilt once** |
 | **[ROS is now opt-in](ros-opt-in.md)** | Any project using ROS: TempoROS is no longer bundled with Tempo, and TempoROSBridge must be enabled | :material-alert: ROS **silently disappears** at runtime |
 | **[v0.3.0](v0.3.0.md)** | TempoWorld transform, property and function-calling APIs | :material-alert: Two changes break **silently at runtime** |
