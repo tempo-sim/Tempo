@@ -124,7 +124,7 @@ void FTempoLidarParticipatingMediaViewExtension::PrePostProcessPass_RenderThread
 	// Every tile of the family writes its own slot of the one results texture: the rect its output
 	// lands in, not the rect the renderer rasterized it at, which is quantized and can differ.
 	const FIntRect& OutputRect = PassInputs.OutputRect;
-	if (OutputRect.Max.X > Results_RenderThread->GetSizeX() || OutputRect.Max.Y > Results_RenderThread->GetSizeY()
+	if (OutputRect.Max.X > static_cast<int32>(Results_RenderThread->GetSizeX()) || OutputRect.Max.Y > static_cast<int32>(Results_RenderThread->GetSizeY())
 		|| OutputRect.Size() != PassInputs.ViewRect.Size())
 	{
 		UE_LOG(LogTempoSensors, Warning, TEXT("Lidar media: output rect (%d,%d)-(%d,%d) does not fit the results texture (%dx%d) or its view rect (%dx%d). Skipping."),
