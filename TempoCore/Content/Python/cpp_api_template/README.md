@@ -51,6 +51,8 @@ proto/
 
 int main() {
     tempo::set_server("localhost", 10001);
+    // Or, for a server on this machine listening on a Unix domain socket (Linux/macOS):
+    // tempo::set_socket("sim-a.sock");
 
     auto result = tempo::tempo_core::get_current_level_name();
     if (!result) {

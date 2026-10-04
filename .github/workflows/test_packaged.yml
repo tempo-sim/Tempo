@@ -14,6 +14,7 @@
 # The workflow exports a small contract to the test_command:
 #   TEMPO_PACKAGED_DIR          = the downloaded Packaged folder
 #   TEMPO_SERVER_PORT           = gRPC port to use
+#   TEMPO_SERVER_SOCKET         = Unix domain socket to use instead of a port (empty = use the port)
 #   TEMPO_SIM_STARTUP_TIMEOUT_S = readiness timeout
 #   TEMPO_SIM_RENDER            = "1" if `render: true` (sensor/GPU groups), else "0"
 #   TEMPO_TEST_REPORT_DIR       = a folder to write a report into (uploaded as an artifact)
@@ -84,6 +85,13 @@ on:
         type: string
         description: gRPC port the packaged sim should listen on.
         default: '10001'
+      server_socket:
+        type: string
+        description: >
+          Unix domain socket path for the packaged sim to listen on instead of a TCP port
+          (Linux/macOS runners only). Keep it short - an AF_UNIX path is capped at ~104 bytes.
+          Empty uses server_port.
+        default: ''
       startup_timeout_s:
         type: string
         description: Seconds to wait for the packaged sim's gRPC server to come up.
@@ -160,6 +168,7 @@ jobs:
       env:
         TEMPO_PACKAGED_DIR: ${{ github.workspace }}/Packaged
         TEMPO_SERVER_PORT: ${{ inputs.server_port }}
+        TEMPO_SERVER_SOCKET: ${{ inputs.server_socket }}
         TEMPO_SIM_STARTUP_TIMEOUT_S: ${{ inputs.startup_timeout_s }}
         TEMPO_SIM_RENDER: ${{ inputs.render && '1' || '0' }}
         TEMPO_TEST_REPORT_DIR: ${{ github.workspace }}/test-report

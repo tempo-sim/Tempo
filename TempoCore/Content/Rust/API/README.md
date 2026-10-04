@@ -22,6 +22,9 @@ fn main() {
     // Point the client at a running Tempo server.
     set_server("localhost", 10001);
 
+    // Or, for a server on this machine listening on a Unix domain socket (Linux/macOS):
+    // set_socket("sim-a.sock");
+
     // Use the generated API modules, e.g. tempo_core, tempo_sensors, tempo_world.
 }
 ```

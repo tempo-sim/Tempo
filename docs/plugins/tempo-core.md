@@ -138,6 +138,13 @@ On startup the log confirms it:
 LogTempoCore: Display: Tempo gRPC server listening on 0.0.0.0:10001
 ```
 
+On Linux and macOS it can listen on a Unix domain socket instead, which is how several sims share
+one machine without being assigned ports:
+
+```text
+LogTempoCore: Display: Tempo gRPC server listening on unix:/run/user/1000/tempo/sim-a.sock
+```
+
 Adding your own services to it is a first-class workflow, not a fork:
 
 [:octicons-arrow-right-24: Adding your own services](../guides/custom-services.md)

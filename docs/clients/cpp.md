@@ -14,7 +14,7 @@ TempoCore/Content/Cpp/API/
 ├── include/
 │   ├── tempo.h                      # umbrella header — include this and you're done
 │   ├── tempo/                       # the high-level client surface
-│   │   ├── context.h                #   set_server, TempoContext
+│   │   ├── context.h                #   set_server, set_socket, TempoContext
 │   │   ├── error.h                  #   TempoError
 │   │   ├── result.h                 #   Result<T>
 │   │   ├── streaming.h              #   ServerStream<T>
