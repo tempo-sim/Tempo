@@ -299,7 +299,7 @@ void FTempoCameraVideoEncoder::EncodeRenderTarget_RenderThread(UTextureRenderTar
 				CaptureDesc.DetermineInititialState();
 
 				FImpl::FWindowsCaptureSlot& Slot = Impl->WindowsCaptureSlots[SlotIndex];
-				Slot.Texture = RHICreateTexture(CaptureDesc);
+				Slot.Texture = FRHICommandListExecutor::GetImmediateCommandList().CreateTexture(CaptureDesc);
 				Slot.Fence = GDynamicRHI->RHICreateGPUFence(TEXT("TempoCameraVideoCaptureFence"));
 				if (!Slot.Texture.IsValid() || !Slot.Fence.IsValid())
 				{
