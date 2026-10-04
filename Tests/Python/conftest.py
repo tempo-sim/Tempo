@@ -11,6 +11,9 @@ launches the binary.
 Configuration comes from the environment (set by Scripts/TestPythonAPI.sh):
   TEMPO_PACKAGED_BINARY        Path to the packaged launcher (e.g. Packaged/Linux/<Project>.sh).
   TEMPO_SERVER_PORT            gRPC port the sim should listen on (default 10001).
+  TEMPO_SERVER_SOCKET          A Unix domain socket for the sim to listen on instead of a port
+                               (Linux/macOS). Set to run several sims on one machine without
+                               assigning each a port. Takes precedence over TEMPO_SERVER_PORT.
   TEMPO_SIM_STARTUP_TIMEOUT_S  How long to wait for the server to come up (default 300).
   TEMPO_SIM_RENDER             "1" to render off-screen (sensors group); else -nullrhi.
   TEMPO_TEST_REPORT_DIR        If set, the sim's full log is written here (sim.log) so CI uploads it.
@@ -24,6 +27,7 @@ import time
 import pytest
 
 SERVER_PORT = int(os.environ.get("TEMPO_SERVER_PORT", "10001"))
+SERVER_SOCKET = os.environ.get("TEMPO_SERVER_SOCKET", "").strip()
 PACKAGED_BINARY = os.environ.get("TEMPO_PACKAGED_BINARY", "")
 STARTUP_TIMEOUT_S = float(os.environ.get("TEMPO_SIM_STARTUP_TIMEOUT_S", "300"))
 
@@ -53,6 +57,8 @@ def sim_server():
     # needed). The sensors group sets TEMPO_SIM_RENDER=1 to render off-screen (and wants a GPU).
     render = os.environ.get("TEMPO_SIM_RENDER", "0") == "1"
     rhi_args = ["-RenderOffScreen"] if render else ["-nullrhi"]
+    # One endpoint argument, matching the server's exclusive transports.
+    endpoint_args = [f"-ServerSocket={SERVER_SOCKET}"] if SERVER_SOCKET else [f"-ServerPort={SERVER_PORT}"]
     args = [
         PACKAGED_BINARY,
         *rhi_args,
@@ -60,7 +66,7 @@ def sim_server():
         "-nopause",
         "-nosound",
         "-nosplash",
-        f"-ServerPort={SERVER_PORT}",
+        *endpoint_args,
         "-stdout",
         "-fullstdoutlogoutput",
     ]
@@ -75,7 +81,10 @@ def sim_server():
     print(f"Sim log: {log.name}")
     proc = subprocess.Popen(args, stdout=log, stderr=subprocess.STDOUT)
 
-    tempo_sim.set_server(port=SERVER_PORT)
+    if SERVER_SOCKET:
+        tempo_sim.set_socket(SERVER_SOCKET)
+    else:
+        tempo_sim.set_server(port=SERVER_PORT)
     deadline = time.monotonic() + STARTUP_TIMEOUT_S
     last_err = None
     while time.monotonic() < deadline:

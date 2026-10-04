@@ -14,6 +14,9 @@ use tempo_sim::TempoError;
 fn api_surface_exists() {
     // Referencing each item as a value forces it to exist with a compatible shape.
     let _set_server = tempo_sim::set_server;
+    // set_socket is generic over AsRef<Path>, so pin the type parameter to name it as a value.
+    // An owned String avoids the higher-ranked lifetime a &str parameter would need.
+    let _set_socket: fn(String) = tempo_sim::set_socket::<String>;
     let _level = tempo_sim::tempo_core::get_current_level_name;
     let _sim_time = tempo_sim::tempo_core::get_sim_time;
     let _step = tempo_sim::tempo_core::step;

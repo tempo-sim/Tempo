@@ -20,6 +20,8 @@
 #   TEMPO_RUST_TESTS_DIR   The Rust test crate dir (defaults to <tempo>/Tests/Rust).
 #   TEMPO_TEST_REPORT_DIR  Where to write the cargo log (defaults to <tempo>/Saved/RustTestReport).
 #   TEMPO_SERVER_PORT      gRPC port the sim should listen on (default 10001).
+#   TEMPO_SERVER_SOCKET    A Unix domain socket for the sim to listen on instead of a port
+#                          (Linux/macOS). Takes precedence over TEMPO_SERVER_PORT.
 
 set -e
 # Never fail silently: report the line and exit code on any set -e abort. (The EXIT trap installed
@@ -30,6 +32,7 @@ SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 TEMPO_ROOT=$( cd -- "$SCRIPT_DIR/.." &> /dev/null && pwd )
 GROUP="${1:-}"
 PORT="${TEMPO_SERVER_PORT:-10001}"
+SOCKET="${TEMPO_SERVER_SOCKET:-}"
 
 if ! command -v cargo >/dev/null 2>&1; then
   echo "FAILED: cargo not on PATH." 1>&2
@@ -81,23 +84,36 @@ if [ "$GROUP" != "contract" ]; then
   RHI_ARG="-nullrhi"
   [ "${TEMPO_SIM_RENDER:-0}" = "1" ] && RHI_ARG="-RenderOffScreen"
 
-  echo "Launching sim: $BINARY $RHI_ARG (port $PORT)"
+  # One endpoint argument, matching the server's exclusive transports.
+  if [ -n "$SOCKET" ]; then
+    ENDPOINT_ARG=(-ServerSocket="$SOCKET")
+    echo "Launching sim: $BINARY $RHI_ARG (socket $SOCKET)"
+  else
+    ENDPOINT_ARG=(-ServerPort="$PORT")
+    echo "Launching sim: $BINARY $RHI_ARG (port $PORT)"
+  fi
   "$BINARY" "$RHI_ARG" -unattended -nopause -nosound -nosplash \
-    -ServerPort="$PORT" -stdout -fullstdoutlogoutput > "$REPORT_DIR/sim.log" 2>&1 &
+    "${ENDPOINT_ARG[@]}" -stdout -fullstdoutlogoutput > "$REPORT_DIR/sim.log" 2>&1 &
   SIM_PID=$!
 
-  # Wait for the gRPC TCP port to accept connections (the tests then retry the gRPC handshake).
-  echo "Waiting for sim gRPC port $PORT ..."
+  # Wait for the endpoint to show up (the tests then retry the gRPC handshake). A socket has no
+  # /dev/tcp equivalent, so wait for the server to create the file.
+  echo "Waiting for sim gRPC endpoint ${SOCKET:-port $PORT} ..."
   for _ in $(seq 1 "${TEMPO_SIM_STARTUP_TIMEOUT_S:-300}"); do
     if ! kill -0 "$SIM_PID" 2>/dev/null; then
       echo "FAILED: sim exited early. Log tail:" 1>&2; tail -n 40 "$REPORT_DIR/sim.log" 1>&2; exit 1
     fi
-    if (exec 3<>"/dev/tcp/127.0.0.1/$PORT") 2>/dev/null; then exec 3>&- 3<&-; break; fi
+    if [ -n "$SOCKET" ]; then
+      if [ -S "$SOCKET" ]; then break; fi
+    elif (exec 3<>"/dev/tcp/127.0.0.1/$PORT") 2>/dev/null; then
+      exec 3>&- 3<&-; break
+    fi
     sleep 1
   done
 fi
 
 export TEMPO_SERVER_PORT="$PORT"
+export TEMPO_SERVER_SOCKET="$SOCKET"
 
 CARGO_ARGS=(test --manifest-path "$TESTS_DIR/Cargo.toml")
 if [ -n "$GROUP" ] && [ "$GROUP" != "all" ]; then

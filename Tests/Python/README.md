@@ -34,7 +34,9 @@ Scripts/TestPythonAPI.sh core       # one group
 pytest. JUnit reports land in `Saved/PythonTestReport/`.
 
 Override the packaged location with `TEMPO_PACKAGED_DIR=/path/to/Packaged` and the port with
-`TEMPO_SERVER_PORT`.
+`TEMPO_SERVER_PORT`. `TEMPO_SERVER_SOCKET=run-a.sock` runs the sim on a Unix domain socket instead
+(Linux/macOS), which is how several test runs share a machine without each claiming a port; it
+takes precedence over the port.
 
 ## How the sim is managed
 

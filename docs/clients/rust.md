@@ -60,7 +60,8 @@ Arguments are **positional** and follow the request message's field order. Fluen
 (`batch()`, `call()`) work the same as in Python — see
 [TempoWorld](../plugins/tempo-world.md#batching-property-sets).
 
-Re-exported at the crate root: `set_server`, `set_server_async`, `tempo_context`, `TempoContext`,
+Re-exported at the crate root: `set_server`, `set_server_async`, `set_socket`, `set_socket_async`,
+`tempo_context`, `TempoContext`,
 `TempoError`, `SyncStreamIterator`.
 
 !!! note "Optional message fields"

@@ -28,6 +28,9 @@ import tempo_sim.TempoSensors  # generated protobuf modules nest under the packa
 # Point the client at a running Tempo server.
 tempo_sim.set_server("localhost", 10001)
 
+# Or, for a server on this machine listening on a Unix domain socket (Linux/macOS):
+tempo_sim.set_socket("sim-a.sock")
+
 # Use the generated API modules, e.g. tempo_sensors, tempo_world.
 from tempo_sim import tempo_sensors
 ```

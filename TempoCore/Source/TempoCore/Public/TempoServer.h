@@ -441,6 +441,9 @@ protected:
 	TUniquePtr<grpc::Server> Server;
 	TUniquePtr<grpc::ServerCompletionQueue> CompletionQueue;
 
+	// The Unix domain socket this server bound, to remove on shutdown. Empty for the Tcp transport.
+	FString BoundSocketPath;
+
 	FDelegateHandle OnPostEngineInitHandle;
 	FDelegateHandle OnPostWorldInitializationHandle;
 	FDelegateHandle OnWorldBeginPlayHandle;

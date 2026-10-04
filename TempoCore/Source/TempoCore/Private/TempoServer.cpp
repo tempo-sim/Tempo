@@ -4,8 +4,14 @@
 
 #include "TempoCoreSettings.h"
 #include "TempoCoreUtils.h"
+#include "TempoServerEndpoint.h"
 #include "TempoServiceProvider.h"
 #include "TempoCore.h"
+
+#include "HAL/PlatformMisc.h"
+#include "Misc/App.h"
+#include "Misc/CommandLine.h"
+#include "Misc/Parse.h"
 
 #include "grpcpp/impl/service_type.h"
 #if PLATFORM_WINDOWS
@@ -53,7 +59,9 @@ FTempoServer::FTempoServer()
 #if WITH_EDITOR
 	GetMutableDefault<UTempoCoreSettings>()->OnSettingChanged().AddLambda([this](UObject* Object, struct FPropertyChangedEvent& Event)
 	{
-		if (Event.Property->GetName() == UTempoCoreSettings::GetServerPortMemberName() ||
+		if (Event.Property->GetName() == UTempoCoreSettings::GetServerTransportMemberName() ||
+			Event.Property->GetName() == UTempoCoreSettings::GetServerPortMemberName() ||
+			Event.Property->GetName() == UTempoCoreSettings::GetServerSocketPathMemberName() ||
 			Event.Property->GetName() == UTempoCoreSettings::GetServerCompressionLevelMemberName())
 		{
 			Reinitialize();
@@ -105,6 +113,49 @@ grpc_compression_level CompressionLevelTogRPC(EServerCompressionLevel TempoCompr
 	}
 }
 
+namespace
+{
+	// sysexits.h's EX_CONFIG - the sim cannot start with the endpoint it was given. Distinct from 1
+	// so a harness can tell this apart from any other early exit.
+	constexpr uint8 ServerStartFailureExitCode = 78;
+
+	// Whether a server that cannot claim its endpoint should take the sim down with it.
+	//
+	// Only a packaged, headless sim: there is no window to put a warning in and usually nobody
+	// watching the log, so a sim that runs on without a server shows up only as every client
+	// failing to connect - far from where the problem is. An editor session or a windowed game
+	// keeps running instead, where the error is visible and the endpoint can be fixed in place.
+	bool ShouldExitOnServerStartFailure()
+	{
+#if WITH_EDITOR
+		return false;
+#else
+		// -nullrhi (and a dedicated server or commandlet) cannot render at all; -RenderOffScreen
+		// renders, but into no window. Both are how the sim runs under test and in CI.
+		static const bool bRenderOffScreen = FParse::Param(FCommandLine::Get(), TEXT("RenderOffScreen"));
+		const bool bHeadless = !FApp::CanEverRender() || bRenderOffScreen;
+		return bHeadless && GetDefault<UTempoCoreSettings>()->GetExitOnServerStartFailure();
+#endif
+	}
+
+	void HandleServerStartFailure(const FString& Reason)
+	{
+		UE_LOG(LogTempoCore, Error, TEXT("Could not start Tempo gRPC server: %s"), *Reason);
+
+		if (ShouldExitOnServerStartFailure())
+		{
+			UE_LOG(LogTempoCore, Error, TEXT("Exiting: no client could reach this headless sim without a server. ")
+				TEXT("Pass -AllowServerStartFailure to run on without one."));
+
+			// Not a Fatal log: a taken endpoint is a configuration problem, not a bug, and a crash
+			// report would bury it. Requesting rather than forcing the exit lets the engine unwind
+			// from the next tick. The status reaches the shell on Linux and Windows; Mac has no
+			// implementation that carries it, so there the log above is what names the failure.
+			FPlatformMisc::RequestExitWithStatus(false, ServerStartFailureExitCode, TEXT("FTempoServer::Initialize"));
+		}
+	}
+}
+
 void FTempoServer::Initialize()
 {
 	TArray<UObject*> ServiceProviderObjects;
@@ -140,30 +191,65 @@ void FTempoServer::Initialize()
 			Cast<ITempoServiceProvider>(Object)->RegisterServices(*this);
 		}
 	}
-	const int32 Port = GetDefault<UTempoCoreSettings>()->GetServerPort();
-	const FString ServerAddress = FString::Printf(TEXT("0.0.0.0:%d"), Port);
+	const UTempoCoreSettings* Settings = GetDefault<UTempoCoreSettings>();
+	TempoServerEndpoint::FEndpoint Endpoint;
+	FString EndpointError;
+	if (!TempoServerEndpoint::ResolveEndpoint(Settings->GetServerTransport(), Settings->GetServerPort(),
+		Settings->GetServerSocketPath(), Endpoint, EndpointError))
+	{
+		HandleServerStartFailure(EndpointError);
+		return;
+	}
+
+	const bool bUnixSocket = !Endpoint.SocketPath.IsEmpty();
+	if (bUnixSocket)
+	{
+		// Unlike a taken TCP port, a socket file in the way does not fail the bind - gRPC removes
+		// it first. Refuse up front instead, so a second server cannot take the name out from
+		// under a running one. See TempoServerEndpoint::IsSocketPathInUse.
+		if (TempoServerEndpoint::IsSocketPathInUse(Endpoint.SocketPath))
+		{
+			HandleServerStartFailure(FString::Printf(
+				TEXT("another server is already listening on %s"), *Endpoint.SocketPath));
+			return;
+		}
+		if (!TempoServerEndpoint::EnsureSocketDirectory(Endpoint.SocketPath, EndpointError))
+		{
+			HandleServerStartFailure(EndpointError);
+			return;
+		}
+	}
+
 	grpc::ServerBuilder Builder;
-	Builder.AddListeningPort(TCHAR_TO_UTF8(*ServerAddress), grpc::InsecureServerCredentials());
-	// gRPC enables SO_REUSEPORT by default where supported, which would let a second instance silently share
-	// the port (with the kernel load-balancing connections between them). Disable it so the bind fails instead.
-	Builder.AddChannelArgument(GRPC_ARG_ALLOW_REUSEPORT, 0);
+	Builder.AddListeningPort(TCHAR_TO_UTF8(*Endpoint.Target), grpc::InsecureServerCredentials());
+	if (!bUnixSocket)
+	{
+		// gRPC enables SO_REUSEPORT by default where supported, which would let a second instance silently share
+		// the port (with the kernel load-balancing connections between them). Disable it so the bind fails instead.
+		// SO_REUSEPORT has no meaning for a Unix domain socket, which the probe above covers instead.
+		Builder.AddChannelArgument(GRPC_ARG_ALLOW_REUSEPORT, 0);
+	}
 	for (const auto& Service : Services)
 	{
 		Builder.RegisterService(Service.Value.Get());
 	}
 
-	Builder.SetDefaultCompressionLevel(CompressionLevelTogRPC(GetDefault<UTempoCoreSettings>()->GetServerCompressionLevel()));
+	Builder.SetDefaultCompressionLevel(CompressionLevelTogRPC(Settings->GetServerCompressionLevel()));
 
 	CompletionQueue.Reset(Builder.AddCompletionQueue().release());
 	Server.Reset(Builder.BuildAndStart().release());
 
 	if (!Server.Get())
 	{
-		UE_LOG(LogTempoCore, Error, TEXT("Error while starting Tempo gRPC server. Perhaps port %d was not available."), Port);
+		HandleServerStartFailure(FString::Printf(
+			TEXT("could not bind %s. Another process is most likely already listening there."), *Endpoint.Target));
 		return;
 	}
 
-	UE_LOG(LogTempoCore, Display, TEXT("Tempo gRPC server listening on %s"), *ServerAddress);
+	// Held so Deinitialize can remove the socket file, which gRPC leaves behind.
+	BoundSocketPath = Endpoint.SocketPath;
+
+	UE_LOG(LogTempoCore, Display, TEXT("Tempo gRPC server listening on %s"), *Endpoint.Target);
 
 	// Now that the server has started we can initialize the request managers.
 	for (const auto& RequestManager : RequestManagers)
@@ -205,6 +291,12 @@ void FTempoServer::Deinitialize()
 
 	Services.Empty();
 	RequestManagers.Empty();
+
+	if (!BoundSocketPath.IsEmpty())
+	{
+		TempoServerEndpoint::RemoveSocketFile(BoundSocketPath);
+		BoundSocketPath.Reset();
+	}
 }
 
 void FTempoServer::Reinitialize()

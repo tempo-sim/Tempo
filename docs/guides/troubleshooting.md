@@ -58,16 +58,64 @@ Check the sim's log for:
 LogTempoCore: Display: Tempo gRPC server listening on 0.0.0.0:10001
 ```
 
-If instead you see:
+If the server never came up, the log says why:
 
 ```text
-LogTempoCore: Error: Error while starting Tempo gRPC server. Perhaps port 10001 was not available.
+LogTempoCore: Error: Could not start Tempo gRPC server: could not bind 0.0.0.0:10001. Another process is most likely already listening there.
 ```
 
-something else already holds the port — often another Tempo instance. Give one of them a different
+Something else already holds the port — often another Tempo instance. Give one of them a different
 port with `-ServerPort=10002`, and point the client at it.
 
+On Linux and macOS you can sidestep ports entirely by giving each sim a Unix domain socket
+(`-ServerSocket=sim-a.sock`) instead.
+
 [:octicons-arrow-right-24: Connecting to a server](../clients/connecting.md)
+
+### The sim refuses to start on a socket
+
+```text
+LogTempoCore: Error: Could not start Tempo gRPC server: another server is already listening on /run/user/1000/tempo/sim-a.sock
+```
+
+Another sim already owns that socket. Unlike a stale file left by a crash — which the next server
+cleans up — a live listener is never displaced, so give this one a different name. Two other
+refusals come from the path itself:
+
+```text
+LogTempoCore: Error: Could not start Tempo gRPC server: socket path is 137 bytes, but this platform allows at most 103: ...
+```
+
+A socket address cannot carry a path that long (the cap is 103 bytes on macOS, 107 on Linux). Use a
+bare name, which lands in the short per-user directory, or pick a shorter path.
+
+```text
+LogTempoCore: Error: Could not start Tempo gRPC server: /tmp/sim-a.sock exists and is not a socket
+```
+
+Something other than a socket is in the way. The server will not delete it; move it or choose
+another name.
+
+### When a failed start exits the sim
+
+A **packaged, headless** sim — one run with `-nullrhi` or `-RenderOffScreen`, as it is under test and
+in CI — does not run on when it cannot claim its endpoint. It logs the error above, follows it with
+
+```text
+LogTempoCore: Error: Exiting: no client could reach this headless sim without a server. Pass -AllowServerStartFailure to run on without one.
+```
+
+and shuts down with exit status **78**. Such a sim has no window to put a warning in and usually
+nobody watching it, so one that ran on without a server would surface only as every client failing to
+connect, a long way from the actual problem. (The status is carried on Linux and Windows. Mac has no
+engine implementation that carries it, so a Mac sim exits `0` and the log is what names the failure.)
+
+Everywhere else — an editor session, or a game with a window — the sim keeps running on the logged
+error, since the message is visible there and the endpoint can be corrected on the spot in **Project
+Settings**. To make a packaged, headless sim behave that way too, set `bExitOnServerStartFailure` to
+false or pass `-AllowServerStartFailure` for a single run.
+
+[:octicons-arrow-right-24: Server settings](../reference/settings.md#server)
 
 ### An async stream dies when I call the API from another thread
 

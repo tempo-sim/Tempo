@@ -21,6 +21,9 @@
 #                             this at your own tests to reuse this runner from a downstream project.
 #   TEMPO_TEST_REPORT_DIR     Where to write the JUnit report (defaults to <tempo>/Saved/PythonTestReport).
 #   TEMPO_SERVER_PORT         gRPC port the sim should listen on (default 10001).
+#   TEMPO_SERVER_SOCKET       A Unix domain socket for the sim to listen on instead of a port
+#                             (Linux/macOS). Lets several sims share a machine without each
+#                             needing its own port. Takes precedence over TEMPO_SERVER_PORT.
 #   TEMPO_TEST_VENV           venv to create/use (default <tempo>/.tempo_test_venv).
 
 set -e
@@ -103,6 +106,9 @@ mkdir -p "$REPORT_DIR"
 
 export TEMPO_PACKAGED_BINARY="$BINARY"
 export TEMPO_SERVER_PORT="${TEMPO_SERVER_PORT:-10001}"
+# Empty unless the caller asked for a socket; conftest launches the sim with -ServerSocket= and
+# points the client at the same path.
+export TEMPO_SERVER_SOCKET="${TEMPO_SERVER_SOCKET:-}"
 # Let conftest write the sim's full log into the report dir so it's uploaded as a CI artifact.
 export TEMPO_TEST_REPORT_DIR="$REPORT_DIR"
 
