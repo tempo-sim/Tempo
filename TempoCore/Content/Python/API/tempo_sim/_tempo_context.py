@@ -68,10 +68,12 @@ def _target_from_env():
       TEMPO_SERVER_ADDRESS  the server's host, with
       TEMPO_SERVER_PORT     its port, as -ServerPort= takes
 
-    TEMPO_SERVER_SOCKET wins when both are set, matching the server's own precedence.
+    TEMPO_SERVER_SOCKET wins when both are set, matching the server's own precedence. It is ignored
+    on Windows, which has no socket transport: this runs at import, so raising here would break
+    the whole package rather than just the connection.
     """
     socket_path = os.environ.get("TEMPO_SERVER_SOCKET", "").strip()
-    if socket_path:
+    if socket_path and sys.platform != "win32":
         return socket_target(socket_path)
     address = os.environ.get("TEMPO_SERVER_ADDRESS", "").strip() or DEFAULT_ADDRESS
     port = os.environ.get("TEMPO_SERVER_PORT", "").strip() or DEFAULT_PORT
