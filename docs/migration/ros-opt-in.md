@@ -100,6 +100,23 @@ Either is fine:
   `Source/ThirdParty/rclcpp` over from the old location so you do not re-download ~500 MB, then
   remove the old directory and its orphaned git directory with the two commands above.
 
+Moving it leaves the old path behind in two generated places. Neither is in your source tree, and
+each is one command to clear:
+
+- **The build steps UnrealBuildTool cached for it.** Your next `Build.sh` or `Package.sh` discards
+  them for you. Building another way first fails on the old
+  `TempoROS/Content/Python/gen_ros_idl.py` —
+  [see Troubleshooting](../guides/troubleshooting.md#a-prebuild-step-fails-on-a-path-that-no-longer-exists).
+- **The copy inside an old `Packaged` folder.** Packaging does not clear the folder first, so a
+  package built before the move keeps its `Plugins/Tempo/TempoROS` beside the `Plugins/TempoROS` the
+  next package stages. TempoROS finds `rclcpp` by scanning the project directory, finds both, and the
+  packaged game dies on startup with `Expected to find exactly one rclcpp module`. Delete `Packaged`
+  and package again, or remove just the leftover:
+
+    ```sh
+    find Packaged -type d -path '*/Plugins/Tempo/TempoROS' -prune -exec rm -rf {} +
+    ```
+
 ## Compatibility
 
 **Tempo `main` is guaranteed compatible with TempoROS `main`, and nothing else.** Tempo's CI proves

@@ -48,6 +48,9 @@ else
   exit 1
 fi
 
+# See Build.sh: a makefile cached from before a plugin moved runs that plugin's old pre-build steps.
+"$SCRIPT_DIR"/DiscardStaleBuildSteps.sh
+
 cd "$UNREAL_ENGINE_PATH"
 
 UPROJECT="$PROJECT_ROOT/$PROJECT_NAME.uproject"

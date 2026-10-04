@@ -50,6 +50,15 @@ your project root works.
 
     [:octicons-arrow-right-24: Packaging](../guides/packaging.md)
 
+`DiscardStaleBuildSteps.sh`
+
+:   Deletes any UnrealBuildTool makefile whose cached prebuild steps run a program that no longer
+    exists — what a moved plugin leaves behind. Object files beside it are kept, so the next build
+    is still incremental. `Build.sh` and `Package.sh` run it first; you only need it directly if you
+    build some other way.
+
+    [:octicons-arrow-right-24: Troubleshooting](../guides/troubleshooting.md#a-prebuild-step-fails-on-a-path-that-no-longer-exists)
+
 ## Testing
 
 `Test.sh [filter]`

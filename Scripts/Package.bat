@@ -37,6 +37,10 @@ if errorlevel 1 (
     exit /b 1
 )
 
+REM See Build.bat: a makefile cached from before a plugin moved runs that plugin's old pre-build steps.
+call "%SCRIPT_DIR%DiscardStaleBuildSteps.bat"
+if errorlevel 1 exit /b %ERRORLEVEL%
+
 cd /d "!UNREAL_ENGINE_PATH!"
 
 set "EXTRA_ARGS="

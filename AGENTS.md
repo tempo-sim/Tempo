@@ -279,6 +279,12 @@ matrix entry in `tempo_build_and_package.yml` (and, for Python, a line in `pytes
   TempoSensors); proto packages were renamed, so old external clients must regenerate.
 - Half-pixel offset: the distortion-map UV loop in `TempoCamera.cpp` must use `U + 0.5`
   (pixel center) or TAA breaks (`distortion_map_half_pixel` memory).
+- Moving a plugin that declares `PreBuildSteps` wedges every later build: UBT runs a target's cached
+  `Intermediate/Build/.../PreBuild-N.{sh,bat}` *before* `IsValidForSourceFiles` — the check that
+  notices a moved/deleted `.uplugin` — so the stale command lines fail first and the makefile is
+  never invalidated. `Scripts/DiscardStaleBuildSteps.sh` (run by `Build.sh` and `Package.sh`) deletes
+  just the offending `Makefile.bin`, keeping the build incremental. Same cause as a CI job that
+  restored an `Intermediate/**` cache from before the move.
 
 ---
 

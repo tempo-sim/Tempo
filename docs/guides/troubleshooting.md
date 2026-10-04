@@ -39,6 +39,31 @@ those plugins on disk. `-restore` undoes it.
 
 [:octicons-arrow-right-24: Traffic as a drop-in replacement](../plugins/traffic.md#drop-in-replacement-for-citysamples-traffic)
 
+### A prebuild step fails on a path that no longer exists
+
+```text
+can't open file '.../Plugins/Tempo/TempoROS/Content/Python/gen_ros_idl.py': [Errno 2] No such file or directory
+Custom build step .../PreBuild-1.sh terminated with exit code 2
+```
+
+A plugin that contributes prebuild steps has moved since your last build — usually
+[TempoROS moving out of Tempo](../migration/ros-opt-in.md) — and UnrealBuildTool is running the
+command lines it cached for the old location.
+
+Rebuilding does not clear it. UBT runs a target's cached prebuild scripts *before* it validates the
+makefile that holds them, so the stale script fails and aborts the build before the check that would
+have noticed the move ever runs. Nothing rewrites those scripts while that makefile still loads.
+
+`Build.sh` and `Package.sh` handle this for you, by deleting the makefile — and nothing else, so the
+build stays incremental. If you build another way (an IDE, `RunUAT` directly), either run the script
+yourself or delete the makefiles by hand:
+
+```bash
+Plugins/Tempo/Scripts/DiscardStaleBuildSteps.sh
+# or, from the project root
+rm Intermediate/Build/*/*/*/*/Makefile.bin
+```
+
 ### `GenROSIDL` prebuild fails with a `TypeError` from `em.py`
 
 ```text
