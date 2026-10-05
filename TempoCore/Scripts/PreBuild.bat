@@ -1,13 +1,13 @@
 @echo off
 REM Copyright Tempo Simulation, LLC. All Rights Reserved
 
+setlocal
+
 REM Find Git Bash to avoid invoking WSL's bash.exe
 set "GIT_BASH="
-where git >nul 2>nul && for /f "delims=" %%i in ('where git') do set "GIT_DIR=%%~dpi.."
-if defined GIT_DIR if exist "%GIT_DIR%\bin\bash.exe" set "GIT_BASH=%GIT_DIR%\bin\bash.exe"
-if not defined GIT_BASH if exist "C:\Program Files\Git\bin\bash.exe" set "GIT_BASH=C:\Program Files\Git\bin\bash.exe"
+for /f "usebackq delims=" %%I in (`"%~dp0_FindBash.bat"`) do set "GIT_BASH=%%I"
 if not defined GIT_BASH (
-    echo [Tempo Prebuild] ERROR: Could not find Git Bash. Please ensure Git for Windows is installed and on PATH.
+    echo [Tempo Prebuild] ERROR: Could not find Git Bash. See above.
     exit /b 1
 )
 

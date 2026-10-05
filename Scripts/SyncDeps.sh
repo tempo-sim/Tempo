@@ -24,7 +24,7 @@ fi
 # Check for jq
 if ! which jq &> /dev/null; then
   echo "Couldn't find jq"
-  if [[ "$OSTYPE" = "msys" ]]; then
+  if [[ "$OSTYPE" = "msys"* || "$OSTYPE" = "cygwin"* ]]; then
     echo "Install (on Windows): curl -L -o /usr/bin/jq.exe https://github.com/stedolan/jq/releases/latest/download/jq-win64.exe)"
   elif [[ "$OSTYPE" = "darwin"* ]]; then
     echo "Install (on Mac): brew install jq"
@@ -36,7 +36,7 @@ fi
 
 TEMPO_ROOT=$(realpath "$SCRIPT_DIR/..")
 
-if [[ "$OSTYPE" = "msys" ]]; then
+if [[ "$OSTYPE" = "msys"* || "$OSTYPE" = "cygwin"* ]]; then
   PLATFORM="Windows"
   # Check if we can cross compile
   if [ -z ${LINUX_MULTIARCH_ROOT+x} ]; then
@@ -48,6 +48,9 @@ elif [[ "$OSTYPE" = "darwin"* ]]; then
   PLATFORM="Mac"
 elif [[ "$OSTYPE" = "linux-gnu"* ]]; then
   PLATFORM="Linux"
+else
+  echo "Unsupported platform (OSTYPE=$OSTYPE)"
+  exit 1
 fi
 
 TEMP=$(mktemp -d)
@@ -57,7 +60,7 @@ GET_HASH() {
   local ARTIFACT_DIR=$1
 
   # Get Unreal Python path
-  if [[ "$OSTYPE" = "msys" ]]; then
+  if [[ "$OSTYPE" = "msys"* || "$OSTYPE" = "cygwin"* ]]; then
     PYTHON_PATH="$UNREAL_ENGINE_PATH/Engine/Binaries/ThirdParty/Python3/Win64/python.exe"
   elif [[ "$OSTYPE" = "darwin"* ]]; then
     PYTHON_PATH="$UNREAL_ENGINE_PATH/Engine/Binaries/ThirdParty/Python3/Mac/bin/python3"

@@ -38,7 +38,7 @@ fi
 # Check for jq
 if ! which jq &> /dev/null; then
   echo "Couldn't find jq"
-  if [[ "$OSTYPE" = "msys" ]]; then
+  if [[ "$OSTYPE" = "msys"* || "$OSTYPE" = "cygwin"* ]]; then
     echo "Install (on Windows): curl -L -o /usr/bin/jq.exe https://github.com/stedolan/jq/releases/latest/download/jq-win64.exe)"
   elif [[ "$OSTYPE" = "darwin"* ]]; then
     echo "Install (on Mac): brew install jq"
@@ -61,7 +61,7 @@ if [ -f "$UNREAL_ENGINE_PATH/Engine/Intermediate/Build/BuildRules/UE5RulesManife
 fi
 
 # Find dotnet
-if [[ "$OSTYPE" = "msys" ]]; then
+if [[ "$OSTYPE" = "msys"* || "$OSTYPE" = "cygwin"* ]]; then
   DOTNET=$(find ./Engine/Binaries/ThirdParty/DotNet -type f -name dotnet.exe)
 elif [[ "$OSTYPE" = "darwin"* ]]; then
   DOTNETS=$(find ./Engine/Binaries/ThirdParty/DotNet -type f -name dotnet)
@@ -84,6 +84,9 @@ elif [[ "$OSTYPE" = "linux-gnu"* ]]; then
       DOTNET=$(echo "${DOTNETS[@]}" | grep -E "linux-x64/dotnet")
     fi
   fi
+else
+  echo "Unsupported platform (OSTYPE=$OSTYPE)"
+  UNSUCCESSFUL_EXIT 1
 fi
 
 ENGINE_MODS_DIR="$TEMPO_ROOT/EngineMods/$RELEASE"
@@ -173,7 +176,7 @@ REBUILD_PLUGIN() {
   # every subsequent compile fails with "PCH file not found". Both forms have to agree.
   PLUGIN_BUILD_DIR=$(cd "$(mktemp -d)" && pwd -P)
   cd "$UNREAL_ENGINE_PATH"
-  if [[ "$OSTYPE" = "msys" ]]; then
+  if [[ "$OSTYPE" = "msys"* || "$OSTYPE" = "cygwin"* ]]; then
     # See Build.sh for why the .bat is run through cmd with a relative path.
     cmd //c 'Engine\Build\BatchFiles\RunUAT.bat' BuildPlugin -Plugin="$TEMP/$ROOT/$PLUGIN_NAME.uplugin" -Package="$PLUGIN_BUILD_DIR" -Rocket -TargetPlatforms=Win64
   elif [[ "$OSTYPE" = "darwin"* ]]; then

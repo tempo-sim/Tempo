@@ -66,7 +66,7 @@ if [ ! -d "$PAK_PATH" ]; then
 fi
 
 PLATFORM=""
-if [[ "$OSTYPE" = "msys" ]]; then
+if [[ "$OSTYPE" = "msys"* || "$OSTYPE" = "cygwin"* ]]; then
   PLATFORM="Win64"
 elif [[ "$OSTYPE" = "darwin"* ]]; then
   PLATFORM="Mac"

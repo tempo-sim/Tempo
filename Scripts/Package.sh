@@ -25,7 +25,7 @@ export UNREAL_ENGINE_PATH=$("$SCRIPT_DIR"/FindUnreal.sh)
 
 HOST_PLATFORM=""
 TARGET_PLATFORM=""
-if [[ "$OSTYPE" = "msys" ]]; then
+if [[ "$OSTYPE" = "msys"* || "$OSTYPE" = "cygwin"* ]]; then
   HOST_PLATFORM="Win64"
   if [ "$1" = "Linux" ]; then
     if [ -z ${LINUX_MULTIARCH_ROOT+x} ]; then
