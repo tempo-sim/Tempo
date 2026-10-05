@@ -10,7 +10,7 @@ PROJECT_NAME=$(find . -maxdepth 1 -name "*.uproject" -exec basename {} .uproject
 UNREAL_ENGINE_PATH=$("$SCRIPT_DIR"/FindUnreal.sh)
 
 PLATFORM=""
-if [[ "$OSTYPE" = "msys" ]]; then
+if [[ "$OSTYPE" = "msys"* || "$OSTYPE" = "cygwin"* ]]; then
   PLATFORM="Win64"
 elif [[ "$OSTYPE" = "darwin"* ]]; then
   PLATFORM="Mac"

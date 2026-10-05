@@ -13,7 +13,7 @@ PROJECT_ROOT="${2//\\//}"
 PLUGIN_ROOT="${3//\\//}"
 
 # Using the Python that comes with Unreal
-if [[ "$OSTYPE" = "msys" ]]; then
+if [[ "$OSTYPE" = "msys"* || "$OSTYPE" = "cygwin"* ]]; then
   # Convert Windows-style paths to Unix
   ENGINE_DIR=$(cygpath -a "$ENGINE_DIR")
   PROJECT_ROOT=$(cygpath -a "$PROJECT_ROOT")
@@ -27,6 +27,9 @@ elif [[ "$OSTYPE" = "linux-gnu"* ]]; then
   # path to Engine/Binaries/ThirdParty, but the correct include directory is in Engine/Source/ThirdParty).
   # So, we help pip find it, which it may need to in order to build any dependencies from source, with CPATH
   export CPATH="$CPATH:$UNREAL_ENGINE_PATH/Engine/Source/ThirdParty/Python3/Linux/include"
+else
+  echo "[Tempo Prebuild] ERROR: Unsupported platform (OSTYPE=$OSTYPE)" >&2
+  exit 1
 fi
 
 # Create (unless a TempoEnv with the same Python already exists) and activate the virtual environment to generate the API.
@@ -39,13 +42,13 @@ if [ -f "$VENV_DIR/pyvenv.cfg" ]; then
   # venv has since been moved/renamed, activate's baked-in paths are stale and
   # python/pip silently fall through to system PATH instead of using the venv.
   VENV_CREATED_AT=$(grep "^command = " "$VENV_DIR/pyvenv.cfg" | sed -E 's|^command = .* -m venv ||' | tr -d '\r' | tr '\\' '/')
-  if [[ "$OSTYPE" = "msys" ]]; then
+  if [[ "$OSTYPE" = "msys"* || "$OSTYPE" = "cygwin"* ]]; then
     VENV_PYTHON_DIR=$(cygpath -a "$VENV_PYTHON_DIR")
     if [ -n "$VENV_CREATED_AT" ]; then
       VENV_CREATED_AT=$(cygpath -a "$VENV_CREATED_AT")
     fi
   fi
-  if [[ "$OSTYPE" = "msys" ]]; then
+  if [[ "$OSTYPE" = "msys"* || "$OSTYPE" = "cygwin"* ]]; then
     VENV_ACTIVATE="$VENV_DIR/Scripts/activate"
   else
     VENV_ACTIVATE="$VENV_DIR/bin/activate"
@@ -64,7 +67,7 @@ if [ -f "$VENV_DIR/pyvenv.cfg" ]; then
 fi
 if [ "$VENV_EXISTS" -eq 0 ]; then
   echo "[Tempo Prebuild] Setting up Tempo Python venv"
-  if [[ "$OSTYPE" = "msys" ]]; then
+  if [[ "$OSTYPE" = "msys"* || "$OSTYPE" = "cygwin"* ]]; then
     ./python.exe -m venv "$VENV_DIR"
   else
     ./python3 -m venv "$VENV_DIR"
@@ -72,14 +75,14 @@ if [ "$VENV_EXISTS" -eq 0 ]; then
 else
   echo "[Tempo Prebuild]  Skipping creation of Tempo Python venv (already exists)"
 fi
-if [[ "$OSTYPE" = "msys" ]]; then
+if [[ "$OSTYPE" = "msys"* || "$OSTYPE" = "cygwin"* ]]; then
   source "$VENV_DIR/Scripts/activate"
 else
   source "$VENV_DIR/bin/activate"
 fi
 
 # Suppress pip's warning to upgrade to a new pip. We're using the pip version that came with Unreal, and we want to stay on it.
-if [[ "$OSTYPE" = "msys" ]]; then
+if [[ "$OSTYPE" = "msys"* || "$OSTYPE" = "cygwin"* ]]; then
   echo -e "[global]\ndisable-pip-version-check = true" > "$VENV_DIR/pip.ini"
 else
   echo -e "[global]\ndisable-pip-version-check = true" > "$VENV_DIR/pip.conf"

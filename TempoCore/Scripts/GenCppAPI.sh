@@ -18,7 +18,7 @@ PROJECT_ROOT="${2//\\//}"
 PLUGIN_ROOT="${3//\\//}"
 TOOL_DIR="${4//\\//}"
 
-if [[ "$OSTYPE" = "msys" ]]; then
+if [[ "$OSTYPE" = "msys"* || "$OSTYPE" = "cygwin"* ]]; then
   ENGINE_DIR=$(cygpath -a "$ENGINE_DIR")
   PROJECT_ROOT=$(cygpath -a "$PROJECT_ROOT")
   PLUGIN_ROOT=$(cygpath -a "$PLUGIN_ROOT")
@@ -33,7 +33,7 @@ fi
 # Activate the venv (created by GenAPI.sh) so gen_cpp_api.py can read the
 # protobuf descriptors and import jinja2.
 VENV_DIR="$PROJECT_ROOT/TempoEnv"
-if [[ "$OSTYPE" = "msys" ]]; then
+if [[ "$OSTYPE" = "msys"* || "$OSTYPE" = "cygwin"* ]]; then
   source "$VENV_DIR/Scripts/activate"
 else
   source "$VENV_DIR/bin/activate"
