@@ -4,6 +4,7 @@ set -e
 
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 TEMPO_ROOT=$( cd -- "$SCRIPT_DIR/.." &> /dev/null && pwd )
+PROJECT_ROOT=$("$SCRIPT_DIR"/FindProjectRoot.sh)
 
 cd "$TEMPO_ROOT"
 
@@ -76,10 +77,30 @@ bash "$INSTALL_ENGINE_MODS" "${EXTRA_ARGS[@]}"
 echo -e "Checking ThirdParty dependencies...\n"
 bash "$SYNC_DEPS" "${EXTRA_ARGS[@]}"
 
-PLUGIN_SETUP_SCRIPTS=$(find "$TEMPO_ROOT" -mindepth 2 -maxdepth 2 -name "Setup.sh" -not -path "$SCRIPT_DIR/Setup.sh" -print -quit)
-if [ -n "$PLUGIN_SETUP_SCRIPTS" ]; then
-  # Pass the same arguments on: without this, `Setup.sh -force` stops being forced at
-  # the plugin boundary, and a plugin whose dependencies need updating drops back to
-  # an interactive prompt - which is exactly what the caller used -force to avoid.
-  bash "$PLUGIN_SETUP_SCRIPTS" "${EXTRA_ARGS[@]}"
+# TempoROS is a separate repository, added to the project alongside Tempo rather than inside it, so
+# a project only has one if it asked for ROS. If this one does, set it up as well: it manages its
+# own third party dependencies and Unreal builds it like any other project plugin. Pass the same
+# arguments on: without them, `Setup.sh -force` would stop being forced at the plugin boundary, and
+# a plugin whose dependencies need updating drops back to an interactive prompt - which is exactly
+# what the caller used -force to avoid.
+TEMPOROS_DIR=$("$SCRIPT_DIR"/FindTempoROS.sh 2>/dev/null) || TEMPOROS_DIR=""
+
+if [ -n "$TEMPOROS_DIR" ] && [ -f "$TEMPOROS_DIR/Setup.sh" ]; then
+  echo -e "\nSetting up TempoROS\n"
+  bash "$TEMPOROS_DIR/Setup.sh" "${EXTRA_ARGS[@]}"
+elif [ -z "$TEMPOROS_DIR" ]; then
+  # TempoROSBridge is the only Tempo plugin that requires TempoROS, and it is opt-in. If this
+  # project has opted into it without adding TempoROS, say so now: the build would otherwise fail
+  # later with UnrealBuildTool's "Unable to find plugin 'TempoROS'", which says less about the fix.
+  UPROJECT_FILE=$(find "$PROJECT_ROOT" -maxdepth 1 -name "*.uproject" -print -quit)
+  BRIDGE_ENABLED=$(jq -r 'first(.Plugins[]?
+      | select((.Name // "") == "TempoROSBridge")
+      | (if (has("Enabled") | not) or .Enabled then "true" else "false" end)) // "false"' "$UPROJECT_FILE")
+  BRIDGE_ENABLED="${BRIDGE_ENABLED%$'\r'}"
+  if [ "$BRIDGE_ENABLED" = "true" ]; then
+    echo -e "\nWARNING: $(basename "$UPROJECT_FILE") enables TempoROSBridge, but this project has no TempoROS plugin."
+    echo "TempoROS is a separate repository. Add it beside Tempo, from $PROJECT_ROOT/Plugins:"
+    echo -e "\n\tgit submodule add https://github.com/tempo-sim/TempoROS.git\n"
+    echo -e "then re-run this script. Compatibility is guaranteed between Tempo main and TempoROS main.\n"
+  fi
 fi

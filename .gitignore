@@ -79,3 +79,9 @@ __pycache__
 # MkDocs local builds (docs are built by Read the Docs; see .readthedocs.yaml)
 site/
 .venv/
+
+# TempoROS is a separate repository, added to the host project's Plugins folder rather than vendored
+# here. A checkout that predates that change still has the old submodule's working tree sitting at
+# Tempo/TempoROS, untracked. Ignoring it keeps `git add -A` from committing it back as an embedded
+# git repository, and keeps `git clean -fd` from deleting someone's rclcpp download.
+/TempoROS/

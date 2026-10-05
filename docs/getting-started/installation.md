@@ -40,30 +40,72 @@
         collision `Setup.sh` resolves. See
         [Tempo + CitySample](../guides/citysample.md).
 
-## Disable ROS plugins if unused
+## Adding ROS
 
-Tempo's primary interface is gRPC, which needs no ROS — see
-[Client APIs](../clients/index.md). [TempoROS](../plugins/tempo-ros.md) and
-[TempoROSBridge](../plugins/tempo-ros-bridge.md) are optional and TempoSample
-explicitly enables both. If you are not using
-ROS, disable them before building:
+Tempo's primary interface is gRPC, which needs no ROS — see [Client APIs](../clients/index.md). Do
+nothing and you get no ROS: nothing to clone, nothing to build, and no `rclcpp` download.
 
-- In your `.uproject`, set the `TempoROS` and `TempoROSBridge` entries' `Enabled` field to `false`:
+ROS support is two plugins, and they are not obtained the same way:
 
-    ```json title=".uproject"
-    {
-        "Name": "TempoROS",
-        "Enabled": false
-    },
-    {
-        "Name": "TempoROSBridge",
-        "Enabled": false
-    }
+| | Where it comes from | Enabled |
+|---|---|---|
+| [TempoROS](../plugins/tempo-ros.md) | A **separate repository**, [tempo-sim/TempoROS](https://github.com/tempo-sim/TempoROS). Tempo does not ship it. | By default, once it is in your project |
+| [TempoROSBridge](../plugins/tempo-ros-bridge.md) | Ships with Tempo | **Opt-in** — `"EnabledByDefault": false` |
+
+If you want ROS, add TempoROS to your project's `Plugins` folder, beside Tempo rather than inside
+it:
+
+```sh
+cd Plugins
+git submodule add https://github.com/tempo-sim/TempoROS.git
+```
+
+Then enable the bridge, which re-exposes Tempo's own services as ROS topics and services, by adding
+it to the `"Plugins"` array of your `.uproject`:
+
+```json title=".uproject"
+{
+    "Name": "TempoROSBridge",
+    "Enabled": true
+}
+```
+
+`Setup.sh` (next section) finds TempoROS wherever it sits under `Plugins` and installs its `rclcpp`
+dependencies for you. Enabling the bridge without TempoROS present is a build error naming
+TempoROS, and `Setup.sh` warns about it first.
+
+Packaging with ROS also needs one line in `Config/DefaultGame.ini` — see
+[Packaging](../guides/packaging.md#packaging-with-temporos).
+
+!!! warning "Track `main` on both"
+
+    Compatibility is guaranteed between Tempo's `main` and TempoROS's `main`, and is verified in
+    Tempo's CI. Pairing a release branch of one with the other is untested.
+
+!!! warning "Upgrading from a version that bundled TempoROS"
+
+    TempoROS used to be a submodule of Tempo, and both plugins were enabled implicitly. After
+    upgrading, a project that never named them in its `.uproject` silently builds without ROS. See
+    [ROS is now opt-in](../migration/ros-opt-in.md).
+
+!!! warning "Moved TempoROS out of Tempo? Clear your old `Packaged` folder"
+
+    Packaging writes into the `Packaged` folder without clearing it first. A package built while
+    TempoROS still lived at `Plugins/Tempo/TempoROS` leaves that copy behind, beside the
+    `Plugins/TempoROS` the next package stages. TempoROS locates `rclcpp` by scanning the project
+    directory, so the packaged game finds both and dies on startup:
+
+    ```text
+    Assertion failed: PossibleTargets.Num() == 1
+    Expected to find exactly one rclcpp module
     ```
 
-- Remove `CustomStageCopyHandler=TempoROSCopyHandler` from `Config/DefaultGame.ini`.
+    Your source tree is fine — only the stale copy inside the package is the problem. Delete the
+    `Packaged` folder and package again, or remove just the leftover:
 
-This avoids requiring a ROS 2 installation and skips building the ROS-dependent modules.
+    ```sh
+    find Packaged -type d -path '*/Plugins/Tempo/TempoROS' -prune -exec rm -rf {} +
+    ```
 
 ## One-time setup
 

@@ -37,29 +37,13 @@ if errorlevel 1 (
     exit /b 1
 )
 
-set "TEMPOROS_ENABLED=false"
-for /f "usebackq delims=" %%I in (`jq -r ".Plugins[]? | select(.Name==\"TempoROS\") | .Enabled" "!UPROJECT_FILE!"`) do set "TEMPOROS_ENABLED=%%I"
-
-if /i "!TEMPOROS_ENABLED!"=="true" (
-    echo Building TempoROS automation ^(for custom copy handler^)
-    set "TEMPOROS_SCRIPTS=!PROJECT_ROOT!\Plugins\Tempo\TempoROS\Scripts"
-    if exist "!TEMPOROS_SCRIPTS!\BuildAutomation.bat" (
-        call "!TEMPOROS_SCRIPTS!\BuildAutomation.bat"
-        if errorlevel 1 exit /b 1
-    ) else (
-        for /f "usebackq delims=" %%I in (`"%SCRIPT_DIR%_FindBash.bat"`) do set "BASH_EXE=%%I"
-        if not defined BASH_EXE exit /b 1
-        "!BASH_EXE!" "!TEMPOROS_SCRIPTS!\BuildAutomation.sh"
-        if errorlevel 1 exit /b 1
-    )
-) else (
-    echo Skipping TempoROS automation build because TempoROS plugin is not enabled
-)
+REM See Build.bat: a makefile cached from before a plugin moved runs that plugin's old pre-build steps.
+call "%SCRIPT_DIR%DiscardStaleBuildSteps.bat"
+if errorlevel 1 exit /b %ERRORLEVEL%
 
 cd /d "!UNREAL_ENGINE_PATH!"
 
 set "EXTRA_ARGS="
-if /i "!TEMPOROS_ENABLED!"=="true" set EXTRA_ARGS=-ScriptDir="!PROJECT_ROOT!\Plugins\Tempo\TempoROS\Scripts"
 
 call "Engine\Build\BatchFiles\RunUAT.bat" Turnkey -command=VerifySdk -platform=!TARGET_PLATFORM! -UpdateIfNeeded -project="!PROJECT_ROOT!\!PROJECT_NAME!.uproject" BuildCookRun -nop4 -utf8output -nocompileeditor -skipbuildeditor -cook -target="!PROJECT_NAME!" -platform=!TARGET_PLATFORM! -project="!PROJECT_ROOT!\!PROJECT_NAME!.uproject" -installed -stage -package -pak -build -iostore -prereqs -clientconfig=Development -unrealexe="UnrealEditor-Cmd.exe" -stagingdirectory="!PROJECT_ROOT!\Packaged" !EXTRA_ARGS! %*
 if errorlevel 1 exit /b %ERRORLEVEL%

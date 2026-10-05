@@ -21,6 +21,10 @@ else
   exit 1
 fi
 
+# UBT runs a target's cached pre-build steps before it validates the makefile that owns them, so a
+# plugin that has moved since the last build takes the build down with it until the makefile goes.
+"$SCRIPT_DIR"/DiscardStaleBuildSteps.sh
+
 cd "$UNREAL_ENGINE_PATH"
 if [ "$PLATFORM" = "Win64" ]; then
   # Run the .bat through cmd explicitly with a relative, space-free path. Letting bash spawn the
