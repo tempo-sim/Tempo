@@ -1131,6 +1131,10 @@ UMaterialInstanceDynamic* UTempoCamera::GetOrCreateStitchColorMID()
 	}
 
 	StitchColorMID->SetTextureParameterValue(TEXT("AtlasRT"), SharedTextureTarget);
+	// The resolve map's UVs address the atlas in 1x output pixels while AtlasRT is UpsamplingFactor
+	// times larger; the material box-filters each 1x pixel's full footprint in AtlasRT, so it needs
+	// the 1x size to find that footprint.
+	StitchColorMID->SetVectorParameterValue(TEXT("AtlasSize"), FLinearColor(AtlasSize.X, AtlasSize.Y, 0.0f, 0.0f));
 	StitchColorMID->SetTextureParameterValue(TEXT("OutputResolveMap"), OutputResolveMap);
 	StitchColorMID->SetTextureParameterValue(TEXT("OutputResolveWeight"), OutputResolveWeight);
 	return StitchColorMID;
