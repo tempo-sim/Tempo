@@ -714,13 +714,10 @@ ETempoTextureFilterType UTempoCamera::GetEffectiveTextureFilterType() const
 	{
 		return ETempoTextureFilterType::Nearest;
 	}
-	// Wide equidistant fisheye: output sampling density varies sharply with angle, so bicubic's
-	// wider footprint keeps detail in the dense central region.
-	if (LensParameters.IsFisheye() && FOVAngle > 120.0f)
-	{
-		return ETempoTextureFilterType::Bicubic;
-	}
-	return ETempoTextureFilterType::Bilinear;
+	// Any distortion resamples the render at fractional texel offsets, where bilinear's blur is
+	// significant at every FOV (it averages neighboring texels by up to half each); bicubic keeps
+	// nearly all of the detail for four taps instead of one.
+	return ETempoTextureFilterType::Bicubic;
 }
 
 void UTempoCamera::OnUnregister()
@@ -1208,10 +1205,12 @@ void UTempoCamera::InitRenderTarget()
 	// is fp32 — not for color dynamic range, but because each tile's distortion PPM bit-packs
 	// (label, depth) into the alpha channel, and fp16 alpha does not have the mantissa bits to
 	// preserve that. Point sampling is mandatory for the aux unpack pass; the color stitch
-	// material overrides to bilinear at its sampler. Atlas dimensions are K * AtlasSize, which
-	// may be larger than SizeXY when feathering (each tile gets a disjoint atlas region) and is
+	// material reads exact texels and does its own filtering. Atlas dimensions are
+	// K * AtlasSize, which may be larger than SizeXY when feathering (each tile gets a disjoint
+	// atlas region) and is
 	// further multiplied by UpsamplingFactor to give the perspective render denser pixels for
-	// the distortion PPM to resample. The stitch pass downsamples to SizeXY via bilinear.
+	// the distortion PPM to resample. The stitch pass filters each output pixel's footprint in
+	// the atlas down to SizeXY.
 	SharedTextureTarget = NewObject<UTextureRenderTarget2D>(this);
 	SharedTextureTarget->TargetGamma = 1.0f;
 	SharedTextureTarget->bGPUSharedFlag = true;
