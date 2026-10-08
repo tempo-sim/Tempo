@@ -103,6 +103,99 @@ namespace
 		return IsExtendedLuminanceRangeEnabled() ? FMath::Log2(Luminance / LuminanceMax) : Luminance;
 	}
 
+	// How densely a tile's perspective render (at UpsamplingFactor 1) samples its output, from the
+	// singular values of the Jacobian of the output->render pixel mapping. At an output pixel, the
+	// render supplies Sigma render pixels per output pixel along each principal direction, so an
+	// UpsamplingFactor of 1 / SigmaMin brings the sparsest direction up to one render pixel per
+	// output pixel, and SigmaMax is how much the densest direction is oversampled.
+	struct FTileSamplingDensity
+	{
+		double MaxRequiredK = 0.0;
+		FVector2D MaxRequiredKPixel = FVector2D::ZeroVector;
+		double MinRequiredK = TNumericLimits<double>::Max();
+		double MaxOversample = 0.0;
+		double ImageCenterRequiredK = 0.0;
+	};
+
+	// Evaluates the Jacobian at continuous tile output pixel coordinates (PU, PV), using the same
+	// pixel -> output-unit -> render-UV mapping as UTempoSceneCaptureComponent2D::FillDistortionMap.
+	// Returns false where the mapping leaves the model's valid region.
+	bool ComputeSamplingSigmas(const FLensModel& Model, const FDistortionRenderConfig& Config, const FVector2D& OutputCenter,
+		double PU, double PV, double& OutSigmaMin, double& OutSigmaMax)
+	{
+		const double RenderPixelsPerTanX = Config.RenderSizeXY.X / (Config.TanRight - Config.TanLeft);
+		const double RenderPixelsPerTanY = Config.RenderSizeXY.Y / (Config.TanBottom - Config.TanTop);
+		const auto ToRenderPixels = [&](double U, double V, FVector2D& OutRender)
+		{
+			const FVector2D Render = Model.OutputToRender((U - OutputCenter.X) / Config.FOutput, (V - OutputCenter.Y) / Config.FOutput);
+			// OutputToRender signals a ray at or beyond the model's horizon with a (1e6, 1e6) sentinel.
+			if (!FMath::IsFinite(Render.X) || !FMath::IsFinite(Render.Y) || FMath::Abs(Render.X) > 1e5 || FMath::Abs(Render.Y) > 1e5)
+			{
+				return false;
+			}
+			OutRender = FVector2D(Render.X * RenderPixelsPerTanX, Render.Y * RenderPixelsPerTanY);
+			return true;
+		};
+
+		constexpr double Step = 0.5;
+		FVector2D XPlus, XMinus, YPlus, YMinus;
+		if (!ToRenderPixels(PU + Step, PV, XPlus) || !ToRenderPixels(PU - Step, PV, XMinus) ||
+			!ToRenderPixels(PU, PV + Step, YPlus) || !ToRenderPixels(PU, PV - Step, YMinus))
+		{
+			return false;
+		}
+		const FVector2D dU = (XPlus - XMinus) / (2.0 * Step);
+		const FVector2D dV = (YPlus - YMinus) / (2.0 * Step);
+
+		// Singular values of the 2x2 Jacobian [dU dV] from its Frobenius norm and determinant.
+		const double SumSquares = dU.SizeSquared() + dV.SizeSquared();
+		const double AbsDet = FMath::Abs(dU.X * dV.Y - dV.X * dU.Y);
+		const double Discriminant = FMath::Sqrt(FMath::Max(0.0, SumSquares * SumSquares - 4.0 * AbsDet * AbsDet));
+		OutSigmaMax = FMath::Sqrt(0.5 * (SumSquares + Discriminant));
+		OutSigmaMin = OutSigmaMax > 0.0 ? AbsDet / OutSigmaMax : 0.0;
+		return OutSigmaMin > 0.0;
+	}
+
+	// Samples the tile on a grid of at most 257x257 output pixels spanning its full rect (edges
+	// included, where fisheye demand tends to peak), plus exactly at ImageCenterPixel, the tile
+	// pixel nearest the full image's optical center.
+	FTileSamplingDensity MeasureTileSamplingDensity(const FLensModel& Model, const FDistortionRenderConfig& Config,
+		const FIntPoint& TileOutputSizeXY, const FVector2D& PrincipalPoint, const FVector2D& ImageCenterPixel)
+	{
+		FTileSamplingDensity Density;
+		const FVector2D OutputCenter = OpticalCenterPixels(TileOutputSizeXY, PrincipalPoint);
+		const int32 NumX = FMath::Min(TileOutputSizeXY.X, 257);
+		const int32 NumY = FMath::Min(TileOutputSizeXY.Y, 257);
+		for (int32 J = 0; J < NumY; ++J)
+		{
+			const double PV = 0.5 + (NumY > 1 ? (TileOutputSizeXY.Y - 1.0) * J / (NumY - 1) : 0.0);
+			for (int32 I = 0; I < NumX; ++I)
+			{
+				const double PU = 0.5 + (NumX > 1 ? (TileOutputSizeXY.X - 1.0) * I / (NumX - 1) : 0.0);
+				double SigmaMin, SigmaMax;
+				if (!ComputeSamplingSigmas(Model, Config, OutputCenter, PU, PV, SigmaMin, SigmaMax))
+				{
+					continue;
+				}
+				const double RequiredK = 1.0 / SigmaMin;
+				if (RequiredK > Density.MaxRequiredK)
+				{
+					Density.MaxRequiredK = RequiredK;
+					Density.MaxRequiredKPixel = FVector2D(PU, PV);
+				}
+				Density.MinRequiredK = FMath::Min(Density.MinRequiredK, RequiredK);
+				Density.MaxOversample = FMath::Max(Density.MaxOversample, SigmaMax);
+			}
+		}
+
+		double SigmaMin, SigmaMax;
+		if (ComputeSamplingSigmas(Model, Config, OutputCenter, ImageCenterPixel.X, ImageCenterPixel.Y, SigmaMin, SigmaMax))
+		{
+			Density.ImageCenterRequiredK = 1.0 / SigmaMin;
+		}
+		return Density;
+	}
+
 	// The auto exposure inputs the controller consumes, resolved the way the engine resolves a view's
 	// final post-process settings: project defaults, then the world's post process volumes at the
 	// view location in priority order, then the component's own overrides.
@@ -1930,7 +2023,34 @@ void UTempoCamera::InitTileDistortionMap(FTempoCameraTile& Tile)
 		Config.RenderSizeXY, Config.TanLeft, Config.TanRight, Config.TanTop, Config.TanBottom, PrincipalPoint);
 	UTempoSceneCaptureComponent2D::ApplyDistortionMapToMaterial(Tile.PostProcessMaterialInstance, Tile.DistortionMap);
 
+	LogTileSamplingDensity(Tile, *Model, Config, PrincipalPoint);
+
 	ApplyTileMaterialParams(Tile);
+}
+
+void UTempoCamera::LogTileSamplingDensity(const FTempoCameraTile& Tile, const FLensModel& Model, const FDistortionRenderConfig& Config, const FVector2D& PrincipalPoint) const
+{
+	// The tile's covered rect in full-image pixels: its owned rect, extended by the feather on the
+	// side it shares a seam with (the side facing the image interior, i.e. a non-zero owned offset).
+	const FIntPoint CoveredOrigin(
+		Tile.OwnedOutputOffset.X > 0 ? Tile.OwnedOutputOffset.X - (Tile.TileOutputSizeXY.X - Tile.OwnedOutputSize.X) : 0,
+		Tile.OwnedOutputOffset.Y > 0 ? Tile.OwnedOutputOffset.Y - (Tile.TileOutputSizeXY.Y - Tile.OwnedOutputSize.Y) : 0);
+
+	const FVector2D ImageCenter = OpticalCenterPixels(SizeXY, LensParameters.GetClampedPrincipalPoint());
+	const FVector2D ImageCenterInTile(
+		FMath::Clamp(ImageCenter.X - CoveredOrigin.X, 0.5, Tile.TileOutputSizeXY.X - 0.5),
+		FMath::Clamp(ImageCenter.Y - CoveredOrigin.Y, 0.5, Tile.TileOutputSizeXY.Y - 0.5));
+
+	const FTileSamplingDensity Density = MeasureTileSamplingDensity(Model, Config, Tile.TileOutputSizeXY, PrincipalPoint, ImageCenterInTile);
+	const FVector2D MaxPixel = Density.MaxRequiredKPixel + FVector2D(CoveredOrigin);
+
+	UE_LOG(LogTempoSensors, Display, TEXT("Sampling density owner: %s camera: %s tile: %d output: %dx%d (%.1fx%.1f deg render FOV) UpsamplingFactor: %.2f. ")
+		TEXT("UpsamplingFactor needed: max %.2f at image pixel (%.0f, %.0f), image center %.2f, least demanding pixel %.2f. Max oversampling at 1x: %.2f"),
+		*GetOwnerName(), *GetSensorName(), static_cast<int32>(&Tile - Tiles), Tile.TileOutputSizeXY.X, Tile.TileOutputSizeXY.Y,
+		FMath::RadiansToDegrees(FMath::Atan(Config.TanRight) - FMath::Atan(Config.TanLeft)),
+		FMath::RadiansToDegrees(FMath::Atan(Config.TanBottom) - FMath::Atan(Config.TanTop)),
+		UpsamplingFactor, Density.MaxRequiredK, MaxPixel.X, MaxPixel.Y, Density.ImageCenterRequiredK, Density.MinRequiredK,
+		Density.MaxOversample);
 }
 
 // Push the tile's tan-bounds onto the distortion PPM. The depth path uses these to recover the
