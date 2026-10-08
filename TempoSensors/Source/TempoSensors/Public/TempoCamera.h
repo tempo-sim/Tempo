@@ -16,6 +16,8 @@
 #include "TempoCamera.generated.h"
 
 class FTempoMotionVectorRewarpViewExtension;
+struct FLensModel;
+struct FDistortionRenderConfig;
 
 // Texture filter applied by the distortion post-process material when sampling the perspective
 // render target. Maps directly to the "FilterType" scalar parameter (Nearest=0, Bilinear=1,
@@ -344,6 +346,11 @@ protected:
 	void ApplyTilePostProcess(FTempoCameraTile& Tile);
 	void SetTileDepthEnabled(FTempoCameraTile& Tile, bool bTileDepthEnabled);
 	void InitTileDistortionMap(FTempoCameraTile& Tile);
+	// Log how densely the tile's perspective render samples its output: the UpsamplingFactor the
+	// tile needs at its most demanding pixel and at the image's optical center, the factor its
+	// least demanding pixel needs, and its worst-case oversampling, all relative to
+	// UpsamplingFactor 1. Diagnostic only; does not change the render.
+	void LogTileSamplingDensity(const FTempoCameraTile& Tile, const FLensModel& Model, const FDistortionRenderConfig& Config, const FVector2D& PrincipalPoint) const;
 	// Push the tile's tan-bounds and filter type onto its distortion PPM. Call after anything that
 	// can hand the tile a fresh MID, which starts from the material's placeholder defaults.
 	void ApplyTileMaterialParams(FTempoCameraTile& Tile);
