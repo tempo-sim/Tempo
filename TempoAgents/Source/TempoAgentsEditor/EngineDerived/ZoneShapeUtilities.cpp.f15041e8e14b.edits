@@ -1,7 +1,7 @@
 # tempo-engine-derived-edits 1
 # source: Plugins/Runtime/ZoneGraph/Source/ZoneGraph/Private/ZoneShapeUtilities.cpp
 # source-sha256: f15041e8e14b10b98b370c2300625da03e44a721194e12b30f971270c051ecb5
-# output-sha256: 9592bfe083d4b87c22d4b44e116f83765ff716ea5a133fac823d71256099b89b
+# output-sha256: c626099e2861a7a0dd251e277321fd48421df5679d87ae6a28ed0903e7c4c42d
 a2 7
 // GENERATED FILE. Do not edit or commit.
 // Tempo's build generates this from your engine's copy of ZoneGraph's ZoneShapeUtilities.cpp,
@@ -291,7 +291,7 @@ a1647 29
 			float SourceTangentLength = FVector::Distance(SourceSlot.Position, DestSlot.Position) / 3.0;
 			float DestTangentLength = SourceTangentLength;
 
-			static const float MinAngleCos = FMath::Cos(FMath::DegreesToRadians(BuildSettings.TurnThresholdAngle));
+			const float MinAngleCos = FMath::Cos(FMath::DegreesToRadians(BuildSettings.TurnThresholdAngle));
 			const bool bIsTurning = FVector2D::DotProduct(FVector2D(SourceSlot.Forward), FVector2D(-DestSlot.Forward)) < MinAngleCos;
 			if (bIsTurning)
 			{

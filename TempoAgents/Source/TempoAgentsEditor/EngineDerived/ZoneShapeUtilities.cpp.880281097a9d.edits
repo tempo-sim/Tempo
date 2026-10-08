@@ -1,7 +1,7 @@
 # tempo-engine-derived-edits 1
 # source: Plugins/Runtime/ZoneGraph/Source/ZoneGraph/Private/ZoneShapeUtilities.cpp
 # source-sha256: 880281097a9d3d14ab953e825c7b89fff7bb72a6f733c8090ed210f6eef9f1c6
-# output-sha256: 9592bfe083d4b87c22d4b44e116f83765ff716ea5a133fac823d71256099b89b
+# output-sha256: c626099e2861a7a0dd251e277321fd48421df5679d87ae6a28ed0903e7c4c42d
 a2 7
 // GENERATED FILE. Do not edit or commit.
 // Tempo's build generates this from your engine's copy of ZoneGraph's ZoneShapeUtilities.cpp,
@@ -126,6 +126,9 @@ a1701 1
 d1735 1
 a1735 1
 		if (RoutingType != EZoneShapePolygonRoutingType::Arcs)
+d1741 1
+a1741 1
+			const float MinAngleCos = FMath::Cos(FMath::DegreesToRadians(BuildSettings.TurnThresholdAngle));
 d1754 1
 a1754 1
 					TEXT("No intersection found between radial directions while building ZoneShape with Bezier routing")))

@@ -49,7 +49,7 @@ bool FTempoEngineModsBuildSettingsTest::RunTest(const FString& Parameters)
 {
 	// As a project's DefaultZoneGraph.ini had them, among the engine's own build settings.
 	const FString BuildSettingsText = TEXT("(CommonTessellationTolerance=1.500000,LaneConnectionAngle=25.000000,TurnThresholdAngle=5.000000,")
-		TEXT("TempoBezierTangentLengthMultiplier=1.250000,PolygonRoutingRules=((Comment=\"a, (tricky) one\",ZoneTagFilter=(AnyTags=(Mask=1)))),")
+		TEXT("TempoBezierTangentLengthMultiplier=1.250000,PolygonRoutingRules=((Comment=\"a, (tricky) one ending in a backslash\\\\\",ZoneTagFilter=(AnyTags=(Mask=1)))),")
 		TEXT("CompatibleTags=((SourceTag=(Bit=3),DestTag=(Bit=5),CompatibleForTurnTypes=(Right,NoTurn)),(SourceTag=(Bit=5),DestTag=(Bit=3),CompatibleForTurnTypes=(Left))),")
 		TEXT("bRemoveOverlap=False,bRemoveSameDestination=True,bFillEmptyDestination=False,bSingleTurningConnectionPerTurnType=False,ConnectionSnapDistance=25.000000)");
 

@@ -9,8 +9,15 @@
           "SourceSHA256": "f15041e8e14b10b98b370c2300625da03e44a721194e12b30f971270c051ecb5",
           "File": "ZoneShapeUtilities.cpp.f15041e8e14b.edits",
           "EngineVersions": [
+            "5.7.0",
+            "5.7.1",
+            "5.7.2",
+            "5.7.3",
             "5.7.4",
-            "5.8.2"
+            "5.8.0",
+            "5.8.1",
+            "5.8.2",
+            "5.8.3"
           ]
         },
         {
@@ -30,8 +37,15 @@
           "SourceSHA256": "e0a76d6a69b58c08a747d06050dd07bccf51c7f1e6b2b862ec5a10ddec309cdc",
           "File": "ZoneGraphBuilder.cpp.e0a76d6a69b5.edits",
           "EngineVersions": [
+            "5.7.0",
+            "5.7.1",
+            "5.7.2",
+            "5.7.3",
             "5.7.4",
-            "5.8.2"
+            "5.8.0",
+            "5.8.1",
+            "5.8.2",
+            "5.8.3"
           ]
         },
         {
@@ -51,8 +65,15 @@
           "SourceSHA256": "efe4bc71d36c51b69f75d44bbc3399c0fbf3d0790b819ce18eb4b7345b84e48a",
           "File": "ZoneGraphBVTree.cpp.efe4bc71d36c.edits",
           "EngineVersions": [
+            "5.7.0",
+            "5.7.1",
+            "5.7.2",
+            "5.7.3",
             "5.7.4",
-            "5.8.2"
+            "5.8.0",
+            "5.8.1",
+            "5.8.2",
+            "5.8.3"
           ]
         }
       ]

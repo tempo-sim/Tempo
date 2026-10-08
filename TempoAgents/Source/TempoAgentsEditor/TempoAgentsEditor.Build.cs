@@ -1,5 +1,6 @@
 ﻿// Copyright Tempo Simulation, LLC. All Rights Reserved.
 
+using Microsoft.Extensions.Logging;
 using System.Diagnostics;
 using System.IO;
 using UnrealBuildTool;
@@ -71,9 +72,11 @@ public class TempoAgentsEditor : TempoModuleRules
 	}
 
 	// Part of this module's source is generated from the engine's (see EngineDerived/README.md).
-	// The plugin's pre-build step is what keeps it up to date and reports any failure. But UBT skips
-	// a pre-build step in the build that first learns of it, and these rules always run before UBT
-	// looks for this module's source files, so the sources are also generated here.
+	// The plugin's pre-build step is what keeps it up to date and fails the build when it cannot be.
+	// But UBT skips a pre-build step in the build that first learns of it (one whose cached makefile
+	// predates it), and these rules always run before UBT looks for this module's source files, so
+	// the sources are also generated here. A failure here only warns: these rules also run where a
+	// failure must not end things, such as project file generation.
 	private void GenerateEngineDerivedSources()
 	{
 		string PythonRelativePath;
@@ -106,13 +109,21 @@ public class TempoAgentsEditor : TempoModuleRules
 		{
 			using (Process GenerateProcess = Process.Start(StartInfo))
 			{
-				GenerateProcess.StandardOutput.ReadToEnd();
-				GenerateProcess.StandardError.ReadToEnd();
+				// Drain stdout asynchronously so the script can never block on a full pipe while
+				// this thread reads stderr to its end.
+				GenerateProcess.OutputDataReceived += (Sender, Line) => { };
+				GenerateProcess.BeginOutputReadLine();
+				string Errors = GenerateProcess.StandardError.ReadToEnd();
 				GenerateProcess.WaitForExit();
+				if (GenerateProcess.ExitCode != 0)
+				{
+					Logger.LogWarning("Generating TempoAgentsEditor's engine-derived sources failed. Without them this module does not link.\n{Errors}", Errors.Trim());
+				}
 			}
 		}
-		catch (System.Exception)
+		catch (System.Exception Ex)
 		{
+			Logger.LogWarning("Could not run gen_engine_derived.py to generate TempoAgentsEditor's engine-derived sources: {Message}", Ex.Message);
 		}
 	}
 }

@@ -77,6 +77,10 @@ plugins:
       scripts:
         - docs/gen_api_reference.py
   - literate-nav
+  # Published URLs that moved keep working.
+  - redirects:
+      redirect_maps:
+        guides/engine-mods.md: plugins/engine-mods.md
 
 # Build-time hooks (see docs/hooks.py).
 hooks:

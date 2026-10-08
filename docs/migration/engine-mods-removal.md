@@ -28,8 +28,9 @@ Earlier versions of `Setup.sh` made three kinds of change that stay behind until
 
 **Do this first.** An engine without the toolchains cannot build a target that names one.
 
-In each `*.Target.cs` file in your project's `Source/` folder, delete the block `Setup.sh` added,
-from the `TEMPO_TOOLCHAIN_BLOCK BEGIN` line to the `TEMPO_TOOLCHAIN_BLOCK END` line:
+Running `Scripts/Setup.sh` (step 3) does this for you: it deletes the block the old `Setup.sh`
+added to each `*.Target.cs` file in your project's `Source/` folder, from the
+`TEMPO_TOOLCHAIN_BLOCK BEGIN` line to the `TEMPO_TOOLCHAIN_BLOCK END` line:
 
 ```csharp
 		// TEMPO_TOOLCHAIN_BLOCK BEGIN - Added by UseTempoToolChain.sh script
@@ -48,8 +49,9 @@ from the `TEMPO_TOOLCHAIN_BLOCK BEGIN` line to the `TEMPO_TOOLCHAIN_BLOCK END` l
 		// TEMPO_TOOLCHAIN_BLOCK END
 ```
 
-If you copied that block into a `*.Target.cs` yourself, it may be there without the marker comments.
-Remove anything that sets `ToolChainName` to one of the three names above.
+If you copied that block into a `*.Target.cs` yourself, it may be there without the marker
+comments. `Setup.sh` does not edit what it did not write — it warns about any remaining selection
+of the three names above, and you remove it yourself.
 
 ### 2. Reinstall Unreal Engine
 
@@ -59,10 +61,15 @@ build agent where you ran `Setup.sh`.
 
 If a `TempoMods` folder is left in the engine's root directory afterwards, delete it.
 
+Until then, Tempo's build warns that the engine still carries the old modifications, and the
+compiler warns (`CS0436`) that the modified UnrealBuildTool's `TempoModuleRules` duplicates
+Tempo's. Both are harmless: the superseded pieces go unused.
+
 ### 3. Run `Setup.sh` again
 
-`Scripts/Setup.sh` takes `InstallEngineMods.sh` out of the git hooks it installed, and makes sure
-your third-party dependencies are up to date.
+`Scripts/Setup.sh` removes the toolchain block from your `*.Target.cs` files (step 1), takes
+`InstallEngineMods.sh` out of the git hooks it installed, warns if the engine still carries the
+mods (step 2), and makes sure your third-party dependencies are up to date.
 
 ### 4. Update your CI
 

@@ -83,7 +83,12 @@ protected:
 
 	FDelegateHandle OnZoneGraphDataAddedHandle;
 
-	// Copies of the lane profiles handed out while generating zone shapes. Adding a lane profile can
-	// move the ones in the ZoneGraph settings, so pointers into those would not stay valid.
-	mutable TIndirectArray<FZoneLaneProfile> LaneProfileCache;
+	// LaneProfile's cache entry, freshly copied from it. Pointers into the cache stay valid until
+	// the next generation pass resets it.
+	const FZoneLaneProfile* CacheLaneProfile(const FZoneLaneProfile& LaneProfile) const;
+
+	// Copies of the lane profiles handed out while generating zone shapes, one per profile ID.
+	// Adding a lane profile can move the ones in the ZoneGraph settings, so pointers into those
+	// would not stay valid, and repeated lookups reuse their entry rather than growing the cache.
+	mutable TMap<FGuid, TUniquePtr<FZoneLaneProfile>> LaneProfileCache;
 };

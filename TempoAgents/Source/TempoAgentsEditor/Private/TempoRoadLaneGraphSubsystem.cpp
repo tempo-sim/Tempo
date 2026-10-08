@@ -588,7 +588,7 @@ const FZoneLaneProfile* UTempoRoadLaneGraphSubsystem::GetLaneProfileByName(FName
 	{
 		if (LaneProfile.Name == LaneProfileName)
 		{
-			return &LaneProfileCache[LaneProfileCache.Add(new FZoneLaneProfile(LaneProfile))];
+			return CacheLaneProfile(LaneProfile);
 		}
 	}
 
@@ -604,7 +604,21 @@ const FZoneLaneProfile* UTempoRoadLaneGraphSubsystem::FindOrAddDynamicLaneProfil
 		return nullptr;
 	}
 
-	return &LaneProfileCache[LaneProfileCache.Add(new FZoneLaneProfile(LaneProfileStore->FindOrAddLaneProfile(LaneProfile)))];
+	return CacheLaneProfile(LaneProfileStore->FindOrAddLaneProfile(LaneProfile));
+}
+
+const FZoneLaneProfile* UTempoRoadLaneGraphSubsystem::CacheLaneProfile(const FZoneLaneProfile& LaneProfile) const
+{
+	TUniquePtr<FZoneLaneProfile>& Cached = LaneProfileCache.FindOrAdd(LaneProfile.ID);
+	if (Cached.IsValid())
+	{
+		*Cached = LaneProfile;
+	}
+	else
+	{
+		Cached = MakeUnique<FZoneLaneProfile>(LaneProfile);
+	}
+	return Cached.Get();
 }
 
 //

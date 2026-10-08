@@ -69,24 +69,37 @@ public class gRPC : ModuleRules
         {
             // The one copy is the shared library, and nothing else may link the static libraries:
             // a linker takes what it finds in them from there, even what the shared library exports,
-            // making a second copy.
+            // making a second copy. On Windows what is linked is the import library beside the DLL.
             string SharedLibrary = SharedLibraryPath(Target.Platform, ModuleDirectory);
-            if (!File.Exists(SharedLibrary))
+            string LinkLibrary = Target.Platform == UnrealTargetPlatform.Win64 ? Path.Combine(LibrariesDirectory, "tempogrpc.lib") : SharedLibrary;
+            foreach (string RequiredFile in new[] { SharedLibrary, LinkLibrary })
             {
-                throw new BuildException("{0} is missing. Tempo needs a TempoThirdParty gRPC release that includes it: run Tempo's Scripts/SyncDeps.sh.", SharedLibrary);
+                if (!File.Exists(RequiredFile))
+                {
+                    throw new BuildException("{0} is missing. Tempo needs a TempoThirdParty gRPC release that includes it: run Tempo's Scripts/SyncDeps.sh.", RequiredFile);
+                }
             }
-            PublicAdditionalLibraries.Add(Target.Platform == UnrealTargetPlatform.Win64 ? Path.Combine(LibrariesDirectory, "tempogrpc.lib") : SharedLibrary);
+            PublicAdditionalLibraries.Add(LinkLibrary);
             RuntimeDependencies.Add(SharedLibrary);
         }
         else
         {
             // The one copy is in the executable, which links the static libraries like any others.
-            foreach (string StaticLibrary in Directory.EnumerateFiles(LibrariesDirectory, "*." + StaticLibraryExtension))
+            int NumStaticLibraries = 0;
+            if (Directory.Exists(LibrariesDirectory))
             {
-                if (Path.GetFileNameWithoutExtension(StaticLibrary) != "tempogrpc")
+                foreach (string StaticLibrary in Directory.EnumerateFiles(LibrariesDirectory, "*." + StaticLibraryExtension))
                 {
-                    PublicAdditionalLibraries.Add(StaticLibrary);
+                    if (Path.GetFileNameWithoutExtension(StaticLibrary) != "tempogrpc")
+                    {
+                        PublicAdditionalLibraries.Add(StaticLibrary);
+                        ++NumStaticLibraries;
+                    }
                 }
+            }
+            if (NumStaticLibraries == 0)
+            {
+                throw new BuildException("No gRPC static libraries in {0}. Tempo needs a TempoThirdParty gRPC release: run Tempo's Scripts/SyncDeps.sh.", LibrariesDirectory);
             }
         }
 

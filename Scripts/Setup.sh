@@ -57,6 +57,41 @@ REMOVE_ENGINE_MODS_FROM_HOOK() {
   fi
 }
 
+# Earlier versions of this script also pointed the project's *.Target.cs files at Tempo's own
+# toolchains, which no longer exist: an engine without them fails to build such a target with
+# "Unable to create toolchain 'TempoVCToolChain'". The block it added is marker-delimited, so take
+# it back out, and warn about any selection of a Tempo toolchain made without the markers.
+REMOVE_TOOLCHAIN_BLOCK_FROM_TARGET_FILE() {
+  TARGET_FILE="$1"
+  if grep -q "TEMPO_TOOLCHAIN_BLOCK BEGIN" "$TARGET_FILE" && grep -q "TEMPO_TOOLCHAIN_BLOCK END" "$TARGET_FILE"; then
+    sed '/TEMPO_TOOLCHAIN_BLOCK BEGIN/,/TEMPO_TOOLCHAIN_BLOCK END/d' "$TARGET_FILE" > "$TARGET_FILE.tmp"
+    cat "$TARGET_FILE.tmp" > "$TARGET_FILE"
+    rm -f "$TARGET_FILE.tmp"
+    echo "Removed the Tempo toolchain block an earlier Setup.sh added to $(basename "$TARGET_FILE"). Tempo no longer provides toolchains."
+  fi
+  if grep -q 'ToolChainName[[:space:]]*=[[:space:]]*"Tempo' "$TARGET_FILE"; then
+    echo "WARNING: $(basename "$TARGET_FILE") still selects a Tempo toolchain, which Tempo no longer provides."
+    echo "Remove the lines setting ToolChainName, or builds will fail with \"Unable to create toolchain\"."
+    echo "See Tempo's docs/migration/engine-mods-removal.md."
+  fi
+}
+
+# Warn if the engine itself still carries Tempo's old modifications. Builds work with them (the
+# superseded pieces warn and go unused), but the engine should go back to the way Epic ships it.
+WARN_IF_ENGINE_STILL_MODIFIED() {
+  UNREAL_ENGINE_ROOT=$("$SCRIPT_DIR"/FindUnreal.sh 2>/dev/null) || UNREAL_ENGINE_ROOT=""
+  if [ -d "$UNREAL_ENGINE_ROOT" ]; then
+    if [ -d "$UNREAL_ENGINE_ROOT/TempoMods" ] || [ -f "$UNREAL_ENGINE_ROOT/Engine/Source/Programs/UnrealBuildTool/ToolChain/TempoVCToolChain.cs" ]; then
+      echo -e "\nWARNING: your Unreal installation at"
+      echo "  $UNREAL_ENGINE_ROOT"
+      echo "still carries the modifications an earlier Tempo installed. Tempo no longer uses or needs them."
+      echo "They are harmless for now, but restore the engine to the way Epic ships it when convenient:"
+      echo "verify the installation in the Epic Games Launcher, or re-extract it on Linux."
+      echo "See Tempo's docs/migration/engine-mods-removal.md."
+    fi
+  fi
+}
+
 SYNC_DEPS="$SCRIPT_DIR/SyncDeps.sh"
 
 if [ "$SKIP_HOOKS" -ne 1 ]; then
@@ -80,6 +115,11 @@ fi
 # Run the steps once (adding -force if specified)
 echo -e "\nDisabling project plugins that Tempo replaces\n"
 bash "$SCRIPT_DIR/DisableConflictingPlugins.sh"
+for TARGET_FILE in "$PROJECT_ROOT/Source/"*.Target.cs; do
+  [ -f "$TARGET_FILE" ] || continue
+  REMOVE_TOOLCHAIN_BLOCK_FROM_TARGET_FILE "$TARGET_FILE"
+done
+WARN_IF_ENGINE_STILL_MODIFIED
 echo -e "Checking ThirdParty dependencies...\n"
 bash "$SYNC_DEPS" "${EXTRA_ARGS[@]}"
 

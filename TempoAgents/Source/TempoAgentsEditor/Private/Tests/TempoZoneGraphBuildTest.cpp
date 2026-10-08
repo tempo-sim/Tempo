@@ -4,6 +4,7 @@
 
 #include "EngineUtils.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/ScopeExit.h"
 #include "Tests/AutomationEditorCommon.h"
 #include "ZoneGraphData.h"
 #include "ZoneGraphDelegates.h"
@@ -69,6 +70,17 @@ bool FTempoZoneGraphBuildTest::RunTest(const FString& Parameters)
 	ATempoLaneProfileStore* LaneProfileStore = ATempoLaneProfileStore::Get(*World, true);
 	UTEST_NOT_NULL("Lane profile store", LaneProfileStore);
 
+	// A failed UTEST_* returns early, and the store's profiles must not outlive the test in the
+	// ZoneGraph settings (nor the test map the editor), whichever way it ends.
+	ON_SCOPE_EXIT
+	{
+		if (IsValid(LaneProfileStore))
+		{
+			LaneProfileStore->Destroy();
+		}
+		FAutomationEditorCommonUtils::CreateNewMap();
+	};
+
 	const FZoneLaneProfile LaneProfile = LaneProfileStore->FindOrAddLaneProfile(MakeLaneProfileWithSpacer());
 	UTEST_TRUE("ZoneGraph settings hold the stored lane profile", AreZoneGraphSettingsHolding(LaneProfile.ID));
 	UTEST_EQUAL("Storing the same lanes again finds the stored lane profile", LaneProfileStore->FindOrAddLaneProfile(MakeLaneProfileWithSpacer()).ID, LaneProfile.ID);
@@ -105,7 +117,6 @@ bool FTempoZoneGraphBuildTest::RunTest(const FString& Parameters)
 	LaneProfileStore->Destroy();
 	UTEST_FALSE("ZoneGraph settings let go of the lane profile with its store", AreZoneGraphSettingsHolding(LaneProfile.ID));
 
-	FAutomationEditorCommonUtils::CreateNewMap();
 	return true;
 }
 

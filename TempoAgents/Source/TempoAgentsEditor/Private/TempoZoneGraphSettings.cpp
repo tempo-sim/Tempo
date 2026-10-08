@@ -15,14 +15,17 @@ namespace
 	{
 		int32 Depth = 0;
 		bool bInQuotes = false;
+		int32 NumPrecedingBackslashes = 0;
 		int32 PairStart = INDEX_NONE;
 		for (int32 Index = 0; Index <= StructText.Len(); ++Index)
 		{
 			const TCHAR Char = Index < StructText.Len() ? StructText[Index] : TEXT(')');
-			if (Char == TEXT('"') && (Index == 0 || StructText[Index - 1] != TEXT('\\')))
+			// A quote is escaped by an odd run of backslashes before it: "ends in a backslash\\" does not.
+			if (Char == TEXT('"') && NumPrecedingBackslashes % 2 == 0)
 			{
 				bInQuotes = !bInQuotes;
 			}
+			NumPrecedingBackslashes = Char == TEXT('\\') ? NumPrecedingBackslashes + 1 : 0;
 			if (bInQuotes)
 			{
 				continue;

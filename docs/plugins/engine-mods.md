@@ -28,7 +28,8 @@ that know which connections they allow.
 The code that lays lanes through an intersection is private to the ZoneGraph module and has no
 extension points, so `TempoAgentsEditor` compiles its own edited copy of it. The copy is not in the
 repo: it is generated when Tempo is built, from your engine's source and edits that contain only
-Tempo's lines. See
+Tempo's lines. Every standard engine installation ships the plugin source this reads; only a
+trimmed or custom engine distribution would lack it. See
 [`EngineDerived/README.md`](https://github.com/tempo-sim/Tempo/tree/main/TempoAgents/Source/TempoAgentsEditor/EngineDerived)
 for how that works and how to support a new engine version.
 

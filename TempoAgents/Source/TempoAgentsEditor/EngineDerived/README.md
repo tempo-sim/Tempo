@@ -7,7 +7,8 @@ code it has to change is private to the engine's ZoneGraph module, with no exten
 Rather than modify the engine, `TempoAgentsEditor` compiles its own edited copies of three of
 ZoneGraph's source files. The copies are **not checked in**. They are generated into
 `Private/EngineDerived` (which is git-ignored) when Tempo is built, from the engine source already
-on your machine and the edits stored in this folder.
+on your machine (every standard engine installation ships its plugins' source) and the edits
+stored in this folder.
 
 | Engine file (`Engine/Plugins/Runtime/ZoneGraph/Source/ZoneGraph/Private`) | Generated file | What Tempo keeps |
 |---|---|---|

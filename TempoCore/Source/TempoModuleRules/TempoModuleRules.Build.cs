@@ -1,5 +1,6 @@
 // Copyright Tempo Simulation, LLC. All Rights Reserved.
 
+using Microsoft.Extensions.Logging;
 using System.IO;
 using System.Reflection;
 using UnrealBuildTool;
@@ -16,6 +17,8 @@ public class TempoModuleRules : ModuleRules
 {
 	public TempoModuleRules(ReadOnlyTargetRules Target) : base(Target)
 	{
+		WarnOnceAboutModifiedUnrealBuildTool();
+
 		PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
 
 		string PublicModuleFolder = Path.Combine(ModuleDirectory, "Public");
@@ -23,15 +26,15 @@ public class TempoModuleRules : ModuleRules
 		string PublicProtobufIncludes = Path.Combine(PublicModuleFolder, "ProtobufGenerated");
 		string PrivateProtobufIncludes = Path.Combine(PrivateModuleFolder, "ProtobufGenerated");
 
-		if (HasProtos(PublicModuleFolder))
+		bool bHasPublicProtos = HasProtos(PublicModuleFolder);
+		if (bHasPublicProtos)
 		{
 			Directory.CreateDirectory(PublicProtobufIncludes);
 			PublicIncludePaths.Add(PublicProtobufIncludes);
-			Directory.CreateDirectory(PrivateProtobufIncludes);
-			PrivateIncludePaths.Add(PrivateProtobufIncludes);
 		}
 
-		if (HasProtos(PrivateModuleFolder))
+		// Public protos generate private code too (the service implementations).
+		if (bHasPublicProtos || HasProtos(PrivateModuleFolder))
 		{
 			Directory.CreateDirectory(PrivateProtobufIncludes);
 			PrivateIncludePaths.Add(PrivateProtobufIncludes);
@@ -45,6 +48,22 @@ public class TempoModuleRules : ModuleRules
 	private static bool HasProtos(string Folder)
 	{
 		return Directory.Exists(Folder) && Directory.GetFiles(Folder, "*.proto", SearchOption.AllDirectories).Length > 0;
+	}
+
+	// An engine that Tempo's retired engine mods modified still has a TempoModuleRules compiled into
+	// UnrealBuildTool. The build works regardless - the compiler prefers this class and says so in a
+	// CS0436 warning per Tempo Build.cs - but the engine should go back to the way Epic ships it.
+	private static bool bWarnedAboutModifiedUnrealBuildTool = false;
+
+	private void WarnOnceAboutModifiedUnrealBuildTool()
+	{
+		if (!bWarnedAboutModifiedUnrealBuildTool && typeof(ModuleRules).Assembly.GetType("TempoModuleRules") != null)
+		{
+			bWarnedAboutModifiedUnrealBuildTool = true;
+			Logger.LogWarning("This engine's UnrealBuildTool still contains Tempo's old modifications. (They are what any CS0436 warning " +
+				"about a duplicate TempoModuleRules is about.) They are harmless but no longer used; restore the engine to the way Epic " +
+				"ships it by verifying or reinstalling it. See Tempo's docs/migration/engine-mods-removal.md.");
+		}
 	}
 
 	/// <summary>
