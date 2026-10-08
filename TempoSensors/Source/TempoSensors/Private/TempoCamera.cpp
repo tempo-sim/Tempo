@@ -1822,6 +1822,23 @@ void UTempoCamera::ValidateFOV() const
 		{
 			Report(6, FString::Printf(TEXT("Equidistant VerticalFOV %.2f (derived) exceeds max 240 degrees."), VerticalFOV));
 		}
+
+		// K1-K4 that bend the polynomial over before the farthest image corner leave that corner
+		// with no physical inverse; those pixels render as the out-of-domain sentinel.
+		const FKannalaBrandtDistortion Model(LensParameters.K1, LensParameters.K2, LensParameters.K3, LensParameters.K4, 0.0, 0.0);
+		const double FOutput = Model.ComputeFOutputForFullImage(SizeXY, FOVAngle);
+		if (FOutput > 0.0 && SizeXY.Y > 0)
+		{
+			const FVector2D OpticalCenter = OpticalCenterPixels(SizeXY, LensParameters.GetClampedPrincipalPoint());
+			const double FarX = FMath::Max(OpticalCenter.X, SizeXY.X - OpticalCenter.X);
+			const double FarY = FMath::Max(OpticalCenter.Y, SizeXY.Y - OpticalCenter.Y);
+			const double CornerThetaD = FMath::Sqrt(FarX * FarX + FarY * FarY) / FOutput;
+			if (CornerThetaD >= Model.ThetaDMax)
+			{
+				Report(8, FString::Printf(TEXT("Equidistant K1-K4 peak at theta_d %.4f (theta %.4f rad), inside the image (farthest corner theta_d %.4f). Pixels beyond the peak have no physical inverse and render as out-of-domain."),
+					Model.ThetaDMax, Model.ThetaMax, CornerThetaD));
+			}
+		}
 	}
 
 	// PrincipalPoint is a normalized offset from the image center; |offset| >= 0.5 places the
@@ -2449,61 +2466,13 @@ void UTempoCamera::SyncTiles()
 		const double FullWidthPCDx = SizeXY.X * 0.5 - OpticalCenterX;
 		const double FullHeightPCDy = SizeXY.Y * 0.5 - OpticalCenterY;
 
-		// Convert a SIGNED 2D pixel offset (from the full image's optical center) to (yaw, pitch)
-		// degrees, via the model. Joint conversion is required for diagonal (4-tile) cases — the
-		// 3D direction implied by independent 1D yaw/pitch differs from the 3D direction whose 2D
-		// forward projection lands on (Dx, Dy), introducing multi-degree gaps at diagonal seams.
-		const auto YawPitchDegFromPixelOffset = [&](double Dx, double Dy)
-		{
-			double Yaw = 0.0;
-			double Pitch = 0.0;
-			Model->PixelOffsetToYawPitchDeg(Dx, Dy, FOutput, Yaw, Pitch);
-			return TPair<double, double>(Yaw, Pitch);
-		};
-
-		// Compute the angular-centroid aim point for a tile defined by its covered-rect corner
-		// pixel offsets (relative to the parent optical center) and pixel-rect-center pixel offset.
-		// Returns (YawDeg, PitchDeg, AxisShiftXRd, AxisShiftYRd):
-		//   - (Yaw, Pitch) is the midpoint of the tile's (yaw, pitch) angular extent over the four
-		//     covered corners — typically a better optical-axis aim than the pixel-rect center
-		//     because the unprojection from pixel-offset to angle is non-linear, so the angular
-		//     midpoint and the pixel-offset midpoint differ for off-axis tiles.
-		//   - AxisShift is the resulting axis position, expressed as a displacement from the tile's
-		//     pixel-rect center in parent r_d units. The distortion model uses this to map
-		//     tile-pixel-centered output coords to the right parent-frame r_d when the axis no
-		//     longer lands at the tile's pixel center.
-		struct FTileAim
-		{
-			double YawDeg;
-			double PitchDeg;
-			double AxisShiftXRd;
-			double AxisShiftYRd;
-		};
+		// Aim each tile at the angular centroid of its covered-rect corners (offsets from the
+		// optical center) rather than its pixel-rect center: the pixel-offset -> angle unprojection
+		// is non-linear, so the two differ for off-axis tiles. See ComputeFisheyeTileAim.
+		using FTileAim = FFisheyeTileAim;
 		const auto ComputeTileAim = [&](double LDx, double RDx, double TDy, double BDy, double PixelCenterDx, double PixelCenterDy)
 		{
-			const auto YP_TL = YawPitchDegFromPixelOffset(LDx, TDy);
-			const auto YP_TR = YawPitchDegFromPixelOffset(RDx, TDy);
-			const auto YP_BL = YawPitchDegFromPixelOffset(LDx, BDy);
-			const auto YP_BR = YawPitchDegFromPixelOffset(RDx, BDy);
-
-			const double YawMin = FMath::Min(FMath::Min(YP_TL.Key, YP_TR.Key), FMath::Min(YP_BL.Key, YP_BR.Key));
-			const double YawMax = FMath::Max(FMath::Max(YP_TL.Key, YP_TR.Key), FMath::Max(YP_BL.Key, YP_BR.Key));
-			const double PitchMin = FMath::Min(FMath::Min(YP_TL.Value, YP_TR.Value), FMath::Min(YP_BL.Value, YP_BR.Value));
-			const double PitchMax = FMath::Max(FMath::Max(YP_TL.Value, YP_TR.Value), FMath::Max(YP_BL.Value, YP_BR.Value));
-
-			FTileAim Aim;
-			Aim.YawDeg = 0.5 * (YawMin + YawMax);
-			Aim.PitchDeg = 0.5 * (PitchMin + PitchMax);
-
-			// Forward-project the centroid back to a pixel offset to recover the axis position
-			// in the parent image plane, then express its displacement from the tile's pixel
-			// center in r_d units (FOutput is pixels/r_d for the model's output unit).
-			double DxAxis = 0.0;
-			double DyAxis = 0.0;
-			Model->YawPitchDegToPixelOffset(Aim.YawDeg, Aim.PitchDeg, FOutput, DxAxis, DyAxis);
-			Aim.AxisShiftXRd = (DxAxis - PixelCenterDx) / FOutput;
-			Aim.AxisShiftYRd = (DyAxis - PixelCenterDy) / FOutput;
-			return Aim;
+			return ComputeFisheyeTileAim(*Model, FOutput, LDx, RDx, TDy, BDy, PixelCenterDx, PixelCenterDy);
 		};
 
 		if (!bSplitHorizontal && !bSplitVertical)

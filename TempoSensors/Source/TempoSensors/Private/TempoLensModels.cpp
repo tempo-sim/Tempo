@@ -333,32 +333,109 @@ double FKannalaBrandtDistortion::SolveDistortion(double Theta, double K1, double
 	return Theta * (1.0 + K1*T2 + K2*T4 + K3*T6 + K4*T8);
 }
 
-double FKannalaBrandtDistortion::SolveInverseDistortion(double ThetaD, double K1, double K2, double K3, double K4)
+// d(theta_d)/d(theta) as a function of U = theta^2.
+static double KannalaBrandtSlope(double U, double K1, double K2, double K3, double K4)
 {
-	if (ThetaD < 1e-6)
+	return 1.0 + U * (3.0*K1 + U * (5.0*K2 + U * (7.0*K3 + U * 9.0*K4)));
+}
+
+void FKannalaBrandtDistortion::ComputeMaxTheta(double K1, double K2, double K3, double K4, double& OutThetaMax, double& OutThetaDMax)
+{
+	// The slope is 1 at theta = 0, so the physical branch ends at the first U in (0, PI^2] where it
+	// reaches zero. Bracket that root on a fine grid, then bisect it to full precision. The grid can
+	// only miss a dip below zero narrower than one step (PI^2 / 1024 in U), which no calibrated lens has.
+	constexpr int32 NumSteps = 1024;
+	const double UMax = UE_DOUBLE_PI * UE_DOUBLE_PI;
+	double ULo = 0.0;
+	double UHi = -1.0;
+	for (int32 I = 1; I <= NumSteps; ++I)
 	{
-		return ThetaD;
+		const double U = UMax * I / NumSteps;
+		if (KannalaBrandtSlope(U, K1, K2, K3, K4) <= 0.0)
+		{
+			UHi = U;
+			break;
+		}
+		ULo = U;
 	}
 
-	return Solve(
-		[K1, K2, K3, K4, ThetaD](double T) {
-			const double T2 = T * T;
-			const double T4 = T2 * T2;
-			const double T6 = T4 * T2;
-			const double T8 = T4 * T4;
-			return T * (1.0 + K1*T2 + K2*T4 + K3*T6 + K4*T8) - ThetaD;
-		},
-		[K1, K2, K3, K4](double T) {
-			const double T2 = T * T;
-			const double T4 = T2 * T2;
-			const double T6 = T4 * T2;
-			const double T8 = T4 * T4;
-			return 1.0 + 3.0*K1*T2 + 5.0*K2*T4 + 7.0*K3*T6 + 9.0*K4*T8;
-		},
-		ThetaD,
-		40,
-		1e-6
-	);
+	if (UHi < 0.0)
+	{
+		OutThetaMax = UE_DOUBLE_PI;
+	}
+	else
+	{
+		for (int32 I = 0; I < 100 && UHi - ULo > 1e-15; ++I)
+		{
+			const double UMid = 0.5 * (ULo + UHi);
+			if (KannalaBrandtSlope(UMid, K1, K2, K3, K4) > 0.0)
+			{
+				ULo = UMid;
+			}
+			else
+			{
+				UHi = UMid;
+			}
+		}
+		// ULo is the last point known to be on the rising branch.
+		OutThetaMax = FMath::Sqrt(ULo);
+	}
+	OutThetaDMax = SolveDistortion(OutThetaMax, K1, K2, K3, K4);
+}
+
+bool FKannalaBrandtDistortion::SolveInverseDistortion(double ThetaD, double K1, double K2, double K3, double K4,
+	double ThetaMax, double ThetaDMax, double& OutTheta)
+{
+	if (ThetaD >= ThetaDMax)
+	{
+		OutTheta = ThetaMax;
+		return false;
+	}
+	if (ThetaD < 1e-12)
+	{
+		OutTheta = FMath::Max(ThetaD, 0.0);
+		return true;
+	}
+
+	// The polynomial rises monotonically on [0, ThetaMax] from 0 to ThetaDMax > ThetaD, so the root
+	// is unique and stays bracketed. Take the Newton step when it lands inside the bracket and
+	// bisect otherwise; either way the bracket shrinks, so this always converges.
+	double Lo = 0.0;
+	double Hi = ThetaMax;
+	double Theta = FMath::Min(ThetaD, ThetaMax);
+	for (int32 I = 0; I < 100; ++I)
+	{
+		const double Residual = SolveDistortion(Theta, K1, K2, K3, K4) - ThetaD;
+		if (FMath::Abs(Residual) < 1e-12)
+		{
+			break;
+		}
+		if (Residual < 0.0)
+		{
+			Lo = Theta;
+		}
+		else
+		{
+			Hi = Theta;
+		}
+		if (Hi - Lo < 1e-14)
+		{
+			break;
+		}
+		const double Slope = KannalaBrandtSlope(Theta * Theta, K1, K2, K3, K4);
+		const double NewtonTheta = (Slope > 0.0) ? Theta - Residual / Slope : -1.0;
+		Theta = (NewtonTheta > Lo && NewtonTheta < Hi) ? NewtonTheta : 0.5 * (Lo + Hi);
+	}
+	OutTheta = Theta;
+	return true;
+}
+
+bool FKannalaBrandtDistortion::SolveInverseDistortion(double ThetaD, double K1, double K2, double K3, double K4, double& OutTheta)
+{
+	double ThetaMax = 0.0;
+	double ThetaDMax = 0.0;
+	ComputeMaxTheta(K1, K2, K3, K4, ThetaMax, ThetaDMax);
+	return SolveInverseDistortion(ThetaD, K1, K2, K3, K4, ThetaMax, ThetaDMax, OutTheta);
 }
 
 double FKannalaBrandtDistortion::ComputeFOutputForFullImage(const FIntPoint& FullImageSizeXY, double FullImageHFOVDeg) const
@@ -396,7 +473,12 @@ void FKannalaBrandtDistortion::PixelOffsetToYawPitchDeg(double DxPixels, double 
 	{
 		return; // ray along the optical axis -> yaw = pitch = 0
 	}
-	const double Theta = SolveInverseDistortion(ThetaD, K1, K2, K3, K4);
+	// A corner beyond the physical branch (ThetaD >= ThetaDMax) has no true direction. Clamp it
+	// radially to the branch's edge, which the solve leaves in Theta when it fails, so tile aims
+	// stay deterministic and symmetric; an unguarded Newton solve there lands on a spurious root
+	// that changes with the last bits of FOutput.
+	double Theta = 0.0;
+	SolveInverseDistortion(ThetaD, K1, K2, K3, K4, ThetaMax, ThetaDMax, Theta);
 	const double SinTheta = FMath::Sin(Theta);
 	// 3D ray in the optical frame (X=right, Y=down, Z=forward).
 	const double X = SinTheta * Mx / ThetaD;
@@ -442,6 +524,11 @@ void FKannalaBrandtDistortion::YawPitchDegToPixelOffset(double YawDeg, double Pi
 
 FVector2D FKannalaBrandtDistortion::OutputToRender(double OutputX, double OutputY) const
 {
+	return OutputToRenderImpl(OutputX, OutputY, /*bClampToDomain=*/ false);
+}
+
+FVector2D FKannalaBrandtDistortion::OutputToRenderImpl(double OutputX, double OutputY, bool bClampToDomain) const
+{
 	// OutputX/OutputY are tile-local coordinates in distorted-angle (theta_d) units, measured
 	// from the tile's pixel-rect center. To get the parent-frame output coords we add the
 	// tile-pixel-center's r_d position in parent space, which equals the optical-axis r_d
@@ -456,9 +543,15 @@ FVector2D FKannalaBrandtDistortion::OutputToRender(double OutputX, double Output
 	const double ParentOutputX = AxisCenterXRd - AxisShiftXRd + OutputX;
 	const double ParentOutputY = AxisCenterYRd - AxisShiftYRd + OutputY;
 
-	// Invert K-B to recover the physical radial angle from the parent's optical axis.
+	// Invert K-B to recover the physical radial angle from the parent's optical axis. Beyond the
+	// physical branch there is no such angle: return the sentinel, unless the caller asked to clamp
+	// to the branch's edge (Theta is left at ThetaMax on failure).
 	const double ThetaD = FMath::Sqrt(ParentOutputX * ParentOutputX + ParentOutputY * ParentOutputY);
-	const double Theta = SolveInverseDistortion(ThetaD, K1, K2, K3, K4);
+	double Theta = 0.0;
+	if (!SolveInverseDistortion(ThetaD, K1, K2, K3, K4, ThetaMax, ThetaDMax, Theta) && !bClampToDomain)
+	{
+		return FVector2D(1e6, 1e6);
+	}
 
 	// Compute 3D ray direction in parent frame.
 	// Coordinate system: X=right, Y=down, Z=forward.
@@ -623,20 +716,39 @@ FDistortionRenderConfig FKannalaBrandtDistortion::ComputeRenderConfig(const FInt
 	// Sample tile corners and edge midpoints in tile-pixel-centered output coords. With
 	// re-aim (AxisShift != 0) OutputToRender already accounts for the axis shift internally,
 	// so the render samples it returns are in the child frame's tan-space relative to the
-	// re-aimed optical axis — exactly what the projection matrix bounds need.
+	// re-aimed optical axis — exactly what the projection matrix bounds need. Samples beyond the
+	// physical branch are clamped radially to its edge, as in PixelOffsetToYawPitchDeg, so the
+	// frustum stays deterministic; those output pixels themselves map to the sentinel.
+	//
+	// A sample that lands behind the tile's camera (the sentinel even after clamping, e.g. a
+	// corner of a lens whose physical branch ends past 90 degrees from the tile's aim) can't be
+	// rendered by any frustum. Leave it out of the bounds: counting it as (+1e6, +1e6) would only
+	// stretch the right and bottom bounds to the cap, skewing the frustum and cutting the
+	// sampling density across the whole tile.
 	double MinRenderX = +TNumericLimits<double>::Max();
 	double MaxRenderX = -TNumericLimits<double>::Max();
 	double MinRenderY = +TNumericLimits<double>::Max();
 	double MaxRenderY = -TNumericLimits<double>::Max();
 	const double SX[] = {-OutputHorizRadius, OutputHorizRadius, -OutputHorizRadius, OutputHorizRadius, 0.0, 0.0, -OutputHorizRadius, OutputHorizRadius};
 	const double SY[] = {-OutputVertRadius, -OutputVertRadius, OutputVertRadius, OutputVertRadius, -OutputVertRadius, OutputVertRadius, 0.0, 0.0};
+	bool bAnyRenderable = false;
 	for (int32 I = 0; I < 8; ++I)
 	{
-		const FVector2D Render = OutputToRender(SX[I], SY[I]);
+		const FVector2D Render = OutputToRenderImpl(SX[I], SY[I], /*bClampToDomain=*/ true);
+		if (Render.X >= 1e6 && Render.Y >= 1e6)
+		{
+			continue;
+		}
+		bAnyRenderable = true;
 		MinRenderX = FMath::Min(MinRenderX, Render.X);
 		MaxRenderX = FMath::Max(MaxRenderX, Render.X);
 		MinRenderY = FMath::Min(MinRenderY, Render.Y);
 		MaxRenderY = FMath::Max(MaxRenderY, Render.Y);
+	}
+	if (!bAnyRenderable)
+	{
+		MinRenderX = MinRenderY = -TNumericLimits<double>::Max();
+		MaxRenderX = MaxRenderY = +TNumericLimits<double>::Max();
 	}
 
 	// Tightly bound the actually-used render quadrant. For symmetric (centered) tiles this
@@ -644,9 +756,9 @@ FDistortionRenderConfig FKannalaBrandtDistortion::ComputeRenderConfig(const FInt
 	// frustum collapses around the active quadrant, recovering the rasterizer pixels that were
 	// previously wasted on empty regions of the symmetric frustum.
 	//
-	// Clamp each bound to tan(85°): samples whose physical angle is at or beyond the model's
-	// horizon return the OutputToRender sentinel (1e6, 1e6), which would otherwise propagate
-	// into a degenerate projection matrix and a single-point UV map. The 85° cap matches the
+	// Clamp each bound to tan(85°): samples just in front of the tile's horizon project to huge
+	// tan values (and with no renderable sample at all the bounds are unbounded), which would
+	// otherwise propagate into a degenerate projection matrix and a single-point UV map. The 85° cap matches the
 	// legacy clamp on RenderFOVAngle (max 170° → tan(85°) frustum half-extent).
 	const double MaxTanBound = FMath::Tan(FMath::DegreesToRadians(85.0));
 	Config.TanLeft = FMath::Clamp(MinRenderX, -MaxTanBound, MaxTanBound);
@@ -663,6 +775,46 @@ FDistortionRenderConfig FKannalaBrandtDistortion::ComputeRenderConfig(const FInt
 	Config.RenderFOVAngle = FMath::Clamp(FMath::RadiansToDegrees(FMath::Atan(RequiredRenderHorizRadius)) * 2.0, 1.0, 170.0);
 
 	return Config;
+}
+
+FFisheyeTileAim ComputeFisheyeTileAim(const FLensModel& Model, double FOutput,
+	double LDx, double RDx, double TDy, double BDy, double PixelCenterDx, double PixelCenterDy)
+{
+	FFisheyeTileAim Aim;
+	if (FOutput <= 0.0)
+	{
+		return Aim;
+	}
+
+	double YawMin = TNumericLimits<double>::Max();
+	double YawMax = TNumericLimits<double>::Lowest();
+	double PitchMin = TNumericLimits<double>::Max();
+	double PitchMax = TNumericLimits<double>::Lowest();
+	for (const double Dx : { LDx, RDx })
+	{
+		for (const double Dy : { TDy, BDy })
+		{
+			double Yaw = 0.0;
+			double Pitch = 0.0;
+			Model.PixelOffsetToYawPitchDeg(Dx, Dy, FOutput, Yaw, Pitch);
+			YawMin = FMath::Min(YawMin, Yaw);
+			YawMax = FMath::Max(YawMax, Yaw);
+			PitchMin = FMath::Min(PitchMin, Pitch);
+			PitchMax = FMath::Max(PitchMax, Pitch);
+		}
+	}
+	Aim.YawDeg = 0.5 * (YawMin + YawMax);
+	Aim.PitchDeg = 0.5 * (PitchMin + PitchMax);
+
+	// Forward-project the centroid back to a pixel offset to recover the axis position in the
+	// parent image plane, then express its displacement from the tile's pixel center in r_d units
+	// (FOutput is pixels/r_d for the model's output unit).
+	double DxAxis = 0.0;
+	double DyAxis = 0.0;
+	Model.YawPitchDegToPixelOffset(Aim.YawDeg, Aim.PitchDeg, FOutput, DxAxis, DyAxis);
+	Aim.AxisShiftXRd = (DxAxis - PixelCenterDx) / FOutput;
+	Aim.AxisShiftYRd = (DyAxis - PixelCenterDy) / FOutput;
+	return Aim;
 }
 
 // ----------------------------------------------------------------------------------------

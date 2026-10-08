@@ -204,7 +204,7 @@ gRPC. Functional/rendering/agents/ROS layers are still not built.
 | Area | File | What |
 |---|---|---|
 | Unit/handedness conversion | `TempoCore/.../Tests/TempoConversionTest.cpp` | `QuantityConverter` factors, vector/rotator/quat handedness, round trips |
-| Camera/lidar lens math | `TempoSensors/.../Tests/TempoLensModelsTest.cpp` | factory, Brown-Conrady/Rational/Kannala-Brandt/Equidistant/Double-Sphere distort↔undistort round trips, focal-length math |
+| Camera/lidar lens math | `TempoSensors/.../Tests/TempoLensModelsTest.cpp` | factory, Brown-Conrady/Rational/Kannala-Brandt/Equidistant/Double-Sphere distort↔undistort round trips, focal-length math, KB physical-branch domain + tile-aim determinism |
 | Kinematic motion models | `TempoMovement/.../Tests/TempoKinematicsTest.cpp` | bicycle & unicycle forward (`SimulateMotion`) + inverse (`ComputeNormalizedSteeringForYawRate`) models, saturation, forward/inverse round trip, off-origin `RotationCenter` pivoting |
 
 **Convention for testing UObject components** (see `TempoKinematicsTest.cpp`): a const method
