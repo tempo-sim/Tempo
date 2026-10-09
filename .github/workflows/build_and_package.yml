@@ -227,7 +227,7 @@ jobs:
       with:
         repository: ${{ inputs.host_project }}
         path: ${{ github.workspace }}/${{ inputs.project_root }}
-        ref: engine_mods_retirement
+        ref: main
         fetch-depth: 0
         submodules: recursive
     - name: Mint Submodules Token (GitHub App)
