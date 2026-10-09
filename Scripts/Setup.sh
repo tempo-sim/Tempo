@@ -81,12 +81,14 @@ REMOVE_TOOLCHAIN_BLOCK_FROM_TARGET_FILE() {
 WARN_IF_ENGINE_STILL_MODIFIED() {
   UNREAL_ENGINE_ROOT=$("$SCRIPT_DIR"/FindUnreal.sh 2>/dev/null) || UNREAL_ENGINE_ROOT=""
   if [ -d "$UNREAL_ENGINE_ROOT" ]; then
-    if [ -d "$UNREAL_ENGINE_ROOT/TempoMods" ] || [ -f "$UNREAL_ENGINE_ROOT/Engine/Source/Programs/UnrealBuildTool/ToolChain/TempoVCToolChain.cs" ]; then
+    if [ -d "$UNREAL_ENGINE_ROOT/TempoMods" ]; then
       echo -e "\nWARNING: your Unreal installation at"
       echo "  $UNREAL_ENGINE_ROOT"
-      echo "still carries the modifications an earlier Tempo installed. Tempo no longer uses or needs them."
+      echo "still carries the modification record an earlier Tempo installed (TempoMods folder). Tempo no longer uses or needs engine mods."
       echo "They are harmless for now, but restore the engine to the way Epic ships it when convenient:"
-      echo "verify the installation in the Epic Games Launcher, or re-extract it on Linux."
+      echo "On Mac or Windows: verify the installation in the Epic Games Launcher and remove the TempoMods folder"
+      echo "  $UNREAL_ENGINE_ROOT/TempoMods"
+      echo "On Linux, re-download and re-extract the engine from the Linux download page"
       echo "See Tempo's docs/migration/engine-mods-removal.md."
     fi
   fi
