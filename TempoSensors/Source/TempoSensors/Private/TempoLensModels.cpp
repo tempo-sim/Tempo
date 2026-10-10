@@ -430,14 +430,6 @@ bool FKannalaBrandtDistortion::SolveInverseDistortion(double ThetaD, double K1, 
 	return true;
 }
 
-bool FKannalaBrandtDistortion::SolveInverseDistortion(double ThetaD, double K1, double K2, double K3, double K4, double& OutTheta)
-{
-	double ThetaMax = 0.0;
-	double ThetaDMax = 0.0;
-	ComputeMaxTheta(K1, K2, K3, K4, ThetaMax, ThetaDMax);
-	return SolveInverseDistortion(ThetaD, K1, K2, K3, K4, ThetaMax, ThetaDMax, OutTheta);
-}
-
 double FKannalaBrandtDistortion::ComputeFOutputForFullImage(const FIntPoint& FullImageSizeXY, double FullImageHFOVDeg) const
 {
 	// FOutput = pixels per radian of theta_d. The full image's theta_d at the right edge equals
@@ -524,10 +516,22 @@ void FKannalaBrandtDistortion::YawPitchDegToPixelOffset(double YawDeg, double Pi
 
 FVector2D FKannalaBrandtDistortion::OutputToRender(double OutputX, double OutputY) const
 {
-	return OutputToRenderImpl(OutputX, OutputY, /*bClampToDomain=*/ false);
+	FVector2D Render;
+	return TryOutputToRender(OutputX, OutputY, Render) ? Render : FVector2D(1e6, 1e6);
 }
 
-FVector2D FKannalaBrandtDistortion::OutputToRenderImpl(double OutputX, double OutputY, bool bClampToDomain) const
+bool FKannalaBrandtDistortion::TryOutputToRender(double OutputX, double OutputY, FVector2D& OutRender) const
+{
+	FVector Ray;
+	if (!OutputToChildRay(OutputX, OutputY, /*bClampToDomain=*/ false, Ray) || Ray.Z <= 1e-10)
+	{
+		return false;
+	}
+	OutRender = FVector2D(Ray.X / Ray.Z, Ray.Y / Ray.Z);
+	return true;
+}
+
+bool FKannalaBrandtDistortion::OutputToChildRay(double OutputX, double OutputY, bool bClampToDomain, FVector& OutRay) const
 {
 	// OutputX/OutputY are tile-local coordinates in distorted-angle (theta_d) units, measured
 	// from the tile's pixel-rect center. To get the parent-frame output coords we add the
@@ -544,13 +548,13 @@ FVector2D FKannalaBrandtDistortion::OutputToRenderImpl(double OutputX, double Ou
 	const double ParentOutputY = AxisCenterYRd - AxisShiftYRd + OutputY;
 
 	// Invert K-B to recover the physical radial angle from the parent's optical axis. Beyond the
-	// physical branch there is no such angle: return the sentinel, unless the caller asked to clamp
-	// to the branch's edge (Theta is left at ThetaMax on failure).
+	// physical branch there is no such angle, unless the caller asked to clamp to the branch's
+	// edge (Theta is left at ThetaMax on failure).
 	const double ThetaD = FMath::Sqrt(ParentOutputX * ParentOutputX + ParentOutputY * ParentOutputY);
 	double Theta = 0.0;
 	if (!SolveInverseDistortion(ThetaD, K1, K2, K3, K4, ThetaMax, ThetaDMax, Theta) && !bClampToDomain)
 	{
-		return FVector2D(1e6, 1e6);
+		return false;
 	}
 
 	// Compute 3D ray direction in parent frame.
@@ -582,17 +586,10 @@ FVector2D FKannalaBrandtDistortion::OutputToRenderImpl(double OutputX, double Ou
 	const double Rz1 = SinAz * RayX + CosAz * RayZ;
 
 	// Apply R_X(ElevationOffset):
-	const double ChildX = Rx1;
-	const double ChildY = CosEl * Ry1 - SinEl * Rz1;
-	const double ChildZ = SinEl * Ry1 + CosEl * Rz1;
-
-	// Perspective projection in child frame.
-	if (ChildZ <= 1e-10)
-	{
-		return FVector2D(1e6, 1e6);
-	}
-
-	return FVector2D(ChildX / ChildZ, ChildY / ChildZ);
+	OutRay.X = Rx1;
+	OutRay.Y = CosEl * Ry1 - SinEl * Rz1;
+	OutRay.Z = SinEl * Ry1 + CosEl * Rz1;
+	return true;
 }
 
 double FRationalDistortion::SolveDistortion(double R, double K1, double K2, double K3, double K4, double K5, double K6)
@@ -720,35 +717,25 @@ FDistortionRenderConfig FKannalaBrandtDistortion::ComputeRenderConfig(const FInt
 	// physical branch are clamped radially to its edge, as in PixelOffsetToYawPitchDeg, so the
 	// frustum stays deterministic; those output pixels themselves map to the sentinel.
 	//
-	// A sample that lands behind the tile's camera (the sentinel even after clamping, e.g. a
-	// corner of a lens whose physical branch ends past 90 degrees from the tile's aim) can't be
-	// rendered by any frustum. Leave it out of the bounds: counting it as (+1e6, +1e6) would only
-	// stretch the right and bottom bounds to the cap, skewing the frustum and cutting the
-	// sampling density across the whole tile.
+	// A sample at or behind the tile's horizon still has in-domain pixels between it and the tile
+	// center whose tan grows without bound in the sample's direction, so it is counted at that
+	// limit: its side of the frustum opens to the cap below. ComputeFisheyeTileLayouts splits
+	// finely enough that no tile corner lands behind its camera, so this is a fallback.
 	double MinRenderX = +TNumericLimits<double>::Max();
 	double MaxRenderX = -TNumericLimits<double>::Max();
 	double MinRenderY = +TNumericLimits<double>::Max();
 	double MaxRenderY = -TNumericLimits<double>::Max();
 	const double SX[] = {-OutputHorizRadius, OutputHorizRadius, -OutputHorizRadius, OutputHorizRadius, 0.0, 0.0, -OutputHorizRadius, OutputHorizRadius};
 	const double SY[] = {-OutputVertRadius, -OutputVertRadius, OutputVertRadius, OutputVertRadius, -OutputVertRadius, OutputVertRadius, 0.0, 0.0};
-	bool bAnyRenderable = false;
 	for (int32 I = 0; I < 8; ++I)
 	{
-		const FVector2D Render = OutputToRenderImpl(SX[I], SY[I], /*bClampToDomain=*/ true);
-		if (Render.X >= 1e6 && Render.Y >= 1e6)
-		{
-			continue;
-		}
-		bAnyRenderable = true;
-		MinRenderX = FMath::Min(MinRenderX, Render.X);
-		MaxRenderX = FMath::Max(MaxRenderX, Render.X);
-		MinRenderY = FMath::Min(MinRenderY, Render.Y);
-		MaxRenderY = FMath::Max(MaxRenderY, Render.Y);
-	}
-	if (!bAnyRenderable)
-	{
-		MinRenderX = MinRenderY = -TNumericLimits<double>::Max();
-		MaxRenderX = MaxRenderY = +TNumericLimits<double>::Max();
+		FVector Ray;
+		OutputToChildRay(SX[I], SY[I], /*bClampToDomain=*/ true, Ray);
+		const double Z = FMath::Max(Ray.Z, 1e-10);
+		MinRenderX = FMath::Min(MinRenderX, Ray.X / Z);
+		MaxRenderX = FMath::Max(MaxRenderX, Ray.X / Z);
+		MinRenderY = FMath::Min(MinRenderY, Ray.Y / Z);
+		MaxRenderY = FMath::Max(MaxRenderY, Ray.Y / Z);
 	}
 
 	// Tightly bound the actually-used render quadrant. For symmetric (centered) tiles this
@@ -756,10 +743,9 @@ FDistortionRenderConfig FKannalaBrandtDistortion::ComputeRenderConfig(const FInt
 	// frustum collapses around the active quadrant, recovering the rasterizer pixels that were
 	// previously wasted on empty regions of the symmetric frustum.
 	//
-	// Clamp each bound to tan(85°): samples just in front of the tile's horizon project to huge
-	// tan values (and with no renderable sample at all the bounds are unbounded), which would
-	// otherwise propagate into a degenerate projection matrix and a single-point UV map. The 85° cap matches the
-	// legacy clamp on RenderFOVAngle (max 170° → tan(85°) frustum half-extent).
+	// Clamp each bound to tan(85°): samples near or past the tile's horizon project to huge tan
+	// values, which would otherwise propagate into a degenerate projection matrix and a
+	// single-point UV map. The 85° cap matches the legacy clamp on RenderFOVAngle (max 170° → tan(85°) frustum half-extent).
 	const double MaxTanBound = FMath::Tan(FMath::DegreesToRadians(85.0));
 	Config.TanLeft = FMath::Clamp(MinRenderX, -MaxTanBound, MaxTanBound);
 	Config.TanRight = FMath::Clamp(MaxRenderX, -MaxTanBound, MaxTanBound);
@@ -815,6 +801,117 @@ FFisheyeTileAim ComputeFisheyeTileAim(const FLensModel& Model, double FOutput,
 	Aim.AxisShiftXRd = (DxAxis - PixelCenterDx) / FOutput;
 	Aim.AxisShiftYRd = (DyAxis - PixelCenterDy) / FOutput;
 	return Aim;
+}
+
+TArray<FFisheyeTileLayout> ComputeFisheyeTileLayouts(const FLensModel& Model, double FOutput,
+	const FIntPoint& SizeXY, const FVector2D& PrincipalPoint, int32 FeatherPixels,
+	bool bSplitHorizontal, bool bSplitVertical, FIntPoint& OutAtlasSize)
+{
+	// Feather is only meaningful where two tiles share an edge. With a single tile (no splits)
+	// there are no seams, so F=0.
+	const int32 F = (bSplitHorizontal || bSplitVertical) ? FMath::Max(0, FeatherPixels) : 0;
+
+	// Per axis: each split half owns exactly its half of the image (the halves sum to the full
+	// size) and covers F pixels more across the seam. An unsplit axis is one span covering it all.
+	struct FSpan
+	{
+		int32 Owned;
+		int32 OwnedOffset;
+		int32 Covered;
+	};
+	const auto Spans = [F](int32 Size, bool bSplit)
+	{
+		TArray<FSpan, TInlineAllocator<2>> Result;
+		if (!bSplit)
+		{
+			Result.Add({Size, 0, Size});
+			return Result;
+		}
+		const int32 Low = FMath::CeilToInt32(Size / 2.0);
+		Result.Add({Low, 0, Low + F});
+		Result.Add({Size - Low, Low, Size - Low + F});
+		return Result;
+	};
+	const TArray<FSpan, TInlineAllocator<2>> Columns = Spans(SizeXY.X, bSplitHorizontal);
+	const TArray<FSpan, TInlineAllocator<2>> Rows = Spans(SizeXY.Y, bSplitVertical);
+
+	// Optical-axis position within the output image. A non-zero principal point shifts it off the
+	// geometric center; all aim geometry is measured from this point so off-axis rays land at the
+	// right output pixels.
+	const FVector2D OpticalCenter = OpticalCenterPixels(SizeXY, PrincipalPoint);
+
+	// Covered spans sit flush against the image edge on their outer side and extend past the seam on
+	// their inner side, so the first span's covered rect starts at 0 and the second's ends at Size.
+	// Returns the span's [Low, High] edges as signed offsets from the optical center.
+	const auto CoveredEdges = [](const FSpan& Span, int32 Index, int32 Size, double Center)
+	{
+		const double Low = (Index == 0) ? 0.0 : Size - Span.Covered;
+		return TPair<double, double>(Low - Center, Low + Span.Covered - Center);
+	};
+
+	// Unit view direction for a (yaw, pitch) aim, in the convention PixelOffsetToYawPitchDeg uses.
+	const auto Direction = [](double YawDeg, double PitchDeg)
+	{
+		const double YawRad = FMath::DegreesToRadians(YawDeg);
+		const double PitchRad = FMath::DegreesToRadians(PitchDeg);
+		return FVector(FMath::Sin(YawRad) * FMath::Cos(PitchRad), -FMath::Sin(PitchRad), FMath::Cos(YawRad) * FMath::Cos(PitchRad));
+	};
+
+	TArray<FFisheyeTileLayout> Layouts;
+	bool bCornerBehindTile = false;
+	int32 AtlasX = 0;
+	int32 AtlasY = 0;
+	for (int32 RowIndex = 0; RowIndex < Rows.Num(); ++RowIndex)
+	{
+		const FSpan& Row = Rows[RowIndex];
+		const TPair<double, double> RowEdges = CoveredEdges(Row, RowIndex, SizeXY.Y, OpticalCenter.Y);
+		AtlasX = 0;
+		for (int32 ColumnIndex = 0; ColumnIndex < Columns.Num(); ++ColumnIndex)
+		{
+			const FSpan& Column = Columns[ColumnIndex];
+			const TPair<double, double> ColumnEdges = CoveredEdges(Column, ColumnIndex, SizeXY.X, OpticalCenter.X);
+
+			FFisheyeTileLayout& Layout = Layouts.AddDefaulted_GetRef();
+			Layout.CoveredSizeXY = FIntPoint(Column.Covered, Row.Covered);
+			Layout.AtlasOffset = FIntPoint(AtlasX, AtlasY);
+			Layout.OwnedOffset = FIntPoint(Column.OwnedOffset, Row.OwnedOffset);
+			Layout.OwnedSize = FIntPoint(Column.Owned, Row.Owned);
+
+			// A single tile on a centered optical axis aims straight ahead with no re-aim. Otherwise
+			// aim at the angular centroid of the covered rect (see ComputeFisheyeTileAim).
+			if (bSplitHorizontal || bSplitVertical || !PrincipalPoint.IsNearlyZero())
+			{
+				Layout.Aim = ComputeFisheyeTileAim(Model, FOutput,
+					ColumnEdges.Key, ColumnEdges.Value, RowEdges.Key, RowEdges.Value,
+					0.5 * (ColumnEdges.Key + ColumnEdges.Value), 0.5 * (RowEdges.Key + RowEdges.Value));
+			}
+
+			const FVector AimDirection = Direction(Layout.Aim.YawDeg, Layout.Aim.PitchDeg);
+			for (const double Dx : { ColumnEdges.Key, ColumnEdges.Value })
+			{
+				for (const double Dy : { RowEdges.Key, RowEdges.Value })
+				{
+					double CornerYawDeg = 0.0;
+					double CornerPitchDeg = 0.0;
+					Model.PixelOffsetToYawPitchDeg(Dx, Dy, FOutput, CornerYawDeg, CornerPitchDeg);
+					bCornerBehindTile |= (Direction(CornerYawDeg, CornerPitchDeg) | AimDirection) <= 0.0;
+				}
+			}
+			AtlasX += Column.Covered;
+		}
+		AtlasY += Row.Covered;
+	}
+	// A tile corner 90 degrees or more from the tile's aim lies behind its camera, so no frustum can
+	// cover the pixels approaching it; capping the frustum to reach toward them would cut sampling
+	// density across the whole tile. Quadrants are narrower, so each keeps its corners in front.
+	if (bCornerBehindTile && !(bSplitHorizontal && bSplitVertical))
+	{
+		return ComputeFisheyeTileLayouts(Model, FOutput, SizeXY, PrincipalPoint, FeatherPixels,
+			/*bSplitHorizontal=*/ true, /*bSplitVertical=*/ true, OutAtlasSize);
+	}
+
+	OutAtlasSize = FIntPoint(AtlasX, AtlasY);
+	return Layouts;
 }
 
 // ----------------------------------------------------------------------------------------
@@ -984,6 +1081,12 @@ void FDoubleSphereDistortion::YawPitchDegToPixelOffset(double YawDeg, double Pit
 
 FVector2D FDoubleSphereDistortion::OutputToRender(double OutputX, double OutputY) const
 {
+	FVector2D Render;
+	return TryOutputToRender(OutputX, OutputY, Render) ? Render : FVector2D(1e6, 1e6);
+}
+
+bool FDoubleSphereDistortion::TryOutputToRender(double OutputX, double OutputY, FVector2D& OutRender) const
+{
 	// OutputX/Y are tile-local r_d coords measured from the tile's pixel-rect center. To get
 	// parent-frame coords we shift by the tile-pixel-center's r_d position in parent space,
 	// which equals (axis projection) - (axis re-aim shift). With AxisShift=0 this reduces to
@@ -1016,7 +1119,7 @@ FVector2D FDoubleSphereDistortion::OutputToRender(double OutputX, double OutputY
 	double RayX, RayY, RayZ;
 	if (!UnprojectPoint(ParentMx, ParentMy, Xi, Alpha, RayX, RayY, RayZ))
 	{
-		return FVector2D(1e6, 1e6);
+		return false;
 	}
 
 	// Rotate from parent frame to child frame: R_X(ElevationOffset) * R_Y(-AzimuthOffset).
@@ -1035,10 +1138,11 @@ FVector2D FDoubleSphereDistortion::OutputToRender(double OutputX, double OutputY
 
 	if (ChildZ <= 1e-10)
 	{
-		return FVector2D(1e6, 1e6);
+		return false;
 	}
 
-	return FVector2D(ChildX / ChildZ, ChildY / ChildZ);
+	OutRender = FVector2D(ChildX / ChildZ, ChildY / ChildZ);
+	return true;
 }
 
 FDistortionRenderConfig FDoubleSphereDistortion::ComputeRenderConfig(const FIntPoint& OutputSizeXY, double FOutput,
