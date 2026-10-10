@@ -143,10 +143,14 @@ bool FTempoLensKannalaBrandtTest::RunTest(const FString& Parameters)
 	}
 
 	// Forward/inverse round trip with nonzero coefficients.
+	double RoundTripThetaMax = 0.0, RoundTripThetaDMax = 0.0;
+	FKannalaBrandtDistortion::ComputeMaxTheta(0.05, 0.01, 0.0, 0.0, RoundTripThetaMax, RoundTripThetaDMax);
 	for (const double Theta : { 0.1, 0.5, 1.0, 1.5 })
 	{
 		const double ThetaD = FKannalaBrandtDistortion::SolveDistortion(Theta, 0.05, 0.01, 0.0, 0.0);
-		const double ThetaBack = FKannalaBrandtDistortion::SolveInverseDistortion(ThetaD, 0.05, 0.01, 0.0, 0.0);
+		double ThetaBack = 0.0;
+		TestTrue(*FString::Printf(TEXT("KB inverse in domain at theta=%.2f"), Theta),
+			FKannalaBrandtDistortion::SolveInverseDistortion(ThetaD, 0.05, 0.01, 0.0, 0.0, RoundTripThetaMax, RoundTripThetaDMax, ThetaBack));
 		Near(*FString::Printf(TEXT("KB round trip at theta=%.2f"), Theta), ThetaBack, Theta);
 	}
 
@@ -155,6 +159,180 @@ bool FTempoLensKannalaBrandtTest::RunTest(const FString& Parameters)
 	const FKannalaBrandtDistortion KB(0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
 	Near(TEXT("KB FOutput for 180deg/1000px"),
 		KB.ComputeFOutputForFullImage(FIntPoint(1000, 1000), 180.0), 500.0 / (UE_PI / 2.0));
+
+	return true;
+}
+
+namespace
+{
+	// TerraVerse's fisheye seed (dirt config/calibrations/seeds/common/cam_f_f.pbtxt). Its polynomial
+	// peaks at theta 2.0081 rad (theta_d 1.6852), short of the sensor corners (theta_d ~1.724).
+	FTempoLensParameters MakeSeedFisheyeLens(const FVector2D& PrincipalPoint)
+	{
+		FTempoLensParameters Params;
+		Params.LensModel = ETempoLensModel::KannalaBrandt;
+		Params.K1 = 0.00585150048f;
+		Params.K2 = -0.0050607579f;
+		Params.K3 = -0.00198001581f;
+		Params.K4 = 0.000104815609f;
+		Params.PrincipalPoint = PrincipalPoint;
+		return Params;
+	}
+
+	// Top/bottom tiles of a tall fisheye split vertically, as UTempoCamera::SyncTiles lays them out.
+	TArray<FFisheyeTileLayout> ComputeVerticalSplit(const FTempoLensParameters& Params, const FIntPoint& SizeXY,
+		double FOutput, int32 Feather)
+	{
+		const TUniquePtr<FLensModel> Model = CreateLensModel(Params, 0.0, 0.0);
+		FIntPoint AtlasSize;
+		return ComputeFisheyeTileLayouts(*Model, FOutput, SizeXY, Params.GetClampedPrincipalPoint(), Feather,
+			/*bSplitHorizontal=*/ false, /*bSplitVertical=*/ true, AtlasSize);
+	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTempoLensKannalaBrandtDomainTest,
+	"Tempo.Sensors.LensModels.KannalaBrandtDomain", TempoLensTestFlags)
+bool FTempoLensKannalaBrandtDomainTest::RunTest(const FString& Parameters)
+{
+	auto Near = [this](const TCHAR* What, double A, double B, double Tol = LensTol)
+	{
+		if (!FMath::IsNearlyEqual(A, B, Tol))
+		{
+			AddError(FString::Printf(TEXT("%s: expected %.8f, got %.8f"), What, B, A));
+		}
+	};
+
+	const FTempoLensParameters Seed = MakeSeedFisheyeLens(FVector2D::ZeroVector);
+	const double K1 = Seed.K1, K2 = Seed.K2, K3 = Seed.K3, K4 = Seed.K4;
+
+	// A monotonic polynomial's branch runs to the PI cap.
+	{
+		double ThetaMax = 0.0, ThetaDMax = 0.0;
+		FKannalaBrandtDistortion::ComputeMaxTheta(0.0, 0.0, 0.0, 0.0, ThetaMax, ThetaDMax);
+		Near(TEXT("KB equidistant ThetaMax"), ThetaMax, UE_DOUBLE_PI);
+		Near(TEXT("KB equidistant ThetaDMax"), ThetaDMax, UE_DOUBLE_PI);
+	}
+
+	// The seed's branch ends where its slope reaches zero.
+	double ThetaMax = 0.0, ThetaDMax = 0.0;
+	FKannalaBrandtDistortion::ComputeMaxTheta(K1, K2, K3, K4, ThetaMax, ThetaDMax);
+	Near(TEXT("KB seed ThetaMax"), ThetaMax, 2.0081, 1e-3);
+	Near(TEXT("KB seed ThetaDMax"), ThetaDMax, 1.6852, 1e-3);
+
+	// Round trips hold all the way up the branch, including close to the peak where the slope vanishes.
+	for (const double Theta : { 0.1, 1.0, 1.5, 1.9, 2.0 })
+	{
+		double ThetaBack = 0.0;
+		const bool bOk = FKannalaBrandtDistortion::SolveInverseDistortion(
+			FKannalaBrandtDistortion::SolveDistortion(Theta, K1, K2, K3, K4), K1, K2, K3, K4, ThetaMax, ThetaDMax, ThetaBack);
+		TestTrue(*FString::Printf(TEXT("KB seed inverse in domain at theta=%.2f"), Theta), bOk);
+		Near(*FString::Printf(TEXT("KB seed round trip at theta=%.2f"), Theta), ThetaBack, Theta, 1e-6);
+	}
+
+	// Beyond the peak there is no physical inverse: the solve reports it, and the distortion map gets
+	// the sentinel instead of a spurious root's scene content.
+	for (const double ThetaD : { ThetaDMax, 1.70, 1.7239, 2.5 })
+	{
+		double Theta = 0.0;
+		TestFalse(*FString::Printf(TEXT("KB seed inverse rejects theta_d=%.4f"), ThetaD),
+			FKannalaBrandtDistortion::SolveInverseDistortion(ThetaD, K1, K2, K3, K4, ThetaMax, ThetaDMax, Theta));
+		const FKannalaBrandtDistortion KB(K1, K2, K3, K4, 0.0, 0.0);
+		FVector2D Render;
+		TestFalse(*FString::Printf(TEXT("KB seed TryOutputToRender rejects theta_d=%.4f"), ThetaD),
+			KB.TryOutputToRender(ThetaD * 0.6, ThetaD * 0.8, Render));
+		TestTrue(*FString::Printf(TEXT("KB seed OutputToRender sentinel at theta_d=%.4f"), ThetaD),
+			KB.OutputToRender(ThetaD * 0.6, ThetaD * 0.8).Equals(FVector2D(1e6, 1e6)));
+	}
+
+	// cam_f_f at camera_downsample_factor 4: 540x960, 1277.85 px/rad / 4, which the camera splits
+	// top/bottom, with its default 16 px feather. Every covered-rect corner lies beyond the peak.
+	const FIntPoint SizeXY(540, 960);
+	const double FOutput = 1277.85 / 4.0;
+	constexpr int32 Feather = 16;
+	const double MaxTanBound = FMath::Tan(FMath::DegreesToRadians(85.0));
+
+	// A top/bottom split would leave each tile's outer corners behind its camera (~93 degrees from
+	// its aim). No frustum covers the pixels approaching them, so a tile in that state opens those
+	// sides to the cap...
+	{
+		const TUniquePtr<FLensModel> Model = CreateLensModel(Seed, 0.0, 0.0);
+		const int32 TopCoveredH = SizeXY.Y / 2 + Feather;
+		const double TopPCDy = TopCoveredH * 0.5 - SizeXY.Y * 0.5;
+		const FFisheyeTileAim Aim = ComputeFisheyeTileAim(*Model, FOutput,
+			-SizeXY.X * 0.5, SizeXY.X * 0.5, -SizeXY.Y * 0.5, TopCoveredH - SizeXY.Y * 0.5, 0.0, TopPCDy);
+		const TUniquePtr<FLensModel> TileModel = CreateLensModel(Seed, Aim.YawDeg, Aim.PitchDeg, Aim.AxisShiftXRd, Aim.AxisShiftYRd);
+		const FDistortionRenderConfig Config = TileModel->ComputeRenderConfig(FIntPoint(SizeXY.X, TopCoveredH), FOutput, FVector2D::ZeroVector);
+		Near(TEXT("KB seed half tile opens left to the cap"), Config.TanLeft, -MaxTanBound, 1e-9);
+		Near(TEXT("KB seed half tile opens right to the cap"), Config.TanRight, MaxTanBound, 1e-9);
+		Near(TEXT("KB seed half tile opens top to the cap"), Config.TanTop, -MaxTanBound, 1e-9);
+		TestTrue(TEXT("KB seed half tile bottom stays tight"), Config.TanBottom < 1.0);
+	}
+
+	// ...which is why the layout promotes it to quadrants, each with its corners in front.
+	const TArray<FFisheyeTileLayout> Centered = ComputeVerticalSplit(Seed, SizeXY, FOutput, Feather);
+	if (!TestEqual(TEXT("KB seed vertical split promoted to quadrants"), Centered.Num(), 4))
+	{
+		return false;
+	}
+	Near(TEXT("KB seed quadrant yaws mirror"), Centered[0].Aim.YawDeg, -Centered[1].Aim.YawDeg, 1e-9);
+	Near(TEXT("KB seed quadrant pitches mirror"), Centered[0].Aim.PitchDeg, -Centered[2].Aim.PitchDeg, 1e-9);
+	Near(TEXT("KB seed top quadrants share pitch"), Centered[0].Aim.PitchDeg, Centered[1].Aim.PitchDeg, 1e-9);
+	TestTrue(TEXT("KB seed TL quadrant aims up and left"), Centered[0].Aim.PitchDeg > 10.0 && Centered[0].Aim.YawDeg < -10.0);
+	TArray<FDistortionRenderConfig> Configs;
+	for (const FFisheyeTileLayout& Layout : Centered)
+	{
+		const FFisheyeTileAim& Aim = Layout.Aim;
+		const TUniquePtr<FLensModel> TileModel = CreateLensModel(Seed, Aim.YawDeg, Aim.PitchDeg, Aim.AxisShiftXRd, Aim.AxisShiftYRd);
+		const FDistortionRenderConfig& Config = Configs.Add_GetRef(TileModel->ComputeRenderConfig(Layout.CoveredSizeXY, FOutput, FVector2D::ZeroVector));
+		TestTrue(TEXT("KB seed quadrant frustum stays clear of the cap"),
+			FMath::Max(FMath::Max(-Config.TanLeft, Config.TanRight), FMath::Max(-Config.TanTop, Config.TanBottom)) < 0.5 * MaxTanBound);
+	}
+	Near(TEXT("KB seed TL/TR frustums mirror"), Configs[0].TanLeft, -Configs[1].TanRight, 1e-9);
+	Near(TEXT("KB seed TL/BL frustums mirror"), Configs[0].TanTop, -Configs[2].TanBottom, 1e-9);
+
+	// A milder lens keeps the top/bottom split: equidistant at 100 degrees HFOV on the same image
+	// reaches ~78 degrees from each tile's aim.
+	{
+		FTempoLensParameters Mild = MakeSeedFisheyeLens(FVector2D::ZeroVector);
+		Mild.K1 = Mild.K2 = Mild.K3 = Mild.K4 = 0.0f;
+		const double MildFOutput = (SizeXY.X / 2.0) / FMath::DegreesToRadians(50.0);
+		const TArray<FFisheyeTileLayout> Halves = ComputeVerticalSplit(Mild, SizeXY, MildFOutput, Feather);
+		if (TestEqual(TEXT("KB mild vertical split keeps two tiles"), Halves.Num(), 2))
+		{
+			const FFisheyeTileAim& Aim = Halves[0].Aim;
+			const TUniquePtr<FLensModel> TileModel = CreateLensModel(Mild, Aim.YawDeg, Aim.PitchDeg, Aim.AxisShiftXRd, Aim.AxisShiftYRd);
+			const FDistortionRenderConfig Config = TileModel->ComputeRenderConfig(Halves[0].CoveredSizeXY, MildFOutput, FVector2D::ZeroVector);
+			Near(TEXT("KB mild top tile TanLeft == -TanRight"), Config.TanLeft, -Config.TanRight, 1e-9);
+			TestTrue(TEXT("KB mild top tile frustum stays clear of the cap"), Config.TanRight < 0.5 * MaxTanBound && Config.TanTop > -0.5 * MaxTanBound);
+		}
+	}
+
+	// The seed's real principal point; a 1e-9 relative change in FOutput (as float FOV round-off
+	// produces) must barely move the aims. An unguarded Newton solve at these corners jumps between
+	// spurious roots and moves the aims by tens of degrees. The quadrants' inner corners sit just
+	// inside the peak, where the inverse is steep, so the aims do drift smoothly (~1e-4 degrees per
+	// 1e-7 of FOutput) — far below a jump.
+	const FTempoLensParameters SeedOffCenter = MakeSeedFisheyeLens(
+		FVector2D((1060.8 - 1080.0) / 2160.0, (1923.54 - 1920.0) / 3840.0));
+	const TArray<FFisheyeTileLayout> Base = ComputeVerticalSplit(SeedOffCenter, SizeXY, FOutput, Feather);
+	for (const double Scale : { 1.0 + 1e-9, 1.0 - 1e-9, 1.0 + 1e-7 })
+	{
+		const TArray<FFisheyeTileLayout> Perturbed = ComputeVerticalSplit(SeedOffCenter, SizeXY, FOutput * Scale, Feather);
+		if (!TestEqual(*FString::Printf(TEXT("KB seed tile count stable (scale %.9f)"), Scale), Perturbed.Num(), Base.Num()))
+		{
+			continue;
+		}
+		for (int32 I = 0; I < Base.Num(); ++I)
+		{
+			Near(*FString::Printf(TEXT("KB seed tile %d yaw stable (scale %.9f)"), I, Scale), Perturbed[I].Aim.YawDeg, Base[I].Aim.YawDeg, 1e-2);
+			Near(*FString::Printf(TEXT("KB seed tile %d pitch stable (scale %.9f)"), I, Scale), Perturbed[I].Aim.PitchDeg, Base[I].Aim.PitchDeg, 1e-2);
+		}
+	}
+	if (TestEqual(TEXT("KB seed off-center split promoted to quadrants"), Base.Num(), 4))
+	{
+		Near(TEXT("KB seed off-center top yaws near mirror"), Base[0].Aim.YawDeg, -Base[1].Aim.YawDeg, 1.0);
+		Near(TEXT("KB seed off-center left pitches near mirror"), Base[0].Aim.PitchDeg, -Base[2].Aim.PitchDeg, 1.0);
+	}
 
 	return true;
 }

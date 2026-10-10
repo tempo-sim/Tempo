@@ -130,6 +130,16 @@ struct TEMPOSENSORS_API FLensModel
 	// (normalized by render focal length).
 	virtual FVector2D OutputToRender(double OutputX, double OutputY) const = 0;
 
+	// OutputToRender that reports whether a render point exists: false when the output point has
+	// no physical ray (beyond the model's domain) or its ray lies behind the render camera, in
+	// which case OutRender is unspecified. Models that can fail override this; the others always
+	// succeed.
+	virtual bool TryOutputToRender(double OutputX, double OutputY, FVector2D& OutRender) const
+	{
+		OutRender = OutputToRender(OutputX, OutputY);
+		return true;
+	}
+
 	// Compute the perspective render configuration for a tile of the given output pixel size,
 	// given the global output focal length (pixels per the model's output unit — this unit
 	// differs by model: r_d in normalized image plane, theta_d in radians, etc.). The returned
@@ -310,7 +320,8 @@ struct TEMPOSENSORS_API FEquidistantDistortion : FLensModel
 // For multi-tile rendering, the child capture has a different optical axis than
 // the parent camera. OutputToRender:
 //   1. Converts tile-local output coordinates (theta_d units) to parent-frame output coords
-//   2. Inverts the K-B polynomial (Newton-Raphson) to recover the physical angle theta
+//   2. Inverts the K-B polynomial to recover the physical angle theta. A theta_d beyond the
+//      polynomial's peak (ThetaDMax) has no physical inverse and maps to the (1e6, 1e6) sentinel.
 //   3. Computes the 3D ray direction from theta and the output plane direction
 //   4. Rotates the ray from parent frame to child frame
 //   5. Projects to child's perspective coordinates
@@ -350,6 +361,13 @@ struct TEMPOSENSORS_API FKannalaBrandtDistortion : FLensModel
 	double AxisCenterXRd = 0.0;
 	double AxisCenterYRd = 0.0;
 
+	// End of the polynomial's physical branch: the K-B polynomial rises monotonically on
+	// [0, ThetaMax] and peaks at ThetaDMax = SolveDistortion(ThetaMax). A theta_d at or beyond
+	// ThetaDMax has no physical inverse. Computed once in the constructor from K1-K4 (same
+	// INVARIANT as AxisCenterXRd/YRd).
+	double ThetaMax = UE_DOUBLE_PI;
+	double ThetaDMax = UE_DOUBLE_PI;
+
 	FKannalaBrandtDistortion(double InK1, double InK2, double InK3, double InK4,
 		double InAzimuthOffset, double InElevationOffset,
 		double InAxisShiftXRd = 0.0, double InAxisShiftYRd = 0.0)
@@ -357,6 +375,8 @@ struct TEMPOSENSORS_API FKannalaBrandtDistortion : FLensModel
 		, AzimuthOffset(InAzimuthOffset), ElevationOffset(InElevationOffset)
 		, AxisShiftXRd(InAxisShiftXRd), AxisShiftYRd(InAxisShiftYRd)
 	{
+		ComputeMaxTheta(K1, K2, K3, K4, ThetaMax, ThetaDMax);
+
 		// The child optical axis (0,0,1 in the child frame) in the parent frame is
 		// R_Y(Az) * R_X(-El) * (0,0,1) = (sin(Az)cos(El), sin(El), cos(Az)cos(El)). Forward-project
 		// that ray through the parent K-B to get its (constant) position in the parent output plane.
@@ -377,6 +397,7 @@ struct TEMPOSENSORS_API FKannalaBrandtDistortion : FLensModel
 	}
 
 	virtual FVector2D OutputToRender(double OutputX, double OutputY) const override;
+	virtual bool TryOutputToRender(double OutputX, double OutputY, FVector2D& OutRender) const override;
 	virtual FDistortionRenderConfig ComputeRenderConfig(const FIntPoint& OutputSizeXY, double FOutput,
 		const FVector2D& PrincipalPoint) const override;
 	virtual double ComputeFOutputForFullImage(const FIntPoint& FullImageSizeXY, double FullImageHFOVDeg) const override;
@@ -388,8 +409,23 @@ struct TEMPOSENSORS_API FKannalaBrandtDistortion : FLensModel
 	// Forward K-B: physical angle theta -> distorted angle theta_d.
 	static double SolveDistortion(double Theta, double K1, double K2, double K3, double K4);
 
-	// Inverse K-B: distorted angle theta_d -> physical angle theta (Newton-Raphson).
-	static double SolveInverseDistortion(double ThetaD, double K1, double K2, double K3, double K4);
+	// End of the physical branch: ThetaMax is the smallest positive root of the polynomial's
+	// derivative (a quartic in theta^2), capped at PI, and ThetaDMax = SolveDistortion(ThetaMax).
+	static void ComputeMaxTheta(double K1, double K2, double K3, double K4, double& OutThetaMax, double& OutThetaDMax);
+
+	// Inverse K-B: distorted angle theta_d -> physical angle theta on [0, ThetaMax], by Newton's
+	// method safeguarded by bisection (always converges). Returns false, leaving OutTheta at
+	// ThetaMax, when ThetaD >= ThetaDMax: there is no physical inverse there. ThetaMax/ThetaDMax
+	// come from ComputeMaxTheta, which is far costlier than the solve, so compute them once per
+	// K1-K4 (as the constructor does), not per call.
+	static bool SolveInverseDistortion(double ThetaD, double K1, double K2, double K3, double K4,
+		double ThetaMax, double ThetaDMax, double& OutTheta);
+
+private:
+	// Tile-local output coords -> unit ray in the child (tile camera) frame, X=right, Y=down,
+	// Z=forward. Returns false for a point beyond ThetaDMax, unless bClampToDomain, which pulls it
+	// radially back to the edge of the physical branch instead (and always returns true).
+	bool OutputToChildRay(double OutputX, double OutputY, bool bClampToDomain, FVector& OutRay) const;
 };
 
 // Double Sphere fisheye projection model for camera tiles.
@@ -437,6 +473,7 @@ struct TEMPOSENSORS_API FDoubleSphereDistortion : FLensModel
 		, AxisShiftXRd(InAxisShiftXRd), AxisShiftYRd(InAxisShiftYRd) {}
 
 	virtual FVector2D OutputToRender(double OutputX, double OutputY) const override;
+	virtual bool TryOutputToRender(double OutputX, double OutputY, FVector2D& OutRender) const override;
 	virtual FDistortionRenderConfig ComputeRenderConfig(const FIntPoint& OutputSizeXY, double FOutput,
 		const FVector2D& PrincipalPoint) const override;
 	virtual double ComputeFOutputForFullImage(const FIntPoint& FullImageSizeXY, double FullImageHFOVDeg) const override;
@@ -458,6 +495,47 @@ struct TEMPOSENSORS_API FDoubleSphereDistortion : FLensModel
 	// r_d = sin(theta) / (alpha*sqrt(1 + 2*xi*cos(theta) + xi^2) + (1-alpha)*(xi + cos(theta))).
 	static double RadialProject(double Theta, double Xi, double Alpha);
 };
+
+// Aim for one tile of a multi-tile fisheye capture. (YawDeg, PitchDeg) is the midpoint of the
+// (yaw, pitch) extent of the tile's four covered-rect corners. AxisShift is where that aim lands
+// in the parent output plane, as a displacement from the tile's pixel-rect center in r_d units.
+struct FFisheyeTileAim
+{
+	double YawDeg = 0.0;
+	double PitchDeg = 0.0;
+	double AxisShiftXRd = 0.0;
+	double AxisShiftYRd = 0.0;
+};
+
+// Compute a tile's aim from its covered-rect edges (LDx/RDx/TDy/BDy) and pixel-rect center, all as
+// signed pixel offsets from the full image's optical center. Model is the full-image (unrotated)
+// lens model and FOutput its global output focal length.
+TEMPOSENSORS_API FFisheyeTileAim ComputeFisheyeTileAim(const FLensModel& Model, double FOutput,
+	double LDx, double RDx, double TDy, double BDy, double PixelCenterDx, double PixelCenterDy);
+
+// One tile of a multi-tile fisheye capture: its aim plus where it sits in the atlas and the output.
+struct FFisheyeTileLayout
+{
+	FFisheyeTileAim Aim;
+	// Rendered (covered) size: the owned rect plus the feather that overlaps each neighbor.
+	FIntPoint CoveredSizeXY = FIntPoint::ZeroValue;
+	// Offset of the covered rect within the atlas.
+	FIntPoint AtlasOffset = FIntPoint::ZeroValue;
+	// The output rect this tile owns (seams split exactly between tiles).
+	FIntPoint OwnedOffset = FIntPoint::ZeroValue;
+	FIntPoint OwnedSize = FIntPoint::ZeroValue;
+};
+
+// Split a SizeXY fisheye output into 1, 2 or 4 tiles: left/right when bSplitHorizontal, top/bottom
+// when bSplitVertical, quadrants when both. A layout that would leave any tile corner behind that
+// tile's camera (90 degrees or more from its aim) is promoted to quadrants. Tiles come back row-major (TL, TR, BL, BR; a top/bottom
+// split is [top, bottom]). Seams sit at the geometric center while aims are measured from the
+// optical center (PrincipalPoint, a normalized offset from the image center), so a large principal
+// point leaves the tiles' angular extents unequal. Model is the full-image (unrotated) lens model
+// and FOutput its global output focal length.
+TEMPOSENSORS_API TArray<FFisheyeTileLayout> ComputeFisheyeTileLayouts(const FLensModel& Model, double FOutput,
+	const FIntPoint& SizeXY, const FVector2D& PrincipalPoint, int32 FeatherPixels,
+	bool bSplitHorizontal, bool bSplitVertical, FIntPoint& OutAtlasSize);
 
 // Factory: construct the distortion model implementation matching the requested parameters.
 // YawDegrees/PitchDegrees are the capture component's relative rotation (UE convention: positive
