@@ -12,6 +12,7 @@ graphs with TempoAgents or run Traffic; everything else only sees a faster setup
 | Generated lane profiles are saved in an `ATempoLaneProfileStore`, not on `AZoneGraphData` | Levels with a lane graph Tempo built | silently, but only for a level never opened and saved with an engine that still has the mods: its lane graph stops rebuilding correctly |
 | Tempo's zone graph build settings moved out of the ZoneGraph settings | Projects that set them | Nothing: Tempo still reads them from where they were until you set them in their new place |
 | `EZoneGraphTurnType` is `EMassTrafficTurnType`; `FLaneConnectionCandidate` is `FTempoLaneConnectionCandidate` | C++ that names them | compile (Blueprints and assets are redirected) |
+| `FTempoLaneConnectionInfo` no longer has an `FLaneConnectionSlot` constructor | C++ that constructed one | compile |
 | `UE::ZoneGraph::Query::FindFirstIntersectionBetweenLanes` is `UE::MassTraffic::FindFirstIntersectionBetweenLanes` | C++ that calls it | compile |
 | `FCrowdTrackingLaneData`'s lead and tail entity fields are `UMassTrafficSubsystem::GetCrowdLaneEnds` | C++ that reads them | compile |
 | `EZoneShapePolygonRoutingType::TempoBezier` is gone; **Bezier** routing gets Tempo's arcs | C++ that names it (zone shapes saved with it load as **Bezier**) | compile |

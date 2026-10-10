@@ -407,7 +407,10 @@ jobs:
         # Set the permissions of the engine DDC files such that they can be accessed in the docker container.
         sudo chown -R 1000:1000 .engine-ddc-cache/
         sudo chmod -R 755 .engine-ddc-cache/
-    - name: Sync Third Party Dependencies
+    # Setup.sh syncs the third party dependencies and, like any machine's first setup, disables
+    # conflicting project plugins and removes the toolchain block an earlier Tempo added to the
+    # project's *.Target.cs files - which keeps CI working for a project that has not migrated yet.
+    - name: Set Up Project
       uses: nick-fields/retry@v4
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -422,7 +425,7 @@ jobs:
             -v ${{ github.workspace }}/.engine-ddc-cache/Engine/DerivedDataCache:/home/ue4/UnrealEngine/Engine/DerivedDataCache \
             -v ${{ github.workspace }}/${{ inputs.project_root }}:/home/ue4/${{ inputs.project_root }} \
             tempo_unreal_image \
-            bash -c "/home/ue4/${{ inputs.tempo_root }}/Scripts/SyncDeps.sh -force"
+            bash -c "/home/ue4/${{ inputs.tempo_root }}/Scripts/Setup.sh -skip-hooks -force"
     - name: Clean (if requested)
       if: ${{ inputs.clean }}
       run: |

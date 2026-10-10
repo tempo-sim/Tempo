@@ -135,7 +135,14 @@ TEMPOROS_DIR=$("$SCRIPT_DIR"/FindTempoROS.sh 2>/dev/null) || TEMPOROS_DIR=""
 
 if [ -n "$TEMPOROS_DIR" ] && [ -f "$TEMPOROS_DIR/Setup.sh" ]; then
   echo -e "\nSetting up TempoROS\n"
-  bash "$TEMPOROS_DIR/Setup.sh" "${EXTRA_ARGS[@]}"
+  if [ "$SKIP_HOOKS" -eq 1 ] && [ -f "$TEMPOROS_DIR/Scripts/SyncDeps.sh" ]; then
+    # TempoROS's Setup.sh is its git hook installation plus its SyncDeps.sh, and it needs a git
+    # context for the former. -skip-hooks runs where there may be none (CI containers, chiefly),
+    # so go straight to the part that is wanted.
+    bash "$TEMPOROS_DIR/Scripts/SyncDeps.sh" "${EXTRA_ARGS[@]}"
+  else
+    bash "$TEMPOROS_DIR/Setup.sh" "${EXTRA_ARGS[@]}"
+  fi
 elif [ -z "$TEMPOROS_DIR" ]; then
   # TempoROSBridge is the only Tempo plugin that requires TempoROS, and it is opt-in. If this
   # project has opted into it without adding TempoROS, say so now: the build would otherwise fail
