@@ -16,16 +16,19 @@
 #include "TempoCamera.generated.h"
 
 class FTempoMotionVectorRewarpViewExtension;
+struct FLensModel;
+struct FDistortionRenderConfig;
 
 // Texture filter applied by the distortion post-process material when sampling the perspective
 // render target. Maps directly to the "FilterType" scalar parameter (Nearest=0, Bilinear=1,
-// Bicubic=2) — the order matches the material switch.
+// Bicubic=2, Lanczos3=3) — the order matches the material switch.
 UENUM(BlueprintType)
 enum class ETempoTextureFilterType : uint8
 {
 	Nearest  UMETA(DisplayName="Nearest", ToolTip="Point sampling. Cheapest; ideal when output and render rasterization are pixel-aligned (no distortion)."),
-	Bilinear UMETA(DisplayName="Bilinear", ToolTip="2x2 linear filtering. Good default for any non-trivial distortion."),
-	Bicubic  UMETA(DisplayName="Bicubic", ToolTip="4x4 cubic filtering. Best quality for wide-FOV equidistant fisheye where output sampling is highly non-uniform."),
+	Bilinear UMETA(DisplayName="Bilinear", ToolTip="2x2 linear filtering. Cheapest option for a distorted lens, but noticeably blurrier than Bicubic."),
+	Bicubic  UMETA(DisplayName="Bicubic", ToolTip="4x4 cubic (Catmull-Rom) filtering. Default for any distorted lens: keeps nearly all detail at fractional sample positions."),
+	Lanczos3 UMETA(DisplayName="Lanczos-3", ToolTip="6x6 Lanczos filtering, clamped to the nearest 2x2 texels to suppress ringing. Sharper than Bicubic where the render is sparser than the output (worth it at low UpsamplingFactor), for 36 texel reads instead of 4 bilinear taps."),
 };
 
 // 4-byte pixel format where first 3 bytes are color, 4th byte is label.
@@ -344,6 +347,11 @@ protected:
 	void ApplyTilePostProcess(FTempoCameraTile& Tile);
 	void SetTileDepthEnabled(FTempoCameraTile& Tile, bool bTileDepthEnabled);
 	void InitTileDistortionMap(FTempoCameraTile& Tile);
+	// Log how densely the tile's perspective render samples its output: the UpsamplingFactor the
+	// tile needs at its most demanding pixel and at the image's optical center, the factor its
+	// least demanding pixel needs, and its worst-case oversampling, all relative to
+	// UpsamplingFactor 1. Diagnostic only; does not change the render.
+	void LogTileSamplingDensity(const FTempoCameraTile& Tile, const FLensModel& Model, const FDistortionRenderConfig& Config, const FVector2D& PrincipalPoint) const;
 	// Push the tile's tan-bounds and filter type onto its distortion PPM. Call after anything that
 	// can hand the tile a fresh MID, which starts from the material's placeholder defaults.
 	void ApplyTileMaterialParams(FTempoCameraTile& Tile);
@@ -394,8 +402,8 @@ protected:
 
 	// Scales the perspective render's view-rect resolution (and hence the resolution of the
 	// scene color the distortion PPM resamples) by this factor. The equidistant output stays
-	// at SizeXY — the K× distorted atlas is bilinearly downsampled to SizeXY by the existing
-	// stitch+feather pass. Useful when distortion is concentrated in a small angular region
+	// at SizeXY — the stitch+feather pass filters each output pixel's full footprint in the K×
+	// distorted atlas down to SizeXY. Useful when distortion is concentrated in a small angular region
 	// (wide-FOV / fisheye) and 1:1 perspective:output sampling produces visibly fuzzy or
 	// pixelated regions in the resampled output. Independent of bEnableScreenPercentage. Atlas
 	// and aux RT memory grow by K². K=1 disables (byte-identical to no-upsampling behavior).
@@ -415,8 +423,7 @@ protected:
 	bool bRewarpMotionVectors = true;
 
 	// When true, TextureFilterType is auto-selected from the lens model + FOV: Pinhole -> Nearest,
-	// any other (Brown-Conrady / Rational / KannalaBrandt / DoubleSphere with FOV <= 120) -> Bilinear,
-	// equidistant fisheye (KannalaBrandt or DoubleSphere) with FOV > 120 -> Bicubic.
+	// any other (Brown-Conrady / Rational / KannalaBrandt / DoubleSphere) -> Bicubic.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo")
 	bool bAutoTextureFilterType = true;
 
@@ -426,7 +433,7 @@ protected:
 	ETempoTextureFilterType TextureFilterType = ETempoTextureFilterType::Bilinear;
 
 	// Resolve the filter actually pushed to the distortion PPM: TextureFilterType when manual, else
-	// derived from LensParameters.LensModel and FOVAngle per the bAutoTextureFilterType comment.
+	// derived from LensParameters.LensModel per the bAutoTextureFilterType comment.
 	ETempoTextureFilterType GetEffectiveTextureFilterType() const;
 
 	// Whether this camera can measure depth. Disabled when not requested to optimize performance.
