@@ -134,7 +134,7 @@ The build stops there, so the arbitration that would have preferred Tempo's copy
 not a resolvable contest — one of the two plugins has to be invisible to Unreal.
 
 `Setup.sh` makes it so, by running
-[`DisableConflictingPlugins.sh`](../reference/scripts.md#dependencies-and-engine-mods): any project
+[`DisableConflictingPlugins.sh`](../reference/scripts.md#dependencies): any project
 plugin whose name matches one Tempo ships has its descriptor renamed, so `Traffic.uplugin` becomes
 `Traffic.uplugin.disabled-by-tempo`. Renaming the descriptor is enough to hide the plugin from both
 UnrealBuildTool and the runtime plugin manager, nothing else on disk is touched, and `-restore`
@@ -202,4 +202,4 @@ distances, stop-sign rest times, crosswalk buffers and headlight thresholds refe
 ## See also
 
 - [TempoAgents](tempo-agents.md) — the gRPC surface over the road network and traffic controls
-- [Engine Mods](engine-mods.md) — the ZoneGraph and MassCrowd changes Traffic depends on
+- [Engine Mods](engine-mods.md) — what replaced the ZoneGraph and MassCrowd engine mods Traffic once depended on

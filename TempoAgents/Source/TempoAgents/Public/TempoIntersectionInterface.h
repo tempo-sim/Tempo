@@ -4,7 +4,8 @@
 
 #include "TempoAgentsTypes.h"
 
-#include "ZoneGraphBuilder.h"
+#include "MassTrafficTurnType.h"
+#include "ZoneGraphTypes.h"
 
 #include "CoreMinimal.h"
 #include "UObject/Interface.h"
@@ -90,18 +91,6 @@ struct FTempoLaneConnectionInfo
 {
 	GENERATED_BODY()
 
-	FTempoLaneConnectionInfo() = default;
-
-	FTempoLaneConnectionInfo(const FLaneConnectionSlot& Slot, int32 InLaneIndex)
-		: Position(Slot.Position)
-		, Forward(Slot.Forward)
-		, Up(Slot.Up)
-		, LaneDesc(Slot.LaneDesc)
-		, Restrictions(Slot.Restrictions)
-		, LaneIndex(InLaneIndex)
-	{
-	}
-
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tempo Agents|Road Lane Graph|Lane Connection Info")
 	FVector Position = FVector::ZeroVector;
 
@@ -119,6 +108,30 @@ struct FTempoLaneConnectionInfo
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tempo Agents|Road Lane Graph|Lane Connection Info")
 	int32 LaneIndex = -1;
+};
+
+// A lane the zone graph build proposes through an intersection, from one of the source road's lane
+// connection infos to one of the destination road's.
+USTRUCT(BlueprintType)
+struct FTempoLaneConnectionCandidate
+{
+	GENERATED_BODY()
+
+	FTempoLaneConnectionCandidate() = default;
+	FTempoLaneConnectionCandidate(const int32 InSourceSlot, const int32 InDestSlot, const FZoneGraphTagMask InTagMask, const EMassTrafficTurnType InTurnType)
+		: SourceSlot(InSourceSlot), DestSlot(InDestSlot), TagMask(InTagMask), TurnType(InTurnType) {}
+
+	UPROPERTY()
+	int32 SourceSlot = 0;
+
+	UPROPERTY()
+	int32 DestSlot = 0;
+
+	UPROPERTY()
+	FZoneGraphTagMask TagMask;
+
+	UPROPERTY()
+	EMassTrafficTurnType TurnType = EMassTrafficTurnType::NoTurn;
 };
 
 UINTERFACE(Blueprintable)
@@ -173,7 +186,7 @@ public:
 	// Lane Filtering Queries
 
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Tempo Agents|Intersection Interface|Queries")
-	bool ShouldFilterTempoLaneConnection(const AActor* SourceConnectionActor, const TArray<FTempoLaneConnectionInfo>& SourceLaneConnectionInfos, const int32 SourceSlotQueryIndex, const AActor* DestConnectionActor, const TArray<FTempoLaneConnectionInfo>& DestLaneConnectionInfos, const int32 DestSlotQueryIndex, const TArray<FLaneConnectionCandidate>& AllCandidates) const;
+	bool ShouldFilterTempoLaneConnection(const AActor* SourceConnectionActor, const TArray<FTempoLaneConnectionInfo>& SourceLaneConnectionInfos, const int32 SourceSlotQueryIndex, const AActor* DestConnectionActor, const TArray<FTempoLaneConnectionInfo>& DestLaneConnectionInfos, const int32 DestSlotQueryIndex, const TArray<FTempoLaneConnectionCandidate>& AllCandidates) const;
 
 	// Traffic Controller Queries
 

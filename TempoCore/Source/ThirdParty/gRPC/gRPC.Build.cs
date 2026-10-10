@@ -1,60 +1,29 @@
 // Copyright Tempo Simulation, LLC. All Rights Reserved.
 
-using System;
-using System.Collections.Generic;
 using System.IO;
 using UnrealBuildTool;
 
 public class gRPC : ModuleRules
 {
-    public class ModuleDepPaths
+    // The shared library holding Tempo's one copy of gRPC, Protobuf and Abseil, from a TempoThirdParty release.
+    public static string SharedLibraryPath(UnrealTargetPlatform Platform, string ModuleDirectory)
     {
-        public readonly string[] HeaderPaths;
-        public readonly string[] LibraryPaths;
-
-        public ModuleDepPaths(string[] headerPaths, string[] libraryPaths)
+        if (Platform == UnrealTargetPlatform.Win64)
         {
-            HeaderPaths = headerPaths;
-            LibraryPaths = libraryPaths;
+            return Path.Combine(ModuleDirectory, "Binaries", "Windows", "tempogrpc.dll");
         }
+        if (Platform == UnrealTargetPlatform.Mac)
+        {
+            return Path.Combine(ModuleDirectory, "Libraries", "Mac", "libtempogrpc.dylib");
+        }
+        return Path.Combine(ModuleDirectory, "Libraries", "Linux", "libtempogrpc.so");
     }
 
-    private IEnumerable<string> FindFilesInDirectory(string dir, string suffix = "")
+    // Whether modules share gRPC, Protobuf and Abseil through the shared library. A monolithic
+    // executable holds the one copy itself.
+    public static bool UsesSharedLibrary(ReadOnlyTargetRules Target)
     {
-        return Directory.EnumerateFiles(dir, "*." + suffix, SearchOption.AllDirectories);
-    }
-
-    public ModuleDepPaths GatherDeps()
-    {
-        List<string> HeaderPaths = new List<string>();
-        List<string> LibraryPaths = new List<string>();
-        
-        HeaderPaths.Add(Path.Combine(ModuleDirectory, "Includes"));
-
-        if (Target.Platform == UnrealTargetPlatform.Win64)
-        {
-            LibraryPaths.AddRange(FindFilesInDirectory(Path.Combine(ModuleDirectory, "Libraries", "Windows"), "lib"));
-            // On Windows the exports.def file contains a list of all the symbols a module that depends on gRPC should re-export.
-            LibraryPaths.Add(Path.Combine(ModuleDirectory, "Libraries", "Windows", "exports.def"));
-        }
-        else if (Target.Platform == UnrealTargetPlatform.Mac)
-        {
-            LibraryPaths.AddRange(FindFilesInDirectory(Path.Combine(ModuleDirectory, "Libraries", "Mac"), "a"));
-            // On Mac the exports.def file contains a list of all the libraries whose symbols a module that depends on gRPC should re-export.
-            LibraryPaths.Add(Path.Combine(ModuleDirectory, "Libraries", "Mac", "exports.def"));
-        }
-        else if (Target.Platform == UnrealTargetPlatform.Linux)
-        {
-            LibraryPaths.AddRange(FindFilesInDirectory(Path.Combine(ModuleDirectory, "Libraries", "Linux"), "a"));
-            // On Linux the exports.def file contains a list of all the libraries whose symbols a module that depends on gRPC should re-export.
-            LibraryPaths.Add(Path.Combine(ModuleDirectory, "Libraries", "Linux", "exports.def"));
-        }
-        else
-        {
-            Console.WriteLine("Unsupported target platform for module gRPC.");
-        }
-
-        return new ModuleDepPaths(HeaderPaths.ToArray(), LibraryPaths.ToArray());
+        return Target.LinkType != TargetLinkType.Monolithic;
     }
 
     public gRPC(ReadOnlyTargetRules Target) : base(Target)
@@ -67,9 +36,72 @@ public class gRPC : ModuleRules
         PublicDefinitions.Add("PROTOBUF_ENABLE_DEBUG_LOGGING_MAY_LEAK_PII=0");
         PublicDefinitions.Add("GOOGLE_PROTOBUF_INTERNAL_DONATE_STEAL_INLINE=0");
 
-        ModuleDepPaths moduleDepPaths = GatherDeps();
-        PublicIncludePaths.AddRange(moduleDepPaths.HeaderPaths);
-        PublicAdditionalLibraries.AddRange(moduleDepPaths.LibraryPaths);
+        PublicIncludePaths.Add(Path.Combine(ModuleDirectory, "Includes"));
+
+        string PlatformName;
+        string StaticLibraryExtension;
+        if (Target.Platform == UnrealTargetPlatform.Win64)
+        {
+            PlatformName = "Windows";
+            StaticLibraryExtension = "lib";
+        }
+        else if (Target.Platform == UnrealTargetPlatform.Mac)
+        {
+            PlatformName = "Mac";
+            StaticLibraryExtension = "a";
+        }
+        else if (Target.Platform == UnrealTargetPlatform.Linux)
+        {
+            PlatformName = "Linux";
+            StaticLibraryExtension = "a";
+        }
+        else
+        {
+            throw new BuildException("Unsupported target platform for module gRPC.");
+        }
+        string LibrariesDirectory = Path.Combine(ModuleDirectory, "Libraries", PlatformName);
+
+        // gRPC, Protobuf and Abseil keep global state, so a process must hold exactly one copy of
+        // them, which every module then shares.
+        bool bUseSharedLibrary = UsesSharedLibrary(Target);
+        PublicDefinitions.Add("TEMPO_GRPC_IS_SHARED_LIBRARY=" + (bUseSharedLibrary ? "1" : "0"));
+        if (bUseSharedLibrary)
+        {
+            // The one copy is the shared library, and nothing else may link the static libraries:
+            // a linker takes what it finds in them from there, even what the shared library exports,
+            // making a second copy. On Windows what is linked is the import library beside the DLL.
+            string SharedLibrary = SharedLibraryPath(Target.Platform, ModuleDirectory);
+            string LinkLibrary = Target.Platform == UnrealTargetPlatform.Win64 ? Path.Combine(LibrariesDirectory, "tempogrpc.lib") : SharedLibrary;
+            foreach (string RequiredFile in new[] { SharedLibrary, LinkLibrary })
+            {
+                if (!File.Exists(RequiredFile))
+                {
+                    throw new BuildException("{0} is missing. Tempo needs a TempoThirdParty gRPC release that includes it: run Tempo's Scripts/SyncDeps.sh.", RequiredFile);
+                }
+            }
+            PublicAdditionalLibraries.Add(LinkLibrary);
+            RuntimeDependencies.Add(SharedLibrary);
+        }
+        else
+        {
+            // The one copy is in the executable, which links the static libraries like any others.
+            int NumStaticLibraries = 0;
+            if (Directory.Exists(LibrariesDirectory))
+            {
+                foreach (string StaticLibrary in Directory.EnumerateFiles(LibrariesDirectory, "*." + StaticLibraryExtension))
+                {
+                    if (Path.GetFileNameWithoutExtension(StaticLibrary) != "tempogrpc")
+                    {
+                        PublicAdditionalLibraries.Add(StaticLibrary);
+                        ++NumStaticLibraries;
+                    }
+                }
+            }
+            if (NumStaticLibraries == 0)
+            {
+                throw new BuildException("No gRPC static libraries in {0}. Tempo needs a TempoThirdParty gRPC release: run Tempo's Scripts/SyncDeps.sh.", LibrariesDirectory);
+            }
+        }
 
         AddEngineThirdPartyPrivateStaticDependencies(Target, "OpenSSL");
         AddEngineThirdPartyPrivateStaticDependencies(Target, "zlib");

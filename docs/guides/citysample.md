@@ -139,8 +139,7 @@ back. If you skip this step the build fails in C# before it compiles any C++, wi
     For the full mechanism, see
     [Traffic as a drop-in replacement](../plugins/traffic.md#drop-in-replacement-for-citysamples-traffic).
 
-`Setup.sh` also rewrites CitySample's three `*.Target.cs` files to use Tempo's toolchain, installs
-the [engine mods](engine-mods.md), and downloads third-party dependencies.
+`Setup.sh` also downloads third-party dependencies.
 
 ## 4. Build and run
 
@@ -173,8 +172,6 @@ If that prints the level name, you are ready for
 |---|---|
 | `Source/CitySample/Util/CitySampleBlueprintLibrary.cpp` | Patched by you, in step 1 |
 | `Plugins/Traffic/`, `Plugins/RuleProcessor/` | Descriptors renamed `*.disabled-by-tempo` |
-| `Source/*.Target.cs` | A `TEMPO_TOOLCHAIN_BLOCK` selecting Tempo's toolchain |
-| Your Unreal installation | [Engine mods](engine-mods.md) applied in place |
 | `TempoEnv/` | Generated Python virtual environment with the client packages |
 
 ## See also

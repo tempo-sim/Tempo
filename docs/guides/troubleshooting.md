@@ -2,15 +2,33 @@
 
 ## Build and setup
 
-### Engine mods or third-party deps are out of sync
+### Third-party deps are out of sync
 
 If you set up with `Setup.sh -skip-hooks`, nothing re-syncs automatically when you change Tempo
-commits. Run them yourself:
+commits. Run it yourself:
 
 ```bash
-Plugins/Tempo/Scripts/InstallEngineMods.sh
 Plugins/Tempo/Scripts/SyncDeps.sh
 ```
+
+### `Unable to create toolchain 'TempoVCToolChain'`
+
+Your `*.Target.cs` files still select a toolchain Tempo no longer provides. Run `Setup.sh` — it
+removes the selection an earlier `Setup.sh` added, and points out one added any other way. See
+[Engine mods removal](../migration/engine-mods-removal.md).
+
+### `warning CS0436: The type 'TempoModuleRules' ... conflicts with the imported type`
+
+Your engine's UnrealBuildTool was modified by an earlier version of Tempo and still contains its
+own `TempoModuleRules`. The build is fine — the compiler prefers Tempo's current class, as the
+warning itself says — but restore the engine to the way Epic ships it when convenient. See
+[Engine mods removal](../migration/engine-mods-removal.md).
+
+### `The engine source file ... was not found`
+
+Tempo generates part of `TempoAgentsEditor` from the engine's ZoneGraph plugin source, which every
+standard Unreal installation includes (no optional component is involved). A trimmed or custom
+engine distribution without `Engine/Plugins/Runtime/ZoneGraph/Source` cannot build Tempo.
 
 ### `CS0101: already contains a definition for 'MassTraffic'`
 

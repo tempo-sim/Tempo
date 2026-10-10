@@ -9,12 +9,17 @@
 #include "TempoZoneGraphBuilder.h"
 #include "TempoRoadLaneGraphSubsystem.generated.h"
 
+class AZoneGraphData;
+
 UCLASS()
 class TEMPOAGENTSEDITOR_API UTempoRoadLaneGraphSubsystem : public UUnrealEditorSubsystem
 {
 	GENERATED_BODY()
 
 public:
+
+	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+	virtual void Deinitialize() override;
 
 	UFUNCTION(BlueprintCallable, Category = "Tempo Agents")
 	void SetupZoneGraphBuilder();
@@ -66,5 +71,24 @@ protected:
 
 	virtual UWorld* GetWorld() const override;
 
+	// Tempo's old modifications to the engine's ZoneGraph saved the lane profiles Tempo generated on
+	// AZoneGraphData. An engine that still has them still loads those, and this moves them to the
+	// level's lane profile store, where an unmodified engine will find them too once the level is saved.
+	void AdoptLaneProfilesSavedOn(const AZoneGraphData* ZoneGraphData);
+
+	// The stored lane profile with the same lanes as LaneProfile, storing it with the level first if there is none.
+	const FZoneLaneProfile* FindOrAddDynamicLaneProfile(const FZoneLaneProfile& LaneProfile) const;
+
 	FTempoZoneGraphBuilder TempoZoneGraphBuilder;
+
+	FDelegateHandle OnZoneGraphDataAddedHandle;
+
+	// LaneProfile's cache entry, freshly copied from it. Pointers into the cache stay valid until
+	// the next generation pass resets it.
+	const FZoneLaneProfile* CacheLaneProfile(const FZoneLaneProfile& LaneProfile) const;
+
+	// Copies of the lane profiles handed out while generating zone shapes, one per profile ID.
+	// Adding a lane profile can move the ones in the ZoneGraph settings, so pointers into those
+	// would not stay valid, and repeated lookups reuse their entry rather than growing the cache.
+	mutable TMap<FGuid, TUniquePtr<FZoneLaneProfile>> LaneProfileCache;
 };

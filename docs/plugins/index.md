@@ -17,13 +17,12 @@ nothing.
 
 ## Not ours, but shipped with Tempo
 
-Two more things live alongside the plugins above. Neither is Tempo-authored — both are Epic code
-that Tempo modifies — and you do not enable them the way you enable the plugins above.
+Two more pages cover what is not a Tempo plugin of its own.
 
 | | What it is |
 |---|---|
-| **[Traffic](traffic.md)** | Tempo's fork of the Traffic plugin from Epic's CitySample, with traffic controllers, sign-controlled intersections, and yielding added. It is what TempoAgents simulates. Also covers the `RuleProcessor` fork. |
-| **[Engine Mods](engine-mods.md)** | Small in-place patches to your engine install — chiefly ZoneGraph and MassCrowd — that the plugins above depend on. |
+| **[Traffic](traffic.md)** | Tempo's fork of the Traffic plugin from Epic's CitySample, with traffic controllers, sign-controlled intersections, and yielding added. It is what TempoAgents simulates. Also covers the `RuleProcessor` fork. You do not enable it the way you enable the plugins above. |
+| **[Engine Mods](engine-mods.md)** | What Tempo used to change in your engine installation, and what replaced it. Tempo no longer changes the engine. |
 
 ## Which do I need?
 

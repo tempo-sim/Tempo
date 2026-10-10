@@ -1,0 +1,353 @@
+# tempo-engine-derived-edits 1
+# source: Plugins/Runtime/ZoneGraph/Source/ZoneGraph/Private/ZoneShapeUtilities.cpp
+# source-sha256: f15041e8e14b10b98b370c2300625da03e44a721194e12b30f971270c051ecb5
+# output-sha256: c626099e2861a7a0dd251e277321fd48421df5679d87ae6a28ed0903e7c4c42d
+a2 7
+// GENERATED FILE. Do not edit or commit.
+// Tempo's build generates this from your engine's copy of ZoneGraph's ZoneShapeUtilities.cpp,
+// applying the edits stored in TempoAgentsEditor/EngineDerived. To change it, see the README there.
+
+#include "TempoZoneShapeTessellation.h"
+#include "TempoZoneGraphBuilder.h"
+#include "TempoZoneGraphSettings.h"
+a7 2
+#include "ZoneShapeComponent.h"
+#include "Kismet/KismetMathLibrary.h"
+d9 17
+a25 1
+namespace TempoZoneShape {
+a778 4
+	const UZoneGraphSettings* ZoneGraphSettings = GetDefault<UZoneGraphSettings>();
+	check(ZoneGraphSettings);
+	const FZoneGraphBuildSettings& BuildSettings = ZoneGraphSettings->GetBuildSettings();
+
+d805 1
+a805 2
+	int32 NextLaneDescIndex = LaneDescIndex; 
+	while (++NextLaneDescIndex < NumLanes)
+d807 2
+a808 2
+		const FZoneLaneDesc& NextLaneDesc = LaneDescs[NextLaneDescIndex];
+		if (NextLaneDesc.Direction == EZoneLaneDirection::None)
+d810 5
+a814 2
+			// Skip spacer lanes and continue until we find a real lane.
+			continue;
+a815 6
+		if (LaneDesc.Direction != NextLaneDesc.Direction)
+		{
+			NextLinkFlags |= EZoneLaneLinkFlags::OppositeDirection;
+		}
+		OutInternalLinks.Emplace(CurrentLaneIndex, FZoneLaneLinkData(CurrentLaneIndex + 1, EZoneLaneLinkType::Adjacent, NextLinkFlags));
+		break;
+d818 1
+a818 2
+	int32 PrevLaneDescIndex = LaneDescIndex;
+	while (--PrevLaneDescIndex >= 0)
+d820 2
+a821 2
+		const FZoneLaneDesc& PrevLaneDesc = LaneDescs[PrevLaneDescIndex];
+		if (PrevLaneDesc.Direction == EZoneLaneDirection::None)
+d823 5
+a827 2
+			// Skip spacer lanes and continue until we find a real lane.
+			continue;
+a828 6
+		if (LaneDesc.Direction != PrevLaneDesc.Direction)
+		{
+			PrevLinkFlags |= EZoneLaneLinkFlags::OppositeDirection;
+		}
+		OutInternalLinks.Emplace(CurrentLaneIndex, FZoneLaneLinkData(CurrentLaneIndex - 1, EZoneLaneLinkType::Adjacent, PrevLinkFlags));
+		break;
+d1003 1
+d1020 1
+a1020 3
+using FLaneConnectionCandidate = FTempoLaneConnectionCandidate;
+
+static TArray<FTempoLaneConnectionInfo> MakeLaneConnectionInfos(TConstArrayView<FLaneConnectionSlot> Slots)
+d1022 6
+a1027 14
+	TArray<FTempoLaneConnectionInfo> LaneConnectionInfos;
+	LaneConnectionInfos.Reserve(Slots.Num());
+	for (const FLaneConnectionSlot& Slot : Slots)
+	{
+		FTempoLaneConnectionInfo& LaneConnectionInfo = LaneConnectionInfos.AddDefaulted_GetRef();
+		LaneConnectionInfo.Position = Slot.Position;
+		LaneConnectionInfo.Forward = Slot.Forward;
+		LaneConnectionInfo.Up = Slot.Up;
+		LaneConnectionInfo.LaneDesc = Slot.LaneDesc;
+		LaneConnectionInfo.Restrictions = Slot.Restrictions;
+		LaneConnectionInfo.LaneIndex = Slot.Index;
+	}
+	return LaneConnectionInfos;
+}
+d1049 1
+a1049 1
+static void AddOrUpdateConnection(TArray<FLaneConnectionCandidate>& Candidates, const int32 SourceSlot, const int32 DestSlot, const FZoneGraphTagMask& TagMask, const EMassTrafficTurnType TurnType)
+d1054 1
+a1054 1
+		Cand->TagMask = Cand->TagMask | TagMask;
+d1058 1
+a1058 1
+		Candidates.Add(FLaneConnectionCandidate(SourceSlot, DestSlot, TagMask, TurnType));
+d1063 1
+a1063 1
+										   const FZoneGraphTagMask& TagMask, const int32 MainDestPointIndex, EMassTrafficTurnType TurnType)
+d1086 1
+a1086 1
+		AddOrUpdateConnection(Candidates, SourceSlots[SourceIdx].Index, DestSlots[DestIdx].Index, TagMask, TurnType);
+d1101 1
+a1101 1
+			AddOrUpdateConnection(Candidates, SourceSlots[SourceIdx].Index, DestSlots[DestIdx].Index, TagMask, TurnType);
+d1109 1
+a1109 1
+	if (TurnType != EMassTrafficTurnType::NoTurn)
+d1111 6
+a1116 2
+		// Turning connections by default get fully-connected slots. The builder may filter them later.
+		for (const FLaneConnectionSlot& SourceSlot : SourceSlots)
+d1118 2
+a1119 1
+			for (const FLaneConnectionSlot& DestSlot : DestSlots)
+d1121 1
+a1121 1
+				AddOrUpdateConnection(Candidates, SourceSlot.Index, DestSlot.Index, TagMask, TurnType);
+d1123 5
+d1132 1
+a1132 4
+		// Non-turning connections by default get one-to-one connected slots.
+		if (SourceNum < DestNum)
+		{
+			const int32 BestLaneIndex = CalcDestinationSide(SourceSlots, DestSlots) ? (DestNum - 1) : 0;
+d1134 2
+a1135 23
+			// Distribute the lanes symmetrically around that best lane.
+			const int32 FirstIndex = FitRange(BestLaneIndex - SourceNum/2, SourceNum, DestNum);
+
+			for (int32 i = 0; i < DestNum; i++)
+			{
+				const int32 SourceIdxUnClamped = i - FirstIndex;
+				if (bOneLanePerDestination && (SourceIdxUnClamped < 0 || SourceIdxUnClamped >= SourceNum))
+				{
+					continue;
+				}
+
+				const int32 SourceIdx = FMath::Clamp(SourceIdxUnClamped, 0, SourceNum - 1);
+				const int32 DestIdx = i;
+			
+				AddOrUpdateConnection(Candidates, SourceSlots[SourceIdx].Index, DestSlots[DestIdx].Index, TagMask, TurnType);
+			}
+		}
+		else
+		{
+			const int32 BestLaneIndex = CalcDestinationSide(SourceSlots, DestSlots) ? 0 : (SourceNum - 1);
+
+			// Distribute the lanes symmetrically around that best lane.
+			const int32 FirstIndex = FitRange(BestLaneIndex - DestNum/2, DestNum, SourceNum);
+d1137 6
+a1142 6
+			for (int32 i = 0; i < SourceNum; i++)
+			{
+				const int32 SourceIdx = i;
+				const int32 DestIdx = FMath::Clamp(i - FirstIndex, 0, DestNum - 1);
+				AddOrUpdateConnection(Candidates, SourceSlots[SourceIdx].Index, DestSlots[DestIdx].Index, TagMask, TurnType);
+			}
+a1204 50
+static EMassTrafficTurnType GetTurnTypeBetweenSourceDest(const FConnectionEntry& Source, TConstArrayView<FConnectionEntry> Destinations, int32 DestIdx, const FMatrix& LocalToWorld, const FZoneGraphBuildSettings& BuildSettings)
+{
+	const FVector SourceForward = LocalToWorld.TransformVector(Source.Point.Rotation.RotateVector(FVector::ForwardVector));
+	const FVector SourceUp = LocalToWorld.TransformVector(Source.Point.Rotation.RotateVector(FVector::UpVector));
+
+	float MinAngle = UE_PI;
+	float MaxAngle = -UE_PI;
+	int32 MinDestIdx = -1;
+	int32 MaxDestIdx = -1;
+	for (int32 Idx = 0; Idx < Destinations.Num(); ++Idx)
+	{
+		const FConnectionEntry& Destination = Destinations[Idx];
+		const FVector DestForward = LocalToWorld.TransformVector(Destination.Point.Rotation.RotateVector(FVector::ForwardVector));
+
+		const float AngleMagnitude = FMath::Acos(FVector::DotProduct(SourceForward, -DestForward));
+		const float AngleSign = FMath::Sign(FVector::CrossProduct(SourceForward, -DestForward).Dot(SourceUp));
+		const float Angle = AngleSign * AngleMagnitude;
+
+		if (Angle < MinAngle)
+		{
+			MinAngle = Angle;
+			MinDestIdx = Idx;
+		}
+		if (Angle > MaxAngle)
+		{
+			MaxAngle = Angle;
+			MaxDestIdx = Idx;
+		}
+	}
+
+	const float TurnThresholdAngle = FMath::DegreesToRadians(BuildSettings.TurnThresholdAngle);
+
+	// A connection must have an angle above the threshold *and* be the right-most connection to be a right turn,
+	// unless bSingleTurningConnectionPerTurnType is false.
+	if ((!TempoSettings().bSingleTurningConnectionPerTurnType || DestIdx == MaxDestIdx) && MaxAngle > TurnThresholdAngle)
+	{
+		return EMassTrafficTurnType::Right;
+	}
+
+	// A connection must have an angle below the threshold *and* be the left-most connection to be a left turn,
+	// unless bSingleTurningConnectionPerTurnType is false.
+	if ((!TempoSettings().bSingleTurningConnectionPerTurnType || DestIdx == MinDestIdx) && MinAngle < -TurnThresholdAngle)
+	{
+		return EMassTrafficTurnType::Left;
+	}
+
+	// Otherwise, the connection is not considered a turn.
+	return EMassTrafficTurnType::NoTurn;
+}
+
+a1205 1
+									const UZoneShapeComponent& PolygonShapeComp, const TMap<int32, const UZoneShapeComponent*>& PointIndexToZoneShapeComponent, const FTempoZoneGraphBuilder& ZoneGraphBuilder,
+d1211 1
+d1263 1
+a1263 4
+
+	// Cache these in case we need them later.
+	TMap<int32, EMassTrafficTurnType> DestinationTurnTypes;
+
+a1282 1
+		// Use closest point on dest so that lane profile widths do not affect direction.
+d1292 1
+a1292 8
+
+		const EMassTrafficTurnType TurnType = GetTurnTypeBetweenSourceDest(Source, Destinations, PointIndex, LocalToWorld, BuildSettings);
+
+		const bool bIsTurning = TurnType != EMassTrafficTurnType::NoTurn;
+		const bool bIsLeftTurn = TurnType == EMassTrafficTurnType::Left;
+
+		DestinationTurnTypes.Add(PointIndex, TurnType);
+
+d1298 3
+d1302 2
+a1382 4
+			FZoneGraphTagMask TagMask(Tag);
+
+			const EMassTrafficTurnType TurnType = DestinationTurnTypes[DestSlots[DestSlotsBegin].PointIndex];
+
+a1403 14
+			for (const auto& CompatibleTagsElem : TempoSettings().CompatibleTags.FilterByPredicate([Tag](const FTempoZoneGraphCompatibleTags& Elem) { return Elem.SourceTag == Tag; }))
+			{
+				const FZoneGraphTag& DestTag = CompatibleTagsElem.DestTag;
+				for (int32 j = DestSlotsBegin; j < DestSlotsEnd; j++)
+				{
+					const FLaneConnectionSlot& DestSlot = DestSlots[j];
+					if (DestSlot.LaneDesc.Tags.ContainsAny(DestTag) && CompatibleTagsElem.CompatibleForTurnTypes.Contains(TurnType))
+					{
+						TagDestSlots.Add(DestSlot);
+						TagMask.Add(FZoneGraphTagMask(DestTag));
+					}
+				}
+			}
+
+d1406 1
+a1406 1
+				AppendLaneConnectionCandidates(Candidates, TagSourceSlots, TagDestSlots, TagMask, MainDestPointIndex, TurnType);
+d1414 1
+a1414 1
+	if (TempoSettings().bRemoveOverlap)
+d1460 1
+a1460 1
+	if (TempoSettings().bRemoveSameDestination)
+d1557 1
+a1557 1
+	if (TempoSettings().bFillEmptyDestination)
+d1611 1
+a1611 2
+				const EMassTrafficTurnType TurnType = GetTurnTypeBetweenSourceDest(Source, Destinations, DestPointIndex, LocalToWorld, BuildSettings);
+				Candidates.Add(FLaneConnectionCandidate(NearestSourceSlot, DestSlotIdx, NearestSlotTags, TurnType));
+a1613 20
+	}
+
+	TArray<const UZoneShapeComponent*> ShapeComponentsInMap;
+	PointIndexToZoneShapeComponent.GenerateValueArray(ShapeComponentsInMap);
+	
+	const bool bAllZoneShapeComponentsInMapAreValid = !ShapeComponentsInMap.Contains(nullptr);
+	if (bAllZoneShapeComponentsInMapAreValid)
+	{
+		const TArray<FLaneConnectionCandidate> AllCandidates = Candidates;
+		const TArray<FTempoLaneConnectionInfo> SourceLaneConnectionInfos = MakeLaneConnectionInfos(SourceSlots);
+		const TArray<FTempoLaneConnectionInfo> DestLaneConnectionInfos = MakeLaneConnectionInfos(DestSlots);
+		Candidates.RemoveAll([&](const FLaneConnectionCandidate& Candidate)
+		{
+			// A slot's EntryID, not its PointIndex, is the index of its ZoneShapePoint: source slots leave
+			// PointIndex unset, and dest slots use it to index the Destinations array.
+			const UZoneShapeComponent* SourceShapeComp = PointIndexToZoneShapeComponent[SourceSlots[Candidate.SourceSlot].EntryID];
+			const UZoneShapeComponent* DestShapeComp = PointIndexToZoneShapeComponent[DestSlots[Candidate.DestSlot].EntryID];
+
+			return ZoneGraphBuilder.ShouldFilterLaneConnection(PolygonShapeComp, *SourceShapeComp, SourceLaneConnectionInfos, Candidate.SourceSlot, *DestShapeComp, DestLaneConnectionInfos, Candidate.DestSlot, AllCandidates);
+		});
+d1646 1
+a1646 1
+		if (RoutingType != EZoneShapePolygonRoutingType::Arcs)
+a1647 29
+			// For non-turning connections, use Distance between source and dest slots / 3.0 as the radius.
+			float SourceTangentLength = FVector::Distance(SourceSlot.Position, DestSlot.Position) / 3.0;
+			float DestTangentLength = SourceTangentLength;
+
+			const float MinAngleCos = FMath::Cos(FMath::DegreesToRadians(BuildSettings.TurnThresholdAngle));
+			const bool bIsTurning = FVector2D::DotProduct(FVector2D(SourceSlot.Forward), FVector2D(-DestSlot.Forward)) < MinAngleCos;
+			if (bIsTurning)
+			{
+				// For turning connections, choose source and dest radius to approximate a circle
+				const FVector2D SourcePoint2D(SourceSlot.Position);
+				const FVector2D DestPoint2D(DestSlot.Position);
+				const FVector2D SourceRadial2D = Rotate90CCW(FVector2D(SourceSlot.Forward));
+				const FVector2D DestRadial2D = Rotate90CCW(FVector2D(DestSlot.Forward));
+				float SourceRadius, DestRadius;
+				if (ensureMsgf(IntersectRayRay2D(FVector2D(SourceSlot.Position), SourceRadial2D.GetSafeNormal(),
+						FVector2D(DestSlot.Position), DestRadial2D.GetSafeNormal(),
+						/*out*/ SourceRadius, /*out*/ DestRadius),
+					TEXT("No intersection found between radial directions while building ZoneShape with Bezier routing")))
+				{
+					// Credit: https://stackoverflow.com/questions/1734745/how-to-create-circle-with-b%C3%A9zier-curves
+					const float TurnAngle = UKismetMathLibrary::DegreesToRadians(UKismetMathLibrary::NormalizedDeltaRotator(SourceSlot.Forward.Rotation(), (-DestSlot.Forward).Rotation()).Yaw);
+					const float Mul = FMath::Abs(4.0 / 3.0 * FMath::Tan(TurnAngle / 4.0)) * TempoSettings().TempoBezierTangentLengthMultiplier;
+
+					// Abs because IntersectRayRay2D will return negative radii if the intersection is in the opposite direction of the radial directions supplied.
+					SourceTangentLength = FMath::Abs(SourceRadius) * Mul;
+					DestTangentLength = FMath::Abs(DestRadius) * Mul;
+				}
+			}
+
+d1649 3
+a1651 2
+			const FVector SourceControlPoint = SourceSlot.Position + SourceSlot.Forward * SourceTangentLength;
+			const FVector DestControlPoint = DestSlot.Position + DestSlot.Forward * DestTangentLength;
+d1734 1
+a1734 2
+void TessellatePolygonShape(const UZoneShapeComponent& PolygonShapeComp, const FTempoZoneGraphBuilder& ZoneGraphBuilder,
+							TConstArrayView<FZoneShapePoint> Points, TConstArrayView<FZoneLaneProfile> LaneProfiles, const FMatrix& LocalToWorld,
+a1736 17
+	const EZoneShapePolygonRoutingType RoutingType = PolygonShapeComp.GetPolygonRoutingType();
+	const FZoneGraphTagMask ZoneTags = PolygonShapeComp.GetTags();
+
+	TConstArrayView<FZoneShapeConnector> ShapeConnectors = PolygonShapeComp.GetShapeConnectors();
+	TConstArrayView<FZoneShapeConnection> ConnectedShapes = PolygonShapeComp.GetConnectedShapes();
+
+	checkf(ConnectedShapes.Num() == ShapeConnectors.Num(), TEXT("ConnectedShapes and ShapeConnectors should have the same number of entries."));
+	
+	TMap<int32, const UZoneShapeComponent*> PointIndexToZoneShapeComponent;
+	for (int32 ConnectionIndex = 0; ConnectionIndex < ConnectedShapes.Num(); ++ConnectionIndex)
+	{
+		const int32 PointIndex = ShapeConnectors[ConnectionIndex].PointIndex;
+		const UZoneShapeComponent* ZoneShapeComponent = ConnectedShapes[ConnectionIndex].ShapeComponent.Get();
+		
+		PointIndexToZoneShapeComponent.Add(PointIndex, ZoneShapeComponent);
+	}
+	
+d1772 1
+a1772 1
+
+d1827 1
+a1827 1
+								Destinations, PolygonShapeComp, PointIndexToZoneShapeComponent, ZoneGraphBuilder, RoutingType, ZoneTags, BuildSettings, LocalToWorld, OutZoneStorage, OutInternalLinks);
+d1854 1
+a1854 1
+} // TempoZoneShape

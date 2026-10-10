@@ -17,6 +17,7 @@ public class TempoAgents : TempoModuleRules
 				"RenderCore",
 				"ZoneGraph",
 				// Tempo
+				"MassTraffic",
 				"TempoCore",
 			}
 		);
@@ -37,7 +38,6 @@ public class TempoAgents : TempoModuleRules
 				"MassSignals",
 				"MassSimulation",
 				"MassSpawner",
-				"MassTraffic",
 				"MassZoneGraphNavigation",
 				"RHI",
 				"Slate",

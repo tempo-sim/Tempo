@@ -1,6 +1,6 @@
 using UnrealBuildTool;
 
-public class TempoCoreROSBridge : ModuleRules
+public class TempoCoreROSBridge : TempoModuleRules
 {
 	public TempoCoreROSBridge(ReadOnlyTargetRules Target) : base(Target)
 	{

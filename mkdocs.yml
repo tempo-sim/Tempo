@@ -77,6 +77,10 @@ plugins:
       scripts:
         - docs/gen_api_reference.py
   - literate-nav
+  # Published URLs that moved keep working.
+  - redirects:
+      redirect_maps:
+        guides/engine-mods.md: plugins/engine-mods.md
 
 # Build-time hooks (see docs/hooks.py).
 hooks:
@@ -163,7 +167,6 @@ nav:
       - guides/packaging.md
       - guides/continuous-integration.md
       - guides/testing.md
-      - guides/engine-mods.md
       - guides/troubleshooting.md
       - guides/documentation.md
   - Reference:
@@ -174,6 +177,8 @@ nav:
       - reference/environment.md
   - Migration:
       - migration/index.md
+      - migration/engine-mods-removal.md
+      - migration/engine-plugin-mods.md
       - migration/ros-opt-in.md
       - migration/v0.3.0.md
       - migration/sensors-v0.2.0.md

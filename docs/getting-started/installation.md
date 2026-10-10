@@ -120,25 +120,22 @@ This script:
 - Disables any plugin already in your project that shares a name with one Tempo ships, by renaming
   its `*.uplugin`. Unreal cannot build two plugins of the same name, so this is what lets Tempo's
   `Traffic` stand in for the one a [CitySample](../plugins/traffic.md) project already has
-- Modifies your project's `*.Target.cs` files to use Tempo's custom toolchain, which is necessary
-  for linking certain third-party dependencies properly
-- Installs the Tempo [engine mods](../guides/engine-mods.md), patching your installed Engine
-  in place
 - Downloads third-party dependencies
-- Adds git hooks that keep engine mods and third-party dependencies up to date automatically as
-  you check out different Tempo commits
+- Adds git hooks that keep third-party dependencies up to date automatically as you check out
+  different Tempo commits
+
+It does not change your Unreal installation.
 
 !!! warning "`-skip-hooks` is for Tempo developers only"
 
     `Setup.sh` accepts a `-skip-hooks` flag which suppresses installing the `post-checkout` and
     `post-merge` git hooks. This is intended only for developers actively modifying Tempo
-    itself — when iterating on Tempo source while not touching `EngineMods/` or third-party
-    dependencies, the hooks can add noticeable overhead to every `git checkout` / `git merge`.
+    itself — when iterating on Tempo source while not touching third-party dependencies, the
+    hooks can add noticeable overhead to every `git checkout` / `git merge`.
 
-    Without the hooks, engine mods and third-party deps will **not** re-sync automatically when
-    you change Tempo commits, and you must run `Scripts/InstallEngineMods.sh` and
-    `Scripts/SyncDeps.sh` manually to keep them in sync. If you are simply using Tempo as a
-    dependency in your project, do not use this flag.
+    Without the hooks, third-party deps will **not** re-sync automatically when you change Tempo
+    commits, and you must run `Scripts/SyncDeps.sh` manually to keep them in sync. If you are
+    simply using Tempo as a dependency in your project, do not use this flag.
 
 ## Build and run
 

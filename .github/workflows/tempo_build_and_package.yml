@@ -20,7 +20,6 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-      packages: read
       actions: write # prune stale build caches (one per engine version)
     uses: ./.github/workflows/build_and_package.yml
     strategy:
@@ -37,7 +36,6 @@ jobs:
       checkout_path: TempoSample/Plugins/Tempo
       cache_repo_root: TempoSample/Plugins/Tempo
       cache_branch: main
-      engine_mods_image: ghcr.io/${{ github.repository_owner }}/tempo-unreal-modded
       environment: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name != github.repository && 'fork-pr-environment' || '' }}
       allow_unsafe_pr_checkout: true
       gen_rust_api: true

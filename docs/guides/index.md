@@ -28,19 +28,13 @@ Task-shaped documentation: how to extend Tempo, ship it, test it, and unstick it
 
     ---
 
-    The reusable GitHub Actions workflows, and how to cut 10–15 minutes per run.
+    The reusable GitHub Actions workflows.
 
 -   **[Testing](testing.md)**
 
     ---
 
     C++ automation tests, and the packaged-build Python and Rust client API suites.
-
--   **[Engine mods](engine-mods.md)**
-
-    ---
-
-    What Tempo patches in your Unreal installation, and how to author a new patch.
 
 -   **[Troubleshooting](troubleshooting.md)**
 

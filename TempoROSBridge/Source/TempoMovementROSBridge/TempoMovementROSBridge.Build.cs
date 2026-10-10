@@ -2,7 +2,7 @@
 
 using UnrealBuildTool;
 
-public class TempoMovementROSBridge : ModuleRules
+public class TempoMovementROSBridge : TempoModuleRules
 {
 	public TempoMovementROSBridge(ReadOnlyTargetRules Target) : base(Target)
 	{

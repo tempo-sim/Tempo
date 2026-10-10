@@ -24,6 +24,11 @@
 			"Name": "TempoCoreEditor",
 			"Type": "Editor",
 			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "TempoCoreBootstrap",
+			"Type": "Runtime",
+			"LoadingPhase": "EarliestPossible"
 		}
 	],
 	"Plugins": [

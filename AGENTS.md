@@ -108,11 +108,10 @@ the package (`import tempo_sim.TempoSensors`).
 All via `Scripts/` (`.sh` + `.bat` mirrors; run `.sh` under Git Bash on Windows). See also
 the `reference_build_scripts` memory.
 
-- **`Setup.sh`** (once): installs the **Tempo toolchain** (`UseTempoToolchain.sh` edits the
-  host `*.Target.cs`), applies **EngineMods**, downloads deps, installs git hooks that keep
-  mods/deps synced across checkouts. `-skip-hooks` only for active Tempo devs. If the host project
-  has a TempoROS, it runs that plugin's own `Setup.sh` too (fetching `rclcpp`), and warns when the
-  project enables TempoROSBridge without supplying TempoROS.
+- **`Setup.sh`** (once): disables conflicting project plugins, downloads deps, installs git hooks
+  that keep deps synced across checkouts. `-skip-hooks` only for active Tempo devs. If the host
+  project has a TempoROS, it runs that plugin's own `Setup.sh` too (fetching `rclcpp`), and warns
+  when the project enables TempoROSBridge without supplying TempoROS.
 - **TempoROS is not vendored**, so nothing may assume a path for it. `Scripts/FindTempoROS.sh`
   (+ `.bat`) prints the plugin's directory or exits 1; `Setup.sh` and `SyncDeps.sh` go through it.
   `SyncDeps.sh` chains to TempoROS's own `SyncDeps.sh`, which is what lets CI sync everything with
@@ -126,14 +125,26 @@ the `reference_build_scripts` memory.
 - **Engine path**: UE 5.7 lives at `/Users/Shared/Epic Games/UE_5.7` (path has a space —
   quote it). On Linux set `UNREAL_ENGINE_PATH`; Mac/Win auto-detect.
 
-**Why the toolchain & engine mods exist:** gRPC/Protobuf static libs are vendored into
-TempoCore and re-exported to other modules; custom toolchains
-(`TempoVCToolChain`/`TempoMacToolChain`/`TempoLinuxToolChain`) fix symbol re-export so
-duplicate globals don't crash. `EngineMods/{5.7,5.8}/` patch UBT, AutomationTool, ZoneGraph and
-MassCrowd **in place** (idempotently, via `InstallEngineMods.sh` reading
-`EngineMods.json`) so users don't need a custom-built engine. `TempoModuleRules` (added as a
-mod) auto-adds the `ProtobufGenerated` include paths and is the base class for every Tempo
-`*.Build.cs`.
+**No engine mods:** Tempo builds against Unreal exactly as Epic ships it, locally and in CI (which
+uses Epic's image plus the thin, unpublished tool layer in `Dockerfile`). Don't add anything that
+changes the engine installation. The old UnrealBuildTool toolchains (`TempoVCToolChain` etc.) are
+gone, and a host `*.Target.cs` must not set `ToolChainName` to one
+(`docs/migration/engine-mods-removal.md`). Automation projects (TempoROS's copy handler) reference
+the engine's prebuilt assemblies under `Engine/Binaries/DotNET/AutomationTool`, never its C#
+projects, which an installed engine cannot build. Engine *plugins* are not modified either:
+TempoAgentsEditor instead compiles edited copies of three ZoneGraph source files, generated at
+build time from the installed engine (`TempoAgentsEditor/EngineDerived/README.md`), and fails the
+build on an engine version whose files it has no edits for. `TempoModuleRules` (`TempoCore/Source/TempoModuleRules`, a Build.cs in a folder of its own so UBT
+compiles it into the project's rules assembly) auto-adds the `ProtobufGenerated` include paths and
+is the base class for every Tempo `*.Build.cs`. gRPC/Protobuf/Abseil live in one shared library,
+`tempogrpc`, shipped by TempoThirdParty beside the static archives; `TempoModuleRules` makes every
+module link it, and no module may link the static archives beside it (a linker would take from the
+archives even what the shared library exports, duplicating global state). Modules compile the
+headers as DLL consumers (`PROTOBUF_USE_DLLS`, `ABSL_CONSUME_DLL`, set in `TempoCore.Build.cs`).
+The DLL exports exactly the symbols in TempoThirdParty's `exports.def`, so a symbol a module
+imports but the DLL lacks is fixed there, not here. Monolithic (packaged) targets instead link the
+static archives into the executable, the one copy. A TempoThirdParty release without `tempogrpc`
+is no longer supported.
 
 **Third-party deps**: `SyncDeps.sh` hash-verifies and downloads prebuilt gRPC (TempoCore) and
 rclcpp (TempoROS, if the project has one) from GitHub releases (`ttp_manifest.json` per dep). Not
@@ -293,7 +304,7 @@ matrix entry in `tempo_build_and_package.yml` (and, for Python, a line in `pytes
 - New capability over the API → §3, copy an existing `*ServiceSubsystem`.
 - Sensor work → `TempoSensors/Source/TempoSensors/{Public,Private}` (`TempoCamera`,
   `TempoTiledSceneCaptureComponent`, `TempoLensModels`, `TempoSensorInterface`).
-- Build/toolchain/deps → `Scripts/`, `EngineMods/`, `*.Build.cs`.
+- Build/deps → `Scripts/`, `*.Build.cs`.
 - Client examples → `ExampleClients/`.
 - Project status & direction → `PROGRESS.md`, `MIGRATION_v0.1.0.md`, `PYTHON_API_SPLIT_PLAN.md`,
   and each plugin's `README.md`.

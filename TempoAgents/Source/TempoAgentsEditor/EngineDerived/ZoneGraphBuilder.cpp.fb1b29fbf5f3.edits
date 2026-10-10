@@ -1,0 +1,34 @@
+# tempo-engine-derived-edits 1
+# source: Plugins/Runtime/ZoneGraph/Source/ZoneGraph/Private/ZoneGraphBuilder.cpp
+# source-sha256: fb1b29fbf5f31955118ec6b4cd8d7f1dfff6cdd03789426625a2907780d2acbc
+# output-sha256: 20362b4612d275d6aa8be0dfcbedc1db8d0276044d6ca692bb8097a967f67a5c
+a2 5
+// GENERATED FILE. Do not edit or commit.
+// Tempo's build generates this from your engine's copy of ZoneGraph's ZoneGraphBuilder.cpp,
+// applying the edits stored in TempoAgentsEditor/EngineDerived. To change it, see the README there.
+
+#include "TempoZoneShapeTessellation.h"
+a3 1
+#include "ZoneShapeComponent.h"
+d5 4
+a8 1
+namespace TempoZoneShape {
+d10 316
+a325 2
+void AppendShapeToZoneStorage(const FTempoZoneGraphBuilder& ZoneGraphBuilder, const UZoneShapeComponent& ShapeComp, const FMatrix& LocalToWorld,
+	FZoneGraphStorage& OutZoneStorage, TArray<FZoneShapeLaneInternalLink>& OutInternalLinks, FZoneGraphBuildData* InBuildData)
+d417 1
+a417 1
+			ReverseLanes(SplineLaneProfile);
+d420 1
+a420 1
+		TessellateSplineShape(AdjustedPoints, SplineLaneProfile, ShapeComp.GetTags(), LocalToWorld, OutZoneStorage, OutInternalLinks);
+d440 1
+a440 1
+				ReverseLanes(PolyLaneProfiles[i]);
+d444 1
+a444 1
+		TessellatePolygonShape(ShapeComp, ZoneGraphBuilder, AdjustedPoints, PolyLaneProfiles, LocalToWorld, OutZoneStorage, OutInternalLinks);
+d468 295
+a762 1
+} // TempoZoneShape

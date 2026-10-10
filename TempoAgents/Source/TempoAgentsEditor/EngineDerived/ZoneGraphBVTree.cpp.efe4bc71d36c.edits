@@ -1,0 +1,23 @@
+# tempo-engine-derived-edits 1
+# source: Plugins/Runtime/ZoneGraph/Source/ZoneGraph/Private/ZoneGraphBVTree.cpp
+# source-sha256: efe4bc71d36c51b69f75d44bbc3399c0fbf3d0790b819ce18eb4b7345b84e48a
+# output-sha256: eff677d4110b37d08b01e292d81e1a59abcbec0b2770e0af8b60fe3aae910fd5
+a2 5
+// GENERATED FILE. Do not edit or commit.
+// Tempo's build generates this from your engine's copy of ZoneGraph's ZoneGraphBVTree.cpp,
+// applying the edits stored in TempoAgentsEditor/EngineDerived. To change it, see the README there.
+
+#include "TempoZoneShapeTessellation.h"
+d6 3
+a8 1
+namespace TempoZoneShape::BVTree
+d97 1
+a97 1
+} // TempoZoneShape::BVTree
+d100 1
+a100 1
+void TempoZoneShape::FZoneBVTreeBuilder::Build(TStridedView<const FBox> Boxes)
+d136 1
+a136 1
+	TempoZoneShape::BVTree::Subdivide(Items, 0, Items.Num(), Nodes);
+d138 9
