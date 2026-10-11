@@ -204,6 +204,11 @@ struct FTempoCameraTile
 	UPROPERTY(VisibleAnywhere)
 	FIntPoint OwnedOutputOffset = FIntPoint::ZeroValue;
 
+	// Offset of the tile's covered (rendered) rect within the output image: its owned rect extended
+	// by the feather on each seam side. Its size is TileOutputSizeXY.
+	UPROPERTY(VisibleAnywhere)
+	FIntPoint CoveredOutputOffset = FIntPoint::ZeroValue;
+
 	UPROPERTY(VisibleAnywhere)
 	FIntPoint OwnedOutputSize = FIntPoint::ZeroValue;
 
@@ -338,7 +343,7 @@ protected:
 	// Returns SharedFinalTextureTarget so OnRenderCompleted reads from the merged output.
 	virtual UTextureRenderTarget2D* GetReadbackTextureTarget() const override { return SharedFinalTextureTarget; }
 
-	void ConfigureTile(FTempoCameraTile& Tile, double YawOffset, double PitchOffset, double FOutput, const FIntPoint& TileSizeXY, const FIntPoint& TileDestOffset, const FIntPoint& OwnedOffset, const FIntPoint& OwnedSize, double AxisShiftXRd, double AxisShiftYRd, bool bActivate);
+	void ConfigureTile(FTempoCameraTile& Tile, double YawOffset, double PitchOffset, double FOutput, const FIntPoint& TileSizeXY, const FIntPoint& TileDestOffset, const FIntPoint& CoveredOffset, const FIntPoint& OwnedOffset, const FIntPoint& OwnedSize, double AxisShiftXRd, double AxisShiftYRd, bool bActivate);
 
 	// Recompute OutputResolveMap and OutputResolveWeight from the current tile layout. Must run
 	// after SyncTiles whenever tile geometry changes. Cheap with FeatherPixels=0 (writes the

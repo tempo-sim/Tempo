@@ -117,6 +117,10 @@ namespace
 		double ImageCenterRequiredK = 0.0;
 		// The requirement SamplingDensityPercentile of the sampled pixels meet; 1 if none were valid.
 		double PercentileRequiredK = 1.0;
+		// The oversampling SamplingDensityPercentile of the sampled pixels stay within. Near a fisheye
+		// polynomial's peak the inverse is steep, so a sliver of pixels beside the out-of-domain region
+		// oversamples by tens of times; the max reports that sliver, this the tile.
+		double PercentileOversample = 0.0;
 	};
 
 	// Fraction of a tile's output pixels the logged percentile requirement covers. Typical lenses'
@@ -135,9 +139,8 @@ namespace
 		const double RenderPixelsPerTanY = Config.RenderSizeXY.Y / (Config.TanBottom - Config.TanTop);
 		const auto ToRenderPixels = [&](double U, double V, FVector2D& OutRender)
 		{
-			const FVector2D Render = Model.OutputToRender((U - OutputCenter.X) / Config.FOutput, (V - OutputCenter.Y) / Config.FOutput);
-			// OutputToRender signals a ray at or beyond the model's horizon with a (1e6, 1e6) sentinel.
-			if (!FMath::IsFinite(Render.X) || !FMath::IsFinite(Render.Y) || FMath::Abs(Render.X) > 1e5 || FMath::Abs(Render.Y) > 1e5)
+			FVector2D Render;
+			if (!Model.TryOutputToRender((U - OutputCenter.X) / Config.FOutput, (V - OutputCenter.Y) / Config.FOutput, Render))
 			{
 				return false;
 			}
@@ -176,6 +179,8 @@ namespace
 		const int32 NumY = FMath::Min(TileOutputSizeXY.Y, 257);
 		TArray<double> RequiredKs;
 		RequiredKs.Reserve(NumX * NumY);
+		TArray<double> Oversamples;
+		Oversamples.Reserve(NumX * NumY);
 		for (int32 J = 0; J < NumY; ++J)
 		{
 			const double PV = 0.5 + (NumY > 1 ? (TileOutputSizeXY.Y - 1.0) * J / (NumY - 1) : 0.0);
@@ -196,13 +201,19 @@ namespace
 				}
 				Density.MinRequiredK = FMath::Min(Density.MinRequiredK, RequiredK);
 				Density.MaxOversample = FMath::Max(Density.MaxOversample, SigmaMax);
+				Oversamples.Add(SigmaMax);
 			}
 		}
 
+		const auto Percentile = [](TArray<double>& Values)
+		{
+			Values.Sort();
+			return Values[FMath::Min(Values.Num() - 1, FMath::FloorToInt32(SamplingDensityPercentile * Values.Num()))];
+		};
 		if (!RequiredKs.IsEmpty())
 		{
-			RequiredKs.Sort();
-			Density.PercentileRequiredK = RequiredKs[FMath::Min(RequiredKs.Num() - 1, FMath::FloorToInt32(SamplingDensityPercentile * RequiredKs.Num()))];
+			Density.PercentileRequiredK = Percentile(RequiredKs);
+			Density.PercentileOversample = Percentile(Oversamples);
 		}
 
 		double SigmaMin, SigmaMax;
@@ -2078,11 +2089,7 @@ void UTempoCamera::InitTileDistortionMap(FTempoCameraTile& Tile)
 
 void UTempoCamera::LogTileSamplingDensity(const FTempoCameraTile& Tile, const FLensModel& Model, const FDistortionRenderConfig& Config, const FVector2D& PrincipalPoint) const
 {
-	// The tile's covered rect in full-image pixels: its owned rect, extended by the feather on the
-	// side it shares a seam with (the side facing the image interior, i.e. a non-zero owned offset).
-	const FIntPoint CoveredOrigin(
-		Tile.OwnedOutputOffset.X > 0 ? Tile.OwnedOutputOffset.X - (Tile.TileOutputSizeXY.X - Tile.OwnedOutputSize.X) : 0,
-		Tile.OwnedOutputOffset.Y > 0 ? Tile.OwnedOutputOffset.Y - (Tile.TileOutputSizeXY.Y - Tile.OwnedOutputSize.Y) : 0);
+	const FIntPoint CoveredOrigin = Tile.CoveredOutputOffset;
 
 	const FVector2D ImageCenter = OpticalCenterPixels(SizeXY, LensParameters.GetClampedPrincipalPoint());
 	const FVector2D ImageCenterInTile(
@@ -2092,13 +2099,14 @@ void UTempoCamera::LogTileSamplingDensity(const FTempoCameraTile& Tile, const FL
 	const FTileSamplingDensity Density = MeasureTileSamplingDensity(Model, Config, Tile.TileOutputSizeXY, PrincipalPoint, ImageCenterInTile);
 	const FVector2D MaxPixel = Density.MaxRequiredKPixel + FVector2D(CoveredOrigin);
 
-	UE_LOG(LogTempoSensors, Display, TEXT("Sampling density owner: %s camera: %s tile: %d output: %dx%d (%.1fx%.1f deg render FOV) UpsamplingFactor: %.2f. ")
-		TEXT("UpsamplingFactor needed: p%.0f %.2f, max %.2f at image pixel (%.0f, %.0f), image center %.2f, least demanding pixel %.2f. Max oversampling at 1x: %.2f"),
+	UE_LOG(LogTempoSensors, Verbose, TEXT("Sampling density owner: %s camera: %s tile: %d output: %dx%d (%.1fx%.1f deg render FOV) UpsamplingFactor: %.2f. ")
+		TEXT("UpsamplingFactor needed: p%.0f %.2f, max %.2f at image pixel (%.0f, %.0f), image center %.2f, least demanding pixel %.2f. ")
+		TEXT("Oversampling at 1x: p%.0f %.2f, max %.2f"),
 		*GetOwnerName(), *GetSensorName(), static_cast<int32>(&Tile - Tiles), Tile.TileOutputSizeXY.X, Tile.TileOutputSizeXY.Y,
 		FMath::RadiansToDegrees(FMath::Atan(Config.TanRight) - FMath::Atan(Config.TanLeft)),
 		FMath::RadiansToDegrees(FMath::Atan(Config.TanBottom) - FMath::Atan(Config.TanTop)),
 		UpsamplingFactor, SamplingDensityPercentile * 100.0, Density.PercentileRequiredK, Density.MaxRequiredK, MaxPixel.X, MaxPixel.Y,
-		Density.ImageCenterRequiredK, Density.MinRequiredK, Density.MaxOversample);
+		Density.ImageCenterRequiredK, Density.MinRequiredK, SamplingDensityPercentile * 100.0, Density.PercentileOversample, Density.MaxOversample);
 }
 
 // Push the tile's tan-bounds onto the distortion PPM. The depth path uses these to recover the
@@ -2526,7 +2534,7 @@ void UTempoCamera::UpdateSharedExposure(bool bSingleTileFastPath, FTempoCameraTi
 	bHasValidSharedExposure = true;
 }
 
-void UTempoCamera::ConfigureTile(FTempoCameraTile& Tile, double YawOffset, double PitchOffset, double FOutput, const FIntPoint& TileSizeXY, const FIntPoint& TileDestOffset, const FIntPoint& OwnedOffset, const FIntPoint& OwnedSize, double AxisShiftXRd, double AxisShiftYRd, bool bActivate)
+void UTempoCamera::ConfigureTile(FTempoCameraTile& Tile, double YawOffset, double PitchOffset, double FOutput, const FIntPoint& TileSizeXY, const FIntPoint& TileDestOffset, const FIntPoint& CoveredOffset, const FIntPoint& OwnedOffset, const FIntPoint& OwnedSize, double AxisShiftXRd, double AxisShiftYRd, bool bActivate)
 {
 	if (!bActivate)
 	{
@@ -2540,6 +2548,7 @@ void UTempoCamera::ConfigureTile(FTempoCameraTile& Tile, double YawOffset, doubl
 	Tile.RelativeRotation = FRotator(PitchOffset, YawOffset, 0.0);
 	Tile.TileOutputSizeXY = TileSizeXY;
 	Tile.TileDestOffset = TileDestOffset;
+	Tile.CoveredOutputOffset = CoveredOffset;
 	Tile.OwnedOutputOffset = OwnedOffset;
 	Tile.OwnedOutputSize = OwnedSize;
 	Tile.OutputFocalLength = FOutput;
@@ -2570,7 +2579,7 @@ void UTempoCamera::SyncTiles()
 
 	auto Deactivate = [this](FTempoCameraTile& Tile)
 	{
-		ConfigureTile(Tile, 0, 0, 0, FIntPoint::ZeroValue, FIntPoint::ZeroValue, FIntPoint::ZeroValue, FIntPoint::ZeroValue, 0.0, 0.0, /*bActivate=*/ false);
+		ConfigureTile(Tile, 0, 0, 0, FIntPoint::ZeroValue, FIntPoint::ZeroValue, FIntPoint::ZeroValue, FIntPoint::ZeroValue, FIntPoint::ZeroValue, 0.0, 0.0, /*bActivate=*/ false);
 	};
 
 	// Build a "no-rotation" model used purely for full-image geometry queries (FOutput,
@@ -2583,7 +2592,7 @@ void UTempoCamera::SyncTiles()
 	{
 		// Single capture: use TL, deactivate others. No seams, no feather. Radial models are
 		// symmetric around the optical axis — no re-aim shift.
-		ConfigureTile(TL, 0.0, 0.0, FOutput, SizeXY, FIntPoint::ZeroValue, FIntPoint::ZeroValue, SizeXY, 0.0, 0.0, /*bActivate=*/ true);
+		ConfigureTile(TL, 0.0, 0.0, FOutput, SizeXY, FIntPoint::ZeroValue, FIntPoint::ZeroValue, FIntPoint::ZeroValue, SizeXY, 0.0, 0.0, /*bActivate=*/ true);
 		Deactivate(TR);
 		Deactivate(BL);
 		Deactivate(BR);
@@ -2599,6 +2608,8 @@ void UTempoCamera::SyncTiles()
 		// fills TL and TR).
 		const TArray<FFisheyeTileLayout> Layouts = ComputeFisheyeTileLayouts(*Model, FOutput, SizeXY,
 			LensParameters.GetClampedPrincipalPoint(), FeatherPixels, bSplitHorizontal, bSplitVertical, AtlasSize);
+		UE_LOG(LogTempoSensors, Verbose, TEXT("Tile layout owner: %s camera: %s tiles: %d atlas: %dx%d"),
+			*GetOwnerName(), *GetSensorName(), Layouts.Num(), AtlasSize.X, AtlasSize.Y);
 		for (int32 I = 0; I < UE_ARRAY_COUNT(Tiles); ++I)
 		{
 			if (!Layouts.IsValidIndex(I))
@@ -2607,7 +2618,7 @@ void UTempoCamera::SyncTiles()
 				continue;
 			}
 			const FFisheyeTileLayout& Layout = Layouts[I];
-			ConfigureTile(Tiles[I], Layout.Aim.YawDeg, Layout.Aim.PitchDeg, FOutput, Layout.CoveredSizeXY, Layout.AtlasOffset,
+			ConfigureTile(Tiles[I], Layout.Aim.YawDeg, Layout.Aim.PitchDeg, FOutput, Layout.CoveredSizeXY, Layout.AtlasOffset, Layout.CoveredOffset,
 				Layout.OwnedOffset, Layout.OwnedSize, Layout.Aim.AxisShiftXRd, Layout.Aim.AxisShiftYRd, /*bActivate=*/ true);
 		}
 	}

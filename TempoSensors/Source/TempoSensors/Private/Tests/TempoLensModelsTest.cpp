@@ -274,6 +274,8 @@ bool FTempoLensKannalaBrandtDomainTest::RunTest(const FString& Parameters)
 	{
 		return false;
 	}
+	TestEqual(TEXT("KB seed TL quadrant covers from the image origin"), Centered[0].CoveredOffset, FIntPoint::ZeroValue);
+	TestEqual(TEXT("KB seed BR quadrant covers to the image corner"), Centered[3].CoveredOffset + Centered[3].CoveredSizeXY, SizeXY);
 	Near(TEXT("KB seed quadrant yaws mirror"), Centered[0].Aim.YawDeg, -Centered[1].Aim.YawDeg, 1e-9);
 	Near(TEXT("KB seed quadrant pitches mirror"), Centered[0].Aim.PitchDeg, -Centered[2].Aim.PitchDeg, 1e-9);
 	Near(TEXT("KB seed top quadrants share pitch"), Centered[0].Aim.PitchDeg, Centered[1].Aim.PitchDeg, 1e-9);
