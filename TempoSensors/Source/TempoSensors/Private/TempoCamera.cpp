@@ -1822,6 +1822,32 @@ void UTempoCamera::ValidateFOV() const
 		{
 			Report(6, FString::Printf(TEXT("Equidistant VerticalFOV %.2f (derived) exceeds max 240 degrees."), VerticalFOV));
 		}
+
+		// The farthest image corner must stay on the polynomial's physical branch; pixels beyond
+		// ThetaDMax have no physical inverse and render as out-of-domain. The branch ends either
+		// where K1-K4 bend the polynomial over (ThetaMax < PI) or at the 180-degree cap.
+		const FKannalaBrandtDistortion Model(LensParameters.K1, LensParameters.K2, LensParameters.K3, LensParameters.K4, 0.0, 0.0);
+		const double FOutput = Model.ComputeFOutputForFullImage(SizeXY, FOVAngle);
+		if (FOutput > 0.0 && SizeXY.Y > 0)
+		{
+			const FVector2D OpticalCenter = OpticalCenterPixels(SizeXY, LensParameters.GetClampedPrincipalPoint());
+			const double FarX = FMath::Max(OpticalCenter.X, SizeXY.X - OpticalCenter.X);
+			const double FarY = FMath::Max(OpticalCenter.Y, SizeXY.Y - OpticalCenter.Y);
+			const double CornerThetaD = FMath::Sqrt(FarX * FarX + FarY * FarY) / FOutput;
+			if (CornerThetaD >= Model.ThetaDMax)
+			{
+				if (Model.ThetaMax < UE_DOUBLE_PI)
+				{
+					Report(9, FString::Printf(TEXT("Equidistant K1-K4 peak at theta_d %.4f (theta %.4f rad), inside the image (farthest corner theta_d %.4f). Pixels beyond the peak have no physical inverse and render as out-of-domain."),
+						Model.ThetaDMax, Model.ThetaMax, CornerThetaD));
+				}
+				else
+				{
+					Report(9, FString::Printf(TEXT("Equidistant FOVAngle %.2f at %dx%d puts the farthest image corner at theta_d %.4f, past the 180-degree limit (theta_d %.4f). Pixels beyond it render as out-of-domain; reduce FOVAngle or the aspect ratio."),
+						FOVAngle, SizeXY.X, SizeXY.Y, CornerThetaD, Model.ThetaDMax));
+				}
+			}
+		}
 	}
 
 	// PrincipalPoint is a normalized offset from the image center; |offset| >= 0.5 places the
@@ -2427,191 +2453,20 @@ void UTempoCamera::SyncTiles()
 		const bool bSplitHorizontal = FOVAngle > MaxPerspectiveFOVPerCapture;
 		const bool bSplitVertical = VerticalFOV > MaxPerspectiveFOVPerCapture;
 
-		// Feather is only meaningful where two tiles share an edge. With a single tile (no splits)
-		// there are no seams, so F=0. Otherwise use the configured value, clamped to keep tiles sane.
-		const int32 F = (bSplitHorizontal || bSplitVertical) ? FMath::Max(0, FeatherPixels) : 0;
-
-		// Optical-axis position within the output image. A non-zero principal point shifts it off
-		// the geometric center; all tile aim and axis-shift geometry below is measured from this
-		// point so the off-axis rays land at the right output pixels. The {Left,Right,Top,Bottom}
-		// extents are the signed pixel distances from the optical center to each image edge. NOTE:
-		// the pixel split between tiles stays at the geometric center, so a large principal-point
-		// shift leaves the tiles' angular extents unequal (one tile covers more FOV than the other).
-		const FVector2D OpticalCenter = OpticalCenterPixels(SizeXY, LensParameters.GetClampedPrincipalPoint());
-		const double OpticalCenterX = OpticalCenter.X;
-		const double OpticalCenterY = OpticalCenter.Y;
-		const double LeftExtent = OpticalCenterX;
-		const double RightExtent = SizeXY.X - OpticalCenterX;
-		const double TopExtent = OpticalCenterY;
-		const double BottomExtent = SizeXY.Y - OpticalCenterY;
-		// Pixel-rect-center offsets from the optical center for tiles that span a full image
-		// dimension (their center sits at the geometric center of that axis).
-		const double FullWidthPCDx = SizeXY.X * 0.5 - OpticalCenterX;
-		const double FullHeightPCDy = SizeXY.Y * 0.5 - OpticalCenterY;
-
-		// Convert a SIGNED 2D pixel offset (from the full image's optical center) to (yaw, pitch)
-		// degrees, via the model. Joint conversion is required for diagonal (4-tile) cases — the
-		// 3D direction implied by independent 1D yaw/pitch differs from the 3D direction whose 2D
-		// forward projection lands on (Dx, Dy), introducing multi-degree gaps at diagonal seams.
-		const auto YawPitchDegFromPixelOffset = [&](double Dx, double Dy)
+		// Layouts come back row-major, which is the Tiles order for every split (a top/bottom split
+		// fills TL and TR).
+		const TArray<FFisheyeTileLayout> Layouts = ComputeFisheyeTileLayouts(*Model, FOutput, SizeXY,
+			LensParameters.GetClampedPrincipalPoint(), FeatherPixels, bSplitHorizontal, bSplitVertical, AtlasSize);
+		for (int32 I = 0; I < UE_ARRAY_COUNT(Tiles); ++I)
 		{
-			double Yaw = 0.0;
-			double Pitch = 0.0;
-			Model->PixelOffsetToYawPitchDeg(Dx, Dy, FOutput, Yaw, Pitch);
-			return TPair<double, double>(Yaw, Pitch);
-		};
-
-		// Compute the angular-centroid aim point for a tile defined by its covered-rect corner
-		// pixel offsets (relative to the parent optical center) and pixel-rect-center pixel offset.
-		// Returns (YawDeg, PitchDeg, AxisShiftXRd, AxisShiftYRd):
-		//   - (Yaw, Pitch) is the midpoint of the tile's (yaw, pitch) angular extent over the four
-		//     covered corners — typically a better optical-axis aim than the pixel-rect center
-		//     because the unprojection from pixel-offset to angle is non-linear, so the angular
-		//     midpoint and the pixel-offset midpoint differ for off-axis tiles.
-		//   - AxisShift is the resulting axis position, expressed as a displacement from the tile's
-		//     pixel-rect center in parent r_d units. The distortion model uses this to map
-		//     tile-pixel-centered output coords to the right parent-frame r_d when the axis no
-		//     longer lands at the tile's pixel center.
-		struct FTileAim
-		{
-			double YawDeg;
-			double PitchDeg;
-			double AxisShiftXRd;
-			double AxisShiftYRd;
-		};
-		const auto ComputeTileAim = [&](double LDx, double RDx, double TDy, double BDy, double PixelCenterDx, double PixelCenterDy)
-		{
-			const auto YP_TL = YawPitchDegFromPixelOffset(LDx, TDy);
-			const auto YP_TR = YawPitchDegFromPixelOffset(RDx, TDy);
-			const auto YP_BL = YawPitchDegFromPixelOffset(LDx, BDy);
-			const auto YP_BR = YawPitchDegFromPixelOffset(RDx, BDy);
-
-			const double YawMin = FMath::Min(FMath::Min(YP_TL.Key, YP_TR.Key), FMath::Min(YP_BL.Key, YP_BR.Key));
-			const double YawMax = FMath::Max(FMath::Max(YP_TL.Key, YP_TR.Key), FMath::Max(YP_BL.Key, YP_BR.Key));
-			const double PitchMin = FMath::Min(FMath::Min(YP_TL.Value, YP_TR.Value), FMath::Min(YP_BL.Value, YP_BR.Value));
-			const double PitchMax = FMath::Max(FMath::Max(YP_TL.Value, YP_TR.Value), FMath::Max(YP_BL.Value, YP_BR.Value));
-
-			FTileAim Aim;
-			Aim.YawDeg = 0.5 * (YawMin + YawMax);
-			Aim.PitchDeg = 0.5 * (PitchMin + PitchMax);
-
-			// Forward-project the centroid back to a pixel offset to recover the axis position
-			// in the parent image plane, then express its displacement from the tile's pixel
-			// center in r_d units (FOutput is pixels/r_d for the model's output unit).
-			double DxAxis = 0.0;
-			double DyAxis = 0.0;
-			Model->YawPitchDegToPixelOffset(Aim.YawDeg, Aim.PitchDeg, FOutput, DxAxis, DyAxis);
-			Aim.AxisShiftXRd = (DxAxis - PixelCenterDx) / FOutput;
-			Aim.AxisShiftYRd = (DyAxis - PixelCenterDy) / FOutput;
-			return Aim;
-		};
-
-		if (!bSplitHorizontal && !bSplitVertical)
-		{
-			// Single fisheye tile covering the whole image. With a centered optical axis the aim is
-			// exactly (0,0) and there is no re-aim. A non-zero principal point offsets the axis from
-			// the tile's pixel center, so derive the aim/axis-shift through the same centroid path as
-			// the split cases (covered rect = full image, pixel center = the image's geometric center).
-			FTileAim Aim{0.0, 0.0, 0.0, 0.0};
-			if (!LensParameters.PrincipalPoint.IsNearlyZero())
+			if (!Layouts.IsValidIndex(I))
 			{
-				Aim = ComputeTileAim(-LeftExtent, +RightExtent, -TopExtent, +BottomExtent, FullWidthPCDx, FullHeightPCDy);
+				Deactivate(Tiles[I]);
+				continue;
 			}
-			ConfigureTile(TL, Aim.YawDeg, Aim.PitchDeg, FOutput, SizeXY, FIntPoint::ZeroValue, FIntPoint::ZeroValue, SizeXY, Aim.AxisShiftXRd, Aim.AxisShiftYRd, true);
-			Deactivate(TR);
-			Deactivate(BL);
-			Deactivate(BR);
-			AtlasSize = SizeXY;
-		}
-		else if (bSplitHorizontal && !bSplitVertical)
-		{
-			// Owned: split exactly into left/right halves; sum equals SizeXY.X.
-			const int32 LeftWidth = FMath::CeilToInt32(SizeXY.X / 2.0);
-			const int32 RightWidth = SizeXY.X - LeftWidth;
-
-			// Covered: each tile extends F pixels into the other's owned region across the seam.
-			const int32 TL_CoveredW = LeftWidth + F;
-			const int32 TR_CoveredW = RightWidth + F;
-
-			// Tile pixel-rect centers, as offsets from the optical center. Both tiles span the full
-			// image height, so their vertical center is the image center (FullHeightPCDy).
-			const double TL_PCDx = TL_CoveredW * 0.5 - LeftExtent;
-			const double TR_PCDx = RightExtent - TR_CoveredW * 0.5;
-
-			// Tile covered-rect corner pixel offsets (top is -Dy, bottom is +Dy).
-			const FTileAim TL_Aim = ComputeTileAim(-LeftExtent, TL_PCDx + TL_CoveredW * 0.5, -TopExtent, +BottomExtent, TL_PCDx, FullHeightPCDy);
-			const FTileAim TR_Aim = ComputeTileAim(TR_PCDx - TR_CoveredW * 0.5, +RightExtent, -TopExtent, +BottomExtent, TR_PCDx, FullHeightPCDy);
-
-			ConfigureTile(TL, TL_Aim.YawDeg, TL_Aim.PitchDeg, FOutput, FIntPoint(TL_CoveredW, SizeXY.Y), FIntPoint(0, 0),
-				FIntPoint(0, 0), FIntPoint(LeftWidth, SizeXY.Y), TL_Aim.AxisShiftXRd, TL_Aim.AxisShiftYRd, true);
-			ConfigureTile(TR, TR_Aim.YawDeg, TR_Aim.PitchDeg, FOutput, FIntPoint(TR_CoveredW, SizeXY.Y), FIntPoint(TL_CoveredW, 0),
-				FIntPoint(LeftWidth, 0), FIntPoint(RightWidth, SizeXY.Y), TR_Aim.AxisShiftXRd, TR_Aim.AxisShiftYRd, true);
-			Deactivate(BL);
-			Deactivate(BR);
-			AtlasSize = FIntPoint(TL_CoveredW + TR_CoveredW, SizeXY.Y);
-		}
-		else if (!bSplitHorizontal && bSplitVertical)
-		{
-			const int32 TopHeight = FMath::CeilToInt32(SizeXY.Y / 2.0);
-			const int32 BottomHeight = SizeXY.Y - TopHeight;
-
-			const int32 Top_CoveredH = TopHeight + F;
-			const int32 Bottom_CoveredH = BottomHeight + F;
-
-			// Both tiles span the full image width, so their horizontal center is the image center
-			// (FullWidthPCDx). Pixel-rect-center Y is offset from the optical center.
-			const double Top_PCDy = Top_CoveredH * 0.5 - TopExtent;
-			const double Bottom_PCDy = BottomExtent - Bottom_CoveredH * 0.5;
-
-			const FTileAim Top_Aim = ComputeTileAim(-LeftExtent, +RightExtent, -TopExtent, Top_PCDy + Top_CoveredH * 0.5, FullWidthPCDx, Top_PCDy);
-			const FTileAim Bottom_Aim = ComputeTileAim(-LeftExtent, +RightExtent, Bottom_PCDy - Bottom_CoveredH * 0.5, +BottomExtent, FullWidthPCDx, Bottom_PCDy);
-
-			ConfigureTile(TL, Top_Aim.YawDeg, Top_Aim.PitchDeg, FOutput, FIntPoint(SizeXY.X, Top_CoveredH), FIntPoint(0, 0),
-				FIntPoint(0, 0), FIntPoint(SizeXY.X, TopHeight), Top_Aim.AxisShiftXRd, Top_Aim.AxisShiftYRd, true);
-			ConfigureTile(TR, Bottom_Aim.YawDeg, Bottom_Aim.PitchDeg, FOutput, FIntPoint(SizeXY.X, Bottom_CoveredH), FIntPoint(0, Top_CoveredH),
-				FIntPoint(0, TopHeight), FIntPoint(SizeXY.X, BottomHeight), Bottom_Aim.AxisShiftXRd, Bottom_Aim.AxisShiftYRd, true);
-			Deactivate(BL);
-			Deactivate(BR);
-			AtlasSize = FIntPoint(SizeXY.X, Top_CoveredH + Bottom_CoveredH);
-		}
-		else
-		{
-			const int32 LeftWidth = FMath::CeilToInt32(SizeXY.X / 2.0);
-			const int32 RightWidth = SizeXY.X - LeftWidth;
-			const int32 TopHeight = FMath::CeilToInt32(SizeXY.Y / 2.0);
-			const int32 BottomHeight = SizeXY.Y - TopHeight;
-
-			const int32 L_CoveredW = LeftWidth + F;
-			const int32 R_CoveredW = RightWidth + F;
-			const int32 T_CoveredH = TopHeight + F;
-			const int32 B_CoveredH = BottomHeight + F;
-
-			// Pixel-rect centers per quadrant, as offsets from the optical center.
-			const double L_PCDx = L_CoveredW * 0.5 - LeftExtent;
-			const double R_PCDx = RightExtent - R_CoveredW * 0.5;
-			const double T_PCDy = T_CoveredH * 0.5 - TopExtent;
-			const double B_PCDy = BottomExtent - B_CoveredH * 0.5;
-
-			// Covered-rect corner X/Y for each tile (offsets from the optical center).
-			const double LCornerInner = L_PCDx + L_CoveredW * 0.5;     // shared seam x for TL/BL
-			const double RCornerInner = R_PCDx - R_CoveredW * 0.5;     // shared seam x for TR/BR
-			const double TCornerInner = T_PCDy + T_CoveredH * 0.5;     // shared seam y for TL/TR
-			const double BCornerInner = B_PCDy - B_CoveredH * 0.5;     // shared seam y for BL/BR
-
-			const FTileAim TL_Aim = ComputeTileAim(-LeftExtent, LCornerInner, -TopExtent, TCornerInner, L_PCDx, T_PCDy);
-			const FTileAim TR_Aim = ComputeTileAim(RCornerInner, +RightExtent, -TopExtent, TCornerInner, R_PCDx, T_PCDy);
-			const FTileAim BL_Aim = ComputeTileAim(-LeftExtent, LCornerInner, BCornerInner, +BottomExtent, L_PCDx, B_PCDy);
-			const FTileAim BR_Aim = ComputeTileAim(RCornerInner, +RightExtent, BCornerInner, +BottomExtent, R_PCDx, B_PCDy);
-
-			ConfigureTile(TL, TL_Aim.YawDeg, TL_Aim.PitchDeg, FOutput, FIntPoint(L_CoveredW, T_CoveredH), FIntPoint(0, 0),
-				FIntPoint(0, 0), FIntPoint(LeftWidth, TopHeight), TL_Aim.AxisShiftXRd, TL_Aim.AxisShiftYRd, true);
-			ConfigureTile(TR, TR_Aim.YawDeg, TR_Aim.PitchDeg, FOutput, FIntPoint(R_CoveredW, T_CoveredH), FIntPoint(L_CoveredW, 0),
-				FIntPoint(LeftWidth, 0), FIntPoint(RightWidth, TopHeight), TR_Aim.AxisShiftXRd, TR_Aim.AxisShiftYRd, true);
-			ConfigureTile(BL, BL_Aim.YawDeg, BL_Aim.PitchDeg, FOutput, FIntPoint(L_CoveredW, B_CoveredH), FIntPoint(0, T_CoveredH),
-				FIntPoint(0, TopHeight), FIntPoint(LeftWidth, BottomHeight), BL_Aim.AxisShiftXRd, BL_Aim.AxisShiftYRd, true);
-			ConfigureTile(BR, BR_Aim.YawDeg, BR_Aim.PitchDeg, FOutput, FIntPoint(R_CoveredW, B_CoveredH), FIntPoint(L_CoveredW, T_CoveredH),
-				FIntPoint(LeftWidth, TopHeight), FIntPoint(RightWidth, BottomHeight), BR_Aim.AxisShiftXRd, BR_Aim.AxisShiftYRd, true);
-			AtlasSize = FIntPoint(L_CoveredW + R_CoveredW, T_CoveredH + B_CoveredH);
+			const FFisheyeTileLayout& Layout = Layouts[I];
+			ConfigureTile(Tiles[I], Layout.Aim.YawDeg, Layout.Aim.PitchDeg, FOutput, Layout.CoveredSizeXY, Layout.AtlasOffset,
+				Layout.OwnedOffset, Layout.OwnedSize, Layout.Aim.AxisShiftXRd, Layout.Aim.AxisShiftYRd, /*bActivate=*/ true);
 		}
 	}
 

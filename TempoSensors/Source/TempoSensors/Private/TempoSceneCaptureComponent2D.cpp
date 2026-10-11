@@ -502,6 +502,11 @@ void UTempoSceneCaptureComponent2D::FillDistortionMap(UTexture2D* DistortionMap,
 	const double InvTanWidth = 1.0 / (TanRight - TanLeft);
 	const double InvTanHeight = 1.0 / (TanBottom - TanTop);
 
+	// UV for output pixels with no render point (beyond a fisheye model's domain, or behind the
+	// tile's camera). Kept finite and clearly outside [0, 1]: the models' (1e6, 1e6) sentinel
+	// overflows FFloat16 to inf, and inf UVs poison filtered taps with NaN.
+	constexpr float OutOfDomainDistortionUV = -1.0f;
+
 	for (int V = 0; V < OutputSizeXY.Y; ++V)
 	{
 		uint16* Row = &MipData[V * OutputSizeXY.X * 2];
@@ -510,9 +515,14 @@ void UTempoSceneCaptureComponent2D::FillDistortionMap(UTexture2D* DistortionMap,
 		for (int U = 0; U < OutputSizeXY.X; ++U)
 		{
 			const double OutputX = (U + 0.5 - OutputCx) / FOutput;
-			const FVector2D Render = Model.OutputToRender(OutputX, OutputY);
-			const float FinalU = static_cast<float>((Render.X - TanLeft) * InvTanWidth);
-			const float FinalV = static_cast<float>((Render.Y - TanTop) * InvTanHeight);
+			FVector2D Render;
+			float FinalU = OutOfDomainDistortionUV;
+			float FinalV = OutOfDomainDistortionUV;
+			if (Model.TryOutputToRender(OutputX, OutputY, Render))
+			{
+				FinalU = static_cast<float>((Render.X - TanLeft) * InvTanWidth);
+				FinalV = static_cast<float>((Render.Y - TanTop) * InvTanHeight);
+			}
 			Row[U * 2 + 0] = FFloat16(FinalU).Encoded;
 			Row[U * 2 + 1] = FFloat16(FinalV).Encoded;
 		}
