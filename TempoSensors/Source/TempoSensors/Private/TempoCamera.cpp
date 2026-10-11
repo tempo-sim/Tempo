@@ -115,7 +115,15 @@ namespace
 		double MinRequiredK = TNumericLimits<double>::Max();
 		double MaxOversample = 0.0;
 		double ImageCenterRequiredK = 0.0;
+		// The requirement SamplingDensityPercentile of the sampled pixels meet; 1 if none were valid.
+		double PercentileRequiredK = 1.0;
 	};
+
+	// Fraction of a tile's output pixels the logged percentile requirement covers. Typical lenses'
+	// requirement is top-heavy (the 99th percentile is within a few percent of the max), while a few
+	// pathological pixels -- rays at or beyond the edge of a lens's valid FOV, whose requirement grows
+	// without bound -- can dominate the max.
+	constexpr double SamplingDensityPercentile = 0.99;
 
 	// Evaluates the Jacobian at continuous tile output pixel coordinates (PU, PV), using the same
 	// pixel -> output-unit -> render-UV mapping as UTempoSceneCaptureComponent2D::FillDistortionMap.
@@ -166,6 +174,8 @@ namespace
 		const FVector2D OutputCenter = OpticalCenterPixels(TileOutputSizeXY, PrincipalPoint);
 		const int32 NumX = FMath::Min(TileOutputSizeXY.X, 257);
 		const int32 NumY = FMath::Min(TileOutputSizeXY.Y, 257);
+		TArray<double> RequiredKs;
+		RequiredKs.Reserve(NumX * NumY);
 		for (int32 J = 0; J < NumY; ++J)
 		{
 			const double PV = 0.5 + (NumY > 1 ? (TileOutputSizeXY.Y - 1.0) * J / (NumY - 1) : 0.0);
@@ -178,6 +188,7 @@ namespace
 					continue;
 				}
 				const double RequiredK = 1.0 / SigmaMin;
+				RequiredKs.Add(RequiredK);
 				if (RequiredK > Density.MaxRequiredK)
 				{
 					Density.MaxRequiredK = RequiredK;
@@ -186,6 +197,12 @@ namespace
 				Density.MinRequiredK = FMath::Min(Density.MinRequiredK, RequiredK);
 				Density.MaxOversample = FMath::Max(Density.MaxOversample, SigmaMax);
 			}
+		}
+
+		if (!RequiredKs.IsEmpty())
+		{
+			RequiredKs.Sort();
+			Density.PercentileRequiredK = RequiredKs[FMath::Min(RequiredKs.Num() - 1, FMath::FloorToInt32(SamplingDensityPercentile * RequiredKs.Num()))];
 		}
 
 		double SigmaMin, SigmaMax;
@@ -1236,10 +1253,12 @@ void UTempoCamera::InitRenderTarget()
 	SharedAuxTextureTarget->InitAutoFormat(SizeXY.X, SizeXY.Y);
 
 	// Resolve maps describe (per equidistant-output pixel) which tile(s) cover it, where in the
-	// atlas to sample, and how to feather. PF_FloatRGBA holds the two atlas UVs; PF_R16F holds the
-	// tile-A weight. Both use TF_Nearest because the materials need exact per-output-pixel data
-	// (smearing the UVs across pixel boundaries would create spurious atlas reads at seams).
-	OutputResolveMap = UTexture2D::CreateTransient(SizeXY.X, SizeXY.Y, PF_FloatRGBA);
+	// atlas to sample, and how to feather. PF_A32B32G32R32F holds the two atlas UVs: the color stitch
+	// floors UV * AtlasSize to find each pixel's footprint, and fp16's step near 1.0 (1/2048) would
+	// land on the wrong pixel once the atlas is ~2k wide. PF_R16F holds the tile-A weight. Both use
+	// TF_Nearest because the materials need exact per-output-pixel data (smearing the UVs across
+	// pixel boundaries would create spurious atlas reads at seams).
+	OutputResolveMap = UTexture2D::CreateTransient(SizeXY.X, SizeXY.Y, PF_A32B32G32R32F);
 	OutputResolveMap->CompressionSettings = TC_HDR;
 	OutputResolveMap->Filter = TF_Nearest;
 	OutputResolveMap->AddressX = TA_Clamp;
@@ -2074,12 +2093,12 @@ void UTempoCamera::LogTileSamplingDensity(const FTempoCameraTile& Tile, const FL
 	const FVector2D MaxPixel = Density.MaxRequiredKPixel + FVector2D(CoveredOrigin);
 
 	UE_LOG(LogTempoSensors, Display, TEXT("Sampling density owner: %s camera: %s tile: %d output: %dx%d (%.1fx%.1f deg render FOV) UpsamplingFactor: %.2f. ")
-		TEXT("UpsamplingFactor needed: max %.2f at image pixel (%.0f, %.0f), image center %.2f, least demanding pixel %.2f. Max oversampling at 1x: %.2f"),
+		TEXT("UpsamplingFactor needed: p%.0f %.2f, max %.2f at image pixel (%.0f, %.0f), image center %.2f, least demanding pixel %.2f. Max oversampling at 1x: %.2f"),
 		*GetOwnerName(), *GetSensorName(), static_cast<int32>(&Tile - Tiles), Tile.TileOutputSizeXY.X, Tile.TileOutputSizeXY.Y,
 		FMath::RadiansToDegrees(FMath::Atan(Config.TanRight) - FMath::Atan(Config.TanLeft)),
 		FMath::RadiansToDegrees(FMath::Atan(Config.TanBottom) - FMath::Atan(Config.TanTop)),
-		UpsamplingFactor, Density.MaxRequiredK, MaxPixel.X, MaxPixel.Y, Density.ImageCenterRequiredK, Density.MinRequiredK,
-		Density.MaxOversample);
+		UpsamplingFactor, SamplingDensityPercentile * 100.0, Density.PercentileRequiredK, Density.MaxRequiredK, MaxPixel.X, MaxPixel.Y,
+		Density.ImageCenterRequiredK, Density.MinRequiredK, Density.MaxOversample);
 }
 
 // Push the tile's tan-bounds onto the distortion PPM. The depth path uses these to recover the
@@ -2153,7 +2172,7 @@ void UTempoCamera::RebuildResolveMaps()
 
 	FTexture2DMipMap& MipMap = OutputResolveMap->GetPlatformData()->Mips[0];
 	FTexture2DMipMap& MipWeight = OutputResolveWeight->GetPlatformData()->Mips[0];
-	uint16* MapData = static_cast<uint16*>(MipMap.BulkData.Lock(LOCK_READ_WRITE));
+	float* MapData = static_cast<float*>(MipMap.BulkData.Lock(LOCK_READ_WRITE));
 	uint16* WeightData = static_cast<uint16*>(MipWeight.BulkData.Lock(LOCK_READ_WRITE));
 	if (!MapData || !WeightData)
 	{
@@ -2169,7 +2188,7 @@ void UTempoCamera::RebuildResolveMaps()
 	// spawn per pixel) while letting reconfigures of large images stay cheap.
 	ParallelFor(SizeXY.Y, [&](int32 Y)
 	{
-		uint16* MapRow = &MapData[Y * SizeXY.X * 4];
+		float* MapRow = &MapData[Y * SizeXY.X * 4];
 		uint16* WeightRow = &WeightData[Y * SizeXY.X];
 		for (int32 X = 0; X < SizeXY.X; ++X)
 		{
@@ -2265,10 +2284,10 @@ void UTempoCamera::RebuildResolveMaps()
 				}
 			}
 
-			MapRow[X * 4 + 0] = FFloat16(UV_A_X).Encoded;
-			MapRow[X * 4 + 1] = FFloat16(UV_A_Y).Encoded;
-			MapRow[X * 4 + 2] = FFloat16(UV_B_X).Encoded;
-			MapRow[X * 4 + 3] = FFloat16(UV_B_Y).Encoded;
+			MapRow[X * 4 + 0] = UV_A_X;
+			MapRow[X * 4 + 1] = UV_A_Y;
+			MapRow[X * 4 + 2] = UV_B_X;
+			MapRow[X * 4 + 3] = UV_B_Y;
 			WeightRow[X] = FFloat16(Weight).Encoded;
 		}
 	});

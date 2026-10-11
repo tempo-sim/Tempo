@@ -251,7 +251,7 @@ struct FTempoCameraTile
 	UPROPERTY(VisibleAnywhere)
 	UMaterialInstanceDynamic* PostProcessMaterialInstance = nullptr;
 
-	// Per-tile distortion map (PF_G16R16F of output→render UV samples).
+	// Per-tile distortion map (PF_R16G16B16A16_UNORM: output→render UV in RG, coverage in B).
 	UPROPERTY(VisibleAnywhere)
 	UTexture2D* DistortionMap = nullptr;
 
@@ -347,10 +347,10 @@ protected:
 	void ApplyTilePostProcess(FTempoCameraTile& Tile);
 	void SetTileDepthEnabled(FTempoCameraTile& Tile, bool bTileDepthEnabled);
 	void InitTileDistortionMap(FTempoCameraTile& Tile);
-	// Log how densely the tile's perspective render samples its output: the UpsamplingFactor the
-	// tile needs at its most demanding pixel and at the image's optical center, the factor its
-	// least demanding pixel needs, and its worst-case oversampling, all relative to
-	// UpsamplingFactor 1. Diagnostic only; does not change the render.
+	// Log how densely the tile's perspective render samples its output, relative to UpsamplingFactor 1:
+	// the factor the tile needs at its 99th-percentile and most demanding pixels, at the image's optical
+	// center and at its least demanding pixel, and its worst-case oversampling. Diagnostic only; does
+	// not change the render.
 	void LogTileSamplingDensity(const FTempoCameraTile& Tile, const FLensModel& Model, const FDistortionRenderConfig& Config, const FVector2D& PrincipalPoint) const;
 	// Push the tile's tan-bounds and filter type onto its distortion PPM. Call after anything that
 	// can hand the tile a fresh MID, which starts from the material's placeholder defaults.
