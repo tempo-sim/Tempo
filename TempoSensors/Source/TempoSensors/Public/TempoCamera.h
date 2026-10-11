@@ -28,7 +28,7 @@ enum class ETempoTextureFilterType : uint8
 	Nearest  UMETA(DisplayName="Nearest", ToolTip="Point sampling. Cheapest; ideal when output and render rasterization are pixel-aligned (no distortion)."),
 	Bilinear UMETA(DisplayName="Bilinear", ToolTip="2x2 linear filtering. Cheapest option for a distorted lens, but noticeably blurrier than Bicubic."),
 	Bicubic  UMETA(DisplayName="Bicubic", ToolTip="4x4 cubic (Catmull-Rom) filtering. Default for any distorted lens: keeps nearly all detail at fractional sample positions."),
-	Lanczos3 UMETA(DisplayName="Lanczos-3", ToolTip="6x6 Lanczos filtering, clamped to the nearest 2x2 texels to suppress ringing. Sharper than Bicubic where the render is sparser than the output (worth it at low UpsamplingFactor), for 36 texel reads instead of 4 bilinear taps."),
+	Lanczos3 UMETA(DisplayName="Lanczos-3", ToolTip="6x6 Lanczos filtering, clamped to the nearest 2x2 texels to suppress ringing. Slightly sharper than Bicubic when UpsamplingFactor is near 1; little visible difference above that. 36 texel reads instead of Bicubic's 9 bilinear taps."),
 };
 
 // 4-byte pixel format where first 3 bytes are color, 4th byte is label.

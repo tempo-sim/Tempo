@@ -744,7 +744,7 @@ ETempoTextureFilterType UTempoCamera::GetEffectiveTextureFilterType() const
 	}
 	// Any distortion resamples the render at fractional texel offsets, where bilinear's blur is
 	// significant at every FOV (it averages neighboring texels by up to half each); bicubic keeps
-	// nearly all of the detail for four taps instead of one.
+	// nearly all of the detail for nine bilinear taps instead of one.
 	return ETempoTextureFilterType::Bicubic;
 }
 
