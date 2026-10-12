@@ -103,6 +103,127 @@ namespace
 		return IsExtendedLuminanceRangeEnabled() ? FMath::Log2(Luminance / LuminanceMax) : Luminance;
 	}
 
+	// How densely a tile's perspective render (at UpsamplingFactor 1) samples its output, from the
+	// singular values of the Jacobian of the output->render pixel mapping. At an output pixel, the
+	// render supplies Sigma render pixels per output pixel along each principal direction, so an
+	// UpsamplingFactor of 1 / SigmaMin brings the sparsest direction up to one render pixel per
+	// output pixel, and SigmaMax is how much the densest direction is oversampled.
+	struct FTileSamplingDensity
+	{
+		double MaxRequiredK = 0.0;
+		FVector2D MaxRequiredKPixel = FVector2D::ZeroVector;
+		double MinRequiredK = TNumericLimits<double>::Max();
+		double MaxOversample = 0.0;
+		double ImageCenterRequiredK = 0.0;
+		// The requirement SamplingDensityPercentile of the sampled pixels meet; 1 if none were valid.
+		double PercentileRequiredK = 1.0;
+		// The oversampling SamplingDensityPercentile of the sampled pixels stay within. Near a fisheye
+		// polynomial's peak the inverse is steep, so a sliver of pixels beside the out-of-domain region
+		// oversamples by tens of times; the max reports that sliver, this the tile.
+		double PercentileOversample = 0.0;
+	};
+
+	// Fraction of a tile's output pixels the logged percentile requirement covers. Typical lenses'
+	// requirement is top-heavy (the 99th percentile is within a few percent of the max), while a few
+	// pathological pixels -- rays at or beyond the edge of a lens's valid FOV, whose requirement grows
+	// without bound -- can dominate the max.
+	constexpr double SamplingDensityPercentile = 0.99;
+
+	// Evaluates the Jacobian at continuous tile output pixel coordinates (PU, PV), using the same
+	// pixel -> output-unit -> render-UV mapping as UTempoSceneCaptureComponent2D::FillDistortionMap.
+	// Returns false where the mapping leaves the model's valid region.
+	bool ComputeSamplingSigmas(const FLensModel& Model, const FDistortionRenderConfig& Config, const FVector2D& OutputCenter,
+		double PU, double PV, double& OutSigmaMin, double& OutSigmaMax)
+	{
+		const double RenderPixelsPerTanX = Config.RenderSizeXY.X / (Config.TanRight - Config.TanLeft);
+		const double RenderPixelsPerTanY = Config.RenderSizeXY.Y / (Config.TanBottom - Config.TanTop);
+		const auto ToRenderPixels = [&](double U, double V, FVector2D& OutRender)
+		{
+			FVector2D Render;
+			if (!Model.TryOutputToRender((U - OutputCenter.X) / Config.FOutput, (V - OutputCenter.Y) / Config.FOutput, Render))
+			{
+				return false;
+			}
+			OutRender = FVector2D(Render.X * RenderPixelsPerTanX, Render.Y * RenderPixelsPerTanY);
+			return true;
+		};
+
+		constexpr double Step = 0.5;
+		FVector2D XPlus, XMinus, YPlus, YMinus;
+		if (!ToRenderPixels(PU + Step, PV, XPlus) || !ToRenderPixels(PU - Step, PV, XMinus) ||
+			!ToRenderPixels(PU, PV + Step, YPlus) || !ToRenderPixels(PU, PV - Step, YMinus))
+		{
+			return false;
+		}
+		const FVector2D dU = (XPlus - XMinus) / (2.0 * Step);
+		const FVector2D dV = (YPlus - YMinus) / (2.0 * Step);
+
+		// Singular values of the 2x2 Jacobian [dU dV] from its Frobenius norm and determinant.
+		const double SumSquares = dU.SizeSquared() + dV.SizeSquared();
+		const double AbsDet = FMath::Abs(dU.X * dV.Y - dV.X * dU.Y);
+		const double Discriminant = FMath::Sqrt(FMath::Max(0.0, SumSquares * SumSquares - 4.0 * AbsDet * AbsDet));
+		OutSigmaMax = FMath::Sqrt(0.5 * (SumSquares + Discriminant));
+		OutSigmaMin = OutSigmaMax > 0.0 ? AbsDet / OutSigmaMax : 0.0;
+		return OutSigmaMin > 0.0;
+	}
+
+	// Samples the tile on a grid of at most 257x257 output pixels spanning its full rect (edges
+	// included, where fisheye demand tends to peak), plus exactly at ImageCenterPixel, the tile
+	// pixel nearest the full image's optical center.
+	FTileSamplingDensity MeasureTileSamplingDensity(const FLensModel& Model, const FDistortionRenderConfig& Config,
+		const FIntPoint& TileOutputSizeXY, const FVector2D& PrincipalPoint, const FVector2D& ImageCenterPixel)
+	{
+		FTileSamplingDensity Density;
+		const FVector2D OutputCenter = OpticalCenterPixels(TileOutputSizeXY, PrincipalPoint);
+		const int32 NumX = FMath::Min(TileOutputSizeXY.X, 257);
+		const int32 NumY = FMath::Min(TileOutputSizeXY.Y, 257);
+		TArray<double> RequiredKs;
+		RequiredKs.Reserve(NumX * NumY);
+		TArray<double> Oversamples;
+		Oversamples.Reserve(NumX * NumY);
+		for (int32 J = 0; J < NumY; ++J)
+		{
+			const double PV = 0.5 + (NumY > 1 ? (TileOutputSizeXY.Y - 1.0) * J / (NumY - 1) : 0.0);
+			for (int32 I = 0; I < NumX; ++I)
+			{
+				const double PU = 0.5 + (NumX > 1 ? (TileOutputSizeXY.X - 1.0) * I / (NumX - 1) : 0.0);
+				double SigmaMin, SigmaMax;
+				if (!ComputeSamplingSigmas(Model, Config, OutputCenter, PU, PV, SigmaMin, SigmaMax))
+				{
+					continue;
+				}
+				const double RequiredK = 1.0 / SigmaMin;
+				RequiredKs.Add(RequiredK);
+				if (RequiredK > Density.MaxRequiredK)
+				{
+					Density.MaxRequiredK = RequiredK;
+					Density.MaxRequiredKPixel = FVector2D(PU, PV);
+				}
+				Density.MinRequiredK = FMath::Min(Density.MinRequiredK, RequiredK);
+				Density.MaxOversample = FMath::Max(Density.MaxOversample, SigmaMax);
+				Oversamples.Add(SigmaMax);
+			}
+		}
+
+		const auto Percentile = [](TArray<double>& Values)
+		{
+			Values.Sort();
+			return Values[FMath::Min(Values.Num() - 1, FMath::FloorToInt32(SamplingDensityPercentile * Values.Num()))];
+		};
+		if (!RequiredKs.IsEmpty())
+		{
+			Density.PercentileRequiredK = Percentile(RequiredKs);
+			Density.PercentileOversample = Percentile(Oversamples);
+		}
+
+		double SigmaMin, SigmaMax;
+		if (ComputeSamplingSigmas(Model, Config, OutputCenter, ImageCenterPixel.X, ImageCenterPixel.Y, SigmaMin, SigmaMax))
+		{
+			Density.ImageCenterRequiredK = 1.0 / SigmaMin;
+		}
+		return Density;
+	}
+
 	// The auto exposure inputs the controller consumes, resolved the way the engine resolves a view's
 	// final post-process settings: project defaults, then the world's post process volumes at the
 	// view location in priority order, then the component's own overrides.
@@ -621,13 +742,10 @@ ETempoTextureFilterType UTempoCamera::GetEffectiveTextureFilterType() const
 	{
 		return ETempoTextureFilterType::Nearest;
 	}
-	// Wide equidistant fisheye: output sampling density varies sharply with angle, so bicubic's
-	// wider footprint keeps detail in the dense central region.
-	if (LensParameters.IsFisheye() && FOVAngle > 120.0f)
-	{
-		return ETempoTextureFilterType::Bicubic;
-	}
-	return ETempoTextureFilterType::Bilinear;
+	// Any distortion resamples the render at fractional texel offsets, where bilinear's blur is
+	// significant at every FOV (it averages neighboring texels by up to half each); bicubic keeps
+	// nearly all of the detail for nine bilinear taps instead of one.
+	return ETempoTextureFilterType::Bicubic;
 }
 
 void UTempoCamera::OnUnregister()
@@ -1038,6 +1156,10 @@ UMaterialInstanceDynamic* UTempoCamera::GetOrCreateStitchColorMID()
 	}
 
 	StitchColorMID->SetTextureParameterValue(TEXT("AtlasRT"), SharedTextureTarget);
+	// The resolve map's UVs address the atlas in 1x output pixels while AtlasRT is UpsamplingFactor
+	// times larger; the material box-filters each 1x pixel's full footprint in AtlasRT, so it needs
+	// the 1x size to find that footprint.
+	StitchColorMID->SetVectorParameterValue(TEXT("AtlasSize"), FLinearColor(AtlasSize.X, AtlasSize.Y, 0.0f, 0.0f));
 	StitchColorMID->SetTextureParameterValue(TEXT("OutputResolveMap"), OutputResolveMap);
 	StitchColorMID->SetTextureParameterValue(TEXT("OutputResolveWeight"), OutputResolveWeight);
 	return StitchColorMID;
@@ -1111,10 +1233,12 @@ void UTempoCamera::InitRenderTarget()
 	// is fp32 — not for color dynamic range, but because each tile's distortion PPM bit-packs
 	// (label, depth) into the alpha channel, and fp16 alpha does not have the mantissa bits to
 	// preserve that. Point sampling is mandatory for the aux unpack pass; the color stitch
-	// material overrides to bilinear at its sampler. Atlas dimensions are K * AtlasSize, which
-	// may be larger than SizeXY when feathering (each tile gets a disjoint atlas region) and is
+	// material reads exact texels and does its own filtering. Atlas dimensions are
+	// K * AtlasSize, which may be larger than SizeXY when feathering (each tile gets a disjoint
+	// atlas region) and is
 	// further multiplied by UpsamplingFactor to give the perspective render denser pixels for
-	// the distortion PPM to resample. The stitch pass downsamples to SizeXY via bilinear.
+	// the distortion PPM to resample. The stitch pass filters each output pixel's footprint in
+	// the atlas down to SizeXY.
 	SharedTextureTarget = NewObject<UTextureRenderTarget2D>(this);
 	SharedTextureTarget->TargetGamma = 1.0f;
 	SharedTextureTarget->bGPUSharedFlag = true;
@@ -1140,10 +1264,12 @@ void UTempoCamera::InitRenderTarget()
 	SharedAuxTextureTarget->InitAutoFormat(SizeXY.X, SizeXY.Y);
 
 	// Resolve maps describe (per equidistant-output pixel) which tile(s) cover it, where in the
-	// atlas to sample, and how to feather. PF_FloatRGBA holds the two atlas UVs; PF_R16F holds the
-	// tile-A weight. Both use TF_Nearest because the materials need exact per-output-pixel data
-	// (smearing the UVs across pixel boundaries would create spurious atlas reads at seams).
-	OutputResolveMap = UTexture2D::CreateTransient(SizeXY.X, SizeXY.Y, PF_FloatRGBA);
+	// atlas to sample, and how to feather. PF_A32B32G32R32F holds the two atlas UVs: the color stitch
+	// floors UV * AtlasSize to find each pixel's footprint, and fp16's step near 1.0 (1/2048) would
+	// land on the wrong pixel once the atlas is ~2k wide. PF_R16F holds the tile-A weight. Both use
+	// TF_Nearest because the materials need exact per-output-pixel data (smearing the UVs across
+	// pixel boundaries would create spurious atlas reads at seams).
+	OutputResolveMap = UTexture2D::CreateTransient(SizeXY.X, SizeXY.Y, PF_A32B32G32R32F);
 	OutputResolveMap->CompressionSettings = TC_HDR;
 	OutputResolveMap->Filter = TF_Nearest;
 	OutputResolveMap->AddressX = TA_Clamp;
@@ -1956,7 +2082,31 @@ void UTempoCamera::InitTileDistortionMap(FTempoCameraTile& Tile)
 		Config.RenderSizeXY, Config.TanLeft, Config.TanRight, Config.TanTop, Config.TanBottom, PrincipalPoint);
 	UTempoSceneCaptureComponent2D::ApplyDistortionMapToMaterial(Tile.PostProcessMaterialInstance, Tile.DistortionMap);
 
+	LogTileSamplingDensity(Tile, *Model, Config, PrincipalPoint);
+
 	ApplyTileMaterialParams(Tile);
+}
+
+void UTempoCamera::LogTileSamplingDensity(const FTempoCameraTile& Tile, const FLensModel& Model, const FDistortionRenderConfig& Config, const FVector2D& PrincipalPoint) const
+{
+	const FIntPoint CoveredOrigin = Tile.CoveredOutputOffset;
+
+	const FVector2D ImageCenter = OpticalCenterPixels(SizeXY, LensParameters.GetClampedPrincipalPoint());
+	const FVector2D ImageCenterInTile(
+		FMath::Clamp(ImageCenter.X - CoveredOrigin.X, 0.5, Tile.TileOutputSizeXY.X - 0.5),
+		FMath::Clamp(ImageCenter.Y - CoveredOrigin.Y, 0.5, Tile.TileOutputSizeXY.Y - 0.5));
+
+	const FTileSamplingDensity Density = MeasureTileSamplingDensity(Model, Config, Tile.TileOutputSizeXY, PrincipalPoint, ImageCenterInTile);
+	const FVector2D MaxPixel = Density.MaxRequiredKPixel + FVector2D(CoveredOrigin);
+
+	UE_LOG(LogTempoSensors, Verbose, TEXT("Sampling density owner: %s camera: %s tile: %d output: %dx%d (%.1fx%.1f deg render FOV) UpsamplingFactor: %.2f. ")
+		TEXT("UpsamplingFactor needed: p%.0f %.2f, max %.2f at image pixel (%.0f, %.0f), image center %.2f, least demanding pixel %.2f. ")
+		TEXT("Oversampling at 1x: p%.0f %.2f, max %.2f"),
+		*GetOwnerName(), *GetSensorName(), static_cast<int32>(&Tile - Tiles), Tile.TileOutputSizeXY.X, Tile.TileOutputSizeXY.Y,
+		FMath::RadiansToDegrees(FMath::Atan(Config.TanRight) - FMath::Atan(Config.TanLeft)),
+		FMath::RadiansToDegrees(FMath::Atan(Config.TanBottom) - FMath::Atan(Config.TanTop)),
+		UpsamplingFactor, SamplingDensityPercentile * 100.0, Density.PercentileRequiredK, Density.MaxRequiredK, MaxPixel.X, MaxPixel.Y,
+		Density.ImageCenterRequiredK, Density.MinRequiredK, SamplingDensityPercentile * 100.0, Density.PercentileOversample, Density.MaxOversample);
 }
 
 // Push the tile's tan-bounds onto the distortion PPM. The depth path uses these to recover the
@@ -2030,7 +2180,7 @@ void UTempoCamera::RebuildResolveMaps()
 
 	FTexture2DMipMap& MipMap = OutputResolveMap->GetPlatformData()->Mips[0];
 	FTexture2DMipMap& MipWeight = OutputResolveWeight->GetPlatformData()->Mips[0];
-	uint16* MapData = static_cast<uint16*>(MipMap.BulkData.Lock(LOCK_READ_WRITE));
+	float* MapData = static_cast<float*>(MipMap.BulkData.Lock(LOCK_READ_WRITE));
 	uint16* WeightData = static_cast<uint16*>(MipWeight.BulkData.Lock(LOCK_READ_WRITE));
 	if (!MapData || !WeightData)
 	{
@@ -2046,7 +2196,7 @@ void UTempoCamera::RebuildResolveMaps()
 	// spawn per pixel) while letting reconfigures of large images stay cheap.
 	ParallelFor(SizeXY.Y, [&](int32 Y)
 	{
-		uint16* MapRow = &MapData[Y * SizeXY.X * 4];
+		float* MapRow = &MapData[Y * SizeXY.X * 4];
 		uint16* WeightRow = &WeightData[Y * SizeXY.X];
 		for (int32 X = 0; X < SizeXY.X; ++X)
 		{
@@ -2142,10 +2292,10 @@ void UTempoCamera::RebuildResolveMaps()
 				}
 			}
 
-			MapRow[X * 4 + 0] = FFloat16(UV_A_X).Encoded;
-			MapRow[X * 4 + 1] = FFloat16(UV_A_Y).Encoded;
-			MapRow[X * 4 + 2] = FFloat16(UV_B_X).Encoded;
-			MapRow[X * 4 + 3] = FFloat16(UV_B_Y).Encoded;
+			MapRow[X * 4 + 0] = UV_A_X;
+			MapRow[X * 4 + 1] = UV_A_Y;
+			MapRow[X * 4 + 2] = UV_B_X;
+			MapRow[X * 4 + 3] = UV_B_Y;
 			WeightRow[X] = FFloat16(Weight).Encoded;
 		}
 	});
@@ -2384,7 +2534,7 @@ void UTempoCamera::UpdateSharedExposure(bool bSingleTileFastPath, FTempoCameraTi
 	bHasValidSharedExposure = true;
 }
 
-void UTempoCamera::ConfigureTile(FTempoCameraTile& Tile, double YawOffset, double PitchOffset, double FOutput, const FIntPoint& TileSizeXY, const FIntPoint& TileDestOffset, const FIntPoint& OwnedOffset, const FIntPoint& OwnedSize, double AxisShiftXRd, double AxisShiftYRd, bool bActivate)
+void UTempoCamera::ConfigureTile(FTempoCameraTile& Tile, double YawOffset, double PitchOffset, double FOutput, const FIntPoint& TileSizeXY, const FIntPoint& TileDestOffset, const FIntPoint& CoveredOffset, const FIntPoint& OwnedOffset, const FIntPoint& OwnedSize, double AxisShiftXRd, double AxisShiftYRd, bool bActivate)
 {
 	if (!bActivate)
 	{
@@ -2398,6 +2548,7 @@ void UTempoCamera::ConfigureTile(FTempoCameraTile& Tile, double YawOffset, doubl
 	Tile.RelativeRotation = FRotator(PitchOffset, YawOffset, 0.0);
 	Tile.TileOutputSizeXY = TileSizeXY;
 	Tile.TileDestOffset = TileDestOffset;
+	Tile.CoveredOutputOffset = CoveredOffset;
 	Tile.OwnedOutputOffset = OwnedOffset;
 	Tile.OwnedOutputSize = OwnedSize;
 	Tile.OutputFocalLength = FOutput;
@@ -2428,7 +2579,7 @@ void UTempoCamera::SyncTiles()
 
 	auto Deactivate = [this](FTempoCameraTile& Tile)
 	{
-		ConfigureTile(Tile, 0, 0, 0, FIntPoint::ZeroValue, FIntPoint::ZeroValue, FIntPoint::ZeroValue, FIntPoint::ZeroValue, 0.0, 0.0, /*bActivate=*/ false);
+		ConfigureTile(Tile, 0, 0, 0, FIntPoint::ZeroValue, FIntPoint::ZeroValue, FIntPoint::ZeroValue, FIntPoint::ZeroValue, FIntPoint::ZeroValue, 0.0, 0.0, /*bActivate=*/ false);
 	};
 
 	// Build a "no-rotation" model used purely for full-image geometry queries (FOutput,
@@ -2441,7 +2592,7 @@ void UTempoCamera::SyncTiles()
 	{
 		// Single capture: use TL, deactivate others. No seams, no feather. Radial models are
 		// symmetric around the optical axis — no re-aim shift.
-		ConfigureTile(TL, 0.0, 0.0, FOutput, SizeXY, FIntPoint::ZeroValue, FIntPoint::ZeroValue, SizeXY, 0.0, 0.0, /*bActivate=*/ true);
+		ConfigureTile(TL, 0.0, 0.0, FOutput, SizeXY, FIntPoint::ZeroValue, FIntPoint::ZeroValue, FIntPoint::ZeroValue, SizeXY, 0.0, 0.0, /*bActivate=*/ true);
 		Deactivate(TR);
 		Deactivate(BL);
 		Deactivate(BR);
@@ -2457,6 +2608,8 @@ void UTempoCamera::SyncTiles()
 		// fills TL and TR).
 		const TArray<FFisheyeTileLayout> Layouts = ComputeFisheyeTileLayouts(*Model, FOutput, SizeXY,
 			LensParameters.GetClampedPrincipalPoint(), FeatherPixels, bSplitHorizontal, bSplitVertical, AtlasSize);
+		UE_LOG(LogTempoSensors, Verbose, TEXT("Tile layout owner: %s camera: %s tiles: %d atlas: %dx%d"),
+			*GetOwnerName(), *GetSensorName(), Layouts.Num(), AtlasSize.X, AtlasSize.Y);
 		for (int32 I = 0; I < UE_ARRAY_COUNT(Tiles); ++I)
 		{
 			if (!Layouts.IsValidIndex(I))
@@ -2465,7 +2618,7 @@ void UTempoCamera::SyncTiles()
 				continue;
 			}
 			const FFisheyeTileLayout& Layout = Layouts[I];
-			ConfigureTile(Tiles[I], Layout.Aim.YawDeg, Layout.Aim.PitchDeg, FOutput, Layout.CoveredSizeXY, Layout.AtlasOffset,
+			ConfigureTile(Tiles[I], Layout.Aim.YawDeg, Layout.Aim.PitchDeg, FOutput, Layout.CoveredSizeXY, Layout.AtlasOffset, Layout.CoveredOffset,
 				Layout.OwnedOffset, Layout.OwnedSize, Layout.Aim.AxisShiftXRd, Layout.Aim.AxisShiftYRd, /*bActivate=*/ true);
 		}
 	}

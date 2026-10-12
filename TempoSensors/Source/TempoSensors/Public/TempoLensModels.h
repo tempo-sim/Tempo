@@ -521,6 +521,8 @@ struct FFisheyeTileLayout
 	FIntPoint CoveredSizeXY = FIntPoint::ZeroValue;
 	// Offset of the covered rect within the atlas.
 	FIntPoint AtlasOffset = FIntPoint::ZeroValue;
+	// Offset of the covered rect within the output image.
+	FIntPoint CoveredOffset = FIntPoint::ZeroValue;
 	// The output rect this tile owns (seams split exactly between tiles).
 	FIntPoint OwnedOffset = FIntPoint::ZeroValue;
 	FIntPoint OwnedSize = FIntPoint::ZeroValue;

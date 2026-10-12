@@ -53,8 +53,8 @@ API at whatever rate you configure.
   A reconfigure is applied at a safe point — when no readback is in flight — so it never tears
   mid-frame.
 - **Pixel-perfect distortion.** Pinhole gets `Nearest` filtering by default (1:1 sampling, no
-  blur); narrow non-pinhole gets `Bilinear`; wide (>120°) equidistant gets `Bicubic` to handle the
-  highly non-uniform sampling density at the optical center. Override via
+  blur); every other lens model gets `Bicubic`, which keeps nearly all detail where the
+  distortion samples between texels (`Bilinear` blurs noticeably there). Override via
   `bAutoTextureFilterType` / `TextureFilterType`. Depth on equidistant lens models is reported as
   Euclidean distance from the camera origin, not depth along the camera axis, avoiding seam
   discontinuities.
@@ -140,8 +140,8 @@ hot-reconfigurable:
 
 `UpsamplingFactor` (1.0–4.0)
 
-:   Scales the perspective render's view rect by this factor before bilinear-downsampling to
-    `SizeXY` in the stitch. Useful when distortion concentrates pixels in a small angular region
+:   Scales the perspective render's view rect by this factor; the stitch then filters each output
+    pixel's footprint down to `SizeXY`. Useful when distortion concentrates pixels in a small angular region
     (wide fisheye) and 1:1 sampling looks pixelated. Atlas memory grows by K².
 
 `RateHz`

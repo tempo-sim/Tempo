@@ -874,6 +874,7 @@ TArray<FFisheyeTileLayout> ComputeFisheyeTileLayouts(const FLensModel& Model, do
 			FFisheyeTileLayout& Layout = Layouts.AddDefaulted_GetRef();
 			Layout.CoveredSizeXY = FIntPoint(Column.Covered, Row.Covered);
 			Layout.AtlasOffset = FIntPoint(AtlasX, AtlasY);
+			Layout.CoveredOffset = FIntPoint(ColumnIndex == 0 ? 0 : SizeXY.X - Column.Covered, RowIndex == 0 ? 0 : SizeXY.Y - Row.Covered);
 			Layout.OwnedOffset = FIntPoint(Column.OwnedOffset, Row.OwnedOffset);
 			Layout.OwnedSize = FIntPoint(Column.Owned, Row.Owned);
 

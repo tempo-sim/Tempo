@@ -451,7 +451,12 @@ void UTempoSceneCaptureComponent2D::CreateOrResizeDistortionMapTexture(UTexture2
 		return;
 	}
 
-	OutTexture = UTexture2D::CreateTransient(TextureSizeXY.X, TextureSizeXY.Y, PF_G16R16F);
+	// 16-bit UNORM rather than fp16: the UVs span [0, 1], where fp16's step near 1.0 (1/2048) misplaces
+	// samples by up to half a pixel at 1080p (a geometric error K cannot reduce), while UNORM's 1/65535 is
+	// uniform across the range and still filterable on every RHI. RG holds the render UV and B the
+	// pixel's coverage (1 where it has a render point, 0 where it has none); A is unused. See
+	// FillDistortionMap for why coverage needs its own channel.
+	OutTexture = UTexture2D::CreateTransient(TextureSizeXY.X, TextureSizeXY.Y, PF_R16G16B16A16_UNORM);
 	OutTexture->CompressionSettings = TC_HDR;
 	OutTexture->Filter = TF_Bilinear;
 	OutTexture->AddressX = TA_Clamp;
@@ -502,29 +507,72 @@ void UTempoSceneCaptureComponent2D::FillDistortionMap(UTexture2D* DistortionMap,
 	const double InvTanWidth = 1.0 / (TanRight - TanLeft);
 	const double InvTanHeight = 1.0 / (TanBottom - TanTop);
 
-	// UV for output pixels with no render point (beyond a fisheye model's domain, or behind the
-	// tile's camera). Kept finite and clearly outside [0, 1]: the models' (1e6, 1e6) sentinel
-	// overflows FFloat16 to inf, and inf UVs poison filtered taps with NaN.
-	constexpr float OutOfDomainDistortionUV = -1.0f;
-
+	// The PPM samples this map bilinearly at the render's resolution, UpsamplingFactor times the
+	// output's, so it blends neighboring texels. Pixels with no render point (beyond a fisheye
+	// model's domain, or behind the tile's camera) therefore can't be flagged with a reserved UV:
+	// a blend with a real UV would land on wrong scene content. Instead coverage (B) carries the
+	// flag, blending into an anti-aliased mask, and an uncovered texel takes the mean UV of its
+	// covered neighbors so blends across the boundary stay at its edge.
+	const int32 NumTexels = OutputSizeXY.X * OutputSizeXY.Y;
+	TArray<FVector2D> UVs;
+	UVs.SetNumUninitialized(NumTexels);
+	TBitArray<> Covered(false, NumTexels);
 	for (int V = 0; V < OutputSizeXY.Y; ++V)
 	{
-		uint16* Row = &MipData[V * OutputSizeXY.X * 2];
 		const double OutputY = (V + 0.5 - OutputCy) / FOutput;
-
 		for (int U = 0; U < OutputSizeXY.X; ++U)
 		{
 			const double OutputX = (U + 0.5 - OutputCx) / FOutput;
+			const int32 Index = V * OutputSizeXY.X + U;
 			FVector2D Render;
-			float FinalU = OutOfDomainDistortionUV;
-			float FinalV = OutOfDomainDistortionUV;
 			if (Model.TryOutputToRender(OutputX, OutputY, Render))
 			{
-				FinalU = static_cast<float>((Render.X - TanLeft) * InvTanWidth);
-				FinalV = static_cast<float>((Render.Y - TanTop) * InvTanHeight);
+				UVs[Index] = FVector2D((Render.X - TanLeft) * InvTanWidth, (Render.Y - TanTop) * InvTanHeight);
+				Covered[Index] = true;
 			}
-			Row[U * 2 + 0] = FFloat16(FinalU).Encoded;
-			Row[U * 2 + 1] = FFloat16(FinalV).Encoded;
+		}
+	}
+
+	const auto ToUNorm = [](double Value)
+	{
+		return static_cast<uint16>(FMath::RoundToInt(FMath::Clamp(Value, 0.0, 1.0) * 65535.0));
+	};
+	for (int V = 0; V < OutputSizeXY.Y; ++V)
+	{
+		uint16* Row = &MipData[V * OutputSizeXY.X * 4];
+		for (int U = 0; U < OutputSizeXY.X; ++U)
+		{
+			const int32 Index = V * OutputSizeXY.X + U;
+			FVector2D UV = FVector2D::ZeroVector;
+			if (Covered[Index])
+			{
+				UV = UVs[Index];
+			}
+			else
+			{
+				int32 NumNeighbors = 0;
+				for (int DV = -1; DV <= 1; ++DV)
+				{
+					for (int DU = -1; DU <= 1; ++DU)
+					{
+						const int NU = U + DU;
+						const int NV = V + DV;
+						if (NU >= 0 && NU < OutputSizeXY.X && NV >= 0 && NV < OutputSizeXY.Y && Covered[NV * OutputSizeXY.X + NU])
+						{
+							UV += UVs[NV * OutputSizeXY.X + NU];
+							++NumNeighbors;
+						}
+					}
+				}
+				if (NumNeighbors > 0)
+				{
+					UV /= NumNeighbors;
+				}
+			}
+			Row[U * 4 + 0] = ToUNorm(UV.X);
+			Row[U * 4 + 1] = ToUNorm(UV.Y);
+			Row[U * 4 + 2] = Covered[Index] ? 65535 : 0;
+			Row[U * 4 + 3] = 0;
 		}
 	}
 
