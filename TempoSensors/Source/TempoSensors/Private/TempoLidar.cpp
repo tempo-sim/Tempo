@@ -1453,8 +1453,8 @@ void TLidarSharedTextureRead<PixelType>::ReadAdditional_RenderThread(FRHICommand
 	{
 		return;
 	}
-	// The atlas read has just waited on the fence behind both copies, so no fence is needed here.
-	// Without a matching staging texture the media are left unread, so the slices get none and
+	// The atlas fence is written behind both copies, and the atlas read has just waited on it, so
+	// it covers this copy too. Without a matching staging texture the media are left unread, so the slices get none and
 	// decode every beam as it would be without media; a zeroed image would read as a fully
 	// attenuated beam and drop every surface return instead.
 	if (!MediaStagingTexture.IsValid() || !FTextureRead::StagingMatches(MediaStagingTexture, this->ImageSize, sizeof(FTempoLidarMediaPixel)))
@@ -1462,7 +1462,7 @@ void TLidarSharedTextureRead<PixelType>::ReadAdditional_RenderThread(FRHICommand
 		UE_LOG(LogTempoSensors, Warning, TEXT("Skipping lidar media read: no matching staging texture. Reporting no media for this scan."));
 		return;
 	}
-	FTextureRead::CopyStagingSurface(RHICmdList, MediaStagingTexture, nullptr, reinterpret_cast<uint8*>(MediaImage.GetData()), this->ImageSize, sizeof(FTempoLidarMediaPixel));
+	FTextureRead::CopyStagingSurface(RHICmdList, MediaStagingTexture, this->RenderFence,reinterpret_cast<uint8*>(MediaImage.GetData()), this->ImageSize, sizeof(FTempoLidarMediaPixel));
 	bMediaRead = true;
 }
 

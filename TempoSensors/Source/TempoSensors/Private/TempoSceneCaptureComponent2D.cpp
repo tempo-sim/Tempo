@@ -4,6 +4,7 @@
 
 #include "TempoSensors.h"
 #include "TempoSensorsSettings.h"
+#include "TempoMetalStagingRead.h"
 
 #include "TempoSensors/Common.pb.h"
 
@@ -80,6 +81,28 @@ void FTextureRead::CopyStagingSurface(FRHICommandListImmediate& RHICmdList, FRHI
 {
 	check(IsInRenderingThread());
 
+	const int32 NumRows = ImageSize.Y;
+	const int64 DstPitch = static_cast<int64>(ImageSize.X) * PixelBytes;
+
+	// Copy in parallel over bands of rows. This runs on the render thread inside OnEndFrameRT,
+	// once per sensor per frame, so a single-threaded copy of a whole frame (~16 MB for a 1080p
+	// camera with depth) sits directly on the render thread's critical path. Small reads (a
+	// lidar slice is a few hundred KB) get fewer bands, down to one.
+	const int32 NumBands = ComputeRowBands(GTextureReadCopyRowBands, NumRows, DstPitch, GTextureReadCopyMinBytesPerBand);
+
+#if PLATFORM_MAC
+	// Metal's map waits for the whole GPU to go idle even behind a signaled fence, so once the
+	// fence has signaled, read the texture directly instead.
+	if (Fence && Fence->Poll())
+	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsTextureReadCopy);
+		if (TempoReadSignaledMetalStagingTexture(Staging, Dst, ImageSize, PixelBytes, NumBands))
+		{
+			return;
+		}
+	}
+#endif
+
 	// Note: SurfaceWidth may be larger than ImageSize.X due to GPU row alignment padding.
 	// We must copy row-by-row to account for this pitch difference.
 	void* OutBuffer;
@@ -98,14 +121,6 @@ void FTextureRead::CopyStagingSurface(FRHICommandListImmediate& RHICmdList, FRHI
 		GDynamicRHI->RHIMapStagingSurface(Staging, Fence, OutBuffer, SurfaceWidth, SurfaceHeight, RHICmdList.GetGPUMask().ToIndex());
 	}
 	const int64 SrcPitch = static_cast<int64>(SurfaceWidth) * PixelBytes;
-	const int64 DstPitch = static_cast<int64>(ImageSize.X) * PixelBytes;
-
-	// Copy in parallel over bands of rows. This runs on the render thread inside OnEndFrameRT,
-	// once per sensor per frame, so a single-threaded copy of a whole frame (~16 MB for a 1080p
-	// camera with depth) sits directly on the render thread's critical path. Small reads (a
-	// lidar slice is a few hundred KB) get fewer bands, down to one.
-	const int32 NumRows = ImageSize.Y;
-	const int32 NumBands = ComputeRowBands(GTextureReadCopyRowBands, NumRows, DstPitch, GTextureReadCopyMinBytesPerBand);
 	const uint8* const SrcBase = static_cast<const uint8*>(OutBuffer);
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsTextureReadCopy);

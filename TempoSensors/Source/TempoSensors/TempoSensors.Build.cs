@@ -51,5 +51,11 @@ public class TempoSensors : TempoModuleRules
 				"TempoSensorsShaders",
 			}
 		);
+
+		if (Target.Platform == UnrealTargetPlatform.Mac)
+		{
+			// Private/Mac/TempoMetalStagingRead.mm reads staging textures through Metal directly.
+			PublicWeakFrameworks.Add("Metal");
+		}
 	}
 }

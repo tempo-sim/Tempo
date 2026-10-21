@@ -80,8 +80,8 @@ struct FTextureRead
 	static bool TEMPOSENSORS_API StagingMatches(const FRHITexture* Staging, const FIntPoint& ImageSize, int32 PixelBytes);
 
 	// Render thread. Map Staging, waiting on Fence, and copy ImageSize rows of PixelBytes-wide pixels
-	// out of it into Dst (tightly packed). Fence may be null when an earlier map has already waited
-	// on the fence behind this copy; the map then waits for the GPU's pending work instead.
+	// out of it into Dst (tightly packed). Fence must be behind the copy into Staging; a null Fence
+	// makes the map wait for the GPU's pending work instead.
 	static void TEMPOSENSORS_API CopyStagingSurface(FRHICommandListImmediate& RHICmdList, FRHITexture* Staging, FRHIGPUFence* Fence, uint8* Dst, const FIntPoint& ImageSize, int32 PixelBytes);
 
 	// Render thread. Called by TTextureReadBase::Read once Image has been copied, before RenderFence
