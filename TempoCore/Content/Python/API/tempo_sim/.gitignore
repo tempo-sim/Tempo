@@ -10,5 +10,7 @@
 !__init__.py
 !_tempo_context.py
 !unreal.py
+!unreal.pyi
+!world.py
 !TempoImageUtils.py
 !TempoLidarUtils.py

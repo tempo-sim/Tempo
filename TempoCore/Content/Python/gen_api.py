@@ -28,7 +28,7 @@ from gen_common import (
 # carries the hand-written infra; the project package only owns its __init__.py.
 TEMPO_SIM_KEEP = {
     ".gitignore", "_tempo_context.py", "TempoImageUtils.py",
-    "TempoLidarUtils.py", "unreal.py", "__init__.py",
+    "TempoLidarUtils.py", "unreal.py", "unreal.pyi", "world.py", "__init__.py",
 }
 PROJECT_PKG_KEEP = {".gitignore", "__init__.py"}
 

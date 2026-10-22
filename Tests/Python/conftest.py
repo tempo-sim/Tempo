@@ -23,8 +23,25 @@ import os
 import subprocess
 import tempfile
 import time
+from pathlib import Path
 
 import pytest
+
+# Groups that test this repository's own tooling rather than a shipped client -- the generated class
+# surface and the runtime that serves it -- need neither a packaged sim nor an installed wheel.
+#
+# Every other module here imports tempo_sim at module scope, so without the wheel they cannot even
+# be collected, and `pytest -m codegen` would fail before running anything. Ignoring them keeps the
+# repo-side groups runnable on their own; a new sim-facing module is covered automatically, and a
+# new repo-side one is added to the set below.
+REPO_SIDE_MODULES = {"test_codegen.py", "test_typed_runtime.py"}
+
+collect_ignore = []
+try:
+    import tempo_sim  # noqa: F401
+except ImportError:
+    collect_ignore = [path.name for path in sorted(Path(__file__).parent.glob("test_*.py"))
+                      if path.name not in REPO_SIDE_MODULES]
 
 SERVER_PORT = int(os.environ.get("TEMPO_SERVER_PORT", "10001"))
 SERVER_SOCKET = os.environ.get("TEMPO_SERVER_SOCKET", "").strip()

@@ -298,6 +298,10 @@ message ActorDescriptor {
   string name = 1;
   // Actor class name, e.g. "BP_Foo_C" for a Blueprint class. Can be passed straight back to SpawnActor.
   string actor_type = 2;
+  // The class's full path. Unlike the name, this is unambiguous -- two Blueprints in different
+  // folders can generate classes with the same name -- so a client matching an actor against a
+  // specific class must compare this.
+  string class_path = 3;
 }
 
 message GetAllActorsResponse {
@@ -311,6 +315,8 @@ message ComponentDescriptor {
   string name = 2;
   // Component class name, e.g. "BP_Foo_C" for a Blueprint class. Can be passed straight back to AddComponent.
   string component_type = 3;
+  // The class's full path, which unlike the name is unambiguous. See ActorDescriptor.class_path.
+  string class_path = 4;
 }
 
 message GetAllComponentsRequest {

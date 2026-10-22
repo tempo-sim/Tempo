@@ -18,6 +18,10 @@
 # schema-free path is added it must land as a separate type, and any catch-all must be hidden from
 # the type checker by a .pyi that omits it.
 
+import difflib
+import json
+import os
+
 from dataclasses import dataclass, field
 
 
@@ -113,3 +117,427 @@ class Object:
     def __repr__(self) -> str:
         where = "{}:{}".format(self._actor, self._component) if self._component else self._actor
         return "{}({!r})".format(type(self).__name__, where)
+
+    def is_a(self, other) -> bool:
+        """Whether this handle's class is `other` or derives from it.
+
+        Not `isinstance`: the generated classes are deliberately flat at runtime, because Unreal's
+        inheritance has cycles across packages and a base has to exist when a class statement runs.
+        The real hierarchy lives in the schema, so this is the question to ask.
+        """
+        ancestor = getattr(other, "__tempo_class__", other)
+        return _classes.is_subclass(type(self).__tempo_class__, ancestor)
+
+    def _property(self, name):
+        member = _classes.find_property(type(self).__tempo_class__, name)
+        if member is None:
+            raise AttributeError("{} has no property {!r}.{}".format(
+                type(self).__name__, name,
+                _suggest(name, _classes.property_names(type(self).__tempo_class__))))
+        return member
+
+    # Attribute access is the API. A generated class declares its members in a .pyi and carries no
+    # descriptors, so every typed read and write arrives here.
+    #
+    # These two are hidden from type checkers by unreal.pyi, which omits them deliberately: a
+    # catch-all the checker can see makes every attribute legal on every generated subclass, and the
+    # whole point of the generated stubs is that an attribute which no longer exists is an error.
+    def __getattr__(self, name):
+        # Only reached when normal lookup fails, so this never shadows a real attribute.
+        if name.startswith("_"):
+            raise AttributeError(name)
+        member = self._property(name)
+        if member.get("struct") and member.get("variant") is None:
+            return StructProxy(self, name, member["struct"])
+        return _read(self._actor, self._component, name)
+
+    def __setattr__(self, name, value):
+        if name.startswith("_"):
+            object.__setattr__(self, name, value)
+            return
+        member = self._property(name)
+        if member.get("variant") is None:
+            raise AttributeError(
+                "{}.{} cannot be written as one value; assign to its members instead".format(
+                    type(self).__name__, name))
+        if not member.get("writable"):
+            raise AttributeError("{}.{} is read-only".format(type(self).__name__, name))
+        _write(self._actor, self._component, name, member, value)
+
+
+class _Classes:
+    """The generated class surface, loaded on demand.
+
+    Three things are needed to serve an attribute: which module a class path lives in (the index),
+    what members a class declares (one `<Module>.meta.json` per module), and what a struct's members
+    are (`structs.meta.json`). Only the index is global -- resolving a superclass needs it before any
+    module is known -- so that is loaded once and the rest per module, the first time a class from
+    it is touched.
+    """
+
+    def __init__(self):
+        self._package = None
+        self._directory = None
+        self._index = None
+        self._modules = {}
+        self._structs = None
+        self._header = None
+
+    def register(self, package, directory):
+        self._package = package
+        self._directory = directory
+        self._index = None
+        self._modules = {}
+        self._structs = None
+        self._header = None
+
+    @property
+    def registered(self):
+        return self._directory is not None
+
+    def _require(self):
+        if not self.registered:
+            raise RuntimeError(
+                "No generated classes are registered. Install and import this build's generated "
+                "class package (e.g. `import tempo_sample_classes`), which ships in "
+                "Packaged/API/Python alongside the tempo-sim wheel.")
+
+    def _load(self, *parts):
+        self._require()
+        with open(os.path.join(self._directory, *parts)) as f:
+            return json.load(f)
+
+    @property
+    def index(self):
+        if self._index is None:
+            self._index = self._load("index.json")
+        return self._index
+
+    @property
+    def header(self):
+        """The schema header the stubs were generated from, for the drift check."""
+        if self._header is None:
+            self._header = self._load("schema_header.json")
+        return self._header
+
+    @property
+    def structs(self):
+        if self._structs is None:
+            self._structs = self._load("structs.meta.json")
+        return self._structs
+
+    def module_of(self, class_path):
+        entry = self.index.get(class_path)
+        return entry.split(":", 1)[0] if entry else None
+
+    def metadata(self, class_path):
+        """The declared members of one class, or None when it is not in this build."""
+        module = self.module_of(class_path)
+        if module is None:
+            return None
+        if module not in self._modules:
+            # A module that is also a package carries its files in __init__.
+            stem = os.path.join(*module.split("."))
+            candidates = (stem + ".meta.json", os.path.join(stem, "__init__.meta.json"))
+            for candidate in candidates:
+                path = os.path.join(self._directory, candidate)
+                if os.path.exists(path):
+                    with open(path) as f:
+                        self._modules[module] = json.load(f)
+                    break
+            else:
+                self._modules[module] = {}
+        return self._modules[module].get(class_path)
+
+    def find_property(self, class_path, name):
+        """One property, searched up the inheritance chain.
+
+        Each class records only what it declares -- repeating AActor's members into every subclass
+        would multiply the schema -- so inherited members are found by walking `super`.
+        """
+        seen = set()
+        while class_path and class_path not in seen:
+            seen.add(class_path)
+            entry = self.metadata(class_path)
+            if entry is None:
+                return None
+            found = entry["properties"].get(name)
+            if found is not None:
+                return found
+            class_path = entry.get("super") or ""
+        return None
+
+    def property_names(self, class_path):
+        """Every property reachable on a class, for suggesting a near miss."""
+        names, seen = [], set()
+        while class_path and class_path not in seen:
+            seen.add(class_path)
+            entry = self.metadata(class_path)
+            if entry is None:
+                break
+            names.extend(entry["properties"])
+            class_path = entry.get("super") or ""
+        return names
+
+    def is_subclass(self, class_path, ancestor_path):
+        seen = set()
+        while class_path and class_path not in seen:
+            if class_path == ancestor_path:
+                return True
+            seen.add(class_path)
+            entry = self.metadata(class_path)
+            if entry is None:
+                return False
+            class_path = entry.get("super") or ""
+        return False
+
+    def python_class(self, class_path):
+        """The generated class for an Unreal class path, importing its module if needed."""
+        entry = self.index.get(class_path)
+        if entry is None:
+            return None
+        module_name, class_name = entry.split(":", 1)
+        import importlib
+        module = importlib.import_module("{}.{}".format(self._package, module_name))
+        return getattr(module, class_name, None)
+
+
+_classes = _Classes()
+
+
+def register_classes(package, directory):
+    """Called by a generated class package when it is imported."""
+    _classes.register(package, directory)
+
+
+def registered_classes():
+    """The class registry, for the entry points in tempo_sim.world."""
+    return _classes
+
+
+def _suggest(name, candidates):
+    """`did you mean` for a near miss, which is the common case for a renamed property."""
+    close = difflib.get_close_matches(name, candidates, n=1, cutoff=0.7)
+    return " Did you mean {!r}?".format(close[0]) if close else ""
+
+
+# -- the wire ------------------------------------------------------------------------------------
+#
+# Imported inside the functions, not at module scope: the generated wrappers import this module's
+# siblings, and importing them back here at load time would be circular.
+
+def _world():
+    from tempo_sim import tempo_world
+    return tempo_world
+
+
+def _value_type():
+    import tempo_sim.TempoWorld.WorldControl_pb2 as WorldControl
+    return WorldControl.Value
+
+
+# Variants whose payload is a plain scalar the proto field takes directly.
+_SCALAR_VARIANTS = frozenset((
+    "bool_value", "int_value", "int64_value", "float_value", "string_value", "enum_value",
+    "class_value", "asset_value", "actor_value", "component_value",
+))
+
+# Variants whose payload is a message with these fields, in this order.
+_COMPONENT_VARIANTS = {
+    "vector_value": ("x", "y", "z"),
+    "vector2d_value": ("x", "y"),
+    "int_vector_value": ("x", "y", "z"),
+    "int_point_value": ("x", "y"),
+    "quat_value": ("x", "y", "z", "w"),
+    "color_value": ("r", "g", "b"),
+}
+
+# How a component-shaped variant maps onto one of this module's value types.
+_COMPONENT_TYPES = {
+    "vector_value": (Vector, ("X", "Y", "Z")),
+    "vector2d_value": (Vector2D, ("X", "Y")),
+    "int_vector_value": (IntVector, ("X", "Y", "Z")),
+    "int_point_value": (IntPoint, ("X", "Y")),
+    "quat_value": (Quat, ("X", "Y", "Z", "W")),
+    "color_value": (Color, ("R", "G", "B")),
+}
+
+
+def _name_of(value):
+    """How a reference-valued property names its target."""
+    if isinstance(value, Object):
+        return "{}:{}".format(value.actor, value.component) if value.component else value.actor
+    if isinstance(value, type) and hasattr(value, "__tempo_class__"):
+        # A generated class stands for the Unreal class it was generated from.
+        return value.__tempo_class__
+    return str(value)
+
+
+def _to_value(variant, value):
+    """Build a Value carrying `value` in `variant`."""
+    message = _value_type()()
+
+    if variant in _SCALAR_VARIANTS:
+        if variant in ("class_value", "asset_value", "actor_value", "component_value"):
+            setattr(message, variant, _name_of(value))
+        elif variant == "enum_value":
+            # A generated enum is str-valued, so its own value is the authored name.
+            setattr(message, variant, str(getattr(value, "value", value)))
+        else:
+            setattr(message, variant, value)
+        return message
+
+    if variant in _COMPONENT_VARIANTS:
+        target = getattr(message, variant)
+        python_type, attributes = _COMPONENT_TYPES[variant]
+        if not isinstance(value, python_type):
+            raise TypeError("expected {}, got {!r}".format(python_type.__name__, value))
+        for field_name, attribute in zip(_COMPONENT_VARIANTS[variant], attributes):
+            setattr(target, field_name, getattr(value, attribute))
+        return message
+
+    if variant == "rotator_value":
+        if not isinstance(value, Rotator):
+            raise TypeError("expected Rotator, got {!r}".format(value))
+        target = message.rotator_value
+        target.r, target.p, target.y = value.Roll, value.Pitch, value.Yaw
+        return message
+
+    if variant == "transform_value":
+        if not isinstance(value, Transform):
+            raise TypeError("expected Transform, got {!r}".format(value))
+        target = message.transform_value
+        target.location.x, target.location.y, target.location.z = (
+            value.Location.X, value.Location.Y, value.Location.Z)
+        target.rotation.r, target.rotation.p, target.rotation.y = (
+            value.Rotation.Roll, value.Rotation.Pitch, value.Rotation.Yaw)
+        return message
+
+    if variant.endswith("_array_value") or variant.endswith("_set_value"):
+        target = getattr(message, variant)
+        reference = variant.startswith(("class_", "asset_", "actor_", "component_"))
+        for element in value:
+            if reference:
+                target.values.append(_name_of(element))
+            elif variant.startswith("enum_"):
+                target.values.append(str(getattr(element, "value", element)))
+            else:
+                target.values.append(element)
+        return message
+
+    raise TypeError("no conversion for Value variant {!r}".format(variant))
+
+
+def _from_value(message):
+    """Read whichever variant a Value carries back into a Python value."""
+    variant = message.WhichOneof("value")
+    if variant is None:
+        return None
+
+    if variant in _SCALAR_VARIANTS:
+        return getattr(message, variant)
+
+    if variant in _COMPONENT_TYPES:
+        source = getattr(message, variant)
+        python_type, attributes = _COMPONENT_TYPES[variant]
+        return python_type(*(getattr(source, field_name)
+                             for field_name in _COMPONENT_VARIANTS[variant]))
+
+    if variant == "rotator_value":
+        source = message.rotator_value
+        return Rotator(source.r, source.p, source.y)
+
+    if variant == "transform_value":
+        source = message.transform_value
+        return Transform(Vector(source.location.x, source.location.y, source.location.z),
+                         Rotator(source.rotation.r, source.rotation.p, source.rotation.y))
+
+    if variant.endswith("_set_value"):
+        return set(getattr(message, variant).values)
+    if variant.endswith("_array_value"):
+        return list(getattr(message, variant).values)
+
+    raise TypeError("no conversion from Value variant {!r}".format(variant))
+
+
+def _read(actor, component, address):
+    return _from_value(_world().get_property(
+        actor=actor, component=component, property=address, native_units=True))
+
+
+def _write(actor, component, address, member, value):
+    """Write one property, through its BlueprintSetter when it has one.
+
+    Writing such a property directly would write its memory and skip the setter, which may be the
+    only thing that clamps the value or marks render state dirty -- so the accessor is called
+    instead. The schema records it; a cooked build could not have told us it exists.
+    """
+    setter = member.get("setter")
+    if setter:
+        _world().call_function(actor=actor, component=component, function=setter, native_units=True,
+                               args=[{"name": "", "value": _to_value(member["variant"], value)}])
+        return
+    _world().set_property(actor=actor, component=component, property=address,
+                          value=_to_value(member["variant"], value), native_units=True)
+
+
+
+class DynamicObject(Object):
+    """A handle with no generated type behind it.
+
+    What the schema-free lookups return, where the class is not known until runtime. It behaves
+    exactly like Object; the difference is entirely in the type checker's view, where this one
+    declares the catch-alls and Object does not. Reaching for it is therefore a visible choice, and
+    one that trades the drift guarantee for not needing the generated classes installed.
+    """
+
+    __slots__ = ()
+
+
+class StructProxy:
+    """A handle to a struct-valued property, addressed a member at a time.
+
+    A struct has no single Value that can carry it, but the server has always resolved a nested
+    address, so reaching into one is a matter of accumulating the path: `PostProcessSettings`
+    becomes `PostProcessSettings.BloomIntensity` on the way out.
+    """
+
+    __slots__ = ("_owner", "_address", "_struct")
+
+    def __init__(self, owner, address, struct):
+        object.__setattr__(self, "_owner", owner)
+        object.__setattr__(self, "_address", address)
+        object.__setattr__(self, "_struct", struct)
+
+    def _member(self, name):
+        members = _classes.structs.get(self._struct, {})
+        member = members.get(name)
+        if member is None:
+            raise AttributeError("{!r} has no member {!r}.{}".format(
+                self._struct, name, _suggest(name, list(members))))
+        return member
+
+    def __getattr__(self, name):
+        if name.startswith("_"):
+            raise AttributeError(name)
+        member = self._member(name)
+        address = "{}.{}".format(self._address, name)
+        if member.get("struct"):
+            return StructProxy(self._owner, address, member["struct"])
+        return _read(self._owner.actor, self._owner.component, address)
+
+    def __setattr__(self, name, value):
+        if name.startswith("_"):
+            object.__setattr__(self, name, value)
+            return
+        member = self._member(name)
+        if member.get("variant") is None:
+            raise AttributeError("{!r}.{} cannot be written as one value; assign to its members"
+                                .format(self._struct, name))
+        if not member.get("writable"):
+            raise AttributeError("{!r}.{} is read-only".format(self._struct, name))
+        _write(self._owner.actor, self._owner.component,
+               "{}.{}".format(self._address, name), member, value)
+
+    def __repr__(self):
+        return "{}({!r})".format(self._struct, self._address)

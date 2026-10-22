@@ -1397,6 +1397,7 @@ void UTempoWorldControlServiceSubsystem::GetAllActors(const TempoCore::Empty& Re
 		TempoWorld::ActorDescriptor* ActorDescriptor = Response.add_actors();
 		ActorDescriptor->set_name(TCHAR_TO_UTF8(*UTempoCoreUtils::GetActorIdentifier(Actor)));
 		ActorDescriptor->set_actor_type(TCHAR_TO_UTF8(*Actor->GetClass()->GetName()));
+		ActorDescriptor->set_class_path(TCHAR_TO_UTF8(*Actor->GetClass()->GetPathName()));
 	}
 
 	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
@@ -1427,6 +1428,7 @@ void UTempoWorldControlServiceSubsystem::GetAllComponents(const GetAllComponents
 		TempoWorld::ComponentDescriptor* ComponentDescriptor = Response.add_components();
 		ComponentDescriptor->set_name(TCHAR_TO_UTF8(*Component->GetName()));
 		ComponentDescriptor->set_component_type(TCHAR_TO_UTF8(*Component->GetClass()->GetName()));
+		ComponentDescriptor->set_class_path(TCHAR_TO_UTF8(*Component->GetClass()->GetPathName()));
 		ComponentDescriptor->set_actor(TCHAR_TO_UTF8(*UTempoCoreUtils::GetActorIdentifier(Actor)));
 	}
 

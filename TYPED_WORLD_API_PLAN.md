@@ -338,6 +338,24 @@ with `tempo_sim` on import so narrowing and spawning can resolve a `UClass` name
 
 ## 6. The Python surface
 
+### 6.0 Where the entry points live
+
+The examples below say `tempo_world.get_actors(...)`, which is where they belong by rights. They are
+**`tempo_sim.world`** instead, because `tempo_sim.tempo_world` is generated from the protos by
+`gen_api.py` and hand-written functions cannot live in a generated module without making the
+generator preserve them -- a fragile arrangement for no gain. So:
+
+```python
+from tempo_sim import world
+from my_project_classes.Game.Vehicles import BP_Cat745_C
+
+for truck in world.get_actors(BP_Cat745_C):
+    truck.MaxSpeed = 1200.0
+```
+
+The value types and the base class live in `tempo_sim.unreal`, which is also where the runtime
+behavior is.
+
 ### 6.1 Discovery by type, not by name
 
 An actor *name* is a runtime string: no type checker can infer a class from `get_actor("my_actor")`,
