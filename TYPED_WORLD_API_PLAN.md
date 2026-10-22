@@ -671,8 +671,11 @@ version-specific, so these are one engine's numbers.
 | `.pyi` total | 3.1 MB, or 3.9 MB with docstrings |
 | `.pyi` modules | 756 |
 | Members emitted / omitted | 38,227 (17,100 methods, 5,468 read-only) / 4,478 |
+| Pyright, scenario importing two classes | **0.48 s** |
+| Pyright, whole 13,004-line `Engine.pyi` | **1.33 s** |
+| mypy, same two (for contrast) | 17.9 s / 62 s |
 
-Five things this settles or changes.
+Six things this settles or changes.
 
 **Class count was badly underestimated.** §8.1 guessed 2,000–4,000 from engine headers; the real
 figure is **12,155**, because a project loads far more engine-plugin classes than the headers
@@ -688,22 +691,38 @@ Documentation says the same: 7,813 tooltips and 21,246 categories, none of which
 produced the *identical* hash (`C53FB015…`), because it covers names, types and writability and
 nothing else. A new tooltip is correctly not a drift event.
 
-**Artifact size is a non-issue; one module is.** 3.1 MB over 756 files is unremarkable, so
-**decision (d) resolves to a single wheel**. But the split is far too coarse at one point:
-`/Script/Engine` alone is **2,069 classes, 6,084 members, 13,004 lines, 541 KB**, while **575 of
-756 modules hold ten classes or fewer**. That one file is what type-checking actually costs, so the
-Phase 1 generator should shard `Engine` rather than treat an Unreal package as atomic.
+**Artifact size is a non-issue.** 3.1 MB over 756 files is unremarkable, so **decision (d)
+resolves to a single wheel**. The distribution is lopsided — `/Script/Engine` alone is 2,069
+classes, 6,084 members, 13,004 lines and 541 KB, while 575 of 756 modules hold ten classes or
+fewer — but see below: that lopsidedness turned out not to cost anything worth fixing.
 
-**Type-check cost is still open, and must not be settled on these numbers.** `pyright` could not be
-run here (no Node on this machine), so the only figures available are from `mypy`, which is the
-slower checker and not the one the goal in §1 names: 62 s to check `Engine.pyi` directly, and 17 s
-for a scenario importing two classes from it. Treat both as an upper bound and as a reason to shard
-`Engine`, not as a verdict. **Measuring pyright is the first task of Phase 1.**
+**Type-check cost is a non-problem, and nearly became a wrong decision.** Measured first with
+`mypy` — the only checker to hand — it looked alarming: 62 s for `Engine.pyi` and 17 s for a
+two-class scenario, which argued for sharding `Engine`. Pyright, the checker the goal in §1
+actually names, does the same work in **1.33 s and 0.48 s**: roughly 47× and 37× faster. Sharding
+`Engine` is therefore **not** needed, and the plan is not going to do it. The near-miss is worth
+recording as a method note: a proxy tool's numbers were wrong by more than an order of magnitude,
+in the direction that would have bought complexity nobody needed.
 
-One operational note for the wrapper script Phase 1 needs: on macOS the editor process exits
-non-zero after a commandlet that succeeded (trace-server shutdown noise), so the wrapper must read
-the commandlet's own result — `Commandlet ... finished execution (result N)` — or check the output
-file, never the process exit code.
+**The guarantee was verified end to end, on real generated stubs.** Not argued — run. Against
+`Engine.pyi` generated from this schema, Pyright reports an error for a misspelled attribute
+(`reportAttributeAccessIssue`, which is the §9.1 guard doing its job) and for assigning to a
+`BlueprintReadOnly` property emitted as a setter-less `@property` (§9.2), and reports nothing for
+valid use. The two drift cases the whole design exists to catch are confirmed to be catchable.
+
+Pyright also pointed out a design detail in passing: checking a `.pyi` with no `.py` beside it
+raises `reportMissingModuleSource`. That is exactly the pairing §8.2 calls for, so emitting the tiny
+runtime `.py` is not only for class identity — it also keeps the checker quiet.
+
+Two operational notes for Phase 1.
+
+On macOS the editor process exits non-zero after a commandlet that succeeded (trace-server shutdown
+noise), so the wrapper script must read the commandlet's own result — `Commandlet ... finished
+execution (result N)` — or check the output file, never the process exit code.
+
+Pyright installs from PyPI (`pip install pyright`) and bootstraps its own prebuilt Node into the
+venv, so the PR check in §10.3 needs no system Node and no change to the CI image — one line in a
+requirements file. Worth preferring over a system dependency given how the CI image is built.
 
 ### Out of scope
 
@@ -718,9 +737,10 @@ file, never the process exit code.
 
 1. **A hole in the static surface** silently voids the guarantee — §9.1 is the known one; the §11
    negative tests exist to catch the next. → Pyright tests gate CI.
-2. **Checker performance**, now the sharpest open risk. Total size turned out fine (3.1 MB), but
-   `/Script/Engine` is one 13,004-line file holding 2,069 classes, and that file is where the cost
-   is. → Shard `Engine` in the generator; measure pyright (not mypy) before believing any number.
+2. **Checker performance — measured and closed.** Pyright checks the largest module in 1.33 s and
+   a realistic scenario in 0.48 s, so neither the 3.1 MB total nor the lopsided `Engine` module
+   needs addressing. Re-measure if the member count grows by an order of magnitude; do not
+   re-measure with mypy, which was wrong here by ~47×.
 3. **Blueprint loading.** Enumerating Blueprint classes means walking the asset registry and
    loading every `BlueprintGeneratedClass` — slow and memory-hungry on a large project, and the most
    likely thing to make Phase 0 fail. Easier in the editor (populated registry,
