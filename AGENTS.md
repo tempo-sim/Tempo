@@ -103,6 +103,37 @@ project's own `Content/Python/API`), which carries that project's own services. 
 namespaced under their distribution, so clients import `tempo_sim.TempoSensors` and
 `tempo_sample.<Module>`. `gen_naming.py` derives both names and classifies each module's owner.
 
+### The typed class surface (a second, separate pipeline)
+
+`.proto` files are the source of truth for the *services*. Unreal's **reflection** is the source of
+truth for a second, independent pipeline that generates a typed Python class per Unreal class, so a
+scenario writes `truck.MaxSpeed = 1200.0` instead of
+`set_float_property(actor=..., property="MaxSpeed", ...)`. Its purpose is **drift detection**: when a
+release regenerates it, a scenario using a property that was removed, retyped or made read-only
+fails under Pyright instead of at runtime. See `TYPED_WORLD_API_PLAN.md`.
+
+- **One classifier.** `TempoWorldReflection` decides what an `FProperty` or `UFunction` is — kind,
+  accepted `Value` variants, writability, accessors, or unsupported-with-a-reason. Everything derives
+  from it: the type string `GetProperties` reports, what `SetProperty` accepts, the typed getter, and
+  the schema. Before it existed those had already drifted. **Do not add a fifth opinion.**
+- **`TempoWorldSchemaWalk`** (runtime module) walks the classes; `TempoWorldEditor`'s
+  `TempoWorldSchema` serializes `tempo_schema.json`; `DescribeClasses` serves the same walk over
+  gRPC. One walk, so the generated stubs and a running sim cannot disagree.
+- **Generation runs in the editor**, because metadata is editor-only (`WITH_METADATA` is
+  `WITH_EDITORONLY_DATA`) and a cooked build cannot report a property's `BlueprintSetter` — 306 of
+  them in TempoSample, each one a property the typed API must write through its accessor rather than
+  straight into memory.
+- **…and is then filtered against the packaged build**, which is the authority on what ships. An
+  editor has ~46% more classes than a packaged game (whole editor-only modules), and a stub for one
+  of those type-checks and then fails at runtime. `Scripts/GenTypedAPI.sh` runs the whole chain:
+  walk → ask the build → filter → generate → stage a wheel. `Package.sh` calls it.
+- **`gen_py_classes.py`** emits three files per module: `.py` (class identity only), `.pyi` (the type
+  surface, never imported) and `.meta.json` (what the runtime needs to build a request). Plus
+  `py.typed`, without which a type checker ignores an installed package's stubs entirely.
+- **`tempo_sim.unreal`** is the hand-written runtime; `tempo_sim.world` has the entry points
+  (`get_actors`, `get_actor`, `spawn_actor`, `spawn_actor_deferred`, `batch`, `check_schema`).
+- **`diff_schema.py`** reports release-to-release drift and exits non-zero on anything breaking.
+
 ---
 
 ## 5. Build / run / package
@@ -179,6 +210,15 @@ committed; fetched.
   short per-user directory, mirrored by all three clients), the `sun_path` length limit, and the
   liveness probe that refuses to displace a running server — gRPC unlinks a socket file before
   binding, so a bind alone would not fail the way a taken port does.
+- **Units in the typed class API**: the one place in Tempo that is **Unreal-native** — centimetres,
+  degrees, left-handed. Raw `UPROPERTY` values carry no semantic tagging, so converting them is
+  guesswork. That is what `native_units` on `GetProperty`/`SetProperty`/`CallFunction` selects, and
+  why `tempo_sim.unreal.Vector` is *not* `TempoCore.Geometry_pb2.Vector`.
+- **No catch-all a type checker can see.** `tempo_sim.unreal.Object` defines `__getattr__` and
+  `__setattr__` — attribute access *is* the typed API — but `unreal.pyi` omits them deliberately. A
+  visible catch-all makes every attribute legal on every generated subclass and silently voids the
+  drift detection. The escape hatch is the separate `DynamicObject`. A test asserts this
+  (`Tempo.Python codegen`, "undeclared attribute").
 - **Config**: `UTempoCoreSettings` (`UDeveloperSettings`), stored under `Config/` with
   command-line overrides. Plugin-owned config (incl. CoreRedirects) belongs in the **plugin's**
   Config, not the project's (`plugin_config_scope` memory).
@@ -239,9 +279,18 @@ sim (not the editor). They cover the client-facing API contract and behavior ove
 
 - **Python — `Tests/Python/`:** `conftest.py` (sim lifecycle fixtures), `pytest.ini` (markers),
   `test_*.py`. Groups = pytest markers: `contract` (wheel-only, no sim — package imports + API
-  surface), `core` (time control), `world` (spawn/query/move/destroy + coordinate round trips),
-  `movement` (commandable pawns; skips if the map has none), `sensors` (camera frame — needs a GPU,
-  **default-off**). Run: `Scripts/TestPythonAPI.sh [group]`.
+  surface), `core` (time control), `world` (spawn/query/move/destroy + coordinate round trips, and
+  the typed class API), `movement` (commandable pawns; skips if the map has none), `sensors` (camera
+  frame — needs a GPU, **default-off**), `codegen` (the typed class generator, its runtime, and the
+  schema diff — **no sim and no wheel**: it runs the in-tree source against a fixture schema and
+  needs `pyright`, which `pip install pyright` brings with its own Node). Run:
+  `Scripts/TestPythonAPI.sh [group]`.
+- **The `codegen` group tests behavior, not text.** A golden-output test would notice that the
+  emitted stubs changed; what matters is whether Pyright *rejects* what it must. So each case
+  generates from `Tests/Python/fixtures/mini_schema.json` and asserts Pyright's verdict on a
+  snippet — one per drift case. The fixture deliberately contains a class named `Object`, because a
+  name collision there once rooted the whole hierarchy in `Unknown`, at which point a checker allows
+  every attribute and the guarantee is gone with no visible symptom.
 - **Rust — `Tests/Rust/`:** a `cargo` crate; `tests/*.rs` files are the groups (`cargo test --test
   <group>`): `contract` (compile/surface check, no sim) and `integration` (live sim). The crate
   under test is the packaged `tempo-sim` crate, vendored in by the script. Run: `Scripts/TestRustAPI.sh

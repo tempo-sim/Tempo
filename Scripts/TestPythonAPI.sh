@@ -12,8 +12,9 @@
 # Build nothing here — run Scripts/Package.sh first (or download a packaged artifact).
 #
 # Usage:
-#   Scripts/TestPythonAPI.sh                # all groups except the GPU-only 'sensors'
+#   Scripts/TestPythonAPI.sh                # all sim-facing groups (not 'sensors', not 'codegen')
 #   Scripts/TestPythonAPI.sh core           # one group: contract | core | world | movement | sensors
+#   Scripts/TestPythonAPI.sh codegen        # the generator and typed runtime; no sim, no wheel
 #
 # Env:
 #   TEMPO_PACKAGED_DIR        Path to the Packaged folder (defaults to <project root>/Packaged).
@@ -33,6 +34,51 @@ trap 'echo "TestPythonAPI.sh: failed at line $LINENO (exit $?)" >&2' ERR
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 TEMPO_ROOT=$( cd -- "$SCRIPT_DIR/.." &> /dev/null && pwd )
 GROUP="${1:-}"
+
+# The repo-side groups test this repository's own tooling -- the class generator, the runtime that
+# serves the generated classes, and the release-to-release schema diff -- against a fixture schema.
+# They need no packaged build and no shipped wheel, only the in-tree source and pyright, so they
+# take their own path and return before any of the packaging machinery below.
+if [ "$GROUP" = "codegen" ]; then
+  PYTHON_BIN=""
+  for candidate in python3 python; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+      PYTHON_BIN="$candidate"
+      break
+    fi
+  done
+  if [ -z "$PYTHON_BIN" ]; then
+    echo "FAILED: no python interpreter on PATH." 1>&2
+    exit 1
+  fi
+
+  VENV="${TEMPO_CODEGEN_TEST_VENV:-$TEMPO_ROOT/.tempo_codegen_venv}"
+  "$PYTHON_BIN" -m venv "$VENV"
+  # shellcheck disable=SC1091
+  if [ -f "$VENV/bin/activate" ]; then
+    source "$VENV/bin/activate"
+  else
+    source "$VENV/Scripts/activate"
+  fi
+  pip install --upgrade pip >/dev/null
+
+  # The in-tree package, because these tests check the generator and runtime as they are in this
+  # working tree, not as some earlier build shipped them.
+  pip install --quiet "$TEMPO_ROOT/TempoCore/Content/Python/API"
+  pip install --quiet --force-reinstall --no-deps "$TEMPO_ROOT/TempoCore/Content/Python/API"
+  pip install --quiet pytest
+  # pyright brings its own prebuilt Node, so this needs no system Node and no change to a CI image.
+  # The tests skip rather than fail if it is somehow unavailable.
+  pip install --quiet pyright || echo "Warning: could not install pyright; type-checking cases will skip" >&2
+
+  TESTS_DIR="${TEMPO_PYTHON_TESTS_DIR:-$TEMPO_ROOT/Tests/Python}"
+  REPORT_DIR="${TEMPO_TEST_REPORT_DIR:-$TEMPO_ROOT/Saved/PythonTestReport}"
+  mkdir -p "$REPORT_DIR"
+
+  echo "Running codegen tests from $TESTS_DIR (no sim, no packaged build) ..."
+  pytest "$TESTS_DIR" -v -m codegen --junitxml="$REPORT_DIR/python-codegen.xml"
+  exit $?
+fi
 
 # Locate the Packaged folder.
 PACKAGED_DIR="${TEMPO_PACKAGED_DIR:-}"
@@ -112,11 +158,12 @@ export TEMPO_SERVER_SOCKET="${TEMPO_SERVER_SOCKET:-}"
 # Let conftest write the sim's full log into the report dir so it's uploaded as a CI artifact.
 export TEMPO_TEST_REPORT_DIR="$REPORT_DIR"
 
-# No group (or "all") runs every group EXCEPT sensors, which needs a GPU + TEMPO_SIM_RENDER=1 and is
-# opt-in (request it explicitly with `TestPythonAPI.sh sensors`).
+# No group (or "all") runs every group EXCEPT two opt-in ones: sensors, which needs a GPU and
+# TEMPO_SIM_RENDER=1, and codegen, which has its own path above and no use for the sim this one
+# launches. Request either explicitly.
 if [ -z "$GROUP" ] || [ "$GROUP" = "all" ]; then
   GROUP="all"
-  MARKER="not sensors"
+  MARKER="not sensors and not codegen"
 else
   MARKER="$GROUP"
 fi

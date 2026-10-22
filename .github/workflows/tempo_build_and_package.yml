@@ -62,6 +62,14 @@ jobs:
       matrix:
         unreal_version: [ "5.7", "5.8" ]
         group: [ "contract", "core", "world", "movement" ]
+        # The codegen group tests this repository's own tooling -- the typed class generator, the
+        # runtime that serves it, and the schema diff -- against a fixture schema. It needs no sim
+        # and no packaged build, so one entry rather than one per engine version: nothing it checks
+        # depends on the engine. It rides this job to inherit the fork-PR gating and checkout
+        # handling below, and simply ignores the artifact it is handed.
+        include:
+          - unreal_version: "5.8"
+            group: "codegen"
     uses: ./.github/workflows/test_packaged.yml
     with:
       # Must match the name build_and_package.yml uploads:
