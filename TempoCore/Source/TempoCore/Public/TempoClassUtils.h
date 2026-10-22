@@ -7,6 +7,47 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Engine/Blueprint.h"
 
+// Resolves an exact class object path to a UClass deriving from T, or nullptr if there is none.
+//
+// A class name is ambiguous: two Blueprints in different content folders can generate classes with
+// the same name, and GetSubClassWithName returns the first it finds. A path is not, so anything
+// that needs to name one specific class -- the typed World API and its generated stubs -- addresses
+// classes this way instead.
+//
+// Takes the generated class's own path ("/Script/Engine.StaticMeshComponent",
+// "/Game/Vehicles/BP_Cat745.BP_Cat745_C"). A content path naming only the asset
+// ("/Game/Vehicles/BP_Cat745") also resolves, to the class that asset generates, which is the same
+// leniency GetSubClassWithName extends to the "_C" suffix.
+template <typename T>
+UClass* GetSubClassWithPath(const FString& Path)
+{
+	if (!Path.StartsWith(TEXT("/")))
+	{
+		return nullptr;
+	}
+
+	FString ObjectPath = Path;
+	int32 LastSlashIndex;
+	if (Path.FindLastChar(TEXT('/'), LastSlashIndex) && !Path.RightChop(LastSlashIndex).Contains(TEXT(".")))
+	{
+		// No object name, so this is an asset path. The class a Blueprint asset generates is named
+		// for the asset plus "_C" and lives inside it. A /Script/ package has no such object, so
+		// this resolves to nothing and falls through to the nullptr below, as it should.
+		const FString AssetName = Path.RightChop(LastSlashIndex + 1);
+		ObjectPath = FString::Printf(TEXT("%s.%s_C"), *Path, *AssetName);
+	}
+
+	UClass* Class = FindObject<UClass>(nullptr, *ObjectPath);
+	if (!Class)
+	{
+		// Quiet because failing to resolve is a legitimate answer here, not an error to report.
+		Class = Cast<UClass>(StaticLoadObject(UClass::StaticClass(), nullptr, *ObjectPath, nullptr,
+			LOAD_NoWarn | LOAD_Quiet));
+	}
+
+	return Class && Class->IsChildOf(T::StaticClass()) ? Class : nullptr;
+}
+
 // Resolves a client-supplied class name to a UClass deriving from T, or nullptr if there is none.
 //
 // Class names are always reported to clients as the real UClass name -- Blueprint "_C" and all --
@@ -19,6 +60,13 @@
 template <typename T>
 UClass* GetSubClassWithName(const FString& Name)
 {
+	// A class name can never contain a '/', so a leading one unambiguously marks a path. Callers
+	// that pass a name keep the documented behavior below -- the first class matching it.
+	if (Name.StartsWith(TEXT("/")))
+	{
+		return GetSubClassWithPath<T>(Name);
+	}
+
 	const FString NameNoSuffix = UTempoCoreUtils::StripBlueprintClassSuffix(Name);
 	// Only worth a second comparison if the request actually carried a "_C".
 	const bool bNameHadSuffix = NameNoSuffix.Len() != Name.Len();
