@@ -292,6 +292,14 @@ namespace
 		{
 			Writer->WriteValue(TEXT("setter"), Member.Type.BlueprintSetter);
 		}
+		if (!Member.Type.Category.IsEmpty())
+		{
+			Writer->WriteValue(TEXT("category"), Member.Type.Category);
+		}
+		if (!Member.Type.Tooltip.IsEmpty())
+		{
+			Writer->WriteValue(TEXT("tooltip"), Member.Type.Tooltip);
+		}
 		Writer->WriteObjectEnd();
 	}
 

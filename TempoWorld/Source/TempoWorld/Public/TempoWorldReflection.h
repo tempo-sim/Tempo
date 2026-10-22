@@ -100,6 +100,11 @@ namespace TempoWorldReflection
 		FString BlueprintGetter;
 		FString BlueprintSetter;
 
+		// Documentation, for the generated stub's docstring and its editor-facing grouping. Also
+		// metadata, so also absent from a cooked build.
+		FString Category;
+		FString Tooltip;
+
 		bool IsSupported() const { return Kind != EValueKind::Unsupported; }
 
 		// Whether one Value message can carry this whole property.

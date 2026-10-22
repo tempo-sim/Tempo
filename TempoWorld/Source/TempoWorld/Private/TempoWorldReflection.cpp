@@ -193,6 +193,16 @@ FTypeInfo ClassifyProperty(const FProperty* Property)
 	{
 		Info.BlueprintSetter = *Setter;
 	}
+	static const FName CategoryName(TEXT("Category"));
+	static const FName ToolTipName(TEXT("ToolTip"));
+	if (const FString* Category = Property->FindMetaData(CategoryName))
+	{
+		Info.Category = *Category;
+	}
+	if (const FString* Tooltip = Property->FindMetaData(ToolTipName))
+	{
+		Info.Tooltip = *Tooltip;
+	}
 #endif
 
 	if (!HasResolvedType(Property))

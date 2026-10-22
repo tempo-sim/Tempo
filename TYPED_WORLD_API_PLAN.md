@@ -652,6 +652,59 @@ new group needs a matrix entry in `tempo_build_and_package.yml`.
 | **4 — Ergonomics** | property streaming, server-side class filter for `get_actors`, asset catalog | Optimizations once the shape is settled. |
 | **5 — Rust / C++** | generators off the same `tempo_schema.json` | Only once the schema has stopped moving. |
 
+### Phase 0 results (measured)
+
+Run against TempoSample on **UE 5.8**, macOS, via `-run=TempoWorldSchema`. The schema is
+version-specific, so these are one engine's numbers.
+
+| | |
+|---|---|
+| Classes | 12,155 (534 Blueprint) |
+| Blueprint-visible properties | 21,290 — 15,659 writable, 163 unsupported |
+| Properties not Blueprint-visible (filtered out) | 24,688 |
+| Blueprint-callable functions | 21,415 — 265 uncallable |
+| Functions not Blueprint-callable (filtered out) | 3,878 |
+| Structs / enums referenced | 1,522 / 1,190 |
+| `tempo_schema.json` | 21.5 MB (24.0 MB with documentation) |
+| Blueprint load | 55–95 s depending on cache state |
+| Walk + write | 0.2 s |
+| `.pyi` total | 3.1 MB, or 3.9 MB with docstrings |
+| `.pyi` modules | 756 |
+| Members emitted / omitted | 38,227 (17,100 methods, 5,468 read-only) / 4,478 |
+
+Five things this settles or changes.
+
+**Class count was badly underestimated.** §8.1 guessed 2,000–4,000 from engine headers; the real
+figure is **12,155**, because a project loads far more engine-plugin classes than the headers
+suggest. Member counts were close, though: 38,227 emitted against an estimated 20,000–40,000.
+
+**The editor-commandlet decision (§5) is confirmed by data, not just by argument.** This build has
+**306 properties that are writable and carry a `BlueprintSetter`** — 414 with either accessor. A
+packaged harvest cannot see one of them, so the typed API would have written straight through all
+306, skipping setters that may be the only thing clamping the value or marking render state dirty.
+Documentation says the same: 7,813 tooltips and 21,246 categories, none of which survive cooking.
+
+**The content hash behaves as designed.** Two runs whose only difference was added documentation
+produced the *identical* hash (`C53FB015…`), because it covers names, types and writability and
+nothing else. A new tooltip is correctly not a drift event.
+
+**Artifact size is a non-issue; one module is.** 3.1 MB over 756 files is unremarkable, so
+**decision (d) resolves to a single wheel**. But the split is far too coarse at one point:
+`/Script/Engine` alone is **2,069 classes, 6,084 members, 13,004 lines, 541 KB**, while **575 of
+756 modules hold ten classes or fewer**. That one file is what type-checking actually costs, so the
+Phase 1 generator should shard `Engine` rather than treat an Unreal package as atomic.
+
+**Type-check cost is still open, and must not be settled on these numbers.** `pyright` could not be
+run here (no Node on this machine), so the only figures available are from `mypy`, which is the
+slower checker and not the one the goal in §1 names: 62 s to check `Engine.pyi` directly, and 17 s
+for a scenario importing two classes from it. Treat both as an upper bound and as a reason to shard
+`Engine`, not as a verdict. **Measuring pyright is the first task of Phase 1.**
+
+One operational note for the wrapper script Phase 1 needs: on macOS the editor process exits
+non-zero after a commandlet that succeeded (trace-server shutdown noise), so the wrapper must read
+the commandlet's own result — `Commandlet ... finished execution (result N)` — or check the output
+file, never the process exit code.
+
 ### Out of scope
 
 - Replacing the string-keyed API — it stays as the low-level layer and the escape hatch.
@@ -665,8 +718,9 @@ new group needs a matrix entry in `tempo_build_and_package.yml`.
 
 1. **A hole in the static surface** silently voids the guarantee — §9.1 is the known one; the §11
    negative tests exist to catch the next. → Pyright tests gate CI.
-2. **Artifact size / checker performance** at 30,000+ members. → Measure in Phase 0; per-module
-   split; `.pyi` not `.py`; partition the distribution if needed.
+2. **Checker performance**, now the sharpest open risk. Total size turned out fine (3.1 MB), but
+   `/Script/Engine` is one 13,004-line file holding 2,069 classes, and that file is where the cost
+   is. → Shard `Engine` in the generator; measure pyright (not mypy) before believing any number.
 3. **Blueprint loading.** Enumerating Blueprint classes means walking the asset registry and
    loading every `BlueprintGeneratedClass` — slow and memory-hungry on a large project, and the most
    likely thing to make Phase 0 fail. Easier in the editor (populated registry,
@@ -696,11 +750,13 @@ splits the docs. The generator fails the build on collisions either way.
 the §5.3 verification test needs class-level introspection of a running sim for classes it cannot
 instantiate, and the dynamic path needs it too. Same classifier behind both.
 
-**(c) Harvest breadth — open.** Everything by default, `base_classes` available to narrow. Revisit
-after Phase 0 measures the real cost.
+**(c) Harvest breadth — settled: everything.** The walk itself costs 0.2 s; the only real cost is
+loading Blueprints (55–95 s), which is affordable for a per-PR check. `base_classes` stays
+available for narrowing a run, and the tests use it to stay fast.
 
-**(d) Distribution granularity — open.** One `<project>-classes` wheel; split engine from project
-only if Phase 0 shows the combined artifact is a problem.
+**(d) Distribution granularity — settled: one wheel.** 3.1–3.9 MB over 756 modules does not justify
+splitting the distribution. The granularity that does need work is *within* it: `/Script/Engine`
+must be sharded (see Phase 0 results).
 
 **(e) Path-aware class resolution — settled:** `GetSubClassWithName` learns about paths; name
 callers keep first-match. See §8.4.
