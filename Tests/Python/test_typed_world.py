@@ -369,6 +369,125 @@ def test_calling_a_generated_method(sim_server):
         tw.destroy_actor(actor=spawned.actor)
 
 
+# -- Phase 4: filtered discovery, watching, and the asset catalog ---------------------------------
+
+@pytest.fixture
+def ticking(sim_server):
+    """A sim that is actually advancing, which a tick-driven subscription needs.
+
+    Deliberately not the paused fixed-step fixture: nothing ticks there, so a stream would block for
+    ever. The default is wall-clock and running, but rather than assume it, this checks -- a blocked
+    next() has no timeout to fall back on, so being wrong here would hang the suite instead of
+    failing it.
+    """
+    import time
+
+    import tempo_sim.tempo_core as tc
+
+    first = tc.get_sim_time().sim_time
+    for _ in range(20):
+        time.sleep(0.1)
+        if tc.get_sim_time().sim_time > first:
+            return
+    pytest.skip("the sim is not advancing, so a tick-driven subscription cannot be observed")
+
+
+
+
+def test_actors_of_class_filters_server_side(actor):
+    """Only the actors asked for, rather than every actor for the client to discard."""
+    response = tw.get_actors_of_class(actor_type=SPAWNABLE, include_subclasses=True)
+    names = [descriptor.name for descriptor in response.actors]
+    assert actor in names
+    assert all(d.class_path == SPAWNABLE for d in response.actors), \
+        "a filtered call should not report anything else"
+
+    everything = tw.get_all_actors().actors
+    assert len(response.actors) <= len(everything)
+
+
+def test_actors_of_class_by_name_or_path(actor):
+    by_path = tw.get_actors_of_class(actor_type=SPAWNABLE, include_subclasses=True)
+    by_name = tw.get_actors_of_class(actor_type="StaticMeshActor", include_subclasses=True)
+    # Both resolve through the one helper every client-supplied class name goes through.
+    assert {d.name for d in by_path.actors} == {d.name for d in by_name.actors}
+
+
+def test_actors_of_class_without_subclasses_is_exact(actor):
+    exact = tw.get_actors_of_class(actor_type="Actor", include_subclasses=False)
+    # Nothing in the world is a plain AActor, so asking for exactly that finds nothing -- which is
+    # why include_subclasses is usually what a caller wants.
+    assert all(d.class_path == "/Script/Engine.Actor" for d in exact.actors)
+
+
+def test_an_unknown_class_is_not_found(sim_server):
+    import grpc
+    with pytest.raises(grpc.RpcError) as caught:
+        tw.get_actors_of_class(actor_type="NoSuchActorClassAnywhere")
+    assert caught.value.code() == grpc.StatusCode.NOT_FOUND
+
+
+def test_streaming_a_property_yields_per_tick(root_component, ticking):
+    actor, root = root_component
+    stream = tw.stream_property(actor=actor, component=root, property="bVisible", native_units=True)
+    try:
+        for _ in range(3):
+            value = next(stream)
+            assert value.WhichOneof("value") == "bool_value"
+    finally:
+        stream.close()
+
+
+def test_streaming_an_unknown_property_errors(actor, ticking):
+    import grpc
+    stream = tw.stream_property(actor=actor, property="NoSuchPropertyAtAll", native_units=True)
+    with pytest.raises(grpc.RpcError):
+        next(stream)
+
+
+def test_the_asset_catalog_finds_assets_by_class(sim_server):
+    """What a client needs to set an asset-valued property without hard-coding a path."""
+    response = tw.get_assets(asset_type="StaticMesh", include_subclasses=True)
+    # A packaged build may legitimately contain no static meshes, so this asserts the shape rather
+    # than a count -- and that every descriptor is usable if there are any.
+    for descriptor in response.assets:
+        assert descriptor.path, "an asset has to report the path a property would accept"
+        assert descriptor.name
+        assert descriptor.class_path
+
+    paths = [descriptor.path for descriptor in response.assets]
+    assert paths == sorted(paths), "sorted, so two calls against one build agree"
+
+
+def test_the_asset_catalog_respects_a_path_prefix(sim_server):
+    everywhere = tw.get_assets(asset_type="Object", include_subclasses=True)
+    scoped = tw.get_assets(asset_type="Object", include_subclasses=True, path_prefix="/Engine")
+    assert len(scoped.assets) <= len(everywhere.assets)
+    assert all(d.path.startswith("/Engine") for d in scoped.assets)
+
+
+def test_an_unknown_asset_class_is_not_found(sim_server):
+    import grpc
+    with pytest.raises(grpc.RpcError) as caught:
+        tw.get_assets(asset_type="NoSuchAssetClassAnywhere")
+    assert caught.value.code() == grpc.StatusCode.NOT_FOUND
+
+
+@requires_classes
+def test_watching_a_property_through_a_handle(sim_server, ticking):
+    StaticMeshActor = registered().python_class(SPAWNABLE)
+    spawned = world.spawn_actor(StaticMeshActor)
+    try:
+        values = []
+        for value in spawned.watch("bHidden"):
+            values.append(value)
+            if len(values) == 2:
+                break
+        assert values == [False, False]
+    finally:
+        tw.destroy_actor(actor=spawned.actor)
+
+
 @requires_classes
 def test_the_installed_classes_match_the_sim(sim_server):
     """The drift check, against the build these classes were generated for.

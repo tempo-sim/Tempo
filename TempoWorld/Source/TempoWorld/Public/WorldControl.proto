@@ -308,6 +308,20 @@ message GetAllActorsResponse {
   repeated ActorDescriptor actors = 1;
 }
 
+// Request only the actors of one class, rather than every actor in the world.
+//
+// GetAllActors returns everything, which is what a client wants when it is exploring. A client that
+// knows the class it is after does not: on a populated map that is thousands of descriptors to
+// build, send and discard, every time it asks.
+message GetActorsOfClassRequest {
+  // The class to match, by path or by name. A path is unambiguous -- two Blueprints in different
+  // folders can generate classes with the same name -- and is what the typed client sends.
+  string actor_type = 1;
+  // Also match actors of classes derived from it. Usually what you want: asking for a base class
+  // and getting nothing because every actor is some subclass of it is rarely the intent.
+  bool include_subclasses = 2;
+}
+
 message ComponentDescriptor {
   // Name of the owning actor.
   string actor = 1;
@@ -365,6 +379,8 @@ message GetPropertiesResponse {
 //
 // Unlike a write, a read never creates what is missing: an array index past the end or an absent
 // map key is an error, not an insertion.
+// Also the request StreamProperty takes: a subscription is the same question asked every tick, so
+// it is addressed the same way.
 message GetPropertyRequest {
   string actor = 1;
   string component = 2;
@@ -1132,6 +1148,35 @@ message DescribeClassesResponse {
   repeated EnumDescriptor enums = 4;
 }
 
+// Request the assets of a class, so a client can discover what it may put in an asset-valued or
+// class-valued property.
+//
+// Without this, setting one means knowing a path in advance -- which a scenario author reads out of
+// the editor and hard-codes, and which then rots. Asking is how a client finds out what is actually
+// in the build it is talking to.
+message GetAssetsRequest {
+  // The asset class to match, by path or by name: "StaticMesh", "/Script/Engine.StaticMesh".
+  string asset_type = 1;
+  // Also match assets of derived classes.
+  bool include_subclasses = 2;
+  // Restrict to a content path prefix, e.g. "/Game/Vehicles". Empty searches everywhere.
+  string path_prefix = 3;
+}
+
+message AssetDescriptor {
+  // The asset's name as it reads in the editor.
+  string name = 1;
+  // The asset's full path, which is what an asset-valued property accepts.
+  string path = 2;
+  // The asset's class path.
+  string class_path = 3;
+}
+
+message GetAssetsResponse {
+  // Sorted by path, so two calls against the same build agree.
+  repeated AssetDescriptor assets = 1;
+}
+
 service WorldControlService {
   rpc SpawnActor(SpawnActorRequest) returns (SpawnActorResponse);
 
@@ -1191,6 +1236,10 @@ service WorldControlService {
 
   rpc GetAllActors(TempoCore.Empty) returns (GetAllActorsResponse);
 
+  rpc GetActorsOfClass(GetActorsOfClassRequest) returns (GetAllActorsResponse);
+
+  rpc GetAssets(GetAssetsRequest) returns (GetAssetsResponse);
+
   rpc GetAllComponents(GetAllComponentsRequest) returns (GetAllComponentsResponse);
 
   rpc GetActorProperties(GetActorPropertiesRequest) returns (GetPropertiesResponse);
@@ -1202,6 +1251,8 @@ service WorldControlService {
   rpc GetProperty(GetPropertyRequest) returns (Value);
 
   rpc GetProperties(GetPropertiesRequest) returns (GetPropertiesByNameResponse);
+
+  rpc StreamProperty(GetPropertyRequest) returns (stream Value);
 
   rpc SetBoolProperty(SetBoolPropertyRequest) returns (TempoCore.Empty);
 

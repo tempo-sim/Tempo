@@ -16,7 +16,7 @@
 # reaching for it is visible at the call site and cannot leak into a typed hierarchy.
 
 from contextlib import AbstractContextManager
-from typing import Any
+from typing import Any, Iterator
 
 class Vector:
     X: float
@@ -73,6 +73,9 @@ class Object:
     def component(self) -> str: ...
     def is_a(self, other: type[Object] | str) -> bool: ...
     def snapshot(self, *names: str) -> AbstractContextManager[Object]: ...
+    # Dynamically typed by necessity: the property is named by a string, so there is nothing for a
+    # checker to narrow from.
+    def watch(self, name: str) -> Iterator[Any]: ...
     # Deliberately no __getattr__ or __setattr__. See the note at the top of this file.
 
 class DynamicObject(Object):

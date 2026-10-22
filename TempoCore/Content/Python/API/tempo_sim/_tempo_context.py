@@ -14,6 +14,26 @@ DEFAULT_PORT = 10001
 DEFAULT_SOCKET_NAME = "tempo.sock"
 
 
+# The loop synchronous callers run on.
+#
+# One loop for the life of the process, rather than one per call. A gRPC channel -- and every stream
+# opened on it -- belongs to the loop that created it, so a fresh loop per call closed the previous
+# one underneath them: a sync `for value in stream_...()` yielded its first value and then stopped,
+# because the second `next()` ran on a new loop and found a dead stream. It also meant the channel
+# was rebuilt on every sync call.
+#
+# Never closed, deliberately. It lives as long as the process that is using it, and closing it at
+# exit would race whatever still holds a channel on it.
+_sync_loop = None
+
+
+def _loop_for_sync_calls():
+    global _sync_loop
+    if _sync_loop is None or _sync_loop.is_closed():
+        _sync_loop = asyncio.new_event_loop()
+    return _sync_loop
+
+
 def run_async(coroutine):
     """
     A helper function to run an async coroutine from a synchronous context.
@@ -24,8 +44,8 @@ def run_async(coroutine):
         future = asyncio.run_coroutine_threadsafe(coroutine, running_loop)
         return future.result()
     except RuntimeError:
-        # No running loop - create a new one and run the coroutine on it
-        return asyncio.run(coroutine)
+        # No running loop, so this is a synchronous caller: run on the one loop kept for them.
+        return _loop_for_sync_calls().run_until_complete(coroutine)
 
 
 def default_socket_directory():

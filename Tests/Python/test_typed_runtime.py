@@ -516,3 +516,56 @@ def test_an_unnameable_component_is_not_offered(classes, wire):
     widget = classes.Widget("MyActor")
     with pytest.raises(AttributeError):
         _ = widget.Has_Space
+
+
+# -- watching a property --------------------------------------------------------------------------
+
+
+def test_watch_yields_each_value(classes, monkeypatch):
+    import tempo_sim.unreal as unreal
+    import tempo_sim.TempoWorld.WorldControl_pb2 as WorldControl
+
+    asked = {}
+
+    class FakeWorld:
+        @staticmethod
+        def stream_property(**kwargs):
+            asked.update(kwargs)
+            for value in (True, False, True):
+                yield WorldControl.Value(bool_value=value)
+
+    monkeypatch.setattr(unreal, "_world", lambda: FakeWorld)
+
+    widget = classes.Widget("MyActor")
+    assert list(widget.watch("bEnabled")) == [True, False, True]
+    assert asked["property"] == "bEnabled"
+    assert asked["actor"] == "MyActor"
+    assert asked["native_units"] is True
+
+
+def test_watching_an_unknown_property_fails_immediately(classes, monkeypatch):
+    import tempo_sim.unreal as unreal
+
+    opened = []
+
+    class FakeWorld:
+        @staticmethod
+        def stream_property(**kwargs):
+            opened.append(kwargs)
+            return iter(())
+
+    monkeypatch.setattr(unreal, "_world", lambda: FakeWorld)
+
+    widget = classes.Widget("MyActor")
+    # Checked before the subscription opens, so a typo fails here rather than after the first tick.
+    with pytest.raises(AttributeError):
+        next(widget.watch("bEnabledd"))
+    assert opened == []
+
+
+def test_a_struct_cannot_be_watched(classes, monkeypatch):
+    import tempo_sim.unreal as unreal
+    monkeypatch.setattr(unreal, "_world", lambda: None)
+    widget = classes.Widget("MyActor")
+    with pytest.raises(AttributeError, match="not readable as one value"):
+        next(widget.watch("Settings"))

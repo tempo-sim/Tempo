@@ -55,18 +55,16 @@ def _spawn_transform(transform: Optional[Transform]):
 def get_actors(cls: type[T]) -> List[T]:
     """Every actor of this class, or of a class derived from it.
 
-    Matched on the class path rather than the name, because two Blueprints in different folders can
-    generate classes with the same name. Subclasses are found through the schema's inheritance
-    graph, which the client already has -- no extra round trip.
+    Filtered by the server, which walks the actors it already has rather than describing all of them
+    for the client to discard -- on a populated map that is the difference between a handful of
+    descriptors and thousands.
+
+    Matched on the class path, because two Blueprints in different folders can generate classes with
+    the same name.
     """
-    classes = registered_classes()
-    wanted = cls.__tempo_class__
-    found = []
-    for descriptor in _world().get_all_actors().actors:
-        path = descriptor.class_path
-        if path == wanted or classes.is_subclass(path, wanted):
-            found.append(cls(descriptor.name))
-    return found
+    response = _world().get_actors_of_class(actor_type=cls.__tempo_class__,
+                                            include_subclasses=True)
+    return [cls(descriptor.name) for descriptor in response.actors]
 
 
 @overload
@@ -88,15 +86,20 @@ def get_actor(name: str, cls: Optional[type] = None) -> Any:
     if cls is None:
         return DynamicObject(name)
 
-    classes = registered_classes()
+    # Ask for the class, then look for the name in the answer: one filtered call rather than a
+    # description of every actor in the world.
     wanted = cls.__tempo_class__
-    for descriptor in _world().get_all_actors().actors:
-        if descriptor.name != name:
-            continue
-        path = descriptor.class_path
-        if path == wanted or classes.is_subclass(path, wanted):
+    response = _world().get_actors_of_class(actor_type=wanted, include_subclasses=True)
+    for descriptor in response.actors:
+        if descriptor.name == name:
             return cls(name)
-        raise TypeError("actor {!r} is {}, which is not {}".format(name, path, wanted))
+
+    # Not of that class, or not there at all -- worth distinguishing, because the two mean very
+    # different things to whoever wrote the name.
+    for descriptor in _world().get_all_actors().actors:
+        if descriptor.name == name:
+            raise TypeError("actor {!r} is {}, which is not {}".format(
+                name, descriptor.class_path, wanted))
     raise LookupError("no actor named {!r}".format(name))
 
 

@@ -8,6 +8,9 @@
 #include "TempoCoreUtils.h"
 #include "TempoWorldUtils.h"
 #include "TempoWorldReflection.h"
+
+#include "AssetRegistry/ARFilter.h"
+#include "AssetRegistry/AssetRegistryModule.h"
 #include "TempoWorldSchemaWalk.h"
 
 #include "Misc/EngineVersion.h"
@@ -54,6 +57,9 @@ using GetScale3DResponse = TempoWorld::GetScale3DResponse;
 using ActivateComponentRequest = TempoWorld::ActivateComponentRequest;
 using DeactivateComponentRequest = TempoWorld::DeactivateComponentRequest;
 using GetAllActorsResponse = TempoWorld::GetAllActorsResponse;
+using GetActorsOfClassRequest = TempoWorld::GetActorsOfClassRequest;
+using GetAssetsRequest = TempoWorld::GetAssetsRequest;
+using GetAssetsResponse = TempoWorld::GetAssetsResponse;
 using GetAllComponentsRequest = TempoWorld::GetAllComponentsRequest;
 using GetAllComponentsResponse = TempoWorld::GetAllComponentsResponse;
 using GetActorPropertiesRequest = TempoWorld::GetActorPropertiesRequest;
@@ -199,10 +205,13 @@ void UTempoWorldControlServiceSubsystem::RegisterServices(FTempoServer& Server)
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetComponentRotation, &UTempoWorldControlServiceSubsystem::SetComponentRotation),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetComponentScale3D, &UTempoWorldControlServiceSubsystem::SetComponentScale3D),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestGetAllActors, &UTempoWorldControlServiceSubsystem::GetAllActors),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestGetActorsOfClass, &UTempoWorldControlServiceSubsystem::GetActorsOfClass),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestGetAssets, &UTempoWorldControlServiceSubsystem::GetAssets),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestGetAllComponents, &UTempoWorldControlServiceSubsystem::GetAllComponents),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestGetActorProperties, &UTempoWorldControlServiceSubsystem::GetActorProperties),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestGetProperty, &UTempoWorldControlServiceSubsystem::GetProperty),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestGetProperties, &UTempoWorldControlServiceSubsystem::GetProperties),
+		StreamingRequestHandler(&WorldControlAsyncService::RequestStreamProperty, &UTempoWorldControlServiceSubsystem::StreamProperty),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestDescribeClasses, &UTempoWorldControlServiceSubsystem::DescribeClasses),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestGetComponentProperties, &UTempoWorldControlServiceSubsystem::GetComponentProperties),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestGetActorFunctions, &UTempoWorldControlServiceSubsystem::GetActorFunctions),
@@ -1338,12 +1347,9 @@ void UTempoWorldControlServiceSubsystem::DeactivateComponent(const DeactivateCom
 	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status_OK);
 }
 
-template <typename RequestType>
-grpc::Status GetObjectForRequest(const UWorld* World, const RequestType& Request, UObject*& Object)
+grpc::Status GetObjectForName(const UWorld* World, const FString& ActorName,
+	const FString& ComponentName, UObject*& Object)
 {
-	const FString ActorName(UTF8_TO_TCHAR(Request.actor().c_str()));
-	const FString ComponentName = FString(UTF8_TO_TCHAR(Request.component().c_str()));
-
 	if (ActorName.IsEmpty())
 	{
 		return grpc::Status(grpc::FAILED_PRECONDITION, "actor must be specified");
@@ -1376,6 +1382,14 @@ grpc::Status GetObjectForRequest(const UWorld* World, const RequestType& Request
 	return grpc::Status_OK;
 }
 
+// Every RPC here addresses an object the same way, by actor name and an optional component name.
+template <typename RequestType>
+grpc::Status GetObjectForRequest(const UWorld* World, const RequestType& Request, UObject*& Object)
+{
+	return GetObjectForName(World, FString(UTF8_TO_TCHAR(Request.actor().c_str())),
+		FString(UTF8_TO_TCHAR(Request.component().c_str())), Object);
+}
+
 void MarkRenderStateDirty(UObject* Object)
 {
 	if (AActor* Actor = Cast<AActor>(Object))
@@ -1388,16 +1402,120 @@ void MarkRenderStateDirty(UObject* Object)
 	}
 }
 
+namespace
+{
+	void DescribeActor(const AActor* Actor, TempoWorld::ActorDescriptor& Out)
+	{
+		Out.set_name(TCHAR_TO_UTF8(*UTempoCoreUtils::GetActorIdentifier(Actor)));
+		Out.set_actor_type(TCHAR_TO_UTF8(*Actor->GetClass()->GetName()));
+		Out.set_class_path(TCHAR_TO_UTF8(*Actor->GetClass()->GetPathName()));
+	}
+}
+
 void UTempoWorldControlServiceSubsystem::GetAllActors(const TempoCore::Empty& Request, const TResponseDelegate<GetAllActorsResponse>& ResponseContinuation) const
 {
 	GetAllActorsResponse Response;
 
 	for (const AActor* Actor : TActorRange<AActor>(GetWorld()))
 	{
-		TempoWorld::ActorDescriptor* ActorDescriptor = Response.add_actors();
-		ActorDescriptor->set_name(TCHAR_TO_UTF8(*UTempoCoreUtils::GetActorIdentifier(Actor)));
-		ActorDescriptor->set_actor_type(TCHAR_TO_UTF8(*Actor->GetClass()->GetName()));
-		ActorDescriptor->set_class_path(TCHAR_TO_UTF8(*Actor->GetClass()->GetPathName()));
+		DescribeActor(Actor, *Response.add_actors());
+	}
+
+	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
+}
+
+void UTempoWorldControlServiceSubsystem::GetAssets(const GetAssetsRequest& Request,
+	const TResponseDelegate<GetAssetsResponse>& ResponseContinuation) const
+{
+	const FString TypeName(UTF8_TO_TCHAR(Request.asset_type().c_str()));
+	if (TypeName.IsEmpty())
+	{
+		ResponseContinuation.ExecuteIfBound(GetAssetsResponse(),
+			grpc::Status(grpc::FAILED_PRECONDITION, "asset_type must be specified"));
+		return;
+	}
+
+	const UClass* Class = GetSubClassWithName<UObject>(TypeName);
+	if (!Class)
+	{
+		const FString ErrorMsg = FString::Printf(TEXT("Did not find asset class '%s'"), *TypeName);
+		ResponseContinuation.ExecuteIfBound(GetAssetsResponse(),
+			grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
+		return;
+	}
+
+	FAssetRegistryModule& AssetRegistryModule =
+		FModuleManager::LoadModuleChecked<FAssetRegistryModule>(FName("AssetRegistry"));
+	const IAssetRegistry& AssetRegistry = AssetRegistryModule.Get();
+
+	FARFilter Filter;
+	Filter.ClassPaths.Add(Class->GetClassPathName());
+	Filter.bRecursiveClasses = Request.include_subclasses();
+	Filter.bRecursivePaths = true;
+
+	const FString PathPrefix(UTF8_TO_TCHAR(Request.path_prefix().c_str()));
+	if (!PathPrefix.IsEmpty())
+	{
+		Filter.PackagePaths.Add(FName(*PathPrefix));
+	}
+
+	TArray<FAssetData> Assets;
+	AssetRegistry.GetAssets(Filter, Assets);
+
+	// Sorted, so two calls against the same build agree and a diff of the answers is readable. The
+	// registry's own order is an implementation detail.
+	//
+	// Case-sensitively, explicitly: FString's < is case-insensitive, which would order these
+	// differently from any client sorting the same strings itself.
+	Assets.Sort([](const FAssetData& A, const FAssetData& B)
+	{
+		return A.GetObjectPathString().Compare(B.GetObjectPathString(), ESearchCase::CaseSensitive) < 0;
+	});
+
+	GetAssetsResponse Response;
+	for (const FAssetData& Asset : Assets)
+	{
+		TempoWorld::AssetDescriptor* Descriptor = Response.add_assets();
+		Descriptor->set_name(TCHAR_TO_UTF8(*Asset.AssetName.ToString()));
+		Descriptor->set_path(TCHAR_TO_UTF8(*Asset.GetObjectPathString()));
+		Descriptor->set_class_path(TCHAR_TO_UTF8(*Asset.AssetClassPath.ToString()));
+	}
+
+	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
+}
+
+void UTempoWorldControlServiceSubsystem::GetActorsOfClass(const GetActorsOfClassRequest& Request,
+	const TResponseDelegate<GetAllActorsResponse>& ResponseContinuation) const
+{
+	const FString ClassName(UTF8_TO_TCHAR(Request.actor_type().c_str()));
+	if (ClassName.IsEmpty())
+	{
+		ResponseContinuation.ExecuteIfBound(GetAllActorsResponse(),
+			grpc::Status(grpc::FAILED_PRECONDITION, "actor_type must be specified"));
+		return;
+	}
+
+	// Resolved through the one helper every client-supplied class name goes through, which accepts
+	// a path as well as a name (AGENTS.md section 6).
+	UClass* Class = GetSubClassWithName<AActor>(ClassName);
+	if (!Class)
+	{
+		const FString ErrorMsg = FString::Printf(TEXT("Did not find actor class '%s'"), *ClassName);
+		ResponseContinuation.ExecuteIfBound(GetAllActorsResponse(),
+			grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
+		return;
+	}
+
+	GetAllActorsResponse Response;
+	for (const AActor* Actor : TActorRange<AActor>(GetWorld()))
+	{
+		const UClass* ActorClass = Actor->GetClass();
+		const bool bMatches = Request.include_subclasses() ? ActorClass->IsChildOf(Class)
+			: ActorClass == Class;
+		if (bMatches)
+		{
+			DescribeActor(Actor, *Response.add_actors());
+		}
 	}
 
 	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
@@ -2462,6 +2580,64 @@ grpc::Status GetPropertyOnObject(const FString& PropertyName, UObject* Object,
 	}
 
 	return WritePropertyToValue(LeafContainer, LeafProperty, bNativeUnits, OutValue);
+}
+
+void UTempoWorldControlServiceSubsystem::StreamProperty(const GetPropertyRequest& Request,
+	const TResponseDelegate<PropertyValue>& ResponseContinuation)
+{
+	FPropertySubscription Subscription;
+	Subscription.Actor = FString(UTF8_TO_TCHAR(Request.actor().c_str()));
+	Subscription.Component = FString(UTF8_TO_TCHAR(Request.component().c_str()));
+	Subscription.Property = FString(UTF8_TO_TCHAR(Request.property().c_str()));
+	Subscription.bNativeUnits = Request.native_units();
+
+	const FString Key = FString::Printf(TEXT("%s/%s/%s/%d"), *Subscription.Actor,
+		*Subscription.Component, *Subscription.Property, Subscription.bNativeUnits ? 1 : 0);
+
+	FPropertySubscription& Existing = PendingPropertyRequests.FindOrAdd(Key, MoveTemp(Subscription));
+	Existing.Continuations.Add(ResponseContinuation);
+}
+
+void UTempoWorldControlServiceSubsystem::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
+
+	// Nothing subscribed is the overwhelmingly common case, and it costs one empty check.
+	if (PendingPropertyRequests.IsEmpty())
+	{
+		return;
+	}
+
+	const UWorld* World = GetWorld();
+	for (auto It = PendingPropertyRequests.CreateIterator(); It; ++It)
+	{
+		FPropertySubscription& Subscription = It.Value();
+
+		// Resolved every tick rather than held: an actor can be destroyed and replaced under the
+		// same name, and a handle cached here would quietly address the dead one.
+		UObject* Object = nullptr;
+		grpc::Status Status = GetObjectForName(World, Subscription.Actor, Subscription.Component, Object);
+
+		PropertyValue Value;
+		if (Status.ok())
+		{
+			Status = GetPropertyOnObject(Subscription.Property, Object, Subscription.bNativeUnits, Value);
+		}
+
+		for (const TResponseDelegate<PropertyValue>& Continuation : Subscription.Continuations)
+		{
+			Continuation.ExecuteIfBound(Status.ok() ? Value : PropertyValue(), Status);
+		}
+
+		// Each continuation answers exactly once, so the subscription is spent. A client that wants
+		// the next tick's value asks again, which is how the other streaming RPCs here behave.
+		It.RemoveCurrent();
+	}
+}
+
+TStatId UTempoWorldControlServiceSubsystem::GetStatId() const
+{
+	RETURN_QUICK_DECLARE_CYCLE_STAT(UTempoWorldControlServiceSubsystem, STATGROUP_Tickables);
 }
 
 void UTempoWorldControlServiceSubsystem::GetProperty(const GetPropertyRequest& Request,

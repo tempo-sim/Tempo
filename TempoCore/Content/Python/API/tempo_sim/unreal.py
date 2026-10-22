@@ -190,6 +190,27 @@ class Object:
             class_path = entry.get("super") or ""
         return names
 
+    def watch(self, name):
+        """Yield this property's value once per simulation tick, until the caller stops asking.
+
+            for speed in truck.watch("MaxSpeed"):
+                if speed > limit:
+                    break
+
+        Dynamically typed, unavoidably: the property is named by a string here, so a type checker
+        has nothing to work from. Annotate the loop variable if it matters. The name is still checked
+        against the class before the subscription opens, so a typo fails immediately rather than
+        after the first tick.
+        """
+        member = self._property(name)
+        if member.get("variant") is None:
+            raise AttributeError(
+                "{}.{} cannot be watched: it is not readable as one value".format(
+                    type(self).__name__, name))
+        for message in _world().stream_property(actor=self._actor, component=self._component,
+                                                property=name, native_units=True):
+            yield _from_value(message)
+
     def _property(self, name):
         member = _classes.find_property(type(self).__tempo_class__, name)
         if member is None:
