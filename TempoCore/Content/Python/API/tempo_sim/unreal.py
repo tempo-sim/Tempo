@@ -99,13 +99,17 @@ class Object:
     # than a name because two Blueprints in different folders can share a name.
     __tempo_class__ = "/Script/CoreUObject.Object"
 
-    __slots__ = ("_actor", "_component")
+    __slots__ = ("_actor", "_component", "_class_path")
 
-    def __init__(self, actor: str = "", component: str = ""):
+    def __init__(self, actor: str = "", component: str = "", class_path: str = ""):
         # Addressed the way every TempoWorld RPC addresses things: an actor name, and a component
         # name when the handle is to a component rather than to the actor itself.
         object.__setattr__(self, "_actor", actor)
         object.__setattr__(self, "_component", component)
+        # The class the thing really has, where whoever built the handle knew it. A query for a base
+        # class hands back handles typed as that base -- which is what lets the call site
+        # type-check -- so the handle's own type is not the answer to what it points at.
+        object.__setattr__(self, "_class_path", class_path)
 
     @property
     def actor(self) -> str:
@@ -122,14 +126,22 @@ class Object:
         return "{}({!r})".format(type(self).__name__, where)
 
     def is_a(self, other) -> bool:
-        """Whether this handle's class is `other` or derives from it.
+        """Whether the thing this handle addresses is `other`, or derives from it.
+
+        A question about the simulation, not about the handle. `get_actors(Pawn)` hands back handles
+        typed `Pawn`, because that is what makes the call site check, but each one points at an
+        actor of whatever class it really is -- so answering from the handle's own type would do no
+        more than repeat the question that was asked.
 
         Not `isinstance`: the generated classes are deliberately flat at runtime, because Unreal's
         inheritance has cycles across packages and a base has to exist when a class statement runs.
         The real hierarchy lives in the schema, so this is the question to ask.
         """
         ancestor = getattr(other, "__tempo_class__", other)
-        return _classes.is_subclass(type(self).__tempo_class__, ancestor)
+        # Recorded where the handle was made, which is where a call to find it out was expected
+        # anyway. A predicate that reached for the network would be a surprise here, and would make
+        # this unanswerable without a running sim.
+        return _classes.is_subclass(self._class_path or type(self).__tempo_class__, ancestor)
 
     @contextmanager
     def snapshot(self, *names):
@@ -244,7 +256,7 @@ class Object:
             # Addressed on this handle's actor, under the component's own name -- which is how
             # every TempoWorld RPC names a component.
             python_class = _classes.python_class(component_class) or Object
-            return python_class(self._actor, name)
+            return python_class(self._actor, name, class_path=component_class)
 
         raise AttributeError("{} has no property or function {!r}.{}".format(
             type(self).__name__, name,

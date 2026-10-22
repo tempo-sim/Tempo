@@ -64,7 +64,19 @@ def get_actors(cls: type[T]) -> List[T]:
     """
     response = _world().get_actors_of_class(actor_type=cls.__tempo_class__,
                                             include_subclasses=True)
-    return [cls(descriptor.name) for descriptor in response.actors]
+    # Carrying each actor's real class, not the one that was asked for: the handle is typed as
+    # the queried class so the call site checks, and is_a() still has to be able to tell the
+    # difference between the pawns that came back.
+    return [cls(descriptor.name, class_path=descriptor.class_path)
+            for descriptor in response.actors]
+
+
+def _class_path_of(name: str) -> str:
+    """The class of one actor by name, or "" when there is no such actor."""
+    for descriptor in _world().get_all_actors().actors:
+        if descriptor.name == name:
+            return descriptor.class_path
+    return ""
 
 
 @overload
@@ -84,7 +96,10 @@ def get_actor(name: str, cls: Optional[type] = None) -> Any:
     the server. That is a deliberate trade, and a separate type so that taking it is visible.
     """
     if cls is None:
-        return DynamicObject(name)
+        # One call to learn what it is. Nothing here needs the class, but a handle that does not
+        # know what it points at cannot answer is_a, and this is the place where finding out costs
+        # a call that was coming anyway rather than one hidden inside a predicate.
+        return DynamicObject(name, class_path=_class_path_of(name))
 
     # Ask for the class, then look for the name in the answer: one filtered call rather than a
     # description of every actor in the world.
@@ -92,7 +107,7 @@ def get_actor(name: str, cls: Optional[type] = None) -> Any:
     response = _world().get_actors_of_class(actor_type=wanted, include_subclasses=True)
     for descriptor in response.actors:
         if descriptor.name == name:
-            return cls(name)
+            return cls(name, class_path=descriptor.class_path)
 
     # Not of that class, or not there at all -- worth distinguishing, because the two mean very
     # different things to whoever wrote the name.

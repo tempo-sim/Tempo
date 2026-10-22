@@ -144,6 +144,23 @@ def test_is_a_consults_the_schema_not_the_python_hierarchy(classes):
     assert not isinstance(widget, core.Object), "runtime hierarchy is intentionally flat"
 
 
+def test_is_a_answers_about_the_actor_not_the_handle(classes):
+    """A query for a base class hands back handles typed as that base.
+
+    That is what makes the call site type-check, but it leaves the handle's own type saying less
+    than the caller knows -- so is_a has to answer from the class the thing really has, which the
+    handle carries, or filtering a broad query down to one class could never work.
+    """
+    import fixture_classes.CoreUObject as core
+
+    as_base = core.Object("MyActor", class_path=WIDGET_PATH)
+    assert as_base.is_a(classes.Widget), "the actor is a Widget however the handle is typed"
+    assert as_base.is_a(core.Object)
+
+    # Nothing recorded, so the handle's own type is the best anyone here knows.
+    assert not core.Object("MyActor").is_a(classes.Widget)
+
+
 def test_metadata_names_the_value_variant(classes):
     import tempo_sim.unreal as unreal
 

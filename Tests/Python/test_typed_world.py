@@ -292,6 +292,32 @@ def test_typed_discovery_finds_spawned_actors(sim_server):
         tw.destroy_actor(actor=spawned.actor)
 
 
+def test_discovery_by_a_base_class_can_be_narrowed(sim_server):
+    """The whole point of asking for a base class: sorting out what came back."""
+    StaticMeshActor = registered().python_class(SPAWNABLE)
+    Actor = registered().python_class("/Script/Engine.Actor")
+    spawned = world.spawn_actor(StaticMeshActor)
+    try:
+        actors = world.get_actors(Actor)
+        ours = [handle for handle in actors if handle.actor == spawned.actor]
+        assert ours, "a StaticMeshActor should come back from a query for Actor"
+        assert ours[0].is_a(StaticMeshActor), "is_a must answer about the actor, not the handle"
+        assert any(not handle.is_a(StaticMeshActor) for handle in actors), \
+            "and must still tell the other actors apart"
+    finally:
+        tw.destroy_actor(actor=spawned.actor)
+
+
+def test_a_handle_made_from_a_name_alone_knows_its_class(sim_server):
+    """get_actor() without a class makes no call, so is_a has to go and ask."""
+    StaticMeshActor = registered().python_class(SPAWNABLE)
+    spawned = world.spawn_actor(StaticMeshActor)
+    try:
+        assert world.get_actor(spawned.actor).is_a(StaticMeshActor)
+    finally:
+        tw.destroy_actor(actor=spawned.actor)
+
+
 def test_call_function_returns_typed_results(root_component):
     """A function's results come back in the same representation a property read uses."""
     actor, root = root_component
