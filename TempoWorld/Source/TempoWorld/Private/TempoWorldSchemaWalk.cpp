@@ -54,7 +54,16 @@ namespace
 				Entry.Name = Pair.Key;
 				for (TFieldIterator<FProperty> It(Pair.Value, EFieldIterationFlags::None); It; ++It)
 				{
-					Entry.Members.Add({ It->GetName(), ClassifyProperty(*It) });
+					// GetAuthoredName, not GetName, and the difference is not cosmetic: a nested
+					// address resolves a struct member by its authored name, so that is the only
+					// name a client can use. A Blueprint struct's members have internal names like
+					// "BandThickness_26_54B1BF..." which nothing would resolve.
+					//
+					// Class properties below are the other way round -- addressed by internal name,
+					// because FindPropertyByName takes that one. The two levels differ because the
+					// server differs; reporting one name for both would make the schema wrong about
+					// one of them.
+					Entry.Members.Add({ It->GetAuthoredName(), ClassifyProperty(*It) });
 				}
 				Entry.Members.Sort([](const FMember& A, const FMember& B) { return A.Name < B.Name; });
 				Result.Add(MoveTemp(Entry));
@@ -139,6 +148,34 @@ namespace
 		return Loaded;
 	}
 
+	// Whether a class is a by-product of compilation rather than part of the API.
+	//
+	// The editor keeps several kinds of class around that no client should ever be handed a name
+	// for. SKEL_ classes are the skeleton Unreal maintains beside every Blueprint generated class
+	// -- one per Blueprint, and editor-only, so including them would have the schema promise
+	// hundreds of classes that a packaged build does not have. PLACEHOLDER-CLASS entries are linker
+	// placeholders for references not yet resolved, and REINST_/TRASHCLASS_/HOTRELOADED_ are what
+	// recompiling leaves behind.
+	bool IsCompilationArtifactImpl(const UClass* Class)
+	{
+		static const TCHAR* ArtifactPrefixes[] = {
+			TEXT("SKEL_"), TEXT("REINST_"), TEXT("TRASHCLASS_"), TEXT("PLACEHOLDER-CLASS"),
+			TEXT("HOTRELOADED_"),
+		};
+
+		const FString Name = Class->GetName();
+		for (const TCHAR* Prefix : ArtifactPrefixes)
+		{
+			if (Name.StartsWith(Prefix, ESearchCase::CaseSensitive))
+			{
+				return true;
+			}
+		}
+
+		// Anything living in the transient package exists only for this session.
+		return Class->GetPackage() == GetTransientPackage();
+	}
+
 	bool PassesBaseClassFilter(const UClass* Class, const TArray<UClass*>& BaseClasses)
 	{
 		if (BaseClasses.IsEmpty())
@@ -170,6 +207,11 @@ void HashMember(FSHA1& Sha, const FString& Owner, const FMember& Member)
 		Member.Type.bBlueprintVisible ? 1 : 0, Member.Type.IsWritable() ? 1 : 0);
 	Sha.UpdateWithString(*Flags, Flags.Len());
 }
+}
+
+bool IsCompilationArtifactClass(const UClass* Class)
+{
+	return Class && IsCompilationArtifactImpl(Class);
 }
 
 FString GetSchemaVersion()
@@ -245,6 +287,11 @@ bool Walk(const FOptions& Options, FResult& OutResult, FString& OutError)
 		{
 			continue;
 		}
+		if (IsCompilationArtifactClass(Class))
+		{
+			++OutResult.Stats.ArtifactClasses;
+			continue;
+		}
 		if (!PassesBaseClassFilter(Class, BaseClasses))
 		{
 			continue;
@@ -260,6 +307,8 @@ bool Walk(const FOptions& Options, FResult& OutResult, FString& OutError)
 
 		for (TFieldIterator<FProperty> PropertyIt(Class, EFieldIterationFlags::None); PropertyIt; ++PropertyIt)
 		{
+			// The internal name, which is what FindPropertyByName resolves. See the note on struct
+			// members above for why these two are not the same accessor.
 			FMember Member{ PropertyIt->GetName(), ClassifyProperty(*PropertyIt) };
 			if (Options.bBlueprintAccessibleOnly && !Member.Type.bBlueprintVisible)
 			{

@@ -77,6 +77,8 @@ namespace TempoWorldSchemaWalk
 	{
 		int32 Classes = 0;
 		int32 BlueprintClasses = 0;
+		// Skipped as compilation by-products: skeletons, placeholders, reinstanced classes.
+		int32 ArtifactClasses = 0;
 		int32 Properties = 0;
 		int32 PropertiesFiltered = 0;
 		int32 PropertiesUnsupported = 0;
@@ -112,6 +114,11 @@ namespace TempoWorldSchemaWalk
 	// Walks the reflected classes. Returns false and fills OutError only when the options name a
 	// base class that does not exist; an empty world is a valid, empty result.
 	TEMPOWORLD_API bool Walk(const FOptions& Options, FResult& OutResult, FString& OutError);
+
+	// Whether a class is a by-product of compilation -- a Blueprint skeleton, a linker placeholder,
+	// a reinstanced or trashed class -- rather than part of the API. Editor-only, mostly, which is
+	// why an editor-side walk has to exclude them: a packaged build does not have them.
+	TEMPOWORLD_API bool IsCompilationArtifactClass(const UClass* Class);
 
 	// A content hash identifying what a client could break against: names, types, writability and
 	// signatures. Deliberately excludes documentation, so adding a tooltip is not a drift event.
