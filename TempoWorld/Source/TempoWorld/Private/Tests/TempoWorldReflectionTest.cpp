@@ -300,4 +300,113 @@ bool FTempoWorldReflectionFunctionsTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+// The nested-address parser, shared by the read and the write paths so an address cannot mean two
+// different things depending on which way the value is travelling.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTempoWorldReflectionAddressParsingTest,
+	"Tempo.World.Reflection.AddressParsing", TempoWorldReflectionTestFlags)
+bool FTempoWorldReflectionAddressParsingTest::RunTest(const FString& Parameters)
+{
+	// Peels one segment at a time, leaving the rest in place, so an address is walked by repeated
+	// calls rather than parsed up front.
+	auto Walk = [](FString Address)
+	{
+		TArray<FString> Segments;
+		while (!Address.IsEmpty())
+		{
+			Segments.Add(SplitPropertyAddress(Address));
+		}
+		return Segments;
+	};
+
+	TestEqual(TEXT("a plain name is one segment"), Walk(TEXT("MaxSpeed")), TArray<FString>({ TEXT("MaxSpeed") }));
+	TestEqual(TEXT("struct member"), Walk(TEXT("PostProcessSettings.BloomIntensity")),
+		TArray<FString>({ TEXT("PostProcessSettings"), TEXT("BloomIntensity") }));
+	TestEqual(TEXT("array index"), Walk(TEXT("Waypoints[2]")),
+		TArray<FString>({ TEXT("Waypoints"), TEXT("2") }));
+	TestEqual(TEXT("index then member"), Walk(TEXT("Waypoints[2].X")),
+		TArray<FString>({ TEXT("Waypoints"), TEXT("2"), TEXT("X") }));
+	// A '.' inside brackets belongs to the key, which is what lets a map key contain one.
+	TestEqual(TEXT("map key containing a dot"), Walk(TEXT("Lookup[a.b].X")),
+		TArray<FString>({ TEXT("Lookup"), TEXT("a.b"), TEXT("X") }));
+	// Depth comes from containers of structs, not from containers of containers: Unreal does not
+	// permit a nested container as a UPROPERTY, so "Grid[1][2]" names nothing and is not a case
+	// worth supporting. (It parses to an empty segment, and the array branch rejects that.)
+	TestEqual(TEXT("array of structs, two levels down"), Walk(TEXT("Waypoints[0].Location.X")),
+		TArray<FString>({ TEXT("Waypoints"), TEXT("0"), TEXT("Location"), TEXT("X") }));
+	TestEqual(TEXT("map of structs"), Walk(TEXT("Lookup[key].Location.Z")),
+		TArray<FString>({ TEXT("Lookup"), TEXT("key"), TEXT("Location"), TEXT("Z") }));
+
+	return true;
+}
+
+// Resolving an address for reading. The asymmetry with the write path is the point: a write grows a
+// container to make room, and a read must report that there is nothing there.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTempoWorldReflectionReadAddressingTest,
+	"Tempo.World.Reflection.ReadAddressing", TempoWorldReflectionTestFlags)
+bool FTempoWorldReflectionReadAddressingTest::RunTest(const FString& Parameters)
+{
+	// Class defaults are a real, populated container and need no world to exist.
+	const USceneComponent* Component = GetDefault<USceneComponent>();
+	const AActor* Actor = GetDefault<AActor>();
+
+	auto Resolve = [](const UObject* Object, const TCHAR* PropertyName, const TCHAR* Inner,
+		const void*& OutContainer, const FProperty*& OutProperty, FString& OutError)
+	{
+		const FProperty* Property = Object->GetClass()->FindPropertyByName(FName(PropertyName));
+		if (!Property)
+		{
+			OutError = TEXT("no such property");
+			return EAddressError::Invalid;
+		}
+		return ResolveNestedPropertyForRead(Object, Property, Inner, OutContainer, OutProperty, OutError);
+	};
+
+	const void* Container = nullptr;
+	const FProperty* Leaf = nullptr;
+	FString Error;
+
+	// An empty address resolves to the property itself.
+	TestEqual(TEXT("empty address"),
+		Resolve(Component, TEXT("RelativeLocation"), TEXT(""), Container, Leaf, Error), EAddressError::None);
+	if (Leaf)
+	{
+		TestEqual(TEXT("empty address lands on the struct"),
+			ClassifyProperty(Leaf).Kind, EValueKind::Vector);
+	}
+
+	// A struct member resolves to that member, classified in its own right.
+	Container = nullptr; Leaf = nullptr;
+	TestEqual(TEXT("struct member"),
+		Resolve(Component, TEXT("RelativeLocation"), TEXT("X"), Container, Leaf, Error), EAddressError::None);
+	if (TestNotNull(TEXT("member resolved"), Leaf))
+	{
+		const EValueKind Kind = ClassifyProperty(Leaf).Kind;
+		// FVector is double-precision in UE5, but either is a scalar the API can carry.
+		TestTrue(TEXT("member is a float or a double"),
+			Kind == EValueKind::Double || Kind == EValueKind::Float);
+	}
+
+	// A member that is not there is NotFound, not a crash and not a silent miss.
+	TestEqual(TEXT("unknown struct member"),
+		Resolve(Component, TEXT("RelativeLocation"), TEXT("Nope"), Container, Leaf, Error), EAddressError::NotFound);
+	TestFalse(TEXT("unknown member says why"), Error.IsEmpty());
+
+	// AActor's Tags defaults to empty, so every index is past the end. A write to index 0 would
+	// append; a read must not, and must say out-of-range rather than not-found.
+	TestEqual(TEXT("index into an empty array"),
+		Resolve(Actor, TEXT("Tags"), TEXT("0"), Container, Leaf, Error), EAddressError::OutOfRange);
+	TestTrue(TEXT("out-of-range names the length"), Error.Contains(TEXT("length 0")));
+
+	// A non-numeric array index is malformed rather than missing.
+	TestEqual(TEXT("non-numeric array index"),
+		Resolve(Actor, TEXT("Tags"), TEXT("first"), Container, Leaf, Error), EAddressError::Invalid);
+
+	// Reaching into something with no members at all.
+	TestEqual(TEXT("inner address on a scalar"),
+		Resolve(Actor, TEXT("bHidden"), TEXT("X"), Container, Leaf, Error), EAddressError::Invalid);
+	TestTrue(TEXT("scalar says it has no inner properties"), Error.Contains(TEXT("no inner properties")));
+
+	return true;
+}
+
 #endif

@@ -99,6 +99,42 @@ namespace
 // FLinearColor have reported "vector", "rotator" and "color" since the first version of this
 // API, while the rest report their struct name. That asymmetry is published behavior, so it is
 // reproduced here rather than tidied.
+FString SplitPropertyAddress(FString& PropertyName)
+{
+	// If a ']' appears before any '[', we are inside a bracket scope (e.g. parsing the contents
+	// of MyMap[...]) and only ']' should terminate the segment - '.' inside the brackets is part
+	// of the key (relevant for map keys containing dots, like FString or FName keys).
+	int32 OpenBracketIdx = INDEX_NONE;
+	int32 CloseBracketIdx = INDEX_NONE;
+	PropertyName.FindChar('[', OpenBracketIdx);
+	PropertyName.FindChar(']', CloseBracketIdx);
+	const bool bInBracket = CloseBracketIdx != INDEX_NONE && (OpenBracketIdx == INDEX_NONE || CloseBracketIdx < OpenBracketIdx);
+
+	for (int32 CharIdx = 0; CharIdx < PropertyName.Len(); ++CharIdx)
+	{
+		if (!bInBracket && (PropertyName[CharIdx] == '.' || PropertyName[CharIdx] == '['))
+		{
+			// Chop everything before
+			const FString FirstPropertyName = PropertyName.LeftChop(PropertyName.Len() - CharIdx);
+			// Chop everything after
+			PropertyName.RightChopInline(CharIdx + 1);
+			return FirstPropertyName;
+		}
+		if (PropertyName[CharIdx] == ']')
+		{
+			// Chop everything before
+			const FString FirstPropertyName = PropertyName.LeftChop(PropertyName.Len() - CharIdx);
+			// Chop everything after (also chopping the '.' after the ']', if it's there)
+			PropertyName.RightChopInline(CharIdx + (CharIdx + 1 < PropertyName.Len() && PropertyName[CharIdx + 1] == '.' ? 2 : 1));
+			return FirstPropertyName;
+		}
+	}
+
+	const FString FirstPropertyName = PropertyName;
+	PropertyName.Empty(); // Nothing left
+	return FirstPropertyName;
+}
+
 EValueKind StructKindForCPPName(const FString& StructCPPName)
 {
 	if (StructCPPName == TEXT("FVector"))      { return EValueKind::Vector; }
@@ -447,6 +483,99 @@ FFunctionInfo ClassifyFunction(const UFunction* Function)
 	Info.bCallable = Info.UnsupportedReason.IsEmpty();
 
 	return Info;
+}
+
+EAddressError ResolveNestedPropertyForRead(const void* Container, const FProperty* Property,
+	const FString& PropertyName, const void*& OutContainer, const FProperty*& OutProperty, FString& OutError)
+{
+	if (!Container || !Property)
+	{
+		OutError = TEXT("no property to address");
+		return EAddressError::Invalid;
+	}
+
+	if (PropertyName.IsEmpty())
+	{
+		OutContainer = Container;
+		OutProperty = Property;
+		return EAddressError::None;
+	}
+
+	// The script helpers below take a mutable pointer because they can resize; nothing here does.
+	void* ValuePtr = const_cast<void*>(Property->ContainerPtrToValuePtr<void>(Container));
+
+	FString RemainingName = PropertyName;
+	const FString FirstName = SplitPropertyAddress(RemainingName);
+
+	if (const FStructProperty* StructProperty = CastField<FStructProperty>(Property))
+	{
+		for (FProperty* Inner = StructProperty->Struct->PropertyLink; Inner; Inner = Inner->PropertyLinkNext)
+		{
+			if (Inner->GetAuthoredName() == FirstName)
+			{
+				return ResolveNestedPropertyForRead(ValuePtr, Inner, RemainingName, OutContainer, OutProperty, OutError);
+			}
+		}
+		OutError = FString::Printf(TEXT("No matching inner property '%s' found on struct property '%s' (type '%s')"),
+			*FirstName, *Property->GetName(), *StructProperty->Struct->GetStructCPPName());
+		return EAddressError::NotFound;
+	}
+
+	if (const FArrayProperty* ArrayProperty = CastField<FArrayProperty>(Property))
+	{
+		if (FirstName.IsEmpty() || !FirstName.IsNumeric() || FirstName.Contains(TEXT(".")) || FirstName.Contains(TEXT("-")))
+		{
+			OutError = FString::Printf(TEXT("Array index must be a non-negative integer for array property '%s' (got '%s')"),
+				*Property->GetName(), *FirstName);
+			return EAddressError::Invalid;
+		}
+		const int32 ElementIndex = FCString::Atoi(*FirstName);
+		FScriptArrayHelper ArrayHelper{ ArrayProperty, ValuePtr };
+		if (ElementIndex >= ArrayHelper.Num())
+		{
+			// There is no append-on-read counterpart: index == length grows the array on a write,
+			// and here it is simply past the end.
+			OutError = FString::Printf(TEXT("Array index %d is out of range for array property '%s' of length %d"),
+				ElementIndex, *Property->GetName(), ArrayHelper.Num());
+			return EAddressError::OutOfRange;
+		}
+		return ResolveNestedPropertyForRead(ArrayHelper.GetRawPtr(ElementIndex), ArrayProperty->Inner,
+			RemainingName, OutContainer, OutProperty, OutError);
+	}
+
+	if (const FMapProperty* MapProperty = CastField<FMapProperty>(Property))
+	{
+		FScriptMapHelper MapHelper{ MapProperty, ValuePtr };
+		FProperty* KeyProp = MapProperty->KeyProp;
+
+		void* KeyTemp = FMemory_Alloca(KeyProp->GetSize());
+		KeyProp->InitializeValue(KeyTemp);
+		const TCHAR* ParseResult = KeyProp->ImportText_Direct(*FirstName, KeyTemp, nullptr, PPF_None);
+		if (ParseResult == nullptr)
+		{
+			KeyProp->DestroyValue(KeyTemp);
+			OutError = FString::Printf(TEXT("Failed to parse map key '%s' for map property '%s'"),
+				*FirstName, *Property->GetName());
+			return EAddressError::Invalid;
+		}
+		const int32 PairIndex = MapHelper.FindMapIndexWithKey(KeyTemp);
+		KeyProp->DestroyValue(KeyTemp);
+
+		if (PairIndex == INDEX_NONE)
+		{
+			// A write would insert the key here. A read reports that it is not there.
+			OutError = FString::Printf(TEXT("Map property '%s' has no key '%s'"), *Property->GetName(), *FirstName);
+			return EAddressError::NotFound;
+		}
+		// ValueProp's Offset_Internal is MapLayout.ValueOffset, so the pair pointer is what
+		// ContainerPtrToValuePtr expects -- the offset is applied exactly once.
+		return ResolveNestedPropertyForRead(MapHelper.GetPairPtr(PairIndex), MapProperty->ValueProp,
+			RemainingName, OutContainer, OutProperty, OutError);
+	}
+
+	OutError = FString::Printf(TEXT("Inner property '%s' was specified on property '%s' (type '%s'), but it has no inner properties"),
+		*PropertyName, *Property->GetName(), *Property->GetCPPType());
+	return EAddressError::Invalid;
 }
 
 FString GetTypeString(const FProperty* Property)

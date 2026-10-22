@@ -353,6 +353,49 @@ message GetPropertiesResponse {
   repeated PropertyDescriptor properties = 1;
 }
 
+// Request one property's current value, typed, rather than the stringified form
+// GetActorProperties reports. Addresses a property exactly as SetProperty does, including the
+// nested forms ("MyStruct.Inner", "MyArray[0]", "MyMap[key]").
+//
+// Unlike a write, a read never creates what is missing: an array index past the end or an absent
+// map key is an error, not an insertion.
+message GetPropertyRequest {
+  string actor = 1;
+  string component = 2;
+  string property = 3;
+  // False (the default) converts the way every other RPC does: rotations and transforms arrive in
+  // radians, right-handed, with lengths in meters. True reports the property exactly as Unreal
+  // stores it -- centimeters, degrees, left-handed -- with no conversion of any kind.
+  bool native_units = 4;
+}
+
+// Request several properties of one object in a single call. A property that cannot be read does
+// not fail the call; its entry carries the reason.
+message GetPropertiesRequest {
+  string actor = 1;
+  string component = 2;
+  repeated string properties = 3;
+  // As GetPropertyRequest.native_units, applied to every property in the request.
+  bool native_units = 4;
+}
+
+// One property's value, or why it could not be read.
+message NamedValue {
+  // The property name, spelled as the request spelled it.
+  string name = 1;
+  // Unset when `code` is non-zero.
+  Value value = 2;
+  // gRPC status code (see grpc::StatusCode). Zero means the value is present.
+  int32 code = 3;
+  // Human-readable error. Empty when `code` is zero.
+  string error = 4;
+}
+
+message GetPropertiesByNameResponse {
+  // One entry per requested property, in request order.
+  repeated NamedValue values = 1;
+}
+
 message SetBoolPropertyRequest {
   string actor = 1;
   string component = 2;
@@ -977,6 +1020,10 @@ service WorldControlService {
   rpc GetActorProperties(GetActorPropertiesRequest) returns (GetPropertiesResponse);
 
   rpc GetComponentProperties(GetComponentPropertiesRequest) returns (GetPropertiesResponse);
+
+  rpc GetProperty(GetPropertyRequest) returns (Value);
+
+  rpc GetProperties(GetPropertiesRequest) returns (GetPropertiesByNameResponse);
 
   rpc SetBoolProperty(SetBoolPropertyRequest) returns (TempoCore.Empty);
 

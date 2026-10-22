@@ -56,6 +56,10 @@ using GetAllComponentsResponse = TempoWorld::GetAllComponentsResponse;
 using GetActorPropertiesRequest = TempoWorld::GetActorPropertiesRequest;
 using GetComponentPropertiesRequest = TempoWorld::GetComponentPropertiesRequest;
 using GetPropertiesResponse = TempoWorld::GetPropertiesResponse;
+using GetPropertyRequest = TempoWorld::GetPropertyRequest;
+using GetPropertiesRequest = TempoWorld::GetPropertiesRequest;
+using GetPropertiesByNameResponse = TempoWorld::GetPropertiesByNameResponse;
+using NamedValue = TempoWorld::NamedValue;
 using GetActorFunctionsRequest = TempoWorld::GetActorFunctionsRequest;
 using GetComponentFunctionsRequest = TempoWorld::GetComponentFunctionsRequest;
 using GetFunctionsResponse = TempoWorld::GetFunctionsResponse;
@@ -192,6 +196,8 @@ void UTempoWorldControlServiceSubsystem::RegisterServices(FTempoServer& Server)
 		SimpleRequestHandler(&WorldControlAsyncService::RequestGetAllActors, &UTempoWorldControlServiceSubsystem::GetAllActors),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestGetAllComponents, &UTempoWorldControlServiceSubsystem::GetAllComponents),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestGetActorProperties, &UTempoWorldControlServiceSubsystem::GetActorProperties),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestGetProperty, &UTempoWorldControlServiceSubsystem::GetProperty),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestGetProperties, &UTempoWorldControlServiceSubsystem::GetProperties),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestGetComponentProperties, &UTempoWorldControlServiceSubsystem::GetComponentProperties),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestGetActorFunctions, &UTempoWorldControlServiceSubsystem::GetActorFunctions),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestGetComponentFunctions, &UTempoWorldControlServiceSubsystem::GetComponentFunctions),
@@ -1867,38 +1873,7 @@ void UTempoWorldControlServiceSubsystem::GetComponentProperties(const GetCompone
 
 FString SplitPropertyName(FString& PropertyName)
 {
-	// If a ']' appears before any '[', we are inside a bracket scope (e.g. parsing the contents
-	// of MyMap[...]) and only ']' should terminate the segment - '.' inside the brackets is part
-	// of the key (relevant for map keys containing dots, like FString or FName keys).
-	int32 OpenBracketIdx = INDEX_NONE;
-	int32 CloseBracketIdx = INDEX_NONE;
-	PropertyName.FindChar('[', OpenBracketIdx);
-	PropertyName.FindChar(']', CloseBracketIdx);
-	const bool bInBracket = CloseBracketIdx != INDEX_NONE && (OpenBracketIdx == INDEX_NONE || CloseBracketIdx < OpenBracketIdx);
-
-	for (int32 CharIdx = 0; CharIdx < PropertyName.Len(); ++CharIdx)
-	{
-		if (!bInBracket && (PropertyName[CharIdx] == '.' || PropertyName[CharIdx] == '['))
-		{
-			// Chop everything before
-			const FString FirstPropertyName = PropertyName.LeftChop(PropertyName.Len() - CharIdx);
-			// Chop everything after
-			PropertyName.RightChopInline(CharIdx + 1);
-			return FirstPropertyName;
-		}
-		if (PropertyName[CharIdx] == ']')
-		{
-			// Chop everything before
-			const FString FirstPropertyName = PropertyName.LeftChop(PropertyName.Len() - CharIdx);
-			// Chop everything after (also chopping the '.' after the ']', if it's there)
-			PropertyName.RightChopInline(CharIdx + (CharIdx + 1 < PropertyName.Len() && PropertyName[CharIdx + 1] == '.' ? 2 : 1));
-			return FirstPropertyName;
-		}
-	}
-
-	const FString FirstPropertyName = PropertyName;
-	PropertyName.Empty(); // Nothing left
-	return FirstPropertyName;
+	return TempoWorldReflection::SplitPropertyAddress(PropertyName);
 }
 
 grpc::Status GetPropertyByName(const UObject* Object, const FString& FullPropertyName, FProperty*& Property, FString& InnerPropertyName)
@@ -1929,6 +1904,462 @@ grpc::Status GetPropertyByName(const UObject* Object, const FString& FullPropert
 	}
 
 	return grpc::Status_OK;
+}
+
+// How an object-valued property names what it points at.
+//
+// An actor is named the way every other RPC names one. Everything else is named by full path, not
+// by UObject::GetName: a path is unambiguous, it is what the typed API addresses classes by, and
+// GetSubClassWithName accepts it, so a value read here can be written straight back.
+FString NameReferencedObject(const UObject* Object, TempoWorldReflection::EValueKind Kind)
+{
+	if (!Object)
+	{
+		return FString();
+	}
+	if (Kind == TempoWorldReflection::EValueKind::Actor)
+	{
+		return UTempoCoreUtils::GetActorIdentifier(Cast<AActor>(Object));
+	}
+	if (Kind == TempoWorldReflection::EValueKind::Component)
+	{
+		const UActorComponent* Component = Cast<UActorComponent>(Object);
+		const AActor* Owner = Component ? Component->GetOwner() : nullptr;
+		return Owner
+			? FString::Printf(TEXT("%s:%s"), *UTempoCoreUtils::GetActorIdentifier(Owner), *Component->GetName())
+			: Object->GetName();
+	}
+	return Object->GetPathName();
+}
+
+grpc::Status WritePropertyToValue(const void* Container, const FProperty* Property, bool bNativeUnits,
+	PropertyValue& OutValue);
+
+// Read one element of a container into a scalar Value, reusing the scalar paths below rather than
+// repeating them per element type.
+grpc::Status ReadContainerElement(const void* ElementPtr, const FProperty* ElementProperty,
+	bool bNativeUnits, PropertyValue& OutValue)
+{
+	// An element property's offset is zero, so the element pointer is also its container.
+	return WritePropertyToValue(ElementPtr, ElementProperty, bNativeUnits, OutValue);
+}
+
+// Read a property into a Value. The inverse of SetValueOnTarget, and driven by the same classifier,
+// so that a property the generated stubs present as readable is one this can actually read.
+grpc::Status WritePropertyToValue(const void* Container, const FProperty* Property, bool bNativeUnits,
+	PropertyValue& OutValue)
+{
+	using namespace TempoWorldReflection;
+	const FTypeInfo Type = ClassifyProperty(Property);
+
+	if (!Type.IsValueExpressible())
+	{
+		const FString Reason = Type.IsSupported()
+			? FString::Printf(TEXT("'%s' (type '%s') cannot be read as one value; address its members instead"),
+				*Property->GetName(), *Type.TypeString)
+			: FString::Printf(TEXT("'%s' cannot be read: %s"), *Property->GetName(), *Type.UnsupportedReason);
+		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*Reason)));
+	}
+
+	switch (Type.Kind)
+	{
+	case EValueKind::Bool:
+	{
+		// Read through the property, not with GetValue_InContainer: a bitfield bool shares its byte
+		// with its neighbours, and a raw copy would report true whenever any of them is set.
+		OutValue.set_bool_value(CastFieldChecked<FBoolProperty>(Property)->GetPropertyValue_InContainer(Container));
+		return grpc::Status_OK;
+	}
+	case EValueKind::Int:
+	{
+		// Every width the API widens into int32, read at its own width.
+		if (const FIntProperty* P = CastField<FIntProperty>(Property))        { int32 V;  P->GetValue_InContainer(Container, &V); OutValue.set_int_value(V); }
+		else if (const FInt16Property* P16 = CastField<FInt16Property>(Property))  { int16 V;  P16->GetValue_InContainer(Container, &V); OutValue.set_int_value(V); }
+		else if (const FInt8Property* P8 = CastField<FInt8Property>(Property))     { int8 V;   P8->GetValue_InContainer(Container, &V); OutValue.set_int_value(V); }
+		else if (const FUInt16Property* PU16 = CastField<FUInt16Property>(Property)) { uint16 V; PU16->GetValue_InContainer(Container, &V); OutValue.set_int_value(V); }
+		else if (const FByteProperty* PB = CastField<FByteProperty>(Property))      { uint8 V;  PB->GetValue_InContainer(Container, &V); OutValue.set_int_value(V); }
+		else { return grpc::Status(grpc::INTERNAL, "int-kinded property of unexpected width"); }
+		return grpc::Status_OK;
+	}
+	case EValueKind::Int64:
+	{
+		if (const FInt64Property* P = CastField<FInt64Property>(Property))        { int64 V;  P->GetValue_InContainer(Container, &V); OutValue.set_int64_value(V); }
+		else if (const FUInt32Property* P32 = CastField<FUInt32Property>(Property)) { uint32 V; P32->GetValue_InContainer(Container, &V); OutValue.set_int64_value(V); }
+		else if (const FUInt64Property* P64 = CastField<FUInt64Property>(Property)) { uint64 V; P64->GetValue_InContainer(Container, &V); OutValue.set_int64_value(static_cast<int64>(V)); }
+		else { return grpc::Status(grpc::INTERNAL, "int64-kinded property of unexpected width"); }
+		return grpc::Status_OK;
+	}
+	case EValueKind::Float:
+	{
+		float V;
+		CastFieldChecked<FFloatProperty>(Property)->GetValue_InContainer(Container, &V);
+		OutValue.set_float_value(V);
+		return grpc::Status_OK;
+	}
+	case EValueKind::Double:
+	{
+		// Value carries one floating-point variant, so a double narrows here exactly as it widens
+		// on the way in.
+		double V;
+		CastFieldChecked<FDoubleProperty>(Property)->GetValue_InContainer(Container, &V);
+		OutValue.set_float_value(static_cast<float>(V));
+		return grpc::Status_OK;
+	}
+	case EValueKind::String:
+	{
+		if (const FStrProperty* P = CastField<FStrProperty>(Property))
+		{
+			FString V;
+			P->GetValue_InContainer(Container, &V);
+			OutValue.set_string_value(TCHAR_TO_UTF8(*V));
+		}
+		else if (const FNameProperty* PN = CastField<FNameProperty>(Property))
+		{
+			FName V;
+			PN->GetValue_InContainer(Container, &V);
+			OutValue.set_string_value(TCHAR_TO_UTF8(*V.ToString()));
+		}
+		else if (const FTextProperty* PT = CastField<FTextProperty>(Property))
+		{
+			FText V;
+			PT->GetValue_InContainer(Container, &V);
+			OutValue.set_string_value(TCHAR_TO_UTF8(*V.ToString()));
+		}
+		else { return grpc::Status(grpc::INTERNAL, "string-kinded property of unexpected type"); }
+		return grpc::Status_OK;
+	}
+	case EValueKind::Enum:
+	{
+		// The authored name, which is the spelling SetProperty's enum_value accepts.
+		if (const FEnumProperty* P = CastField<FEnumProperty>(Property))
+		{
+			const void* ValuePtr = P->ContainerPtrToValuePtr<void>(Container);
+			const int64 IntValue = P->GetUnderlyingProperty()->GetSignedIntPropertyValue(ValuePtr);
+			OutValue.set_enum_value(TCHAR_TO_UTF8(*P->GetEnum()->GetAuthoredNameStringByValue(IntValue)));
+		}
+		else if (const FByteProperty* PB = CastField<FByteProperty>(Property))
+		{
+			uint8 Index;
+			PB->GetValue_InContainer(Container, &Index);
+			OutValue.set_enum_value(TCHAR_TO_UTF8(*PB->Enum->GetAuthoredNameStringByIndex(Index)));
+		}
+		else { return grpc::Status(grpc::INTERNAL, "enum-kinded property of unexpected type"); }
+		return grpc::Status_OK;
+	}
+	case EValueKind::Vector:
+	{
+		// Vectors are not unit-converted in either direction; see the documented exception.
+		FVector V;
+		CastFieldChecked<FStructProperty>(Property)->GetValue_InContainer(Container, &V);
+		TempoCore::Vector* Out = OutValue.mutable_vector_value();
+		Out->set_x(V.X); Out->set_y(V.Y); Out->set_z(V.Z);
+		return grpc::Status_OK;
+	}
+	case EValueKind::Vector2D:
+	{
+		FVector2D V;
+		CastFieldChecked<FStructProperty>(Property)->GetValue_InContainer(Container, &V);
+		TempoCore::Vector2D* Out = OutValue.mutable_vector2d_value();
+		Out->set_x(V.X); Out->set_y(V.Y);
+		return grpc::Status_OK;
+	}
+	case EValueKind::IntVector:
+	{
+		FIntVector V;
+		CastFieldChecked<FStructProperty>(Property)->GetValue_InContainer(Container, &V);
+		TempoWorld::IntVector* Out = OutValue.mutable_int_vector_value();
+		Out->set_x(V.X); Out->set_y(V.Y); Out->set_z(V.Z);
+		return grpc::Status_OK;
+	}
+	case EValueKind::IntPoint:
+	{
+		FIntPoint V;
+		CastFieldChecked<FStructProperty>(Property)->GetValue_InContainer(Container, &V);
+		TempoWorld::IntPoint* Out = OutValue.mutable_int_point_value();
+		Out->set_x(V.X); Out->set_y(V.Y);
+		return grpc::Status_OK;
+	}
+	case EValueKind::Rotator:
+	{
+		FRotator V;
+		CastFieldChecked<FStructProperty>(Property)->GetValue_InContainer(Container, &V);
+		if (!bNativeUnits)
+		{
+			V = QuantityConverter<Deg2Rad, L2R>::Convert(V);
+		}
+		TempoCore::Rotation* Out = OutValue.mutable_rotator_value();
+		Out->set_r(V.Roll); Out->set_p(V.Pitch); Out->set_y(V.Yaw);
+		return grpc::Status_OK;
+	}
+	case EValueKind::Quat:
+	{
+		FQuat V;
+		CastFieldChecked<FStructProperty>(Property)->GetValue_InContainer(Container, &V);
+		if (!bNativeUnits)
+		{
+			V = QuantityConverter<UC_NONE, L2R>::Convert(V);
+		}
+		TempoWorld::Quat* Out = OutValue.mutable_quat_value();
+		Out->set_x(V.X); Out->set_y(V.Y); Out->set_z(V.Z); Out->set_w(V.W);
+		return grpc::Status_OK;
+	}
+	case EValueKind::Transform:
+	{
+		FTransform V;
+		CastFieldChecked<FStructProperty>(Property)->GetValue_InContainer(Container, &V);
+		if (bNativeUnits)
+		{
+			// Report the transform exactly as Unreal stores it: cm, degrees, left-handed.
+			TempoCore::Transform* Out = OutValue.mutable_transform_value();
+			TempoCore::Vector* Location = Out->mutable_location();
+			Location->set_x(V.GetLocation().X); Location->set_y(V.GetLocation().Y); Location->set_z(V.GetLocation().Z);
+			const FRotator Rotation = V.Rotator();
+			TempoCore::Rotation* OutRotation = Out->mutable_rotation();
+			OutRotation->set_r(Rotation.Roll); OutRotation->set_p(Rotation.Pitch); OutRotation->set_y(Rotation.Yaw);
+		}
+		else
+		{
+			*OutValue.mutable_transform_value() = FromUnrealTransform(V);
+		}
+		return grpc::Status_OK;
+	}
+	case EValueKind::Color:
+	{
+		const FStructProperty* StructProperty = CastFieldChecked<FStructProperty>(Property);
+		FColor V;
+		if (StructProperty->Struct->GetStructCPPName() == TEXT("FLinearColor"))
+		{
+			FLinearColor Linear;
+			StructProperty->GetValue_InContainer(Container, &Linear);
+			V = Linear.ToFColor(true);
+		}
+		else
+		{
+			StructProperty->GetValue_InContainer(Container, &V);
+		}
+		TempoWorld::Color* Out = OutValue.mutable_color_value();
+		Out->set_r(V.R); Out->set_g(V.G); Out->set_b(V.B);
+		return grpc::Status_OK;
+	}
+	case EValueKind::Class:
+	case EValueKind::Asset:
+	case EValueKind::Actor:
+	case EValueKind::Component:
+	{
+		FString Name;
+		if (const FObjectProperty* P = CastField<FObjectProperty>(Property))
+		{
+			TObjectPtr<UObject> Object;
+			P->GetValue_InContainer(Container, &Object);
+			Name = NameReferencedObject(Object.Get(), Type.Kind);
+		}
+		else if (const FSoftObjectProperty* PS = CastField<FSoftObjectProperty>(Property))
+		{
+			// A soft reference names its target whether or not it is loaded, so report the stored
+			// path rather than resolving it.
+			Name = PS->GetPropertyValue_InContainer(Container).ToString();
+		}
+		else { return grpc::Status(grpc::INTERNAL, "reference-kinded property of unexpected type"); }
+
+		switch (Type.Kind)
+		{
+		case EValueKind::Class:     OutValue.set_class_value(TCHAR_TO_UTF8(*Name)); break;
+		case EValueKind::Asset:     OutValue.set_asset_value(TCHAR_TO_UTF8(*Name)); break;
+		case EValueKind::Actor:     OutValue.set_actor_value(TCHAR_TO_UTF8(*Name)); break;
+		default:                    OutValue.set_component_value(TCHAR_TO_UTF8(*Name)); break;
+		}
+		return grpc::Status_OK;
+	}
+	case EValueKind::Array:
+	case EValueKind::Set:
+	{
+		// Read every element into a scalar Value first, then fan them into the one repeated variant
+		// that carries this element kind.
+		TArray<PropertyValue> Elements;
+		const void* ValuePtr = Property->ContainerPtrToValuePtr<void>(Container);
+		if (const FArrayProperty* ArrayProperty = CastField<FArrayProperty>(Property))
+		{
+			FScriptArrayHelper Helper{ ArrayProperty, const_cast<void*>(ValuePtr) };
+			for (int32 Index = 0; Index < Helper.Num(); ++Index)
+			{
+				PropertyValue Element;
+				const grpc::Status Status = ReadContainerElement(Helper.GetRawPtr(Index), ArrayProperty->Inner, bNativeUnits, Element);
+				if (!Status.ok()) { return Status; }
+				Elements.Add(MoveTemp(Element));
+			}
+		}
+		else if (const FSetProperty* SetProperty = CastField<FSetProperty>(Property))
+		{
+			FScriptSetHelper Helper{ SetProperty, const_cast<void*>(ValuePtr) };
+			for (int32 Index = 0; Index < Helper.GetMaxIndex(); ++Index)
+			{
+				if (!Helper.IsValidIndex(Index)) { continue; }
+				PropertyValue Element;
+				const grpc::Status Status = ReadContainerElement(Helper.GetElementPtr(Index), SetProperty->ElementProp, bNativeUnits, Element);
+				if (!Status.ok()) { return Status; }
+				Elements.Add(MoveTemp(Element));
+			}
+		}
+		else { return grpc::Status(grpc::INTERNAL, "container-kinded property of unexpected type"); }
+
+		const bool bIsSet = Type.Kind == EValueKind::Set;
+		switch (Type.ElementType->Kind)
+		{
+		case EValueKind::Bool:
+		{
+			TempoWorld::BoolArray* Out = bIsSet ? OutValue.mutable_bool_set_value() : OutValue.mutable_bool_array_value();
+			for (const PropertyValue& Element : Elements) { Out->add_values(Element.bool_value()); }
+			break;
+		}
+		case EValueKind::Int:
+		{
+			TempoWorld::IntArray* Out = bIsSet ? OutValue.mutable_int_set_value() : OutValue.mutable_int_array_value();
+			for (const PropertyValue& Element : Elements) { Out->add_values(Element.int_value()); }
+			break;
+		}
+		case EValueKind::Int64:
+		{
+			TempoWorld::Int64Array* Out = bIsSet ? OutValue.mutable_int64_set_value() : OutValue.mutable_int64_array_value();
+			for (const PropertyValue& Element : Elements) { Out->add_values(Element.int64_value()); }
+			break;
+		}
+		case EValueKind::Float:
+		case EValueKind::Double:
+		{
+			TempoWorld::FloatArray* Out = bIsSet ? OutValue.mutable_float_set_value() : OutValue.mutable_float_array_value();
+			for (const PropertyValue& Element : Elements) { Out->add_values(Element.float_value()); }
+			break;
+		}
+		case EValueKind::String:
+		{
+			TempoWorld::StringArray* Out = bIsSet ? OutValue.mutable_string_set_value() : OutValue.mutable_string_array_value();
+			for (const PropertyValue& Element : Elements) { Out->add_values(Element.string_value()); }
+			break;
+		}
+		case EValueKind::Enum:
+		{
+			TempoWorld::StringArray* Out = bIsSet ? OutValue.mutable_enum_set_value() : OutValue.mutable_enum_array_value();
+			for (const PropertyValue& Element : Elements) { Out->add_values(Element.enum_value()); }
+			break;
+		}
+		case EValueKind::Class:
+		{
+			TempoWorld::StringArray* Out = bIsSet ? OutValue.mutable_class_set_value() : OutValue.mutable_class_array_value();
+			for (const PropertyValue& Element : Elements) { Out->add_values(Element.class_value()); }
+			break;
+		}
+		case EValueKind::Asset:
+		{
+			TempoWorld::StringArray* Out = bIsSet ? OutValue.mutable_asset_set_value() : OutValue.mutable_asset_array_value();
+			for (const PropertyValue& Element : Elements) { Out->add_values(Element.asset_value()); }
+			break;
+		}
+		case EValueKind::Actor:
+		{
+			TempoWorld::StringArray* Out = bIsSet ? OutValue.mutable_actor_set_value() : OutValue.mutable_actor_array_value();
+			for (const PropertyValue& Element : Elements) { Out->add_values(Element.actor_value()); }
+			break;
+		}
+		case EValueKind::Component:
+		{
+			TempoWorld::StringArray* Out = bIsSet ? OutValue.mutable_component_set_value() : OutValue.mutable_component_array_value();
+			for (const PropertyValue& Element : Elements) { Out->add_values(Element.component_value()); }
+			break;
+		}
+		default:
+			// IsValueExpressible already excluded these, so reaching here is a classifier bug.
+			return grpc::Status(grpc::INTERNAL, "container element kind has no repeated Value variant");
+		}
+		return grpc::Status_OK;
+	}
+	default:
+		return grpc::Status(grpc::INTERNAL, "value-expressible property of unhandled kind");
+	}
+}
+
+// Read one property of one object, by the same addressing SetProperty accepts.
+grpc::Status GetPropertyOnObject(const FString& PropertyName, UObject* Object,
+	bool bNativeUnits, PropertyValue& OutValue)
+{
+	FProperty* Property = nullptr;
+	FString InnerPropertyName;
+	const grpc::Status FindStatus = GetPropertyByName(Object, PropertyName, Property, InnerPropertyName);
+	if (!FindStatus.ok())
+	{
+		return FindStatus;
+	}
+
+	const void* LeafContainer = nullptr;
+	const FProperty* LeafProperty = nullptr;
+	FString ResolveError;
+	const TempoWorldReflection::EAddressError AddressError = TempoWorldReflection::ResolveNestedPropertyForRead(
+		Object, Property, InnerPropertyName, LeafContainer, LeafProperty, ResolveError);
+	if (AddressError != TempoWorldReflection::EAddressError::None)
+	{
+		grpc::StatusCode Code = grpc::FAILED_PRECONDITION;
+		switch (AddressError)
+		{
+		case TempoWorldReflection::EAddressError::NotFound:   Code = grpc::NOT_FOUND; break;
+		case TempoWorldReflection::EAddressError::OutOfRange: Code = grpc::OUT_OF_RANGE; break;
+		default: break;
+		}
+		return grpc::Status(Code, std::string(TCHAR_TO_UTF8(*ResolveError)));
+	}
+
+	return WritePropertyToValue(LeafContainer, LeafProperty, bNativeUnits, OutValue);
+}
+
+void UTempoWorldControlServiceSubsystem::GetProperty(const GetPropertyRequest& Request,
+	const TResponseDelegate<PropertyValue>& ResponseContinuation) const
+{
+	UObject* Object = nullptr;
+	const grpc::Status ObjectStatus = GetObjectForRequest(GetWorld(), Request, Object);
+	if (!ObjectStatus.ok())
+	{
+		ResponseContinuation.ExecuteIfBound(PropertyValue(), ObjectStatus);
+		return;
+	}
+
+	PropertyValue Value;
+	const grpc::Status Status = GetPropertyOnObject(
+		FString(UTF8_TO_TCHAR(Request.property().c_str())), Object, Request.native_units(), Value);
+	ResponseContinuation.ExecuteIfBound(Status.ok() ? Value : PropertyValue(), Status);
+}
+
+void UTempoWorldControlServiceSubsystem::GetProperties(const GetPropertiesRequest& Request,
+	const TResponseDelegate<GetPropertiesByNameResponse>& ResponseContinuation) const
+{
+	UObject* Object = nullptr;
+	const grpc::Status ObjectStatus = GetObjectForRequest(GetWorld(), Request, Object);
+	if (!ObjectStatus.ok())
+	{
+		ResponseContinuation.ExecuteIfBound(GetPropertiesByNameResponse(), ObjectStatus);
+		return;
+	}
+
+	// One unreadable property does not fail the batch: a caller reading a dozen properties wants the
+	// eleven that worked plus the reason for the twelfth, not one error and no values.
+	GetPropertiesByNameResponse Response;
+	for (const std::string& RequestedName : Request.properties())
+	{
+		NamedValue* Entry = Response.add_values();
+		Entry->set_name(RequestedName);
+
+		PropertyValue Value;
+		const grpc::Status Status = GetPropertyOnObject(
+			FString(UTF8_TO_TCHAR(RequestedName.c_str())), Object, Request.native_units(), Value);
+		if (Status.ok())
+		{
+			*Entry->mutable_value() = Value;
+		}
+		else
+		{
+			Entry->set_code(Status.error_code());
+			Entry->set_error(Status.error_message());
+		}
+	}
+
+	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
 }
 
 template <typename PropertyType, typename ValueType>

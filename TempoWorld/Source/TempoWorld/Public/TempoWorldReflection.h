@@ -185,6 +185,38 @@ namespace TempoWorldReflection
 	// bCallable == false and a reason.
 	TEMPOWORLD_API FFunctionInfo ClassifyFunction(const UFunction* Function);
 
+	// Peel the first segment off a nested property address, leaving the remainder in place:
+	// "Inner.Deeper" -> "Inner", "[2].Foo" -> "2", "[key].Bar" -> "key". A '.' inside brackets is
+	// part of the key, which is what lets a map key contain one.
+	//
+	// One parser, shared by the read and the write paths, so that an address cannot mean two things.
+	TEMPOWORLD_API FString SplitPropertyAddress(FString& PropertyName);
+
+	// Why a nested property address could not be resolved.
+	enum class EAddressError : uint8
+	{
+		None,
+		// No such struct member, or no such map key.
+		NotFound,
+		// An array index outside the array.
+		OutOfRange,
+		// The address is malformed, or reaches into something with no members.
+		Invalid,
+	};
+
+	// Navigate a nested property address ("Inner", "0", "key", and combinations) for reading, from a
+	// property and the container holding it down to the leaf the address names.
+	//
+	// The write path's equivalent creates what is missing -- it appends an array element and inserts
+	// a map key -- because a write says what the value should become. A read must not: an index past
+	// the end or an absent key is an error, not a reason to grow the container. That asymmetry is the
+	// reason this is its own function rather than a flag on the other one.
+	//
+	// On success OutContainer and OutProperty name the leaf, such that OutProperty's
+	// Get*_InContainer(OutContainer) reads it, and the returned error is None.
+	TEMPOWORLD_API EAddressError ResolveNestedPropertyForRead(const void* Container, const FProperty* Property,
+		const FString& PropertyName, const void*& OutContainer, const FProperty*& OutProperty, FString& OutError);
+
 	// Classifies a property. Never fails: an unrepresentable property comes back with
 	// Kind == Unsupported and a reason.
 	TEMPOWORLD_API FTypeInfo ClassifyProperty(const FProperty* Property);
