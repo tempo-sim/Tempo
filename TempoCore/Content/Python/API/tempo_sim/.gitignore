@@ -9,6 +9,8 @@
 !.gitignore
 !__init__.py
 !_tempo_context.py
+!_tempo_context.pyi
+!py.typed
 !unreal.py
 !unreal.pyi
 !world.py
