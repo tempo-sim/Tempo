@@ -298,6 +298,14 @@ Or, more directly:
 tw.get_actor_properties(name="MyActor", include_components=True)
 ```
 
+!!! tip "There is a typed alternative"
+
+    Everything below addresses properties by string, which nothing can check until the call runs. If
+    you are writing scenarios that have to survive a new release of the simulation, see
+    [Typed classes](../clients/typed-classes.md): the same capability with the strings replaced by
+    generated types, so a renamed or removed property is a type error rather than a runtime failure.
+    This page remains the complete and unfiltered surface, and the typed classes are built on it.
+
 Once you know the actor, component and property, set it with the RPC for its type:
 
 | Set property RPC | Unreal type |

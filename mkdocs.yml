@@ -157,6 +157,7 @@ nav:
       - clients/index.md
       - clients/connecting.md
       - clients/python.md
+      - clients/typed-classes.md
       - clients/rust.md
       - clients/cpp.md
       - clients/examples.md
