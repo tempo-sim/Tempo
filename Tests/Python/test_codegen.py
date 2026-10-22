@@ -106,6 +106,25 @@ def ok(w: E.Widget) -> None:
     assert errors == [], "a component's own members should type-check: {}".format(errors)
 
 
+def test_a_component_is_declared_once(generated):
+    """A Blueprint component variable is both a component template and the property holding it.
+
+    Emitting both puts the name in the class body twice, and the second declaration is the one a
+    type checker believes -- so the typed handle would lose to a bare Object, making correct code
+    an error. The runtime looks for a property first, so it would answer the read with the
+    component's name as a string rather than a handle. The component accessor has to be the only
+    declaration, in the stub and in the metadata alike.
+    """
+    package = generated / DIST
+    stub = (package / "Engine.pyi").read_text()
+    assert stub.count("def Mesh(") == 1, "Mesh should be declared once"
+    assert "Mesh: " not in stub, "Mesh must not also be declared as a plain attribute"
+
+    widget = json.loads((package / "Engine.meta.json").read_text())["/Script/Engine.Widget"]
+    assert widget["components"]["Mesh"] == "/Script/Engine.MeshThing"
+    assert "Mesh" not in widget["properties"], "the runtime would serve the property instead"
+
+
 @pytest.mark.parametrize("case,source", [
     ("assigning to a component", "w.Mesh = None"),
     ("a component whose class is absent", "w.Gone.Visible = True"),

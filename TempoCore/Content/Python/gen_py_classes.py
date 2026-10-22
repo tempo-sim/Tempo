@@ -430,9 +430,22 @@ class Generator:
             identity_bodies.append("")
 
             body = []
+            # A Blueprint component variable is two things at once: a component template, and the
+            # object property that holds the component. Declaring both would put the same name in
+            # the class body twice, and the later declaration is the one a type checker believes --
+            # so the typed handle would lose to a bare object, and the runtime, which looks for a
+            # property first, would answer a read with the component's name instead of a handle.
+            # The component accessor is the useful one, so it wins and the property stands down.
+            component_names = set()
             for component in cls.get("components", []):
-                body.extend(self.emit_component(component, stub_imports))
+                lines = self.emit_component(component, stub_imports)
+                if lines:
+                    component_names.add(component["name"])
+                body.extend(lines)
             for member in cls.get("properties", []):
+                if member["name"] in component_names:
+                    self.stats["members_shadowed_by_component"] += 1
+                    continue
                 body.extend(self.emit_member(member, stub_imports))
             for function in cls.get("functions", []):
                 body.extend(self.emit_function(function, stub_imports))
@@ -445,6 +458,9 @@ class Generator:
             # expose, so the two cannot disagree about what exists.
             properties = {}
             for member in cls.get("properties", []):
+                if member["name"] in component_names:
+                    # Stood down above; the runtime must agree with the stubs about which one it is.
+                    continue
                 variant = self.variant_for(member)
                 struct = member.get("struct", "") if member.get("kind") == "struct" else ""
                 if variant is None and not struct:
@@ -657,8 +673,9 @@ def main(argv):
     print("members            {} ({} writable, {} read-only)".format(
         stats["members"], stats["writable"], stats["read_only"]))
     print("functions          {}".format(stats["functions"]))
-    print("components         {} ({} omitted, {} unnameable)".format(
-        stats["components"], stats["components_omitted"], stats["components_unnameable"]))
+    print("components         {} ({} omitted, {} unnameable, {} also a property)".format(
+        stats["components"], stats["components_omitted"], stats["components_unnameable"],
+        stats["members_shadowed_by_component"]))
     print("omitted            {} members, {} functions, {} unnameable".format(
         stats["members_omitted"], stats["functions_omitted"], stats["members_unnameable"]))
     return 0
