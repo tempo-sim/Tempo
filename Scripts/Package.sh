@@ -207,11 +207,30 @@ PACKAGE_PYTHON_PACKAGE() {
   fi
 }
 
+# Generate this build's typed Python classes before the wheels are built, so they ship beside the
+# clients they extend. This walks the editor's reflection and loads every Blueprint, which costs
+# about a minute; TEMPO_SKIP_TYPED_API=1 skips it.
+#
+# Deliberately non-fatal: it runs the editor, so it can fail for reasons that have nothing to do
+# with whether the package itself is good, and a staged build without the typed classes is still a
+# working build. The failure is loud, and the wheel is simply absent rather than stale.
+TYPED_API_STAGE=""
+if [[ -n "$TEMPO_SKIP_TYPED_API" && "$TEMPO_SKIP_TYPED_API" != "0" ]]; then
+  echo "Skipping typed Python classes (TEMPO_SKIP_TYPED_API is set)"
+elif "$SCRIPT_DIR"/GenTypedAPI.sh; then
+  TYPED_API_STAGE=$(find "$PROJECT_ROOT/Saved/TempoTypedAPI" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | head -1)
+else
+  echo "Warning: failed to generate the typed Python classes; the packaged build will not include them" >&2
+fi
+
 # Package whenever any Python interpreter is available. The wheel is built either way (via `build`
 # if present, else pip); only a complete absence of Python skips it.
 if [[ -n "$PYTHON_BIN" ]]; then
   PACKAGE_PYTHON_PACKAGE "$PROJECT_ROOT/Plugins/Tempo/TempoCore/Content/Python/API"
   PACKAGE_PYTHON_PACKAGE "$PROJECT_ROOT/Content/Python/API"
+  if [[ -n "$TYPED_API_STAGE" ]]; then
+    PACKAGE_PYTHON_PACKAGE "$TYPED_API_STAGE"
+  fi
 else
   echo "Skipping Python package build: no python interpreter available"
 fi
