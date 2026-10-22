@@ -29,6 +29,11 @@ before anything runs.
     or changed API fail under Pyright**, instead of failing at runtime days later. Completion and
     hover documentation come along for free, but they are not the point.
 
+!!! tip "Setting this up for the first time"
+
+    [Typed classes, step by step](../guides/typed-classes.md) walks from packaging to a type checker
+    catching a rename, with a runnable example. This page is the reference behind it.
+
 ## Installing
 
 The classes are generated from the build they describe, so they ship with it:

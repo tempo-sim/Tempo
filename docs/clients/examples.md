@@ -31,6 +31,20 @@ python ./Plugins/Tempo/ExampleClients/Python/SensorPlayground.py
 python ./Plugins/Tempo/ExampleClients/Python/WorldPlayground.py --ip localhost --port 10001
 ```
 
+### Typed classes
+
+**`TypedClasses.py`** — a tour of the [typed classes](typed-classes.md): spawn an actor by its
+class, read and write its properties, reach its components, call a function, batch and watch. Every
+attribute in it is a declared member of a generated class, so a type checker reads the file against
+the build those classes came from.
+
+```bash
+python ./Plugins/Tempo/ExampleClients/Python/TypedClasses.py
+```
+
+It needs this build's generated class package installed alongside `tempo-sim`;
+[Typed classes, step by step](../guides/typed-classes.md) sets that up.
+
 ### Visualizers
 
 **`LidarPreview.py`** — a minimal example: stream a single lidar at a target rate and visualize

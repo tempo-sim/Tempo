@@ -165,6 +165,7 @@ nav:
       - guides/index.md
       - guides/citysample.md
       - guides/custom-services.md
+      - guides/typed-classes.md
       - guides/packaging.md
       - guides/continuous-integration.md
       - guides/testing.md
