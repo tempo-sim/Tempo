@@ -8,6 +8,9 @@
 #include "TempoCoreUtils.h"
 #include "TempoWorldUtils.h"
 #include "TempoWorldReflection.h"
+#include "TempoWorldSchemaWalk.h"
+
+#include "Misc/EngineVersion.h"
 #include "TempoWorld.h"
 
 #include "EngineUtils.h"
@@ -59,6 +62,8 @@ using GetPropertiesResponse = TempoWorld::GetPropertiesResponse;
 using GetPropertyRequest = TempoWorld::GetPropertyRequest;
 using GetPropertiesRequest = TempoWorld::GetPropertiesRequest;
 using GetPropertiesByNameResponse = TempoWorld::GetPropertiesByNameResponse;
+using DescribeClassesRequest = TempoWorld::DescribeClassesRequest;
+using DescribeClassesResponse = TempoWorld::DescribeClassesResponse;
 using NamedValue = TempoWorld::NamedValue;
 using GetActorFunctionsRequest = TempoWorld::GetActorFunctionsRequest;
 using GetComponentFunctionsRequest = TempoWorld::GetComponentFunctionsRequest;
@@ -198,6 +203,7 @@ void UTempoWorldControlServiceSubsystem::RegisterServices(FTempoServer& Server)
 		SimpleRequestHandler(&WorldControlAsyncService::RequestGetActorProperties, &UTempoWorldControlServiceSubsystem::GetActorProperties),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestGetProperty, &UTempoWorldControlServiceSubsystem::GetProperty),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestGetProperties, &UTempoWorldControlServiceSubsystem::GetProperties),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestDescribeClasses, &UTempoWorldControlServiceSubsystem::DescribeClasses),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestGetComponentProperties, &UTempoWorldControlServiceSubsystem::GetComponentProperties),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestGetActorFunctions, &UTempoWorldControlServiceSubsystem::GetActorFunctions),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestGetComponentFunctions, &UTempoWorldControlServiceSubsystem::GetComponentFunctions),
@@ -1867,6 +1873,146 @@ void UTempoWorldControlServiceSubsystem::GetComponentProperties(const GetCompone
 
 	GetPropertiesResponse Response;
 	GetObjectProperties(Component, Response);
+
+	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
+}
+
+namespace
+{
+	// Fill a TypeDescriptor from the classifier, following container nesting as far as it goes.
+	void WriteTypeDescriptor(const TempoWorldReflection::FTypeInfo& Type, TempoWorld::TypeDescriptor& Out)
+	{
+		using namespace TempoWorldReflection;
+		Out.set_kind(TCHAR_TO_UTF8(GetKindName(Type.Kind)));
+		Out.set_property_type(TCHAR_TO_UTF8(*Type.TypeString));
+		if (!Type.UnsupportedReason.IsEmpty())
+		{
+			Out.set_unsupported_reason(TCHAR_TO_UTF8(*Type.UnsupportedReason));
+		}
+		if (!Type.EnumName.IsEmpty())
+		{
+			Out.set_enum_name(TCHAR_TO_UTF8(*Type.EnumName));
+		}
+		if (Type.Kind == EValueKind::Struct && !Type.StructName.IsEmpty())
+		{
+			Out.set_struct_name(TCHAR_TO_UTF8(*Type.StructName));
+		}
+		if (!Type.ClassPath.IsEmpty())
+		{
+			Out.set_class_path(TCHAR_TO_UTF8(*Type.ClassPath));
+		}
+		if (Type.ElementType.IsValid())
+		{
+			WriteTypeDescriptor(*Type.ElementType, *Out.mutable_element());
+		}
+		if (Type.KeyType.IsValid())
+		{
+			WriteTypeDescriptor(*Type.KeyType, *Out.mutable_key());
+		}
+	}
+
+	void WriteMemberDescriptor(const TempoWorldSchemaWalk::FMember& Member, TempoWorld::ClassPropertyDescriptor& Out)
+	{
+		Out.set_name(TCHAR_TO_UTF8(*Member.Name));
+		WriteTypeDescriptor(Member.Type, *Out.mutable_type());
+		Out.set_readable(Member.Type.bBlueprintVisible);
+		Out.set_writable(Member.Type.IsWritable());
+		Out.set_value_expressible(Member.Type.IsValueExpressible());
+		Out.set_blueprint_getter(TCHAR_TO_UTF8(*Member.Type.BlueprintGetter));
+		Out.set_blueprint_setter(TCHAR_TO_UTF8(*Member.Type.BlueprintSetter));
+		Out.set_category(TCHAR_TO_UTF8(*Member.Type.Category));
+		Out.set_tooltip(TCHAR_TO_UTF8(*Member.Type.Tooltip));
+	}
+}
+
+void UTempoWorldControlServiceSubsystem::DescribeClasses(const DescribeClassesRequest& Request,
+	const TResponseDelegate<DescribeClassesResponse>& ResponseContinuation) const
+{
+	using namespace TempoWorldReflection;
+
+	TempoWorldSchemaWalk::FOptions Options;
+	for (const std::string& BaseClass : Request.base_classes())
+	{
+		Options.BaseClasses.Add(FString(UTF8_TO_TCHAR(BaseClass.c_str())));
+	}
+	Options.bIncludeBlueprintClasses = Request.include_blueprint_classes();
+	Options.bBlueprintAccessibleOnly = Request.blueprint_accessible_only();
+	Options.bIncludeFunctions = Request.include_functions();
+
+	TempoWorldSchemaWalk::FResult Result;
+	FString Error;
+	if (!TempoWorldSchemaWalk::Walk(Options, Result, Error))
+	{
+		ResponseContinuation.ExecuteIfBound(DescribeClassesResponse(),
+			grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*Error))));
+		return;
+	}
+
+	DescribeClassesResponse Response;
+
+	TempoWorld::SchemaHeader* Header = Response.mutable_header();
+	Header->set_schema_version(TCHAR_TO_UTF8(*TempoWorldSchemaWalk::GetSchemaVersion()));
+	Header->set_engine_version(TCHAR_TO_UTF8(*FEngineVersion::Current().ToString(EVersionComponent::Minor)));
+	// The same hash a generated schema file carries, so a client can compare the two directly.
+	Header->set_content_hash(TCHAR_TO_UTF8(*TempoWorldSchemaWalk::HashResult(Result)));
+	Header->set_blueprint_accessible_only(Options.bBlueprintAccessibleOnly);
+	Header->set_includes_blueprint_classes(Options.bIncludeBlueprintClasses);
+
+	for (const TempoWorldSchemaWalk::FClassEntry& Entry : Result.Classes)
+	{
+		TempoWorld::ClassDescriptor* Class = Response.add_classes();
+		Class->set_name(TCHAR_TO_UTF8(*Entry.Name));
+		Class->set_class_path(TCHAR_TO_UTF8(*Entry.ClassPath));
+		Class->set_super_path(TCHAR_TO_UTF8(*Entry.SuperPath));
+		Class->set_package(TCHAR_TO_UTF8(*Entry.Package));
+		Class->set_is_abstract(Entry.bAbstract);
+		Class->set_is_blueprint(Entry.bBlueprint);
+
+		for (const TempoWorldSchemaWalk::FMember& Member : Entry.Properties)
+		{
+			WriteMemberDescriptor(Member, *Class->add_properties());
+		}
+
+		for (const FFunctionInfo& Function : Entry.Functions)
+		{
+			TempoWorld::ClassFunctionDescriptor* Out = Class->add_functions();
+			Out->set_name(TCHAR_TO_UTF8(*Function.Name));
+			Out->set_signature(TCHAR_TO_UTF8(*Function.Signature));
+			Out->set_blueprint_callable(Function.bBlueprintCallable);
+			Out->set_callable(Function.bCallable);
+			Out->set_unsupported_reason(TCHAR_TO_UTF8(*Function.UnsupportedReason));
+			Out->set_positional(Function.AllInputsValueExpressible());
+			for (const FParameterInfo& Parameter : Function.Parameters)
+			{
+				TempoWorld::ClassParameterDescriptor* OutParm = Out->add_parameters();
+				OutParm->set_name(TCHAR_TO_UTF8(*Parameter.Name));
+				WriteTypeDescriptor(Parameter.Type, *OutParm->mutable_type());
+				OutParm->set_kind(Parameter.Kind == EParameterKind::Return ? TempoWorld::PK_RETURN
+					: Parameter.Kind == EParameterKind::Output ? TempoWorld::PK_OUTPUT
+					: TempoWorld::PK_INPUT);
+			}
+		}
+	}
+
+	for (const TempoWorldSchemaWalk::FStructEntry& Entry : Result.Structs)
+	{
+		TempoWorld::StructDescriptor* Struct = Response.add_structs();
+		Struct->set_name(TCHAR_TO_UTF8(*Entry.Name));
+		for (const TempoWorldSchemaWalk::FMember& Member : Entry.Members)
+		{
+			WriteMemberDescriptor(Member, *Struct->add_members());
+		}
+	}
+
+	for (const TempoWorldSchemaWalk::FEnumEntry& Entry : Result.Enums)
+	{
+		TempoWorld::EnumDescriptor* Enum = Response.add_enums();
+		Enum->set_name(TCHAR_TO_UTF8(*Entry.Name));
+		for (const FString& Enumerator : Entry.Enumerators)
+		{
+			Enum->add_enumerators(TCHAR_TO_UTF8(*Enumerator));
+		}
+	}
 
 	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
 }

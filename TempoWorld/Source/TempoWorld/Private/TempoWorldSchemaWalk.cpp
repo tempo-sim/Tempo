@@ -7,6 +7,7 @@
 #include "AssetRegistry/ARFilter.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Engine/Blueprint.h"
+#include "Misc/SecureHash.h"
 #include "UObject/UObjectIterator.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogTempoWorldSchemaWalk, Log, All);
@@ -155,6 +156,61 @@ namespace
 	}
 }
 
+namespace
+{
+// A canonical rendering of one member, hashed to identify the schema's content. Deliberately
+// covers only what a client could break against: a name, a type, and whether it can be written.
+// Documentation is not in it, so adding a tooltip is correctly not a drift event.
+void HashMember(FSHA1& Sha, const FString& Owner, const FMember& Member)
+{
+	Sha.UpdateWithString(*Owner, Owner.Len());
+	Sha.UpdateWithString(*Member.Name, Member.Name.Len());
+	Sha.UpdateWithString(*Member.Type.TypeString, Member.Type.TypeString.Len());
+	const FString Flags = FString::Printf(TEXT("%d%d"),
+		Member.Type.bBlueprintVisible ? 1 : 0, Member.Type.IsWritable() ? 1 : 0);
+	Sha.UpdateWithString(*Flags, Flags.Len());
+}
+}
+
+FString GetSchemaVersion()
+{
+	return TEXT("1");
+}
+
+FString HashResult(const FResult& Result)
+{
+	FSHA1 Sha;
+	for (const FClassEntry& Entry : Result.Classes)
+	{
+		Sha.UpdateWithString(*Entry.ClassPath, Entry.ClassPath.Len());
+		Sha.UpdateWithString(*Entry.SuperPath, Entry.SuperPath.Len());
+		for (const FMember& Member : Entry.Properties)
+		{
+			HashMember(Sha, Entry.ClassPath, Member);
+		}
+		for (const FFunctionInfo& Function : Entry.Functions)
+		{
+			Sha.UpdateWithString(*Function.Signature, Function.Signature.Len());
+		}
+	}
+	for (const FStructEntry& Entry : Result.Structs)
+	{
+		for (const FMember& Member : Entry.Members)
+		{
+			HashMember(Sha, Entry.Name, Member);
+		}
+	}
+	for (const FEnumEntry& Entry : Result.Enums)
+	{
+		Sha.UpdateWithString(*Entry.Name, Entry.Name.Len());
+		for (const FString& Enumerator : Entry.Enumerators)
+		{
+			Sha.UpdateWithString(*Enumerator, Enumerator.Len());
+		}
+	}
+	return Sha.Finalize().ToString();
+}
+
 bool Walk(const FOptions& Options, FResult& OutResult, FString& OutError)
 {
 	TArray<UClass*> BaseClasses;
@@ -222,7 +278,8 @@ bool Walk(const FOptions& Options, FResult& OutResult, FString& OutError)
 			Entry.Properties.Add(MoveTemp(Member));
 		}
 
-		for (TFieldIterator<UFunction> FunctionIt(Class, EFieldIterationFlags::None); FunctionIt; ++FunctionIt)
+		for (TFieldIterator<UFunction> FunctionIt(Class, EFieldIterationFlags::None);
+			Options.bIncludeFunctions && FunctionIt; ++FunctionIt)
 		{
 			FFunctionInfo Function = ClassifyFunction(*FunctionIt);
 			if (Options.bBlueprintAccessibleOnly && !Function.bBlueprintCallable)

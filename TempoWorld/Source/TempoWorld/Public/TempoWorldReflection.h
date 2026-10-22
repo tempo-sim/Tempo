@@ -185,6 +185,9 @@ namespace TempoWorldReflection
 	// bCallable == false and a reason.
 	TEMPOWORLD_API FFunctionInfo ClassifyFunction(const UFunction* Function);
 
+	// The canonical name of a kind, as the schema and DescribeClasses both report it.
+	TEMPOWORLD_API const TCHAR* GetKindName(EValueKind Kind);
+
 	// Peel the first segment off a nested property address, leaving the remainder in place:
 	// "Inner.Deeper" -> "Inner", "[2].Foo" -> "2", "[key].Bar" -> "key". A '.' inside brackets is
 	// part of the key, which is what lets a map key contain one.

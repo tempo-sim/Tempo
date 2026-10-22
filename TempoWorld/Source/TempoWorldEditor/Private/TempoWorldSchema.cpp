@@ -7,7 +7,6 @@
 
 #include "Misc/EngineVersion.h"
 #include "Misc/FileHelper.h"
-#include "Misc/SecureHash.h"
 #include "Serialization/JsonWriter.h"
 
 namespace TempoWorldSchema
@@ -17,42 +16,7 @@ using namespace TempoWorldSchemaWalk;
 
 namespace
 {
-	// Bumped when the shape of the document changes, so a generator reading an older file says so
-	// rather than quietly producing half a client.
-	const TCHAR* SchemaVersion = TEXT("1");
-
 	using FSchemaJsonWriter = TJsonWriter<TCHAR, TPrettyJsonPrintPolicy<TCHAR>>;
-
-	const TCHAR* KindName(EValueKind Kind)
-	{
-		switch (Kind)
-		{
-		case EValueKind::Bool:       return TEXT("bool");
-		case EValueKind::Int:        return TEXT("int");
-		case EValueKind::Int64:      return TEXT("int64");
-		case EValueKind::Float:      return TEXT("float");
-		case EValueKind::Double:     return TEXT("double");
-		case EValueKind::String:     return TEXT("string");
-		case EValueKind::Enum:       return TEXT("enum");
-		case EValueKind::Vector:     return TEXT("vector");
-		case EValueKind::Vector2D:   return TEXT("vector2d");
-		case EValueKind::IntVector:  return TEXT("intvector");
-		case EValueKind::IntPoint:   return TEXT("intpoint");
-		case EValueKind::Rotator:    return TEXT("rotator");
-		case EValueKind::Quat:       return TEXT("quat");
-		case EValueKind::Transform:  return TEXT("transform");
-		case EValueKind::Color:      return TEXT("color");
-		case EValueKind::Class:      return TEXT("class");
-		case EValueKind::Asset:      return TEXT("asset");
-		case EValueKind::Actor:      return TEXT("actor");
-		case EValueKind::Component:  return TEXT("component");
-		case EValueKind::Struct:     return TEXT("struct");
-		case EValueKind::Array:      return TEXT("array");
-		case EValueKind::Set:        return TEXT("set");
-		case EValueKind::Map:        return TEXT("map");
-		default:                     return TEXT("unsupported");
-		}
-	}
 
 	const TCHAR* ParameterKindName(EParameterKind Kind)
 	{
@@ -66,7 +30,7 @@ namespace
 
 	void WriteTypeFields(const TSharedRef<FSchemaJsonWriter>& Writer, const FTypeInfo& Type)
 	{
-		Writer->WriteValue(TEXT("kind"), KindName(Type.Kind));
+		Writer->WriteValue(TEXT("kind"), GetKindName(Type.Kind));
 		Writer->WriteValue(TEXT("type"), Type.TypeString);
 		if (!Type.UnsupportedReason.IsEmpty())
 		{
@@ -125,52 +89,6 @@ namespace
 		Writer->WriteObjectEnd();
 	}
 
-	// A canonical rendering of one member, hashed to identify the schema's content. Deliberately
-	// covers only what a client could break against: a name, a type, and whether it can be written.
-	// Documentation is not in it, so adding a tooltip is correctly not a drift event.
-	void HashMember(FSHA1& Sha, const FString& Owner, const FMember& Member)
-	{
-		Sha.UpdateWithString(*Owner, Owner.Len());
-		Sha.UpdateWithString(*Member.Name, Member.Name.Len());
-		Sha.UpdateWithString(*Member.Type.TypeString, Member.Type.TypeString.Len());
-		const FString Flags = FString::Printf(TEXT("%d%d"),
-			Member.Type.bBlueprintVisible ? 1 : 0, Member.Type.IsWritable() ? 1 : 0);
-		Sha.UpdateWithString(*Flags, Flags.Len());
-	}
-
-	FString HashResult(const FResult& Result)
-	{
-		FSHA1 Sha;
-		for (const FClassEntry& Entry : Result.Classes)
-		{
-			Sha.UpdateWithString(*Entry.ClassPath, Entry.ClassPath.Len());
-			Sha.UpdateWithString(*Entry.SuperPath, Entry.SuperPath.Len());
-			for (const FMember& Member : Entry.Properties)
-			{
-				HashMember(Sha, Entry.ClassPath, Member);
-			}
-			for (const FFunctionInfo& Function : Entry.Functions)
-			{
-				Sha.UpdateWithString(*Function.Signature, Function.Signature.Len());
-			}
-		}
-		for (const FStructEntry& Entry : Result.Structs)
-		{
-			for (const FMember& Member : Entry.Members)
-			{
-				HashMember(Sha, Entry.Name, Member);
-			}
-		}
-		for (const FEnumEntry& Entry : Result.Enums)
-		{
-			Sha.UpdateWithString(*Entry.Name, Entry.Name.Len());
-			for (const FString& Enumerator : Entry.Enumerators)
-			{
-				Sha.UpdateWithString(*Enumerator, Enumerator.Len());
-			}
-		}
-		return Sha.Finalize().ToString();
-	}
 }
 
 FString FStats::ToString() const
@@ -216,7 +134,7 @@ bool Write(const FOptions& Options, FStats& OutStats, FString& OutError)
 	OutStats.Enums = Result.Enums.Num();
 	OutStats.BlueprintLoadSeconds = Result.Stats.BlueprintLoadSeconds;
 	OutStats.WalkSeconds = Result.Stats.WalkSeconds;
-	OutStats.ContentHash = HashResult(Result);
+	OutStats.ContentHash = TempoWorldSchemaWalk::HashResult(Result);
 
 	const double WriteStart = FPlatformTime::Seconds();
 
@@ -227,7 +145,7 @@ bool Write(const FOptions& Options, FStats& OutStats, FString& OutError)
 	Writer->WriteObjectStart();
 
 	Writer->WriteObjectStart(TEXT("header"));
-	Writer->WriteValue(TEXT("schema_version"), SchemaVersion);
+	Writer->WriteValue(TEXT("schema_version"), TempoWorldSchemaWalk::GetSchemaVersion());
 	Writer->WriteValue(TEXT("engine_version"), FEngineVersion::Current().ToString(EVersionComponent::Minor));
 	Writer->WriteValue(TEXT("content_hash"), OutStats.ContentHash);
 	Writer->WriteValue(TEXT("blueprint_accessible_only"), Options.bBlueprintAccessibleOnly);

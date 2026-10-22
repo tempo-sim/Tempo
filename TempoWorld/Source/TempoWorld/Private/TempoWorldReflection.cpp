@@ -99,6 +99,37 @@ namespace
 // FLinearColor have reported "vector", "rotator" and "color" since the first version of this
 // API, while the rest report their struct name. That asymmetry is published behavior, so it is
 // reproduced here rather than tidied.
+const TCHAR* GetKindName(EValueKind Kind)
+{
+	switch (Kind)
+	{
+	case EValueKind::Bool:       return TEXT("bool");
+	case EValueKind::Int:        return TEXT("int");
+	case EValueKind::Int64:      return TEXT("int64");
+	case EValueKind::Float:      return TEXT("float");
+	case EValueKind::Double:     return TEXT("double");
+	case EValueKind::String:     return TEXT("string");
+	case EValueKind::Enum:       return TEXT("enum");
+	case EValueKind::Vector:     return TEXT("vector");
+	case EValueKind::Vector2D:   return TEXT("vector2d");
+	case EValueKind::IntVector:  return TEXT("intvector");
+	case EValueKind::IntPoint:   return TEXT("intpoint");
+	case EValueKind::Rotator:    return TEXT("rotator");
+	case EValueKind::Quat:       return TEXT("quat");
+	case EValueKind::Transform:  return TEXT("transform");
+	case EValueKind::Color:      return TEXT("color");
+	case EValueKind::Class:      return TEXT("class");
+	case EValueKind::Asset:      return TEXT("asset");
+	case EValueKind::Actor:      return TEXT("actor");
+	case EValueKind::Component:  return TEXT("component");
+	case EValueKind::Struct:     return TEXT("struct");
+	case EValueKind::Array:      return TEXT("array");
+	case EValueKind::Set:        return TEXT("set");
+	case EValueKind::Map:        return TEXT("map");
+	default:                     return TEXT("unsupported");
+	}
+}
+
 FString SplitPropertyAddress(FString& PropertyName)
 {
 	// If a ']' appears before any '[', we are inside a bracket scope (e.g. parsing the contents

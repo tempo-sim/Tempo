@@ -177,15 +177,13 @@ message SchemaHeader {
   string content_hash = 3;      // §10.1
 }
 
-message SchemaChunk {
-  oneof chunk {
-    SchemaHeader header = 1;    // first chunk on the stream
-    ClassDescriptor class_descriptor = 2;
-    StructDescriptor struct_descriptor = 3;
-    EnumDescriptor enum_descriptor = 4;
-  }
+message DescribeClassesResponse {
+  SchemaHeader header = 1;
+  repeated ClassDescriptor classes = 2;
+  repeated StructDescriptor structs = 3;
+  repeated EnumDescriptor enums = 4;
 }
-rpc DescribeClasses(DescribeClassesRequest) returns (stream SchemaChunk);
+rpc DescribeClasses(DescribeClassesRequest) returns (DescribeClassesResponse);
 ```
 
 `ClassFunctionDescriptor` is a **new** message, not a reuse of `FunctionDescriptor`: that one carries
@@ -196,8 +194,13 @@ Two choices worth noting:
 
 - **Declared-only members.** Inheritance is reconstructed from `super_class`. Otherwise `AActor`'s
   members repeat into every one of ~2,000 actor classes, multiplying payload and stubs alike.
-- **Streaming.** A full engine walk is tens of megabytes. Streaming avoids leaning on the client's
-  1 GB `max_receive_message_length` (`_tempo_context.py`) and lets consumers process incrementally.
+- **Unary, not streaming** (revised during implementation). Revision 2 specified a stream, on the
+  grounds that a full walk is tens of megabytes and a generator would want to consume it
+  incrementally. But §5 made an editor commandlet the generator's source, so nothing streams it any
+  more: the RPC's callers are the verification test and the dynamic path, both of which narrow the
+  walk with `base_classes`. 21.5 MB also sits well inside the clients' existing 1 GB
+  `max_receive_message_length` (`_tempo_context.py`). A unary call is simpler, and the streaming
+  handlers in this codebase are shaped for subscriptions rather than finite batches.
 
 Note that §5 makes an **editor commandlet** the source of truth for generation. `DescribeClasses`
 stays an RPC regardless: the §5.4 verification test must ask a running sim "do you have this class

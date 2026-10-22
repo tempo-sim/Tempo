@@ -34,6 +34,10 @@ namespace TempoWorldSchemaWalk
 		// Report only what Blueprint can reach, which is what the typed API exposes. The
 		// string-keyed RPCs stay unfiltered regardless; this is about the generated surface.
 		bool bBlueprintAccessibleOnly = true;
+
+		// Classify functions as well as properties. A caller that only wants the property surface
+		// can skip roughly half the work.
+		bool bIncludeFunctions = true;
 	};
 
 	/** A named property, paired with what the classifier made of it. */
@@ -100,7 +104,19 @@ namespace TempoWorldSchemaWalk
 		FStats Stats;
 	};
 
+	// The layout version of the schema these types describe. Bumped when the shape changes, so a
+	// generator reading an older document says so rather than quietly producing half a client.
+	// Reported by both the schema file and DescribeClasses.
+	TEMPOWORLD_API FString GetSchemaVersion();
+
 	// Walks the reflected classes. Returns false and fills OutError only when the options name a
 	// base class that does not exist; an empty world is a valid, empty result.
 	TEMPOWORLD_API bool Walk(const FOptions& Options, FResult& OutResult, FString& OutError);
+
+	// A content hash identifying what a client could break against: names, types, writability and
+	// signatures. Deliberately excludes documentation, so adding a tooltip is not a drift event.
+	//
+	// Shared so that the hash in a generated schema file and the hash a running sim reports are the
+	// same number, which is what lets a client refuse stubs built against a different build.
+	TEMPOWORLD_API FString HashResult(const FResult& Result);
 }

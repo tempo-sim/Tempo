@@ -966,6 +966,146 @@ message SetPropertiesResponse {
   repeated SetPropertyResult failures = 1;
 }
 
+// Class-level reflection: what a class declares, whether or not any instance of it exists.
+//
+// Every other introspection RPC here is instance-keyed -- you must have spawned an actor to ask
+// what it has. The generated client stubs are produced from a schema written by an editor
+// commandlet, not from this RPC; this is what lets a caller interrogate a *running* sim, which is
+// how the test that checks every generated class still resolves against the packaged build works,
+// and how a client without stubs discovers what is there.
+//
+// Unary rather than streaming: a full engine walk is tens of megabytes, which the clients' message
+// limit already accommodates, and `base_classes` narrows it when that is too much.
+message DescribeClassesRequest {
+  // Restrict the walk to subclasses of these, by class name or class path. Empty walks every class.
+  repeated string base_classes = 1;
+  // Load Blueprint generated classes from the asset registry first. Without this, a Blueprint that
+  // nothing has touched is invisible, because only loaded classes can be enumerated. This is the
+  // expensive part of a walk.
+  bool include_blueprint_classes = 2;
+  // Report only what Blueprint can reach, which is what the typed client exposes.
+  bool blueprint_accessible_only = 3;
+  // Report functions as well as properties.
+  bool include_functions = 4;
+}
+
+// One type, as the API represents it. Containers nest through `element` and `key`, so a type reads
+// to arbitrary depth.
+message TypeDescriptor {
+  // How the API represents this type: "bool", "vector", "enum", "array", "struct", "unsupported", ...
+  string kind = 1;
+  // The type string, in the same vocabulary PropertyDescriptor.property_type uses.
+  string property_type = 2;
+  // Why this type has no representation. Empty when it has one.
+  string unsupported_reason = 3;
+  // Set when `kind` is "enum"; names an entry in DescribeClassesResponse.enums.
+  string enum_name = 4;
+  // Set when `kind` is "struct"; names an entry in DescribeClassesResponse.structs.
+  string struct_name = 5;
+  // Set for the reference kinds; the full path of the class referred to.
+  string class_path = 6;
+  // Element type for "array" and "set", value type for "map".
+  TypeDescriptor element = 7;
+  // Key type for "map".
+  TypeDescriptor key = 8;
+}
+
+message ClassPropertyDescriptor {
+  string name = 1;
+  TypeDescriptor type = 2;
+  // Blueprint-visible.
+  bool readable = 3;
+  // Blueprint-visible, not read-only, and expressible as one value.
+  bool writable = 4;
+  // False when one Value cannot carry the whole property: a map, an arbitrary struct, or a
+  // container whose element has no repeated variant. Those are still reachable a member or an
+  // element at a time, by nested address.
+  bool value_expressible = 5;
+  // Accessor UFUNCTION names, when the property declares them. Writing such a property through
+  // SetProperty writes its memory directly and skips the accessor. These come from metadata, which
+  // a cooked build does not carry, so they are empty unless the server is an editor.
+  string blueprint_getter = 6;
+  string blueprint_setter = 7;
+  // Documentation, also metadata, also absent from a cooked build.
+  string category = 8;
+  string tooltip = 9;
+}
+
+message ClassParameterDescriptor {
+  string name = 1;
+  TypeDescriptor type = 2;
+  ParameterKind kind = 3;
+}
+
+message ClassFunctionDescriptor {
+  string name = 1;
+  // The signature as the declaration reads, with out parameters prefixed "out ".
+  string signature = 2;
+  // FUNC_BlueprintCallable or FUNC_BlueprintPure.
+  bool blueprint_callable = 3;
+  // Whether CallFunction will accept an invocation of it.
+  bool callable = 4;
+  // Why not, when `callable` is false.
+  string unsupported_reason = 5;
+  // Whether every input can be supplied as one Value, so a caller can pass plain positional
+  // arguments. False when an input is an arbitrary struct, which the server will still take a
+  // member at a time by nested address.
+  bool positional = 6;
+  // In declaration order, because that order is the calling convention.
+  repeated ClassParameterDescriptor parameters = 7;
+}
+
+message ClassDescriptor {
+  // The class name, Blueprint "_C" and all.
+  string name = 1;
+  // The full class path, which is the unambiguous identity: two Blueprints in different folders can
+  // share a name.
+  string class_path = 2;
+  // The superclass's path, or empty for a root. Inheritance is reconstructed from this, because
+  // each class reports only what it declares.
+  string super_path = 3;
+  // The package the class lives in, e.g. "/Script/Engine" or "/Game/Vehicles/BP_Cat745".
+  string package = 4;
+  bool is_abstract = 5;
+  bool is_blueprint = 6;
+  // Declared on this class only, sorted by name.
+  repeated ClassPropertyDescriptor properties = 7;
+  repeated ClassFunctionDescriptor functions = 8;
+}
+
+message StructDescriptor {
+  string name = 1;
+  repeated ClassPropertyDescriptor members = 2;
+}
+
+message EnumDescriptor {
+  string name = 1;
+  // The authored names, which are the spellings a Value's enum_value accepts. Unreal's synthetic
+  // _MAX entry is omitted, since it is not a value anyone can set.
+  repeated string enumerators = 2;
+}
+
+message SchemaHeader {
+  // The layout of these messages, so a client reading an older schema can say so.
+  string schema_version = 1;
+  // Engine version. Two engine versions produce different schemas.
+  string engine_version = 2;
+  // Identifies what a client could break against: names, types, writability and signatures, but
+  // not documentation. A client compares this against the schema its stubs were generated from.
+  string content_hash = 3;
+  bool blueprint_accessible_only = 4;
+  bool includes_blueprint_classes = 5;
+}
+
+message DescribeClassesResponse {
+  SchemaHeader header = 1;
+  // Sorted by class path.
+  repeated ClassDescriptor classes = 2;
+  // The structs and enums the reported members refer to, sorted by name.
+  repeated StructDescriptor structs = 3;
+  repeated EnumDescriptor enums = 4;
+}
+
 service WorldControlService {
   rpc SpawnActor(SpawnActorRequest) returns (SpawnActorResponse);
 
@@ -1030,6 +1170,8 @@ service WorldControlService {
   rpc GetActorProperties(GetActorPropertiesRequest) returns (GetPropertiesResponse);
 
   rpc GetComponentProperties(GetComponentPropertiesRequest) returns (GetPropertiesResponse);
+
+  rpc DescribeClasses(DescribeClassesRequest) returns (DescribeClassesResponse);
 
   rpc GetProperty(GetPropertyRequest) returns (Value);
 
