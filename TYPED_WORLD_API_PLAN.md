@@ -1,14 +1,15 @@
 # Typed World API — Design Scope
 
-Status: **proposal**. Scopes a generated, statically-checkable client API for TempoWorld's
-reflection surface, replacing string-keyed property access with attribute access on typed
-handles. Python first; the design keeps Rust and C++ reachable from the same inputs.
+Status: **proposal**, revision 2. Scopes a generated, statically-checkable client API for
+TempoWorld's reflection surface, replacing string-keyed property access with attribute access on
+typed handles. Python first; the design keeps Rust and C++ reachable from the same inputs.
 
-Verified against `main` at `12adc4f7` (post engine-mods retirement, post TempoROS externalization).
+Verified against `main` at `12adc4f7`. Revision 2 follows a review that measured revision 1
+against the drift-detection goal in §1 and found a hole that defeated it (§9.1).
 
 ---
 
-## 1. The problem
+## 1. The goal
 
 TempoWorld exposes Unreal's reflection system over gRPC. Every address in it is a string:
 
@@ -16,65 +17,96 @@ TempoWorld exposes Unreal's reflection system over gRPC. Every address in it is 
 tempo_world.set_float_property(actor="my_actor", property="MaxSpeed", value=1.0)
 ```
 
-The property name, its type, and the choice of RPC are all decided by the caller and only
-validated on the server, at the moment of the call. Rename `MaxSpeed` in C++ or in a Blueprint and
-nothing breaks until a client runs and gets `NOT_FOUND`. There is no completion, no type checking,
-and no way to find affected call sites except grep.
+The property name, its type, and the choice of RPC are all decided by the caller and only validated
+on the server, at the moment of the call. There is no completion, no type checking, and no way to
+find affected call sites except grep.
 
-The target:
+**The primary goal is drift detection, not convenience.** Stated as the test the design has to pass:
+
+> A new downstream release, with its regenerated stubs, makes scenarios that use removed or changed
+> API **fail under Pyright**.
+
+Completion and typo-catching fall out of that for free, but they are not the point, and designing
+for them alone produces a system that silently passes the cases that matter. Three consequences run
+through the whole design:
+
+1. **An escape hatch that the type checker can see is not an escape hatch — it is a hole.** A
+   catch-all `__getattr__` anywhere in the statically visible hierarchy makes every attribute on
+   every generated class legal (§9.1).
+2. **A type checker enforces nothing unless CI requires it.** The strictness policy for consuming
+   repos is part of the deliverable, not advice (§10.4).
+3. **Unsupported types must be absent from the stubs, never typed `Any`.** `Any` passes silently,
+   which is the failure mode this exists to prevent.
+
+The target surface, leading with the form that actually carries a guarantee:
 
 ```python
-actor = tempo_world.get_actor("my_actor")
-actor.MaxSpeed = 1.0
+for truck in tempo_world.get_actors(BP_Cat745_C):   # list[BP_Cat745_C]
+    truck.MaxSpeed = 1200.0
 ```
-
-…where `MaxSpeed` is a declared member of a generated type, so a type checker rejects a
-misspelling, an IDE completes it, and the write is checked against the property's real type and
-writability before it ever leaves the process.
 
 ---
 
 ## 2. What already exists
 
 Most of the wire protocol is in place. This is substantially a **client-side** layer over RPCs
-TempoWorld already serves, plus three server-side gaps (§3).
+TempoWorld already serves, plus the server-side gaps in §3.
 
 | Capability | RPC | Notes |
 |---|---|---|
 | Write any property, type carried in the value | `SetProperty(SetPropertyRequest) -> Empty` | `Value` oneof covers 38 variants |
-| Write a batch in one call | `SetProperties` | returns per-op failures by index |
-| Call any `UFUNCTION` | `CallFunction` | typed `Value` args, results by name |
-| Nested addressing | — | `MyStruct.Inner`, `MyArray[0]`, `MyMap[key]`, arbitrary depth (`SplitPropertyName` / `GetPropertyByName`) |
+| Write a batch in one call | `SetProperties` | per-op failures by index; **no generic-`Value` op** (§3d) |
+| Call any `UFUNCTION` | `CallFunction` | typed `Value` args; **results are strings** (§3e) |
+| Deferred spawn | `SpawnActor(deferred=true)` + `FinishSpawningActor` | already enough for §6.2's context manager |
+| Nested addressing | — | `MyStruct.Inner`, `MyArray[0]`, `MyMap[key]`, arbitrary depth |
 | Instance property listing | `GetActorProperties`, `GetComponentProperties` | values as **strings** |
-| Instance function listing | `GetActorFunctions`, `GetComponentFunctions` | `FunctionDescriptor` + `ParameterDescriptor` already model params, kinds, callability |
-| Class-name leniency | `GetSubClassWithName` (`TempoClassUtils.h`) | `BP_Foo` and `BP_Foo_C` both resolve |
+| Instance function listing | `GetActorFunctions`, `GetComponentFunctions` | `ParameterDescriptor` is already instance-free |
+| Class-name leniency | `GetSubClassWithName` (`TempoClassUtils.h`) | by **name** only, not path (§8.4) |
 | Type vocabulary | `GetPropertyTypeAndValue` | `bool`, `int`, `int64`, `float`, `double`, `string`, `vector`, `rotator`, `color`, `FMyStruct`, `array<T>`, `map<K,V>`, `set<T>`, `TSubclassOf<X>`, `unsupported` |
-
-So: `SetProperty` and `CallFunction` are already the generic write/invoke primitives the typed
-layer needs, and `ParameterDescriptor` is already an instance-free parameter model.
 
 ---
 
-## 3. Server-side gaps
+## 3. Server-side work
 
-Three additions to `TempoWorld/Source/TempoWorld/Public/WorldControl.proto` and its subsystem.
-RPC names must be unique within the module — `GetProperty`, `GetProperties` and `DescribeClasses`
-are all still free (verified against both of the module's protos).
+Nothing here needs an engine change, which is a hard constraint: Tempo builds against Unreal exactly
+as Epic ships it (AGENTS.md §5). `GetProperty`, `GetProperties` and `DescribeClasses` are all still
+free as RPC names in the module (names must be unique per module).
 
-Nothing here needs an engine change, which is now a hard constraint: Tempo builds against Unreal
-exactly as Epic ships it (AGENTS.md §5). The whole feature is plugin-side.
+### 3a. One classification function — the keystone
 
-### 3a. A typed getter (the biggest single gap)
+Today "which `Value` variants may be written to this `FProperty`" (`SetValueOnTarget`) and "what type
+string does it report" (`GetPropertyTypeAndValue`) are **separate, file-local** code paths in
+`TempoWorldControlServiceSubsystem.cpp`. This plan would add a third (the schema walk) and a fourth
+(the typed getter). Four independent opinions about the same `FProperty`, kept in agreement by tests.
 
-There is no way to read one property as a typed value. `GetActorProperties` returns *every*
-property of an object with each value stringified. `x = actor.MaxSpeed` needs:
+That is not good enough here. If the generator's view of what is writable diverges from the server's
+accept/reject behavior, the stubs promise a guarantee the server does not honor — and the whole
+feature rests on that guarantee.
+
+**Requirement: all four derive from one public, world-independent classifier**, in a new
+`TempoWorld/Public/TempoWorldReflection.h`, which maps an `FProperty` to a structured descriptor:
+
+- kind, and the `Value` variant(s) it accepts;
+- the referenced enum / struct / class;
+- read-only and Blueprint-visible flags;
+- accessor function names when the property has a `BlueprintGetter`/`BlueprintSetter` (§5.3);
+- or *unsupported, with a reason*.
+
+Plus the equivalent for function signatures and callability. Being world-independent makes it both
+unit-testable (§11) and usable from a commandlet (§5). Then the stubs and the server cannot diverge
+by construction, rather than by vigilance.
+
+### 3b. A typed getter
+
+`GetActorProperties` returns *every* property of an object with each value stringified, so there is
+no way to read one property as a typed value.
 
 ```proto
 message GetPropertyRequest {
   string actor = 1;
   string component = 2;
   string property = 3;         // same nested addressing as SetProperty
-  bool native_units = 4;       // see §7
+  bool native_units = 4;       // §7
 }
 rpc GetProperty(GetPropertyRequest) returns (Value);
 
@@ -89,55 +121,51 @@ message GetPropertiesByNameResponse { repeated NamedValue values = 1; }
 rpc GetProperties(GetPropertiesRequest) returns (GetPropertiesByNameResponse);
 ```
 
-Implementation mirrors the existing write path: `GetPropertyByName` already resolves the nested
-address; what's missing is a `GetValueFromTarget` that is the inverse of `SetValueOnTarget` —
-reading an `FProperty` into a `Value` oneof rather than into a string. The type dispatch in
-`GetPropertyTypeAndValue` is the template.
+`GetPropertyByName` already resolves the nested address; what's missing is a `GetValueFromTarget`
+that is the inverse of `SetValueOnTarget`, driven by the §3a classifier. The batch form is not
+optional: without it, reading five properties off one actor is five round trips.
 
-The batch form matters more than it looks: without it, reading five properties off one actor is
-five round trips (§6, §11 Risk 2).
+### 3c. Class-level reflection
 
-### 3b. Class-level reflection
-
-Everything today is instance-keyed — you must have spawned an actor to ask what it has. Stub
-generation needs to describe classes that may never be instantiated.
+Everything today is instance-keyed — you must have spawned an actor to ask what it has.
 
 ```proto
 message DescribeClassesRequest {
-  // Restrict the walk, e.g. ["Actor", "ActorComponent"]. Empty = every UClass.
-  repeated string base_classes = 1;
-  // Force-load Blueprint generated classes from the asset registry (see Risk 3).
-  bool include_blueprint_classes = 2;
-  bool blueprint_accessible_only = 3;   // honor CPF_BlueprintVisible etc.
+  repeated string base_classes = 1;     // restrict the walk; empty = every UClass
+  bool include_blueprint_classes = 2;   // force-load from the asset registry (Risk 3)
+  bool blueprint_accessible_only = 3;
   bool include_functions = 4;
 }
 
 message ClassDescriptor {
   string name = 1;              // real UClass name, "_C" and all
-  string super_class = 2;
-  string package = 3;           // "/Script/Engine" -> drives output module layout
-  bool is_abstract = 4;
-  bool is_blueprint = 5;
+  string class_path = 2;        // full object path -- the unambiguous identity (§8.4)
+  string super_class = 3;
+  string package = 4;           // "/Script/Engine" or "/Game/..." -> output layout (§8.3)
+  bool is_abstract = 5;
+  bool is_blueprint = 6;
   // Declared on THIS class only. Inherited members come from super_class.
-  repeated ClassPropertyDescriptor properties = 6;
-  repeated ClassFunctionDescriptor functions = 7;
-  repeated ComponentTemplateDescriptor components = 8;   // Phase 3
+  repeated ClassPropertyDescriptor properties = 7;
+  repeated ClassFunctionDescriptor functions = 8;
+  repeated ComponentTemplateDescriptor components = 9;   // Phase 3
 }
 
 message ClassPropertyDescriptor {
   string name = 1;
-  string property_type = 2;     // existing vocabulary
+  string property_type = 2;
   bool readable = 3;            // CPF_BlueprintVisible
   bool writable = 4;            // readable && !CPF_BlueprintReadOnly
-  // False when `Value` can't express the type and it is reachable only by nested address
-  // (arbitrary UStructs, maps, nested containers).
-  bool value_expressible = 5;
-  string enum_name = 6;         // -> EnumDescriptor
-  string struct_name = 7;       // -> StructDescriptor
-  string class_name = 8;        // object/class-typed: the pointee's class, so the generated
-                                // accessor can be typed instead of falling back to Object
-  string category = 9;
-  string tooltip = 10;          // becomes the generated docstring
+  bool value_expressible = 5;   // false => reachable only by nested address
+  string unsupported_reason = 6;
+  string enum_name = 7;
+  string struct_name = 8;
+  string class_name = 9;        // pointee's class, so the accessor can be typed
+  // Non-empty when the property has a BlueprintGetter/Setter: writing it through SetProperty
+  // bypasses the accessor, so the typed layer routes through CallFunction instead (§5.3).
+  string blueprint_getter = 10;
+  string blueprint_setter = 11;
+  string category = 12;         // editor-only metadata (§5.1)
+  string tooltip = 13;          // editor-only metadata (§5.1)
 }
 
 message StructDescriptor { string name = 1; repeated ClassPropertyDescriptor members = 2; }
@@ -145,8 +173,8 @@ message EnumDescriptor   { string name = 1; repeated string enumerators = 2; }
 
 message SchemaHeader {
   string schema_version = 1;    // this message layout
-  string engine_version = 2;    // 5.7 vs 5.8 produce different schemas
-  string content_hash = 3;      // see §9
+  string engine_version = 2;    // 5.7 and 5.8 produce different schemas
+  string content_hash = 3;      // §10.1
 }
 
 message SchemaChunk {
@@ -160,25 +188,26 @@ message SchemaChunk {
 rpc DescribeClasses(DescribeClassesRequest) returns (stream SchemaChunk);
 ```
 
-`ClassFunctionDescriptor` is a **new** message, not a reuse of the existing `FunctionDescriptor`:
-that one carries `actor` and `component` fields, which are meaningless for a class that was never
-instantiated. It reuses `ParameterDescriptor` and `ParameterKind` unchanged, which are already
-instance-free, and keeps `signature`, `callable` and `error`.
+`ClassFunctionDescriptor` is a **new** message, not a reuse of `FunctionDescriptor`: that one carries
+`actor` and `component`, meaningless for a class that was never instantiated. It reuses
+`ParameterDescriptor` and `ParameterKind` unchanged.
 
-Two other choices worth noting:
+Two choices worth noting:
 
-- **Declared-only members.** Each class lists only what it declares; inheritance is reconstructed
-  from `super_class`. Without this, `AActor`'s members are repeated into every one of ~2,000 actor
-  classes and both the wire payload and the generated artifact blow up by an order of magnitude.
+- **Declared-only members.** Inheritance is reconstructed from `super_class`. Otherwise `AActor`'s
+  members repeat into every one of ~2,000 actor classes, multiplying payload and stubs alike.
 - **Streaming.** A full engine walk is tens of megabytes. Streaming avoids leaning on the client's
-  1 GB `max_receive_message_length` (set in `_tempo_context.py`) and lets the generator write
-  incrementally.
+  1 GB `max_receive_message_length` (`_tempo_context.py`) and lets consumers process incrementally.
 
-### 3c. Blueprint-accessibility filtering
+Note that §5 makes an **editor commandlet** the source of truth for generation. `DescribeClasses`
+stays an RPC regardless: the §5.4 verification test must ask a running sim "do you have this class
+with these members", for classes that cannot all be instantiated, and the dynamic path (§9.1) needs
+runtime introspection. Both are backed by the same §3a classifier as the commandlet.
+
+### 3d. Blueprint-accessibility filtering
 
 `GetObjectProperties` currently walks every `FProperty` via `TFieldIterator` with **no** flag
-filtering — zero `CPF_Blueprint*` checks in the function today. The ask is "Blueprint-accessible
-types with appropriate visibility", which means a new predicate:
+filtering — zero `CPF_Blueprint*` checks in the function today.
 
 | Surface | Condition |
 |---|---|
@@ -186,357 +215,487 @@ types with appropriate visibility", which means a new predicate:
 | writable property | `CPF_BlueprintVisible && !CPF_BlueprintReadOnly` |
 | callable function | `FUNC_BlueprintCallable \|\| FUNC_BlueprintPure`, and not `FUNC_Delegate` |
 
-**The filter applies to the new `DescribeClasses` RPC only.** The existing string-keyed RPCs stay
-unfiltered — they are the escape hatch for everything the typed layer deliberately hides, and
-narrowing them would be a breaking change. `GetPropertyTypeAndValue`'s existing exclusions
-(`ArrayDim != 1` C-arrays, unresolved types → `"unsupported"`) carry over unchanged.
+These flags are part of the serialized property and **do survive cooking**, unlike metadata (§5.1).
+The filter applies to the schema walk only; the existing string-keyed RPCs stay unfiltered, as the
+escape hatch for everything the typed layer hides.
+
+### 3e. Closing the unit and batching gaps
+
+Three concrete proto gaps that revision 1 missed, all verified against the current file:
+
+- **`CallFunctionRequest` has no `native_units`.** Rotator and transform *arguments* to generated
+  methods would still be converted. Add it.
+- **`SetPropertyOp` has no generic-`Value` variant** — only the 38 typed `Set*PropertyRequest`
+  ones. So `batch()` (§6.3) cannot carry native-unit writes at all. Add
+  `SetPropertyRequest generic_op`.
+- **`FunctionResult.value` is a `string`.** `d = car.GetDistanceTo(other) -> float` (§6.4) therefore
+  needs `CallFunction` to return typed `Value` results honoring `native_units`. Phase 2 is **not**
+  "reuse `ParameterDescriptor` as-is with no server work".
 
 ---
 
 ## 4. Architecture
 
 ```
-packaged sim (headless)
-    │  DescribeClasses (stream)
-    ▼
-tempo_schema.json          ← language-neutral, versioned, hashed
+editor commandlet  (source of truth -- has metadata, runs on every PR)
     │
-    ├── gen_py_classes.py   → <project>-classes wheel   (.py identity + .pyi types)
+    ▼
+tempo_schema.json          ← language-neutral, versioned, hashed, deterministic
+    │
+    ├── gen_py_classes.py   → <project>-classes wheel
+    │                          .py        class identity
+    │                          .pyi       the type surface
+    │                          .meta.json per-module runtime types (§8.2)
     ├── gen_rust_classes.py → (later)
     └── gen_cpp_classes.py  → (later)
+
+packaged sim ──► DescribeClasses ──► verification test (§5.4) + dynamic path (§9.1)
 
 tempo_sim (hand-written runtime)
     Actor / Component / StructProxy  → GetProperty / SetProperty / CallFunction
 ```
 
-The hinge is `tempo_schema.json`. Generated output in any language is a pure function of it, which
-is what keeps Rust and C++ cheap later and mirrors the existing
-`gen_api.py` / `gen_rust_api.py` / `gen_cpp_api.py` split.
-
-**All behavior lives in the hand-written runtime; generated code carries only names and types.**
-There is no generated method body anywhere. That is what makes a 30,000-member artifact tractable.
+Both the commandlet and the RPC are backed by the one classifier in §3a, so they cannot disagree.
+Generated code carries only names, types and a metadata table — **no generated method bodies
+anywhere**, which is what makes a 30,000-member artifact tractable.
 
 ---
 
-## 5. Where it runs
+## 5. Where generation runs
 
-Harvest against the **packaged** sim over gRPC, not an editor commandlet:
+Revision 1 harvested from the packaged sim over gRPC. That was wrong on two counts, and the fix
+reverses it.
 
-- It is ground truth for what the shipped binary actually contains — cooked classes, the real
-  enabled-plugin set — rather than what the editor could load.
-- It needs no editor build, so a downstream project gets it from `Scripts/Package.sh` for free.
-- The lifecycle machinery already exists in `Tests/Python/conftest.py`: launch headless with
-  `-nullrhi -unattended -nopause -nosound` plus an endpoint flag, poll until the server answers,
-  tear down. Factor that into a shared helper so `conftest.py` and the harvester share one
-  implementation.
+### 5.1 A cooked build has no metadata
 
-New: `TempoCore/Content/Python/gen_stubs.py`, hooked into `Scripts/Package.sh` between the
-`RunUAT BuildCookRun` invocation (`Package.sh:104`) and `PACKAGE_PYTHON_PACKAGE`
-(`Package.sh:213`) — today the wheels are built last, and the harvest has to land before them.
+`WITH_METADATA` is defined as `WITH_EDITORONLY_DATA`
+(`Engine/Source/Runtime/Core/Public/Misc/CoreMiscDefines.h:32`), and `FField::GetMetaData`,
+`FindMetaData` and `HasMetaData` all sit inside `#if WITH_METADATA` in
+`CoreUObject/Public/UObject/Field.h`. So in a packaged build:
 
-Order inside `Package.sh`: `BuildCookRun` → stage → launch packaged sim → `DescribeClasses` →
-`tempo_schema.json` → generate the classes package into `Saved/` → build all wheels into
-`Packaged/API/Python/`.
+- `tooltip` and `category` are always empty — the "becomes the generated docstring" promise cannot
+  be kept;
+- `BlueprintGetter` / `BlueprintSetter` are invisible, so the harvester cannot even *detect* the
+  case in §5.3.
 
-### Endpoint
+Property *flags* survive cooking, so the core type information was never at risk — but the design
+depended on metadata it could not see.
 
-Prefer a **Unix domain socket** for the harvest where the platform supports it
-(`TempoServerEndpoint::IsUnixSocketTransportSupported()` — true on Linux/macOS, false on Windows,
-where the vendored gRPC 1.62 has no AF_UNIX support). Launch with `-ServerSocket=<bare name>`,
-which resolves into the short per-user directory, and fall back to `-ServerPort=` on Windows.
+### 5.2 PR-time checking needs a schema without a package
 
-This is not incidental: a package-time harvest that grabs TCP 10001 will collide with a developer's
-running editor or with a parallel CI job, and the socket transport refuses to displace a live
-server rather than silently taking the name. Use a harvest-specific socket name, and honor the
-established `TEMPO_SERVER_SOCKET` / `TEMPO_SERVER_PORT` env contract that the test harness and all
-three clients already read.
+The drift goal (§1) wants breakage caught when the breaking change is proposed, not at release. A
+packaged harvest can only run after `BuildCookRun`, so the earliest signal is release time. An
+editor build is something CI already produces and runs headless (`Scripts/Test.sh`), so a commandlet
+can run on every PR.
 
-### Distribution
+### 5.3 The resolution
 
-The harvest is build-specific — engine version (5.7 and 5.8 are both supported and produce
-different schemas), enabled plugins, and project Blueprints all change it — so it cannot live in
-the canonical, PyPI-publishable `tempo-sim`. Ship it as its own generated distribution, named off
-the project the same way the Rust crate and project Python package already are:
+1. **Generate in the editor.** A commandlet in a new `TempoWorldEditor` module writes
+   `tempo_schema.json`, with metadata, explicitly excluding editor-only modules and `CPF_EditorOnly`
+   properties. Blueprint discovery is also *easier* here: the asset registry is fully populated and
+   `GetDerivedClassNames` works, which softens Risk 3.
+2. **Filter against the cook.** At release, intersect the schema with what was actually cooked, from
+   the cook's asset registry output (`Packaged/AssetRegistry.bin`, already copied by
+   `Package.sh`). No sim launch needed.
+3. **Verify against the packaged build.** An integration test launches the packaged sim — as
+   `test_packaged.yml` already does — and asserts every generated class, property and function
+   resolves at runtime with the declared type. This keeps the packaged harvest's real advantage
+   (ground truth for what ships) without making the package the *source* of truth.
+
+On `BlueprintGetter`/`BlueprintSetter`: seeing them in the editor does not let a packaged server
+honor them — `SetProperty` writes property memory directly either way, skipping a setter that might,
+say, mark render state dirty. Detection only enables the fix, which is for the typed layer to route
+those members through `CallFunction` on the accessor instead of through `SetProperty`. That is why
+`ClassPropertyDescriptor` carries the accessor names (§3c).
+
+### 5.4 Endpoint, for the verification test and the dynamic path
+
+Prefer a **Unix domain socket** where supported (`TempoServerEndpoint::IsUnixSocketTransportSupported()`
+— true on Linux/macOS, false on Windows, where the vendored gRPC 1.62 has no AF_UNIX). Launch with
+`-ServerSocket=<bare name>`, falling back to `-ServerPort=`. A verification run that grabs TCP 10001
+would collide with a developer's editor or a parallel CI job; the socket transport also refuses to
+displace a live server. Honor the established `TEMPO_SERVER_SOCKET` / `TEMPO_SERVER_PORT` contract.
+
+### 5.5 Distribution
+
+The schema is build-specific — engine version (5.7 and 5.8 both supported, and they differ), enabled
+plugins, and project Blueprints all change it — so it cannot live in the canonical,
+PyPI-publishable `tempo-sim`.
 
 | Distribution | Contents | Built |
 |---|---|---|
-| `tempo-sim` | runtime proxies, `get_actor`, schema loader, base `Actor`/`Component`/`StructProxy` | hand-written, as today |
-| `<project>-classes` (e.g. `tempo-sample-classes`) | every harvested class in the build: engine, plugin, project | per package |
+| `tempo-sim` | runtime proxies, `get_actors`, `spawn_actor`, schema/metadata loader, base `Actor`/`Component`/`StructProxy` | hand-written, as today |
+| `<project>-classes` (e.g. `tempo-sample-classes`) | every class in the build: engine, plugin, project | per release |
 
-`TestPythonAPI.sh` already installs *all* wheels from `Packaged/API/Python/`, so the classes
-package is picked up by the test jobs with no script change. The generated package registers its
-classes with `tempo_sim` on import (entry point or explicit registry call) so `get_actor` can
-return the most-derived type it knows about.
+`TestPythonAPI.sh` already installs *all* wheels from `Packaged/API/Python/`, so the classes package
+is picked up by the test jobs with no script change. The generated package registers its classes
+with `tempo_sim` on import so narrowing and spawning can resolve a `UClass` name to a Python class.
 
 ---
 
 ## 6. The Python surface
 
-### Acquiring a handle
+### 6.1 Discovery by type, not by name
+
+An actor *name* is a runtime string: no type checker can infer a class from `get_actor("my_actor")`,
+and a hard-coded name is itself drift-prone (editor labels differ from packaged names —
+`docs/concepts/naming.md`). So the API leads with type-based discovery, where there is no unchecked
+string at all:
 
 ```python
-from tempo_sim import tempo_world
+from tempo_sample_classes.Game.Vehicles import BP_Cat745_C
 
-# Dynamic: works with no stubs installed, returns the base proxy.
-actor = tempo_world.get_actor("my_actor")
-actor.MaxSpeed = 1200.0
-
-# Statically typed: the class is the second argument, so the checker knows the type.
-from tempo_sample_classes.TempoSample import BP_Vehicle_C
-car = tempo_world.get_actor("my_actor", BP_Vehicle_C)   # -> BP_Vehicle_C
-car.MaxSpeed = 1200.0     # checked: exists, float, writable
-car.MxSped = 1200.0       # pyright/mypy error
+for truck in tempo_world.get_actors(BP_Cat745_C):    # -> list[BP_Cat745_C]
+    truck.MaxSpeed = 1200.0
 ```
 
-Note the asymmetry: an actor *name* is a runtime string, so no type checker can infer the class
-from `get_actor("my_actor")` alone. The one-argument form is the convenience path and is typed
-`Actor`; the two-argument form is the one that actually buys static checking. `spawn_actor` can
-return a narrowed type for free, since it already takes the class.
+`get_actors(Cls)` returns instances of the class **and its subclasses**. No new RPC is strictly
+required: the schema carries the full inheritance graph, so the client can compute the subclass set
+and filter `GetAllActors` locally. A server-side class filter is a later optimization.
 
-### Properties
+Name lookup remains available and narrowing is checked at runtime:
 
 ```python
-car.bEnabled = True
-print(car.Mass)                              # one GetProperty round trip
-car.PostProcessSettings.BloomIntensity = 2.0 # nested dot-path, zero new server work
-car.WaypointTags = ["alpha", "bravo"]        # whole-array replace via SetProperty
+truck = tempo_world.get_actor("Cat745_2", BP_Cat745_C)   # -> BP_Cat745_C; raises if it isn't one
 ```
 
-Nested structs need no new RPC: `StructProxy` accumulates the path and hands
-`"PostProcessSettings.BloomIntensity"` to the existing nested addressing. Same for
-`car.MyArray[0]` and `car.MyMap["key"]`.
+### 6.2 Spawning, including deferred initialization
 
-### Components
+Typed spawning is nearly free — `SpawnActor` already takes a class — and it is a primary use case,
+so it belongs in Phase 1, not Phase 4:
 
 ```python
-cam = car.component("TempoCamera")                        # -> Component
-cam = car.component("TempoCamera", TempoCameraComponent)  # -> typed
-car.Mesh.RelativeLocation = Vector(0, 0, 150)             # Phase 3: generated from SCS
+truck = tempo_world.spawn_actor(BP_Cat745_C, transform=t)     # -> BP_Cat745_C
+
+with tempo_world.spawn_actor_deferred(BP_Cat745_C, transform=t) as truck:
+    truck.InitialTerrainHeight = 1.0    # before construction script / BeginPlay
+# FinishSpawningActor on exit; the block's writes go out as one batch
 ```
 
-Blueprint classes carry their component templates in the SimpleConstructionScript, and native
-classes carry default subobjects — both are harvestable, so component accessors can be generated
-and typed rather than string-keyed. Phase 3.
+Without the deferred form, properties read by a construction script or `BeginPlay` are unreachable
+from the typed API. The wire support already exists (`SpawnActorRequest.deferred`).
 
-### Functions
+### 6.3 Properties and batching
 
 ```python
-car.SetActorTickEnabled(True)
-d = car.GetDistanceTo(other)     # -> float
+truck.bEnabled = True
+print(truck.Mass)                              # one GetProperty round trip
+truck.PostProcessSettings.BloomIntensity = 2.0 # nested dot-path, no new server work
+truck.WaypointTags = ["alpha", "bravo"]        # whole-array replace
+
+with tempo_world.batch():          # buffered, flushed as one SetProperties (needs §3e)
+    truck.MaxSpeed = 1200.0
+    truck.Mass = 1500.0
+
+with truck.snapshot():             # one GetProperties; reads served from the snapshot
+    print(truck.MaxSpeed, truck.Mass)
 ```
 
-Generated signature only; the body is the existing `CallFunction`. `ParameterDescriptor` and
-`ParameterKind` already model params, direction and callability, so the generator mostly reshapes
-data it is handed.
+Naive attribute access is one RPC per attribute — a real regression against today's explicit
+batching, so these two context managers are part of the deliverable, not a nicety.
 
-### Batching
-
-Naive attribute access is one RPC per attribute. That is a real regression against today's
-explicit `set_properties` batching, so the typed layer has to offer an equivalent:
+### 6.4 Functions and components
 
 ```python
-with tempo_world.batch():          # writes buffered, flushed as one SetProperties
-    car.MaxSpeed = 1200.0
-    car.Mass = 1500.0
-
-with car.snapshot():               # one GetProperties; reads served from the snapshot
-    print(car.MaxSpeed, car.Mass)
+truck.SetActorTickEnabled(True)
+d = truck.GetDistanceTo(other)                            # needs typed results, §3e
+cam = truck.component("TempoCamera", TempoCameraComponent)
+truck.Mesh.RelativeLocation = Vector(0, 0, 150)           # Phase 3, generated from SCS
 ```
 
 ---
 
 ## 7. Units
 
-The typed API is **Unreal-native throughout**: centimeters, degrees, left-handed. That is a
-deliberate break from the rest of the Tempo API (meters, radians, right-handed) and it is the right
-call here — these are raw `UPROPERTY` values with no reliable semantic tagging, so converting them
-is guesswork.
+The typed API is **Unreal-native throughout**: centimeters, degrees, left-handed. These are raw
+`UPROPERTY` values with no reliable semantic tagging, so converting them is guesswork.
 
-It is also a conflict with the existing `Value` message, which **does** convert `rotator_value`,
-`quat_value` and `transform_value` from radians/right-handed. Reusing `Value` unchanged would
-double-convert. Hence `bool native_units` on `GetPropertyRequest` / `GetPropertiesRequest`, and a
-matching field on `SetPropertyRequest`:
+`Value` already converts `rotator_value`, `quat_value` and `transform_value` from radians/
+right-handed, so reusing it unchanged would double-convert. Hence `native_units` on
+`GetPropertyRequest`, `GetPropertiesRequest`, `SetPropertyRequest` **and `CallFunctionRequest`**
+(§3e):
 
 - `native_units = false` (default): today's behavior, unchanged for every existing caller.
 - `native_units = true`: no conversion at all. The typed layer always sets it.
 
 This also regularizes the documented wart where scalar and vector setters don't convert but
 transform-shaped ones do (`docs/concepts/conventions.md#the-exception-set_property`). Inside the
-typed API there is no exception — nothing converts.
+typed API there is no exception.
 
-**Consequence to flag loudly in the docs:** there will be two `Vector` types in the Python client.
-`tempo_sim.unreal.Vector` (cm, left-handed, used by the typed API) and
-`tempo_sim.TempoCore.Geometry_pb2.Vector` (m, right-handed, used by every other RPC). They are not
-interchangeable. Distinct names and an explicit conversion helper, not implicit coercion.
+**Consequence to flag loudly:** two `Vector` types in one client —
+`tempo_sim.unreal.Vector` (cm, left-handed, typed API) and
+`tempo_sim.TempoCore.Geometry_pb2.Vector` (m, right-handed, every other RPC). Distinct names and an
+explicit conversion helper, never implicit coercion. Generated struct and enum names must be checked
+against the hand-written runtime names so a harvested `Vector` cannot shadow `tempo_sim.unreal.Vector`.
 
 ---
 
-## 8. Artifact form and scale — the main engineering risk
+## 8. Generated artifact
 
-### Measured ceiling
+### 8.1 Measured ceiling
 
-Declarations in UE 5.7 (counted from engine headers; a packaged build links a subset):
+Declarations in UE 5.7 (counted from engine headers; a build links a subset):
 
 | Source | `UCLASS` | `UPROPERTY` | `BlueprintReadWrite/ReadOnly` | `BlueprintCallable` |
 |---|---|---|---|---|
 | `Engine/Source` | 4,268 | 27,541 | 6,365 | not counted |
 | `Engine/Plugins` | 9,346 | 52,820 | 13,284 | 12,570 |
 
-So the hard ceiling is ~13,600 classes / ~80,000 properties, of which ~19,600 are
-Blueprint-accessible. A real TempoSample-shaped package will link a fraction of that — order
-2,000–4,000 classes and 20,000–40,000 accessible members — but the design has to survive the upper
-end, because "all types including engine" is the stated requirement and a CitySample-class project
-approaches it.
+Ceiling ~13,600 classes / ~80,000 properties, ~19,600 Blueprint-accessible. A TempoSample-shaped
+build links a fraction — order 2,000–4,000 classes, 20,000–40,000 accessible members — but
+"all types including engine" has to survive the upper end.
 
-### Recommendation: `.py` for identity, `.pyi` for types
+### 8.2 Three files per module
 
-Emit, per Unreal module (`/Script/Engine` → `Engine.py` + `Engine.pyi`):
+Per Unreal package, e.g. `/Script/Engine` → `Engine.{py,pyi,meta.json}`:
 
 ```python
-# Engine.py  — tiny, loaded at runtime
+# Engine.py — tiny, loaded at runtime
 class StaticMeshComponent(SceneComponent):
-    __tempo_class__ = "StaticMeshComponent"
+    __tempo_class__ = "/Script/Engine.StaticMeshComponent"
 ```
 
 ```python
 # Engine.pyi — large, never loaded at runtime
 class StaticMeshComponent(SceneComponent):
-    bEnabled: bool
     RelativeLocation: Vector
+    @property
+    def Mass(self) -> float: ...                      # read-only: no setter (§9.2)
     def SetStaticMesh(self, NewMesh: StaticMesh) -> bool: ...
 ```
 
-Why this split:
+**`Engine.meta.json` is not optional.** To build a `SetProperty` the runtime must choose a `Value`
+variant, and Python types do not determine it: a `str` could be `string_value`, `enum_value`,
+`class_value`, `asset_value`, `actor_value` or `component_value`; an `int` could be `int_value` or
+`int64_value`. The "did you mean" check (§9.3) likewise needs the member list. Revision 1 said the
+`.py` holds only `__tempo_class__` and left this registry unspecified — a genuine hole.
 
-- **Runtime cost is a class object per Unreal class and nothing else.** No annotation dictionaries,
-  no descriptors, no per-member runtime objects. Note that under PEP 563 (`from __future__ import
-  annotations`, required at the `>=3.9` floor in `pyproject.toml`) class-body annotations still
-  build a `__annotations__` dict of strings at class creation — ~40,000 interned strings if the
-  annotations lived in the `.py`. Putting them in the `.pyi` avoids that entirely.
-- **Type checkers read the `.pyi` and ignore the `.py`**, so the full surface is statically
-  available at zero import cost. Large stubs are the normal case for checkers (`types-*` packages
-  are this shape).
-- **The classes are real runtime objects**, so `get_actor(name, BP_Vehicle_C)` narrowing,
-  `isinstance`, and the class registry all work — which a stub-only (PEP 561 `-stubs`) distribution
-  could not provide.
-- Per-module files plus a lazy package-level `__getattr__` mean a client that touches three classes
-  parses three modules.
+So: a per-module metadata table (member → `Value` variant, flags, accessor names), **loaded lazily
+on first use of a class from that module**, and emitted in the same generator run as the `.pyi` so
+the two cannot disagree.
 
-Alternative considered: generating real `@property` descriptors per member. Rejected — ~40,000
-descriptor objects, slow import, no static benefit over the `.pyi`.
+Why the split earns its keep: runtime cost is one small class object per Unreal class, plus the
+metadata for modules actually touched. Under PEP 563 (`from __future__ import annotations`, forced by
+the `>=3.9` floor in `pyproject.toml`) class-body annotations still build an `__annotations__` dict
+of strings at class creation — ~40,000 interned strings if they lived in the `.py`. Type checkers
+read the `.pyi` and ignore the `.py`, so the full surface is statically available at zero import
+cost. The classes are still real runtime objects, so narrowing, `isinstance` and the registry work —
+which a stub-only (PEP 561 `-stubs`) distribution could not provide.
 
-**Phase 0 must measure this against a real harvest before the rest is built.** If `.pyi` parse time
-in pyright turns out to be the binding constraint, the fallback is to partition the classes package
-(`<project>-classes-engine`, `-project`) and let a project depend only on what it uses.
+Rejected: a real `@property` descriptor per member — ~40,000 descriptor objects, slow import, no
+static benefit over the `.pyi`.
 
----
+### 8.3 Where Blueprint classes land
 
-## 9. Behavior, failure modes, and staleness
+`/Script/Engine` → `Engine` does not extend to Blueprints, which live in `/Game/...` content paths.
+(Revision 1's own example, `tempo_sample_classes.TempoSample.BP_Vehicle_C`, didn't follow its own
+rule.) Use **path-based modules**: `/Game/Vehicles/BP_Cat745` → `<project>_classes.Game.Vehicles`.
 
-- **Runtime validation.** The runtime proxy checks attribute names against the registry it was
-  generated with, so `actor.MxSped` raises immediately with a "did you mean `MaxSpeed`?" rather than
-  producing a `NOT_FOUND` from the server. Unknown-but-plausible names still fall through to the
-  server for the dynamic path.
-- **Writability.** Writing a `BlueprintReadOnly` property is a static error (no annotation in the
-  `.pyi` for a writable form) and a runtime `AttributeError`.
-- **Schema drift.** Stubs generated from build X, run against sim Y, is silent wrongness. The
-  `SchemaHeader` carries `engine_version` and a `content_hash`; the runtime fetches it on first
-  connect and warns (or raises, configurable) on mismatch. This is cheap and it is the difference
-  between a usable system and a confusing one. The two supported engine versions make it mandatory,
-  not optional.
-- **Actor names are still runtime strings.** This design makes *property* names static; it does not
-  make actor names static. The existing warning in `docs/concepts/naming.md` — editor labels differ
-  from packaged names, so query, don't hard-code — is unchanged.
+### 8.4 Class identity is the path, not the name
+
+Two Blueprints in different folders can share a class name. Generation must fail on a duplicate
+within a module, and every generated class carries its full `class_path` so the runtime spawns and
+narrows by exact class.
+
+This is **not free on the server side**: `SpawnActorRequest.actor_type` is a *name*, resolved by
+`GetSubClassWithName`, which is name-only — and AGENTS.md §6 requires every client-supplied class
+name to go through it. Spawning or narrowing by exact path needs either a new path field on the
+request or path-aware resolution inside that helper. Scope it explicitly in Phase 1 rather than
+assuming it.
 
 ---
 
-## 10. Testing
+## 9. The static guarantee
 
-Follows AGENTS.md §7: pure logic in C++ unit tests, client-facing behavior in the packaged Python
-suite.
+This section exists because it is the feature. Each item below is a way the guarantee silently
+evaporates.
 
-**C++ (`TempoWorld/Source/TempoWorld/Private/Tests/`, namespace `Tempo.World.Reflection.*`).** The
-free-standing pieces are exactly the shape `Tempo.Core.ServerEndpoint` already demonstrates:
+### 9.1 No catch-all on the statically visible `Actor`
 
-- the Blueprint-accessibility predicate against hand-built flag combinations;
-- `property_type` → `Value` variant mapping, and the `value_expressible` determination;
-- the declared-vs-inherited member split for a small synthetic class chain;
-- `GetValueFromTarget` / `SetValueOnTarget` round trip over a transient `UObject` (the
-  `FKinematicTestFixture` pattern — `NewObject` into `GetTransientPackage()`, no RHI needed).
+If Pyright can see `__getattr__` / `__setattr__` on `Actor`, it accepts **any** attribute on
+`Actor` *and on every generated subclass*. `truck.MxSped = 1200.0` would type-check. A removed
+property would type-check. That is precisely the case the feature exists to catch, and it defeats
+the entire design — the single most important correction in revision 2.
 
-**Python.** A new `classes` marker in `Tests/Python/pytest.ini` for the wheel-only surface check
-(imports, a known class has a known member, no sim — the `contract` shape), plus typed get/set
-coverage added to the existing `world` group against the live sim. A brand-new group needs a matrix
-entry in `tempo_build_and_package.yml`.
+Therefore:
 
-**The generator.** A golden-output test: harvest with `base_classes` narrowed to one Tempo class,
-assert the emitted `.py`/`.pyi` text. Keeps naming-rule changes (§12a) visible in a diff.
+- the `.pyi` for `Actor` declares **no** catch-all (the runtime `.py` still has one);
+- the dynamic, schema-free path returns a **distinct** `DynamicActor` type that does declare it, so
+  the escape hatch is visible at the call site and never leaks into a typed hierarchy;
+- a Pyright negative test asserts that an undeclared attribute on a generated class is an error
+  (§11).
+
+### 9.2 Read-only members need the `@property` form
+
+A plain `Mass: float` in a `.pyi` **is writable** — revision 1's claim that read-only fell out of
+"no annotation for a writable form" was simply wrong. Read-only members must be emitted as a
+setter-less property:
+
+```python
+@property
+def Mass(self) -> float: ...
+```
+
+Pyright reports assignment to it as an error. (`Final` is not the right tool: it also forbids
+reassignment in subclasses and carries different semantics.) This is exactly the "property became
+read-only" drift case.
+
+### 9.3 Runtime behavior
+
+- **Validation.** The proxy checks names against the per-module metadata (§8.2), so a typo raises
+  immediately with a "did you mean `MaxSpeed`?" rather than a server `NOT_FOUND`.
+- **Writability.** Writing a read-only property is a static error *and* a runtime `AttributeError`.
+- **Narrowing.** `get_actor(name, Cls)` verifies the actor really is a `Cls` or a subclass, and
+  raises otherwise.
+- **Accessors.** A member with a `BlueprintSetter` is written through `CallFunction` on the
+  accessor, not `SetProperty` (§5.3).
+
+### 9.4 Unsupported types are omitted
+
+Anything the classifier reports as unsupported is **left out of the `.pyi`** — never typed `Any`.
+Using it is then an error rather than a silent pass. `unsupported_reason` (§3c) is what the error
+message and the drift report quote.
 
 ---
 
-## 11. Phasing
+## 10. Release-to-release drift
+
+Distinct from "stubs vs. the sim they are used against", and the thing the goal in §1 actually asks
+for. Revision 1 only had the former.
+
+### 10.1 Deterministic output
+
+Sorted keys, no timestamps, stable formatting, in both `tempo_schema.json` and the generated files,
+so two releases diff cleanly. Without this, every other item here is unreadable noise.
+
+### 10.2 A drift report
+
+Diff each release's schema against the previous one and emit removed/changed classes, members and
+signatures as a reviewable list, so a breaking change is a decision made before release rather than
+a discovery after it.
+
+### 10.3 A PR-time check
+
+The commandlet (§5) runs on every PR, so the schema diff can gate the PR that causes it. This is the
+main practical payoff of moving generation into the editor. The check must be **reusable by
+downstream projects** — the same pattern as `test_packaged.yml` — because the drift that breaks
+scenarios happens on the *consuming* project's releases, not on Tempo's.
+
+### 10.4 A strictness policy for consuming repos
+
+A type checker enforces nothing unless CI requires it. The deliverable therefore includes the
+required configuration for scenario repos: Pyright in strict mode, or at minimum
+`reportUnknownMemberType`, `reportUnknownArgumentType` and `reportUnnecessaryTypeIgnoreComment` as
+errors. Without it, `Any` leaking in from scenario code and stray `# type: ignore` comments quietly
+bypass the guarantee — and the last of those three is what stops an ignore surviving after the thing
+it silenced was fixed.
+
+### 10.5 Schema identity
+
+`SchemaHeader` carries `schema_version`, `engine_version` and `content_hash`. The runtime fetches it
+on first connect and warns (configurable to raise) on mismatch. Two supported engine versions make
+this mandatory.
+
+---
+
+## 11. Testing
+
+Per AGENTS.md §7: pure logic in C++ unit tests, client-facing behavior in the packaged Python suite.
+
+**C++ (`TempoWorld/Private/Tests/`, `Tempo.World.Reflection.*`).** The §3a classifier is
+world-independent by construction, which is what makes this cheap — the same shape as
+`Tempo.Core.ServerEndpoint`:
+
+- the classifier over hand-built flag/type combinations, including every `unsupported_reason`;
+- `value_expressible` and the accepted-variant set;
+- the declared-vs-inherited split over a synthetic class chain;
+- `GetValueFromTarget` / `SetValueOnTarget` round trip on a transient `UObject` (the
+  `FKinematicTestFixture` pattern — `NewObject` into `GetTransientPackage()`, no RHI).
+
+**Pyright behavior tests — the ones that test the actual guarantee.** A golden-text test catches
+changes in emitted text but says nothing about type-checker behavior. Generate from a fixture
+schema, run Pyright over known-good and known-bad snippets, and assert which errors appear:
+
+| Change in a new release | Expected Pyright error |
+|---|---|
+| Property removed | Unknown attribute |
+| Property type changed | Assignment / usage type mismatch |
+| Property became read-only | Assignment to read-only property |
+| Function removed or signature changed | Call error |
+| Enum value removed or renamed | Unknown member |
+| Class removed or renamed | Unresolved import |
+| Component removed (Phase 3) | Unknown attribute on the component accessor |
+| **Any undeclared attribute on a generated class** | **Unknown attribute** — guards §9.1 |
+
+**Python integration.** A `classes` marker in `Tests/Python/pytest.ini` for the wheel-only surface
+check (no sim), plus typed get/set/spawn coverage in the existing `world` group. The §5.3
+verification test — every generated member resolves against the packaged sim — is its own group. A
+new group needs a matrix entry in `tempo_build_and_package.yml`.
+
+---
+
+## 12. Phasing
 
 | Phase | Scope | Why this order |
 |---|---|---|
-| **0 — Spike** | `DescribeClasses` + harvester; run against the existing TempoSample package; publish real class/member counts, wire size, `.pyi` size, pyright cold-check time, Blueprint-load cost | Every §8 decision is a guess until this exists. Small, and it de-risks the rest. |
-| **1 — Properties** | `GetProperty`/`GetProperties`, `native_units`, BP-accessibility filter, runtime proxy, Python generator, `Package.sh` hook, `<project>-classes` wheel, schema-hash check, docs, tests | The core ask, end to end. |
-| **2 — Functions** | Generated method signatures over `CallFunction` | Reuses `ParameterDescriptor` as-is. |
-| **3 — Components, structs, enums** | SCS/default-subobject component accessors; nested `StructProxy`; `UENUM` → Python `Enum` | Needs Phase 1's proxy in place. |
-| **4 — Ergonomics** | `batch()` / `snapshot()` context managers, typed `spawn_actor`, property streaming | Performance work; shape is known after 1–3. |
-| **5 — Rust / C++** | Generators off the same `tempo_schema.json` | Only worth starting once the schema has stopped moving. |
+| **0 — Spike** | §3a classifier; editor commandlet; run against TempoSample; publish class/member counts, `.pyi` size, Pyright cold-check time, Blueprint-load cost, and whether metadata is populated for the classes that matter | Every §8 decision is a guess until this exists, and it proves the commandlet choice. |
+| **1 — The guarantee, end to end** | typed get/set (`GetProperty`/`GetProperties`), `native_units` everywhere incl. `CallFunction`, generic `SetPropertyOp`, BP-accessibility filter, runtime proxy + `DynamicActor` split, per-module metadata, **`get_actors(Cls)`, typed `spawn_actor`, deferred spawn**, class-path identity, read-only `@property` form, deterministic output, drift report, PR check, Pyright tests, docs | Type-based discovery and spawning are the primary use case, and the §9 items are the feature — none can slip. |
+| **2 — Functions** | typed `Value` results on `CallFunction`; generated method signatures | Needs server work (§3e), not just reshaping. |
+| **3 — Components, structs, enums** | SCS/default-subobject accessors; nested `StructProxy`; `UENUM` → Python `Enum` | Needs Phase 1's proxy. |
+| **4 — Ergonomics** | property streaming, server-side class filter for `get_actors`, asset catalog | Optimizations once the shape is settled. |
+| **5 — Rust / C++** | generators off the same `tempo_schema.json` | Only once the schema has stopped moving. |
 
 ### Out of scope
 
-- Replacing the string-keyed API. It stays — as the escape hatch for non-Blueprint-accessible
-  properties, as the dynamic path, and for backward compatibility.
-- Editor-time generation.
-- Delegates and multicast events (`FUNC_Delegate` is already excluded).
+- Replacing the string-keyed API — it stays as the low-level layer and the escape hatch.
+- Delegates and multicast events (`FUNC_Delegate` already excluded).
 - C-style array properties (`ArrayDim != 1`), already `"unsupported"`.
-- Making actor names statically checkable.
+- Making actor *names* statically checkable (§6.1 sidesteps the need).
 
 ---
 
-## 12. Risks
+## 13. Risks
 
-1. **Artifact size / type-checker performance** at 30,000+ members. → Measure in Phase 0; per-module
-   split; `.pyi` rather than `.py` annotations; partition the distribution if needed.
-2. **Round-trip amplification.** `for a in actors: a.X = 1` over 1,000 actors is 1,000 RPCs where the
-   explicit API would have been one `set_properties`. → `batch()`/`snapshot()` in Phase 4, and say
-   so plainly in the docs from Phase 1.
-3. **Blueprint classes are not loaded in a cooked build.** `TObjectIterator<UClass>` only sees loaded
-   classes; harvesting Blueprint classes means walking the asset registry and `LoadObject`-ing every
-   `BlueprintGeneratedClass`. On a large project that is slow and memory-hungry, and it is the most
-   likely thing to make the Phase-0 harvest fail. → `base_classes` / path filters on the request,
-   `include_blueprint_classes` opt-out, and measure the cost in Phase 0.
-4. **Schema drift** between stubs and sim. → `engine_version` + content hash, checked on connect.
-5. **Two `Vector` types** in one client. → distinct module paths, explicit conversion, prominent docs.
-6. **Package-time dependency on a working headless launch.** `Package.sh` would gain a step that can
-   fail for reasons unrelated to packaging. → non-fatal by default (warn, skip the classes wheel);
-   the CI test jobs already prove the headless launch works, so a hard failure is reasonable in CI.
-   Use the socket transport where available (§5) so the harvest cannot collide with a running editor
-   or a parallel CI job.
-7. **Name mangling.** See §13a; whichever way it goes, the generator must detect collisions at
-   generation time and fail the build rather than emit a silently shadowed member.
+1. **A hole in the static surface** silently voids the guarantee — §9.1 is the known one; the §11
+   negative tests exist to catch the next. → Pyright tests gate CI.
+2. **Artifact size / checker performance** at 30,000+ members. → Measure in Phase 0; per-module
+   split; `.pyi` not `.py`; partition the distribution if needed.
+3. **Blueprint loading.** Enumerating Blueprint classes means walking the asset registry and
+   loading every `BlueprintGeneratedClass` — slow and memory-hungry on a large project, and the most
+   likely thing to make Phase 0 fail. Easier in the editor (populated registry,
+   `GetDerivedClassNames`) than it was in a cooked build. → `base_classes`/path filters, measure in
+   Phase 0.
+4. **Editor/cook divergence.** The commandlet sees more than ships. → §5.3 cook filter plus the
+   §5.4 packaged verification test, which is what makes the reversal safe.
+5. **Four classifiers drifting.** → §3a makes it one, in a public header.
+6. **Round-trip amplification.** 1,000 actors × one property = 1,000 RPCs. → `batch()`/`snapshot()`
+   in Phase 1, documented from the start.
+7. **Two `Vector` types**, and generated names shadowing runtime ones. → distinct module paths,
+   explicit conversion, a generation-time name check (§7).
+8. **Consumer CI not enforcing strictness** — the guarantee is only as strong as the weakest
+   consuming repo's Pyright config. → §10.4 ships the policy, not just advice.
 
 ---
 
-## 13. Open decisions
+## 14. Open decisions
 
-**(a) Member naming — verbatim or snake_case.** Recommendation: **verbatim Unreal names**
-(`actor.MaxSpeed`, `actor.bEnabled`). It is collision-free, it matches what the editor and every
-existing Tempo doc show, and a rename in Unreal maps 1:1 to a rename in client code — which is the
-point of the exercise. The cost is inconsistency with the snake_case RPC wrappers and a slightly
-un-Pythonic feel. snake_case is viable if the generator fails the build on collisions, but it needs
-an acronym-aware rule that the existing `pascal_to_snake` does not have (`FOVAngle` →
-`f_o_v_angle`). Offering both spellings is possible and not recommended — it doubles the stub and
-splits the docs.
+**(a) Member naming.** Settled on **verbatim Unreal names** (`truck.MaxSpeed`, `truck.bEnabled`):
+collision-free, matches the editor and the existing docs, and a rename in Unreal maps 1:1 onto a
+rename in scenario code — which is the point. snake_case would need an acronym-aware rule the
+existing `pascal_to_snake` lacks (`FOVAngle` → `f_o_v_angle`). Offering both doubles the stub and
+splits the docs. The generator fails the build on collisions either way.
 
-**(b) Handle acquisition.** Recommendation: both forms — `get_actor(name) -> Actor` for the dynamic
-path and `get_actor(name, Cls) -> Cls` for the checked path — with the docs leading on the second,
-since the first provides no static guarantee.
+**(b) Does `DescribeClasses` stay?** Recommendation: **yes**, even with the commandlet as source of
+truth — the §5.3 verification test needs class-level introspection of a running sim for classes it
+cannot instantiate, and the dynamic path needs it too. Same classifier behind both. The alternative
+(drop the RPC, verify per-instance) cannot cover classes that are never spawned.
 
-**(c) Harvest breadth.** Recommendation: everything by default, with `base_classes` available to
-narrow it. Revisit after Phase 0 measures what "everything" actually costs.
+**(c) Harvest breadth.** Everything by default, `base_classes` available to narrow. Revisit after
+Phase 0 measures the real cost.
 
-**(d) Distribution granularity.** Recommendation: one `<project>-classes` wheel. Split engine from
-project only if Phase 0 shows the combined artifact is a problem.
+**(d) Distribution granularity.** One `<project>-classes` wheel; split engine from project only if
+Phase 0 shows the combined artifact is a problem.
+
+**(e) Path-aware class resolution.** §8.4 needs `SpawnActor` to accept an exact class path. Decide
+between a new field on `SpawnActorRequest` and teaching `GetSubClassWithName` about paths — the
+latter is tidier but touches a helper every service uses.
