@@ -292,6 +292,83 @@ def test_typed_discovery_finds_spawned_actors(sim_server):
         tw.destroy_actor(actor=spawned.actor)
 
 
+def test_call_function_returns_typed_results(root_component):
+    """A function's results come back in the same representation a property read uses."""
+    actor, root = root_component
+    response = tw.call_function(actor=actor, component=root, function="GetRelativeTransform",
+                                native_units=True)
+    assert response.results, "GetRelativeTransform should hand something back"
+    returned = next(r for r in response.results if r.name == "ReturnValue")
+    # The legacy string form is still there, and still a string.
+    assert returned.value
+    # The typed form needs no parsing and can be fed straight back in.
+    assert returned.HasField("typed_value")
+    assert returned.typed_value.WhichOneof("value") == "transform_value"
+
+
+def test_a_typed_result_matches_the_property_it_reports(root_component):
+    """The same value, read two ways, has to agree.
+
+    The function reader and the property reader are the same code pointed at different containers
+    -- a call frame is just another container -- and this is what says so.
+
+    Compared against GetRelativeTransform, which reads the relative-transform properties directly.
+    A world-space getter would not do: writing RelativeLocation sets the property but does not call
+    UpdateComponentToWorld, so the derived world transform stays stale. See the note below.
+    """
+    actor, root = root_component
+    tw.set_property(actor=actor, component=root, property="RelativeLocation",
+                    value=WorldControl.Value(vector_value={"x": 10.0, "y": 20.0, "z": 30.0}),
+                    native_units=True)
+
+    from_property = tw.get_property(actor=actor, component=root, property="RelativeLocation",
+                                    native_units=True).vector_value
+    from_function = next(
+        r for r in tw.call_function(actor=actor, component=root, function="GetRelativeTransform",
+                                    native_units=True).results
+        if r.name == "ReturnValue").typed_value.transform_value.location
+
+    assert (from_function.x, from_function.y, from_function.z) == \
+           pytest.approx((from_property.x, from_property.y, from_property.z), abs=1e-3)
+
+
+def test_writing_a_transform_property_does_not_move_the_component(root_component):
+    """A property write sets memory; it does not run whatever derives from it.
+
+    This is not a defect to fix in the client -- it is what writing a UPROPERTY means. Unreal
+    recomputes a component's world transform in UpdateComponentToWorld, which a property write does
+    not call, so the component has a new RelativeLocation and an unchanged world position.
+
+    Pinned as a test because it is surprising, and because the fix is to call a function rather than
+    to write a property: SetActorTransform, or the component's own setter.
+    """
+    actor, root = root_component
+    tw.set_property(actor=actor, component=root, property="RelativeLocation",
+                    value=WorldControl.Value(vector_value={"x": 10.0, "y": 20.0, "z": 30.0}),
+                    native_units=True)
+
+    world_location = next(
+        r for r in tw.call_function(actor=actor, component=root,
+                                    function="K2_GetComponentLocation", native_units=True).results
+        if r.name == "ReturnValue").typed_value.vector_value
+
+    assert (world_location.x, world_location.y, world_location.z) == pytest.approx((0.0, 0.0, 0.0)), \
+        "if this now matches the property, Unreal propagates the write and the docs should say so"
+
+
+@requires_classes
+def test_calling_a_generated_method(sim_server):
+    StaticMeshActor = registered().python_class(SPAWNABLE)
+    spawned = world.spawn_actor(StaticMeshActor)
+    try:
+        # Declared by the stub, dispatched through CallFunction, returned typed.
+        assert spawned.ActorHasTag("nope") is False
+        spawned.Tags = ["marked"]
+        assert spawned.ActorHasTag("marked") is True
+    finally:
+        tw.destroy_actor(actor=spawned.actor)
+
+
 @requires_classes
 def test_the_installed_classes_match_the_sim(sim_server):
     """The drift check, against the build these classes were generated for.

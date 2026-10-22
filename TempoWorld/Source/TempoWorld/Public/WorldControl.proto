@@ -833,8 +833,15 @@ message FunctionResult {
   // Property type string, from the same vocabulary as PropertyDescriptor.property_type.
   string property_type = 2;
   // The value, serialized as a string the same way GetProperties serializes a
-  // property's value.
+  // property's value. Human-readable, and lossy: a vector arrives as "{X:1.0, Y:2.0, Z:3.0}".
+  // Prefer `typed_value` for anything a program acts on.
   string value = 3;
+  // The same value, typed, in the same representation SetProperty accepts and GetProperty
+  // returns -- so a result can be read without parsing, and fed straight back in.
+  //
+  // Unset for a type the API cannot express as one value, where `value` and `property_type` are
+  // all there is. Honors the request's native_units, exactly as a property read does.
+  Value typed_value = 4;
 }
 
 message CallFunctionResponse {
@@ -1061,6 +1068,17 @@ message ClassFunctionDescriptor {
   repeated ClassParameterDescriptor parameters = 7;
 }
 
+// A component a class brings with it, under a known name on every instance.
+//
+// A Blueprint declares these in its construction script; a native class creates them in its
+// constructor. Either way a client can address one without being told its name at runtime.
+message ComponentTemplateDescriptor {
+  // The name the component has on an instance, which is how every RPC here addresses it.
+  string name = 1;
+  // The component class's full path.
+  string class_path = 2;
+}
+
 message ClassDescriptor {
   // The class name, Blueprint "_C" and all.
   string name = 1;
@@ -1077,6 +1095,8 @@ message ClassDescriptor {
   // Declared on this class only, sorted by name.
   repeated ClassPropertyDescriptor properties = 7;
   repeated ClassFunctionDescriptor functions = 8;
+  // Likewise declared-only: an inherited component belongs to the class that introduced it.
+  repeated ComponentTemplateDescriptor components = 9;
 }
 
 message StructDescriptor {

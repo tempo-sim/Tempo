@@ -170,6 +170,16 @@ bool Write(const FOptions& Options, FStats& OutStats, FString& OutError)
 		}
 		Writer->WriteArrayEnd();
 
+		Writer->WriteArrayStart(TEXT("components"));
+		for (const FComponentTemplate& Component : Entry.Components)
+		{
+			Writer->WriteObjectStart();
+			Writer->WriteValue(TEXT("name"), Component.Name);
+			Writer->WriteValue(TEXT("class"), Component.ClassPath);
+			Writer->WriteObjectEnd();
+		}
+		Writer->WriteArrayEnd();
+
 		Writer->WriteArrayStart(TEXT("functions"));
 		for (const FFunctionInfo& Function : Entry.Functions)
 		{

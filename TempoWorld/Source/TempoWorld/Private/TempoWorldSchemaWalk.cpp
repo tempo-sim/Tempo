@@ -7,6 +7,10 @@
 #include "AssetRegistry/ARFilter.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Engine/Blueprint.h"
+#include "Engine/BlueprintGeneratedClass.h"
+#include "Engine/SCS_Node.h"
+#include "Engine/SimpleConstructionScript.h"
+#include "GameFramework/Actor.h"
 #include "Misc/SecureHash.h"
 #include "UObject/UObjectIterator.h"
 
@@ -176,6 +180,80 @@ namespace
 		return Class->GetPackage() == GetTransientPackage();
 	}
 
+	// The components a class brings with it, excluding any it merely inherits.
+	//
+	// Two sources, because Unreal has two ways of declaring one. A Blueprint lists them in its
+	// SimpleConstructionScript, which holds only that Blueprint's own nodes -- inherited components
+	// live in the parent's script -- so those are already declared-only. A native class creates them
+	// as default subobjects in its constructor, and its CDO carries the inherited ones too, so those
+	// are found by difference against the superclass's CDO.
+	TArray<FComponentTemplate> CollectDeclaredComponents(const UClass* Class)
+	{
+		TArray<FComponentTemplate> Components;
+
+		if (const UBlueprintGeneratedClass* Generated = Cast<UBlueprintGeneratedClass>(Class))
+		{
+			if (const USimpleConstructionScript* Script = Generated->SimpleConstructionScript)
+			{
+				for (const USCS_Node* Node : Script->GetAllNodes())
+				{
+					if (!Node || !Node->ComponentTemplate)
+					{
+						continue;
+					}
+					const FName VariableName = Node->GetVariableName();
+					if (VariableName.IsNone())
+					{
+						continue;
+					}
+					Components.Add({ VariableName.ToString(),
+						Node->ComponentTemplate->GetClass()->GetPathName() });
+				}
+			}
+			return Components;
+		}
+
+		// Native: only actors have components, and only the ones this class adds are its own.
+		if (!Class->IsChildOf(AActor::StaticClass()))
+		{
+			return Components;
+		}
+
+		const AActor* Defaults = Class->GetDefaultObject<AActor>();
+		if (!Defaults)
+		{
+			return Components;
+		}
+
+		TSet<FName> InheritedNames;
+		if (const UClass* Super = Class->GetSuperClass())
+		{
+			if (Super->IsChildOf(AActor::StaticClass()))
+			{
+				if (const AActor* SuperDefaults = Super->GetDefaultObject<AActor>())
+				{
+					for (const UActorComponent* Component : SuperDefaults->GetComponents())
+					{
+						if (Component)
+						{
+							InheritedNames.Add(Component->GetFName());
+						}
+					}
+				}
+			}
+		}
+
+		for (const UActorComponent* Component : Defaults->GetComponents())
+		{
+			if (!Component || InheritedNames.Contains(Component->GetFName()))
+			{
+				continue;
+			}
+			Components.Add({ Component->GetName(), Component->GetClass()->GetPathName() });
+		}
+		return Components;
+	}
+
 	bool PassesBaseClassFilter(const UClass* Class, const TArray<UClass*>& BaseClasses)
 	{
 		if (BaseClasses.IsEmpty())
@@ -233,6 +311,12 @@ FString HashResult(const FResult& Result)
 		for (const FFunctionInfo& Function : Entry.Functions)
 		{
 			Sha.UpdateWithString(*Function.Signature, Function.Signature.Len());
+		}
+		// A component that disappears, or changes class, breaks a caller exactly as a property does.
+		for (const FComponentTemplate& Component : Entry.Components)
+		{
+			Sha.UpdateWithString(*Component.Name, Component.Name.Len());
+			Sha.UpdateWithString(*Component.ClassPath, Component.ClassPath.Len());
 		}
 	}
 	for (const FStructEntry& Entry : Result.Structs)
@@ -347,7 +431,11 @@ bool Walk(const FOptions& Options, FResult& OutResult, FString& OutError)
 			Entry.Functions.Add(MoveTemp(Function));
 		}
 
+		Entry.Components = CollectDeclaredComponents(Class);
+
 		// Sorted so that reordering declarations in C++ or in a Blueprint is not a schema diff.
+		Entry.Components.Sort([](const FComponentTemplate& A, const FComponentTemplate& B)
+			{ return A.Name < B.Name; });
 		Entry.Properties.Sort([](const FMember& A, const FMember& B) { return A.Name < B.Name; });
 		Entry.Functions.Sort([](const FFunctionInfo& A, const FFunctionInfo& B) { return A.Name < B.Name; });
 

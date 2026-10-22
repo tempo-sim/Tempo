@@ -26,6 +26,9 @@
 #                             (Linux/macOS). Lets several sims share a machine without each
 #                             needing its own port. Takes precedence over TEMPO_SERVER_PORT.
 #   TEMPO_TEST_VENV           venv to create/use (default <tempo>/.tempo_test_venv).
+#   TEMPO_TEST_INTREE_CLIENT  Install the in-tree tempo-sim instead of the packaged wheel. For
+#                             iterating on the client against an already-packaged sim; unset, the
+#                             tests check exactly what was packaged.
 
 set -e
 # Never fail silently: report the line and exit code on any set -e abort.
@@ -125,8 +128,22 @@ pip install --upgrade pip >/dev/null
 # inter-wheel dependencies when they're given together. Read into an array via -print0 so paths
 # with spaces survive; guard the missing-dir case so `set -e` doesn't abort, falling back to the
 # in-tree source package.
+# Iterating on the client itself -- tempo_sim's runtime, or a proto -- means the wheel under
+# Packaged is older than the tree, and the tests then check the previous build's client against the
+# current sim. Rebuilding the wheel is one option; this is the other, and it is explicit so that the
+# default still tests exactly what was packaged.
 WHEELS=()
-if [ -d "$PACKAGED_DIR/API/Python" ]; then
+if [ -n "$TEMPO_TEST_INTREE_CLIENT" ] && [ "$TEMPO_TEST_INTREE_CLIENT" != "0" ]; then
+  echo "TEMPO_TEST_INTREE_CLIENT is set: installing the in-tree client instead of the packaged wheel."
+  echo "  (The sim is still the packaged one. Any project or generated-class wheels are still used.)"
+  while IFS= read -r -d '' whl; do
+    case "$(basename "$whl")" in
+      tempo_sim-*) ;;  # replaced by the in-tree source below
+      *) WHEELS+=("$whl") ;;
+    esac
+  done < <(find "$PACKAGED_DIR/API/Python" -name "*.whl" -print0 2>/dev/null)
+  WHEELS+=("$TEMPO_ROOT/TempoCore/Content/Python/API")
+elif [ -d "$PACKAGED_DIR/API/Python" ]; then
   while IFS= read -r -d '' whl; do
     WHEELS+=("$whl")
   done < <(find "$PACKAGED_DIR/API/Python" -name "*.whl" -print0 2>/dev/null)

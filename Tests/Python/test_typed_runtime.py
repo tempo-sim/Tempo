@@ -367,3 +367,152 @@ def test_the_snapshot_is_released_on_exit(classes, fake_world):
         _ = widget.bEnabled
     _ = widget.bEnabled
     assert fake_world[-1] == ("get_property", "bEnabled"), "a read after the block is not cached"
+
+
+# -- calling functions ----------------------------------------------------------------------------
+
+
+@pytest.fixture
+def fake_calls(monkeypatch, classes):
+    """Record CallFunction invocations and hand back a chosen set of results."""
+    import tempo_sim.unreal as unreal
+    import tempo_sim.TempoWorld.WorldControl_pb2 as WorldControl
+
+    recorded = {"calls": [], "results": []}
+
+    class FakeWorld:
+        @staticmethod
+        def call_function(**kwargs):
+            recorded["calls"].append(kwargs)
+
+            class Response:
+                results = recorded["results"]
+            return Response()
+
+    monkeypatch.setattr(unreal, "_world", lambda: FakeWorld)
+
+    def result(name, **value_kwargs):
+        return WorldControl.FunctionResult(name=name,
+                                          typed_value=WorldControl.Value(**value_kwargs))
+
+    recorded["make"] = result
+    return recorded
+
+
+def test_a_function_is_callable_through_the_handle(classes, fake_calls):
+    widget = classes.Widget("MyActor")
+    widget.Refresh()
+    assert len(fake_calls["calls"]) == 1
+    call = fake_calls["calls"][0]
+    assert call["function"] == "Refresh"
+    assert call["actor"] == "MyActor"
+    assert list(call["args"]) == []
+    # The typed API is Unreal-native, and a function argument is the same Value a property takes.
+    assert call["native_units"] is True
+
+
+def test_arguments_may_be_positional_or_named(classes, fake_calls):
+    widget = classes.Widget("MyActor")
+    widget.Resize(4)
+    widget.Resize(NewSize=5)
+    assert [arg["name"] for arg in fake_calls["calls"][0]["args"]] == ["NewSize"]
+    assert fake_calls["calls"][0]["args"][0]["value"].int_value == 4
+    assert fake_calls["calls"][1]["args"][0]["value"].int_value == 5
+
+
+def test_a_return_value_comes_back_typed(classes, fake_calls):
+    fake_calls["results"] = [fake_calls["make"]("ReturnValue", bool_value=True)]
+    widget = classes.Widget("MyActor")
+    # Not a string to be parsed: the same representation a property read returns.
+    assert widget.Resize(4) is True
+
+
+def test_a_void_function_returns_none(classes, fake_calls):
+    fake_calls["results"] = []
+    widget = classes.Widget("MyActor")
+    assert widget.Refresh() is None
+
+
+def test_out_parameters_come_back_by_name(classes, fake_calls):
+    # How a Blueprint usually hands back more than one thing. Position would be guesswork, so the
+    # result is keyed.
+    fake_calls["results"] = [
+        fake_calls["make"]("ReturnValue", bool_value=True),
+        fake_calls["make"]("Remainder", int_value=2),
+    ]
+    widget = classes.Widget("MyActor")
+    assert widget.Resize(4) == {"ReturnValue": True, "Remainder": 2}
+
+
+@pytest.mark.parametrize("case,call", [
+    ("too many positional", lambda w: w.Resize(1, 2)),
+    ("unknown name", lambda w: w.Resize(NotAParameter=1)),
+    ("missing argument", lambda w: w.Resize()),
+    ("duplicated argument", lambda w: w.Resize(1, NewSize=2)),
+])
+def test_bad_arguments_are_refused_before_the_wire(classes, fake_calls, case, call):
+    widget = classes.Widget("MyActor")
+    with pytest.raises(TypeError):
+        call(widget)
+    assert fake_calls["calls"] == [], "{} must not reach the server".format(case)
+
+
+def test_an_uncallable_function_is_not_offered(classes, fake_calls):
+    widget = classes.Widget("MyActor")
+    # Latent in the fixture, so the server would refuse it; the client does not pretend otherwise.
+    with pytest.raises(AttributeError):
+        widget.Latent()
+
+
+def test_a_function_cannot_be_assigned_to(classes, fake_calls):
+    widget = classes.Widget("MyActor")
+    with pytest.raises(AttributeError, match="is a function"):
+        widget.Refresh = 1
+
+
+def test_an_unknown_member_suggests_either_kind(classes, fake_calls):
+    widget = classes.Widget("MyActor")
+    with pytest.raises(AttributeError) as caught:
+        widget.Refres()
+    assert "Refresh" in str(caught.value)
+
+
+# -- components -----------------------------------------------------------------------------------
+
+
+def test_a_component_is_reachable_as_an_attribute(classes, wire):
+    widget = classes.Widget("MyActor")
+    mesh = widget.Mesh
+    # A handle to the component on this actor, typed as the component's own class, so its members
+    # are addressable in turn.
+    assert mesh.actor == "MyActor"
+    assert mesh.component == "Mesh"
+    assert type(mesh).__tempo_class__ == "/Script/Engine.MeshThing"
+    assert wire["reads"] == [], "reaching a component is not itself a read"
+
+
+def test_a_components_properties_address_through_it(classes, wire):
+    widget = classes.Widget("MyActor")
+    widget.Mesh.Visible = True
+    assert wire["writes"] == [("MyActor", "Mesh", "Visible", True)]
+
+
+def test_a_component_cannot_be_assigned(classes, wire):
+    widget = classes.Widget("MyActor")
+    # The attribute names a component that exists; replacing one is not an assignment.
+    with pytest.raises(AttributeError, match="is a component"):
+        widget.Mesh = None
+    assert wire["writes"] == []
+
+
+def test_a_component_whose_class_is_absent_is_not_offered(classes, wire):
+    widget = classes.Widget("MyActor")
+    # Typing it would mean a handle whose members are unknown, which is not worth offering.
+    with pytest.raises(AttributeError):
+        _ = widget.Gone
+
+
+def test_an_unnameable_component_is_not_offered(classes, wire):
+    widget = classes.Widget("MyActor")
+    with pytest.raises(AttributeError):
+        _ = widget.Has_Space

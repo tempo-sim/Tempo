@@ -15,7 +15,8 @@
    "abstract": false,
    "blueprint": false,
    "properties": [],
-   "functions": []
+   "functions": [],
+   "components": []
   },
   {
    "name": "Widget",
@@ -25,47 +26,165 @@
    "abstract": false,
    "blueprint": false,
    "properties": [
-    {"name": "bEnabled", "kind": "bool", "type": "bool",
-     "readable": true, "writable": true, "value_expressible": true},
-    {"name": "Offset", "kind": "vector", "type": "vector",
-     "readable": true, "writable": false, "value_expressible": true},
-    {"name": "Mode", "kind": "enum", "type": "EWidgetMode", "enum": "EWidgetMode",
-     "readable": true, "writable": true, "value_expressible": true},
-    {"name": "Tags", "kind": "array", "type": "array<string>",
-     "element": {"kind": "string", "type": "string"},
-     "readable": true, "writable": true, "value_expressible": true},
-    {"name": "Settings", "kind": "struct", "type": "FWidgetSettings", "struct": "FWidgetSettings",
-     "readable": true, "writable": false, "value_expressible": false},
-    {"name": "Doomed", "kind": "unsupported", "type": "unsupported",
+    {
+     "name": "bEnabled",
+     "kind": "bool",
+     "type": "bool",
+     "readable": true,
+     "writable": true,
+     "value_expressible": true
+    },
+    {
+     "name": "Offset",
+     "kind": "vector",
+     "type": "vector",
+     "readable": true,
+     "writable": false,
+     "value_expressible": true
+    },
+    {
+     "name": "Mode",
+     "kind": "enum",
+     "type": "EWidgetMode",
+     "enum": "EWidgetMode",
+     "readable": true,
+     "writable": true,
+     "value_expressible": true
+    },
+    {
+     "name": "Tags",
+     "kind": "array",
+     "type": "array<string>",
+     "element": {
+      "kind": "string",
+      "type": "string"
+     },
+     "readable": true,
+     "writable": true,
+     "value_expressible": true
+    },
+    {
+     "name": "Settings",
+     "kind": "struct",
+     "type": "FWidgetSettings",
+     "struct": "FWidgetSettings",
+     "readable": true,
+     "writable": false,
+     "value_expressible": false
+    },
+    {
+     "name": "Doomed",
+     "kind": "unsupported",
+     "type": "unsupported",
      "unsupported_reason": "C-style fixed-size array",
-     "readable": true, "writable": true, "value_expressible": false},
-    {"name": "Has Spaces", "kind": "bool", "type": "bool",
-     "readable": true, "writable": true, "value_expressible": true}
+     "readable": true,
+     "writable": true,
+     "value_expressible": false
+    },
+    {
+     "name": "Has Spaces",
+     "kind": "bool",
+     "type": "bool",
+     "readable": true,
+     "writable": true,
+     "value_expressible": true
+    }
    ],
    "functions": [
-    {"name": "Refresh", "signature": "void Refresh()", "callable": true, "positional": true,
-     "parameters": []},
-    {"name": "Resize", "signature": "bool Resize(int NewSize)", "callable": true, "positional": true,
+    {
+     "name": "Refresh",
+     "signature": "void Refresh()",
+     "callable": true,
+     "positional": true,
+     "parameters": []
+    },
+    {
+     "name": "Resize",
+     "signature": "bool Resize(int NewSize)",
+     "callable": true,
+     "positional": true,
      "parameters": [
-      {"name": "NewSize", "direction": "in", "kind": "int", "type": "int"},
-      {"name": "ReturnValue", "direction": "return", "kind": "bool", "type": "bool"}
-     ]},
-    {"name": "Latent", "signature": "void Latent()", "callable": false, "positional": true,
+      {
+       "name": "NewSize",
+       "direction": "in",
+       "kind": "int",
+       "type": "int"
+      },
+      {
+       "name": "ReturnValue",
+       "direction": "return",
+       "kind": "bool",
+       "type": "bool"
+      }
+     ]
+    },
+    {
+     "name": "Latent",
+     "signature": "void Latent()",
+     "callable": false,
+     "positional": true,
      "unsupported_reason": "Function 'Latent' is latent, which cannot be called over the API",
-     "parameters": []}
+     "parameters": []
+    }
+   ],
+   "components": [
+    {
+     "name": "Mesh",
+     "class": "/Script/Engine.MeshThing"
+    },
+    {
+     "name": "Gone",
+     "class": "/Script/Engine.NotInThisBuild"
+    },
+    {
+     "name": "Has Space",
+     "class": "/Script/Engine.MeshThing"
+    }
    ]
+  },
+  {
+   "name": "MeshThing",
+   "path": "/Script/Engine.MeshThing",
+   "super": "/Script/CoreUObject.Object",
+   "package": "/Script/Engine",
+   "abstract": false,
+   "blueprint": false,
+   "components": [],
+   "properties": [
+    {
+     "name": "Visible",
+     "kind": "bool",
+     "type": "bool",
+     "readable": true,
+     "writable": true,
+     "value_expressible": true
+    }
+   ],
+   "functions": []
   }
  ],
  "structs": [
   {
    "name": "FWidgetSettings",
    "members": [
-    {"name": "Scale", "kind": "float", "type": "float",
-     "readable": true, "writable": true, "value_expressible": true}
+    {
+     "name": "Scale",
+     "kind": "float",
+     "type": "float",
+     "readable": true,
+     "writable": true,
+     "value_expressible": true
+    }
    ]
   }
  ],
  "enums": [
-  {"name": "EWidgetMode", "enumerators": ["Simple", "Advanced"]}
+  {
+   "name": "EWidgetMode",
+   "enumerators": [
+    "Simple",
+    "Advanced"
+   ]
+  }
  ]
 }

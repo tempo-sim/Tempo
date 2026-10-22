@@ -208,15 +208,38 @@ class Object:
         # Only reached when normal lookup fails, so this never shadows a real attribute.
         if name.startswith("_"):
             raise AttributeError(name)
-        member = self._property(name)
-        if member.get("struct") and member.get("variant") is None:
-            return StructProxy(self, name, member["struct"])
-        return _read(self._actor, self._component, name)
+        member = _classes.find_property(type(self).__tempo_class__, name)
+        if member is not None:
+            if member.get("struct") and member.get("variant") is None:
+                return StructProxy(self, name, member["struct"])
+            return _read(self._actor, self._component, name)
+
+        signature = _classes.find_function(type(self).__tempo_class__, name)
+        if signature is not None:
+            return BoundFunction(self, name, signature)
+
+        component_class = _classes.find_component(type(self).__tempo_class__, name)
+        if component_class is not None:
+            # Addressed on this handle's actor, under the component's own name -- which is how
+            # every TempoWorld RPC names a component.
+            python_class = _classes.python_class(component_class) or Object
+            return python_class(self._actor, name)
+
+        raise AttributeError("{} has no property or function {!r}.{}".format(
+            type(self).__name__, name,
+            _suggest(name, _classes.member_names(type(self).__tempo_class__))))
 
     def __setattr__(self, name, value):
         if name.startswith("_"):
             object.__setattr__(self, name, value)
             return
+        if _classes.find_function(type(self).__tempo_class__, name) is not None:
+            raise AttributeError("{}.{} is a function, not a property".format(
+                type(self).__name__, name))
+        if _classes.find_component(type(self).__tempo_class__, name) is not None:
+            raise AttributeError(
+                "{}.{} is a component, not a property. Assign to its properties, or add and "
+                "destroy components through the TempoWorld API.".format(type(self).__name__, name))
         member = self._property(name)
         if member.get("variant") is None:
             raise AttributeError(
@@ -328,6 +351,48 @@ class _Classes:
                 return found
             class_path = entry.get("super") or ""
         return None
+
+    def find_component(self, class_path, name):
+        """One component, searched up the inheritance chain, as the members are."""
+        seen = set()
+        while class_path and class_path not in seen:
+            seen.add(class_path)
+            entry = self.metadata(class_path)
+            if entry is None:
+                return None
+            found = entry.get("components", {}).get(name)
+            if found is not None:
+                return found
+            class_path = entry.get("super") or ""
+        return None
+
+    def find_function(self, class_path, name):
+        """One function, searched up the inheritance chain, as find_property does."""
+        seen = set()
+        while class_path and class_path not in seen:
+            seen.add(class_path)
+            entry = self.metadata(class_path)
+            if entry is None:
+                return None
+            found = entry.get("functions", {}).get(name)
+            if found is not None:
+                return found
+            class_path = entry.get("super") or ""
+        return None
+
+    def member_names(self, class_path):
+        """Every property and function reachable on a class, for suggesting a near miss."""
+        names, seen = [], set()
+        while class_path and class_path not in seen:
+            seen.add(class_path)
+            entry = self.metadata(class_path)
+            if entry is None:
+                break
+            names.extend(entry["properties"])
+            names.extend(entry.get("functions", {}))
+            names.extend(entry.get("components", {}))
+            class_path = entry.get("super") or ""
+        return names
 
     def property_names(self, class_path):
         """Every property reachable on a class, for suggesting a near miss."""
@@ -655,6 +720,77 @@ class DynamicObject(Object):
     """
 
     __slots__ = ()
+
+
+class BoundFunction:
+    """A function on a handle, ready to call.
+
+    What attribute lookup returns for a generated method. Separate from the handle so that getting
+    the attribute costs nothing until it is called, and so a method and a property of the same name
+    cannot be confused for one another.
+    """
+
+    __slots__ = ("_owner", "_name", "_signature")
+
+    def __init__(self, owner, name, signature):
+        self._owner = owner
+        self._name = name
+        self._signature = signature
+
+    def __call__(self, *args, **kwargs):
+        inputs = self._signature["inputs"]
+        if len(args) > len(inputs):
+            raise TypeError("{}() takes {} argument(s), {} given".format(
+                self._name, len(inputs), len(args)))
+
+        # Positional first, then by name -- the declaration order is the calling convention, and the
+        # generated stub spells the names, so either reads correctly at the call site.
+        supplied = {}
+        for parameter, value in zip(inputs, args):
+            supplied[parameter["name"]] = value
+        for name, value in kwargs.items():
+            if name in supplied:
+                raise TypeError("{}() got multiple values for {!r}".format(self._name, name))
+            supplied[name] = value
+
+        expected = {parameter["name"] for parameter in inputs}
+        unexpected = set(supplied) - expected
+        if unexpected:
+            raise TypeError("{}() got unexpected argument(s) {}".format(
+                self._name, ", ".join(sorted(unexpected))))
+        missing = expected - set(supplied)
+        if missing:
+            raise TypeError("{}() is missing argument(s) {}".format(
+                self._name, ", ".join(sorted(missing))))
+
+        arguments = [{"name": parameter["name"],
+                      "value": _to_value(parameter["variant"], supplied[parameter["name"]])}
+                     for parameter in inputs]
+
+        response = _world().call_function(actor=self._owner.actor, component=self._owner.component,
+                                          function=self._name, args=arguments, native_units=True)
+        return _function_result(response, self._signature)
+
+    def __repr__(self):
+        return "<bound {}.{}>".format(type(self._owner).__name__, self._name)
+
+
+def _function_result(response, signature):
+    """What a call hands back.
+
+    A void function returns None. A function with a return value returns it. A function that also
+    has out parameters -- which is how a Blueprint usually hands back more than one thing -- returns
+    a dict keyed by name, because position would be guesswork.
+    """
+    results = {entry.name: _from_value(entry.typed_value)
+               for entry in response.results if entry.HasField("typed_value")}
+    if not results:
+        return None
+
+    has_return = signature.get("returns") is not None
+    if has_return and len(results) == 1 and "ReturnValue" in results:
+        return results["ReturnValue"]
+    return results
 
 
 class StructProxy:

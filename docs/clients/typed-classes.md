@@ -78,6 +78,17 @@ truck.WaypointTags = ["alpha", "bravo"]
 A read-only property (`BlueprintReadOnly`) is generated as a property with no setter, so assigning
 to it is a type error rather than a runtime surprise.
 
+!!! warning "A write sets the property; it does not run what derives from it"
+
+    Assigning to a property writes that property and nothing else. Unreal often recomputes something
+    from it elsewhere — a component's world transform is recalculated in `UpdateComponentToWorld`,
+    which a property write does not call — so `component.RelativeLocation = v` leaves the component
+    with a new relative location and an unchanged position in the world.
+
+    To *move* something, call a function: `SetActorTransform` and friends, or the component's own
+    setter. The same applies to any property Unreal exposes through a `BlueprintSetter`, and those
+    the typed API already routes through the accessor for you.
+
 ### Units
 
 **The typed classes are the one corner of the Tempo API that speaks Unreal's own units**:

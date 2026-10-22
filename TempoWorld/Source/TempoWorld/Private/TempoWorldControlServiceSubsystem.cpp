@@ -1975,6 +1975,13 @@ void UTempoWorldControlServiceSubsystem::DescribeClasses(const DescribeClassesRe
 			WriteMemberDescriptor(Member, *Class->add_properties());
 		}
 
+		for (const TempoWorldSchemaWalk::FComponentTemplate& Component : Entry.Components)
+		{
+			TempoWorld::ComponentTemplateDescriptor* Out = Class->add_components();
+			Out->set_name(TCHAR_TO_UTF8(*Component.Name));
+			Out->set_class_path(TCHAR_TO_UTF8(*Component.ClassPath));
+		}
+
 		for (const FFunctionInfo& Function : Entry.Functions)
 		{
 			TempoWorld::ClassFunctionDescriptor* Out = Class->add_functions();
@@ -4078,6 +4085,19 @@ namespace
 			Result->set_name(TCHAR_TO_UTF8(*Parm->GetName()));
 			Result->set_property_type(TCHAR_TO_UTF8(*Type));
 			Result->set_value(TCHAR_TO_UTF8(*Value));
+
+			// The same value, typed. A call frame is just another container, so this is the
+			// property reader pointed at the frame rather than at an object -- which is what keeps
+			// a returned vector identical to the same vector read off a property.
+			//
+			// A type the API cannot carry as one value leaves typed_value unset rather than
+			// failing the call: the string form is still useful, and the caller asked to invoke a
+			// function, not to read this parameter.
+			PropertyValue TypedValue;
+			if (WritePropertyToValue(Frame, Parm, Request.native_units(), TypedValue).ok())
+			{
+				*Result->mutable_typed_value() = TypedValue;
+			}
 		}
 
 		return grpc::Status_OK;

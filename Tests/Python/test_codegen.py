@@ -96,6 +96,32 @@ def test_identity_file_has_no_annotations(generated):
     assert "bEnabled" not in identity, "the identity file must not carry members"
 
 
+def test_components_are_typed_as_their_own_class(generated, tmp_path):
+    errors = check(generated, """
+import fixture_classes.Engine as E
+
+def ok(w: E.Widget) -> None:
+    w.Mesh.Visible = True
+""", tmp_path)
+    assert errors == [], "a component's own members should type-check: {}".format(errors)
+
+
+@pytest.mark.parametrize("case,source", [
+    ("assigning to a component", "w.Mesh = None"),
+    ("a component whose class is absent", "w.Gone.Visible = True"),
+    ("an unnameable component", "w.Has_Space.Visible = True"),
+    ("a member the component does not have", "w.Mesh.NoSuchThing = True"),
+])
+def test_component_misuse_is_a_type_error(generated, tmp_path, case, source):
+    errors = check(generated, """
+import fixture_classes.Engine as E
+
+def drift(w: E.Widget) -> None:
+    {}
+""".format(source), tmp_path)
+    assert errors, "{} should be a type error".format(case)
+
+
 def test_valid_usage_type_checks(generated, tmp_path):
     errors = check(generated, """
 import fixture_classes.Engine as E

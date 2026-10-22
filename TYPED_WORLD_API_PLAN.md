@@ -699,6 +699,26 @@ new group needs a matrix entry in `tempo_build_and_package.yml`.
 | **2 — Functions** | typed `Value` results on `CallFunction`; generated method signatures | Needs server work (§3e), not just reshaping. |
 | **3 — Components, structs, enums** | SCS/default-subobject accessors; nested `StructProxy`; `UENUM` → Python `Enum` | Needs Phase 1's proxy. |
 | **4 — Ergonomics** | property streaming, server-side class filter for `get_actors`, asset catalog | Optimizations once the shape is settled. |
+
+**Phase 2 notes.** `FunctionResult` gained `typed_value` rather than changing `value`: the string
+form is published API and still useful to read, so both ship, with the typed one documented as the
+one a program should act on. A call frame is just another container, so the typed result is the
+property reader pointed at the frame — which is what makes a returned vector identical to the same
+vector read off a property, and is asserted as such. On the client, a generated method returns its
+return value directly, or a dict keyed by name when the function also has out parameters, which is
+how a Blueprint usually hands back more than one thing; position would be guesswork.
+
+**Phase 3 notes.** Components come from two places, because Unreal has two ways of declaring one: a
+Blueprint's SimpleConstructionScript, which already holds only its own nodes, and a native class's
+default subobjects, which its CDO carries along with every inherited one — so those are found by
+difference against the superclass's CDO. A component accessor is read-only: the attribute names a
+component that exists, and replacing one is not an assignment.
+
+**Phase 4 scope, as built.** Property streaming requires a tick, and the Control subsystem is not
+tickable while the State one is. Rather than move the property machinery (which depends on the
+generated `Value` and so cannot live in the deliberately protobuf-free classifier), Control becomes
+tickable and the subscription lives beside the rest of the property code. The tick early-returns on
+an empty subscription map, so a project that never streams pays nothing measurable.
 | **5 — Rust / C++** | generators off the same `tempo_schema.json` | Only once the schema has stopped moving. |
 
 ### Phase 0 results (measured)

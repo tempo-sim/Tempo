@@ -47,6 +47,22 @@ namespace TempoWorldSchemaWalk
 		TempoWorldReflection::FTypeInfo Type;
 	};
 
+	/**
+	 * A component a class brings with it.
+	 *
+	 * A Blueprint declares these in its SimpleConstructionScript; a native class creates them as
+	 * default subobjects in its constructor. Either way they exist on every instance under a known
+	 * name, which is what lets a generated class offer `truck.Mesh` instead of making a caller
+	 * remember the string.
+	 */
+	struct FComponentTemplate
+	{
+		// The name the component has on an instance, which is how every TempoWorld RPC addresses it.
+		FString Name;
+		// The component class's path.
+		FString ClassPath;
+	};
+
 	struct FClassEntry
 	{
 		FString Name;
@@ -59,6 +75,9 @@ namespace TempoWorldSchemaWalk
 		// keeps AActor's members out of all two thousand of its subclasses.
 		TArray<FMember> Properties;
 		TArray<TempoWorldReflection::FFunctionInfo> Functions;
+		// Declared on this class only, as the members are: an inherited component belongs to the
+		// class that introduced it.
+		TArray<FComponentTemplate> Components;
 	};
 
 	struct FStructEntry
