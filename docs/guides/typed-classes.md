@@ -140,10 +140,11 @@ Start a sim — the packaged binary, headless, is enough:
 ./Packaged/Mac/TempoSample.app/Contents/MacOS/TempoSample -nullrhi -unattended -nosound
 ```
 
-Then, from the project root:
+Then, from the project root. The example lives with the project whose classes it names — for
+TempoSample that is `Content/Python/ExampleClients/TypedClasses.py`:
 
 ```bash
-python Plugins/Tempo/ExampleClients/Python/TypedClasses.py
+python ./Content/Python/ExampleClients/TypedClasses.py
 ```
 
 ```text
@@ -228,7 +229,11 @@ which is the point — a rename in C++ or in a Blueprint has to show up here as 
 none of this would catch anything.
 
 In your own project the distribution is `<your-project>-classes` and the import is
-`<your_project>_classes`; everything after the import is identical.
+`<your_project>_classes`; everything after the import is identical. That is also why the example
+ships with TempoSample rather than with Tempo: the plugin's own
+[example clients](../clients/examples.md) address everything by string and so run against any sim,
+while a typed one names classes that exist in exactly one project. Copy it into yours and change the
+imports.
 
 ## 9. Keep the classes and the sim together
 

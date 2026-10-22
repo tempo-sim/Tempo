@@ -31,20 +31,6 @@ python ./Plugins/Tempo/ExampleClients/Python/SensorPlayground.py
 python ./Plugins/Tempo/ExampleClients/Python/WorldPlayground.py --ip localhost --port 10001
 ```
 
-### Typed classes
-
-**`TypedClasses.py`** — a tour of the [typed classes](typed-classes.md): spawn an actor by its
-class, read and write its properties, reach its components, call a function, batch and watch. Every
-attribute in it is a declared member of a generated class, so a type checker reads the file against
-the build those classes came from.
-
-```bash
-python ./Plugins/Tempo/ExampleClients/Python/TypedClasses.py
-```
-
-It needs this build's generated class package installed alongside `tempo-sim`;
-[Typed classes, step by step](../guides/typed-classes.md) sets that up.
-
 ### Visualizers
 
 **`LidarPreview.py`** — a minimal example: stream a single lidar at a target rate and visualize
@@ -97,6 +83,22 @@ they cost bandwidth and CPU and crowd out color real estate when there are many 
 them with `--depth` / `--labels` / `--bboxes`, or per-camera from the Streams panel.
 
 It works on Linux, macOS and Windows — rerun ships native viewers for all three.
+
+### Typed classes
+
+The examples above run against any Tempo sim, because they address everything by string. A
+[typed classes](typed-classes.md) example cannot: its whole value is naming one project's classes in
+code a type checker reads, so it belongs with the project whose classes it names.
+
+TempoSample's is `Content/Python/ExampleClients/TypedClasses.py` — spawn an actor by its class, read
+and write its properties, reach its components, call a function, batch, watch, and discover by type:
+
+```bash
+python ./Content/Python/ExampleClients/TypedClasses.py
+```
+
+[Typed classes, step by step](../guides/typed-classes.md) walks through it, and through writing the
+equivalent against your own project's classes.
 
 ### Notebook
 
