@@ -4,6 +4,7 @@
 
 #include "Components/SceneComponent.h"
 #include "GameFramework/Actor.h"
+#include "Kismet/KismetSystemLibrary.h"
 #include "Misc/AutomationTest.h"
 
 // Unit tests for the one classifier every TempoWorld path derives its view of an FProperty from.
@@ -208,6 +209,93 @@ bool FTempoWorldReflectionExposureTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("RootComponent getter"), Root.BlueprintGetter, FString(TEXT("K2_GetRootComponent")));
 	TestTrue(TEXT("Tags declares no accessors"), Tags.BlueprintGetter.IsEmpty() && Tags.BlueprintSetter.IsEmpty());
 #endif
+
+	return true;
+}
+
+// Function classification: what CallFunction will accept, and how a signature reads.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTempoWorldReflectionFunctionsTest,
+	"Tempo.World.Reflection.Functions", TempoWorldReflectionTestFlags)
+bool FTempoWorldReflectionFunctionsTest::RunTest(const FString& Parameters)
+{
+	auto Classify = [this](UClass* Owner, const TCHAR* Name) -> FFunctionInfo
+	{
+		const UFunction* Function = Owner->FindFunctionByName(FName(Name));
+		if (!Function)
+		{
+			AddError(FString::Printf(TEXT("%s has no function named %s"), *Owner->GetName(), Name));
+			return FFunctionInfo();
+		}
+		return ClassifyFunction(Function);
+	};
+
+	// A getter: one return value, no inputs.
+	const FFunctionInfo GetLocation = Classify(AActor::StaticClass(), TEXT("K2_GetActorLocation"));
+	TestTrue(TEXT("K2_GetActorLocation is Blueprint-callable"), GetLocation.bBlueprintCallable);
+	TestTrue(TEXT("K2_GetActorLocation is callable"), GetLocation.bCallable);
+	TestEqual(TEXT("K2_GetActorLocation signature"), GetLocation.Signature,
+		FString(TEXT("vector K2_GetActorLocation()")));
+	if (const FParameterInfo* Return = GetLocation.FindReturn())
+	{
+		TestEqual(TEXT("return kind"), Return->Type.Kind, EValueKind::Vector);
+	}
+	else
+	{
+		AddError(TEXT("K2_GetActorLocation should have a return value"));
+	}
+	TestTrue(TEXT("no inputs to express"), GetLocation.AllInputsValueExpressible());
+
+	// A setter: one by-value input, no return. Unreal spells a void return "void".
+	const FFunctionInfo SetHidden = Classify(AActor::StaticClass(), TEXT("SetActorHiddenInGame"));
+	TestTrue(TEXT("SetActorHiddenInGame is callable"), SetHidden.bCallable);
+	TestEqual(TEXT("SetActorHiddenInGame signature"), SetHidden.Signature,
+		FString(TEXT("void SetActorHiddenInGame(bool bNewHidden)")));
+	TestNull(TEXT("SetActorHiddenInGame has no return"), SetHidden.FindReturn());
+	if (TestEqual(TEXT("SetActorHiddenInGame parameter count"), SetHidden.Parameters.Num(), 1))
+	{
+		TestEqual(TEXT("bNewHidden is an input"), SetHidden.Parameters[0].Kind, EParameterKind::Input);
+		TestEqual(TEXT("bNewHidden is a bool"), SetHidden.Parameters[0].Type.Kind, EValueKind::Bool);
+	}
+
+	// Whether a non-const reference parameter counts as an input is UHT's call, not ours, so rather
+	// than pin its answer this asserts the invariant that holds either way: the "out " prefix in the
+	// rendered signature appears for exactly the parameters classified as outputs.
+	const FFunctionInfo Bounds = Classify(AActor::StaticClass(), TEXT("GetActorBounds"));
+	TestTrue(TEXT("GetActorBounds is callable"), Bounds.bCallable);
+	TestNull(TEXT("GetActorBounds has no return"), Bounds.FindReturn());
+	for (const FParameterInfo& Parameter : Bounds.Parameters)
+	{
+		const FString Rendered = FString::Printf(TEXT("out %s %s"), *Parameter.Type.TypeString, *Parameter.Name);
+		if (Bounds.Signature.Contains(Rendered) != (Parameter.Kind == EParameterKind::Output))
+		{
+			AddError(FString::Printf(
+				TEXT("parameter '%s': kind and signature disagree about out-ness (signature: %s)"),
+				*Parameter.Name, *Bounds.Signature));
+		}
+	}
+
+	// A latent function cannot be driven from outside: only the caller's own latent action manager
+	// can fill in its FLatentActionInfo.
+	const FFunctionInfo Delay = Classify(UKismetSystemLibrary::StaticClass(), TEXT("Delay"));
+	TestTrue(TEXT("Delay is Blueprint-callable"), Delay.bBlueprintCallable);
+	TestFalse(TEXT("Delay is not callable over the API"), Delay.bCallable);
+	TestTrue(TEXT("Delay says why"), Delay.UnsupportedReason.Contains(TEXT("latent")));
+
+	// A delegate input cannot be supplied over the wire.
+	const FFunctionInfo LoadAsset = Classify(UKismetSystemLibrary::StaticClass(), TEXT("LoadAsset"));
+	TestFalse(TEXT("LoadAsset is not callable over the API"), LoadAsset.bCallable);
+	TestFalse(TEXT("LoadAsset says why"), LoadAsset.UnsupportedReason.IsEmpty());
+
+	// A UFUNCTION() with no Blueprint specifier is invisible to the typed API even though the server
+	// would happily call it through the string-keyed one.
+	const FFunctionInfo OnRep = Classify(AActor::StaticClass(), TEXT("OnRep_ReplicatedMovement"));
+	TestFalse(TEXT("OnRep_ReplicatedMovement is not Blueprint-callable"), OnRep.bBlueprintCallable);
+	TestTrue(TEXT("OnRep_ReplicatedMovement is still callable"), OnRep.bCallable);
+
+	// Null is classified, not crashed on.
+	const FFunctionInfo None = ClassifyFunction(nullptr);
+	TestFalse(TEXT("null function is not callable"), None.bCallable);
+	TestFalse(TEXT("null function says why"), None.UnsupportedReason.IsEmpty());
 
 	return true;
 }

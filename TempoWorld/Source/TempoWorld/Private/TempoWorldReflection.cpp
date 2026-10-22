@@ -3,6 +3,7 @@
 #include "TempoWorldReflection.h"
 
 #include "Components/ActorComponent.h"
+#include "Engine/LatentActionManager.h"
 #include "GameFramework/Actor.h"
 
 namespace TempoWorldReflection
@@ -322,6 +323,118 @@ FTypeInfo ClassifyProperty(const FProperty* Property)
 			*Property->GetClass()->GetName());
 		Info.TypeString = TEXT("unsupported");
 	}
+
+	return Info;
+}
+
+bool FFunctionInfo::AllInputsValueExpressible() const
+{
+	for (const FParameterInfo& Parameter : Parameters)
+	{
+		if (Parameter.Kind == EParameterKind::Input && !Parameter.Type.IsValueExpressible())
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
+const FParameterInfo* FFunctionInfo::FindReturn() const
+{
+	return Parameters.FindByPredicate([](const FParameterInfo& Parameter)
+	{
+		return Parameter.Kind == EParameterKind::Return;
+	});
+}
+
+bool IsInputParameter(const FProperty* Property)
+{
+	if (!Property || !Property->HasAnyPropertyFlags(CPF_Parm) || Property->HasAnyPropertyFlags(CPF_ReturnParm))
+	{
+		return false;
+	}
+	// A Blueprint "by-ref" input is CPF_OutParm|CPF_ReferenceParm, and is an input.
+	return !Property->HasAnyPropertyFlags(CPF_OutParm) || Property->HasAnyPropertyFlags(CPF_ReferenceParm);
+}
+
+FFunctionInfo ClassifyFunction(const UFunction* Function)
+{
+	FFunctionInfo Info;
+
+	if (!Function)
+	{
+		Info.UnsupportedReason = TEXT("no function");
+		return Info;
+	}
+
+	Info.Name = Function->GetName();
+	Info.bBlueprintCallable = Function->HasAnyFunctionFlags(FUNC_BlueprintCallable | FUNC_BlueprintPure);
+
+	// There is nothing to call on a delegate. FUNC_Delegate covers multicast too.
+	if (Function->HasAnyFunctionFlags(FUNC_Delegate))
+	{
+		Info.UnsupportedReason = FString::Printf(TEXT("'%s' is a delegate, not a callable function"), *Info.Name);
+	}
+
+	FString ReturnTypeString = TEXT("void");
+	TArray<FString> SignatureParms;
+
+	for (TFieldIterator<FProperty> It(Function); It && It->HasAnyPropertyFlags(CPF_Parm); ++It)
+	{
+		const FProperty* Parm = *It;
+
+		FParameterInfo Parameter;
+		Parameter.Name = Parm->GetName();
+		Parameter.Type = ClassifyProperty(Parm);
+		Parameter.Kind = Parm->HasAnyPropertyFlags(CPF_ReturnParm) ? EParameterKind::Return
+			: IsInputParameter(Parm) ? EParameterKind::Input
+			: EParameterKind::Output;
+
+		if (Parameter.Kind == EParameterKind::Return)
+		{
+			ReturnTypeString = Parameter.Type.TypeString;
+		}
+		else
+		{
+			SignatureParms.Add(FString::Printf(TEXT("%s%s %s"),
+				Parameter.Kind == EParameterKind::Input ? TEXT("") : TEXT("out "),
+				*Parameter.Type.TypeString, *Parameter.Name));
+		}
+
+		// Reasons a parameter makes the whole function uninvokable. The first one found wins, so the
+		// reason reported is the one a caller would hit first. Classification of later parameters
+		// continues regardless, because the signature is still worth reporting.
+		const FStructProperty* StructParm = CastField<FStructProperty>(Parm);
+		if (Info.UnsupportedReason.IsEmpty() && StructParm
+			&& StructParm->Struct == FLatentActionInfo::StaticStruct())
+		{
+			// Latent functions are identified by their FLatentActionInfo parameter, which only the
+			// caller's own latent action manager can meaningfully fill in.
+			Info.UnsupportedReason = FString::Printf(
+				TEXT("Function '%s' is latent, which cannot be called over the API"), *Info.Name);
+		}
+
+		if (Info.UnsupportedReason.IsEmpty() && Parm->ArrayDim != 1)
+		{
+			Info.UnsupportedReason = FString::Printf(
+				TEXT("Parameter '%s' of function '%s' is a C-style array, which is not supported"),
+				*Parameter.Name, *Info.Name);
+		}
+
+		if (Info.UnsupportedReason.IsEmpty() && Parameter.Kind == EParameterKind::Input
+			&& (CastField<FDelegateProperty>(Parm) || CastField<FMulticastDelegateProperty>(Parm)))
+		{
+			Info.UnsupportedReason = FString::Printf(
+				TEXT("Parameter '%s' of function '%s' is a delegate, which cannot be supplied over the API"),
+				*Parameter.Name, *Info.Name);
+		}
+
+		Info.Parameters.Add(MoveTemp(Parameter));
+	}
+
+	Info.Signature = FString::Printf(TEXT("%s %s(%s)"), *ReturnTypeString, *Info.Name,
+		*FString::Join(SignatureParms, TEXT(", ")));
+	Info.bCallable = Info.UnsupportedReason.IsEmpty();
 
 	return Info;
 }

@@ -3359,41 +3359,16 @@ namespace
 	// parameters. A Blueprint "by-ref" input is CPF_OutParm|CPF_ReferenceParm and is an input.
 	bool IsInputParm(const FProperty* Property)
 	{
-		if (!Property->HasAnyPropertyFlags(CPF_Parm) || Property->HasAnyPropertyFlags(CPF_ReturnParm))
-		{
-			return false;
-		}
-		return !Property->HasAnyPropertyFlags(CPF_OutParm) || Property->HasAnyPropertyFlags(CPF_ReferenceParm);
+		return TempoWorldReflection::IsInputParameter(Property);
 	}
 
-	grpc::Status CheckFunctionIsCallable(const UObject* Object, const UFunction* Function)
+	grpc::Status CheckFunctionIsCallable(const UFunction* Function)
 	{
-		for (TFieldIterator<FProperty> It(Function); It && It->HasAnyPropertyFlags(CPF_Parm); ++It)
+		const TempoWorldReflection::FFunctionInfo Info = TempoWorldReflection::ClassifyFunction(Function);
+		if (!Info.bCallable)
 		{
-			const FProperty* Parm = *It;
-			// Latent functions are identified by their FLatentActionInfo parameter, which only
-			// the caller's own latent action manager can meaningfully fill in.
-			if (const FStructProperty* StructParm = CastField<FStructProperty>(Parm))
-			{
-				if (StructParm->Struct == FLatentActionInfo::StaticStruct())
-				{
-					const FString ErrorMsg = FString::Printf(TEXT("Function '%s' on object '%s' is latent, which cannot be called over the API"), *Function->GetName(), *Object->GetName());
-					return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
-				}
-			}
-			if (Parm->ArrayDim != 1)
-			{
-				// UProperties can be C-style arrays, indicated by a non-1 ArrayDim. We don't support these.
-				const FString ErrorMsg = FString::Printf(TEXT("Parameter '%s' of function '%s' is a C-style array, which is not supported"), *Parm->GetName(), *Function->GetName());
-				return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
-			}
-			if (IsInputParm(Parm) && (CastField<FDelegateProperty>(Parm) || CastField<FMulticastDelegateProperty>(Parm)))
-			{
-				const FString ErrorMsg = FString::Printf(TEXT("Parameter '%s' of function '%s' is a delegate, which cannot be supplied over the API"), *Parm->GetName(), *Function->GetName());
-				return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
-			}
+			return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*Info.UnsupportedReason)));
 		}
-
 		return grpc::Status_OK;
 	}
 
@@ -3435,7 +3410,7 @@ namespace
 	// container that SetValueOnTarget can write into.
 	grpc::Status CallFunctionWithArgs(const UWorld* World, UObject* Object, UFunction* Function, const CallFunctionRequest& Request, CallFunctionResponse& Response)
 	{
-		const grpc::Status CallableStatus = CheckFunctionIsCallable(Object, Function);
+		const grpc::Status CallableStatus = CheckFunctionIsCallable(Function);
 		if (!CallableStatus.ok())
 		{
 			return CallableStatus;
@@ -3518,27 +3493,9 @@ namespace
 		return grpc::Status_OK;
 	}
 
-	// Render a function's signature the way its declaration reads, using the same type vocabulary
-	// GetProperties reports: "float GetDistanceTo(AActor* OtherActor)". Out parameters stay in the
-	// parameter list, prefixed with "out ", since that is where the frame expects them.
 	FString GetFunctionSignature(const UFunction* Function)
 	{
-		FString ReturnType = TEXT("void");
-		TArray<FString> Parms;
-		for (TFieldIterator<FProperty> It(Function); It && It->HasAnyPropertyFlags(CPF_Parm); ++It)
-		{
-			const FProperty* Parm = *It;
-			FString Type;
-			GetPropertyTypeAndValue(nullptr, Parm, Type, nullptr);
-			if (Parm->HasAnyPropertyFlags(CPF_ReturnParm))
-			{
-				ReturnType = Type;
-				continue;
-			}
-			Parms.Add(FString::Printf(TEXT("%s%s %s"), IsInputParm(Parm) ? TEXT("") : TEXT("out "), *Type, *Parm->GetName()));
-		}
-
-		return FString::Printf(TEXT("%s %s(%s)"), *ReturnType, *Function->GetName(), *FString::Join(Parms, TEXT(", ")));
+		return TempoWorldReflection::ClassifyFunction(Function).Signature;
 	}
 
 	void GetObjectFunctions(const UObject* Object, GetFunctionsResponse& Response)
@@ -3595,7 +3552,7 @@ namespace
 
 			// Report exactly what CallFunction would refuse, so a caller never has to guess which
 			// of the listed functions it can actually invoke.
-			const grpc::Status CallableStatus = CheckFunctionIsCallable(Object, Function);
+			const grpc::Status CallableStatus = CheckFunctionIsCallable(Function);
 			FunctionDescriptor->set_callable(CallableStatus.ok());
 			if (!CallableStatus.ok())
 			{

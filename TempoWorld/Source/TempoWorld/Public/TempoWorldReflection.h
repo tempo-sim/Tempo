@@ -124,6 +124,62 @@ namespace TempoWorldReflection
 	// structs. They agree here.
 	TEMPOWORLD_API EValueKind StructKindForCPPName(const FString& StructCPPName);
 
+	// How a function passes a parameter.
+	enum class EParameterKind : uint8
+	{
+		// The caller must supply it. A Blueprint "by-ref" input is CPF_OutParm|CPF_ReferenceParm
+		// and counts as an input, which is why this is not simply "not an out parm".
+		Input,
+		// The function hands it back. The caller must not supply it.
+		Output,
+		// The function's return value, which Unreal names "ReturnValue".
+		Return,
+	};
+
+	/** One parameter of a function. A UFunction's parameters are FProperties, so they classify. */
+	struct TEMPOWORLD_API FParameterInfo
+	{
+		FString Name;
+		FTypeInfo Type;
+		EParameterKind Kind = EParameterKind::Input;
+	};
+
+	/** Everything this API knows about one UFunction. */
+	struct TEMPOWORLD_API FFunctionInfo
+	{
+		FString Name;
+		// The signature as the declaration reads, in the same type vocabulary properties report:
+		// "float GetDistanceTo(AActor* OtherActor)". Out parameters stay in the list, prefixed
+		// "out ", because that is where the call frame expects them.
+		FString Signature;
+		TArray<FParameterInfo> Parameters;
+
+		// FUNC_BlueprintCallable or FUNC_BlueprintPure: whether Blueprint may call it at all. This
+		// is the filter the typed API applies, and it comes from flags, which survive cooking.
+		bool bBlueprintCallable = false;
+
+		// Whether CallFunction will accept an invocation of it.
+		bool bCallable = false;
+		// Why not, when bCallable is false. Empty otherwise.
+		FString UnsupportedReason;
+
+		// Whether every input can be supplied as one Value, so a generated method can take plain
+		// positional arguments. False when an input is an arbitrary struct or a map, which the
+		// server will still accept a member at a time by nested address ("MyStruct.Inner") but which
+		// a single generated parameter cannot express.
+		bool AllInputsValueExpressible() const;
+
+		// The return value, or null for a void function. Out parameters are not it.
+		const FParameterInfo* FindReturn() const;
+	};
+
+	// Whether the caller must supply this parameter.
+	TEMPOWORLD_API bool IsInputParameter(const FProperty* Property);
+
+	// Classifies a function. Never fails: an uninvokable function comes back with
+	// bCallable == false and a reason.
+	TEMPOWORLD_API FFunctionInfo ClassifyFunction(const UFunction* Function);
+
 	// Classifies a property. Never fails: an unrepresentable property comes back with
 	// Kind == Unsupported and a reason.
 	TEMPOWORLD_API FTypeInfo ClassifyProperty(const FProperty* Property);
