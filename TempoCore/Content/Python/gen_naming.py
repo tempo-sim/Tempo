@@ -14,7 +14,7 @@ from pathlib import Path
 # Import name of the publishable Tempo plugin distribution (PyPI dist name
 # `tempo-sim`, import name `tempo_sim`). This is the namespace under which the
 # plugin-owned generated protos and wrappers are nested, and the Rust-symmetric
-# infra crate name. See PYTHON_API_SPLIT_PLAN.md.
+# infra crate name. See AGENTS.md section 4.
 INFRA_PACKAGE = "tempo_sim"
 
 

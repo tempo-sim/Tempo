@@ -97,9 +97,11 @@ Reference implementations: `UTempoTimeServiceSubsystem`, `UTempoCoreServiceSubsy
 - `TempoCore/Scripts/GenAPI.sh` builds/refreshes the `TempoEnv` venv and installs the Python pkg.
 - A `.tempo_prebuild_cache.json` skips unnecessary regeneration.
 
-**Direction in flight** (see `PYTHON_API_SPLIT_PLAN.md`): splitting the Python API into a
-canonical `tempo-sim` distribution + per-project `tempo-sample`, and namespacing protos under
-the package (`import tempo_sim.TempoSensors`).
+The Python API ships as **two distributions**: the canonical `tempo-sim` (this plugin's
+`TempoCore/Content/Python/API`) and one named after the host project (`tempo-sample`, from the
+project's own `Content/Python/API`), which carries that project's own services. Protos are
+namespaced under their distribution, so clients import `tempo_sim.TempoSensors` and
+`tempo_sample.<Module>`. `gen_naming.py` derives both names and classifies each module's owner.
 
 ---
 
@@ -306,5 +308,7 @@ matrix entry in `tempo_build_and_package.yml` (and, for Python, a line in `pytes
   `TempoTiledSceneCaptureComponent`, `TempoLensModels`, `TempoSensorInterface`).
 - Build/deps → `Scripts/`, `*.Build.cs`.
 - Client examples → `ExampleClients/`.
-- Project status & direction → `PROGRESS.md`, `MIGRATION_v0.1.0.md`, `PYTHON_API_SPLIT_PLAN.md`,
-  and each plugin's `README.md`.
+- Project history → `MIGRATION_v0.1.0.md`, `MIGRATION_v0.3.0.md`, and `docs/migration/`.
+- Work in flight → the top-level `*_PLAN.md` docs (`TYPED_WORLD_API_PLAN.md`).
+- Published documentation → `docs/` (start at `docs/index.md`); `docs/guides/documentation.md`
+  explains how it is built.
