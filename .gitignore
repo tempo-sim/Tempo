@@ -63,6 +63,9 @@ Saved/*
 
 # Test harness scratch (venv for TestPython.sh; vendored crate + build output for TestRust.sh)
 .tempo_test_venv/
+# The codegen group builds its own venv: it installs the in-tree package and pyright, and
+# has no use for the packaged wheels the one above holds.
+.tempo_codegen_venv/
 Tests/Rust/vendor/
 Tests/Rust/target/
 
