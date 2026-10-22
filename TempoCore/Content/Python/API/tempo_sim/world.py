@@ -29,13 +29,27 @@ def _world():
     return tempo_world
 
 
-def _transform_fields(transform: Optional[Transform]):
-    """A Transform as the fields SpawnActor takes, in Unreal's own units."""
+def _spawn_transform(transform: Optional[Transform]):
+    """A Transform as the message SpawnActor takes.
+
+    SpawnActor converts: it reads meters, radians and right-handed, unlike the typed property API,
+    which is Unreal-native throughout. So a native-unit Transform has to be converted on the way
+    in, rather than passed through.
+    """
+    import math
+
+    import tempo_sim.TempoCore.Geometry_pb2 as Geometry
+
     transform = transform or Transform()
-    return {
-        "x": transform.Location.X, "y": transform.Location.Y, "z": transform.Location.Z,
-        "r": transform.Rotation.Roll, "p": transform.Rotation.Pitch, "yaw": transform.Rotation.Yaw,
-    }
+    message = Geometry.Transform()
+    # cm -> m, and Unreal's left-handed Y is the API's right-handed -Y.
+    message.location.x = transform.Location.X / 100.0
+    message.location.y = -transform.Location.Y / 100.0
+    message.location.z = transform.Location.Z / 100.0
+    message.rotation.r = math.radians(transform.Rotation.Roll)
+    message.rotation.p = -math.radians(transform.Rotation.Pitch)
+    message.rotation.y = -math.radians(transform.Rotation.Yaw)
+    return message
 
 
 def get_actors(cls: type[T]) -> List[T]:
@@ -93,7 +107,8 @@ def spawn_actor(cls: type[T], transform: Optional[Transform] = None,
     Typed for free: the RPC already takes the class, so there is nothing to infer.
     """
     response = _world().spawn_actor(actor_type=cls.__tempo_class__, deferred=False,
-                                    relative_to_actor=relative_to, **_transform_fields(transform))
+                                    relative_to_actor=relative_to,
+                                    transform=_spawn_transform(transform))
     return cls(response.name)
 
 
@@ -110,7 +125,8 @@ def spawn_actor_deferred(cls: type[T], transform: Optional[Transform] = None,
             truck.InitialTerrainHeight = 1.0
     """
     response = _world().spawn_actor(actor_type=cls.__tempo_class__, deferred=True,
-                                    relative_to_actor=relative_to, **_transform_fields(transform))
+                                    relative_to_actor=relative_to,
+                                    transform=_spawn_transform(transform))
     handle = cls(response.name)
     try:
         yield handle
