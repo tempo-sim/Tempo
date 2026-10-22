@@ -20,7 +20,11 @@
  *
  * Output is deterministic -- classes, properties, functions, structs and enums are all emitted in
  * sorted order, with no timestamps -- so two releases diff cleanly and a breaking change is a
- * reviewable list rather than an archaeology exercise.
+ * reviewable list rather than an archaeology exercise. The ordering is a property of the walk
+ * (TempoWorldSchemaWalk, in the runtime module), not of this serializer.
+ *
+ * This file owns only the document: the walk itself is shared with DescribeClasses, so what the
+ * stubs are generated from and what a running sim reports cannot drift apart.
  */
 namespace TempoWorldSchema
 {
