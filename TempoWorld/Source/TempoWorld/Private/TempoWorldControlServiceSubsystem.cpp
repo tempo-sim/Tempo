@@ -2980,7 +2980,8 @@ grpc::Status ResolveComponents(const UWorld* World, const RepeatedStringType& Va
 
 // The one place that knows how each Value variant maps onto Unreal property types. Both the
 // singular Set*Property RPCs and CallFunction's arguments come through here.
-grpc::Status SetValueOnTarget(const UWorld* World, const FPropertyTarget& Target, const PropertyValue& Value)
+grpc::Status SetValueOnTarget(const UWorld* World, const FPropertyTarget& Target, const PropertyValue& Value,
+	bool bNativeUnits)
 {
 	switch (Value.value_case())
 	{
@@ -3053,19 +3054,24 @@ grpc::Status SetValueOnTarget(const UWorld* World, const FPropertyTarget& Target
 		Rotator.Roll = Value.rotator_value().r();
 		Rotator.Pitch = Value.rotator_value().p();
 		Rotator.Yaw = Value.rotator_value().y();
-		return SetStructOnTarget(World, Target, QuantityConverter<Rad2Deg,R2L>::Convert(Rotator), TEXT("FRotator"));
+		return SetStructOnTarget(World, Target,
+			bNativeUnits ? Rotator : QuantityConverter<Rad2Deg,R2L>::Convert(Rotator), TEXT("FRotator"));
 	}
 	case PropertyValue::kQuatValue:
 	{
+		const FQuat Given(Value.quat_value().x(), Value.quat_value().y(), Value.quat_value().z(), Value.quat_value().w());
 		// Convert from right-handed (API convention) to Unreal's left-handed FQuat.
-		const FQuat Quat = QuantityConverter<UC_NONE, R2L>::Convert(
-			FQuat(Value.quat_value().x(), Value.quat_value().y(), Value.quat_value().z(), Value.quat_value().w()));
+		const FQuat Quat = bNativeUnits ? Given : QuantityConverter<UC_NONE, R2L>::Convert(Given);
 		return SetStructOnTarget(World, Target, Quat, TEXT("FQuat"));
 	}
 	case PropertyValue::kTransformValue:
 	{
 		// Same conventions as SpawnActor/SetActorTransform: m -> cm for location, rad/right-handed -> deg/left-handed for rotation.
-		const FTransform Transform = ToUnrealTransform(Value.transform_value());
+		const FTransform Transform = bNativeUnits
+			? FTransform(
+				FRotator(Value.transform_value().rotation().p(), Value.transform_value().rotation().y(), Value.transform_value().rotation().r()),
+				FVector(Value.transform_value().location().x(), Value.transform_value().location().y(), Value.transform_value().location().z()))
+			: ToUnrealTransform(Value.transform_value());
 		return SetStructOnTarget(World, Target, Transform, TEXT("FTransform"));
 	}
 	case PropertyValue::kColorValue:
@@ -3353,7 +3359,8 @@ grpc::Status SetValueOnTarget(const UWorld* World, const FPropertyTarget& Target
 
 // Resolve the actor/component and property a Set*PropertyRequest names, then write Value into it.
 template <typename RequestType>
-grpc::Status SetPropertyOnObject(const UWorld* World, const RequestType& Request, const PropertyValue& Value)
+grpc::Status SetPropertyOnObject(const UWorld* World, const RequestType& Request, const PropertyValue& Value,
+	bool bNativeUnits = false)
 {
 	FPropertyTarget Target;
 	const grpc::Status GetObjectStatus = GetObjectForRequest(World, Request, Target.Object);
@@ -3369,7 +3376,7 @@ grpc::Status SetPropertyOnObject(const UWorld* World, const RequestType& Request
 		return GetPropertyStatus;
 	}
 
-	return SetValueOnTarget(World, Target, Value);
+	return SetValueOnTarget(World, Target, Value, bNativeUnits);
 }
 
 // Credit: https://stackoverflow.com/a/44065093
@@ -3754,6 +3761,9 @@ namespace
 		case SetPropertyOp::kAssetSetOp:        return SetPropertyImpl(World, Op.asset_set_op());
 		case SetPropertyOp::kActorSetOp:        return SetPropertyImpl(World, Op.actor_set_op());
 		case SetPropertyOp::kComponentSetOp:    return SetPropertyImpl(World, Op.component_set_op());
+		// The generic op carries its own native_units, so a batched native-unit write goes here.
+		case SetPropertyOp::kGenericOp:         return SetPropertyOnObject(World, Op.generic_op(),
+			Op.generic_op().value(), Op.generic_op().native_units());
 		case SetPropertyOp::OP_NOT_SET:
 		default:
 			return grpc::Status(grpc::FAILED_PRECONDITION, "SetPropertyOp has no op set");
@@ -3781,7 +3791,8 @@ void UTempoWorldControlServiceSubsystem::SetProperties(const SetPropertiesReques
 
 void UTempoWorldControlServiceSubsystem::SetPropertyValue(const SetPropertyRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const
 {
-	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), SetPropertyOnObject(GetWorld(), Request, Request.value()));
+	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(),
+		SetPropertyOnObject(GetWorld(), Request, Request.value(), Request.native_units()));
 }
 
 namespace
@@ -3893,7 +3904,7 @@ namespace
 				return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 			}
 
-			const grpc::Status SetStatus = SetValueOnTarget(World, Target, Arg.value());
+			const grpc::Status SetStatus = SetValueOnTarget(World, Target, Arg.value(), Request.native_units());
 			if (!SetStatus.ok())
 			{
 				const FString ErrorMsg = FString::Printf(TEXT("Argument %d ('%s') of function '%s': %s"), ArgIndex, *ParmName, *Function->GetName(), UTF8_TO_TCHAR(SetStatus.error_message().c_str()));

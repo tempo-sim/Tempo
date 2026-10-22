@@ -792,6 +792,10 @@ message SetPropertyRequest {
   string component = 2;
   string property = 3;
   Value value = 4;
+  // False (the default) converts the way every other RPC does: rotations and transforms are given
+  // in radians, right-handed, with lengths in meters. True writes the value exactly as given, in
+  // Unreal's own units -- centimeters, degrees, left-handed.
+  bool native_units = 5;
 }
 
 // One argument to CallFunction.
@@ -811,6 +815,9 @@ message CallFunctionRequest {
   // supplied; out parameters and the return value must not be. Args are
   // applied in order.
   repeated FunctionArg args = 4;
+  // As SetPropertyRequest.native_units, applied to every argument in the call. An argument is the
+  // same Value a property takes, so it is converted by the same rules.
+  bool native_units = 5;
 }
 
 // One value a function handed back: its return value or an out parameter.
@@ -933,6 +940,9 @@ message SetPropertyOp {
     SetAssetSetPropertyRequest asset_set_op = 36;
     SetActorSetPropertyRequest actor_set_op = 37;
     SetComponentSetPropertyRequest component_set_op = 38;
+    // The generic form, carrying the value's type in the value. This is the only op that can
+    // express a native-unit write, since the 38 named ops above have no such field.
+    SetPropertyRequest generic_op = 39;
   }
 }
 

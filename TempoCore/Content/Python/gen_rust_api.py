@@ -367,13 +367,22 @@ pub struct Call {
     component: String,
     function: String,
     args: Vec<{{ arg_type }}>,
+    native_units: bool,
 }
 
 pub fn call(actor: String, component: String, function: String) -> Call {
-    Call { actor, component, function, args: Vec::new() }
+    Call { actor, component, function, args: Vec::new(), native_units: false }
 }
 
 impl Call {
+    /// Pass arguments in Unreal's own units (centimeters, degrees, left-handed) instead of the
+    /// API's meters/radians/right-handed convention. Affects rotator, quaternion and transform
+    /// arguments; the rest are never converted either way.
+    pub fn native_units(mut self, native_units: bool) -> Self {
+        self.native_units = native_units;
+        self
+    }
+
 {%- for method in methods %}
     pub fn {{ method.name }}(
         mut self,
@@ -416,6 +425,7 @@ impl Call {
             component: self.component,
             function: self.function,
             args: self.args,
+            native_units: self.native_units,
         };
         let response = client.call_function(request).await?;
         Ok(response.into_inner())
@@ -635,6 +645,21 @@ impl Call {
                 value_enum_path = _crate_path(owner, value_module_pascal, f"{value_module_snake}::Value")
                 request_rust_type_call = _crate_path(owner, value_module_pascal, "CallFunctionRequest")
                 call_rpc = next(rpc for rpc in call_service.rpcs if rpc.name == "CallFunction")
+                # The Call builder below spells out CallFunctionRequest's fields, because each one
+                # reaches it differently (args accumulate through the *_arg methods, the rest are
+                # set once). That makes it the one place a new field has to be wired in by hand, so
+                # check for one here: the alternative is an E0063 in generated Rust that points at
+                # the output instead of at this template.
+                call_request_desc = all_messages[call_rpc.request_type]
+                modelled_fields = {"actor", "component", "function", "args", "native_units"}
+                actual_fields = {field.name for field in call_request_desc.fields}
+                if actual_fields != modelled_fields:
+                    raise Exception(
+                        "CallFunctionRequest fields changed: {}. The Rust Call builder in "
+                        "gen_rust_api.py spells its fields out, so add the new one to the builder "
+                        "struct, to `call()`, to the request initializer, and to `modelled_fields` "
+                        "here.".format(
+                            ", ".join(sorted(actual_fields.symmetric_difference(modelled_fields)))))
                 call_response_desc = all_messages[call_rpc.response_type]
                 response_rust_type_call = _crate_path(
                     owner, call_response_desc.module_name.split(".")[0], call_response_desc.object_name)
