@@ -605,6 +605,24 @@ main practical payoff of moving generation into the editor. The check must be **
 downstream projects** — the same pattern as `test_packaged.yml` — because the drift that breaks
 scenarios happens on the *consuming* project's releases, not on Tempo's.
 
+`diff_schema.py` is the tool: it compares two schemas, lists what a client could break against,
+counts additions without listing them, and exits non-zero when anything is breaking.
+
+**What it needs, and the one thing still undecided: a baseline to diff against.** The schema is
+~20 MB, far too large to commit, so the previous state has to come from somewhere. Three options,
+none of them obviously right:
+
+1. **The previous release's schema, published as a release artifact.** Cheapest to check (one
+   download) and matches what a consumer actually upgrades from, which is the comparison that
+   matters. Needs the release process to publish it.
+2. **Regenerate from the base branch in CI.** No stored artifact, always exact, but it means a
+   second editor build and schema walk per PR — minutes, not seconds.
+3. **Commit a digest** rather than the schema: one line per member, enough to diff. Perhaps 2–3 MB
+   for this build, so still a large committed artifact that changes on nearly every PR.
+
+Option 1 is the recommendation, and it is a release-process decision rather than a code one, which
+is why it is called out here instead of implemented.
+
 ### 10.4 A strictness policy for consuming repos
 
 A type checker enforces nothing unless CI requires it, and Tempo cannot require it in someone
