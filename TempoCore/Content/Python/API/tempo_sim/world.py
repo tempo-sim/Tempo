@@ -18,7 +18,8 @@
 from contextlib import contextmanager
 from typing import Any, Iterator, List, Optional, TypeVar, overload
 
-from .unreal import DynamicObject, Object, Rotator, Transform, Vector, registered_classes
+from .unreal import (Batch, DynamicObject, Object, Rotator, Transform, Vector,
+                     registered_classes)
 
 T = TypeVar("T", bound=Object)
 
@@ -117,3 +118,58 @@ def spawn_actor_deferred(cls: type[T], transform: Optional[Transform] = None,
         # Finish even if the block raised: a deferred actor left unfinished is in the world but
         # never initialized, which is worse than one configured only partway.
         _world().finish_spawning_actor(actor=response.name)
+
+
+def batch() -> Batch:
+    """Collect writes made inside the block and send them together.
+
+        with world.batch():
+            truck.MaxSpeed = 1200.0
+            truck.Mass = 1500.0
+
+    One call instead of two, and one instead of twenty when there are twenty. Writes keep their
+    order, and the block is abandoned without sending anything if it raises.
+    """
+    return Batch()
+
+
+class SchemaMismatch(RuntimeError):
+    """The installed generated classes describe a different build than the sim is running."""
+
+
+def check_schema(raise_on_mismatch: bool = True) -> bool:
+    """Compare the installed generated classes against the sim's own reflection.
+
+    Stubs generated from one build and used against another is silent wrongness: the type checker
+    is satisfied, and the first attribute access that disagrees fails for reasons that look like
+    anything but a version skew. The content hash covers names, types and writability -- not
+    documentation -- so this answers "can these stubs address this sim", not "is anything different
+    at all".
+
+    Not automatic on connect, and deliberately so: the sim computes its hash by walking reflection,
+    which is dominated by loading every Blueprint and takes the best part of a minute. Paying that
+    on every client start would be worse than the problem. Call it once from a test, or at the start
+    of a long run. (A packaged build could report a hash baked in at package time, which would make
+    an on-connect check cheap; that is packaging work, not client work.)
+    """
+    installed = registered_classes().header
+    reported = _world().describe_classes(include_blueprint_classes=True,
+                                         blueprint_accessible_only=True,
+                                         include_functions=True).header
+
+    if reported.content_hash == installed["content_hash"]:
+        return True
+
+    message = (
+        "the installed generated classes do not match this sim.\n"
+        "  classes were generated from: engine {}, schema {}, hash {}\n"
+        "  the sim reports:             engine {}, schema {}, hash {}\n"
+        "Regenerate the client against this build, or connect to the build the client came from."
+    ).format(installed.get("engine_version"), installed.get("schema_version"),
+             installed.get("content_hash"),
+             reported.engine_version, reported.schema_version, reported.content_hash)
+    if raise_on_mismatch:
+        raise SchemaMismatch(message)
+    import warnings
+    warnings.warn(message, stacklevel=2)
+    return False

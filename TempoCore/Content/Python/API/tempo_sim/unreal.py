@@ -21,6 +21,9 @@
 import difflib
 import json
 import os
+import threading
+
+from contextlib import contextmanager
 
 from dataclasses import dataclass, field
 
@@ -127,6 +130,65 @@ class Object:
         """
         ancestor = getattr(other, "__tempo_class__", other)
         return _classes.is_subclass(type(self).__tempo_class__, ancestor)
+
+    @contextmanager
+    def snapshot(self, *names):
+        """Read several properties in one call, then serve attribute reads from that.
+
+        Attribute access costs a round trip each, which is the price of looking like a field. A
+        snapshot pays it once:
+
+            with truck.snapshot():
+                print(truck.MaxSpeed, truck.Mass, truck.Drag)
+
+        With no arguments it fetches every readable property of the class, which is one call however
+        many there are -- a win past the second read, and worth knowing about on a class with
+        hundreds. Naming the properties fetches only those.
+
+        It is a point-in-time copy: the simulation moves on, and the values do not. A write inside
+        the block goes straight through and drops that entry, so a read after it sees the new value
+        rather than the stale one.
+        """
+        wanted = list(names) if names else self._readable_names()
+        values = {}
+        if wanted:
+            response = _world().get_properties(
+                actor=self._actor, component=self._component, properties=wanted, native_units=True)
+            for entry in response.values:
+                # An unreadable property does not fail the call; it simply is not in the snapshot,
+                # and a read of it falls through to the server to report why.
+                if entry.code == 0:
+                    values[entry.name] = _from_value(entry.value)
+
+        snapshots = getattr(_state, "snapshots", None)
+        if snapshots is None:
+            snapshots = _state.snapshots = {}
+        key = (self._actor, self._component)
+        previous = snapshots.get(key)
+        snapshots[key] = values
+        try:
+            yield self
+        finally:
+            if previous is None:
+                snapshots.pop(key, None)
+            else:
+                snapshots[key] = previous
+
+    def _readable_names(self):
+        """Every property of this class that can be read as one value."""
+        class_path = type(self).__tempo_class__
+        names, seen = [], set()
+        while class_path and class_path not in seen:
+            seen.add(class_path)
+            entry = _classes.metadata(class_path)
+            if entry is None:
+                break
+            for name, member in entry["properties"].items():
+                # A struct is addressed through its members, so there is nothing to prefetch.
+                if member.get("variant") is not None:
+                    names.append(name)
+            class_path = entry.get("super") or ""
+        return names
 
     def _property(self, name):
         member = _classes.find_property(type(self).__tempo_class__, name)
@@ -460,7 +522,92 @@ def _from_value(message):
     raise TypeError("no conversion from Value variant {!r}".format(variant))
 
 
+# The open batch, if any. Thread-local because the client is not thread-safe anyway -- the gRPC
+# channel is bound to the loop that created it -- so a batch opened on one thread has no business
+# capturing writes made on another.
+_state = threading.local()
+
+
+def _open_batch():
+    return getattr(_state, "batch", None)
+
+
+class Batch:
+    """Buffers writes and sends them together.
+
+    Attribute access is one round trip per attribute, which is the cost of making it look like
+    assignment. Setting twenty properties on an actor should not be twenty calls, so a batch
+    collects them and flushes once.
+
+    Order is preserved exactly. A property with a BlueprintSetter has to be written by calling its
+    accessor, which is not something SetProperties can carry, so the queue holds both kinds and the
+    flush sends each contiguous run of plain writes as one SetProperties call with the accessor
+    calls in between. The common case -- no accessors -- is a single call.
+    """
+
+    def __init__(self):
+        self._queue = []
+        self._depth = 0
+
+    def add_write(self, actor, component, address, variant, value):
+        self._queue.append(("set", (actor, component, address, variant, value)))
+
+    def add_call(self, actor, component, function, variant, value):
+        self._queue.append(("call", (actor, component, function, variant, value)))
+
+    def __enter__(self):
+        self._depth += 1
+        _state.batch = self
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        self._depth -= 1
+        if self._depth > 0:
+            # A nested batch joins the outer one rather than flushing early, so the whole block is
+            # still one flush.
+            return False
+        _state.batch = None
+        if exc_type is None:
+            self.flush()
+        return False
+
+    def flush(self):
+        queued, self._queue = self._queue, []
+        pending = []
+        for kind, payload in queued:
+            if kind == "set":
+                pending.append(payload)
+                continue
+            self._send(pending)
+            pending = []
+            actor, component, function, variant, value = payload
+            _world().call_function(actor=actor, component=component, function=function,
+                                   native_units=True,
+                                   args=[{"name": "", "value": _to_value(variant, value)}])
+        self._send(pending)
+
+    @staticmethod
+    def _send(writes):
+        if not writes:
+            return
+        builder = _world().batch()
+        for actor, component, address, variant, value in writes:
+            # The generic op, which is the only one carrying native_units.
+            builder.set_generic_property(actor=actor, component=component, property=address,
+                                         value=_to_value(variant, value), native_units=True)
+        response = builder.execute()
+        if response.failures:
+            first = response.failures[0]
+            raise RuntimeError("batched write {} of {} failed: {}".format(
+                first.op_index, len(writes), first.error))
+
+
 def _read(actor, component, address):
+    # A snapshot serves reads for the handle that opened it, so a block reading several properties
+    # costs one call rather than one per property.
+    cache = getattr(_state, "snapshots", {}).get((actor, component))
+    if cache is not None and address in cache:
+        return cache[address]
     return _from_value(_world().get_property(
         actor=actor, component=component, property=address, native_units=True))
 
@@ -473,10 +620,26 @@ def _write(actor, component, address, member, value):
     instead. The schema records it; a cooked build could not have told us it exists.
     """
     setter = member.get("setter")
+    batch = _open_batch()
+
     if setter:
-        _world().call_function(actor=actor, component=component, function=setter, native_units=True,
-                               args=[{"name": "", "value": _to_value(member["variant"], value)}])
+        if batch is not None:
+            batch.add_call(actor, component, setter, member["variant"], value)
+        else:
+            _world().call_function(actor=actor, component=component, function=setter,
+                                   native_units=True,
+                                   args=[{"name": "", "value": _to_value(member["variant"], value)}])
         return
+
+    cache = getattr(_state, "snapshots", {}).get((actor, component))
+    if cache is not None:
+        # The snapshot is now stale for this property; drop it rather than serve the old value.
+        cache.pop(address, None)
+
+    if batch is not None:
+        batch.add_write(actor, component, address, member["variant"], value)
+        return
+
     _world().set_property(actor=actor, component=component, property=address,
                           value=_to_value(member["variant"], value), native_units=True)
 

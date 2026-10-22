@@ -211,3 +211,159 @@ def test_an_object_handle_travels_as_its_address(classes):
     assert unreal._to_value("actor_value", classes.Widget("Thing")).actor_value == "Thing"
     assert unreal._to_value("component_value",
                             classes.Widget("Thing", "Mesh")).component_value == "Thing:Mesh"
+
+
+# -- batching and snapshots ----------------------------------------------------------------------
+
+
+@pytest.fixture
+def fake_world(monkeypatch, classes):
+    """Replace the generated client wrappers, recording the calls made through them.
+
+    One level lower than the `wire` fixture: these tests are about how many calls are made and in
+    what order, so the calls themselves have to be visible.
+    """
+    import tempo_sim.unreal as unreal
+
+    calls = []
+
+    class FakeBatchBuilder:
+        def __init__(self):
+            self.ops = []
+
+        def set_generic_property(self, **kwargs):
+            self.ops.append(kwargs["property"])
+            return self
+
+        def execute(self):
+            calls.append(("set_properties", list(self.ops)))
+
+            class Response:
+                failures = []
+            return Response()
+
+    class FakeWorld:
+        @staticmethod
+        def batch():
+            return FakeBatchBuilder()
+
+        @staticmethod
+        def set_property(**kwargs):
+            calls.append(("set_property", kwargs["property"]))
+
+        @staticmethod
+        def call_function(**kwargs):
+            calls.append(("call_function", kwargs["function"]))
+
+        @staticmethod
+        def get_property(**kwargs):
+            calls.append(("get_property", kwargs["property"]))
+            import tempo_sim.TempoWorld.WorldControl_pb2 as WorldControl
+            return WorldControl.Value(bool_value=True)
+
+        @staticmethod
+        def get_properties(**kwargs):
+            calls.append(("get_properties", list(kwargs["properties"])))
+            import tempo_sim.TempoWorld.WorldControl_pb2 as WorldControl
+
+            class Response:
+                values = [WorldControl.NamedValue(name=name, value=WorldControl.Value(bool_value=True))
+                          for name in kwargs["properties"]]
+            return Response()
+
+    monkeypatch.setattr(unreal, "_world", lambda: FakeWorld)
+    return calls
+
+
+def test_a_batch_sends_one_call(classes, fake_world):
+    from tempo_sim import world
+
+    widget = classes.Widget("MyActor")
+    with world.batch():
+        widget.bEnabled = True
+        widget.Mode = "Simple"
+        widget.Tags = ["x"]
+
+    assert fake_world == [("set_properties", ["bEnabled", "Mode", "Tags"])], \
+        "three writes in a batch should be one call"
+
+
+def test_writes_outside_a_batch_are_sent_immediately(classes, fake_world):
+    widget = classes.Widget("MyActor")
+    widget.bEnabled = True
+    widget.Mode = "Simple"
+    assert fake_world == [("set_property", "bEnabled"), ("set_property", "Mode")]
+
+
+def test_a_failed_block_sends_nothing(classes, fake_world):
+    from tempo_sim import world
+
+    widget = classes.Widget("MyActor")
+    with pytest.raises(ValueError):
+        with world.batch():
+            widget.bEnabled = True
+            raise ValueError("abandoned")
+    assert fake_world == [], "an abandoned block must not flush"
+
+
+def test_nested_batches_flush_once(classes, fake_world):
+    from tempo_sim import world
+
+    widget = classes.Widget("MyActor")
+    outer = world.batch()
+    with outer:
+        widget.bEnabled = True
+        with outer:
+            widget.Mode = "Simple"
+        assert fake_world == [], "the inner block must not flush early"
+    assert fake_world == [("set_properties", ["bEnabled", "Mode"])]
+
+
+def test_a_snapshot_reads_once_and_serves_the_rest(classes, fake_world):
+    widget = classes.Widget("MyActor")
+    with widget.snapshot("bEnabled", "Mode"):
+        assert widget.bEnabled is True
+        assert widget.bEnabled is True
+        assert widget.Mode is True
+    assert fake_world == [("get_properties", ["bEnabled", "Mode"])], \
+        "reads inside a snapshot should not reach the server"
+
+
+def test_reads_outside_a_snapshot_go_to_the_server(classes, fake_world):
+    widget = classes.Widget("MyActor")
+    assert widget.bEnabled is True
+    assert widget.bEnabled is True
+    assert fake_world == [("get_property", "bEnabled"), ("get_property", "bEnabled")]
+
+
+def test_a_snapshot_with_no_names_fetches_the_readable_properties(classes, fake_world):
+    widget = classes.Widget("MyActor")
+    with widget.snapshot():
+        pass
+    assert len(fake_world) == 1
+    kind, names = fake_world[0]
+    assert kind == "get_properties"
+    # Every property carryable as one value, and nothing that is only addressable through members.
+    assert set(names) >= {"bEnabled", "Mode", "Tags"}
+    assert "Settings" not in names, "a struct has nothing to prefetch"
+
+
+def test_writing_inside_a_snapshot_drops_the_stale_entry(classes, fake_world):
+    widget = classes.Widget("MyActor")
+    with widget.snapshot("bEnabled"):
+        assert widget.bEnabled is True          # served from the snapshot
+        widget.bEnabled = False                 # the snapshot is now stale for this property
+        _ = widget.bEnabled                     # so this must ask the server
+    assert fake_world == [
+        ("get_properties", ["bEnabled"]),
+        ("set_property", "bEnabled"),
+        ("get_property", "bEnabled"),
+    ]
+
+
+def test_the_snapshot_is_released_on_exit(classes, fake_world):
+    widget = classes.Widget("MyActor")
+    with widget.snapshot("bEnabled"):
+        _ = widget.bEnabled
+    _ = widget.bEnabled
+    assert fake_world[-1] == ("get_property", "bEnabled"), "a read after the block is not cached"

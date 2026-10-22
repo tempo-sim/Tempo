@@ -620,9 +620,19 @@ there, correct, and easy to switch on — not that it is universally switched on
 
 ### 10.5 Schema identity
 
-`SchemaHeader` carries `schema_version`, `engine_version` and `content_hash`. The runtime fetches it
-on first connect and warns (configurable to raise) on mismatch. Two supported engine versions make
-this mandatory.
+`SchemaHeader` carries `schema_version`, `engine_version` and `content_hash`, and the client
+compares the hash its stubs were generated from against the one the sim reports. Two supported
+engine versions make this mandatory.
+
+**Revised during implementation: the check is explicit, not on-connect.** Revision 2 said the
+runtime would fetch the header on first connect. It cannot affordably: the sim computes its hash by
+walking reflection, and that walk is dominated by loading every Blueprint — 55–95 s measured. Paying
+that on every client start is worse than the problem it detects. So `world.check_schema()` is
+called deliberately — from a test, or once at the start of a long run.
+
+The on-connect version becomes affordable once a packaged build reports a hash computed at package
+time rather than on demand, which is build plumbing rather than client work. Scoped with the
+packaging step.
 
 ---
 
