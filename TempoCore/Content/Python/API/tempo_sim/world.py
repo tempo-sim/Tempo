@@ -169,6 +169,9 @@ def check_schema(raise_on_mismatch: bool = True) -> bool:
     an on-connect check cheap; that is packaging work, not client work.)
     """
     installed = registered_classes().header
+    # These three options must match what query_packaged_classes.py asked when the installed
+    # classes were stamped. The hash covers function signatures, so a different request yields a
+    # different number for the same build.
     reported = _world().describe_classes(include_blueprint_classes=True,
                                          blueprint_accessible_only=True,
                                          include_functions=True).header

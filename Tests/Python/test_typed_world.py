@@ -292,8 +292,33 @@ def test_typed_discovery_finds_spawned_actors(sim_server):
         tw.destroy_actor(actor=spawned.actor)
 
 
-# The hash-equality check between the installed classes and the sim is deliberately not asserted
-# here yet. It cannot pass: the schema is generated in the editor, which has thousands of classes a
-# packaged build does not -- entire editor-only modules -- so the two walks legitimately differ until
-# the schema is filtered to what actually ships. That filter is the missing step, and the assertion
-# arrives with it.
+@requires_classes
+def test_the_installed_classes_match_the_sim(sim_server):
+    """The drift check, against the build these classes were generated for.
+
+    Only meaningful because the schema is filtered to what the build ships and stamped with the
+    build's own hash: an editor's hash would never match, having walked thousands of classes a
+    packaged game does not have.
+
+    Slow -- the sim walks reflection and loads every Blueprint to answer -- which is exactly why
+    this is not done automatically on connect.
+    """
+    assert world.check_schema(raise_on_mismatch=True) is True
+
+
+@requires_classes
+def test_every_generated_class_exists_in_the_sim(sim_server):
+    """No stub may promise a class this build does not have.
+
+    This is the check that caught the editor/cook divergence: the unfiltered schema offered 5,229
+    classes -- whole editor-only modules -- that a packaged build has no trace of, and a scenario
+    addressing one would type-check and then fail at runtime.
+    """
+    reported = {cls.class_path for cls in tw.describe_classes(
+        include_blueprint_classes=True, blueprint_accessible_only=True,
+        include_functions=False).classes}
+
+    promised = set(registered().index)
+    missing = promised - reported
+    assert not missing, "{} generated class(es) are absent from this build, e.g. {}".format(
+        len(missing), sorted(missing)[:5])

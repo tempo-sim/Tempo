@@ -90,13 +90,44 @@ if [ ! -s "$SCHEMA" ]; then
 fi
 grep -A1 "Wrote schema" "$LOG" | tail -2 || true
 
+# Narrow the schema to what the packaged build actually has.
+#
+# The walk above ran in the editor, because only an editor reports property metadata. But an editor
+# also has thousands of classes a packaged game does not -- whole editor-only modules -- and stubs
+# for those are worse than no stubs: a scenario addressing one type-checks and then fails at
+# runtime. The build's own reflection is the authority on what ships, so ask it.
+#
+# Skipped when there is no packaged binary yet, which is the case when this script is run on its own
+# rather than from Package.sh. The schema is then the editor's full view, which is right for
+# diffing one release against another and wrong for generating a client.
+GENERATE_FROM="$SCHEMA"
+PACKAGED_BINARY=$("$SCRIPT_DIR"/FindPackagedBinary.sh "$PROJECT_ROOT/Packaged" 2>/dev/null || true)
+
+if [ -n "$PACKAGED_BINARY" ] && [ -x "$PACKAGED_BINARY" ]; then
+  echo "Asking the packaged build which classes it has"
+  CLASS_PATHS="$SCHEMA_DIR/packaged_class_paths.json"
+  FILTERED="$SCHEMA_DIR/tempo_schema_packaged.json"
+  if "$PYTHON_BIN" "$PYTHON_DIR/query_packaged_classes.py" "$PACKAGED_BINARY" "$CLASS_PATHS"; then
+    if "$PYTHON_BIN" "$PYTHON_DIR/filter_schema.py" "$SCHEMA" "$CLASS_PATHS" "$FILTERED"; then
+      GENERATE_FROM="$FILTERED"
+    else
+      echo "Warning: could not filter the schema; generating from the editor's full view" >&2
+    fi
+  else
+    echo "Warning: could not query the packaged build; generating from the editor's full view" >&2
+  fi
+else
+  echo "No packaged build to filter against; generating from the editor's full view."
+  echo "  (Run this from Package.sh, or package first, to generate only classes that ship.)"
+fi
+
 STAGE="$STAGE_ROOT/$DIST_NAME"
 rm -rf "$STAGE"
 mkdir -p "$STAGE"
 
 echo "Generating $IMPORT_NAME"
 "$PYTHON_BIN" "$PYTHON_DIR/gen_py_classes.py" \
-  "$SCHEMA" "$STAGE/$IMPORT_NAME"
+  "$GENERATE_FROM" "$STAGE/$IMPORT_NAME"
 
 # The version follows tempo-sim's, so a client and the classes it addresses move together.
 TEMPO_SIM_VERSION=$(grep -m1 '^version' \
