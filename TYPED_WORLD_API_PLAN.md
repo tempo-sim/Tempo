@@ -497,11 +497,14 @@ Two Blueprints in different folders can share a class name. Generation must fail
 within a module, and every generated class carries its full `class_path` so the runtime spawns and
 narrows by exact class.
 
-This is **not free on the server side**: `SpawnActorRequest.actor_type` is a *name*, resolved by
-`GetSubClassWithName`, which is name-only — and AGENTS.md §6 requires every client-supplied class
-name to go through it. Spawning or narrowing by exact path needs either a new path field on the
-request or path-aware resolution inside that helper. Scope it explicitly in Phase 1 rather than
-assuming it.
+**Resolved:** `GetSubClassWithName` learns about paths rather than the request gaining a field. A
+class name can never contain a `/`, so a leading one unambiguously marks a path and cannot shadow a
+name. Callers that pass a name — every existing client, `SpawnActor` included — keep the documented
+first-match behavior exactly; the typed API and its stubs always pass a full path and get the one
+class they meant. This keeps AGENTS.md §6's rule that every client-supplied class name resolves
+through that one helper, and it means a client that already had a path in hand stops getting no
+class at all. Implemented as `GetSubClassWithPath<T>` in `TempoClassUtils.h`, which
+`GetSubClassWithName` delegates to.
 
 ---
 
@@ -583,12 +586,16 @@ scenarios happens on the *consuming* project's releases, not on Tempo's.
 
 ### 10.4 A strictness policy for consuming repos
 
-A type checker enforces nothing unless CI requires it. The deliverable therefore includes the
-required configuration for scenario repos: Pyright in strict mode, or at minimum
-`reportUnknownMemberType`, `reportUnknownArgumentType` and `reportUnnecessaryTypeIgnoreComment` as
-errors. Without it, `Any` leaking in from scenario code and stray `# type: ignore` comments quietly
-bypass the guarantee — and the last of those three is what stops an ignore surviving after the thing
-it silenced was fixed.
+A type checker enforces nothing unless CI requires it, and Tempo cannot require it in someone
+else's repository. What Tempo owes is the **mechanism**: stubs that make the drift a type error, a
+reusable PR check, and a documented, recommended configuration — Pyright in strict mode, or at
+minimum `reportUnknownMemberType`, `reportUnknownArgumentType` and
+`reportUnnecessaryTypeIgnoreComment` as errors. (The last of those is what stops an ignore comment
+outliving the thing it silenced.)
+
+A scenario repo that declines to adopt it, lets `Any` leak in, or scatters `# type: ignore` gets a
+weaker guarantee, and that is its own call to make. The design's obligation is that the mechanism is
+there, correct, and easy to switch on — not that it is universally switched on.
 
 ### 10.5 Schema identity
 
@@ -685,17 +692,18 @@ rename in scenario code — which is the point. snake_case would need an acronym
 existing `pascal_to_snake` lacks (`FOVAngle` → `f_o_v_angle`). Offering both doubles the stub and
 splits the docs. The generator fails the build on collisions either way.
 
-**(b) Does `DescribeClasses` stay?** Recommendation: **yes**, even with the commandlet as source of
-truth — the §5.3 verification test needs class-level introspection of a running sim for classes it
-cannot instantiate, and the dynamic path needs it too. Same classifier behind both. The alternative
-(drop the RPC, verify per-instance) cannot cover classes that are never spawned.
+**(b) Does `DescribeClasses` stay? — settled: yes.** Even with the commandlet as source of truth,
+the §5.3 verification test needs class-level introspection of a running sim for classes it cannot
+instantiate, and the dynamic path needs it too. Same classifier behind both.
 
-**(c) Harvest breadth.** Everything by default, `base_classes` available to narrow. Revisit after
-Phase 0 measures the real cost.
+**(c) Harvest breadth — open.** Everything by default, `base_classes` available to narrow. Revisit
+after Phase 0 measures the real cost.
 
-**(d) Distribution granularity.** One `<project>-classes` wheel; split engine from project only if
-Phase 0 shows the combined artifact is a problem.
+**(d) Distribution granularity — open.** One `<project>-classes` wheel; split engine from project
+only if Phase 0 shows the combined artifact is a problem.
 
-**(e) Path-aware class resolution.** §8.4 needs `SpawnActor` to accept an exact class path. Decide
-between a new field on `SpawnActorRequest` and teaching `GetSubClassWithName` about paths — the
-latter is tidier but touches a helper every service uses.
+**(e) Path-aware class resolution — settled:** `GetSubClassWithName` learns about paths; name
+callers keep first-match. See §8.4.
+
+**(f) A `TempoWorldEditor` module — settled: yes.** TempoWorld is single-module today; the schema
+commandlet needs an editor module, and it is an ordinary addition.
