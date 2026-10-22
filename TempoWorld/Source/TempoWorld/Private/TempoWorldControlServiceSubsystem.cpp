@@ -7,6 +7,7 @@
 #include "TempoConversion.h"
 #include "TempoCoreUtils.h"
 #include "TempoWorldUtils.h"
+#include "TempoWorldReflection.h"
 #include "TempoWorld.h"
 
 #include "EngineUtils.h"
@@ -1425,64 +1426,26 @@ void UTempoWorldControlServiceSubsystem::GetAllComponents(const GetAllComponents
 // wasn't cooked (deleted asset, editor-only module, plugin disabled for the packaged target).
 // The editor always has the type loaded, so this only ever bites in a packaged build - and it
 // bites hard: FObjectProperty::GetCPPType() and friends check() on it.
-bool HasResolvedType(const FProperty* Property)
-{
-	// Covers FObjectProperty, FClassProperty, FSoftObjectProperty, FSoftClassProperty, FWeakObjectProperty, ...
-	if (const FObjectPropertyBase* ObjectProperty = CastField<FObjectPropertyBase>(Property))
-	{
-		if (!ObjectProperty->PropertyClass)
-		{
-			return false;
-		}
-	}
-	if (const FClassProperty* ClassProperty = CastField<FClassProperty>(Property))
-	{
-		return ClassProperty->MetaClass != nullptr;
-	}
-	if (const FSoftClassProperty* SoftClassProperty = CastField<FSoftClassProperty>(Property))
-	{
-		return SoftClassProperty->MetaClass != nullptr;
-	}
-	if (const FInterfaceProperty* InterfaceProperty = CastField<FInterfaceProperty>(Property))
-	{
-		return InterfaceProperty->InterfaceClass != nullptr;
-	}
-	if (const FEnumProperty* EnumProperty = CastField<FEnumProperty>(Property))
-	{
-		return EnumProperty->GetEnum() != nullptr;
-	}
-	if (const FStructProperty* StructProperty = CastField<FStructProperty>(Property))
-	{
-		return StructProperty->Struct != nullptr;
-	}
-	return true;
-}
-
 // Render one property as a (type, value) pair of strings. Pass a null `Value` to ask for the
 // type alone. Shared by GetProperties and by CallFunction, so a function result reads exactly
 // like the same value read back off a property.
 void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, FString& Type, FString* Value)
 {
-	if (!HasResolvedType(Property))
+	// The type is whatever the one classifier says it is; this function's remaining job is reading
+	// the bytes, which needs the concrete FProperty and so keeps its own cast chain below.
+	Type = TempoWorldReflection::GetTypeString(Property);
+	if (Type == TEXT("unsupported"))
 	{
-		UE_LOG(LogTempoWorld, Warning, TEXT("Property '%s' names a type that isn't present in this build. Skipping it."),
-			*GetFullNameSafe(Property));
-		Type = TEXT("unsupported");
-		return;
-	}
-
-	if (Property->ArrayDim != 1)
-	{
-		// UProperties can be C-style arrays (who knew?), and this will be indicated by a non-1 ArrayDim member.
-		// For example, FPostProcessSettings has FLinearColor LensFlareTints[8]
-		// We don't support these types
-		Type = TEXT("unsupported");
+		if (!TempoWorldReflection::HasResolvedType(Property))
+		{
+			UE_LOG(LogTempoWorld, Warning, TEXT("Property '%s' names a type that isn't present in this build. Skipping it."),
+				*GetFullNameSafe(Property));
+		}
 		return;
 	}
 
 	if (const FStrProperty* StrProperty = CastField<FStrProperty>(Property))
 	{
-		Type = TEXT("string");
 		if (Value)
 		{
 			StrProperty->GetValue_InContainer(Container, Value);
@@ -1490,7 +1453,6 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 	}
 	else if (const FNameProperty* NameProperty = CastField<FNameProperty>(Property))
 	{
-		Type = TEXT("string");
 		if (Value)
 		{
 			FName ValueName;
@@ -1500,7 +1462,6 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 	}
 	else if (const FTextProperty* TextProperty = CastField<FTextProperty>(Property))
 	{
-		Type = TEXT("string");
 		if (Value)
 		{
 			FText ValueText;
@@ -1510,7 +1471,6 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 	}
 	else if (const FBoolProperty* BoolProperty = CastField<FBoolProperty>(Property))
 	{
-		Type = TEXT("bool");
 		if (Value)
 		{
 			// Read through the property rather than with GetValue_InContainer, which raw-copies
@@ -1521,7 +1481,6 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 	}
 	else if (const FIntProperty* IntProperty = CastField<FIntProperty>(Property))
 	{
-		Type = TEXT("int");
 		if (Value)
 		{
 			int32 ValueInt;
@@ -1531,7 +1490,6 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 	}
 	else if (const FInt64Property* Int64Property = CastField<FInt64Property>(Property))
 	{
-		Type = TEXT("int64");
 		if (Value)
 		{
 			int64 ValueInt;
@@ -1541,7 +1499,6 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 	}
 	else if (const FInt16Property* Int16Property = CastField<FInt16Property>(Property))
 	{
-		Type = TEXT("int");
 		if (Value)
 		{
 			int16 ValueInt;
@@ -1551,7 +1508,6 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 	}
 	else if (const FInt8Property* Int8Property = CastField<FInt8Property>(Property))
 	{
-		Type = TEXT("int");
 		if (Value)
 		{
 			int8 ValueInt;
@@ -1561,7 +1517,6 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 	}
 	else if (const FUInt64Property* UInt64Property = CastField<FUInt64Property>(Property))
 	{
-		Type = TEXT("int64");
 		if (Value)
 		{
 			uint64 ValueInt;
@@ -1571,7 +1526,6 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 	}
 	else if (const FUInt32Property* UInt32Property = CastField<FUInt32Property>(Property))
 	{
-		Type = TEXT("int64");
 		if (Value)
 		{
 			uint32 ValueInt;
@@ -1581,7 +1535,6 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 	}
 	else if (const FUInt16Property* UInt16Property = CastField<FUInt16Property>(Property))
 	{
-		Type = TEXT("int");
 		if (Value)
 		{
 			uint16 ValueInt;
@@ -1591,7 +1544,6 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 	}
 	else if (const FFloatProperty* FloatProperty = CastField<FFloatProperty>(Property))
 	{
-		Type = TEXT("float");
 		if (Value)
 		{
 			float ValueFloat;
@@ -1601,7 +1553,6 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 	}
 	else if (const FDoubleProperty* DoubleProperty = CastField<FDoubleProperty>(Property))
 	{
-		Type = TEXT("double");
 		if (Value)
 		{
 			double ValueDouble;
@@ -1611,8 +1562,6 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 	}
 	else if (const FEnumProperty* EnumProperty = CastField<FEnumProperty>(Property))
 	{
-		const FString EnumName = EnumProperty->GetEnum()->GetName();
-		Type = EnumName;
 		if (Value)
 		{
 			const FNumericProperty* EnumIntProperty = EnumProperty->GetUnderlyingProperty();
@@ -1626,8 +1575,6 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 		// Bytes might be enums, or just bytes
 		if (ByteProperty->Enum)
 		{
-			const FString EnumName = ByteProperty->Enum->GetName();
-			Type = EnumName;
 			if (Value)
 			{
 				uint8 ValueIndex;
@@ -1637,7 +1584,6 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 		}
 		else
 		{
-			Type = TEXT("int");
 			if (Value)
 			{
 				uint8 ValueByte;
@@ -1648,16 +1594,6 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 	}
 	else if (const FObjectProperty* ObjectProperty = CastField<FObjectProperty>(Property))
 	{
-		FString InnerType;
-		const FString OuterType =  ObjectProperty->GetCPPType(&InnerType, 0);
-		if (InnerType.IsEmpty())
-		{
-			Type = OuterType;
-		}
-		else
-		{
-			Type = FString::Printf(TEXT("%s<%s>"), *OuterType, *InnerType);
-		}
 		if (Value)
 		{
 			TObjectPtr<UObject> ValueObject;
@@ -1682,16 +1618,6 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 	else if (const FSoftObjectProperty* SoftObjectProperty = CastField<FSoftObjectProperty>(Property))
 	{
 		// Catches both FSoftObjectProperty and FSoftClassProperty (the latter derives from the former).
-		FString InnerType;
-		const FString OuterType = SoftObjectProperty->GetCPPType(&InnerType, 0);
-		if (InnerType.IsEmpty())
-		{
-			Type = OuterType;
-		}
-		else
-		{
-			Type = FString::Printf(TEXT("%s<%s>"), *OuterType, *InnerType);
-		}
 		if (Value)
 		{
 			const FSoftObjectPtr& Soft = SoftObjectProperty->GetPropertyValue_InContainer(Container);
@@ -1703,7 +1629,6 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 	{
 		if (StructProperty->Struct->GetStructCPPName() == TEXT("FVector"))
 		{
-			Type = TEXT("vector");
 			if (Value)
 			{
 				FVector ValueVector;
@@ -1713,7 +1638,6 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 		}
 		else if (StructProperty->Struct->GetStructCPPName() == TEXT("FRotator"))
 		{
-			Type = TEXT("rotator");
 			if (Value)
 			{
 				FRotator ValueRotator;
@@ -1724,7 +1648,6 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 		}
 		else if (StructProperty->Struct->GetStructCPPName() == TEXT("FColor"))
 		{
-			Type = TEXT("color");
 			if (Value)
 			{
 				FColor ValueColor;
@@ -1734,7 +1657,6 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 		}
 		else if (StructProperty->Struct->GetStructCPPName() == TEXT("FLinearColor"))
 		{
-			Type = TEXT("color");
 			if (Value)
 			{
 				FLinearColor ValueLinearColor;
@@ -1745,7 +1667,6 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 		}
 		else
 		{
-			Type = StructProperty->Struct->GetStructCPPName();
 			if (Value)
 			{
 				*Value = TEXT("{");
@@ -1765,9 +1686,8 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 	}
 	else if (const FArrayProperty* ArrayProperty = CastField<FArrayProperty>(Property))
 	{
-		FString InnerType = TEXT("unsupported");
-		// First, get the inner type (even if the array is empty!)
-		GetPropertyTypeAndValue(nullptr, ArrayProperty->Inner, InnerType, nullptr);
+		// The inner type is known even when the array is empty.
+		const FString InnerType = TempoWorldReflection::GetTypeString(ArrayProperty->Inner);
 		if (Value)
 		{
 			*Value = TEXT("[");
@@ -1785,15 +1705,12 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 			}
 			Value->Append(TEXT("]"));
 		}
-		Type = FString::Printf(TEXT("array<%s>"), *InnerType);
 	}
 	else if (const FMapProperty* MapProperty = CastField<FMapProperty>(Property))
 	{
-		FString KeyType = TEXT("unsupported");
-		FString ValueType = TEXT("unsupported");
-		// Get key and value types (even if the map is empty)
-		GetPropertyTypeAndValue(nullptr, MapProperty->KeyProp, KeyType, nullptr);
-		GetPropertyTypeAndValue(nullptr, MapProperty->ValueProp, ValueType, nullptr);
+		// Key and value types are known even when the map is empty.
+		const FString KeyType = TempoWorldReflection::GetTypeString(MapProperty->KeyProp);
+		const FString ValueType = TempoWorldReflection::GetTypeString(MapProperty->ValueProp);
 		if (Value)
 		{
 			*Value = TEXT("{");
@@ -1820,13 +1737,11 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 			}
 			Value->Append(TEXT("}"));
 		}
-		Type = FString::Printf(TEXT("map<%s,%s>"), *KeyType, *ValueType);
 	}
 	else if (const FSetProperty* SetProperty = CastField<FSetProperty>(Property))
 	{
-		FString InnerType = TEXT("unsupported");
-		// Get the inner type (even if the set is empty)
-		GetPropertyTypeAndValue(nullptr, SetProperty->ElementProp, InnerType, nullptr);
+		// The element type is known even when the set is empty.
+		const FString InnerType = TempoWorldReflection::GetTypeString(SetProperty->ElementProp);
 		if (Value)
 		{
 			*Value = TEXT("{");
@@ -1848,11 +1763,6 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 			}
 			Value->Append(TEXT("}"));
 		}
-		Type = FString::Printf(TEXT("set<%s>"), *InnerType);
-	}
-	else
-	{
-		Type = TEXT("unsupported");
 	}
 }
 
