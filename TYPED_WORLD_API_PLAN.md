@@ -719,7 +719,8 @@ tickable while the State one is. Rather than move the property machinery (which 
 generated `Value` and so cannot live in the deliberately protobuf-free classifier), Control becomes
 tickable and the subscription lives beside the rest of the property code. The tick early-returns on
 an empty subscription map, so a project that never streams pays nothing measurable.
-| **5 — Rust / C++** | generators off the same `tempo_schema.json` | Only once the schema has stopped moving. |
+| **5 — Rust** | `gen_rust_classes.py` + a `tempo_sim::unreal` runtime, off the same `tempo_schema.json` | Designed and measured in §15. |
+| **6 — C++** | generator off the same `tempo_schema.json` | Not started. |
 
 ### Phase 0 results (measured)
 
@@ -835,6 +836,10 @@ rename in scenario code — which is the point. snake_case would need an acronym
 existing `pascal_to_snake` lacks (`FOVAngle` → `f_o_v_angle`). Offering both doubles the stub and
 splits the docs. The generator fails the build on collisions either way.
 
+Rust answers this differently, and the acronym objection does not survive contact with a two-pass
+rule — see §15.3. Python keeps verbatim names; each language gets the names its users would guess,
+and the schema remains the one place both are derived from.
+
 **(b) Does `DescribeClasses` stay? — settled: yes.** Even with the commandlet as source of truth,
 the §5.3 verification test needs class-level introspection of a running sim for classes it cannot
 instantiate, and the dynamic path needs it too. Same classifier behind both.
@@ -852,3 +857,145 @@ callers keep first-match. See §8.4.
 
 **(f) A `TempoWorldEditor` module — settled: yes.** TempoWorld is single-module today; the schema
 commandlet needs an editor module, and it is an ordinary addition.
+
+---
+
+## 15. The Rust surface
+
+Phase 5. The same `tempo_schema.json`, a second generator, and a hand-written runtime that mirrors
+`tempo_sim.unreal` / `tempo_sim.world`. Everything below was measured against the real packaged
+schema for TempoSample on UE 5.8 — 6,068 classes, 5,500 properties, 13,054 functions, 267
+components, max inheritance depth 9 — not estimated.
+
+### 15.1 Rust has the inheritance this needs
+
+The earlier assessment held that Rust would be much harder than Python because it has no
+inheritance. That was wrong, and the reason is worth keeping: **generated code carries no data.** A
+handle is an actor name, a component name and a class path; a generated class adds names and types
+and nothing else. So there is no state to inherit — only a method surface — and Unreal's single
+inheritance maps exactly onto a chain of `Deref`:
+
+```rust
+#[repr(transparent)]
+pub struct TempoLidar(pub ObjectRef);
+
+impl std::ops::Deref for TempoLidar {
+    type Target = TempoTiledSceneCaptureComponent;
+    fn deref(&self) -> &Self::Target { TempoTiledSceneCaptureComponent::from_ref(&self.0) }
+}
+```
+
+One impl per class, not one per (class, ancestor) pair. Deref coercion then does the two things
+inheritance is wanted for, both verified to compile:
+
+- **Inherited members resolve.** `lidar.relative_location()` reaches `SceneComponent` five hops up.
+- **Polymorphism at a call site.** `fn aim(c: &SceneComponent)` accepts `&lidar`.
+
+`Deref` for inheritance is usually an anti-pattern because it leaks a type's internals; here the
+"internals" *are* the base class, which is the relation being modeled.
+
+**The rejected alternative, and why.** The gtk-rs shape — a marker type per class, a transitive
+`impl IsA<Ancestor> for Derived`, and accessors in a blanket `impl<T: IsA<C>>` — was built and
+measured too. It costs 15,754 `IsA` impls against 6,068 `Deref` impls, and it **does not compile
+with inherent methods**: two accessors of the same name under different `IsA` bounds are 3,765
+`error[E0592]: duplicate definitions`, because the compiler cannot prove the bounds disjoint. It
+would need one extension trait per class, which the caller must bring into scope — so
+`lidar.relative_location()` would require a `use` of `SceneComponentExt`, or a prelude importing
+6,068 traits. Deref needs neither.
+
+### 15.2 One crate, no feature gates
+
+The feared cost did not materialize. Cold, from `cargo clean`, for the whole 6,068-class surface:
+
+| shape | `cargo check` | `cargo build` | generated |
+|---|---|---|---|
+| sync only | 6.1 s | 7.3 s | 21,260 methods |
+| lazy `.get()` / `.await` | 5.9 s | 7.1 s | 21,260 methods |
+| twin `x()` + `x_async()`, async twins as `async fn` | 49.4 s | **51.9 s** | 42,520 methods |
+| **twin, async twins returning `impl Future`** | 10.7 s | **13.0 s** | 42,520 methods |
+
+So no cargo features per package, no `bindgen`-style allowlist, no proc macro reading the schema at
+compile time — one plain crate, as Python ships one wheel. 41 MB `.rlib`, built once and cached.
+
+**The cost driver is `async fn`, not class count.** Each one compiles to its own state machine, and
+doubling the method count that way cost 7×. Writing the async twin as a plain function handing back
+the runtime's future keeps the call syntax identical (`lidar.horizontal_beams_async().await?`) and
+puts the state machine in the runtime, once per value type instead of once per member:
+
+```rust
+pub fn horizontal_beams_async(&self)
+    -> impl std::future::Future<Output = Result<i32, TempoError>> + '_
+{ self.0.get_async("HorizontalBeams") }
+```
+
+That is 13.0 s against 51.9 s for the same surface. The twin form is what every other generated
+Tempo Rust API offers (§4), so the typed surface matches it rather than inventing a third
+convention.
+
+### 15.3 Naming: snake_case, and §14(a) revisited
+
+§14(a) settled Python on verbatim Unreal names and noted snake_case "would need an acronym-aware
+rule the existing `pascal_to_snake` lacks (`FOVAngle` → `f_o_v_angle`)". For Rust the answer is
+snake_case anyway, because a Rust user guesses `horizontal_beams`, and the objection turns out not
+to apply — a two-pass rule handles acronyms correctly, verified over all 15,611 real member names:
+
+```python
+s = re.sub(r"(.)([A-Z][a-z]+)", r"\1_\2", name)
+s = re.sub(r"([a-z])([A-Z])",   r"\1_\2", s).lower()
+```
+
+`FOVAngle` → `fov_angle`, `MaxFOV` → `max_fov`, `UVChannel` → `uv_channel`, `LODBias` → `lod_bias`,
+`HDRCaptureEnabled` → `hdr_capture_enabled`, `SizeXY` → `size_xy`. Note the second pattern excludes
+digits deliberately: with `[a-z0-9]` there, `Use2DMode` becomes `use2_d_mode` and `Vector2D`
+becomes `vector2_d`, which is wrong 147 times in this schema. A reserved word gets a trailing
+underscore (`Box` → `box_`), as Python's generator already does.
+
+Measured collisions, per class, over the whole schema:
+
+| | |
+|---|---|
+| property vs. property | **0** |
+| function vs. function | **0** |
+| a property's setter vs. a `Set*` function | **257** |
+
+Only the last is real, and it is the same shape as the component/property clash Python already
+resolves: `RadialSlider` has a `ShowSliderHandle` property and a `SetShowSliderHandle` function,
+and both want `set_show_slider_handle`. **The property wins and the function is omitted**, counted
+in the generator's stats. They do the same thing — and where the property has a `BlueprintSetter`,
+the property path already calls the accessor (§8.2), so nothing is lost.
+
+### 15.4 The guarantee, verified
+
+The point of the typed surface is that drift fails the build. Each case below was compiled:
+
+| case | result |
+|---|---|
+| misspelled property | `error[E0599]: no method named horizontal_beems` |
+| write to a read-only property | `error[E0599]: no method named set_b_color_enabled` |
+| wrong value type | `error[E0308]: expected i32, found &str` |
+| a component passed as an actor | `error[E0308]: expected &Actor, found &TempoLidar` |
+| a property of an unrelated class | `error[E0599]: no method named max_draw_distance_scale` |
+| all four of the above on the `_async` twin | same errors |
+
+Rust states the read-only case better than Pyright does: a read-only property simply has no setter,
+so the error names the method that does not exist rather than complaining about an assignment.
+
+**§9.1 has no Rust analogue, which is the good news.** Python needs a `.pyi` that deliberately
+omits `__getattr__`, because a catch-all visible to the checker would make every attribute legal.
+Rust has no catch-all to hide: an undeclared method is an error with nothing to suppress it. The
+dynamic escape hatch is therefore an explicit method on the handle, not a separate type.
+
+### 15.5 Phasing
+
+| | | |
+|---|---|---|
+| **5a** | `tempo_sim::unreal` — handle, `unsafe trait Class`, value types, `Value` conversion, sync + async get/set/call, batch, snapshot | mirrors `unreal.py` |
+| **5b** | `tempo_sim::world` — `get_actors`, `get_actor`, `spawn_actor`, `spawn_actor_deferred`, `batch`, `check_schema` | mirrors `world.py` |
+| **5c** | `gen_rust_classes.py` — enums, structs, one module per package, the crate manifest | mirrors `gen_py_classes.py` |
+| **5d** | `GenTypedAPI.sh` stages the crate; `Package.sh` ships it to `Packaged/API/Rust` | behind `TEMPO_GEN_RUST_API=1`, as the RPC generator is |
+| **5e** | tests — compile-rejection cases in the `codegen` group, live cases in the Rust `integration` group | §11 |
+| **5f** | docs — a Rust tab in `docs/guides/typed-classes.md`, reference in `docs/clients/typed-classes.md` | |
+
+The one piece of `unsafe` lives in 5a, in `from_ref`, and is what `#[repr(transparent)]` exists to
+make sound. Generated code contains none: it gets the cast through an `unsafe trait Class` whose
+contract is "I am a transparent newtype over `ObjectRef`", which only the generator implements.
