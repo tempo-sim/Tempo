@@ -108,6 +108,17 @@ for /f "usebackq tokens=2 delims== " %%V in (`findstr /b /c:"version" "!PYTHON_D
 
 echo Typed Python classes staged at !STAGE!
 
+REM No published class subset here, deliberately.
+REM
+REM The subset describes the modules every build ships, so it can travel with the published wheel
+REM (TYPED_WORLD_API_PLAN.md section 16) -- but only if what it narrows is itself narrowed to a
+REM packaged build. This mirror generates from the editor's unfiltered walk, which has ~46%% more
+REM classes than a packaged game and editor-only members on the classes both have. A published
+REM package built from that would describe classes and members no build has, which is worse than
+REM having none. Said out loud rather than skipped silently, because the .sh has the same guard and
+REM takes it when there is no packaged build either.
+echo Skipping the published classes ^(this mirror generates from the editor's unfiltered walk^)
+
 REM The Rust crate, from the same schema. Its version follows tempo-sim's crate version so that a
 REM client and the classes it addresses move together.
 if not defined TEMPO_GEN_RUST_API goto :no_rust

@@ -327,3 +327,58 @@ def reaching(d: E.DeepBridged) -> None:
     d.Outsider.Tuning = 1.0
 """, tmp_path)
     assert errors, "a dropped class's members must not be reachable through the Object it became"
+
+
+# -- generated into the published wheel -----------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def nested(tmp_path_factory, subset):
+    """The subset generated where it ships: inside another package, under its engine version.
+
+    `tempo_sim.UE.v5_8` rather than a distribution of its own (TYPED_WORLD_API_PLAN.md section
+    16.4), and `v5_8` rather than `5_8` because an identifier cannot begin with a digit.
+    """
+    narrowed, _ = subset
+    out = tmp_path_factory.mktemp("nested")
+    schema = out / "subset.json"
+    schema.write_text(json.dumps(narrowed))
+    package = out / DIST / "UE" / "v5_8"
+    (out / DIST).mkdir(parents=True, exist_ok=True)
+    (out / DIST / "__init__.py").write_text("")
+    (out / DIST / "UE").mkdir(parents=True, exist_ok=True)
+    (out / DIST / "UE" / "__init__.py").write_text("")
+    subprocess.run([sys.executable, GENERATOR, str(schema), str(package),
+                    "--package={}.UE.v5_8".format(DIST)],
+                   check=True, capture_output=True, text=True)
+    return out
+
+
+def test_a_nested_package_imports_itself_by_its_full_name(nested):
+    """The emitted modules import each other, and a directory name is not the dotted name.
+
+    Left to the directory this would emit `import v5_8.enums`, which resolves to nothing from
+    anywhere -- and the failure would be an ImportError at runtime rather than anything a type
+    checker reports.
+    """
+    stub = (nested / DIST / "UE" / "v5_8" / "Engine.pyi").read_text()
+    assert "{}.UE.v5_8.enums".format(DIST) in stub, [
+        line for line in stub.splitlines() if "import" in line]
+
+
+def test_the_published_classes_type_check_where_they_ship(nested, tmp_path):
+    errors = check(nested, """
+from fixture_classes.UE.v5_8.Engine import Widget
+
+def ok(w: Widget) -> None:
+    w.bEnabled = True
+    print(w.Offset.X)
+""", tmp_path)
+    assert errors == [], "the published classes should type-check: {}".format(errors)
+
+    errors = check(nested, """
+from fixture_classes.UE.v5_8.Engine import Widget
+
+def drift(w: Widget) -> None:
+    w.bEnabledd = True
+""", tmp_path)
+    assert errors, "the guarantee has to survive being nested"

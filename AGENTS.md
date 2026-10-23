@@ -123,10 +123,17 @@ fails under Pyright instead of at runtime. See `TYPED_WORLD_API_PLAN.md`.
   `WITH_EDITORONLY_DATA`) and a cooked build cannot report a property's `BlueprintSetter` — 306 of
   them in TempoSample, each one a property the typed API must write through its accessor rather than
   straight into memory.
-- **…and is then filtered against the packaged build**, which is the authority on what ships. An
-  editor has ~46% more classes than a packaged game (whole editor-only modules), and a stub for one
-  of those type-checks and then fails at runtime. `Scripts/GenTypedAPI.sh` runs the whole chain:
-  walk → ask the build → filter → generate → stage a wheel. `Package.sh` calls it.
+- **…and is then filtered against the packaged build**, which is the authority on what ships — both
+  halves of it. An editor has ~46% more classes than a packaged game (whole editor-only modules),
+  and a stub for one of those type-checks and then fails at runtime. It also has **members a
+  packaged class does not**: `AActor` declares seven `WITH_EDITORONLY_DATA` properties and eleven
+  editor-only functions, and it is the root of two thousand classes. So the build reports its whole
+  declared surface and `filter_schema.py` narrows to it, dropping what the build lacks and taking
+  signatures, parameter names and flags from the build — a `CallFunction` argument is matched by
+  name and a cooked build cases some differently. The invariant is that **the generated package
+  declares nothing the build lacks**, which is what makes a build-sourced hash honest; a test
+  asserts it. `Scripts/GenTypedAPI.sh` runs the whole chain: walk → ask the build → filter →
+  generate → stage a wheel → generate the published subset. `Package.sh` calls it.
 - **`gen_py_classes.py`** emits three files per module: `.py` (class identity only), `.pyi` (the type
   surface, never imported) and `.meta.json` (what the runtime needs to build a request). Plus
   `py.typed`, without which a type checker ignores an installed package's stubs entirely.
@@ -153,6 +160,17 @@ fails under Pyright instead of at runtime. See `TYPED_WORLD_API_PLAN.md`.
   superclass as "this class is a root", silently stripping every inherited member while the stubs
   still type-check. See `TYPED_WORLD_API_PLAN.md` §16.
 - **`diff_schema.py`** reports release-to-release drift and exits non-zero on anything breaking.
+- **Drift is checked per entry, not per build.** Each class, struct and enum carries its own hash
+  (`HashClass`/`HashStruct`/`HashEnum`; the header's whole-walk number is those folded together), and
+  `check_schema` compares entry by entry over what the installed package has. A published subset
+  could never match a whole-walk hash, and for a whole-build package the per-entry report says
+  *what* moved rather than only that something did. An entry the sim has and the package does not is
+  deliberately not a finding.
+- **Both class registries hold a list.** More than one generated package can be installed — a
+  project's own, and the published subset inside `tempo_sim` — and they describe different things, so
+  neither `register_classes` may overwrite. An inheritance chain crosses between them (a project's
+  Blueprint derives from an engine class the published package declares), which is why the metadata
+  walk and Rust's `is_a` search every registration.
 
 ---
 

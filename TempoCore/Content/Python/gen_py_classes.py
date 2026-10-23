@@ -592,7 +592,7 @@ def write_file(path, text):
         f.write(text)
 
 
-def generate(schema_path, output_dir, docstrings=False):
+def generate(schema_path, output_dir, docstrings=False, package=None):
     with open(schema_path) as f:
         schema = json.load(f)
 
@@ -603,7 +603,11 @@ def generate(schema_path, output_dir, docstrings=False):
             "tempo_schema.json is schema_version {!r}, but this generator reads {!r}. Regenerate "
             "the schema, or use the generator that shipped with it.".format(actual, expected))
 
-    dist = os.path.basename(output_dir.rstrip(os.sep))
+    # The dotted name the emitted modules import each other by. The directory's own name serves
+    # for a top-level distribution; a package generated *inside* another one -- the published
+    # classes at tempo_sim.UE.v5_8 (TYPED_WORLD_API_PLAN.md section 16.4) -- has to be told, since
+    # its directory is only the last segment of it.
+    dist = package or os.path.basename(output_dir.rstrip(os.sep))
     generator = Generator(schema, docstrings)
 
     # The enums module is emitted first, because structs and classes both import from it.
@@ -691,10 +695,14 @@ def generate(schema_path, output_dir, docstrings=False):
 
 
 def main(argv):
-    if len(argv) < 3:
-        print(__doc__ or "usage: gen_py_classes.py <schema.json> <output-dir> [--docstrings]")
+    arguments = [a for a in argv[1:] if not a.startswith("--")]
+    options = {a.split("=", 1)[0]: a.split("=", 1)[-1] for a in argv[1:] if a.startswith("--")}
+    if len(arguments) < 2:
+        print(__doc__ or
+              "usage: gen_py_classes.py <schema.json> <output-dir> [--docstrings] [--package=NAME]")
         return 2
-    stats, modules = generate(argv[1], argv[2], "--docstrings" in argv)
+    stats, modules = generate(arguments[0], arguments[1], "--docstrings" in options,
+                              options.get("--package"))
     print("modules            {}".format(len(modules)))
     print("classes            {}".format(stats["classes"]))
     print("structs / enums    {} / {}".format(stats["structs"], stats["enums"]))

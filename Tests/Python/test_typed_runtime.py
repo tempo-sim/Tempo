@@ -802,3 +802,94 @@ def test_a_mismatch_can_warn_instead_of_raising(classes, describing):
 
     with pytest.warns(UserWarning, match="do not match this sim"):
         assert world.check_schema(raise_on_mismatch=False) is False
+
+
+# -- two installed packages -----------------------------------------------------------------------
+#
+# A project installs its own classes; it may also have the published ones that ship inside
+# tempo_sim (TYPED_WORLD_API_PLAN.md section 16). They describe different things, so the registry
+# holds both -- and an inheritance chain crosses from one to the other, because a project's classes
+# derive from engine classes the published package declares.
+
+@pytest.fixture(scope="module")
+def two_packages(tmp_path_factory):
+    """One package holding `Object`, another holding what derives from it.
+
+    Split by Unreal package, which is how the real split falls: the published set is chosen by
+    module, so a project keeps whatever is outside it and inherits across the boundary.
+    """
+    import json
+
+    with open(FIXTURE) as f:
+        schema = json.load(f)
+
+    def part(packages, name, out):
+        subset = dict(schema)
+        subset["classes"] = [cls for cls in schema["classes"] if cls["package"] in packages]
+        document = out / (name + ".json")
+        document.write_text(json.dumps(subset))
+        subprocess.run([sys.executable, GENERATOR, str(document), str(out / name)],
+                       check=True, capture_output=True, text=True)
+
+    out = tmp_path_factory.mktemp("split")
+    part({"/Script/CoreUObject"}, "published_classes", out)
+    part({"/Script/Engine", "/Script/SomePlugin"}, "project_classes", out)
+
+    installed = _tempo_sim_modules()
+    for name in installed:
+        del sys.modules[name]
+    sys.path.insert(0, str(out))
+    sys.path.insert(0, RUNTIME_API)
+    try:
+        import published_classes  # noqa: F401  (importing is what registers it)
+        import project_classes  # noqa: F401
+        import project_classes.Engine as engine
+        import tempo_sim.unreal as runtime
+        assert runtime.__file__.startswith(RUNTIME_API)
+        yield engine, runtime
+    finally:
+        sys.path.remove(str(out))
+        sys.path.remove(RUNTIME_API)
+        for name in _tempo_sim_modules():
+            del sys.modules[name]
+        sys.modules.update(installed)
+
+
+def test_both_packages_are_registered(two_packages):
+    """Python's register() used to overwrite, so the first import became unresolvable -- silently,
+    since its own generated classes go on working and only the metadata is gone."""
+    _, runtime = two_packages
+    registered = {package.package for package in runtime.registered_classes().packages}
+    assert registered == {"published_classes", "project_classes"}
+
+
+def test_a_class_resolves_from_whichever_package_has_it(two_packages):
+    _, runtime = two_packages
+    classes = runtime.registered_classes()
+    assert classes.module_of("/Script/CoreUObject.Object") == "CoreUObject"
+    assert classes.module_of(WIDGET_PATH) == "Engine"
+
+
+def test_an_inherited_property_is_found_across_the_boundary(two_packages, wire):
+    """Widget is in one package and the Object it derives from is in the other.
+
+    Each class records only what it declares, so reading an inherited property means walking
+    `super` -- and that walk has to cross packages or the published classes buy nothing.
+    """
+    engine, _ = two_packages
+    widget = engine.Widget("MyActor")
+    assert widget.Name == "read-back", "Object.Name should resolve from the other package"
+    assert wire["reads"] == [("MyActor", "", "Name")]
+
+
+def test_is_a_crosses_the_boundary(two_packages):
+    engine, runtime = two_packages
+    classes = runtime.registered_classes()
+    assert classes.is_subclass(WIDGET_PATH, "/Script/CoreUObject.Object")
+
+
+def test_the_dynamic_path_reaches_either_package(two_packages):
+    _, runtime = two_packages
+    classes = runtime.registered_classes()
+    assert classes.python_class(WIDGET_PATH).__name__ == "Widget"
+    assert classes.python_class("/Script/CoreUObject.Object").__name__ == "Object"
