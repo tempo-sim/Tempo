@@ -145,6 +145,13 @@ fails under Pyright instead of at runtime. See `TYPED_WORLD_API_PLAN.md`.
   `context.rs` is). The one `unsafe` in the typed Rust surface is `unreal::upcast`, behind an
   `unsafe trait Class` whose "I am a `#[repr(transparent)]` newtype over `ObjectRef`" contract only
   the generator satisfies; generated Rust contains none.
+- **`subset_schema.py`** narrows the same schema to the modules that ship in *every* build --
+  the engine's always-loaded ones plus Tempo's own, derived from the `.uplugin` descriptors -- so
+  those classes can go out in the published `tempo-sim` wheel and crate rather than only beside a
+  project's package. It also **reroots**: a subset chosen by module is the first thing here that
+  can leave a class's superclass out of the document, and both generators read a dangling
+  superclass as "this class is a root", silently stripping every inherited member while the stubs
+  still type-check. See `TYPED_WORLD_API_PLAN.md` §16.
 - **`diff_schema.py`** reports release-to-release drift and exits non-zero on anything breaking.
 
 ---
