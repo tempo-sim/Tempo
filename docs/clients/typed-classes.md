@@ -236,6 +236,11 @@ Everything in [What is not there](#what-is-not-there) applies, plus two Rust-onl
   Container *properties* of those kinds are fine; it is only function parameters.
 - **Functions with a struct parameter**, as in Python — a struct has no single value that can carry
   it, so it is reachable a member at a time but not passable as an argument.
+- **Functions whose return value cannot be carried**, which Python offers with a degraded result.
+  In Rust the return type is part of the contract, so a method that would silently discard its
+  answer is not generated at all. An *out* parameter that cannot be carried is different: the
+  caller never supplies one, so it is simply dropped from the tuple and the function stays — which
+  is what keeps `k2_set_actor_location`, whose `out HitResult` is an `FHitResult`.
 
 Conversely, one Python concession is unnecessary here. The Python stubs must deliberately *omit*
 `__getattr__`, because a catch-all a type checker can see makes every attribute legal on every

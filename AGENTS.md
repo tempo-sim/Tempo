@@ -362,6 +362,19 @@ matrix entry in `tempo_build_and_package.yml` (and, for Python, a line in `pytes
 - Quote the engine path (it contains a space).
 - Changing a `.proto` is a client-facing API change: it regenerates Python/Rust/C++ clients
   and may need CoreRedirects (in the plugin's Config) for renamed assets/classes.
+- **The repo-side `codegen` group can silently test an installed wheel instead of the working
+  tree.** `Tests/Python/conftest.py` imports `tempo_sim` at collection time to decide
+  `collect_ignore`, so on a machine that has packaged the project the wheel's modules are already
+  in `sys.modules` and no later `sys.path` insertion displaces them. In clean CI there is no wheel
+  and the tree wins, which is why this hides. `test_typed_runtime.py`'s `classes` fixture sets the
+  imported modules aside and asserts it loaded from the tree; anything new that exercises
+  `tempo_sim` from the tree must do the same. A defect in the `BlueprintSetter` write path shipped
+  behind this.
+- **A `CallFunction` arg must be named**, and the name is matched against the function's own
+  parameters, so writing a property through its `BlueprintSetter` means knowing what that setter
+  calls its argument. `gen_classes_common.resolve_setters` joins the two halves the schema keeps
+  apart; do not resolve it per consumer, or the stub and the runtime will disagree about which
+  properties are writable.
 - `MIGRATION_v0.1.0.md` documents the previous → v0.1.0 module consolidation (e.g. TempoCamera+TempoLidar →
   TempoSensors); proto packages were renamed, so old external clients must regenerate.
 - Half-pixel offset: the distortion-map UV loop in `TempoCamera.cpp` must use `U + 0.5`
