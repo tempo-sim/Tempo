@@ -12,7 +12,14 @@
 //! #         const PATH: &'static str = "/Game/Vehicles/BP_Cat745.BP_Cat745_C";
 //! #         fn from_object(o: tempo_sim::unreal::ObjectRef) -> Self { Self(o) }
 //! #         fn as_object(&self) -> &tempo_sim::unreal::ObjectRef { &self.0 }
+//! #         fn hierarchy() -> &'static (dyn tempo_sim::unreal::Hierarchy + 'static) { &T }
 //! #     }
+//! # struct Table;
+//! # impl tempo_sim::unreal::Hierarchy for Table {
+//! #     fn superclass(&self, _: &str) -> Option<&str> { None }
+//! #     fn header(&self) -> tempo_sim::unreal::SchemaIdentity { Default::default() }
+//! # }
+//! # static T: Table = Table;
 //! #     impl BP_Cat745_C {
 //! #         pub fn set_max_speed(&self, v: f64) -> Result<(), tempo_sim::TempoError> {
 //! #             self.0.set("MaxSpeed", v)
@@ -35,7 +42,7 @@
 //! one is its own kind of drift.
 
 use crate::error::TempoError;
-use crate::unreal::{Class, ObjectRef, Transform};
+use crate::unreal::{note_origin, Class, ObjectRef, Transform};
 
 pub use crate::unreal::batch;
 
@@ -70,12 +77,14 @@ fn spawn_transform(transform: Option<Transform>) -> crate::proto::tempo_core::Tr
 /// Matched on the class path, because two Blueprints in different folders can generate classes
 /// with the same name.
 pub fn get_actors<T: Class>() -> Result<Vec<T>, TempoError> {
+    note_origin::<T>();
     let response = crate::tempo_world::get_actors_of_class(T::PATH.to_string(), true)?;
     Ok(described(response))
 }
 
 /// Every actor of this class, without blocking.
 pub async fn get_actors_async<T: Class>() -> Result<Vec<T>, TempoError> {
+    note_origin::<T>();
     let response = crate::tempo_world::get_actors_of_class_async(T::PATH.to_string(), true).await?;
     Ok(described(response))
 }
@@ -98,6 +107,7 @@ fn described<T: Class>(response: crate::proto::tempo_world::GetAllActorsResponse
 /// A name is a runtime string, so without the check a typo or a renamed actor would surface later
 /// as a confusing failure on first property access rather than here.
 pub fn get_actor<T: Class>(name: &str) -> Result<T, TempoError> {
+    note_origin::<T>();
     // Ask for the class, then look for the name in the answer: one filtered call rather than a
     // description of every actor in the world.
     let response = crate::tempo_world::get_actors_of_class(T::PATH.to_string(), true)?;
@@ -109,6 +119,7 @@ pub fn get_actor<T: Class>(name: &str) -> Result<T, TempoError> {
 
 /// One actor by name, without blocking.
 pub async fn get_actor_async<T: Class>(name: &str) -> Result<T, TempoError> {
+    note_origin::<T>();
     let response = crate::tempo_world::get_actors_of_class_async(T::PATH.to_string(), true).await?;
     if let Some(found) = matching::<T>(&response, name) {
         return Ok(found);
@@ -168,6 +179,7 @@ pub fn spawn_actor<T: Class>(
     transform: Option<Transform>,
     relative_to: &str,
 ) -> Result<T, TempoError> {
+    note_origin::<T>();
     let response = crate::tempo_world::spawn_actor(
         T::PATH.to_string(),
         false,
@@ -182,6 +194,7 @@ pub async fn spawn_actor_async<T: Class>(
     transform: Option<Transform>,
     relative_to: &str,
 ) -> Result<T, TempoError> {
+    note_origin::<T>();
     let response = crate::tempo_world::spawn_actor_async(
         T::PATH.to_string(),
         false,
@@ -205,7 +218,14 @@ pub async fn spawn_actor_async<T: Class>(
 /// #     const PATH: &'static str = "/Game/Vehicles/BP_Cat745.BP_Cat745_C";
 /// #     fn from_object(o: tempo_sim::unreal::ObjectRef) -> Self { Self(o) }
 /// #     fn as_object(&self) -> &tempo_sim::unreal::ObjectRef { &self.0 }
+/// #     fn hierarchy() -> &'static (dyn tempo_sim::unreal::Hierarchy + 'static) { &T }
 /// # }
+/// # struct Table;
+/// # impl tempo_sim::unreal::Hierarchy for Table {
+/// #     fn superclass(&self, _: &str) -> Option<&str> { None }
+/// #     fn header(&self) -> tempo_sim::unreal::SchemaIdentity { Default::default() }
+/// # }
+/// # static T: Table = Table;
 /// # impl BP_Cat745_C {
 /// #     fn set_initial_terrain_height(&self, v: f64) -> Result<(), tempo_sim::TempoError> {
 /// #         self.0.set("InitialTerrainHeight", v)
@@ -232,6 +252,7 @@ where
     T: Class,
     F: FnOnce(&T) -> Result<(), TempoError>,
 {
+    note_origin::<T>();
     let response = crate::tempo_world::spawn_actor(
         T::PATH.to_string(),
         true,

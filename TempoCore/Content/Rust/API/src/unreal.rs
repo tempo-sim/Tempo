@@ -208,6 +208,20 @@ pub unsafe trait Class: Sized {
     fn from_object(object: ObjectRef) -> Self;
 
     fn as_object(&self) -> &ObjectRef;
+
+    /// The class table of the crate this type was generated into.
+    ///
+    /// Rust has no import side effects, so a generated crate cannot announce itself the way
+    /// Python's `__init__.py` does. Instead every path that makes a handle registers through this,
+    /// which means [`ObjectRef::is_a`] and `world::check_schema` work without the caller
+    /// remembering to do anything.
+    fn hierarchy() -> &'static (dyn Hierarchy + 'static);
+}
+
+/// Note the crate a handle came from, so the class table is available to ask about it later.
+#[inline]
+pub fn note_origin<T: Class>() {
+    register_classes(T::hierarchy());
 }
 
 /// View an object as one of its superclasses.
@@ -852,6 +866,7 @@ impl ObjectRef {
 
     /// Read a reference-valued property as a typed handle.
     pub fn get_object<T: Class>(&self, property: &str) -> Result<T, TempoError> {
+        note_origin::<T>();
         Ok(T::from_object(object_reference(&crate::tempo_world::get_property(
             self.actor.clone(),
             self.component.clone(),
@@ -871,7 +886,36 @@ impl ObjectRef {
             property.to_string(),
             true,
         );
+        note_origin::<T>();
         async move { Ok(T::from_object(object_reference(&request.await?)?)) }
+    }
+
+    /// Point an actor-valued property at an actor.
+    pub fn set_actor_ref<T: Class>(&self, property: &str, value: &T) -> Result<(), TempoError> {
+        self.set(property, ActorName(value.as_object().reference_name()))
+    }
+
+    /// Point a component-valued property at a component.
+    pub fn set_component_ref<T: Class>(&self, property: &str, value: &T) -> Result<(), TempoError> {
+        self.set(property, ComponentName(value.as_object().reference_name()))
+    }
+
+    /// Point an actor-valued property at an actor, without blocking.
+    pub fn set_actor_ref_async<'s, T: Class>(
+        &'s self,
+        property: &str,
+        value: &T,
+    ) -> impl Future<Output = Result<(), TempoError>> + 's {
+        self.set_async(property, ActorName(value.as_object().reference_name()))
+    }
+
+    /// Point a component-valued property at a component, without blocking.
+    pub fn set_component_ref_async<'s, T: Class>(
+        &'s self,
+        property: &str,
+        value: &T,
+    ) -> impl Future<Output = Result<(), TempoError>> + 's {
+        self.set_async(property, ComponentName(value.as_object().reference_name()))
     }
 
     /// One of this actor's components, addressed under its own name.
@@ -880,6 +924,7 @@ impl ObjectRef {
     /// replacing one is not an assignment. Add and destroy components through the `TempoWorld`
     /// API.
     pub fn component_handle<T: Class>(&self, name: &str) -> T {
+        note_origin::<T>();
         T::from_object(ObjectRef::component(&self.actor, name).with_class(T::PATH))
     }
 
@@ -1181,4 +1226,166 @@ pub fn hierarchy() -> &'static (dyn Hierarchy + 'static) {
 /// Whether a generated class crate has registered itself.
 pub fn classes_registered() -> bool {
     !hierarchy().header().content_hash.is_empty()
+}
+
+impl ObjectRef {
+    /// Read an array or set of enums.
+    ///
+    /// Separate from [`ObjectRef::get`] because a `Vec` of a generated enum cannot implement
+    /// [`FromValue`]: in the generated crate both `Vec` and the trait are foreign, and the orphan
+    /// rule wants a local type that is not merely a parameter of a foreign one. Reading through
+    /// `UnrealEnum` sidesteps that, and keeps the conversion in one place.
+    pub fn get_enums<T: UnrealEnum>(&self, property: &str) -> Result<Vec<T>, TempoError> {
+        let value = crate::tempo_world::get_property(
+            self.actor.clone(),
+            self.component.clone(),
+            property.to_string(),
+            true,
+        )?;
+        enum_names(&value)?.iter().map(|name| T::from_unreal_name(name)).collect()
+    }
+
+    /// Read an array or set of enums, without blocking.
+    pub fn get_enums_async<T: UnrealEnum>(
+        &self,
+        property: &str,
+    ) -> impl Future<Output = Result<Vec<T>, TempoError>> + '_ {
+        let request = crate::tempo_world::get_property_async(
+            self.actor.clone(),
+            self.component.clone(),
+            property.to_string(),
+            true,
+        );
+        async move {
+            let value = request.await?;
+            enum_names(&value)?.iter().map(|name| T::from_unreal_name(name)).collect()
+        }
+    }
+
+    /// Write an array of enums, or queue it when a [`batch`] is open.
+    pub fn set_enums<T: UnrealEnum>(
+        &self,
+        property: &str,
+        values: &[T],
+    ) -> Result<(), TempoError> {
+        self.set(property, EnumNames(values.iter().map(|v| v.unreal_name().to_string()).collect()))
+    }
+
+    /// Write an array of enums, without blocking.
+    pub fn set_enums_async<'s, T: UnrealEnum>(
+        &'s self,
+        property: &str,
+        values: &[T],
+    ) -> impl Future<Output = Result<(), TempoError>> + 's {
+        let names = EnumNames(values.iter().map(|v| v.unreal_name().to_string()).collect());
+        self.set_async(property, names)
+    }
+}
+
+/// A reference's name, in the variant its property expects. Two types rather than one, because
+/// the name alone does not say whether the server should look for an actor or a component.
+struct ActorName(String);
+
+struct ComponentName(String);
+
+impl ToValue for ActorName {
+    fn to_value(&self) -> pb::Value {
+        pb::Value { value: Some(pb::value::Value::ActorValue(self.0.clone())) }
+    }
+}
+
+impl ToValue for ComponentName {
+    fn to_value(&self) -> pb::Value {
+        pb::Value { value: Some(pb::value::Value::ComponentValue(self.0.clone())) }
+    }
+}
+
+/// The names an enum container carries on the wire. Its own type, so that writing one picks the
+/// enum array variant rather than the string array variant a `Vec<String>` would.
+struct EnumNames(Vec<String>);
+
+impl ToValue for EnumNames {
+    fn to_value(&self) -> pb::Value {
+        pb::Value {
+            value: Some(pb::value::Value::EnumArrayValue(pb::StringArray {
+                values: self.0.clone(),
+            })),
+        }
+    }
+}
+
+fn enum_names(value: &pb::Value) -> Result<&Vec<String>, TempoError> {
+    match variant(value)? {
+        pb::value::Value::EnumArrayValue(inner) => Ok(&inner.values),
+        pb::value::Value::EnumSetValue(inner) => Ok(&inner.values),
+        _ => Err(wrong(value, "an enum array")),
+    }
+}
+
+// -- generated declarations ----------------------------------------------------------------------
+
+/// Declare an Unreal enum and everything the typed API needs to carry one.
+///
+/// An enum travels as its authored name rather than its numeric value, because that is what
+/// survives someone reordering the enumerators. The conversions are here rather than in the
+/// generated crate so that all 866 of them cannot drift from each other.
+///
+/// ```
+/// tempo_sim::unreal_enum! {
+///     ETempoReturnMode { Strongest = "Strongest", Last = "Last" }
+/// }
+/// # fn main() {}
+/// ```
+#[macro_export]
+macro_rules! unreal_enum {
+    ($name:ident { $($variant:ident = $authored:literal),* $(,)? }) => {
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+        pub enum $name { $($variant,)* }
+
+        impl $crate::unreal::UnrealEnum for $name {
+            fn unreal_name(&self) -> &'static str {
+                match self { $(Self::$variant => $authored,)* }
+            }
+
+            fn from_unreal_name(name: &str) -> ::core::result::Result<Self, $crate::TempoError> {
+                match name {
+                    $($authored => ::core::result::Result::Ok(Self::$variant),)*
+                    other => ::core::result::Result::Err($crate::TempoError::Protocol(format!(
+                        "the sim reported {:?} for {}, which is not one of its enumerators",
+                        other,
+                        ::core::stringify!($name),
+                    ))),
+                }
+            }
+        }
+
+        impl $crate::unreal::FromValue for $name {
+            fn from_value(
+                value: &$crate::proto::tempo_world::Value,
+            ) -> ::core::result::Result<Self, $crate::TempoError> {
+                match &value.value {
+                    ::core::option::Option::Some(
+                        $crate::proto::tempo_world::value::Value::EnumValue(name),
+                    ) => <Self as $crate::unreal::UnrealEnum>::from_unreal_name(name),
+                    _ => ::core::result::Result::Err($crate::TempoError::Protocol(format!(
+                        "expected an enum from the server for {}",
+                        ::core::stringify!($name),
+                    ))),
+                }
+            }
+        }
+
+        impl $crate::unreal::ToValue for $name {
+            fn to_value(&self) -> $crate::proto::tempo_world::Value {
+                $crate::proto::tempo_world::Value {
+                    value: ::core::option::Option::Some(
+                        $crate::proto::tempo_world::value::Value::EnumValue(
+                            <Self as $crate::unreal::UnrealEnum>::unreal_name(self).to_string(),
+                        ),
+                    ),
+                }
+            }
+        }
+
+    };
 }
