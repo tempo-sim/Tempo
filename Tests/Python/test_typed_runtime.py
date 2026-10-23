@@ -748,6 +748,9 @@ def test_a_changed_class_is_named(classes, describing):
         world.check_schema()
     assert "1 changed" in str(raised.value)
     assert WIDGET_PATH in str(raised.value)
+    # One of each kind is a "class", a "struct" or an "enum". Trimming the plural key gave
+    # "classe", which is how the first real report read.
+    assert "class /Script/Engine.Widget" in str(raised.value)
 
 
 def test_a_class_the_sim_does_not_have_is_named_separately(classes, describing):

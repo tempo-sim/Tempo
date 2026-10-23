@@ -171,8 +171,10 @@ class SchemaMismatch(RuntimeError):
     """The installed generated classes describe a different build than the sim is running."""
 
 
-# The three things a generated package records a hash for, as `hashes.json` keys them.
+# The three things a generated package records a hash for, as `hashes.json` keys them, and what one
+# of each is called -- "classes"[:-1] is "classe", which is how the first report read.
 _KINDS = ("classes", "structs", "enums")
+_SINGULAR = {"classes": "class", "structs": "struct", "enums": "enum"}
 
 
 def _compare(installed, reported):
@@ -199,7 +201,7 @@ def _compare(installed, reported):
 
 def _examples(findings, limit=5):
     """A few findings by name. Enough to recognise the change; the count carries the scale."""
-    shown = ", ".join("{} {}".format(kind[:-1], name) for kind, name in findings[:limit])
+    shown = ", ".join("{} {}".format(_SINGULAR[kind], name) for kind, name in findings[:limit])
     return shown + ", ..." if len(findings) > limit else shown
 
 
