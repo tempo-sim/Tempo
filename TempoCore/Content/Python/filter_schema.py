@@ -225,6 +225,13 @@ def main(argv):
                   "walk under the same name, and are left out".format(
                       corrections["members_only_in_build"],
                       corrections["functions_only_in_build"]))
+        # And close over the types again, because the first pass closed over the *editor's*
+        # members. A struct reachable only from a member the build does not have survives that
+        # closure and is then declared by a package no sim will confirm -- 38 of them in
+        # TempoSample, FExportHLODAssetsParams and FBakingConfiguration among them, all editor-only
+        # and all reached from editor-only members. DescribeClasses reports exactly the types its
+        # reported members refer to, so re-closing over the narrowed members lands on the same set.
+        filtered = filter_schema(filtered, keep_paths)
     else:
         print("warning: this report has no declared surface, so only the class list is narrowed; "
               "regenerate it with the current query_packaged_classes.py", file=sys.stderr)

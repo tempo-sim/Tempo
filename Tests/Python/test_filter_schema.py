@@ -273,3 +273,60 @@ def test_a_report_without_a_surface_narrows_only_the_class_list(tmp_path):
 
     filtered = json.loads(out.read_text())
     assert sorted(cls["path"] for cls in filtered["classes"]) == sorted(reported["classes"])
+
+
+def test_a_type_reachable_only_from_a_dropped_member_is_dropped(tmp_path):
+    """The closure has to run again after the members are narrowed, not only before.
+
+    The first pass closes over the *editor's* members, so a struct reached only from a member the
+    build does not have survives it -- and is then declared by a package the sim will not confirm.
+    38 of them in TempoSample, all editor-only: FExportHLODAssetsParams, FBakingConfiguration,
+    FAnimDataModelNotifPayload. The live `check_schema` test is what caught it, which is the
+    per-entry check earning its place on its first outing.
+    """
+    schema = {
+        "header": {"schema_version": "2", "engine_version": "5.8", "content_hash": "EDITOR"},
+        "classes": [{
+            "name": "Widget", "path": "/Script/Engine.Widget", "super": "", "package": "/Script/Engine",
+            "abstract": False, "blueprint": False, "content_hash": "EDITOR-WIDGET",
+            "components": [], "functions": [],
+            "properties": [
+                {"name": "Shipped", "kind": "struct", "type": "FShipped", "struct": "FShipped",
+                 "readable": True, "writable": True, "value_expressible": False},
+                {"name": "EditorOnly", "kind": "struct", "type": "FEditorOnly",
+                 "struct": "FEditorOnly",
+                 "readable": True, "writable": True, "value_expressible": False},
+            ],
+        }],
+        "structs": [{"name": "FShipped", "content_hash": "E1", "members": []},
+                    {"name": "FEditorOnly", "content_hash": "E2", "members": []}],
+        "enums": [],
+    }
+    reported = {
+        "classes": ["/Script/Engine.Widget"],
+        "header": {"schema_version": "2", "engine_version": "5.8", "content_hash": "BUILD"},
+        "surface": {
+            "classes": {"/Script/Engine.Widget": {
+                "content_hash": "BUILD-WIDGET", "super": "",
+                "properties": {"Shipped": member(value_expressible=False)},
+                "functions": {}, "components": {}}},
+            # The build reports only the types its own members refer to, which is why re-closing
+            # over the narrowed members lands on the same set.
+            "structs": {"FShipped": {"content_hash": "B1", "members": {}}},
+            "enums": {},
+        },
+    }
+    document = tmp_path / "schema.json"
+    document.write_text(json.dumps(schema))
+    report = tmp_path / "reported.json"
+    report.write_text(json.dumps(reported))
+    out = tmp_path / "filtered.json"
+
+    result = subprocess.run(
+        [sys.executable, os.path.join(PYTHON_DIR, "filter_schema.py"), str(document),
+         str(report), str(out)],
+        capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+    filtered = json.loads(out.read_text())
+    assert [s["name"] for s in filtered["structs"]] == ["FShipped"]
