@@ -95,7 +95,7 @@ def published_packages(plugin_root):
     return sorted(set(ENGINE_PACKAGES) | set(tempo_packages(plugin_root)))
 
 
-def reroot(schema):
+def reroot(schema, all_classes):
     """Point each class at its nearest *kept* ancestor, and report what that skipped.
 
     A subset is the first thing in this pipeline that can break the schema's one structural
@@ -118,18 +118,22 @@ def reroot(schema):
     declared in between. Nothing a rerooted class declares itself is lost, and nothing it claims is
     wrong -- there is only less of it, which is what a published subset is.
 
+    `all_classes` maps every class path in the *unnarrowed* schema to its entry, because walking
+    past a dropped ancestor means reading that ancestor's own superclass -- which is no longer in
+    the document being rerooted.
+
     Returns the list of (class path, new super, skipped paths), for the caller to report.
     """
-    by_path = {cls["path"]: cls for cls in schema["classes"]}
+    kept = {cls["path"] for cls in schema["classes"]}
     rerooted = []
     for cls in schema["classes"]:
         super_path = cls.get("super") or ""
-        if not super_path or super_path in by_path:
+        if not super_path or super_path in kept:
             continue
         skipped = []
-        while super_path and super_path not in by_path:
+        while super_path and super_path not in kept:
             skipped.append(super_path)
-            super_path = (schema["_outside"].get(super_path) or {}).get("super") or ""
+            super_path = (all_classes.get(super_path) or {}).get("super") or ""
         cls["super"] = super_path
         rerooted.append((cls["path"], super_path, skipped))
     return rerooted
@@ -139,13 +143,7 @@ def subset(schema, packages):
     """The schema narrowed to `packages`, rerooted, and stamped as a subset."""
     keep = {cls["path"] for cls in schema["classes"] if cls["package"] in packages}
     narrowed = filter_schema(schema, keep)
-
-    # Rerooting has to follow the ancestors it is skipping over, which are gone from the narrowed
-    # document by then. Carried on the side rather than re-filtering, so there is one definition of
-    # what the subset contains.
-    narrowed["_outside"] = {cls["path"]: cls for cls in schema["classes"]}
-    rerooted = reroot(narrowed)
-    del narrowed["_outside"]
+    rerooted = reroot(narrowed, {cls["path"]: cls for cls in schema["classes"]})
 
     header = dict(narrowed.get("header", {}))
     # The whole-walk hash the header carries identifies a *build*, and a subset is not one: no sim
