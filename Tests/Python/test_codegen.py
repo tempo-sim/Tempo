@@ -106,6 +106,36 @@ def ok(w: E.Widget) -> None:
     assert errors == [], "a component's own members should type-check: {}".format(errors)
 
 
+def test_a_reference_is_typed_as_the_class_it_points_at(generated, tmp_path):
+    """A property holding an actor, asset, component or class is typed as that class.
+
+    The schema calls the key `class`; the proto calls the same thing `class_path`, and the
+    generator read the proto's name. The lookup therefore never matched and the "pointee is
+    outside this walk" fallback always won, so all 4,977 reference-valued members and parameters in
+    TempoSample were typed as a bare `Object`. Nothing failed -- the stub was merely useless, which
+    is the failure mode §9 exists to catch, so it is asserted on the type rather than on the text.
+    """
+    stub = (generated / DIST / "Engine.pyi").read_text()
+    assert "Target: MeshThing" in stub, "a reference should name its class, not Object: {}".format(
+        [line for line in stub.splitlines() if "Target" in line])
+
+    errors = check(generated, """
+import fixture_classes.Engine as E
+
+def ok(w: E.Widget) -> None:
+    w.Target.Visible = True
+""", tmp_path)
+    assert errors == [], "a reference's own members should type-check: {}".format(errors)
+
+    errors = check(generated, """
+import fixture_classes.Engine as E
+
+def bad(w: E.Widget) -> None:
+    w.Target.Nope = True
+""", tmp_path)
+    assert errors, "a member the pointee does not have must still be an error"
+
+
 def test_a_component_is_declared_once(generated):
     """A Blueprint component variable is both a component template and the property holding it.
 

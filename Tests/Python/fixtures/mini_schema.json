@@ -36,6 +36,15 @@
           "value_expressible": true
         },
         {
+          "name": "Target",
+          "kind": "actor",
+          "type": "AMeshThing*",
+          "class": "/Script/Engine.MeshThing",
+          "readable": true,
+          "writable": true,
+          "value_expressible": true
+        },
+        {
           "name": "bEnabled",
           "kind": "bool",
           "type": "bool",

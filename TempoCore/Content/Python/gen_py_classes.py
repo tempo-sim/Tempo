@@ -206,9 +206,14 @@ class Generator:
         raise Unsupported(type_desc.get("unsupported_reason") or "kind {!r}".format(kind))
 
     def reference_name(self, type_desc, imports):
-        """The generated class an object reference points at, or the runtime base when unknown."""
-        path = type_desc.get("class_path")
-        referenced = self.classes_by_path.get(path)
+        """The generated class an object reference points at, or the runtime base when unknown.
+
+        `class`, not `class_path`: that is what `TempoWorldSchema.cpp` writes into the JSON, and
+        what `emit_component` has always read. `class_path` is the *proto* field's name, and
+        reading it here silently typed every reference-valued member as a bare `Object` -- the
+        lookup never matched, so the fallback always won.
+        """
+        referenced = self.classes_by_path.get(type_desc.get("class", ""))
         if referenced is None:
             # The pointee is outside this walk, so the most that can be said is that it is an
             # object. Narrower than Any: its members are still not addressable.
