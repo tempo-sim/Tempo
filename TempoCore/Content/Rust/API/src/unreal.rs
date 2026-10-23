@@ -592,6 +592,35 @@ impl ToValue for Vec<f64> {
     }
 }
 
+macro_rules! name_container {
+    ($($case:ident, $set_case:ident, $wanted:literal, $wrapper:ident;)*) => { $(
+        impl FromValue for Vec<$wrapper> {
+            fn from_value(value: &pb::Value) -> Result<Self, TempoError> {
+                let names = match variant(value)? {
+                    pb::value::Value::$case(inner) => &inner.values,
+                    pb::value::Value::$set_case(inner) => &inner.values,
+                    _ => return Err(wrong(value, $wanted)),
+                };
+                Ok(names.iter().map(|name| $wrapper(name.clone())).collect())
+            }
+        }
+        impl ToValue for Vec<$wrapper> {
+            fn to_value(&self) -> pb::Value {
+                pb::Value {
+                    value: Some(pb::value::Value::$case(pb::StringArray {
+                        values: self.iter().map(|reference| reference.0.clone()).collect(),
+                    })),
+                }
+            }
+        }
+    )* };
+}
+
+name_container! {
+    ClassArrayValue, ClassSetValue, "a class array", ClassRef;
+    AssetArrayValue, AssetSetValue, "an asset array", AssetRef;
+}
+
 // -- batching ------------------------------------------------------------------------------------
 
 /// One queued write.
@@ -890,6 +919,81 @@ impl ObjectRef {
         async move { Ok(T::from_object(object_reference(&request.await?)?)) }
     }
 
+    /// Read an array or set of actor or component references as typed handles.
+    ///
+    /// Separate from [`ObjectRef::get`] for the same reason [`ObjectRef::get_enums`] is: a `Vec`
+    /// of a generated class cannot implement [`FromValue`] in the crate that generated it.
+    pub fn get_objects<T: Class>(&self, property: &str) -> Result<Vec<T>, TempoError> {
+        note_origin::<T>();
+        let value = crate::tempo_world::get_property(
+            self.actor.clone(),
+            self.component.clone(),
+            property.to_string(),
+            true,
+        )?;
+        Ok(reference_names(&value)?
+            .iter()
+            .map(|name| T::from_object(ObjectRef::from_reference_name(name)))
+            .collect())
+    }
+
+    /// Read an array or set of references as typed handles, without blocking.
+    pub fn get_objects_async<T: Class>(
+        &self,
+        property: &str,
+    ) -> impl Future<Output = Result<Vec<T>, TempoError>> + '_ {
+        note_origin::<T>();
+        let request = crate::tempo_world::get_property_async(
+            self.actor.clone(),
+            self.component.clone(),
+            property.to_string(),
+            true,
+        );
+        async move {
+            let value = request.await?;
+            Ok(reference_names(&value)?
+                .iter()
+                .map(|name| T::from_object(ObjectRef::from_reference_name(name)))
+                .collect())
+        }
+    }
+
+    /// Point an actor-valued array at some actors.
+    pub fn set_actor_refs<T: Class>(
+        &self,
+        property: &str,
+        values: &[T],
+    ) -> Result<(), TempoError> {
+        self.set(property, ActorNames(reference_list(values)))
+    }
+
+    /// Point a component-valued array at some components.
+    pub fn set_component_refs<T: Class>(
+        &self,
+        property: &str,
+        values: &[T],
+    ) -> Result<(), TempoError> {
+        self.set(property, ComponentNames(reference_list(values)))
+    }
+
+    /// Point an actor-valued array at some actors, without blocking.
+    pub fn set_actor_refs_async<'s, T: Class>(
+        &'s self,
+        property: &str,
+        values: &[T],
+    ) -> impl Future<Output = Result<(), TempoError>> + 's {
+        self.set_async(property, ActorNames(reference_list(values)))
+    }
+
+    /// Point a component-valued array at some components, without blocking.
+    pub fn set_component_refs_async<'s, T: Class>(
+        &'s self,
+        property: &str,
+        values: &[T],
+    ) -> impl Future<Output = Result<(), TempoError>> + 's {
+        self.set_async(property, ComponentNames(reference_list(values)))
+    }
+
     /// Point an actor-valued property at an actor.
     pub fn set_actor_ref<T: Class>(&self, property: &str, value: &T) -> Result<(), TempoError> {
         self.set(property, ActorName(value.as_object().reference_name()))
@@ -991,6 +1095,45 @@ impl ObjectRef {
         async move { T::from_value(returned(&request.await?)?) }
     }
 
+    /// Call a function whose result is an actor or a component.
+    pub fn call_for_object<T: Class>(
+        &self,
+        function: &str,
+        args: Vec<pb::FunctionArg>,
+    ) -> Result<T, TempoError> {
+        note_origin::<T>();
+        let response = self.call_raw(function, args)?;
+        Self::object_result_of(&response, "ReturnValue")
+    }
+
+    /// Call a function whose result is an actor or a component, without blocking.
+    pub fn call_for_object_async<T: Class>(
+        &self,
+        function: &str,
+        args: Vec<pb::FunctionArg>,
+    ) -> impl Future<Output = Result<T, TempoError>> + '_ {
+        note_origin::<T>();
+        let request = self.call_raw_async(function, args);
+        async move { Self::object_result_of(&request.await?, "ReturnValue") }
+    }
+
+    /// One named result of a call, as a typed handle.
+    pub fn object_result_of<T: Class>(
+        response: &pb::CallFunctionResponse,
+        name: &str,
+    ) -> Result<T, TempoError> {
+        note_origin::<T>();
+        let value = response
+            .results
+            .iter()
+            .find(|result| result.name == name)
+            .and_then(|result| result.typed_value.as_ref())
+            .ok_or_else(|| {
+                TempoError::Protocol(format!("the function returned no result named {:?}", name))
+            })?;
+        Ok(T::from_object(object_reference(value)?))
+    }
+
     /// Yield this property's value once per simulation tick, until the caller stops asking.
     ///
     /// Dynamically typed in the property, unavoidably: it is named by a string here, so there is
@@ -1041,6 +1184,25 @@ impl ObjectRef {
             }
         }
     }
+}
+
+/// An argument naming an actor. Its own function because the handle's type cannot say whether the
+/// server should look for an actor or a component.
+pub fn argument_actor<T: Class>(name: &str, value: &T) -> pb::FunctionArg {
+    argument(name, &ActorName(value.as_object().reference_name()))
+}
+
+/// An argument naming a component.
+pub fn argument_component<T: Class>(name: &str, value: &T) -> pb::FunctionArg {
+    argument(name, &ComponentName(value.as_object().reference_name()))
+}
+
+/// One argument of a call, named the way the function declares it.
+///
+/// Generated code names every argument rather than relying on order, so adding a parameter to a
+/// Blueprint cannot silently shift the others onto the wrong ones.
+pub fn argument<T: ToValue>(name: &str, value: &T) -> pb::FunctionArg {
+    pb::FunctionArg { name: name.to_string(), value: Some(value.to_value()) }
 }
 
 fn returned(response: &pb::CallFunctionResponse) -> Result<&pb::Value, TempoError> {
@@ -1297,6 +1459,44 @@ impl ToValue for ActorName {
 impl ToValue for ComponentName {
     fn to_value(&self) -> pb::Value {
         pb::Value { value: Some(pb::value::Value::ComponentValue(self.0.clone())) }
+    }
+}
+
+struct ActorNames(Vec<String>);
+
+struct ComponentNames(Vec<String>);
+
+impl ToValue for ActorNames {
+    fn to_value(&self) -> pb::Value {
+        pb::Value {
+            value: Some(pb::value::Value::ActorArrayValue(pb::StringArray {
+                values: self.0.clone(),
+            })),
+        }
+    }
+}
+
+impl ToValue for ComponentNames {
+    fn to_value(&self) -> pb::Value {
+        pb::Value {
+            value: Some(pb::value::Value::ComponentArrayValue(pb::StringArray {
+                values: self.0.clone(),
+            })),
+        }
+    }
+}
+
+fn reference_list<T: Class>(values: &[T]) -> Vec<String> {
+    values.iter().map(|value| value.as_object().reference_name()).collect()
+}
+
+fn reference_names(value: &pb::Value) -> Result<&Vec<String>, TempoError> {
+    match variant(value)? {
+        pb::value::Value::ActorArrayValue(inner) => Ok(&inner.values),
+        pb::value::Value::ActorSetValue(inner) => Ok(&inner.values),
+        pb::value::Value::ComponentArrayValue(inner) => Ok(&inner.values),
+        pb::value::Value::ComponentSetValue(inner) => Ok(&inner.values),
+        _ => Err(wrong(value, "an actor or component array")),
     }
 }
 
