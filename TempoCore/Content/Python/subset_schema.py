@@ -155,6 +155,11 @@ def subset(schema, packages):
     header["published_subset"] = True
     header["published_packages"] = list(packages)
     header.pop("content_hash", None)
+    # Which classes see a narrower ancestry here than in a project's own package, and what they
+    # were really derived from. The per-class hashes are untouched and still match the build -- a
+    # rerooted class can address the sim exactly as well, it just declares less -- so this is the
+    # only record that the view narrowed, and release notes and diagnostics both want it.
+    header["rerooted"] = {path: skipped[0] for path, _, skipped in rerooted}
     narrowed["header"] = header
     return narrowed, rerooted
 

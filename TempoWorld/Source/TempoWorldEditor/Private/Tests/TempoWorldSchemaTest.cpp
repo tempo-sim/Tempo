@@ -236,6 +236,28 @@ bool FTempoWorldSchemaDeclaredOnlyTest::RunTest(const FString& Parameters)
 	// property becoming read-only into a type error rather than a runtime failure.
 	TestFalse(TEXT("RelativeLocation is not writable"), RelativeLocation->GetBoolField(TEXT("writable")));
 
+	// Every class carries its own hash, which is what a client holding part of a build compares --
+	// a published class package describes only the modules every build ships, so no sim will ever
+	// report a whole-walk hash it could match. Two different classes must not share one.
+	TSet<FString> ClassHashes;
+	for (const TSharedPtr<FJsonValue>& Item : *Classes)
+	{
+		const TSharedPtr<FJsonObject>* Object;
+		if (!Item->TryGetObject(Object))
+		{
+			continue;
+		}
+		const FString Hash = (*Object)->GetStringField(TEXT("content_hash"));
+		if (Hash.IsEmpty())
+		{
+			AddError(FString::Printf(TEXT("%s has no content hash"),
+				*(*Object)->GetStringField(TEXT("path"))));
+			break;
+		}
+		ClassHashes.Add(Hash);
+	}
+	TestEqual(TEXT("every class's hash is distinct"), ClassHashes.Num(), Classes->Num());
+
 	// The header has to identify the build, or stubs and sim can disagree silently.
 	const TSharedPtr<FJsonObject>* Header;
 	if (TestTrue(TEXT("has a header"), Root->TryGetObjectField(TEXT("header"), Header)))

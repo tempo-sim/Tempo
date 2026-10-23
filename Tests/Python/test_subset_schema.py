@@ -180,7 +180,34 @@ def test_the_header_says_it_is_a_subset_and_carries_no_build_hash(subset):
     assert "content_hash" not in header
     # What the stubs still need to say about themselves.
     assert header["engine_version"] == "5.8"
-    assert header["schema_version"] == "1"
+    assert header["schema_version"] == "2"
+
+
+def test_the_header_records_what_was_rerooted(subset):
+    """The per-class hashes still match the build, so nothing else says the view narrowed.
+
+    A rerooted class can address the sim exactly as well as the project's own version of it -- it
+    declares less, which is not something a hash over what it declares could show.
+    """
+    narrowed, _ = subset
+    assert narrowed["header"]["rerooted"] == {
+        "/Script/Engine.Bridged": "/Script/SomePlugin.PluginBase",
+        "/Script/Engine.DeepBridged": "/Script/SomePlugin.PluginMiddle",
+        "/Script/Engine.Orphan": "/Script/SomePlugin.Rootless",
+    }
+
+
+def test_the_per_class_hashes_survive(subset):
+    """What a client compares when it holds only part of a build.
+
+    Dropped along with the whole-walk hash would leave a published package with nothing to check
+    at all, which is the failure this whole exercise is about.
+    """
+    narrowed, _ = subset
+    for cls in narrowed["classes"]:
+        assert cls.get("content_hash"), "{} lost its hash".format(cls["path"])
+    for entry in narrowed["structs"] + narrowed["enums"]:
+        assert entry.get("content_hash"), "{} lost its hash".format(entry["name"])
 
 
 def test_types_nothing_kept_mentions_are_dropped(subset):

@@ -294,45 +294,75 @@ bool IsCompilationArtifactClass(const UClass* Class)
 
 FString GetSchemaVersion()
 {
-	return TEXT("1");
+	// 2 added a content hash per class, struct and enum. A client generated from a version 1
+	// document has none to compare, so reading one has to fail rather than check nothing.
+	return TEXT("2");
+}
+
+FString HashClass(const FClassEntry& Entry)
+{
+	FSHA1 Sha;
+	Sha.UpdateWithString(*Entry.ClassPath, Entry.ClassPath.Len());
+	Sha.UpdateWithString(*Entry.SuperPath, Entry.SuperPath.Len());
+	for (const FMember& Member : Entry.Properties)
+	{
+		HashMember(Sha, Entry.ClassPath, Member);
+	}
+	for (const FFunctionInfo& Function : Entry.Functions)
+	{
+		Sha.UpdateWithString(*Function.Signature, Function.Signature.Len());
+	}
+	// A component that disappears, or changes class, breaks a caller exactly as a property does.
+	for (const FComponentTemplate& Component : Entry.Components)
+	{
+		Sha.UpdateWithString(*Component.Name, Component.Name.Len());
+		Sha.UpdateWithString(*Component.ClassPath, Component.ClassPath.Len());
+	}
+	return Sha.Finalize().ToString();
+}
+
+FString HashStruct(const FStructEntry& Entry)
+{
+	FSHA1 Sha;
+	Sha.UpdateWithString(*Entry.Name, Entry.Name.Len());
+	for (const FMember& Member : Entry.Members)
+	{
+		HashMember(Sha, Entry.Name, Member);
+	}
+	return Sha.Finalize().ToString();
+}
+
+FString HashEnum(const FEnumEntry& Entry)
+{
+	FSHA1 Sha;
+	Sha.UpdateWithString(*Entry.Name, Entry.Name.Len());
+	for (const FString& Enumerator : Entry.Enumerators)
+	{
+		Sha.UpdateWithString(*Enumerator, Enumerator.Len());
+	}
+	return Sha.Finalize().ToString();
 }
 
 FString HashResult(const FResult& Result)
 {
+	// Folded from the per-entry hashes rather than computed again over the members, so a change to
+	// what identifies one class cannot leave the two numbers disagreeing about it. The walk's
+	// ordering is deterministic (see FResult), which is what makes folding well defined.
 	FSHA1 Sha;
 	for (const FClassEntry& Entry : Result.Classes)
 	{
-		Sha.UpdateWithString(*Entry.ClassPath, Entry.ClassPath.Len());
-		Sha.UpdateWithString(*Entry.SuperPath, Entry.SuperPath.Len());
-		for (const FMember& Member : Entry.Properties)
-		{
-			HashMember(Sha, Entry.ClassPath, Member);
-		}
-		for (const FFunctionInfo& Function : Entry.Functions)
-		{
-			Sha.UpdateWithString(*Function.Signature, Function.Signature.Len());
-		}
-		// A component that disappears, or changes class, breaks a caller exactly as a property does.
-		for (const FComponentTemplate& Component : Entry.Components)
-		{
-			Sha.UpdateWithString(*Component.Name, Component.Name.Len());
-			Sha.UpdateWithString(*Component.ClassPath, Component.ClassPath.Len());
-		}
+		const FString Hash = HashClass(Entry);
+		Sha.UpdateWithString(*Hash, Hash.Len());
 	}
 	for (const FStructEntry& Entry : Result.Structs)
 	{
-		for (const FMember& Member : Entry.Members)
-		{
-			HashMember(Sha, Entry.Name, Member);
-		}
+		const FString Hash = HashStruct(Entry);
+		Sha.UpdateWithString(*Hash, Hash.Len());
 	}
 	for (const FEnumEntry& Entry : Result.Enums)
 	{
-		Sha.UpdateWithString(*Entry.Name, Entry.Name.Len());
-		for (const FString& Enumerator : Entry.Enumerators)
-		{
-			Sha.UpdateWithString(*Enumerator, Enumerator.Len());
-		}
+		const FString Hash = HashEnum(Entry);
+		Sha.UpdateWithString(*Hash, Hash.Len());
 	}
 	return Sha.Finalize().ToString();
 }

@@ -145,4 +145,19 @@ namespace TempoWorldSchemaWalk
 	// Shared so that the hash in a generated schema file and the hash a running sim reports are the
 	// same number, which is what lets a client refuse stubs built against a different build.
 	TEMPOWORLD_API FString HashResult(const FResult& Result);
+
+	// The same question about one entry: can a client that was generated against this class, struct
+	// or enum still address it.
+	//
+	// Two things need this rather than the whole-walk number. A published class package describes a
+	// subset of a build by design (TYPED_WORLD_API_PLAN.md section 16), so no sim will ever report
+	// a hash it could match, and comparing per entry is the only check available to it. And for a
+	// full package it is a better check anyway: one number over the whole walk says only "something
+	// moved", where today adding a single Blueprint invalidates every class in the build.
+	//
+	// HashResult is defined in terms of these, so there is one definition of what an entry's
+	// identity is rather than two that could drift.
+	TEMPOWORLD_API FString HashClass(const FClassEntry& Entry);
+	TEMPOWORLD_API FString HashStruct(const FStructEntry& Entry);
+	TEMPOWORLD_API FString HashEnum(const FEnumEntry& Entry);
 }

@@ -2087,6 +2087,7 @@ void UTempoWorldControlServiceSubsystem::DescribeClasses(const DescribeClassesRe
 		Class->set_package(TCHAR_TO_UTF8(*Entry.Package));
 		Class->set_is_abstract(Entry.bAbstract);
 		Class->set_is_blueprint(Entry.bBlueprint);
+		Class->set_content_hash(TCHAR_TO_UTF8(*TempoWorldSchemaWalk::HashClass(Entry)));
 
 		for (const TempoWorldSchemaWalk::FMember& Member : Entry.Properties)
 		{
@@ -2125,6 +2126,7 @@ void UTempoWorldControlServiceSubsystem::DescribeClasses(const DescribeClassesRe
 	{
 		TempoWorld::StructDescriptor* Struct = Response.add_structs();
 		Struct->set_name(TCHAR_TO_UTF8(*Entry.Name));
+		Struct->set_content_hash(TCHAR_TO_UTF8(*TempoWorldSchemaWalk::HashStruct(Entry)));
 		for (const TempoWorldSchemaWalk::FMember& Member : Entry.Members)
 		{
 			WriteMemberDescriptor(Member, *Struct->add_members());
@@ -2135,6 +2137,7 @@ void UTempoWorldControlServiceSubsystem::DescribeClasses(const DescribeClassesRe
 	{
 		TempoWorld::EnumDescriptor* Enum = Response.add_enums();
 		Enum->set_name(TCHAR_TO_UTF8(*Entry.Name));
+		Enum->set_content_hash(TCHAR_TO_UTF8(*TempoWorldSchemaWalk::HashEnum(Entry)));
 		for (const FString& Enumerator : Entry.Enumerators)
 		{
 			Enum->add_enumerators(TCHAR_TO_UTF8(*Enumerator));

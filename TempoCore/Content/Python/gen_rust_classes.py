@@ -645,7 +645,7 @@ def generate(schema_path, output_dir, version="0.0.0", docs=False):
     with open(schema_path) as f:
         schema = json.load(f)
 
-    expected = "1"
+    expected = "2"
     actual = schema.get("header", {}).get("schema_version")
     if actual != expected:
         raise Exception(

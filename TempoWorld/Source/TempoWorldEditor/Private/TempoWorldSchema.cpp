@@ -162,6 +162,7 @@ bool Write(const FOptions& Options, FStats& OutStats, FString& OutError)
 		Writer->WriteValue(TEXT("package"), Entry.Package);
 		Writer->WriteValue(TEXT("abstract"), Entry.bAbstract);
 		Writer->WriteValue(TEXT("blueprint"), Entry.bBlueprint);
+		Writer->WriteValue(TEXT("content_hash"), TempoWorldSchemaWalk::HashClass(Entry));
 
 		Writer->WriteArrayStart(TEXT("properties"));
 		for (const FMember& Member : Entry.Properties)
@@ -215,6 +216,7 @@ bool Write(const FOptions& Options, FStats& OutStats, FString& OutError)
 	{
 		Writer->WriteObjectStart();
 		Writer->WriteValue(TEXT("name"), Entry.Name);
+		Writer->WriteValue(TEXT("content_hash"), TempoWorldSchemaWalk::HashStruct(Entry));
 		Writer->WriteArrayStart(TEXT("members"));
 		for (const FMember& Member : Entry.Members)
 		{
@@ -230,6 +232,7 @@ bool Write(const FOptions& Options, FStats& OutStats, FString& OutError)
 	{
 		Writer->WriteObjectStart();
 		Writer->WriteValue(TEXT("name"), Entry.Name);
+		Writer->WriteValue(TEXT("content_hash"), TempoWorldSchemaWalk::HashEnum(Entry));
 		Writer->WriteArrayStart(TEXT("enumerators"));
 		for (const FString& Enumerator : Entry.Enumerators)
 		{

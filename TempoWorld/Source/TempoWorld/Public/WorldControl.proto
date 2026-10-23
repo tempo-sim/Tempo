@@ -1113,11 +1113,22 @@ message ClassDescriptor {
   repeated ClassFunctionDescriptor functions = 8;
   // Likewise declared-only: an inherited component belongs to the class that introduced it.
   repeated ComponentTemplateDescriptor components = 9;
+  // What a client generated against this class could break against -- its path, its superclass, and
+  // the names, types, writability and signatures of what it declares -- and nothing else, so adding
+  // a tooltip does not change it. SchemaHeader.content_hash is these folded together.
+  //
+  // Compared per class rather than per build by a client that holds only part of one: a published
+  // class package describes the modules every build ships and nothing else, so it can never match
+  // a whole-walk hash. It is the better comparison for a full package too, which today is told only
+  // that something moved.
+  string content_hash = 10;
 }
 
 message StructDescriptor {
   string name = 1;
   repeated ClassPropertyDescriptor members = 2;
+  // As ClassDescriptor.content_hash, over this struct's name and members.
+  string content_hash = 3;
 }
 
 message EnumDescriptor {
@@ -1125,6 +1136,8 @@ message EnumDescriptor {
   // The authored names, which are the spellings a Value's enum_value accepts. Unreal's synthetic
   // _MAX entry is omitted, since it is not a value anyone can set.
   repeated string enumerators = 2;
+  // As ClassDescriptor.content_hash, over this enum's name and enumerators.
+  string content_hash = 3;
 }
 
 message SchemaHeader {
