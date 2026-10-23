@@ -34,6 +34,53 @@ def _point_client_at(socket_name, port):
     return ["-ServerPort={}".format(port)], lambda: tempo_sim.set_server(port=port)
 
 
+def _surface(response):
+    """What the build declares, as `filter_schema.py` needs to narrow the editor's document to it.
+
+    The editor is the only thing that can report a property's metadata -- a BlueprintSetter, a
+    category -- and the packaged build is the only authority on what exists. That is already why
+    the class *list* is taken from here. Members are no different, and were being taken from the
+    editor: measured on TempoSample, 101 classes have a property the editor has and the build does
+    not, starting with AActor's seven WITH_EDITORONLY_DATA ones -- and AActor is the root of two
+    thousand classes, so every actor in the generated package declared seven properties that fail
+    at runtime. 54 classes likewise have an editor-only function (AActor::GetActorLabel among
+    them), 48 have an editor-only component, and 96 report a different signature, usually a
+    parameter whose name is cased differently in a cooked build. A CallFunction argument is matched
+    by name, so that last one is not cosmetic.
+    """
+    def parameters(function):
+        return [parameter.name for parameter in function.parameters]
+
+    def members(descriptors):
+        return {member.name: {"readable": member.readable,
+                              "writable": member.writable,
+                              "value_expressible": member.value_expressible}
+                for member in descriptors}
+
+    return {
+        "classes": {
+            cls.class_path: {
+                "content_hash": cls.content_hash,
+                "super": cls.super_path,
+                "properties": members(cls.properties),
+                "functions": {function.name: {"signature": function.signature,
+                                              "parameters": parameters(function),
+                                              "callable": function.callable}
+                              for function in cls.functions},
+                "components": {component.name: component.class_path
+                               for component in cls.components},
+            }
+            for cls in response.classes
+        },
+        "structs": {entry.name: {"content_hash": entry.content_hash,
+                                 "members": members(entry.members)}
+                    for entry in response.structs},
+        "enums": {entry.name: {"content_hash": entry.content_hash,
+                               "enumerators": list(entry.enumerators)}
+                  for entry in response.enums},
+    }
+
+
 def query(binary, port, timeout, socket_name):
     import tempo_sim
     import tempo_sim.tempo_world as tempo_world
@@ -66,6 +113,7 @@ def query(binary, port, timeout, socket_name):
                                                         include_functions=True)
                 return {
                     "classes": [cls.class_path for cls in response.classes],
+                    "surface": _surface(response),
                     # The build's own identity, so the generated client can be stamped with the
                     # hash of the sim it was made for rather than of the editor that walked it.
                     "header": {

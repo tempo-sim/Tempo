@@ -37,6 +37,116 @@ def referenced_type_names(type_desc, structs, enums):
             referenced_type_names(type_desc[nested], structs, enums)
 
 
+def narrow_to_surface(schema, surface):
+    """Narrow each class and struct to what the build declares, and correct what it reports.
+
+    The editor is the only thing that can report a property's metadata and the build is the only
+    authority on what exists, so the two have to be combined. Narrowing the class *list* was only
+    half of that: a class both have can still declare members only the editor does, and those were
+    passing straight through into the stubs. AActor alone contributed seven -- ActorGuid,
+    PivotOffset, RuntimeGrid and the rest are WITH_EDITORONLY_DATA -- to every one of the two
+    thousand classes that derive from it.
+
+    Three corrections, in order of how much they matter:
+
+    - **A member the build does not have is dropped.** It is a stub that type-checks and then fails
+      at runtime, which is the one outcome this whole exercise exists to prevent.
+    - **A function's signature and parameter names come from the build.** A CallFunction argument is
+      matched against the function's own parameters by name, and a cooked build cases some of them
+      differently, so an editor-sourced name is a FAILED_PRECONDITION at the first call.
+    - **Readability, writability and value-expressibility come from the build.** They are derived
+      from flags that survive cooking, so they should already agree; taken from the build so that
+      nothing rests on "should".
+
+    What is deliberately *not* done is adding a member the build has and the editor does not -- 23
+    classes have a property like that and 7 a function, nearly all a Blueprint variable the cook
+    cased differently. Carrying one over would mean no metadata for it, and so no BlueprintSetter,
+    which is how a property gets written wrongly rather than not at all. The typed API offers less
+    instead, which is its documented failure mode.
+
+    Returns a count per correction, for the caller to report.
+    """
+    stats = {"members_dropped": 0, "functions_dropped": 0, "components_dropped": 0,
+             "signatures_corrected": 0, "flags_corrected": 0,
+             "members_only_in_build": 0, "functions_only_in_build": 0}
+
+    def correct_flags(member, reported):
+        corrected = False
+        for field in ("readable", "writable", "value_expressible"):
+            if member.get(field) != reported[field]:
+                member[field] = reported[field]
+                corrected = True
+        return corrected
+
+    for cls in schema.get("classes", []):
+        declared = surface["classes"].get(cls["path"])
+        if declared is None:
+            continue
+        cls["content_hash"] = declared["content_hash"]
+
+        kept = []
+        for member in cls.get("properties", []):
+            reported = declared["properties"].get(member["name"])
+            if reported is None:
+                stats["members_dropped"] += 1
+                continue
+            stats["flags_corrected"] += 1 if correct_flags(member, reported) else 0
+            kept.append(member)
+        stats["members_only_in_build"] += len(declared["properties"]) - len(kept)
+        cls["properties"] = kept
+
+        kept = []
+        for function in cls.get("functions", []):
+            reported = declared["functions"].get(function["name"])
+            if reported is None:
+                stats["functions_dropped"] += 1
+                continue
+            if function.get("signature") != reported["signature"]:
+                function["signature"] = reported["signature"]
+                # The parameter list is positional in both documents, so the names line up with
+                # it. A count mismatch would mean the two disagree about the function itself, in
+                # which case the build's view is the one to keep and the editor's names are no
+                # use.
+                names = reported["parameters"]
+                if len(names) == len(function.get("parameters", [])):
+                    for parameter, name in zip(function["parameters"], names):
+                        parameter["name"] = name
+                stats["signatures_corrected"] += 1
+            kept.append(function)
+        stats["functions_only_in_build"] += len(declared["functions"]) - len(kept)
+        cls["functions"] = kept
+
+        kept = []
+        for component in cls.get("components", []):
+            if declared["components"].get(component["name"]) != component["class"]:
+                stats["components_dropped"] += 1
+                continue
+            kept.append(component)
+        cls["components"] = kept
+
+    for struct in schema.get("structs", []):
+        declared = surface["structs"].get(struct["name"])
+        if declared is None:
+            continue
+        struct["content_hash"] = declared["content_hash"]
+        kept = []
+        for member in struct.get("members", []):
+            reported = declared["members"].get(member["name"])
+            if reported is None:
+                stats["members_dropped"] += 1
+                continue
+            stats["flags_corrected"] += 1 if correct_flags(member, reported) else 0
+            kept.append(member)
+        struct["members"] = kept
+
+    for enum in schema.get("enums", []):
+        declared = surface["enums"].get(enum["name"])
+        if declared is not None:
+            enum["content_hash"] = declared["content_hash"]
+
+    return stats
+
+
 def filter_schema(schema, keep_paths):
     """The schema with classes outside `keep_paths` removed, and types nothing names dropped."""
     kept_classes = [cls for cls in schema.get("classes", []) if cls["path"] in keep_paths]
@@ -94,6 +204,30 @@ def main(argv):
     before = len(schema.get("classes", []))
     filtered = filter_schema(schema, keep_paths)
     after = len(filtered["classes"])
+
+    # Narrow the members too, which is the other half of "the build is the authority on what
+    # ships". Older reports carry no surface, in which case the class list is all that can be
+    # narrowed and the members stay the editor's -- said out loud, because it is the difference
+    # between stubs that address this build and stubs that mostly do.
+    surface = reported.get("surface")
+    if surface:
+        corrections = narrow_to_surface(filtered, surface)
+        print("dropped {} member(s), {} function(s) and {} component(s) the build does not have"
+              .format(corrections["members_dropped"], corrections["functions_dropped"],
+                      corrections["components_dropped"]))
+        print("corrected {} signature(s) and {} member flag(s) from the build".format(
+            corrections["signatures_corrected"], corrections["flags_corrected"]))
+        if corrections["members_only_in_build"] or corrections["functions_only_in_build"]:
+            # Not carried over: without the editor's metadata there is no BlueprintSetter for it,
+            # and writing such a property directly is how it gets written wrongly rather than not
+            # at all.
+            print("note: {} member(s) and {} function(s) the build has are not in the editor's "
+                  "walk under the same name, and are left out".format(
+                      corrections["members_only_in_build"],
+                      corrections["functions_only_in_build"]))
+    else:
+        print("warning: this report has no declared surface, so only the class list is narrowed; "
+              "regenerate it with the current query_packaged_classes.py", file=sys.stderr)
 
     # Stamp the header with the build's own identity rather than the editor's.
     #
