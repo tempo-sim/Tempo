@@ -111,6 +111,25 @@ Full generated API documentation for the published crate is on
     `"tempo_sim_source": "registry"` in `crate_info.json` to depend on the published crates.io
     crate instead.
 
+## Typed classes
+
+Everything above addresses properties by string. The generated **typed classes** remove the
+strings, so a renamed or removed property fails `cargo build` instead of failing mid-simulation:
+
+```rust
+use tempo_sample_classes::classes::game::vehicles::BP_Cat745_C;
+use tempo_sim::world;
+
+for truck in world::get_actors::<BP_Cat745_C>()? {
+    truck.set_max_speed(1200.0)?;
+}
+```
+
+The crate is generated from the build it describes and ships beside this one, under the same
+`TEMPO_GEN_RUST_API` opt-in.
+
+[:octicons-arrow-right-24: Typed classes](typed-classes.md)
+
 ## Example clients
 
 `ExampleClients/Rust/` contains `SensorPlayground`, `WorldPlayground` and `MovementPlayground` —

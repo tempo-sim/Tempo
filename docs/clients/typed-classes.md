@@ -170,6 +170,83 @@ By design, and in every case because the alternative is worse:
 The string-keyed [property API](../plugins/tempo-world.md) remains for all of it, and stays
 unfiltered on purpose.
 
+## The same thing in Rust
+
+The classes are generated for Rust too, from the same schema and with the same guarantee. The crate
+ships beside `tempo-sim` when the build is packaged with `TEMPO_GEN_RUST_API=1`:
+
+```toml
+[dependencies]
+tempo-sim = { path = "Packaged/API/Rust/tempo-sim" }
+tempo-sample-classes = { path = "Packaged/API/Rust/tempo-sample-classes" }
+```
+
+```rust
+use tempo_sample_classes::classes::game::vehicles::BP_Cat745_C;
+use tempo_sim::world;
+
+for truck in world::get_actors::<BP_Cat745_C>()? {
+    truck.set_max_speed(1200.0)?;
+}
+```
+
+Rust states the guarantee more sharply than Pyright does in one respect: a read-only property has
+no setter at all, so writing to one is `no method named set_max_speed`, which names the thing that
+does not exist rather than complaining about an assignment.
+
+### What differs from Python
+
+| | Python | Rust |
+|---|---|---|
+| Member names | Unreal's own, verbatim — `truck.MaxSpeed` | snake_case — `truck.max_speed()` |
+| Reading | an attribute — `truck.MaxSpeed` | a call that can fail — `truck.max_speed()?` |
+| Writing | an assignment — `truck.MaxSpeed = 1200.0` | `truck.set_max_speed(1200.0)?` |
+| Async | the same name, awaited | a separate `_async` twin |
+| Inheritance | real in the stubs, flat at run time | a `Deref` chain, both |
+| Batching | `with world.batch():` | `world::batch(\|\| { ... })?` |
+| Streaming | `truck.watch("MaxSpeed")` — a string | `truck.watch_max_speed()?` — checked |
+| Escape hatch | `DynamicObject`, a separate type | `truck.0`, the handle underneath |
+
+The names are the one deliberate divergence. Python keeps Unreal's spelling so that one name works
+in the editor, the schema and the scenario; Rust uses the names a Rust programmer would guess. Both
+are derived from the same schema, so a rename still has to show up in both.
+
+Two consequences of reading being a call rather than an attribute:
+
+```rust
+// Python chains, because attribute access is implicit I/O:    w.Target.Visible
+// Rust unwraps first, because the read is a call that can fail:
+let visible = widget.target()?.visible()?;
+```
+
+```rust
+// Several writes, one round trip. Nothing is sent if the body returns an error.
+world::batch(|| {
+    lidar.set_horizontal_beams(1024)?;
+    lidar.set_vertical_fov(30.0)
+})?;
+```
+
+### What is not there, in Rust specifically
+
+Everything in [What is not there](#what-is-not-there) applies, plus two Rust-only omissions:
+
+- **Container arguments to functions.** A `TArray` parameter of enums or object references would
+  need a slice of a generated type, which Rust's orphan rule keeps out of the generic conversion.
+  Container *properties* of those kinds are fine; it is only function parameters.
+- **Functions with a struct parameter**, as in Python — a struct has no single value that can carry
+  it, so it is reachable a member at a time but not passable as an argument.
+
+Conversely, one Python concession is unnecessary here. The Python stubs must deliberately *omit*
+`__getattr__`, because a catch-all a type checker can see makes every attribute legal on every
+generated class. Rust has no catch-all to hide: an undeclared method is an error with nothing that
+could suppress it. That is also why a root class is generated without a `Deref` — it keeps the
+handle's own string-keyed methods behind an explicit `.0` rather than offering them on everything.
+
+Functions that return more than one value hand back a tuple — the return value first, then the out
+parameters in declaration order — but each element is read by the name it was declared with, so
+adding a parameter to a Blueprint cannot silently shift the others onto the wrong values.
+
 ## Keeping a scenario repository honest
 
 The generated stubs make drift *detectable*; your CI is what makes it *detected*. Pyright enforces

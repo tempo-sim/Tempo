@@ -130,8 +130,21 @@ fails under Pyright instead of at runtime. See `TYPED_WORLD_API_PLAN.md`.
 - **`gen_py_classes.py`** emits three files per module: `.py` (class identity only), `.pyi` (the type
   surface, never imported) and `.meta.json` (what the runtime needs to build a request). Plus
   `py.typed`, without which a type checker ignores an installed package's stubs entirely.
+- **`gen_rust_classes.py`** emits one file per module, off the same schema, behind
+  `TEMPO_GEN_RUST_API` as the Rust RPC generator is. One file and not three because a generated Rust
+  method already knows its property's type, its `Value` variant and its `BlueprintSetter` — the
+  lookups the Python runtime does per access happen at generation time, so there is no metadata
+  table to keep in step. Unreal's single inheritance is emitted as a chain of `Deref`, which is what
+  makes an inherited member resolve and a derived handle coerce where a base one is wanted; names
+  are snake_case there, which is the one deliberate divergence from Python's verbatim ones. See
+  `TYPED_WORLD_API_PLAN.md` §15.
 - **`tempo_sim.unreal`** is the hand-written runtime; `tempo_sim.world` has the entry points
   (`get_actors`, `get_actor`, `spawn_actor`, `spawn_actor_deferred`, `batch`, `check_schema`).
+  `tempo_sim::unreal` / `tempo_sim::world` are the Rust mirrors, hand-written in the same
+  `Content/Rust/API/src` the generator otherwise owns (whitelisted in its `.gitignore`, as
+  `context.rs` is). The one `unsafe` in the typed Rust surface is `unreal::upcast`, behind an
+  `unsafe trait Class` whose "I am a `#[repr(transparent)]` newtype over `ObjectRef`" contract only
+  the generator satisfies; generated Rust contains none.
 - **`diff_schema.py`** reports release-to-release drift and exits non-zero on anything breaking.
 
 ---
@@ -291,7 +304,8 @@ sim (not the editor). They cover the client-facing API contract and behavior ove
   the typed class API), `movement` (commandable pawns; skips if the map has none), `sensors` (camera
   frame — needs a GPU, **default-off**), `codegen` (the typed class generator, its runtime, and the
   schema diff — **no sim and no wheel**: it runs the in-tree source against a fixture schema and
-  needs `pyright`, which `pip install pyright` brings with its own Node). Run:
+  needs `pyright`, which `pip install pyright` brings with its own Node; the Rust half of the same
+  group needs `cargo` and is skipped without it). Run:
   `Scripts/TestPythonAPI.sh [group]`.
 - **The `codegen` group tests behavior, not text.** A golden-output test would notice that the
   emitted stubs changed; what matters is whether Pyright *rejects* what it must. So each case
@@ -300,7 +314,10 @@ sim (not the editor). They cover the client-facing API contract and behavior ove
   name collision there once rooted the whole hierarchy in `Unknown`, at which point a checker allows
   every attribute and the guarantee is gone with no visible symptom.
 - **Rust — `Tests/Rust/`:** a `cargo` crate; `tests/*.rs` files are the groups (`cargo test --test
-  <group>`): `contract` (compile/surface check, no sim) and `integration` (live sim). The crate
+  <group>`): `contract` (compile/surface check, no sim), `integration` (live sim) and `typed`
+  (the typed class surface against a live sim, in its own crate under `Tests/Rust/typed/` — it needs
+  a second path dependency named after the host project, which the runner vendors as
+  `project-classes`). The crate
   under test is the packaged `tempo-sim` crate, vendored in by the script. Run: `Scripts/TestRustAPI.sh
   [group]`.
 - **Sim lifecycle:** Python's session-scoped `sim_server` fixture (and `TestRustAPI.sh` for Rust)

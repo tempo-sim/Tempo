@@ -5,7 +5,9 @@ of a simulation, if a property was renamed since it was written. The
 [typed classes](../clients/typed-classes.md) move that failure to your type checker. This walks from
 a fresh checkout to a scenario a checker reads, and to watching it catch a rename.
 
-What it assumes: a packaged build, Python 3.9 or newer, and nothing else.
+What it assumes: a packaged build, Python 3.9 or newer, and nothing else. The same classes are
+generated for Rust; [step 11](#11-rust-instead-of-python) is that path, and the steps before it
+apply to both.
 
 ## 1. Package the build
 
@@ -281,6 +283,89 @@ world.check_schema()     # raises SchemaMismatch if they disagree
 The example takes `--check-schema` to run it. It is explicit rather than automatic because the sim
 answers by walking its whole reflection, which takes most of a minute — so it belongs once at the
 start of a long run, or in a test.
+
+## 11. Rust instead of Python
+
+The same schema generates a Rust crate, with the same guarantee — and in Rust it is the compiler
+rather than a separate checker, so there is nothing to configure and no way to skip it.
+
+It is behind the same opt-in as the Rust RPC client, because a project that does not use Rust
+should not pay for generating 16 MB of it:
+
+```bash
+TEMPO_GEN_RUST_API=1 Scripts/Package.sh
+```
+
+That leaves two crates beside each other:
+
+```
+Packaged/API/Rust/tempo-sim/                  the client and the typed runtime
+Packaged/API/Rust/tempo-sample-classes/       this build's classes
+```
+
+Point a scenario crate at both. The classes crate depends on `tempo-sim` by relative path, so keep
+them together or copy both:
+
+```toml
+[dependencies]
+tempo-sim = { path = "../Packaged/API/Rust/tempo-sim" }
+tempo-sample-classes = { path = "../Packaged/API/Rust/tempo-sample-classes" }
+```
+
+Then the same scenario as [step 6](#6-run-the-example), in Rust:
+
+```rust
+use tempo_sample_classes::classes::game::street_sweeper::blueprint::BP_StreetSweeper_C;
+use tempo_sim::{world, TempoError};
+
+fn main() -> Result<(), TempoError> {
+    tempo_sim::set_server("localhost", 10001);
+
+    // The classes and the sim have to describe the same build.
+    world::check_schema()?;
+
+    for sweeper in world::get_actors::<BP_StreetSweeper_C>()? {
+        // A component, typed as its own class.
+        let lidar = sweeper.tempo_lidar();
+        println!("{}x{} beams", lidar.horizontal_beams()?, lidar.vertical_beams()?);
+
+        // Four writes, one round trip. Nothing is sent if the body fails.
+        world::batch(|| {
+            lidar.set_horizontal_beams(1024)?;
+            lidar.set_vertical_beams(64)?;
+            lidar.set_horizontal_fov(90.0)?;
+            lidar.set_max_distance(20000.0)        // centimetres -- 200 m
+        })?;
+
+        // RelativeLocation is declared five classes up, on SceneComponent.
+        println!("{:?}", lidar.relative_location()?);
+    }
+    Ok(())
+}
+```
+
+`cargo build` is the whole check. The four cases from [step 8](#8-watch-a-rename-get-caught) fail
+like this:
+
+```text
+error[E0599]: no method named `horizontal_beems` found for struct `TempoLidar`
+error[E0599]: no method named `set_b_color_enabled` found for struct `TempoLidar`
+error[E0308]: mismatched types: expected `i32`, found `&str`
+error[E0599]: no method named `no_such_thing` found for struct `StaticMeshComponent`
+```
+
+Autocomplete comes from rust-analyzer with no configuration — it reads the crate you depend on.
+
+Three things read differently from Python, and the
+[reference](../clients/typed-classes.md#what-differs-from-python) has the full table:
+
+- **Names are snake_case.** `HorizontalBeams` becomes `horizontal_beams`, and the rule handles
+  acronyms — `FOVAngle` is `fov_angle`, not `f_o_v_angle`. A reserved word takes a trailing
+  underscore, so a Blueprint component named `Box` is `sweeper.box_()`.
+- **A read is a call that can fail**, not an attribute, so chaining through a reference unwraps
+  first: `widget.target()?.visible()?`.
+- **Async is a separate `_async` twin** — `lidar.horizontal_beams_async().await?` — matching every
+  other generated Tempo Rust API.
 
 ## Next
 
