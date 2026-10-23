@@ -1,15 +1,19 @@
 #!/usr/bin/env bash
 
-# Generates the typed Python class surface for this build: runs the schema commandlet in the editor,
-# turns the schema into an importable package, and writes the pyproject that packages it as a wheel.
+# Generates the typed class surface for this build: runs the schema commandlet in the editor, then
+# turns the one schema into a Python package and (when Rust generation is opted in) a Rust crate.
 #
-# Called by Package.sh before the wheels are built. Can be run on its own to refresh the classes
+# Called by Package.sh before the clients are built. Can be run on its own to refresh the classes
 # after changing a Blueprint or a UPROPERTY:
 #
 #   Scripts/GenTypedAPI.sh
 #
-# The schema lands in Saved/TempoSchema/tempo_schema.json and the package in
-# Saved/TempoTypedAPI/<dist>/, which Package.sh then builds into Packaged/API/Python.
+# The schema lands in Saved/TempoSchema/tempo_schema.json, the Python package in
+# Saved/TempoTypedAPI/python/<dist>/ and the Rust crate in Saved/TempoTypedAPI/rust/<crate>/, which
+# Package.sh then builds into Packaged/API/{Python,Rust}.
+#
+# Rust follows the same gate as the RPC client generator, TEMPO_GEN_RUST_API: a project that does
+# not use the Rust client should not pay for generating 16 MB of it.
 
 set -e
 
@@ -121,7 +125,7 @@ else
   echo "  (Run this from Package.sh, or package first, to generate only classes that ship.)"
 fi
 
-STAGE="$STAGE_ROOT/$DIST_NAME"
+STAGE="$STAGE_ROOT/python/$DIST_NAME"
 rm -rf "$STAGE"
 mkdir -p "$STAGE"
 
@@ -158,4 +162,22 @@ include = ["$IMPORT_NAME", "$IMPORT_NAME.*"]
 "*" = ["py.typed", "*.pyi", "*.meta.json", "index.json", "schema_header.json"]
 EOF
 
-echo "Typed classes staged at $STAGE"
+echo "Typed Python classes staged at $STAGE"
+
+# The Rust crate, from the same schema. Its version follows tempo-sim's crate version so that a
+# client and the classes it addresses move together, exactly as the wheel follows tempo-sim's.
+if [ -n "${TEMPO_GEN_RUST_API:-}" ] && [ "${TEMPO_GEN_RUST_API}" != "0" ]; then
+  RUST_CRATE="$DIST_NAME"
+  RUST_STAGE="$STAGE_ROOT/rust/$RUST_CRATE"
+  TEMPO_SIM_CRATE_VERSION=$(grep -m1 '^version' \
+    "$SCRIPT_DIR/../TempoCore/Content/Rust/API/Cargo.toml" \
+    | sed -E 's/^version[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/')
+  rm -rf "$RUST_STAGE"
+  mkdir -p "$RUST_STAGE"
+  echo "Generating $RUST_CRATE"
+  "$PYTHON_BIN" "$PYTHON_DIR/gen_rust_classes.py" \
+    "$GENERATE_FROM" "$RUST_STAGE" "--version=$TEMPO_SIM_CRATE_VERSION"
+  echo "Typed Rust classes staged at $RUST_STAGE"
+else
+  echo "Skipping the typed Rust classes (set TEMPO_GEN_RUST_API=1 to generate them)"
+fi

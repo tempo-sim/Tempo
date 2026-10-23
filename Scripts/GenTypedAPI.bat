@@ -1,16 +1,19 @@
 @echo off
 setlocal enabledelayedexpansion
 
-REM Generates the typed Python class surface for this build: runs the schema commandlet in the
-REM editor, turns the schema into an importable package, and writes the pyproject that packages it.
+REM Generates the typed class surface for this build: runs the schema commandlet in the editor,
+REM then turns the one schema into a Python package and (when Rust generation is opted in) a Rust
+REM crate.
 REM
-REM Called by Package.bat before the wheels are built. Can be run on its own to refresh the classes
-REM after changing a Blueprint or a UPROPERTY:
+REM Called by Package.bat before the clients are built. Can be run on its own to refresh the
+REM classes after changing a Blueprint or a UPROPERTY:
 REM
 REM   Scripts\GenTypedAPI.bat
 REM
-REM The schema lands in Saved\TempoSchema\tempo_schema.json and the package in
-REM Saved\TempoTypedAPI\<dist>\.
+REM The schema lands in Saved\TempoSchema\tempo_schema.json, the Python package in
+REM Saved\TempoTypedAPI\python\<dist>\ and the Rust crate in Saved\TempoTypedAPI\rust\<crate>\.
+REM
+REM Rust follows the same gate as the RPC client generator, TEMPO_GEN_RUST_API.
 
 set "SCRIPT_DIR=%~dp0"
 
@@ -69,7 +72,7 @@ if not exist "!SCHEMA!" (
 )
 findstr /c:"Wrote schema" "!LOG!"
 
-set "STAGE=!PROJECT_ROOT!\Saved\TempoTypedAPI\!DIST_NAME!"
+set "STAGE=!PROJECT_ROOT!\Saved\TempoTypedAPI\python\!DIST_NAME!"
 if exist "!STAGE!" rmdir /s /q "!STAGE!"
 mkdir "!STAGE!"
 
@@ -103,5 +106,23 @@ for /f "usebackq tokens=2 delims== " %%V in (`findstr /b /c:"version" "!PYTHON_D
     echo "*" = ["py.typed", "*.pyi", "*.meta.json", "index.json", "schema_header.json"]
 )
 
-echo Typed classes staged at !STAGE!
+echo Typed Python classes staged at !STAGE!
+
+REM The Rust crate, from the same schema. Its version follows tempo-sim's crate version so that a
+REM client and the classes it addresses move together.
+if not defined TEMPO_GEN_RUST_API goto :no_rust
+if "!TEMPO_GEN_RUST_API!"=="0" goto :no_rust
+
+set "RUST_STAGE=!PROJECT_ROOT!\Saved\TempoTypedAPI\rust\!DIST_NAME!"
+for /f "usebackq tokens=2 delims== " %%V in (`findstr /b /c:"version" "!SCRIPT_DIR!..\TempoCore\Content\Rust\API\Cargo.toml"`) do set "TEMPO_SIM_CRATE_VERSION=%%~V"
+if exist "!RUST_STAGE!" rmdir /s /q "!RUST_STAGE!"
+mkdir "!RUST_STAGE!"
+echo Generating !DIST_NAME! ^(Rust^)
+"!PYTHON_BIN!" "!PYTHON_DIR!\gen_rust_classes.py" "!SCHEMA!" "!RUST_STAGE!" "--version=!TEMPO_SIM_CRATE_VERSION!"
+if errorlevel 1 exit /b 1
+echo Typed Rust classes staged at !RUST_STAGE!
+exit /b 0
+
+:no_rust
+echo Skipping the typed Rust classes (set TEMPO_GEN_RUST_API=1 to generate them)
 exit /b 0
