@@ -1,6 +1,13 @@
 """Generate a typed Rust class crate from tempo_schema.json.
 
-    gen_rust_classes.py <schema.json> <output-dir> [--docs]
+    gen_rust_classes.py <schema.json> <output-dir> [--docs] [--in-crate] [--root=PATH]
+
+`--in-crate` emits a module tree rooted at `mod.rs` and no manifest, for the published subset that
+lives inside tempo-sim itself (TYPED_WORLD_API_PLAN.md §16.4). It takes `--root` with it: the
+emitted modules reach each other by path, and inside tempo-sim `crate` is tempo-sim rather than the
+classes, so that path is `crate::ue::v5_8`. References to the *runtime* need no such treatment --
+they name `::tempo_sim::unreal::*` absolutely, and tempo-sim's `extern crate self as tempo_sim`
+makes that resolve inside tempo-sim too.
 
 The Rust sibling of gen_py_classes.py, off the same schema. Where that emits three files per
 module -- identity, types and runtime metadata -- this emits one, because Rust needs no metadata
@@ -110,9 +117,14 @@ def module_for(package):
 
 
 class Generator:
-    def __init__(self, schema, docs=False):
+    def __init__(self, schema, docs=False, root="crate"):
         self.schema = schema
         self.docs = docs
+        # The path the emitted modules reach each other by. `crate` for a crate of its own; for the
+        # published subset, which lives inside tempo-sim (TYPED_WORLD_API_PLAN.md section 16.4),
+        # the path to its own root -- `crate::ue::v5_8`, since `crate` there is tempo-sim and the
+        # classes are several modules down from it.
+        self.root = root
         self.classes_by_path = {c["path"]: c for c in schema["classes"]}
         self.struct_names = {s["name"] for s in schema.get("structs", [])}
         self.enum_names = {e["name"] for e in schema.get("enums", [])}
@@ -137,7 +149,7 @@ class Generator:
             name = type_desc.get("enum")
             if not name or name not in self.enum_names:
                 raise Unsupported("enum not in the schema")
-            return "crate::enums::" + ident(name), PLAIN
+            return self.root + "::enums::" + ident(name), PLAIN
 
         if kind in ("actor", "component"):
             return self.class_type(type_desc), OBJECT
@@ -166,7 +178,7 @@ class Generator:
         return self.path_of(referenced)
 
     def path_of(self, cls):
-        return "crate::classes::{}::{}".format(
+        return self.root + "::classes::{}::{}".format(
             "::".join(module_for(cls["package"])), ident(cls["name"]))
 
     def doc_lines(self, member, indent):
@@ -296,9 +308,10 @@ class Generator:
         used.add(accessor)
         self.stats["struct_properties"] += 1
         return self.doc_lines(member, "    ") + [
-            "    pub fn {}(&self) -> crate::structs::{}<'_> "
-            "{{ crate::structs::{}(self.0.struct_ref({})) }}".format(
-                accessor, ident(name), ident(name), json.dumps(member["name"]))]
+            "    pub fn {}(&self) -> {}::structs::{}<'_> "
+            "{{ {}::structs::{}(self.0.struct_ref({})) }}".format(
+                accessor, self.root, ident(name), self.root, ident(name),
+                json.dumps(member["name"]))]
 
     def emit_component(self, component, used):
         """A component the class brings with it, typed as its own class.
@@ -450,7 +463,7 @@ class Generator:
             "    fn from_object(object: {}::ObjectRef) -> Self {{ Self(object) }}".format(RUNTIME),
             "    fn as_object(&self) -> &{}::ObjectRef {{ &self.0 }}".format(RUNTIME),
             "    fn hierarchy() -> &'static (dyn {}::Hierarchy + 'static) "
-            "{{ &crate::hierarchy::TABLE }}".format(RUNTIME),
+            "{{ &{}::hierarchy::TABLE }}".format(RUNTIME, self.root),
             "}",
             "",
         ]
@@ -684,7 +697,7 @@ def write_file(path, text):
         f.write(text)
 
 
-def generate(schema_path, output_dir, version="0.0.0", docs=False):
+def generate(schema_path, output_dir, version="0.0.0", docs=False, in_crate=False, root=None):
     with open(schema_path) as f:
         schema = json.load(f)
 
@@ -696,7 +709,7 @@ def generate(schema_path, output_dir, version="0.0.0", docs=False):
             "the schema, or use the generator that shipped with it.".format(actual, expected))
 
     crate = os.path.basename(output_dir.rstrip(os.sep))
-    generator = Generator(schema, docs)
+    generator = Generator(schema, docs, root=root or "crate")
     source = os.path.join(output_dir, "src")
 
     write_file(os.path.join(source, "enums.rs"), generator.emit_enums())
@@ -725,9 +738,18 @@ def generate(schema_path, output_dir, version="0.0.0", docs=False):
                + "".join("pub mod {};\n".format(segments[0])
                          for segments in sorted(modules) if len(segments) == 1))
 
-    write_file(os.path.join(source, "lib.rs"), LIB_RS.format(crate=crate))
-    write_file(os.path.join(output_dir, "Cargo.toml"),
-               CARGO_TOML.format(crate=crate, version=version))
+    # A crate of its own, or a module tree inside tempo-sim.
+    #
+    # The emitted class code is identical either way, because it names `::tempo_sim::unreal::*`
+    # absolutely and `lib.rs` says `extern crate self as tempo_sim`, which makes that path resolve
+    # inside tempo-sim too. So the published subset (TYPED_WORLD_API_PLAN.md section 16.4) needs no
+    # second emitter -- only a different root file and no manifest of its own.
+    if in_crate:
+        write_file(os.path.join(source, "mod.rs"), MOD_RS)
+    else:
+        write_file(os.path.join(source, "lib.rs"), LIB_RS.format(crate=crate))
+        write_file(os.path.join(output_dir, "Cargo.toml"),
+                   CARGO_TOML.format(crate=crate, version=version))
 
     return generator.stats, modules
 
@@ -746,6 +768,28 @@ LIB_RS = """// Generated by gen_rust_classes.py from tempo_schema.json. Do not e
 // Unreal's names are kept as Unreal spells them, so the types do not read as Rust types would.
 #![allow(non_camel_case_types, non_snake_case)]
 // A generated surface describes the whole build; a scenario uses a little of it.
+#![allow(dead_code)]
+
+pub mod classes;
+pub mod enums;
+pub mod hierarchy;
+pub mod structs;
+"""
+
+MOD_RS = """// Generated by gen_rust_classes.py from tempo_schema.json. Do not edit.
+
+//! Typed Rust classes for one Unreal version's always-loaded modules.
+//!
+//! A class here is a handle, not a copy: calling a method asks the running simulation. Unreal's
+//! inheritance is a chain of `Deref`, so an inherited member resolves without anything extra and
+//! a derived handle passes where a base one is wanted.
+//!
+//! Everything is in Unreal's own units -- centimetres, degrees, left-handed. See
+//! `tempo_sim::unreal`.
+
+// Unreal's names are kept as Unreal spells them, so the types do not read as Rust types would.
+#![allow(non_camel_case_types, non_snake_case)]
+// A generated surface describes the whole module set; a scenario uses a little of it.
 #![allow(dead_code)]
 
 pub mod classes;
@@ -778,7 +822,12 @@ def main(argv):
     for argument in argv[3:]:
         if argument.startswith("--version="):
             version = argument[len("--version="):]
-    stats, modules = generate(argv[1], argv[2], version, "--docs" in argv)
+    root = None
+    for argument in argv[3:]:
+        if argument.startswith("--root="):
+            root = argument[len("--root="):]
+    stats, modules = generate(argv[1], argv[2], version, "--docs" in argv,
+                              "--in-crate" in argv, root)
     print("modules            {}".format(len(modules)))
     print("classes            {}".format(stats["classes"]))
     print("structs / enums    {} / {}".format(stats["structs"], stats["enums"]))
