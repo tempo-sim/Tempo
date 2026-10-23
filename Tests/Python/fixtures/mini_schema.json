@@ -14,7 +14,16 @@
       "package": "/Script/CoreUObject",
       "abstract": false,
       "blueprint": false,
-      "properties": [],
+      "properties": [
+        {
+          "name": "Name",
+          "kind": "string",
+          "type": "FString",
+          "readable": true,
+          "writable": false,
+          "value_expressible": true
+        }
+      ],
       "functions": [],
       "components": []
     },

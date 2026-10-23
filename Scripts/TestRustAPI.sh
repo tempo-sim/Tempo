@@ -60,10 +60,37 @@ TESTS_DIR="${TEMPO_RUST_TESTS_DIR:-$TEMPO_ROOT/Tests/Rust}"
 REPORT_DIR="${TEMPO_TEST_REPORT_DIR:-$TEMPO_ROOT/Saved/RustTestReport}"
 mkdir -p "$REPORT_DIR"
 
+# The typed class surface is its own crate, because it needs a second path dependency whose
+# package name belongs to the host project. Everything else lives in Tests/Rust itself.
+CRATE_DIR="$TESTS_DIR"
+if [ "$GROUP" = "typed" ]; then
+  CRATE_DIR="$TESTS_DIR/typed"
+fi
+
 # Vendor the packaged crate so the test crate's `path` dependency resolves.
-rm -rf "$TESTS_DIR/vendor/tempo-sim"
-mkdir -p "$TESTS_DIR/vendor"
-cp -r "$CRATE_SRC" "$TESTS_DIR/vendor/tempo-sim"
+rm -rf "$CRATE_DIR/vendor/tempo-sim"
+mkdir -p "$CRATE_DIR/vendor"
+cp -r "$CRATE_SRC" "$CRATE_DIR/vendor/tempo-sim"
+
+if [ "$GROUP" = "typed" ]; then
+  # This build's generated classes, vendored under a fixed name. The package is called after the
+  # host project (tempo-sample-classes), and a dependency has to be named at compile time, so the
+  # one `name =` line is rewritten rather than having every project fork the test crate.
+  CLASSES_SRC=$(find "$PACKAGED_DIR/API/Rust" -maxdepth 1 -type d -name "*-classes" 2>/dev/null | head -1)
+  if [ -z "$CLASSES_SRC" ]; then
+    echo "FAILED: no generated classes crate under $PACKAGED_DIR/API/Rust (was the package built with TEMPO_GEN_RUST_API=1?)." 1>&2
+    exit 1
+  fi
+  echo "Vendoring $(basename "$CLASSES_SRC") as project-classes"
+  rm -rf "$CRATE_DIR/vendor/project-classes"
+  cp -r "$CLASSES_SRC" "$CRATE_DIR/vendor/project-classes"
+  # Not `sed -i`: its suffix argument is required on BSD and rejected on GNU, and this script runs
+  # on both. [[:space:]] rather than \s for the same reason.
+  CLASSES_MANIFEST="$CRATE_DIR/vendor/project-classes/Cargo.toml"
+  sed -E 's/^name[[:space:]]*=[[:space:]]*"[^"]+"/name = "project-classes"/' \
+    "$CLASSES_MANIFEST" > "$CLASSES_MANIFEST.renamed"
+  mv "$CLASSES_MANIFEST.renamed" "$CLASSES_MANIFEST"
+fi
 
 # Launch the sim for groups that need it (everything except the compile-only "contract" group).
 SIM_PID=""
@@ -115,7 +142,7 @@ fi
 export TEMPO_SERVER_PORT="$PORT"
 export TEMPO_SERVER_SOCKET="$SOCKET"
 
-CARGO_ARGS=(test --manifest-path "$TESTS_DIR/Cargo.toml")
+CARGO_ARGS=(test --manifest-path "$CRATE_DIR/Cargo.toml")
 if [ -n "$GROUP" ] && [ "$GROUP" != "all" ]; then
   CARGO_ARGS+=(--test "$GROUP")
 fi
