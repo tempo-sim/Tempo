@@ -196,7 +196,40 @@ The file is about 140 lines and each section stands alone. Worth knowing as you 
 - **`is_a` asks about the actor**, not about the handle, which is what makes narrowing a broad query
   work.
 
-## 7. Watch a rename get caught
+## 7. Configure a Tempo sensor
+
+Tempo's own components are in the generated classes alongside the engine's, so a sensor is
+configured the same way as anything else:
+
+```python
+from tempo_sample_classes.TempoSensors import TempoLidar
+
+lidar = sweeper.TempoLidar          # typed as TempoLidar
+
+with world.batch():                 # one call, so one reconfigure
+    lidar.HorizontalBeams = 1024
+    lidar.VerticalBeams = 64
+    lidar.HorizontalFOV = 90.0
+    lidar.MaxDistance = 20000.0     # centimetres -- 200 m
+```
+
+Those take effect on the next frame. `UTempoTiledSceneCaptureComponent::TickComponent` compares each
+watched parameter against its mirror and reconfigures the tiles when one has moved, and the
+parameters that do not need a reconfigure are read fresh per measurement — so unlike a transform
+property, writing these is enough.
+
+The batch matters more here than it does elsewhere: four separate writes are four round trips, and
+the lidar would see up to four of them on separate frames and rebuild its tiles each time.
+
+!!! note "What a Tempo class offers is what it declares"
+
+    A property reaches the typed classes when it is declared `BlueprintReadWrite` (writable) or
+    `BlueprintReadOnly` / `VisibleAnywhere` (read-only). That is deliberate: the specifier is how a
+    Tempo class says which of its properties are public scenario API, as against the internals that
+    are `UPROPERTY` only so the garbage collector can see them. The string-keyed API still reaches
+    everything, with no guarantee attached.
+
+## 8. Watch a rename get caught
 
 This is the part worth doing by hand. Near the end of the example are four commented lines:
 
@@ -220,7 +253,7 @@ Each of those is a thing that would otherwise have been a `NOT_FOUND` from the s
 point in the run reached that line. The read-only one is the interesting case: it never failed
 loudly at all — a write to a `BlueprintReadOnly` property was simply refused.
 
-## 8. Where the names come from
+## 9. Where the names come from
 
 The import path mirrors the content path. `/Game/StreetSweeper/Blueprint/BP_StreetSweeper` is
 `tempo_sample_classes.Game.StreetSweeper.Blueprint.BP_StreetSweeper_C`; an engine class like
@@ -235,7 +268,7 @@ ships with TempoSample rather than with Tempo: the plugin's own
 while a typed one names classes that exist in exactly one project. Copy it into yours and change the
 imports.
 
-## 9. Keep the classes and the sim together
+## 10. Keep the classes and the sim together
 
 Classes generated from one build and used against another is silent wrongness — the checker is
 satisfied, and the first disagreement surfaces as something that looks like anything else. One call

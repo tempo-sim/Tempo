@@ -30,22 +30,22 @@ protected:
 
 	virtual void BeginPlay() override;
 
-private:
-	UPROPERTY(EditDefaultsOnly, Category = "Tempo")
+protected:
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Tempo")
 	TObjectPtr<UBehaviorTree> BehaviorTreeAsset;
 
-	UPROPERTY(EditDefaultsOnly, Category = "Tempo")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Tempo")
 	TObjectPtr<UBlackboardData> BlackboardAsset;
 
-	UPROPERTY(EditDefaultsOnly, Category = "Tempo")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Tempo")
 	bool bEnableCrowdSeparation = true;
 
-	UPROPERTY(EditDefaultsOnly, Category = "Tempo")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Tempo")
 	float CrowdSeparationWeight = 50.0f;
 
-	UPROPERTY(EditDefaultsOnly, Category = "Tempo")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Tempo")
 	float AvoidanceRangeMultiplier = 1.1f;
 
-	UPROPERTY(EditDefaultsOnly, Category = "Tempo")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Tempo")
 	ETempoAvoidanceQuality AvoidanceQuality = ETempoAvoidanceQuality::Medium;
 };

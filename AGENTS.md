@@ -214,6 +214,14 @@ committed; fetched.
   degrees, left-handed. Raw `UPROPERTY` values carry no semantic tagging, so converting them is
   guesswork. That is what `native_units` on `GetProperty`/`SetProperty`/`CallFunction` selects, and
   why `tempo_sim.unreal.Vector` is *not* `TempoCore.Geometry_pb2.Vector`.
+- **Blueprint exposure is how a Tempo class declares its public scenario API.** The typed class
+  surface is walked with `bBlueprintAccessibleOnly`, so a property reaches it only when it is
+  declared `BlueprintReadWrite` (writable) or `BlueprintReadOnly`/`VisibleAnywhere` (read-only). Add
+  the specifier when a property is meant to be configured or observed from a scenario; leave a
+  `UPROPERTY(Transient)` that exists for the garbage collector alone. The string-keyed API still
+  reaches everything either way -- the specifier buys the drift guarantee, not the access. Note the
+  asymmetry this implies: `FTypeInfo::IsWritable()` means "writable *through the typed API*", and
+  `SetProperty` accepts more than that.
 - **No catch-all a type checker can see.** `tempo_sim.unreal.Object` defines `__getattr__` and
   `__setattr__` — attribute access *is* the typed API — but `unreal.pyi` omits them deliberately. A
   visible catch-all makes every attribute legal on every generated subclass and silently voids the

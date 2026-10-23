@@ -87,7 +87,7 @@ protected:
 	bool bMouseCaptured = false;
 
 	// If true, draws a debug sphere around the currently possessed pawn.
-	UPROPERTY(EditAnywhere, Category = "Tempo")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo")
 	bool bHighlightPossessedPawn;
 
 	// A map to hold all pawns, dynamically grouped by their specific UClass.
@@ -121,7 +121,7 @@ protected:
 	 * The widget class to use for the custom hover cursor.
 	 * You must assign this in the Blueprint editor that inherits from this C++ class.
 	 */
-	UPROPERTY(EditDefaultsOnly, Category = "UI", meta = (DisplayName = "Hover Cursor Widget"))
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "UI", meta = (DisplayName = "Hover Cursor Widget"))
 	TSubclassOf<UUserWidget> HoverCursorWidgetClass;
 
 	/**

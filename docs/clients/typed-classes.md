@@ -158,6 +158,14 @@ By design, and in every case because the alternative is worse:
   expressed as one value each.
 - **Editor-only classes.** The schema is generated in the editor but filtered to what the packaged
   build actually ships, so the classes you are offered are classes that exist.
+- **Properties a class does not declare as Blueprint-accessible.** `BlueprintReadWrite` and
+  `BlueprintReadOnly` are how a class says which of its properties are public API, as against the
+  ones that are `UPROPERTY` only so the garbage collector or the serializer can see them. A
+  `UPROPERTY(Transient)` holding a material instance is not something to offer a scenario.
+
+    The server will still read and write them by string, since nothing about the transport cares. So
+    reaching one through the string API is possible and is the escape hatch — it simply comes with
+    no guarantee that it will still be there next release, which is the trade this page is about.
 
 The string-keyed [property API](../plugins/tempo-world.md) remains for all of it, and stays
 unfiltered on purpose.

@@ -400,31 +400,31 @@ protected:
 	// (MeasurementTypes is inherited from UTempoTiledSceneCaptureComponent.)
 
 	// The minimum distance this Lidar can measure. Note that GEngine->NearClipPlane must be less than this value.
-	UPROPERTY(EditAnywhere, meta=(UIMin=0.0, ClampMin=0.0))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(UIMin=0.0, ClampMin=0.0))
 	double MinDistance = 10.0; // 10cm
 
 	// The maximum distance this Lidar can measure. Note that UTempoSensorsSettings::MaxLidarDepth must be greater than this value.
-	UPROPERTY(EditAnywhere, meta=(UIMin=0.0, ClampMin=0.0))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(UIMin=0.0, ClampMin=0.0))
 	double MaxDistance = 10000.0; // 100m
 
 	// The distance closer than which perpendicular surfaces will have saturated (1.0) intensity.
-	UPROPERTY(EditAnywhere, meta=(UIMin=0.0, ClampMin=0.0))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(UIMin=0.0, ClampMin=0.0))
 	double IntensitySaturationDistance = 1000.0; // 10m
 
 	// The vertical field of view in degrees.
-	UPROPERTY(EditAnywhere, meta=(UIMin=0.0001, UIMax=180.0, ClampMin=0.0001, ClampMax=180.0))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(UIMin=0.0001, UIMax=180.0, ClampMin=0.0001, ClampMax=180.0))
 	double VerticalFOV = 30.0;
 
 	// The horizontal field of view in degrees.
-	UPROPERTY(EditAnywhere, meta=(UIMin=0.0001, UIMax=360.0, ClampMin=0.0001, ClampMax=360.0))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(UIMin=0.0001, UIMax=360.0, ClampMin=0.0001, ClampMax=360.0))
 	double HorizontalFOV = 120.0;
 
 	// The number of vertical beams.
-	UPROPERTY(EditAnywhere, meta=(UIMin=1, ClampMin=1))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(UIMin=1, ClampMin=1))
 	int32 VerticalBeams = 64;
 
 	// The number of horizontal beams.
-	UPROPERTY(EditAnywhere, meta=(UIMin=2, ClampMin=2))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(UIMin=2, ClampMin=2))
 	int32 HorizontalBeams = 200;
 
 	// Full-angle beam divergence in degrees. The rendered image is sized so each pixel subtends one
@@ -432,15 +432,15 @@ protected:
 	// tracks the beam footprint rather than the beam count. A single value covers both axes for now
 	// (the pipeline renders square angular pixels); per-axis divergence would need the projection/
 	// decode rework noted in ConfigureTile.
-	UPROPERTY(EditAnywhere, meta=(UIMin=0.0001, ClampMin=0.0001))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(UIMin=0.0001, ClampMin=0.0001))
 	double BeamDivergence = 0.35;
 
 	// How the rendered pixel grid is sized from BeamDivergence. See ETempoLidarSamplingStrategy.
-	UPROPERTY(EditAnywhere)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	ETempoLidarSamplingStrategy SamplingStrategy = ETempoLidarSamplingStrategy::Simple;
 
 	// The max angle of incidence in degrees from which this Lidar will get a return.
-	UPROPERTY(EditAnywhere, meta=(UIMin=0.0, UIMax=90.0, ClampMin=0.0, ClampMax=90.0))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(UIMin=0.0, UIMax=90.0, ClampMin=0.0, ClampMax=90.0))
 	float MaxAngleOfIncidence = 87.5;
 
 	// Per-beam intrinsic calibration. When non-empty, replaces the uniform VerticalBeams /
@@ -457,7 +457,7 @@ protected:
 	// are attenuated by the two-way transmittance to the surface and dropped when they fall below
 	// MinDetectableIntensity; the medium itself produces an echo of its own. Off, none of the extra
 	// passes run and the output is unchanged.
-	UPROPERTY(EditAnywhere, Category="TempoLidar")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="TempoLidar")
 	bool bSimulateParticipatingMedia = true;
 
 	// Participating media (fog, dust, smoke): also rasterize translucent primitives (Niagara sprites
@@ -465,14 +465,14 @@ protected:
 	// materials, so a dust or smoke effect built from translucent sprites attenuates and scatters the
 	// beam like fog does. Costs one extra rasterization of those primitives per tile, evaluating
 	// opacity only. Additive materials block nothing and are skipped.
-	UPROPERTY(EditAnywhere, Category="TempoLidar", meta=(EditCondition="bSimulateParticipatingMedia"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="TempoLidar", meta=(EditCondition="bSimulateParticipatingMedia"))
 	bool bMediaIncludesTranslucency = true;
 
 	// Participating media (fog, dust, smoke): converts the camera's visual opacity into the lidar's
 	// optical depth. 1 = what the camera sees is what the beam sees, which holds for fog and dust,
 	// whose particles are large compared to the wavelength. Fine smoke scatters less in the near
 	// infrared than in visible light: below 1.
-	UPROPERTY(EditAnywhere, Category="TempoLidar", meta=(EditCondition="bSimulateParticipatingMedia", UIMin=0.0, UIMax=4.0, ClampMin=0.0))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="TempoLidar", meta=(EditCondition="bSimulateParticipatingMedia", UIMin=0.0, UIMax=4.0, ClampMin=0.0))
 	float MediaExtinctionScale = 1.0f;
 
 	// Participating media (fog, dust, smoke): how much of what a white medium takes out of the beam
@@ -480,29 +480,29 @@ protected:
 	// return is this times its albedo estimate: a sprite's base color luminance (its emissive for
 	// unlit materials), the fog component's albedo for fog. So dark smoke returns less than white
 	// fog, and a medium echo's reflectivity is that albedo.
-	UPROPERTY(EditAnywhere, Category="TempoLidar", meta=(EditCondition="bSimulateParticipatingMedia", UIMin=0.0, UIMax=1.0, ClampMin=0.0))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="TempoLidar", meta=(EditCondition="bSimulateParticipatingMedia", UIMin=0.0, UIMax=1.0, ClampMin=0.0))
 	float MediaBackscatter = 0.1f;
 
 	// Echoes weaker than this are not reported, whether from a surface seen through participating
 	// media (fog, dust, smoke) or from the medium itself. Only applied when media are simulated.
-	UPROPERTY(EditAnywhere, Category="TempoLidar", meta=(EditCondition="bSimulateParticipatingMedia", UIMin=0.0, UIMax=1.0, ClampMin=0.0, ClampMax=1.0))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="TempoLidar", meta=(EditCondition="bSimulateParticipatingMedia", UIMin=0.0, UIMax=1.0, ClampMin=0.0, ClampMax=1.0))
 	float MinDetectableIntensity = 0.01f;
 
 	// Participating media (fog, dust, smoke): draw each beam's medium echo range at random from the
 	// medium's return distribution, so returns spread through the medium as a real sensor's do. Off,
 	// every beam reports the median range of its distribution, which forms a clean shell.
-	UPROPERTY(EditAnywhere, AdvancedDisplay, Category="TempoLidar", meta=(EditCondition="bSimulateParticipatingMedia"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, AdvancedDisplay, Category="TempoLidar", meta=(EditCondition="bSimulateParticipatingMedia"))
 	bool bStochasticMediaReturns = true;
 
 	// Participating media (fog, dust, smoke): number of range bins the transmittance profile of each
 	// beam is resolved into, log-spaced out to MaxDistance. More bins place medium echoes more
 	// precisely at a cost in memory (12 bytes per bin per rendered pixel) and time.
-	UPROPERTY(EditAnywhere, AdvancedDisplay, Category="TempoLidar", meta=(EditCondition="bSimulateParticipatingMedia", UIMin=8, UIMax=256, ClampMin=2, ClampMax=1024))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, AdvancedDisplay, Category="TempoLidar", meta=(EditCondition="bSimulateParticipatingMedia", UIMin=8, UIMax=256, ClampMin=2, ClampMax=1024))
 	int32 MediaRangeBins = 64;
 
 	// Which echo a beam reports when it detects more than one. Only participating media (fog, dust,
 	// smoke) produce a second echo, so without them every mode reports the same returns.
-	UPROPERTY(EditAnywhere, Category="TempoLidar")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="TempoLidar")
 	ETempoLidarReturnMode ReturnMode = ETempoLidarReturnMode::Strongest;
 
 	// RateHz and SequenceId are inherited from UTempoSceneCaptureComponent2D.
@@ -514,7 +514,7 @@ protected:
 	// survive the brief sub-frame gaps in a streaming gRPC client (response sent → client
 	// re-issues next request) — without it, the toggle oscillates and the back-to-back RT swaps
 	// race the async UpdateResource on the render thread.
-	UPROPERTY(VisibleAnywhere, Category="Tempo")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Tempo")
 	bool bColorEnabled = false;
 
 	// Frames seen without any color request. Resets to 0 whenever a request with include_color

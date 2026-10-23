@@ -292,6 +292,32 @@ def test_typed_discovery_finds_spawned_actors(sim_server):
         tw.destroy_actor(actor=spawned.actor)
 
 
+@requires_classes
+def test_tempo_components_declare_their_own_configuration():
+    """Tempo's own components must be configurable through the typed classes, not only by string.
+
+    A property reaches the typed surface only when its UPROPERTY says BlueprintReadWrite or
+    BlueprintReadOnly -- which is how a Tempo class declares what is public scenario API. Nothing
+    else enforces that, so dropping the specifier in a refactor would quietly take Tempo's own API
+    back out of the typed classes while leaving the string-keyed one working, and the loss would
+    surface as a scenario that cannot configure a sensor. These are a lidar's basic parameters.
+
+    Reads the installed metadata rather than a live component, so it needs no sim and no project
+    content: TempoSensors ships with Tempo.
+    """
+    registry = registered()
+    lidar = "/Script/TempoSensors.TempoLidar"
+    for name in ("HorizontalBeams", "VerticalBeams", "HorizontalFOV", "VerticalFOV",
+                 "MinDistance", "MaxDistance", "ReturnMode", "SamplingStrategy"):
+        member = registry.find_property(lidar, name)
+        assert member is not None, "TempoLidar.{} is absent from the typed surface".format(name)
+        assert member["writable"], "TempoLidar.{} should be writable".format(name)
+
+    # Declared VisibleAnywhere, so it is readable and must not be assignable.
+    derived = registry.find_property(lidar, "bColorEnabled")
+    assert derived is not None and not derived["writable"]
+
+
 def test_discovery_by_a_base_class_can_be_narrowed(sim_server):
     """The whole point of asking for a base class: sorting out what came back."""
     StaticMeshActor = registered().python_class(SPAWNABLE)

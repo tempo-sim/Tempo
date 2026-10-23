@@ -32,13 +32,13 @@ protected:
 	UPROPERTY(BlueprintAssignable)
 	FTeleportMovementEvent OnMovementBegan;
 
-	UPROPERTY(EditAnywhere)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	float StoppedVelocityThreshold = 100.0;
 
-	UPROPERTY(EditAnywhere)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	float StoppedVelocityHysteresis = 25.0;
 
-	UPROPERTY(EditAnywhere, meta=(UIMin=0.0, UIMax=1.0, ClampMin=0.0, ClampMax=1.0))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(UIMin=0.0, UIMax=1.0, ClampMin=0.0, ClampMax=1.0))
 	float VelocitySmoothing = 0.75;
 
 	FTransform LastTransform;

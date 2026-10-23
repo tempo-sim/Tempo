@@ -49,9 +49,10 @@ API at whatever rate you configure.
   `UpsamplingFactor=1`, the camera renders straight to the final render target — no aux-unpack, no
   proxy-tonemap pass, no merge — saving one `FSceneRenderer` and two Canvas blits per frame.
 - **Runtime reconfiguration.** Lens model, FOV, resolution, beam counts, beam calibration and
-  feather can all change at runtime (via Blueprint, the Editor, or `set_*_property` over the API).
-  A reconfigure is applied at a safe point — when no readback is in flight — so it never tears
-  mid-frame.
+  feather can all change at runtime (via Blueprint, the Editor, `set_*_property` over the API, or
+  the [typed classes](../clients/typed-classes.md), where `lidar.HorizontalBeams = 1024` is checked
+  against the build before it runs). A reconfigure is applied at a safe point — when no readback is
+  in flight — so it never tears mid-frame.
 - **Pixel-perfect distortion.** Pinhole gets `Nearest` filtering by default (1:1 sampling, no
   blur); every other lens model gets `Bicubic`, which keeps nearly all detail where the
   distortion samples between texels (`Bilinear` blurs noticeably there). Override via
