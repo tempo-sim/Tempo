@@ -585,6 +585,80 @@ def test_the_installed_classes_match_the_sim(sim_server):
     assert world.check_schema(raise_on_mismatch=True) is True
 
 
+def _import_published_classes():
+    """Import the published classes for this build's engine version, if the wheel carries them.
+
+    They ship inside `tempo_sim` rather than as a distribution of their own
+    (TYPED_WORLD_API_PLAN.md section 16), one subpackage per Unreal version, and importing them is
+    lazy by design -- `import tempo_sim` does not pull in three megabytes of classes nobody asked
+    for. So a test that wants them has to ask.
+
+    Only the version matching this build. A wheel carrying several is the point of the namespace,
+    and importing a version the sim is not running would correctly report a mismatch.
+    """
+    import importlib
+
+    # The project's own package, which was generated from this build in the same run, so its
+    # engine version is the one to ask for. Found by name rather than by position: the published
+    # one registers too, and which came first is an import-order detail.
+    project = [package for package in registered().packages
+               if not package.package.startswith("tempo_sim.")]
+    if not project:
+        return None
+    engine_version = project[0].header.get("engine_version") or ""
+    if not engine_version:
+        return None
+    name = "tempo_sim.UE.v" + engine_version.replace(".", "_")
+    try:
+        importlib.import_module(name)
+    except ImportError:
+        return None
+    return name
+
+
+@requires_classes
+def test_the_published_classes_match_the_sim(sim_server):
+    """The published subset against a running sim, beside the project's own classes.
+
+    This is the premise of section 16 under test: a package describing only the modules every build
+    ships can still verify itself, because the comparison is per entry. A whole-walk hash could
+    never match -- the subset is 1,730 classes of 6,068 by construction.
+    """
+    published = _import_published_classes()
+    if published is None:
+        pytest.skip("this tempo-sim wheel carries no published classes for this engine version")
+
+    installed = {package.package for package in registered().packages}
+    assert published in installed, "importing the published classes should register them"
+    assert len(installed) > 1, "the project's own classes should still be registered too"
+
+    assert world.check_schema(raise_on_mismatch=True) is True
+
+
+@requires_classes
+def test_the_published_classes_offer_no_more_than_the_build(sim_server):
+    """Less, not wrong -- which is what makes a build-sourced hash honest.
+
+    The subset drops whole modules and reroots 32 classes past an ancestor it does not carry, so it
+    offers less than the project's package. What it must never do is offer a class the build has no
+    trace of.
+    """
+    published = _import_published_classes()
+    if published is None:
+        pytest.skip("this tempo-sim wheel carries no published classes for this engine version")
+
+    reported = {cls.class_path for cls in tw.describe_classes(
+        include_blueprint_classes=True, blueprint_accessible_only=True,
+        include_functions=False).classes}
+
+    package = next(p for p in registered().packages if p.package == published)
+    promised = set(package.index)
+    assert promised, "the published package should declare some classes"
+    missing = promised - reported
+    assert not missing, "{} published class(es) are absent from this build, e.g. {}".format(
+        len(missing), sorted(missing)[:5])
+
+
 @requires_classes
 def test_every_generated_class_exists_in_the_sim(sim_server):
     """No stub may promise a class this build does not have.
