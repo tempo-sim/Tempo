@@ -171,40 +171,110 @@ class SchemaMismatch(RuntimeError):
     """The installed generated classes describe a different build than the sim is running."""
 
 
+# The three things a generated package records a hash for, as `hashes.json` keys them.
+_KINDS = ("classes", "structs", "enums")
+
+
+def _compare(installed, reported):
+    """What the sim no longer agrees about, as (changed, absent) lists of (kind, name).
+
+    The two findings are not the same thing. An entry whose hash moved is one the package may
+    describe wrongly -- a renamed property, a changed signature, a member that became read-only. An
+    entry the sim does not have at all is one nothing can address.
+
+    What is deliberately *not* a finding is an entry the sim has and the package does not. A
+    published package describes the modules every build ships and nothing else, so that is its
+    normal condition rather than a problem with it.
+    """
+    changed, absent = [], []
+    for kind in _KINDS:
+        current = reported[kind]
+        for name, hashed in sorted(installed.get(kind, {}).items()):
+            if name not in current:
+                absent.append((kind, name))
+            elif hashed and current[name] != hashed:
+                changed.append((kind, name))
+    return changed, absent
+
+
+def _examples(findings, limit=5):
+    """A few findings by name. Enough to recognise the change; the count carries the scale."""
+    shown = ", ".join("{} {}".format(kind[:-1], name) for kind, name in findings[:limit])
+    return shown + ", ..." if len(findings) > limit else shown
+
+
 def check_schema(raise_on_mismatch: bool = True) -> bool:
-    """Compare the installed generated classes against the sim's own reflection.
+    """Compare the installed generated classes against the sim's own reflection, class by class.
 
     Stubs generated from one build and used against another is silent wrongness: the type checker
     is satisfied, and the first attribute access that disagrees fails for reasons that look like
-    anything but a version skew. The content hash covers names, types and writability -- not
+    anything but a version skew. A hash covers names, types, writability and signatures -- not
     documentation -- so this answers "can these stubs address this sim", not "is anything different
     at all".
 
-    Not automatic on connect, and deliberately so: the sim computes its hash by walking reflection,
-    which is dominated by loading every Blueprint and takes the best part of a minute. Paying that
-    on every client start would be worse than the problem. Call it once from a test, or at the start
-    of a long run. (A packaged build could report a hash baked in at package time, which would make
-    an on-connect check cheap; that is packaging work, not client work.)
-    """
-    installed = registered_classes().header
-    # These three options must match what query_packaged_classes.py asked when the installed
-    # classes were stamped. The hash covers function signatures, so a different request yields a
-    # different number for the same build.
-    reported = _world().describe_classes(include_blueprint_classes=True,
-                                         blueprint_accessible_only=True,
-                                         include_functions=True).header
+    Compared per class rather than per build, for two reasons. A package may describe part of a
+    build by design: the published classes inside `tempo_sim` describe the modules every build
+    ships (see TYPED_WORLD_API_PLAN.md section 16), so a whole-walk comparison would reject every
+    one of them. And for a whole-build package it is simply a better report -- one number says only
+    that something moved, where today a project that adds a single Blueprint invalidates every
+    class it has.
 
-    if reported.content_hash == installed["content_hash"]:
+    Every installed package is checked, because more than one can be installed and they describe
+    different things.
+
+    Not automatic on connect, and deliberately so: the sim computes its answer by walking
+    reflection, which is dominated by loading every Blueprint and takes the best part of a minute.
+    Paying that on every client start would be worse than the problem. Call it once from a test, or
+    at the start of a long run. (A packaged build could report hashes baked in at package time,
+    which would make an on-connect check cheap; that is packaging work, not client work.)
+    """
+    packages = registered_classes().packages
+    if not packages:
+        raise SchemaMismatch(
+            "no generated classes are installed, so there is nothing to check. Install this "
+            "build's generated class package (e.g. `tempo_sample_classes`), which ships in "
+            "Packaged/API/Python alongside the tempo-sim wheel.")
+
+    # These three options must match what query_packaged_classes.py asked when the installed
+    # classes were stamped. The hashes cover function signatures, so a different request yields
+    # different numbers for the same build.
+    response = _world().describe_classes(include_blueprint_classes=True,
+                                         blueprint_accessible_only=True,
+                                         include_functions=True)
+    reported = {
+        "classes": {entry.class_path: entry.content_hash for entry in response.classes},
+        "structs": {entry.name: entry.content_hash for entry in response.structs},
+        "enums": {entry.name: entry.content_hash for entry in response.enums},
+    }
+
+    problems = []
+    for package in packages:
+        hashes = package.hashes
+        if not hashes:
+            problems.append(
+                "  {}: generated before the per-class hashes existed (schema version {}), so it "
+                "cannot be checked. Regenerate it.".format(
+                    package.package, package.header.get("schema_version")))
+            continue
+        changed, absent = _compare(hashes, reported)
+        if not changed and not absent:
+            continue
+        detail = []
+        if changed:
+            detail.append("{} changed ({})".format(len(changed), _examples(changed)))
+        if absent:
+            detail.append("{} not in this sim ({})".format(len(absent), _examples(absent)))
+        problems.append("  {}: {}".format(package.package, "; ".join(detail)))
+
+    if not problems:
         return True
 
     message = (
         "the installed generated classes do not match this sim.\n"
-        "  classes were generated from: engine {}, schema {}, hash {}\n"
-        "  the sim reports:             engine {}, schema {}, hash {}\n"
+        + "\n".join(problems)
+        + "\n  the sim reports: engine {}, schema {}\n"
         "Regenerate the client against this build, or connect to the build the client came from."
-    ).format(installed.get("engine_version"), installed.get("schema_version"),
-             installed.get("content_hash"),
-             reported.engine_version, reported.schema_version, reported.content_hash)
+    ).format(response.header.engine_version, response.header.schema_version)
     if raise_on_mismatch:
         raise SchemaMismatch(message)
     import warnings

@@ -146,6 +146,11 @@ world.check_schema()     # raises SchemaMismatch if they disagree
 It is explicit rather than automatic because the sim answers by walking its whole reflection, which
 takes most of a minute. Call it once from a test, or at the start of a long run.
 
+The comparison is per class, so the report names what moved rather than only saying that something
+did, and it distinguishes a class whose members changed from a class the sim does not have at all.
+A class the *sim* has and your package does not is not a finding — that is the normal state of a
+package describing part of a build.
+
 ## What is not there
 
 By design, and in every case because the alternative is worse:
@@ -156,8 +161,11 @@ By design, and in every case because the alternative is worse:
   string-keyed API.
 - **Functions the server will not invoke**: latent functions, and any whose parameters cannot be
   expressed as one value each.
-- **Editor-only classes.** The schema is generated in the editor but filtered to what the packaged
-  build actually ships, so the classes you are offered are classes that exist.
+- **Editor-only classes, and editor-only members of the classes that remain.** The schema is
+  generated in the editor, because only an editor can report a `BlueprintSetter` — and is then
+  narrowed to what the packaged build reports from its own reflection. Both halves matter: `AActor`
+  declares seven `WITH_EDITORONLY_DATA` properties and eleven editor-only functions that no
+  packaged build has, and it is the root of two thousand classes.
 - **Properties a class does not declare as Blueprint-accessible.** `BlueprintReadWrite` and
   `BlueprintReadOnly` are how a class says which of its properties are public API, as against the
   ones that are `UPROPERTY` only so the garbage collector or the serializer can see them. A

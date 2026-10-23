@@ -658,6 +658,23 @@ def generate(schema_path, output_dir, docstrings=False):
     write_file(os.path.join(output_dir, "index.json"),
                json.dumps(index, indent=0, sort_keys=True) + "\n")
 
+    # What `world.check_schema` compares, one entry at a time. A separate file because nothing else
+    # reads it: a package that is never checked never loads it.
+    #
+    # Per entry rather than the header's one number, because a package may hold part of a build by
+    # design -- the published classes describe the modules every build ships -- and a whole-walk
+    # hash is then guaranteed to differ while every class in it is current. It is the better report
+    # for a whole-build package too, which otherwise learns only that something moved.
+    write_file(os.path.join(output_dir, "hashes.json"),
+               json.dumps({
+                   "classes": {cls["path"]: cls.get("content_hash", "")
+                               for cls in schema["classes"]},
+                   "structs": {struct["name"]: struct.get("content_hash", "")
+                               for struct in schema.get("structs", [])},
+                   "enums": {enum["name"]: enum.get("content_hash", "")
+                             for enum in schema.get("enums", [])},
+               }, indent=0, sort_keys=True) + "\n")
+
     # PEP 561. Without this marker a type checker ignores the inline stubs of an *installed*
     # package entirely -- the generated classes would import and run and check nothing, which is
     # the one outcome this whole exercise is meant to prevent.

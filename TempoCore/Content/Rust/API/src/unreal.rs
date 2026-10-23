@@ -1195,7 +1195,7 @@ impl ObjectRef {
             if current == ancestor {
                 return true;
             }
-            match hierarchy().superclass(current) {
+            match superclass_of(current) {
                 Some(parent) if hops < 128 => {
                     current = parent;
                     hops += 1;
@@ -1363,10 +1363,38 @@ impl ObjectRef {
 /// `world::check_schema`). Everything else a generated method needs, it already knows statically.
 pub trait Hierarchy: Send + Sync {
     /// The class a class derives from, or `None` for a root or an unknown class.
-    fn superclass(&self, class_path: &str) -> Option<&str>;
+    ///
+    /// `'static` because the table is compiled into the generated crate, which is what lets a
+    /// caller walk the chain across crates without borrowing the registry.
+    fn superclass(&self, class_path: &str) -> Option<&'static str>;
 
     /// The schema this build's classes were generated from: engine version, schema version, hash.
     fn header(&self) -> SchemaIdentity;
+
+    /// Every entry of one kind and what it hashed to, sorted by name.
+    fn hashes(&self, kind: EntryKind) -> &'static [(&'static str, &'static str)];
+
+    /// What one entry hashed to, or `None` when these classes do not have it.
+    fn content_hash(&self, kind: EntryKind, name: &str) -> Option<&'static str>;
+}
+
+/// The three things a generated crate records a hash for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EntryKind {
+    Class,
+    Struct,
+    Enum,
+}
+
+impl EntryKind {
+    /// What one entry of this kind is called, for a message that names a finding.
+    pub fn label(self) -> &'static str {
+        match self {
+            EntryKind::Class => "class",
+            EntryKind::Struct => "struct",
+            EntryKind::Enum => "enum",
+        }
+    }
 }
 
 /// Identifies the build a generated class package was made from.
@@ -1380,34 +1408,84 @@ pub struct SchemaIdentity {
 struct NoClasses;
 
 impl Hierarchy for NoClasses {
-    fn superclass(&self, _class_path: &str) -> Option<&str> {
+    fn superclass(&self, _class_path: &str) -> Option<&'static str> {
         None
     }
 
     fn header(&self) -> SchemaIdentity {
         SchemaIdentity::default()
     }
+
+    fn hashes(&self, _kind: EntryKind) -> &'static [(&'static str, &'static str)] {
+        &[]
+    }
+
+    fn content_hash(&self, _kind: EntryKind, _name: &str) -> Option<&'static str> {
+        None
+    }
 }
 
-static HIERARCHY: std::sync::OnceLock<&'static (dyn Hierarchy + 'static)> =
-    std::sync::OnceLock::new();
+/// Every linked generated class crate, in registration order.
+///
+/// A list and not one slot, because more than one can be linked and they do not describe the same
+/// thing: a project's own crate describes its whole build, while the published classes inside
+/// `tempo_sim` describe the modules every build ships (TYPED_WORLD_API_PLAN.md §16). One slot
+/// would make whichever registered second invisible — no `is_a`, no dynamic path — and silently,
+/// since the loser's own generated methods would go on working.
+///
+/// There is no overlap to arbitrate: a project's crate re-exports the published classes it matches
+/// rather than redefining them.
+static HIERARCHIES: std::sync::RwLock<Vec<&'static (dyn Hierarchy + 'static)>> =
+    std::sync::RwLock::new(Vec::new());
 
 /// Called by a generated class crate to make its hierarchy available.
 ///
 /// Where Python's equivalent reads JSON out of the installed package at import time, this is a
 /// table compiled into the generated crate — so it cannot go missing, and it costs no I/O.
 pub fn register_classes(hierarchy: &'static (dyn Hierarchy + 'static)) {
-    let _ = HIERARCHY.set(hierarchy);
+    if let Ok(mut registered) = HIERARCHIES.write() {
+        // Every handle made through a crate registers it, so this runs constantly for the same
+        // table. Compared by address, since each crate has exactly one.
+        if !registered
+            .iter()
+            .any(|existing| std::ptr::eq(*existing as *const _, hierarchy as *const _))
+        {
+            registered.push(hierarchy);
+        }
+    }
 }
 
-/// The registered hierarchy, or an empty one when no generated classes are linked.
+/// Every linked hierarchy, in registration order. Empty when no generated classes are linked.
+pub fn hierarchies() -> Vec<&'static (dyn Hierarchy + 'static)> {
+    HIERARCHIES.read().map(|h| h.clone()).unwrap_or_default()
+}
+
+/// What a class derives from, according to whichever linked crate knows it.
+///
+/// Searched across all of them, because the chain can cross between crates: a project's Blueprint
+/// derives from an engine class the published crate declares.
+pub fn superclass_of(class_path: &str) -> Option<&'static str> {
+    let registered = HIERARCHIES.read().ok()?;
+    registered
+        .iter()
+        .find_map(|hierarchy| hierarchy.superclass(class_path))
+}
+
+/// The first linked hierarchy, or an empty one when none is.
+///
+/// Kept for the single-crate case, which is every project that has not linked the published
+/// classes beside its own. [`hierarchies`] is what a lookup across all of them wants.
 pub fn hierarchy() -> &'static (dyn Hierarchy + 'static) {
-    *HIERARCHY.get_or_init(|| &NoClasses)
+    HIERARCHIES
+        .read()
+        .ok()
+        .and_then(|registered| registered.first().copied())
+        .unwrap_or(&NoClasses)
 }
 
 /// Whether a generated class crate has registered itself.
 pub fn classes_registered() -> bool {
-    !hierarchy().header().content_hash.is_empty()
+    HIERARCHIES.read().map(|h| !h.is_empty()).unwrap_or(false)
 }
 
 impl ObjectRef {

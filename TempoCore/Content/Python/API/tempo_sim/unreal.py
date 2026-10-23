@@ -283,8 +283,8 @@ class Object:
         _write(self._actor, self._component, name, member, value)
 
 
-class _Classes:
-    """The generated class surface, loaded on demand.
+class _Package:
+    """One installed generated class package, loaded on demand.
 
     Three things are needed to serve an attribute: which module a class path lives in (the index),
     what members a class declares (one `<Module>.meta.json` per module), and what a struct's members
@@ -293,36 +293,17 @@ class _Classes:
     it is touched.
     """
 
-    def __init__(self):
-        self._package = None
-        self._directory = None
+    def __init__(self, package, directory):
+        self.package = package
+        self.directory = directory
         self._index = None
         self._modules = {}
         self._structs = None
         self._header = None
-
-    def register(self, package, directory):
-        self._package = package
-        self._directory = directory
-        self._index = None
-        self._modules = {}
-        self._structs = None
-        self._header = None
-
-    @property
-    def registered(self):
-        return self._directory is not None
-
-    def _require(self):
-        if not self.registered:
-            raise RuntimeError(
-                "No generated classes are registered. Install and import this build's generated "
-                "class package (e.g. `import tempo_sample_classes`), which ships in "
-                "Packaged/API/Python alongside the tempo-sim wheel.")
+        self._hashes = None
 
     def _load(self, *parts):
-        self._require()
-        with open(os.path.join(self._directory, *parts)) as f:
+        with open(os.path.join(self.directory, *parts)) as f:
             return json.load(f)
 
     @property
@@ -333,7 +314,6 @@ class _Classes:
 
     @property
     def header(self):
-        """The schema header the stubs were generated from, for the drift check."""
         if self._header is None:
             self._header = self._load("schema_header.json")
         return self._header
@@ -344,12 +324,27 @@ class _Classes:
             self._structs = self._load("structs.meta.json")
         return self._structs
 
+    @property
+    def hashes(self):
+        """What each class, struct and enum hashed to in the build this package came from.
+
+        Only `world.check_schema` reads this, so a package that is never checked never loads it.
+        Absent in a package generated before the hashes existed, which reads as "nothing to
+        compare" rather than as a mismatch.
+        """
+        if self._hashes is None:
+            try:
+                self._hashes = self._load("hashes.json")
+            except IOError:
+                self._hashes = {}
+        return self._hashes
+
     def module_of(self, class_path):
         entry = self.index.get(class_path)
         return entry.split(":", 1)[0] if entry else None
 
     def metadata(self, class_path):
-        """The declared members of one class, or None when it is not in this build."""
+        """The declared members of one class, or None when this package does not have it."""
         module = self.module_of(class_path)
         if module is None:
             return None
@@ -358,7 +353,7 @@ class _Classes:
             stem = os.path.join(*module.split("."))
             candidates = (stem + ".meta.json", os.path.join(stem, "__init__.meta.json"))
             for candidate in candidates:
-                path = os.path.join(self._directory, candidate)
+                path = os.path.join(self.directory, candidate)
                 if os.path.exists(path):
                     with open(path) as f:
                         self._modules[module] = json.load(f)
@@ -366,6 +361,104 @@ class _Classes:
             else:
                 self._modules[module] = {}
         return self._modules[module].get(class_path)
+
+    def python_class(self, class_path):
+        entry = self.index.get(class_path)
+        if entry is None:
+            return None
+        module_name, class_name = entry.split(":", 1)
+        import importlib
+        module = importlib.import_module("{}.{}".format(self.package, module_name))
+        return getattr(module, class_name, None)
+
+
+class _Classes:
+    """Every installed generated class package, searched in registration order.
+
+    More than one can be installed, and they do not describe the same thing. A project's own
+    package describes its whole build; the published one inside `tempo_sim` describes the modules
+    every build ships (TYPED_WORLD_API_PLAN.md section 16). A registry that held only the last
+    registration would make whichever lost unresolvable -- no metadata, no `is_a`, no dynamic path --
+    so this holds all of them.
+
+    There is no overlap to arbitrate: a project's package re-exports the published classes it
+    matches rather than redefining them, and leaves them out of its own index.
+    """
+
+    def __init__(self):
+        self._packages = []
+
+    def register(self, package, directory):
+        # Re-importing the same package is not a second one. It happens whenever a test reloads a
+        # package from a different path, and two entries would then disagree about where to read.
+        self._packages = [p for p in self._packages if p.package != package]
+        self._packages.append(_Package(package, directory))
+
+    @property
+    def registered(self):
+        return bool(self._packages)
+
+    @property
+    def packages(self):
+        return list(self._packages)
+
+    def _require(self):
+        if not self.registered:
+            raise RuntimeError(
+                "No generated classes are registered. Install and import this build's generated "
+                "class package (e.g. `import tempo_sample_classes`), which ships in "
+                "Packaged/API/Python alongside the tempo-sim wheel.")
+
+    @property
+    def index(self):
+        """Every known class path, across packages. The first registration of a path wins."""
+        self._require()
+        merged = {}
+        for package in reversed(self._packages):
+            merged.update(package.index)
+        return merged
+
+    @property
+    def headers(self):
+        """One header per installed package, each describing what that package was generated from."""
+        self._require()
+        return [(package.package, package.header) for package in self._packages]
+
+    @property
+    def header(self):
+        """The first package's header.
+
+        Kept for the single-package case, which is every project that has not installed the
+        published classes beside its own. `headers` is what a check across all of them wants.
+        """
+        self._require()
+        return self._packages[0].header
+
+    @property
+    def structs(self):
+        self._require()
+        merged = {}
+        for package in reversed(self._packages):
+            merged.update(package.structs)
+        return merged
+
+    def _owner(self, class_path):
+        """The package that has this class, or None."""
+        for package in self._packages:
+            if package.module_of(class_path) is not None:
+                return package
+        return None
+
+    def module_of(self, class_path):
+        self._require()
+        owner = self._owner(class_path)
+        return owner.module_of(class_path) if owner else None
+
+    def metadata(self, class_path):
+        """The declared members of one class, or None when no installed package has it."""
+        self._require()
+        owner = self._owner(class_path)
+        return owner.metadata(class_path) if owner else None
 
     def find_property(self, class_path, name):
         """One property, searched up the inheritance chain.
@@ -453,13 +546,9 @@ class _Classes:
 
     def python_class(self, class_path):
         """The generated class for an Unreal class path, importing its module if needed."""
-        entry = self.index.get(class_path)
-        if entry is None:
-            return None
-        module_name, class_name = entry.split(":", 1)
-        import importlib
-        module = importlib.import_module("{}.{}".format(self._package, module_name))
-        return getattr(module, class_name, None)
+        self._require()
+        owner = self._owner(class_path)
+        return owner.python_class(class_path) if owner else None
 
 
 _classes = _Classes()

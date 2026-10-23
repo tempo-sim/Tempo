@@ -103,7 +103,7 @@ for /f "usebackq tokens=2 delims== " %%V in (`findstr /b /c:"version" "!PYTHON_D
     echo # The .pyi files are the whole point and are not .py, so they are listed explicitly -- as is
     echo # py.typed, without which a type checker ignores an installed package's stubs altogether.
     echo [tool.setuptools.package-data]
-    echo "*" = ["py.typed", "*.pyi", "*.meta.json", "index.json", "schema_header.json"]
+    echo "*" = ["py.typed", "*.pyi", "*.meta.json", "index.json", "hashes.json", "schema_header.json"]
 )
 
 echo Typed Python classes staged at !STAGE!

@@ -676,3 +676,129 @@ def test_a_property_whose_setter_cannot_be_named_is_read_only(classes):
     widget = classes.Widget("MyActor")
     with pytest.raises(AttributeError, match="read-only"):
         widget.Untouchable = True
+
+
+# -- the drift check ------------------------------------------------------------------------------
+#
+# check_schema compares what each installed package recorded against what the sim reports, entry by
+# entry. Per entry and not per build because a package may hold part of one by design -- the
+# published classes describe the modules every build ships (TYPED_WORLD_API_PLAN.md section 16) --
+# and because a single number can only ever say that something moved.
+
+@pytest.fixture
+def describing(monkeypatch):
+    """Let a test say what the sim reports, and check `check_schema` against it."""
+    from tempo_sim import world
+
+    class Entry:
+        def __init__(self, name, content_hash):
+            self.name = self.class_path = name
+            self.content_hash = content_hash
+
+    class Header:
+        engine_version = "5.8"
+        schema_version = "2"
+
+    def describe(classes=None, structs=None, enums=None):
+        class Response:
+            header = Header()
+
+        def fake_world():
+            class FakeWorld:
+                @staticmethod
+                def describe_classes(**_):
+                    response = Response()
+                    response.classes = [Entry(n, h) for n, h in (classes or {}).items()]
+                    response.structs = [Entry(n, h) for n, h in (structs or {}).items()]
+                    response.enums = [Entry(n, h) for n, h in (enums or {}).items()]
+                    return response
+            return FakeWorld
+
+        # `world` reaches the generated RPC module through its own `_world`, not the runtime's.
+        monkeypatch.setattr(world, "_world", fake_world)
+
+    return describe
+
+
+def _installed(classes):
+    """What the fixture package recorded, which is what a check compares against."""
+    package = classes.__name__.split(".")[0]
+    import tempo_sim.unreal as unreal
+    return next(p for p in unreal.registered_classes().packages if p.package == package).hashes
+
+
+def test_matching_hashes_pass(classes, describing):
+    from tempo_sim import world
+
+    installed = _installed(classes)
+    describing(classes=installed["classes"], structs=installed["structs"],
+               enums=installed["enums"])
+    assert world.check_schema() is True
+
+
+def test_a_changed_class_is_named(classes, describing):
+    from tempo_sim import world
+
+    installed = _installed(classes)
+    reported = dict(installed["classes"])
+    reported[WIDGET_PATH] = "SOMETHING-ELSE"
+    describing(classes=reported, structs=installed["structs"], enums=installed["enums"])
+
+    with pytest.raises(world.SchemaMismatch) as raised:
+        world.check_schema()
+    assert "1 changed" in str(raised.value)
+    assert WIDGET_PATH in str(raised.value)
+
+
+def test_a_class_the_sim_does_not_have_is_named_separately(classes, describing):
+    """Not the same finding as a changed one: nothing can address it at all."""
+    from tempo_sim import world
+
+    installed = _installed(classes)
+    reported = {path: value for path, value in installed["classes"].items()
+                if path != WIDGET_PATH}
+    describing(classes=reported, structs=installed["structs"], enums=installed["enums"])
+
+    with pytest.raises(world.SchemaMismatch) as raised:
+        world.check_schema()
+    assert "1 not in this sim" in str(raised.value)
+    assert WIDGET_PATH in str(raised.value)
+
+
+def test_a_class_only_the_sim_has_is_not_a_finding(classes, describing):
+    """The normal condition of a published package, which describes part of a build by design.
+
+    This is the case a whole-walk hash cannot express: every class the package holds is current,
+    and the one number still differs.
+    """
+    from tempo_sim import world
+
+    installed = _installed(classes)
+    reported = dict(installed["classes"])
+    reported["/Game/Blueprints/BP_Thing.BP_Thing_C"] = "A-PROJECT-CLASS"
+    describing(classes=reported, structs=installed["structs"], enums=installed["enums"])
+
+    assert world.check_schema() is True
+
+
+def test_a_changed_struct_or_enum_is_a_finding(classes, describing):
+    from tempo_sim import world
+
+    installed = _installed(classes)
+    structs = {name: "MOVED" for name in installed["structs"]}
+    describing(classes=installed["classes"], structs=structs, enums=installed["enums"])
+
+    with pytest.raises(world.SchemaMismatch, match="struct FWidgetSettings"):
+        world.check_schema()
+
+
+def test_a_mismatch_can_warn_instead_of_raising(classes, describing):
+    from tempo_sim import world
+
+    installed = _installed(classes)
+    reported = dict(installed["classes"])
+    reported[WIDGET_PATH] = "SOMETHING-ELSE"
+    describing(classes=reported, structs=installed["structs"], enums=installed["enums"])
+
+    with pytest.warns(UserWarning, match="do not match this sim"):
+        assert world.check_schema(raise_on_mismatch=False) is False

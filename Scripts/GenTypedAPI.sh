@@ -159,7 +159,7 @@ include = ["$IMPORT_NAME", "$IMPORT_NAME.*"]
 # The .pyi files are the whole point and are not .py, so they have to be listed explicitly -- as
 # does py.typed, without which a type checker ignores an installed package's stubs altogether.
 [tool.setuptools.package-data]
-"*" = ["py.typed", "*.pyi", "*.meta.json", "index.json", "schema_header.json"]
+"*" = ["py.typed", "*.pyi", "*.meta.json", "index.json", "hashes.json", "schema_header.json"]
 EOF
 
 echo "Typed Python classes staged at $STAGE"
