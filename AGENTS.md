@@ -387,6 +387,13 @@ matrix entry in `tempo_build_and_package.yml` (and, for Python, a line in `pytes
 - Quote the engine path (it contains a space).
 - Changing a `.proto` is a client-facing API change: it regenerates Python/Rust/C++ clients
   and may need CoreRedirects (in the plugin's Config) for renamed assets/classes.
+- **Run the `codegen` group through `Scripts/TestPythonAPI.sh codegen`, not `pytest` directly.**
+  The runner reinstalls the in-tree `tempo_sim` into `.tempo_codegen_venv` on every invocation,
+  which is what keeps the installed copy and the tree identical. Invoking `pytest` yourself skips
+  that, and after a `.proto` change the stale installed `*_pb2` and the tree's differ — at which
+  point `AddSerializedFile` raises `duplicate file name ... WorldControl.proto` and two dozen tests
+  error in a way that looks nothing like the cause. (Identical bytes are tolerated, which is why it
+  only appears after a proto change.)
 - **The repo-side `codegen` group can silently test an installed wheel instead of the working
   tree.** `Tests/Python/conftest.py` imports `tempo_sim` at collection time to decide
   `collect_ignore`, so on a machine that has packaged the project the wheel's modules are already
