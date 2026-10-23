@@ -261,6 +261,37 @@ def test_typed_attribute_access_round_trips(sim_server):
 
 
 @requires_classes
+def test_a_property_with_a_blueprint_setter_is_written_through_it(sim_server):
+    """The gap that let a real defect ship: nothing wrote one of these against a live sim.
+
+    NetUpdateFrequency carries a BlueprintSetter, so the write has to call SetNetUpdateFrequency
+    rather than touch the memory -- a setter may be the only thing that clamps a value or marks
+    render state dirty, and a cooked build could not even have told us it exists, which is why the
+    schema is walked in the editor.
+
+    It also has to *name* the argument. CallFunction refuses an unnamed one outright, so this
+    failed every time with FAILED_PRECONDITION until the generator started resolving what the
+    setter calls its parameter. 306 properties in this build go down that path.
+    """
+    StaticMeshActor = registered().python_class(SPAWNABLE)
+    assert StaticMeshActor is not None
+
+    member = registered().find_property(SPAWNABLE, "NetUpdateFrequency")
+    assert member is not None and member["setter"], \
+        "this test is pointless unless the property really has a setter"
+    assert member["setter_argument"], "the setter's argument has to be named"
+
+    spawned = world.spawn_actor(StaticMeshActor)
+    try:
+        spawned.NetUpdateFrequency = 50.0
+        assert spawned.NetUpdateFrequency == pytest.approx(50.0)
+        spawned.NetUpdateFrequency = 25.0
+        assert spawned.NetUpdateFrequency == pytest.approx(25.0)
+    finally:
+        tw.destroy_actor(actor=spawned.actor)
+
+
+@requires_classes
 def test_writing_a_read_only_property_is_refused_before_the_wire(sim_server):
     SceneComponent = registered().python_class("/Script/Engine.SceneComponent")
     assert SceneComponent is not None

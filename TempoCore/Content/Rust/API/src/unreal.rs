@@ -628,7 +628,7 @@ enum Queued {
     /// A plain write, which `SetProperties` can carry.
     Set { object: ObjectRef, property: String, value: pb::Value },
     /// A write through a `BlueprintSetter`, which it cannot.
-    Call { object: ObjectRef, function: String, value: pb::Value },
+    Call { object: ObjectRef, function: String, argument: String, value: pb::Value },
 }
 
 thread_local! {
@@ -698,9 +698,9 @@ fn flush(queued: Vec<Queued>) -> Result<(), TempoError> {
     for item in queued {
         match item {
             Queued::Set { object, property, value } => pending.push((object, property, value)),
-            Queued::Call { object, function, value } => {
+            Queued::Call { object, function, argument, value } => {
                 send_writes(std::mem::take(&mut pending))?;
-                call_setter(&object, &function, value)?;
+                call_setter(&object, &function, &argument, value)?;
             }
         }
     }
@@ -733,12 +733,17 @@ fn send_writes(writes: Vec<(ObjectRef, String, pb::Value)>) -> Result<(), TempoE
     Ok(())
 }
 
-fn call_setter(object: &ObjectRef, function: &str, value: pb::Value) -> Result<(), TempoError> {
+fn call_setter(
+    object: &ObjectRef,
+    function: &str,
+    argument: &str,
+    value: pb::Value,
+) -> Result<(), TempoError> {
     crate::tempo_world::call_function(
         object.actor.clone(),
         object.component.clone(),
         function.to_string(),
-        vec![pb::FunctionArg { name: String::new(), value: Some(value) }],
+        vec![pb::FunctionArg { name: argument.to_string(), value: Some(value) }],
         true,
     )?;
     Ok(())
@@ -747,13 +752,14 @@ fn call_setter(object: &ObjectRef, function: &str, value: pb::Value) -> Result<(
 async fn call_setter_async(
     object: &ObjectRef,
     function: &str,
+    argument: &str,
     value: pb::Value,
 ) -> Result<(), TempoError> {
     crate::tempo_world::call_function_async(
         object.actor.clone(),
         object.component.clone(),
         function.to_string(),
-        vec![pb::FunctionArg { name: String::new(), value: Some(value) }],
+        vec![pb::FunctionArg { name: argument.to_string(), value: Some(value) }],
         true,
     )
     .await?;
@@ -869,15 +875,27 @@ impl ObjectRef {
     /// the only thing that clamps the value or marks render state dirty — so the accessor is
     /// called instead. The generator knows which properties have one; a cooked build could not
     /// have told it they exist.
-    pub fn set_via<T: ToValue>(&self, setter: &str, value: T) -> Result<(), TempoError> {
+    /// `argument` is what the setter calls its parameter. `CallFunction` rejects an unnamed
+    /// argument outright and matches the name against the function's own parameters, so the
+    /// generator resolves it from the schema; a property whose setter cannot be named is not
+    /// generated as writable at all.
+    pub fn set_via<T: ToValue>(
+        &self,
+        setter: &str,
+        argument: &str,
+        value: T,
+    ) -> Result<(), TempoError> {
         let item = Queued::Call {
             object: self.clone(),
             function: setter.to_string(),
+            argument: argument.to_string(),
             value: value.to_value(),
         };
         match enqueue(item) {
             None => Ok(()),
-            Some(Queued::Call { function, value, .. }) => call_setter(self, &function, value),
+            Some(Queued::Call { function, argument, value, .. }) => {
+                call_setter(self, &function, &argument, value)
+            }
             Some(Queued::Set { .. }) => unreachable!("a Call cannot come back as a Set"),
         }
     }
@@ -886,11 +904,13 @@ impl ObjectRef {
     pub fn set_via_async<T: ToValue>(
         &self,
         setter: &str,
+        argument: &str,
         value: T,
     ) -> impl Future<Output = Result<(), TempoError>> + '_ {
         let setter = setter.to_string();
+        let argument = argument.to_string();
         let value = value.to_value();
-        async move { call_setter_async(self, &setter, value).await }
+        async move { call_setter_async(self, &setter, &argument, value).await }
     }
 
     /// Read a reference-valued property as a typed handle.

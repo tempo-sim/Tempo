@@ -650,8 +650,8 @@ class Batch:
     def add_write(self, actor, component, address, variant, value):
         self._queue.append(("set", (actor, component, address, variant, value)))
 
-    def add_call(self, actor, component, function, variant, value):
-        self._queue.append(("call", (actor, component, function, variant, value)))
+    def add_call(self, actor, component, function, argument, variant, value):
+        self._queue.append(("call", (actor, component, function, argument, variant, value)))
 
     def __enter__(self):
         self._depth += 1
@@ -678,10 +678,10 @@ class Batch:
                 continue
             self._send(pending)
             pending = []
-            actor, component, function, variant, value = payload
+            actor, component, function, argument, variant, value = payload
             _world().call_function(actor=actor, component=component, function=function,
                                    native_units=True,
-                                   args=[{"name": "", "value": _to_value(variant, value)}])
+                                   args=[{"name": argument, "value": _to_value(variant, value)}])
         self._send(pending)
 
     @staticmethod
@@ -721,12 +721,17 @@ def _write(actor, component, address, member, value):
     batch = _open_batch()
 
     if setter:
+        # Named, not positional: CallFunction rejects an unnamed arg outright, and matches the name
+        # against the function's own parameters. The generator resolved what this setter calls its
+        # argument; a property whose setter could not be named is not writable at all.
+        argument = member.get("setter_argument") or ""
         if batch is not None:
-            batch.add_call(actor, component, setter, member["variant"], value)
+            batch.add_call(actor, component, setter, argument, member["variant"], value)
         else:
             _world().call_function(actor=actor, component=component, function=setter,
                                    native_units=True,
-                                   args=[{"name": "", "value": _to_value(member["variant"], value)}])
+                                   args=[{"name": argument,
+                                          "value": _to_value(member["variant"], value)}])
         return
 
     cache = getattr(_state, "snapshots", {}).get((actor, component))

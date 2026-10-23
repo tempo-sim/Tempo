@@ -95,14 +95,19 @@ fn a_property_with_a_blueprint_setter_is_written_through_it() {
     connect();
     let actor = spawn();
 
-    // bAutoDestroyWhenFinished carries a BlueprintSetter, so the generated setter calls
-    // SetAutoDestroyWhenFinished rather than writing the memory -- which is the thing a packaged
-    // harvest could not have known, and the reason generation runs in the editor. The read has to
-    // come back changed for the call to have landed.
-    actor.actor().set_b_auto_destroy_when_finished(true).expect("set bAutoDestroyWhenFinished");
-    assert!(actor.actor().b_auto_destroy_when_finished().expect("read bAutoDestroyWhenFinished"));
-    actor.actor().set_b_auto_destroy_when_finished(false).expect("set bAutoDestroyWhenFinished");
-    assert!(!actor.actor().b_auto_destroy_when_finished().expect("read bAutoDestroyWhenFinished"));
+    // NetUpdateFrequency carries a BlueprintSetter, so the generated setter calls
+    // SetNetUpdateFrequency rather than writing the memory -- which is the thing a packaged
+    // harvest could not have known, and the reason generation runs in the editor. The write also
+    // has to *name* its argument ("Frequency"): CallFunction refuses an unnamed one outright, and
+    // every write down this path failed with FAILED_PRECONDITION until the generator resolved it.
+    //
+    // Not bAutoDestroyWhenFinished, which was the first choice: its setter destroyed the actor,
+    // and the following read failed with "Failed to find actor". That was proof the accessor ran
+    // -- writing the memory directly could not have done it -- but it makes a poor assertion.
+    actor.actor().set_net_update_frequency(50.0).expect("set NetUpdateFrequency");
+    assert_eq!(actor.actor().net_update_frequency().expect("read"), 50.0);
+    actor.actor().set_net_update_frequency(25.0).expect("set NetUpdateFrequency");
+    assert_eq!(actor.actor().net_update_frequency().expect("read"), 25.0);
 }
 
 #[test]

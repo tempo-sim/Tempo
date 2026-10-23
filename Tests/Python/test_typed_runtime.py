@@ -25,21 +25,47 @@ pytestmark = pytest.mark.codegen
 WIDGET_PATH = "/Script/Engine.Widget"
 
 
+def _tempo_sim_modules():
+    return {name: module for name, module in list(sys.modules.items())
+            if name == "tempo_sim" or name.startswith("tempo_sim.")}
+
+
 @pytest.fixture(scope="module")
 def classes(tmp_path_factory):
-    """The fixture schema generated and importable, with the runtime registered against it."""
+    """The fixture schema generated and importable, with the runtime registered against it.
+
+    The runtime from the *working tree*, deliberately and with a check. conftest imports tempo_sim
+    at collection time to decide what to ignore, so on any machine that has packaged the project --
+    which installs the wheel -- tempo_sim is already in sys.modules from site-packages, and no
+    later sys.path insertion can displace it. These tests exist to check the working tree, so the
+    already-imported modules are set aside and re-imported from it, and restored afterwards for the
+    sim-facing groups.
+
+    Without this they passed against the installed wheel, silently. That is how a defect in the
+    BlueprintSetter write path survived: the fix was in the tree and the test read the wheel.
+    """
     out = tmp_path_factory.mktemp("runtime")
     subprocess.run([sys.executable, GENERATOR, FIXTURE, str(out / "fixture_classes")],
                    check=True, capture_output=True, text=True)
+    installed = _tempo_sim_modules()
+    for name in installed:
+        del sys.modules[name]
     sys.path.insert(0, str(out))
     sys.path.insert(0, RUNTIME_API)
     try:
         import fixture_classes  # noqa: F401  (importing is what registers it)
         import fixture_classes.Engine as engine
+        import tempo_sim.unreal as runtime
+        assert runtime.__file__.startswith(RUNTIME_API), (
+            "these tests must exercise the working tree, not an installed wheel; got {}"
+            .format(runtime.__file__))
         yield engine
     finally:
         sys.path.remove(str(out))
         sys.path.remove(RUNTIME_API)
+        for name in _tempo_sim_modules():
+            del sys.modules[name]
+        sys.modules.update(installed)
 
 
 @pytest.fixture
@@ -586,3 +612,67 @@ def test_a_struct_cannot_be_watched(classes, monkeypatch):
     widget = classes.Widget("MyActor")
     with pytest.raises(AttributeError, match="not readable as one value"):
         next(widget.watch("Settings"))
+
+
+@pytest.fixture
+def server(monkeypatch):
+    """Replace the generated RPC module, so the real _write runs and its request is visible.
+
+    The `wire` fixture above replaces `_write` itself, which is right for testing what an address
+    resolves to and wrong for testing what `_write` sends. This one goes one layer lower.
+    """
+    import tempo_sim.unreal as unreal
+
+    sent = {"set_property": [], "call_function": []}
+
+    class FakeWorld:
+        @staticmethod
+        def set_property(**kwargs):
+            sent["set_property"].append(kwargs)
+
+        @staticmethod
+        def call_function(**kwargs):
+            sent["call_function"].append(kwargs)
+
+    monkeypatch.setattr(unreal, "_world", lambda: FakeWorld)
+    return sent
+
+
+def test_a_property_with_a_setter_is_written_through_it(classes, server):
+    """And the argument is named, which is the part that was wrong.
+
+    CallFunction refuses an unnamed argument outright -- "Every arg in a CallFunction request must
+    have a name" -- and matches the name against the function's own parameters. Both runtimes sent
+    "" until the generator started resolving it, so every write to one of the 306 properties with a
+    BlueprintSetter failed. Nothing caught it because no test wrote one against a live sim.
+    """
+    widget = classes.Widget("MyActor")
+    widget.ScaleFactor = 2.5
+
+    assert server["set_property"] == [], "a property with a setter must not be written directly"
+    assert len(server["call_function"]) == 1
+    call = server["call_function"][0]
+    assert call["function"] == "SetScaleFactor"
+    assert [arg["name"] for arg in call["args"]] == ["InScale"], \
+        "the argument has to carry the setter's own parameter name"
+    assert call["args"][0]["value"].float_value == pytest.approx(2.5)
+
+
+def test_a_batched_setter_write_keeps_the_argument_name(classes, server):
+    from tempo_sim import world
+
+    widget = classes.Widget("MyActor")
+    with world.batch():
+        widget.ScaleFactor = 3.5
+    assert [arg["name"] for arg in server["call_function"][0]["args"]] == ["InScale"]
+
+
+def test_a_property_whose_setter_cannot_be_named_is_read_only(classes):
+    """Writing it directly would skip the setter, which is the thing the accessor path prevents.
+
+    UE 5.8 has exactly one of these: UCineCameraSettings::DefaultFilmbackPreset declares
+    BlueprintSetter=SetDefaultfilmbackPreset, with a lowercase f, and no such function exists.
+    """
+    widget = classes.Widget("MyActor")
+    with pytest.raises(AttributeError, match="read-only"):
+        widget.Untouchable = True

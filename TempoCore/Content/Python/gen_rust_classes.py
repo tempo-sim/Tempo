@@ -19,6 +19,8 @@ import sys
 
 from collections import defaultdict
 
+from gen_classes_common import resolve_setters
+
 RUNTIME = "::tempo_sim::unreal"
 ERROR = "::tempo_sim::TempoError"
 
@@ -118,6 +120,9 @@ class Generator:
         for cls in schema["classes"]:
             self.by_module[tuple(module_for(cls["package"]))].append(cls)
         self.stats = defaultdict(int)
+        # Before anything is emitted, so the accessors and the Python stubs agree about which
+        # properties are writable.
+        self.stats["setters_unresolvable"] = resolve_setters(schema)
 
     # -- type rendering -------------------------------------------------------------------------
 
@@ -235,13 +240,17 @@ class Generator:
         self.stats["writable"] += 1
         setter = member.get("setter") or ""
         if setter and how == PLAIN:
+            # Both the function and what it calls its argument: CallFunction rejects an unnamed
+            # argument and matches the name against the function's own parameters.
+            accessor = "{}, {}".format(json.dumps(setter),
+                                       json.dumps(member.get("setter_argument", "")))
             lines.append("    pub fn set_{}(&self, value: {}) -> Result<(), {}> "
                          "{{ self.0.set_via({}, value) }}"
-                         .format(getter, rust, ERROR, json.dumps(setter)))
+                         .format(getter, rust, ERROR, accessor))
             lines.append("    pub fn set_{}_async(&self, value: {}) -> impl "
                          "::core::future::Future<Output = Result<(), {}>> + '_ "
                          "{{ self.0.set_via_async({}, value) }}"
-                         .format(getter, rust, ERROR, json.dumps(setter)))
+                         .format(getter, rust, ERROR, accessor))
             return lines
 
         write = {
@@ -326,19 +335,31 @@ class Generator:
 
         inputs, outputs, returns = [], [], None
         for parameter in function.get("parameters", []):
+            direction = parameter.get("direction")
             try:
                 rust, how = self.rust_type(parameter)
+                # A container of enums or object references would need a slice of a generated type
+                # as an argument, or a decode this runtime does not offer as a result. Either way
+                # it cannot be carried here.
+                carryable = how not in (ENUMS, OBJECTS)
             except Unsupported:
+                rust, how, carryable = None, None, False
+
+            if not carryable:
+                if direction == "out":
+                    # Dropped from the result and nothing else: the caller does not supply an out
+                    # parameter, so one that cannot be carried back does not stop the call. This is
+                    # what keeps K2_SetActorLocation, whose out HitResult is an FHitResult.
+                    self.stats["out_params_dropped"] += 1
+                    continue
+                # An input the caller cannot pass, or a return value the method would have to
+                # discard. Offering a method that silently drops its answer is worse than not
+                # offering it, so this is omitted -- §9.4, omitted rather than loosely typed.
                 self.stats["functions_omitted"] += 1
                 return []
-            if how in (ENUMS, OBJECTS):
-                # A container argument would need a slice of a generated type, which the orphan
-                # rule keeps out of the generic conversion. Still reachable through the string API.
-                self.stats["functions_omitted"] += 1
-                return []
+
             entry = (snake(parameter["name"]), parameter["name"], rust, how,
                      parameter.get("kind"))
-            direction = parameter.get("direction")
             if direction == "return":
                 returns = entry
             elif direction == "out":
@@ -720,14 +741,16 @@ def main(argv):
     print("structs / enums    {} / {}".format(stats["structs"], stats["enums"]))
     print("properties         {} ({} writable, {} read-only, {} struct-valued)".format(
         stats["properties"], stats["writable"], stats["read_only"], stats["struct_properties"]))
-    print("functions          {} ({} with out parameters)".format(
-        stats["functions"], stats["functions_with_out_params"]))
+    print("functions          {} ({} with out parameters, {} out params dropped)".format(
+        stats["functions"], stats["functions_with_out_params"], stats["out_params_dropped"]))
     print("components         {} ({} omitted)".format(
         stats["components"], stats["components_omitted"]))
     print("struct members     {} ({} omitted)".format(
         stats["struct_members"], stats["struct_members_omitted"]))
     print("omitted            {} properties, {} functions".format(
         stats["properties_omitted"], stats["functions_omitted"]))
+    print("unnameable setters {} (property demoted to read-only)".format(
+        stats["setters_unresolvable"]))
     print("name taken already {} properties, {} functions, {} components".format(
         stats["properties_shadowed"], stats["functions_shadowed"], stats["components_shadowed"]))
     return 0

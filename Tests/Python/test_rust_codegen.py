@@ -193,6 +193,33 @@ def test_a_function_is_callable(workspace):
 """) == []
 
 
+def test_a_setter_names_the_argument_it_sends(workspace):
+    """A BlueprintSetter write has to carry the setter's own parameter name.
+
+    CallFunction refuses an unnamed argument -- "Every arg in a CallFunction request must have a
+    name" -- so this is not cosmetic: every write to one of the 306 properties with a setter failed
+    until the generator resolved it. Asserted on the emitted call, because the failure is a runtime
+    one that no amount of type checking would catch.
+    """
+    engine = (workspace / CRATE / "src" / "classes" / "engine.rs").read_text()
+    assert 'set_via("SetScaleFactor", "InScale"' in engine, \
+        "the setter and its argument both have to be named: {}".format(
+            [line.strip() for line in engine.splitlines() if "set_via" in line])
+
+
+def test_a_property_whose_setter_cannot_be_named_is_read_only(workspace):
+    """Writing it directly would skip the setter, which is what the accessor path prevents."""
+    engine = (workspace / CRATE / "src" / "classes" / "engine.rs").read_text()
+    assert "fn untouchable(" in engine, "it should still be readable"
+    assert "fn set_untouchable(" not in engine, "it must not be writable"
+    assert check(workspace, """
+    let _: bool = widget.untouchable()?;
+""") == []
+    assert check(workspace, """
+    widget.set_untouchable(true)?;
+"""), "a property whose setter cannot be named must not be writable"
+
+
 # -- drift must not compile ----------------------------------------------------------------------
 
 @pytest.mark.parametrize("case,body", [

@@ -54,6 +54,24 @@
           "value_expressible": true
         },
         {
+          "name": "ScaleFactor",
+          "kind": "float",
+          "type": "float",
+          "readable": true,
+          "writable": true,
+          "value_expressible": true,
+          "setter": "SetScaleFactor"
+        },
+        {
+          "name": "Untouchable",
+          "kind": "bool",
+          "type": "bool",
+          "readable": true,
+          "writable": true,
+          "value_expressible": true,
+          "setter": "SetNoSuchFunction"
+        },
+        {
           "name": "bEnabled",
           "kind": "bool",
           "type": "bool",
@@ -118,6 +136,20 @@
         }
       ],
       "functions": [
+        {
+          "name": "SetScaleFactor",
+          "signature": "void SetScaleFactor(float InScale)",
+          "callable": true,
+          "positional": true,
+          "parameters": [
+            {
+              "name": "InScale",
+              "direction": "in",
+              "kind": "float",
+              "type": "float"
+            }
+          ]
+        },
         {
           "name": "Refresh",
           "signature": "void Refresh()",

@@ -28,6 +28,8 @@ import re
 import sys
 from collections import defaultdict
 
+from gen_classes_common import resolve_setters
+
 # Where the hand-written runtime lives. Generated code takes its base class and value types from
 # here and nothing else.
 RUNTIME_MODULE = "tempo_sim.unreal"
@@ -134,6 +136,8 @@ class Generator:
     def __init__(self, schema, docstrings=False):
         self.schema = schema
         self.docstrings = docstrings
+        self.stats = defaultdict(int)
+        self.stats["setters_unresolvable"] = resolve_setters(schema)
         self.classes_by_path = {c["path"]: c for c in schema["classes"]}
         self.struct_names = {s["name"] for s in schema.get("structs", [])}
         self.enum_names = {e["name"] for e in schema.get("enums", [])}
@@ -141,7 +145,6 @@ class Generator:
         self.by_module = defaultdict(list)
         for cls in schema["classes"]:
             self.by_module[module_for(cls["package"])].append(cls)
-        self.stats = defaultdict(int)
 
     # -- type rendering -------------------------------------------------------------------------
 
@@ -476,6 +479,9 @@ class Generator:
                     "writable": bool(member.get("writable")),
                     "getter": member.get("getter", ""),
                     "setter": member.get("setter", ""),
+                    # What the setter calls its argument. CallFunction rejects an unnamed one, so
+                    # the runtime cannot write through an accessor without this.
+                    "setter_argument": member.get("setter_argument", ""),
                     "struct": struct,
                 }
             # Functions the stubs expose, so the runtime can invoke exactly what they declare --
