@@ -721,6 +721,7 @@ tickable and the subscription lives beside the rest of the property code. The ti
 an empty subscription map, so a project that never streams pays nothing measurable.
 | **5 — Rust** | `gen_rust_classes.py` + a `tempo_sim::unreal` runtime, off the same `tempo_schema.json` | Designed and measured in §15. |
 | **6 — C++** | generator off the same `tempo_schema.json` | Not started. |
+| **7 — Published classes** | an engine-core + Tempo subset inside the published `tempo-sim` wheel and crate, namespaced by engine version; per-class drift checking | Designed and measured in §16. Independent of 6. |
 
 ### Phase 0 results (measured)
 
@@ -999,3 +1000,194 @@ dynamic escape hatch is therefore an explicit method on the handle, not a separa
 The one piece of `unsafe` lives in 5a, in `from_ref`, and is what `#[repr(transparent)]` exists to
 make sound. Generated code contains none: it gets the cast through an `unsafe trait Class` whose
 contract is "I am a transparent newtype over `ObjectRef`", which only the generator implements.
+
+---
+
+## 16. Published classes
+
+Phase 7, and independent of Phase 6. Everything above generates per project, per release:
+`<project>-classes` describes one build and ships beside it in `Packaged/API`. That is the only way
+to describe a build *completely* — and it means a user cannot `pip install` their way to a typed
+surface, and has none at all until they have packaged one. A published subset closes that gap for
+the part of the surface that does not vary.
+
+### 16.1 The variable is the plugin set, not the engine release
+
+The obvious reading is that a published package is impossible because the engine API is specific to
+a UE release — hence one package per release, `tempo-sim-classes-5.8`. That is the wrong axis.
+Measured on TempoSample: an **editor reports 11,297 classes and the packaged game ships 6,068**, so
+5,229 — 46% — exist only because of what that project enabled or what its editor loaded. A package
+that guessed at those would be wrong about nearly half its content, and wrong in the worst
+direction: a stub that type-checks and then fails at runtime, which is the exact inverse of §1.
+
+So the criterion is not "which engine version" but **which modules ship in every build, whatever
+the project enables**. That is checkable, and it is what `subset_schema.py` applies.
+
+### 16.2 The module set
+
+| Package | Classes | Why it is always there |
+|---|---|---|
+| `/Script/Engine` | 1,389 | compiled in, loaded unconditionally |
+| `/Script/UMG` | 144 | ditto |
+| `/Script/CoreUObject` | 98 | ditto |
+| `/Script/SlateCore` | 8 | ditto |
+| `/Script/DeveloperSettings`, `/Script/PhysicsCore` | 4 each | ditto |
+| `/Script/InputCore` | 1 | ditto |
+| Tempo's own runtime modules (9) | 82 | a project that has Tempo has these |
+
+**1,730 classes of 6,068** (28.5%). The engine list is hand-written, because "is this module always
+loaded" is not a question the schema can answer — the schema is one project's answer to it. Tempo's
+half is derived from the `.uplugin` descriptors, so a new plugin is published by existing.
+
+Two exclusions follow from the same rule. `TempoROSBridge` is `EnabledByDefault: false`, so a
+project that ignores it never builds it. `TempoROS` is a separate repository the host project
+supplies, so a project may not have it at all. `External/` is left out too: those are vendored Epic
+plugins whose presence is Tempo's choice to keep making, not a promise to a client.
+
+**The five beyond Engine and CoreUObject are not there for their own classes.** 161 classes between
+them is not the point; leaving them out does not remove them from the API, it only makes every
+member that *mentions* one degrade to a bare `Object`. With them in, **25 members of 7,652** still
+degrade that way — `UAudioComponent::GetModulators()` naming `/Script/AudioExtensions`,
+`USkeletalMesh::MeshClothingAssets` naming `/Script/ClothingSystemRuntimeInterface`. 0.33%, and
+`Object` is honest about what it is rather than wrong.
+
+### 16.3 Rerooting, which a subset is the first thing to need
+
+A subset is the first thing in this pipeline that can break the schema's one structural invariant:
+every class's superclass is also in the document. The editor's full walk and the packaged filter are
+both closed over superclasses by construction — a packaged build is a subset of its own editor — so
+nothing until now had to think about it. A subset chosen by module is not closed: **32 classes
+derive from something outside it, and ten of those are in `/Script/Engine` itself.**
+`UEngineReplicationBridge` derives from IrisCore, `UWidgetAnimation` from MovieScene,
+`UTempoChaosWheeledVehicleMovementComponent` from ChaosVehicles.
+
+Leaving the dangling path in place is the one outcome to avoid, because **both generators read an
+unresolvable superclass as "this class is a root"** — silently, with the stubs still type-checking.
+A rooted `TempoWheeledVehiclePawn` would carry its own two properties and nothing else: no `Pawn`,
+no `Actor`, and in Rust no `Deref`, so it could not even be passed where an actor is wanted.
+
+So `subset_schema.py` **reroots**: each such class is pointed at its nearest kept ancestor.
+`TempoWheeledVehiclePawn` *is* a `Pawn`, so deriving it from `Pawn` is sound; what it gives up is
+whatever `WheeledVehiclePawn` declared in between. Nothing a rerooted class declares itself is
+lost, and nothing it claims is wrong — there is only less of it, which is what a published subset
+is. The whole bill is **55 properties, 200 functions and 6 components**, concentrated in classes
+nobody addresses from a scenario; the one worth naming in release notes is
+`TempoChaosWheeledVehicleMovementComponent`, which loses the 64 wheel functions ChaosVehicles
+declares. A project's own package has them, as it has everything.
+
+### 16.4 One distribution, namespaced by engine version
+
+No new packages. The published classes go inside the existing `tempo-sim` wheel and `tempo-sim`
+crate, under an engine-version namespace:
+
+```python
+from tempo_sim.UE.v5_8.Engine import Pawn
+```
+```rust
+use tempo_sim::ue::v5_8::classes::engine::Pawn;   // feature = "ue-5-8"
+```
+
+`v5_8`, not `5_8`: an identifier cannot begin with a digit in either language, so the user-facing
+spelling needs the prefix. CI already runs the schema commandlet on both 5.7 and 5.8, so the
+per-version artifacts are nearly free.
+
+**Python ships both versions unconditionally; Rust gates each behind a cargo feature.** The two
+languages are not symmetric here and the measurements say so:
+
+| | per UE version | two versions | for comparison |
+|---|---|---|---|
+| Python, compressed | **0.30 MB** | 0.60 MB | `tempo-sim` wheel is 0.10 MB today |
+| Rust, `cargo build` (the crate alone) | **8.7 s** | ~17 s | full 6,068-class crate: 29.3 s |
+| Rust, `cargo check` | 5.7 s | ~11 s | full crate: 22.6 s |
+
+A wheel going from 0.10 MB to 0.70 MB is the size the full `tempo-sample-classes` wheel already is,
+and Python is lazy — a version nobody imports costs nothing at runtime, and Pyright loads only the
+module imported. Rust has no such laziness: 17 s of codegen would be paid by **every** `tempo-sim`
+user, including everyone who only ever touches the RPC API. Default-off features are exactly the
+tool for that, and §15.2's "no feature gates" holds for its own subject — a project's own classes
+crate, which someone opted into by generating it.
+
+### 16.5 Type identity: re-export, do not redefine
+
+The subtle failure, and the one that decides whether a published package is worth having. A project
+with both installed would have **two unrelated generated types for `/Script/Engine.Pawn`**:
+`tempo_sim.UE.v5_8.Engine.Pawn` and `tempo_sample_classes.Engine.Pawn`. At runtime they are
+interchangeable, because dispatch is on the class-path string. Statically they are not:
+
+```python
+def aim(p: tempo_sim.UE.v5_8.Engine.Pawn) -> None: ...
+
+aim(sweeper)        # error: BP_StreetSweeper_C derives from the *project's* Pawn
+```
+
+A shared helper library written against the published types could therefore accept no project's
+Blueprints — which is most of what such a library is for.
+
+So the project generator, when a published subset exists for its engine version, **re-exports rather
+than redefines**: a class whose subset entry matches is emitted as
+`from tempo_sim.UE.v5_8.Engine import Pawn as Pawn` (`pub use` in Rust) and omitted from the
+project's own index. One type per Unreal class, and everything composes. The comparison is per
+class, so a project that genuinely diverged still gets its own definition — and since Tempo builds
+the engine exactly as Epic ships it (§5), divergence should not arise. A class the subset rerooted
+is a divergence by that test, which is correct: the project has the real ancestor and should define
+its own.
+
+### 16.6 Two registries, not one
+
+Both generated packages register themselves — Python through `register_classes` at import,
+Rust through the self-registering class table — and today both registries hold exactly one entry.
+Python's `register()` overwrites; Rust's `OnceLock::set` discards the later call. With a published
+package and a project package installed together, whichever loses becomes unresolvable: no
+metadata, no `is_a`, no dynamic path.
+
+Both become lists, searched in registration order. There is no overlap to arbitrate, because §16.5
+has the project omit from its own index exactly what it re-exports.
+
+### 16.7 `check_schema` has to become per class
+
+`check_schema` compares one SHA-1 over the whole walk against the one the sim reports. **A subset
+can never match that**, by construction, so a published package has no way to verify itself — and
+`subset_schema.py` accordingly drops `content_hash` from the header and sets `published_subset`,
+rather than leaving a number that could only ever mismatch.
+
+The replacement is a hash per class, folded into the whole-walk hash so there is still one
+definition of what a class's identity is:
+
+- `HashClass(const FClassEntry&)` in `TempoWorldSchemaWalk`, with `HashResult` accumulating those.
+- `content_hash` on `ClassDescriptor`, `StructDescriptor` and `EnumDescriptor`, and in the JSON.
+- Both clients compare class by class over what they have, and report the classes the sim lacks and
+  the classes whose hash differs. A class the sim has and the package does not is not an error —
+  for a subset it is the normal case.
+
+This is a better check than today's regardless of publishing: a project adding one Blueprint
+currently invalidates the hash for every class in the build, so the only repair is to regenerate,
+and the report cannot say what actually moved. Per class, it can.
+
+### 16.8 What is given up, honestly
+
+A published package has **no entry points of its own**: `/Script/TempoSample` is one class and
+TempoSample's Blueprints are 25 more — 0.4% of classes, and 100% of the places a scenario starts.
+That is survivable because a handle constructor is public, so `TempoLidar("Sweeper", "Lidar")`
+checks every member while leaving the two names unchecked, and `world::get_actors::<Pawn>()` needs
+no project class at all. It is a real step down from the full package, and the docs should say so
+rather than sell the subset as equivalent.
+
+Bundling also pins the engine classes to Tempo's release cadence: if Epic changes reflection in a
+5.8.x patch, the published classes are stale until the next Tempo release, where a separate package
+could ship on its own. Reflection rarely moves in a patch release, and `v5_8` is the right
+granularity for that risk.
+
+### 16.9 Phasing
+
+| | | |
+|---|---|---|
+| **7a** | `subset_schema.py` — the module set, the subset, rerooting; `codegen` tests | pure Python, no engine |
+| **7b** | per-class hashes — `HashClass`, the three proto fields, the JSON writer; C++ unit test | the §16.7 prerequisite |
+| **7c** | subset-aware `check_schema` in both clients; both registries become lists (§16.6) | needs 7b |
+| **7d** | generate into `tempo_sim/UE/v5_8` and `tempo_sim::ue::v5_8`, Rust behind `ue-5-8` | needs 7a |
+| **7e** | re-export rather than redefine, in both generators (§16.5) | needs 7d |
+| **7f** | CI collects the per-version subset; `Package.sh` wiring; docs | |
+
+7a through 7c stand on their own: the per-class check is worth having before anything is published,
+and it is the one piece that cannot be added afterwards without changing a published package's
+meaning.
