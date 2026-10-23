@@ -1181,13 +1181,45 @@ granularity for that risk.
 
 | | | |
 |---|---|---|
-| **7a** | `subset_schema.py` — the module set, the subset, rerooting; `codegen` tests | pure Python, no engine |
-| **7b** | per-class hashes — `HashClass`, the three proto fields, the JSON writer; C++ unit test | the §16.7 prerequisite |
-| **7c** | subset-aware `check_schema` in both clients; both registries become lists (§16.6) | needs 7b |
-| **7d** | generate into `tempo_sim/UE/v5_8` and `tempo_sim::ue::v5_8`, Rust behind `ue-5-8` | needs 7a |
-| **7e** | re-export rather than redefine, in both generators (§16.5) | needs 7d |
-| **7f** | CI collects the per-version subset; `Package.sh` wiring; docs | |
+| **7a** | `subset_schema.py` — the module set, the subset, rerooting; `codegen` tests | pure Python, no engine. **Done.** |
+| **7b** | per-entry hashes — `HashClass`/`HashStruct`/`HashEnum`, the three proto fields, the JSON writer; C++ unit tests | the §16.7 prerequisite. **Done.** |
+| **7b′** | **the build is the authority on members too** — `query_packaged_classes.py` reports its whole declared surface and `filter_schema.py` narrows to it | Not foreseen; see §16.10. **Done.** |
+| **7c** | per-entry `check_schema` in both clients; both registries become lists (§16.6) | needs 7b and 7b′. **Done.** |
+| **7d** | generate into `tempo_sim/UE/v5_8` (Python) | needs 7a. **Done.** |
+| **7e** | `tempo_sim::ue::v5_8` behind a `ue-5-8` cargo feature | needs 7d; the Rust half of §16.4 |
+| **7f** | re-export rather than redefine, in both generators (§16.5) | needs 7d and 7e |
+| **7g** | CI collects the per-version subset; a release wheel carrying 5.7 and 5.8; docs | |
 
-7a through 7c stand on their own: the per-class check is worth having before anything is published,
+7a through 7c stand on their own: the per-entry check is worth having before anything is published,
 and it is the one piece that cannot be added afterwards without changing a published package's
 meaning.
+
+### 16.10 The editor is not the authority on members either
+
+Found while stamping the per-entry hashes, and the reason 7b′ exists. §5.3 established that an
+editor cannot be trusted for the class *list* and that the packaged build has to be asked. Members
+were still being taken from the editor, and of the 6,068 classes both have, **270 disagree about
+what they declare** — along with 72 of 1,034 structs.
+
+`AActor` is one of them. It carries seven `WITH_EDITORONLY_DATA` properties — `ActorGuid`,
+`ActorInstanceGuid`, `ContentBundleGuid`, `PivotOffset`, `RuntimeGrid`, `SpriteScale`,
+`bIsSpatiallyLoaded` — and eleven editor-only functions including `GetActorLabel` and
+`SetFolderPath`. It is the root of two thousand classes, so **every actor in the generated package
+declared members that type-check and then fail at runtime**, which is precisely the outcome §1 is
+about. 48 further classes differ by an editor-only component, such as `ANavLinkProxy`'s billboard.
+
+96 classes report a different **function signature**, and that one is not cosmetic: a cooked build
+cases some parameter names differently (`Position` against `position`), and a `CallFunction`
+argument is matched against the function's own parameters by name. An editor-sourced name is a
+`FAILED_PRECONDITION` at the first call — the same defect as the `BlueprintSetter` write path, in a
+different place.
+
+So the build now reports its whole declared surface and the filter narrows to it: **318 members, 168
+functions and 64 components dropped**, 298 signatures and their parameter names corrected, and every
+per-entry hash taken from the build. What it deliberately does not do is carry over the 25 members
+and 23 functions the build has under a name the editor does not — without the editor's metadata
+there is no `BlueprintSetter` for one, and writing such a property directly is how it gets written
+*wrongly* rather than not at all.
+
+The invariant this buys is what makes a build-sourced hash honest: **the generated package declares
+nothing the build lacks.** A subset of what ships can address what ships; a superset cannot.
