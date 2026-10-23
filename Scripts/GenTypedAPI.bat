@@ -115,8 +115,11 @@ REM (TYPED_WORLD_API_PLAN.md section 16) -- but only if what it narrows is itsel
 REM packaged build. This mirror generates from the editor's unfiltered walk, which has ~46%% more
 REM classes than a packaged game and editor-only members on the classes both have. A published
 REM package built from that would describe classes and members no build has, which is worse than
-REM having none. Said out loud rather than skipped silently, because the .sh has the same guard and
-REM takes it when there is no packaged build either.
+REM having none.
+REM
+REM That unfiltered walk is this mirror's wider gap: the .sh asks the packaged build what it has and
+REM now refuses to generate without an answer, while this one has never asked. Package.bat builds no
+REM Python or Rust clients either, so nothing here ships today -- closing both is one job.
 echo Skipping the published classes ^(this mirror generates from the editor's unfiltered walk^)
 
 REM The Rust crate, from the same schema. Its version follows tempo-sim's crate version so that a

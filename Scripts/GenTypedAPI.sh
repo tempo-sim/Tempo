@@ -111,16 +111,29 @@ if [ -n "$PACKAGED_BINARY" ] && [ -x "$PACKAGED_BINARY" ]; then
   echo "Asking the packaged build which classes it has"
   CLASS_PATHS="$SCHEMA_DIR/packaged_class_paths.json"
   FILTERED="$SCHEMA_DIR/tempo_schema_packaged.json"
-  if "$PYTHON_BIN" "$PYTHON_DIR/query_packaged_classes.py" "$PACKAGED_BINARY" "$CLASS_PATHS"; then
-    if "$PYTHON_BIN" "$PYTHON_DIR/filter_schema.py" "$SCHEMA" "$CLASS_PATHS" "$FILTERED"; then
-      GENERATE_FROM="$FILTERED"
-    else
-      echo "Warning: could not filter the schema; generating from the editor's full view" >&2
-    fi
-  else
-    echo "Warning: could not query the packaged build; generating from the editor's full view" >&2
+  # A build that is there and will not answer is an error, not a reason to fall back.
+  #
+  # Falling back ships stubs for the editor's whole view -- 11,297 classes where the build has
+  # 6,068, so 5,229 that type-check and then fail at runtime, which is precisely what filtering
+  # exists to prevent. It happened: the packaged sim exited before answering once during a package
+  # run, the warning scrolled past in a two-thousand-line log, and the wheel went out describing a
+  # build nobody has. Package.sh treats a failure here as non-fatal and simply ships no typed
+  # classes, which is the right outcome -- absent beats wrong.
+  if ! "$PYTHON_BIN" "$PYTHON_DIR/query_packaged_classes.py" "$PACKAGED_BINARY" "$CLASS_PATHS"; then
+    echo "Could not query $PACKAGED_BINARY, which is the authority on what ships." >&2
+    echo "  Refusing to generate from the editor's full view: it has thousands of classes a" >&2
+    echo "  packaged build does not, and a stub for one of those fails at runtime." >&2
+    exit 1
   fi
+  if ! "$PYTHON_BIN" "$PYTHON_DIR/filter_schema.py" "$SCHEMA" "$CLASS_PATHS" "$FILTERED"; then
+    echo "Could not narrow the schema to what $PACKAGED_BINARY reports." >&2
+    exit 1
+  fi
+  GENERATE_FROM="$FILTERED"
 else
+  # No build at all is the standalone case -- someone refreshing the classes after editing a
+  # Blueprint, before packaging. The editor's full view is then what there is, and it is also the
+  # right input for diffing one release against another.
   echo "No packaged build to filter against; generating from the editor's full view."
   echo "  (Run this from Package.sh, or package first, to generate only classes that ship.)"
 fi
