@@ -112,6 +112,12 @@ else
   cp -r "$PROJECT_ROOT/Saved/Cooked/$TARGET_PLATFORM/$PROJECT_NAME/AssetRegistry.bin" "$PROJECT_ROOT/Packaged"
 fi
 
+# The clients are rebuilt from scratch below, so clear what an earlier package left. Each step only
+# replaces its own destination, and a distribution that no longer exists -- the -classes package the
+# typed classes once shipped as -- would otherwise sit there, still installed by every `pip install
+# Packaged/API/Python/*/*.whl`.
+rm -rf "$PROJECT_ROOT/Packaged/API/Python" "$PROJECT_ROOT/Packaged/API/Rust"
+
 # Copy generated Rust crate(s) to Packaged/API/Rust/ so downstream consumers can
 # build a Rust client against this packaged build. Only ships the files that
 # `cargo package` would include — same as the publish artifact, minus target/,
