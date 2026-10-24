@@ -113,7 +113,14 @@ def query(binary, port, timeout, socket_name):
                 response = tempo_world.describe_classes(include_blueprint_classes=True,
                                                         blueprint_accessible_only=True,
                                                         include_functions=True)
+                # Every asset the build cooked, which is the one fact about an asset only the
+                # build knows: an editor lists everything on disk, including what the cook dropped
+                # because nothing referenced it. filter_schema.py decides what becomes the catalog.
+                assets = tempo_world.get_assets(asset_type="/Script/CoreUObject.Object",
+                                                include_subclasses=True)
                 return {
+                    "assets": [{"path": asset.path, "class": asset.class_path}
+                               for asset in assets.assets],
                     "classes": [cls.class_path for cls in response.classes],
                     "surface": _surface(response),
                     # The build's own identity, so the generated client can be stamped with the

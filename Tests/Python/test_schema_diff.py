@@ -186,3 +186,53 @@ def test_the_tool_exits_nonzero_on_breaking_changes(baseline, tmp_path):
     assert result.returncode == 1
     assert "bEnabled" in result.stdout
     assert "breaking change" in result.stdout
+
+
+
+def diff(baseline, mutate):
+    """As `changes`, but keeping who each change is about."""
+    new = copy.deepcopy(baseline)
+    mutate(new)
+    return compare(baseline, new)
+
+
+def test_a_removed_asset_is_breaking(baseline):
+    def mutate(new):
+        new["assets"] = [a for a in new["assets"] if a["path"] != "/Game/Widgets/W_Main.W_Main"]
+    breaking, _ = diff(baseline, mutate)
+    assert ("/Game/Widgets/W_Main.W_Main", "asset removed") in breaking
+
+
+def test_an_asset_whose_class_changed_is_breaking(baseline):
+    def mutate(new):
+        for asset in new["assets"]:
+            if asset["path"] == "/Game/Widgets/W_Main.W_Main":
+                asset["class"] = "/Script/Engine.Widget"
+    breaking, _ = diff(baseline, mutate)
+    assert any(owner == "/Game/Widgets/W_Main.W_Main" and "asset class" in change
+               for owner, change in breaking)
+
+
+def test_an_added_asset_is_not_breaking(baseline):
+    def mutate(new):
+        new["assets"].append({"path": "/Game/New.New", "class": "/Script/Engine.MeshThing"})
+    breaking, additions = diff(baseline, mutate)
+    assert breaking == []
+    assert ("/Game/New.New", "asset added") in additions
+
+
+def test_no_catalog_on_one_side_compares_no_assets(baseline):
+    """An editor schema has none; diffing it against a packaged one must not remove every asset."""
+    def mutate(new):
+        new.pop("assets")
+    breaking, _ = diff(baseline, mutate)
+    assert not any(change == "asset removed" for _, change in breaking)
+
+
+def test_a_struct_that_stops_travelling_whole_is_breaking(baseline):
+    def mutate(new):
+        for struct in new["structs"]:
+            if struct["name"] == "FWidgetSettings":
+                struct["value_expressible"] = False
+    breaking, _ = diff(baseline, mutate)
+    assert ("FWidgetSettings", "struct can no longer be passed as one value") in breaking

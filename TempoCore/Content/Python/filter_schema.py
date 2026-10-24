@@ -158,6 +158,52 @@ def narrow_to_surface(schema, surface):
     return stats
 
 
+# Asset classes that do not belong in the catalog, with everything derived from them.
+#
+# A redirector is what moving an asset leaves at its old path; listing one would keep the old name
+# compiling, which is precisely the case the catalog exists to catch. A Blueprint's class is in the
+# class surface already, as a class -- which is how a scenario uses it -- and its Blueprint asset is
+# the editor's view of that class.
+EXCLUDED_ASSET_CLASSES = frozenset((
+    "/Script/CoreUObject.ObjectRedirector",
+    "/Script/CoreUObject.Class",
+    "/Script/Engine.BlueprintCore",
+))
+
+# Folders whose packages are machinery rather than assets: World Partition's generated streaming
+# cells and its one-file-per-actor packages. Nothing addresses one by path.
+EXCLUDED_ASSET_FOLDERS = ("_Generated_", "__ExternalActors__", "__ExternalObjects__")
+
+
+def derives_from(class_path, ancestors, classes_by_path):
+    seen = set()
+    while class_path and class_path not in seen:
+        if class_path in ancestors:
+            return True
+        seen.add(class_path)
+        cls = classes_by_path.get(class_path)
+        class_path = cls.get("super", "") if cls else ""
+    return False
+
+
+def catalog(reported_assets, classes_by_path):
+    """The cooked assets a scenario can name, sorted by path.
+
+    `classes_by_path` is the editor's whole walk rather than the narrowed one, because an asset's
+    class can be one the build has and the stubs leave out, and its ancestry still decides whether
+    it is a Blueprint.
+    """
+    kept = []
+    for asset in reported_assets:
+        if derives_from(asset["class"], EXCLUDED_ASSET_CLASSES, classes_by_path):
+            continue
+        package = asset["path"].split(".", 1)[0]
+        if any(folder in package.split("/") for folder in EXCLUDED_ASSET_FOLDERS):
+            continue
+        kept.append({"path": asset["path"], "class": asset["class"]})
+    return sorted(kept, key=lambda asset: asset["path"])
+
+
 def filter_schema(schema, keep_paths):
     """The schema with classes outside `keep_paths` removed, and types nothing names dropped."""
     kept_classes = [cls for cls in schema.get("classes", []) if cls["path"] in keep_paths]
@@ -246,6 +292,17 @@ def main(argv):
     else:
         print("warning: this report has no declared surface, so only the class list is narrowed; "
               "regenerate it with the current query_packaged_classes.py", file=sys.stderr)
+
+    # The asset catalog comes from the build alone. An editor has no business contributing to it:
+    # it lists assets the cook dropped, and a catalog entry for one type-checks and then fails.
+    if "assets" in reported:
+        filtered["assets"] = catalog(reported["assets"], {cls["path"]: cls for cls in schema["classes"]})
+        print("assets {} reported -> {} in the catalog".format(
+            len(reported["assets"]), len(filtered["assets"])))
+    else:
+        filtered.pop("assets", None)
+        print("warning: this report lists no assets, so there is no asset catalog; regenerate it "
+              "with the current query_packaged_classes.py", file=sys.stderr)
 
     # Stamp the header with the build's own identity rather than the editor's.
     #

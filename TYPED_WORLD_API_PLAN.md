@@ -724,7 +724,7 @@ an empty subscription map, so a project that never streams pays nothing measurab
 | **7 — Published classes** | an engine-core + Tempo subset inside the published `tempo-sim` wheel and crate, namespaced by engine version; per-class drift checking | Designed and measured in §16. Independent of 6. |
 | **8 — Struct values** | a `StructValue` variant; value-expressible structs in the classifier; struct arguments, results and whole-struct writes in both clients | Designed in §17. **Done**; see §17.7. |
 | **9 — One ordered batch** | `RunBatch` carrying sets, gets and calls in order within one tick; deferred and immediate reads in both clients | Designed in §18. **Done**; see §18.3. |
-| **10 — Asset catalog** | cooked assets from the packaged build; `AssetRef[T]` typed by class; a generated catalog per mount point; drift reporting | Designed in §19. |
+| **10 — Asset catalog** | cooked assets from the packaged build; `AssetRef[T]` typed by class; a generated catalog per mount point; drift reporting | Designed in §19. **Done**; see §19.5. |
 
 ### Phase 0 results (measured)
 
@@ -1530,7 +1530,7 @@ nothing extra, since the schema already records an object property's pointee cla
 
 **Python**: `AssetRef` is covariant, so an `AssetRef[Material]` goes where an
 `AssetRef[MaterialInterface]` is wanted. **Rust**: `AssetRef<T>` derefs to `AssetRef<T::Super>`
-through the same `Deref` chain a class handle uses, so `&M_PAINT` coerces to
+through the same `Deref` chain a class handle uses, so `&M_Paint` coerces to
 `&AssetRef<MaterialInterface>` and a setter takes `&AssetRef<…>` to allow it. That is a second
 `unsafe` reinterpretation beside `upcast`, sound for the same reason — `AssetRef` is
 `#[repr(transparent)]` over its path, with the class only in a `PhantomData`.
@@ -1552,3 +1552,32 @@ The catalog *is* the drift detection: a removed asset is an attribute that no lo
 retyped one a type error. `diff_schema.py` reports both as breaking, and an added asset as
 additive. `check_schema` compares the installed catalog against the sim's `GetAssets` and names any
 asset the package has and the sim does not.
+
+### 19.5 As built
+
+From TempoSample's packaged build: **873 cooked assets reported, 783 in the catalog, 781 emitted**.
+The 90 excluded are Blueprints and World Partition's generated cells; the two not emitted are one
+package holding two asset objects. Five things were found doing it.
+
+**An asset is named by its package, not its object.** `/Engine/EngineResources/Black_Low.Black` is a
+package called `Black_Low` holding an object called `Black`, beside a package `Black` holding another.
+Package names are unique within a folder and object names are not.
+
+**World Partition packages are not assets.** `_Generated_` streaming cells and `__ExternalActors__`
+packages are cooked and listed, all named after their map, and nothing addresses one by path.
+They are excluded by folder.
+
+**A map beside a folder of its own name is ordinary.** `OpenWorld.umap` beside `OpenWorld/` would
+have failed a collision rule written for classes. Python gives the folder a trailing underscore;
+Rust needs nothing, since modules and statics are separate namespaces. What still collides after
+that is left out and counted rather than failing the package.
+
+**A read-only property shadowed the Rust function that sets it.** The generator reserved
+`set_<name>` for every property, writable or not, so `UStaticMeshComponent::SetStaticMesh` -- the
+only way to set a static mesh, against its read-only `StaticMesh` -- was never generated. The name
+is now reserved only for a writable property. Found by writing the first catalog test.
+
+**The catalog is checked by `check_schema` too**, in both clients, against the sim's own registry:
+an asset's identity is its path and its class, so a moved one is absent and a retyped one changed.
+The sim is asked for its assets only when a linked package has a catalog.
+

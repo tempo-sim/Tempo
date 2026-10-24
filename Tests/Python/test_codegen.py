@@ -206,6 +206,45 @@ def ok(w: E.Widget) -> None:
     assert errors == [], "struct values should type-check cleanly: {}".format(errors)
 
 
+def test_the_asset_catalog_type_checks(generated, tmp_path):
+    errors = check(generated, """
+import fixture_classes.Engine as E
+from fixture_classes.assets import Engine, Game
+from tempo_sim.unreal import AssetRef
+
+def ok(w: E.Widget) -> None:
+    w.Skin = Game.Widgets.W_Main
+    # Covariant: a MeshThing asset is an Object asset.
+    w.AnyAsset = Game.Widgets.W_Main
+    w.Reskin(Game.Maps.Showroom_.Lighting)
+    current: AssetRef[E.MeshThing] = w.Skin
+    print(current.path, Engine.Basic._9Grid.path, Game.Maps.Showroom.path)
+    # The escape hatch, for a path that comes from data: untyped, and visibly so.
+    w.Skin = AssetRef("/Game/FromAConfigFile")
+""", tmp_path)
+    assert errors == [], "the catalog should type-check cleanly: {}".format(errors)
+
+
+@pytest.mark.parametrize("case,source", [
+    ("an asset that was renamed", "w.Skin = Game.Widgets.W_Mian"),
+    ("an asset of the wrong class", "w.Skin = Game.Widgets.Trims.T_Gold"),
+    ("an asset as a function argument of the wrong class", "w.Reskin(Game.Widgets.Trims.T_Gold)"),
+    ("a bare path", 'w.Skin = "/Game/Widgets/W_Main"'),
+    ("two assets that collide, both left out", "print(Game.Widgets.Dup_One)"),
+    ("a folder renamed beside its asset is not the asset", "w.Skin = Game.Maps.Showroom_"),
+    ("a catalog entry cannot be reassigned", "Game.Widgets.W_Main = Game.Widgets.W_Main"),
+])
+def test_asset_drift_is_a_type_error(generated, tmp_path, case, source):
+    errors = check(generated, """
+import fixture_classes.Engine as E
+from fixture_classes.assets import Engine, Game
+
+def drift(w: E.Widget) -> None:
+    {}
+""".format(source), tmp_path)
+    assert errors, "{} should be a type error, but Pyright accepted it".format(case)
+
+
 def test_a_deferred_read_is_typed_by_what_it_reads(generated, tmp_path):
     errors = check(generated, """
 import fixture_classes.Engine as E

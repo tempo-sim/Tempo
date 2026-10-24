@@ -5,7 +5,11 @@
 # A release regenerates the typed classes, and a scenario written against the old ones either still
 # type-checks or does not. This says which, before the release rather than after: removed classes,
 # removed or retyped properties, properties that became read-only, changed signatures, removed
-# enumerators. Additions are counted but not listed -- nothing breaks by gaining a member.
+# enumerators, and moved, removed or retyped assets. Additions are counted but not listed -- nothing
+# breaks by gaining a member.
+#
+# Assets are compared only when both documents have a catalog, which only a schema narrowed against
+# a packaged build does; comparing one against none would report every asset as removed.
 #
 # Exits 1 when there is a breaking change, so it can gate a pull request:
 #
@@ -91,6 +95,10 @@ def compare(old, new):
     for name in sorted(set(old_structs) - set(new_structs)):
         breaking.append((name, "struct removed"))
     for name in sorted(set(old_structs) & set(new_structs)):
+        # Every function taking one is withheld once it cannot travel whole, and its value type with
+        # them -- as breaking as removing each of those.
+        if old_structs[name].get("value_expressible") and not new_structs[name].get("value_expressible"):
+            breaking.append((name, "struct can no longer be passed as one value"))
         was, now = _named(old_structs[name].get("members", [])), _named(new_structs[name].get("members", []))
         for member in sorted(set(was) - set(now)):
             breaking.append((name, "struct member {} removed".format(member)))
@@ -109,6 +117,19 @@ def compare(old, new):
             breaking.append((name, "enumerator {} removed".format(enumerator)))
         for enumerator in sorted(now - was):
             additions.append((name, "enumerator {} added".format(enumerator)))
+
+    # The asset catalog. A moved asset is a removed one under its old path and an added one under
+    # its new path -- which is exactly how a scenario naming the old path experiences it.
+    old_assets = {asset["path"]: asset["class"] for asset in old.get("assets", [])}
+    new_assets = {asset["path"]: asset["class"] for asset in new.get("assets", [])}
+    if old_assets and new_assets:
+        for path in sorted(set(old_assets) - set(new_assets)):
+            breaking.append((path, "asset removed"))
+        for path in sorted(set(new_assets) - set(old_assets)):
+            additions.append((path, "asset added"))
+        for path in sorted(set(old_assets) & set(new_assets)):
+            if old_assets[path] != new_assets[path]:
+                breaking.append((path, "asset class: {} -> {}".format(old_assets[path], new_assets[path])))
 
     return breaking, additions
 

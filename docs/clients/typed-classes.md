@@ -178,6 +178,41 @@ if the block raises before anything forced a flush.
 A snapshot is a point-in-time copy: the simulation moves on and the values do not. A write inside
 the block drops that entry, so a read after it sees the new value.
 
+## Assets
+
+Every asset the build cooked is in a generated catalog, one module per mount point, with folders as
+namespaces. An asset-valued property is typed by the class it accepts:
+
+```python
+from tempo_sample_classes.assets import Engine, Game
+
+mesh.SetStaticMesh(Engine.BasicShapes.Cube)          # AssetRef[StaticMesh]
+mesh.SetStaticMesh(Game.Materials.M_Paint)           # type error: AssetRef[Material]
+mesh.SetStaticMesh(Game.Vehicles.SM_Truk)            # type error: no such asset
+```
+
+That is the point of it: a scenario naming an asset that was moved, renamed or dropped from the cook
+stops type-checking, instead of failing with `NOT_FOUND` halfway through a run. `AssetRef` is
+covariant, so a `Material` goes wherever a `MaterialInterface` is wanted.
+
+The catalog is what the **packaged** build cooked, not what the editor has on disk — an asset that
+nothing references is not cooked, and an entry for it would type-check and then fail. So it exists
+only when the classes are generated against a packaged build, which `Package.sh` does. It leaves out
+redirectors (what a move leaves at the old path — listing one would keep the old name compiling),
+Blueprints (they are classes, and are already there as classes), and World Partition's generated
+packages.
+
+Names are the asset's own, mangled only where Python cannot spell them (`9Grid` is `_9Grid`). A map
+usually sits beside a folder of the same name; the map keeps the name and the folder takes a
+trailing underscore (`Maps.OpenWorld` and `Maps.OpenWorld_`). Two assets whose names still collide
+are both left out, and generation says so.
+
+A path that comes from data — a config file, a command line — can still be used, as
+`AssetRef("/Game/…")`. It is untyped, deliberately and visibly, because nothing could check it.
+
+`world.check_schema()` also compares the catalog against the sim's own asset registry, and names any
+asset the package has and the sim does not.
+
 ## Spawning
 
 ```python
@@ -304,6 +339,23 @@ closure through its `?`. `defer(|| Ok(lidar.horizontal_beams()? * 2))` defers th
 the doubling never happens — a change of *type* is refused, but one that keeps it cannot be told
 apart from the read. Python cannot make that mistake, because the placeholder will not multiply. A
 method with out parameters cannot be deferred at all; call it directly.
+
+### Assets, in Rust
+
+The catalog is a module tree of statics, `assets::engine::basic_shapes::Cube`, each an
+`AssetRef<StaticMesh>`. An `AssetRef` derefs along the same chain the class handles do, so an
+asset-valued setter takes a reference and a derived class coerces into it:
+
+```rust
+use tempo_sample_classes::assets::engine::basic_shapes::Cube;
+use tempo_sample_classes::assets::game::materials::M_Paint;
+
+mesh.set_static_mesh(&Cube)?;                        // &AssetRef<StaticMesh>
+mesh.set_material(0, &M_Paint)?;                     // &AssetRef<Material> -> &AssetRef<MaterialInterface>
+mesh.set_static_mesh(&AssetRef::from_path(path))?;   // a path from data: untyped, visibly
+```
+
+Rust keeps modules and statics apart, so a map and the folder beside it keep the same name there.
 
 ### What is not there, in Rust specifically
 

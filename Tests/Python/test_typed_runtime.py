@@ -828,9 +828,17 @@ def test_a_property_whose_setter_cannot_be_named_is_read_only(classes):
 # and because a single number can only ever say that something moved.
 
 @pytest.fixture
-def describing(monkeypatch):
-    """Let a test say what the sim reports, and check `check_schema` against it."""
+def describing(monkeypatch, classes):
+    """Let a test say what the sim reports, and check `check_schema` against it.
+
+    The sim's assets default to exactly the installed catalog, so a test about classes is not
+    also, by accident, a test about assets.
+    """
     from tempo_sim import world
+
+    class Asset:
+        def __init__(self, path, class_path):
+            self.path, self.class_path = path, class_path
 
     class Entry:
         def __init__(self, name, content_hash):
@@ -841,9 +849,11 @@ def describing(monkeypatch):
         engine_version = "5.8"
         schema_version = "3"
 
-    def describe(classes=None, structs=None, enums=None):
+    def describe(classes=None, structs=None, enums=None, assets=None):
         class Response:
             header = Header()
+
+        reported_assets = _installed_package(classes_fixture)["assets"] if assets is None else assets
 
         def fake_world():
             class FakeWorld:
@@ -854,19 +864,31 @@ def describing(monkeypatch):
                     response.structs = [Entry(n, h) for n, h in (structs or {}).items()]
                     response.enums = [Entry(n, h) for n, h in (enums or {}).items()]
                     return response
+
+                @staticmethod
+                def get_assets(**_):
+                    class AssetsResponse:
+                        pass
+                    AssetsResponse.assets = [Asset(path, cls) for path, cls in reported_assets.items()]
+                    return AssetsResponse
             return FakeWorld
 
         # `world` reaches the generated RPC module through its own `_world`, not the runtime's.
         monkeypatch.setattr(world, "_world", fake_world)
 
+    classes_fixture = classes
     return describe
+
+
+def _installed_package(classes):
+    package = classes.__name__.split(".")[0]
+    import tempo_sim.unreal as unreal
+    return next(p for p in unreal.registered_classes().packages if p.package == package).hashes
 
 
 def _installed(classes):
     """What the fixture package recorded, which is what a check compares against."""
-    package = classes.__name__.split(".")[0]
-    import tempo_sim.unreal as unreal
-    return next(p for p in unreal.registered_classes().packages if p.package == package).hashes
+    return _installed_package(classes)
 
 
 def test_matching_hashes_pass(classes, describing):
@@ -937,6 +959,35 @@ def test_a_changed_struct_or_enum_is_a_finding(classes, describing):
         world.check_schema()
 
 
+def test_an_asset_the_sim_did_not_cook_is_named(classes, describing):
+    """A catalog entry the build no longer has: moved, renamed, or simply no longer referenced."""
+    from tempo_sim import world
+
+    installed = _installed(classes)
+    assets = {path: cls for path, cls in installed["assets"].items()
+              if path != "/Game/Widgets/W_Main.W_Main"}
+    describing(classes=installed["classes"], structs=installed["structs"],
+               enums=installed["enums"], assets=assets)
+
+    with pytest.raises(world.SchemaMismatch) as raised:
+        world.check_schema()
+    assert "asset /Game/Widgets/W_Main.W_Main" in str(raised.value)
+    assert "not in this sim" in str(raised.value)
+
+
+def test_an_asset_whose_class_changed_is_named(classes, describing):
+    from tempo_sim import world
+
+    installed = _installed(classes)
+    assets = dict(installed["assets"])
+    assets["/Game/Widgets/W_Main.W_Main"] = "/Script/Engine.Widget"
+    describing(classes=installed["classes"], structs=installed["structs"],
+               enums=installed["enums"], assets=assets)
+
+    with pytest.raises(world.SchemaMismatch, match="1 changed"):
+        world.check_schema()
+
+
 def test_a_mismatch_can_warn_instead_of_raising(classes, describing):
     from tempo_sim import world
 
@@ -947,6 +998,45 @@ def test_a_mismatch_can_warn_instead_of_raising(classes, describing):
 
     with pytest.warns(UserWarning, match="do not match this sim"):
         assert world.check_schema(raise_on_mismatch=False) is False
+
+# -- the asset catalog -----------------------------------------------------------------------------
+
+
+def test_a_catalog_entry_is_an_asset_ref(classes):
+    from fixture_classes.assets import Game
+    import tempo_sim.unreal as unreal
+
+    entry = Game.Widgets.W_Main
+    assert isinstance(entry, unreal.AssetRef)
+    assert entry.path == "/Game/Widgets/W_Main.W_Main"
+    assert entry.class_path == "/Script/Engine.MeshThing"
+
+
+def test_an_asset_travels_as_its_path(classes):
+    from fixture_classes.assets import Game
+    import tempo_sim.unreal as unreal
+
+    assert unreal._to_value("asset_value", Game.Widgets.W_Main).asset_value == "/Game/Widgets/W_Main.W_Main"
+    # A plain string still works at run time; it is only the type checker that refuses it.
+    assert unreal._to_value("asset_value", "/Game/X.X").asset_value == "/Game/X.X"
+
+
+def test_an_asset_reads_back_as_an_asset_ref(classes):
+    import tempo_sim.unreal as unreal
+    import tempo_sim.TempoWorld.WorldControl_pb2 as WorldControl
+
+    read = unreal._from_value(WorldControl.Value(asset_value="/Game/Widgets/W_Main.W_Main"))
+    assert read == unreal.AssetRef("/Game/Widgets/W_Main.W_Main")
+    assert unreal._from_value(WorldControl.Value(asset_value="")) is None, "an unset reference is None"
+    assert unreal._from_value(WorldControl.Value(asset_array_value={"values": ["/A.A", "/B.B"]})) == [
+        unreal.AssetRef("/A.A"), unreal.AssetRef("/B.B")]
+
+
+def test_a_catalog_entry_cannot_be_changed(classes):
+    from fixture_classes.assets import Game
+    with pytest.raises(AttributeError):
+        Game.Widgets.W_Main.path = "/Game/Elsewhere"
+
 
 # -- struct values --------------------------------------------------------------------------------
 

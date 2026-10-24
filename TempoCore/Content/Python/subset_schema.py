@@ -145,6 +145,10 @@ def subset(schema, packages):
     narrowed = filter_schema(schema, keep)
     rerooted = reroot(narrowed, {cls["path"]: cls for cls in schema["classes"]})
 
+    # A project's assets are its own -- even the engine content it cooks depends on what the project
+    # references -- so the published classes carry no catalog.
+    narrowed.pop("assets", None)
+
     header = dict(narrowed.get("header", {}))
     # The whole-walk hash the header carries identifies a *build*, and a subset is not one: no sim
     # will ever report this number, so a client comparing it would only ever see a mismatch. The

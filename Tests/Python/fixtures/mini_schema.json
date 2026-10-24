@@ -253,6 +253,33 @@
      "readable": true,
      "writable": true,
      "value_expressible": true
+    },
+    {
+     "name": "Skin",
+     "kind": "asset",
+     "type": "TObjectPtr<UMeshThing>",
+     "class": "/Script/Engine.MeshThing",
+     "readable": true,
+     "writable": true,
+     "value_expressible": true
+    },
+    {
+     "name": "AnyAsset",
+     "kind": "asset",
+     "type": "TObjectPtr<UObject>",
+     "class": "/Script/CoreUObject.Object",
+     "readable": true,
+     "writable": true,
+     "value_expressible": true
+    },
+    {
+     "name": "Frame",
+     "kind": "asset",
+     "type": "TObjectPtr<UMeshThing>",
+     "class": "/Script/Engine.MeshThing",
+     "readable": true,
+     "writable": false,
+     "value_expressible": true
     }
    ],
    "functions": [
@@ -383,6 +410,48 @@
         "kind": "int",
         "type": "int"
        }
+      },
+      {
+       "name": "ReturnValue",
+       "direction": "return",
+       "kind": "bool",
+       "type": "bool"
+      }
+     ]
+    },
+    {
+     "name": "Reskin",
+     "signature": "bool Reskin(TObjectPtr<UMeshThing> NewSkin)",
+     "callable": true,
+     "positional": true,
+     "parameters": [
+      {
+       "name": "NewSkin",
+       "direction": "in",
+       "kind": "asset",
+       "type": "TObjectPtr<UMeshThing>",
+       "class": "/Script/Engine.MeshThing"
+      },
+      {
+       "name": "ReturnValue",
+       "direction": "return",
+       "kind": "bool",
+       "type": "bool"
+      }
+     ]
+    },
+    {
+     "name": "SetFrame",
+     "signature": "bool SetFrame(TObjectPtr<UMeshThing> NewFrame)",
+     "callable": true,
+     "positional": true,
+     "parameters": [
+      {
+       "name": "NewFrame",
+       "direction": "in",
+       "kind": "asset",
+       "type": "TObjectPtr<UMeshThing>",
+       "class": "/Script/Engine.MeshThing"
       },
       {
        "name": "ReturnValue",
@@ -551,6 +620,40 @@
     "Simple",
     "Advanced"
    ]
+  }
+ ],
+ "assets": [
+  {
+   "path": "/Engine/Basic/9Grid.9Grid",
+   "class": "/Script/Engine.MeshThing"
+  },
+  {
+   "path": "/Engine/Basic/Gizmo.Gizmo",
+   "class": "/Script/NotInTheWalk.Thing"
+  },
+  {
+   "path": "/Game/Maps/Showroom.Showroom",
+   "class": "/Script/Engine.Orphan"
+  },
+  {
+   "path": "/Game/Maps/Showroom/Lighting.Lighting",
+   "class": "/Script/Engine.MeshThing"
+  },
+  {
+   "path": "/Game/Widgets/Dup-One.Dup-One",
+   "class": "/Script/Engine.MeshThing"
+  },
+  {
+   "path": "/Game/Widgets/Dup_One.Dup_One",
+   "class": "/Script/Engine.MeshThing"
+  },
+  {
+   "path": "/Game/Widgets/Trims/T_Gold.T_Gold",
+   "class": "/Script/Engine.Widget"
+  },
+  {
+   "path": "/Game/Widgets/W_Main.W_Main",
+   "class": "/Script/Engine.MeshThing"
   }
  ]
 }

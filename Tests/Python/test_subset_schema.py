@@ -218,6 +218,12 @@ def test_types_nothing_kept_mentions_are_dropped(subset):
     assert [enum["name"] for enum in narrowed["enums"]] == ["EWidgetMode"]
 
 
+def test_a_published_subset_has_no_asset_catalog(subset):
+    """What a project cooks is its own, engine content included."""
+    narrowed, _ = subset
+    assert "assets" not in narrowed
+
+
 def test_an_empty_subset_is_refused(tmp_path):
     """Writing a package with no classes in it is never what was wanted.
 

@@ -177,8 +177,8 @@ class SchemaMismatch(RuntimeError):
 
 # The three things a generated package records a hash for, as `hashes.json` keys them, and what one
 # of each is called -- "classes"[:-1] is "classe", which is how the first report read.
-_KINDS = ("classes", "structs", "enums")
-_SINGULAR = {"classes": "class", "structs": "struct", "enums": "enum"}
+_KINDS = ("classes", "structs", "enums", "assets")
+_SINGULAR = {"classes": "class", "structs": "struct", "enums": "enum", "assets": "asset"}
 
 
 def _compare(installed, reported):
@@ -251,7 +251,13 @@ def check_schema(raise_on_mismatch: bool = True) -> bool:
         "classes": {entry.class_path: entry.content_hash for entry in response.classes},
         "structs": {entry.name: entry.content_hash for entry in response.structs},
         "enums": {entry.name: entry.content_hash for entry in response.enums},
+        "assets": {},
     }
+    # The asset catalog's identity is each asset's path and class, which the sim answers from its
+    # asset registry. Asked only when some installed package has a catalog to compare.
+    if any(package.hashes.get("assets") for package in packages):
+        assets = _world().get_assets(asset_type="/Script/CoreUObject.Object", include_subclasses=True)
+        reported["assets"] = {asset.path: asset.class_path for asset in assets.assets}
 
     problems = []
     for package in packages:

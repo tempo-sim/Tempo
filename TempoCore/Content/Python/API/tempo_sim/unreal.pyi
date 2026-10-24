@@ -20,6 +20,7 @@ from typing import Any, Callable, Generic, Iterator, TypeVar
 
 _V = TypeVar("_V")
 _T = TypeVar("_T")
+_C = TypeVar("_C", covariant=True)
 
 class Vector:
     X: float
@@ -66,6 +67,18 @@ class Color:
     G: int
     B: int
     def __init__(self, R: int = ..., G: int = ..., B: int = ...) -> None: ...
+
+class AssetRef(Generic[_C]):
+    """A cooked asset, by path, typed by its class.
+
+    Covariant: an AssetRef[Material] goes where an AssetRef[MaterialInterface] is wanted. Built
+    from a path it is AssetRef[Unknown], which is the escape hatch for a path from data.
+    """
+    @property
+    def path(self) -> str: ...
+    @property
+    def class_path(self) -> str: ...
+    def __init__(self, path: str, class_path: str = ...) -> None: ...
 
 class Struct:
     """The base of every generated struct type.

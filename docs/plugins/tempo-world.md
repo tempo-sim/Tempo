@@ -325,7 +325,7 @@ Once you know the actor, component and property, set it with the RPC for its typ
 | `set_transform_property` | `FTransform` |
 | `set_color_property` | `FColor` or `FLinearColor` |
 | `set_class_property` | `UClass*`, `TSubclassOf`, or `TSoftClassPtr` (by name) |
-| `set_asset_property` | asset, `TSoftObjectPtr` (by path/name) |
+| `set_asset_property` | asset, `TSoftObjectPtr` (by path/name); also `TWeakObjectPtr` |
 | `set_actor_property` | `AActor*` (by name) |
 | `set_component_property` | `UActorComponent*` (by name, as `ActorName:ComponentName`) |
 

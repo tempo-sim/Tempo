@@ -224,6 +224,48 @@ def test_a_deferred_read_is_typed_by_what_it_reads(workspace):
 """), "a deferred read must keep the type of what it reads"
 
 
+def test_the_asset_catalog_compiles(workspace):
+    assert check(workspace, """
+    use fixture_classes::assets::game::widgets::W_Main;
+    use tempo_sim::unreal::AssetRef;
+    widget.set_skin(&W_Main)?;
+    // A MeshThing asset is an Object asset, through the same Deref chain as the classes.
+    widget.set_any_asset(&W_Main)?;
+    let _: bool = widget.reskin(&fixture_classes::assets::game::maps::showroom::Lighting)?;
+    let _: AssetRef<MeshThing> = widget.skin()?;
+    // A map and the folder beside it, which Rust keeps in separate namespaces.
+    let _ = &fixture_classes::assets::game::maps::Showroom;
+    let _ = &fixture_classes::assets::engine::basic::_9Grid;
+    // The escape hatch: a path from data, untyped, visibly so.
+    widget.set_skin(&AssetRef::from_path("/Game/FromAConfigFile"))?;
+""") == []
+
+
+def test_a_read_only_propertys_set_function_is_kept(workspace):
+    """A read-only property has no setter, so its Set<Name> function is the way to change it.
+
+    Reserving the setter's name regardless shadowed UStaticMeshComponent::SetStaticMesh -- the one
+    way to set a static mesh -- behind a property that would never use the name.
+    """
+    assert check(workspace, """
+    let _: bool = widget.set_frame(&fixture_classes::assets::game::widgets::W_Main)?;
+    let _ = widget.frame()?;
+""") == []
+
+
+@pytest.mark.parametrize("case,body", [
+    ("an asset that was renamed",
+     "widget.set_skin(&fixture_classes::assets::game::widgets::W_Mian)?;"),
+    ("an asset of the wrong class",
+     "widget.set_skin(&fixture_classes::assets::game::widgets::trims::T_Gold)?;"),
+    ("a bare path", 'widget.set_skin("/Game/Widgets/W_Main")?;'),
+    ("two assets that collide, both left out",
+     "let _ = &fixture_classes::assets::game::widgets::Dup_One;"),
+])
+def test_asset_drift_does_not_compile(workspace, case, body):
+    assert check(workspace, "    " + body), "{} must not compile".format(case)
+
+
 def test_a_function_is_callable(workspace):
     assert check(workspace, """
     widget.refresh()?;

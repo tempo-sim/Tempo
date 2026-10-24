@@ -303,13 +303,41 @@ pub fn check_schema() -> Result<(), TempoError> {
     // classes were stamped. The hashes cover function signatures, so a different request yields
     // different numbers for the same build.
     let reported = crate::tempo_world::describe_classes(Vec::new(), true, true, true)?;
-    compare(reported)
+    let assets = if has_catalog() {
+        catalog(crate::tempo_world::get_assets(ANY_ASSET.to_string(), true, String::new())?)
+    } else {
+        Default::default()
+    };
+    compare(reported, assets)
 }
 
 /// Compare the linked generated classes against the sim's reflection, without blocking.
 pub async fn check_schema_async() -> Result<(), TempoError> {
     let reported = crate::tempo_world::describe_classes_async(Vec::new(), true, true, true).await?;
-    compare(reported)
+    let assets = if has_catalog() {
+        catalog(crate::tempo_world::get_assets_async(ANY_ASSET.to_string(), true, String::new()).await?)
+    } else {
+        Default::default()
+    };
+    compare(reported, assets)
+}
+
+/// The class every asset derives from, which asks the registry for all of them.
+const ANY_ASSET: &str = "/Script/CoreUObject.Object";
+
+/// Whether any linked crate has an asset catalog to compare, which is the only reason to ask the
+/// sim for its assets.
+fn has_catalog() -> bool {
+    crate::unreal::hierarchies()
+        .iter()
+        .any(|hierarchy| !hierarchy.hashes(crate::unreal::EntryKind::Asset).is_empty())
+}
+
+/// The sim's assets as the catalog records them: path to class path.
+fn catalog(
+    response: crate::proto::tempo_world::GetAssetsResponse,
+) -> std::collections::HashMap<String, String> {
+    response.assets.into_iter().map(|asset| (asset.path, asset.class_path)).collect()
 }
 
 /// One entry the sim no longer agrees about.
@@ -328,6 +356,7 @@ impl std::fmt::Display for Finding {
 
 fn compare(
     reported: crate::proto::tempo_world::DescribeClassesResponse,
+    reported_assets: std::collections::HashMap<String, String>,
 ) -> Result<(), TempoError> {
     use crate::unreal::EntryKind;
 
@@ -358,12 +387,18 @@ fn compare(
         .map(|entry| (entry.name.as_str(), entry.content_hash.as_str()))
         .collect();
 
+    let assets: std::collections::HashMap<&str, &str> = reported_assets
+        .iter()
+        .map(|(path, class)| (path.as_str(), class.as_str()))
+        .collect();
+
     let mut findings: Vec<Finding> = Vec::new();
     for hierarchy in &linked {
         for (kind, current) in [
             (EntryKind::Class, &classes),
             (EntryKind::Struct, &structs),
             (EntryKind::Enum, &enums),
+            (EntryKind::Asset, &assets),
         ] {
             for (name, linked_hash) in hierarchy.hashes(kind) {
                 match current.get(*name) {
@@ -473,6 +508,7 @@ mod tests {
                 EntryKind::Class => CLASSES,
                 EntryKind::Struct => STRUCTS,
                 EntryKind::Enum => ENUMS,
+                EntryKind::Asset => &[],
             }
         }
 
@@ -537,13 +573,13 @@ mod tests {
     #[test]
     fn matching_hashes_pass() {
         linked();
-        compare(response(CLASSES)).expect("the same hashes should match");
+        compare(response(CLASSES), Default::default()).expect("the same hashes should match");
     }
 
     #[test]
     fn a_changed_class_is_named() {
         linked();
-        let text = message(compare(response(&[(WIDGET, "SOMETHING-ELSE")])));
+        let text = message(compare(response(&[(WIDGET, "SOMETHING-ELSE")]), Default::default()));
         assert!(text.contains("1 changed"), "{text}");
         assert!(text.contains(WIDGET), "{text}");
     }
@@ -551,7 +587,7 @@ mod tests {
     #[test]
     fn a_class_the_sim_does_not_have_is_a_different_finding() {
         linked();
-        let text = message(compare(response(&[])));
+        let text = message(compare(response(&[]), Default::default()));
         assert!(text.contains("1 not in this sim"), "{text}");
         assert!(text.contains(WIDGET), "{text}");
     }
@@ -564,6 +600,6 @@ mod tests {
         linked();
         let mut reported = Vec::from(CLASSES);
         reported.push(("/Game/Blueprints/BP_Thing.BP_Thing_C", "A-PROJECT-CLASS"));
-        compare(response(&reported)).expect("a class only the sim has is not a problem");
+        compare(response(&reported), Default::default()).expect("a class only the sim has is not a problem");
     }
 }

@@ -65,6 +65,18 @@ impl Drop for Spawned {
     }
 }
 
+/// Make the actor's root movable. A spawned StaticMeshActor's root is Static, which refuses both a
+/// move and a new mesh -- correctly, and with a false return that the tests below are not about.
+fn make_movable(actor: &Spawned) {
+    tempo_sim::tempo_world::set_enum_property(
+        actor.name(),
+        "StaticMeshComponent0".to_string(),
+        "Mobility".to_string(),
+        "Movable".to_string(),
+    )
+    .expect("make the root movable");
+}
+
 fn spawn() -> Spawned {
     // StaticMeshActor is an engine class, so it is present whatever the host project is, and it
     // spawns with no mesh or collision so nothing moves it afterwards.
@@ -234,6 +246,7 @@ fn a_struct_argument_and_result_round_trip() {
 fn an_out_struct_comes_back_with_the_return_value() {
     connect();
     let actor = spawn();
+    make_movable(&actor);
 
     // K2_SetActorLocation's FHitResult had no representation before struct values, so the method
     // returned only its bool. It is now a value, read back by name.
@@ -271,4 +284,19 @@ fn a_batch_defers_reads_and_keeps_order() {
         Ok(())
     })
     .expect("batch");
+}
+
+#[test]
+fn a_catalog_asset_goes_through_a_typed_setter() {
+    use project_classes::assets::engine::basic_shapes::Cube;
+
+    connect();
+    let actor = spawn();
+    make_movable(&actor);
+    let component = actor.actor().static_mesh_component0();
+
+    // An AssetRef<StaticMesh> from the catalog, into the setter that takes one. A material here
+    // would not compile.
+    assert!(component.set_static_mesh(&Cube).expect("SetStaticMesh"));
+    assert_eq!(component.static_mesh().expect("read StaticMesh"), Cube.clone());
 }

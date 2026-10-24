@@ -547,6 +547,11 @@ def test_an_out_struct_comes_back_by_name(sim_server):
     StaticMeshActor = registered().python_class(SPAWNABLE)
     spawned = world.spawn_actor(StaticMeshActor)
     try:
+        # A spawned StaticMeshActor's root is Static, which refuses to move -- and says so with a
+        # false return, which is not what this test is about.
+        root = next(c.name for c in tw.get_all_components(actor=spawned.actor).components
+                    if "StaticMesh" in c.component_type)
+        tw.set_enum_property(actor=spawned.actor, component=root, property="Mobility", value="Movable")
         results = spawned.K2_SetActorLocation(unreal.Vector(100.0, 0.0, 0.0), False, True)
         assert results["ReturnValue"] is True
         hit = results["SweepHitResult"]
@@ -593,6 +598,7 @@ def test_a_batch_carries_calls(actor):
 
 
 def test_a_failed_op_stops_the_batch_when_asked(actor):
+    tw.set_bool_property(actor=actor, property="bCanBeDamaged", value=True)
     response = tw.run_batch(stop_on_failure=True, ops=[
         _set_op(actor, "NoSuchProperty", bool_value=True),
         _set_op(actor, "bCanBeDamaged", bool_value=False),
@@ -603,6 +609,7 @@ def test_a_failed_op_stops_the_batch_when_asked(actor):
 
 
 def test_a_failed_op_does_not_stop_the_batch_by_default(actor):
+    tw.set_bool_property(actor=actor, property="bCanBeDamaged", value=True)
     response = tw.run_batch(ops=[
         _set_op(actor, "NoSuchProperty", bool_value=True),
         _set_op(actor, "bCanBeDamaged", bool_value=False),
@@ -633,6 +640,38 @@ def test_a_typed_batch_defers_and_orders(sim_server):
             assert spawned.bCanBeDamaged is True, "an immediate read sees the queued write"
     finally:
         tw.destroy_actor(actor=spawned.actor)
+
+
+# -- the typed asset catalog -------------------------------------------------------------------------
+
+def _catalog(mount):
+    """One mount point of the installed package's catalog: `_catalog("Engine").BasicShapes.Cube`."""
+    import importlib
+    for package in registered().packages:
+        try:
+            return importlib.import_module("{}.assets.{}".format(package.package, mount))
+        except ImportError:
+            continue
+    pytest.skip("the installed classes carry no asset catalog for {}".format(mount))
+
+
+@requires_classes
+def test_the_catalog_is_what_the_build_cooked(sim_server):
+    cooked = {asset.path: asset.class_path for asset in
+              tw.get_assets(asset_type="/Script/CoreUObject.Object", include_subclasses=True).assets}
+    cube = _catalog("Engine").BasicShapes.Cube
+    assert cooked.get(cube.path) == "/Script/Engine.StaticMesh"
+
+
+@requires_classes
+def test_a_catalog_asset_goes_through_a_typed_setter(root_component):
+    actor, root = root_component
+    StaticMeshComponent = registered().python_class("/Script/Engine.StaticMeshComponent")
+    mesh = StaticMeshComponent(actor, root)
+    cube = _catalog("Engine").BasicShapes.Cube
+
+    assert mesh.SetStaticMesh(cube) is True
+    assert mesh.StaticMesh == cube, "an asset reads back as the AssetRef that was written"
 
 
 # -- Phase 4: filtered discovery, watching, and the asset catalog ---------------------------------

@@ -103,9 +103,87 @@ pub struct Color {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ClassRef(pub String);
 
-/// A reference to an asset, by path or by name.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct AssetRef(pub String);
+/// A reference to a cooked asset, by path, typed by the asset's class.
+///
+/// The generated catalog holds one per asset the build cooked -- `assets::game::vehicles::SM_Truck`
+/// is an `AssetRef<StaticMesh>` -- and an asset-valued property's setter takes the class it
+/// accepts. So a moved or renamed asset is a name that no longer resolves, and a material where a
+/// mesh is wanted does not compile.
+///
+/// It derefs to `AssetRef<Superclass>` along the same chain a class handle does, so `&M_PAINT`, an
+/// `&AssetRef<Material>`, coerces to the `&AssetRef<MaterialInterface>` a setter takes. Built from a
+/// path, it takes whatever class the destination wants: that is the escape hatch for a path from
+/// data, and it is visible where it is written.
+#[repr(transparent)]
+pub struct AssetRef<T = AnyClass> {
+    path: std::borrow::Cow<'static, str>,
+    class: std::marker::PhantomData<fn() -> T>,
+}
+
+/// The class of an asset reference whose class nothing knows -- the default for `AssetRef`.
+pub enum AnyClass {}
+
+impl<T> AssetRef<T> {
+    /// A reference to the asset at this path, for the generated catalog's statics.
+    pub const fn from_static(path: &'static str) -> Self {
+        Self { path: std::borrow::Cow::Borrowed(path), class: std::marker::PhantomData }
+    }
+
+    /// A reference to the asset at a path known only at run time. Nothing checks it until the
+    /// server looks it up.
+    pub fn from_path(path: impl Into<String>) -> Self {
+        Self { path: std::borrow::Cow::Owned(path.into()), class: std::marker::PhantomData }
+    }
+
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+}
+
+// By hand rather than derived, because a derive would demand the same of the class parameter,
+// which is a marker and has none of them.
+impl<T> Clone for AssetRef<T> {
+    fn clone(&self) -> Self {
+        Self { path: self.path.clone(), class: std::marker::PhantomData }
+    }
+}
+
+impl<T> std::fmt::Debug for AssetRef<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "AssetRef({:?})", self.path)
+    }
+}
+
+impl<T> PartialEq for AssetRef<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.path == other.path
+    }
+}
+
+impl<T> Eq for AssetRef<T> {}
+
+impl<T> std::hash::Hash for AssetRef<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.path.hash(state);
+    }
+}
+
+impl<T> ::core::ops::Deref for AssetRef<T>
+where
+    T: Class + ::core::ops::Deref,
+    T::Target: Class + Sized,
+{
+    type Target = AssetRef<T::Target>;
+
+    #[inline]
+    fn deref(&self) -> &AssetRef<T::Target> {
+        // SAFETY: AssetRef is `#[repr(transparent)]` over its path, the class being only a
+        // `PhantomData`, so every AssetRef<_> has one layout and this reinterprets nothing but the
+        // marker. The `T: Deref` bound is the class's own superclass link, which is what makes the
+        // widened class true.
+        unsafe { &*(self as *const Self as *const AssetRef<T::Target>) }
+    }
+}
 
 impl ClassRef {
     /// The class a generated type stands for.
@@ -124,7 +202,7 @@ macro_rules! string_ref {
         impl From<String> for $t { fn from(name: String) -> Self { Self(name) } }
     )* };
 }
-string_ref!(ClassRef, AssetRef);
+string_ref!(ClassRef);
 
 // -- the handle ----------------------------------------------------------------------------------
 
@@ -526,18 +604,39 @@ impl ToValue for ClassRef {
     }
 }
 
-impl FromValue for AssetRef {
+impl<T> FromValue for AssetRef<T> {
     fn from_value(value: &pb::Value) -> Result<Self, TempoError> {
         match variant(value)? {
-            pb::value::Value::AssetValue(name) => Ok(AssetRef(name.clone())),
+            pb::value::Value::AssetValue(path) => Ok(AssetRef::from_path(path.clone())),
             _ => Err(wrong(value, "an asset reference")),
         }
     }
 }
 
-impl ToValue for AssetRef {
+impl<T> ToValue for AssetRef<T> {
     fn to_value(&self) -> pb::Value {
-        pb::Value { value: Some(pb::value::Value::AssetValue(self.0.clone())) }
+        pb::Value { value: Some(pb::value::Value::AssetValue(self.path.to_string())) }
+    }
+}
+
+impl<T> FromValue for Vec<AssetRef<T>> {
+    fn from_value(value: &pb::Value) -> Result<Self, TempoError> {
+        let paths = match variant(value)? {
+            pb::value::Value::AssetArrayValue(inner) => &inner.values,
+            pb::value::Value::AssetSetValue(inner) => &inner.values,
+            _ => return Err(wrong(value, "an asset array")),
+        };
+        Ok(paths.iter().map(|path| AssetRef::from_path(path.clone())).collect())
+    }
+}
+
+impl<T> ToValue for Vec<AssetRef<T>> {
+    fn to_value(&self) -> pb::Value {
+        pb::Value {
+            value: Some(pb::value::Value::AssetArrayValue(pb::StringArray {
+                values: self.iter().map(|asset| asset.path.to_string()).collect(),
+            })),
+        }
     }
 }
 
@@ -618,7 +717,6 @@ macro_rules! name_container {
 
 name_container! {
     ClassArrayValue, ClassSetValue, "a class array", ClassRef;
-    AssetArrayValue, AssetSetValue, "an asset array", AssetRef;
 }
 
 // -- struct values -------------------------------------------------------------------------------
@@ -1749,12 +1847,15 @@ pub trait Hierarchy: Send + Sync {
     fn content_hash(&self, kind: EntryKind, name: &str) -> Option<&'static str>;
 }
 
-/// The three things a generated crate records a hash for.
+/// The things a generated crate records an identity for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EntryKind {
     Class,
     Struct,
     Enum,
+    /// An asset in the catalog, by path. Its "hash" is its class path: one that moved is absent,
+    /// one whose class changed is a different asset under the same name.
+    Asset,
 }
 
 impl EntryKind {
@@ -1764,6 +1865,7 @@ impl EntryKind {
             EntryKind::Class => "class",
             EntryKind::Struct => "struct",
             EntryKind::Enum => "enum",
+            EntryKind::Asset => "asset",
         }
     }
 }

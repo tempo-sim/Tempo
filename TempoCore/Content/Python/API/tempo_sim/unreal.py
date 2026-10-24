@@ -87,6 +87,44 @@ class Color:
     B: int = 0
 
 
+class AssetRef:
+    """A reference to a cooked asset, by path.
+
+    The generated catalog holds one per asset the build cooked -- `assets.Game.Vehicles.SM_Truck` --
+    typed by the asset's class, and an asset-valued property is typed by the class it accepts. So a
+    moved or renamed asset is an attribute that no longer exists, and a material where a mesh is
+    wanted is a type error. Generic in the stub only; at runtime the class is carried for display.
+
+    Constructing one from a path is the escape hatch, for a path that comes from data: it is
+    untyped, and visibly so where it is written.
+    """
+
+    __slots__ = ("path", "class_path")
+
+    def __init__(self, path, class_path=""):
+        object.__setattr__(self, "path", path)
+        object.__setattr__(self, "class_path", class_path)
+
+    def __class_getitem__(cls, item):
+        # AssetRef[StaticMesh] in an annotation that does get evaluated.
+        return cls
+
+    def __setattr__(self, name, value):
+        raise AttributeError("an AssetRef cannot be changed; it names one asset")
+
+    def __eq__(self, other):
+        return isinstance(other, AssetRef) and other.path == self.path
+
+    def __hash__(self):
+        return hash(self.path)
+
+    def __str__(self):
+        return self.path
+
+    def __repr__(self):
+        return "AssetRef({!r})".format(self.path)
+
+
 class Struct:
     """The base of every generated struct: a value, as opposed to a StructProxy's live handle.
 
@@ -739,6 +777,8 @@ _COMPONENT_TYPES = {
 
 def _name_of(value):
     """How a reference-valued property names its target."""
+    if isinstance(value, AssetRef):
+        return value.path
     if isinstance(value, Object):
         return "{}:{}".format(value.actor, value.component) if value.component else value.actor
     if isinstance(value, type) and hasattr(value, "__tempo_class__"):
@@ -854,6 +894,10 @@ def _from_value(message):
     if variant is None:
         return None
 
+    if variant == "asset_value":
+        # An empty path is a property that points at nothing.
+        return AssetRef(message.asset_value) if message.asset_value else None
+
     if variant in _SCALAR_VARIANTS:
         return getattr(message, variant)
 
@@ -878,6 +922,9 @@ def _from_value(message):
         return Transform(Vector(source.location.x, source.location.y, source.location.z),
                          Rotator(source.rotation.r, source.rotation.p, source.rotation.y))
 
+    if variant in ("asset_array_value", "asset_set_value"):
+        assets = [AssetRef(path) for path in getattr(message, variant).values]
+        return set(assets) if variant == "asset_set_value" else assets
     if variant.endswith("_set_value"):
         return set(getattr(message, variant).values)
     if variant.endswith("_array_value"):

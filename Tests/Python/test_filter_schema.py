@@ -351,3 +351,48 @@ def test_a_type_reachable_only_from_a_dropped_member_is_dropped(tmp_path):
 
     filtered = json.loads(out.read_text())
     assert [s["name"] for s in filtered["structs"]] == ["FShipped"]
+
+
+# -- the asset catalog -----------------------------------------------------------------------------
+
+def _report(assets):
+    return [{"path": path, "class": cls} for path, cls in assets]
+
+
+def test_the_catalog_keeps_what_was_cooked_and_nothing_else(schema):
+    classes = {cls["path"]: cls for cls in schema["classes"]}
+    classes["/Script/CoreUObject.Class"] = {"path": "/Script/CoreUObject.Class", "super": ""}
+    classes["/Script/Engine.BlueprintGeneratedClass"] = {
+        "path": "/Script/Engine.BlueprintGeneratedClass", "super": "/Script/CoreUObject.Class"}
+    classes["/Script/Engine.BlueprintCore"] = {"path": "/Script/Engine.BlueprintCore", "super": ""}
+    classes["/Script/Engine.Blueprint"] = {"path": "/Script/Engine.Blueprint",
+                                           "super": "/Script/Engine.BlueprintCore"}
+
+    kept = filter_schema.catalog(_report([
+        ("/Game/Meshes/SM_Rock.SM_Rock", "/Script/Engine.MeshThing"),
+        # What moving an asset leaves behind: keeping it would keep the old name compiling.
+        ("/Game/Old/SM_Rock.SM_Rock", "/Script/CoreUObject.ObjectRedirector"),
+        # A Blueprint is a class, already in the class surface.
+        ("/Game/BP_Truck.BP_Truck_C", "/Script/Engine.BlueprintGeneratedClass"),
+        ("/Game/BP_Truck.BP_Truck", "/Script/Engine.Blueprint"),
+        # World Partition's machinery, which nothing addresses by path.
+        ("/Game/Maps/Open/_Generated_/0ABC.Open", "/Script/Engine.World"),
+        ("/Game/__ExternalActors__/Maps/Open/1/AB/XYZ.XYZ", "/Script/Engine.World"),
+        ("/Game/Maps/Open.Open", "/Script/Engine.World"),
+    ]), classes)
+    assert [asset["path"] for asset in kept] == ["/Game/Maps/Open.Open", "/Game/Meshes/SM_Rock.SM_Rock"]
+
+
+def test_the_catalog_comes_from_the_build(tmp_path, schema, surface):
+    """An editor schema has no catalog; the filtered one takes its assets from the report."""
+    schema_path, report_path, out_path = (tmp_path / name for name in ("s.json", "r.json", "o.json"))
+    schema.pop("assets", None)
+    schema_path.write_text(json.dumps(schema))
+    report_path.write_text(json.dumps({
+        "classes": [cls["path"] for cls in schema["classes"]],
+        "surface": surface,
+        "assets": _report([("/Game/A.A", "/Script/Engine.MeshThing")]),
+        "header": {"schema_version": "3", "engine_version": "5.8", "content_hash": "BUILD"},
+    }))
+    assert filter_schema.main(["filter_schema.py", str(schema_path), str(report_path), str(out_path)]) == 0
+    assert json.loads(out_path.read_text())["assets"] == [{"path": "/Game/A.A", "class": "/Script/Engine.MeshThing"}]

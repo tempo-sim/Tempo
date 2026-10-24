@@ -58,7 +58,6 @@ SIMPLE_TYPES = {
     "transform": RUNTIME + "::Transform",
     "color": RUNTIME + "::Color",
     "class": RUNTIME + "::ClassRef",
-    "asset": RUNTIME + "::AssetRef",
 }
 
 # Element kinds a container has a Value variant for. Anything else makes its container
@@ -70,7 +69,10 @@ CONTAINER_ELEMENTS = frozenset(
 # How each kind is read and written. `plain` is get/set; the others need a runtime helper, either
 # because the Rust type cannot say which Value variant to use or because the orphan rule forbids
 # an impl on a Vec of a generated type.
-PLAIN, OBJECT, ENUMS, OBJECTS, ACTOR_REF, COMPONENT_REF = range(6)
+#
+# ASSET is read as PLAIN is, and written by reference: a setter taking `&AssetRef<MaterialInterface>`
+# is what lets `&M_PAINT`, an `&AssetRef<Material>`, coerce into it through AssetRef's Deref.
+PLAIN, OBJECT, ENUMS, OBJECTS, ACTOR_REF, COMPONENT_REF, ASSET = range(7)
 
 
 class Unsupported(Exception):
@@ -178,6 +180,13 @@ class Generator:
         if kind in ("actor", "component"):
             return self.class_type(type_desc), OBJECT
 
+        if kind == "asset":
+            referenced = self.classes_by_path.get(type_desc.get("class", ""))
+            if referenced is None:
+                # Its class is outside this walk, so the most that can be said is that it is an asset.
+                return RUNTIME + "::AssetRef", ASSET
+            return "{}::AssetRef<{}>".format(RUNTIME, self.path_of(referenced)), ASSET
+
         if kind == "struct":
             name = type_desc.get("struct") or ""
             if name not in self.expressible_structs:
@@ -241,11 +250,15 @@ class Generator:
             self.stats["properties_shadowed"] += 1
             return []
         used.add(getter)
-        # Reserved so a Set<Name> function cannot take the setter's name out from under it.
-        used.add("set_" + getter)
         used.add(getter + "_async")
-        used.add("set_" + getter + "_async")
         used.add("watch_" + getter)
+        if member.get("writable"):
+            # Reserved so a Set<Name> function cannot take the setter's name out from under it.
+            # Only for a writable property: a read-only one has no setter to protect, and its
+            # Set<Name> function is then the one way to change it -- UStaticMeshComponent's
+            # SetStaticMesh, against its read-only StaticMesh.
+            used.add("set_" + getter)
+            used.add("set_" + getter + "_async")
 
         literal = rust_str(name)
         lines = self.doc_lines(member, "    ")
@@ -253,6 +266,7 @@ class Generator:
 
         read, read_async = {
             PLAIN: ("get", "get_async"),
+            ASSET: ("get", "get_async"),
             OBJECT: ("get_object", "get_object_async"),
             ENUMS: ("get_enums", "get_enums_async"),
             OBJECTS: ("get_objects", "get_objects_async"),
@@ -261,7 +275,7 @@ class Generator:
         # A BlueprintGetter is called rather than read through, because it may be the only thing
         # that computes the value.
         accessor = member.get("getter") or ""
-        if accessor and how == PLAIN:
+        if accessor and how in (PLAIN, ASSET):
             lines.append("    pub fn {}(&self) -> Result<{}, {}> {{ self.0.get_via({}) }}"
                          .format(getter, rust, ERROR, rust_str(accessor)))
             lines.append("    pub fn {}_async(&self) -> impl ::core::future::Future<Output = "
@@ -274,7 +288,7 @@ class Generator:
                          "Result<{}, {}>> + '_ {{ self.0.{}({}) }}"
                          .format(getter, rust, ERROR, read_async, literal))
 
-        if how == PLAIN:
+        if how in (PLAIN, ASSET):
             # Streaming is a plain read repeated, so only the plainly-carried kinds offer it.
             lines.append("    pub fn watch_{}(&self) -> Result<impl ::core::iter::Iterator<Item = "
                          "Result<{}, {}>>, {}> {{ self.0.watch({}) }}"
@@ -288,22 +302,25 @@ class Generator:
 
         self.stats["writable"] += 1
         setter = member.get("setter") or ""
-        if setter and how == PLAIN:
+        if setter and how in (PLAIN, ASSET):
             # Both the function and what it calls its argument: CallFunction rejects an unnamed
             # argument and matches the name against the function's own parameters.
             accessor = "{}, {}".format(rust_str(setter),
                                        rust_str(member.get("setter_argument", "")))
-            lines.append("    pub fn set_{}(&self, value: {}) -> Result<(), {}> "
-                         "{{ self.0.set_via({}, value) }}"
-                         .format(getter, rust, ERROR, accessor))
-            lines.append("    pub fn set_{}_async(&self, value: {}) -> impl "
+            parameter, value = ("value: &{}".format(rust), "value.clone()") if how == ASSET \
+                else ("value: {}".format(rust), "value")
+            lines.append("    pub fn set_{}(&self, {}) -> Result<(), {}> "
+                         "{{ self.0.set_via({}, {}) }}"
+                         .format(getter, parameter, ERROR, accessor, value))
+            lines.append("    pub fn set_{}_async(&self, {}) -> impl "
                          "::core::future::Future<Output = Result<(), {}>> + '_ "
-                         "{{ self.0.set_via_async({}, value) }}"
-                         .format(getter, rust, ERROR, accessor))
+                         "{{ self.0.set_via_async({}, {}) }}"
+                         .format(getter, parameter, ERROR, accessor, value))
             return lines
 
         write = {
             PLAIN: ("set", "set_async", "value: {}".format(rust), "value"),
+            ASSET: ("set", "set_async", "value: &{}".format(rust), "value.clone()"),
             OBJECT: self.object_write(member, rust),
             ENUMS: ("set_enums", "set_enums_async", "value: &[{}]".format(rust[4:-1]), "value"),
             OBJECTS: self.objects_write(member, rust),
@@ -457,9 +474,10 @@ class Generator:
         if outputs:
             self.stats["functions_with_out_params"] += 1
 
-        # An object argument is passed by reference: a handle is not a value to hand over.
+        # An object argument is passed by reference: a handle is not a value to hand over. So is an
+        # asset, which is what lets a catalog entry of a derived class coerce into the parameter.
         signature = "".join(
-            ", {}: {}{}".format(argument, "&" if how == OBJECT else "", rust)
+            ", {}: {}{}".format(argument, "&" if how in (OBJECT, ASSET) else "", rust)
             for argument, _, rust, how, _ in inputs)
         args = "vec![{}]".format(", ".join(
             "{}::{}({}, {}{})".format(
@@ -468,7 +486,7 @@ class Generator:
                 else "argument_component" if how == OBJECT
                 else "argument",
                 rust_str(declared),
-                "" if how == OBJECT else "&",
+                "" if how in (OBJECT, ASSET) else "&",
                 argument)
             for argument, declared, _, how, kind in inputs))
         literal = rust_str(function["name"])
@@ -659,7 +677,7 @@ class Generator:
             except Unsupported:
                 self.stats["struct_value_fields_omitted"] += 1
                 continue
-            if how not in (PLAIN, OBJECT):
+            if how not in (PLAIN, OBJECT, ASSET):
                 # A container of enums or of handles needs a decode this runtime does not offer
                 # inside a struct. Leaving it out is safe: a write is a merge, so the member keeps
                 # whatever the destination holds.
@@ -734,7 +752,7 @@ class Generator:
         except Unsupported:
             self.stats["struct_members_omitted"] += 1
             return []
-        if how != PLAIN:
+        if how not in (PLAIN, ASSET):
             # A struct member is addressed through StructRef, which carries only the plain kinds.
             self.stats["struct_members_omitted"] += 1
             return []
@@ -745,9 +763,64 @@ class Generator:
         lines = ["    pub fn {}(&self) -> Result<{}, {}> {{ self.0.get({}) }}".format(
             accessor, rust, ERROR, literal)]
         if member.get("writable"):
+            parameter, value = ("&" + rust, "value.clone()") if how == ASSET else (rust, "value")
             lines.append("    pub fn set_{}(&self, value: {}) -> Result<(), {}> "
-                         "{{ self.0.set({}, value) }}".format(accessor, rust, ERROR, literal))
+                         "{{ self.0.set({}, {}) }}".format(accessor, parameter, ERROR, literal, value))
         return lines
+
+    def emit_assets(self):
+        """The asset catalog: one module per mount point, folders as modules, assets as statics.
+
+        Each static is an `AssetRef` typed by the asset's class, so a moved or renamed asset is a
+        path that no longer resolves and a material where a mesh is wanted does not compile. An
+        asset is named by its package, which is unique within its folder where the object inside it
+        need not be. Rust keeps modules and statics in separate namespaces, so a map beside a folder
+        of the same name needs nothing; two entries that still land on one name are both left out
+        and counted, rather than failing the crate.
+
+        Returns {mount module: text}, empty when the schema has no catalog.
+        """
+        tree = {}
+        for asset in self.schema.get("assets", []):
+            segments = asset["path"].split(".", 1)[0].strip("/").split("/")
+            if len(segments) < 2:
+                self.stats["assets_unplaceable"] += 1
+                continue
+            node = tree.setdefault(segments[0], {"folders": {}, "assets": {}})
+            for folder in segments[1:-1]:
+                node = node["folders"].setdefault(folder, {"folders": {}, "assets": {}})
+            node["assets"].setdefault(segments[-1], []).append(asset)
+
+        def emit(node, indent):
+            lines = []
+            statics, modules = defaultdict(list), defaultdict(list)
+            for name, assets in node["assets"].items():
+                statics[ident(name)].append(assets)
+            for folder in node["folders"]:
+                modules[snake(folder)].append(folder)
+            for name in sorted(modules):
+                if len(modules[name]) > 1:
+                    self.stats["assets_colliding"] += 1
+                    continue
+                lines.append("{}pub mod {} {{".format(indent, name))
+                lines += emit(node["folders"][modules[name][0]], indent + "    ")
+                lines.append("{}}}".format(indent))
+            for name in sorted(statics):
+                if len(statics[name]) > 1 or len(statics[name][0]) > 1:
+                    self.stats["assets_colliding"] += 1
+                    continue
+                asset = statics[name][0][0]
+                referenced = self.classes_by_path.get(asset["class"])
+                asset_type = "{}::AssetRef<{}>".format(RUNTIME, self.path_of(referenced)) \
+                    if referenced else RUNTIME + "::AssetRef"
+                lines.append("{}pub static {}: {} = {}::AssetRef::from_static({});".format(
+                    indent, name, asset_type, RUNTIME, rust_str(asset["path"])))
+                self.stats["assets"] += 1
+            return lines
+
+        header = ["// Generated by gen_rust_classes.py from tempo_schema.json. Do not edit.", ""]
+        return {snake(mount): "\n".join(header + emit(node, "")) + "\n"
+                for mount, node in sorted(tree.items())}
 
     def emit_hierarchy(self):
         """The one table that has to be data rather than code: who derives from whom.
@@ -777,13 +850,15 @@ class Generator:
             "/// and a whole-walk hash is then guaranteed to differ while every class in it is",
             "/// current.",
         ]
-        for name, entries, key in (
-                ("CLASS_HASH", self.schema["classes"], "path"),
-                ("STRUCT_HASH", self.schema.get("structs", []), "name"),
-                ("ENUM_HASH", self.schema.get("enums", []), "name")):
+        for name, entries, key, value in (
+                ("CLASS_HASH", self.schema["classes"], "path", "content_hash"),
+                ("STRUCT_HASH", self.schema.get("structs", []), "name", "content_hash"),
+                ("ENUM_HASH", self.schema.get("enums", []), "name", "content_hash"),
+                # An asset's identity is its path and class, so its class is what is compared.
+                ("ASSET_HASH", self.schema.get("assets", []), "path", "class")):
             lines.append("static {}: &[(&str, &str)] = &[".format(name))
             lines += ["    ({}, {}),".format(rust_str(entry[key]),
-                                             rust_str(entry.get("content_hash", "")))
+                                             rust_str(entry.get(value, "")))
                       for entry in sorted(entries, key=lambda e: e[key])]
             lines += ["];", ""]
         lines += [
@@ -815,6 +890,7 @@ class Generator:
             "            ::tempo_sim::unreal::EntryKind::Class => CLASS_HASH,",
             "            ::tempo_sim::unreal::EntryKind::Struct => STRUCT_HASH,",
             "            ::tempo_sim::unreal::EntryKind::Enum => ENUM_HASH,",
+            "            ::tempo_sim::unreal::EntryKind::Asset => ASSET_HASH,",
             "        }",
             "    }",
             "",
@@ -864,6 +940,18 @@ def generate(schema_path, output_dir, version="0.0.0", docs=False, in_crate=Fals
     write_file(os.path.join(source, "structs.rs"), generator.emit_structs())
     write_file(os.path.join(source, "hierarchy.rs"), generator.emit_hierarchy())
 
+    # The asset catalog, when the schema has one -- only a schema narrowed against a packaged build
+    # does, since the catalog is of what was cooked.
+    asset_modules = generator.emit_assets()
+    for mount, text in asset_modules.items():
+        write_file(os.path.join(source, "assets", mount + ".rs"), text)
+    if asset_modules:
+        write_file(os.path.join(source, "assets.rs"),
+                   "// Generated by gen_rust_classes.py from tempo_schema.json. Do not edit.\n\n"
+                   "//! The assets this build cooked, by mount point.\n\n"
+                   + "".join("pub mod {};\n".format(mount) for mount in sorted(asset_modules)))
+    assets_line = "pub mod assets;\n" if asset_modules else ""
+
     # A module can also be a prefix of another, because Unreal's mount points flatten onto the
     # same Rust names: /Script/Engine wants to be `engine`, and so does /Engine/EditorResources.
     # Rust is happy for a module to hold both items and submodules, so no disambiguation is needed
@@ -893,9 +981,12 @@ def generate(schema_path, output_dir, version="0.0.0", docs=False, in_crate=Fals
     # inside tempo-sim too. So the published subset (TYPED_WORLD_API_PLAN.md section 16.4) needs no
     # second emitter -- only a different root file and no manifest of its own.
     if in_crate:
-        write_file(os.path.join(source, "mod.rs"), MOD_RS)
+        write_file(os.path.join(source, "mod.rs"), MOD_RS.replace("pub mod classes;\n",
+                                                                   assets_line + "pub mod classes;\n"))
     else:
-        write_file(os.path.join(source, "lib.rs"), LIB_RS.format(crate=crate))
+        write_file(os.path.join(source, "lib.rs"),
+                   LIB_RS.format(crate=crate).replace("pub mod classes;\n",
+                                                      assets_line + "pub mod classes;\n"))
         write_file(os.path.join(output_dir, "Cargo.toml"),
                    CARGO_TOML.format(crate=crate, version=version))
 
@@ -913,8 +1004,9 @@ LIB_RS = """// Generated by gen_rust_classes.py from tempo_schema.json. Do not e
 //! Everything is in Unreal's own units -- centimetres, degrees, left-handed. See
 //! `tempo_sim::unreal`.
 
-// Unreal's names are kept as Unreal spells them, so the types do not read as Rust types would.
-#![allow(non_camel_case_types, non_snake_case)]
+// Unreal's names are kept as Unreal spells them, so the types do not read as Rust types would --
+// an asset static included, which is named as the asset is.
+#![allow(non_camel_case_types, non_snake_case, non_upper_case_globals)]
 // A generated surface describes the whole build; a scenario uses a little of it.
 #![allow(dead_code)]
 
@@ -991,6 +1083,8 @@ def main(argv):
         stats["struct_members"], stats["struct_members_omitted"]))
     print("omitted            {} properties, {} functions".format(
         stats["properties_omitted"], stats["functions_omitted"]))
+    print("assets             {} ({} left out colliding)".format(
+        stats["assets"], stats["assets_colliding"]))
     print("unnameable setters {} (property demoted to read-only)".format(
         stats["setters_unresolvable"]))
     print("name taken already {} properties, {} functions, {} components".format(

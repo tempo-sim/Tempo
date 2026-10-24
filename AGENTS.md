@@ -149,9 +149,11 @@ fails under Pyright instead of at runtime. See `TYPED_WORLD_API_PLAN.md`.
   (`get_actors`, `get_actor`, `spawn_actor`, `spawn_actor_deferred`, `batch`, `check_schema`).
   `tempo_sim::unreal` / `tempo_sim::world` are the Rust mirrors, hand-written in the same
   `Content/Rust/API/src` the generator otherwise owns (whitelisted in its `.gitignore`, as
-  `context.rs` is). The one `unsafe` in the typed Rust surface is `unreal::upcast`, behind an
-  `unsafe trait Class` whose "I am a `#[repr(transparent)]` newtype over `ObjectRef`" contract only
-  the generator satisfies; generated Rust contains none.
+  `context.rs` is). The typed Rust surface has two `unsafe` reinterpretations, both of a
+  `#[repr(transparent)]` newtype: `unreal::upcast`, behind an `unsafe trait Class` whose "I am a
+  newtype over `ObjectRef`" contract only the generator satisfies, and `AssetRef`'s `Deref` to its
+  superclass's `AssetRef`, sound because the class is only a `PhantomData`. Generated Rust contains
+  none.
 - **`subset_schema.py`** narrows the same schema to the modules that ship in *every* build --
   the engine's always-loaded ones plus Tempo's own, derived from the `.uplugin` descriptors -- so
   those classes can go out in the published `tempo-sim` wheel and crate rather than only beside a
@@ -159,6 +161,11 @@ fails under Pyright instead of at runtime. See `TYPED_WORLD_API_PLAN.md`.
   can leave a class's superclass out of the document, and both generators read a dangling
   superclass as "this class is a root", silently stripping every inherited member while the stubs
   still type-check. See `TYPED_WORLD_API_PLAN.md` §16.
+- **The asset catalog comes from the packaged build alone.** `query_packaged_classes.py` asks the
+  sim for every cooked asset and `filter_schema.py` writes them into the filtered schema's
+  `assets`, less redirectors, Blueprints and World Partition's generated packages; both generators
+  emit an `assets` module per mount point, with `AssetRef` typed by class. An editor's registry
+  lists what the cook dropped, so a schema not narrowed against a build has no catalog at all.
 - **`diff_schema.py`** reports release-to-release drift and exits non-zero on anything breaking.
 - **Drift is checked per entry, not per build.** Each class, struct and enum carries its own hash
   (`HashClass`/`HashStruct`/`HashEnum`; the header's whole-walk number is those folded together), and
