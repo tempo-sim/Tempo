@@ -28,7 +28,7 @@ import re
 import sys
 from collections import defaultdict
 
-from gen_classes_common import resolve_setters
+from gen_classes_common import enumerator_members, resolve_setters
 
 # Where the hand-written runtime lives. Generated code takes its base class and value types from
 # here and nothing else.
@@ -733,14 +733,10 @@ class Generator:
         for enum in sorted(self.schema.get("enums", []), key=lambda e: e["name"]):
             lines.append("")
             lines.append("class {}(str, Enum):".format(identifier(enum["name"])))
-            emitted = set()
-            for enumerator in enum.get("enumerators", []):
-                member = identifier(enumerator)
-                if member in emitted:
-                    continue
-                emitted.add(member)
-                lines.append('    {} = "{}"'.format(member, enumerator))
-            if not emitted:
+            members = enumerator_members(enum.get("enumerators", []), identifier)
+            for member, authored in members:
+                lines.append("    {} = {}".format(member, json.dumps(authored)))
+            if not members:
                 lines.append("    pass")
         self.stats["enums"] = len(self.schema.get("enums", []))
         self.stats["structs"] = len(self.schema.get("structs", []))

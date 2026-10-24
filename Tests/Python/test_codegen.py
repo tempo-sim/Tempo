@@ -187,6 +187,23 @@ def ok(w: E.Widget) -> None:
     assert errors == [], "valid usage should type-check cleanly: {}".format(errors)
 
 
+def test_every_enumerator_has_a_member(generated):
+    """Symbol-only enumerators are numbered, and names that mangle alike are all kept."""
+    import importlib.util
+    path = str(generated / DIST / "enums.py")
+    spec = importlib.util.spec_from_file_location("fixture_enums", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert {member.name: member.value for member in module.EWidgetComparison} == {
+        "Enumerator0": "==",
+        "Enumerator1": "<",
+        "Enumerator1_2": "Enumerator1",
+        "Less_Than": "Less Than",
+        "Less_Than_4": "Less_Than",
+        "Greater": "Greater",
+    }
+
+
 def test_struct_values_type_check(generated, tmp_path):
     errors = check(generated, """
 import fixture_classes.Engine as E

@@ -69,3 +69,31 @@ def resolve_setters(schema):
             member["writable"] = False
             demoted += 1
     return demoted
+
+
+def enumerator_members(enumerators, legalize):
+    """Each enumerator's member name, paired with the authored name the wire carries.
+
+    `legalize` is the target language's identifier mangling, which makes every `\\W` an
+    underscore. That is right for `EKeys::Left Shift` and wrong for an enumerator spelled only in
+    symbols: `==`, `<` and `!=` come out as runs of underscores, which say nothing, collide with each
+    other, and in Rust's case include `_`, which is not an identifier at all. Those are named
+    `Enumerator<N>` after their position instead.
+
+    Every enumerator gets a member. A name already taken -- two enumerators that mangle alike, or
+    a real `Enumerator2` -- is suffixed with the later one's position, rather than the later one
+    being dropped: a dropped enumerator is a value the sim can report and the client cannot read.
+    """
+    members, taken = [], set()
+    for index, authored in enumerate(enumerators):
+        if any(character.isalnum() for character in authored):
+            name = legalize(authored)
+        else:
+            name = "Enumerator{}".format(index)
+        candidate, suffix = name, index
+        while candidate in taken:
+            candidate = "{}_{}".format(name, suffix)
+            suffix += 1
+        taken.add(candidate)
+        members.append((candidate, authored))
+    return members

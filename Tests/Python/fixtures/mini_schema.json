@@ -620,6 +620,18 @@
     "Simple",
     "Advanced"
    ]
+  },
+  {
+   "name": "EWidgetComparison",
+   "content_hash": "FIXTURE-ENUM-EWIDGETCOMPARISON",
+   "enumerators": [
+    "==",
+    "<",
+    "Enumerator1",
+    "Less Than",
+    "Less_Than",
+    "Greater"
+   ]
   }
  ],
  "assets": [

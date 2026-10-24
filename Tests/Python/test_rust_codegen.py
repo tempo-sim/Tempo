@@ -112,8 +112,12 @@ def check(workspace, body):
     result = subprocess.run(
         [cargo, "build", "--quiet", "--message-format=short"],
         cwd=str(snippet), capture_output=True, text=True, env=environment)
-    return [line for line in result.stderr.splitlines()
-            if line.startswith("src/main.rs") and ": error" in line]
+    errors = [line for line in result.stderr.splitlines()
+              if line.startswith("src/main.rs") and ": error" in line]
+    # A generated crate that does not build never gets as far as the snippet, which would
+    # otherwise read as a snippet with no errors.
+    assert errors or result.returncode == 0, result.stderr
+    return errors
 
 
 # -- the surface exists and is typed -------------------------------------------------------------
@@ -238,6 +242,31 @@ def test_the_asset_catalog_compiles(workspace):
     let _ = &fixture_classes::assets::engine::basic::_9Grid;
     // The escape hatch: a path from data, untyped, visibly so.
     widget.set_skin(&AssetRef::from_path("/Game/FromAConfigFile"))?;
+""") == []
+
+
+def test_every_enumerator_has_a_variant(workspace):
+    """Symbol-only enumerators are numbered, and names that mangle alike are all kept.
+
+    `<` once mangled to `_`, which is not a Rust identifier, so the whole crate failed to build;
+    and of two enumerators mangling to one name the second was dropped, leaving a value the sim
+    can report that the client could not decode.
+    """
+    assert check(workspace, """
+    use fixture_classes::enums::EWidgetComparison;
+    use tempo_sim::unreal::UnrealEnum;
+    let named = [
+        (EWidgetComparison::Enumerator0, "=="),
+        (EWidgetComparison::Enumerator1, "<"),
+        (EWidgetComparison::Enumerator1_2, "Enumerator1"),
+        (EWidgetComparison::Less_Than, "Less Than"),
+        (EWidgetComparison::Less_Than_4, "Less_Than"),
+        (EWidgetComparison::Greater, "Greater"),
+    ];
+    for (variant, authored) in named {
+        assert_eq!(variant.unreal_name(), authored);
+        assert_eq!(EWidgetComparison::from_unreal_name(authored)?, variant);
+    }
 """) == []
 
 
