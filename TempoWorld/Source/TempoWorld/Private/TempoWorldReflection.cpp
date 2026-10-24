@@ -5,6 +5,8 @@
 #include "Components/ActorComponent.h"
 #include "Engine/LatentActionManager.h"
 #include "GameFramework/Actor.h"
+#include "Misc/ScopeExit.h"
+#include "Misc/ScopeRWLock.h"
 
 namespace TempoWorldReflection
 {
@@ -68,13 +70,17 @@ namespace
 		}
 	}
 
-	// Whether a Value has a repeated variant for this element kind. Mirrors the array and set cases
-	// of SetValueOnTarget: the scalar kinds and the object references, and nothing else -- there is
-	// no repeated variant for a vector, a transform, a struct, or a nested container.
-	bool HasRepeatedValueVariant(EValueKind Kind)
+	// Whether a Value has a repeated variant for this element. Mirrors the array and set cases of
+	// SetValueOnTarget: the scalar kinds, the object references, and -- in an array, not a set -- a
+	// struct that is itself value-expressible. There is no repeated variant for a vector, a
+	// transform or a nested container, and none for a set of structs, which needs a hash function
+	// reflection cannot see.
+	bool HasRepeatedValueVariant(const FTypeInfo& Element, bool bIsArray)
 	{
-		switch (Kind)
+		switch (Element.Kind)
 		{
+		case EValueKind::Struct:
+			return bIsArray && IsStructValueExpressible(Element.Struct);
 		case EValueKind::Bool:
 		case EValueKind::Int:
 		case EValueKind::Int64:
@@ -186,18 +192,86 @@ bool FTypeInfo::IsValueExpressible() const
 	{
 	case EValueKind::Unsupported:
 		return false;
-	// Reachable only through its members, by nested address.
+	// A StructValue when every member can be carried; otherwise only through its members.
 	case EValueKind::Struct:
-		return false;
+		return IsStructValueExpressible(Struct);
 	// A Value has no map variant at all. A map's entries are reachable as "MyMap[key]".
 	case EValueKind::Map:
 		return false;
 	case EValueKind::Array:
 	case EValueKind::Set:
-		return ElementType.IsValid() && HasRepeatedValueVariant(ElementType->Kind);
+		return ElementType.IsValid() && HasRepeatedValueVariant(*ElementType, Kind == EValueKind::Array);
 	default:
 		return true;
 	}
+}
+
+namespace
+{
+	// The structs whose expressibility is being decided on this thread, innermost last.
+	//
+	// A struct can reach itself through an array of its own type, so while one is being decided a
+	// nested mention of it is answered "yes" provisionally rather than recursing forever. If any
+	// other member fails, the outer answer is false regardless.
+	thread_local TArray<const UScriptStruct*> StructsInProgress;
+
+	bool ComputeStructValueExpressible(const UScriptStruct* Struct)
+	{
+		StructsInProgress.Push(Struct);
+		ON_SCOPE_EXIT { StructsInProgress.Pop(); };
+
+		bool bAnyMember = false;
+		// Inherited members included: a value is the whole struct, and FVector_NetQuantize's X, Y
+		// and Z are FVector's.
+		for (TFieldIterator<FProperty> It(Struct); It; ++It)
+		{
+			bAnyMember = true;
+			if (!ClassifyProperty(*It).IsValueExpressible())
+			{
+				return false;
+			}
+		}
+		return bAnyMember;
+	}
+}
+
+bool IsStructValueExpressible(const UScriptStruct* Struct)
+{
+	if (!Struct)
+	{
+		return false;
+	}
+	if (StructsInProgress.Contains(Struct))
+	{
+		return true;
+	}
+
+	// Native structs cannot change under a running process, and the classifier runs on every read,
+	// so their answer is computed once. A UUserDefinedStruct can be recompiled in place in an
+	// editor, keeping its pointer and changing its members, so it is decided afresh each time.
+	//
+	// Only an answer decided from the top is cached. One decided inside another struct's decision
+	// may rest on that struct's provisional "yes", which the outer decision can still overturn.
+	const bool bNative = (Struct->StructFlags & STRUCT_Native) != 0;
+	const bool bCacheable = bNative && StructsInProgress.IsEmpty();
+
+	static FRWLock CacheLock;
+	static TMap<const UScriptStruct*, bool> Cache;
+	if (bNative)
+	{
+		FReadScopeLock ReadLock(CacheLock);
+		if (const bool* Found = Cache.Find(Struct))
+		{
+			return *Found;
+		}
+	}
+	const bool bExpressible = ComputeStructValueExpressible(Struct);
+	if (bCacheable)
+	{
+		FWriteScopeLock WriteLock(CacheLock);
+		Cache.Add(Struct, bExpressible);
+	}
+	return bExpressible;
 }
 
 bool HasResolvedType(const FProperty* Property)
@@ -346,8 +420,10 @@ FTypeInfo ClassifyProperty(const FProperty* Property)
 		}
 	}
 	// Object references. FClassProperty derives from FObjectProperty and FSoftClassProperty from
-	// FSoftObjectProperty, so the class forms are identified before the object forms. Weak, lazy and
-	// interface properties reach neither branch and fall through to unsupported, as they always have.
+	// FSoftObjectProperty, so the class forms are identified before the object forms. A weak
+	// reference is the same kind of value as a hard one -- something named, or nothing -- and is
+	// what FHitResult holds its component and physical material in. Lazy and interface properties
+	// reach none of these branches and fall through to unsupported.
 	else if (const FClassProperty* ClassProperty = CastField<FClassProperty>(Property))
 	{
 		FillReference(Info, ClassProperty, ClassProperty->MetaClass, /*bIsClassProperty*/ true);
@@ -363,6 +439,10 @@ FTypeInfo ClassifyProperty(const FProperty* Property)
 	else if (const FSoftObjectProperty* SoftObjectProperty = CastField<FSoftObjectProperty>(Property))
 	{
 		FillReference(Info, SoftObjectProperty, SoftObjectProperty->PropertyClass, /*bIsClassProperty*/ false);
+	}
+	else if (const FWeakObjectProperty* WeakObjectProperty = CastField<FWeakObjectProperty>(Property))
+	{
+		FillReference(Info, WeakObjectProperty, WeakObjectProperty->PropertyClass, /*bIsClassProperty*/ false);
 	}
 	else if (const FStructProperty* StructProperty = CastField<FStructProperty>(Property))
 	{
@@ -601,6 +681,99 @@ EAddressError ResolveNestedPropertyForRead(const void* Container, const FPropert
 		// ValueProp's Offset_Internal is MapLayout.ValueOffset, so the pair pointer is what
 		// ContainerPtrToValuePtr expects -- the offset is applied exactly once.
 		return ResolveNestedPropertyForRead(MapHelper.GetPairPtr(PairIndex), MapProperty->ValueProp,
+			RemainingName, OutContainer, OutProperty, OutError);
+	}
+
+	OutError = FString::Printf(TEXT("Inner property '%s' was specified on property '%s' (type '%s'), but it has no inner properties"),
+		*PropertyName, *Property->GetName(), *Property->GetCPPType());
+	return EAddressError::Invalid;
+}
+
+EAddressError ResolveNestedPropertyForWrite(void* Container, FProperty* Property,
+	const FString& PropertyName, void*& OutContainer, FProperty*& OutProperty, FString& OutError)
+{
+	if (!Container || !Property)
+	{
+		OutError = TEXT("no property to address");
+		return EAddressError::Invalid;
+	}
+
+	if (PropertyName.IsEmpty())
+	{
+		OutContainer = Container;
+		OutProperty = Property;
+		return EAddressError::None;
+	}
+
+	void* ValuePtr = Property->ContainerPtrToValuePtr<void>(Container);
+
+	FString RemainingName = PropertyName;
+	const FString FirstName = SplitPropertyAddress(RemainingName);
+
+	if (const FStructProperty* StructProperty = CastField<FStructProperty>(Property))
+	{
+		for (FProperty* Inner = StructProperty->Struct->PropertyLink; Inner; Inner = Inner->PropertyLinkNext)
+		{
+			if (Inner->GetAuthoredName() == FirstName)
+			{
+				return ResolveNestedPropertyForWrite(ValuePtr, Inner, RemainingName, OutContainer, OutProperty, OutError);
+			}
+		}
+		OutError = FString::Printf(TEXT("No matching inner property '%s' found on struct property '%s' (type '%s')"),
+			*FirstName, *Property->GetName(), *StructProperty->Struct->GetStructCPPName());
+		return EAddressError::NotFound;
+	}
+
+	if (const FArrayProperty* ArrayProperty = CastField<FArrayProperty>(Property))
+	{
+		if (FirstName.IsEmpty() || !FirstName.IsNumeric() || FirstName.Contains(TEXT(".")) || FirstName.Contains(TEXT("-")))
+		{
+			OutError = FString::Printf(TEXT("Array index must be a non-negative integer for array property '%s' (got '%s')"),
+				*Property->GetName(), *FirstName);
+			return EAddressError::Invalid;
+		}
+		const int32 ElementIndex = FCString::Atoi(*FirstName);
+		FScriptArrayHelper ArrayHelper{ ArrayProperty, ValuePtr };
+		if (ElementIndex > ArrayHelper.Num())
+		{
+			OutError = FString::Printf(TEXT("Array index %d is greater than length %d of array property '%s' (use index == length to append)"),
+				ElementIndex, ArrayHelper.Num(), *Property->GetName());
+			return EAddressError::OutOfRange;
+		}
+		if (ElementIndex == ArrayHelper.Num())
+		{
+			ArrayHelper.AddValue();
+		}
+		return ResolveNestedPropertyForWrite(ArrayHelper.GetRawPtr(ElementIndex), ArrayProperty->Inner,
+			RemainingName, OutContainer, OutProperty, OutError);
+	}
+
+	if (const FMapProperty* MapProperty = CastField<FMapProperty>(Property))
+	{
+		FScriptMapHelper MapHelper{ MapProperty, ValuePtr };
+		FProperty* KeyProp = MapProperty->KeyProp;
+
+		void* KeyTemp = FMemory_Alloca(KeyProp->GetSize());
+		KeyProp->InitializeValue(KeyTemp);
+		const TCHAR* ParseResult = KeyProp->ImportText_Direct(*FirstName, KeyTemp, nullptr, PPF_None);
+		if (ParseResult == nullptr)
+		{
+			KeyProp->DestroyValue(KeyTemp);
+			OutError = FString::Printf(TEXT("Failed to parse map key '%s' for map property '%s'"),
+				*FirstName, *Property->GetName());
+			return EAddressError::Invalid;
+		}
+		int32 PairIndex = MapHelper.FindMapIndexWithKey(KeyTemp);
+		if (PairIndex == INDEX_NONE)
+		{
+			PairIndex = MapHelper.AddDefaultValue_Invalid_NeedsRehash();
+			KeyProp->CopyCompleteValue(MapHelper.GetKeyPtr(PairIndex), KeyTemp);
+			MapHelper.Rehash();
+		}
+		KeyProp->DestroyValue(KeyTemp);
+
+		// As on the read path: ValueProp's offset is applied to the pair pointer exactly once.
+		return ResolveNestedPropertyForWrite(MapHelper.GetPairPtr(PairIndex), MapProperty->ValueProp,
 			RemainingName, OutContainer, OutProperty, OutError);
 	}
 

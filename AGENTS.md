@@ -407,6 +407,10 @@ matrix entry in `tempo_build_and_package.yml` (and, for Python, a line in `pytes
   calls its argument. `gen_classes_common.resolve_setters` joins the two halves the schema keeps
   apart; do not resolve it per consumer, or the stub and the runtime will disagree about which
   properties are writable.
+- **A proto `map<>` field does not link.** Protobuf's map internals call Abseil logging symbols that
+  the shared `tempogrpc` library does not export, so the module using one fails at link time with
+  undefined `absl_tempo::...::log_internal` symbols. Use a `repeated` name/value message (as
+  `StructValue.fields` does), or add the exports in TempoThirdParty's `exports.def`.
 - `MIGRATION_v0.1.0.md` documents the previous → v0.1.0 module consolidation (e.g. TempoCamera+TempoLidar →
   TempoSensors); proto packages were renamed, so old external clients must regenerate.
 - Half-pixel offset: the distortion-map UV loop in `TempoCamera.cpp` must use `U + 0.5`

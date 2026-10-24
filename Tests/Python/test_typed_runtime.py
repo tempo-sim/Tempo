@@ -132,11 +132,39 @@ def test_struct_property_is_addressed_member_by_member(classes, wire):
     assert wire["reads"] == [("MyActor", "", "Settings.Scale")]
 
 
-def test_struct_cannot_be_assigned_whole(classes, wire):
+def test_an_inexpressible_struct_cannot_be_assigned_whole(classes, wire):
     widget = classes.Widget("MyActor")
+    # FWidgetLimits holds a map, so no one Value carries it; it is reachable member by member only.
     with pytest.raises(AttributeError, match="members"):
-        widget.Settings = None
+        widget.Limits = None
     assert wire["writes"] == []
+
+
+def test_an_expressible_struct_is_assigned_whole(classes, wire):
+    import fixture_classes.structs as structs
+
+    widget = classes.Widget("MyActor")
+    settings = structs.FWidgetSettings(Scale=2.0)
+    widget.Settings = settings
+    assert wire["writes"] == [("MyActor", "", "Settings", settings)]
+
+
+def test_reading_an_expressible_struct_still_returns_a_live_proxy(classes, wire):
+    """A copy would turn `widget.Settings.Scale = 2.0` into a write to nothing."""
+    import tempo_sim.unreal as unreal
+
+    widget = classes.Widget("MyActor")
+    assert isinstance(widget.Settings, unreal.StructProxy)
+    widget.Settings.Inner.Offset = unreal.Vector(1.0, 2.0, 3.0)
+    assert wire["writes"] == [("MyActor", "", "Settings.Inner.Offset", unreal.Vector(1.0, 2.0, 3.0))]
+
+
+def test_a_member_nothing_can_read_is_not_offered(classes, wire):
+    """An array of vectors has no Value variant and is not a struct to reach into."""
+    widget = classes.Widget("MyActor")
+    with pytest.raises(AttributeError):
+        _ = widget.Waypoints
+    assert wire["reads"] == []
 
 
 def test_unknown_struct_member_is_refused(classes, wire):
@@ -606,12 +634,12 @@ def test_watching_an_unknown_property_fails_immediately(classes, monkeypatch):
     assert opened == []
 
 
-def test_a_struct_cannot_be_watched(classes, monkeypatch):
+def test_an_inexpressible_struct_cannot_be_watched(classes, monkeypatch):
     import tempo_sim.unreal as unreal
     monkeypatch.setattr(unreal, "_world", lambda: None)
     widget = classes.Widget("MyActor")
     with pytest.raises(AttributeError, match="not readable as one value"):
-        next(widget.watch("Settings"))
+        next(widget.watch("Limits"))
 
 
 @pytest.fixture
@@ -697,7 +725,7 @@ def describing(monkeypatch):
 
     class Header:
         engine_version = "5.8"
-        schema_version = "2"
+        schema_version = "3"
 
     def describe(classes=None, structs=None, enums=None):
         class Response:
@@ -806,6 +834,138 @@ def test_a_mismatch_can_warn_instead_of_raising(classes, describing):
     with pytest.warns(UserWarning, match="do not match this sim"):
         assert world.check_schema(raise_on_mismatch=False) is False
 
+# -- struct values --------------------------------------------------------------------------------
+
+
+def test_a_struct_value_names_its_struct_and_carries_only_what_it_was_given(classes):
+    import tempo_sim.unreal as unreal
+    import fixture_classes.structs as structs
+
+    message = unreal._to_value("struct_value", structs.FWidgetSettings(Scale=2.0))
+    assert message.struct_value.struct_name == "FWidgetSettings"
+    # A write is a merge, so what was not given must not be sent: sending a default would clobber
+    # the destination's own value.
+    assert [field.name for field in message.struct_value.fields] == ["Scale"]
+    assert message.struct_value.fields[0].value.float_value == 2.0
+
+
+def test_struct_values_round_trip_with_nesting(classes):
+    import tempo_sim.unreal as unreal
+    import fixture_classes.structs as structs
+
+    original = structs.FWidgetSettings(Scale=1.5,
+                                       Inner=structs.FWidgetTrim(Offset=unreal.Vector(1.0, 2.0, 3.0)))
+    back = unreal._from_value(unreal._to_value("struct_value", original))
+    # The generated value type, not a bare one: it is what the stub promised a read returns.
+    assert type(back) is structs.FWidgetSettings
+    assert type(back.Inner) is structs.FWidgetTrim
+    assert back == original
+
+
+def test_an_array_of_struct_values_round_trips(classes):
+    import tempo_sim.unreal as unreal
+    import fixture_classes.structs as structs
+
+    history = [structs.FWidgetSettings(Scale=1.0), structs.FWidgetSettings(Scale=2.0)]
+    assert unreal._from_value(unreal._to_value("struct_array_value", history)) == history
+
+
+def test_a_read_value_carries_its_read_only_members(classes):
+    """The server reports every member. A scenario cannot set Label, but it can read one back."""
+    import tempo_sim.unreal as unreal
+    import tempo_sim.TempoWorld.WorldControl_pb2 as WorldControl
+
+    message = WorldControl.Value()
+    message.struct_value.struct_name = "FWidgetSettings"
+    field = message.struct_value.fields.add()
+    field.name = "Label"
+    field.value.string_value = "from the sim"
+    assert unreal._from_value(message).Label == "from the sim"
+
+
+@pytest.mark.parametrize("case,build", [
+    ("an unknown member", lambda s: s.FWidgetSettings(Scal=1.0)),
+    ("a read-only member", lambda s: s.FWidgetSettings(Label="x")),
+    ("a positional argument", lambda s: s.FWidgetSettings(1.0)),
+])
+def test_a_struct_value_is_checked_as_it_is_built(classes, case, build):
+    import fixture_classes.structs as structs
+    with pytest.raises((AttributeError, TypeError)):
+        build(structs)
+
+
+def test_a_member_that_was_not_given_says_so(classes):
+    import fixture_classes.structs as structs
+    with pytest.raises(AttributeError, match="not set"):
+        _ = structs.FWidgetSettings(Scale=1.0).Inner
+
+
+def test_a_struct_the_package_does_not_declare_still_reads(classes):
+    import tempo_sim.unreal as unreal
+    import tempo_sim.TempoWorld.WorldControl_pb2 as WorldControl
+
+    message = WorldControl.Value()
+    message.struct_value.struct_name = "FFromANewerSim"
+    field = message.struct_value.fields.add()
+    field.name = "Count"
+    field.value.int_value = 3
+    value = unreal._from_value(message)
+    assert isinstance(value, unreal.Struct)
+    assert value.Count == 3
+
+
+def test_a_function_takes_and_returns_a_struct_value(classes, fake_calls):
+    import fixture_classes.structs as structs
+    import tempo_sim.TempoWorld.WorldControl_pb2 as WorldControl
+
+    returned = WorldControl.Value()
+    returned.struct_value.struct_name = "FWidgetSettings"
+    field = returned.struct_value.fields.add()
+    field.name = "Scale"
+    field.value.float_value = 4.0
+    fake_calls["results"] = [WorldControl.FunctionResult(name="ReturnValue", typed_value=returned)]
+
+    widget = classes.Widget("MyActor")
+    result = widget.Configure(structs.FWidgetSettings(Scale=2.0))
+    argument = fake_calls["calls"][0]["args"][0]
+    assert argument["name"] == "NewSettings"
+    assert argument["value"].struct_value.fields[0].value.float_value == 2.0
+    assert result == structs.FWidgetSettings(Scale=4.0)
+
+
+@pytest.mark.parametrize("name", ["GetLimits", "ApplyLimits"])
+def test_a_function_whose_struct_cannot_travel_is_not_offered(classes, fake_calls, name):
+    widget = classes.Widget("MyActor")
+    with pytest.raises(AttributeError):
+        getattr(widget, name)
+
+
+def test_a_proxy_passed_as_a_value_is_read_first(classes, monkeypatch):
+    """`f(truck.Settings)` passes what the property holds, not a handle the server cannot take."""
+    import tempo_sim.unreal as unreal
+    import tempo_sim.TempoWorld.WorldControl_pb2 as WorldControl
+
+    read = WorldControl.Value()
+    read.struct_value.struct_name = "FWidgetSettings"
+    field = read.struct_value.fields.add()
+    field.name = "Scale"
+    field.value.float_value = 9.0
+    asked = []
+
+    class FakeWorld:
+        @staticmethod
+        def get_property(**kwargs):
+            asked.append(kwargs["property"])
+            return read
+
+    monkeypatch.setattr(unreal, "_world", lambda: FakeWorld)
+    widget = classes.Widget("MyActor")
+    message = unreal._to_value("struct_value", widget.Settings)
+    assert asked == ["Settings"]
+    assert message.struct_value.fields[0].value.float_value == 9.0
+    assert unreal.value_of(widget.Settings).Scale == 9.0
+
+
 
 # -- two installed packages -----------------------------------------------------------------------
 #
@@ -896,3 +1056,4 @@ def test_the_dynamic_path_reaches_either_package(two_packages):
     classes = runtime.registered_classes()
     assert classes.python_class(WIDGET_PATH).__name__ == "Widget"
     assert classes.python_class("/Script/CoreUObject.Object").__name__ == "Object"
+

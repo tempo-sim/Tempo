@@ -83,6 +83,46 @@ truck.WaypointTags = ["alpha", "bravo"]
 A read-only property (`BlueprintReadOnly`) is generated as a property with no setter, so assigning
 to it is a type error rather than a runtime surprise.
 
+### Structs
+
+A struct property reads as a live handle, so assigning to one of its members writes to the sim.
+Most structs can also travel whole — every one whose members can each be carried as a value, which
+is 1,230 of TempoSample's 1,558 — and those have a generated value type, built with keyword
+arguments:
+
+```python
+from tempo_sample_classes.structs import FWalkableSlopeOverride
+
+mesh.SetWalkableSlopeOverride(FWalkableSlopeOverride(WalkableSlopeAngle=12.0))
+current = mesh.GetWalkableSlopeOverride()                    # FWalkableSlopeOverride, a value
+truck.Settings = FWheelSettings(Radius=40.0)                  # one write
+copy = unreal.value_of(truck.Settings)                        # the whole struct, read once
+```
+
+**A struct write is a merge.** Only the members a value was given are sent, and the destination
+keeps the rest — its current value for a property, its default for a function argument. So a value
+with one member is the same write as assigning that member through the handle, and nothing you did
+not mention is reset.
+
+The constructor takes the members a scenario may write — the Blueprint-writable ones — while a value
+read back from the sim carries all of them. `FHitResult` is the common case of a struct that is
+read and never built: Blueprint itself reaches its members through a Break node.
+
+A struct with a member that cannot travel — a map, a fixed-size array — has no constructor and
+cannot be passed whole, but is still reachable a member at a time.
+
+### Results by name
+
+A method whose function also has out parameters returns every result keyed by name, because a
+Blueprint usually hands back several things and position would be guesswork. The keys and their
+types come from the signature:
+
+```python
+results = truck.K2_SetActorLocation(target, True, False)
+moved: bool = results["ReturnValue"]
+hit = results["SweepHitResult"]          # FHitResult
+```
+
 !!! warning "A write sets the property; it does not run what derives from it"
 
     Assigning to a property writes that property and nothing else. Unreal often recomputes something
@@ -155,12 +195,15 @@ package describing part of a build.
 
 By design, and in every case because the alternative is worse:
 
-- **Types the API cannot carry** are absent rather than typed `Any`. A map, an arbitrary struct as a
-  whole value, a C-style fixed array. `Any` would type-check and then fail.
+- **Types the API cannot carry** are absent rather than typed `Any`. A map as a whole value, a
+  struct with a member that cannot travel, a C-style fixed array. `Any` would type-check and then
+  fail.
 - **Names Python cannot spell** — a Blueprint variable with a space in it. Reach those through the
   string-keyed API.
 - **Functions the server will not invoke**: latent functions, and any whose parameters cannot be
   expressed as one value each.
+- **Functions whose result cannot come back.** A method that answered `None` where its stub promised
+  a value would be worse than none at all.
 - **Editor-only classes, and editor-only members of the classes that remain.** The schema is
   generated in the editor, because only an editor can report a `BlueprintSetter` — and is then
   narrowed to what the packaged build reports from its own reflection. Both halves matter: `AActor`
@@ -242,13 +285,27 @@ Everything in [What is not there](#what-is-not-there) applies, plus two Rust-onl
 - **Container arguments to functions.** A `TArray` parameter of enums or object references would
   need a slice of a generated type, which Rust's orphan rule keeps out of the generic conversion.
   Container *properties* of those kinds are fine; it is only function parameters.
-- **Functions with a struct parameter**, as in Python — a struct has no single value that can carry
-  it, so it is reachable a member at a time but not passable as an argument.
-- **Functions whose return value cannot be carried**, which Python offers with a degraded result.
-  In Rust the return type is part of the contract, so a method that would silently discard its
-  answer is not generated at all. An *out* parameter that cannot be carried is different: the
-  caller never supplies one, so it is simply dropped from the tuple and the function stays — which
-  is what keeps `k2_set_actor_location`, whose `out HitResult` is an `FHitResult`.
+- **Struct value fields holding a container of enums or of handles.** A struct value is otherwise
+  complete; such a field is left out, and since a write is a merge, leaving it out leaves the
+  destination's own value in place.
+
+An *out* parameter that cannot be carried is dropped from the tuple and the function stays: the
+caller never supplies one, so it does not stop the call.
+
+Struct values are plain Rust structs with every field an `Option`, because an unset field is not
+sent. A struct property's accessor returns its proxy, which loads and stores the whole value:
+
+```rust
+use tempo_sample_classes::structs::FWalkableSlopeOverride;
+
+mesh.set_walkable_slope_override(FWalkableSlopeOverride {
+    walkable_slope_angle: Some(12.0),
+    ..Default::default()
+})?;
+let (moved, hit) = truck.k2_set_actor_location(target, true, false)?;   // hit: FHitResult
+let copy = truck.settings().load()?;                                    // the whole struct
+truck.settings().radius()?;                                             // or one member
+```
 
 Conversely, one Python concession is unnecessary here. The Python stubs must deliberately *omit*
 `__getattr__`, because a catch-all a type checker can see makes every attribute legal on every

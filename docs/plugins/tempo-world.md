@@ -360,6 +360,32 @@ Reach for it when the type isn't known until runtime — dispatching over a conf
 replaying recorded property values. When you know the type at the call site, the named
 `set_*_property` functions say the same thing more plainly.
 
+### Struct values
+
+A `USTRUCT` with no first-class variant travels as a `struct_value`: its C++ name and its members by
+authored name. `get_property` returns one for a struct property, `call_function` accepts one for a
+struct parameter and returns one for a struct result, and `struct_array_value` carries a `TArray` of
+them.
+
+```python
+value = WorldControl.Value()
+value.struct_value.struct_name = "FBodyInstance"
+field = value.struct_value.fields.add()
+field.name = "LinearDamping"
+field.value.float_value = 0.75
+tempo_world.set_property(actor="MyActor", component="Mesh", property="BodyInstance", value=value)
+```
+
+- **A write is a merge.** Only the members present are written; the rest keep what they held — the
+  property's current value, or a function parameter's default. The example above changes
+  `LinearDamping` and nothing else.
+- **A read reports every member**, inherited ones included.
+- **Only structs whose every member can travel** are carried this way. One holding a map, a
+  fixed-size array or another such struct is still reachable a member at a time, by nested address.
+  `DescribeClasses` reports which is which as `StructDescriptor.value_expressible`.
+- `struct_name` is checked: writing an `FHitResult` into an `FBodyInstance` property fails. Leave it
+  empty to skip the check.
+
 ### Batching property sets
 
 `set_properties` accepts a list of any of the singular set-property ops above and runs them in

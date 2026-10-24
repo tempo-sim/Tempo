@@ -217,6 +217,7 @@ bool Write(const FOptions& Options, FStats& OutStats, FString& OutError)
 		Writer->WriteObjectStart();
 		Writer->WriteValue(TEXT("name"), Entry.Name);
 		Writer->WriteValue(TEXT("content_hash"), TempoWorldSchemaWalk::HashStruct(Entry));
+		Writer->WriteValue(TEXT("value_expressible"), Entry.bValueExpressible);
 		Writer->WriteArrayStart(TEXT("members"));
 		for (const FMember& Member : Entry.Members)
 		{

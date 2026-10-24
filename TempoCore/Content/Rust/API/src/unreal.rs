@@ -621,6 +621,146 @@ name_container! {
     AssetArrayValue, AssetSetValue, "an asset array", AssetRef;
 }
 
+// -- struct values -------------------------------------------------------------------------------
+//
+// A struct with no first-class representation travels as a `StructValue`: its members by name.
+// Generated code declares one Rust struct per Unreal struct that can travel that way, every field
+// an `Option`, and implements `FromValue`/`ToValue` for it through the two helpers below -- so the
+// encoding is written once, here, rather than once per generated struct.
+//
+// Every field is optional because a write is a merge: only the members present are written, and
+// the rest of the destination keeps what it holds. A value built with one field is the same write
+// as assigning that one member through the proxy.
+
+/// A generated struct value, named as the sim names it.
+pub trait StructType {
+    /// The struct's C++ name, e.g. `"FHitResult"` -- what `StructValue.struct_name` carries.
+    const NAME: &'static str;
+}
+
+/// The members of a `StructValue` the server sent, for a generated `FromValue` to read.
+pub struct StructFields<'v> {
+    fields: &'v [pb::StructField],
+}
+
+impl<'v> StructFields<'v> {
+    /// The fields of a struct value, checking it is the struct expected.
+    pub fn of(value: &'v pb::Value, name: &str) -> Result<Self, TempoError> {
+        match variant(value)? {
+            pb::value::Value::StructValue(inner) => {
+                if !inner.struct_name.is_empty() && inner.struct_name != name {
+                    return Err(TempoError::Protocol(format!(
+                        "expected a {} from the server, got a {}",
+                        name, inner.struct_name
+                    )));
+                }
+                Ok(Self { fields: &inner.fields })
+            }
+            _ => Err(wrong(value, "a struct")),
+        }
+    }
+
+    fn find(&self, name: &str) -> Option<&'v pb::Value> {
+        self.fields.iter().find(|field| field.name == name).and_then(|field| field.value.as_ref())
+    }
+
+    /// One member, or `None` when the server did not send it.
+    pub fn get<T: FromValue>(&self, name: &str) -> Result<Option<T>, TempoError> {
+        self.find(name).map(T::from_value).transpose()
+    }
+
+    /// One member that refers to an actor or a component, as a typed handle.
+    pub fn object<T: Class>(&self, name: &str) -> Result<Option<T>, TempoError> {
+        note_origin::<T>();
+        match self.find(name) {
+            None => Ok(None),
+            Some(value) => match variant(value)? {
+                // An unset reference reads as an empty name, which is no handle at all.
+                pb::value::Value::ActorValue(reference) | pb::value::Value::ComponentValue(reference)
+                    if reference.is_empty() =>
+                {
+                    Ok(None)
+                }
+                _ => Ok(Some(T::from_object(object_reference(value)?))),
+            },
+        }
+    }
+}
+
+/// A `StructValue` being built, for a generated `ToValue` to fill in.
+pub struct StructBuilder {
+    value: pb::StructValue,
+}
+
+impl StructBuilder {
+    pub fn new(name: &str) -> Self {
+        Self { value: pb::StructValue { struct_name: name.to_string(), fields: Vec::new() } }
+    }
+
+    fn push(&mut self, name: &str, value: pb::Value) {
+        self.value.fields.push(pb::StructField { name: name.to_string(), value: Some(value) });
+    }
+
+    /// One member, when it has been given. An unset field is not sent, which leaves the
+    /// destination's own value in place.
+    pub fn field<T: ToValue>(&mut self, name: &str, value: &Option<T>) {
+        if let Some(value) = value {
+            self.push(name, value.to_value());
+        }
+    }
+
+    /// One member referring to an actor.
+    pub fn actor<T: Class>(&mut self, name: &str, value: &Option<T>) {
+        if let Some(value) = value {
+            self.push(name, ActorName(value.as_object().reference_name()).to_value());
+        }
+    }
+
+    /// One member referring to a component.
+    pub fn component<T: Class>(&mut self, name: &str, value: &Option<T>) {
+        if let Some(value) = value {
+            self.push(name, ComponentName(value.as_object().reference_name()).to_value());
+        }
+    }
+
+    pub fn finish(self) -> pb::Value {
+        pb::Value { value: Some(pb::value::Value::StructValue(self.value)) }
+    }
+}
+
+// An array of structs. Here rather than per generated struct because the orphan rule forbids a
+// generated crate implementing a tempo-sim trait for a `Vec` of its own type; a blanket impl over
+// `StructType` is how it is allowed at all.
+impl<T: StructType + FromValue> FromValue for Vec<T> {
+    fn from_value(value: &pb::Value) -> Result<Self, TempoError> {
+        match variant(value)? {
+            pb::value::Value::StructArrayValue(inner) => inner
+                .values
+                .iter()
+                .map(|element| {
+                    T::from_value(&pb::Value {
+                        value: Some(pb::value::Value::StructValue(element.clone())),
+                    })
+                })
+                .collect(),
+            _ => Err(wrong(value, "an array of structs")),
+        }
+    }
+}
+
+impl<T: StructType + ToValue> ToValue for Vec<T> {
+    fn to_value(&self) -> pb::Value {
+        let values = self
+            .iter()
+            .filter_map(|element| match element.to_value().value {
+                Some(pb::value::Value::StructValue(inner)) => Some(inner),
+                _ => None,
+            })
+            .collect();
+        pb::Value { value: Some(pb::value::Value::StructArrayValue(pb::StructArray { values })) }
+    }
+}
+
 // -- batching ------------------------------------------------------------------------------------
 
 /// One queued write.
@@ -1249,9 +1389,10 @@ fn object_reference(value: &pb::Value) -> Result<ObjectRef, TempoError> {
 
 /// A handle to a struct-valued property, addressed a member at a time.
 ///
-/// A struct has no single `Value` that can carry it, but the server has always resolved a nested
-/// address, so reaching into one is a matter of accumulating the path: `PostProcessSettings`
-/// becomes `PostProcessSettings.BloomIntensity` on the way out.
+/// The server has always resolved a nested address, so reaching into a struct is a matter of
+/// accumulating the path: `PostProcessSettings` becomes `PostProcessSettings.BloomIntensity` on the
+/// way out. A struct that can also travel as one value is loaded and stored whole through
+/// [`StructRef::load`] and [`StructRef::store`].
 ///
 /// Generated code wraps this in a typed proxy per Unreal struct, so the members are checked too.
 #[derive(Clone, Debug)]
@@ -1294,6 +1435,29 @@ impl<'a> StructRef<'a> {
     /// A struct inside this one.
     pub fn nested(&self, member: &str) -> StructRef<'a> {
         StructRef { owner: self.owner, address: self.member(member) }
+    }
+
+    /// The whole struct this addresses, as a value.
+    pub fn load<T: FromValue>(&self) -> Result<T, TempoError> {
+        self.owner.get(&self.address)
+    }
+
+    /// The whole struct this addresses, as a value, without blocking.
+    pub fn load_async<'s, T: FromValue + 's>(&'s self) -> impl Future<Output = Result<T, TempoError>> + 's {
+        self.owner.get_async(&self.address)
+    }
+
+    /// Write a struct value here: its given fields, merged into what is there.
+    pub fn store<T: ToValue>(&self, value: T) -> Result<(), TempoError> {
+        self.owner.set(&self.address, value)
+    }
+
+    /// Write a struct value here, without blocking.
+    pub fn store_async<'s, T: ToValue + 's>(
+        &'s self,
+        value: T,
+    ) -> impl Future<Output = Result<(), TempoError>> + 's {
+        self.owner.set_async(&self.address, value)
     }
 }
 
@@ -1686,4 +1850,72 @@ macro_rules! unreal_enum {
         }
 
     };
+}
+
+#[cfg(test)]
+mod tests {
+    //! The struct encoding, through a value type written the way `gen_rust_classes.py` writes one.
+
+    use super::*;
+
+    #[derive(Clone, Debug, Default, PartialEq)]
+    struct Trim {
+        offset: Option<Vector>,
+        label: Option<String>,
+    }
+
+    impl StructType for Trim {
+        const NAME: &'static str = "FTrim";
+    }
+
+    impl FromValue for Trim {
+        fn from_value(value: &pb::Value) -> Result<Self, TempoError> {
+            let fields = StructFields::of(value, "FTrim")?;
+            Ok(Self { offset: fields.get("Offset")?, label: fields.get("Label")? })
+        }
+    }
+
+    impl ToValue for Trim {
+        fn to_value(&self) -> pb::Value {
+            let mut builder = StructBuilder::new("FTrim");
+            builder.field("Offset", &self.offset);
+            builder.field("Label", &self.label);
+            builder.finish()
+        }
+    }
+
+    #[test]
+    fn a_struct_value_round_trips() {
+        let trim = Trim { offset: Some(Vector { x: 1.0, y: 2.0, z: 3.0 }), label: Some("a".into()) };
+        assert_eq!(Trim::from_value(&trim.to_value()).unwrap(), trim);
+    }
+
+    #[test]
+    fn an_unset_field_is_not_sent() {
+        // A write is a merge, so sending a default would clobber what the destination holds.
+        let value = Trim { offset: None, label: Some("only".into()) }.to_value();
+        match value.value {
+            Some(pb::value::Value::StructValue(inner)) => {
+                assert_eq!(inner.struct_name, "FTrim");
+                let names: Vec<_> = inner.fields.iter().map(|field| field.name.as_str()).collect();
+                assert_eq!(names, ["Label"]);
+            }
+            other => panic!("expected a struct value, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn a_different_struct_is_refused() {
+        let mut value = Trim::default().to_value();
+        if let Some(pb::value::Value::StructValue(inner)) = value.value.as_mut() {
+            inner.struct_name = "FSomethingElse".into();
+        }
+        assert!(Trim::from_value(&value).is_err());
+    }
+
+    #[test]
+    fn an_array_of_structs_round_trips() {
+        let trims = vec![Trim { label: Some("a".into()), ..Default::default() }, Trim::default()];
+        assert_eq!(Vec::<Trim>::from_value(&trims.to_value()).unwrap(), trims);
+    }
 }

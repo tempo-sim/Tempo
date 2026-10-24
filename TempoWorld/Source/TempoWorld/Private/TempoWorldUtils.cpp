@@ -39,5 +39,8 @@ UObject* GetAssetByPath(const FString& AssetPath)
 		return AssetData.GetAsset();
 	}
 
-	return nullptr;
+	// Not an asset, but possibly an object that is loaded: a property typed as a plain UObject can
+	// hold anything, and reads back as its full path -- an actor in a level, say. Resolving that path
+	// is what lets such a value be written straight back.
+	return FSoftObjectPath(AssetPath).ResolveObject();
 }

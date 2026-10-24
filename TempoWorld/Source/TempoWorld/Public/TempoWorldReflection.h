@@ -46,8 +46,9 @@ namespace TempoWorldReflection
 		// Object references, by what they point at.
 		Class, Asset, Actor, Component,
 
-		// A UStruct with no first-class representation. Reachable only through its members, by
-		// nested address ("MyStruct.Inner"), never as one value.
+		// A UStruct with no first-class representation. Carried as one value -- a StructValue of its
+		// members -- when every member can be (IsStructValueExpressible), and otherwise reachable
+		// only through its members, by nested address ("MyStruct.Inner").
 		Struct,
 
 		// Containers. The payload is in FTypeInfo::ElementType (and KeyType for Map), which nests
@@ -109,10 +110,11 @@ namespace TempoWorldReflection
 
 		// Whether one Value message can carry this whole property.
 		//
-		// False for a map, for an arbitrary struct, and for a container whose element has no
-		// repeated Value variant -- all of which are still reachable a member or an element at a
-		// time by nested address. The generated stubs expose those as nested accessors rather than
-		// as assignable members, so what the stubs allow stays exactly what SetProperty accepts.
+		// False for a map, for a struct with a member that cannot be carried, and for a container
+		// whose element has no repeated Value variant -- all of which are still reachable a member
+		// or an element at a time by nested address. The generated stubs expose those as nested
+		// accessors rather than as assignable members, so what the stubs allow stays exactly what
+		// SetProperty accepts.
 		bool IsValueExpressible() const;
 
 		// Whether the typed API may assign to this property. A readable-but-not-writable property
@@ -128,6 +130,15 @@ namespace TempoWorldReflection
 	// transform, a quaternion and a 2D vector, while the read path classified all three as arbitrary
 	// structs. They agree here.
 	TEMPOWORLD_API EValueKind StructKindForCPPName(const FString& StructCPPName);
+
+	// Whether a struct with no first-class representation can be carried as one StructValue.
+	//
+	// True when it has at least one reflected member and every member -- inherited ones included,
+	// Blueprint-visible or not -- is itself value-expressible. A read reports every member, so a
+	// struct with one that cannot be carried would come back with a hole in it; such a struct stays
+	// reachable a member at a time instead. A struct with no members at all is excluded from the
+	// other side: whatever it holds, reflection does not report it.
+	TEMPOWORLD_API bool IsStructValueExpressible(const UScriptStruct* Struct);
 
 	// How a function passes a parameter.
 	enum class EParameterKind : uint8
@@ -169,9 +180,9 @@ namespace TempoWorldReflection
 		FString UnsupportedReason;
 
 		// Whether every input can be supplied as one Value, so a generated method can take plain
-		// positional arguments. False when an input is an arbitrary struct or a map, which the
-		// server will still accept a member at a time by nested address ("MyStruct.Inner") but which
-		// a single generated parameter cannot express.
+		// positional arguments. False when an input is a map, or a struct with a member that cannot
+		// be carried, which the server will still accept a member at a time by nested address
+		// ("MyStruct.Inner") but which a single generated parameter cannot express.
 		bool AllInputsValueExpressible() const;
 
 		// The return value, or null for a void function. Out parameters are not it.
@@ -219,6 +230,15 @@ namespace TempoWorldReflection
 	// Get*_InContainer(OutContainer) reads it, and the returned error is None.
 	TEMPOWORLD_API EAddressError ResolveNestedPropertyForRead(const void* Container, const FProperty* Property,
 		const FString& PropertyName, const void*& OutContainer, const FProperty*& OutProperty, FString& OutError);
+
+	// The write path's counterpart: the same addressing, creating what is missing on the way.
+	//
+	// An array index equal to the array's length appends an element, and an absent map key is
+	// inserted, because a write says what the value should become. An index past the end is still
+	// OutOfRange. Used where a whole value is written to a nested address -- a StructValue whose
+	// members are then written one by one -- rather than a single leaf.
+	TEMPOWORLD_API EAddressError ResolveNestedPropertyForWrite(void* Container, FProperty* Property,
+		const FString& PropertyName, void*& OutContainer, FProperty*& OutProperty, FString& OutError);
 
 	// Classifies a property. Never fails: an unrepresentable property comes back with
 	// Kind == Unsupported and a reason.

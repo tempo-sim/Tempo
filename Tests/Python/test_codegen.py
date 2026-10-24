@@ -187,6 +187,73 @@ def ok(w: E.Widget) -> None:
     assert errors == [], "valid usage should type-check cleanly: {}".format(errors)
 
 
+def test_struct_values_type_check(generated, tmp_path):
+    errors = check(generated, """
+import fixture_classes.Engine as E
+import fixture_classes.structs as structs
+import tempo_sim.unreal as _unreal
+
+def ok(w: E.Widget) -> None:
+    w.Settings = structs.FWidgetSettings(Scale=2.0, Inner=structs.FWidgetTrim(Offset=_unreal.Vector()))
+    w.Settings.Scale = 3.0
+    result: structs.FWidgetSettings = w.Configure(structs.FWidgetSettings(Scale=1.0))
+    print(result.Scale, result.Label)
+    w.History = [structs.FWidgetSettings()]
+    w.Configure(w.Settings)
+    copy: structs.FWidgetSettings = _unreal.value_of(w.Settings)
+    print(copy.Inner.Offset.X, w.Limits.Floor)
+""", tmp_path)
+    assert errors == [], "struct values should type-check cleanly: {}".format(errors)
+
+
+def test_out_parameters_are_typed_by_name(generated, tmp_path):
+    """With out parameters a method returns every result keyed by name, and the stub has to say so.
+
+    It used to say only the return value -- `-> bool` -- while the runtime handed back a dict, so a
+    caller doing what the stub said got a dict where a bool was promised.
+    """
+    errors = check(generated, """
+import fixture_classes.Engine as E
+
+def ok(w: E.Widget) -> None:
+    results = w.Measure()
+    moved: bool = results["ReturnValue"]
+    scale = results["Measured"].Scale
+""", tmp_path)
+    assert errors == [], "named results should type-check: {}".format(errors)
+
+    for source in ('w.Measure()["Tally"]', "b: bool = w.Measure()"):
+        errors = check(generated, """
+import fixture_classes.Engine as E
+
+def drift(w: E.Widget) -> None:
+    {}
+""".format(source), tmp_path)
+        assert errors, "{} should be a type error".format(source)
+
+
+@pytest.mark.parametrize("case,source", [
+    ("a member the struct lacks", "structs.FWidgetSettings(Scal=1.0)"),
+    ("a positional member", "structs.FWidgetSettings(1.0)"),
+    ("a read-only member in the constructor", 'structs.FWidgetSettings(Label="x")'),
+    ("a member of the wrong type", 'structs.FWidgetSettings(Scale="big")'),
+    ("the wrong struct as an argument", "w.Configure(structs.FWidgetTrim())"),
+    ("assigning a struct that cannot travel", "w.Limits = structs.FWidgetLimits()"),
+    ("a function returning a struct that cannot travel", "w.GetLimits()"),
+    ("a function taking a struct that cannot travel", "w.ApplyLimits(structs.FWidgetLimits())"),
+    ("a member nothing can read", "print(w.Waypoints)"),
+])
+def test_struct_drift_is_a_type_error(generated, tmp_path, case, source):
+    errors = check(generated, """
+import fixture_classes.Engine as E
+import fixture_classes.structs as structs
+
+def drift(w: E.Widget) -> None:
+    {}
+""".format(source), tmp_path)
+    assert errors, "{} should be a type error, but Pyright accepted it".format(case)
+
+
 @pytest.mark.parametrize("case,source", [
     # A property removed in a new release.
     ("removed property", "w.bEnabledd = True"),

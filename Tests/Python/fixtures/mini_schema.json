@@ -4,7 +4,7 @@
   "content_hash": "FIXTURE",
   "engine_version": "5.8",
   "includes_blueprint_classes": false,
-  "schema_version": "2"
+  "schema_version": "3"
  },
  "classes": [
   {
@@ -200,6 +200,40 @@
      "type": "FWidgetSettings",
      "struct": "FWidgetSettings",
      "readable": true,
+     "writable": true,
+     "value_expressible": true
+    },
+    {
+     "name": "Limits",
+     "kind": "struct",
+     "type": "FWidgetLimits",
+     "struct": "FWidgetLimits",
+     "readable": true,
+     "writable": false,
+     "value_expressible": false
+    },
+    {
+     "name": "History",
+     "kind": "array",
+     "type": "array<FWidgetSettings>",
+     "element": {
+      "kind": "struct",
+      "type": "FWidgetSettings",
+      "struct": "FWidgetSettings"
+     },
+     "readable": true,
+     "writable": true,
+     "value_expressible": true
+    },
+    {
+     "name": "Waypoints",
+     "kind": "array",
+     "type": "array<vector>",
+     "element": {
+      "kind": "vector",
+      "type": "vector"
+     },
+     "readable": true,
      "writable": false,
      "value_expressible": false
     },
@@ -270,6 +304,93 @@
      "positional": true,
      "unsupported_reason": "Function 'Latent' is latent, which cannot be called over the API",
      "parameters": []
+    },
+    {
+     "name": "Configure",
+     "signature": "FWidgetSettings Configure(FWidgetSettings NewSettings)",
+     "callable": true,
+     "positional": true,
+     "parameters": [
+      {
+       "name": "NewSettings",
+       "direction": "in",
+       "kind": "struct",
+       "type": "FWidgetSettings",
+       "struct": "FWidgetSettings"
+      },
+      {
+       "name": "ReturnValue",
+       "direction": "return",
+       "kind": "struct",
+       "type": "FWidgetSettings",
+       "struct": "FWidgetSettings"
+      }
+     ]
+    },
+    {
+     "name": "ApplyLimits",
+     "signature": "void ApplyLimits(FWidgetLimits NewLimits)",
+     "callable": true,
+     "positional": false,
+     "parameters": [
+      {
+       "name": "NewLimits",
+       "direction": "in",
+       "kind": "struct",
+       "type": "FWidgetLimits",
+       "struct": "FWidgetLimits"
+      }
+     ]
+    },
+    {
+     "name": "GetLimits",
+     "signature": "FWidgetLimits GetLimits()",
+     "callable": true,
+     "positional": true,
+     "parameters": [
+      {
+       "name": "ReturnValue",
+       "direction": "return",
+       "kind": "struct",
+       "type": "FWidgetLimits",
+       "struct": "FWidgetLimits"
+      }
+     ]
+    },
+    {
+     "name": "Measure",
+     "signature": "bool Measure(out FWidgetSettings Measured, out map<string,int> Tally)",
+     "callable": true,
+     "positional": true,
+     "parameters": [
+      {
+       "name": "Measured",
+       "direction": "out",
+       "kind": "struct",
+       "type": "FWidgetSettings",
+       "struct": "FWidgetSettings"
+      },
+      {
+       "name": "Tally",
+       "direction": "out",
+       "kind": "map",
+       "type": "map<string,int>",
+       "key": {
+        "kind": "string",
+        "type": "string"
+       },
+       "element": {
+        "kind": "int",
+        "type": "int"
+       }
+      },
+      {
+       "name": "ReturnValue",
+       "direction": "return",
+       "kind": "bool",
+       "type": "bool"
+      }
+     ]
     }
    ],
    "components": [
@@ -344,13 +465,77 @@
  ],
  "structs": [
   {
+   "name": "FWidgetLimits",
+   "content_hash": "FIXTURE-STRUCT-FWIDGETLIMITS",
+   "value_expressible": false,
+   "members": [
+    {
+     "name": "Floor",
+     "kind": "float",
+     "type": "float",
+     "readable": true,
+     "writable": true,
+     "value_expressible": true
+    },
+    {
+     "name": "Steps",
+     "kind": "map",
+     "type": "map<string,int>",
+     "key": {
+      "kind": "string",
+      "type": "string"
+     },
+     "element": {
+      "kind": "int",
+      "type": "int"
+     },
+     "readable": true,
+     "writable": false,
+     "value_expressible": false
+    }
+   ]
+  },
+  {
    "name": "FWidgetSettings",
    "content_hash": "FIXTURE-STRUCT-FWIDGETSETTINGS",
+   "value_expressible": true,
    "members": [
+    {
+     "name": "Inner",
+     "kind": "struct",
+     "type": "FWidgetTrim",
+     "struct": "FWidgetTrim",
+     "readable": true,
+     "writable": true,
+     "value_expressible": true
+    },
+    {
+     "name": "Label",
+     "kind": "string",
+     "type": "string",
+     "readable": true,
+     "writable": false,
+     "value_expressible": true
+    },
     {
      "name": "Scale",
      "kind": "float",
      "type": "float",
+     "readable": true,
+     "writable": true,
+     "value_expressible": true
+    }
+   ]
+  },
+  {
+   "name": "FWidgetTrim",
+   "content_hash": "FIXTURE-STRUCT-FWIDGETTRIM",
+   "value_expressible": true,
+   "members": [
+    {
+     "name": "Offset",
+     "kind": "vector",
+     "type": "vector",
      "readable": true,
      "writable": true,
      "value_expressible": true

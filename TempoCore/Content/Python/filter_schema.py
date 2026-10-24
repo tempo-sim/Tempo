@@ -54,9 +54,11 @@ def narrow_to_surface(schema, surface):
     - **A function's signature and parameter names come from the build.** A CallFunction argument is
       matched against the function's own parameters by name, and a cooked build cases some of them
       differently, so an editor-sourced name is a FAILED_PRECONDITION at the first call.
-    - **Readability, writability and value-expressibility come from the build.** They are derived
-      from flags that survive cooking, so they should already agree; taken from the build so that
-      nothing rests on "should".
+    - **Readability, writability and value-expressibility come from the build** -- a member's, a
+      struct's as a whole, and a function's `positional`. They are derived from flags that survive
+      cooking, so they should already agree; taken from the build so that nothing rests on
+      "should". A struct's can genuinely differ: one editor-only member that cannot be carried
+      makes the whole struct inexpressible in the editor alone.
 
     What is deliberately *not* done is adding a member the build has and the editor does not -- 23
     classes have a property like that and 7 a function, nearly all a Blueprint variable the cook
@@ -101,6 +103,11 @@ def narrow_to_surface(schema, surface):
             if reported is None:
                 stats["functions_dropped"] += 1
                 continue
+            # Whether every input travels as one value, which decides whether the function is
+            # offered. Older reports do not carry it, and then the editor's answer stands.
+            if "positional" in reported and function.get("positional") != reported["positional"]:
+                function["positional"] = reported["positional"]
+                stats["flags_corrected"] += 1
             if function.get("signature") != reported["signature"]:
                 function["signature"] = reported["signature"]
                 # The parameter list is positional in both documents, so the names line up with
@@ -129,6 +136,10 @@ def narrow_to_surface(schema, surface):
         if declared is None:
             continue
         struct["content_hash"] = declared["content_hash"]
+        # A member only the editor has can make a struct inexpressible there and not in the build.
+        if "value_expressible" in declared and struct.get("value_expressible") != declared["value_expressible"]:
+            struct["value_expressible"] = declared["value_expressible"]
+            stats["flags_corrected"] += 1
         kept = []
         for member in struct.get("members", []):
             reported = declared["members"].get(member["name"])

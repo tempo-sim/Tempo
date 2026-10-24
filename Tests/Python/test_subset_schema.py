@@ -180,7 +180,7 @@ def test_the_header_says_it_is_a_subset_and_carries_no_build_hash(subset):
     assert "content_hash" not in header
     # What the stubs still need to say about themselves.
     assert header["engine_version"] == "5.8"
-    assert header["schema_version"] == "2"
+    assert header["schema_version"] == "3"
 
 
 def test_the_header_records_what_was_rerooted(subset):
@@ -212,7 +212,9 @@ def test_the_per_class_hashes_survive(subset):
 
 def test_types_nothing_kept_mentions_are_dropped(subset):
     narrowed, _ = subset
-    assert [struct["name"] for struct in narrowed["structs"]] == ["FWidgetSettings"]
+    # The widget's own structs, and the one FWidgetSettings reaches through a member.
+    assert [struct["name"] for struct in narrowed["structs"]] == [
+        "FWidgetLimits", "FWidgetSettings", "FWidgetTrim"]
     assert [enum["name"] for enum in narrowed["enums"]] == ["EWidgetMode"]
 
 

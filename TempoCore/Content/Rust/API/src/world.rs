@@ -462,7 +462,7 @@ mod tests {
 
         fn header(&self) -> crate::unreal::SchemaIdentity {
             crate::unreal::SchemaIdentity {
-                schema_version: "2".to_string(),
+                schema_version: "3".to_string(),
                 engine_version: "5.8".to_string(),
                 content_hash: "WHOLE-WALK".to_string(),
             }
@@ -496,7 +496,7 @@ mod tests {
     fn response(classes: &[(&str, &str)]) -> pb::DescribeClassesResponse {
         pb::DescribeClassesResponse {
             header: Some(pb::SchemaHeader {
-                schema_version: "2".to_string(),
+                schema_version: "3".to_string(),
                 engine_version: "5.8".to_string(),
                 ..Default::default()
             }),

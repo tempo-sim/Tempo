@@ -84,6 +84,9 @@ namespace TempoWorldSchemaWalk
 	{
 		FString Name;
 		TArray<FMember> Members;
+		// Whether the whole struct travels as one StructValue -- the classifier's answer, recorded so
+		// that no generator has to work it out again from the members and risk disagreeing.
+		bool bValueExpressible = false;
 	};
 
 	struct FEnumEntry

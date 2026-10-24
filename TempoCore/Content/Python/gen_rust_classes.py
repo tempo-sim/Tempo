@@ -77,6 +77,27 @@ class Unsupported(Exception):
     """A type the API cannot carry. Its member is omitted rather than loosely typed."""
 
 
+def rust_str(text):
+    """A Rust string literal.
+
+    Not `json.dumps`: JSON escapes anything outside ASCII as `\\uXXXX`, and a character outside the
+    basic plane as a surrogate pair, neither of which Rust accepts -- and Blueprint function names do
+    contain emoji. A Rust literal can hold UTF-8 as is; only the control characters need an
+    escape, and Rust spells that `\\u{XX}`.
+    """
+    escaped = []
+    for character in str(text):
+        if character in ('"', "\\"):
+            escaped.append("\\" + character)
+        elif character == "\n":
+            escaped.append("\\n")
+        elif ord(character) < 0x20 or ord(character) == 0x7F:
+            escaped.append("\\u{{{:x}}}".format(ord(character)))
+        else:
+            escaped.append(character)
+    return '"' + "".join(escaped) + '"'
+
+
 def ident(text):
     """One path segment as a legal Rust identifier."""
     cleaned = re.sub(r"\W", "_", text)
@@ -127,6 +148,9 @@ class Generator:
         self.root = root
         self.classes_by_path = {c["path"]: c for c in schema["classes"]}
         self.struct_names = {s["name"] for s in schema.get("structs", [])}
+        # The classifier's answer, recorded per struct by the walk -- not worked out again here.
+        self.expressible_structs = {s["name"] for s in schema.get("structs", [])
+                                    if s.get("value_expressible")}
         self.enum_names = {e["name"] for e in schema.get("enums", [])}
         self.by_module = defaultdict(list)
         for cls in schema["classes"]:
@@ -154,9 +178,22 @@ class Generator:
         if kind in ("actor", "component"):
             return self.class_type(type_desc), OBJECT
 
+        if kind == "struct":
+            name = type_desc.get("struct") or ""
+            if name not in self.expressible_structs:
+                # Reachable a member at a time through its proxy, never as one value.
+                raise Unsupported("struct {!r} cannot travel as one value".format(name))
+            return self.root + "::structs::" + ident(name), PLAIN
+
         if kind in ("array", "set"):
             element = type_desc.get("element") or {}
             element_kind = element.get("kind")
+            if element_kind == "struct":
+                # Arrays only: a set of structs has no Value variant.
+                if kind != "array":
+                    raise Unsupported("a set of structs has no Value variant")
+                inner, _ = self.rust_type(element)
+                return "Vec<{}>".format(inner), PLAIN
             if element_kind not in CONTAINER_ELEMENTS:
                 # No repeated Value variant for it, so it is reachable only a member at a time.
                 raise Unsupported("no Value variant for a container of {!r}".format(element_kind))
@@ -210,7 +247,7 @@ class Generator:
         used.add("set_" + getter + "_async")
         used.add("watch_" + getter)
 
-        literal = json.dumps(name)
+        literal = rust_str(name)
         lines = self.doc_lines(member, "    ")
         self.stats["properties"] += 1
 
@@ -226,10 +263,10 @@ class Generator:
         accessor = member.get("getter") or ""
         if accessor and how == PLAIN:
             lines.append("    pub fn {}(&self) -> Result<{}, {}> {{ self.0.get_via({}) }}"
-                         .format(getter, rust, ERROR, json.dumps(accessor)))
+                         .format(getter, rust, ERROR, rust_str(accessor)))
             lines.append("    pub fn {}_async(&self) -> impl ::core::future::Future<Output = "
                          "Result<{}, {}>> + '_ {{ self.0.get_via_async({}) }}"
-                         .format(getter, rust, ERROR, json.dumps(accessor)))
+                         .format(getter, rust, ERROR, rust_str(accessor)))
         else:
             lines.append("    pub fn {}(&self) -> Result<{}, {}> {{ self.0.{}({}) }}"
                          .format(getter, rust, ERROR, read, literal))
@@ -254,8 +291,8 @@ class Generator:
         if setter and how == PLAIN:
             # Both the function and what it calls its argument: CallFunction rejects an unnamed
             # argument and matches the name against the function's own parameters.
-            accessor = "{}, {}".format(json.dumps(setter),
-                                       json.dumps(member.get("setter_argument", "")))
+            accessor = "{}, {}".format(rust_str(setter),
+                                       rust_str(member.get("setter_argument", "")))
             lines.append("    pub fn set_{}(&self, value: {}) -> Result<(), {}> "
                          "{{ self.0.set_via({}, value) }}"
                          .format(getter, rust, ERROR, accessor))
@@ -296,7 +333,13 @@ class Generator:
                 "value: &[{}]".format(element), "value")
 
     def emit_struct_property(self, member, used):
-        """A struct-valued property, reached a member at a time through a typed proxy."""
+        """A struct-valued property: a typed proxy to reach into, and a setter when it travels whole.
+
+        The accessor always returns the proxy, whose `load()` reads the whole value -- so a member
+        write through it goes on writing to the sim. A writable struct that can travel as one value
+        also gets `set_<name>`, which takes the generated value type and, like every setter, goes
+        through the property's BlueprintSetter when it has one.
+        """
         name = member.get("struct") or ""
         if name not in self.struct_names:
             self.stats["properties_omitted"] += 1
@@ -307,11 +350,35 @@ class Generator:
             return []
         used.add(accessor)
         self.stats["struct_properties"] += 1
-        return self.doc_lines(member, "    ") + [
-            "    pub fn {}(&self) -> {}::structs::{}<'_> "
-            "{{ {}::structs::{}(self.0.struct_ref({})) }}".format(
+        lines = self.doc_lines(member, "    ") + [
+            "    pub fn {}(&self) -> {}::structs::{}Ref<'_> "
+            "{{ {}::structs::{}Ref(self.0.struct_ref({})) }}".format(
                 accessor, self.root, ident(name), self.root, ident(name),
-                json.dumps(member["name"]))]
+                rust_str(member["name"]))]
+        if not member.get("writable") or name not in self.expressible_structs:
+            return lines
+
+        setter_name = "set_" + accessor
+        if setter_name in used:
+            return lines
+        used.add(setter_name)
+        used.add(setter_name + "_async")
+        value_type = "{}::structs::{}".format(self.root, ident(name))
+        literal = rust_str(member["name"])
+        setter = member.get("setter") or ""
+        if setter:
+            accessor_args = "{}, {}".format(rust_str(setter),
+                                            rust_str(member.get("setter_argument", "")))
+            call, call_async = "set_via({}, value)".format(accessor_args), \
+                "set_via_async({}, value)".format(accessor_args)
+        else:
+            call, call_async = "set({}, value)".format(literal), "set_async({}, value)".format(literal)
+        lines.append("    pub fn {}(&self, value: {}) -> Result<(), {}> {{ self.0.{} }}".format(
+            setter_name, value_type, ERROR, call))
+        lines.append("    pub fn {}_async(&self, value: {}) -> impl ::core::future::Future<Output = "
+                     "Result<(), {}>> + '_ {{ self.0.{} }}".format(
+                         setter_name, value_type, ERROR, call_async))
+        return lines
 
     def emit_component(self, component, used):
         """A component the class brings with it, typed as its own class.
@@ -330,7 +397,7 @@ class Generator:
         used.add(accessor)
         self.stats["components"] += 1
         return ["    pub fn {}(&self) -> {} {{ self.0.component_handle({}) }}".format(
-            accessor, self.path_of(referenced), json.dumps(component["name"]))]
+            accessor, self.path_of(referenced), rust_str(component["name"]))]
 
     def emit_function(self, function, used):
         """One callable function. Returns [] when its signature cannot be expressed."""
@@ -400,11 +467,11 @@ class Generator:
                 "argument_actor" if (how == OBJECT and kind == "actor")
                 else "argument_component" if how == OBJECT
                 else "argument",
-                json.dumps(declared),
+                rust_str(declared),
                 "" if how == OBJECT else "&",
                 argument)
             for argument, declared, _, how, kind in inputs))
-        literal = json.dumps(function["name"])
+        literal = rust_str(function["name"])
 
         if not outputs:
             if returns is None:
@@ -431,7 +498,7 @@ class Generator:
         reads = ", ".join(
             "{}::ObjectRef::{}::<{}>(&response, {})?".format(
                 RUNTIME, "object_result_of" if how == OBJECT else "result_of", rust,
-                json.dumps(declared))
+                rust_str(declared))
             for _, declared, rust, how, _ in wanted)
         trailing = "," if len(wanted) == 1 else ""
         return [
@@ -455,11 +522,12 @@ class Generator:
         name = ident(cls["name"])
         lines = [
             "#[repr(transparent)]",
+            "#[derive(Clone, Debug, PartialEq, Eq)]",
             "pub struct {}(pub {}::ObjectRef);".format(name, RUNTIME),
             "",
             "// SAFETY: a transparent newtype over ObjectRef, which is what upcast() relies on.",
             "unsafe impl {}::Class for {} {{".format(RUNTIME, name),
-            '    const PATH: &\'static str = {};'.format(json.dumps(cls["path"])),
+            '    const PATH: &\'static str = {};'.format(rust_str(cls["path"])),
             "    fn from_object(object: {}::ObjectRef) -> Self {{ Self(object) }}".format(RUNTIME),
             "    fn as_object(&self) -> &{}::ObjectRef {{ &self.0 }}".format(RUNTIME),
             "    fn hierarchy() -> &'static (dyn {}::Hierarchy + 'static) "
@@ -531,7 +599,7 @@ class Generator:
                 if variant in emitted:
                     continue
                 emitted.add(variant)
-                entries.append("    {} = {},".format(variant, json.dumps(enumerator)))
+                entries.append("    {} = {},".format(variant, rust_str(enumerator)))
             lines.append("::tempo_sim::unreal_enum! {")
             lines.append("    {} {{".format(ident(enum["name"])))
             lines += ["    " + entry for entry in entries]
@@ -542,33 +610,113 @@ class Generator:
         return "\n".join(lines) + "\n"
 
     def emit_structs(self):
-        """A proxy per struct, so a nested address like PostProcessSettings.BloomIntensity checks.
+        """Per struct, a proxy to reach into it by address and -- when it travels whole -- a value.
 
-        A struct has no single Value that can carry it, but the server has always resolved a nested
-        address, so reaching into one is a matter of accumulating the path.
+        The proxy, `<Name>Ref`, is what a struct property's accessor returns, so a nested address
+        like PostProcessSettings.BloomIntensity checks member by member. The value, `<Name>`, is what
+        a function takes and returns and what `load()`/`store()` move whole: every member an
+        `Option`, because a write is a merge and an unset field leaves the destination as it was.
         """
         lines = ["// Generated by gen_rust_classes.py from tempo_schema.json. Do not edit.", ""]
         for struct in sorted(self.schema.get("structs", []), key=lambda s: s["name"]):
             name = ident(struct["name"])
-            lines.append("pub struct {}<'a>(pub {}::StructRef<'a>);".format(name, RUNTIME))
-            body, used = [], set()
+            expressible = struct["name"] in self.expressible_structs
+            lines.append("pub struct {}Ref<'a>(pub {}::StructRef<'a>);".format(name, RUNTIME))
+            # Reserved first, so a member called Load or Store cannot take the whole-value methods.
+            used = {"load", "load_async", "store", "store_async"} if expressible else set()
+            body = []
+            if expressible:
+                body += [
+                    "    pub fn load(&self) -> Result<{}, {}> {{ self.0.load() }}".format(name, ERROR),
+                    "    pub fn load_async(&self) -> impl ::core::future::Future<Output = Result<{}, "
+                    "{}>> + '_ {{ self.0.load_async() }}".format(name, ERROR),
+                    "    pub fn store(&self, value: {}) -> Result<(), {}> {{ self.0.store(value) }}"
+                    .format(name, ERROR),
+                    "    pub fn store_async(&self, value: {}) -> impl ::core::future::Future<Output = "
+                    "Result<(), {}>> + '_ {{ self.0.store_async(value) }}".format(name, ERROR),
+                ]
             for member in struct.get("members", []):
                 body += self.emit_struct_member(member, used)
             if body:
                 lines.append("")
-                lines.append("impl<'a> {}<'a> {{".format(name))
+                lines.append("impl<'a> {}Ref<'a> {{".format(name))
                 lines += body
                 lines.append("}")
             lines.append("")
+            if expressible:
+                lines += self.emit_struct_value(struct)
             self.stats["structs"] += 1
         return "\n".join(lines) + "\n"
+
+    def emit_struct_value(self, struct):
+        """The value type for one struct, and its conversions to and from a StructValue."""
+        name = ident(struct["name"])
+        literal = rust_str(struct["name"])
+        fields, used = [], set()
+        for member in struct.get("members", []):
+            try:
+                rust, how = self.rust_type(member)
+            except Unsupported:
+                self.stats["struct_value_fields_omitted"] += 1
+                continue
+            if how not in (PLAIN, OBJECT):
+                # A container of enums or of handles needs a decode this runtime does not offer
+                # inside a struct. Leaving it out is safe: a write is a merge, so the member keeps
+                # whatever the destination holds.
+                self.stats["struct_value_fields_omitted"] += 1
+                continue
+            field = snake(member["name"])
+            if field in used:
+                self.stats["struct_value_fields_omitted"] += 1
+                continue
+            used.add(field)
+            fields.append((field, member["name"], rust, how, member.get("kind")))
+
+        lines = ["/// `{}` as a value. Unset fields are not sent, so the destination keeps them."
+                 .format(struct["name"]),
+                 "#[derive(Clone, Debug, Default, PartialEq)]",
+                 "pub struct {} {{".format(name)]
+        lines += ["    pub {}: Option<{}>,".format(field, rust) for field, _, rust, _, _ in fields]
+        lines += ["}", ""]
+        lines += [
+            "impl {}::StructType for {} {{".format(RUNTIME, name),
+            "    const NAME: &'static str = {};".format(literal),
+            "}",
+            "",
+            "impl {}::FromValue for {} {{".format(RUNTIME, name),
+            "    fn from_value(value: &::tempo_sim::proto::tempo_world::Value) -> Result<Self, {}> {{"
+            .format(ERROR),
+            # Read even when there is nothing to keep, so a different struct is still refused.
+            "        let {} = {}::StructFields::of(value, {})?;".format(
+                "fields" if fields else "_fields", RUNTIME, literal),
+            "        Ok(Self {",
+        ]
+        lines += ["            {}: fields.{}({})?,".format(
+            field, "object" if how == OBJECT else "get", rust_str(declared))
+            for field, declared, _, how, _ in fields]
+        lines += [
+            "        })",
+            "    }",
+            "}",
+            "",
+            "impl {}::ToValue for {} {{".format(RUNTIME, name),
+            "    fn to_value(&self) -> ::tempo_sim::proto::tempo_world::Value {",
+            "        let {}builder = {}::StructBuilder::new({});".format(
+                "mut " if fields else "", RUNTIME, literal),
+        ]
+        for field, declared, _, how, kind in fields:
+            method = "field" if how != OBJECT else ("actor" if kind == "actor" else "component")
+            lines.append("        builder.{}({}, &self.{});".format(method, rust_str(declared), field))
+        lines += ["        builder.finish()", "    }", "}", ""]
+        self.stats["struct_values"] += 1
+        return lines
 
     def emit_struct_member(self, member, used):
         name = member["name"]
         accessor = snake(name)
         if accessor in used:
             return []
-        literal = json.dumps(name)
+        literal = rust_str(name)
 
         if member.get("kind") == "struct":
             nested = member.get("struct") or ""
@@ -578,7 +726,7 @@ class Generator:
             used.add(accessor)
             self.stats["struct_members"] += 1
             # 'a, not '_: the nested proxy addresses the same object, not this proxy.
-            return ["    pub fn {}(&self) -> {}<'a> {{ {}(self.0.nested({})) }}".format(
+            return ["    pub fn {}(&self) -> {}Ref<'a> {{ {}Ref(self.0.nested({})) }}".format(
                 accessor, ident(nested), ident(nested), literal)]
 
         try:
@@ -616,7 +764,7 @@ class Generator:
             "/// Each class and the one it derives from, sorted by path so a lookup can bisect.",
             "static SUPERCLASS: &[(&str, &str)] = &[",
         ]
-        lines += ["    ({}, {}),".format(json.dumps(path), json.dumps(parent))
+        lines += ["    ({}, {}),".format(rust_str(path), rust_str(parent))
                   for path, parent in pairs]
         lines += [
             "];",
@@ -634,8 +782,8 @@ class Generator:
                 ("STRUCT_HASH", self.schema.get("structs", []), "name"),
                 ("ENUM_HASH", self.schema.get("enums", []), "name")):
             lines.append("static {}: &[(&str, &str)] = &[".format(name))
-            lines += ["    ({}, {}),".format(json.dumps(entry[key]),
-                                             json.dumps(entry.get("content_hash", "")))
+            lines += ["    ({}, {}),".format(rust_str(entry[key]),
+                                             rust_str(entry.get("content_hash", "")))
                       for entry in sorted(entries, key=lambda e: e[key])]
             lines += ["];", ""]
         lines += [
@@ -679,11 +827,11 @@ class Generator:
             "    fn header(&self) -> ::tempo_sim::unreal::SchemaIdentity {",
             "        ::tempo_sim::unreal::SchemaIdentity {",
             "            schema_version: {}.to_string(),".format(
-                json.dumps(str(header.get("schema_version", "")))),
+                rust_str(str(header.get("schema_version", "")))),
             "            engine_version: {}.to_string(),".format(
-                json.dumps(str(header.get("engine_version", "")))),
+                rust_str(str(header.get("engine_version", "")))),
             "            content_hash: {}.to_string(),".format(
-                json.dumps(str(header.get("content_hash", "")))),
+                rust_str(str(header.get("content_hash", "")))),
             "        }",
             "    }",
             "}",
@@ -701,7 +849,7 @@ def generate(schema_path, output_dir, version="0.0.0", docs=False, in_crate=Fals
     with open(schema_path) as f:
         schema = json.load(f)
 
-    expected = "2"
+    expected = "3"
     actual = schema.get("header", {}).get("schema_version")
     if actual != expected:
         raise Exception(
@@ -830,7 +978,9 @@ def main(argv):
                               "--in-crate" in argv, root)
     print("modules            {}".format(len(modules)))
     print("classes            {}".format(stats["classes"]))
-    print("structs / enums    {} / {}".format(stats["structs"], stats["enums"]))
+    print("structs / enums    {} / {} ({} passable as values, {} value fields omitted)".format(
+        stats["structs"], stats["enums"], stats["struct_values"],
+        stats["struct_value_fields_omitted"]))
     print("properties         {} ({} writable, {} read-only, {} struct-valued)".format(
         stats["properties"], stats["writable"], stats["read_only"], stats["struct_properties"]))
     print("functions          {} ({} with out parameters, {} out params dropped)".format(

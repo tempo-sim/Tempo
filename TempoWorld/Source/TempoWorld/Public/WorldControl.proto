@@ -750,6 +750,30 @@ message Color {
   int32 b = 3;
 }
 
+// A struct with no first-class representation, as its members.
+//
+// A struct is carried this way only when every member it has can itself be carried as a Value, so
+// a read reports the whole struct. A struct with a map, a weak reference or a fixed-size array
+// among its members is not, and is reachable only a member at a time, by nested address.
+message StructValue {
+  // The struct's C++ name, e.g. "FHitResult" -- the name DescribeClasses reports it under. A write
+  // fails when the destination is a different struct. Empty accepts any struct.
+  string struct_name = 1;
+  // A write sets only the members present and leaves the rest as they were: a property keeps its
+  // current values, and a function parameter keeps its defaults. A read reports every member, in
+  // declaration order. A member named twice is written twice, in order.
+  repeated StructField fields = 2;
+}
+
+// One member of a StructValue.
+message StructField {
+  // The member's authored name, which is how a nested address names it too.
+  string name = 1;
+  Value value = 2;
+}
+
+message StructArray { repeated StructValue values = 1; }
+
 // One typed value, independent of what it is assigned to. Used by SetProperty
 // as a property's new value and by CallFunction as an argument's value.
 //
@@ -804,6 +828,8 @@ message Value {
     StringArray asset_set_value = 36;
     StringArray actor_set_value = 37;
     StringArray component_set_value = 38;
+    StructValue struct_value = 39;
+    StructArray struct_array_value = 40;
   }
 }
 
@@ -1046,9 +1072,9 @@ message ClassPropertyDescriptor {
   bool readable = 3;
   // Blueprint-visible, not read-only, and expressible as one value.
   bool writable = 4;
-  // False when one Value cannot carry the whole property: a map, an arbitrary struct, or a
-  // container whose element has no repeated variant. Those are still reachable a member or an
-  // element at a time, by nested address.
+  // False when one Value cannot carry the whole property: a map, a struct with a member that
+  // cannot be carried either, or a container whose element has no repeated variant. Those are
+  // still reachable a member or an element at a time, by nested address.
   bool value_expressible = 5;
   // Accessor UFUNCTION names, when the property declares them. Writing such a property through
   // SetProperty writes its memory directly and skips the accessor. These come from metadata, which
@@ -1077,8 +1103,8 @@ message ClassFunctionDescriptor {
   // Why not, when `callable` is false.
   string unsupported_reason = 5;
   // Whether every input can be supplied as one Value, so a caller can pass plain positional
-  // arguments. False when an input is an arbitrary struct, which the server will still take a
-  // member at a time by nested address.
+  // arguments. False when an input is a map, or a struct with a member that cannot be carried,
+  // which the server will still take a member at a time by nested address.
   bool positional = 6;
   // In declaration order, because that order is the calling convention.
   repeated ClassParameterDescriptor parameters = 7;
@@ -1125,10 +1151,15 @@ message ClassDescriptor {
 }
 
 message StructDescriptor {
+  // The struct's C++ name, which is what a StructValue's struct_name carries.
   string name = 1;
+  // Every reflected member, inherited ones included, sorted by name.
   repeated ClassPropertyDescriptor members = 2;
   // As ClassDescriptor.content_hash, over this struct's name and members.
   string content_hash = 3;
+  // Whether the whole struct travels as one StructValue: true when every member can be carried as
+  // a Value. When false it is reachable only a member at a time, by nested address.
+  bool value_expressible = 4;
 }
 
 message EnumDescriptor {

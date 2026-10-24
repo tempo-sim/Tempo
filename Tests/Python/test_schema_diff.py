@@ -131,7 +131,7 @@ def test_a_removed_struct_member_is_breaking(baseline):
     def mutate(new):
         for s in new["structs"]:
             if s["name"] == "FWidgetSettings":
-                s["members"] = []
+                s["members"] = [m for m in s["members"] if m["name"] != "Scale"]
     breaking, _ = changes(baseline, mutate)
     assert breaking == ["struct member Scale removed"]
 

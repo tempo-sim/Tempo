@@ -2,10 +2,14 @@
 
 #include "TempoWorldReflection.h"
 
+#include "Camera/CameraTypes.h"
 #include "Components/SceneComponent.h"
+#include "Engine/DataTable.h"
+#include "Engine/HitResult.h"
 #include "GameFramework/Actor.h"
 #include "Kismet/KismetSystemLibrary.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/ScopeExit.h"
 
 // Unit tests for the one classifier every TempoWorld path derives its view of an FProperty from.
 // No world and no RHI: the pure cases build FTypeInfo directly, and the rest classify properties off
@@ -84,8 +88,8 @@ bool FTempoWorldReflectionValueExpressibleTest::RunTest(const FString& Parameter
 	}
 
 	TestFalse(TEXT("unsupported"), Scalar(EValueKind::Unsupported).IsValueExpressible());
-	// Reachable as "MyStruct.Inner", never as one value.
-	TestFalse(TEXT("arbitrary struct"), Scalar(EValueKind::Struct).IsValueExpressible());
+	// A struct is decided by its members (see StructValues), so one with no struct to look at is not.
+	TestFalse(TEXT("struct with no UScriptStruct"), Scalar(EValueKind::Struct).IsValueExpressible());
 
 	// Containers, element by element: a Value has repeated variants only for the scalar kinds and
 	// the object references.
@@ -97,7 +101,7 @@ bool FTempoWorldReflectionValueExpressibleTest::RunTest(const FString& Parameter
 	// No repeated variant exists for these, so the whole container is nested-access only.
 	TestFalse(TEXT("array of vector"), Container(EValueKind::Array, EValueKind::Vector).IsValueExpressible());
 	TestFalse(TEXT("array of transform"), Container(EValueKind::Array, EValueKind::Transform).IsValueExpressible());
-	TestFalse(TEXT("array of struct"), Container(EValueKind::Array, EValueKind::Struct).IsValueExpressible());
+	TestFalse(TEXT("array of a struct with no UScriptStruct"), Container(EValueKind::Array, EValueKind::Struct).IsValueExpressible());
 	TestFalse(TEXT("array of unsupported"), Container(EValueKind::Array, EValueKind::Unsupported).IsValueExpressible());
 	TestFalse(TEXT("nested array"), Container(EValueKind::Array, EValueKind::Array).IsValueExpressible());
 
@@ -405,6 +409,137 @@ bool FTempoWorldReflectionReadAddressingTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("inner address on a scalar"),
 		Resolve(Actor, TEXT("bHidden"), TEXT("X"), Container, Leaf, Error), EAddressError::Invalid);
 	TestTrue(TEXT("scalar says it has no inner properties"), Error.Contains(TEXT("no inner properties")));
+
+	return true;
+}
+
+// Which structs travel as one StructValue: those whose every reflected member can, recursively.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTempoWorldReflectionStructValuesTest,
+	"Tempo.World.Reflection.StructValues", TempoWorldReflectionTestFlags)
+bool FTempoWorldReflectionStructValuesTest::RunTest(const FString& Parameters)
+{
+	// The struct a quarter of the withheld functions hand back. Its component and physical material
+	// are weak references, and its hit object a struct holding one, so this is also the test that a
+	// weak reference is a reference rather than unsupported.
+	TestTrue(TEXT("FHitResult"), IsStructValueExpressible(FHitResult::StaticStruct()));
+
+	// Its members are found by their own classification, inherited ones included.
+	const FProperty* HitComponent = FHitResult::StaticStruct()->FindPropertyByName(TEXT("Component"));
+	if (TestNotNull(TEXT("FHitResult has a Component"), HitComponent))
+	{
+		TestEqual(TEXT("a weak component pointer is a component reference"),
+			ClassifyProperty(HitComponent).Kind, EValueKind::Component);
+	}
+
+	// FVector_NetQuantize declares nothing; its X, Y and Z are FVector's. Declared-only iteration
+	// would call it memberless, and so not a value at all.
+	TestTrue(TEXT("a struct whose members are all inherited"),
+		IsStructValueExpressible(FVector_NetQuantize::StaticStruct()));
+
+	// FPostProcessSettings has a C-style array (LensFlareTints[8]), so one Value cannot carry it.
+	TestFalse(TEXT("a struct with an inexpressible member"),
+		IsStructValueExpressible(FPostProcessSettings::StaticStruct()));
+	// And a struct holding one inherits that, however deep.
+	TestFalse(TEXT("a struct holding an inexpressible struct"),
+		IsStructValueExpressible(FMinimalViewInfo::StaticStruct()));
+	// Nothing reflected at all: whatever it holds, a read could not report it.
+	TestFalse(TEXT("a struct with no members"), IsStructValueExpressible(FTableRowBase::StaticStruct()));
+	TestFalse(TEXT("no struct"), IsStructValueExpressible(nullptr));
+
+	// The answer is cached for a native struct; asking twice must agree.
+	TestTrue(TEXT("cached answer agrees"), IsStructValueExpressible(FHitResult::StaticStruct()));
+
+	// Functions follow: an input or output of such a struct no longer withholds the function.
+	const UFunction* LineTrace = UKismetSystemLibrary::StaticClass()->FindFunctionByName(TEXT("LineTraceSingle"));
+	if (TestNotNull(TEXT("LineTraceSingle"), LineTrace))
+	{
+		const FFunctionInfo Info = ClassifyFunction(LineTrace);
+		TestTrue(TEXT("LineTraceSingle is positional"), Info.AllInputsValueExpressible());
+		const FParameterInfo* OutHit = Info.Parameters.FindByPredicate(
+			[](const FParameterInfo& Parameter) { return Parameter.Name == TEXT("OutHit"); });
+		if (TestNotNull(TEXT("LineTraceSingle has OutHit"), OutHit))
+		{
+			TestEqual(TEXT("OutHit is an output"), OutHit->Kind, EParameterKind::Output);
+			TestTrue(TEXT("OutHit can be read back as one value"), OutHit->Type.IsValueExpressible());
+		}
+	}
+
+	// An array of a value-expressible struct has a variant; a set of one does not.
+	const UFunction* LineTraceMulti = UKismetSystemLibrary::StaticClass()->FindFunctionByName(TEXT("LineTraceMulti"));
+	if (TestNotNull(TEXT("LineTraceMulti"), LineTraceMulti))
+	{
+		const FProperty* OutHits = LineTraceMulti->FindPropertyByName(TEXT("OutHits"));
+		if (TestNotNull(TEXT("LineTraceMulti has OutHits"), OutHits))
+		{
+			TestTrue(TEXT("array of FHitResult"), ClassifyProperty(OutHits).IsValueExpressible());
+		}
+	}
+	FTypeInfo SetOfHits;
+	SetOfHits.Kind = EValueKind::Set;
+	SetOfHits.ElementType = MakeShared<FTypeInfo>();
+	SetOfHits.ElementType->Kind = EValueKind::Struct;
+	SetOfHits.ElementType->Struct = FHitResult::StaticStruct();
+	TestFalse(TEXT("set of FHitResult"), SetOfHits.IsValueExpressible());
+
+	return true;
+}
+
+// Resolving an address for writing, which -- unlike reading -- makes room for what it names.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTempoWorldReflectionWriteAddressingTest,
+	"Tempo.World.Reflection.WriteAddressing", TempoWorldReflectionTestFlags)
+bool FTempoWorldReflectionWriteAddressingTest::RunTest(const FString& Parameters)
+{
+	// A function's parameter frame is a real container with an array in it, and needs no world.
+	UFunction* LineTraceMulti = UKismetSystemLibrary::StaticClass()->FindFunctionByName(TEXT("LineTraceMulti"));
+	if (!TestNotNull(TEXT("LineTraceMulti"), LineTraceMulti))
+	{
+		return false;
+	}
+	FProperty* OutHits = LineTraceMulti->FindPropertyByName(TEXT("OutHits"));
+	if (!TestNotNull(TEXT("OutHits"), OutHits))
+	{
+		return false;
+	}
+
+	uint8* Frame = static_cast<uint8*>(FMemory_Alloca_Aligned(LineTraceMulti->ParmsSize, LineTraceMulti->GetMinAlignment()));
+	FMemory::Memzero(Frame, LineTraceMulti->ParmsSize);
+	for (TFieldIterator<FProperty> It(LineTraceMulti); It && It->HasAnyPropertyFlags(CPF_Parm); ++It)
+	{
+		It->InitializeValue_InContainer(Frame);
+	}
+	ON_SCOPE_EXIT
+	{
+		for (TFieldIterator<FProperty> It(LineTraceMulti); It && It->HasAnyPropertyFlags(CPF_Parm); ++It)
+		{
+			It->DestroyValue_InContainer(Frame);
+		}
+	};
+
+	const FArrayProperty* ArrayProperty = CastFieldChecked<FArrayProperty>(OutHits);
+	auto Length = [&]() { return FScriptArrayHelper(ArrayProperty, OutHits->ContainerPtrToValuePtr<void>(Frame)).Num(); };
+
+	void* Container = nullptr;
+	FProperty* Leaf = nullptr;
+	FString Error;
+
+	// Index == length appends, which a read must not do.
+	TestEqual(TEXT("append at the end"),
+		ResolveNestedPropertyForWrite(Frame, OutHits, TEXT("0"), Container, Leaf, Error), EAddressError::None);
+	TestEqual(TEXT("the array grew"), Length(), 1);
+	TestTrue(TEXT("lands on the element"), Leaf && CastField<FStructProperty>(Leaf) != nullptr);
+
+	// Into a member of that element, through an inherited one.
+	TestEqual(TEXT("a member of the element"),
+		ResolveNestedPropertyForWrite(Frame, OutHits, TEXT("0.ImpactPoint.X"), Container, Leaf, Error), EAddressError::None);
+	TestEqual(TEXT("no second element"), Length(), 1);
+
+	// Past the end is still out of range: only the next index can be made.
+	TestEqual(TEXT("past the end"),
+		ResolveNestedPropertyForWrite(Frame, OutHits, TEXT("3"), Container, Leaf, Error), EAddressError::OutOfRange);
+	TestEqual(TEXT("the array did not grow"), Length(), 1);
+
+	TestEqual(TEXT("unknown member"),
+		ResolveNestedPropertyForWrite(Frame, OutHits, TEXT("0.Nope"), Container, Leaf, Error), EAddressError::NotFound);
 
 	return true;
 }

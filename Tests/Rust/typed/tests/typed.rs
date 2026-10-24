@@ -12,6 +12,8 @@
 use std::time::{Duration, Instant};
 
 use project_classes::classes::engine::{Actor, StaticMeshActor};
+use project_classes::enums::EWalkableSlopeBehavior;
+use project_classes::structs::FWalkableSlopeOverride;
 use tempo_sim::unreal::{Class, Vector};
 use tempo_sim::world;
 
@@ -208,4 +210,37 @@ fn the_async_twin_reaches_the_same_property() {
         actor.actor().set_b_can_be_damaged_async(false).await.expect("set bCanBeDamaged");
         assert!(!actor.actor().b_can_be_damaged_async().await.expect("read bCanBeDamaged"));
     });
+}
+
+#[test]
+fn a_struct_argument_and_result_round_trip() {
+    connect();
+    let actor = spawn();
+    let component = actor.actor().static_mesh_component0();
+
+    // In through a parameter and out through a return value: one generated value type both ways.
+    component
+        .set_walkable_slope_override(FWalkableSlopeOverride {
+            walkable_slope_behavior: Some(EWalkableSlopeBehavior::WalkableSlope_Decrease),
+            walkable_slope_angle: Some(12.0),
+        })
+        .expect("SetWalkableSlopeOverride");
+    let back = component.get_walkable_slope_override().expect("GetWalkableSlopeOverride");
+    assert_eq!(back.walkable_slope_behavior, Some(EWalkableSlopeBehavior::WalkableSlope_Decrease));
+    assert!((back.walkable_slope_angle.expect("the angle comes back") - 12.0).abs() < 1e-3);
+}
+
+#[test]
+fn an_out_struct_comes_back_with_the_return_value() {
+    connect();
+    let actor = spawn();
+
+    // K2_SetActorLocation's FHitResult had no representation before struct values, so the method
+    // returned only its bool. It is now a value, read back by name.
+    let (moved, hit) = actor
+        .actor()
+        .k2_set_actor_location(Vector { x: 100.0, y: 0.0, z: 0.0 }, false, true)
+        .expect("K2_SetActorLocation");
+    assert!(moved);
+    assert_eq!(hit.b_blocking_hit, Some(false), "nothing to hit with the sweep off");
 }

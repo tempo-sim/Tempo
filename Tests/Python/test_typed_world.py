@@ -452,6 +452,110 @@ def test_calling_a_generated_method(sim_server):
         tw.destroy_actor(actor=spawned.actor)
 
 
+# -- struct values ----------------------------------------------------------------------------------
+
+def _struct_value(name, **fields):
+    value = WorldControl.Value()
+    value.struct_value.struct_name = name
+    for field_name, field_value in fields.items():
+        field = value.struct_value.fields.add()
+        field.name = field_name
+        field.value.CopyFrom(WorldControl.Value(**field_value))
+    return value
+
+
+def _fields(value):
+    return {field.name: field.value for field in value.struct_value.fields}
+
+
+def test_a_struct_property_reads_whole(root_component):
+    """Every member comes back, inherited ones included, so a read is the whole struct."""
+    actor, root = root_component
+    read = tw.get_property(actor=actor, component=root, property="BodyInstance", native_units=True)
+    assert read.WhichOneof("value") == "struct_value"
+    assert read.struct_value.struct_name == "FBodyInstance"
+    assert {"LinearDamping", "AngularDamping", "bEnableGravity"} <= set(_fields(read))
+
+
+def test_a_struct_write_is_a_merge(root_component):
+    """Only the members given are written; the rest keep what they held.
+
+    That is what makes a struct value safe to send without knowing every member -- which no client
+    does, since a struct can carry state reflection never reports.
+    """
+    actor, root = root_component
+    before = _fields(tw.get_property(actor=actor, component=root, property="BodyInstance",
+                                     native_units=True))
+    tw.set_property(actor=actor, component=root, property="BodyInstance", native_units=True,
+                    value=_struct_value("FBodyInstance", LinearDamping={"float_value": 0.75}))
+    after = _fields(tw.get_property(actor=actor, component=root, property="BodyInstance",
+                                    native_units=True))
+    assert after["LinearDamping"].float_value == pytest.approx(0.75)
+    assert after["AngularDamping"] == before["AngularDamping"], "an unmentioned member must not move"
+
+
+def test_a_nested_address_takes_a_struct_value(root_component):
+    actor, root = root_component
+    tw.set_property(actor=actor, component=root, property="BodyInstance", native_units=True,
+                    value=_struct_value("FBodyInstance", AngularDamping={"float_value": 0.25}))
+    assert tw.get_property(actor=actor, component=root, property="BodyInstance.AngularDamping",
+                           native_units=True).float_value == pytest.approx(0.25)
+
+
+def test_the_wrong_struct_is_refused(root_component):
+    actor, root = root_component
+    with pytest.raises(Exception, match="FHitResult"):
+        tw.set_property(actor=actor, component=root, property="BodyInstance", native_units=True,
+                        value=_struct_value("FHitResult", Time={"float_value": 1.0}))
+
+
+def test_a_struct_argument_and_result_round_trip(root_component):
+    """In through a parameter, out through a return value: the same struct, both ways."""
+    actor, root = root_component
+    tw.call_function(actor=actor, component=root, function="SetWalkableSlopeOverride",
+                     native_units=True,
+                     args=[{"name": "NewOverride", "value": _struct_value(
+                         "FWalkableSlopeOverride",
+                         WalkableSlopeBehavior={"enum_value": "WalkableSlope_Increase"},
+                         WalkableSlopeAngle={"float_value": 33.0})}])
+    returned = next(r for r in tw.call_function(
+        actor=actor, component=root, function="GetWalkableSlopeOverride", native_units=True).results
+        if r.name == "ReturnValue")
+    fields = _fields(returned.typed_value)
+    assert fields["WalkableSlopeBehavior"].enum_value == "WalkableSlope_Increase"
+    assert fields["WalkableSlopeAngle"].float_value == pytest.approx(33.0)
+
+
+@requires_classes
+def test_a_typed_struct_argument_and_result_round_trip(root_component):
+    actor, root = root_component
+    StaticMeshComponent = registered().python_class("/Script/Engine.StaticMeshComponent")
+    structs = registered().struct_class("FWalkableSlopeOverride")
+    mesh = StaticMeshComponent(actor, root)
+
+    mesh.SetWalkableSlopeOverride(structs(WalkableSlopeBehavior="WalkableSlope_Decrease",
+                                          WalkableSlopeAngle=12.0))
+    back = mesh.GetWalkableSlopeOverride()
+    assert type(back) is structs, "a struct result comes back as the generated value type"
+    assert back.WalkableSlopeBehavior == "WalkableSlope_Decrease"
+    assert back.WalkableSlopeAngle == pytest.approx(12.0)
+
+
+@requires_classes
+def test_an_out_struct_comes_back_by_name(sim_server):
+    """K2_SetActorLocation's FHitResult was withheld before struct values; now it is a result."""
+    StaticMeshActor = registered().python_class(SPAWNABLE)
+    spawned = world.spawn_actor(StaticMeshActor)
+    try:
+        results = spawned.K2_SetActorLocation(unreal.Vector(100.0, 0.0, 0.0), False, True)
+        assert results["ReturnValue"] is True
+        hit = results["SweepHitResult"]
+        assert type(hit).__tempo_struct__ == "FHitResult"
+        assert hit.bBlockingHit is False, "nothing to hit with sweep off"
+    finally:
+        tw.destroy_actor(actor=spawned.actor)
+
+
 # -- Phase 4: filtered discovery, watching, and the asset catalog ---------------------------------
 
 @pytest.fixture

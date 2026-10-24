@@ -65,7 +65,8 @@ def _surface(response):
                 "properties": members(cls.properties),
                 "functions": {function.name: {"signature": function.signature,
                                               "parameters": parameters(function),
-                                              "callable": function.callable}
+                                              "callable": function.callable,
+                                              "positional": function.positional}
                               for function in cls.functions},
                 "components": {component.name: component.class_path
                                for component in cls.components},
@@ -73,6 +74,7 @@ def _surface(response):
             for cls in response.classes
         },
         "structs": {entry.name: {"content_hash": entry.content_hash,
+                                 "value_expressible": entry.value_expressible,
                                  "members": members(entry.members)}
                     for entry in response.structs},
         "enums": {entry.name: {"content_hash": entry.content_hash,

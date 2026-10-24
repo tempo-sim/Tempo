@@ -1757,6 +1757,21 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 			*Value = Path.IsEmpty() ? TEXT("null") : Path;
 		}
 	}
+	else if (const FWeakObjectProperty* WeakObjectProperty = CastField<FWeakObjectProperty>(Property))
+	{
+		if (Value)
+		{
+			const UObject* ValueObject = WeakObjectProperty->GetObjectPropertyValue_InContainer(Container);
+			if (const AActor* Actor = Cast<AActor>(ValueObject))
+			{
+				*Value = UTempoCoreUtils::GetActorIdentifier(Actor);
+			}
+			else
+			{
+				*Value = ValueObject ? ValueObject->GetName() : TEXT("null");
+			}
+		}
+	}
 	else if (const FStructProperty* StructProperty = CastField<FStructProperty>(Property))
 	{
 		if (StructProperty->Struct->GetStructCPPName() == TEXT("FVector"))
@@ -2127,6 +2142,7 @@ void UTempoWorldControlServiceSubsystem::DescribeClasses(const DescribeClassesRe
 		TempoWorld::StructDescriptor* Struct = Response.add_structs();
 		Struct->set_name(TCHAR_TO_UTF8(*Entry.Name));
 		Struct->set_content_hash(TCHAR_TO_UTF8(*TempoWorldSchemaWalk::HashStruct(Entry)));
+		Struct->set_value_expressible(Entry.bValueExpressible);
 		for (const TempoWorldSchemaWalk::FMember& Member : Entry.Members)
 		{
 			WriteMemberDescriptor(Member, *Struct->add_members());
@@ -2218,6 +2234,27 @@ grpc::Status ReadContainerElement(const void* ElementPtr, const FProperty* Eleme
 {
 	// An element property's offset is zero, so the element pointer is also its container.
 	return WritePropertyToValue(ElementPtr, ElementProperty, bNativeUnits, OutValue);
+}
+
+// Read every member of a struct into a StructValue, each by the scalar or nested paths below. Only
+// reached for a struct the classifier calls value-expressible, so every member has a representation.
+grpc::Status WriteStructToValue(const UScriptStruct* Struct, const void* StructPtr, bool bNativeUnits,
+	TempoWorld::StructValue& OutValue)
+{
+	OutValue.set_struct_name(TCHAR_TO_UTF8(*Struct->GetStructCPPName()));
+	for (TFieldIterator<FProperty> It(Struct); It; ++It)
+	{
+		TempoWorld::StructField* Field = OutValue.add_fields();
+		// The authored name, which is what a nested address resolves a member by.
+		Field->set_name(TCHAR_TO_UTF8(*It->GetAuthoredName()));
+		// A member's offset is relative to the struct, so the struct is its container.
+		const grpc::Status Status = WritePropertyToValue(StructPtr, *It, bNativeUnits, *Field->mutable_value());
+		if (!Status.ok())
+		{
+			return Status;
+		}
+	}
+	return grpc::Status_OK;
 }
 
 // Read a property into a Value. The inverse of SetValueOnTarget, and driven by the same classifier,
@@ -2417,6 +2454,12 @@ grpc::Status WritePropertyToValue(const void* Container, const FProperty* Proper
 		Out->set_r(V.R); Out->set_g(V.G); Out->set_b(V.B);
 		return grpc::Status_OK;
 	}
+	case EValueKind::Struct:
+	{
+		const FStructProperty* StructProperty = CastFieldChecked<FStructProperty>(Property);
+		return WriteStructToValue(StructProperty->Struct, StructProperty->ContainerPtrToValuePtr<void>(Container),
+			bNativeUnits, *OutValue.mutable_struct_value());
+	}
 	case EValueKind::Class:
 	case EValueKind::Asset:
 	case EValueKind::Actor:
@@ -2434,6 +2477,11 @@ grpc::Status WritePropertyToValue(const void* Container, const FProperty* Proper
 			// A soft reference names its target whether or not it is loaded, so report the stored
 			// path rather than resolving it.
 			Name = PS->GetPropertyValue_InContainer(Container).ToString();
+		}
+		else if (const FWeakObjectProperty* PW = CastField<FWeakObjectProperty>(Property))
+		{
+			// A weak reference to something since destroyed reads as nothing, as it would in C++.
+			Name = NameReferencedObject(PW->GetObjectPropertyValue_InContainer(Container), Type.Kind);
 		}
 		else { return grpc::Status(grpc::INTERNAL, "reference-kinded property of unexpected type"); }
 
@@ -2540,6 +2588,13 @@ grpc::Status WritePropertyToValue(const void* Container, const FProperty* Proper
 		{
 			TempoWorld::StringArray* Out = bIsSet ? OutValue.mutable_component_set_value() : OutValue.mutable_component_array_value();
 			for (const PropertyValue& Element : Elements) { Out->add_values(Element.component_value()); }
+			break;
+		}
+		case EValueKind::Struct:
+		{
+			// Arrays only: IsValueExpressible excludes a set of structs.
+			TempoWorld::StructArray* Out = OutValue.mutable_struct_array_value();
+			for (PropertyValue& Element : Elements) { *Out->add_values() = MoveTemp(*Element.mutable_struct_value()); }
 			break;
 		}
 		default:
@@ -2786,6 +2841,13 @@ template <>
 grpc::Status SetSinglePropertyValue<FSoftObjectProperty, UObject*>(void* ValuePtr, FSoftObjectProperty* Property, UObject* const& ValueObj)
 {
 	// Also handles FSoftClassProperty (derives from FSoftObjectProperty).
+	Property->SetObjectPropertyValue(ValuePtr, ValueObj);
+	return grpc::Status_OK;
+}
+
+template <>
+grpc::Status SetSinglePropertyValue<FWeakObjectProperty, UObject*>(void* ValuePtr, FWeakObjectProperty* Property, UObject* const& ValueObj)
+{
 	Property->SetObjectPropertyValue(ValuePtr, ValueObj);
 	return grpc::Status_OK;
 }
@@ -3180,32 +3242,40 @@ grpc::Status SetStructOnTarget(const UWorld* World, const FPropertyTarget& Targe
 // also catches FSoftClassProperty (which derives from FSoftObjectProperty).
 grpc::Status SetObjectOnTarget(const UWorld* World, const FPropertyTarget& Target, UObject* Object)
 {
-	return TryTypesOnTarget<FObjectProperty, FSoftObjectProperty>(World, Target, Object);
+	return TryTypesOnTarget<FObjectProperty, FSoftObjectProperty, FWeakObjectProperty>(World, Target, Object);
 }
 
 grpc::Status SetObjectArrayOnTarget(const UWorld* World, const FPropertyTarget& Target, const TArray<UObject*>& Objects)
 {
-	// First try to set it as an FObjectProperty array, then fall back on an FSoftObjectProperty array.
+	// Hard, then soft, then weak. An error other than FAILED_PRECONDITION means the type was right
+	// and something else was wrong, so it is the answer.
 	const grpc::Status ObjectStatus = SetArrayOnTarget<FObjectProperty>(World, Target, Objects);
-
-	// If we got an error other than FAILED_PRECONDITION that means the type was right, but something else was wrong.
 	if (ObjectStatus.ok() || ObjectStatus.error_code() != grpc::FAILED_PRECONDITION)
 	{
 		return ObjectStatus;
 	}
-
-	return SetArrayOnTarget<FSoftObjectProperty>(World, Target, Objects);
+	const grpc::Status SoftStatus = SetArrayOnTarget<FSoftObjectProperty>(World, Target, Objects);
+	if (SoftStatus.ok() || SoftStatus.error_code() != grpc::FAILED_PRECONDITION)
+	{
+		return SoftStatus;
+	}
+	return SetArrayOnTarget<FWeakObjectProperty>(World, Target, Objects);
 }
 
 grpc::Status SetObjectSetOnTarget(const UWorld* World, const FPropertyTarget& Target, const TArray<UObject*>& Objects)
 {
-	// First try to set it as an FObjectProperty set, then fall back on an FSoftObjectProperty set.
+	// As for arrays: hard, then soft, then weak.
 	const grpc::Status ObjectStatus = SetSetOnTarget<FObjectProperty>(World, Target, Objects);
 	if (ObjectStatus.ok() || ObjectStatus.error_code() != grpc::FAILED_PRECONDITION)
 	{
 		return ObjectStatus;
 	}
-	return SetSetOnTarget<FSoftObjectProperty>(World, Target, Objects);
+	const grpc::Status SoftStatus = SetSetOnTarget<FSoftObjectProperty>(World, Target, Objects);
+	if (SoftStatus.ok() || SoftStatus.error_code() != grpc::FAILED_PRECONDITION)
+	{
+		return SoftStatus;
+	}
+	return SetSetOnTarget<FWeakObjectProperty>(World, Target, Objects);
 }
 
 template <typename RepeatedStringType>
@@ -3310,6 +3380,155 @@ grpc::Status ResolveComponents(const UWorld* World, const RepeatedStringType& Va
 		OutComponents.Add(Component);
 	}
 	return grpc::Status_OK;
+}
+
+grpc::Status SetValueOnTarget(const UWorld* World, const FPropertyTarget& Target, const PropertyValue& Value,
+	bool bNativeUnits);
+
+grpc::Status AddressErrorStatus(TempoWorldReflection::EAddressError Error, const FString& Message)
+{
+	grpc::StatusCode Code = grpc::FAILED_PRECONDITION;
+	switch (Error)
+	{
+	case TempoWorldReflection::EAddressError::NotFound:   Code = grpc::NOT_FOUND; break;
+	case TempoWorldReflection::EAddressError::OutOfRange: Code = grpc::OUT_OF_RANGE; break;
+	default: break;
+	}
+	return grpc::Status(Code, std::string(TCHAR_TO_UTF8(*Message)));
+}
+
+// Write the fields of a StructValue into the struct at StructPtr, each through SetValueOnTarget.
+//
+// A merge: a member the value does not mention keeps what it holds. That is what lets a client that
+// knows only some of a struct's members -- every client, since a struct can carry state reflection
+// does not report -- write one without clobbering the rest, and it is what a nested-address write
+// of one member has always done. Each member is converted, range-checked and type-matched by the
+// same code as any other property, because it goes through the same function.
+grpc::Status WriteStructFields(const UWorld* World, const UScriptStruct* Struct, void* StructPtr,
+	const TempoWorld::StructValue& Value, bool bNativeUnits)
+{
+	const FString StructName = Struct->GetStructCPPName();
+	if (!Value.struct_name().empty())
+	{
+		const FString Given(UTF8_TO_TCHAR(Value.struct_name().c_str()));
+		if (Given != StructName)
+		{
+			const FString ErrorMsg = FString::Printf(TEXT("A '%s' was given where a '%s' is expected"), *Given, *StructName);
+			return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+		}
+	}
+
+	for (const TempoWorld::StructField& Field : Value.fields())
+	{
+		const FString FieldName(UTF8_TO_TCHAR(Field.name().c_str()));
+		FProperty* Member = nullptr;
+		for (FProperty* Candidate = Struct->PropertyLink; Candidate; Candidate = Candidate->PropertyLinkNext)
+		{
+			if (Candidate->GetAuthoredName() == FieldName)
+			{
+				Member = Candidate;
+				break;
+			}
+		}
+		if (!Member)
+		{
+			const FString ErrorMsg = FString::Printf(TEXT("Struct '%s' has no member '%s'"), *StructName, *FieldName);
+			return grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+		}
+
+		// No owning object: the edit is announced once, for the whole struct, by the caller.
+		FPropertyTarget MemberTarget;
+		MemberTarget.Container = StructPtr;
+		MemberTarget.Property = Member;
+		const grpc::Status Status = SetValueOnTarget(World, MemberTarget, Field.value(), bNativeUnits);
+		if (!Status.ok())
+		{
+			const FString ErrorMsg = FString::Printf(TEXT("%s.%s: %s"), *StructName, *FieldName, UTF8_TO_TCHAR(Status.error_message().c_str()));
+			return grpc::Status(Status.error_code(), std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+		}
+	}
+	return grpc::Status_OK;
+}
+
+// A StructValue into a struct-valued property, parameter, or nested address naming one.
+grpc::Status SetStructValueOnTarget(const UWorld* World, const FPropertyTarget& Target,
+	const TempoWorld::StructValue& Value, bool bNativeUnits)
+{
+	grpc::Status Status = grpc::Status_OK;
+	{
+		FScopedPropertyEdit EditScope(World, Target);
+
+		void* LeafContainer = nullptr;
+		FProperty* Leaf = nullptr;
+		FString ResolveError;
+		const TempoWorldReflection::EAddressError AddressError = TempoWorldReflection::ResolveNestedPropertyForWrite(
+			Target.Container, Target.Property, Target.InnerPropertyName, LeafContainer, Leaf, ResolveError);
+		if (AddressError != TempoWorldReflection::EAddressError::None)
+		{
+			return AddressErrorStatus(AddressError, ResolveError);
+		}
+
+		const FStructProperty* StructProperty = CastField<FStructProperty>(Leaf);
+		if (!StructProperty)
+		{
+			const FString ErrorMsg = FString::Printf(TEXT("Property '%s' has type '%s' but a struct was given"), *Leaf->GetName(), *Leaf->GetCPPType());
+			return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+		}
+
+		Status = WriteStructFields(World, StructProperty->Struct, StructProperty->ContainerPtrToValuePtr<void>(LeafContainer),
+			Value, bNativeUnits);
+	}
+
+	if (Status.ok())
+	{
+		MarkRenderStateDirty(Target.Object);
+	}
+	return Status;
+}
+
+// A StructArray replaces the whole array, as every other array variant does. Each element starts
+// from the struct's defaults, so a member an element does not mention is the default rather than
+// whatever happened to be at that index before.
+grpc::Status SetStructArrayOnTarget(const UWorld* World, const FPropertyTarget& Target,
+	const TempoWorld::StructArray& Values, bool bNativeUnits)
+{
+	grpc::Status Status = grpc::Status_OK;
+	{
+		FScopedPropertyEdit EditScope(World, Target);
+
+		void* LeafContainer = nullptr;
+		FProperty* Leaf = nullptr;
+		FString ResolveError;
+		const TempoWorldReflection::EAddressError AddressError = TempoWorldReflection::ResolveNestedPropertyForWrite(
+			Target.Container, Target.Property, Target.InnerPropertyName, LeafContainer, Leaf, ResolveError);
+		if (AddressError != TempoWorldReflection::EAddressError::None)
+		{
+			return AddressErrorStatus(AddressError, ResolveError);
+		}
+
+		const FArrayProperty* ArrayProperty = CastField<FArrayProperty>(Leaf);
+		const FStructProperty* ElementProperty = ArrayProperty ? CastField<FStructProperty>(ArrayProperty->Inner) : nullptr;
+		if (!ElementProperty)
+		{
+			const FString ErrorMsg = FString::Printf(TEXT("Property '%s' has type '%s' but an array of structs was given"), *Leaf->GetName(), *Leaf->GetCPPType());
+			return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+		}
+
+		FScriptArrayHelper ArrayHelper{ ArrayProperty, ArrayProperty->ContainerPtrToValuePtr<void>(LeafContainer) };
+		ArrayHelper.EmptyValues();
+		ArrayHelper.AddValues(Values.values_size());
+		for (int32 Index = 0; Index < Values.values_size() && Status.ok(); ++Index)
+		{
+			// An element's offset is zero, so the element pointer is its own value pointer.
+			Status = WriteStructFields(World, ElementProperty->Struct, ArrayHelper.GetRawPtr(Index), Values.values(Index), bNativeUnits);
+		}
+	}
+
+	if (Status.ok())
+	{
+		MarkRenderStateDirty(Target.Object);
+	}
+	return Status;
 }
 
 // The one place that knows how each Value variant maps onto Unreal property types. Both the
@@ -3684,6 +3903,14 @@ grpc::Status SetValueOnTarget(const UWorld* World, const FPropertyTarget& Target
 			return Status;
 		}
 		return SetObjectSetOnTarget(World, Target, ComponentArray);
+	}
+	case PropertyValue::kStructValue:
+	{
+		return SetStructValueOnTarget(World, Target, Value.struct_value(), bNativeUnits);
+	}
+	case PropertyValue::kStructArrayValue:
+	{
+		return SetStructArrayOnTarget(World, Target, Value.struct_array_value(), bNativeUnits);
 	}
 	case PropertyValue::VALUE_NOT_SET:
 	default:

@@ -722,7 +722,7 @@ an empty subscription map, so a project that never streams pays nothing measurab
 | **5 — Rust** | `gen_rust_classes.py` + a `tempo_sim::unreal` runtime, off the same `tempo_schema.json` | Designed and measured in §15. |
 | **6 — C++** | generator off the same `tempo_schema.json` | Not started. |
 | **7 — Published classes** | an engine-core + Tempo subset inside the published `tempo-sim` wheel and crate, namespaced by engine version; per-class drift checking | Designed and measured in §16. Independent of 6. |
-| **8 — Struct values** | a `StructValue` variant; value-expressible structs in the classifier; struct arguments, results and whole-struct writes in both clients | Designed in §17. A quarter of the function surface needs it. |
+| **8 — Struct values** | a `StructValue` variant; value-expressible structs in the classifier; struct arguments, results and whole-struct writes in both clients | Designed in §17. **Done**; see §17.7. |
 | **9 — One ordered batch** | `RunBatch` carrying sets, gets and calls in order within one tick; deferred and immediate reads in both clients | Designed in §18. Fixes reads inside a batch seeing pre-batch values. |
 | **10 — Asset catalog** | cooked assets from the packaged build; `AssetRef[T]` typed by class; a generated catalog per mount point; drift reporting | Designed in §19. |
 
@@ -1245,9 +1245,10 @@ parameter or return value. A quarter of the function surface, and the quarter th
 
 ```proto
 message StructValue {
-  string struct_name = 1;          // "FHitResult" -- the schema's name for it; empty accepts any
-  map<string, Value> fields = 2;   // by authored member name
+  string struct_name = 1;               // "FHitResult" -- the schema's name for it; empty accepts any
+  repeated StructField fields = 2;      // in declaration order on a read
 }
+message StructField { string name = 1; Value value = 2; }   // by authored member name
 message StructArray { repeated StructValue values = 1; }
 
 // in Value's oneof:
@@ -1336,6 +1337,53 @@ struct of `Option` fields beside the existing proxy, for the same reason.
 A function whose struct parameter is not value-expressible by §17.3, and one with a `TSet` of
 structs or a map. Those were already absent and stay absent, by the rule that an unsupported type is
 omitted rather than loosened.
+
+### 17.7 As built
+
+Measured on TempoSample's editor walk: **1,230 of 1,558 structs are value-expressible**, and
+positional functions go from **14,977 to 17,410** of 18,882 callable — 2,433 newly offered. Six
+things differ from the design above or were found doing it.
+
+**Weak references became references.** `FHitResult`, the struct the section leads with, holds its
+component and physical material as `TWeakObjectPtr`, and its hit object as an `FActorInstanceHandle`
+holding another — and a weak property was unsupported, so under §17.3 `FHitResult` would not have
+been a value at all. A weak reference is the same kind of value as a hard one, something named or
+nothing, so it is now classified as one (Actor, Component or Asset by pointee) and read and written
+as one. That also makes 19 Blueprint-visible weak-pointer *properties* reachable that were not. A
+`UObject`-typed reference names its target by path, which for an actor is not an asset path, so
+`GetAssetByPath` falls back to resolving a loaded object by path — which is what lets a read
+`FHitResult` be written straight back.
+
+**`repeated StructField`, not `map<string, Value>`.** A proto map pulls protobuf's map internals
+into the generated `.pb.cc`, and those call Abseil logging symbols that the shared `tempogrpc`
+library does not export, so `TempoWorld` failed to link. That would be fixed in TempoThirdParty's
+`exports.def`, not here; a repeated name/value pair needs no new symbols and gives a read a
+deterministic order besides.
+
+**Out parameters are typed by name in Python.** A method with carryable out parameters has always
+returned a dict keyed by name, while its stub declared only the return type — `-> bool` for
+`K2_SetActorLocation`. That was already wrong for vector out parameters (`GetActorBounds`), and
+struct values would have made it wrong for every function with an `FHitResult`. The stub now
+declares a `TypedDict` per such method. Rust already returned a tuple read by name, and now carries
+the `FHitResult` in it.
+
+**Python withholds what it cannot answer, as Rust did.** A function whose return value cannot be
+carried was offered and answered `None`; a container property with no variant (an array of vectors)
+was declared in the stub and absent from the runtime metadata. Both now are omitted.
+
+**Rust proxies are `<Name>Ref`.** The plain name goes to the value type, which is the one a scenario
+writes out; the proxy is what a struct property's accessor returns and is rarely named. Generated
+class handles also derive `Clone`, `Debug`, `PartialEq` and `Eq`, which a struct value holding a
+component reference needs.
+
+**Rust string literals were wrong outside ASCII.** They were emitted with `json.dumps`, whose
+`\uXXXX` escapes and surrogate pairs Rust rejects — and TempoSample's Ultra Dynamic Sky Blueprint
+names a function with an emoji, so the full crate did not compile. Found here only because the
+full crate was built against the new struct values; `rust_str` now emits UTF-8.
+
+The schema is **version 3**: struct entries carry their inherited members and `value_expressible`,
+and `filter_schema.py` takes that flag and each function's `positional` from the packaged build, as
+it does every other flag.
 
 ---
 

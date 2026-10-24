@@ -87,6 +87,77 @@ class Color:
     B: int = 0
 
 
+class Struct:
+    """The base of every generated struct: a value, as opposed to a StructProxy's live handle.
+
+    Built by a scenario to pass whole -- to a function, or to assign to a struct property -- and
+    handed back by a read of one. Only the members it has been given travel, and a write sets only
+    those, leaving the rest of the destination as it was; so a value built with one member is the
+    same write as assigning that member through the proxy.
+
+    Holds its members in a dict rather than in slots, because a struct read back from the server can
+    carry members this package does not declare. The generated subclass names the Unreal struct it
+    stands for and nothing else; what its members are comes from the package's metadata, as a
+    class's do.
+    """
+
+    __tempo_struct__ = ""
+
+    __slots__ = ("_fields",)
+
+    def __init__(self, **fields):
+        object.__setattr__(self, "_fields", {})
+        for name, value in fields.items():
+            # Through __setattr__, so a constructor argument is checked exactly as an assignment is.
+            setattr(self, name, value)
+
+    @classmethod
+    def _from_fields(cls, fields):
+        """A value as the server reported it: every member, read-only ones included."""
+        value = cls.__new__(cls)
+        object.__setattr__(value, "_fields", dict(fields))
+        return value
+
+    @classmethod
+    def _members(cls):
+        return _classes.struct_members(cls.__tempo_struct__)
+
+    def __getattr__(self, name):
+        if name.startswith("_"):
+            raise AttributeError(name)
+        fields = object.__getattribute__(self, "_fields")
+        if name in fields:
+            return fields[name]
+        members = self._members()
+        if name in members:
+            raise AttributeError("{}.{} was not set on this value".format(type(self).__name__, name))
+        raise AttributeError("{} has no member {!r}.{}".format(
+            type(self).__name__, name, _suggest(name, list(members))))
+
+    def __setattr__(self, name, value):
+        if name.startswith("_"):
+            object.__setattr__(self, name, value)
+            return
+        members = self._members()
+        member = members.get(name)
+        if member is None:
+            raise AttributeError("{} has no member {!r}.{}".format(
+                type(self).__name__, name, _suggest(name, list(members))))
+        if member.get("variant") is None:
+            raise AttributeError("{}.{} cannot be carried as one value".format(type(self).__name__, name))
+        if not member.get("writable"):
+            raise AttributeError("{}.{} is read-only".format(type(self).__name__, name))
+        self._fields[name] = value
+
+    def __eq__(self, other):
+        return (isinstance(other, Struct) and type(self).__tempo_struct__ == type(other).__tempo_struct__
+                and self._fields == other._fields)
+
+    def __repr__(self):
+        return "{}({})".format(type(self).__name__, ", ".join(
+            "{}={!r}".format(name, value) for name, value in sorted(self._fields.items())))
+
+
 class Object:
     """The root of the generated class hierarchy.
 
@@ -196,8 +267,9 @@ class Object:
             if entry is None:
                 break
             for name, member in entry["properties"].items():
-                # A struct is addressed through its members, so there is nothing to prefetch.
-                if member.get("variant") is not None:
+                # A struct property reads as a proxy, which is addressed through its members, so
+                # there is nothing to prefetch.
+                if member.get("variant") is not None and not _is_proxied(member):
                     names.append(name)
             class_path = entry.get("super") or ""
         return names
@@ -243,7 +315,7 @@ class Object:
             raise AttributeError(name)
         member = _classes.find_property(type(self).__tempo_class__, name)
         if member is not None:
-            if member.get("struct") and member.get("variant") is None:
+            if _is_proxied(member):
                 return StructProxy(self, name, member["struct"])
             return _read(self._actor, self._component, name)
 
@@ -387,12 +459,14 @@ class _Classes:
 
     def __init__(self):
         self._packages = []
+        self._struct_classes = {}
 
     def register(self, package, directory):
         # Re-importing the same package is not a second one. It happens whenever a test reloads a
         # package from a different path, and two entries would then disagree about where to read.
         self._packages = [p for p in self._packages if p.package != package]
         self._packages.append(_Package(package, directory))
+        self._struct_classes = {}
 
     @property
     def registered(self):
@@ -441,6 +515,37 @@ class _Classes:
         for package in reversed(self._packages):
             merged.update(package.structs)
         return merged
+
+    def struct_members(self, name):
+        """One struct's members, from whichever installed package declares it."""
+        for package in self._packages:
+            found = package.structs.get(name)
+            if found is not None:
+                return found
+        return {}
+
+    def struct_class(self, name):
+        """The generated value type for a struct, or a bare one when no installed package has it.
+
+        A struct the sim reports and no package declares still comes back as a value -- its members
+        readable, nothing about it checked -- rather than failing a read that succeeded.
+        """
+        cached = self._struct_classes.get(name)
+        if cached is not None:
+            return cached
+        import importlib
+        found = None
+        for package in self._packages:
+            if name not in package.structs:
+                continue
+            module = importlib.import_module("{}.structs".format(package.package))
+            found = getattr(module, _identifier(name), None)
+            if found is not None:
+                break
+        if found is None:
+            found = type(_identifier(name), (Struct,), {"__slots__": (), "__tempo_struct__": name})
+        self._struct_classes[name] = found
+        return found
 
     def _owner(self, class_path):
         """The package that has this class, or None."""
@@ -564,6 +669,26 @@ def registered_classes():
     return _classes
 
 
+def _identifier(name):
+    """A struct's name as the generator spells its class. Mirrors gen_py_classes.identifier."""
+    import keyword
+    import re
+    cleaned = re.sub(r"\W", "_", name)
+    if not cleaned or cleaned[0].isdigit():
+        cleaned = "_" + cleaned
+    return cleaned + "_" if keyword.iskeyword(cleaned) else cleaned
+
+
+def _is_proxied(member):
+    """Whether a member reads as a StructProxy: a struct, whether or not it is also one value.
+
+    A struct-valued property keeps reading as a live handle even when it could travel whole, so that
+    `truck.Settings.Scale = 2.0` goes on writing to the sim rather than to a copy. An array of
+    structs is not proxied; it reads as a list of values.
+    """
+    return bool(member.get("struct")) and member.get("variant") in (None, "struct_value")
+
+
 def _suggest(name, candidates):
     """`did you mean` for a near miss, which is the common case for a renamed property."""
     close = difflib.get_close_matches(name, candidates, n=1, cutoff=0.7)
@@ -622,9 +747,55 @@ def _name_of(value):
     return str(value)
 
 
+def value_of(value):
+    """A struct property's current value, as a copy.
+
+    Reading a struct property hands back a proxy, so that assigning to its members writes to the
+    sim. This is the read of the whole thing, in one call, for when a copy is what is wanted.
+    Anything that is not a proxy is returned as it is.
+    """
+    if isinstance(value, StructProxy):
+        return _read(value._owner.actor, value._owner.component, value._address)
+    return value
+
+
+def _fill_struct(target, value):
+    """Write a struct value into a StructValue message, one field per member it has."""
+    value = value_of(value)
+    if not isinstance(value, Struct):
+        raise TypeError("expected a struct value, got {!r}".format(value))
+    name = type(value).__tempo_struct__
+    target.struct_name = name
+    members = _classes.struct_members(name)
+    for member_name, member_value in value._fields.items():
+        member = members.get(member_name) or {}
+        variant = member.get("variant")
+        if variant is None:
+            # Read back from a sim that knows a member this package does not. A write is a merge,
+            # so leaving it out leaves the destination's own value in place.
+            continue
+        field = target.fields.add()
+        field.name = member_name
+        field.value.CopyFrom(_to_value(variant, member_value))
+
+
+def _read_struct(source):
+    return _classes.struct_class(source.struct_name)._from_fields(
+        {field.name: _from_value(field.value) for field in source.fields})
+
+
 def _to_value(variant, value):
     """Build a Value carrying `value` in `variant`."""
     message = _value_type()()
+
+    if variant == "struct_value":
+        _fill_struct(message.struct_value, value)
+        return message
+
+    if variant == "struct_array_value":
+        for element in value:
+            _fill_struct(message.struct_array_value.values.add(), element)
+        return message
 
     if variant in _SCALAR_VARIANTS:
         if variant in ("class_value", "asset_value", "actor_value", "component_value"):
@@ -685,6 +856,12 @@ def _from_value(message):
 
     if variant in _SCALAR_VARIANTS:
         return getattr(message, variant)
+
+    if variant == "struct_value":
+        return _read_struct(message.struct_value)
+
+    if variant == "struct_array_value":
+        return [_read_struct(element) for element in message.struct_array_value.values]
 
     if variant in _COMPONENT_TYPES:
         source = getattr(message, variant)
@@ -936,7 +1113,7 @@ class StructProxy:
         object.__setattr__(self, "_struct", struct)
 
     def _member(self, name):
-        members = _classes.structs.get(self._struct, {})
+        members = _classes.struct_members(self._struct)
         member = members.get(name)
         if member is None:
             raise AttributeError("{!r} has no member {!r}.{}".format(
@@ -948,7 +1125,7 @@ class StructProxy:
             raise AttributeError(name)
         member = self._member(name)
         address = "{}.{}".format(self._address, name)
-        if member.get("struct"):
+        if _is_proxied(member):
             return StructProxy(self._owner, address, member["struct"])
         return _read(self._owner.actor, self._owner.component, address)
 

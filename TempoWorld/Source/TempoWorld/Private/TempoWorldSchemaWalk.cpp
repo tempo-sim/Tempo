@@ -56,7 +56,11 @@ namespace
 			{
 				FStructEntry Entry;
 				Entry.Name = Pair.Key;
-				for (TFieldIterator<FProperty> It(Pair.Value, EFieldIterationFlags::None); It; ++It)
+				Entry.bValueExpressible = IsStructValueExpressible(Pair.Value);
+				// Inherited members included, unlike a class's. A class's inheritance is reconstructed
+				// from its superclass path, and a struct entry carries none -- so declared-only
+				// would leave FVector_NetQuantize, which derives from FVector, with no members.
+				for (TFieldIterator<FProperty> It(Pair.Value); It; ++It)
 				{
 					// GetAuthoredName, not GetName, and the difference is not cosmetic: a nested
 					// address resolves a struct member by its authored name, so that is the only
@@ -110,7 +114,7 @@ namespace
 			}
 			// Recorded before recursing, so a struct that reaches itself terminates.
 			Structs.Add(Name, Struct);
-			for (TFieldIterator<FProperty> It(Struct, EFieldIterationFlags::None); It; ++It)
+			for (TFieldIterator<FProperty> It(Struct); It; ++It)
 			{
 				Add(ClassifyProperty(*It));
 			}
@@ -296,7 +300,10 @@ FString GetSchemaVersion()
 {
 	// 2 added a content hash per class, struct and enum. A client generated from a version 1
 	// document has none to compare, so reading one has to fail rather than check nothing.
-	return TEXT("2");
+	//
+	// 3 made structs value-expressible and gave struct entries their inherited members. A version 2
+	// generator would emit no value type for a struct and withhold every function taking one.
+	return TEXT("3");
 }
 
 FString HashClass(const FClassEntry& Entry)
@@ -325,6 +332,9 @@ FString HashStruct(const FStructEntry& Entry)
 {
 	FSHA1 Sha;
 	Sha.UpdateWithString(*Entry.Name, Entry.Name.Len());
+	// Whether it can be passed whole decides whether a function taking one is offered at all.
+	const FString Expressible = Entry.bValueExpressible ? TEXT("1") : TEXT("0");
+	Sha.UpdateWithString(*Expressible, Expressible.Len());
 	for (const FMember& Member : Entry.Members)
 	{
 		HashMember(Sha, Entry.Name, Member);

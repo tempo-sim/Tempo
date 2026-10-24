@@ -40,6 +40,7 @@ PREAMBLE = """#![allow(unused_imports, unused_variables, dead_code, unused_must_
 use fixture_classes::classes::core_u_object::Object;
 use fixture_classes::classes::engine::{MeshThing, Widget};
 use fixture_classes::enums::EWidgetMode;
+use fixture_classes::structs::{FWidgetSettings, FWidgetTrim};
 use tempo_sim::unreal::{Class, ObjectRef, Vector};
 use tempo_sim::{world, TempoError};
 
@@ -186,6 +187,26 @@ def test_a_struct_property_is_addressed_a_member_at_a_time(workspace):
 """) == []
 
 
+def test_struct_values_compile(workspace):
+    """A struct that travels whole: built, assigned, passed, returned and loaded."""
+    assert check(workspace, """
+    let settings = FWidgetSettings {
+        scale: Some(2.0),
+        inner: Some(FWidgetTrim { offset: Some(Vector::default()) }),
+        ..Default::default()
+    };
+    widget.set_settings(settings.clone())?;
+    let back: FWidgetSettings = widget.configure(settings)?;
+    let _: Option<String> = back.label;
+    let copy: FWidgetSettings = widget.settings().load()?;
+    widget.settings().store(copy)?;
+    widget.settings().inner().set_offset(Vector::default())?;
+    widget.set_history(vec![FWidgetSettings::default()])?;
+    let _: Vec<FWidgetSettings> = widget.history()?;
+    let _: f64 = widget.limits().floor()?;
+""") == []
+
+
 def test_a_function_is_callable(workspace):
     assert check(workspace, """
     widget.refresh()?;
@@ -237,6 +258,18 @@ def test_a_property_whose_setter_cannot_be_named_is_read_only(workspace):
     ("a function called with the wrong arity", "let _ = widget.resize()?;"),
     ("discovery by a type that is not a class", "let _ = world::get_actors::<u32>()?;"),
     ("a struct member the struct lacks", "let _ = widget.settings().nope()?;"),
+    ("a struct value field the struct lacks",
+     "let _ = FWidgetSettings { scal: Some(1.0), ..Default::default() };"),
+    ("a struct value field of the wrong type",
+     "let _ = FWidgetSettings { scale: Some(\"big\".to_string()), ..Default::default() };"),
+    ("the wrong struct as an argument", "let _ = widget.configure(FWidgetTrim::default())?;"),
+    ("a value type for a struct that cannot travel",
+     "let _ = fixture_classes::structs::FWidgetLimits::default();"),
+    ("assigning a struct that cannot travel", "widget.set_limits(Default::default())?;"),
+    ("loading a struct that cannot travel", "let _ = widget.limits().load()?;"),
+    ("a function returning a struct that cannot travel", "let _ = widget.get_limits()?;"),
+    ("a function taking a struct that cannot travel", "widget.apply_limits()?;"),
+    ("a container nothing can read", "let _ = widget.waypoints()?;"),
 ])
 def test_drift_does_not_compile(workspace, case, body):
     """Each of these is what a release is expected to break, and must break the build.

@@ -140,8 +140,14 @@ class Generator:
         self.stats["setters_unresolvable"] = resolve_setters(schema)
         self.classes_by_path = {c["path"]: c for c in schema["classes"]}
         self.struct_names = {s["name"] for s in schema.get("structs", [])}
+        # The classifier's answer, recorded per struct by the walk, rather than a second opinion
+        # worked out here from the members.
+        self.expressible_structs = {s["name"] for s in schema.get("structs", [])
+                                    if s.get("value_expressible")}
         self.enum_names = {e["name"] for e in schema.get("enums", [])}
         self.current_module = ""
+        self.current_class = ""
+        self.result_types = []
         self.by_module = defaultdict(list)
         for cls in schema["classes"]:
             self.by_module[module_for(cls["package"])].append(cls)
@@ -227,18 +233,32 @@ class Generator:
 
     # -- variants the runtime writes with -------------------------------------------------------
 
-    @staticmethod
-    def variant_for(type_desc):
+    def variant_for(self, type_desc):
         kind = type_desc.get("kind")
         if kind in SINGULAR_VARIANTS:
             return SINGULAR_VARIANTS[kind]
+        if kind == "struct":
+            return "struct_value" if type_desc.get("struct") in self.expressible_structs else None
         if kind in ("array", "set"):
-            element = (type_desc.get("element") or {}).get("kind")
-            base = REPEATED_ELEMENTS.get(element)
+            element = type_desc.get("element") or {}
+            if element.get("kind") == "struct":
+                # Arrays only: a set of structs has no variant.
+                carried = kind == "array" and element.get("struct") in self.expressible_structs
+                return "struct_array_value" if carried else None
+            base = REPEATED_ELEMENTS.get(element.get("kind"))
             if base is None:
                 return None
             return "{}_{}_value".format(base, "array" if kind == "array" else "set")
         return None
+
+    def struct_of(self, type_desc):
+        """The struct a member, parameter or array element is, or "" when it is not one."""
+        if type_desc.get("kind") == "struct":
+            return type_desc.get("struct", "")
+        element = type_desc.get("element") or {}
+        if type_desc.get("kind") == "array" and element.get("kind") == "struct":
+            return element.get("struct", "")
+        return ""
 
     # -- emission -------------------------------------------------------------------------------
 
@@ -277,6 +297,11 @@ class Generator:
 
     def emit_member(self, member, imports, indent="    "):
         """One property, as stub lines. Returns [] when the type cannot be carried."""
+        if self.variant_for(member) is None and member.get("kind") != "struct":
+            # Neither one value nor a struct to reach into -- an array of vectors, say. The runtime
+            # has no way to read it, so a stub declaring it would type-check and then fail.
+            self.stats["members_omitted"] += 1
+            return []
         try:
             annotation = self.annotation(member, imports)
         except Unsupported:
@@ -314,8 +339,17 @@ class Generator:
             self.stats["functions_omitted"] += 1
             return []
 
-        args, returns = [], "None"
+        args, returns, outputs = [], "None", []
         for parameter in function.get("parameters", []):
+            if parameter.get("direction") == "out":
+                # An out parameter comes back in the results when it can travel, and is simply
+                # absent from them when it cannot; either way it does not stop the call.
+                if self.variant_for(parameter) is not None:
+                    try:
+                        outputs.append((parameter["name"], self.annotation(parameter, imports)))
+                    except Unsupported:
+                        pass
+                continue
             try:
                 annotation = self.annotation(parameter, imports)
             except Unsupported:
@@ -327,6 +361,11 @@ class Generator:
             # arguments and no return type, and looked perfectly plausible in the output.
             direction = parameter.get("direction")
             if direction == "return":
+                if self.variant_for(parameter) is None:
+                    # A result that cannot come back. Offering a method that silently answers None
+                    # is worse than not offering it -- §9.4, as gen_rust_classes.py has it.
+                    self.stats["functions_omitted"] += 1
+                    return []
                 returns = annotation
             elif direction == "in":
                 parameter_name = parameter["name"]
@@ -334,7 +373,19 @@ class Generator:
                     self.stats["functions_omitted"] += 1
                     return []
                 args.append("{}: {}".format(parameter_name, annotation))
-            # An out parameter is not supplied by the caller and is not part of the signature.
+
+        if outputs:
+            # With out parameters the runtime hands back every result keyed by name, because a
+            # Blueprint usually returns several things and position would be guesswork. The keys
+            # and their types are fixed by the signature, so they are a TypedDict -- functional
+            # syntax, because a key need only be a string.
+            results = ([("ReturnValue", returns)] if returns != "None" else []) + outputs
+            result_type = "_Result_{}_{}".format(self.current_class, name)
+            self.result_types.append('{} = _typing.TypedDict("{}", {{{}}})'.format(
+                result_type, result_type,
+                ", ".join('"{}": {}'.format(key, value) for key, value in results)))
+            returns = result_type
+            self.stats["functions_with_results"] += 1
 
         self.stats["functions"] += 1
         return ["{}def {}(self{}) -> {}: ...".format(
@@ -407,9 +458,11 @@ class Generator:
         identity_imports = {"runtime": set(), "enums": set(), "structs": set(), "classes": set()}
         stub_bodies, identity_bodies = [], []
         metadata = {}
+        self.result_types = []
 
         for cls in self.in_definition_order(classes):
             name = py_class_name(cls["name"])
+            self.current_class = name
             if name in names_seen:
                 # Two Blueprints in different folders can share a name. Rather than let one shadow
                 # the other, which would silently point a scenario at the wrong class, say so.
@@ -470,8 +523,8 @@ class Generator:
                     # Stood down above; the runtime must agree with the stubs about which one it is.
                     continue
                 variant = self.variant_for(member)
-                struct = member.get("struct", "") if member.get("kind") == "struct" else ""
-                if variant is None and not struct:
+                struct = self.struct_of(member)
+                if variant is None and member.get("kind") != "struct":
                     # Neither carryable as one value nor addressable through members.
                     continue
                 properties[member["name"]] = {
@@ -497,12 +550,16 @@ class Generator:
                     variant = self.variant_for(parameter)
                     direction = parameter.get("direction")
                     if direction == "return":
+                        if variant is None:
+                            expressible = False
+                            break
                         returns = variant
                     elif direction == "in":
                         if variant is None:
                             expressible = False
                             break
-                        inputs.append({"name": parameter["name"], "variant": variant})
+                        inputs.append({"name": parameter["name"], "variant": variant,
+                                       "struct": self.struct_of(parameter)})
                     # An out parameter is not supplied, and comes back in the results.
                 if not expressible:
                     continue
@@ -523,27 +580,61 @@ class Generator:
         header = "# Generated by gen_py_classes.py from tempo_schema.json. Do not edit.\n"
         identity = header + "\n".join(self.import_lines(module_name, identity_imports, dist)
                                       + [""] + identity_bodies)
-        stub = header + "\n".join(self.import_lines(module_name, stub_imports, dist) + [""] + stub_bodies)
+        stub_lines = self.import_lines(module_name, stub_imports, dist)
+        if self.result_types:
+            stub_lines.append("import typing as _typing")
+        stub_lines += [""] + stub_bodies
+        if self.result_types:
+            stub_lines += ["# What a method with out parameters hands back, keyed by name."] + \
+                self.result_types + [""]
+        stub = header + "\n".join(stub_lines)
         return identity, stub, metadata
 
     def emit_structs(self, dist):
-        """Structs, so a nested address like PostProcessSettings.BloomIntensity type-checks."""
+        """Structs: the static type of a struct property's proxy, and a value type of their own.
+
+        The same class serves both. A struct-valued property reads as a live handle, so that
+        `PostProcessSettings.BloomIntensity = 2.0` keeps writing to the sim, and is typed as the
+        struct so its members check. A value-expressible struct can also be built and passed whole --
+        to a function, or to assign -- through a keyword-only constructor naming the members a
+        scenario may write. Keyword-only because a struct's members are sorted by name, so a
+        positional argument would silently move when a member was added.
+
+        Returns the identity module and the stub, which differ: the identity carries no annotations,
+        as a class module's does not.
+        """
         self.current_module = "structs"
-        imports = {"runtime": set(), "enums": set(), "structs": set(), "classes": set()}
-        bodies = []
+        imports = {"runtime": {"Struct"}, "enums": set(), "structs": set(), "classes": set()}
+        identities, bodies = [], []
         for struct in sorted(self.schema.get("structs", []), key=lambda s: s["name"]):
             name = identifier(struct["name"])
-            body = []
+            body, arguments = [], []
             for member in struct.get("members", []):
-                body.extend(self.emit_member(member, imports))
-            bodies.append("class {}:".format(name))
+                lines = self.emit_member(member, imports)
+                body.extend(lines)
+                if (lines and member.get("writable") and struct["name"] in self.expressible_structs
+                        and self.variant_for(member) is not None):
+                    arguments.append("{}: {} = ...".format(
+                        member["name"], self.annotation(member, imports)))
+            if struct["name"] in self.expressible_structs:
+                body.append("    def __init__(self{}) -> None: ...".format(
+                    ", *, " + ", ".join(arguments) if arguments else ""))
+                self.stats["struct_values"] += 1
+            bodies.append("class {}({}.Struct):".format(name, RUNTIME_ALIAS))
             bodies.extend(body if body else ["    ..."])
             bodies.append("")
-        header = ("# Generated by gen_py_classes.py from tempo_schema.json. Do not edit.\n"
-                  # A struct can name another struct declared further down this same file, so
-                  # annotations have to be lazy for the module to import.
-                  "from __future__ import annotations\n")
-        return header + "\n".join(self.import_lines("structs", imports, dist) + [""] + bodies)
+            identities.append("class {}({}.Struct):".format(name, RUNTIME_ALIAS))
+            identities.append("    __slots__ = ()")
+            identities.append('    __tempo_struct__ = "{}"'.format(struct["name"]))
+            identities.append("")
+        header = "# Generated by gen_py_classes.py from tempo_schema.json. Do not edit.\n"
+        identity = header + "\n".join(["import {} as {}".format(RUNTIME_MODULE, RUNTIME_ALIAS), ""]
+                                      + identities)
+        # A struct can name another struct declared further down this same file, so annotations
+        # have to be lazy for the stub to read in order.
+        stub = (header + "from __future__ import annotations\n"
+                + "\n".join(self.import_lines("structs", imports, dist) + [""] + bodies))
+        return identity, stub
 
     def struct_metadata(self):
         """Per-struct member metadata, so a nested address can be resolved and written.
@@ -560,7 +651,7 @@ class Generator:
                 members[member["name"]] = {
                     "variant": variant,
                     "writable": bool(member.get("writable")),
-                    "struct": member.get("struct", "") if member.get("kind") == "struct" else "",
+                    "struct": self.struct_of(member),
                 }
             metadata[struct["name"]] = members
         return metadata
@@ -596,7 +687,7 @@ def generate(schema_path, output_dir, docstrings=False, package=None):
     with open(schema_path) as f:
         schema = json.load(f)
 
-    expected = "2"
+    expected = "3"
     actual = schema.get("header", {}).get("schema_version")
     if actual != expected:
         raise Exception(
@@ -612,10 +703,9 @@ def generate(schema_path, output_dir, docstrings=False, package=None):
 
     # The enums module is emitted first, because structs and classes both import from it.
     write_file(os.path.join(output_dir, "enums.py"), generator.emit_enums())
-    structs = generator.emit_structs(dist)
-    write_file(os.path.join(output_dir, "structs.py"), structs)
-    # Structs and enums have no runtime behavior of their own, so one file serves both roles.
-    write_file(os.path.join(output_dir, "structs.pyi"), structs)
+    struct_identity, struct_stub = generator.emit_structs(dist)
+    write_file(os.path.join(output_dir, "structs.py"), struct_identity)
+    write_file(os.path.join(output_dir, "structs.pyi"), struct_stub)
 
     # A module name can also be a package prefix, because Unreal's mount points flatten onto the
     # same Python names: /Script/Engine wants to be `Engine`, and so does /Engine/EditorResources/...
@@ -705,7 +795,8 @@ def main(argv):
                               options.get("--package"))
     print("modules            {}".format(len(modules)))
     print("classes            {}".format(stats["classes"]))
-    print("structs / enums    {} / {}".format(stats["structs"], stats["enums"]))
+    print("structs / enums    {} / {} ({} passable as values)".format(
+        stats["structs"], stats["enums"], stats["struct_values"]))
     print("members            {} ({} writable, {} read-only)".format(
         stats["members"], stats["writable"], stats["read_only"]))
     print("functions          {}".format(stats["functions"]))

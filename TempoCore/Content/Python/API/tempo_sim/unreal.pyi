@@ -16,7 +16,9 @@
 # reaching for it is visible at the call site and cannot leak into a typed hierarchy.
 
 from contextlib import AbstractContextManager
-from typing import Any, Iterator
+from typing import Any, Iterator, TypeVar
+
+_V = TypeVar("_V")
 
 class Vector:
     X: float
@@ -63,6 +65,19 @@ class Color:
     G: int
     B: int
     def __init__(self, R: int = ..., G: int = ..., B: int = ...) -> None: ...
+
+class Struct:
+    """The base of every generated struct type.
+
+    A generated struct declares its members, and -- when it can travel as one value -- a
+    keyword-only constructor naming the ones a scenario may write. Like Object, this declares no
+    catch-all, so a member a struct does not have is a type error.
+    """
+    __tempo_struct__: str
+
+def value_of(value: _V) -> _V:
+    """A struct property's current value as a copy, rather than the live proxy a read returns."""
+    ...
 
 class Object:
     __tempo_class__: str

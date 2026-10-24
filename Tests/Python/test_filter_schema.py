@@ -58,7 +58,8 @@ def surface(schema):
                 "functions": {f["name"]: {"signature": f["signature"],
                                           "parameters": [p["name"]
                                                          for p in f.get("parameters", [])],
-                                          "callable": f.get("callable", True)}
+                                          "callable": f.get("callable", True),
+                                          "positional": f.get("positional", True)}
                               for f in cls["functions"]},
                 "components": {c["name"]: c["class"] for c in cls["components"]},
             }
@@ -66,7 +67,10 @@ def surface(schema):
         },
         "structs": {
             struct["name"]: {"content_hash": "BUILD-" + struct["name"].upper(),
-                             "members": {m["name"]: member() for m in struct["members"]}}
+                             "value_expressible": struct["value_expressible"],
+                             "members": {m["name"]: member(m["readable"], m["writable"],
+                                                           m["value_expressible"])
+                                         for m in struct["members"]}}
             for struct in schema["structs"]
         },
         "enums": {
@@ -182,6 +186,23 @@ def test_flags_come_from_the_build(schema, surface):
     assert enabled["writable"] is False
 
 
+def test_struct_and_function_expressibility_come_from_the_build(schema, surface):
+    """Whether a struct travels whole decides which functions are offered, so it is the build's call.
+
+    An editor can hold a member a build does not -- a WITH_EDITORONLY_DATA one -- and that member
+    alone can make a struct inexpressible in one and not the other.
+    """
+    surface["structs"]["FWidgetSettings"]["value_expressible"] = False
+    surface["classes"]["/Script/Engine.Widget"]["functions"]["Configure"]["positional"] = False
+    stats = filter_schema.narrow_to_surface(schema, surface)
+
+    assert stats["flags_corrected"] == 2
+    settings = next(s for s in schema["structs"] if s["name"] == "FWidgetSettings")
+    assert settings["value_expressible"] is False
+    configure = next(f for f in widget(schema)["functions"] if f["name"] == "Configure")
+    assert configure["positional"] is False
+
+
 def test_a_member_only_the_build_has_is_counted_and_left_out(schema, surface):
     """Carrying one over would mean no metadata for it, and so no BlueprintSetter.
 
@@ -258,7 +279,7 @@ def test_a_class_the_build_does_not_report_is_left_alone(schema, surface):
 def test_a_report_without_a_surface_narrows_only_the_class_list(tmp_path):
     """Backwards compatible, and loud about it: an older report cannot narrow members."""
     reported = {"classes": ["/Script/Engine.Widget", "/Script/CoreUObject.Object"],
-                "header": {"schema_version": "2", "engine_version": "5.8",
+                "header": {"schema_version": "3", "engine_version": "5.8",
                            "content_hash": "BUILD"}}
     report = tmp_path / "reported.json"
     report.write_text(json.dumps(reported))
@@ -285,7 +306,7 @@ def test_a_type_reachable_only_from_a_dropped_member_is_dropped(tmp_path):
     per-entry check earning its place on its first outing.
     """
     schema = {
-        "header": {"schema_version": "2", "engine_version": "5.8", "content_hash": "EDITOR"},
+        "header": {"schema_version": "3", "engine_version": "5.8", "content_hash": "EDITOR"},
         "classes": [{
             "name": "Widget", "path": "/Script/Engine.Widget", "super": "", "package": "/Script/Engine",
             "abstract": False, "blueprint": False, "content_hash": "EDITOR-WIDGET",
@@ -304,7 +325,7 @@ def test_a_type_reachable_only_from_a_dropped_member_is_dropped(tmp_path):
     }
     reported = {
         "classes": ["/Script/Engine.Widget"],
-        "header": {"schema_version": "2", "engine_version": "5.8", "content_hash": "BUILD"},
+        "header": {"schema_version": "3", "engine_version": "5.8", "content_hash": "BUILD"},
         "surface": {
             "classes": {"/Script/Engine.Widget": {
                 "content_hash": "BUILD-WIDGET", "super": "",
