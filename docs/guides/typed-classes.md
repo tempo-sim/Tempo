@@ -27,8 +27,8 @@ Two distributions, and you want both:
 
 | Distribution | What it is |
 |---|---|
-| `tempo-sim` | The client: the generated gRPC wrappers, the runtime behind attribute access, `tempo_sim.world`, and the published types for what every build has, as `tempo_sim.types` — generated from the latest engine Tempo supports. |
-| `tempo-sample` | The host project's own package, named after the project: the typed classes for this build, as `tempo_sample.types`, and the project's own services, if it defines any. |
+| `tempo-sim` | The client: the generated gRPC wrappers, the runtime behind attribute access, `tempo_sim.world`, and the published types for what every build has, as `tempo_sim.reflected` — generated from the latest engine Tempo supports. |
+| `tempo-sample` | The host project's own package, named after the project: the typed classes for this build, as `tempo_sample.reflected`, and the project's own services, if it defines any. |
 
 !!! note "`Package.sh` only"
 
@@ -54,7 +54,7 @@ pip install Packaged/API/Python/tempo-sim/*.whl \
 Importing the classes is what registers them with the runtime, so the check is an import:
 
 ```bash
-python -c "import tempo_sample.types; from tempo_sim import world; print('ready')"
+python -c "import tempo_sample.reflected; from tempo_sim import world; print('ready')"
 ```
 
 Both packages are marked under [PEP 561](https://peps.python.org/pep-0561/), which is what lets a
@@ -202,7 +202,7 @@ Tempo's own components are in the generated classes alongside the engine's, so a
 configured the same way as anything else:
 
 ```python
-from tempo_sample.types.TempoSensors import TempoLidar
+from tempo_sample.reflected.TempoSensors import TempoLidar
 
 lidar = sweeper.TempoLidar          # typed as TempoLidar
 
@@ -256,17 +256,17 @@ loudly at all — a write to a `BlueprintReadOnly` property was simply refused.
 ## 9. Where the names come from
 
 The import path mirrors the content path. `/Game/StreetSweeper/Blueprint/BP_StreetSweeper` is
-`tempo_sample.types.Game.StreetSweeper.Blueprint.BP_StreetSweeper_C`; an engine class like
-`/Script/Engine.Pawn` is `tempo_sample.types.Engine.Pawn`. Member names are Unreal's own, verbatim,
-which is the point — a rename in C++ or in a Blueprint has to show up here as a different name, or
-none of this would catch anything.
+`tempo_sample.reflected.Game.StreetSweeper.Blueprint.BP_StreetSweeper_C`; an engine class like
+`/Script/Engine.Pawn` is `tempo_sample.reflected.Engine.Pawn`. Member names are Unreal's own,
+verbatim, which is the point — a rename in C++ or in a Blueprint has to show up here as a different
+name, or none of this would catch anything.
 
-In your own project the distribution is `<your-project>` and the import is `<your_project>.types`;
-everything after it is identical. The package exists even if your project defines no services of
-its own: it then holds only the classes. That is also why the example
-ships with TempoSample rather than with Tempo: the plugin's own
-[example clients](../clients/examples.md) address everything by string and so run against any sim,
-while a typed one names classes that exist in exactly one project. Copy it into yours and change the
+In your own project the distribution is `<your-project>` and the import is
+`<your_project>.reflected`; everything after it is identical. The package exists even if your
+project defines no services of its own: it then holds only the classes. That is also why the example
+ships with TempoSample rather than with Tempo: the plugin's own [example
+clients](../clients/examples.md) address everything by string and so run against any sim, while a
+typed one names classes that exist in exactly one project. Copy it into yours and change the
 imports.
 
 ## 10. Keep the classes and the sim together
@@ -299,7 +299,7 @@ That leaves two crates beside each other:
 
 ```
 Packaged/API/Rust/tempo-sim/          the client, the typed runtime and the published types
-Packaged/API/Rust/tempo-sample/       this build's classes, as its `types` module, and the project's services
+Packaged/API/Rust/tempo-sample/       this build's classes (module `reflected`) and its services
 ```
 
 Point a scenario crate at both. The project crate depends on `tempo-sim` by relative path, so keep
@@ -311,14 +311,15 @@ tempo-sim = { path = "../Packaged/API/Rust/tempo-sim" }
 tempo-sample = { path = "../Packaged/API/Rust/tempo-sample" }
 ```
 
-The classes are behind the crate's `types` feature, which is on by default; a crate that only calls
-the project's services can turn it off with `default-features = false` and skip compiling them. The
-feature also turns on tempo-sim's own `types`, which the project's re-exports come from.
+The classes are behind the crate's `reflected` feature, which is on by default; a crate that only
+calls the project's services can turn it off with `default-features = false` and skip compiling
+them. The feature also turns on tempo-sim's own `reflected`, which the project's re-exports come
+from.
 
 Then the same scenario as [step 6](#6-run-the-example), in Rust:
 
 ```rust
-use tempo_sample::types::classes::game::street_sweeper::blueprint::BP_StreetSweeper_C;
+use tempo_sample::reflected::classes::game::street_sweeper::blueprint::BP_StreetSweeper_C;
 use tempo_sim::{world, TempoError};
 
 fn main() -> Result<(), TempoError> {

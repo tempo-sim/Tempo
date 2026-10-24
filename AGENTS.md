@@ -136,24 +136,24 @@ fails under Pyright instead of at runtime. See `TYPED_WORLD_API_PLAN.md`.
   narrow to the published subset and generate it → generate the project's types. `Package.sh`
   calls it.
 - **Two trees of types, one per package.** The published subset goes into tempo-sim itself, as
-  `tempo_sim.types` and `tempo_sim::types` (the latter behind tempo-sim's default-off `types`
-  feature). A project's go into its own client package and crate, as `tempo_sample.types` and
-  `tempo_sample::types` (default-on `types` feature), beside the wrappers its protos generate. Both
-  are generated and git-ignored. **Latest engine only**: the published types come from the newest
-  engine Tempo supports, and a client against an older one is checked against those.
+  `tempo_sim.reflected` and `tempo_sim::reflected` (the latter behind tempo-sim's default-off
+  `reflected` feature). A project's go into its own client package and crate, as
+  `tempo_sample.reflected` and `tempo_sample::reflected` (default-on `reflected` feature), beside
+  the wrappers its protos generate. Both are generated and git-ignored. **Latest engine only**: the
+  published types come from the newest engine Tempo supports, and a client against an older one is
+  checked against those.
 - **A project's types re-export the published ones they share** (`gen_classes_common.shared_with`,
-  §16.5), so `tempo_sample.types.Engine.Pawn` *is* `tempo_sim.types.Engine.Pawn`. Shared means the
-  same hash, a shared superclass, and shared structs and enums; the classes an entry mentions are
-  deliberately unconstrained (§16.11 has the two stricter rules that broke it). A re-exported
-  entry is left out of the project's index, metadata and hash tables, and the project's Rust table
-  names the published one through `Hierarchy::depends_on`.
+  §16.5), so `tempo_sample.reflected.Engine.Pawn` *is* `tempo_sim.reflected.Engine.Pawn`. Shared
+  means the same hash, a shared superclass, and shared structs and enums; the classes an entry
+  mentions are deliberately unconstrained (§16.11 has the two stricter rules that broke it). A
+  re-exported entry is left out of the project's index, metadata and hash tables, and the project's
+  Rust table names the published one through `Hierarchy::depends_on`.
 - **The two halves of the project package are generated at different times** (wrappers at build
-  time, types at package time, since the types need the packaged build), so
-  `gen_project_package.py` owns everything in the package that is not generated code — manifest,
-  `__init__`/`lib.rs`, `.gitignore` — derives it from what is on disk, and either side may be first;
-  a project with no protos gets a package holding only types. The RPC generators count a package
-  subdirectory as a proto module only if it holds `_pb2` files, which is what keeps `types` out of
-  them.
+  time, types at package time, since the types need the packaged build), so `gen_project_package.py`
+  owns everything in the package that is not generated code — manifest, `__init__`/`lib.rs`,
+  `.gitignore` — derives it from what is on disk, and either side may be first; a project with no
+  protos gets a package holding only types. The RPC generators count a package subdirectory as a
+  proto module only if it holds `_pb2` files, which is what keeps `reflected` out of them.
 - **`gen_py_classes.py`** emits three files per module: `.py` (class identity only), `.pyi` (the type
   surface, never imported) and `.meta.json` (what the runtime needs to build a request). Plus
   `py.typed`, without which a type checker ignores an installed package's stubs entirely.
@@ -174,11 +174,11 @@ fails under Pyright instead of at runtime. See `TYPED_WORLD_API_PLAN.md`.
   newtype over `ObjectRef`" contract only the generator satisfies, and `AssetRef`'s `Deref` to its
   superclass's `AssetRef`, sound because the class is only a `PhantomData`. Generated Rust contains
   none.
-- **`subset_schema.py`** narrows the same schema to the modules that ship in *every* build --
-  the engine's always-loaded ones plus Tempo's own, derived from the `.uplugin` descriptors -- so
-  those classes can go out in the published `tempo-sim` wheel and crate, as `types`, rather than only
-  beside a project's package. It also **reroots**: a subset chosen by module is the first thing here that
-  can leave a class's superclass out of the document, and both generators read a dangling
+- **`subset_schema.py`** narrows the same schema to the modules that ship in *every* build -- the
+  engine's always-loaded ones plus Tempo's own, derived from the `.uplugin` descriptors -- so those
+  classes can go out in the published `tempo-sim` wheel and crate, as `reflected`, rather than only
+  beside a project's package. It also **reroots**: a subset chosen by module is the first thing here
+  that can leave a class's superclass out of the document, and both generators read a dangling
   superclass as "this class is a root", silently stripping every inherited member while the stubs
   still type-check. See `TYPED_WORLD_API_PLAN.md` §16.
 - **The asset catalog comes from the packaged build alone.** `query_packaged_classes.py` asks the

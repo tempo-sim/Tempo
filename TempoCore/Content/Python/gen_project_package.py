@@ -5,10 +5,11 @@
 A project's `tempo-sample` package and crate are filled by two pipelines that run at different
 times. The RPC wrappers come from its protos, at build time (`gen_api.py`, `gen_rust_api.py`); the
 typed classes come from its reflection, at package time (`Scripts/GenTypedAPI.sh`), into
-`tempo_sample.types` and `tempo_sample::types`. Either can be the first to need the package -- a project
-with no protos has classes and nothing else -- so both write its manifest, `__init__`/`lib.rs` and
-`.gitignore` through here, and each file is derived from what is on disk rather than from what the
-caller happened to generate. The other pipeline's half is then never written out of it.
+`tempo_sample.reflected` and `tempo_sample::reflected`. Either can be the first to need the
+package -- a project with no protos has classes and nothing else -- so both write its manifest,
+`__init__`/`lib.rs` and `.gitignore` through here, and each file is derived from what is on disk
+rather than from what the caller happened to generate. The other pipeline's half is then never
+written out of it.
 
 Standard library only, because GenTypedAPI.sh runs on whatever interpreter it finds.
 
@@ -30,8 +31,8 @@ from gen_naming import INFRA_PACKAGE, package_import_name, project_package_name
 # and where the published ones go inside tempo-sim's. One level down because a class module is
 # named after its Unreal module, as a proto module is, and `/Script/Greeter` would otherwise land
 # on the `Greeter` protos.
-PYTHON_CLASSES = "types"
-RUST_CLASSES = "types"
+PYTHON_CLASSES = "reflected"
+RUST_CLASSES = "reflected"
 
 PYTHON_METADATA_FILE = "project_info.json"
 RUST_METADATA_FILE = "crate_info.json"
@@ -277,7 +278,7 @@ def write_project_lib_rs(src_dir: Path):
         "//!\n"
         "//! Re-exports the Tempo runtime helpers from `tempo_sim` and adds the\n"
         "//! project's own service wrappers and proto types, and the typed classes of its\n"
-        "//! build under `types`.",
+        "//! build under `reflected`.",
     ]
     if _has_protos(src_dir):
         sections.append("pub mod proto;")
@@ -287,7 +288,7 @@ def write_project_lib_rs(src_dir: Path):
     if wrappers:
         sections.append("\n".join(f"pub mod {module};" for module in wrappers))
     if _has_classes(src_dir):
-        sections.append(f'#[cfg(feature = "types")]\npub mod {RUST_CLASSES};')
+        sections.append(f'#[cfg(feature = "reflected")]\npub mod {RUST_CLASSES};')
     (src_dir / "lib.rs").write_text("\n\n".join(sections) + "\n", encoding="utf-8")
 
 
@@ -387,10 +388,12 @@ def write_project_cargo_toml(project_crate_dir: Path, crate_name: str, tempo_cra
         "]",
         "",
         "[features]",
-        "# The typed classes of this build (`types`). On unless a crate asks for the services alone.",
-        'default = ["types"]',
+        "# The typed classes of this build (`reflected`). On unless a crate asks for the services",
+        "# alone.",
+        'default = ["reflected"]',
         # Which re-export the published types they share, when tempo-sim has them.
-        'types = ["tempo-sim/types"]' if _has_classes(tempo_crate_dir / "src") else "types = []",
+        ('reflected = ["tempo-sim/reflected"]' if _has_classes(tempo_crate_dir / "src")
+         else "reflected = []"),
         "",
         "[dependencies]",
         tempo_sim_dep,

@@ -10,10 +10,10 @@
 #   Scripts/GenTypedAPI.sh
 #
 # The schema lands in Saved/TempoSchema/tempo_schema.json. The classes go into the project's own
-# client package and crate, beside the wrappers its protos generate -- `tempo_sample.types` in
-# Content/Python/API and `tempo_sample::types` in Content/Rust/API -- which Package.sh then builds
-# into Packaged/API/{Python,Rust}. Both are generated and git-ignored, as the wrappers beside them
-# are. So are the published types, which go into tempo-sim itself.
+# client package and crate, beside the wrappers its protos generate -- `tempo_sample.reflected` in
+# Content/Python/API and `tempo_sample::reflected` in Content/Rust/API -- which Package.sh then
+# builds into Packaged/API/{Python,Rust}. Both are generated and git-ignored, as the wrappers beside
+# them are. So are the published types, which go into tempo-sim itself.
 #
 # Rust follows the same gate as the RPC client generator, TEMPO_GEN_RUST_API: a project that does
 # not use the Rust client should not pay for generating 16 MB of it.
@@ -144,8 +144,8 @@ fi
 # modules that are in every build -- the engine's always-loaded ones and Tempo's own -- so it can
 # travel with the published wheel and crate:
 #
-#   from tempo_sim.types.Engine import Pawn
-#   use tempo_sim::types::classes::engine::Pawn;     // feature = "types"
+#   from tempo_sim.reflected.Engine import Pawn
+#   use tempo_sim::reflected::classes::engine::Pawn;     // feature = "reflected"
 #
 # From the one engine version this build uses, which is the latest Tempo supports: a client
 # against an older engine is type-checked against the latest's classes (see
@@ -161,17 +161,17 @@ if [ "$GENERATE_FROM" != "$SCHEMA" ]; then
   echo "Narrowing to the modules every build ships"
   if "$PYTHON_BIN" "$PYTHON_DIR/subset_schema.py" "$GENERATE_FROM" "$SUBSET"; then
     PUBLISHED="$SUBSET"
-    PUBLISHED_PYTHON="$PYTHON_DIR/API/tempo_sim/types"
+    PUBLISHED_PYTHON="$PYTHON_DIR/API/tempo_sim/reflected"
     rm -rf "$PUBLISHED_PYTHON"
-    echo "Generating tempo_sim.types"
+    echo "Generating tempo_sim.reflected"
     "$PYTHON_BIN" "$PYTHON_DIR/gen_py_classes.py" \
-      "$SUBSET" "$PUBLISHED_PYTHON" "--package=tempo_sim.types"
+      "$SUBSET" "$PUBLISHED_PYTHON" "--package=tempo_sim.reflected"
     if [ -n "$RUST" ]; then
-      PUBLISHED_RUST="$SCRIPT_DIR/../TempoCore/Content/Rust/API/src/types"
+      PUBLISHED_RUST="$SCRIPT_DIR/../TempoCore/Content/Rust/API/src/reflected"
       rm -rf "$PUBLISHED_RUST"
-      echo "Generating tempo_sim::types"
+      echo "Generating tempo_sim::reflected"
       "$PYTHON_BIN" "$PYTHON_DIR/gen_rust_classes.py" \
-        "$SUBSET" "$PUBLISHED_RUST" "--root=crate::types"
+        "$SUBSET" "$PUBLISHED_RUST" "--root=crate::reflected"
     fi
   else
     echo "Warning: could not narrow the schema; there will be no published types" >&2
@@ -190,23 +190,23 @@ fi
 # it already. A directory of its own, so a class module named after an Unreal module cannot land on
 # the proto module of the same name.
 "$PYTHON_BIN" "$PYTHON_DIR/gen_project_package.py" python "$PROJECT_ROOT"
-CLASSES_DIR="$PROJECT_ROOT/Content/Python/API/$IMPORT_NAME/types"
+CLASSES_DIR="$PROJECT_ROOT/Content/Python/API/$IMPORT_NAME/reflected"
 rm -rf "$CLASSES_DIR"
 
-echo "Generating $IMPORT_NAME.types"
+echo "Generating $IMPORT_NAME.reflected"
 "$PYTHON_BIN" "$PYTHON_DIR/gen_py_classes.py" \
-  "$GENERATE_FROM" "$CLASSES_DIR" "--package=$IMPORT_NAME.types" \
+  "$GENERATE_FROM" "$CLASSES_DIR" "--package=$IMPORT_NAME.reflected" \
   ${PUBLISHED_ARG[@]+"${PUBLISHED_ARG[@]}"}
 echo "Typed Python classes generated at $CLASSES_DIR"
 
-# The Rust types, from the same schema, into the project's own crate as its `types` module. The
+# The Rust types, from the same schema, into the project's own crate as its `reflected` module. The
 # crate's manifest and lib.rs are written after them, because lib.rs declares what src/ holds.
 if [ -n "$RUST" ]; then
-  RUST_CLASSES_DIR="$PROJECT_ROOT/Content/Rust/API/src/types"
+  RUST_CLASSES_DIR="$PROJECT_ROOT/Content/Rust/API/src/reflected"
   rm -rf "$RUST_CLASSES_DIR"
-  echo "Generating $IMPORT_NAME::types"
+  echo "Generating $IMPORT_NAME::reflected"
   "$PYTHON_BIN" "$PYTHON_DIR/gen_rust_classes.py" \
-    "$GENERATE_FROM" "$RUST_CLASSES_DIR" "--root=crate::types" \
+    "$GENERATE_FROM" "$RUST_CLASSES_DIR" "--root=crate::reflected" \
     ${PUBLISHED_ARG[@]+"${PUBLISHED_ARG[@]}"}
   "$PYTHON_BIN" "$PYTHON_DIR/gen_project_package.py" rust "$PROJECT_ROOT"
   echo "Typed Rust classes generated at $RUST_CLASSES_DIR"

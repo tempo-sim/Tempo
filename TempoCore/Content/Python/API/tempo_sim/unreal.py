@@ -531,7 +531,7 @@ class _Classes:
         if not self.registered:
             raise RuntimeError(
                 "No generated classes are registered. Install this build's project package and "
-                "import its classes (e.g. `import tempo_sample.types`); the wheel ships in "
+                "import its classes (e.g. `import tempo_sample.reflected`); the wheel ships in "
                 "Packaged/API/Python alongside the tempo-sim wheel.")
 
     @property

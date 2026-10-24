@@ -5,11 +5,11 @@
 
 The tree is rooted at `<output-dir>/mod.rs`, and there is no manifest: the types go inside an
 existing crate rather than one of their own -- a project's into its own client crate, as
-`tempo_sample::types` (TYPED_WORLD_API_PLAN.md §20), and the published subset into tempo-sim, as
-`tempo_sim::types` (§16.4). `--root` is that path from the crate's root, `crate::types` by default:
-the emitted modules reach each other by it. References to the *runtime* need no such treatment --
-they name `::tempo_sim::unreal::*` absolutely, which resolves in any crate depending on tempo-sim,
-and inside tempo-sim through its `extern crate self as tempo_sim`.
+`tempo_sample::reflected` (TYPED_WORLD_API_PLAN.md §20), and the published subset into tempo-sim, as
+`tempo_sim::reflected` (§16.4). `--root` is that path from the crate's root, `crate::reflected` by
+default: the emitted modules reach each other by it. References to the *runtime* need no such
+treatment -- they name `::tempo_sim::unreal::*` absolutely, which resolves in any crate depending on
+tempo-sim, and inside tempo-sim through its `extern crate self as tempo_sim`.
 
 `--published` names the published subset's schema. What it describes identically is re-exported
 from `--published-root` rather than defined again (§16.5), so a project's `Pawn` and tempo-sim's
@@ -146,12 +146,12 @@ def module_for(package):
 
 
 class Generator:
-    def __init__(self, schema, docs=False, root="crate::types", published=None,
-                 published_root="::tempo_sim::types"):
+    def __init__(self, schema, docs=False, root="crate::reflected", published=None,
+                 published_root="::tempo_sim::reflected"):
         self.schema = schema
         self.docs = docs
         # The path the emitted modules reach each other by: where the tree sits in its host crate --
-        # `crate::types` both in a project's client crate and, for the published types, in
+        # `crate::reflected` both in a project's client crate and, for the published types, in
         # tempo-sim (TYPED_WORLD_API_PLAN.md section 16.4).
         self.root = root
         # What the published types already define identically, and where they live. Those are
@@ -957,8 +957,8 @@ def write_file(path, text):
         f.write(text)
 
 
-def generate(schema_path, output_dir, docs=False, root="crate::types", published_path=None,
-             published_root="::tempo_sim::types"):
+def generate(schema_path, output_dir, docs=False, root="crate::reflected", published_path=None,
+             published_root="::tempo_sim::reflected"):
     with open(schema_path) as f:
         schema = json.load(f)
     published = None
@@ -1049,8 +1049,8 @@ def main(argv):
     if len(argv) < 3:
         print(__doc__)
         return 2
-    options = {"--root": "crate::types", "--published": None,
-               "--published-root": "::tempo_sim::types"}
+    options = {"--root": "crate::reflected", "--published": None,
+               "--published-root": "::tempo_sim::reflected"}
     for argument in argv[3:]:
         name, _, value = argument.partition("=")
         if name in options:

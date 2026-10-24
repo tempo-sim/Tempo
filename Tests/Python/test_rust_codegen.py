@@ -5,11 +5,11 @@ The same shape as test_codegen.py, and for the same reason: a golden-output test
 the emitted bytes changed, but what matters is whether the compiler rejects what it has to reject.
 So each case generates from the same fixture schema and asserts what rustc says about a snippet.
 
-The classes are generated where a project's are, as the `types` module of a host crate whose manifest
-and lib.rs come from gen_project_package.py, as a project's do. The snippet is its own crate
-depending on that one, which is the position that matters: the orphan rule and `Deref` coercion
-both behave differently inside the generating crate than outside it, and outside is where a
-scenario lives.
+The classes are generated where a project's are, as the `reflected` module of a host crate whose
+manifest and lib.rs come from gen_project_package.py, as a project's do. The snippet is its own
+crate depending on that one, which is the position that matters: the orphan rule and `Deref`
+coercion both behave differently inside the generating crate than outside it, and outside is where
+a scenario lives.
 
 Needs no packaged sim and no wheel, only cargo. Skipped, not failed, when cargo is absent. The
 cargo target directory is shared and kept under Saved/, so only the first run pays for building
@@ -40,10 +40,10 @@ CRATE = "fixture-project"
 CRATE_IMPORT = "fixture_project"
 
 PREAMBLE = """#![allow(unused_imports, unused_variables, dead_code, unused_must_use, non_snake_case)]
-use fixture_project::types::classes::core_u_object::Object;
-use fixture_project::types::classes::engine::{MeshThing, Widget};
-use fixture_project::types::enums::EWidgetMode;
-use fixture_project::types::structs::{FWidgetSettings, FWidgetTrim};
+use fixture_project::reflected::classes::core_u_object::Object;
+use fixture_project::reflected::classes::engine::{MeshThing, Widget};
+use fixture_project::reflected::enums::EWidgetMode;
+use fixture_project::reflected::structs::{FWidgetSettings, FWidgetTrim};
 use tempo_sim::unreal::{Class, ObjectRef, Vector};
 use tempo_sim::{world, TempoError};
 
@@ -102,30 +102,31 @@ def _sync(source, destination, skip=()):
 def tempo_sim_copy(name, published=None, scratch=None):
     """tempo-sim's sources, at a fixed path under Saved/ so cargo's cache survives between runs.
 
-    A copy rather than the crate itself, because what `src/types` holds is the test's to decide:
+    A copy rather than the crate itself, because what `src/reflected` holds is the test's to decide:
     nothing, or the published types generated from `published`. The in-tree crate holds whatever
     the last package left there.
     """
     copy = os.path.join(PLUGIN_ROOT, "Saved", "RustCodegen", name, "tempo-sim")
-    _sync(os.path.join(RUST_API, "src"), os.path.join(copy, "src"), skip=("types",))
+    _sync(os.path.join(RUST_API, "src"), os.path.join(copy, "src"), skip=("reflected",))
     with open(os.path.join(RUST_API, "Cargo.toml"), "rb") as f:
         manifest = f.read()
     target = os.path.join(copy, "Cargo.toml")
     if not os.path.exists(target) or open(target, "rb").read() != manifest:
         with open(target, "wb") as f:
             f.write(manifest)
-    types = os.path.join(copy, "src", "types")
+    reflected = os.path.join(copy, "src", "reflected")
     if published is None:
-        if os.path.exists(types):
-            shutil.rmtree(types)
+        if os.path.exists(reflected):
+            shutil.rmtree(reflected)
     else:
         with open(os.path.join(RUST_API, "src", "lib.rs")) as f:
-            assert "pub mod types;" in f.read(), \
+            assert "pub mod reflected;" in f.read(), \
                 "tempo-sim's lib.rs predates the published types; rebuild to regenerate it"
         staged = os.path.join(str(scratch), "published-types")
-        subprocess.run([sys.executable, GENERATOR, str(published), staged, "--root=crate::types"],
-                       check=True, capture_output=True, text=True)
-        _sync(staged, types)
+        subprocess.run(
+            [sys.executable, GENERATOR, str(published), staged, "--root=crate::reflected"],
+            check=True, capture_output=True, text=True)
+        _sync(staged, reflected)
     return copy
 
 
@@ -139,8 +140,8 @@ def make_workspace(root, tempo_sim, extra_args=()):
     os.symlink(tempo_sim, str(root / "tempo-sim"))
     host = root / CRATE
     subprocess.run(
-        [sys.executable, GENERATOR, FIXTURE, str(host / "src" / "types"), "--root=crate::types"]
-        + list(extra_args),
+        [sys.executable, GENERATOR, FIXTURE, str(host / "src" / "reflected"),
+         "--root=crate::reflected"] + list(extra_args),
         check=True, capture_output=True, text=True)
 
     sys.path.insert(0, PYTHON_DIR)
@@ -236,20 +237,20 @@ def check(workspace, body):
 
 def test_generates_the_expected_files(workspace):
     crate = workspace / CRATE
-    for name in ("Cargo.toml", "src/lib.rs", "src/types/mod.rs", "src/types/enums.rs",
-                 "src/types/structs.rs", "src/types/hierarchy.rs", "src/types/classes.rs",
-                 "src/types/classes/engine.rs"):
+    for name in ("Cargo.toml", "src/lib.rs", "src/reflected/mod.rs", "src/reflected/enums.rs",
+                 "src/reflected/structs.rs", "src/reflected/hierarchy.rs",
+                 "src/reflected/classes.rs", "src/reflected/classes/engine.rs"):
         assert (crate / name).exists(), "{} was not generated".format(name)
 
 
 def test_the_host_crate_declares_the_classes_behind_a_default_feature(workspace):
-    """A crate with classes and no protos: no proto module, no proto dependencies, `types` on."""
+    """A crate with classes and no protos: no proto module or dependencies, `reflected` on."""
     crate = workspace / CRATE
     lib = (crate / "src" / "lib.rs").read_text()
-    assert '#[cfg(feature = "types")]\npub mod types;' in lib
+    assert '#[cfg(feature = "reflected")]\npub mod reflected;' in lib
     assert "pub mod proto;" not in lib
     manifest = (crate / "Cargo.toml").read_text()
-    assert 'default = ["types"]' in manifest
+    assert 'default = ["reflected"]' in manifest
     assert "tonic" not in manifest
 
 
@@ -267,7 +268,8 @@ def test_an_inherited_property_resolves_through_deref(workspace):
     This is the whole reason the generated classes are a Deref chain. Nothing in Widget's own impl
     mentions Name.
     """
-    assert "fn name(" not in (workspace / CRATE / "src" / "types" / "classes" / "engine.rs").read_text(), \
+    engine = workspace / CRATE / "src" / "reflected" / "classes" / "engine.rs"
+    assert "fn name(" not in engine.read_text(), \
         "Name must come from Object, not be copied into Widget"
     assert check(workspace, """
     let _: String = widget.name()?;
@@ -354,16 +356,17 @@ def test_a_deferred_read_is_typed_by_what_it_reads(workspace):
 
 def test_the_asset_catalog_compiles(workspace):
     assert check(workspace, """
-    use fixture_project::types::assets::game::widgets::W_Main;
+    use fixture_project::reflected::assets::game::widgets::W_Main;
     use tempo_sim::unreal::AssetRef;
     widget.set_skin(&W_Main)?;
     // A MeshThing asset is an Object asset, through the same Deref chain as the classes.
     widget.set_any_asset(&W_Main)?;
-    let _: bool = widget.reskin(&fixture_project::types::assets::game::maps::showroom::Lighting)?;
+    use fixture_project::reflected::assets::game::maps::showroom::Lighting;
+    let _: bool = widget.reskin(&Lighting)?;
     let _: AssetRef<MeshThing> = widget.skin()?;
     // A map and the folder beside it, which Rust keeps in separate namespaces.
-    let _ = &fixture_project::types::assets::game::maps::Showroom;
-    let _ = &fixture_project::types::assets::engine::basic::_9Grid;
+    let _ = &fixture_project::reflected::assets::game::maps::Showroom;
+    let _ = &fixture_project::reflected::assets::engine::basic::_9Grid;
     // The escape hatch: a path from data, untyped, visibly so.
     widget.set_skin(&AssetRef::from_path("/Game/FromAConfigFile"))?;
 """) == []
@@ -386,7 +389,7 @@ def test_every_enumerator_has_a_variant(workspace):
     can report that the client could not decode.
     """
     assert check(workspace, """
-    use fixture_project::types::enums::EWidgetComparison;
+    use fixture_project::reflected::enums::EWidgetComparison;
     use tempo_sim::unreal::UnrealEnum;
     let named = [
         (EWidgetComparison::Enumerator0, "=="),
@@ -410,19 +413,19 @@ def test_a_read_only_propertys_set_function_is_kept(workspace):
     way to set a static mesh -- behind a property that would never use the name.
     """
     assert check(workspace, """
-    let _: bool = widget.set_frame(&fixture_project::types::assets::game::widgets::W_Main)?;
+    let _: bool = widget.set_frame(&fixture_project::reflected::assets::game::widgets::W_Main)?;
     let _ = widget.frame()?;
 """) == []
 
 
 @pytest.mark.parametrize("case,body", [
     ("an asset that was renamed",
-     "widget.set_skin(&fixture_project::types::assets::game::widgets::W_Mian)?;"),
+     "widget.set_skin(&fixture_project::reflected::assets::game::widgets::W_Mian)?;"),
     ("an asset of the wrong class",
-     "widget.set_skin(&fixture_project::types::assets::game::widgets::trims::T_Gold)?;"),
+     "widget.set_skin(&fixture_project::reflected::assets::game::widgets::trims::T_Gold)?;"),
     ("a bare path", 'widget.set_skin("/Game/Widgets/W_Main")?;'),
     ("two assets that collide, both left out",
-     "let _ = &fixture_project::types::assets::game::widgets::Dup_One;"),
+     "let _ = &fixture_project::reflected::assets::game::widgets::Dup_One;"),
 ])
 def test_asset_drift_does_not_compile(workspace, case, body):
     assert check(workspace, "    " + body), "{} must not compile".format(case)
@@ -443,7 +446,7 @@ def test_a_setter_names_the_argument_it_sends(workspace):
     until the generator resolved it. Asserted on the emitted call, because the failure is a runtime
     one that no amount of type checking would catch.
     """
-    engine = (workspace / CRATE / "src" / "types" / "classes" / "engine.rs").read_text()
+    engine = (workspace / CRATE / "src" / "reflected" / "classes" / "engine.rs").read_text()
     assert 'set_via("SetScaleFactor", "InScale"' in engine, \
         "the setter and its argument both have to be named: {}".format(
             [line.strip() for line in engine.splitlines() if "set_via" in line])
@@ -451,7 +454,7 @@ def test_a_setter_names_the_argument_it_sends(workspace):
 
 def test_a_property_whose_setter_cannot_be_named_is_read_only(workspace):
     """Writing it directly would skip the setter, which is what the accessor path prevents."""
-    engine = (workspace / CRATE / "src" / "types" / "classes" / "engine.rs").read_text()
+    engine = (workspace / CRATE / "src" / "reflected" / "classes" / "engine.rs").read_text()
     assert "fn untouchable(" in engine, "it should still be readable"
     assert "fn set_untouchable(" not in engine, "it must not be writable"
     assert check(workspace, """
@@ -485,7 +488,7 @@ def test_a_property_whose_setter_cannot_be_named_is_read_only(workspace):
      "let _ = FWidgetSettings { scale: Some(\"big\".to_string()), ..Default::default() };"),
     ("the wrong struct as an argument", "let _ = widget.configure(FWidgetTrim::default())?;"),
     ("a value type for a struct that cannot travel",
-     "let _ = fixture_project::types::structs::FWidgetLimits::default();"),
+     "let _ = fixture_project::reflected::structs::FWidgetLimits::default();"),
     ("assigning a struct that cannot travel", "widget.set_limits(Default::default())?;"),
     ("loading a struct that cannot travel", "let _ = widget.limits().load()?;"),
     ("a function returning a struct that cannot travel", "let _ = widget.get_limits()?;"),
@@ -522,15 +525,15 @@ def test_the_escape_hatch_is_explicit(workspace):
 def test_a_shared_class_is_the_published_type(reexporting):
     """A helper written against tempo-sim's type takes the project's: they are one type."""
     assert check(reexporting, """
-    fn published_mesh(_m: &tempo_sim::types::classes::engine::MeshThing) {}
+    fn published_mesh(_m: &tempo_sim::reflected::classes::engine::MeshThing) {}
     published_mesh(&mesh);
-    let _object: &tempo_sim::types::classes::core_u_object::Object = &mesh;
+    let _object: &tempo_sim::reflected::classes::core_u_object::Object = &mesh;
 """) == []
 
 
 def test_a_class_the_release_describes_differently_is_the_projects_own(reexporting):
     assert check(reexporting, """
-    fn published_widget(_w: &tempo_sim::types::classes::engine::Widget) {}
+    fn published_widget(_w: &tempo_sim::reflected::classes::engine::Widget) {}
     published_widget(&widget);
 """) != []
 
@@ -547,11 +550,11 @@ def test_the_project_table_brings_in_the_published_one(reexporting):
 
 
 def test_a_re_exported_entry_is_left_out_of_the_project_table(reexporting):
-    hierarchy = (reexporting / CRATE / "src" / "types" / "hierarchy.rs").read_text()
+    hierarchy = (reexporting / CRATE / "src" / "reflected" / "hierarchy.rs").read_text()
     # Its superclass entry, not the name: an asset's class is in the table either way.
     assert '("/Script/Engine.MeshThing", "/Script/CoreUObject.Object")' not in hierarchy
     assert '("/Script/Engine.Widget", "/Script/CoreUObject.Object")' in hierarchy
     assert "fn depends_on" in hierarchy
     manifest = (reexporting / CRATE / "Cargo.toml").read_text()
-    assert 'types = ["tempo-sim/types"]' in manifest
+    assert 'reflected = ["tempo-sim/reflected"]' in manifest
 

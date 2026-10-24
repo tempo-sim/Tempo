@@ -341,7 +341,7 @@ def reaching(d: E.DeepBridged) -> None:
 
 @pytest.fixture(scope="module")
 def nested(tmp_path_factory, subset):
-    """The subset generated where it ships: inside another package, as `tempo_sim.types` is.
+    """The subset generated where it ships: inside another package, as `tempo_sim.reflected` is.
 
     Not a distribution of its own (TYPED_WORLD_API_PLAN.md section 16.4).
     """
@@ -349,11 +349,11 @@ def nested(tmp_path_factory, subset):
     out = tmp_path_factory.mktemp("nested")
     schema = out / "subset.json"
     schema.write_text(json.dumps(narrowed))
-    package = out / DIST / "types"
+    package = out / DIST / "reflected"
     (out / DIST).mkdir(parents=True, exist_ok=True)
     (out / DIST / "__init__.py").write_text("")
     subprocess.run([sys.executable, GENERATOR, str(schema), str(package),
-                    "--package={}.types".format(DIST)],
+                    "--package={}.reflected".format(DIST)],
                    check=True, capture_output=True, text=True)
     return out
 
@@ -361,18 +361,18 @@ def nested(tmp_path_factory, subset):
 def test_a_nested_package_imports_itself_by_its_full_name(nested):
     """The emitted modules import each other, and a directory name is not the dotted name.
 
-    Left to the directory this would emit `import types.enums`, which finds the standard library's
-    `types` module and nothing in it -- and the failure would be an ImportError at runtime rather
-    than anything a type checker reports.
+    Left to the directory this would emit `import reflected.enums`, which resolves to nothing from
+    anywhere -- and the failure would be an ImportError at runtime rather than anything a type
+    checker reports.
     """
-    stub = (nested / DIST / "types" / "Engine.pyi").read_text()
-    assert "{}.types.enums".format(DIST) in stub, [
+    stub = (nested / DIST / "reflected" / "Engine.pyi").read_text()
+    assert "{}.reflected.enums".format(DIST) in stub, [
         line for line in stub.splitlines() if "import" in line]
 
 
 def test_the_published_classes_type_check_where_they_ship(nested, tmp_path):
     errors = check(nested, """
-from fixture_classes.types.Engine import Widget
+from fixture_classes.reflected.Engine import Widget
 
 def ok(w: Widget) -> None:
     w.bEnabled = True
@@ -381,7 +381,7 @@ def ok(w: Widget) -> None:
     assert errors == [], "the published classes should type-check: {}".format(errors)
 
     errors = check(nested, """
-from fixture_classes.types.Engine import Widget
+from fixture_classes.reflected.Engine import Widget
 
 def drift(w: Widget) -> None:
     w.bEnabledd = True
@@ -482,15 +482,15 @@ def reexporting(tmp_path_factory, subset):
     published_schema.write_text(json.dumps(published))
     (out / DIST).mkdir()
     (out / DIST / "__init__.py").write_text("")
-    subprocess.run([sys.executable, GENERATOR, str(published_schema), str(out / DIST / "types"),
-                    "--package={}.types".format(DIST)],
+    subprocess.run([sys.executable, GENERATOR, str(published_schema), str(out / DIST / "reflected"),
+                    "--package={}.reflected".format(DIST)],
                    check=True, capture_output=True, text=True)
     (out / PROJECT).mkdir()
     (out / PROJECT / "__init__.py").write_text("")
-    subprocess.run([sys.executable, GENERATOR, FIXTURE, str(out / PROJECT / "types"),
-                    "--package={}.types".format(PROJECT),
+    subprocess.run([sys.executable, GENERATOR, FIXTURE, str(out / PROJECT / "reflected"),
+                    "--package={}.reflected".format(PROJECT),
                     "--published={}".format(published_schema),
-                    "--published-package={}.types".format(DIST)],
+                    "--published-package={}.reflected".format(DIST)],
                    check=True, capture_output=True, text=True)
     return out
 
@@ -501,19 +501,20 @@ def _read_json(path):
 
 
 def test_what_the_published_types_share_is_re_exported(reexporting):
-    engine = (reexporting / PROJECT / "types" / "Engine.py").read_text()
-    stub = (reexporting / PROJECT / "types" / "Engine.pyi").read_text()
-    line = "from {}.types.Engine import MeshThing as MeshThing".format(DIST)
+    engine = (reexporting / PROJECT / "reflected" / "Engine.py").read_text()
+    stub = (reexporting / PROJECT / "reflected" / "Engine.pyi").read_text()
+    line = "from {}.reflected.Engine import MeshThing as MeshThing".format(DIST)
     assert line in engine and line in stub
     # Defined here: changed (Widget), rerooted by the subset (Bridged), or not published at all.
     for name in ("Widget", "Bridged"):
         assert "class {}(".format(name) in engine, name
-    assert "class PluginBase(" in (reexporting / PROJECT / "types" / "SomePlugin.py").read_text()
+    plugin = reexporting / PROJECT / "reflected" / "SomePlugin.py"
+    assert "class PluginBase(" in plugin.read_text()
 
 
 def test_a_re_exported_entry_is_left_to_the_published_package(reexporting):
     """One registration per class: the published index answers for what it defines."""
-    project = reexporting / PROJECT / "types"
+    project = reexporting / PROJECT / "reflected"
     index = _read_json(project / "index.json")
     assert "/Script/Engine.MeshThing" not in index
     assert "/Script/CoreUObject.Object" not in index
@@ -524,24 +525,24 @@ def test_a_re_exported_entry_is_left_to_the_published_package(reexporting):
     assert "FWidgetTrim" not in hashes["structs"] and "FWidgetSettings" in hashes["structs"]
     assert "EWidgetMode" not in hashes["enums"]
 
-    assert "import {}.types".format(DIST) in (project / "__init__.py").read_text(), \
+    assert "import {}.reflected".format(DIST) in (project / "__init__.py").read_text(), \
         "the project's types have to register the published ones they lean on"
 
 
 def test_structs_and_enums_are_re_exported_too(reexporting):
-    project = reexporting / PROJECT / "types"
+    project = reexporting / PROJECT / "reflected"
     structs = (project / "structs.pyi").read_text()
-    assert "from {}.types.structs import FWidgetTrim as FWidgetTrim".format(DIST) in structs
+    assert "from {}.reflected.structs import FWidgetTrim as FWidgetTrim".format(DIST) in structs
     assert "class FWidgetSettings(" in structs
-    assert "from {}.types.enums import EWidgetMode as EWidgetMode".format(DIST) in \
+    assert "from {}.reflected.enums import EWidgetMode as EWidgetMode".format(DIST) in \
         (project / "enums.py").read_text()
 
 
 def test_a_shared_class_is_one_type_to_a_checker(reexporting, tmp_path):
     """The point of re-exporting: a helper written against the published type takes the project's."""
     errors = check(reexporting, """
-import {dist}.types.Engine as published
-import {project}.types.Engine as project
+import {dist}.reflected.Engine as published
+import {project}.reflected.Engine as project
 
 def helper(mesh: published.MeshThing) -> None: ...
 
@@ -551,8 +552,8 @@ def ok(mesh: project.MeshThing) -> None:
     assert errors == [], "a re-exported class should be the published one: {}".format(errors)
 
     errors = check(reexporting, """
-import {dist}.types.Engine as published
-import {project}.types.Engine as project
+import {dist}.reflected.Engine as published
+import {project}.reflected.Engine as project
 
 def helper(widget: published.Widget) -> None: ...
 

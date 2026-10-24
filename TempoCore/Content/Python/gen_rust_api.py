@@ -841,8 +841,8 @@ pub mod world;
 // The published types: the engine's always-loaded modules and Tempo's own, generated from the
 // latest supported engine by Scripts/GenTypedAPI.sh. Off by default, because generating them is a
 // packaging step and compiling them is a cost an RPC-only client should not pay.
-#[cfg(feature = "types")]
-pub mod types;
+#[cfg(feature = "reflected")]
+pub mod reflected;
 
 // Re-export commonly used items
 pub use context::{set_server, set_server_async, set_socket, set_socket_async, tempo_context, TempoContext};
@@ -998,9 +998,9 @@ if __name__ == "__main__":
 
     # Discover modules by inspecting the nested pb2 trees: each subdir of a
     # package dir holding pb2 is one module. {module: (namespace, dir)}. A subdir
-    # without any is something else -- the typed classes, `types`, sit beside the
+    # without any is something else -- the typed classes, `reflected`, sit beside the
     # proto modules in both packages -- and counting it would both report a
-    # project module that does not exist and collide the two packages' `types`.
+    # project module that does not exist and collide the two packages' `reflected`.
     def _is_proto_module(d):
         return d.is_dir() and d.name != "__pycache__" and any(d.rglob("*_pb2.py"))
 

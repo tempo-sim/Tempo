@@ -13,7 +13,7 @@ The **typed classes** are the same capability with the strings removed:
 
 ```python
 from tempo_sim import world
-from tempo_sample.types.Game.Vehicles import BP_Cat745_C
+from tempo_sample.reflected.Game.Vehicles import BP_Cat745_C
 
 for truck in world.get_actors(BP_Cat745_C):
     truck.MaxSpeed = 1200.0
@@ -43,9 +43,9 @@ pip install Packaged/API/Python/tempo-sim/*.whl \
             Packaged/API/Python/tempo-sample/*.whl
 ```
 
-They are the `types` subpackage of the project's own package, beside its services:
-`tempo_sample.types` for TempoSample, `<your_project>.types` for yours, there even when the project
-defines no services. Importing it is what registers the classes with the runtime.
+They are the `reflected` subpackage of the project's own package, beside its services:
+`tempo_sample.reflected` for TempoSample, `<your_project>.reflected` for yours, there even when the
+project defines no services. Importing it is what registers the classes with the runtime.
 
 ### The published types
 
@@ -53,13 +53,13 @@ defines no services. Importing it is what registers the classes with the runtime
 ones and Tempo's — so code that touches only those needs no project package at all:
 
 ```python
-from tempo_sim.types.Engine import Pawn
-from tempo_sim.types.TempoSensors import TempoLidar
+from tempo_sim.reflected.Engine import Pawn
+from tempo_sim.reflected.TempoSensors import TempoLidar
 ```
 
 A project's package re-exports every one of these it describes alike, rather than generating a
-second type for the same Unreal class: `tempo_sample.types.Engine.Pawn` *is*
-`tempo_sim.types.Engine.Pawn`. So a helper library written against the published types takes a
+second type for the same Unreal class: `tempo_sample.reflected.Engine.Pawn` *is*
+`tempo_sim.reflected.Engine.Pawn`. So a helper library written against the published types takes a
 project's Blueprints too. Where the two would differ — a class whose ancestry the published set
 cannot carry, or one mentioning a type it does not have — the project defines its own.
 
@@ -100,7 +100,7 @@ A subsystem — world, game instance, engine or local player — is found by its
 there is one of each:
 
 ```python
-from tempo_sample.types.TempoAgents import TempoAgentsWorldSubsystem
+from tempo_sample.reflected.TempoAgents import TempoAgentsWorldSubsystem
 
 agents = world.get_subsystem(TempoAgentsWorldSubsystem)
 agents.BrightnessMeterLateralOffset = 450.0
@@ -133,7 +133,7 @@ is 1,230 of TempoSample's 1,558 — and those have a generated value type, built
 arguments:
 
 ```python
-from tempo_sample.types.structs import FWalkableSlopeOverride
+from tempo_sample.reflected.structs import FWalkableSlopeOverride
 
 mesh.SetWalkableSlopeOverride(FWalkableSlopeOverride(WalkableSlopeAngle=12.0))
 current = mesh.GetWalkableSlopeOverride()                    # FWalkableSlopeOverride, a value
@@ -226,7 +226,7 @@ Every asset the build cooked is in a generated catalog, one module per mount poi
 namespaces. An asset-valued property is typed by the class it accepts:
 
 ```python
-from tempo_sample.types.assets import Engine, Game
+from tempo_sample.reflected.assets import Engine, Game
 
 mesh.SetStaticMesh(Engine.BasicShapes.Cube)          # AssetRef[StaticMesh]
 mesh.SetStaticMesh(Game.Materials.M_Paint)           # type error: AssetRef[Material]
@@ -317,10 +317,10 @@ unfiltered on purpose.
 ## The same thing in Rust
 
 The classes are generated for Rust too, from the same schema and with the same guarantee, as the
-`types` module of the project's own crate — behind its `types` feature, which is on by default. The
-crate ships beside `tempo-sim` when the build is packaged with `TEMPO_GEN_RUST_API=1`. The published
-types are `tempo_sim::types`, behind tempo-sim's own `types` feature, which is off by default and
-which a project's crate turns on for the ones it re-exports:
+`reflected` module of the project's own crate — behind its `reflected` feature, which is on by
+default. The crate ships beside `tempo-sim` when the build is packaged with `TEMPO_GEN_RUST_API=1`.
+The published types are `tempo_sim::reflected`, behind tempo-sim's own `reflected` feature, which is
+off by default and which a project's crate turns on for the ones it re-exports:
 
 ```toml
 [dependencies]
@@ -329,7 +329,7 @@ tempo-sample = { path = "Packaged/API/Rust/tempo-sample" }
 ```
 
 ```rust
-use tempo_sample::types::classes::game::vehicles::BP_Cat745_C;
+use tempo_sample::reflected::classes::game::vehicles::BP_Cat745_C;
 use tempo_sim::world;
 
 for truck in world::get_actors::<BP_Cat745_C>()? {
@@ -393,8 +393,8 @@ The catalog is a module tree of statics, `assets::engine::basic_shapes::Cube`, e
 asset-valued setter takes a reference and a derived class coerces into it:
 
 ```rust
-use tempo_sample::types::assets::engine::basic_shapes::Cube;
-use tempo_sample::types::assets::game::materials::M_Paint;
+use tempo_sample::reflected::assets::engine::basic_shapes::Cube;
+use tempo_sample::reflected::assets::game::materials::M_Paint;
 
 mesh.set_static_mesh(&Cube)?;                        // &AssetRef<StaticMesh>
 mesh.set_material(0, &M_Paint)?;                     // &AssetRef<Material> -> &AssetRef<MaterialInterface>
@@ -421,7 +421,7 @@ Struct values are plain Rust structs with every field an `Option`, because an un
 sent. A struct property's accessor returns its proxy, which loads and stores the whole value:
 
 ```rust
-use tempo_sample::types::structs::FWalkableSlopeOverride;
+use tempo_sample::reflected::structs::FWalkableSlopeOverride;
 
 mesh.set_walkable_slope_override(FWalkableSlopeOverride {
     walkable_slope_angle: Some(12.0),

@@ -3,8 +3,8 @@
 //! Integration tests for the typed Rust class surface against a packaged sim.
 //!
 //! The Rust half of what `Tests/Python/test_typed_world.py` does. `Scripts/TestRustAPI.sh typed`
-//! vendors the project's crate, which carries this build's generated classes as its `types` module,
-//! as `project`, and launches the packaged sim.
+//! vendors the project's crate, which carries this build's generated classes as its `reflected`
+//! module, as `project`, and launches the packaged sim.
 //!
 //! Everything here addresses classes that any host project with Tempo has -- engine classes and
 //! Tempo's own -- so the file is not specific to TempoSample. Run single-threaded, since these
@@ -12,9 +12,9 @@
 
 use std::time::{Duration, Instant};
 
-use project::types::classes::engine::{Actor, StaticMeshActor};
-use project::types::enums::EWalkableSlopeBehavior;
-use project::types::structs::FWalkableSlopeOverride;
+use project::reflected::classes::engine::{Actor, StaticMeshActor};
+use project::reflected::enums::EWalkableSlopeBehavior;
+use project::reflected::structs::FWalkableSlopeOverride;
 use tempo_sim::unreal::{Class, Vector};
 use tempo_sim::world;
 
@@ -205,7 +205,7 @@ fn an_actor_looked_up_by_the_wrong_class_is_refused() {
     world::get_actor::<StaticMeshActor>(&name).expect("the actor is a StaticMeshActor");
 
     // A name is a runtime string, so this is the one place the typed API has to check at run time.
-    let wrong = world::get_actor::<project::types::classes::engine::Pawn>(&name);
+    let wrong = world::get_actor::<project::reflected::classes::engine::Pawn>(&name);
     assert!(wrong.is_err(), "looking the actor up as a Pawn should fail");
 
     let missing = world::get_actor::<StaticMeshActor>("NoSuchActorExistsHere");
@@ -289,7 +289,7 @@ fn a_batch_defers_reads_and_keeps_order() {
 
 #[test]
 fn a_catalog_asset_goes_through_a_typed_setter() {
-    use project::types::assets::engine::basic_shapes::Cube;
+    use project::reflected::assets::engine::basic_shapes::Cube;
 
     connect();
     let actor = spawn();
@@ -304,8 +304,8 @@ fn a_catalog_asset_goes_through_a_typed_setter() {
 
 #[test]
 fn a_subsystem_is_reached_by_its_class() {
-    use project::types::classes::engine::ReplaySubsystem;
-    use project::types::classes::tempo_agents::TempoAgentsWorldSubsystem;
+    use project::reflected::classes::engine::ReplaySubsystem;
+    use project::reflected::classes::tempo_agents::TempoAgentsWorldSubsystem;
 
     connect();
     // A world subsystem, read and written; there is one per world, so the class is the address.
@@ -331,7 +331,7 @@ fn a_class_that_is_not_a_subsystem_fails_at_the_lookup() {
 fn a_shared_class_is_tempo_sims_own_type() {
     // The project's types re-export what tempo-sim's published ones describe alike, so a helper
     // written against tempo-sim's takes the project's handle as it is.
-    fn published_actor(actor: &tempo_sim::types::classes::engine::StaticMeshActor) -> String {
+    fn published_actor(actor: &tempo_sim::reflected::classes::engine::StaticMeshActor) -> String {
         actor.as_object().actor_name().to_string()
     }
 
@@ -339,7 +339,7 @@ fn a_shared_class_is_tempo_sims_own_type() {
     let actor = spawn();
     assert_eq!(published_actor(actor.actor()), actor.name());
     // And the other way: discovery through the published type finds the project's actor.
-    let found = world::get_actors::<tempo_sim::types::classes::engine::StaticMeshActor>()
+    let found = world::get_actors::<tempo_sim::reflected::classes::engine::StaticMeshActor>()
         .expect("get_actors");
     assert!(found.iter().any(|a| a.as_object().actor_name() == actor.name()));
 }

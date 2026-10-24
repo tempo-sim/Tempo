@@ -11,8 +11,8 @@ REM
 REM   Scripts\GenTypedAPI.bat
 REM
 REM The schema lands in Saved\TempoSchema\tempo_schema.json. The classes go into the project's own
-REM client package and crate, beside the wrappers its protos generate: <project>.types in
-REM Content\Python\API and <project>::types in Content\Rust\API.
+REM client package and crate, beside the wrappers its protos generate: <project>.reflected in
+REM Content\Python\API and <project>::reflected in Content\Rust\API.
 REM
 REM Rust follows the same gate as the RPC client generator, TEMPO_GEN_RUST_API.
 
@@ -76,11 +76,11 @@ REM Into the project's own package, creating it if the project has no protos to 
 REM already, in a directory of its own so a class module cannot land on a proto module's name.
 "!PYTHON_BIN!" "!PYTHON_DIR!\gen_project_package.py" python "!PROJECT_ROOT!"
 if errorlevel 1 exit /b 1
-set "CLASSES_DIR=!PROJECT_ROOT!\Content\Python\API\!IMPORT_NAME!\types"
+set "CLASSES_DIR=!PROJECT_ROOT!\Content\Python\API\!IMPORT_NAME!\reflected"
 if exist "!CLASSES_DIR!" rmdir /s /q "!CLASSES_DIR!"
 
-echo Generating !IMPORT_NAME!.types
-"!PYTHON_BIN!" "!PYTHON_DIR!\gen_py_classes.py" "!SCHEMA!" "!CLASSES_DIR!" "--package=!IMPORT_NAME!.types"
+echo Generating !IMPORT_NAME!.reflected
+"!PYTHON_BIN!" "!PYTHON_DIR!\gen_py_classes.py" "!SCHEMA!" "!CLASSES_DIR!" "--package=!IMPORT_NAME!.reflected"
 if errorlevel 1 exit /b 1
 echo Typed Python classes generated at !CLASSES_DIR!
 
@@ -103,10 +103,10 @@ REM crate's manifest and lib.rs are written after them, because lib.rs declares 
 if not defined TEMPO_GEN_RUST_API goto :no_rust
 if "!TEMPO_GEN_RUST_API!"=="0" goto :no_rust
 
-set "RUST_CLASSES_DIR=!PROJECT_ROOT!\Content\Rust\API\src\types"
+set "RUST_CLASSES_DIR=!PROJECT_ROOT!\Content\Rust\API\src\reflected"
 if exist "!RUST_CLASSES_DIR!" rmdir /s /q "!RUST_CLASSES_DIR!"
-echo Generating !IMPORT_NAME!::types
-"!PYTHON_BIN!" "!PYTHON_DIR!\gen_rust_classes.py" "!SCHEMA!" "!RUST_CLASSES_DIR!" "--root=crate::types"
+echo Generating !IMPORT_NAME!::reflected
+"!PYTHON_BIN!" "!PYTHON_DIR!\gen_rust_classes.py" "!SCHEMA!" "!RUST_CLASSES_DIR!" "--root=crate::reflected"
 if errorlevel 1 exit /b 1
 "!PYTHON_BIN!" "!PYTHON_DIR!\gen_project_package.py" rust "!PROJECT_ROOT!"
 if errorlevel 1 exit /b 1

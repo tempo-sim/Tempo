@@ -25,9 +25,9 @@ include = [
 ]
 
 [features]
-# The published types (`tempo_sim::types`), when Scripts/GenTypedAPI.sh has generated them. A
+# The published types (`tempo_sim::reflected`), when Scripts/GenTypedAPI.sh has generated them. A
 # project's crate turns this on for the types it re-exports.
-types = []
+reflected = []
 
 [dependencies]
 tonic = "0.13"

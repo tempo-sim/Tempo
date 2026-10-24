@@ -30,10 +30,10 @@ SPAWNABLE = "/Script/Engine.StaticMeshActor"
 def _import_generated_classes():
     """Import the project's generated classes, if installed; importing is what registers them.
 
-    They are the `types` subpackage of the project's own package, which is named after the project
-    (`tempo_sample.types` for TempoSample), so it is discovered rather than named here -- this file
-    should work for any project using Tempo. tempo-sim's own `types` holds the published ones, and
-    is not this build's.
+    They are the `reflected` subpackage of the project's own package, which is named after the
+    project (`tempo_sample.reflected` for TempoSample), so it is discovered rather than named here
+    -- this file should work for any project using Tempo. tempo-sim's own `reflected` holds the
+    published ones, and is not this build's.
     """
     import importlib
 
@@ -49,9 +49,9 @@ def _import_generated_classes():
             continue
         for path in distribution.files or []:
             parts = path.parts
-            if len(parts) == 3 and parts[1:] == ("types", "__init__.py"):
+            if len(parts) == 3 and parts[1:] == ("reflected", "__init__.py"):
                 try:
-                    importlib.import_module(parts[0] + ".types")
+                    importlib.import_module(parts[0] + ".reflected")
                     return True
                 except ImportError:
                     break
@@ -918,10 +918,10 @@ def _import_published_classes():
     import importlib
 
     try:
-        importlib.import_module("tempo_sim.types")
+        importlib.import_module("tempo_sim.reflected")
     except ImportError:
         return None
-    return "tempo_sim.types"
+    return "tempo_sim.reflected"
 
 
 def _project_package():
@@ -942,7 +942,7 @@ def test_a_shared_class_is_one_type_in_both_packages(sim_server):
     if _import_published_classes() is None:
         pytest.skip("this tempo-sim wheel carries no published types")
     project = importlib.import_module(_project_package() + ".Engine")
-    published = importlib.import_module("tempo_sim.types.Engine")
+    published = importlib.import_module("tempo_sim.reflected.Engine")
     assert project.Pawn is published.Pawn
     # Resolved from the published package, which is the one that defines it.
     assert registered().python_class("/Script/Engine.Pawn") is published.Pawn

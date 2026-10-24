@@ -822,9 +822,9 @@ def generate(schema_path, output_dir, docstrings=False, package=None, published_
             "tempo_schema.json is schema_version {!r}, but this generator reads {!r}. Regenerate "
             "the schema, or use the generator that shipped with it.".format(actual, expected))
 
-    # The dotted name the emitted modules import each other by. The directory's own name serves
-    # for a top-level distribution; a package generated *inside* another one -- the published
-    # types at tempo_sim.types (TYPED_WORLD_API_PLAN.md section 16.4) -- has to be told, since its
+    # The dotted name the emitted modules import each other by. The directory's own name serves for
+    # a top-level distribution; a package generated *inside* another one -- the published types at
+    # tempo_sim.reflected (TYPED_WORLD_API_PLAN.md section 16.4) -- has to be told, since its
     # directory is only the last segment of it.
     dist = package or os.path.basename(output_dir.rstrip(os.sep))
     generator = Generator(schema, docstrings, published, published_package)
@@ -949,7 +949,7 @@ def main(argv):
         return 2
     stats, modules = generate(arguments[0], arguments[1], "--docstrings" in options,
                               options.get("--package"), options.get("--published"),
-                              options.get("--published-package", "tempo_sim.types"))
+                              options.get("--published-package", "tempo_sim.reflected"))
     print("modules            {}".format(len(modules)))
     print("classes            {} ({} re-exported from the published types)".format(
         stats["classes"], stats["classes_reexported"]))
