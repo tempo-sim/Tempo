@@ -48,7 +48,7 @@
 use crate::error::TempoError;
 use crate::unreal::{note_origin, Class, ObjectRef, Transform};
 
-pub use crate::unreal::batch;
+pub use crate::unreal::{batch, defer, Deferred};
 
 /// A `Transform` as `SpawnActor` takes it.
 ///

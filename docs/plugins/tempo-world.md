@@ -386,6 +386,30 @@ tempo_world.set_property(actor="MyActor", component="Mesh", property="BodyInstan
 - `struct_name` is checked: writing an `FHitResult` into an `FBodyInstance` property fails. Leave it
   empty to skip the check.
 
+### Running several operations in order
+
+`run_batch` carries property writes, property reads and function calls together, each the same
+request its own RPC takes, and runs them in order in one go on the game thread — so the whole batch
+happens between two ticks, and a read sees every write before it in the same batch.
+
+```python
+import tempo_sim.TempoWorld.WorldControl_pb2 as WorldControl
+
+response = tempo_world.run_batch(stop_on_failure=True, ops=[
+    WorldControl.BatchOp(set=WorldControl.SetPropertyRequest(
+        actor="MyActor", property="bCanBeDamaged", value=WorldControl.Value(bool_value=False))),
+    WorldControl.BatchOp(get=WorldControl.GetPropertyRequest(actor="MyActor", property="bCanBeDamaged")),
+    WorldControl.BatchOp(call=WorldControl.CallFunctionRequest(actor="MyActor", function="ActorHasTag",
+        args=[WorldControl.FunctionArg(name="Tag", value=WorldControl.Value(string_value="x"))])),
+])
+read_back = response.results[1].value.bool_value
+```
+
+There is one result per op, failed or not, because a read's value is found by position. With
+`stop_on_failure`, the first failure ends the batch and every later op comes back `ABORTED` without
+having run; without it, every op runs regardless, as `set_properties` does. The
+[typed classes](../clients/typed-classes.md#one-call-instead-of-twenty) are built on this.
+
 ### Batching property sets
 
 `set_properties` accepts a list of any of the singular set-property ops above and runs them in

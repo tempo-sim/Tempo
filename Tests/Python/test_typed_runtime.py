@@ -295,28 +295,42 @@ def fake_world(monkeypatch, classes):
     what order, so the calls themselves have to be visible.
     """
     import tempo_sim.unreal as unreal
+    import tempo_sim.TempoWorld.WorldControl_pb2 as WorldControl
 
     calls = []
+    # Index -> (code, error) for an op the fake should fail. Later ops come back ABORTED, as the
+    # server reports them under stop_on_failure.
+    failures = {}
 
-    class FakeBatchBuilder:
-        def __init__(self):
-            self.ops = []
-
-        def set_generic_property(self, **kwargs):
-            self.ops.append(kwargs["property"])
-            return self
-
-        def execute(self):
-            calls.append(("set_properties", list(self.ops)))
-
-            class Response:
-                failures = []
-            return Response()
+    def describe(op):
+        kind = op.WhichOneof("op")
+        request = getattr(op, kind)
+        return "{} {}".format(kind, request.function if kind == "call" else request.property)
 
     class FakeWorld:
         @staticmethod
-        def batch():
-            return FakeBatchBuilder()
+        def run_batch(ops, stop_on_failure):
+            calls.append(("run_batch", [describe(op) for op in ops]))
+            assert stop_on_failure is True, "the typed runtime stops at the first failure"
+            results, failed = [], False
+            for index, op in enumerate(ops):
+                result = WorldControl.BatchOpResult()
+                if failed:
+                    result.code, result.error = 10, "not run"
+                elif index in failures:
+                    result.code, result.error = failures[index]
+                    failed = True
+                elif op.WhichOneof("op") == "get":
+                    result.value.bool_value = True
+                elif op.WhichOneof("op") == "call":
+                    result.call.results.add(name="ReturnValue",
+                                            typed_value=WorldControl.Value(bool_value=True))
+                results.append(result)
+
+            class Response:
+                pass
+            Response.results = results
+            return Response()
 
         @staticmethod
         def set_property(**kwargs):
@@ -343,6 +357,7 @@ def fake_world(monkeypatch, classes):
             return Response()
 
     monkeypatch.setattr(unreal, "_world", lambda: FakeWorld)
+    FakeWorld.failures = failures
     return calls
 
 
@@ -355,8 +370,96 @@ def test_a_batch_sends_one_call(classes, fake_world):
         widget.Mode = "Simple"
         widget.Tags = ["x"]
 
-    assert fake_world == [("set_properties", ["bEnabled", "Mode", "Tags"])], \
+    assert fake_world == [("run_batch", ["set bEnabled", "set Mode", "set Tags"])], \
         "three writes in a batch should be one call"
+
+
+def test_an_accessor_write_travels_in_the_same_batch(classes, fake_world):
+    """A BlueprintSetter write is a call, which SetProperties could not carry: it split the batch."""
+    from tempo_sim import world
+
+    widget = classes.Widget("MyActor")
+    with world.batch():
+        widget.bEnabled = True
+        widget.ScaleFactor = 2.0
+        widget.Tags = ["x"]
+    assert fake_world == [("run_batch", ["set bEnabled", "call SetScaleFactor", "set Tags"])]
+
+
+def test_a_deferred_read_rides_along(classes, fake_world):
+    from tempo_sim import world
+
+    widget = classes.Widget("MyActor")
+    with world.batch() as b:
+        widget.bEnabled = False
+        enabled = b.get(lambda: widget.bEnabled)
+        assert not enabled.done
+        with pytest.raises(RuntimeError, match="not run yet"):
+            _ = enabled.value
+        resized = b.call(lambda: widget.Resize(4))
+    assert fake_world == [("run_batch", ["set bEnabled", "get bEnabled", "call Resize"])], \
+        "the read and the call go out with the write, after it, in one call"
+    assert enabled.value is True
+    assert resized.value is True
+
+
+def test_an_immediate_read_sends_what_is_queued_with_it(classes, fake_world):
+    """Otherwise it would reach the server ahead of the writes before it, and see stale values."""
+    from tempo_sim import world
+
+    widget = classes.Widget("MyActor")
+    with world.batch():
+        widget.bEnabled = True
+        assert widget.Mode is True
+        assert fake_world == [("run_batch", ["set bEnabled", "get Mode"])]
+        widget.Tags = ["x"]
+    assert fake_world[-1] == ("run_batch", ["set Tags"])
+
+
+def test_an_immediate_call_sends_what_is_queued_with_it(classes, fake_world):
+    from tempo_sim import world
+
+    widget = classes.Widget("MyActor")
+    with world.batch():
+        widget.bEnabled = True
+        assert widget.Resize(4) is True
+    assert fake_world == [("run_batch", ["set bEnabled", "call Resize"])]
+
+
+def test_a_failed_op_is_named_and_what_follows_it_did_not_run(classes, fake_world):
+    from tempo_sim import world
+    import tempo_sim.unreal as unreal
+
+    unreal._world().failures[1] = (9, "Property 'Mode' has the wrong type")
+    widget = classes.Widget("MyActor")
+    with pytest.raises(unreal.BatchError) as caught:
+        with world.batch() as b:
+            widget.bEnabled = True
+            widget.Mode = "Simple"
+            later = b.get(lambda: widget.bEnabled)
+    assert caught.value.index == 1, "the op that failed, not one the server then skipped"
+    assert "Mode" in str(caught.value)
+    with pytest.raises(unreal.BatchError):
+        _ = later.value
+
+
+def test_a_deferred_lambda_cannot_transform_what_it_reads(classes, fake_world):
+    """There is no value yet inside the lambda, so working on one has to fail rather than be skipped."""
+    from tempo_sim import world
+
+    widget = classes.Widget("MyActor")
+    with pytest.raises(TypeError):
+        with world.batch() as b:
+            b.get(lambda: widget.ScaleFactor * 2)
+
+
+def test_a_deferred_lambda_makes_exactly_one_request(classes, fake_world):
+    from tempo_sim import world
+
+    widget = classes.Widget("MyActor")
+    with pytest.raises(TypeError, match="exactly one"):
+        with world.batch() as b:
+            b.get(lambda: (widget.bEnabled, widget.Mode))
 
 
 def test_writes_outside_a_batch_are_sent_immediately(classes, fake_world):
@@ -387,7 +490,7 @@ def test_nested_batches_flush_once(classes, fake_world):
         with outer:
             widget.Mode = "Simple"
         assert fake_world == [], "the inner block must not flush early"
-    assert fake_world == [("set_properties", ["bEnabled", "Mode"])]
+    assert fake_world == [("run_batch", ["set bEnabled", "set Mode"])]
 
 
 def test_a_snapshot_reads_once_and_serves_the_rest(classes, fake_world):
@@ -651,7 +754,7 @@ def server(monkeypatch):
     """
     import tempo_sim.unreal as unreal
 
-    sent = {"set_property": [], "call_function": []}
+    sent = {"set_property": [], "call_function": [], "run_batch": []}
 
     class FakeWorld:
         @staticmethod
@@ -661,6 +764,15 @@ def server(monkeypatch):
         @staticmethod
         def call_function(**kwargs):
             sent["call_function"].append(kwargs)
+
+        @staticmethod
+        def run_batch(ops, stop_on_failure):
+            import tempo_sim.TempoWorld.WorldControl_pb2 as WorldControl
+            sent["run_batch"].append(list(ops))
+
+            class Response:
+                results = [WorldControl.BatchOpResult() for _ in ops]
+            return Response()
 
     monkeypatch.setattr(unreal, "_world", lambda: FakeWorld)
     return sent
@@ -692,7 +804,9 @@ def test_a_batched_setter_write_keeps_the_argument_name(classes, server):
     widget = classes.Widget("MyActor")
     with world.batch():
         widget.ScaleFactor = 3.5
-    assert [arg["name"] for arg in server["call_function"][0]["args"]] == ["InScale"]
+    (op,), = server["run_batch"]
+    assert op.call.function == "SetScaleFactor"
+    assert [arg.name for arg in op.call.args] == ["InScale"]
 
 
 def test_a_property_whose_setter_cannot_be_named_is_read_only(classes):

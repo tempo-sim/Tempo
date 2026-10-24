@@ -207,6 +207,23 @@ def test_struct_values_compile(workspace):
 """) == []
 
 
+def test_a_deferred_read_is_typed_by_what_it_reads(workspace):
+    assert check(workspace, """
+    world::batch(|| {
+        widget.set_b_enabled(true)?;
+        let enabled: world::Deferred<bool> = world::defer(|| widget.b_enabled())?;
+        let resized: world::Deferred<bool> = world::defer(|| widget.resize(4))?;
+        Ok(())
+    })?;
+""") == []
+    assert check(workspace, """
+    world::batch(|| {
+        let _: world::Deferred<String> = world::defer(|| widget.b_enabled())?;
+        Ok(())
+    })?;
+"""), "a deferred read must keep the type of what it reads"
+
+
 def test_a_function_is_callable(workspace):
     assert check(workspace, """
     widget.refresh()?;

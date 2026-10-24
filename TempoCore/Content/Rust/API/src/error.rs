@@ -32,4 +32,14 @@ pub enum TempoError {
     /// mismatch means the stubs and the sim disagree about a property.
     #[error("{0}")]
     Protocol(String),
+
+    /// An op in a batch failed, or was not run because an earlier one failed. Names which.
+    #[error("{0}")]
+    Batch(String),
+
+    /// What a read inside `unreal::defer` returns in place of its value, which does not exist yet.
+    /// `defer` turns it into the `Deferred` it hands back, so it is not seen outside one.
+    #[doc(hidden)]
+    #[error("a read was deferred into a batch")]
+    Deferred,
 }

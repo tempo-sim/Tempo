@@ -155,14 +155,18 @@ def spawn_actor_deferred(cls: type[T], transform: Optional[Transform] = None,
 
 
 def batch() -> Batch:
-    """Collect writes made inside the block and send them together.
+    """Send what the block does as one RunBatch: in order, and between two ticks of the sim.
 
-        with world.batch():
+        with world.batch() as b:
             truck.MaxSpeed = 1200.0
             truck.Mass = 1500.0
+            speed = b.get(lambda: truck.MaxSpeed)       # Deferred[float]
+        print(speed.value)
 
-    One call instead of two, and one instead of twenty when there are twenty. Writes keep their
-    order, and the block is abandoned without sending anything if it raises.
+    One call instead of twenty when there are twenty, accessor writes included. A read or call made
+    directly inside the block, rather than through `b.get`/`b.call`, sends what is queued with it
+    and returns its real value -- so it sees the writes before it. Nothing is sent if the block
+    raises before that.
     """
     return Batch()
 

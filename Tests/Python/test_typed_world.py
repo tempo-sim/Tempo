@@ -556,6 +556,85 @@ def test_an_out_struct_comes_back_by_name(sim_server):
         tw.destroy_actor(actor=spawned.actor)
 
 
+# -- one ordered batch ------------------------------------------------------------------------------
+
+def _set_op(actor, prop, **value):
+    return WorldControl.BatchOp(set=WorldControl.SetPropertyRequest(
+        actor=actor, property=prop, value=WorldControl.Value(**value), native_units=True))
+
+
+def _get_op(actor, prop):
+    return WorldControl.BatchOp(get=WorldControl.GetPropertyRequest(
+        actor=actor, property=prop, native_units=True))
+
+
+def test_a_batch_reads_its_own_writes_in_order(actor):
+    """A read sees every write before it in the same batch, and none after it."""
+    response = tw.run_batch(ops=[
+        _set_op(actor, "bCanBeDamaged", bool_value=False),
+        _get_op(actor, "bCanBeDamaged"),
+        _set_op(actor, "bCanBeDamaged", bool_value=True),
+        _get_op(actor, "bCanBeDamaged"),
+    ])
+    assert [result.code for result in response.results] == [0, 0, 0, 0]
+    assert response.results[1].value.bool_value is False
+    assert response.results[3].value.bool_value is True
+
+
+def test_a_batch_carries_calls(actor):
+    response = tw.run_batch(ops=[
+        _set_op(actor, "Tags", string_array_value={"values": ["batched"]}),
+        WorldControl.BatchOp(call=WorldControl.CallFunctionRequest(
+            actor=actor, function="ActorHasTag", native_units=True,
+            args=[WorldControl.FunctionArg(name="Tag", value=WorldControl.Value(string_value="batched"))])),
+    ])
+    returned = next(r for r in response.results[1].call.results if r.name == "ReturnValue")
+    assert returned.typed_value.bool_value is True, "the call ran after the write before it"
+
+
+def test_a_failed_op_stops_the_batch_when_asked(actor):
+    response = tw.run_batch(stop_on_failure=True, ops=[
+        _set_op(actor, "NoSuchProperty", bool_value=True),
+        _set_op(actor, "bCanBeDamaged", bool_value=False),
+    ])
+    assert response.results[0].code != 0
+    assert response.results[1].code == 10, "the op after a failure is reported ABORTED, not run"
+    assert tw.get_property(actor=actor, property="bCanBeDamaged").bool_value is True
+
+
+def test_a_failed_op_does_not_stop_the_batch_by_default(actor):
+    response = tw.run_batch(ops=[
+        _set_op(actor, "NoSuchProperty", bool_value=True),
+        _set_op(actor, "bCanBeDamaged", bool_value=False),
+    ])
+    assert response.results[0].code != 0
+    assert response.results[1].code == 0
+    assert tw.get_property(actor=actor, property="bCanBeDamaged").bool_value is False
+
+
+@requires_classes
+def test_a_typed_batch_defers_and_orders(sim_server):
+    StaticMeshActor = registered().python_class(SPAWNABLE)
+    spawned = world.spawn_actor(StaticMeshActor)
+    try:
+        with world.batch() as b:
+            spawned.bCanBeDamaged = False
+            # NetUpdateFrequency has a BlueprintSetter: a call, in the same batch.
+            spawned.NetUpdateFrequency = 40.0
+            damaged = b.get(lambda: spawned.bCanBeDamaged)
+            frequency = b.get(lambda: spawned.NetUpdateFrequency)
+            tagged = b.call(lambda: spawned.ActorHasTag("nope"))
+        assert damaged.value is False
+        assert frequency.value == pytest.approx(40.0)
+        assert tagged.value is False
+
+        with world.batch():
+            spawned.bCanBeDamaged = True
+            assert spawned.bCanBeDamaged is True, "an immediate read sees the queued write"
+    finally:
+        tw.destroy_actor(actor=spawned.actor)
+
+
 # -- Phase 4: filtered discovery, watching, and the asset catalog ---------------------------------
 
 @pytest.fixture

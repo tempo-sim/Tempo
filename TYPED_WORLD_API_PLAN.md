@@ -723,7 +723,7 @@ an empty subscription map, so a project that never streams pays nothing measurab
 | **6 — C++** | generator off the same `tempo_schema.json` | Not started. |
 | **7 — Published classes** | an engine-core + Tempo subset inside the published `tempo-sim` wheel and crate, namespaced by engine version; per-class drift checking | Designed and measured in §16. Independent of 6. |
 | **8 — Struct values** | a `StructValue` variant; value-expressible structs in the classifier; struct arguments, results and whole-struct writes in both clients | Designed in §17. **Done**; see §17.7. |
-| **9 — One ordered batch** | `RunBatch` carrying sets, gets and calls in order within one tick; deferred and immediate reads in both clients | Designed in §18. Fixes reads inside a batch seeing pre-batch values. |
+| **9 — One ordered batch** | `RunBatch` carrying sets, gets and calls in order within one tick; deferred and immediate reads in both clients | Designed in §18. **Done**; see §18.3. |
 | **10 — Asset catalog** | cooked assets from the packaged build; `AssetRef[T]` typed by class; a generated catalog per mount point; drift reporting | Designed in §19. |
 
 ### Phase 0 results (measured)
@@ -1460,6 +1460,28 @@ checker — the stub says `truck.MaxSpeed` is a `float`, so it cannot be a place
 Rust mirrors both: `b.get(|| truck.max_speed())` returns `Deferred<f64>`. A function with out
 parameters cannot be deferred in Rust, because its generated method decodes after the call returns
 and there is nothing yet to decode; it runs immediately instead.
+
+### 18.3 As built
+
+Three departures from the above.
+
+**Rust defers with a free function, `world::defer`, not `b.get`.** `batch` already takes a closure
+with no handle in it, and adding one would break every existing call. The mechanism is the same:
+inside `defer`, a typed accessor queues its op, leaves a `Deferred` of its own decoded type behind,
+and returns an internal `TempoError::Deferred` that `defer` turns back into that `Deferred`. Every
+read decodes where the value arrives, which is what lets a deferred object or enum read be typed as
+the handle or enum rather than as a raw `Value`.
+
+**One Rust limit Python does not have.** A closure that works on the value — `defer(|| Ok(x()? *
+2.0))` — leaves through the `?` before the multiplication, so the plain value is deferred. A change
+of type is caught (the `Deferred` would not downcast) but a same-type transform cannot be told
+apart from the read itself. Documented, and tested for the case that is caught. In Python the
+placeholder is a bare object, so `* 2` raises.
+
+**`Batch.__exit__` is typed `-> None`.** It was `-> bool`, which a type checker reads as "may
+swallow exceptions" — so every name assigned inside a batch block was "possibly unbound" after it,
+including every `Deferred`. A batch never swallows the block's exception, and the stub now says
+so.
 
 ---
 

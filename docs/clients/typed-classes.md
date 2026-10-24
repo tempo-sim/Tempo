@@ -151,13 +151,29 @@ them would be guesswork, and the typed API therefore does not convert at all.
 Each attribute access is a round trip, which is the price of looking like a field. When that matters:
 
 ```python
-with world.batch():            # writes buffered, sent together
+with world.batch() as b:       # one RunBatch, in order, between two ticks of the sim
     truck.MaxSpeed = 1200.0
-    truck.Mass = 1500.0
+    truck.ScaleFactor = 2.0                     # a BlueprintSetter write: a call, same batch
+    speed = b.get(lambda: truck.MaxSpeed)       # Deferred[float]
+    moved = b.call(lambda: truck.TeleportTo(p, r, False, False))
+print(speed.value, moved.value)
 
 with truck.snapshot():         # one read; attribute reads served from it
     print(truck.MaxSpeed, truck.Mass, truck.Drag)
 ```
+
+The server runs a whole batch in one go, so nothing simulates against a half-configured actor. A
+read or call inside it comes back one of two ways:
+
+- **Deferred**, through `b.get` / `b.call`: queued with everything else, its value available once
+  the block has run. The lambda's own type is the `Deferred`'s, so a renamed property is still a
+  type error inside it. It must make exactly one read or call and return it as it is.
+- **Immediately**, by just reading or calling: what is queued so far goes out with it, and the real
+  value comes back — so it sees the writes before it. A second round trip, and the batch has then
+  partly run.
+
+If an op fails, the server stops there and the block raises `BatchError` naming it. Nothing is sent
+if the block raises before anything forced a flush.
 
 A snapshot is a point-in-time copy: the simulation moves on and the values do not. A write inside
 the block drops that entry, so a read after it sees the new value.
@@ -254,7 +270,8 @@ does not exist rather than complaining about an assignment.
 | Writing | an assignment — `truck.MaxSpeed = 1200.0` | `truck.set_max_speed(1200.0)?` |
 | Async | the same name, awaited | a separate `_async` twin |
 | Inheritance | real in the stubs, flat at run time | a `Deref` chain, both |
-| Batching | `with world.batch():` | `world::batch(\|\| { ... })?` |
+| Batching | `with world.batch() as b:` | `world::batch(\|\| { ... })?` |
+| Deferred read | `b.get(lambda: truck.MaxSpeed)` | `world::defer(\|\| truck.max_speed())?` |
 | Streaming | `truck.watch("MaxSpeed")` — a string | `truck.watch_max_speed()?` — checked |
 | Escape hatch | `DynamicObject`, a separate type | `truck.0`, the handle underneath |
 
@@ -271,12 +288,22 @@ let visible = widget.target()?.visible()?;
 ```
 
 ```rust
-// Several writes, one round trip. Nothing is sent if the body returns an error.
+// Several writes and a read, one round trip. Nothing is sent if the body returns an error first.
+let mut beams = None;
 world::batch(|| {
     lidar.set_horizontal_beams(1024)?;
-    lidar.set_vertical_fov(30.0)
+    lidar.set_vertical_fov(30.0)?;
+    beams = Some(world::defer(|| lidar.horizontal_beams())?);   // Deferred<i32>
+    Ok(())
 })?;
+let beams = beams.unwrap().take()?;
 ```
+
+Do nothing to the value inside `defer`'s closure: there is no value yet, and the read leaves the
+closure through its `?`. `defer(|| Ok(lidar.horizontal_beams()? * 2))` defers the plain count, and
+the doubling never happens — a change of *type* is refused, but one that keeps it cannot be told
+apart from the read. Python cannot make that mistake, because the placeholder will not multiply. A
+method with out parameters cannot be deferred at all; call it directly.
 
 ### What is not there, in Rust specifically
 

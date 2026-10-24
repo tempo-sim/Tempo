@@ -124,6 +124,10 @@ using SetPropertyOp = TempoWorld::SetPropertyOp;
 using SetPropertyResult = TempoWorld::SetPropertyResult;
 using SetPropertiesRequest = TempoWorld::SetPropertiesRequest;
 using SetPropertiesResponse = TempoWorld::SetPropertiesResponse;
+using RunBatchRequest = TempoWorld::RunBatchRequest;
+using RunBatchResponse = TempoWorld::RunBatchResponse;
+using BatchOp = TempoWorld::BatchOp;
+using BatchOpResult = TempoWorld::BatchOpResult;
 
 FTempoWorldControlServiceActivated UTempoWorldControlServiceSubsystem::TempoWorldControlServiceActivated;
 FTempoWorldControlServiceDeactivated UTempoWorldControlServiceSubsystem::TempoWorldControlServiceDeactivated;
@@ -266,7 +270,8 @@ void UTempoWorldControlServiceSubsystem::RegisterServices(FTempoServer& Server)
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetComponentSetProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetComponentSetPropertyRequest>),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetProperties, &UTempoWorldControlServiceSubsystem::SetProperties),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetProperty, &UTempoWorldControlServiceSubsystem::SetPropertyValue),
-		SimpleRequestHandler(&WorldControlAsyncService::RequestCallFunction, &UTempoWorldControlServiceSubsystem::CallObjectFunction)
+		SimpleRequestHandler(&WorldControlAsyncService::RequestCallFunction, &UTempoWorldControlServiceSubsystem::CallObjectFunction),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestRunBatch, &UTempoWorldControlServiceSubsystem::RunBatch)
 	);
 }
 
@@ -4578,34 +4583,112 @@ namespace
 	}
 }
 
+namespace
+{
+	// CallFunction, from the request to the response: shared by the RPC and by RunBatch's call ops.
+	grpc::Status CallFunctionForRequest(const UWorld* World, const CallFunctionRequest& Request, CallFunctionResponse& Response)
+	{
+		UObject* Object = nullptr;
+		const grpc::Status GetObjectStatus = GetObjectForRequest(World, Request, Object);
+		if (!GetObjectStatus.ok())
+		{
+			return GetObjectStatus;
+		}
+
+		if (Request.function().empty())
+		{
+			return grpc::Status(grpc::FAILED_PRECONDITION, "function must be specified in CallFunction request");
+		}
+
+		const FName FunctionName(UTF8_TO_TCHAR(Request.function().c_str()));
+		UFunction* Function = Object->GetClass()->FindFunctionByName(FunctionName);
+		if (!Function)
+		{
+			const FString ErrorMsg = FString::Printf(TEXT("Function '%s' not found on object '%s' (class '%s')"), *FunctionName.ToString(), *Object->GetName(), *Object->GetClass()->GetName());
+			return grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+		}
+
+		return CallFunctionWithArgs(World, Object, Function, Request, Response);
+	}
+}
+
 void UTempoWorldControlServiceSubsystem::CallObjectFunction(const CallFunctionRequest& Request, const TResponseDelegate<CallFunctionResponse>& ResponseContinuation) const
 {
-	UObject* Object = nullptr;
-	const grpc::Status GetObjectStatus = GetObjectForRequest(GetWorld(), Request, Object);
-	if (!GetObjectStatus.ok())
-	{
-		ResponseContinuation.ExecuteIfBound(CallFunctionResponse(), GetObjectStatus);
-		return;
-	}
-
-	if (Request.function().empty())
-	{
-		ResponseContinuation.ExecuteIfBound(CallFunctionResponse(), grpc::Status(grpc::FAILED_PRECONDITION, "function must be specified in CallFunction request"));
-		return;
-	}
-
-	const FName FunctionName(UTF8_TO_TCHAR(Request.function().c_str()));
-	UFunction* Function = Object->GetClass()->FindFunctionByName(FunctionName);
-	if (!Function)
-	{
-		const FString ErrorMsg = FString::Printf(TEXT("Function '%s' not found on object '%s' (class '%s')"), *FunctionName.ToString(), *Object->GetName(), *Object->GetClass()->GetName());
-		ResponseContinuation.ExecuteIfBound(CallFunctionResponse(), grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
-		return;
-	}
-
 	CallFunctionResponse Response;
-	const grpc::Status CallStatus = CallFunctionWithArgs(GetWorld(), Object, Function, Request, Response);
-	ResponseContinuation.ExecuteIfBound(Response, CallStatus);
+	const grpc::Status CallStatus = CallFunctionForRequest(GetWorld(), Request, Response);
+	ResponseContinuation.ExecuteIfBound(CallStatus.ok() ? Response : CallFunctionResponse(), CallStatus);
+}
+
+void UTempoWorldControlServiceSubsystem::RunBatch(const RunBatchRequest& Request, const TResponseDelegate<RunBatchResponse>& ResponseContinuation) const
+{
+	const UWorld* World = GetWorld();
+	RunBatchResponse Response;
+
+	// The whole batch runs here, in one handler invocation on the game thread, which is what puts
+	// it between two ticks. Each op is the same code its own RPC runs, so a batched write, read or
+	// call behaves exactly as the unbatched one would at that point in the sequence.
+	int32 FailedAt = INDEX_NONE;
+	for (int32 Index = 0; Index < Request.ops_size(); ++Index)
+	{
+		BatchOpResult* Result = Response.add_results();
+		if (FailedAt != INDEX_NONE)
+		{
+			Result->set_code(grpc::ABORTED);
+			Result->set_error(TCHAR_TO_UTF8(*FString::Printf(TEXT("not run: op %d failed first"), FailedAt)));
+			continue;
+		}
+
+		const BatchOp& Op = Request.ops(Index);
+		grpc::Status Status = grpc::Status_OK;
+		switch (Op.op_case())
+		{
+		case BatchOp::kSet:
+			Status = SetPropertyOnObject(World, Op.set(), Op.set().value(), Op.set().native_units());
+			break;
+		case BatchOp::kGet:
+		{
+			UObject* Object = nullptr;
+			Status = GetObjectForRequest(World, Op.get(), Object);
+			PropertyValue Value;
+			if (Status.ok())
+			{
+				Status = GetPropertyOnObject(FString(UTF8_TO_TCHAR(Op.get().property().c_str())), Object,
+					Op.get().native_units(), Value);
+			}
+			if (Status.ok())
+			{
+				*Result->mutable_value() = MoveTemp(Value);
+			}
+			break;
+		}
+		case BatchOp::kCall:
+		{
+			CallFunctionResponse CallResponse;
+			Status = CallFunctionForRequest(World, Op.call(), CallResponse);
+			if (Status.ok())
+			{
+				*Result->mutable_call() = MoveTemp(CallResponse);
+			}
+			break;
+		}
+		case BatchOp::OP_NOT_SET:
+		default:
+			Status = grpc::Status(grpc::FAILED_PRECONDITION, "BatchOp has no op set");
+			break;
+		}
+
+		if (!Status.ok())
+		{
+			Result->set_code(static_cast<int32>(Status.error_code()));
+			Result->set_error(Status.error_message());
+			if (Request.stop_on_failure())
+			{
+				FailedAt = Index;
+			}
+		}
+	}
+
+	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
 }
 
 void UTempoWorldControlServiceSubsystem::GetActorFunctions(const GetActorFunctionsRequest& Request, const TResponseDelegate<GetFunctionsResponse>& ResponseContinuation) const

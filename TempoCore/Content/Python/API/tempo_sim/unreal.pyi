@@ -16,9 +16,10 @@
 # reaching for it is visible at the call site and cannot leak into a typed hierarchy.
 
 from contextlib import AbstractContextManager
-from typing import Any, Iterator, TypeVar
+from typing import Any, Callable, Generic, Iterator, TypeVar
 
 _V = TypeVar("_V")
+_T = TypeVar("_T")
 
 class Vector:
     X: float
@@ -107,9 +108,25 @@ class StructProxy:
     def __getattr__(self, name: str) -> Any: ...
     def __setattr__(self, name: str, value: Any) -> None: ...
 
+class BatchError(RuntimeError):
+    index: int
+    code: int
+    error: str
+
+class Deferred(Generic[_T]):
+    """A read or call queued in a batch, available once the batch has run."""
+    @property
+    def done(self) -> bool: ...
+    @property
+    def value(self) -> _T: ...
+
 class Batch:
     def __enter__(self) -> Batch: ...
-    def __exit__(self, *exc: Any) -> bool: ...
+    # None, not bool: a batch never swallows the block's exception, and a checker reading `bool`
+    # would treat everything assigned inside the block as possibly unbound after it.
+    def __exit__(self, *exc: Any) -> None: ...
+    def get(self, read: Callable[[], _T]) -> Deferred[_T]: ...
+    def call(self, invoke: Callable[[], _T]) -> Deferred[_T]: ...
     def flush(self) -> None: ...
 
 def register_classes(package: str, directory: str) -> None: ...

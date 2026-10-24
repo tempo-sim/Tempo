@@ -206,6 +206,32 @@ def ok(w: E.Widget) -> None:
     assert errors == [], "struct values should type-check cleanly: {}".format(errors)
 
 
+def test_a_deferred_read_is_typed_by_what_it_reads(generated, tmp_path):
+    errors = check(generated, """
+import fixture_classes.Engine as E
+from tempo_sim import world
+
+def ok(w: E.Widget) -> None:
+    with world.batch() as b:
+        enabled = b.get(lambda: w.bEnabled)
+        grown = b.call(lambda: w.Resize(4))
+    flag: bool = enabled.value
+    resized: bool = grown.value
+""", tmp_path)
+    assert errors == [], "a deferred read should carry its type: {}".format(errors)
+
+    for source in ("s: str = b.get(lambda: w.bEnabled).value", "b.get(lambda: w.bEnabledd)"):
+        errors = check(generated, """
+import fixture_classes.Engine as E
+from tempo_sim import world
+
+def drift(w: E.Widget) -> None:
+    with world.batch() as b:
+        {}
+""".format(source), tmp_path)
+        assert errors, "{} should be a type error".format(source)
+
+
 def test_out_parameters_are_typed_by_name(generated, tmp_path):
     """With out parameters a method returns every result keyed by name, and the stub has to say so.
 

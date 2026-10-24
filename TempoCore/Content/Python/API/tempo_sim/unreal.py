@@ -891,33 +891,159 @@ def _from_value(message):
 # capturing writes made on another.
 _state = threading.local()
 
+# What a read or call made inside `Batch.get`/`Batch.call` returns in place of its value, which does
+# not exist yet. Nothing outside this module sees it: the Deferred is handed back instead.
+_PENDING = object()
+
+# grpc.StatusCode.ABORTED: what RunBatch reports for an op it did not run because an earlier one
+# failed. Spelled as a number so this module does not import grpc to compare one.
+_ABORTED = 10
+
 
 def _open_batch():
     return getattr(_state, "batch", None)
 
 
+def _worldcontrol():
+    import tempo_sim.TempoWorld.WorldControl_pb2 as WorldControl
+    return WorldControl
+
+
+class BatchError(RuntimeError):
+    """An operation in a batch failed. Says which, and what it was."""
+
+    def __init__(self, index, count, description, code, error):
+        super().__init__("batched op {} of {} ({}) failed: {}".format(index, count, description, error))
+        self.index = index
+        self.code = code
+        self.error = error
+
+
+class Deferred:
+    """The result of a read or call queued in a batch, available once the batch has run.
+
+    Typed by what was deferred -- `b.get(lambda: truck.MaxSpeed)` is a `Deferred[float]` -- so a
+    renamed property is still a type error inside the lambda.
+    """
+
+    __slots__ = ("_done", "_value", "_error")
+
+    def __init__(self):
+        self._done = False
+        self._value = None
+        self._error = None
+
+    @property
+    def done(self):
+        """Whether the batch carrying this has run."""
+        return self._done
+
+    @property
+    def value(self):
+        """The result. Raises the op's error if it failed, and RuntimeError if it has not run yet."""
+        if not self._done:
+            raise RuntimeError("the batch has not run yet; read .value after the `with` block")
+        if self._error is not None:
+            raise self._error
+        return self._value
+
+    def _resolve(self, value):
+        self._done, self._value = True, value
+
+    def _fail(self, error):
+        self._done, self._error = True, error
+
+    def __repr__(self):
+        if not self._done:
+            return "Deferred(pending)"
+        return "Deferred(error={!r})".format(self._error) if self._error else "Deferred({!r})".format(self._value)
+
+
 class Batch:
-    """Buffers writes and sends them together.
+    """Sends the writes, reads and calls made inside it as one RunBatch, in order.
 
     Attribute access is one round trip per attribute, which is the cost of making it look like
     assignment. Setting twenty properties on an actor should not be twenty calls, so a batch
-    collects them and flushes once.
+    collects them and flushes once -- and because the server runs a whole batch between two ticks,
+    nothing simulates against the half-configured actor.
 
-    Order is preserved exactly. A property with a BlueprintSetter has to be written by calling its
-    accessor, which is not something SetProperties can carry, so the queue holds both kinds and the
-    flush sends each contiguous run of plain writes as one SetProperties call with the accessor
-    calls in between. The common case -- no accessors -- is a single call.
+    A write through a BlueprintSetter is a call, and travels in the same batch. A read or call
+    comes back one of two ways:
+
+    - **Deferred**, through `get` or `call`: queued with everything else, its result available
+      from the returned Deferred once the batch has run. One round trip for the whole block.
+    - **Immediately**, by simply reading or calling: what is queued so far goes out with it, and
+      the real result comes back, so the read sees every write before it. Correct, and ordered, but
+      it is a round trip of its own and the batch has then partly run.
+
+    The server stops at the first failure and reports what it did not run, and the flush raises a
+    BatchError naming the op that failed. Nothing is sent if the block raises before a flush.
     """
 
     def __init__(self):
-        self._queue = []
+        self._ops = []
         self._depth = 0
 
+    def _add(self, op, description, on_result=None):
+        self._ops.append((op, description, on_result))
+
     def add_write(self, actor, component, address, variant, value):
-        self._queue.append(("set", (actor, component, address, variant, value)))
+        WorldControl = _worldcontrol()
+        self._add(WorldControl.BatchOp(set=WorldControl.SetPropertyRequest(
+            actor=actor, component=component, property=address,
+            value=_to_value(variant, value), native_units=True)),
+            "write {}".format(_where(actor, component, address)))
 
     def add_call(self, actor, component, function, argument, variant, value):
-        self._queue.append(("call", (actor, component, function, argument, variant, value)))
+        WorldControl = _worldcontrol()
+        self._add(WorldControl.BatchOp(call=WorldControl.CallFunctionRequest(
+            actor=actor, component=component, function=function, native_units=True,
+            args=[WorldControl.FunctionArg(name=argument, value=_to_value(variant, value))])),
+            "call {}".format(_where(actor, component, function)))
+
+    def defer(self, op, description, decode):
+        """Queue an op whose result something will want, and hand back where it will arrive."""
+        deferred = Deferred()
+
+        def on_result(result, error):
+            if error is not None:
+                deferred._fail(error)
+            else:
+                deferred._resolve(decode(result))
+
+        self._add(op, description, on_result)
+        return deferred
+
+    def run_now(self, op, description, decode):
+        """Queue an op, send everything queued, and return the op's own result."""
+        deferred = self.defer(op, description, decode)
+        self.flush()
+        return deferred.value
+
+    def get(self, read):
+        """Defer a read: `b.get(lambda: truck.MaxSpeed)`. The lambda's result type is the Deferred's."""
+        return self._capture(read)
+
+    def call(self, invoke):
+        """Defer a call: `b.call(lambda: truck.TeleportTo(dest, rot, False, False))`."""
+        return self._capture(invoke)
+
+    def _capture(self, body):
+        previous = getattr(_state, "capture", None)
+        captured = _state.capture = []
+        try:
+            returned = body()
+        finally:
+            _state.capture = previous
+        if not captured:
+            # Answered without asking the server -- a snapshot served it. Nothing to wait for.
+            deferred = Deferred()
+            deferred._resolve(returned)
+            return deferred
+        if len(captured) != 1 or returned is not _PENDING:
+            raise TypeError("a deferred lambda must make exactly one read or call and return its "
+                            "result unchanged; this one made {}".format(len(captured)))
+        return captured[0]
 
     def __enter__(self):
         self._depth += 1
@@ -933,37 +1059,31 @@ class Batch:
         _state.batch = None
         if exc_type is None:
             self.flush()
+        else:
+            self._ops = []
         return False
 
     def flush(self):
-        queued, self._queue = self._queue, []
-        pending = []
-        for kind, payload in queued:
-            if kind == "set":
-                pending.append(payload)
-                continue
-            self._send(pending)
-            pending = []
-            actor, component, function, argument, variant, value = payload
-            _world().call_function(actor=actor, component=component, function=function,
-                                   native_units=True,
-                                   args=[{"name": argument, "value": _to_value(variant, value)}])
-        self._send(pending)
-
-    @staticmethod
-    def _send(writes):
-        if not writes:
+        queued, self._ops = self._ops, []
+        if not queued:
             return
-        builder = _world().batch()
-        for actor, component, address, variant, value in writes:
-            # The generic op, which is the only one carrying native_units.
-            builder.set_generic_property(actor=actor, component=component, property=address,
-                                         value=_to_value(variant, value), native_units=True)
-        response = builder.execute()
-        if response.failures:
-            first = response.failures[0]
-            raise RuntimeError("batched write {} of {} failed: {}".format(
-                first.op_index, len(writes), first.error))
+        response = _world().run_batch(ops=[op for op, _, _ in queued], stop_on_failure=True)
+        first_failure = None
+        for index, ((_, description, on_result), result) in enumerate(zip(queued, response.results)):
+            error = None
+            if result.code != 0:
+                error = BatchError(index, len(queued), description, result.code, result.error)
+                # The op that failed, not the ones the server then declined to run.
+                if first_failure is None and result.code != _ABORTED:
+                    first_failure = error
+            if on_result is not None:
+                on_result(result, error)
+        if first_failure is not None:
+            raise first_failure
+
+
+def _where(actor, component, address):
+    return "{}:{}.{}".format(actor, component, address) if component else "{}.{}".format(actor, address)
 
 
 def _read(actor, component, address):
@@ -972,6 +1092,21 @@ def _read(actor, component, address):
     cache = getattr(_state, "snapshots", {}).get((actor, component))
     if cache is not None and address in cache:
         return cache[address]
+
+    batch = _open_batch()
+    if batch is not None:
+        # Through the batch, so the read lands after the writes queued before it rather than ahead
+        # of them -- a read that skipped the queue would report the value from before the batch.
+        WorldControl = _worldcontrol()
+        op = WorldControl.BatchOp(get=WorldControl.GetPropertyRequest(
+            actor=actor, component=component, property=address, native_units=True))
+        description = "read {}".format(_where(actor, component, address))
+        capture = getattr(_state, "capture", None)
+        if capture is not None:
+            capture.append(batch.defer(op, description, lambda result: _from_value(result.value)))
+            return _PENDING
+        return batch.run_now(op, description, lambda result: _from_value(result.value))
+
     return _from_value(_world().get_property(
         actor=actor, component=component, property=address, native_units=True))
 
@@ -1070,6 +1205,27 @@ class BoundFunction:
         arguments = [{"name": parameter["name"],
                       "value": _to_value(parameter["variant"], supplied[parameter["name"]])}
                      for parameter in inputs]
+
+        batch = _open_batch()
+        if batch is not None:
+            # In order with whatever the batch has queued, exactly as a read is.
+            WorldControl = _worldcontrol()
+            op = WorldControl.BatchOp(call=WorldControl.CallFunctionRequest(
+                actor=self._owner.actor, component=self._owner.component, function=self._name,
+                native_units=True,
+                args=[WorldControl.FunctionArg(name=argument["name"], value=argument["value"])
+                      for argument in arguments]))
+            description = "call {}".format(_where(self._owner.actor, self._owner.component, self._name))
+            signature = self._signature
+
+            def decode(result):
+                return _function_result(result.call, signature)
+
+            capture = getattr(_state, "capture", None)
+            if capture is not None:
+                capture.append(batch.defer(op, description, decode))
+                return _PENDING
+            return batch.run_now(op, description, decode)
 
         response = _world().call_function(actor=self._owner.actor, component=self._owner.component,
                                           function=self._name, args=arguments, native_units=True)

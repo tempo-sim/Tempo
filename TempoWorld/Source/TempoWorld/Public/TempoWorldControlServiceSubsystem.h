@@ -71,6 +71,8 @@ namespace TempoWorld
 	class SetPropertyRequest;
 	class SetPropertiesRequest;
 	class SetPropertiesResponse;
+	class RunBatchRequest;
+	class RunBatchResponse;
 }
 
 DECLARE_MULTICAST_DELEGATE(FTempoWorldControlServiceActivated);
@@ -169,6 +171,8 @@ public:
 	void CallObjectFunction(const TempoWorld::CallFunctionRequest& Request, const TResponseDelegate<TempoWorld::CallFunctionResponse>& ResponseContinuation) const;
 
 	void SetProperties(const TempoWorld::SetPropertiesRequest& Request, const TResponseDelegate<TempoWorld::SetPropertiesResponse>& ResponseContinuation) const;
+
+	void RunBatch(const TempoWorld::RunBatchRequest& Request, const TResponseDelegate<TempoWorld::RunBatchResponse>& ResponseContinuation) const;
 
 	void OnTempoWorldControlServiceActivated();
 

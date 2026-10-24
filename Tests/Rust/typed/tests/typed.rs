@@ -244,3 +244,31 @@ fn an_out_struct_comes_back_with_the_return_value() {
     assert!(moved);
     assert_eq!(hit.b_blocking_hit, Some(false), "nothing to hit with the sweep off");
 }
+
+#[test]
+fn a_batch_defers_reads_and_keeps_order() {
+    connect();
+    let actor = spawn();
+
+    let mut damaged = None;
+    let mut frequency = None;
+    world::batch(|| {
+        actor.actor().set_b_can_be_damaged(false)?;
+        // A BlueprintSetter write: a call, in the same RunBatch.
+        actor.actor().set_net_update_frequency(40.0)?;
+        damaged = Some(world::defer(|| actor.actor().b_can_be_damaged())?);
+        frequency = Some(world::defer(|| actor.actor().net_update_frequency())?);
+        Ok(())
+    })
+    .expect("batch");
+    assert!(!damaged.expect("deferred").take().expect("bCanBeDamaged"));
+    assert_eq!(frequency.expect("deferred").take().expect("NetUpdateFrequency"), 40.0);
+
+    world::batch(|| {
+        actor.actor().set_b_can_be_damaged(true)?;
+        // Read directly, so it goes out with the write before it rather than ahead of it.
+        assert!(actor.actor().b_can_be_damaged()?, "an immediate read sees the queued write");
+        Ok(())
+    })
+    .expect("batch");
+}

@@ -763,12 +763,15 @@ impl<T: StructType + ToValue> ToValue for Vec<T> {
 
 // -- batching ------------------------------------------------------------------------------------
 
-/// One queued write.
-enum Queued {
-    /// A plain write, which `SetProperties` can carry.
-    Set { object: ObjectRef, property: String, value: pb::Value },
-    /// A write through a `BlueprintSetter`, which it cannot.
-    Call { object: ObjectRef, function: String, argument: String, value: pb::Value },
+/// What a queued op's result is delivered to, once the batch carrying it has run.
+type Resolver = Box<dyn FnOnce(Result<pb::BatchOpResult, TempoError>)>;
+
+/// One op queued in a batch.
+struct Queued {
+    op: pb::BatchOp,
+    /// What the op was, for the error that names it if it fails.
+    description: String,
+    resolve: Option<Resolver>,
 }
 
 thread_local! {
@@ -776,17 +779,22 @@ thread_local! {
     // the loop that created it -- so a batch opened on one thread has no business capturing writes
     // made on another.
     static BATCH: RefCell<Option<Vec<Queued>>> = const { RefCell::new(None) };
+    // Set while `defer` runs its closure: the read the closure makes is queued, and its Deferred
+    // left here for `defer` to hand back.
+    static CAPTURE: RefCell<Option<Vec<Box<dyn std::any::Any>>>> = const { RefCell::new(None) };
 }
 
-/// Collect the writes made inside `body` and send them together.
+/// grpc's ABORTED: what `RunBatch` reports for an op it did not run because an earlier one failed.
+const ABORTED: i32 = 10;
+
+/// Send what `body` does as one `RunBatch`: in order, and between two ticks of the simulation.
 ///
 /// ```no_run
-/// # use tempo_sim::unreal::batch;
+/// # use tempo_sim::unreal::{batch, defer};
 /// # fn configure() -> Result<(), tempo_sim::TempoError> {
-/// # let lidar: &() = &(); let _ = lidar;
 /// batch(|| {
 ///     // lidar.set_horizontal_beams(1024)?;
-///     // lidar.set_vertical_beams(64)?;
+///     // let beams = defer(|| lidar.horizontal_beams())?;   // Deferred<i32>
 ///     Ok(())
 /// })
 /// # }
@@ -794,15 +802,18 @@ thread_local! {
 ///
 /// Each typed write is one round trip, which is the cost of making it look like a field. Setting
 /// twenty properties on an actor should not be twenty calls, so a batch collects them and flushes
-/// once.
+/// once -- and since the server runs the whole batch between two ticks, nothing simulates against
+/// the half-configured actor. A write through a `BlueprintSetter` is a call, and travels in the
+/// same batch.
 ///
-/// Order is preserved exactly. A property with a `BlueprintSetter` has to be written by calling
-/// its accessor, which `SetProperties` cannot carry, so the queue holds both kinds and the flush
-/// sends each contiguous run of plain writes as one call with the accessor calls in between. The
-/// common case — no accessors — is a single call.
+/// A read or call inside the batch comes back one of two ways. Through [`defer`], it is queued with
+/// everything else and its result is available from the returned [`Deferred`] once the batch has
+/// run. Made directly, it goes out at once with everything queued before it and returns its real
+/// result -- so it sees those writes -- at the price of a round trip of its own.
 ///
-/// Nothing is sent if `body` returns an error: a half-applied configuration is harder to reason
-/// about than one that never started.
+/// The server stops at the first failure, and this reports it, naming the op. Nothing is sent if
+/// `body` returns an error before a read forced a flush: a half-applied configuration is harder to
+/// reason about than one that never started.
 pub fn batch<F>(body: F) -> Result<(), TempoError>
 where
     F: FnOnce() -> Result<(), TempoError>,
@@ -822,55 +833,237 @@ where
     }
 }
 
-/// Queue a write if a batch is open, reporting whether it was taken.
-fn enqueue(item: Queued) -> Option<Queued> {
+/// A read or call queued in a [`batch`], available once the batch has run.
+pub struct Deferred<T> {
+    slot: std::rc::Rc<RefCell<Option<Result<T, String>>>>,
+}
+
+impl<T> Deferred<T> {
+    fn ready(value: T) -> Self {
+        Self { slot: std::rc::Rc::new(RefCell::new(Some(Ok(value)))) }
+    }
+
+    /// Whether the batch carrying this has run.
+    pub fn is_done(&self) -> bool {
+        self.slot.borrow().is_some()
+    }
+
+    /// Take the result out. The op's own error if it failed; an error if the batch has not run.
+    pub fn take(&self) -> Result<T, TempoError> {
+        match self.slot.borrow_mut().take() {
+            Some(Ok(value)) => Ok(value),
+            Some(Err(error)) => Err(TempoError::Batch(error)),
+            None => Err(TempoError::Protocol(
+                "the batch has not run yet, or this result was already taken".into(),
+            )),
+        }
+    }
+}
+
+/// Defer one read or call into the open [`batch`], typed by what it reads.
+///
+/// `defer(|| truck.max_speed())?` is a `Deferred<f64>`: the closure runs, but the read it makes
+/// is queued rather than sent, and its value arrives with the rest of the batch. The closure must
+/// make exactly one read or call and return its result unchanged. Outside a batch the read simply
+/// happens, and the `Deferred` is ready at once.
+///
+/// **Do nothing to the value inside the closure.** There is no value yet: the read returns early
+/// through its `?`, so `defer(|| Ok(truck.max_speed()? * 2.0))` defers the plain speed and the
+/// doubling never happens. A change of type is caught and refused; one that keeps the type cannot
+/// be told apart from the read itself. Transform the result after [`Deferred::take`].
+///
+/// A generated method with out parameters cannot be deferred: it decodes its tuple after the call
+/// returns, and there is nothing yet to decode. Call it directly instead.
+pub fn defer<T: 'static>(read: impl FnOnce() -> Result<T, TempoError>) -> Result<Deferred<T>, TempoError> {
+    let previous = CAPTURE.with(|slot| slot.borrow_mut().replace(Vec::new()));
+    let returned = read();
+    let captured = CAPTURE
+        .with(|slot| std::mem::replace(&mut *slot.borrow_mut(), previous))
+        .unwrap_or_default();
+
+    match (returned, captured.len()) {
+        // Answered without a request, or outside a batch: there is nothing to wait for.
+        (Ok(value), 0) => Ok(Deferred::ready(value)),
+        (Err(TempoError::Deferred), 1) => captured
+            .into_iter()
+            .next()
+            .and_then(|deferred| deferred.downcast::<Deferred<T>>().ok())
+            .map(|deferred| *deferred)
+            .ok_or_else(|| {
+                TempoError::Protocol(
+                    "a deferred closure must return what its one read or call returns, unchanged \
+                     (a method with out parameters cannot be deferred)"
+                        .into(),
+                )
+            }),
+        (Err(error), 0) => Err(error),
+        (_, made) => Err(TempoError::Protocol(format!(
+            "a deferred closure must make exactly one read or call; this one made {}",
+            made
+        ))),
+    }
+}
+
+fn batch_open() -> bool {
+    BATCH.with(|slot| slot.borrow().is_some())
+}
+
+/// Queue an op if a batch is open, reporting whether it was taken.
+fn enqueue(op: pb::BatchOp, description: String) -> bool {
     BATCH.with(|slot| match slot.borrow_mut().as_mut() {
         Some(queue) => {
-            queue.push(item);
-            None
+            queue.push(Queued { op, description, resolve: None });
+            true
         }
-        None => Some(item),
+        None => false,
     })
 }
 
-fn flush(queued: Vec<Queued>) -> Result<(), TempoError> {
-    let mut pending: Vec<(ObjectRef, String, pb::Value)> = Vec::new();
-    for item in queued {
-        match item {
-            Queued::Set { object, property, value } => pending.push((object, property, value)),
-            Queued::Call { object, function, argument, value } => {
-                send_writes(std::mem::take(&mut pending))?;
-                call_setter(&object, &function, &argument, value)?;
-            }
-        }
+/// Run one op whose result is wanted: as its own RPC when no batch is open, and through the batch
+/// otherwise -- queued and deferred inside [`defer`], or sent at once with everything before it.
+fn perform<T: 'static>(
+    op: pb::BatchOp,
+    description: String,
+    decode: impl FnOnce(pb::BatchOpResult) -> Result<T, TempoError> + 'static,
+    direct: impl FnOnce() -> Result<T, TempoError>,
+) -> Result<T, TempoError> {
+    if !batch_open() {
+        return direct();
     }
-    send_writes(pending)
+
+    let slot = std::rc::Rc::new(RefCell::new(None));
+    let sink = slot.clone();
+    let resolve: Resolver = Box::new(move |outcome| {
+        *sink.borrow_mut() = Some(outcome.and_then(decode).map_err(|error| error.to_string()));
+    });
+    BATCH.with(|batch| {
+        if let Some(queue) = batch.borrow_mut().as_mut() {
+            queue.push(Queued { op, description, resolve: Some(resolve) });
+        }
+    });
+
+    let capturing = CAPTURE.with(|capture| match capture.borrow_mut().as_mut() {
+        Some(captured) => {
+            captured.push(Box::new(Deferred::<T> { slot: slot.clone() }));
+            true
+        }
+        None => false,
+    });
+    if capturing {
+        return Err(TempoError::Deferred);
+    }
+
+    let queued = BATCH.with(|batch| batch.borrow_mut().as_mut().map(std::mem::take).unwrap_or_default());
+    let flushed = flush(queued);
+    let outcome = slot.borrow_mut().take();
+    match outcome {
+        Some(Ok(value)) => Ok(value),
+        // The op that failed first, which may be an earlier one this op depended on.
+        Some(Err(error)) => Err(flushed.err().unwrap_or(TempoError::Batch(error))),
+        None => Err(flushed.err().unwrap_or_else(|| {
+            TempoError::Protocol("the server answered the batch without this op".into())
+        })),
+    }
 }
 
-fn send_writes(writes: Vec<(ObjectRef, String, pb::Value)>) -> Result<(), TempoError> {
-    if writes.is_empty() {
+fn flush(queued: Vec<Queued>) -> Result<(), TempoError> {
+    if queued.is_empty() {
         return Ok(());
     }
-    let count = writes.len();
-    let mut builder = crate::tempo_world::batch();
-    for (object, property, value) in writes {
-        // The generic op, which is the only one carrying native_units.
-        builder = builder.set_generic_property(
-            object.actor.clone(),
-            object.component.clone(),
-            property,
-            value,
-            true,
-        );
+    let count = queued.len();
+    let ops = queued.iter().map(|queued| queued.op.clone()).collect();
+    let response = match crate::tempo_world::run_batch(ops, true) {
+        Ok(response) => response,
+        Err(error) => {
+            let message = error.to_string();
+            for queued in queued {
+                if let Some(resolve) = queued.resolve {
+                    resolve(Err(TempoError::Batch(message.clone())));
+                }
+            }
+            return Err(error);
+        }
+    };
+
+    let mut first_failure = None;
+    let mut results = response.results.into_iter();
+    for (index, queued) in queued.into_iter().enumerate() {
+        let outcome = match results.next() {
+            Some(result) if result.code == 0 => Ok(result),
+            Some(result) => {
+                let error = format!(
+                    "batched op {} of {} ({}) failed: {}",
+                    index, count, queued.description, result.error
+                );
+                // The op that failed, not the ones the server then declined to run.
+                if first_failure.is_none() && result.code != ABORTED {
+                    first_failure = Some(error.clone());
+                }
+                Err(TempoError::Batch(error))
+            }
+            None => Err(TempoError::Protocol("the server answered the batch short".into())),
+        };
+        if let Some(resolve) = queued.resolve {
+            resolve(outcome);
+        }
     }
-    let response = builder.execute()?;
-    if let Some(first) = response.failures.first() {
-        return Err(TempoError::Protocol(format!(
-            "batched write {} of {} failed: {}",
-            first.op_index, count, first.error
-        )));
+    match first_failure {
+        Some(error) => Err(TempoError::Batch(error)),
+        None => Ok(()),
     }
-    Ok(())
+}
+
+fn where_of(object: &ObjectRef, member: &str) -> String {
+    if object.component.is_empty() {
+        format!("{}.{}", object.actor, member)
+    } else {
+        format!("{}:{}.{}", object.actor, object.component, member)
+    }
+}
+
+fn get_op(object: &ObjectRef, property: &str) -> (pb::BatchOp, String) {
+    (
+        pb::BatchOp {
+            op: Some(pb::batch_op::Op::Get(pb::GetPropertyRequest {
+                actor: object.actor.clone(),
+                component: object.component.clone(),
+                property: property.to_string(),
+                native_units: true,
+            })),
+        },
+        format!("read {}", where_of(object, property)),
+    )
+}
+
+fn call_op(object: &ObjectRef, function: &str, args: Vec<pb::FunctionArg>) -> (pb::BatchOp, String) {
+    (
+        pb::BatchOp {
+            op: Some(pb::batch_op::Op::Call(pb::CallFunctionRequest {
+                actor: object.actor.clone(),
+                component: object.component.clone(),
+                function: function.to_string(),
+                args,
+                native_units: true,
+            })),
+        },
+        format!("call {}", where_of(object, function)),
+    )
+}
+
+/// The value a get op read.
+fn read_value(result: pb::BatchOpResult) -> Result<pb::Value, TempoError> {
+    match result.result {
+        Some(pb::batch_op_result::Result::Value(value)) => Ok(value),
+        _ => Err(TempoError::Protocol("a batched read came back without a value".into())),
+    }
+}
+
+/// The results a call op handed back.
+fn call_results(result: pb::BatchOpResult) -> Result<pb::CallFunctionResponse, TempoError> {
+    match result.result {
+        Some(pb::batch_op_result::Result::Call(response)) => Ok(response),
+        _ => Err(TempoError::Protocol("a batched call came back without results".into())),
+    }
 }
 
 fn call_setter(
@@ -913,14 +1106,54 @@ async fn call_setter_async(
 // nothing that can disagree with the stub.
 
 impl ObjectRef {
-    /// Read one property.
-    pub fn get<T: FromValue>(&self, property: &str) -> Result<T, TempoError> {
-        T::from_value(&crate::tempo_world::get_property(
-            self.actor.clone(),
-            self.component.clone(),
-            property.to_string(),
-            true,
-        )?)
+    /// Read one property -- through the open [`batch`] when there is one, so it sees the writes
+    /// queued before it.
+    pub fn get<T: FromValue + 'static>(&self, property: &str) -> Result<T, TempoError> {
+        self.read_as(property, T::from_value)
+    }
+
+    /// Read one property and decode it into what the caller wants. The decoder is applied where
+    /// the value arrives, which inside [`defer`] is after the batch runs -- so a deferred read is
+    /// typed as what it decodes to, not as the raw value.
+    fn read_as<T: 'static>(
+        &self,
+        property: &str,
+        decode: fn(&pb::Value) -> Result<T, TempoError>,
+    ) -> Result<T, TempoError> {
+        let (op, description) = get_op(self, property);
+        perform(op, description, move |result| decode(&read_value(result)?), || {
+            decode(&crate::tempo_world::get_property(
+                self.actor.clone(),
+                self.component.clone(),
+                property.to_string(),
+                true,
+            )?)
+        })
+    }
+
+    /// Call a function and decode its return value, as `read_as` does a property.
+    fn call_as<T: 'static>(
+        &self,
+        function: &str,
+        args: Vec<pb::FunctionArg>,
+        decode: fn(&pb::Value) -> Result<T, TempoError>,
+    ) -> Result<T, TempoError> {
+        let (op, description) = call_op(self, function, args.clone());
+        perform(
+            op,
+            description,
+            move |result| decode(returned(&call_results(result)?)?),
+            || {
+                let response = crate::tempo_world::call_function(
+                    self.actor.clone(),
+                    self.component.clone(),
+                    function.to_string(),
+                    args,
+                    true,
+                )?;
+                decode(returned(&response)?)
+            },
+        )
     }
 
     /// Read one property, without blocking.
@@ -938,15 +1171,8 @@ impl ObjectRef {
     }
 
     /// Read one property through its `BlueprintGetter`.
-    pub fn get_via<T: FromValue>(&self, getter: &str) -> Result<T, TempoError> {
-        let response = crate::tempo_world::call_function(
-            self.actor.clone(),
-            self.component.clone(),
-            getter.to_string(),
-            Vec::new(),
-            true,
-        )?;
-        T::from_value(returned(&response)?)
+    pub fn get_via<T: FromValue + 'static>(&self, getter: &str) -> Result<T, TempoError> {
+        self.call_as(getter, Vec::new(), T::from_value)
     }
 
     /// Read one property through its `BlueprintGetter`, without blocking.
@@ -966,25 +1192,28 @@ impl ObjectRef {
 
     /// Write one property, or queue it when a [`batch`] is open.
     pub fn set<T: ToValue>(&self, property: &str, value: T) -> Result<(), TempoError> {
-        let item = Queued::Set {
-            object: self.clone(),
+        let request = pb::SetPropertyRequest {
+            actor: self.actor.clone(),
+            component: self.component.clone(),
             property: property.to_string(),
-            value: value.to_value(),
+            value: Some(value.to_value()),
+            native_units: true,
         };
-        match enqueue(item) {
-            None => Ok(()),
-            Some(Queued::Set { property, value, .. }) => {
-                crate::tempo_world::set_property(
-                    self.actor.clone(),
-                    self.component.clone(),
-                    property,
-                    value,
-                    true,
-                )?;
-                Ok(())
-            }
-            Some(Queued::Call { .. }) => unreachable!("a Set cannot come back as a Call"),
+        if batch_open() {
+            enqueue(
+                pb::BatchOp { op: Some(pb::batch_op::Op::Set(request)) },
+                format!("write {}", where_of(self, property)),
+            );
+            return Ok(());
         }
+        crate::tempo_world::set_property(
+            request.actor,
+            request.component,
+            request.property,
+            request.value.unwrap_or_default(),
+            true,
+        )?;
+        Ok(())
     }
 
     /// Write one property, without blocking.
@@ -1025,19 +1254,17 @@ impl ObjectRef {
         argument: &str,
         value: T,
     ) -> Result<(), TempoError> {
-        let item = Queued::Call {
-            object: self.clone(),
-            function: setter.to_string(),
-            argument: argument.to_string(),
-            value: value.to_value(),
-        };
-        match enqueue(item) {
-            None => Ok(()),
-            Some(Queued::Call { function, argument, value, .. }) => {
-                call_setter(self, &function, &argument, value)
-            }
-            Some(Queued::Set { .. }) => unreachable!("a Call cannot come back as a Set"),
+        let value = value.to_value();
+        if batch_open() {
+            let (op, description) = call_op(
+                self,
+                setter,
+                vec![pb::FunctionArg { name: argument.to_string(), value: Some(value) }],
+            );
+            enqueue(op, description);
+            return Ok(());
         }
+        call_setter(self, setter, argument, value)
     }
 
     /// Write one property through its `BlueprintSetter`, without blocking.
@@ -1054,14 +1281,9 @@ impl ObjectRef {
     }
 
     /// Read a reference-valued property as a typed handle.
-    pub fn get_object<T: Class>(&self, property: &str) -> Result<T, TempoError> {
+    pub fn get_object<T: Class + 'static>(&self, property: &str) -> Result<T, TempoError> {
         note_origin::<T>();
-        Ok(T::from_object(object_reference(&crate::tempo_world::get_property(
-            self.actor.clone(),
-            self.component.clone(),
-            property.to_string(),
-            true,
-        )?)?))
+        self.read_as(property, |value| Ok(T::from_object(object_reference(value)?)))
     }
 
     /// Read a reference-valued property as a typed handle, without blocking.
@@ -1083,18 +1305,14 @@ impl ObjectRef {
     ///
     /// Separate from [`ObjectRef::get`] for the same reason [`ObjectRef::get_enums`] is: a `Vec`
     /// of a generated class cannot implement [`FromValue`] in the crate that generated it.
-    pub fn get_objects<T: Class>(&self, property: &str) -> Result<Vec<T>, TempoError> {
+    pub fn get_objects<T: Class + 'static>(&self, property: &str) -> Result<Vec<T>, TempoError> {
         note_origin::<T>();
-        let value = crate::tempo_world::get_property(
-            self.actor.clone(),
-            self.component.clone(),
-            property.to_string(),
-            true,
-        )?;
-        Ok(reference_names(&value)?
-            .iter()
-            .map(|name| T::from_object(ObjectRef::from_reference_name(name)))
-            .collect())
+        self.read_as(property, |value| {
+            Ok(reference_names(value)?
+                .iter()
+                .map(|name| T::from_object(ObjectRef::from_reference_name(name)))
+                .collect())
+        })
     }
 
     /// Read an array or set of references as typed handles, without blocking.
@@ -1194,13 +1412,7 @@ impl ObjectRef {
 
     /// Call a function and ignore what it returns.
     pub fn call(&self, function: &str, args: Vec<pb::FunctionArg>) -> Result<(), TempoError> {
-        crate::tempo_world::call_function(
-            self.actor.clone(),
-            self.component.clone(),
-            function.to_string(),
-            args,
-            true,
-        )?;
+        self.call_raw(function, args)?;
         Ok(())
     }
 
@@ -1224,19 +1436,12 @@ impl ObjectRef {
     }
 
     /// Call a function and read its return value.
-    pub fn call_for<T: FromValue>(
+    pub fn call_for<T: FromValue + 'static>(
         &self,
         function: &str,
         args: Vec<pb::FunctionArg>,
     ) -> Result<T, TempoError> {
-        let response = crate::tempo_world::call_function(
-            self.actor.clone(),
-            self.component.clone(),
-            function.to_string(),
-            args,
-            true,
-        )?;
-        T::from_value(returned(&response)?)
+        self.call_as(function, args, T::from_value)
     }
 
     /// Call a function and read its return value, without blocking.
@@ -1256,14 +1461,13 @@ impl ObjectRef {
     }
 
     /// Call a function whose result is an actor or a component.
-    pub fn call_for_object<T: Class>(
+    pub fn call_for_object<T: Class + 'static>(
         &self,
         function: &str,
         args: Vec<pb::FunctionArg>,
     ) -> Result<T, TempoError> {
         note_origin::<T>();
-        let response = self.call_raw(function, args)?;
-        Self::object_result_of(&response, "ReturnValue")
+        self.call_as(function, args, |value| Ok(T::from_object(object_reference(value)?)))
     }
 
     /// Call a function whose result is an actor or a component, without blocking.
@@ -1407,7 +1611,7 @@ impl<'a> StructRef<'a> {
         format!("{}.{}", self.address, name)
     }
 
-    pub fn get<T: FromValue>(&self, member: &str) -> Result<T, TempoError> {
+    pub fn get<T: FromValue + 'static>(&self, member: &str) -> Result<T, TempoError> {
         self.owner.get(&self.member(member))
     }
 
@@ -1438,7 +1642,7 @@ impl<'a> StructRef<'a> {
     }
 
     /// The whole struct this addresses, as a value.
-    pub fn load<T: FromValue>(&self) -> Result<T, TempoError> {
+    pub fn load<T: FromValue + 'static>(&self) -> Result<T, TempoError> {
         self.owner.get(&self.address)
     }
 
@@ -1492,13 +1696,16 @@ impl ObjectRef {
         function: &str,
         args: Vec<pb::FunctionArg>,
     ) -> Result<pb::CallFunctionResponse, TempoError> {
-        crate::tempo_world::call_function(
-            self.actor.clone(),
-            self.component.clone(),
-            function.to_string(),
-            args,
-            true,
-        )
+        let (op, description) = call_op(self, function, args.clone());
+        perform(op, description, call_results, || {
+            crate::tempo_world::call_function(
+                self.actor.clone(),
+                self.component.clone(),
+                function.to_string(),
+                args,
+                true,
+            )
+        })
     }
 
     /// Call a function and hand back every result, without blocking.
@@ -1659,14 +1866,10 @@ impl ObjectRef {
     /// [`FromValue`]: in the generated crate both `Vec` and the trait are foreign, and the orphan
     /// rule wants a local type that is not merely a parameter of a foreign one. Reading through
     /// `UnrealEnum` sidesteps that, and keeps the conversion in one place.
-    pub fn get_enums<T: UnrealEnum>(&self, property: &str) -> Result<Vec<T>, TempoError> {
-        let value = crate::tempo_world::get_property(
-            self.actor.clone(),
-            self.component.clone(),
-            property.to_string(),
-            true,
-        )?;
-        enum_names(&value)?.iter().map(|name| T::from_unreal_name(name)).collect()
+    pub fn get_enums<T: UnrealEnum + 'static>(&self, property: &str) -> Result<Vec<T>, TempoError> {
+        self.read_as(property, |value| {
+            enum_names(value)?.iter().map(|name| T::from_unreal_name(name)).collect()
+        })
     }
 
     /// Read an array or set of enums, without blocking.
@@ -1911,6 +2114,78 @@ mod tests {
             inner.struct_name = "FSomethingElse".into();
         }
         assert!(Trim::from_value(&value).is_err());
+    }
+
+    /// A batch abandoned by its body sends nothing, which is what lets these run without a sim.
+    fn abandoned<F: FnOnce()>(body: F) {
+        let outcome = batch(|| {
+            body();
+            Err(TempoError::Protocol("abandoned".into()))
+        });
+        assert!(outcome.is_err());
+    }
+
+    #[test]
+    fn a_deferred_read_is_queued_not_sent() {
+        let object = ObjectRef::actor("Somewhere");
+        abandoned(|| {
+            let deferred = defer(|| object.get::<bool>("bHidden")).expect("defer");
+            assert!(!deferred.is_done(), "nothing has been sent, so nothing has come back");
+            assert!(deferred.take().is_err(), "a pending result is not a value");
+            let queued = BATCH.with(|slot| slot.borrow().as_ref().map(Vec::len));
+            assert_eq!(queued, Some(1), "the read waits in the batch");
+        });
+    }
+
+    #[test]
+    fn a_deferred_closure_makes_exactly_one_read() {
+        let object = ObjectRef::actor("Somewhere");
+        abandoned(|| {
+            let both = defer(|| Ok((object.get::<bool>("A")?, object.get::<bool>("B")?)));
+            // The first read short-circuits the closure, so its result is not the read's own.
+            assert!(both.is_err());
+        });
+    }
+
+    #[test]
+    fn a_result_turned_into_another_type_cannot_be_deferred() {
+        let object = ObjectRef::actor("Somewhere");
+        abandoned(|| {
+            let fast = defer(|| Ok(object.get::<f64>("Speed")? > 1.0));
+            assert!(fast.is_err(), "the deferred value would be the read's f64, not the closure's bool");
+        });
+    }
+
+    #[test]
+    fn outside_a_batch_a_deferred_value_is_ready_at_once() {
+        let ready = defer(|| Ok(7)).expect("defer");
+        assert!(ready.is_done());
+        assert_eq!(ready.take().expect("value"), 7);
+    }
+
+    #[test]
+    fn a_write_inside_a_batch_is_queued() {
+        let object = ObjectRef::actor("Somewhere");
+        abandoned(|| {
+            object.set("bHidden", true).expect("queued, not sent");
+            object.set_via("SetScale", "InScale", 2.0).expect("queued, not sent");
+            let kinds: Vec<_> = BATCH.with(|slot| {
+                slot.borrow()
+                    .as_ref()
+                    .map(|queue| {
+                        queue
+                            .iter()
+                            .map(|queued| match &queued.op.op {
+                                Some(pb::batch_op::Op::Set(_)) => "set",
+                                Some(pb::batch_op::Op::Call(_)) => "call",
+                                _ => "other",
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            });
+            assert_eq!(kinds, ["set", "call"], "an accessor write travels in the same batch");
+        });
     }
 
     #[test]

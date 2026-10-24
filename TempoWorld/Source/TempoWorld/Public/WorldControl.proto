@@ -1021,6 +1021,49 @@ message SetPropertiesResponse {
   repeated SetPropertyResult failures = 1;
 }
 
+// One operation in a RunBatch: a property write, a property read, or a function call -- each the
+// same request its own RPC takes.
+message BatchOp {
+  oneof op {
+    SetPropertyRequest set = 1;
+    GetPropertyRequest get = 2;
+    CallFunctionRequest call = 3;
+  }
+}
+
+// Run several operations in order, in one call, between two ticks of the simulation.
+//
+// Every op is run in sequence within a single invocation on the game thread, so nothing simulates
+// against a half-applied batch -- configure twenty properties and call a function, and the
+// function sees all twenty. A read sees every write before it in the same batch.
+message RunBatchRequest {
+  repeated BatchOp ops = 1;
+  // Stop at the first op that fails, and report every later one as ABORTED without running it --
+  // for a batch whose later ops assume the earlier ones happened. False runs every op regardless,
+  // as SetProperties does.
+  bool stop_on_failure = 2;
+}
+
+// What one op did. Unlike SetProperties, every op has one, failed or not, because a read's answer
+// is found by position.
+message BatchOpResult {
+  // gRPC status code (see grpc::StatusCode). Zero means the op succeeded.
+  int32 code = 1;
+  // Human-readable error. Empty when `code` is zero.
+  string error = 2;
+  oneof result {
+    // A get's value.
+    Value value = 3;
+    // A call's results.
+    CallFunctionResponse call = 4;
+  }
+}
+
+message RunBatchResponse {
+  // One per op, in request order.
+  repeated BatchOpResult results = 1;
+}
+
 // Class-level reflection: what a class declares, whether or not any instance of it exists.
 //
 // Every other introspection RPC here is instance-keyed -- you must have spawned an actor to ask
@@ -1379,6 +1422,9 @@ service WorldControlService {
   rpc SetProperty(SetPropertyRequest) returns (TempoCore.Empty);
 
   rpc CallFunction(CallFunctionRequest) returns (CallFunctionResponse);
+
+  // Sets, gets and calls, in order, between two ticks. See RunBatchRequest.
+  rpc RunBatch(RunBatchRequest) returns (RunBatchResponse);
 
   rpc GetActorFunctions(GetActorFunctionsRequest) returns (GetFunctionsResponse);
 
