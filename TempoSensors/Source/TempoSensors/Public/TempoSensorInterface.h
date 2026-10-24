@@ -47,4 +47,8 @@ public:
 	// Execute any pending capture scheduled by MaybeMarkPendingCapture. Called from the subsystem
 	// after OnWorldTickEnd, when all actor transforms are final and SendAllEndOfFrameUpdates has run.
 	virtual void ExecutePendingCapture() {}
+
+	// Time until this sensor's capture timer next fires, if it has one running. Lets Tempo's substep
+	// loop give the step a capture is due at its own frame.
+	virtual TOptional<double> GetSecondsUntilNextCapture() const { return TOptional<double>(); }
 };

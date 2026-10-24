@@ -39,6 +39,32 @@ namespace
 		}
 		return grpc::Status(grpc::StatusCode::UNKNOWN, "Step ended with an unknown result");
 	}
+
+	// Changing the time mode, pausing, or stepping several frames must happen at a frame boundary, not
+	// between frames in the substep loop. Inside the loop, re-run the handler once the loop's frame ends.
+	template <typename RequestType, typename ResponseType>
+	bool DeferIfInSubstepLoop(const UTempoTimeServiceSubsystem* Subsystem,
+		void (UTempoTimeServiceSubsystem::*Handler)(const RequestType&, const TResponseDelegate<ResponseType>&) const,
+		const RequestType& Request, const TResponseDelegate<ResponseType>& ResponseContinuation)
+	{
+		ATempoWorldSettings* WorldSettings = Cast<ATempoWorldSettings>(Subsystem->GetWorld()->GetWorldSettings());
+		if (!WorldSettings || !WorldSettings->IsInSubstepLoop())
+		{
+			return false;
+		}
+		TWeakObjectPtr<const UTempoTimeServiceSubsystem> WeakSubsystem(Subsystem);
+		return WorldSettings->DeferToFrameBoundary([WeakSubsystem, Handler, Request, ResponseContinuation]()
+		{
+			if (const UTempoTimeServiceSubsystem* Self = WeakSubsystem.Get())
+			{
+				(Self->*Handler)(Request, ResponseContinuation);
+			}
+			else
+			{
+				ResponseContinuation.ExecuteIfBound(ResponseType(), grpc::Status(grpc::StatusCode::ABORTED, "World ended before the request could run"));
+			}
+		});
+	}
 }
 
 void UTempoTimeServiceSubsystem::RegisterServices(FTempoServer& Server)
@@ -70,6 +96,11 @@ void UTempoTimeServiceSubsystem::Deinitialize()
 
 void UTempoTimeServiceSubsystem::SetTimeMode(const TempoCore::TimeModeRequest& Request, const TResponseDelegate<TempoEmpty>& ResponseContinuation) const
 {
+	if (DeferIfInSubstepLoop(this, &UTempoTimeServiceSubsystem::SetTimeMode, Request, ResponseContinuation))
+	{
+		return;
+	}
+
 	if (!Cast<ATempoWorldSettings>(GetWorld()->GetWorldSettings()))
 	{
 		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "SetTimeMode has no effect unless using TempoWorldSettings"));
@@ -101,6 +132,11 @@ void UTempoTimeServiceSubsystem::SetTimeMode(const TempoCore::TimeModeRequest& R
 
 void UTempoTimeServiceSubsystem::SetSimStepsPerSecond(const SetSimStepsPerSecondRequest& Request, const TResponseDelegate<TempoEmpty>& ResponseContinuation) const
 {
+	if (DeferIfInSubstepLoop(this, &UTempoTimeServiceSubsystem::SetSimStepsPerSecond, Request, ResponseContinuation))
+	{
+		return;
+	}
+
 	const int32 RequestedStepsPerSecond = Request.sim_steps_per_second();
 
 	if (RequestedStepsPerSecond < 1)
@@ -123,6 +159,11 @@ void UTempoTimeServiceSubsystem::SetSimStepsPerSecond(const SetSimStepsPerSecond
 
 void UTempoTimeServiceSubsystem::Play(const TempoEmpty& Request, const TResponseDelegate<TempoEmpty>& ResponseContinuation) const
 {
+	if (DeferIfInSubstepLoop(this, &UTempoTimeServiceSubsystem::Play, Request, ResponseContinuation))
+	{
+		return;
+	}
+
 	if (APlayerController* PlayerController = UGameplayStatics::GetPlayerController(GetWorld(), 0))
 	{
 		PlayerController->SetPause(false);
@@ -138,6 +179,11 @@ void UTempoTimeServiceSubsystem::Play(const TempoEmpty& Request, const TResponse
 
 void UTempoTimeServiceSubsystem::AdvanceSteps(const AdvanceStepsRequest& Request, const TResponseDelegate<TempoEmpty>& ResponseContinuation) const
 {
+	if (DeferIfInSubstepLoop(this, &UTempoTimeServiceSubsystem::AdvanceSteps, Request, ResponseContinuation))
+	{
+		return;
+	}
+
 	const int32 RequestedSteps = Request.steps();
 
 	if (RequestedSteps < 1)
@@ -168,6 +214,11 @@ void UTempoTimeServiceSubsystem::AdvanceSteps(const AdvanceStepsRequest& Request
 
 void UTempoTimeServiceSubsystem::Pause(const TempoEmpty& Request, const TDelegate<void(const TempoEmpty&, grpc::Status)>& ResponseContinuation) const
 {
+	if (DeferIfInSubstepLoop(this, &UTempoTimeServiceSubsystem::Pause, Request, ResponseContinuation))
+	{
+		return;
+	}
+
 	if (APlayerController* PlayerController = UGameplayStatics::GetPlayerController(GetWorld(), 0))
 	{
 		PlayerController->SetPause(true);
@@ -205,6 +256,7 @@ void UTempoTimeServiceSubsystem::Step(const TempoEmpty& Request, const TResponse
 void UTempoTimeServiceSubsystem::GetSimTime(const TempoEmpty& Request, const TResponseDelegate<GetSimTimeResponse>& ResponseContinuation) const
 {
 	GetSimTimeResponse Response;
-	Response.set_sim_time(GetWorld()->GetTimeSeconds());
+	const ATempoWorldSettings* WorldSettings = Cast<ATempoWorldSettings>(GetWorld()->GetWorldSettings());
+	Response.set_sim_time(WorldSettings ? WorldSettings->GetSimTime() : GetWorld()->GetTimeSeconds());
 	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
 }

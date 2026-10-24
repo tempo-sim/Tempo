@@ -368,6 +368,22 @@ public:
 		DeactivateService(ServiceName);
 	}
 
+	// Handles gRPC events on the game thread until ShouldStop returns true, or until no event has
+	// arrived for QuietTimeoutSeconds. While the queue is idle, OnPoll runs every PollIntervalSeconds.
+	// Returns whether ShouldStop ended it. This is how ATempoWorldSettings' substep loop serves RPCs
+	// between frames, outside TickInternal.
+	bool PumpEvents(TFunctionRef<bool()> ShouldStop, double QuietTimeoutSeconds, double PollIntervalSeconds, TFunctionRef<void()> OnPoll);
+
+	// While set, a new request to a service that may only run inside a world tick (level loads,
+	// quitting, engine settings) is held back rather than handled. TickInternal handles held requests
+	// first, once this is cleared.
+	void SetHoldFrameBoundaryRequests(bool bHold) { bHoldFrameBoundaryRequests = bHold; }
+
+	bool HasHeldRequests() const { return !HeldRequestTags.IsEmpty(); }
+
+	// PROTOTYPE(substep-rpc): seconds PumpEvents spent in request handlers.
+	double PumpHandleSeconds = 0.0;
+
 protected:
 	void Initialize();
 	void Deinitialize();
@@ -433,6 +449,9 @@ protected:
 	void HandleEventForTag(int32 Tag, bool bOk);
 
 	bool bIsInitialized = false;
+
+	bool bHoldFrameBoundaryRequests = false;
+	TArray<int32> HeldRequestTags;
 
 	int32 TagAllocator = 0;
 	TMap<int32, TSharedPtr<FRequestManager>> RequestManagers;

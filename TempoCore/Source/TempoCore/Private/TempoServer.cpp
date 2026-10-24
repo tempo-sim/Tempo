@@ -156,6 +156,18 @@ namespace
 	}
 }
 
+namespace
+{
+	// Services whose handlers load levels, quit, or change engine settings, so must run inside a world
+	// tick rather than in the substep loop between frames.
+	bool IsFrameBoundaryService(const FName& ServiceName)
+	{
+		static const FName TempoCoreServiceName(TEXT("TempoCore.TempoCoreService"));
+		static const FName TempoCoreEditorServiceName(TEXT("TempoCore.TempoCoreEditorService"));
+		return ServiceName == TempoCoreServiceName || ServiceName == TempoCoreEditorServiceName;
+	}
+}
+
 void FTempoServer::Initialize()
 {
 	TArray<UObject*> ServiceProviderObjects;
@@ -341,6 +353,16 @@ void FTempoServer::TickInternal()
 		return;
 	}
 
+	if (!bHoldFrameBoundaryRequests && !HeldRequestTags.IsEmpty())
+	{
+		const TArray<int32> HeldTags = MoveTemp(HeldRequestTags);
+		HeldRequestTags.Reset();
+		for (const int32 HeldTag : HeldTags)
+		{
+			HandleEventForTag(HeldTag, true);
+		}
+	}
+
 	const UTempoCoreSettings* Settings = GetDefault<UTempoCoreSettings>();
 	const ETimeMode TimeMode = Settings->GetTimeMode();
 	const int32 MaxEventProcessingTimeMicroSeconds = Settings->GetMaxEventProcessingTime();
@@ -404,6 +426,52 @@ void FTempoServer::TickInternal()
 	}
 }
 
+bool FTempoServer::PumpEvents(TFunctionRef<bool()> ShouldStop, double QuietTimeoutSeconds, double PollIntervalSeconds, TFunctionRef<void()> OnPoll)
+{
+	TRACE_CPUPROFILER_EVENT_SCOPE(TempoServerPumpEvents);
+
+	if (!bIsInitialized)
+	{
+		return ShouldStop();
+	}
+
+	const int64 PollIntervalNanoSeconds = FMath::Max<int64>(1, static_cast<int64>(PollIntervalSeconds * 1.e9));
+	const gpr_timespec PollInterval {PollIntervalNanoSeconds / 1000000000, static_cast<int32>(PollIntervalNanoSeconds % 1000000000), GPR_TIMESPAN};
+	double LastEventSeconds = FPlatformTime::Seconds();
+	while (!ShouldStop())
+	{
+		int32* Tag;
+		bool bOk;
+		// AsyncNext returns as soon as an event arrives, so the interval only bounds how long an idle
+		// queue goes without OnPoll; it adds no latency to a request.
+		switch (CompletionQueue->AsyncNext(reinterpret_cast<void**>(&Tag), &bOk, PollInterval))
+		{
+		case grpc::CompletionQueue::GOT_EVENT:
+			{
+				const double HandleStart = FPlatformTime::Seconds();
+				HandleEventForTag(*Tag, bOk);
+				LastEventSeconds = FPlatformTime::Seconds();
+				PumpHandleSeconds += LastEventSeconds - HandleStart;
+				break;
+			}
+		case grpc::CompletionQueue::SHUTDOWN:
+			{
+				return false;
+			}
+		case grpc::CompletionQueue::TIMEOUT:
+			{
+				OnPoll();
+				if (FPlatformTime::Seconds() - LastEventSeconds > QuietTimeoutSeconds)
+				{
+					return false;
+				}
+				break;
+			}
+		}
+	}
+	return true;
+}
+
 void FTempoServer::HandleEventForTag(int32 Tag, bool bOk)
 {
 	if (TSharedPtr<FRequestManager>* RequestManager = RequestManagers.Find(Tag))
@@ -423,6 +491,12 @@ void FTempoServer::HandleEventForTag(int32 Tag, bool bOk)
 			}
 		case FRequestManager::REQUESTED: // A request has been received.
 			{
+				if (bHoldFrameBoundaryRequests && IsFrameBoundaryService((*RequestManager)->GetServiceName()))
+				{
+					HeldRequestTags.Add(Tag);
+					break;
+				}
+
 				// Immediately prepare to receive another request.
 				const int32 NewTag = TagAllocator++;
 				RequestManagers.Emplace(NewTag, (*RequestManager)->Duplicate(NewTag))->Init(CompletionQueue.Get());
