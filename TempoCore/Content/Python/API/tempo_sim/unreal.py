@@ -517,8 +517,8 @@ class _Classes:
     def _require(self):
         if not self.registered:
             raise RuntimeError(
-                "No generated classes are registered. Install and import this build's generated "
-                "class package (e.g. `import tempo_sample_classes`), which ships in "
+                "No generated classes are registered. Install this build's project package and "
+                "import its classes (e.g. `import tempo_sample.UE`); the wheel ships in "
                 "Packaged/API/Python alongside the tempo-sim wheel.")
 
     @property

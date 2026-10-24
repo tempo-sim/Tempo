@@ -149,37 +149,13 @@ PACKAGE_RUST_CRATE() {
         cp "$CRATE_DIR/$rel" "$DEST/$rel"
       fi
     done
+  # A crate depending on tempo-sim by path names it where the source tree has it, which is not
+  # where Packaged/API/Rust does: beside it. Not `sed -i`, whose suffix argument BSD requires and
+  # GNU rejects.
+  sed -E '/^tempo-sim[[:space:]]*=/s/path[[:space:]]*=[[:space:]]*"[^"]*"/path = "..\/tempo-sim"/' \
+    "$DEST/Cargo.toml" > "$DEST/Cargo.toml.relocated"
+  mv "$DEST/Cargo.toml.relocated" "$DEST/Cargo.toml"
 }
-
-# The generated classes crate, which is Cargo.toml plus src/ and nothing else. Copied rather than
-# run through `cargo package --list`, because its path dependency on tempo-sim resolves only once
-# the two sit side by side -- which is what the destination arranges.
-PACKAGE_GENERATED_RUST_CRATE() {
-  local CRATE_DIR="$1"
-  if [[ ! -f "$CRATE_DIR/Cargo.toml" ]]; then
-    return 0
-  fi
-  local CRATE_NAME
-  CRATE_NAME=$(basename "$CRATE_DIR")
-  local DEST="$PROJECT_ROOT/Packaged/API/Rust/$CRATE_NAME"
-  echo "Packaging generated Rust crate $CRATE_NAME -> $DEST"
-  rm -rf "$DEST"
-  mkdir -p "$DEST"
-  cp "$CRATE_DIR/Cargo.toml" "$DEST/Cargo.toml"
-  cp -r "$CRATE_DIR/src" "$DEST/src"
-}
-
-# Only package the Rust crate(s) when Rust generation is opted in via
-# TEMPO_GEN_RUST_API (same gate as gen_rust_api.py / GenRustAPI.sh); otherwise
-# the crates are absent or stale and shouldn't be shipped.
-if [[ -n "$TEMPO_GEN_RUST_API" && "$TEMPO_GEN_RUST_API" != "0" ]]; then
-  if command -v cargo >/dev/null 2>&1; then
-    PACKAGE_RUST_CRATE "$PROJECT_ROOT/Plugins/Tempo/TempoCore/Content/Rust/API"
-    PACKAGE_RUST_CRATE "$PROJECT_ROOT/Content/Rust/API"
-  else
-    echo "Skipping Rust crate packaging: cargo not on PATH"
-  fi
-fi
 
 # Build the generated Python package(s) (sdist + wheel) into
 # Packaged/API/Python/<dist-name>/ so downstream consumers can `pip install` a
@@ -225,28 +201,40 @@ PACKAGE_PYTHON_PACKAGE() {
   fi
 }
 
-# Generate this build's typed Python classes before the wheels are built, so they ship beside the
-# clients they extend. This walks the editor's reflection and loads every Blueprint, which costs
-# about a minute; TEMPO_SKIP_TYPED_API=1 skips it.
+# Generate this build's typed classes before the wheels and crates are built, since they go into the
+# project's own package and crate. This walks the editor's reflection and loads every Blueprint,
+# which costs about a minute; TEMPO_SKIP_TYPED_API=1 skips it.
 #
 # Deliberately non-fatal: it runs the editor, so it can fail for reasons that have nothing to do
 # with whether the package itself is good, and a staged build without the typed classes is still a
-# working build. The failure is loud, and the wheel is simply absent rather than stale.
-TYPED_API_STAGE=""
-TYPED_API_RUST_STAGE=""
+# working build. The failure is loud, and the classes are simply absent rather than stale.
+#
+# Either way, classes an earlier package left in the source tree are removed rather than shipped:
+# they describe a different build.
+CLEAR_TYPED_API() {
+  if [[ -n "$PYTHON_BIN" ]]; then
+    "$PYTHON_BIN" "$PROJECT_ROOT/Plugins/Tempo/TempoCore/Content/Python/gen_project_package.py" \
+      clear "$PROJECT_ROOT"
+  fi
+}
 if [[ -n "$TEMPO_SKIP_TYPED_API" && "$TEMPO_SKIP_TYPED_API" != "0" ]]; then
   echo "Skipping typed classes (TEMPO_SKIP_TYPED_API is set)"
-elif "$SCRIPT_DIR"/GenTypedAPI.sh; then
-  TYPED_API_STAGE=$(find "$PROJECT_ROOT/Saved/TempoTypedAPI/python" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | head -1)
-  TYPED_API_RUST_STAGE=$(find "$PROJECT_ROOT/Saved/TempoTypedAPI/rust" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | head -1)
-else
+  CLEAR_TYPED_API
+elif ! "$SCRIPT_DIR"/GenTypedAPI.sh; then
   echo "Warning: failed to generate the typed classes; the packaged build will not include them" >&2
+  CLEAR_TYPED_API
 fi
 
-# After the generation above, so the crate exists to copy. The tempo-sim crate it depends on was
-# staged further up, into the same Packaged/API/Rust that ../tempo-sim resolves against.
-if [[ -n "$TYPED_API_RUST_STAGE" ]]; then
-  PACKAGE_GENERATED_RUST_CRATE "$TYPED_API_RUST_STAGE"
+# Only package the Rust crate(s) when Rust generation is opted in via
+# TEMPO_GEN_RUST_API (same gate as gen_rust_api.py / GenRustAPI.sh); otherwise
+# the crates are absent or stale and shouldn't be shipped.
+if [[ -n "$TEMPO_GEN_RUST_API" && "$TEMPO_GEN_RUST_API" != "0" ]]; then
+  if command -v cargo >/dev/null 2>&1; then
+    PACKAGE_RUST_CRATE "$PROJECT_ROOT/Plugins/Tempo/TempoCore/Content/Rust/API"
+    PACKAGE_RUST_CRATE "$PROJECT_ROOT/Content/Rust/API"
+  else
+    echo "Skipping Rust crate packaging: cargo not on PATH"
+  fi
 fi
 
 # Package whenever any Python interpreter is available. The wheel is built either way (via `build`
@@ -254,9 +242,6 @@ fi
 if [[ -n "$PYTHON_BIN" ]]; then
   PACKAGE_PYTHON_PACKAGE "$PROJECT_ROOT/Plugins/Tempo/TempoCore/Content/Python/API"
   PACKAGE_PYTHON_PACKAGE "$PROJECT_ROOT/Content/Python/API"
-  if [[ -n "$TYPED_API_STAGE" ]]; then
-    PACKAGE_PYTHON_PACKAGE "$TYPED_API_STAGE"
-  fi
 else
   echo "Skipping Python package build: no python interpreter available"
 fi

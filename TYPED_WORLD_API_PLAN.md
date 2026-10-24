@@ -330,6 +330,8 @@ PyPI-publishable `tempo-sim`.
 | `tempo-sim` | runtime proxies, `get_actors`, `spawn_actor`, schema/metadata loader, base `Actor`/`Component`/`StructProxy` | hand-written, as today |
 | `<project>-classes` (e.g. `tempo-sample-classes`) | every class in the build: engine, plugin, project | per release |
 
+*Superseded by §20: the classes are now the `UE` subpackage of the project's own package.*
+
 `TestPythonAPI.sh` already installs *all* wheels from `Packaged/API/Python/`, so the classes package
 is picked up by the test jobs with no script change. The generated package registers its classes
 with `tempo_sim` on import so narrowing and spawning can resolve a `UClass` name to a Python class.
@@ -725,6 +727,7 @@ an empty subscription map, so a project that never streams pays nothing measurab
 | **8 — Struct values** | a `StructValue` variant; value-expressible structs in the classifier; struct arguments, results and whole-struct writes in both clients | Designed in §17. **Done**; see §17.7. |
 | **9 — One ordered batch** | `RunBatch` carrying sets, gets and calls in order within one tick; deferred and immediate reads in both clients | Designed in §18. **Done**; see §18.3. |
 | **10 — Asset catalog** | cooked assets from the packaged build; `AssetRef[T]` typed by class; a generated catalog per mount point; drift reporting | Designed in §19. **Done**; see §19.5. |
+| **11 — One package per project** | a project's classes in its own client package and crate (`tempo_sample.UE`, `tempo_sample::ue`) rather than a `-classes` one beside it | §20. **Done.** |
 
 ### Phase 0 results (measured)
 
@@ -1580,4 +1583,59 @@ is now reserved only for a writable property. Found by writing the first catalog
 **The catalog is checked by `check_schema` too**, in both clients, against the sim's own registry:
 an asset's identity is its path and its class, so a moved one is absent and a retyped one changed.
 The sim is asked for its assets only when a linked package has a catalog.
+
+---
+
+## 20. One package per project
+
+Phase 11. A project shipped three distributions: `tempo-sim`, its own `tempo-sample` (the wrappers
+its protos generate) and `tempo-sample-classes` (§5.5). The third existed only because the classes
+were designed before the published subset (§16) showed the other shape — classes inside a package
+that already exists, under a namespace of their own. So the project's classes now go into its own
+package and crate, exactly as the published ones go into tempo-sim's:
+
+```python
+from tempo_sample.UE.Game.Vehicles import BP_Cat745_C      # was tempo_sample_classes.Game.Vehicles
+```
+```rust
+use tempo_sample::ue::classes::game::vehicles::BP_Cat745_C; // was tempo_sample_classes::classes::...
+```
+
+**A namespace, not the package root**, because a class module is named after its Unreal module and
+so is a proto module: `/Script/Greeter` would land on the `Greeter` protos. `UE` and `ue` mirror
+`tempo_sim.UE.v5_8` and `tempo_sim::ue::v5_8` without the version, since a project's package
+describes one build.
+
+**Two pipelines, one package.** The wrappers are generated at build time and the classes at package
+time — they need the packaged build to filter against — and a project with no protos has no package
+at all until the classes need one. So everything in the package that is not generated code (the
+manifest, `__init__.py`/`py.typed`, `lib.rs`, `.gitignore`) moved out of `gen_api.py` and
+`gen_rust_api.py` into `gen_project_package.py`, which both prebuild generators and
+`GenTypedAPI.sh` call. It derives each file from what is on disk — `lib.rs` declares `proto` if
+`proto.rs` is there, each wrapper present, and `ue` if `ue/mod.rs` is — so either side can run
+first and neither writes the other's half out. It is standard library only, because
+`GenTypedAPI.sh` runs on any interpreter it finds.
+
+**`ue` is a default-on cargo feature.** The classes are 6,068 types and ~30 s of compiling; a crate
+that only calls the project's services can opt out, and the prebuild's sanity build of the
+wrappers does (`--no-default-features`) rather than adding that to every build touching a proto.
+The prebuild cache also stops hashing `src/ue`, which it does not read. Python needs no
+equivalent, being lazy.
+
+**Found doing it.**
+
+- *Both RPC generators counted every package subdirectory as a proto module.* With `tempo_sim/UE`
+  generated, `gen_rust_api.py` already saw a module `UE`, classified it as the project's (no plugin
+  has a module of that name), and so believed a project without protos had some. A directory is
+  now a module only if it holds `_pb2` files.
+- *`gen_rust_classes.py --in-crate` had never run* (§16.9's 7e is still open) and wrote `mod.rs`
+  into `<out>/src/`. Fixed, and the standalone-crate mode it was the alternative to is gone, since
+  nothing uses it now; the codegen tests generate into a host crate written by
+  `gen_project_package.py`, the way a project's are.
+- *The packaged project crate could not be built.* `Package.sh` copied it with its source-tree path
+  to tempo-sim (`../../../Plugins/Tempo/...`), which resolves to nothing under `Packaged/API/Rust`.
+  It now rewrites that dependency to `../tempo-sim` on the way out.
+- *A failed or skipped generation would have shipped stale classes*, now that they live in a source
+  tree rather than a staging directory that was simply not built. `Package.sh` clears them
+  (`gen_project_package.py clear`) in both cases: absent beats wrong.
 

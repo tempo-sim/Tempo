@@ -73,21 +73,28 @@ mkdir -p "$CRATE_DIR/vendor"
 cp -r "$CRATE_SRC" "$CRATE_DIR/vendor/tempo-sim"
 
 if [ "$GROUP" = "typed" ]; then
-  # This build's generated classes, vendored under a fixed name. The package is called after the
-  # host project (tempo-sample-classes), and a dependency has to be named at compile time, so the
-  # one `name =` line is rewritten rather than having every project fork the test crate.
-  CLASSES_SRC=$(find "$PACKAGED_DIR/API/Rust" -maxdepth 1 -type d -name "*-classes" 2>/dev/null | head -1)
+  # The project's own crate, which carries this build's generated classes as its `ue` module,
+  # vendored under a fixed name. The crate is called after the host project (tempo-sample), and a
+  # dependency has to be named at compile time, so the one `name =` line is rewritten rather than
+  # having every project fork the test crate.
+  CLASSES_SRC=""
+  for candidate in "$PACKAGED_DIR"/API/Rust/*/; do
+    if [ -f "$candidate/src/ue/mod.rs" ]; then
+      CLASSES_SRC="${candidate%/}"
+      break
+    fi
+  done
   if [ -z "$CLASSES_SRC" ]; then
-    echo "FAILED: no generated classes crate under $PACKAGED_DIR/API/Rust (was the package built with TEMPO_GEN_RUST_API=1?)." 1>&2
+    echo "FAILED: no crate under $PACKAGED_DIR/API/Rust carries generated classes (was the package built with TEMPO_GEN_RUST_API=1?)." 1>&2
     exit 1
   fi
-  echo "Vendoring $(basename "$CLASSES_SRC") as project-classes"
-  rm -rf "$CRATE_DIR/vendor/project-classes"
-  cp -r "$CLASSES_SRC" "$CRATE_DIR/vendor/project-classes"
+  echo "Vendoring $(basename "$CLASSES_SRC") as project"
+  rm -rf "$CRATE_DIR/vendor/project"
+  cp -r "$CLASSES_SRC" "$CRATE_DIR/vendor/project"
   # Not `sed -i`: its suffix argument is required on BSD and rejected on GNU, and this script runs
   # on both. [[:space:]] rather than \s for the same reason.
-  CLASSES_MANIFEST="$CRATE_DIR/vendor/project-classes/Cargo.toml"
-  sed -E 's/^name[[:space:]]*=[[:space:]]*"[^"]+"/name = "project-classes"/' \
+  CLASSES_MANIFEST="$CRATE_DIR/vendor/project/Cargo.toml"
+  sed -E 's/^name[[:space:]]*=[[:space:]]*"[^"]+"/name = "project"/' \
     "$CLASSES_MANIFEST" > "$CLASSES_MANIFEST.renamed"
   mv "$CLASSES_MANIFEST.renamed" "$CLASSES_MANIFEST"
 fi

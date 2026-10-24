@@ -17,11 +17,12 @@ Python side. `Scripts/TestRustAPI.sh <group>` runs `cargo test --test <group>`.
 
 ## The `typed` group is its own crate
 
-`typed/` has its own `Cargo.toml`, because it needs a second path dependency — this build's
-generated classes — whose package is named after the host project (`tempo-sample-classes`). A
-dependency has to be named at compile time, so `Scripts/TestRustAPI.sh` vendors it as
-`project-classes`, rewriting the one `name =` line, and the tests refer to that. They address only
-engine classes and Tempo's own, so the file is not specific to TempoSample.
+`typed/` has its own `Cargo.toml`, because it needs a second path dependency — the project's own
+crate, which carries this build's generated classes as its `ue` module — whose package is named
+after the host project (`tempo-sample`). A dependency has to be named at compile time, so
+`Scripts/TestRustAPI.sh` vendors it as `project`, rewriting the one `name =` line, and the tests
+refer to `project::ue`. They address only engine classes and Tempo's own, so the file is not
+specific to TempoSample.
 
 ## How the crate dependency resolves
 

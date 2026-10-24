@@ -3,7 +3,8 @@
 //! Integration tests for the typed Rust class surface against a packaged sim.
 //!
 //! The Rust half of what `Tests/Python/test_typed_world.py` does. `Scripts/TestRustAPI.sh typed`
-//! vendors this build's generated classes as `project-classes` and launches the packaged sim.
+//! vendors the project's crate, which carries this build's generated classes as its `ue` module,
+//! as `project`, and launches the packaged sim.
 //!
 //! Everything here addresses classes that any host project with Tempo has -- engine classes and
 //! Tempo's own -- so the file is not specific to TempoSample. Run single-threaded, since these
@@ -11,9 +12,9 @@
 
 use std::time::{Duration, Instant};
 
-use project_classes::classes::engine::{Actor, StaticMeshActor};
-use project_classes::enums::EWalkableSlopeBehavior;
-use project_classes::structs::FWalkableSlopeOverride;
+use project::ue::classes::engine::{Actor, StaticMeshActor};
+use project::ue::enums::EWalkableSlopeBehavior;
+use project::ue::structs::FWalkableSlopeOverride;
 use tempo_sim::unreal::{Class, Vector};
 use tempo_sim::world;
 
@@ -204,7 +205,7 @@ fn an_actor_looked_up_by_the_wrong_class_is_refused() {
     world::get_actor::<StaticMeshActor>(&name).expect("the actor is a StaticMeshActor");
 
     // A name is a runtime string, so this is the one place the typed API has to check at run time.
-    let wrong = world::get_actor::<project_classes::classes::engine::Pawn>(&name);
+    let wrong = world::get_actor::<project::ue::classes::engine::Pawn>(&name);
     assert!(wrong.is_err(), "looking the actor up as a Pawn should fail");
 
     let missing = world::get_actor::<StaticMeshActor>("NoSuchActorExistsHere");
@@ -288,7 +289,7 @@ fn a_batch_defers_reads_and_keeps_order() {
 
 #[test]
 fn a_catalog_asset_goes_through_a_typed_setter() {
-    use project_classes::assets::engine::basic_shapes::Cube;
+    use project::ue::assets::engine::basic_shapes::Cube;
 
     connect();
     let actor = spawn();

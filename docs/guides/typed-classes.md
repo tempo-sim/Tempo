@@ -20,16 +20,15 @@ ls Packaged/API/Python
 ```
 
 ```text
-tempo-sample  tempo-sample-classes  tempo-sim
+tempo-sample  tempo-sim
 ```
 
-Three distributions, and you want all three:
+Two distributions, and you want both:
 
 | Distribution | What it is |
 |---|---|
 | `tempo-sim` | The client: the generated gRPC wrappers, the runtime behind attribute access, and `tempo_sim.world`. |
-| `tempo-sample` | The host project's own services, if it defines any. Named after the project. |
-| `tempo-sample-classes` | The typed classes for this build. Named after the project, so yours is `<your-project>-classes`. |
+| `tempo-sample` | The host project's own package, named after the project: the typed classes for this build, as `tempo_sample.UE`, and the project's own services, if it defines any. |
 
 !!! note "`Package.sh` only"
 
@@ -49,14 +48,13 @@ source .venv/bin/activate          # Windows: .venv\Scripts\activate
 
 ```bash
 pip install Packaged/API/Python/tempo-sim/*.whl \
-            Packaged/API/Python/tempo-sample/*.whl \
-            Packaged/API/Python/tempo-sample-classes/*.whl
+            Packaged/API/Python/tempo-sample/*.whl
 ```
 
-Importing the classes package is what registers it with the runtime, so the check is an import:
+Importing the classes is what registers them with the runtime, so the check is an import:
 
 ```bash
-python -c "import tempo_sample_classes; from tempo_sim import world; print('ready')"
+python -c "import tempo_sample.UE; from tempo_sim import world; print('ready')"
 ```
 
 Both packages are marked under [PEP 561](https://peps.python.org/pep-0561/), which is what lets a
@@ -204,7 +202,7 @@ Tempo's own components are in the generated classes alongside the engine's, so a
 configured the same way as anything else:
 
 ```python
-from tempo_sample_classes.TempoSensors import TempoLidar
+from tempo_sample.UE.TempoSensors import TempoLidar
 
 lidar = sweeper.TempoLidar          # typed as TempoLidar
 
@@ -258,13 +256,14 @@ loudly at all — a write to a `BlueprintReadOnly` property was simply refused.
 ## 9. Where the names come from
 
 The import path mirrors the content path. `/Game/StreetSweeper/Blueprint/BP_StreetSweeper` is
-`tempo_sample_classes.Game.StreetSweeper.Blueprint.BP_StreetSweeper_C`; an engine class like
-`/Script/Engine.Pawn` is `tempo_sample_classes.Engine.Pawn`. Member names are Unreal's own, verbatim,
+`tempo_sample.UE.Game.StreetSweeper.Blueprint.BP_StreetSweeper_C`; an engine class like
+`/Script/Engine.Pawn` is `tempo_sample.UE.Engine.Pawn`. Member names are Unreal's own, verbatim,
 which is the point — a rename in C++ or in a Blueprint has to show up here as a different name, or
 none of this would catch anything.
 
-In your own project the distribution is `<your-project>-classes` and the import is
-`<your_project>_classes`; everything after the import is identical. That is also why the example
+In your own project the distribution is `<your-project>` and the import is `<your_project>.UE`;
+everything after it is identical. The package exists even if your project defines no services of
+its own: it then holds only the classes. That is also why the example
 ships with TempoSample rather than with Tempo: the plugin's own
 [example clients](../clients/examples.md) address everything by string and so run against any sim,
 while a typed one names classes that exist in exactly one project. Copy it into yours and change the
@@ -299,23 +298,26 @@ TEMPO_GEN_RUST_API=1 Scripts/Package.sh
 That leaves two crates beside each other:
 
 ```
-Packaged/API/Rust/tempo-sim/                  the client and the typed runtime
-Packaged/API/Rust/tempo-sample-classes/       this build's classes
+Packaged/API/Rust/tempo-sim/          the client and the typed runtime
+Packaged/API/Rust/tempo-sample/       this build's classes, as its `ue` module, and the project's services
 ```
 
-Point a scenario crate at both. The classes crate depends on `tempo-sim` by relative path, so keep
+Point a scenario crate at both. The project crate depends on `tempo-sim` by relative path, so keep
 them together or copy both:
 
 ```toml
 [dependencies]
 tempo-sim = { path = "../Packaged/API/Rust/tempo-sim" }
-tempo-sample-classes = { path = "../Packaged/API/Rust/tempo-sample-classes" }
+tempo-sample = { path = "../Packaged/API/Rust/tempo-sample" }
 ```
+
+The classes are behind the crate's `ue` feature, which is on by default; a crate that only calls the
+project's services can turn it off with `default-features = false` and skip compiling them.
 
 Then the same scenario as [step 6](#6-run-the-example), in Rust:
 
 ```rust
-use tempo_sample_classes::classes::game::street_sweeper::blueprint::BP_StreetSweeper_C;
+use tempo_sample::ue::classes::game::street_sweeper::blueprint::BP_StreetSweeper_C;
 use tempo_sim::{world, TempoError};
 
 fn main() -> Result<(), TempoError> {

@@ -133,7 +133,16 @@ fails under Pyright instead of at runtime. See `TYPED_WORLD_API_PLAN.md`.
   name and a cooked build cases some differently. The invariant is that **the generated package
   declares nothing the build lacks**, which is what makes a build-sourced hash honest; a test
   asserts it. `Scripts/GenTypedAPI.sh` runs the whole chain: walk → ask the build → filter →
-  generate → stage a wheel → generate the published subset. `Package.sh` calls it.
+  generate → generate the published subset. `Package.sh` calls it.
+- **A project's classes go into its own client package and crate**, as `tempo_sample.UE` and
+  `tempo_sample::ue` (behind a default-on `ue` feature), beside the wrappers its protos generate —
+  as the published ones go into `tempo_sim.UE.v5_8`. The two halves are generated at different
+  times (wrappers at build time, classes at package time, since the classes need the packaged
+  build), so `gen_project_package.py` owns everything in the package that is not generated code —
+  manifest, `__init__`/`lib.rs`, `.gitignore` — derives it from what is on disk, and either side may
+  be first; a project with no protos gets a package holding only classes. The RPC generators count
+  a package subdirectory as a proto module only if it holds `_pb2` files, which is what keeps `UE`
+  out of them.
 - **`gen_py_classes.py`** emits three files per module: `.py` (class identity only), `.pyi` (the type
   surface, never imported) and `.meta.json` (what the runtime needs to build a request). Plus
   `py.typed`, without which a type checker ignores an installed package's stubs entirely.
@@ -348,8 +357,8 @@ sim (not the editor). They cover the client-facing API contract and behavior ove
 - **Rust — `Tests/Rust/`:** a `cargo` crate; `tests/*.rs` files are the groups (`cargo test --test
   <group>`): `contract` (compile/surface check, no sim), `integration` (live sim) and `typed`
   (the typed class surface against a live sim, in its own crate under `Tests/Rust/typed/` — it needs
-  a second path dependency named after the host project, which the runner vendors as
-  `project-classes`). The crate
+  the project's own crate, named after the host project, which the runner vendors as
+  `project`). The crate
   under test is the packaged `tempo-sim` crate, vendored in by the script. Run: `Scripts/TestRustAPI.sh
   [group]`.
 - **Sim lifecycle:** Python's session-scoped `sim_server` fixture (and `TestRustAPI.sh` for Rust)

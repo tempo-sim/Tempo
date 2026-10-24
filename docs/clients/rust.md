@@ -117,7 +117,7 @@ Everything above addresses properties by string. The generated **typed classes**
 strings, so a renamed or removed property fails `cargo build` instead of failing mid-simulation:
 
 ```rust
-use tempo_sample_classes::classes::game::vehicles::BP_Cat745_C;
+use tempo_sample::ue::classes::game::vehicles::BP_Cat745_C;
 use tempo_sim::world;
 
 for truck in world::get_actors::<BP_Cat745_C>()? {

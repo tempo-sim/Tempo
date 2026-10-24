@@ -5,9 +5,11 @@ The same shape as test_codegen.py, and for the same reason: a golden-output test
 the emitted bytes changed, but what matters is whether the compiler rejects what it has to reject.
 So each case generates from the same fixture schema and asserts what rustc says about a snippet.
 
-The snippet is its own crate depending on the generated one, which is the position that matters:
-the orphan rule and `Deref` coercion both behave differently inside the generating crate than
-outside it, and outside is where a scenario lives.
+The classes are generated where a project's are, as the `ue` module of a host crate whose manifest
+and lib.rs come from gen_project_package.py, as a project's do. The snippet is its own crate
+depending on that one, which is the position that matters: the orphan rule and `Deref` coercion
+both behave differently inside the generating crate than outside it, and outside is where a
+scenario lives.
 
 Needs no packaged sim and no wheel, only cargo. Skipped, not failed, when cargo is absent. The
 cargo target directory is shared and kept under Saved/, so only the first run pays for building
@@ -26,21 +28,22 @@ import pytest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PLUGIN_ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
-GENERATOR = os.path.join(PLUGIN_ROOT, "TempoCore", "Content", "Python", "gen_rust_classes.py")
+PYTHON_DIR = os.path.join(PLUGIN_ROOT, "TempoCore", "Content", "Python")
+GENERATOR = os.path.join(PYTHON_DIR, "gen_rust_classes.py")
 RUST_API = os.path.join(PLUGIN_ROOT, "TempoCore", "Content", "Rust", "API")
 TARGET_DIR = os.path.join(PLUGIN_ROOT, "Saved", "RustCodegenTarget")
 FIXTURE = os.path.join(HERE, "fixtures", "mini_schema.json")
 
 pytestmark = pytest.mark.codegen
 
-CRATE = "fixture-classes"
-CRATE_IMPORT = "fixture_classes"
+CRATE = "fixture-project"
+CRATE_IMPORT = "fixture_project"
 
 PREAMBLE = """#![allow(unused_imports, unused_variables, dead_code, unused_must_use, non_snake_case)]
-use fixture_classes::classes::core_u_object::Object;
-use fixture_classes::classes::engine::{MeshThing, Widget};
-use fixture_classes::enums::EWidgetMode;
-use fixture_classes::structs::{FWidgetSettings, FWidgetTrim};
+use fixture_project::ue::classes::core_u_object::Object;
+use fixture_project::ue::classes::engine::{MeshThing, Widget};
+use fixture_project::ue::enums::EWidgetMode;
+use fixture_project::ue::structs::{FWidgetSettings, FWidgetTrim};
 use tempo_sim::unreal::{Class, ObjectRef, Vector};
 use tempo_sim::{world, TempoError};
 
@@ -65,32 +68,33 @@ def cargo_executable():
     return candidate if os.path.exists(candidate) else None
 
 
-def crate_version():
-    """tempo-sim's version, which the generated crate pins its dependency to."""
-    with open(os.path.join(RUST_API, "Cargo.toml")) as manifest:
-        for line in manifest:
-            if line.startswith("version"):
-                return line.split("=", 1)[1].strip().strip('"')
-    raise AssertionError("tempo-sim's Cargo.toml has no version")
-
-
 @pytest.fixture(scope="module")
 def workspace(tmp_path_factory):
-    """The fixture schema generated into a crate, with a snippet crate ready to compile.
+    """The fixture schema generated into a host crate, with a snippet crate ready to compile.
 
-    `tempo-sim` arrives as a symlink named exactly what the generated manifest's `../tempo-sim`
-    expects, so the layout under test is the one `Packaged/API/Rust` arranges.
+    `tempo-sim` arrives as a symlink beside the host crate, so the layout under test is the one
+    `Packaged/API/Rust` arranges, and both crates name it by the same `../tempo-sim` -- one path, so
+    cargo sees one tempo-sim rather than two whose types do not unify.
     """
     cargo = cargo_executable()
     if cargo is None:
         pytest.skip("cargo is not installed")
 
     root = tmp_path_factory.mktemp("rust")
-    subprocess.run(
-        [sys.executable, GENERATOR, FIXTURE, str(root / CRATE),
-         "--version={}".format(crate_version())],
-        check=True, capture_output=True, text=True)
     os.symlink(RUST_API, str(root / "tempo-sim"))
+    host = root / CRATE
+    subprocess.run(
+        [sys.executable, GENERATOR, FIXTURE, str(host / "src" / "ue"), "--root=crate::ue"],
+        check=True, capture_output=True, text=True)
+
+    sys.path.insert(0, PYTHON_DIR)
+    try:
+        import gen_project_package as package
+    finally:
+        sys.path.remove(PYTHON_DIR)
+    package.write_project_cargo_toml(host, CRATE, root / "tempo-sim",
+                                     package.read_version(root / "tempo-sim" / "Cargo.toml"))
+    package.write_project_lib_rs(host / "src")
 
     snippet = root / "snippet"
     (snippet / "src").mkdir(parents=True)
@@ -124,9 +128,21 @@ def check(workspace, body):
 
 def test_generates_the_expected_files(workspace):
     crate = workspace / CRATE
-    for name in ("Cargo.toml", "src/lib.rs", "src/enums.rs", "src/structs.rs",
-                 "src/hierarchy.rs", "src/classes.rs", "src/classes/engine.rs"):
+    for name in ("Cargo.toml", "src/lib.rs", "src/ue/mod.rs", "src/ue/enums.rs",
+                 "src/ue/structs.rs", "src/ue/hierarchy.rs", "src/ue/classes.rs",
+                 "src/ue/classes/engine.rs"):
         assert (crate / name).exists(), "{} was not generated".format(name)
+
+
+def test_the_host_crate_declares_the_classes_behind_a_default_feature(workspace):
+    """A crate with classes and no protos: no proto module, no proto dependencies, `ue` on."""
+    crate = workspace / CRATE
+    lib = (crate / "src" / "lib.rs").read_text()
+    assert '#[cfg(feature = "ue")]\npub mod ue;' in lib
+    assert "pub mod proto;" not in lib
+    manifest = (crate / "Cargo.toml").read_text()
+    assert 'default = ["ue"]' in manifest
+    assert "tonic" not in manifest
 
 
 def test_a_property_reads_and_writes(workspace):
@@ -143,7 +159,7 @@ def test_an_inherited_property_resolves_through_deref(workspace):
     This is the whole reason the generated classes are a Deref chain. Nothing in Widget's own impl
     mentions Name.
     """
-    assert "fn name(" not in (workspace / CRATE / "src" / "classes" / "engine.rs").read_text(), \
+    assert "fn name(" not in (workspace / CRATE / "src" / "ue" / "classes" / "engine.rs").read_text(), \
         "Name must come from Object, not be copied into Widget"
     assert check(workspace, """
     let _: String = widget.name()?;
@@ -230,16 +246,16 @@ def test_a_deferred_read_is_typed_by_what_it_reads(workspace):
 
 def test_the_asset_catalog_compiles(workspace):
     assert check(workspace, """
-    use fixture_classes::assets::game::widgets::W_Main;
+    use fixture_project::ue::assets::game::widgets::W_Main;
     use tempo_sim::unreal::AssetRef;
     widget.set_skin(&W_Main)?;
     // A MeshThing asset is an Object asset, through the same Deref chain as the classes.
     widget.set_any_asset(&W_Main)?;
-    let _: bool = widget.reskin(&fixture_classes::assets::game::maps::showroom::Lighting)?;
+    let _: bool = widget.reskin(&fixture_project::ue::assets::game::maps::showroom::Lighting)?;
     let _: AssetRef<MeshThing> = widget.skin()?;
     // A map and the folder beside it, which Rust keeps in separate namespaces.
-    let _ = &fixture_classes::assets::game::maps::Showroom;
-    let _ = &fixture_classes::assets::engine::basic::_9Grid;
+    let _ = &fixture_project::ue::assets::game::maps::Showroom;
+    let _ = &fixture_project::ue::assets::engine::basic::_9Grid;
     // The escape hatch: a path from data, untyped, visibly so.
     widget.set_skin(&AssetRef::from_path("/Game/FromAConfigFile"))?;
 """) == []
@@ -253,7 +269,7 @@ def test_every_enumerator_has_a_variant(workspace):
     can report that the client could not decode.
     """
     assert check(workspace, """
-    use fixture_classes::enums::EWidgetComparison;
+    use fixture_project::ue::enums::EWidgetComparison;
     use tempo_sim::unreal::UnrealEnum;
     let named = [
         (EWidgetComparison::Enumerator0, "=="),
@@ -277,19 +293,19 @@ def test_a_read_only_propertys_set_function_is_kept(workspace):
     way to set a static mesh -- behind a property that would never use the name.
     """
     assert check(workspace, """
-    let _: bool = widget.set_frame(&fixture_classes::assets::game::widgets::W_Main)?;
+    let _: bool = widget.set_frame(&fixture_project::ue::assets::game::widgets::W_Main)?;
     let _ = widget.frame()?;
 """) == []
 
 
 @pytest.mark.parametrize("case,body", [
     ("an asset that was renamed",
-     "widget.set_skin(&fixture_classes::assets::game::widgets::W_Mian)?;"),
+     "widget.set_skin(&fixture_project::ue::assets::game::widgets::W_Mian)?;"),
     ("an asset of the wrong class",
-     "widget.set_skin(&fixture_classes::assets::game::widgets::trims::T_Gold)?;"),
+     "widget.set_skin(&fixture_project::ue::assets::game::widgets::trims::T_Gold)?;"),
     ("a bare path", 'widget.set_skin("/Game/Widgets/W_Main")?;'),
     ("two assets that collide, both left out",
-     "let _ = &fixture_classes::assets::game::widgets::Dup_One;"),
+     "let _ = &fixture_project::ue::assets::game::widgets::Dup_One;"),
 ])
 def test_asset_drift_does_not_compile(workspace, case, body):
     assert check(workspace, "    " + body), "{} must not compile".format(case)
@@ -310,7 +326,7 @@ def test_a_setter_names_the_argument_it_sends(workspace):
     until the generator resolved it. Asserted on the emitted call, because the failure is a runtime
     one that no amount of type checking would catch.
     """
-    engine = (workspace / CRATE / "src" / "classes" / "engine.rs").read_text()
+    engine = (workspace / CRATE / "src" / "ue" / "classes" / "engine.rs").read_text()
     assert 'set_via("SetScaleFactor", "InScale"' in engine, \
         "the setter and its argument both have to be named: {}".format(
             [line.strip() for line in engine.splitlines() if "set_via" in line])
@@ -318,7 +334,7 @@ def test_a_setter_names_the_argument_it_sends(workspace):
 
 def test_a_property_whose_setter_cannot_be_named_is_read_only(workspace):
     """Writing it directly would skip the setter, which is what the accessor path prevents."""
-    engine = (workspace / CRATE / "src" / "classes" / "engine.rs").read_text()
+    engine = (workspace / CRATE / "src" / "ue" / "classes" / "engine.rs").read_text()
     assert "fn untouchable(" in engine, "it should still be readable"
     assert "fn set_untouchable(" not in engine, "it must not be writable"
     assert check(workspace, """
@@ -352,7 +368,7 @@ def test_a_property_whose_setter_cannot_be_named_is_read_only(workspace):
      "let _ = FWidgetSettings { scale: Some(\"big\".to_string()), ..Default::default() };"),
     ("the wrong struct as an argument", "let _ = widget.configure(FWidgetTrim::default())?;"),
     ("a value type for a struct that cannot travel",
-     "let _ = fixture_classes::structs::FWidgetLimits::default();"),
+     "let _ = fixture_project::ue::structs::FWidgetLimits::default();"),
     ("assigning a struct that cannot travel", "widget.set_limits(Default::default())?;"),
     ("loading a struct that cannot travel", "let _ = widget.limits().load()?;"),
     ("a function returning a struct that cannot travel", "let _ = widget.get_limits()?;"),

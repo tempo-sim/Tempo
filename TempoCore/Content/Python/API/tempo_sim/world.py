@@ -237,9 +237,9 @@ def check_schema(raise_on_mismatch: bool = True) -> bool:
     packages = registered_classes().packages
     if not packages:
         raise SchemaMismatch(
-            "no generated classes are installed, so there is nothing to check. Install this "
-            "build's generated class package (e.g. `tempo_sample_classes`), which ships in "
-            "Packaged/API/Python alongside the tempo-sim wheel.")
+            "no generated classes are registered, so there is nothing to check. Install this "
+            "build's project package and import its classes (e.g. `import tempo_sample.UE`); "
+            "the wheel ships in Packaged/API/Python alongside the tempo-sim wheel.")
 
     # These three options must match what query_packaged_classes.py asked when the installed
     # classes were stamped. The hashes cover function signatures, so a different request yields

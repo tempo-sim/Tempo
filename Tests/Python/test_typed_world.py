@@ -28,10 +28,12 @@ SPAWNABLE = "/Script/Engine.StaticMeshActor"
 
 
 def _import_generated_classes():
-    """Import whichever generated class package is installed; importing is what registers it.
+    """Import the project's generated classes, if installed; importing is what registers them.
 
-    The distribution is named after the project (`tempo-sample-classes` for TempoSample), so it is
-    discovered rather than named here -- this file should work for any project using Tempo.
+    They are the `UE` subpackage of the project's own package, which is named after the project
+    (`tempo_sample.UE` for TempoSample), so it is discovered rather than named here -- this file
+    should work for any project using Tempo. tempo-sim's own `UE` holds the published classes, one
+    package per engine version, and is not this build's.
     """
     import importlib
 
@@ -40,15 +42,19 @@ def _import_generated_classes():
     except ImportError:  # Python 3.7
         return False
 
+    # Found by the files a distribution installed rather than by trying an import of each, which
+    # would import every installed package's top level to find one.
     for distribution in metadata.distributions():
-        name = distribution.metadata["Name"] or ""
-        if not name.endswith("-classes"):
+        if (distribution.metadata["Name"] or "") == "tempo-sim":
             continue
-        try:
-            importlib.import_module(name.replace("-", "_"))
-            return True
-        except ImportError:
-            continue
+        for path in distribution.files or []:
+            parts = path.parts
+            if len(parts) == 3 and parts[1:] == ("UE", "__init__.py"):
+                try:
+                    importlib.import_module(parts[0] + ".UE")
+                    return True
+                except ImportError:
+                    break
     return False
 
 

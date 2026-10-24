@@ -13,7 +13,7 @@ The **typed classes** are the same capability with the strings removed:
 
 ```python
 from tempo_sim import world
-from tempo_sample_classes.Game.Vehicles import BP_Cat745_C
+from tempo_sample.UE.Game.Vehicles import BP_Cat745_C
 
 for truck in world.get_actors(BP_Cat745_C):
     truck.MaxSpeed = 1200.0
@@ -40,11 +40,12 @@ The classes are generated from the build they describe, so they ship with it:
 
 ```bash
 pip install Packaged/API/Python/tempo-sim/*.whl \
-            Packaged/API/Python/tempo-sample-classes/*.whl
+            Packaged/API/Python/tempo-sample/*.whl
 ```
 
-The distribution is named after the project — `tempo-sample-classes` for TempoSample,
-`<your-project>-classes` for yours — and importing it is what registers it with the runtime.
+They are the `UE` subpackage of the project's own package, beside its services:
+`tempo_sample.UE` for TempoSample, `<your_project>.UE` for yours, there even when the project
+defines no services. Importing it is what registers the classes with the runtime.
 
 ## Finding things
 
@@ -91,7 +92,7 @@ is 1,230 of TempoSample's 1,558 — and those have a generated value type, built
 arguments:
 
 ```python
-from tempo_sample_classes.structs import FWalkableSlopeOverride
+from tempo_sample.UE.structs import FWalkableSlopeOverride
 
 mesh.SetWalkableSlopeOverride(FWalkableSlopeOverride(WalkableSlopeAngle=12.0))
 current = mesh.GetWalkableSlopeOverride()                    # FWalkableSlopeOverride, a value
@@ -184,7 +185,7 @@ Every asset the build cooked is in a generated catalog, one module per mount poi
 namespaces. An asset-valued property is typed by the class it accepts:
 
 ```python
-from tempo_sample_classes.assets import Engine, Game
+from tempo_sample.UE.assets import Engine, Game
 
 mesh.SetStaticMesh(Engine.BasicShapes.Cube)          # AssetRef[StaticMesh]
 mesh.SetStaticMesh(Game.Materials.M_Paint)           # type error: AssetRef[Material]
@@ -274,17 +275,18 @@ unfiltered on purpose.
 
 ## The same thing in Rust
 
-The classes are generated for Rust too, from the same schema and with the same guarantee. The crate
+The classes are generated for Rust too, from the same schema and with the same guarantee, as the
+`ue` module of the project's own crate — behind its `ue` feature, which is on by default. The crate
 ships beside `tempo-sim` when the build is packaged with `TEMPO_GEN_RUST_API=1`:
 
 ```toml
 [dependencies]
 tempo-sim = { path = "Packaged/API/Rust/tempo-sim" }
-tempo-sample-classes = { path = "Packaged/API/Rust/tempo-sample-classes" }
+tempo-sample = { path = "Packaged/API/Rust/tempo-sample" }
 ```
 
 ```rust
-use tempo_sample_classes::classes::game::vehicles::BP_Cat745_C;
+use tempo_sample::ue::classes::game::vehicles::BP_Cat745_C;
 use tempo_sim::world;
 
 for truck in world::get_actors::<BP_Cat745_C>()? {
@@ -347,8 +349,8 @@ The catalog is a module tree of statics, `assets::engine::basic_shapes::Cube`, e
 asset-valued setter takes a reference and a derived class coerces into it:
 
 ```rust
-use tempo_sample_classes::assets::engine::basic_shapes::Cube;
-use tempo_sample_classes::assets::game::materials::M_Paint;
+use tempo_sample::ue::assets::engine::basic_shapes::Cube;
+use tempo_sample::ue::assets::game::materials::M_Paint;
 
 mesh.set_static_mesh(&Cube)?;                        // &AssetRef<StaticMesh>
 mesh.set_material(0, &M_Paint)?;                     // &AssetRef<Material> -> &AssetRef<MaterialInterface>
@@ -375,7 +377,7 @@ Struct values are plain Rust structs with every field an `Option`, because an un
 sent. A struct property's accessor returns its proxy, which loads and stores the whole value:
 
 ```rust
-use tempo_sample_classes::structs::FWalkableSlopeOverride;
+use tempo_sample::ue::structs::FWalkableSlopeOverride;
 
 mesh.set_walkable_slope_override(FWalkableSlopeOverride {
     walkable_slope_angle: Some(12.0),
