@@ -1877,6 +1877,12 @@ pub trait Hierarchy: Send + Sync {
 
     /// What one entry hashed to, or `None` when these classes do not have it.
     fn content_hash(&self, kind: EntryKind, name: &str) -> Option<&'static str>;
+
+    /// Another table these classes lean on, registered with them: a project's types re-export the
+    /// published ones they share, and leave those entries to the published table.
+    fn depends_on(&self) -> Option<&'static (dyn Hierarchy + 'static)> {
+        None
+    }
 }
 
 /// The things a generated crate records an identity for.
@@ -1948,15 +1954,20 @@ static HIERARCHIES: std::sync::RwLock<Vec<&'static (dyn Hierarchy + 'static)>> =
 /// Where Python's equivalent reads JSON out of the installed package at import time, this is a
 /// table compiled into the generated crate — so it cannot go missing, and it costs no I/O.
 pub fn register_classes(hierarchy: &'static (dyn Hierarchy + 'static)) {
-    if let Ok(mut registered) = HIERARCHIES.write() {
-        // Every handle made through a crate registers it, so this runs constantly for the same
-        // table. Compared by address, since each crate has exactly one.
-        if !registered
-            .iter()
-            .any(|existing| std::ptr::eq(*existing as *const _, hierarchy as *const _))
-        {
+    let mut next = Some(hierarchy);
+    while let Some(hierarchy) = next {
+        if let Ok(mut registered) = HIERARCHIES.write() {
+            // Every handle made through a crate registers it, so this runs constantly for the same
+            // table. Compared by address, since each crate has exactly one.
+            if registered
+                .iter()
+                .any(|existing| std::ptr::eq(*existing as *const _, hierarchy as *const _))
+            {
+                return;
+            }
             registered.push(hierarchy);
         }
+        next = hierarchy.depends_on();
     }
 }
 

@@ -24,6 +24,11 @@ include = [
     "proto/**/*.proto",
 ]
 
+[features]
+# The published types (`tempo_sim::types`), when Scripts/GenTypedAPI.sh has generated them. A
+# project's crate turns this on for the types it re-exports.
+types = []
+
 [dependencies]
 tonic = "0.13"
 prost = "0.13"

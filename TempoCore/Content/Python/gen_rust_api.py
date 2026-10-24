@@ -824,15 +824,25 @@ def update_lib_rs(rust_root_dir, generated_modules):
 //! }
 //! ```
 
+// The generated types name the runtime as `::tempo_sim::unreal`, the path a project's crate
+// knows it by; this makes the same path resolve in here, where the published types live.
+extern crate self as tempo_sim;
+
 pub mod context;
 pub mod error;
 pub mod proto;
 pub mod streaming;
 
-// The typed World API: hand-written, unlike everything below, and the base the generated
-// <project>-classes crate builds on.
+// The typed World API: hand-written, unlike everything below, and the base a project's generated
+// types build on.
 pub mod unreal;
 pub mod world;
+
+// The published types: the engine's always-loaded modules and Tempo's own, generated from the
+// latest supported engine by Scripts/GenTypedAPI.sh. Off by default, because generating them is a
+// packaging step and compiling them is a cost an RPC-only client should not pay.
+#[cfg(feature = "types")]
+pub mod types;
 
 // Re-export commonly used items
 pub use context::{set_server, set_server_async, set_socket, set_socket_async, tempo_context, TempoContext};
@@ -869,7 +879,10 @@ def _collect_rust_inputs(script_dir: str, pb2_roots, rust_crate_dir: Path,
         sub_dir = rust_crate_dir / sub
         if not sub_dir.exists():
             continue
-        for path, _, files in os.walk(sub_dir):
+        for path, directories, files in os.walk(sub_dir):
+            # The published types are GenTypedAPI.sh's, and nothing here reads them.
+            if Path(path) == rust_crate_dir / "src":
+                directories[:] = [d for d in directories if d != RUST_CLASSES]
             for filename in files:
                 if filename.endswith((".rs", ".proto")):
                     inputs.append(Path(path) / filename)
@@ -985,9 +998,9 @@ if __name__ == "__main__":
 
     # Discover modules by inspecting the nested pb2 trees: each subdir of a
     # package dir holding pb2 is one module. {module: (namespace, dir)}. A subdir
-    # without any is something else -- the typed classes, `UE`, sit beside the
+    # without any is something else -- the typed classes, `types`, sit beside the
     # proto modules in both packages -- and counting it would both report a
-    # project module that does not exist and collide the two packages' `UE`.
+    # project module that does not exist and collide the two packages' `types`.
     def _is_proto_module(d):
         return d.is_dir() and d.name != "__pycache__" and any(d.rglob("*_pb2.py"))
 

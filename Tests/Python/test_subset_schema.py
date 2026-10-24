@@ -341,22 +341,19 @@ def reaching(d: E.DeepBridged) -> None:
 
 @pytest.fixture(scope="module")
 def nested(tmp_path_factory, subset):
-    """The subset generated where it ships: inside another package, under its engine version.
+    """The subset generated where it ships: inside another package, as `tempo_sim.types` is.
 
-    `tempo_sim.UE.v5_8` rather than a distribution of its own (TYPED_WORLD_API_PLAN.md section
-    16.4), and `v5_8` rather than `5_8` because an identifier cannot begin with a digit.
+    Not a distribution of its own (TYPED_WORLD_API_PLAN.md section 16.4).
     """
     narrowed, _ = subset
     out = tmp_path_factory.mktemp("nested")
     schema = out / "subset.json"
     schema.write_text(json.dumps(narrowed))
-    package = out / DIST / "UE" / "v5_8"
+    package = out / DIST / "types"
     (out / DIST).mkdir(parents=True, exist_ok=True)
     (out / DIST / "__init__.py").write_text("")
-    (out / DIST / "UE").mkdir(parents=True, exist_ok=True)
-    (out / DIST / "UE" / "__init__.py").write_text("")
     subprocess.run([sys.executable, GENERATOR, str(schema), str(package),
-                    "--package={}.UE.v5_8".format(DIST)],
+                    "--package={}.types".format(DIST)],
                    check=True, capture_output=True, text=True)
     return out
 
@@ -364,18 +361,18 @@ def nested(tmp_path_factory, subset):
 def test_a_nested_package_imports_itself_by_its_full_name(nested):
     """The emitted modules import each other, and a directory name is not the dotted name.
 
-    Left to the directory this would emit `import v5_8.enums`, which resolves to nothing from
-    anywhere -- and the failure would be an ImportError at runtime rather than anything a type
-    checker reports.
+    Left to the directory this would emit `import types.enums`, which finds the standard library's
+    `types` module and nothing in it -- and the failure would be an ImportError at runtime rather
+    than anything a type checker reports.
     """
-    stub = (nested / DIST / "UE" / "v5_8" / "Engine.pyi").read_text()
-    assert "{}.UE.v5_8.enums".format(DIST) in stub, [
+    stub = (nested / DIST / "types" / "Engine.pyi").read_text()
+    assert "{}.types.enums".format(DIST) in stub, [
         line for line in stub.splitlines() if "import" in line]
 
 
 def test_the_published_classes_type_check_where_they_ship(nested, tmp_path):
     errors = check(nested, """
-from fixture_classes.UE.v5_8.Engine import Widget
+from fixture_classes.types.Engine import Widget
 
 def ok(w: Widget) -> None:
     w.bEnabled = True
@@ -384,9 +381,183 @@ def ok(w: Widget) -> None:
     assert errors == [], "the published classes should type-check: {}".format(errors)
 
     errors = check(nested, """
-from fixture_classes.UE.v5_8.Engine import Widget
+from fixture_classes.types.Engine import Widget
 
 def drift(w: Widget) -> None:
     w.bEnabledd = True
 """, tmp_path)
     assert errors, "the guarantee has to survive being nested"
+
+
+# -- a project's types re-export the published ones (section 16.5) --------------------------------
+
+def _shared(schema, published):
+    sys.path.insert(0, PYTHON_DIR)
+    try:
+        from gen_classes_common import shared_with
+    finally:
+        sys.path.remove(PYTHON_DIR)
+    return shared_with(schema, published)
+
+
+def _fixture():
+    with open(FIXTURE) as f:
+        return json.load(f)
+
+
+def test_what_a_build_publishes_unchanged_is_shared(subset):
+    narrowed, _ = subset
+    classes, structs, enums = _shared(_fixture(), narrowed)
+    assert {"/Script/CoreUObject.Object", "/Script/Engine.MeshThing",
+            "/Script/Engine.Widget"} <= classes
+    # Rerooted by the subset, so its chain differs though its own hash does not.
+    assert "/Script/Engine.Bridged" not in classes
+    assert "/Script/SomePlugin.PluginBase" not in classes, "not published at all"
+    assert structs == {"FWidgetLimits", "FWidgetSettings", "FWidgetTrim"}
+    # EWidgetComparison is not published: nothing the subset keeps mentions it.
+    assert enums == {"EWidgetMode"}
+
+
+def test_a_changed_struct_unshares_whatever_carries_it(subset):
+    """FWidgetSettings holds an FWidgetTrim, and Widget an FWidgetSettings: a struct the project
+    redefines has to be the one its own types hand back."""
+    import copy
+
+    narrowed, _ = subset
+    published = copy.deepcopy(narrowed)
+    for struct in published["structs"]:
+        if struct["name"] == "FWidgetTrim":
+            struct["content_hash"] = "A-DIFFERENT-TRIM"
+    classes, structs, _ = _shared(_fixture(), published)
+    assert structs == {"FWidgetLimits"}
+    assert "/Script/Engine.Widget" not in classes
+    assert "/Script/Engine.MeshThing" in classes, "nothing MeshThing has mentions the trim"
+
+
+def test_a_class_mentioning_an_unpublished_class_is_still_shared(subset):
+    """Its member is a bare Object in both packages, which is the lesser cost.
+
+    Unsharing it instead was tried, and broke the case the asset catalog exists for: StaticMesh
+    mentions a class the subset lacks, so the project defined its own -- and the shared
+    StaticMeshComponent's setter then took a StaticMesh the project's catalog did not hand out.
+    """
+    import copy
+
+    narrowed, _ = subset
+    schema, published = _fixture(), copy.deepcopy(narrowed)
+    mention = {"name": "Plugin", "kind": "actor", "class": "/Script/SomePlugin.PluginBase",
+               "readable": True, "writable": True}
+    for document in (schema, published):
+        for cls in document["classes"]:
+            if cls["path"] == "/Script/Engine.MeshThing":
+                cls["properties"] = cls.get("properties", []) + [dict(mention)]
+    classes, _, _ = _shared(schema, published)
+    assert "/Script/Engine.MeshThing" in classes
+
+
+PROJECT = "fixture_project"
+
+
+@pytest.fixture(scope="module")
+def reexporting(tmp_path_factory, subset):
+    """The published types, and a project's generated against them.
+
+    The published copy is altered as a different release would be: Widget and FWidgetSettings hash
+    differently, so the project has to define its own. MeshThing and Object match; Bridged was
+    rerooted by the subset, so its chain differs even though its own hash does not.
+    """
+    import copy
+
+    narrowed, _ = subset
+    published = copy.deepcopy(narrowed)
+    for cls in published["classes"]:
+        if cls["path"] == "/Script/Engine.Widget":
+            cls["content_hash"] = "A-DIFFERENT-WIDGET"
+    for struct in published["structs"]:
+        if struct["name"] == "FWidgetSettings":
+            struct["content_hash"] = "A-DIFFERENT-SETTINGS"
+
+    out = tmp_path_factory.mktemp("reexporting")
+    published_schema = out / "published.json"
+    published_schema.write_text(json.dumps(published))
+    (out / DIST).mkdir()
+    (out / DIST / "__init__.py").write_text("")
+    subprocess.run([sys.executable, GENERATOR, str(published_schema), str(out / DIST / "types"),
+                    "--package={}.types".format(DIST)],
+                   check=True, capture_output=True, text=True)
+    (out / PROJECT).mkdir()
+    (out / PROJECT / "__init__.py").write_text("")
+    subprocess.run([sys.executable, GENERATOR, FIXTURE, str(out / PROJECT / "types"),
+                    "--package={}.types".format(PROJECT),
+                    "--published={}".format(published_schema),
+                    "--published-package={}.types".format(DIST)],
+                   check=True, capture_output=True, text=True)
+    return out
+
+
+def _read_json(path):
+    with open(path) as f:
+        return json.load(f)
+
+
+def test_what_the_published_types_share_is_re_exported(reexporting):
+    engine = (reexporting / PROJECT / "types" / "Engine.py").read_text()
+    stub = (reexporting / PROJECT / "types" / "Engine.pyi").read_text()
+    line = "from {}.types.Engine import MeshThing as MeshThing".format(DIST)
+    assert line in engine and line in stub
+    # Defined here: changed (Widget), rerooted by the subset (Bridged), or not published at all.
+    for name in ("Widget", "Bridged"):
+        assert "class {}(".format(name) in engine, name
+    assert "class PluginBase(" in (reexporting / PROJECT / "types" / "SomePlugin.py").read_text()
+
+
+def test_a_re_exported_entry_is_left_to_the_published_package(reexporting):
+    """One registration per class: the published index answers for what it defines."""
+    project = reexporting / PROJECT / "types"
+    index = _read_json(project / "index.json")
+    assert "/Script/Engine.MeshThing" not in index
+    assert "/Script/CoreUObject.Object" not in index
+    assert "/Script/Engine.Widget" in index
+
+    hashes = _read_json(project / "hashes.json")
+    assert "/Script/Engine.MeshThing" not in hashes["classes"]
+    assert "FWidgetTrim" not in hashes["structs"] and "FWidgetSettings" in hashes["structs"]
+    assert "EWidgetMode" not in hashes["enums"]
+
+    assert "import {}.types".format(DIST) in (project / "__init__.py").read_text(), \
+        "the project's types have to register the published ones they lean on"
+
+
+def test_structs_and_enums_are_re_exported_too(reexporting):
+    project = reexporting / PROJECT / "types"
+    structs = (project / "structs.pyi").read_text()
+    assert "from {}.types.structs import FWidgetTrim as FWidgetTrim".format(DIST) in structs
+    assert "class FWidgetSettings(" in structs
+    assert "from {}.types.enums import EWidgetMode as EWidgetMode".format(DIST) in \
+        (project / "enums.py").read_text()
+
+
+def test_a_shared_class_is_one_type_to_a_checker(reexporting, tmp_path):
+    """The point of re-exporting: a helper written against the published type takes the project's."""
+    errors = check(reexporting, """
+import {dist}.types.Engine as published
+import {project}.types.Engine as project
+
+def helper(mesh: published.MeshThing) -> None: ...
+
+def ok(mesh: project.MeshThing) -> None:
+    helper(mesh)
+""".format(dist=DIST, project=PROJECT), tmp_path)
+    assert errors == [], "a re-exported class should be the published one: {}".format(errors)
+
+    errors = check(reexporting, """
+import {dist}.types.Engine as published
+import {project}.types.Engine as project
+
+def helper(widget: published.Widget) -> None: ...
+
+def diverged(widget: project.Widget) -> None:
+    helper(widget)
+""".format(dist=DIST, project=PROJECT), tmp_path)
+    assert errors, "a class the release describes differently is the project's own type"
+

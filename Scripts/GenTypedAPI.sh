@@ -10,9 +10,10 @@
 #   Scripts/GenTypedAPI.sh
 #
 # The schema lands in Saved/TempoSchema/tempo_schema.json. The classes go into the project's own
-# client package and crate, beside the wrappers its protos generate -- `tempo_sample.UE` in
-# Content/Python/API and `tempo_sample::ue` in Content/Rust/API -- which Package.sh then builds into
-# Packaged/API/{Python,Rust}. Both are generated and git-ignored, as the wrappers beside them are.
+# client package and crate, beside the wrappers its protos generate -- `tempo_sample.types` in
+# Content/Python/API and `tempo_sample::types` in Content/Rust/API -- which Package.sh then builds
+# into Packaged/API/{Python,Rust}. Both are generated and git-ignored, as the wrappers beside them
+# are. So are the published types, which go into tempo-sim itself.
 #
 # Rust follows the same gate as the RPC client generator, TEMPO_GEN_RUST_API: a project that does
 # not use the Rust client should not pay for generating 16 MB of it.
@@ -132,75 +133,81 @@ else
   echo "  (Run this from Package.sh, or package first, to generate only classes that ship.)"
 fi
 
+RUST=""
+if [ -n "${TEMPO_GEN_RUST_API:-}" ] && [ "${TEMPO_GEN_RUST_API}" != "0" ]; then
+  RUST=1
+fi
+
+# The published types, generated into tempo-sim itself.
+#
+# Everything below describes one project's build and ships beside it. This describes only the
+# modules that are in every build -- the engine's always-loaded ones and Tempo's own -- so it can
+# travel with the published wheel and crate:
+#
+#   from tempo_sim.types.Engine import Pawn
+#   use tempo_sim::types::classes::engine::Pawn;     // feature = "types"
+#
+# From the one engine version this build uses, which is the latest Tempo supports: a client
+# against an older engine is type-checked against the latest's classes (see
+# docs/clients/typed-classes.md). Generated into the source tree and git-ignored, exactly as the
+# protos and service wrappers beside it are.
+#
+# First, because the project's types re-export what these define identically. Skipped without a
+# packaged build to filter against, because a subset of the editor's unfiltered view would describe
+# classes and members no build has -- which is the whole thing this is for.
+PUBLISHED=""
+if [ "$GENERATE_FROM" != "$SCHEMA" ]; then
+  SUBSET="$SCHEMA_DIR/tempo_schema_published.json"
+  echo "Narrowing to the modules every build ships"
+  if "$PYTHON_BIN" "$PYTHON_DIR/subset_schema.py" "$GENERATE_FROM" "$SUBSET"; then
+    PUBLISHED="$SUBSET"
+    PUBLISHED_PYTHON="$PYTHON_DIR/API/tempo_sim/types"
+    rm -rf "$PUBLISHED_PYTHON"
+    echo "Generating tempo_sim.types"
+    "$PYTHON_BIN" "$PYTHON_DIR/gen_py_classes.py" \
+      "$SUBSET" "$PUBLISHED_PYTHON" "--package=tempo_sim.types"
+    if [ -n "$RUST" ]; then
+      PUBLISHED_RUST="$SCRIPT_DIR/../TempoCore/Content/Rust/API/src/types"
+      rm -rf "$PUBLISHED_RUST"
+      echo "Generating tempo_sim::types"
+      "$PYTHON_BIN" "$PYTHON_DIR/gen_rust_classes.py" \
+        "$SUBSET" "$PUBLISHED_RUST" "--root=crate::types"
+    fi
+  else
+    echo "Warning: could not narrow the schema; there will be no published types" >&2
+  fi
+else
+  echo "Skipping the published types (they need a packaged build to filter against)"
+fi
+
+# What the project's types are compared against, to re-export rather than redefine.
+PUBLISHED_ARG=()
+if [ -n "$PUBLISHED" ]; then
+  PUBLISHED_ARG=("--published=$PUBLISHED")
+fi
+
 # Into the project's own package, creating it if the project has no protos of its own to have made
 # it already. A directory of its own, so a class module named after an Unreal module cannot land on
 # the proto module of the same name.
 "$PYTHON_BIN" "$PYTHON_DIR/gen_project_package.py" python "$PROJECT_ROOT"
-CLASSES_DIR="$PROJECT_ROOT/Content/Python/API/$IMPORT_NAME/UE"
+CLASSES_DIR="$PROJECT_ROOT/Content/Python/API/$IMPORT_NAME/types"
 rm -rf "$CLASSES_DIR"
 
-echo "Generating $IMPORT_NAME.UE"
+echo "Generating $IMPORT_NAME.types"
 "$PYTHON_BIN" "$PYTHON_DIR/gen_py_classes.py" \
-  "$GENERATE_FROM" "$CLASSES_DIR" "--package=$IMPORT_NAME.UE"
+  "$GENERATE_FROM" "$CLASSES_DIR" "--package=$IMPORT_NAME.types" \
+  ${PUBLISHED_ARG[@]+"${PUBLISHED_ARG[@]}"}
 echo "Typed Python classes generated at $CLASSES_DIR"
 
-# The published subset, generated into the tempo-sim package itself.
-#
-# Everything above describes one project's build and ships beside it. This describes only the
-# modules that are in every build -- the engine's always-loaded ones and Tempo's own -- so it can
-# travel with the published wheel, under the engine version it was taken from:
-#
-#   from tempo_sim.UE.v5_8.Engine import Pawn
-#
-# Generated into the source tree and git-ignored, exactly as the protos and service wrappers beside
-# it are: generated code is not committed here, it ships in the built artifact. Each engine version
-# is its own package, so a wheel built from a tree that has generated both carries both.
-#
-# Skipped without a packaged build to filter against, because a subset of the editor's unfiltered
-# view would describe classes and members no build has -- which is the whole thing this is for.
-if [ "$GENERATE_FROM" != "$SCHEMA" ]; then
-  ENGINE_VERSION=$("$PYTHON_BIN" -c "
-import json
-with open('$GENERATE_FROM') as f:
-    print(json.load(f)['header']['engine_version'])
-")
-  # An identifier cannot begin with a digit in Python or in Rust, hence the v.
-  VERSION_PACKAGE="v$(echo "$ENGINE_VERSION" | tr '.' '_')"
-  SUBSET="$SCHEMA_DIR/tempo_schema_published.json"
-  PUBLISHED_ROOT="$PYTHON_DIR/API/tempo_sim/UE"
-
-  echo "Narrowing to the modules every build ships"
-  if "$PYTHON_BIN" "$PYTHON_DIR/subset_schema.py" "$GENERATE_FROM" "$SUBSET"; then
-    rm -rf "$PUBLISHED_ROOT/$VERSION_PACKAGE"
-    mkdir -p "$PUBLISHED_ROOT"
-    {
-      echo "# Generated by Scripts/GenTypedAPI.sh. Do not edit."
-      echo "#"
-      echo "# One subpackage per Unreal version, each holding the classes that version's"
-      echo "# always-loaded modules declare. Import the one your sim runs:"
-      echo "#"
-      echo "#     from tempo_sim.UE.v5_8.Engine import Pawn"
-    } > "$PUBLISHED_ROOT/__init__.py"
-    echo "Generating tempo_sim.UE.$VERSION_PACKAGE"
-    "$PYTHON_BIN" "$PYTHON_DIR/gen_py_classes.py" \
-      "$SUBSET" "$PUBLISHED_ROOT/$VERSION_PACKAGE" \
-      "--package=tempo_sim.UE.$VERSION_PACKAGE"
-    echo "Published classes generated at tempo_sim/UE/$VERSION_PACKAGE"
-  else
-    echo "Warning: could not narrow the schema; the wheel will carry no published classes" >&2
-  fi
-else
-  echo "Skipping the published classes (they need a packaged build to filter against)"
-fi
-
-# The Rust classes, from the same schema, into the project's own crate as its `ue` module. The
+# The Rust types, from the same schema, into the project's own crate as its `types` module. The
 # crate's manifest and lib.rs are written after them, because lib.rs declares what src/ holds.
-if [ -n "${TEMPO_GEN_RUST_API:-}" ] && [ "${TEMPO_GEN_RUST_API}" != "0" ]; then
-  RUST_CLASSES_DIR="$PROJECT_ROOT/Content/Rust/API/src/ue"
+if [ -n "$RUST" ]; then
+  RUST_CLASSES_DIR="$PROJECT_ROOT/Content/Rust/API/src/types"
   rm -rf "$RUST_CLASSES_DIR"
-  echo "Generating $IMPORT_NAME::ue"
+  echo "Generating $IMPORT_NAME::types"
   "$PYTHON_BIN" "$PYTHON_DIR/gen_rust_classes.py" \
-    "$GENERATE_FROM" "$RUST_CLASSES_DIR" "--root=crate::ue"
+    "$GENERATE_FROM" "$RUST_CLASSES_DIR" "--root=crate::types" \
+    ${PUBLISHED_ARG[@]+"${PUBLISHED_ARG[@]}"}
   "$PYTHON_BIN" "$PYTHON_DIR/gen_project_package.py" rust "$PROJECT_ROOT"
   echo "Typed Rust classes generated at $RUST_CLASSES_DIR"
 else

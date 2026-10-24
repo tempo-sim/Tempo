@@ -30,10 +30,10 @@ SPAWNABLE = "/Script/Engine.StaticMeshActor"
 def _import_generated_classes():
     """Import the project's generated classes, if installed; importing is what registers them.
 
-    They are the `UE` subpackage of the project's own package, which is named after the project
-    (`tempo_sample.UE` for TempoSample), so it is discovered rather than named here -- this file
-    should work for any project using Tempo. tempo-sim's own `UE` holds the published classes, one
-    package per engine version, and is not this build's.
+    They are the `types` subpackage of the project's own package, which is named after the project
+    (`tempo_sample.types` for TempoSample), so it is discovered rather than named here -- this file
+    should work for any project using Tempo. tempo-sim's own `types` holds the published ones, and
+    is not this build's.
     """
     import importlib
 
@@ -49,9 +49,9 @@ def _import_generated_classes():
             continue
         for path in distribution.files or []:
             parts = path.parts
-            if len(parts) == 3 and parts[1:] == ("UE", "__init__.py"):
+            if len(parts) == 3 and parts[1:] == ("types", "__init__.py"):
                 try:
-                    importlib.import_module(parts[0] + ".UE")
+                    importlib.import_module(parts[0] + ".types")
                     return True
                 except ImportError:
                     break
@@ -908,34 +908,45 @@ def test_the_installed_classes_match_the_sim(sim_server):
 
 
 def _import_published_classes():
-    """Import the published classes for this build's engine version, if the wheel carries them.
+    """Import the published types, if the wheel carries them, and return their package name.
 
     They ship inside `tempo_sim` rather than as a distribution of their own
-    (TYPED_WORLD_API_PLAN.md section 16), one subpackage per Unreal version, and importing them is
-    lazy by design -- `import tempo_sim` does not pull in three megabytes of classes nobody asked
-    for. So a test that wants them has to ask.
-
-    Only the version matching this build. A wheel carrying several is the point of the namespace,
-    and importing a version the sim is not running would correctly report a mismatch.
+    (TYPED_WORLD_API_PLAN.md section 16), and importing them is lazy by design -- `import
+    tempo_sim` does not pull in three megabytes of classes nobody asked for. The project's types
+    import them already when they re-export any; this asks regardless.
     """
     import importlib
 
-    # The project's own package, which was generated from this build in the same run, so its
-    # engine version is the one to ask for. Found by name rather than by position: the published
-    # one registers too, and which came first is an import-order detail.
-    project = [package for package in registered().packages
-               if not package.package.startswith("tempo_sim.")]
-    if not project:
-        return None
-    engine_version = project[0].header.get("engine_version") or ""
-    if not engine_version:
-        return None
-    name = "tempo_sim.UE.v" + engine_version.replace(".", "_")
     try:
-        importlib.import_module(name)
+        importlib.import_module("tempo_sim.types")
     except ImportError:
         return None
-    return name
+    return "tempo_sim.types"
+
+
+def _project_package():
+    """The project's types package, found among the registered ones rather than named."""
+    return next((package.package for package in registered().packages
+                 if not package.package.startswith("tempo_sim.")), None)
+
+
+@requires_classes
+def test_a_shared_class_is_one_type_in_both_packages(sim_server):
+    """A project's types re-export what the published ones define identically (section 16.5).
+
+    Otherwise there would be two types for /Script/Engine.Pawn, and a helper written against the
+    published one could accept none of the project's Blueprints.
+    """
+    import importlib
+
+    if _import_published_classes() is None:
+        pytest.skip("this tempo-sim wheel carries no published types")
+    project = importlib.import_module(_project_package() + ".Engine")
+    published = importlib.import_module("tempo_sim.types.Engine")
+    assert project.Pawn is published.Pawn
+    # Resolved from the published package, which is the one that defines it.
+    assert registered().python_class("/Script/Engine.Pawn") is published.Pawn
+    assert world.get_actors(project.Pawn) is not None
 
 
 @requires_classes

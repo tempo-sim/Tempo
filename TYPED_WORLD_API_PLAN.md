@@ -330,7 +330,7 @@ PyPI-publishable `tempo-sim`.
 | `tempo-sim` | runtime proxies, `get_actors`, `spawn_actor`, schema/metadata loader, base `Actor`/`Component`/`StructProxy` | hand-written, as today |
 | `<project>-classes` (e.g. `tempo-sample-classes`) | every class in the build: engine, plugin, project | per release |
 
-*Superseded by §20: the classes are now the `UE` subpackage of the project's own package.*
+*Superseded by §20: the classes are now the `types` subpackage of the project's own package.*
 
 `TestPythonAPI.sh` already installs *all* wheels from `Packaged/API/Python/`, so the classes package
 is picked up by the test jobs with no script change. The generated package registers its classes
@@ -723,11 +723,11 @@ tickable and the subscription lives beside the rest of the property code. The ti
 an empty subscription map, so a project that never streams pays nothing measurable.
 | **5 — Rust** | `gen_rust_classes.py` + a `tempo_sim::unreal` runtime, off the same `tempo_schema.json` | Designed and measured in §15. |
 | **6 — C++** | generator off the same `tempo_schema.json` | Not started. |
-| **7 — Published classes** | an engine-core + Tempo subset inside the published `tempo-sim` wheel and crate, namespaced by engine version; per-class drift checking | Designed and measured in §16. Independent of 6. |
+| **7 — Published classes** | an engine-core + Tempo subset inside the published `tempo-sim` wheel and crate, namespaced by engine version; per-class drift checking | Designed and measured in §16; built as `tempo_sim.types`, latest engine only (§16.11). 7g remains. |
 | **8 — Struct values** | a `StructValue` variant; value-expressible structs in the classifier; struct arguments, results and whole-struct writes in both clients | Designed in §17. **Done**; see §17.7. |
 | **9 — One ordered batch** | `RunBatch` carrying sets, gets and calls in order within one tick; deferred and immediate reads in both clients | Designed in §18. **Done**; see §18.3. |
 | **10 — Asset catalog** | cooked assets from the packaged build; `AssetRef[T]` typed by class; a generated catalog per mount point; drift reporting | Designed in §19. **Done**; see §19.5. |
-| **11 — One package per project** | a project's classes in its own client package and crate (`tempo_sample.UE`, `tempo_sample::ue`) rather than a `-classes` one beside it | §20. **Done.** |
+| **11 — One package per project** | a project's classes in its own client package and crate (`tempo_sample.types`, `tempo_sample::types`) rather than a `-classes` one beside it | §20. **Done.** |
 | **12 — Subsystems** | a `subsystem` address on the typed requests; `world.get_subsystem` in both clients | §21. **Done.** |
 
 ### Phase 0 results (measured)
@@ -1192,10 +1192,10 @@ granularity for that risk.
 | **7b** | per-entry hashes — `HashClass`/`HashStruct`/`HashEnum`, the three proto fields, the JSON writer; C++ unit tests | the §16.7 prerequisite. **Done.** |
 | **7b′** | **the build is the authority on members too** — `query_packaged_classes.py` reports its whole declared surface and `filter_schema.py` narrows to it | Not foreseen; see §16.10. **Done.** |
 | **7c** | per-entry `check_schema` in both clients; both registries become lists (§16.6) | needs 7b and 7b′. **Done.** |
-| **7d** | generate into `tempo_sim/UE/v5_8` (Python) | needs 7a. **Done.** |
-| **7e** | `tempo_sim::ue::v5_8` behind a `ue-5-8` cargo feature | needs 7d; the Rust half of §16.4 |
-| **7f** | re-export rather than redefine, in both generators (§16.5) | needs 7d and 7e |
-| **7g** | CI collects the per-version subset; a release wheel carrying 5.7 and 5.8; docs | |
+| **7d** | generate into `tempo_sim/UE/v5_8` (Python) — since renamed `tempo_sim.types` (§16.11) | needs 7a. **Done.** |
+| **7e** | the Rust half of §16.4 — as built, `tempo_sim::types` behind a `types` feature (§16.11) | needs 7d. **Done.** |
+| **7f** | re-export rather than redefine, in both generators (§16.5) | needs 7d and 7e. **Done**; see §16.11. |
+| **7g** | CI generates the published types for release; ~~a wheel carrying 5.7 and 5.8~~ (dropped, §16.11) | |
 
 7a through 7c stand on their own: the per-entry check is worth having before anything is published,
 and it is the one piece that cannot be added afterwards without changing a published package's
@@ -1230,6 +1230,71 @@ there is no `BlueprintSetter` for one, and writing such a property directly is h
 
 The invariant this buys is what makes a build-sourced hash honest: **the generated package declares
 nothing the build lacks.** A subset of what ships can address what ships; a superset cannot.
+
+### 16.11 As built: one namespace, latest engine only
+
+**No version in the path.** §16.4's `tempo_sim.UE.v5_8` put Tempo's own classes under an engine
+version, which reads wrong — they are Tempo's, not the engine's — and they cannot be moved out
+from under it either, because a Tempo class inherits from engine classes that differ per version:
+an unversioned `TempoLidar` stub has to derive from one particular version's `SceneComponent`, and
+Python stubs cannot choose a base by engine version. Rust could, through mutually exclusive
+features, but having the two languages disagree about what a path means was worse than the
+problem. So both carry **the newest supported engine's types only**, at one unversioned path:
+
+```python
+from tempo_sim.types.Engine import Pawn
+from tempo_sim.types.TempoSensors import TempoLidar
+```
+```rust
+use tempo_sim::types::classes::engine::Pawn;          // tempo-sim feature = "types"
+```
+
+The cost is that a client against an older engine is checked against the newest one's classes. A
+member or enumerator added since then type-checks and fails at its first use, loudly, with the
+server naming what it lacks; `check_schema` names every class that differs; and a project's own
+types, generated from its real build, are exact regardless. The 5.7/5.8 delta for the published
+modules has not been measured — no 5.7 schema has been generated yet — and 7g's two-version wheel is
+dropped. `types` rather than `UE` because the tree is what Unreal's reflection describes, Tempo's
+classes and a project's Blueprints included, not the engine's classes alone. The project's tree is
+renamed to match (§20).
+
+**Rust needed `extern crate self as tempo_sim`.** The generated code names the runtime as
+`::tempo_sim::unreal`, the path a project's crate knows it by; this file had claimed tempo-sim
+already declared the alias that makes the same path resolve inside tempo-sim, and it did not.
+`lib.rs` now does, and declares `types` behind the feature, off by default so an RPC-only client
+compiles none of it.
+
+**What "alike" means (7f).** Re-exporting needs more than an equal hash, which covers only what an
+entry declares. As built, in `gen_classes_common.shared_with`, an entry is shared when its hash
+matches, its superclass is the same and shared, and every struct and enum it mentions is shared —
+the subset omits a member whose struct or enum it does not carry, so without that rule a published
+class could declare less than the project's under the same hash. **The classes it mentions are not
+constrained**, and that took two wrong turns to establish:
+
+- Requiring them shared is the strictly correct closure, and useless: in TempoSample's build, 32
+  rerooted classes and 12 that mention an unpublished engine class (`TypedElementSelectionSet`,
+  `StaticMeshDescription`, the audio plugins' bases) spread through the reference graph to
+  **Actor, Pawn and every component**, leaving 1,287 of 1,730 shared and none that matter.
+- Requiring them merely published looked right — the subset types a member mentioning an absent
+  class as a bare `Object`, so the published class says less — and left 1,684 shared. The live
+  Rust suite then failed to compile its catalog test: `StaticMesh` is one of the twelve, so the
+  project defined its own, and the shared `StaticMeshComponent::set_static_mesh` took a
+  `StaticMesh` the project's asset catalog did not hand out. 194 cooked assets were typed as a
+  class that rule unshared.
+
+Unconstrained, **1,697 of 1,730 classes, all 264 structs and all 298 enums** are shared. The 33 left
+are rerooted classes deriving from plugins (Mass, Chaos vehicles, MovieScene); two members of
+shared classes mention one of them (`WidgetAnimation`) and hand back the published type, and no
+cooked asset is typed as one. The price is the dozen members typed `Object` in both packages where
+a project's own generation would have named the class.
+
+A re-exported entry is left out of the project's index, metadata and hash tables, so each class is
+registered exactly once, by the package that defines it; the project's Python `types/__init__`
+imports `tempo_sim.types` first, and its Rust table names the published one through a new defaulted
+`Hierarchy::depends_on`, which `register_classes` follows. In Rust a re-export sits at the path a
+definition would have, so every reference inside the project's tree — a `Deref` target, a
+component accessor, an `AssetRef<…>` — resolves to the published type without the generator having
+to know.
 
 ---
 
@@ -1596,16 +1661,15 @@ that already exists, under a namespace of their own. So the project's classes no
 package and crate, exactly as the published ones go into tempo-sim's:
 
 ```python
-from tempo_sample.UE.Game.Vehicles import BP_Cat745_C      # was tempo_sample_classes.Game.Vehicles
+from tempo_sample.types.Game.Vehicles import BP_Cat745_C   # was tempo_sample_classes.Game.Vehicles
 ```
 ```rust
-use tempo_sample::ue::classes::game::vehicles::BP_Cat745_C; // was tempo_sample_classes::classes::...
+use tempo_sample::types::classes::game::vehicles::BP_Cat745_C; // was tempo_sample_classes::...
 ```
 
 **A namespace, not the package root**, because a class module is named after its Unreal module and
-so is a proto module: `/Script/Greeter` would land on the `Greeter` protos. `UE` and `ue` mirror
-`tempo_sim.UE.v5_8` and `tempo_sim::ue::v5_8` without the version, since a project's package
-describes one build.
+so is a proto module: `/Script/Greeter` would land on the `Greeter` protos. Built as `UE`/`ue`, and
+renamed `types` in both languages with the published tree (§16.11), whose layout it mirrors.
 
 **Two pipelines, one package.** The wrappers are generated at build time and the classes at package
 time — they need the packaged build to filter against — and a project with no protos has no package

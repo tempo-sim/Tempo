@@ -5,7 +5,7 @@
 A project's `tempo-sample` package and crate are filled by two pipelines that run at different
 times. The RPC wrappers come from its protos, at build time (`gen_api.py`, `gen_rust_api.py`); the
 typed classes come from its reflection, at package time (`Scripts/GenTypedAPI.sh`), into
-`tempo_sample.UE` and `tempo_sample::ue`. Either can be the first to need the package -- a project
+`tempo_sample.types` and `tempo_sample::types`. Either can be the first to need the package -- a project
 with no protos has classes and nothing else -- so both write its manifest, `__init__`/`lib.rs` and
 `.gitignore` through here, and each file is derived from what is on disk rather than from what the
 caller happened to generate. The other pipeline's half is then never written out of it.
@@ -14,7 +14,7 @@ Standard library only, because GenTypedAPI.sh runs on whatever interpreter it fi
 
     gen_project_package.py python <project_root>   create the package, write its own files
     gen_project_package.py rust <project_root>     create the crate, write its own files
-    gen_project_package.py clear <project_root>    remove the typed classes from both
+    gen_project_package.py clear <project_root>    remove the generated types, published ones too
 """
 
 import json
@@ -26,11 +26,12 @@ from pathlib import Path
 
 from gen_naming import INFRA_PACKAGE, package_import_name, project_package_name
 
-# Where the typed classes go inside the project's package and crate, beside the proto modules.
-# One level down because a class module is named after its Unreal module, as a proto module is,
-# and `/Script/Greeter` would otherwise land on the `Greeter` protos.
-PYTHON_CLASSES = "UE"
-RUST_CLASSES = "ue"
+# Where the typed classes go inside the project's package and crate, beside the proto modules --
+# and where the published ones go inside tempo-sim's. One level down because a class module is
+# named after its Unreal module, as a proto module is, and `/Script/Greeter` would otherwise land
+# on the `Greeter` protos.
+PYTHON_CLASSES = "types"
+RUST_CLASSES = "types"
 
 PYTHON_METADATA_FILE = "project_info.json"
 RUST_METADATA_FILE = "crate_info.json"
@@ -262,9 +263,9 @@ def write_project_lib_rs(src_dir: Path):
     without separately depending on `tempo-sim`. Every other top-level `.rs` file is
     a service wrapper; gen_rust_api.py sweeps stale ones before calling this.
 
-    The classes sit behind a default feature: a crate that only wants the services can turn
+    The types sit behind a default feature: a crate that only wants the services can turn
     them off, and the prebuild's sanity build of the wrappers does, rather than compiling a
-    whole build's worth of classes it has no reason to check.
+    whole build's worth of types it has no reason to check.
     """
     wrappers = sorted(entry[:-len(".rs")] for entry in os.listdir(src_dir)
                       if entry.endswith(".rs") and entry not in ("lib.rs", "proto.rs"))
@@ -276,7 +277,7 @@ def write_project_lib_rs(src_dir: Path):
         "//!\n"
         "//! Re-exports the Tempo runtime helpers from `tempo_sim` and adds the\n"
         "//! project's own service wrappers and proto types, and the typed classes of its\n"
-        "//! build under `ue`.",
+        "//! build under `types`.",
     ]
     if _has_protos(src_dir):
         sections.append("pub mod proto;")
@@ -286,7 +287,7 @@ def write_project_lib_rs(src_dir: Path):
     if wrappers:
         sections.append("\n".join(f"pub mod {module};" for module in wrappers))
     if _has_classes(src_dir):
-        sections.append(f'#[cfg(feature = "ue")]\npub mod {RUST_CLASSES};')
+        sections.append(f'#[cfg(feature = "types")]\npub mod {RUST_CLASSES};')
     (src_dir / "lib.rs").write_text("\n\n".join(sections) + "\n", encoding="utf-8")
 
 
@@ -386,9 +387,10 @@ def write_project_cargo_toml(project_crate_dir: Path, crate_name: str, tempo_cra
         "]",
         "",
         "[features]",
-        "# The typed classes of this build (`ue`). On unless a crate asks for the services alone.",
-        'default = ["ue"]',
-        "ue = []",
+        "# The typed classes of this build (`types`). On unless a crate asks for the services alone.",
+        'default = ["types"]',
+        # Which re-export the published types they share, when tempo-sim has them.
+        'types = ["tempo-sim/types"]' if _has_classes(tempo_crate_dir / "src") else "types = []",
         "",
         "[dependencies]",
         tempo_sim_dep,
@@ -432,18 +434,23 @@ Cargo.toml
 # -- Both -----------------------------------------------------------------------------------------
 
 def clear_classes(project_root: Path):
-    """Remove the typed classes from the package and the crate, leaving the services.
+    """Remove the generated types -- the project's and the published ones -- leaving the services.
 
-    For a package run whose classes were not generated: classes an earlier run left describe a
+    For a package run whose types were not generated: types an earlier run left describe a
     different build, and a package that ships without them is better than one that ships those.
+    The published ones are cleared too, since they are generated in the same step and would ship
+    inside tempo-sim.
     """
     python_classes = (python_api_dir(project_root)
                       / package_import_name(project_package_name(project_root)) / PYTHON_CLASSES)
     shutil.rmtree(python_classes, ignore_errors=True)
+    shutil.rmtree(TEMPO_PYTHON_API / "tempo_sim" / PYTHON_CLASSES, ignore_errors=True)
+    shutil.rmtree(TEMPO_RUST_API / "src" / RUST_CLASSES, ignore_errors=True)
     src_dir = rust_crate_dir(project_root) / "src"
     if (src_dir / RUST_CLASSES).exists():
         shutil.rmtree(src_dir / RUST_CLASSES)
-        write_project_lib_rs(src_dir)
+    if (src_dir / "lib.rs").exists():
+        write_rust_crate(project_root)
 
 
 def main(argv):

@@ -73,13 +73,14 @@ mkdir -p "$CRATE_DIR/vendor"
 cp -r "$CRATE_SRC" "$CRATE_DIR/vendor/tempo-sim"
 
 if [ "$GROUP" = "typed" ]; then
-  # The project's own crate, which carries this build's generated classes as its `ue` module,
+  # The project's own crate, which carries this build's generated classes as its `types` module,
   # vendored under a fixed name. The crate is called after the host project (tempo-sample), and a
   # dependency has to be named at compile time, so the one `name =` line is rewritten rather than
-  # having every project fork the test crate.
+  # having every project fork the test crate. tempo-sim has a `types` of its own, the published
+  # ones, and is not it.
   CLASSES_SRC=""
   for candidate in "$PACKAGED_DIR"/API/Rust/*/; do
-    if [ -f "$candidate/src/ue/mod.rs" ]; then
+    if [ "$(basename "$candidate")" != "tempo-sim" ] && [ -f "$candidate/src/types/mod.rs" ]; then
       CLASSES_SRC="${candidate%/}"
       break
     fi
