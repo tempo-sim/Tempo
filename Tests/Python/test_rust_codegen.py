@@ -261,6 +261,15 @@ def test_the_asset_catalog_compiles(workspace):
 """) == []
 
 
+def test_a_subsystem_is_reached_by_its_class(workspace):
+    assert check(workspace, """
+    let subsystem: Widget = world::get_subsystem::<Widget>()?;
+    let enabled: bool = subsystem.b_enabled()?;
+    assert_eq!(subsystem.as_object().subsystem_class(), Widget::PATH);
+    assert_eq!(subsystem.as_object().actor_name(), "");
+""") == []
+
+
 def test_every_enumerator_has_a_variant(workspace):
     """Symbol-only enumerators are numbered, and names that mangle alike are all kept.
 

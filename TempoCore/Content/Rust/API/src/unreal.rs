@@ -209,23 +209,30 @@ string_ref!(ClassRef);
 /// What a handle addresses, and the class it was found to have.
 ///
 /// Addressed the way every `TempoWorld` RPC addresses things: an actor name, and a component name
-/// when the handle is to a component rather than to the actor itself.
+/// when the handle is to a component rather than to the actor itself -- or, for a subsystem, its
+/// class alone, since there is one per world (or game instance, or engine).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ObjectRef {
     actor: String,
     component: String,
+    subsystem: String,
     class_path: String,
 }
 
 impl ObjectRef {
     /// A handle to an actor.
     pub fn actor(name: impl Into<String>) -> Self {
-        Self { actor: name.into(), component: String::new(), class_path: String::new() }
+        Self { actor: name.into(), ..Self::default() }
     }
 
     /// A handle to one of an actor's components.
     pub fn component(actor: impl Into<String>, component: impl Into<String>) -> Self {
-        Self { actor: actor.into(), component: component.into(), class_path: String::new() }
+        Self { actor: actor.into(), component: component.into(), ..Self::default() }
+    }
+
+    /// A handle to a subsystem, by its class path. See [`crate::world::get_subsystem`].
+    pub fn subsystem(class_path: impl Into<String>) -> Self {
+        Self { subsystem: class_path.into(), ..Self::default() }
     }
 
     /// The same handle, recording the class the thing really has.
@@ -246,6 +253,11 @@ impl ObjectRef {
     /// The name of the component this handle addresses, or `""` for the actor itself.
     pub fn component_name(&self) -> &str {
         &self.component
+    }
+
+    /// The class of the subsystem this handle addresses, or `""` for an actor or a component.
+    pub fn subsystem_class(&self) -> &str {
+        &self.subsystem
     }
 
     /// The class the thing was found to have, or `""` when whoever built the handle did not know.
@@ -1112,7 +1124,9 @@ fn flush(queued: Vec<Queued>) -> Result<(), TempoError> {
 }
 
 fn where_of(object: &ObjectRef, member: &str) -> String {
-    if object.component.is_empty() {
+    if !object.subsystem.is_empty() {
+        format!("{}.{}", object.subsystem, member)
+    } else if object.component.is_empty() {
         format!("{}.{}", object.actor, member)
     } else {
         format!("{}:{}.{}", object.actor, object.component, member)
@@ -1127,6 +1141,7 @@ fn get_op(object: &ObjectRef, property: &str) -> (pb::BatchOp, String) {
                 component: object.component.clone(),
                 property: property.to_string(),
                 native_units: true,
+                subsystem: object.subsystem.clone(),
             })),
         },
         format!("read {}", where_of(object, property)),
@@ -1142,6 +1157,7 @@ fn call_op(object: &ObjectRef, function: &str, args: Vec<pb::FunctionArg>) -> (p
                 function: function.to_string(),
                 args,
                 native_units: true,
+                subsystem: object.subsystem.clone(),
             })),
         },
         format!("call {}", where_of(object, function)),
@@ -1176,6 +1192,7 @@ fn call_setter(
         function.to_string(),
         vec![pb::FunctionArg { name: argument.to_string(), value: Some(value) }],
         true,
+        object.subsystem.clone(),
     )?;
     Ok(())
 }
@@ -1192,6 +1209,7 @@ async fn call_setter_async(
         function.to_string(),
         vec![pb::FunctionArg { name: argument.to_string(), value: Some(value) }],
         true,
+        object.subsystem.clone(),
     )
     .await?;
     Ok(())
@@ -1225,6 +1243,7 @@ impl ObjectRef {
                 self.component.clone(),
                 property.to_string(),
                 true,
+                self.subsystem.clone(),
             )?)
         })
     }
@@ -1248,6 +1267,7 @@ impl ObjectRef {
                     function.to_string(),
                     args,
                     true,
+                    self.subsystem.clone(),
                 )?;
                 decode(returned(&response)?)
             },
@@ -1264,6 +1284,7 @@ impl ObjectRef {
             self.component.clone(),
             property.to_string(),
             true,
+            self.subsystem.clone(),
         );
         async move { T::from_value(&request.await?) }
     }
@@ -1284,6 +1305,7 @@ impl ObjectRef {
             getter.to_string(),
             Vec::new(),
             true,
+            self.subsystem.clone(),
         );
         async move { T::from_value(returned(&request.await?)?) }
     }
@@ -1296,6 +1318,7 @@ impl ObjectRef {
             property: property.to_string(),
             value: Some(value.to_value()),
             native_units: true,
+            subsystem: self.subsystem.clone(),
         };
         if batch_open() {
             enqueue(
@@ -1310,6 +1333,7 @@ impl ObjectRef {
             request.property,
             request.value.unwrap_or_default(),
             true,
+            request.subsystem,
         )?;
         Ok(())
     }
@@ -1329,6 +1353,7 @@ impl ObjectRef {
             property.to_string(),
             value.to_value(),
             true,
+            self.subsystem.clone(),
         );
         async move {
             request.await?;
@@ -1394,6 +1419,7 @@ impl ObjectRef {
             self.component.clone(),
             property.to_string(),
             true,
+            self.subsystem.clone(),
         );
         note_origin::<T>();
         async move { Ok(T::from_object(object_reference(&request.await?)?)) }
@@ -1424,6 +1450,7 @@ impl ObjectRef {
             self.component.clone(),
             property.to_string(),
             true,
+            self.subsystem.clone(),
         );
         async move {
             let value = request.await?;
@@ -1526,6 +1553,7 @@ impl ObjectRef {
             function.to_string(),
             args,
             true,
+            self.subsystem.clone(),
         );
         async move {
             request.await?;
@@ -1554,6 +1582,7 @@ impl ObjectRef {
             function.to_string(),
             args,
             true,
+            self.subsystem.clone(),
         );
         async move { T::from_value(returned(&request.await?)?) }
     }
@@ -1610,6 +1639,7 @@ impl ObjectRef {
             self.component.clone(),
             property.to_string(),
             true,
+            self.subsystem.clone(),
         )?;
         Ok(stream.map(|message| match message {
             Ok(value) => T::from_value(&value),
@@ -1802,6 +1832,7 @@ impl ObjectRef {
                 function.to_string(),
                 args,
                 true,
+                self.subsystem.clone(),
             )
         })
     }
@@ -1818,6 +1849,7 @@ impl ObjectRef {
             function.to_string(),
             args,
             true,
+            self.subsystem.clone(),
         )
     }
 }
@@ -1984,6 +2016,7 @@ impl ObjectRef {
             self.component.clone(),
             property.to_string(),
             true,
+            self.subsystem.clone(),
         );
         async move {
             let value = request.await?;

@@ -373,10 +373,11 @@ pub struct Call {
     function: String,
     args: Vec<{{ arg_type }}>,
     native_units: bool,
+    subsystem: String,
 }
 
 pub fn call(actor: String, component: String, function: String) -> Call {
-    Call { actor, component, function, args: Vec::new(), native_units: false }
+    Call { actor, component, function, args: Vec::new(), native_units: false, subsystem: String::new() }
 }
 
 impl Call {
@@ -385,6 +386,13 @@ impl Call {
     /// arguments; the rest are never converted either way.
     pub fn native_units(mut self, native_units: bool) -> Self {
         self.native_units = native_units;
+        self
+    }
+
+    /// Call the function on a subsystem rather than an actor: its class, by path or name. The
+    /// actor and component given to [`call`] must then be empty.
+    pub fn subsystem(mut self, subsystem: String) -> Self {
+        self.subsystem = subsystem;
         self
     }
 
@@ -431,6 +439,7 @@ impl Call {
             function: self.function,
             args: self.args,
             native_units: self.native_units,
+            subsystem: self.subsystem,
         };
         let response = client.call_function(request).await?;
         Ok(response.into_inner())
@@ -656,7 +665,7 @@ impl Call {
                 # check for one here: the alternative is an E0063 in generated Rust that points at
                 # the output instead of at this template.
                 call_request_desc = all_messages[call_rpc.request_type]
-                modelled_fields = {"actor", "component", "function", "args", "native_units"}
+                modelled_fields = {"actor", "component", "function", "args", "native_units", "subsystem"}
                 actual_fields = {field.name for field in call_request_desc.fields}
                 if actual_fields != modelled_fields:
                     raise Exception(

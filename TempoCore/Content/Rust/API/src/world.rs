@@ -131,6 +131,39 @@ pub async fn get_actor_async<T: Class>(name: &str) -> Result<T, TempoError> {
     Err(not_that_class(crate::tempo_world::get_all_actors_async().await?, name, T::PATH))
 }
 
+/// The subsystem of one class: a world, game instance, engine or local player subsystem, belonging
+/// to the sim's game world.
+///
+/// There is one of each, so the class is the whole address and there is no name to get wrong. The
+/// sim resolves it here rather than at first use, because a subsystem may decline to exist
+/// (`ShouldCreateSubsystem`) and that is better reported at the lookup. A class that is not a
+/// subsystem at all is refused the same way.
+pub fn get_subsystem<T: Class>() -> Result<T, TempoError> {
+    note_origin::<T>();
+    crate::tempo_world::get_properties(
+        String::new(),
+        String::new(),
+        Vec::new(),
+        true,
+        T::PATH.to_string(),
+    )?;
+    Ok(T::from_object(ObjectRef::subsystem(T::PATH).with_class(T::PATH)))
+}
+
+/// The subsystem of one class, without blocking.
+pub async fn get_subsystem_async<T: Class>() -> Result<T, TempoError> {
+    note_origin::<T>();
+    crate::tempo_world::get_properties_async(
+        String::new(),
+        String::new(),
+        Vec::new(),
+        true,
+        T::PATH.to_string(),
+    )
+    .await?;
+    Ok(T::from_object(ObjectRef::subsystem(T::PATH).with_class(T::PATH)))
+}
+
 fn matching<T: Class>(
     response: &crate::proto::tempo_world::GetAllActorsResponse,
     name: &str,

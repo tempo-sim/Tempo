@@ -301,3 +301,28 @@ fn a_catalog_asset_goes_through_a_typed_setter() {
     assert!(component.set_static_mesh(&Cube).expect("SetStaticMesh"));
     assert_eq!(component.static_mesh().expect("read StaticMesh"), Cube.clone());
 }
+
+#[test]
+fn a_subsystem_is_reached_by_its_class() {
+    use project::ue::classes::engine::ReplaySubsystem;
+    use project::ue::classes::tempo_agents::TempoAgentsWorldSubsystem;
+
+    connect();
+    // A world subsystem, read and written; there is one per world, so the class is the address.
+    let agents = world::get_subsystem::<TempoAgentsWorldSubsystem>().expect("get_subsystem");
+    let before = agents.brightness_meter_lateral_offset().expect("read");
+    agents.set_brightness_meter_lateral_offset(456.0).expect("write");
+    let after = agents.brightness_meter_lateral_offset().expect("read back");
+    agents.set_brightness_meter_lateral_offset(before).expect("restore");
+    assert_eq!(after, 456.0);
+
+    // A game instance subsystem, through a function.
+    let replay = world::get_subsystem::<ReplaySubsystem>().expect("get_subsystem");
+    assert!(!replay.is_playing().expect("IsPlaying"), "nothing is replaying in a test sim");
+}
+
+#[test]
+fn a_class_that_is_not_a_subsystem_fails_at_the_lookup() {
+    connect();
+    assert!(world::get_subsystem::<StaticMeshActor>().is_err());
+}

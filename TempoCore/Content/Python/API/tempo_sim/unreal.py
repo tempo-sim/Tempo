@@ -208,13 +208,16 @@ class Object:
     # than a name because two Blueprints in different folders can share a name.
     __tempo_class__ = "/Script/CoreUObject.Object"
 
-    __slots__ = ("_actor", "_component", "_class_path")
+    __slots__ = ("_actor", "_component", "_subsystem", "_class_path")
 
-    def __init__(self, actor: str = "", component: str = "", class_path: str = ""):
+    def __init__(self, actor: str = "", component: str = "", class_path: str = "",
+                 subsystem: str = ""):
         # Addressed the way every TempoWorld RPC addresses things: an actor name, and a component
-        # name when the handle is to a component rather than to the actor itself.
+        # name when the handle is to a component rather than to the actor itself -- or, for a
+        # subsystem, its class alone, since there is one per world (or game instance, or engine).
         object.__setattr__(self, "_actor", actor)
         object.__setattr__(self, "_component", component)
+        object.__setattr__(self, "_subsystem", subsystem)
         # The class the thing really has, where whoever built the handle knew it. A query for a base
         # class hands back handles typed as that base -- which is what lets the call site
         # type-check -- so the handle's own type is not the answer to what it points at.
@@ -230,9 +233,19 @@ class Object:
         """The name of the component this handle addresses, or "" for the actor itself."""
         return self._component
 
+    @property
+    def subsystem(self) -> str:
+        """The class of the subsystem this handle addresses, or "" for an actor or a component."""
+        return self._subsystem
+
+    def _target(self):
+        """This handle's address, as the request fields every TempoWorld RPC takes it in."""
+        if self._subsystem:
+            return {"subsystem": self._subsystem}
+        return {"actor": self._actor, "component": self._component}
+
     def __repr__(self) -> str:
-        where = "{}:{}".format(self._actor, self._component) if self._component else self._actor
-        return "{}({!r})".format(type(self).__name__, where)
+        return "{}({!r})".format(type(self).__name__, _describe(self._target()))
 
     def is_a(self, other) -> bool:
         """Whether the thing this handle addresses is `other`, or derives from it.
@@ -274,7 +287,7 @@ class Object:
         values = {}
         if wanted:
             response = _world().get_properties(
-                actor=self._actor, component=self._component, properties=wanted, native_units=True)
+                **self._target(), properties=wanted, native_units=True)
             for entry in response.values:
                 # An unreadable property does not fail the call; it simply is not in the snapshot,
                 # and a read of it falls through to the server to report why.
@@ -284,7 +297,7 @@ class Object:
         snapshots = getattr(_state, "snapshots", None)
         if snapshots is None:
             snapshots = _state.snapshots = {}
-        key = (self._actor, self._component)
+        key = _key(self._target())
         previous = snapshots.get(key)
         snapshots[key] = values
         try:
@@ -329,8 +342,8 @@ class Object:
             raise AttributeError(
                 "{}.{} cannot be watched: it is not readable as one value".format(
                     type(self).__name__, name))
-        for message in _world().stream_property(actor=self._actor, component=self._component,
-                                                property=name, native_units=True):
+        for message in _world().stream_property(**self._target(), property=name,
+                                                native_units=True):
             yield _from_value(message)
 
     def _property(self, name):
@@ -355,7 +368,7 @@ class Object:
         if member is not None:
             if _is_proxied(member):
                 return StructProxy(self, name, member["struct"])
-            return _read(self._actor, self._component, name)
+            return _read(self._target(), name)
 
         signature = _classes.find_function(type(self).__tempo_class__, name)
         if signature is not None:
@@ -390,7 +403,7 @@ class Object:
                     type(self).__name__, name))
         if not member.get("writable"):
             raise AttributeError("{}.{} is read-only".format(type(self).__name__, name))
-        _write(self._actor, self._component, name, member, value)
+        _write(self._target(), name, member, value)
 
 
 class _Package:
@@ -780,6 +793,9 @@ def _name_of(value):
     if isinstance(value, AssetRef):
         return value.path
     if isinstance(value, Object):
+        if value.subsystem:
+            raise TypeError("{!r} is a subsystem, which a reference property cannot hold".format(
+                value))
         return "{}:{}".format(value.actor, value.component) if value.component else value.actor
     if isinstance(value, type) and hasattr(value, "__tempo_class__"):
         # A generated class stands for the Unreal class it was generated from.
@@ -795,7 +811,7 @@ def value_of(value):
     Anything that is not a proxy is returned as it is.
     """
     if isinstance(value, StructProxy):
-        return _read(value._owner.actor, value._owner.component, value._address)
+        return _read(value._owner._target(), value._address)
     return value
 
 
@@ -1034,19 +1050,18 @@ class Batch:
     def _add(self, op, description, on_result=None):
         self._ops.append((op, description, on_result))
 
-    def add_write(self, actor, component, address, variant, value):
+    def add_write(self, target, address, variant, value):
         WorldControl = _worldcontrol()
         self._add(WorldControl.BatchOp(set=WorldControl.SetPropertyRequest(
-            actor=actor, component=component, property=address,
-            value=_to_value(variant, value), native_units=True)),
-            "write {}".format(_where(actor, component, address)))
+            **target, property=address, value=_to_value(variant, value), native_units=True)),
+            "write {}".format(_where(target, address)))
 
-    def add_call(self, actor, component, function, argument, variant, value):
+    def add_call(self, target, function, argument, variant, value):
         WorldControl = _worldcontrol()
         self._add(WorldControl.BatchOp(call=WorldControl.CallFunctionRequest(
-            actor=actor, component=component, function=function, native_units=True,
+            **target, function=function, native_units=True,
             args=[WorldControl.FunctionArg(name=argument, value=_to_value(variant, value))])),
-            "call {}".format(_where(actor, component, function)))
+            "call {}".format(_where(target, function)))
 
     def defer(self, op, description, decode):
         """Queue an op whose result something will want, and hand back where it will arrive."""
@@ -1129,14 +1144,28 @@ class Batch:
             raise first_failure
 
 
-def _where(actor, component, address):
-    return "{}:{}.{}".format(actor, component, address) if component else "{}.{}".format(actor, address)
+def _describe(target):
+    """A target as a person would name it: `Actor`, `Actor:Component` or a subsystem's class."""
+    if "subsystem" in target:
+        return target["subsystem"]
+    if target["component"]:
+        return "{}:{}".format(target["actor"], target["component"])
+    return target["actor"]
 
 
-def _read(actor, component, address):
+def _where(target, address):
+    return "{}.{}".format(_describe(target), address)
+
+
+def _key(target):
+    """A target as something a dict can be keyed by."""
+    return tuple(sorted(target.items()))
+
+
+def _read(target, address):
     # A snapshot serves reads for the handle that opened it, so a block reading several properties
     # costs one call rather than one per property.
-    cache = getattr(_state, "snapshots", {}).get((actor, component))
+    cache = getattr(_state, "snapshots", {}).get(_key(target))
     if cache is not None and address in cache:
         return cache[address]
 
@@ -1146,19 +1175,18 @@ def _read(actor, component, address):
         # of them -- a read that skipped the queue would report the value from before the batch.
         WorldControl = _worldcontrol()
         op = WorldControl.BatchOp(get=WorldControl.GetPropertyRequest(
-            actor=actor, component=component, property=address, native_units=True))
-        description = "read {}".format(_where(actor, component, address))
+            **target, property=address, native_units=True))
+        description = "read {}".format(_where(target, address))
         capture = getattr(_state, "capture", None)
         if capture is not None:
             capture.append(batch.defer(op, description, lambda result: _from_value(result.value)))
             return _PENDING
         return batch.run_now(op, description, lambda result: _from_value(result.value))
 
-    return _from_value(_world().get_property(
-        actor=actor, component=component, property=address, native_units=True))
+    return _from_value(_world().get_property(**target, property=address, native_units=True))
 
 
-def _write(actor, component, address, member, value):
+def _write(target, address, member, value):
     """Write one property, through its BlueprintSetter when it has one.
 
     Writing such a property directly would write its memory and skip the setter, which may be the
@@ -1174,24 +1202,23 @@ def _write(actor, component, address, member, value):
         # argument; a property whose setter could not be named is not writable at all.
         argument = member.get("setter_argument") or ""
         if batch is not None:
-            batch.add_call(actor, component, setter, argument, member["variant"], value)
+            batch.add_call(target, setter, argument, member["variant"], value)
         else:
-            _world().call_function(actor=actor, component=component, function=setter,
-                                   native_units=True,
+            _world().call_function(**target, function=setter, native_units=True,
                                    args=[{"name": argument,
                                           "value": _to_value(member["variant"], value)}])
         return
 
-    cache = getattr(_state, "snapshots", {}).get((actor, component))
+    cache = getattr(_state, "snapshots", {}).get(_key(target))
     if cache is not None:
         # The snapshot is now stale for this property; drop it rather than serve the old value.
         cache.pop(address, None)
 
     if batch is not None:
-        batch.add_write(actor, component, address, member["variant"], value)
+        batch.add_write(target, address, member["variant"], value)
         return
 
-    _world().set_property(actor=actor, component=component, property=address,
+    _world().set_property(**target, property=address,
                           value=_to_value(member["variant"], value), native_units=True)
 
 
@@ -1258,11 +1285,10 @@ class BoundFunction:
             # In order with whatever the batch has queued, exactly as a read is.
             WorldControl = _worldcontrol()
             op = WorldControl.BatchOp(call=WorldControl.CallFunctionRequest(
-                actor=self._owner.actor, component=self._owner.component, function=self._name,
-                native_units=True,
+                **self._owner._target(), function=self._name, native_units=True,
                 args=[WorldControl.FunctionArg(name=argument["name"], value=argument["value"])
                       for argument in arguments]))
-            description = "call {}".format(_where(self._owner.actor, self._owner.component, self._name))
+            description = "call {}".format(_where(self._owner._target(), self._name))
             signature = self._signature
 
             def decode(result):
@@ -1274,8 +1300,8 @@ class BoundFunction:
                 return _PENDING
             return batch.run_now(op, description, decode)
 
-        response = _world().call_function(actor=self._owner.actor, component=self._owner.component,
-                                          function=self._name, args=arguments, native_units=True)
+        response = _world().call_function(**self._owner._target(), function=self._name,
+                                          args=arguments, native_units=True)
         return _function_result(response, self._signature)
 
     def __repr__(self):
@@ -1330,7 +1356,7 @@ class StructProxy:
         address = "{}.{}".format(self._address, name)
         if _is_proxied(member):
             return StructProxy(self._owner, address, member["struct"])
-        return _read(self._owner.actor, self._owner.component, address)
+        return _read(self._owner._target(), address)
 
     def __setattr__(self, name, value):
         if name.startswith("_"):
@@ -1342,8 +1368,7 @@ class StructProxy:
                                 .format(self._struct, name))
         if not member.get("writable"):
             raise AttributeError("{!r}.{} is read-only".format(self._struct, name))
-        _write(self._owner.actor, self._owner.component,
-               "{}.{}".format(self._address, name), member, value)
+        _write(self._owner._target(), "{}.{}".format(self._address, name), member, value)
 
     def __repr__(self):
         return "{}({!r})".format(self._struct, self._address)

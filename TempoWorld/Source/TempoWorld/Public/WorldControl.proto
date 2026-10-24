@@ -389,6 +389,11 @@ message GetPropertyRequest {
   // radians, right-handed, with lengths in meters. True reports the property exactly as Unreal
   // stores it -- centimeters, degrees, left-handed -- with no conversion of any kind.
   bool native_units = 4;
+  // Addresses a subsystem rather than an actor: the class of a world, game-instance, engine or
+  // local-player subsystem, by path ("/Script/TempoAgents.TempoAgentsWorldSubsystem") or by name.
+  // The instance is the one belonging to the sim's game world (for a local-player subsystem, its
+  // first local player). When set, actor and component must be empty.
+  string subsystem = 5;
 }
 
 // Request several properties of one object in a single call. A property that cannot be read does
@@ -399,6 +404,8 @@ message GetPropertiesRequest {
   repeated string properties = 3;
   // As GetPropertyRequest.native_units, applied to every property in the request.
   bool native_units = 4;
+  // As GetPropertyRequest.subsystem.
+  string subsystem = 5;
 }
 
 // One property's value, or why it could not be read.
@@ -844,6 +851,8 @@ message SetPropertyRequest {
   // in radians, right-handed, with lengths in meters. True writes the value exactly as given, in
   // Unreal's own units -- centimeters, degrees, left-handed.
   bool native_units = 5;
+  // As GetPropertyRequest.subsystem.
+  string subsystem = 6;
 }
 
 // One argument to CallFunction.
@@ -866,6 +875,8 @@ message CallFunctionRequest {
   // As SetPropertyRequest.native_units, applied to every argument in the call. An argument is the
   // same Value a property takes, so it is converted by the same rules.
   bool native_units = 5;
+  // As GetPropertyRequest.subsystem.
+  string subsystem = 6;
 }
 
 // One value a function handed back: its return value or an out parameter.

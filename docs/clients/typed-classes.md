@@ -70,6 +70,23 @@ the server. It is a separate type so that giving up the guarantee is visible at 
     ([Naming](../concepts/naming.md)), so a hard-coded name is its own kind of drift. Discovery by
     type avoids the question.
 
+### Subsystems
+
+A subsystem — world, game instance, engine or local player — is found by its class alone, since
+there is one of each:
+
+```python
+from tempo_sample.UE.TempoAgents import TempoAgentsWorldSubsystem
+
+agents = world.get_subsystem(TempoAgentsWorldSubsystem)
+agents.BrightnessMeterLateralOffset = 450.0
+```
+
+The handle is like any other: properties, functions, snapshots and batches all work on it. The
+lookup asks the sim to resolve the subsystem, so one that declined to exist
+(`ShouldCreateSubsystem`), or a class that is not a subsystem at all, fails there rather than at
+first use. A local player subsystem is the first local player's.
+
 ## Reading and writing
 
 Attribute access is the API. Reading asks the server; assigning tells it.
@@ -311,6 +328,7 @@ does not exist rather than complaining about an assignment.
 | Deferred read | `b.get(lambda: truck.MaxSpeed)` | `world::defer(\|\| truck.max_speed())?` |
 | Streaming | `truck.watch("MaxSpeed")` — a string | `truck.watch_max_speed()?` — checked |
 | Escape hatch | `DynamicObject`, a separate type | `truck.0`, the handle underneath |
+| Subsystems | `world.get_subsystem(Cls)` | `world::get_subsystem::<Cls>()?` |
 
 The names are the one deliberate divergence. Python keeps Unreal's spelling so that one name works
 in the editor, the schema and the scenario; Rust uses the names a Rust programmer would guess. Both

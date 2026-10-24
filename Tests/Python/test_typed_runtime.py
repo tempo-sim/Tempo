@@ -75,12 +75,12 @@ def wire(monkeypatch):
 
     calls = {"reads": [], "writes": []}
 
-    def fake_read(actor, component, address):
-        calls["reads"].append((actor, component, address))
+    def fake_read(target, address):
+        calls["reads"].append((target["actor"], target["component"], address))
         return "read-back"
 
-    def fake_write(actor, component, address, member, value):
-        calls["writes"].append((actor, component, address, value))
+    def fake_write(target, address, member, value):
+        calls["writes"].append((target["actor"], target["component"], address, value))
 
     monkeypatch.setattr(unreal, "_read", fake_read)
     monkeypatch.setattr(unreal, "_write", fake_write)
@@ -103,6 +103,97 @@ def test_component_handles_carry_their_component(classes, wire):
     widget = classes.Widget("MyActor", "Mesh")
     widget.bEnabled = False
     assert wire["writes"] == [("MyActor", "Mesh", "bEnabled", False)]
+
+
+@pytest.fixture
+def requests(monkeypatch, classes):
+    """Every request the runtime builds, as the keyword arguments it hands the generated client."""
+    import tempo_sim.unreal as unreal
+    import tempo_sim.TempoWorld.WorldControl_pb2 as WorldControl
+
+    sent = []
+
+    class FakeWorld:
+        @staticmethod
+        def get_property(**kwargs):
+            sent.append(("get_property", kwargs))
+            return WorldControl.Value(bool_value=True)
+
+        @staticmethod
+        def get_properties(**kwargs):
+            sent.append(("get_properties", kwargs))
+
+            class Response:
+                values = []
+            return Response()
+
+        @staticmethod
+        def set_property(**kwargs):
+            sent.append(("set_property", kwargs))
+
+        @staticmethod
+        def call_function(**kwargs):
+            sent.append(("call_function", kwargs))
+
+            class Response:
+                results = []
+            return Response()
+
+        @staticmethod
+        def run_batch(ops, stop_on_failure):
+            sent.append(("run_batch", list(ops)))
+
+            class Response:
+                results = [WorldControl.BatchOpResult() for _ in ops]
+            return Response()
+
+    monkeypatch.setattr(unreal, "_world", lambda: FakeWorld)
+    import tempo_sim.world as world
+    monkeypatch.setattr(world, "_world", lambda: FakeWorld)
+    return sent
+
+
+def test_a_subsystem_is_addressed_by_its_class_alone(classes, requests):
+    subsystem = classes.Widget(subsystem="/Script/Engine.Widget")
+    assert subsystem.bEnabled is True
+    subsystem.bEnabled = False
+    subsystem.Refresh()
+    for _, kwargs in requests:
+        assert kwargs["subsystem"] == "/Script/Engine.Widget"
+        # Not merely empty: a subsystem request names no actor, so the server cannot mistake it.
+        assert "actor" not in kwargs and "component" not in kwargs
+    assert [name for name, _ in requests] == ["get_property", "set_property", "call_function"]
+
+
+def test_a_batched_subsystem_op_carries_the_subsystem(classes, requests):
+    from tempo_sim import world
+
+    subsystem = classes.Widget(subsystem="/Script/Engine.Widget")
+    with world.batch():
+        subsystem.bEnabled = True
+        subsystem.Refresh()
+    (_, ops), = requests
+    assert [op.set.subsystem or op.call.subsystem for op in ops] == ["/Script/Engine.Widget"] * 2
+    assert all(not (op.set.actor or op.call.actor) for op in ops)
+
+
+def test_get_subsystem_resolves_it_and_types_the_handle(classes, requests):
+    from tempo_sim import world
+
+    subsystem = world.get_subsystem(classes.Widget)
+    assert isinstance(subsystem, classes.Widget)
+    assert subsystem.subsystem == classes.Widget.__tempo_class__
+    # Asked once, up front, so a subsystem that declined to exist fails at the lookup.
+    assert requests == [("get_properties", {"subsystem": classes.Widget.__tempo_class__,
+                                            "properties": [], "native_units": True})]
+
+
+def test_a_subsystem_cannot_be_held_by_a_reference_property(classes):
+    import tempo_sim.unreal as unreal
+
+    subsystem = classes.Widget(subsystem="/Script/Engine.Widget")
+    with pytest.raises(TypeError, match="subsystem"):
+        unreal._to_value("actor_value", subsystem)
 
 
 def test_unknown_property_suggests_a_near_miss(classes, wire):

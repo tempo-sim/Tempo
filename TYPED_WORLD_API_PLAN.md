@@ -728,6 +728,7 @@ an empty subscription map, so a project that never streams pays nothing measurab
 | **9 — One ordered batch** | `RunBatch` carrying sets, gets and calls in order within one tick; deferred and immediate reads in both clients | Designed in §18. **Done**; see §18.3. |
 | **10 — Asset catalog** | cooked assets from the packaged build; `AssetRef[T]` typed by class; a generated catalog per mount point; drift reporting | Designed in §19. **Done**; see §19.5. |
 | **11 — One package per project** | a project's classes in its own client package and crate (`tempo_sample.UE`, `tempo_sample::ue`) rather than a `-classes` one beside it | §20. **Done.** |
+| **12 — Subsystems** | a `subsystem` address on the typed requests; `world.get_subsystem` in both clients | §21. **Done.** |
 
 ### Phase 0 results (measured)
 
@@ -1638,4 +1639,34 @@ equivalent, being lazy.
 - *A failed or skipped generation would have shipped stale classes*, now that they live in a source
   tree rather than a staging directory that was simply not built. `Package.sh` clears them
   (`gen_project_package.py clear`) in both cases: absent beats wrong.
+
+## 21. Subsystems
+
+Phase 12. The schema already had the subsystem classes — 114 of them in TempoSample's build, with
+their properties and functions generated like any class's — and nothing could reach one, because
+every typed request addressed an actor and optionally a component. A subsystem is neither.
+
+**The address is the class.** There is one subsystem of each class per owner, so `GetPropertyRequest`,
+`GetPropertiesRequest`, `SetPropertyRequest` and `CallFunctionRequest` (and with them
+`StreamProperty` and every `RunBatch` op) gain a `subsystem` field naming it, by path or name, with
+`actor` and `component` left empty. The server resolves it in the one place every typed request is
+resolved, `GetObjectForName`, by the kind of subsystem: the world's own, its game instance's, the
+engine's, or its first local player's. A lookup by base class finds a derived subsystem, which is
+Unreal's own rule. The older per-type `Set*PropertyRequest`s do not carry the field, and a C++20
+`requires` keeps the shared resolver compiling for them.
+
+**Clients.** A handle carries one target instead of an actor/component pair — the Python runtime
+threads `{"actor", "component"}` or `{"subsystem"}` through every request it builds, and Rust's
+`ObjectRef` gains the field — and the entry points are `world.get_subsystem(Cls)` and
+`world::get_subsystem::<Cls>()`. Each asks the sim once, with an empty `GetProperties`, so a
+subsystem that declined to exist (`ShouldCreateSubsystem`), or a class that is not a subsystem at
+all, fails at the lookup rather than at first use. Neither client checks the class itself: the
+server already refuses one that is not a `USubsystem` and says so, and a second opinion could only
+disagree with it. A subsystem cannot be the value of a reference property — those name an actor or
+component — which Rust's types already rule out and Python refuses at run time.
+
+**What it costs.** A new field on `SetPropertyRequest` and `CallFunctionRequest`, which predate this
+branch, adds a trailing positional parameter to their generated Rust wrappers (`set_property`,
+`call_function`). Python's wrappers take keywords and are unaffected; the Rust `Call` builder keeps
+its `call(actor, component, function)` and gains a `.subsystem(...)` method.
 

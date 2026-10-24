@@ -207,6 +207,7 @@ protected:
 	{
 		FString Actor;
 		FString Component;
+		FString Subsystem;
 		FString Property;
 		bool bNativeUnits = false;
 		TArray<TResponseDelegate<TempoWorld::Value>> Continuations;

@@ -386,6 +386,24 @@ tempo_world.set_property(actor="MyActor", component="Mesh", property="BodyInstan
 - `struct_name` is checked: writing an `FHitResult` into an `FBodyInstance` property fails. Leave it
   empty to skip the check.
 
+### Subsystems
+
+`get_property`, `get_properties`, `stream_property`, `set_property` and `call_function` — and so
+the ops in a `run_batch` — can address a subsystem instead of an actor: give `subsystem`, its class
+by path or name, and leave `actor` and `component` empty. The instance is the one belonging to the
+sim's game world: its own for a world subsystem, its game instance's, the engine's, or its first
+local player's.
+
+```python
+offset = tempo_world.get_property(subsystem="/Script/TempoAgents.TempoAgentsWorldSubsystem",
+                                  property="BrightnessMeterLateralOffset", native_units=True)
+playing = tempo_world.call_function(subsystem="/Script/Engine.ReplaySubsystem", function="IsPlaying")
+```
+
+A class that is not a subsystem, or a subsystem that does not exist in this world, is `NOT_FOUND`;
+naming an actor as well is `FAILED_PRECONDITION`. The older per-type `set_*_property` RPCs address
+actors only.
+
 ### Running several operations in order
 
 `run_batch` carries property writes, property reads and function calls together, each the same
@@ -515,7 +533,9 @@ with one `*_arg` method per supported type:
         .execute();
     ```
 
-`execute_async` is available for `await` in Python and Rust. Each `*_arg` method takes the same
+`execute_async` is available for `await` in Python and Rust. In Rust, `.subsystem(...)` on the
+builder addresses a [subsystem](#subsystems) instead, with the actor and component left empty. Each
+`*_arg` method takes the same
 arguments as the corresponding `set_*_property` function, minus the property name — so
 `vector_arg` takes `x`/`y`/`z` and `transform_arg` takes a whole `Transform`. The same conversion
 caveats apply.

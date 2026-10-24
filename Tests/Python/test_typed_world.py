@@ -705,6 +705,100 @@ def ticking(sim_server):
 
 
 
+# -- subsystems -----------------------------------------------------------------------------------
+#
+# One of each kind the server knows the owner of, all in every build: a world subsystem with
+# properties (TempoAgents' own), a game instance subsystem with a function (the engine's replay
+# subsystem), and an engine subsystem (UMG's viewport one), which is only resolved.
+
+WORLD_SUBSYSTEM = "/Script/TempoAgents.TempoAgentsWorldSubsystem"
+GAME_INSTANCE_SUBSYSTEM = "/Script/Engine.ReplaySubsystem"
+ENGINE_SUBSYSTEM = "/Script/UMG.GameViewportSubsystem"
+
+
+def test_a_world_subsystem_property_round_trips(sim_server):
+    offset = "BrightnessMeterLateralOffset"
+    before = tw.get_property(subsystem=WORLD_SUBSYSTEM, property=offset, native_units=True)
+    try:
+        tw.set_property(subsystem=WORLD_SUBSYSTEM, property=offset,
+                        value=WorldControl.Value(float_value=321.0), native_units=True)
+        read = tw.get_property(subsystem=WORLD_SUBSYSTEM, property=offset, native_units=True)
+        assert read.float_value == pytest.approx(321.0)
+    finally:
+        tw.set_property(subsystem=WORLD_SUBSYSTEM, property=offset, value=before, native_units=True)
+
+
+def test_a_game_instance_subsystem_function_is_callable(sim_server):
+    response = tw.call_function(subsystem=GAME_INSTANCE_SUBSYSTEM, function="IsPlaying",
+                                native_units=True)
+    returned = next(r for r in response.results if r.name == "ReturnValue")
+    assert returned.typed_value.bool_value is False, "nothing is replaying in a test sim"
+
+
+def test_an_engine_subsystem_resolves(sim_server):
+    response = tw.get_properties(subsystem=ENGINE_SUBSYSTEM, properties=[])
+    assert list(response.values) == []
+
+
+def test_a_batch_addresses_a_subsystem(sim_server):
+    offset = "BrightnessMeterLateralOffset"
+    before = tw.get_property(subsystem=WORLD_SUBSYSTEM, property=offset, native_units=True)
+    try:
+        response = tw.run_batch(ops=[
+            WorldControl.BatchOp(set=WorldControl.SetPropertyRequest(
+                subsystem=WORLD_SUBSYSTEM, property=offset,
+                value=WorldControl.Value(float_value=123.0), native_units=True)),
+            WorldControl.BatchOp(get=WorldControl.GetPropertyRequest(
+                subsystem=WORLD_SUBSYSTEM, property=offset, native_units=True)),
+        ])
+        assert [result.code for result in response.results] == [0, 0]
+        assert response.results[1].value.float_value == pytest.approx(123.0)
+    finally:
+        tw.set_property(subsystem=WORLD_SUBSYSTEM, property=offset, value=before, native_units=True)
+
+
+def test_a_class_that_is_not_a_subsystem_is_not_found(sim_server):
+    import grpc
+    with pytest.raises(grpc.RpcError) as caught:
+        tw.get_properties(subsystem=SPAWNABLE, properties=[])
+    assert caught.value.code() == grpc.StatusCode.NOT_FOUND
+    assert "USubsystem" in caught.value.details()
+
+
+def test_a_subsystem_is_addressed_on_its_own(actor):
+    import grpc
+    with pytest.raises(grpc.RpcError) as caught:
+        tw.get_properties(actor=actor, subsystem=WORLD_SUBSYSTEM, properties=[])
+    assert caught.value.code() == grpc.StatusCode.FAILED_PRECONDITION
+
+
+@requires_classes
+def test_a_typed_subsystem_reads_writes_and_calls(sim_server):
+    WorldSubsystem = registered().python_class(WORLD_SUBSYSTEM)
+    agents = world.get_subsystem(WorldSubsystem)
+    before = agents.BrightnessMeterLateralOffset
+    try:
+        agents.BrightnessMeterLateralOffset = 456.0
+        assert agents.BrightnessMeterLateralOffset == pytest.approx(456.0)
+        with world.batch() as b:
+            agents.BrightnessMeterLateralOffset = 654.0
+            read = b.get(lambda: agents.BrightnessMeterLateralOffset)
+        assert read.value == pytest.approx(654.0)
+    finally:
+        agents.BrightnessMeterLateralOffset = before
+
+    Replay = registered().python_class(GAME_INSTANCE_SUBSYSTEM)
+    assert world.get_subsystem(Replay).IsPlaying() is False
+
+
+@requires_classes
+def test_a_non_subsystem_class_fails_at_the_lookup(sim_server):
+    import grpc
+    StaticMeshActor = registered().python_class(SPAWNABLE)
+    with pytest.raises(grpc.RpcError):
+        world.get_subsystem(StaticMeshActor)
+
+
 def test_actors_of_class_filters_server_side(actor):
     """Only the actors asked for, rather than every actor for the client to discard."""
     response = tw.get_actors_of_class(actor_type=SPAWNABLE, include_subclasses=True)

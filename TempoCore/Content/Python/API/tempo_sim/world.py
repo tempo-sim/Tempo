@@ -118,6 +118,21 @@ def get_actor(name: str, cls: Optional[type] = None) -> Any:
     raise LookupError("no actor named {!r}".format(name))
 
 
+def get_subsystem(cls: type[T]) -> T:
+    """The subsystem of one class: a world, game instance, engine or local player subsystem,
+    belonging to the sim's game world.
+
+        labeler = world.get_subsystem(TempoActorLabeler)
+
+    There is one of each, so the class is the whole address and there is no name to get wrong. The
+    sim resolves it here rather than at first use, because a subsystem may decline to exist
+    (`ShouldCreateSubsystem`) and that is better reported at the lookup. A class that is not a
+    subsystem at all is refused the same way.
+    """
+    _world().get_properties(subsystem=cls.__tempo_class__, properties=[], native_units=True)
+    return cls(subsystem=cls.__tempo_class__, class_path=cls.__tempo_class__)
+
+
 def spawn_actor(cls: type[T], transform: Optional[Transform] = None,
                 relative_to: str = "") -> T:
     """Spawn one actor of a class and return a handle to it.

@@ -175,6 +175,9 @@ fails under Pyright instead of at runtime. See `TYPED_WORLD_API_PLAN.md`.
   `assets`, less redirectors, Blueprints and World Partition's generated packages; both generators
   emit an `assets` module per mount point, with `AssetRef` typed by class. An editor's registry
   lists what the cook dropped, so a schema not narrowed against a build has no catalog at all.
+- **A subsystem is addressed by its class.** The typed requests carry `subsystem` as an alternative
+  to `actor`/`component`, resolved in `GetObjectForName` by the kind of subsystem (world, game
+  instance, engine, first local player); the clients' entry point is `world.get_subsystem`.
 - **`diff_schema.py`** reports release-to-release drift and exits non-zero on anything breaking.
 - **Drift is checked per entry, not per build.** Each class, struct and enum carries its own hash
   (`HashClass`/`HashStruct`/`HashEnum`; the header's whole-walk number is those folded together), and

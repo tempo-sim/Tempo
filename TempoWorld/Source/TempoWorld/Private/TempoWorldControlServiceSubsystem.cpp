@@ -18,6 +18,12 @@
 
 #include "EngineUtils.h"
 #include "Engine/EngineTypes.h"
+#include "Engine/GameInstance.h"
+#include "Engine/LocalPlayer.h"
+#include "Subsystems/EngineSubsystem.h"
+#include "Subsystems/GameInstanceSubsystem.h"
+#include "Subsystems/LocalPlayerSubsystem.h"
+#include "Subsystems/WorldSubsystem.h"
 #include "Engine/LatentActionManager.h"
 #include "Misc/ScopeExit.h"
 #if WITH_EDITOR
@@ -1352,9 +1358,72 @@ void UTempoWorldControlServiceSubsystem::DeactivateComponent(const DeactivateCom
 	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status_OK);
 }
 
-grpc::Status GetObjectForName(const UWorld* World, const FString& ActorName,
-	const FString& ComponentName, UObject*& Object)
+// The instance of a subsystem class that belongs to this world, wherever that class keeps one. Each
+// kind of subsystem has its own owner -- the world, its game instance, the engine, a local player --
+// and a lookup by base class finds a derived one, so asking for an abstract base is fine too.
+grpc::Status GetSubsystemForName(const UWorld* World, const FString& SubsystemName, UObject*& Object)
 {
+	UClass* Class = GetSubClassWithName<USubsystem>(SubsystemName);
+	if (!Class)
+	{
+		const FString ErrorMsg = FString::Printf(TEXT("No subsystem class '%s' found (must be a subclass of USubsystem)"), *SubsystemName);
+		return grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+	}
+
+	USubsystem* Subsystem = nullptr;
+	if (Class->IsChildOf<UWorldSubsystem>())
+	{
+		Subsystem = World->GetSubsystemBase(Class);
+	}
+	else if (Class->IsChildOf<UGameInstanceSubsystem>())
+	{
+		if (const UGameInstance* GameInstance = World->GetGameInstance())
+		{
+			Subsystem = GameInstance->GetSubsystemBase(Class);
+		}
+	}
+	else if (Class->IsChildOf<UEngineSubsystem>())
+	{
+		Subsystem = GEngine ? GEngine->GetEngineSubsystemBase(Class) : nullptr;
+	}
+	else if (Class->IsChildOf<ULocalPlayerSubsystem>())
+	{
+		const UGameInstance* GameInstance = World->GetGameInstance();
+		if (const ULocalPlayer* LocalPlayer = GameInstance ? GameInstance->GetFirstGamePlayer() : nullptr)
+		{
+			Subsystem = LocalPlayer->GetSubsystemBase(Class);
+		}
+	}
+	else
+	{
+		// An editor subsystem, or a kind this does not know the owner of.
+		const FString ErrorMsg = FString::Printf(TEXT("'%s' is not a world, game instance, engine or local player subsystem"), *SubsystemName);
+		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+	}
+
+	if (!Subsystem)
+	{
+		// A subsystem can decline to exist (ShouldCreateSubsystem), so a real class is no promise.
+		const FString ErrorMsg = FString::Printf(TEXT("No '%s' subsystem exists in this world"), *SubsystemName);
+		return grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+	}
+
+	Object = Subsystem;
+	return grpc::Status_OK;
+}
+
+grpc::Status GetObjectForName(const UWorld* World, const FString& ActorName,
+	const FString& ComponentName, const FString& SubsystemName, UObject*& Object)
+{
+	if (!SubsystemName.IsEmpty())
+	{
+		if (!ActorName.IsEmpty() || !ComponentName.IsEmpty())
+		{
+			return grpc::Status(grpc::FAILED_PRECONDITION, "a subsystem is addressed on its own, without an actor or component");
+		}
+		return GetSubsystemForName(World, SubsystemName, Object);
+	}
+
 	if (ActorName.IsEmpty())
 	{
 		return grpc::Status(grpc::FAILED_PRECONDITION, "actor must be specified");
@@ -1387,12 +1456,18 @@ grpc::Status GetObjectForName(const UWorld* World, const FString& ActorName,
 	return grpc::Status_OK;
 }
 
-// Every RPC here addresses an object the same way, by actor name and an optional component name.
+// Every RPC here addresses an object the same way: by actor name and an optional component name, or
+// -- for the typed requests, which carry the field -- by subsystem class instead.
 template <typename RequestType>
 grpc::Status GetObjectForRequest(const UWorld* World, const RequestType& Request, UObject*& Object)
 {
+	FString SubsystemName;
+	if constexpr (requires { Request.subsystem(); })
+	{
+		SubsystemName = FString(UTF8_TO_TCHAR(Request.subsystem().c_str()));
+	}
 	return GetObjectForName(World, FString(UTF8_TO_TCHAR(Request.actor().c_str())),
-		FString(UTF8_TO_TCHAR(Request.component().c_str())), Object);
+		FString(UTF8_TO_TCHAR(Request.component().c_str())), SubsystemName, Object);
 }
 
 void MarkRenderStateDirty(UObject* Object)
@@ -2651,11 +2726,13 @@ void UTempoWorldControlServiceSubsystem::StreamProperty(const GetPropertyRequest
 	FPropertySubscription Subscription;
 	Subscription.Actor = FString(UTF8_TO_TCHAR(Request.actor().c_str()));
 	Subscription.Component = FString(UTF8_TO_TCHAR(Request.component().c_str()));
+	Subscription.Subsystem = FString(UTF8_TO_TCHAR(Request.subsystem().c_str()));
 	Subscription.Property = FString(UTF8_TO_TCHAR(Request.property().c_str()));
 	Subscription.bNativeUnits = Request.native_units();
 
-	const FString Key = FString::Printf(TEXT("%s/%s/%s/%d"), *Subscription.Actor,
-		*Subscription.Component, *Subscription.Property, Subscription.bNativeUnits ? 1 : 0);
+	const FString Key = FString::Printf(TEXT("%s/%s/%s/%s/%d"), *Subscription.Actor,
+		*Subscription.Component, *Subscription.Subsystem, *Subscription.Property,
+		Subscription.bNativeUnits ? 1 : 0);
 
 	FPropertySubscription& Existing = PendingPropertyRequests.FindOrAdd(Key, MoveTemp(Subscription));
 	Existing.Continuations.Add(ResponseContinuation);
@@ -2679,7 +2756,8 @@ void UTempoWorldControlServiceSubsystem::Tick(float DeltaTime)
 		// Resolved every tick rather than held: an actor can be destroyed and replaced under the
 		// same name, and a handle cached here would quietly address the dead one.
 		UObject* Object = nullptr;
-		grpc::Status Status = GetObjectForName(World, Subscription.Actor, Subscription.Component, Object);
+		grpc::Status Status = GetObjectForName(World, Subscription.Actor, Subscription.Component,
+			Subscription.Subsystem, Object);
 
 		PropertyValue Value;
 		if (Status.ok())
