@@ -722,6 +722,9 @@ an empty subscription map, so a project that never streams pays nothing measurab
 | **5 — Rust** | `gen_rust_classes.py` + a `tempo_sim::unreal` runtime, off the same `tempo_schema.json` | Designed and measured in §15. |
 | **6 — C++** | generator off the same `tempo_schema.json` | Not started. |
 | **7 — Published classes** | an engine-core + Tempo subset inside the published `tempo-sim` wheel and crate, namespaced by engine version; per-class drift checking | Designed and measured in §16. Independent of 6. |
+| **8 — Struct values** | a `StructValue` variant; value-expressible structs in the classifier; struct arguments, results and whole-struct writes in both clients | Designed in §17. A quarter of the function surface needs it. |
+| **9 — One ordered batch** | `RunBatch` carrying sets, gets and calls in order within one tick; deferred and immediate reads in both clients | Designed in §18. Fixes reads inside a batch seeing pre-batch values. |
+| **10 — Asset catalog** | cooked assets from the packaged build; `AssetRef[T]` typed by class; a generated catalog per mount point; drift reporting | Designed in §19. |
 
 ### Phase 0 results (measured)
 
@@ -1223,3 +1226,259 @@ there is no `BlueprintSetter` for one, and writing such a property directly is h
 
 The invariant this buys is what makes a build-sourced hash honest: **the generated package declares
 nothing the build lacks.** A subset of what ships can address what ships; a superset cannot.
+
+---
+
+## 17. Struct values
+
+Phase 8. Everything above reaches an arbitrary `USTRUCT` a member at a time, by nested address
+(`PostProcessSettings.BloomIntensity`), and never as one value — `IsValueExpressible` has said
+`false` for `EValueKind::Struct` since §3a, because a `Value` had no variant to carry one. That was
+survivable for properties, which a `StructProxy` reaches into, and not for functions: a parameter
+cannot be supplied a member at a time through a generated signature, so **a function with a struct
+input or a struct result was not offered at all**. Measured on TempoSample's editor walk, that is
+**4,840 of 19,083 Blueprint-callable functions** — 3,797 with a struct input, 1,878 with a struct out
+parameter or return value. A quarter of the function surface, and the quarter that includes
+`LineTraceSingle`'s `FHitResult`.
+
+### 17.1 The wire
+
+```proto
+message StructValue {
+  string struct_name = 1;          // "FHitResult" -- the schema's name for it; empty accepts any
+  map<string, Value> fields = 2;   // by authored member name
+}
+message StructArray { repeated StructValue values = 1; }
+
+// in Value's oneof:
+StructValue struct_value = 39;
+StructArray struct_array_value = 40;
+```
+
+Recursive — a field is a `Value`, which may be another `StructValue` — so a struct of structs needs
+nothing further. Keyed by **authored** name, because that is what a nested address already resolves
+a member by and what the schema reports for struct members (a Blueprint struct's internal names look
+like `BandThickness_26_54B1BF…`). Arrays of structs get a variant; sets of structs do not, because a
+`TSet` of a `USTRUCT` needs a hash function reflection cannot see and is rare enough in Blueprint-facing
+code not to justify one.
+
+`struct_name` is checked against the destination on a write, exactly as the first-class struct
+variants check theirs (`SetStructOnTarget` refuses an `FVector` into an `FRotator`). It is the CPP
+name, which is what the schema keys struct entries by.
+
+### 17.2 A write is a merge, not a replacement
+
+**Only the fields present are written.** The others keep whatever the destination already holds —
+its current value for a property, its default-constructed value for a function parameter, whose
+frame is initialized before any argument is written.
+
+That is the choice that makes a struct value safe to round-trip. A replacement would reset every
+member the client did not mention, and a client is never in a position to mention all of them: a
+struct can carry members the generated type does not declare, and native state that reflection does
+not see at all (`FKey`'s cached `KeyDetails`). Under a merge neither can be clobbered, and the
+semantics are the ones the nested-address write has always had — a `StructValue` with one field is
+exactly `SetProperty("Settings.Scale", …)`, and is implemented as that, member by member through
+`SetValueOnTarget`, so a struct member is converted, range-checked and type-matched by the same code
+as any other property.
+
+### 17.3 Which structs are value-expressible
+
+**A struct is value-expressible when every one of its reflected members is**, recursively, and it has
+at least one. A struct with a map, a weak pointer, a C-style array or a delegate among its members
+is not, and stays reachable a member at a time exactly as before.
+
+The rule is over **all** members, not the Blueprint-visible ones. A read reports every member, so a
+struct value is the whole struct as reflection knows it; a struct with an inexpressible member would
+come back with a hole in it, and a value that silently omits part of the thing it claims to be is the
+§9.4 failure in a new place. A struct with no members at all is excluded for the same reason from
+the other side: whatever it holds, reflection does not report it.
+
+The decision lives in the classifier (`IsValueExpressible`), so the schema's `value_expressible`, the
+function's `positional`, `GetProperty`, `SetProperty` and `CallFunction` all change together — that
+was the point of §3a. A struct property that becomes value-expressible also becomes `writable`, which
+changes the hash of every class declaring one; that is the schema honestly describing a new
+capability, not drift.
+
+Native structs are cached, keyed by `UScriptStruct*`, because a struct check walks members and the
+classifier runs on every read. A `UUserDefinedStruct` is not cached: it can be recompiled under the
+same pointer in an editor.
+
+### 17.4 Struct members include inherited ones
+
+The schema walk enumerated struct members with `EFieldIterationFlags::None`, which is **declared
+members only** — right for classes, where inheritance is reconstructed from `super`, and wrong for
+structs, which carry no `super` in the schema at all. `FVector_NetQuantize` derives from `FVector`, so
+it declared nothing and was emitted as an empty proxy. Struct entries now include inherited members.
+
+### 17.5 The clients
+
+The generated struct type becomes a **value type** as well as the proxy's static type:
+
+```python
+moved = truck.K2_SetActorLocation(NewLocation=target, bSweep=True, bTeleport=False)
+hit = moved["SweepHitResult"]                            # FHitResult: a value, newly offered
+print(hit.ImpactPoint.X, hit.bBlockingHit)
+
+truck.PostProcessSettings.BloomIntensity = 2.0           # unchanged: a live handle, by address
+truck.WheelSetup = FWheelSetup(WheelClass=Wheel, BoneName="FL")   # new: one write, merged
+```
+
+Reading a struct property still returns the proxy, because `truck.Settings.Scale = 2.0` has to keep
+writing to the sim rather than to a local copy — making the read return a value would turn every
+existing member write into a silent no-op. A proxy passed where a value is wanted (a function
+argument, an assignment) is read first, so the two compose. In Python the constructor is
+keyword-only with every field optional — positional arguments would silently reassign when a member
+is added — and an unset field is simply absent from the `StructValue`. Rust gets a `#[derive(Default)]`
+struct of `Option` fields beside the existing proxy, for the same reason.
+
+### 17.6 What is still not offered
+
+A function whose struct parameter is not value-expressible by §17.3, and one with a `TSet` of
+structs or a map. Those were already absent and stay absent, by the rule that an unsupported type is
+omitted rather than loosened.
+
+---
+
+## 18. One ordered batch
+
+Phase 9. §6.3's `batch()` collects writes and flushes them as `SetProperties`. Three things it could
+not do:
+
+- **Carry a call.** A property with a `BlueprintSetter` is written by calling its accessor, which
+  `SetProperties` cannot express, so a batch with one accessor write in the middle was three round
+  trips: the writes before it, the call, the writes after.
+- **Carry a read.** A read inside a batch went straight to the server — *ahead of the writes queued
+  before it*, so it reported the value from before the batch. That is a correctness bug, not a
+  missing optimization, and it is in both clients today.
+- **Promise anything about time.** Separate RPCs are separate game-thread tasks, and a tick can fall
+  between any two of them.
+
+### 18.1 The RPC
+
+```proto
+message BatchOp {
+  oneof op {
+    SetPropertyRequest set = 1;
+    GetPropertyRequest get = 2;
+    CallFunctionRequest call = 3;
+  }
+}
+message RunBatchRequest  { repeated BatchOp ops = 1; bool stop_on_failure = 2; }
+message BatchOpResult {
+  int32 code = 1;  string error = 2;           // per op; 0 is OK
+  oneof result { Value value = 3; CallFunctionResponse call = 4; }
+}
+message RunBatchResponse { repeated BatchOpResult results = 1; }   // one per op, in order
+
+rpc RunBatch(RunBatchRequest) returns (RunBatchResponse);
+```
+
+`RunBatch`, not `Batch`: the Python and Rust RPC generators already emit a `batch()` builder for
+`SetProperties`, and RPC names are flattened per module.
+
+The server runs the ops **in order, in one handler invocation**, so the whole batch happens between
+two ticks. That is a guarantee worth having on its own — configure twenty properties and call
+`Activate`, and nothing simulates against the half-configured actor.
+
+One result per op, failed or not, unlike `SetProperties`, which reports failures only: a read's
+answer has to come back by position. `stop_on_failure` stops at the first failure and reports every
+later op as `ABORTED`; the typed clients set it, because an op after a failed one was written
+assuming the failed one had happened. Off, the batch behaves as `SetProperties` does.
+
+### 18.2 The clients
+
+Writes and accessor writes queue as before, now into one `RunBatch`. Reads and calls inside a batch
+have two forms:
+
+```python
+with world.batch() as b:
+    truck.MaxSpeed = 1200.0
+    truck.ScaleFactor = 2.0                      # a BlueprintSetter: queued as a call
+    speed = b.get(lambda: truck.MaxSpeed)        # Deferred[float], one round trip in all
+    moved = b.call(lambda: truck.TeleportTo(p))  # Deferred[bool]
+print(speed.value, moved.value)
+```
+
+**Deferred**, through `b.get`/`b.call`: the lambda is evaluated in capture mode, so the read or call
+it makes is queued and its type comes from the lambda's own return type — `Deferred[float]` is
+inferred, not declared, and a renamed property is still a type error inside the lambda. The value is
+available once the batch has run.
+
+**Immediate**, by just reading or calling: the queued ops and this one go out together as one
+`RunBatch`, and the real result comes back. Correct and ordered; two round trips instead of one if
+the batch continues, and the batch has then partly run. That is the price of not lying to the type
+checker — the stub says `truck.MaxSpeed` is a `float`, so it cannot be a placeholder.
+
+Rust mirrors both: `b.get(|| truck.max_speed())` returns `Deferred<f64>`. A function with out
+parameters cannot be deferred in Rust, because its generated method decodes after the call returns
+and there is nothing yet to decode; it runs immediately instead.
+
+---
+
+## 19. The asset catalog
+
+Phase 10. An asset-valued property is typed today as the class it points at — a `StaticMesh`
+handle — while what travels is a path string, so nothing checks the path and the stub misdescribes
+the value. A scenario that hard-codes `/Game/Vehicles/SM_Truck` keeps type-checking after the asset
+is moved or renamed, and fails at runtime with `NOT_FOUND`. That is §1's failure in a third place.
+
+### 19.1 Where the catalog comes from
+
+**From the packaged build, and only from it.** Classes need the editor for their metadata (§5), and
+assets have no metadata that matters; what they need is the one fact only the build knows, which is
+whether the asset was cooked. An editor's registry lists everything on disk, including assets
+nothing references and the cook therefore dropped — a catalog of those would type-check and then
+fail, which is the thing this exists to prevent.
+
+So `query_packaged_classes.py` also asks `GetAssets` for every asset the build has, and
+`filter_schema.py` writes them into the filtered schema as a top-level `assets` list. With no
+packaged build there is no catalog, for the same reason there are no published classes then: absent
+beats wrong. Measured on TempoSample: **877 cooked assets**, 233 under `/Game` and 337 under
+`/Engine`, the rest spread across 18 plugin mount points.
+
+Excluded:
+
+- **Redirectors.** Moving an asset in the editor leaves an `ObjectRedirector` at the old path. A
+  catalog that listed it would keep the old name compiling, which is precisely the case to catch.
+- **Blueprint classes** (`BlueprintGeneratedClass`, `WidgetBlueprintGeneratedClass`, `Blueprint`).
+  They are already in the class surface, as classes, which is how a scenario uses them.
+
+### 19.2 The typed handle
+
+`AssetRef` becomes generic in the asset's class, and an asset-valued property is typed by what it
+accepts:
+
+```python
+from tempo_sample_classes.assets import Game
+
+truck.Mesh.StaticMesh = Game.Vehicles.SM_Truck     # AssetRef[StaticMesh]
+truck.Mesh.StaticMesh = Game.Materials.M_Paint     # error: AssetRef[Material]
+```
+
+That is a second guarantee on top of the rename one — the right *kind* of asset — and it costs
+nothing extra, since the schema already records an object property's pointee class.
+
+**Python**: `AssetRef` is covariant, so an `AssetRef[Material]` goes where an
+`AssetRef[MaterialInterface]` is wanted. **Rust**: `AssetRef<T>` derefs to `AssetRef<T::Super>`
+through the same `Deref` chain a class handle uses, so `&M_PAINT` coerces to
+`&AssetRef<MaterialInterface>` and a setter takes `&AssetRef<…>` to allow it. That is a second
+`unsafe` reinterpretation beside `upcast`, sound for the same reason — `AssetRef` is
+`#[repr(transparent)]` over its path, with the class only in a `PhantomData`.
+
+The escape hatch is the constructor, `AssetRef("/Game/…")` / `AssetRef::from_path`, which takes a path
+from data — a config file, a CLI argument — that no type checker could verify. It is untyped
+(`AssetRef[Any]` in Python), visibly so at the call site.
+
+### 19.3 Layout
+
+One module per mount point, with folders as nested namespaces: `assets.Game.Vehicles.SM_Truck` in
+Python, `assets::game::vehicles::SM_Truck` in Rust. Folder segments follow each language's module
+naming; asset names stay verbatim, as class names do, mangled only where the language cannot spell
+them, with a collision failing generation as a class collision does.
+
+### 19.4 Drift
+
+The catalog *is* the drift detection: a removed asset is an attribute that no longer exists, a
+retyped one a type error. `diff_schema.py` reports both as breaking, and an added asset as
+additive. `check_schema` compares the installed catalog against the sim's `GetAssets` and names any
+asset the package has and the sim does not.
