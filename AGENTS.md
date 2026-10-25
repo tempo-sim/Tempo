@@ -180,6 +180,18 @@ fails under Pyright instead of at runtime. See `TYPED_WORLD_API_PLAN.md`.
   newtype over `ObjectRef`" contract only the generator satisfies, and `AssetRef`'s `Deref` to its
   superclass's `AssetRef`, sound because the class is only a `PhantomData`. Generated Rust contains
   none.
+- **`gen_cpp_classes.py`** emits the C++ typed classes for the C++ client, behind
+  `TEMPO_GEN_CPP_API`: a header per class (including its superclass, forward-declaring the rest), a
+  header per module, enums, structs, assets and the hierarchy, with every definition out of line;
+  `build_cpp_classes.py` compiles them into `libtempo_reflected` and installs it beside `libtempo`.
+  The C++ surface mirrors Rust's (same `snake_case` names, `gen_classes_common.snake_case` with
+  C++'s reserved words) but uses real inheritance. **One tree**, the project's whole build, as
+  `tempo::reflected`: the C++ client is built per project, so there is no published subset. Every C++
+  build here is capped by `gen_naming.build_jobs()` -- a bare `cmake --build --parallel` is `make -j`
+  under the Makefile generator, which started three hundred compiles at once and ran a 64 GB
+  machine out of memory. `Package.sh` ships `Packaged/API/Cpp` self-contained: headers, both
+  archives, the vendored gRPC headers and the shared `tempogrpc` library (never the static archives),
+  with `TempoConfig.cmake` for `find_package(Tempo)`. See `TYPED_WORLD_API_PLAN.md` §23.
 - **`subset_schema.py`** narrows the same schema to the modules that ship in *every* build -- the
   engine's always-loaded ones plus Tempo's own, derived from the `.uplugin` descriptors -- so those
   classes can go out in the published `tempo-sim` wheel and crate, as `reflected`, rather than only
@@ -385,6 +397,12 @@ sim (not the editor). They cover the client-facing API contract and behavior ove
   snippet — one per drift case. The fixture deliberately contains a class named `Object`, because a
   name collision there once rooted the whole hierarchy in `Unknown`, at which point a checker allows
   every attribute and the guarantee is gone with no visible symptom.
+- **C++ — `Tests/Cpp/`:** a CMake project against the packaged client (`find_package(Tempo)`), one
+  executable per group -- `contract` (no sim), `integration` (the RPC client) and `typed` (the typed
+  classes, on engine and Tempo classes every build has) -- with a header-only harness of its own.
+  Run: `Scripts/TestCppAPI.sh <group>` (needs a package built with `TEMPO_GEN_CPP_API=1`). The
+  `codegen` group's `test_cpp_codegen.py` checks the generator against the fixture with the host
+  compiler, and skips where the C++ client or the vendored gRPC has not been built.
 - **Rust — `Tests/Rust/`:** a `cargo` crate; `tests/*.rs` files are the groups (`cargo test --test
   <group>`): `contract` (compile/surface check, no sim), `integration` (live sim) and `typed`
   (the typed class surface against a live sim, in its own crate under `Tests/Rust/typed/` — it needs
@@ -404,7 +422,7 @@ sim (not the editor). They cover the client-facing API contract and behavior ove
   → `TEMPO_TEST_REPORT_DIR` (default `Saved/{Python,Rust}TestReport`). **Package first**
   (`Scripts/Package.sh`; Rust needs `TEMPO_GEN_RUST_API=1`).
 - **CI (fan-out):** `tempo_build_and_package.yml` sets `upload_artifact: true` (package built &
-  uploaded once), then `test_packaged_python_api` and `test_packaged_rust_api` matrix jobs (Unreal
+  uploaded once), then `test_packaged_python_api`, `test_packaged_rust_api` and `test_packaged_cpp_api` matrix jobs (Unreal
   version × group) both call the **generic, reusable** `test_packaged.yml`. Each job downloads the
   same artifact and runs one group in parallel — build once, test many.
   `test_packaged_socket_transport` re-runs the Python `core` group with the sim on a Unix domain

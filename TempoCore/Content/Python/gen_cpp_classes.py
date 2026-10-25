@@ -981,6 +981,17 @@ namespace tempo::reflected {
 /// hashed to, for is_a and world::check_schema.
 const ::tempo::unreal::Hierarchy& hierarchy();
 
+namespace detail {
+
+// Including the classes registers them, as importing them does in Python: every class header
+// includes this one, so any translation unit that names a class initializes this at startup -- in
+// the scenario's own object file, where a linker cannot drop it as it would an unreferenced object
+// in the archive. Without it, world::check_schema called before any handle was made found nothing to
+// check.
+inline const bool registered = (::tempo::unreal::register_classes(hierarchy()), true);
+
+}  // namespace detail
+
 }  // namespace tempo::reflected
 """
 

@@ -1,54 +1,55 @@
 # C++ Client
 
-A drop-in C++ client library, generated at build time when `TEMPO_GEN_CPP_API=1`.
+A C++ client library, generated at build time when `TEMPO_GEN_CPP_API=1`, and shipped
+self-contained by `Scripts/Package.sh` with the same variable set.
 
 ```bash
 export TEMPO_GEN_CPP_API=1
-Plugins/Tempo/Scripts/Build.sh
+Plugins/Tempo/Scripts/Package.sh
 ```
 
 ## What you get
 
 ```text
-TempoCore/Content/Cpp/API/
+Packaged/API/Cpp/
+├── TempoConfig.cmake               # find_package(Tempo CONFIG)
 ├── include/
-│   ├── tempo.h                      # umbrella header — include this and you're done
-│   ├── tempo/                       # the high-level client surface
-│   │   ├── context.h                #   set_server, set_socket, TempoContext
-│   │   ├── error.h                  #   TempoError
-│   │   ├── result.h                 #   Result<T>
-│   │   ├── streaming.h              #   ServerStream<T>
-│   │   └── <service>.h              #   one per gRPC service (tempo_core, tempo_world, …)
-│   └── proto/
-│       └── <Package>/<File>.pb.h    # protoc-generated message types
-│       └── <Package>/<File>.grpc.pb.h
-├── lib/
-│   └── <Platform>/libtempo.{a,lib}  # static archive — wrapper + protoc outputs
-└── proto/
-    └── <Package>/<File>.proto       # decorated source protos (informational)
+│   ├── tempo.h                     # umbrella header for the RPC client
+│   ├── tempo/                      # context, error, result, streaming, one header per service,
+│   │   │                           #   and unreal.h, world.h, conversion.h for the typed classes
+│   │   └── reflected/              # the typed classes: one header per class, one per module
+│   └── proto/                      # protoc-generated message types
+├── lib/<Platform>/
+│   ├── libtempo.{a,lib}            # the RPC client and the typed runtime
+│   ├── libtempo_reflected.{a,lib}  # the typed classes
+│   └── libtempogrpc.{dylib,so} / tempogrpc.{dll,lib}
+└── third_party/grpc/include/       # the vendored gRPC, protobuf and abseil headers
 ```
+
+Nothing else is needed: the shared `tempogrpc` library carries gRPC, protobuf, abseil, OpenSSL and
+zlib inside it, as it does for Tempo's own modules. Linking it rather than the static archives
+beside it is the same rule they follow, for the same reason — one copy of gRPC's global state — and
+it is a seventh of their size.
+
+The build also leaves the same client, less the typed classes, in this checkout at
+`Plugins/Tempo/TempoCore/Content/Cpp/API/`, where it finds the vendored gRPC next door.
 
 ## Integration
 
-1. Add to your include path:
-   - `<this-folder>/include`
-   - `<this-folder>/include/proto`
-2. Link against `lib/<Platform>/libtempo.{a,lib}` for your build host.
-3. **Bring your own gRPC++ and protobuf** — `libtempo` does *not* bundle them. Three reasonable
-   options:
+Through CMake, against either:
 
-    | Option | Notes |
-    |---|---|
-    | **Vendored from Tempo** (recommended) | Guaranteed ABI match. Use the headers and static archives at `Plugins/Tempo/TempoCore/Source/ThirdParty/gRPC/{Includes,Libraries/<Platform>}`. |
-    | **vcpkg / Conan** | ABI compatibility depends on flags. |
-    | **System gRPC** (`apt install libgrpc++-dev`) | Same caveat. |
+```cmake
+find_package(Tempo CONFIG REQUIRED PATHS <project>/Packaged/API/Cpp)
+target_link_libraries(my_client PRIVATE tempo::reflected)   # the typed classes, and everything
+# or
+target_link_libraries(my_client PRIVATE tempo::tempo)       # the RPC client alone
+```
 
-4. Define the same gRPC compile flags this library was built with:
-
-    ```text
-    GOOGLE_PROTOBUF_NO_RTTI=1
-    GRPC_ALLOW_EXCEPTIONS=0
-    ```
+The targets carry the include paths, the defines the library was built with
+(`GOOGLE_PROTOBUF_NO_RTTI`, `GRPC_ALLOW_EXCEPTIONS=0`, `PROTOBUF_USE_DLLS`, `ABSL_CONSUME_DLL` and
+the rest), `-fno-rtti` (the vendored protobuf ships no typeinfo for its message base classes), and
+C++20. On Windows, copy `tempogrpc.dll` next to the executable. Without CMake, mirror what
+`TempoConfig.cmake` sets.
 
 ## Quick start
 
@@ -58,9 +59,9 @@ TempoCore/Content/Cpp/API/
 int main() {
     tempo::set_server("localhost", 10001);
 
-    auto state = tempo::tempo_world::get_current_actor_state("MyActor");
+    auto state = tempo::tempo_world::get_current_actor_state("MyActor", false);
     if (!state) {
-        return 1;  // Result<T> carries a TempoError
+        return 1;  // Result<T> carries a TempoError; nothing here throws
     }
 }
 ```
@@ -68,19 +69,41 @@ int main() {
 Function names match the Python and Rust clients — `pascal_to_snake` of the RPC name, namespaced
 by module under `tempo::`.
 
+## The typed classes
+
+The same [typed classes](typed-classes.md) the Python and Rust clients have, for the project's whole
+build, as `tempo::reflected` — one tree rather than Python's and Rust's two, because the C++ client
+is built per project. The C++ surface mirrors the Rust one: the same snake_case names, a `Result`
+from every call, and Unreal's single inheritance as C++ inheritance.
+
+```cpp
+#include <tempo/world.h>
+#include <tempo/reflected/classes/engine/StaticMeshActor.h>
+#include <tempo/reflected/structs.h>
+
+using tempo::reflected::classes::engine::StaticMeshActor;
+
+auto actors = tempo::world::get_actors<StaticMeshActor>();   // Result<std::vector<StaticMeshActor>>
+for (const StaticMeshActor& actor : actors.value()) {
+    actor.set_b_can_be_damaged(false);                        // declared on Actor, inherited
+    auto [moved, hit] = actor.k2_set_actor_location({0, 0, 500}, false, true).value();
+}
+```
+
+Include the header of each class you use (`tempo/reflected/classes/<module>/<Class>.h`), or a
+module's (`tempo/reflected/engine.h`). A header declares and forward-declares only, so calling a
+method that returns a class you have not included is an incomplete-type error naming it. Struct
+values need `tempo/reflected/structs.h`.
+
+`tempo::world` mirrors `tempo::tempo_world` with handles; `tempo::conversion` converts Unreal's
+values to and from SI (`ue_to_si`, `si_to_ue`). Async twins are the one thing the Rust surface has
+that this does not: the C++ client is synchronous throughout.
+
 ## Requirements
 
-- **CMake** 3.20 or later (for the shipped examples).
+- **CMake** 3.20 or later.
 - **A C++20 compiler** — clang 14+, gcc 11+, MSVC 19.30+. Required because the vendored absl
-  headers depend on `std::weak_ordering`.
-- **OpenSSL 1.1** and **zlib**.
-
-!!! warning "OpenSSL 1.x, not 3.x"
-
-    The vendored gRPC was compiled against OpenSSL 1.x and references `SSL_get_peer_certificate`,
-    which OpenSSL 3.x replaced with `SSL_get1_peer_certificate`. On macOS:
-    `brew install openssl@1.1`. On Linux, point `OPENSSL_ROOT_DIR` at an OpenSSL 1.1 install, or
-    rebuild gRPC against your system OpenSSL.
+  headers depend on `std::weak_ordering`, and because the typed classes use concepts.
 
 ## Example clients
 
@@ -95,8 +118,7 @@ stdout, with no GUI and no interactive prompts.
 
 ```bash
 cd Plugins/Tempo/ExampleClients/cpp
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
-    -DOPENSSL_ROOT_DIR=/opt/homebrew/opt/openssl@1.1
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release        # or -DTempo_DIR=<project>/Packaged/API/Cpp
 cmake --build build --parallel
 ```
 

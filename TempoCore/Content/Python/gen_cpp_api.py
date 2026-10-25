@@ -809,8 +809,9 @@ class CppApiGenerator:
         for arc in archives:
             shutil.copy2(arc, self.lib_dir / arc.name)
 
-        # README (static; copied verbatim)
+        # README and the CMake package config (static; copied verbatim)
         shutil.copy2(self.template_dir / "README.md", self.api_dir / "README.md")
+        shutil.copy2(self.template_dir / "TempoConfig.cmake", self.api_dir / "TempoConfig.cmake")
 
         print(f"[Tempo Prebuild] C++ API written to {self.api_dir}")
         print(f"[Tempo Prebuild]   modules: {', '.join(generated_modules)}")

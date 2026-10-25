@@ -116,7 +116,7 @@ fi
 # replaces its own destination, and a distribution that no longer exists -- the -classes package the
 # typed classes once shipped as -- would otherwise sit there, still installed by every `pip install
 # Packaged/API/Python/*/*.whl`.
-rm -rf "$PROJECT_ROOT/Packaged/API/Python" "$PROJECT_ROOT/Packaged/API/Rust"
+rm -rf "$PROJECT_ROOT/Packaged/API/Python" "$PROJECT_ROOT/Packaged/API/Rust" "$PROJECT_ROOT/Packaged/API/Cpp"
 
 # Copy generated Rust crate(s) to Packaged/API/Rust/ so downstream consumers can
 # build a Rust client against this packaged build. Only ships the files that
@@ -222,6 +222,10 @@ CLEAR_TYPED_API() {
     "$PYTHON_BIN" "$PROJECT_ROOT/Plugins/Tempo/TempoCore/Content/Python/gen_project_package.py" \
       clear "$PROJECT_ROOT"
   fi
+  # The C++ classes too, which build_cpp_classes.py installed beside the C++ client.
+  local CPP_API="$PROJECT_ROOT/Plugins/Tempo/TempoCore/Content/Cpp/API"
+  rm -rf "$CPP_API/include/tempo/reflected"
+  rm -f "$CPP_API"/lib/*/libtempo_reflected.a "$CPP_API"/lib/*/tempo_reflected.lib
 }
 if [[ -n "$TEMPO_SKIP_TYPED_API" && "$TEMPO_SKIP_TYPED_API" != "0" ]]; then
   echo "Skipping typed classes (TEMPO_SKIP_TYPED_API is set)"
@@ -229,6 +233,39 @@ if [[ -n "$TEMPO_SKIP_TYPED_API" && "$TEMPO_SKIP_TYPED_API" != "0" ]]; then
 elif ! "$SCRIPT_DIR"/GenTypedAPI.sh; then
   echo "Warning: failed to generate the typed classes; the packaged build will not include them" >&2
   CLEAR_TYPED_API
+fi
+
+# Copy the C++ client to Packaged/API/Cpp/, self-contained: its headers and archives, the typed
+# classes' archive when there is one, the vendored gRPC headers, and the shared tempogrpc library,
+# which carries OpenSSL and zlib inside it -- so a consumer needs neither this checkout nor an engine.
+# The shared library rather than the static archives beside it, as Tempo's own modules link it, and
+# at a seventh of their size. TempoConfig.cmake makes it a CMake package (find_package(Tempo)).
+PACKAGE_CPP_CLIENT() {
+  local SRC="$PROJECT_ROOT/Plugins/Tempo/TempoCore/Content/Cpp/API"
+  local GRPC="$PROJECT_ROOT/Plugins/Tempo/TempoCore/Source/ThirdParty/gRPC"
+  local DEST="$PROJECT_ROOT/Packaged/API/Cpp"
+  if [ ! -d "$SRC/lib/$HOST_PLATFORM" ]; then
+    echo "Skipping C++ client packaging: no C++ client built for $HOST_PLATFORM"
+    return
+  fi
+  echo "Packaging the C++ client -> $DEST"
+  mkdir -p "$DEST/lib/$HOST_PLATFORM" "$DEST/third_party/grpc"
+  cp -R "$SRC/include" "$DEST/include"
+  cp "$SRC/lib/$HOST_PLATFORM/"* "$DEST/lib/$HOST_PLATFORM/"
+  cp "$SRC/README.md" "$SRC/TempoConfig.cmake" "$DEST/"
+  cp -R "$GRPC/Includes" "$DEST/third_party/grpc/include"
+  case "$HOST_PLATFORM" in
+    Win64)
+      cp "$GRPC/Binaries/Windows/tempogrpc.dll" "$GRPC/Libraries/Windows/tempogrpc.lib" "$DEST/lib/$HOST_PLATFORM/" ;;
+    Mac)
+      cp "$GRPC/Libraries/Mac/libtempogrpc.dylib" "$DEST/lib/$HOST_PLATFORM/" ;;
+    *)
+      cp "$GRPC/Libraries/Linux/libtempogrpc.so" "$DEST/lib/$HOST_PLATFORM/" ;;
+  esac
+}
+
+if [[ -n "$TEMPO_GEN_CPP_API" && "$TEMPO_GEN_CPP_API" != "0" ]]; then
+  PACKAGE_CPP_CLIENT
 fi
 
 # Only package the Rust crate(s) when Rust generation is opted in via

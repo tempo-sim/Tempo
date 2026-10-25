@@ -722,7 +722,7 @@ generated `Value` and so cannot live in the deliberately protobuf-free classifie
 tickable and the subscription lives beside the rest of the property code. The tick early-returns on
 an empty subscription map, so a project that never streams pays nothing measurable.
 | **5 — Rust** | `gen_rust_classes.py` + a `tempo_sim::unreal` runtime, off the same `tempo_schema.json` | Designed and measured in §15. |
-| **6 — C++** | generator off the same `tempo_schema.json`, runtime, packaging, tests | §23. |
+| **6 — C++** | generator off the same `tempo_schema.json`, runtime, packaging, tests | §23. **Done.** |
 | **7 — Published classes** | an engine-core + Tempo subset inside the published `tempo-sim` wheel and crate, namespaced by engine version; per-class drift checking | Designed and measured in §16; built as `tempo_sim.reflected`, latest engine only (§16.11). 7g remains. |
 | **8 — Struct values** | a `StructValue` variant; value-expressible structs in the classifier; struct arguments, results and whole-struct writes in both clients | Designed in §17. **Done**; see §17.7. |
 | **9 — One ordered batch** | `RunBatch` carrying sets, gets and calls in order within one tick; deferred and immediate reads in both clients | Designed in §18. **Done**; see §18.3. |
@@ -1912,9 +1912,9 @@ the defines a DLL consumer needs (`PROTOBUF_USE_DLLS`, `ABSL_CONSUME_DLL`), as T
 
 | Phase | What | |
 |---|---|---|
-| **6a** | the runtime: `tempo/unreal.h`, `world.h`, `conversion.h`, `Result<void>`, the new error kinds | |
+| **6a** | the runtime: `tempo/unreal.h`, `world.h`, `conversion.h`, `Result<void>`, the new error kinds | **Done.** |
 | **6b** | `gen_cpp_classes.py`, `build_cpp_classes.py`, and the `codegen` tests | **Done.** TempoSample's 6,068 classes compile into a 186 MB archive in 5½ minutes at 16 jobs (14 GB peak). |
-| **6c** | `libtempo_reflected` from `GenTypedAPI.sh`; `Packaged/API/Cpp`, self-contained, with a CMake config; the examples built against it | |
-| **6d** | `Tests/Cpp`, `TestCppAPI.sh`, CI | |
-| **6e** | docs | |
+| **6c** | `libtempo_reflected` from `GenTypedAPI.sh`; `Packaged/API/Cpp`, self-contained, with a CMake config; the examples built against it | **Done.** The config works from the build tree too, so the examples need no package and no OpenSSL. |
+| **6d** | `Tests/Cpp`, `TestCppAPI.sh`, CI | **Done.** |
+| **6e** | docs | **Done.** |
 

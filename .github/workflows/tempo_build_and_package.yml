@@ -138,3 +138,26 @@ jobs:
       allow_unsafe_pr_checkout: true
       environment: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name != github.repository && 'fork-pr-environment' || '' }}
     secrets: inherit
+
+  test_packaged_cpp_api:
+    name: Test Packaged C++ API
+    needs: build_and_package
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        unreal_version: [ "5.7", "5.8" ]
+        group: [ "contract", "integration", "typed" ]
+    uses: ./.github/workflows/test_packaged.yml
+    with:
+      artifact_name: ${{ format('{0}-ubuntu-24.04-{1}-{2}', github.event.repository.name, matrix.unreal_version, github.sha) }}
+      name: cpp-${{ matrix.group }}
+      test_command: Scripts/TestCppAPI.sh ${{ matrix.group }}
+      unreal_version: ${{ matrix.unreal_version }}
+      runner: ubuntu-24.04
+      python_version: ''     # C++ groups need only cmake and a compiler, both in the runner image
+      checkout_path: TempoSample/Plugins/Tempo
+      allow_unsafe_pr_checkout: true
+      environment: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name != github.repository && 'fork-pr-environment' || '' }}
+    secrets: inherit

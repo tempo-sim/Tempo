@@ -98,7 +98,7 @@ REM now refuses to generate without an answer, while this one has never asked. P
 REM Python or Rust clients either, so nothing here ships today -- closing both is one job.
 echo Skipping the published classes ^(this mirror generates from the editor's unfiltered walk^)
 
-REM The Rust classes, from the same schema, into the project's own crate as its types module. The
+REM The Rust classes, from the same schema, into the project's own crate as its reflected module. The
 REM crate's manifest and lib.rs are written after them, because lib.rs declares what src\ holds.
 if not defined TEMPO_GEN_RUST_API goto :no_rust
 if "!TEMPO_GEN_RUST_API!"=="0" goto :no_rust
@@ -111,8 +111,26 @@ if errorlevel 1 exit /b 1
 "!PYTHON_BIN!" "!PYTHON_DIR!\gen_project_package.py" rust "!PROJECT_ROOT!"
 if errorlevel 1 exit /b 1
 echo Typed Rust classes generated at !RUST_CLASSES_DIR!
-exit /b 0
+goto :cpp
 
 :no_rust
 echo Skipping the typed Rust classes (set TEMPO_GEN_RUST_API=1 to generate them)
+
+:cpp
+REM The C++ classes, from the same schema, compiled into libtempo_reflected beside the C++ client,
+REM which a build with TEMPO_GEN_CPP_API=1 has already made.
+if not defined TEMPO_GEN_CPP_API goto :no_cpp
+if "!TEMPO_GEN_CPP_API!"=="0" goto :no_cpp
+
+set "CPP_CLASSES_DIR=!SCHEMA_DIR!\cpp"
+if exist "!CPP_CLASSES_DIR!" rmdir /s /q "!CPP_CLASSES_DIR!"
+echo Generating tempo::reflected
+"!PYTHON_BIN!" "!PYTHON_DIR!\gen_cpp_classes.py" "!SCHEMA!" "!CPP_CLASSES_DIR!"
+if errorlevel 1 exit /b 1
+"!PYTHON_BIN!" "!PYTHON_DIR!\build_cpp_classes.py" "!CPP_CLASSES_DIR!" "!SCRIPT_DIR!..\TempoCore\Content\Cpp\API" "!SCRIPT_DIR!..\TempoCore\Source\ThirdParty\gRPC"
+if errorlevel 1 exit /b 1
+exit /b 0
+
+:no_cpp
+echo Skipping the typed C++ classes (set TEMPO_GEN_CPP_API=1 to generate them)
 exit /b 0

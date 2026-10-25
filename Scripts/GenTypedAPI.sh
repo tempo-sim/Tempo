@@ -213,3 +213,23 @@ if [ -n "$RUST" ]; then
 else
   echo "Skipping the typed Rust classes (set TEMPO_GEN_RUST_API=1 to generate them)"
 fi
+
+# The C++ classes, from the same schema, compiled into libtempo_reflected and installed beside the
+# C++ client, which a build with TEMPO_GEN_CPP_API=1 has already made. One tree, the project's whole
+# build: the C++ client is built per project, so there is no published subset to share
+# (TYPED_WORLD_API_PLAN.md section 23.2).
+if [ -n "${TEMPO_GEN_CPP_API:-}" ] && [ "${TEMPO_GEN_CPP_API}" != "0" ]; then
+  CPP_API_DIR="$SCRIPT_DIR/../TempoCore/Content/Cpp/API"
+  if [ ! -d "$CPP_API_DIR/include/proto" ]; then
+    echo "The C++ client has not been built (TEMPO_GEN_CPP_API=1 Scripts/Build.sh makes it)" >&2
+    exit 1
+  fi
+  CPP_CLASSES_DIR="$SCHEMA_DIR/cpp"
+  rm -rf "$CPP_CLASSES_DIR"
+  echo "Generating tempo::reflected"
+  "$PYTHON_BIN" "$PYTHON_DIR/gen_cpp_classes.py" "$GENERATE_FROM" "$CPP_CLASSES_DIR"
+  "$PYTHON_BIN" "$PYTHON_DIR/build_cpp_classes.py" "$CPP_CLASSES_DIR" "$CPP_API_DIR" \
+    "$SCRIPT_DIR/../TempoCore/Source/ThirdParty/gRPC"
+else
+  echo "Skipping the typed C++ classes (set TEMPO_GEN_CPP_API=1 to generate them)"
+fi

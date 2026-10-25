@@ -695,6 +695,42 @@ Functions that return more than one value hand back a tuple — the return value
 parameters in declaration order — but each element is read by the name it was declared with, so
 adding a parameter to a Blueprint cannot silently shift the others onto the wrong values.
 
+## The same thing in C++
+
+The C++ client has the typed classes too, generated from the same schema with the same guarantee —
+here the compiler's. They describe the project's whole build, as `tempo::reflected`, in a second
+archive, `libtempo_reflected`, which `Package.sh` builds and ships in `Packaged/API/Cpp` when
+`TEMPO_GEN_CPP_API=1`. There is one tree rather than Python's and Rust's two, because the C++ client
+is built per project rather than published, so there is no latest-engine limitation either.
+
+```cpp
+#include <tempo/world.h>
+#include <tempo/reflected/classes/game/vehicles/BP_Cat745_C.h>
+
+using tempo::reflected::classes::game::vehicles::BP_Cat745_C;
+
+auto trucks = tempo::world::get_actors<BP_Cat745_C>();
+if (!trucks) return 1;
+for (const BP_Cat745_C& truck : trucks.value()) truck.set_max_speed(1200.0);
+```
+
+It mirrors the Rust surface, with C++'s own means where they serve better:
+
+| | Rust | C++ |
+|---|---|---|
+| Names | snake_case | the same names |
+| Errors | `Result<T, TempoError>` and `?` | `tempo::Result<T>`; nothing throws |
+| Inheritance | a `Deref` chain | C++ inheritance: `class Pawn : public Actor` |
+| A class, as a bound | `T: Class` | the `tempo::unreal::Class` concept |
+| Out parameters | a tuple | a `std::tuple`, unpacked with a structured binding |
+| Struct values | `Option` fields | `std::optional` fields |
+| Async | `_async` twins | none: the C++ client is synchronous |
+| Batching | `world::batch(\|\| { ... })` | `world::batch([&]() -> Result<void> { ... })` |
+
+A class's header includes its superclass's and forward-declares the rest, so a scenario includes
+the headers of the classes it uses; definitions are compiled into the archive, so including a
+module costs only its declarations. See [C++ client](cpp.md) for linking it.
+
 ## Keeping a scenario repository honest
 
 The generated stubs make drift *detectable*; your CI is what makes it *detected*. Pyright enforces

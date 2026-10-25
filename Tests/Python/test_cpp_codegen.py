@@ -451,6 +451,9 @@ def test_values_conversions_and_batches_behave(generated):
     stdout, stderr, status = run(generated, r"""
     auto expect = [](bool ok, const char* what) { std::printf("%s %s\n", ok ? "ok" : "FAILED", what); };
 
+    // Including the classes registered them, before any handle: what check_schema relies on.
+    expect(!hierarchies().empty(), "including a class registers its hierarchy");
+
     // A struct value round-trips, and an unset member is not sent: a write is a merge.
     FWidgetSettings settings;
     settings.scale = 2.5;
