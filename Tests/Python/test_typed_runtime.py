@@ -1,5 +1,5 @@
 # Copyright Tempo Simulation, LLC. All Rights Reserved
-"""Tests for the runtime that serves the generated typed classes.
+"""Tests for the runtime that serves the generated reflected API.
 
 Attribute access is the API, so these check what an access actually does: which address it sends,
 what it refuses, and how it explains a refusal. No sim: the two functions that reach the wire are
@@ -1653,9 +1653,8 @@ def test_a_property_whose_setter_cannot_be_named_is_read_only(classes):
 # -- the drift check ------------------------------------------------------------------------------
 #
 # check_schema compares what each installed package recorded against what the sim reports, entry by
-# entry. Per entry and not per build because a package may hold part of one by design -- the
-# published classes describe the modules every build ships (TYPED_WORLD_API_PLAN.md section 16) --
-# and because a single number can only ever say that something moved.
+# entry. Per entry and not per build because a single number can only ever say that something
+# moved, where the per-entry report names what did.
 
 @pytest.fixture
 def describing(monkeypatch, classes):
@@ -1763,7 +1762,7 @@ def test_a_class_the_sim_does_not_have_is_named_separately(classes, describing):
 
 
 def test_a_class_only_the_sim_has_is_not_a_finding(classes, describing):
-    """The normal condition of a published package, which describes part of a build by design.
+    """A Blueprint added since the package was generated.
 
     This is the case a whole-walk hash cannot express: every class the package holds is current,
     and the one number still differs.
@@ -2003,17 +2002,13 @@ def test_a_proxy_passed_as_a_value_is_read_first(classes, monkeypatch):
 
 # -- two installed packages -----------------------------------------------------------------------
 #
-# A project installs its own classes; it may also have the published ones that ship inside
-# tempo_sim (TYPED_WORLD_API_PLAN.md section 16). They describe different things, so the registry
-# holds both -- and an inheritance chain crosses from one to the other, because a project's classes
-# derive from engine classes the published package declares.
+# Nothing stops a client installing more than one generated package, so the registry holds all of
+# them rather than letting the last import win -- and a lookup searches every one of them, an
+# inheritance chain included.
 
 @pytest.fixture(scope="module")
 def two_packages(tmp_path_factory):
-    """One package holding `Object`, another holding what derives from it.
-
-    Split by Unreal package, which is how the real split falls: the published set is chosen by
-    module, so a project keeps whatever is outside it and inherits across the boundary.
+    """One package holding `Object`, another holding what derives from it, split by Unreal package.
     """
     import json
 
@@ -2029,7 +2024,7 @@ def two_packages(tmp_path_factory):
                        check=True, capture_output=True, text=True)
 
     out = tmp_path_factory.mktemp("split")
-    part({"/Script/CoreUObject"}, "published_classes", out)
+    part({"/Script/CoreUObject"}, "base_classes", out)
     part({"/Script/Engine", "/Script/SomePlugin"}, "project_classes", out)
 
     installed = _tempo_sim_modules()
@@ -2038,7 +2033,7 @@ def two_packages(tmp_path_factory):
     sys.path.insert(0, str(out))
     sys.path.insert(0, RUNTIME_API)
     try:
-        import published_classes  # noqa: F401  (importing is what registers it)
+        import base_classes  # noqa: F401  (importing is what registers it)
         import project_classes  # noqa: F401
         import project_classes.Engine as engine
         import tempo_sim.unreal as runtime
@@ -2057,7 +2052,7 @@ def test_both_packages_are_registered(two_packages):
     since its own generated classes go on working and only the metadata is gone."""
     _, runtime = two_packages
     registered = {package.package for package in runtime.registered_classes().packages}
-    assert registered == {"published_classes", "project_classes"}
+    assert registered == {"base_classes", "project_classes"}
 
 
 def test_a_class_resolves_from_whichever_package_has_it(two_packages):
@@ -2071,7 +2066,7 @@ def test_an_inherited_property_is_found_across_the_boundary(two_packages, wire):
     """Widget is in one package and the Object it derives from is in the other.
 
     Each class records only what it declares, so reading an inherited property means walking
-    `super` -- and that walk has to cross packages or the published classes buy nothing.
+    `super` -- and that walk searches every package.
     """
     engine, _ = two_packages
     widget = engine.Widget("MyActor")

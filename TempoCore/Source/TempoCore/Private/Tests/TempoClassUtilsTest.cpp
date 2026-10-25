@@ -6,7 +6,7 @@
 #include "GameFramework/Actor.h"
 #include "Misc/AutomationTest.h"
 
-// Tests for class resolution by path, which is how the typed World API addresses a class: a class
+// Tests for class resolution by path, which is how the reflected API addresses a class: a class
 // name is ambiguous (two Blueprints in different folders can generate the same name) while a path is
 // not. Resolution by name keeps its documented first-match behavior and is not retested here.
 //

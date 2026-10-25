@@ -1,6 +1,6 @@
 # Copyright Tempo Simulation, LLC. All Rights Reserved
 
-"""Integration tests for the typed World API against a packaged sim.
+"""Integration tests for the reflected API against a packaged sim.
 
 The unit tests cover what the client decides on its own -- which address it sends, what it refuses,
 how it explains a refusal. They cannot cover whether a value survives the trip, because that depends
@@ -32,8 +32,7 @@ def _import_generated_classes():
 
     They are the `reflected` subpackage of the project's own package, which is named after the
     project (`tempo_sample.reflected` for TempoSample), so it is discovered rather than named here
-    -- this file should work for any project using Tempo. tempo-sim's own `reflected` holds the
-    published ones, and is not this build's.
+    -- this file should work for any project using Tempo.
     """
     import importlib
 
@@ -45,8 +44,6 @@ def _import_generated_classes():
     # Found by the files a distribution installed rather than by trying an import of each, which
     # would import every installed package's top level to find one.
     for distribution in metadata.distributions():
-        if (distribution.metadata["Name"] or "") == "tempo-sim":
-            continue
         for path in distribution.files or []:
             parts = path.parts
             if len(parts) == 3 and parts[1:] == ("reflected", "__init__.py"):
@@ -331,12 +328,12 @@ def test_typed_discovery_finds_spawned_actors(sim_server):
 
 @requires_classes
 def test_tempo_components_declare_their_own_configuration():
-    """Tempo's own components must be configurable through the typed classes, not only by string.
+    """Tempo's own components must be configurable through the reflected API, not only by string.
 
     A property reaches the typed surface only when its UPROPERTY says BlueprintReadWrite or
     BlueprintReadOnly -- which is how a Tempo class declares what is public scenario API. Nothing
     else enforces that, so dropping the specifier in a refactor would quietly take Tempo's own API
-    back out of the typed classes while leaving the string-keyed one working, and the loss would
+    back out of the reflected API while leaving the string-keyed one working, and the loss would
     surface as a scenario that cannot configure a sensor. These are a lidar's basic parameters.
 
     Reads the installed metadata rather than a live component, so it needs no sim and no project
@@ -985,91 +982,6 @@ def test_the_installed_classes_match_the_sim(sim_server):
     this is not done automatically on connect.
     """
     assert world.check_schema(raise_on_mismatch=True) is True
-
-
-def _import_published_classes():
-    """Import the published types, if the wheel carries them, and return their package name.
-
-    They ship inside `tempo_sim` rather than as a distribution of their own
-    (TYPED_WORLD_API_PLAN.md section 16), and importing them is lazy by design -- `import
-    tempo_sim` does not pull in three megabytes of classes nobody asked for. The project's types
-    import them already when they re-export any; this asks regardless.
-    """
-    import importlib
-
-    try:
-        importlib.import_module("tempo_sim.reflected")
-    except ImportError:
-        return None
-    return "tempo_sim.reflected"
-
-
-def _project_package():
-    """The project's types package, found among the registered ones rather than named."""
-    return next((package.package for package in registered().packages
-                 if not package.package.startswith("tempo_sim.")), None)
-
-
-@requires_classes
-def test_a_shared_class_is_one_type_in_both_packages(sim_server):
-    """A project's types re-export what the published ones define identically (section 16.5).
-
-    Otherwise there would be two types for /Script/Engine.Pawn, and a helper written against the
-    published one could accept none of the project's Blueprints.
-    """
-    import importlib
-
-    if _import_published_classes() is None:
-        pytest.skip("this tempo-sim wheel carries no published types")
-    project = importlib.import_module(_project_package() + ".Engine")
-    published = importlib.import_module("tempo_sim.reflected.Engine")
-    assert project.Pawn is published.Pawn
-    # Resolved from the published package, which is the one that defines it.
-    assert registered().python_class("/Script/Engine.Pawn") is published.Pawn
-    assert world.get_actors(project.Pawn) is not None
-
-
-@requires_classes
-def test_the_published_classes_match_the_sim(sim_server):
-    """The published subset against a running sim, beside the project's own classes.
-
-    This is the premise of section 16 under test: a package describing only the modules every build
-    ships can still verify itself, because the comparison is per entry. A whole-walk hash could
-    never match -- the subset is 1,730 classes of 6,068 by construction.
-    """
-    published = _import_published_classes()
-    if published is None:
-        pytest.skip("this tempo-sim wheel carries no published classes for this engine version")
-
-    installed = {package.package for package in registered().packages}
-    assert published in installed, "importing the published classes should register them"
-    assert len(installed) > 1, "the project's own classes should still be registered too"
-
-    assert world.check_schema(raise_on_mismatch=True) is True
-
-
-@requires_classes
-def test_the_published_classes_offer_no_more_than_the_build(sim_server):
-    """Less, not wrong -- which is what makes a build-sourced hash honest.
-
-    The subset drops whole modules and reroots 32 classes past an ancestor it does not carry, so it
-    offers less than the project's package. What it must never do is offer a class the build has no
-    trace of.
-    """
-    published = _import_published_classes()
-    if published is None:
-        pytest.skip("this tempo-sim wheel carries no published classes for this engine version")
-
-    reported = {cls.class_path for cls in tw.describe_classes(
-        include_blueprint_classes=True, blueprint_accessible_only=True,
-        include_functions=False).classes}
-
-    package = next(p for p in registered().packages if p.package == published)
-    promised = set(package.index)
-    assert promised, "the published package should declare some classes"
-    missing = promised - reported
-    assert not missing, "{} published class(es) are absent from this build, e.g. {}".format(
-        len(missing), sorted(missing)[:5])
 
 
 @requires_classes

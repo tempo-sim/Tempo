@@ -723,7 +723,7 @@ tickable and the subscription lives beside the rest of the property code. The ti
 an empty subscription map, so a project that never streams pays nothing measurable.
 | **5 — Rust** | `gen_rust_classes.py` + a `tempo_sim::unreal` runtime, off the same `tempo_schema.json` | Designed and measured in §15. |
 | **6 — C++** | generator off the same `tempo_schema.json`, runtime, packaging, tests | §23. **Done.** |
-| **7 — Published classes** | an engine-core + Tempo subset inside the published `tempo-sim` wheel and crate, namespaced by engine version; per-class drift checking | Designed and measured in §16; built as `tempo_sim.reflected`, latest engine only (§16.11). 7g remains. |
+| **7 — Published classes** | an engine-core + Tempo subset inside the published `tempo-sim` wheel and crate, namespaced by engine version; per-class drift checking | Designed and measured in §16; built as `tempo_sim.reflected`, latest engine only (§16.11); **reverted** (§16.12). Per-entry drift checking and the build-sourced members (7b, 7b′, 7c) stay. |
 | **8 — Struct values** | a `StructValue` variant; value-expressible structs in the classifier; struct arguments, results and whole-struct writes in both clients | Designed in §17. **Done**; see §17.7. |
 | **9 — One ordered batch** | `RunBatch` carrying sets, gets and calls in order within one tick; deferred and immediate reads in both clients | Designed in §18. **Done**; see §18.3. |
 | **10 — Asset catalog** | cooked assets from the packaged build; `AssetRef[T]` typed by class; a generated catalog per mount point; drift reporting | Designed in §19. **Done**; see §19.5. |
@@ -1013,6 +1013,10 @@ contract is "I am a transparent newtype over `ObjectRef`", which only the genera
 
 ## 16. Published classes
 
+> **Reverted** — see §16.12. The reflected API is generated per project only; tempo-sim ships the
+> runtime and no classes. The rest of this section is the design as it was built, kept for the
+> reasoning, and its measurements are still the ones to start from if the question comes back.
+
 Phase 7, and independent of Phase 6. Everything above generates per project, per release:
 `<project>-classes` describes one build and ships beside it in `Packaged/API`. That is the only way
 to describe a build *completely* — and it means a user cannot `pip install` their way to a typed
@@ -1297,6 +1301,41 @@ path a definition would have, so every reference inside the project's tree — a
 component accessor, an `AssetRef<…>` — resolves to the published type without the generator having
 to know.
 
+### 16.12 Reverted: the project generates everything
+
+Before any release carried them, the published types were taken back out. §16.11's cost — one
+`tempo-sim` serves every engine Tempo supports, so it can describe only the newest — falls entirely
+on the user who is not on the newest engine, and falls in the worst direction: a member their engine
+lacks type-checks and fails at runtime, which is the inverse of §1. A project's own package has no
+such cost. It is generated from the project's packaged build, so it is exact for that build's
+engine version, hotfix included, as well as its plugins and Blueprints.
+
+What the published types bought was a typed surface without packaging a project, and §16.8 had
+already called that a real step down from the project's package: no entry points, no Blueprints, no
+asset catalog. Requiring a packaged build is the accepted price.
+
+So, as built now:
+
+- **One tree per project, in every language**, as C++ already was (§23.2): `<project>.reflected`,
+  `<project>::reflected` and `tempo::reflected`, each describing the whole build and defining every
+  class it has. `tempo-sim` has no `reflected` module and no `reflected` feature.
+- **Gone**: `subset_schema.py`, `gen_classes_common.shared_with` and the re-export paths in both
+  generators, the generators' `--published` options, `Hierarchy::depends_on`, the empty placeholder
+  module tempo-sim's crate carried (`ensure_published_module`), and `extern crate self as
+  tempo_sim`, which only the published types inside tempo-sim needed.
+- **Kept**, because each stands on its own: the per-entry hashes and the per-entry `check_schema`
+  (§16.7, the better report for a whole-build package too); the build as the authority on members
+  (§16.10); rerooting, which `filter_schema.py` still needs when a stale schema meets a fresh
+  report; and registries that hold a list, since nothing stops a client installing two projects'
+  packages.
+- **Renamed**: the API is the *reflected API* throughout the docs, `Scripts/GenTypedAPI.sh` is
+  `Scripts/GenReflectedAPI.sh`, and `TEMPO_SKIP_TYPED_API` / `TEMPO_REQUIRE_TYPED_API` are
+  `TEMPO_SKIP_REFLECTED_API` / `TEMPO_REQUIRE_REFLECTED_API`. Earlier sections keep the names they
+  were written with.
+- **The plugin's example clients are back on the string-keyed API.** They run against any project's
+  sim, which a reflected example cannot; examples of the reflected API belong with the project whose
+  classes they name.
+
 ---
 
 ## 17. Struct values
@@ -1572,8 +1611,7 @@ fail, which is the thing this exists to prevent.
 
 So `query_packaged_classes.py` also asks `GetAssets` for every asset the build has, and
 `filter_schema.py` writes them into the filtered schema as a top-level `assets` list. With no
-packaged build there is no catalog, for the same reason there are no published classes then: absent
-beats wrong. Measured on TempoSample: **877 cooked assets**, 233 under `/Game` and 337 under
+packaged build there is no catalog: absent beats wrong. Measured on TempoSample: **877 cooked assets**, 233 under `/Game` and 337 under
 `/Engine`, the rest spread across 18 plugin mount points.
 
 Excluded:
@@ -1868,7 +1906,8 @@ Python and Rust split the types between the published subset in tempo-sim and th
 because tempo-sim is distributed on its own (§16, §20). The C++ client is not: it is built per
 project, with the project's protos compiled into the same library. So it has one tree,
 `tempo::reflected`, describing the project's whole build — no published subset, no re-exports, and
-no latest-engine limitation, since it is always generated from the build it describes.
+no latest-engine limitation, since it is always generated from the build it describes. (Python and
+Rust have since followed: §16.12.)
 
 ### 23.3 Files, and what a consumer compiles
 

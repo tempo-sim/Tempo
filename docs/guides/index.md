@@ -18,7 +18,7 @@ Task-shaped documentation: how to extend Tempo, ship it, test it, and unstick it
     Define `.proto` services in your own module and get generated Python, Rust and C++ clients for
     free. Walked through end to end with the Greeter plugin.
 
--   **[Typed classes, step by step](typed-classes.md)**
+-   **[The reflected API, step by step](reflected-api.md)**
 
     ---
 

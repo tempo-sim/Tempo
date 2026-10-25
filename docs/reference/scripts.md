@@ -49,6 +49,13 @@ your project root works.
 
     [:octicons-arrow-right-24: Packaging](../guides/packaging.md)
 
+`GenReflectedAPI.sh`
+
+:   Generates the project's [reflected API](../clients/reflected-api.md) from its Unreal reflection,
+    narrowed to what the packaged build has, into the project's own client package and crate.
+    `Package.sh` runs it; run it yourself to refresh the classes against an existing package after
+    changing a `UPROPERTY` or a Blueprint.
+
 `DiscardStaleBuildSteps.sh`
 
 :   Deletes any UnrealBuildTool makefile whose cached prebuild steps run a program that no longer

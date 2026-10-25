@@ -40,9 +40,9 @@ jobs:
       allow_unsafe_pr_checkout: true
       gen_rust_api: true
       gen_cpp_api: true
-      # The typed-class test jobs below need the classes in the package; a package without them is
+      # The reflected API's test jobs below need it in the package; a package without them is
       # a failure here, not four misleading ones there.
-      require_typed_api: true
+      require_reflected_api: true
       automation_test_filter: Tempo.
       # Upload the packaged build so the Python API test jobs below can fan out against it.
       upload_artifact: true
@@ -65,7 +65,7 @@ jobs:
       matrix:
         unreal_version: [ "5.7", "5.8" ]
         group: [ "contract", "core", "world", "movement" ]
-        # The codegen group tests this repository's own tooling -- the typed class generators for
+        # The codegen group tests this repository's own tooling -- the reflected API generators for
         # all three clients, the runtime that serves the Python one, and the schema tools -- against
         # a fixture schema. It needs no sim, so one entry rather than one per engine version:
         # nothing it checks depends on the engine. It rides this job to inherit the fork-PR gating
@@ -120,7 +120,7 @@ jobs:
 
   # Fan-out (Rust): the same artifact, the same sim, exercised through the generated Rust client.
   # "contract" compiles the crate (surface check, no sim); "integration" runs against a live sim;
-  # "typed" drives the generated class surface, whose crate the packaged build has to contain --
+  # "typed" drives the reflected API, whose crate the packaged build has to contain --
   # which it does, because the package job sets TEMPO_GEN_RUST_API.
   test_packaged_rust_api:
     name: Test Packaged Rust API

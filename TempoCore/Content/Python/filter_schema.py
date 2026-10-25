@@ -261,12 +261,8 @@ def reroot(schema, all_classes):
     """Point each class at its nearest *kept* ancestor, and report what that skipped.
 
     The schema has one structural invariant: every class's superclass is also in the document. The
-    editor's full walk keeps it by construction. Narrowing can break it in two ways. A published
-    subset chosen by module does so by design -- 32 classes in the published set derive from
-    something outside it, and ten of those are in `/Script/Engine` itself: `UEngineReplicationBridge`
-    derives from IrisCore, `UTempoChaosWheeledVehicleMovementComponent` from ChaosVehicles,
-    `UWidgetAnimation` from MovieScene. The packaged filter does so only when the editor's walk and
-    the build disagree -- a class the build lacks but the schema's hierarchy passes through, or a
+    editor's full walk keeps it by construction. The packaged filter breaks it only when the
+    editor's walk and the build disagree -- a class the build lacks but the schema's hierarchy passes through, or a
     superclass the build reports under a path the walk never saw -- which a schema and a report
     taken from the same build never do, and a stale schema beside a fresh report can.
 
@@ -374,7 +370,7 @@ def main(argv):
 
     # A class whose superclass the build lacks -- the chain passed through a class the build does
     # not have, or the build named one the editor's walk never saw -- is pointed at its nearest kept
-    # ancestor, as a published subset's are. Left dangling, both generators would read it as a root
+    # ancestor. Left dangling, both generators would read it as a root
     # and silently strip every inherited member while the stubs still type-check.
     rerooted = reroot(filtered, {cls["path"]: cls for cls in schema["classes"]})
     if rerooted:

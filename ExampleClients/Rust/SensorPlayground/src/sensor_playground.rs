@@ -16,10 +16,7 @@ use show_image::{ImageInfo, ImageView, WindowProxy};
 use tempo_sim::proto::tempo_sensors::ColorEncoding;
 use tempo_sim::proto::tempo_core::{Rotation, Transform, Vector};
 use tempo_sim::proto::tempo_sensors::MeasurementType;
-use tempo_sim::reflected::classes::engine::SceneCaptureComponent2D;
-use tempo_sim::reflected::structs::FVector4;
-use tempo_sim::unreal::ObjectRef;
-use tempo_sim::{set_server_async, tempo_sensors, tempo_world, world, TempoError};
+use tempo_sim::{set_server_async, tempo_sensors, tempo_world, TempoError};
 use tokio::task::JoinHandle;
 use tokio_stream::StreamExt;
 
@@ -185,35 +182,63 @@ async fn randomize_camera_post_process(
     owner: &str,
 ) -> Result<(), TempoError> {
     let mut rng = rand::thread_rng();
-    // Typed: a renamed or retyped post-process setting fails to compile here, rather than failing
-    // the call. Every Tempo camera is a SceneCaptureComponent2D, which is where
-    // PostProcessSettings lives.
-    let camera = SceneCaptureComponent2D(ObjectRef::component(owner, camera_name));
-    // One round trip for all of it, applied between two ticks of the sim. Inside the batch each
-    // setter only queues, which is why the closure is synchronous and nothing in it is awaited.
-    world::batch_async(|| {
-        let settings = camera.post_process_settings();
-        settings.set_b_override_white_temp(true)?;
-        settings.set_white_temp(rng.gen_range(700.0..=2000.0))?;
-
-        settings.set_b_override_bloom_intensity(true)?;
-        settings.set_bloom_intensity(rng.gen_range(0.0..=1.0))?;
-
-        settings.set_b_override_auto_exposure_speed_up(true)?;
-        settings.set_auto_exposure_speed_up(rng.gen_range(1.0..=20.0))?;
-
-        settings.set_b_override_auto_exposure_speed_down(true)?;
-        settings.set_auto_exposure_speed_down(rng.gen_range(1.0..=20.0))?;
-
-        settings.set_b_override_color_saturation(true)?;
-        settings.color_saturation().store(FVector4 {
-            x: Some(rng.gen_range(0.0..=1.0)),
-            y: Some(rng.gen_range(0.0..=1.0)),
-            z: Some(rng.gen_range(0.0..=1.0)),
-            w: Some(rng.gen_range(0.0..=1.0)),
-        })
-    })
-    .await
+    let scalars: [(&str, &str, f32); 4] = [
+        (
+            "PostProcessSettings.bOverride_WhiteTemp",
+            "PostProcessSettings.WhiteTemp",
+            rng.gen_range(700.0_f32..=2000.0_f32),
+        ),
+        (
+            "PostProcessSettings.bOverride_BloomIntensity",
+            "PostProcessSettings.BloomIntensity",
+            rng.gen_range(0.0_f32..=1.0_f32),
+        ),
+        (
+            "PostProcessSettings.bOverride_AutoExposureSpeedUp",
+            "PostProcessSettings.AutoExposureSpeedUp",
+            rng.gen_range(1.0_f32..=20.0_f32),
+        ),
+        (
+            "PostProcessSettings.bOverride_AutoExposureSpeedDown",
+            "PostProcessSettings.AutoExposureSpeedDown",
+            rng.gen_range(1.0_f32..=20.0_f32),
+        ),
+    ];
+    for (override_prop, prop, value) in scalars {
+        tempo_world::set_bool_property_async(
+            owner.to_string(),
+            camera_name.to_string(),
+            override_prop.to_string(),
+            true,
+        )
+        .await?;
+        tempo_world::set_float_property_async(
+            owner.to_string(),
+            camera_name.to_string(),
+            prop.to_string(),
+            value,
+        )
+        .await?;
+    }
+    tempo_world::set_bool_property_async(
+        owner.to_string(),
+        camera_name.to_string(),
+        "PostProcessSettings.bOverride_ColorSaturation".to_string(),
+        true,
+    )
+    .await?;
+    for axis in ["X", "Y", "Z", "W"] {
+        let prop = format!("PostProcessSettings.ColorSaturation.{}", axis);
+        let v: f32 = rng.gen_range(0.0_f32..=1.0_f32);
+        tempo_world::set_float_property_async(
+            owner.to_string(),
+            camera_name.to_string(),
+            prop,
+            v,
+        )
+        .await?;
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------

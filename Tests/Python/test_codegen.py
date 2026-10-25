@@ -1,5 +1,5 @@
 # Copyright Tempo Simulation, LLC. All Rights Reserved
-"""Tests for the generated typed class surface.
+"""Tests for the generated reflected API.
 
 These test the guarantee rather than the text. A golden-output test would notice that the emitted
 bytes changed; what matters is whether a type checker rejects the things it has to reject, because

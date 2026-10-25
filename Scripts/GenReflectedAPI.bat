@@ -1,17 +1,17 @@
 @echo off
 setlocal enabledelayedexpansion
 
-REM Generates the typed class surface from the editor's reflection: runs the schema commandlet in
-REM the editor, then turns the one schema into classes for the project's Python package and (when
-REM Rust generation is opted in) its Rust crate.
+REM Generates the reflected API from the editor's reflection: runs the schema commandlet in the
+REM editor, then turns the one schema into classes for the project's Python package and (when Rust
+REM generation is opted in) its Rust crate.
 REM
 REM Run on its own, to refresh the classes after changing a Blueprint or a UPROPERTY:
 REM
-REM   Scripts\GenTypedAPI.bat
+REM   Scripts\GenReflectedAPI.bat
 REM
 REM Nothing calls it: Package.bat builds no client packages, so nothing this generates ships. That
 REM is also why this mirror stops short of the .sh -- it generates from the editor's unfiltered
-REM walk and so makes neither the published subset nor the C++ library (see the notes below).
+REM walk and so does not make the C++ library (see the note below).
 REM
 REM The schema lands in Saved\TempoSchema\tempo_schema.json. The classes go into the project's own
 REM client package and crate, beside the wrappers its protos generate: <project>.reflected in
@@ -46,7 +46,7 @@ if not defined PYTHON_BIN (
     where python >nul 2>&1 && set "PYTHON_BIN=python"
 )
 if not defined PYTHON_BIN (
-    echo No python interpreter available to generate the typed classes 1>&2
+    echo No python interpreter available to generate the reflected API 1>&2
     exit /b 1
 )
 
@@ -56,7 +56,7 @@ for /f "usebackq delims=" %%I in (`"!PYTHON_BIN!" -c "import sys; sys.path.inser
 
 set "SCHEMA_DIR=!PROJECT_ROOT!\Saved\TempoSchema"
 set "SCHEMA=!SCHEMA_DIR!\tempo_schema.json"
-set "LOG=!SCHEMA_DIR!\gen_typed_api.log"
+set "LOG=!SCHEMA_DIR!\gen_reflected_api.log"
 if not exist "!SCHEMA_DIR!" mkdir "!SCHEMA_DIR!"
 
 echo Walking reflection to !SCHEMA! (this loads every Blueprint, so it takes a minute)
@@ -85,21 +85,11 @@ if exist "!CLASSES_DIR!" rmdir /s /q "!CLASSES_DIR!"
 echo Generating !IMPORT_NAME!.reflected
 "!PYTHON_BIN!" "!PYTHON_DIR!\gen_py_classes.py" "!SCHEMA!" "!CLASSES_DIR!" "--package=!IMPORT_NAME!.reflected"
 if errorlevel 1 exit /b 1
-echo Typed Python classes generated at !CLASSES_DIR!
+echo Reflected Python API generated at !CLASSES_DIR!
 
-REM No published class subset here, deliberately.
-REM
-REM The subset describes the modules every build ships, so it can travel with the published wheel
-REM (TYPED_WORLD_API_PLAN.md section 16) -- but only if what it narrows is itself narrowed to a
-REM packaged build. This mirror generates from the editor's unfiltered walk, which has ~46%% more
-REM classes than a packaged game and editor-only members on the classes both have. A published
-REM package built from that would describe classes and members no build has, which is worse than
-REM having none.
-REM
-REM That unfiltered walk is this mirror's wider gap: the .sh asks the packaged build what it has and
-REM now refuses to generate without an answer, while this one has never asked. Package.bat builds no
-REM Python or Rust clients either, so nothing here ships today -- closing both is one job.
-echo Skipping the published classes ^(this mirror generates from the editor's unfiltered walk^)
+REM This mirror generates from the editor's unfiltered walk: the .sh asks the packaged build what it
+REM has and refuses to generate without an answer, while this one has never asked. Package.bat builds
+REM no Python or Rust clients either, so nothing here ships today -- closing both is one job.
 
 REM The Rust classes, from the same schema, into the project's own crate as its reflected module. The
 REM crate's manifest and lib.rs are written after them, because lib.rs declares what src\ holds.
@@ -113,11 +103,11 @@ echo Generating !IMPORT_NAME!::reflected
 if errorlevel 1 exit /b 1
 "!PYTHON_BIN!" "!PYTHON_DIR!\gen_project_package.py" rust "!PROJECT_ROOT!"
 if errorlevel 1 exit /b 1
-echo Typed Rust classes generated at !RUST_CLASSES_DIR!
+echo Reflected Rust API generated at !RUST_CLASSES_DIR!
 goto :cpp
 
 :no_rust
-echo Skipping the typed Rust classes (set TEMPO_GEN_RUST_API=1 to generate them)
+echo Skipping the reflected Rust API (set TEMPO_GEN_RUST_API=1 to generate it)
 
 :cpp
 REM No C++ classes here either, under the same caveat. The .sh compiles them into libtempo_reflected
@@ -125,6 +115,6 @@ REM and installs it beside the C++ client in TempoCore\Content\Cpp\API, which is
 REM links. Built from the unfiltered walk, that library would declare the editor's classes and
 REM members, so a program against it compiles and then fails at runtime on a packaged sim -- and
 REM unlike the Python and Rust trees above, it would sit exactly where the next C++ build looks.
-REM A typed C++ library that cannot be trusted is worse than none.
-echo Skipping the typed C++ classes ^(this mirror generates from the editor's unfiltered walk^)
+REM A reflected C++ library that cannot be trusted is worse than none.
+echo Skipping the reflected C++ API ^(this mirror generates from the editor's unfiltered walk^)
 exit /b 0

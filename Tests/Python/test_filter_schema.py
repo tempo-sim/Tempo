@@ -18,6 +18,8 @@ import sys
 
 import pytest
 
+from test_codegen import DIST, GENERATOR, check
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 PLUGIN_ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 PYTHON_DIR = os.path.join(PLUGIN_ROOT, "TempoCore", "Content", "Python")
@@ -309,9 +311,8 @@ def test_a_class_whose_superclass_the_build_lacks_is_rerooted(tmp_path, schema, 
 
     A schema and a report taken from the same build keep every superclass by construction; a stale
     schema beside a fresh report need not. Both generators read a superclass they cannot resolve as
-    "this class is a root", so a dangling one strips every inherited member without a type error --
-    the same failure the published subset reroots to avoid, so the same remedy, recorded the same
-    way in the header.
+    "this class is a root", so a dangling one strips every inherited member without a type error.
+    So such a class is pointed at its nearest kept ancestor, and the header records it.
     """
     gone = "/Script/SomePlugin.PluginBase"
     del surface["classes"][gone]
@@ -338,6 +339,43 @@ def test_a_class_whose_superclass_the_build_lacks_is_rerooted(tmp_path, schema, 
     # The invariant itself, over the whole document.
     assert [(cls["path"], cls["super"]) for cls in filtered["classes"]
             if cls.get("super") and cls["super"] not in by_path] == []
+
+
+def test_a_rerooted_class_keeps_what_its_kept_ancestors_declare(tmp_path, schema):
+    """Why rerooting exists, asserted rather than described, through a type checker.
+
+    The same narrowing twice, once rerooted and once left dangling. The kept classes are the same
+    and both sets of stubs type-check -- but without rerooting the inherited half of the surface
+    quietly disappears. If the dangling case ever passes, rerooting has stopped mattering and
+    nothing else would say so.
+    """
+    gone = "/Script/SomePlugin.PluginBase"
+    keep = {cls["path"] for cls in schema["classes"] if cls["path"] != gone}
+    snippet = """
+import fixture_classes.Engine as E
+
+def ok(b: E.Bridged) -> None:
+    b.bBridged = True          # its own
+    b.bEnabled = True          # Widget's, above the dropped class
+    b.Refresh()                # Widget's, likewise
+"""
+
+    def generate(document, name):
+        out = tmp_path / name
+        out.mkdir()
+        (out / "schema.json").write_text(json.dumps(document))
+        subprocess.run([sys.executable, GENERATOR, str(out / "schema.json"), str(out / DIST)],
+                       check=True, capture_output=True, text=True)
+        return out
+
+    dangling = filter_schema.filter_schema(schema, keep)
+    rerooted = copy.deepcopy(dangling)
+    filter_schema.reroot(rerooted, {cls["path"]: cls for cls in schema["classes"]})
+
+    errors = check(generate(rerooted, "rerooted"), snippet, tmp_path)
+    assert errors == [], "a rerooted class must keep its kept ancestors: {}".format(errors)
+    assert check(generate(dangling, "dangling"), snippet, tmp_path), \
+        "a dangling superclass should have cost Bridged its inherited members"
 
 
 def test_a_class_the_build_does_not_report_is_left_alone(schema, surface):

@@ -114,7 +114,7 @@ fi
 
 # The clients are rebuilt from scratch below, so clear what an earlier package left. Each step only
 # replaces its own destination, and a distribution that no longer exists -- the -classes package the
-# typed classes once shipped as -- would otherwise sit there, still installed by every `pip install
+# reflected API once shipped as -- would otherwise sit there, still installed by every `pip install
 # Packaged/API/Python/*/*.whl`.
 rm -rf "$PROJECT_ROOT/Packaged/API/Python" "$PROJECT_ROOT/Packaged/API/Rust" "$PROJECT_ROOT/Packaged/API/Cpp"
 
@@ -207,20 +207,20 @@ PACKAGE_PYTHON_PACKAGE() {
   fi
 }
 
-# Generate this build's typed classes before the wheels and crates are built, since they go into the
+# Generate this build's reflected API before the wheels and crates are built, since they go into the
 # project's own package and crate. This walks the editor's reflection and loads every Blueprint,
-# which costs about a minute; TEMPO_SKIP_TYPED_API=1 skips it.
+# which costs about a minute; TEMPO_SKIP_REFLECTED_API=1 skips it.
 #
 # Non-fatal by default: it runs the editor, so it can fail for reasons that have nothing to do with
-# whether the package itself is good, and a staged build without the typed classes is still a
+# whether the package itself is good, and a staged build without the reflected API is still a
 # working build. The failure is loud, and the classes are simply absent rather than stale.
-# TEMPO_REQUIRE_TYPED_API=1 makes it fatal instead, for a pipeline whose downstream jobs test the
-# typed classes: a package that went green without them fails those jobs with errors that say
+# TEMPO_REQUIRE_REFLECTED_API=1 makes it fatal instead, for a pipeline whose downstream jobs test the
+# reflected API: a package that went green without them fails those jobs with errors that say
 # nothing about the cause.
 #
 # Either way, classes an earlier package left in the source tree are removed rather than shipped:
 # they describe a different build.
-CLEAR_TYPED_API() {
+CLEAR_REFLECTED_API() {
   if [[ -n "$PYTHON_BIN" ]]; then
     "$PYTHON_BIN" "$PROJECT_ROOT/Plugins/Tempo/TempoCore/Content/Python/gen_project_package.py" \
       clear "$PROJECT_ROOT"
@@ -230,20 +230,20 @@ CLEAR_TYPED_API() {
   rm -rf "$CPP_API/include/tempo/reflected"
   rm -f "$CPP_API"/lib/*/libtempo_reflected.a "$CPP_API"/lib/*/tempo_reflected.lib
 }
-if [[ -n "$TEMPO_SKIP_TYPED_API" && "$TEMPO_SKIP_TYPED_API" != "0" ]]; then
-  echo "Skipping typed classes (TEMPO_SKIP_TYPED_API is set)"
-  CLEAR_TYPED_API
-elif ! "$SCRIPT_DIR"/GenTypedAPI.sh; then
-  if [[ -n "$TEMPO_REQUIRE_TYPED_API" && "$TEMPO_REQUIRE_TYPED_API" != "0" ]]; then
-    echo "Failed to generate the typed classes, which TEMPO_REQUIRE_TYPED_API requires" >&2
+if [[ -n "$TEMPO_SKIP_REFLECTED_API" && "$TEMPO_SKIP_REFLECTED_API" != "0" ]]; then
+  echo "Skipping the reflected API (TEMPO_SKIP_REFLECTED_API is set)"
+  CLEAR_REFLECTED_API
+elif ! "$SCRIPT_DIR"/GenReflectedAPI.sh; then
+  if [[ -n "$TEMPO_REQUIRE_REFLECTED_API" && "$TEMPO_REQUIRE_REFLECTED_API" != "0" ]]; then
+    echo "Failed to generate the reflected API, which TEMPO_REQUIRE_REFLECTED_API requires" >&2
     exit 1
   fi
-  echo "Warning: failed to generate the typed classes; the packaged build will not include them" >&2
-  CLEAR_TYPED_API
+  echo "Warning: failed to generate the reflected API; the packaged build will not include them" >&2
+  CLEAR_REFLECTED_API
 fi
 
-# Copy the C++ client to Packaged/API/Cpp/, self-contained: its headers and archives, the typed
-# classes' archive when there is one, the vendored gRPC headers, and the shared tempogrpc library,
+# Copy the C++ client to Packaged/API/Cpp/, self-contained: its headers and archives, the reflected
+# API's archive when there is one, the vendored gRPC headers, and the shared tempogrpc library,
 # which carries OpenSSL and zlib inside it -- so a consumer needs neither this checkout nor an engine.
 # The shared library rather than the static archives beside it, as Tempo's own modules link it, and
 # at a seventh of their size. TempoConfig.cmake makes it a CMake package (find_package(Tempo)).

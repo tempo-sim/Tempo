@@ -1,5 +1,5 @@
 # Copyright Tempo Simulation, LLC. All Rights Reserved
-"""Tests for the generated typed Rust class surface.
+"""Tests for the generated reflected Rust API.
 
 The same shape as test_codegen.py, and for the same reason: a golden-output test would notice that
 the emitted bytes changed, but what matters is whether the compiler rejects what it has to reject.
@@ -21,7 +21,6 @@ tempo-sim's dependencies.
 
 import os
 import shutil
-from pathlib import Path
 import subprocess
 import sys
 
@@ -69,17 +68,15 @@ def cargo_executable():
     return candidate if os.path.exists(candidate) else None
 
 
-def _sync(source, destination, skip=()):
+def _sync(source, destination):
     """Make `destination` hold what `source` does, touching only files whose content differs.
 
     So that cargo, which goes by modification time, rebuilds only what changed between runs.
     """
     source, destination = str(source), str(destination)
     wanted = set()
-    for directory, subdirectories, files in os.walk(source):
+    for directory, _, files in os.walk(source):
         relative = os.path.relpath(directory, source)
-        subdirectories[:] = [d for d in subdirectories
-                             if os.path.normpath(os.path.join(relative, d)) not in skip]
         for name in files:
             path = os.path.normpath(os.path.join(relative, name))
             wanted.add(path)
@@ -96,50 +93,24 @@ def _sync(source, destination, skip=()):
     for directory, _, files in os.walk(destination):
         for name in files:
             path = os.path.normpath(os.path.relpath(os.path.join(directory, name), destination))
-            if path not in wanted and not any(path.startswith(s + os.sep) for s in skip):
+            if path not in wanted:
                 os.remove(os.path.join(directory, name))
 
 
-def tempo_sim_copy(name, published=None, scratch=None):
-    """tempo-sim's sources, at a fixed path under Saved/ so cargo's cache survives between runs.
-
-    A copy rather than the crate itself, because what `src/reflected` holds is the test's to decide:
-    nothing, or the published types generated from `published`. The in-tree crate holds whatever
-    the last package left there.
-    """
+def tempo_sim_copy(name):
+    """tempo-sim's sources, at a fixed path under Saved/ so cargo's cache survives between runs."""
     copy = os.path.join(PLUGIN_ROOT, "Saved", "RustCodegen", name, "tempo-sim")
-    _sync(os.path.join(RUST_API, "src"), os.path.join(copy, "src"), skip=("reflected",))
+    _sync(os.path.join(RUST_API, "src"), os.path.join(copy, "src"))
     with open(os.path.join(RUST_API, "Cargo.toml"), "rb") as f:
         manifest = f.read()
     target = os.path.join(copy, "Cargo.toml")
     if not os.path.exists(target) or open(target, "rb").read() != manifest:
         with open(target, "wb") as f:
             f.write(manifest)
-    reflected = os.path.join(copy, "src", "reflected")
-    if published is None:
-        if os.path.exists(reflected):
-            shutil.rmtree(reflected)
-        # As a tempo-sim without published types ships: lib.rs declares the module, so an empty
-        # placeholder stands in for it (gen_project_package.ensure_published_module).
-        sys.path.insert(0, PYTHON_DIR)
-        try:
-            import gen_project_package as package
-        finally:
-            sys.path.remove(PYTHON_DIR)
-        package.ensure_published_module(Path(os.path.join(copy, "src")))
-    else:
-        with open(os.path.join(RUST_API, "src", "lib.rs")) as f:
-            assert "pub mod reflected;" in f.read(), \
-                "tempo-sim's lib.rs predates the published types; rebuild to regenerate it"
-        staged = os.path.join(str(scratch), "published-types")
-        subprocess.run(
-            [sys.executable, GENERATOR, str(published), staged, "--root=crate::reflected"],
-            check=True, capture_output=True, text=True)
-        _sync(staged, reflected)
     return copy
 
 
-def make_workspace(root, tempo_sim, extra_args=()):
+def make_workspace(root, tempo_sim):
     """A host crate holding the fixture's types, and a snippet crate depending on it.
 
     `tempo-sim` arrives as a symlink beside the host crate, so the layout under test is the one
@@ -150,7 +121,7 @@ def make_workspace(root, tempo_sim, extra_args=()):
     host = root / CRATE
     subprocess.run(
         [sys.executable, GENERATOR, FIXTURE, str(host / "src" / "reflected"),
-         "--root=crate::reflected"] + list(extra_args),
+         "--root=crate::reflected"],
         check=True, capture_output=True, text=True)
 
     sys.path.insert(0, PYTHON_DIR)
@@ -174,45 +145,10 @@ def make_workspace(root, tempo_sim, extra_args=()):
 
 @pytest.fixture(scope="module")
 def workspace(tmp_path_factory):
-    """The fixture's types in a host crate, with nothing published to re-export."""
+    """The fixture's types in a host crate."""
     if cargo_executable() is None:
         pytest.skip("cargo is not installed")
     return make_workspace(tmp_path_factory.mktemp("rust"), tempo_sim_copy("plain"))
-
-
-def published_fixture(directory):
-    """The fixture's published subset, altered as a different release would be.
-
-    Widget hashes differently, so a project has to define its own -- and so must everything
-    deriving from it. MeshThing and Object match, and are re-exported.
-    """
-    import json
-
-    sys.path.insert(0, PYTHON_DIR)
-    try:
-        import subset_schema
-    finally:
-        sys.path.remove(PYTHON_DIR)
-    with open(FIXTURE) as f:
-        schema = json.load(f)
-    published, _ = subset_schema.subset(schema, ("/Script/CoreUObject", "/Script/Engine"))
-    for cls in published["classes"]:
-        if cls["path"] == "/Script/Engine.Widget":
-            cls["content_hash"] = "A-DIFFERENT-WIDGET"
-    path = directory / "published.json"
-    path.write_text(json.dumps(published))
-    return path
-
-
-@pytest.fixture(scope="module")
-def reexporting(tmp_path_factory):
-    """The fixture's types against published ones they partly share."""
-    if cargo_executable() is None:
-        pytest.skip("cargo is not installed")
-    root = tmp_path_factory.mktemp("rust-reexporting")
-    published = published_fixture(root)
-    tempo_sim = tempo_sim_copy("published", published, root)
-    return make_workspace(root, tempo_sim, ["--published={}".format(published)])
 
 
 def run(workspace, body):
@@ -435,15 +371,6 @@ def test_the_classes_are_registered_before_main(workspace):
     assert stdout.strip() == "1"
 
 
-def test_the_published_classes_are_registered_beside_the_projects(reexporting):
-    stdout, stderr, status = run(reexporting, """
-    println!("{}", tempo_sim::unreal::hierarchies().len());
-    let _ = &widget;
-""")
-    assert status == 0, stderr
-    assert stdout.strip() == "2"
-
-
 def test_the_asset_catalog_compiles(workspace):
     assert check(workspace, """
     use fixture_project::reflected::assets::game::widgets::W_Main;
@@ -631,46 +558,6 @@ def test_the_escape_hatch_is_explicit(workspace):
     assert check(workspace, """
     let _: i32 = widget.get("WhateverThisIs")?;
 """), "ObjectRef's string API must not be reachable without naming the field"
-
-
-# -- re-exporting the published types (section 16.5) ---------------------------------------------
-
-def test_a_shared_class_is_the_published_type(reexporting):
-    """A helper written against tempo-sim's type takes the project's: they are one type."""
-    assert check(reexporting, """
-    fn published_mesh(_m: &tempo_sim::reflected::classes::engine::MeshThing) {}
-    published_mesh(&mesh);
-    let _object: &tempo_sim::reflected::classes::core_u_object::Object = &mesh;
-""") == []
-
-
-def test_a_class_the_release_describes_differently_is_the_projects_own(reexporting):
-    assert check(reexporting, """
-    fn published_widget(_w: &tempo_sim::reflected::classes::engine::Widget) {}
-    published_widget(&widget);
-""") != []
-
-
-def test_the_project_table_brings_in_the_published_one(reexporting):
-    """MeshThing's superclass is in the published table only; registering the project's finds it."""
-    stdout, stderr, status = run(reexporting, """
-    tempo_sim::unreal::register_classes(<Widget as Class>::hierarchy());
-    let as_mesh = ObjectRef::actor("m").with_class(MeshThing::PATH);
-    println!("{}", as_mesh.is_a(Object::PATH));
-""")
-    assert status == 0, stderr
-    assert stdout.strip() == "true"
-
-
-def test_a_re_exported_entry_is_left_out_of_the_project_table(reexporting):
-    hierarchy = (reexporting / CRATE / "src" / "reflected" / "hierarchy.rs").read_text()
-    # Its superclass entry, not the name: an asset's class is in the table either way.
-    assert '("/Script/Engine.MeshThing", "/Script/CoreUObject.Object")' not in hierarchy
-    assert '("/Script/Engine.Widget", "/Script/CoreUObject.Object")' in hierarchy
-    assert "fn depends_on" in hierarchy
-    manifest = (reexporting / CRATE / "Cargo.toml").read_text()
-    assert 'reflected = ["tempo-sim/reflected"]' in manifest
-
 
 
 # -- conversions -----------------------------------------------------------------------------------

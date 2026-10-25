@@ -3,7 +3,7 @@
 # The Tempo C++ client, as a CMake package:
 #
 #   find_package(Tempo CONFIG REQUIRED PATHS <this directory>)
-#   target_link_libraries(my_client PRIVATE tempo::reflected)   # the typed classes, and everything
+#   target_link_libraries(my_client PRIVATE tempo::reflected)   # the reflected API, and everything
 #   target_link_libraries(my_client PRIVATE tempo::tempo)       # the RPC client alone
 #
 # Works from either place the client lives: Packaged/API/Cpp, which carries the gRPC headers and the
@@ -89,7 +89,7 @@ if(NOT TARGET tempo::reflected)
     else()
         set(_TEMPO_REFLECTED "${_TEMPO_LIB}/libtempo_reflected.a")
     endif()
-    # The typed classes are built at package time, so a client generated only at build time has
+    # The reflected API is built at package time, so a client generated only at build time has
     # none: tempo::reflected is then simply not there.
     if(EXISTS "${_TEMPO_REFLECTED}")
         add_library(tempo::reflected STATIC IMPORTED)

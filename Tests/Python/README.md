@@ -11,9 +11,9 @@ Each marker is also a CI fan-out group — see `.github/workflows/test_packaged.
 | Marker | Needs running sim? | Covers |
 |---|---|---|
 | `contract` | no (wheel only) | the generated package imports and exposes the expected per-module API surface |
-| `codegen` | no (no wheel either) | the typed class generators and the runtime that serves the Python classes, against the fixture schema in `fixtures/mini_schema.json`, plus the schema filter/subset/diff tools. Each drift case asserts Pyright's verdict on a snippet, so it needs `pyright` (the runner installs it, with its own Node). The Rust and C++ halves compile what their generators emit and skip without `cargo` / a host compiler and the vendored gRPC. |
+| `codegen` | no (no wheel either) | the reflected API generators and the runtime that serves the Python classes, against the fixture schema in `fixtures/mini_schema.json`, plus the schema filter/diff tools. Each drift case asserts Pyright's verdict on a snippet, so it needs `pyright` (the runner installs it, with its own Node). The Rust and C++ halves compile what their generators emit and skip without `cargo` / a host compiler and the vendored gRPC. |
 | `core` | yes | TempoCore time control (level name, sim time, fixed-step determinism) |
-| `world` | yes | TempoWorld spawn/query/move/destroy + meters/right-handed coordinate round trips, and the typed class API (`tempo_sim.world` handles, property reads and writes, batching, `check_schema`) through the generated classes the wheel ships |
+| `world` | yes | TempoWorld spawn/query/move/destroy + meters/right-handed coordinate round trips, and the reflected API (`tempo_sim.world` handles, property reads and writes, batching, `check_schema`) through the project's generated classes |
 | `movement` | yes | TempoMovement commandable-pawn listing + velocity command moves a pawn (skips if the map has no commandable pawns) |
 | `sensors` | yes + **GPU** | TempoSensors data APIs (stream a camera frame). Needs `TEMPO_SIM_RENDER=1` and a GPU; **excluded from the default CI matrix.** |
 

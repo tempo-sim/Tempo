@@ -2,7 +2,7 @@
 #
 # Compares two tempo_schema.json files and reports what a client could break against.
 #
-# A release regenerates the typed classes, and a scenario written against the old ones either still
+# A release regenerates the reflected API, and a scenario written against the old ones either still
 # type-checks or does not. This says which, before the release rather than after: removed classes,
 # removed or retyped properties, properties that became read-only, changed signatures, functions no
 # longer offered, removed or retyped components, removed enumerators, struct members that went away

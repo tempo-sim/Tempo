@@ -1,4 +1,4 @@
-# Typed classes
+# Reflected API
 
 The property API addresses everything by string:
 
@@ -9,7 +9,8 @@ tempo_world.set_float_property(actor="Cat745_2", property="MaxSpeed", value=1200
 Nothing checks that spelling until the call runs. Rename `MaxSpeed` in C++ or in a Blueprint and
 nothing breaks until a scenario reaches that line, mid-simulation, and gets `NOT_FOUND`.
 
-The **typed classes** are the same capability with the strings removed:
+The **reflected API** is the same capability with the strings removed, generated from Unreal's own
+reflection of your build:
 
 ```python
 from tempo_sim import world
@@ -31,34 +32,35 @@ before anything runs.
 
 !!! tip "Setting this up for the first time"
 
-    [Typed classes, step by step](../guides/typed-classes.md) walks from packaging to a type checker
+    [The reflected API, step by step](../guides/reflected-api.md) walks from packaging to a type checker
     catching a rename, with a runnable example. This page is the reference behind it.
 
 ## Before you start
 
-Five things about the typed classes catch people out. Each has a section below.
+Five things about the reflected API catch people out. Each has a section below.
 
-1. **They speak Unreal's units, not Tempo's.** Centimetres, degrees and a left-handed frame, unlike
-   every other Tempo RPC. Their value types are Unreal's own — `FVector`, `FRotator`,
+1. **It speaks Unreal's units, not Tempo's.** Centimetres, degrees and a left-handed frame, unlike
+   every other Tempo RPC. Its value types are Unreal's own — `FVector`, `FRotator`,
    `FTransform` — shaped as Unreal's are, and `tempo_sim.conversion` converts to and from SI. See
    [Units](#units).
-2. **They describe the latest supported engine.** The types shipped in `tempo-sim` are generated
-   from the newest engine version Tempo supports, and only a project's own types are exact for its
-   build. See [Latest engine only](#latest-engine-only).
+2. **It comes from your packaged build.** The classes are generated per project, from the build
+   they describe — its exact engine version, plugins, C++ and Blueprints — so they exist only once
+   you have packaged it. `pip install tempo-sim` alone gives you none. See [Installing](#installing).
 3. **A class offers only what it exposes to Blueprint.** A property needs `BlueprintReadWrite` or
    `BlueprintReadOnly`, and a function needs `BlueprintCallable` or `BlueprintPure`. Without one of
    those it is absent, however it is declared otherwise. See
    [What a class offers](#what-a-class-offers).
-4. **Two packages carry them.** `tempo-sim` has the runtime and the types every build shares; your
-   project's own package has the types for your build, including its Blueprints and its asset
-   catalog. See [What comes from where](#what-comes-from-where).
-5. **They do not replace an RPC.** Calling a function through them is a quick way to reach
+4. **Two packages carry it.** `tempo-sim` has the runtime, and your project's own package has the
+   classes of your build, including its Blueprints and its asset catalog. See
+   [What comes from where](#what-comes-from-where).
+5. **It does not replace an RPC.** Calling a function through it is a quick way to reach
    something, not a way to design an API. Something that streams, or that finishes later than the
    call, wants an RPC. See [When to write an RPC instead](#when-to-write-an-rpc-instead).
 
 ## Installing
 
-The classes are generated from the build they describe, so they ship with it:
+The classes are generated from the build they describe, when it is packaged (`Package.sh` runs
+`Scripts/GenReflectedAPI.sh`), and they ship with it:
 
 ```bash
 pip install Packaged/API/Python/tempo-sim/*.whl \
@@ -73,58 +75,26 @@ project defines no services. Importing it is what registers the classes with the
 
 | | `tempo-sim` (`tempo_sim`, `tempo_sim::`) | Your project's package (`tempo_sample`, `tempo_sample::`) |
 |---|---|---|
-| **Runtime** | `unreal` (the handle classes, Unreal's value types, `AssetRef`), `world` (the typed mirror of `tempo_world`: discovery, spawning, components, transforms, world state, `batch`, `check_schema`; SI, as `tempo_world` is), `conversion` | none; it uses tempo-sim's |
-| **Types** | `reflected`: the *published* types, for the modules every build has, which are the engine's always-loaded modules and Tempo's plugins | `reflected`: every class in *this* build, including its C++ modules, its Blueprints, the plugins it enables and every engine module it loads |
-| **Asset catalog** | none, since what is cooked depends on the project | `reflected.assets`, everything this build cooked |
-| **Generated from** | the newest engine Tempo supports | this project's packaged build |
-| **Exact for** | that engine version, for the modules it covers | this build |
+| **Runtime** | `unreal` (the handle classes, Unreal's value types, `AssetRef`), `world` (discovery, spawning, components, transforms, world state, `batch`, `check_schema`; the mirror of `tempo_world`, in SI as `tempo_world` is), `conversion` | none; it uses tempo-sim's |
+| **Classes** | none | `reflected`: every class in *this* build, including its C++ modules, its Blueprints, the plugins it enables and every engine module it loads |
+| **Asset catalog** | none | `reflected.assets`, everything this build cooked |
 | **Services** | Tempo's RPC wrappers (`tempo_world`, `tempo_sensors`, …) | the project's own, if it defines any |
-| **Rust feature** | `reflected`, off by default | `reflected`, on by default, which also turns on tempo-sim's |
+| **Rust feature** | none | `reflected`, on by default |
 
-In a scenario for one project, import from that project's package. It covers everything, and where
-it describes a class the same way as the published types, it re-exports the published one rather
-than defining a second (below), so the two never conflict. Import from `tempo_sim.reflected` when
-the code is meant for any Tempo project, such as a helper library or a tool that only touches
-engine and Tempo classes.
+The two runtime modules split along the units boundary. `unreal` holds what is Unreal's own and in
+Unreal's units — the handles the generated classes derive from, `FVector`, `FRotator`, `AssetRef`
+— and `world` holds the functions that, like `tempo_world`, speak SI.
 
-### The published types
+### Exact for your build
 
-`tempo-sim` carries types of its own, for the modules every build has — the engine's always-loaded
-ones and Tempo's — so code that touches only those needs no project package at all:
+**The classes describe the build they were generated from, exactly**: its engine version down to
+the hotfix, the plugins it enables, its own C++ modules and its Blueprints. Nothing in them is a
+guess about some other build, so there is no older-engine caveat — a project on any engine Tempo
+supports gets the classes of that engine.
 
-```python
-from tempo_sim.reflected.Engine import Pawn
-from tempo_sim.reflected.TempoSensors import TempoLidar
-```
-
-A project's package re-exports every one of these it describes alike, rather than generating a
-second type for the same Unreal class: `tempo_sample.reflected.Engine.Pawn` *is*
-`tempo_sim.reflected.Engine.Pawn`. So a helper library written against the published types takes a
-project's Blueprints too. Where the two would differ — a class whose ancestry the published set
-cannot carry, or one mentioning a type it does not have — the project defines its own.
-
-### Latest engine only
-
-**The published types in `tempo-sim` are generated from the newest engine version Tempo supports,
-and only from that one.** One `tempo-sim` wheel and one crate serve every engine Tempo builds
-against, so they cannot also match each of those engines.
-
-What that means for code that uses them against an older engine:
-
-- **A member or enumerator the older engine lacks still type-checks.** It fails at its first use,
-  with the server naming what it does not have. This is the one way the guarantee is weaker against
-  an older engine, and the direction it fails in: never a false error, sometimes a missed one.
-- **A member the newer engine removed is absent**, so code still using it is a type error even
-  though the older engine would have accepted it.
-- **`world.check_schema()` names every class that differs** between the installed types and the
-  running sim. Run it once at the start of a scenario that uses the published types against an
-  older engine.
-
-**A project's own types are not affected.** They are generated from the project's packaged build,
-whatever its engine, so they are exact for it. Where an older engine describes a class differently
-from the newest one, the project's package defines its own type for it instead of re-exporting the
-published one. A scenario that imports from its project's package is therefore checked against its
-real engine.
+The price is that they exist only once the project has been packaged, and are regenerated each time
+it is. After changing a `UPROPERTY` or a Blueprint, package again (or run
+`Scripts/GenReflectedAPI.sh` against the existing package) to see the change.
 
 ## Finding things
 
@@ -229,16 +199,17 @@ hit = results["SweepHitResult"]          # FHitResult
 
     To *move* something, call a function: `SetActorTransform` and friends, or the component's own
     setter. The same applies to any property Unreal exposes through a `BlueprintSetter`, and those
-    the typed API already routes through the accessor for you.
+    the reflected API already routes through the accessor for you.
 
 ### Units
 
-**The typed classes are the one corner of the Tempo API that speaks Unreal's own units**:
+**The reflected API is the one corner of the Tempo API that speaks Unreal's own units**:
 centimetres, degrees, left-handed (X forward, Y right, Z up). Every other Tempo RPC speaks metres,
 radians and a right-handed frame (X forward, Y left, Z up). Raw `UPROPERTY` values carry no semantic
-tagging, so converting them would be guesswork, and the typed API therefore does not convert at all.
+tagging, so converting them would be guesswork, and the reflected API therefore does not convert at
+all.
 
-That covers everything that goes through a typed class: property reads and writes, function
+That covers everything that goes through a reflected class: property reads and writes, function
 arguments and results, struct members, `watch`, batches and snapshots. A `MaxDistance` of `20000.0`
 is 200 metres, and a `RelativeRotation` yaw of `90.0` is a quarter turn to the right. `world`, on
 the other hand, mirrors `tempo_world` and speaks SI like it: `spawn_actor` takes a `Transform` in
@@ -246,7 +217,7 @@ metres and radians, as `tempo_world.spawn_actor` does.
 
 #### Unreal's own types
 
-The values the typed classes carry are Unreal's own, named and shaped as Unreal's are, in
+The values the reflected API carries are Unreal's own, named and shaped as Unreal's are, in
 `tempo_sim.unreal`, `tempo_sim::unreal` and `tempo::unreal`:
 
 | Type | Shape | |
@@ -259,7 +230,7 @@ The values the typed classes carry are Unreal's own, named and shaped as Unreal'
 | `FColor` | `R`, `G`, `B`, `A` | 8-bit sRGB, opaque by default |
 | `FLinearColor` | `R`, `G`, `B`, `A` | floating-point, linear, opaque by default |
 
-Member names follow each language's convention, as everywhere in the typed classes: `Pitch` in
+Member names follow each language's convention, as everywhere in the reflected API: `Pitch` in
 Python, `pitch` in Rust and C++. So `FRotator(10, 20, 30)` means what it does in Unreal — pitch 10,
 yaw 20, roll 30 — and an `FTransform` carries its scale, which a write keeps rather than resetting
 to 1.
@@ -439,7 +410,7 @@ asset the package has and the sim does not.
 
 ## The world module
 
-`world` is the typed counterpart of `tempo_world`, and mirrors it: the same functions, the same
+`world` is the reflected API's counterpart of `tempo_world`, and mirrors it: the same functions, the same
 arguments in the same SI units — metres, radians, right-handed — with a handle wherever
 `tempo_world` takes an actor's or a component's name, and a class wherever it takes a class's. Each
 returns what its `tempo_world` namesake returns, except that what makes a thing hands back a typed
@@ -493,8 +464,8 @@ takes most of a minute. Call it once from a test, or at the start of a long run.
 
 The comparison is per class, so the report names what moved rather than only saying that something
 did, and it distinguishes a class whose members changed from a class the sim does not have at all.
-A class the *sim* has and your package does not is not a finding — that is the normal state of a
-package describing part of a build.
+A class the *sim* has and your package does not is not a finding: nothing written against the package
+can address it, so nothing can fail because of it.
 
 ## What is not there
 
@@ -522,10 +493,10 @@ unfiltered on purpose.
 
 ## What a class offers
 
-**A member reaches the typed classes only if its class exposes it to Blueprint.** The specifier
+**A member reaches the reflected API only if its class exposes it to Blueprint.** The specifier
 decides, and nothing else does:
 
-| Declared as | In the typed classes |
+| Declared as | In the reflected API |
 |---|---|
 | `UPROPERTY(BlueprintReadWrite)` | read and write |
 | `UPROPERTY(BlueprintReadOnly)` | read only: no setter in Python, and no `set_` method in Rust |
@@ -560,7 +531,7 @@ This is deliberate, because the guarantee is only as good as the surface it cove
 plenty of `UPROPERTY`s that exist so the garbage collector, the serializer or the editor can see
 them, and offering those to scenarios would make every internal change a breaking one. The
 Blueprint specifier is the declaration Unreal already has for "this is meant to be used from
-outside", so the typed classes use it as theirs.
+outside", so the reflected API uses it as its own.
 
 **If something you need is missing, the fix is in the class.** Add `BlueprintReadWrite`,
 `BlueprintReadOnly` or `BlueprintCallable`, rebuild, and regenerate (`Package.sh` does that). For a
@@ -569,7 +540,7 @@ property regardless, but without the guarantee that it will still be there next 
 
 ## When to write an RPC instead
 
-The typed classes can call any Blueprint-callable function, so it is tempting to treat them as a
+The reflected API can call any Blueprint-callable function, so it is tempting to treat it as a
 way to add API without writing any: put a `UFUNCTION(BlueprintCallable)` on a class and call it from
 Python. For a one-off, or for a function that already exists, that is fine. For something clients
 will depend on, a [proper RPC](../guides/custom-services.md) is usually better. The reasons, roughly
@@ -581,28 +552,28 @@ in order of how often they decide it:
   (a collision, a lane change, a traffic light turning), bulk data at its own rate (images, point
   clouds) and anything computed rather than stored need a streaming RPC, which is how Tempo's
   sensors work.
-- **It finishes later than the call.** A typed call runs the function on the game thread and
+- **It finishes later than the call.** A reflected call runs the function on the game thread and
   answers in the same tick with whatever it returned. That is also why latent functions are left
   out: their result arrives later and the call cannot wait for it. An RPC handler can hold its
   response until the work is done, such as arriving at a destination, finishing a render readback,
   or stepping some number of frames, so the client makes one call and awaits it instead of polling.
 - **It should speak SI.** An RPC converts its values once, in the server, which knows what each
-  one means: a location is scaled, a direction is not, a scale is left alone. A typed function
-  hands every client raw Unreal values to convert itself.
+  one means: a location is scaled, a direction is not, a scale is left alone. A reflected
+  function hands every client raw Unreal values to convert itself.
 - **It is a contract, not an implementation detail.** A `.proto` is an API you design and version
   on purpose. A function's signature changes whenever someone edits the C++ or the Blueprint. The
-  typed classes make that change a type error, but an RPC keeps it from happening at all. And to be
+  reflected API makes that change a type error, but an RPC keeps it from happening at all. And to be
   reachable, the function has to be `BlueprintCallable`, which also exposes it to every Blueprint.
 - **Other clients need it.** The C++ client and the ROS bridge are generated from the protos and
-  know nothing about the typed classes.
-- **It moves a lot of data.** Every typed value travels as a self-describing `Value`, and every
+  know nothing about the reflected API.
+- **It moves a lot of data.** Every reflected value travels as a self-describing `Value`, and every
   call names its target and member as strings for the server to look up through reflection. A
   purpose-built message, such as the packed arrays a lidar scan uses, is far cheaper for bulk data.
   A batch reduces the number of round trips, but not the cost of each value.
-- **It needs a type the typed classes cannot carry**, such as a map, a fixed-size array, a delegate
+- **It needs a type the reflected API cannot carry**, such as a map, a fixed-size array, a delegate
   or a struct with one of those inside (see [What is not there](#what-is-not-there)).
 
-The typed classes are the right tool for what they were built for: configuring and observing what
+The reflected API is the right tool for what it was built for: configuring and observing what
 a class already exposes, and calling the functions it already has, with a type checker catching the
 day any of it changes.
 
@@ -610,9 +581,7 @@ day any of it changes.
 
 The classes are generated for Rust too, from the same schema and with the same guarantee, as the
 `reflected` module of the project's own crate — behind its `reflected` feature, which is on by
-default. The crate ships beside `tempo-sim` when the build is packaged with `TEMPO_GEN_RUST_API=1`.
-The published types are `tempo_sim::reflected`, behind tempo-sim's own `reflected` feature, which is
-off by default and which a project's crate turns on for the ones it re-exports:
+default. The crate ships beside `tempo-sim` when the build is packaged with `TEMPO_GEN_RUST_API=1`:
 
 ```toml
 [dependencies]
@@ -761,11 +730,10 @@ adding a parameter to a Blueprint cannot silently shift the others onto the wron
 
 ## The same thing in C++
 
-The C++ client has the typed classes too, generated from the same schema with the same guarantee —
-here the compiler's. They describe the project's whole build, as `tempo::reflected`, in a second
+The C++ client has the reflected API too, generated from the same schema with the same guarantee —
+here the compiler's. It describes the project's whole build, as `tempo::reflected`, in a second
 archive, `libtempo_reflected`, which `Package.sh` builds and ships in `Packaged/API/Cpp` when
-`TEMPO_GEN_CPP_API=1`. There is one tree rather than Python's and Rust's two, because the C++ client
-is built per project rather than published, so there is no latest-engine limitation either.
+`TEMPO_GEN_CPP_API=1`.
 
 ```cpp
 #include <tempo/world.h>

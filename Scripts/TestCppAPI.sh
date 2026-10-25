@@ -13,7 +13,7 @@
 # Usage:
 #   Scripts/TestCppAPI.sh contract         # links, conversions, the typed hierarchy (no sim)
 #   Scripts/TestCppAPI.sh integration      # the RPC client against a running sim
-#   Scripts/TestCppAPI.sh typed            # the typed classes against a running sim
+#   Scripts/TestCppAPI.sh typed            # the reflected API against a running sim
 #
 # Env:
 #   TEMPO_PACKAGED_DIR     Path to the Packaged folder (defaults to <project root>/Packaged).

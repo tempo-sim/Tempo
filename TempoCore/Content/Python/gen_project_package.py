@@ -4,18 +4,18 @@
 
 A project's `tempo-sample` package and crate are filled by two pipelines that run at different
 times. The RPC wrappers come from its protos, at build time (`gen_api.py`, `gen_rust_api.py`); the
-typed classes come from its reflection, at package time (`Scripts/GenTypedAPI.sh`), into
+reflected API comes from its reflection, at package time (`Scripts/GenReflectedAPI.sh`), into
 `tempo_sample.reflected` and `tempo_sample::reflected`. Either can be the first to need the
 package -- a project with no protos has classes and nothing else -- so both write its manifest,
 `__init__`/`lib.rs` and `.gitignore` through here, and each file is derived from what is on disk
 rather than from what the caller happened to generate. The other pipeline's half is then never
 written out of it.
 
-Standard library only, because GenTypedAPI.sh runs on whatever interpreter it finds.
+Standard library only, because GenReflectedAPI.sh runs on whatever interpreter it finds.
 
     gen_project_package.py python <project_root>   create the package, write its own files
     gen_project_package.py rust <project_root>     create the crate, write its own files
-    gen_project_package.py clear <project_root>    remove the generated types, published ones too
+    gen_project_package.py clear <project_root>    remove the generated types
 """
 
 import json
@@ -27,10 +27,9 @@ from pathlib import Path
 
 from gen_naming import INFRA_PACKAGE, package_import_name, project_package_name
 
-# Where the typed classes go inside the project's package and crate, beside the proto modules --
-# and where the published ones go inside tempo-sim's. One level down because a class module is
-# named after its Unreal module, as a proto module is, and `/Script/Greeter` would otherwise land
-# on the `Greeter` protos.
+# Where the reflected API goes inside the project's package and crate, beside the proto modules.
+# One level down because a class module is named after its Unreal module, as a proto module is, and
+# `/Script/Greeter` would otherwise land on the `Greeter` protos.
 PYTHON_CLASSES = "reflected"
 RUST_CLASSES = "reflected"
 
@@ -134,7 +133,7 @@ def write_project_pyproject(project_api_dir: Path, dist_name: str, import_name: 
     version = metadata.get("version", "0.1.0")
     description = metadata.get(
         "description",
-        "Project-specific Tempo client API: its own services and the typed classes of its build, "
+        "Project-specific Tempo client API: its own services and the reflected API of its build, "
         "on top of tempo-sim.")
 
     deps = [f"tempo-sim=={tempo_sim_version}"]
@@ -189,7 +188,7 @@ def write_project_pyproject(project_api_dir: Path, dist_name: str, import_name: 
         "[tool.setuptools.packages.find]",
         f'include = [{_toml_str(import_name)}, {_toml_str(import_name + ".*")}]',
         "",
-        # The typed classes' .pyi files are the whole point of them and are not .py, so they have
+        # The reflected API's .pyi files are the whole point of them and are not .py, so they have
         # to be listed -- as does py.typed, without which a type checker ignores an installed
         # package's stubs altogether -- along with the metadata the runtime builds a request from.
         "[tool.setuptools.package-data]",
@@ -218,7 +217,7 @@ def write_project_init(project_pkg_dir: Path):
 def write_project_gitignore(project_api_dir: Path, import_name: str):
     """Write the project package's .gitignore.
 
-    The whole package dir is generated (pb2, wrappers, typed classes, __init__), so it stays
+    The whole package dir is generated (pb2, wrappers, reflected API, __init__), so it stays
     out of git; consumers regenerate it locally. The generated pyproject.toml and
     the user's project_info.json are tracked.
     """
@@ -228,8 +227,8 @@ def write_project_gitignore(project_api_dir: Path, import_name: str):
         "/dist/\n"
         "*.egg-info/\n"
         "\n"
-        "# Generated Python package (pb2 + wrappers from gen_protos.py / gen_api.py, typed classes\n"
-        "# from GenTypedAPI.sh)\n"
+        "# Generated Python package (pb2 + wrappers from gen_protos.py / gen_api.py, reflected API\n"
+        "# from GenReflectedAPI.sh)\n"
         f"/{import_name}/\n",
         encoding="utf-8",
     )
@@ -256,37 +255,6 @@ def _has_classes(src_dir: Path) -> bool:
     return (src_dir / RUST_CLASSES / "mod.rs").exists()
 
 
-def ensure_published_module(tempo_src_dir: Path):
-    """Give tempo-sim a `reflected` module if nothing has generated one: an empty placeholder.
-
-    tempo-sim's lib.rs declares `reflected` behind its feature unconditionally, and a project's
-    crate turns that feature on by default for the published types it re-exports. So the module
-    has to exist in every tempo-sim a project can depend on, whether or not Scripts/GenTypedAPI.sh
-    has run -- and it runs at package time, after the build that writes lib.rs, so lib.rs cannot
-    decide by looking. A tempo-sim that shipped with the declaration and no module failed every
-    dependent with "file not found for module `reflected`" the moment the default feature turned it
-    on. GenTypedAPI.sh removes the placeholder and generates the real module in its place; a package
-    run that generates no types puts it back (`clear_classes`).
-    """
-    module = tempo_src_dir / RUST_CLASSES
-    if (module / "mod.rs").exists():
-        return
-    shutil.rmtree(module, ignore_errors=True)
-    module.mkdir(parents=True)
-    (module / "mod.rs").write_text(
-        "// Copyright Tempo Simulation, LLC. All Rights Reserved\n"
-        "//\n"
-        "// Auto-generated by gen_project_package.py. Do not edit.\n"
-        "\n"
-        "//! The published typed classes, of which this tempo-sim has none.\n"
-        "//!\n"
-        "//! Scripts/GenTypedAPI.sh replaces this module with the classes of the engine's\n"
-        "//! always-loaded modules and Tempo's own when it runs against a packaged build. Until\n"
-        "//! then it is empty, so a crate that turns on the `reflected` feature -- as a project's\n"
-        "//! crate does by default -- compiles either way.\n",
-        encoding="utf-8")
-
-
 def write_project_lib_rs(src_dir: Path):
     """Write the project crate's lib.rs, declaring whatever src/ holds.
 
@@ -308,7 +276,7 @@ def write_project_lib_rs(src_dir: Path):
         "//! Project-specific Rust client API.\n"
         "//!\n"
         "//! Re-exports the Tempo runtime helpers from `tempo_sim` and adds the\n"
-        "//! project's own service wrappers and proto types, and the typed classes of its\n"
+        "//! project's own service wrappers and proto types, and the reflected API of its\n"
         "//! build under `reflected`.",
     ]
     if _has_protos(src_dir):
@@ -367,7 +335,7 @@ def write_project_cargo_toml(project_crate_dir: Path, crate_name: str, tempo_cra
     rust_version = metadata.get("rust-version", "1.85")
     description = metadata.get(
         "description",
-        "Project-specific Rust client API: its own services and the typed classes of its build, "
+        "Project-specific Rust client API: its own services and the reflected API of its build, "
         "on top of tempo-sim.")
 
     lines = [
@@ -419,14 +387,10 @@ def write_project_cargo_toml(project_crate_dir: Path, crate_name: str, tempo_cra
         "]",
         "",
         "[features]",
-        "# The typed classes of this build (`reflected`). On unless a crate asks for the services",
-        "# alone. They re-export the published types they share, so tempo-sim's own feature comes",
-        "# on with them; a tempo-sim that has no published types carries an empty module there.",
+        "# The reflected API of this build (`reflected`). On unless a crate asks for the services",
+        "# alone.",
         'default = ["reflected"]',
-        # Unconditionally, whatever the local tree holds and wherever tempo-sim comes from: a
-        # registry tempo-sim is not on disk to probe, and probing the local one answered for it.
-        # Every tempo-sim has the module (`ensure_published_module`), so this always resolves.
-        'reflected = ["tempo-sim/reflected"]',
+        'reflected = []',
         "",
         "[dependencies]",
         tempo_sim_dep,
@@ -462,7 +426,7 @@ Cargo.toml
 # Tempo proto sources staged here so protoc can resolve project imports.
 /tempo_proto_includes/
 
-# Generated Rust sources (wrappers from gen_rust_api.py, typed classes from GenTypedAPI.sh)
+# Generated Rust sources (wrappers from gen_rust_api.py, reflected API from GenReflectedAPI.sh)
 /src/
 ''', encoding="utf-8")
 
@@ -470,21 +434,14 @@ Cargo.toml
 # -- Both -----------------------------------------------------------------------------------------
 
 def clear_classes(project_root: Path):
-    """Remove the generated types -- the project's and the published ones -- leaving the services.
+    """Remove the project's generated types, leaving the services.
 
     For a package run whose types were not generated: types an earlier run left describe a
     different build, and a package that ships without them is better than one that ships those.
-    The published ones are cleared too, since they are generated in the same step and would ship
-    inside tempo-sim -- whose `reflected` module is then the empty placeholder again, because its
-    lib.rs still declares it.
     """
     python_classes = (python_api_dir(project_root)
                       / package_import_name(project_package_name(project_root)) / PYTHON_CLASSES)
     shutil.rmtree(python_classes, ignore_errors=True)
-    shutil.rmtree(TEMPO_PYTHON_API / "tempo_sim" / PYTHON_CLASSES, ignore_errors=True)
-    shutil.rmtree(TEMPO_RUST_API / "src" / RUST_CLASSES, ignore_errors=True)
-    if (TEMPO_RUST_API / "src" / "lib.rs").exists():
-        ensure_published_module(TEMPO_RUST_API / "src")
     src_dir = rust_crate_dir(project_root) / "src"
     if (src_dir / RUST_CLASSES).exists():
         shutil.rmtree(src_dir / RUST_CLASSES)

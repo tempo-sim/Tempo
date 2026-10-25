@@ -27,6 +27,16 @@
 
     [:octicons-arrow-right-24: C++ client](../clients/cpp.md)
 
+`TEMPO_SKIP_REFLECTED_API`
+
+:   Set to `1` to have `Package.sh` skip generating the [reflected API](../clients/reflected-api.md),
+    which walks the editor's reflection and costs about a minute. The package then ships without it.
+
+`TEMPO_REQUIRE_REFLECTED_API`
+
+:   Set to `1` to make a failure to generate the reflected API fail `Package.sh`. Without it the
+    failure is a warning and the package ships without the reflected API.
+
 ## Testing
 
 These are read by `Scripts/TestPythonAPI.sh` and `Scripts/TestRustAPI.sh`.

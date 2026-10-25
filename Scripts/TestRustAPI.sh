@@ -60,7 +60,7 @@ TESTS_DIR="${TEMPO_RUST_TESTS_DIR:-$TEMPO_ROOT/Tests/Rust}"
 REPORT_DIR="${TEMPO_TEST_REPORT_DIR:-$TEMPO_ROOT/Saved/RustTestReport}"
 mkdir -p "$REPORT_DIR"
 
-# The typed class surface is its own crate, because it needs a second path dependency whose
+# The reflected API's tests are their own crate, because they need a second path dependency whose
 # package name belongs to the host project. Everything else lives in Tests/Rust itself.
 CRATE_DIR="$TESTS_DIR"
 if [ "$GROUP" = "typed" ]; then
@@ -76,8 +76,7 @@ if [ "$GROUP" = "typed" ]; then
   # The project's own crate, which carries this build's generated classes as its `reflected` module,
   # vendored under a fixed name. The crate is called after the host project (tempo-sample), and a
   # dependency has to be named at compile time, so the one `name =` line is rewritten rather than
-  # having every project fork the test crate. tempo-sim has a `reflected` of its own, the published
-  # ones, and is not it.
+  # having every project fork the test crate.
   CLASSES_SRC=""
   for candidate in "$PACKAGED_DIR"/API/Rust/*/; do
     if [ "$(basename "$candidate")" != "tempo-sim" ] \

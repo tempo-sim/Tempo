@@ -1,6 +1,6 @@
 // Copyright Tempo Simulation, LLC. All Rights Reserved
 //
-// The typed group: the C++ typed classes against the build they were generated from. The cases
+// The typed group: the reflected C++ API against the build they were generated from. The cases
 // are the Rust typed group's (Tests/Rust/typed/tests/typed.rs), on engine and Tempo classes every
 // build has, so the suite runs against any project.
 //

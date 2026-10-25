@@ -1,6 +1,6 @@
 // Copyright Tempo Simulation, LLC. All Rights Reserved
 //
-// The hand-written base of the typed World API: the handle every generated class derives from,
+// The hand-written base of the reflected API: the handle every generated class derives from,
 // the value types that carry Unreal's structs, and the machinery that turns a method call into a
 // TempoWorld RPC. Mirrors src/unreal.rs in the Rust API.
 //

@@ -72,7 +72,7 @@ if [ "$GROUP" = "codegen" ]; then
   # and the per-module wrappers -- are what a build writes into the tree, and they are not tracked.
   # A built tree has them. A clean checkout (CI's test jobs) does not, and takes them from the
   # packaged tempo-sim wheel: only the generated files, never the hand-written ones the tree is the
-  # authority on, and never reflected/, which describes one particular build.
+  # authority on.
   API_DIR="$TEMPO_ROOT/TempoCore/Content/Python/API"
   if [ -f "$API_DIR/tempo_sim/tempo_world.py" ] && [ -f "$API_DIR/tempo_sim/TempoWorld/WorldControl_pb2.py" ]; then
     echo "Using the generated client modules in the tree."

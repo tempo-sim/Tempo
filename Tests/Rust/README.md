@@ -13,7 +13,7 @@ Python side. `Scripts/TestRustAPI.sh <group>` runs `cargo test --test <group>`.
 |---|---|---|
 | `contract` | no (compile only) | the generated crate compiles and exposes the expected modules, functions, and proto types — a renamed/dropped symbol breaks the build |
 | `integration` | yes | level name + spawn/query/destroy + coordinate round trip against a live sim |
-| `typed` | yes | the typed class surface: inherited members through `Deref`, a `BlueprintSetter` write, batching, components, discovery by type, `is_a`, `check_schema`, and the `_async` twins |
+| `typed` | yes | the reflected API: inherited members through `Deref`, a `BlueprintSetter` write, batching, components, discovery by type, `is_a`, `check_schema`, and the `_async` twins |
 
 ## The `typed` group is its own crate
 

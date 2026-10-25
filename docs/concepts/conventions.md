@@ -46,7 +46,7 @@ pose. A bare float or vector does not.
     Values you *read back* through `get_*_properties` are likewise Unreal-native and unconverted,
     as are values returned by [`call_function`](../plugins/tempo-world.md#calling-functions).
 
-The [typed classes](../clients/typed-classes.md#units) are Unreal-native throughout, and their value
+The [reflected API](../clients/reflected-api.md#units) is Unreal-native throughout, and its value
 types are Unreal's own — `FVector`, `FRotator`, `FTransform` — shaped as Unreal's are.
 `tempo_sim.conversion` (Python), `tempo_sim::conversion` (Rust) and `tempo/conversion.h` (C++)
 convert them to and from the TempoCore messages with the rules above: `ue_to_si` and `si_to_ue`.

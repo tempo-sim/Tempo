@@ -16,7 +16,6 @@ from pathlib import Path
 from gen_project_package import (
     RUST_CLASSES,
     RUST_METADATA_FILE,
-    ensure_published_module,
     read_version,
     write_project_lib_rs,
     write_rust_crate,
@@ -826,29 +825,17 @@ def update_lib_rs(rust_root_dir, generated_modules):
 //! }
 //! ```
 
-// The generated types name the runtime as `::tempo_sim::unreal`, the path a project's crate
-// knows it by; this makes the same path resolve in here, where the published types live.
-extern crate self as tempo_sim;
-
 pub mod context;
 pub mod error;
 pub mod proto;
 pub mod streaming;
 
-// The typed World API: hand-written, unlike everything below, and the base a project's generated
-// types build on, and the conversions between its Unreal-native values and the SI ones the RPCs
-// speak.
+// The reflected API's runtime: hand-written, unlike everything below. The base a project's
+// generated types build on, and the conversions between their Unreal-native values and the SI ones
+// the RPCs speak.
 pub mod conversion;
 pub mod unreal;
 pub mod world;
-
-// The published types: the engine's always-loaded modules and Tempo's own, generated from the
-// latest supported engine by Scripts/GenTypedAPI.sh. Off by default, because generating them is a
-// packaging step and compiling them is a cost an RPC-only client should not pay. The module is
-// there whether or not that step has run -- empty until it has -- so turning the feature on
-// compiles against any tempo-sim.
-#[cfg(feature = "reflected")]
-pub mod reflected;
 
 // Re-export commonly used items
 pub use context::{set_server, set_server_async, set_socket, set_socket_async, tempo_context, TempoContext};
@@ -885,10 +872,7 @@ def _collect_rust_inputs(script_dir: str, pb2_roots, rust_crate_dir: Path,
         sub_dir = rust_crate_dir / sub
         if not sub_dir.exists():
             continue
-        for path, directories, files in os.walk(sub_dir):
-            # The published types are GenTypedAPI.sh's, and nothing here reads them.
-            if Path(path) == rust_crate_dir / "src":
-                directories[:] = [d for d in directories if d != RUST_CLASSES]
+        for path, _, files in os.walk(sub_dir):
             for filename in files:
                 if filename.endswith((".rs", ".proto")):
                     inputs.append(Path(path) / filename)
@@ -919,7 +903,7 @@ def _collect_project_crate_inputs(project_crate_dir: Path):
         if not sub_dir.exists():
             continue
         for path, directories, files in os.walk(sub_dir):
-            # The typed classes are GenTypedAPI.sh's, generated from reflection rather than from
+            # The reflected API is GenReflectedAPI.sh's, generated from reflection rather than from
             # anything this reads -- thousands of files that would only slow the hash down.
             if Path(path) == project_crate_dir / "src":
                 directories[:] = [d for d in directories if d != RUST_CLASSES]
@@ -997,11 +981,6 @@ if __name__ == "__main__":
 
     if not os.path.exists(tempo_src_dir):
         os.makedirs(tempo_src_dir)
-    # lib.rs declares `reflected` behind a feature, so the module has to exist whether or not
-    # GenTypedAPI.sh has generated anything into it. Ahead of the cache check, which does not
-    # look at that directory, so a deleted one is put back by the next build rather than the next
-    # proto change.
-    ensure_published_module(tempo_crate_dir / "src")
 
     cargo_toml = tempo_crate_dir / "Cargo.toml"
     crate_version = read_version(cargo_toml)
@@ -1091,7 +1070,7 @@ if __name__ == "__main__":
         # packaging and then can't resolve the version on crates.io (where it
         # isn't published). Package.sh enumerates ship-files via `cargo package
         # --list --no-verify`, which works without resolving deps.
-        # Without the typed classes, which this generated none of: checking them here would add a
+        # Without the reflected API, which this generated none of: checking them here would add a
         # whole build's worth of compiling to every build that touches a proto.
         print("[Tempo Prebuild] Building project Rust crate", flush=True)
         subprocess.run(

@@ -302,9 +302,9 @@ tw.get_actor_properties(name="MyActor", include_components=True)
 
     Everything below addresses properties by string, which nothing can check until the call runs. If
     you are writing scenarios that have to survive a new release of the simulation, see
-    [Typed classes](../clients/typed-classes.md): the same capability with the strings replaced by
+    [Reflected API](../clients/reflected-api.md): the same capability with the strings replaced by
     generated types, so a renamed or removed property is a type error rather than a runtime failure.
-    This page remains the complete and unfiltered surface, and the typed classes are built on it.
+    This page remains the complete and unfiltered surface, and the reflected API is built on it.
 
 Once you know the actor, component and property, set it with the RPC for its type:
 
@@ -426,7 +426,7 @@ read_back = response.results[1].value.bool_value
 There is one result per op, failed or not, because a read's value is found by position. With
 `stop_on_failure`, the first failure ends the batch and every later op comes back `ABORTED` without
 having run; without it, every op runs regardless, as `set_properties` does. The
-[typed classes](../clients/typed-classes.md#one-call-instead-of-twenty) are built on this.
+[reflected API](../clients/reflected-api.md#one-call-instead-of-twenty) is built on this.
 
 ### Batching property sets
 

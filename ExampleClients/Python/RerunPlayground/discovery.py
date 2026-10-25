@@ -10,8 +10,6 @@ from typing import List, Optional, Set
 import tempo_sim.tempo_sensors as ts
 import tempo_sim.tempo_world as tw
 import tempo_sim.TempoSensors.Sensors_pb2 as Sensors
-from tempo_sim import world
-from tempo_sim.reflected.Engine import SceneCaptureComponent2D
 
 # Human-readable names for the measurement-type enum, used in labels/logging.
 MEASUREMENT_NAMES = {
@@ -63,17 +61,20 @@ class SceneModel:
 
 
 async def _discover_camera_fov(owner: str, sensor: str) -> Optional[float]:
-    """Best-effort: read a camera's horizontal FOV so we can log a Pinhole. Returns None for a
-    sensor that has none.
-
-    Every Tempo camera is a SceneCaptureComponent2D, whose FOVAngle is its horizontal FOV in
-    degrees. A typed read, awaited: an attribute read cannot itself be awaited, so the read is
-    deferred through a lambda and sent on its own.
-    """
+    """Best-effort: read a camera's horizontal FOV from its component properties so
+    we can log a Pinhole. Returns None if no FOV-like property is found."""
     try:
-        return await world.get_async(lambda: SceneCaptureComponent2D(owner, sensor).FOVAngle)
+        props = await tw.get_component_properties(actor=owner, component=sensor)
     except Exception:
         return None
+    for prop in props.properties:
+        # USceneCaptureComponent2D exposes "FOVAngle"; tolerate other FOV-ish names.
+        if "fov" in prop.name.lower():
+            try:
+                return float(prop.value)
+            except (ValueError, TypeError):
+                continue
+    return None
 
 
 def _pick_track_actor(actors: List[str], preferred: str) -> str:

@@ -50,7 +50,7 @@ API at whatever rate you configure.
   proxy-tonemap pass, no merge — saving one `FSceneRenderer` and two Canvas blits per frame.
 - **Runtime reconfiguration.** Lens model, FOV, resolution, beam counts, beam calibration and
   feather can all change at runtime (via Blueprint, the Editor, `set_*_property` over the API, or
-  the [typed classes](../clients/typed-classes.md), where `lidar.HorizontalBeams = 1024` is checked
+  the [reflected API](../clients/reflected-api.md), where `lidar.HorizontalBeams = 1024` is checked
   against the build before it runs). A reconfigure is applied at a safe point — when no readback is
   in flight — so it never tears mid-frame.
 - **Pixel-perfect distortion.** Pinhole gets `Nearest` filtering by default (1:1 sampling, no

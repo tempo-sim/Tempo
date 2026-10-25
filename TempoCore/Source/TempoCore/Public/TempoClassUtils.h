@@ -11,7 +11,7 @@
 //
 // A class name is ambiguous: two Blueprints in different content folders can generate classes with
 // the same name, and GetSubClassWithName returns the first it finds. A path is not, so anything
-// that needs to name one specific class -- the typed World API and its generated stubs -- addresses
+// that needs to name one specific class -- the reflected API and its generated stubs -- addresses
 // classes this way instead.
 //
 // Takes the generated class's own path ("/Script/Engine.StaticMeshComponent",

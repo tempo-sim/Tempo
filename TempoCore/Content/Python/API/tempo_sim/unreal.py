@@ -1,6 +1,6 @@
 # Copyright Tempo Simulation, LLC. All Rights Reserved
 #
-# The hand-written base of the typed World API: the root class every generated class derives from,
+# The hand-written base of the reflected API: the root class every generated class derives from,
 # and the value types that carry Unreal's structs.
 #
 # Everything in this module is in Unreal's own units -- centimeters, degrees, left-handed -- which is
@@ -561,14 +561,9 @@ class _Package:
 class _Classes:
     """Every installed generated class package, searched in registration order.
 
-    More than one can be installed, and they do not describe the same thing. A project's own
-    package describes its whole build; the published one inside `tempo_sim` describes the modules
-    every build ships (TYPED_WORLD_API_PLAN.md section 16). A registry that held only the last
+    Nothing stops a client installing more than one, and a registry that held only the last
     registration would make whichever lost unresolvable -- no metadata, no `is_a`, no dynamic path --
     so this holds all of them.
-
-    There is no overlap to arbitrate: a project's package re-exports the published classes it
-    matches rather than redefining them, and leaves them out of its own index.
     """
 
     def __init__(self):
@@ -620,8 +615,8 @@ class _Classes:
     def header(self):
         """The first package's header.
 
-        Kept for the single-package case, which is every project that has not installed the
-        published classes beside its own. `headers` is what a check across all of them wants.
+        Kept for the single-package case, which is the usual one. `headers` is what a check across
+        all of them wants.
         """
         self._require()
         return self._packages[0].header

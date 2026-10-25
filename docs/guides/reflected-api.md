@@ -1,8 +1,8 @@
-# Typed classes, step by step
+# The reflected API, step by step
 
 A scenario written against the string-keyed property API fails at the line that runs, in the middle
 of a simulation, if a property was renamed since it was written. The
-[typed classes](../clients/typed-classes.md) move that failure to your type checker. This walks from
+[reflected API](../clients/reflected-api.md) moves that failure to your type checker. This walks from
 a fresh checkout to a scenario a checker reads, and to watching it catch a rename.
 
 What it assumes: a packaged build, Python 3.9 or newer, and nothing else. The same classes are
@@ -27,8 +27,8 @@ Two distributions, and you want both:
 
 | Distribution | What it is |
 |---|---|
-| `tempo-sim` | The client: the generated gRPC wrappers, the runtime behind attribute access, `tempo_sim.world`, `tempo_sim.conversion`, and the published types for what every build has, as `tempo_sim.reflected`. Those are generated from the latest engine Tempo supports, and only that one ([Latest engine only](../clients/typed-classes.md#latest-engine-only)). |
-| `tempo-sample` | The host project's own package, named after the project: the typed classes for this build, as `tempo_sample.reflected`, exact for its engine and including its Blueprints and asset catalog, and the project's own services, if it defines any. |
+| `tempo-sim` | The client: the generated gRPC wrappers, the runtime behind attribute access, `tempo_sim.world` and `tempo_sim.conversion`. The same for every project. |
+| `tempo-sample` | The host project's own package, named after the project: the reflected API of this build, as `tempo_sample.reflected`, exact for its engine and including its Blueprints and asset catalog, and the project's own services, if it defines any. |
 
 !!! note "`Package.sh` only"
 
@@ -85,7 +85,7 @@ pip install pyright
 Why those three on top of `standard`:
 
 - **`reportUnknownMemberType`** and **`reportUnknownArgumentType`** — a member whose type a checker
-  cannot work out is the shape drift takes when something falls out of the typed surface. Left as
+  cannot work out is the shape drift takes when something falls out of the reflected API. Left as
   warnings, that passes quietly.
 - **`reportUnnecessaryTypeIgnoreComment`** — stops a `# type: ignore` outliving the thing it
   silenced. Without it, the first rename anyone silences is silenced forever.
@@ -96,7 +96,7 @@ pyright
 
 !!! warning "The string-keyed API is not typed yet"
 
-    This covers the typed classes. The generated RPC wrappers — `tempo_sim.tempo_world`,
+    This covers the reflected API. The generated RPC wrappers — `tempo_sim.tempo_world`,
     `tempo_sim.tempo_core` and the rest — are dual sync/async, which a checker reads as
     coroutine-returning, so `tempo_world.get_all_actors().actors` draws an error even though it is
     correct. Until those carry stubs, keep such calls in their own module and exclude it, or
@@ -199,7 +199,7 @@ knowing as you read it:
 - **Units are Unreal's own** — centimetres, degrees, left-handed. This is the one corner of the
   Tempo API that does not convert, which is why its types are named `FVector` and so on rather
   than `Vector`, the type the other RPCs use; `tempo_sim.conversion` converts between them. See
-  [Units](../clients/typed-classes.md#units).
+  [Units](../clients/reflected-api.md#units).
 - **`is_a` asks about the actor**, not about the handle, which is what makes narrowing a broad query
   work.
 
@@ -231,19 +231,19 @@ the lidar would see up to four of them on separate frames and rebuild its tiles 
 
 In a coroutine, write `async with world.batch():` instead, and read with
 `await world.get_async(lambda: lidar.HorizontalBeams)`. Plain attribute access blocks, and a
-coroutine that blocks waits on its own event loop, so the typed classes refuse it there and say
-which form to use ([From a coroutine](../clients/typed-classes.md#from-a-coroutine)).
+coroutine that blocks waits on its own event loop, so the reflected API refuses it there and says
+which form to use ([From a coroutine](../clients/reflected-api.md#from-a-coroutine)).
 
 !!! note "What a Tempo class offers is what it declares"
 
-    A property reaches the typed classes only when it is declared `BlueprintReadWrite` (writable) or
+    A property reaches the reflected API only when it is declared `BlueprintReadWrite` (writable) or
     `BlueprintReadOnly` (read-only), and a function only when it is `BlueprintCallable` or
     `BlueprintPure`. `VisibleAnywhere` or `EditAnywhere` alone is not enough: those are for the
     editor, and a property with only them is absent. That is deliberate: the specifier is how a
     Tempo class says which of its properties are public scenario API, as against the internals that
     are `UPROPERTY` only so the garbage collector can see them. The string-keyed API still reaches
     everything, with no guarantee attached. See
-    [What a class offers](../clients/typed-classes.md#what-a-class-offers).
+    [What a class offers](../clients/reflected-api.md#what-a-class-offers).
 
 ## 8. Watch a rename get caught
 
@@ -283,8 +283,8 @@ In your own project the distribution is `<your-project>` and the import is
 `<your_project>.reflected`; everything after it is identical. The package exists even if your
 project defines no services of its own: it then holds only the classes. That is also why the example
 ships with TempoSample rather than with Tempo: the plugin's own [example
-clients](../clients/examples.md) address everything by string and so run against any sim, while a
-typed one names classes that exist in exactly one project. Copy it into yours and change the
+clients](../clients/examples.md) address everything by string and so run against any sim, while
+one using the reflected API names classes that exist in exactly one project. Copy it into yours and change the
 imports.
 
 ## 10. Keep the classes and the sim together
@@ -316,7 +316,7 @@ TEMPO_GEN_RUST_API=1 Scripts/Package.sh
 That leaves two crates beside each other:
 
 ```
-Packaged/API/Rust/tempo-sim/          the client, the typed runtime and the published types
+Packaged/API/Rust/tempo-sim/          the client and the reflected API's runtime
 Packaged/API/Rust/tempo-sample/       this build's classes (module `reflected`) and its services
 ```
 
@@ -331,8 +331,7 @@ tempo-sample = { path = "../Packaged/API/Rust/tempo-sample" }
 
 The classes are behind the crate's `reflected` feature, which is on by default; a crate that only
 calls the project's services can turn it off with `default-features = false` and skip compiling
-them. The feature also turns on tempo-sim's own `reflected`, which the project's re-exports come
-from.
+them.
 
 Then the same scenario as [step 6](#6-run-the-example), in Rust:
 
@@ -380,7 +379,7 @@ error[E0599]: no method named `no_such_thing` found for struct `StaticMeshCompon
 Autocomplete comes from rust-analyzer with no configuration — it reads the crate you depend on.
 
 Three things read differently from Python, and the
-[reference](../clients/typed-classes.md#what-differs-from-python) has the full table:
+[reference](../clients/reflected-api.md#what-differs-from-python) has the full table:
 
 - **Names are snake_case.** `HorizontalBeams` becomes `horizontal_beams`, and the rule handles
   acronyms — `FOVAngle` is `fov_angle`, not `f_o_v_angle`. A reserved word takes a trailing
@@ -392,8 +391,8 @@ Three things read differently from Python, and the
 
 ## Next
 
-- [Typed classes](../clients/typed-classes.md) — the reference: units and conversion, what is
+- [Reflected API](../clients/reflected-api.md) — the reference: units and conversion, what is
   deliberately absent, how batching and snapshots behave, how to hold a scenario repository to the
-  guarantee, and [when to write an RPC instead](../clients/typed-classes.md#when-to-write-an-rpc-instead).
+  guarantee, and [when to write an RPC instead](../clients/reflected-api.md#when-to-write-an-rpc-instead).
 - [TempoWorld](../plugins/tempo-world.md) — the string-keyed property API underneath, which stays
   unfiltered on purpose.

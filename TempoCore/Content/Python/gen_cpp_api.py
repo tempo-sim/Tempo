@@ -762,7 +762,7 @@ class CppApiGenerator:
 
     def copy_artifacts(self, generated_modules):
         """Copy headers, library, README, and decorated protos to Content/Cpp/API/."""
-        # Wipe & recreate include/, lib/<platform>/ -- all but the typed classes, which are built at
+        # Wipe & recreate include/, lib/<platform>/ -- all but the reflected API, which is built at
         # package time rather than here (build_cpp_classes.py) and would otherwise be lost to every
         # rebuild after a package.
         reflected = self.include_dir / "tempo" / "reflected"
@@ -794,7 +794,7 @@ class CppApiGenerator:
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(pbh, dest)
 
-        # Library archive(s), again keeping the typed classes'.
+        # Library archive(s), again keeping the reflected API's.
         self.lib_dir.mkdir(parents=True, exist_ok=True)
         for stale in self.lib_dir.iterdir():
             if "tempo_reflected" not in stale.name:

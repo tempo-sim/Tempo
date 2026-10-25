@@ -1,6 +1,6 @@
 # Copyright Tempo Simulation, LLC. All Rights Reserved
 #
-# Entry points for the typed World API: how a scenario gets a handle it can address by attribute.
+# Entry points for the reflected API: how a scenario gets a handle it can address by attribute.
 #
 # The form to reach for is discovery by type:
 #
@@ -618,9 +618,9 @@ def _compare(installed, reported):
     describe wrongly -- a renamed property, a changed signature, a member that became read-only. An
     entry the sim does not have at all is one nothing can address.
 
-    What is deliberately *not* a finding is an entry the sim has and the package does not. A
-    published package describes the modules every build ships and nothing else, so that is its
-    normal condition rather than a problem with it.
+    What is deliberately *not* a finding is an entry the sim has and the package does not. Code
+    written against the package cannot address it, so nothing that type-checked can fail because of
+    it -- a Blueprint added since the package was generated is not a skew worth stopping for.
     """
     changed, absent = [], []
     for kind in _KINDS:
@@ -648,15 +648,11 @@ async def check_schema_async(raise_on_mismatch: bool = True) -> bool:
     documentation -- so this answers "can these stubs address this sim", not "is anything different
     at all".
 
-    Compared per class rather than per build, for two reasons. A package may describe part of a
-    build by design: the published classes inside `tempo_sim` describe the modules every build
-    ships (see TYPED_WORLD_API_PLAN.md section 16), so a whole-walk comparison would reject every
-    one of them. And for a whole-build package it is simply a better report -- one number says only
-    that something moved, where today a project that adds a single Blueprint invalidates every
-    class it has.
+    Compared per class rather than per build, because it is the better report: one number says only
+    that something moved, and a project that adds a single Blueprint would invalidate every class it
+    has. Per class, the report names what actually moved.
 
-    Every installed package is checked, because more than one can be installed and they describe
-    different things.
+    Every installed package is checked, if more than one is installed.
 
     Not automatic on connect, and deliberately so: the sim computes its answer by walking
     reflection, which is dominated by loading every Blueprint and takes the best part of a minute.

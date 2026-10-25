@@ -39,7 +39,7 @@ import pytest
 # Ignoring them keeps the repo-side groups runnable on their own; a new sim-facing module is
 # covered automatically, and a new repo-side one is added to the set below.
 REPO_SIDE_MODULES = {"test_codegen.py", "test_typed_runtime.py", "test_schema_diff.py",
-                     "test_filter_schema.py", "test_subset_schema.py",
+                     "test_filter_schema.py",
                      "test_cpp_codegen.py", "test_rust_codegen.py"}
 
 

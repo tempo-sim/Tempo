@@ -10,13 +10,13 @@ TempoConfig.cmake             # find_package(Tempo CONFIG): targets tempo::tempo
 include/
   tempo.h                     # umbrella header for the RPC client
   tempo/                      # context.h, error.h, result.h, streaming.h, one header per service,
-                              # and unreal.h, world.h, conversion.h: the typed classes' runtime
-    reflected/                # the typed classes, when they were built (at package time)
+                              # and unreal.h, world.h, conversion.h: the reflected API's runtime
+    reflected/                # the reflected API, when it was built (at package time)
   proto/
     <Package>/<File>.pb.h     # protoc-generated message types
 lib/
   <Platform>/libtempo.a                   # wrappers, runtime and protoc outputs (tempo.lib on Windows)
-  <Platform>/libtempo_reflected.a         # the typed classes, when they were built (tempo_reflected.lib)
+  <Platform>/libtempo_reflected.a         # the reflected API, when it was built (tempo_reflected.lib)
 third_party/grpc/include/     # in Packaged/API/Cpp only: the vendored gRPC headers
 ```
 

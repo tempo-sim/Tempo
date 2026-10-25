@@ -124,7 +124,7 @@ def build_jobs(gigabytes_per_job=2):
     """How many compilers a C++ build may run at once: one per core, as memory allows.
 
     Never `cmake --build --parallel` with no number: for the Makefile generator that is `make -j`,
-    which starts every compile at once. The typed classes are three hundred translation units, each
+    which starts every compile at once. The reflected API is three hundred translation units, each
     parsing protobuf and gRPC, and starting them all exhausted a 64 GB machine. TEMPO_CPP_BUILD_JOBS
     overrides the estimate.
     """

@@ -2,7 +2,7 @@
 #
 # Launches a packaged sim headless, asks it which classes it has, and writes their paths.
 #
-# Used by GenTypedAPI.sh to narrow the editor-generated schema to what actually ships. The editor is
+# Used by GenReflectedAPI.sh to narrow the editor-generated schema to what actually ships. The editor is
 # the only thing that can report property metadata, and the packaged build is the only authority on
 # which classes exist, so the two have to be combined -- and this is the half that asks the build.
 #

@@ -157,7 +157,7 @@ nav:
       - clients/index.md
       - clients/connecting.md
       - clients/python.md
-      - clients/typed-classes.md
+      - clients/reflected-api.md
       - clients/rust.md
       - clients/cpp.md
       - clients/examples.md
@@ -165,7 +165,7 @@ nav:
       - guides/index.md
       - guides/citysample.md
       - guides/custom-services.md
-      - guides/typed-classes.md
+      - guides/reflected-api.md
       - guides/packaging.md
       - guides/continuous-integration.md
       - guides/testing.md

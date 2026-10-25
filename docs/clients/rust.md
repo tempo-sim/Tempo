@@ -111,9 +111,9 @@ Full generated API documentation for the published crate is on
     `"tempo_sim_source": "registry"` in `crate_info.json` to depend on the published crates.io
     crate instead.
 
-## Typed classes
+## Reflected API
 
-Everything above addresses properties by string. The generated **typed classes** remove the
+Everything above addresses properties by string. The generated **reflected API** removes the
 strings, so a renamed or removed property fails `cargo build` instead of failing mid-simulation:
 
 ```rust
@@ -128,7 +128,7 @@ for truck in world::get_actors::<BP_Cat745_C>()? {
 The crate is generated from the build it describes and ships beside this one, under the same
 `TEMPO_GEN_RUST_API` opt-in.
 
-[:octicons-arrow-right-24: Typed classes](typed-classes.md)
+[:octicons-arrow-right-24: Reflected API](reflected-api.md)
 
 ## Example clients
 

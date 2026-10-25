@@ -1,6 +1,6 @@
 // Copyright Tempo Simulation, LLC. All Rights Reserved
 //
-// Entry points for the typed World API: how a scenario gets a handle it can address by method.
+// Entry points for the reflected API: how a scenario gets a handle it can address by method.
 // Mirrors src/world.rs in the Rust API.
 //
 // The form to reach for is discovery by type:

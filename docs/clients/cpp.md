@@ -16,12 +16,12 @@ Packaged/API/Cpp/
 ├── include/
 │   ├── tempo.h                     # umbrella header for the RPC client
 │   ├── tempo/                      # context, error, result, streaming, one header per service,
-│   │   │                           #   and unreal.h, world.h, conversion.h for the typed classes
-│   │   └── reflected/              # the typed classes: one header per class, one per module
+│   │   │                           #   and unreal.h, world.h, conversion.h for the reflected API
+│   │   └── reflected/              # the reflected API: one header per class, one per module
 │   └── proto/                      # protoc-generated message types
 ├── lib/<Platform>/
 │   ├── libtempo.a                  # the RPC client and the typed runtime (tempo.lib on Windows)
-│   ├── libtempo_reflected.a        # the typed classes (tempo_reflected.lib on Windows)
+│   ├── libtempo_reflected.a        # the reflected API (tempo_reflected.lib on Windows)
 │   └── libtempogrpc.{dylib,so} / tempogrpc.{dll,lib}
 └── third_party/grpc/include/       # the vendored gRPC, protobuf and abseil headers
 ```
@@ -32,8 +32,8 @@ beside it is the same rule they follow, for the same reason — one copy of gRPC
 it is a seventh of their size.
 
 The build also leaves the same client in this checkout at `Plugins/Tempo/TempoCore/Content/Cpp/API/`,
-where it finds the vendored gRPC next door. `Build.sh` alone leaves it without the typed classes,
-which need the packaged build; `Package.sh` generates them (`Scripts/GenTypedAPI.sh`) and installs
+where it finds the vendored gRPC next door. `Build.sh` alone leaves it without the reflected API,
+which needs the packaged build; `Package.sh` generates it (`Scripts/GenReflectedAPI.sh`) and installs
 `libtempo_reflected` and `include/tempo/reflected/` there as well as into `Packaged/API/Cpp`, so after
 a package both copies carry them.
 
@@ -43,7 +43,7 @@ Through CMake, against either:
 
 ```cmake
 find_package(Tempo CONFIG REQUIRED PATHS <project>/Packaged/API/Cpp)
-target_link_libraries(my_client PRIVATE tempo::reflected)   # the typed classes, and everything
+target_link_libraries(my_client PRIVATE tempo::reflected)   # the reflected API, and everything
 # or
 target_link_libraries(my_client PRIVATE tempo::tempo)       # the RPC client alone
 ```
@@ -72,11 +72,10 @@ int main() {
 Function names match the Python and Rust clients — `pascal_to_snake` of the RPC name, namespaced
 by module under `tempo::`.
 
-## The typed classes
+## The reflected API
 
-The same [typed classes](typed-classes.md) the Python and Rust clients have, for the project's whole
-build, as `tempo::reflected` — one tree rather than Python's and Rust's two, because the C++ client
-is built per project. The C++ surface mirrors the Rust one: the same snake_case names, a `Result`
+The same [reflected API](reflected-api.md) the Python and Rust clients have, for the project's whole
+build, as `tempo::reflected`. The C++ surface mirrors the Rust one: the same snake_case names, a `Result`
 from every call, and Unreal's single inheritance as C++ inheritance.
 
 ```cpp
@@ -116,7 +115,7 @@ that this does not: the C++ client is synchronous throughout.
 
 - **CMake** 3.20 or later.
 - **A C++20 compiler** — clang 14+, gcc 11+, MSVC 19.30+. Required because the vendored absl
-  headers depend on `std::weak_ordering`, and because the typed classes use concepts.
+  headers depend on `std::weak_ordering`, and because the reflected API uses concepts.
 
 ## Example clients
 

@@ -1,6 +1,6 @@
 // Copyright Tempo Simulation, LLC. All Rights Reserved
 
-//! Entry points for the typed World API: how a scenario gets a handle it can address by method.
+//! Entry points for the reflected API: how a scenario gets a handle it can address by method.
 //!
 //! The form to reach for is discovery by type:
 //!
@@ -952,14 +952,11 @@ pub async fn raycast_async(
 /// documentation — so this answers "can these classes address this sim", not "is anything
 /// different at all".
 ///
-/// Compared per entry rather than per build, for two reasons. A crate may describe part of a build
-/// by design: the published classes inside `tempo_sim` describe the modules every build ships (see
-/// TYPED_WORLD_API_PLAN.md §16), so a whole-walk comparison would reject every one of them. And
-/// for a whole-build crate it is simply a better report — one number says only that something
-/// moved, where today a project that adds a single Blueprint invalidates every class it has.
+/// Compared per entry rather than per build, because it is the better report: one number says only
+/// that something moved, and a project that adds a single Blueprint would invalidate every class it
+/// has. Per entry, the report names what actually moved.
 ///
-/// Every linked crate is checked, because more than one can be linked and they describe different
-/// things.
+/// Every linked crate is checked, if more than one is linked.
 ///
 /// Not automatic on connect, and deliberately so: the sim computes its answer by walking
 /// reflection, which is dominated by loading every Blueprint and takes the best part of a minute.
@@ -1070,9 +1067,9 @@ fn compare(
         ] {
             for (name, linked_hash) in hierarchy.hashes(kind) {
                 match current.get(*name) {
-                    // An entry the sim has and the crate does not is deliberately not a finding: a
-                    // published crate holds the modules every build ships and nothing else, so
-                    // that is its normal condition rather than a problem with it.
+                    // Only what the crate has is compared. An entry the sim has and the crate does
+                    // not is deliberately not a finding: nothing compiled against the crate can
+                    // address it, so nothing can fail because of it.
                     None => findings.push(Finding {
                         kind,
                         name: (*name).to_string(),
@@ -1263,9 +1260,8 @@ mod tests {
 
     #[test]
     fn a_class_only_the_sim_has_is_not_a_finding() {
-        // The normal condition of a published crate, which describes part of a build by design --
-        // and the case a whole-walk hash cannot express, since every entry the crate holds is
-        // current while the one number still differs.
+        // A Blueprint added since the crate was generated -- the case a whole-walk hash cannot
+        // express, since every entry the crate holds is current while the one number differs.
         linked();
         let mut reported = Vec::from(CLASSES);
         reported.push(("/Game/Blueprints/BP_Thing.BP_Thing_C", "A-PROJECT-CLASS"));

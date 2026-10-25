@@ -1,8 +1,8 @@
 // Copyright Tempo Simulation, LLC. All Rights Reserved
 //
 // The contract group: what a packaged C++ client promises without a sim to talk to. That it links
-// -- the RPC client, the shared tempogrpc library and, when it was built, the typed classes -- that
-// the conversions apply the server's rules, and that the typed classes' compiled-in hierarchy
+// -- the RPC client, the shared tempogrpc library and, when it was built, the reflected API -- that
+// the conversions apply the server's rules, and that the reflected API's compiled-in hierarchy
 // answers is_a.
 
 #include <cmath>

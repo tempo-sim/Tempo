@@ -5,9 +5,9 @@ A CMake project against the packaged C++ client (`Packaged/API/Cpp`, written by
 
 | Group | Needs a sim | What |
 |---|---|---|
-| `contract` | no | the client links (RPC client, typed classes, shared `tempogrpc`), the conversions, the typed hierarchy |
+| `contract` | no | the client links (RPC client, reflected API, shared `tempogrpc`), the conversions, the typed hierarchy |
 | `integration` | yes | the RPC client against a running sim |
-| `typed` | yes | the typed classes, on engine and Tempo classes every build has |
+| `typed` | yes | the reflected API, on engine and Tempo classes every build has |
 
 ```bash
 Scripts/TestCppAPI.sh contract

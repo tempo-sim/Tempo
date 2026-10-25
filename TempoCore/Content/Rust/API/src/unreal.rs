@@ -1,6 +1,6 @@
 // Copyright Tempo Simulation, LLC. All Rights Reserved
 
-//! The hand-written base of the typed World API: the handle every generated class wraps, the
+//! The hand-written base of the reflected API: the handle every generated class wraps, the
 //! value types that carry Unreal's structs, and the machinery that turns an attribute-shaped
 //! call into a `TempoWorld` RPC.
 //!
@@ -2140,12 +2140,6 @@ pub trait Hierarchy: Send + Sync {
 
     /// What one entry hashed to, or `None` when these classes do not have it.
     fn content_hash(&self, kind: EntryKind, name: &str) -> Option<&'static str>;
-
-    /// Another table these classes lean on, registered with them: a project's types re-export the
-    /// published ones they share, and leave those entries to the published table.
-    fn depends_on(&self) -> Option<&'static (dyn Hierarchy + 'static)> {
-        None
-    }
 }
 
 /// The things a generated crate records an identity for.
@@ -2201,14 +2195,9 @@ impl Hierarchy for NoClasses {
 
 /// Every linked generated class crate, in registration order.
 ///
-/// A list and not one slot, because more than one can be linked and they do not describe the same
-/// thing: a project's own crate describes its whole build, while the published classes inside
-/// `tempo_sim` describe the modules every build ships (TYPED_WORLD_API_PLAN.md §16). One slot
-/// would make whichever registered second invisible — no `is_a`, no dynamic path — and silently,
-/// since the loser's own generated methods would go on working.
-///
-/// There is no overlap to arbitrate: a project's crate re-exports the published classes it matches
-/// rather than redefining them.
+/// A list and not one slot, because nothing stops a client linking more than one generated crate,
+/// and one slot would make whichever registered second invisible — no `is_a`, no dynamic path —
+/// and silently, since the loser's own generated methods would go on working.
 static HIERARCHIES: std::sync::RwLock<Vec<&'static (dyn Hierarchy + 'static)>> =
     std::sync::RwLock::new(Vec::new());
 
@@ -2217,21 +2206,17 @@ static HIERARCHIES: std::sync::RwLock<Vec<&'static (dyn Hierarchy + 'static)>> =
 /// Where Python's equivalent reads JSON out of the installed package at import time, this is a
 /// table compiled into the generated crate — so it cannot go missing, and it costs no I/O.
 pub fn register_classes(hierarchy: &'static (dyn Hierarchy + 'static)) {
-    let mut next = Some(hierarchy);
-    while let Some(hierarchy) = next {
-        if let Ok(mut registered) = HIERARCHIES.write() {
-            // Every handle made through a crate registers it, so this runs constantly for the same
-            // table. Compared by address, since each crate has exactly one -- the table's address
-            // alone, not the vtable a `dyn` pointer also carries, since each crate that names a
-            // table may instantiate a vtable for it of its own.
-            if registered.iter().any(|existing| {
-                std::ptr::addr_eq(*existing as *const dyn Hierarchy, hierarchy as *const dyn Hierarchy)
-            }) {
-                return;
-            }
-            registered.push(hierarchy);
+    if let Ok(mut registered) = HIERARCHIES.write() {
+        // Every handle made through a crate registers it, so this runs constantly for the same
+        // table. Compared by address, since each crate has exactly one -- the table's address
+        // alone, not the vtable a `dyn` pointer also carries, since each crate that names a
+        // table may instantiate a vtable for it of its own.
+        if registered.iter().any(|existing| {
+            std::ptr::addr_eq(*existing as *const dyn Hierarchy, hierarchy as *const dyn Hierarchy)
+        }) {
+            return;
         }
-        next = hierarchy.depends_on();
+        registered.push(hierarchy);
     }
 }
 
@@ -2242,8 +2227,7 @@ pub fn hierarchies() -> Vec<&'static (dyn Hierarchy + 'static)> {
 
 /// What a class derives from, according to whichever linked crate knows it.
 ///
-/// Searched across all of them, because the chain can cross between crates: a project's Blueprint
-/// derives from an engine class the published crate declares.
+/// Searched across all of them, since any one of them may be the crate that knows it.
 pub fn superclass_of(class_path: &str) -> Option<&'static str> {
     let registered = HIERARCHIES.read().ok()?;
     registered
@@ -2253,8 +2237,8 @@ pub fn superclass_of(class_path: &str) -> Option<&'static str> {
 
 /// The first linked hierarchy, or an empty one when none is.
 ///
-/// Kept for the single-crate case, which is every project that has not linked the published
-/// classes beside its own. [`hierarchies`] is what a lookup across all of them wants.
+/// Kept for the single-crate case, which is the usual one. [`hierarchies`] is what a lookup across
+/// all of them wants.
 pub fn hierarchy() -> &'static (dyn Hierarchy + 'static) {
     HIERARCHIES
         .read()

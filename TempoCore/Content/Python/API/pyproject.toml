@@ -75,9 +75,6 @@ Repository = "https://github.com/tempo-sim/Tempo"
 include = ["tempo_sim", "tempo_sim.*"]
 
 # py.typed is what makes a checker use this package's types at all (PEP 561) -- without it the
-# hand-written stubs are there to be ignored. The stubs are not .py, so they have to be named too,
-# as are the data files the generated published types under tempo_sim/reflected need: the .pyi
-# carrying their type surface, the per-module metadata the runtime builds a request from, the class
-# index, and the per-entry hashes world.check_schema compares.
+# hand-written stubs are there to be ignored. The stubs are not .py, so they have to be named too.
 [tool.setuptools.package-data]
-"*" = ["py.typed", "*.pyi", "*.meta.json", "index.json", "hashes.json", "schema_header.json"]
+"*" = ["py.typed", "*.pyi"]

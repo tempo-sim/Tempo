@@ -1,6 +1,6 @@
 // Copyright Tempo Simulation, LLC. All Rights Reserved
 
-//! Integration tests for the typed Rust class surface against a packaged sim.
+//! Integration tests for the reflected Rust API against a packaged sim.
 //!
 //! The Rust half of what `Tests/Python/test_typed_world.py` does. `Scripts/TestRustAPI.sh typed`
 //! vendors the project's crate, which carries this build's generated classes as its `reflected`
@@ -500,21 +500,4 @@ fn a_subsystem_is_reached_by_its_class() {
 fn a_class_that_is_not_a_subsystem_fails_at_the_lookup() {
     connect();
     assert!(world::get_subsystem::<StaticMeshActor>().is_err());
-}
-
-#[test]
-fn a_shared_class_is_tempo_sims_own_type() {
-    // The project's types re-export what tempo-sim's published ones describe alike, so a helper
-    // written against tempo-sim's takes the project's handle as it is.
-    fn published_actor(actor: &tempo_sim::reflected::classes::engine::StaticMeshActor) -> String {
-        actor.as_object().actor_name().to_string()
-    }
-
-    connect();
-    let actor = spawn();
-    assert_eq!(published_actor(actor.actor()), actor.name());
-    // And the other way: discovery through the published type finds the project's actor.
-    let found = world::get_actors::<tempo_sim::reflected::classes::engine::StaticMeshActor>()
-        .expect("get_actors");
-    assert!(found.iter().any(|a| a.as_object().actor_name() == actor.name()));
 }

@@ -1,6 +1,6 @@
 // Copyright Tempo Simulation, LLC. All Rights Reserved
 //
-// Conversions between the typed World API's values, which are Unreal's own (centimeters, degrees,
+// Conversions between the reflected API's values, which are Unreal's own (centimeters, degrees,
 // left-handed), and the TempoCore geometry messages the rest of Tempo's API speaks (meters,
 // radians, right-handed). Mirrors src/conversion.rs in the Rust API.
 //

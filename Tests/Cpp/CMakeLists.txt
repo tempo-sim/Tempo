@@ -1,7 +1,7 @@
 # Copyright Tempo Simulation, LLC. All Rights Reserved
 #
 # The C++ client's tests, against a packaged client (Packaged/API/Cpp), one executable per group:
-# contract (no sim), integration (the RPC client) and typed (the typed classes). Scripts/TestCppAPI.sh
+# contract (no sim), integration (the RPC client) and typed (the reflected API). Scripts/TestCppAPI.sh
 # configures this with Tempo_DIR pointed at the package, launches a sim, and runs a group.
 
 cmake_minimum_required(VERSION 3.20)
