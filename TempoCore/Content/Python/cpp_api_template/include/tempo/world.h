@@ -6,9 +6,9 @@
 // The form to reach for is discovery by type:
 //
 //     #include <tempo/world.h>
-//     #include <tempo/reflected/classes/game/vehicles/BP_Cat745_C.h>
+//     #include <tempo/reflected/classes/game/vehicles/BP_Truck_C.h>
 //
-//     auto trucks = tempo::world::get_actors<tempo::reflected::classes::game::vehicles::BP_Cat745_C>();
+//     auto trucks = tempo::world::get_actors<tempo::reflected::classes::game::vehicles::BP_Truck_C>();
 //     if (!trucks) return 1;
 //     for (const auto& truck : trucks.value()) {
 //         if (auto set = truck.set_max_speed(1200.0); !set) return 1;

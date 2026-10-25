@@ -41,7 +41,7 @@ through the whole design:
 The target surface, leading with the form that actually carries a guarantee:
 
 ```python
-for truck in tempo_world.get_actors(BP_Cat745_C):   # list[BP_Cat745_C]
+for truck in tempo_world.get_actors(BP_Truck_C):   # list[BP_Truck_C]
     truck.MaxSpeed = 1200.0
 ```
 
@@ -349,9 +349,9 @@ generator preserve them -- a fragile arrangement for no gain. So:
 
 ```python
 from tempo_sim import world
-from my_project_classes.Game.Vehicles import BP_Cat745_C
+from my_project_classes.Game.Vehicles import BP_Truck_C
 
-for truck in world.get_actors(BP_Cat745_C):
+for truck in world.get_actors(BP_Truck_C):
     truck.MaxSpeed = 1200.0
 ```
 
@@ -366,9 +366,9 @@ and a hard-coded name is itself drift-prone (editor labels differ from packaged 
 string at all:
 
 ```python
-from tempo_sample_classes.Game.Vehicles import BP_Cat745_C
+from tempo_sample_classes.Game.Vehicles import BP_Truck_C
 
-for truck in tempo_world.get_actors(BP_Cat745_C):    # -> list[BP_Cat745_C]
+for truck in tempo_world.get_actors(BP_Truck_C):    # -> list[BP_Truck_C]
     truck.MaxSpeed = 1200.0
 ```
 
@@ -379,7 +379,7 @@ and filter `GetAllActors` locally. A server-side class filter is a later optimiz
 Name lookup remains available and narrowing is checked at runtime:
 
 ```python
-truck = tempo_world.get_actor("Cat745_2", BP_Cat745_C)   # -> BP_Cat745_C; raises if it isn't one
+truck = tempo_world.get_actor("Truck_2", BP_Truck_C)   # -> BP_Truck_C; raises if it isn't one
 ```
 
 ### 6.2 Spawning, including deferred initialization
@@ -388,10 +388,10 @@ Typed spawning is nearly free — `SpawnActor` already takes a class — and it 
 so it belongs in Phase 1, not Phase 4:
 
 ```python
-truck = tempo_world.spawn_actor(BP_Cat745_C, transform=t)     # -> BP_Cat745_C
+truck = tempo_world.spawn_actor(BP_Truck_C, transform=t)     # -> BP_Truck_C
 
-with tempo_world.spawn_actor_deferred(BP_Cat745_C, transform=t) as truck:
-    truck.InitialTerrainHeight = 1.0    # before construction script / BeginPlay
+with tempo_world.spawn_actor_deferred(BP_Truck_C, transform=t) as truck:
+    truck.MaxSpeed = 1200.0    # before construction script / BeginPlay
 # FinishSpawningActor on exit; the block's writes go out as one batch
 ```
 
@@ -512,7 +512,7 @@ static benefit over the `.pyi`.
 
 `/Script/Engine` → `Engine` does not extend to Blueprints, which live in `/Game/...` content paths.
 (Revision 1's own example, `tempo_sample_classes.TempoSample.BP_Vehicle_C`, didn't follow its own
-rule.) Use **path-based modules**: `/Game/Vehicles/BP_Cat745` → `<project>_classes.Game.Vehicles`.
+rule.) Use **path-based modules**: `/Game/Vehicles/BP_Truck` → `<project>_classes.Game.Vehicles`.
 
 ### 8.4 Class identity is the path, not the name
 
@@ -1700,10 +1700,10 @@ that already exists, under a namespace of their own. So the project's classes no
 package and crate, exactly as the published ones go into tempo-sim's:
 
 ```python
-from tempo_sample.reflected.Game.Vehicles import BP_Cat745_C  # was tempo_sample_classes.Game...
+from tempo_sample.reflected.Game.Vehicles import BP_Truck_C  # was tempo_sample_classes.Game...
 ```
 ```rust
-use tempo_sample::reflected::classes::game::vehicles::BP_Cat745_C; // was tempo_sample_classes::...
+use tempo_sample::reflected::classes::game::vehicles::BP_Truck_C; // was tempo_sample_classes::...
 ```
 
 **A namespace, not the package root**, because a class module is named after its Unreal module and

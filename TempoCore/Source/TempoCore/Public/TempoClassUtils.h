@@ -15,8 +15,8 @@
 // classes this way instead.
 //
 // Takes the generated class's own path ("/Script/Engine.StaticMeshComponent",
-// "/Game/Vehicles/BP_Cat745.BP_Cat745_C"). A content path naming only the asset
-// ("/Game/Vehicles/BP_Cat745") also resolves, to the class that asset generates, which is the same
+// "/Game/Vehicles/BP_Truck.BP_Truck_C"). A content path naming only the asset
+// ("/Game/Vehicles/BP_Truck") also resolves, to the class that asset generates, which is the same
 // leniency GetSubClassWithName extends to the "_C" suffix.
 template <typename T>
 UClass* GetSubClassWithPath(const FString& Path)

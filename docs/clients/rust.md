@@ -117,10 +117,10 @@ Everything above addresses properties by string. The generated **reflected API**
 strings, so a renamed or removed property fails `cargo build` instead of failing mid-simulation:
 
 ```rust
-use tempo_sample::reflected::classes::game::vehicles::BP_Cat745_C;
+use tempo_sample::reflected::classes::game::vehicles::BP_Truck_C;
 use tempo_sim::world;
 
-for truck in world::get_actors::<BP_Cat745_C>()? {
+for truck in world::get_actors::<BP_Truck_C>()? {
     truck.set_max_speed(1200.0)?;
 }
 ```

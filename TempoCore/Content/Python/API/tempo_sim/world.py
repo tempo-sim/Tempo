@@ -5,9 +5,9 @@
 # The form to reach for is discovery by type:
 #
 #     from tempo_sim import world
-#     from my_project_classes.Game.Vehicles import BP_Cat745_C
+#     from my_project_classes.Game.Vehicles import BP_Truck_C
 #
-#     for truck in world.get_actors(BP_Cat745_C):
+#     for truck in world.get_actors(BP_Truck_C):
 #         truck.MaxSpeed = 1200.0
 #
 # There is no unchecked string in that at all, which is the point. Looking an actor up by name is
@@ -215,8 +215,8 @@ def spawn_actor_deferred(cls: type[T], transform: Optional[Transform] = None,
     the only way to influence anything that reads them -- a plain spawn has already run both by the
     time the handle exists.
 
-        with world.spawn_actor_deferred(BP_Cat745_C, transform=t) as truck:
-            truck.InitialTerrainHeight = 1.0
+        with world.spawn_actor_deferred(BP_Truck_C, transform=t) as truck:
+            truck.MaxSpeed = 1200.0
     """
     name = run_async(_spawn(cls, True, transform, relative_to_actor))
     try:
@@ -234,9 +234,9 @@ async def spawn_actor_deferred_async(cls: type[T], transform: Optional[Transform
     """spawn_actor_deferred, for a coroutine. Configure the actor inside a batch, since an
     assignment there only queues:
 
-        async with world.spawn_actor_deferred_async(BP_Cat745_C, transform=t) as truck:
+        async with world.spawn_actor_deferred_async(BP_Truck_C, transform=t) as truck:
             async with world.batch():
-                truck.InitialTerrainHeight = 1.0
+                truck.MaxSpeed = 1200.0
     """
     name = await _spawn(cls, True, transform, relative_to_actor)
     try:

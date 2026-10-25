@@ -117,7 +117,7 @@ def module_for(package):
     """The module a class's package maps to.
 
     `/Script/Engine` is one module, `Engine`. A Blueprint lives in a content path naming the asset
-    itself (`/Game/Vehicles/BP_Cat745`), so its module is the folder it sits in, `Game.Vehicles` --
+    itself (`/Game/Vehicles/BP_Truck`), so its module is the folder it sits in, `Game.Vehicles` --
     an Unreal package is not a module for Blueprints the way it is for native code.
     """
     if package.startswith("/Script/"):

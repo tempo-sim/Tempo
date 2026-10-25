@@ -3,7 +3,7 @@
 The property API addresses everything by string:
 
 ```python
-tempo_world.set_float_property(actor="Cat745_2", property="MaxSpeed", value=1200.0)
+tempo_world.set_float_property(actor="Truck_2", property="MaxSpeed", value=1200.0)
 ```
 
 Nothing checks that spelling until the call runs. Rename `MaxSpeed` in C++ or in a Blueprint and
@@ -14,9 +14,9 @@ reflection of your build:
 
 ```python
 from tempo_sim import world
-from tempo_sample.reflected.Game.Vehicles import BP_Cat745_C
+from tempo_sample.reflected.Game.Vehicles import BP_Truck_C
 
-for truck in world.get_actors(BP_Cat745_C):
+for truck in world.get_actors(BP_Truck_C):
     truck.MaxSpeed = 1200.0
 ```
 
@@ -81,9 +81,36 @@ project defines no services. Importing it is what registers the classes with the
 | **Services** | Tempo's RPC wrappers (`tempo_world`, `tempo_sensors`, …) | the project's own, if it defines any |
 | **Rust feature** | none | `reflected`, on by default |
 
-The two runtime modules split along the units boundary. `unreal` holds what is Unreal's own and in
-Unreal's units — the handles the generated classes derive from, `FVector`, `FRotator`, `AssetRef`
-— and `world` holds the functions that, like `tempo_world`, speak SI.
+### `unreal` and `world`
+
+The runtime is two modules, split along the [units](#units) boundary. The same names appear in all
+three clients: `tempo_sim.unreal` / `tempo_sim.world` in Python, `tempo_sim::unreal` /
+`tempo_sim::world` in Rust, and `tempo::unreal` / `tempo::world` in C++.
+
+**`unreal` is Unreal's own vocabulary**: the types that a reflected class is built from, or that it
+hands back. They are named and shaped as Unreal's are, in Unreal's units, which is where the module
+gets its name. It holds:
+
+- **Unreal's value types**: `FVector`, `FRotator`, `FTransform`, `FColor` and the rest (see
+  [Unreal's own types](#unreals-own-types)), in centimetres, degrees and a left-handed frame.
+- **The handle base** that every generated class is built on: `Object` in Python, `ObjectRef` in
+  Rust, `Handle` in C++. Python also has `DynamicObject`, the unchecked handle you get when you name
+  no class.
+- **`AssetRef`**, the type of every entry in the asset catalog, typed by the asset's class.
+- **The plumbing behind the reflected API**: the class registry that importing your project's
+  `reflected` package fills, and the deferred reads a batch hands back (`Deferred`).
+
+Your code imports from `unreal` mainly to build a value to pass in, for example
+`from tempo_sim.unreal import FVector`. The rest arrives through the generated classes.
+
+**`world` is where a scenario starts**: finding actors (`get_actors`, `get_actor`,
+`get_subsystem`), spawning them, `batch` and `check_schema`. Apart from those entry points, it
+mirrors `tempo_world`: the same functions under the same names, taking handles where `tempo_world`
+takes names. It also speaks SI as `tempo_world` does, so `world.spawn_actor` takes a
+`world.Transform` in metres and radians.
+
+So a value in centimetres comes from `unreal` and a value in metres comes from `world`, and moving
+one into the other is always an explicit [conversion](#converting).
 
 ### Exact for your build
 
@@ -101,13 +128,13 @@ it is. After changing a `UPROPERTY` or a Blueprint, package again (or run
 Prefer discovery **by type**. There is no unchecked string in it at all:
 
 ```python
-trucks = world.get_actors(BP_Cat745_C)      # list[BP_Cat745_C], including subclasses
+trucks = world.get_actors(BP_Truck_C)      # list[BP_Truck_C], including subclasses
 ```
 
 By name also works, and is checked against the actor's real class:
 
 ```python
-truck = world.get_actor("Cat745_2", BP_Cat745_C)   # raises if it is not one
+truck = world.get_actor("Truck_2", BP_Truck_C)   # raises if it is not one
 ```
 
 Without a class you get a `DynamicObject`, where every attribute is permitted and checked only by
@@ -251,7 +278,7 @@ returns:
     from tempo_sim.conversion import si_to_ue, ue_to_si
 
     location = sweeper.K2_GetActorLocation()              # FVector, centimetres
-    truck = world.spawn_actor(BP_Cat745_C, transform=world.Transform(location=ue_to_si(location)))
+    truck = world.spawn_actor(BP_Truck_C, transform=world.Transform(location=ue_to_si(location)))
 
     pose = si_to_ue(tempo_world.get_current_actor_state(actor="Marker").transform)   # FTransform
     reach = ue_to_si(sweeper.TempoLidar.MaxDistance)      # a float: centimetres to metres
@@ -418,10 +445,10 @@ handle to it.
 
 ```python
 t = world.Transform(location=world.Vector(z=5.0))        # SI, as tempo_world takes it: 5 m up
-truck = world.spawn_actor(BP_Cat745_C, transform=t)       # -> BP_Cat745_C
+truck = world.spawn_actor(BP_Truck_C, transform=t)       # -> BP_Truck_C
 
-with world.spawn_actor_deferred(BP_Cat745_C, transform=t) as truck:
-    truck.InitialTerrainHeight = 1.0      # before the construction script and BeginPlay run
+with world.spawn_actor_deferred(BP_Truck_C, transform=t) as truck:
+    truck.MaxSpeed = 1200.0      # before the construction script and BeginPlay run
 
 light = world.add_component(PointLightComponent, truck, name="Beacon")   # -> PointLightComponent
 world.set_actor_location(truck, world.Vector(x=10.0), relative_to_actor=marker)
@@ -590,10 +617,10 @@ tempo-sample = { path = "Packaged/API/Rust/tempo-sample" }
 ```
 
 ```rust
-use tempo_sample::reflected::classes::game::vehicles::BP_Cat745_C;
+use tempo_sample::reflected::classes::game::vehicles::BP_Truck_C;
 use tempo_sim::world;
 
-for truck in world::get_actors::<BP_Cat745_C>()? {
+for truck in world::get_actors::<BP_Truck_C>()? {
     truck.set_max_speed(1200.0)?;
 }
 ```
@@ -737,13 +764,13 @@ archive, `libtempo_reflected`, which `Package.sh` builds and ships in `Packaged/
 
 ```cpp
 #include <tempo/world.h>
-#include <tempo/reflected/classes/game/vehicles/BP_Cat745_C.h>
+#include <tempo/reflected/classes/game/vehicles/BP_Truck_C.h>
 
-using tempo::reflected::classes::game::vehicles::BP_Cat745_C;
+using tempo::reflected::classes::game::vehicles::BP_Truck_C;
 
-auto trucks = tempo::world::get_actors<BP_Cat745_C>();
+auto trucks = tempo::world::get_actors<BP_Truck_C>();
 if (!trucks) return 1;
-for (const BP_Cat745_C& truck : trucks.value()) truck.set_max_speed(1200.0);
+for (const BP_Truck_C& truck : trucks.value()) truck.set_max_speed(1200.0);
 ```
 
 It mirrors the Rust surface, with C++'s own means where they serve better:

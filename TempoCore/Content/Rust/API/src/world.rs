@@ -8,9 +8,9 @@
 //! use tempo_sim::world;
 //! # mod my_project_classes { pub mod game { pub mod vehicles {
 //! #     #[repr(transparent)]
-//! #     pub struct BP_Cat745_C(pub tempo_sim::unreal::ObjectRef);
-//! #     unsafe impl tempo_sim::unreal::Class for BP_Cat745_C {
-//! #         const PATH: &'static str = "/Game/Vehicles/BP_Cat745.BP_Cat745_C";
+//! #     pub struct BP_Truck_C(pub tempo_sim::unreal::ObjectRef);
+//! #     unsafe impl tempo_sim::unreal::Class for BP_Truck_C {
+//! #         const PATH: &'static str = "/Game/Vehicles/BP_Truck.BP_Truck_C";
 //! #         fn from_object(o: tempo_sim::unreal::ObjectRef) -> Self { Self(o) }
 //! #         fn as_object(&self) -> &tempo_sim::unreal::ObjectRef { &self.0 }
 //! #         fn hierarchy() -> &'static (dyn tempo_sim::unreal::Hierarchy + 'static) { &T }
@@ -25,16 +25,16 @@
 //! #         -> Option<&'static str> { None }
 //! # }
 //! # static T: Table = Table;
-//! #     impl BP_Cat745_C {
+//! #     impl BP_Truck_C {
 //! #         pub fn set_max_speed(&self, v: f64) -> Result<(), tempo_sim::TempoError> {
 //! #             self.0.set("MaxSpeed", v)
 //! #         }
 //! #     }
 //! # } } }
-//! use my_project_classes::game::vehicles::BP_Cat745_C;
+//! use my_project_classes::game::vehicles::BP_Truck_C;
 //!
 //! # fn main() -> Result<(), tempo_sim::TempoError> {
-//! for truck in world::get_actors::<BP_Cat745_C>()? {
+//! for truck in world::get_actors::<BP_Truck_C>()? {
 //!     truck.set_max_speed(1200.0)?;
 //! }
 //! # Ok(())
@@ -247,9 +247,9 @@ pub async fn spawn_actor_async<T: Class>(
 /// ```no_run
 /// # use tempo_sim::world;
 /// # #[repr(transparent)]
-/// # struct BP_Cat745_C(tempo_sim::unreal::ObjectRef);
-/// # unsafe impl tempo_sim::unreal::Class for BP_Cat745_C {
-/// #     const PATH: &'static str = "/Game/Vehicles/BP_Cat745.BP_Cat745_C";
+/// # struct BP_Truck_C(tempo_sim::unreal::ObjectRef);
+/// # unsafe impl tempo_sim::unreal::Class for BP_Truck_C {
+/// #     const PATH: &'static str = "/Game/Vehicles/BP_Truck.BP_Truck_C";
 /// #     fn from_object(o: tempo_sim::unreal::ObjectRef) -> Self { Self(o) }
 /// #     fn as_object(&self) -> &tempo_sim::unreal::ObjectRef { &self.0 }
 /// #     fn hierarchy() -> &'static (dyn tempo_sim::unreal::Hierarchy + 'static) { &T }
@@ -264,14 +264,14 @@ pub async fn spawn_actor_async<T: Class>(
 /// #         -> Option<&'static str> { None }
 /// # }
 /// # static T: Table = Table;
-/// # impl BP_Cat745_C {
-/// #     fn set_initial_terrain_height(&self, v: f64) -> Result<(), tempo_sim::TempoError> {
-/// #         self.0.set("InitialTerrainHeight", v)
+/// # impl BP_Truck_C {
+/// #     fn set_max_speed(&self, v: f64) -> Result<(), tempo_sim::TempoError> {
+/// #         self.0.set("MaxSpeed", v)
 /// #     }
 /// # }
 /// # fn main() -> Result<(), tempo_sim::TempoError> {
-/// let truck = world::spawn_actor_deferred::<BP_Cat745_C, _>(None, None, |truck| {
-///     truck.set_initial_terrain_height(1.0)
+/// let truck = world::spawn_actor_deferred::<BP_Truck_C, _>(None, None, |truck| {
+///     truck.set_max_speed(1200.0)
 /// })?;
 /// # let _ = truck;
 /// # Ok(())
@@ -316,9 +316,9 @@ where
 /// ```no_run
 /// # use tempo_sim::world;
 /// # #[repr(transparent)]
-/// # struct BP_Cat745_C(tempo_sim::unreal::ObjectRef);
-/// # unsafe impl tempo_sim::unreal::Class for BP_Cat745_C {
-/// #     const PATH: &'static str = "/Game/Vehicles/BP_Cat745.BP_Cat745_C";
+/// # struct BP_Truck_C(tempo_sim::unreal::ObjectRef);
+/// # unsafe impl tempo_sim::unreal::Class for BP_Truck_C {
+/// #     const PATH: &'static str = "/Game/Vehicles/BP_Truck.BP_Truck_C";
 /// #     fn from_object(o: tempo_sim::unreal::ObjectRef) -> Self { Self(o) }
 /// #     fn as_object(&self) -> &tempo_sim::unreal::ObjectRef { &self.0 }
 /// #     fn hierarchy() -> &'static (dyn tempo_sim::unreal::Hierarchy + 'static) { &T }
@@ -333,14 +333,14 @@ where
 /// #         -> Option<&'static str> { None }
 /// # }
 /// # static T: Table = Table;
-/// # impl BP_Cat745_C {
-/// #     fn set_initial_terrain_height(&self, v: f64) -> Result<(), tempo_sim::TempoError> {
-/// #         self.0.set("InitialTerrainHeight", v)
+/// # impl BP_Truck_C {
+/// #     fn set_max_speed(&self, v: f64) -> Result<(), tempo_sim::TempoError> {
+/// #         self.0.set("MaxSpeed", v)
 /// #     }
 /// # }
 /// # async fn spawn() -> Result<(), tempo_sim::TempoError> {
-/// let truck = world::spawn_actor_deferred_async::<BP_Cat745_C, _, _>(None, None, |truck| async move {
-///     world::batch_async(|| truck.set_initial_terrain_height(1.0)).await
+/// let truck = world::spawn_actor_deferred_async::<BP_Truck_C, _, _>(None, None, |truck| async move {
+///     world::batch_async(|| truck.set_max_speed(1200.0)).await
 /// })
 /// .await?;
 /// # let _ = truck;

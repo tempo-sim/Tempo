@@ -1226,7 +1226,7 @@ message ClassDescriptor {
   // The superclass's path, or empty for a root. Inheritance is reconstructed from this, because
   // each class reports only what it declares.
   string super_path = 3;
-  // The package the class lives in, e.g. "/Script/Engine" or "/Game/Vehicles/BP_Cat745".
+  // The package the class lives in, e.g. "/Script/Engine" or "/Game/Vehicles/BP_Truck".
   string package = 4;
   bool is_abstract = 5;
   bool is_blueprint = 6;
